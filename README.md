@@ -53,18 +53,24 @@ curl -s http://127.0.0.1:4891/healthz
 tools/start.sh start personal-agent      # 或 restart / stop / status
 ```
 
-## 验收
+## 验收（分四层，各层职责不同）
 
 ```bash
-npm test                                  # 89 项单元 + 集成测试
-npm run smoke                             # 对已部署站点做真实 HTTP/WS 冒烟（默认公网）
+npm test                 # 1) vitest 单元 + 集成（自带假沙箱，不需要 Docker/网络）
+npm run smoke            # 2) 对已部署实例的真实 HTTP + WebSocket 冒烟（默认公网）
+npx playwright test      # 3) 真实浏览器 UI（桌面 1440×900 + 手机 390×844）
 PA_PRIMARY_ORIGIN=http://localhost:4891 \
-PA_COMPANION_ORIGIN=http://127.0.0.1:4891 npm run smoke     # 对本地实例
+PA_COMPANION_ORIGIN=http://127.0.0.1:4891 npm run smoke     # 对本地实例冒烟
 ```
 
-`npm run smoke` 覆盖：登录与 cookie 属性、会话、模型列表、一次性工作区票据（含重放与
-开放重定向拒绝）、伴随站会话与续期、经鉴权的 shell 调用、上传与列目录、跨源写入拒绝、
-各原生界面可用性、以及未登录时所有表面一律 401。
+| 层 | 覆盖 |
+| --- | --- |
+| `npm test`（94 项） | 未登录绕过、会话过期/轮换/吊销与已建立连接被关闭、Host/Origin/CSRF 校验、重定向安全、代理 HTTP 与 WebSocket（对假沙箱）、事件回放与 delta 顺序、重复提交与跨会话冲突、停止语义、未知结果不重放、shell 支撑的文件操作只报真实结果 |
+| `npm run smoke`（33 项） | 真实 HTTPS 登录与 cookie 属性、模型列表、一次性票据（重放与开放重定向）、伴随站会话与跨源续期、经鉴权的 shell 调用、上传与列目录、跨源写入拒绝、原生界面可达、未登录时各表面一律 401、**真实 WebSocket 升级**（已登录 101 / 未登录 401） |
+| `npx playwright test` | 登录界面（错误密码与正确密码）、打开工作区后立刻切标签的竞态、连续切换最终落在最后点击的标签、真实文件列表与 code-server 可达、无横向溢出 |
+| 人工/父端验收 | VNC 桌面帧流、浏览器 CDP 帧流、手机 390/360 实际交互与截图 |
+
+`npm run smoke` 会读取 `var/owner-secret.txt`（或用 `PA_OWNER_SECRET_FILE` 指定）。
 
 ## 配置
 
@@ -89,6 +95,7 @@ PA_COMPANION_ORIGIN=http://127.0.0.1:4891 npm run smoke     # 对本地实例
 
 ## 已知限制
 
-- Playwright 桌面/手机端到端套件尚未落地；当前 UI 验收由人工浏览器 + `npm run smoke` 覆盖。
+- JupyterLab 首次加载会出现 `Shared module @jupyter-widgets/base doesn't exist in shared scope`
+  的第三方 widget 前端告警；内核执行本身正常（`/v1/jupyter/execute` 实测返回 stdout）。
 - 沙箱镜像固定不自动升级；升级步骤见运行手册（需人工确认并复验浏览器与编辑器）。
 - 只有本机 loopback 明文调试时才允许非 Secure cookie；公网一律 `Secure`。

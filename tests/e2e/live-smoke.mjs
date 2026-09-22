@@ -1,6 +1,8 @@
 // Public HTTPS acceptance probe: real cookies, both origins, no secrets printed.
 import fs from "node:fs";
 import path from "node:path";
+import https from "node:https";
+import http from "node:http";
 
 // Maintained live smoke test. Defaults target the production deployment; override to
 // point at a local instance, e.g.
@@ -140,6 +142,56 @@ for (const surface of ["/terminal", "/vnc/vnc.html", "/code-server/", "/jupyter/
   const res = await call(anonJar, `${COMPANION}${surface}`);
   check(`unauthenticated ${surface} denied`, res.status === 401, `status=${res.status}`);
 }
+
+// 11. Open-redirect attempt on the bootstrap target must fall back to "/"
+const redirectTicket = await call(primary, `${PRIMARY}/api/workspace/ticket`, {
+  method: "POST",
+  json: { next: "//evil.example.com/steal" },
+  headers: { origin: PRIMARY, "x-csrf-token": csrfCookie ?? "" },
+});
+const redirectBoot = await call(companion, redirectTicket.json?.url);
+check("open redirect neutralised", redirectBoot.status === 303 && redirectBoot.headers.get("location") === "/", `location=${redirectBoot.headers.get("location")}`);
+
+// 12. Real WebSocket upgrade on the companion origin (authenticated 101, anonymous 401)
+async function wsUpgrade(url, cookie) {
+  const target = new URL(url);
+  const client = target.protocol === "https:" ? https : http;
+  return await new Promise((resolve) => {
+    const req = client.request({
+      host: target.hostname,
+      port: target.port || (target.protocol === "https:" ? 443 : 80),
+      path: target.pathname,
+      method: "GET",
+      headers: {
+        Connection: "Upgrade",
+        Upgrade: "websocket",
+        "Sec-WebSocket-Version": "13",
+        "Sec-WebSocket-Key": "dGhlIHNhbXBsZSBub25jZQ==",
+        Origin: target.origin,
+        ...(cookie ? { Cookie: cookie } : {}),
+      },
+      timeout: 20_000,
+    });
+    req.on("upgrade", (res, socket) => {
+      socket.destroy();
+      resolve(res.statusCode);
+    });
+    req.on("response", (res) => {
+      res.resume();
+      resolve(res.statusCode);
+    });
+    req.on("error", () => resolve(0));
+    req.on("timeout", () => {
+      req.destroy();
+      resolve(0);
+    });
+    req.end();
+  });
+}
+const authedWs = await wsUpgrade(`${COMPANION}/v1/shell/ws`, companion.header());
+check("authenticated websocket upgrade accepted", authedWs === 101, `status=${authedWs}`);
+const anonWs = await wsUpgrade(`${COMPANION}/v1/shell/ws`, "");
+check("unauthenticated websocket upgrade denied", anonWs === 401, `status=${anonWs}`);
 
 console.log(results.join("\n"));
 const failed = results.filter((r) => r.startsWith("FAIL"));

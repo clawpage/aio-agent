@@ -77,9 +77,9 @@
 - 审批与输入请求（命令/文件/权限/`requestUserInput`/MCP elicitation）成为 UI 上可操作的卡片，
   按各自 schema 回填响应，15 分钟无响应自动拒绝，Codex 断开时立即失效而不是干等超时。
 
-## 免费登录与 token 边界
+## 统一登录与 token 边界
 
-- 宿主机保持原有 `codex login`，不在容器里重复登录。
+- 宿主机保持原有 `codex login`（使用本人已有订阅额度），不在容器里重复登录。
 - 需要 token 时，控制面在本机启动宿主机 `codex app-server`，只调用官方方法
   `account/read {refreshToken:true}`（由宿主机 Codex 自己完成受管刷新）与
   `getAuthStatus {includeToken:true}`，绝不自行实现 OAuth、绝不写宿主机 auth 文件。
@@ -93,7 +93,9 @@
   `/var/run/docker.sock` 或任何 workspace 路径。
 - 容器内以 `gem`(uid 1000) 运行；Node 控制面只以固定参数调用 Docker（固定的容器名、
   固定卷名），没有任意宿主机 shell 通道。
-- 容器创建前会校验**归属标签**、**镜像**与**卷挂载**，名字被别的容器占用时拒绝接管。
+- 容器创建前会校验**归属标签**、**镜像**与**卷挂载**，名字被别的容器占用时拒绝接管；
+  启动时修正 `/home/gem/.config` 等父目录属主并只重启需要的 supervisord 程序（例如 code-server），
+  绝不 `restart all`。
 - `BROWSER_NO_SANDBOX=--no-sandbox` 是该镜像在 Docker Desktop 的 Linux VM 里运行 Chromium
   的必要条件（VM 不支持 user namespace），仅影响容器内部浏览器。
 

@@ -74,7 +74,9 @@ export async function ensureOwner(
       OWNER_SOURCE_META_KEY,
       generatedSecretPath ? "generated" : "env",
     );
-    opts.log.warn("owner password rotated", { generatedSecret: Boolean(generatedSecretPath) });
+    // Rotating the password must invalidate every existing login.
+    const revoked = db.prepare("UPDATE sessions SET revoked_at = ? WHERE owner_id = ? AND revoked_at IS NULL").run(Date.now(), existing.id);
+    opts.log.warn("owner password rotated", { generatedSecret: Boolean(generatedSecretPath), sessionsRevoked: revoked.changes });
     return { created: false, reset: true, generatedSecretPath };
   }
 

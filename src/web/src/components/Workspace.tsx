@@ -29,6 +29,10 @@ export function Workspace({ open, status, initialPath, onClose, onNotify }: Prop
   const [frameKey, setFrameKey] = useState(0);
   const [sessionReady, setSessionReady] = useState(false);
   const [originHint, setOriginHint] = useState("");
+  const [frameError, setFrameError] = useState<string | null>(null);
+  /** Monotonic navigation id: a late async result must never override a newer choice. */
+  const navGenRef = useRef(0);
+  const userNavigatedRef = useRef(false);
   const [fullscreen, setFullscreen] = useState(false);
   const [previewPath, setPreviewPath] = useState("/");
   const [previewSrc, setPreviewSrc] = useState<string | null>(null);
@@ -37,97 +41,112 @@ export function Workspace({ open, status, initialPath, onClose, onNotify }: Prop
   const bootstrapping = useRef(false);
 
   /**
-   * Load a companion path. While no verified companion session exists we redeem a
-   * short-lived one-time ticket through /_bootstrap (which is a top-level
-   * navigation, so it also works inside an iframe). `sessionReady` is only set
-   * once a frame actually reports load, never merely because a ticket was issued.
+   * Every frame navigation redeems its own short-lived one-time ticket. Tickets
+   * are cheap and single-use, so no shared "bootstrapping" state can leave a tab
+   * selected while the frame still shows the previous page, and a stale cookie
+   * can never wedge the panel.
    */
-  const ensureSession = useCallback(
-    async (nextPath: string): Promise<string | null> => {
-      if (sessionReady && origin) return `${origin}${nextPath}`;
-      if (bootstrapping.current) return null;
-      bootstrapping.current = true;
+  const navigateTo = useCallback(
+    async (id: TabId, explicitPath?: string): Promise<void> => {
+      const def = TABS.find((t) => t.id === id);
+      userNavigatedRef.current = true;
+      setTab(id);
+      setFrameError(null);
+      // Bump the generation for every navigation, including native tabs: a frame
+      // result that is still in flight must not land after the user left the frame.
+      const generation = ++navGenRef.current;
+      if (!def || def.kind !== "frame" || (!def.path && !explicitPath)) return;
+      const path = explicitPath ?? def.path!;
+      setFrameStatus("loading");
       try {
-        const ticket = await api.ticket(nextPath);
+        const ticket = await api.ticket(path);
+        if (generation !== navGenRef.current) return; // superseded by a newer tap
         setOriginHint(ticket.origin);
-        return ticket.url;
+        setFrameSrc(ticket.url);
+        setFrameKey((k) => k + 1);
       } catch (err) {
-        onNotify(err instanceof Error ? err.message : String(err), "error");
-        return null;
-      } finally {
-        bootstrapping.current = false;
+        if (generation !== navGenRef.current) return;
+        setFrameStatus("timeout");
+        setFrameError(err instanceof Error ? err.message : String(err));
+        onNotify(`工作区会话获取失败：${err instanceof Error ? err.message : String(err)}`, "error");
       }
     },
-    [onNotify, origin, sessionReady],
+    [onNotify],
   );
 
-  /** Verify the companion cookie really works; used on mount and after expiry. */
-  const verifyCompanionSession = useCallback(
-    async (base: string): Promise<boolean> => {
+  /** Open a path (or a port) in the preview tab with the same generation guard. */
+  const openPreview = useCallback(
+    async (input: string): Promise<void> => {
+      const path = normalizePreviewTarget(input);
+      userNavigatedRef.current = true;
+      setTab("preview");
+      setFrameError(null);
+      const generation = ++navGenRef.current;
       try {
-        const res = await fetch(`${base}/api/workspace/session`, { credentials: "include" });
-        if (!res.ok) return false;
-        const body = (await res.json()) as { authenticated?: boolean };
-        return body.authenticated === true;
-      } catch {
-        return false;
+        const ticket = await api.ticket(path);
+        if (generation !== navGenRef.current) return;
+        setOriginHint(ticket.origin);
+        setPreviewSrc(ticket.url);
+      } catch (err) {
+        if (generation !== navGenRef.current) return;
+        setFrameError(err instanceof Error ? err.message : String(err));
+        onNotify(err instanceof Error ? err.message : String(err), "error");
       }
     },
-    [],
+    [onNotify],
   );
+
+  /** Verify the companion cookie really works (used for the renewal timer only). */
+  const verifyCompanionSession = useCallback(async (base: string): Promise<boolean> => {
+    try {
+      const res = await fetch(`${base}/api/workspace/session`, { credentials: "include" });
+      if (!res.ok) return false;
+      const body = (await res.json()) as { authenticated?: boolean };
+      return body.authenticated === true;
+    } catch {
+      return false;
+    }
+  }, []);
 
   /** Renew the companion cookie from the control plane (dedicated CORS-enabled endpoint). */
-  const renewCompanionSession = useCallback(
-    async (base: string): Promise<void> => {
-      try {
-        await fetch(`${base}/api/workspace/refresh`, { method: "POST", credentials: "include" });
-      } catch {
-        /* a failed renew simply means the next frame load bootstraps again */
-      }
-    },
-    [],
-  );
-
-  const showTab = useCallback(
-    async (id: TabId) => {
-      setTab(id);
-      const def = TABS.find((t) => t.id === id);
-      if (!def || def.kind !== "frame" || !def.path) return;
-      const src = await ensureSession(def.path);
-      if (src) {
-        setFrameSrc(src);
-        setFrameKey((k) => k + 1);
-      }
-    },
-    [ensureSession],
-  );
+  const renewCompanionSession = useCallback(async (base: string): Promise<void> => {
+    try {
+      await fetch(`${base}/api/workspace/refresh`, { method: "POST", credentials: "include" });
+    } catch {
+      /* a failed renew simply means the next navigation bootstraps again */
+    }
+  }, []);
 
   const openedRef = useRef(false);
   useEffect(() => {
     if (!open) {
       openedRef.current = false;
+      userNavigatedRef.current = false;
+      navGenRef.current += 1; // invalidate anything still in flight
+      setFrameSrc(null);
+      setPreviewSrc(null);
       return;
     }
     if (openedRef.current) return;
     openedRef.current = true;
-    void (async () => {
-      // Trust an existing companion cookie only if it actually authenticates.
-      if (origin) {
+
+    // Choose the initial tab synchronously so anything the user taps next wins.
+    if (initialPath && initialPath.startsWith("/")) {
+      setPreviewPath(initialPath);
+      void openPreview(initialPath);
+    } else {
+      void navigateTo("browser");
+    }
+
+    // Background session check: it may set the renewal flag but must never move tabs.
+    if (origin) {
+      void (async () => {
         const valid = await verifyCompanionSession(origin);
-        setSessionReady(valid);
-        if (!valid) setSessionReady(false);
-      }
-      if (initialPath && initialPath.startsWith("/")) {
-        setPreviewPath(initialPath);
-        setTab("preview");
-        const src = await ensureSession(initialPath);
-        setSessionReady(true);
-        setPreviewSrc(src ?? (origin ? `${origin}${initialPath}` : null));
-        return;
-      }
-      await showTab("browser");
-    })();
-  }, [ensureSession, initialPath, open, origin, showTab, verifyCompanionSession]);
+        if (!userNavigatedRef.current) setSessionReady(valid);
+        else setSessionReady((prev) => prev || valid);
+      })();
+    }
+  }, [initialPath, navigateTo, open, openPreview, origin, verifyCompanionSession]);
 
   // Renew the companion session periodically and when the tab comes back.
   useEffect(() => {
@@ -162,10 +181,14 @@ export function Workspace({ open, status, initialPath, onClose, onNotify }: Prop
 
   const openExternal = useCallback(
     async (path: string) => {
-      const src = sessionReady && origin ? `${origin}${path}` : await ensureSession(path);
-      if (src) window.open(src, "_blank", "noopener,noreferrer");
+      try {
+        const ticket = await api.ticket(path);
+        window.open(ticket.url, "_blank", "noopener,noreferrer");
+      } catch (err) {
+        onNotify(err instanceof Error ? err.message : String(err), "error");
+      }
     },
-    [ensureSession, origin, sessionReady],
+    [onNotify],
   );
 
   const currentDef = TABS.find((t) => t.id === tab);
@@ -183,7 +206,7 @@ export function Workspace({ open, status, initialPath, onClose, onNotify }: Prop
               role="tab"
               aria-selected={tab === t.id}
               className={tab === t.id ? "active" : ""}
-              onClick={() => void showTab(t.id)}
+              onClick={() => void navigateTo(t.id)}
             >
               {t.label}
             </button>
@@ -217,13 +240,7 @@ export function Workspace({ open, status, initialPath, onClose, onNotify }: Prop
               <button
                 type="button"
                 className="primary"
-                onClick={() => {
-                  void (async () => {
-                    const path = normalizePreviewTarget(previewPath);
-                    const src = sessionReady && origin ? `${origin}${path}` : await ensureSession(path);
-                    setPreviewSrc(src);
-                  })();
-                }}
+                onClick={() => void openPreview(previewPath)}
               >
                 打开
               </button>
@@ -235,7 +252,13 @@ export function Workspace({ open, status, initialPath, onClose, onNotify }: Prop
               端口会通过沙箱的代理入口打开（例如 3000 → <code>/proxy/3000/</code>），用于访问你在沙箱里启动的服务。
             </p>
             {previewSrc ? (
-              <iframe key={previewSrc} src={previewSrc} title="预览" sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-downloads" />
+              <iframe
+                key={previewSrc}
+                src={previewSrc}
+                title="预览"
+                sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-downloads"
+                onLoad={() => setSessionReady(true)}
+              />
             ) : (
               <p className="muted">输入沙箱内的路径（例如 /jupyter/lab 或你自己生成的 HTML 文件）。</p>
             )}
@@ -258,13 +281,14 @@ export function Workspace({ open, status, initialPath, onClose, onNotify }: Prop
             ) : (
               <p className="muted">正在建立工作区会话…</p>
             )}
+            {frameError && <div className="frame-hint error">{frameError}</div>}
             {frameStatus === "timeout" && (
               <div className="frame-hint">
                 页面加载超时。
                 <button type="button" className="link" onClick={() => currentDef?.path && void openExternal(currentDef.path)}>
                   在新标签页打开
                 </button>
-                <button type="button" className="link" onClick={() => void showTab(tab)}>
+                <button type="button" className="link" onClick={() => void navigateTo(tab)}>
                   重试
                 </button>
               </div>
@@ -466,6 +490,7 @@ function FilesTab({ notify }: { notify: (message: string, level?: "info" | "erro
 
 function ApiTab({ notify }: { notify: (message: string, level?: "info" | "error") => void }) {
   const [caps, setCaps] = useState<CapabilitiesResponse | null>(null);
+  const [capsLoading, setCapsLoading] = useState(true);
   const [method, setMethod] = useState("GET");
   const [path, setPath] = useState("/v1/sandbox");
   const [body, setBody] = useState("");
@@ -473,18 +498,26 @@ function ApiTab({ notify }: { notify: (message: string, level?: "info" | "error"
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
+    let cancelled = false;
     void (async () => {
       try {
-        setCaps(await api.capabilities());
+        const data = await api.capabilities();
+        if (!cancelled) setCaps(data);
       } catch (err) {
-        notify(err instanceof Error ? err.message : String(err), "error");
+        if (!cancelled) notify(err instanceof Error ? err.message : String(err), "error");
+      } finally {
+        if (!cancelled) setCapsLoading(false);
       }
     })();
+    return () => {
+      cancelled = true;
+    };
   }, [notify]);
 
   return (
     <div className="caps">
       <div className="cap-groups">
+        {capsLoading && !caps && <p className="muted">正在读取沙箱能力清单…</p>}
         {caps?.inventory.groups.map((group) => (
           <details key={group.id} open={group.id === "browser"}>
             <summary>
@@ -567,9 +600,25 @@ function ApiTab({ notify }: { notify: (message: string, level?: "info" | "error"
         {result !== null && <pre className="result">{result}</pre>}
 
         <h4>MCP 服务器</h4>
-        <p className="muted">{caps?.mcpServers.length ? caps.mcpServers.join("、") : "暂无"}</p>
+        <p className="muted">
+          {capsLoading && !caps
+            ? "正在读取…"
+            : caps?.mcpServers.length
+              ? caps.mcpServers.join("、")
+              : caps
+                ? "沙箱未报告 MCP 服务器"
+                : "读取失败"}
+        </p>
         <h4>技能</h4>
-        <p className="muted">{caps?.skills.length ? caps.skills.map((s) => s.name).join("、") : "暂无已注册技能"}</p>
+        <p className="muted">
+          {capsLoading && !caps
+            ? "正在读取…"
+            : caps?.skills.length
+              ? caps.skills.map((s) => s.name).join("、")
+              : caps
+                ? "沙箱未注册额外技能"
+                : "读取失败"}
+        </p>
         {caps?.inventory.sandboxVersion && <p className="muted">沙箱版本：{caps.inventory.sandboxVersion}</p>}
       </div>
     </div>

@@ -799,6 +799,12 @@ textarea:focus {
   background: #fff;
 }
 
+.frame-hint.error {
+  border-color: var(--error);
+  color: var(--error);
+  bottom: 64px;
+}
+
 .frame-hint {
   position: absolute;
   left: 12px;

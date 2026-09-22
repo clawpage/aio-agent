@@ -5,7 +5,7 @@
   "description": "Private single-owner personal agent: Codex + AIO Sandbox control plane with Chinese UI",
   "type": "module",
   "engines": {
-    "node": ">=22.5.0"
+    "node": ">=24.0.0"
   },
   "scripts": {
     "build": "npm run build:web && npm run build:server",
