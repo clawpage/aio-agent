@@ -59,7 +59,12 @@ const login = await call(primary, `${PRIMARY}/api/auth/login`, { method: "POST",
 check("login", login.status === 200, `status=${login.status}`);
 const sessionAttrs = (primary.attributes.get("pa_session") ?? []).join(";").toLowerCase();
 check("session cookie is HttpOnly", sessionAttrs.includes("httponly"));
-check("session cookie is Secure", sessionAttrs.includes("secure"));
+// Secure is mandatory over TLS; loopback http (local runs) intentionally omits it.
+if (PRIMARY.startsWith("https://")) {
+  check("session cookie is Secure", sessionAttrs.includes("secure"));
+} else {
+  check("loopback session cookie omits Secure by design", !sessionAttrs.includes("secure"));
+}
 const csrfCookie = primary.cookies.get("pa_csrf");
 check("csrf cookie present (not a credential)", Boolean(csrfCookie));
 
@@ -85,7 +90,9 @@ const bootUrl = ticket.json?.url;
 check("ticket url uses companion origin", typeof bootUrl === "string" && bootUrl.startsWith(COMPANION), bootUrl?.slice(0, 48));
 const boot = await call(companion, bootUrl);
 check("bootstrap redirects", boot.status === 303, `status=${boot.status} -> ${boot.headers.get("location")}`);
-check("companion cookie is HttpOnly", (companion.attributes.get("pa_ws_session") ?? []).join(";").toLowerCase().includes("httponly"));
+const companionAttrs = (companion.attributes.get("pa_ws_session") ?? []).join(";").toLowerCase();
+check("companion cookie is HttpOnly", companionAttrs.includes("httponly"));
+if (COMPANION.startsWith("https://")) check("companion cookie is Secure", companionAttrs.includes("secure"));
 const replay = await call(companion, bootUrl);
 check("ticket is single-use", replay.status === 403, `status=${replay.status}`);
 

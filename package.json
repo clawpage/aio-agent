@@ -18,7 +18,9 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
-    "smoke": "node tests/e2e/live-smoke.mjs"
+    "smoke": "node tests/e2e/live-smoke.mjs",
+    "test:ui": "playwright test",
+    "test:ui:login": "PA_E2E_BASE=http://localhost:4891 PA_E2E_STATE=var/.auth/state-local.json playwright test tests/e2e/login.spec.ts"
   },
   "dependencies": {
     "dompurify": "3.4.15",

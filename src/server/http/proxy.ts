@@ -218,6 +218,19 @@ export function rewriteHandshakeResponse(head: string, secure: boolean): string 
   return out.join("\r\n");
 }
 
+/**
+ * Write a complete HTTP response on a raw socket and close it after the write is
+ * flushed. `write()` followed immediately by `destroy()` can truncate the bytes,
+ * which an edge proxy reports as 502 instead of the real status code.
+ */
+export function endSocket(socket: Duplex, response: string): void {
+  if (socket.destroyed) return;
+  socket.end(response);
+  const timer = setTimeout(() => socket.destroy(), 2000);
+  timer.unref?.();
+  socket.on("close", () => clearTimeout(timer));
+}
+
 function upstreamRequestLine(req: http.IncomingMessage, ctx: RequestContext): string[] {
   const lines: string[] = [`${req.method} ${req.url} HTTP/1.1`];
   for (const [key, value] of Object.entries(req.headers)) {
@@ -316,8 +329,9 @@ export function handleProxyUpgrade(
   const originHeader = req.headers.origin;
   const origin = Array.isArray(originHeader) ? (originHeader[0] ?? null) : (originHeader ?? null);
   if (!origin || !originAllowed(cfg, "workspace", origin)) {
-    clientSocket.write("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n");
-    clientSocket.destroy();
+    // end() flushes the response before FIN; write()+destroy() could truncate it
+    // and make the edge report a 502 instead of the real 403.
+    endSocket(clientSocket, "HTTP/1.1 403 Forbidden\r\nConnection: close\r\nContent-Length: 0\r\n\r\n");
     return;
   }
 
@@ -327,8 +341,7 @@ export function handleProxyUpgrade(
     if (handshakeDone) return;
     log.warn("sandbox upgrade handshake timeout", { url: req.url });
     upstream.destroy();
-    clientSocket.write("HTTP/1.1 504 Gateway Timeout\r\nConnection: close\r\n\r\n");
-    clientSocket.destroy();
+    endSocket(clientSocket, "HTTP/1.1 504 Gateway Timeout\r\nConnection: close\r\nContent-Length: 0\r\n\r\n");
   }, cfg.proxyConnectTimeoutMs);
 
   let closed = false;

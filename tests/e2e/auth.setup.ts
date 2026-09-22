@@ -12,7 +12,8 @@ const secretFile = process.env.PA_OWNER_SECRET_FILE ?? "var/owner-secret.txt";
  */
 setup("authenticate as owner", async ({ page }) => {
   const password = fs.readFileSync(path.resolve(secretFile), "utf8").trim();
-  fs.mkdirSync(path.dirname(STORAGE_STATE), { recursive: true });
+  fs.mkdirSync(path.dirname(STORAGE_STATE), { recursive: true, mode: 0o700 });
+  fs.mkdirSync(new URL("../../var/.playwright", import.meta.url).pathname, { recursive: true, mode: 0o700 });
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "个人智能体" })).toBeVisible();
   await page.getByLabel("密码").fill(password);

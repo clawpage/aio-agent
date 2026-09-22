@@ -10,6 +10,10 @@ const storageState = process.env.PA_E2E_STATE ?? "var/.auth/state.json";
 export default defineConfig({
   testDir: "tests/e2e",
   testMatch: /.*\.spec\.ts/,
+  // Failure artifacts (traces/snapshots) can contain typed secrets such as the
+  // owner password, so they are written under the git-ignored var/ directory
+  // which the setup creates with 0700 permissions.
+  outputDir: "var/.playwright",
   timeout: 150_000,
   expect: { timeout: 30_000 },
   fullyParallel: false,

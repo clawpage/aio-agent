@@ -9,6 +9,28 @@ import type {
   Turn,
 } from "./types";
 
+/** Short Chinese fallback for responses that carry no usable JSON message. */
+export function friendlyStatusMessage(status: number): string {
+  switch (status) {
+    case 401:
+      return "登录已失效，请重新登录";
+    case 403:
+      return "请求被拒绝";
+    case 404:
+      return "接口不存在";
+    case 413:
+      return "内容过大";
+    case 429:
+      return "请求过于频繁，已被限流，请稍后再试";
+    case 502:
+    case 503:
+    case 504:
+      return "服务暂时不可用，请稍后重试";
+    default:
+      return `请求失败（HTTP ${status}）`;
+  }
+}
+
 export class ApiError extends Error {
   status: number;
   code: string;
@@ -44,14 +66,20 @@ async function request<T>(path: string, init: { method?: string; body?: unknown 
     try {
       parsed = JSON.parse(text);
     } catch {
-      parsed = { message: text };
+      // Non-JSON bodies happen when an edge/proxy answers instead of our API
+      // (rate limiting, maintenance pages). Never surface raw HTML in the UI.
+      parsed = null;
     }
   }
   if (!res.ok) {
     const body = (parsed ?? {}) as { error?: string; message?: string };
-    throw new ApiError(res.status, body.error ?? "error", body.message ?? `请求失败 (${res.status})`);
+    const readable =
+      typeof body.message === "string" && body.message.trim().length > 0 && body.message.length <= 300
+        ? body.message
+        : friendlyStatusMessage(res.status);
+    throw new ApiError(res.status, body.error ?? "error", readable);
   }
-  return parsed as T;
+  return (parsed ?? {}) as T;
 }
 
 export const api = {

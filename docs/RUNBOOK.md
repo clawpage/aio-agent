@@ -94,6 +94,8 @@ npm run smoke
 | 终端/VNC/Jupyter 502 | 沙箱未就绪或刚被重启 | 看 `/healthz` 与容器状态；控制面每 30 s 自动重试接管容器与 Codex |
 | 智能体不回话、`agentReady=false` | 宿主机 Codex 登录失效 | 在 Mac 上 `codex login`，再 `/Users/mengxiao/workspace/tools/start.sh restart personal-agent` |
 | 登录提示会话过期 | 会话被吊销或超过 TTL | 重新登录即可；客户端每 15 分钟自动续期并轮换 token |
+| 登录返回 429 | 本机限速：同一 IP 密码错误过多（默认锁定 15 分钟） | 等待锁定窗口结束后再登录；不要反复重试 |
+| 登录页出现 Cloudflare 提示页或 1015 | 公网边缘限流（高频自动化登录触发） | 降低登录频率并等待冷却；这是正确的保护行为，不要放宽边缘策略 |
 | 手机端外链工作区要求再次登录 | 跨来源 cookie 在部分浏览器被拦截 | 用「新标签页打开」按钮；或回到控制台重新点开工作区 |
 
 ## 7. 崩溃恢复验证（唯一可靠方式）

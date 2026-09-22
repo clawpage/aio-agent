@@ -3,7 +3,7 @@ import path from "node:path";
 import express, { type NextFunction, type Request, type Response } from "express";
 import type { AppContext } from "../context.js";
 import { createApiRouter } from "./api.js";
-import { handleProxyHttp, handleProxyUpgrade } from "./proxy.js";
+import { endSocket, handleProxyHttp, handleProxyUpgrade } from "./proxy.js";
 import { resolveRequest, type RequestContext } from "./security.js";
 import { COOKIE_NAMES, sessionCookies } from "../auth/sessions.js";
 import { safeRedirectPath } from "../auth/tickets.js";
@@ -212,14 +212,12 @@ function acceptsHtml(req: Request): boolean {
 export function handleUpgrade(ctx: AppContext, req: import("node:http").IncomingMessage, socket: import("node:stream").Duplex, head: Buffer): void {
   const rec = resolveRequest({ cfg: ctx.cfg, sessions: ctx.sessions, req });
   if (!rec || rec.kind !== "workspace") {
-    socket.write("HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n");
-    socket.destroy();
+    endSocket(socket, "HTTP/1.1 404 Not Found\r\nConnection: close\r\nContent-Length: 0\r\n\r\n");
     return;
   }
   const token = rec.cookies[COOKIE_NAMES.workspace.session];
   if (!rec.session || !token || !ctx.sessions.isLive(rec.session.id)) {
-    socket.write("HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n");
-    socket.destroy();
+    endSocket(socket, "HTTP/1.1 401 Unauthorized\r\nConnection: close\r\nContent-Length: 0\r\n\r\n");
     return;
   }
   rec.session = ctx.sessions.resolve("workspace", token) ?? rec.session;

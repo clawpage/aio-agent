@@ -378,6 +378,14 @@ textarea:focus {
   place-items: center;
   height: 100dvh;
   padding: 20px;
+  /* Short viewports (phone landscape, or a banner pushing the card down) must
+     scroll rather than clip the submit button out of reach. */
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.login-card {
+  max-height: none;
 }
 
 .login-card {
