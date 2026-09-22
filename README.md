@@ -1,0 +1,94 @@
+# personal-agent
+
+私有个人智能体：**Codex + AIO Sandbox**，一个 owner、一个常驻沙箱、一个常驻主智能体，
+中文控制台，桌面与手机功能对等。公网只通过专用 Cloudflare tunnel 暴露两个精确域名：
+
+- 控制台（登录、对话、审批、历史）：<https://agent.zymx.tech>
+- 伴随工作区（终端 / 桌面 / 浏览器 / 编辑器 / 笔记本 / 接口）：<https://agent-workspace.zymx.tech>
+
+> 两个域名都要求本人登录（未登录一律 401）。没有注册入口，也不对外提供服务。
+
+## 它是什么
+
+```
+浏览器 ─> agent.zymx.tech ────────┐   控制台：对话流、工具进度、审批、停止、重连、历史
+浏览器 ─> agent-workspace.zymx.tech ┤   工作区：AIO 全部界面与 REST/WS 表面（同样需要登录）
+                                   └─> 本机 Node 控制面（127.0.0.1:4891）
+                                         └─> 沙箱容器 personal-agent-sandbox
+                                               └─> 常驻 Codex app-server（stdio）
+```
+
+- **沙箱内执行**：命令、文件、浏览器、桌面、编辑器、笔记本都发生在容器里；宿主机（Mac）
+  的能力没有接入沙箱，也不暴露 Docker socket 或 home 目录。
+- **统一登录**：不在沙箱里重新登录。控制面从 Mac 上已有 `codex login` 通过官方方法
+  `account/read {refreshToken:true}` + `getAuthStatus` 取访问 token，只把访问 token 交给沙箱
+  （refresh token 永不离开 Mac）；沙箱 401 时由控制面按需重新取。
+- **持久化**：工作区、CODEX_HOME、浏览器 profile 各一个命名卷；控制面重启、容器重启、
+  浏览器断线都不丢历史。断线不会中断智能体，重连自动补齐事件。
+
+## 快速开始
+
+```bash
+cd projects/personal-agent
+npm install
+npm run build            # 构建前端 + 服务端
+npm test                 # 单元 + 集成测试（无需 Docker）
+npm run typecheck
+```
+
+本机运行（不经过 tunnel）：
+
+```bash
+PA_BIND=127.0.0.1 PA_PORT=4891 node dist/server/index.js
+# 首次启动会生成 owner 密码到 var/owner-secret.txt（0600，git 忽略，从不写日志）
+curl -s http://127.0.0.1:4891/healthz
+```
+
+浏览器打开 `http://localhost:4891`（主站；本地开发中 `127.0.0.1:4891` 是伴随站，
+两者是不同来源，跨站规则与线上一致）。
+
+生产路径（由 workspace 的统一 launcher 管理）：
+
+```bash
+tools/start.sh start personal-agent      # 或 restart / stop / status
+```
+
+## 验收
+
+```bash
+npm test                                  # 89 项单元 + 集成测试
+npm run smoke                             # 对已部署站点做真实 HTTP/WS 冒烟（默认公网）
+PA_PRIMARY_ORIGIN=http://localhost:4891 \
+PA_COMPANION_ORIGIN=http://127.0.0.1:4891 npm run smoke     # 对本地实例
+```
+
+`npm run smoke` 覆盖：登录与 cookie 属性、会话、模型列表、一次性工作区票据（含重放与
+开放重定向拒绝）、伴随站会话与续期、经鉴权的 shell 调用、上传与列目录、跨源写入拒绝、
+各原生界面可用性、以及未登录时所有表面一律 401。
+
+## 配置
+
+所有参数通过 `PA_*` 环境变量提供，见 [`.env.example`](.env.example)；生产覆盖写入
+`var/runtime.env`（git 忽略）。关键项：
+
+| 变量 | 默认 | 说明 |
+| --- | --- | --- |
+| `PA_PORT` / `PA_BIND` | `4891` / `127.0.0.1` | 控制面监听地址 |
+| `PA_PRIMARY_HOST` / `PA_WORKSPACE_HOST` | `agent.zymx.tech` / `agent-workspace.zymx.tech` | 两个精确域名 |
+| `PA_TRUST_CF_CONNECTING_IP` | `1`（生产） | 仅在专用 tunnel 之后开启，否则限速可被伪造头绕过 |
+| `PA_SANDBOX_IMAGE` | `ghcr.io/agent-infra/sandbox:1.11.0` | 固定镜像，升级需人工确认 |
+| `PA_SANDBOX_PORT` | `18081` | 沙箱发布到 loopback 的端口 |
+| `PA_OWNER_PASSWORD` | 空 | 设置则用它，否则生成到 `var/owner-secret.txt` |
+
+## 文档
+
+- [运行手册](docs/RUNBOOK.md)：启停、健康、日志、凭据、tunnel/DNS、故障处理
+- [架构与安全边界](docs/ARCHITECTURE.md)：两个来源、会话与 CSRF、执行模型、token 边界
+- [AIO 能力清单](docs/AIO-CAPABILITIES.md)：按固定镜像实测的 140 个接口与原生界面入口
+- [项目规范](AGENTS.md)
+
+## 已知限制
+
+- Playwright 桌面/手机端到端套件尚未落地；当前 UI 验收由人工浏览器 + `npm run smoke` 覆盖。
+- 沙箱镜像固定不自动升级；升级步骤见运行手册（需人工确认并复验浏览器与编辑器）。
+- 只有本机 loopback 明文调试时才允许非 Secure cookie；公网一律 `Secure`。
