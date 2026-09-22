@@ -1,0 +1,151 @@
+#!/usr/bin/env node
+/**
+ * Production supervisor for personal-agent.
+ *
+ * Runs two children and keeps them alive:
+ *   1. the Node control-plane server (serves the SPA, API, SSE and the
+ *      authenticated AIO companion proxy on loopback)
+ *   2. the dedicated Cloudflare tunnel that publishes the two exact hostnames
+ *
+ * Both are restarted with backoff if they exit. SIGTERM/SIGINT are forwarded so
+ * `tools/start.sh stop personal-agent` shuts everything down cleanly.
+ *
+ * Optional runtime overrides: var/runtime.env (KEY=VALUE per line).
+ */
+import { spawn } from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
+import process from "node:process";
+
+const ROOT = path.resolve(import.meta.dirname, "..");
+const VAR = path.join(ROOT, "var");
+const LOGS = path.join(VAR, "logs");
+const CLOUDFLARED = process.env.PA_CLOUDFLARED_BIN ?? "/opt/homebrew/bin/cloudflared";
+const TUNNEL_CONFIG = path.join(VAR, "cloudflared", "config.yml");
+const SERVER_ENTRY = path.join(ROOT, "dist", "server", "index.js");
+
+fs.mkdirSync(LOGS, { recursive: true });
+
+function loadRuntimeEnv() {
+  const file = path.join(VAR, "runtime.env");
+  const env = { ...process.env };
+  if (!fs.existsSync(file)) return env;
+  for (const line of fs.readFileSync(file, "utf8").split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const idx = trimmed.indexOf("=");
+    if (idx <= 0) continue;
+    env[trimmed.slice(0, idx).trim()] = trimmed.slice(idx + 1).trim();
+  }
+  return env;
+}
+
+const baseEnv = {
+  PA_BIND: "127.0.0.1",
+  PA_PORT: "4891",
+  // Behind the dedicated tunnel the edge overwrites CF-Connecting-IP.
+  PA_TRUST_CF_CONNECTING_IP: "1",
+  ...loadRuntimeEnv(),
+};
+
+function log(message) {
+  const line = JSON.stringify({ ts: new Date().toISOString(), supervisor: "personal-agent", msg: message });
+  process.stdout.write(line + "\n");
+}
+
+function openLog(name) {
+  return fs.openSync(path.join(LOGS, `${name}.log`), "a");
+}
+
+const children = new Map();
+
+const restartTimers = new Set();
+
+function startChild(name, command, args, env, { required }) {
+  // Never resurrect a child while (or after) the supervisor is shutting down.
+  if (shuttingDown) return null;
+  if (required && !fs.existsSync(command) && command.startsWith("/")) {
+    log(`fatal: ${command} not found`);
+    process.exit(1);
+  }
+  const out = openLog(name);
+  let child;
+  try {
+    child = spawn(command, args, { cwd: ROOT, env, stdio: ["ignore", out, out] });
+  } finally {
+    // The child holds its own descriptor; the parent must not leak this one.
+    fs.closeSync(out);
+  }
+  child.on("exit", (code, signal) => {
+    children.delete(name);
+    if (shuttingDown) return;
+    log(`${name} exited code=${code} signal=${signal}; restarting in 3s`);
+    const timer = setTimeout(() => {
+      restartTimers.delete(timer);
+      startChild(name, command, args, env, { required });
+    }, 3000);
+    restartTimers.add(timer);
+  });
+  child.on("error", (err) => log(`${name} spawn error: ${err.message}`));
+  children.set(name, child);
+  log(`${name} started pid=${child.pid}`);
+  return child;
+}
+
+let shuttingDown = false;
+function shutdown(signal) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  for (const timer of restartTimers) clearTimeout(timer);
+  restartTimers.clear();
+  log(`received ${signal}, stopping children`);
+  for (const [name, child] of children) {
+    log(`stopping ${name} pid=${child.pid}`);
+    child.kill("SIGTERM");
+  }
+  setTimeout(() => {
+    for (const [, child] of children) child.kill("SIGKILL");
+    process.exit(0);
+  }, 5000).unref();
+}
+
+process.on("SIGTERM", () => shutdown("SIGTERM"));
+process.on("SIGINT", () => shutdown("SIGINT"));
+
+if (!fs.existsSync(SERVER_ENTRY)) {
+  log(`fatal: ${SERVER_ENTRY} missing; run npm run build:server first`);
+  process.exit(1);
+}
+
+/** Refuse to serve a stale build: dist older than the newest source file. */
+function newestMtime(dir) {
+  let newest = 0;
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) newest = Math.max(newest, newestMtime(full));
+    else if (/\.(ts|tsx)$/.test(entry.name)) newest = Math.max(newest, fs.statSync(full).mtimeMs);
+  }
+  return newest;
+}
+const srcDir = path.join(ROOT, "src", "server");
+if (fs.existsSync(srcDir)) {
+  const srcNewest = newestMtime(srcDir);
+  const distMtime = fs.statSync(SERVER_ENTRY).mtimeMs;
+  if (srcNewest > distMtime) {
+    log("fatal: src/server is newer than dist; run npm run build:server before starting");
+    process.exit(1);
+  }
+}
+
+startChild("personal-agent", process.execPath, [SERVER_ENTRY], baseEnv, { required: true });
+
+if (fs.existsSync(TUNNEL_CONFIG)) {
+  startChild("personal-agent-tunnel", CLOUDFLARED, ["--no-autoupdate", "--config", TUNNEL_CONFIG, "tunnel", "run"], baseEnv, {
+    required: true,
+  });
+} else {
+  log(`tunnel config ${TUNNEL_CONFIG} missing; running without the public tunnel`);
+}
+
+// Keep the supervisor alive (children have their own exit handlers).
+setInterval(() => undefined, 60_000);

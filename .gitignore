@@ -1,0 +1,33 @@
+# Runtime data (never committed)
+/var/
+*.sqlite
+*.sqlite-*
+*.log
+*.pid
+
+# Node
+node_modules/
+npm-debug.log*
+
+# Build output
+/dist/
+/.vite/
+/vite.config.ts.timestamp-*
+
+# Local environment / secrets
+.env
+.env.*
+!.env.example
+owner-secret.txt
+*.pem
+*.key
+
+# Test artifacts
+/test-results/
+/playwright-report/
+/coverage/
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
