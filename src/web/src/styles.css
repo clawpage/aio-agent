@@ -825,12 +825,20 @@ textarea:focus {
   display: none;
 }
 .tool .tool-detail {
+  flex: 1;
   color: var(--text-dim);
   font-family: var(--mono);
   font-size: 12px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.tool .tool-title {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+.tool summary > .dot {
+  flex-shrink: 0;
 }
 .tool pre,
 .reasoning pre {
@@ -923,6 +931,7 @@ textarea:focus {
 }
 
 .composer {
+  flex-shrink: 0;
   border-top: 1px solid var(--border);
   background: var(--bg-soft);
   padding: 10px 12px calc(10px + env(safe-area-inset-bottom));
@@ -942,6 +951,13 @@ textarea:focus {
   gap: 8px;
   align-items: flex-end;
   flex-wrap: wrap;
+}
+.composer-settings {
+  display: flex;
+  gap: 8px;
+}
+.composer-settings-toggle {
+  display: none;
 }
 
 /* The file input is a real, focusable control kept visually hidden (not
@@ -1270,6 +1286,7 @@ textarea:focus {
   .app,
   .app:has(> .workspace:not(.fullscreen)) {
     grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) auto;
   }
 
   .sidebar {
@@ -1287,12 +1304,11 @@ textarea:focus {
 
   .chat {
     border-right: none;
-    padding-bottom: 56px;
   }
 
   .workspace:not(.fullscreen) {
     position: fixed;
-    inset: 0;
+    inset: 0 0 calc(52px + env(safe-area-inset-bottom));
     z-index: 65;
     border-left: none;
   }
@@ -1314,16 +1330,17 @@ textarea:focus {
   }
 
   .main {
-    padding-bottom: 56px;
+    min-height: 0;
+    grid-column: 1;
+    grid-row: 1;
   }
 
   .bottom-nav {
     display: grid;
     grid-template-columns: repeat(4, 1fr);
-    position: fixed;
-    left: 0;
-    right: 0;
-    bottom: 0;
+    grid-column: 1;
+    grid-row: 2;
+    position: relative;
     z-index: 80;
     background: var(--bg-soft);
     border-top: 1px solid var(--border);
@@ -1332,7 +1349,8 @@ textarea:focus {
   .bottom-nav button {
     border: none;
     background: none;
-    padding: 12px 4px;
+    min-height: 52px;
+    padding: 10px 4px;
     font-size: 13px;
     color: var(--text-dim);
   }
@@ -1342,19 +1360,97 @@ textarea:focus {
   }
 
   .chat-head {
-    padding-top: calc(12px + env(safe-area-inset-top));
+    flex-shrink: 0;
+    padding: calc(8px + env(safe-area-inset-top)) 12px 8px;
+    gap: 8px;
+  }
+  .chat-head > button {
+    min-height: 44px;
+    flex-shrink: 0;
+  }
+  .chat-title {
+    flex-wrap: wrap;
+    column-gap: 6px;
+    row-gap: 0;
+  }
+  .chat-title h2 {
+    max-width: 100%;
+  }
+  .composer {
+    padding: 10px 12px;
+    gap: 6px;
   }
   .composer textarea {
+    min-height: 56px;
     max-height: 24dvh;
+    font-size: 16px;
+    border-radius: 14px;
+    padding: 10px 12px;
+  }
+  .composer-row {
+    gap: 6px;
+    align-items: center;
+  }
+  .composer-row > .spacer {
+    display: none;
+  }
+  .composer-row > .file-button,
+  .composer-row > button {
+    min-height: 44px;
+    flex-shrink: 0;
+    padding: 8px 10px;
+  }
+  .composer-row > .composer-settings-toggle {
+    display: flex;
+    flex: 1;
+    align-items: center;
+    justify-content: space-between;
+    gap: 4px;
+    font-size: 12px;
+    color: var(--text-dim);
+    background: transparent;
+    border-color: transparent;
+  }
+  .composer-settings-toggle > span:first-child {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .composer-settings {
+    display: none;
+    order: 3;
+    width: 100%;
+    padding: 8px 0 2px;
+    border-top: 1px solid var(--border);
+  }
+  .composer-settings.expanded {
+    display: flex;
+  }
+  .composer-settings .field {
+    flex: 1;
+    min-width: 0;
+  }
+  .composer-settings .field:first-child {
+    flex: 2;
+  }
+  .composer-settings select {
+    width: 100%;
+    min-height: 44px;
+    font-size: 16px;
+  }
+  .composer .chips {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+  }
+  .composer .chip {
+    flex: 0 0 auto;
+  }
+  .composer .chip button {
+    min-width: 32px;
+    min-height: 32px;
   }
   .msg .bubble {
     max-width: 92%;
-  }
-}
-
-@media (max-width: 380px) {
-  .composer-row .field {
-    min-width: 96px;
   }
 }
 

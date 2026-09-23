@@ -77,6 +77,8 @@ test.describe("workspace navigation", () => {
     }
     await expect(page.locator(".composer textarea")).toBeVisible();
     await expect(page.locator(".status-chip")).toContainText("智能体在线", { timeout: 30_000 });
+    const settings = page.getByRole("button", { name: "模型与思考设置" });
+    if (await settings.isVisible()) await settings.click();
     const modelSelect = page.locator(".composer-row select").first();
     await expect(modelSelect).toBeVisible();
     // A new conversation must start on the app default model, which is not the

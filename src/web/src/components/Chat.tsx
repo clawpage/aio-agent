@@ -61,6 +61,8 @@ export function Chat({
   const [error, setError] = useState<string | null>(null);
   const [model, setModel] = useState<string>("");
   const [effort, setEffort] = useState<string>("");
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const draftRef = useRef<HTMLTextAreaElement | null>(null);
   const [previewPath, setPreviewPath] = useState<string | null>(null);
   const lastIdRef = useRef(0);
   const pendingRef = useRef<{ clientMessageId: string; signature: string; snapshot: { text: string; attachments: Attachment[] } } | null>(null);
@@ -68,6 +70,12 @@ export function Chat({
   const stickRef = useRef(true);
   const stateRef = useRef<TimelineState>(timeline);
   stateRef.current = timeline;
+  useEffect(() => {
+    const input = draftRef.current;
+    if (!input) return;
+    input.style.height = "auto";
+    input.style.height = `${input.scrollHeight}px`;
+  }, [draft]);
   // Stream handlers must not re-run the effect (the SSE connection would drop).
   const onChangedRef = useRef(onConversationChanged);
   onChangedRef.current = onConversationChanged;
@@ -385,8 +393,10 @@ export function Chat({
           </div>
         )}
         <textarea
+          ref={draftRef}
+          aria-label="消息"
           value={draft}
-          placeholder="要做什么？Enter 发送，Shift+Enter 换行。可以附上文件或图片。"
+          placeholder="想做些什么？"
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
@@ -394,7 +404,7 @@ export function Chat({
               void send();
             }
           }}
-          rows={3}
+          rows={2}
         />
         <div className="composer-row">
           {/* A real <label> wrapping a visually-hidden input: clicking the label
@@ -418,37 +428,53 @@ export function Chat({
             />
           </label>
           {models.length > 0 && (
-            <label className="field">
-              <span>模型</span>
-              <select
-                value={model || currentModel?.id || ""}
-                onChange={(e) => {
-                  setModel(e.target.value);
-                  setEffort("");
-                }}
-                disabled={running}
-              >
-                {models.map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.displayName}
-                    {m.isDefault ? "（默认）" : ""}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <button
+              type="button"
+              className="composer-settings-toggle ghost"
+              aria-label="模型与思考设置"
+              aria-expanded={settingsOpen}
+              aria-controls="composer-settings"
+              onClick={() => setSettingsOpen((open) => !open)}
+            >
+              <span>{currentModel?.displayName ?? "模型"} · {EFFORT_LABELS[effort || currentModel?.defaultReasoningEffort || ""] ?? "默认"}</span>
+              <span aria-hidden>{settingsOpen ? "⌃" : "⌄"}</span>
+            </button>
           )}
-          {efforts.length > 1 && (
-            <label className="field">
-              <span>思考</span>
-              <select value={effort || currentModel?.defaultReasoningEffort || ""} onChange={(e) => setEffort(e.target.value)} disabled={running}>
-                {efforts.map((value) => (
-                  <option key={value} value={value}>
-                    {EFFORT_LABELS[value] ?? value}
-                  </option>
-                ))}
-              </select>
-            </label>
-          )}
+          <div id="composer-settings" className={`composer-settings${settingsOpen ? " expanded" : ""}`}>
+            {models.length > 0 && (
+              <label className="field">
+                <span>模型</span>
+                <select
+                  aria-label="模型"
+                  value={model || currentModel?.id || ""}
+                  onChange={(e) => {
+                    setModel(e.target.value);
+                    setEffort("");
+                  }}
+                  disabled={running}
+                >
+                  {models.map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.displayName}
+                      {m.isDefault ? "（默认）" : ""}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+            {efforts.length > 1 && (
+              <label className="field">
+                <span>思考</span>
+                <select aria-label="思考" value={effort || currentModel?.defaultReasoningEffort || ""} onChange={(e) => setEffort(e.target.value)} disabled={running}>
+                  {efforts.map((value) => (
+                    <option key={value} value={value}>
+                      {EFFORT_LABELS[value] ?? value}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+          </div>
           <span className="spacer" />
           {running && activeHere ? (
             <button type="button" className="danger" onClick={() => void stop()}>
@@ -530,7 +556,7 @@ function BlockView({
       <details className={`tool ${block.status}`} open={block.status === "running"}>
         <summary>
           <span className={`dot ${block.status === "running" ? "warn" : block.status === "error" ? "error" : "ok"}`} aria-hidden />
-          {block.title}
+          <span className="tool-title">{block.title}</span>
           {block.detail && <span className="tool-detail">{block.detail}</span>}
         </summary>
         {block.output ? <pre>{block.output}</pre> : <pre className="muted">（暂无输出）</pre>}

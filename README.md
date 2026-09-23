@@ -66,6 +66,7 @@ PA_PRIMARY_ORIGIN=http://localhost:4891 \
 PA_COMPANION_ORIGIN=http://127.0.0.1:4891 npm run smoke     # 对本地实例冒烟
 
 # 本地假后端 UI 验收：静态 dist/web + 全部 /api 由 page.route mock，不会访问任何实例
+npx playwright install chromium webkit # 首次准备浏览器运行时
 npm run build && npx playwright test --config playwright.local.config.ts
 ```
 
@@ -108,6 +109,10 @@ npm run build && npx playwright test --config playwright.local.config.ts
 - [项目规范](AGENTS.md)
 
 ## 已知限制
+
+- 手机对话页将模型和思考选项收进输入区的设置入口；桌面直接显示。移动端布局测试包含
+  Chromium 与 WebKit 的 390/360 宽度、短视口、附件、发送和停止。WebKit 自动化不等同于
+  iPhone 真机软键盘与 Safari 地址栏行为验收。
 
 - JupyterLab 首次加载会出现 `Shared module @jupyter-widgets/base doesn't exist in shared scope`
   的第三方 widget 前端告警；内核执行本身正常（`/v1/jupyter/execute` 实测返回 stdout）。
