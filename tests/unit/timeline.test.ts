@@ -457,7 +457,7 @@ describe("working groups", () => {
     expect(groups(third)[0]!.status).toBe("done");
   });
 
-  it("removes a whitespace-only summary and its now-empty group, keeping the indexes exact", () => {
+  it("drops a whitespace-only summary while keeping the live row and exact indexes", () => {
     const state = feed([
       // A group for an earlier turn, so the reindex has something to keep correct.
       ev("turn.queued", { turnId: "t0", text: "第一轮" }),
@@ -470,12 +470,15 @@ describe("working groups", () => {
       ev("item/completed", { item: { id: "r", type: "reasoning", summary: [] } }, "t1"),
     ]);
 
-    // No empty group and no empty summary row are left behind.
-    expect(groups(state).map((g) => g.turnId)).toEqual(["t0"]);
+    // The blank summary row is gone, and the still-running t1 row survives with
+    // no children (its first tool has not arrived yet).
+    expect(groups(state).map((g) => g.turnId)).toEqual(["t0", "t1"]);
+    expect(groups(state)[1]!.children).toHaveLength(0);
+    expect(groups(state)[1]!.status).toBe("running");
     expect(reasonings(state)).toHaveLength(0);
     expect(state.groupOf.has("item:r")).toBe(false);
 
-    // A later real tool for t1 recreates its group, with correct indexes.
+    // A later real tool for t1 joins that existing row, with correct indexes.
     applyEvent(state, ev("item/started", { item: { id: "c1", type: "commandExecution", command: "ls" } }, "t1"));
     applyEvent(state, ev("item/completed", { item: { id: "m1", type: "agentMessage", text: "正文" } }, "t1"));
     const gs = groups(state);
@@ -493,7 +496,7 @@ describe("working groups", () => {
     expect(state.index.get("item:m1")).toBe(assistantIdx);
   });
 
-  it("removes an empty group even when a sibling summary with real text stays", () => {
+  it("keeps a real summary alongside a dropped blank one", () => {
     const state = feed([
       ev("turn.started", { turnId: "t1" }, "t1"),
       ev("stream.delta", { itemId: "keep", kind: "item/reasoning/summaryTextDelta", delta: "有内容" }, "t1"),
@@ -503,5 +506,151 @@ describe("working groups", () => {
     const g = groups(state)[0]!;
     expect(g.children.map((c) => c.id)).toEqual(["item:keep"]);
     expect(reasonings(state)).toHaveLength(1);
+  });
+});
+
+describe("working group presence", () => {
+  it("creates the turn's activity row on turn.started, before any tool or summary", () => {
+    const state = feed([ev("turn.started", { turnId: "t1" }, "t1")]);
+    const gs = groups(state);
+    expect(gs).toHaveLength(1);
+    expect(gs[0]!.id).toBe("working:t1");
+    expect(gs[0]!.children).toHaveLength(0);
+    expect(gs[0]!.status).toBe("running");
+    expect(isWorkingActive(gs[0]!.status)).toBe(true);
+  });
+
+  it("keeps a running turn's row when the only summary was blank", () => {
+    const state = feed([
+      ev("turn.started", { turnId: "t1" }, "t1"),
+      ev("stream.delta", { itemId: "r", kind: "item/reasoning/summaryTextDelta", delta: "\n\n" }, "t1"),
+      ev("item/completed", { item: { id: "r", type: "reasoning", summary: [] } }, "t1"),
+    ]);
+    // The empty summary is dropped, but the live turn's row survives.
+    expect(groups(state)).toHaveLength(1);
+    expect(groups(state)[0]!.children).toHaveLength(0);
+    expect(groups(state)[0]!.status).toBe("running");
+    expect(reasonings(state)).toHaveLength(0);
+    // A real summary afterwards joins the same row instead of creating a second.
+    applyEvent(state, ev("item/completed", { item: { id: "r2", type: "reasoning", summary: ["真实摘要"] } }, "t1"));
+    expect(groups(state)).toHaveLength(1);
+    expect(reasonings(state).map((r) => r.text)).toEqual(["真实摘要"]);
+  });
+
+  it("keeps a static completed row for a settled turn that produced no activity", () => {
+    const state = feed([
+      ev("turn.started", { turnId: "t1" }, "t1"),
+      ev("turn.finished", { turnId: "t1", status: "completed" }, "t1"),
+    ]);
+    // A settled turn with no activity keeps a static, honest completed row.
+    expect(groups(state)).toHaveLength(1);
+    expect(groups(state)[0]!.status).toBe("done");
+    expect(groups(state)[0]!.children).toHaveLength(0);
+    // It is settled, so nothing animates.
+    expect(isWorkingActive(groups(state)[0]!.status)).toBe(false);
+  });
+
+  it("never duplicates the row when turn.started is replayed", () => {
+    const state = feed([
+      ev("turn.started", { turnId: "t1" }, "t1"),
+      ev("turn.started", { turnId: "t1" }, "t1"),
+      ev("item/started", { item: { id: "c1", type: "commandExecution", command: "ls" } }, "t1"),
+      ev("turn.started", { turnId: "t1" }, "t1"),
+    ]);
+    expect(groups(state)).toHaveLength(1);
+    expect(groups(state)[0]!.children.map((c) => c.id)).toEqual(["item:c1"]);
+    expect(state.blocks.filter((b) => b.kind === "working")).toHaveLength(1);
+  });
+
+  it("shows one row for a turn that only produces assistant prose", () => {
+    const state = feed([
+      ev("turn.started", { turnId: "t1" }, "t1"),
+      ev("item/completed", { item: { id: "m1", type: "agentMessage", text: "纯文本回答" } }, "t1"),
+      ev("turn.finished", { turnId: "t1", status: "completed" }, "t1"),
+    ]);
+    expect(groups(state)).toHaveLength(1);
+    expect(groups(state)[0]!.children).toHaveLength(0);
+    expect(groups(state)[0]!.status).toBe("done");
+    // The prose itself stays a top-level assistant block.
+    const assistant = state.blocks.filter((b) => b.kind === "assistant");
+    expect(assistant).toHaveLength(1);
+    expect((assistant[0] as { text: string }).text).toBe("纯文本回答");
+    // The group sits before the prose it belongs to.
+    expect(state.groupIndex.get("t1")!).toBeLessThan(state.index.get("item:m1")!);
+  });
+
+  it("keeps a queued turn out of the running state and off the animation", () => {
+    const state = feed([ev("turn.queued", { turnId: "t1", text: "排队" }, "t1")]);
+    // A queued turn is honest about waiting; it has no activity row until it runs.
+    expect(groups(state)).toHaveLength(0);
+    expect(state.turnStatus.get("t1")).toBe("queued");
+    expect(isWorkingActive("queued")).toBe(false);
+    expect(workingLabel("queued")).toBe("已排队等待");
+
+    // Once it starts, exactly one row appears and it animates.
+    applyEvent(state, ev("turn.started", { turnId: "t1" }, "t1"));
+    expect(groups(state)).toHaveLength(1);
+    expect(groups(state)[0]!.status).toBe("running");
+  });
+
+  it("keeps an empty group through stopping and settles it on the terminal event", () => {
+    const state = feed([
+      ev("turn.started", { turnId: "t1" }, "t1"),
+      ev("turn.interrupt_requested", { turnId: "t1" }, "t1"),
+    ]);
+    expect(groups(state)).toHaveLength(1);
+    expect(groups(state)[0]!.status).toBe("stopping");
+    expect(isWorkingActive(groups(state)[0]!.status)).toBe(true);
+
+    applyEvent(state, ev("turn.finished", { turnId: "t1", status: "interrupted" }, "t1"));
+    expect(groups(state)).toHaveLength(1);
+    expect(groups(state)[0]!.status).toBe("stopped");
+    expect(isWorkingActive(groups(state)[0]!.status)).toBe(false);
+  });
+
+  it("keeps the row for a failed turn with no tools and reports the failure", () => {
+    const state = feed([
+      ev("turn.started", { turnId: "t1" }, "t1"),
+      ev("turn.failed", { turnId: "t1", message: "启动失败" }, "t1"),
+    ]);
+    expect(groups(state)).toHaveLength(1);
+    expect(groups(state)[0]!.status).toBe("error");
+    expect(workingLabel(groups(state)[0]!.status)).toBe("执行出错");
+    expect(isWorkingActive(groups(state)[0]!.status)).toBe(false);
+  });
+
+  it("still gives each turn its own row across a multi-turn replay", () => {
+    const state = feed([
+      ev("turn.started", { turnId: "t1" }, "t1"),
+      ev("item/completed", { item: { id: "a1", type: "commandExecution", status: "completed" } }, "t1"),
+      ev("turn.finished", { turnId: "t1", status: "completed" }, "t1"),
+      ev("turn.started", { turnId: "t2" }, "t2"),
+      ev("item/completed", { item: { id: "m2", type: "agentMessage", text: "只有正文" } }, "t2"),
+      ev("turn.finished", { turnId: "t2", status: "completed" }, "t2"),
+      ev("turn.started", { turnId: "t3" }, "t3"),
+    ]);
+    const gs = groups(state);
+    expect(gs.map((g) => g.id)).toEqual(["working:t1", "working:t2", "working:t3"]);
+    expect(gs.map((g) => g.status)).toEqual(["done", "done", "running"]);
+    // Only the genuinely running turn animates.
+    expect(gs.map((g) => isWorkingActive(g.status))).toEqual([false, false, true]);
+    expect(gs[0]!.children.map((c) => c.id)).toEqual(["item:a1"]);
+    expect(gs[1]!.children).toHaveLength(0);
+    // A late tool for the settled first turn joins its own row, not the live one.
+    applyEvent(state, ev("item/completed", { item: { id: "late", type: "commandExecution", status: "completed" } }, "t1"));
+    expect(groups(state)[0]!.children.map((c) => c.id)).toEqual(["item:a1", "item:late"]);
+    expect(groups(state)[2]!.children).toHaveLength(0);
+  });
+
+  it("never surfaces raw reasoning in a row created before its first summary", () => {
+    const state = feed([
+      ev("turn.started", { turnId: "t1" }, "t1"),
+      ev("stream.delta", { itemId: "raw", kind: "item/reasoning/textDelta", delta: "RAW COT" }, "t1"),
+      ev("item/completed", { item: { id: "raw", type: "reasoning", summary: [], content: ["RAW COT"] } }, "t1"),
+    ]);
+    expect(groups(state)).toHaveLength(1);
+    expect(groups(state)[0]!.children).toHaveLength(0);
+    expect(reasonings(state)).toHaveLength(0);
+    expect(JSON.stringify(state.blocks)).not.toContain("RAW COT");
   });
 });

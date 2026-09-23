@@ -77,7 +77,7 @@ npm run build && npx playwright test --config playwright.local.config.ts
 | `npm test` | 未登录绕过、会话过期/轮换/吊销与已建立连接被关闭、Host/Origin/CSRF 校验、重定向安全、代理 HTTP 与 WebSocket（对假沙箱）、事件回放与 delta 顺序、重复提交与跨会话冲突、停止语义、未知结果不重放、shell 支撑的文件操作只报真实结果、自动标题（首轮一次性、手动优先、失败保留、替换守卫、旧会话补名、超时后迟到事件隔离）、会话生命周期（空标题复用、重命名/恢复默认标题冲突 409、无删除接口）、沙箱浏览器标签 URL 校验 |
 | `npm run smoke` | 真实 HTTPS 登录与 cookie 属性、模型列表、一次性票据（重放与开放重定向）、伴随站会话与跨源续期、经鉴权的 shell 调用、上传与列目录、跨源写入拒绝、原生界面可达、未登录时各表面一律 401、**真实 WebSocket 升级**（已登录 101 / 未登录 401） |
 | `npx playwright test` | 登录界面（错误密码与正确密码）、对话页输入区不含任何模型/思考控件、统一配置页默认选中 GPT-6-Sol（桌面侧栏与手机底导航入口）、打开工作区后立刻切标签的竞态、连续切换最终落在最后点击的标签、真实文件列表与 code-server 可达、无横向溢出 |
-| `npx playwright test --config playwright.local.config.ts` | 本地假后端（默认 `dist/web`，可用 `PA_TEST_WEB_ROOT` 指向 scratch 构建 + 全部 `/api` 由 `page.route` mock）：会话 `⋯` 菜单/重命名/归档/恢复且无删除、失败重命名保留输入、运行态与 `prefers-reduced-motion`、Markdown 链接只进沙箱浏览器（`mailto:`/相对链接保持不可导航）、归档行标题不可点、统一配置页保存/刷新持久化/跨会话生效/失败反馈/无模型列表时禁用保存/返回会话保留草稿、折叠 Working 分组默认收起/点击与键盘展开收起/增量不重置展开/终态停动画/审批露出（桌面 1440×900，手机 390/360 含 WebKit，暗亮无溢出） |
+| `npx playwright test --config playwright.local.config.ts` | 本地假后端（默认 `dist/web`，可用 `PA_TEST_WEB_ROOT` 指向 scratch 构建 + 全部 `/api` 由 `page.route` mock）：会话 `⋯` 菜单/重命名/归档/恢复且无删除、失败重命名保留输入、运行态与 `prefers-reduced-motion`、Markdown 链接只进沙箱浏览器（`mailto:`/相对链接保持不可导航）、归档行标题不可点、统一配置页保存/刷新持久化/跨会话生效/失败反馈/无模型列表时禁用保存/返回会话保留草稿、折叠 Working 分组默认收起/点击与键盘展开收起/增量不重置展开/终态停动画/审批露出/长历史展开自然高度与行可达（桌面 1440×900，手机 390/360 含 WebKit，短视口与暗亮无溢出） |
 | 人工/父端验收 | VNC 桌面帧流、浏览器 CDP 帧流、手机 390/360 实际交互与截图 |
 
 `npm run smoke` 会读取 `var/owner-secret.txt`（或用 `PA_OWNER_SECRET_FILE` 指定）。
@@ -120,12 +120,15 @@ npm run build && npx playwright test --config playwright.local.config.ts
   地址栏行为验收。
 
 - 每轮的工具调用与思考摘要默认折叠进该轮的“Working…”分组：一轮一个分组、按 turn 隔离，
-  分组落在该轮首次工具/摘要的位置，历史默认收起。分组头如实反映状态（运行中、排队等待、
+  该轮 `turn.started` 时就出现（不等首个工具），因此只有正文的轮次也有自己的一条。
+  分组落在该轮开始处，缺失生命周期的旧历史按首次活动处，历史默认收起。分组头如实反映状态（运行中、排队等待、
   已完成、执行出错、已停止、结果未知），只有真正在执行的一轮才有循环扫光；排队不冒充
-  运行，完成/失败/停止后动画停止。用户消息、助手正文、审批、补充输入与错误提示始终独立
+  运行，完成/失败/停止后动画停止。尚未产生工具或摘要的轮次展开后只给一句中性提示
+  （如“正在处理…”），不伪造摘要。用户消息、助手正文、审批、补充输入与错误提示始终独立
   显示，不藏进分组；某个工具失败时折叠状态下也能从组头看到“工具出错”。分组头可点击或
   键盘操作（`aria-expanded`），展开状态在增量事件到达时保持，原始 reasoning 内容永不展示，
-  只显示模型生成的摘要。`prefers-reduced-motion` 下关闭扫光动画。
+  只显示模型生成的摘要。展开时按内容自然撑开（卡片不参与父滚动容器的收缩），由外层滚动
+  承载长历史。`prefers-reduced-motion` 下关闭扫光动画。
 
 - JupyterLab 首次加载会出现 `Shared module @jupyter-widgets/base doesn't exist in shared scope`
   的第三方 widget 前端告警；内核执行本身正常（`/v1/jupyter/execute` 实测返回 stdout）。

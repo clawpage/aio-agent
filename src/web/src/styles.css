@@ -978,6 +978,14 @@ textarea:focus {
   border-radius: 10px;
   background: var(--bg-soft);
   overflow: hidden;
+  /*
+   * `.chat-scroll` is a column flex container, and `overflow: hidden` makes this
+   * card's automatic minimum size resolve to 0 — so by default it would be
+   * squeezed (and its expanded body clipped to a sliver) whenever the history is
+   * taller than the viewport. Take the card out of shrinking so it always renders
+   * its natural height and the scroll container scrolls instead.
+   */
+  flex-shrink: 0;
 }
 
 .working-head {
@@ -1061,6 +1069,12 @@ textarea:focus {
   gap: 6px;
   padding: 8px 10px 10px;
   border-top: 1px solid var(--border);
+}
+
+/* Shown when a turn is running but has no tool call or summary yet. */
+.working-empty {
+  color: var(--text-dim);
+  font-size: 12.5px;
 }
 
 .working.error {

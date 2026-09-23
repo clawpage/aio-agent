@@ -193,9 +193,16 @@ function reindex(state: TimelineState): TimelineState {
   return state;
 }
 
-/** Drop a working group that no longer holds any child, keeping the maps exact. */
+/**
+ * Drop a working group that no longer holds any child, keeping the maps exact.
+ * A group that is still in flight is kept even while empty: the turn is real from
+ * the moment it starts, so an activity row must not blink out and back in before
+ * its first tool or summary arrives. Only a settled group with nothing to show is
+ * dropped (for example a legacy blank summary with no turn lifecycle at all).
+ */
 function removeGroupIfEmpty(state: TimelineState, group: WorkingBlock): void {
   if (group.children.length > 0) return;
+  if (isWorkingActive(group.status)) return;
   const idx = state.blocks.indexOf(group);
   if (idx === -1) return;
   state.blocks.splice(idx, 1);
@@ -410,6 +417,11 @@ export function applyEvent(state: TimelineState, event: AgentEvent): void {
       const turnId = event.turnId || text(p.turnId) || String(event.id);
       state.currentTurnId = turnId;
       setTurnStatus(state, turnId, "running");
+      // The turn's activity row belongs to the turn itself, not to its first tool:
+      // create it now so a turn that is running (or that only ever produces
+      // assistant prose) still shows one honest Working row. `workingGroupFor` is
+      // idempotent, so replaying `turn.started` never duplicates the group.
+      workingGroupFor(state, turnId);
       return;
     }
     case "item/started": {

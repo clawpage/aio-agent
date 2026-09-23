@@ -571,6 +571,14 @@ function WorkingGroup({
   const toolCount = block.children.filter((c) => c.kind === "tool").length;
   const label = workingLabel(block.status);
   const active = isWorkingActive(block.status);
+  const emptyHint =
+    block.status === "running"
+      ? "正在处理…"
+      : block.status === "stopping"
+        ? "正在停止…"
+        : block.status === "queued"
+          ? "已排队等待"
+          : "本轮没有工具调用或摘要";
   const bodyId = `working-body-${block.turnId}`;
   return (
     <article className={`working ${block.status}${active ? " active" : ""}`}>
@@ -594,6 +602,9 @@ function WorkingGroup({
       </button>
       {open && (
         <div className="working-body" id={bodyId}>
+          {/* A turn that has started but has no tool or summary yet still gets an
+              honest, content-free line — never a fabricated summary. */}
+          {block.children.length === 0 && <div className="working-empty">{emptyHint}</div>}
           {block.children.map((child) => {
             const inProgress = childInProgress(block, child);
             return child.kind === "tool" ? (
