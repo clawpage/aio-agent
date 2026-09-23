@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { SandboxContainer } from "../../src/server/docker/sandbox.js";
 import { CODEX_CONFIG_TOML, WORKSPACE_AGENTS_MD } from "../../src/server/docker/seed.js";
 import { Logger } from "../../src/server/logger.js";
@@ -37,6 +37,7 @@ describe("sandbox workspace seed", () => {
   it("writes AGENTS.md and config.toml only when absent so customisations survive", async () => {
     const cfg = testConfig("/tmp/pa-seed-test", 1);
     const container = new SandboxContainer(cfg, new Logger("error", undefined, false));
+    const isolation = vi.spyOn(container, "enforceCodexIsolation").mockResolvedValue();
     const calls: Array<{ path: string; content: string; opts: unknown }> = [];
     container.writeFileInSandbox = (async (filePath: string, content: string, opts?: unknown) => {
       calls.push({ path: filePath, content, opts });
@@ -51,5 +52,13 @@ describe("sandbox workspace seed", () => {
     const toml = calls.find((c) => c.path.endsWith("/config.toml"));
     expect(toml?.opts).toMatchObject({ onlyIfAbsent: true });
     expect(toml?.content).toBe(CODEX_CONFIG_TOML);
+    expect(isolation).toHaveBeenCalledOnce();
+  });
+
+  it("fails startup when the managed isolation policy cannot be installed", async () => {
+    const container = new SandboxContainer(testConfig("/tmp/pa-policy-test", 1), new Logger("error", undefined, false));
+    vi.spyOn(container, "writeFileInSandbox").mockResolvedValue();
+    vi.spyOn(container, "execInSandbox").mockResolvedValue({ code: 1, stdout: "", stderr: "Existing unmanaged Codex requirements; merge policy explicitly" });
+    await expect(container.seedWorkspace()).rejects.toThrow("Cannot enforce sandbox Codex MCP isolation");
   });
 });

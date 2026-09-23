@@ -162,7 +162,26 @@ grep -E 'exited code|started pid' .logs/personal-agent.log
 
 备份 SQLite 时先 `docker`/服务停止或用 `sqlite3 .backup`，避免复制到半写状态的 WAL。
 
-## 9. 已知限制
+## 9. Codex MCP 隔离验收
+
+构建并启动后运行 `npm run smoke:isolation`：使用真实沙箱与既有账号，只查询配置及工具元数据，
+验证强行开启 Apps/插件、添加外部 MCP、把 AIO 地址指向其他服务均无法突破受管理策略。
+临时 app-server 与宿主机鉴权辅助进程会在验收结束后关闭，不创建模型轮次。
+
+容器每次接管时都会更新由本项目管理的 `/etc/codex/requirements.toml`。不覆盖未知管理者的
+策略文件；遇到该冲突应先审查合并，不要删除文件绕过。新容器同时写入禁用 Apps/插件的默认
+config，已有容器保留自定义 config、memory 和 AGENTS，通过独立系统策略生效。
+
+用固定版本的 Codex 运行 `features list`，应看到 `apps`、`plugins`、`remote_plugin` 为 false，
+memory 保持原值。`mcp list --json` 中唯一可启用的服务器为沙箱内 `aio_browser`；通过
+app-server 的 `mcpServerStatus/list` 与 `app/list` 只验元数据，应分别得到 AIO 工具和空 App
+清单。验收不需要读取或发送任何邮件。启动参数和 requirements 变化需重启本服务的 Codex
+进程才对已运行实例生效；先核对 running/queued 轮次，不能静默中断任务。
+
+以上为工具接入隔离，不是共享账号 token 的服务端权限裁剪；需要更强的独立信任边界时应
+另外使用没有个人 Connector 的账号/凭据与受控网络出口。
+
+## 10. 已知限制
 
 - 未实现自动滚动升级镜像；升级需人工按第 3 节执行。沙箱内 Codex CLI 是卷里的固定版本，
   升级方式见第 3 节，不需要重建镜像。

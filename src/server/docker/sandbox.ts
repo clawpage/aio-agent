@@ -2,7 +2,7 @@ import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { setTimeout as delay } from "node:timers/promises";
 import type { Config } from "../config.js";
 import type { Logger } from "../logger.js";
-import { CODEX_CONFIG_TOML, WORKSPACE_AGENTS_MD } from "./seed.js";
+import { CODEX_CONFIG_TOML, CODEX_ISOLATION_MARKER, CODEX_ISOLATION_OVERRIDES, CODEX_REQUIREMENTS_TOML, WORKSPACE_AGENTS_MD } from "./seed.js";
 
 export interface ContainerState {
   exists: boolean;
@@ -410,13 +410,39 @@ export class SandboxContainer {
   /**
    * Seed the persistent workspace with agent-facing instructions and register the
    * sandbox MCP server so the agent can drive the real browser, not only shells.
-   * Both files are only created when absent: an AGENTS.md the agent or the user
-   * already customised is never overwritten, and neither is config.toml.
+   * AGENTS.md and config.toml are created only when absent. The separate system
+   * MCP isolation policy is enforced on every startup, including old sandboxes.
    */
   async seedWorkspace(): Promise<void> {
     const s = this.#cfg.sandbox;
     await this.writeFileInSandbox(`${s.containerWorkspaceDir}/AGENTS.md`, WORKSPACE_AGENTS_MD, { onlyIfAbsent: true });
     await this.writeFileInSandbox(`${s.containerCodexHome}/config.toml`, CODEX_CONFIG_TOML, { onlyIfAbsent: true });
+    await this.enforceCodexIsolation();
+  }
+
+  /** A separate managed policy avoids rewriting the user's persistent config. */
+  async enforceCodexIsolation(): Promise<void> {
+    const script = `import os, pathlib, sys, tempfile
+directory = pathlib.Path('/etc/codex')
+target = directory / 'requirements.toml'
+if directory.is_symlink() or target.is_symlink():
+    raise SystemExit('Refusing symlink at Codex policy path')
+directory.mkdir(mode=0o755, parents=True, exist_ok=True)
+if target.exists() and not target.read_text().startswith(sys.argv[1] + '\\n'):
+    raise SystemExit('Existing unmanaged Codex requirements; merge policy explicitly')
+os.chown(directory, 0, 0)
+os.chmod(directory, 0o755)
+with tempfile.NamedTemporaryFile(mode='w', dir=directory, delete=False) as f:
+    temporary = f.name
+    f.write(sys.argv[2])
+try:
+    os.chmod(temporary, 0o644)
+    os.replace(temporary, target)
+finally:
+    if os.path.exists(temporary): os.unlink(temporary)
+`;
+    const result = await this.execInSandbox(["python3", "-c", script, CODEX_ISOLATION_MARKER, CODEX_REQUIREMENTS_TOML], { user: "root" });
+    if (result.code !== 0) throw new Error(`Cannot enforce sandbox Codex MCP isolation: ${result.stderr.trim() || result.stdout.trim()}`);
   }
 
   /** Spawn `docker exec -i` with a fixed prefix for the sandbox Codex process. */
@@ -437,6 +463,7 @@ export class SandboxContainer {
         "--listen",
         "stdio://",
         ...extraConfig,
+        ...CODEX_ISOLATION_OVERRIDES,
       ],
       { stdio: ["pipe", "pipe", "pipe"] },
     );

@@ -86,4 +86,31 @@ url = "http://127.0.0.1:8080/mcp"
 # 记忆由后台在会话闲置后生成，不会立即出现。
 [features]
 memories = true
+apps = false
+plugins = false
+remote_plugin = false
+
+[apps._default]
+enabled = false
 `;
+
+// System policy applies to both existing and newly created sandboxes, including
+// CLI sessions started from their terminal. Keep personal account connectors out
+// even when project/user config or a CLI override attempts to enable them.
+export const CODEX_ISOLATION_MARKER = "# Managed by personal-agent: sandbox MCP isolation";
+export const CODEX_REQUIREMENTS_TOML = `${CODEX_ISOLATION_MARKER}
+[features]
+apps = false
+plugins = false
+remote_plugin = false
+
+[mcp_servers.aio_browser.identity]
+url = "http://127.0.0.1:8080/mcp"
+`;
+
+export const CODEX_ISOLATION_OVERRIDES = [
+  "-c", "features.apps=false",
+  "-c", "features.plugins=false",
+  "-c", "features.remote_plugin=false",
+  "-c", "apps._default.enabled=false",
+];

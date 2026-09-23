@@ -130,6 +130,14 @@
 
 ## 沙箱隔离
 
+- 账号登录复用不代表 Connector 权限隔离：Codex 的 Apps 默认开启，因此沙箱显式关闭
+  `features.apps`、`features.plugins`、`features.remote_plugin`，并设置 `apps._default.enabled=false`。
+  控制面在每次接管容器时安装独立的 `/etc/codex/requirements.toml`（root 管理），固定这三个
+  feature 为 false；MCP 白名单只接受 `aio_browser` 的精确 URL `http://127.0.0.1:8080/mcp`。
+  app-server 启动参数再次关闭相同入口；现有用户 config、AGENTS 与 Mac 连接配置不覆盖。
+  遇到不属于 personal-agent 的 requirements 文件时拒绝覆盖并阻止运行时启动，需人工合并。
+  此规则隔离的是 Codex 工具接入；不声称共享账号访问 token 已变为模型专用权限，也不隔离
+  用户在沙箱浏览器中主动登录的网站。沙箱 root/自定义客户端仍属于原有可信执行边界。
 - 只挂载三个命名卷（工作区、CODEX_HOME、浏览器 profile）；不挂载宿主机 home、
   `/var/run/docker.sock` 或任何 workspace 路径。
 - 容器内以 `gem`(uid 1000) 运行；Node 控制面只以固定参数调用 Docker（固定的容器名、
