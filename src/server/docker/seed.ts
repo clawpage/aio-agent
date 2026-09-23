@@ -8,7 +8,7 @@
  * from inside the sandbox is unaffected.
  */
 
-export const WORKSPACE_AGENTS_MD = `# 沙箱工作区说明（由 personal-agent 自动生成，可自由修改）
+export const WORKSPACE_AGENTS_MD = `# 沙箱工作区说明（由 AIO Agent 自动生成，可自由修改）
 
 你运行在一个隔离的 AIO Sandbox 容器里。持久化工作区是 \`/home/gem/workspace\`（当前目录）。
 宿主机（Mac）的能力没有接入到这个沙箱：你没有宿主机文件、密钥或应用权限，也不需要它们。
@@ -78,7 +78,7 @@ export const WORKSPACE_AGENTS_MD = `# 沙箱工作区说明（由 personal-agent
 - 用中文回答，说明你实际执行的命令与结果。
 `;
 
-export const CODEX_CONFIG_TOML = `# 由 personal-agent 生成；如果你自行修改，系统不会覆盖此文件。
+export const CODEX_CONFIG_TOML = `# 由 AIO Agent 生成；如果你自行修改，系统不会覆盖此文件。
 [mcp_servers.aio_browser]
 url = "http://127.0.0.1:8080/mcp"
 
