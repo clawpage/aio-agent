@@ -419,13 +419,40 @@ export class AgentManager {
 
   // --------------------------------------------------------- conversations
 
+  /**
+   * List conversations for the sidebar.
+   *
+   * The single active blank default ("新会话" with zero turns) is pinned first
+   * so the “start a new chat” slot is always in a predictable place, regardless
+   * of when it was created. Archived blank defaults are never pinned.
+   *
+   * Every other row is ordered by the most recent actual message activity — the
+   * newest of each turn's user input (`created_at`) or completed agent reply
+   * (`completed_at`) — not by `conversations.updated_at`, which rename, archive,
+   * restore and status changes also touch. A conversation with no turns falls
+   * back to its creation time, and ties are broken by creation time and id so the
+   * order is stable. `turnCount` is still returned unchanged.
+   */
   listConversations(includeArchived = false): Array<ConversationRow & { turnCount: number }> {
     const rows = this.#db
       .prepare(
         `SELECT c.*, (SELECT COUNT(*) FROM turns t WHERE t.conversation_id = c.id) AS turnCount
-         FROM conversations c WHERE (? OR c.archived = 0) ORDER BY c.updated_at DESC`,
+         FROM conversations c
+         WHERE (? OR c.archived = 0)
+         ORDER BY
+           CASE
+             WHEN c.archived = 0 AND c.title = ?
+               AND NOT EXISTS (SELECT 1 FROM turns t WHERE t.conversation_id = c.id)
+             THEN 0 ELSE 1
+           END ASC,
+           COALESCE(
+             (SELECT MAX(COALESCE(t.completed_at, t.created_at)) FROM turns t WHERE t.conversation_id = c.id),
+             c.created_at
+           ) DESC,
+           c.created_at DESC,
+           c.id DESC`,
       )
-      .all(includeArchived ? 1 : 0) as unknown as Array<ConversationRow & { turnCount: number }>;
+      .all(includeArchived ? 1 : 0, DEFAULT_CONVERSATION_TITLE) as unknown as Array<ConversationRow & { turnCount: number }>;
     return rows;
   }
 

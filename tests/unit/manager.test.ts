@@ -930,3 +930,124 @@ describe("conversation lifecycle management", () => {
     db.close();
   });
 });
+
+describe("conversation list ordering", () => {
+  let turnSeq = 0;
+  function addTurn(db: Db, conversationId: string, opts: { createdAt: number; completedAt?: number | null; status?: string }): void {
+    turnSeq += 1;
+    db.prepare(
+      "INSERT INTO turns (id, conversation_id, client_message_id, status, input_text, created_at, completed_at) VALUES (?, ?, ?, ?, '', ?, ?)",
+    ).run(`turn_sort_${turnSeq}`, conversationId, `cm_sort_${turnSeq}`, opts.status ?? "completed", opts.createdAt, opts.completedAt ?? null);
+  }
+  const ids = (agent: AgentManager): string[] => agent.listConversations().map((c) => c.id);
+
+  it("pins an active blank default created before the other conversations", async () => {
+    const { agent, db } = makeManager();
+    await agent.init();
+    const blank = agent.createConversation();
+    const older = agent.createConversation({ title: "旧会话" });
+    addTurn(db, older.id, { createdAt: 1_000, completedAt: 2_000 });
+    const newer = agent.createConversation({ title: "新会话标题" });
+    addTurn(db, newer.id, { createdAt: 3_000, completedAt: 4_000 });
+
+    expect(ids(agent)[0]).toBe(blank.id);
+    agent.shutdown();
+    db.close();
+  });
+
+  it("pins an active blank default created after the other conversations", async () => {
+    const { agent, db } = makeManager();
+    await agent.init();
+    const older = agent.createConversation({ title: "旧会话" });
+    addTurn(db, older.id, { createdAt: 1_000, completedAt: 2_000 });
+    const newer = agent.createConversation({ title: "新会话标题" });
+    addTurn(db, newer.id, { createdAt: 3_000, completedAt: 4_000 });
+    const blank = agent.createConversation();
+
+    expect(ids(agent)[0]).toBe(blank.id);
+    agent.shutdown();
+    db.close();
+  });
+
+  it("orders by the latest turn, using the completed reply time", async () => {
+    const { agent, db } = makeManager();
+    await agent.init();
+    const a = agent.createConversation({ title: "A" });
+    addTurn(db, a.id, { createdAt: 1_000, completedAt: 5_000 });
+    const b = agent.createConversation({ title: "B" });
+    addTurn(db, b.id, { createdAt: 2_000, completedAt: 2_500 });
+
+    // A's user input is older, but its agent reply completed later than B's turn.
+    expect(ids(agent)).toEqual([a.id, b.id]);
+    agent.shutdown();
+    db.close();
+  });
+
+  it("uses a conversation's newest turn among several messages", async () => {
+    const { agent, db } = makeManager();
+    await agent.init();
+    const a = agent.createConversation({ title: "A" });
+    addTurn(db, a.id, { createdAt: 1_000, completedAt: 1_200 });
+    addTurn(db, a.id, { createdAt: 4_000, completedAt: 4_100 });
+    const b = agent.createConversation({ title: "B" });
+    addTurn(db, b.id, { createdAt: 3_000, completedAt: 3_000 });
+
+    expect(ids(agent)).toEqual([a.id, b.id]);
+    agent.shutdown();
+    db.close();
+  });
+
+  it("falls back to creation time for a conversation without turns", async () => {
+    const { agent, db } = makeManager();
+    await agent.init();
+    const older = agent.createConversation({ title: "旧" });
+    const newer = agent.createConversation({ title: "新" });
+
+    // `createConversation` stamps both with `Date.now()`; force distinct times.
+    db.prepare("UPDATE conversations SET created_at = 1, updated_at = 1 WHERE id = ?").run(older.id);
+    db.prepare("UPDATE conversations SET created_at = 2, updated_at = 2 WHERE id = ?").run(newer.id);
+
+    expect(ids(agent)).toEqual([newer.id, older.id]);
+    agent.shutdown();
+    db.close();
+  });
+
+  it("does not let rename, restore or status updates move an old conversation up", async () => {
+    const { agent, db } = makeManager();
+    await agent.init();
+    const old = agent.createConversation({ title: "旧" });
+    addTurn(db, old.id, { createdAt: 1_000, completedAt: 1_000 });
+    const recent = agent.createConversation({ title: "新" });
+    addTurn(db, recent.id, { createdAt: 2_000, completedAt: 2_000 });
+    expect(ids(agent)).toEqual([recent.id, old.id]);
+
+    // A rename and a status change both bump `updated_at`; neither is a message.
+    agent.renameConversation(old.id, "旧（改名）");
+    db.prepare("UPDATE conversations SET status = 'running', updated_at = ? WHERE id = ?").run(Date.now() + 100_000, old.id);
+    expect(ids(agent)).toEqual([recent.id, old.id]);
+
+    // Archiving then restoring the recent conversation must not demote it either.
+    agent.archiveConversation(recent.id, true);
+    agent.restoreConversation(recent.id);
+    expect(ids(agent)).toEqual([recent.id, old.id]);
+    agent.shutdown();
+    db.close();
+  });
+
+  it("does not force an archived blank default to the top of the archived list", async () => {
+    const { agent, db } = makeManager();
+    await agent.init();
+    const blank = agent.createConversation();
+    const used = agent.createConversation({ title: "有消息" });
+    addTurn(db, used.id, { createdAt: 5_000, completedAt: 5_000 });
+    // Make the blank clearly older, then archive both.
+    db.prepare("UPDATE conversations SET created_at = 100, updated_at = 100 WHERE id = ?").run(blank.id);
+    agent.archiveConversation(blank.id, true);
+    agent.archiveConversation(used.id, true);
+
+    const archived = agent.listConversations(true).filter((c) => c.archived === 1).map((c) => c.id);
+    expect(archived).toEqual([used.id, blank.id]);
+    agent.shutdown();
+    db.close();
+  });
+});

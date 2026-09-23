@@ -4,6 +4,8 @@ import type { AgentEvent, Attachment, Conversation, ModelInfo, StatusResponse } 
 import { applyEvent, emptyTimeline, removeBlock, type Block, type TimelineState } from "../timeline";
 import { itemOpensSandboxBrowser } from "../browserCommand";
 import { Markdown } from "./Markdown";
+import { FilePreview } from "./FilePreview";
+import { workspaceFileKind } from "../sandboxLink";
 
 interface Props {
   conversation: Conversation;
@@ -59,6 +61,7 @@ export function Chat({
   const [error, setError] = useState<string | null>(null);
   const [model, setModel] = useState<string>("");
   const [effort, setEffort] = useState<string>("");
+  const [previewPath, setPreviewPath] = useState<string | null>(null);
   const lastIdRef = useRef(0);
   const pendingRef = useRef<{ clientMessageId: string; signature: string; snapshot: { text: string; attachments: Attachment[] } } | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -255,6 +258,23 @@ export function Chat({
     }
   }, []);
 
+  const openSandboxFile = useCallback((path: string) => {
+    if (workspaceFileKind(path) === "image") {
+      setPreviewPath(path);
+      return;
+    }
+    // Non-image workspace files download straight through the authenticated API.
+    // The response carries an attachment disposition, so the browser saves it
+    // instead of navigating away from the console.
+    const anchor = document.createElement("a");
+    anchor.href = api.downloadUrl(path);
+    anchor.download = path.slice(path.lastIndexOf("/") + 1) || "download";
+    anchor.rel = "noopener";
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+  }, []);
+
   const onPickFiles = useCallback(async (files: FileList | null) => {
     if (!files || files.length === 0) return;
     const picked = Array.from(files).slice(0, 6);
@@ -337,6 +357,7 @@ export function Chat({
             onRespond={respond}
             onOpenWorkspace={onOpenWorkspace}
             onOpenBrowserLink={onOpenBrowserLink}
+            onOpenFile={openSandboxFile}
           />
         ))}
       </div>
@@ -446,6 +467,8 @@ export function Chat({
         </div>
         {willQueue && <div className="queue-hint">沙箱正在执行其他会话（最多 {capacity} 个并发），本条消息会排队等待。</div>}
       </div>
+
+      {previewPath && <FilePreview path={previewPath} onClose={() => setPreviewPath(null)} />}
     </section>
   );
 }
@@ -455,11 +478,13 @@ function BlockView({
   onRespond,
   onOpenWorkspace,
   onOpenBrowserLink,
+  onOpenFile,
 }: {
   block: Block;
   onRespond: (requestId: string, decision: string, extra?: unknown) => void;
   onOpenWorkspace: (path?: string) => void;
   onOpenBrowserLink: (url: string) => void;
+  onOpenFile: (path: string) => void;
 }) {
   if (block.kind === "user") {
     return (
@@ -484,7 +509,7 @@ function BlockView({
     return (
       <article className="msg assistant">
         <div className="bubble">
-          <Markdown source={block.text} onOpenLink={onOpenBrowserLink} />
+          <Markdown source={block.text} onOpenLink={onOpenBrowserLink} onOpenFile={onOpenFile} />
           {block.streaming && <span className="caret" aria-hidden />}
         </div>
       </article>

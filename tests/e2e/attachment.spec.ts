@@ -172,6 +172,7 @@ test.describe("attachment upload", () => {
       if (typeof body.path === "string") uploaded.push(body.path);
       expect(upload.status()).toBe(200);
       expect(typeof body.path, "upload response must include a sandbox path").toBe("string");
+      expect(body.path, "attachments land in the fixed uploads dir").toContain("/home/gem/workspace/uploads/");
 
       // A visible chip appears with the file name, and the send button is enabled.
       await expect(page.locator(".composer .chip", { hasText: "pa-e2e-synthetic.txt" })).toBeVisible({ timeout: 20_000 });
@@ -236,6 +237,7 @@ test.describe("attachment upload", () => {
       if (typeof body.path === "string") uploaded.push(body.path);
       expect(upload.status()).toBe(200);
       expect(typeof body.path, "upload response must include a sandbox path").toBe("string");
+      expect(body.path, "image attachments land in the fixed uploads dir").toContain("/home/gem/workspace/uploads/");
       expect(body.kind).toBe("image");
 
       const chip = page.locator(".composer .chip", { hasText: "pa-e2e-pixel.png" });

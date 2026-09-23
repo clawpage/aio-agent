@@ -53,6 +53,8 @@ export const WORKSPACE_AGENTS_MD = `# 沙箱工作区说明（由 personal-agent
   \`.scratch/\` 不保证备份；需要长期保留的脚本或结论要移入对应项目并提交。写入任何产物前先
   用 \`mkdir -p <目录>\` 建好目标目录，不要把 \`<topic>\` 之类的占位符原样当命令输入 shell。
 - 不把业务项目、下载目录、\`test-*\`、\`tmp-*\` 或交付文件夹直接放在 \`/home/gem/workspace\` 根目录。
+- \`/home/gem/workspace/uploads/\` 是系统收到的原始附件（用户在对话里上传的文件），不是项目交付物；
+  不要把它当项目目录，也不要删除或整理里面的用户文件。
 
 ## 动文件之前
 

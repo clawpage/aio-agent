@@ -73,13 +73,15 @@ const status = await call(primary, `${PRIMARY}/api/status`, { headers: { origin:
 check("status authenticated", status.status === 200 && status.json?.agent?.sessionReady === true, `account=${status.json?.agent?.account?.email}`);
 check("host auth ok", status.json?.hostAuth?.ok === true);
 
-// 3. Conversation + model list
+// 3. Conversation + model list (read-only: no probe conversation is created)
 const models = await call(primary, `${PRIMARY}/api/models`, { headers: { origin: PRIMARY } });
 check("models from live API", (models.json?.models ?? []).length > 0, (models.json?.models ?? []).map((m) => m.id).join(","));
-const created = await call(primary, `${PRIMARY}/api/conversations`, {
-  method: "POST", json: { title: "公网验收" }, headers: { origin: PRIMARY, "x-csrf-token": csrfCookie ?? "" },
-});
-check("create conversation", created.status === 201, `status=${created.status}`);
+const conversations = await call(primary, `${PRIMARY}/api/conversations`, { headers: { origin: PRIMARY } });
+check(
+  "conversation list readable",
+  conversations.status === 200 && Array.isArray(conversations.json?.conversations),
+  `status=${conversations.status} count=${conversations.json?.conversations?.length}`,
+);
 
 // 4. Workspace ticket -> companion cookie
 const ticket = await call(primary, `${PRIMARY}/api/workspace/ticket`, {
@@ -114,20 +116,27 @@ const renew = await call(companion, `${COMPANION}/api/workspace/refresh`, {
 });
 check("companion renewal from control-plane origin", renew.status === 200, `status=${renew.status}`);
 
-// 7. File upload + list through the control plane
+// 7. File upload + list through the control plane (default fixed uploads dir)
 const upload = await call(primary, `${PRIMARY}/api/sandbox/upload`, {
   method: "POST",
   json: {
     name: "public-proof.txt",
     contentBase64: Buffer.from("public upload ok").toString("base64"),
-    dir: "/home/gem/workspace",
   },
   headers: { origin: PRIMARY, "x-csrf-token": csrfCookie ?? "" },
 });
 check("upload file", upload.status === 200 && Boolean(upload.json?.path), upload.json?.path);
-const list = await call(primary, `${PRIMARY}/api/files/list?path=${encodeURIComponent("/home/gem/workspace")}`, { headers: { origin: PRIMARY } });
+check("upload lands in the fixed uploads dir", String(upload.json?.path ?? "").startsWith("/home/gem/workspace/uploads/"), upload.json?.path);
+const list = await call(primary, `${PRIMARY}/api/files/list?path=${encodeURIComponent("/home/gem/workspace/uploads")}`, { headers: { origin: PRIMARY } });
 const names = (list.json?.files ?? []).map((f) => f.name);
-check("uploaded file visible in listing", names.some((n) => n.includes("public-proof")), names.join(","));
+check("uploaded file visible in uploads listing", names.some((n) => n.includes("public-proof")), names.join(","));
+// Do not leave the probe attachment behind in the persistent workspace.
+const cleanupUpload = await call(primary, `${PRIMARY}/api/files/delete`, {
+  method: "POST",
+  json: { path: upload.json?.path },
+  headers: { origin: PRIMARY, "x-csrf-token": csrfCookie ?? "" },
+});
+check("probe attachment cleaned up", upload.status !== 200 || (cleanupUpload.status === 200 && cleanupUpload.json?.ok === true), `status=${cleanupUpload.status}`);
 
 // 8. Cross-origin write to the companion must be rejected with a real Origin header
 const forgedWrite = await call(companion, `${COMPANION}/v1/shell/exec`, {

@@ -1406,6 +1406,8 @@ textarea:focus {
   .conv-menu,
   .modal,
   .modal-backdrop,
+  .file-preview,
+  .file-preview-overlay,
   .chat.running .chat-title .dot,
   .chat.running .composer::before {
     animation: none !important;
@@ -1429,5 +1431,111 @@ textarea:focus {
   .chat.running .composer::before {
     opacity: 0.4;
     background: var(--accent);
+  }
+}
+
+/* ------------------------------------------------ workspace file preview */
+
+/* A workspace file link in an agent reply: opens a preview or starts a
+   download, never a web navigation. */
+.markdown a[data-sandbox-file] {
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-style: dotted;
+}
+
+.file-preview-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 110;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  animation: fade-in var(--dur-fast) ease;
+}
+
+.file-preview {
+  width: min(920px, 100%);
+  max-height: calc(100vh - 32px);
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.4);
+  animation: modal-in var(--dur) var(--ease);
+}
+
+.file-preview-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.file-preview-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+.file-preview-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px;
+  background: var(--bg);
+}
+
+.file-preview-body img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  border-radius: 8px;
+}
+
+.file-preview-foot {
+  display: flex;
+  justify-content: flex-end;
+  padding: 10px 12px;
+  border-top: 1px solid var(--border);
+}
+
+.file-preview-foot a.primary {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 9px;
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+  padding: 7px 14px;
+  text-decoration: none;
+}
+
+.file-preview-foot a.primary:hover {
+  filter: brightness(1.07);
+}
+
+@media (max-width: 480px) {
+  .file-preview-overlay {
+    padding: 8px;
+  }
+
+  .file-preview {
+    max-height: calc(100vh - 16px);
+  }
+
+  .file-preview-body {
+    padding: 8px;
   }
 }

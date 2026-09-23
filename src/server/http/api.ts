@@ -1,4 +1,5 @@
 import express, { type Request, type Response, type NextFunction, type Router } from "express";
+import { randomUUID } from "node:crypto";
 import type { AppContext } from "../context.js";
 import { InvalidConversationTitleError, normalizeConversationTitle, TurnConflictError } from "../codex/manager.js";
 import type { AgentEvent } from "../codex/manager.js";
@@ -807,15 +808,34 @@ export function createApiRouter(context: AppContext): Router {
         return;
       }
       const safeName = name.replace(/[^\w.\-()\u4e00-\u9fa5]+/g, "_").slice(-120) || "upload.bin";
-      const requestedDir =
-        typeof req.body?.dir === "string" && req.body.dir.trim() ? req.body.dir.trim() : cfg.sandbox.containerWorkspaceDir;
+      // Raw attachments land in a fixed workspace directory instead of the
+      // workspace root. An explicit `dir` is still honoured for generic callers.
+      const explicitDir = typeof req.body?.dir === "string" && req.body.dir.trim() ? req.body.dir.trim() : null;
+      const requestedDir = explicitDir ?? `${cfg.sandbox.containerWorkspaceDir}/uploads`;
       const dirCheck = requireAbsoluteSandboxPath(requestedDir);
       if (!dirCheck.ok) {
         res.status(400).json({ error: "bad_path", message: dirCheck.message });
         return;
       }
       const dir = dirCheck.path;
-      const target = `${dir === "/" ? "" : dir}/${Date.now()}-${safeName}`;
+      // Only the fixed default uploads directory is created automatically. An
+      // explicit `dir` keeps the previous contract: the caller's directory must
+      // already exist, and the API never creates an arbitrary sandbox path.
+      if (!explicitDir) {
+        const mkdir = await runSandboxCommand(`mkdir -p -- ${shellQuote(dir)}`);
+        if (!mkdir.ok) {
+          res.status(502).json({ error: "mkdir_failed", message: mkdir.message ?? "创建附件目录失败", detail: mkdir.output.slice(0, 500) });
+          return;
+        }
+        const dirStat = await statSandboxPath(dir);
+        if (!dirStat.exists || !dirStat.isDirectory) {
+          res.status(502).json({ error: "mkdir_unverified", message: "命令已执行，但沙箱中未确认附件目录存在" });
+          return;
+        }
+      }
+      // A short random segment prevents two same-millisecond uploads with the same
+      // name from overwriting each other.
+      const target = `${dir === "/" ? "" : dir}/${Date.now()}-${randomUUID().slice(0, 8)}-${safeName}`;
       const form = new FormData();
       form.append("file", new Blob([new Uint8Array(buffer)]), safeName);
       form.append("path", target);

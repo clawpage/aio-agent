@@ -346,6 +346,78 @@ describe("conversation management and sandbox browser tabs", () => {
     expect(res.status).toBe(404);
   });
 
+  it("orders the conversation list by latest message activity, not updated_at", async () => {
+    const { cookie } = await login(h);
+    const db = h.ctx.db;
+    const suffix = `${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+    const blank = `conv_sort_${suffix}_blank`;
+    const old = `conv_sort_${suffix}_old`;
+    const recent = `conv_sort_${suffix}_recent`;
+    const base = Date.now();
+    const ids = [blank, old, recent];
+    const insertConv = db.prepare(
+      "INSERT INTO conversations (id, owner_id, title, model, cwd, status, archived, created_at, updated_at) VALUES (?, 'owner_1', ?, NULL, '/home/gem/workspace', 'idle', 0, ?, ?)",
+    );
+    const insertTurn = db.prepare(
+      "INSERT INTO turns (id, conversation_id, client_message_id, status, input_text, created_at, completed_at) VALUES (?, ?, ?, 'completed', '', ?, ?)",
+    );
+    try {
+      // Every row shares the same `updated_at`, so the old `updated_at DESC`
+      // ordering could not have produced this result.
+      insertConv.run(blank, "新会话", base - 5000, base);
+      insertConv.run(old, "旧", base - 4000, base);
+      insertConv.run(recent, "新", base - 3000, base);
+      insertTurn.run(`turn_sort_${suffix}_old`, old, `cm_sort_${suffix}_old`, base - 4000, base - 4000);
+      insertTurn.run(`turn_sort_${suffix}_recent`, recent, `cm_sort_${suffix}_recent`, base - 3000, base - 3000);
+
+      const res = await h.request("/api/conversations", { headers: { cookie } });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { conversations: Array<{ id: string; turnCount: number }> };
+      const ordered = body.conversations.map((c) => c.id).filter((id) => ids.includes(id));
+      expect(ordered).toEqual([blank, recent, old]);
+      const blankRow = body.conversations.find((c) => c.id === blank);
+      expect(blankRow?.turnCount).toBe(0);
+    } finally {
+      for (const id of ids) {
+        db.prepare("DELETE FROM turns WHERE conversation_id = ?").run(id);
+        db.prepare("DELETE FROM conversations WHERE id = ?").run(id);
+      }
+    }
+  });
+
+  it("does not pin an archived blank default in the archived list", async () => {
+    const { cookie } = await login(h);
+    const db = h.ctx.db;
+    const suffix = `${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+    const archivedBlank = `conv_sort_${suffix}_ablank`;
+    const archivedUsed = `conv_sort_${suffix}_aused`;
+    const base = Date.now();
+    const ids = [archivedBlank, archivedUsed];
+    const insertConv = db.prepare(
+      "INSERT INTO conversations (id, owner_id, title, model, cwd, status, archived, created_at, updated_at) VALUES (?, 'owner_1', ?, NULL, '/home/gem/workspace', 'idle', 1, ?, ?)",
+    );
+    try {
+      insertConv.run(archivedBlank, "新会话", base - 5000, base);
+      insertConv.run(archivedUsed, "有消息", base - 4000, base);
+      db.prepare(
+        "INSERT INTO turns (id, conversation_id, client_message_id, status, input_text, created_at, completed_at) VALUES (?, ?, ?, 'completed', '', ?, ?)",
+      ).run(`turn_sort_${suffix}_aused`, archivedUsed, `cm_sort_${suffix}_aused`, base - 3000, base - 3000);
+
+      const res = await h.request("/api/conversations?archived=1", { headers: { cookie } });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { conversations: Array<{ id: string; archived: number }> };
+      const ordered = body.conversations
+        .filter((c) => c.archived === 1 && ids.includes(c.id))
+        .map((c) => c.id);
+      expect(ordered).toEqual([archivedUsed, archivedBlank]);
+    } finally {
+      for (const id of ids) {
+        db.prepare("DELETE FROM turns WHERE conversation_id = ?").run(id);
+        db.prepare("DELETE FROM conversations WHERE id = ?").run(id);
+      }
+    }
+  });
+
   it("opens an http/https link as a sandbox browser tab and rejects unsafe URLs", async () => {
     const { cookie, csrf } = await login(h);
     const headers = { cookie, "x-csrf-token": csrf, "content-type": "application/json" };
@@ -713,10 +785,12 @@ describe("sandbox upload and agent status", () => {
     expect(body.name).toBe("note.txt");
     expect(body.kind).toBe("file");
     expect(body.size).toBe(bytes.byteLength);
-    expect(body.path.startsWith("/home/gem/workspace/")).toBe(true);
+    expect(body.path.startsWith("/home/gem/workspace/uploads/")).toBe(true);
     expect(body.path.endsWith("-note.txt")).toBe(true);
     // The bytes really reached the sandbox upload endpoint.
     expect(h.sandbox.lastUploadBody()).toContain("synthetic-attachment-content");
+    // The default uploads directory is created and verified before uploading.
+    expect(h.sandbox.lastShellCommand()).toContain("mkdir -p -- '/home/gem/workspace/uploads'");
   });
 
   it("classifies an image attachment and rejects a missing payload", async () => {
@@ -736,6 +810,48 @@ describe("sandbox upload and agent status", () => {
       body: JSON.stringify({ name: "", contentBase64: "" }),
     });
     expect(empty.status).toBe(400);
+  });
+
+  it("honours an explicit upload dir and never overwrites a same-named upload", async () => {
+    const { cookie, csrf } = await login(h);
+    const headers = { cookie, "x-csrf-token": csrf, "content-type": "application/json" };
+    const body = { name: "note.txt", mime: "text/plain", contentBase64: Buffer.from("x").toString("base64"), dir: "/home/gem/workspace/projects/demo" };
+    const first = await h.request("/api/sandbox/upload", { method: "POST", headers, body: JSON.stringify(body) });
+    const second = await h.request("/api/sandbox/upload", { method: "POST", headers, body: JSON.stringify(body) });
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
+    const firstPath = ((await first.json()) as { path: string }).path;
+    const secondPath = ((await second.json()) as { path: string }).path;
+    expect(firstPath.startsWith("/home/gem/workspace/projects/demo/")).toBe(true);
+    expect(secondPath.startsWith("/home/gem/workspace/projects/demo/")).toBe(true);
+    expect(firstPath).not.toBe(secondPath);
+    // An explicit dir keeps the old contract: it is never auto-created, so the
+    // API cannot be used to mkdir an arbitrary sandbox path.
+    expect(h.sandbox.lastShellCommand()).not.toContain("/home/gem/workspace/projects/demo");
+  });
+
+  it("reports a failed attachment-directory creation instead of a fake success", async () => {
+    const { cookie, csrf } = await login(h);
+    const headers = { cookie, "x-csrf-token": csrf, "content-type": "application/json" };
+    const body = JSON.stringify({ name: "note.txt", contentBase64: Buffer.from("x").toString("base64") });
+    h.sandbox.script.shell = { success: false, message: "模拟 mkdir 失败" };
+    try {
+      const res = await h.request("/api/sandbox/upload", { method: "POST", headers, body });
+      expect(res.status).toBe(502);
+      expect(((await res.json()) as { error: string }).error).toBe("mkdir_failed");
+    } finally {
+      delete h.sandbox.script.shell;
+    }
+
+    // The command may succeed while the sandbox still does not report the dir.
+    h.sandbox.script.existingPaths = [];
+    try {
+      const res = await h.request("/api/sandbox/upload", { method: "POST", headers, body });
+      expect(res.status).toBe(502);
+      expect(((await res.json()) as { error: string }).error).toBe("mkdir_unverified");
+    } finally {
+      delete h.sandbox.script.existingPaths;
+    }
   });
 
   it("exposes activeTurns and capacity in the agent status", async () => {

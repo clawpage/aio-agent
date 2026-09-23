@@ -1,0 +1,73 @@
+import { describe, expect, it } from "vitest";
+import {
+  isSandboxLink,
+  isWorkspaceFilePath,
+  workspaceFileKind,
+  workspaceFilePathFromHref,
+  SANDBOX_WORKSPACE_ROOT,
+} from "../../src/web/src/sandboxLink.js";
+
+describe("sandbox link classification", () => {
+  it("accepts only absolute http/https URLs for the sandbox browser", () => {
+    for (const href of ["http://example.com", "https://example.com/a?b=1#c"]) {
+      expect(isSandboxLink(href), href).toBe(true);
+    }
+    for (const href of [
+      "",
+      "/home/gem/workspace/a.png",
+      "//example.com/x",
+      "mailto:owner@example.com",
+      "javascript:alert(1)",
+      "data:text/html,<b>x</b>",
+      "file:///etc/passwd",
+      "#frag",
+      "foo/bar",
+    ]) {
+      expect(isSandboxLink(href), href).toBe(false);
+    }
+  });
+
+  it("accepts decoded absolute workspace paths and rejects everything else", () => {
+    expect(workspaceFilePathFromHref(`${SANDBOX_WORKSPACE_ROOT}/garden-line-drawing.png`)).toBe(
+      `${SANDBOX_WORKSPACE_ROOT}/garden-line-drawing.png`,
+    );
+    // Marked percent-encodes non-ASCII; decoding restores the real path.
+    expect(workspaceFilePathFromHref(`${SANDBOX_WORKSPACE_ROOT}/%E4%B8%AD%E6%96%87.png`)).toBe(
+      `${SANDBOX_WORKSPACE_ROOT}/中文.png`,
+    );
+    expect(workspaceFilePathFromHref(SANDBOX_WORKSPACE_ROOT)).toBe(SANDBOX_WORKSPACE_ROOT);
+
+    for (const href of [
+      "",
+      "a.png",
+      "//evil.example.com/x",
+      "https://example.com/x.png",
+      "/etc/passwd",
+      "/home/gem/workspace-evil/x.png",
+      `${SANDBOX_WORKSPACE_ROOT}/../.ssh/id_rsa`,
+      `${SANDBOX_WORKSPACE_ROOT}/%2e%2e/.ssh/id_rsa`,
+      `${SANDBOX_WORKSPACE_ROOT}/a\\b.png`,
+      `${SANDBOX_WORKSPACE_ROOT}/bad\nname.png`,
+      "%E0%A4%A",
+    ]) {
+      expect(workspaceFilePathFromHref(href), href).toBeNull();
+    }
+  });
+
+  it("validates decoded paths directly and rejects traversal", () => {
+    expect(isWorkspaceFilePath(`${SANDBOX_WORKSPACE_ROOT}/a/b/c.png`)).toBe(true);
+    expect(isWorkspaceFilePath(`${SANDBOX_WORKSPACE_ROOT}/..`)).toBe(false);
+    expect(isWorkspaceFilePath("/home/gem/other/x")).toBe(false);
+    expect(isWorkspaceFilePath("relative/x")).toBe(false);
+    expect(isWorkspaceFilePath("")).toBe(false);
+  });
+
+  it("classifies raster images for preview and everything else for download", () => {
+    for (const ext of ["png", "PNG", "jpg", "jpeg", "webp", "gif", "avif"]) {
+      expect(workspaceFileKind(`${SANDBOX_WORKSPACE_ROOT}/x.${ext}`), ext).toBe("image");
+    }
+    for (const name of ["x.txt", "x.pdf", "x", "x.png.txt", "x.svg"]) {
+      expect(workspaceFileKind(`${SANDBOX_WORKSPACE_ROOT}/${name}`), name).toBe("file");
+    }
+  });
+});

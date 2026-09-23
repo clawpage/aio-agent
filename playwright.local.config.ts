@@ -24,6 +24,7 @@ export default defineConfig({
     "**/conversation-management.spec.ts",
     "**/chat-motion.spec.ts",
     "**/menu-qa.spec.ts",
+    "**/file-preview.spec.ts",
   ],
   outputDir: "var/.playwright-local",
   timeout: 60_000,
