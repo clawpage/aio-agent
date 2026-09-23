@@ -81,8 +81,15 @@
   单条原子守卫；手动改名与 `meta.title_manual:<id>` 写入在同一 SQLite 事务，成功后发
   `conversation.title_updated`。只重命名仍为默认名且从未手动改名的会话；失败保留原名，
   同一进程不重试、下次启动可重试；旧会话在 Codex 就绪后串行补名。
-- 一个 owner 在沙箱内**串行执行**：同一时刻只有一个 turn 在跑，其他会话的输入排队；
-  重复提交由 `clientMessageId` 幂等去重，同一 ID 携带不同内容会被 409 拒绝。
+- 一个 owner 在沙箱内**跨会话并发、同会话串行**：最多 `PA_MAX_CONCURRENT_TURNS`（默认 3，取值 clamp
+  到 1–3）个主
+  turn 在不同会话里同时执行，第四个会话的输入按创建时间 FIFO 排队，任一槽位释放即被唤醒。
+  同一会话始终只有一个 turn 在跑，其后续输入排队。活动 turn 以会话为键保存在
+  `#activeTurns`；通知、delta、审批、停止、完成等待都按 `threadId`/`turnId` 归属到正确的会话，
+  无身份可归属的事件（未知线程，或存在多个活动 turn 且无标识）被丢弃或直接拒绝，绝不记到随机会话。
+  重复提交由 `clientMessageId` 幂等去重，同一 ID 携带不同内容会被 409 拒绝。旧的
+  `agent_state.active_turn_id`/`active_conversation_id` 表示第一个活动 turn，重启核对仍扫描所有
+  `running` 轮次。
 - 所有事件（含流式 delta）先落 SQLite 再广播；浏览器断线**不会**中断智能体，重连按事件 id
   分页补齐历史（`?since=`）。delta 在 250 ms 窗口内合并，但任何非 delta 事件落库前会先冲刷
   缓冲区，保证客户端不会先看到完整文本、再收到旧 delta 而重复。
@@ -93,6 +100,10 @@
   分别按 `unknown` / `interrupted` 处理。
 - 审批与输入请求（命令/文件/权限/`requestUserInput`/MCP elicitation）成为 UI 上可操作的卡片，
   按各自 schema 回填响应，15 分钟无响应自动拒绝，Codex 断开时立即失效而不是干等超时。
+- 思考展示只使用模型生成的**摘要**：主 turn 显式请求 `summary: PA_REASONING_SUMMARY`（默认 `concise`），
+  UI 只解析 `item/reasoning/summaryTextDelta` 事件和 `reasoning` item 的 `summary` 数组，
+  不展示原始思维链（`content` 数组与 `item/reasoning/textDelta` 被丢弃），没有摘要时不产生空的
+  “摘要”可展开行。
 
 ## 统一登录与 token 边界
 

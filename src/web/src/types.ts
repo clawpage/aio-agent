@@ -59,6 +59,8 @@ export interface StatusResponse {
     account: { email: string | null; planType: string | null; type: string } | null;
     activeTurnId: string | null;
     activeConversationId: string | null;
+    activeTurns?: Array<{ conversationId: string; turnId: string; codexTurnId: string | null; threadId: string | null }>;
+    capacity?: number;
     queuedTurns: number;
     lastError: string | null;
   };

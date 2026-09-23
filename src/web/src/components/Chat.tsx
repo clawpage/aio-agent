@@ -41,6 +41,7 @@ export function Chat({ conversation, models, status, onConversationChanged, onSt
   const [draft, setDraft] = useState("");
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [busy, setBusy] = useState(false);
+  const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [model, setModel] = useState<string>("");
   const [effort, setEffort] = useState<string>("");
@@ -48,7 +49,6 @@ export function Chat({ conversation, models, status, onConversationChanged, onSt
   const pendingRef = useRef<{ clientMessageId: string; signature: string; snapshot: { text: string; attachments: Attachment[] } } | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const stickRef = useRef(true);
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const stateRef = useRef<TimelineState>(timeline);
   stateRef.current = timeline;
   // Stream handlers must not re-run the effect (the SSE connection would drop).
@@ -135,9 +135,16 @@ export function Chat({ conversation, models, status, onConversationChanged, onSt
     node.scrollTop = node.scrollHeight;
   }, [timeline]);
 
-  const running = Boolean(status?.agent.activeTurnId) || conversation.status === "running";
-  const activeTurnId = status?.agent.activeTurnId ?? null;
-  const activeHere = status?.agent.activeConversationId === conversation.id || !activeTurnId;
+  const activeTurns = status?.agent.activeTurns ?? [];
+  const capacity = status?.agent.capacity ?? 1;
+  const activeHere = activeTurns.length
+    ? activeTurns.some((t) => t.conversationId === conversation.id)
+    : status?.agent.activeConversationId === conversation.id;
+  const running = activeHere || conversation.status === "running";
+  const atCapacity = activeTurns.length >= capacity;
+  // This conversation has nothing running, but sending now would wait: the
+  // sandbox is at capacity, or a stale "running" flag has not cleared yet.
+  const willQueue = !activeHere && (atCapacity || conversation.status === "running");
 
   const currentModel = models.find((m) => m.id === model) ?? models.find((m) => m.isDefault) ?? models[0];
   const efforts = currentModel?.reasoningEfforts ?? [];
@@ -214,20 +221,29 @@ export function Chat({ conversation, models, status, onConversationChanged, onSt
   }, []);
 
   const onPickFiles = useCallback(async (files: FileList | null) => {
-    if (!files) return;
-    setBusy(true);
-    try {
-      const uploaded: Attachment[] = [];
-      for (const file of Array.from(files).slice(0, 6)) {
+    if (!files || files.length === 0) return;
+    const picked = Array.from(files).slice(0, 6);
+    setUploading(true);
+    setError(null);
+    // Upload one by one and keep every success even if a later file fails, so a
+    // partial failure never discards attachments that already made it.
+    const uploaded: Attachment[] = [];
+    const failures: string[] = [];
+    for (const file of picked) {
+      try {
         uploaded.push(await api.upload(file));
-        pendingRef.current = null;
+      } catch (err) {
+        failures.push(`${file.name}：${err instanceof Error ? err.message : String(err)}`);
       }
-      setAttachments((prev) => [...prev, ...uploaded]);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setBusy(false);
     }
+    if (uploaded.length) {
+      setAttachments((prev) => [...prev, ...uploaded]);
+      pendingRef.current = null;
+    }
+    if (failures.length) {
+      setError(`部分附件上传失败：${failures.join("；")}${uploaded.length ? "（已上传的附件已保留）" : ""}`);
+    }
+    setUploading(false);
   }, []);
 
   const blocks = timeline.blocks;
@@ -317,19 +333,26 @@ export function Chat({ conversation, models, status, onConversationChanged, onSt
           rows={3}
         />
         <div className="composer-row">
-          <input
-            ref={fileInputRef}
-            type="file"
-            multiple
-            hidden
-            onChange={(e) => {
-              void onPickFiles(e.target.files);
-              e.target.value = "";
-            }}
-          />
-          <button type="button" className="ghost" onClick={() => fileInputRef.current?.click()} disabled={busy}>
-            附件
-          </button>
+          {/* A real <label> wrapping a visually-hidden input: clicking the label
+              opens the native picker in every browser, including ones that
+              refuse a programmatic click on a display:none input. The control is
+              disabled while an upload or a send is in flight so picking a file
+              can never race the composer being cleared on send. */}
+          <label className={`file-button ${uploading || busy ? "disabled" : ""}`} aria-disabled={uploading || busy}>
+            {uploading ? "上传中…" : "附件"}
+            <input
+              type="file"
+              multiple
+              className="file-input"
+              aria-label="添加附件"
+              data-testid="attachment-input"
+              disabled={uploading || busy}
+              onChange={(e) => {
+                void onPickFiles(e.target.files);
+                e.target.value = "";
+              }}
+            />
+          </label>
           {models.length > 0 && (
             <label className="field">
               <span>模型</span>
@@ -368,12 +391,17 @@ export function Chat({ conversation, models, status, onConversationChanged, onSt
               停止
             </button>
           ) : (
-            <button type="button" className="primary" onClick={() => void send()} disabled={busy || (!draft.trim() && attachments.length === 0)}>
-              {running ? "排队发送" : "发送"}
+            <button
+              type="button"
+              className="primary"
+              onClick={() => void send()}
+              disabled={busy || uploading || (!draft.trim() && attachments.length === 0)}
+            >
+              {willQueue ? "排队发送" : "发送"}
             </button>
           )}
         </div>
-        {running && !activeHere && <div className="queue-hint">沙箱正在执行另一个会话，本条消息会排队等待。</div>}
+        {willQueue && <div className="queue-hint">沙箱正在执行其他会话（最多 {capacity} 个并发），本条消息会排队等待。</div>}
       </div>
     </section>
   );
@@ -421,7 +449,7 @@ function BlockView({
   if (block.kind === "reasoning") {
     return (
       <details className="reasoning">
-        <summary>思考过程{block.streaming ? "（进行中）" : ""}</summary>
+        <summary>摘要{block.streaming ? "（进行中）" : ""}</summary>
         <pre>{block.text}</pre>
       </details>
     );

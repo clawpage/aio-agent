@@ -421,6 +421,7 @@ export class SandboxCodexSession {
     effort?: string | null;
     cwd?: string | null;
     clientUserMessageId?: string | null;
+    summary?: "none" | "auto" | "concise" | "detailed" | null;
   }): Promise<string> {
     await this.start();
     const files = (params.attachments ?? []).filter((a) => a.kind === "file");
@@ -440,6 +441,8 @@ export class SandboxCodexSession {
         ...(params.effort ? { effort: params.effort } : {}),
         ...(params.cwd ? { cwd: params.cwd } : {}),
         ...(params.clientUserMessageId ? { clientUserMessageId: params.clientUserMessageId } : {}),
+        // Only opt into summaries when asked; never send raw chain-of-thought.
+        ...(params.summary && params.summary !== "none" ? { summary: params.summary } : {}),
       },
       60_000,
     )) as { turn: { id: string } };

@@ -16,6 +16,11 @@ function envInt(name: string, fallback: number): number {
   return Number.isFinite(n) ? n : fallback;
 }
 
+function envEnum<T extends string>(name: string, allowed: readonly T[], fallback: T): T {
+  const v = process.env[name];
+  return v && (allowed as readonly string[]).includes(v) ? (v as T) : fallback;
+}
+
 export const PROJECT_ROOT = path.resolve(import.meta.dirname, "..", "..");
 
 /** Parse an `a,b,c` list, trimming and dropping empties. */
@@ -82,6 +87,10 @@ export function loadConfig(): {
     titleMaxChars: number;
     /** Hard timeout for one auxiliary title run. */
     titleTimeoutMs: number;
+    /** Upper bound on concurrent main Codex turns across conversations. */
+    maxConcurrentTurns: number;
+    /** Reasoning summary mode requested for main turns (`none` disables summaries). */
+    reasoningSummary: "none" | "auto" | "concise" | "detailed";
   };
   hostCodex: {
     bin: string;
@@ -184,6 +193,15 @@ export function loadConfig(): {
       titleEffort: envStr("PA_TITLE_EFFORT", "low"),
       titleMaxChars: envInt("PA_TITLE_MAX_CHARS", 24),
       titleTimeoutMs: envInt("PA_TITLE_TIMEOUT_SECONDS", 30) * 1000,
+      // At most three main turns run at once across different conversations; a
+      // fourth conversation waits in FIFO order for a slot to free. One
+      // conversation still runs at most one turn at a time. The env value is
+      // clamped to 1..3 so operators cannot exceed the reviewed concurrency cap.
+      maxConcurrentTurns: Math.min(3, Math.max(1, envInt("PA_MAX_CONCURRENT_TURNS", 3))),
+      // Ask Codex for a model-generated reasoning *summary* rather than raw
+      // chain-of-thought; `concise` keeps the UI rows short and non-empty only
+      // when there is real summary text.
+      reasoningSummary: envEnum("PA_REASONING_SUMMARY", ["none", "auto", "concise", "detailed"], "concise"),
     },
     hostCodex: {
       bin: envStr("PA_HOST_CODEX_BIN", "codex"),

@@ -94,4 +94,58 @@ describe("timeline reducer", () => {
     applyEvent(state, ev("mcpServer/startupStatus/updated", { name: "aio_browser" }));
     expect(state.blocks.length).toBe(0);
   });
+
+  it("never renders an empty reasoning row for a started item with no summary", () => {
+    const state = feed([
+      ev("item/started", { item: { id: "r-empty", type: "reasoning", summary: [], content: [] } }),
+      ev("item/completed", { item: { id: "r-empty", type: "reasoning", summary: [], content: [] } }),
+    ]);
+    expect(state.blocks.filter((b) => b.kind === "reasoning")).toHaveLength(0);
+  });
+
+  it("renders a completed reasoning item from its summary array only", () => {
+    const state = feed([
+      ev("item/started", { item: { id: "r1", type: "reasoning", summary: [], content: [] } }),
+      ev("item/completed", { item: { id: "r1", type: "reasoning", summary: ["先确认目标", "再执行"], content: ["RAW COT"] } }),
+    ]);
+    const reasoning = state.blocks.filter((b) => b.kind === "reasoning") as Array<{ text: string; streaming: boolean }>;
+    expect(reasoning).toHaveLength(1);
+    expect(reasoning[0]!.text).toBe("先确认目标\n\n再执行");
+    expect(reasoning[0]!.streaming).toBe(false);
+    // Raw chain-of-thought must never leak into the row.
+    expect(reasoning[0]!.text).not.toContain("RAW COT");
+  });
+
+  it("keeps summary deltas in order before the completed item", () => {
+    const state = feed([
+      ev("item/started", { item: { id: "r2", type: "reasoning", summary: [], content: [] } }),
+      ev("stream.delta", { itemId: "r2", kind: "item/reasoning/summaryTextDelta", delta: "第一段" }),
+      ev("stream.delta", { itemId: "r2", kind: "item/reasoning/summaryTextDelta", delta: "第二段" }),
+      ev("item/completed", { item: { id: "r2", type: "reasoning", summary: ["第一段第二段"] } }),
+    ]);
+    const reasoning = state.blocks.filter((b) => b.kind === "reasoning") as Array<{ text: string; streaming: boolean }>;
+    expect(reasoning).toHaveLength(1);
+    expect(reasoning[0]!.text).toBe("第一段第二段");
+    expect(reasoning[0]!.streaming).toBe(false);
+  });
+
+  it("drops raw chain-of-thought deltas without creating a reasoning row", () => {
+    const state = feed([
+      ev("stream.delta", { itemId: "raw1", kind: "item/reasoning/textDelta", delta: "RAW" }),
+      ev("stream.delta", { itemId: "raw1", kind: "item/reasoning/contentDelta", delta: "COT" }),
+    ]);
+    expect(state.blocks).toHaveLength(0);
+    expect(state.index.has("item:raw1")).toBe(false);
+  });
+
+  it("still renders a reasoning row for a real summary delta", () => {
+    const state = feed([
+      ev("item/started", { item: { id: "r3", type: "reasoning", summary: [], content: [] } }),
+      ev("stream.delta", { itemId: "r3", kind: "item/reasoning/summaryPartAdded", delta: "先确认目标" }),
+    ]);
+    const reasoning = state.blocks.filter((b) => b.kind === "reasoning") as Array<{ text: string; streaming: boolean }>;
+    expect(reasoning).toHaveLength(1);
+    expect(reasoning[0]!.text).toBe("先确认目标");
+    expect(reasoning[0]!.streaming).toBe(true);
+  });
 });

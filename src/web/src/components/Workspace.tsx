@@ -306,7 +306,6 @@ function FilesTab({ notify }: { notify: (message: string, level?: "info" | "erro
   const [loading, setLoading] = useState(false);
   const [editing, setEditing] = useState<{ path: string; content: string } | null>(null);
   const [newName, setNewName] = useState("");
-  const uploadRef = useRef<HTMLInputElement | null>(null);
 
   const load = useCallback(
     async (target: string) => {
@@ -379,28 +378,31 @@ function FilesTab({ notify }: { notify: (message: string, level?: "info" | "erro
         >
           新建目录
         </button>
-        <input
-          ref={uploadRef}
-          type="file"
-          hidden
-          onChange={(e) => {
-            const file = e.target.files?.[0];
-            e.target.value = "";
-            if (!file) return;
-            void (async () => {
-              try {
-                const uploaded = await api.upload(file, path);
-                notify(`已上传到 ${path} → ${uploaded.path}`);
-                await load(path);
-              } catch (err) {
-                notify(err instanceof Error ? err.message : String(err), "error");
-              }
-            })();
-          }}
-        />
-        <button type="button" className="ghost" onClick={() => uploadRef.current?.click()}>
+        {/* Same robust pattern as the chat composer: a real label opens the
+            native picker instead of a programmatic click on a hidden input. */}
+        <label className="file-button">
           上传
-        </button>
+          <input
+            type="file"
+            className="file-input"
+            aria-label="上传文件"
+            data-testid="workspace-upload-input"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              e.target.value = "";
+              if (!file) return;
+              void (async () => {
+                try {
+                  const uploaded = await api.upload(file, path);
+                  notify(`已上传到 ${path} → ${uploaded.path}`);
+                  await load(path);
+                } catch (err) {
+                  notify(err instanceof Error ? err.message : String(err), "error");
+                }
+              })();
+            }}
+          />
+        </label>
       </div>
 
       <ul className="file-list">

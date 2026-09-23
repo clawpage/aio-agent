@@ -47,6 +47,7 @@ export interface FakeSandbox {
   requests: Array<{ method: string; url: string; headers: http.IncomingHttpHeaders }>;
   script: SandboxScript;
   lastShellCommand: () => string;
+  lastUploadBody: () => string;
   close: () => Promise<void>;
 }
 
@@ -55,6 +56,12 @@ export async function startFakeSandbox(): Promise<FakeSandbox> {
   const requests: FakeSandbox["requests"] = [];
   const sandboxScript: SandboxScript = {};
   let lastShellCommand = "";
+  let lastUploadBody = "";
+  // In the default "everything exists" mode, model the real filesystem effect of
+  // `rm -rf` so higher-level delete flows can verify removal. Tests that pin
+  // `existingPaths` keep that list authoritative (used to assert unverified
+  // deletion), so tracking only applies when it is unset.
+  const removedPaths = new Set<string>();
   const server = http.createServer((req, res) => {
     requests.push({ method: req.method ?? "GET", url: req.url ?? "/", headers: req.headers });
     if (req.url === "/health") {
@@ -77,6 +84,15 @@ export async function startFakeSandbox(): Promise<FakeSandbox> {
       req.on("data", (c) => (body += c));
       req.on("end", () => {
         lastShellCommand = body;
+        if (!sandboxScript.existingPaths) {
+          try {
+            const command = (JSON.parse(body || "{}") as { command?: string }).command ?? "";
+            const removed = /^rm -rf -- '(.*)'$/s.exec(command);
+            if (removed) removedPaths.add(removed[1].replace(/'\\''/g, "'"));
+          } catch {
+            /* body was not JSON; nothing to model */
+          }
+        }
         const scripted = sandboxScript.shell ?? { success: true, data: { status: "completed", exit_code: 0, output: "" } };
         res.writeHead(200, { "content-type": "application/json" });
         res.end(JSON.stringify(typeof scripted === "function" ? scripted(body) : scripted));
@@ -90,12 +106,24 @@ export async function startFakeSandbox(): Promise<FakeSandbox> {
       );
       return;
     }
+    if (req.url === "/v1/file/upload") {
+      let body = "";
+      req.on("data", (c) => (body += c));
+      req.on("end", () => {
+        lastUploadBody = body;
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({ success: true, data: { path: "uploaded" } }));
+      });
+      return;
+    }
     if (req.url === "/v1/file/list") {
       let body = "";
       req.on("data", (c) => (body += c));
       req.on("end", () => {
         const target = (JSON.parse(body || "{}") as { path?: string }).path ?? "";
-        const exists = sandboxScript.existingPaths ? sandboxScript.existingPaths.includes(target) : true;
+        const exists = sandboxScript.existingPaths
+          ? sandboxScript.existingPaths.includes(target)
+          : !removedPaths.has(target);
         res.writeHead(200, { "content-type": "application/json" });
         res.end(
           exists
@@ -160,6 +188,7 @@ export async function startFakeSandbox(): Promise<FakeSandbox> {
     requests,
     script: sandboxScript,
     lastShellCommand: () => lastShellCommand,
+    lastUploadBody: () => lastUploadBody,
     close: async () => {
       for (const socket of upgraded) socket.destroy();
       upgraded.clear();
@@ -185,6 +214,8 @@ export class FakeCodex implements CodexSessionLike {
   lastError: string | null = null;
   startedThreads: Array<{ threadId: string; cwd?: string; model?: string }> = [];
   startedTurns: Array<{ threadId: string; turnId: string; text: string; model?: string | null; attachments?: Array<{ path: string; kind: string }> }> = [];
+  /** Summary mode passed on the most recent main turn. */
+  lastStartTurnSummary: string | null | undefined = undefined;
   interrupted: Array<{ threadId: string; turnId: string }> = [];
   answers: Array<{ id: string; result: unknown }> = [];
   resumedThreads: string[] = [];
@@ -198,9 +229,13 @@ export class FakeCodex implements CodexSessionLike {
   failStart = false;
   /** Scripted automatic-title behavior. */
   titleResult: string | null = "自动标题";
+  /** When set, the title is derived from the input (to distinguish conversations). */
+  titleResultFor: ((userText: string) => string | null) | null = null;
   titleCalls: string[] = [];
   failTitle = false;
   titleDelayMs = 0;
+  /** When set, `startTurn` waits for it to resolve before returning a turn id. */
+  startTurnGate: Promise<void> | null = null;
 
   onNotification(handler: (method: string, params: unknown) => void): void {
     this.#notificationHandler = handler;
@@ -265,9 +300,12 @@ export class FakeCodex implements CodexSessionLike {
     attachments?: Array<{ path: string; kind: "image" | "file"; name?: string }>;
     model?: string | null;
     clientUserMessageId?: string | null;
+    summary?: "none" | "auto" | "concise" | "detailed" | null;
   }): Promise<string> {
     const turnId = `turn_${++this.#turnSeq}`;
+    this.lastStartTurnSummary = params.summary;
     this.startedTurns.push({ threadId: params.threadId, turnId, text: params.text, model: params.model, attachments: params.attachments });
+    if (this.startTurnGate) await this.startTurnGate;
     if (this.#manualTurns.has(params.threadId)) return turnId;
     return turnId;
   }
@@ -317,6 +355,7 @@ export class FakeCodex implements CodexSessionLike {
     this.titleCalls.push(userText);
     if (this.titleDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, this.titleDelayMs));
     if (this.failTitle) throw new Error("title generation failed");
+    if (this.titleResultFor) return this.titleResultFor(userText);
     return this.titleResult;
   }
 

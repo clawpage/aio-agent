@@ -37,6 +37,33 @@ function text(value: unknown): string {
   return typeof value === "string" ? value : "";
 }
 
+/**
+ * Codex reasoning items carry `summary` (model-generated) and `content` (raw
+ * chain-of-thought) as string arrays. Only the summary is ever surfaced; a raw
+ * `content` array is never rendered or fabricated.
+ */
+function reasoningSummaryText(item: Record<string, unknown>): string {
+  const summary = item.summary;
+  if (Array.isArray(summary)) {
+    return summary
+      .filter((part): part is string => typeof part === "string")
+      .join("\n\n")
+      .trim();
+  }
+  return text(summary).trim();
+}
+
+/**
+ * The only reasoning-family delta kinds that may surface as a reasoning row.
+ * These are model-generated summaries. Any other reasoning delta (notably raw
+ * `item/reasoning/textDelta` chain-of-thought) is dropped before it can create
+ * or extend a block.
+ */
+const REASONING_SUMMARY_DELTA_KINDS = new Set([
+  "item/reasoning/summaryTextDelta",
+  "item/reasoning/summaryPartAdded",
+]);
+
 const TOOL_TITLES: Record<string, string> = {
   commandExecution: "执行命令",
   fileChange: "修改文件",
@@ -113,7 +140,9 @@ export function applyEvent(state: TimelineState, event: AgentEvent): void {
         return;
       }
       if (type === "reasoning") {
-        if (!state.index.has(id)) push(state, { kind: "reasoning", id, text: "", streaming: true });
+        // Reasoning rows are created lazily by a real summary delta (or the
+        // completed item). Creating one here would leave an empty expandable
+        // row for every reasoning item that has no summary.
         return;
       }
       if (type === "userMessage") return;
@@ -144,10 +173,20 @@ export function applyEvent(state: TimelineState, event: AgentEvent): void {
         return;
       }
       if (type === "reasoning") {
+        const summaryText = reasoningSummaryText(item);
         if (existing !== undefined) {
           const block = state.blocks[existing] as Extract<Block, { kind: "reasoning" }>;
-          block.text = text(item.summary) || text(item.text) || block.text;
+          if (summaryText) block.text = summaryText;
           block.streaming = false;
+          // A reasoning item with neither summary text nor buffered deltas must
+          // not remain as an empty expandable row on replay.
+          if (!block.text.trim()) {
+            state.blocks.splice(existing, 1);
+            state.index.delete(id);
+            state.blocks.forEach((b, i) => state.index.set(b.id, i));
+          }
+        } else if (summaryText) {
+          push(state, { kind: "reasoning", id, text: summaryText, streaming: false });
         }
         return;
       }
@@ -178,13 +217,18 @@ export function applyEvent(state: TimelineState, event: AgentEvent): void {
       const kind = text(p.kind);
       const delta = text(p.delta);
       if (!delta) return;
-      const isReasoning = kind.includes("reasoning");
+      // Only model-generated reasoning summaries are surfaced. Drop every other
+      // reasoning-family delta (especially raw `item/reasoning/textDelta`
+      // chain-of-thought) before it can create or extend a block. The server
+      // already filters these; this guards replayed or malformed events.
+      const isReasoningSummary = REASONING_SUMMARY_DELTA_KINDS.has(kind);
+      if (kind.includes("reasoning") && !isReasoningSummary) return;
       const id = `item:${itemId}`;
       let idx = state.index.get(id);
       if (idx === undefined) {
         idx = push(
           state,
-          isReasoning
+          isReasoningSummary
             ? { kind: "reasoning", id, text: delta, streaming: true }
             : { kind: "assistant", id, text: delta, streaming: true },
         );

@@ -30,6 +30,8 @@ export interface CodexSessionLike {
     effort?: string | null;
     cwd?: string | null;
     clientUserMessageId?: string | null;
+    /** Reasoning summary mode; `none` opts out entirely. */
+    summary?: "none" | "auto" | "concise" | "detailed" | null;
   }): Promise<string>;
   interrupt(threadId: string, turnId: string): Promise<void>;
   /** One throwaway, tool-free run used only for automatic conversation titles. */
@@ -95,9 +97,10 @@ export interface PendingRequestRow {
 
 const DELTA_METHODS = new Set([
   "item/agentMessage/delta",
+  // Model-generated reasoning summaries only. Raw chain-of-thought
+  // (`item/reasoning/textDelta`) is deliberately not surfaced.
   "item/reasoning/summaryTextDelta",
   "item/reasoning/summaryPartAdded",
-  "item/reasoning/textDelta",
   "item/commandExecution/outputDelta",
   "item/fileChange/outputDelta",
   "command/exec/outputDelta",
@@ -147,11 +150,22 @@ export interface SubmitTurnInput {
   cwd?: string | null;
 }
 
+export interface ActiveTurn {
+  conversationId: string;
+  turnId: string;
+  codexTurnId: string | null;
+  threadId: string | null;
+}
+
 export interface AgentStatus {
   sessionReady: boolean;
   account: { email: string | null; planType: string | null; type: string } | null;
   activeTurnId: string | null;
   activeConversationId: string | null;
+  /** Every turn currently executing, one per conversation. */
+  activeTurns: ActiveTurn[];
+  /** Maximum number of concurrently executing main turns. */
+  capacity: number;
   queuedTurns: number;
   lastError: string | null;
 }
@@ -170,9 +184,8 @@ export class AgentManager {
   #hostTokens: HostTokenSource;
   #titles: AutoTitler;
 
-  #activeTurnId: string | null = null;
-  #activeConversationId: string | null = null;
-  #pumping = false;
+  #activeTurns = new Map<string, ActiveTurn>();
+  #capacity: number;
   #deltaBuffers = new Map<string, { conversationId: string; turnId: string | null; itemId: string; kind: string; text: string }>();
   #deltaTimer: NodeJS.Timeout | null = null;
   #completionWaiters = new Map<string, () => void>();
@@ -192,6 +205,7 @@ export class AgentManager {
     this.#log = deps.log.child("agent");
     this.#codex = deps.codex;
     this.#hostTokens = deps.hostTokens;
+    this.#capacity = Math.max(1, deps.cfg.agent.maxConcurrentTurns);
     this.#titles = new AutoTitler({
       cfg: deps.cfg,
       db: deps.db,
@@ -211,7 +225,7 @@ export class AgentManager {
     this.#codex.onServerRequest((id, method, params) => this.#handleServerRequest(id, method, params));
     this.#codex.onClosed((reason) => this.#handleCodexClosed(reason));
     // Resume queue processing if the previous process died mid-queue.
-    void this.#pump();
+    this.#pump();
     // If the session is already up (tests / warm start), catch up old titles now;
     // otherwise startSandboxRuntime does it once the session is established.
     if (this.#codex.ready) this.#titles.scheduleBackfill();
@@ -469,34 +483,48 @@ export class AgentManager {
       cwd: input.cwd ?? null,
     });
     const turn = this.#db.prepare("SELECT * FROM turns WHERE id = ?").get(id) as unknown as TurnRow;
-    void this.#pump();
+    this.#pump();
     return { turn, duplicate: false };
   }
 
-  #nextQueuedTurn(): TurnRow | null {
-    return (
-      (this.#db.prepare("SELECT * FROM turns WHERE status = 'queued' ORDER BY created_at ASC LIMIT 1").get() as unknown as TurnRow | undefined) ??
-      null
-    );
+  /**
+   * Next queued turn whose conversation is not already executing. FIFO by
+   * creation time across all conversations, but a conversation that is already
+   * running is skipped so it never runs two turns at once.
+   */
+  #nextEligibleQueuedTurn(): TurnRow | null {
+    const rows = this.#db
+      .prepare("SELECT * FROM turns WHERE status = 'queued' ORDER BY created_at ASC, rowid ASC")
+      .all() as unknown as TurnRow[];
+    for (const turn of rows) {
+      if (this.#activeTurns.has(turn.conversation_id)) continue;
+      return turn;
+    }
+    return null;
   }
 
-  async #pump(): Promise<void> {
-    if (this.#pumping) return;
-    this.#pumping = true;
-    try {
-      for (;;) {
-        const turn = this.#nextQueuedTurn();
-        if (!turn) break;
-        this.#activeTurnId = turn.id;
-        this.#activeConversationId = turn.conversation_id;
-        this.#db.prepare("UPDATE agent_state SET active_turn_id = ?, active_conversation_id = ?, updated_at = ? WHERE id = 1").run(
-          turn.id,
-          turn.conversation_id,
-          Date.now(),
-        );
-        try {
-          await this.#runTurn(turn);
-        } catch (err) {
+  /**
+   * Fill every free execution slot, then return. Each started turn releases its
+   * slot and wakes the pump again from its own completion handler, so queued
+   * work is picked up as soon as any slot frees.
+   */
+  #pump(): void {
+    for (;;) {
+      if (this.#activeTurns.size >= this.#capacity) break;
+      const turn = this.#nextEligibleQueuedTurn();
+      if (!turn) break;
+      const ctx: ActiveTurn = {
+        conversationId: turn.conversation_id,
+        turnId: turn.id,
+        codexTurnId: null,
+        threadId: null,
+      };
+      // Reserve the conversation slot synchronously before any await so a later
+      // pump pass (or a concurrent submit) cannot start a second turn for it.
+      this.#activeTurns.set(turn.conversation_id, ctx);
+      this.#persistActiveState();
+      void this.#runTurn(turn, ctx)
+        .catch((err) => {
           const message = err instanceof Error ? err.message : String(err);
           this.#lastError = message;
           if (err instanceof TurnOutcomeUnknownError) {
@@ -504,21 +532,30 @@ export class AgentManager {
           } else {
             this.#failTurn(turn, message);
           }
-        } finally {
-          this.#activeTurnId = null;
-          this.#activeConversationId = null;
-          this.#db.prepare("UPDATE agent_state SET active_turn_id = NULL, active_conversation_id = NULL, updated_at = ? WHERE id = 1").run(
-            Date.now(),
-          );
+        })
+        .finally(() => {
+          this.#activeTurns.delete(turn.conversation_id);
+          this.#persistActiveState();
           this.#db.prepare("UPDATE conversations SET status = 'idle', updated_at = ? WHERE id = ?").run(Date.now(), turn.conversation_id);
-        }
-      }
-    } finally {
-      this.#pumping = false;
+          this.#pump();
+        });
     }
   }
 
-  async #runTurn(turn: TurnRow): Promise<void> {
+  /**
+   * Legacy `agent_state` only has room for one active turn, so it mirrors the
+   * first (oldest) running turn while the full set is persisted in `queue_json`.
+   * Restart reconciliation still inspects every `running` turn in `turns`.
+   */
+  #persistActiveState(): void {
+    const active = [...this.#activeTurns.values()];
+    const first = active[0] ?? null;
+    this.#db
+      .prepare("UPDATE agent_state SET active_turn_id = ?, active_conversation_id = ?, queue_json = ?, updated_at = ? WHERE id = 1")
+      .run(first?.turnId ?? null, first?.conversationId ?? null, JSON.stringify(active.map((a) => a.turnId)), Date.now());
+  }
+
+  async #runTurn(turn: TurnRow, ctx: ActiveTurn): Promise<void> {
     const conversation = this.getConversation(turn.conversation_id);
     if (!conversation) throw new Error("会话不存在");
     // Validate at claim time too, in case it was interrupted concurrently.
@@ -548,6 +585,9 @@ export class AgentManager {
     } else {
       await this.#codex.resumeThread(threadId);
     }
+    // Route later notifications for this thread back to this exact turn even
+    // while several conversations are executing at once.
+    ctx.threadId = threadId;
 
     const generation = this.#codexGeneration;
     let codexTurnId: string;
@@ -559,6 +599,7 @@ export class AgentManager {
         model,
         effort: turn.effort,
         clientUserMessageId: turn.client_message_id,
+        summary: this.#cfg.agent.reasoningSummary,
       });
     } catch (err) {
       // The turn may already have been accepted by Codex before the transport
@@ -568,6 +609,7 @@ export class AgentManager {
       }
       throw err;
     }
+    ctx.codexTurnId = codexTurnId;
     this.#db.prepare("UPDATE turns SET codex_turn_id = ? WHERE id = ?").run(codexTurnId, turn.id);
     this.#appendEvent(conversation.id, turn.id, "turn.codex_started", { turnId: turn.id, codexTurnId });
 
@@ -721,28 +763,97 @@ export class AgentManager {
 
   // ------------------------------------------------------------ approvals
 
-  #conversationForThread(threadId: string | undefined, fallbackConversationId: string | null): string | null {
+  /** Local turn id for a Codex turn id, or null when it is not ours. */
+  #localTurnId(codexTurnId: string | undefined): string | null {
+    if (!codexTurnId) return null;
+    const row = this.#db.prepare("SELECT id FROM turns WHERE codex_turn_id = ?").get(codexTurnId) as { id: string } | undefined;
+    return row?.id ?? null;
+  }
+
+  /**
+   * Resolve the conversation/turn an inbound notification belongs to.
+   *
+   * Under concurrency an event is only attributed when it carries a `threadId`
+   * or `turnId` that maps to a known conversation/turn, and when the two
+   * identities agree (a thread from one conversation with a turn from another is
+   * rejected). Once a conversation's active turn has its Codex turn id, an
+   * older/other turn id on the same thread is stale and dropped. An event with
+   * an unknown thread id is dropped — never assigned to a random active
+   * conversation — which is also how an isolated auxiliary (auto-title) thread
+   * stays isolated. The fallback to "the single active turn" only applies when
+   * the event carries no usable identity at all and exactly one turn runs.
+   */
+  #routeContext(params: Record<string, unknown>): { conversationId: string; turnId: string | null } | null {
+    const threadId = typeof params.threadId === "string" && params.threadId ? params.threadId : undefined;
+    const codexTurnId = typeof params.turnId === "string" && params.turnId ? params.turnId : undefined;
+
     if (threadId) {
-      const row = this.#db.prepare("SELECT id FROM conversations WHERE codex_thread_id = ?").get(threadId) as { id: string } | undefined;
-      // A known thread always maps to its own conversation. An unknown thread is
-      // never silently attributed to whatever turn happens to be active: that is
-      // how an isolated auxiliary (auto-title) thread stays isolated.
-      return row?.id ?? null;
+      const row = this.#db.prepare("SELECT id FROM conversations WHERE codex_thread_id = ?").get(threadId) as
+        | { id: string }
+        | undefined;
+      // An unknown thread is never attributed to whatever turn happens to be
+      // active: that is also how an isolated auxiliary (auto-title) thread stays
+      // isolated.
+      if (!row?.id) return null;
+      const conversationId = row.id;
+      const active = this.#activeTurns.get(conversationId);
+      if (codexTurnId) {
+        const local = this.#localTurnId(codexTurnId);
+        if (local) {
+          const owner = this.#db.prepare("SELECT conversation_id FROM turns WHERE id = ?").get(local) as
+            | { conversation_id: string }
+            | undefined;
+          // The thread and the turn must agree. Combining conversation A's
+          // thread with conversation B's turn would otherwise write B's event
+          // into A.
+          if (owner?.conversation_id !== conversationId) return null;
+          // Once this conversation's active turn has a Codex turn id, only that
+          // turn is still live: an older/other turn id on the same thread is
+          // stale and must not be attributed to the current turn.
+          if (active?.codexTurnId && active.codexTurnId !== codexTurnId) return null;
+          return { conversationId, turnId: local };
+        }
+        // The turn id is not persisted yet, so it can only be an early event for
+        // the turn that is still starting. If the active turn already carries a
+        // different Codex turn id, this one is stale.
+        if (active?.codexTurnId) return null;
+        return { conversationId, turnId: active?.turnId ?? null };
+      }
+      // No turn identity at all: the known thread alone routes to its
+      // conversation and, while it is active, to its current turn.
+      return { conversationId, turnId: active?.turnId ?? null };
     }
-    return fallbackConversationId;
+
+    const local = this.#localTurnId(codexTurnId);
+    if (local) {
+      const row = this.#db.prepare("SELECT conversation_id FROM turns WHERE id = ?").get(local) as
+        | { conversation_id: string }
+        | undefined;
+      if (row) {
+        const active = this.#activeTurns.get(row.conversation_id);
+        if (active?.codexTurnId && active.codexTurnId !== codexTurnId) return null;
+        return { conversationId: row.conversation_id, turnId: local };
+      }
+    }
+    // No usable identity at all: only an unambiguous single active turn can
+    // claim the event. A turn id that contradicts that turn is dropped.
+    if (this.#activeTurns.size === 1) {
+      const only = this.#activeTurns.values().next().value as ActiveTurn;
+      if (codexTurnId && only.codexTurnId && only.codexTurnId !== codexTurnId) return null;
+      return { conversationId: only.conversationId, turnId: only.turnId };
+    }
+    return null;
   }
 
   #handleServerRequest(id: string, method: string, params: unknown): void {
-    const p = (params ?? {}) as { threadId?: string; turnId?: string };
-    const conversationId = this.#conversationForThread(p.threadId, this.#activeConversationId);
-    if (!conversationId) {
+    const route = this.#routeContext((params ?? {}) as Record<string, unknown>);
+    if (!route) {
+      // An approval we cannot attribute (unknown/aux thread, or several active
+      // turns and no identity) is denied rather than shown for a random turn.
       this.#codex.answer(id, this.#defaultDeny(method));
       return;
     }
-    const turnRow = p.turnId
-      ? (this.#db.prepare("SELECT id FROM turns WHERE codex_turn_id = ?").get(p.turnId) as { id: string } | undefined)
-      : undefined;
-    const turnId = turnRow?.id ?? this.#activeTurnId;
+    const { conversationId, turnId } = route;
     const requestId = randomId("req");
     this.#db
       .prepare(
@@ -867,37 +978,27 @@ export class AgentManager {
       return;
     }
 
-    const conversationId = this.#conversationForThread(p.threadId as string | undefined, this.#activeConversationId);
-    if (!conversationId) return;
+    const route = this.#routeContext(p);
+    if (!route) return;
     // Flush buffered deltas first: they arrived before this event, so they must get
     // lower sequence ids. Otherwise a client that applied the completed item first
     // would append stale deltas afterwards and duplicate the text.
     this.#flushDeltas();
-    const turnId = this.#activeConversationId === conversationId ? this.#activeTurnId : null;
-    this.#appendEvent(conversationId, turnId, method, params);
+    this.#appendEvent(route.conversationId, route.turnId, method, params);
   }
 
   #bufferDelta(method: string, params: Record<string, unknown>): void {
-    const conversationId = this.#activeConversationId;
-    if (!conversationId) return;
-    // When a notification carries an explicit thread id it must belong to the
-    // active conversation's registered main thread. Auxiliary (auto-title) and
-    // unknown threads are dropped rather than attributed to the active
-    // conversation. Early events without a thread id keep the original behaviour.
-    const threadId = params.threadId;
-    if (typeof threadId === "string") {
-      const row = this.#db.prepare("SELECT id FROM conversations WHERE codex_thread_id = ?").get(threadId) as { id: string } | undefined;
-      if (row?.id !== conversationId) return;
-    }
+    const route = this.#routeContext(params);
+    if (!route) return;
     const itemId = String(params.itemId ?? params.turnId ?? "stream");
     const text = extractDeltaText(method, params);
     if (!text) return;
-    const key = `${conversationId}:${itemId}:${method}`;
+    const key = `${route.conversationId}:${itemId}:${method}`;
     const existing = this.#deltaBuffers.get(key);
     if (existing) {
       existing.text += text;
     } else {
-      this.#deltaBuffers.set(key, { conversationId, turnId: this.#activeTurnId, itemId, kind: method, text });
+      this.#deltaBuffers.set(key, { conversationId: route.conversationId, turnId: route.turnId, itemId, kind: method, text });
     }
     if (!this.#deltaTimer) {
       this.#deltaTimer = setTimeout(() => this.#flushDeltas(), 250);
@@ -927,11 +1028,20 @@ export class AgentManager {
   async status(): Promise<AgentStatus> {
     const queued = (this.#db.prepare("SELECT COUNT(*) AS n FROM turns WHERE status = 'queued'").get() as { n: number }).n;
     const account = this.#codex.account;
+    const active = [...this.#activeTurns.values()];
+    const first = active[0] ?? null;
     return {
       sessionReady: this.#codex.ready,
       account,
-      activeTurnId: this.#activeTurnId,
-      activeConversationId: this.#activeConversationId,
+      activeTurnId: first?.turnId ?? null,
+      activeConversationId: first?.conversationId ?? null,
+      activeTurns: active.map((a) => ({
+        conversationId: a.conversationId,
+        turnId: a.turnId,
+        codexTurnId: a.codexTurnId,
+        threadId: a.threadId,
+      })),
+      capacity: this.#capacity,
       queuedTurns: queued,
       lastError: this.#codex.lastError ?? this.#lastError,
     };

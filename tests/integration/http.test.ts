@@ -531,6 +531,55 @@ describe("websocket proxy", () => {
   });
 });
 
+describe("sandbox upload and agent status", () => {
+  it("relays a synthetic attachment into the sandbox and reports its kind", async () => {
+    const { cookie, csrf } = await login(h);
+    const bytes = Buffer.from("synthetic-attachment-content");
+    const res = await h.request("/api/sandbox/upload", {
+      method: "POST",
+      headers: { cookie, "x-csrf-token": csrf, "content-type": "application/json" },
+      body: JSON.stringify({ name: "note.txt", mime: "text/plain", contentBase64: bytes.toString("base64") }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { path: string; name: string; kind: string; size: number };
+    expect(body.name).toBe("note.txt");
+    expect(body.kind).toBe("file");
+    expect(body.size).toBe(bytes.byteLength);
+    expect(body.path.startsWith("/home/gem/workspace/")).toBe(true);
+    expect(body.path.endsWith("-note.txt")).toBe(true);
+    // The bytes really reached the sandbox upload endpoint.
+    expect(h.sandbox.lastUploadBody()).toContain("synthetic-attachment-content");
+  });
+
+  it("classifies an image attachment and rejects a missing payload", async () => {
+    const { cookie, csrf } = await login(h);
+    const png = Buffer.from("89504e470d0a1a0a", "hex");
+    const ok = await h.request("/api/sandbox/upload", {
+      method: "POST",
+      headers: { cookie, "x-csrf-token": csrf, "content-type": "application/json" },
+      body: JSON.stringify({ name: "pixel.png", mime: "image/png", contentBase64: png.toString("base64") }),
+    });
+    expect(ok.status).toBe(200);
+    expect(((await ok.json()) as { kind: string }).kind).toBe("image");
+
+    const empty = await h.request("/api/sandbox/upload", {
+      method: "POST",
+      headers: { cookie, "x-csrf-token": csrf, "content-type": "application/json" },
+      body: JSON.stringify({ name: "", contentBase64: "" }),
+    });
+    expect(empty.status).toBe(400);
+  });
+
+  it("exposes activeTurns and capacity in the agent status", async () => {
+    const { cookie } = await login(h);
+    const res = await h.request("/api/status", { headers: { cookie } });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { agent: { activeTurns: unknown[]; capacity: number } };
+    expect(Array.isArray(body.agent.activeTurns)).toBe(true);
+    expect(body.agent.capacity).toBeGreaterThanOrEqual(1);
+  });
+});
+
 /** Obtain a workspace session cookie by redeeming a real bootstrap ticket. */
 async function bootstrapWorkspace(h: TestHarness): Promise<{ cookie: string }> {
   const boot = await bootstrapWorkspaceWithSession(h);

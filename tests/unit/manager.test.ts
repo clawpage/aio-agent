@@ -55,33 +55,63 @@ describe("AgentManager", () => {
     expect(() => agent.submitTurn({ conversationId: b.id, text: "hi", clientMessageId: "m1" })).toThrow(TurnConflictError);
   });
 
-  it("serialises execution so only one turn runs at a time across conversations", async () => {
-    const a = agent.createConversation({ title: "a" });
-    const b = agent.createConversation({ title: "b" });
-    codex.holdTurn("thread_1");
-    agent.submitTurn({ conversationId: a.id, text: "first", clientMessageId: "m1" });
-    await tick();
-    agent.submitTurn({ conversationId: b.id, text: "second", clientMessageId: "m2" });
-    await tick(50);
-    // Second turn must still be queued while the first holds the sandbox.
-    expect(codex.startedTurns.length).toBe(1);
-    const queued = db.prepare("SELECT status FROM turns WHERE client_message_id = 'm2'").get() as { status: string };
-    expect(queued.status).toBe("queued");
+  it("runs up to three conversations concurrently and queues the fourth", async () => {
+    const convs = ["a", "b", "c", "d"].map((t) => agent.createConversation({ title: t }));
+    // All four turns stay running until Codex reports completion, so holding the
+    // first three naturally fills every slot.
+    for (let i = 0; i < 4; i++) {
+      agent.submitTurn({ conversationId: convs[i]!.id, text: `msg-${i}`, clientMessageId: `m${i}` });
+    }
+    await tick(80);
+    expect(codex.startedTurns.length).toBe(3);
+    const queued = db.prepare("SELECT client_message_id, status FROM turns WHERE status = 'queued'").all() as Array<{
+      client_message_id: string;
+      status: string;
+    }>;
+    expect(queued.map((q) => q.client_message_id)).toEqual(["m3"]);
 
-    codex.releaseTurn("thread_1");
+    const status = await agent.status();
+    expect(status.activeTurns).toHaveLength(3);
+    expect(status.capacity).toBe(3);
+    expect(status.queuedTurns).toBe(1);
+    // Legacy fields mirror the oldest active turn.
+    expect(status.activeTurnId).toBe(status.activeTurns[0]!.turnId);
+    expect(status.activeConversationId).toBe(status.activeTurns[0]!.conversationId);
+
+    // Freeing one slot wakes the pump and starts the queued turn.
+    codex.completeTurn(codex.startedTurns[0]!.turnId);
+    await tick(80);
+    expect(codex.startedTurns.length).toBe(4);
+    expect((db.prepare("SELECT COUNT(*) AS n FROM turns WHERE status = 'queued'").get() as { n: number }).n).toBe(0);
+  });
+
+  it("never runs two turns for the same conversation at once", async () => {
+    const a = agent.createConversation({ title: "a" });
+    agent.submitTurn({ conversationId: a.id, text: "first", clientMessageId: "m1" });
+    await tick(40);
+    agent.submitTurn({ conversationId: a.id, text: "second", clientMessageId: "m2" });
+    await tick(60);
+    // The first turn holds the conversation's slot; the second stays queued even
+    // though two other execution slots are free.
+    expect(codex.startedTurns.length).toBe(1);
+    expect((db.prepare("SELECT status FROM turns WHERE client_message_id = 'm2'").get() as { status: string }).status).toBe("queued");
+
     codex.completeTurn(codex.startedTurns[0]!.turnId);
     await tick(80);
     expect(codex.startedTurns.length).toBe(2);
+    expect(codex.startedTurns[1]!.text).toBe("second");
   });
 
   it("cancels a queued turn instead of merely announcing it", async () => {
-    const a = agent.createConversation({ title: "a" });
+    // Fill all three slots so the target conversation's turn is genuinely queued.
+    const holders = ["h1", "h2", "h3"].map((t) => agent.createConversation({ title: t }));
     const b = agent.createConversation({ title: "b" });
-    codex.holdTurn("thread_1");
-    agent.submitTurn({ conversationId: a.id, text: "first", clientMessageId: "m1" });
-    await tick();
+    for (let i = 0; i < 3; i++) {
+      agent.submitTurn({ conversationId: holders[i]!.id, text: `hold-${i}`, clientMessageId: `h${i}` });
+    }
     const second = agent.submitTurn({ conversationId: b.id, text: "second", clientMessageId: "m2" });
-    await tick(20);
+    await tick(80);
+    expect(codex.startedTurns.length).toBe(3);
 
     const result = await agent.interrupt(b.id);
     expect(result.ok).toBe(true);
@@ -89,11 +119,11 @@ describe("AgentManager", () => {
     const row = db.prepare("SELECT status FROM turns WHERE id = ?").get(second.turn.id) as { status: string };
     expect(row.status).toBe("interrupted");
 
-    codex.releaseTurn("thread_1");
+    // Free a slot; the cancelled turn must never reach Codex.
     codex.completeTurn(codex.startedTurns[0]!.turnId);
     await tick(80);
-    // The cancelled turn must never reach Codex.
-    expect(codex.startedTurns.length).toBe(1);
+    expect(codex.startedTurns.some((t) => t.text === "second")).toBe(false);
+    expect(codex.startedTurns.length).toBe(3);
   });
 
   it("interrupts a running turn through Codex", async () => {
@@ -370,6 +400,340 @@ describe("AgentManager", () => {
     expect(deltas[0]!.payload).toEqual({ itemId: "i2", kind: "item/agentMessage/delta", delta: "正常增量" });
     codex.completeTurn(turn.turnId);
     await tick();
+  });
+
+  it("attributes events, deltas and approvals to the right conversation under concurrency", async () => {
+    const a = agent.createConversation({ title: "a" });
+    const b = agent.createConversation({ title: "b" });
+    const c = agent.createConversation({ title: "c" });
+    for (const [conv, id] of [
+      [a, "ma"],
+      [b, "mb"],
+      [c, "mc"],
+    ] as const) {
+      agent.submitTurn({ conversationId: conv.id, text: id, clientMessageId: id });
+    }
+    await tick(80);
+    expect(codex.startedTurns.length).toBe(3);
+    const turnA = codex.startedTurns[0]!;
+    const turnB = codex.startedTurns[1]!;
+    const turnC = codex.startedTurns[2]!;
+
+    // Interleaved deltas must land on their own conversation only.
+    codex.emitNotification("item/agentMessage/delta", { threadId: turnA.threadId, turnId: turnA.turnId, itemId: "ia", delta: "A" });
+    codex.emitNotification("item/agentMessage/delta", { threadId: turnC.threadId, turnId: turnC.turnId, itemId: "ic", delta: "C" });
+    codex.emitNotification("item/agentMessage/delta", { threadId: turnB.threadId, turnId: turnB.turnId, itemId: "ib", delta: "B" });
+    // A non-delta item for B must not flush A's or C's buffered delta into B.
+    codex.emitNotification("item/completed", { threadId: turnB.threadId, turnId: turnB.turnId, item: { id: "ib", type: "agentMessage", text: "B" } });
+    await tick(20);
+
+    const deltas = (conv: string) =>
+      agent.listEvents(conv, 0).filter((e) => e.type === "stream.delta").map((e) => (e.payload as { delta: string }).delta);
+    expect(deltas(a.id)).toEqual(["A"]);
+    expect(deltas(b.id)).toEqual(["B"]);
+    expect(deltas(c.id)).toEqual(["C"]);
+    // The completed item for B belongs to B's turn only.
+    const completedB = agent.listEvents(b.id, 0).find((e) => e.type === "item/completed");
+    expect(completedB?.turnId).toBe(agent.listTurns(b.id).find((t) => t.client_message_id === "mb")!.id);
+
+    // An approval for C is attributed to C and only C.
+    codex.emitServerRequest("sr-a", "item/commandExecution/requestApproval", { threadId: turnA.threadId, turnId: turnA.turnId, command: "ls a" });
+    codex.emitServerRequest("sr-c", "item/commandExecution/requestApproval", { threadId: turnC.threadId, turnId: turnC.turnId, command: "ls c" });
+    await tick(20);
+    expect(agent.listPendingRequests(a.id)).toHaveLength(1);
+    expect(agent.listPendingRequests(b.id)).toHaveLength(0);
+    expect(agent.listPendingRequests(c.id)).toHaveLength(1);
+
+    // An approval whose thread cannot be routed is denied, not shown anywhere.
+    codex.emitServerRequest("sr-unknown", "item/commandExecution/requestApproval", { threadId: "thread_unknown", turnId: "turn_unknown" });
+    await tick(20);
+    expect(codex.answers.find((x) => x.id === "sr-unknown")?.result).toEqual({ decision: "decline" });
+    expect(agent.listPendingRequests().length).toBe(2);
+
+    for (const turn of [turnA, turnB, turnC]) codex.completeTurn(turn.turnId);
+    await tick(80);
+  });
+
+  it("interrupts one conversation without touching the others", async () => {
+    const a = agent.createConversation({ title: "a" });
+    const b = agent.createConversation({ title: "b" });
+    const c = agent.createConversation({ title: "c" });
+    for (const [conv, id] of [
+      [a, "ma"],
+      [b, "mb"],
+      [c, "mc"],
+    ] as const) {
+      agent.submitTurn({ conversationId: conv.id, text: id, clientMessageId: id });
+    }
+    await tick(80);
+    const result = await agent.interrupt(b.id);
+    expect(result.status).toBe("running");
+    expect(codex.interrupted).toEqual([{ threadId: codex.startedTurns[1]!.threadId, turnId: codex.startedTurns[1]!.turnId }]);
+    // The other two turns were never interrupted.
+    expect(codex.interrupted.some((i) => i.turnId === codex.startedTurns[0]!.turnId)).toBe(false);
+    expect(codex.interrupted.some((i) => i.turnId === codex.startedTurns[2]!.turnId)).toBe(false);
+    // All three are still executing until Codex reports their outcomes.
+    expect((await agent.status()).activeTurns).toHaveLength(3);
+    for (const turn of codex.startedTurns) codex.completeTurn(turn.turnId);
+    await tick(80);
+  });
+
+  it("marks every in-flight turn unknown when the connection dies under concurrency", async () => {
+    const a = agent.createConversation({ title: "a" });
+    const b = agent.createConversation({ title: "b" });
+    agent.submitTurn({ conversationId: a.id, text: "ma", clientMessageId: "ma" });
+    agent.submitTurn({ conversationId: b.id, text: "mb", clientMessageId: "mb" });
+    await tick(80);
+    expect(codex.startedTurns.length).toBe(2);
+    codex.emitClosed("exit code=137 signal=null");
+    await tick(80);
+    const rows = db.prepare("SELECT status FROM turns ORDER BY created_at").all() as Array<{ status: string }>;
+    expect(rows.map((r) => r.status)).toEqual(["unknown", "unknown"]);
+    expect(codex.startedTurns.length).toBe(2);
+  });
+
+  it("reconciles multiple running turns after a restart without replaying any", async () => {
+    const conv = agent.createConversation({ title: "multi" });
+    const now = Date.now();
+    for (const id of ["t1", "t2", "t3", "t4"]) {
+      db.prepare("INSERT INTO turns (id, conversation_id, client_message_id, status, input_text, created_at) VALUES (?,?,?,?,?,?)").run(
+        id,
+        conv.id,
+        id,
+        id === "t4" ? "queued" : "running",
+        id,
+        now,
+      );
+    }
+    const freshCodex = new FakeCodex();
+    const fresh = new AgentManager({
+      cfg: testConfig("/tmp/pa-manager-test", 1),
+      db,
+      log: new Logger("error", undefined, false),
+      codex: freshCodex,
+      hostTokens: { status: async () => ({}) } as unknown as HostTokenSource,
+    });
+    await fresh.init();
+    const statuses = db.prepare("SELECT id, status FROM turns ORDER BY id").all() as Array<{ id: string; status: string }>;
+    expect(statuses.map((s) => s.status)).toEqual(["unknown", "unknown", "unknown", "interrupted"]);
+    expect(freshCodex.startedTurns.length).toBe(0);
+    fresh.shutdown();
+  });
+
+  it("requests a concise reasoning summary and never surfaces raw chain-of-thought", async () => {
+    const conv = agent.createConversation({ title: "reasoning" });
+    agent.submitTurn({ conversationId: conv.id, text: "think", clientMessageId: "m1" });
+    await tick(40);
+    const turn = codex.startedTurns[0]!;
+    // The manager must opt into summaries on the main turn.
+    expect(codex.lastStartTurnSummary).toBe("concise");
+    // Raw reasoning text deltas are dropped; summary deltas are kept.
+    codex.emitNotification("item/reasoning/textDelta", { threadId: turn.threadId, turnId: turn.turnId, itemId: "r1", delta: "RAW" });
+    codex.emitNotification("item/reasoning/summaryTextDelta", { threadId: turn.threadId, turnId: turn.turnId, itemId: "r1", summaryIndex: 0, delta: "摘要" });
+    await tick(300);
+    const deltas = agent.listEvents(conv.id, 0).filter((e) => e.type === "stream.delta");
+    expect(deltas).toHaveLength(1);
+    expect((deltas[0]!.payload as { kind: string }).kind).toBe("item/reasoning/summaryTextDelta");
+    codex.completeTurn(turn.turnId);
+    await tick();
+  });
+
+  it("names two conversations that finish their first turns concurrently without crossing titles", async () => {
+    codex.titleResultFor = (userText) => `命名-${userText}`;
+    const a = agent.createConversation();
+    const b = agent.createConversation();
+    agent.submitTurn({ conversationId: a.id, text: "alpha", clientMessageId: "ma" });
+    agent.submitTurn({ conversationId: b.id, text: "beta", clientMessageId: "mb" });
+    await tick(80);
+    expect(codex.startedTurns.length).toBe(2);
+    // Both first turns complete while both titles are pending.
+    for (const turn of codex.startedTurns) codex.completeTurn(turn.turnId);
+    await tick(80);
+    await agent.waitForAutoTitles();
+    const titleA = (db.prepare("SELECT title FROM conversations WHERE id = ?").get(a.id) as { title: string }).title;
+    const titleB = (db.prepare("SELECT title FROM conversations WHERE id = ?").get(b.id) as { title: string }).title;
+    expect(titleA).toBe("命名-alpha");
+    expect(titleB).toBe("命名-beta");
+    expect(codex.titleCalls.sort()).toEqual(["alpha", "beta"]);
+  });
+
+  it("rejects an event whose thread and turn identities disagree", async () => {
+    const a = agent.createConversation({ title: "a" });
+    const b = agent.createConversation({ title: "b" });
+    agent.submitTurn({ conversationId: a.id, text: "ma", clientMessageId: "ma" });
+    agent.submitTurn({ conversationId: b.id, text: "mb", clientMessageId: "mb" });
+    await tick(80);
+    const turnA = codex.startedTurns[0]!;
+    const turnB = codex.startedTurns[1]!;
+
+    // A's thread paired with B's turn id must never be written into A (or B).
+    codex.emitNotification("item/agentMessage/delta", { threadId: turnA.threadId, turnId: turnB.turnId, itemId: "mix", delta: "MIX" });
+    codex.emitNotification("item/completed", {
+      threadId: turnA.threadId,
+      turnId: turnB.turnId,
+      item: { id: "mix", type: "agentMessage", text: "MIX" },
+    });
+    await tick(300);
+    expect(agent.listEvents(a.id, 0).filter((e) => e.type === "stream.delta")).toHaveLength(0);
+    expect(agent.listEvents(b.id, 0).filter((e) => e.type === "stream.delta")).toHaveLength(0);
+    expect(agent.listEvents(a.id, 0).some((e) => e.type === "item/completed")).toBe(false);
+    expect(agent.listEvents(b.id, 0).some((e) => e.type === "item/completed")).toBe(false);
+
+    // A mismatched approval is denied and shown nowhere.
+    codex.emitServerRequest("sr-mix", "item/commandExecution/requestApproval", {
+      threadId: turnA.threadId,
+      turnId: turnB.turnId,
+      command: "ls",
+    });
+    await tick(20);
+    expect(codex.answers.find((x) => x.id === "sr-mix")?.result).toEqual({ decision: "decline" });
+    expect(agent.listPendingRequests()).toHaveLength(0);
+
+    // The correctly paired identity still routes to A's own turn.
+    codex.emitNotification("item/agentMessage/delta", { threadId: turnA.threadId, turnId: turnA.turnId, itemId: "ok", delta: "OK" });
+    await tick(300);
+    const ok = agent.listEvents(a.id, 0).filter((e) => e.type === "stream.delta");
+    expect(ok).toHaveLength(1);
+    expect(ok[0]!.turnId).toBe(agent.listTurns(a.id).find((t) => t.client_message_id === "ma")!.id);
+
+    for (const turn of [turnA, turnB]) codex.completeTurn(turn.turnId);
+    await tick(80);
+  });
+
+  it("rejects a stale turn id once the active turn already has its codex turn id", async () => {
+    const a = agent.createConversation({ title: "a" });
+    agent.submitTurn({ conversationId: a.id, text: "first", clientMessageId: "m1" });
+    await tick(40);
+    const first = codex.startedTurns[0]!;
+    codex.completeTurn(first.turnId);
+    await tick(80);
+
+    agent.submitTurn({ conversationId: a.id, text: "second", clientMessageId: "m2" });
+    await tick(40);
+    const second = codex.startedTurns[1]!;
+    expect(second.threadId).toBe(first.threadId);
+
+    // Same thread, but an older turn: no longer live, so it is dropped.
+    codex.emitNotification("item/agentMessage/delta", { threadId: second.threadId, turnId: first.turnId, itemId: "old", delta: "OLD" });
+    codex.emitNotification("item/completed", {
+      threadId: second.threadId,
+      turnId: first.turnId,
+      item: { id: "old", type: "agentMessage", text: "OLD" },
+    });
+    codex.emitServerRequest("sr-old", "item/commandExecution/requestApproval", { threadId: second.threadId, turnId: first.turnId, command: "ls" });
+    await tick(300);
+    expect(agent.listEvents(a.id, 0).filter((e) => e.type === "stream.delta")).toHaveLength(0);
+    expect(
+      agent.listEvents(a.id, 0).some((e) => e.type === "item/completed" && (e.payload as { item?: { id?: string } }).item?.id === "old"),
+    ).toBe(false);
+    expect(codex.answers.find((x) => x.id === "sr-old")?.result).toEqual({ decision: "decline" });
+    expect(agent.listPendingRequests()).toHaveLength(0);
+
+    // The live turn id still routes.
+    codex.emitNotification("item/agentMessage/delta", { threadId: second.threadId, turnId: second.turnId, itemId: "new", delta: "NEW" });
+    await tick(300);
+    const live = agent.listEvents(a.id, 0).filter((e) => e.type === "stream.delta");
+    expect(live).toHaveLength(1);
+    expect(live[0]!.turnId).toBe(agent.listTurns(a.id).find((t) => t.client_message_id === "m2")!.id);
+
+    codex.completeTurn(second.turnId);
+    await tick(80);
+  });
+
+  it("drops events from an unknown thread instead of attributing them to an active turn", async () => {
+    const a = agent.createConversation({ title: "a" });
+    agent.submitTurn({ conversationId: a.id, text: "ma", clientMessageId: "ma" });
+    await tick(40);
+    const turnA = codex.startedTurns[0]!;
+
+    codex.emitNotification("item/agentMessage/delta", { threadId: "thread_other", turnId: turnA.turnId, itemId: "x", delta: "X" });
+    codex.emitNotification("item/completed", {
+      threadId: "thread_other",
+      turnId: turnA.turnId,
+      item: { id: "x", type: "agentMessage", text: "X" },
+    });
+    codex.emitServerRequest("sr-other", "item/commandExecution/requestApproval", { threadId: "thread_other", turnId: turnA.turnId, command: "ls" });
+    await tick(300);
+    expect(agent.listEvents(a.id, 0).filter((e) => e.type === "stream.delta")).toHaveLength(0);
+    expect(agent.listEvents(a.id, 0).some((e) => e.type === "item/completed")).toBe(false);
+    expect(codex.answers.find((x) => x.id === "sr-other")?.result).toEqual({ decision: "decline" });
+    expect(agent.listPendingRequests()).toHaveLength(0);
+
+    codex.completeTurn(turnA.turnId);
+    await tick(80);
+  });
+
+  it("routes an early event for the starting turn before startTurn resolves", async () => {
+    const a = agent.createConversation({ title: "a" });
+    let release!: () => void;
+    codex.startTurnGate = new Promise<void>((resolve) => (release = resolve));
+    const submitted = agent.submitTurn({ conversationId: a.id, text: "early", clientMessageId: "me" });
+    await tick(40);
+    const threadId = codex.startedThreads[0]!.threadId;
+
+    // The codex turn id is not persisted yet; the thread identity alone must be
+    // enough to attach the event to the turn that is still starting.
+    codex.emitNotification("item/started", { threadId, turnId: "turn_not_yet_known", item: { id: "e1", type: "agentMessage" } });
+    await tick(20);
+    const early = agent.listEvents(a.id, 0).find((e) => e.type === "item/started");
+    expect(early).toBeDefined();
+    expect(early!.turnId).toBe(submitted.turn.id);
+
+    // Once the real codex turn id exists, the same foreign id is stale and dropped.
+    release();
+    await tick(40);
+    const codexTurnId = codex.startedTurns[0]!.turnId;
+    expect(codexTurnId).not.toBe("turn_not_yet_known");
+    codex.emitNotification("item/completed", {
+      threadId,
+      turnId: "turn_not_yet_known",
+      item: { id: "e1", type: "agentMessage", text: "late" },
+    });
+    await tick(20);
+    expect(agent.listEvents(a.id, 0).some((e) => e.type === "item/completed")).toBe(false);
+
+    codex.completeTurn(codexTurnId);
+    await tick(80);
+  });
+
+  it("keeps three concurrent conversations isolated for events and approvals", async () => {
+    const convs = ["a", "b", "c"].map((t) => agent.createConversation({ title: t }));
+    convs.forEach((c, i) => agent.submitTurn({ conversationId: c.id, text: `m${i}`, clientMessageId: `m${i}` }));
+    await tick(80);
+    expect(codex.startedTurns.length).toBe(3);
+    const [ta, tb, tc] = codex.startedTurns;
+
+    for (const [turn, delta] of [
+      [ta, "A"],
+      [tb, "B"],
+      [tc, "C"],
+    ] as const) {
+      codex.emitNotification("item/agentMessage/delta", { threadId: turn.threadId, turnId: turn.turnId, itemId: `i${delta}`, delta });
+      codex.emitServerRequest(`sr-${delta}`, "item/commandExecution/requestApproval", {
+        threadId: turn.threadId,
+        turnId: turn.turnId,
+        command: `ls ${delta}`,
+      });
+    }
+    await tick(300);
+
+    convs.forEach((c, i) => {
+      const expected = ["A", "B", "C"][i]!;
+      const deltas = agent.listEvents(c.id, 0).filter((e) => e.type === "stream.delta");
+      expect(deltas.map((e) => (e.payload as { delta: string }).delta)).toEqual([expected]);
+      const pending = agent.listPendingRequests(c.id);
+      expect(pending).toHaveLength(1);
+      expect(pending[0]!.codex_request_id).toBe(`sr-${expected}`);
+    });
+
+    // A cross-thread mismatch among the three is still denied.
+    codex.emitServerRequest("sr-mix", "item/commandExecution/requestApproval", { threadId: ta.threadId, turnId: tb.turnId, command: "ls" });
+    await tick(20);
+    expect(codex.answers.find((x) => x.id === "sr-mix")?.result).toEqual({ decision: "decline" });
+    expect(agent.listPendingRequests()).toHaveLength(3);
+
+    for (const turn of codex.startedTurns) codex.completeTurn(turn.turnId);
+    await tick(80);
   });
 });
 

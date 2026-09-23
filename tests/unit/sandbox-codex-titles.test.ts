@@ -197,3 +197,24 @@ describe("SandboxCodexSession auto-title isolation", () => {
     }
   });
 });
+
+describe("SandboxCodexSession main turn summary opt-in", () => {
+  it("sends the requested reasoning summary and omits it when disabled", async () => {
+    const server = new FakeAppServer();
+    server.handle("thread/start", () => ({ thread: { id: "main_1" }, model: "gpt-6-sol", cwd: "/home/gem/workspace" }));
+    server.handle("turn/start", () => ({ turn: { id: "turn_main_1" } }));
+    const session = makeSession(server, 200);
+    try {
+      await session.startThread({ model: "gpt-6-sol" });
+      await session.startTurn({ threadId: "main_1", text: "hi", summary: "concise" });
+      const withSummary = server.inbound.filter((m) => m.method === "turn/start").at(-1)!;
+      expect(withSummary.params?.summary).toBe("concise");
+
+      await session.startTurn({ threadId: "main_1", text: "again", summary: "none" });
+      const without = server.inbound.filter((m) => m.method === "turn/start").at(-1)!;
+      expect("summary" in (without.params ?? {})).toBe(false);
+    } finally {
+      session.close();
+    }
+  });
+});
