@@ -8,6 +8,8 @@ interface Props {
   initialPath?: string;
   onClose: () => void;
   onNotify: (message: string, level?: "info" | "error") => void;
+  /** Bumped by the app after it creates a sandbox browser tab, to reveal it. */
+  browserNonce?: number;
 }
 
 type TabId = "desktop" | "browser" | "terminal" | "files" | "editor" | "notebook" | "preview" | "api";
@@ -23,7 +25,7 @@ const TABS: Array<{ id: TabId; label: string; path?: string; kind: "frame" | "na
   { id: "api", label: "接口与 MCP", kind: "native" },
 ];
 
-export function Workspace({ open, status, initialPath, onClose, onNotify }: Props) {
+export function Workspace({ open, status, initialPath, onClose, onNotify, browserNonce }: Props) {
   const [tab, setTab] = useState<TabId>("browser");
   const [frameSrc, setFrameSrc] = useState<string | null>(null);
   const [frameKey, setFrameKey] = useState(0);
@@ -118,6 +120,23 @@ export function Workspace({ open, status, initialPath, onClose, onNotify }: Prop
   }, []);
 
   const openedRef = useRef(false);
+
+  /**
+   * A link the agent rendered was opened as a sandbox browser tab. If the
+   * workspace is already showing, reload the browser view (a fresh one-time
+   * ticket) so the newly created tab becomes visible; if it is closed, the open
+   * effect below already lands on the browser tab, so this must not double-load.
+   * Declared before the open effect so `openedRef` is still false on that first
+   * render.
+   */
+  const lastBrowserNonceRef = useRef(browserNonce ?? 0);
+  useEffect(() => {
+    if (browserNonce === undefined || browserNonce === lastBrowserNonceRef.current) return;
+    lastBrowserNonceRef.current = browserNonce;
+    if (!open || !openedRef.current) return;
+    void navigateTo("browser");
+  }, [browserNonce, navigateTo, open]);
+
   useEffect(() => {
     if (!open) {
       openedRef.current = false;

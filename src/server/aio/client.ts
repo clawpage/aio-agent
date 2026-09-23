@@ -120,6 +120,34 @@ export class AioClient {
     }
   }
 
+  /**
+   * Create a real Chromium tab inside the sandbox and load `url` in it. This is
+   * the only sandbox browser write the control plane performs on behalf of a
+   * user click, and the URL is validated by the caller before it reaches here.
+   */
+  async createBrowserTab(url: string): Promise<BrowserTabResult> {
+    let res: Response;
+    let json: { success?: boolean; message?: string; data?: unknown } | null = null;
+    try {
+      res = await fetch(`${this.baseUrl}/v1/browser/tabs`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ url }),
+        signal: AbortSignal.timeout(15_000),
+      });
+      json = (await res.json().catch(() => null)) as { success?: boolean; message?: string; data?: unknown } | null;
+    } catch (err) {
+      return { ok: false, message: `无法连接沙箱浏览器：${err instanceof Error ? err.message : String(err)}` };
+    }
+    if (!res.ok) {
+      return { ok: false, message: json?.message ?? `沙箱返回 HTTP ${res.status}` };
+    }
+    if (!json || json.success === false) {
+      return { ok: false, message: json?.message ?? "沙箱未确认新标签页已创建" };
+    }
+    return { ok: true, message: json.message ?? "已打开", data: json.data ?? null };
+  }
+
   async buildInventory(force = false): Promise<CapabilityInventory> {
     if (!force && this.#cache && Date.now() - this.#cache.at < 60_000) return this.#cache.inventory;
 
@@ -142,6 +170,35 @@ export class AioClient {
     this.#cache = { at: Date.now(), inventory };
     return inventory;
   }
+}
+
+export interface BrowserTabResult {
+  ok: boolean;
+  message: string;
+  data?: unknown;
+}
+
+/**
+ * Parse a user-supplied link for the sandbox browser. Only absolute http/https
+ * URLs without embedded credentials are accepted; everything else (javascript:,
+ * data:, file:, mailto:, `user:pass@host`) is rejected before any sandbox call.
+ */
+export function parseHttpUrl(input: string): { ok: true; url: string } | { ok: false; message: string } {
+  const value = input.trim();
+  if (!value) return { ok: false, message: "缺少链接地址" };
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    return { ok: false, message: "链接地址无效" };
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    return { ok: false, message: "只允许 http/https 链接" };
+  }
+  if (parsed.username || parsed.password) {
+    return { ok: false, message: "链接不能包含用户名或密码" };
+  }
+  return { ok: true, url: parsed.href };
 }
 
 const GROUP_DEFS: Array<{

@@ -20,6 +20,7 @@
     "test:e2e": "playwright test",
     "smoke": "node tests/e2e/live-smoke.mjs",
     "test:ui": "playwright test",
+    "test:ui:local": "playwright test --config playwright.local.config.ts",
     "test:ui:login": "PA_E2E_BASE=http://localhost:4891 PA_E2E_STATE=var/.auth/state-local.json playwright test tests/e2e/login.spec.ts"
   },
   "dependencies": {

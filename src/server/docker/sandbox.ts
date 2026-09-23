@@ -410,12 +410,12 @@ export class SandboxContainer {
   /**
    * Seed the persistent workspace with agent-facing instructions and register the
    * sandbox MCP server so the agent can drive the real browser, not only shells.
-   * AGENTS.md is refreshed each start; config.toml is only created when absent so
-   * the agent's own customisations are preserved.
+   * Both files are only created when absent: an AGENTS.md the agent or the user
+   * already customised is never overwritten, and neither is config.toml.
    */
   async seedWorkspace(): Promise<void> {
     const s = this.#cfg.sandbox;
-    await this.writeFileInSandbox(`${s.containerWorkspaceDir}/AGENTS.md`, WORKSPACE_AGENTS_MD);
+    await this.writeFileInSandbox(`${s.containerWorkspaceDir}/AGENTS.md`, WORKSPACE_AGENTS_MD, { onlyIfAbsent: true });
     await this.writeFileInSandbox(`${s.containerCodexHome}/config.toml`, CODEX_CONFIG_TOML, { onlyIfAbsent: true });
   }
 

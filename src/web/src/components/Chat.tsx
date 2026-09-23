@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, openEventStream } from "../api";
 import type { AgentEvent, Attachment, Conversation, ModelInfo, StatusResponse } from "../types";
 import { applyEvent, emptyTimeline, removeBlock, type Block, type TimelineState } from "../timeline";
+import { itemOpensSandboxBrowser } from "../browserCommand";
 import { Markdown } from "./Markdown";
 
 interface Props {
@@ -11,6 +12,10 @@ interface Props {
   onConversationChanged: () => void;
   onStatusChanged: () => void;
   onOpenWorkspace: (path?: string) => void;
+  /** Open a Markdown link as a real tab in the sandbox browser. */
+  onOpenBrowserLink: (url: string) => void;
+  /** The agent itself navigated the sandbox browser; reveal that view. */
+  onAgentBrowserNavigate: () => void;
 }
 
 const EFFORT_LABELS: Record<string, string> = {
@@ -35,7 +40,16 @@ function newMessageId(): string {
   return `m${Date.now()}${Math.random().toString(36).slice(2)}`;
 }
 
-export function Chat({ conversation, models, status, onConversationChanged, onStatusChanged, onOpenWorkspace }: Props) {
+export function Chat({
+  conversation,
+  models,
+  status,
+  onConversationChanged,
+  onStatusChanged,
+  onOpenWorkspace,
+  onOpenBrowserLink,
+  onAgentBrowserNavigate,
+}: Props) {
   const [timeline, setTimeline] = useState<TimelineState>(() => emptyTimeline());
   const [connected, setConnected] = useState(false);
   const [draft, setDraft] = useState("");
@@ -56,12 +70,20 @@ export function Chat({ conversation, models, status, onConversationChanged, onSt
   onChangedRef.current = onConversationChanged;
   const onStatusRef = useRef(onStatusChanged);
   onStatusRef.current = onStatusChanged;
+  // Same rule as the other stream callbacks: keep the latest handler in a ref so
+  // a new identity never re-runs the effect and reconnects the SSE stream.
+  const onBrowserNavRef = useRef(onAgentBrowserNavigate);
+  onBrowserNavRef.current = onAgentBrowserNavigate;
 
   // Load history, then stream. Reconnects resume from the last seen event id.
   useEffect(() => {
     let disposed = false;
     let close: (() => void) | null = null;
     let retry: number | null = null;
+    // Replayed history must never move the workspace. Live events only start
+    // after the stream reports `replay.complete`; every (re)connect resets this
+    // so a reconnect's replay is treated like history too.
+    let liveEvents = false;
     setTimeline(emptyTimeline());
     setConnected(false);
     lastIdRef.current = 0;
@@ -85,10 +107,20 @@ export function Chat({ conversation, models, status, onConversationChanged, onSt
     };
 
     const connect = () => {
+      liveEvents = false;
       close = openEventStream(conversation.id, lastIdRef.current, {
         onEvent: (event: AgentEvent) => {
           if (event.id <= lastIdRef.current) return;
           lastIdRef.current = event.id;
+          // The agent itself navigated the sandbox browser: reveal that view, but
+          // only on this open chat page and only if it is in the foreground, so a
+          // background tab never steals focus.
+          if (liveEvents && event.type === "item/started") {
+            const item = (event.payload?.item ?? null) as Record<string, unknown> | null;
+            if (itemOpensSandboxBrowser(item) && document.visibilityState === "visible" && document.hasFocus()) {
+              onBrowserNavRef.current();
+            }
+          }
           setTimeline((prev) => {
             const next: TimelineState = { blocks: [...prev.blocks], index: new Map(prev.index) };
             applyEvent(next, event);
@@ -102,7 +134,10 @@ export function Chat({ conversation, models, status, onConversationChanged, onSt
           // this header) immediately instead of waiting for the next poll.
           if (event.type === "conversation.title_updated") onChangedRef.current();
         },
-        onOpen: () => setConnected(true),
+        onOpen: () => {
+          setConnected(true);
+          liveEvents = true;
+        },
         onError: () => {
           setConnected(false);
           close?.();
@@ -250,12 +285,14 @@ export function Chat({ conversation, models, status, onConversationChanged, onSt
   const pendingApprovals = useMemo(() => blocks.filter((b) => b.kind === "approval" && b.status === "pending").length, [blocks]);
 
   return (
-    <section className="chat">
+    <section className={`chat ${running ? "running" : ""}`}>
       <header className="chat-head">
         <div className="chat-title">
           <h2 title={conversation.title}>{conversation.title}</h2>
           <span className={`dot ${connected ? "ok" : "warn"}`} aria-hidden />
-          <span className="chat-sub">{connected ? "已连接" : "重连中…"}</span>
+          <span className="chat-sub">
+            {running ? "智能体工作中…" : connected ? "已连接" : "重连中…"}
+          </span>
         </div>
         <div className="chat-head-actions">
           {pendingApprovals > 0 && <span className="pill warn">{pendingApprovals} 项待处理</span>}
@@ -294,7 +331,13 @@ export function Chat({ conversation, models, status, onConversationChanged, onSt
         )}
 
         {blocks.map((block) => (
-          <BlockView key={block.id} block={block} onRespond={respond} onOpenWorkspace={onOpenWorkspace} />
+          <BlockView
+            key={block.id}
+            block={block}
+            onRespond={respond}
+            onOpenWorkspace={onOpenWorkspace}
+            onOpenBrowserLink={onOpenBrowserLink}
+          />
         ))}
       </div>
 
@@ -411,10 +454,12 @@ function BlockView({
   block,
   onRespond,
   onOpenWorkspace,
+  onOpenBrowserLink,
 }: {
   block: Block;
   onRespond: (requestId: string, decision: string, extra?: unknown) => void;
   onOpenWorkspace: (path?: string) => void;
+  onOpenBrowserLink: (url: string) => void;
 }) {
   if (block.kind === "user") {
     return (
@@ -439,7 +484,7 @@ function BlockView({
     return (
       <article className="msg assistant">
         <div className="bubble">
-          <Markdown source={block.text} />
+          <Markdown source={block.text} onOpenLink={onOpenBrowserLink} />
           {block.streaming && <span className="caret" aria-hidden />}
         </div>
       </article>

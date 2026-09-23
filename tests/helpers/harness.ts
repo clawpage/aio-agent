@@ -39,6 +39,10 @@ export interface SandboxScript {
   shellView?: { success: boolean; data?: Record<string, unknown> };
   /** Make /v1/file/write return a structured FileOperationError. */
   writeError?: boolean;
+  /** Payload returned by POST /v1/browser/tabs (defaults to a success envelope). */
+  browserTab?: { success: boolean; message?: string; data?: unknown };
+  /** HTTP status returned by POST /v1/browser/tabs (defaults to 200). */
+  browserTabStatus?: number;
 }
 
 export interface FakeSandbox {
@@ -48,6 +52,7 @@ export interface FakeSandbox {
   script: SandboxScript;
   lastShellCommand: () => string;
   lastUploadBody: () => string;
+  lastBrowserTabBody: () => string;
   close: () => Promise<void>;
 }
 
@@ -57,6 +62,7 @@ export async function startFakeSandbox(): Promise<FakeSandbox> {
   const sandboxScript: SandboxScript = {};
   let lastShellCommand = "";
   let lastUploadBody = "";
+  let lastBrowserTabBody = "";
   // In the default "everything exists" mode, model the real filesystem effect of
   // `rm -rf` so higher-level delete flows can verify removal. Tests that pin
   // `existingPaths` keep that list authoritative (used to assert unverified
@@ -147,6 +153,17 @@ export async function startFakeSandbox(): Promise<FakeSandbox> {
       });
       return;
     }
+    if (req.url === "/v1/browser/tabs") {
+      let body = "";
+      req.on("data", (c) => (body += c));
+      req.on("end", () => {
+        lastBrowserTabBody = body;
+        const payload = sandboxScript.browserTab ?? { success: true, message: "opened", data: { tabId: "tab_1" } };
+        res.writeHead(sandboxScript.browserTabStatus ?? 200, { "content-type": "application/json" });
+        res.end(JSON.stringify(payload));
+      });
+      return;
+    }
     if (req.url?.startsWith("/echo")) {
       let body = "";
       req.on("data", (c) => (body += c));
@@ -189,6 +206,7 @@ export async function startFakeSandbox(): Promise<FakeSandbox> {
     script: sandboxScript,
     lastShellCommand: () => lastShellCommand,
     lastUploadBody: () => lastUploadBody,
+    lastBrowserTabBody: () => lastBrowserTabBody,
     close: async () => {
       for (const socket of upgraded) socket.destroy();
       upgraded.clear();

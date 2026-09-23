@@ -89,8 +89,10 @@ export const api = {
   refresh: () => request<{ ok: boolean; expiresAt: number }>("/api/auth/refresh", { method: "POST", body: {} }),
   status: () => request<StatusResponse>("/api/status"),
 
-  conversations: () => request<{ conversations: Conversation[] }>("/api/conversations"),
-  createConversation: (title?: string) => request<{ conversation: Conversation }>("/api/conversations", { method: "POST", body: { title: title ?? "" } }),
+  conversations: (includeArchived = false) =>
+    request<{ conversations: Conversation[] }>(`/api/conversations${includeArchived ? "?archived=1" : ""}`),
+  createConversation: (title?: string) =>
+    request<{ conversation: Conversation; reused: boolean }>("/api/conversations", { method: "POST", body: { title: title ?? "" } }),
   updateConversation: (id: string, patch: { title?: string; archived?: boolean }) =>
     request<{ conversation: Conversation }>(`/api/conversations/${encodeURIComponent(id)}`, { method: "PATCH", body: patch }),
   conversation: (id: string) =>
@@ -107,6 +109,10 @@ export const api = {
     request<{ ok: boolean; message: string }>(`/api/approvals/${encodeURIComponent(requestId)}/respond`, { method: "POST", body: { decision, extra } }),
 
   models: () => request<{ models: ModelInfo[] }>("/api/models"),
+
+  /** Open a link in a new tab of the sandbox's real Chromium (validated server-side). */
+  openBrowserTab: (url: string) =>
+    request<{ ok: boolean; message: string; data: unknown }>("/api/browser/tabs", { method: "POST", body: { url } }),
   capabilities: () => request<CapabilitiesResponse>("/api/capabilities"),
   sandboxContext: () => request<{ context: string | null }>("/api/sandbox/context"),
 

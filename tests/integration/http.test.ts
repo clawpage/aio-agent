@@ -208,6 +208,174 @@ describe("conversation and agent endpoints", () => {
   });
 });
 
+describe("conversation management and sandbox browser tabs", () => {
+  it("reuses a blank default conversation for an empty create and keeps explicit titles separate", async () => {
+    const { cookie, csrf } = await login(h);
+    const headers = { cookie, "x-csrf-token": csrf, "content-type": "application/json" };
+
+    const first = await h.request("/api/conversations", { method: "POST", headers, body: JSON.stringify({ title: "" }) });
+    expect(first.status).toBe(201);
+    const firstBody = (await first.json()) as { conversation: { id: string }; reused: boolean };
+    expect(firstBody.reused).toBe(false);
+
+    const second = await h.request("/api/conversations", { method: "POST", headers, body: JSON.stringify({ title: "   " }) });
+    expect(second.status).toBe(200);
+    const secondBody = (await second.json()) as { conversation: { id: string }; reused: boolean };
+    expect(secondBody.reused).toBe(true);
+    expect(secondBody.conversation.id).toBe(firstBody.conversation.id);
+
+    const explicit = await h.request("/api/conversations", { method: "POST", headers, body: JSON.stringify({ title: "显式标题" }) });
+    expect(explicit.status).toBe(201);
+    const explicitBody = (await explicit.json()) as { conversation: { id: string }; reused: boolean };
+    expect(explicitBody.reused).toBe(false);
+    expect(explicitBody.conversation.id).not.toBe(firstBody.conversation.id);
+  });
+
+  it("returns 409 when restoring a blank default while another is already active", async () => {
+    const { cookie, csrf } = await login(h);
+    const headers = { cookie, "x-csrf-token": csrf, "content-type": "application/json" };
+    // Ensure one active blank default exists (created or reused from the other test).
+    const active = await h.request("/api/conversations", { method: "POST", headers, body: JSON.stringify({ title: "" }) });
+    expect([200, 201]).toContain(active.status);
+
+    const now = Date.now();
+    h.ctx.db
+      .prepare(
+        "INSERT INTO conversations (id, owner_id, title, model, cwd, status, archived, created_at, updated_at) VALUES ('conv_blank_archived', 'owner_1', '新会话', NULL, NULL, 'idle', 1, ?, ?)",
+      )
+      .run(now, now);
+    const res = await h.request("/api/conversations/conv_blank_archived", {
+      method: "PATCH",
+      headers,
+      body: JSON.stringify({ archived: false }),
+    });
+    expect(res.status).toBe(409);
+    expect(((await res.json()) as { error: string }).error).toBe("conversation_conflict");
+    h.ctx.db.prepare("DELETE FROM conversations WHERE id = 'conv_blank_archived'").run();
+  });
+
+  it("returns 409 when a blank conversation is renamed onto the active default slot", async () => {
+    const { cookie, csrf } = await login(h);
+    const headers = { cookie, "x-csrf-token": csrf, "content-type": "application/json" };
+    // Ensure one active blank default exists (created or reused from a prior test).
+    const active = await h.request("/api/conversations", { method: "POST", headers, body: JSON.stringify({ title: "" }) });
+    expect([200, 201]).toContain(active.status);
+
+    const created = await h.request("/api/conversations", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ title: "将被改名" }),
+    });
+    const { conversation } = (await created.json()) as { conversation: { id: string; title: string } };
+
+    const conflict = await h.request(`/api/conversations/${conversation.id}`, {
+      method: "PATCH",
+      headers,
+      body: JSON.stringify({ title: "新会话" }),
+    });
+    expect(conflict.status).toBe(409);
+    expect(((await conflict.json()) as { error: string }).error).toBe("conversation_conflict");
+
+    // A normal rename still works and is announced.
+    const renamed = await h.request(`/api/conversations/${conversation.id}`, {
+      method: "PATCH",
+      headers,
+      body: JSON.stringify({ title: "改名成功" }),
+    });
+    expect(renamed.status).toBe(200);
+    expect(((await renamed.json()) as { conversation: { title: string } }).conversation.title).toBe("改名成功");
+  });
+
+  it("rejects a blank or over-long rename with 400 without touching the row or manual marker", async () => {
+    const { cookie, csrf } = await login(h);
+    const headers = { cookie, "x-csrf-token": csrf, "content-type": "application/json" };
+
+    const now = Date.now();
+    h.ctx.db
+      .prepare(
+        "INSERT INTO conversations (id, owner_id, title, model, cwd, status, archived, created_at, updated_at) VALUES ('conv_title_guard', 'owner_1', '原始标题', NULL, NULL, 'idle', 0, ?, ?)",
+      )
+      .run(now, now);
+    const manualKey = "title_manual:conv_title_guard";
+    expect(h.ctx.db.prepare("SELECT value FROM meta WHERE key = ?").get(manualKey)).toBeUndefined();
+
+    try {
+      for (const bad of ["", "   ", "x".repeat(201), null, 42]) {
+        const res = await h.request("/api/conversations/conv_title_guard", {
+          method: "PATCH",
+          headers,
+          body: JSON.stringify({ title: bad }),
+        });
+        expect(res.status, `rejecting ${JSON.stringify(bad)}`).toBe(400);
+        expect(((await res.json()) as { error: string }).error).toBe("invalid_title");
+      }
+
+      // Neither the stored title nor the manual-title marker moved.
+      const row = h.ctx.db.prepare("SELECT title FROM conversations WHERE id = 'conv_title_guard'").get() as { title: string };
+      expect(row.title).toBe("原始标题");
+      expect(h.ctx.db.prepare("SELECT value FROM meta WHERE key = ?").get(manualKey)).toBeUndefined();
+
+      // A valid, trimmed title still renames and records the manual marker.
+      const ok = await h.request("/api/conversations/conv_title_guard", {
+        method: "PATCH",
+        headers,
+        body: JSON.stringify({ title: `  ${"长".repeat(200)}  ` }),
+      });
+      expect(ok.status).toBe(200);
+      expect(((await ok.json()) as { conversation: { title: string } }).conversation.title).toBe("长".repeat(200));
+      expect(h.ctx.db.prepare("SELECT value FROM meta WHERE key = ?").get(manualKey)).toBeTruthy();
+    } finally {
+      h.ctx.db.prepare("DELETE FROM events WHERE conversation_id = 'conv_title_guard'").run();
+      h.ctx.db.prepare("DELETE FROM conversations WHERE id = 'conv_title_guard'").run();
+      h.ctx.db.prepare("DELETE FROM meta WHERE key = ?").run(manualKey);
+    }
+  });
+
+  it("has no delete endpoint for conversations", async () => {
+    const { cookie, csrf } = await login(h);
+    const created = await h.request("/api/conversations", {
+      method: "POST",
+      headers: { cookie, "x-csrf-token": csrf, "content-type": "application/json" },
+      body: JSON.stringify({ title: "不可删除" }),
+    });
+    const { conversation } = (await created.json()) as { conversation: { id: string } };
+    const res = await h.request(`/api/conversations/${conversation.id}`, {
+      method: "DELETE",
+      headers: { cookie, "x-csrf-token": csrf },
+    });
+    expect(res.status).toBe(404);
+  });
+
+  it("opens an http/https link as a sandbox browser tab and rejects unsafe URLs", async () => {
+    const { cookie, csrf } = await login(h);
+    const headers = { cookie, "x-csrf-token": csrf, "content-type": "application/json" };
+
+    const ok = await h.request("/api/browser/tabs", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ url: "https://example.com/a?b=1" }),
+    });
+    expect(ok.status).toBe(200);
+    expect(((await ok.json()) as { ok: boolean }).ok).toBe(true);
+    expect((JSON.parse(h.sandbox.lastBrowserTabBody()) as { url: string }).url).toBe("https://example.com/a?b=1");
+
+    for (const bad of ["javascript:alert(1)", "file:///etc/passwd", "https://user:pass@example.com/", "mailto:x@y.com", "not a url", ""]) {
+      const res = await h.request("/api/browser/tabs", { method: "POST", headers, body: JSON.stringify({ url: bad }) });
+      expect(res.status, `rejecting ${bad}`).toBe(400);
+    }
+
+    // A sandbox-side failure must surface, never be reported as success.
+    h.sandbox.script.browserTab = { success: false, message: "模拟浏览器错误" };
+    const failed = await h.request("/api/browser/tabs", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ url: "https://example.com/" }),
+    });
+    expect(failed.status).toBe(502);
+    expect(((await failed.json()) as { message: string }).message).toContain("模拟浏览器错误");
+  });
+});
+
 describe("sandbox proxy", () => {
   it("denies unauthenticated access to the companion origin", async () => {
     const res = await h.request("/terminal", { host: "workspace" });

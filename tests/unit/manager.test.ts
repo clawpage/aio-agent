@@ -1,7 +1,13 @@
 import { describe, expect, it, beforeEach, afterEach } from "vitest";
 import { openDb, getMeta, type Db } from "../../src/server/db.js";
 import { Logger } from "../../src/server/logger.js";
-import { AgentManager, TurnConflictError, buildApprovalResponse, parseAttachments } from "../../src/server/codex/manager.js";
+import {
+  AgentManager,
+  InvalidConversationTitleError,
+  TurnConflictError,
+  buildApprovalResponse,
+  parseAttachments,
+} from "../../src/server/codex/manager.js";
 import { FakeCodex, testConfig } from "../helpers/harness.js";
 import type { HostTokenSource } from "../../src/server/codex/hostTokens.js";
 
@@ -364,7 +370,7 @@ describe("AgentManager", () => {
 
   it("records a manual rename and announces it in one step", () => {
     const conv = agent.createConversation();
-    expect(agent.renameConversation(conv.id, "  我的手改标题  ")).toBe(true);
+    expect(agent.renameConversation(conv.id, "  我的手改标题  ").renamed).toBe(true);
 
     const row = db.prepare("SELECT title FROM conversations WHERE id = ?").get(conv.id) as { title: string };
     expect(row.title).toBe("我的手改标题");
@@ -375,7 +381,7 @@ describe("AgentManager", () => {
     expect(updates[0]!.payload).toEqual({ title: "我的手改标题" });
 
     // Renaming a conversation that does not exist changes nothing and stays silent.
-    expect(agent.renameConversation("conv_missing", "x")).toBe(false);
+    expect(agent.renameConversation("conv_missing", "x").renamed).toBe(false);
   });
 
   it("records an explicit default title at creation as a manual choice", () => {
@@ -770,5 +776,157 @@ describe("attachment parsing", () => {
     expect(parseAttachments('[{"path":"/a.png","kind":"image"}]')).toEqual([{ path: "/a.png", kind: "image", name: undefined }]);
     expect(parseAttachments("not json")).toEqual([]);
     expect(parseAttachments(null)).toEqual([]);
+  });
+});
+
+describe("conversation lifecycle management", () => {
+  it("reuses an active blank default conversation and keeps explicit titles separate", async () => {
+    const { agent, db } = makeManager();
+    await agent.init();
+    const first = agent.getOrCreateConversation();
+    expect(first.reused).toBe(false);
+    expect(first.conversation.title).toBe("新会话");
+
+    const second = agent.getOrCreateConversation();
+    expect(second.reused).toBe(true);
+    expect(second.conversation.id).toBe(first.conversation.id);
+
+    const explicit = agent.getOrCreateConversation({ title: "显式" });
+    expect(explicit.reused).toBe(false);
+    expect(explicit.conversation.id).not.toBe(first.conversation.id);
+    agent.shutdown();
+    db.close();
+  });
+
+  it("refuses to restore a blank default while another active blank default exists", () => {
+    const { agent, db } = makeManager();
+    const activeBlank = agent.createConversation();
+    const archivedBlank = agent.createConversation();
+    agent.archiveConversation(archivedBlank.id, true);
+
+    const conflict = agent.restoreConversation(archivedBlank.id);
+    expect(conflict.conflict).toBe(true);
+    expect(agent.getConversation(archivedBlank.id)?.archived).toBe(1);
+
+    // With no active blank left, the restore succeeds.
+    agent.archiveConversation(activeBlank.id, true);
+    const ok = agent.restoreConversation(archivedBlank.id);
+    expect(ok.restored).toBe(true);
+    expect(agent.getConversation(archivedBlank.id)?.archived).toBe(0);
+    agent.shutdown();
+    db.close();
+  });
+
+  it("restores a conversation with messages even while a blank default is active", async () => {
+    const { agent, codex, db } = makeManager();
+    await agent.init();
+    agent.createConversation();
+    const used = agent.createConversation({ title: "有消息" });
+    agent.submitTurn({ conversationId: used.id, text: "hi", clientMessageId: "m1" });
+    await tick();
+    codex.completeTurn(codex.startedTurns[0]!.turnId);
+    await tick();
+    agent.archiveConversation(used.id, true);
+
+    const restored = agent.restoreConversation(used.id);
+    expect(restored.restored).toBe(true);
+    expect(agent.getConversation(used.id)?.archived).toBe(0);
+    agent.shutdown();
+    db.close();
+  });
+
+  it("does not reuse a blank default conversation once it has a turn", async () => {
+    const { agent, codex, db } = makeManager();
+    await agent.init();
+    const first = agent.getOrCreateConversation();
+    agent.submitTurn({ conversationId: first.conversation.id, text: "hi", clientMessageId: "m1" });
+    await tick();
+    codex.completeTurn(codex.startedTurns[0]!.turnId);
+    await tick();
+
+    const second = agent.getOrCreateConversation();
+    expect(second.reused).toBe(false);
+    expect(second.conversation.id).not.toBe(first.conversation.id);
+    agent.shutdown();
+    db.close();
+  });
+
+  it("refuses to rename a blank conversation onto the active default slot", () => {
+    const { agent, db } = makeManager();
+    // One active blank default already occupies the single default slot.
+    agent.createConversation();
+    const other = agent.createConversation({ title: "有标题" });
+
+    const conflict = agent.renameConversation(other.id, "新会话");
+    expect(conflict.conflict).toBe(true);
+    expect(conflict.renamed).toBe(false);
+    expect(agent.getConversation(other.id)?.title).toBe("有标题");
+
+    // A non-default title still renames normally.
+    const ok = agent.renameConversation(other.id, "自定义标题");
+    expect(ok.conflict).toBe(false);
+    expect(ok.renamed).toBe(true);
+    expect(agent.getConversation(other.id)?.title).toBe("自定义标题");
+    agent.shutdown();
+    db.close();
+  });
+
+  it("allows the default title once the active conversation is no longer blank", async () => {
+    const { agent, codex, db } = makeManager();
+    await agent.init();
+    const first = agent.createConversation();
+    agent.submitTurn({ conversationId: first.id, text: "hi", clientMessageId: "m1" });
+    await tick();
+    codex.completeTurn(codex.startedTurns[0]!.turnId);
+    await tick();
+
+    const second = agent.createConversation({ title: "另一个" });
+    const ok = agent.renameConversation(second.id, "新会话");
+    expect(ok.conflict).toBe(false);
+    expect(ok.renamed).toBe(true);
+    expect(agent.getConversation(second.id)?.title).toBe("新会话");
+    agent.shutdown();
+    db.close();
+  });
+
+  it("rejects blank and over-long manual titles instead of silently rewriting them", () => {
+    const { agent, db } = makeManager();
+    const conv = agent.createConversation({ title: "原名" });
+    for (const bad of ["", "   ", "x".repeat(201)]) {
+      expect(() => agent.renameConversation(conv.id, bad)).toThrow(InvalidConversationTitleError);
+    }
+    expect(agent.getConversation(conv.id)?.title).toBe("原名");
+
+    const ok = agent.renameConversation(conv.id, `  ${"y".repeat(200)}  `);
+    expect(ok.renamed).toBe(true);
+    expect(agent.getConversation(conv.id)?.title).toBe("y".repeat(200));
+    agent.shutdown();
+    db.close();
+  });
+
+  it("archives duplicate blank defaults on init but never a conversation with messages", async () => {
+    const db = openDb(":memory:");
+    const now = Date.now();
+    const insert = (id: string, createdAt: number) => {
+      db.prepare(
+        "INSERT INTO conversations (id, owner_id, title, model, cwd, status, archived, created_at, updated_at) VALUES (?, 'owner_1', '新会话', NULL, '/home/gem/workspace', 'idle', 0, ?, ?)",
+      ).run(id, createdAt, createdAt);
+    };
+    insert("blank_old", now - 3000);
+    insert("blank_mid", now - 2000);
+    insert("blank_new", now - 1000);
+    insert("has_message", now - 4000);
+    db.prepare(
+      "INSERT INTO turns (id, conversation_id, client_message_id, status, input_text, created_at) VALUES ('t1', 'has_message', 'cm1', 'completed', 'hello', ?)",
+    ).run(now - 4000);
+
+    const { agent } = makeManager({}, db);
+    await agent.init();
+    const active = db.prepare("SELECT id FROM conversations WHERE archived = 0 ORDER BY id").all() as Array<{ id: string }>;
+    expect(active.map((r) => r.id)).toEqual(["blank_new", "has_message"]);
+    const archived = db.prepare("SELECT id FROM conversations WHERE archived = 1 ORDER BY id").all() as Array<{ id: string }>;
+    expect(archived.map((r) => r.id)).toEqual(["blank_mid", "blank_old"]);
+    agent.shutdown();
+    db.close();
   });
 });

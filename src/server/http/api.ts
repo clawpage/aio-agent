@@ -1,10 +1,11 @@
 import express, { type Request, type Response, type NextFunction, type Router } from "express";
 import type { AppContext } from "../context.js";
-import { TurnConflictError } from "../codex/manager.js";
+import { InvalidConversationTitleError, normalizeConversationTitle, TurnConflictError } from "../codex/manager.js";
 import type { AgentEvent } from "../codex/manager.js";
 import type { HostKind, RequestContext } from "./security.js";
 import { UNSAFE_METHODS, guardUnsafe, originAllowed } from "./security.js";
 import { BOOTSTRAP_USERNAME, authenticateOwner, getOwner } from "../auth/owner.js";
+import { parseHttpUrl } from "../aio/client.js";
 import { COOKIE_NAMES, clearSessionCookies, sessionCookies } from "../auth/sessions.js";
 import { safeRedirectPath } from "../auth/tickets.js";
 import { audit } from "../db.js";
@@ -298,8 +299,8 @@ export function createApiRouter(context: AppContext): Router {
       const title = typeof req.body?.title === "string" ? req.body.title : "";
       const model = typeof req.body?.model === "string" ? req.body.model : null;
       const cwd = typeof req.body?.cwd === "string" ? req.body.cwd : null;
-      const conversation = agent.createConversation({ title, model, cwd });
-      res.status(201).json({ conversation });
+      const { conversation, reused } = agent.getOrCreateConversation({ title, model, cwd });
+      res.status(reused ? 200 : 201).json({ conversation, reused });
     }),
   );
 
@@ -327,8 +328,45 @@ export function createApiRouter(context: AppContext): Router {
     requireSession,
     asyncHandler(async (req, res) => {
       const id = param(req, "id");
-      if (typeof req.body?.title === "string") agent.renameConversation(id, req.body.title);
-      if (typeof req.body?.archived === "boolean") agent.archiveConversation(id, req.body.archived);
+      const body = (req.body ?? {}) as Record<string, unknown>;
+      if ("title" in body) {
+        if (typeof body.title !== "string") {
+          res.status(400).json({ error: "invalid_title", message: "标题必须是字符串" });
+          return;
+        }
+        // Validate before any mutation, so a rejected title never renames the
+        // conversation or marks it as manually titled.
+        let title: string;
+        try {
+          title = normalizeConversationTitle(body.title);
+        } catch (err) {
+          if (!(err instanceof InvalidConversationTitleError)) throw err;
+          res.status(400).json({ error: "invalid_title", message: err.message });
+          return;
+        }
+        const renamed = agent.renameConversation(id, title);
+        if (renamed.conflict) {
+          res.status(409).json({
+            error: "conversation_conflict",
+            message: "已有一个活跃的空白默认会话，请先给它命名或归档，再使用这个标题",
+          });
+          return;
+        }
+      }
+      if (typeof body.archived === "boolean") {
+        if (body.archived) {
+          agent.archiveConversation(id, true);
+        } else {
+          const restored = agent.restoreConversation(id);
+          if (restored.conflict) {
+            res.status(409).json({
+              error: "conversation_conflict",
+              message: "已有一个活跃的空白默认会话，请先使用、重命名或归档它，再恢复这一个",
+            });
+            return;
+          }
+        }
+      }
       const conversation = agent.getConversation(id);
       if (!conversation) {
         res.status(404).json({ error: "not_found" });
@@ -802,6 +840,30 @@ export function createApiRouter(context: AppContext): Router {
     requireSession,
     asyncHandler(async (_req, res) => {
       res.json({ context: await aio.sandboxContext() });
+    }),
+  );
+
+  /**
+   * Open a link in a new tab of the sandbox's real Chromium. Narrow by design:
+   * the body only carries a URL, the URL must be http/https without credentials,
+   * and this endpoint can never drive any other sandbox API or a host browser.
+   */
+  router.post(
+    "/browser/tabs",
+    requireKind("primary"),
+    requireSession,
+    asyncHandler(async (req, res) => {
+      const checked = parseHttpUrl(typeof req.body?.url === "string" ? req.body.url : "");
+      if (!checked.ok) {
+        res.status(400).json({ error: "bad_url", message: checked.message });
+        return;
+      }
+      const result = await aio.createBrowserTab(checked.url);
+      if (!result.ok) {
+        res.status(502).json({ error: "browser_tab_failed", message: result.message });
+        return;
+      }
+      res.json({ ok: true, message: result.message, data: result.data ?? null });
     }),
   );
 

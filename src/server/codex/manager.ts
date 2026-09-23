@@ -120,6 +120,31 @@ export const LEGACY_DEFAULT_MODEL = "gpt-5.5";
 /** `meta` key recording that the one-time default-model migration already ran. */
 export const MODEL_MIGRATION_KEY = "model_default_migration_v1";
 
+/** Maximum length of a hand-typed conversation title; mirrored by the API and UI. */
+export const CONVERSATION_TITLE_MAX_CHARS = 200;
+
+/** Raised when a caller supplies a title the server refuses to persist verbatim. */
+export class InvalidConversationTitleError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "InvalidConversationTitleError";
+  }
+}
+
+/**
+ * Trim and validate a user-supplied conversation title. Blank and over-long
+ * titles are rejected instead of being silently rewritten, so a direct manager
+ * call follows exactly the same contract as `PATCH /conversations/:id`.
+ */
+export function normalizeConversationTitle(raw: string): string {
+  const title = raw.trim();
+  if (!title) throw new InvalidConversationTitleError("标题不能为空");
+  if (title.length > CONVERSATION_TITLE_MAX_CHARS) {
+    throw new InvalidConversationTitleError(`标题最长 ${CONVERSATION_TITLE_MAX_CHARS} 个字符`);
+  }
+  return title;
+}
+
 /**
  * Raised when a turn was already handed to Codex but its outcome can no longer be
  * determined (transport failure / process death). Such turns are never retried
@@ -221,6 +246,7 @@ export class AgentManager {
   async init(): Promise<void> {
     this.#reconcileInterrupted();
     this.#migrateLegacyDefaultModel();
+    this.#archiveDuplicateBlankConversations();
     this.#codex.onNotification((method, params) => this.#handleNotification(method, params));
     this.#codex.onServerRequest((id, method, params) => this.#handleServerRequest(id, method, params));
     this.#codex.onClosed((reason) => this.#handleCodexClosed(reason));
@@ -318,6 +344,39 @@ export class AgentManager {
     }
   }
 
+  /**
+   * Idempotent housekeeping: at most one active, zero-turn conversation may keep
+   * the default "新会话" title. Older duplicates are archived (recoverable), never
+   * deleted. A conversation with any message is never touched, and the newest
+   * blank default (by created_at, then id) always survives.
+   */
+  #archiveDuplicateBlankConversations(): void {
+    const rows = this.#db
+      .prepare(
+        `SELECT c.id FROM conversations c
+         WHERE c.archived = 0 AND c.title = ?
+           AND NOT EXISTS (SELECT 1 FROM turns t WHERE t.conversation_id = c.id)
+         ORDER BY c.created_at DESC, c.id DESC`,
+      )
+      .all(DEFAULT_CONVERSATION_TITLE) as Array<{ id: string }>;
+    if (rows.length <= 1) return;
+    const duplicates = rows.slice(1).map((r) => r.id);
+    const now = Date.now();
+    this.#db.exec("BEGIN IMMEDIATE");
+    try {
+      const stmt = this.#db.prepare("UPDATE conversations SET archived = 1, updated_at = ? WHERE id = ? AND archived = 0");
+      for (const id of duplicates) stmt.run(now, id);
+      this.#db.exec("COMMIT");
+    } catch (err) {
+      this.#db.exec("ROLLBACK");
+      throw err;
+    }
+    this.#log.info("archived duplicate blank default conversations", {
+      kept: rows[0]?.id ?? null,
+      archived: duplicates.length,
+    });
+  }
+
   // ---------------------------------------------------------------- events
 
   #appendEvent(conversationId: string, turnId: string | null, type: string, payload: unknown): AgentEvent {
@@ -391,9 +450,34 @@ export class AgentManager {
     return this.getConversation(id)!;
   }
 
-  renameConversation(id: string, title: string): boolean {
+  /**
+   * Rename a conversation by hand and mark the title as manual so the automatic
+   * titler never overwrites it. Returns `conflict` (instead of renaming) when the
+   * rename would create a second active, zero-turn default "新会话" — the active
+   * list must never hold two indistinguishable empty conversations; the caller
+   * maps that to a 409.
+   */
+  renameConversation(id: string, title: string): { renamed: boolean; conflict: boolean } {
     const now = Date.now();
-    const nextTitle = title.trim().slice(0, 200) || "会话";
+    const nextTitle = normalizeConversationTitle(title);
+    const existing = this.getConversation(id);
+    if (!existing) return { renamed: false, conflict: false };
+    // Only an active blank default competes for the single default slot; an
+    // archived blank stays recoverable and is guarded on restore instead.
+    if (existing.archived === 0 && nextTitle === DEFAULT_CONVERSATION_TITLE) {
+      const turns = this.#db.prepare("SELECT COUNT(*) AS n FROM turns WHERE conversation_id = ?").get(id) as { n: number };
+      if (turns.n === 0) {
+        const other = this.#db
+          .prepare(
+            `SELECT c.id FROM conversations c
+             WHERE c.archived = 0 AND c.id != ? AND c.title = ?
+               AND NOT EXISTS (SELECT 1 FROM turns t WHERE t.conversation_id = c.id)
+             LIMIT 1`,
+          )
+          .get(id, DEFAULT_CONVERSATION_TITLE) as { id: string } | undefined;
+        if (other) return { renamed: false, conflict: true };
+      }
+    }
     // The rename and its “manual title” marker must land together: a crash or
     // error between the two would otherwise drop the user's intent and let the
     // automatic titler rename the conversation afterwards.
@@ -409,12 +493,63 @@ export class AgentManager {
     }
     // Announce only after the commit, so a rolled-back rename is never broadcast.
     if (changed) this.#appendEvent(id, null, TITLE_UPDATED_EVENT, { title: nextTitle });
-    return changed;
+    return { renamed: changed, conflict: false };
   }
 
   archiveConversation(id: string, archived = true): boolean {
     const res = this.#db.prepare("UPDATE conversations SET archived = ?, updated_at = ? WHERE id = ?").run(archived ? 1 : 0, Date.now(), id);
     return res.changes > 0;
+  }
+
+  /**
+   * Restore an archived conversation. A blank default "新会话" (zero turns) may
+   * only be restored when no other active blank default exists, so the active
+   * list never contains two indistinguishable empty conversations; the caller
+   * maps `conflict` to a 409.
+   */
+  restoreConversation(id: string): { restored: boolean; conflict: boolean } {
+    const conversation = this.getConversation(id);
+    if (!conversation) return { restored: false, conflict: false };
+    if (conversation.archived && conversation.title === DEFAULT_CONVERSATION_TITLE) {
+      const turns = this.#db.prepare("SELECT COUNT(*) AS n FROM turns WHERE conversation_id = ?").get(id) as { n: number };
+      if (turns.n === 0) {
+        const other = this.#db
+          .prepare(
+            `SELECT c.id FROM conversations c
+             WHERE c.archived = 0 AND c.id != ? AND c.title = ?
+               AND NOT EXISTS (SELECT 1 FROM turns t WHERE t.conversation_id = c.id)
+             LIMIT 1`,
+          )
+          .get(id, DEFAULT_CONVERSATION_TITLE) as { id: string } | undefined;
+        if (other) return { restored: false, conflict: true };
+      }
+    }
+    return { restored: this.archiveConversation(id, false), conflict: false };
+  }
+
+  /**
+   * API-facing create: an empty title reuses the existing active, zero-turn
+   * default "新会话" instead of piling up blanks (the optional-archive on start
+   * becomes idempotent). An explicit title always creates a new conversation, so
+   * `createConversation` keeps its original one-insert semantics.
+   */
+  getOrCreateConversation(opts: { title?: string; model?: string | null; cwd?: string | null } = {}): {
+    conversation: ConversationRow;
+    reused: boolean;
+  } {
+    const requested = (opts.title ?? "").trim();
+    if (!requested) {
+      const existing = this.#db
+        .prepare(
+          `SELECT c.* FROM conversations c
+           WHERE c.archived = 0 AND c.title = ?
+             AND NOT EXISTS (SELECT 1 FROM turns t WHERE t.conversation_id = c.id)
+           ORDER BY c.created_at DESC, c.id DESC LIMIT 1`,
+        )
+        .get(DEFAULT_CONVERSATION_TITLE) as ConversationRow | undefined;
+      if (existing) return { conversation: existing, reused: true };
+    }
+    return { conversation: this.createConversation(opts), reused: false };
   }
 
   listTurns(conversationId: string): TurnRow[] {

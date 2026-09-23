@@ -47,12 +47,48 @@ async function archiveConversation(page: Page, id: string): Promise<void> {
   expect(res.ok(), `archiving test conversation ${id} must succeed (HTTP ${res.status()})`).toBe(true);
 }
 
+/** Show the conversation list on mobile, where the sidebar is hidden by default. */
+async function showSidebar(page: Page): Promise<void> {
+  const bottomNav = page.locator(".bottom-nav button", { hasText: "会话" });
+  if (await bottomNav.isVisible().catch(() => false)) {
+    await bottomNav.click();
+    await expect(page.locator(".sidebar")).toHaveClass(/show-mobile/);
+  }
+}
+
 /**
- * Create a new empty conversation and record its id in `created` *before* any
- * later assertion can fail, so the caller's `finally` always archives it.
+ * Create an independent conversation with a unique explicit title and select it.
+ *
+ * The console's empty "新建" may reuse the owner's existing blank default
+ * conversation (the server intentionally dedupes those), so a test that uploads
+ * or sends must never rely on it. An explicit title always creates a fresh row
+ * that belongs to this test and is the only thing cleanup archives.
  */
 async function newConversation(page: Page, created: string[]): Promise<string> {
   await ensureApp(page);
+  const title = `e2e-附件-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const res = await page.request.post("/api/conversations", {
+    headers: await authHeaders(page),
+    data: { title },
+  });
+  expect(res.status(), "an explicit title always creates a fresh conversation").toBe(201);
+  const body = (await res.json()) as { conversation?: { id?: string } };
+  const id = body.conversation?.id;
+  expect(typeof id, "create response must include a conversation id").toBe("string");
+  created.push(id as string);
+
+  // Reload so the new conversation is in the list, then select it explicitly
+  // instead of trusting whatever the list happens to auto-select.
+  await page.reload();
+  await expect(page.locator(".app")).toBeVisible({ timeout: 60_000 });
+  await showSidebar(page);
+  await page.locator(".conv", { hasText: title }).locator(".conv-main").click();
+  await expect(page.locator(".composer textarea")).toBeVisible({ timeout: 20_000 });
+  return id as string;
+}
+
+/** Click the console's 新建 button and return the server's create response. */
+async function clickNew(page: Page): Promise<{ id: string; reused: boolean; status: number }> {
   const createResponse = page.waitForResponse(
     (r) => r.request().method() === "POST" && new URL(r.url()).pathname === "/api/conversations",
   );
@@ -60,13 +96,10 @@ async function newConversation(page: Page, created: string[]): Promise<string> {
   if (await bottomNav.isVisible().catch(() => false)) await bottomNav.click();
   else await page.getByRole("button", { name: "＋ 新建会话" }).click();
   const res = await createResponse;
-  const body = (await res.json().catch(() => ({}))) as { conversation?: { id?: string } };
+  const body = (await res.json().catch(() => ({}))) as { conversation?: { id?: string }; reused?: boolean };
   const id = body.conversation?.id;
-  if (typeof id === "string") created.push(id);
-  expect(res.status(), "creating a test conversation must succeed").toBe(201);
   expect(typeof id, "create response must include a conversation id").toBe("string");
-  await expect(page.locator(".composer textarea")).toBeVisible({ timeout: 20_000 });
-  return id as string;
+  return { id: id as string, reused: Boolean(body.reused), status: res.status() };
 }
 
 /**
@@ -93,6 +126,26 @@ async function cleanup(page: Page, uploaded: string[], created: string[]): Promi
 }
 
 test.describe("attachment upload", () => {
+  test("新建会话 reuses one blank default instead of creating duplicates", async ({ page }) => {
+    const created: string[] = [];
+    try {
+      await ensureApp(page);
+      // The first empty create may create (201) or reuse (200) the owner's blank
+      // default; only a conversation this test created is ever archived.
+      const first = await clickNew(page);
+      if (first.status === 201) created.push(first.id);
+      await expect(page.locator(".composer textarea")).toBeVisible({ timeout: 20_000 });
+
+      const second = await clickNew(page);
+      if (second.status === 201) created.push(second.id);
+      expect(second.status, "the second empty create reuses the blank default").toBe(200);
+      expect(second.reused).toBe(true);
+      expect(second.id).toBe(first.id);
+    } finally {
+      await cleanup(page, [], created);
+    }
+  });
+
   test("附件 opens a real file chooser and uploads a synthetic file to a visible chip", async ({ page }) => {
     const created: string[] = [];
     const uploaded: string[] = [];
