@@ -3,7 +3,7 @@ import { mkdir } from "node:fs/promises";
 import { makeConversation, mockConsole, MOCK_STATUS } from "./mock-api";
 
 const id = "mobile-layout";
-const evidence = "/Users/mengxiao/workspace/.scratch/artifacts/personal-agent-mobile-ui";
+const evidence = "var/.playwright-artifacts/mobile-ui";
 function stream() {
   const items = [
     { type: "commandExecution", id: "command", command: "/bin/bash -lc \"aio shell exec 'free -h; df -h; inspect /home/gem/workspace/a-very-long-directory'\"", status: "completed", aggregatedOutput: "Mem: 5.8Gi 2.6Gi available" },

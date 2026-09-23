@@ -1,12 +1,64 @@
-# personal-agent
+# AIO Agent
 
-私有个人智能体：**Codex + AIO Sandbox**，一个 owner、一个常驻沙箱、一个常驻主智能体，
-中文控制台，桌面与手机功能对等。公网只通过专用 Cloudflare tunnel 暴露两个精确域名：
+> Canonical repository: <https://github.com/clawpage/aio-agent>
 
-- 控制台（登录、对话、审批、历史）：<https://agent.zymx.tech>
-- 伴随工作区（终端 / 桌面 / 浏览器 / 编辑器 / 笔记本 / 接口）：<https://agent-workspace.zymx.tech>
+**AIO Agent** 是一个 single-owner、self-hosted 的智能体控制台：一个常驻 **AIO Sandbox** 容器，
+一个常驻 **Codex** 主智能体，中文 UI，桌面与手机功能对等。它适合个人或单人团队把
+Codex + AIO Sandbox 跑在自己的机器上，通过自己的入口访问。
 
-> 两个域名都要求本人登录（未登录一律 401）。没有注册入口，也不对外提供服务。
+- **Single owner / self-hosted**：只有一个 owner 账号，没有注册入口，不是多租户服务，
+  也不对外提供公共 demo。
+- **Codex + AIO Sandbox**：命令、文件、浏览器、桌面、编辑器、笔记本都发生在容器里；
+  控制面只以固定参数调用 Docker，不挂载宿主 home / workspace / `docker.sock`。
+- **中文 UI**：登录、对话、审批、历史、配置、工作区全部为中文界面。
+- **两个来源**：控制台（主站）与伴随工作区（AIO 全部界面）是两个不同来源，都要求登录，
+  未登录一律 401。
+
+本仓库的公开安装入口（Quickstart）只依赖本仓库与宿主已安装的 Docker + Codex CLI；
+公共域名由使用者自行填写，仓库不附带任何公共 demo 入口。
+
+## Quickstart
+
+前置条件：
+
+- Node.js **>= 24**（见 `package.json` 的 `engines`）
+- 宿主已安装 **Docker**（AIO Agent 用它启动固定版沙箱容器）
+- 宿主 **Codex CLI 已登录**（`codex login`；控制面通过官方方法从宿主机取访问 token，
+  refresh token 永不离开宿主机）——这是真实运行时依赖，不是可选项
+
+```bash
+git clone https://github.com/clawpage/aio-agent.git
+cd aio-agent
+npm ci
+cp .env.example .env
+npm run build
+node --env-file=.env dist/server/index.js
+```
+
+`node --env-file=.env` 只在这次启动读取仓库根目录的 `.env`（Quickstart 的配置入口）。
+`var/runtime.env` 是另一条路径：只有 `bin/serve` 守护进程会读取它（见运行手册），
+用 `node --env-file` 直接启动时**不会**读取。
+
+首次启动会生成 owner 密码到 `var/owner-secret.txt`（0600，git 忽略，从不写日志）。
+
+本机访问（两个不同来源，本地开发时分别对应）：
+
+- 控制台（主站）：<http://localhost:4891>
+- 伴随工作区：<http://127.0.0.1:4891>
+
+生产使用者**必须**覆盖 `PA_PRIMARY_HOST` / `PA_WORKSPACE_HOST` 为自己的域名；
+`.env.example` 中的 `agent.example.com` / `workspace.example.com` 只是占位示例，
+不是公共 demo，也没有对应的公共实例。健康检查：
+
+```bash
+curl -s http://127.0.0.1:4891/healthz
+```
+
+> **兼容保留的运行时标识**：为兼容既有部署，容器名 `personal-agent-sandbox`、命名卷
+> `personal-agent-workspace` / `-codex` / `-browser`、SQLite 文件名 `personal-agent.sqlite`、
+> cookie 名 `pa_*` 与 `PA_*` 环境变量前缀**保持不变**——这些承载既有容器、卷、数据库与登录
+> 状态，改名会丢数据或中断服务。health `service` 字段与 Codex `clientInfo.name` 里的旧标识
+> 只是为兼容已有集成而保留，不是品牌。品牌层（包名、页面标题、侧栏、文档）为 AIO Agent。
 
 ## 它是什么
 
@@ -31,17 +83,16 @@
   `read-only` + `never` 审批）根据首条用户消息命名；不占用主执行队列、不改变主对话模型，
   失败保留“新会话”，用户手动改过的标题永不覆盖。
 
-## 快速开始
+## 本地开发与测试
 
 ```bash
-cd projects/personal-agent
-npm install
+npm ci                   # 按 lockfile 安装（与 Quickstart 一致）
 npm run build            # 构建前端 + 服务端
-npm test                 # 单元 + 集成测试（无需 Docker）
+npm test                 # 单元 + 集成测试（自带假沙箱，无需 Docker）
 npm run typecheck
 ```
 
-本机运行（不经过 tunnel）：
+本机运行（不经过任何 tunnel，只用 loopback）：
 
 ```bash
 PA_BIND=127.0.0.1 PA_PORT=4891 node dist/server/index.js
@@ -49,23 +100,22 @@ PA_BIND=127.0.0.1 PA_PORT=4891 node dist/server/index.js
 curl -s http://127.0.0.1:4891/healthz
 ```
 
-浏览器打开 `http://localhost:4891`（主站；本地开发中 `127.0.0.1:4891` 是伴随站，
+浏览器打开 `http://localhost:4891`（控制台；本地开发中 `127.0.0.1:4891` 是伴随站，
 两者是不同来源，跨站规则与线上一致）。
 
-生产路径（由 workspace 的统一 launcher 管理）：
-
-```bash
-tools/start.sh start personal-agent      # 或 restart / stop / status
-```
+> 可选：本仓库最初用 workspace 根目录的统一 launcher 管理现有部署
+> （`tools/start.sh start|restart|stop|status personal-agent`）。它属于**现有部署的可选管理方式**，
+> 不是公开安装的必要步骤；公开使用者用上面的 `node --env-file=.env dist/server/index.js` 即可。
 
 ## 验收（分四层，各层职责不同）
 
 ```bash
 npm test                 # 1) vitest 单元 + 集成（自带假沙箱，不需要 Docker/网络）
-npm run smoke            # 2) 对已部署实例的真实 HTTP + WebSocket 冒烟（默认公网）
-npx playwright test      # 3) 真实浏览器 UI（桌面 1440×900 + 手机 390×844）
-PA_PRIMARY_ORIGIN=http://localhost:4891 \
-PA_COMPANION_ORIGIN=http://127.0.0.1:4891 npm run smoke     # 对本地实例冒烟
+npm run smoke            # 2) HTTP + WebSocket 冒烟（默认本地 localhost:4891 + 127.0.0.1:4891）
+npx playwright test      # 3) 真实浏览器 UI（默认本地 http://localhost:4891）
+# 真实公网验收：显式指定两个 origin（缺省只跑本地）
+PA_PRIMARY_ORIGIN=https://agent.example.com \
+PA_COMPANION_ORIGIN=https://workspace.example.com npm run smoke
 
 # 本地假后端 UI 验收：静态 dist/web + 全部 /api 由 page.route mock，不会访问任何实例
 npx playwright install chromium webkit # 首次准备浏览器运行时
@@ -90,8 +140,8 @@ npm run build && npx playwright test --config playwright.local.config.ts
 | 变量 | 默认 | 说明 |
 | --- | --- | --- |
 | `PA_PORT` / `PA_BIND` | `4891` / `127.0.0.1` | 控制面监听地址 |
-| `PA_PRIMARY_HOST` / `PA_WORKSPACE_HOST` | `agent.zymx.tech` / `agent-workspace.zymx.tech` | 两个精确域名 |
-| `PA_TRUST_CF_CONNECTING_IP` | `1`（生产） | 仅在专用 tunnel 之后开启，否则限速可被伪造头绕过 |
+| `PA_PRIMARY_HOST` / `PA_WORKSPACE_HOST` | 源码默认 `agent.zymx.tech` / `agent-workspace.zymx.tech`（兼容保留） | **生产使用者必须覆盖**为自己的两个精确域名；`.env.example` 用 `agent.example.com` / `workspace.example.com` 占位 |
+| `PA_TRUST_CF_CONNECTING_IP` | `0` | 仅当请求确实经由自己可信的反向代理（会覆盖 `CF-Connecting-IP`）时才设为 `1`；否则限速可被伪造头绕过 |
 | `PA_SANDBOX_IMAGE` | `ghcr.io/agent-infra/sandbox:1.11.0` | 固定镜像，升级需人工确认 |
 | `PA_SANDBOX_CODEX_VERSION` | `0.156.1` | 沙箱内固定版 Codex CLI（在持久卷里，升级见运行手册） |
 | `PA_DEFAULT_MODEL` | `gpt-6-sol` | 未在统一配置页另选时的默认模型；配置页的模型/思考强度保存于 owner `meta`，对之后所有消息生效，提交时按 turn 冻结 |

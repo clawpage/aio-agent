@@ -12,7 +12,7 @@ import { makeConversation, mockConsole } from "./mock-api";
  * layouts itself via `setViewportSize`.
  */
 
-const OUT = "/Users/mengxiao/workspace/.scratch/artifacts/personal-agent-menu-qa";
+const OUT = "var/.playwright-artifacts/menu-qa";
 
 /** Wait for entry animations to settle so a screenshot shows the final frame. */
 async function settle(page: import("@playwright/test").Page, selector: string): Promise<void> {

@@ -7,7 +7,7 @@ const secretFile = process.env.PA_OWNER_SECRET_FILE ?? "var/owner-secret.txt";
 // Real login flow is exercised without the shared session state.
 test.use({ storageState: { cookies: [], origins: [] } });
 
-const base = process.env.PA_E2E_BASE ?? "https://agent.zymx.tech";
+const base = process.env.PA_E2E_BASE ?? "http://localhost:4891";
 const isLoopback = /^https?:\/\/(localhost|127\.0\.0\.1)(:|$)/.test(base);
 // Repeated wrong-password logins against the public hostname can trip Cloudflare's
 // edge rate limiter (Error 1015), which is not something this project controls.
@@ -29,7 +29,7 @@ test.describe("login", () => {
     });
 
     await page.goto("/");
-    await expect(page.getByRole("heading", { name: "个人智能体" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "AIO Agent" })).toBeVisible();
 
     await page.getByLabel("密码").fill(`wrong-${Date.now()}`);
     await page.getByRole("button", { name: "登录" }).click();

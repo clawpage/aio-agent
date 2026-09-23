@@ -31,7 +31,7 @@ export function Login({ onSuccess, notice }: { onSuccess: () => void; notice?: s
           void submit();
         }}
       >
-        <h1>个人智能体</h1>
+        <h1>AIO Agent</h1>
         <p className="muted">私有部署，仅一个所有者账号，不开放注册。</p>
         <label className="field">
           <span>账号</span>

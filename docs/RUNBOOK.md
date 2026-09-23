@@ -1,4 +1,4 @@
-# personal-agent 运行手册
+# AIO Agent 运行手册
 
 面向运维与故障处理。安全模型与设计理由见 [架构与安全边界](ARCHITECTURE.md)。
 
@@ -47,7 +47,9 @@ cd projects/personal-agent
 npm run typecheck && npm test
 npm run build                      # 必须先构建，bin/serve 会拒绝启动早于 src 的 dist
 /Users/mengxiao/workspace/tools/start.sh restart personal-agent
-npm run smoke
+# npm run smoke 默认只打本地；当前部署要对公网冒烟必须显式给出两个 origin：
+PA_PRIMARY_ORIGIN=https://agent.zymx.tech \
+PA_COMPANION_ORIGIN=https://agent-workspace.zymx.tech npm run smoke
 ```
 
 **沙箱 Codex CLI 版本**（与镜像分开固定）：模型可用性由 CLI 版本决定，固定镜像里的旧 CLI

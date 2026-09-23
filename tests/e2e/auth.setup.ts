@@ -15,7 +15,7 @@ setup("authenticate as owner", async ({ page }) => {
   fs.mkdirSync(path.dirname(STORAGE_STATE), { recursive: true, mode: 0o700 });
   fs.mkdirSync(new URL("../../var/.playwright", import.meta.url).pathname, { recursive: true, mode: 0o700 });
   await page.goto("/");
-  await expect(page.getByRole("heading", { name: "个人智能体" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "AIO Agent" })).toBeVisible();
   await page.getByLabel("密码").fill(password);
   await page.getByRole("button", { name: "登录" }).click();
   await expect(page.getByRole("button", { name: "＋ 新建会话" })).toBeVisible({ timeout: 60_000 });

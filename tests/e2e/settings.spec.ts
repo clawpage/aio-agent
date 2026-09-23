@@ -3,7 +3,7 @@ import { mkdir } from "node:fs/promises";
 import { makeConversation, mockConsole, MOCK_STATUS } from "./mock-api";
 
 const id = "settings-layout";
-const evidence = "/Users/mengxiao/workspace/.scratch/artifacts/personal-agent-config";
+const evidence = "var/.playwright-artifacts/config";
 
 function stream() {
   return (

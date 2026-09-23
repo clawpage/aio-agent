@@ -282,7 +282,7 @@ export function App() {
         <div className="brand">
           <span className="brand-mark" aria-hidden />
           <div>
-            <strong>个人智能体</strong>
+            <strong>AIO Agent</strong>
             <span className="muted tiny">Codex + AIO 沙箱</span>
           </div>
         </div>

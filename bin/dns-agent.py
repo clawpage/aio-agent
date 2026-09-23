@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Bounded DNS step for the personal-agent deployment.
+"""Bounded DNS helper for the ORIGINAL personal-agent deployment.
+
+NOTE: this is NOT a quickstart entry point. It depends on tooling OUTSIDE this
+repository (tools/linode-local/dns.py) and only manages the two exact CNAMEs of
+the author's existing deployment. Public/self-hosted users should configure
+PA_PRIMARY_HOST / PA_WORKSPACE_HOST themselves and ignore this script.
 
 Creates exactly two proxied CNAMEs (agent.zymx.tech, agent-workspace.zymx.tech)
 pointing at the dedicated personal-agent tunnel. It never modifies unrelated

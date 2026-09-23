@@ -10,7 +10,7 @@ import { makeConversation, mockConsole, MOCK_STATUS } from "./mock-api";
  */
 
 const CONV_ID = "conv_e2e_working";
-const evidence = "/Users/mengxiao/workspace/.scratch/artifacts/personal-agent-working-ui";
+const evidence = "var/.playwright-artifacts/working-ui";
 
 let nextId = 1;
 function event(type: string, payload: Record<string, unknown>, turnId: string | null = null) {

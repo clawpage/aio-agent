@@ -1,10 +1,11 @@
 import { defineConfig, devices } from "@playwright/test";
 
 /**
- * UI acceptance runs against a real deployment. Default is production; override
- * with PA_E2E_BASE (e.g. http://localhost:4891) for a local instance.
+ * UI acceptance runs against a real deployment. Defaults to a LOCAL instance so
+ * the public suite never touches anyone's production by accident; override with
+ * PA_E2E_BASE (e.g. https://agent.example.com) for an explicit public run.
  */
-const baseURL = process.env.PA_E2E_BASE ?? "https://agent.zymx.tech";
+const baseURL = process.env.PA_E2E_BASE ?? "http://localhost:4891";
 const storageState = process.env.PA_E2E_STATE ?? "var/.auth/state.json";
 
 export default defineConfig({
