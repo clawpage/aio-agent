@@ -72,6 +72,16 @@ export function loadConfig(): {
   agent: {
     /** Model a turn uses when neither the client nor the conversation picked one. */
     defaultModel: string;
+    /** Generate a conversation title from the first turn with an isolated Luna run. */
+    autoTitle: boolean;
+    /** Model used only for the auxiliary title run; never the main conversation model. */
+    titleModel: string;
+    /** Reasoning effort for the auxiliary title run (Luna supports low..max, not minimal). */
+    titleEffort: string;
+    /** Upper bound on a generated title, in Unicode code points. */
+    titleMaxChars: number;
+    /** Hard timeout for one auxiliary title run. */
+    titleTimeoutMs: number;
   };
   hostCodex: {
     bin: string;
@@ -167,6 +177,13 @@ export function loadConfig(): {
     },
     agent: {
       defaultModel: envStr("PA_DEFAULT_MODEL", "gpt-6-sol"),
+      // Only the auxiliary title run uses a different model; the main agent stays
+      // on PA_DEFAULT_MODEL. Disabling this keeps the sandbox untouched by titles.
+      autoTitle: envStr("PA_AUTO_TITLE", "1") === "1",
+      titleModel: envStr("PA_TITLE_MODEL", "gpt-6-luna"),
+      titleEffort: envStr("PA_TITLE_EFFORT", "low"),
+      titleMaxChars: envInt("PA_TITLE_MAX_CHARS", 24),
+      titleTimeoutMs: envInt("PA_TITLE_TIMEOUT_SECONDS", 30) * 1000,
     },
     hostCodex: {
       bin: envStr("PA_HOST_CODEX_BIN", "codex"),

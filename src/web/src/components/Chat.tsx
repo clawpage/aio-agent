@@ -98,6 +98,9 @@ export function Chat({ conversation, models, status, onConversationChanged, onSt
             onChangedRef.current();
             onStatusRef.current();
           }
+          // An automatic title lands as its own event; refresh the sidebar (and
+          // this header) immediately instead of waiting for the next poll.
+          if (event.type === "conversation.title_updated") onChangedRef.current();
         },
         onOpen: () => setConnected(true),
         onError: () => {

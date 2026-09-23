@@ -5,6 +5,7 @@ import type { Config } from "../config.js";
 import type { Logger } from "../logger.js";
 import type { CodexModel, SandboxAccount } from "./sandboxCodex.js";
 import type { HostTokenSource } from "./hostTokens.js";
+import { AutoTitler, DEFAULT_CONVERSATION_TITLE, TITLE_UPDATED_EVENT, manualTitleMetaKey } from "./autoTitle.js";
 
 /**
  * Narrow view of the sandbox Codex process that the manager depends on. Keeping
@@ -31,6 +32,8 @@ export interface CodexSessionLike {
     clientUserMessageId?: string | null;
   }): Promise<string>;
   interrupt(threadId: string, turnId: string): Promise<void>;
+  /** One throwaway, tool-free run used only for automatic conversation titles. */
+  generateTitle(userText: string): Promise<string | null>;
   answer(id: string, result: unknown): boolean;
   close(): void;
 }
@@ -165,6 +168,7 @@ export class AgentManager {
   #log: Logger;
   #codex: CodexSessionLike;
   #hostTokens: HostTokenSource;
+  #titles: AutoTitler;
 
   #activeTurnId: string | null = null;
   #activeConversationId: string | null = null;
@@ -188,6 +192,15 @@ export class AgentManager {
     this.#log = deps.log.child("agent");
     this.#codex = deps.codex;
     this.#hostTokens = deps.hostTokens;
+    this.#titles = new AutoTitler({
+      cfg: deps.cfg,
+      db: deps.db,
+      log: deps.log,
+      codex: deps.codex,
+      appendEvent: (conversationId, turnId, type, payload) => {
+        this.#appendEvent(conversationId, turnId, type, payload);
+      },
+    });
     this.events.setMaxListeners(0);
   }
 
@@ -199,6 +212,19 @@ export class AgentManager {
     this.#codex.onClosed((reason) => this.#handleCodexClosed(reason));
     // Resume queue processing if the previous process died mid-queue.
     void this.#pump();
+    // If the session is already up (tests / warm start), catch up old titles now;
+    // otherwise startSandboxRuntime does it once the session is established.
+    if (this.#codex.ready) this.#titles.scheduleBackfill();
+  }
+
+  /** Queue bounded catch-up titles for default-named conversations (idempotent). */
+  scheduleTitleBackfill(): void {
+    this.#titles.scheduleBackfill();
+  }
+
+  /** Await all currently-queued automatic title runs (used by tests). */
+  async waitForAutoTitles(): Promise<void> {
+    await this.#titles.drain();
   }
 
   /**
@@ -337,17 +363,39 @@ export class AgentManager {
   createConversation(opts: { title?: string; model?: string | null; cwd?: string | null } = {}): ConversationRow {
     const now = Date.now();
     const id = randomId("conv");
-    const title = (opts.title ?? "").trim() || "新会话";
+    const requested = (opts.title ?? "").trim();
+    const title = requested || DEFAULT_CONVERSATION_TITLE;
     this.#db
       .prepare("INSERT INTO conversations (id, owner_id, title, model, cwd, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 'idle', ?, ?)")
       .run(id, "owner_1", title, opts.model ?? null, opts.cwd ?? this.#cfg.sandbox.containerWorkspaceDir, now, now);
+    // An explicit non-default title at creation is a user choice, not a slot for
+    // the automatic titler to overwrite later.
+    if (requested) {
+      setMeta(this.#db, manualTitleMetaKey(id), String(now));
+    }
     this.#appendEvent(id, null, "conversation.created", { title });
     return this.getConversation(id)!;
   }
 
   renameConversation(id: string, title: string): boolean {
-    const res = this.#db.prepare("UPDATE conversations SET title = ?, updated_at = ? WHERE id = ?").run(title.trim().slice(0, 200) || "会话", Date.now(), id);
-    return res.changes > 0;
+    const now = Date.now();
+    const nextTitle = title.trim().slice(0, 200) || "会话";
+    // The rename and its “manual title” marker must land together: a crash or
+    // error between the two would otherwise drop the user's intent and let the
+    // automatic titler rename the conversation afterwards.
+    let changed = false;
+    this.#db.exec("BEGIN IMMEDIATE");
+    try {
+      changed = this.#db.prepare("UPDATE conversations SET title = ?, updated_at = ? WHERE id = ?").run(nextTitle, now, id).changes > 0;
+      if (changed) setMeta(this.#db, manualTitleMetaKey(id), String(now));
+      this.#db.exec("COMMIT");
+    } catch (err) {
+      this.#db.exec("ROLLBACK");
+      throw err;
+    }
+    // Announce only after the commit, so a rolled-back rename is never broadcast.
+    if (changed) this.#appendEvent(id, null, TITLE_UPDATED_EVENT, { title: nextTitle });
+    return changed;
   }
 
   archiveConversation(id: string, archived = true): boolean {
@@ -541,6 +589,12 @@ export class AgentManager {
     if (status === "completed") {
       this.#db.prepare("UPDATE turns SET status = 'completed', completed_at = ? WHERE id = ?").run(Date.now(), turn.id);
       this.#appendEvent(conversation.id, turn.id, "turn.finished", { turnId: turn.id, status: "completed" });
+      // Name the conversation from its first message only, and only once the
+      // first turn has actually completed. Later turns never rename it.
+      const firstTurn = this.#db
+        .prepare("SELECT id FROM turns WHERE conversation_id = ? ORDER BY created_at ASC, rowid ASC LIMIT 1")
+        .get(conversation.id) as { id: string } | undefined;
+      if (firstTurn?.id === turn.id) this.#titles.scheduleForConversation(conversation.id);
     } else if (status === "interrupted") {
       this.#db.prepare("UPDATE turns SET status = 'interrupted', completed_at = ? WHERE id = ?").run(Date.now(), turn.id);
       this.#appendEvent(conversation.id, turn.id, "turn.finished", { turnId: turn.id, status: "interrupted" });
@@ -670,7 +724,10 @@ export class AgentManager {
   #conversationForThread(threadId: string | undefined, fallbackConversationId: string | null): string | null {
     if (threadId) {
       const row = this.#db.prepare("SELECT id FROM conversations WHERE codex_thread_id = ?").get(threadId) as { id: string } | undefined;
-      if (row) return row.id;
+      // A known thread always maps to its own conversation. An unknown thread is
+      // never silently attributed to whatever turn happens to be active: that is
+      // how an isolated auxiliary (auto-title) thread stays isolated.
+      return row?.id ?? null;
     }
     return fallbackConversationId;
   }
@@ -823,6 +880,15 @@ export class AgentManager {
   #bufferDelta(method: string, params: Record<string, unknown>): void {
     const conversationId = this.#activeConversationId;
     if (!conversationId) return;
+    // When a notification carries an explicit thread id it must belong to the
+    // active conversation's registered main thread. Auxiliary (auto-title) and
+    // unknown threads are dropped rather than attributed to the active
+    // conversation. Early events without a thread id keep the original behaviour.
+    const threadId = params.threadId;
+    if (typeof threadId === "string") {
+      const row = this.#db.prepare("SELECT id FROM conversations WHERE codex_thread_id = ?").get(threadId) as { id: string } | undefined;
+      if (row?.id !== conversationId) return;
+    }
     const itemId = String(params.itemId ?? params.turnId ?? "stream");
     const text = extractDeltaText(method, params);
     if (!text) return;

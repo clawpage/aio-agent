@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeEach, afterEach } from "vitest";
-import { openDb, type Db } from "../../src/server/db.js";
+import { openDb, getMeta, type Db } from "../../src/server/db.js";
 import { Logger } from "../../src/server/logger.js";
 import { AgentManager, TurnConflictError, buildApprovalResponse, parseAttachments } from "../../src/server/codex/manager.js";
 import { FakeCodex, testConfig } from "../helpers/harness.js";
@@ -291,6 +291,85 @@ describe("AgentManager", () => {
     expect(other.codex.startedTurns[0]?.model).toBe("gpt-6-luna");
     other.agent.shutdown();
     other.db.close();
+  });
+
+  it("names a conversation from its first message exactly once", async () => {
+    const conv = agent.createConversation();
+    expect(conv.title).toBe("新会话");
+    agent.submitTurn({ conversationId: conv.id, text: "帮我看看这个脚本", clientMessageId: "m1" });
+    await tick();
+    codex.completeTurn(codex.startedTurns[0]!.turnId);
+    await tick(40);
+    await agent.waitForAutoTitles();
+
+    expect(codex.titleCalls).toEqual(["帮我看看这个脚本"]);
+    let row = db.prepare("SELECT title FROM conversations WHERE id = ?").get(conv.id) as { title: string };
+    expect(row.title).toBe("自动标题");
+    expect(agent.listEvents(conv.id, 0).some((e) => e.type === "conversation.title_updated")).toBe(true);
+
+    // A second turn must never rename it again.
+    agent.submitTurn({ conversationId: conv.id, text: "第二轮", clientMessageId: "m2" });
+    await tick();
+    codex.completeTurn(codex.startedTurns[1]!.turnId);
+    await tick(40);
+    await agent.waitForAutoTitles();
+    expect(codex.titleCalls).toEqual(["帮我看看这个脚本"]);
+    row = db.prepare("SELECT title FROM conversations WHERE id = ?").get(conv.id) as { title: string };
+    expect(row.title).toBe("自动标题");
+  });
+
+  it("never overwrites a title the user set by hand", async () => {
+    const conv = agent.createConversation();
+    agent.renameConversation(conv.id, "我的会话");
+    agent.submitTurn({ conversationId: conv.id, text: "首条消息", clientMessageId: "m1" });
+    await tick();
+    codex.completeTurn(codex.startedTurns[0]!.turnId);
+    await tick(40);
+    await agent.waitForAutoTitles();
+
+    expect(codex.titleCalls).toEqual([]);
+    const row = db.prepare("SELECT title FROM conversations WHERE id = ?").get(conv.id) as { title: string };
+    expect(row.title).toBe("我的会话");
+  });
+
+  it("records a manual rename and announces it in one step", () => {
+    const conv = agent.createConversation();
+    expect(agent.renameConversation(conv.id, "  我的手改标题  ")).toBe(true);
+
+    const row = db.prepare("SELECT title FROM conversations WHERE id = ?").get(conv.id) as { title: string };
+    expect(row.title).toBe("我的手改标题");
+    // The marker that stops the auto-titler is written together with the title.
+    expect(getMeta(db, `title_manual:${conv.id}`)).not.toBeNull();
+    const updates = agent.listEvents(conv.id, 0).filter((e) => e.type === "conversation.title_updated");
+    expect(updates).toHaveLength(1);
+    expect(updates[0]!.payload).toEqual({ title: "我的手改标题" });
+
+    // Renaming a conversation that does not exist changes nothing and stays silent.
+    expect(agent.renameConversation("conv_missing", "x")).toBe(false);
+  });
+
+  it("records an explicit default title at creation as a manual choice", () => {
+    const conv = agent.createConversation({ title: "新会话" });
+    expect(conv.title).toBe("新会话");
+    // Even the default string, when explicitly requested, must not be auto-named.
+    expect(getMeta(db, `title_manual:${conv.id}`)).not.toBeNull();
+  });
+
+  it("drops deltas from unknown threads while the main turn is active", async () => {
+    const conv = agent.createConversation();
+    agent.submitTurn({ conversationId: conv.id, text: "主对话", clientMessageId: "m1" });
+    await tick();
+    const turn = codex.startedTurns[0]!;
+    // An auxiliary / unknown thread must never contribute to the main stream.
+    codex.emitNotification("item/agentMessage/delta", { threadId: "aux_1", turnId: "turn_aux", itemId: "i1", delta: "标题泄漏" });
+    // The registered main thread still buffers normally.
+    codex.emitNotification("item/agentMessage/delta", { threadId: turn.threadId, turnId: turn.turnId, itemId: "i2", delta: "正常增量" });
+    await tick(300);
+    const deltas = agent.listEvents(conv.id, 0).filter((e) => e.type === "stream.delta");
+    expect(deltas).toHaveLength(1);
+    expect(deltas[0]!.payload).toEqual({ itemId: "i2", kind: "item/agentMessage/delta", delta: "正常增量" });
+    codex.completeTurn(turn.turnId);
+    await tick();
   });
 });
 

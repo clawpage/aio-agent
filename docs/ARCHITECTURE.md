@@ -70,6 +70,17 @@
   最后用 `PA_DEFAULT_MODEL`（默认 `gpt-6-sol`）。升级时有一次受 `meta` 键
   （`model_default_migration_v1`）保护的一次性迁移：仍带旧默认值 `gpt-5.5` 的会话改为新默认，
   只改 `model` 列、不动历史；之后用户手动选择（包括 5.5）永久保留。
+- **自动标题**（独立于主对话）：会话首轮 `completed` 后，控制面异步启动一个沙箱内临时线程
+  （`thread/start {ephemeral:true, sandbox:"read-only", approvalPolicy:"never", model: PA_TITLE_MODEL}`），
+  把首条用户消息交给它生成短标题；首轮只有附件时用附件名/类型构造输入。只有临时线程被
+  `threadSubscriber` 接管，其通知、审批、delta 不会进入用户会话（`#conversationForThread` 对
+  未知线程不再回退到活动会话）。只有 `turn/completed` 状态为 `completed` 才采用结果；超时/失败
+  返回 `null`，超时时 best-effort `turn/interrupt`，并把该临时线程标记为 tombstone：直到真正收到
+  `turn/completed` 或会话关闭前，它的所有通知继续丢弃，避免迟到的 delta 被 `#bufferDelta` 记到主会话。
+  写库用 `UPDATE ... WHERE title='新会话' AND archived=0 AND NOT EXISTS(meta.title_manual:<id>)`
+  单条原子守卫；手动改名与 `meta.title_manual:<id>` 写入在同一 SQLite 事务，成功后发
+  `conversation.title_updated`。只重命名仍为默认名且从未手动改名的会话；失败保留原名，
+  同一进程不重试、下次启动可重试；旧会话在 Codex 就绪后串行补名。
 - 一个 owner 在沙箱内**串行执行**：同一时刻只有一个 turn 在跑，其他会话的输入排队；
   重复提交由 `clientMessageId` 幂等去重，同一 ID 携带不同内容会被 409 拒绝。
 - 所有事件（含流式 delta）先落 SQLite 再广播；浏览器断线**不会**中断智能体，重连按事件 id

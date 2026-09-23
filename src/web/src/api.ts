@@ -168,6 +168,7 @@ export function openEventStream(
   source.addEventListener("session.revoked", () => handlers.onRevoked?.());
   const knownTypes = [
     "conversation.created",
+    "conversation.title_updated",
     "turn.queued",
     "turn.started",
     "turn.codex_started",

@@ -58,6 +58,9 @@ npm run smoke
 | --- | --- | --- |
 | `PA_SANDBOX_CODEX_VERSION` | `0.156.1` | 固定版本；安装前缀与二进制路径都由它推导，不会与路径不一致 |
 | `PA_DEFAULT_MODEL` | `gpt-6-sol` | 新会话与旧会话后续轮次的默认模型；`/api/models` 也以它标记默认项 |
+| `PA_AUTO_TITLE` | `1` | 首轮完成后自动命名会话；设为 `0` 则完全不调用标题线程 |
+| `PA_TITLE_MODEL` / `PA_TITLE_EFFORT` | `gpt-6-luna` / `low` | 只用于隔离的自动标题临时线程 |
+| `PA_TITLE_MAX_CHARS` / `PA_TITLE_TIMEOUT_SECONDS` | `24` / `30` | 标题长度上限与单次标题运行超时 |
 
 - 二进制路径：`/home/gem/.codex/tools/codex-<版本>/node_modules/.bin/codex`（在 `personal-agent-codex` 卷内）。
 - 每次接管容器时控制面会核实版本；缺失或版本不符时用
@@ -70,6 +73,19 @@ npm run smoke
   `model='gpt-5.5'` 的会话改为 `PA_DEFAULT_MODEL`（只改 `model` 列，不动历史消息与线程），
   并写入该 meta 键。迁移只跑一次，之后用户手动选择 5.5 不会被重置。风险场景（需恢复旧默认）：
   删掉该 meta 行并重启会再跑一次，会同时把用户手动选择的 5.5 一起改掉，只在明确需要时使用。
+- 自动标题：首轮 `completed` 后在后台用沙箱内一个独立临时线程（`read-only` + `never` + `ephemeral`）
+  生成，不占用主执行队列；首轮只有附件时用附件名/类型构造输入。只有 `turn/completed` 为
+  `completed` 才采用结果，超时/失败保留原名。超时会 best-effort `turn/interrupt`，并在收到真正
+  `turn/completed` 前继续丢弃该临时线程的所有通知（迟到 delta 不会混入用户对话）。
+  只重命名未归档、标题仍为“新会话”、且从未手动改名的会话（手动改名与标记在同一事务），
+  失败保留原名（同一进程不重试，下次启动可重试）。每次接管容器、Codex 就绪后会对旧会话
+  串行补名一次。查待补名数量（不输出任何用户内容）：
+  ```bash
+  sqlite3 projects/personal-agent/var/personal-agent.sqlite \
+    "SELECT COUNT(*) FROM conversations c WHERE c.archived=0 AND c.title='新会话' \
+     AND (SELECT t.status FROM turns t WHERE t.conversation_id=c.id ORDER BY t.created_at ASC, t.rowid ASC LIMIT 1)='completed' \
+     AND NOT EXISTS (SELECT 1 FROM meta m WHERE m.key='title_manual:'||c.id);"
+  ```
 
 **沙箱镜像升级**（单独任务，需人工确认）：
 1. 记录当前镜像与 digest；2. `docker pull` 目标版本并在**临时容器名**下验证

@@ -3,6 +3,7 @@ import type { Logger } from "../logger.js";
 import type { SandboxContainer } from "../docker/sandbox.js";
 import { JsonRpcPeer } from "./jsonrpc.js";
 import type { HostTokenSource } from "./hostTokens.js";
+import { buildTitlePrompt } from "./autoTitle.js";
 
 export interface SandboxAccount {
   email: string | null;
@@ -39,6 +40,21 @@ export class SandboxCodexSession {
   #onNotification: ((method: string, params: unknown) => void) | null = null;
   #onServerRequest: ((id: string, method: string, params: unknown) => void) | null = null;
   #onClosed: ((reason: string) => void) | null = null;
+  /**
+   * Auxiliary ephemeral threads (auto-title) and the listeners that own their
+   * notifications. Routing by thread id keeps their events, approvals and deltas
+   * completely out of the user's main conversation stream.
+   */
+  #threadSubscribers = new Map<string, Set<(method: string, params: unknown) => void>>();
+  /**
+   * Auxiliary threads whose run ended from our point of view (timeout / error)
+   * but which may still emit late notifications. Their events are dropped — never
+   * attributed to the active user conversation — until a real `turn/completed`
+   * proves the run is over. Insertion order is used for bounded eviction.
+   */
+  #discardedThreads = new Map<string, true>();
+  /** Maximum number of tombstoned auxiliary threads kept for late-event dropping. */
+  static readonly MAX_DISCARDED_THREADS = 64;
   #account: SandboxAccount | null = null;
   #lastError: string | null = null;
 
@@ -90,7 +106,7 @@ export class SandboxCodexSession {
       'sandbox_mode="danger-full-access"',
     ]);
     const peer = new JsonRpcPeer(child, "sandbox-codex");
-    peer.on("notification", (method, params) => this.#onNotification?.(method, params));
+    peer.on("notification", (method, params) => this.#routeNotification(method, params));
     peer.on("warning", (message) => this.#log.warn("sandbox codex warning", { message }));
     peer.on("closed", (reason) => {
       this.#log.warn("sandbox codex app-server closed", { reason });
@@ -105,6 +121,13 @@ export class SandboxCodexSession {
     peer.onAnyServerRequest((method, params, id) => {
       if (method === "account/chatgptAuthTokens/refresh") {
         return this.#refreshTokens(params as { previousAccountId?: string | null });
+      }
+      // A background title thread must never raise a UI approval: deny it here
+      // rather than letting it be attributed to the active user conversation.
+      // Tombstoned threads keep being denied so a late approval cannot leak either.
+      const auxThreadId = (params as { threadId?: unknown } | undefined)?.threadId;
+      if (typeof auxThreadId === "string" && this.#isAuxThread(auxThreadId)) {
+        return Promise.resolve(denyForAuxThread(method));
       }
       const key = String(id);
       return new Promise((resolve) => {
@@ -152,6 +175,186 @@ export class SandboxCodexSession {
     this.#lastError = null;
     this.#peer = peer;
     this.#log.info("sandbox codex session ready", { account: this.#account.email, plan: this.#account.planType });
+  }
+
+  #isAuxThread(threadId: string): boolean {
+    return this.#threadSubscribers.has(threadId) || this.#discardedThreads.has(threadId);
+  }
+
+  /**
+   * Keep dropping notifications for an auxiliary thread whose run we stopped
+   * waiting on. A `turn/completed` is the only proof the run is over, at which
+   * point the tombstone is released; the set is bounded so a thread that never
+   * completes cannot leak memory.
+   */
+  #discardThread(threadId: string): void {
+    this.#discardedThreads.delete(threadId);
+    this.#discardedThreads.set(threadId, true);
+    while (this.#discardedThreads.size > SandboxCodexSession.MAX_DISCARDED_THREADS) {
+      const oldest = this.#discardedThreads.keys().next().value as string | undefined;
+      if (oldest === undefined) break;
+      this.#discardedThreads.delete(oldest);
+    }
+  }
+
+  #routeNotification(method: string, params: unknown): void {
+    const threadId = (params as { threadId?: unknown } | undefined)?.threadId;
+    if (typeof threadId === "string") {
+      const subscribers = this.#threadSubscribers.get(threadId);
+      if (subscribers) {
+        for (const subscriber of subscribers) {
+          try {
+            subscriber(method, params);
+          } catch (err) {
+            this.#log.warn("aux thread notification handler failed", {
+              error: err instanceof Error ? err.message : String(err),
+            });
+          }
+        }
+        return;
+      }
+      if (this.#discardedThreads.has(threadId)) {
+        // Still dropped; once the turn truly ends the tombstone can be released.
+        if (method === "turn/completed") this.#discardedThreads.delete(threadId);
+        return;
+      }
+    }
+    this.#onNotification?.(method, params);
+  }
+
+  /**
+   * Run one throwaway, tool-free turn and return the assistant text.
+   *
+   * The thread is `ephemeral` (never persisted), `read-only` and `never`
+   * approval, on a dedicated model, so it cannot touch the sandbox or the user's
+   * conversation. Text is captured from live notifications because ephemeral
+   * threads cannot be re-read afterwards (`thread/read` rejects `includeTurns`).
+   */
+  async generateTitle(userText: string): Promise<string | null> {
+    await this.start();
+    const peer = this.#peer;
+    if (!peer?.alive) return null;
+    const model = this.#cfg.agent.titleModel;
+    const threadRes = (await peer.request(
+      "thread/start",
+      {
+        ephemeral: true,
+        sandbox: "read-only",
+        approvalPolicy: "never",
+        model,
+        cwd: this.#cfg.sandbox.containerWorkspaceDir,
+      },
+      60_000,
+    )) as { thread: { id: string } };
+    const threadId = threadRes.thread.id;
+
+    const deltas: string[] = [];
+    let finalText = "";
+    // Only a real `turn/completed {status:"completed"}` may produce a title.
+    let turnStatus: string | null = null;
+    let timedOut = false;
+    let startFailed = false;
+    let startError: unknown = null;
+    let turnId: string | null = null;
+    let settled = false;
+    let resolveDone!: () => void;
+    const done = new Promise<void>((resolve) => {
+      resolveDone = resolve;
+    });
+    const settle = () => {
+      if (settled) return;
+      settled = true;
+      resolveDone();
+    };
+    const listener = (method: string, params: unknown) => {
+      const p = (params ?? {}) as Record<string, unknown>;
+      if (method === "item/agentMessage/delta" && typeof p.delta === "string") {
+        deltas.push(p.delta);
+        return;
+      }
+      if (method === "item/completed") {
+        const item = p.item as { type?: string; text?: string } | undefined;
+        if (item?.type === "agentMessage" && typeof item.text === "string") finalText = item.text;
+        return;
+      }
+      if (method === "turn/completed") {
+        const turn = p.turn as { status?: string; items?: Array<{ type?: string; text?: string }> } | undefined;
+        turnStatus = typeof turn?.status === "string" ? turn.status : "unknown";
+        const message = (turn?.items ?? []).find((it) => it?.type === "agentMessage" && typeof it.text === "string");
+        if (message?.text) finalText = message.text;
+        settle();
+      }
+    };
+    this.#threadSubscribers.set(threadId, new Set([listener]));
+    const timer = setTimeout(() => {
+      timedOut = true;
+      settle();
+    }, this.#cfg.agent.titleTimeoutMs);
+    timer.unref?.();
+    // The start promise always settles the wait (success, failure or timeout) so
+    // this method never outlives its configured budget waiting on the turn.
+    const startPromise = (peer.request(
+      "turn/start",
+      {
+        threadId,
+        input: [{ type: "text", text: buildTitlePrompt(userText, this.#cfg.agent.titleMaxChars) }],
+        model,
+        ...(this.#cfg.agent.titleEffort ? { effort: this.#cfg.agent.titleEffort } : {}),
+      },
+      60_000,
+    ) as Promise<{ turn?: { id?: string } }>).then(
+      (res) => {
+        turnId = res?.turn?.id ?? null;
+      },
+      (err) => {
+        startFailed = true;
+        startError = err;
+        settle();
+      },
+    );
+    try {
+      await done;
+    } finally {
+      clearTimeout(timer);
+      this.#threadSubscribers.delete(threadId);
+    }
+    if (turnStatus === null) {
+      // No completion notification: the run may still be going on the server, so
+      // keep dropping its events instead of letting a late delta reach the main
+      // conversation (the delta buffer is keyed by active conversation, not thread).
+      this.#discardThread(threadId);
+      if (startFailed) {
+        this.#log.warn("title turn failed", { error: startError instanceof Error ? startError.message : String(startError) });
+      } else if (timedOut) {
+        // Best effort: ask the server to stop so the tombstone is released soon.
+        await this.#interruptAuxTurn(threadId, startPromise, () => turnId);
+      }
+    }
+    if (turnStatus !== "completed") return null;
+    return finalText || deltas.join("") || null;
+  }
+
+  /** Stop a timed-out auxiliary turn without ever blocking on a dead session. */
+  async #interruptAuxTurn(threadId: string, startPromise: Promise<void>, turnId: () => string | null): Promise<void> {
+    const peer = this.#peer;
+    if (!peer?.alive) return;
+    // The turn id may not have arrived yet; give it a short bounded window.
+    await Promise.race([
+      startPromise,
+      new Promise<void>((resolve) => {
+        const t = setTimeout(resolve, 2000);
+        t.unref?.();
+      }),
+    ]);
+    const id = turnId();
+    if (!id || !this.#peer?.alive) return;
+    try {
+      // Best effort and short: the tombstone already blocks late events, so never
+      // let a slow interrupt delay the next title task for long.
+      await this.#peer.request("turn/interrupt", { threadId, turnId: id }, 5_000);
+    } catch (err) {
+      this.#log.warn("title interrupt failed", { error: err instanceof Error ? err.message : String(err) });
+    }
   }
 
   async #refreshTokens(params: { previousAccountId?: string | null }): Promise<unknown> {
@@ -275,8 +478,20 @@ export class SandboxCodexSession {
 
   close(): void {
     this.cancelAllPending();
+    for (const subscribers of this.#threadSubscribers.values()) subscribers.clear();
+    this.#threadSubscribers.clear();
+    this.#discardedThreads.clear();
     this.#peer?.close();
     this.#peer = null;
     this.#account = null;
   }
+}
+
+/** Safe refusal for any approval raised by an auxiliary title thread. */
+function denyForAuxThread(method: string): unknown {
+  if (method === "item/tool/requestUserInput") return { answers: {} };
+  if (method === "mcpServer/elicitation/request") return { action: "decline", content: null };
+  if (method === "item/permissions/requestApproval") return { permissions: {}, scope: "turn" };
+  if (method === "applyPatchApproval" || method === "execCommandApproval") return { decision: "denied" };
+  return { decision: "decline" };
 }

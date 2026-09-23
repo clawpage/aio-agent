@@ -131,6 +131,9 @@ export async function startSandboxRuntime(ctx: AppContext): Promise<void> {
     await agent.ensureSession();
     ctx.sandboxSetupError = null;
     log.info("codex session established");
+    // Catch up titles for conversations that predate the auto-title feature. This
+    // runs in the background and never blocks the main turn queue.
+    agent.scheduleTitleBackfill();
     try {
       ctx.sandboxSurfaces = await container.surfaces();
     } catch (err) {

@@ -196,6 +196,11 @@ export class FakeCodex implements CodexSessionLike {
   #manualTurns = new Map<string, { threadId: string; resolve: () => void }>();
   /** Set to make startThread fail. */
   failStart = false;
+  /** Scripted automatic-title behavior. */
+  titleResult: string | null = "自动标题";
+  titleCalls: string[] = [];
+  failTitle = false;
+  titleDelayMs = 0;
 
   onNotification(handler: (method: string, params: unknown) => void): void {
     this.#notificationHandler = handler;
@@ -270,11 +275,16 @@ export class FakeCodex implements CodexSessionLike {
   /** Emit a scripted run for the most recent turn. */
   async runTurn(turnId: string, opts: { text?: string; status?: string } = {}): Promise<void> {
     const text = opts.text ?? "hello";
-    this.#notificationHandler?.("item/started", { threadId: "t", turnId, item: { id: "i1", type: "agentMessage" } });
-    this.#notificationHandler?.("item/agentMessage/delta", { threadId: "t", turnId, itemId: "i1", delta: text.slice(0, 3) });
-    this.#notificationHandler?.("item/agentMessage/delta", { threadId: "t", turnId, itemId: "i1", delta: text.slice(3) });
-    this.#notificationHandler?.("item/completed", { threadId: "t", turnId, item: { id: "i1", type: "agentMessage", text } });
+    const threadId = this.#threadForTurn(turnId);
+    this.#notificationHandler?.("item/started", { threadId, turnId, item: { id: "i1", type: "agentMessage" } });
+    this.#notificationHandler?.("item/agentMessage/delta", { threadId, turnId, itemId: "i1", delta: text.slice(0, 3) });
+    this.#notificationHandler?.("item/agentMessage/delta", { threadId, turnId, itemId: "i1", delta: text.slice(3) });
+    this.#notificationHandler?.("item/completed", { threadId, turnId, item: { id: "i1", type: "agentMessage", text } });
     this.completeTurn(turnId, opts.status ?? "completed");
+  }
+
+  #threadForTurn(turnId: string): string {
+    return this.startedTurns.find((t) => t.turnId === turnId)?.threadId ?? "t";
   }
 
   /** Emit an arbitrary Codex notification to the manager. */
@@ -283,7 +293,7 @@ export class FakeCodex implements CodexSessionLike {
   }
 
   completeTurn(turnId: string, status = "completed"): void {
-    this.#notificationHandler?.("turn/completed", { threadId: "t", turn: { id: turnId, status } });
+    this.#notificationHandler?.("turn/completed", { threadId: this.#threadForTurn(turnId), turn: { id: turnId, status } });
   }
 
   /** Hold a turn open until the test releases it (simulates a long-running agent). */
@@ -301,6 +311,13 @@ export class FakeCodex implements CodexSessionLike {
 
   async interrupt(threadId: string, turnId: string): Promise<void> {
     this.interrupted.push({ threadId, turnId });
+  }
+
+  async generateTitle(userText: string): Promise<string | null> {
+    this.titleCalls.push(userText);
+    if (this.titleDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, this.titleDelayMs));
+    if (this.failTitle) throw new Error("title generation failed");
+    return this.titleResult;
   }
 
   answer(id: string, result: unknown): boolean {
