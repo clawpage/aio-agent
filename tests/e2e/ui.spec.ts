@@ -77,7 +77,12 @@ test.describe("workspace navigation", () => {
     }
     await expect(page.locator(".composer textarea")).toBeVisible();
     await expect(page.locator(".status-chip")).toContainText("智能体在线", { timeout: 30_000 });
-    await expect(page.locator(".composer-row select").first()).toBeVisible();
+    const modelSelect = page.locator(".composer-row select").first();
+    await expect(modelSelect).toBeVisible();
+    // A new conversation must start on the app default model, which is not the
+    // CLI's own default (that one is gpt-6-astra).
+    await expect(modelSelect).toHaveValue("gpt-6-sol");
+    await expect(modelSelect.locator("option:checked")).toContainText("GPT-6-Sol（默认）");
   });
 });
 

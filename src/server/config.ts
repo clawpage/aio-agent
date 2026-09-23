@@ -64,6 +64,14 @@ export function loadConfig(): {
     readyTimeoutMs: number;
     autostart: boolean;
     fileOpTimeoutMs: number;
+    /** Versioned Codex CLI installed into the persistent CODEX_HOME volume. */
+    codexVersion: string;
+    codexPrefix: string;
+    codexBin: string;
+  };
+  agent: {
+    /** Model a turn uses when neither the client nor the conversation picked one. */
+    defaultModel: string;
   };
   hostCodex: {
     bin: string;
@@ -98,6 +106,15 @@ export function loadConfig(): {
   // control plane, so cross-origin rules behave like production (where the two
   // sites are different hostnames).
   const workspaceOrigins = [...parseList(envStr("PA_WORKSPACE_ORIGINS", "")), `https://${workspaceHost}`, `http://127.0.0.1:${port}`];
+
+  // Pinned Codex CLI in the persistent CODEX_HOME volume. One version drives
+  // both the install prefix and the binary path so they can never drift apart.
+  const sandboxCodexVersion = envStr("PA_SANDBOX_CODEX_VERSION", "0.156.1");
+  const sandboxCodexPrefix = envStr("PA_SANDBOX_CODEX_PREFIX", `/home/gem/.codex/tools/codex-${sandboxCodexVersion}`);
+  const sandboxCodexBin = envStr(
+    "PA_SANDBOX_CODEX_BIN",
+    path.posix.join(sandboxCodexPrefix, "node_modules", ".bin", "codex"),
+  );
 
   return {
     port,
@@ -141,6 +158,15 @@ export function loadConfig(): {
       autostart: envStr("PA_SANDBOX_AUTOSTART", "1") === "1",
       // Bound for shell-backed file operations (mkdir/delete) before reporting failure.
       fileOpTimeoutMs: envInt("PA_FILE_OP_TIMEOUT_SECONDS", 30) * 1000,
+      // The pinned AIO image ships an older Codex CLI and must not be upgraded;
+      // the agent binary lives in the persistent personal-agent-codex volume
+      // instead, so container rebuilds keep it and the version is explicit.
+      codexVersion: sandboxCodexVersion,
+      codexPrefix: sandboxCodexPrefix,
+      codexBin: sandboxCodexBin,
+    },
+    agent: {
+      defaultModel: envStr("PA_DEFAULT_MODEL", "gpt-6-sol"),
     },
     hostCodex: {
       bin: envStr("PA_HOST_CODEX_BIN", "codex"),

@@ -65,11 +65,17 @@ export function Chat({ conversation, models, status, onConversationChanged, onSt
     setTimeline(emptyTimeline());
     setConnected(false);
     lastIdRef.current = 0;
+    // Back to the app default first: a conversation without a stored model must
+    // not inherit the model picked in the previously opened conversation.
+    setModel("");
+    setEffort("");
 
     const start = async () => {
       try {
         const detail = await api.conversation(conversation.id);
         if (disposed) return;
+        // Conversations that only carried the legacy default were moved to the
+        // app default once, server-side; so a stored model here is a real choice.
         if (detail.conversation.model) setModel(detail.conversation.model);
       } catch {
         /* model defaults are optional */

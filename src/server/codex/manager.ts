@@ -1,5 +1,6 @@
 import { EventEmitter } from "node:events";
 import type { Db } from "../db.js";
+import { getMeta, setMeta } from "../db.js";
 import type { Config } from "../config.js";
 import type { Logger } from "../logger.js";
 import type { CodexModel, SandboxAccount } from "./sandboxCodex.js";
@@ -104,6 +105,16 @@ const DELTA_METHODS = new Set([
 const APPROVAL_TIMEOUT_MS = 15 * 60_000;
 
 /**
+ * The model every conversation defaulted to before this deployment. Conversations
+ * still carrying it were never an explicit user choice (there was no other model
+ * to pick), so they are moved to the configured default exactly once.
+ */
+export const LEGACY_DEFAULT_MODEL = "gpt-5.5";
+
+/** `meta` key recording that the one-time default-model migration already ran. */
+export const MODEL_MIGRATION_KEY = "model_default_migration_v1";
+
+/**
  * Raised when a turn was already handed to Codex but its outcome can no longer be
  * determined (transport failure / process death). Such turns are never retried
  * automatically because the sandbox may already have performed side effects.
@@ -182,6 +193,7 @@ export class AgentManager {
 
   async init(): Promise<void> {
     this.#reconcileInterrupted();
+    this.#migrateLegacyDefaultModel();
     this.#codex.onNotification((method, params) => this.#handleNotification(method, params));
     this.#codex.onServerRequest((id, method, params) => this.#handleServerRequest(id, method, params));
     this.#codex.onClosed((reason) => this.#handleCodexClosed(reason));
@@ -237,6 +249,32 @@ export class AgentManager {
     );
     if (stale.length || pending.length) {
       this.#log.warn("reconciled interrupted work after restart", { turns: stale.length, approvals: pending.length });
+    }
+  }
+
+  /**
+   * One-time correction of the previous default model.
+   *
+   * Runs before any turn can be submitted and is recorded in `meta`, so it never
+   * runs twice: a model the user picks deliberately from now on (including
+   * `gpt-5.5`) is respected forever. Only the `model` column changes — history,
+   * threads and events are untouched.
+   */
+  #migrateLegacyDefaultModel(): void {
+    if (getMeta(this.#db, MODEL_MIGRATION_KEY)) return;
+    const target = this.#cfg.agent.defaultModel;
+    const res = this.#db.prepare("UPDATE conversations SET model = ? WHERE model = ?").run(target, LEGACY_DEFAULT_MODEL);
+    setMeta(
+      this.#db,
+      MODEL_MIGRATION_KEY,
+      JSON.stringify({ from: LEGACY_DEFAULT_MODEL, to: target, changed: Number(res.changes), at: Date.now() }),
+    );
+    if (res.changes) {
+      this.#log.info("migrated conversations off the legacy default model", {
+        from: LEGACY_DEFAULT_MODEL,
+        to: target,
+        conversations: Number(res.changes),
+      });
     }
   }
 
@@ -366,15 +404,19 @@ export class AgentManager {
       throw err;
     }
     this.#db.prepare("UPDATE conversations SET updated_at = ? WHERE id = ?").run(now, input.conversationId);
+    // Persist the resolved model so the stored conversation state and the turn
+    // that will run agree: an explicit client choice wins, then the model the
+    // conversation already uses, then the configured default.
+    const model = input.model ?? conversation.model ?? this.#cfg.agent.defaultModel;
     this.#db
-      .prepare("UPDATE conversations SET model = COALESCE(?, model), cwd = COALESCE(?, cwd) WHERE id = ?")
-      .run(input.model ?? null, input.cwd ?? null, input.conversationId);
+      .prepare("UPDATE conversations SET model = ?, cwd = COALESCE(?, cwd) WHERE id = ?")
+      .run(model, input.cwd ?? null, input.conversationId);
     this.#appendEvent(input.conversationId, id, "turn.queued", {
       turnId: id,
       clientMessageId: input.clientMessageId,
       text: input.text,
       attachments,
-      model: input.model ?? null,
+      model,
       effort: input.effort ?? null,
       cwd: input.cwd ?? null,
     });
@@ -440,9 +482,13 @@ export class AgentManager {
     this.#db.prepare("UPDATE conversations SET status = 'running', updated_at = ? WHERE id = ?").run(Date.now(), conversation.id);
     this.#appendEvent(conversation.id, turn.id, "turn.started", { turnId: turn.id });
 
+    // Resolve against the configured default as well: a conversation without a
+    // stored model would otherwise make Codex fall back to its own default
+    // (currently gpt-6-astra), which this agent never runs implicitly.
+    const model = conversation.model ?? this.#cfg.agent.defaultModel;
     let threadId = conversation.codex_thread_id;
     if (!threadId) {
-      const started = await this.#codex.startThread({ cwd: conversation.cwd ?? undefined, model: conversation.model ?? undefined });
+      const started = await this.#codex.startThread({ cwd: conversation.cwd ?? undefined, model });
       threadId = started.threadId;
       this.#db.prepare("UPDATE conversations SET codex_thread_id = ?, model = COALESCE(model, ?), cwd = ? WHERE id = ?").run(
         threadId,
@@ -462,7 +508,7 @@ export class AgentManager {
         threadId,
         text: turn.input_text,
         attachments: parseAttachments(turn.attachments_json),
-        model: conversation.model,
+        model,
         effort: turn.effort,
         clientUserMessageId: turn.client_message_id,
       });
@@ -829,8 +875,16 @@ export class AgentManager {
     await this.#codex.start();
   }
 
+  /**
+   * Models offered by the sandbox Codex, with this product's configured default
+   * marked. The CLI has its own default (currently gpt-6-astra) which this agent
+   * never runs implicitly, and the UI labels the default from `isDefault`.
+   */
   async listModels() {
-    return await this.#codex.listModels();
+    const models = await this.#codex.listModels();
+    const preferred = this.#cfg.agent.defaultModel;
+    if (!models.some((m) => m.id === preferred)) return models;
+    return models.map((m) => ({ ...m, isDefault: m.id === preferred }));
   }
 
   async hostAuthStatus() {

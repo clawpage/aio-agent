@@ -5,10 +5,16 @@ import { AgentManager, TurnConflictError, buildApprovalResponse, parseAttachment
 import { FakeCodex, testConfig } from "../helpers/harness.js";
 import type { HostTokenSource } from "../../src/server/codex/hostTokens.js";
 
-function makeManager(): { agent: AgentManager; codex: FakeCodex; db: Db } {
-  const db = openDb(":memory:");
+function seedConversation(db: Db, id: string, model: string | null): void {
+  const now = Date.now();
+  db.prepare(
+    "INSERT INTO conversations (id, owner_id, title, model, cwd, status, archived, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 'idle', 0, ?, ?)",
+  ).run(id, "owner_1", "seeded", model, "/home/gem/workspace", now, now);
+}
+
+function makeManager(extraEnv: Record<string, string> = {}, db: Db = openDb(":memory:")): { agent: AgentManager; codex: FakeCodex; db: Db } {
   const codex = new FakeCodex();
-  const cfg = testConfig("/tmp/pa-manager-test", 1);
+  const cfg = testConfig("/tmp/pa-manager-test", 1, extraEnv);
   const hostTokens = { status: async () => ({ ok: true, authMethod: "chatgpt", email: null, planType: null, expiresAt: null, error: null }) } as unknown as HostTokenSource;
   const agent = new AgentManager({ cfg, db, log: new Logger("error", undefined, false), codex, hostTokens });
   return { agent, codex, db };
@@ -225,6 +231,66 @@ describe("AgentManager", () => {
     // Nothing was replayed into Codex.
     expect(freshCodex.startedTurns.length).toBe(0);
     fresh.shutdown();
+  });
+
+  it("reports the configured default model as the default, not the CLI's own default", async () => {
+    const models = await agent.listModels();
+    expect(models.find((m) => m.id === "gpt-6-sol")?.isDefault).toBe(true);
+    expect(models.find((m) => m.id === "gpt-5.5")?.isDefault).toBe(false);
+  });
+
+  it("migrates the legacy default model once, then preserves a later manual choice", async () => {
+    const db2 = openDb(":memory:");
+    seedConversation(db2, "conv_legacy", "gpt-5.5");
+    const first = makeManager({}, db2);
+    await first.agent.init();
+
+    const migrated = db2.prepare("SELECT model FROM conversations WHERE id = 'conv_legacy'").get() as { model: string };
+    expect(migrated.model).toBe("gpt-6-sol");
+
+    // The migrated conversation really runs the default model on its next turn.
+    first.agent.submitTurn({ conversationId: "conv_legacy", text: "hi", clientMessageId: "m1" });
+    await tick();
+    expect(first.codex.startedTurns[0]?.model).toBe("gpt-6-sol");
+    first.codex.completeTurn(first.codex.startedTurns[0].turnId);
+    await tick();
+
+    // Picking the old model on purpose afterwards is a real choice...
+    first.agent.submitTurn({ conversationId: "conv_legacy", text: "again", clientMessageId: "m2", model: "gpt-5.5" });
+    await tick();
+    expect(first.codex.startedTurns[1]?.model).toBe("gpt-5.5");
+    first.agent.shutdown();
+
+    // ...and the one-time migration never rewrites it on a later restart.
+    const second = makeManager({}, db2);
+    await second.agent.init();
+    const kept = db2.prepare("SELECT model FROM conversations WHERE id = 'conv_legacy'").get() as { model: string };
+    expect(kept.model).toBe("gpt-5.5");
+    second.agent.shutdown();
+    db2.close();
+  });
+
+  it("keeps an explicit model choice for the conversation", async () => {
+    const conv = agent.createConversation({ title: "explicit" });
+    db.prepare("UPDATE conversations SET model = ? WHERE id = ?").run("gpt-5.5", conv.id);
+
+    agent.submitTurn({ conversationId: conv.id, text: "hi", clientMessageId: "m1", model: "gpt-6-astra" });
+    await tick();
+
+    expect(codex.startedTurns[0]?.model).toBe("gpt-6-astra");
+    const row = db.prepare("SELECT model FROM conversations WHERE id = ?").get(conv.id) as { model: string };
+    expect(row.model).toBe("gpt-6-astra");
+  });
+
+  it("honours PA_DEFAULT_MODEL", async () => {
+    const other = makeManager({ PA_DEFAULT_MODEL: "gpt-6-luna" });
+    await other.agent.init();
+    const conv = other.agent.createConversation({ title: "configured" });
+    other.agent.submitTurn({ conversationId: conv.id, text: "hi", clientMessageId: "m1" });
+    await tick();
+    expect(other.codex.startedTurns[0]?.model).toBe("gpt-6-luna");
+    other.agent.shutdown();
+    other.db.close();
   });
 });
 

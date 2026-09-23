@@ -50,6 +50,27 @@ npm run build                      # 必须先构建，bin/serve 会拒绝启动
 npm run smoke
 ```
 
+**沙箱 Codex CLI 版本**（与镜像分开固定）：模型可用性由 CLI 版本决定，固定镜像里的旧 CLI
+（`codex-cli 0.139.0`）无法运行 `gpt-6-sol`。因此控制面不调用 `PATH` 上的 `codex`，而是调用持久卷里的
+固定版本：
+
+| 配置 | 默认值 | 说明 |
+| --- | --- | --- |
+| `PA_SANDBOX_CODEX_VERSION` | `0.156.1` | 固定版本；安装前缀与二进制路径都由它推导，不会与路径不一致 |
+| `PA_DEFAULT_MODEL` | `gpt-6-sol` | 新会话与旧会话后续轮次的默认模型；`/api/models` 也以它标记默认项 |
+
+- 二进制路径：`/home/gem/.codex/tools/codex-<版本>/node_modules/.bin/codex`（在 `personal-agent-codex` 卷内）。
+- 每次接管容器时控制面会核实版本；缺失或版本不符时用
+  `npm install --prefix <前缀> @openai/codex@<版本>` 以 `gem` 用户补齐，不改动固定镜像。
+  补齐失败会明确报错并保持 `/healthz.ready=false`，**不会**静默回退到镜像里的旧 CLI。
+- 升级步骤：改 `PA_SANDBOX_CODEX_VERSION`（写 `var/runtime.env`）→ `npm run build` → 定点重启服务。
+  先用独立 `CODEX_HOME` 验证 `model/list` 与一次真实 turn，再让生产使用；旧版本目录保留，
+  把版本改回去即可回退。
+- 默认模型迁移：服务启动时若 `meta.model_default_migration_v1` 不存在，会把仍为旧默认
+  `model='gpt-5.5'` 的会话改为 `PA_DEFAULT_MODEL`（只改 `model` 列，不动历史消息与线程），
+  并写入该 meta 键。迁移只跑一次，之后用户手动选择 5.5 不会被重置。风险场景（需恢复旧默认）：
+  删掉该 meta 行并重启会再跑一次，会同时把用户手动选择的 5.5 一起改掉，只在明确需要时使用。
+
 **沙箱镜像升级**（单独任务，需人工确认）：
 1. 记录当前镜像与 digest；2. `docker pull` 目标版本并在**临时容器名**下验证
    `/health`、`code-server`、`jupyter`、`vnc`、`aio browser`；3. 更新 `PA_SANDBOX_IMAGE`
@@ -118,7 +139,7 @@ grep -E 'exited code|started pid' .logs/personal-agent.log
 | --- | --- | --- |
 | 对话、事件、会话、票据 | `var/personal-agent.sqlite`（含 `-wal`/`-shm`） | 高（历史与登录态） |
 | 工作区文件 | docker volume `personal-agent-workspace` | 高 |
-| Codex 会话状态 | docker volume `personal-agent-codex` | 中 |
+| Codex 会话状态 | docker volume `personal-agent-codex` | 中（同时保存固定版 Codex CLI 二进制） |
 | 浏览器 profile | docker volume `personal-agent-browser` | 低 |
 | owner 密码 | `var/owner-secret.txt` | 高（丢失需重置） |
 | tunnel 凭据 | `var/cloudflared/credentials.json` | 高 |
@@ -127,7 +148,8 @@ grep -E 'exited code|started pid' .logs/personal-agent.log
 
 ## 9. 已知限制
 
-- 未实现自动滚动升级镜像；升级需人工按第 3 节执行。
+- 未实现自动滚动升级镜像；升级需人工按第 3 节执行。沙箱内 Codex CLI 是卷里的固定版本，
+  升级方式见第 3 节，不需要重建镜像。
 - 编辑器/笔记本等原生界面依赖浏览器 iframe 与第三方 cookie 策略；不支持内嵌时用新标签页打开。
 - JupyterLab 首次加载会打印 `@jupyter-widgets/base` 的第三方 widget 前端告警；内核执行正常，
   不影响 `/v1/jupyter/execute` 与 notebook 计算。

@@ -21,6 +21,16 @@ export interface DockerRunResult {
 }
 
 /**
+ * Version reported by `<codexBin> --version`, e.g. `codex-cli 0.156.1`.
+ * Parsed and compared exactly: a substring check would accept `0.156.10` as
+ * `0.156.1` and silently run the wrong binary.
+ */
+export function parseCodexVersion(output: string): string | null {
+  const match = /codex-cli\s+(\S+)/.exec(output);
+  return match ? match[1] : null;
+}
+
+/**
  * Owns exactly one named sandbox container. Every Docker invocation uses a fixed
  * argument list (never a shell), so no caller can smuggle extra flags or paths.
  */
@@ -151,6 +161,7 @@ export class SandboxContainer {
     await this.waitReady();
     await this.waitUserReady();
     await this.#fixOwnership();
+    await this.ensureCodexCli();
     await this.seedWorkspace();
     await this.ensurePrograms();
     await this.waitSurfaces();
@@ -225,6 +236,57 @@ export class SandboxContainer {
     if (res.code !== 0) {
       throw new Error(`failed to prepare sandbox ownership: ${res.stderr.trim() || res.stdout.trim()}`);
     }
+  }
+
+  /**
+   * Ensure the pinned Codex CLI exists in the persistent volume.
+   *
+   * The AIO image keeps its own (older) Codex on PATH; the agent must run the
+   * versioned binary in the personal-agent-codex volume instead. If it is
+   * missing (fresh volume, container rebuild) or has the wrong version it is
+   * installed once from npm. Failure is raised, never silently downgraded: a
+   * stale binary would make the configured default model unusable.
+   */
+  async ensureCodexCli(): Promise<{ version: string; installed: boolean }> {
+    const s = this.#cfg.sandbox;
+    const probe = await this.docker(["exec", "-u", s.containerUser, this.name, s.codexBin, "--version"], { timeoutMs: 30_000 });
+    const found = parseCodexVersion(probe.stdout);
+    if (probe.code === 0 && found === s.codexVersion) return { version: found, installed: false };
+
+    this.#log.warn("installing pinned sandbox codex cli", {
+      wanted: s.codexVersion,
+      found: found ?? (probe.stdout.trim() || probe.stderr.trim()),
+      prefix: s.codexPrefix,
+    });
+    const install = await this.docker(
+      [
+        "exec",
+        "-u",
+        s.containerUser,
+        this.name,
+        "npm",
+        "install",
+        "--prefix",
+        s.codexPrefix,
+        "--no-audit",
+        "--no-fund",
+        `@openai/codex@${s.codexVersion}`,
+      ],
+      { timeoutMs: 600_000 },
+    );
+    if (install.code !== 0) {
+      throw new Error(
+        `沙箱 Codex CLI 安装失败（需要 @openai/codex@${s.codexVersion}）：${install.stderr.trim() || install.stdout.trim()}`,
+      );
+    }
+    const verify = await this.docker(["exec", "-u", s.containerUser, this.name, s.codexBin, "--version"], { timeoutMs: 30_000 });
+    const installed = parseCodexVersion(verify.stdout);
+    if (verify.code !== 0 || installed !== s.codexVersion) {
+      throw new Error(
+        `沙箱 Codex CLI 安装后校验失败：期望 ${s.codexVersion}，实际 ${installed ?? (verify.stdout.trim() || verify.stderr.trim())}`,
+      );
+    }
+    return { version: s.codexVersion, installed: true };
   }
 
   /**
@@ -370,7 +432,7 @@ export class SandboxContainer {
         this.name,
         "env",
         `CODEX_HOME=${s.containerCodexHome}`,
-        "codex",
+        s.codexBin,
         "app-server",
         "--listen",
         "stdio://",

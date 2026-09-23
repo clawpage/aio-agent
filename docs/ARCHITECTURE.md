@@ -63,7 +63,13 @@
 
 ## 执行模型
 
-- 沙箱里的 Codex 以 `docker exec -i ... codex app-server` 常驻，通过 stdio JSON-RPC 驱动。
+- 沙箱里的 Codex 以 `docker exec -i ... <卷内固定版本 codex> app-server` 常驻，通过 stdio JSON-RPC 驱动。
+  二进制取自持久卷（`/home/gem/.codex/tools/codex-<版本>/node_modules/.bin/codex`），
+  不使用镜像 `PATH` 上的旧版本；接管容器时核实版本并自动补齐（失败则明确报错，不静默回退）。
+- 每个轮次的模型在提交时解析并写入会话：客户端显式选择优先，其次沿用会话已存的模型，
+  最后用 `PA_DEFAULT_MODEL`（默认 `gpt-6-sol`）。升级时有一次受 `meta` 键
+  （`model_default_migration_v1`）保护的一次性迁移：仍带旧默认值 `gpt-5.5` 的会话改为新默认，
+  只改 `model` 列、不动历史；之后用户手动选择（包括 5.5）永久保留。
 - 一个 owner 在沙箱内**串行执行**：同一时刻只有一个 turn 在跑，其他会话的输入排队；
   重复提交由 `clientMessageId` 幂等去重，同一 ID 携带不同内容会被 409 拒绝。
 - 所有事件（含流式 delta）先落 SQLite 再广播；浏览器断线**不会**中断智能体，重连按事件 id

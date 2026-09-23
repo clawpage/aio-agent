@@ -184,7 +184,7 @@ export class FakeCodex implements CodexSessionLike {
   account: SandboxAccount | null = { email: "owner@example.com", planType: "prolite", type: "chatgpt" };
   lastError: string | null = null;
   startedThreads: Array<{ threadId: string; cwd?: string; model?: string }> = [];
-  startedTurns: Array<{ threadId: string; turnId: string; text: string; attachments?: Array<{ path: string; kind: string }> }> = [];
+  startedTurns: Array<{ threadId: string; turnId: string; text: string; model?: string | null; attachments?: Array<{ path: string; kind: string }> }> = [];
   interrupted: Array<{ threadId: string; turnId: string }> = [];
   answers: Array<{ id: string; result: unknown }> = [];
   resumedThreads: string[] = [];
@@ -218,7 +218,18 @@ export class FakeCodex implements CodexSessionLike {
   async start(): Promise<void> {}
 
   async listModels(): Promise<CodexModel[]> {
+    // Mirrors the real CLI: its own default is not the model this app runs.
     return [
+      {
+        id: "gpt-6-sol",
+        model: "gpt-6-sol",
+        displayName: "GPT-6-Sol",
+        description: "test model",
+        isDefault: false,
+        supportedReasoningEfforts: ["low", "medium", "high"],
+        defaultReasoningEffort: "medium",
+        inputModalities: ["text", "image"],
+      },
       {
         id: "gpt-5.5",
         model: "gpt-5.5",
@@ -251,7 +262,7 @@ export class FakeCodex implements CodexSessionLike {
     clientUserMessageId?: string | null;
   }): Promise<string> {
     const turnId = `turn_${++this.#turnSeq}`;
-    this.startedTurns.push({ threadId: params.threadId, turnId, text: params.text, attachments: params.attachments });
+    this.startedTurns.push({ threadId: params.threadId, turnId, text: params.text, model: params.model, attachments: params.attachments });
     if (this.#manualTurns.has(params.threadId)) return turnId;
     return turnId;
   }

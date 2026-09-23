@@ -79,7 +79,7 @@ export function workspaceOrigin(ctx: RequestContext, cfg: AppContext["cfg"]): st
 
 export function createApiRouter(context: AppContext): Router {
   const router = express.Router();
-  const { cfg, sessions, tickets, limiter, agent, codex, aio, container, hostTokens, db, log } = context;
+  const { cfg, sessions, tickets, limiter, agent, aio, container, hostTokens, db, log } = context;
 
   /**
    * Cross-origin access is granted to exactly two companion endpoints that the
@@ -451,7 +451,9 @@ export function createApiRouter(context: AppContext): Router {
     requireSession,
     asyncHandler(async (_req, res) => {
       try {
-        const models = await codex.listModels();
+        // Through the manager: it marks this product's configured default model,
+        // which is not the CLI's own default.
+        const models = await agent.listModels();
         res.json({
           models: models.map((m) => ({
             id: m.id,

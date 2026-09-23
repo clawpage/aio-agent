@@ -118,6 +118,15 @@ describe("session lifecycle", () => {
 });
 
 describe("conversation and agent endpoints", () => {
+  it("serves the app default model through the manager, not the CLI default", async () => {
+    const { cookie } = await login(h);
+    const res = await h.request("/api/models", { headers: { cookie } });
+    expect(res.status).toBe(200);
+    const { models } = (await res.json()) as { models: Array<{ id: string; isDefault: boolean }> };
+    // The fake CLI reports gpt-5.5 as its own default; the app default is Sol.
+    expect(models.filter((m) => m.isDefault).map((m) => m.id)).toEqual(["gpt-6-sol"]);
+  });
+
   it("creates conversations, streams events and reports status", async () => {
     const { cookie, csrf } = await login(h);
     const created = await h.request("/api/conversations", {
