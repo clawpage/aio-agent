@@ -48,6 +48,21 @@ export const MOCK_STATUS = {
   workspaceOrigin: "http://127.0.0.1:4289",
 };
 
+/** One model as `/api/settings` reports it (validation shape for the page). */
+export interface MockSettingsModel {
+  id: string;
+  displayName: string;
+  supportedReasoningEfforts: string[];
+  defaultReasoningEffort: string | null;
+}
+
+export const MOCK_SETTINGS_MODELS: MockSettingsModel[] = [
+  { id: "gpt-6-sol", displayName: "GPT-6-Sol", supportedReasoningEfforts: ["low", "medium", "high"], defaultReasoningEffort: "medium" },
+  { id: "gpt-5.5", displayName: "GPT-5.5", supportedReasoningEfforts: ["minimal", "low"], defaultReasoningEffort: "low" },
+];
+
+export const MOCK_DEFAULT_MODEL = "gpt-6-sol";
+
 export const MOCK_MODELS = {
   models: [
     {
@@ -77,6 +92,14 @@ export interface MockConsoleOptions {
   status?: unknown;
   /** Fail the next PATCH /api/conversations/:id once, then clear the override. */
   failPatchOnce?: { status: number; error?: string; message: string };
+  /** Unified settings the server holds; the mock mutates it on a successful PUT. */
+  settings?: { model: string | null; effort: string | null };
+  /** Fail the next PUT /api/settings once, then clear the override. */
+  failSettingsOnce?: { status: number; error?: string; message: string };
+  /** Model catalog `/api/settings` reports; an empty list disables saving. */
+  settingsModels?: MockSettingsModel[];
+  /** Observe a PUT /api/settings body. */
+  onSaveSettings?: (body: { model: string | null; effort: string | null }) => void;
 }
 
 export async function mockConsole(page: Page, opts: MockConsoleOptions): Promise<void> {
@@ -88,6 +111,38 @@ export async function mockConsole(page: Page, opts: MockConsoleOptions): Promise
   );
   await page.route((url) => url.pathname === "/api/status", (route) => json(route, opts.status ?? MOCK_STATUS));
   await page.route((url) => url.pathname === "/api/models", (route) => json(route, MOCK_MODELS));
+
+  // Unified settings: GET returns the stored choice plus the catalog; PUT mirrors
+  // the server's validation (unknown model / unsupported effort -> 400).
+  const settingsState = opts.settings ?? { model: null, effort: null };
+  const settingsModels = opts.settingsModels ?? MOCK_SETTINGS_MODELS;
+  await page.route((url) => url.pathname === "/api/settings", (route) => {
+    const request = route.request();
+    if (request.method() !== "PUT") {
+      const savedModelAvailable =
+        settingsModels.length === 0 ? null : settingsState.model === null || settingsModels.some((m) => m.id === settingsState.model);
+      return json(route, { settings: settingsState, defaultModel: MOCK_DEFAULT_MODEL, models: settingsModels, savedModelAvailable });
+    }
+    if (opts.failSettingsOnce) {
+      const failure = opts.failSettingsOnce;
+      opts.failSettingsOnce = undefined;
+      return json(route, { error: failure.error ?? "server_error", message: failure.message }, failure.status);
+    }
+    const body = JSON.parse(request.postData() ?? "{}") as { model?: unknown; effort?: unknown };
+    const model = typeof body.model === "string" && body.model ? body.model : null;
+    const effort = typeof body.effort === "string" && body.effort ? body.effort : null;
+    if (model && !settingsModels.some((m) => m.id === model)) {
+      return json(route, { error: "invalid_settings", message: "未知的模型，请刷新后重试" }, 400);
+    }
+    const target = settingsModels.find((m) => m.id === model);
+    if (effort && (!target || !target.supportedReasoningEfforts.includes(effort))) {
+      return json(route, { error: "invalid_settings", message: "该模型不支持这个思考强度" }, 400);
+    }
+    settingsState.model = model;
+    settingsState.effort = effort;
+    opts.onSaveSettings?.({ model, effort });
+    return json(route, { ok: true, settings: { model, effort } });
+  });
 
   // Active by default; `?archived=1` also returns archived conversations, like
   // the server.

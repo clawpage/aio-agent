@@ -1,35 +1,211 @@
 import type { AgentEvent } from "./types";
 
-export type Block =
-  | { kind: "user"; id: string; text: string; attachments: Array<{ path: string; name?: string; kind?: string }> }
-  | { kind: "assistant"; id: string; text: string; streaming: boolean }
-  | { kind: "reasoning"; id: string; text: string; streaming: boolean }
-  | { kind: "tool"; id: string; toolType: string; title: string; detail: string; status: "running" | "done" | "error"; output: string }
-  | { kind: "approval"; id: string; requestId: string; method: string; payload: Record<string, unknown>; status: "pending" | "resolved"; decision?: string }
-  | { kind: "status"; id: string; text: string; level: "info" | "warn" | "error" };
+/** Lifecycle of one turn's collapsed "Working" group. */
+export type WorkingStatus = "queued" | "running" | "stopping" | "done" | "error" | "stopped" | "unknown";
+
+export interface UserBlock {
+  kind: "user";
+  id: string;
+  text: string;
+  attachments: Array<{ path: string; name?: string; kind?: string }>;
+}
+
+export interface AssistantBlock {
+  kind: "assistant";
+  id: string;
+  text: string;
+  streaming: boolean;
+}
+
+export interface ReasoningBlock {
+  kind: "reasoning";
+  id: string;
+  /** Owning turn: the outer event turnId, never the remote Codex turn id. */
+  turnId: string;
+  text: string;
+  streaming: boolean;
+}
+
+export interface ToolBlock {
+  kind: "tool";
+  id: string;
+  turnId: string;
+  toolType: string;
+  title: string;
+  detail: string;
+  status: "running" | "done" | "error";
+  output: string;
+}
+
+export interface ApprovalBlock {
+  kind: "approval";
+  id: string;
+  requestId: string;
+  method: string;
+  payload: Record<string, unknown>;
+  status: "pending" | "resolved";
+  decision?: string;
+}
+
+export interface StatusBlock {
+  kind: "status";
+  id: string;
+  text: string;
+  level: "info" | "warn" | "error";
+}
+
+/**
+ * One turn's collapsed activity: every tool call and reasoning summary of that
+ * turn lives here. Normal user/assistant prose, approvals and status lines stay
+ * top-level so nothing important is ever hidden behind a collapsed header.
+ */
+export interface WorkingBlock {
+  kind: "working";
+  id: string;
+  turnId: string;
+  status: WorkingStatus;
+  children: Array<ToolBlock | ReasoningBlock>;
+  /** True once any child tool failed, so the header can flag it even on success. */
+  hasToolError: boolean;
+}
+
+export type Block = UserBlock | AssistantBlock | ReasoningBlock | ToolBlock | ApprovalBlock | StatusBlock | WorkingBlock;
 
 export interface TimelineState {
   blocks: Block[];
-  /** itemId -> index in blocks, for streaming updates. */
+  /** block id -> index in `blocks`, for top-level streaming updates. */
   index: Map<string, number>;
+  /** turnId -> index in `blocks` of that turn's working group. */
+  groupIndex: Map<string, number>;
+  /** child block id -> owning turnId, so a child update finds its group. */
+  groupOf: Map<string, string>;
+  /** turnId -> latest lifecycle status, so a late group inherits a terminal one. */
+  turnStatus: Map<string, WorkingStatus>;
+  /** Most recent turn-scoped id, used to attribute events carrying no turnId. */
+  currentTurnId: string | null;
+}
+
+const TERMINAL_STATUSES = new Set<WorkingStatus>(["done", "error", "stopped", "unknown"]);
+
+const STATUS_RANK: Record<WorkingStatus, number> = {
+  // `queued` is an un-proven state: a real lifecycle event later in the stream
+  // always outranks it.
+  queued: 0,
+  running: 1,
+  stopping: 2,
+  done: 3,
+  error: 3,
+  stopped: 3,
+  unknown: 3,
+};
+
+/** Header text for a group. `queued` never claims to be working. */
+export function workingLabel(status: WorkingStatus): string {
+  switch (status) {
+    case "queued":
+      return "已排队等待";
+    case "running":
+      return "Working…";
+    case "stopping":
+      return "正在停止…";
+    case "done":
+      return "已完成";
+    case "error":
+      return "执行出错";
+    case "stopped":
+      return "已停止";
+    case "unknown":
+      return "结果未知";
+  }
+}
+
+/**
+ * Whether a child row should present itself as still in progress. Once the turn
+ * reached a terminal state, a tool that never received its `item/completed` (or a
+ * summary that never got its final delta) must stop claiming to be "进行中": the
+ * row keeps its real output, but the spinner/open styling is suppressed. The
+ * child's own recorded status is never rewritten, so no success is faked.
+ */
+export function childInProgress(group: WorkingBlock, child: ToolBlock | ReasoningBlock): boolean {
+  if (TERMINAL_STATUSES.has(group.status)) return false;
+  return child.kind === "tool" ? child.status === "running" : child.streaming;
+}
+
+/** Only a genuinely in-flight turn animates; history and queued rows stay still. */
+export function isWorkingActive(status: WorkingStatus): boolean {
+  return status === "running" || status === "stopping";
 }
 
 export function removeBlock(state: TimelineState, id: string): TimelineState {
   const idx = state.index.get(id);
   if (idx === undefined) return state;
   const blocks = state.blocks.filter((_, i) => i !== idx);
-  const index = new Map<string, number>();
-  blocks.forEach((b, i) => index.set(b.id, i));
-  return { blocks, index };
+  return reindex({ ...state, blocks });
+}
+
+/**
+ * Copy-on-write base for an incremental update. The reducers mutate in place, so
+ * every block that a reducer can write to is copied here: each top-level block,
+ * every working group, and each group's children (and the children array itself).
+ * Only the payloads that are never mutated (attachments, approval params) are
+ * shared. The index maps are copied for the same reason. A caller can therefore
+ * apply events to the copy while the previously rendered state stays byte-for-byte
+ * intact, which is what keeps React from re-applying a delta on the same object.
+ */
+export function cloneTimeline(state: TimelineState): TimelineState {
+  return {
+    blocks: state.blocks.map((b) =>
+      b.kind === "working" ? { ...b, children: b.children.map((c) => ({ ...c })) } : { ...b },
+    ),
+    index: new Map(state.index),
+    groupIndex: new Map(state.groupIndex),
+    groupOf: new Map(state.groupOf),
+    turnStatus: new Map(state.turnStatus),
+    currentTurnId: state.currentTurnId,
+  };
 }
 
 export function emptyTimeline(): TimelineState {
-  return { blocks: [], index: new Map() };
+  return {
+    blocks: [],
+    index: new Map(),
+    groupIndex: new Map(),
+    groupOf: new Map(),
+    turnStatus: new Map(),
+    currentTurnId: null,
+  };
+}
+
+/** Rebuild both index maps from `blocks`, writing them into `state`. */
+function reindexInPlace(state: TimelineState): void {
+  const index = new Map<string, number>();
+  const groupIndex = new Map<string, number>();
+  state.blocks.forEach((b, i) => {
+    index.set(b.id, i);
+    if (b.kind === "working") groupIndex.set(b.turnId, i);
+  });
+  state.index = index;
+  state.groupIndex = groupIndex;
+}
+
+function reindex(state: TimelineState): TimelineState {
+  reindexInPlace(state);
+  return state;
+}
+
+/** Drop a working group that no longer holds any child, keeping the maps exact. */
+function removeGroupIfEmpty(state: TimelineState, group: WorkingBlock): void {
+  if (group.children.length > 0) return;
+  const idx = state.blocks.indexOf(group);
+  if (idx === -1) return;
+  state.blocks.splice(idx, 1);
+  reindexInPlace(state);
 }
 
 function push(state: TimelineState, block: Block): number {
   state.blocks.push(block);
   state.index.set(block.id, state.blocks.length - 1);
+  if (block.kind === "working") state.groupIndex.set(block.turnId, state.blocks.length - 1);
   return state.blocks.length - 1;
 }
 
@@ -62,6 +238,19 @@ function reasoningSummaryText(item: Record<string, unknown>): string {
 const REASONING_SUMMARY_DELTA_KINDS = new Set([
   "item/reasoning/summaryTextDelta",
   "item/reasoning/summaryPartAdded",
+]);
+
+/**
+ * The server buffers every tool-output stream method and re-emits it as a
+ * `stream.delta` carrying the original method in `kind`. These deltas extend the
+ * owning tool card's output; they must never be mistaken for assistant prose.
+ */
+const TOOL_OUTPUT_DELTA_KINDS = new Set([
+  "item/commandExecution/outputDelta",
+  "item/fileChange/outputDelta",
+  "command/exec/outputDelta",
+  "process/outputDelta",
+  "item/mcpToolCall/progress",
 ]);
 
 const TOOL_TITLES: Record<string, string> = {
@@ -98,6 +287,87 @@ function toolOutput(item: Record<string, unknown>): string {
   return "";
 }
 
+/**
+ * The turn a block belongs to. The outer event turnId (this server's turn id)
+ * always wins; the payload's `turnId` is the remote Codex turn id and is only a
+ * fallback for legacy events. Events with neither attach to the most recent
+ * turn seen in this conversation, and finally to a stable `untracked` bucket.
+ */
+function resolveTurnId(state: TimelineState, event: AgentEvent): string {
+  if (event.turnId) return event.turnId;
+  const payloadTurnId = text((event.payload ?? {}).turnId);
+  if (payloadTurnId) return payloadTurnId;
+  return state.currentTurnId ?? "untracked";
+}
+
+function setTurnStatus(state: TimelineState, turnId: string, status: WorkingStatus): void {
+  const previous = state.turnStatus.get(turnId);
+  if (previous && TERMINAL_STATUSES.has(previous) && !TERMINAL_STATUSES.has(status)) return;
+  if (previous && STATUS_RANK[status] < STATUS_RANK[previous]) return;
+  state.turnStatus.set(turnId, status);
+  const idx = state.groupIndex.get(turnId);
+  if (idx === undefined) return;
+  const group = state.blocks[idx];
+  if (group?.kind === "working") group.status = status;
+}
+
+/** Find (or lazily create) the working group for a turn. */
+function workingGroupFor(state: TimelineState, turnId: string): WorkingBlock {
+  const idx = state.groupIndex.get(turnId);
+  if (idx !== undefined) {
+    const group = state.blocks[idx];
+    if (group?.kind === "working") return group;
+  }
+  const group: WorkingBlock = {
+    kind: "working",
+    id: `working:${turnId}`,
+    turnId,
+    // A group created after its turn already ended inherits that terminal status;
+    // a group with no observed lifecycle at all (legacy events, partial history)
+    // is shown as an unknown static record instead of animating forever or
+    // claiming a success that was never observed.
+    status: state.turnStatus.get(turnId) ?? "unknown",
+    children: [],
+    hasToolError: false,
+  };
+  push(state, group);
+  return group;
+}
+
+function findChild(state: TimelineState, id: string): { group: WorkingBlock; child: ToolBlock | ReasoningBlock } | null {
+  const turnId = state.groupOf.get(id);
+  if (turnId === undefined) return null;
+  const groupIdx = state.groupIndex.get(turnId);
+  if (groupIdx === undefined) return null;
+  const group = state.blocks[groupIdx];
+  if (group?.kind !== "working") return null;
+  const child = group.children.find((c) => c.id === id);
+  return child ? { group, child } : null;
+}
+
+/** The tool block with this id, whether it lives in a group or (legacy) top level. */
+function findToolBlock(state: TimelineState, id: string): ToolBlock | null {
+  const found = findChild(state, id);
+  if (found && found.child.kind === "tool") return found.child;
+  const idx = state.index.get(id);
+  if (idx === undefined) return null;
+  const block = state.blocks[idx];
+  return block?.kind === "tool" ? block : null;
+}
+
+function addTool(state: TimelineState, turnId: string, block: Omit<ToolBlock, "turnId">): void {
+  const group = workingGroupFor(state, turnId);
+  group.children.push({ ...block, turnId });
+  state.groupOf.set(block.id, turnId);
+  if (block.status === "error") group.hasToolError = true;
+}
+
+function addReasoning(state: TimelineState, turnId: string, block: Omit<ReasoningBlock, "turnId">): void {
+  const group = workingGroupFor(state, turnId);
+  group.children.push({ ...block, turnId });
+  state.groupOf.set(block.id, turnId);
+}
+
 export function applyEvent(state: TimelineState, event: AgentEvent): void {
   const p = event.payload ?? {};
   switch (event.type) {
@@ -111,14 +381,19 @@ export function applyEvent(state: TimelineState, event: AgentEvent): void {
     }
     case "turn.queued": {
       const attachments = Array.isArray(p.attachments) ? (p.attachments as Array<{ path: string }>) : [];
-      const turnId = String(p.turnId ?? event.id);
+      // Every lifecycle branch resolves the turn id the same way: the outer
+      // event turnId (this server's turn id) wins, and the payload's turnId is a
+      // legacy fallback for rows persisted before that column was populated.
+      const turnId = event.turnId || text(p.turnId) || String(event.id);
+      state.currentTurnId = turnId;
+      setTurnStatus(state, turnId, "queued");
       const clientMessageId = text(p.clientMessageId);
       // Reconcile the optimistic bubble with the authoritative server turn instead
       // of leaving a duplicate user message behind.
       const pendingId = clientMessageId ? `user:pending:${clientMessageId}` : null;
       const existingIdx = pendingId ? state.index.get(pendingId) : undefined;
       if (existingIdx !== undefined && state.blocks[existingIdx]?.kind === "user") {
-        const block = state.blocks[existingIdx] as Extract<Block, { kind: "user" }>;
+        const block = state.blocks[existingIdx] as UserBlock;
         const finalId = `user:${turnId}`;
         state.index.delete(pendingId as string);
         block.id = finalId;
@@ -131,10 +406,17 @@ export function applyEvent(state: TimelineState, event: AgentEvent): void {
       push(state, { kind: "user", id: `user:${turnId}`, text: text(p.text), attachments });
       return;
     }
+    case "turn.started": {
+      const turnId = event.turnId || text(p.turnId) || String(event.id);
+      state.currentTurnId = turnId;
+      setTurnStatus(state, turnId, "running");
+      return;
+    }
     case "item/started": {
       const item = (p.item ?? {}) as Record<string, unknown>;
       const type = text(item.type) || "item";
       const id = `item:${text(item.id) || String(event.id)}`;
+      const turnId = resolveTurnId(state, event);
       if (type === "agentMessage") {
         if (!state.index.has(id)) push(state, { kind: "assistant", id, text: "", streaming: true });
         return;
@@ -146,7 +428,8 @@ export function applyEvent(state: TimelineState, event: AgentEvent): void {
         return;
       }
       if (type === "userMessage") return;
-      push(state, {
+      if (findChild(state, id)) return;
+      addTool(state, turnId, {
         kind: "tool",
         id,
         toolType: type,
@@ -160,13 +443,14 @@ export function applyEvent(state: TimelineState, event: AgentEvent): void {
     case "item/completed": {
       const item = (p.item ?? {}) as Record<string, unknown>;
       const id = `item:${text(item.id) || String(event.id)}`;
-      const existing = state.index.get(id);
       const type = text(item.type) || "item";
+      const turnId = resolveTurnId(state, event);
       if (type === "agentMessage") {
+        const existing = state.index.get(id);
         if (existing === undefined) {
           push(state, { kind: "assistant", id, text: text(item.text), streaming: false });
         } else {
-          const block = state.blocks[existing] as Extract<Block, { kind: "assistant" }>;
+          const block = state.blocks[existing] as AssistantBlock;
           block.text = text(item.text) || block.text;
           block.streaming = false;
         }
@@ -174,42 +458,47 @@ export function applyEvent(state: TimelineState, event: AgentEvent): void {
       }
       if (type === "reasoning") {
         const summaryText = reasoningSummaryText(item);
-        if (existing !== undefined) {
-          const block = state.blocks[existing] as Extract<Block, { kind: "reasoning" }>;
+        const found = findChild(state, id);
+        if (found) {
+          const block = found.child as ReasoningBlock;
           if (summaryText) block.text = summaryText;
           block.streaming = false;
           // A reasoning item with neither summary text nor buffered deltas must
-          // not remain as an empty expandable row on replay.
+          // not remain as an empty expandable row on replay. If it was the group's
+          // only child, the group goes too — a later real tool for the same turn
+          // recreates it from the retained turn status.
           if (!block.text.trim()) {
-            state.blocks.splice(existing, 1);
-            state.index.delete(id);
-            state.blocks.forEach((b, i) => state.index.set(b.id, i));
+            found.group.children = found.group.children.filter((c) => c.id !== id);
+            state.groupOf.delete(id);
+            removeGroupIfEmpty(state, found.group);
           }
         } else if (summaryText) {
-          push(state, { kind: "reasoning", id, text: summaryText, streaming: false });
+          addReasoning(state, turnId, { kind: "reasoning", id, text: summaryText, streaming: false });
         }
         return;
       }
       if (type === "userMessage") return;
       const output = toolOutput(item);
       const failed = text(item.status) === "failed" || text(item.status) === "error";
-      if (existing === undefined) {
-        push(state, {
-          kind: "tool",
-          id,
-          toolType: type,
-          title: TOOL_TITLES[type] ?? type,
-          detail: toolDetail(type, item),
-          status: failed ? "error" : "done",
-          output,
-        });
-      } else {
-        const block = state.blocks[existing] as Extract<Block, { kind: "tool" }>;
+      const found = findChild(state, id);
+      if (found) {
+        const block = found.child as ToolBlock;
         block.status = failed ? "error" : "done";
         if (output) block.output = output;
         const detail = toolDetail(type, item);
         if (detail) block.detail = detail;
+        if (failed) found.group.hasToolError = true;
+        return;
       }
+      addTool(state, turnId, {
+        kind: "tool",
+        id,
+        toolType: type,
+        title: TOOL_TITLES[type] ?? type,
+        detail: toolDetail(type, item),
+        status: failed ? "error" : "done",
+        output,
+      });
       return;
     }
     case "stream.delta": {
@@ -224,22 +513,36 @@ export function applyEvent(state: TimelineState, event: AgentEvent): void {
       const isReasoningSummary = REASONING_SUMMARY_DELTA_KINDS.has(kind);
       if (kind.includes("reasoning") && !isReasoningSummary) return;
       const id = `item:${itemId}`;
-      let idx = state.index.get(id);
+      const turnId = resolveTurnId(state, event);
+      if (isReasoningSummary) {
+        const found = findChild(state, id);
+        if (found) {
+          const block = found.child as ReasoningBlock;
+          block.text += delta;
+          block.streaming = true;
+        } else {
+          addReasoning(state, turnId, { kind: "reasoning", id, text: delta, streaming: true });
+        }
+        return;
+      }
+      // Tool-output streams arrive normalized as `stream.delta` (the server
+      // buffers item/commandExecution/outputDelta & co and re-emits them with the
+      // original method in `kind`). They extend the owning tool card's output and
+      // must never be appended to an assistant bubble.
+      if (TOOL_OUTPUT_DELTA_KINDS.has(kind)) {
+        const tool = findToolBlock(state, id);
+        if (tool) tool.output += delta;
+        return;
+      }
+      const idx = state.index.get(id);
       if (idx === undefined) {
-        idx = push(
-          state,
-          isReasoningSummary
-            ? { kind: "reasoning", id, text: delta, streaming: true }
-            : { kind: "assistant", id, text: delta, streaming: true },
-        );
+        push(state, { kind: "assistant", id, text: delta, streaming: true });
         return;
       }
       const block = state.blocks[idx]!;
-      if (block.kind === "assistant" || block.kind === "reasoning") {
+      if (block.kind === "assistant") {
         block.text += delta;
         block.streaming = true;
-      } else if (block.kind === "tool") {
-        block.output += delta;
       }
       return;
     }
@@ -250,7 +553,7 @@ export function applyEvent(state: TimelineState, event: AgentEvent): void {
       const idx = state.index.get(id);
       if (idx === undefined) push(state, { kind: "assistant", id, text: delta, streaming: true });
       else {
-        const block = state.blocks[idx] as Extract<Block, { kind: "assistant" }>;
+        const block = state.blocks[idx] as AssistantBlock;
         block.text += delta;
       }
       return;
@@ -258,11 +561,8 @@ export function applyEvent(state: TimelineState, event: AgentEvent): void {
     case "item/commandExecution/outputDelta": {
       const itemId = text(p.itemId) || "stream";
       const delta = text(p.delta) || text(p.output);
-      const idx = state.index.get(`item:${itemId}`);
-      if (idx !== undefined) {
-        const block = state.blocks[idx]!;
-        if (block.kind === "tool") block.output += delta;
-      }
+      const found = findChild(state, `item:${itemId}`);
+      if (found && found.child.kind === "tool") found.child.output += delta;
       return;
     }
     case "approval.requested": {
@@ -281,7 +581,7 @@ export function applyEvent(state: TimelineState, event: AgentEvent): void {
       const requestId = text(p.requestId);
       const idx = state.index.get(`approval:${requestId}`);
       if (idx !== undefined) {
-        const block = state.blocks[idx] as Extract<Block, { kind: "approval" }>;
+        const block = state.blocks[idx] as ApprovalBlock;
         block.status = "resolved";
         block.decision = text(p.decision);
       }
@@ -289,19 +589,40 @@ export function applyEvent(state: TimelineState, event: AgentEvent): void {
     }
     case "turn.finished": {
       const status = text(p.status);
+      // The outer event turnId is this server's turn id and is the only value the
+      // working groups are keyed by; the payload's turnId is the remote Codex turn
+      // id and is a legacy fallback only.
+      const turnId = event.turnId || text(p.turnId) || "";
+      const mapped: WorkingStatus =
+        status === "completed"
+          ? "done"
+          : status === "interrupted"
+            ? "stopped"
+            : status === "failed" || status === "error"
+              ? "error"
+              : "unknown";
+      if (turnId) setTurnStatus(state, turnId, mapped);
       const level = status === "completed" ? "info" : status === "unknown" ? "error" : "warn";
       const label =
         status === "completed" ? "本轮完成" : status === "interrupted" ? "已停止" : status === "unknown" ? "结果未知" : `结束：${status}`;
       push(state, { kind: "status", id: `finish:${String(p.turnId ?? event.id)}`, text: `${label}${text(p.message) ? ` · ${text(p.message)}` : ""}`, level });
       return;
     }
-    case "turn.failed":
+    case "turn.failed": {
+      const turnId = event.turnId || text(p.turnId) || "";
+      if (turnId) setTurnStatus(state, turnId, "error");
       push(state, { kind: "status", id: `fail:${String(p.turnId ?? event.id)}`, text: `执行失败：${text(p.message)}`, level: "error" });
       return;
-    case "turn.cancelled":
+    }
+    case "turn.cancelled": {
+      const turnId = event.turnId || text(p.turnId) || "";
+      if (turnId) setTurnStatus(state, turnId, "stopped");
       push(state, { kind: "status", id: `cancel:${String(p.turnId ?? event.id)}`, text: "已取消排队中的轮次", level: "warn" });
       return;
-    case "turn.reconciled":
+    }
+    case "turn.reconciled": {
+      const turnId = event.turnId || text(p.turnId) || "";
+      if (turnId) setTurnStatus(state, turnId, text(p.status) === "unknown" ? "unknown" : "stopped");
       push(state, {
         kind: "status",
         id: `reconciled:${String(p.turnId ?? event.id)}`,
@@ -309,9 +630,13 @@ export function applyEvent(state: TimelineState, event: AgentEvent): void {
         level: text(p.status) === "unknown" ? "error" : "warn",
       });
       return;
-    case "turn.interrupt_requested":
+    }
+    case "turn.interrupt_requested": {
+      const turnId = event.turnId || text(p.turnId) || "";
+      if (turnId) setTurnStatus(state, turnId, "stopping");
       push(state, { kind: "status", id: `stop:${event.id}`, text: "已请求停止…", level: "warn" });
       return;
+    }
     case "thread.started":
       push(state, { kind: "status", id: `thread:${String(p.threadId ?? event.id)}`, text: `已创建会话线程（模型 ${text(p.model)}）`, level: "info" });
       return;

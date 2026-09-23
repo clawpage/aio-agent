@@ -1,11 +1,49 @@
 import { describe, expect, it } from "vitest";
-import { applyEvent, buildTimeline, emptyTimeline, removeBlock } from "../../src/web/src/timeline";
+import {
+  applyEvent,
+  buildTimeline,
+  childInProgress,
+  cloneTimeline,
+  emptyTimeline,
+  isWorkingActive,
+  removeBlock,
+  workingLabel,
+  type Block,
+  type ReasoningBlock,
+  type TimelineState,
+  type ToolBlock,
+  type WorkingBlock,
+} from "../../src/web/src/timeline";
 import type { AgentEvent } from "../../src/web/src/types";
 
+/** Every tool block, whether it sits inside a working group or (legacy) top level. */
+function tools(state: TimelineState): ToolBlock[] {
+  const out: ToolBlock[] = [];
+  for (const b of state.blocks) {
+    if (b.kind === "tool") out.push(b);
+    else if (b.kind === "working") out.push(...b.children.filter((c): c is ToolBlock => c.kind === "tool"));
+  }
+  return out;
+}
+
+/** Every reasoning summary, wherever it lives. */
+function reasonings(state: TimelineState): ReasoningBlock[] {
+  const out: ReasoningBlock[] = [];
+  for (const b of state.blocks) {
+    if (b.kind === "reasoning") out.push(b);
+    else if (b.kind === "working") out.push(...b.children.filter((c): c is ReasoningBlock => c.kind === "reasoning"));
+  }
+  return out;
+}
+
+function groups(state: TimelineState): WorkingBlock[] {
+  return state.blocks.filter((b): b is WorkingBlock => b.kind === "working");
+}
+
 let seq = 0;
-function ev(type: string, payload: Record<string, unknown>): AgentEvent {
+function ev(type: string, payload: Record<string, unknown>, turnId: string | null = null): AgentEvent {
   seq += 1;
-  return { id: seq, type, turnId: null, createdAt: Date.now(), payload };
+  return { id: seq, type, turnId, createdAt: Date.now(), payload };
 }
 
 function feed(events: AgentEvent[]) {
@@ -63,7 +101,7 @@ describe("timeline reducer", () => {
       ev("stream.delta", { itemId: "c1", kind: "item/commandExecution/outputDelta", delta: "Linux\n" }),
       ev("item/completed", { item: { id: "c1", type: "commandExecution", status: "completed", aggregatedOutput: "Linux\n" } }),
     ]);
-    const tool = state.blocks.find((b) => b.kind === "tool") as { detail: string; status: string; output: string };
+    const tool = tools(state)[0]!;
     expect(tool.detail).toContain("uname -a");
     expect(tool.status).toBe("done");
     expect(tool.output).toContain("Linux");
@@ -100,7 +138,9 @@ describe("timeline reducer", () => {
       ev("item/started", { item: { id: "r-empty", type: "reasoning", summary: [], content: [] } }),
       ev("item/completed", { item: { id: "r-empty", type: "reasoning", summary: [], content: [] } }),
     ]);
-    expect(state.blocks.filter((b) => b.kind === "reasoning")).toHaveLength(0);
+    expect(reasonings(state)).toHaveLength(0);
+    // No empty group is left behind either.
+    expect(groups(state).every((g) => g.children.length > 0)).toBe(true);
   });
 
   it("renders a completed reasoning item from its summary array only", () => {
@@ -108,7 +148,7 @@ describe("timeline reducer", () => {
       ev("item/started", { item: { id: "r1", type: "reasoning", summary: [], content: [] } }),
       ev("item/completed", { item: { id: "r1", type: "reasoning", summary: ["先确认目标", "再执行"], content: ["RAW COT"] } }),
     ]);
-    const reasoning = state.blocks.filter((b) => b.kind === "reasoning") as Array<{ text: string; streaming: boolean }>;
+    const reasoning = reasonings(state);
     expect(reasoning).toHaveLength(1);
     expect(reasoning[0]!.text).toBe("先确认目标\n\n再执行");
     expect(reasoning[0]!.streaming).toBe(false);
@@ -123,7 +163,7 @@ describe("timeline reducer", () => {
       ev("stream.delta", { itemId: "r2", kind: "item/reasoning/summaryTextDelta", delta: "第二段" }),
       ev("item/completed", { item: { id: "r2", type: "reasoning", summary: ["第一段第二段"] } }),
     ]);
-    const reasoning = state.blocks.filter((b) => b.kind === "reasoning") as Array<{ text: string; streaming: boolean }>;
+    const reasoning = reasonings(state);
     expect(reasoning).toHaveLength(1);
     expect(reasoning[0]!.text).toBe("第一段第二段");
     expect(reasoning[0]!.streaming).toBe(false);
@@ -143,9 +183,325 @@ describe("timeline reducer", () => {
       ev("item/started", { item: { id: "r3", type: "reasoning", summary: [], content: [] } }),
       ev("stream.delta", { itemId: "r3", kind: "item/reasoning/summaryPartAdded", delta: "先确认目标" }),
     ]);
-    const reasoning = state.blocks.filter((b) => b.kind === "reasoning") as Array<{ text: string; streaming: boolean }>;
+    const reasoning = reasonings(state);
     expect(reasoning).toHaveLength(1);
     expect(reasoning[0]!.text).toBe("先确认目标");
     expect(reasoning[0]!.streaming).toBe(true);
+  });
+});
+
+describe("working groups", () => {
+  it("collects each turn's tools and summaries into one group, isolated per turn", () => {
+    const state = feed([
+      ev("turn.queued", { turnId: "t1", text: "第一轮" }),
+      ev("turn.started", { turnId: "t1" }),
+      ev("item/started", { item: { id: "a1", type: "commandExecution", command: "ls" } }),
+      ev("item/completed", { item: { id: "a1", type: "commandExecution", status: "completed", aggregatedOutput: "ok" } }),
+      ev("item/completed", { item: { id: "r1", type: "reasoning", summary: ["先看目录"] } }),
+      ev("turn.finished", { turnId: "t1", status: "completed" }),
+      ev("turn.queued", { turnId: "t2", text: "第二轮" }),
+      ev("turn.started", { turnId: "t2" }),
+      ev("item/started", { item: { id: "b1", type: "commandExecution", command: "pwd" } }),
+      ev("item/completed", { item: { id: "b1", type: "commandExecution", status: "completed" } }),
+      ev("turn.finished", { turnId: "t2", status: "completed" }),
+    ]);
+    const gs = groups(state);
+    expect(gs.map((g) => g.id)).toEqual(["working:t1", "working:t2"]);
+    expect(gs[0]!.children.map((c) => c.id)).toEqual(["item:a1", "item:r1"]);
+    expect(gs[1]!.children.map((c) => c.id)).toEqual(["item:b1"]);
+    // Every child knows its owning turn, and the turn is the local one.
+    expect(tools(state).map((t) => t.turnId)).toEqual(["t1", "t2"]);
+    expect(reasonings(state).map((r) => r.turnId)).toEqual(["t1"]);
+    // The first tool of each turn sits at the group's position, not top level.
+    expect(state.blocks.some((b) => b.kind === "tool")).toBe(false);
+    expect(state.blocks.some((b) => b.kind === "reasoning")).toBe(false);
+  });
+
+  it("keeps normal assistant prose out of the group", () => {
+    const state = feed([
+      ev("turn.started", { turnId: "t1" }),
+      ev("item/started", { item: { id: "c1", type: "commandExecution", command: "ls" } }),
+      ev("item/completed", { item: { id: "c1", type: "commandExecution", status: "completed" } }),
+      ev("item/completed", { item: { id: "m1", type: "agentMessage", text: "这是正文" } }),
+    ]);
+    const assistant = state.blocks.filter((b) => b.kind === "assistant");
+    expect(assistant).toHaveLength(1);
+    expect(groups(state)[0]!.children).toHaveLength(1);
+    expect(groups(state)[0]!.children[0]!.kind).toBe("tool");
+  });
+
+  it("resolves the local turn id the same way for lifecycle and item events", () => {
+    // The payload carries the remote Codex turn id; the outer event turnId is this
+    // server's local turn id. Every branch must agree on the outer one, otherwise a
+    // group would never receive its own turn's lifecycle.
+    const state = feed([
+      ev("turn.started", { turnId: "remote-1" }, "local1"),
+      ev("item/started", { item: { id: "x1", type: "commandExecution", command: "ls" }, turnId: "remote-1" }, "local1"),
+      ev("turn.finished", { turnId: "remote-1", status: "completed" }, "local1"),
+    ]);
+    expect(groups(state).map((g) => g.turnId)).toEqual(["local1"]);
+    expect(groups(state)[0]!.status).toBe("done");
+    expect(state.currentTurnId).toBe("local1");
+  });
+
+  it("prefers the outer local turnId over the payload's remote turn id", () => {
+    const state = feed([
+      ev("turn.started", { turnId: "local1" }),
+      // The payload carries the remote Codex turn id; the group must key on local1.
+      ev("item/started", { item: { id: "x1", type: "commandExecution", command: "ls" }, turnId: "remote-9" }, "local1"),
+      ev("turn.finished", { turnId: "remote-9", status: "completed" }, "local1"),
+    ]);
+    const gs = groups(state);
+    expect(gs).toHaveLength(1);
+    expect(gs[0]!.turnId).toBe("local1");
+    expect(gs[0]!.status).toBe("done");
+    expect(tools(state)[0]!.turnId).toBe("local1");
+  });
+
+  it("gives an unowned legacy event a stable static bucket when no turn is known", () => {
+    // Replayed history can contain events with no turn identity at all. With no
+    // observed turn to attach them to they land in one stable `untracked` group
+    // that stays static: no animation, no invented success.
+    const state = feed([
+      { id: 998, type: "item/completed", turnId: null, createdAt: Date.now(), payload: { item: { id: "old1", type: "commandExecution", status: "completed" } } },
+      { id: 999, type: "item/completed", turnId: null, createdAt: Date.now(), payload: { item: { id: "old2", type: "commandExecution", status: "completed" } } },
+    ]);
+    const gs = groups(state);
+    expect(gs).toHaveLength(1);
+    expect(gs[0]!.turnId).toBe("untracked");
+    expect(gs[0]!.children.map((c) => c.id)).toEqual(["item:old1", "item:old2"]);
+    expect(gs[0]!.status).toBe("unknown");
+    expect(isWorkingActive(gs[0]!.status)).toBe(false);
+    expect(workingLabel(gs[0]!.status)).toBe("结果未知");
+  });
+
+  it("attaches an early live event with no turnId to the turn that just started", () => {
+    // The server can emit the first item of a turn before the local turn id is
+    // persisted; those events carry no turnId and must join the starting turn
+    // rather than a separate bucket.
+    const state = feed([
+      ev("turn.started", { turnId: "live" }),
+      ev("item/started", { item: { id: "early", type: "commandExecution", command: "ls" } }),
+    ]);
+    expect(groups(state).map((g) => g.turnId)).toEqual(["live"]);
+    expect(groups(state)[0]!.status).toBe("running");
+  });
+
+  it("routes every normalized tool-output stream delta into the tool, never into prose", () => {
+    const kinds = [
+      "item/commandExecution/outputDelta",
+      "item/fileChange/outputDelta",
+      "command/exec/outputDelta",
+      "process/outputDelta",
+      "item/mcpToolCall/progress",
+    ];
+    for (const kind of kinds) {
+      const state = feed([
+        ev("turn.started", { turnId: "t1" }),
+        ev("item/started", { item: { id: "cmd1", type: "commandExecution", command: "probe" } }),
+        ev("stream.delta", { itemId: "cmd1", kind, delta: "probe-output" }),
+      ]);
+      expect(tools(state)[0]!.output).toBe("probe-output");
+      expect(state.blocks.filter((b) => b.kind === "assistant")).toHaveLength(0);
+    }
+  });
+
+  it("keeps a failed tool flagged on the group header even after the turn succeeds", () => {
+    const state = feed([
+      ev("turn.started", { turnId: "t1" }),
+      ev("item/started", { item: { id: "f1", type: "commandExecution", command: "boom" } }),
+      ev("item/completed", { item: { id: "f1", type: "commandExecution", status: "failed" } }),
+      ev("turn.finished", { turnId: "t1", status: "completed" }),
+    ]);
+    const g = groups(state)[0]!;
+    expect(g.status).toBe("done");
+    expect(g.hasToolError).toBe(true);
+    expect(tools(state)[0]!.status).toBe("error");
+  });
+
+  it("maps every terminal lifecycle onto the right label without faking success", () => {
+    const cases: Array<[Record<string, unknown>, string, string]> = [
+      [{ status: "completed" }, "done", "已完成"],
+      [{ status: "failed", message: "boom" }, "error", "执行出错"],
+      [{ status: "interrupted" }, "stopped", "已停止"],
+      [{ status: "unknown", message: "断连" }, "unknown", "结果未知"],
+    ];
+    for (const [payload, status, label] of cases) {
+      const state = feed([
+        ev("turn.started", { turnId: "t1" }),
+        ev("item/completed", { item: { id: "c1", type: "commandExecution", status: "completed" } }),
+        ev("turn.finished", { turnId: "t1", ...payload }),
+      ]);
+      expect(groups(state)[0]!.status).toBe(status);
+      expect(workingLabel(status as never)).toBe(label);
+      expect(isWorkingActive(status as never)).toBe(false);
+    }
+  });
+
+  it("reports a failed turn as an execution error, not an unknown outcome", () => {
+    const state = feed([
+      ev("turn.started", { turnId: "t1" }),
+      ev("item/completed", { item: { id: "c1", type: "commandExecution", status: "completed" } }),
+      ev("turn.failed", { turnId: "t1", message: "沙箱崩了" }),
+    ]);
+    expect(groups(state)[0]!.status).toBe("error");
+    const status = state.blocks.find((b) => b.kind === "status") as { level: string; text: string };
+    expect(status.level).toBe("error");
+    expect(status.text).toContain("沙箱崩了");
+  });
+
+  it("never animates a queued turn and only animates once it actually started", () => {
+    const queued = feed([
+      ev("turn.queued", { turnId: "t1", text: "排队" }),
+      ev("item/started", { item: { id: "c1", type: "commandExecution", command: "ls" } }),
+    ]);
+    expect(groups(queued)[0]!.status).toBe("queued");
+    expect(isWorkingActive(groups(queued)[0]!.status)).toBe(false);
+    expect(workingLabel("queued")).not.toContain("Working");
+
+    const running = buildTimeline([ev("turn.started", { turnId: "t1" })], queued);
+    expect(groups(running)[0]!.status).toBe("running");
+    expect(isWorkingActive("running")).toBe(true);
+  });
+
+  it("does not animate a completed tool that never saw a lifecycle event", () => {
+    const state = feed([
+      ev("item/completed", { item: { id: "c1", type: "commandExecution", status: "completed" } }),
+    ]);
+    const g = groups(state)[0]!;
+    expect(g.turnId).toBe("untracked");
+    expect(isWorkingActive(g.status)).toBe(false);
+    expect(workingLabel(g.status)).toBe("结果未知");
+  });
+
+  it("inherits the terminal status for a group created after its turn already ended", () => {
+    const state = feed([
+      ev("turn.started", { turnId: "t1" }),
+      ev("turn.finished", { turnId: "t1", status: "completed" }),
+      // A late/replayed tool event for the same turn must not restart the animation.
+      ev("item/completed", { item: { id: "late", type: "commandExecution", status: "completed" } }, "t1"),
+    ]);
+    const g = groups(state)[0]!;
+    expect(g.status).toBe("done");
+    expect(isWorkingActive(g.status)).toBe(false);
+    expect(g.children).toHaveLength(1);
+  });
+
+  it("stops claiming in-progress on children when the turn ends without their completion", () => {
+    const state = feed([
+      ev("turn.started", { turnId: "t1" }),
+      ev("item/started", { item: { id: "c1", type: "commandExecution", command: "sleep 100" } }),
+      ev("stream.delta", { itemId: "r1", kind: "item/reasoning/summaryTextDelta", delta: "还在想" }),
+      ev("turn.finished", { turnId: "t1", status: "interrupted" }),
+    ]);
+    const g = groups(state)[0]!;
+    expect(g.status).toBe("stopped");
+    const tool = g.children.find((c) => c.kind === "tool")!;
+    const reasoning = g.children.find((c) => c.kind === "reasoning")!;
+    // The recorded statuses are untouched; only the "in progress" presentation stops.
+    expect(tool.kind === "tool" && tool.status).toBe("running");
+    expect(childInProgress(g, tool)).toBe(false);
+    expect(childInProgress(g, reasoning)).toBe(false);
+    // While the turn is live the same children do present as in progress.
+    const live = feed([
+      ev("turn.started", { turnId: "t1" }),
+      ev("item/started", { item: { id: "c1", type: "commandExecution", command: "sleep 100" } }),
+    ]);
+    const liveGroup = groups(live)[0]!;
+    expect(childInProgress(liveGroup, liveGroup.children[0]!)).toBe(true);
+  });
+
+  it("keeps a real recorded output visible after the turn ends", () => {
+    const state = feed([
+      ev("turn.started", { turnId: "t1" }),
+      ev("item/started", { item: { id: "c1", type: "commandExecution", command: "ls" } }),
+      ev("stream.delta", { itemId: "c1", kind: "item/commandExecution/outputDelta", delta: "partial" }),
+      ev("turn.finished", { turnId: "t1", status: "interrupted" }),
+    ]);
+    const tool = tools(state)[0]!;
+    expect(tool.output).toBe("partial");
+  });
+
+  it("applies an incremental update to a clone without touching the previous state", () => {
+    const first = feed([
+      ev("turn.started", { turnId: "local1" }),
+      ev("item/started", { item: { id: "cmd1", type: "commandExecution", command: "probe" } }),
+    ]);
+    const next = cloneTimeline(first);
+    applyEvent(next, ev("stream.delta", { itemId: "cmd1", kind: "item/commandExecution/outputDelta", delta: "probe" }));
+
+    // The maps are independent copies...
+    expect(next.groupIndex).not.toBe(first.groupIndex);
+    expect(next.groupOf).not.toBe(first.groupOf);
+    expect(next.turnStatus).not.toBe(first.turnStatus);
+    // ...and so are the block objects the reducer mutates: the group, the
+    // children array, and the child that received the delta.
+    const firstGroup = groups(first)[0]!;
+    const nextGroup = groups(next)[0]!;
+    expect(nextGroup).not.toBe(firstGroup);
+    expect(nextGroup.children).not.toBe(firstGroup.children);
+    expect(nextGroup.children[0]).not.toBe(firstGroup.children[0]);
+    // The previous state is byte-for-byte unchanged: no duplicated delta, no
+    // leaked child.
+    expect((firstGroup.children[0] as ToolBlock).output).toBe("");
+    expect(firstGroup.children).toHaveLength(1);
+    expect((nextGroup.children[0] as ToolBlock).output).toBe("probe");
+    // A second, independent update still starts from the untouched original.
+    const third = cloneTimeline(first);
+    applyEvent(third, ev("item/started", { item: { id: "cmd2", type: "commandExecution", command: "pwd" } }));
+    expect(groups(first)[0]!.children).toHaveLength(1);
+    expect(groups(third)[0]!.children).toHaveLength(2);
+    // Mutating the clone's group status must not reach the original either.
+    applyEvent(third, ev("turn.finished", { turnId: "local1", status: "completed" }));
+    expect(groups(first)[0]!.status).toBe("running");
+    expect(groups(third)[0]!.status).toBe("done");
+  });
+
+  it("removes a whitespace-only summary and its now-empty group, keeping the indexes exact", () => {
+    const state = feed([
+      // A group for an earlier turn, so the reindex has something to keep correct.
+      ev("turn.queued", { turnId: "t0", text: "第一轮" }),
+      ev("turn.started", { turnId: "t0" }),
+      ev("item/completed", { item: { id: "k0", type: "commandExecution", status: "completed" } }, "t0"),
+      ev("turn.finished", { turnId: "t0", status: "completed" }, "t0"),
+      // The turn under test: only a blank summary, then a real tool and prose.
+      ev("turn.started", { turnId: "t1" }, "t1"),
+      ev("stream.delta", { itemId: "r", kind: "item/reasoning/summaryTextDelta", delta: "\n\n" }, "t1"),
+      ev("item/completed", { item: { id: "r", type: "reasoning", summary: [] } }, "t1"),
+    ]);
+
+    // No empty group and no empty summary row are left behind.
+    expect(groups(state).map((g) => g.turnId)).toEqual(["t0"]);
+    expect(reasonings(state)).toHaveLength(0);
+    expect(state.groupOf.has("item:r")).toBe(false);
+
+    // A later real tool for t1 recreates its group, with correct indexes.
+    applyEvent(state, ev("item/started", { item: { id: "c1", type: "commandExecution", command: "ls" } }, "t1"));
+    applyEvent(state, ev("item/completed", { item: { id: "m1", type: "agentMessage", text: "正文" } }, "t1"));
+    const gs = groups(state);
+    expect(gs.map((g) => g.turnId)).toEqual(["t0", "t1"]);
+    expect(gs[1]!.children.map((c) => c.id)).toEqual(["item:c1"]);
+    // Every index map agrees with the actual block positions.
+    state.blocks.forEach((b, i) => {
+      expect(state.index.get(b.id)).toBe(i);
+      if (b.kind === "working") expect(state.groupIndex.get(b.turnId)).toBe(i);
+    });
+    expect(state.groupOf.get("item:c1")).toBe("t1");
+    // The assistant prose stayed top-level, after the t1 group.
+    const assistantIdx = state.blocks.findIndex((b) => b.kind === "assistant");
+    expect(assistantIdx).toBeGreaterThan(state.groupIndex.get("t1")!);
+    expect(state.index.get("item:m1")).toBe(assistantIdx);
+  });
+
+  it("removes an empty group even when a sibling summary with real text stays", () => {
+    const state = feed([
+      ev("turn.started", { turnId: "t1" }, "t1"),
+      ev("stream.delta", { itemId: "keep", kind: "item/reasoning/summaryTextDelta", delta: "有内容" }, "t1"),
+      ev("stream.delta", { itemId: "blank", kind: "item/reasoning/summaryTextDelta", delta: "   " }, "t1"),
+      ev("item/completed", { item: { id: "blank", type: "reasoning", summary: [] } }, "t1"),
+    ]);
+    const g = groups(state)[0]!;
+    expect(g.children.map((c) => c.id)).toEqual(["item:keep"]);
+    expect(reasonings(state)).toHaveLength(1);
   });
 });

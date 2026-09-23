@@ -1,7 +1,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, openEventStream } from "../api";
-import type { AgentEvent, Attachment, Conversation, ModelInfo, StatusResponse } from "../types";
-import { applyEvent, emptyTimeline, removeBlock, type Block, type TimelineState } from "../timeline";
+import type { AgentEvent, Attachment, Conversation, StatusResponse } from "../types";
+import {
+  applyEvent,
+  childInProgress,
+  cloneTimeline,
+  emptyTimeline,
+  isWorkingActive,
+  removeBlock,
+  workingLabel,
+  type Block,
+  type TimelineState,
+  type WorkingBlock,
+} from "../timeline";
 import { itemOpensSandboxBrowser } from "../browserCommand";
 import { Markdown } from "./Markdown";
 import { FilePreview } from "./FilePreview";
@@ -9,7 +20,6 @@ import { workspaceFileKind } from "../sandboxLink";
 
 interface Props {
   conversation: Conversation;
-  models: ModelInfo[];
   status: StatusResponse | null;
   onConversationChanged: () => void;
   onStatusChanged: () => void;
@@ -19,13 +29,6 @@ interface Props {
   /** The agent itself navigated the sandbox browser; reveal that view. */
   onAgentBrowserNavigate: () => void;
 }
-
-const EFFORT_LABELS: Record<string, string> = {
-  low: "低",
-  medium: "中",
-  high: "高",
-  xhigh: "极高",
-};
 
 const APPROVAL_LABELS: Record<string, string> = {
   "item/commandExecution/requestApproval": "请求执行命令",
@@ -44,7 +47,6 @@ function newMessageId(): string {
 
 export function Chat({
   conversation,
-  models,
   status,
   onConversationChanged,
   onStatusChanged,
@@ -59,11 +61,14 @@ export function Chat({
   const [busy, setBusy] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [model, setModel] = useState<string>("");
-  const [effort, setEffort] = useState<string>("");
-  const [settingsOpen, setSettingsOpen] = useState(false);
   const draftRef = useRef<HTMLTextAreaElement | null>(null);
   const [previewPath, setPreviewPath] = useState<string | null>(null);
+  /**
+   * Which "Working" groups the user has opened, keyed by turn id. Held outside
+   * the timeline so an incremental SSE update can never reset a group the user
+   * expanded; history starts collapsed and only an explicit click opens one.
+   */
+  const [openGroups, setOpenGroups] = useState<ReadonlySet<string>>(() => new Set());
   const lastIdRef = useRef(0);
   const pendingRef = useRef<{ clientMessageId: string; signature: string; snapshot: { text: string; attachments: Attachment[] } } | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -98,22 +103,8 @@ export function Chat({
     setTimeline(emptyTimeline());
     setConnected(false);
     lastIdRef.current = 0;
-    // Back to the app default first: a conversation without a stored model must
-    // not inherit the model picked in the previously opened conversation.
-    setModel("");
-    setEffort("");
 
     const start = async () => {
-      try {
-        const detail = await api.conversation(conversation.id);
-        if (disposed) return;
-        // Conversations that only carried the legacy default were moved to the
-        // app default once, server-side; so a stored model here is a real choice.
-        if (detail.conversation.model) setModel(detail.conversation.model);
-      } catch {
-        /* model defaults are optional */
-      }
-      if (disposed) return;
       connect();
     };
 
@@ -133,7 +124,7 @@ export function Chat({
             }
           }
           setTimeline((prev) => {
-            const next: TimelineState = { blocks: [...prev.blocks], index: new Map(prev.index) };
+            const next = cloneTimeline(prev);
             applyEvent(next, event);
             return next;
           });
@@ -192,9 +183,6 @@ export function Chat({
   // sandbox is at capacity, or a stale "running" flag has not cleared yet.
   const willQueue = !activeHere && (atCapacity || conversation.status === "running");
 
-  const currentModel = models.find((m) => m.id === model) ?? models.find((m) => m.isDefault) ?? models[0];
-  const efforts = currentModel?.reasoningEfforts ?? [];
-
   const send = useCallback(async () => {
     if (busy) return;
     const text = draft.trim();
@@ -217,7 +205,7 @@ export function Chat({
         payload: { clientMessageId, text, attachments },
       };
       setTimeline((prev) => {
-        const next: TimelineState = { blocks: [...prev.blocks], index: new Map(prev.index) };
+        const next = cloneTimeline(prev);
         applyEvent(next, optimistic);
         return next;
       });
@@ -226,8 +214,6 @@ export function Chat({
         text,
         clientMessageId,
         attachments,
-        model: model || null,
-        effort: effort || null,
       });
       // Only clear the composer once the server has accepted the turn.
       setDraft("");
@@ -245,7 +231,7 @@ export function Chat({
     } finally {
       setBusy(false);
     }
-  }, [attachments, busy, conversation.id, draft, effort, model]);
+  }, [attachments, busy, conversation.id, draft]);
 
   const stop = useCallback(async () => {
     try {
@@ -362,6 +348,15 @@ export function Chat({
           <BlockView
             key={block.id}
             block={block}
+            openGroups={openGroups}
+            onToggleGroup={(turnId) =>
+              setOpenGroups((prev) => {
+                const next = new Set(prev);
+                if (next.has(turnId)) next.delete(turnId);
+                else next.add(turnId);
+                return next;
+              })
+            }
             onRespond={respond}
             onOpenWorkspace={onOpenWorkspace}
             onOpenBrowserLink={onOpenBrowserLink}
@@ -427,54 +422,6 @@ export function Chat({
               }}
             />
           </label>
-          {models.length > 0 && (
-            <button
-              type="button"
-              className="composer-settings-toggle ghost"
-              aria-label="模型与思考设置"
-              aria-expanded={settingsOpen}
-              aria-controls="composer-settings"
-              onClick={() => setSettingsOpen((open) => !open)}
-            >
-              <span>{currentModel?.displayName ?? "模型"} · {EFFORT_LABELS[effort || currentModel?.defaultReasoningEffort || ""] ?? "默认"}</span>
-              <span aria-hidden>{settingsOpen ? "⌃" : "⌄"}</span>
-            </button>
-          )}
-          <div id="composer-settings" className={`composer-settings${settingsOpen ? " expanded" : ""}`}>
-            {models.length > 0 && (
-              <label className="field">
-                <span>模型</span>
-                <select
-                  aria-label="模型"
-                  value={model || currentModel?.id || ""}
-                  onChange={(e) => {
-                    setModel(e.target.value);
-                    setEffort("");
-                  }}
-                  disabled={running}
-                >
-                  {models.map((m) => (
-                    <option key={m.id} value={m.id}>
-                      {m.displayName}
-                      {m.isDefault ? "（默认）" : ""}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            )}
-            {efforts.length > 1 && (
-              <label className="field">
-                <span>思考</span>
-                <select aria-label="思考" value={effort || currentModel?.defaultReasoningEffort || ""} onChange={(e) => setEffort(e.target.value)} disabled={running}>
-                  {efforts.map((value) => (
-                    <option key={value} value={value}>
-                      {EFFORT_LABELS[value] ?? value}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            )}
-          </div>
           <span className="spacer" />
           {running && activeHere ? (
             <button type="button" className="danger" onClick={() => void stop()}>
@@ -501,12 +448,16 @@ export function Chat({
 
 function BlockView({
   block,
+  openGroups,
+  onToggleGroup,
   onRespond,
   onOpenWorkspace,
   onOpenBrowserLink,
   onOpenFile,
 }: {
   block: Block;
+  openGroups: ReadonlySet<string>;
+  onToggleGroup: (turnId: string) => void;
   onRespond: (requestId: string, decision: string, extra?: unknown) => void;
   onOpenWorkspace: (path?: string) => void;
   onOpenBrowserLink: (url: string) => void;
@@ -552,15 +503,16 @@ function BlockView({
   }
 
   if (block.kind === "tool") {
+    return <ToolCard block={block} />;
+  }
+
+  if (block.kind === "working") {
     return (
-      <details className={`tool ${block.status}`} open={block.status === "running"}>
-        <summary>
-          <span className={`dot ${block.status === "running" ? "warn" : block.status === "error" ? "error" : "ok"}`} aria-hidden />
-          <span className="tool-title">{block.title}</span>
-          {block.detail && <span className="tool-detail">{block.detail}</span>}
-        </summary>
-        {block.output ? <pre>{block.output}</pre> : <pre className="muted">（暂无输出）</pre>}
-      </details>
+      <WorkingGroup
+        block={block}
+        open={openGroups.has(block.turnId)}
+        onToggle={() => onToggleGroup(block.turnId)}
+      />
     );
   }
 
@@ -568,10 +520,11 @@ function BlockView({
     return <ApprovalCard block={block} onRespond={onRespond} />;
   }
 
+  const status = block as Extract<Block, { kind: "status" }>;
   return (
-    <div className={`status-line ${block.level}`}>
-      {block.text}
-      {block.text.includes("浏览器") && (
+    <div className={`status-line ${status.level}`}>
+      {status.text}
+      {status.text.includes("浏览器") && (
         <button type="button" className="link" onClick={() => onOpenWorkspace()}>
           打开工作区
         </button>
@@ -579,6 +532,85 @@ function BlockView({
     </div>
   );
 }
+/**
+ * One tool call inside a Working group: the existing compact tool summary.
+ * `inProgress` comes from the owning turn's lifecycle, so a tool left without an
+ * `item/completed` stops looking active once the turn ends; its real recorded
+ * status and output are untouched.
+ */
+function ToolCard({ block, inProgress }: { block: Extract<Block, { kind: "tool" }>; inProgress?: boolean }) {
+  const running = block.status === "running" && inProgress !== false;
+  const shown = running ? "running" : block.status === "running" ? "done" : block.status;
+  return (
+    <details className={`tool ${shown}`} open={running}>
+      <summary>
+        <span className={`dot ${running ? "warn" : block.status === "error" ? "error" : "ok"}`} aria-hidden />
+        <span className="tool-title">{block.title}</span>
+        {block.detail && <span className="tool-detail">{block.detail}</span>}
+      </summary>
+      {block.output ? <pre>{block.output}</pre> : <pre className="muted">（暂无输出）</pre>}
+    </details>
+  );
+}
+
+/**
+ * One turn's collapsed activity. Tools and reasoning summaries live inside; the
+ * header states the turn's real status, flags a failed tool, and animates only
+ * while the turn is genuinely in flight. It is a real button, so it is reachable
+ * and toggleable from the keyboard, with `aria-expanded` reflecting the state.
+ */
+function WorkingGroup({
+  block,
+  open,
+  onToggle,
+}: {
+  block: WorkingBlock;
+  open: boolean;
+  onToggle: () => void;
+}) {
+  const toolCount = block.children.filter((c) => c.kind === "tool").length;
+  const label = workingLabel(block.status);
+  const active = isWorkingActive(block.status);
+  const bodyId = `working-body-${block.turnId}`;
+  return (
+    <article className={`working ${block.status}${active ? " active" : ""}`}>
+      <button
+        type="button"
+        className="working-head"
+        aria-expanded={open}
+        aria-controls={bodyId}
+        onClick={onToggle}
+      >
+        {active && <span className="working-sweep" aria-hidden />}
+        <span className={`dot ${block.status === "running" || block.status === "stopping" ? "warn" : block.status === "done" ? "ok" : block.status === "queued" ? "" : "error"}`} aria-hidden />
+        <span className="working-label">{label}</span>
+        {block.hasToolError && <span className="working-flag">工具出错</span>}
+        <span className="working-meta">
+          {toolCount > 0 ? `${toolCount} 项工具调用` : "工具与摘要"}
+        </span>
+        <span className="working-caret" aria-hidden>
+          {open ? "⌃" : "⌄"}
+        </span>
+      </button>
+      {open && (
+        <div className="working-body" id={bodyId}>
+          {block.children.map((child) => {
+            const inProgress = childInProgress(block, child);
+            return child.kind === "tool" ? (
+              <ToolCard key={child.id} block={child} inProgress={inProgress} />
+            ) : (
+              <details className="reasoning" key={child.id}>
+                <summary>摘要{inProgress ? "（进行中）" : ""}</summary>
+                <pre>{child.text}</pre>
+              </details>
+            );
+          })}
+        </div>
+      )}
+    </article>
+  );
+}
+
 interface QuestionOption {
   label?: string;
   description?: string;

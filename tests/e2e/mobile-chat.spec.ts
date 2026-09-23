@@ -20,6 +20,10 @@ async function setup(page: Page, running = false) {
   });
   await page.emulateMedia({ colorScheme: "dark", reducedMotion: "reduce" });
   await page.goto("/");
+  // Tools live inside the collapsed per-turn Working group; expand it to assert
+  // the compact tool summary and measure it.
+  await expect(page.locator(".working-head")).toBeVisible();
+  await page.locator(".working-head").click();
   await expect(page.locator(".tool-title")).toHaveText("执行命令");
   await expect(page.locator(".msg.assistant")).toBeVisible();
 }
@@ -35,6 +39,13 @@ async function assertLayout(page: Page) {
   expect(metrics.title.height).toBeLessThan(28);
   expect(metrics.title.width).toBeGreaterThan(45);
   expect(metrics.send.height).toBeGreaterThanOrEqual(44);
+  // The attachment control sits at the composer's left edge and the send/stop
+  // button at its right edge, with the free space between them — no dead gap
+  // left of the button after the model control was removed.
+  expect(metrics.attachment.left - metrics.composer.left).toBeLessThanOrEqual(13);
+  expect(metrics.composer.right - metrics.send.right).toBeLessThanOrEqual(13);
+  expect(metrics.send.left).toBeGreaterThan(metrics.attachment.right);
+  expect(metrics.send.right).toBeLessThanOrEqual(metrics.viewport);
 }
 
 test("compact mobile composer and horizontal tool title at 390 and 360, including short viewport", async ({ page }, info) => {
@@ -44,30 +55,22 @@ test("compact mobile composer and horizontal tool title at 390 and 360, includin
   for (const width of [390, 360]) {
     await page.setViewportSize({ width, height: 844 });
     await assertLayout(page);
-    await expect(page.getByLabel("模型", { exact: true })).toBeHidden();
+    // The composer no longer carries any model control, on any width.
+    await expect(page.locator(".composer select")).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "模型与思考设置" })).toHaveCount(0);
     await page.screenshot({ animations: "disabled", scale: "css", path: `${evidence}/mobile-${width}-dark.png` });
   }
   await page.setViewportSize({ width: 390, height: 430 });
   await page.getByRole("textbox", { name: "消息" }).focus();
   await assertLayout(page);
-  await page.getByRole("button", { name: "模型与思考设置" }).click();
-  await expect(page.getByLabel("思考", { exact: true })).toBeVisible();
   expect(await page.locator(".composer").evaluate(el => el.getBoundingClientRect().bottom)).toBeLessThanOrEqual(430);
-  await page.getByRole("button", { name: "模型与思考设置" }).click();
   await page.setViewportSize({ width: 390, height: 844 });
   await page.evaluate(() => document.documentElement.dataset.theme = "light");
   await page.screenshot({ animations: "disabled", scale: "css", path: `${evidence}/mobile-390-light.png` });
 });
 
-test("settings, native attachment chooser and send retain their payload", async ({ page }, info) => {
+test("native attachment chooser and send retain their payload without model fields", async ({ page }, info) => {
   await setup(page);
-  if (info.project.name.startsWith("mobile")) await page.getByRole("button", { name: "模型与思考设置" }).click();
-  await page.getByLabel("模型", { exact: true }).selectOption("gpt-6-sol");
-  await page.getByLabel("思考", { exact: true }).selectOption("high");
-  if (info.project.name.startsWith("mobile")) {
-    await page.getByRole("button", { name: "模型与思考设置" }).click();
-    await expect(page.getByRole("button", { name: "模型与思考设置" })).toContainText("高");
-  }
   await page.route("**/api/sandbox/upload", route => route.fulfill({ json: { path: "/home/gem/workspace/uploads/probe.txt", name: "移动端附件测试.txt", kind: "file" } }));
   const chooser = page.waitForEvent("filechooser");
   await page.locator(".file-button").click();
@@ -81,14 +84,17 @@ test("settings, native attachment chooser and send retain their payload", async 
   await page.getByRole("textbox", { name: "消息" }).fill("请阅读附件");
   await page.getByRole("button", { name: "发送", exact: true }).click();
   await expect(page.getByRole("textbox", { name: "消息" })).toHaveValue("");
-  expect(payload).toMatchObject({ text: "请阅读附件", model: "gpt-6-sol", effort: "high", attachments: [{ path: "/home/gem/workspace/uploads/probe.txt" }] });
+  // The client sends no model/effort: the server reads the saved unified config.
+  expect(payload).toMatchObject({ text: "请阅读附件", attachments: [{ path: "/home/gem/workspace/uploads/probe.txt" }] });
+  expect(payload).not.toHaveProperty("model");
+  expect(payload).not.toHaveProperty("effort");
   if (info.project.name === "desktop") {
     await mkdir(evidence, { recursive: true });
     await page.screenshot({ animations: "disabled", scale: "css", path: `${evidence}/desktop-1440.png` });
   }
 });
 
-test("stop is reachable in the mobile toolbar and settings remain locked while running", async ({ page }, info) => {
+test("stop is reachable in the mobile toolbar while a turn runs", async ({ page }, info) => {
   test.skip(!info.project.name.startsWith("mobile"), "mobile layout");
   await setup(page, true);
   let stopped = false;
@@ -96,8 +102,7 @@ test("stop is reachable in the mobile toolbar and settings remain locked while r
     stopped = true;
     await route.fulfill({ json: { ok: true, status: "interrupt_requested", message: "已请求停止" } });
   });
-  await page.getByRole("button", { name: "模型与思考设置" }).click();
-  await expect(page.getByLabel("模型", { exact: true })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "停止", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "停止", exact: true }).click();
   await expect.poll(() => stopped).toBe(true);
 });

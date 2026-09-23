@@ -74,6 +74,7 @@ CREATE TABLE IF NOT EXISTS turns (
   input_text TEXT NOT NULL,
   attachments_json TEXT NOT NULL DEFAULT '[]',
   cancel_requested INTEGER NOT NULL DEFAULT 0,
+  model TEXT,
   effort TEXT,
   error TEXT,
   created_at INTEGER NOT NULL,
@@ -144,6 +145,7 @@ export function openDb(dbPath: string): Db {
   }
   const db = new DatabaseSync(dbPath);
   db.exec(SCHEMA);
+  migrate(db);
   const current = getMeta(db, "schema_version");
   if (current === null) {
     setMeta(db, "schema_version", String(SCHEMA_VERSION));
@@ -151,6 +153,18 @@ export function openDb(dbPath: string): Db {
     throw new Error(`unsupported schema version ${current}, expected ${SCHEMA_VERSION}`);
   }
   return db;
+}
+
+/**
+ * Idempotent, additive migrations for databases created before a column existed.
+ * `CREATE TABLE IF NOT EXISTS` never alters an existing table, so each new column
+ * is added here when the live schema is missing it. Safe to run on every open.
+ */
+function migrate(db: Db): void {
+  const columns = (db.prepare("PRAGMA table_info(turns)").all() as Array<{ name: string }>).map((c) => c.name);
+  if (!columns.includes("model")) {
+    db.exec("ALTER TABLE turns ADD COLUMN model TEXT");
+  }
 }
 
 export function getMeta(db: Db, key: string): string | null {

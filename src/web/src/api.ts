@@ -1,10 +1,12 @@
 import type {
+  AgentSettings,
   ApprovalRequest,
   Attachment,
   CapabilitiesResponse,
   Conversation,
   FileEntry,
   ModelInfo,
+  SettingsResponse,
   StatusResponse,
   Turn,
 } from "./types";
@@ -99,7 +101,7 @@ export const api = {
     request<{ conversation: Conversation; turns: Turn[]; approvals: ApprovalRequest[] }>(`/api/conversations/${encodeURIComponent(id)}`),
   events: async (id: string, since = 0) =>
     (await request<{ events: import("./types").AgentEvent[] }>(`/api/conversations/${encodeURIComponent(id)}/events?format=json&since=${since}`)).events,
-  submitTurn: (id: string, body: { text: string; clientMessageId: string; attachments?: Attachment[]; model?: string | null; effort?: string | null }) =>
+  submitTurn: (id: string, body: { text: string; clientMessageId: string; attachments?: Attachment[] }) =>
     request<{ turn: Turn; duplicate: boolean }>(`/api/conversations/${encodeURIComponent(id)}/turns`, { method: "POST", body }),
   interrupt: (id: string) =>
     request<{ ok: boolean; status: string; message: string }>(`/api/conversations/${encodeURIComponent(id)}/interrupt`, { method: "POST", body: {} }),
@@ -109,6 +111,11 @@ export const api = {
     request<{ ok: boolean; message: string }>(`/api/approvals/${encodeURIComponent(requestId)}/respond`, { method: "POST", body: { decision, extra } }),
 
   models: () => request<{ models: ModelInfo[] }>("/api/models"),
+
+  /** Unified owner settings applied to every later message. */
+  settings: () => request<SettingsResponse>("/api/settings"),
+  saveSettings: (body: AgentSettings) =>
+    request<{ ok: boolean; settings: AgentSettings }>("/api/settings", { method: "PUT", body }),
 
   /** Open a link in a new tab of the sandbox's real Chromium (validated server-side). */
   openBrowserTab: (url: string) =>

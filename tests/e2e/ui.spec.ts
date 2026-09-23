@@ -68,7 +68,7 @@ test.describe("workspace navigation", () => {
     await expect.poll(() => frameUrls(page), { timeout: 90_000 }).toContain("/code-server");
   });
 
-  test("chat shows the model picker and a live agent status", async ({ page }) => {
+  test("composer has no model control and the config page owns the model", async ({ page }) => {
     await ensureApp(page);
     if (await page.locator(".bottom-nav button", { hasText: "新建" }).isVisible().catch(() => false)) {
       await page.locator(".bottom-nav button", { hasText: "新建" }).click();
@@ -77,12 +77,14 @@ test.describe("workspace navigation", () => {
     }
     await expect(page.locator(".composer textarea")).toBeVisible();
     await expect(page.locator(".status-chip")).toContainText("智能体在线", { timeout: 30_000 });
-    const settings = page.getByRole("button", { name: "模型与思考设置" });
-    if (await settings.isVisible()) await settings.click();
-    const modelSelect = page.locator(".composer-row select").first();
+    // The conversation composer carries no model/effort control any more.
+    await expect(page.locator(".composer select")).toHaveCount(0);
+
+    // The unified config page is where the model now lives, and a fresh install
+    // defaults to the app default model (not the CLI's own gpt-6-astra).
+    await page.locator(".sidebar-foot button", { hasText: "配置" }).click();
+    const modelSelect = page.getByLabel("模型", { exact: true });
     await expect(modelSelect).toBeVisible();
-    // A new conversation must start on the app default model, which is not the
-    // CLI's own default (that one is gpt-6-astra).
     await expect(modelSelect).toHaveValue("gpt-6-sol");
     await expect(modelSelect.locator("option:checked")).toContainText("GPT-6-Sol（默认）");
   });

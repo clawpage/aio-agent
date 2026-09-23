@@ -6,6 +6,15 @@ import type { Logger } from "../logger.js";
 import type { CodexModel, SandboxAccount } from "./sandboxCodex.js";
 import type { HostTokenSource } from "./hostTokens.js";
 import { AutoTitler, DEFAULT_CONVERSATION_TITLE, TITLE_UPDATED_EVENT, manualTitleMetaKey } from "./autoTitle.js";
+import {
+  effectiveAgentSettings,
+  readAgentSettings,
+  validateAgentSettings,
+  writeAgentSettings,
+  type AgentSettings,
+  type SettingsValidation,
+  type ValidatableModel,
+} from "../settings.js";
 
 /**
  * Narrow view of the sandbox Codex process that the manager depends on. Keeping
@@ -68,6 +77,8 @@ export interface TurnRow {
   attachments_json: string;
   client_message_id: string;
   cancel_requested: number;
+  /** Model frozen at submit time so queued turns never follow a later change. */
+  model: string | null;
   effort: string | null;
   error: string | null;
   created_at: number;
@@ -218,6 +229,13 @@ export class AgentManager {
   #lastError: string | null = null;
   #approvalTimers = new Map<string, NodeJS.Timeout>();
   /**
+   * Last observed model catalog. Kept so a synchronous submit can validate and
+   * resolve the unified owner settings without an extra round trip to Codex.
+   * Refreshed by `listModels()` (the settings page loads it) and best-effort at
+   * init; an empty cache simply skips effort re-validation.
+   */
+  #modelCatalog: CodexModel[] = [];
+  /**
    * Incremented whenever the sandbox Codex connection dies. A turn captures the
    * value before starting; if it changed, the outcome is unknown and must not be
    * waited on (the completion notification can never arrive).
@@ -246,12 +264,17 @@ export class AgentManager {
   async init(): Promise<void> {
     this.#reconcileInterrupted();
     this.#migrateLegacyDefaultModel();
+    this.#backfillTurnModels();
     this.#archiveDuplicateBlankConversations();
     this.#codex.onNotification((method, params) => this.#handleNotification(method, params));
     this.#codex.onServerRequest((id, method, params) => this.#handleServerRequest(id, method, params));
     this.#codex.onClosed((reason) => this.#handleCodexClosed(reason));
     // Resume queue processing if the previous process died mid-queue.
     this.#pump();
+    // Prime the model catalog so a submit can re-validate a stored effort without
+    // the user having to open the config page first. Best-effort: a cold sandbox
+    // simply leaves the cache empty and the stored value is kept as-is.
+    void this.refreshModelCatalog();
     // If the session is already up (tests / warm start), catch up old titles now;
     // otherwise startSandboxRuntime does it once the session is established.
     if (this.#codex.ready) this.#titles.scheduleBackfill();
@@ -342,6 +365,42 @@ export class AgentManager {
         conversations: Number(res.changes),
       });
     }
+  }
+
+  /**
+   * Backfill the frozen `turns.model` for rows created before that column
+   * existed. The authoritative source is the `turn.queued` event snapshot, which
+   * already carried the model the turn was accepted with. Only turns whose
+   * queued event is missing fall back to the conversation's current model, and
+   * the backfill is idempotent (it only touches rows still holding NULL).
+   */
+  #backfillTurnModels(): void {
+    const rows = this.#db
+      .prepare("SELECT id, conversation_id FROM turns WHERE model IS NULL")
+      .all() as unknown as Array<{ id: string; conversation_id: string }>;
+    if (!rows.length) return;
+    const eventStmt = this.#db.prepare("SELECT payload FROM events WHERE conversation_id = ? AND turn_id = ? AND type = 'turn.queued' ORDER BY id ASC LIMIT 1");
+    const convStmt = this.#db.prepare("SELECT model FROM conversations WHERE id = ?");
+    const update = this.#db.prepare("UPDATE turns SET model = ? WHERE id = ? AND model IS NULL");
+    let changed = 0;
+    for (const row of rows) {
+      let model: string | null = null;
+      const event = eventStmt.get(row.conversation_id, row.id) as { payload: string } | undefined;
+      if (event) {
+        try {
+          const parsed = JSON.parse(event.payload) as { model?: unknown };
+          if (typeof parsed.model === "string" && parsed.model) model = parsed.model;
+        } catch {
+          /* corrupt payload: fall through to the conversation model */
+        }
+      }
+      if (!model) {
+        const conv = convStmt.get(row.conversation_id) as { model: string | null } | undefined;
+        model = conv?.model ?? null;
+      }
+      if (model) changed += Number(update.run(model, row.id).changes);
+    }
+    if (changed) this.#log.info("backfilled frozen turn models", { turns: changed });
   }
 
   /**
@@ -588,6 +647,49 @@ export class AgentManager {
   // ---------------------------------------------------------------- turns
 
   /**
+   * Owner-level unified settings (model + reasoning effort) applied to every
+   * later message regardless of which conversation or device sent it.
+   */
+  agentSettings(): AgentSettings {
+    return readAgentSettings(this.#db);
+  }
+
+  /**
+   * Persist the unified settings after validating them against the model catalog
+   * the caller supplied (the settings page reads `/api/models` first). Storing an
+   * unvalidated value is refused so a later turn can never fail on it.
+   */
+  saveAgentSettings(input: { model?: unknown; effort?: unknown }, models: ValidatableModel[]): SettingsValidation {
+    const result = validateAgentSettings(input, models);
+    if (!result.ok) return result;
+    writeAgentSettings(this.#db, result.settings);
+    return result;
+  }
+
+  /**
+   * Resolve the model and effort a freshly submitted turn should freeze.
+   *
+   * The unified owner settings are authoritative for every later message: when
+   * they are unset the configured default model applies, never the conversation's
+   * own stale model. A per-turn override is only honoured for internal callers
+   * (the HTTP route never forwards client model/effort), so the config page is the
+   * single source of truth the UI exposes.
+   */
+  #resolveSubmitSettings(input: SubmitTurnInput): { model: string; effort: string | null } {
+    const stored = effectiveAgentSettings(this.agentSettings(), this.#modelCatalog, this.#cfg.agent.defaultModel);
+    const model = input.model ?? stored.model ?? this.#cfg.agent.defaultModel;
+    let effort = input.effort ?? stored.effort ?? null;
+    if (effort) {
+      const catalog = this.#modelCatalog.find((m) => m.id === model);
+      // Drop an effort the target model does not support rather than letting the
+      // turn fail at Codex start time. An unavailable catalog keeps the stored
+      // value, which was already validated when it was saved.
+      if (catalog && !catalog.supportedReasoningEfforts.includes(effort)) effort = null;
+    }
+    return { model, effort };
+  }
+
+  /**
    * Idempotent submit: repeating the same clientMessageId returns the existing
    * turn instead of starting a second run.
    */
@@ -613,12 +715,16 @@ export class AgentManager {
     const now = Date.now();
     const id = randomId("turn");
     const attachments = input.attachments ?? [];
+    // Freeze the resolved model on the turn itself. A queued turn must keep the
+    // model it was submitted with even if the owner changes the unified setting
+    // (or another turn rewrites `conversations.model`) before it starts.
+    const resolved = this.#resolveSubmitSettings(input);
     try {
       this.#db
         .prepare(
-          "INSERT INTO turns (id, conversation_id, client_message_id, status, input_text, attachments_json, effort, created_at) VALUES (?, ?, ?, 'queued', ?, ?, ?, ?)",
+          "INSERT INTO turns (id, conversation_id, client_message_id, status, input_text, attachments_json, model, effort, created_at) VALUES (?, ?, ?, 'queued', ?, ?, ?, ?, ?)",
         )
-        .run(id, input.conversationId, input.clientMessageId, input.text, JSON.stringify(attachments), input.effort ?? null, now);
+        .run(id, input.conversationId, input.clientMessageId, input.text, JSON.stringify(attachments), resolved.model, resolved.effort, now);
     } catch (err) {
       // Concurrent duplicate submission: return the winner.
       if (String(err).includes("UNIQUE")) {
@@ -629,9 +735,8 @@ export class AgentManager {
     }
     this.#db.prepare("UPDATE conversations SET updated_at = ? WHERE id = ?").run(now, input.conversationId);
     // Persist the resolved model so the stored conversation state and the turn
-    // that will run agree: an explicit client choice wins, then the model the
-    // conversation already uses, then the configured default.
-    const model = input.model ?? conversation.model ?? this.#cfg.agent.defaultModel;
+    // that will run agree.
+    const model = resolved.model ?? this.#cfg.agent.defaultModel;
     this.#db
       .prepare("UPDATE conversations SET model = ?, cwd = COALESCE(?, cwd) WHERE id = ?")
       .run(model, input.cwd ?? null, input.conversationId);
@@ -641,7 +746,7 @@ export class AgentManager {
       text: input.text,
       attachments,
       model,
-      effort: input.effort ?? null,
+      effort: resolved.effort,
       cwd: input.cwd ?? null,
     });
     const turn = this.#db.prepare("SELECT * FROM turns WHERE id = ?").get(id) as unknown as TurnRow;
@@ -729,10 +834,12 @@ export class AgentManager {
     this.#db.prepare("UPDATE conversations SET status = 'running', updated_at = ? WHERE id = ?").run(Date.now(), conversation.id);
     this.#appendEvent(conversation.id, turn.id, "turn.started", { turnId: turn.id });
 
-    // Resolve against the configured default as well: a conversation without a
-    // stored model would otherwise make Codex fall back to its own default
-    // (currently gpt-6-astra), which this agent never runs implicitly.
-    const model = conversation.model ?? this.#cfg.agent.defaultModel;
+    // Prefer the model frozen on the turn at submit time. A turn queued before
+    // the owner changed the unified setting (or before another turn rewrote
+    // `conversations.model`) must still run the model it was accepted with.
+    // Legacy rows without a frozen model fall back to the conversation, then the
+    // configured default (never Codex's own gpt-6-astra default).
+    const model = turn.model ?? conversation.model ?? this.#cfg.agent.defaultModel;
     let threadId = conversation.codex_thread_id;
     if (!threadId) {
       const started = await this.#codex.startThread({ cwd: conversation.cwd ?? undefined, model });
@@ -1220,9 +1327,30 @@ export class AgentManager {
    */
   async listModels() {
     const models = await this.#codex.listModels();
+    // Cache the catalog so a later synchronous submit can validate the unified
+    // effort without another Codex round trip.
+    this.#modelCatalog = models;
     const preferred = this.#cfg.agent.defaultModel;
     if (!models.some((m) => m.id === preferred)) return models;
     return models.map((m) => ({ ...m, isDefault: m.id === preferred }));
+  }
+
+  /**
+   * Best-effort catalog warm-up used at init. Failures are swallowed: a submit
+   * falls back to the stored (already validated) effort when the catalog is not
+   * yet known, so a cold sandbox never blocks or downgrades a later turn.
+   */
+  async refreshModelCatalog(): Promise<void> {
+    try {
+      await this.listModels();
+    } catch (err) {
+      this.#log.debug("model catalog unavailable at init", { error: err instanceof Error ? err.message : String(err) });
+    }
+  }
+
+  /** Whether a model catalog has been observed (settings UI disables saving when not). */
+  hasModelCatalog(): boolean {
+    return this.#modelCatalog.length > 0;
   }
 
   async hostAuthStatus() {

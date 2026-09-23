@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { api, ApiError } from "./api";
-import type { Conversation, ModelInfo, StatusResponse } from "./types";
+import type { Conversation, StatusResponse } from "./types";
 import { Chat } from "./components/Chat";
 import { Login } from "./components/Login";
+import { Settings } from "./components/Settings";
 import { Workspace } from "./components/Workspace";
 
 type SessionState = { checked: boolean; authenticated: boolean; username: string | null };
@@ -19,7 +20,6 @@ export function App() {
   const [showArchived, setShowArchived] = useState(false);
   const [renameTarget, setRenameTarget] = useState<Conversation | null>(null);
   const [activeId, setActiveId] = useState<string | null>(null);
-  const [models, setModels] = useState<ModelInfo[]>([]);
   const [status, setStatus] = useState<StatusResponse | null>(null);
   const [workspaceOpen, setWorkspaceOpen] = useState(false);
   const [workspacePath, setWorkspacePath] = useState<string | undefined>(undefined);
@@ -29,6 +29,9 @@ export function App() {
   );
   const [mobilePane, setMobilePane] = useState<"chat" | "list">("chat");
   const [toast, setToast] = useState<{ text: string; level: "info" | "error" } | null>(null);
+  // The unified config page is a real separate view. The chat pane stays mounted
+  // behind it so returning never loses a draft, attachments or the SSE stream.
+  const [view, setView] = useState<"chat" | "settings">("chat");
   const lastRefresh = useRef(Date.now());
 
   const notify = useCallback((message: string, level: "info" | "error" = "info") => {
@@ -95,14 +98,6 @@ export function App() {
     if (!session.authenticated) return;
     void refreshConversations();
     void refreshStatus();
-    void (async () => {
-      try {
-        const data = await api.models();
-        setModels(data.models);
-      } catch {
-        setModels([]);
-      }
-    })();
   }, [session.authenticated, refreshConversations, refreshStatus]);
 
   // Keep the poll light but responsive: status every 8s, conversations every 20s.
@@ -155,6 +150,7 @@ export function App() {
       setShowArchived(false);
       setActiveId(conversation.id);
       setMobilePane("chat");
+      setView("chat");
       setWorkspaceOpen(false);
       if (reused) await refreshConversations();
     } catch (err) {
@@ -165,6 +161,18 @@ export function App() {
   const selectConversation = useCallback((id: string) => {
     setActiveId(id);
     setMobilePane("chat");
+    setView("chat");
+  }, []);
+
+  /**
+   * Open the unified config page. Both entries (desktop sidebar and mobile
+   * bottom nav) must close the mobile conversation drawer and the workspace, or
+   * the drawer would cover the settings view on a phone.
+   */
+  const openSettings = useCallback(() => {
+    setMobilePane("chat");
+    setWorkspaceOpen(false);
+    setView("settings");
   }, []);
 
   const archiveConversation = useCallback(
@@ -310,6 +318,13 @@ export function App() {
           <button type="button" className="ghost block" onClick={() => setTheme(theme === "dark" ? "light" : "dark")}>
             {theme === "dark" ? "浅色模式" : "深色模式"}
           </button>
+          <button
+            type="button"
+            className={`ghost block ${view === "settings" ? "active" : ""}`}
+            onClick={openSettings}
+          >
+            配置
+          </button>
           <button type="button" className="ghost block" onClick={() => void logout()}>
             退出登录
           </button>
@@ -324,33 +339,40 @@ export function App() {
             {!hostAuthBad && !sandboxBad && agentBad && `智能体会话未就绪：${status?.agent.lastError ?? "正在启动"}`}
           </div>
         )}
-        {active && !showArchived ? (
-          <Chat
-            conversation={active}
-            models={models}
-            status={status}
-            onConversationChanged={() => void refreshConversations()}
-            onStatusChanged={() => void refreshStatus()}
-            onOpenWorkspace={(path) => {
-              setWorkspacePath(path);
-              setWorkspaceOpen(true);
-            }}
-            onOpenBrowserLink={(url) => void openBrowserLink(url)}
-            onAgentBrowserNavigate={revealSandboxBrowser}
-          />
-        ) : (
-          <div className="empty">
-            <h3>{showArchived ? "已归档会话" : "还没有会话"}</h3>
-            <p>
-              {showArchived
-                ? "在这里恢复到活跃列表。归档只影响侧栏显示，不会清除沙箱文件或远端 Codex 数据。"
-                : "创建一个会话，开始使用你的常驻智能体。"}
-            </p>
-            <button type="button" className="primary" onClick={() => void createConversation()}>
-              新建会话
-            </button>
-          </div>
-        )}
+        {/*
+          The chat pane stays mounted while the config page is open: hiding it
+          (not unmounting) keeps the draft, attachments, scroll position and the
+          live SSE stream intact, so returning never interrupts a running task.
+        */}
+        <div className="view-slot" hidden={view === "settings"}>
+          {active && !showArchived ? (
+            <Chat
+              conversation={active}
+              status={status}
+              onConversationChanged={() => void refreshConversations()}
+              onStatusChanged={() => void refreshStatus()}
+              onOpenWorkspace={(path) => {
+                setWorkspacePath(path);
+                setWorkspaceOpen(true);
+              }}
+              onOpenBrowserLink={(url) => void openBrowserLink(url)}
+              onAgentBrowserNavigate={revealSandboxBrowser}
+            />
+          ) : (
+            <div className="empty">
+              <h3>{showArchived ? "已归档会话" : "还没有会话"}</h3>
+              <p>
+                {showArchived
+                  ? "在这里恢复到活跃列表。归档只影响侧栏显示，不会清除沙箱文件或远端 Codex 数据。"
+                  : "创建一个会话，开始使用你的常驻智能体。"}
+              </p>
+              <button type="button" className="primary" onClick={() => void createConversation()}>
+                新建会话
+              </button>
+            </div>
+          )}
+        </div>
+        {view === "settings" && <Settings onBack={() => setView("chat")} />}
       </main>
 
       <Workspace
@@ -366,14 +388,31 @@ export function App() {
       />
 
       <nav className="bottom-nav">
-        <button type="button" className={mobilePane === "list" ? "active" : ""} onClick={() => setMobilePane(mobilePane === "list" ? "chat" : "list")}>
+        <button
+          type="button"
+          className={mobilePane === "list" && view === "chat" ? "active" : ""}
+          onClick={() => {
+            setView("chat");
+            setMobilePane(mobilePane === "list" ? "chat" : "list");
+          }}
+        >
           会话
         </button>
         <button type="button" onClick={() => void createConversation()}>
           新建
         </button>
-        <button type="button" className={workspaceOpen ? "active" : ""} onClick={() => setWorkspaceOpen(true)}>
+        <button
+          type="button"
+          className={workspaceOpen ? "active" : ""}
+          onClick={() => {
+            setView("chat");
+            setWorkspaceOpen(true);
+          }}
+        >
           工作区
+        </button>
+        <button type="button" className={view === "settings" ? "active" : ""} onClick={openSettings}>
+          配置
         </button>
         <button type="button" onClick={() => void logout()}>
           退出

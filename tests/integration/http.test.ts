@@ -208,6 +208,186 @@ describe("conversation and agent endpoints", () => {
   });
 });
 
+describe("unified settings endpoint", () => {
+  it("denies settings access without a session", async () => {
+    for (const [method, path] of [
+      ["GET", "/api/settings"],
+      ["PUT", "/api/settings"],
+    ] as const) {
+      const res = await h.request(path, { method });
+      expect(res.status, `${method} ${path}`).toBe(401);
+    }
+  });
+
+  it("requires CSRF and rejects a foreign origin on save", async () => {
+    const { cookie } = await login(h);
+    const noCsrf = await h.request("/api/settings", {
+      method: "PUT",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ model: "gpt-6-sol" }),
+    });
+    expect(noCsrf.status).toBe(403);
+    expect(((await noCsrf.json()) as { error: string }).error).toBe("csrf_invalid");
+
+    const { csrf } = await login(h);
+    const badOrigin = await h.request("/api/settings", {
+      method: "PUT",
+      headers: { cookie, "x-csrf-token": csrf, "content-type": "application/json", origin: "https://sibling.example.com" },
+      body: JSON.stringify({ model: "gpt-6-sol" }),
+    });
+    expect(badOrigin.status).toBe(403);
+    expect(((await badOrigin.json()) as { error: string }).error).toBe("origin_denied");
+  });
+
+  it("returns the default choice, the model catalog and saved-model availability", async () => {
+    const { cookie } = await login(h);
+    const res = await h.request("/api/settings", { headers: { cookie } });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      settings: { model: string | null; effort: string | null };
+      defaultModel: string;
+      models: Array<{ id: string; supportedReasoningEfforts: string[]; defaultReasoningEffort: string | null }>;
+      savedModelAvailable: boolean | null;
+    };
+    expect(body.defaultModel).toBe("gpt-6-sol");
+    expect(body.models.map((m) => m.id)).toContain("gpt-6-sol");
+    expect(body.models.every((m) => Array.isArray(m.supportedReasoningEfforts))).toBe(true);
+    expect(body.savedModelAvailable).toBe(true);
+  });
+
+  it("rejects malformed or invalid saves without overwriting the stored choice", async () => {
+    const { cookie, csrf } = await login(h);
+    const headers = { cookie, "x-csrf-token": csrf, "content-type": "application/json" };
+    const seed = await h.request("/api/settings", {
+      method: "PUT",
+      headers,
+      body: JSON.stringify({ model: "gpt-6-sol", effort: "high" }),
+    });
+    expect(seed.status).toBe(200);
+
+    // A numeric model must be refused, not silently coerced to null.
+    const numeric = await h.request("/api/settings", {
+      method: "PUT",
+      headers,
+      body: JSON.stringify({ model: 123, effort: null }),
+    });
+    expect(numeric.status).toBe(400);
+    expect(((await numeric.json()) as { error: string }).error).toBe("invalid_settings");
+
+    const arrayBody = await h.request("/api/settings", {
+      method: "PUT",
+      headers,
+      body: JSON.stringify(["gpt-6-sol"]),
+    });
+    expect(arrayBody.status).toBe(400);
+
+    const unknownModel = await h.request("/api/settings", {
+      method: "PUT",
+      headers,
+      body: JSON.stringify({ model: "gpt-9-nope", effort: null }),
+    });
+    expect(unknownModel.status).toBe(400);
+
+    const badEffort = await h.request("/api/settings", {
+      method: "PUT",
+      headers,
+      body: JSON.stringify({ model: "gpt-6-sol", effort: "impossible" }),
+    });
+    expect(badEffort.status).toBe(400);
+
+    // Every refusal left the seeded choice intact.
+    const after = await h.request("/api/settings", { headers: { cookie } });
+    expect(((await after.json()) as { settings: unknown }).settings).toEqual({ model: "gpt-6-sol", effort: "high" });
+  });
+
+  it("merges a partial save with the stored value instead of resetting the other field", async () => {
+    const { cookie, csrf } = await login(h);
+    const headers = { cookie, "x-csrf-token": csrf, "content-type": "application/json" };
+    await h.request("/api/settings", {
+      method: "PUT",
+      headers,
+      body: JSON.stringify({ model: "gpt-6-sol", effort: "high" }),
+    });
+    // Only the effort changes; the model must be preserved.
+    const partial = await h.request("/api/settings", {
+      method: "PUT",
+      headers,
+      body: JSON.stringify({ effort: "low" }),
+    });
+    expect(partial.status).toBe(200);
+    expect(((await partial.json()) as { settings: unknown }).settings).toEqual({ model: "gpt-6-sol", effort: "low" });
+    // Restore the default so later cases in this file start clean.
+    await h.request("/api/settings", { method: "PUT", headers, body: JSON.stringify({ model: null, effort: null }) });
+  });
+
+  it("persists the saved choice and freezes it on the next submitted turn", async () => {
+    const { cookie, csrf } = await login(h);
+    const headers = { cookie, "x-csrf-token": csrf, "content-type": "application/json" };
+    const saved = await h.request("/api/settings", {
+      method: "PUT",
+      headers,
+      body: JSON.stringify({ model: "gpt-6-sol", effort: "high" }),
+    });
+    expect(saved.status).toBe(200);
+
+    const reread = await h.request("/api/settings", { headers: { cookie } });
+    expect(((await reread.json()) as { settings: unknown }).settings).toEqual({ model: "gpt-6-sol", effort: "high" });
+
+    const created = await h.request("/api/conversations", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ title: "settings-apply" }),
+    });
+    const { conversation } = (await created.json()) as { conversation: { id: string } };
+    const turnRes = await h.request(`/api/conversations/${conversation.id}/turns`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ text: "hello", clientMessageId: "settings-1" }),
+    });
+    expect(turnRes.status).toBe(202);
+    const { turn } = (await turnRes.json()) as { turn: { model: string | null; effort: string | null } };
+    expect(turn.model).toBe("gpt-6-sol");
+    expect(turn.effort).toBe("high");
+
+    await new Promise((r) => setTimeout(r, 60));
+    expect(h.codex.startedTurns.at(-1)?.model).toBe("gpt-6-sol");
+    h.codex.completeTurn(h.codex.startedTurns.at(-1)!.turnId);
+    await h.request("/api/settings", { method: "PUT", headers, body: JSON.stringify({ model: null, effort: null }) });
+  });
+
+  it("ignores model/effort sent by an older client so the saved config always wins", async () => {
+    const { cookie, csrf } = await login(h);
+    const headers = { cookie, "x-csrf-token": csrf, "content-type": "application/json" };
+    await h.request("/api/settings", {
+      method: "PUT",
+      headers,
+      body: JSON.stringify({ model: "gpt-6-sol", effort: "high" }),
+    });
+
+    const created = await h.request("/api/conversations", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ title: "legacy-client" }),
+    });
+    const { conversation } = (await created.json()) as { conversation: { id: string } };
+    const turnRes = await h.request(`/api/conversations/${conversation.id}/turns`, {
+      method: "POST",
+      headers,
+      // A pre-upgrade page would still send these; they must not override.
+      body: JSON.stringify({ text: "hi", clientMessageId: "legacy-1", model: "gpt-5.5", effort: "low" }),
+    });
+    expect(turnRes.status).toBe(202);
+    const { turn } = (await turnRes.json()) as { turn: { model: string | null; effort: string | null } };
+    expect(turn.model).toBe("gpt-6-sol");
+    expect(turn.effort).toBe("high");
+
+    await new Promise((r) => setTimeout(r, 60));
+    expect(h.codex.startedTurns.at(-1)?.model).toBe("gpt-6-sol");
+    h.codex.completeTurn(h.codex.startedTurns.at(-1)!.turnId);
+    await h.request("/api/settings", { method: "PUT", headers, body: JSON.stringify({ model: null, effort: null }) });
+  });
+});
+
 describe("conversation management and sandbox browser tabs", () => {
   it("reuses a blank default conversation for an empty create and keeps explicit titles separate", async () => {
     const { cookie, csrf } = await login(h);

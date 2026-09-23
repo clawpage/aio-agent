@@ -425,13 +425,14 @@ export function createApiRouter(context: AppContext): Router {
         return;
       }
       try {
+        // Model and effort are intentionally NOT read from the request: the saved
+        // unified config is the single source of truth for later messages, so an
+        // older client still sending them cannot bypass the config page.
         const { turn, duplicate } = agent.submitTurn({
           conversationId,
           text,
           clientMessageId,
           attachments,
-          model: typeof req.body?.model === "string" ? req.body.model : null,
-          effort: typeof req.body?.effort === "string" ? req.body.effort : null,
           cwd: typeof req.body?.cwd === "string" ? req.body.cwd : null,
         });
         res.status(duplicate ? 200 : 202).json({ turn, duplicate });
@@ -507,6 +508,87 @@ export function createApiRouter(context: AppContext): Router {
       } catch (err) {
         res.status(503).json({ error: "models_unavailable", message: err instanceof Error ? err.message : String(err), models: [] });
       }
+    }),
+  );
+
+  // ---------------------------------------------------------------- settings
+
+  /**
+   * Unified owner settings applied to every later message. Reading them back is
+   * what makes the choice durable across devices and reloads; the response also
+   * carries the configured default so the UI can render an explicit "default".
+   */
+  router.get(
+    "/settings",
+    requireKind("primary"),
+    requireSession,
+    asyncHandler(async (_req, res) => {
+      const settings = agent.agentSettings();
+      let models: Array<{ id: string; displayName: string; supportedReasoningEfforts: string[]; defaultReasoningEffort: string | null }> = [];
+      try {
+        models = (await agent.listModels()).map((m) => ({
+          id: m.id,
+          displayName: m.displayName,
+          supportedReasoningEfforts: m.supportedReasoningEfforts,
+          defaultReasoningEffort: m.defaultReasoningEffort,
+        }));
+      } catch {
+        // A settings read must still answer with the stored choice when the model
+        // catalog is temporarily unavailable; validation happens on save.
+        models = [];
+      }
+      // `savedModelAvailable` is null when the catalog is unknown: the UI must not
+      // claim a stored model is unusable just because Codex is not up yet.
+      const savedModelAvailable =
+        models.length === 0 ? null : settings.model === null || models.some((m) => m.id === settings.model);
+      res.json({ settings, defaultModel: cfg.agent.defaultModel, models, savedModelAvailable });
+    }),
+  );
+
+  /**
+   * Save the unified settings. A partial body is merged with the stored value so
+   * a caller may update just the model; a malformed or unknown field is refused
+   * (never silently coerced) and the stored choice is left untouched on failure.
+   */
+  router.put(
+    "/settings",
+    requireKind("primary"),
+    requireSession,
+    asyncHandler(async (req, res) => {
+      const body: unknown = req.body ?? {};
+      if (typeof body !== "object" || body === null || Array.isArray(body)) {
+        res.status(400).json({ error: "invalid_settings", message: "设置必须是一个对象" });
+        return;
+      }
+      const record = body as Record<string, unknown>;
+      if (!("model" in record) && !("effort" in record)) {
+        res.status(400).json({ error: "invalid_settings", message: "缺少要保存的设置" });
+        return;
+      }
+      let models: Array<{ id: string; displayName: string; supportedReasoningEfforts: string[]; defaultReasoningEffort: string | null }>;
+      try {
+        models = await agent.listModels();
+      } catch (err) {
+        res.status(503).json({ error: "models_unavailable", message: err instanceof Error ? err.message : String(err) });
+        return;
+      }
+      if (models.length === 0) {
+        res.status(503).json({ error: "models_unavailable", message: "暂时无法获取模型列表，请稍后重试" });
+        return;
+      }
+      const stored = agent.agentSettings();
+      // Merge a partial body over the stored value, then validate the whole thing.
+      const candidate = {
+        model: "model" in record ? record.model : stored.model,
+        effort: "effort" in record ? record.effort : stored.effort,
+      };
+      const result = agent.saveAgentSettings(candidate, models);
+      if (!result.ok) {
+        res.status(400).json({ error: "invalid_settings", message: result.message });
+        return;
+      }
+      audit(db, "agent_settings_updated", JSON.stringify(result.settings), ctxOf(req).ip);
+      res.json({ ok: true, settings: result.settings });
     }),
   );
 

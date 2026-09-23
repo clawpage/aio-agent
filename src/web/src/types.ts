@@ -53,6 +53,34 @@ export interface ModelInfo {
   inputModalities: string[];
 }
 
+/**
+ * Unified owner settings applied to every later message. `null` means "use the
+ * model's own default" (model) or "use the model's default effort" (effort).
+ */
+export interface AgentSettings {
+  model: string | null;
+  effort: string | null;
+}
+
+/** One model as the settings page needs it to validate an effort choice. */
+export interface SettingsModel {
+  id: string;
+  displayName: string;
+  supportedReasoningEfforts: string[];
+  defaultReasoningEffort: string | null;
+}
+
+export interface SettingsResponse {
+  settings: AgentSettings;
+  defaultModel: string;
+  models: SettingsModel[];
+  /**
+   * Whether the stored model is still offered by the catalog. `null` when the
+   * catalog is unknown, so the UI must not claim it is unusable.
+   */
+  savedModelAvailable: boolean | null;
+}
+
 export interface StatusResponse {
   agent: {
     sessionReady: boolean;

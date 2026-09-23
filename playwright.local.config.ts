@@ -26,6 +26,8 @@ export default defineConfig({
     "**/menu-qa.spec.ts",
     "**/file-preview.spec.ts",
     "**/mobile-chat.spec.ts",
+    "**/settings.spec.ts",
+    "**/working.spec.ts",
   ],
   outputDir: "var/.playwright-local",
   timeout: 60_000,
@@ -55,7 +57,7 @@ export default defineConfig({
     },
     {
       name: "mobile-webkit",
-      testMatch: "**/mobile-chat.spec.ts",
+      testMatch: ["**/mobile-chat.spec.ts", "**/settings.spec.ts", "**/working.spec.ts"],
       use: { ...devices["iPhone 13"], viewport: { width: 390, height: 844 } },
     },
   ],

@@ -11,7 +11,12 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const port = Number(process.argv[2] ?? 4288);
-const root = path.resolve(fileURLToPath(new URL("../../dist/web", import.meta.url)));
+// Default to the checked-in build output, but let a local run point at a
+// scratch `--outDir` build (PA_TEST_WEB_ROOT is an absolute path) so verifying
+// source changes never has to overwrite the served `dist/web` bundle.
+const root = process.env.PA_TEST_WEB_ROOT
+  ? path.resolve(process.env.PA_TEST_WEB_ROOT)
+  : path.resolve(fileURLToPath(new URL("../../dist/web", import.meta.url)));
 
 const MIME = {
   ".html": "text/html; charset=utf-8",

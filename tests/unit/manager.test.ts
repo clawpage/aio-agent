@@ -1,5 +1,6 @@
 import { describe, expect, it, beforeEach, afterEach } from "vitest";
 import { openDb, getMeta, type Db } from "../../src/server/db.js";
+import { writeAgentSettings } from "../../src/server/settings.js";
 import { Logger } from "../../src/server/logger.js";
 import {
   AgentManager,
@@ -318,6 +319,124 @@ describe("AgentManager", () => {
     expect(row.model).toBe("gpt-6-astra");
   });
 
+  it("applies the unified owner settings to every later message over a stale conversation model", async () => {
+    const models = await agent.listModels();
+    const conv = agent.createConversation({ title: "unified" });
+    // A conversation carrying an old per-conversation model must not win: the
+    // saved unified config is authoritative for later messages.
+    db.prepare("UPDATE conversations SET model = ? WHERE id = ?").run("gpt-5.5", conv.id);
+    const saved = agent.saveAgentSettings({ model: "gpt-6-sol", effort: "high" }, models);
+    expect(saved.ok).toBe(true);
+
+    agent.submitTurn({ conversationId: conv.id, text: "hi", clientMessageId: "m1" });
+    await tick();
+
+    expect(codex.startedTurns[0]?.model).toBe("gpt-6-sol");
+    const turn = db.prepare("SELECT model, effort FROM turns WHERE client_message_id = 'm1'").get() as {
+      model: string;
+      effort: string | null;
+    };
+    expect(turn.model).toBe("gpt-6-sol");
+    expect(turn.effort).toBe("high");
+    expect(agent.agentSettings()).toEqual({ model: "gpt-6-sol", effort: "high" });
+  });
+
+  it("freezes the resolved model on a queued turn so a later config change cannot alter it", async () => {
+    const models = await agent.listModels();
+    const holders = ["h1", "h2", "h3"].map((t) => agent.createConversation({ title: t }));
+    for (let i = 0; i < 3; i++) {
+      agent.submitTurn({ conversationId: holders[i]!.id, text: `hold-${i}`, clientMessageId: `hold-${i}` });
+    }
+    await tick(80);
+    expect(codex.startedTurns.length).toBe(3);
+
+    // Submitted while every slot is busy, so this turn genuinely waits in queue.
+    agent.saveAgentSettings({ model: "gpt-6-sol", effort: "medium" }, models);
+    const conv = agent.createConversation({ title: "queued" });
+    agent.submitTurn({ conversationId: conv.id, text: "queued", clientMessageId: "q1" });
+    await tick(40);
+    expect((db.prepare("SELECT status FROM turns WHERE client_message_id = 'q1'").get() as { status: string }).status).toBe("queued");
+    const frozen = db.prepare("SELECT model, effort FROM turns WHERE client_message_id = 'q1'").get() as { model: string; effort: string };
+    expect(frozen.model).toBe("gpt-6-sol");
+
+    // The owner changes the unified config, and another turn rewrites the stored
+    // conversation model, before the queued turn ever starts.
+    agent.saveAgentSettings({ model: "gpt-5.5", effort: null }, models);
+    db.prepare("UPDATE conversations SET model = ? WHERE id = ?").run("gpt-5.5", conv.id);
+
+    codex.completeTurn(codex.startedTurns[0]!.turnId);
+    await tick(120);
+    const started = codex.startedTurns.find((t) => t.text === "queued");
+    expect(started?.model).toBe("gpt-6-sol");
+  });
+
+  it("uses the configured default for a later message when the global choice is unset", async () => {
+    const conv = agent.createConversation({ title: "stale" });
+    // A conversation carrying an old model must not win when no unified choice
+    // has been saved: the config page shows "default", so the turn must run it.
+    db.prepare("UPDATE conversations SET model = ? WHERE id = ?").run("gpt-5.5", conv.id);
+    expect(agent.agentSettings()).toEqual({ model: null, effort: null });
+
+    agent.submitTurn({ conversationId: conv.id, text: "hi", clientMessageId: "m1" });
+    await tick();
+
+    expect(codex.startedTurns[0]?.model).toBe("gpt-6-sol");
+    const row = db.prepare("SELECT model FROM conversations WHERE id = ?").get(conv.id) as { model: string };
+    expect(row.model).toBe("gpt-6-sol");
+  });
+
+  it("keeps a saved effort when the model catalog was never fetched", async () => {
+    // Simulates a restart where the user sends before opening the config page and
+    // the catalog is still unavailable: the stored, already-validated effort must
+    // survive rather than being silently dropped.
+    const db2 = openDb(":memory:");
+    const codex2 = new FakeCodex();
+    codex2.listModels = async () => {
+      throw new Error("codex not up yet");
+    };
+    const cfg2 = testConfig("/tmp/pa-manager-test", 1);
+    const hostTokens = { status: async () => ({ ok: true, authMethod: "chatgpt", email: null, planType: null, expiresAt: null, error: null }) } as unknown as HostTokenSource;
+    const agent2 = new AgentManager({ cfg: cfg2, db: db2, log: new Logger("error", undefined, false), codex: codex2, hostTokens });
+    await agent2.init();
+    // Seed a saved choice directly (the API validated it when it was saved).
+    writeAgentSettings(db2, { model: "gpt-6-sol", effort: "high" });
+
+    const conv = agent2.createConversation({ title: "cold" });
+    agent2.submitTurn({ conversationId: conv.id, text: "hi", clientMessageId: "cold-1" });
+    await tick();
+
+    const turn = db2.prepare("SELECT model, effort FROM turns WHERE client_message_id = 'cold-1'").get() as {
+      model: string;
+      effort: string | null;
+    };
+    expect(turn.model).toBe("gpt-6-sol");
+    expect(turn.effort).toBe("high");
+    expect(codex2.startedTurns[0]?.model).toBe("gpt-6-sol");
+    agent2.shutdown();
+    db2.close();
+  });
+
+  it("backfills a frozen model for turns created before the column existed", async () => {
+    const db2 = openDb(":memory:");
+    const { agent: fresh } = makeManager({}, db2);
+    await fresh.init();
+    const conv = fresh.createConversation({ title: "legacy" });
+    fresh.submitTurn({ conversationId: conv.id, text: "old", clientMessageId: "old-1" });
+    await tick(60);
+    // Simulate a pre-migration row: the turn has no frozen model, but the queued
+    // event still carries the snapshot it was accepted with.
+    db2.prepare("UPDATE turns SET model = NULL WHERE client_message_id = 'old-1'").run();
+    db2.prepare("UPDATE conversations SET model = ? WHERE id = ?").run("gpt-6-astra", conv.id);
+    fresh.shutdown();
+
+    const second = makeManager({}, db2);
+    await second.agent.init();
+    const row = db2.prepare("SELECT model FROM turns WHERE client_message_id = 'old-1'").get() as { model: string | null };
+    expect(row.model).toBe("gpt-6-sol");
+    second.agent.shutdown();
+    db2.close();
+  });
+
   it("honours PA_DEFAULT_MODEL", async () => {
     const other = makeManager({ PA_DEFAULT_MODEL: "gpt-6-luna" });
     await other.agent.init();
@@ -524,6 +643,38 @@ describe("AgentManager", () => {
     expect(statuses.map((s) => s.status)).toEqual(["unknown", "unknown", "unknown", "interrupted"]);
     expect(freshCodex.startedTurns.length).toBe(0);
     fresh.shutdown();
+  });
+
+  it("normalizes every tool-output stream method into a stream.delta with its original kind", async () => {
+    const conv = agent.createConversation({ title: "tool output" });
+    agent.submitTurn({ conversationId: conv.id, text: "run", clientMessageId: "m1" });
+    await tick(40);
+    const turn = codex.startedTurns[0]!;
+    codex.emitNotification("item/started", { threadId: turn.threadId, turnId: turn.turnId, item: { id: "cmd1", type: "commandExecution", command: "probe" } });
+    // Each of these is buffered by the manager and re-emitted as `stream.delta`
+    // carrying the original method in `kind`, keyed by the tool's itemId. The web
+    // client relies on that shape to route output into the tool card.
+    const methods: Array<[string, Record<string, unknown>]> = [
+      ["item/commandExecution/outputDelta", { delta: "cmd-out" }],
+      ["item/fileChange/outputDelta", { delta: "file-out" }],
+      ["command/exec/outputDelta", { delta: "exec-out" }],
+      ["process/outputDelta", { delta: "proc-out" }],
+      ["item/mcpToolCall/progress", { delta: "mcp-out" }],
+    ];
+    for (const [method, extra] of methods) {
+      codex.emitNotification(method, { threadId: turn.threadId, turnId: turn.turnId, itemId: "cmd1", ...extra });
+    }
+    await tick(400);
+    const deltas = agent.listEvents(conv.id, 0).filter((e) => e.type === "stream.delta");
+    expect(deltas).toHaveLength(methods.length);
+    for (const e of deltas) {
+      const payload = e.payload as { itemId: string; kind: string; delta: string };
+      expect(payload.itemId).toBe("cmd1");
+      expect(methods.map(([m]) => m)).toContain(payload.kind);
+      expect(payload.delta).toMatch(/-out$/);
+    }
+    codex.completeTurn(turn.turnId);
+    await tick();
   });
 
   it("requests a concise reasoning summary and never surfaces raw chain-of-thought", async () => {
