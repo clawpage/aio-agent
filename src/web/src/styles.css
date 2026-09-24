@@ -1341,24 +1341,57 @@ textarea:focus {
   gap: 2px;
   overflow-y: auto;
 }
+/* One row per entry: name + size on the first line, every action on the second.
+   Directories stay single-line and compact. */
 .file-list li {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+  padding: 4px 8px;
+  border-radius: 8px;
+  min-width: 0;
+}
+
+.file-main {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 8px;
-  border-radius: 8px;
+  min-width: 0;
+}
+
+/* A directory row has no file actions, so it stays on one line. */
+.file-list li.is-directory {
+  flex-direction: row;
+  align-items: center;
+}
+
+.file-list li.is-directory .file-actions {
+  padding-left: 0;
 }
 .file-list li:hover {
   background: var(--bg);
 }
 .file-name {
   flex: 1;
+  min-width: 0;
   border: none;
   background: none;
   text-align: left;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* Row controls stay on one line while they fit, then wrap instead of pushing
+   the list wider than the panel. */
+.file-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding-left: 20px;
+  font-size: 12px;
 }
 .file-size {
   color: var(--text-dim);
@@ -1923,15 +1956,55 @@ textarea:focus {
   }
 }
 
-/* ------------------------------------------------------------ docs tools ---- */
+/* -------------------------------------------------- merged files + docs tools ---- */
+
+/* Secondary, collapsed readiness detail inside the 文件 tab. */
+.docs-processing {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 8px 10px;
+  background: var(--bg-raised);
+  margin-top: 4px;
+}
+
+.docs-processing > summary {
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.docs-processing > .row {
+  margin-top: 8px;
+}
+
+/* Compact conversion panel: only shown for the row the user picked. */
+.docs-convert {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 8px 10px;
+  background: var(--bg-raised);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.docs-convert .docs-convert-name {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 .docs-checks {
   list-style: none;
-  margin: 6px 0 0;
+  margin: 8px 0;
   padding: 0;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 16px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 4px;
+  font-size: 12px;
 }
 
 .docs-checks li {
@@ -1954,8 +2027,27 @@ textarea:focus {
   font-size: 12px;
 }
 
-.docs-dirs {
-  margin-bottom: 6px;
+.docs-badge {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+}
+
+.docs-badge.ok {
+  border-color: #2f7d4f;
+  color: #7ee2a8;
+}
+
+.docs-badge.warn {
+  border-color: #8a6d1f;
+  color: #f0cf7a;
+}
+
+.docs-badge.error {
+  border-color: #7d3a3a;
+  color: #f0a0a0;
 }
 
 /* ----------------------------------------------------------- preview additions */
@@ -2009,63 +2101,11 @@ textarea:focus {
   gap: 8px;
 }
 
-/* ------------------------------------------------------------- document tools */
-
-.docs-tools {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-  padding: 12px;
-  overflow: auto;
-  height: 100%;
-}
-
-.docs-status,
-.docs-files,
-.docs-actions {
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 10px 12px;
-  background: var(--bg-raised);
-}
-
-.docs-badge {
-  font-size: 11px;
-  font-weight: 700;
-  padding: 2px 8px;
-  border-radius: 999px;
-  border: 1px solid var(--border);
-}
-
-.docs-badge.ok {
-  border-color: #2f7d4f;
-  color: #7ee2a8;
-}
-
-.docs-badge.warn {
-  border-color: #8a6d1f;
-  color: #f0cf7a;
-}
-
-.docs-badge.error {
-  border-color: #7d3a3a;
-  color: #f0a0a0;
-}
-
-.docs-checks {
-  list-style: none;
-  margin: 8px 0;
-  padding: 0;
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 4px;
-  font-size: 12px;
-}
-
 .file-list li.selected {
   border-color: var(--accent);
 }
 
+/* Phones: the file name keeps the row, the actions wrap under it. */
 @media (max-width: 480px) {
   .file-card-name {
     max-width: 150px;
@@ -2073,5 +2113,20 @@ textarea:focus {
 
   .file-preview-pager {
     gap: 6px;
+  }
+
+  /* Keep the two-line shape on a phone: name + size above, actions below. */
+  .file-main {
+    align-items: flex-start;
+  }
+
+  .file-actions {
+    gap: 8px 12px;
+    padding-left: 20px;
+  }
+
+  .file-actions .link,
+  .file-actions a.link {
+    padding: 4px 2px;
   }
 }

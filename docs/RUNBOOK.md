@@ -94,7 +94,7 @@ PA_COMPANION_ORIGIN=https://agent-workspace.zymx.tech npm run smoke
 工具装在**持久工具目录** `/home/gem/.codex/tools/aio-doc`（不在镜像里，卷保留即保留），
 分两层：root 只做系统包与目录权限，gem 用户建 venv 并安装 Python 库。
 
-**推荐：用 UI 的「文档工具」标签页点「安装/修复」**。它会先把控制面当前源码里的脚本
+**推荐：在工作区「文件」页底部展开「文档处理」，点「安装/修复」**。它会先把控制面当前源码里的脚本
 部署进沙箱，再依次跑 root 层与用户层安装，fresh/新重建环境最可靠。
 
 也可以在**项目根目录**手工执行等价的两步（`cd` 到本仓库根再运行）：

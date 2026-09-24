@@ -200,7 +200,7 @@ export function FilePreview({ path, onClose, onConvert, actions }: Props) {
           {phase === "unsupported" && (
             <div className="file-preview-note" role="status">
               <p>该格式暂不支持在线预览。</p>
-              <p className="muted tiny">你可以直接下载原文件，或用「文档工具」把它转换成可预览的格式。</p>
+              <p className="muted tiny">你可以直接下载原文件，或在工作区「文件」页对它有转换入口时把它转换成可预览的格式。</p>
             </div>
           )}
 

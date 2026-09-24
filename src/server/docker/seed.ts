@@ -115,7 +115,7 @@ description: Create, modify and convert Word/Excel/PowerPoint/PDF documents insi
 /home/gem/.codex/tools/aio-doc/bin/aio-doc doctor        # 一次输出 CLI 与 Python 库的就绪状态
 \`\`\`
 
-未就绪时不要假装成功：告诉用户工具未安装，并让其在工作区「文档工具」页点「安装/修复」。
+未就绪时不要假装成功：告诉用户工具未安装，并让其在工作区「文件」页底部展开「文档处理」，点「安装/修复」。
 
 ## 首选入口：\`aio-doc\`
 
