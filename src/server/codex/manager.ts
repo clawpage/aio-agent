@@ -5,6 +5,7 @@ import type { Config } from "../config.js";
 import type { Logger } from "../logger.js";
 import type { CodexModel, SandboxAccount } from "./sandboxCodex.js";
 import type { HostTokenSource } from "./hostTokens.js";
+import { BridgeModel, CHATGPT_PROVIDER_ID } from "../bridgeModel.js";
 import { AutoTitler, DEFAULT_CONVERSATION_TITLE, TITLE_UPDATED_EVENT, manualTitleMetaKey } from "./autoTitle.js";
 import {
   effectiveAgentSettings,
@@ -29,7 +30,15 @@ export interface CodexSessionLike {
   onClosed(handler: (reason: string) => void): void;
   start(): Promise<void>;
   listModels(): Promise<CodexModel[]>;
-  startThread(opts: { cwd?: string; model?: string }): Promise<{ threadId: string; model: string; cwd: string }>;
+  startThread(opts: {
+    cwd?: string;
+    model?: string;
+    modelProvider?: string;
+  }): Promise<{ threadId: string; model: string; cwd: string; modelProvider: string | null }>;
+  forkThread(
+    threadId: string,
+    opts: { model?: string; modelProvider?: string; cwd?: string },
+  ): Promise<{ threadId: string; model: string; cwd: string; modelProvider: string | null }>;
   resumeThread(threadId: string): Promise<void>;
   startTurn(params: {
     threadId: string;
@@ -55,6 +64,8 @@ export interface ConversationRow {
   title: string;
   codex_thread_id: string | null;
   model: string | null;
+  /** Codex provider the current thread runs on; null means the ChatGPT one. */
+  model_provider: string | null;
   cwd: string | null;
   status: string;
   archived: number;
@@ -176,6 +187,19 @@ export class TurnConflictError extends Error {
   }
 }
 
+/**
+ * Raised when a submission cannot run on the selected model at all — currently
+ * an image attachment sent to the text-only bridge model. Refusing it in the
+ * control plane gives the user a clear Chinese message instead of a remote
+ * Codex failure halfway through the turn.
+ */
+export class TurnInputUnsupportedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "TurnInputUnsupportedError";
+  }
+}
+
 export interface SubmitTurnInput {
   conversationId: string;
   text: string;
@@ -219,6 +243,7 @@ export class AgentManager {
   #codex: CodexSessionLike;
   #hostTokens: HostTokenSource;
   #titles: AutoTitler;
+  #bridge: BridgeModel | null;
 
   #activeTurns = new Map<string, ActiveTurn>();
   #capacity: number;
@@ -242,12 +267,21 @@ export class AgentManager {
    */
   #codexGeneration = 0;
 
-  constructor(deps: { cfg: Config; db: Db; log: Logger; codex: CodexSessionLike; hostTokens: HostTokenSource }) {
+  constructor(deps: {
+    cfg: Config;
+    db: Db;
+    log: Logger;
+    codex: CodexSessionLike;
+    hostTokens: HostTokenSource;
+    /** Optional bridge model; absent means every turn runs on ChatGPT. */
+    bridge?: BridgeModel | null;
+  }) {
     this.#cfg = deps.cfg;
     this.#db = deps.db;
     this.#log = deps.log.child("agent");
     this.#codex = deps.codex;
     this.#hostTokens = deps.hostTokens;
+    this.#bridge = deps.bridge ?? null;
     this.#capacity = Math.max(1, deps.cfg.agent.maxConcurrentTurns);
     this.#titles = new AutoTitler({
       cfg: deps.cfg,
@@ -719,6 +753,12 @@ export class AgentManager {
     // model it was submitted with even if the owner changes the unified setting
     // (or another turn rewrites `conversations.model`) before it starts.
     const resolved = this.#resolveSubmitSettings(input);
+    // The bridge model is text-only. Refuse an image here, with a clear message,
+    // rather than letting Codex reject the turn remotely.
+    const model = resolved.model ?? this.#cfg.agent.defaultModel;
+    if (attachments.some((a) => a.kind === "image") && this.#bridge?.isTextOnly(model)) {
+      throw new TurnInputUnsupportedError("该模型只支持文本输入，请移除图片附件后重试");
+    }
     try {
       this.#db
         .prepare(
@@ -736,7 +776,6 @@ export class AgentManager {
     this.#db.prepare("UPDATE conversations SET updated_at = ? WHERE id = ?").run(now, input.conversationId);
     // Persist the resolved model so the stored conversation state and the turn
     // that will run agree.
-    const model = resolved.model ?? this.#cfg.agent.defaultModel;
     this.#db
       .prepare("UPDATE conversations SET model = ?, cwd = COALESCE(?, cwd) WHERE id = ?")
       .run(model, input.cwd ?? null, input.conversationId);
@@ -840,17 +879,59 @@ export class AgentManager {
     // Legacy rows without a frozen model fall back to the conversation, then the
     // configured default (never Codex's own gpt-6-astra default).
     const model = turn.model ?? conversation.model ?? this.#cfg.agent.defaultModel;
+    // The provider is decided by the model that will actually run, and only a
+    // bridge model ever resolves to a non-ChatGPT provider. A ChatGPT turn never
+    // sends `modelProvider`, so that path stays byte-identical to before.
+    const desiredProvider = this.#bridge?.providerForModel(model) ?? CHATGPT_PROVIDER_ID;
+    // A conversation with no recorded provider was created on ChatGPT.
+    const currentProvider = conversation.model_provider ?? CHATGPT_PROVIDER_ID;
     let threadId = conversation.codex_thread_id;
     if (!threadId) {
-      const started = await this.#codex.startThread({ cwd: conversation.cwd ?? undefined, model });
+      const started = await this.#codex.startThread({
+        cwd: conversation.cwd ?? undefined,
+        model,
+        ...(desiredProvider !== CHATGPT_PROVIDER_ID ? { modelProvider: desiredProvider } : {}),
+      });
       threadId = started.threadId;
-      this.#db.prepare("UPDATE conversations SET codex_thread_id = ?, model = COALESCE(model, ?), cwd = ? WHERE id = ?").run(
+      this.#db
+        .prepare(
+          "UPDATE conversations SET codex_thread_id = ?, model = COALESCE(model, ?), model_provider = ?, cwd = ? WHERE id = ?",
+        )
+        .run(threadId, started.model, desiredProvider, started.cwd, conversation.id);
+      this.#appendEvent(conversation.id, turn.id, "thread.started", {
         threadId,
-        started.model,
-        started.cwd,
-        conversation.id,
-      );
-      this.#appendEvent(conversation.id, turn.id, "thread.started", { threadId, model: started.model, cwd: started.cwd });
+        model: started.model,
+        cwd: started.cwd,
+        modelProvider: desiredProvider,
+      });
+    } else if (desiredProvider !== currentProvider) {
+      // Codex only honours `modelProvider` when a thread is created, so an
+      // existing conversation switching providers continues on a fork that keeps
+      // the history. Resuming would silently stay on the old provider.
+      const forked = await this.#codex.forkThread(threadId, {
+        model,
+        // Same rule as the start branch: a ChatGPT thread is forked without a
+        // `modelProvider`, so that path never names the provider explicitly.
+        ...(desiredProvider !== CHATGPT_PROVIDER_ID ? { modelProvider: desiredProvider } : {}),
+        ...(conversation.cwd ? { cwd: conversation.cwd } : {}),
+      });
+      threadId = forked.threadId;
+      this.#db
+        .prepare("UPDATE conversations SET codex_thread_id = ?, model_provider = ?, cwd = ? WHERE id = ?")
+        .run(threadId, desiredProvider, forked.cwd, conversation.id);
+      this.#log.info("conversation switched provider by forking its thread", {
+        conversationId: conversation.id,
+        from: currentProvider,
+        to: desiredProvider,
+        model,
+      });
+      this.#appendEvent(conversation.id, turn.id, "thread.started", {
+        threadId,
+        model: forked.model,
+        cwd: forked.cwd,
+        modelProvider: desiredProvider,
+        forkedFrom: conversation.codex_thread_id,
+      });
     } else {
       await this.#codex.resumeThread(threadId);
     }
@@ -1326,13 +1407,28 @@ export class AgentManager {
    * never runs implicitly, and the UI labels the default from `isDefault`.
    */
   async listModels() {
-    const models = await this.#codex.listModels();
+    const models = await this.#withBridgeModel(await this.#codex.listModels());
     // Cache the catalog so a later synchronous submit can validate the unified
     // effort without another Codex round trip.
     this.#modelCatalog = models;
     const preferred = this.#cfg.agent.defaultModel;
     if (!models.some((m) => m.id === preferred)) return models;
     return models.map((m) => ({ ...m, isDefault: m.id === preferred }));
+  }
+
+  /**
+   * Append the optional bridge model to the Codex catalog.
+   *
+   * A custom provider's models never appear in `model/list` (the provider's own
+   * catalog is not merged), so the control plane adds this one entry itself.
+   * With no bridge key the catalog is returned untouched.
+   */
+  #withBridgeModel(models: CodexModel[]): CodexModel[] {
+    const entry = this.#bridge?.modelEntry();
+    if (!entry) return models;
+    // Never shadow a real catalog entry with the synthetic one.
+    if (models.some((m) => m.id === entry.id)) return models;
+    return [...models, entry];
   }
 
   /**

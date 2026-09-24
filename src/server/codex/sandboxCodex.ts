@@ -1,6 +1,7 @@
 import type { Config } from "../config.js";
 import type { Logger } from "../logger.js";
 import type { SandboxContainer } from "../docker/sandbox.js";
+import type { BridgeModel } from "../bridgeModel.js";
 import { JsonRpcPeer } from "./jsonrpc.js";
 import type { HostTokenSource } from "./hostTokens.js";
 import { buildTitlePrompt } from "./autoTitle.js";
@@ -20,6 +21,11 @@ export interface CodexModel {
   supportedReasoningEfforts: string[];
   defaultReasoningEffort: string | null;
   inputModalities: string[];
+  /**
+   * Provider this model must run on. Absent means Codex's own ChatGPT provider;
+   * the bridge model is the only entry that carries another one.
+   */
+  modelProvider?: string;
 }
 
 export type ServerRequestResolver = (result: unknown) => void;
@@ -34,6 +40,7 @@ export class SandboxCodexSession {
   #log: Logger;
   #container: SandboxContainer;
   #hostTokens: HostTokenSource;
+  #bridge: BridgeModel | null;
   #peer: JsonRpcPeer | null = null;
   #starting: Promise<void> | null = null;
   #pendingRequests = new Map<string, ServerRequestResolver>();
@@ -58,11 +65,18 @@ export class SandboxCodexSession {
   #account: SandboxAccount | null = null;
   #lastError: string | null = null;
 
-  constructor(cfg: Config, log: Logger, container: SandboxContainer, hostTokens: HostTokenSource) {
+  constructor(
+    cfg: Config,
+    log: Logger,
+    container: SandboxContainer,
+    hostTokens: HostTokenSource,
+    bridge: BridgeModel | null = null,
+  ) {
     this.#cfg = cfg;
     this.#log = log.child("sandbox-codex");
     this.#container = container;
     this.#hostTokens = hostTokens;
+    this.#bridge = bridge;
   }
 
   get ready(): boolean {
@@ -104,7 +118,11 @@ export class SandboxCodexSession {
       'approval_policy="on-request"',
       "-c",
       'sandbox_mode="danger-full-access"',
-    ]);
+      // The optional bridge provider is defined through command-line overrides,
+      // so the sandbox config.toml is never rewritten. With no bridge key these
+      // arguments are absent and the ChatGPT command line is unchanged.
+      ...(this.#bridge?.providerConfigArgs() ?? []),
+    ], this.#bridge?.providerEnv());
     const peer = new JsonRpcPeer(child, "sandbox-codex");
     peer.on("notification", (method, params) => this.#routeNotification(method, params));
     peer.on("warning", (message) => this.#log.warn("sandbox codex warning", { message }));
@@ -393,7 +411,9 @@ export class SandboxCodexSession {
     }));
   }
 
-  async startThread(opts: { cwd?: string; model?: string } = {}): Promise<{ threadId: string; model: string; cwd: string }> {
+  async startThread(
+    opts: { cwd?: string; model?: string; modelProvider?: string } = {},
+  ): Promise<{ threadId: string; model: string; cwd: string; modelProvider: string | null }> {
     await this.start();
     const res = (await this.#peer!.request(
       "thread/start",
@@ -402,10 +422,36 @@ export class SandboxCodexSession {
         approvalPolicy: "on-request",
         sandbox: "danger-full-access",
         ...(opts.model ? { model: opts.model } : {}),
+        ...(opts.modelProvider ? { modelProvider: opts.modelProvider } : {}),
       },
       60_000,
-    )) as { thread: { id: string }; model: string; cwd: string };
-    return { threadId: res.thread.id, model: res.model, cwd: res.cwd };
+    )) as { thread: { id: string }; model: string; cwd: string; modelProvider?: string | null };
+    return { threadId: res.thread.id, model: res.model, cwd: res.cwd, modelProvider: res.modelProvider ?? null };
+  }
+
+  /**
+   * Fork a thread onto another provider, keeping its history.
+   *
+   * Codex only honours `modelProvider` at thread creation, so an existing
+   * conversation that switches providers must continue on a fork. A turn on the
+   * same provider keeps using `resumeThread` and never forks.
+   */
+  async forkThread(
+    threadId: string,
+    opts: { model?: string; modelProvider?: string; cwd?: string } = {},
+  ): Promise<{ threadId: string; model: string; cwd: string; modelProvider: string | null }> {
+    await this.start();
+    const res = (await this.#peer!.request(
+      "thread/fork",
+      {
+        threadId,
+        ...(opts.cwd ? { cwd: opts.cwd } : {}),
+        ...(opts.model ? { model: opts.model } : {}),
+        ...(opts.modelProvider ? { modelProvider: opts.modelProvider } : {}),
+      },
+      60_000,
+    )) as { thread: { id: string }; model: string; cwd: string; modelProvider?: string | null };
+    return { threadId: res.thread.id, model: res.model, cwd: res.cwd, modelProvider: res.modelProvider ?? null };
   }
 
   async resumeThread(threadId: string): Promise<void> {

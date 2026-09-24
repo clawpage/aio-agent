@@ -481,9 +481,17 @@ finally:
     if (result.code !== 0) throw new Error(`Cannot enforce sandbox Codex MCP isolation: ${result.stderr.trim() || result.stdout.trim()}`);
   }
 
-  /** Spawn `docker exec -i` with a fixed prefix for the sandbox Codex process. */
-  spawnCodexAppServer(extraConfig: string[] = []): ChildProcess {
+  /**
+   * Spawn `docker exec -i` with a fixed prefix for the sandbox Codex process.
+   *
+   * `secretEnv` values are passed through the docker CLI's own environment and
+   * referenced by name only (`-e NAME`), so a key never appears in argv or in a
+   * host process listing. The isolation flags keep their exact order and
+   * semantics; `secretEnv` never changes them.
+   */
+  spawnCodexAppServer(extraConfig: string[] = [], secretEnv: Record<string, string> = {}): ChildProcess {
     const s = this.#cfg.sandbox;
+    const envFlags = Object.keys(secretEnv).flatMap((name) => ["-e", name]);
     return spawn(
       "docker",
       [
@@ -491,6 +499,7 @@ finally:
         "-i",
         "-u",
         s.containerUser,
+        ...envFlags,
         this.name,
         "env",
         `CODEX_HOME=${s.containerCodexHome}`,
@@ -501,7 +510,7 @@ finally:
         ...extraConfig,
         ...CODEX_ISOLATION_OVERRIDES,
       ],
-      { stdio: ["pipe", "pipe", "pipe"] },
+      { stdio: ["pipe", "pipe", "pipe"], env: { ...process.env, ...secretEnv } },
     );
   }
 

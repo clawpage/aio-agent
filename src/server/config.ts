@@ -116,6 +116,18 @@ export function loadConfig(): {
     tokenRefreshSkewMs: number;
     requestTimeoutMs: number;
   };
+  /**
+   * Optional OpenCode Go / LiteLLM bridge model. `enabled` is auto by default:
+   * the model is offered only when a key can actually be read.
+   */
+  bridge: {
+    enabled: string;
+    baseUrl: string;
+    model: string;
+    providerId: string;
+    secretsFile: string;
+    envKey: string;
+  };
   externalBaseUrl: string;
 } {
   const port = envInt("PA_PORT", 4891);
@@ -240,6 +252,16 @@ export function loadConfig(): {
       home: envStr("PA_HOST_CODEX_HOME", path.join(os.homedir(), ".codex")),
       tokenRefreshSkewMs: envInt("PA_HOST_TOKEN_SKEW_HOURS", 6) * 3600_000,
       requestTimeoutMs: envInt("PA_HOST_CODEX_TIMEOUT_SECONDS", 10) * 1000,
+    },
+    // The bridge is a local convenience, never a hard dependency: with no key
+    // the model simply does not appear and the ChatGPT path is untouched.
+    bridge: {
+      enabled: envStr("PA_OPENCODE_GO_ENABLED", "auto"),
+      baseUrl: envStr("PA_OPENCODE_GO_BASE_URL", "http://host.docker.internal:4017/v1"),
+      model: envStr("PA_OPENCODE_GO_MODEL", "deepseek-v4.1-flash"),
+      providerId: envStr("PA_OPENCODE_GO_PROVIDER_ID", "opencode_go"),
+      secretsFile: envStr("PA_OPENCODE_GO_SECRETS_FILE", path.join(os.homedir(), ".config", "codex-opencode-go", "secrets.env")),
+      envKey: envStr("PA_OPENCODE_GO_ENV_KEY", "LITELLM_MASTER_KEY"),
     },
     externalBaseUrl: envStr("PA_EXTERNAL_BASE_URL", ""),
   };

@@ -57,6 +57,7 @@ CREATE TABLE IF NOT EXISTS conversations (
   title TEXT NOT NULL,
   codex_thread_id TEXT,
   model TEXT,
+  model_provider TEXT,
   cwd TEXT,
   status TEXT NOT NULL DEFAULT 'idle',
   archived INTEGER NOT NULL DEFAULT 0,
@@ -164,6 +165,15 @@ function migrate(db: Db): void {
   const columns = (db.prepare("PRAGMA table_info(turns)").all() as Array<{ name: string }>).map((c) => c.name);
   if (!columns.includes("model")) {
     db.exec("ALTER TABLE turns ADD COLUMN model TEXT");
+  }
+  // Which Codex provider a conversation's thread currently runs on. NULL means
+  // the ChatGPT provider, which is what every conversation predating the
+  // optional bridge used.
+  const conversationColumns = (db.prepare("PRAGMA table_info(conversations)").all() as Array<{ name: string }>).map(
+    (c) => c.name,
+  );
+  if (!conversationColumns.includes("model_provider")) {
+    db.exec("ALTER TABLE conversations ADD COLUMN model_provider TEXT");
   }
 }
 

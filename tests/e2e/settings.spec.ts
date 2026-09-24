@@ -182,6 +182,45 @@ test("config page surfaces a save failure, retries a failed load and disables sa
   await expect(page.getByRole("button", { name: "保存", exact: true })).toBeDisabled();
 });
 
+test("config page explains a text-only bridge model and saves it with its own efforts", async ({ page }, info) => {
+  const mobile = info.project.name.startsWith("mobile");
+  await setup(page, {
+    settingsModels: [
+      { id: "gpt-6-sol", displayName: "GPT-6-Sol", supportedReasoningEfforts: ["low", "medium", "high"], defaultReasoningEffort: "medium" },
+      {
+        id: "deepseek-v4.1-flash",
+        displayName: "DeepSeek V4.1 Flash（OpenCode Go）",
+        supportedReasoningEfforts: ["low", "high", "max"],
+        defaultReasoningEffort: "high",
+        inputModalities: ["text"],
+        modelProvider: "opencode_go",
+      },
+    ],
+  });
+  let savedBody: unknown;
+  await page.route("**/api/settings", async (route) => {
+    if (route.request().method() === "PUT") savedBody = route.request().postDataJSON();
+    await route.fallback();
+  });
+
+  await openSettings(page, mobile);
+  await waitForLoadedSettings(page);
+  // A plain ChatGPT model says nothing about input modalities.
+  await expect(page.getByRole("note")).toHaveCount(0);
+
+  await page.getByLabel("模型", { exact: true }).selectOption("deepseek-v4.1-flash");
+  await expect(page.getByRole("note")).toContainText("只支持文本输入");
+  // The effort list belongs to the bridge model, not the ChatGPT one.
+  await page.getByLabel("思考强度", { exact: true }).selectOption("max");
+  await page.getByRole("button", { name: "保存", exact: true }).click();
+  await expect(page.locator(".banner.ok")).toContainText("已保存");
+  expect(savedBody).toMatchObject({ model: "deepseek-v4.1-flash", effort: "max" });
+
+  // Switching back to a ChatGPT model withdraws the text-only note.
+  await page.getByLabel("模型", { exact: true }).selectOption("gpt-6-sol");
+  await expect(page.getByRole("note")).toHaveCount(0);
+});
+
 test("config page locks edits while saving and restores defaults", async ({ page }, info) => {
   const mobile = info.project.name.startsWith("mobile");
   await setup(page, { running: true });

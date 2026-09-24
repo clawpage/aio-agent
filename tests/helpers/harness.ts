@@ -231,6 +231,9 @@ export class FakeCodex implements CodexSessionLike {
   account: SandboxAccount | null = { email: "owner@example.com", planType: "prolite", type: "chatgpt" };
   lastError: string | null = null;
   startedThreads: Array<{ threadId: string; cwd?: string; model?: string }> = [];
+  forkedThreads: Array<{ from: string; threadId: string; model?: string; modelProvider?: string }> = [];
+  /** Provider each created/forked thread runs on (null = ChatGPT account). */
+  threadProviders = new Map<string, string | null>();
   startedTurns: Array<{ threadId: string; turnId: string; text: string; model?: string | null; attachments?: Array<{ path: string; kind: string }> }> = [];
   /** Summary mode passed on the most recent main turn. */
   lastStartTurnSummary: string | null | undefined = undefined;
@@ -301,11 +304,37 @@ export class FakeCodex implements CodexSessionLike {
     ];
   }
 
-  async startThread(opts: { cwd?: string; model?: string }): Promise<{ threadId: string; model: string; cwd: string }> {
+  async startThread(opts: { cwd?: string; model?: string; modelProvider?: string }): Promise<{
+    threadId: string;
+    model: string;
+    cwd: string;
+    modelProvider: string | null;
+  }> {
     if (this.failStart) throw new Error("thread start failed");
     const threadId = `thread_${++this.#threadSeq}`;
     this.startedThreads.push({ threadId, cwd: opts.cwd, model: opts.model });
-    return { threadId, model: opts.model ?? "gpt-5.5", cwd: opts.cwd ?? "/home/gem/workspace" };
+    this.threadProviders.set(threadId, opts.modelProvider ?? null);
+    return {
+      threadId,
+      model: opts.model ?? "gpt-5.5",
+      cwd: opts.cwd ?? "/home/gem/workspace",
+      modelProvider: opts.modelProvider ?? null,
+    };
+  }
+
+  async forkThread(
+    threadId: string,
+    opts: { model?: string; modelProvider?: string; cwd?: string },
+  ): Promise<{ threadId: string; model: string; cwd: string; modelProvider: string | null }> {
+    const forkedId = `thread_${++this.#threadSeq}`;
+    this.forkedThreads.push({ from: threadId, threadId: forkedId, model: opts.model, modelProvider: opts.modelProvider });
+    this.threadProviders.set(forkedId, opts.modelProvider ?? null);
+    return {
+      threadId: forkedId,
+      model: opts.model ?? "gpt-5.5",
+      cwd: opts.cwd ?? "/home/gem/workspace",
+      modelProvider: opts.modelProvider ?? null,
+    };
   }
 
   async resumeThread(threadId: string): Promise<void> {
