@@ -13,6 +13,7 @@ import type { CodexModel, SandboxAccount } from "../../src/server/codex/sandboxC
 import type { CodexSessionLike } from "../../src/server/codex/manager.js";
 import type { SandboxContainer } from "../../src/server/docker/sandbox.js";
 import { createApp, handleUpgrade } from "../../src/server/http/server.js";
+import { FakeBrowserRuntime } from "./fakeBrowserRuntime.js";
 
 async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | void> {
   let timer: NodeJS.Timeout | undefined;
@@ -406,6 +407,8 @@ export interface TestHarness {
   primaryPort: number;
   sandbox: FakeSandbox;
   codex: FakeCodex;
+  /** Scripted container-side browser runtime (never the real container). */
+  browserRuntime: FakeBrowserRuntime;
   dataDir: string;
   shutdown: () => Promise<void>;
   request: (
@@ -498,7 +501,15 @@ export function testConfig(dataDir: string, sandboxPort: number, extra: Record<s
   }
 }
 
-export async function startHarness(extraEnv: Record<string, string> = {}): Promise<TestHarness> {
+export interface StartHarnessOptions {
+  /** Replace the scripted browser runtime, e.g. to script a container failure. */
+  browserRuntime?: FakeBrowserRuntime;
+}
+
+export async function startHarness(
+  extraEnv: Record<string, string> = {},
+  options: StartHarnessOptions = {},
+): Promise<TestHarness> {
   const sandbox = await startFakeSandbox();
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "personal-agent-test-"));
   const cfg = testConfig(dataDir, sandbox.port, extraEnv);
@@ -518,7 +529,14 @@ export async function startHarness(extraEnv: Record<string, string> = {}): Promi
   } as unknown as SandboxContainer;
 
   const log = new Logger("error", undefined, false);
-  const { ctx, shutdown } = await bootstrap({ config: cfg, log, overrides: { codex, container: containerStub } });
+  const browserRuntime = options.browserRuntime ?? new FakeBrowserRuntime();
+  const { ctx, shutdown } = await bootstrap({
+    config: cfg,
+    log,
+    // The browser runtime is always scripted: the real adapter shells into the
+    // sandbox, which a unit/integration test must never touch.
+    overrides: { codex, container: containerStub, browserRuntime },
+  });
   const app = createApp(ctx);
   const server = http.createServer(app);
   server.on("upgrade", (req, socket, head) => handleUpgrade(ctx, req, socket, head));
@@ -553,6 +571,7 @@ export async function startHarness(extraEnv: Record<string, string> = {}): Promi
     primaryPort: port,
     sandbox,
     codex,
+    browserRuntime,
     dataDir,
     shutdown: async () => {
       // Bound every cleanup step so a stuck socket cannot hang the suite.

@@ -1,8 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { api } from "../api";
+import { api, ApiError } from "../api";
 import type { CapabilitiesResponse, DocumentReadiness, FileEntry, StatusResponse } from "../types";
 import { FilePreview } from "./FilePreview";
 import { isPreviewableKind, kindLabel, workspaceFileKind } from "../sandboxLink";
+import { BrowserViewerController } from "../browserViewer";
+import { BrowserStatusBar, fetchBrowserStatus, STATUS_POLL_MS } from "./BrowserStatusBar";
+import { needsRestore } from "../browserStatusView";
+import { browserApi, type BrowserLifecycleStateView } from "../api";
 
 interface Props {
   open: boolean;
@@ -46,6 +50,23 @@ export function Workspace({ open, status, initialPath, onClose, onNotify, browse
   const [frameStatus, setFrameStatus] = useState<"idle" | "loading" | "loaded" | "timeout">("idle");
   const origin = status?.workspaceOrigin ?? originHint;
   const bootstrapping = useRef(false);
+  /** True while this window holds a viewer lease on the sandbox browser. */
+  const [watching, setWatching] = useState(false);
+  /** Read-only lifecycle status; polling it never wakes or extends the browser. */
+  const [browserStatus, setBrowserStatus] = useState<BrowserLifecycleStateView | null>(null);
+  const [keepAlivePin, setKeepAlivePin] = useState<{ id: string; note: string } | null>(null);
+  /**
+   * A released browser has no live page to show, so the panel suspends its frame
+   * until a restore confirms an awake browser. The generation makes a slow restore
+   * unable to remount a frame after the user already switched away.
+   */
+  const [suspended, setSuspended] = useState(false);
+  /**
+   * Document visibility. A backgrounded console must not keep the browser alive
+   * nor keep its iframe/WebSocket stream mounted, so both the lease and the frame
+   * follow this flag.
+   */
+  const [docVisible, setDocVisible] = useState(() => (typeof document === "undefined" ? true : document.visibilityState === "visible"));
 
   /**
    * Every frame navigation redeems its own short-lived one-time ticket. Tickets
@@ -215,6 +236,162 @@ export function Workspace({ open, status, initialPath, onClose, onNotify, browse
     [onNotify],
   );
 
+  /**
+   * Viewer lease for the sandbox browser.
+   *
+   * The lease is claimed only while the browser/desktop panel is the visible tab
+   * AND the document is visible, and it is released the moment the panel hides,
+   * the workspace closes or the window is backgrounded - so nobody has to wait for
+   * the server TTL to get their memory back. The controller is per-window, so two
+   * open consoles never share an incarnation.
+   */
+  const viewerRef = useRef<BrowserViewerController | null>(null);
+  if (viewerRef.current === null) {
+    viewerRef.current = new BrowserViewerController({
+      transport: {
+        heartbeat: async (id, generation) => {
+          try {
+            const res = await browserApi.heartbeat(id, generation);
+            setBrowserStatus(res.status);
+            return { kind: "ok", generation: res.generation };
+          } catch (err) {
+            const code = err instanceof ApiError ? err.code : "";
+            if (code === "stale_viewer") return { kind: "stale" };
+            return { kind: "error", message: err instanceof Error ? err.message : String(err) };
+          }
+        },
+        release: async (id) => {
+          try {
+            await browserApi.releaseViewer(id);
+          } catch {
+            // The server expires the lease by TTL; a failed release is not fatal.
+          }
+        },
+      },
+      onError: (message) => onNotify(message, "error"),
+    });
+  }
+  const viewer = viewerRef.current;
+
+  /** The browser/desktop panels are the only ones that need a live Chromium. */
+  const holdsBrowser = open && (tab === "browser" || tab === "desktop" || tab === "preview");
+
+  // Follow document visibility so a hidden console unmounts its frame and stream.
+  useEffect(() => {
+    const onVisibility = () => setDocVisible(document.visibilityState === "visible");
+    document.addEventListener("visibilitychange", onVisibility);
+    onVisibility();
+    return () => document.removeEventListener("visibilitychange", onVisibility);
+  }, []);
+
+  // Poll the read-only status while the workspace is open. This never renews the
+  // lease, which is what lets the countdown actually run down in the UI.
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const next = await fetchBrowserStatus();
+        if (!cancelled) setBrowserStatus(next);
+      } catch {
+        /* a failed poll leaves the previous status; it must not force a wake */
+      }
+    };
+    void poll();
+    const timer = window.setInterval(() => void poll(), STATUS_POLL_MS);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [open]);
+
+  // Hold the lease exactly while a browser panel is genuinely on screen.
+  useEffect(() => {
+    if (!holdsBrowser || document.visibilityState !== "visible") {
+      void viewer.release();
+      setWatching(false);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      const generation = await viewer.claim();
+      if (cancelled) return;
+      setWatching(generation > 0);
+    })();
+    const onVisibility = () => {
+      // Hidden: drop it now. Visible again: re-claim through the same controller,
+      // whose generation makes a heartbeat in flight during the hide stale.
+      if (document.visibilityState === "visible") {
+        void viewer.claim().then((generation) => {
+          if (!cancelled) setWatching(generation > 0);
+        });
+      } else {
+        void viewer.release();
+        setWatching(false);
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      cancelled = true;
+      document.removeEventListener("visibilitychange", onVisibility);
+      void viewer.release();
+      setWatching(false);
+    };
+  }, [holdsBrowser, viewer]);
+
+  // Release the lease when the whole page goes away (close/navigate/logout).
+  useEffect(() => {
+    // Best-effort: the request may be dropped during teardown, in which case the
+    // server TTL expires the lease on its own.
+    const bye = () => void viewer.release();
+    window.addEventListener("pagehide", bye);
+    return () => {
+      window.removeEventListener("pagehide", bye);
+      viewer.dispose();
+    };
+  }, [viewer]);
+
+  // Suspend the frame while the browser is released, so the panel never shows a
+  // dead iframe as if it worked. The proxy rebuilds the browser on the next
+  // browser-bound request; this only reflects the state honestly.
+  useEffect(() => {
+    if (!holdsBrowser) return;
+    setSuspended(needsRestore(browserStatus));
+  }, [holdsBrowser, browserStatus]);
+
+  const wakeBrowser = useCallback(async () => {
+    try {
+      const res = await browserApi.wake();
+      setBrowserStatus(res.status);
+    } catch (err) {
+      try {
+        setBrowserStatus(await fetchBrowserStatus());
+      } catch {
+        /* keep the previous status */
+      }
+      throw err;
+    }
+  }, []);
+
+  const togglePin = useCallback(() => {
+    void (async () => {
+      try {
+        if (keepAlivePin) {
+          await browserApi.unpin(keepAlivePin.id);
+          setKeepAlivePin(null);
+          onNotify("已取消保留浏览器");
+        } else {
+          const res = await browserApi.pin("手动保留浏览器");
+          setKeepAlivePin({ id: res.pin.id, note: res.pin.note });
+          onNotify("已保留浏览器，空闲时不会自动释放");
+        }
+        setBrowserStatus(await fetchBrowserStatus());
+      } catch (err) {
+        onNotify(err instanceof Error ? err.message : String(err), "error");
+      }
+    })();
+  }, [keepAlivePin, onNotify]);
+
   const currentDef = TABS.find((t) => t.id === tab);
 
   if (!open) return null;
@@ -252,6 +429,16 @@ export function Workspace({ open, status, initialPath, onClose, onNotify, browse
       </header>
 
       <div className="ws-body">
+        {holdsBrowser && (
+          <BrowserStatusBar
+            status={browserStatus}
+            watching={watching}
+            onWake={wakeBrowser}
+            onNotify={onNotify}
+            pinned={keepAlivePin}
+            onPinToggle={togglePin}
+          />
+        )}
         {tab === "files" && <FilesTab notify={onNotify} onPreview={setFilePreview} />}
         {tab === "docs" && <DocsTab notify={onNotify} onPreview={setFilePreview} />}
         {tab === "preview" && (
@@ -292,7 +479,26 @@ export function Workspace({ open, status, initialPath, onClose, onNotify, browse
         {tab === "api" && <ApiTab notify={onNotify} />}
         {TABS.find((t) => t.id === tab)?.kind === "frame" && (
           <>
-            {frameSrc ? (
+            {suspended ? (
+              <div className="frame-hint">
+                <p>
+                  浏览器已释放以节省内存
+                  {browserStatus?.restorePending ? "，上一次快照仍在等待恢复。" : "。"}
+                </p>
+                <p className="muted tiny">恢复后会按保存的标签、滚动位置与站点会话重建页面；正在进行的下载和未提交的表单不会被恢复。</p>
+                <button
+                  type="button"
+                  className="primary"
+                  onClick={() =>
+                    void wakeBrowser().catch((err) => onNotify(err instanceof Error ? err.message : String(err), "error"))
+                  }
+                >
+                  启动并恢复浏览器
+                </button>
+              </div>
+            ) : !docVisible ? (
+              <p className="muted">窗口在后台，已暂停该面板并释放浏览器占用。</p>
+            ) : frameSrc ? (
               <iframe
                 key={frameKey}
                 src={frameSrc}

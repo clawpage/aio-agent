@@ -116,6 +116,35 @@ export function loadConfig(): {
     tokenRefreshSkewMs: number;
     requestTimeoutMs: number;
   };
+  /**
+   * Only the sandbox Chromium is ever put to sleep. The container, Codex,
+   * terminal, code-server and Jupyter are never stopped by this feature - the
+   * control plane only releases the browser's own process memory and rebuilds
+   * the tabs from a snapshot when the browser is next needed.
+   */
+  browser: {
+    /** Master switch; when off the browser lifecycle is a no-op (always awake). */
+    enabled: boolean;
+    /** How long the browser may sit with no task/viewer/activity hold before sleeping. */
+    idleMs: number;
+    /** Viewer heartbeat validity; a viewer that stops heartbeating loses its hold. */
+    viewerTtlMs: number;
+    /** Container directory (persistent CODEX_HOME volume) holding the managed helper + snapshot. */
+    toolDir: string;
+    /** Absolute container path of the browser snapshot (0600, never logged). */
+    snapshotPath: string;
+    /** Bound for one helper invocation (status/snapshot/stop/start). */
+    helperTimeoutMs: number;
+    /** Bound for waiting until CDP answers after a start. */
+    wakeTimeoutMs: number;
+    /** How long a stop may take before it is reported as a failure. */
+    stopTimeoutMs: number;
+    /**
+     * What to do when a page holds typed-but-unsubmitted input:
+     * `block` refuses the sleep (conservative), `warn` sleeps and reports it.
+     */
+    dirtyInputPolicy: "block" | "warn";
+  };
   externalBaseUrl: string;
 } {
   const port = envInt("PA_PORT", 4891);
@@ -240,6 +269,25 @@ export function loadConfig(): {
       home: envStr("PA_HOST_CODEX_HOME", path.join(os.homedir(), ".codex")),
       tokenRefreshSkewMs: envInt("PA_HOST_TOKEN_SKEW_HOURS", 6) * 3600_000,
       requestTimeoutMs: envInt("PA_HOST_CODEX_TIMEOUT_SECONDS", 10) * 1000,
+    },
+    browser: {
+      enabled: envStr("PA_BROWSER_LIFECYCLE", "1") === "1",
+      // A five minute default keeps a browser that nobody is looking at from
+      // holding hundreds of MB of renderer memory; the floor stops a
+      // misconfiguration from thrashing the browser on every navigation.
+      idleMs: Math.max(30_000, envInt("PA_BROWSER_IDLE_SECONDS", 300) * 1000),
+      viewerTtlMs: Math.max(10_000, envInt("PA_BROWSER_VIEWER_TTL_SECONDS", 60) * 1000),
+      toolDir: envStr("PA_BROWSER_TOOL_DIR", path.posix.join(sandboxCodexPrefix, "..", "aio-browser")),
+      snapshotPath: envStr(
+        "PA_BROWSER_SNAPSHOT_PATH",
+        path.posix.join(envStr("PA_BROWSER_TOOL_DIR", path.posix.join(sandboxCodexPrefix, "..", "aio-browser")), "browser-snapshot.json"),
+      ),
+      helperTimeoutMs: Math.max(5_000, envInt("PA_BROWSER_HELPER_TIMEOUT_SECONDS", 45) * 1000),
+      wakeTimeoutMs: Math.max(5_000, envInt("PA_BROWSER_WAKE_TIMEOUT_SECONDS", 90) * 1000),
+      stopTimeoutMs: Math.max(5_000, envInt("PA_BROWSER_STOP_TIMEOUT_SECONDS", 30) * 1000),
+      // Default `block`: a browser that holds typed-but-unsubmitted input is
+      // never released, so no user-visible work can be lost by accident.
+      dirtyInputPolicy: envEnum("PA_BROWSER_DIRTY_INPUT_POLICY", ["block", "warn"] as const, "block"),
     },
     externalBaseUrl: envStr("PA_EXTERNAL_BASE_URL", ""),
   };

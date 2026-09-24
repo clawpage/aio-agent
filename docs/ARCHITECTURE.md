@@ -118,6 +118,42 @@
   不展示原始思维链（`content` 数组与 `item/reasoning/textDelta` 被丢弃），没有摘要时不产生空的
   “摘要”可展开行。
 
+## 浏览器内存生命周期
+
+沙箱 Chromium 在无人使用时会被**真正释放**（不是 `SIGSTOP`，也不是停容器），下次按需从快照
+重建。控制面本身从不向进程发信号：它把**受管 helper**（`src/server/browser/scripts/browser-runtime.py`，
+随构建复制到 `dist`，接管时以 root 写进持久卷并校验 digest）按子命令调用，归属核对与信号都在
+helper 内、紧挨着信号发生。
+
+- **状态机**（`src/server/browser/lifecycle.ts`）：`awake / idle / snapshotting / asleep / restoring / error`。
+  聚合四类占用：主 turn（整轮同步租约）、观看者（可见面板心跳、TTL 过期）、进行中的浏览器
+  HTTP/WS 调用、以及操作者 pin。默认空闲 5 分钟后进入 `snapshotting`。
+- **竞态防护**：租约同步预留在任何 `await` 之前；快照后再**重新核对**租约，若中途有新增占用则
+  **取消停止**。睡眠与恢复串行且 single-flight，`epoch` 防止迟到的探测覆盖新状态。`status()`
+  是纯内存只读，永不唤醒、也不顺延空闲。
+- **归属与 fail-closed**：只有 supervisor 与 browser **两处归属都证明成立**、且快照里的 source
+  PID/starttime 与实际一致时才允许停止；否则如实报 `stop_unattributed`/`stop_failed` 并且**不动**
+  进程。无法确认归属的浏览器报 `browserRunning: null` + `"unknown"`，**绝不**当成“不存在”
+  （那会错误地另起一个 Chromium）。真实样本中 Chrome 会把整个命令行 flatten 成单个 NUL token、
+  且 root 读不到 `/proc/<pid>/exe`，因此归属判定基于固定 binary 前缀 + profile 独立 token 边界 +
+  排除 `--type=` 子进程，并结合 helper PID/PPID/uid/starttime。
+- **代理保护**：伴随域的浏览器/CDP/VNC 路径在握手/请求同步预占调用租约，连接结束释放；
+  终端、文件、code-server、Jupyter 与普通静态资源**不**保护浏览器。`/api/browser/status`
+  是只读轮询。
+- **任务保护**：`AgentManager` 在 turn 启动前同步 `reserveTurn()`，在 `finally` 归还，覆盖启动、
+  异常、停止与审批等待；`await ready()` 在 `turn.started` 之后执行，恢复失败只记录
+  `turn.browser_unavailable` 事件而**不**让纯文本任务失败。沙箱内 MCP/CLI 绕过控制面，因此第一版
+  保守保护**整轮**而不是精确识别浏览器工具的那几秒。
+- **快照边界**：保存标签顺序/URL/选中页/滚动/`sessionStorage`；cookies/localStorage/IndexedDB
+  仍由既有 profile 卷承载。恢复是**重建页面**而非保留 JS 堆，先注入按 origin 限定的
+  `sessionStorage` 初始化脚本再导航，最后让 AIO soft 重连并激活正确标签。不支持/含未提交输入/
+  正在下载的页面会**保守拒绝**回收并给出原因；快照失败**绝不**停止浏览器，恢复失败保留快照不报成功。
+  归属不明的进程（本沙箱的 Chromium 会把自己的命令行压成一个 token，root 也读不到 `/proc/<pid>/exe`）
+  报 `browserAttribution: "unknown"` 且 `browserRunning: null`，**绝不当成“没有浏览器”**去另起一个；
+  读不出内容的标签报 `tab_unresponsive` 而不是伪造原因，命令本身失败也一定返回结构化 JSON 而非堆栈。
+- **恢复循环**：30 s runtime recovery 只用只读探测**核对**浏览器状态（离带停止、崩溃、空闲释放），
+  绝不把“浏览器睡眠”当成“沙箱离线”去重启容器。
+
 ## 统一登录与 token 边界
 
 - 宿主机保持原有 `codex login`（使用本人已有订阅额度），不在容器里重复登录。

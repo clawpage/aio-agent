@@ -9,6 +9,8 @@ import type { HostTokenSource } from "./codex/hostTokens.js";
 import type { AgentManager, CodexSessionLike } from "./codex/manager.js";
 import type { AioClient } from "./aio/client.js";
 import type { DocumentService } from "./documents/service.js";
+import type { BrowserService } from "./browser/service.js";
+import type { BrowserRuntimeLike } from "./browser/lifecycle.js";
 
 export interface AppContext {
   cfg: Config;
@@ -24,6 +26,17 @@ export interface AppContext {
   aio: AioClient;
   /** Sandbox document preview/conversion (readiness, bounded render, cache). */
   documents: DocumentService;
+  /**
+   * Sandbox browser lifecycle: decides when Chromium is released and rebuilds it
+   * from a snapshot. Only the browser is ever released - never the container.
+   */
+  browser: BrowserService;
+  /**
+   * Container-side helper adapter behind `browser` (provisioning + CLI calls).
+   * This is the runtime the service actually uses, so a test override is visible
+   * here too instead of only inside `browser`.
+   */
+  browserRuntime: BrowserRuntimeLike;
   startedAt: number;
   /** Last sandbox setup error, surfaced truthfully in status (never a secret). */
   sandboxSetupError: string | null;

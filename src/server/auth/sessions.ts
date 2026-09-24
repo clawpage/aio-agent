@@ -168,6 +168,15 @@ export class SessionStore {
     return row.revoked_at === null && row.expires_at > now;
   }
 
+  /** Ids of live companion sessions derived from a primary session. */
+  linkedIds(sessionId: string): string[] {
+    return (
+      this.#db.prepare("SELECT id FROM sessions WHERE parent_session_id = ? AND revoked_at IS NULL").all(sessionId) as {
+        id: string;
+      }[]
+    ).map((r) => r.id);
+  }
+
   /** Revoke workspace companion sessions derived from a primary session. */
   revokeLinked(kind: SessionKind, sessionId: string, reason = "parent-logout"): number {
     const rows = this.#db

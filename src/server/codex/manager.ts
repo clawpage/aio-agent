@@ -211,6 +211,22 @@ export interface AgentStatus {
  * event log and approval lifecycle. Browser disconnects never affect execution:
  * events are written to SQLite first and streamed to whoever is connected.
  */
+/**
+ * Narrow view of the browser lifecycle the manager depends on.
+ *
+ * A managed turn protects the sandbox browser for its whole duration: the lease
+ * is reserved synchronously (before any await) so no idle timer can release a
+ * Chromium the turn is about to drive, and `ready()` is awaited before the turn
+ * executes so a released browser is rebuilt from its snapshot first. Keeping the
+ * dependency optional lets existing tests drive the manager with no browser.
+ */
+export interface BrowserGateLike {
+  /** Reserve a hold for one whole turn; returns the release function. */
+  reserveTurn(): () => void;
+  /** Resolve once the browser is awake and restored; rejects fail-closed. */
+  ready(): Promise<void>;
+}
+
 export class AgentManager {
   readonly events = new EventEmitter();
   #db: Db;
@@ -241,13 +257,24 @@ export class AgentManager {
    * waited on (the completion notification can never arrive).
    */
   #codexGeneration = 0;
+  /** Optional browser lifecycle gate; absent means no browser release management. */
+  #browser: BrowserGateLike | null;
 
-  constructor(deps: { cfg: Config; db: Db; log: Logger; codex: CodexSessionLike; hostTokens: HostTokenSource }) {
+  constructor(deps: {
+    cfg: Config;
+    db: Db;
+    log: Logger;
+    codex: CodexSessionLike;
+    hostTokens: HostTokenSource;
+    /** Optional: when present, every managed turn protects the sandbox browser. */
+    browser?: BrowserGateLike | null;
+  }) {
     this.#cfg = deps.cfg;
     this.#db = deps.db;
     this.#log = deps.log.child("agent");
     this.#codex = deps.codex;
     this.#hostTokens = deps.hostTokens;
+    this.#browser = deps.browser ?? null;
     this.#capacity = Math.max(1, deps.cfg.agent.maxConcurrentTurns);
     this.#titles = new AutoTitler({
       cfg: deps.cfg,
@@ -790,6 +817,13 @@ export class AgentManager {
       // pump pass (or a concurrent submit) cannot start a second turn for it.
       this.#activeTurns.set(turn.conversation_id, ctx);
       this.#persistActiveState();
+      // Protect the sandbox browser for the whole turn. The reservation is
+      // synchronous and taken here, before the first await, so an idle timer can
+      // never release a Chromium this turn is about to use - even while the turn
+      // is still starting, waiting on an approval, or being cancelled. The release
+      // runs in the turn's own `finally`, so a thrown error, an interrupt or a
+      // connection loss cannot leak the hold.
+      const releaseBrowser = this.#browser ? this.#browser.reserveTurn() : () => {};
       void this.#runTurn(turn, ctx)
         .catch((err) => {
           const message = err instanceof Error ? err.message : String(err);
@@ -801,6 +835,7 @@ export class AgentManager {
           }
         })
         .finally(() => {
+          releaseBrowser();
           this.#activeTurns.delete(turn.conversation_id);
           this.#persistActiveState();
           this.#db.prepare("UPDATE conversations SET status = 'idle', updated_at = ? WHERE id = ?").run(Date.now(), turn.conversation_id);
@@ -833,6 +868,22 @@ export class AgentManager {
 
     this.#db.prepare("UPDATE conversations SET status = 'running', updated_at = ? WHERE id = ?").run(Date.now(), conversation.id);
     this.#appendEvent(conversation.id, turn.id, "turn.started", { turnId: turn.id });
+
+    // The turn holds a browser lease already (reserved synchronously in #pump).
+    // Wait for a usable browser before executing: if Chromium was released for
+    // idleness, this rebuilds it from the snapshot first. A failure is reported
+    // on the turn and the turn still runs - a text-only task must not be failed by
+    // a browser it never needed, and any browser tool will surface its own honest
+    // error. We never claim the browser is usable when it is not.
+    if (this.#browser) {
+      try {
+        await this.#browser.ready();
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        this.#log.warn("browser unavailable at turn start", { error: message, turnId: turn.id });
+        this.#appendEvent(conversation.id, turn.id, "turn.browser_unavailable", { turnId: turn.id, message });
+      }
+    }
 
     // Prefer the model frozen on the turn at submit time. A turn queued before
     // the owner changed the unified setting (or before another turn rewrote

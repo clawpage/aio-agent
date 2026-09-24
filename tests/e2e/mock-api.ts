@@ -100,6 +100,66 @@ export interface MockConsoleOptions {
   settingsModels?: MockSettingsModel[];
   /** Observe a PUT /api/settings body. */
   onSaveSettings?: (body: { model: string | null; effort: string | null }) => void;
+  /**
+   * Serve the browser lifecycle endpoints too. Off by default so existing specs
+   * keep a strict mock; the browser lifecycle spec opts in.
+   */
+  browser?: MockBrowserOptions;
+}
+
+/** Mutable browser lifecycle state the mocked control plane serves. */
+export interface MockBrowserState {
+  state: string;
+  browserRunning: boolean | null;
+  restorePending: boolean;
+  idleRemainingMs: number | null;
+  pins: Array<{ id: string; note: string; createdAt: number; expiresAt: number | null }>;
+  lastErrorCode: string | null;
+  lastError: string | null;
+  unrestoredTabCount: number | null;
+}
+
+export interface MockBrowserOptions {
+  /** Start from released ("asleep") instead of the default awake state. */
+  startAsleep?: boolean;
+  /** Observe every state transition the mock serves, for assertions. */
+  onChange?: (state: MockBrowserState) => void;
+}
+
+const BROWSER_STATE_LABELS: Record<string, string> = {
+  awake: "浏览器已就绪",
+  idle: "浏览器空闲中，即将释放",
+  snapshotting: "正在保存浏览器状态",
+  asleep: "浏览器已释放，等待按需恢复",
+  restoring: "正在恢复浏览器",
+  error: "浏览器状态异常",
+};
+
+/** A lifecycle payload shaped exactly like `browserStatusPayload` on the server. */
+export function browserStatusPayload(state: MockBrowserState, viewers: number, turns = 0, calls = 0) {
+  return {
+    enabled: true,
+    state: state.state,
+    stateLabel: BROWSER_STATE_LABELS[state.state] ?? state.state,
+    idleDeadline: state.idleRemainingMs === null ? null : Date.now() + state.idleRemainingMs,
+    idleRemainingMs: state.idleRemainingMs,
+    idleMinutes: state.idleRemainingMs === null ? null : Math.ceil(state.idleRemainingMs / 60_000),
+    since: Date.now() - 1000,
+    epoch: 1,
+    leases: { turns, viewers, calls, holds: state.pins.length, pins: state.pins.length },
+    viewers,
+    holds: state.pins.length,
+    pins: state.pins,
+    held: turns + viewers + calls + state.pins.length > 0,
+    browserRunning: state.browserRunning,
+    snapshotAt: null,
+    restoredSnapshotAt: null,
+    restorePending: state.restorePending,
+    lastError: state.lastError,
+    lastErrorCode: state.lastErrorCode,
+    lastSnapshotWarnings: [],
+    unrestoredTabCount: state.unrestoredTabCount,
+  };
 }
 
 export async function mockConsole(page: Page, opts: MockConsoleOptions): Promise<void> {
@@ -224,4 +284,63 @@ export async function mockConsole(page: Page, opts: MockConsoleOptions): Promise
       expiresAt: Date.now() + 60_000,
     }),
   );
+
+  if (opts.browser) {
+    // The mock tracks viewer ids so a spec can prove a hidden panel released its
+    // lease and a reopened one re-claimed it, without a real container.
+    const state: MockBrowserState = {
+      state: opts.browser.startAsleep ? "asleep" : "awake",
+      browserRunning: opts.browser.startAsleep ? false : true,
+      restorePending: Boolean(opts.browser.startAsleep),
+      idleRemainingMs: opts.browser.startAsleep ? null : 240_000,
+      pins: [],
+      lastErrorCode: null,
+      lastError: null,
+      unrestoredTabCount: null,
+    };
+    const viewers = new Set<string>();
+    const publish = () => opts.browser?.onChange?.(state);
+    const payload = () => browserStatusPayload(state, viewers.size);
+
+    await page.route((url) => url.pathname === "/api/browser/status", (route) => {
+      // Read-only: it must never change `state`.
+      return json(route, { status: payload() });
+    });
+    await page.route((url) => url.pathname === "/api/browser/viewer/heartbeat", (route) => {
+      const body = JSON.parse(route.request().postData() ?? "{}") as { id?: string; generation?: number };
+      if (!body.id) return json(route, { error: "bad_viewer_id", message: "缺少有效的观看标识" }, 400);
+      viewers.add(body.id);
+      publish();
+      return json(route, { ok: true, generation: body.generation ?? 1, status: payload() });
+    });
+    await page.route((url) => url.pathname === "/api/browser/viewer/release", (route) => {
+      const body = JSON.parse(route.request().postData() ?? "{}") as { id?: string };
+      if (body.id) viewers.delete(body.id);
+      publish();
+      return json(route, { ok: true, status: payload() });
+    });
+    await page.route((url) => url.pathname === "/api/browser/pin", (route) => {
+      const body = JSON.parse(route.request().postData() ?? "{}") as { note?: string; ttlMs?: number };
+      const pin = { id: `pin_${state.pins.length + 1}`, note: body.note ?? "手动保留", createdAt: Date.now(), expiresAt: null };
+      state.pins.push(pin);
+      state.idleRemainingMs = null;
+      publish();
+      return json(route, { ok: true, pin, status: payload() });
+    });
+    await page.route((url) => url.pathname === "/api/browser/pin/release", (route) => {
+      const body = JSON.parse(route.request().postData() ?? "{}") as { id?: string };
+      state.pins = state.pins.filter((p) => p.id !== body.id);
+      state.idleRemainingMs = 240_000;
+      publish();
+      return json(route, { ok: true, status: payload() });
+    });
+    await page.route((url) => url.pathname === "/api/browser/wake", (route) => {
+      state.state = "awake";
+      state.browserRunning = true;
+      state.restorePending = false;
+      state.idleRemainingMs = 240_000;
+      publish();
+      return json(route, { ok: true, status: payload() });
+    });
+  }
 }

@@ -109,6 +109,36 @@ curl -s http://127.0.0.1:4891/healthz
 校验（拒绝越界、symlink 逃逸、选项注入），预览只回传受鉴权的 raster 图或安全文本，
 下载主动内容一律 `attachment`。转换结果写成**新文件**，绝不覆盖原文件。
 
+## 浏览器内存生命周期（空闲释放与按需恢复）
+
+沙箱里的 Chromium 常驻会占住几百 MB 渲染内存，即使没人在看。这条功能让**只有浏览器**在
+无人使用时被真正释放，下一次需要时再从快照重建；容器、Codex、终端、code-server、Jupyter
+**都不会**被停掉。
+
+- **谁算「在用」**：正在执行的智能体任务（整轮保护，不区分是否用到浏览器）、可见工作区面板里
+  正在观看的人、进行中的浏览器/CDP/VNC 请求与 WebSocket 连接、以及用户手动「保留浏览器」。
+- **默认空闲 5 分钟**释放（`PA_BROWSER_IDLE_SECONDS`，下限 30 秒）；面板心跳 TTL 60 秒
+  （`PA_BROWSER_VIEWER_TTL_SECONDS`）。总开关 `PA_BROWSER_LIFECYCLE=1`（默认开）。
+- **状态**：工作区浏览器/桌面面板顶部的中文状态条显示当前状态、占用原因、观看数量、空闲倒计时、
+  已释放/正在恢复，并给出重试与「保留浏览器」入口。`/api/browser/status` 是**只读**轮询，
+  永不唤醒、也不续期空闲倒计时。
+- **观看租约**：仅当面板可见**且**页面 `document` 可见时持有；隐藏、关闭、切换标签或窗口转入
+  后台会立即卸载 iframe/流并释放，不等 TTL。多窗口各自独立，断网/崩溃自动过期，注销会清理。
+
+**快照与恢复的边界（诚实说明）**：
+
+- 保存：标签顺序、当前 URL、选中页、滚动位置、`sessionStorage`；cookies/localStorage/IndexedDB
+  仍由原有持久 profile 卷承载，不需要也不应重复保存。
+- 恢复：**重新创建页面**并导航回 URL，不保留 JS 堆；先注入只对匹配 origin 生效的
+  `sessionStorage` 初始化脚本再导航；完成后再让 AIO 重新连接并激活正确的标签页。
+- **保守拒绝**：无法安全保存的页面（`chrome://` 等不支持、有未提交输入、正在下载）会**阻止**
+  这次释放并给出原因，而**不是**静默丢状态；快照失败**绝不**停止浏览器。
+- 恢复失败保留快照并如实报错，可重试；不会假报成功，也不会重复创建已恢复的标签。
+- 用户数据目录（`/home/gem/.config/browser`）不动，登录状态得以保留。
+
+> 控制面从不让浏览器为「读状态」而保持运行，也不会把「进程归属未知」当成「浏览器不存在」
+> （那会错误地另起一个 Chromium）：无法确认归属时按保守策略处理并如实显示。
+
 ## 本地开发与测试
 
 ```bash
@@ -150,7 +180,8 @@ npm run build && npx playwright test --config playwright.local.config.ts
 
 | 层 | 覆盖 |
 | --- | --- |
-| `npm test` | 未登录绕过、会话过期/轮换/吊销与已建立连接被关闭、Host/Origin/CSRF 校验、重定向安全、代理 HTTP 与 WebSocket（对假沙箱）、事件回放与 delta 顺序、重复提交与跨会话冲突、停止语义、未知结果不重放、shell 支撑的文件操作只报真实结果、自动标题（首轮一次性、手动优先、失败保留、替换守卫、旧会话补名、超时后迟到事件隔离）、会话生命周期（空标题复用、重命名/恢复默认标题冲突 409、无删除接口）、沙箱浏览器标签 URL 校验 |
+| `npm test` | 未登录绕过、会话过期/轮换/吊销与已建立连接被关闭、Host/Origin/CSRF 校验、重定向安全、代理 HTTP 与 WebSocket（对假沙箱）、事件回放与 delta 顺序、重复提交与跨会话冲突、停止语义、未知结果不重放、shell 支撑的文件操作只报真实结果、自动标题（首轮一次性、手动优先、失败保留、替换守卫、旧会话补名、超时后迟到事件隔离）、会话生命周期（空标题复用、重命名/恢复默认标题冲突 409、无删除接口）、沙箱浏览器标签 URL 校验、**浏览器生命周期**（状态机竞态/多观看者 TTL/任务租约单飞/快照失败不停止/恢复 single-flight/归属未知 fail-closed/状态轮询不唤醒、浏览器 API 鉴权+CSRF+注销清理、代理只保护 browser/CDP/VNC 且拒绝时释放租约） |
+| `python3 tests/unit/browser-runtime.test.py` | 容器内受管 helper 的纯函数与安全边界：真实 flattened cmdline 归属、`unknown` 不等于 `absent`、快照 schema/原子 0600、精确 PID/starttime 校验后才停、按 origin 限定且在导航前注入 `sessionStorage`、AIO soft 重连与激活 index、错误脱敏 |
 | `npm run smoke` | 真实 HTTPS 登录与 cookie 属性、模型列表、一次性票据（重放与开放重定向）、伴随站会话与跨源续期、经鉴权的 shell 调用、上传与列目录、跨源写入拒绝、原生界面可达、未登录时各表面一律 401、**真实 WebSocket 升级**（已登录 101 / 未登录 401） |
 | `npx playwright test` | 登录界面（错误密码与正确密码）、对话页输入区不含任何模型/思考控件、统一配置页默认选中 GPT-6-Sol（桌面侧栏与手机底导航入口）、打开工作区后立刻切标签的竞态、连续切换最终落在最后点击的标签、真实文件列表与 code-server 可达、无横向溢出 |
 | `npx playwright test --config playwright.local.config.ts` | 会话文件卡片与统一预览（图片缩略图/分页翻页/下载/失败重试/360px 无溢出）、工作区「文档工具」目录导航与转换、本地假后端（默认 `dist/web`，可用 `PA_TEST_WEB_ROOT` 指向 scratch 构建 + 全部 `/api` 由 `page.route` mock）：会话 `⋯` 菜单/重命名/归档/恢复且无删除、失败重命名保留输入、运行态与 `prefers-reduced-motion`、Markdown 链接只进沙箱浏览器（`mailto:`/相对链接保持不可导航）、归档行标题不可点、统一配置页保存/刷新持久化/跨会话生效/失败反馈/无模型列表时禁用保存/返回会话保留草稿、折叠 Working 分组默认收起/点击与键盘展开收起/增量不重置展开/终态停动画/审批露出/长历史展开自然高度与行可达（桌面 1440×900，手机 390/360 含 WebKit，短视口与暗亮无溢出） |
@@ -178,6 +209,10 @@ npm run build && npx playwright test --config playwright.local.config.ts
 | `PA_REASONING_SUMMARY` | `concise` | 主 turn 的思考摘要模式（`concise`/`auto`/`detailed`/`none`），不展示原始思维链 |
 | `PA_SANDBOX_PORT` | `18081` | 沙箱发布到 loopback 的端口 |
 | `PA_OWNER_PASSWORD` | 空 | 设置则用它，否则生成到 `var/owner-secret.txt` |
+| `PA_BROWSER_LIFECYCLE` | `1` | 浏览器空闲释放总开关；关闭则浏览器始终常驻 |
+| `PA_BROWSER_IDLE_SECONDS` | `300` | 无占用后释放浏览器的空闲时长（下限 30 秒） |
+| `PA_BROWSER_VIEWER_TTL_SECONDS` | `60` | 观看心跳租约有效期（下限 10 秒）；到期即释放 |
+| `PA_BROWSER_DIRTY_INPUT_POLICY` | `block` | 页面有未提交输入时 `block`（保守拒绝释放）/`warn` |
 
 ## 文档
 

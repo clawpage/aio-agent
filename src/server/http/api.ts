@@ -11,6 +11,7 @@ import { COOKIE_NAMES, clearSessionCookies, sessionCookies } from "../auth/sessi
 import { safeRedirectPath } from "../auth/tickets.js";
 import { audit } from "../db.js";
 import { DocumentError, type DocumentService } from "../documents/service.js";
+import type { BrowserStatusView } from "../browser/service.js";
 import { documentKind, isRenderableKind, requireWorkspaceFilePath } from "../documents/paths.js";
 
 declare global {
@@ -80,6 +81,51 @@ export function workspaceOrigin(ctx: RequestContext, cfg: AppContext["cfg"]): st
   }
   return `https://${cfg.workspaceHost}`;
 }
+
+/**
+ * Public, secret-free view of the browser lifecycle for the control-plane UI.
+ *
+ * It deliberately exposes only counts, a Chinese state label and a Chinese idle
+ * deadline: the snapshot path, page URLs, cookies and storage values never leave
+ * the server, and the raw container message is replaced by a fixed sentence
+ * keyed on the stable error code.
+ */
+function browserStatusPayload(status: BrowserStatusView): Record<string, unknown> {
+  const idleRemainingMs = status.idleDeadline === null ? null : Math.max(0, status.idleDeadline - Date.now());
+  return {
+    enabled: status.enabled,
+    state: status.state,
+    stateLabel: BROWSER_STATE_LABELS[status.state] ?? status.state,
+    idleDeadline: status.idleDeadline,
+    idleRemainingMs,
+    idleMinutes: idleRemainingMs === null ? null : Math.ceil(idleRemainingMs / 60_000),
+    since: status.since,
+    epoch: status.epoch,
+    leases: status.leases,
+    viewers: status.viewerCount,
+    holds: status.leases.holds,
+    pins: status.pins ?? [],
+    held: status.leases.turns + status.leases.calls + status.leases.viewers + status.leases.holds > 0,
+    browserRunning: status.browserRunning,
+    snapshotAt: status.snapshotAt,
+    restoredSnapshotAt: status.restoredSnapshotAt ?? null,
+    restorePending: status.restorePending ?? false,
+    lastError: status.lastError,
+    lastErrorCode: status.lastErrorCode,
+    lastSnapshotWarnings: status.lastSnapshotWarnings,
+    unrestoredTabCount: status.unrestoredTabCount,
+  };
+}
+
+/** Chinese state labels shown in the browser panel; never machine identifiers. */
+export const BROWSER_STATE_LABELS: Record<string, string> = {
+  awake: "浏览器已就绪",
+  idle: "浏览器空闲中，即将释放",
+  snapshotting: "正在保存浏览器状态",
+  asleep: "浏览器已释放，等待按需恢复",
+  restoring: "正在恢复浏览器",
+  error: "浏览器状态异常",
+};
 
 export function createApiRouter(context: AppContext): Router {
   const router = express.Router();
@@ -192,6 +238,11 @@ export function createApiRouter(context: AppContext): Router {
     requireSession,
     asyncHandler(async (req, res, ctx) => {
       const session = ctx.session!;
+      // A signed-out window can no longer be watching the browser, so drop every
+      // viewer lease it held (primary and any linked companion session) instead of
+      // waiting for the TTL to expire.
+      context.browser.releaseViewersForSession(session.id);
+      for (const linked of sessions.linkedIds(session.id)) context.browser.releaseViewersForSession(linked);
       sessions.revoke(session.id, "logout");
       sessions.revokeLinked("primary", session.id, "parent-logout");
       res.setHeader("Set-Cookie", clearSessionCookies("primary", ctx.secure));
@@ -1212,9 +1263,113 @@ export function createApiRouter(context: AppContext): Router {
     requireKind("workspace"),
     requireSession,
     asyncHandler(async (_req, res, ctx) => {
+      context.browser.releaseViewersForSession(ctx.session!.id);
       sessions.revoke(ctx.session!.id, "workspace-logout");
       res.setHeader("Set-Cookie", clearSessionCookies("workspace", ctx.secure));
       res.json({ ok: true });
+    }),
+  );
+
+  // ------------------------------------------------- browser lifecycle API
+
+  /**
+   * Read-only browser lifecycle status. Deliberately in-memory and never waking:
+   * a status poll must not keep the browser alive or extend its idle deadline, so
+   * the UI can show a countdown that is still allowed to reach zero.
+   */
+  router.get(
+    "/browser/status",
+    requireKind("primary"),
+    requireSession,
+    asyncHandler(async (_req, res) => {
+      res.json({ status: browserStatusPayload(context.browser.status()) });
+    }),
+  );
+
+  /**
+   * A visible browser/desktop panel heartbeats here. The lease is bound to the
+   * session, so a logout can drop it, and to a per-window generation, so a
+   * heartbeat that was already in flight when the panel hid cannot resurrect a
+   * cancelled lease.
+   */
+  router.post(
+    "/browser/viewer/heartbeat",
+    requireKind("primary"),
+    requireSession,
+    asyncHandler(async (req, res, ctx) => {
+      const id = typeof req.body?.id === "string" ? req.body.id.trim() : "";
+      if (!id || id.length > 128) {
+        res.status(400).json({ error: "bad_viewer_id", message: "缺少有效的观看标识" });
+        return;
+      }
+      const generation = Number.isFinite(Number(req.body?.generation)) ? Math.trunc(Number(req.body.generation)) : 0;
+      const lease = context.browser.touchViewer(id, ctx.session!.id, generation);
+      if (!lease) {
+        // The panel's incarnation was already released; it must remount rather
+        // than assume it still holds the browser awake.
+        res.status(409).json({ error: "stale_viewer", message: "该面板的观看授权已失效，请重新打开浏览器面板" });
+        return;
+      }
+      res.json({ ok: true, generation: lease.generation, status: browserStatusPayload(context.browser.status()) });
+    }),
+  );
+
+  /** Explicit release when a panel hides, closes or switches away. */
+  router.post(
+    "/browser/viewer/release",
+    requireKind("primary"),
+    requireSession,
+    asyncHandler(async (req, res) => {
+      const id = typeof req.body?.id === "string" ? req.body.id.trim() : "";
+      if (id) context.browser.releaseViewer(id);
+      res.json({ ok: true, status: browserStatusPayload(context.browser.status()) });
+    }),
+  );
+
+  /** Keep-alive pin: protects the browser for work the control plane cannot see. */
+  router.post(
+    "/browser/pin",
+    requireKind("primary"),
+    requireSession,
+    asyncHandler(async (req, res) => {
+      const raw = typeof req.body?.note === "string" ? req.body.note.trim() : "";
+      const note = (raw || "手动保留").slice(0, 120);
+      const ttlMs = Number(req.body?.ttlMs);
+      const pin = context.browser.pin(note, Number.isFinite(ttlMs) && ttlMs > 0 ? Math.trunc(ttlMs) : undefined);
+      res.json({
+        ok: true,
+        pin: { id: pin.id, note: pin.note, expiresAt: Number.isFinite(pin.expiresAt) ? pin.expiresAt : null },
+        status: browserStatusPayload(context.browser.status()),
+      });
+    }),
+  );
+
+  router.post(
+    "/browser/pin/release",
+    requireKind("primary"),
+    requireSession,
+    asyncHandler(async (req, res) => {
+      const id = typeof req.body?.id === "string" ? req.body.id.trim() : "";
+      if (id) context.browser.unpin(id);
+      res.json({ ok: true, status: browserStatusPayload(context.browser.status()) });
+    }),
+  );
+
+  /** Explicit wake/retry, used when an automatic restore failed. */
+  router.post(
+    "/browser/wake",
+    requireKind("primary"),
+    requireSession,
+    asyncHandler(async (_req, res) => {
+      try {
+        await context.browser.wake();
+        res.json({ ok: true, status: browserStatusPayload(context.browser.status()) });
+      } catch (err) {
+        // The lifecycle always throws a fixed, secret-free sentence, but the
+        // code is what the UI keys its retry text on.
+        const message = err instanceof Error ? err.message : "浏览器恢复失败";
+        res.status(502).json({ error: "browser_wake_failed", message, status: browserStatusPayload(context.browser.status()) });
+      }
     }),
   );
 

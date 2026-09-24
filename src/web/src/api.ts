@@ -193,6 +193,55 @@ export const api = {
     request<{ status: number; contentType: string | null; body: string }>("/api/sandbox/request", { method: "POST", body: { method, path, body } }),
 };
 
+export interface BrowserLifecycleStateView {
+  enabled: boolean;
+  state: string;
+  stateLabel: string;
+  idleDeadline: number | null;
+  idleRemainingMs: number | null;
+  idleMinutes: number | null;
+  since: number;
+  epoch: number;
+  leases: { turns: number; viewers: number; calls: number; holds: number; pins: number };
+  viewers: number;
+  holds: number;
+  pins: Array<{ id: string; note: string; createdAt: number; expiresAt: number | null }>;
+  held: boolean;
+  browserRunning: boolean | null;
+  snapshotAt: number | null;
+  restoredSnapshotAt: number | null;
+  restorePending: boolean;
+  lastError: string | null;
+  lastErrorCode: string | null;
+  lastSnapshotWarnings: Array<{ code: string; message: string; tabIndex: number | null }>;
+  unrestoredTabCount: number | null;
+}
+
+/**
+ * Browser lifecycle control-plane client.
+ *
+ * `status` is a read-only poll and deliberately never renews the lease; heartbeats
+ * come only from a visible panel. Keeping them separate is what lets the idle
+ * countdown actually reach zero while the UI is open.
+ */
+export const browserApi = {
+  status: () => request<{ status: BrowserLifecycleStateView }>("/api/browser/status"),
+  heartbeat: (id: string, generation: number) =>
+    request<{ ok: boolean; generation: number; status: BrowserLifecycleStateView }>("/api/browser/viewer/heartbeat", {
+      method: "POST",
+      body: { id, generation },
+    }),
+  releaseViewer: (id: string) =>
+    request<{ ok: boolean }>("/api/browser/viewer/release", { method: "POST", body: { id } }),
+  pin: (note: string, ttlMs?: number) =>
+    request<{ ok: boolean; pin: { id: string; note: string; expiresAt: number | null } }>("/api/browser/pin", {
+      method: "POST",
+      body: ttlMs === undefined ? { note } : { note, ttlMs },
+    }),
+  unpin: (id: string) => request<{ ok: boolean }>("/api/browser/pin/release", { method: "POST", body: { id } }),
+  wake: () => request<{ ok: boolean; status: BrowserLifecycleStateView }>("/api/browser/wake", { method: "POST", body: {} }),
+};
+
 /** Open an authenticated EventSource for a conversation, resuming from `since`. */
 export function openEventStream(
   conversationId: string,

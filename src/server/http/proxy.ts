@@ -7,6 +7,7 @@ import { originAllowed, UNSAFE_METHODS } from "./security.js";
 import { COOKIE_NAMES, parseCookies } from "../auth/sessions.js";
 import type { SessionStore } from "../auth/sessions.js";
 import type { Logger } from "../logger.js";
+import { isBrowserBoundPath, isStaticAssetPath } from "../browser/service.js";
 
 const CONTROL_COOKIES = new Set(Object.values(COOKIE_NAMES).flatMap((n) => [n.session, n.csrf]));
 
@@ -48,6 +49,33 @@ export interface ProxyDeps {
   cfg: Config;
   log: Logger;
   sessions: SessionStore;
+  /**
+   * Optional browser lifecycle gate. When present, a request whose path is
+   * genuinely browser/CDP/VNC bound holds a lease for the whole connection, so
+   * the browser cannot be released out from under an in-flight navigation or an
+   * open VNC/CDP socket. Terminal, file, code-server and Jupyter traffic is never
+   * protected, and neither is an iframe's static assets.
+   */
+  browser?: BrowserCallGate | null;
+}
+
+/** The slice of the browser service the proxy needs; keeps this module decoupled. */
+export interface BrowserCallGate {
+  /** Reserve synchronously; returns the release function. */
+  reserveCall(): () => void;
+  /** Resolve once the browser is usable; rejects fail-closed. */
+  ready(): Promise<void>;
+}
+
+/**
+ * True when this request should hold the browser awake: the path must be
+ * browser-bound, and must not be a static asset the panel merely renders. This is
+ * what stops a long-lived iframe from holding the browser up through its own
+ * images/scripts while still protecting a real navigation or an API call.
+ */
+export function shouldProtectBrowser(url: string | undefined): boolean {
+  if (!url) return false;
+  return isBrowserBoundPath(url) && !isStaticAssetPath(url);
 }
 
 /** Remove our own control-plane cookies before forwarding to the sandbox. */
@@ -268,6 +296,40 @@ export function handleProxyHttp(
     }
   }
 
+  // Browser-bound traffic holds the browser awake for the connection's lifetime.
+  // The lease is reserved synchronously, before the upstream call is even queued,
+  // so an idle release can never win the race. A released browser is rebuilt
+  // first, which is what makes a hidden panel's navigation work on re-show.
+  const browserGate = deps.browser && shouldProtectBrowser(req.url) ? deps.browser.reserveCall() : null;
+  const forward = () => proxyHttpUpstream(deps, ctx, req, res, browserGate);
+  if (!browserGate || !deps.browser) {
+    forward();
+    return;
+  }
+  void (async () => {
+    try {
+      await deps.browser!.ready();
+    } catch (err) {
+      browserGate();
+      log.warn("browser unavailable for proxied request", { error: err instanceof Error ? err.message : String(err) });
+      if (!res.headersSent) res.writeHead(503, { "content-type": "application/json; charset=utf-8" });
+      res.end(JSON.stringify({ error: "browser_unavailable", message: "浏览器正在恢复，请稍后重试" }));
+      return;
+    }
+    forward();
+  })();
+}
+
+/** The actual reverse-proxy pass; split out so the browser gate can await first. */
+function proxyHttpUpstream(
+  deps: ProxyDeps,
+  ctx: RequestContext,
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  releaseBrowser: (() => void) | null,
+): void {
+  const { cfg, log } = deps;
+
   const upstream = http.request({
     host: "127.0.0.1",
     port: cfg.sandbox.hostPort,
@@ -312,6 +374,7 @@ export function handleProxyHttp(
     clearTimeout(connectTimer);
     detachGuard();
     upstream.destroy();
+    releaseBrowser?.();
   };
   res.on("close", finish);
   req.on("aborted", finish);
@@ -326,9 +389,16 @@ export function handleProxyUpgrade(
   head: Buffer,
 ): void {
   const { cfg, log } = deps;
+  // Reserve before the origin check so the boot race is consistent, and keep the
+  // lease for the socket's whole life: an open CDP/VNC session is real browser
+  // use, and dropping the lease mid-session would release the target under it.
+  const releaseBrowser = deps.browser && shouldProtectBrowser(req.url) ? deps.browser.reserveCall() : null;
   const originHeader = req.headers.origin;
   const origin = Array.isArray(originHeader) ? (originHeader[0] ?? null) : (originHeader ?? null);
   if (!origin || !originAllowed(cfg, "workspace", origin)) {
+    // Release the lease we just reserved: this connection never opened, so
+    // holding it would keep the browser awake for a rejected request.
+    releaseBrowser?.();
     // end() flushes the response before FIN; write()+destroy() could truncate it
     // and make the edge report a 502 instead of the real 403.
     endSocket(clientSocket, "HTTP/1.1 403 Forbidden\r\nConnection: close\r\nContent-Length: 0\r\n\r\n");
@@ -351,6 +421,7 @@ export function handleProxyUpgrade(
     closed = true;
     clearTimeout(connectTimer);
     detachGuard();
+    releaseBrowser?.();
     log.debug("upgrade proxy closed", { url: req.url, why });
     upstream.destroy();
     clientSocket.destroy();

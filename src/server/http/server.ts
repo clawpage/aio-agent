@@ -137,7 +137,7 @@ export function createApp(ctx: AppContext): express.Express {
       res.status(401).json({ error: "unauthenticated", message: "工作区需要授权" });
       return;
     }
-    handleProxyHttp({ cfg: ctx.cfg, log: ctx.log, sessions: ctx.sessions }, rec, req, res);
+    handleProxyHttp({ cfg: ctx.cfg, log: ctx.log, sessions: ctx.sessions, browser: ctx.browser.proxyGate() }, rec, req, res);
   });
 
   // Control-plane SPA.
@@ -221,5 +221,5 @@ export function handleUpgrade(ctx: AppContext, req: import("node:http").Incoming
     return;
   }
   rec.session = ctx.sessions.resolve("workspace", token) ?? rec.session;
-  handleProxyUpgrade({ cfg: ctx.cfg, log: ctx.log, sessions: ctx.sessions }, rec, req, socket, head);
+  handleProxyUpgrade({ cfg: ctx.cfg, log: ctx.log, sessions: ctx.sessions, browser: ctx.browser.proxyGate() }, rec, req, socket, head);
 }

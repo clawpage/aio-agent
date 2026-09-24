@@ -8,6 +8,9 @@ import { LoginRateLimiter } from "./auth/ratelimit.js";
 import { ensureOwner } from "./auth/owner.js";
 import { SandboxContainer } from "./docker/sandbox.js";
 import { DocumentService } from "./documents/service.js";
+import { BrowserRuntime } from "./browser/runtime.js";
+import { BrowserService } from "./browser/service.js";
+import type { BrowserRuntimeLike } from "./browser/lifecycle.js";
 import { HostTokenSource } from "./codex/hostTokens.js";
 import { SandboxCodexSession } from "./codex/sandboxCodex.js";
 import { AgentManager } from "./codex/manager.js";
@@ -32,6 +35,7 @@ export interface BootstrapOptions {
     container?: SandboxContainer;
     aio?: AioClient;
     documents?: DocumentService;
+    browserRuntime?: BrowserRuntimeLike;
   };
 }
 
@@ -69,7 +73,20 @@ export async function bootstrap(opts: BootstrapOptions = {}): Promise<Bootstrapp
   const documents = opts.overrides?.documents ?? new DocumentService(cfg, log, container);
   const hostTokens = new HostTokenSource(cfg, log);
   const codex = opts.overrides?.codex ?? new SandboxCodexSession(cfg, log, container, hostTokens);
-  const agent = new AgentManager({ cfg, db, log, codex, hostTokens });
+  const browserRuntime = new BrowserRuntime(cfg, log, container);
+  // A test seam replaces the container-facing runtime; the state machine itself
+  // is always the production one.
+  const resolvedBrowserRuntime: BrowserRuntimeLike = opts.overrides?.browserRuntime ?? browserRuntime;
+  const browser = new BrowserService({
+    cfg,
+    log,
+    // A test override replaces only the container-facing runtime, so the state
+    // machine under test is the same one production uses.
+    runtime: resolvedBrowserRuntime,
+  });
+  // The manager protects the browser for the whole of every managed turn, so a
+  // lease must exist before this point (a queued turn can start on construction).
+  const agent = new AgentManager({ cfg, db, log, codex, hostTokens, browser });
   const aio = opts.overrides?.aio ?? new AioClient(cfg, log);
 
   const ctx: AppContext = {
@@ -85,6 +102,8 @@ export async function bootstrap(opts: BootstrapOptions = {}): Promise<Bootstrapp
     agent,
     aio,
     documents,
+    browser,
+    browserRuntime: resolvedBrowserRuntime,
     startedAt: Date.now(),
     sandboxSetupError: null,
     sandboxSurfaces: null,
@@ -105,6 +124,9 @@ export async function bootstrap(opts: BootstrapOptions = {}): Promise<Bootstrapp
   const shutdown = async (): Promise<void> => {
     clearInterval(maintenance);
     agent.shutdown();
+    // Stops only this service's own timers. It never signals the browser: a
+    // control-plane restart must leave a running Chromium untouched.
+    browser.shutdown();
     hostTokens.close();
     try {
       db.close();
@@ -210,6 +232,19 @@ export function startRuntimeRecovery(ctx: AppContext, intervalMs = 30_000): Runt
       if (needsWork || ctx.sandboxSurfaces === null) {
         ctx.log.info("runtime recovery pass", { sandboxReady: ready, running: state.running, codexReady: ctx.codex.ready });
         await startSandboxRuntime(ctx);
+      }
+      // A released Chromium is not a broken sandbox. `/health` only proves the
+      // container's API is alive; when the container is otherwise healthy this
+      // read-only probe reconciles the control plane with reality (out-of-band
+      // stop, a crash, or a browser released for idleness) without ever waking
+      // it. It must never be part of the `needsWork` decision above, or a sleep
+      // would trigger a container-wide restart.
+      if (ready && ctx.cfg.browser.enabled) {
+        try {
+          await ctx.browser.observe();
+        } catch (err) {
+          ctx.log.debug?.("browser observe probe failed", { error: err instanceof Error ? err.message : String(err) });
+        }
       }
     } catch (err) {
       ctx.log.warn("runtime recovery pass failed", { error: err instanceof Error ? err.message : String(err) });

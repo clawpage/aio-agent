@@ -1302,6 +1302,59 @@ textarea:focus {
   background: #fff;
 }
 
+/**
+ * Browser lifecycle status bar. Kept as one flex row so it stays readable at
+ * 360px: the state and occupancy wrap, the actions stay tappable.
+ */
+.browser-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-raised);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.browser-status .bs-state {
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.browser-status .bs-occupancy,
+.browser-status .bs-refusal,
+.browser-status .bs-countdown,
+.browser-status .bs-unknown {
+  color: var(--muted);
+}
+
+.browser-status .bs-watching {
+  color: var(--accent, #7cc4ff);
+}
+
+.browser-status.warn .bs-state {
+  color: #e5b567;
+}
+
+.browser-status.error .bs-state,
+.browser-status.error .bs-refusal {
+  color: var(--error);
+}
+
+.browser-status.busy .bs-state {
+  color: #7cc4ff;
+}
+
+.browser-status.off {
+  opacity: 0.75;
+}
+
+.browser-status .bs-pin {
+  margin-left: auto;
+}
+
 .frame-hint.error {
   border-color: var(--error);
   color: var(--error);

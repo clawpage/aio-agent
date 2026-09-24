@@ -176,6 +176,45 @@ docker exec -u gem personal-agent-sandbox \
 | 登录页出现 Cloudflare 提示页或 1015 | 公网边缘限流（高频自动化登录触发） | 降低登录频率并等待冷却；这是正确的保护行为，不要放宽边缘策略 |
 | 手机端外链工作区要求再次登录 | 跨来源 cookie 在部分浏览器被拦截 | 用「新标签页打开」按钮；或回到控制台重新点开工作区 |
 
+## 6.1 浏览器内存生命周期（空闲释放 / 按需恢复）
+
+只有**沙箱 Chromium** 会被释放，容器与 Codex/终端/code-server/Jupyter 不受影响。控制面从不
+自己发信号：它把受管 helper 写进持久卷再按子命令调用，helper 负责核对归属后才可安全停/启。
+
+```bash
+# 只读状态（父端验收用；绝不停/不停/不唤醒）
+docker exec -i -u root personal-agent-sandbox python3 - status \
+  < src/server/browser/scripts/browser-runtime.py
+# 期望：真实运行时 {"ok":true,"browserRunning":true,"browserAttribution":"owned",...}
+# 无法确认归属时必须是 browserRunning:null + "unknown"，绝不当作"不存在"。
+```
+
+- **停止前必须两处归属都成立**：supervisor 与 browser 都 `owned`，且快照里的 source
+  PID/starttime 与实际一致；否则拒绝并如实报 `stop_unattributed`/`stop_failed`，不动进程。
+- **上游 helper 的强杀**：向 `/opt/gem/browser-supervisor.py` 发 SIGTERM 后，它会在内部约 10 秒
+  后强制结束其 Chrome（upstream 行为，不改镜像）。生产执行前应按下方受控脚本观察它确实退出。
+- **快照失败/未支持的页面**：不停止浏览器；拒绝原因会出现在 UI。恢复失败保留快照并可重试。
+- **快照文件**：持久卷内 0600 原子写入，含标签/URL/滚动/sessionStorage；URL 与 cookies 从不
+  进日志或 API。
+
+**受控真实验收（仅本服务所有者、确认当前无活动任务与观看者后执行）**
+
+```bash
+cd /Users/mengxiao/workspace/projects/personal-agent.worktrees/browser-lifecycle
+# 0) 只读确认没有正在运行的任务/观看者，并记录当前 Chrome PID/starttime
+docker exec -i -u root personal-agent-sandbox python3 - status \
+  < src/server/browser/scripts/browser-runtime.py
+# 1) 快照 -> 睡眠 -> 唤醒，逐步执行并观察真实 PID 变化与标签恢复
+#    snapshot:  docker exec ... python3 - snapshot --snapshot <snapshotPath>
+#    stop:      docker exec ... python3 - stop --snapshot <snapshotPath> \
+#                 --source-pid <pid> --source-starttime <starttime>
+#    wake:      docker exec ... python3 - wake --snapshot <snapshotPath> --wait-ms 60000
+# 2) 每一步后重新 status，核对 browserRunning/pid/starttime/restorePending
+# 3) 恢复后从控制台或 AIO MCP 触发一次真实浏览器工具，确认连到新浏览器
+```
+
+> 不要在有人正在看浏览器、或有任务在跑时执行上面的 stop/wake。
+
 ## 7. 崩溃恢复验证（唯一可靠方式）
 
 ```bash

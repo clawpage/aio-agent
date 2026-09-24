@@ -20,6 +20,7 @@ export default defineConfig({
   testMatch: [
     "**/browser-auto-open.spec.ts",
     "**/browser-link.spec.ts",
+    "**/browser-lifecycle.spec.ts",
     "**/archived-list.spec.ts",
     "**/conversation-management.spec.ts",
     "**/chat-motion.spec.ts",
