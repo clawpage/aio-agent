@@ -51,7 +51,10 @@ function cookie(name: string): string {
   return match ? decodeURIComponent(match.slice(name.length + 1)) : "";
 }
 
-async function request<T>(path: string, init: { method?: string; body?: unknown } = {}): Promise<T> {
+async function request<T>(
+  path: string,
+  init: { method?: string; body?: unknown; signal?: AbortSignal } = {},
+): Promise<T> {
   const headers: Record<string, string> = {};
   const csrf = cookie("pa_csrf");
   if (init.body !== undefined) headers["content-type"] = "application/json";
@@ -60,6 +63,7 @@ async function request<T>(path: string, init: { method?: string; body?: unknown 
     method: init.method ?? "GET",
     headers,
     credentials: "same-origin",
+    signal: init.signal,
     body: init.body === undefined ? undefined : JSON.stringify(init.body),
   });
   const text = await res.text();
@@ -152,6 +156,38 @@ export const api = {
   deleteFile: (path: string) => request<{ ok: boolean }>("/api/files/delete", { method: "POST", body: { path } }),
   mkdir: (path: string) => request<{ ok: boolean }>("/api/files/mkdir", { method: "POST", body: { path } }),
   downloadUrl: (path: string) => `/api/files/download?path=${encodeURIComponent(path)}`,
+
+  /**
+   * Sandbox document tools. The control plane validates the path (lexically and
+   * with `realpath` inside the container) and only ever returns rasterised PNG
+   * pages or short text — never raw Office/PDF bytes.
+   */
+  documentReadiness: (refresh = false) =>
+    request<import("./types").DocumentReadiness>(`/api/documents/readiness${refresh ? "?refresh=1" : ""}`),
+  provisionDocuments: () =>
+    request<{ ok: boolean; message: string; readiness: import("./types").DocumentReadiness }>("/api/documents/provision", {
+      method: "POST",
+      body: {},
+    }),
+  documentInfo: (path: string) =>
+    request<import("./types").DocumentInfo>(`/api/documents/info?path=${encodeURIComponent(path)}`),
+  documentRender: (path: string, signal?: AbortSignal) =>
+    request<import("./types").DocumentRender>(`/api/documents/render?path=${encodeURIComponent(path)}`, { signal }),
+  documentPageUrl: (path: string, page: number) =>
+    `/api/documents/page?path=${encodeURIComponent(path)}&page=${page}`,
+  /**
+   * Inline image URL. Not the download endpoint: that one is octet-stream with an
+   * attachment disposition, which an `<img>` will not render. The server sniffs
+   * the bytes and refuses anything that is not really an image.
+   */
+  documentImageUrl: (path: string) => `/api/documents/image?path=${encodeURIComponent(path)}`,
+  convertDocument: (path: string, format: string) =>
+    request<{ path: string; bytes: number }>("/api/documents/convert", { method: "POST", body: { path, format } }),
+  documentText: (path: string, signal?: AbortSignal) =>
+    request<{ path: string; text: string; size: number; truncated: boolean }>(
+      `/api/documents/text?path=${encodeURIComponent(path)}`,
+      { signal },
+    ),
 
   sandboxRequest: (method: string, path: string, body?: unknown) =>
     request<{ status: number; contentType: string | null; body: string }>("/api/sandbox/request", { method: "POST", body: { method, path, body } }),

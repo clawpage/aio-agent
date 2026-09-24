@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api";
-import type { CapabilitiesResponse, FileEntry, StatusResponse } from "../types";
+import type { CapabilitiesResponse, DocumentReadiness, FileEntry, StatusResponse } from "../types";
+import { FilePreview } from "./FilePreview";
+import { isPreviewableKind, kindLabel, workspaceFileKind } from "../sandboxLink";
 
 interface Props {
   open: boolean;
@@ -12,13 +14,14 @@ interface Props {
   browserNonce?: number;
 }
 
-type TabId = "desktop" | "browser" | "terminal" | "files" | "editor" | "notebook" | "preview" | "api";
+type TabId = "desktop" | "browser" | "terminal" | "files" | "docs" | "editor" | "notebook" | "preview" | "api";
 
 const TABS: Array<{ id: TabId; label: string; path?: string; kind: "frame" | "native" }> = [
   { id: "desktop", label: "桌面", path: "/vnc/vnc.html?autoconnect=1&resize=scale&path=ws", kind: "frame" },
   { id: "browser", label: "浏览器", path: "/browser-ui", kind: "frame" },
   { id: "terminal", label: "终端", path: "/terminal", kind: "frame" },
   { id: "files", label: "文件", kind: "native" },
+  { id: "docs", label: "文档工具", kind: "native" },
   { id: "editor", label: "编辑器", path: "/code-server/", kind: "frame" },
   { id: "notebook", label: "笔记本", path: "/jupyter/lab", kind: "frame" },
   { id: "preview", label: "预览", kind: "native" },
@@ -38,6 +41,8 @@ export function Workspace({ open, status, initialPath, onClose, onNotify, browse
   const [fullscreen, setFullscreen] = useState(false);
   const [previewPath, setPreviewPath] = useState("/");
   const [previewSrc, setPreviewSrc] = useState<string | null>(null);
+  /** Workspace file shown in the unified preview dialog (null = closed). */
+  const [filePreview, setFilePreview] = useState<string | null>(null);
   const [frameStatus, setFrameStatus] = useState<"idle" | "loading" | "loaded" | "timeout">("idle");
   const origin = status?.workspaceOrigin ?? originHint;
   const bootstrapping = useRef(false);
@@ -247,7 +252,8 @@ export function Workspace({ open, status, initialPath, onClose, onNotify, browse
       </header>
 
       <div className="ws-body">
-        {tab === "files" && <FilesTab notify={onNotify} />}
+        {tab === "files" && <FilesTab notify={onNotify} onPreview={setFilePreview} />}
+        {tab === "docs" && <DocsTab notify={onNotify} onPreview={setFilePreview} />}
         {tab === "preview" && (
           <div className="preview">
             <div className="row">
@@ -315,11 +321,18 @@ export function Workspace({ open, status, initialPath, onClose, onNotify, browse
           </>
         )}
       </div>
+      {filePreview && <FilePreview path={filePreview} onClose={() => setFilePreview(null)} />}
     </section>
   );
 }
 
-function FilesTab({ notify }: { notify: (message: string, level?: "info" | "error") => void }) {
+function FilesTab({
+  notify,
+  onPreview,
+}: {
+  notify: (message: string, level?: "info" | "error") => void;
+  onPreview: (path: string) => void;
+}) {
   const [path, setPath] = useState("/home/gem/workspace");
   const [entries, setEntries] = useState<FileEntry[]>([]);
   const [loading, setLoading] = useState(false);
@@ -433,25 +446,40 @@ function FilesTab({ notify }: { notify: (message: string, level?: "info" | "erro
               type="button"
               className="file-name"
               onClick={() => {
-                if (entry.is_directory) void load(entry.path);
-                else
-                  void (async () => {
-                    try {
-                      const data = await api.readFile(entry.path);
-                      setEditing({ path: data.path, content: data.content });
-                    } catch (err) {
-                      notify(err instanceof Error ? err.message : String(err), "error");
-                    }
-                  })();
+                if (entry.is_directory) {
+                  void load(entry.path);
+                  return;
+                }
+                // Previewable documents and images open the unified preview;
+                // only plain text keeps the inline editor (so a binary file is
+                // never loaded into a textarea).
+                const kind = workspaceFileKind(entry.path);
+                if (isPreviewableKind(kind) || kind === "text") {
+                  onPreview(entry.path);
+                  return;
+                }
+                void (async () => {
+                  try {
+                    const data = await api.readFile(entry.path);
+                    setEditing({ path: data.path, content: data.content });
+                  } catch (err) {
+                    notify(err instanceof Error ? err.message : String(err), "error");
+                  }
+                })();
               }}
             >
               {entry.is_directory ? "📁" : "📄"} {entry.name}
             </button>
             <span className="file-size">{entry.is_directory ? "" : formatSize(entry.size)}</span>
             {!entry.is_directory && (
-              <a className="link" href={api.downloadUrl(entry.path)} download>
-                下载
-              </a>
+              <>
+                <button type="button" className="link" onClick={() => onPreview(entry.path)}>
+                  预览
+                </button>
+                <a className="link" href={api.downloadUrl(entry.path)} download>
+                  下载
+                </a>
+              </>
             )}
             <button
               type="button"
@@ -505,6 +533,315 @@ function FilesTab({ notify }: { notify: (message: string, level?: "info" | "erro
           <textarea value={editing.content} onChange={(e) => setEditing({ ...editing, content: e.target.value })} spellCheck={false} />
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * 「文档工具」tab: honest readiness of the sandbox document toolchain, plus a
+ * lightweight pick-an-existing-file → preview / convert / download flow.
+ *
+ * This is deliberately not an editor: authoring and format conversion are done
+ * by the agent inside the sandbox (`aio-doc` + LibreOffice). The console only
+ * reports whether the tools are actually ready and lets the user act on a file.
+ */
+function DocsTab({
+  notify,
+  onPreview,
+}: {
+  notify: (message: string, level?: "info" | "error") => void;
+  onPreview: (path: string) => void;
+}) {
+  const [readiness, setReadiness] = useState<DocumentReadiness | null>(null);
+  const [checking, setChecking] = useState(true);
+  const [installing, setInstalling] = useState(false);
+  const [path, setPath] = useState("/home/gem/workspace");
+  const [entries, setEntries] = useState<FileEntry[]>([]);
+  const [target, setTarget] = useState("");
+  const [format, setFormat] = useState("pdf");
+  const [converting, setConverting] = useState(false);
+  const [output, setOutput] = useState<{ path: string; bytes: number } | null>(null);
+
+  const check = useCallback(
+    async (refresh = false) => {
+      setChecking(true);
+      try {
+        setReadiness(await api.documentReadiness(refresh));
+      } catch (err) {
+        notify(err instanceof Error ? err.message : String(err), "error");
+      } finally {
+        setChecking(false);
+      }
+    },
+    [notify],
+  );
+
+  useEffect(() => {
+    void check();
+  }, [check]);
+
+  const load = useCallback(
+    async (dir: string) => {
+      try {
+        const data = await api.listFiles(dir);
+        // Directories are kept: without them the workspace root looks empty
+        // (the interesting files live in uploads/, projects/, …) and a user has
+        // no way to navigate to them except typing an absolute path.
+        setEntries(data.files ?? []);
+        setPath(data.path ?? dir);
+      } catch (err) {
+        notify(err instanceof Error ? err.message : String(err), "error");
+      }
+    },
+    [notify],
+  );
+
+  useEffect(() => {
+    void load("/home/gem/workspace");
+  }, [load]);
+
+  const install = useCallback(async () => {
+    setInstalling(true);
+    try {
+      const result = await api.provisionDocuments();
+      setReadiness(result.readiness);
+      notify(result.message, result.ok ? "info" : "error");
+    } catch (err) {
+      notify(err instanceof Error ? err.message : String(err), "error");
+    } finally {
+      setInstalling(false);
+    }
+  }, [notify]);
+
+  const selectedKind = target ? workspaceFileKind(target) : null;
+  const parent = useMemo(() => path.replace(/\/[^/]+\/?$/, "") || "/", [path]);
+  const files = entries.filter((entry) => !entry.is_directory);
+  const directories = entries.filter((entry) => entry.is_directory);
+
+  // Only the conversions LibreOffice can actually do for this source type are
+  // offered: showing "Excel" for a Word file would be a promise the tool cannot
+  // keep. PDF is available for every renderable kind.
+  const convertTargets = useMemo(() => {
+    switch (selectedKind) {
+      case "word":
+        return [
+          { value: "pdf", label: "PDF" },
+          { value: "docx", label: "Word (.docx)" },
+          { value: "txt", label: "纯文本" },
+          { value: "odt", label: "OpenDocument 文本 (.odt)" },
+        ];
+      case "excel":
+        return [
+          { value: "pdf", label: "PDF" },
+          { value: "xlsx", label: "Excel (.xlsx)" },
+          { value: "csv", label: "CSV" },
+          { value: "ods", label: "OpenDocument 表格 (.ods)" },
+        ];
+      case "ppt":
+        return [
+          { value: "pdf", label: "PDF" },
+          { value: "pptx", label: "PowerPoint (.pptx)" },
+          { value: "odp", label: "OpenDocument 演示 (.odp)" },
+        ];
+      case "pdf":
+        return [
+          { value: "docx", label: "Word (.docx)" },
+          { value: "txt", label: "纯文本" },
+          { value: "html", label: "HTML" },
+        ];
+      case "image":
+        return [
+          { value: "pdf", label: "PDF" },
+        ];
+      case "text":
+        return [
+          { value: "pdf", label: "PDF" },
+          { value: "docx", label: "Word (.docx)" },
+        ];
+      default:
+        return [];
+    }
+  }, [selectedKind]);
+
+  // Keep the chosen format valid whenever the selected file changes type.
+  useEffect(() => {
+    if (convertTargets.length === 0) return;
+    if (!convertTargets.some((option) => option.value === format)) {
+      setFormat(convertTargets[0].value);
+    }
+  }, [convertTargets, format]);
+
+  const convert = useCallback(async () => {
+    if (!target) return;
+    setConverting(true);
+    setOutput(null);
+    try {
+      // The server validates the path and format and runs the fixed container
+      // command; the console never builds a shell string.
+      const result = await api.convertDocument(target, format);
+      setOutput(result);
+      notify(`已生成 ${result.path}（原文件未被修改）`);
+      void load(path);
+    } catch (err) {
+      notify(err instanceof Error ? err.message : String(err), "error");
+    } finally {
+      setConverting(false);
+    }
+  }, [format, load, notify, path, target]);
+
+  const ready = readiness?.ready === true;
+  const previewReady = readiness?.previewReady === true;
+  const authoringReady = readiness?.authoringReady === true;
+
+  // One line per user-facing capability, with the underlying library/command in
+  // a collapsed detail: the operator sees readiness, not an implementation list.
+  const capabilityRows = [
+    { label: "Word（.doc/.docx）", ok: readiness?.tools.soffice === true && readiness?.python.docx === true, detail: "LibreOffice + python-docx" },
+    { label: "Excel（.xls/.xlsx）", ok: readiness?.tools.soffice === true && readiness?.python.openpyxl === true, detail: "LibreOffice + openpyxl" },
+    { label: "PowerPoint（.ppt/.pptx）", ok: readiness?.tools.soffice === true && readiness?.python.pptx === true, detail: "LibreOffice + python-pptx" },
+    { label: "PDF 预览", ok: readiness?.tools.pdftoppm === true, detail: "poppler（pdftoppm / pdfinfo）" },
+    { label: "中文字体", ok: readiness?.tools.cjkFont === true, detail: "fonts-noto-cjk" },
+  ];
+
+  return (
+    <div className="docs-tools">
+      <section className="docs-status" aria-live="polite">
+        <div className="row">
+          <strong>沙箱文档工具</strong>
+          <span
+            className={`docs-badge ${ready ? "ok" : previewReady ? "warn" : "error"}`}
+            data-testid="docs-readiness-badge"
+          >
+            {checking ? "检查中…" : ready ? "全部就绪" : previewReady ? "仅预览可用" : "尚未就绪"}
+          </span>
+          <span className="spacer" />
+          <button type="button" className="ghost" onClick={() => void check(true)} disabled={checking}>
+            重新检查
+          </button>
+          {!ready && (
+            <button type="button" className="primary" onClick={() => void install()} disabled={installing || !readiness?.enabled}>
+              {installing ? "安装中…" : "安装/修复"}
+            </button>
+          )}
+        </div>
+        {readiness?.error && (
+          <p className="banner warn" role="status">
+            {readiness.error}
+          </p>
+        )}
+        {readiness && readiness.enabled && (
+          <ul className="docs-checks">
+            {capabilityRows.map((row) => (
+              <li key={row.label}>
+                <span aria-hidden="true">{row.ok ? "✅" : "⬜"}</span> {row.label}
+                <details className="docs-detail">
+                  <summary>实现</summary>
+                  <code>{row.detail}</code>
+                </details>
+              </li>
+            ))}
+          </ul>
+        )}
+        <p className="muted tiny">
+          智能体可在沙箱内创建、修改 Word / Excel / PPT 并做格式转换（例如 Word → PDF、旧格式 .doc/.xls/.ppt
+          转现代格式）。转换在沙箱中进行，不依赖宿主机 Office。字体与复杂排版可能与本机 Office 存在差异，不承诺
+          100% 保真。
+        </p>
+      </section>
+
+      <section className="docs-files">
+        <div className="row">
+          <button type="button" className="ghost" onClick={() => void load(parent)} disabled={path === "/home/gem/workspace"}>
+            上一级
+          </button>
+          <input value={path} onChange={(e) => setPath(e.target.value)} onKeyDown={(e) => e.key === "Enter" && void load(path)} />
+          <button type="button" className="ghost" onClick={() => void load(path)}>
+            刷新
+          </button>
+        </div>
+        {entries.length === 0 && <p className="muted">该目录下没有文件。</p>}
+        {directories.length > 0 && (
+          <ul className="file-list docs-dirs">
+            {directories.map((entry) => (
+              <li key={entry.path}>
+                <button type="button" className="file-name" onClick={() => void load(entry.path)}>
+                  📁 {entry.name}
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+        <ul className="file-list">
+          {files.map((entry) => (
+            <li key={entry.path} className={target === entry.path ? "selected" : ""}>
+              <button type="button" className="file-name" onClick={() => setTarget(entry.path)}>
+                {target === entry.path ? "◉" : "○"} {entry.name}
+              </button>
+              <span className="file-size">{formatSize(entry.size)}</span>
+              <button type="button" className="link" onClick={() => onPreview(entry.path)}>
+                预览
+              </button>
+              <a className="link" href={api.downloadUrl(entry.path)} download>
+                下载
+              </a>
+            </li>
+          ))}
+        </ul>
+        {files.length === 0 && directories.length > 0 && (
+          <p className="muted tiny">该目录只有子目录，点进上面的目录继续查找文件。</p>
+        )}
+      </section>
+
+      <section className="docs-actions">
+        <div className="row">
+          <span className="muted tiny">已选：{target || "（先在上面选一个文件）"}</span>
+        </div>
+        <div className="row">
+          <label className="field">
+            <span>转换为</span>
+            <select value={format} onChange={(e) => setFormat(e.target.value)} disabled={convertTargets.length === 0}>
+              {convertTargets.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button
+            type="button"
+            className="primary"
+            onClick={() => void convert()}
+            disabled={!target || converting || !ready || convertTargets.length === 0}
+          >
+            {converting ? "转换中…" : "转换"}
+          </button>
+          <button type="button" className="ghost" onClick={() => target && onPreview(target)} disabled={!target}>
+            预览
+          </button>
+        </div>
+        {target && convertTargets.length === 0 && (
+          <p className="muted tiny">该格式暂不支持转换（可预览或下载）。</p>
+        )}
+        {!ready && (
+          <p className="muted tiny">
+            {readiness?.enabled === false
+              ? "文档工具已被配置关闭。"
+              : authoringReady
+                ? "创建/修改已就绪；预览 PDF/图片仍可用。"
+                : "转换需要文档工具就绪；预览 PDF/图片仍可用。"}
+          </p>
+        )}
+        {selectedKind && <p className="muted tiny">当前文件类型：{kindLabel(selectedKind)}</p>}
+        {output && (
+          <p className="banner" role="status">
+            已生成 {output.path}
+          </p>
+        )}
+        <p className="muted tiny">
+          也可以直接在对话里让智能体做：例如「把这个 Word 转成 PDF」「新建一个 Excel 并算总和」。沙箱内工具说明见
+          工作区 AGENTS.md 与 <code>aio-doc --help</code>。
+        </p>
+      </section>
     </div>
   );
 }

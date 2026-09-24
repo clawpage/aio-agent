@@ -143,3 +143,35 @@ export interface FileEntry {
   modified_time: string | null;
   extension: string;
 }
+
+/** Tool readiness reported by the sandbox document service. */
+export interface DocumentReadiness {
+  enabled: boolean;
+  ready: boolean;
+  previewReady: boolean;
+  authoringReady: boolean;
+  version: string | null;
+  tools: Record<string, boolean>;
+  python: Record<string, boolean>;
+  missing: string[];
+  error: string | null;
+  checkedAt: number;
+}
+
+/** Preview metadata for one workspace document (page count, truncation, size). */
+export interface DocumentInfo {
+  path: string;
+  kind: string;
+  size: number;
+  renderable: boolean;
+  textPreviewable: boolean;
+}
+
+export interface DocumentRender {
+  path: string;
+  kind: string;
+  pageCount: number;
+  totalPages: number;
+  truncated: boolean;
+  size: number;
+}

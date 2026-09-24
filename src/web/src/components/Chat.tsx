@@ -16,7 +16,9 @@ import {
 import { itemOpensSandboxBrowser } from "../browserCommand";
 import { Markdown } from "./Markdown";
 import { FilePreview } from "./FilePreview";
-import { workspaceFileKind } from "../sandboxLink";
+import { FileCard } from "./FileCard";
+import { extractFileRefs, attachmentRefs } from "../fileRefs";
+import { isPreviewableKind, workspaceFileKind } from "../sandboxLink";
 
 interface Props {
   conversation: Conversation;
@@ -253,13 +255,12 @@ export function Chat({
   }, []);
 
   const openSandboxFile = useCallback((path: string) => {
-    if (workspaceFileKind(path) === "image") {
+    // Everything the console can render opens in the unified preview; only a
+    // format nothing can preview falls back to a straight download.
+    if (isPreviewableKind(workspaceFileKind(path)) || workspaceFileKind(path) === "text") {
       setPreviewPath(path);
       return;
     }
-    // Non-image workspace files download straight through the authenticated API.
-    // The response carries an attachment disposition, so the browser saves it
-    // instead of navigating away from the console.
     const anchor = document.createElement("a");
     anchor.href = api.downloadUrl(path);
     anchor.download = path.slice(path.lastIndexOf("/") + 1) || "download";
@@ -446,6 +447,45 @@ export function Chat({
   );
 }
 
+/**
+ * Cards for the workspace files one agent message points at.
+ *
+ * Extraction is memoised on the message text: an incremental `stream.delta`
+ * appends text, so React reconciles the existing cards (keyed by path) instead of
+ * rebuilding the list — the cards never flicker or reset mid-stream. Extraction
+ * itself is pure, so a delta that adds no new reference produces the same array.
+ */
+function MessageFileCards({ text, onOpen }: { text: string; onOpen: (path: string) => void }) {
+  const refs = useMemo(() => extractFileRefs(text), [text]);
+  if (refs.length === 0) return null;
+  return (
+    <div className="file-cards" data-testid="message-file-cards">
+      {refs.map((ref) => (
+        <FileCard key={ref.path} path={ref.path} name={ref.name} kind={ref.kind} onOpen={onOpen} />
+      ))}
+    </div>
+  );
+}
+
+/** Cards for the files attached to a user turn (uploaded or pasted paths). */
+function AttachmentCards({
+  attachments,
+  onOpen,
+}: {
+  attachments: ReadonlyArray<{ path?: string; name?: string; kind?: string }>;
+  onOpen: (path: string) => void;
+}) {
+  const refs = useMemo(() => attachmentRefs(attachments), [attachments]);
+  if (refs.length === 0) return null;
+  return (
+    <div className="file-cards" data-testid="message-attachment-cards">
+      {refs.map((ref) => (
+        <FileCard key={ref.path} path={ref.path} name={ref.name} kind={ref.kind} onOpen={onOpen} />
+      ))}
+    </div>
+  );
+}
+
 function BlockView({
   block,
   openGroups,
@@ -469,13 +509,7 @@ function BlockView({
         <div className="bubble">
           {block.text && <div className="plain">{block.text}</div>}
           {block.attachments.length > 0 && (
-            <div className="chips">
-              {block.attachments.map((a) => (
-                <span className="chip" key={a.path}>
-                  {a.kind === "image" ? "🖼" : "📄"} {a.name || a.path}
-                </span>
-              ))}
-            </div>
+            <AttachmentCards attachments={block.attachments} onOpen={onOpenFile} />
           )}
         </div>
       </article>
@@ -487,6 +521,7 @@ function BlockView({
       <article className="msg assistant">
         <div className="bubble">
           <Markdown source={block.text} onOpenLink={onOpenBrowserLink} onOpenFile={onOpenFile} />
+          <MessageFileCards text={block.text} onOpen={onOpenFile} />
           {block.streaming && <span className="caret" aria-hidden />}
         </div>
       </article>

@@ -62,12 +62,20 @@ describe("sandbox link classification", () => {
     expect(isWorkspaceFilePath("")).toBe(false);
   });
 
-  it("classifies raster images for preview and everything else for download", () => {
-    for (const ext of ["png", "PNG", "jpg", "jpeg", "webp", "gif", "avif"]) {
+  it("classifies every kind the preview dialog can render", () => {
+    for (const ext of ["png", "PNG", "jpg", "jpeg", "webp", "gif", "avif", "bmp"]) {
       expect(workspaceFileKind(`${SANDBOX_WORKSPACE_ROOT}/x.${ext}`), ext).toBe("image");
     }
-    for (const name of ["x.txt", "x.pdf", "x", "x.png.txt", "x.svg"]) {
-      expect(workspaceFileKind(`${SANDBOX_WORKSPACE_ROOT}/${name}`), name).toBe("file");
-    }
+    expect(workspaceFileKind(`${SANDBOX_WORKSPACE_ROOT}/x.pdf`)).toBe("pdf");
+    expect(workspaceFileKind(`${SANDBOX_WORKSPACE_ROOT}/x.docx`)).toBe("word");
+    expect(workspaceFileKind(`${SANDBOX_WORKSPACE_ROOT}/x.xlsx`)).toBe("excel");
+    expect(workspaceFileKind(`${SANDBOX_WORKSPACE_ROOT}/x.pptx`)).toBe("ppt");
+    // Markdown source, HTML and SVG are shown as escaped text, never markup.
+    expect(workspaceFileKind(`${SANDBOX_WORKSPACE_ROOT}/x.txt`)).toBe("text");
+    expect(workspaceFileKind(`${SANDBOX_WORKSPACE_ROOT}/x.svg`)).toBe("text");
+    expect(workspaceFileKind(`${SANDBOX_WORKSPACE_ROOT}/x.png.txt`)).toBe("text");
+    // Nothing is guessed: an unknown extension is download-only.
+    expect(workspaceFileKind(`${SANDBOX_WORKSPACE_ROOT}/x`)).toBe("unsupported");
+    expect(workspaceFileKind(`${SANDBOX_WORKSPACE_ROOT}/x.exe`)).toBe("unsupported");
   });
 });

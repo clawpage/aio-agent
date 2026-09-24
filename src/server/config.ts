@@ -74,6 +74,24 @@ export function loadConfig(): {
     codexPrefix: string;
     codexBin: string;
   };
+  documents: {
+    /** Master switch for sandbox document conversion (preview rasterisation). */
+    enabled: boolean;
+    /** Directory inside the sandbox holding the managed tool scripts + venv. */
+    toolDir: string;
+    /** Page cap for one preview render; later pages are reported as truncated. */
+    maxPages: number;
+    /** Hard bound for one conversion step, enforced inside the container. */
+    timeoutMs: number;
+    /** In-process render cache budget, in bytes. */
+    cacheMaxBytes: number;
+    /** Renders allowed to run at once; further requests wait for a slot. */
+    maxConcurrent: number;
+    /** How long a readiness probe result is reused before re-checking. */
+    readinessTtlMs: number;
+    /** Longest text file the console will show inline, in bytes. */
+    textMaxBytes: number;
+  };
   agent: {
     /** Model a turn uses when neither the client nor the conversation picked one. */
     defaultModel: string;
@@ -183,6 +201,20 @@ export function loadConfig(): {
       codexVersion: sandboxCodexVersion,
       codexPrefix: sandboxCodexPrefix,
       codexBin: sandboxCodexBin,
+    },
+    documents: {
+      // Conversion runs entirely inside the sandbox with fixed argv; the control
+      // plane never parses a document itself.
+      enabled: envStr("PA_DOCUMENTS_ENABLED", "1") === "1",
+      // Lives in the persistent CODEX_HOME volume so a container rebuild keeps
+      // the managed scripts (the fixed image is never modified).
+      toolDir: envStr("PA_DOC_TOOLS_DIR", path.posix.join(sandboxCodexPrefix, "..", "aio-doc")),
+      maxPages: Math.min(50, Math.max(1, envInt("PA_DOC_PREVIEW_MAX_PAGES", 12))),
+      timeoutMs: Math.max(5_000, envInt("PA_DOC_TIMEOUT_SECONDS", 120) * 1000),
+      cacheMaxBytes: Math.max(0, envInt("PA_DOC_CACHE_MAX_MB", 64) * 1024 * 1024),
+      maxConcurrent: Math.min(4, Math.max(1, envInt("PA_DOC_MAX_CONCURRENT", 2))),
+      readinessTtlMs: Math.max(1_000, envInt("PA_DOC_READINESS_TTL_SECONDS", 60) * 1000),
+      textMaxBytes: Math.max(1024, envInt("PA_DOC_TEXT_MAX_KB", 256) * 1024),
     },
     agent: {
       defaultModel: envStr("PA_DEFAULT_MODEL", "gpt-6-sol"),

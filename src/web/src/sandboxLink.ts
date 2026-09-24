@@ -21,7 +21,31 @@
 export const SANDBOX_WORKSPACE_ROOT = "/home/gem/workspace";
 
 /** Image extensions that may be shown in the in-conversation lightbox. */
-const IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "webp", "gif", "avif"]);
+export const IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "webp", "gif", "avif", "bmp"]);
+
+/**
+ * How the console should present a workspace file. Mirrors the server-side
+ * classification (`src/server/documents/paths.ts`): the server is authoritative
+ * and re-validates, this only decides which control to render.
+ *
+ * `text` covers Markdown source, HTML and SVG too — those are shown as escaped
+ * text, never parsed as markup, so agent-produced active content cannot execute
+ * inside the console.
+ */
+export type WorkspaceFileKind = "image" | "pdf" | "word" | "excel" | "ppt" | "text" | "unsupported";
+
+const KIND_BY_EXTENSION: Record<string, WorkspaceFileKind> = {
+  png: "image", jpg: "image", jpeg: "image", webp: "image", gif: "image", avif: "image", bmp: "image",
+  pdf: "pdf",
+  doc: "word", docx: "word", odt: "word", rtf: "word",
+  xls: "excel", xlsx: "excel", ods: "excel",
+  ppt: "ppt", pptx: "ppt", odp: "ppt",
+  txt: "text", md: "text", markdown: "text", log: "text", csv: "text", tsv: "text", json: "text",
+  yml: "text", yaml: "text", toml: "text", ini: "text", conf: "text", xml: "text",
+  html: "text", htm: "text", svg: "text", css: "text",
+  js: "text", mjs: "text", cjs: "text", ts: "text", tsx: "text", jsx: "text",
+  py: "text", sh: "text", sql: "text", diff: "text", patch: "text",
+};
 
 export function isSandboxLink(href: string): boolean {
   if (!href) return false;
@@ -71,9 +95,60 @@ export function workspaceFilePathFromHref(href: string): string | null {
   return isWorkspaceFilePath(decoded) ? decoded : null;
 }
 
-/** Classify a workspace file path for the UI: raster image preview vs download. */
-export function workspaceFileKind(path: string): "image" | "file" {
+/** Classify a workspace file path for the UI. */
+export function workspaceFileKind(path: string): WorkspaceFileKind {
   const name = path.slice(path.lastIndexOf("/") + 1).toLowerCase();
-  const ext = name.includes(".") ? name.slice(name.lastIndexOf(".") + 1) : "";
-  return IMAGE_EXTENSIONS.has(ext) ? "image" : "file";
+  const dot = name.lastIndexOf(".");
+  const ext = dot > 0 ? name.slice(dot + 1) : "";
+  return KIND_BY_EXTENSION[ext] ?? "unsupported";
+}
+
+/** Human label for a kind, used by cards and the preview header. */
+export function kindLabel(kind: WorkspaceFileKind): string {
+  switch (kind) {
+    case "image":
+      return "图片";
+    case "pdf":
+      return "PDF";
+    case "word":
+      return "Word 文档";
+    case "excel":
+      return "Excel 表格";
+    case "ppt":
+      return "PowerPoint 演示";
+    case "text":
+      return "文本";
+    default:
+      return "文件";
+  }
+}
+
+/** A short badge shown on a file card; kept ASCII so it renders everywhere. */
+export function kindBadge(kind: WorkspaceFileKind): string {
+  switch (kind) {
+    case "image":
+      return "IMG";
+    case "pdf":
+      return "PDF";
+    case "word":
+      return "DOC";
+    case "excel":
+      return "XLS";
+    case "ppt":
+      return "PPT";
+    case "text":
+      return "TXT";
+    default:
+      return "FILE";
+  }
+}
+
+/** True for kinds the sandbox can rasterise into page previews. */
+export function isPreviewableKind(kind: WorkspaceFileKind): boolean {
+  return kind === "image" || kind === "pdf" || kind === "word" || kind === "excel" || kind === "ppt";
+}
+
+/** File name from a workspace path, for display. */
+export function baseName(path: string): string {
+  return path.slice(path.lastIndexOf("/") + 1) || path;
 }

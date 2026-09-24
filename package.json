@@ -9,7 +9,7 @@
   },
   "scripts": {
     "build": "npm run build:web && npm run build:server",
-    "build:server": "tsc -p tsconfig.server.json",
+    "build:server": "tsc -p tsconfig.server.json && node scripts/copy-server-assets.mjs",
     "build:web": "vite build",
     "dev:server": "tsx watch src/server/index.ts",
     "dev:web": "vite",

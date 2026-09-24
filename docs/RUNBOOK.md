@@ -89,6 +89,45 @@ PA_COMPANION_ORIGIN=https://agent-workspace.zymx.tech npm run smoke
      AND NOT EXISTS (SELECT 1 FROM meta m WHERE m.key='title_manual:'||c.id);"
   ```
 
+**沙箱文档工具（会话预览 + 智能体创建/转换）**：
+
+工具装在**持久工具目录** `/home/gem/.codex/tools/aio-doc`（不在镜像里，卷保留即保留），
+分两层：root 只做系统包与目录权限，gem 用户建 venv 并安装 Python 库。
+
+**推荐：用 UI 的「文档工具」标签页点「安装/修复」**。它会先把控制面当前源码里的脚本
+部署进沙箱，再依次跑 root 层与用户层安装，fresh/新重建环境最可靠。
+
+也可以在**项目根目录**手工执行等价的两步（`cd` 到本仓库根再运行）：
+
+```bash
+# 只读就绪检查（不改任何东西）
+docker exec -u gem personal-agent-sandbox \
+  bash /home/gem/.codex/tools/aio-doc/scripts/provision.sh check /home/gem/.codex/tools/aio-doc
+
+# root 层：apt 装 libreoffice / poppler-utils / 中文字体 / python3-venv。
+# root 脚本必须以受信任的 stdin 传入当前源码仓的内容，绝不执行 gem 可写的沙箱内脚本
+# （否则被入侵的 gem 账号就能改变 root 执行的东西）。故用 `bash -s -- <tool_dir> gem`
+# 加 `docker exec -i` 重定向；注意在项目根目录执行：
+docker exec -i -u root personal-agent-sandbox \
+  bash -s -- /home/gem/.codex/tools/aio-doc gem \
+  < src/server/documents/scripts/install-root.sh
+
+# 用户层：venv + python-docx/openpyxl/python-pptx/pypdf/reportlab（gem 自己的脚本，可读路径执行）
+docker exec -u gem personal-agent-sandbox \
+  bash /home/gem/.codex/tools/aio-doc/scripts/provision.sh install /home/gem/.codex/tools/aio-doc
+```
+
+两步都幂等、可重复执行；已就绪时走 fast path，只刷新 CLI，不跑 apt/pip。
+
+- 控制面每次启动会**非阻塞**同步一次工具脚本（含已发布的 `bin/aio-doc`），只做 digest 比对
+  与写文件，不跑 apt/pip，不会拖慢聊天启动；失败只记日志。
+- **重建/换新沙箱后系统包要重装**：venv 在持久卷里会保留，但 apt 系统包（LibreOffice、
+  poppler、字体）属于容器层，随容器重建消失，需重新执行上面的 root 层安装，再跑一次就绪检查。
+- 智能体侧的用法说明写在沙箱内 `/home/gem/.codex/skills/aio-documents/SKILL.md` 与
+  `/home/gem/.codex/tools/aio-doc/bin/aio-doc --help`（未加 PATH，用绝对路径）；技能文件由控制面在新沙箱启动时写入（既有沙箱的 AGENTS.md 不会被覆盖）。
+- 转换在独立 LibreOffice profile 下运行（禁宏、不自动更新外链、限制时长/页数/并发），
+  输出为新文件，不覆盖原件；不做 100% 保真承诺（字体与 LO 复杂特性可能有差异）。
+
 **沙箱镜像升级**（单独任务，需人工确认）：
 1. 记录当前镜像与 digest；2. `docker pull` 目标版本并在**临时容器名**下验证
    `/health`、`code-server`、`jupyter`、`vnc`、`aio browser`；3. 更新 `PA_SANDBOX_IMAGE`

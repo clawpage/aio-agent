@@ -1,0 +1,488 @@
+#!/usr/bin/env python3
+"""aio-doc: create / modify / convert documents inside the AIO sandbox.
+
+Run `aio-doc --help` for the command list. This CLI is the discoverable entry
+point for the sandbox agent; it uses the isolated document venv when present and
+LibreOffice for format conversion.
+
+Conversion notes that matter for correctness:
+  * openpyxl does NOT calculate formulas. Writing `=SUM(A1:A5)` stores the
+    formula but leaves no cached value, so a reader that does not recalculate
+    shows nothing. `aio-doc xlsx-recalc` runs LibreOffice over the file to
+    produce real cached values; only then is the result verified.
+  * LibreOffice conversion goes through a private user profile with the highest
+    macro security, and never refreshes external links.
+"""
+
+import argparse
+import json
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+
+WORKSPACE_ROOT = "/home/gem/workspace"
+VENV_PY = "/home/gem/.codex/tools/aio-doc/venv/bin/python"
+
+
+def python_bin():
+    """Prefer the managed venv so docx/openpyxl/pptx are always importable."""
+    if os.path.isfile(VENV_PY) and os.access(VENV_PY, os.X_OK):
+        return VENV_PY
+    return sys.executable
+
+
+def in_workspace(path):
+    real = os.path.realpath(path)
+    return real == WORKSPACE_ROOT or real.startswith(WORKSPACE_ROOT + os.sep)
+
+
+def require_workspace(path):
+    if not in_workspace(path):
+        fail("outside_workspace", "只允许读写工作区 %s 内的文件" % WORKSPACE_ROOT)
+    return os.path.realpath(path)
+
+
+def fail(code, message):
+    print(json.dumps({"ok": False, "code": code, "message": message}, ensure_ascii=False))
+    sys.exit(1)
+
+
+def ok(**fields):
+    payload = {"ok": True}
+    payload.update(fields)
+    print(json.dumps(payload, ensure_ascii=False))
+
+
+def run_python(code, *args):
+    proc = subprocess.run([python_bin(), "-c", code, *args], capture_output=True, text=True)
+    if proc.returncode != 0:
+        fail("python_error", (proc.stderr or proc.stdout).strip()[:800])
+    return proc.stdout
+
+
+# Highest macro security + external links not refreshed on load. Written into a
+# throwaway profile before LibreOffice starts, so LO merges it on first load.
+# This is the same policy lo-run.sh applies for the preview path; it lives here
+# too because the CLI is a second, independent entry point into LibreOffice.
+#
+# Key names come from the registry the pinned image ships
+# (/usr/lib/libreoffice/share/registry/main.xcd): macros are controlled by
+# Common/Security/Scripting, while external links are the document-type
+# property <Office.Calc|Office.Writer>/Content/Update/Link. The enumeration is
+# per document type: Calc is 0=always, 1=never, 2=on request (so 1 disables it),
+# while Writer is 0=always, 1=on request, 2=never (so 2 disables it).
+LO_PROFILE_XCU = """<?xml version="1.0" encoding="UTF-8"?>
+<oor:items xmlns:oor="http://openoffice.org/2001/registry" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+ <item oor:path="/org.openoffice.Office.Common/Security/Scripting"><prop oor:name="MacroSecurityLevel" oor:op="fuse"><value>3</value></prop></item>
+ <item oor:path="/org.openoffice.Office.Common/Security/Scripting"><prop oor:name="DisableMacrosExecution" oor:op="fuse"><value>true</value></prop></item>
+ <item oor:path="/org.openoffice.Office.Calc/Content/Update"><prop oor:name="Link" oor:op="fuse"><value>1</value></prop></item>
+ <item oor:path="/org.openoffice.Office.Writer/Content/Update"><prop oor:name="Link" oor:op="fuse"><value>2</value></prop></item>
+</oor:items>
+"""
+
+
+def lo_convert(src, outdir, target, timeout=180):
+    """One headless LibreOffice conversion with a private hardened profile.
+
+    LibreOffice 7.3 rejects the `--` end-of-options separator ("Error in option:
+    --"), so it is never passed. Every path handed to soffice is absolute and
+    already validated to live inside the workspace, so it can never be read as an
+    option in the first place.
+    """
+    profile = tempfile.mkdtemp(prefix="aio-doc-lo-")
+    try:
+        os.makedirs(os.path.join(profile, "user"), exist_ok=True)
+        with open(os.path.join(profile, "user", "registrymodifications.xcu"), "w", encoding="utf-8") as handle:
+            handle.write(LO_PROFILE_XCU)
+        proc = subprocess.run(
+            [
+                "soffice", "--headless", "--norestore", "--nolockcheck", "--nodefault", "--nologo",
+                "-env:UserInstallation=file://" + profile,
+                "--convert-to", target, "--outdir", outdir, src,
+            ],
+            capture_output=True, text=True, timeout=timeout,
+        )
+        return proc
+    except subprocess.TimeoutExpired:
+        fail("timeout", "LibreOffice 转换超时（文件可能过大或过于复杂）")
+    finally:
+        shutil.rmtree(profile, ignore_errors=True)
+
+
+def cmd_doctor(_args):
+    tools = {}
+    for name in ("soffice", "pdftoppm", "pdfinfo"):
+        tools[name] = bool(shutil.which(name))
+    libs = {}
+    probe = (
+        "import importlib\n"
+        "for m in ('docx','openpyxl','pptx','pypdf','reportlab','pandas'):\n"
+        "    try:\n"
+        "        importlib.import_module(m); print(m + '=1')\n"
+        "    except Exception:\n"
+        "        print(m + '=0')\n"
+    )
+    try:
+        out = subprocess.run([python_bin(), "-c", probe], capture_output=True, text=True).stdout
+    except Exception:
+        out = ""
+    for line in out.splitlines():
+        if "=" in line:
+            key, value = line.split("=", 1)
+            libs[key] = value == "1"
+    ok(python=python_bin(), tools=tools, pythonLibraries=libs)
+
+
+def cmd_docx_new(args):
+    target = require_workspace(args.path)
+    run_python(
+        "import sys\n"
+        "from docx import Document\n"
+        "doc = Document()\n"
+        "for line in sys.argv[1].split('\\n'):\n"
+        "    doc.add_paragraph(line)\n"
+        "doc.save(sys.argv[2])\n",
+        args.text, target,
+    )
+    ok(path=target, bytes=os.path.getsize(target))
+
+
+def cmd_docx_read(args):
+    source = require_workspace(args.path)
+    out = run_python(
+        "import sys\n"
+        "from docx import Document\n"
+        "doc = Document(sys.argv[1])\n"
+        "print('\\n'.join(p.text for p in doc.paragraphs))\n",
+        source,
+    )
+    ok(path=source, text=out)
+
+
+def cmd_docx_append(args):
+    target = require_workspace(args.path)
+    run_python(
+        "import sys\n"
+        "from docx import Document\n"
+        "doc = Document(sys.argv[1])\n"
+        "for line in sys.argv[2].split('\\n'):\n"
+        "    doc.add_paragraph(line)\n"
+        "doc.save(sys.argv[1])\n",
+        target, args.text,
+    )
+    ok(path=target, bytes=os.path.getsize(target))
+
+
+# Shared with xlsx-set: a cell value is written with the type it *looks* like, so
+# `1,2,=SUM(A1:A2)` produces real numbers and a real formula. Without this every
+# cell would be text and SUM would silently compute nothing.
+CELL_COERCE = """
+def coerce(text):
+    value = text.strip()
+    if value.startswith('='):
+        return value
+    try:
+        if value and value not in ('-', '+', '.'):
+            return int(value)
+    except ValueError:
+        pass
+    try:
+        if value and value not in ('-', '+', '.'):
+            return float(value)
+    except ValueError:
+        pass
+    if value.upper() in ('TRUE', 'FALSE'):
+        return value.upper() == 'TRUE'
+    return text
+"""
+
+
+def cmd_xlsx_new(args):
+    target = require_workspace(args.path)
+    run_python(
+        "import sys\n"
+        "from openpyxl import Workbook\n"
+        + CELL_COERCE +
+        "wb = Workbook(); ws = wb.active\n"
+        "for row_index, row in enumerate(sys.argv[1].split('\\n'), start=1):\n"
+        "    if row == '' and row_index > 1:\n"
+        "        continue\n"
+        "    for col_index, cell in enumerate(row.split(','), start=1):\n"
+        "        ws.cell(row=row_index, column=col_index, value=coerce(cell))\n"
+        "wb.save(sys.argv[2])\n",
+        args.rows, target,
+    )
+    ok(
+        path=target,
+        bytes=os.path.getsize(target),
+        note="数字写为数值、以 = 开头写为公式；openpyxl 不计算公式，公式请用 xlsx-recalc 生成缓存值后再用 xlsx-read --values 验证",
+    )
+
+
+def cmd_xlsx_set(args):
+    """Write a value or formula into one cell (e.g. a SUM formula)."""
+    target = require_workspace(args.path)
+    run_python(
+        "import sys\n"
+        "from openpyxl import load_workbook\n"
+        + CELL_COERCE +
+        "wb = load_workbook(sys.argv[1])\n"
+        "ws = wb[sys.argv[2]] if sys.argv[2] in wb.sheetnames else wb.active\n"
+        "ws[sys.argv[3]] = coerce(sys.argv[4])\n"
+        "wb.save(sys.argv[1])\n",
+        target, args.sheet, args.cell, args.value,
+    )
+    ok(
+        path=target,
+        cell=args.cell,
+        note="数字写为数值、以 = 开头写为公式；openpyxl 不会计算公式，用 xlsx-recalc 让 LibreOffice 重算并写入缓存值",
+    )
+
+
+def cmd_xlsx_read(args):
+    source = require_workspace(args.path)
+    out = run_python(
+        "import sys\n"
+        "from openpyxl import load_workbook\n"
+        "wb = load_workbook(sys.argv[1], data_only=sys.argv[2] == '1')\n"
+        "for name in wb.sheetnames:\n"
+        "    ws = wb[name]\n"
+        "    print('## ' + name)\n"
+        "    for row in ws.iter_rows(values_only=True):\n"
+        "        print('\\t'.join('' if c is None else str(c) for c in row))\n",
+        source, "1" if args.values else "0",
+    )
+    ok(path=source, text=out)
+
+
+def cmd_xlsx_recalc(args):
+    """Recalculate with LibreOffice so formula cells get real cached values.
+
+    Converting `xlsx -> xlsx` into the *input's own directory* is not reliable:
+    LibreOffice can refuse to overwrite the source (or exit 0 having written
+    nothing), which used to be reported as success. So the conversion goes to a
+    throwaway directory, the produced workbook is verified to actually carry
+    cached values, and only then is it saved to an explicit new path. The
+    original file is never overwritten unless `--in-place` is passed explicitly.
+    """
+    source = require_workspace(args.path)
+    tmpdir = tempfile.mkdtemp(prefix="aio-doc-recalc-")
+    try:
+        proc = lo_convert(source, tmpdir, "xlsx")
+        if proc.returncode != 0:
+            fail("recalc_failed", (proc.stderr or proc.stdout).strip()[:400] or "LibreOffice 重算失败")
+
+        stem = os.path.splitext(os.path.basename(source))[0]
+        produced = os.path.join(tmpdir, stem + ".xlsx")
+        if not os.path.isfile(produced):
+            candidates = [n for n in os.listdir(tmpdir) if n.lower().endswith(".xlsx")]
+            if not candidates:
+                fail("recalc_failed", "LibreOffice 未生成重算后的文件")
+            produced = os.path.join(tmpdir, candidates[0])
+        if os.path.getsize(produced) == 0:
+            fail("recalc_failed", "LibreOffice 生成的重算文件为空")
+
+        # A converted file that lost its cached values would be a silent no-op;
+        # check before publishing it as the result.
+        verify = run_python(
+            "import sys\n"
+            "from openpyxl import load_workbook\n"
+            "wb = load_workbook(sys.argv[1], data_only=True)\n"
+            "cached = 0\n"
+            "for ws in wb.worksheets:\n"
+            "    for row in ws.iter_rows(values_only=True):\n"
+            "        for value in row:\n"
+            "            if value is not None:\n"
+            "                cached += 1\n"
+            "print(cached)\n",
+            produced,
+        ).strip()
+        try:
+            cached_count = int(verify.splitlines()[-1])
+        except (ValueError, IndexError):
+            cached_count = 0
+        if cached_count == 0:
+            fail("recalc_failed", "重算结果没有任何缓存值；文件可能没有公式或已损坏")
+
+        if args.in_place:
+            destination = source
+        elif args.out:
+            destination = require_workspace(args.out)
+        else:
+            destination = os.path.join(os.path.dirname(source), stem + ".recalc.xlsx")
+            destination = require_workspace(destination)
+
+        if destination != source:
+            if os.path.exists(destination) and not args.overwrite:
+                fail("exists", "目标文件已存在：%s（加 --overwrite 覆盖）" % destination)
+        os.makedirs(os.path.dirname(destination), exist_ok=True)
+        shutil.copyfile(produced, destination)
+        ok(
+            path=destination,
+            bytes=os.path.getsize(destination),
+            cachedCells=cached_count,
+            inPlace=bool(args.in_place),
+            note="已由 LibreOffice 重算并写入缓存值；用 xlsx-read --values 可验证",
+        )
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+def cmd_pptx_new(args):
+    target = require_workspace(args.path)
+    run_python(
+        "import sys\n"
+        "from pptx import Presentation\n"
+        "prs = Presentation()\n"
+        "layout = prs.slide_layouts[1]\n"
+        "for title in sys.argv[1].split('\\n'):\n"
+        "    if not title.strip():\n"
+        "        continue\n"
+        "    slide = prs.slides.add_slide(layout)\n"
+        "    slide.shapes.title.text = title\n"
+        "prs.save(sys.argv[2])\n",
+        args.titles, target,
+    )
+    ok(path=target, slides=len([t for t in args.titles.split("\n") if t.strip()]), bytes=os.path.getsize(target))
+
+
+def cmd_pptx_read(args):
+    source = require_workspace(args.path)
+    out = run_python(
+        "import sys\n"
+        "from pptx import Presentation\n"
+        "prs = Presentation(sys.argv[1])\n"
+        "for index, slide in enumerate(prs.slides, start=1):\n"
+        "    print('## slide %d' % index)\n"
+        "    for shape in slide.shapes:\n"
+        "        if shape.has_text_frame:\n"
+        "            for para in shape.text_frame.paragraphs:\n"
+        "                print(''.join(run.text for run in para.runs))\n",
+        source,
+    )
+    ok(path=source, text=out)
+
+
+def publish_exclusive(source, outdir, stem, extension):
+    """Copy `source` into `outdir` as stem.extension, never overwriting.
+
+    The destination is created with O_EXCL, so two concurrent conversions of the
+    same source cannot both claim the same name: the loser sees FileExistsError,
+    advances to the next numbered name, and retries instead of clobbering the
+    winner (a plain exists()-then-copy() check is a time-of-check/time-of-use
+    race). Returns the absolute path written.
+    """
+    for suffix in range(0, 1000):
+        name = "%s.%s" % (stem, extension) if suffix == 0 else "%s (%d).%s" % (stem, suffix, extension)
+        destination = os.path.join(outdir, name)
+        try:
+            descriptor = os.open(destination, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+        except FileExistsError:
+            continue
+        except OSError:
+            fail("write_failed", "无法写入转换结果")
+        try:
+            with os.fdopen(descriptor, "wb") as out, open(source, "rb") as inp:
+                shutil.copyfileobj(inp, out)
+        except OSError:
+            try:
+                os.unlink(destination)
+            except OSError:
+                pass
+            fail("write_failed", "无法写入转换结果")
+        return destination
+    fail("exists", "同名文件过多，无法生成唯一输出名")
+
+
+def cmd_convert(args):
+    source = require_workspace(args.path)
+    outdir = require_workspace(args.outdir) if args.outdir else os.path.dirname(source)
+    if not os.path.isdir(outdir):
+        fail("not_found", "输出目录不存在：%s" % outdir)
+
+    stem = os.path.splitext(os.path.basename(source))[0]
+    # Convert into a throwaway directory first. Writing straight into the user's
+    # directory both risked overwriting an existing file of the same name and
+    # made a failed run that left an old file behind look like a success.
+    tmpdir = tempfile.mkdtemp(prefix="aio-doc-convert-")
+    try:
+        proc = lo_convert(source, tmpdir, args.to)
+        if proc.returncode != 0:
+            fail("convert_failed", (proc.stderr or proc.stdout).strip()[:400] or "LibreOffice 转换失败")
+        produced = os.path.join(tmpdir, stem + "." + args.to)
+        if not os.path.isfile(produced) or os.path.getsize(produced) == 0:
+            names = [n for n in os.listdir(tmpdir) if os.path.isfile(os.path.join(tmpdir, n))]
+            if len(names) != 1:
+                fail("convert_failed", "LibreOffice 未生成预期的输出文件")
+            produced = os.path.join(tmpdir, names[0])
+        if os.path.getsize(produced) == 0:
+            fail("convert_failed", "LibreOffice 生成的文件为空")
+
+        destination = publish_exclusive(produced, outdir, stem, args.to)
+        ok(
+            path=destination,
+            bytes=os.path.getsize(destination),
+            note="转换结果为新文件，原文件未被修改",
+        )
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+def cmd_pdf_text(args):
+    source = require_workspace(args.path)
+    if not shutil.which("pdftotext"):
+        fail("missing_tool", "缺少 poppler-utils（pdftotext）")
+    proc = subprocess.run(["pdftotext", source, "-"], capture_output=True, text=True, timeout=120)
+    if proc.returncode != 0:
+        fail("pdf_text_failed", (proc.stderr or "").strip()[:400] or "提取 PDF 文本失败")
+    ok(path=source, text=proc.stdout[:200000])
+
+
+def build_parser():
+    parser = argparse.ArgumentParser(prog="aio-doc", description="AIO 沙箱文档工具：创建 / 修改 / 转换 Word、Excel、PPT、PDF")
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    sub.add_parser("doctor", help="检查文档工具就绪状态").set_defaults(func=cmd_doctor)
+
+    p = sub.add_parser("docx-new", help="新建 Word 文档"); p.add_argument("path"); p.add_argument("--text", default="")
+    p.set_defaults(func=cmd_docx_new)
+    p = sub.add_parser("docx-read", help="读取 Word 文本"); p.add_argument("path"); p.set_defaults(func=cmd_docx_read)
+    p = sub.add_parser("docx-append", help="在 Word 文档末尾追加段落"); p.add_argument("path"); p.add_argument("--text", required=True)
+    p.set_defaults(func=cmd_docx_append)
+
+    p = sub.add_parser("xlsx-new", help="新建 Excel（--rows 每行逗号分隔）"); p.add_argument("path"); p.add_argument("--rows", default="")
+    p.set_defaults(func=cmd_xlsx_new)
+    p = sub.add_parser("xlsx-set", help="写入单元格（支持 =SUM(...) 公式）")
+    p.add_argument("path"); p.add_argument("cell"); p.add_argument("--value", required=True); p.add_argument("--sheet", default="")
+    p.set_defaults(func=cmd_xlsx_set)
+    p = sub.add_parser("xlsx-read", help="读取 Excel"); p.add_argument("path"); p.add_argument("--values", action="store_true", help="读取缓存值而非公式")
+    p.set_defaults(func=cmd_xlsx_read)
+    p = sub.add_parser("xlsx-recalc", help="用 LibreOffice 重算公式并写入缓存值（默认输出到新文件）")
+    p.add_argument("path")
+    p.add_argument("--out", default="", help="结果文件路径（默认 <原名>.recalc.xlsx，不覆盖原文件）")
+    p.add_argument("--in-place", action="store_true", help="显式覆盖原文件（默认不覆盖）")
+    p.add_argument("--overwrite", action="store_true", help="允许覆盖已存在的 --out 目标")
+    p.set_defaults(func=cmd_xlsx_recalc)
+
+    p = sub.add_parser("pptx-new", help="新建 PPT（--titles 每行一页）"); p.add_argument("path"); p.add_argument("--titles", default="")
+    p.set_defaults(func=cmd_pptx_new)
+    p = sub.add_parser("pptx-read", help="读取 PPT 文本"); p.add_argument("path"); p.set_defaults(func=cmd_pptx_read)
+
+    p = sub.add_parser("convert", help="用 LibreOffice 转换格式（如 docx→pdf）")
+    p.add_argument("path"); p.add_argument("--to", required=True, help="目标扩展名，如 pdf/docx/xlsx/pptx/csv")
+    p.add_argument("--outdir", default="")
+    p.set_defaults(func=cmd_convert)
+
+    p = sub.add_parser("pdf-text", help="提取 PDF 文本"); p.add_argument("path"); p.set_defaults(func=cmd_pdf_text)
+    return parser
+
+
+def main():
+    args = build_parser().parse_args()
+    args.func(args)
+
+
+if __name__ == "__main__":
+    main()

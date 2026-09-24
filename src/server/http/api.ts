@@ -10,6 +10,8 @@ import { parseHttpUrl } from "../aio/client.js";
 import { COOKIE_NAMES, clearSessionCookies, sessionCookies } from "../auth/sessions.js";
 import { safeRedirectPath } from "../auth/tickets.js";
 import { audit } from "../db.js";
+import { DocumentError, type DocumentService } from "../documents/service.js";
+import { documentKind, isRenderableKind, requireWorkspaceFilePath } from "../documents/paths.js";
 
 declare global {
   // eslint-disable-next-line @typescript-eslint/no-namespace
@@ -822,6 +824,182 @@ export function createApiRouter(context: AppContext): Router {
       const disposition = upstream.headers.get("content-disposition");
       if (disposition) res.setHeader("Content-Disposition", disposition);
       res.end(Buffer.from(await upstream.arrayBuffer()));
+    }),
+  );
+
+  // -------------------------------------------------- documents (sandbox tools)
+
+  /**
+   * Every document path is validated twice: lexically here (absolute, inside the
+   * workspace root, no traversal/control characters/`-` segments) and again
+   * inside the container via `realpath`, so a symlink that points outside the
+   * workspace is refused even when the lexical path looked valid.
+   */
+  const checkedDocumentPath = (input: string): string => {
+    const checked = requireWorkspaceFilePath(input, cfg.sandbox.containerWorkspaceDir);
+    if (!checked.ok) throw new DocumentError("outside_workspace", checked.message, 400);
+    return checked.path;
+  };
+
+  const documentHandler =
+    (fn: (req: Request, res: Response) => Promise<void>) =>
+    async (req: Request, res: Response): Promise<void> => {
+      try {
+        await fn(req, res);
+      } catch (err) {
+        if (err instanceof DocumentError) {
+          res.status(err.status).json({ error: err.code, message: err.message });
+          return;
+        }
+        log.error("document endpoint failed", { url: req.url, error: err instanceof Error ? err.message : String(err) });
+        res.status(502).json({ error: "document_failed", message: "文档服务暂时不可用" });
+      }
+    };
+
+  router.get(
+    "/documents/readiness",
+    requireKind("primary"),
+    requireSession,
+    documentHandler(async (req, res) => {
+      const force = String(req.query.refresh ?? "") === "1";
+      res.setHeader("Cache-Control", "no-store");
+      res.json(await context.documents.readiness(force));
+    }),
+  );
+
+  /** Explicit operator action: install/verify the sandbox document toolchain. */
+  router.post(
+    "/documents/provision",
+    requireKind("primary"),
+    requireSession,
+    documentHandler(async (_req, res) => {
+      res.setHeader("Cache-Control", "no-store");
+      const result = await context.documents.provision();
+      res.status(result.ok ? 200 : 502).json(result);
+    }),
+  );
+
+  /** Metadata for the preview dialog: kind, page count, size, truncation. */
+  router.get(
+    "/documents/info",
+    requireKind("primary"),
+    requireSession,
+    documentHandler(async (req, res) => {
+      const target = checkedDocumentPath(String(req.query.path ?? ""));
+      const kind = documentKind(target);
+      const stat = await context.documents.stat(target);
+      if (!stat.exists) {
+        res.status(404).json({ error: "not_found", message: "文件不存在或已被移动" });
+        return;
+      }
+      res.setHeader("Cache-Control", "no-store");
+      res.json({
+        path: target,
+        kind,
+        size: stat.size,
+        renderable: isRenderableKind(kind),
+        textPreviewable: kind === "text",
+      });
+    }),
+  );
+
+  /**
+   * Render a workspace document to page rasters inside the sandbox. The reply
+   * carries metadata only: page images are fetched one at a time from
+   * `/documents/page`, so a large preview never has to be held in one response.
+   */
+  router.get(
+    "/documents/render",
+    requireKind("primary"),
+    requireSession,
+    documentHandler(async (req, res) => {
+      const target = checkedDocumentPath(String(req.query.path ?? ""));
+      const result = await context.documents.render(target);
+      res.setHeader("Cache-Control", "no-store");
+      res.json({
+        path: target,
+        kind: result.kind,
+        pageCount: result.pageCount,
+        totalPages: result.totalPages,
+        truncated: result.truncated,
+        size: result.size,
+      });
+    }),
+  );
+
+  /**
+   * One rasterised page. Deliberately the only document bytes the browser ever
+   * receives: an authenticated PNG with `nosniff`/`no-store`, never the original
+   * Office/PDF bytes (those are only ever served as an attachment download).
+   */
+  router.get(
+    "/documents/page",
+    requireKind("primary"),
+    requireSession,
+    documentHandler(async (req, res) => {
+      const target = checkedDocumentPath(String(req.query.path ?? ""));
+      const index = Number.parseInt(String(req.query.page ?? "1"), 10);
+      const page = await context.documents.page(target, index);
+      res.setHeader("Content-Type", "image/png");
+      res.setHeader("X-Content-Type-Options", "nosniff");
+      res.setHeader("Cache-Control", "no-store");
+      res.setHeader("Content-Disposition", "inline");
+      res.end(page.bytes);
+    }),
+  );
+
+  /**
+   * Convert a workspace document to a NEW file inside the sandbox. The original
+   * is never modified; the target format is validated against a fixed allowlist
+   * and the command shape is built server-side.
+   */
+  router.post(
+    "/documents/convert",
+    requireKind("primary"),
+    requireSession,
+    documentHandler(async (req, res) => {
+      const target = checkedDocumentPath(String(req.body?.path ?? ""));
+      const format = String(req.body?.format ?? "");
+      const result = await context.documents.convert(target, format);
+      res.setHeader("Cache-Control", "no-store");
+      res.json(result);
+    }),
+  );
+
+  /**
+   * One workspace image served inline, with a sniffed image content type.
+   *
+   * Deliberately separate from `/files/download` (octet-stream + attachment,
+   * unusable in an `<img>`): only a file whose kind is `image` *and* whose bytes
+   * carry a real image magic number is returned, always `inline` with
+   * `nosniff`/`no-store`. Nothing here can be used to fetch a non-image or a
+   * host file.
+   */
+  router.get(
+    "/documents/image",
+    requireKind("primary"),
+    requireSession,
+    documentHandler(async (req, res) => {
+      const target = checkedDocumentPath(String(req.query.path ?? ""));
+      const image = await context.documents.image(target);
+      res.setHeader("Content-Type", image.contentType);
+      res.setHeader("X-Content-Type-Options", "nosniff");
+      res.setHeader("Cache-Control", "no-store");
+      res.setHeader("Content-Disposition", "inline");
+      res.end(image.bytes);
+    }),
+  );
+
+  /** Small text files shown inline; binary or oversized content is refused. */
+  router.get(
+    "/documents/text",
+    requireKind("primary"),
+    requireSession,
+    documentHandler(async (req, res) => {
+      const target = checkedDocumentPath(String(req.query.path ?? ""));
+      const result = await context.documents.text(target);
+      res.setHeader("Cache-Control", "no-store");
+      res.json({ path: target, ...result });
     }),
   );
 

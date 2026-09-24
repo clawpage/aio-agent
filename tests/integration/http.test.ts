@@ -1069,3 +1069,78 @@ async function bootstrapWorkspaceWithSession(h: TestHarness): Promise<{ cookie: 
     .get() as { id: string };
   return { cookie, sessionId: row.id };
 }
+
+describe("document endpoints", () => {
+  it("requires a session for every document route", async () => {
+    for (const path of [
+      "/api/documents/readiness",
+      "/api/documents/info?path=/home/gem/workspace/a.docx",
+      "/api/documents/render?path=/home/gem/workspace/a.docx",
+      "/api/documents/page?path=/home/gem/workspace/a.docx&page=1",
+      "/api/documents/image?path=/home/gem/workspace/a.png",
+      "/api/documents/text?path=/home/gem/workspace/a.txt",
+    ]) {
+      const res = await h.request(path);
+      expect(res.status, path).toBe(401);
+    }
+    const post = await h.request("/api/documents/provision", { method: "POST", body: "{}" });
+    expect(post.status).toBe(401);
+    const convert = await h.request("/api/documents/convert", {
+      method: "POST",
+      body: JSON.stringify({ path: "/home/gem/workspace/a.docx", format: "pdf" }),
+    });
+    expect(convert.status).toBe(401);
+  });
+
+  it("rejects a path outside the workspace before touching the sandbox", async () => {
+    const { cookie } = await login(h);
+    for (const path of [
+      "/etc/passwd",
+      "/home/gem/workspace/../etc/passwd",
+      "/home/gem/workspace-evil/x.png",
+      "relative/x.png",
+      "",
+      "/home/gem/workspace",
+    ]) {
+      const res = await h.request(`/api/documents/info?path=${encodeURIComponent(path)}`, {
+        headers: { cookie },
+      });
+      expect(res.status, path).toBe(400);
+      const body = (await res.json()) as { error: string };
+      expect(body.error, path).toBe("outside_workspace");
+    }
+  });
+
+  it("rejects a control character or option-looking segment in the path", async () => {
+    const { cookie } = await login(h);
+    for (const path of ["/home/gem/workspace/a\u0000b.png", "/home/gem/workspace/-rf.png"]) {
+      const res = await h.request(`/api/documents/info?path=${encodeURIComponent(path)}`, {
+        headers: { cookie },
+      });
+      expect(res.status, path).toBe(400);
+    }
+  });
+
+  it("rejects an unsupported conversion target with a client error, not a 500", async () => {
+    const { cookie, csrf } = await login(h);
+    const res = await h.request("/api/documents/convert", {
+      method: "POST",
+      headers: { cookie, "x-csrf-token": csrf, "content-type": "application/json" },
+      body: JSON.stringify({ path: "/home/gem/workspace/a.docx", format: "exe" }),
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toBe("bad_request");
+  });
+
+  it("answers readiness as data even when the sandbox cannot be reached", async () => {
+    const { cookie } = await login(h);
+    const res = await h.request("/api/documents/readiness", { headers: { cookie } });
+    // The fake container stub has no exec seam, so readiness reports an error as
+    // data with HTTP 200: a broken document toolchain must never break chat.
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { enabled: boolean; ready: boolean };
+    expect(typeof body.ready).toBe("boolean");
+    expect(res.headers.get("cache-control")).toBe("no-store");
+  });
+});

@@ -30,6 +30,17 @@ marked.use({
       }
       return `<a href="${escapeAttr(href)}"${titleAttr}>${text}</a>`;
     },
+    /**
+     * A workspace image reference renders as nothing here: the sanitizer only
+     * keeps `https?` srcs, and a bare `<img>` with a stripped src is a broken
+     * element. The file card below the message (with its lazy thumbnail) is the
+     * real affordance, and it opens the same preview.
+     */
+    image({ href, title, text }) {
+      if (workspaceFilePathFromHref(href)) return "";
+      const titleAttr = title ? ` title="${escapeAttr(title)}"` : "";
+      return `<img src="${escapeAttr(href)}" alt="${escapeAttr(text)}"${titleAttr}>`;
+    },
   },
 });
 

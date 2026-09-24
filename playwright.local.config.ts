@@ -25,6 +25,7 @@ export default defineConfig({
     "**/chat-motion.spec.ts",
     "**/menu-qa.spec.ts",
     "**/file-preview.spec.ts",
+    "**/documents.spec.ts",
     "**/mobile-chat.spec.ts",
     "**/settings.spec.ts",
     "**/working.spec.ts",
@@ -57,7 +58,12 @@ export default defineConfig({
     },
     {
       name: "mobile-webkit",
-      testMatch: ["**/mobile-chat.spec.ts", "**/settings.spec.ts", "**/working.spec.ts"],
+      testMatch: [
+        "**/mobile-chat.spec.ts",
+        "**/settings.spec.ts",
+        "**/working.spec.ts",
+        "**/documents.spec.ts",
+      ],
       use: { ...devices["iPhone 13"], viewport: { width: 390, height: 844 } },
     },
   ],

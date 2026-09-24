@@ -2,7 +2,15 @@ import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { setTimeout as delay } from "node:timers/promises";
 import type { Config } from "../config.js";
 import type { Logger } from "../logger.js";
-import { CODEX_CONFIG_TOML, CODEX_ISOLATION_MARKER, CODEX_ISOLATION_OVERRIDES, CODEX_REQUIREMENTS_TOML, WORKSPACE_AGENTS_MD } from "./seed.js";
+import {
+  CODEX_CONFIG_TOML,
+  CODEX_ISOLATION_MARKER,
+  CODEX_ISOLATION_OVERRIDES,
+  CODEX_REQUIREMENTS_TOML,
+  DOCUMENT_SKILL_DIR,
+  DOCUMENT_SKILL_MD,
+  WORKSPACE_AGENTS_MD,
+} from "./seed.js";
 
 export interface ContainerState {
   exists: boolean;
@@ -51,16 +59,28 @@ export class SandboxContainer {
     return `http://127.0.0.1:${this.#cfg.sandbox.hostPort}`;
   }
 
-  async docker(args: string[], opts: { timeoutMs?: number } = {}): Promise<DockerRunResult> {
+  async docker(args: string[], opts: { timeoutMs?: number; stdin?: string } = {}): Promise<DockerRunResult> {
     return await new Promise((resolve, reject) => {
-      execFile("docker", args, { timeout: opts.timeoutMs ?? 60_000, maxBuffer: 32 * 1024 * 1024 }, (err, stdout, stderr) => {
-        if (err && (err as NodeJS.ErrnoException).code === "ENOENT") {
-          reject(new Error("docker CLI not found on PATH"));
-          return;
-        }
-        const code = err && typeof (err as { code?: unknown }).code === "number" ? (err as { code: number }).code : err ? 1 : 0;
-        resolve({ code, stdout: String(stdout ?? ""), stderr: String(stderr ?? "") });
-      });
+      const child = execFile(
+        "docker",
+        args,
+        { timeout: opts.timeoutMs ?? 60_000, maxBuffer: 32 * 1024 * 1024 },
+        (err, stdout, stderr) => {
+          if (err && (err as NodeJS.ErrnoException).code === "ENOENT") {
+            reject(new Error("docker CLI not found on PATH"));
+            return;
+          }
+          const code = err && typeof (err as { code?: unknown }).code === "number" ? (err as { code: number }).code : err ? 1 : 0;
+          resolve({ code, stdout: String(stdout ?? ""), stderr: String(stderr ?? "") });
+        },
+      );
+      // `-i` is always passed to docker exec, so stdin must always be closed:
+      // an open pipe would let a command that reads stdin wait forever. `stdin`
+      // itself is only ever control-plane content - this is how a
+      // control-plane-owned script reaches a root shell without being written to
+      // a sandbox-writable path.
+      child.stdin?.on("error", () => undefined);
+      child.stdin?.end(opts.stdin ?? "");
     });
   }
 
@@ -417,6 +437,22 @@ export class SandboxContainer {
     const s = this.#cfg.sandbox;
     await this.writeFileInSandbox(`${s.containerWorkspaceDir}/AGENTS.md`, WORKSPACE_AGENTS_MD, { onlyIfAbsent: true });
     await this.writeFileInSandbox(`${s.containerCodexHome}/config.toml`, CODEX_CONFIG_TOML, { onlyIfAbsent: true });
+    // The document skill is managed, not `onlyIfAbsent`: it must reach existing
+    // sandboxes too, and it writes to exactly one skill directory so no user
+    // skill or instruction is ever touched. Its directory is created first -
+    // `cat >` cannot create a missing parent, so on a fresh sandbox the write
+    // would otherwise fail and take the whole startup path down with it.
+    const skillDir = `${s.containerCodexHome}/${DOCUMENT_SKILL_DIR}`;
+    const mkdir = await this.execInSandbox(["mkdir", "-p", skillDir], { timeoutMs: 15_000 });
+    if (mkdir.code !== 0) {
+      // A missing skill must never block the sandbox: the agent can still be
+      // told about the tools through AGENTS.md.
+      this.#log.warn("could not create the sandbox document skill directory", {
+        error: (mkdir.stderr || mkdir.stdout).trim().slice(0, 200),
+      });
+    } else {
+      await this.writeFileInSandbox(`${skillDir}/SKILL.md`, DOCUMENT_SKILL_MD);
+    }
     await this.enforceCodexIsolation();
   }
 
@@ -469,10 +505,17 @@ finally:
     );
   }
 
-  /** Run a one-shot command inside the sandbox (fixed argv, no shell expansion by us). */
-  async execInSandbox(argv: string[], opts: { timeoutMs?: number; user?: string } = {}): Promise<DockerRunResult> {
-    return await this.docker(["exec", "-u", opts.user ?? this.#cfg.sandbox.containerUser, this.name, ...argv], {
-      timeoutMs: opts.timeoutMs ?? 60_000,
-    });
+  /**
+   * Run a one-shot command inside the sandbox (fixed argv, no shell expansion by
+   * us). `stdin` is only ever control-plane content, never user input.
+   */
+  async execInSandbox(
+    argv: string[],
+    opts: { timeoutMs?: number; user?: string; stdin?: string } = {},
+  ): Promise<DockerRunResult> {
+    return await this.docker(
+      ["exec", "-i", "-u", opts.user ?? this.#cfg.sandbox.containerUser, this.name, ...argv],
+      { timeoutMs: opts.timeoutMs ?? 60_000, stdin: opts.stdin },
+    );
   }
 }

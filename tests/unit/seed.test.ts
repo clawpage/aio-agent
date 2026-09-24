@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { SandboxContainer } from "../../src/server/docker/sandbox.js";
-import { CODEX_CONFIG_TOML, WORKSPACE_AGENTS_MD } from "../../src/server/docker/seed.js";
+import { CODEX_CONFIG_TOML, DOCUMENT_SKILL_DIR, DOCUMENT_SKILL_MD, WORKSPACE_AGENTS_MD } from "../../src/server/docker/seed.js";
 import { Logger } from "../../src/server/logger.js";
 import { testConfig } from "../helpers/harness.js";
 
@@ -53,6 +53,65 @@ describe("sandbox workspace seed", () => {
     expect(toml?.opts).toMatchObject({ onlyIfAbsent: true });
     expect(toml?.content).toBe(CODEX_CONFIG_TOML);
     expect(isolation).toHaveBeenCalledOnce();
+  });
+
+  it("writes the document skill into the controlled skills directory for existing sandboxes too", async () => {
+    const cfg = testConfig("/tmp/pa-skill-test", 1);
+    const container = new SandboxContainer(cfg, new Logger("error", undefined, false));
+    vi.spyOn(container, "enforceCodexIsolation").mockResolvedValue();
+    const calls: Array<{ path: string; content: string; opts: unknown }> = [];
+    container.writeFileInSandbox = (async (filePath: string, content: string, opts?: unknown) => {
+      calls.push({ path: filePath, content, opts });
+    }) as typeof container.writeFileInSandbox;
+    // `cat >` cannot create a missing parent, so the skill directory must be
+    // created first or a fresh sandbox would never receive the skill.
+    const execCalls: string[][] = [];
+    container.execInSandbox = (async (argv: string[]) => {
+      execCalls.push(argv);
+      return { code: 0, stdout: "", stderr: "" };
+    }) as typeof container.execInSandbox;
+
+    await container.seedWorkspace();
+
+    const skill = calls.find((c) => c.path.endsWith(`/${DOCUMENT_SKILL_DIR}/SKILL.md`));
+    expect(skill).toBeDefined();
+    expect(skill?.content).toBe(DOCUMENT_SKILL_MD);
+    // Managed, not `onlyIfAbsent`: a tool-path change must reach existing
+    // sandboxes. AGENTS.md/config.toml keep the user's own edits, this does not
+    // overwrite any other skill.
+    expect(skill?.opts ?? {}).not.toMatchObject({ onlyIfAbsent: true });
+    expect(execCalls.some((argv) => argv[0] === "mkdir" && argv[1] === "-p" && argv[2].endsWith(DOCUMENT_SKILL_DIR))).toBe(
+      true,
+    );
+  });
+
+  it("does not fail the whole seed when the skill directory cannot be created", async () => {
+    // A missing skill is a degradation, not a reason to leave the console
+    // without a sandbox: AGENTS.md still names the document tools.
+    const cfg = testConfig("/tmp/pa-skill-fail-test", 1);
+    const container = new SandboxContainer(cfg, new Logger("error", undefined, false));
+    vi.spyOn(container, "enforceCodexIsolation").mockResolvedValue();
+    const written: string[] = [];
+    container.writeFileInSandbox = (async (filePath: string) => {
+      written.push(filePath);
+    }) as typeof container.writeFileInSandbox;
+    container.execInSandbox = (async () => ({ code: 1, stdout: "", stderr: "permission denied" })) as typeof container.execInSandbox;
+
+    await expect(container.seedWorkspace()).resolves.toBeUndefined();
+    expect(written.some((p) => p.endsWith("/AGENTS.md"))).toBe(true);
+    expect(written.some((p) => p.includes(DOCUMENT_SKILL_DIR))).toBe(false);
+  });
+
+  it("names the real in-container CLI and never a host tool", () => {
+    expect(DOCUMENT_SKILL_MD).toContain("/home/gem/.codex/tools/aio-doc/bin/aio-doc");
+    expect(DOCUMENT_SKILL_MD).toContain("/home/gem/.codex/tools/aio-doc/venv/bin/python");
+    expect(DOCUMENT_SKILL_MD).toContain("name: aio-documents");
+    // No host path, no host skill package, no network service.
+    for (const forbidden of ["/Users/", "~/.codex/skills", "npm ", "pip install", "https://"]) {
+      expect(DOCUMENT_SKILL_MD, `skill must not reference ${forbidden}`).not.toContain(forbidden);
+    }
+    // LibreOffice 7.3 rejects the `--` separator; the example must not teach it.
+    expect(DOCUMENT_SKILL_MD).not.toMatch(/--convert-to pdf[^\n]*\s--\s/);
   });
 
   it("fails startup when the managed isolation policy cannot be installed", async () => {

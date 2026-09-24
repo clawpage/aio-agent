@@ -1,14 +1,29 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api";
+import {
+  baseName,
+  isPreviewableKind,
+  kindLabel,
+  workspaceFileKind,
+  type WorkspaceFileKind,
+} from "../sandboxLink";
 
 /**
- * In-conversation preview for a sandbox workspace image.
+ * Unified preview for a workspace file.
  *
- * The download endpoint replies with `application/octet-stream` and an
- * attachment disposition (the AIO sandbox does not inline PNGs), so the image is
- * fetched as a same-origin blob and shown through a typed object URL. The object
- * URL is revoked when the dialog closes or the path changes. Only the explicit
- * 下载 link performs the real attachment download.
+ * Security model — the browser never receives the original document bytes for a
+ * preview:
+ *   * images are fetched as a same-origin blob and shown through a typed object
+ *     URL (the download endpoint answers `application/octet-stream` + attachment);
+ *   * PDF/Word/Excel/PowerPoint are converted inside the sandbox and returned as
+ *     authenticated PNG pages, so no PDF viewer, iframe, blob HTML or SVG ever
+ *     executes agent-produced active content in the console;
+ *   * text is shown as escaped text in a `<pre>`, with a size cap enforced by the
+ *     server;
+ *   * unsupported formats say so and offer the original download.
+ *
+ * The 下载 link is the only place the original file is transferred, and it always
+ * carries an attachment disposition.
  */
 
 const IMAGE_MIME: Record<string, string> = {
@@ -18,51 +33,44 @@ const IMAGE_MIME: Record<string, string> = {
   webp: "image/webp",
   gif: "image/gif",
   avif: "image/avif",
+  bmp: "image/bmp",
 };
 
-function fileName(path: string): string {
-  return path.slice(path.lastIndexOf("/") + 1) || path;
-}
-
 function imageMime(path: string): string {
-  const name = fileName(path).toLowerCase();
-  const ext = name.includes(".") ? name.slice(name.lastIndexOf(".") + 1) : "";
+  const name = baseName(path).toLowerCase();
+  const dot = name.lastIndexOf(".");
+  const ext = dot > 0 ? name.slice(dot + 1) : "";
   return IMAGE_MIME[ext] ?? "application/octet-stream";
 }
 
-export function FilePreview({ path, onClose }: { path: string; onClose: () => void }) {
-  const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
-  const [url, setUrl] = useState<string | null>(null);
+interface Props {
+  path: string;
+  onClose: () => void;
+  /** Offered for kinds the sandbox tools can convert (e.g. Word → PDF). */
+  onConvert?: (path: string, target: string) => void;
+  /** Extra actions rendered in the footer (workspace integration). */
+  actions?: React.ReactNode;
+}
+
+type Phase = "loading" | "ready" | "error" | "unsupported";
+
+export function FilePreview({ path, onClose, onConvert, actions }: Props) {
+  const kind = useMemo<WorkspaceFileKind>(() => workspaceFileKind(path), [path]);
+  const name = baseName(path);
+  const [phase, setPhase] = useState<Phase>("loading");
   const [error, setError] = useState<string | null>(null);
+  const [imageUrl, setImageUrl] = useState<string | null>(null);
+  const [text, setText] = useState<string | null>(null);
+  const [textTruncated, setTextTruncated] = useState(false);
+  const [page, setPage] = useState(1);
+  const [pageCount, setPageCount] = useState(0);
+  const [totalPages, setTotalPages] = useState(0);
+  const [truncated, setTruncated] = useState(false);
+  const [pageFailed, setPageFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
   const closeRef = useRef<HTMLButtonElement | null>(null);
 
-  useEffect(() => {
-    const controller = new AbortController();
-    let objectUrl: string | null = null;
-    setStatus("loading");
-    setError(null);
-    setUrl(null);
-    void (async () => {
-      try {
-        const res = await fetch(api.downloadUrl(path), { credentials: "same-origin", signal: controller.signal });
-        if (!res.ok) throw new Error(`无法加载文件（HTTP ${res.status}）`);
-        const buffer = await res.arrayBuffer();
-        if (controller.signal.aborted) return;
-        objectUrl = URL.createObjectURL(new Blob([buffer], { type: imageMime(path) }));
-        setUrl(objectUrl);
-        setStatus("ready");
-      } catch (err) {
-        if (controller.signal.aborted) return;
-        setError(err instanceof Error ? err.message : String(err));
-        setStatus("error");
-      }
-    })();
-    return () => {
-      controller.abort();
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
-    };
-  }, [path]);
-
+  // Focus the close control so Escape/Enter work immediately after opening.
   useEffect(() => {
     closeRef.current?.focus();
   }, []);
@@ -74,10 +82,84 @@ export function FilePreview({ path, onClose }: { path: string; onClose: () => vo
         onClose();
       }
     };
-    // Capture so Escape closes the lightbox before any other handler runs.
     document.addEventListener("keydown", onKeyDown, true);
     return () => document.removeEventListener("keydown", onKeyDown, true);
   }, [onClose]);
+
+  // One loader per path (and per explicit retry), so a late result from a
+  // previous file can never overwrite the dialog that replaced it.
+  useEffect(() => {
+    const controller = new AbortController();
+    let objectUrl: string | null = null;
+    setPhase("loading");
+    setError(null);
+    setImageUrl(null);
+    setText(null);
+    setTextTruncated(false);
+    setPage(1);
+    setPageCount(0);
+    setTotalPages(0);
+    setTruncated(false);
+    setPageFailed(false);
+
+    void (async () => {
+      try {
+        if (kind === "unsupported") {
+          setPhase("unsupported");
+          return;
+        }
+        if (kind === "image") {
+          // The inline image endpoint (not the download endpoint): it returns a
+          // real image content type after sniffing the bytes.
+          const res = await fetch(api.documentImageUrl(path), { credentials: "same-origin", signal: controller.signal });
+          if (!res.ok) throw new Error("无法加载文件（可能已被移动或删除）");
+          const blob = await res.blob();
+          if (controller.signal.aborted) return;
+          if (blob.size === 0) throw new Error("文件是空的（0 字节）");
+          // Trust the response's own type (the server sniffed the bytes); fall
+          // back to the extension only if it came back untyped.
+          const type = blob.type && blob.type !== "application/octet-stream" ? blob.type : imageMime(path);
+          const typed = new Blob([blob], { type });
+          objectUrl = URL.createObjectURL(typed);
+          setImageUrl(objectUrl);
+          setPhase("ready");
+          return;
+        }
+        if (kind === "text") {
+          // The signal is passed so the in-flight request is cancelled when the
+          // dialog switches files or retries; the aborted check below stops a
+          // late resolution from writing into the new dialog either way.
+          const result = await api.documentText(path, controller.signal);
+          if (controller.signal.aborted) return;
+          setText(result.text);
+          setTextTruncated(result.truncated);
+          setPhase("ready");
+          return;
+        }
+        // pdf / word / excel / ppt: rasterised inside the sandbox.
+        const rendered = await api.documentRender(path, controller.signal);
+        if (controller.signal.aborted) return;
+        setPageCount(rendered.pageCount);
+        setTotalPages(rendered.totalPages);
+        setTruncated(rendered.truncated);
+        setPhase("ready");
+      } catch (err) {
+        // An aborted request rejects with an AbortError; that is the expected
+        // result of switching files, not a failure to show the user.
+        if (controller.signal.aborted) return;
+        setError(err instanceof Error ? err.message : String(err));
+        setPhase("error");
+      }
+    })();
+
+    return () => {
+      controller.abort();
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [kind, path, attempt]);
+
+  const retry = useCallback(() => setAttempt((n) => n + 1), []);
+  const raster = isPreviewableKind(kind) && kind !== "image";
 
   return (
     <div
@@ -87,30 +169,110 @@ export function FilePreview({ path, onClose }: { path: string; onClose: () => vo
         if (event.target === event.currentTarget) onClose();
       }}
     >
-      <div className="file-preview" role="dialog" aria-modal="true" aria-label={`预览 ${fileName(path)}`}>
+      <div className="file-preview" role="dialog" aria-modal="true" aria-label={`预览 ${name}`}>
         <header className="file-preview-head">
           <span className="file-preview-name" title={path}>
-            {fileName(path)}
+            {name}
           </span>
+          <span className="muted tiny">{kindLabel(kind)}</span>
+          <span className="spacer" />
           <button type="button" className="ghost" onClick={onClose} ref={closeRef} aria-label="关闭预览">
             关闭
           </button>
         </header>
+
         <div className="file-preview-body">
-          {status === "loading" && (
+          {phase === "loading" && (
             <p className="muted" role="status">
-              正在加载…
+              {raster ? "正在沙箱中转换并生成预览…" : "正在加载…"}
             </p>
           )}
-          {status === "error" && (
-            <p className="banner error" role="alert">
-              {error}
-            </p>
+
+          {phase === "error" && (
+            <div className="banner error" role="alert">
+              <span>{error}</span>
+              <button type="button" onClick={retry}>
+                重试
+              </button>
+            </div>
           )}
-          {status === "ready" && url && <img src={url} alt={fileName(path)} data-testid="file-preview-image" />}
+
+          {phase === "unsupported" && (
+            <div className="file-preview-note" role="status">
+              <p>该格式暂不支持在线预览。</p>
+              <p className="muted tiny">你可以直接下载原文件，或用「文档工具」把它转换成可预览的格式。</p>
+            </div>
+          )}
+
+          {phase === "ready" && kind === "image" && imageUrl && (
+            <img src={imageUrl} alt={name} data-testid="file-preview-image" onError={() => {
+              setError("图片无法解码，可能已损坏或不是真正的图片格式");
+              setPhase("error");
+            }} />
+          )}
+
+          {phase === "ready" && kind === "text" && text !== null && (
+            <div className="file-preview-text">
+              {textTruncated && (
+                <p className="banner warn" role="status">
+                  文件较大，仅显示开头部分；完整内容请下载查看。
+                </p>
+              )}
+              <pre data-testid="file-preview-text">{text}</pre>
+            </div>
+          )}
+
+          {phase === "ready" && raster && pageCount > 0 && (
+            <div className="file-preview-pages">
+              {pageFailed ? (
+                <div className="banner error" role="alert">
+                  <span>这一页无法显示（转换可能部分失败）。</span>
+                  <button type="button" onClick={() => setPageFailed(false)}>
+                    重试
+                  </button>
+                </div>
+              ) : (
+                <img
+                  key={`${path}#${page}#${attempt}`}
+                  src={api.documentPageUrl(path, page)}
+                  alt={`${name} 第 ${page} 页`}
+                  data-testid="file-preview-page"
+                  onError={() => setPageFailed(true)}
+                />
+              )}
+            </div>
+          )}
         </div>
+
         <footer className="file-preview-foot">
-          <a className="primary" href={api.downloadUrl(path)} download={fileName(path)} data-testid="file-preview-download">
+          {raster && pageCount > 0 && (
+            <div className="file-preview-pager" role="group" aria-label="翻页">
+              <button type="button" className="ghost" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page <= 1}>
+                上一页
+              </button>
+              <span className="muted tiny" data-testid="file-preview-pageno">
+                {page} / {pageCount}
+                {truncated ? `（共 ${totalPages} 页，仅预览前 ${pageCount} 页）` : ""}
+              </span>
+              <button
+                type="button"
+                className="ghost"
+                onClick={() => setPage((p) => Math.min(pageCount, p + 1))}
+                disabled={page >= pageCount}
+              >
+                下一页
+              </button>
+            </div>
+          )}
+          {truncated && pageCount > 0 && <span className="muted tiny">预览已截断</span>}
+          <span className="spacer" />
+          {onConvert && (kind === "word" || kind === "excel" || kind === "ppt") && (
+            <button type="button" className="ghost" onClick={() => onConvert(path, "pdf")}>
+              转换为 PDF
+            </button>
+          )}
+          {actions}
+          <a className="primary" href={api.downloadUrl(path)} download={name} data-testid="file-preview-download">
             下载
           </a>
         </footer>

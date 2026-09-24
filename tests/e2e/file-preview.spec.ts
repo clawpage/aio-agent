@@ -35,7 +35,29 @@ function sseWithMarkdown(markdown: string): string {
   ].join("\n");
 }
 
-/** Mock the authenticated download endpoint with an attachment disposition. */
+/**
+ * Mock the authenticated *inline image* endpoint.
+ *
+ * The preview no longer points an `<img>` at the download endpoint: that one is
+ * `application/octet-stream` with an attachment disposition, which browsers
+ * refuse to render. `/api/documents/image` sniffs the bytes and answers a real
+ * image content type, so that is what the console fetches.
+ */
+async function mockImage(page: Page, { status = 200, body = TINY_PNG }: { status?: number; body?: Buffer } = {}): Promise<void> {
+  await page.route("**/api/documents/image**", (route) =>
+    route.fulfill({
+      status,
+      contentType: status === 200 ? "image/png" : "application/json",
+      body: status === 200 ? body : JSON.stringify({ error: "unsupported" }),
+    }),
+  );
+}
+
+/**
+ * Mock the authenticated download endpoint with an attachment disposition. This
+ * stays a real download in the test: clicking 下载 must still transfer the
+ * original file, not the preview raster.
+ */
 async function mockDownload(page: Page, { status = 200, body = TINY_PNG }: { status?: number; body?: Buffer } = {}): Promise<void> {
   await page.route("**/api/files/download**", (route) =>
     route.fulfill({
@@ -63,6 +85,7 @@ const fileLink = (page: Page, text: string) => page.locator(".markdown a[data-sa
 test.describe("workspace file links", () => {
   test("an image link opens an in-conversation preview and the 下载 button performs a real download", async ({ page }) => {
     const id = "conv_e2e_file_preview";
+    await mockImage(page);
     await mockDownload(page);
     await openConversation(page, id, "[下载图片](/home/gem/workspace/garden-line-drawing.png)", "下载图片");
 
@@ -93,6 +116,7 @@ test.describe("workspace file links", () => {
 
   test("the file control is keyboard operable after sanitisation (role button, Enter/Space, Escape)", async ({ page }) => {
     const id = "conv_e2e_file_preview_keyboard";
+    await mockImage(page);
     await mockDownload(page);
     await openConversation(page, id, "[下载图片](/home/gem/workspace/garden-line-drawing.png)", "下载图片");
 
@@ -122,9 +146,7 @@ test.describe("workspace file links", () => {
 
   test("a failed preview shows a visible error instead of a blank dialog", async ({ page }) => {
     const id = "conv_e2e_file_preview_error";
-    await page.route("**/api/files/download**", (route) =>
-      route.fulfill({ status: 502, contentType: "application/json", body: JSON.stringify({ error: "download_failed" }) }),
-    );
+    await mockImage(page, { status: 502 });
     await openConversation(page, id, "[下载图片](/home/gem/workspace/garden-line-drawing.png)", "下载图片");
     await fileLink(page, "下载图片").click();
     await expect(page.getByRole("dialog")).toBeVisible({ timeout: 20_000 });
@@ -135,6 +157,7 @@ test.describe("workspace file links", () => {
 
   test("the preview is usable at 360px width", async ({ page }) => {
     const id = "conv_e2e_file_preview_360";
+    await mockImage(page);
     await mockDownload(page);
     await page.setViewportSize({ width: 360, height: 640 });
     await openConversation(page, id, "[下载图片](/home/gem/workspace/garden-line-drawing.png)", "下载图片");
@@ -148,14 +171,29 @@ test.describe("workspace file links", () => {
     expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(360);
   });
 
-  test("a non-image workspace file downloads directly without a dialog", async ({ page }) => {
+  test("a text workspace file previews as safe text and still downloads the original", async ({ page }) => {
     const id = "conv_e2e_file_download";
     await mockDownload(page);
+    // A .txt is a supported preview kind now, so it opens the unified preview and
+    // renders escaped text through /api/documents/text rather than downloading
+    // straight away. The 下载 control must still fetch the original file.
+    await page.route("**/api/documents/text**", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ path: "/home/gem/workspace/report.txt", text: "hello 世界", size: 12, truncated: false }),
+      }),
+    );
     await openConversation(page, id, "[下载文本](/home/gem/workspace/report.txt)", "下载文本");
-    const downloadPromise = page.waitForEvent("download");
     await fileLink(page, "下载文本").click();
+
+    const dialog = page.getByRole("dialog");
+    await expect(dialog).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByTestId("file-preview-text")).toHaveText("hello 世界", { timeout: 20_000 });
+
+    const downloadPromise = page.waitForEvent("download");
+    await page.getByTestId("file-preview-download").click();
     const download = await downloadPromise;
     expect(download.suggestedFilename()).toContain("report.txt");
-    await expect(page.getByRole("dialog")).toHaveCount(0);
   });
 });

@@ -7,6 +7,7 @@ import { TicketStore } from "./auth/tickets.js";
 import { LoginRateLimiter } from "./auth/ratelimit.js";
 import { ensureOwner } from "./auth/owner.js";
 import { SandboxContainer } from "./docker/sandbox.js";
+import { DocumentService } from "./documents/service.js";
 import { HostTokenSource } from "./codex/hostTokens.js";
 import { SandboxCodexSession } from "./codex/sandboxCodex.js";
 import { AgentManager } from "./codex/manager.js";
@@ -30,6 +31,7 @@ export interface BootstrapOptions {
     codex?: import("./codex/manager.js").CodexSessionLike;
     container?: SandboxContainer;
     aio?: AioClient;
+    documents?: DocumentService;
   };
 }
 
@@ -64,6 +66,7 @@ export async function bootstrap(opts: BootstrapOptions = {}): Promise<Bootstrapp
     lockoutMs: cfg.loginLockoutMs,
   });
   const container = opts.overrides?.container ?? new SandboxContainer(cfg, log);
+  const documents = opts.overrides?.documents ?? new DocumentService(cfg, log, container);
   const hostTokens = new HostTokenSource(cfg, log);
   const codex = opts.overrides?.codex ?? new SandboxCodexSession(cfg, log, container, hostTokens);
   const agent = new AgentManager({ cfg, db, log, codex, hostTokens });
@@ -81,6 +84,7 @@ export async function bootstrap(opts: BootstrapOptions = {}): Promise<Bootstrapp
     codex,
     agent,
     aio,
+    documents,
     startedAt: Date.now(),
     sandboxSetupError: null,
     sandboxSurfaces: null,
@@ -146,6 +150,40 @@ export async function startSandboxRuntime(ctx: AppContext): Promise<void> {
   }
 }
 
+/**
+ * Refresh the managed sandbox content (the workspace AGENTS.md template and the
+ * document skill) once per startup.
+ *
+ * `startSandboxRuntime` already seeds, but only when it actually brings the
+ * sandbox up. On an already-healthy container it returns early, so a version
+ * that adds a new managed skill would never reach the running sandbox. This is
+ * deliberately fire-and-forget and failure-tolerant: a sandbox that cannot be
+ * reached must not stop the console from serving chat.
+ */
+export async function refreshSandboxContent(ctx: AppContext): Promise<void> {
+  if (!ctx.cfg.sandbox.autostart) return;
+  try {
+    const state = await ctx.container.inspect();
+    if (!state.exists || !state.running) return;
+    await ctx.container.seedWorkspace();
+    // The managed document scripts (and the published `aio-doc` copy) live in
+    // the persistent tool directory, so a start that ships a newer script must
+    // sync them into an already-running sandbox too - otherwise it keeps running
+    // the previous revision. `ensureScripts` is a cheap digest check that only
+    // writes files/chmod; it never runs apt/pip, so this stays off the chat
+    // critical path. A sandbox that cannot be reached is logged and ignored.
+    try {
+      await ctx.documents.ensureScripts();
+    } catch (err) {
+      ctx.log.warn("sandbox document script refresh failed", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  } catch (err) {
+    ctx.log.warn("sandbox content refresh failed", { error: err instanceof Error ? err.message : String(err) });
+  }
+}
+
 export interface RuntimeRecovery {
   stop(): void;
   /** Run one recovery pass immediately (used by tests and manual checks). */
@@ -205,6 +243,10 @@ async function main(): Promise<void> {
 
   const recovery = startRuntimeRecovery(ctx);
   void recovery.tick();
+  // Independent of the health check above, so a new managed skill reaches a
+  // sandbox that is already running. Never awaited: chat startup must not wait
+  // on the sandbox.
+  void refreshSandboxContent(ctx);
 
   let closing = false;
   const close = async (signal: string) => {

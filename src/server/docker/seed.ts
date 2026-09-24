@@ -38,6 +38,18 @@ export const WORKSPACE_AGENTS_MD = `# 沙箱工作区说明（由 AIO Agent 自�
 该端点实际提供的工具包括：\`browser_navigate\`、\`browser_get_text\`、\`browser_get_markdown\`、
 \`browser_screenshot\`、\`browser_click\`、\`browser_evaluate\`、\`browser_tab_list\`、\`browser_press_key\` 等。
 
+## 文档工具（Word / Excel / PPT / PDF）
+
+创建、修改、转换文档用 \`/home/gem/.codex/tools/aio-doc/bin/aio-doc\`（也可直接用同名 skill）：
+
+- 先确认就绪：\`/home/gem/.codex/tools/aio-doc/bin/aio-doc doctor\`。未就绪时如实说明，不要假装成功。
+- 创建/修改：python-docx（Word）、openpyxl（Excel）、python-pptx（PPT），都在隔离 venv 里。
+- 格式转换：headless LibreOffice，例如 Word → PDF、旧格式 .doc/.xls/.ppt → 现代格式。
+- **openpyxl 不会计算公式**：写完 \`=SUM(...)\` 必须用 \`aio-doc xlsx-recalc\` 让 LibreOffice 重算，
+  再用 \`xlsx-read --values\` 确认缓存值出现，才算真的算对了。\`xlsx-recalc\` 默认输出新文件
+  （\`<原名>.recalc.xlsx\`），只有显式加 \`--in-place\` 才会覆盖原文件。
+- 转换输出为新文件，不要覆盖用户原件；字体与复杂排版可能有差异，不要承诺 100% 保真。
+
 ## 目录与产物约定
 
 工作区根目录只用来放少数顶层目录，不要散落项目、下载物和交付文件。
@@ -76,6 +88,96 @@ export const WORKSPACE_AGENTS_MD = `# 沙箱工作区说明（由 AIO Agent 自�
 - 产物按上面的目录约定写入 \`/home/gem/workspace\`（会持久保存），不要只放在 \`/tmp\`，也不要散落在工作区根目录。
 - 需要浏览器操作时优先用 \`aio browser\` 或 MCP 工具，而不是只描述步骤。
 - 用中文回答，说明你实际执行的命令与结果。
+`;
+
+/**
+ * Sandbox document skill. Written into the controlled CODEX_HOME skills
+ * directory so both new and existing sandboxes can discover the document tools.
+ * It is self-contained: it names the actual in-container CLI and libraries and
+ * never refers to a host tool, a host skill package, or a network service.
+ *
+ * The file is managed (not `onlyIfAbsent`) so a tool-path change actually
+ * reaches existing sandboxes; it never touches any other skill.
+ */
+export const DOCUMENT_SKILL_DIR = "skills/aio-documents";
+export const DOCUMENT_SKILL_MD = `---
+name: aio-documents
+description: Create, modify and convert Word/Excel/PowerPoint/PDF documents inside the AIO sandbox with python-docx, openpyxl, python-pptx and headless LibreOffice. Use for generating reports, spreadsheets with formulas, slide decks, or converting between Office/PDF formats.
+---
+
+# 沙箱文档工具
+
+在沙箱内创建、修改和转换文档。所有处理都在沙箱里完成，不依赖宿主机 Office。
+
+## 先检查工具是否就绪
+
+\`\`\`bash
+/home/gem/.codex/tools/aio-doc/bin/aio-doc doctor        # 一次输出 CLI 与 Python 库的就绪状态
+\`\`\`
+
+未就绪时不要假装成功：告诉用户工具未安装，并让其在工作区「文档工具」页点「安装/修复」。
+
+## 首选入口：\`aio-doc\`
+
+命令安装在 \`/home/gem/.codex/tools/aio-doc/bin/aio-doc\`（不在 PATH 上，用绝对路径调用）：
+
+\`\`\`bash
+/home/gem/.codex/tools/aio-doc/bin/aio-doc --help
+\`\`\`
+
+常用命令：
+
+- Word：\`aio-doc docx-new <path> --text "..."\`、\`docx-read\`、\`docx-append\`
+- Excel：\`aio-doc xlsx-new <path> --rows "a,b"\`、\`xlsx-set <path> B4 --value "=SUM(B1:B3)"\`、\`xlsx-read --values\`
+- PPT：\`aio-doc pptx-new <path> --titles "第一页"\`、\`pptx-read\`
+- 转换：\`aio-doc convert <path> --to pdf\`（也支持 docx/xlsx/pptx/csv/txt）
+- PDF 文本：\`aio-doc pdf-text <path>\`
+
+路径一律用工作区内的绝对路径（\`/home/gem/workspace/...\`）。工具只读写工作区内的文件。下文为简洁仍写作 \`aio-doc\`，实际请用上面的绝对路径。
+
+## 直接使用 Python 库
+
+需要更细的控制时直接用库（与 \`aio-doc\` 使用同一个隔离 venv）：
+
+\`\`\`bash
+/home/gem/.codex/tools/aio-doc/venv/bin/python -c 'from docx import Document; d = Document(); d.add_paragraph("你好"); d.save("/home/gem/workspace/报告.docx")'
+\`\`\`
+
+可用：\`docx\`（python-docx）、\`openpyxl\`、\`pptx\`（python-pptx）、\`pypdf\`、\`reportlab\`。
+中文要指定字体（如 \`宋体\` / \`Noto Sans CJK SC\`）并确认渲染效果。
+
+## Excel 公式的硬性规则
+
+**openpyxl 不会计算公式。** 写入 \`=SUM(A1:A5)\` 只保存公式字符串，没有缓存值；
+不重算的读取方会看到空白。因此：
+
+1. 用 \`xlsx-set\` 或 openpyxl 写公式；
+2. 用 \`aio-doc xlsx-recalc <path>\` 让 LibreOffice 重算并写入缓存值。默认输出到新文件
+   \`<原名>.recalc.xlsx\`，**不覆盖原文件**；只有显式 \`--in-place\` 才覆盖原件，
+   用 \`--out <path>\` 可指定输出路径；
+3. 用 \`aio-doc xlsx-read <path> --values\` 确认缓存值真的出现。
+
+只有第 3 步有真实数字才算成功；不要因为写入了公式就报告计算完成。
+
+## LibreOffice 转换
+
+\`\`\`bash
+soffice --headless --norestore --nolockcheck --nodefault --nologo \
+  -env:UserInstallation=file:///tmp/lo-profile-$$ \
+  --convert-to pdf --outdir /home/gem/workspace/out /home/gem/workspace/输入.docx
+\`\`\`
+
+- 每次用一个独立的 \`-env:UserInstallation\`，避免与其它转换互相干扰。
+- 不要加 \`--\` 分隔符：LibreOffice 7.3 会直接报 \`Error in option: --\`。路径本身是绝对路径，
+  不会被当成选项。
+- 输出到工作区内的新文件，**不要覆盖用户原件**。
+- 字体与复杂排版可能与用户本机 Office 有差异，不要承诺 100% 保真；转换后要实际检查结果。
+- 旧格式（.doc/.xls/.ppt）可先转成现代格式再处理。
+
+## 交付
+
+生成的文件放在 \`/home/gem/workspace\` 下的项目目录或 \`.scratch/artifacts/<topic>/\`，
+不要散落在工作区根目录。完成后报告实际执行的命令与产物路径。
 `;
 
 export const CODEX_CONFIG_TOML = `# 由 AIO Agent 生成；如果你自行修改，系统不会覆盖此文件。

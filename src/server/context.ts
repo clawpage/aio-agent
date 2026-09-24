@@ -8,6 +8,7 @@ import type { SandboxContainer } from "./docker/sandbox.js";
 import type { HostTokenSource } from "./codex/hostTokens.js";
 import type { AgentManager, CodexSessionLike } from "./codex/manager.js";
 import type { AioClient } from "./aio/client.js";
+import type { DocumentService } from "./documents/service.js";
 
 export interface AppContext {
   cfg: Config;
@@ -21,6 +22,8 @@ export interface AppContext {
   codex: CodexSessionLike;
   agent: AgentManager;
   aio: AioClient;
+  /** Sandbox document preview/conversion (readiness, bounded render, cache). */
+  documents: DocumentService;
   startedAt: number;
   /** Last sandbox setup error, surfaced truthfully in status (never a secret). */
   sandboxSetupError: string | null;
