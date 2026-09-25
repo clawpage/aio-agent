@@ -8,6 +8,7 @@ import {
   TurnConflictError,
   buildApprovalResponse,
   parseAttachments,
+  type AgentEvent,
 } from "../../src/server/codex/manager.js";
 import { FakeCodex, testConfig } from "../helpers/harness.js";
 import type { HostTokenSource } from "../../src/server/codex/hostTokens.js";
@@ -1200,5 +1201,147 @@ describe("conversation list ordering", () => {
     expect(archived).toEqual([used.id, blank.id]);
     agent.shutdown();
     db.close();
+  });
+});
+
+describe("AgentManager item lifecycle idempotency", () => {
+  let agent: AgentManager;
+  let codex: FakeCodex;
+  let db: Db;
+  let seq = 0;
+
+  beforeEach(async () => {
+    ({ agent, codex, db } = makeManager());
+    await agent.init();
+  });
+
+  afterEach(() => {
+    agent.shutdown();
+    db.close();
+  });
+
+  /** Start one held turn on a fresh conversation; returns its routed identities. */
+  async function startHeldTurn(title = "idem"): Promise<{ conversationId: string; threadId: string; turnId: string }> {
+    const conv = agent.createConversation({ title });
+    codex.holdTurn("thread_1");
+    agent.submitTurn({ conversationId: conv.id, text: "hi", clientMessageId: `idem-${++seq}` });
+    await tick(40);
+    return { conversationId: conv.id, threadId: codex.startedThreads[0]!.threadId, turnId: codex.startedTurns[0]!.turnId };
+  }
+
+  function startedItem(ids: { threadId: string; turnId: string }, itemId: string, extra: Record<string, unknown> = {}) {
+    return { threadId: ids.threadId, turnId: ids.turnId, item: { id: itemId, type: "agentMessage", text: "", ...extra } };
+  }
+
+  it("persists and emits an identical item/started re-send only once", async () => {
+    const ids = await startHeldTurn();
+    const emitted: AgentEvent[] = [];
+    agent.events.on("event", (e: AgentEvent) => emitted.push(e));
+
+    const payload = startedItem(ids, "msg_dup");
+    codex.emitNotification("item/started", payload);
+    codex.emitNotification("item/started", payload); // bridge re-send, identical payload
+    await tick(10);
+
+    expect(agent.listEvents(ids.conversationId, 0).filter((e) => e.type === "item/started")).toHaveLength(1);
+    expect(emitted.filter((e) => e.type === "item/started")).toHaveLength(1);
+
+    codex.releaseTurn(ids.threadId);
+    codex.completeTurn(ids.turnId);
+    await tick(40);
+  });
+
+  it("persists an identical item/completed re-send only once", async () => {
+    const ids = await startHeldTurn("completed");
+    const payload = { threadId: ids.threadId, turnId: ids.turnId, item: { id: "msg_done", type: "agentMessage", text: "DONE" } };
+    codex.emitNotification("item/completed", payload);
+    codex.emitNotification("item/completed", payload);
+    await tick(10);
+
+    expect(agent.listEvents(ids.conversationId, 0).filter((e) => e.type === "item/completed")).toHaveLength(1);
+
+    codex.releaseTurn(ids.threadId);
+    codex.completeTurn(ids.turnId);
+    await tick(40);
+  });
+
+  it("keeps a same item id with a different payload, a different item id, and a different turn", async () => {
+    const ids = await startHeldTurn("variants");
+
+    // Same item id, different payload (the empty text became real content).
+    codex.emitNotification("item/started", startedItem(ids, "same_id", { text: "" }));
+    codex.emitNotification("item/started", startedItem(ids, "same_id", { text: "real content" }));
+    await tick(10);
+    const sameIdEvents = agent.listEvents(ids.conversationId, 0).filter((e) => e.type === "item/started");
+    expect(sameIdEvents).toHaveLength(2);
+
+    // Different item id with an otherwise identical shape.
+    codex.emitNotification("item/started", startedItem(ids, "other_id"));
+    await tick(10);
+    expect(agent.listEvents(ids.conversationId, 0).filter((e) => e.type === "item/started")).toHaveLength(3);
+
+    codex.releaseTurn(ids.threadId);
+    codex.completeTurn(ids.turnId);
+    await tick(40);
+
+    // Same conversation, next turn: a reused item id must still persist.
+    agent.submitTurn({ conversationId: ids.conversationId, text: "again", clientMessageId: `idem-${++seq}` });
+    await tick(40);
+    const turn2 = codex.startedTurns[codex.startedTurns.length - 1]!;
+    expect(turn2.turnId).not.toBe(ids.turnId);
+    codex.emitNotification("item/started", startedItem({ threadId: turn2.threadId, turnId: turn2.turnId }, "same_id"));
+    await tick(10);
+    expect(agent.listEvents(ids.conversationId, 0).filter((e) => e.type === "item/started")).toHaveLength(4);
+
+    codex.completeTurn(turn2.turnId);
+    await tick(40);
+  });
+
+  it("flushes pending deltas before dropping a duplicate item/started", async () => {
+    const ids = await startHeldTurn("delta-order");
+    const payload = startedItem(ids, "msg_stream");
+    codex.emitNotification("item/started", payload);
+    codex.emitNotification("item/agentMessage/delta", { threadId: ids.threadId, turnId: ids.turnId, itemId: "msg_stream", delta: "PROBE" });
+    // The duplicate arrives while PROBE is still buffered: its flush must win
+    // before the duplicate is dropped.
+    codex.emitNotification("item/started", payload);
+    await tick(10);
+
+    const events = agent.listEvents(ids.conversationId, 0);
+    expect(events.filter((e) => e.type === "item/started")).toHaveLength(1);
+    const startedIdx = events.findIndex((e) => e.type === "item/started");
+    const deltaIdx = events.findIndex((e) => e.type === "stream.delta");
+    expect(deltaIdx).toBeGreaterThan(startedIdx);
+    expect((events[deltaIdx]!.payload as { delta: string }).delta).toBe("PROBE");
+
+    codex.releaseTurn(ids.threadId);
+    codex.completeTurn(ids.turnId);
+    await tick(40);
+  });
+
+  it("deduplicates an identical item/started after a restart (persisted, not in-memory)", async () => {
+    const shared = openDb(":memory:");
+    const first = makeManager({}, shared);
+    await first.agent.init();
+    const conv = first.agent.createConversation({ title: "restart" });
+    first.codex.holdTurn("thread_1");
+    first.agent.submitTurn({ conversationId: conv.id, text: "hi", clientMessageId: `idem-${++seq}` });
+    await tick(40);
+    const threadId = first.codex.startedThreads[0]!.threadId;
+    const turnId = first.codex.startedTurns[0]!.turnId;
+    const payload = { threadId, turnId, item: { id: "msg_restart", type: "agentMessage", text: "" } };
+    first.codex.emitNotification("item/started", payload);
+    await tick(10);
+    expect(first.agent.listEvents(conv.id, 0).filter((e) => e.type === "item/started")).toHaveLength(1);
+    first.agent.shutdown();
+
+    // Fresh process on the same database: the duplicate must still be recognised.
+    const second = makeManager({}, shared);
+    await second.agent.init();
+    second.codex.emitNotification("item/started", payload);
+    await tick(10);
+    expect(second.agent.listEvents(conv.id, 0).filter((e) => e.type === "item/started")).toHaveLength(1);
+    second.agent.shutdown();
+    shared.close();
   });
 });

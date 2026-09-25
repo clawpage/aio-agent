@@ -117,6 +117,14 @@ export interface PendingRequestRow {
   created_at: number;
 }
 
+/**
+ * Item lifecycle notifications that the bridge model may re-send verbatim (same
+ * thread/turn/item and identical payload, ~1s apart). Only these are candidates
+ * for persisted-event deduplication; deltas, turn, warning and approval events
+ * keep their existing behaviour.
+ */
+const ITEM_LIFECYCLE_METHODS = new Set(["item/started", "item/completed"]);
+
 const DELTA_METHODS = new Set([
   "item/agentMessage/delta",
   // Model-generated reasoning summaries only. Raw chain-of-thought
@@ -1333,8 +1341,47 @@ export class AgentManager {
     // Flush buffered deltas first: they arrived before this event, so they must get
     // lower sequence ids. Otherwise a client that applied the completed item first
     // would append stale deltas afterwards and duplicate the text.
+    //
+    // The flush must happen even when this notification turns out to be an exact
+    // duplicate (see below): pending deltas for the same item still have to be
+    // persisted ahead of the (dropped) started/completed marker.
     this.#flushDeltas();
+    if (ITEM_LIFECYCLE_METHODS.has(method) && this.#hasIdenticalItemEvent(route.conversationId, route.turnId, method, params)) {
+      return;
+    }
     this.#appendEvent(route.conversationId, route.turnId, method, params);
+  }
+
+  /**
+   * Whether an identical item-lifecycle event is already persisted.
+   *
+   * The bridge model re-sends the very same `item/started` / `item/completed`
+   * notification a second time. The dedup key is the full tuple —
+   * conversation + turn + event type + item id + complete payload — so only an
+   * exact repeat is dropped. A same item id with a different payload, a
+   * different item id, or a different turn still persists.
+   *
+   * The check reads the events table rather than an in-process Set, so it keeps
+   * working after a restart. Events without an item id are never deduplicated
+   * (nothing real is swallowed), and existing history is untouched.
+   */
+  #hasIdenticalItemEvent(
+    conversationId: string,
+    turnId: string | null,
+    type: string,
+    payload: unknown,
+  ): boolean {
+    const item = (payload as { item?: unknown } | null)?.item;
+    const itemId = (item as { id?: unknown } | null)?.id;
+    if (typeof itemId !== "string" || !itemId) return false;
+    const row = this.#db
+      .prepare(
+        `SELECT id FROM events
+          WHERE conversation_id = ? AND type = ? AND turn_id IS ? AND payload = ?
+          ORDER BY id DESC LIMIT 1`,
+      )
+      .get(conversationId, type, turnId, JSON.stringify(payload ?? null)) as { id: number } | undefined;
+    return row !== undefined;
   }
 
   #bufferDelta(method: string, params: Record<string, unknown>): void {
