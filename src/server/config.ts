@@ -31,6 +31,19 @@ export function parseList(v: string): string[] {
     .filter(Boolean);
 }
 
+/**
+ * Bridged OpenCode Go model ids, in picker order.
+ *
+ * `PA_OPENCODE_GO_MODELS` is the multi-model list; the older single-model
+ * `PA_OPENCODE_GO_MODEL` still wins when it is set, so an existing deployment
+ * that pinned one model keeps exactly that one.
+ */
+function bridgeModelIds(): string[] {
+  const single = envStr("PA_OPENCODE_GO_MODEL", "");
+  if (single) return [single];
+  return parseList(envStr("PA_OPENCODE_GO_MODELS", "deepseek-v4.1-flash,mimo-v2.6-pro"));
+}
+
 export function loadConfig(): {
   port: number;
   bind: string;
@@ -117,13 +130,18 @@ export function loadConfig(): {
     requestTimeoutMs: number;
   };
   /**
-   * Optional OpenCode Go / LiteLLM bridge model. `enabled` is auto by default:
-   * the model is offered only when a key can actually be read.
+   * Optional OpenCode Go / LiteLLM bridge models. `enabled` is auto by default:
+   * the models are offered only when a key can actually be read.
+   *
+   * `PA_OPENCODE_GO_MODEL` (single id) is still honoured and wins over
+   * `PA_OPENCODE_GO_MODELS`, so an existing single-model deployment keeps
+   * exactly the one it configured.
    */
   bridge: {
     enabled: string;
     baseUrl: string;
-    model: string;
+    /** Every bridged model id, in the order the picker should show them. */
+    models: string[];
     providerId: string;
     secretsFile: string;
     envKey: string;
@@ -258,7 +276,7 @@ export function loadConfig(): {
     bridge: {
       enabled: envStr("PA_OPENCODE_GO_ENABLED", "auto"),
       baseUrl: envStr("PA_OPENCODE_GO_BASE_URL", "http://host.docker.internal:4017/v1"),
-      model: envStr("PA_OPENCODE_GO_MODEL", "deepseek-v4.1-flash"),
+      models: bridgeModelIds(),
       providerId: envStr("PA_OPENCODE_GO_PROVIDER_ID", "opencode_go"),
       secretsFile: envStr("PA_OPENCODE_GO_SECRETS_FILE", path.join(os.homedir(), ".config", "codex-opencode-go", "secrets.env")),
       envKey: envStr("PA_OPENCODE_GO_ENV_KEY", "LITELLM_MASTER_KEY"),

@@ -1407,7 +1407,7 @@ export class AgentManager {
    * never runs implicitly, and the UI labels the default from `isDefault`.
    */
   async listModels() {
-    const models = await this.#withBridgeModel(await this.#codex.listModels());
+    const models = this.#withBridgeModels(await this.#codex.listModels());
     // Cache the catalog so a later synchronous submit can validate the unified
     // effort without another Codex round trip.
     this.#modelCatalog = models;
@@ -1417,18 +1417,19 @@ export class AgentManager {
   }
 
   /**
-   * Append the optional bridge model to the Codex catalog.
+   * Append the optional bridge models to the Codex catalog.
    *
    * A custom provider's models never appear in `model/list` (the provider's own
-   * catalog is not merged), so the control plane adds this one entry itself.
-   * With no bridge key the catalog is returned untouched.
+   * catalog is not merged), so the control plane adds those entries itself.
+   * With no bridge key the catalog is returned untouched, and an entry whose id
+   * the CLI already reports is never shadowed by the synthetic one.
    */
-  #withBridgeModel(models: CodexModel[]): CodexModel[] {
-    const entry = this.#bridge?.modelEntry();
-    if (!entry) return models;
-    // Never shadow a real catalog entry with the synthetic one.
-    if (models.some((m) => m.id === entry.id)) return models;
-    return [...models, entry];
+  #withBridgeModels(models: CodexModel[]): CodexModel[] {
+    const entries = this.#bridge?.modelEntries() ?? [];
+    const known = new Set(models.map((m) => m.id));
+    const added = entries.filter((entry) => !known.has(entry.id));
+    if (added.length === 0) return models;
+    return [...models, ...added];
   }
 
   /**

@@ -110,16 +110,22 @@ curl -s http://127.0.0.1:4891/healthz
 校验（拒绝越界、symlink 逃逸、选项注入），预览只回传受鉴权的 raster 图或安全文本，
 下载主动内容一律 `attachment`。转换结果写成**新文件**，绝不覆盖原文件。
 
-## 可选：OpenCode Go（DeepSeek）桥模型
+## 可选：OpenCode Go 桥模型（DeepSeek / MiMo）
 
 统一配置页的模型选择器默认只有 ChatGPT 账号的模型。若本机已装并运行
 `tools/codex-opencode-go`（本地 LiteLLM 的 Responses 桥，监听 `127.0.0.1:4017`，
-模型 `deepseek-v4.1-flash`），控制面会自动多列出一个
-**DeepSeek V4.1 Flash（OpenCode Go）**，可以和 ChatGPT 模型自由切换：
+上游 `https://opencode.ai/zen/go/v1`），控制面会把桥上的每个模型都列进选择器
+（默认 `deepseek-v4.1-flash` 与 `mimo-v2.6-pro`），可以和 ChatGPT 模型自由切换：
 
-- **自动启用**：`PA_OPENCODE_GO_ENABLED=auto`（默认）只在能取到密钥时才列出该模型；
+- **自动启用**：`PA_OPENCODE_GO_ENABLED=auto`（默认）只在能取到密钥时才列出这些模型；
   取不到就完全不出现，ChatGPT 路径与今天完全一致。`on` 会要求启用（取不到密钥会打警告）
   并保持关闭，`off` 显式关闭。
+- **模型清单**：`PA_OPENCODE_GO_MODELS`（逗号分隔，默认两个模型）。旧变量
+  `PA_OPENCODE_GO_MODEL` 仍可用，设置它等价于只列出那一个模型（优先级更高），
+  既有单模型部署行为不变。
+- **每个模型的思考强度**：DeepSeek 支持 `low`/`high`/`max`，MiMo 上游拒绝 `max`
+  （HTTP 400），只提供 `low`/`high`；两者默认都是 `high`。选择器只列出各模型
+  真实可用的档位，所以不会存下一个每次执行都失败的组合。
 - **密钥**：优先读进程环境变量 `LITELLM_MASTER_KEY`，否则读私有文件
   `~/.config/codex-opencode-go/secrets.env`（逐行 `KEY=VALUE`，**不执行**）。
   文件权限宽于 `600`/`400` 时**拒绝使用**并给出可读日志。密钥不写日志、数据库、argv
@@ -131,9 +137,8 @@ curl -s http://127.0.0.1:4891/healthz
   所以同一个会话换模型若跨了 provider，控制面会用 `thread/fork` 续在新 provider 上并保留
   历史；provider 不变时仍走普通 resume。ChatGPT 会话的启动/恢复/派生一如既往**不发送**
   `modelProvider`。
-- **仅支持文本**：该模型 `inputModalities` 只有 `text`，带图片的提交会在提交阶段就被拒绝
-  （HTTP 400 `input_unsupported`，中文提示），不会等远端报错。思考强度支持
-  `low`/`high`/`max`，默认 `high`。
+- **仅支持文本**：两个桥模型的 `inputModalities` 都只有 `text`，带图片的提交会在提交阶段
+  就被拒绝（HTTP 400 `input_unsupported`，中文提示），不会等远端报错。
 - **已知边界**：密钥在沙箱内对进程可见（Codex 需要读取它）——这是该桥的固有代价，
   与本项目「不桥接宿主机能力」的既有边界不冲突，但请自行评估；桥不可用时该模型只是不出现，
   不会影响控制面启动。
@@ -207,9 +212,11 @@ npm run build && npx playwright test --config playwright.local.config.ts
 | `PA_TITLE_MAX_CHARS` | `24` | 生成标题的最大字符数 |
 | `PA_MAX_CONCURRENT_TURNS` | `3` | 跨会话同时执行的主 turn 上限（取值 clamp 到 1–3）；同一会话始终串行，排队 FIFO |
 | `PA_REASONING_SUMMARY` | `concise` | 主 turn 的思考摘要模式（`concise`/`auto`/`detailed`/`none`），不展示原始思维链 |
-| `PA_OPENCODE_GO_ENABLED` | `auto` | 是否列出 OpenCode Go（DeepSeek）桥模型；`auto` 仅在有密钥时出现，另有 `on`/`off` |
+| `PA_OPENCODE_GO_ENABLED` | `auto` | 是否列出 OpenCode Go 桥模型；`auto` 仅在有密钥时出现，另有 `on`/`off` |
 | `PA_OPENCODE_GO_BASE_URL` | `http://host.docker.internal:4017/v1` | 沙箱内可达的 LiteLLM Responses 桥地址 |
-| `PA_OPENCODE_GO_MODEL` / `PA_OPENCODE_GO_PROVIDER_ID` | `deepseek-v4.1-flash` / `opencode_go` | 桥模型 id 与注入 Codex 的 provider id |
+| `PA_OPENCODE_GO_MODELS` | `deepseek-v4.1-flash,mimo-v2.6-pro` | 桥模型 id 列表（逗号分隔），决定选择器里出现哪些桥模型 |
+| `PA_OPENCODE_GO_MODEL`（兼容旧配置） | 空 | 设置则只列出这一个桥模型，优先级高于 `PA_OPENCODE_GO_MODELS` |
+| `PA_OPENCODE_GO_PROVIDER_ID` | `opencode_go` | 注入 Codex 的 provider id（与 `~/.codex/opencode-go.config.toml` 保持一致） |
 | `PA_OPENCODE_GO_SECRETS_FILE` / `PA_OPENCODE_GO_ENV_KEY` | `~/.config/codex-opencode-go/secrets.env` / `LITELLM_MASTER_KEY` | 密钥来源（环境变量优先，其次该文件；权限宽于 600/400 拒绝） |
 | `PA_SANDBOX_PORT` | `18081` | 沙箱发布到 loopback 的端口 |
 | `PA_OWNER_PASSWORD` | 空 | 设置则用它，否则生成到 `var/owner-secret.txt` |

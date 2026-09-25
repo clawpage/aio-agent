@@ -234,7 +234,15 @@ export class FakeCodex implements CodexSessionLike {
   forkedThreads: Array<{ from: string; threadId: string; model?: string; modelProvider?: string }> = [];
   /** Provider each created/forked thread runs on (null = ChatGPT account). */
   threadProviders = new Map<string, string | null>();
-  startedTurns: Array<{ threadId: string; turnId: string; text: string; model?: string | null; attachments?: Array<{ path: string; kind: string }> }> = [];
+  startedTurns: Array<{
+    threadId: string;
+    turnId: string;
+    text: string;
+    model?: string | null;
+    /** Reasoning effort the turn was started with, when one was sent. */
+    effort?: string | null;
+    attachments?: Array<{ path: string; kind: string }>;
+  }> = [];
   /** Summary mode passed on the most recent main turn. */
   lastStartTurnSummary: string | null | undefined = undefined;
   interrupted: Array<{ threadId: string; turnId: string }> = [];
@@ -346,12 +354,20 @@ export class FakeCodex implements CodexSessionLike {
     text: string;
     attachments?: Array<{ path: string; kind: "image" | "file"; name?: string }>;
     model?: string | null;
+    effort?: string | null;
     clientUserMessageId?: string | null;
     summary?: "none" | "auto" | "concise" | "detailed" | null;
   }): Promise<string> {
     const turnId = `turn_${++this.#turnSeq}`;
     this.lastStartTurnSummary = params.summary;
-    this.startedTurns.push({ threadId: params.threadId, turnId, text: params.text, model: params.model, attachments: params.attachments });
+    this.startedTurns.push({
+      threadId: params.threadId,
+      turnId,
+      text: params.text,
+      model: params.model,
+      effort: params.effort,
+      attachments: params.attachments,
+    });
     if (this.startTurnGate) await this.startTurnGate;
     if (this.#manualTurns.has(params.threadId)) return turnId;
     return turnId;

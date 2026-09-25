@@ -12,11 +12,56 @@ import type { CodexModel } from "./codex/sandboxCodex.js";
  */
 export const CHATGPT_PROVIDER_ID = "openai";
 
-const BRIDGE_DISPLAY_NAME = "DeepSeek V4.1 Flash（OpenCode Go）";
+const BRIDGE_TEXT_ONLY: string[] = ["text"];
 
-/** The three thinking levels the bridged model was verified to accept. */
-const BRIDGE_EFFORTS = ["low", "high", "max"] as const;
-const BRIDGE_DEFAULT_EFFORT = "high";
+/**
+ * Per-model metadata for the models the local OpenCode Go bridge serves.
+ *
+ * Everything here is verified against the upstream endpoint, not copied from
+ * the bridge config: a model must not advertise a thinking level the upstream
+ * rejects, or the settings page would let an owner save a combination whose
+ * every turn fails. An id that is not listed gets the conservative defaults
+ * below (no `max`, text-only), which is the safe direction to be wrong in.
+ */
+interface BridgeModelSpec {
+  displayName: string;
+  description: string;
+  supportedReasoningEfforts: string[];
+  defaultReasoningEffort: string;
+  inputModalities: string[];
+}
+
+const BRIDGE_MODEL_SPECS: Record<string, BridgeModelSpec> = {
+  "deepseek-v4.1-flash": {
+    displayName: "DeepSeek V4.1 Flash（OpenCode Go）",
+    description: "OpenCode Go（本机 LiteLLM 桥）提供的 DeepSeek 模型；仅支持文本输入。",
+    supportedReasoningEfforts: ["low", "high", "max"],
+    defaultReasoningEffort: "high",
+    inputModalities: BRIDGE_TEXT_ONLY,
+  },
+  "mimo-v2.6-pro": {
+    displayName: "MiMo V2.6 Pro（OpenCode Go）",
+    // The upstream answers HTTP 400 "Invalid request parameters" for `max`, so
+    // it is deliberately absent here rather than offered and then rejected.
+    description: "OpenCode Go（本机 LiteLLM 桥）提供的 MiMo 模型；仅支持文本输入，思考强度最高到 high。",
+    supportedReasoningEfforts: ["low", "high"],
+    defaultReasoningEffort: "high",
+    inputModalities: BRIDGE_TEXT_ONLY,
+  },
+};
+
+/** Metadata for one bridged model id; unknown ids get the conservative defaults. */
+function bridgeModelSpec(model: string): BridgeModelSpec {
+  return (
+    BRIDGE_MODEL_SPECS[model] ?? {
+      displayName: `${model}（OpenCode Go）`,
+      description: "OpenCode Go（本机 LiteLLM 桥）提供的模型；仅支持文本输入。",
+      supportedReasoningEfforts: ["low", "high"],
+      defaultReasoningEffort: "high",
+      inputModalities: BRIDGE_TEXT_ONLY,
+    }
+  );
+}
 
 export type BridgeEnabledSetting = "auto" | "on" | "off";
 
@@ -28,7 +73,8 @@ export interface BridgeStatus {
   /** The master key itself. Callers must never log, persist or echo it. */
   secret: string | null;
   providerId: string;
-  model: string;
+  /** Every model the bridge serves, in configured order. */
+  models: string[];
   baseUrl: string;
   /** Environment variable name the sandbox Codex reads the key from. */
   envKey: string;
@@ -126,7 +172,7 @@ export class BridgeModel {
     const setting = parseEnabledSetting(b.enabled);
     const base = {
       providerId: b.providerId,
-      model: b.model,
+      models: b.models,
       baseUrl: b.baseUrl,
       envKey: b.envKey,
       setting,
@@ -158,7 +204,7 @@ export class BridgeModel {
 
     this.#status = { ...base, enabled: true, reason: null, secret };
     this.#log.info("桥模型已启用", {
-      model: b.model,
+      models: b.models,
       provider: b.providerId,
       baseUrl: b.baseUrl,
       envKey: b.envKey,
@@ -171,30 +217,33 @@ export class BridgeModel {
     return this.status().enabled;
   }
 
-  /** The bridged model id, whether or not the bridge is usable. */
-  get modelId(): string {
-    return this.#cfg.bridge.model;
+  /** Every bridged model id, whether or not the bridge is usable. */
+  get modelIds(): string[] {
+    return this.#cfg.bridge.models;
   }
 
   get providerId(): string {
     return this.#cfg.bridge.providerId;
   }
 
-  /** The catalog entry the control plane adds; null while the bridge is off. */
-  modelEntry(): CodexModel | null {
+  /** Catalog entries the control plane adds; empty while the bridge is off. */
+  modelEntries(): CodexModel[] {
     const status = this.status();
-    if (!status.enabled) return null;
-    return {
-      id: status.model,
-      model: status.model,
-      displayName: BRIDGE_DISPLAY_NAME,
-      description: "OpenCode Go（本机 LiteLLM 桥）提供的 DeepSeek 模型；仅支持文本输入。",
-      isDefault: false,
-      supportedReasoningEfforts: [...BRIDGE_EFFORTS],
-      defaultReasoningEffort: BRIDGE_DEFAULT_EFFORT,
-      inputModalities: ["text"],
-      modelProvider: status.providerId,
-    };
+    if (!status.enabled) return [];
+    return status.models.map((id) => {
+      const spec = bridgeModelSpec(id);
+      return {
+        id,
+        model: id,
+        displayName: spec.displayName,
+        description: spec.description,
+        isDefault: false,
+        supportedReasoningEfforts: [...spec.supportedReasoningEfforts],
+        defaultReasoningEffort: spec.defaultReasoningEffort,
+        inputModalities: [...spec.inputModalities],
+        modelProvider: status.providerId,
+      };
+    });
   }
 
   /**
@@ -238,7 +287,7 @@ export class BridgeModel {
   /** Provider a turn using `model` must run on. */
   providerForModel(model: string): string {
     const status = this.status();
-    return status.enabled && model === status.model ? status.providerId : CHATGPT_PROVIDER_ID;
+    return status.enabled && status.models.includes(model) ? status.providerId : CHATGPT_PROVIDER_ID;
   }
 
   /** Whether this model can only take text (so an image must be refused early). */

@@ -22,19 +22,65 @@ afterAll(async () => {
 });
 
 describe("bridge model over HTTP", () => {
-  it("offers the bridge model in the catalog with its provider and modalities", async () => {
+  it("offers both bridge models in the catalog with their provider and modalities", async () => {
     const { cookie } = await login(h);
     const res = await h.request("/api/models", { headers: { cookie } });
     expect(res.status).toBe(200);
     const { models } = (await res.json()) as {
       models: Array<{ id: string; isDefault: boolean; inputModalities: string[]; modelProvider: string | null }>;
     };
-    const bridge = models.find((m) => m.id === "deepseek-v4.1-flash");
-    expect(bridge).toBeDefined();
-    expect(bridge?.modelProvider).toBe("opencode_go");
-    expect(bridge?.inputModalities).toEqual(["text"]);
+    for (const id of ["deepseek-v4.1-flash", "mimo-v2.6-pro"]) {
+      const bridge = models.find((m) => m.id === id);
+      expect(bridge, `${id} must be offered while the bridge is enabled`).toBeDefined();
+      expect(bridge?.modelProvider).toBe("opencode_go");
+      expect(bridge?.inputModalities).toEqual(["text"]);
+    }
     // The product default is still the ChatGPT model, never the bridge one.
     expect(models.filter((m) => m.isDefault).map((m) => m.id)).toEqual(["gpt-6-sol"]);
+  });
+
+  it("advertises each bridge model's own thinking levels over HTTP", async () => {
+    const { cookie } = await login(h);
+    const res = await h.request("/api/settings", { headers: { cookie } });
+    expect(res.status).toBe(200);
+    const { models } = (await res.json()) as {
+      models: Array<{ id: string; supportedReasoningEfforts: string[]; defaultReasoningEffort: string | null }>;
+    };
+    const deepseek = models.find((m) => m.id === "deepseek-v4.1-flash");
+    expect(deepseek?.supportedReasoningEfforts).toEqual(["low", "high", "max"]);
+
+    const mimo = models.find((m) => m.id === "mimo-v2.6-pro");
+    expect(mimo).toBeDefined();
+    // `max` is refused upstream for mimo, so the API must not offer it.
+    expect(mimo?.supportedReasoningEfforts).toEqual(["low", "high"]);
+    expect(mimo?.supportedReasoningEfforts).not.toContain("max");
+    expect(mimo?.defaultReasoningEffort).toBe("high");
+  });
+
+  it("refuses an unsupported effort for mimo but accepts a supported one", async () => {
+    const { cookie, csrf } = await login(h);
+    const headers = { cookie, "x-csrf-token": csrf, "content-type": "application/json" };
+
+    const bad = await h.request("/api/settings", {
+      method: "PUT",
+      headers,
+      body: JSON.stringify({ model: "mimo-v2.6-pro", effort: "max" }),
+    });
+    expect(bad.status).toBe(400);
+
+    const ok = await h.request("/api/settings", {
+      method: "PUT",
+      headers,
+      body: JSON.stringify({ model: "mimo-v2.6-pro", effort: "low" }),
+    });
+    expect(ok.status).toBe(200);
+    expect(((await ok.json()) as { settings: unknown }).settings).toEqual({
+      model: "mimo-v2.6-pro",
+      effort: "low",
+    });
+
+    // Restore the ChatGPT default so later cases in this file start clean.
+    await h.request("/api/settings", { method: "PUT", headers, body: JSON.stringify({ model: null, effort: null }) });
   });
 
   it("reports the bridge model in the settings catalog and accepts its own effort", async () => {

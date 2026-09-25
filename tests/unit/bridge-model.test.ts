@@ -74,13 +74,17 @@ describe("BridgeModel configuration", () => {
     const cfg = testConfig("/tmp/pa-bridge-off", 1, { PA_OPENCODE_GO_SECRETS_FILE: "/nonexistent/secrets.env" });
     const bridge = new BridgeModel(cfg, new Logger("error", undefined, false));
     expect(bridge.enabled).toBe(false);
-    expect(bridge.modelEntry()).toBeNull();
+    expect(bridge.modelEntries()).toEqual([]);
     expect(bridge.providerConfigArgs()).toEqual([]);
     expect(bridge.providerEnvFlags()).toEqual([]);
     expect(bridge.providerEnv()).toEqual({});
     // With no bridge, every model resolves to the ChatGPT provider.
     expect(bridge.providerForModel("gpt-6-sol")).toBe(CHATGPT_PROVIDER_ID);
     expect(bridge.isTextOnly("gpt-6-sol")).toBe(false);
+    // Neither bridged id may be claimed while the bridge is off.
+    expect(bridge.providerForModel("deepseek-v4.1-flash")).toBe(CHATGPT_PROVIDER_ID);
+    expect(bridge.providerForModel("mimo-v2.6-pro")).toBe(CHATGPT_PROVIDER_ID);
+    expect(bridge.isTextOnly("mimo-v2.6-pro")).toBe(false);
   });
 
   it("enables the provider and catalog entry when a permission-clean key file exists", () => {
@@ -91,14 +95,28 @@ describe("BridgeModel configuration", () => {
     const bridge = new BridgeModel(cfg, new Logger("error", undefined, false));
     expect(bridge.enabled).toBe(true);
 
-    const entry = bridge.modelEntry();
-    expect(entry?.id).toBe("deepseek-v4.1-flash");
-    expect(entry?.displayName).toContain("OpenCode Go");
-    expect(entry?.supportedReasoningEfforts).toEqual(["low", "high", "max"]);
-    expect(entry?.defaultReasoningEffort).toBe("high");
-    expect(entry?.inputModalities).toEqual(["text"]);
-    expect(entry?.modelProvider).toBe("opencode_go");
-    expect(entry?.isDefault).toBe(false);
+    // Both bridged models are offered, in configured order.
+    expect(bridge.modelIds).toEqual(["deepseek-v4.1-flash", "mimo-v2.6-pro"]);
+    const entries = bridge.modelEntries();
+    expect(entries.map((e) => e.id)).toEqual(["deepseek-v4.1-flash", "mimo-v2.6-pro"]);
+    for (const entry of entries) {
+      expect(entry.displayName).toContain("OpenCode Go");
+      expect(entry.modelProvider).toBe("opencode_go");
+      expect(entry.isDefault).toBe(false);
+      // Both are text-only; neither may advertise image input.
+      expect(entry.inputModalities).toEqual(["text"]);
+      // A bridged model always has a concrete default effort.
+      expect(entry.supportedReasoningEfforts).toContain(entry.defaultReasoningEffort);
+    }
+
+    const [deepseek, mimo] = entries;
+    expect(deepseek?.supportedReasoningEfforts).toEqual(["low", "high", "max"]);
+    expect(deepseek?.defaultReasoningEffort).toBe("high");
+    // mimo must not advertise `max`: the upstream rejects it with HTTP 400.
+    expect(mimo?.supportedReasoningEfforts).toEqual(["low", "high"]);
+    expect(mimo?.supportedReasoningEfforts).not.toContain("max");
+    expect(mimo?.defaultReasoningEffort).toBe("high");
+    expect(mimo?.displayName).toContain("MiMo");
 
     const args = bridge.providerConfigArgs();
     expect(args.join(" ")).toContain('model_providers.opencode_go.base_url="http://host.docker.internal:4017/v1"');
@@ -108,8 +126,59 @@ describe("BridgeModel configuration", () => {
     expect(args.join(" ")).not.toContain(SECRET_VALUE);
 
     expect(bridge.providerForModel("deepseek-v4.1-flash")).toBe("opencode_go");
+    expect(bridge.providerForModel("mimo-v2.6-pro")).toBe("opencode_go");
     expect(bridge.isTextOnly("deepseek-v4.1-flash")).toBe(true);
+    expect(bridge.isTextOnly("mimo-v2.6-pro")).toBe(true);
     expect(bridge.providerForModel("gpt-6-sol")).toBe(CHATGPT_PROVIDER_ID);
+    expect(bridge.isTextOnly("gpt-6-sol")).toBe(false);
+  });
+
+  it("honours PA_OPENCODE_GO_MODELS and keeps the legacy single-model variable working", () => {
+    const dir = tmpDir();
+    cleanups.push(() => fs.rmSync(dir, { recursive: true, force: true }));
+    const file = writeSecrets(dir, `LITELLM_MASTER_KEY=${SECRET_VALUE}\n`);
+
+    const custom = new BridgeModel(
+      testConfig("/tmp/pa-bridge-models", 1, {
+        PA_OPENCODE_GO_SECRETS_FILE: file,
+        PA_OPENCODE_GO_MODELS: "mimo-v2.6-pro",
+      }),
+      new Logger("error", undefined, false),
+    );
+    expect(custom.modelIds).toEqual(["mimo-v2.6-pro"]);
+    expect(custom.providerForModel("mimo-v2.6-pro")).toBe("opencode_go");
+    // deepseek is not configured here, so it must not be claimed by the bridge.
+    expect(custom.providerForModel("deepseek-v4.1-flash")).toBe(CHATGPT_PROVIDER_ID);
+
+    // An existing deployment that pinned one model keeps exactly that one.
+    const legacy = new BridgeModel(
+      testConfig("/tmp/pa-bridge-legacy", 1, {
+        PA_OPENCODE_GO_SECRETS_FILE: file,
+        PA_OPENCODE_GO_MODEL: "deepseek-v4.1-flash",
+        PA_OPENCODE_GO_MODELS: "mimo-v2.6-pro,deepseek-v4.1-flash",
+      }),
+      new Logger("error", undefined, false),
+    );
+    expect(legacy.modelIds).toEqual(["deepseek-v4.1-flash"]);
+    expect(legacy.modelEntries().map((e) => e.id)).toEqual(["deepseek-v4.1-flash"]);
+  });
+
+  it("keeps an unknown bridged id conservative instead of inventing capabilities", () => {
+    const dir = tmpDir();
+    cleanups.push(() => fs.rmSync(dir, { recursive: true, force: true }));
+    const file = writeSecrets(dir, `LITELLM_MASTER_KEY=${SECRET_VALUE}\n`);
+    const bridge = new BridgeModel(
+      testConfig("/tmp/pa-bridge-unknown", 1, {
+        PA_OPENCODE_GO_SECRETS_FILE: file,
+        PA_OPENCODE_GO_MODELS: "some-future-model",
+      }),
+      new Logger("error", undefined, false),
+    );
+    const entry = bridge.modelEntries()[0];
+    expect(entry?.id).toBe("some-future-model");
+    expect(entry?.supportedReasoningEfforts).toEqual(["low", "high"]);
+    expect(entry?.supportedReasoningEfforts).not.toContain("max");
+    expect(entry?.inputModalities).toEqual(["text"]);
   });
 
   it("prefers the process environment over the file and honours an explicit off switch", () => {
@@ -129,7 +198,7 @@ describe("BridgeModel configuration", () => {
     );
     // Even with a readable key, an explicit opt-out keeps the model out.
     expect(off.enabled).toBe(false);
-    expect(off.modelEntry()).toBeNull();
+    expect(off.modelEntries()).toEqual([]);
   });
 });
 
@@ -277,6 +346,82 @@ describe("AgentManager with the bridge enabled", () => {
     await tick();
     expect(codex.startedTurns.length).toBe(1);
     codex.completeTurn(codex.startedTurns[0]!.turnId);
+    await tick();
+  });
+
+  it("lists both bridged models with their own thinking levels", async () => {
+    const models = await agent.listModels();
+    const ids = models.map((m) => m.id);
+    expect(ids).toContain("deepseek-v4.1-flash");
+    expect(ids).toContain("mimo-v2.6-pro");
+
+    const deepseek = models.find((m) => m.id === "deepseek-v4.1-flash");
+    expect(deepseek?.supportedReasoningEfforts).toEqual(["low", "high", "max"]);
+    expect(deepseek?.modelProvider).toBe("opencode_go");
+
+    const mimo = models.find((m) => m.id === "mimo-v2.6-pro");
+    expect(mimo?.supportedReasoningEfforts).toEqual(["low", "high"]);
+    expect(mimo?.defaultReasoningEffort).toBe("high");
+    expect(mimo?.inputModalities).toEqual(["text"]);
+    expect(mimo?.modelProvider).toBe("opencode_go");
+
+    // The app default is still the ChatGPT model the product ships with.
+    expect(models.filter((m) => m.isDefault).map((m) => m.id)).toEqual(["gpt-6-sol"]);
+  });
+
+  it("saves and runs mimo on the bridge provider, but refuses its unsupported max", async () => {
+    // `max` is rejected upstream for mimo, so it must not be savable here.
+    const bad = agent.saveAgentSettings({ model: "mimo-v2.6-pro", effort: "max" }, await agent.listModels());
+    expect(bad.ok).toBe(false);
+
+    const saved = agent.saveAgentSettings({ model: "mimo-v2.6-pro", effort: "high" }, await agent.listModels());
+    expect(saved.ok).toBe(true);
+
+    const conv = agent.createConversation({ title: "mimo" });
+    agent.submitTurn({ conversationId: conv.id, text: "hi", clientMessageId: "m1" });
+    await tick();
+    expect(codex.startedThreads.length).toBe(1);
+    const threadId = codex.startedThreads[0]!.threadId;
+    expect(codex.threadProviders.get(threadId)).toBe("opencode_go");
+    expect(codex.startedTurns[0]?.model).toBe("mimo-v2.6-pro");
+    // The frozen effort is the one that was saved, not silently upgraded.
+    expect(codex.startedTurns[0]?.effort).toBe("high");
+    codex.completeTurn(codex.startedTurns[0]!.turnId);
+    await tick();
+  });
+
+  it("refuses an image attachment on mimo as well", async () => {
+    agent.saveAgentSettings({ model: "mimo-v2.6-pro", effort: null }, await agent.listModels());
+    const conv = agent.createConversation({ title: "mimo-text-only" });
+    expect(() =>
+      agent.submitTurn({
+        conversationId: conv.id,
+        text: "look",
+        clientMessageId: "m3",
+        attachments: [{ path: "/home/gem/workspace/a.png", kind: "image" }],
+      }),
+    ).toThrow(TurnInputUnsupportedError);
+    expect(codex.startedTurns.length).toBe(0);
+  });
+
+  it("keeps both bridged models on one provider thread when switching between them", async () => {
+    // Both slugs share the same provider, so switching between them must not
+    // force a thread fork the way crossing to ChatGPT does.
+    agent.saveAgentSettings({ model: "deepseek-v4.1-flash", effort: "high" }, await agent.listModels());
+    const conv = agent.createConversation({ title: "bridged-pair" });
+    agent.submitTurn({ conversationId: conv.id, text: "one", clientMessageId: "p1" });
+    await tick();
+    codex.completeTurn(codex.startedTurns[0]!.turnId);
+    await tick();
+    expect(codex.forkedThreads.length).toBe(0);
+
+    agent.saveAgentSettings({ model: "mimo-v2.6-pro", effort: "low" }, await agent.listModels());
+    agent.submitTurn({ conversationId: conv.id, text: "two", clientMessageId: "p2" });
+    await tick();
+    expect(codex.forkedThreads.length).toBe(0);
+    expect(codex.startedTurns[1]?.model).toBe("mimo-v2.6-pro");
+    expect(codex.threadProviders.get(codex.startedTurns[1]!.threadId)).toBe("opencode_go");
+    codex.completeTurn(codex.startedTurns[1]!.turnId);
     await tick();
   });
 });

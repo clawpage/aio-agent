@@ -195,6 +195,14 @@ test("config page explains a text-only bridge model and saves it with its own ef
         inputModalities: ["text"],
         modelProvider: "opencode_go",
       },
+      {
+        id: "mimo-v2.6-pro",
+        displayName: "MiMo V2.6 Pro（OpenCode Go）",
+        supportedReasoningEfforts: ["low", "high"],
+        defaultReasoningEffort: "high",
+        inputModalities: ["text"],
+        modelProvider: "opencode_go",
+      },
     ],
   });
   let savedBody: unknown;
@@ -215,6 +223,22 @@ test("config page explains a text-only bridge model and saves it with its own ef
   await page.getByRole("button", { name: "保存", exact: true }).click();
   await expect(page.locator(".banner.ok")).toContainText("已保存");
   expect(savedBody).toMatchObject({ model: "deepseek-v4.1-flash", effort: "max" });
+
+  // The second bridge model has its own, narrower effort list: `max` must not
+  // be offered for it, because the upstream rejects that combination.
+  await page.getByLabel("模型", { exact: true }).selectOption("mimo-v2.6-pro");
+  await expect(page.getByRole("note")).toContainText("只支持文本输入");
+  // Options render with Chinese labels ("低"/"高"/"最高"), so assert on values.
+  const mimoEffortValues = await page
+    .getByLabel("思考强度", { exact: true })
+    .locator("option")
+    .evaluateAll((options) => options.map((option) => (option as HTMLOptionElement).value));
+  expect(mimoEffortValues).toContain("high");
+  expect(mimoEffortValues).not.toContain("max");
+  await page.getByLabel("思考强度", { exact: true }).selectOption("high");
+  await page.getByRole("button", { name: "保存", exact: true }).click();
+  await expect(page.locator(".banner.ok")).toContainText("已保存");
+  expect(savedBody).toMatchObject({ model: "mimo-v2.6-pro", effort: "high" });
 
   // Switching back to a ChatGPT model withdraws the text-only note.
   await page.getByLabel("模型", { exact: true }).selectOption("gpt-6-sol");
