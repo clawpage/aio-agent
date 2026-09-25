@@ -81,6 +81,15 @@ export interface TimelineState {
   groupOf: Map<string, string>;
   /** turnId -> latest lifecycle status, so a late group inherits a terminal one. */
   turnStatus: Map<string, WorkingStatus>;
+  /**
+   * assistant item ids that were seen as an empty `agentMessage` item and whose
+   * block was dropped (never created) because it carried no text at all. A late
+   * or duplicated `item/started` for such an id must not resurrect a blank
+   * bubble. This is not a suppression list: any real prose (a non-empty delta or
+   * completed text) clears the marker and builds the block again, so genuine
+   * content is never swallowed.
+   */
+  blankAssistantItems: Set<string>;
   /** Most recent turn-scoped id, used to attribute events carrying no turnId. */
   currentTurnId: string | null;
 }
@@ -144,6 +153,19 @@ export function removeBlock(state: TimelineState, id: string): TimelineState {
 }
 
 /**
+ * Drop one block in place, keeping `blocks` and both index maps exact. Used by
+ * the reducers, which rewrite the state object they are given rather than
+ * returning a new one.
+ */
+function removeBlockInPlace(state: TimelineState, id: string): boolean {
+  const idx = state.index.get(id);
+  if (idx === undefined) return false;
+  state.blocks.splice(idx, 1);
+  reindexInPlace(state);
+  return true;
+}
+
+/**
  * Copy-on-write base for an incremental update. The reducers mutate in place, so
  * every block that a reducer can write to is copied here: each top-level block,
  * every working group, and each group's children (and the children array itself).
@@ -161,6 +183,7 @@ export function cloneTimeline(state: TimelineState): TimelineState {
     groupIndex: new Map(state.groupIndex),
     groupOf: new Map(state.groupOf),
     turnStatus: new Map(state.turnStatus),
+    blankAssistantItems: new Set(state.blankAssistantItems),
     currentTurnId: state.currentTurnId,
   };
 }
@@ -172,6 +195,7 @@ export function emptyTimeline(): TimelineState {
     groupIndex: new Map(),
     groupOf: new Map(),
     turnStatus: new Map(),
+    blankAssistantItems: new Set(),
     currentTurnId: null,
   };
 }
@@ -430,6 +454,10 @@ export function applyEvent(state: TimelineState, event: AgentEvent): void {
       const id = `item:${text(item.id) || String(event.id)}`;
       const turnId = resolveTurnId(state, event);
       if (type === "agentMessage") {
+        // A blank item that was already resolved to nothing stays resolved: a
+        // duplicated or late `item/started` (both occur in stored history) must
+        // not put an empty bubble back on screen. Real text clears the marker.
+        if (state.blankAssistantItems.has(id)) return;
         if (!state.index.has(id)) push(state, { kind: "assistant", id, text: "", streaming: true });
         return;
       }
@@ -458,14 +486,32 @@ export function applyEvent(state: TimelineState, event: AgentEvent): void {
       const type = text(item.type) || "item";
       const turnId = resolveTurnId(state, event);
       if (type === "agentMessage") {
+        const completedText = text(item.text);
         const existing = state.index.get(id);
-        if (existing === undefined) {
-          push(state, { kind: "assistant", id, text: text(item.text), streaming: false });
-        } else {
+        if (existing !== undefined) {
           const block = state.blocks[existing] as AssistantBlock;
-          block.text = text(item.text) || block.text;
+          block.text = completedText || block.text;
           block.streaming = false;
+          // The bridge model emits an empty `agentMessage` item before each tool
+          // call: `item/started` and `item/completed` both carry `text === ""` and
+          // no delta ever arrives. Such an item must not leave a blank bubble
+          // behind. Prose that was buffered from real deltas is kept as-is.
+          if (!block.text.trim()) {
+            removeBlockInPlace(state, id);
+            state.blankAssistantItems.add(id);
+          }
+          return;
         }
+        if (completedText.trim()) {
+          // Real text on a settled item always creates its block, even if an
+          // earlier empty completion had marked this id as blank.
+          state.blankAssistantItems.delete(id);
+          push(state, { kind: "assistant", id, text: completedText, streaming: false });
+          return;
+        }
+        // A blank completion with no block (and no buffered delta) creates
+        // nothing, so replaying legacy history leaves no empty bubble either.
+        state.blankAssistantItems.add(id);
         return;
       }
       if (type === "reasoning") {
@@ -548,6 +594,9 @@ export function applyEvent(state: TimelineState, event: AgentEvent): void {
       }
       const idx = state.index.get(id);
       if (idx === undefined) {
+        // Real prose always has the last word: an item that once completed blank
+        // is un-marked here so a late delta still produces its bubble.
+        state.blankAssistantItems.delete(id);
         push(state, { kind: "assistant", id, text: delta, streaming: true });
         return;
       }
@@ -562,11 +611,17 @@ export function applyEvent(state: TimelineState, event: AgentEvent): void {
       const itemId = text(p.itemId) || "stream";
       const delta = text(p.delta);
       const id = `item:${itemId}`;
+      // Same rule as `stream.delta`: an empty delta carries no prose, so it may
+      // neither create a blank bubble nor keep one alive.
+      if (!delta) return;
       const idx = state.index.get(id);
-      if (idx === undefined) push(state, { kind: "assistant", id, text: delta, streaming: true });
-      else {
+      if (idx === undefined) {
+        state.blankAssistantItems.delete(id);
+        push(state, { kind: "assistant", id, text: delta, streaming: true });
+      } else {
         const block = state.blocks[idx] as AssistantBlock;
         block.text += delta;
+        state.blankAssistantItems.delete(id);
       }
       return;
     }

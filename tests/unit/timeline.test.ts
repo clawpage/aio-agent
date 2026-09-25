@@ -8,6 +8,7 @@ import {
   isWorkingActive,
   removeBlock,
   workingLabel,
+  type AssistantBlock,
   type Block,
   type ReasoningBlock,
   type TimelineState,
@@ -38,6 +39,19 @@ function reasonings(state: TimelineState): ReasoningBlock[] {
 
 function groups(state: TimelineState): WorkingBlock[] {
   return state.blocks.filter((b): b is WorkingBlock => b.kind === "working");
+}
+
+/** Every assistant prose bubble currently on screen. */
+function assistants(state: TimelineState): AssistantBlock[] {
+  return state.blocks.filter((b): b is AssistantBlock => b.kind === "assistant");
+}
+
+/** Both index maps must agree with the real block positions after every edit. */
+function expectExactIndexes(state: TimelineState): void {
+  state.blocks.forEach((b, i) => {
+    expect(state.index.get(b.id)).toBe(i);
+    if (b.kind === "working") expect(state.groupIndex.get(b.turnId)).toBe(i);
+  });
 }
 
 let seq = 0;
@@ -652,5 +666,151 @@ describe("working group presence", () => {
     expect(groups(state)[0]!.children).toHaveLength(0);
     expect(reasonings(state)).toHaveLength(0);
     expect(JSON.stringify(state.blocks)).not.toContain("RAW COT");
+  });
+});
+
+describe("blank agentMessage items", () => {
+  // The bridge model emits an empty `agentMessage` item before each tool call:
+  // `item/started` and `item/completed` both carry `text === ""` and no delta
+  // ever arrives. None of that may reach the screen as an empty bubble.
+  it("produces no assistant bubble for a blank started + completed pair with no delta", () => {
+    const state = feed([
+      ev("item/started", { item: { id: "blank1", type: "agentMessage" } }, "t1"),
+      ev("item/completed", { item: { id: "blank1", type: "agentMessage", text: "" } }, "t1"),
+      ev("item/started", { item: { id: "c1", type: "commandExecution", command: "ls" } }, "t1"),
+      ev("item/completed", { item: { id: "c1", type: "commandExecution", status: "completed", aggregatedOutput: "ok" } }, "t1"),
+    ]);
+    expect(assistants(state)).toHaveLength(0);
+    expect(state.index.has("item:blank1")).toBe(false);
+    // The real tool of that turn is untouched.
+    expect(tools(state).map((t) => t.id)).toEqual(["item:c1"]);
+    expectExactIndexes(state);
+  });
+
+  it("stays empty when the same blank item/started is written twice", () => {
+    // Stored history really does contain a duplicated `item/started` with the
+    // identical payload and id; the second one must not rebuild a blank bubble.
+    const state = feed([
+      ev("item/started", { item: { id: "blank2", type: "agentMessage" } }, "t1"),
+      ev("item/started", { item: { id: "blank2", type: "agentMessage" } }, "t1"),
+      ev("item/completed", { item: { id: "blank2", type: "agentMessage", text: "" } }, "t1"),
+    ]);
+    expect(assistants(state)).toHaveLength(0);
+    expect(state.index.has("item:blank2")).toBe(false);
+    expectExactIndexes(state);
+
+    // A duplicate `item/started` arriving after the blank completion is equally
+    // inert, and the maps stay exact.
+    applyEvent(state, ev("item/started", { item: { id: "blank2", type: "agentMessage" } }, "t1"));
+    expect(assistants(state)).toHaveLength(0);
+    expectExactIndexes(state);
+  });
+
+  it("ignores a blank completed item that arrives before its item/started", () => {
+    const state = feed([
+      ev("item/completed", { item: { id: "blank3", type: "agentMessage", text: "" } }, "t1"),
+      ev("item/started", { item: { id: "blank3", type: "agentMessage" } }, "t1"),
+    ]);
+    expect(assistants(state)).toHaveLength(0);
+    expect(state.index.has("item:blank3")).toBe(false);
+    expectExactIndexes(state);
+  });
+
+  it("still renders real prose after a blank completion for the same id", () => {
+    // Out-of-order recovery: the blank completion came first, but the item did
+    // produce genuine prose. Nothing may be swallowed permanently.
+    const delayed = feed([
+      ev("item/completed", { item: { id: "late1", type: "agentMessage", text: "" } }, "t1"),
+      ev("stream.delta", { itemId: "late1", kind: "item/agentMessage/delta", delta: "真实回答" }, "t1"),
+    ]);
+    expect(assistants(delayed)).toHaveLength(1);
+    expect(assistants(delayed)[0]!.text).toBe("真实回答");
+    expectExactIndexes(delayed);
+
+    const viaCompleted = feed([
+      ev("item/completed", { item: { id: "late2", type: "agentMessage", text: "" } }, "t1"),
+      ev("item/completed", { item: { id: "late2", type: "agentMessage", text: "补上的正文" } }, "t1"),
+    ]);
+    expect(assistants(viaCompleted)).toHaveLength(1);
+    expect(assistants(viaCompleted)[0]!.text).toBe("补上的正文");
+    expect(assistants(viaCompleted)[0]!.streaming).toBe(false);
+    expectExactIndexes(viaCompleted);
+  });
+
+  it("recovers a late item/started with real delta text that follows a blank completion", () => {
+    const state = feed([
+      ev("item/completed", { item: { id: "late3", type: "agentMessage", text: "" } }, "t1"),
+      ev("item/started", { item: { id: "late3", type: "agentMessage" } }, "t1"),
+      ev("stream.delta", { itemId: "late3", kind: "item/agentMessage/delta", delta: "增量正文" }, "t1"),
+    ]);
+    expect(assistants(state)).toHaveLength(1);
+    expect(assistants(state)[0]!.text).toBe("增量正文");
+    expect(assistants(state)[0]!.streaming).toBe(true);
+    expectExactIndexes(state);
+  });
+
+  it("keeps prose buffered from real deltas out of the blank rule", () => {
+    const state = feed([
+      ev("item/started", { item: { id: "m5", type: "agentMessage" } }, "t1"),
+      ev("stream.delta", { itemId: "m5", kind: "item/agentMessage/delta", delta: "PROBE" }),
+      ev("stream.delta", { itemId: "m5", kind: "item/agentMessage/delta", delta: "_OK" }),
+      ev("item/completed", { item: { id: "m5", type: "agentMessage", text: "PROBE_OK" } }, "t1"),
+    ]);
+    expect(assistants(state)).toHaveLength(1);
+    expect(assistants(state)[0]!.text).toBe("PROBE_OK");
+    expect(assistants(state)[0]!.streaming).toBe(false);
+    expectExactIndexes(state);
+  });
+
+  it("keeps whitespace-only completed text out of the timeline but never drops a neighbour", () => {
+    const state = feed([
+      ev("item/completed", { item: { id: "keep", type: "agentMessage", text: "保留的正文" } }, "t1"),
+      ev("item/started", { item: { id: "ws", type: "agentMessage" } }, "t1"),
+      ev("item/completed", { item: { id: "ws", type: "agentMessage", text: "   \n\n" } }, "t1"),
+    ]);
+    expect(assistants(state).map((b) => b.id)).toEqual(["item:keep"]);
+    expect(state.index.get("item:keep")).toBe(0);
+    expectExactIndexes(state);
+  });
+
+  it("never lets an empty delta create a blank bubble", () => {
+    const state = feed([
+      ev("item/agentMessage/delta", { itemId: "e1", delta: "" }, "t1"),
+      ev("stream.delta", { itemId: "e2", kind: "item/agentMessage/delta", delta: "" }, "t1"),
+    ]);
+    expect(assistants(state)).toHaveLength(0);
+    expect(state.index.size).toBe(0);
+  });
+
+  it("never deletes real prose when a duplicate empty completion follows it", () => {
+    const state = feed([
+      ev("item/started", { item: { id: "m6", type: "agentMessage" } }, "t1"),
+      ev("item/completed", { item: { id: "m6", type: "agentMessage", text: "真实正文" } }, "t1"),
+      // A replayed/duplicated empty completion must not overwrite or delete it.
+      ev("item/completed", { item: { id: "m6", type: "agentMessage", text: "" } }, "t1"),
+    ]);
+    expect(assistants(state)).toHaveLength(1);
+    expect(assistants(state)[0]!.text).toBe("真实正文");
+    expect(assistants(state)[0]!.streaming).toBe(false);
+    expectExactIndexes(state);
+  });
+
+  it("drops a blank assistant bubble during a legacy history replay, leaving the tools", () => {
+    // A whole stored conversation: the bridge's blank prose items interleaved
+    // with real tool calls, replayed in one pass exactly as the client does.
+    const state = feed([
+      ev("turn.started", { turnId: "t1" }, "t1"),
+      ev("item/started", { item: { id: "b1", type: "agentMessage" } }, "t1"),
+      ev("item/started", { item: { id: "b1", type: "agentMessage" } }, "t1"),
+      ev("item/completed", { item: { id: "b1", type: "agentMessage", text: "" } }, "t1"),
+      ev("item/started", { item: { id: "c1", type: "commandExecution", command: "ls" } }, "t1"),
+      ev("item/completed", { item: { id: "c1", type: "commandExecution", status: "completed", aggregatedOutput: "a\nb" } }, "t1"),
+      ev("item/completed", { item: { id: "m1", type: "agentMessage", text: "最终回答" } }, "t1"),
+      ev("turn.finished", { turnId: "t1", status: "completed" }, "t1"),
+    ]);
+    expect(assistants(state).map((b) => b.id)).toEqual(["item:m1"]);
+    expect(tools(state).map((t) => t.id)).toEqual(["item:c1"]);
+    expect(groups(state)[0]!.children.map((c) => c.id)).toEqual(["item:c1"]);
+    expectExactIndexes(state);
   });
 });

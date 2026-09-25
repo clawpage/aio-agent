@@ -517,6 +517,11 @@ function BlockView({
   }
 
   if (block.kind === "assistant") {
+    // Defensive fallback for stored or abnormal history: a settled assistant
+    // block with no text at all would render an empty bubble. The reducer
+    // already drops such blocks; this only keeps a blank bubble off screen if
+    // one ever reaches the view (a streaming block keeps its caret).
+    if (!block.streaming && !block.text.trim()) return null;
     return (
       <article className="msg assistant">
         <div className="bubble">
