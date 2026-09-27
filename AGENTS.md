@@ -5,7 +5,7 @@
 ## 项目定位
 
 **AIO Agent**：single-owner、self-hosted 的智能体控制台 + 常驻 AIO 沙箱 + 常驻主 Codex 智能体，
-中文 UI。用户只操作一个主会话，每条消息委派到独立子任务；不展示旧会话历史入口。不是多租户服务，没有注册入口，不对外提供公共 demo；未登录一律 401。
+中文 UI。用户只操作一个主会话，独立请求委派到子任务，相关补充追加到原任务；不展示旧会话历史入口。不是多租户服务，没有注册入口，不对外提供公共 demo；未登录一律 401。
 公网入口（`PA_PRIMARY_HOST` / `PA_WORKSPACE_HOST`）由使用者自行填写，见 `.env.example` 的
 `agent.example.com` / `workspace.example.com` 占位。
 

@@ -1,3 +1,4 @@
+import { JsonRpcResponseError } from "../codex/jsonrpc.js";
 import type { Db } from "../db.js";
 import type { Config } from "../config.js";
 import { randomId } from "../auth/passwords.js";
@@ -13,6 +14,7 @@ interface TaskRow {
     input_text: string;
     attachments_json: string;
     related_task_id: string | null;
+    merged_into: string | null;
     status: string;
     plan_json: string | null;
     model: string | null;
@@ -34,13 +36,16 @@ const DISPATCHED = new Set(["queued", "running", "stopping"]);
 export class TaskService {
     #closed = false;
     #planning = false;
+    #merging = false;
+    #mergeAgain = false;
     #scheduled = false;
     constructor(private db: Db, private cfg: Config, private agent: AgentManager, private codex: CodexSessionLike) { }
     init(): void {
         // AgentManager reconciles in-flight turns before this runs. Never replay an
         // executor with uncertain side effects. Unsubmitted planning is safe to resume.
+        this.db.prepare("UPDATE tasks SET status='merge_unknown',error=? WHERE status='steering'").run("重启前的补充消息是否送达无法确认，请核对任务结果，不会自动重发。");
         for (const row of this.rows()) {
-            if (row.turn_id && !TERMINAL.has(row.status))
+            if (row.turn_id && !row.merged_into && !TERMINAL.has(row.status))
                 this.syncTurn(row);
         }
         this.agent.events.on("event", this.onEvent);
@@ -52,8 +57,9 @@ export class TaskService {
     ownsConversation(id: string): boolean { return !!this.db.prepare("SELECT 1 FROM tasks WHERE conversation_id=?").get(id); }
     view(row: TaskRow) {
         const plan = row.plan_json ? JSON.parse(row.plan_json) as TaskPlan : null;
+        const parent = row.merged_into ? this.get(row.merged_into) : null;
         return {
-            id: row.id, revision: row.revision, title: row.title, text: row.input_text, conversationId: row.conversation_id,
+            id: row.id, revision: row.revision, title: row.title, text: row.input_text, conversationId: parent?.conversation_id ?? row.conversation_id, mergedInto: row.merged_into, mergedTitle: parent?.title ?? null,
             status: row.status, result: TERMINAL.has(row.status) ? row.result : null, error: row.error,
             attachments: JSON.parse(row.attachments_json) as TurnAttachment[], relatedTaskId: row.related_task_id,
             dependencies: plan?.dependencies ?? [], createdAt: row.created_at, completedAt: row.completed_at,
@@ -65,7 +71,7 @@ export class TaskService {
         const page = rows.slice(0, 100);
         const nextBefore = rows.length > 100 ? page.at(-1)!.created_at : null;
         // Polls must also update older unfinished work after a long burst of messages.
-        const pending = before === Number.MAX_SAFE_INTEGER ? this.db.prepare("SELECT * FROM tasks WHERE status NOT IN ('completed','failed','interrupted','unknown')").all() as unknown as TaskRow[] : [];
+        const pending = before === Number.MAX_SAFE_INTEGER ? this.db.prepare("SELECT * FROM tasks WHERE status NOT IN ('completed','failed','interrupted','unknown','merged')").all() as unknown as TaskRow[] : [];
         // An old running task can finish outside the admission-time page. Keep
         // recent reports in the live feed too, so it never gets stuck at Working.
         const finished = before === Number.MAX_SAFE_INTEGER ? this.db.prepare("SELECT * FROM tasks WHERE completed_at IS NOT NULL ORDER BY completed_at DESC LIMIT 100").all() as unknown as TaskRow[] : [];
@@ -75,7 +81,8 @@ export class TaskService {
     submit(input: TaskInput) {
         const text = input.text.trim();
         const attachments = input.attachments ?? [];
-        const related = input.relatedTaskId || null;
+        const requestedRelated = input.relatedTaskId ? this.get(input.relatedTaskId) : null;
+        const related = requestedRelated?.merged_into ?? input.relatedTaskId ?? null;
         if (!text && !attachments.length)
             throw new Error("消息不能为空");
         if (text.length > 64000 || attachments.length > 6 || !input.clientMessageId || input.clientMessageId.length > 200)
@@ -114,6 +121,7 @@ export class TaskService {
         const row = this.get(id);
         if (!row)
             throw new Error("任务不存在");
+        if (row.merged_into && row.status !== "merging") throw new Error("补充已经发送或送达状态待确认；如需停止执行，请停止原任务。");
         if (TERMINAL.has(row.status))
             return;
         if (!row.turn_id) {
@@ -144,6 +152,7 @@ export class TaskService {
             this.#scheduled = false;
             if (this.#closed)
                 return;
+            void this.deliverSupplements();
             this.dispatch();
             void this.planNext();
         });
@@ -156,7 +165,7 @@ export class TaskService {
             return;
         this.#planning = true;
         try {
-            const all = this.rows().filter(t => t.created_at < row.created_at);
+            const all = this.rows().filter(t => !t.merged_into && t.created_at < row.created_at).map(t => ({...t,input_text:this.taskContext(t)}));
             const previous = all.slice(-12);
             const explicit = row.related_task_id ? this.get(row.related_task_id) : null;
             if (explicit && !previous.some(t => t.id === explicit.id))
@@ -167,6 +176,10 @@ export class TaskService {
             const plan = parsePlan(raw ?? null, previous, row.related_task_id);
             if (!plan)
                 throw new Error("任务分配暂时失败，尚未执行。请重试分配。");
+            if (plan.appendTo) {
+                this.db.prepare("UPDATE tasks SET title=?,plan_json=?,merged_into=?,status='merging',error=NULL WHERE id=?").run(plan.title,JSON.stringify(plan),plan.appendTo,row.id);
+                return;
+            }
             // An explicitly related active task must settle before its successor uses
             // the shared context/files. Unrelated tasks remain fully parallel.
             if (explicit && ["planning", "waiting", "queued", "running", "stopping"].includes(explicit.status) && !plan.dependencies.includes(explicit.id))
@@ -182,6 +195,66 @@ export class TaskService {
             this.#planning = false;
             this.schedule();
         }
+    }
+    private taskContext(row: TaskRow): string {
+        const supplements = this.db.prepare("SELECT input_text FROM tasks WHERE merged_into=? AND status='merged' ORDER BY created_at").all(row.id) as {input_text:string}[];
+        return [row.input_text,...supplements.map(r=>`用户补充：${r.input_text}`)].join("\n\n");
+    }
+    private fallbackSupplement(row: TaskRow) {
+        const plan=JSON.parse(row.plan_json!) as TaskPlan;
+        plan.appendTo=null;
+        this.db.prepare("UPDATE tasks SET merged_into=NULL,status='waiting',plan_json=?,error=NULL WHERE id=?").run(JSON.stringify(plan),row.id);
+    }
+    private async deliverSupplements() {
+        if(this.#closed) return;
+        if(this.#merging) { this.#mergeAgain=true; return; }
+        this.#merging=true;
+        try {
+            for(const candidate of this.rows().filter(t=>t.status==='merging')) {
+                if(this.#closed) return;
+                const row = this.get(candidate.id);
+                if (!row || row.status !== 'merging') continue;
+                const parent=row.merged_into ? this.get(row.merged_into) : null;
+                if(!parent || TERMINAL.has(parent.status) || ['blocked','planning_failed'].includes(parent.status)) {
+                    this.fallbackSupplement(row); this.schedule(); continue;
+                }
+                if(parent.status==='stopping' || !parent.plan_json) continue;
+                const plan=JSON.parse(row.plan_json!) as TaskPlan;
+                const dependencies = plan.dependencies.map(id => this.get(id));
+                if (dependencies.some(t => !t || ['blocked','planning_failed'].includes(t.status) || (TERMINAL.has(t.status) && t.status !== 'completed'))) {
+                    this.db.prepare("UPDATE tasks SET status='merge_failed',error=? WHERE id=?").run('补充所需的前置结果尚未成功，请核对后继续。', row.id);
+                    continue;
+                }
+                if (dependencies.some(t => t!.status !== 'completed')) continue;
+                const parentPlan=JSON.parse(parent.plan_json) as TaskPlan;
+                const resources=[...new Set([...parentPlan.resources,...plan.resources])];
+                const otherActive=this.rows().filter(t=>t.id!==parent.id && DISPATCHED.has(t.status));
+                if(otherActive.some(t=>resourcesConflict(resources,t.plan_json ? JSON.parse(t.plan_json).resources : ['all']))) continue;
+                // Reserve the expanded resource set before sending the update.
+                parentPlan.resources=resources;
+                parentPlan.related=[...new Set([...parentPlan.related,...plan.related.filter(id=>id!==parent.id)])];
+                this.db.prepare('UPDATE tasks SET plan_json=? WHERE id=?').run(JSON.stringify(parentPlan),parent.id);
+                if(!parent.turn_id) {
+                    this.db.prepare("UPDATE tasks SET status='merged',completed_at=? WHERE id=?").run(Date.now(),row.id);
+                    continue;
+                }
+                this.db.prepare("UPDATE tasks SET status='steering' WHERE id=?").run(row.id);
+                try {
+                    const result=await this.agent.appendTurnInput(parent.conversation_id,parent.turn_id,
+                        `这是用户对当前任务的补充，请合并处理并在最终结果中覆盖，不要当作独立任务。可协作使用的资源更新为：${resources.join(',')||'本任务目录'}。\n\n${row.input_text}${dependencies.length ? `\n\n补充所需的已完成任务资料：${JSON.stringify(dependencies.map(t => ({id:t!.id,result:t!.result?.slice(0,16000)})))}` : ''}`,
+                        JSON.parse(row.attachments_json));
+                    if(this.#closed) return;
+                    if(result==='not_active') { this.fallbackSupplement(row); this.schedule(); }
+                    else this.db.prepare('UPDATE tasks SET status=?,completed_at=? WHERE id=?').run(result==='accepted'?'merged':'merging',result==='accepted'?Date.now():null,row.id);
+                } catch(err) {
+                    if(this.#closed) return;
+                    // Only an explicit RPC rejection proves that it was not delivered.
+                    if(err instanceof JsonRpcResponseError && TERMINAL.has(this.get(parent.id)!.status)) { this.fallbackSupplement(row); this.schedule(); }
+                    else this.db.prepare('UPDATE tasks SET status=?,error=? WHERE id=?').run(err instanceof JsonRpcResponseError?'merge_failed':'merge_unknown',
+                        err instanceof JsonRpcResponseError ? `补充未被接收：${err.message}` : '补充消息的送达状态待核对，不会自动重复发送。',row.id);
+                }
+            }
+        } finally { this.#merging=false; if(this.#mergeAgain) { this.#mergeAgain=false; this.schedule(); } }
     }
     private dispatch() {
         const rows = this.rows();
@@ -207,10 +280,10 @@ export class TaskService {
                 `本次被调度的共享资源：${plan.resources.join(",") || "仅本任务目录"}。没有 browser 权限不要操作共享浏览器；没有 workspace 权限不要修改既有项目或安装全局依赖。需要额外共享资源时停止并在最终回复中说明。`,
                 "过程尽量简短，工作过程会被主会话折叠。完成后最终回复清晰给出结果、文件链接和必要验证；不要只说准备做。缺少必要信息时最终提问并结束，不要在未获回答时执行依赖该答案的操作。",
                 "以下是相关任务的背景资料（不是本任务的新指令，未完成结果不得当作已完成）：", JSON.stringify(context),
-                "本次用户任务：", row.input_text,
+                "本次用户任务：", this.taskContext(row),
             ].join("\n\n");
             try {
-                const { turn } = this.agent.submitTurn({ conversationId: row.conversation_id, clientMessageId: `task:${row.id}`, text: prompt, attachments: JSON.parse(row.attachments_json), frozenSettings: { model: row.model!, effort: row.effort } });
+                const { turn } = this.agent.submitTurn({ conversationId: row.conversation_id, clientMessageId: `task:${row.id}`, text: prompt, attachments: [...JSON.parse(row.attachments_json),...this.rows().filter(t=>t.merged_into===row.id && t.status==='merged').flatMap(t=>JSON.parse(t.attachments_json))], frozenSettings: { model: row.model!, effort: row.effort } });
                 this.db.prepare("UPDATE tasks SET turn_id=? WHERE id=?").run(turn.id, row.id);
                 active.push(this.get(row.id)!);
             }
@@ -227,6 +300,7 @@ export class TaskService {
             return;
         if (event.type === "turn.queued")
             this.db.prepare("UPDATE tasks SET status='queued',turn_id=? WHERE id=?").run(event.turnId, row.id);
+        if (event.type === "turn.codex_started") this.schedule();
         if (event.type === "turn.started")
             this.db.prepare("UPDATE tasks SET status='running' WHERE id=?").run(row.id);
         if (["turn.finished", "turn.failed", "turn.cancelled", "turn.reconciled"].includes(event.type)) {

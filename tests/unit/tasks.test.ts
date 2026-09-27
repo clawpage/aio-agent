@@ -3,12 +3,16 @@ import { openDb, type Db } from "../../src/server/db.js";
 import { AgentManager } from "../../src/server/codex/manager.js";
 import type { HostTokenSource } from "../../src/server/codex/hostTokens.js";
 import { TaskService } from "../../src/server/tasks/service.js";
+import { JsonRpcResponseError } from "../../src/server/codex/jsonrpc.js";
 import { parsePlan, resourcesConflict } from "../../src/server/tasks/planning.js";
 import { Logger } from "../../src/server/logger.js";
 import { writeAgentSettings } from "../../src/server/settings.js";
 import { FakeCodex, testConfig } from "../helpers/harness.js";
 class PlanningCodex extends FakeCodex {
     plans: string[] = [];
+    steers: {threadId:string;expectedTurnId:string;text:string;attachments?:{path:string;kind:"image"|"file";name?:string}[]}[] = [];
+    steerHook: (()=>Promise<void>) | null = null;
+    async steerTurn(p: {threadId:string;expectedTurnId:string;text:string;attachments?:{path:string;kind:"image"|"file";name?:string}[]}) { this.steers.push(p); await this.steerHook?.(); }
     plan: (p: string) => Promise<string | null> = async (p) => {
         const data = JSON.parse(p.split("\n").at(-1)!);
         return JSON.stringify({ title: data.message, related: [], dependencies: [], resources: [] });
@@ -156,6 +160,106 @@ describe("main inbox delegation", () => {
         await tick();
         expect(tasks.get(a.id)?.result).toBe("final report");
     });
+    it("steers a travel supplement into the active executor without a second task or dependent wait", async()=>{
+        const parent=submit("规划带娃三天行程");await tick();
+        codex.plan=async()=>JSON.stringify({title:"补充住宿和餐厅",appendTo:parent.id,related:[parent.id],dependencies:[parent.id],resources:[]});
+        const extra=submit("我住在902 links way，帮我也找好餐厅推荐");await tick();await tick();
+        expect(codex.startedTurns).toHaveLength(1);
+        expect(codex.steers).toHaveLength(1);
+        expect(codex.steers[0]).toMatchObject({threadId:codex.startedTurns[0]!.threadId,expectedTurnId:codex.startedTurns[0]!.turnId});
+        expect(codex.steers[0]!.text).toContain("902 links way");
+        expect(tasks.get(extra.id)).toMatchObject({status:"merged",merged_into:parent.id});
+        expect(tasks.list().tasks.find(t=>t.id===extra.id)?.conversationId).toBe(parent.conversationId);
+        await codex.runTurn(codex.startedTurns[0]!.turnId,{text:"包含住宿和餐厅的完整行程"});await tick();
+        expect(tasks.get(parent.id)?.result).toContain("餐厅");
+        expect(tasks.list().tasks.find(t=>t.id===extra.id)?.result).toBeNull();
+    });
+    it("folds supplements into a not-yet-dispatched task including attachments", async()=>{
+        codex.plan=async()=>JSON.stringify({title:"shared",related:[],dependencies:[],resources:["browser"]});
+        const blocking=submit("browser busy");await tick();const parent=submit("plan trip");await tick();
+        codex.plan=async()=>JSON.stringify({title:"extra",appendTo:parent.id,related:[],dependencies:[],resources:["browser"]});
+        const extra=tasks.submit({text:"with photo",attachments:[{path:"/home/gem/workspace/uploads/photo.png",kind:"image"}],clientMessageId:"photo"}).task;await tick();
+        // Resource held by the first task: wait as a supplement, not a new executor.
+        expect(tasks.get(extra.id)?.status).toBe("merging");
+        await codex.runTurn(codex.startedTurns[0]!.turnId);await tick();await tick();
+        expect(tasks.get(extra.id)?.status).toBe("merged");
+        expect(codex.startedTurns).toHaveLength(2);
+        expect(codex.startedTurns[1]!.text).toContain("with photo");
+        expect(codex.startedTurns[1]!.attachments).toHaveLength(1);
+        expect(codex.steers).toHaveLength(0);
+    });
+    it("waits only for the running executor ID, then steers it without waiting for completion",async()=>{
+        let release!:()=>void;codex.startTurnGate=new Promise(r=>release=r);
+        const parent=submit("starting");await tick();
+        codex.plan=async()=>JSON.stringify({title:"extra",appendTo:parent.id,related:[],dependencies:[],resources:[]});
+        const extra=submit("additional requirement");await tick();expect(tasks.get(extra.id)?.status).toBe("merging");
+        release();await tick();await tick();expect(tasks.get(extra.id)?.status).toBe("merged");expect(codex.steers).toHaveLength(1);
+    });
+    it("does not replay an ambiguously delivered supplement",async()=>{
+        const parent=submit("a");await tick();
+        codex.plan=async()=>JSON.stringify({title:"extra",appendTo:parent.id,related:[],dependencies:[],resources:[]});
+        codex.steerHook=async()=>{throw new Error("transport timeout");};
+        const extra=submit("b");await tick();expect(tasks.get(extra.id)?.status).toBe("merge_unknown");
+        await codex.runTurn(codex.startedTurns[0]!.turnId);await tick();
+        expect(codex.steers).toHaveLength(1);expect(codex.startedTurns).toHaveLength(1);
+    });
+    it("handles a task finishing during classification as a followup, without losing the message",async()=>{
+        const parent=submit("a");await tick();let finish!:(s:string)=>void;
+        codex.plan=()=>new Promise(r=>finish=r);const extra=submit("b");await tick();
+        await codex.runTurn(codex.startedTurns[0]!.turnId,{text:"original result"});
+        finish(JSON.stringify({title:"extra",appendTo:parent.id,related:[],dependencies:[],resources:[]}));await tick();await tick();
+        expect(codex.steers).toHaveLength(0);expect(codex.startedTurns).toHaveLength(2);
+        expect(codex.startedTurns[1]!.text).toContain("original result");expect(tasks.get(extra.id)?.status).toBe("running");
+    });
+    it("reconciles a restart during steering as unknown, never as delivered",async()=>{
+        const parent=submit("a");await tick();const extra=submit("b");await tick();
+        db.prepare("UPDATE tasks SET status='steering',merged_into=? WHERE id=?").run(parent.id,extra.id);
+        tasks.close();tasks=new TaskService(db,testConfig("/tmp/aio-main-tasks",1),agent,codex);tasks.init();await tick();
+        expect(tasks.get(extra.id)?.status).toBe("merge_unknown");expect(codex.steers).toHaveLength(0);
+    });
+    it("delivers multiple supplements once even while the first steer is in flight", async()=>{
+        const parent=submit("a");await tick();
+        codex.plan=async()=>JSON.stringify({title:"extra",appendTo:parent.id,related:[],dependencies:[],resources:[]});
+        let release!:()=>void;codex.steerHook=()=>new Promise(r=>release=r);
+        const first=submit("b");await tick();
+        const second=submit("c");await tick();
+        expect(submit("c").id).toBe(second.id);
+        expect(codex.steers).toHaveLength(1);
+        codex.steerHook=null;release();await tick();await tick();
+        expect(codex.steers).toHaveLength(2);
+        expect(tasks.get(first.id)?.status).toBe("merged");
+        expect(tasks.get(second.id)?.status).toBe("merged");
+        expect(codex.startedTurns).toHaveLength(1);
+    });
+    it("waits for additional shared resources before steering, while independent work continues",async()=>{
+        codex.plan=async()=>JSON.stringify({title:"browser",related:[],dependencies:[],resources:["browser"]});
+        submit("browser task");await tick();
+        codex.plan=async()=>JSON.stringify({title:"document",related:[],dependencies:[],resources:[]});
+        const parent=submit("document task");await tick();
+        codex.plan=async()=>JSON.stringify({title:"extra",appendTo:parent.id,related:[],dependencies:[],resources:["browser"]});
+        const extra=submit("add browser research");await tick();
+        expect(tasks.get(extra.id)?.status).toBe("merging");expect(codex.steers).toHaveLength(0);
+        await codex.runTurn(codex.startedTurns[0]!.turnId);await tick();await tick();
+        expect(codex.steers).toHaveLength(1);expect(tasks.get(extra.id)?.status).toBe("merged");
+        expect(JSON.parse(tasks.get(parent.id)!.plan_json!).resources).toEqual(["browser"]);
+    });
+    it("does not steer a supplement before a separate prerequisite result is available",async()=>{
+        const parent=submit("a"), prerequisite=submit("b");await tick();
+        codex.plan=async()=>JSON.stringify({title:"extra",appendTo:parent.id,related:[prerequisite.id],dependencies:[prerequisite.id],resources:[]});
+        const extra=submit("include separate result");await tick();
+        expect(codex.steers).toHaveLength(0);expect(tasks.get(extra.id)?.status).toBe("merging");
+        await codex.runTurn(codex.startedTurns[1]!.turnId,{text:"verified source"});await tick();
+        expect(codex.steers).toHaveLength(1);expect(codex.steers[0]!.text).toContain("verified source");
+    });
+    it("uses a followup only after definite RPC rejection when the parent has just finished",async()=>{
+        const parent=submit("a");await tick();
+        codex.plan=async()=>JSON.stringify({title:"extra",appendTo:parent.id,related:[],dependencies:[],resources:[]});
+        codex.steerHook=async()=>{await codex.runTurn(codex.startedTurns[0]!.turnId,{text:"finished original"});throw new JsonRpcResponseError("turn/steer",-32600,"no active turn");};
+        const extra=submit("b");await tick();await tick();
+        expect(codex.steers).toHaveLength(1);expect(codex.startedTurns).toHaveLength(2);
+        expect(tasks.get(extra.id)?.merged_into).toBeNull();
+        expect(codex.startedTurns[1]!.text).toContain("finished original");
+    });
     it("keeps old pending tasks in the live page while paginating every completed task", () => {
         tasks.close();
         const jobs = Array.from({ length: 120 }, (_, i) => submit(`history-${i}`));
@@ -175,4 +279,10 @@ it("validates plans against known task IDs and serializes intersecting resources
     expect(parsePlan('{"title":"x","related":[],"dependencies":[],"resources":["unknown"]}', [], null)).toBeNull();
     expect(resourcesConflict(["browser"], ["browser"])).toBe(true);
     expect(resourcesConflict(["browser"], [])).toBe(false);
+});
+
+it("rejects steering to unknown or finished tasks",()=>{
+    const plan={title:"extra",appendTo:"a",related:[],dependencies:[],resources:[]};
+    expect(parsePlan(JSON.stringify(plan),[],null)).toBeNull();
+    expect(parsePlan(JSON.stringify(plan),[{id:"a",title:"a",input_text:"a",status:"completed",result:"done"}],null)).toBeNull();
 });

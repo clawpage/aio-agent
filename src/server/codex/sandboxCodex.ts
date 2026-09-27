@@ -509,6 +509,16 @@ export class SandboxCodexSession {
     await this.#peer.request("turn/interrupt", { threadId, turnId }, 30_000);
   }
 
+  async steerTurn(params: { threadId: string; expectedTurnId: string; text: string; attachments?: Array<{path:string;kind:"image"|"file";name?:string}> }): Promise<void> {
+    if (!this.#peer?.alive) throw new Error("Codex connection is unavailable");
+    const files = (params.attachments ?? []).filter(a => a.kind === "file");
+    const text = params.text + (files.length ? `\n附件已上传到沙箱：\n${files.map(a => a.path).join("\n")}` : "");
+    const input: Array<Record<string, unknown>> = [{type:"text",text}];
+    for (const a of params.attachments ?? []) if (a.kind === "image") input.push({type:"localImage",path:a.path});
+    const result = await this.#peer.request("turn/steer", {threadId:params.threadId,expectedTurnId:params.expectedTurnId,input},30_000) as {turnId:string};
+    if (result.turnId !== params.expectedTurnId) throw new Error("Steering acknowledgement did not match the requested turn");
+  }
+
   async readThread(threadId: string): Promise<unknown> {
     await this.start();
     return await this.#peer!.request("thread/read", { threadId, includeTurns: true }, 60_000);

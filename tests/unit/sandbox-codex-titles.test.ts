@@ -218,3 +218,22 @@ describe("SandboxCodexSession main turn summary opt-in", () => {
     }
   });
 });
+
+describe("SandboxCodexSession active-turn steering",()=>{
+  it("sends the exact turn ID, text and images without starting another turn",async()=>{
+    const server=new FakeAppServer();server.handle("turn/steer",p=>({turnId:p.expectedTurnId}));
+    const session=makeSession(server);
+    try{
+      await session.start();
+      await session.steerTurn({threadId:"thread-main",expectedTurnId:"turn-main",text:"补充要求",attachments:[{kind:"image",path:"/workspace/photo.png"},{kind:"file",path:"/workspace/data.csv"}]});
+      const requests=server.inbound.filter(m=>m.method?.startsWith("turn/"));
+      expect(requests).toHaveLength(1);
+      expect(requests[0]).toMatchObject({method:"turn/steer",params:{threadId:"thread-main",expectedTurnId:"turn-main",input:[{type:"text",text:expect.stringContaining("/workspace/data.csv")},{type:"localImage",path:"/workspace/photo.png"}]}});
+    }finally{session.close();}
+  });
+  it("does not mark a mismatched acknowledgement as delivered",async()=>{
+    const server=new FakeAppServer();server.handle("turn/steer",()=>({turnId:"different"}));
+    const session=makeSession(server);
+    try{await session.start();await expect(session.steerTurn({threadId:"thread-main",expectedTurnId:"turn-main",text:"extra"})).rejects.toThrow("acknowledgement");}finally{session.close();}
+  });
+});

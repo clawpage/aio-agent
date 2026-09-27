@@ -38,7 +38,7 @@
 ## 主会话任务调度
 
 `GET /api/main` 提供主会话任务账本，`POST /api/tasks` 接收消息并持久化后立即返回。
-`tasks` 与内部 `conversations` 一对一，后者仍复用已有执行、事件、审批、停止与重连机制。
+`tasks` 持久化每条消息，每行预留内部 `conversation`；新任务通过它执行，补充消息则用 `merged_into` 引用原任务、沿用原执行线程。后者仍复用已有事件、审批、停止与重连机制。
 旧会话管理 API 为兼容保留，但任务所属 conversation 禁止通过旧接口追加 turn 或重命名/归档。
 新前端只展示主会话、配置和工作区，不展示旧会话历史入口。
 
@@ -46,6 +46,12 @@
 只能引用已存在且更早的任务，防止循环依赖；相关任务结果在派发时重新读取，避免使用陈旧快照。
 并发数复用 `PA_MAX_CONCURRENT_TURNS`；browser/workspace 资源锁在持久化计划上计算，
 只锁冲突资源，不让一个等待任务阻塞所有独立任务。它不是 OS 权限隔离，执行者共享沙箱。
+
+派单 JSON 的 `appendTo` 用于识别同一进行中任务的补充（地址、条件、纠正、额外要求）。
+尚未派发时合入原始输入；排队时更新 turn 输入；执行中通过 [Codex turn/steer](https://learn.chatgpt.com/docs/app-server#steer-an-active-turn) 和 `expectedTurnId` 追加到同一轮，只有收到匹配回执才标记 merged。
+补充状态为 merging → steering → merged；启动中等待 Codex turn ID，新增资源与其他执行任务冲突时等待资源。
+原任务恰好结束且确认未送达时，转为带原结果的后续任务；RPC 明确拒绝标记 merge_failed，断线、超时或重启中的 steering 标记 merge_unknown，绝不自动重发。
+主时间线保留补充原文和归属提示，不新增运行状态条或重复最终回报。
 
 状态为 planning → waiting → queued/running → completed/failed/interrupted/unknown。
 planning_failed 可安全重试分类；blocked 提示前置结果需要核对。每条用户消息 ID 唯一、payload

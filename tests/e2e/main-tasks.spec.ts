@@ -60,7 +60,7 @@ test("per-task stop and explicit related followup never stop other tasks", async
     await expect(page.locator(".task-progress")).toHaveCount(1);
     expect(stops).toEqual(["task-1"]);
     expect(rows[1]!.status).toBe("running");
-    await page.locator('.task-entry[data-task-id="task-2"]').getByRole("button", { name: "关联新任务" }).click();
+    await page.locator('.task-entry[data-task-id="task-2"]').getByRole("button", { name: "补充此任务" }).click();
     await expect(page.locator(".composer .chip")).toContainText("任务 2");
     await send(page, "接着做第二部分");
     expect(bodies[0]?.relatedTaskId).toBe("task-2");
@@ -120,4 +120,28 @@ test("failed submit preserves payload and idempotency key, details stay folded a
     await expect(page.locator(".task-detail")).toBeVisible();
     const box = await page.locator(".task-detail .chat-scroll").boundingBox();
     expect(box!.height).toBeGreaterThan(400);
+});
+
+test("related supplement joins the original task, with one running indicator and one final report",async({page},info)=>{
+    const parent=task(1);parent.title="带娃三天行程";
+    const {rows}=await setup(page,[parent]);
+    await send(page,"我民宿住在902 links way，帮我也找好餐厅推荐");
+    Object.assign(rows[1]!,{mergedInto:parent.id,mergedTitle:parent.title,conversationId:parent.conversationId,status:"merged",revision:2});
+    await expect(page.locator(".task-supplement")).toContainText("已补充到：带娃三天行程");
+    await expect(page.locator(".task-progress")).toHaveCount(1);
+    await expect(page.locator(".chat-sub")).toHaveText("1 个任务处理中");
+    await page.locator(".task-supplement button").click();
+    await expect(page.locator(".task-detail")).toBeVisible();
+    await page.getByRole("button",{name:"← 返回主会话"}).click();
+    await page.reload();
+    await expect(page.locator(".task-progress")).toHaveCount(1);
+    Object.assign(rows[0]!,{status:"completed",result:"包含民宿附近餐厅推荐的完整行程",revision:3,completedAt:Date.now()});
+    await expect(page.locator(".task-report")).toHaveCount(1);
+    await expect(page.locator(".task-progress")).toHaveCount(0);
+    await expect(page.locator(".task-report .bubble")).toContainText("餐厅推荐");
+    for(const width of info.project.name.startsWith("mobile")?[390,360]:[1440]){
+        await page.setViewportSize({width,height:844});
+        expect(await page.evaluate(()=>document.documentElement.scrollWidth-document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
+    }
+    await page.screenshot({path:`/Users/mengxiao/workspace/.scratch/artifacts/aio-remove-history/${info.project.name}-supplement.png`,animations:"disabled"});
 });

@@ -3,6 +3,7 @@ export interface TaskPlan {
     related: string[];
     dependencies: string[];
     resources: string[];
+    appendTo?: string | null;
 }
 export interface PlanningTask {
     id: string;
@@ -13,8 +14,10 @@ export interface PlanningTask {
 }
 export function planningPrompt(text: string, previous: PlanningTask[], explicit: string | null): string {
     return [
-        "你是 AIO Agent 的主会话派单器。每条新消息都派成独立子任务。只做分类，绝不执行任务、调用工具或读取文件。",
-        "只返回 JSON：{title:string,related:string[],dependencies:string[],resources:string[]}。标题不超过40字。",
+        "你是 AIO Agent 的主会话派单器。先判断新消息是已有任务的补充还是独立新任务。只做分类，绝不执行任务、调用工具或读取文件。",
+        "只返回 JSON：{title:string,appendTo:string|null,related:string[],dependencies:string[],resources:string[]}。标题不超过40字。",
+        "用户补充正在进行任务的地址、条件、纠正、偏好、答案或同一交付物的额外要求，appendTo 必须选该任务id，直接追加，不创建依赖任务。例如先规划带娃三天旅游，后说民宿住在某地址并推荐餐厅，属于同一行程任务补充。",
+        "只能向 planning/waiting/queued/running 的任务追加。同主题但明确要求独立交付、等前一项完成再做，或无关任务，appendTo=null，按新任务和依赖处理。不能把所有消息都追加给最后一项；必须语义上属于同一任务。",
         "related 是理解本任务有帮助的历史任务id；无关任务不要关联。dependencies 是必须先完成才可执行的任务id，必须也在related里。",
         "代词、‘继续/改一下/刚才那个’应结合最近的相关任务理解；需要尚未产出的文件或结果时必须声明依赖，不能臆造已完成。",
         "修复 failed、unknown、blocked、planning_failed 任务时可以 related 引用背景，但不要把它列为必须成功完成的 dependencies。",
@@ -28,17 +31,19 @@ export function parsePlan(raw: string | null, previous: PlanningTask[], explicit
     try {
         const p = JSON.parse((raw ?? "").replace(/^```(?:json)?\s*|\s*```$/g, "").trim()) as TaskPlan;
         const ids = new Set(previous.map(t => t.id));
+        const appendTo = p.appendTo ?? null;
+        if (appendTo !== null && (typeof appendTo !== "string" || !previous.some(t => t.id === appendTo && ["planning","waiting","queued","running"].includes(t.status)))) return null;
         if (typeof p.title !== "string" || !p.title.trim() || !Array.isArray(p.related) || !Array.isArray(p.dependencies) || !Array.isArray(p.resources))
             return null;
         if ([...p.related, ...p.dependencies].some(id => typeof id !== "string" || !ids.has(id)))
             return null;
         if (p.resources.some(r => r !== "browser" && r !== "workspace"))
             return null;
-        const related = [...new Set([...p.related, ...p.dependencies, ...(explicit ? [explicit] : [])])];
+        const related = [...new Set([...p.related, ...p.dependencies, ...(explicit ? [explicit] : []), ...(appendTo ? [appendTo] : [])])];
         if (related.length > 12)
             return null;
-        const dependencies = [...new Set(p.dependencies)];
-        return { title: [...p.title.trim()].slice(0, 40).join(""), related, dependencies, resources: [...new Set(p.resources)] };
+        const dependencies = [...new Set(p.dependencies)].filter(id => id !== appendTo);
+        return { title: [...p.title.trim()].slice(0, 40).join(""), related, dependencies, resources: [...new Set(p.resources)], appendTo };
     }
     catch {
         return null;

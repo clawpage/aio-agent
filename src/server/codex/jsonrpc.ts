@@ -17,6 +17,13 @@ export interface PendingRequest {
   timer: NodeJS.Timeout;
 }
 
+/** A definite server rejection, unlike a timeout/disconnect with unknown delivery. */
+export class JsonRpcResponseError extends Error {
+  constructor(public method: string, public code: number, message: string) {
+    super(`${method}: ${message}`);
+  }
+}
+
 export type ServerRequestHandler = (
   method: string,
   params: unknown,
@@ -174,7 +181,7 @@ export class JsonRpcPeer extends EventEmitter<PeerEvents> {
     this.#pending.delete(key);
     clearTimeout(pending.timer);
     if (msg.error) {
-      pending.reject(new Error(`${pending.method}: ${msg.error.message}`));
+      pending.reject(new JsonRpcResponseError(pending.method, msg.error.code, msg.error.message));
     } else {
       pending.resolve(msg.result);
     }

@@ -134,8 +134,8 @@ export function TaskChat({ onDetails, onOpenWorkspace, onOpenLink, onBrowserNavi
         }
     };
     const relate = (task: Task) => { setRelated(task); input.current?.focus(); };
-    const active = tasks.filter(t => !terminal.has(t.status) && !["planning_failed", "blocked"].includes(t.status));
-    const feed = tasks.flatMap(t => [{ task: t, report: false, at: t.createdAt }, ...(terminal.has(t.status) ? [{ task: t, report: true, at: t.completedAt ?? t.createdAt }] : [])])
+    const active = tasks.filter(t => !t.mergedInto && !terminal.has(t.status) && !["planning_failed", "blocked"].includes(t.status));
+    const feed = tasks.flatMap(t => [{ task: t, report: false, at: t.createdAt }, ...(!t.mergedInto && terminal.has(t.status) ? [{ task: t, report: true, at: t.completedAt ?? t.createdAt }] : [])])
         .sort((a, b) => a.at - b.at || Number(a.report) - Number(b.report) || a.task.id.localeCompare(b.task.id));
     return <section className="chat task-chat">
     <header className="chat-head"><div className="chat-title"><h2>主会话</h2><span className={`dot ${connected ? "ok" : "warn"}`}/><span className="chat-sub">{active.length ? `${active.length} 个任务处理中` : connected ? "随时可以交给我" : "正在连接…"}</span></div><button className="ghost" onClick={onOpenWorkspace}>工作区</button></header>
@@ -148,10 +148,11 @@ export function TaskChat({ onDetails, onOpenWorkspace, onOpenLink, onBrowserNavi
         <div className="task-actions"><button className="ghost tiny" onClick={() => relate(t)}>继续此任务</button><button className="ghost tiny" onClick={() => onDetails(t)}>查看过程</button></div>
       </article> : <div className="task-entry" key={t.id} data-task-id={t.id}>
         <article className="msg user"><div className="bubble">{t.relatedTaskId && <small className="muted">关联任务</small>}<p>{t.text}</p>{t.attachments.length > 0 && <AttachmentCards attachments={t.attachments} onOpen={setPreview}/>}</div></article>
-        {!terminal.has(t.status) && <div className={`task-progress ${t.status === "running" ? "active" : ""}`}>
+        {t.mergedInto && <div className="task-supplement"><button className="ghost tiny" onClick={() => onDetails(t)}>{t.status === "merged" ? "已补充到" : t.status === "merging" || t.status === "steering" ? "正在补充到" : t.status === "interrupted" ? "已取消补充" : "补充需要核对"}：{t.mergedTitle}</button>{t.error && <p className="tiny error">{t.error}</p>}</div>}
+        {!t.mergedInto && !terminal.has(t.status) && <div className={`task-progress ${t.status === "running" ? "active" : ""}`}>
           <button className="task-summary" onClick={() => onDetails(t)} aria-label={`展开任务：${t.title}`}><span className={`dot ${t.approvals ? "warn" : ""}`}/><span className="task-progress-label">{t.approvals ? "需要你确认" : labels[t.status] ?? t.status}</span><span className="task-progress-title">{t.title}</span><span aria-hidden>›</span></button>
           {t.error && <p className="tiny">{t.error}</p>}
-          <div className="task-actions">{t.status === "planning_failed" ? <button className="ghost tiny" onClick={() => void act(() => api.retryTaskPlanning(t.id))}>重试分配</button> : t.status === "blocked" ? <button className="ghost tiny" onClick={() => relate(t)}>补充任务</button> : <button className="ghost tiny" disabled={t.status === "stopping"} onClick={() => void act(() => api.stopTask(t.id))}>停止该任务</button>}<button className="ghost tiny" onClick={() => relate(t)}>关联新任务</button></div>
+          <div className="task-actions">{t.status === "planning_failed" ? <button className="ghost tiny" onClick={() => void act(() => api.retryTaskPlanning(t.id))}>重试分配</button> : t.status === "blocked" ? <button className="ghost tiny" onClick={() => relate(t)}>补充任务</button> : <button className="ghost tiny" disabled={t.status === "stopping"} onClick={() => void act(() => api.stopTask(t.id))}>停止该任务</button>}<button className="ghost tiny" onClick={() => relate(t)}>补充此任务</button></div>
         </div>}
       </div>)}
     </div>

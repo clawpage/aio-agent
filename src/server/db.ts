@@ -136,6 +136,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   input_text TEXT NOT NULL,
   attachments_json TEXT NOT NULL DEFAULT '[]',
   related_task_id TEXT REFERENCES tasks(id),
+  merged_into TEXT REFERENCES tasks(id),
   status TEXT NOT NULL DEFAULT 'planning',
   plan_json TEXT,
   model TEXT,
@@ -186,6 +187,8 @@ export function openDb(dbPath: string): Db {
  * is added here when the live schema is missing it. Safe to run on every open.
  */
 function migrate(db: Db): void {
+  const taskColumns = db.prepare("PRAGMA table_info(tasks)").all() as Array<{ name: string }>;
+  if (!taskColumns.some(c => c.name === "merged_into")) db.exec("ALTER TABLE tasks ADD COLUMN merged_into TEXT REFERENCES tasks(id)");
   const columns = (db.prepare("PRAGMA table_info(turns)").all() as Array<{ name: string }>).map((c) => c.name);
   if (!columns.includes("model")) {
     db.exec("ALTER TABLE turns ADD COLUMN model TEXT");

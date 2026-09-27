@@ -52,6 +52,7 @@ export interface CodexSessionLike {
     summary?: "none" | "auto" | "concise" | "detailed" | null;
   }): Promise<string>;
   interrupt(threadId: string, turnId: string): Promise<void>;
+  steerTurn?(params: {threadId:string;expectedTurnId:string;text:string;attachments?:TurnAttachment[]}): Promise<void>;
   /** One throwaway, tool-free run used only for automatic conversation titles. */
   generateTitle(userText: string): Promise<string | null>;
   planTask?(prompt: string): Promise<string | null>;
@@ -1160,6 +1161,22 @@ export class AgentManager {
         resolve(info?.status ?? "unknown");
       });
     });
+  }
+
+  /** Append to the queued input or steer the exact active Codex turn. */
+  async appendTurnInput(conversationId: string, localTurnId: string, text: string, attachments: TurnAttachment[]): Promise<"accepted"|"starting"|"not_active"> {
+    const turn = this.#db.prepare("SELECT * FROM turns WHERE id=? AND conversation_id=?").get(localTurnId,conversationId) as unknown as TurnRow | undefined;
+    if (!turn || !["queued","running"].includes(turn.status)) return "not_active";
+    if (turn.status === "queued") {
+      this.#db.prepare("UPDATE turns SET input_text=?,attachments_json=? WHERE id=?").run(`${turn.input_text}\n\n${text}`,JSON.stringify([...parseAttachments(turn.attachments_json),...attachments]),turn.id);
+    } else {
+      const conversation = this.getConversation(conversationId);
+      if (!turn.codex_turn_id || !conversation?.codex_thread_id) return "starting";
+      if (!this.#codex.steerTurn) throw new Error("当前执行器不支持运行中补充");
+      await this.#codex.steerTurn({threadId:conversation.codex_thread_id,expectedTurnId:turn.codex_turn_id,text,attachments});
+    }
+    this.#appendEvent(conversationId,turn.id,"turn.input_appended",{text,attachments});
+    return "accepted";
   }
 
   /**
