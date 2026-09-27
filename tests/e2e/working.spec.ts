@@ -212,18 +212,23 @@ test.describe("working group", () => {
     await expect(page.locator(".working-head .dot.idle")).toHaveCount(1);
   });
 
-  test("labels a failed turn as an execution error and flags the failed tool", async ({ page }) => {
+  test("keeps tool failures inside details while still reporting an actual failed turn", async ({ page }) => {
     await openChat(page, true);
     const emit = (e: unknown) => page.evaluate((x) => (window as unknown as { __paEmit: (y: unknown) => void }).__paEmit(x), e);
     await emit(event("turn.started", { turnId: "t1" }, "t1"));
     await emit(event("item/started", { item: { id: "f1", type: "commandExecution", command: "boom" } }, "t1"));
     await emit(event("item/completed", { item: { id: "f1", type: "commandExecution", status: "failed" } }, "t1"));
+    await expect(page.locator(".working-label")).toHaveText("Working…");
+    await expect(page.locator(".working-head")).not.toContainText("工具出错");
+    await page.locator(".working-head").click();
+    await expect(page.locator(".working-body .tool.error")).toHaveCount(1);
+    await page.locator(".working-head").click();
     await emit(event("turn.failed", { turnId: "t1", message: "沙箱崩了" }, "t1"));
 
     await expect(page.locator(".working-label")).toHaveText("执行了 1 项操作 · 出错");
     await expect(group(page)).not.toHaveClass(/\bactive\b/);
-    // A failed tool must be visible from the collapsed header, not hidden.
-    await expect(page.locator(".working-flag")).toHaveText("工具出错");
+    // Individual tool failures stay in details; the turn outcome remains honest.
+    await expect(page.locator(".working-head")).not.toContainText("工具出错");
     await expect(page.locator(".working-head .dot.error")).toHaveCount(1);
   });
 

@@ -602,7 +602,7 @@ function ToolCard({ block, inProgress }: { block: Extract<Block, { kind: "tool" 
 
 /**
  * One continuous run of activity inside a turn. Tools and reasoning summaries
- * live inside; the header states the run's own status, flags a failed tool, and
+ * live inside; the header states the run's own status and
  * animates only while this run is the turn's live one — a run closed by later
  * prose keeps its place and never animates again. It is a real button, so it is
  * reachable and toggleable from the keyboard, with `aria-expanded` reflecting the
@@ -658,7 +658,6 @@ function WorkingGroup({
         {active && <span className="working-sweep" aria-hidden />}
         <span className={`dot ${dotClass}`} aria-hidden />
         <span className="working-label">{label}</span>
-        {block.hasToolError && <span className="working-flag">工具出错</span>}
         {meta && <span className="working-meta">{meta}</span>}
         <span className="working-caret" aria-hidden>
           {open ? "⌃" : "⌄"}
