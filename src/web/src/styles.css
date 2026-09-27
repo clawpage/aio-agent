@@ -2222,14 +2222,27 @@ textarea:focus {
 .task-detail .chat { flex: 1; min-height: 0; }
 .task-detail-bar { padding: 8px 16px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border); }
 @media (max-width: 760px) {
-  .main-inbox-app .sidebar { display: none; }
+
   .task-feed { gap: 18px; }
   .task-report { width: 100%; }
   .task-chat .composer textarea { min-height: 56px; }
 }
 @media (prefers-reduced-motion: reduce) { .task-progress.active .task-progress-label { animation: none; background: none; color: var(--text-dim); } }
 
-.main-inbox-app .bottom-nav { grid-template-columns: repeat(4, 1fr); }
+/* The inbox uses a mobile drawer; legacy conversation navigation stays separate. */
+.mobile-menu-button, .mobile-menu-close { display: none; }
+@media (max-width: 900px) {
+  .main-inbox-app { grid-template-rows: minmax(0, 1fr); }
+  .main-inbox-app .sidebar { display: flex; z-index: 90; width: min(300px, 85vw); inset: 0 auto 0 0; padding-top: calc(58px + env(safe-area-inset-top)); padding-bottom: calc(16px + env(safe-area-inset-bottom)); overflow-y: auto; visibility: hidden; }
+  .main-inbox-app .sidebar.show-mobile { visibility: visible; }
+  .mobile-menu-button { display: flex; align-items: center; justify-content: center; position: fixed; top: calc(6px + env(safe-area-inset-top)); left: 8px; width: 44px; height: 44px; padding: 0; z-index: 71; border-color: transparent; }
+  .mobile-menu-close { display: block; position: absolute; top: calc(6px + env(safe-area-inset-top)); right: 8px; width: 44px; height: 44px; padding: 0; font-size: 28px; border-color: transparent; }
+  .mobile-menu-backdrop { position: fixed; inset: 0; z-index: 85; background: rgb(0 0 0 / .4); backdrop-filter: blur(2px); }
+  .main-inbox-app .task-chat .chat-head, .main-inbox-app .settings-head, .main-inbox-app .task-detail-bar, .main-inbox-app .workspace .ws-head { padding-left: 60px; min-height: calc(56px + env(safe-area-inset-top)); }
+  .main-inbox-app .workspace:not(.fullscreen) { bottom: 0; }
+  .main-inbox-app .composer { padding-bottom: max(12px, env(safe-area-inset-bottom)); }
+}
+@media (prefers-reduced-motion: reduce) { .main-inbox-app .sidebar { transition: none; } }
 
 /* Reading-oriented deliverables: titles remain legible on narrow screens. */
 .file-cards { width: 100%; }

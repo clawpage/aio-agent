@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api, ApiError } from "../api";
 import type { Conversation, StatusResponse, Task } from "../types";
 import { Chat } from "./Chat";
@@ -8,6 +8,32 @@ import { Workspace } from "./Workspace";
 import { TaskChat } from "./TaskChat";
 /** One owner-facing inbox; executor conversations are implementation details. */
 export function MainApp() {
+    const [mobile, setMobile] = useState(() => matchMedia("(max-width: 900px)").matches);
+    const [menuOpen, setMenuOpen] = useState(false);
+    const menuButton = useRef<HTMLButtonElement>(null);
+    const sidebar = useRef<HTMLElement>(null);
+    const closeMenu = useCallback(() => { setMenuOpen(false); menuButton.current?.focus(); }, []);
+    useEffect(() => {
+        const query = matchMedia("(max-width: 900px)");
+        const change = () => { setMobile(query.matches); setMenuOpen(false); };
+        query.addEventListener("change", change);
+        return () => query.removeEventListener("change", change);
+    }, []);
+    useEffect(() => {
+        if (!mobile || !menuOpen) return;
+        const controls = () => [...(sidebar.current?.querySelectorAll<HTMLButtonElement>("button:not(:disabled), a[href]") ?? [])];
+        controls()[0]?.focus();
+        const key = (event: KeyboardEvent) => {
+            if (event.key === "Escape") { event.preventDefault(); closeMenu(); }
+            if (event.key === "Tab") {
+                const items = controls(), first = items[0], last = items.at(-1);
+                if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+                else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+            }
+        };
+        document.addEventListener("keydown", key);
+        return () => document.removeEventListener("keydown", key);
+    }, [mobile, menuOpen, closeMenu]);
     const [auth, setAuth] = useState<boolean | null>(null);
     const [status, setStatus] = useState<StatusResponse | null>(null);
     const [view, setView] = useState<"main" | "settings" | "detail">("main");
@@ -17,7 +43,7 @@ export function MainApp() {
     const [browserNonce, setBrowserNonce] = useState(0);
     const [notice, setNotice] = useState<string | null>(null);
     const [theme, setTheme] = useState(() => matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark");
-    const expired = useCallback(() => { setAuth(false); setNotice("登录已过期，请重新登录。"); }, []);
+    const expired = useCallback(() => { setAuth(false); setMenuOpen(false); setNotice("登录已过期，请重新登录。"); }, []);
     const check = useCallback(async () => { try {
         setAuth((await api.session()).authenticated);
     }
@@ -64,7 +90,7 @@ export function MainApp() {
     catch (err) {
         notify(err instanceof Error ? err.message : String(err));
     } }, [notify, revealBrowser]);
-    const openWorkspace = useCallback((path?: string) => { setWorkspacePath(path); setWorkspace(true); }, []);
+    const openWorkspace = useCallback((path?: string) => { setMenuOpen(false); setWorkspacePath(path); setWorkspace(true); }, []);
     const details = useCallback(async (task: Task) => { try {
         setDetail((await api.conversation(task.conversationId)).conversation);
         setView("detail");
@@ -73,10 +99,11 @@ export function MainApp() {
     catch (err) {
         notify(err instanceof Error ? err.message : String(err));
     } }, [notify]);
-    const settings = () => { setView("settings"); setWorkspace(false); };
+    const settings = () => { closeMenu(); setView("settings"); setWorkspace(false); };
     const logout = async () => { try {
         await api.logout();
         setAuth(false);
+        setMenuOpen(false);
         setDetail(null);
         setWorkspace(false);
         setView("main");
@@ -89,11 +116,15 @@ export function MainApp() {
     if (!auth)
         return <Login notice={notice} onSuccess={() => void check()}/>;
     return <div className="app main-inbox-app">
-    <aside className="sidebar"><div className="brand"><span className="brand-mark" aria-hidden/><div><strong>AIO Agent</strong><span className="muted tiny">一个入口，把事情交给我</span></div></div>
-      <button className={`ghost block ${view === "main" ? "active" : ""}`} onClick={() => setView("main")}>主会话</button>
+    <button className="mobile-menu-button ghost" ref={menuButton} aria-label="打开导航" aria-expanded={menuOpen} aria-controls="main-navigation" onClick={() => setMenuOpen(true)}><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
+    {mobile && menuOpen && <div className="mobile-menu-backdrop" onClick={closeMenu} aria-hidden="true"/>}
+    <aside ref={sidebar} id="main-navigation" className={`sidebar ${menuOpen ? "show-mobile" : ""}`} role={mobile && menuOpen ? "dialog" : undefined} aria-modal={mobile && menuOpen ? true : undefined} aria-label="导航" aria-hidden={mobile && !menuOpen ? true : undefined} inert={mobile && !menuOpen}>
+      <button className="mobile-menu-close ghost" aria-label="关闭导航" onClick={closeMenu}>×</button><div className="brand"><span className="brand-mark" aria-hidden/><div><strong>AIO Agent</strong><span className="muted tiny">一个入口，把事情交给我</span></div></div>
+      <button className={`ghost block ${view === "main" ? "active" : ""}`} onClick={() => { closeMenu(); setView("main"); setWorkspace(false); }}>主会话</button>
+      <button className="ghost block" onClick={() => { closeMenu(); openWorkspace(); }}>工作区</button>
       <div className="sidebar-foot"><span className="muted tiny">{status?.agent.sessionReady ? "智能体在线" : "正在连接智能体"}</span><button className="ghost block" onClick={() => setTheme(t => t === "dark" ? "light" : "dark")}>{theme === "dark" ? "浅色模式" : "深色模式"}</button><button className="ghost block" onClick={settings}>配置</button><button className="ghost block" onClick={() => void logout()}>退出登录</button></div>
     </aside>
-    <main className="main">
+    <main className="main" inert={mobile && menuOpen}>
       {notice && <div className="banner" role="alert">{notice}<button onClick={() => setNotice(null)}>关闭</button></div>}
       {status && !status.agent.sessionReady && <div className="banner error">智能体暂未就绪：{status.agent.lastError ?? "正在连接"}。消息仍会保留。</div>}
       <div className="view-slot" hidden={view !== "main"}><TaskChat onDetails={t => void details(t)} onOpenWorkspace={() => openWorkspace()} onOpenLink={u => void openLink(u)} onBrowserNavigate={() => { if (view === "main")
@@ -102,6 +133,5 @@ export function MainApp() {
       {view === "detail" && detail && <div className="task-detail"><div className="task-detail-bar"><button className="ghost" onClick={() => setView("main")}>← 返回主会话</button><span className="muted tiny">过程详情</span></div><Chat key={detail.id} readOnly conversation={detail} status={status} onConversationChanged={() => { }} onStatusChanged={() => void refreshStatus()} onOpenWorkspace={openWorkspace} onOpenBrowserLink={u => void openLink(u)} onAgentBrowserNavigate={revealBrowser}/></div>}
     </main>
     <Workspace open={workspace} status={status} initialPath={workspacePath} browserNonce={browserNonce} onClose={() => { setWorkspace(false); setWorkspacePath(undefined); }} onNotify={notify}/>
-    <nav className="bottom-nav"><button onClick={() => setView("main")}>主会话</button><button onClick={() => openWorkspace()}>工作区</button><button onClick={settings}>配置</button><button onClick={() => void logout()}>退出</button></nav>
   </div>;
 }

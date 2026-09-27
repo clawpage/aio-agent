@@ -72,14 +72,15 @@ test("attachments and drafts survive config and task details without a history e
     await (await chooser).setFiles({ name: "a.txt", mimeType: "text/plain", buffer: Buffer.from("hello") });
     await expect(page.locator(".composer .chips")).toContainText("a.txt");
     await page.getByRole("textbox", { name: "消息", exact: true }).fill("保留草稿");
-    const nav = page.locator(info.project.name.startsWith("mobile") ? ".bottom-nav" : ".sidebar");
+    if (info.project.name.startsWith("mobile")) await page.getByRole("button", { name: "打开导航" }).click();
+    const nav = page.locator(".sidebar");
     await nav.getByRole("button", { name: "配置", exact: true }).click();
     await expect(page.getByRole("heading", { name: "配置", exact: true })).toBeVisible();
     await page.getByRole("button", { name: "← 返回会话" }).click();
     await expect(page.getByRole("textbox", { name: "消息", exact: true })).toHaveValue("保留草稿");
     await expect(page.locator(".composer .chips")).toContainText("a.txt");
     await expect(page.getByRole("button", { name: /^历史(记录)?$/ })).toHaveCount(0);
-    await expect(page.locator(".bottom-nav button")).toHaveCount(4);
+    await expect(page.locator(".bottom-nav")).toHaveCount(0);
     await page.getByRole("button", { name: "展开任务：任务 1" }).click();
     await expect(page.locator(".task-detail")).toBeVisible();
     await expect(page.locator(".task-detail .composer")).toHaveCount(0);
@@ -189,4 +190,50 @@ test("clarification stays inline, answers target the right task and unrelated wo
     await expect(page.locator(".task-question")).toHaveCount(1);
     await page.locator('.task-entry[data-task-id="task-1"] .task-question').scrollIntoViewIfNeeded();
     await page.screenshot({path:`/Users/mengxiao/workspace/.scratch/artifacts/aio-task-clarification/${info.project.name}.png`});
+});
+
+test("mobile drawer replaces bottom navigation and preserves the chat draft",async({page},info)=>{
+    await setup(page,[task(1)]);
+    await expect(page.locator('.bottom-nav')).toHaveCount(0);
+    if(!info.project.name.startsWith('mobile')) {
+        await expect(page.locator('.sidebar')).toBeVisible();
+        await expect(page.getByRole('button',{name:'打开导航'})).toBeHidden();
+        return;
+    }
+    for(const width of [390,360]) {
+        await page.setViewportSize({width,height:844});
+        const menu=page.getByRole('button',{name:'打开导航'});
+        await expect(menu).toBeVisible();
+        await expect(page.locator('.sidebar')).toBeHidden();
+        await page.getByRole('textbox',{name:'消息',exact:true}).fill('保留这段草稿');
+        const composer=await page.locator('.composer').boundingBox();
+        expect(composer!.y+composer!.height).toBeGreaterThan(830);
+        await menu.click();
+        const drawer=page.getByRole('dialog',{name:'导航'});
+        await expect(drawer).toBeVisible();
+        await expect(menu).toHaveAttribute('aria-expanded','true');
+        await expect(page.getByRole('button',{name:'关闭导航'})).toBeFocused();
+        await page.keyboard.press('Shift+Tab');
+        await expect(drawer.getByRole('button',{name:'退出登录'})).toBeFocused();
+        await page.keyboard.press('Escape');
+        await expect(drawer).toHaveCount(0);await expect(menu).toBeFocused();
+        await menu.click();
+        await page.locator('.mobile-menu-backdrop').click({position:{x:width-5,y:400}});
+        await expect(page.locator('.sidebar')).toBeHidden();
+        await menu.click();await drawer.getByRole('button',{name:'配置',exact:true}).click();
+        await expect(page.getByRole('heading',{name:'配置',exact:true})).toBeVisible();
+        await expect(page.locator('.sidebar')).toBeHidden();
+        await menu.click();await drawer.getByRole('button',{name:'主会话',exact:true}).click();
+        await expect(page.getByRole('textbox',{name:'消息',exact:true})).toHaveValue('保留这段草稿');
+        await menu.click();await drawer.getByRole('button',{name:'工作区',exact:true}).click();
+        await expect(page.locator('.workspace')).toBeVisible();
+        const workspace=await page.locator('.workspace').boundingBox();expect(workspace!.y+workspace!.height).toBe(844);
+        await menu.click();await drawer.getByRole('button',{name:'主会话',exact:true}).click();
+        await expect(page.locator('.workspace')).toHaveCount(0);
+        expect(await page.evaluate(()=>document.documentElement.scrollWidth-document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
+    }
+    await page.getByRole('button',{name:'打开导航'}).click();
+    await page.screenshot({path:`/Users/mengxiao/workspace/.scratch/artifacts/aio-mobile-drawer/${info.project.name}-drawer.png`});
+    await page.getByRole('button',{name:'关闭导航'}).click();
+    await page.screenshot({path:`/Users/mengxiao/workspace/.scratch/artifacts/aio-mobile-drawer/${info.project.name}-chat.png`});
 });
