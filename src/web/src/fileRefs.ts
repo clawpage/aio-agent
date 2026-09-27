@@ -28,6 +28,7 @@ export interface FileRef {
   path: string;
   name: string;
   kind: WorkspaceFileKind;
+  title?: string;
   /** True when the reference came from an `![]()` image reference. */
   image: boolean;
 }
@@ -48,13 +49,16 @@ export function extractFileRefs(markdown: string): FileRef[] {
   if (!markdown) return [];
   const seen = new Set<string>();
   const refs: FileRef[] = [];
-  const push = (href: string, image: boolean): void => {
+  const push = (href: string, image: boolean, label: string): void => {
     // Marked percent-encodes non-ASCII characters in an href, so decode first;
     // anything that fails workspace validation is skipped, never rewritten.
     const path = workspaceFilePathFromHref(href);
     if (!path || seen.has(path)) return;
     seen.add(path);
-    refs.push({ path, name: nameOf(path), kind: workspaceFileKind(path), image });
+    const title = label.replace(/[*_`]/g, "").trim();
+    refs.push({ path, name: nameOf(path), kind: workspaceFileKind(path), image,
+      ...(!image && title && title !== nameOf(path) && !/^(?:下载|下载文件|下载图片|点击下载|查看|打开|download)$/i.test(title) ? { title } : {}),
+    });
   };
 
   let tokens: Token[];
@@ -68,9 +72,9 @@ export function extractFileRefs(markdown: string): FileRef[] {
 
   marked.walkTokens(tokens, (token) => {
     if (token.type === "link") {
-      push((token as Tokens.Link).href, false);
+      push((token as Tokens.Link).href, false, (token as Tokens.Link).text);
     } else if (token.type === "image") {
-      push((token as Tokens.Image).href, true);
+      push((token as Tokens.Image).href, true, (token as Tokens.Image).text);
     }
   });
   return refs;

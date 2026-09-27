@@ -97,3 +97,9 @@ describe("attachment cards", () => {
     expect(refs[0]).toMatchObject({ name: "report.docx", kind: "word", image: false });
   });
 });
+
+it("uses descriptive document link titles without replacing the real download name",()=>{
+  const [ref]=extractFileRefs('[完整行程](/home/gem/workspace/trip.md)');
+  expect(ref).toMatchObject({title:'完整行程',name:'trip.md',path:'/home/gem/workspace/trip.md'});
+  expect(extractFileRefs('[下载文件](/home/gem/workspace/trip.md)')[0]?.title).toBeUndefined();
+});

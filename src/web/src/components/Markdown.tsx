@@ -63,8 +63,10 @@ export function Markdown({
   source,
   onOpenLink,
   onOpenFile,
+  document = false,
 }: {
   source: string;
+  document?: boolean;
   onOpenLink?: (url: string) => void;
   onOpenFile?: (path: string) => void;
 }) {
@@ -78,9 +80,13 @@ export function Markdown({
       // DOMPurify would strip `tabindex="0"` and break keyboard focus.
       ADD_URI_SAFE_ATTR: ["tabindex"],
       ADD_ATTR: ["target", "rel", "data-sandbox-file", "role", "tabindex"],
+      ...(document ? {
+        FORBID_TAGS: ["form", "input", "button", "textarea", "select", "option", "iframe", "object", "embed", "svg", "math", "style"],
+        FORBID_ATTR: ["style", "id", "name"],
+      } : {}),
     });
     return clean.replace(/<a /g, '<a target="_blank" rel="noopener noreferrer" ');
-  }, [source]);
+  }, [source, document]);
 
   const onClick = useCallback(
     (event: MouseEvent<HTMLDivElement>) => {

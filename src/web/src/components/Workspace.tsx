@@ -544,7 +544,10 @@ export function Workspace({ open, status, initialPath, onClose, onNotify, browse
           </>
         )}
       </div>
-      {filePreview && <FilePreview path={filePreview} onClose={() => setFilePreview(null)} />}
+      {filePreview && <FilePreview path={filePreview} onClose={() => setFilePreview(null)} onOpenLink={async url => {
+        try { await api.openBrowserTab(url); await navigateTo("browser"); }
+        catch (err) { onNotify(err instanceof Error ? err.message : String(err), "error"); }
+      }} />}
     </section>
   );
 }

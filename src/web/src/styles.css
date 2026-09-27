@@ -2239,3 +2239,39 @@ textarea:focus {
 @media (prefers-reduced-motion: reduce) { .task-progress.active .task-progress-label { animation: none; background: none; color: var(--text-dim); } }
 
 .main-inbox-app .bottom-nav { grid-template-columns: repeat(4, 1fr); }
+
+/* Reading-oriented deliverables: titles remain legible on narrow screens. */
+.file-cards { width: 100%; }
+.file-card { width: min(100%, 520px); }
+.file-card-name { white-space: normal; overflow-wrap: anywhere; max-width: none; line-height: 1.45; }
+.file-card-filename { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 260px; }
+.file-card[data-kind="markdown"] .file-card-thumb { color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, var(--bg)); }
+.file-card[data-kind="markdown"] .file-card-badge { color: inherit; }
+.file-preview-document { width: min(960px, 100%); height: min(88dvh, 960px); }
+.file-preview-toolbar { display: flex; flex-shrink: 0; gap: 4px; padding: 8px 16px; border-bottom: 1px solid var(--border); }
+.file-preview-toolbar button { padding: 5px 16px; color: var(--text-dim); }
+.file-preview-toolbar button[aria-pressed="true"] { color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, var(--bg)); border-color: transparent; }
+.file-preview-document .file-preview-body { display: block; padding: 0; }
+.file-preview-document .file-preview-text { height: auto; overflow: visible; }
+.file-preview-document .file-preview-text > pre { padding: 24px; }
+.document-reading { margin: 0 auto; padding: 36px 40px 56px; max-width: 78ch; font-size: 16px; line-height: 1.85; overflow-wrap: anywhere; }
+.document-reading .markdown h1 { font-size: 1.8em; line-height: 1.35; margin: 0 0 1em; letter-spacing: -.025em; }
+.document-reading .markdown h2 { font-size: 1.3em; line-height: 1.5; margin: 1.8em 0 .7em; padding-bottom: .35em; border-bottom: 1px solid var(--border); }
+.document-reading .markdown h3 { font-size: 1.08em; margin: 1.4em 0 .5em; }
+.document-reading .markdown p, .document-reading .markdown ul, .document-reading .markdown ol { margin: .8em 0; }
+.document-reading .markdown li { margin: .3em 0; }
+.document-reading .markdown table { width: 100%; margin: 1.25em 0; font-size: .9em; }
+.document-reading .markdown th, .document-reading .markdown td { padding: 10px 12px; min-width: 90px; vertical-align: top; }
+.document-reading .markdown th { background: var(--bg-raised); text-align: left; }
+.document-reading .markdown blockquote { margin: 1.3em 0; padding: 10px 16px; background: var(--bg-raised); border-left-color: var(--accent); border-radius: 0 8px 8px 0; }
+.document-reading .markdown pre { max-width: 100%; white-space: pre; overflow-x: auto; font-size: 13px; }
+.document-reading .markdown a { text-underline-offset: 3px; }
+.file-preview-foot { flex-shrink: 0; gap: 8px; flex-wrap: wrap; }
+@media (max-width: 480px) {
+  .file-card-filename { max-width: 155px; }
+  .file-preview-document { height: calc(100dvh - 16px); max-height: calc(100dvh - 16px); }
+  .file-preview-document .file-preview-head { gap: 6px; }
+  .document-reading { padding: 24px 18px 40px; font-size: 15px; }
+  .document-reading .markdown h1 { font-size: 1.55em; }
+  .file-preview-document .file-preview-text > pre { padding: 18px; }
+}

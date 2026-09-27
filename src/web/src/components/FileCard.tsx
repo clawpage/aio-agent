@@ -1,6 +1,6 @@
 import { memo, useEffect, useRef, useState } from "react";
 import { api } from "../api";
-import { kindBadge, kindLabel, type WorkspaceFileKind } from "../sandboxLink";
+import { isMarkdownPath, kindBadge, kindLabel, type WorkspaceFileKind } from "../sandboxLink";
 
 /**
  * One workspace file shown as a card in the conversation.
@@ -23,14 +23,16 @@ import { kindBadge, kindLabel, type WorkspaceFileKind } from "../sandboxLink";
 export interface FileCardProps {
   path: string;
   name: string;
+  title?: string;
   kind: WorkspaceFileKind;
   onOpen: (path: string) => void;
 }
 
-export const FileCard = memo(function FileCard({ path, name, kind, onOpen }: FileCardProps) {
+export const FileCard = memo(function FileCard({ path, name, title, kind, onOpen }: FileCardProps) {
   const [thumbUrl, setThumbUrl] = useState<string | null>(null);
   const [thumbFailed, setThumbFailed] = useState(false);
   const image = kind === "image";
+  const markdown = isMarkdownPath(path);
   const showThumb = image && !thumbFailed;
   const cardRef = useRef<HTMLDivElement | null>(null);
 
@@ -94,8 +96,8 @@ export const FileCard = memo(function FileCard({ path, name, kind, onOpen }: Fil
   }, [image, path]);
 
   return (
-    <div ref={cardRef} className="file-card" data-testid="file-card" data-kind={kind} data-path={path} title={path}>
-      <button type="button" className="file-card-open" onClick={() => onOpen(path)}>
+    <div ref={cardRef} className="file-card" data-testid="file-card" data-kind={markdown ? "markdown" : kind} data-path={path} title={path}>
+      <button type="button" className="file-card-open" onClick={() => onOpen(path)} aria-label={`预览 ${title || name}`}>
         <span className="file-card-thumb" aria-hidden="true">
           {showThumb && thumbUrl ? (
             <img
@@ -108,13 +110,14 @@ export const FileCard = memo(function FileCard({ path, name, kind, onOpen }: Fil
               onError={() => setThumbFailed(true)}
             />
           ) : (
-            <span className="file-card-badge">{kindBadge(kind)}</span>
+            <span className="file-card-badge">{markdown ? "MD" : kindBadge(kind)}</span>
           )}
         </span>
         <span className="file-card-meta">
-          <span className="file-card-name">{name}</span>
+          <span className="file-card-name">{title || name}</span>
+          {title && <span className="file-card-filename muted tiny">{name}</span>}
           <span className="muted tiny">
-            {kindLabel(kind)}
+            {markdown ? "Markdown 文档" : kindLabel(kind)}{kind !== "unsupported" ? " · 点击预览" : " · 可下载"}
             {image && thumbFailed ? "（缩略图不可用，点开查看）" : ""}
           </span>
         </span>

@@ -570,3 +570,53 @@ test.describe("unified 文件 tab", () => {
     expect((panelBox?.x ?? 0) + (panelBox?.width ?? 0)).toBeLessThanOrEqual(360);
   });
 });
+
+test("Markdown deliverables have readable titles, formatted preview, source toggle and safe links", async ({ page }, info) => {
+  await mockDocuments(page);
+  const md = '# 三天两晚完整行程\n\n先看 **安排重点**。\n\n## 每日安排\n\n| 日期 | 活动 |\n| --- | --- |\n| 第一天 | 抵达休息 |\n| 第二天 | 湖边散步 |\n\n> 出发前确认开放时间。\n\n[官方信息](https://example.com/travel)\n\n' + Array.from({length:24},(_,i)=>`### 第 ${i+1} 项提醒\n\n保持舒适的节奏，预留休息时间。`).join('\n\n') + '\n\n最后一项检查';
+  await page.route('**/api/documents/text**', r => r.fulfill({json:{text:md,truncated:false}}));
+  let opened: string | null = null;
+  await openConversation(page,'conv_markdown_reader','已整理好 [完整三天行程](/home/gem/workspace/long-trip-document.md)。');
+  await page.route('**/api/browser/tabs',r=>{opened=r.request().postDataJSON().url;return r.fulfill({json:{ok:true}});});
+  const card=page.getByTestId('file-card');
+  await expect(card.locator('.file-card-name')).toHaveText('完整三天行程');
+  await expect(card.locator('.file-card-badge')).toHaveText('MD');
+  await card.getByRole('button',{name:'预览 完整三天行程'}).click();
+  const dialog=page.getByRole('dialog');
+  await expect(dialog.getByRole('heading',{level:1})).toHaveText('三天两晚完整行程');
+  await expect(dialog.locator('table')).toContainText('抵达休息');
+  await expect(dialog.locator('blockquote')).toContainText('确认开放时间');
+  await dialog.getByRole('button',{name:'原文',exact:true}).click();
+  await expect(dialog.getByTestId('file-preview-text')).toContainText('# 三天两晚完整行程');
+  await dialog.getByRole('button',{name:'阅读',exact:true}).click();
+  for(const width of info.project.name.startsWith('mobile')?[390,360]:[1440]) {
+    await page.setViewportSize({width,height:844});
+    const body=dialog.locator('.file-preview-body');
+    expect(await body.evaluate(el=>el.scrollHeight)).toBeGreaterThan(await body.evaluate(el=>el.clientHeight));
+    await body.evaluate(el=>{el.scrollTop=el.scrollHeight;});
+    await expect(dialog.getByText('最后一项检查',{exact:true})).toBeInViewport();
+    expect(await page.evaluate(()=>document.documentElement.scrollWidth-document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
+    await body.evaluate(el=>{el.scrollTop=0;});
+  }
+  await page.screenshot({path:`/Users/mengxiao/workspace/.scratch/artifacts/aio-result-preview/${info.project.name}-reader.png`,animations:'disabled'});
+  await dialog.getByRole('link',{name:'官方信息'}).click();
+  await expect.poll(()=>opened).toBe('https://example.com/travel');
+  await expect(dialog).toHaveCount(0);
+});
+
+test("Markdown preview cannot execute HTML and leaves HTML files as source",async({page})=>{
+  await mockDocuments(page);
+  const content='# 安全文档\n\n<script>window.previewPwned=1</script><form action="https://evil.example"><input name="secret"><button>发送秘密</button></form><iframe src="https://evil.example"></iframe><img src=x onerror="window.previewPwned=1"><a href="javascript:alert(1)">危险链接</a>\n\n**可阅读内容**';
+  await page.route('**/api/documents/text**',r=>r.fulfill({json:{text:content,truncated:true}}));
+  await openConversation(page,'conv_safe_reader','[文档](/home/gem/workspace/safe.md) [网页源码](/home/gem/workspace/source.html)');
+  await page.getByRole('button',{name:'预览 文档',exact:true}).click();
+  const dialog=page.getByRole('dialog');
+  await expect(dialog.getByRole('heading',{name:'安全文档'})).toBeVisible();
+  await expect(dialog.locator('script,iframe,form,input')).toHaveCount(0);
+  expect(await page.evaluate(()=>(window as any).previewPwned)).toBeUndefined();
+  await expect(dialog.getByRole('status')).toContainText('仅显示开头部分');
+  await dialog.getByRole('button',{name:'关闭预览'}).click();
+  await page.getByRole('button',{name:'预览 网页源码',exact:true}).click();
+  await expect(page.getByTestId('file-preview-text')).toContainText('<script>');
+  await expect(page.getByTestId('file-preview-markdown')).toHaveCount(0);
+});

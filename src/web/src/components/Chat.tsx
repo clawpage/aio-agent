@@ -447,7 +447,7 @@ export function Chat({
       </div>
 
       }
-      {previewPath && <FilePreview path={previewPath} onClose={() => setPreviewPath(null)} />}
+      {previewPath && <FilePreview path={previewPath} onClose={() => setPreviewPath(null)} onOpenLink={onOpenBrowserLink} />}
     </section>
   );
 }
@@ -466,7 +466,7 @@ export function MessageFileCards({ text, onOpen }: { text: string; onOpen: (path
   return (
     <div className="file-cards" data-testid="message-file-cards">
       {refs.map((ref) => (
-        <FileCard key={ref.path} path={ref.path} name={ref.name} kind={ref.kind} onOpen={onOpen} />
+        <FileCard key={ref.path} path={ref.path} name={ref.name} title={ref.title} kind={ref.kind} onOpen={onOpen} />
       ))}
     </div>
   );
@@ -485,7 +485,7 @@ export function AttachmentCards({
   return (
     <div className="file-cards" data-testid="message-attachment-cards">
       {refs.map((ref) => (
-        <FileCard key={ref.path} path={ref.path} name={ref.name} kind={ref.kind} onOpen={onOpen} />
+        <FileCard key={ref.path} path={ref.path} name={ref.name} title={ref.title} kind={ref.kind} onOpen={onOpen} />
       ))}
     </div>
   );

@@ -2,11 +2,15 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api";
 import {
   baseName,
+  isMarkdownPath,
   isPreviewableKind,
   kindLabel,
   workspaceFileKind,
   type WorkspaceFileKind,
 } from "../sandboxLink";
+import { Markdown } from "./Markdown";
+import { FileCard } from "./FileCard";
+import { extractFileRefs } from "../fileRefs";
 
 /**
  * Unified preview for a workspace file.
@@ -18,7 +22,7 @@ import {
  *   * PDF/Word/Excel/PowerPoint are converted inside the sandbox and returned as
  *     authenticated PNG pages, so no PDF viewer, iframe, blob HTML or SVG ever
  *     executes agent-produced active content in the console;
- *   * text is shown as escaped text in a `<pre>`, with a size cap enforced by the
+ *   * Markdown is sanitized for reading; other text is escaped, with a size cap enforced by the
  *     server;
  *   * unsupported formats say so and offer the original download.
  *
@@ -46,6 +50,7 @@ function imageMime(path: string): string {
 interface Props {
   path: string;
   onClose: () => void;
+  onOpenLink?: (url: string) => void;
   /** Offered for kinds the sandbox tools can convert (e.g. Word → PDF). */
   onConvert?: (path: string, target: string) => void;
   /** Extra actions rendered in the footer (workspace integration). */
@@ -54,7 +59,13 @@ interface Props {
 
 type Phase = "loading" | "ready" | "error" | "unsupported";
 
-export function FilePreview({ path, onClose, onConvert, actions }: Props) {
+export function FilePreview({ path: initialPath, onClose, onOpenLink, onConvert, actions }: Props) {
+  const [path, setPath] = useState(initialPath);
+  const [history, setHistory] = useState<string[]>([]);
+  const [sourceView, setSourceView] = useState(false);
+  useEffect(() => { setPath(initialPath); setHistory([]); }, [initialPath]);
+  const openFile = (next: string) => { setHistory(old => [...old, path]); setPath(next); };
+  const markdown = isMarkdownPath(path);
   const kind = useMemo<WorkspaceFileKind>(() => workspaceFileKind(path), [path]);
   const name = baseName(path);
   const [phase, setPhase] = useState<Phase>("loading");
@@ -92,6 +103,7 @@ export function FilePreview({ path, onClose, onConvert, actions }: Props) {
     const controller = new AbortController();
     let objectUrl: string | null = null;
     setPhase("loading");
+    setSourceView(false);
     setError(null);
     setImageUrl(null);
     setText(null);
@@ -160,6 +172,12 @@ export function FilePreview({ path, onClose, onConvert, actions }: Props) {
 
   const retry = useCallback(() => setAttempt((n) => n + 1), []);
   const raster = isPreviewableKind(kind) && kind !== "image";
+  const refs = useMemo(() => markdown && text ? extractFileRefs(text) : [], [markdown, text]);
+  const openLink = async (url: string) => {
+    if (onOpenLink) { onOpenLink(url); onClose(); return; }
+    try { await api.openBrowserTab(url); }
+    catch (err) { setError(err instanceof Error ? err.message : String(err)); }
+  };
 
   return (
     <div
@@ -169,18 +187,23 @@ export function FilePreview({ path, onClose, onConvert, actions }: Props) {
         if (event.target === event.currentTarget) onClose();
       }}
     >
-      <div className="file-preview" role="dialog" aria-modal="true" aria-label={`预览 ${name}`}>
+      <div className={`file-preview ${markdown ? "file-preview-document" : ""}`} role="dialog" aria-modal="true" aria-label={`预览 ${name}`}>
         <header className="file-preview-head">
+          {history.length > 0 && <button className="ghost" aria-label="返回上个文件" onClick={() => { setPath(history.at(-1)!); setHistory(old => old.slice(0,-1)); }}>←</button>}
           <span className="file-preview-name" title={path}>
             {name}
           </span>
-          <span className="muted tiny">{kindLabel(kind)}</span>
+          <span className="muted tiny">{markdown ? "Markdown" : kindLabel(kind)}</span>
           <span className="spacer" />
           <button type="button" className="ghost" onClick={onClose} ref={closeRef} aria-label="关闭预览">
             关闭
           </button>
         </header>
 
+        {phase === "ready" && markdown && <div className="file-preview-toolbar" role="group" aria-label="文档显示方式">
+          <button className="ghost" aria-pressed={!sourceView} onClick={() => setSourceView(false)}>阅读</button>
+          <button className="ghost" aria-pressed={sourceView} onClick={() => setSourceView(true)}>原文</button>
+        </div>}
         <div className="file-preview-body">
           {phase === "loading" && (
             <p className="muted" role="status">
@@ -218,7 +241,10 @@ export function FilePreview({ path, onClose, onConvert, actions }: Props) {
                   文件较大，仅显示开头部分；完整内容请下载查看。
                 </p>
               )}
-              <pre data-testid="file-preview-text">{text}</pre>
+              {markdown && !sourceView ? <article className="document-reading" data-testid="file-preview-markdown">
+                <Markdown source={text} document onOpenLink={url => void openLink(url)} onOpenFile={openFile}/>
+                {refs.length > 0 && <div className="file-cards">{refs.map(ref => <FileCard key={ref.path} {...ref} onOpen={openFile}/>)}</div>}
+              </article> : <pre data-testid="file-preview-text">{text}</pre>}
             </div>
           )}
 

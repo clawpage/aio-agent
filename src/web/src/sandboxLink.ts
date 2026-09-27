@@ -28,9 +28,8 @@ export const IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "webp", "gif", "a
  * classification (`src/server/documents/paths.ts`): the server is authoritative
  * and re-validates, this only decides which control to render.
  *
- * `text` covers Markdown source, HTML and SVG too — those are shown as escaped
- * text, never parsed as markup, so agent-produced active content cannot execute
- * inside the console.
+ * `text` uses the size-capped text endpoint. Markdown gets a sanitized reading
+ * view; HTML/SVG/code remain escaped source, never active documents.
  */
 export type WorkspaceFileKind = "image" | "pdf" | "word" | "excel" | "ppt" | "text" | "unsupported";
 
@@ -151,4 +150,9 @@ export function isPreviewableKind(kind: WorkspaceFileKind): boolean {
 /** File name from a workspace path, for display. */
 export function baseName(path: string): string {
   return path.slice(path.lastIndexOf("/") + 1) || path;
+}
+
+/** Markdown shares the safe text transport, but has its own reading presentation. */
+export function isMarkdownPath(path: string): boolean {
+  return /\.(?:md|markdown)$/i.test(baseName(path));
 }

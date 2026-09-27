@@ -166,6 +166,6 @@ export function TaskChat({ onDetails, onOpenWorkspace, onOpenLink, onBrowserNavi
     } }}/>
       <div className="composer-row"><label className={`file-button ${busy || uploading ? "disabled" : ""}`}>{uploading ? "上传中…" : "附件"}<input type="file" multiple className="file-input" aria-label="添加附件" data-testid="attachment-input" disabled={busy || uploading} onChange={e => { void pick(e.target.files); e.target.value = ""; }}/></label><span className="spacer"/><button className="primary" disabled={busy || uploading || (!draft.trim() && !attachments.length)} onClick={() => void send()}>{busy ? "提交中…" : "发送"}</button></div>
     </div>
-    {preview && <FilePreview path={preview} onClose={() => setPreview(null)}/>}
+    {preview && <FilePreview path={preview} onClose={() => setPreview(null)} onOpenLink={onOpenLink}/>}
   </section>;
 }

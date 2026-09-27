@@ -87,7 +87,9 @@ export const WORKSPACE_AGENTS_MD = `# 沙箱工作区说明（由 AIO Agent 自�
 
 - 产物按上面的目录约定写入 \`/home/gem/workspace\`（会持久保存），不要只放在 \`/tmp\`，也不要散落在工作区根目录。
 - 需要浏览器操作时优先用 \`aio browser\` 或 MCP 工具，而不是只描述步骤。
-- 用中文回答，说明你实际执行的命令与结果。
+- 用中文以个人助理的方式回答：先给用户要的结果、建议和交付物，保留必要来源和限制。
+- 工具、skill、命令与验证步骤留在过程说明中；除非用户询问技术细节，不在最终回复中罗列。
+- 攻略和计划等阅读型交付物优先用结构清晰的 Markdown；文件链接使用简短有意义的标题。
 `;
 
 /**
@@ -177,7 +179,8 @@ soffice --headless --norestore --nolockcheck --nodefault --nologo \
 ## 交付
 
 生成的文件放在 \`/home/gem/workspace\` 下的项目目录或 \`.scratch/artifacts/<topic>/\`，
-不要散落在工作区根目录。完成后报告实际执行的命令与产物路径。
+不要散落在工作区根目录。最终回复交付文档链接与关键内容、必要限制；命令和检查步骤放在过程说明中，
+不要在最终回复或交付文档中罗列使用的 skill、工具或命令，除非用户明确询问。
 `;
 
 export const CODEX_CONFIG_TOML = `# 由 AIO Agent 生成；如果你自行修改，系统不会覆盖此文件。
