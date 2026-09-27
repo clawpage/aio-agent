@@ -51,6 +51,8 @@ export interface ModelInfo {
   reasoningEfforts: string[];
   defaultReasoningEffort: string | null;
   inputModalities: string[];
+  /** Codex provider for this model; null/absent means the ChatGPT account. */
+  modelProvider?: string | null;
 }
 
 /**
@@ -68,6 +70,9 @@ export interface SettingsModel {
   displayName: string;
   supportedReasoningEfforts: string[];
   defaultReasoningEffort: string | null;
+  /** Present for catalog entries that are not plain ChatGPT models. */
+  inputModalities?: string[];
+  modelProvider?: string | null;
 }
 
 export interface SettingsResponse {

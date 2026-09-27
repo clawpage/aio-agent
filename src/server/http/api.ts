@@ -1,7 +1,12 @@
 import express, { type Request, type Response, type NextFunction, type Router } from "express";
 import { randomUUID } from "node:crypto";
 import type { AppContext } from "../context.js";
-import { InvalidConversationTitleError, normalizeConversationTitle, TurnConflictError } from "../codex/manager.js";
+import {
+  InvalidConversationTitleError,
+  normalizeConversationTitle,
+  TurnConflictError,
+  TurnInputUnsupportedError,
+} from "../codex/manager.js";
 import type { AgentEvent } from "../codex/manager.js";
 import type { HostKind, RequestContext } from "./security.js";
 import { UNSAFE_METHODS, guardUnsafe, originAllowed } from "./security.js";
@@ -494,6 +499,12 @@ export function createApiRouter(context: AppContext): Router {
           res.status(409).json({ error: "message_id_conflict", message: err.message });
           return;
         }
+        // A submission the selected model cannot run is a client error, not a
+        // server failure: report it plainly with the model's own constraint.
+        if (err instanceof TurnInputUnsupportedError) {
+          res.status(400).json({ error: "input_unsupported", message: err.message });
+          return;
+        }
         res.status(400).json({ error: "submit_failed", message: err instanceof Error ? err.message : String(err) });
       }
     }),
@@ -556,6 +567,7 @@ export function createApiRouter(context: AppContext): Router {
             reasoningEfforts: m.supportedReasoningEfforts,
             defaultReasoningEffort: m.defaultReasoningEffort,
             inputModalities: m.inputModalities,
+            modelProvider: m.modelProvider ?? null,
           })),
         });
       } catch (err) {
@@ -577,13 +589,22 @@ export function createApiRouter(context: AppContext): Router {
     requireSession,
     asyncHandler(async (_req, res) => {
       const settings = agent.agentSettings();
-      let models: Array<{ id: string; displayName: string; supportedReasoningEfforts: string[]; defaultReasoningEffort: string | null }> = [];
+      let models: Array<{
+        id: string;
+        displayName: string;
+        supportedReasoningEfforts: string[];
+        defaultReasoningEffort: string | null;
+        inputModalities: string[];
+        modelProvider: string | null;
+      }> = [];
       try {
         models = (await agent.listModels()).map((m) => ({
           id: m.id,
           displayName: m.displayName,
           supportedReasoningEfforts: m.supportedReasoningEfforts,
           defaultReasoningEffort: m.defaultReasoningEffort,
+          inputModalities: m.inputModalities,
+          modelProvider: m.modelProvider ?? null,
         }));
       } catch {
         // A settings read must still answer with the stored choice when the model

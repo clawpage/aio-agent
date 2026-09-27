@@ -73,6 +73,11 @@ export function Settings({ onBack, onSaved }: Props) {
   const savedModelUnusable = savedModelAvailable === false && Boolean(model) && !currentModel;
   const canSave = !loading && !saving && catalogKnown && Boolean(model) && !savedModelUnusable;
   const isDefaultChoice = Boolean(defaultModel) && model === defaultModel && effort === "";
+  /**
+   * A non-ChatGPT catalog entry (the optional OpenCode Go bridge) is text-only,
+   * so the page says so instead of letting an image attachment fail on send.
+   */
+  const textOnlyHint = Boolean(currentModel?.modelProvider) && currentModel?.inputModalities?.includes("image") === false;
 
   const pickModel = useCallback(
     (next: string) => {
@@ -172,6 +177,12 @@ export function Settings({ onBack, onSaved }: Props) {
             </select>
             <span className="muted tiny">所有新消息都会使用这个模型。</span>
           </label>
+
+          {textOnlyHint && (
+            <p className="muted tiny" role="note">
+              该模型只支持文本输入；带图片的附件会被拒绝，需要图片能力请换回 ChatGPT 模型。
+            </p>
+          )}
 
           <label className="field">
             <span>思考强度</span>

@@ -95,7 +95,8 @@ curl -s http://127.0.0.1:4891/healthz
 - **其他格式**：明确说明「可下载」，不会假装能预览。
 - 预览失败、转换失败、文件已删除都会给出可恢复的提示与重试，不显示成功空白。
 
-工作区里的「文档工具」标签页可以列目录、选文件预览/转换/下载，并显示工具就绪状态。
+工作区里的「文件」标签页统一承担目录导航、上传、新建、预览、下载、文本编辑与删除；对可转换格式的文件行还提供
+「转换」入口（紧凑面板，可取消/执行，结果可预览下载），工具就绪状态收在底部默认折叠的「文档处理」里。
 智能体侧可以在沙箱内**创建、修改、转换**文档（Word/Excel/PPT 用 Python 库，
 格式转换与 PDF 用 LibreOffice），例如「把这个 Word 转成 PDF」「新建一个 Excel 并算总和」。
 
@@ -138,6 +139,41 @@ curl -s http://127.0.0.1:4891/healthz
 
 > 控制面从不让浏览器为「读状态」而保持运行，也不会把「进程归属未知」当成「浏览器不存在」
 > （那会错误地另起一个 Chromium）：无法确认归属时按保守策略处理并如实显示。
+
+## 可选：OpenCode Go 桥模型（DeepSeek / MiMo）
+
+统一配置页的模型选择器默认只有 ChatGPT 账号的模型。若本机已装并运行
+`tools/codex-opencode-go`（本地 LiteLLM 的 Responses 桥，监听 `127.0.0.1:4017`，
+上游 `https://opencode.ai/zen/go/v1`），控制面会把桥上的每个模型都列进选择器
+（默认 `deepseek-v4.1-flash` 与 `mimo-v2.6-pro`），可以和 ChatGPT 模型自由切换：
+
+- **自动启用**：`PA_OPENCODE_GO_ENABLED=auto`（默认）只在能取到密钥时才列出这些模型；
+  取不到就完全不出现，ChatGPT 路径与今天完全一致。`on` 会要求启用（取不到密钥会打警告）
+  并保持关闭，`off` 显式关闭。
+- **模型清单**：`PA_OPENCODE_GO_MODELS`（逗号分隔，默认两个模型）。旧变量
+  `PA_OPENCODE_GO_MODEL` 仍可用，设置它等价于只列出那一个模型（优先级更高），
+  既有单模型部署行为不变。
+- **每个模型的思考强度**：DeepSeek 支持 `low`/`high`/`max`，MiMo 上游拒绝 `max`
+  （HTTP 400），只提供 `low`/`high`；两者默认都是 `high`。选择器只列出各模型
+  真实可用的档位，所以不会存下一个每次执行都失败的组合。
+- **密钥**：优先读进程环境变量 `LITELLM_MASTER_KEY`，否则读私有文件
+  `~/.config/codex-opencode-go/secrets.env`（逐行 `KEY=VALUE`，**不执行**）。
+  文件权限宽于 `600`/`400` 时**拒绝使用**并给出可读日志。密钥不写日志、数据库、argv
+  或前端；传给 `docker exec` 时 argv 只出现变量名（`-e LITELLM_MASTER_KEY`），值走子进程环境。
+- **沙箱可达性**：容器内用 `http://host.docker.internal:4017/v1` 访问宿主桥，
+  不是 `127.0.0.1`。provider 用 `-c` 覆盖在命令行注入，不改动容器内 `config.toml`，
+  也不动固定镜像与既有隔离参数。
+- **切换语义**：Codex 只在创建线程时才认 `modelProvider`（`thread/resume` 传它不生效），
+  所以同一个会话换模型若跨了 provider，控制面会用 `thread/fork` 续在新 provider 上并保留
+  历史；provider 不变时仍走普通 resume。ChatGPT 会话的启动/恢复/派生一如既往**不发送**
+  `modelProvider`。
+- **仅支持文本**：两个桥模型的 `inputModalities` 都只有 `text`，带图片的提交会在提交阶段
+  就被拒绝（HTTP 400 `input_unsupported`，中文提示），不会等远端报错。
+- **已知边界**：密钥在沙箱内对进程可见（Codex 需要读取它）——这是该桥的固有代价，
+  与本项目「不桥接宿主机能力」的既有边界不冲突，但请自行评估；桥不可用时该模型只是不出现，
+  不会影响控制面启动。
+
+配置项见 [`.env.example`](.env.example) 的 `PA_OPENCODE_GO_*`。
 
 ## 本地开发与测试
 
@@ -184,7 +220,7 @@ npm run build && npx playwright test --config playwright.local.config.ts
 | `python3 tests/unit/browser-runtime.test.py` | 容器内受管 helper 的纯函数与安全边界：真实 flattened cmdline 归属、`unknown` 不等于 `absent`、快照 schema/原子 0600、精确 PID/starttime 校验后才停、按 origin 限定且在导航前注入 `sessionStorage`、AIO soft 重连与激活 index、错误脱敏 |
 | `npm run smoke` | 真实 HTTPS 登录与 cookie 属性、模型列表、一次性票据（重放与开放重定向）、伴随站会话与跨源续期、经鉴权的 shell 调用、上传与列目录、跨源写入拒绝、原生界面可达、未登录时各表面一律 401、**真实 WebSocket 升级**（已登录 101 / 未登录 401） |
 | `npx playwright test` | 登录界面（错误密码与正确密码）、对话页输入区不含任何模型/思考控件、统一配置页默认选中 GPT-6-Sol（桌面侧栏与手机底导航入口）、打开工作区后立刻切标签的竞态、连续切换最终落在最后点击的标签、真实文件列表与 code-server 可达、无横向溢出 |
-| `npx playwright test --config playwright.local.config.ts` | 会话文件卡片与统一预览（图片缩略图/分页翻页/下载/失败重试/360px 无溢出）、工作区「文档工具」目录导航与转换、本地假后端（默认 `dist/web`，可用 `PA_TEST_WEB_ROOT` 指向 scratch 构建 + 全部 `/api` 由 `page.route` mock）：会话 `⋯` 菜单/重命名/归档/恢复且无删除、失败重命名保留输入、运行态与 `prefers-reduced-motion`、Markdown 链接只进沙箱浏览器（`mailto:`/相对链接保持不可导航）、归档行标题不可点、统一配置页保存/刷新持久化/跨会话生效/失败反馈/无模型列表时禁用保存/返回会话保留草稿、折叠 Working 分组默认收起/点击与键盘展开收起/增量不重置展开/终态停动画/审批露出/长历史展开自然高度与行可达（桌面 1440×900，手机 390/360 含 WebKit，短视口与暗亮无溢出） |
+| `npx playwright test --config playwright.local.config.ts` | 会话文件卡片与统一预览（图片缩略图/分页翻页/下载/失败重试/360px 无溢出）、工作区「文件」唯一入口/上传/目录导航/转换/迟到结果不跳目录、本地假后端（默认 `dist/web`，可用 `PA_TEST_WEB_ROOT` 指向 scratch 构建 + 全部 `/api` 由 `page.route` mock）：会话 `⋯` 菜单/重命名/归档/恢复且无删除、失败重命名保留输入、运行态与 `prefers-reduced-motion`、Markdown 链接只进沙箱浏览器（`mailto:`/相对链接保持不可导航）、归档行标题不可点、统一配置页保存/刷新持久化/跨会话生效/失败反馈/无模型列表时禁用保存/返回会话保留草稿、活动段混排（文本/活动多段次序、当前条唯一且置底、段独立展开且增量不重置、迟到日志回原段、空占位不切段、状态行在活动段之上）、默认收起/点击与键盘展开收起/终态停动画/审批露出/长历史展开自然高度（段自身不滚动）与行可达（桌面 1440×900，手机 390/360 含 WebKit，短视口与暗亮无溢出） |
 | 人工/父端验收 | VNC 桌面帧流、浏览器 CDP 帧流、手机 390/360 实际交互与截图 |
 
 `npm run smoke` 会读取 `var/owner-secret.txt`（或用 `PA_OWNER_SECRET_FILE` 指定）。
@@ -207,6 +243,12 @@ npm run build && npx playwright test --config playwright.local.config.ts
 | `PA_TITLE_MAX_CHARS` | `24` | 生成标题的最大字符数 |
 | `PA_MAX_CONCURRENT_TURNS` | `3` | 跨会话同时执行的主 turn 上限（取值 clamp 到 1–3）；同一会话始终串行，排队 FIFO |
 | `PA_REASONING_SUMMARY` | `concise` | 主 turn 的思考摘要模式（`concise`/`auto`/`detailed`/`none`），不展示原始思维链 |
+| `PA_OPENCODE_GO_ENABLED` | `auto` | 是否列出 OpenCode Go 桥模型；`auto` 仅在有密钥时出现，另有 `on`/`off` |
+| `PA_OPENCODE_GO_BASE_URL` | `http://host.docker.internal:4017/v1` | 沙箱内可达的 LiteLLM Responses 桥地址 |
+| `PA_OPENCODE_GO_MODELS` | `deepseek-v4.1-flash,mimo-v2.6-pro` | 桥模型 id 列表（逗号分隔），决定选择器里出现哪些桥模型 |
+| `PA_OPENCODE_GO_MODEL`（兼容旧配置） | 空 | 设置则只列出这一个桥模型，优先级高于 `PA_OPENCODE_GO_MODELS` |
+| `PA_OPENCODE_GO_PROVIDER_ID` | `opencode_go` | 注入 Codex 的 provider id（与 `~/.codex/opencode-go.config.toml` 保持一致） |
+| `PA_OPENCODE_GO_SECRETS_FILE` / `PA_OPENCODE_GO_ENV_KEY` | `~/.config/codex-opencode-go/secrets.env` / `LITELLM_MASTER_KEY` | 密钥来源（环境变量优先，其次该文件；权限宽于 600/400 拒绝） |
 | `PA_SANDBOX_PORT` | `18081` | 沙箱发布到 loopback 的端口 |
 | `PA_OWNER_PASSWORD` | 空 | 设置则用它，否则生成到 `var/owner-secret.txt` |
 | `PA_BROWSER_LIFECYCLE` | `1` | 浏览器空闲释放总开关；关闭则浏览器始终常驻 |
@@ -230,16 +272,25 @@ npm run build && npx playwright test --config playwright.local.config.ts
   刷新持久化、失败反馈与暗亮无溢出。WebKit 自动化不等同于 iPhone 真机软键盘与 Safari
   地址栏行为验收。
 
-- 每轮的工具调用与思考摘要默认折叠进该轮的“Working…”分组：一轮一个分组、按 turn 隔离，
-  该轮 `turn.started` 时就出现（不等首个工具），因此只有正文的轮次也有自己的一条。
-  分组落在该轮开始处，缺失生命周期的旧历史按首次活动处，历史默认收起。分组头如实反映状态（运行中、排队等待、
-  已完成、执行出错、已停止、结果未知），只有真正在执行的一轮才有循环扫光；排队不冒充
-  运行，完成/失败/停止后动画停止。尚未产生工具或摘要的轮次展开后只给一句中性提示
-  （如“正在处理…”），不伪造摘要。用户消息、助手正文、审批、补充输入与错误提示始终独立
-  显示，不藏进分组；某个工具失败时折叠状态下也能从组头看到“工具出错”。分组头可点击或
-  键盘操作（`aria-expanded`），展开状态在增量事件到达时保持，原始 reasoning 内容永不展示，
-  只显示模型生成的摘要。展开时按内容自然撑开（卡片不参与父滚动容器的收缩），由外层滚动
-  承载长历史。`prefers-reduced-motion` 下关闭扫光动画。
+- 工具调用与思考摘要按“连续活动段”混排，而不是整轮聚到开头：一段可见内容（非空的助手
+  正文块、审批卡）就是边界，边界之前的活动段就地留在原位置，边界之后立刻开启新的活动段。
+  于是时间线读起来是 `文本1 — 执行了N项操作 — 文本2 — 执行了M项操作 — 最新文字 — 当前进行中`
+  的 ChatGPT 式流，正在执行的那一条始终在该轮最新可见内容之后、也就是最后。每轮至多一条
+  处于活动状态并有循环扫光；已结束的历史段不参与动画、不因为后续 delta 改变位置或展开
+  状态。每个活动段有稳定 ID（`working:<turnId>:<seq>`），展开状态按段独立保存，增量事件
+  不会重置；迟到的工具输出/完成事件按 `segmentOf` 归属写回它原本所在的段，既不重复新建也
+  不会挪到末尾。桥模型在每次工具前发的空 `agentMessage` 采用惰性建块：只有首次真正出现非空正文（增量或完成事件）时才创建气泡，因此它既不产生空气泡、也不切段，更不会占住“当前进行中”的末位；重复或迟到的 `item/started` 对已有 id 是无副作用的空操作，不会重复建块、也不会把已结算正文改回 stream。
+- 活动段头部如实反映状态（运行中、排队等待、已完成、执行出错、已停止、结果未知）：只有真正
+  在执行的那段才有扫光；排队不冒充运行，完成/失败/停止后动画停止。已结束的历史段用中性
+  灰点与陈述式文案（`执行了 N 项操作`，纯摘要段显示 `思考摘要`），不再重复计数、也不再叫
+  “Working…”；工具真正失败时无论是否已结束都保留“工具出错”与错误提示。尚未产生工具或
+  摘要的活动段展开后只给一句中性提示（如“正在处理…”），不伪造摘要；空的终态段不会以
+  “执行了 0 项操作”留在历史里，但该轮结果仍以状态行如实呈现。用户消息、助手正文、审批、
+  补充输入与错误提示始终独立显示，不藏进活动段；可见状态行（线程创建、提示、停止请求等）
+  落在活动段之上，当前条保持在该轮最底部。段头可点击或键盘操作（`aria-expanded`），原始
+  reasoning 内容永不展示，只显示模型生成的摘要。展开时按内容自然撑开（外层滚动承载长
+  历史，段自身不设高度上限也不内层滚动；仅单个工具的日志保留自身高度上限并自行滚动）。
+  `prefers-reduced-motion` 下关闭扫光动画。
 
 - JupyterLab 首次加载会出现 `Shared module @jupyter-widgets/base doesn't exist in shared scope`
   的第三方 widget 前端告警；内核执行本身正常（`/v1/jupyter/execute` 实测返回 stdout）。

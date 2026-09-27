@@ -14,6 +14,7 @@ import type { BrowserRuntimeLike } from "./browser/lifecycle.js";
 import { HostTokenSource } from "./codex/hostTokens.js";
 import { SandboxCodexSession } from "./codex/sandboxCodex.js";
 import { AgentManager } from "./codex/manager.js";
+import { BridgeModel } from "./bridgeModel.js";
 import { AioClient } from "./aio/client.js";
 import { createApp, handleUpgrade } from "./http/server.js";
 import type { AppContext } from "./context.js";
@@ -72,7 +73,10 @@ export async function bootstrap(opts: BootstrapOptions = {}): Promise<Bootstrapp
   const container = opts.overrides?.container ?? new SandboxContainer(cfg, log);
   const documents = opts.overrides?.documents ?? new DocumentService(cfg, log, container);
   const hostTokens = new HostTokenSource(cfg, log);
-  const codex = opts.overrides?.codex ?? new SandboxCodexSession(cfg, log, container, hostTokens);
+  // One bridge instance per process: it owns the single decision about whether
+  // the optional OpenCode Go model exists, and holds the key in memory only.
+  const bridge = new BridgeModel(cfg, log);
+  const codex = opts.overrides?.codex ?? new SandboxCodexSession(cfg, log, container, hostTokens, bridge);
   const browserRuntime = new BrowserRuntime(cfg, log, container);
   // A test seam replaces the container-facing runtime; the state machine itself
   // is always the production one.
@@ -86,7 +90,7 @@ export async function bootstrap(opts: BootstrapOptions = {}): Promise<Bootstrapp
   });
   // The manager protects the browser for the whole of every managed turn, so a
   // lease must exist before this point (a queued turn can start on construction).
-  const agent = new AgentManager({ cfg, db, log, codex, hostTokens, browser });
+  const agent = new AgentManager({ cfg, db, log, codex, hostTokens, browser, bridge });
   const aio = opts.overrides?.aio ?? new AioClient(cfg, log);
 
   const ctx: AppContext = {

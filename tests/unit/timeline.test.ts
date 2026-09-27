@@ -7,7 +7,11 @@ import {
   emptyTimeline,
   isWorkingActive,
   removeBlock,
+  segmentIsActive,
+  segmentLabel,
+  segmentStatusTone,
   workingLabel,
+  type AssistantBlock,
   type Block,
   type ReasoningBlock,
   type TimelineState,
@@ -38,6 +42,33 @@ function reasonings(state: TimelineState): ReasoningBlock[] {
 
 function groups(state: TimelineState): WorkingBlock[] {
   return state.blocks.filter((b): b is WorkingBlock => b.kind === "working");
+}
+
+/** Every assistant prose bubble currently on screen. */
+function assistants(state: TimelineState): AssistantBlock[] {
+  return state.blocks.filter((b): b is AssistantBlock => b.kind === "assistant");
+}
+
+/** Every index map must agree with the real block positions after every edit. */
+function expectExactIndexes(state: TimelineState): void {
+  state.blocks.forEach((b, i) => {
+    expect(state.index.get(b.id)).toBe(i);
+    if (b.kind === "working") expect(state.groupIndex.get(b.id)).toBe(i);
+  });
+  // Each turn's segment list is exactly its live segments, in stream order.
+  for (const [turnId, ids] of state.segmentsByTurn) {
+    const actual = groups(state)
+      .filter((g) => g.turnId === turnId)
+      .map((g) => g.id);
+    expect(ids).toEqual(actual);
+  }
+  // Every recorded child points at a segment that exists.
+  for (const segmentId of state.segmentOf.values()) expect(state.groupIndex.has(segmentId)).toBe(true);
+}
+
+/** The ids of one turn's activity segments, in stream order. */
+function segmentIds(state: TimelineState, turnId: string): string[] {
+  return (state.segmentsByTurn.get(turnId) ?? []).slice();
 }
 
 let seq = 0;
@@ -206,7 +237,7 @@ describe("working groups", () => {
       ev("turn.finished", { turnId: "t2", status: "completed" }),
     ]);
     const gs = groups(state);
-    expect(gs.map((g) => g.id)).toEqual(["working:t1", "working:t2"]);
+    expect(gs.map((g) => g.id)).toEqual(["working:t1:0", "working:t2:0"]);
     expect(gs[0]!.children.map((c) => c.id)).toEqual(["item:a1", "item:r1"]);
     expect(gs[1]!.children.map((c) => c.id)).toEqual(["item:b1"]);
     // Every child knows its owning turn, and the turn is the local one.
@@ -432,7 +463,7 @@ describe("working groups", () => {
 
     // The maps are independent copies...
     expect(next.groupIndex).not.toBe(first.groupIndex);
-    expect(next.groupOf).not.toBe(first.groupOf);
+    expect(next.segmentOf).not.toBe(first.segmentOf);
     expect(next.turnStatus).not.toBe(first.turnStatus);
     // ...and so are the block objects the reducer mutates: the group, the
     // children array, and the child that received the delta.
@@ -476,24 +507,27 @@ describe("working groups", () => {
     expect(groups(state)[1]!.children).toHaveLength(0);
     expect(groups(state)[1]!.status).toBe("running");
     expect(reasonings(state)).toHaveLength(0);
-    expect(state.groupOf.has("item:r")).toBe(false);
+    expect(state.segmentOf.has("item:r")).toBe(false);
 
-    // A later real tool for t1 joins that existing row, with correct indexes.
+    // A later real tool for t1 joins that live row; the prose that follows closes
+    // that run and opens a fresh current-activity row beneath it.
     applyEvent(state, ev("item/started", { item: { id: "c1", type: "commandExecution", command: "ls" } }, "t1"));
     applyEvent(state, ev("item/completed", { item: { id: "m1", type: "agentMessage", text: "正文" } }, "t1"));
-    const gs = groups(state);
-    expect(gs.map((g) => g.turnId)).toEqual(["t0", "t1"]);
-    expect(gs[1]!.children.map((c) => c.id)).toEqual(["item:c1"]);
-    // Every index map agrees with the actual block positions.
-    state.blocks.forEach((b, i) => {
-      expect(state.index.get(b.id)).toBe(i);
-      if (b.kind === "working") expect(state.groupIndex.get(b.turnId)).toBe(i);
-    });
-    expect(state.groupOf.get("item:c1")).toBe("t1");
-    // The assistant prose stayed top-level, after the t1 group.
-    const assistantIdx = state.blocks.findIndex((b) => b.kind === "assistant");
-    expect(assistantIdx).toBeGreaterThan(state.groupIndex.get("t1")!);
-    expect(state.index.get("item:m1")).toBe(assistantIdx);
+    const t1Segments = segmentIds(state, "t1");
+    expect(t1Segments).toHaveLength(2);
+    const first = groups(state).find((g) => g.id === t1Segments[0]!)!;
+    const trailing = groups(state).find((g) => g.id === t1Segments[1]!)!;
+    expect(first.children.map((c) => c.id)).toEqual(["item:c1"]);
+    expect(first.closed).toBe(true);
+    expect(segmentIsActive(first)).toBe(false);
+    expect(trailing.children).toHaveLength(0);
+    expect(segmentIsActive(trailing)).toBe(true);
+    // The tool run ended before the prose, which precedes the live row.
+    const assistantIdx = state.index.get("item:m1")!;
+    expect(state.groupIndex.get(t1Segments[0]!)!).toBeLessThan(assistantIdx);
+    expect(assistantIdx).toBeLessThan(state.groupIndex.get(t1Segments[1]!)!);
+    expect(state.segmentOf.get("item:c1")).toBe(t1Segments[0]);
+    expectExactIndexes(state);
   });
 
   it("keeps a real summary alongside a dropped blank one", () => {
@@ -514,7 +548,7 @@ describe("working group presence", () => {
     const state = feed([ev("turn.started", { turnId: "t1" }, "t1")]);
     const gs = groups(state);
     expect(gs).toHaveLength(1);
-    expect(gs[0]!.id).toBe("working:t1");
+    expect(gs[0]!.id).toBe("working:t1:0");
     expect(gs[0]!.children).toHaveLength(0);
     expect(gs[0]!.status).toBe("running");
     expect(isWorkingActive(gs[0]!.status)).toBe(true);
@@ -537,17 +571,22 @@ describe("working group presence", () => {
     expect(reasonings(state).map((r) => r.text)).toEqual(["真实摘要"]);
   });
 
-  it("keeps a static completed row for a settled turn that produced no activity", () => {
+  it("keeps a settled row for a turn that produced no activity", () => {
     const state = feed([
       ev("turn.started", { turnId: "t1" }, "t1"),
       ev("turn.finished", { turnId: "t1", status: "completed" }, "t1"),
     ]);
-    // A settled turn with no activity keeps a static, honest completed row.
-    expect(groups(state)).toHaveLength(1);
-    expect(groups(state)[0]!.status).toBe("done");
-    expect(groups(state)[0]!.children).toHaveLength(0);
-    // It is settled, so nothing animates.
-    expect(isWorkingActive(groups(state)[0]!.status)).toBe(false);
+    // The row exists while the turn is live, so the header appears immediately...
+    const live = groups(
+      feed([ev("turn.started", { turnId: "t1" }, "t1")]),
+    )[0]!;
+    expect(live.status).toBe("running");
+    expect(isWorkingActive(live.status)).toBe(true);
+    // ...but a settled turn with nothing recorded leaves no empty "执行 0 项操作"
+    // row behind. Its outcome stays visible as an honest status line instead.
+    expect(groups(state)).toHaveLength(0);
+    const statuses = state.blocks.filter((b) => b.kind === "status") as Array<{ text: string }>;
+    expect(statuses.map((s) => s.text).join(" ")).toContain("本轮完成");
   });
 
   it("never duplicates the row when turn.started is replayed", () => {
@@ -562,21 +601,27 @@ describe("working group presence", () => {
     expect(state.blocks.filter((b) => b.kind === "working")).toHaveLength(1);
   });
 
-  it("shows one row for a turn that only produces assistant prose", () => {
-    const state = feed([
+  it("shows a current-activity row while a prose-only turn is still running", () => {
+    const midTurn = feed([
       ev("turn.started", { turnId: "t1" }, "t1"),
       ev("item/completed", { item: { id: "m1", type: "agentMessage", text: "纯文本回答" } }, "t1"),
-      ev("turn.finished", { turnId: "t1", status: "completed" }, "t1"),
     ]);
-    expect(groups(state)).toHaveLength(1);
-    expect(groups(state)[0]!.children).toHaveLength(0);
-    expect(groups(state)[0]!.status).toBe("done");
-    // The prose itself stays a top-level assistant block.
-    const assistant = state.blocks.filter((b) => b.kind === "assistant");
-    expect(assistant).toHaveLength(1);
-    expect((assistant[0] as { text: string }).text).toBe("纯文本回答");
-    // The group sits before the prose it belongs to.
-    expect(state.groupIndex.get("t1")!).toBeLessThan(state.index.get("item:m1")!);
+    // The prose itself stays a top-level assistant block, and the turn's live
+    // activity row sits *after* it while the turn is still running.
+    expect(assistants(midTurn).map((b) => b.id)).toEqual(["item:m1"]);
+    const live = groups(midTurn);
+    expect(live).toHaveLength(1);
+    expect(live[0]!.children).toHaveLength(0);
+    expect(isWorkingActive(live[0]!.status)).toBe(true);
+    expect(segmentIsActive(live[0]!)).toBe(true);
+    expect(midTurn.groupIndex.get(live[0]!.id)!).toBeGreaterThan(midTurn.index.get("item:m1")!);
+
+    // Once it settles the empty row is gone: no "执行 0 项操作" line is left, but
+    // the turn's outcome is still reported.
+    applyEvent(midTurn, ev("turn.finished", { turnId: "t1", status: "completed" }, "t1"));
+    expect(groups(midTurn)).toHaveLength(0);
+    const statuses = midTurn.blocks.filter((b) => b.kind === "status") as Array<{ text: string }>;
+    expect(statuses.map((s) => s.text).join(" ")).toContain("本轮完成");
   });
 
   it("keeps a queued turn out of the running state and off the animation", () => {
@@ -593,7 +638,7 @@ describe("working group presence", () => {
     expect(groups(state)[0]!.status).toBe("running");
   });
 
-  it("keeps an empty group through stopping and settles it on the terminal event", () => {
+  it("keeps the live row through stopping and clears it on the terminal event", () => {
     const state = feed([
       ev("turn.started", { turnId: "t1" }, "t1"),
       ev("turn.interrupt_requested", { turnId: "t1" }, "t1"),
@@ -601,22 +646,32 @@ describe("working group presence", () => {
     expect(groups(state)).toHaveLength(1);
     expect(groups(state)[0]!.status).toBe("stopping");
     expect(isWorkingActive(groups(state)[0]!.status)).toBe(true);
+    expect(segmentIsActive(groups(state)[0]!)).toBe(true);
 
     applyEvent(state, ev("turn.finished", { turnId: "t1", status: "interrupted" }, "t1"));
-    expect(groups(state)).toHaveLength(1);
-    expect(groups(state)[0]!.status).toBe("stopped");
-    expect(isWorkingActive(groups(state)[0]!.status)).toBe(false);
+    // Nothing was recorded and the turn stopped: the empty row is pruned, and the
+    // stop is reported truthfully ("已停止"). The stop notice precedes the live
+    // row while stopping, so the row stays bottom-most until it settles.
+    expect(groups(state)).toHaveLength(0);
+    const statuses = state.blocks.filter((b) => b.kind === "status") as Array<{ text: string }>;
+    expect(statuses.map((s) => s.text).join(" ")).toContain("已停止");
+    expect(isWorkingActive("stopped")).toBe(false);
   });
 
-  it("keeps the row for a failed turn with no tools and reports the failure", () => {
+  it("reports a failed turn with no tools instead of leaving an empty row", () => {
     const state = feed([
       ev("turn.started", { turnId: "t1" }, "t1"),
       ev("turn.failed", { turnId: "t1", message: "启动失败" }, "t1"),
     ]);
-    expect(groups(state)).toHaveLength(1);
-    expect(groups(state)[0]!.status).toBe("error");
-    expect(workingLabel(groups(state)[0]!.status)).toBe("执行出错");
-    expect(isWorkingActive(groups(state)[0]!.status)).toBe(false);
+    // No tools ran, so no "执行 0 项操作" row is left — but the failure is never
+    // hidden: it stays visible as an error status line.
+    expect(groups(state)).toHaveLength(0);
+    const statuses = state.blocks.filter((b) => b.kind === "status") as Array<{ text: string; level: string }>;
+    const failure = statuses.find((s) => s.text.includes("启动失败"));
+    expect(failure).toBeDefined();
+    expect(failure!.level).toBe("error");
+    expect(workingLabel("error")).toBe("执行出错");
+    expect(isWorkingActive("error")).toBe(false);
   });
 
   it("still gives each turn its own row across a multi-turn replay", () => {
@@ -630,16 +685,19 @@ describe("working group presence", () => {
       ev("turn.started", { turnId: "t3" }, "t3"),
     ]);
     const gs = groups(state);
-    expect(gs.map((g) => g.id)).toEqual(["working:t1", "working:t2", "working:t3"]);
-    expect(gs.map((g) => g.status)).toEqual(["done", "done", "running"]);
-    // Only the genuinely running turn animates.
-    expect(gs.map((g) => isWorkingActive(g.status))).toEqual([false, false, true]);
+    // t1 recorded a tool; t2 produced only prose (its empty rows settled away);
+    // t3 is still live so its activity row is present and empty.
+    expect(gs.map((g) => g.turnId)).toEqual(["t1", "t3"]);
+    expect(gs.map((g) => g.status)).toEqual(["done", "running"]);
+    // Only the genuinely running turn animates and counts as current.
+    expect(gs.map((g) => segmentIsActive(g))).toEqual([false, true]);
     expect(gs[0]!.children.map((c) => c.id)).toEqual(["item:a1"]);
     expect(gs[1]!.children).toHaveLength(0);
     // A late tool for the settled first turn joins its own row, not the live one.
     applyEvent(state, ev("item/completed", { item: { id: "late", type: "commandExecution", status: "completed" } }, "t1"));
     expect(groups(state)[0]!.children.map((c) => c.id)).toEqual(["item:a1", "item:late"]);
-    expect(groups(state)[2]!.children).toHaveLength(0);
+    expect(groups(state)[1]!.children).toHaveLength(0);
+    expect(assistants(state).map((b) => b.id)).toEqual(["item:m2"]);
   });
 
   it("never surfaces raw reasoning in a row created before its first summary", () => {
@@ -652,5 +710,549 @@ describe("working group presence", () => {
     expect(groups(state)[0]!.children).toHaveLength(0);
     expect(reasonings(state)).toHaveLength(0);
     expect(JSON.stringify(state.blocks)).not.toContain("RAW COT");
+  });
+});
+
+describe("interleaved activity segments", () => {
+  // The user-visible contract: a turn's tools and summaries must not pile up at
+  // the top of the turn. Visible prose (and approval cards) split the turn into
+  // segments, and the still-running segment is always the last thing on screen.
+  it("splits a turn into text / activity / text / activity and keeps the live row last", () => {
+    const state = feed([
+      ev("turn.started", { turnId: "t1" }, "t1"),
+      ev("item/completed", { item: { id: "m1", type: "agentMessage", text: "第一段" } }, "t1"),
+      ev("item/started", { item: { id: "c1", type: "commandExecution", command: "ls" } }, "t1"),
+      ev("item/completed", { item: { id: "c1", type: "commandExecution", status: "completed", aggregatedOutput: "a" } }, "t1"),
+      ev("item/completed", { item: { id: "m2", type: "agentMessage", text: "第二段" } }, "t1"),
+      ev("item/started", { item: { id: "c2", type: "commandExecution", command: "pwd" } }, "t1"),
+    ]);
+    // Rendered order: 文本1 — 执行1 — 文本2 — 进行中. The placeholder row opened
+    // by turn.started held nothing, so the first boundary pruned it instead of
+    // leaving an empty line at the top of the turn.
+    expect(state.blocks.map((b) => (b.kind === "working" ? `working(${b.children.length})` : `${b.kind}:${b.id.split(":").pop()}`))).toEqual([
+      "assistant:m1",
+      "working(1)",
+      "assistant:m2",
+      "working(1)",
+    ]);
+    // Exactly one row is the current one, and it is the last block.
+    const active = groups(state).filter((g) => segmentIsActive(g));
+    expect(active).toHaveLength(1);
+    expect(state.blocks[state.blocks.length - 1]!.id).toBe(active[0]!.id);
+    // The completed segment kept its place and reports what it did.
+    const closed = groups(state).find((g) => g.closed)!;
+    expect(closed.children.map((c) => c.id)).toEqual(["item:c1"]);
+    expect(segmentLabel(closed)).toBe("执行了 1 项操作");
+    expectExactIndexes(state);
+  });
+
+  it("does not move a closed segment when later deltas keep arriving", () => {
+    const state = feed([
+      ev("turn.started", { turnId: "t1" }, "t1"),
+      ev("item/completed", { item: { id: "m1", type: "agentMessage", text: "开场" } }, "t1"),
+      ev("item/started", { item: { id: "c1", type: "commandExecution", command: "ls" } }, "t1"),
+      ev("item/completed", { item: { id: "c1", type: "commandExecution", status: "completed" } }, "t1"),
+      ev("item/completed", { item: { id: "m2", type: "agentMessage", text: "正文" } }, "t1"),
+    ]);
+    const closedId = groups(state).find((g) => g.closed)!.id;
+    const closedBefore = state.groupIndex.get(closedId)!;
+    // Streams of deltas for the live prose must not reorder settled history.
+    for (const chunk of ["继", "续", "输", "出"]) {
+      applyEvent(state, ev("stream.delta", { itemId: "m2", kind: "item/agentMessage/delta", delta: chunk }, "t1"));
+    }
+    applyEvent(state, ev("item/completed", { item: { id: "m3", type: "agentMessage", text: "再一段" } }, "t1"));
+    expect(state.groupIndex.get(closedId)).toBe(closedBefore);
+    expect(groups(state).find((g) => g.id === closedId)!.children.map((c) => c.id)).toEqual(["item:c1"]);
+    expect(assistants(state).find((b) => b.id === "item:m2")!.text).toBe("正文继续输出");
+    expectExactIndexes(state);
+  });
+
+  it("updates a late tool completion inside its own original segment", () => {
+    const state = feed([
+      ev("turn.started", { turnId: "t1" }, "t1"),
+      ev("item/started", { item: { id: "c1", type: "commandExecution", command: "slow" } }, "t1"),
+      ev("item/completed", { item: { id: "m1", type: "agentMessage", text: "先说话" } }, "t1"),
+      ev("item/started", { item: { id: "c2", type: "commandExecution", command: "fast" } }, "t1"),
+      ev("item/completed", { item: { id: "c2", type: "commandExecution", status: "completed", aggregatedOutput: "fast" } }, "t1"),
+    ]);
+    const ids = segmentIds(state, "t1");
+    expect(ids).toHaveLength(2);
+    // c1's completion lands while c2's segment is the live one.
+    applyEvent(state, ev("item/completed", { item: { id: "c1", type: "commandExecution", status: "completed", aggregatedOutput: "slow-done" } }, "t1"));
+    const first = groups(state).find((g) => g.id === ids[0]!)!;
+    const newest = groups(state).find((g) => g.id === ids[1]!)!;
+    expect(first.children.map((c) => c.id)).toEqual(["item:c1"]);
+    expect((first.children[0] as ToolBlock).output).toBe("slow-done");
+    expect((first.children[0] as ToolBlock).status).toBe("done");
+    // No duplicate and no move: c2 stayed in the newest segment.
+    expect(newest.children.map((c) => c.id)).toEqual(["item:c2"]);
+    expect(tools(state).map((t) => t.id)).toEqual(["item:c1", "item:c2"]);
+    expectExactIndexes(state);
+  });
+
+  it("keeps a late output delta routed to the segment that owns the tool", () => {
+    const state = feed([
+      ev("turn.started", { turnId: "t1" }, "t1"),
+      ev("item/started", { item: { id: "c1", type: "commandExecution", command: "build" } }, "t1"),
+      ev("item/completed", { item: { id: "m1", type: "agentMessage", text: "等待中" } }, "t1"),
+    ]);
+    const ownerId = state.segmentOf.get("item:c1")!;
+    applyEvent(state, ev("stream.delta", { itemId: "c1", kind: "item/commandExecution/outputDelta", delta: "late-log" }, "t1"));
+    expect(state.segmentOf.get("item:c1")).toBe(ownerId);
+    const owner = groups(state).find((g) => g.id === ownerId)!;
+    expect((owner.children[0] as ToolBlock).output).toBe("late-log");
+    expect(state.blocks.filter((b) => b.kind === "assistant")).toHaveLength(1);
+    expectExactIndexes(state);
+  });
+
+  it("keeps independent open state per segment and never reopens a closed one", () => {
+    const state = feed([
+      ev("turn.started", { turnId: "t1" }, "t1"),
+      ev("item/started", { item: { id: "c1", type: "commandExecution", command: "ls" } }, "t1"),
+      ev("item/completed", { item: { id: "m1", type: "agentMessage", text: "中间" } }, "t1"),
+    ]);
+    const ids = segmentIds(state, "t1");
+    expect(ids).toHaveLength(2);
+    const first = groups(state).find((g) => g.id === ids[0]!)!;
+    // The closed segment keeps its own identity (and therefore its own expand
+    // state) even as the live segment grows.
+    applyEvent(state, ev("item/started", { item: { id: "c2", type: "commandExecution", command: "pwd" } }, "t1"));
+    expect(groups(state).find((g) => g.id === ids[0]!)!.children.map((c) => c.id)).toEqual(["item:c1"]);
+    expect(groups(state).find((g) => g.id === ids[1]!)!.children.map((c) => c.id)).toEqual(["item:c2"]);
+    expect(segmentIsActive(first)).toBe(false);
+  });
+
+  it("produces the same structure from a replay and from step-by-step deltas", () => {
+    const events = [
+      ev("turn.started", { turnId: "t1" }, "t1"),
+      ev("item/completed", { item: { id: "m1", type: "agentMessage", text: "第一段" } }, "t1"),
+      ev("item/started", { item: { id: "c1", type: "commandExecution", command: "ls" } }, "t1"),
+      ev("item/completed", { item: { id: "c1", type: "commandExecution", status: "completed", aggregatedOutput: "x" } }, "t1"),
+      ev("item/completed", { item: { id: "m2", type: "agentMessage", text: "第二段" } }, "t1"),
+      ev("turn.finished", { turnId: "t1", status: "completed" }, "t1"),
+    ];
+    const replayed = buildTimeline(events);
+    const incremental = emptyTimeline();
+    for (const event of events) applyEvent(incremental, event);
+    const shape = (state: TimelineState) =>
+      state.blocks.map((b) => (b.kind === "working" ? `working:${b.children.map((c) => c.id).join(",")}` : `${b.kind}:${b.id}`));
+    expect(shape(incremental)).toEqual(shape(replayed));
+  });
+
+  it("gives a second turn its own segments without cross-talk", () => {
+    const state = feed([
+      ev("turn.started", { turnId: "t1" }, "t1"),
+      ev("item/started", { item: { id: "a1", type: "commandExecution", command: "one" } }, "t1"),
+      ev("item/completed", { item: { id: "am1", type: "agentMessage", text: "t1 正文" } }, "t1"),
+      ev("turn.finished", { turnId: "t1", status: "completed" }, "t1"),
+      ev("turn.started", { turnId: "t2" }, "t2"),
+      ev("item/started", { item: { id: "b1", type: "commandExecution", command: "two" } }, "t2"),
+    ]);
+    const t1 = segmentIds(state, "t1");
+    const t2 = segmentIds(state, "t2");
+    // t1's prose closed its tool run; the empty trailing row was pruned when the
+    // turn settled, so only the recorded segment survives.
+    expect(t1).toHaveLength(1);
+    expect(t2).toHaveLength(1);
+    expect(t1).not.toContain(t2[0]);
+    expect(groups(state).find((g) => g.id === t1[0]!)!.children.map((c) => c.id)).toEqual(["item:a1"]);
+    expect(groups(state).find((g) => g.id === t2[0]!)!.children.map((c) => c.id)).toEqual(["item:b1"]);
+    // Only the live second turn's row is current.
+    expect(groups(state).filter((g) => segmentIsActive(g)).map((g) => g.turnId)).toEqual(["t2"]);
+    expectExactIndexes(state);
+  });
+
+  it("never lets an empty agentMessage item open a segment", () => {
+    const state = feed([
+      ev("turn.started", { turnId: "t1" }, "t1"),
+      ev("item/started", { item: { id: "b1", type: "agentMessage" } }, "t1"),
+      ev("item/completed", { item: { id: "b1", type: "agentMessage", text: "" } }, "t1"),
+      ev("item/started", { item: { id: "c1", type: "commandExecution", command: "ls" } }, "t1"),
+      ev("item/completed", { item: { id: "c1", type: "commandExecution", status: "completed" } }, "t1"),
+    ]);
+    // One activity run only: the blank bridge item split nothing.
+    expect(segmentIds(state, "t1")).toHaveLength(1);
+    expect(groups(state)).toHaveLength(1);
+    expect(groups(state)[0]!.children.map((c) => c.id)).toEqual(["item:c1"]);
+    expect(assistants(state)).toHaveLength(0);
+    expectExactIndexes(state);
+  });
+
+  it("keeps a blank agentMessage start from occupying the bottom before a tool", () => {
+    // The bridge opens a text-less `agentMessage` item, then a tool, then the
+    // real prose. The blank start must not create a block that jumps ahead of the
+    // tool or steals the live row's bottom slot.
+    const state = feed([
+      ev("turn.started", { turnId: "t1" }, "t1"),
+      ev("item/started", { item: { id: "m1", type: "agentMessage", text: "" } }, "t1"),
+      ev("item/started", { item: { id: "c1", type: "commandExecution", command: "ls" } }, "t1"),
+      ev("item/completed", { item: { id: "m1", type: "agentMessage", text: "真正的正文" } }, "t1"),
+    ]);
+    // Nothing was materialised for the blank start: the tool is the only child of
+    // the still-live first segment, and the prose follows it.
+    expect(state.blocks.map((b) => (b.kind === "working" ? `working(${b.children.length})` : `${b.kind}:${b.id.split(":").pop()}`))).toEqual([
+      "working(1)",
+      "assistant:m1",
+      "working(0)",
+    ]);
+    expect(tools(state).map((t) => t.id)).toEqual(["item:c1"]);
+    const active = groups(state).filter((g) => segmentIsActive(g));
+    expect(active).toHaveLength(1);
+    expect(state.blocks[state.blocks.length - 1]!.id).toBe(active[0]!.id);
+    expectExactIndexes(state);
+  });
+
+  it("appends a live tool before prose when the prose start is empty", () => {
+    // Stream order start(empty m1) → tool c1 → delta(m1): the delta is the first
+    // real prose, so the tool segment closes above it and the live row trails.
+    const state = feed([
+      ev("turn.started", { turnId: "t1" }, "t1"),
+      ev("item/started", { item: { id: "m1", type: "agentMessage", text: "" } }, "t1"),
+      ev("item/started", { item: { id: "c1", type: "commandExecution", command: "ls" } }, "t1"),
+      ev("stream.delta", { itemId: "m1", kind: "item/agentMessage/delta", delta: "正文" }, "t1"),
+    ]);
+    expect(assistants(state)).toHaveLength(1);
+    expect(assistants(state)[0]!.text).toBe("正文");
+    const segments = groups(state);
+    expect(segments[0]!.closed).toBe(true);
+    expect(segments[0]!.children.map((c) => c.id)).toEqual(["item:c1"]);
+    expect(segmentIsActive(segments[segments.length - 1]!)).toBe(true);
+    expectExactIndexes(state);
+  });
+
+  it("treats an approval card as a boundary that stays visible above the live row", () => {
+    const state = feed([
+      ev("turn.started", { turnId: "t1" }, "t1"),
+      ev("item/started", { item: { id: "c1", type: "commandExecution", command: "rm" } }, "t1"),
+      ev("approval.requested", { requestId: "r1", method: "item/commandExecution/requestApproval", params: { command: "rm" } }, "t1"),
+    ]);
+    const approval = state.blocks.find((b) => b.kind === "approval")!;
+    const live = state.blocks[state.blocks.length - 1]!;
+    // The card is a top-level block, before the live row, and never hidden.
+    expect(approval).toBeDefined();
+    expect(state.index.get(approval.id)!).toBeLessThan(state.index.get(live.id)!);
+    expect(state.blocks.filter((b) => b.kind === "working").map((g) => (g as WorkingBlock).closed)).toEqual([true, false]);
+    expect(segmentIsActive(groups(state)[1]!)).toBe(true);
+    expectExactIndexes(state);
+  });
+
+  it("reports queued/stopped/unknown/error truthfully without faking success", () => {
+    const settled = (status: string) =>
+      feed([
+        ev("turn.started", { turnId: "t1" }, "t1"),
+        ev("item/started", { item: { id: "c1", type: "commandExecution", command: "x" } }, "t1"),
+        ev("item/completed", { item: { id: "c1", type: "commandExecution", status: "completed" } }, "t1"),
+        ev("turn.finished", { turnId: "t1", status }, "t1"),
+      ]);
+    expect(segmentLabel(groups(settled("completed"))[0]!)).toBe("执行了 1 项操作");
+    expect(segmentLabel(groups(settled("interrupted"))[0]!)).toBe("执行了 1 项操作 · 已停止");
+    expect(segmentLabel(groups(settled("unknown"))[0]!)).toBe("执行了 1 项操作 · 结果未知");
+    // A queued turn never animates.
+    const queued = feed([ev("turn.queued", { turnId: "tq", text: "排队" }, "tq")]);
+    expect(groups(queued)).toHaveLength(0);
+    expect(isWorkingActive("queued")).toBe(false);
+    // A failed turn keeps its error wording instead of claiming success.
+    const failed = feed([
+      ev("turn.started", { turnId: "tf" }, "tf"),
+      ev("turn.failed", { turnId: "tf", message: "boom" }, "tf"),
+    ]);
+    expect(workingLabel("error")).toBe("执行出错");
+    expect(groups(failed).every((g) => !segmentIsActive(g))).toBe(true);
+  });
+
+  it("never calls a closed history segment 'Working…', even while its turn still runs", () => {
+    const state = feed([
+      ev("turn.started", { turnId: "t1" }, "t1"),
+      ev("stream.delta", { itemId: "r1", kind: "item/reasoning/summaryTextDelta", delta: "先想一下" }, "t1"),
+      ev("item/completed", { item: { id: "m1", type: "agentMessage", text: "说点什么" } }, "t1"),
+    ]);
+    const history = groups(state)[0]!;
+    expect(history.closed).toBe(true);
+    expect(history.status).toBe("running");
+    // A summary-only history segment reads as a finished summary, never Working.
+    expect(segmentLabel(history)).toBe("思考摘要");
+    expect(segmentLabel(history)).not.toContain("Working");
+    // And it must not be treated as the current row: only the trailing row is.
+    expect(segmentIsActive(history)).toBe(false);
+    expect(segmentStatusTone(history)).toBe("history");
+    const live = groups(state)[1]!;
+    expect(segmentIsActive(live)).toBe(true);
+    expect(segmentStatusTone(live)).toBe("active");
+    expect(segmentLabel(live)).toBe("Working…");
+  });
+
+  it("orders reasoning → assistant prose → live row and labels each honestly", () => {
+    const state = feed([
+      ev("turn.started", { turnId: "t1" }, "t1"),
+      ev("stream.delta", { itemId: "r1", kind: "item/reasoning/summaryTextDelta", delta: "推理摘要" }, "t1"),
+      ev("item/completed", { item: { id: "m1", type: "agentMessage", text: "第一段正文" } }, "t1"),
+      ev("item/started", { item: { id: "c1", type: "commandExecution", command: "ls" } }, "t1"),
+    ]);
+    // The live row is the last thing on screen; the summary segment precedes the
+    // prose it was closed by.
+    const segments = groups(state);
+    expect(segments.map((g) => g.turnId)).toEqual(["t1", "t1"]);
+    expect(state.groupIndex.get(segments[0]!.id)!).toBeLessThan(state.index.get("item:m1")!);
+    expect(state.index.get("item:m1")!).toBeLessThan(state.groupIndex.get(segments[1]!.id)!);
+    // History keeps the neutral wording; the live row is the only "Working…".
+    expect(segmentLabel(segments[0]!)).toBe("思考摘要");
+    expect(segmentStatusTone(segments[0]!)).toBe("history");
+    expect(segmentLabel(segments[1]!)).toBe("Working…");
+    expect(segmentStatusTone(segments[1]!)).toBe("active");
+  });
+
+  it("flags a real tool error on a history segment instead of a neutral mark", () => {
+    const state = feed([
+      ev("turn.started", { turnId: "t1" }, "t1"),
+      ev("item/started", { item: { id: "f1", type: "commandExecution", command: "boom" } }, "t1"),
+      ev("item/completed", { item: { id: "f1", type: "commandExecution", status: "failed" } }, "t1"),
+      ev("item/completed", { item: { id: "m1", type: "agentMessage", text: "出错了" } }, "t1"),
+    ]);
+    const history = groups(state)[0]!;
+    expect(history.closed).toBe(true);
+    expect(segmentStatusTone(history)).toBe("error");
+    expect(segmentLabel(history)).toBe("执行了 1 项操作 · 出错");
+  });
+
+  it("counts operations exactly once in the history label", () => {
+    const state = feed([
+      ev("turn.started", { turnId: "t1" }, "t1"),
+      ev("item/started", { item: { id: "c1", type: "commandExecution", command: "one" } }, "t1"),
+      ev("item/completed", { item: { id: "c1", type: "commandExecution", status: "completed" } }, "t1"),
+      ev("item/started", { item: { id: "c2", type: "commandExecution", command: "two" } }, "t1"),
+      ev("item/completed", { item: { id: "c2", type: "commandExecution", status: "completed" } }, "t1"),
+      ev("stream.delta", { itemId: "r1", kind: "item/reasoning/summaryTextDelta", delta: "摘要一" }, "t1"),
+      ev("item/completed", { item: { id: "m1", type: "agentMessage", text: "结束" } }, "t1"),
+    ]);
+    const history = groups(state)[0]!;
+    // One label states the tool count exactly once; the meta only adds summaries.
+    expect(segmentLabel(history)).toBe("执行了 2 项操作");
+    expect((segmentLabel(history).match(/2/g) ?? []).length).toBe(1);
+  });
+
+  it("keeps a closed segment's children honest once the turn ends without their completion", () => {
+    const state = feed([
+      ev("turn.started", { turnId: "t1" }, "t1"),
+      ev("item/started", { item: { id: "c1", type: "commandExecution", command: "sleep" } }, "t1"),
+      ev("item/completed", { item: { id: "m1", type: "agentMessage", text: "等待" } }, "t1"),
+      ev("turn.finished", { turnId: "t1", status: "interrupted" }, "t1"),
+    ]);
+    const first = groups(state)[0]!;
+    expect(first.closed).toBe(true);
+    const tool = first.children[0]! as ToolBlock;
+    // The recorded status is untouched; only the "in progress" presentation stops.
+    expect(tool.status).toBe("running");
+    expect(childInProgress(first, tool)).toBe(false);
+    expect(segmentLabel(first)).toBe("执行了 1 项操作 · 已停止");
+  });
+});
+
+describe("blank agentMessage items", () => {
+  // The bridge model emits an empty `agentMessage` item before each tool call:
+  // `item/started` and `item/completed` both carry `text === ""` and no delta
+  // ever arrives. None of that may reach the screen as an empty bubble.
+  it("produces no assistant bubble for a blank started + completed pair with no delta", () => {
+    const state = feed([
+      ev("item/started", { item: { id: "blank1", type: "agentMessage" } }, "t1"),
+      ev("item/completed", { item: { id: "blank1", type: "agentMessage", text: "" } }, "t1"),
+      ev("item/started", { item: { id: "c1", type: "commandExecution", command: "ls" } }, "t1"),
+      ev("item/completed", { item: { id: "c1", type: "commandExecution", status: "completed", aggregatedOutput: "ok" } }, "t1"),
+    ]);
+    expect(assistants(state)).toHaveLength(0);
+    expect(state.index.has("item:blank1")).toBe(false);
+    // The real tool of that turn is untouched.
+    expect(tools(state).map((t) => t.id)).toEqual(["item:c1"]);
+    expectExactIndexes(state);
+  });
+
+  it("stays empty when the same blank item/started is written twice", () => {
+    // Stored history really does contain a duplicated `item/started` with the
+    // identical payload and id; the second one must not rebuild a blank bubble.
+    const state = feed([
+      ev("item/started", { item: { id: "blank2", type: "agentMessage" } }, "t1"),
+      ev("item/started", { item: { id: "blank2", type: "agentMessage" } }, "t1"),
+      ev("item/completed", { item: { id: "blank2", type: "agentMessage", text: "" } }, "t1"),
+    ]);
+    expect(assistants(state)).toHaveLength(0);
+    expect(state.index.has("item:blank2")).toBe(false);
+    expectExactIndexes(state);
+
+    // A duplicate `item/started` arriving after the blank completion is equally
+    // inert, and the maps stay exact.
+    applyEvent(state, ev("item/started", { item: { id: "blank2", type: "agentMessage" } }, "t1"));
+    expect(assistants(state)).toHaveLength(0);
+    expectExactIndexes(state);
+  });
+
+  it("ignores a blank completed item that arrives before its item/started", () => {
+    const state = feed([
+      ev("item/completed", { item: { id: "blank3", type: "agentMessage", text: "" } }, "t1"),
+      ev("item/started", { item: { id: "blank3", type: "agentMessage" } }, "t1"),
+    ]);
+    expect(assistants(state)).toHaveLength(0);
+    expect(state.index.has("item:blank3")).toBe(false);
+    expectExactIndexes(state);
+  });
+
+  it("still renders real prose after a blank completion for the same id", () => {
+    // Out-of-order recovery: the blank completion came first, but the item did
+    // produce genuine prose. Nothing may be swallowed permanently.
+    const delayed = feed([
+      ev("item/completed", { item: { id: "late1", type: "agentMessage", text: "" } }, "t1"),
+      ev("stream.delta", { itemId: "late1", kind: "item/agentMessage/delta", delta: "真实回答" }, "t1"),
+    ]);
+    expect(assistants(delayed)).toHaveLength(1);
+    expect(assistants(delayed)[0]!.text).toBe("真实回答");
+    expectExactIndexes(delayed);
+
+    const viaCompleted = feed([
+      ev("item/completed", { item: { id: "late2", type: "agentMessage", text: "" } }, "t1"),
+      ev("item/completed", { item: { id: "late2", type: "agentMessage", text: "补上的正文" } }, "t1"),
+    ]);
+    expect(assistants(viaCompleted)).toHaveLength(1);
+    expect(assistants(viaCompleted)[0]!.text).toBe("补上的正文");
+    expect(assistants(viaCompleted)[0]!.streaming).toBe(false);
+    expectExactIndexes(viaCompleted);
+  });
+
+  it("recovers a late item/started with real delta text that follows a blank completion", () => {
+    const state = feed([
+      ev("item/completed", { item: { id: "late3", type: "agentMessage", text: "" } }, "t1"),
+      ev("item/started", { item: { id: "late3", type: "agentMessage" } }, "t1"),
+      ev("stream.delta", { itemId: "late3", kind: "item/agentMessage/delta", delta: "增量正文" }, "t1"),
+    ]);
+    expect(assistants(state)).toHaveLength(1);
+    expect(assistants(state)[0]!.text).toBe("增量正文");
+    expect(assistants(state)[0]!.streaming).toBe(true);
+    expectExactIndexes(state);
+  });
+
+  it("keeps prose buffered from real deltas out of the blank rule", () => {
+    const state = feed([
+      ev("item/started", { item: { id: "m5", type: "agentMessage" } }, "t1"),
+      ev("stream.delta", { itemId: "m5", kind: "item/agentMessage/delta", delta: "PROBE" }),
+      ev("stream.delta", { itemId: "m5", kind: "item/agentMessage/delta", delta: "_OK" }),
+      ev("item/completed", { item: { id: "m5", type: "agentMessage", text: "PROBE_OK" } }, "t1"),
+    ]);
+    expect(assistants(state)).toHaveLength(1);
+    expect(assistants(state)[0]!.text).toBe("PROBE_OK");
+    expect(assistants(state)[0]!.streaming).toBe(false);
+    expectExactIndexes(state);
+  });
+
+  it("keeps whitespace-only completed text out of the timeline but never drops a neighbour", () => {
+    const state = feed([
+      ev("item/completed", { item: { id: "keep", type: "agentMessage", text: "保留的正文" } }, "t1"),
+      ev("item/started", { item: { id: "ws", type: "agentMessage" } }, "t1"),
+      ev("item/completed", { item: { id: "ws", type: "agentMessage", text: "   \n\n" } }, "t1"),
+    ]);
+    expect(assistants(state).map((b) => b.id)).toEqual(["item:keep"]);
+    expect(state.index.get("item:keep")).toBe(0);
+    expectExactIndexes(state);
+  });
+
+  it("never lets an empty delta create a blank bubble", () => {
+    const state = feed([
+      ev("item/agentMessage/delta", { itemId: "e1", delta: "" }, "t1"),
+      ev("stream.delta", { itemId: "e2", kind: "item/agentMessage/delta", delta: "" }, "t1"),
+    ]);
+    expect(assistants(state)).toHaveLength(0);
+    expect(state.index.size).toBe(0);
+  });
+
+  it("never deletes real prose when a duplicate empty completion follows it", () => {
+    const state = feed([
+      ev("item/started", { item: { id: "m6", type: "agentMessage" } }, "t1"),
+      ev("item/completed", { item: { id: "m6", type: "agentMessage", text: "真实正文" } }, "t1"),
+      // A replayed/duplicated empty completion must not overwrite or delete it.
+      ev("item/completed", { item: { id: "m6", type: "agentMessage", text: "" } }, "t1"),
+    ]);
+    expect(assistants(state)).toHaveLength(1);
+    expect(assistants(state)[0]!.text).toBe("真实正文");
+    expect(assistants(state)[0]!.streaming).toBe(false);
+    expectExactIndexes(state);
+  });
+
+  it("never duplicates the block when a non-empty item/started arrives twice", () => {
+    // Two separate events, same item id, both carrying real text: only one block
+    // may exist, and the live row must still be last.
+    const state = feed([
+      ev("turn.started", { turnId: "t1" }, "t1"),
+      ev("item/started", { item: { id: "m1", type: "agentMessage", text: "hello" } }, "t1"),
+      ev("item/started", { item: { id: "m1", type: "agentMessage", text: "hello" } }, "t1"),
+    ]);
+    expect(assistants(state).map((b) => b.id)).toEqual(["item:m1"]);
+    expect(assistants(state)[0]!.text).toBe("hello");
+    const active = groups(state).filter((g) => segmentIsActive(g));
+    expect(active).toHaveLength(1);
+    expect(state.blocks[state.blocks.length - 1]!.id).toBe(active[0]!.id);
+    expect(state.blocks[state.blocks.length - 1]!.kind).toBe("working");
+    expectExactIndexes(state);
+  });
+
+  it("keeps a late item/started from restoring streaming on settled prose", () => {
+    const state = feed([
+      ev("turn.started", { turnId: "t1" }, "t1"),
+      ev("item/completed", { item: { id: "m1", type: "agentMessage", text: "已结算正文" } }, "t1"),
+    ]);
+    const before = assistants(state)[0]!;
+    expect(before.streaming).toBe(false);
+    // A replayed `item/started` (real text or not) must neither duplicate nor
+    // flip the settled block back to streaming.
+    applyEvent(state, ev("item/started", { item: { id: "m1", type: "agentMessage", text: "已结算正文" } }, "t1"));
+    applyEvent(state, ev("item/started", { item: { id: "m1", type: "agentMessage", text: "" } }, "t1"));
+    expect(assistants(state).map((b) => b.id)).toEqual(["item:m1"]);
+    expect(assistants(state)[0]!.text).toBe("已结算正文");
+    expect(assistants(state)[0]!.streaming).toBe(false);
+    expectExactIndexes(state);
+  });
+
+  it("lets a real non-empty start outrank a stale blank marker", () => {
+    // A blank completion first marked the id as content-free; a later non-empty
+    // item/started carries genuine prose and must still build its block.
+    const state = feed([
+      ev("item/completed", { item: { id: "m1", type: "agentMessage", text: "" } }, "t1"),
+      ev("item/started", { item: { id: "m1", type: "agentMessage", text: "迟到的正文" } }, "t1"),
+    ]);
+    expect(assistants(state).map((b) => b.id)).toEqual(["item:m1"]);
+    expect(assistants(state)[0]!.text).toBe("迟到的正文");
+    expect(assistants(state)[0]!.streaming).toBe(true);
+    expectExactIndexes(state);
+  });
+
+  it("does not split a tool segment when a blank start never gains prose", () => {
+    const state = feed([
+      ev("turn.started", { turnId: "t1" }, "t1"),
+      ev("item/started", { item: { id: "m1", type: "agentMessage", text: "" } }, "t1"),
+      ev("item/started", { item: { id: "c1", type: "commandExecution", command: "ls" } }, "t1"),
+      ev("item/completed", { item: { id: "c1", type: "commandExecution", status: "completed", aggregatedOutput: "ok" } }, "t1"),
+      ev("item/completed", { item: { id: "m1", type: "agentMessage", text: "" } }, "t1"),
+      ev("turn.finished", { turnId: "t1", status: "completed" }, "t1"),
+    ]);
+    // One activity run only; the blank start/completion split nothing.
+    expect(segmentIds(state, "t1")).toHaveLength(1);
+    expect(groups(state)).toHaveLength(1);
+    expect(groups(state)[0]!.children.map((c) => c.id)).toEqual(["item:c1"]);
+    expect(assistants(state)).toHaveLength(0);
+    expectExactIndexes(state);
+  });
+
+  it("drops a blank assistant bubble during a legacy history replay, leaving the tools", () => {
+    // A whole stored conversation: the bridge's blank prose items interleaved
+    // with real tool calls, replayed in one pass exactly as the client does.
+    const state = feed([
+      ev("turn.started", { turnId: "t1" }, "t1"),
+      ev("item/started", { item: { id: "b1", type: "agentMessage" } }, "t1"),
+      ev("item/started", { item: { id: "b1", type: "agentMessage" } }, "t1"),
+      ev("item/completed", { item: { id: "b1", type: "agentMessage", text: "" } }, "t1"),
+      ev("item/started", { item: { id: "c1", type: "commandExecution", command: "ls" } }, "t1"),
+      ev("item/completed", { item: { id: "c1", type: "commandExecution", status: "completed", aggregatedOutput: "a\nb" } }, "t1"),
+      ev("item/completed", { item: { id: "m1", type: "agentMessage", text: "最终回答" } }, "t1"),
+      ev("turn.finished", { turnId: "t1", status: "completed" }, "t1"),
+    ]);
+    expect(assistants(state).map((b) => b.id)).toEqual(["item:m1"]);
+    expect(tools(state).map((t) => t.id)).toEqual(["item:c1"]);
+    expect(groups(state)[0]!.children.map((c) => c.id)).toEqual(["item:c1"]);
+    expectExactIndexes(state);
   });
 });

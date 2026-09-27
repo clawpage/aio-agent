@@ -54,6 +54,9 @@ export interface MockSettingsModel {
   displayName: string;
   supportedReasoningEfforts: string[];
   defaultReasoningEffort: string | null;
+  /** Present on catalog entries that are not plain ChatGPT models. */
+  inputModalities?: string[];
+  modelProvider?: string | null;
 }
 
 export const MOCK_SETTINGS_MODELS: MockSettingsModel[] = [

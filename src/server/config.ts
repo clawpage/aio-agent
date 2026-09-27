@@ -31,6 +31,19 @@ export function parseList(v: string): string[] {
     .filter(Boolean);
 }
 
+/**
+ * Bridged OpenCode Go model ids, in picker order.
+ *
+ * `PA_OPENCODE_GO_MODELS` is the multi-model list; the older single-model
+ * `PA_OPENCODE_GO_MODEL` still wins when it is set, so an existing deployment
+ * that pinned one model keeps exactly that one.
+ */
+function bridgeModelIds(): string[] {
+  const single = envStr("PA_OPENCODE_GO_MODEL", "");
+  if (single) return [single];
+  return parseList(envStr("PA_OPENCODE_GO_MODELS", "deepseek-v4.1-flash,mimo-v2.6-pro"));
+}
+
 export function loadConfig(): {
   port: number;
   bind: string;
@@ -144,6 +157,23 @@ export function loadConfig(): {
      * `block` refuses the sleep (conservative), `warn` sleeps and reports it.
      */
     dirtyInputPolicy: "block" | "warn";
+  };
+  /**
+   * Optional OpenCode Go / LiteLLM bridge models. `enabled` is auto by default:
+   * the models are offered only when a key can actually be read.
+   *
+   * `PA_OPENCODE_GO_MODEL` (single id) is still honoured and wins over
+   * `PA_OPENCODE_GO_MODELS`, so an existing single-model deployment keeps
+   * exactly the one it configured.
+   */
+  bridge: {
+    enabled: string;
+    baseUrl: string;
+    /** Every bridged model id, in the order the picker should show them. */
+    models: string[];
+    providerId: string;
+    secretsFile: string;
+    envKey: string;
   };
   externalBaseUrl: string;
 } {
@@ -288,6 +318,16 @@ export function loadConfig(): {
       // Default `block`: a browser that holds typed-but-unsubmitted input is
       // never released, so no user-visible work can be lost by accident.
       dirtyInputPolicy: envEnum("PA_BROWSER_DIRTY_INPUT_POLICY", ["block", "warn"] as const, "block"),
+    },
+    // The bridge is a local convenience, never a hard dependency: with no key
+    // the model simply does not appear and the ChatGPT path is untouched.
+    bridge: {
+      enabled: envStr("PA_OPENCODE_GO_ENABLED", "auto"),
+      baseUrl: envStr("PA_OPENCODE_GO_BASE_URL", "http://host.docker.internal:4017/v1"),
+      models: bridgeModelIds(),
+      providerId: envStr("PA_OPENCODE_GO_PROVIDER_ID", "opencode_go"),
+      secretsFile: envStr("PA_OPENCODE_GO_SECRETS_FILE", path.join(os.homedir(), ".config", "codex-opencode-go", "secrets.env")),
+      envKey: envStr("PA_OPENCODE_GO_ENV_KEY", "LITELLM_MASTER_KEY"),
     },
     externalBaseUrl: envStr("PA_EXTERNAL_BASE_URL", ""),
   };
