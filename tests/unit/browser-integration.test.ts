@@ -351,6 +351,35 @@ describe("BrowserViewerController", () => {
     await controller.claim();
     expect(t.releases.length).toBe(0);
   });
+
+  it("does not send releases for an unopened panel or repeat an already released lease", async () => {
+    const t = transport();
+    const controller = new BrowserViewerController({ transport: t.transport, heartbeatMs: 0, visibilityState: () => "visible" });
+    await controller.release();
+    await controller.release();
+    expect(t.releases).toHaveLength(0);
+    await controller.claim();
+    await controller.release();
+    await controller.release();
+    controller.dispose();
+    expect(t.releases).toHaveLength(1);
+  });
+
+  it("still releases a first heartbeat while its reply is pending", async () => {
+    let finish!: (value: {kind: "ok"; generation: number}) => void;
+    const releases: number[] = [];
+    const controller = new BrowserViewerController({ heartbeatMs: 0, visibilityState: () => "visible", transport: {
+      heartbeat: () => new Promise(resolve => { finish = resolve; }),
+      release: async (_id, generation) => { releases.push(generation); },
+    } });
+    const claim = controller.claim();
+    const generation = controller.generation;
+    await controller.release();
+    finish({kind: "ok", generation});
+    expect(await claim).toBe(0);
+    expect(releases).toEqual([generation]);
+    expect(controller.held).toBe(false);
+  });
 });
 
 describe("browser status view derivation", () => {

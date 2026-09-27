@@ -66,6 +66,8 @@ export class BrowserViewerController {
    */
   #generation = 0;
   #held = false;
+  /** A heartbeat was attempted since the last release, even if its reply is late. */
+  #mayHaveLease = false;
   /** True once a join/release raced a heartbeat, so its late reply is dropped. */
   #heartbeatInFlight = false;
   #timer: ReturnType<typeof setInterval> | null = null;
@@ -170,13 +172,13 @@ export class BrowserViewerController {
     // incarnation for any heartbeat still travelling.
     const releasedGeneration = this.#generation;
     this.#generation += 1;
-    const held = this.#held;
     this.#held = false;
     // The release is always sent, even when no heartbeat has completed yet: the
     // server may already have recorded this incarnation (the first heartbeat can
     // still be in flight when the panel is hidden again), and skipping it would
     // leave the browser awake until the TTL lapses.
-    if (!held && releasedGeneration === 0) return;
+    if (!this.#mayHaveLease) return;
+    this.#mayHaveLease = false;
     try {
       await this.#transport.release(this.id, releasedGeneration);
     } catch {
@@ -222,6 +224,7 @@ export class BrowserViewerController {
   }
 
   async #send(generation: number): Promise<HeartbeatResult> {
+    this.#mayHaveLease = true;
     try {
       return await this.#transport.heartbeat(this.id, generation);
     } catch (err) {
