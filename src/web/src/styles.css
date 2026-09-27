@@ -2266,3 +2266,5 @@ textarea:focus {
   .document-reading .markdown h1 { font-size: 1.55em; }
   .file-preview-document .file-preview-text > pre { padding: 18px; }
 }
+
+.task-intro { margin: 8px 4px 10px; font-size: 14px; line-height: 1.65; color: var(--text-dim); overflow-wrap: anywhere; }

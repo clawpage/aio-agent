@@ -145,3 +145,23 @@ test("related supplement joins the original task, with one running indicator and
     }
     await page.screenshot({path:`/Users/mengxiao/workspace/.scratch/artifacts/aio-remove-history/${info.project.name}-supplement.png`,animations:"disabled"});
 });
+
+test("shows one stable overview only when execution starts, retaining it through polls and reload",async({page},info)=>{
+    const description="我会结合十点退房安排返程路线，选择途中适合休息和用餐的地点，给你一份完整行程。";
+    const pending={...task(1,"waiting"),description};
+    const {rows}=await setup(page,[pending]);
+    await expect(page.locator(".task-intro")).toHaveCount(0);
+    Object.assign(rows[0]!,{status:"running",revision:2});
+    await expect(page.locator(".task-intro")).toHaveText(description);
+    Object.assign(rows[0]!,{revision:3,approvals:1});
+    await expect(page.locator(".task-summary")).toContainText("需要你确认");
+    await expect(page.locator(".task-intro")).toHaveCount(1);
+    await page.reload();
+    await expect(page.locator(".task-intro")).toHaveText(description);
+    if(info.project.name.startsWith("mobile"))await page.setViewportSize({width:360,height:844});
+    expect(await page.evaluate(()=>document.documentElement.scrollWidth-document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
+    await page.screenshot({path:`/Users/mengxiao/workspace/.scratch/artifacts/aio-task-intro/${info.project.name}.png`,animations:"disabled"});
+    Object.assign(rows[0]!,{status:"completed",result:"返程安排已完成",revision:4,completedAt:Date.now()});
+    await expect(page.locator(".task-intro")).toHaveCount(0);
+    await expect(page.locator(".task-report")).toHaveCount(1);
+});

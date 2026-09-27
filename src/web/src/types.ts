@@ -182,6 +182,7 @@ export interface DocumentRender {
 }
 
 export interface Task {
+  description?: string | null;
   mergedInto?: string | null;
   mergedTitle?: string | null;
   revision: number;

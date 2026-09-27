@@ -1,5 +1,6 @@
 export interface TaskPlan {
     title: string;
+    description?: string;
     related: string[];
     dependencies: string[];
     resources: string[];
@@ -15,7 +16,8 @@ export interface PlanningTask {
 export function planningPrompt(text: string, previous: PlanningTask[], explicit: string | null): string {
     return [
         "你是 AIO Agent 的主会话派单器。先判断新消息是已有任务的补充还是独立新任务。只做分类，绝不执行任务、调用工具或读取文件。",
-        "只返回 JSON：{title:string,appendTo:string|null,related:string[],dependencies:string[],resources:string[]}。标题不超过40字。",
+        "只返回 JSON：{title:string,description:string,appendTo:string|null,related:string[],dependencies:string[],resources:string[]}。标题不超过40字。",
+        "description 是任务启动时给用户看的整体说明，用第一人称中文、100字以内，结合这次请求与已有背景，说清准备处理哪些重点和交付什么；不是重复标题，也不是宣称已经完成。只生成这一次，不写持续进度，不罗列模型、skill、工具或命令。不编造未提供的条件或承诺未授权的预订等操作。",
         "用户补充正在进行任务的地址、条件、纠正、偏好、答案或同一交付物的额外要求，appendTo 必须选该任务id，直接追加，不创建依赖任务。例如先规划带娃三天旅游，后说民宿住在某地址并推荐餐厅，属于同一行程任务补充。",
         "只能向 planning/waiting/queued/running 的任务追加。同主题但明确要求独立交付、等前一项完成再做，或无关任务，appendTo=null，按新任务和依赖处理。不能把所有消息都追加给最后一项；必须语义上属于同一任务。",
         "related 是理解本任务有帮助的历史任务id；无关任务不要关联。dependencies 是必须先完成才可执行的任务id，必须也在related里。",
@@ -42,8 +44,12 @@ export function parsePlan(raw: string | null, previous: PlanningTask[], explicit
         const related = [...new Set([...p.related, ...p.dependencies, ...(explicit ? [explicit] : []), ...(appendTo ? [appendTo] : [])])];
         if (related.length > 12)
             return null;
+        if (p.description !== undefined && typeof p.description !== "string") return null;
+        const overview = (p.description?.trim() || `我会围绕“${p.title.trim()}”梳理需要处理的重点，完成后给你整理好的结果和需要关注的事项。`).replace(/\s+/g, " ");
+        const chars = [...overview];
+        const description = chars.length > 100 ? chars.slice(0, 99).join("") + "…" : overview;
         const dependencies = [...new Set(p.dependencies)].filter(id => id !== appendTo);
-        return { title: [...p.title.trim()].slice(0, 40).join(""), related, dependencies, resources: [...new Set(p.resources)], appendTo };
+        return { title: [...p.title.trim()].slice(0, 40).join(""), related, dependencies, resources: [...new Set(p.resources)], appendTo, description };
     }
     catch {
         return null;

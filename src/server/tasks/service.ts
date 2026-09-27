@@ -62,6 +62,7 @@ export class TaskService {
             id: row.id, revision: row.revision, title: row.title, text: row.input_text, conversationId: parent?.conversation_id ?? row.conversation_id, mergedInto: row.merged_into, mergedTitle: parent?.title ?? null,
             status: row.status, result: TERMINAL.has(row.status) ? row.result : null, error: row.error,
             attachments: JSON.parse(row.attachments_json) as TurnAttachment[], relatedTaskId: row.related_task_id,
+            description: plan?.description ?? null,
             dependencies: plan?.dependencies ?? [], createdAt: row.created_at, completedAt: row.completed_at,
             approvals: this.agent.listPendingRequests(row.conversation_id).length,
         };

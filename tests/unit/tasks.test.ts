@@ -260,6 +260,17 @@ describe("main inbox delegation", () => {
         expect(tasks.get(extra.id)?.merged_into).toBeNull();
         expect(codex.startedTurns[1]!.text).toContain("finished original");
     });
+    it("persists the initial overview without replacing it after a supplement or service reload",async()=>{
+        const description="我会根据退房时间梳理返程路线，安排途中休息和用餐，整理成一份可照着走的行程。";
+        codex.plan=async()=>JSON.stringify({title:"返程安排",description,related:[],dependencies:[],resources:[]});
+        const parent=submit("十点退房后返程");await tick();
+        expect(tasks.list().tasks.find(t=>t.id===parent.id)?.description).toBe(description);
+        codex.plan=async()=>JSON.stringify({title:"补充",description:"新要求的说明",appendTo:parent.id,related:[],dependencies:[],resources:[]});
+        submit("路上加一次午餐");await tick();
+        tasks.close();tasks=new TaskService(db,testConfig("/tmp/aio-main-tasks",1),agent,codex);tasks.init();await tick();
+        expect(tasks.list().tasks.find(t=>t.id===parent.id)?.description).toBe(description);
+        expect(codex.plans).toHaveLength(2);
+    });
     it("keeps old pending tasks in the live page while paginating every completed task", () => {
         tasks.close();
         const jobs = Array.from({ length: 120 }, (_, i) => submit(`history-${i}`));
@@ -285,4 +296,13 @@ it("rejects steering to unknown or finished tasks",()=>{
     const plan={title:"extra",appendTo:"a",related:[],dependencies:[],resources:[]};
     expect(parsePlan(JSON.stringify(plan),[],null)).toBeNull();
     expect(parsePlan(JSON.stringify(plan),[{id:"a",title:"a",input_text:"a",status:"completed",result:"done"}],null)).toBeNull();
+});
+
+it("bounds an overview to 100 Unicode characters and supports older planner payloads",()=>{
+    const base={title:"计划",related:[],dependencies:[],resources:[]};
+    const plan=parsePlan(JSON.stringify({...base,description:"路😀".repeat(80)}),[],null)!;
+    expect([...plan.description!]).toHaveLength(100);
+    expect(plan.description?.endsWith("…")).toBe(true);
+    expect(parsePlan(JSON.stringify(base),[],null)?.description).toContain("计划");
+    expect(parsePlan(JSON.stringify({...base,description:42}),[],null)).toBeNull();
 });
