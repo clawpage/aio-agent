@@ -199,5 +199,6 @@ export interface Task {
   dependencies: string[];
   approvals: number;
   createdAt: number;
+  startedAt?: number | null;
   completedAt: number | null;
 }

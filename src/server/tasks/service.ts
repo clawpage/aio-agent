@@ -57,6 +57,7 @@ export class TaskService {
     ownsConversation(id: string): boolean { return !!this.db.prepare("SELECT 1 FROM tasks WHERE conversation_id=?").get(id); }
     view(row: TaskRow) {
         const plan = row.plan_json ? JSON.parse(row.plan_json) as TaskPlan : null;
+        const turn = row.turn_id ? this.db.prepare("SELECT started_at FROM turns WHERE id=?").get(row.turn_id) as { started_at: number | null } | undefined : undefined;
         const parent = row.merged_into ? this.get(row.merged_into) : null;
         return {
             id: row.id, revision: row.revision, title: row.title, text: row.input_text, conversationId: parent?.conversation_id ?? row.conversation_id, mergedInto: row.merged_into, mergedTitle: parent?.title ?? null,
@@ -64,7 +65,7 @@ export class TaskService {
             attachments: JSON.parse(row.attachments_json) as TurnAttachment[], relatedTaskId: row.related_task_id,
             description: plan?.description ?? null,
             clarification: row.status === "needs_input" ? plan?.clarification ?? null : null,
-            dependencies: plan?.dependencies ?? [], createdAt: row.created_at, completedAt: row.completed_at,
+            dependencies: plan?.dependencies ?? [], createdAt: row.created_at, startedAt: turn?.started_at ?? null, completedAt: row.completed_at,
             approvals: this.agent.listPendingRequests(row.conversation_id).length,
         };
     }

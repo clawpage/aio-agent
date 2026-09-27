@@ -34,6 +34,21 @@ beforeEach(async () => {
 afterEach(async () => { tasks.close(); for (const t of codex.startedTurns)
     codex.completeTurn(t.turnId); await tick(); agent.shutdown(); db.close(); });
 describe("main inbox delegation", () => {
+    it("exposes persisted execution start instead of admission time, including after completion", async () => {
+        const job = submit("测试执行时间");
+        expect(job.startedAt).toBeNull();
+        await tick();
+        const row = tasks.get(job.id)!;
+        db.prepare("UPDATE tasks SET created_at=? WHERE id=?").run(1000, job.id);
+        db.prepare("UPDATE turns SET started_at=? WHERE id=?").run(10_000, row.turn_id);
+        expect(tasks.view(tasks.get(job.id)!).startedAt).toBe(10_000);
+        codex.completeTurn(codex.startedTurns[0]!.turnId);
+        await tick();
+        const finished = tasks.view(tasks.get(job.id)!);
+        expect(finished.status).toBe("completed");
+        expect(finished.startedAt).toBe(10_000);
+        expect(finished.completedAt).toBeGreaterThan(10_000);
+    });
     it("asks once for essentials, keeps the original task, and does not reserve browser resources while waiting", async () => {
         codex.plan = async p => {
             const data = JSON.parse(p.split("\n").at(-1)!);

@@ -237,3 +237,33 @@ test("mobile drawer replaces bottom navigation and preserves the chat draft",asy
     await page.getByRole('button',{name:'关闭导航'}).click();
     await page.screenshot({path:`/Users/mengxiao/workspace/.scratch/artifacts/aio-mobile-drawer/${info.project.name}-chat.png`});
 });
+
+test("message times and task elapsed durations update and freeze without including the queue", async ({ page }, info) => {
+    const now = new Date(2026, 8, 27, 14, 30).getTime();
+    await page.clock.install({ time: now });
+    const running = { ...task(1), createdAt: now - 300_000, startedAt: now - 65_000 };
+    const waiting = { ...task(2, "waiting"), createdAt: now - 200_000, startedAt: null };
+    const done = { ...task(3, "completed"), createdAt: now - 180_000, startedAt: now - 150_000, completedAt: now - 60_000, result: "这是整理好的结果。" };
+    const { rows } = await setup(page, [running, waiting, done]);
+    const entry = page.locator('.task-entry[data-task-id="task-1"]');
+    await expect(entry.locator("time")).toHaveText("5 分钟前");
+    await expect(entry.locator("time")).toHaveAttribute("datetime", new Date(running.createdAt).toISOString());
+    await expect(entry.locator("time")).toHaveAttribute("title", /2026/);
+    await expect(entry.locator(".task-duration")).toHaveText("已处理 1 分 5 秒");
+    await expect(page.locator('.task-entry[data-task-id="task-2"] .task-duration')).toHaveCount(0);
+    const report = page.locator('.task-report[data-task-id="task-3"]');
+    await expect(report.locator("time")).toHaveText("1 分钟前");
+    await expect(report.locator(".task-duration")).toHaveText("处理用时 1 分 30 秒");
+    await page.clock.fastForward(5000);
+    await expect(entry.locator(".task-duration")).toHaveText("已处理 1 分 10 秒");
+    Object.assign(rows[0]!, { status: "completed", result: "完成", completedAt: now + 5000, revision: 2 });
+    await page.clock.fastForward(3000);
+    await expect(page.locator('.task-report[data-task-id="task-1"] .task-duration')).toHaveText("处理用时 1 分 10 秒");
+    await page.clock.fastForward(60000);
+    await expect(page.locator('.task-report[data-task-id="task-1"] .task-duration')).toHaveText("处理用时 1 分 10 秒");
+    await page.reload();
+    await expect(report.locator(".task-duration")).toHaveText("处理用时 1 分 30 秒");
+    if (info.project.name.startsWith("mobile")) await page.setViewportSize({ width: 360, height: 844 });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    await page.screenshot({ path: `/Users/mengxiao/workspace/.scratch/artifacts/aio-message-times/${info.project.name}.png` });
+});

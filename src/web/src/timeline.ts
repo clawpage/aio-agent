@@ -5,6 +5,7 @@ export type WorkingStatus = "queued" | "running" | "stopping" | "done" | "error"
 
 export interface UserBlock {
   kind: "user";
+  createdAt?: number;
   id: string;
   text: string;
   attachments: Array<{ path: string; name?: string; kind?: string }>;
@@ -12,6 +13,7 @@ export interface UserBlock {
 
 export interface AssistantBlock {
   kind: "assistant";
+  createdAt?: number;
   id: string;
   text: string;
   streaming: boolean;
@@ -597,7 +599,7 @@ export function applyEvent(state: TimelineState, event: AgentEvent): void {
       // rolled back) by clientMessageId once the server responds.
       const clientMessageId = text(p.clientMessageId);
       const attachments = Array.isArray(p.attachments) ? (p.attachments as Array<{ path: string }>) : [];
-      push(state, { kind: "user", id: `user:pending:${clientMessageId}`, text: text(p.text), attachments });
+      push(state, { kind: "user", createdAt: event.createdAt, id: `user:pending:${clientMessageId}`, text: text(p.text), attachments });
       return;
     }
     case "turn.queued": {
@@ -624,7 +626,7 @@ export function applyEvent(state: TimelineState, event: AgentEvent): void {
         return;
       }
       if (state.index.has(`user:${turnId}`)) return;
-      push(state, { kind: "user", id: `user:${turnId}`, text: text(p.text), attachments });
+      push(state, { kind: "user", createdAt: event.createdAt, id: `user:${turnId}`, text: text(p.text), attachments });
       return;
     }
     case "turn.started": {
@@ -661,7 +663,7 @@ export function applyEvent(state: TimelineState, event: AgentEvent): void {
         const startText = text(item.text).trim();
         if (startText) {
           state.blankAssistantItems.delete(id);
-          push(state, { kind: "assistant", id, text: startText, streaming: true });
+          push(state, { kind: "assistant", createdAt: event.createdAt, id, text: startText, streaming: true });
           contentBoundary(state, turnId, id);
         }
         return;
@@ -715,7 +717,7 @@ export function applyEvent(state: TimelineState, event: AgentEvent): void {
           // Real text on a settled item always creates its block, even if an
           // earlier empty completion had marked this id as blank.
           state.blankAssistantItems.delete(id);
-          push(state, { kind: "assistant", id, text: completedText, streaming: false });
+          push(state, { kind: "assistant", createdAt: event.createdAt, id, text: completedText, streaming: false });
           contentBoundary(state, turnId, id);
           return;
         }
@@ -808,7 +810,7 @@ export function applyEvent(state: TimelineState, event: AgentEvent): void {
         // is un-marked here so a late delta still produces its bubble. The first
         // real delta is what closes the current activity run.
         state.blankAssistantItems.delete(id);
-        push(state, { kind: "assistant", id, text: delta, streaming: true });
+        push(state, { kind: "assistant", createdAt: event.createdAt, id, text: delta, streaming: true });
         contentBoundary(state, turnId, id);
         return;
       }
@@ -831,7 +833,7 @@ export function applyEvent(state: TimelineState, event: AgentEvent): void {
       const idx = state.index.get(id);
       if (idx === undefined) {
         state.blankAssistantItems.delete(id);
-        push(state, { kind: "assistant", id, text: delta, streaming: true });
+        push(state, { kind: "assistant", createdAt: event.createdAt, id, text: delta, streaming: true });
         contentBoundary(state, turnId, id);
       } else {
         const block = state.blocks[idx] as AssistantBlock;

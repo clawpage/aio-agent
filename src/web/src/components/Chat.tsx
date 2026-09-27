@@ -1,3 +1,4 @@
+import { MessageTime, useDisplayClock } from "./MessageTime";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, openEventStream } from "../api";
 import type { AgentEvent, Attachment, Conversation, StatusResponse } from "../types";
@@ -60,6 +61,7 @@ export function Chat({
   onAgentBrowserNavigate,
 }: Props) {
   const [timeline, setTimeline] = useState<TimelineState>(() => emptyTimeline());
+  const now = useDisplayClock();
   const [connected, setConnected] = useState(false);
   const [draft, setDraft] = useState("");
   const [attachments, setAttachments] = useState<Attachment[]>([]);
@@ -353,6 +355,7 @@ export function Chat({
           <BlockView
             key={block.id}
             block={block}
+            now={now}
             openSegments={openSegments}
             onToggleSegment={(segmentId) =>
               setOpenSegments((prev) => {
@@ -493,6 +496,7 @@ export function AttachmentCards({
 
 function BlockView({
   block,
+  now,
   openSegments,
   onToggleSegment,
   onRespond,
@@ -501,6 +505,7 @@ function BlockView({
   onOpenFile,
 }: {
   block: Block;
+  now: number;
   openSegments: ReadonlySet<string>;
   onToggleSegment: (segmentId: string) => void;
   onRespond: (requestId: string, decision: string, extra?: unknown) => void;
@@ -516,6 +521,7 @@ function BlockView({
           {block.attachments.length > 0 && (
             <AttachmentCards attachments={block.attachments} onOpen={onOpenFile} />
           )}
+          <div className="message-meta"><MessageTime at={block.createdAt} now={now}/></div>
         </div>
       </article>
     );
@@ -535,6 +541,7 @@ function BlockView({
           <Markdown source={block.text} onOpenLink={onOpenBrowserLink} onOpenFile={onOpenFile} />
           <MessageFileCards text={block.text} onOpen={onOpenFile} />
           {block.streaming && <span className="caret" aria-hidden />}
+          <div className="message-meta"><MessageTime at={block.createdAt} now={now}/></div>
         </div>
       </article>
     );
