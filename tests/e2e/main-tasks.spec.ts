@@ -65,8 +65,8 @@ test("per-task stop and explicit related followup never stop other tasks", async
     await send(page, "接着做第二部分");
     expect(bodies[0]?.relatedTaskId).toBe("task-2");
 });
-test("attachments use native picker, config retains drafts, old history is read-only", async ({ page }, info) => {
-    await setup(page);
+test("attachments and drafts survive config and task details without a history entry", async ({ page }, info) => {
+    await setup(page, [task(1)]);
     await page.route("**/api/sandbox/upload", r => r.fulfill({ json: { path: "/home/gem/workspace/uploads/a.txt", name: "a.txt", kind: "file" } }));
     const chooser = page.waitForEvent("filechooser");
     await page.locator(".file-button").click();
@@ -79,8 +79,9 @@ test("attachments use native picker, config retains drafts, old history is read-
     await page.getByRole("button", { name: "← 返回会话" }).click();
     await expect(page.getByRole("textbox", { name: "消息", exact: true })).toHaveValue("保留草稿");
     await expect(page.locator(".composer .chips")).toContainText("a.txt");
-    await nav.getByRole("button", { name: info.project.name.startsWith("mobile") ? "历史" : "历史记录", exact: true }).click();
-    await page.getByRole("button", { name: /保留的旧会话/ }).click();
+    await expect(page.getByRole("button", { name: /^历史(记录)?$/ })).toHaveCount(0);
+    await expect(page.locator(".bottom-nav button")).toHaveCount(4);
+    await page.getByRole("button", { name: "展开任务：任务 1" }).click();
     await expect(page.locator(".task-detail")).toBeVisible();
     await expect(page.locator(".task-detail .composer")).toHaveCount(0);
     await page.getByRole("button", { name: "← 返回主会话" }).click();

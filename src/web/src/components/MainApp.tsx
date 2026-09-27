@@ -10,8 +10,7 @@ import { TaskChat } from "./TaskChat";
 export function MainApp() {
     const [auth, setAuth] = useState<boolean | null>(null);
     const [status, setStatus] = useState<StatusResponse | null>(null);
-    const [view, setView] = useState<"main" | "settings" | "history" | "detail">("main");
-    const [history, setHistory] = useState<Conversation[]>([]);
+    const [view, setView] = useState<"main" | "settings" | "detail">("main");
     const [detail, setDetail] = useState<Conversation | null>(null);
     const [workspace, setWorkspace] = useState(false);
     const [workspacePath, setWorkspacePath] = useState<string | undefined>();
@@ -74,20 +73,11 @@ export function MainApp() {
     catch (err) {
         notify(err instanceof Error ? err.message : String(err));
     } }, [notify]);
-    const showHistory = async () => { try {
-        setHistory((await api.conversations(true)).conversations);
-        setView("history");
-        setWorkspace(false);
-    }
-    catch (err) {
-        notify(err instanceof Error ? err.message : String(err));
-    } };
     const settings = () => { setView("settings"); setWorkspace(false); };
     const logout = async () => { try {
         await api.logout();
         setAuth(false);
         setDetail(null);
-        setHistory([]);
         setWorkspace(false);
         setView("main");
     }
@@ -101,7 +91,6 @@ export function MainApp() {
     return <div className="app main-inbox-app">
     <aside className="sidebar"><div className="brand"><span className="brand-mark" aria-hidden/><div><strong>AIO Agent</strong><span className="muted tiny">一个入口，把事情交给我</span></div></div>
       <button className={`ghost block ${view === "main" ? "active" : ""}`} onClick={() => setView("main")}>主会话</button>
-      <button className="ghost block" onClick={() => void showHistory()}>历史记录</button>
       <div className="sidebar-foot"><span className="muted tiny">{status?.agent.sessionReady ? "智能体在线" : "正在连接智能体"}</span><button className="ghost block" onClick={() => setTheme(t => t === "dark" ? "light" : "dark")}>{theme === "dark" ? "浅色模式" : "深色模式"}</button><button className="ghost block" onClick={settings}>配置</button><button className="ghost block" onClick={() => void logout()}>退出登录</button></div>
     </aside>
     <main className="main">
@@ -110,10 +99,9 @@ export function MainApp() {
       <div className="view-slot" hidden={view !== "main"}><TaskChat onDetails={t => void details(t)} onOpenWorkspace={() => openWorkspace()} onOpenLink={u => void openLink(u)} onBrowserNavigate={() => { if (view === "main")
         revealBrowser(); }} onExpired={expired}/></div>
       {view === "settings" && <Settings onBack={() => setView("main")}/>}
-      {view === "history" && <section className="history-view"><header className="chat-head"><h2>历史记录</h2><button className="ghost" onClick={() => setView("main")}>返回主会话</button></header><p className="muted">旧会话保留在这里查看。新的事情直接发给主会话。</p><div className="history-list">{history.map(c => <button className="ghost" key={c.id} onClick={() => { setDetail(c); setView("detail"); }}>{c.title}<span className="muted tiny">{c.archived ? "已归档" : "历史会话"}</span></button>)}{!history.length && <p>没有旧会话。</p>}</div></section>}
       {view === "detail" && detail && <div className="task-detail"><div className="task-detail-bar"><button className="ghost" onClick={() => setView("main")}>← 返回主会话</button><span className="muted tiny">过程详情</span></div><Chat key={detail.id} readOnly conversation={detail} status={status} onConversationChanged={() => { }} onStatusChanged={() => void refreshStatus()} onOpenWorkspace={openWorkspace} onOpenBrowserLink={u => void openLink(u)} onAgentBrowserNavigate={revealBrowser}/></div>}
     </main>
     <Workspace open={workspace} status={status} initialPath={workspacePath} browserNonce={browserNonce} onClose={() => { setWorkspace(false); setWorkspacePath(undefined); }} onNotify={notify}/>
-    <nav className="bottom-nav"><button onClick={() => setView("main")}>主会话</button><button onClick={() => void showHistory()}>历史</button><button onClick={() => openWorkspace()}>工作区</button><button onClick={settings}>配置</button><button onClick={() => void logout()}>退出</button></nav>
+    <nav className="bottom-nav"><button onClick={() => setView("main")}>主会话</button><button onClick={() => openWorkspace()}>工作区</button><button onClick={settings}>配置</button><button onClick={() => void logout()}>退出</button></nav>
   </div>;
 }

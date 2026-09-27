@@ -2228,9 +2228,6 @@ textarea:focus {
 .task-detail { display: flex; flex-direction: column; flex: 1; min-height: 0; }
 .task-detail .chat { flex: 1; min-height: 0; }
 .task-detail-bar { padding: 8px 16px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border); }
-.history-view { overflow: auto; padding: 16px; }
-.history-list { display: flex; flex-direction: column; gap: 8px; }
-.history-list > button { display: flex; justify-content: space-between; gap: 12px; text-align: left; }
 @media (max-width: 760px) {
   .main-inbox-app .sidebar { display: none; }
   .task-feed { gap: 18px; }
@@ -2238,3 +2235,5 @@ textarea:focus {
   .task-chat .composer textarea { min-height: 56px; }
 }
 @media (prefers-reduced-motion: reduce) { .task-progress.active .task-progress-label { animation: none; background: none; color: var(--text-dim); } }
+
+.main-inbox-app .bottom-nav { grid-template-columns: repeat(4, 1fr); }
