@@ -63,6 +63,7 @@ export class TaskService {
             status: row.status, result: TERMINAL.has(row.status) ? row.result : null, error: row.error,
             attachments: JSON.parse(row.attachments_json) as TurnAttachment[], relatedTaskId: row.related_task_id,
             description: plan?.description ?? null,
+            clarification: row.status === "needs_input" ? plan?.clarification ?? null : null,
             dependencies: plan?.dependencies ?? [], createdAt: row.created_at, completedAt: row.completed_at,
             approvals: this.agent.listPendingRequests(row.conversation_id).length,
         };
@@ -171,21 +172,33 @@ export class TaskService {
             const explicit = row.related_task_id ? this.get(row.related_task_id) : null;
             if (explicit && !previous.some(t => t.id === explicit.id))
                 previous.push(explicit);
-            const raw = await this.codex.planTask?.(planningPrompt(row.input_text || `处理附件：${row.attachments_json}`, previous, row.related_task_id));
+            const inputContext = this.taskContext(row);
+            const files = [row,...this.rows().filter(t=>t.merged_into===row.id && t.status==='merged')]
+                .flatMap(t=>JSON.parse(t.attachments_json) as TurnAttachment[]);
+            const planningInput = [inputContext, ...(files.length ? [`已有附件（执行者可以读取其中资料）：${JSON.stringify(files)}`] : [])].filter(Boolean).join("\n\n");
+            const raw = await this.codex.planTask?.(planningPrompt(planningInput, previous, row.related_task_id));
             if (this.#closed || this.get(row.id)?.status !== "planning")
                 return;
+            // A supplement may arrive while the classifier is in flight. Replan
+            // with the latest input rather than dispatching an outdated decision.
+            if (this.taskContext(this.get(row.id)!) !== inputContext) return;
             const plan = parsePlan(raw ?? null, previous, row.related_task_id);
             if (!plan)
                 throw new Error("任务分配暂时失败，尚未执行。请重试分配。");
+            if (explicit?.status === "needs_input") {
+                plan.appendTo = explicit.id;
+                plan.clarification = null;
+                plan.dependencies = plan.dependencies.filter(id => id !== explicit.id);
+            }
             if (plan.appendTo) {
                 this.db.prepare("UPDATE tasks SET title=?,plan_json=?,merged_into=?,status='merging',error=NULL WHERE id=?").run(plan.title,JSON.stringify(plan),plan.appendTo,row.id);
                 return;
             }
             // An explicitly related active task must settle before its successor uses
             // the shared context/files. Unrelated tasks remain fully parallel.
-            if (explicit && ["planning", "waiting", "queued", "running", "stopping"].includes(explicit.status) && !plan.dependencies.includes(explicit.id))
+            if (explicit && ["planning", "needs_input", "waiting", "queued", "running", "stopping"].includes(explicit.status) && !plan.dependencies.includes(explicit.id))
                 plan.dependencies.push(explicit.id);
-            this.db.prepare("UPDATE tasks SET title=?,plan_json=?,status='waiting',error=NULL WHERE id=?").run(plan.title, JSON.stringify(plan), row.id);
+            this.db.prepare("UPDATE tasks SET title=?,plan_json=?,status=?,error=NULL WHERE id=?").run(plan.title, JSON.stringify(plan), plan.clarification ? "needs_input" : "waiting", row.id);
             this.agent.renameConversation(row.conversation_id, plan.title);
         }
         catch (err) {
@@ -199,7 +212,8 @@ export class TaskService {
     }
     private taskContext(row: TaskRow): string {
         const supplements = this.db.prepare("SELECT input_text FROM tasks WHERE merged_into=? AND status='merged' ORDER BY created_at").all(row.id) as {input_text:string}[];
-        return [row.input_text,...supplements.map(r=>`用户补充：${r.input_text}`)].join("\n\n");
+        const question = row.plan_json ? (JSON.parse(row.plan_json) as TaskPlan).clarification : null;
+        return [row.input_text, ...(question ? [`本任务此前的问题：${question}`] : []),...supplements.map(r=>`用户补充：${r.input_text}`)].join("\n\n");
     }
     private fallbackSupplement(row: TaskRow) {
         const plan=JSON.parse(row.plan_json!) as TaskPlan;
@@ -220,6 +234,19 @@ export class TaskService {
                     this.fallbackSupplement(row); this.schedule(); continue;
                 }
                 if(parent.status==='stopping' || !parent.plan_json) continue;
+                // Answering a preflight question does not need executor slots or
+                // shared resources. Persist the answer and re-evaluate the SAME task.
+                if (!parent.turn_id && (parent.status === 'needs_input' ||
+                    (parent.status === 'planning' && (JSON.parse(parent.plan_json) as TaskPlan).clarification))) {
+                    this.db.exec('BEGIN IMMEDIATE');
+                    try {
+                        this.db.prepare("UPDATE tasks SET status='merged',completed_at=? WHERE id=?").run(Date.now(),row.id);
+                        this.db.prepare("UPDATE tasks SET status='planning',error=NULL WHERE id=?").run(parent.id);
+                        this.db.exec('COMMIT');
+                    } catch (err) { this.db.exec('ROLLBACK'); throw err; }
+                    this.schedule();
+                    continue;
+                }
                 const plan=JSON.parse(row.plan_json!) as TaskPlan;
                 const dependencies = plan.dependencies.map(id => this.get(id));
                 if (dependencies.some(t => !t || ['blocked','planning_failed'].includes(t.status) || (TERMINAL.has(t.status) && t.status !== 'completed'))) {

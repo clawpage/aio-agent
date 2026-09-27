@@ -34,6 +34,69 @@ beforeEach(async () => {
 afterEach(async () => { tasks.close(); for (const t of codex.startedTurns)
     codex.completeTurn(t.turnId); await tick(); agent.shutdown(); db.close(); });
 describe("main inbox delegation", () => {
+    it("asks once for essentials, keeps the original task, and does not reserve browser resources while waiting", async () => {
+        codex.plan = async p => {
+            const data = JSON.parse(p.split("\n").at(-1)!);
+            const answered = data.message.includes("用户补充：");
+            return JSON.stringify({title:"航班查询",related:[],dependencies:[],resources:data.message.includes("机票") ? ["browser"] : [],
+                clarification:data.message.includes("机票") && !answered ? "从哪里出发、去哪儿，哪天出行？" : null});
+        };
+        const parent=submit("查机票"); await tick();
+        expect(tasks.get(parent.id)?.status).toBe("needs_input");
+        expect(tasks.list().tasks[0]?.clarification).toContain("哪天");
+        expect(codex.startedTurns).toHaveLength(0);
+        const other=submit("写一个短故事"); await tick();
+        expect(tasks.get(other.id)?.status).toBe("running");
+        const reply=submit("示例：巴黎到罗马，10月12日",parent.id); await tick(); await tick();
+        expect(tasks.get(reply.id)?.status).toBe("merged");
+        expect(tasks.get(reply.id)?.merged_into).toBe(parent.id);
+        expect(tasks.get(parent.id)?.status).toBe("running");
+        expect(tasks.list().tasks.find(t=>t.id===parent.id)?.clarification).toBeNull();
+        expect(codex.startedTurns).toHaveLength(2);
+        expect(codex.startedTurns[1]?.text).toContain("巴黎到罗马");
+        expect(tasks.submit({text:"示例：巴黎到罗马，10月12日",relatedTaskId:parent.id,clientMessageId:"示例：巴黎到罗马，10月12日"}).duplicate).toBe(true);
+    });
+    it("routes a free-text partial answer, asks only the remaining essential, and survives restart without execution", async () => {
+        let parentId="";
+        codex.plan=async p=>{
+            const data=JSON.parse(p.split("\n").at(-1)!);
+            return JSON.stringify({title:"机票",related:[],dependencies:[],resources:["browser"],
+                appendTo:data.message==="去罗马"?parentId:null,
+                clarification:data.message.includes("用户补充：")?"哪天出发？":"去哪儿，哪天出发？"});
+        };
+        const parent=submit("从巴黎查机票");parentId=parent.id;await tick();
+        const answer=submit("去罗马");await tick();await tick();
+        expect(tasks.get(answer.id)?.status).toBe("merged");
+        expect(tasks.list().tasks.find(t=>t.id===parent.id)?.clarification).toBe("哪天出发？");
+        tasks.close();
+        tasks=new TaskService(db,testConfig("/tmp/aio-main-tasks",1),agent,codex);tasks.init();await tick();
+        expect(tasks.get(parent.id)?.status).toBe("needs_input");
+        expect(codex.startedTurns).toHaveLength(0);
+        await tasks.stop(parent.id);
+        expect(tasks.get(parent.id)?.status).toBe("interrupted");
+        expect(tasks.list().tasks.find(t=>t.id===parent.id)?.clarification).toBeNull();
+    });
+    it("includes attached information in preflight context instead of asking the user to repeat it",async()=>{
+        const job=tasks.submit({text:"按附件的航线和日期查机票",clientMessageId:"with-file",attachments:[{kind:"file",path:"/home/gem/workspace/uploads/requirements.md",name:"requirements.md"}]}).task;
+        await tick();
+        expect(codex.plans[0]).toContain("已有附件");
+        expect(codex.plans[0]).toContain("requirements.md");
+        expect(tasks.get(job.id)?.status).toBe("running");
+    });
+    it("keeps simultaneous questions and their explicit answers separate",async()=>{
+        codex.plan=async p=>{
+            const data=JSON.parse(p.split("\n").at(-1)!);
+            return JSON.stringify({title:data.message.slice(0,20),related:[],dependencies:[],resources:[],
+                clarification:data.message.includes("用户补充：")?null:"请提供任务的目标？"});
+        };
+        const first=submit("第一个任务"),second=submit("第二个任务");await tick();
+        submit("只回答第二个",second.id);await tick();await tick();
+        expect(tasks.get(first.id)?.status).toBe("needs_input");
+        expect(tasks.get(second.id)?.status).toBe("running");
+        expect(codex.startedTurns).toHaveLength(1);
+        expect(codex.startedTurns[0]?.text).toContain("只回答第二个");
+        expect(codex.startedTurns[0]?.text).not.toContain("第一个任务");
+    });
     it("accepts four messages immediately, runs three isolated child threads, reports out of order without cross-talk", async () => {
         const jobs = ["a", "b", "c", "d"].map(t => submit(t));
         expect(tasks.list().tasks).toHaveLength(4);
@@ -305,4 +368,13 @@ it("bounds an overview to 100 Unicode characters and supports older planner payl
     expect(plan.description?.endsWith("…")).toBe(true);
     expect(parsePlan(JSON.stringify(base),[],null)?.description).toContain("计划");
     expect(parsePlan(JSON.stringify({...base,description:42}),[],null)).toBeNull();
+});
+
+it("validates optional clarification and allows semantic routing to a waiting question",()=>{
+    const base={title:"query",related:[],dependencies:[],resources:[]};
+    expect(parsePlan(JSON.stringify({...base,clarification:42}),[],null)).toBeNull();
+    expect(parsePlan(JSON.stringify({...base,clarification:"问".repeat(201)}),[],null)).toBeNull();
+    expect(parsePlan(JSON.stringify({...base,clarification:"  "}),[],null)).toBeNull();
+    const previous=[{id:"q",title:"flight",input_text:"query",status:"needs_input",result:null}];
+    expect(parsePlan(JSON.stringify({...base,appendTo:"q",clarification:"ignored"}),previous,null)).toMatchObject({appendTo:"q",clarification:null});
 });

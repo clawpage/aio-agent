@@ -165,3 +165,29 @@ test("shows one stable overview only when execution starts, retaining it through
     await expect(page.locator(".task-intro")).toHaveCount(0);
     await expect(page.locator(".task-report")).toHaveCount(1);
 });
+
+test("clarification stays inline, answers target the right task and unrelated work stays available",async({page},info)=>{
+    const first=task(1,"needs_input"),second=task(2,"needs_input"),working=task(3);
+    first.clarification="想从哪里出发、去哪里，哪天出行？";
+    second.clarification="这份演示要介绍哪个产品？";
+    const {bodies,rows}=await setup(page,[first,second,working]);
+    await expect(page.locator(".chat-sub")).toHaveText("1 个任务处理中");
+    await expect(page.locator(".task-question")).toHaveCount(2);
+    await page.reload();
+    const question=page.locator('.task-entry[data-task-id="task-2"] .task-question');
+    await expect(question).toContainText(second.clarification);
+    await question.getByRole("button",{name:"回答问题"}).click();
+    await expect(page.locator(".composer .chip")).toContainText("回答：任务 2");
+    await send(page,"演示虚构的待办产品");
+    expect(bodies[0]?.relatedTaskId).toBe(second.id);
+    await send(page,"另外写个笑话");
+    expect(bodies[1]?.relatedTaskId).toBeNull();
+    for(const width of info.project.name.startsWith("mobile")?[390,360]:[1440]) {
+        await page.setViewportSize({width,height:844});
+        expect(await page.evaluate(()=>document.documentElement.scrollWidth-document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
+    }
+    Object.assign(rows[1]!,{status:"running",clarification:null,revision:2});
+    await expect(page.locator(".task-question")).toHaveCount(1);
+    await page.locator('.task-entry[data-task-id="task-1"] .task-question').scrollIntoViewIfNeeded();
+    await page.screenshot({path:`/Users/mengxiao/workspace/.scratch/artifacts/aio-task-clarification/${info.project.name}.png`});
+});

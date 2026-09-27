@@ -6,7 +6,7 @@ import { AttachmentCards, MessageFileCards } from "./Chat";
 import { Markdown } from "./Markdown";
 import { FilePreview } from "./FilePreview";
 const terminal = new Set(["completed", "failed", "interrupted", "unknown"]);
-const labels: Record<string, string> = { planning: "正在分配…", planning_failed: "分配失败", waiting: "等待依赖或资源", queued: "排队中", running: "Working…", stopping: "正在停止…", completed: "已完成", failed: "执行失败", interrupted: "已停止", unknown: "结果待核对", blocked: "需要补充" };
+const labels: Record<string, string> = { planning: "正在分配…", needs_input: "等待你补充", planning_failed: "分配失败", waiting: "等待依赖或资源", queued: "排队中", running: "Working…", stopping: "正在停止…", completed: "已完成", failed: "执行失败", interrupted: "已停止", unknown: "结果待核对", blocked: "需要补充" };
 export function TaskChat({ onDetails, onOpenWorkspace, onOpenLink, onBrowserNavigate, onExpired }: {
     onDetails: (task: Task) => void;
     onOpenWorkspace: () => void;
@@ -134,11 +134,12 @@ export function TaskChat({ onDetails, onOpenWorkspace, onOpenLink, onBrowserNavi
         }
     };
     const relate = (task: Task) => { setRelated(task); input.current?.focus(); };
-    const active = tasks.filter(t => !t.mergedInto && !terminal.has(t.status) && !["planning_failed", "blocked"].includes(t.status));
+    const active = tasks.filter(t => !t.mergedInto && !terminal.has(t.status) && !["planning_failed", "blocked", "needs_input"].includes(t.status));
+    const awaiting = tasks.filter(t => !t.mergedInto && t.status === "needs_input");
     const feed = tasks.flatMap(t => [{ task: t, report: false, at: t.createdAt }, ...(!t.mergedInto && terminal.has(t.status) ? [{ task: t, report: true, at: t.completedAt ?? t.createdAt }] : [])])
         .sort((a, b) => a.at - b.at || Number(a.report) - Number(b.report) || a.task.id.localeCompare(b.task.id));
     return <section className="chat task-chat">
-    <header className="chat-head"><div className="chat-title"><h2>主会话</h2><span className={`dot ${connected ? "ok" : "warn"}`}/><span className="chat-sub">{active.length ? `${active.length} 个任务处理中` : connected ? "随时可以交给我" : "正在连接…"}</span></div><button className="ghost" onClick={onOpenWorkspace}>工作区</button></header>
+    <header className="chat-head"><div className="chat-title"><h2>主会话</h2><span className={`dot ${connected ? "ok" : "warn"}`}/><span className="chat-sub">{active.length ? `${active.length} 个任务处理中` : awaiting.length ? `${awaiting.length} 个任务等你补充` : connected ? "随时可以交给我" : "正在连接…"}</span></div><button className="ghost" onClick={onOpenWorkspace}>工作区</button></header>
     <div className="chat-scroll task-feed" ref={scroll} onScroll={e => { const n = e.currentTarget; stick.current = n.scrollHeight - n.scrollTop - n.clientHeight < 80; }}>
       {nextBefore && <button className="ghost" onClick={() => void act(async () => { const d = await api.main(nextBefore); stick.current = false; merge(d.tasks); setNextBefore(d.nextBefore); })}>加载更早的任务</button>}
       {!tasks.length && <div className="empty"><h3>把事情交给我</h3><p>可以接着发不同任务。过程会收拢，完成后在这里回报。</p></div>}
@@ -151,17 +152,18 @@ export function TaskChat({ onDetails, onOpenWorkspace, onOpenLink, onBrowserNavi
         {t.mergedInto && <div className="task-supplement"><button className="ghost tiny" onClick={() => onDetails(t)}>{t.status === "merged" ? "已补充到" : t.status === "merging" || t.status === "steering" ? "正在补充到" : t.status === "interrupted" ? "已取消补充" : "补充需要核对"}：{t.mergedTitle}</button>{t.error && <p className="tiny error">{t.error}</p>}</div>}
         {!t.mergedInto && !terminal.has(t.status) && <div className={`task-progress ${t.status === "running" ? "active" : ""}`}>
           <button className="task-summary" onClick={() => onDetails(t)} aria-label={`展开任务：${t.title}`}><span className={`dot ${t.approvals ? "warn" : ""}`}/><span className="task-progress-label">{t.approvals ? "需要你确认" : labels[t.status] ?? t.status}</span><span className="task-progress-title">{t.title}</span><span aria-hidden>›</span></button>
+          {t.status === "needs_input" && t.clarification && <div className="task-question"><p>{t.clarification}</p><button className="primary tiny" onClick={() => relate(t)}>回答问题</button></div>}
           {t.description && ["running", "stopping"].includes(t.status) && <p className="task-intro">{t.description}</p>}
           {t.error && <p className="tiny">{t.error}</p>}
-          <div className="task-actions">{t.status === "planning_failed" ? <button className="ghost tiny" onClick={() => void act(() => api.retryTaskPlanning(t.id))}>重试分配</button> : t.status === "blocked" ? <button className="ghost tiny" onClick={() => relate(t)}>补充任务</button> : <button className="ghost tiny" disabled={t.status === "stopping"} onClick={() => void act(() => api.stopTask(t.id))}>停止该任务</button>}<button className="ghost tiny" onClick={() => relate(t)}>补充此任务</button></div>
+          <div className="task-actions">{t.status === "planning_failed" ? <button className="ghost tiny" onClick={() => void act(() => api.retryTaskPlanning(t.id))}>重试分配</button> : t.status === "blocked" ? <button className="ghost tiny" onClick={() => relate(t)}>补充任务</button> : <button className="ghost tiny" disabled={t.status === "stopping"} onClick={() => void act(() => api.stopTask(t.id))}>停止该任务</button>}{t.status !== "needs_input" && <button className="ghost tiny" onClick={() => relate(t)}>补充此任务</button>}</div>
         </div>}
       </div>)}
     </div>
     {error && <div className="banner error" role="alert">{error}<button onClick={() => setError(null)}>关闭</button></div>}
     <div className="composer">
-      {related && <div className="chip">关联：{related.title}<button onClick={() => setRelated(null)} aria-label="取消关联">×</button></div>}
+      {related && <div className="chip">{related.status === "needs_input" ? "回答" : "关联"}：{related.title}<button onClick={() => setRelated(null)} aria-label="取消关联">×</button></div>}
       {!!attachments.length && <div className="chips">{attachments.map(a => <span className="chip" key={a.path}>{a.name}<button aria-label="移除附件" disabled={busy} onClick={() => setAttachments(old => old.filter(x => x.path !== a.path))}>×</button></span>)}</div>}
-      <textarea ref={input} rows={2} value={draft} aria-label="消息" placeholder="交给我一个任务，也可以继续发其他事情…" disabled={busy} onChange={e => setDraft(e.target.value)} onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+      <textarea ref={input} rows={2} value={draft} aria-label="消息" placeholder={related?.status === "needs_input" ? "补充需要的信息，回答会接回这个任务…" : "交给我一个任务，也可以继续发其他事情…"} disabled={busy} onChange={e => setDraft(e.target.value)} onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
         e.preventDefault();
         void send();
     } }}/>
