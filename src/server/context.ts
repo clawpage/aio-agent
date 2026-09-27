@@ -12,7 +12,10 @@ import type { DocumentService } from "./documents/service.js";
 import type { BrowserService } from "./browser/service.js";
 import type { BrowserRuntimeLike } from "./browser/lifecycle.js";
 
+import type { TaskService } from "./tasks/service.js";
+
 export interface AppContext {
+  tasks: TaskService;
   cfg: Config;
   db: Db;
   log: Logger;

@@ -22,6 +22,7 @@ import { extractFileRefs, attachmentRefs } from "../fileRefs";
 import { isPreviewableKind, workspaceFileKind } from "../sandboxLink";
 
 interface Props {
+  readOnly?: boolean;
   conversation: Conversation;
   status: StatusResponse | null;
   onConversationChanged: () => void;
@@ -49,6 +50,7 @@ function newMessageId(): string {
 }
 
 export function Chat({
+  readOnly = false,
   conversation,
   status,
   onConversationChanged,
@@ -377,7 +379,7 @@ export function Chat({
         </div>
       )}
 
-      <div className="composer">
+      {!readOnly && <div className="composer">
         {attachments.length > 0 && (
           <div className="chips">
             {attachments.map((a) => (
@@ -444,6 +446,7 @@ export function Chat({
         {willQueue && <div className="queue-hint">沙箱正在执行其他会话（最多 {capacity} 个并发），本条消息会排队等待。</div>}
       </div>
 
+      }
       {previewPath && <FilePreview path={previewPath} onClose={() => setPreviewPath(null)} />}
     </section>
   );
@@ -457,7 +460,7 @@ export function Chat({
  * rebuilding the list — the cards never flicker or reset mid-stream. Extraction
  * itself is pure, so a delta that adds no new reference produces the same array.
  */
-function MessageFileCards({ text, onOpen }: { text: string; onOpen: (path: string) => void }) {
+export function MessageFileCards({ text, onOpen }: { text: string; onOpen: (path: string) => void }) {
   const refs = useMemo(() => extractFileRefs(text), [text]);
   if (refs.length === 0) return null;
   return (
@@ -470,7 +473,7 @@ function MessageFileCards({ text, onOpen }: { text: string; onOpen: (path: strin
 }
 
 /** Cards for the files attached to a user turn (uploaded or pasted paths). */
-function AttachmentCards({
+export function AttachmentCards({
   attachments,
   onOpen,
 }: {

@@ -17,6 +17,7 @@ import { AgentManager } from "./codex/manager.js";
 import { BridgeModel } from "./bridgeModel.js";
 import { AioClient } from "./aio/client.js";
 import { createApp, handleUpgrade } from "./http/server.js";
+import { TaskService } from "./tasks/service.js";
 import type { AppContext } from "./context.js";
 
 export interface Bootstrapped {
@@ -93,7 +94,9 @@ export async function bootstrap(opts: BootstrapOptions = {}): Promise<Bootstrapp
   const agent = new AgentManager({ cfg, db, log, codex, hostTokens, browser, bridge });
   const aio = opts.overrides?.aio ?? new AioClient(cfg, log);
 
+  const tasks = new TaskService(db, cfg, agent, codex);
   const ctx: AppContext = {
+    tasks,
     cfg,
     db,
     log,
@@ -114,6 +117,7 @@ export async function bootstrap(opts: BootstrapOptions = {}): Promise<Bootstrapp
   };
 
   await agent.init();
+  tasks.init();
 
   const maintenance = setInterval(() => {
     try {
@@ -127,6 +131,7 @@ export async function bootstrap(opts: BootstrapOptions = {}): Promise<Bootstrapp
 
   const shutdown = async (): Promise<void> => {
     clearInterval(maintenance);
+    tasks.close();
     agent.shutdown();
     // Stops only this service's own timers. It never signals the browser: a
     // control-plane restart must leave a running Chromium untouched.

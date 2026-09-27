@@ -32,6 +32,12 @@ const MIME = {
 
 const server = http.createServer((req, res) => {
   const url = new URL(req.url ?? "/", `http://127.0.0.1:${port}`);
+  // A missing API is a 404, never a successful HTML response. This also lets
+  // rolling-upgrade specs exercise the older backend without the task API.
+  if (url.pathname.startsWith("/api/")) {
+    res.writeHead(404, { "content-type": "application/json" }).end('{"error":"not_found"}');
+    return;
+  }
   let filePath = path.join(root, decodeURIComponent(url.pathname));
   if (!filePath.startsWith(root)) {
     res.writeHead(403).end("forbidden");

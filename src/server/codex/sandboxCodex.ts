@@ -249,6 +249,15 @@ export class SandboxCodexSession {
    * threads cannot be re-read afterwards (`thread/read` rejects `includeTurns`).
    */
   async generateTitle(userText: string): Promise<string | null> {
+    return this.#auxiliaryText(buildTitlePrompt(userText, this.#cfg.agent.titleMaxChars), this.#cfg.agent.titleEffort);
+  }
+
+  /** Read-only main-agent planning; receives bounded metadata, never executes a task. */
+  async planTask(prompt: string): Promise<string | null> {
+    return this.#auxiliaryText(prompt, "high", 90_000);
+  }
+
+  async #auxiliaryText(prompt: string, effort: string | null, timeoutMs = this.#cfg.agent.titleTimeoutMs): Promise<string | null> {
     await this.start();
     const peer = this.#peer;
     if (!peer?.alive) return null;
@@ -307,7 +316,7 @@ export class SandboxCodexSession {
     const timer = setTimeout(() => {
       timedOut = true;
       settle();
-    }, this.#cfg.agent.titleTimeoutMs);
+    }, timeoutMs);
     timer.unref?.();
     // The start promise always settles the wait (success, failure or timeout) so
     // this method never outlives its configured budget waiting on the turn.
@@ -315,9 +324,9 @@ export class SandboxCodexSession {
       "turn/start",
       {
         threadId,
-        input: [{ type: "text", text: buildTitlePrompt(userText, this.#cfg.agent.titleMaxChars) }],
+        input: [{ type: "text", text: prompt }],
         model,
-        ...(this.#cfg.agent.titleEffort ? { effort: this.#cfg.agent.titleEffort } : {}),
+        ...(effort ? { effort } : {}),
       },
       60_000,
     ) as Promise<{ turn?: { id?: string } }>).then(

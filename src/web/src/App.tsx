@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { api, ApiError } from "./api";
 import type { Conversation, StatusResponse } from "./types";
+import { MainApp } from "./components/MainApp";
 import { Chat } from "./components/Chat";
 import { Login } from "./components/Login";
 import { Settings } from "./components/Settings";
@@ -12,7 +13,7 @@ type SessionState = { checked: boolean; authenticated: boolean; username: string
 /** Backend contract for a hand-typed title (mirrors `renameConversation`). */
 const TITLE_MAX_CHARS = 200;
 
-export function App() {
+function LegacyApp() {
   const [session, setSession] = useState<SessionState>({ checked: false, authenticated: false, username: null });
   const [notice, setNotice] = useState<string | null>(null);
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -692,4 +693,11 @@ function RenameDialog({
       </div>
     </div>
   );
+}
+
+/** Rolling upgrades: a new bundle can still talk to an older control plane. */
+export function App() {
+  const [mode, setMode] = useState<"loading" | "tasks" | "legacy">("loading");
+  useEffect(() => { void api.main().then(() => setMode("tasks")).catch(err => setMode(err instanceof ApiError && err.status === 404 ? "legacy" : "tasks")); }, []);
+  return mode === "loading" ? <div className="boot">加载中…</div> : mode === "legacy" ? <LegacyApp /> : <MainApp />;
 }

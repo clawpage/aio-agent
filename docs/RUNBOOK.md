@@ -61,7 +61,7 @@ PA_COMPANION_ORIGIN=https://agent-workspace.zymx.tech npm run smoke
 | `PA_SANDBOX_CODEX_VERSION` | `0.156.1` | 固定版本；安装前缀与二进制路径都由它推导，不会与路径不一致 |
 | `PA_DEFAULT_MODEL` | `gpt-6-sol` | 新会话与旧会话后续轮次的默认模型；`/api/models` 也以它标记默认项 |
 | `PA_AUTO_TITLE` | `1` | 首轮完成后自动命名会话；设为 `0` 则完全不调用标题线程 |
-| `PA_TITLE_MODEL` / `PA_TITLE_EFFORT` | `gpt-6-luna` / `low` | 只用于隔离的自动标题临时线程 |
+| `PA_TITLE_MODEL` / `PA_TITLE_EFFORT` | `gpt-6-luna` / `low` | 自动标题线程；主会话派单也用此模型，派单固定 high / 90 秒 |
 | `PA_TITLE_MAX_CHARS` / `PA_TITLE_TIMEOUT_SECONDS` | `24` / `30` | 标题长度上限与单次标题运行超时 |
 
 - 二进制路径：`/home/gem/.codex/tools/codex-<版本>/node_modules/.bin/codex`（在 `personal-agent-codex` 卷内）。

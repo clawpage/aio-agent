@@ -54,6 +54,7 @@ export interface CodexSessionLike {
   interrupt(threadId: string, turnId: string): Promise<void>;
   /** One throwaway, tool-free run used only for automatic conversation titles. */
   generateTitle(userText: string): Promise<string | null>;
+  planTask?(prompt: string): Promise<string | null>;
   answer(id: string, result: unknown): boolean;
   close(): void;
 }
@@ -209,6 +210,8 @@ export class TurnInputUnsupportedError extends Error {
 }
 
 export interface SubmitTurnInput {
+  /** Internal dispatcher snapshot; never accepted from HTTP request fields. */
+  frozenSettings?: { model: string; effort: string | null };
   conversationId: string;
   text: string;
   clientMessageId: string;
@@ -560,7 +563,7 @@ export class AgentManager {
       .prepare(
         `SELECT c.*, (SELECT COUNT(*) FROM turns t WHERE t.conversation_id = c.id) AS turnCount
          FROM conversations c
-         WHERE (? OR c.archived = 0)
+         WHERE (? OR c.archived = 0) AND NOT EXISTS (SELECT 1 FROM tasks j WHERE j.conversation_id = c.id)
          ORDER BY
            CASE
              WHEN c.archived = 0 AND c.title = ?
@@ -738,7 +741,8 @@ export class AgentManager {
    * (the HTTP route never forwards client model/effort), so the config page is the
    * single source of truth the UI exposes.
    */
-  #resolveSubmitSettings(input: SubmitTurnInput): { model: string; effort: string | null } {
+  resolveSubmitSettings(input: SubmitTurnInput): { model: string; effort: string | null } {
+    if (input.frozenSettings) return input.frozenSettings;
     const stored = effectiveAgentSettings(this.agentSettings(), this.#modelCatalog, this.#cfg.agent.defaultModel);
     const model = input.model ?? stored.model ?? this.#cfg.agent.defaultModel;
     let effort = input.effort ?? stored.effort ?? null;
@@ -781,7 +785,7 @@ export class AgentManager {
     // Freeze the resolved model on the turn itself. A queued turn must keep the
     // model it was submitted with even if the owner changes the unified setting
     // (or another turn rewrites `conversations.model`) before it starts.
-    const resolved = this.#resolveSubmitSettings(input);
+    const resolved = this.resolveSubmitSettings(input);
     // The bridge model is text-only. Refuse an image here, with a clear message,
     // rather than letting Codex reject the turn remotely.
     const model = resolved.model ?? this.#cfg.agent.defaultModel;

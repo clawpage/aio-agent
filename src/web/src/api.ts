@@ -89,6 +89,10 @@ async function request<T>(
 }
 
 export const api = {
+  main: (before?: number) => request<{ mode: "tasks"; tasks: import("./types").Task[]; nextBefore: number | null }>(`/api/main${before ? `?before=${before}` : ""}`),
+  submitTask: (body: { text: string; clientMessageId: string; attachments: Attachment[]; relatedTaskId: string | null }) => request<{ task: import("./types").Task; duplicate: boolean }>("/api/tasks", { method: "POST", body }),
+  stopTask: (id: string) => request<{ok:boolean}>(`/api/tasks/${encodeURIComponent(id)}/stop`, {method:"POST",body:{}}),
+  retryTaskPlanning: (id: string) => request<{ok:boolean}>(`/api/tasks/${encodeURIComponent(id)}/retry-planning`, {method:"POST",body:{}}),
   session: () => request<{ authenticated: boolean; username: string | null; expiresAt?: number; secure?: boolean }>("/api/auth/session"),
   login: (password: string) => request<{ ok: boolean; username: string; expiresAt: number }>("/api/auth/login", { method: "POST", body: { password } }),
   logout: () => request<{ ok: boolean }>("/api/auth/logout", { method: "POST", body: {} }),

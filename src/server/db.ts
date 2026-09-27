@@ -126,6 +126,30 @@ CREATE TABLE IF NOT EXISTS audit_log (
   ip TEXT
 );
 
+CREATE TABLE IF NOT EXISTS tasks (
+  id TEXT PRIMARY KEY,
+  revision INTEGER NOT NULL DEFAULT 0,
+  client_message_id TEXT NOT NULL UNIQUE,
+  conversation_id TEXT NOT NULL UNIQUE REFERENCES conversations(id),
+  turn_id TEXT,
+  title TEXT NOT NULL,
+  input_text TEXT NOT NULL,
+  attachments_json TEXT NOT NULL DEFAULT '[]',
+  related_task_id TEXT REFERENCES tasks(id),
+  status TEXT NOT NULL DEFAULT 'planning',
+  plan_json TEXT,
+  model TEXT,
+  effort TEXT,
+  result TEXT,
+  error TEXT,
+  created_at INTEGER NOT NULL,
+  completed_at INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_tasks_created ON tasks(created_at);
+CREATE TRIGGER IF NOT EXISTS task_revision AFTER UPDATE ON tasks
+WHEN NEW.revision = OLD.revision
+BEGIN UPDATE tasks SET revision=OLD.revision+1 WHERE id=NEW.id; END;
+
 CREATE TABLE IF NOT EXISTS agent_state (
   id INTEGER PRIMARY KEY CHECK (id = 1),
   active_turn_id TEXT,

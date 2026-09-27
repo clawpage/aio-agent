@@ -180,3 +180,20 @@ export interface DocumentRender {
   truncated: boolean;
   size: number;
 }
+
+export interface Task {
+  revision: number;
+  id: string;
+  title: string;
+  text: string;
+  conversationId: string;
+  status: string;
+  result: string | null;
+  error: string | null;
+  attachments: Attachment[];
+  relatedTaskId: string | null;
+  dependencies: string[];
+  approvals: number;
+  createdAt: number;
+  completedAt: number | null;
+}

@@ -79,6 +79,8 @@ check("host auth ok", status.json?.hostAuth?.ok === true);
 const models = await call(primary, `${PRIMARY}/api/models`, { headers: { origin: PRIMARY } });
 check("models from live API", (models.json?.models ?? []).length > 0, (models.json?.models ?? []).map((m) => m.id).join(","));
 const conversations = await call(primary, `${PRIMARY}/api/conversations`, { headers: { origin: PRIMARY } });
+const main = await call(primary, `${PRIMARY}/api/main`, { headers: { origin: PRIMARY } });
+check("single main task inbox readable", main.status === 200 && main.json?.mode === "tasks" && Array.isArray(main.json?.tasks));
 check(
   "conversation list readable",
   conversations.status === 200 && Array.isArray(conversations.json?.conversations),

@@ -340,6 +340,35 @@ export function createApiRouter(context: AppContext): Router {
 
   // -------------------------------------------------------- conversations
 
+  router.get("/main", requireKind("primary"), requireSession, asyncHandler(async (req, res) => {
+    const before = Number(req.query.before ?? Number.MAX_SAFE_INTEGER);
+    res.json({ mode: "tasks", ...context.tasks.list(Number.isSafeInteger(before) && before > 0 ? before : Number.MAX_SAFE_INTEGER) });
+  }));
+  router.post("/tasks", requireKind("primary"), requireSession, asyncHandler(async (req, res) => {
+    try {
+      const b = req.body ?? {};
+      if (typeof b.text !== "string" || typeof b.clientMessageId !== "string") throw new Error("消息格式不正确");
+      const attachments = Array.isArray(b.attachments) ? b.attachments.map((a: {path?:unknown;kind?:unknown;name?:unknown}) => {
+        if (!a || typeof a.path !== "string") throw new Error("附件路径无效");
+        const checked = requireWorkspaceFilePath(a.path, cfg.sandbox.containerWorkspaceDir);
+        if (!checked.ok) throw new Error(checked.message);
+        return { path: checked.path, kind: a.kind === "image" ? "image" as const : "file" as const, name: typeof a.name === "string" ? a.name : "" };
+      }) : [];
+      const result = context.tasks.submit({ text: b.text, clientMessageId: b.clientMessageId, attachments, relatedTaskId: typeof b.relatedTaskId === "string" ? b.relatedTaskId : null });
+      res.status(result.duplicate ? 200 : 202).json(result);
+    } catch (err) {
+      res.status(err instanceof TurnConflictError ? 409 : 400).json({ error: "task_submit_failed", message: err instanceof Error ? err.message : "任务提交失败" });
+    }
+  }));
+  router.post("/tasks/:id/stop", requireKind("primary"), requireSession, asyncHandler(async (req, res) => {
+    try { await context.tasks.stop(param(req, "id")); res.json({ ok: true }); }
+    catch (err) { res.status(409).json({ error: "stop_failed", message: err instanceof Error ? err.message : "停止失败" }); }
+  }));
+  router.post("/tasks/:id/retry-planning", requireKind("primary"), requireSession, asyncHandler(async (req, res) => {
+    try { context.tasks.retryPlanning(param(req, "id")); res.json({ ok: true }); }
+    catch (err) { res.status(409).json({ error: "retry_refused", message: err instanceof Error ? err.message : "无法重试" }); }
+  }));
+
   router.get(
     "/conversations",
     requireKind("primary"),
@@ -388,6 +417,10 @@ export function createApiRouter(context: AppContext): Router {
     asyncHandler(async (req, res) => {
       const id = param(req, "id");
       const body = (req.body ?? {}) as Record<string, unknown>;
+      if (context.tasks.ownsConversation(id)) {
+        res.status(409).json({ error: "managed_task", message: "子任务由主会话管理" });
+        return;
+      }
       if ("title" in body) {
         if (typeof body.title !== "string") {
           res.status(400).json({ error: "invalid_title", message: "标题必须是字符串" });
@@ -471,6 +504,10 @@ export function createApiRouter(context: AppContext): Router {
     asyncHandler(async (req, res) => {
       const conversationId = param(req, "id");
       const text = typeof req.body?.text === "string" ? req.body.text : "";
+      if (context.tasks.ownsConversation(conversationId)) {
+        res.status(409).json({ error: "managed_task", message: "请在主会话提交关联任务" });
+        return;
+      }
       const clientMessageId =
         typeof req.body?.clientMessageId === "string" && req.body.clientMessageId ? req.body.clientMessageId : `cm_${Date.now()}_${Math.random().toString(36).slice(2)}`;
       const attachments = Array.isArray(req.body?.attachments)
