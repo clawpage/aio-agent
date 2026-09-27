@@ -1,6 +1,6 @@
 import { memo, useEffect, useRef, useState } from "react";
 import { api } from "../api";
-import { isMarkdownPath, kindBadge, kindLabel, type WorkspaceFileKind } from "../sandboxLink";
+import { isMarkdownPath, isHtmlPath, kindBadge, kindLabel, type WorkspaceFileKind } from "../sandboxLink";
 
 /**
  * One workspace file shown as a card in the conversation.
@@ -32,6 +32,7 @@ export const FileCard = memo(function FileCard({ path, name, title, kind, onOpen
   const [thumbUrl, setThumbUrl] = useState<string | null>(null);
   const [thumbFailed, setThumbFailed] = useState(false);
   const image = kind === "image";
+  const html = isHtmlPath(path);
   const markdown = isMarkdownPath(path);
   const showThumb = image && !thumbFailed;
   const cardRef = useRef<HTMLDivElement | null>(null);
@@ -96,7 +97,7 @@ export const FileCard = memo(function FileCard({ path, name, title, kind, onOpen
   }, [image, path]);
 
   return (
-    <div ref={cardRef} className="file-card" data-testid="file-card" data-kind={markdown ? "markdown" : kind} data-path={path} title={path}>
+    <div ref={cardRef} className="file-card" data-testid="file-card" data-kind={html ? "html" : markdown ? "markdown" : kind} data-path={path} title={path}>
       <button type="button" className="file-card-open" onClick={() => onOpen(path)} aria-label={`预览 ${title || name}`}>
         <span className="file-card-thumb" aria-hidden="true">
           {showThumb && thumbUrl ? (
@@ -110,14 +111,14 @@ export const FileCard = memo(function FileCard({ path, name, title, kind, onOpen
               onError={() => setThumbFailed(true)}
             />
           ) : (
-            <span className="file-card-badge">{markdown ? "MD" : kindBadge(kind)}</span>
+            <span className="file-card-badge">{html ? "HTML" : markdown ? "MD" : kindBadge(kind)}</span>
           )}
         </span>
         <span className="file-card-meta">
           <span className="file-card-name">{title || name}</span>
           {title && <span className="file-card-filename muted tiny">{name}</span>}
           <span className="muted tiny">
-            {markdown ? "Markdown 文档" : kindLabel(kind)}{kind !== "unsupported" ? " · 点击预览" : " · 可下载"}
+            {html ? "HTML 页面" : markdown ? "Markdown 文档" : kindLabel(kind)}{kind !== "unsupported" ? " · 点击预览" : " · 可下载"}
             {image && thumbFailed ? "（缩略图不可用，点开查看）" : ""}
           </span>
         </span>

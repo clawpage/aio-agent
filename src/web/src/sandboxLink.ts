@@ -156,3 +156,5 @@ export function baseName(path: string): string {
 export function isMarkdownPath(path: string): boolean {
   return /\.(?:md|markdown)$/i.test(baseName(path));
 }
+
+export function isHtmlPath(path: string): boolean { return /\.html?$/i.test(baseName(path)); }

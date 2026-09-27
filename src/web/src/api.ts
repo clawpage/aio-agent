@@ -187,6 +187,7 @@ export const api = {
   documentImageUrl: (path: string) => `/api/documents/image?path=${encodeURIComponent(path)}`,
   convertDocument: (path: string, format: string) =>
     request<{ path: string; bytes: number }>("/api/documents/convert", { method: "POST", body: { path, format } }),
+  documentHtmlUrl: (path: string) => `/api/documents/html?path=${encodeURIComponent(path)}`,
   documentText: (path: string, signal?: AbortSignal) =>
     request<{ path: string; text: string; size: number; truncated: boolean }>(
       `/api/documents/text?path=${encodeURIComponent(path)}`,

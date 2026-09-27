@@ -3,6 +3,7 @@ import { api } from "../api";
 import {
   baseName,
   isMarkdownPath,
+  isHtmlPath,
   isPreviewableKind,
   kindLabel,
   workspaceFileKind,
@@ -15,19 +16,11 @@ import { extractFileRefs } from "../fileRefs";
 /**
  * Unified preview for a workspace file.
  *
- * Security model — the browser never receives the original document bytes for a
- * preview:
- *   * images are fetched as a same-origin blob and shown through a typed object
- *     URL (the download endpoint answers `application/octet-stream` + attachment);
- *   * PDF/Word/Excel/PowerPoint are converted inside the sandbox and returned as
- *     authenticated PNG pages, so no PDF viewer, iframe, blob HTML or SVG ever
- *     executes agent-produced active content in the console;
- *   * Markdown is sanitized for reading; other text is escaped, with a size cap enforced by the
- *     server;
- *   * unsupported formats say so and offer the original download.
- *
- * The 下载 link is the only place the original file is transferred, and it always
- * carries an attachment disposition.
+ * Images use typed blobs; Office/PDF are rasterised; Markdown is sanitized.
+ * HTML uses an authenticated endpoint with CSP sandbox plus a sandboxed iframe
+ * (scripts allowed, same-origin/storage/parent access and network disallowed).
+ * Plain text is escaped and all text previews are capped. Downloads remain
+ * attachment-only and preserve the original bytes.
  */
 
 const IMAGE_MIME: Record<string, string> = {
@@ -66,11 +59,13 @@ export function FilePreview({ path: initialPath, onClose, onOpenLink, onConvert,
   useEffect(() => { setPath(initialPath); setHistory([]); }, [initialPath]);
   const openFile = (next: string) => { setHistory(old => [...old, path]); setPath(next); };
   const markdown = isMarkdownPath(path);
+  const html = isHtmlPath(path);
   const kind = useMemo<WorkspaceFileKind>(() => workspaceFileKind(path), [path]);
   const name = baseName(path);
   const [phase, setPhase] = useState<Phase>("loading");
   const [error, setError] = useState<string | null>(null);
   const [imageUrl, setImageUrl] = useState<string | null>(null);
+  const [htmlUrl, setHtmlUrl] = useState<string | null>(null);
   const [text, setText] = useState<string | null>(null);
   const [textTruncated, setTextTruncated] = useState(false);
   const [page, setPage] = useState(1);
@@ -107,6 +102,7 @@ export function FilePreview({ path: initialPath, onClose, onOpenLink, onConvert,
     setError(null);
     setImageUrl(null);
     setText(null);
+    setHtmlUrl(null);
     setTextTruncated(false);
     setPage(1);
     setPageCount(0);
@@ -143,6 +139,11 @@ export function FilePreview({ path: initialPath, onClose, onOpenLink, onConvert,
           // late resolution from writing into the new dialog either way.
           const result = await api.documentText(path, controller.signal);
           if (controller.signal.aborted) return;
+          if (html && !result.truncated) {
+            const ticket = await api.ticket(api.documentHtmlUrl(path));
+            if (controller.signal.aborted) return;
+            setHtmlUrl(ticket.url);
+          }
           setText(result.text);
           setTextTruncated(result.truncated);
           setPhase("ready");
@@ -168,7 +169,7 @@ export function FilePreview({ path: initialPath, onClose, onOpenLink, onConvert,
       controller.abort();
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [kind, path, attempt]);
+  }, [kind, path, html, attempt]);
 
   const retry = useCallback(() => setAttempt((n) => n + 1), []);
   const raster = isPreviewableKind(kind) && kind !== "image";
@@ -187,24 +188,24 @@ export function FilePreview({ path: initialPath, onClose, onOpenLink, onConvert,
         if (event.target === event.currentTarget) onClose();
       }}
     >
-      <div className={`file-preview ${markdown ? "file-preview-document" : ""}`} role="dialog" aria-modal="true" aria-label={`预览 ${name}`}>
+      <div className={`file-preview ${markdown || html ? "file-preview-document" : ""}`} role="dialog" aria-modal="true" aria-label={`预览 ${name}`}>
         <header className="file-preview-head">
           {history.length > 0 && <button className="ghost" aria-label="返回上个文件" onClick={() => { setPath(history.at(-1)!); setHistory(old => old.slice(0,-1)); }}>←</button>}
           <span className="file-preview-name" title={path}>
             {name}
           </span>
-          <span className="muted tiny">{markdown ? "Markdown" : kindLabel(kind)}</span>
+          <span className="muted tiny">{html ? "HTML 页面" : markdown ? "Markdown" : kindLabel(kind)}</span>
           <span className="spacer" />
           <button type="button" className="ghost" onClick={onClose} ref={closeRef} aria-label="关闭预览">
             关闭
           </button>
         </header>
 
-        {phase === "ready" && markdown && <div className="file-preview-toolbar" role="group" aria-label="文档显示方式">
-          <button className="ghost" aria-pressed={!sourceView} onClick={() => setSourceView(false)}>阅读</button>
-          <button className="ghost" aria-pressed={sourceView} onClick={() => setSourceView(true)}>原文</button>
+        {phase === "ready" && (markdown || html) && <div className="file-preview-toolbar" role="group" aria-label="文档显示方式">
+          <button className="ghost" aria-pressed={!sourceView} onClick={() => { if (html && sourceView) retry(); else setSourceView(false); }}>{html ? "页面" : "阅读"}</button>
+          <button className="ghost" aria-pressed={sourceView} onClick={() => setSourceView(true)}>{html ? "源码" : "原文"}</button>
         </div>}
-        <div className="file-preview-body">
+        <div className={`file-preview-body ${html && !sourceView && !textTruncated ? "file-preview-html-body" : ""}`}>
           {phase === "loading" && (
             <p className="muted" role="status">
               {raster ? "正在沙箱中转换并生成预览…" : "正在加载…"}
@@ -235,13 +236,13 @@ export function FilePreview({ path: initialPath, onClose, onOpenLink, onConvert,
           )}
 
           {phase === "ready" && kind === "text" && text !== null && (
-            <div className="file-preview-text">
+            <div className={`file-preview-text ${html && !sourceView && !textTruncated ? "file-preview-html" : ""}`}>
               {textTruncated && (
                 <p className="banner warn" role="status">
                   文件较大，仅显示开头部分；完整内容请下载查看。
                 </p>
               )}
-              {markdown && !sourceView ? <article className="document-reading" data-testid="file-preview-markdown">
+              {html && !sourceView && !textTruncated && htmlUrl ? <iframe title={`HTML 页面：${name}`} data-testid="file-preview-html" sandbox="allow-scripts" referrerPolicy="no-referrer" src={htmlUrl} /> : markdown && !sourceView ? <article className="document-reading" data-testid="file-preview-markdown">
                 <Markdown source={text} document onOpenLink={url => void openLink(url)} onOpenFile={openFile}/>
                 {refs.length > 0 && <div className="file-cards">{refs.map(ref => <FileCard key={ref.path} {...ref} onOpen={openFile}/>)}</div>}
               </article> : <pre data-testid="file-preview-text">{text}</pre>}

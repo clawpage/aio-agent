@@ -12,8 +12,8 @@ function cfg() {
 describe("host classification", () => {
   it("maps the configured hosts and the loopback dev pair", () => {
     const c = cfg();
-    expect(classifyHost(c, "agent.zymx.tech")).toBe("primary");
-    expect(classifyHost(c, "agent-workspace.zymx.tech")).toBe("workspace");
+    expect(classifyHost(c, "agent.clawpage.ai")).toBe("primary");
+    expect(classifyHost(c, "agent-workspace.clawpage.ai")).toBe("workspace");
     expect(classifyHost(c, "localhost:4891")).toBe("primary");
     expect(classifyHost(c, "127.0.0.1:4891")).toBe("workspace");
   });
@@ -21,13 +21,13 @@ describe("host classification", () => {
   it("rejects unknown hosts and host:port mismatches", () => {
     const c = cfg();
     expect(classifyHost(c, "evil.example.com")).toBeNull();
-    expect(classifyHost(c, "agent.zymx.tech.evil.com")).toBeNull();
+    expect(classifyHost(c, "agent.clawpage.ai.evil.com")).toBeNull();
     expect(classifyHost(c, "")).toBeNull();
-    expect(classifyHost(c, "agent.zymx.tech:4443")).toBeNull();
+    expect(classifyHost(c, "agent.clawpage.ai:4443")).toBeNull();
   });
 
   it("strips ports for hostname comparison", () => {
-    expect(hostnameOf("agent.zymx.tech:443")).toBe("agent.zymx.tech");
+    expect(hostnameOf("agent.clawpage.ai:443")).toBe("agent.clawpage.ai");
     expect(hostnameOf("[::1]:4891")).toBe("[::1]");
   });
 });
@@ -35,10 +35,10 @@ describe("host classification", () => {
 describe("origin allowlisting", () => {
   it("allows only the configured origins per site", () => {
     const c = cfg();
-    expect(originAllowed(c, "primary", "https://agent.zymx.tech")).toBe(true);
-    expect(originAllowed(c, "primary", "https://agent.zymx.tech/")).toBe(true);
-    expect(originAllowed(c, "primary", "https://agent-workspace.zymx.tech")).toBe(false);
-    expect(originAllowed(c, "workspace", "https://agent-workspace.zymx.tech")).toBe(true);
+    expect(originAllowed(c, "primary", "https://agent.clawpage.ai")).toBe(true);
+    expect(originAllowed(c, "primary", "https://agent.clawpage.ai/")).toBe(true);
+    expect(originAllowed(c, "primary", "https://agent-workspace.clawpage.ai")).toBe(false);
+    expect(originAllowed(c, "workspace", "https://agent-workspace.clawpage.ai")).toBe(true);
     expect(originAllowed(c, "primary", "https://evil.example.com")).toBe(false);
     expect(originAllowed(c, "primary", "null")).toBe(false);
     expect(originAllowed(c, "primary", null)).toBe(false);

@@ -6,7 +6,7 @@ repository (tools/linode-local/dns.py) and only manages the two exact CNAMEs of
 the author's existing deployment. Public/self-hosted users should configure
 PA_PRIMARY_HOST / PA_WORKSPACE_HOST themselves and ignore this script.
 
-Creates exactly two proxied CNAMEs (agent.zymx.tech, agent-workspace.zymx.tech)
+Creates exactly two proxied CNAMEs (agent.clawpage.ai, agent-workspace.clawpage.ai)
 pointing at the dedicated personal-agent tunnel. It never modifies unrelated
 records: if a name already exists it is reported and left untouched unless the
 value already matches the expected tunnel target.
@@ -28,8 +28,8 @@ import dns as dns_helper  # noqa: E402  (credential/api helpers only)
 
 TUNNEL_ID = "384645fd-a428-4df6-a84b-e392c6e0df2d"
 TARGET = f"{TUNNEL_ID}.cfargotunnel.com"
-NAMES = ["agent.zymx.tech", "agent-workspace.zymx.tech"]
-ZONE = "zymx.tech"
+NAMES = ["agent.clawpage.ai", "agent-workspace.clawpage.ai"]
+ZONE = "clawpage.ai"
 
 
 def find(name: str):

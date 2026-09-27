@@ -6,8 +6,8 @@
 公网只通过专用 Cloudflare tunnel 暴露两个精确域名。
 
 ```
-浏览器 ──TLS──> agent.zymx.tech ──┐
-浏览器 ──TLS──> agent-workspace.zymx.tech ──┤
+浏览器 ──TLS──> agent.clawpage.ai ──┐
+浏览器 ──TLS──> agent-workspace.clawpage.ai ──┤
                                             └─> cloudflared（专用 tunnel）
                                                   └─> Node 控制面 127.0.0.1:4891
                                                         ├─ 主域：SPA + /api + SSE
@@ -24,7 +24,7 @@
 
 控制面按 `Host` 头把请求分成两类，两者共用同一个 Node 进程但**cookie 与来源互相独立**：
 
-| | 主站 `agent.zymx.tech` | 伴随站 `agent-workspace.zymx.tech` |
+| | 主站 `agent.clawpage.ai` | 伴随站 `agent-workspace.clawpage.ai` |
 |---|---|---|
 | 内容 | 中文控制台 SPA、`/api/*`、SSE | AIO 全部 HTTP/WS 表面（终端、VNC、Jupyter、code-server、MCP、`/v1/*`） |
 | Cookie | `pa_session`（HttpOnly）+ `pa_csrf` | `pa_ws_session`（HttpOnly）+ `pa_ws_csrf` |

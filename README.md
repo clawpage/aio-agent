@@ -64,15 +64,17 @@ curl -s http://127.0.0.1:4891/healthz
 
 派单时，只有缺少无法合理默认的关键条件才会在主会话提问。例如实际查询机票缺目的地或日期，
 会一次问齐缺少的条件；一般旅行建议、灵活日期探索，以及预算、风格等可选偏好不会触发问卷。
-问题显示为“等待你补充”，不启动子任务、不占执行名额或共享资源。点击“回答问题”可明确关联，
-也可以直接回复，主会话会结合语义接回原任务；无关请求继续独立执行。部分回答只追问仍阻塞的条件。
+问题显示为“等待你补充”，不启动子任务、不占执行名额或共享资源。直接在主输入框回答或补充，
+主会话会结合待回答的问题和任务上下文自动接回原任务，无需点击按钮或选择任务；无关请求继续独立执行。部分回答只追问仍阻塞的条件。
 问题与回答持久保存，刷新或服务重启后仍可继续；答案足够后只启动原任务一次。
+
+阅读型交付物按内容选择格式：普通文字与简单表格可用 Markdown；复杂排版、图表或交互优先用适配手机的 HTML 页面。用户指定的格式优先。HTML 文件卡片默认展示页面，可切换源码、下载原文件；隔离预览支持内嵌样式和脚本，不加载外部网络资源或读取主站登录状态。
 
 ## 它是什么
 
 ```
-浏览器 ─> agent.zymx.tech ────────┐   控制台：对话流、工具进度、审批、停止、重连、历史
-浏览器 ─> agent-workspace.zymx.tech ┤   工作区：AIO 全部界面与 REST/WS 表面（同样需要登录）
+浏览器 ─> agent.clawpage.ai ────────┐   控制台：对话流、工具进度、审批、停止、重连、历史
+浏览器 ─> agent-workspace.clawpage.ai ┤   工作区：AIO 全部界面与 REST/WS 表面（同样需要登录）
                                    └─> 本机 Node 控制面（127.0.0.1:4891）
                                          └─> 沙箱容器 personal-agent-sandbox
                                                └─> 常驻 Codex app-server（stdio）
@@ -262,7 +264,7 @@ npm run build && npx playwright test --config playwright.local.config.ts
 | 变量 | 默认 | 说明 |
 | --- | --- | --- |
 | `PA_PORT` / `PA_BIND` | `4891` / `127.0.0.1` | 控制面监听地址 |
-| `PA_PRIMARY_HOST` / `PA_WORKSPACE_HOST` | 源码默认 `agent.zymx.tech` / `agent-workspace.zymx.tech`（兼容保留） | **生产使用者必须覆盖**为自己的两个精确域名；`.env.example` 用 `agent.example.com` / `workspace.example.com` 占位 |
+| `PA_PRIMARY_HOST` / `PA_WORKSPACE_HOST` | 源码默认 `agent.clawpage.ai` / `agent-workspace.clawpage.ai`（当前部署） | **生产使用者必须覆盖**为自己的两个精确域名；`.env.example` 用 `agent.example.com` / `workspace.example.com` 占位 |
 | `PA_TRUST_CF_CONNECTING_IP` | `0` | 仅当请求确实经由自己可信的反向代理（会覆盖 `CF-Connecting-IP`）时才设为 `1`；否则限速可被伪造头绕过 |
 | `PA_SANDBOX_IMAGE` | `ghcr.io/agent-infra/sandbox:1.11.0` | 固定镜像，升级需人工确认 |
 | `PA_SANDBOX_CODEX_VERSION` | `0.156.1` | 沙箱内固定版 Codex CLI（在持久卷里，升级见运行手册） |

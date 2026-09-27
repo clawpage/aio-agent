@@ -54,16 +54,15 @@ test("one inbox accepts parallel messages, folds progress, reports completion or
     expect(short!.height).toBeLessThan(40);
     await page.screenshot({ path: `/Users/mengxiao/workspace/.scratch/artifacts/aio-main-tasks/${info.project.name}-main.png`, animations: "disabled" });
 });
-test("per-task stop and explicit related followup never stop other tasks", async ({ page }) => {
+test("per-task stop and natural followup never stop other tasks", async ({ page }) => {
     const { rows, bodies, stops } = await setup(page, [task(1), task(2)]);
     await page.locator('.task-entry[data-task-id="task-1"]').getByRole("button", { name: "停止该任务" }).click();
     await expect(page.locator(".task-progress")).toHaveCount(1);
     expect(stops).toEqual(["task-1"]);
     expect(rows[1]!.status).toBe("running");
-    await page.locator('.task-entry[data-task-id="task-2"]').getByRole("button", { name: "补充此任务" }).click();
-    await expect(page.locator(".composer .chip")).toContainText("任务 2");
+    await expect(page.getByRole("button", { name: "补充此任务" })).toHaveCount(0);
     await send(page, "接着做第二部分");
-    expect(bodies[0]?.relatedTaskId).toBe("task-2");
+    expect(bodies[0]?.relatedTaskId).toBeNull();
 });
 test("attachments and drafts survive config and task details without a history entry", async ({ page }, info) => {
     await setup(page, [task(1)]);
@@ -176,10 +175,10 @@ test("clarification stays inline, answers target the right task and unrelated wo
     await page.reload();
     const question=page.locator('.task-entry[data-task-id="task-2"] .task-question');
     await expect(question).toContainText(second.clarification);
-    await question.getByRole("button",{name:"回答问题"}).click();
-    await expect(page.locator(".composer .chip")).toContainText("回答：任务 2");
+    await expect(page.getByRole("button",{name:/回答问题|补充此任务|继续此任务|补充任务/})).toHaveCount(0);
+    await expect(page.locator(".composer .chip")).toHaveCount(0);
     await send(page,"演示虚构的待办产品");
-    expect(bodies[0]?.relatedTaskId).toBe(second.id);
+    expect(bodies[0]?.relatedTaskId).toBeNull();
     await send(page,"另外写个笑话");
     expect(bodies[1]?.relatedTaskId).toBeNull();
     for(const width of info.project.name.startsWith("mobile")?[390,360]:[1440]) {

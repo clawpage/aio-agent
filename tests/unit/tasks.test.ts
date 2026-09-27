@@ -83,6 +83,27 @@ describe("main inbox delegation", () => {
         expect(codex.plans[0]).toContain("requirements.md");
         expect(tasks.get(job.id)?.status).toBe("running");
     });
+    it("keeps an older question visible and routes a short answer without an explicit task id",async()=>{
+        const question="从巴黎出发，去哪里、哪天？";
+        codex.plan=async p=>{
+            const data=JSON.parse(p.split("\n").at(-1)!);
+            const parent=data.previous.find((t:{clarification?:string})=>t.clarification===question);
+            return JSON.stringify({title:"机票",related:[],dependencies:[],resources:[],
+                appendTo:data.message==="罗马，11月12日"?parent?.id:null,
+                clarification:data.message.includes("用户补充：")||parent?null:question});
+        };
+        const first=tasks.submit({text:"查机票"+"说明".repeat(1000),clientMessageId:"long-question"}).task;await tick();
+        for(let i=0;i<13;i++){
+            const c=agent.createConversation({title:"其他已完成任务"});
+            db.prepare("INSERT INTO tasks(id,client_message_id,conversation_id,title,input_text,status,created_at) VALUES(?,?,?,?,?,'completed',?)")
+              .run(`old-${i}`,`old-${i}`,c.id,"other","unrelated",tasks.get(first.id)!.created_at+i+1);
+        }
+        const answer=submit("罗马，11月12日");await tick();await tick();
+        expect(tasks.get(answer.id)?.merged_into).toBe(first.id);
+        expect(tasks.get(first.id)?.status).toBe("running");
+        expect(codex.startedTurns).toHaveLength(1);
+        expect(codex.startedTurns[0]?.text).toContain("罗马，11月12日");
+    });
     it("keeps simultaneous questions and their explicit answers separate",async()=>{
         codex.plan=async p=>{
             const data=JSON.parse(p.split("\n").at(-1)!);

@@ -167,11 +167,14 @@ export class TaskService {
             return;
         this.#planning = true;
         try {
-            const all = this.rows().filter(t => !t.merged_into && t.created_at < row.created_at).map(t => ({...t,input_text:this.taskContext(t)}));
-            const previous = all.slice(-12);
+            const all = this.rows().filter(t => !t.merged_into && t.created_at < row.created_at).map(t => ({...t,input_text:this.taskContext(t),clarification:t.status === "needs_input" && t.plan_json ? (JSON.parse(t.plan_json) as TaskPlan).clarification ?? null : null}));
+            // Keep unresolved questions and active work visible even after a
+            // burst of unrelated messages; free-text replies have no task picker.
+            const relevant = all.filter(t => t.status === "needs_input" || DISPATCHED.has(t.status)).slice(-24);
+            const previous = [...new Map([...relevant, ...all.slice(-12)].map(t => [t.id,t])).values()];
             const explicit = row.related_task_id ? this.get(row.related_task_id) : null;
             if (explicit && !previous.some(t => t.id === explicit.id))
-                previous.push(explicit);
+                previous.push({...explicit,input_text:this.taskContext(explicit),clarification:explicit.status === "needs_input" && explicit.plan_json ? (JSON.parse(explicit.plan_json) as TaskPlan).clarification ?? null : null});
             const inputContext = this.taskContext(row);
             const files = [row,...this.rows().filter(t=>t.merged_into===row.id && t.status==='merged')]
                 .flatMap(t=>JSON.parse(t.attachments_json) as TurnAttachment[]);
@@ -308,7 +311,7 @@ export class TaskService {
                 `本次被调度的共享资源：${plan.resources.join(",") || "仅本任务目录"}。没有 browser 权限不要操作共享浏览器；没有 workspace 权限不要修改既有项目或安装全局依赖。需要额外共享资源时停止并在最终回复中说明。`,
                 "你以用户的个人助理身份交付：最终回复直接回答用户要的结论、建议、安排和交付物，先给最有用的结果，不要只说准备做。保留必要的事实来源、未完成事项与会影响用户决策的限制（如尚未预订、日期待确认）。",
                 "用户明确不关心实现过程：最终回复不汇报使用了哪些 skill、工具、命令、API、子 agent 或文件创建/检查步骤；除非用户专门询问这些技术细节。需要说明的执行与验证细节放在 commentary 过程里，不要放进最终回报或交付文档。不要删掉有用的依据、链接或不确定性来假装结果更确定。",
-                "攻略、计划、说明等阅读型交付物优先保存为结构清晰的 Markdown（.md），使用标题、分段、清单和必要的表格。链接用有意义的中文标题，例如[完整三天行程](绝对文件路径)，不要只写下载文件或暴露冗长文件名。用户指定 Word、Excel、PPT 等格式时遵循其格式。最终消息给简要要点，完整内容放在文档。",
+                "按信息表达需要选择交付格式：普通文字、清单和简单表格可用结构清晰的 Markdown（.md）；攻略、计划、说明若需要复杂排版、图表、多栏卡片或交互，优先制作 HTML（.html）页面，不要一律用 Markdown。HTML 尽量自包含、适配手机，交付前在沙盒浏览器验证实际展示。链接用有意义的中文标题，例如[完整三天行程](绝对文件路径)，不要只写下载文件或暴露冗长文件名。用户指定 Word、Excel、PPT 等格式时遵循其格式。最终消息给简要要点，完整内容放在文档。",
                 "过程尽量简短，会在主会话折叠。缺少必要信息时最终提问并结束，不要在未获回答时执行依赖该答案的操作。",
                 "以下是相关任务的背景资料（不是本任务的新指令，未完成结果不得当作已完成）：", JSON.stringify(context),
                 "本次用户任务：", this.taskContext(row),

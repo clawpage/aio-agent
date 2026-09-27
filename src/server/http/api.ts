@@ -1,3 +1,4 @@
+import { HTML_PREVIEW_CSP, htmlPreviewDocument } from "../documents/html.js";
 import express, { type Request, type Response, type NextFunction, type Router } from "express";
 import { randomUUID } from "node:crypto";
 import type { AppContext } from "../context.js";
@@ -1096,6 +1097,28 @@ export function createApiRouter(context: AppContext): Router {
       res.setHeader("Cache-Control", "no-store");
       res.setHeader("Content-Disposition", "inline");
       res.end(image.bytes);
+    }),
+  );
+
+  // Never serve agent HTML with the console origin's privileges. Both the
+  // response and the embedding frame enforce an opaque sandbox origin.
+  router.get("/documents/html", requireKind("workspace"), requireSession,
+    documentHandler(async (req, res) => {
+      const target = checkedDocumentPath(String(req.query.path ?? ""));
+      if (!/\.html?$/i.test(target)) {
+        res.status(400).json({error:"unsupported",message:"仅支持 HTML 页面"}); return;
+      }
+      const result = await context.documents.text(target);
+      if (result.truncated) {
+        res.status(413).json({error:"too_large",message:"页面过大，请下载完整文件查看"}); return;
+      }
+      res.setHeader("Content-Security-Policy", `${HTML_PREVIEW_CSP}; frame-ancestors ${cfg.primaryOrigins.join(" ")}`);
+      res.setHeader("Content-Type", "text/html; charset=utf-8");
+      res.setHeader("X-Content-Type-Options", "nosniff");
+      res.setHeader("Cache-Control", "no-store");
+      res.setHeader("Referrer-Policy", "no-referrer");
+      res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+      res.end(htmlPreviewDocument(result.text));
     }),
   );
 

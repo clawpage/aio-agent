@@ -39,7 +39,7 @@ cookie 名 `pa_*` 与 `PA_*` 前缀**保持不变**——它们承载既有容�
    参数调用 Docker，不提供任意宿主机 shell 通道。
 4. **两个来源**：主站与伴随站必须保持不同来源；不要把 AIO 生成内容放到主站上，也不要为了
    本地调试放宽 cookie 安全属性（localhost 明文是唯一例外）。
-5. **DNS**：只允许维护 `agent.zymx.tech` 与 `agent-workspace.zymx.tech` 两条记录；不得运行
+5. **DNS**：只允许维护 `agent.clawpage.ai` 与 `agent-workspace.clawpage.ai` 两条记录；不得运行
    `tools/linode-local/dns.py` 的 plan/apply/rollback（那是另一条迁移线）。
 6. **停止语义要诚实**：排队/执行中/启动中的停止分别处理，不得谎报已停止；连接中断导致的
    未知结果标记 `unknown` 并提示先核对，不自动重放有副作用的操作。

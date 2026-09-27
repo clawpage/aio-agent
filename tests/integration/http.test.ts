@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import net from "node:net";
 import { login, rawUpgrade, startHarness, type TestHarness } from "../helpers/harness.js";
 
@@ -13,6 +13,15 @@ afterAll(async () => {
 });
 
 describe("host and origin gating", () => {
+  it("redirects the configured retired host without forwarding requests or query secrets",async()=>{
+    h.ctx.cfg.legacyPrimaryHost="agent.zymx.tech";
+    try {
+      const r=await h.request("/old?token=private",{hostHeader:"agent.zymx.tech"});
+      expect(r.status).toBe(302);expect(r.headers.get("location")).toBe("https://agent.clawpage.ai/");
+      const write=await h.request("/api/auth/login",{method:"POST",hostHeader:"agent.zymx.tech",body:"{}"});
+      expect(write.status).toBe(410);
+    } finally {delete h.ctx.cfg.legacyPrimaryHost;}
+  });
   it("rejects unknown Host headers", async () => {
     const res = await h.request("/api/auth/session", { hostHeader: "evil.example.com" });
     expect(res.status).toBe(404);
@@ -671,7 +680,7 @@ describe("sandbox proxy", () => {
     expect(setCookies.join(" ")).not.toContain("Domain=example.com");
     expect(res.headers.get("x-frame-options")).toBeNull();
     const csp = res.headers.get("content-security-policy") ?? "";
-    expect(csp).toContain("frame-ancestors 'self' https://agent.zymx.tech");
+    expect(csp).toContain("frame-ancestors 'self' https://agent.clawpage.ai");
     expect(csp).not.toContain("frame-ancestors 'none'");
   });
 
@@ -1071,6 +1080,28 @@ async function bootstrapWorkspaceWithSession(h: TestHarness): Promise<{ cookie: 
 }
 
 describe("document endpoints", () => {
+  it("serves HTML only with origin isolation, no network and size/path guards", async () => {
+    const {cookie}=await login(h);
+    const {cookie:wsCookie}=await bootstrapWorkspace(h);
+    const text=vi.spyOn(h.ctx.documents,"text").mockResolvedValue({text:"<h1>Demo</h1><script>document.title='demo'</script>",size:65,truncated:false});
+    try {
+      expect((await h.request("/api/documents/html?path=/home/gem/workspace/demo.html",{headers:{cookie}})).status).toBe(404);
+      expect((await h.request("/api/documents/html?path=/home/gem/workspace/demo.html",{host:"workspace"})).status).toBe(401);
+      const res=await h.request("/api/documents/html?path=/home/gem/workspace/demo.html",{host:"workspace",headers:{cookie:wsCookie}});
+      expect(res.status).toBe(200);
+      expect(res.headers.get("content-type")).toContain("text/html");
+      const csp=res.headers.get("content-security-policy")!;
+      expect(csp).toContain("sandbox allow-scripts");expect(csp).not.toContain("allow-same-origin");
+      expect(csp).toContain("connect-src 'none'");expect(csp).toContain("default-src 'none'");
+      expect(res.headers.get("cache-control")).toBe("no-store");
+      expect(await res.text()).toContain("<h1>Demo");
+      for(const path of ["/etc/secret.html","/home/gem/workspace/a.svg"]){
+        expect((await h.request(`/api/documents/html?path=${encodeURIComponent(path)}`,{host:"workspace",headers:{cookie:wsCookie}})).status).toBe(400);
+      }
+      text.mockResolvedValue({text:"partial",size:999999,truncated:true});
+      expect((await h.request("/api/documents/html?path=/home/gem/workspace/demo.html",{host:"workspace",headers:{cookie:wsCookie}})).status).toBe(413);
+    } finally {text.mockRestore();}
+  });
   it("requires a session for every document route", async () => {
     for (const path of [
       "/api/documents/readiness",

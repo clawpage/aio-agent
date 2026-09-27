@@ -20,6 +20,16 @@ export function createApp(ctx: AppContext): express.Express {
   app.disable("x-powered-by");
   app.set("trust proxy", false); // we read only explicitly configured headers
 
+  // A configured retired host is redirect-only, never a second API origin.
+  app.use((req: Request, res: Response, next: NextFunction) => {
+    const legacy = ctx.cfg.legacyPrimaryHost;
+    const host = (req.headers.host ?? "").toLowerCase().replace(/:443$/, "");
+    if (!legacy || legacy === ctx.cfg.primaryHost || host !== legacy) { next(); return; }
+    res.setHeader("Cache-Control", "no-store");
+    if (req.method === "GET" || req.method === "HEAD") res.redirect(302, `https://${ctx.cfg.primaryHost}/`);
+    else res.status(410).json({error:"moved",message:"入口已迁移，请从新域名登录"});
+  });
+
   // Host classification happens first: an unknown Host never reaches any handler.
   app.use((req: Request, res: Response, next: NextFunction) => {
     const resolved = resolveRequest({ cfg: ctx.cfg, sessions: ctx.sessions, req });

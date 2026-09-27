@@ -52,6 +52,7 @@ export function loadConfig(): {
   ownerSecretPath: string;
   logDir: string;
   primaryHost: string;
+  legacyPrimaryHost?: string;
   workspaceHost: string;
   allowedHosts: string[];
   primaryOrigins: string[];
@@ -180,8 +181,8 @@ export function loadConfig(): {
   const port = envInt("PA_PORT", 4891);
   const bind = envStr("PA_BIND", "127.0.0.1");
   const dataDir = envStr("PA_DATA_DIR", path.join(PROJECT_ROOT, "var"));
-  const primaryHost = envStr("PA_PRIMARY_HOST", "agent.zymx.tech").toLowerCase();
-  const workspaceHost = envStr("PA_WORKSPACE_HOST", "agent-workspace.zymx.tech").toLowerCase();
+  const primaryHost = envStr("PA_PRIMARY_HOST", "agent.clawpage.ai").toLowerCase();
+  const workspaceHost = envStr("PA_WORKSPACE_HOST", "agent-workspace.clawpage.ai").toLowerCase();
   const loopbackHosts = [`localhost:${port}`, `127.0.0.1:${port}`, `[::1]:${port}`, "localhost", "127.0.0.1"];
   const allowedHosts = [
     ...parseList(envStr("PA_ALLOWED_HOSTS", "")).map((h) => h.toLowerCase()),
@@ -220,6 +221,7 @@ export function loadConfig(): {
     ownerSecretPath: envStr("PA_OWNER_SECRET_PATH", path.join(dataDir, "owner-secret.txt")),
     logDir: path.join(dataDir, "logs"),
     primaryHost,
+    legacyPrimaryHost: envStr("PA_LEGACY_PRIMARY_HOST", "").toLowerCase() || undefined,
     workspaceHost,
     allowedHosts,
     primaryOrigins,

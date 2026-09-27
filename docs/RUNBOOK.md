@@ -32,8 +32,8 @@ curl -s http://127.0.0.1:4891/healthz
 # {"ok":true,"dependenciesReady":true,"servicesReady":true,"agentReady":true,"ready":true,...}
 
 # 公网两处入口
-curl -s -o /dev/null -w '%{http_code}\n' https://agent.zymx.tech/                 # 200 登录页
-curl -s -o /dev/null -w '%{http_code}\n' https://agent-workspace.zymx.tech/terminal  # 401（未登录）
+curl -s -o /dev/null -w '%{http_code}\n' https://agent.clawpage.ai/                 # 200 登录页
+curl -s -o /dev/null -w '%{http_code}\n' https://agent-workspace.clawpage.ai/terminal  # 401（未登录）
 ```
 
 `ready` 的语义：`dependenciesReady` = 沙箱健康 + 宿主机 Codex 登录有效 + 原生表面
@@ -48,8 +48,8 @@ npm run typecheck && npm test
 npm run build                      # 必须先构建，bin/serve 会拒绝启动早于 src 的 dist
 /Users/mengxiao/workspace/tools/start.sh restart personal-agent
 # npm run smoke 默认只打本地；当前部署要对公网冒烟必须显式给出两个 origin：
-PA_PRIMARY_ORIGIN=https://agent.zymx.tech \
-PA_COMPANION_ORIGIN=https://agent-workspace.zymx.tech npm run smoke
+PA_PRIMARY_ORIGIN=https://agent.clawpage.ai \
+PA_COMPANION_ORIGIN=https://agent-workspace.clawpage.ai npm run smoke
 ```
 
 **沙箱 Codex CLI 版本**（与镜像分开固定）：模型可用性由 CLI 版本决定，固定镜像里的旧 CLI
@@ -154,7 +154,10 @@ docker exec -u gem personal-agent-sandbox \
 ## 5. Tunnel 与 DNS
 
 - 专用 tunnel 名 `personal-agent`，ID `384645fd-a428-4df6-a84b-e392c6e0df2d`；
-  配置 `var/cloudflared/config.yml`，ingress 只列两个 hostname，最后一条默认 404。
+  配置 `var/cloudflared/config.yml`，ingress 列出两个正式 hostname，另保留旧主站的跳转入口，最后一条默认 404。
+- 正式入口为 `agent.clawpage.ai`，工作区为 `agent-workspace.clawpage.ai`。设置
+  `PA_LEGACY_PRIMARY_HOST=agent.zymx.tech` 后，旧入口仅跳转新主站，不接受 API 写入。
+  域名变更后需在新域名重新登录一次，沿用既有账号密码与数据。
 - DNS 只有两条记录，由有界脚本维护：
   ```bash
   python3 bin/dns-agent.py check    # 只读，逐条核对类型/目标/proxied

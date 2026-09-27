@@ -2270,4 +2270,8 @@ textarea:focus {
 .task-intro { margin: 8px 4px 10px; font-size: 14px; line-height: 1.65; color: var(--text-dim); overflow-wrap: anywhere; }
 
 .task-question { margin: 8px 0 12px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 14px; }
-.task-question p { margin: 0 0 12px; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.65; }
+.task-question p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.65; }
+
+.file-preview-html-body { overflow: hidden; min-height: 0; }
+.file-preview-document .file-preview-html { height: 100%; min-height: 0; }
+.file-preview-html iframe { display: block; width: 100%; height: 100%; border: 0; background: white; }
