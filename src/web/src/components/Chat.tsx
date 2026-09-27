@@ -6,9 +6,10 @@ import {
   childInProgress,
   cloneTimeline,
   emptyTimeline,
-  isWorkingActive,
   removeBlock,
-  workingLabel,
+  segmentIsActive,
+  segmentLabel,
+  segmentStatusTone,
   type Block,
   type TimelineState,
   type WorkingBlock,
@@ -66,11 +67,12 @@ export function Chat({
   const draftRef = useRef<HTMLTextAreaElement | null>(null);
   const [previewPath, setPreviewPath] = useState<string | null>(null);
   /**
-   * Which "Working" groups the user has opened, keyed by turn id. Held outside
-   * the timeline so an incremental SSE update can never reset a group the user
-   * expanded; history starts collapsed and only an explicit click opens one.
+   * Which activity segments the user has opened, keyed by *segment id* (not turn
+   * id): a turn can own several segments now, so each one expands independently
+   * and an incremental SSE update can never reset a segment the user opened.
+   * History starts collapsed and only an explicit click opens one.
    */
-  const [openGroups, setOpenGroups] = useState<ReadonlySet<string>>(() => new Set());
+  const [openSegments, setOpenSegments] = useState<ReadonlySet<string>>(() => new Set());
   const lastIdRef = useRef(0);
   const pendingRef = useRef<{ clientMessageId: string; signature: string; snapshot: { text: string; attachments: Attachment[] } } | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -349,12 +351,12 @@ export function Chat({
           <BlockView
             key={block.id}
             block={block}
-            openGroups={openGroups}
-            onToggleGroup={(turnId) =>
-              setOpenGroups((prev) => {
+            openSegments={openSegments}
+            onToggleSegment={(segmentId) =>
+              setOpenSegments((prev) => {
                 const next = new Set(prev);
-                if (next.has(turnId)) next.delete(turnId);
-                else next.add(turnId);
+                if (next.has(segmentId)) next.delete(segmentId);
+                else next.add(segmentId);
                 return next;
               })
             }
@@ -488,16 +490,16 @@ function AttachmentCards({
 
 function BlockView({
   block,
-  openGroups,
-  onToggleGroup,
+  openSegments,
+  onToggleSegment,
   onRespond,
   onOpenWorkspace,
   onOpenBrowserLink,
   onOpenFile,
 }: {
   block: Block;
-  openGroups: ReadonlySet<string>;
-  onToggleGroup: (turnId: string) => void;
+  openSegments: ReadonlySet<string>;
+  onToggleSegment: (segmentId: string) => void;
   onRespond: (requestId: string, decision: string, extra?: unknown) => void;
   onOpenWorkspace: (path?: string) => void;
   onOpenBrowserLink: (url: string) => void;
@@ -517,11 +519,13 @@ function BlockView({
   }
 
   if (block.kind === "assistant") {
-    // Defensive fallback for stored or abnormal history: a settled assistant
-    // block with no text at all would render an empty bubble. The reducer
-    // already drops such blocks; this only keeps a blank bubble off screen if
-    // one ever reaches the view (a streaming block keeps its caret).
-    if (!block.streaming && !block.text.trim()) return null;
+    // Defensive fallback for stored or abnormal history: an assistant block
+    // with no text at all would render an empty bubble, and a zero-width
+    // streaming caret would wrongly steal the bottom slot from the live
+    // activity row. The reducer never creates such a block (creation is lazy);
+    // this only keeps a blank bubble or bare caret off screen if one ever
+    // reaches the view.
+    if (!block.text.trim()) return null;
     return (
       <article className="msg assistant">
         <div className="bubble">
@@ -550,8 +554,8 @@ function BlockView({
     return (
       <WorkingGroup
         block={block}
-        open={openGroups.has(block.turnId)}
-        onToggle={() => onToggleGroup(block.turnId)}
+        open={openSegments.has(block.id)}
+        onToggle={() => onToggleSegment(block.id)}
       />
     );
   }
@@ -594,10 +598,12 @@ function ToolCard({ block, inProgress }: { block: Extract<Block, { kind: "tool" 
 }
 
 /**
- * One turn's collapsed activity. Tools and reasoning summaries live inside; the
- * header states the turn's real status, flags a failed tool, and animates only
- * while the turn is genuinely in flight. It is a real button, so it is reachable
- * and toggleable from the keyboard, with `aria-expanded` reflecting the state.
+ * One continuous run of activity inside a turn. Tools and reasoning summaries
+ * live inside; the header states the run's own status, flags a failed tool, and
+ * animates only while this run is the turn's live one — a run closed by later
+ * prose keeps its place and never animates again. It is a real button, so it is
+ * reachable and toggleable from the keyboard, with `aria-expanded` reflecting the
+ * state of *this* segment only.
  */
 function WorkingGroup({
   block,
@@ -609,8 +615,10 @@ function WorkingGroup({
   onToggle: () => void;
 }) {
   const toolCount = block.children.filter((c) => c.kind === "tool").length;
-  const label = workingLabel(block.status);
-  const active = isWorkingActive(block.status);
+  const reasoningCount = block.children.length - toolCount;
+  const label = segmentLabel(block, toolCount);
+  const active = segmentIsActive(block);
+  const tone = segmentStatusTone(block);
   const emptyHint =
     block.status === "running"
       ? "正在处理…"
@@ -619,9 +627,24 @@ function WorkingGroup({
         : block.status === "queued"
           ? "已排队等待"
           : "本轮没有工具调用或摘要";
-  const bodyId = `working-body-${block.turnId}`;
+  // The label already counts the tools ("执行了 3 项操作"), and a summary-only
+  // history row already says "思考摘要". So the meta only adds what the label
+  // leaves out: the summary count beside a tool count, or the live row's own
+  // hint before anything has arrived. Nothing is shown when the label already
+  // says everything there is to say — never a duplicated count.
+  const meta =
+    toolCount > 0 && reasoningCount > 0
+      ? `${reasoningCount} 条摘要`
+      : active && block.children.length === 0
+        ? "工具与摘要"
+        : "";
+  // History rows read as neutral marks, not the amber in-progress dot; a real
+  // error still flags loudly.
+  const dotClass = tone === "active" ? "warn" : tone === "error" ? "error" : "idle";
+  // Stable per segment, so two segments in one turn never share a body id.
+  const bodyId = `working-body-${block.id.replace(/[^A-Za-z0-9_-]/g, "-")}`;
   return (
-    <article className={`working ${block.status}${active ? " active" : ""}`}>
+    <article className={`working ${block.status}${active ? " active" : ""}${block.closed ? " closed" : ""}`}>
       <button
         type="button"
         className="working-head"
@@ -630,19 +653,17 @@ function WorkingGroup({
         onClick={onToggle}
       >
         {active && <span className="working-sweep" aria-hidden />}
-        <span className={`dot ${block.status === "running" || block.status === "stopping" ? "warn" : block.status === "done" ? "ok" : block.status === "queued" ? "" : "error"}`} aria-hidden />
+        <span className={`dot ${dotClass}`} aria-hidden />
         <span className="working-label">{label}</span>
         {block.hasToolError && <span className="working-flag">工具出错</span>}
-        <span className="working-meta">
-          {toolCount > 0 ? `${toolCount} 项工具调用` : "工具与摘要"}
-        </span>
+        {meta && <span className="working-meta">{meta}</span>}
         <span className="working-caret" aria-hidden>
           {open ? "⌃" : "⌄"}
         </span>
       </button>
       {open && (
         <div className="working-body" id={bodyId}>
-          {/* A turn that has started but has no tool or summary yet still gets an
+          {/* A run that has started but has no tool or summary yet still gets an
               honest, content-free line — never a fabricated summary. */}
           {block.children.length === 0 && <div className="working-empty">{emptyHint}</div>}
           {block.children.map((child) => {

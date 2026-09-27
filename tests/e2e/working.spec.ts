@@ -2,11 +2,14 @@ import { expect, test, type Page } from "@playwright/test";
 import { makeConversation, mockConsole, MOCK_STATUS } from "./mock-api";
 
 /**
- * The collapsed "Working…" group: one per turn, holding that turn's tools and
- * reasoning summaries. These specs drive the real web bundle with every API
- * mocked. Incremental delivery is exercised through a controllable EventSource
- * shim, so a mid-stream update can be asserted to keep the user's expand state —
- * something a single fully-buffered SSE body cannot reproduce.
+ * The collapsed activity row. A turn is split into *segments*: visible prose (or
+ * an approval card) closes the current run of tools/summaries and opens a fresh
+ * one after it, so the stream reads `文本1 — 执行N项 — 文本2 — 执行M项 — 进行中`
+ * and the still-running row is always the last thing on screen. These specs drive
+ * the real web bundle with every API mocked. Incremental delivery is exercised
+ * through a controllable EventSource shim, so a mid-stream update can be asserted
+ * to keep the user's expand state — something a single fully-buffered SSE body
+ * cannot reproduce.
  */
 
 const CONV_ID = "conv_e2e_working";
@@ -120,6 +123,9 @@ async function cardGeometry(page: Page) {
     return {
       cardHeight: Math.round(el.getBoundingClientRect().height),
       bodyHeight: Math.round(body.getBoundingClientRect().height),
+      // Natural height means the body never scrolls itself: its own content must
+      // fit exactly, with the chat scroller owning all scrolling.
+      bodyScrollOverflow: body.scrollHeight - body.clientHeight,
       cardScrollOverflow: el.scrollHeight - el.clientHeight,
       bodyBottomVsCardBottom: Math.round(body.getBoundingClientRect().bottom - el.getBoundingClientRect().bottom),
       rowCount: rows.length,
@@ -198,10 +204,12 @@ test.describe("working group", () => {
 
     await emit(event("turn.finished", { turnId: "t1", status: "completed" }, "t1"));
     await expect(group(page)).not.toHaveClass(/\bactive\b/);
-    await expect(page.locator(".working-label")).toHaveText("已完成");
+    // A settled row states what it did, and never claims to be working.
+    await expect(page.locator(".working-label")).toHaveText("执行了 1 项操作");
     expect(await page.locator(".working-label").evaluate((el) => getComputedStyle(el).animationName)).toBe("none");
-    // The tool never got its item/completed: it must stop claiming to be running.
+    // History carries a neutral mark, not the amber in-progress dot.
     await expect(page.locator(".working-head .dot.warn")).toHaveCount(0);
+    await expect(page.locator(".working-head .dot.idle")).toHaveCount(1);
   });
 
   test("labels a failed turn as an execution error and flags the failed tool", async ({ page }) => {
@@ -212,10 +220,11 @@ test.describe("working group", () => {
     await emit(event("item/completed", { item: { id: "f1", type: "commandExecution", status: "failed" } }, "t1"));
     await emit(event("turn.failed", { turnId: "t1", message: "沙箱崩了" }, "t1"));
 
-    await expect(page.locator(".working-label")).toHaveText("执行出错");
+    await expect(page.locator(".working-label")).toHaveText("执行了 1 项操作 · 出错");
     await expect(group(page)).not.toHaveClass(/\bactive\b/);
     // A failed tool must be visible from the collapsed header, not hidden.
     await expect(page.locator(".working-flag")).toHaveText("工具出错");
+    await expect(page.locator(".working-head .dot.error")).toHaveCount(1);
   });
 
   test("does not animate a queued turn and never claims it is working", async ({ page }) => {
@@ -238,9 +247,9 @@ test.describe("working group", () => {
     await emit(event("turn.started", { turnId: "t2" }, "t2"));
     await emit(event("item/completed", { item: { id: "b1", type: "commandExecution", status: "completed" } }, "t2"));
 
-    // Two isolated groups: the finished first turn stays static while the second runs.
+    // Two isolated rows: the finished first turn stays static while the second runs.
     await expect(page.locator(".working")).toHaveCount(2);
-    await expect(page.locator(".working-label").nth(0)).toHaveText("已完成");
+    await expect(page.locator(".working-label").nth(0)).toHaveText("执行了 1 项操作");
     await expect(page.locator(".working-label").nth(1)).toHaveText("Working…");
     await expect(group(page, 0)).not.toHaveClass(/\bactive\b/);
     await expect(group(page, 1)).toHaveClass(/\bactive\b/);
@@ -288,6 +297,178 @@ test.describe("working group", () => {
   });
 });
 
+test.describe("interleaved activity segments", () => {
+  test("orders text/activity/text/activity with the running row last", async ({ page }) => {
+    await openChat(page, true);
+    await emit(page, event("turn.started", { turnId: "t1" }, "t1"));
+    await emit(page, event("item/completed", { item: { id: "m1", type: "agentMessage", text: "第一段正文。" } }, "t1"));
+    await emit(page, event("item/started", { item: { id: "c1", type: "commandExecution", command: "ls -la" } }, "t1"));
+    await emit(page, event("item/completed", { item: { id: "c1", type: "commandExecution", status: "completed", aggregatedOutput: "a" } }, "t1"));
+    await emit(page, event("item/completed", { item: { id: "m2", type: "agentMessage", text: "第二段正文。" } }, "t1"));
+    await emit(page, event("item/started", { item: { id: "c2", type: "commandExecution", command: "pwd" } }, "t1"));
+
+    // Rendered order: 文本1 — 执行1 — 文本2 — 进行中.
+    const order = await page.evaluate(() =>
+      [...document.querySelectorAll(".chat-scroll > *")]
+        .filter((el) => el.matches(".msg.assistant") || el.matches(".working"))
+        .map((el) => (el.matches(".working") ? "working" : "assistant")),
+    );
+    expect(order).toEqual(["assistant", "working", "assistant", "working"]);
+
+    // Exactly one row is current, and it is the bottom-most timeline element.
+    await expect(page.locator(".working.active")).toHaveCount(1);
+    await expect(group(page, 1)).toHaveClass(/\bactive\b/);
+    await expect(group(page, 0)).not.toHaveClass(/\bactive\b/);
+    // The completed run reports what it did, without repeating the count.
+    await expect(page.locator(".working-label").nth(0)).toHaveText("执行了 1 项操作");
+    await expect(group(page, 0).locator(".working-meta")).toHaveCount(0);
+    await expect(group(page, 0).locator(".working-head .dot.warn")).toHaveCount(0);
+    await expect(group(page, 0).locator(".working-head .dot.idle")).toHaveCount(1);
+  });
+
+  test("keeps each segment's expand state independent across a live delta", async ({ page }) => {
+    await openChat(page, true);
+    await emit(page, event("turn.started", { turnId: "t1" }, "t1"));
+    await emit(page, event("item/started", { item: { id: "c1", type: "commandExecution", command: "ls" } }, "t1"));
+    await emit(page, event("item/completed", { item: { id: "m1", type: "agentMessage", text: "中间说明。" } }, "t1"));
+    await emit(page, event("item/started", { item: { id: "c2", type: "commandExecution", command: "pwd" } }, "t1"));
+
+    // Open the first (historical) segment...
+    await head(page, 0).click();
+    await expect(head(page, 0)).toHaveAttribute("aria-expanded", "true");
+    await expect(head(page, 1)).toHaveAttribute("aria-expanded", "false");
+
+    // ...then a delta for the second segment must not reset it, and the open
+    // state must not leak between segments.
+    await emit(page, event("stream.delta", { itemId: "c2", kind: "item/commandExecution/outputDelta", delta: "still-running" }, "t1"));
+    await expect(head(page, 0)).toHaveAttribute("aria-expanded", "true");
+    await expect(head(page, 1)).toHaveAttribute("aria-expanded", "false");
+    await expect(group(page, 0).locator(".working-body .tool")).toHaveCount(1);
+    await expect(group(page, 1).locator(".working-body")).toHaveCount(0);
+  });
+
+  test("routes a late tool completion and log back into its original segment", async ({ page }) => {
+    await openChat(page, true);
+    await emit(page, event("turn.started", { turnId: "t1" }, "t1"));
+    await emit(page, event("item/started", { item: { id: "c1", type: "commandExecution", command: "slow-build" } }, "t1"));
+    await emit(page, event("item/completed", { item: { id: "m1", type: "agentMessage", text: "等待编译。" } }, "t1"));
+
+    // The completion + a late log arrive while the second segment is the live one.
+    await emit(page, event("stream.delta", { itemId: "c1", kind: "item/commandExecution/outputDelta", delta: "late-log-line" }, "t1"));
+    await emit(page, event("item/completed", { item: { id: "c1", type: "commandExecution", status: "completed", aggregatedOutput: "late-log-line" } }, "t1"));
+
+    // No duplicate row was created, and the log landed in the *first* segment.
+    await expect(page.locator(".working")).toHaveCount(2);
+    await head(page, 0).click();
+    const tool = group(page, 0).locator(".working-body .tool");
+    await expect(tool).toHaveCount(1);
+    await expect(tool).toContainText("late-log-line");
+    // The tool is its own collapsed <details> (unlike the group header), and the
+    // late completion settled it: open it and prove the log is really visible and
+    // the card reads as finished, not still in progress.
+    await expect(tool).not.toHaveAttribute("open", "");
+    await tool.locator("summary").click();
+    await expect(tool).toHaveAttribute("open", "");
+    await expect(tool.locator("pre")).toBeVisible();
+    await expect(tool.locator("pre")).toContainText("late-log-line");
+    await expect(tool).toHaveClass(/\bdone\b/);
+    // The live segment stayed empty and current.
+    await expect(group(page, 1)).toHaveClass(/\bactive\b/);
+    await expect(page.locator(".msg.assistant")).toHaveCount(1);
+  });
+
+  test("labels a closed summary-only history segment without in-progress wording", async ({ page }) => {
+    await openChat(page, true);
+    await emit(page, event("turn.started", { turnId: "t1" }, "t1"));
+    await emit(page, event("stream.delta", { itemId: "r1", kind: "item/reasoning/summaryTextDelta", delta: "先想一想" }, "t1"));
+    await emit(page, event("item/completed", { item: { id: "m1", type: "agentMessage", text: "说一下结论。" } }, "t1"));
+
+    // The closed summary run is a finished historical record, not a current one.
+    await expect(page.locator(".working-label").nth(0)).toHaveText("思考摘要");
+    await expect(page.locator(".working-label").nth(0)).not.toContainText("Working");
+    await expect(group(page, 0)).not.toHaveClass(/\bactive\b/);
+    // Only the trailing row is current.
+    await expect(page.locator(".working.active")).toHaveCount(1);
+    await expect(page.locator(".working-label").last()).toHaveText("Working…");
+  });
+
+  test("keeps the live row last when a blank agentMessage start precedes the tool", async ({ page }) => {
+    await openChat(page, true);
+    // The real bridge order that regressed: turn starts, blank `agentMessage`
+    // item opens, then a thread notice, then the tool.
+    await emit(page, event("turn.started", { turnId: "t1" }, "t1"));
+    await emit(page, event("item/started", { item: { id: "m1", type: "agentMessage", text: "" } }, "t1"));
+    await emit(page, event("thread.started", { threadId: "th1", model: "gpt-x" }, "t1"));
+    await emit(page, event("item/started", { item: { id: "c1", type: "commandExecution", command: "ls" } }, "t1"));
+
+    // The blank start painted nothing: no assistant bubble, and the live activity
+    // row is still the last element in the scroll container.
+    await expect(page.locator(".msg.assistant")).toHaveCount(0);
+    const lastIsWorking = await page.evaluate(() => {
+      const nodes = [...document.querySelectorAll(".chat-scroll > *")].filter(
+        (el) => el.matches(".working") || el.matches(".status-line") || el.matches(".msg.assistant"),
+      );
+      return nodes[nodes.length - 1]!.matches(".working");
+    });
+    expect(lastIsWorking).toBe(true);
+    await expect(page.locator(".working.active")).toHaveCount(1);
+  });
+
+  test("lets real prose after a blank start form the block in stream order", async ({ page }) => {
+    await openChat(page, true);
+    await emit(page, event("turn.started", { turnId: "t1" }, "t1"));
+    await emit(page, event("item/started", { item: { id: "m1", type: "agentMessage", text: "" } }, "t1"));
+    await emit(page, event("item/started", { item: { id: "c1", type: "commandExecution", command: "ls" } }, "t1"));
+
+    // A blank completion with no prose must not split the tool segment either.
+    await emit(page, event("item/completed", { item: { id: "m1", type: "agentMessage", text: "" } }, "t1"));
+    await expect(page.locator(".working")).toHaveCount(1);
+    await expect(page.locator(".msg.assistant")).toHaveCount(0);
+
+    // The first real prose lands after the tool: it becomes a visible block, and
+    // a fresh live row follows it — the structure is text/activity/text/activity,
+    // never an empty bubble ahead of the tool.
+    await emit(page, event("item/completed", { item: { id: "m2", type: "agentMessage", text: "结论如下。" } }, "t1"));
+    await expect(page.locator(".working")).toHaveCount(2);
+    await expect(page.locator(".msg.assistant")).toHaveCount(1);
+    await expect(page.locator(".msg.assistant")).toContainText("结论如下。");
+    await expect(page.locator(".working.active")).toHaveCount(1);
+    await expect(page.locator(".working-label").last()).toHaveText("Working…");
+  });
+
+  test("keeps a visible status line above the live row and never below it", async ({ page }) => {
+    await openChat(page, true);
+    await emit(page, event("turn.started", { turnId: "t1" }, "t1"));
+    await emit(page, event("thread.started", { threadId: "th1", model: "gpt-x" }, "t1"));
+    await emit(page, event("warning", { message: "注意配额" }, "t1"));
+    await emit(page, event("item/started", { item: { id: "c1", type: "commandExecution", command: "ls" } }, "t1"));
+
+    // The running row stays the bottom-most element even after visible status
+    // events arrive; the notices sit above it.
+    const lastIsWorking = await page.evaluate(() => {
+      const nodes = [...document.querySelectorAll(".chat-scroll > *")].filter(
+        (el) => el.matches(".working") || el.matches(".status-line"),
+      );
+      return nodes[nodes.length - 1]!.matches(".working");
+    });
+    expect(lastIsWorking).toBe(true);
+    await expect(page.locator(".working.active")).toHaveCount(1);
+  });
+
+  test("never leaves a stale working row behind a stopped or failed turn", async ({ page }) => {
+    await openChat(page, true);
+    await emit(page, event("turn.started", { turnId: "t1" }, "t1"));
+    await emit(page, event("turn.interrupt_requested", { turnId: "t1" }, "t1"));
+    // While stopping the row is still the live one, at the bottom.
+    await expect(page.locator(".working-label")).toHaveText("正在停止…");
+    await emit(page, event("turn.finished", { turnId: "t1", status: "interrupted" }, "t1"));
+    // Nothing was recorded, so no empty row survives — the stop is still reported.
+    await expect(group(page)).toHaveCount(0);
+    await expect(page.locator(".status-line").last()).toContainText("已停止");
+    await expect(page.locator(".working.active")).toHaveCount(0);
+  });
+});
+
 test.describe("working group height and presence", () => {
   test("shows one Working row from turn.started, before any tool or summary", async ({ page }) => {
     await openChat(page, true);
@@ -305,20 +486,23 @@ test.describe("working group height and presence", () => {
     await expect(page.locator(".working-body .reasoning")).toHaveCount(0);
   });
 
-  test("keeps the row for a prose-only turn and settles it as a static completed row", async ({ page }) => {
+  test("shows the current-activity row for a prose-only turn, then leaves nothing stale", async ({ page }) => {
     await openChat(page, true);
     await emit(page, event("turn.started", { turnId: "t1" }, "t1"));
     await emit(page, event("item/completed", { item: { id: "m1", type: "agentMessage", text: "只有正文的回答。" } }, "t1"));
-    await emit(page, event("turn.finished", { turnId: "t1", status: "completed" }, "t1"));
 
+    // While the turn runs, the prose is followed by the live activity row.
     await expect(page.locator(".msg.assistant")).toContainText("只有正文的回答。");
     await expect(group(page)).toBeVisible();
-    await expect(page.locator(".working-label")).toHaveText("已完成");
-    await expect(group(page)).not.toHaveClass(/\bactive\b/);
-    expect(await page.locator(".working-label").evaluate((el) => getComputedStyle(el).animationName)).toBe("none");
-    // Still expandable, still honest about having nothing to list.
+    await expect(page.locator(".working-label")).toHaveText("Working…");
     await head(page).click();
-    await expect(page.locator(".working-body .working-empty")).toHaveText("本轮没有工具调用或摘要");
+    await expect(page.locator(".working-body .working-empty")).toHaveText("正在处理…");
+
+    // Once it settles nothing empty ("执行 0 项操作") is left behind...
+    await emit(page, event("turn.finished", { turnId: "t1", status: "completed" }, "t1"));
+    await expect(group(page)).toHaveCount(0);
+    // ...but the turn's outcome is still reported truthfully.
+    await expect(page.locator(".status-line").last()).toContainText("本轮完成");
   });
 
   test("keeps a blank-summary turn's row while it runs and never shows raw reasoning", async ({ page }) => {
@@ -355,6 +539,9 @@ test.describe("working group height and presence", () => {
       expect(geo.rowsWithHeight).toBe(geo.rowCount);
       // The expanded body is a real area, not a squeezed sliver.
       expect(geo.bodyHeight, `body height at ${width}`).toBeGreaterThan(120);
+      // Natural height: the body renders all of its content and never scrolls
+      // itself — the outer chat scroller is the only scroll container.
+      expect(geo.bodyScrollOverflow, `body must not scroll itself at ${width}`).toBeLessThanOrEqual(1);
       expect(geo.cardHeight).toBeGreaterThan(geo.bodyHeight);
       // The history overflows the scroller instead, and the composer stays put.
       expect(geo.scrollOverflow).toBeGreaterThan(0);
