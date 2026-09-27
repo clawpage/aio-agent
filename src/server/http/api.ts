@@ -1340,9 +1340,14 @@ export function createApiRouter(context: AppContext): Router {
     "/browser/viewer/release",
     requireKind("primary"),
     requireSession,
-    asyncHandler(async (req, res) => {
+    asyncHandler(async (req, res, ctx) => {
       const id = typeof req.body?.id === "string" ? req.body.id.trim() : "";
-      if (id) context.browser.releaseViewer(id);
+      // The generation is optional for backward compatibility, but when present a
+      // late release from an old incarnation can no longer drop a newer panel.
+      const generation = Number.isFinite(Number(req.body?.generation))
+        ? Math.trunc(Number(req.body.generation))
+        : undefined;
+      if (id) context.browser.releaseViewer(id, generation, ctx.session!.id);
       res.json({ ok: true, status: browserStatusPayload(context.browser.status()) });
     }),
   );
@@ -1353,10 +1358,16 @@ export function createApiRouter(context: AppContext): Router {
     requireKind("primary"),
     requireSession,
     asyncHandler(async (req, res) => {
-      const raw = typeof req.body?.note === "string" ? req.body.note.trim() : "";
-      const note = (raw || "手动保留").slice(0, 120);
+      // `ui: true` (or no note at all) is the browser panel's own keep-awake
+      // switch: it is identified by a fixed note, idempotent, and rebuildable
+      // from `status().pins`, so a reload can always release it. A caller that
+      // passes its own note (a script, an operator) keeps today's behaviour.
       const ttlMs = Number(req.body?.ttlMs);
-      const pin = context.browser.pin(note, Number.isFinite(ttlMs) && ttlMs > 0 ? Math.trunc(ttlMs) : undefined);
+      const ttl = Number.isFinite(ttlMs) && ttlMs > 0 ? Math.trunc(ttlMs) : undefined;
+      const raw = typeof req.body?.note === "string" ? req.body.note.trim() : "";
+      const pin = req.body?.ui === true
+        ? context.browser.pinUiKeepAlive()
+        : context.browser.pin((raw || "手动保留").slice(0, 120), ttl);
       res.json({
         ok: true,
         pin: { id: pin.id, note: pin.note, expiresAt: Number.isFinite(pin.expiresAt) ? pin.expiresAt : null },
@@ -1372,6 +1383,9 @@ export function createApiRouter(context: AppContext): Router {
     asyncHandler(async (req, res) => {
       const id = typeof req.body?.id === "string" ? req.body.id.trim() : "";
       if (id) context.browser.unpin(id);
+      // A panel that lost its pin id (reload, second window) releases by the fixed
+      // UI note instead; a note-carrying request never touches other pins.
+      if (req.body?.ui === true) context.browser.unpinUiKeepAlive();
       res.json({ ok: true, status: browserStatusPayload(context.browser.status()) });
     }),
   );

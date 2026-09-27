@@ -864,7 +864,21 @@ export class AgentManager {
       // is still starting, waiting on an approval, or being cancelled. The release
       // runs in the turn's own `finally`, so a thrown error, an interrupt or a
       // connection loss cannot leak the hold.
-      const releaseBrowser = this.#browser ? this.#browser.reserveTurn() : () => {};
+      let releaseBrowser: () => void;
+      try {
+        releaseBrowser = this.#browser ? this.#browser.reserveTurn() : () => {};
+      } catch (err) {
+        // A reservation that throws (e.g. the lifecycle was shut down) must not
+        // strand the conversation slot: undo it synchronously and report the turn.
+        const message = err instanceof Error ? err.message : String(err);
+        this.#activeTurns.delete(turn.conversation_id);
+        this.#persistActiveState();
+        this.#failTurn(turn, message);
+        this.#db
+          .prepare("UPDATE conversations SET status = 'idle', updated_at = ? WHERE id = ?")
+          .run(Date.now(), turn.conversation_id);
+        continue;
+      }
       void this.#runTurn(turn, ctx)
         .catch((err) => {
           const message = err instanceof Error ? err.message : String(err);
@@ -912,10 +926,13 @@ export class AgentManager {
 
     // The turn holds a browser lease already (reserved synchronously in #pump).
     // Wait for a usable browser before executing: if Chromium was released for
-    // idleness, this rebuilds it from the snapshot first. A failure is reported
-    // on the turn and the turn still runs - a text-only task must not be failed by
-    // a browser it never needed, and any browser tool will surface its own honest
-    // error. We never claim the browser is usable when it is not.
+    // idleness, this rebuilds it from the snapshot first.
+    //
+    // A ready() failure must NOT be papered over by starting the Codex turn: the
+    // sandbox's own MCP/CLI browser tools reach Chromium directly and bypass this
+    // proxy, so a turn that ran anyway could drive a browser we never confirmed.
+    // The honest outcome is a failed turn with a fixed, secret-free message; the
+    // slot and lease are released by #pump's `finally`.
     if (this.#browser) {
       try {
         await this.#browser.ready();
@@ -923,7 +940,17 @@ export class AgentManager {
         const message = err instanceof Error ? err.message : String(err);
         this.#log.warn("browser unavailable at turn start", { error: message, turnId: turn.id });
         this.#appendEvent(conversation.id, turn.id, "turn.browser_unavailable", { turnId: turn.id, message });
+        throw new Error(message);
       }
+    }
+
+    // Honour a stop that arrived while the browser was being rebuilt *before*
+    // dispatching: starting a side-effecting Codex turn only to interrupt it
+    // immediately is exactly the sequence the review flagged.
+    if (this.#turnCancelled(turn.id)) {
+      this.#db.prepare("UPDATE turns SET status = 'interrupted', completed_at = ? WHERE id = ?").run(Date.now(), turn.id);
+      this.#appendEvent(conversation.id, turn.id, "turn.finished", { turnId: turn.id, status: "interrupted" });
+      return;
     }
 
     // Prefer the model frozen on the turn at submit time. A turn queued before
@@ -1056,6 +1083,14 @@ export class AgentManager {
     } else {
       this.#failTurn(turn, `Codex 轮次结束状态：${status}`);
     }
+  }
+
+  /** True when a stop was requested for this turn before it was dispatched. */
+  #turnCancelled(turnId: string): boolean {
+    const row = this.#db.prepare("SELECT cancel_requested FROM turns WHERE id = ?").get(turnId) as unknown as
+      | { cancel_requested: number }
+      | undefined;
+    return Boolean(row?.cancel_requested);
   }
 
   /**

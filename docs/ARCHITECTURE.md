@@ -141,12 +141,11 @@ helper 内、紧挨着信号发生。
   终端、文件、code-server、Jupyter 与普通静态资源**不**保护浏览器。`/api/browser/status`
   是只读轮询。
 - **任务保护**：`AgentManager` 在 turn 启动前同步 `reserveTurn()`，在 `finally` 归还，覆盖启动、
-  异常、停止与审批等待；`await ready()` 在 `turn.started` 之后执行，恢复失败只记录
-  `turn.browser_unavailable` 事件而**不**让纯文本任务失败。沙箱内 MCP/CLI 绕过控制面，因此第一版
+  异常、停止与审批等待；`await ready()` 在 `turn.started` 之后执行，恢复失败记录
+  `turn.browser_unavailable` 并终止该轮，避免绕过代理的内部浏览器工具使用未恢复的实例。沙箱内 MCP/CLI 绕过控制面，因此第一版
   保守保护**整轮**而不是精确识别浏览器工具的那几秒。
-- **快照边界**：保存标签顺序/URL/选中页/滚动/`sessionStorage`；cookies/localStorage/IndexedDB
-  仍由既有 profile 卷承载。恢复是**重建页面**而非保留 JS 堆，先注入按 origin 限定的
-  `sessionStorage` 初始化脚本再导航，最后让 AIO soft 重连并激活正确标签。不支持/含未提交输入/
+- **快照边界**：保存标签顺序/URL/选中页/滚动/`sessionStorage`，以及 cookies 和当前标签站点的 localStorage/IndexedDB；完整存储导出失败则不停止。恢复是**重建页面**而非保留 JS 堆，先注入按 origin 限定的
+  `sessionStorage` 初始化脚本再导航，在创建标签前让 AIO soft 重连，避免重连后的 CDP 枚举打乱索引；最后核对顺序并激活正确标签。不支持/含未提交输入/
   正在下载的页面会**保守拒绝**回收并给出原因；快照失败**绝不**停止浏览器，恢复失败保留快照不报成功。
   归属不明的进程（本沙箱的 Chromium 会把自己的命令行压成一个 token，root 也读不到 `/proc/<pid>/exe`）
   报 `browserAttribution: "unknown"` 且 `browserRunning: null`，**绝不当成“没有浏览器”**去另起一个；
@@ -188,3 +187,5 @@ helper 内、紧挨着信号发生。
 
 SQLite（`var/personal-agent.sqlite`，WAL）保存 owner、会话、对话、轮次、事件、审批与票据。
 浏览器重连、控制面重启、容器重启都不会丢历史；被中断的轮次带明确状态而不是静默重试。
+
+存储工具使用锁定的 Playwright 1.63.0。其公开 `setStorageState` 没有超时参数，因此受管 helper 使用同版本 channel 的 timeout，使库内部的 finally 在 CDP 断开前关闭临时页。升级版本须重新验证真实超时清理、启动时存储及标签顺序。受管可执行工具目录及其祖先必须由 root 控制；持久快照和可重建工具分别存放。

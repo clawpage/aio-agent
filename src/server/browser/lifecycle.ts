@@ -20,6 +20,7 @@
  * extends the idle deadline, so a status poll cannot keep the browser alive.
  */
 
+import { STORAGE_SNAPSHOT_SCHEMAS } from "./types.js";
 import type {
   BrowserLifecycleState,
   BrowserLifecycleStatus,
@@ -66,6 +67,30 @@ export interface RuntimeStatus {
    */
   pendingBrowserPid?: number | null;
   pendingBrowserStarttime?: number | null;
+  /**
+   * Schema of the snapshot on disk (null when there is none). A snapshot written
+   * before the storage capture existed can never authorise a release.
+   */
+  snapshotSchema?: number | null;
+  /**
+   * True only when the snapshot carries a complete cookies/localStorage/IndexedDB
+   * capture. A snapshot without it is a lossy snapshot: releasing on it would
+   * log the user out, so the core refuses to sleep until a fresh one is taken.
+   */
+  snapshotHasStorage?: boolean;
+  /** Content-free storage counts, for the UI (never cookies/localStorage values). */
+  storageCounts?: {
+    cookies: number;
+    origins: number;
+    localStorageEntries: number;
+    indexedDbDatabases: number;
+  } | null;
+  /**
+   * True while *another* process holds the cross-process transition lock (a
+   * previous control plane that is still stopping/restoring). A read-only probe:
+   * it never waits and never takes the lock.
+   */
+  transitionBusy?: boolean;
 }
 
 export interface SnapshotOutcome {
@@ -79,11 +104,30 @@ export interface SnapshotOutcome {
   message?: string | null;
   /** False when the runtime could not confirm the real tab order. */
   orderVerified?: boolean;
+  /**
+   * Content-free storage counts of the snapshot that was just written. A capture
+   * that could not export cookies/localStorage/IndexedDB fails outright instead
+   * of reporting zero counts, so a successful snapshot always has these.
+   */
+  storageCounts?: {
+    cookies: number;
+    origins: number;
+    localStorageEntries: number;
+    indexedDbDatabases: number;
+  } | null;
+  /** Stable machine-readable refusal code (e.g. `snapshot_storage_missing`). */
+  reason?: string | null;
 }
 
 export interface StopOutcome {
   ok: boolean;
   message?: string | null;
+  /**
+   * Stable refusal code from the runtime (e.g. `snapshot_storage_missing`). A
+   * refusal is not a failure: the browser is still running and untouched, so the
+   * core reports it as blocked rather than as an error.
+   */
+  reason?: string | null;
 }
 
 export interface WakeOutcome {
@@ -200,6 +244,14 @@ export interface BrowserLifecycleOptions {
   wakeTimeoutMs?: number;
   /** Stable id generator, injectable so tests get deterministic lease ids. */
   newId?: () => string;
+  /**
+   * Budget for the one-shot read-only reconcile barrier that runs before the
+   * first real browser use. It retries only while another process is finishing a
+   * transition; it never wakes the browser and never blocks `status()`.
+   */
+  reconcileTimeoutMs?: number;
+  /** Delay between reconcile retries while a transition is still in flight. */
+  reconcileRetryMs?: number;
 }
 
 const DEFAULTS = {
@@ -210,6 +262,8 @@ const DEFAULTS = {
   snapshotTimeoutMs: 45_000,
   stopTimeoutMs: 30_000,
   wakeTimeoutMs: 90_000,
+  reconcileTimeoutMs: 15_000,
+  reconcileRetryMs: 500,
 };
 
 interface LeaseRecord {
@@ -236,6 +290,8 @@ export class BrowserLifecycle {
   #snapshotTimeoutMs: number;
   #stopTimeoutMs: number;
   #wakeTimeoutMs: number;
+  #reconcileTimeoutMs: number;
+  #reconcileRetryMs: number;
 
   #state: BrowserLifecycleState;
   #epoch = 0;
@@ -264,8 +320,21 @@ export class BrowserLifecycle {
 
   #sleepPromise: Promise<SleepOutcome> | null = null;
   #wakePromise: Promise<void> | null = null;
+  /**
+   * One-shot read-only reconcile that every real browser use awaits first. It
+   * exists because a freshly constructed lifecycle starts out trusting its own
+   * optimistic `awake`/`idle` state, while the container may actually hold a
+   * *sleeping* browser or a browser a previous control plane still owes a restore
+   * for. Without it the first `ready()` after a restart would hand out a browser
+   * that has to be rebuilt. Coalesced: concurrent callers share one probe.
+   */
+  #reconciled: Promise<void> | null = null;
 
   #snapshotAt: number | null = null;
+  #snapshotSchema: number | null = null;
+  #snapshotHasStorage = false;
+  #storageCounts: NonNullable<RuntimeStatus["storageCounts"]> | null = null;
+  #transitionBusy = false;
   #warnings: SnapshotWarning[] = [];
   #unrestoredTabCount: number | null = null;
 
@@ -308,6 +377,8 @@ export class BrowserLifecycle {
     this.#snapshotTimeoutMs = opts.snapshotTimeoutMs ?? DEFAULTS.snapshotTimeoutMs;
     this.#stopTimeoutMs = opts.stopTimeoutMs ?? DEFAULTS.stopTimeoutMs;
     this.#wakeTimeoutMs = opts.wakeTimeoutMs ?? DEFAULTS.wakeTimeoutMs;
+    this.#reconcileTimeoutMs = Math.max(0, opts.reconcileTimeoutMs ?? DEFAULTS.reconcileTimeoutMs);
+    this.#reconcileRetryMs = Math.max(1, opts.reconcileRetryMs ?? DEFAULTS.reconcileRetryMs);
     this.#nextId = opts.newId ?? (() => `lease-${++this.#seq}`);
     // An idle browser with nothing holding it: arm the countdown immediately so a
     // freshly started control plane releases a browser nobody is using.
@@ -342,6 +413,10 @@ status(): BrowserLifecycleStatus {
       unrestoredTabCount: this.#unrestoredTabCount,
       browserRunning: this.#browserRunning,
       probedAt: this.#probedAt,
+      snapshotSchema: this.#snapshotSchema,
+      snapshotHasStorage: this.#snapshotHasStorage,
+      storageCounts: this.#storageCounts,
+      transitionBusy: this.#transitionBusy,
     };
   }
 
@@ -368,6 +443,7 @@ status(): BrowserLifecycleStatus {
       }
       this.#probedAt = this.#clock.now();
       this.#browserRunning = null;
+      this.#reconciled = null;
       return this.status();
     }
     if (this.#epoch !== epochAtStart) {
@@ -377,7 +453,10 @@ status(): BrowserLifecycleStatus {
     }
     this.#probedAt = this.#clock.now();
     this.#browserRunning = res.ok ? res.browserRunning : null;
-    if (!res.ok) return this.status();
+    if (!res.ok) {
+      this.#reconciled = null;
+      return this.status();
+    }
     // Never reconcile underneath an in-flight transition: the cycle itself owns
     // the state until it settles.
     if (this.#sleepPromise || this.#wakePromise || this.#disposed) return this.status();
@@ -386,6 +465,12 @@ status(): BrowserLifecycleStatus {
     // existing on disk does not mean this browser was ever released, so it must
     // never be converted into a pending restore here.
     const pending = res.restorePending === true;
+    this.#transitionBusy = res.transitionBusy === true;
+    if (this.#transitionBusy) this.#reconciled = null;
+    if (typeof res.snapshotAt === "number") this.#snapshotAt = res.snapshotAt;
+    this.#snapshotSchema = typeof res.snapshotSchema === "number" ? res.snapshotSchema : null;
+    this.#snapshotHasStorage = res.snapshotHasStorage === true;
+    this.#storageCounts = res.storageCounts ?? null;
     if (res.browserRunning && pending) {
       if (!this.#pendingRestore) {
         this.#pendingRestore = true;
@@ -405,7 +490,13 @@ status(): BrowserLifecycleStatus {
     }
     if (res.browserRunning === null || res.browserAttribution === "unknown") {
       // Ownership unknown: leave the physical flags exactly as they are. Adopting
-      // `asleep` here would let the next ready() start a second Chromium.
+      // `asleep` here would let the next ready() start a second Chromium, and
+      // adopting "usable" would hand out a browser we cannot account for.
+      this.#browserRunning = null;
+      this.#reconciled = null;
+      // A pending restore we could not rule out stays owed: the next ready() must
+      // still reconcile and restore rather than treat the browser as usable.
+      if (this.#asleep) this.#pendingRestore = true;
       return this.status();
     }
     if (!res.browserRunning && !this.#asleep) {
@@ -419,6 +510,10 @@ status(): BrowserLifecycleStatus {
       this.#setState("asleep");
       this.#emit("reconciled", "检测到浏览器已停止，已同步为休眠状态");
     } else if (res.browserRunning && this.#asleep) {
+      // The runtime is the only authority on whether a restore is owed. A
+      // snapshot file merely existing - e.g. a capture that was followed by a
+      // lease cancelling the stop - must never be turned into a pending restore
+      // here, or the next caller would rebuild over live pages.
       if (pending) {
         // Chromium is up and the runtime confirms it still owes the restore of the
         // snapshot we released it for: the next caller must restore before use.
@@ -451,6 +546,145 @@ status(): BrowserLifecycleStatus {
     }
     if (typeof res.snapshotAt === "number" && this.#snapshotAt === null) this.#snapshotAt = res.snapshotAt;
     return this.status();
+  }
+
+  /**
+   * One-shot read-only reconcile, awaited by every real browser use.
+   *
+   * A delivered browser is only handed over once a probe has *confirmed* three
+   * things: a running Chromium, exact ownership attribution, and no restore still
+   * owed by another process (including a previous control plane that is still in
+   * the middle of a stop/restore - the cross-process lock reports that as
+   * `transitionBusy`, and this waits for it to clear within a bounded budget).
+   *
+   * Coalesced: concurrent callers share one probe. A failure is remembered and
+   * re-thrown on every later `ready()` until a probe succeeds, so an inconclusive
+   * first look can never be mistaken for "the browser is fine". `status()` never
+   * calls this, so a read-only poll neither reconciles nor wakes anything.
+   */
+  #reconcile(): Promise<void> {
+    if (this.#reconciled) return this.#reconciled;
+    const promise = this.#runReconcile().catch((err) => {
+      // A failed barrier must not be cached as done: drop the memo so the next
+      // ready() tries again, and keep a stable, secret-free code surfaced.
+      if (this.#reconciled === promise) this.#reconciled = null;
+      throw err;
+    });
+    this.#reconciled = promise;
+    return promise;
+  }
+
+  async #runReconcile(): Promise<void> {
+    const deadline = this.#clock.now() + this.#reconcileTimeoutMs;
+    for (;;) {
+      // Never probe underneath an in-flight transition this process owns: the
+      // cycle re-checks ownership itself and will settle the state.
+      if (this.#sleepPromise || this.#wakePromise) {
+        await (this.#sleepPromise ?? this.#wakePromise)?.catch(() => undefined);
+        continue;
+      }
+      const epochAtStart = this.#epoch;
+      let res: RuntimeStatus;
+      try {
+        res = await this.#runtime.status({ timeoutMs: this.#stopTimeoutMs });
+      } catch (err) {
+        this.#log.warn?.("browser reconcile probe failed", { detail: sanitizeDetail(err) });
+        throw this.#reconcileError("reconcile_failed", err);
+      }
+      if (this.#epoch !== epochAtStart) {
+        // A transition landed while we were probing; re-probe against the newer
+        // physical world instead of trusting a stale answer.
+        continue;
+      }
+      this.#probedAt = this.#clock.now();
+      if (!res.ok) {
+        this.#browserRunning = null;
+        throw this.#reconcileError("reconcile_failed", res.message);
+      }
+      this.#adoptRuntimeStatus(res);
+      // Another process is still stopping/restoring. Wait for it to clear, but
+      // only within the bounded budget - a lock we cannot outlast fails closed.
+      if (res.transitionBusy === true) {
+        if (this.#clock.now() >= deadline) {
+          throw this.#reconcileError(
+            "reconcile_failed",
+            "另一个进程仍在停止/恢复浏览器，等待超时",
+          );
+        }
+        await this.#sleep(this.#reconcileRetryMs);
+        continue;
+      }
+      // Ownership must be confirmed. `null`/`unknown` is never "absent": passing
+      // it would let the next caller start a second Chromium.
+      if (res.browserRunning === null || res.browserAttribution === "unknown") {
+        this.#browserRunning = null;
+        throw this.#reconcileError("reconcile_failed", "无法确认浏览器归属");
+      }
+      // A successful probe means the transient reconcile failure is over: clear it
+      // so the status stops reporting a stale error.
+      if (this.#lastErrorCode === "reconcile_failed") this.#clearError();
+      if (res.browserRunning === false) {
+        // Proven gone. The next step (ensureAwake) rebuilds it from the snapshot.
+        this.#asleep = true;
+        this.#pendingRestore = false;
+        this.#forgetPendingIdentity();
+        return;
+      }
+      // Running and owned. A restore the runtime still owes makes the browser
+      // unusable until ready() runs (or joins) it.
+      if (res.restorePending === true) {
+        this.#pendingRestore = true;
+        this.#asleep = false;
+        this.#rememberPendingIdentity(res);
+        return;
+      }
+      // The barrier may only *raise* the asleep/pending flags, never lower them:
+      //  - a locally-recorded `asleep` reflects a release this incarnation really
+      //    performed, and a runtime that still claims a running browser is either
+      //    stale or looking at a process we never accounted for - the next step
+      //    (a real wake/restore) settles it;
+      //  - a locally-recorded `pendingRestore` reflects work this incarnation owes;
+      //    a probe cannot prove the tabs were rebuilt, so only a completed restore
+      //    (`#ensureAwake`) may clear it.
+      // Adopting the browser here would hand out a process we refused to trust.
+      if (this.#asleep || this.#pendingRestore) return;
+      // A failed sleep left the same browser running: the browser is genuinely
+      // usable, so leave a failed-transition state and re-arm the countdown.
+      if (this.#state === "error" || this.#state === "idle") {
+        if (this.#state === "error") this.#clearError();
+        this.#resumeUsable();
+      }
+      return;
+    }
+  }
+
+  /**
+   * Adopt the read-only facts a probe returned. It never *derives* a pending
+   * restore from a snapshot file: the runtime is the only authority on whether a
+   * restore is still owed, so a snapshot merely existing never triggers a rebuild.
+   */
+  #adoptRuntimeStatus(res: RuntimeStatus): void {
+    this.#browserRunning = res.browserRunning;
+    this.#transitionBusy = res.transitionBusy === true;
+    if (typeof res.snapshotAt === "number") this.#snapshotAt = res.snapshotAt;
+    this.#snapshotSchema = typeof res.snapshotSchema === "number" ? res.snapshotSchema : null;
+    this.#snapshotHasStorage = res.snapshotHasStorage === true;
+    this.#storageCounts = res.storageCounts ?? null;
+    if (typeof res.restoredSnapshotAt === "number") this.#restoredSnapshotAt = res.restoredSnapshotAt;
+
+  }
+
+  #reconcileError(code: LifecycleErrorCode, raw?: unknown): Error {
+    const { message } = this.#fail(code, raw);
+    this.#lastErrorCode = code;
+    return new Error(message);
+  }
+
+  /** Clock-based sleep so a fake clock keeps tests deterministic. */
+  #sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => {
+      this.#clock.setTimeout(resolve, ms);
+    });
   }
 
   /** Remember which browser process the owed restore belongs to. */
@@ -511,37 +745,66 @@ status(): BrowserLifecycleStatus {
   touchViewer(id: string, sessionId: string, generation = 0): ViewerLease | null {
     this.#assertUsable();
     const now = this.#clock.now();
-    const live = this.#viewers.get(id);
+    const key = JSON.stringify([sessionId, id]);
+    const live = this.#viewers.get(key);
     if (live) {
       if (generation < live.generation) {
         this.#emit("viewer.touched", "stale viewer heartbeat ignored");
         return null;
       }
       const next: ViewerLease = { id, sessionId, seenAt: now, generation };
-      this.#viewers.set(id, next);
+      this.#viewers.set(key, next);
       this.#emit("viewer.touched", generation > live.generation ? "viewer rejoined" : "viewer heartbeat");
       this.#armExpiry();
       return next;
     }
-    const tombstone = this.#viewerTombstones.get(id);
+    const tombstone = this.#viewerTombstones.get(key);
     if (tombstone && generation <= tombstone.generation) {
       this.#emit("viewer.touched", "heartbeat after release ignored");
       return null;
     }
-    this.#viewerTombstones.delete(id);
+    this.#viewerTombstones.delete(key);
     const created: ViewerLease = { id, sessionId, seenAt: now, generation };
-    this.#viewers.set(id, created);
+    this.#viewers.set(key, created);
     this.#onHolderAdded();
     this.#emit("viewer.touched", "viewer joined");
     this.#armExpiry();
     return created;
   }
 
-  releaseViewer(id: string): void {
-    const viewer = this.#viewers.get(id);
-    if (!viewer) return;
-    this.#viewers.delete(id);
-    this.#viewerTombstones.set(id, { generation: viewer.generation, at: this.#clock.now() });
+  /**
+   * Drop a viewer lease. When `generation` is supplied it is the incarnation the
+   * caller believes it held: a release that arrives late (after the panel
+   * remounted and claimed a newer generation) must not drop the newer lease, and
+   * a release for an incarnation the server no longer tracks is still recorded as
+   * a tombstone so a late heartbeat cannot resurrect it.
+   */
+  releaseViewer(id: string, generation?: number, sessionId?: string): void {
+    // Omitted session is reserved for trusted in-process cleanup. HTTP always supplies it.
+    const owner = sessionId ?? [...this.#viewers.values()].find(v => v.id === id)?.sessionId;
+    if (!owner) return;
+    const key = JSON.stringify([owner, id]);
+    const viewer = this.#viewers.get(key);
+    if (!viewer) {
+      // Nothing is held. Record a tombstone for the released generation (when
+      // known) so a heartbeat that was already on the wire is rejected instead of
+      // rebuilding the lease the panel just gave up.
+      if (typeof generation === "number" && generation > 0) {
+        const existing = this.#viewerTombstones.get(key);
+        if (!existing || generation > existing.generation) {
+          this.#viewerTombstones.set(key, { generation, at: this.#clock.now() });
+        }
+      }
+      return;
+    }
+    if (typeof generation === "number" && generation < viewer.generation) {
+      // A late release from an already-superseded incarnation: ignore it and keep
+      // the newer panel's lease intact.
+      this.#emit("lease.released", "stale viewer release ignored");
+      return;
+    }
+    this.#viewers.delete(key);
+    this.#viewerTombstones.set(key, { generation: Math.max(viewer.generation, generation ?? 0), at: this.#clock.now() });
     this.#emit("lease.released", "viewer released");
     this.#onHolderRemoved();
     this.#armExpiry();
@@ -594,6 +857,44 @@ status(): BrowserLifecycleStatus {
     this.#armExpiry();
   }
 
+  /**
+   * Add a hold that is *identified* by its note instead of by a caller-held id.
+   *
+   * A browser tab or a page reload destroys whatever React state remembered the
+   * pin id, which used to leave a permanent pin the UI could no longer release.
+   * Reusing the existing pin with the same note makes the call idempotent, so a
+   * reloaded or second window can re-derive the same pin from the status payload
+   * and release exactly that one.
+   */
+  pinIdentified(note: string, ttlMs?: number): PinLease {
+    this.#assertUsable();
+    const now = this.#clock.now();
+    for (const existing of this.#pins.values()) {
+      if (existing.note === note && existing.expiresAt > now) {
+        if (ttlMs && ttlMs > 0) existing.expiresAt = now + ttlMs;
+        this.#armExpiry();
+        return existing;
+      }
+    }
+    return this.pin(note, ttlMs);
+  }
+
+  /** Release the pins with exactly this note. Never touches a differently-noted pin. */
+  unpinNote(note: string): number {
+    let removed = 0;
+    for (const [id, pin] of [...this.#pins]) {
+      if (pin.note !== note) continue;
+      this.#pins.delete(id);
+      removed += 1;
+    }
+    if (removed > 0) {
+      this.#emit("pin.removed", "browser pin removed");
+      this.#onHolderRemoved();
+      this.#armExpiry();
+    }
+    return removed;
+  }
+
   /** Currently held pins, expired ones excluded. */
   pins(): PinLease[] {
     const now = this.#clock.now();
@@ -615,13 +916,21 @@ status(): BrowserLifecycleStatus {
     // being torn down (and never races a half-finished stop).
     const sleepInFlight = this.#sleepPromise;
     if (sleepInFlight) await sleepInFlight.catch(() => undefined);
+    // Read-only reconcile barrier. A freshly constructed lifecycle starts out
+    // trusting its own optimistic state, but the container may already hold a
+    // sleeping browser - or a browser a previous control plane still owes a
+    // restore for. Until one probe confirms the real ownership, no caller is
+    // handed a browser. An inconclusive probe fails closed instead of passing.
+    await this.#reconcile();
     if (this.#asleep || this.#pendingRestore) {
       await this.#ensureAwake();
       return;
     }
-    // A failed sleep/stop leaves the browser running and therefore usable; the
-    // error stays visible as `lastError` but must not make it look unusable.
-    if (this.#state === "error") this.#resumeUsable();
+    // The reconcile above is the only thing allowed to restore a usable state:
+    // an unconfirmed browser never becomes usable here.
+    if (this.#state === "error" && this.#browserRunning === true && !this.#pendingRestore) {
+      this.#resumeUsable();
+    }
   }
 
   /**
@@ -633,8 +942,11 @@ status(): BrowserLifecycleStatus {
     this.#assertUsable();
     const sleepInFlight = this.#sleepPromise;
     if (sleepInFlight) await sleepInFlight.catch(() => undefined);
+    await this.#reconcile();
     if (!this.#asleep && !this.#pendingRestore) {
-      if (this.#state === "error") this.#resumeUsable();
+      if (this.#state === "error" && this.#browserRunning === true && !this.#pendingRestore) {
+        this.#resumeUsable();
+      }
       return;
     }
     await this.#ensureAwake();
@@ -776,6 +1088,8 @@ status(): BrowserLifecycleStatus {
     | { kind: "ready"; pid: number; starttime: number | null }
     | { kind: "already-gone" }
     | { kind: "restore-owed" }
+    | { kind: "transition-busy" }
+    | { kind: "storage-missing" }
     | { kind: "unknown" }
   > {
     let res: RuntimeStatus;
@@ -787,7 +1101,11 @@ status(): BrowserLifecycleStatus {
     }
     if (!res.ok) return { kind: "unknown" };
     this.#probedAt = this.#clock.now();
-    this.#browserRunning = res.browserRunning;
+    this.#adoptRuntimeStatus(res);
+    // Another process (typically a previous control plane) owns a stop/restore
+    // right now. Signalling underneath it would fight over the same browser, so
+    // this cycle stands down; the idle countdown re-arms and retries later.
+    if (res.transitionBusy === true) return { kind: "transition-busy" };
     if (res.browserRunning === null || res.browserAttribution === "unknown") {
       // Ownership could not be proven. That is not "no browser": signalling now
       // could hit a process we never attributed, so refuse.
@@ -800,6 +1118,13 @@ status(): BrowserLifecycleStatus {
     }
     if (res.restorePending === true) return { kind: "restore-owed" };
     if (typeof res.pid !== "number") return { kind: "unknown" };
+    // Dual gate: the core refuses to release on a snapshot the runtime itself
+    // reports as lossy. The helper enforces the same rule immediately before the
+    // signal, so a snapshot that lost its storage can never authorise a stop.
+    if (res.snapshotHasStorage !== true) return { kind: "storage-missing" };
+    if (typeof res.snapshotSchema === "number" && !STORAGE_SNAPSHOT_SCHEMAS.includes(res.snapshotSchema)) {
+      return { kind: "storage-missing" };
+    }
     return { pid: res.pid, starttime: typeof res.starttime === "number" ? res.starttime : null, kind: "ready" };
   }
 
@@ -975,6 +1300,11 @@ status(): BrowserLifecycleStatus {
         this.#asleep = false;
         this.#pendingRestore = false;
         this.#restoredSnapshotAt = this.#snapshotAt;
+        // A completed wake proves the browser is up; recording it keeps the
+        // status honest without another probe.
+        this.#browserRunning = true;
+        this.#probedAt = this.#clock.now();
+        this.#forgetPendingIdentity();
         this.#epoch += 1;
         this.#clearError();
         this.#setState("awake");
@@ -1041,13 +1371,20 @@ status(): BrowserLifecycleStatus {
     // partial snapshot, but a runtime that reported success while dropping pages
     // would silently lose them, so this is checked independently.
     const incomplete = (snap.skipped ?? 0) > 0;
-    if (!snap.ok || snap.blocked || incomplete) {
-      // A snapshot we cannot trust must never be followed by a stop.
+    // A successful snapshot must also carry the storage capture: the runtime fails
+    // outright without it, so a `ok` result that reports a lossy schema is treated
+    // as a refusal here too, before any stop is even considered.
+    const lossyStorage = snap.ok && !snap.blocked && snap.storageCounts == null;
+    if (!snap.ok || snap.blocked || incomplete || lossyStorage) {
+      // A snapshot we cannot trust must never be followed by a stop. The most
+      // specific reason wins so the UI can name the real problem.
       const code: LifecycleErrorCode = incomplete
         ? "snapshot_incomplete"
         : snap.blocked
           ? "snapshot_blocked"
-          : "snapshot_failed";
+          : lossyStorage
+            ? "snapshot_storage_missing"
+            : "snapshot_failed";
       const { message } = this.#fail(code, snap.message);
       this.#setState("error");
       this.#log.warn?.("browser snapshot failed; keeping the browser running", { error: message });
@@ -1059,6 +1396,8 @@ status(): BrowserLifecycleStatus {
     this.#snapshotAt = snap.savedAt ?? this.#clock.now();
     this.#warnings = snap.warnings ?? [];
     this.#unrestoredTabCount = snap.skipped ?? 0;
+    this.#snapshotHasStorage = snap.storageCounts != null;
+    this.#storageCounts = snap.storageCounts ?? null;
     this.#clearError();
 
     // A shutdown mid-snapshot must not start a stop: the cycle no longer owns
@@ -1096,9 +1435,18 @@ status(): BrowserLifecycleStatus {
       return { verdict: "asleep", message: null, warnings: this.#warnings, savedAt: this.#snapshotAt };
     }
     if (source.kind !== "ready") {
-      const code: LifecycleErrorCode = source.kind === "restore-owed" ? "restore_pending" : "stop_unattributed";
+      // Map the verdict to an honest, secret-free code. `transition-busy` and
+      // `storage-missing` are refusals, not failures: the browser is untouched.
+      const code: LifecycleErrorCode =
+        source.kind === "restore-owed"
+          ? "restore_pending"
+          : source.kind === "storage-missing"
+            ? "snapshot_storage_missing"
+            : source.kind === "transition-busy"
+              ? "restore_pending"
+              : "stop_unattributed";
       const { message } = this.#fail(code);
-      this.#log.warn?.("browser stop blocked: cannot attribute the running browser", { reason: source.kind });
+      this.#log.warn?.("browser stop blocked", { reason: source.kind });
       // Never keep a stale `snapshotting` label: the browser is still up and needs
       // to look usable-with-a-caveat, not mid-transition.
       if (source.kind === "restore-owed") {
@@ -1106,12 +1454,19 @@ status(): BrowserLifecycleStatus {
         this.#cancelIdle();
         this.#setState("awake");
       } else {
-        this.#setState("error");
+        // A refusal leaves the browser running and usable; only an unattributable
+        // browser is a real error. Everything retries on the idle countdown.
+        this.#setState(source.kind === "unknown" ? "error" : "awake");
         this.#scheduleRetry();
         this.#armExpiry();
       }
       this.#emit("sleep.blocked", message);
-      return { verdict: "blocked", message, warnings: this.#warnings, savedAt: this.#snapshotAt };
+      return {
+        verdict: source.kind === "unknown" ? "error" : "blocked",
+        message,
+        warnings: this.#warnings,
+        savedAt: this.#snapshotAt,
+      };
     }
     this.#stopSourcePid = source.pid;
     this.#stopSourceStarttime = source.starttime;
@@ -1121,6 +1476,17 @@ status(): BrowserLifecycleStatus {
       sourcePid: source.pid,
       sourceStarttime: source.starttime,
     });
+    if (!stopped.ok && stopped.reason === "snapshot_storage_missing") {
+      // The helper refuses to release on a snapshot it cannot vouch for. The
+      // browser was never signalled, so this is a refusal, not a failure: report
+      // it as blocked and leave the browser running.
+      const { message } = this.#fail("snapshot_storage_missing", stopped.message);
+      this.#setState("awake");
+      this.#scheduleRetry();
+      this.#armExpiry();
+      this.#emit("sleep.blocked", message);
+      return { verdict: "blocked", message, warnings: this.#warnings, savedAt: this.#snapshotAt };
+    }
     if (!stopped.ok) {
       // A failed stop does NOT prove the browser is still running: it may have
       // exited half-way. Re-probe before claiming anything, and when the probe is
@@ -1169,9 +1535,18 @@ status(): BrowserLifecycleStatus {
     return { verdict: "asleep", message: null, warnings: this.#warnings, savedAt: this.#snapshotAt };
   }
 
-  /** Return to a truthful usable state after a transition that left the browser running. */
+  /**
+   * Return to a truthful usable state after a transition that left the browser
+   * running. This is deliberately narrow: it is only called once a probe has
+   * *confirmed* the browser is running and owned and owes no restore, so it can
+   * never promote an unattributed or restore-owed browser to "usable".
+   */
   #resumeUsable(): void {
-    if (this.#hasHolders() || this.#pendingRestore) this.#setState("awake");
+    if (this.#pendingRestore) {
+      this.#setState("awake");
+      return;
+    }
+    if (this.#hasHolders()) this.#setState("awake");
     else this.#scheduleIdle();
   }
 
@@ -1198,6 +1573,8 @@ const ERROR_MESSAGES: Record<LifecycleErrorCode, string> = {
   snapshot_failed: "浏览器快照失败，已保留浏览器运行",
   snapshot_blocked: "页面状态无法安全保存，已放弃释放浏览器",
   snapshot_incomplete: "快照未覆盖全部标签，已放弃释放浏览器",
+  snapshot_storage_missing: "快照缺少 cookies/本地存储/IndexedDB，已放弃释放浏览器以免丢失登录状态",
+  reconcile_failed: "无法确认浏览器真实状态，已阻止使用浏览器",
   restore_pending: "存在尚未恢复到运行中浏览器的快照，暂不释放浏览器",
   stop_failed: "停止浏览器失败，正在核对真实状态",
   stop_unattributed: "无法确认正在运行的浏览器归属，已放弃释放浏览器",

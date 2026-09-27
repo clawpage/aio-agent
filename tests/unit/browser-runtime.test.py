@@ -356,13 +356,37 @@ def base_snapshot() -> dict[str, Any]:
     }
 
 
+def stoppable_snapshot() -> dict[str, Any]:
+    """A schema-2 snapshot that also carries the storage capture.
+
+    `stop_browser` refuses anything without it, so every test that wants to reach
+    the process-ownership checks must start from this shape.
+    """
+    snap = base_snapshot()
+    snap["storage"] = {
+        "schema": 1,
+        "capturedAt": 1,
+        "counts": {"cookies": 1, "origins": 1, "localStorageEntries": 1, "indexedDbDatabases": 0},
+        "state": {
+            "cookies": [{"name": "a", "value": "b", "domain": "example.com", "path": "/"}],
+            "origins": [{"origin": "https://example.com", "localStorage": [{"name": "k", "value": "v"}]}],
+        },
+    }
+    return snap
+
+
 @test
 def test_validate_snapshot_accepts_and_rejects() -> None:
     assert_true(rt.validate_snapshot(base_snapshot())[0], "合法快照应通过")
 
     bad_schema = base_snapshot()
-    bad_schema["schema"] = 2
+    bad_schema["schema"] = 99
     assert_false(rt.validate_snapshot(bad_schema)[0], "schema 不符必须拒绝")
+    # Schema 1 stays readable so the operator gets an honest "storage missing"
+    # refusal instead of "cannot read"; it is never released on.
+    legacy = base_snapshot()
+    legacy["schema"] = 1
+    assert_true(rt.validate_snapshot(legacy)[0], "schema 1 仍应可读（用于给出诚实拒绝）")
 
     missing_tabs = base_snapshot()
     del missing_tabs["tabs"]
@@ -387,6 +411,18 @@ def test_validate_snapshot_accepts_and_rejects() -> None:
     unknown_warning = base_snapshot()
     unknown_warning["warnings"] = [{"code": "made_up", "message": "x", "tabIndex": None}]
     assert_false(rt.validate_snapshot(unknown_warning)[0], "未知 warning code 必须拒绝")
+
+    good_storage = base_snapshot()
+    good_storage["storage"] = {"schema": 1, "state": {"cookies": [], "origins": []}}
+    assert_true(rt.validate_snapshot(good_storage)[0], "合法 storage 应通过")
+
+    bad_storage_schema = base_snapshot()
+    bad_storage_schema["storage"] = {"schema": 9, "state": {"cookies": [], "origins": []}}
+    assert_false(rt.validate_snapshot(bad_storage_schema)[0], "storage schema 不符必须拒绝")
+
+    bad_storage_state = base_snapshot()
+    bad_storage_state["storage"] = {"schema": 1, "state": {"cookies": []}}
+    assert_false(rt.validate_snapshot(bad_storage_state)[0], "storage 缺少 origins 必须拒绝")
 
 
 @test
@@ -872,7 +908,7 @@ def test_stop_signals_only_sigterm_and_removes_owned_pid_files() -> None:
     try:
         with tempfile.TemporaryDirectory() as tmp:
             path = os.path.join(tmp, "snapshot.json")
-            snapshot = base_snapshot()
+            snapshot = stoppable_snapshot()
             snapshot["source"]["browserPid"] = 555
             snapshot["source"]["browserStarttime"] = 9
             rt.write_snapshot(path, snapshot)
@@ -910,7 +946,7 @@ def test_stop_reports_failure_when_processes_survive() -> None:
     try:
         with tempfile.TemporaryDirectory() as tmp:
             path = os.path.join(tmp, "snapshot.json")
-            snapshot = base_snapshot()
+            snapshot = stoppable_snapshot()
             snapshot["source"]["browserPid"] = 555
             snapshot["source"]["browserStarttime"] = 9
             rt.write_snapshot(path, snapshot)
@@ -952,7 +988,7 @@ def test_stop_does_not_delete_pid_file_of_another_process() -> None:
     try:
         with tempfile.TemporaryDirectory() as tmp:
             path = os.path.join(tmp, "snapshot.json")
-            snapshot = base_snapshot()
+            snapshot = stoppable_snapshot()
             snapshot["source"]["browserPid"] = 555
             snapshot["source"]["browserStarttime"] = 9
             rt.write_snapshot(path, snapshot)
@@ -1595,6 +1631,228 @@ def test_dispatch_is_a_separate_entrypoint_from_main() -> None:
     assert_true("def main(" in source, "必须存在 main")
     assert_true("except Exception as exc" in source, "main 必须兜底异常")
 
+
+
+@test
+def test_blank_new_tab_aliases_are_normalised() -> None:
+    # Verified live: AIO says chrome://new-tab-page/ while CDP says chrome://newtab/
+    # for the same empty default tab. Without normalisation the pairing is
+    # unprovable and every release is blocked forever.
+    assert_eq(rt.normalize_blank_url("chrome://newtab/"), "about:blank", "CDP 别名应归一化")
+    assert_eq(rt.normalize_blank_url("chrome://new-tab-page/"), "about:blank", "AIO 别名应归一化")
+    assert_eq(rt.normalize_blank_url("about:blank"), "about:blank", "about:blank 保持不变")
+    # A real chrome:// page is NOT a blank alias and must keep blocking.
+    assert_eq(rt.normalize_blank_url("chrome://settings/"), "chrome://settings/", "其它 chrome:// 页不归一化")
+    assert_eq(rt.normalize_blank_url("https://example.com/"), "https://example.com/", "普通 URL 不归一化")
+
+
+@test
+def test_tab_plan_pairs_the_real_blank_alias_sample() -> None:
+    # The exact sample the parent acceptance run hit.
+    cdp_pages = [
+        {"id": "t1", "url": "http://127.0.0.1:8765/f.html?tab=one"},
+        {"id": "t2", "url": "chrome://newtab/"},
+    ]
+    aio_rows = [
+        {"index": 0, "url": "http://127.0.0.1:8765/f.html?tab=one", "title": "one", "is_active": False},
+        {"index": 1, "url": "chrome://new-tab-page/", "title": "New Tab", "is_active": True},
+    ]
+    plan, warnings, order_verified, blocked = rt.tab_plan(cdp_pages, aio_rows)
+    assert_eq(blocked, "", "默认新标签别名不应永久阻塞配对")
+    assert_true(order_verified, "顺序应被确认")
+    assert_eq(len(plan), 2, "两个标签都应进入计划")
+    assert_eq(plan[1]["url"], "about:blank", "别名应以 about:blank 恢复")
+    assert_true(plan[1]["active"], "选中状态应来自 AIO")
+
+
+@test
+def test_tab_plan_still_blocks_other_chrome_pages() -> None:
+    cdp_pages = [{"id": "t1", "url": "chrome://settings/"}]
+    aio_rows = [{"index": 0, "url": "chrome://settings/", "title": "Settings", "is_active": True}]
+    plan, _warnings, _verified, blocked = rt.tab_plan(cdp_pages, aio_rows)
+    # The plan pairs them (the URLs agree); it is `classify_url` that refuses the
+    # scheme, so the capture fails closed rather than the pairing.
+    assert_eq(blocked, "", "URL 一致的配对本身不阻塞")
+    assert_eq(len(plan), 1, "计划中仍有这一页")
+    assert_false(rt.classify_url("chrome://settings/")[0], "chrome://settings/ 不可恢复")
+    assert_true(rt.classify_url("about:blank")[0], "about:blank 可恢复")
+
+
+@test
+def test_storage_helpers_report_content_free_counts() -> None:
+    snap = stoppable_snapshot()
+    counts = rt.storage_counts(snap)
+    assert_eq(counts["cookies"], 1, "应统计 cookie 数量")
+    assert_eq(counts["origins"], 1, "应统计 origin 数量")
+    assert_eq(counts["localStorageEntries"], 1, "应统计 localStorage 条目数")
+    assert_true(rt.snapshot_has_storage(snap), "带 storage 的快照应被判为完整")
+    assert_false(rt.snapshot_has_storage(base_snapshot()), "缺少 storage 的快照不是完整快照")
+    del snap["storage"]["state"]
+    assert_false(rt.snapshot_has_storage(snap), "storage.state 缺失即不完整")
+
+
+@test
+def test_stop_refuses_a_snapshot_without_storage() -> None:
+    """The added storage gate: an old schema-1 snapshot must never authorise a stop."""
+    fake = FakeProc()
+    restore = with_fake_proc(fake)
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "snapshot.json")
+            legacy = base_snapshot()
+            legacy["schema"] = 1
+            legacy["source"]["browserPid"] = 555
+            legacy["source"]["browserStarttime"] = 9
+            rt.write_snapshot(path, legacy)
+            helper_pid = os.path.join(tmp, "h.pid")
+            browser_pid = os.path.join(tmp, "b.pid")
+            with open(helper_pid, "w", encoding="utf-8") as handle:
+                handle.write("4242\n")
+            with open(browser_pid, "w", encoding="utf-8") as handle:
+                handle.write("555\n")
+            fake.add(4242, ["/usr/bin/python3", "/opt/gem/browser-supervisor.py"], uid=0, starttime=1)
+            fake.add(555, ["/opt/browser/chrome", f"--user-data-dir={rt.DEFAULT_PROFILE_DIR}"], uid=0, ppid=4242, starttime=9)
+            result = rt.stop_browser(path, helper_pid_file=helper_pid, browser_pid_file=browser_pid, timeout_s=0.3)
+            assert_false(result["ok"], "旧 schema 缺少存储时必须拒绝停止")
+            assert_true("存储" in result["message"] or "拒绝停止" in result["message"], "应给出诚实原因")
+            assert_eq(result.get("reason"), "snapshot_storage_missing", "应给出稳定的拒绝码")
+    finally:
+        restore()
+
+
+@test
+def test_storage_state_export_and_import_use_the_helper(monkeypatch_note: str = "") -> None:
+    """The Python side must drive the vendored helper, never serialize storage itself."""
+    calls: list[list[str]] = []
+
+    class FakeCompleted:
+        returncode = 0
+        stdout = b'{"ok": true, "cookies": 2, "origins": 1, "localStorageEntries": 3, "indexedDbDatabases": 1}\n'
+        stderr = b""
+
+    import subprocess as _subprocess
+
+    saved_run = _subprocess.run
+    saved_which = rt.shutil.which
+
+    def fake_run(argv: list[str], **kwargs: Any) -> Any:
+        calls.append(list(argv))
+        # The helper is expected to have written its own output file.
+        out_index = argv.index("--out") + 1 if "--out" in argv else None
+        if out_index is not None:
+            with open(argv[out_index], "w", encoding="utf-8") as handle:
+                handle.write(json.dumps({"schema": 1, "capturedAt": 5, "state": {"cookies": [], "origins": []}}))
+        return FakeCompleted()
+
+    def fake_helper_dir(tmp: str) -> str:
+        with open(os.path.join(tmp, rt.STORAGE_HELPER_NAME), "w", encoding="utf-8") as handle:
+            handle.write("// stub")
+        os.makedirs(os.path.join(tmp, rt.STORAGE_VENDOR_NAME), exist_ok=True)
+        return tmp
+
+    with tempfile.TemporaryDirectory() as tmp:
+        helper_dir = fake_helper_dir(tmp)
+        saved_candidates = rt.NODE_CANDIDATES
+        _subprocess.run = fake_run  # type: ignore[assignment]
+        rt.NODE_CANDIDATES = ("/usr/bin/fake-node",)  # type: ignore[assignment]
+        saved_isfile = rt.os.path.isfile
+        saved_access = rt.os.access
+        rt.os.path.isfile = lambda p: True if p == "/usr/bin/fake-node" else saved_isfile(p)  # type: ignore[assignment]
+        rt.os.access = lambda p, m: True if p == "/usr/bin/fake-node" else saved_access(p, m)  # type: ignore[assignment]
+        try:
+            result = rt.export_storage_state(
+                ["https://example.com/x"], timeout=5, helper_dir=helper_dir, temp_dir=tmp
+            )
+        finally:
+            _subprocess.run = saved_run  # type: ignore[assignment]
+            rt.shutil.which = saved_which  # type: ignore[assignment]
+            rt.NODE_CANDIDATES = saved_candidates  # type: ignore[assignment]
+            rt.os.path.isfile = saved_isfile  # type: ignore[assignment]
+            rt.os.access = saved_access  # type: ignore[assignment]
+        assert_eq(calls[0][0], "/usr/bin/fake-node", "应使用解析出的 node")
+        assert_true(rt.STORAGE_HELPER_NAME in calls[0][1], "应调用受管的存储 helper")
+        assert_eq(calls[0][2], "export", "第一个子命令应是 export")
+        assert_eq(result["counts"]["cookies"], 2, "应回传内容无关的计数")
+        assert_true("state" in result, "应带回原始 state 供快照保存")
+        # The temporary export file must not be left behind.
+        leftovers = [n for n in os.listdir(tmp) if n.endswith(".storage.json")]
+        assert_eq(leftovers, [], "临时导出文件必须被清理")
+
+
+@test
+def test_storage_export_refuses_when_the_helper_is_missing() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        try:
+            rt.export_storage_state(["https://example.com"], timeout=2, helper_dir=tmp, temp_dir=tmp)
+        except rt.StorageError as exc:
+            assert_true("storage_helper_missing" in str(exc), "应给出稳定的缺失码")
+        else:
+            raise AssertionError("缺少 helper 时必须拒绝导出")
+
+
+# ---------------------------------------------------- storage completeness
+
+
+@test
+def test_storage_export_allows_an_empty_origin_set() -> None:
+    """A browser parked on about:blank still owns cookies and must be releasable."""
+    calls: list[list[str]] = []
+
+    class FakeCompleted:
+        returncode = 0
+        stdout = b'{"ok": true, "cookies": 1, "origins": 0, "localStorageEntries": 0, "indexedDbDatabases": 0}\n'
+        stderr = b""
+
+    import subprocess as _subprocess
+
+    saved_run = _subprocess.run
+
+    def fake_run(argv: list[str], **kwargs: Any) -> Any:
+        calls.append(list(argv))
+        if "--out" in argv:
+            with open(argv[argv.index("--out") + 1], "w", encoding="utf-8") as handle:
+                handle.write(json.dumps({"schema": 1, "capturedAt": 5, "state": {"cookies": [{"name": "a"}], "origins": []}}))
+        return FakeCompleted()
+
+    with tempfile.TemporaryDirectory() as tmp:
+        with open(os.path.join(tmp, rt.STORAGE_HELPER_NAME), "w", encoding="utf-8") as handle:
+            handle.write("// stub")
+        os.makedirs(os.path.join(tmp, rt.STORAGE_VENDOR_NAME), exist_ok=True)
+        saved_candidates = rt.NODE_CANDIDATES
+        saved_isfile = rt.os.path.isfile
+        saved_access = rt.os.access
+        _subprocess.run = fake_run  # type: ignore[assignment]
+        rt.NODE_CANDIDATES = ("/usr/bin/fake-node",)  # type: ignore[assignment]
+        rt.os.path.isfile = lambda p: True if p == "/usr/bin/fake-node" else saved_isfile(p)  # type: ignore[assignment]
+        rt.os.access = lambda p, m: True if p == "/usr/bin/fake-node" else saved_access(p, m)  # type: ignore[assignment]
+        try:
+            result = rt.export_storage_state(["about:blank"], timeout=5, helper_dir=tmp, temp_dir=tmp)
+        finally:
+            _subprocess.run = saved_run  # type: ignore[assignment]
+            rt.NODE_CANDIDATES = saved_candidates  # type: ignore[assignment]
+            rt.os.path.isfile = saved_isfile  # type: ignore[assignment]
+            rt.os.access = saved_access  # type: ignore[assignment]
+        # No --origin flag was passed: an empty origin set is a complete capture.
+        assert_false("--origin" in calls[0], "空 origin 集合不应传 --origin")
+        assert_eq(result["counts"]["cookies"], 1, "空 origin 仍应导出 cookies")
+
+
+@test
+def test_snapshot_has_storage_requires_the_capture_schema() -> None:
+    """A schema-1 (pre-storage) snapshot must never authorise a release."""
+    assert_false(rt.snapshot_has_storage({"schema": 2}), "只有 schema+state 才算完整")
+    assert_false(rt.snapshot_has_storage({"schema": 2, "storage": {"schema": 2, "state": {}}}), "storage schema 必须为 1")
+    assert_true(
+        rt.snapshot_has_storage({"schema": 2, "storage": {"schema": 1, "state": {"cookies": [], "origins": []}}}),
+        "合法的 storage 捕获应被接受",
+    )
+    # The stop gate refuses a storage-less snapshot with a stable, secret-free
+    # reason the control plane turns into an honest "cannot release" verdict.
+    source = open(os.path.abspath(rt.__file__), encoding="utf-8").read()
+    assert_true("snapshot_storage_missing" in source, "停止路径必须报告稳定的 storage 缺失码")
+
+
+# Node helper deadline and redaction are behavior-tested in browser-storage.test.ts.
 
 
 def main() -> int:

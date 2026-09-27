@@ -194,21 +194,21 @@ docker exec -i -u root personal-agent-sandbox python3 - status \
 - **上游 helper 的强杀**：向 `/opt/gem/browser-supervisor.py` 发 SIGTERM 后，它会在内部约 10 秒
   后强制结束其 Chrome（upstream 行为，不改镜像）。生产执行前应按下方受控脚本观察它确实退出。
 - **快照失败/未支持的页面**：不停止浏览器；拒绝原因会出现在 UI。恢复失败保留快照并可重试。
-- **快照文件**：持久卷内 0600 原子写入，含标签/URL/滚动/sessionStorage；URL 与 cookies 从不
+- **快照文件**：持久卷内 0600 原子写入，含标签/URL/滚动/sessionStorage、cookies 和当前站点的 localStorage/IndexedDB；URL 与存储内容从不
   进日志或 API。
 
 **受控真实验收（仅本服务所有者、确认当前无活动任务与观看者后执行）**
 
 ```bash
-cd /Users/mengxiao/workspace/projects/personal-agent.worktrees/browser-lifecycle
+cd /path/to/aio-agent
 # 0) 只读确认没有正在运行的任务/观看者，并记录当前 Chrome PID/starttime
 docker exec -i -u root personal-agent-sandbox python3 - status \
   < src/server/browser/scripts/browser-runtime.py
 # 1) 快照 -> 睡眠 -> 唤醒，逐步执行并观察真实 PID 变化与标签恢复
-#    snapshot:  docker exec ... python3 - snapshot --snapshot <snapshotPath>
-#    stop:      docker exec ... python3 - stop --snapshot <snapshotPath> \
+#    snapshot:  docker exec ... python3 /opt/aio-browser/browser-runtime.py snapshot --snapshot <snapshotPath>
+#    stop:      docker exec ... python3 /opt/aio-browser/browser-runtime.py stop --snapshot <snapshotPath> \
 #                 --source-pid <pid> --source-starttime <starttime>
-#    wake:      docker exec ... python3 - wake --snapshot <snapshotPath> --wait-ms 60000
+#    wake:      docker exec ... python3 /opt/aio-browser/browser-runtime.py wake --snapshot <snapshotPath> --wait-ms 60000
 # 2) 每一步后重新 status，核对 browserRunning/pid/starttime/restorePending
 # 3) 恢复后从控制台或 AIO MCP 触发一次真实浏览器工具，确认连到新浏览器
 ```

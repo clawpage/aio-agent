@@ -27,8 +27,13 @@ class RecordingGate implements BrowserGateLike {
   /** Held open so a test can observe the in-flight turn state. */
   readyGate: Promise<void> | null = null;
   readyError: string | null = null;
+  /** Set to reject the reserve itself, as a broken runtime would. */
+  reserveError: string | null = null;
+  /** A manually controlled ready() wait. */
+  #readyRelease: (() => void) | null = null;
 
   reserveTurn(): () => void {
+    if (this.reserveError) throw new Error(this.reserveError);
     this.events.push("reserve");
     let released = false;
     return () => {
@@ -42,6 +47,19 @@ class RecordingGate implements BrowserGateLike {
     this.events.push("ready");
     if (this.readyGate) await this.readyGate;
     if (this.readyError) throw new Error(this.readyError);
+  }
+
+  /** Block the next ready() call until releaseReady() is called. */
+  holdReady(): void {
+    this.readyGate = new Promise<void>((resolve) => {
+      this.#readyRelease = resolve;
+    });
+  }
+
+  releaseReady(): void {
+    this.readyGate = null;
+    this.#readyRelease?.();
+    this.#readyRelease = null;
   }
 }
 
@@ -109,20 +127,61 @@ describe("AgentManager browser lease", () => {
     expect(gate.events).toContain("release");
   });
 
-  it("still runs the turn, and records it, when the browser cannot be restored", async () => {
+  it("does not dispatch the turn when the browser cannot be restored", async () => {
+    // The sandbox MCP reaches the browser without passing the companion proxy, so
+    // the proxy gate cannot protect a turn that started anyway. A failed restore
+    // must therefore stop the turn from being dispatched at all, and say so.
     gate.readyError = "浏览器恢复失败";
     const conv = agent.createConversation({ title: "t" });
     agent.submitTurn({ conversationId: conv.id, text: "hi", clientMessageId: "m1" });
-    await tick(60);
-    codex.completeTurn(codex.startedTurns[0]!.turnId);
     await tick(80);
-    // A text-only turn must not be failed by a browser it never needed...
-    expect(codex.startedTurns.length).toBe(1);
-    // ...but the browser problem must be visible rather than silently swallowed.
+    expect(codex.startedTurns.length).toBe(0);
     const events = agent.listEvents(conv.id, 0);
     expect(events.some((e) => e.type === "turn.browser_unavailable")).toBe(true);
-    // The lease is still released exactly once despite the failure.
+    // The failed turn is terminal, and the lease is released exactly once.
+    expect(events.some((e) => e.type === "turn.failed")).toBe(true);
     expect(gate.events.filter((e) => e === "release").length).toBe(1);
+  });
+
+  it("does not dispatch a turn the user already stopped while the browser restored", async () => {
+    // A stop that lands during the restore wait must be honoured *before* the
+    // first side-effecting request, not by interrupting a turn already running.
+    gate.holdReady();
+    const conv = agent.createConversation({ title: "t" });
+    agent.submitTurn({ conversationId: conv.id, text: "hi", clientMessageId: "m1" });
+    await tick(30);
+    expect(gate.events).toContain("ready");
+    await agent.interrupt(conv.id);
+    gate.releaseReady();
+    await tick(80);
+    expect(codex.startedTurns.length).toBe(0);
+    const events = agent.listEvents(conv.id, 0);
+    // The turn is terminal (interrupted/failed) without ever reaching Codex.
+    expect(
+      events.some(
+        (e) =>
+          e.type === "turn.failed" ||
+          (e.type === "turn.finished" && (e.payload as { status?: string })?.status === "interrupted"),
+      ),
+    ).toBe(true);
+    expect(gate.events.filter((e) => e === "release").length).toBe(1);
+  });
+
+  it("releases the slot when reserving the browser lease itself throws", async () => {
+    // A throwing reserve must not leak an activeTurns slot: the next turn has to
+    // be able to run.
+    gate.reserveError = "reserve exploded";
+    const conv = agent.createConversation({ title: "t" });
+    agent.submitTurn({ conversationId: conv.id, text: "hi", clientMessageId: "m1" });
+    await tick(80);
+    const events = agent.listEvents(conv.id, 0);
+    expect(events.some((e) => e.type === "turn.failed")).toBe(true);
+    gate.reserveError = null;
+    agent.submitTurn({ conversationId: conv.id, text: "again", clientMessageId: "m2" });
+    await tick(80);
+    codex.completeTurn(codex.startedTurns[0]!.turnId);
+    await tick(80);
+    expect(codex.startedTurns.length).toBe(1);
   });
 
   it("does not reserve anything when no browser gate is configured", async () => {
@@ -149,6 +208,13 @@ describe("proxy browser-bound path classification", () => {
       "/json/version",
       "/vnc/vnc.html",
       "/websockify",
+      // The workspace VNC panel opens the raw websocket at path `ws`; without it
+      // a directly-opened VNC stream is not protected and can be released while
+      // the user is watching.
+      "/ws",
+      // Companion-domain screenshot/input operations.
+      "/v1/display",
+      "/v1/display/screenshot",
     ]) {
       expect(isBrowserBoundPath(path), path).toBe(true);
       expect(shouldProtectBrowser(path), path).toBe(true);
@@ -164,6 +230,10 @@ describe("proxy browser-bound path classification", () => {
       "/jupyter/lab",
       "/health",
       "/",
+      // Terminal/Jupyter websockets share the `ws` vocabulary but are not the
+      // browser: `/v1/shell/ws` must stay unprotected.
+      "/v1/shell/ws",
+      "/api/v1/shell/ws",
     ]) {
       expect(isBrowserBoundPath(path), path).toBe(false);
       expect(shouldProtectBrowser(path), path).toBe(false);
@@ -345,4 +415,20 @@ describe("browser status view derivation", () => {
     expect(refusalReason({ ...base, lastErrorCode: "stop_failed" })).toContain("仍在运行");
     expect(refusalReason({ ...base })).toBeNull();
   });
+});
+
+it('ignores a stale held heartbeat after release and rejoin', async () => {
+  let call=0;
+  let finish!: (value: {kind:'stale'})=>void;
+  const viewer=new BrowserViewerController({
+    id:'race', visibilityState:()=> 'visible',
+    transport:{heartbeat:async()=>{call++; if(call===2)return new Promise(resolve=>{finish=resolve});return {kind:'ok',generation:call}},release:async()=>{}},
+  });
+  await viewer.claim();
+  const old=viewer.claim();
+  await viewer.release();
+  const current=await viewer.claim();
+  finish({kind:'stale'}); await old;
+  expect(viewer.isCurrent(current)).toBe(true);
+  await viewer.dispose();
 });

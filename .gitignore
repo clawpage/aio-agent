@@ -31,3 +31,7 @@ owner-secret.txt
 .DS_Store
 .idea/
 .vscode/
+
+# Python helper caches
+__pycache__/
+*.pyc

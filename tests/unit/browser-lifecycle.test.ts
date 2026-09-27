@@ -92,6 +92,13 @@ interface RuntimeScript {
   restorePending?: Seq<boolean>;
   pendingBrowserPid?: number | null;
   pendingBrowserStarttime?: number | null;
+  /** Snapshot schema the runtime holds (2 = storage-bearing). */
+  snapshotSchema?: Seq<number | null>;
+  /** True only when the held snapshot carries cookies/localStorage/IndexedDB. */
+  snapshotHasStorage?: Seq<boolean>;
+  /** Another process holds the cross-process transition lock. */
+  transitionBusy?: Seq<boolean>;
+  storageCounts?: Seq<{ cookies: number; origins: number; localStorageEntries: number; indexedDbDatabases: number } | null>;
 }
 
 function makeRuntime(script: RuntimeScript = {}) {
@@ -131,12 +138,30 @@ function makeRuntime(script: RuntimeScript = {}) {
         restorePending: at(script.restorePending ?? false, call),
         pendingBrowserPid: script.pendingBrowserPid ?? null,
         pendingBrowserStarttime: script.pendingBrowserStarttime ?? null,
+        // A storage-bearing snapshot by default: the core refuses to release on
+        // anything less, so tests that expect a real stop must model one.
+        snapshotSchema: at(script.snapshotSchema ?? 2, call),
+        snapshotHasStorage: at(script.snapshotHasStorage ?? true, call),
+        transitionBusy: at(script.transitionBusy ?? false, call),
+        storageCounts: at(
+          script.storageCounts ?? { cookies: 2, origins: 1, localStorageEntries: 3, indexedDbDatabases: 1 },
+          call,
+        ),
       };
     },
     async snapshot() {
       calls.snapshot += 1;
       if (gates.snapshot) await gates.snapshot;
-      return script.snapshot ?? { ok: true, savedAt: 1_700_000_000_123, tabs: 2, skipped: 0, warnings: [] };
+      return (
+        script.snapshot ?? {
+          ok: true,
+          savedAt: 1_700_000_000_123,
+          tabs: 2,
+          skipped: 0,
+          warnings: [],
+          storageCounts: { cookies: 2, origins: 1, localStorageEntries: 3, indexedDbDatabases: 1 },
+        }
+      );
     },
     async stop(opts) {
       calls.stop += 1;
@@ -185,6 +210,38 @@ const settle = async () => {
   for (let i = 0; i < 8; i += 1) await tick();
 };
 
+/**
+ * Drive a promise that waits on the injected clock: advancing the fake clock and
+ * yielding between steps lets the retry loop make progress without a real timer.
+ */
+async function pumpClock<T>(
+  promise: Promise<T>,
+  clock: FakeClock,
+  { stepMs = 100, maxMs = 60_000 }: { stepMs?: number; maxMs?: number } = {},
+): Promise<T> {
+  let settled = false;
+  let value: T | undefined;
+  let failure: unknown;
+  promise.then(
+    (v) => {
+      settled = true;
+      value = v;
+    },
+    (e) => {
+      settled = true;
+      failure = e;
+    },
+  );
+  let advanced = 0;
+  while (!settled && advanced < maxMs) {
+    clock.advance(stepMs);
+    advanced += stepMs;
+    await tick();
+  }
+  if (failure !== undefined) throw failure;
+  return value as T;
+}
+
 describe("BrowserLifecycle status", () => {
   it("starts idle with a deadline and never reports asleep before a stop", () => {
     const runtime = makeRuntime();
@@ -208,6 +265,29 @@ describe("BrowserLifecycle status", () => {
     expect(runtime.calls.wake).toBe(0);
     expect(life.status().idleDeadline).toBe(before);
     expect(life.status().state).toBe("idle");
+    life.shutdown();
+  });
+
+  it("reports the storage-bearing schema and counts without leaking contents", async () => {
+    const runtime = makeRuntime();
+    const { life, clock } = makeLifecycle(runtime);
+    clock.advance(300_000);
+    await settle();
+    const status = life.status();
+    expect(status.snapshotSchema).toBe(2);
+    expect(status.snapshotHasStorage).toBe(true);
+    expect(status.storageCounts).toEqual({
+      cookies: 2,
+      origins: 1,
+      localStorageEntries: 3,
+      indexedDbDatabases: 1,
+    });
+    expect(status.transitionBusy).toBe(false);
+    // Counts only: the payload carries numbers, never storage values or URLs.
+    const json = JSON.stringify(status);
+    expect(json).not.toMatch(/cookie=/i);
+    expect(json).not.toContain("://");
+    expect(json).not.toMatch(/\{[^}]*"value"/);
     life.shutdown();
   });
 
@@ -664,6 +744,146 @@ describe("BrowserLifecycle race safety", () => {
   });
 });
 
+describe("BrowserLifecycle storage gate", () => {
+  it("refuses to stop when the runtime reports no storage capture", async () => {
+    // A lossy snapshot (cookies/localStorage/IndexedDB missing) must never be
+    // followed by a stop, even though the capture itself reported `ok`.
+    const runtime = makeRuntime({ snapshotHasStorage: false, snapshotSchema: 1 });
+    const { life, clock } = makeLifecycle(runtime);
+    clock.advance(300_000);
+    await settle();
+    expect(runtime.calls.stop).toBe(0);
+    expect(life.status().lastErrorCode).toBe("snapshot_storage_missing");
+    // The browser is untouched and still usable-with-a-caveat, not mid-transition.
+    expect(life.status().state).not.toBe("asleep");
+    expect(life.status().state).not.toBe("snapshotting");
+    life.shutdown();
+  });
+
+  it("treats a stop refusal from the helper as blocked, not as a failure", async () => {
+    // The helper re-checks the snapshot right before signalling; its refusal must
+    // leave the browser running and must not be reported as a stop error.
+    const runtime = makeRuntime({ stop: { ok: false, message: "no storage", reason: "snapshot_storage_missing" } });
+    const { life, clock } = makeLifecycle(runtime);
+    clock.advance(300_000);
+    await settle();
+    expect(runtime.calls.stop).toBe(1);
+    expect(life.status().lastErrorCode).toBe("snapshot_storage_missing");
+    expect(life.status().state).not.toBe("asleep");
+    life.shutdown();
+  });
+
+  it("never reports a successful snapshot that dropped the storage capture", async () => {
+    // The runtime claims `ok` but with no storage counts: the core refuses.
+    const runtime = makeRuntime({
+      snapshot: { ok: true, savedAt: 7, tabs: 2, skipped: 0, warnings: [], storageCounts: null },
+    });
+    const { life, clock } = makeLifecycle(runtime);
+    clock.advance(300_000);
+    await settle();
+    expect(runtime.calls.stop).toBe(0);
+    expect(life.status().lastErrorCode).toBe("snapshot_storage_missing");
+    life.shutdown();
+  });
+});
+
+describe("BrowserLifecycle reconcile barrier", () => {
+  it("restores before the first use after a control-plane restart onto a sleeping browser", async () => {
+    // The lifecycle is constructed trusting its optimistic `idle`; the container
+    // actually has no browser. The first ready() must not hand out a dead state.
+    const runtime = makeRuntime({ browserRunning: false });
+    const { life } = makeLifecycle(runtime);
+    await life.ready();
+    expect(runtime.calls.status).toBeGreaterThanOrEqual(1);
+    expect(runtime.calls.wake).toBe(1);
+    // No holders → the idle countdown is re-armed for the freshly built browser.
+    expect(life.status().state).not.toBe("asleep");
+    expect(life.status().browserRunning).toBe(true);
+    life.shutdown();
+  });
+
+  it("fails closed when the first probe cannot attribute the browser", async () => {
+    const runtime = makeRuntime({ browserRunning: null, pid: null });
+    const { life } = makeLifecycle(runtime);
+    await expect(life.ready()).rejects.toThrow("无法确认浏览器真实状态");
+    expect(runtime.calls.wake).toBe(0);
+    expect(life.status().lastErrorCode).toBe("reconcile_failed");
+    life.shutdown();
+  });
+
+  it("fails closed on a failed probe and does not start a second browser", async () => {
+    const runtime = makeRuntime({ statusOk: false });
+    const { life } = makeLifecycle(runtime);
+    await expect(life.ready()).rejects.toThrow("无法确认浏览器真实状态");
+    expect(runtime.calls.wake).toBe(0);
+    life.shutdown();
+  });
+
+  it("coalesces concurrent first uses into one probe", async () => {
+    const runtime = makeRuntime();
+    const { life } = makeLifecycle(runtime);
+    await Promise.all([life.ready(), life.ready(), life.ready()]);
+    expect(runtime.calls.status).toBe(1);
+    expect(runtime.calls.wake).toBe(0);
+    life.shutdown();
+  });
+
+  it("waits out a transition held by a previous control plane, then confirms", async () => {
+    // The previous control plane is still stopping/restoring: the barrier must not
+    // pass while the lock is held, and must confirm the identity once it clears.
+    const runtime = makeRuntime({ transitionBusy: [true, false], browserRunning: [true, true] });
+    const { life, clock } = makeLifecycle(runtime, { reconcileTimeoutMs: 10_000, reconcileRetryMs: 100 });
+    await pumpClock(life.ready(), clock);
+    expect(runtime.calls.status).toBe(2);
+    expect(runtime.calls.wake).toBe(0);
+    expect(life.status().transitionBusy).toBe(false);
+    life.shutdown();
+  });
+
+  it("retries a reconcile that failed so a later ready() can succeed", async () => {
+    const runtime = makeRuntime({ browserRunning: [null, true] });
+    const { life } = makeLifecycle(runtime);
+    await expect(life.ready()).rejects.toThrow("无法确认");
+    await life.ready();
+    expect(life.status().lastErrorCode).toBeNull();
+    // Confirmed running with no holders → the idle countdown is re-armed.
+    expect(life.status().state).toBe("idle");
+    expect(life.status().browserRunning).toBe(true);
+    life.shutdown();
+  });
+
+  it("status() never reconciles, wakes or extends the idle deadline", async () => {
+    const runtime = makeRuntime();
+    const { life, clock } = makeLifecycle(runtime);
+    const deadline = life.status().idleDeadline;
+    clock.advance(60_000);
+    for (let i = 0; i < 10; i += 1) life.status();
+    expect(runtime.calls.status).toBe(0);
+    expect(runtime.calls.wake).toBe(0);
+    expect(life.status().idleDeadline).toBe(deadline);
+    life.shutdown();
+  });
+
+  it("keeps an owed restore blocked rather than adopting the running browser", async () => {
+    // A stop that found a process we cannot vouch for records a pending restore.
+    // A later probe that sees only "running" must not clear it.
+    const runtime = makeRuntime({
+      stop: { ok: false, message: "busy" },
+      browserRunning: [true, true, true],
+      pid: [294, 999, 999],
+      starttime: [1000, 5, 5],
+    });
+    const { life, clock } = makeLifecycle(runtime);
+    clock.advance(300_000);
+    await settle();
+    expect(life.status().lastErrorCode).toBe("stop_failed");
+    // The next use must restore, never adopt the unidentified process.
+    await life.ready();
+    expect(runtime.calls.wake).toBe(1);
+    life.shutdown();
+  });
+});
+
 describe("BrowserLifecycle reconciliation", () => {
   it("adopts an out-of-band stop without touching the runtime state machine", async () => {
     const runtime = makeRuntime();
@@ -1049,7 +1269,16 @@ describe("BrowserLifecycle lease bookkeeping", () => {
 
   it("exposes snapshot warnings without leaking tab contents", async () => {
     const warning: SnapshotWarning = { code: "unsupported_scheme", message: "chrome:// 无法恢复", tabIndex: 1 };
-    const runtime = makeRuntime({ snapshot: { ok: true, savedAt: 5, tabs: 1, skipped: 0, warnings: [warning] } });
+    const runtime = makeRuntime({
+      snapshot: {
+        ok: true,
+        savedAt: 5,
+        tabs: 1,
+        skipped: 0,
+        warnings: [warning],
+        storageCounts: { cookies: 1, origins: 1, localStorageEntries: 0, indexedDbDatabases: 0 },
+      },
+    });
     const { life, clock } = makeLifecycle(runtime);
     clock.advance(300_000);
     await settle();
@@ -1086,4 +1315,72 @@ describe("BrowserLifecycle lease bookkeeping", () => {
     expect(life.status().leases.pins).toBe(0);
     life.shutdown();
   });
+});
+
+describe("BrowserLifecycle identified pins", () => {
+  it("reuses the same pin for a repeated identified add", () => {
+    const runtime = makeRuntime();
+    const { life } = makeLifecycle(runtime);
+    const first = life.pinIdentified("UI 手动保留浏览器");
+    const second = life.pinIdentified("UI 手动保留浏览器");
+    // A reload or a second window must not stack a second permanent pin.
+    expect(second.id).toBe(first.id);
+    expect(life.pins().length).toBe(1);
+    life.shutdown();
+  });
+
+  it("releases only the identified pin, never a differently-noted one", () => {
+    const runtime = makeRuntime();
+    const { life } = makeLifecycle(runtime);
+    const scriptPin = life.pin("cdp 自动化", 600_000);
+    life.pinIdentified("UI 手动保留浏览器");
+    const removed = life.unpinNote("UI 手动保留浏览器");
+    expect(removed).toBe(1);
+    const left = life.pins();
+    expect(left.map((p) => p.id)).toEqual([scriptPin.id]);
+    life.shutdown();
+  });
+
+  it("can be released after a reload re-derives it from the status payload", () => {
+    const runtime = makeRuntime();
+    const { life } = makeLifecycle(runtime);
+    life.pinIdentified("UI 手动保留浏览器");
+    // A fresh component only sees status().pins; it filters by the fixed note.
+    const seen = life.status().pins.filter((p) => p.note === "UI 手动保留浏览器");
+    expect(seen.length).toBe(1);
+    expect(life.unpinNote("UI 手动保留浏览器")).toBe(1);
+    expect(life.status().pins.length).toBe(0);
+    life.shutdown();
+  });
+
+  it("re-adding an already-released identified pin creates it again", () => {
+    const runtime = makeRuntime();
+    const { life } = makeLifecycle(runtime);
+    life.pinIdentified("UI 手动保留浏览器");
+    life.unpinNote("UI 手动保留浏览器");
+    const again = life.pinIdentified("UI 手动保留浏览器");
+    expect(life.pins().map((p) => p.id)).toEqual([again.id]);
+    life.shutdown();
+  });
+});
+
+it('isolates identical viewer ids by session and tombstones releases before first touch', () => {
+  const {life}=makeLifecycle(makeRuntime());
+  life.releaseViewer('window', 1, 'a');
+  expect(life.touchViewer('window','a',1)).toBeNull();
+  expect(life.touchViewer('window','b',1)).not.toBeNull();
+  life.releaseViewer('window',2,'a');
+  expect(life.status().leases.viewers).toBe(1);
+  expect(life.touchViewer('window','a',3)).not.toBeNull();
+  life.releaseViewer('window',1,'a');
+  expect(life.status().leases.viewers).toBe(2);
+  life.shutdown();
+});
+it('does not reuse an initial success after an unknown ownership observation', async () => {
+  const runtime=makeRuntime({browserRunning:[true,null,null]});
+  const {life}=makeLifecycle(runtime);
+  await life.ready();
+  await life.observeRuntime();
+  await expect(life.ready()).rejects.toThrow();
+  life.shutdown();
 });

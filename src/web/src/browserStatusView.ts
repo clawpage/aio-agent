@@ -43,7 +43,7 @@ export function statusTone(status: BrowserLifecycleStateView | null): StatusTone
 export function needsRestore(status: BrowserLifecycleStateView | null): boolean {
   if (!status || !status.enabled) return false;
   if (status.state === "asleep" || status.state === "restoring" || status.state === "snapshotting") return true;
-  if (status.state === "error" && status.restorePending) return true;
+  if (status.restorePending || status.browserRunning === false) return true;
   return false;
 }
 

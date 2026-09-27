@@ -21,10 +21,15 @@ export type HeartbeatResult =
   | { kind: "error"; message?: string };
 
 export interface ViewerTransport {
-  /** One heartbeat for `id` at `generation`. */
+  /** One heartbeat for `id` at `generation`; the server replies with its own. */
   heartbeat(id: string, generation: number): Promise<HeartbeatResult>;
-  /** Best-effort explicit release; a failure means the TTL will expire it. */
-  release(id: string): Promise<void>;
+  /**
+   * Best-effort explicit release. The generation travels with the id so the
+   * server can ignore a release from an already-superseded incarnation: a reply
+   * that was delayed across a remount must never drop the *new* panel's lease.
+   * A failure means the TTL will expire the lease on its own.
+   */
+  release(id: string, generation: number): Promise<void>;
 }
 
 export interface BrowserViewerOptions {
@@ -53,17 +58,16 @@ export class BrowserViewerController {
   #onError: ((message: string) => void) | undefined;
 
   /**
-   * Incarnation counter. Bumped on every release *and* on a stale-heartbeat
-   * rejection, so a heartbeat that was already in flight can never be mistaken
-   * for the current incarnation.
+   * Incarnation counter. Bumped when the panel joins, when it releases, and on a
+   * stale-heartbeat rejection - but *not* on a routine heartbeat. A heartbeat
+   * extends the incarnation it already holds, so a slow restore that spans more
+   * than one heartbeat interval cannot invalidate the generation the panel is
+   * waiting on.
    */
   #generation = 0;
   #held = false;
-  /**
-   * Generation of the heartbeat currently in flight; used to drop its reply when
-   * a release happened while it was travelling.
-   */
-  #inFlight: number | null = null;
+  /** True once a join/release raced a heartbeat, so its late reply is dropped. */
+  #heartbeatInFlight = false;
   #timer: ReturnType<typeof setInterval> | null = null;
   #disposed = false;
 
@@ -90,36 +94,62 @@ export class BrowserViewerController {
    */
   async claim(): Promise<number> {
     if (this.#disposed || this.#visibility() !== "visible") return 0;
+    if (this.#held) {
+      // Routine heartbeat: extend the *same* incarnation. The generation is not
+      // bumped, so a caller waiting on it (e.g. across a slow restore) is not
+      // invalidated by a heartbeat that merely kept the lease alive.
+      const generation = this.#generation;
+      const result = await this.#send(generation);
+      if (this.#disposed || !this.#held || generation !== this.#generation) return 0;
+      return this.#handleHeartbeat(result, generation);
+    }
+    // First join for this incarnation: mint a new generation.
     const generation = this.#generation + 1;
     this.#generation = generation;
-    this.#inFlight = generation;
+    this.#heartbeatInFlight = true;
     const result = await this.#send(generation);
-    // A release (or a newer claim) happened while this heartbeat was in flight:
-    // its reply describes an incarnation that is no longer current.
-    if (this.#disposed || generation !== this.#generation) return this.#held ? this.#generation : 0;
-    this.#inFlight = null;
+    // A release (or a newer join) landed while this heartbeat was in flight: its
+    // reply describes an incarnation that is no longer current.
+    if (this.#disposed || generation !== this.#generation) {
+      return this.#held ? this.#generation : 0;
+    }
+    this.#heartbeatInFlight = false;
+    return this.#handleHeartbeat(result, generation, true);
+  }
+
+  /**
+   * Apply a heartbeat reply to `generation`. `mayRetryStale` allows exactly one
+   * follow-up attempt after the server reports a tombstone at a higher
+   * generation - never a loop.
+   */
+  async #handleHeartbeat(result: HeartbeatResult, generation: number, mayRetryStale = false): Promise<number> {
     if (result.kind === "ok") {
       this.#held = true;
       this.#armTimer();
       return this.#generation;
     }
     if (result.kind === "stale") {
-      // The server had already tombstoned this id at a higher generation (for
-      // example another window reused the id after a crash), so this incarnation
-      // is behind. Move past the tombstone and claim once more.
+      // Another incarnation reused this id (a crashed window was replaced). Move
+      // past the tombstone once, then give up honestly.
       this.#held = false;
-      this.#generation += 1;
-      const retryGeneration = this.#generation;
+      if (!mayRetryStale) {
+        this.#onError?.("无法保护浏览器占用状态，请重新打开面板");
+        return 0;
+      }
+      const retryGeneration = generation + 1;
+      this.#generation = retryGeneration;
+      this.#heartbeatInFlight = true;
       const retried = await this.#send(retryGeneration);
       if (this.#disposed || retryGeneration !== this.#generation) {
         return this.#held ? this.#generation : 0;
       }
-      this.#inFlight = null;
+      this.#heartbeatInFlight = false;
       if (retried.kind === "ok") {
         this.#held = true;
         this.#armTimer();
         return this.#generation;
       }
+      this.#held = false;
       this.#onError?.("无法保护浏览器占用状态，请重新打开面板");
       return 0;
     }
@@ -134,21 +164,34 @@ export class BrowserViewerController {
    */
   async release(): Promise<void> {
     this.#cancelTimer();
+    // The incarnation being given up. The generation is sent with the release so
+    // the server can ignore a late release that belongs to an older incarnation
+    // than the one it is currently tracking; bumping it locally supersedes this
+    // incarnation for any heartbeat still travelling.
+    const releasedGeneration = this.#generation;
     this.#generation += 1;
-    this.#inFlight = null;
-    if (!this.#held) return;
+    const held = this.#held;
     this.#held = false;
+    // The release is always sent, even when no heartbeat has completed yet: the
+    // server may already have recorded this incarnation (the first heartbeat can
+    // still be in flight when the panel is hidden again), and skipping it would
+    // leave the browser awake until the TTL lapses.
+    if (!held && releasedGeneration === 0) return;
     try {
-      await this.#transport.release(this.id);
+      await this.#transport.release(this.id, releasedGeneration);
     } catch {
       // The server expires the lease by TTL anyway; never surface this as an error
       // the user must act on.
     }
   }
 
-  /** True when `generation` is still the incarnation this controller holds. */
+  /**
+   * True when `generation` is still the incarnation this controller holds. A
+   * routine heartbeat never changes the generation, so a panel waiting on a slow
+   * restore stays current as long as the lease is still held.
+   */
   isCurrent(generation: number): boolean {
-    return this.#held && generation === this.#generation;
+    return this.#held && !this.#disposed && generation === this.#generation;
   }
 
   /** Release and stop every timer; safe to call from an unmount path. */

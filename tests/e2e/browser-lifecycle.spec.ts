@@ -59,7 +59,7 @@ test.describe("browser lifecycle panel", () => {
     await expect(page.locator(".browser-status")).toHaveCount(0);
   });
 
-  test("a released browser offers an honest restore action instead of a dead frame", async ({ page, isMobile }) => {
+  test("opening a released browser automatically restores before showing its frame", async ({ page, isMobile }) => {
     test.skip(isMobile, "desktop-only restore affordance");
     await page.bringToFront();
     await mockConsole(page, {
@@ -71,13 +71,9 @@ test.describe("browser lifecycle panel", () => {
     await page.goto("/");
     await page.getByRole("button", { name: "工作区" }).first().click();
 
-    // The frame is replaced by an explicit restore prompt, never a blank page.
-    await expect(page.getByRole("button", { name: "启动并恢复浏览器" })).toBeVisible({ timeout: 20_000 });
-    await expect(page.locator(".workspace iframe")).toHaveCount(0);
-
-    await page.getByRole("button", { name: "启动并恢复浏览器" }).click();
-    // After the mocked wake the panel mounts the frame again.
+    // Opening the panel is the request to use it; no second click is needed.
     await expect(page.locator(".workspace iframe")).toBeVisible({ timeout: 20_000 });
+    await expect(page.locator(".browser-status")).toContainText("浏览器已就绪");
   });
 
   test("manual keep-alive pin is reflected in the status bar", async ({ page, isMobile }) => {
@@ -96,6 +92,11 @@ test.describe("browser lifecycle panel", () => {
 
     await page.getByRole("button", { name: "保留浏览器" }).click();
     await expect(page.getByRole("button", { name: "取消保留" })).toBeVisible({ timeout: 10_000 });
+    await page.reload();
+    await page.getByRole("button", { name: "工作区" }).first().click();
+    await expect(page.getByRole("button", { name: "取消保留" })).toBeVisible();
+    await page.getByRole("button", { name: "取消保留" }).click();
+    await expect(page.getByRole("button", { name: "保留浏览器" })).toBeVisible();
   });
 });
 
@@ -124,6 +125,45 @@ test.describe("browser lifecycle panel responsiveness", () => {
       expect(box.width).toBeLessThanOrEqual(width + 1);
       expect(box.x).toBeGreaterThanOrEqual(-1);
       expect(box.x + box.width).toBeLessThanOrEqual(width + 1);
+      await page.screenshot({ path: test.info().outputPath(`browser-status-${width}.png`) });
     }
   });
+});
+
+
+test("a restore spanning heartbeats completes and the panel can then close", async ({page,isMobile}) => {
+  test.skip(isMobile, "desktop drives visibility and timer races");
+  await mockConsole(page, {conversations:[makeConversation(CONV_ID,"恢复竞态")],browser:{startAsleep:true}});
+  let release!:()=>void;
+  await page.route(url=>url.pathname==="/api/browser/wake", async route=>{
+    await new Promise<void>(resolve=>{release=resolve});
+    await route.fallback();
+  });
+  await page.clock.install();
+  await page.goto('/');
+  const waking=page.waitForRequest(req=>new URL(req.url()).pathname==='/api/browser/wake');
+  await page.getByRole('button',{name:'工作区'}).first().click();
+  await waking;
+  await page.clock.fastForward(25_000);
+  await expect(page.locator('.workspace iframe')).toHaveCount(0);
+  release();
+  await expect(page.locator('.workspace iframe')).toBeVisible();
+  await page.getByRole('button',{name:'关闭工作区'}).click();
+  await expect(page.locator('.workspace iframe')).toHaveCount(0);
+});
+
+
+test("closing the panel during restore prevents a late frame mount", async ({page,isMobile}) => {
+  test.skip(isMobile, "desktop interaction race");
+  await mockConsole(page, {conversations:[makeConversation(CONV_ID,"关闭恢复")],browser:{startAsleep:true}});
+  let release!:()=>void;
+  await page.route(url=>url.pathname==="/api/browser/wake",async route=>{
+    await new Promise<void>(resolve=>{release=resolve});await route.fallback();
+  });
+  await page.goto('/');
+  const waking=page.waitForRequest(req=>new URL(req.url()).pathname==='/api/browser/wake');
+  await page.getByRole('button',{name:'工作区'}).first().click();await waking;
+  await page.getByRole('button',{name:'关闭工作区'}).click();release();
+  await expect(page.locator('.workspace')).toHaveCount(0);
+  await expect(page.locator('.workspace iframe')).toHaveCount(0);
 });

@@ -307,10 +307,10 @@ export function loadConfig(): {
       // misconfiguration from thrashing the browser on every navigation.
       idleMs: Math.max(30_000, envInt("PA_BROWSER_IDLE_SECONDS", 300) * 1000),
       viewerTtlMs: Math.max(10_000, envInt("PA_BROWSER_VIEWER_TTL_SECONDS", 60) * 1000),
-      toolDir: envStr("PA_BROWSER_TOOL_DIR", path.posix.join(sandboxCodexPrefix, "..", "aio-browser")),
+      toolDir: envStr("PA_BROWSER_TOOL_DIR", "/opt/aio-browser"),
       snapshotPath: envStr(
         "PA_BROWSER_SNAPSHOT_PATH",
-        path.posix.join(envStr("PA_BROWSER_TOOL_DIR", path.posix.join(sandboxCodexPrefix, "..", "aio-browser")), "browser-snapshot.json"),
+        path.posix.join(sandboxCodexPrefix, "..", "aio-browser", "browser-snapshot.json"),
       ),
       helperTimeoutMs: Math.max(5_000, envInt("PA_BROWSER_HELPER_TIMEOUT_SECONDS", 45) * 1000),
       wakeTimeoutMs: Math.max(5_000, envInt("PA_BROWSER_WAKE_TIMEOUT_SECONDS", 90) * 1000),

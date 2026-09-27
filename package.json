@@ -30,7 +30,8 @@
     "marked": "18.0.14",
     "react": "19.3.0",
     "react-dom": "19.3.0",
-    "ws": "8.21.3"
+    "ws": "8.21.3",
+    "playwright-core": "1.63.0"
   },
   "devDependencies": {
     "@playwright/test": "1.63.0",

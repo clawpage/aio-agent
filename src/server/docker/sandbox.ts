@@ -409,11 +409,11 @@ export class SandboxContainer {
     content: string,
     opts: { user?: string; onlyIfAbsent?: boolean } = {},
   ): Promise<void> {
-    const script = opts.onlyIfAbsent ? `[ -f ${filePath} ] || cat > ${filePath}` : `cat > ${filePath}`;
+    const script = opts.onlyIfAbsent ? '[ -f "$1" ] || cat > "$1"' : 'cat > "$1"';
     await new Promise<void>((resolve, reject) => {
       const child = spawn(
         "docker",
-        ["exec", "-i", "-u", opts.user ?? this.#cfg.sandbox.containerUser, this.name, "bash", "-lc", script],
+        ["exec", "-i", "-u", opts.user ?? this.#cfg.sandbox.containerUser, this.name, "bash", "-lc", script, "write-file", filePath],
         { stdio: ["pipe", "pipe", "pipe"] },
       );
       let stderr = "";

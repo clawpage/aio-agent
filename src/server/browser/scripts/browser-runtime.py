@@ -39,6 +39,7 @@ import fcntl
 import json
 import os
 import re
+import shutil
 import signal
 import subprocess
 import tempfile
@@ -73,13 +74,37 @@ DEFAULT_DOWNLOAD_DIRS = (
     "/home/gem/.config/browser/Default/Downloads",
 )
 
-SNAPSHOT_SCHEMA = 1
+SNAPSHOT_SCHEMA = 2
 DEFAULT_SNAPSHOT_PATH = "/home/gem/.codex/tools/aio-browser/browser-snapshot.json"
+
+# The Playwright-backed storage exporter/importer, provisioned next to this
+# script. It is the only component that reads/writes cookies + localStorage +
+# IndexedDB; this process never serializes those values itself.
+STORAGE_HELPER_NAME = "browser-storage.cjs"
+# Vendored playwright-core lives beside the helper (commented in README).
+STORAGE_VENDOR_NAME = "playwright-core"
+
+# Node interpreters, tried in order. A browser image does not promise a `node`
+# on PATH for root, so the absolute candidates come first.
+NODE_CANDIDATES = (
+    "/opt/nodejs/24/bin/node",
+    "/opt/nodejs/22/bin/node",
+    "/opt/nodejs/20/bin/node",
+    "/usr/local/bin/node20",
+    "/usr/local/bin/node",
+    "/usr/bin/node",
+)
 
 # A page we are willing to re-open. Everything else is reported, never guessed.
 RESTORABLE_SCHEMES = ("http", "https")
 RESTORABLE_LITERAL = ("about:blank",)
+# Chromium's own empty pages. AIO reports `chrome://new-tab-page/` while CDP
+# reports `chrome://newtab/` for the *same* default tab, so the two are
+# normalised to `about:blank` before any strict tab matching. Without this the
+# pairing is unprovable and the release is blocked forever (verified real case).
 BLANK_URLS = ("about:blank", "chrome://newtab/", "chrome://new-tab-page/")
+CHROME_BLANK_ALIASES = ("chrome://newtab/", "chrome://new-tab-page/", "chrome://newtab", "chrome://new-tab-page")
+BLANK_LITERAL = "about:blank"
 
 # Default policy: never drop a page silently.
 DEFAULT_DIRTY_INPUT_POLICY = "block"
@@ -106,6 +131,7 @@ SNAPSHOT_WARNING_CODES = (
     "tab_error",
     "tab_order_unverified",
     "active_unknown",
+    "storage_unavailable",
 )
 
 
@@ -123,8 +149,27 @@ def err(message: str, **fields: Any) -> dict[str, Any]:
 # ------------------------------------------------------------ pure helpers
 
 
+def normalize_blank_url(url: str) -> str:
+    """Map a default-new-tab alias to `about:blank`; leave everything else alone.
+
+    AIO reports `chrome://new-tab-page/` and CDP reports `chrome://newtab/` for the
+    same empty default tab (verified live in the acceptance sandbox). Comparing the
+    raw strings made the tab pairing permanently unprovable, which blocked every
+    release. Only these known-empty aliases are rewritten: any other `chrome://`
+    page stays untouched and keeps blocking, and duplicate detection still runs on
+    the normalised values.
+    """
+    if not isinstance(url, str):
+        return url
+    trimmed = url.strip()
+    if trimmed in CHROME_BLANK_ALIASES or trimmed.rstrip("/") in CHROME_BLANK_ALIASES:
+        return BLANK_LITERAL
+    return url
+
+
 def classify_url(url: str) -> tuple[bool, str]:
     """Return (restorable, scheme). Never raises; unknown input is not restorable."""
+    url = normalize_blank_url(url)
     if not isinstance(url, str) or not url.strip():
         return False, ""
     trimmed = url.strip()
@@ -256,11 +301,225 @@ def is_browser_argv(argv: Sequence[str], profile_dir: str = DEFAULT_PROFILE_DIR)
     return browser_argv_verdict(argv, profile_dir)[0]
 
 
+# ---------------------------------------------------------- storage bridge
+
+
+class StorageError(RuntimeError):
+    """A storage export/import failed. Never carries storage contents."""
+
+
+def find_node() -> str | None:
+    for candidate in NODE_CANDIDATES:
+        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            return candidate
+    found = shutil.which("node")
+    if found and os.access(found, os.X_OK):
+        return found
+    return None
+
+
+def storage_helper_paths(helper_dir: str | None = None) -> tuple[str, str]:
+    """(helper script, vendored playwright-core dir) inside the managed tool dir."""
+    base = helper_dir or os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(base, STORAGE_HELPER_NAME), os.path.join(base, STORAGE_VENDOR_NAME)
+
+
+def _run_storage_helper(
+    argv: Sequence[str], timeout: float, helper_dir: str | None = None
+) -> dict[str, Any]:
+    """Invoke the node storage helper and parse its single JSON line.
+
+    The helper only ever prints counts and fixed codes, so nothing secret can
+    leak through this boundary; a non-zero exit is turned into a fixed message.
+    """
+    helper, vendor = storage_helper_paths(helper_dir)
+    if not os.path.isfile(helper):
+        raise StorageError("storage_helper_missing")
+    node = find_node()
+    if node is None:
+        raise StorageError("node_missing")
+    if not os.path.isdir(vendor):
+        raise StorageError("storage_vendor_missing")
+    try:
+        completed = subprocess.run(
+            [node, helper, *argv, "--vendor", vendor],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=timeout,
+            check=False,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise StorageError("storage_timeout") from exc
+    except OSError as exc:
+        raise StorageError(f"storage_spawn_failed:{type(exc).__name__}") from exc
+    text = (completed.stdout or b"").decode("utf-8", "replace").strip()
+    line = text.split("\n")[-1] if text else ""
+    parsed: Any = None
+    if line:
+        try:
+            parsed = json.loads(line)
+        except ValueError:
+            parsed = None
+    if not isinstance(parsed, dict):
+        raise StorageError(f"storage_bad_output_exit_{completed.returncode}")
+    if parsed.get("ok") is not True:
+        code = parsed.get("code") or "storage_failed"
+        raise StorageError(str(code))
+    return parsed
+
+
+def export_storage_state(
+    origins: Sequence[str],
+    endpoint: str = "http://127.0.0.1:9222",
+    timeout: float = 45.0,
+    helper_dir: str | None = None,
+    temp_dir: str | None = None,
+) -> dict[str, Any]:
+    """Export cookies + localStorage + IndexedDB for the given origins.
+
+    Returns `{"schema": 1, "capturedAt": ms, "state": {...}, "counts": {...}}`.
+    A missing node/helper/vendor is a hard failure: the caller must then refuse
+    the release, because a snapshot without storage is not a complete snapshot.
+    """
+    # An empty origin set is legitimate: a browser parked on about:blank still
+    # owns cookies, and refusing here would make it unreleasable forever.
+    usable = sorted({origin_of(o) for o in origins} - {""})
+    directory = temp_dir or os.path.dirname(os.path.abspath(DEFAULT_SNAPSHOT_PATH))
+    os.makedirs(directory, exist_ok=True)
+    handle = tempfile.NamedTemporaryFile(mode="w", suffix=".storage.json", dir=directory, delete=False)
+    handle.close()
+    os.chmod(handle.name, 0o600)
+    try:
+        argv = ["export", "--endpoint", endpoint, "--out", handle.name]
+        for origin in usable:
+            argv.extend(["--origin", origin])
+        # The helper enforces its own shorter deadline and reports it as a fixed
+        # code; the caller keeps a margin so cleanup still runs inside this bound.
+        result = _run_storage_helper(argv, timeout, helper_dir)
+        try:
+            with open(handle.name, encoding="utf-8") as fh:
+                payload = json.load(fh)
+        except (OSError, ValueError) as exc:
+            raise StorageError("storage_read_failed") from exc
+        if not isinstance(payload, dict) or not isinstance(payload.get("state"), dict):
+            raise StorageError("storage_state_malformed")
+        return {
+            "schema": 1,
+            "capturedAt": int(payload.get("capturedAt") or time.time() * 1000),
+            "state": payload["state"],
+            "counts": {
+                "cookies": int(result.get("cookies") or 0),
+                "origins": int(result.get("origins") or 0),
+                "requestedOrigins": int(result.get("requestedOrigins") or 0),
+                "localStorageEntries": int(result.get("localStorageEntries") or 0),
+                "indexedDbDatabases": int(result.get("indexedDbDatabases") or 0),
+            },
+        }
+    finally:
+        try:
+            os.unlink(handle.name)
+        except OSError:
+            pass
+
+
+def import_storage_state(
+    storage: Mapping[str, Any],
+    endpoint: str = "http://127.0.0.1:9222",
+    timeout: float = 45.0,
+    helper_dir: str | None = None,
+    temp_dir: str | None = None,
+) -> dict[str, Any]:
+    """Apply a captured storage state to the default context *before* navigating.
+
+    Uses a short-lived 0600 file because the state is written by node; it is
+    removed even when the import fails.
+    """
+    state = storage.get("state") if isinstance(storage, Mapping) else None
+    if not isinstance(state, dict):
+        raise StorageError("storage_state_malformed")
+    directory = temp_dir or os.path.dirname(os.path.abspath(DEFAULT_SNAPSHOT_PATH))
+    os.makedirs(directory, exist_ok=True)
+    handle = tempfile.NamedTemporaryFile(mode="w", suffix=".storage-import.json", dir=directory, delete=False)
+    try:
+        json.dump({"schema": 1, "state": state}, handle)
+        handle.flush()
+        os.fsync(handle.fileno())
+        handle.close()
+        os.chmod(handle.name, 0o600)
+        return _run_storage_helper(
+            ["import", "--endpoint", endpoint, "--in", handle.name], timeout, helper_dir
+        )
+    finally:
+        try:
+            handle.close()
+        except OSError:
+            pass
+        try:
+            os.unlink(handle.name)
+        except OSError:
+            pass
+
+
+def snapshot_origin_list(snapshot: Mapping[str, Any]) -> list[str]:
+    """Every distinct http(s) origin the snapshot's tabs need storage for."""
+    origins: list[str] = []
+    for tab in snapshot.get("tabs") or []:
+        if not isinstance(tab, Mapping):
+            continue
+        origin = origin_of(str(tab.get("url") or ""))
+        if origin and origin not in origins:
+            origins.append(origin)
+    return origins
+
+
+def storage_counts(snapshot: Mapping[str, Any]) -> dict[str, int]:
+    """Safe, content-free counts for logs and the API."""
+    storage = snapshot.get("storage")
+    if not isinstance(storage, Mapping):
+        return {"cookies": 0, "origins": 0, "localStorageEntries": 0, "indexedDbDatabases": 0}
+    counts = storage.get("counts")
+    if isinstance(counts, Mapping):
+        return {
+            "cookies": int(counts.get("cookies") or 0),
+            "origins": int(counts.get("origins") or 0),
+            "localStorageEntries": int(counts.get("localStorageEntries") or 0),
+            "indexedDbDatabases": int(counts.get("indexedDbDatabases") or 0),
+        }
+    # Older/foreign snapshots: count from the raw state without echoing values.
+    state = storage.get("state") if isinstance(storage.get("state"), Mapping) else {}
+    origins = state.get("origins") if isinstance(state.get("origins"), list) else []
+    return {
+        "cookies": len(state.get("cookies") or []) if isinstance(state.get("cookies"), list) else 0,
+        "origins": len(origins),
+        "localStorageEntries": sum(
+            len(o.get("localStorage") or []) for o in origins if isinstance(o, Mapping)
+        ),
+        "indexedDbDatabases": sum(len(o.get("indexedDB") or []) for o in origins if isinstance(o, Mapping)),
+    }
+
+
+def snapshot_has_storage(obj: Mapping[str, Any]) -> bool:
+    """True when the snapshot carries a usable, complete storage capture."""
+    storage = obj.get("storage")
+    if not isinstance(storage, Mapping):
+        return False
+    if storage.get("schema") != 1:
+        return False
+    return isinstance(storage.get("state"), Mapping)
+
+
+# Snapshots this build can *read*. Schema 1 predates the storage capture and is
+# deliberately still readable so the operator gets an honest message instead of
+# "cannot read" - but it never authorises a release (see `stop_browser`).
+READABLE_SNAPSHOT_SCHEMAS = (1, SNAPSHOT_SCHEMA)
+
+
 def validate_snapshot(obj: Any) -> tuple[bool, str]:
     """Validate a decoded snapshot. Returns (ok, error-message)."""
     if not isinstance(obj, dict):
         return False, "快照不是 JSON 对象"
-    if obj.get("schema") != SNAPSHOT_SCHEMA:
+    if obj.get("schema") not in READABLE_SNAPSHOT_SCHEMAS:
         return False, f"快照 schema 不受支持：{obj.get('schema')!r}"
     tabs = obj.get("tabs")
     if not isinstance(tabs, list):
@@ -292,6 +551,19 @@ def validate_snapshot(obj: Any) -> tuple[bool, str]:
     source = obj.get("source", None)
     if source is not None and not isinstance(source, dict):
         return False, "快照的 source 不是对象"
+    storage = obj.get("storage", None)
+    if storage is not None:
+        if not isinstance(storage, dict):
+            return False, "快照的 storage 不是对象"
+        if storage.get("schema") != 1:
+            return False, f"快照 storage schema 不受支持：{storage.get('schema')!r}"
+        if not isinstance(storage.get("state"), dict):
+            return False, "快照 storage 缺少 state 对象"
+        state = storage["state"]
+        if not isinstance(state.get("cookies"), list):
+            return False, "快照 storage state 缺少 cookies 数组"
+        if not isinstance(state.get("origins"), list):
+            return False, "快照 storage state 缺少 origins 数组"
     return True, ""
 
 
@@ -692,16 +964,21 @@ class FileLock:
     plane can never leave a lock behind that blocks the next one.
     """
 
-    def __init__(self, path: str) -> None:
+    def __init__(self, path: str, shared: bool = False) -> None:
         self.path = path
+        # A shared holder proves "no transition owns this browser" without
+        # blocking another *reader*; only an exclusive holder (a real transition)
+        # makes it fail.
+        self.shared = shared
         self._fd: int | None = None
 
     def acquire(self) -> None:
         directory = os.path.dirname(self.path) or "."
         os.makedirs(directory, exist_ok=True)
         fd = os.open(self.path, os.O_RDWR | os.O_CREAT, 0o600)
+        mode = fcntl.LOCK_SH if self.shared else fcntl.LOCK_EX
         try:
-            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            fcntl.flock(fd, mode | fcntl.LOCK_NB)
         except OSError as exc:
             os.close(fd)
             raise LockBusy(f"另一个浏览器生命周期操作正在进行（{exc}）") from exc
@@ -978,7 +1255,7 @@ def aio_request(method: str, path: str, body: Mapping[str, Any] | None = None) -
         conn.close()
 
 
-def aio_activate_index(index: int, tab_count: int) -> tuple[bool, str]:
+def aio_activate_index(index: int, tab_count: int, reconnect: bool = True) -> tuple[bool, str]:
     """Point the AIO tool API at the tab we just focused natively.
 
     The AIO API tracks its own active index; if it is not told, later browser tool
@@ -988,9 +1265,10 @@ def aio_activate_index(index: int, tab_count: int) -> tuple[bool, str]:
     """
     if index < 0 or (tab_count and index >= tab_count):
         return False, "active_index_out_of_range"
-    _, reconnect_error = aio_request("POST", "/v1/browser/restart", {"mode": "soft"})
-    if reconnect_error:
-        return False, "aio_reconnect_failed"
+    if reconnect:
+        _, reconnect_error = aio_request("POST", "/v1/browser/restart", {"mode": "soft"})
+        if reconnect_error:
+            return False, "aio_reconnect_failed"
     _, activate_error = aio_request("PUT", f"/v1/browser/tabs/{int(index)}/activate")
     if activate_error:
         return False, "active_activate_failed"
@@ -1038,7 +1316,7 @@ def tab_plan(
         )
         plan = [
             {
-                "url": str(page.get("url") or ""),
+                "url": normalize_blank_url(str(page.get("url") or "")),
                 "title": str(page.get("title") or ""),
                 "active": False,
                 "targetId": str(page.get("id") or "") or None,
@@ -1050,7 +1328,9 @@ def tab_plan(
     cdp_urls: list[str] = []
     cdp_by_url: dict[str, list[str]] = {}
     for page in cdp_pages:
-        url = str(page.get("url") or "")
+        # The default-new-tab aliases are normalised *before* matching so AIO's
+        # `chrome://new-tab-page/` and CDP's `chrome://newtab/` describe one tab.
+        url = normalize_blank_url(str(page.get("url") or ""))
         if not url:
             continue
         target_id = str(page.get("id") or "")
@@ -1060,7 +1340,7 @@ def tab_plan(
             return [], warnings, False, "cdp_target_missing_id"
         cdp_urls.append(url)
         cdp_by_url.setdefault(url, []).append(target_id)
-    aio_urls = [str(row.get("url") or "") for row in aio_rows]
+    aio_urls = [normalize_blank_url(str(row.get("url") or "")) for row in aio_rows]
 
     def counts(items: Sequence[str]) -> dict[str, int]:
         tally: dict[str, int] = {}
@@ -1080,7 +1360,7 @@ def tab_plan(
 
     plan = []
     for row in aio_rows:
-        url = str(row.get("url") or "")
+        url = normalize_blank_url(str(row.get("url") or ""))
         target_ids = cdp_by_url.get(url) or []
         if len(target_ids) != 1:
             return [], warnings, False, "tab_target_not_unique"
@@ -1265,6 +1545,30 @@ def capture_snapshot(
             {"code": "active_unknown", "message": "接口未报告选中标签，恢复后不会自动切换", "tabIndex": None}
         ]
 
+    # Cookies + localStorage + IndexedDB. The persistent profile alone is NOT
+    # enough (verified live: session cookies and localStorage were lost across a
+    # stop), so the state is captured explicitly through the vendored Playwright
+    # helper. A missing helper/node/vendor fails the whole capture: releasing on a
+    # storage-less snapshot would silently log the user out.
+    storage_origins = [origin for origin in (origin_of(str(tab["url"])) for tab in tabs) if origin]
+    try:
+        storage = export_storage_state(storage_origins, timeout=max(timeout, 45.0))
+    except StorageError as exc:
+        return err(
+            "无法导出浏览器存储（cookies/localStorage/IndexedDB），已放弃释放以避免丢失登录状态",
+            blocked=True,
+            reason="storage_unavailable",
+            detail=str(exc),
+            warnings=warnings
+            + [
+                {
+                    "code": "storage_unavailable",
+                    "message": "无法导出浏览器存储，已放弃释放以避免丢失登录状态",
+                    "tabIndex": None,
+                }
+            ],
+        )
+
     snapshot: dict[str, Any] = {
         "schema": SNAPSHOT_SCHEMA,
         "savedAt": int(time.time() * 1000),
@@ -1273,6 +1577,7 @@ def capture_snapshot(
         "warnings": warnings,
         "skipped": 0,
         "orderVerified": order_verified,
+        "storage": storage,
         "source": {
             "browserPid": int(browser["pid"]) if browser["ok"] else None,
             "browserStarttime": int(browser["starttime"]) if browser["ok"] else None,
@@ -1292,6 +1597,7 @@ def capture_snapshot(
         skipped=0,
         warnings=warnings,
         orderVerified=order_verified,
+        storageCounts=storage_counts(snapshot),
         browserPid=snapshot["source"]["browserPid"],
     )
 
@@ -1377,6 +1683,7 @@ def stop_browser(
             reason="snapshot_source_incomplete",
         )
 
+
     helper = verify_helper(helper_pid_file, helper_script)
     if not helper["ok"]:
         # An unverifiable supervisor means we cannot attribute the process tree we
@@ -1406,6 +1713,17 @@ def stop_browser(
         return err("控制面核验的 PID 与当前浏览器不一致，拒绝停止", blocked=True)
     if source_starttime is not None and int(source_starttime) != browser_start:
         return err("控制面核验的 starttime 与当前浏览器不一致，拒绝停止", blocked=True)
+
+    # A schema-1 snapshot (or any snapshot without the storage capture) is not a
+    # complete snapshot: releasing on it would drop cookies/localStorage/IndexedDB.
+    # This is a conservative refusal the operator sees, never a silent data loss.
+    if not snapshot_has_storage(snapshot):
+        return err(
+            "快照不包含 cookies/localStorage/IndexedDB（旧 schema 或存储导出缺失），拒绝停止以免丢失登录状态；请重新保存快照",
+            blocked=True,
+            reason="snapshot_storage_missing",
+            snapshotSchema=snapshot.get("schema"),
+        )
 
     pid = int(helper["pid"])
     starttime = int(helper["starttime"])
@@ -1604,6 +1922,39 @@ def restore_tabs(
     if state is None or state.get("snapshotSavedAt") != saved_at:
         state = {"snapshotSavedAt": saved_at, "tabs": [None] * len(tabs)}
 
+    # Storage (cookies/localStorage/IndexedDB) is imported exactly once per
+    # (snapshot, browser process) pair, and *before* any tab is created or
+    # navigated, so a page's first boot sees the restored values. The marker is
+    # bound to the browser's pid+starttime: a retry against the same process must
+    # not re-import (which would wipe state the restored pages have since
+    # written), while a *new* browser legitimately re-imports.
+    identity_pid, identity_start = _current_browser_identity()
+    storage = snapshot.get("storage")
+    storage_ok = snapshot_has_storage(snapshot)
+    already_imported = (
+        state.get("storageImported") is True
+        and state.get("storageSavedAt") == saved_at
+        and state.get("storageBrowserPid") == identity_pid
+        and state.get("storageBrowserStarttime") == identity_start
+    )
+    if storage_ok and not already_imported:
+        try:
+            import_storage_state(storage, timeout=timeout)
+        except StorageError as exc:
+            # Fail closed: opening the tabs without their cookies/storage would
+            # look like a successful restore while the user is logged out.
+            return err(
+                "无法导入浏览器存储，恢复未完成；快照已保留以便重试",
+                restoredTabs=0,
+                failed=[{"index": None, "reason": "storage_import_failed", "detail": str(exc)}],
+                problems=["storage_import_failed"],
+            )
+        state["storageImported"] = True
+        state["storageSavedAt"] = saved_at
+        state["storageBrowserPid"] = identity_pid
+        state["storageBrowserStarttime"] = identity_start
+        write_restore_state(snapshot_path, state)
+
     existing_ids = _page_target_ids(cdp)
     startup_ids = set(existing_ids)
     entries: list[dict[str, Any]] = list(state.get("tabs") or [])
@@ -1613,6 +1964,13 @@ def restore_tabs(
     failed: list[dict[str, Any]] = []
     problems: list[str] = []
     try:
+        # Attach AIO before creating restored tabs, so its page-added events
+        # preserve creation order. Reconnecting afterwards enumerates CDP targets
+        # in an unspecified order and can silently reverse the tool indices.
+        if not any(isinstance(entry, dict) and entry.get("targetId") in existing_ids for entry in entries):
+            _, reconnect_error = aio_request("POST", "/v1/browser/restart", {"mode": "soft"})
+            if reconnect_error:
+                return err("无法连接 AIO 浏览器接口，快照已保留", restoredTabs=0)
         # 1. Make sure every snapshot tab has a live target (re-using existing ones).
         for index, tab in enumerate(tabs):
             url = str(tab.get("url") or "")
@@ -1745,7 +2103,16 @@ def restore_tabs(
             state["tabs"] = entries
             write_restore_state(snapshot_path, state)
 
-        # 3. Focus the tab the user had focused, but only when the snapshot could
+        # 3. Drop the browser's own startup placeholder pages.
+        keep = {str(e["targetId"]) for e in entries if isinstance(e, dict) and isinstance(e.get("targetId"), str)}
+        _close_startup_pages(cdp, startup_ids, keep)
+
+        # Verify the tool-visible order after removing startup placeholders.
+        rows, rows_error = aio_tabs()
+        if rows_error or rows is None or [normalize_blank_url(str(row.get("url") or "")) for row in rows] != [normalize_blank_url(str(tab.get("url") or "")) for tab in tabs]:
+            problems.append("active_activate_failed")
+
+        # 4. Focus the tab the user had focused, but only when the snapshot could
         #    actually prove which one it was, and only after the AIO API agrees.
         #    The AIO tool pointer is what later MCP/browser calls use, so the
         #    native focus and the API's active index must be the same page.
@@ -1758,7 +2125,7 @@ def restore_tabs(
                     cdp.call("Target.activateTarget", {"targetId": target_id})
                 except CdpError:
                     problems.append("active_activate_failed")
-                synced, problem = aio_activate_index(active_index, len(tabs))
+                synced, problem = aio_activate_index(active_index, len(tabs), reconnect=False)
                 if not synced:
                     problems.append(problem)
             else:
@@ -1766,9 +2133,6 @@ def restore_tabs(
         else:
             problems.append("active_unknown")
 
-        # 4. Drop the browser's own startup placeholder pages.
-        keep = {str(e["targetId"]) for e in entries if isinstance(e, dict) and isinstance(e.get("targetId"), str)}
-        _close_startup_pages(cdp, startup_ids, keep)
     except CdpError as exc:
         return err(
             redact_urls(f"恢复标签失败：{exc}"), restoredTabs=_restored_count(entries), failed=failed
@@ -2006,6 +2370,18 @@ def status(
     `browserAttribution: "unknown"` with `browserRunning: null`, never as `false`:
     "cannot tell" must not be read by the control plane as "no browser exists".
     """
+    # Read-only probe of the cross-process transition lock. A previous control
+    # plane may still be releasing/restoring the browser: a restart must not hand
+    # out "running and usable" while another process owns a transition on it.
+    # This never waits and never takes the lock.
+    transition_busy = False
+    try:
+        probe = FileLock(lock_path_for(snapshot_path), shared=True)
+        probe.acquire()
+        probe.release()
+    except LockBusy:
+        transition_busy = True
+
     helper = verify_helper(helper_pid_file, helper_script)
     browser = verify_browser(
         browser_pid_file,
@@ -2052,6 +2428,10 @@ def status(
         snapshotAt=snapshot_at,
         restoredSnapshotAt=restored_snapshot_at,
         restorePending=pending,
+        snapshotSchema=snapshot.get("schema") if snapshot else None,
+        snapshotHasStorage=bool(snapshot is not None and snapshot_has_storage(snapshot)),
+        storageCounts=storage_counts(snapshot) if snapshot is not None else None,
+        transitionBusy=transition_busy,
         message=None if owned else browser.get("message"),
     )
 

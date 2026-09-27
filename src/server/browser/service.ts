@@ -55,6 +55,12 @@ const BROWSER_PATH_PREFIXES = [
   "/json",
   "/vnc",
   "/websockify",
+  // The live screen stream. The workspace panel opens the VNC websocket at
+  // `/ws`, and `/v1/display` serves its screenshots/input; both are real viewing.
+  // `/v1/shell/ws` (the terminal) is deliberately NOT listed: it is a different
+  // surface and must never keep Chromium awake.
+  "/ws",
+  "/v1/display",
 ];
 
 /**
@@ -62,6 +68,16 @@ const BROWSER_PATH_PREFIXES = [
  * Terminal, file, code-server and Jupyter traffic must never keep the browser up,
  * and neither may an iframe's static assets.
  */
+/** Paths that are never browser viewing even though a listed prefix could match. */
+const NON_BROWSER_PATH_PREFIXES = ["/v1/shell", "/v1/files", "/v1/jupyter", "/api/v1/shell"];
+
+/**
+ * Fixed note of the browser panel's keep-awake pin. It is a protocol constant,
+ * not a user-visible string: both the server and the panel match on it, and the
+ * panel filters `status().pins` by it to rebuild its own toggle state.
+ */
+export const UI_KEEP_ALIVE_NOTE = "UI 手动保留浏览器";
+
 export function isBrowserBoundPath(url: string): boolean {
   let pathname: string;
   try {
@@ -70,6 +86,11 @@ export function isBrowserBoundPath(url: string): boolean {
     return false;
   }
   const lower = pathname.toLowerCase();
+  // Terminal/file/notebook surfaces are excluded first: an open terminal must
+  // never hold Chromium awake, whatever a prefix rule says.
+  if (NON_BROWSER_PATH_PREFIXES.some((prefix) => lower === prefix || lower.startsWith(`${prefix}/`))) {
+    return false;
+  }
   if (lower === "/json" || lower === "/json/list" || lower === "/json/version" || lower.startsWith("/json/")) {
     return true;
   }
@@ -205,8 +226,8 @@ export class BrowserService {
     return this.#lifecycle.touchViewer(id, sessionId, generation);
   }
 
-  releaseViewer(id: string): void {
-    this.#lifecycle.releaseViewer(id);
+  releaseViewer(id: string, generation?: number, sessionId?: string): void {
+    this.#lifecycle.releaseViewer(id, generation, sessionId);
   }
 
   /** Drop every viewer lease a session held (logout). */
@@ -226,6 +247,26 @@ export class BrowserService {
 
   pins(): PinLease[] {
     return this.#lifecycle.pins();
+  }
+
+  /**
+   * The browser panel's own "keep the browser awake" switch, made idempotent and
+   * rebuildable from `status()`. The note is a fixed control-plane constant, so a
+   * reload, a second window or a re-login re-derives the same pin instead of
+   * stacking a new permanent one, and releasing it can never release an operator
+   * or background-script pin that happens to exist at the same time.
+   */
+  pinUiKeepAlive(): PinLease {
+    return this.#lifecycle.pinIdentified(UI_KEEP_ALIVE_NOTE);
+  }
+
+  unpinUiKeepAlive(): number {
+    return this.#lifecycle.unpinNote(UI_KEEP_ALIVE_NOTE);
+  }
+
+  /** The UI keep-alive pin currently held, or null. Reconstructed from server state. */
+  uiKeepAlivePin(): PinLease | null {
+    return this.pins().find((pin) => pin.note === UI_KEEP_ALIVE_NOTE) ?? null;
   }
 
   leases(): LeaseSummary {

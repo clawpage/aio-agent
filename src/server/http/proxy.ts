@@ -306,14 +306,51 @@ export function handleProxyHttp(
     forward();
     return;
   }
+  // The wake can take seconds. Attach the disconnect guard *before* awaiting it,
+  // so a client that goes away while the browser is being rebuilt does not later
+  // start a ghost upstream request and leak the call lease.
+  let released = false;
+  const releaseOnce = () => {
+    if (released) return;
+    released = true;
+    browserGate();
+  };
+  let clientGone = false;
+  const onClientGone = () => {
+    clientGone = true;
+    releaseOnce();
+  };
+  res.on("close", onClientGone);
+  req.on("aborted", onClientGone);
+  // A logout during the wait must abort too, exactly like an in-flight proxy.
+  const detachEarlyGuard = attachSessionGuard(deps, ctx, () => {
+    clientGone = true;
+    releaseOnce();
+    if (!res.headersSent) res.writeHead(401, { "content-type": "application/json; charset=utf-8" });
+    res.end(JSON.stringify({ error: "session_revoked", message: "会话已失效，请重新登录" }));
+  });
   void (async () => {
     try {
       await deps.browser!.ready();
     } catch (err) {
-      browserGate();
+      releaseOnce();
+      detachEarlyGuard();
+      res.off("close", onClientGone);
+      req.off("aborted", onClientGone);
       log.warn("browser unavailable for proxied request", { error: err instanceof Error ? err.message : String(err) });
       if (!res.headersSent) res.writeHead(503, { "content-type": "application/json; charset=utf-8" });
       res.end(JSON.stringify({ error: "browser_unavailable", message: "浏览器正在恢复，请稍后重试" }));
+      return;
+    }
+    // The wait is over: hand the remaining lifetime to the upstream pass, which
+    // installs its own guards. Drop ours so nothing is released twice.
+    detachEarlyGuard();
+    res.off("close", onClientGone);
+    req.off("aborted", onClientGone);
+    if (clientGone || res.writableEnded || res.destroyed || req.socket.destroyed) {
+      // The client left (or logged out) while we were waiting: never start a
+      // ghost upstream. The lease was already released exactly once.
+      releaseOnce();
       return;
     }
     forward();
@@ -405,103 +442,147 @@ export function handleProxyUpgrade(
     return;
   }
 
-  const upstream = net.connect(cfg.sandbox.hostPort, "127.0.0.1");
-  let handshakeDone = false;
-  const connectTimer = setTimeout(() => {
-    if (handshakeDone) return;
-    log.warn("sandbox upgrade handshake timeout", { url: req.url });
-    upstream.destroy();
-    endSocket(clientSocket, "HTTP/1.1 504 Gateway Timeout\r\nConnection: close\r\nContent-Length: 0\r\n\r\n");
-  }, cfg.proxyConnectTimeoutMs);
-
+  // The browser may be asleep: a direct CDP/VNC connection must restore it first,
+  // so the gate is awaited before the upstream socket is opened. Guards for a
+  // client that leaves during that wait are attached *before* awaiting.
   let closed = false;
   let detachGuard: () => void = () => undefined;
-  const close = (why: string) => {
+  let upstream: net.Socket | null = null;
+  let close = (why: string) => {
     if (closed) return;
     closed = true;
-    clearTimeout(connectTimer);
     detachGuard();
     releaseBrowser?.();
     log.debug("upgrade proxy closed", { url: req.url, why });
-    upstream.destroy();
+    upstream?.destroy();
     clientSocket.destroy();
   };
-
   detachGuard = attachSessionGuard(deps, ctx, () => close("session-revoked"));
+  const onClientGone = () => close("client-gone");
+  clientSocket.on("close", onClientGone);
+  clientSocket.on("error", onClientGone);
+  clientSocket.on("end", onClientGone);
 
-  // Buffer the upstream handshake so cookies can be filtered before the client
-  // sees them, then switch to raw piping for the rest of the session.
-  /**
-   * Copy between sockets with backpressure handling: a long VNC/CDP session must
-   * not buffer unbounded data in memory when one side is slower.
-   */
-  const pipeWithBackpressure = (from: Duplex, to: Duplex) => {
-    let paused = false;
-    const onData = (chunk: Buffer) => {
-      if (to.destroyed || from.destroyed) return;
-      if (to.write(chunk) === false) {
-        paused = true;
-        from.pause();
-        to.once("drain", () => {
-          paused = false;
-          if (!from.destroyed) from.resume();
+  void (async () => {
+    if (releaseBrowser && deps.browser) {
+      try {
+        await deps.browser.ready();
+      } catch (err) {
+        log.warn("browser unavailable for proxied upgrade", {
+          error: err instanceof Error ? err.message : String(err),
         });
+        if (!closed) {
+          endSocket(
+            clientSocket,
+            "HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\nContent-Length: 0\r\n\r\n",
+          );
+        }
+        close("browser-unavailable");
+        return;
       }
-    };
-    from.on("data", onData);
-    from.on("end", () => {
-      if (!to.destroyed) to.end();
-    });
-    return () => {
-      from.off("data", onData);
-      if (paused) from.resume();
-    };
-  };
-
-  // Buffer the upstream handshake so cookies can be filtered before the client
-  // sees them, then switch to raw piping for the rest of the session.
-  let pending = Buffer.alloc(0);
-  const onUpstreamData = (chunk: Buffer) => {
-    if (handshakeDone) return;
-    pending = Buffer.concat([pending, chunk]);
-    const end = pending.indexOf("\r\n\r\n");
-    if (end < 0) {
-      if (pending.length > 64 * 1024) close("handshake-too-large");
+    }
+    // The client may have gone away while the browser was being rebuilt: never
+    // open a ghost upstream for a socket nobody is reading.
+    if (closed || clientSocket.destroyed || clientSocket.writableEnded) {
+      close("client-gone-during-ready");
       return;
     }
-    handshakeDone = true;
-    clearTimeout(connectTimer);
-    const headText = pending.subarray(0, end).toString("latin1");
-    const rest = pending.subarray(end + 4);
-    pending = Buffer.alloc(0);
-    if (!clientSocket.destroyed) {
-      clientSocket.write(rewriteHandshakeResponse(headText, ctx.secure) + "\r\n\r\n");
-      if (rest.length) clientSocket.write(rest);
-    }
-    upstream.off("data", onUpstreamData);
-    // From here on both directions stream with backpressure handling.
-    pipeWithBackpressure(upstream, clientSocket);
-    pipeWithBackpressure(clientSocket, upstream);
-  };
 
-  upstream.on("connect", () => {
-    upstream.write(upstreamRequestLine(req, ctx).join("\r\n") + "\r\n\r\n");
-    if (head.length) upstream.write(head);
-    upstream.on("data", onUpstreamData);
-    // Client bytes that arrive before the handshake completes stay buffered by
-    // the paused socket and are released once the upstream is ready.
-    clientSocket.pause();
-    const release = () => {
-      if (!upstream.destroyed) clientSocket.resume();
+    const upstreamSocket: net.Socket = net.connect(cfg.sandbox.hostPort, "127.0.0.1");
+    upstream = upstreamSocket;
+    let handshakeDone = false;
+    const connectTimer = setTimeout(() => {
+      if (handshakeDone) return;
+      log.warn("sandbox upgrade handshake timeout", { url: req.url });
+      upstreamSocket.destroy();
+      endSocket(clientSocket, "HTTP/1.1 504 Gateway Timeout\r\nConnection: close\r\nContent-Length: 0\r\n\r\n");
+    }, cfg.proxyConnectTimeoutMs);
+    // `close` was defined before the socket existed; rebind it so the timer and
+    // the upstream socket are torn down on every path (including a session
+    // revoke that landed while we were waiting for the browser).
+    close = (why: string) => {
+      if (closed) return;
+      closed = true;
+      clearTimeout(connectTimer);
+      detachGuard();
+      clientSocket.off("close", onClientGone);
+      releaseBrowser?.();
+      log.debug("upgrade proxy closed", { url: req.url, why });
+      upstreamSocket.destroy();
+      clientSocket.destroy();
     };
-    upstream.once("data", release);
-    upstream.once("close", release);
-  });
+    if (closed) {
+      close("client-gone-during-ready");
+      return;
+    }
+    /**
+     * Copy between sockets with backpressure handling: a long VNC/CDP session must
+     * not buffer unbounded data in memory when one side is slower.
+     */
+    const pipeWithBackpressure = (from: Duplex, to: Duplex) => {
+      let paused = false;
+      const onData = (chunk: Buffer) => {
+        if (to.destroyed || from.destroyed) return;
+        if (to.write(chunk) === false) {
+          paused = true;
+          from.pause();
+          to.once("drain", () => {
+            paused = false;
+            if (!from.destroyed) from.resume();
+          });
+        }
+      };
+      from.on("data", onData);
+      from.on("end", () => {
+        if (!to.destroyed) to.end();
+      });
+    };
 
-  upstream.on("error", () => close("upstream-error"));
-  upstream.on("end", () => close("upstream-end"));
-  clientSocket.on("error", () => close("client-error"));
-  clientSocket.on("end", () => close("client-end"));
-  clientSocket.on("close", () => close("client-close"));
-  upstream.on("close", () => close("upstream-close"));
+    // Buffer the upstream handshake so cookies can be filtered before the client
+    // sees them, then switch to raw piping for the rest of the session.
+    let pending = Buffer.alloc(0);
+    const onUpstreamData = (chunk: Buffer) => {
+      if (handshakeDone) return;
+      pending = Buffer.concat([pending, chunk]);
+      const end = pending.indexOf("\r\n\r\n");
+      if (end < 0) {
+        if (pending.length > 64 * 1024) close("handshake-too-large");
+        return;
+      }
+      handshakeDone = true;
+      clearTimeout(connectTimer);
+      const headText = pending.subarray(0, end).toString("latin1");
+      const rest = pending.subarray(end + 4);
+      pending = Buffer.alloc(0);
+      if (!clientSocket.destroyed) {
+        clientSocket.write(rewriteHandshakeResponse(headText, ctx.secure) + "\r\n\r\n");
+        if (rest.length) clientSocket.write(rest);
+      }
+      upstreamSocket.off("data", onUpstreamData);
+      // From here on both directions stream with backpressure handling.
+      pipeWithBackpressure(upstreamSocket, clientSocket);
+      pipeWithBackpressure(clientSocket, upstreamSocket);
+    };
+
+    upstreamSocket.on("connect", () => {
+      upstreamSocket.write(upstreamRequestLine(req, ctx).join("\r\n") + "\r\n\r\n");
+      if (head.length) upstreamSocket.write(head);
+      upstreamSocket.on("data", onUpstreamData);
+      // Client bytes that arrive before the handshake completes stay buffered by
+      // the paused socket and are released once the upstream is ready.
+      clientSocket.pause();
+      const release = () => {
+        if (!upstreamSocket.destroyed) clientSocket.resume();
+      };
+      upstreamSocket.once("data", release);
+      upstreamSocket.once("close", release);
+    });
+
+    upstreamSocket.on("error", () => close("upstream-error"));
+    upstreamSocket.on("end", () => close("upstream-end"));
+    clientSocket.on("error", () => close("client-error"));
+    clientSocket.on("end", () => close("client-end"));
+    clientSocket.on("close", () => close("client-close"));
+    upstreamSocket.on("close", () => close("upstream-close"));
+  })();
 }

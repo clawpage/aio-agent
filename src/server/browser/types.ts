@@ -48,10 +48,12 @@ export type LifecycleErrorCode =
   | "snapshot_failed"
   | "snapshot_blocked"
   | "snapshot_incomplete"
+  | "snapshot_storage_missing"
   | "stop_failed"
   | "stop_unattributed"
   | "restore_pending"
   | "wake_failed"
+  | "reconcile_failed"
   | "runtime_error";
 
 export interface BrowserLifecycleStatus {
@@ -85,6 +87,26 @@ export interface BrowserLifecycleStatus {
   restoredSnapshotAt: number | null;
   /** True when the runtime still owes a restore of the held snapshot. */
   restorePending: boolean;
+  /** Schema of the snapshot on disk; null when there is none. */
+  snapshotSchema: number | null;
+  /**
+   * True only when the snapshot carries a complete cookies/localStorage/IndexedDB
+   * capture. A snapshot without it is lossy: releasing on it logs the user out, so
+   * the state machine refuses to sleep until a fresh snapshot is taken.
+   */
+  snapshotHasStorage: boolean;
+  /** Content-free storage counts for the UI (never cookies/localStorage values). */
+  storageCounts: {
+    cookies: number;
+    origins: number;
+    localStorageEntries: number;
+    indexedDbDatabases: number;
+  } | null;
+  /**
+   * True while another process holds the cross-process transition lock - a
+   * previous control plane still finishing a stop/restore. Purely informational.
+   */
+  transitionBusy: boolean;
 }
 
 /** One viewer of the browser panel; identified per browser window/tab. */
@@ -143,7 +165,7 @@ export interface SnapshotTab {
 }
 
 export interface BrowserSnapshot {
-  schema: 1;
+  schema: 1 | 2;
   savedAt: number;
   /** Browser build string from CDP, for operator diagnosis only. */
   browserVersion: string | null;
@@ -167,4 +189,15 @@ export interface BrowserSnapshot {
   };
 }
 
-export const SNAPSHOT_SCHEMA = 1 as const;
+/**
+ * Current writer schema. Schema 2 adds the full cookies/localStorage/IndexedDB
+ * capture; schema 1 snapshots remain readable but never authorise a release,
+ * because restoring them would silently log the user out.
+ */
+export const SNAPSHOT_SCHEMA = 2 as const;
+/** Schemas this control plane can still parse (readable, not necessarily safe to stop on). */
+export const READABLE_SNAPSHOT_SCHEMAS: readonly number[] = [1, 2];
+/** Schemas whose restore is complete enough to release the browser for. */
+export const STORAGE_SNAPSHOT_SCHEMA = 2 as const;
+/** Every schema that carries the full cookies/localStorage/IndexedDB capture. */
+export const STORAGE_SNAPSHOT_SCHEMAS: readonly number[] = [STORAGE_SNAPSHOT_SCHEMA];

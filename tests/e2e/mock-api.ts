@@ -323,16 +323,16 @@ export async function mockConsole(page: Page, opts: MockConsoleOptions): Promise
       return json(route, { ok: true, status: payload() });
     });
     await page.route((url) => url.pathname === "/api/browser/pin", (route) => {
-      const body = JSON.parse(route.request().postData() ?? "{}") as { note?: string; ttlMs?: number };
-      const pin = { id: `pin_${state.pins.length + 1}`, note: body.note ?? "手动保留", createdAt: Date.now(), expiresAt: null };
+      const body = JSON.parse(route.request().postData() ?? "{}") as { note?: string; ttlMs?: number; ui?: boolean };
+      const pin = { id: `pin_${state.pins.length + 1}`, note: body.ui ? "UI 手动保留浏览器" : body.note ?? "手动保留", createdAt: Date.now(), expiresAt: null };
       state.pins.push(pin);
       state.idleRemainingMs = null;
       publish();
       return json(route, { ok: true, pin, status: payload() });
     });
     await page.route((url) => url.pathname === "/api/browser/pin/release", (route) => {
-      const body = JSON.parse(route.request().postData() ?? "{}") as { id?: string };
-      state.pins = state.pins.filter((p) => p.id !== body.id);
+      const body = JSON.parse(route.request().postData() ?? "{}") as { id?: string; ui?: boolean };
+      state.pins = state.pins.filter((p) => p.id !== body.id && !(body.ui && p.note === "UI 手动保留浏览器"));
       state.idleRemainingMs = 240_000;
       publish();
       return json(route, { ok: true, status: payload() });

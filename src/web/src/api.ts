@@ -224,6 +224,9 @@ export interface BrowserLifecycleStateView {
  * come only from a visible panel. Keeping them separate is what lets the idle
  * countdown actually reach zero while the UI is open.
  */
+/** Fixed note of the panel's own keep-awake pin; mirrors the server constant. */
+export const UI_KEEP_ALIVE_NOTE = "UI 手动保留浏览器";
+
 export const browserApi = {
   status: () => request<{ status: BrowserLifecycleStateView }>("/api/browser/status"),
   heartbeat: (id: string, generation: number) =>
@@ -231,8 +234,24 @@ export const browserApi = {
       method: "POST",
       body: { id, generation },
     }),
-  releaseViewer: (id: string) =>
-    request<{ ok: boolean }>("/api/browser/viewer/release", { method: "POST", body: { id } }),
+  releaseViewer: (id: string, generation: number) =>
+    request<{ ok: boolean }>("/api/browser/viewer/release", { method: "POST", body: { id, generation } }),
+  /**
+   * The browser panel's keep-awake switch, identified by a fixed server-side note
+   * rather than by a client-held id, so a reload or a second window re-derives the
+   * same pin from `status().pins` and can always release it. A caller that wants a
+   * script/operator pin passes its own note.
+   */
+  pinUi: () =>
+    request<{ ok: boolean; pin: { id: string; note: string; expiresAt: number | null }; status: BrowserLifecycleStateView }>(
+      "/api/browser/pin",
+      { method: "POST", body: { ui: true } },
+    ),
+  unpinUi: () =>
+    request<{ ok: boolean; status: BrowserLifecycleStateView }>("/api/browser/pin/release", {
+      method: "POST",
+      body: { ui: true },
+    }),
   pin: (note: string, ttlMs?: number) =>
     request<{ ok: boolean; pin: { id: string; note: string; expiresAt: number | null } }>("/api/browser/pin", {
       method: "POST",

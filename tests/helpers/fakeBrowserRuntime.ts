@@ -25,8 +25,25 @@ export class FakeBrowserRuntime implements BrowserRuntimeLike {
     pid: 4242,
     starttime: 1000,
     version: "Chrome/146.0.7680.31",
+    // A storage-bearing snapshot by default: the lifecycle refuses to release a
+    // browser whose snapshot lacks cookies/localStorage/IndexedDB, so every test
+    // that expects a real stop models a complete schema-2 snapshot.
+    snapshotSchema: 2,
+    snapshotHasStorage: true,
+    transitionBusy: false,
+    storageCounts: { cookies: 2, origins: 1, localStorageEntries: 3, indexedDbDatabases: 1 },
   };
-  snapshotValue: SnapshotOutcome = { ok: true, savedAt: 111, tabs: 1, skipped: 0, warnings: [], orderVerified: true };
+  snapshotValue: SnapshotOutcome = {
+    ok: true,
+    savedAt: 111,
+    tabs: 1,
+    skipped: 0,
+    warnings: [],
+    orderVerified: true,
+    // A complete, storage-bearing snapshot: the lifecycle refuses to release on
+    // anything less, so a real stop in a test needs real storage counts.
+    storageCounts: { cookies: 2, origins: 1, localStorageEntries: 3, indexedDbDatabases: 1 },
+  };
   stopValue: StopOutcome = { ok: true };
   wakeValue: WakeOutcome = { ok: true, restoredTabs: 1 };
   /** When set, `stop` rejects with this message (a runtime failure). */

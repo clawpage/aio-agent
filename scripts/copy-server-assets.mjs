@@ -4,6 +4,8 @@
 // relative to its own directory).
 import { cp, mkdir } from "node:fs/promises";
 import path from "node:path";
+import { createRequire } from "node:module";
+import { execFileSync } from "node:child_process";
 
 const root = path.resolve(import.meta.dirname, "..");
 
@@ -16,6 +18,15 @@ const assetTrees = [
 for (const [from, to] of assetTrees) {
   const target = path.join(root, to);
   await mkdir(path.dirname(target), { recursive: true });
-  await cp(path.join(root, from), target, { recursive: true });
+  await cp(path.join(root, from), target, { recursive: true, filter: source => !source.includes("__pycache__") && !source.endsWith(".pyc") });
   console.log(`copied server assets -> ${to}`);
 }
+
+// Build the offline runtime dependency from the exact lockfile dependency.
+// No registry request, browser download, or checked-in generated archive.
+const require = createRequire(import.meta.url);
+const packageDir = path.dirname(require.resolve("playwright-core/package.json"));
+const vendor = path.join(root, "dist/server/browser/vendor");
+await mkdir(vendor, { recursive: true });
+execFileSync("tar", ["-czf", path.join(vendor, "playwright-core.tgz"), "-C", packageDir, "."]);
+console.log("packaged offline playwright-core runtime");
