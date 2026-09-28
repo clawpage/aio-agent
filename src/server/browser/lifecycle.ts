@@ -1385,13 +1385,21 @@ status(): BrowserLifecycleStatus {
           : lossyStorage
             ? "snapshot_storage_missing"
             : "snapshot_failed";
-      const { message } = this.#fail(code, snap.message);
+      const failure = this.#fail(code, snap.message);
+      // Only allowlisted, static text reaches the UI; runtime messages may
+      // contain URLs or storage. Do not retain warnings from an older snapshot.
+      const detail = snap.blocked && snap.reason
+        ? SNAPSHOT_BLOCK_MESSAGES.get(snap.reason)
+        : undefined;
+      const message = detail ?? failure.message;
+      this.#lastError = message;
+      this.#warnings = detail ? [{ code: snap.reason as SnapshotWarning["code"], message: detail, tabIndex: null }] : [];
       this.#setState("error");
       this.#log.warn?.("browser snapshot failed; keeping the browser running", { error: message });
       this.#emit("sleep.failed", message);
       this.#scheduleRetry();
       this.#armExpiry();
-      return { verdict: "error", message, warnings: snap.warnings ?? this.#warnings, savedAt: this.#snapshotAt };
+      return { verdict: "error", message, warnings: this.#warnings, savedAt: this.#snapshotAt };
     }
     this.#snapshotAt = snap.savedAt ?? this.#clock.now();
     this.#warnings = snap.warnings ?? [];
@@ -1566,6 +1574,20 @@ status(): BrowserLifecycleStatus {
  * the code to its own copy); nothing derived from a runtime error ever lands
  * here, so a URL, cookie or token cannot leak through the status API.
  */
+const SNAPSHOT_BLOCK_MESSAGES = new Map<string, string>([
+  ["ambiguous_duplicate_tabs", "同网址标签的身份无法确认，已保留浏览器；稍后自动重试"],
+  ["tab_identity_unverified", "核对标签身份时页面发生变化或连接失败，已保留浏览器；稍后自动重试"],
+  ["tab_focus_unverified", "无法确认原选中标签，已保留浏览器；稍后自动重试"],
+  ["tab_set_mismatch", "浏览器与工具的标签列表不一致，已保留浏览器；稍后自动重试"],
+  ["tab_target_not_unique", "无法唯一确认标签身份，已保留浏览器"],
+  ["cdp_target_missing_id", "标签缺少运行标识，已保留浏览器"],
+  ["dirty_input", "页面有未提交的输入，已保留浏览器；提交或清除输入后可自动回收"],
+  ["download_in_flight", "存在未完成的下载，已保留浏览器；下载完成后可自动回收"],
+  ["unsupported_scheme", "有页面类型暂不支持恢复，已保留浏览器"],
+  ["tab_error", "页面状态读取失败，已保留浏览器；稍后自动重试"],
+  ["storage_unavailable", "站点存储保存失败，已保留浏览器以保护登录状态"],
+]);
+
 const ERROR_MESSAGES: Record<LifecycleErrorCode, string> = {
   disabled: "浏览器生命周期未启用",
   holders: "存在占用（任务/观看/保留），未释放浏览器",

@@ -441,6 +441,7 @@ describe("browser status view derivation", () => {
     expect(statusTone({ ...base, state: "error" })).toBe("error");
     const blocked = refusalReason({ ...base, lastErrorCode: "snapshot_blocked", unrestoredTabCount: 2 });
     expect(blocked).toContain("2 个页面");
+    expect(refusalReason({ ...base, lastErrorCode: "snapshot_blocked", lastError: "页面有未提交的输入，已保留浏览器" })).toContain("未提交的输入");
     expect(refusalReason({ ...base, lastErrorCode: "stop_failed" })).toContain("仍在运行");
     expect(refusalReason({ ...base })).toBeNull();
   });

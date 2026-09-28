@@ -1405,8 +1405,67 @@ def test_aio_restored_indices_preserves_extra_and_duplicate_tabs_and_cleans_mark
         assert_eq(rt.aio_restored_indices(FakeCdp(), [{"targetId": "a"}])[0], None, "找不到身份不猜 index")
         rt.aio_request = lambda *args: ({"success": True, "data": {1: 1, 3: 0}.get(active[0])}, "")
         assert_eq(rt.aio_restored_indices(FakeCdp(), [{"targetId": "a"}, {"targetId": "b"}])[0], None, "顺序改变不能报成功")
+        assert_eq(rt.aio_restored_indices(FakeCdp(), [{"targetId": "a"}, {"targetId": "b"}], require_order=False)[0], [3, 1], "保存阶段按身份重排 CDP 枚举结果")
     finally:
         rt.aio_tabs, rt.aio_request, rt.aio_activate_index = saved_tabs, saved_request, saved_activate
+
+
+@test
+def test_duplicate_capture_matches_identity_and_preserves_focus_on_failure() -> None:
+    saved = rt.aio_tabs, rt.aio_request, rt.aio_activate_index
+    pages = [{"id": "second", "type": "page", "url": "https://example.test/same"},
+             {"id": "first", "type": "page", "url": "https://example.test/same"}]
+    active = [0]
+    fail = [False]
+    focus_failure = [False]
+    changed = [False]
+    def rows():
+        return [{"index": i, "url": "https://example.test/same", "is_active": i == active[0]} for i in range(2)]
+    class Cdp:
+        def __init__(self): self.markers = {}; self.cleaned = []
+        def attach(self, target): return target
+        def evaluate(self, session, expression):
+            if expression.startswith("delete "):
+                self.markers.pop(session, None); self.cleaned.append(session)
+            else:
+                # The production probe assigns positions in CDP order.
+                self.markers[session] = 0 if session == "second" else 1
+            return True
+        def targets(self): return pages[:1] if changed[0] else pages
+        def call(self, *args): return {}
+    cdp = Cdp()
+    def activate(index, count, reconnect=True):
+        assert_false(reconnect, "捕获不能重连并改变标签顺序")
+        if focus_failure[0] and index == 0 and active[0] == 1:
+            return False, "active_activate_failed"
+        active[0] = index
+        return True, ""
+    def request(*args):
+        if fail[0] and active[0] == 1: return None, "offline"
+        return {"success": True, "data": cdp.markers.get(["first", "second"][active[0]])}, ""
+    rt.aio_tabs = lambda: (rows(), "")
+    rt.aio_activate_index = activate
+    rt.aio_request = request
+    try:
+        plan, _, verified, problem = rt.duplicate_capture_plan(cdp, pages, rows())
+        assert_eq(problem, "")
+        assert_true(verified)
+        assert_eq([p["targetId"] for p in plan], ["first", "second"], "同网址不能靠 CDP 枚举顺序配对")
+        assert_eq([p["active"] for p in plan], [True, False])
+        assert_eq(active[0], 0, "成功后恢复原选中页")
+        assert_eq(cdp.markers, {}, "不留下页面标记")
+        fail[0] = True
+        assert_eq(rt.duplicate_capture_plan(cdp, pages, rows())[3], "tab_identity_unverified")
+        assert_eq(active[0], 0, "失败也恢复原选中页")
+        assert_eq(cdp.markers, {})
+        fail[0] = False; changed[0] = True
+        assert_eq(rt.duplicate_capture_plan(cdp, pages, rows())[3], "tab_identity_unverified", "标签关闭时禁止保存")
+        assert_eq(active[0], 0)
+        assert_eq(rt.tab_plan(pages, rows(), verified_targets={0: "first", 1: "first"})[3], "tab_target_not_unique", "同一 target 不能保存两次")
+        changed[0] = False; focus_failure[0] = True
+        assert_eq(rt.duplicate_capture_plan(cdp, pages, rows())[3], "tab_focus_unverified", "无法恢复焦点时不能保存")
+    finally:
+        rt.aio_tabs, rt.aio_request, rt.aio_activate_index = saved
 
 
 @test

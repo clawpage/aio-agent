@@ -136,6 +136,13 @@ export interface PinLease {
 /** A page the helper could not fully capture and refused to lose silently. */
 export interface SnapshotWarning {
   code:
+    | "ambiguous_duplicate_tabs"
+    | "tab_identity_unverified"
+    | "tab_focus_unverified"
+    | "tab_set_mismatch"
+    | "tab_target_not_unique"
+    | "cdp_target_missing_id"
+    | "storage_unavailable"
     | "unsupported_scheme"
     | "unreachable"
     | "dirty_input"

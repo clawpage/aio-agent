@@ -123,6 +123,8 @@ export interface MockBrowserState {
 }
 
 export interface MockBrowserOptions {
+  /** A fixed, safe reason for a browser whose idle snapshot was refused. */
+  snapshotBlockReason?: string;
   /** Start from released ("asleep") instead of the default awake state. */
   startAsleep?: boolean;
   /** Observe every state transition the mock serves, for assertions. */
@@ -297,8 +299,8 @@ export async function mockConsole(page: Page, opts: MockConsoleOptions): Promise
       restorePending: Boolean(opts.browser.startAsleep),
       idleRemainingMs: opts.browser.startAsleep ? null : 240_000,
       pins: [],
-      lastErrorCode: null,
-      lastError: null,
+      lastErrorCode: opts.browser.snapshotBlockReason ? "snapshot_blocked" : null,
+      lastError: opts.browser.snapshotBlockReason ?? null,
       unrestoredTabCount: null,
     };
     const viewers = new Set<string>();

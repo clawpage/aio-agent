@@ -87,6 +87,7 @@ export function refusalReason(status: BrowserLifecycleStateView | null): string 
   switch (status.lastErrorCode) {
     case "snapshot_blocked":
     case "snapshot_incomplete":
+      if (status.lastError) return status.lastError;
       return count > 0
         ? `有 ${count} 个页面无法安全保存（可能未提交的输入或下载中），已保留浏览器未释放`
         : "快照不完整，已保留浏览器未释放";

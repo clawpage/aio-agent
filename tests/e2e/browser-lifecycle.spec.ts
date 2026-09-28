@@ -21,6 +21,18 @@ function replayOnly(): string {
 }
 
 test.describe("browser lifecycle panel", () => {
+  test("shows the specific safe reason when recycling is blocked", async ({ page }) => {
+    const reason = "页面有未提交的输入，已保留浏览器；提交或清除输入后可自动回收";
+    await mockConsole(page, {
+      conversations: [makeConversation(CONV_ID, "回收阻止原因")],
+      browser: { snapshotBlockReason: reason },
+    });
+    await page.goto("/");
+    await page.getByRole("button", { name: "工作区", exact: true }).first().click();
+    await expect(page.locator(".browser-status")).toContainText(reason);
+    await page.locator(".browser-status").screenshot({ path: test.info().outputPath("recycle-blocked.png") });
+  });
+
   test("a visible browser panel claims a viewer lease and shows the status bar", async ({ page, isMobile }) => {
     test.skip(isMobile, "the workspace overlay is desktop-first here; the mobile project covers layout only");
     await page.bringToFront();

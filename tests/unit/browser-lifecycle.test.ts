@@ -622,6 +622,24 @@ describe("BrowserLifecycle race safety", () => {
     life.shutdown();
   });
 
+  it.each(["dirty_input", "download_in_flight", "tab_identity_unverified"])("exposes a safe specific snapshot refusal: %s", async (reason) => {
+    const runtime = makeRuntime({ snapshot: {
+      ok: false, blocked: true, reason,
+      message: "https://private.example/?token=secret",
+      warnings: [{code: "tab_error", message: "private cookie secret", tabIndex: 0}],
+    }});
+    const { life, clock } = makeLifecycle(runtime);
+    clock.advance(300_000);
+    await settle();
+    const status = life.status();
+    expect(status.lastErrorCode).toBe("snapshot_blocked");
+    expect(status.lastError).not.toBe("页面状态无法安全保存，已放弃释放浏览器");
+    expect(status.lastSnapshotWarnings[0]?.code).toBe(reason);
+    expect(JSON.stringify(status)).not.toMatch(/private|secret/);
+    expect(runtime.calls.stop).toBe(0);
+    life.shutdown();
+  });
+
   it("never stops when the snapshot fails and reports a secret-free code", async () => {
     const runtime = makeRuntime({
       snapshot: {

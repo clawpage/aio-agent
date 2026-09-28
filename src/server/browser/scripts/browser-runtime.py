@@ -1276,7 +1276,10 @@ def aio_activate_index(index: int, tab_count: int, reconnect: bool = True) -> tu
     return True, ""
 
 
-def aio_restored_indices(cdp: Cdp, entries: Sequence[Any]) -> tuple[list[int] | None, str]:
+def aio_restored_indices(
+    cdp: Cdp, entries: Sequence[Any], *, require_order: bool = True,
+    expected_rows: Sequence[Mapping[str, Any]] | None = None,
+) -> tuple[list[int] | None, str]:
     """Map restored CDP targets to AIO indices without guessing by URL.
 
     Chromium may restore its own session or the user may add tabs during recovery.
@@ -1286,6 +1289,8 @@ def aio_restored_indices(cdp: Cdp, entries: Sequence[Any]) -> tuple[list[int] | 
     """
     rows, problem = aio_tabs()
     if problem or rows is None:
+        return None, "active_activate_failed"
+    if expected_rows is not None and rows != list(expected_rows):
         return None, "active_activate_failed"
     key = "__aio_restore_" + uuid.uuid4().hex
     sessions: list[str] = []
@@ -1316,7 +1321,7 @@ def aio_restored_indices(cdp: Cdp, entries: Sequence[Any]) -> tuple[list[int] | 
             return None, "active_activate_failed"
         # Extra pages can surround restored pages, but their relative order must
         # still match the snapshot. Never silently claim reordered tabs survived.
-        if indices != sorted(indices):
+        if require_order and indices != sorted(indices):
             return None, "active_activate_failed"
         return indices, ""
     except CdpError:
@@ -1333,10 +1338,49 @@ def aio_restored_indices(cdp: Cdp, entries: Sequence[Any]) -> tuple[list[int] | 
                 pass
 
 
+def duplicate_capture_plan(
+    cdp: Cdp, pages: Sequence[Mapping[str, Any]], rows: Sequence[Mapping[str, Any]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], bool, str]:
+    """Prove duplicate-tab identity, preserving the original AIO focus.
+
+    URL/title/order are not identities. The same ephemeral marker protocol used
+    by restore pairs each AIO index with its actual CDP target. No page storage,
+    URL or content is modified. Navigation/closure during probing blocks capture.
+    """
+    active = [r for r in rows if r.get("is_active")]
+    if len(active) != 1:
+        return [], [], False, "tab_identity_unverified"
+    original_index = active[0]["index"]
+    result = ([], [], False, "tab_identity_unverified")
+    focus_restored = False
+    try:
+        entries = [{"targetId": p.get("id")} for p in pages]
+        indices, problem = aio_restored_indices(cdp, entries, require_order=False, expected_rows=rows)
+        if indices is not None and not problem:
+            # Target ids and URLs must still describe exactly the captured set.
+            current = [p for p in cdp.targets() if p.get("type") == "page"]
+            identity = lambda ps: sorted((p.get("id", ""), normalize_blank_url(str(p.get("url") or ""))) for p in ps)
+            if identity(current) == identity(pages):
+                result = tab_plan(pages, rows, verified_targets={i: p["id"] for i, p in zip(indices, pages)})
+    except CdpError:
+        pass
+    finally:
+        # Even failed probes must undo their temporary tab selection. Refuse a
+        # snapshot if the index set changed or the original focus cannot return.
+        after, problem = aio_tabs()
+        shape = lambda rs: [(r["index"], r["url"]) for r in rs]
+        if not problem and after is not None and shape(after) == shape(rows):
+            focus_restored, _ = aio_activate_index(original_index, len(rows), reconnect=False)
+            after, problem = aio_tabs()
+            focus_restored = focus_restored and not problem and after is not None and [r["index"] for r in after if r.get("is_active")] == [original_index]
+    return result if focus_restored else ([], [], False, "tab_focus_unverified")
+
+
 def tab_plan(
     cdp_pages: Sequence[Mapping[str, Any]],
     aio_rows: Sequence[Mapping[str, Any]] | None,
     aio_error: str = "",
+    verified_targets: Mapping[int, str] | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], bool, str]:
     """Pair CDP pages with the AIO tab rows, provably, one target per tab.
 
@@ -1349,9 +1393,7 @@ def tab_plan(
       * order and focus come from the AIO API only - never guessed from CDP;
       * the AIO and CDP URL *multisets* must be equal. A set difference would
         quietly drop or duplicate a page, so a mismatch blocks instead;
-      * a URL that appears more than once in either list has no provable
-        target↔row correspondence (two identical pages are indistinguishable in
-        the API), so duplicates block rather than all mapping to the first target;
+      * duplicate URLs require a live, marker-proven target↔row mapping;
       * when the API is unavailable, the plan is built from CDP order with every
         tab marked unfocused and the order flagged unverified - each entry still
         carries its own targetId, so the mapping stays 1:1.
@@ -1411,17 +1453,24 @@ def tab_plan(
     if cdp_counts != aio_counts:
         return [], warnings, False, "tab_set_mismatch"
     duplicated = [url for url, count in cdp_counts.items() if count > 1]
-    if duplicated:
+    if duplicated and verified_targets is None:
         # Two tabs on the same URL: the API cannot say which CDP target is which,
         # so neither scroll nor sessionStorage can be attributed.
         return [], warnings, False, "ambiguous_duplicate_tabs"
 
     plan = []
+    used_targets: set[str] = set()
     for row in aio_rows:
         url = normalize_blank_url(str(row.get("url") or ""))
         target_ids = cdp_by_url.get(url) or []
+        if verified_targets is not None:
+            proven = verified_targets.get(row["index"])
+            target_ids = [proven] if proven in target_ids else []
         if len(target_ids) != 1:
             return [], warnings, False, "tab_target_not_unique"
+        if target_ids[0] in used_targets:
+            return [], warnings, False, "tab_target_not_unique"
+        used_targets.add(target_ids[0])
         plan.append(
             {
                 "url": url,
@@ -1522,6 +1571,14 @@ def capture_snapshot(
 
     aio_rows, aio_error = aio_tabs()
     plan, warnings, order_verified, blocked_reason = tab_plan(pages, aio_rows, aio_error)
+    if blocked_reason == "ambiguous_duplicate_tabs" and aio_rows:
+        try:
+            cdp.connect()
+            plan, warnings, order_verified, blocked_reason = duplicate_capture_plan(cdp, pages, aio_rows)
+        except CdpError:
+            blocked_reason = "tab_identity_unverified"
+        finally:
+            cdp.close()
     if blocked_reason:
         # The API and CDP listings disagree, or a URL repeats: the tab↔target
         # pairing is not provable, so no snapshot is written and nothing is stopped.
@@ -1530,6 +1587,8 @@ def capture_snapshot(
             "ambiguous_duplicate_tabs": "存在多个相同 URL 的标签，无法区分各自内容，已放弃保存",
             "tab_target_not_unique": "无法为某个标签唯一确定 CDP 目标，已放弃保存",
             "cdp_target_missing_id": "有标签缺少 CDP 目标 id，已放弃保存",
+            "tab_identity_unverified": "标签身份核对失败或核对期间页面发生变化，已保留浏览器",
+            "tab_focus_unverified": "无法恢复核对前的选中标签，已保留浏览器",
         }.get(blocked_reason, "无法确认标签与 CDP 目标的对应关系")
         return err(
             f"{explain}；已放弃释放浏览器，请整理标签后重试",
@@ -2161,9 +2220,17 @@ def restore_tabs(
             state["tabs"] = entries
             write_restore_state(snapshot_path, state)
 
-        # 3. Drop the browser's own startup placeholder pages.
+        # 3. Move AIO off its startup page before closing placeholders. If its
+        # selected Playwright page is closed, AIO reconnects on the next request
+        # and enumerates CDP targets in an unspecified (often reversed) order.
+        # Prove identities while that page is still alive, then select a restored
+        # page so closing the placeholder cannot invalidate the AIO session.
         keep = {str(e["targetId"]) for e in entries if isinstance(e, dict) and isinstance(e.get("targetId"), str)}
-        _close_startup_pages(cdp, startup_ids, keep)
+        before_close, _ = aio_restored_indices(cdp, entries)
+        if before_close:
+            selected, _ = aio_activate_index(before_close[0], 0, reconnect=False)
+            if selected:
+                _close_startup_pages(cdp, startup_ids, keep)
 
         # Prove target identity, preserving extra tabs instead of blocking forever
         # on a full-list URL comparison (duplicates/redirects are not identities).
