@@ -267,3 +267,16 @@ test("message times and task elapsed durations update and freeze without includi
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
     await page.screenshot({ path: `/Users/mengxiao/workspace/.scratch/artifacts/aio-message-times/${info.project.name}.png` });
 });
+
+test("waiting identifies its blocker and updates without a revision bump",async({page},info)=>{
+ const pending=task(1,"waiting");pending.waitReason={label:"等待文件操作",message:"“整理项目”正在使用同一文件范围或共享环境，结束后自动继续。"};
+ const {rows}=await setup(page,[pending]);
+ await expect(page.locator('.task-progress-label')).toHaveText("等待文件操作");
+ await expect(page.locator('.task-wait-reason')).toContainText("整理项目");
+ const box=await page.locator('.task-wait-reason').boundingBox();expect(box!.x+box!.width).toBeLessThanOrEqual(page.viewportSize()!.width);
+ await page.screenshot({path:`/Users/mengxiao/workspace/.scratch/artifacts/aio-scoped-resources/wait-${info.project.name}.png`,animations:"disabled"});
+ rows[0]!.waitReason={label:"等待执行空位",message:"已有 3 个任务执行中，空位释放后自动开始。"};
+ await expect(page.locator('.task-progress-label')).toHaveText("等待执行空位");
+ Object.assign(rows[0]!,{status:"running",revision:2,waitReason:null});
+ await expect(page.locator('.task-progress-label')).toHaveText("Working…");await expect(page.locator('.task-wait-reason')).toHaveCount(0);
+});

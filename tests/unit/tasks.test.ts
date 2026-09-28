@@ -180,6 +180,33 @@ describe("main inbox delegation", () => {
         await tick();
         expect(tasks.get(b.id)?.status).toBe("running");
     });
+    it("runs unrelated directory writes and new documents together, queues overlapping writes with a reason", async () => {
+        const root="/home/gem/workspace";
+        codex.plan=async p=>{const {message}=JSON.parse(p.split("\n").at(-1)!);return JSON.stringify({title:message,related:[],dependencies:[],resources:message==='document'?[]:[`write:${root}/projects/${message==='overlap'?'a/src':message}`]});};
+        const a=submit("a");await tick();
+        const overlap=submit("overlap"), b=submit("b"), doc=submit("document");await tick();await tick();
+        expect(tasks.get(a.id)?.status).toBe("running");expect(tasks.get(b.id)?.status).toBe("running");expect(tasks.get(doc.id)?.status).toBe("running");
+        const waiting=tasks.view(tasks.get(overlap.id)!);expect(waiting.status).toBe("waiting");expect(waiting.waitReason?.label).toBe("等待文件操作");expect(waiting.waitReason?.message).toContain("“a”");
+        codex.completeTurn(codex.startedTurns[0]!.turnId);await tick();expect(tasks.get(overlap.id)?.status).toBe("running");expect(tasks.view(tasks.get(overlap.id)!).waitReason).toBeNull();
+    });
+    it("protects implicit task directories and keeps legacy broad workspace claims conservative",async()=>{
+        const doc=submit("document");await tick();
+        codex.plan=async()=>JSON.stringify({title:"delete tasks",related:[],dependencies:[],resources:["write:/home/gem/workspace/tasks"]});
+        const deletion=submit("delete task directories");await tick();expect(tasks.get(deletion.id)?.status).toBe("waiting");
+        codex.plan=async()=>JSON.stringify({title:"legacy",related:[],dependencies:[],resources:["workspace"]});
+        const broad=submit("global install");await tick();expect(tasks.get(broad.id)?.status).toBe("waiting");
+        codex.completeTurn(codex.startedTurns[0]!.turnId);await tick();expect(tasks.get(deletion.id)?.status).toBe("running");expect(tasks.get(broad.id)?.status).toBe("waiting");
+    });
+    it("waits for a scoped resource upgrade without reserving it or blocking independent work",async()=>{
+        codex.plan=async()=>JSON.stringify({title:"writer",related:[],dependencies:[],resources:["write:/home/gem/workspace/projects/a"]});
+        const writer=submit("writer");await tick();
+        codex.plan=async()=>JSON.stringify({title:"doc",related:[],dependencies:[],resources:[]});
+        const doc=submit("doc");await tick();
+        codex.plan=async()=>JSON.stringify({title:"extra",appendTo:doc.id,related:[],dependencies:[],resources:["read:/home/gem/workspace/projects/a/report.md"]});
+        const extra=submit("extra");await tick();expect(tasks.get(extra.id)?.status).toBe("merging");expect(codex.steers).toHaveLength(0);
+        expect(tasks.view(tasks.get(extra.id)!).waitReason?.label).toBe("等待文件操作");
+        codex.completeTurn(codex.startedTurns[0]!.turnId);await tick();expect(codex.steers).toHaveLength(1);expect(tasks.get(extra.id)?.status).toBe("merged");
+    });
     it("stops only the selected child and accepts further work", async () => {
         const a = submit("a"), b = submit("b");
         await tick();

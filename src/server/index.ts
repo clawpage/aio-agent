@@ -94,7 +94,7 @@ export async function bootstrap(opts: BootstrapOptions = {}): Promise<Bootstrapp
   const agent = new AgentManager({ cfg, db, log, codex, hostTokens, browser, bridge });
   const aio = opts.overrides?.aio ?? new AioClient(cfg, log);
 
-  const tasks = new TaskService(db, cfg, agent, codex);
+  const tasks = new TaskService(db, cfg, agent, codex, container);
   const ctx: AppContext = {
     tasks,
     cfg,

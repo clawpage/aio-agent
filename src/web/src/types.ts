@@ -182,6 +182,7 @@ export interface DocumentRender {
 }
 
 export interface Task {
+  waitReason?: { label: string; message: string } | null;
   clarification?: string | null;
   description?: string | null;
   mergedInto?: string | null;

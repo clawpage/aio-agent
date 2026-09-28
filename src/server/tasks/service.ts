@@ -3,6 +3,7 @@ import type { Db } from "../db.js";
 import type { Config } from "../config.js";
 import { randomId } from "../auth/passwords.js";
 import { AgentManager, TurnConflictError, type AgentEvent, type CodexSessionLike, type TurnAttachment } from "../codex/manager.js";
+import { normalizeResource, resolveResources, type ResourceSandbox } from "./resources.js";
 import { parsePlan, planningPrompt, resourcesConflict, type TaskPlan } from "./planning.js";
 interface TaskRow {
     revision: number;
@@ -39,7 +40,7 @@ export class TaskService {
     #merging = false;
     #mergeAgain = false;
     #scheduled = false;
-    constructor(private db: Db, private cfg: Config, private agent: AgentManager, private codex: CodexSessionLike) { }
+    constructor(private db: Db, private cfg: Config, private agent: AgentManager, private codex: CodexSessionLike, private resourceSandbox?: ResourceSandbox) { }
     init(): void {
         // AgentManager reconciles in-flight turns before this runs. Never replay an
         // executor with uncertain side effects. Unsubmitted planning is safe to resume.
@@ -64,10 +65,32 @@ export class TaskService {
             status: row.status, result: TERMINAL.has(row.status) ? row.result : null, error: row.error,
             attachments: JSON.parse(row.attachments_json) as TurnAttachment[], relatedTaskId: row.related_task_id,
             description: plan?.description ?? null,
+            waitReason: this.waitReason(row),
             clarification: row.status === "needs_input" ? plan?.clarification ?? null : null,
             dependencies: plan?.dependencies ?? [], createdAt: row.created_at, startedAt: turn?.started_at ?? null, completedAt: row.completed_at,
             approvals: this.agent.listPendingRequests(row.conversation_id).length,
         };
+    }
+    private claims(row: TaskRow, plan?: TaskPlan): string[] {
+        const p = plan ?? (row.plan_json ? JSON.parse(row.plan_json) as TaskPlan : null);
+        if (!p) return ["all"];
+        return [...new Set([...p.resources, `write:${this.cfg.sandbox.containerWorkspaceDir}/tasks/${row.id}`, ...(p.ownedResources ?? [])])];
+    }
+    private waitReason(row: TaskRow): { label: string; message: string } | null {
+        if (!["waiting", "merging"].includes(row.status) || !row.plan_json) return null;
+        const plan = JSON.parse(row.plan_json) as TaskPlan;
+        const dependency = plan.dependencies.map(id => this.get(id)).find(t => t && t.status !== "completed");
+        if (dependency) return { label: "等待前置任务", message: `等待“${dependency.title}”完成后继续。` };
+        const parent = row.merged_into ? this.get(row.merged_into) : null;
+        const claims = parent ? [...this.claims(parent), ...this.claims(row)] : this.claims(row);
+        const active = this.rows().filter(t => DISPATCHED.has(t.status) && t.id !== parent?.id);
+        const blocker = active.find(t => resourcesConflict(claims, this.claims(t)));
+        if (blocker) {
+            const browser = claims.includes("browser") && this.claims(blocker).includes("browser");
+            return { label: browser ? "等待浏览器" : "等待文件操作", message: `“${blocker.title}”正在使用${browser ? "共享浏览器" : "同一文件范围或共享环境"}，结束后自动继续。` };
+        }
+        if (!parent && active.length >= this.cfg.agent.maxConcurrentTurns) return { label: "等待执行空位", message: `已有 ${this.cfg.agent.maxConcurrentTurns} 个任务执行中，空位释放后自动开始。` };
+        return { label: parent ? "正在追加" : "即将开始", message: parent ? "正在将补充交给原任务。" : "已满足执行条件，正在调度。" };
     }
     list(before = Number.MAX_SAFE_INTEGER) {
         const rows = this.db.prepare("SELECT * FROM tasks WHERE created_at < ? ORDER BY created_at DESC LIMIT 101").all(before) as unknown as TaskRow[];
@@ -180,13 +203,13 @@ export class TaskService {
             const files = [row,...this.rows().filter(t=>t.merged_into===row.id && t.status==='merged')]
                 .flatMap(t=>JSON.parse(t.attachments_json) as TurnAttachment[]);
             const planningInput = [inputContext, ...(files.length ? [`已有附件（执行者可以读取其中资料）：${JSON.stringify(files)}`] : [])].filter(Boolean).join("\n\n");
-            const raw = await this.codex.planTask?.(planningPrompt(planningInput, previous, row.related_task_id));
+            const raw = await this.codex.planTask?.(planningPrompt(planningInput, previous, row.related_task_id, this.cfg.sandbox.containerWorkspaceDir));
             if (this.#closed || this.get(row.id)?.status !== "planning")
                 return;
             // A supplement may arrive while the classifier is in flight. Replan
             // with the latest input rather than dispatching an outdated decision.
             if (this.taskContext(this.get(row.id)!) !== inputContext) return;
-            const plan = parsePlan(raw ?? null, previous, row.related_task_id);
+            const plan = parsePlan(raw ?? null, previous, row.related_task_id, this.cfg.sandbox.containerWorkspaceDir);
             if (!plan)
                 throw new Error("任务分配暂时失败，尚未执行。请重试分配。");
             if (explicit?.status === "needs_input") {
@@ -194,6 +217,16 @@ export class TaskService {
                 plan.clarification = null;
                 plan.dependencies = plan.dependencies.filter(id => id !== explicit.id);
             }
+            const ownerId = plan.appendTo ?? row.id;
+            const root = this.cfg.sandbox.containerWorkspaceDir;
+            const owned = [`write:${root}/tasks/${ownerId}`, ...files.map(f => normalizeResource(`read:${f.path}`, root) ?? "workspace")];
+            // Resolve aliases in the sandbox, never against the Mac filesystem.
+            if (this.resourceSandbox) {
+                plan.resources = await resolveResources(plan.resources, root, this.resourceSandbox);
+                plan.ownedResources = await resolveResources(owned, root, this.resourceSandbox);
+            } else plan.ownedResources = owned;
+            if (this.#closed || this.get(row.id)?.status !== "planning") return;
+            if (this.taskContext(this.get(row.id)!) !== inputContext) return;
             if (plan.appendTo) {
                 this.db.prepare("UPDATE tasks SET title=?,plan_json=?,merged_into=?,status='merging',error=NULL WHERE id=?").run(plan.title,JSON.stringify(plan),plan.appendTo,row.id);
                 return;
@@ -261,9 +294,10 @@ export class TaskService {
                 const parentPlan=JSON.parse(parent.plan_json) as TaskPlan;
                 const resources=[...new Set([...parentPlan.resources,...plan.resources])];
                 const otherActive=this.rows().filter(t=>t.id!==parent.id && DISPATCHED.has(t.status));
-                if(otherActive.some(t=>resourcesConflict(resources,t.plan_json ? JSON.parse(t.plan_json).resources : ['all']))) continue;
+                if(otherActive.some(t=>resourcesConflict([...this.claims(parent, parentPlan), ...this.claims(row, plan)],this.claims(t)))) continue;
                 // Reserve the expanded resource set before sending the update.
                 parentPlan.resources=resources;
+                parentPlan.ownedResources=[...new Set([...(parentPlan.ownedResources ?? []),...(plan.ownedResources ?? [])])];
                 parentPlan.related=[...new Set([...parentPlan.related,...plan.related.filter(id=>id!==parent.id)])];
                 this.db.prepare('UPDATE tasks SET plan_json=? WHERE id=?').run(JSON.stringify(parentPlan),parent.id);
                 if(!parent.turn_id) {
@@ -273,7 +307,7 @@ export class TaskService {
                 this.db.prepare("UPDATE tasks SET status='steering' WHERE id=?").run(row.id);
                 try {
                     const result=await this.agent.appendTurnInput(parent.conversation_id,parent.turn_id,
-                        `这是用户对当前任务的补充，请合并处理并在最终结果中覆盖，不要当作独立任务。可协作使用的资源更新为：${resources.join(',')||'本任务目录'}。\n\n${row.input_text}${dependencies.length ? `\n\n补充所需的已完成任务资料：${JSON.stringify(dependencies.map(t => ({id:t!.id,result:t!.result?.slice(0,16000)})))}` : ''}`,
+                        `这是用户对当前任务的补充，请合并处理并在最终结果中覆盖，不要当作独立任务。可协作使用的资源更新为：${this.claims(parent, parentPlan).join(',')}。\n\n${row.input_text}${dependencies.length ? `\n\n补充所需的已完成任务资料：${JSON.stringify(dependencies.map(t => ({id:t!.id,result:t!.result?.slice(0,16000)})))}` : ''}`,
                         JSON.parse(row.attachments_json),resources.includes("browser"));
                     if(this.#closed) return;
                     if(result==='browser_unavailable') this.db.prepare("UPDATE tasks SET status='merge_failed',error=? WHERE id=?").run('此补充需要浏览器，但浏览器暂未恢复；原任务仍可继续，请恢复浏览器后重新补充。',row.id);
@@ -303,14 +337,15 @@ export class TaskService {
             }
             if (deps.some(d => d!.status !== "completed"))
                 continue;
-            if (active.some(t => resourcesConflict(plan.resources, t.plan_json ? (JSON.parse(t.plan_json) as TaskPlan).resources : ["all"])))
+            if (active.some(t => resourcesConflict(this.claims(row, plan), this.claims(t))))
                 continue;
             const related = plan.related.map(id => this.get(id)).filter((t): t is TaskRow => !!t);
             const context = related.map(t => ({ id: t.id, message: t.input_text.slice(0, 6000), status: t.status, result: t.result?.slice(0, 16000) }));
             const prompt = [
                 `你是 AIO Agent 主会话委派的独立子 agent。任务 ID：${row.id}。只处理本任务，不递归委派。`,
                 `新文件放在 ${this.cfg.sandbox.containerWorkspaceDir}/tasks/${row.id}/（自行创建），不要散落工作区根目录。共享工作区里可能有其他子 agent；不得覆盖无关文件或修改其他任务目录。`,
-                `本次被调度的共享资源：${plan.resources.join(",") || "仅本任务目录"}。没有 browser 权限不要操作共享浏览器；没有 workspace 权限不要修改既有项目或安装全局依赖。需要额外共享资源时停止并在最终回复中说明。`,
+                `本次获准使用的资源范围：${this.claims(row, plan).join(",")}。read: 只读；write: 可修改该路径及后代；workspace 表示共享环境操作。没有 browser 不操作共享浏览器；没有 workspace 不安装全局依赖或改变共享运行环境。只在声明路径内操作，不修改符号链接或通过链接越过声明范围。需要额外范围时停止并说明，不擅自扩大。沙盒命令无需审批不代表可以越过本任务范围。`,
+                `临时文件、渲染输出、缓存和工具配置也放在 ${this.cfg.sandbox.containerWorkspaceDir}/tasks/${row.id}/.tmp/，设置 TMPDIR 指向该目录；LibreOffice 使用该目录下独立的 UserInstallation。不要复用或清理 /tmp/verify、/tmp/lo-final 等公共路径。结束前等待本任务的写入子进程完成，不留后台写入。`,
                 "你以用户的个人助理身份交付：最终回复直接回答用户要的结论、建议、安排和交付物，先给最有用的结果，不要只说准备做。保留必要的事实来源、未完成事项与会影响用户决策的限制（如尚未预订、日期待确认）。",
                 "用户明确不关心实现过程：最终回复不汇报使用了哪些 skill、工具、命令、API、子 agent 或文件创建/检查步骤；除非用户专门询问这些技术细节。需要说明的执行与验证细节放在 commentary 过程里，不要放进最终回报或交付文档。不要删掉有用的依据、链接或不确定性来假装结果更确定。",
                 "按信息表达需要选择交付格式：普通文字、清单和简单表格可用结构清晰的 Markdown（.md）；攻略、计划、说明若需要复杂排版、图表、多栏卡片或交互，优先制作 HTML（.html）页面，不要一律用 Markdown。HTML 尽量自包含、适配手机，交付前在沙盒浏览器验证实际展示。链接用有意义的中文标题，例如[完整三天行程](绝对文件路径)，不要只写下载文件或暴露冗长文件名。用户指定 Word、Excel、PPT 等格式时遵循其格式。最终消息给简要要点，完整内容放在文档。",
