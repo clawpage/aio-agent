@@ -49,6 +49,14 @@ describe("main inbox delegation", () => {
         expect(finished.startedAt).toBe(10_000);
         expect(finished.completedAt).toBeGreaterThan(10_000);
     });
+    it("freezes browser dependency from the dispatched resource plan", async () => {
+        const chat=submit("hi"); await tick();
+        const first=tasks.get(chat.id)!;
+        expect(db.prepare("SELECT browser_required FROM turns WHERE id=?").get(first.turn_id)?.browser_required).toBe(0);
+        codex.plan=async()=>JSON.stringify({title:"网页",related:[],dependencies:[],resources:["browser"]});
+        const web=submit("打开网页"); await tick();
+        expect(db.prepare("SELECT browser_required FROM turns WHERE id=?").get(tasks.get(web.id)!.turn_id)?.browser_required).toBe(1);
+    });
     it("asks once for essentials, keeps the original task, and does not reserve browser resources while waiting", async () => {
         codex.plan = async p => {
             const data = JSON.parse(p.split("\n").at(-1)!);

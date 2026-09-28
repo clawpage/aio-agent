@@ -1357,6 +1357,42 @@ def test_restore_fails_when_the_aio_focus_cannot_be_synced() -> None:
 
 
 @test
+def test_restore_finishes_with_reindexed_aio_tabs_and_focuses_the_original_target() -> None:
+    from unittest.mock import patch
+    class FakeCdp:
+        def __init__(self, **kwargs): self.calls = []
+        def connect(self): pass
+        def close(self): pass
+        def attach(self, target): return target
+        def targets(self): return [{"id": t, "type": "page", "url": "https://example.test/"} for t in ["a", "b", "c"]]
+        def call(self, method, params, **kwargs): self.calls.append((method, params)); return {}
+    cdp = FakeCdp()
+    activated = []
+    mapping = [0, 2, 1]
+    def identify(c, entries, require_order=True):
+        return (None, "active_activate_failed") if require_order else (mapping, "")
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "snapshot.json")
+        snapshot = {"savedAt": 123, "orderVerified": True, "tabs": [
+            {"url": "https://example.test/", "active": i == 1} for i in range(3)]}
+        state = {"snapshotSavedAt": 123, "completed": False, "tabs": [
+            {"targetId": t, "navigated": True, "storageApplied": True, "scrollApplied": True} for t in ["a", "b", "c"]]}
+        rt.write_restore_state(path, state)
+        with patch.object(rt, "Cdp", lambda **k: cdp), patch.object(rt, "wait_for_ready_state", return_value=True), \
+             patch.object(rt, "_current_browser_identity", return_value=(12, 34)), \
+             patch.object(rt, "aio_restored_indices", identify), \
+             patch.object(rt, "aio_activate_index", lambda i, *a, **k: (activated.append(i) or True, "")):
+            for _ in range(2):
+                result = rt.restore_tabs(snapshot, snapshot_path=path)
+                assert_true(result["ok"], "内部编号重排不应阻止恢复")
+                assert_false(result["orderVerified"], "不能声称内部编号保持原序")
+                assert_eq(activated[-1], 2, "原选中目标 b 对应当前 index 2")
+                assert_true(rt.read_restore_state(path)["completed"])
+            assert_false(any(m in ("Target.createTarget", "Target.closeTarget", "Page.navigate") for m, _ in cdp.calls), "重试不能重建、关闭或重新导航标签")
+            assert_true(("Target.activateTarget", {"targetId": "b"}) in cdp.calls)
+
+
+@test
 def test_restore_pending_keeps_focus_failure_pending_even_when_all_pages_applied() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         path = os.path.join(tmp, "snapshot.json")

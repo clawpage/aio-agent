@@ -2226,7 +2226,7 @@ def restore_tabs(
         # Prove identities while that page is still alive, then select a restored
         # page so closing the placeholder cannot invalidate the AIO session.
         keep = {str(e["targetId"]) for e in entries if isinstance(e, dict) and isinstance(e.get("targetId"), str)}
-        before_close, _ = aio_restored_indices(cdp, entries)
+        before_close, _ = aio_restored_indices(cdp, entries, require_order=False)
         if before_close:
             selected, _ = aio_activate_index(before_close[0], 0, reconnect=False)
             if selected:
@@ -2234,9 +2234,13 @@ def restore_tabs(
 
         # Prove target identity, preserving extra tabs instead of blocking forever
         # on a full-list URL comparison (duplicates/redirects are not identities).
-        restored_indices, index_problem = aio_restored_indices(cdp, entries)
+        restored_indices, index_problem = aio_restored_indices(cdp, entries, require_order=False)
         if restored_indices is None:
             problems.append(index_problem)
+        elif restored_indices != sorted(restored_indices):
+            # AIO re-enumerates CDP targets on reconnect; its indices are not
+            # native Chrome tab order. Identity and focus remain fully verified.
+            problems.append("tab_order_unverified")
 
         # 4. Focus the tab the user had focused, but only when the snapshot could
         #    actually prove which one it was, and only after the AIO API agrees.
@@ -2293,7 +2297,7 @@ def restore_tabs(
     state["browserPid"] = identity[0]
     state["browserStarttime"] = identity[1]
     write_restore_state(snapshot_path, state)
-    return ok(restoredTabs=restored, orderVerified=bool(snapshot.get("orderVerified", False)), problems=problems)
+    return ok(restoredTabs=restored, orderVerified=bool(snapshot.get("orderVerified", False)) and "tab_order_unverified" not in problems, problems=problems)
 
 
 def _restored_count(entries: Sequence[Any]) -> int:

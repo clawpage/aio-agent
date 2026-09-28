@@ -90,6 +90,7 @@ export interface TurnRow {
   attachments_json: string;
   client_message_id: string;
   cancel_requested: number;
+  browser_required: number;
   /** Model frozen at submit time so queued turns never follow a later change. */
   model: string | null;
   effort: string | null;
@@ -211,6 +212,8 @@ export class TurnInputUnsupportedError extends Error {
 }
 
 export interface SubmitTurnInput {
+  /** Internal resource plan only; legacy/HTTP turns stay conservative. */
+  requiresBrowser?: boolean;
   /** Internal dispatcher snapshot; never accepted from HTTP request fields. */
   frozenSettings?: { model: string; effort: string | null };
   conversationId: string;
@@ -252,8 +255,8 @@ export interface AgentStatus {
  *
  * A managed turn protects the sandbox browser for its whole duration: the lease
  * is reserved synchronously (before any await) so no idle timer can release a
- * Chromium the turn is about to drive, and `ready()` is awaited before the turn
- * executes so a released browser is rebuilt from its snapshot first. Keeping the
+ * Chromium the turn is about to drive, and browser-dependent turns await `ready()` before execution. Internal tasks
+ * with no browser resource skip recovery; adding browser work gates the steer. Keeping the
  * dependency optional lets existing tests drive the manager with no browser.
  */
 export interface BrowserGateLike {
@@ -796,9 +799,9 @@ export class AgentManager {
     try {
       this.#db
         .prepare(
-          "INSERT INTO turns (id, conversation_id, client_message_id, status, input_text, attachments_json, model, effort, created_at) VALUES (?, ?, ?, 'queued', ?, ?, ?, ?, ?)",
+          "INSERT INTO turns (id, conversation_id, client_message_id, status, input_text, attachments_json, model, effort, browser_required, created_at) VALUES (?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?)",
         )
-        .run(id, input.conversationId, input.clientMessageId, input.text, JSON.stringify(attachments), resolved.model, resolved.effort, now);
+        .run(id, input.conversationId, input.clientMessageId, input.text, JSON.stringify(attachments), resolved.model, resolved.effort, input.requiresBrowser === false ? 0 : 1, now);
     } catch (err) {
       // Concurrent duplicate submission: return the winner.
       if (String(err).includes("UNIQUE")) {
@@ -930,7 +933,9 @@ export class AgentManager {
     this.#appendEvent(conversation.id, turn.id, "turn.started", { turnId: turn.id });
 
     // The turn holds a browser lease already (reserved synchronously in #pump).
-    // Wait for a usable browser before executing: if Chromium was released for
+    // Only tasks whose frozen resource plan needs a browser wait for it.
+    // Chat/file-only tasks must not depend on browser recovery. Legacy turns
+    // retain the conservative default. Wait for a usable browser before executing: if Chromium was released for
     // idleness, this rebuilds it from the snapshot first.
     //
     // A ready() failure must NOT be papered over by starting the Codex turn: the
@@ -938,7 +943,7 @@ export class AgentManager {
     // proxy, so a turn that ran anyway could drive a browser we never confirmed.
     // The honest outcome is a failed turn with a fixed, secret-free message; the
     // slot and lease are released by #pump's `finally`.
-    if (this.#browser) {
+    if (this.#browser && turn.browser_required !== 0) {
       try {
         await this.#browser.ready();
       } catch (err) {
@@ -1164,15 +1169,24 @@ export class AgentManager {
   }
 
   /** Append to the queued input or steer the exact active Codex turn. */
-  async appendTurnInput(conversationId: string, localTurnId: string, text: string, attachments: TurnAttachment[]): Promise<"accepted"|"starting"|"not_active"> {
+  async appendTurnInput(conversationId: string, localTurnId: string, text: string, attachments: TurnAttachment[], requiresBrowser = false): Promise<"accepted"|"starting"|"not_active"|"browser_unavailable"> {
     const turn = this.#db.prepare("SELECT * FROM turns WHERE id=? AND conversation_id=?").get(localTurnId,conversationId) as unknown as TurnRow | undefined;
     if (!turn || !["queued","running"].includes(turn.status)) return "not_active";
     if (turn.status === "queued") {
-      this.#db.prepare("UPDATE turns SET input_text=?,attachments_json=? WHERE id=?").run(`${turn.input_text}\n\n${text}`,JSON.stringify([...parseAttachments(turn.attachments_json),...attachments]),turn.id);
+      this.#db.prepare("UPDATE turns SET input_text=?,attachments_json=?,browser_required=MAX(browser_required,?) WHERE id=?").run(`${turn.input_text}\n\n${text}`,JSON.stringify([...parseAttachments(turn.attachments_json),...attachments]),requiresBrowser ? 1 : 0,turn.id);
     } else {
       const conversation = this.getConversation(conversationId);
       if (!turn.codex_turn_id || !conversation?.codex_thread_id) return "starting";
       if (!this.#codex.steerTurn) throw new Error("当前执行器不支持运行中补充");
+      if (requiresBrowser && turn.browser_required === 0) {
+        try { await this.#browser?.ready(); }
+        catch { return "browser_unavailable"; }
+        // The original task can finish or be stopped during recovery. Never
+        // steer stale work or grant browser access before recovery is proven.
+        const current = this.#db.prepare("SELECT status,cancel_requested FROM turns WHERE id=?").get(turn.id) as { status: string; cancel_requested: number };
+        if (current.status !== "running" || current.cancel_requested) return "not_active";
+        this.#db.prepare("UPDATE turns SET browser_required=1 WHERE id=?").run(turn.id);
+      }
       await this.#codex.steerTurn({threadId:conversation.codex_thread_id,expectedTurnId:turn.codex_turn_id,text,attachments});
     }
     this.#appendEvent(conversationId,turn.id,"turn.input_appended",{text,attachments});

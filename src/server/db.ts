@@ -75,6 +75,7 @@ CREATE TABLE IF NOT EXISTS turns (
   input_text TEXT NOT NULL,
   attachments_json TEXT NOT NULL DEFAULT '[]',
   cancel_requested INTEGER NOT NULL DEFAULT 0,
+  browser_required INTEGER NOT NULL DEFAULT 1,
   model TEXT,
   effort TEXT,
   error TEXT,
@@ -190,6 +191,7 @@ function migrate(db: Db): void {
   const taskColumns = db.prepare("PRAGMA table_info(tasks)").all() as Array<{ name: string }>;
   if (!taskColumns.some(c => c.name === "merged_into")) db.exec("ALTER TABLE tasks ADD COLUMN merged_into TEXT REFERENCES tasks(id)");
   const columns = (db.prepare("PRAGMA table_info(turns)").all() as Array<{ name: string }>).map((c) => c.name);
+  if (!columns.includes("browser_required")) db.exec("ALTER TABLE turns ADD COLUMN browser_required INTEGER NOT NULL DEFAULT 1");
   if (!columns.includes("model")) {
     db.exec("ALTER TABLE turns ADD COLUMN model TEXT");
   }

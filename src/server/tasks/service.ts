@@ -274,9 +274,10 @@ export class TaskService {
                 try {
                     const result=await this.agent.appendTurnInput(parent.conversation_id,parent.turn_id,
                         `这是用户对当前任务的补充，请合并处理并在最终结果中覆盖，不要当作独立任务。可协作使用的资源更新为：${resources.join(',')||'本任务目录'}。\n\n${row.input_text}${dependencies.length ? `\n\n补充所需的已完成任务资料：${JSON.stringify(dependencies.map(t => ({id:t!.id,result:t!.result?.slice(0,16000)})))}` : ''}`,
-                        JSON.parse(row.attachments_json));
+                        JSON.parse(row.attachments_json),resources.includes("browser"));
                     if(this.#closed) return;
-                    if(result==='not_active') { this.fallbackSupplement(row); this.schedule(); }
+                    if(result==='browser_unavailable') this.db.prepare("UPDATE tasks SET status='merge_failed',error=? WHERE id=?").run('此补充需要浏览器，但浏览器暂未恢复；原任务仍可继续，请恢复浏览器后重新补充。',row.id);
+                    else if(result==='not_active') { this.fallbackSupplement(row); this.schedule(); }
                     else this.db.prepare('UPDATE tasks SET status=?,completed_at=? WHERE id=?').run(result==='accepted'?'merged':'merging',result==='accepted'?Date.now():null,row.id);
                 } catch(err) {
                     if(this.#closed) return;
@@ -318,7 +319,7 @@ export class TaskService {
                 "本次用户任务：", this.taskContext(row),
             ].join("\n\n");
             try {
-                const { turn } = this.agent.submitTurn({ conversationId: row.conversation_id, clientMessageId: `task:${row.id}`, text: prompt, attachments: [...JSON.parse(row.attachments_json),...this.rows().filter(t=>t.merged_into===row.id && t.status==='merged').flatMap(t=>JSON.parse(t.attachments_json))], frozenSettings: { model: row.model!, effort: row.effort } });
+                const { turn } = this.agent.submitTurn({ conversationId: row.conversation_id, clientMessageId: `task:${row.id}`, text: prompt, attachments: [...JSON.parse(row.attachments_json),...this.rows().filter(t=>t.merged_into===row.id && t.status==='merged').flatMap(t=>JSON.parse(t.attachments_json))], requiresBrowser: plan.resources.includes("browser"), frozenSettings: { model: row.model!, effort: row.effort } });
                 this.db.prepare("UPDATE tasks SET turn_id=? WHERE id=?").run(turn.id, row.id);
                 active.push(this.get(row.id)!);
             }

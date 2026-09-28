@@ -89,6 +89,38 @@ describe("AgentManager browser lease", () => {
     db.close();
   });
 
+  it("executes a non-browser task even when browser recovery is broken", async () => {
+    gate.readyError = "浏览器恢复失败";
+    const conv = agent.createConversation({title:"普通问候"});
+    const {turn} = agent.submitTurn({conversationId:conv.id,text:"hi",clientMessageId:"no-browser",requiresBrowser:false});
+    await tick(80);
+    expect(turn.browser_required).toBe(0);
+    expect(gate.events).not.toContain("ready");
+    expect(codex.startedTurns).toHaveLength(1);
+    codex.completeTurn(codex.startedTurns[0]!.turnId);
+    await tick(80);
+    expect(db.prepare("SELECT status FROM turns WHERE id=?").get(turn.id)?.status).toBe("completed");
+    expect(gate.events.filter(e=>e==="release")).toHaveLength(1);
+  });
+
+  it("gates newly requested browser work before steering a previously independent task", async () => {
+    const steers: unknown[] = [];
+    Object.assign(codex, {steerTurn: async (p:unknown)=>{steers.push(p);}});
+    const conv = agent.createConversation({title:"任务"});
+    const {turn} = agent.submitTurn({conversationId:conv.id,text:"整理文字",clientMessageId:"upgrade-browser",requiresBrowser:false});
+    await tick(80);
+    gate.readyError="恢复失败";
+    expect(await agent.appendTurnInput(conv.id,turn.id,"再看网页",[],true)).toBe("browser_unavailable");
+    expect(steers).toHaveLength(0);
+    expect(db.prepare("SELECT status,browser_required FROM turns WHERE id=?").get(turn.id)).toMatchObject({status:"running",browser_required:0});
+    gate.readyError=null;
+    expect(await agent.appendTurnInput(conv.id,turn.id,"再看网页",[],true)).toBe("accepted");
+    expect(steers).toHaveLength(1);
+    expect(db.prepare("SELECT browser_required FROM turns WHERE id=?").get(turn.id)?.browser_required).toBe(1);
+    codex.completeTurn(codex.startedTurns[0]!.turnId);
+    await tick(50);
+  });
+
   it("reserves the browser before the turn starts and releases it after", async () => {
     const conv = agent.createConversation({ title: "t" });
     agent.submitTurn({ conversationId: conv.id, text: "hi", clientMessageId: "m1" });
