@@ -336,6 +336,15 @@ export function Workspace({ open, status, initialPath, onClose, onNotify, browse
         setBrowserStatus(res.status);
         setSuspended(false);
       } catch (err) {
+        // Read the failed transition immediately, instead of leaving the old
+        // asleep message visible until the next 15-second status poll.
+        try {
+          const status = await fetchBrowserStatus();
+          if (!cancelled && viewer.isCurrent(generation)) {
+            browserStatusRef.current = status;
+            setBrowserStatus(status);
+          }
+        } catch { /* retain the last known state if status is unavailable */ }
         if (!cancelled && viewer.isCurrent(generation))
           onNotify(err instanceof Error ? err.message : String(err), "error");
       } finally {
@@ -498,7 +507,7 @@ export function Workspace({ open, status, initialPath, onClose, onNotify, browse
             {holdsBrowser && (suspended || restoringBrowser) ? (
               <div className="frame-hint">
                 <p>
-                  {restoringBrowser ? "正在按快照恢复浏览器…" : "浏览器已释放以节省内存"}
+                  {restoringBrowser ? "正在按快照恢复浏览器…" : browserStatus?.lastErrorCode === "wake_failed" ? "浏览器恢复尚未完成，现有标签和快照已保留" : "浏览器已释放以节省内存"}
                   {browserStatus?.restorePending ? "，上一次快照仍在等待恢复。" : "。"}
                 </p>
                 <p className="muted tiny">恢复后会按保存的标签、滚动位置与站点会话重建页面；正在进行的下载和未提交的表单不会被恢复。</p>

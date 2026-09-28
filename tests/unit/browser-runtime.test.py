@@ -1357,6 +1357,59 @@ def test_restore_fails_when_the_aio_focus_cannot_be_synced() -> None:
 
 
 @test
+def test_restore_pending_keeps_focus_failure_pending_even_when_all_pages_applied() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "snapshot.json")
+        snapshot = base_snapshot()
+        rt.write_snapshot(path, snapshot)
+        rt.write_restore_state(path, {
+            "snapshotSavedAt": snapshot["savedAt"], "completed": False,
+            "tabs": [{"targetId": "t1", "storageApplied": True, "scrollApplied": True}],
+        })
+        assert_true(rt.restore_pending(path, 555, 9), "焦点同步失败不能被误报为已恢复")
+
+
+@test
+def test_aio_restored_indices_preserves_extra_and_duplicate_tabs_and_cleans_markers() -> None:
+    saved_tabs, saved_request, saved_activate = rt.aio_tabs, rt.aio_request, rt.aio_activate_index
+    class FakeCdp:
+        def __init__(self): self.cleaned = []; self.detached = []
+        def attach(self, target): return target
+        def evaluate(self, session, expression):
+            if expression.startswith("delete "): self.cleaned.append(session)
+            return True
+        def call(self, method, params): self.detached.append(params["sessionId"]); return {}
+    cdp = FakeCdp()
+    rows = [{"index": i, "url": "https://example.test/same", "is_active": False} for i in range(4)]
+    active = [0]
+    def activate(index, count, reconnect=True):
+        assert_false(reconnect, "映射中不重连或重排")
+        active[0] = index
+        return True, ""
+    def request(*args):
+        return {"success": True, "data": {1: 0, 3: 1}.get(active[0])}, ""
+    rt.aio_tabs = lambda: (rows, "")
+    rt.aio_activate_index = activate
+    rt.aio_request = request
+    try:
+        indices, problem = rt.aio_restored_indices(cdp, [{"targetId": "a"}, {"targetId": "b"}])
+        assert_eq(indices, [1, 3], "相同 URL 的额外标签不能冒充恢复标签")
+        assert_eq(problem, "")
+        assert_eq(cdp.cleaned, ["a", "b"], "必须清理所有临时标识")
+        assert_eq(cdp.detached, ["a", "b"])
+        rt.aio_request = lambda *args: (None, "disconnected")
+        cdp = FakeCdp()
+        assert_eq(rt.aio_restored_indices(cdp, [{"targetId": "a"}])[0], None)
+        assert_eq(cdp.cleaned, ["a"], "失败也清理")
+        rt.aio_request = lambda *args: ({"success": True, "data": None}, "")
+        assert_eq(rt.aio_restored_indices(FakeCdp(), [{"targetId": "a"}])[0], None, "找不到身份不猜 index")
+        rt.aio_request = lambda *args: ({"success": True, "data": {1: 1, 3: 0}.get(active[0])}, "")
+        assert_eq(rt.aio_restored_indices(FakeCdp(), [{"targetId": "a"}, {"targetId": "b"}])[0], None, "顺序改变不能报成功")
+    finally:
+        rt.aio_tabs, rt.aio_request, rt.aio_activate_index = saved_tabs, saved_request, saved_activate
+
+
+@test
 def test_aio_activate_uses_the_verified_soft_reconnect_and_index_route() -> None:
     calls: list[tuple[str, str, Any]] = []
     saved = rt.aio_request

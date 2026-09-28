@@ -44,6 +44,7 @@ import signal
 import subprocess
 import tempfile
 import time
+import uuid
 from typing import Any, Iterable, Mapping, Sequence
 from urllib.parse import urlsplit
 
@@ -1275,6 +1276,63 @@ def aio_activate_index(index: int, tab_count: int, reconnect: bool = True) -> tu
     return True, ""
 
 
+def aio_restored_indices(cdp: Cdp, entries: Sequence[Any]) -> tuple[list[int] | None, str]:
+    """Map restored CDP targets to AIO indices without guessing by URL.
+
+    Chromium may restore its own session or the user may add tabs during recovery.
+    Extra tabs must survive, including same-URL ones. Use an ephemeral, random
+    non-enumerable window property to prove identity through both clients. It is
+    removed in finally and never touches cookies, storage, URL or page content.
+    """
+    rows, problem = aio_tabs()
+    if problem or rows is None:
+        return None, "active_activate_failed"
+    key = "__aio_restore_" + uuid.uuid4().hex
+    sessions: list[str] = []
+    indices: list[int | None] = [None] * len(entries)
+    try:
+        for position, entry in enumerate(entries):
+            if not isinstance(entry, dict) or not isinstance(entry.get("targetId"), str):
+                return None, "active_activate_failed"
+            session = cdp.attach(entry["targetId"])
+            sessions.append(session)
+            cdp.evaluate(session, f"Object.defineProperty(globalThis, {json.dumps(key)}, {{value:{position},configurable:true}}); true")
+        for row in rows:
+            activated, problem = aio_activate_index(row["index"], len(rows), reconnect=False)
+            if not activated:
+                return None, problem
+            result, problem = aio_request("POST", "/v1/browser/page/evaluate", {"expression": f"globalThis[{json.dumps(key)}] ?? null"})
+            if problem or not isinstance(result, dict) or result.get("success") is False:
+                return None, "active_activate_failed"
+            position = result.get("data")
+            if type(position) is int and 0 <= position < len(entries):
+                if indices[position] is not None:
+                    return None, "active_activate_failed"
+                indices[position] = row["index"]
+        after, problem = aio_tabs()
+        if problem or after is None or [(r["index"], r["url"]) for r in after] != [(r["index"], r["url"]) for r in rows]:
+            return None, "active_activate_failed"
+        if any(index is None for index in indices):
+            return None, "active_activate_failed"
+        # Extra pages can surround restored pages, but their relative order must
+        # still match the snapshot. Never silently claim reordered tabs survived.
+        if indices != sorted(indices):
+            return None, "active_activate_failed"
+        return indices, ""
+    except CdpError:
+        return None, "active_activate_failed"
+    finally:
+        for session in sessions:
+            try:
+                cdp.evaluate(session, f"delete globalThis[{json.dumps(key)}]")
+            except CdpError:
+                pass  # A page that closed or navigated already discarded it.
+            try:
+                cdp.call("Target.detachFromTarget", {"sessionId": session})
+            except CdpError:
+                pass
+
+
 def tab_plan(
     cdp_pages: Sequence[Mapping[str, Any]],
     aio_rows: Sequence[Mapping[str, Any]] | None,
@@ -2107,10 +2165,11 @@ def restore_tabs(
         keep = {str(e["targetId"]) for e in entries if isinstance(e, dict) and isinstance(e.get("targetId"), str)}
         _close_startup_pages(cdp, startup_ids, keep)
 
-        # Verify the tool-visible order after removing startup placeholders.
-        rows, rows_error = aio_tabs()
-        if rows_error or rows is None or [normalize_blank_url(str(row.get("url") or "")) for row in rows] != [normalize_blank_url(str(tab.get("url") or "")) for tab in tabs]:
-            problems.append("active_activate_failed")
+        # Prove target identity, preserving extra tabs instead of blocking forever
+        # on a full-list URL comparison (duplicates/redirects are not identities).
+        restored_indices, index_problem = aio_restored_indices(cdp, entries)
+        if restored_indices is None:
+            problems.append(index_problem)
 
         # 4. Focus the tab the user had focused, but only when the snapshot could
         #    actually prove which one it was, and only after the AIO API agrees.
@@ -2120,12 +2179,12 @@ def restore_tabs(
         if active_index is not None:
             entry = entries[active_index] if active_index < len(entries) else None
             target_id = entry.get("targetId") if isinstance(entry, dict) else None
-            if isinstance(target_id, str) and target_id in _page_target_ids(cdp):
+            if restored_indices is not None and isinstance(target_id, str) and target_id in _page_target_ids(cdp):
                 try:
                     cdp.call("Target.activateTarget", {"targetId": target_id})
                 except CdpError:
                     problems.append("active_activate_failed")
-                synced, problem = aio_activate_index(active_index, len(tabs), reconnect=False)
+                synced, problem = aio_activate_index(restored_indices[active_index], 0, reconnect=False)
                 if not synced:
                     problems.append(problem)
             else:
@@ -2206,13 +2265,9 @@ def restore_pending(
         return False
 
     if fresh:
-        entries = state.get("tabs") or []
-        if len(entries) < len(snapshot.get("tabs") or []):
-            return True
-        return any(
-            not (isinstance(e, dict) and e.get("storageApplied") and e.get("scrollApplied"))
-            for e in entries
-        )
+        # Applying storage/scroll is not enough: order and AIO focus may still
+        # have failed. Only an explicit completed record proves recovery.
+        return True
 
     # No progress record at all. Saving a snapshot does not release the browser, so
     # "a snapshot exists" must never by itself mean a restore is owed. The one

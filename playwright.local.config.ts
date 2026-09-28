@@ -61,6 +61,7 @@ export default defineConfig({
     {
       name: "mobile-webkit",
       testMatch: [
+        "**/browser-lifecycle.spec.ts",
         "**/mobile-chat.spec.ts",
         "**/settings.spec.ts",
         "**/working.spec.ts",

@@ -167,3 +167,22 @@ test("closing the panel during restore prevents a late frame mount", async ({pag
   await expect(page.locator('.workspace')).toHaveCount(0);
   await expect(page.locator('.workspace iframe')).toHaveCount(0);
 });
+
+test("failed focus recovery keeps an honest retry state and retry reveals the browser", async ({page}) => {
+  let state: any;
+  await mockConsole(page, {conversations:[makeConversation(CONV_ID,"恢复失败")],browser:{startAsleep:true,onChange:s=>{state=s;}}});
+  let fail=true;
+  await page.route(url=>url.pathname==='/api/browser/wake',async route=>{
+    if(!fail) return route.fallback();
+    Object.assign(state,{state:'error',browserRunning:true,restorePending:true,lastErrorCode:'wake_failed',lastError:'恢复浏览器失败，快照仍然保留'});
+    await route.fulfill({status:502,json:{error:'browser_wake_failed',message:'恢复浏览器失败，快照仍然保留'}});
+  });
+  await page.goto('/');
+  await page.getByRole('button',{name:'工作区'}).first().click();
+  await expect(page.locator('.frame-hint')).toContainText('浏览器恢复尚未完成，现有标签和快照已保留');
+  await expect(page.locator('.workspace iframe')).toHaveCount(0);
+  fail=false;
+  await page.getByRole('button',{name:'重试恢复浏览器',exact:true}).click();
+  await expect(page.locator('.workspace iframe')).toBeVisible();
+  await expect(page.locator('.frame-hint')).toHaveCount(0);
+});
