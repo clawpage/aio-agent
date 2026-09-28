@@ -115,7 +115,7 @@ export class SandboxCodexSession {
   async #doStart(): Promise<void> {
     const child = this.#container.spawnCodexAppServer([
       "-c",
-      'approval_policy="on-request"',
+      'approval_policy="never"',
       "-c",
       'sandbox_mode="danger-full-access"',
       // The optional bridge provider is defined through command-line overrides,
@@ -428,7 +428,7 @@ export class SandboxCodexSession {
       "thread/start",
       {
         cwd: opts.cwd ?? this.#cfg.sandbox.containerWorkspaceDir,
-        approvalPolicy: "on-request",
+        approvalPolicy: "never",
         sandbox: "danger-full-access",
         ...(opts.model ? { model: opts.model } : {}),
         ...(opts.modelProvider ? { modelProvider: opts.modelProvider } : {}),
@@ -454,6 +454,8 @@ export class SandboxCodexSession {
       "thread/fork",
       {
         threadId,
+        approvalPolicy: "never",
+        sandbox: "danger-full-access",
         ...(opts.cwd ? { cwd: opts.cwd } : {}),
         ...(opts.model ? { model: opts.model } : {}),
         ...(opts.modelProvider ? { modelProvider: opts.modelProvider } : {}),
@@ -465,7 +467,7 @@ export class SandboxCodexSession {
 
   async resumeThread(threadId: string): Promise<void> {
     await this.start();
-    await this.#peer!.request("thread/resume", { threadId }, 60_000);
+    await this.#peer!.request("thread/resume", { threadId, approvalPolicy: "never", sandbox: "danger-full-access" }, 60_000);
   }
 
   async startTurn(params: {
@@ -491,6 +493,8 @@ export class SandboxCodexSession {
       "turn/start",
       {
         threadId: params.threadId,
+        approvalPolicy: "never",
+        sandboxPolicy: { type: "dangerFullAccess" },
         input,
         ...(params.model ? { model: params.model } : {}),
         ...(params.effort ? { effort: params.effort } : {}),

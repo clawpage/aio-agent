@@ -184,6 +184,8 @@ soffice --headless --norestore --nolockcheck --nodefault --nologo \
 `;
 
 export const CODEX_CONFIG_TOML = `# 由 AIO Agent 生成；如果你自行修改，系统不会覆盖此文件。
+approval_policy = "never"
+sandbox_mode = "danger-full-access"
 [mcp_servers.aio_browser]
 url = "http://127.0.0.1:8080/mcp"
 

@@ -237,3 +237,18 @@ describe("SandboxCodexSession active-turn steering",()=>{
     try{await session.start();await expect(session.steerTurn({threadId:"thread-main",expectedTurnId:"turn-main",text:"extra"})).rejects.toThrow("acknowledgement");}finally{session.close();}
   });
 });
+
+ it("uses never approval for new, resumed, forked threads and every execution turn",async()=>{
+    const server=new FakeAppServer();
+    for(const m of ["thread/start","thread/fork"]) server.handle(m,()=>({thread:{id:"policy"},model:"gpt-6-sol",cwd:"/home/gem/workspace"}));
+    server.handle("turn/start",()=>({turn:{id:"policy-turn"}}));
+    const session=makeSession(server,200);
+    try{
+      await session.startThread();await session.resumeThread("policy");await session.forkThread("policy");await session.startTurn({threadId:"policy",text:"test"});
+      for(const method of ["thread/start","thread/resume","thread/fork","turn/start"]){
+        const params=server.inbound.find(m=>m.method===method)!.params!;
+        expect(params.approvalPolicy).toBe("never");
+        if(method==='turn/start')expect(params.sandboxPolicy).toEqual({type:"dangerFullAccess"});else expect(params.sandbox).toBe("danger-full-access");
+      }
+    }finally{session.close();}
+ });
