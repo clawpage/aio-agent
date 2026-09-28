@@ -317,9 +317,9 @@ export function Chat({
         </div>
         <div className="chat-head-actions">
           {pendingApprovals > 0 && <span className="pill warn">{pendingApprovals} 项待处理</span>}
-          <button type="button" className="ghost" onClick={() => onOpenWorkspace()}>
+          {!readOnly && <button type="button" className="ghost" onClick={() => onOpenWorkspace()}>
             工作区
-          </button>
+          </button>}
         </div>
       </header>
 

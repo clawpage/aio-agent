@@ -127,7 +127,7 @@ export function MainApp() {
     <main className="main" inert={mobile && menuOpen}>
       {notice && <div className="banner" role="alert">{notice}<button onClick={() => setNotice(null)}>关闭</button></div>}
       {status && !status.agent.sessionReady && <div className="banner error">智能体暂未就绪：{status.agent.lastError ?? "正在连接"}。消息仍会保留。</div>}
-      <div className="view-slot" hidden={view !== "main"}><TaskChat onDetails={t => void details(t)} onOpenWorkspace={() => openWorkspace()} onOpenLink={u => void openLink(u)} onBrowserNavigate={() => { if (view === "main")
+      <div className="view-slot" hidden={view !== "main"}><TaskChat onDetails={t => void details(t)} onOpenLink={u => void openLink(u)} onBrowserNavigate={() => { if (view === "main")
         revealBrowser(); }} onExpired={expired}/></div>
       {view === "settings" && <Settings onBack={() => setView("main")}/>}
       {view === "detail" && detail && <div className="task-detail"><div className="task-detail-bar"><button className="ghost" onClick={() => setView("main")}>← 返回主会话</button><span className="muted tiny">过程详情</span></div><Chat key={detail.id} readOnly conversation={detail} status={status} onConversationChanged={() => { }} onStatusChanged={() => void refreshStatus()} onOpenWorkspace={openWorkspace} onOpenBrowserLink={u => void openLink(u)} onAgentBrowserNavigate={revealBrowser}/></div>}

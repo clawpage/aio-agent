@@ -8,9 +8,8 @@ import { Markdown } from "./Markdown";
 import { FilePreview } from "./FilePreview";
 const terminal = new Set(["completed", "failed", "interrupted", "unknown"]);
 const labels: Record<string, string> = { planning: "正在分配…", needs_input: "等待你补充", planning_failed: "分配失败", waiting: "等待依赖或资源", queued: "排队中", running: "Working…", stopping: "正在停止…", completed: "已完成", failed: "执行失败", interrupted: "已停止", unknown: "结果待核对", blocked: "需要补充" };
-export function TaskChat({ onDetails, onOpenWorkspace, onOpenLink, onBrowserNavigate, onExpired }: {
+export function TaskChat({ onDetails, onOpenLink, onBrowserNavigate, onExpired }: {
     onDetails: (task: Task) => void;
-    onOpenWorkspace: () => void;
     onOpenLink: (url: string) => void;
     onBrowserNavigate: () => void;
     onExpired: () => void;
@@ -138,7 +137,7 @@ export function TaskChat({ onDetails, onOpenWorkspace, onOpenLink, onBrowserNavi
     const feed = tasks.flatMap(t => [{ task: t, report: false, at: t.createdAt }, ...(!t.mergedInto && terminal.has(t.status) ? [{ task: t, report: true, at: t.completedAt ?? t.createdAt }] : [])])
         .sort((a, b) => a.at - b.at || Number(a.report) - Number(b.report) || a.task.id.localeCompare(b.task.id));
     return <section className="chat task-chat">
-    <header className="chat-head"><div className="chat-title"><h2>主会话</h2><span className={`dot ${connected ? "ok" : "warn"}`}/><span className="chat-sub">{active.length ? `${active.length} 个任务处理中` : awaiting.length ? `${awaiting.length} 个任务等你补充` : connected ? "随时可以交给我" : "正在连接…"}</span></div><button className="ghost" onClick={onOpenWorkspace}>工作区</button></header>
+    <header className="chat-head"><div className="chat-title"><h2>主会话</h2><span className={`dot ${connected ? "ok" : "warn"}`}/><span className="chat-sub">{active.length ? `${active.length} 个任务处理中` : awaiting.length ? `${awaiting.length} 个任务等你补充` : connected ? "随时可以交给我" : "正在连接…"}</span></div></header>
     <div className="chat-scroll task-feed" ref={scroll} onScroll={e => { const n = e.currentTarget; stick.current = n.scrollHeight - n.scrollTop - n.clientHeight < 80; }}>
       {nextBefore && <button className="ghost" onClick={() => void act(async () => { const d = await api.main(nextBefore); stick.current = false; merge(d.tasks); setNextBefore(d.nextBefore); })}>加载更早的任务</button>}
       {!tasks.length && <div className="empty"><h3>把事情交给我</h3><p>可以接着发不同任务。过程会收拢，完成后在这里回报。</p></div>}

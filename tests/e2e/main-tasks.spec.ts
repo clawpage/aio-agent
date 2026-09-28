@@ -33,6 +33,7 @@ async function setup(page: Page, rows: Task[] = []) {
 const send = async (page: Page, text: string) => { await page.getByRole("textbox", { name: "消息", exact: true }).fill(text); await page.getByRole("button", { name: "发送", exact: true }).click(); await expect(page.getByRole("textbox", { name: "消息", exact: true })).toHaveValue(""); };
 test("one inbox accepts parallel messages, folds progress, reports completion order and survives reload", async ({ page }, info) => {
     const { rows, bodies } = await setup(page);
+    await expect(page.locator(".chat-head").getByRole("button", { name: "工作区", exact: true })).toHaveCount(0);
     await expect(page.getByRole("button", { name: /新建会话/ })).toHaveCount(0);
     await send(page, "写报告");
     await send(page, "另外计算数字");
@@ -83,6 +84,7 @@ test("attachments and drafts survive config and task details without a history e
     await expect(page.locator(".bottom-nav")).toHaveCount(0);
     await page.getByRole("button", { name: "展开任务：任务 1" }).click();
     await expect(page.locator(".task-detail")).toBeVisible();
+    await expect(page.locator(".task-detail .chat-head").getByRole("button", { name: "工作区", exact: true })).toHaveCount(0);
     await expect(page.locator(".task-detail .composer")).toHaveCount(0);
     await page.getByRole("button", { name: "← 返回主会话" }).click();
     await expect(page.getByRole("textbox", { name: "消息", exact: true })).toHaveValue("保留草稿");
@@ -118,6 +120,7 @@ test("failed submit preserves payload and idempotency key, details stay folded a
     }
     await page.getByRole("button", { name: "展开任务：任务 1" }).click();
     await expect(page.locator(".task-detail")).toBeVisible();
+    await expect(page.locator(".task-detail .chat-head").getByRole("button", { name: "工作区", exact: true })).toHaveCount(0);
     const box = await page.locator(".task-detail .chat-scroll").boundingBox();
     expect(box!.height).toBeGreaterThan(400);
 });
@@ -132,6 +135,7 @@ test("related supplement joins the original task, with one running indicator and
     await expect(page.locator(".chat-sub")).toHaveText("1 个任务处理中");
     await page.locator(".task-supplement button").click();
     await expect(page.locator(".task-detail")).toBeVisible();
+    await expect(page.locator(".task-detail .chat-head").getByRole("button", { name: "工作区", exact: true })).toHaveCount(0);
     await page.getByRole("button",{name:"← 返回主会话"}).click();
     await page.reload();
     await expect(page.locator(".task-progress")).toHaveCount(1);
