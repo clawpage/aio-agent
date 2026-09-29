@@ -99,3 +99,26 @@ it("destroys finished tasks' tabs right before an idle snapshot, and only then",
   await wrapped.stop();
   expect(calls).toEqual(["status", "wake", "prune", "snapshot", "stop"]);
 });
+
+it("makes sure the current tab server runs before typing for a person", async () => {
+  const { TabServer } = await import("../../src/server/browser/tabs.js");
+  const seen: string[] = [];
+  const container = {
+    execInSandbox: async (argv: string[]) => {
+      const route = argv.find((a) => a.startsWith("http://127.0.0.1:8190/")) ?? argv[0]!;
+      seen.push(route.replace("http://127.0.0.1:8190", ""));
+      if (route.endsWith("/healthz")) return { code: 0, stdout: JSON.stringify({ version: "old" }), stderr: "" };
+      if (route.endsWith("/input")) return { code: 0, stdout: '{"title":"t","url":"u"}\n200', stderr: "" };
+      return { code: 0, stdout: "", stderr: "" };
+    },
+    writeFileInSandbox: async () => undefined,
+    execDetached: async () => ({ code: 0, stdout: "", stderr: "" }),
+  };
+  const runtime = { ensureScripts: async () => undefined };
+  const tabs = new TabServer(testConfig("/tmp/pa-tabs-input", 1), new Logger("error", undefined, false), container as never, runtime as never);
+  // The stale server is replaced (it never reports the new version here, so ensure gives up and input refuses honestly).
+  const out = await tabs.input({ text: "hi" });
+  expect(seen[0]).toBe("/healthz");
+  expect(out.status).toBe(503);
+  expect(seen).not.toContain("/input");
+}, 20_000);

@@ -227,6 +227,12 @@ export class TabServer implements TabServerLike {
   }
 
   async input(input: { text?: string; key?: string }): Promise<{ status: number; body: Record<string, unknown> }> {
+    // A person may type before any task turn has started the current server version.
+    try {
+      await this.ensure();
+    } catch {
+      return { status: 503, body: { error: "unavailable", message: "浏览器输入暂不可用，请稍后重试" } };
+    }
     const res = await this.#container.execInSandbox(
       ["curl", "-s", "-m", "20", "-w", "\n%{http_code}", "-X", "POST", "-H", "content-type: application/json", "--data-binary", "@-", `http://127.0.0.1:${TAB_SERVER_PORT}/input`],
       { timeoutMs: 25_000, stdin: JSON.stringify(input) },
