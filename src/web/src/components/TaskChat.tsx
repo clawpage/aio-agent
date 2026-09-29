@@ -8,7 +8,18 @@ import { FilePreview } from "./FilePreview";
 import { TaskBrowser } from "./TaskBrowser";
 import type {TaskFeed} from '../taskStatus';
 const terminal = new Set(["completed", "failed", "interrupted", "unknown"]);
-const labels: Record<string, string> = { planning: "正在分配…", needs_input: "等待你补充", planning_failed: "分配失败", waiting: "等待依赖或资源", queued: "排队中", running: "Working…", stopping: "正在停止…", completed: "已完成", failed: "执行失败", interrupted: "已停止", unknown: "结果待核对", blocked: "需要补充" };
+/** What the dispatcher does with every message; shown in turn while it decides, not as live progress. */
+const DISPATCH_HINTS = ["理解你的需求", "对照进行中和历史任务", "决定新开任务还是补充到已有任务"];
+const HINT_MS = 1800;
+function DispatchHint() {
+    const [i, setI] = useState(0);
+    useEffect(() => {
+        const timer = window.setInterval(() => setI(n => (n + 1) % DISPATCH_HINTS.length), HINT_MS);
+        return () => window.clearInterval(timer);
+    }, []);
+    return <p className="task-dispatch-hint"><span key={i}>{DISPATCH_HINTS[i]}</span></p>;
+}
+const labels: Record<string, string> = { planning: "正在分配", needs_input: "等待你补充", planning_failed: "分配失败", waiting: "等待依赖或资源", queued: "排队中", running: "Working…", stopping: "正在停止…", completed: "已完成", failed: "执行失败", interrupted: "已停止", unknown: "结果待核对", blocked: "需要补充" };
 export function TaskChat({ onDetails, onOpenLink, onExpired, onFeed, onRevealBrowser }: {
     onDetails: (task: Task) => void;
     /** Open the workspace on the browser, where a taken-over task tab is in front. */
@@ -153,8 +164,11 @@ export function TaskChat({ onDetails, onOpenLink, onExpired, onFeed, onRevealBro
             .reduce((latest, t) => t.createdAt >= latest.createdAt ? t : latest, task);
         progressAt.set(anchor.id, task);
     }
-    const renderProgress = (t: Task) => <div className={`task-progress ${t.status === "running" ? "active" : ""} ${t.status === "needs_input" ? "needs-input" : ""}`}>
-          <button className="task-summary" onClick={() => onDetails(t)} aria-label={`展开任务：${t.title}`}><span className={`dot ${t.approvals || t.browser?.request ? "warn" : ""}`}/><span className="task-progress-label">{t.approvals ? "需要你确认" : t.browser?.request && t.status === "running" ? "需要你操作浏览器" : t.waitReason?.label ?? labels[t.status] ?? t.status}</span><span className="task-progress-title">{t.title}</span><span aria-hidden>›</span></button>
+    const renderProgress = (t: Task) => <div className={`task-progress ${t.status === "running" || t.status === "planning" ? "active" : ""} ${t.status === "planning" ? "planning" : ""} ${t.status === "needs_input" ? "needs-input" : ""}`}>
+          <button className="task-summary" onClick={() => onDetails(t)} aria-label={`展开任务：${t.title}`}>{t.status === "planning"
+            ? <span className="dispatch-glyph" aria-hidden="true"><i/><i/><i/></span>
+            : <span className={`dot ${t.approvals || t.browser?.request ? "warn" : ""}`}/>}<span className="task-progress-label" key={t.status}>{t.approvals ? "需要你确认" : t.browser?.request && t.status === "running" ? "需要你操作浏览器" : t.waitReason?.label ?? labels[t.status] ?? t.status}</span><span className="task-progress-title">{t.title}</span><span aria-hidden>›</span></button>
+          {t.status === "planning" && <DispatchHint/>}
           {t.waitReason && <p className="task-intro task-wait-reason">{t.waitReason.message}</p>}
           {t.status === "needs_input" && t.clarification && <div className="task-question" role="status" aria-label="需要你补充">
             <div className="task-question-heading"><span aria-hidden="true">?</span><strong>需要你补充</strong></div>

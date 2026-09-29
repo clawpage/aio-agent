@@ -503,3 +503,21 @@ test("a link in a reply opens in the person's own tab, operated from the same co
     await expect(panel).toBeHidden();
     await expect.poll(() => calls.filter(c => c.route === "close").map(c => c.body.tab).sort()).toEqual(["t8", "t9"]);
 });
+test("dispatching shows a calm sorting animation and what the dispatcher weighs, and stays still for reduced motion", async ({ page }, info) => {
+    await setup(page, [{ ...task(1, "planning"), title: "帮我订周六晚上的餐厅" }]);
+    await page.emulateMedia({ colorScheme: "light", reducedMotion: "no-preference" });
+    const card = page.locator('[data-task-id="task-1"] .task-progress');
+    await expect(card.locator(".task-progress-label")).toHaveText("正在分配");
+    const glyph = card.locator(".dispatch-glyph i").first();
+    await expect(glyph).toBeVisible();
+    expect(await glyph.evaluate(n => getComputedStyle(n).animationName)).toBe("dispatch-sort");
+    const hint = card.locator(".task-dispatch-hint");
+    await expect(hint).toHaveText("理解你的需求");
+    await expect(hint).toHaveText("对照进行中和历史任务", { timeout: 5000 });
+    await page.screenshot({ path: info.outputPath("dispatching.png") });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
+
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    expect(await glyph.evaluate(n => getComputedStyle(n).animationName)).toBe("none");
+    expect(await hint.locator("span").evaluate(n => getComputedStyle(n).animationName)).toBe("none");
+});

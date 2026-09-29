@@ -2231,7 +2231,7 @@ textarea:focus {
 .task-summary { border: 0; background: transparent; padding: 6px 0; display: flex; align-items: center; gap: 9px; width: 100%; text-align: left; color: var(--text-dim); }
 .task-progress-label { white-space: nowrap; flex-shrink: 0; }
 .task-progress-title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
-.task-progress.active .task-progress-label { background: linear-gradient(100deg,var(--text-dim),var(--accent),var(--text-dim)); background-size: 200% 100%; background-clip: text; -webkit-background-clip: text; color: transparent; animation: flow 3s linear infinite; }
+.task-progress.active .task-progress-label { background: linear-gradient(100deg,var(--text-dim),var(--accent),var(--text-dim)); background-size: 200% 100%; background-clip: text; -webkit-background-clip: text; color: transparent; animation: hint-in 0.3s ease both, flow 3s linear infinite; }
 .task-supplement { color: var(--text-dim); padding: 0 4px; }
 .task-supplement button { max-width: 100%; white-space: normal; overflow-wrap: anywhere; text-align: left; color: inherit; }
 .task-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 5px; }
@@ -2248,7 +2248,25 @@ textarea:focus {
   .task-report { width: 100%; }
   .task-chat .composer textarea { min-height: 56px; }
 }
-@media (prefers-reduced-motion: reduce) { .task-progress.active .task-progress-label { animation: none; background: none; color: var(--text-dim); } }
+/*
+ * Dispatching: three small cards rising in turn while the dispatcher sorts the
+ * message, and a line of what it weighs, fading from one to the next. A card
+ * that changes status eases its label in. Transform/opacity only.
+ */
+.dispatch-glyph { flex-shrink: 0; display: inline-flex; align-items: flex-end; gap: 2px; width: 13px; height: 12px; }
+.dispatch-glyph i { flex: 1; height: 100%; border-radius: 1px; background: var(--accent); transform-origin: bottom; animation: dispatch-sort 1.2s ease-in-out infinite; }
+.dispatch-glyph i:nth-child(2) { animation-delay: 0.15s; }
+.dispatch-glyph i:nth-child(3) { animation-delay: 0.3s; }
+@keyframes dispatch-sort { 0%, 100% { transform: scaleY(0.35); opacity: 0.45; } 50% { transform: scaleY(1); opacity: 1; } }
+.task-dispatch-hint { margin: 0 0 4px 22px; font-size: 12px; color: var(--text-dim); min-height: 1.5em; }
+.task-dispatch-hint span { display: inline-block; animation: hint-in 0.4s ease both; }
+@keyframes hint-in { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
+.task-progress-label { animation: hint-in 0.3s ease both; }
+@media (prefers-reduced-motion: reduce) {
+  .task-progress.active .task-progress-label { animation: none; background: none; color: var(--text-dim); }
+  .task-progress-label, .task-dispatch-hint span { animation: none; }
+  .dispatch-glyph i { animation: none; transform: scaleY(0.7); opacity: 0.8; }
+}
 
 /* The inbox uses a mobile drawer; legacy conversation navigation stays separate. */
 .mobile-menu-button, .mobile-menu-close { display: none; }
