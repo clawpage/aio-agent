@@ -145,7 +145,10 @@ node --env-file=var/runtime.env bin/create-user.mjs <username>
 
 账号固定 member，随机密码只写 `var/user-secrets/<username>.txt`（0600）；重复执行拒绝覆盖。
 没有注册入口，不改变 owner 密码与会话。member 固定 DeepSeek high，因此上线前需确认 OpenCode Go 桥接可用。
-底层文件/浏览器/终端仍共享，账号分级不代表多租户隔离。
+member 首次访问或服务启动时创建独立 `aio-user-<散列>` 容器及三卷，数据存在 `var/users/<散列>/`；owner 原卷保留。
+成员工作区域名为 `agent-workspace-<散列>.clawpage.ai`（由配置的工作区域名推导），上线前为具体域名配置 CNAME/TLS/tunnel；没有域名时不会回退 owner 工作区。
+成员模型网关仅监听无状态 DeepSeek 请求（默认端口 4902），凭据按账号存放 `var/users/<散列>/model-token`，不可公开。网络守卫镜像 `aio-agent-network-guard:1` 从固定沙箱镜像构建，独立只读运行并只授予 NET_ADMIN。
+运行验收必须包括：两个账号的同名文件互不可见；任务/HTTP/WS 指向各自容器；成员不能 TCP 连接 owner 容器与宿主私网服务；成员卷没有 owner auth.json/记忆；成员无法读取 owner 历史响应。
 
 
 - owner 密码：`var/owner-secret.txt`（0600，明文，方便本人查看；git 忽略；从不写日志）。

@@ -2,7 +2,7 @@
 
 ## 目标形态
 
-一个 owner 管理受信任 member、一个持久 AIO 沙箱、一个常驻主 Codex 智能体；中文界面；桌面与手机功能对等；
+一个 owner 管理 member、每账号独立持久 AIO 沙箱和 Codex 智能体；中文界面；桌面与手机功能对等；
 公网只通过专用 Cloudflare tunnel 暴露两个精确域名。
 
 ```
@@ -45,7 +45,7 @@
 派单器是隔离的临时 Luna 分类线程（read-only、never、ephemeral），输出经校验的 JSON。
 只能引用已存在且更早的任务，防止循环依赖；相关任务结果在派发时重新读取，避免使用陈旧快照。
 并发数复用 `PA_MAX_CONCURRENT_TURNS`；browser/workspace 资源锁在持久化计划上计算，
-只锁冲突资源，不让一个等待任务阻塞所有独立任务。它不是 OS 权限隔离，执行者共享沙箱。
+只锁冲突资源，不让一个等待任务阻塞所有独立任务。它不是 OS 权限隔离，同账号执行者共享沙箱，跨账号使用不同容器。
 
 派单 JSON 的 `appendTo` 用于识别同一进行中任务的补充（地址、条件、纠正、额外要求）。
 尚未派发时合入原始输入；排队时更新 turn 输入；执行中通过 [Codex turn/steer](https://learn.chatgpt.com/docs/app-server#steer-an-active-turn) 和 `expectedTurnId` 追加到同一轮，只有收到匹配回执才标记 merged。
@@ -78,11 +78,15 @@ planning_failed 可安全重试分类；blocked 提示前置结果需要核对�
 
 数据库保留兼容表名 `owners`，增加 `role=owner|member`；原 `owner_1` 迁移为 owner，密码与已有 session 不变。
 任务经 conversation.owner_id 绑定账号；列表、详情、事件回放/实时流、审批、引用、停止与派单历史均核对归属。
-owner 维护全局模型与 SOUL；member 派单和执行固定 DeepSeek / high，服务端拒绝覆盖，桥接不可用时失败，不回退 GPT。
+owner 维护自己的模型与 SOUL，各 member 从默认 SOUL 开始独立保存；member 派单和执行固定 DeepSeek / high，服务端拒绝覆盖，桥接不可用时失败，不回退 GPT。
 member 不走 owner 的自动标题模型，也不显示配置/模型/提示原文。这里的隐藏指产品配置及结构化元数据，不对正常回答文字做删词处理。
 
-这些是控制面权限和默认执行策略，**不是不互信租户的安全边界**：工作区、浏览器、终端与任意 shell 仍在一个沙箱中共享。
-不应向不互信用户开放；profile/context、按用户文件目录或提示词都不能代替独立运行环境。未来对外多租户必须另建沙箱与凭据隔离。
+`UserRuntimes` 按服务器查证的账号身份选择完整运行环境，禁止客户端指定容器、端口、目录或上游。
+member 使用独立容器和三个独立卷、独立宿主任务 DB / SOUL / 缓存、独立网络和工作区域名。
+HTTP、SSE、WebSocket、文件预览、上传、终端与浏览器都走同一账号绑定。工作区票据继承主站登录身份，且只能在该账号对应域名消费。
+独立 DeepSeek 网关仅允许 POST responses，强制 high / store=false，拒绝 previous_response_id、conversation 和后台请求；管理密钥留在宿主，成员只有独立能力凭据。
+容器不挂载宿主路径或 Docker socket，丢弃 NET_RAW，原本不授予 NET_ADMIN。可信只读网络守卫通过共享目标网络命名空间原子安装 IPv4/IPv6 规则；不在用户可写容器中执行提权代码。仅模型网关是私网出口例外；其他私网/宿主地址被拒绝。
+旧共享环境的 member 数据不自动复制，新账号从空环境开始。旧测试数据清理须明确授权，owner 原有卷不迁移。此设计仍依赖 Docker/宿主内核边界，不等于独立虚拟机。
 
 ## 请求防护
 
