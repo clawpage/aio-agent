@@ -252,3 +252,21 @@ describe("SandboxCodexSession active-turn steering",()=>{
       }
     }finally{session.close();}
  });
+
+it('sends SOUL as developer instructions for start, fork, resume and the planning thread, including empty overrides',async()=>{
+ const server=new FakeAppServer();
+ for(const method of ['thread/start','thread/fork'])server.handle(method,()=>({thread:{id:'soul-thread'},model:'gpt-6-sol',cwd:'/workspace'}));
+ server.handle('thread/resume',()=>({}));
+ server.handle('turn/start',()=>{setTimeout(()=>server.notify('turn/completed',{threadId:'soul-thread',turn:{id:'soul-turn',status:'completed',items:[{type:'agentMessage',text:'{}'}]}}),5);return {turn:{id:'soul-turn'}};});
+ const session=makeSession(server,200);
+ try {
+  const soul='# Soul\n你是我的个人助理。\n';
+  await session.startThread({developerInstructions:soul});
+  await session.forkThread('soul-thread',{developerInstructions:soul});
+  await session.resumeThread('soul-thread',soul);
+  expect(await session.planTask('planning input',soul)).toBe('{}');
+  for(const r of server.inbound.filter(r=>['thread/start','thread/fork','thread/resume'].includes(r.method??'')))expect(r.params?.developerInstructions).toBe(soul);
+  expect(server.inbound.find(r=>r.method==='turn/start')?.params?.input).toEqual([{type:'text',text:'planning input'}]);
+  await session.resumeThread('soul-thread','');expect(server.inbound.at(-1)?.params?.developerInstructions).toBe('');
+ }finally{session.close();}
+});

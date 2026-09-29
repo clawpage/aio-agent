@@ -1206,3 +1206,22 @@ describe("document endpoints", () => {
     expect(res.headers.get("cache-control")).toBe("no-store");
   });
 });
+
+describe('SOUL.md configuration',()=>{
+ it('requires auth and CSRF, persists content and protects concurrent edits',async()=>{
+  expect((await h.request('/api/settings/soul')).status).toBe(401);
+  const {cookie,csrf}=await login(h);
+  const initial=await h.request('/api/settings/soul',{headers:{cookie}});
+  expect(initial.headers.get('cache-control')).toBe('no-store');
+  const doc=await initial.json() as {revision:string;content:string};
+  const headers={cookie,origin:`http://localhost:${h.primaryPort}`,'content-type':'application/json','x-csrf-token':csrf};
+  const body=JSON.stringify({content:'# SOUL\n我的个人助理。\n',revision:doc.revision});
+  expect((await h.request('/api/settings/soul',{method:'PUT',headers:{...headers,'x-csrf-token':''},body})).status).toBe(403);
+  const saved=await h.request('/api/settings/soul',{method:'PUT',headers,body});expect(saved.status).toBe(200);
+  const value=await saved.json() as {revision:string;content:string};
+  expect((await (await h.request('/api/settings/soul',{headers:{cookie}})).json() as any).content).toBe(value.content);
+  expect((await h.request('/api/settings/soul',{method:'PUT',headers,body})).status).toBe(409);
+  expect((await h.request('/api/settings/soul',{method:'PUT',headers,body:JSON.stringify({revision:value.revision,content:'x'.repeat(65537)})})).status).toBe(400);
+  expect((await h.request('/api/settings/soul',{method:'PUT',headers,body:JSON.stringify({revision:value.revision,content:doc.content})})).status).toBe(200);
+ });
+});

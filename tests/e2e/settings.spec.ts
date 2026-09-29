@@ -311,3 +311,30 @@ test("config page has no horizontal overflow in dark and light at each viewport"
     }
   }
 });
+
+test('SOUL editor saves independently, preserves conflict drafts and persists empty clearing',async({page},info)=>{
+ await setup(page,{settingsModels:[]});
+ let content='# SOUL.md\n你是小助理。';let revision='one';let conflict=false;
+ await page.route('**/api/settings/soul',async r=>{
+  if(r.request().method()==='PUT'){
+   const body=r.request().postDataJSON();
+   if(conflict)return r.fulfill({status:409,json:{message:'SOUL.md 已在其他页面修改，请重新加载后合并你的修改。'}});
+   expect(body.revision).toBe(revision);content=body.content;revision+='x';
+  }
+  return r.fulfill({json:{content,revision,defaultContent:'# SOUL.md\n默认助理',maxBytes:65536}});
+ });
+ await openSettings(page,info.project.name.startsWith('mobile'));
+ const editor=page.getByRole('textbox',{name:'SOUL.md 内容'});
+ await expect(editor).toHaveValue(content);
+ await editor.fill('# SOUL.md\n我叫 AIO，是你的个人助理。');
+ await page.getByRole('button',{name:'保存 SOUL.md',exact:true}).click();
+ await expect(page.getByText('SOUL.md 已保存，下次任务开始时生效。',{exact:true})).toBeVisible();
+ await page.reload();await openSettings(page,info.project.name.startsWith('mobile'));await expect(editor).toHaveValue(content);
+ conflict=true;await editor.fill('保留未保存草稿');await page.getByRole('button',{name:'保存 SOUL.md',exact:true}).click();
+ await expect(page.getByRole('region',{name:'助理设定'}).getByRole('alert')).toContainText('其他页面');await expect(editor).toHaveValue('保留未保存草稿');
+ conflict=false;await editor.fill('');await page.getByRole('button',{name:'保存 SOUL.md',exact:true}).click();await expect(page.locator('.soul-saved')).toBeVisible();expect(content).toBe('');
+ await page.getByRole('button',{name:'填入默认设定'}).click();await expect(editor).toHaveValue('# SOUL.md\n默认助理');
+ if(info.project.name.startsWith('mobile'))await page.setViewportSize({width:360,height:844});
+ await editor.scrollIntoViewIfNeeded();expect(await page.evaluate(()=>document.documentElement.scrollWidth-innerWidth)).toBeLessThanOrEqual(1);
+ await page.screenshot({path:info.outputPath('soul.png')});
+});

@@ -177,6 +177,7 @@ export async function mockConsole(page: Page, opts: MockConsoleOptions): Promise
   await page.route((url) => url.pathname === "/api/status", (route) => json(route, opts.status ?? MOCK_STATUS));
   await page.route((url) => url.pathname === "/api/models", (route) => json(route, MOCK_MODELS));
 
+  await page.route('**/api/settings/soul',route=>json(route,{content:'# SOUL.md\n你是个人助理。',revision:'initial',defaultContent:'# SOUL.md\n你是个人助理。',maxBytes:65536}));
   // Unified settings: GET returns the stored choice plus the catalog; PUT mirrors
   // the server's validation (unknown model / unsupported effort -> 400).
   const settingsState = opts.settings ?? { model: null, effort: null };

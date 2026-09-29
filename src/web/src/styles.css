@@ -2337,3 +2337,10 @@ textarea:focus {
 .task-list-summary { color:var(--text-dim); font-size:13px; line-height:1.6; margin:10px 0; display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; overflow:hidden; overflow-wrap:anywhere; }
 .task-list-meta { display:flex; gap:12px; align-items:center; font-size:11px; color:var(--text-dim); }
 @media(max-width:900px) { .task-list-scroll { padding:12px; } .task-list-meta { gap:8px; flex-wrap:wrap; } }
+
+.soul-settings { margin-top:24px; }
+.soul-settings h3 { margin:0 0 8px; font-size:16px; }
+.soul-settings textarea { min-height:300px; width:100%; resize:vertical; font:14px/1.65 ui-monospace,SFMono-Regular,Menlo,monospace; overflow-wrap:anywhere; }
+.soul-actions { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+.soul-saved { color:var(--ok); font-size:13px; }
+@media(max-width:900px) { .soul-settings textarea { font-size:16px; } }

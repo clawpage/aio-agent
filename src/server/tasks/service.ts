@@ -1,3 +1,4 @@
+import {readSoul} from '../soul.js';
 import { JsonRpcResponseError } from "../codex/jsonrpc.js";
 import type { Db } from "../db.js";
 import type { Config } from "../config.js";
@@ -216,7 +217,7 @@ export class TaskService {
             const files = [row,...this.rows().filter(t=>t.merged_into===row.id && t.status==='merged')]
                 .flatMap(t=>JSON.parse(t.attachments_json) as TurnAttachment[]);
             const planningInput = [inputContext, ...(files.length ? [`已有附件（执行者可以读取其中资料）：${JSON.stringify(files)}`] : [])].filter(Boolean).join("\n\n");
-            const raw = await this.codex.planTask?.(planningPrompt(planningInput, explicit ? previous.filter(t => t.id === explicit.id) : previous, row.related_task_id, this.cfg.sandbox.containerWorkspaceDir));
+            const raw = await this.codex.planTask?.(planningPrompt(planningInput, explicit ? previous.filter(t => t.id === explicit.id) : previous, row.related_task_id, this.cfg.sandbox.containerWorkspaceDir),readSoul(this.cfg).content);
             if (this.#closed || this.get(row.id)?.status !== "planning")
                 return;
             // A supplement may arrive while the classifier is in flight. Replan

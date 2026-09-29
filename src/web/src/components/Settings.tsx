@@ -1,3 +1,4 @@
+import {SoulSettings} from './SoulSettings';
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "../api";
 import type { AgentSettings, SettingsModel } from "../types";
@@ -230,6 +231,8 @@ export function Settings({ onBack, onSaved }: Props) {
             {saving ? "保存中…" : "保存"}
           </button>
         </div>
+
+        <SoulSettings/>
 
         <p className="muted tiny">默认配置：模型 {defaultModel || "—"}，思考强度按模型默认。保存后对之后的所有消息生效。</p>
       </div>

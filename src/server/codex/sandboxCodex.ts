@@ -253,11 +253,11 @@ export class SandboxCodexSession {
   }
 
   /** Read-only main-agent planning; receives bounded metadata, never executes a task. */
-  async planTask(prompt: string): Promise<string | null> {
-    return this.#auxiliaryText(prompt, "high", 90_000);
+  async planTask(prompt: string, developerInstructions?: string): Promise<string | null> {
+    return this.#auxiliaryText(prompt, "high", 90_000, developerInstructions);
   }
 
-  async #auxiliaryText(prompt: string, effort: string | null, timeoutMs = this.#cfg.agent.titleTimeoutMs): Promise<string | null> {
+  async #auxiliaryText(prompt: string, effort: string | null, timeoutMs = this.#cfg.agent.titleTimeoutMs, developerInstructions?: string): Promise<string | null> {
     await this.start();
     const peer = this.#peer;
     if (!peer?.alive) return null;
@@ -265,6 +265,7 @@ export class SandboxCodexSession {
     const threadRes = (await peer.request(
       "thread/start",
       {
+        ...(developerInstructions !== undefined ? {developerInstructions} : {}),
         ephemeral: true,
         sandbox: "read-only",
         approvalPolicy: "never",
@@ -421,7 +422,7 @@ export class SandboxCodexSession {
   }
 
   async startThread(
-    opts: { cwd?: string; model?: string; modelProvider?: string } = {},
+    opts: { cwd?: string; model?: string; modelProvider?: string; developerInstructions?: string } = {},
   ): Promise<{ threadId: string; model: string; cwd: string; modelProvider: string | null }> {
     await this.start();
     const res = (await this.#peer!.request(
@@ -432,6 +433,7 @@ export class SandboxCodexSession {
         sandbox: "danger-full-access",
         ...(opts.model ? { model: opts.model } : {}),
         ...(opts.modelProvider ? { modelProvider: opts.modelProvider } : {}),
+        ...(opts.developerInstructions !== undefined ? {developerInstructions: opts.developerInstructions} : {}),
       },
       60_000,
     )) as { thread: { id: string }; model: string; cwd: string; modelProvider?: string | null };
@@ -447,7 +449,7 @@ export class SandboxCodexSession {
    */
   async forkThread(
     threadId: string,
-    opts: { model?: string; modelProvider?: string; cwd?: string } = {},
+    opts: { model?: string; modelProvider?: string; cwd?: string; developerInstructions?: string } = {},
   ): Promise<{ threadId: string; model: string; cwd: string; modelProvider: string | null }> {
     await this.start();
     const res = (await this.#peer!.request(
@@ -459,15 +461,16 @@ export class SandboxCodexSession {
         ...(opts.cwd ? { cwd: opts.cwd } : {}),
         ...(opts.model ? { model: opts.model } : {}),
         ...(opts.modelProvider ? { modelProvider: opts.modelProvider } : {}),
+        ...(opts.developerInstructions !== undefined ? {developerInstructions: opts.developerInstructions} : {}),
       },
       60_000,
     )) as { thread: { id: string }; model: string; cwd: string; modelProvider?: string | null };
     return { threadId: res.thread.id, model: res.model, cwd: res.cwd, modelProvider: res.modelProvider ?? null };
   }
 
-  async resumeThread(threadId: string): Promise<void> {
+  async resumeThread(threadId: string, developerInstructions?: string): Promise<void> {
     await this.start();
-    await this.#peer!.request("thread/resume", { threadId, approvalPolicy: "never", sandbox: "danger-full-access" }, 60_000);
+    await this.#peer!.request("thread/resume", { threadId, approvalPolicy: "never", sandbox: "danger-full-access", ...(developerInstructions !== undefined ? {developerInstructions} : {}) }, 60_000);
   }
 
   async startTurn(params: {

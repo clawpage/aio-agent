@@ -89,6 +89,8 @@ async function request<T>(
 }
 
 export const api = {
+  soul: () => request<{content:string;revision:string;defaultContent:string;maxBytes:number}>('/api/settings/soul'),
+  saveSoul: (body:{content:string;revision:string}) => request<{ok:true;content:string;revision:string}>('/api/settings/soul',{method:'PUT',body}),
   main: (before?: number) => request<{ mode: "tasks"; tasks: import("./types").Task[]; nextBefore: number | null }>(`/api/main${before ? `?before=${before}` : ""}`),
   submitTask: (body: { text: string; clientMessageId: string; attachments: Attachment[]; relatedTaskId: string | null }) => request<{ task: import("./types").Task; duplicate: boolean }>("/api/tasks", { method: "POST", body }),
   stopTask: (id: string) => request<{ok:boolean}>(`/api/tasks/${encodeURIComponent(id)}/stop`, {method:"POST",body:{}}),

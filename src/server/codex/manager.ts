@@ -1,3 +1,4 @@
+import {readSoul} from '../soul.js';
 import { EventEmitter } from "node:events";
 import type { Db } from "../db.js";
 import { getMeta, setMeta } from "../db.js";
@@ -34,12 +35,13 @@ export interface CodexSessionLike {
     cwd?: string;
     model?: string;
     modelProvider?: string;
+    developerInstructions?: string;
   }): Promise<{ threadId: string; model: string; cwd: string; modelProvider: string | null }>;
   forkThread(
     threadId: string,
-    opts: { model?: string; modelProvider?: string; cwd?: string },
+    opts: { model?: string; modelProvider?: string; cwd?: string; developerInstructions?: string },
   ): Promise<{ threadId: string; model: string; cwd: string; modelProvider: string | null }>;
-  resumeThread(threadId: string): Promise<void>;
+  resumeThread(threadId: string, developerInstructions?: string): Promise<void>;
   startTurn(params: {
     threadId: string;
     text: string;
@@ -55,7 +57,7 @@ export interface CodexSessionLike {
   steerTurn?(params: {threadId:string;expectedTurnId:string;text:string;attachments?:TurnAttachment[]}): Promise<void>;
   /** One throwaway, tool-free run used only for automatic conversation titles. */
   generateTitle(userText: string): Promise<string | null>;
-  planTask?(prompt: string): Promise<string | null>;
+  planTask?(prompt: string, developerInstructions?: string): Promise<string | null>;
   answer(id: string, result: unknown): boolean;
   close(): void;
 }
@@ -975,9 +977,11 @@ export class AgentManager {
     const desiredProvider = this.#bridge?.providerForModel(model) ?? CHATGPT_PROVIDER_ID;
     // A conversation with no recorded provider was created on ChatGPT.
     const currentProvider = conversation.model_provider ?? CHATGPT_PROVIDER_ID;
+    const developerInstructions = readSoul(this.#cfg).content;
     let threadId = conversation.codex_thread_id;
     if (!threadId) {
       const started = await this.#codex.startThread({
+        developerInstructions,
         cwd: conversation.cwd ?? undefined,
         model,
         ...(desiredProvider !== CHATGPT_PROVIDER_ID ? { modelProvider: desiredProvider } : {}),
@@ -999,6 +1003,7 @@ export class AgentManager {
       // existing conversation switching providers continues on a fork that keeps
       // the history. Resuming would silently stay on the old provider.
       const forked = await this.#codex.forkThread(threadId, {
+        developerInstructions,
         model,
         // Same rule as the start branch: a ChatGPT thread is forked without a
         // `modelProvider`, so that path never names the provider explicitly.
@@ -1023,7 +1028,7 @@ export class AgentManager {
         forkedFrom: conversation.codex_thread_id,
       });
     } else {
-      await this.#codex.resumeThread(threadId);
+      await this.#codex.resumeThread(threadId, developerInstructions);
     }
     // Route later notifications for this thread back to this exact turn even
     // while several conversations are executing at once.

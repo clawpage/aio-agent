@@ -1,3 +1,4 @@
+import {readSoul,writeSoul,SoulError,DEFAULT_SOUL,SOUL_MAX_BYTES} from '../soul.js';
 import { HTML_PREVIEW_CSP, htmlPreviewDocument } from "../documents/html.js";
 import express, { type Request, type Response, type NextFunction, type Router } from "express";
 import { randomUUID } from "node:crypto";
@@ -615,6 +616,19 @@ export function createApiRouter(context: AppContext): Router {
       }
     }),
   );
+
+  // Owner-only source text, independent of model catalog availability.
+  router.get('/settings/soul',requireKind('primary'),requireSession,asyncHandler(async(_req,res)=>{
+    res.setHeader('Cache-Control','no-store');
+    res.json({...readSoul(cfg),defaultContent:DEFAULT_SOUL,maxBytes:SOUL_MAX_BYTES});
+  }));
+  router.put('/settings/soul',requireKind('primary'),requireSession,asyncHandler(async(req,res)=>{
+    try {
+      const result=writeSoul(cfg,req.body?.content,req.body?.revision);
+      audit(db,'soul_updated',result.revision,ctxOf(req).ip);
+      res.setHeader('Cache-Control','no-store');res.json({ok:true,...result});
+    } catch(err) {if(err instanceof SoulError){res.status(err.status).json({error:'invalid_soul',message:err.message});return;}throw err;}
+  }));
 
   // ---------------------------------------------------------------- settings
 
