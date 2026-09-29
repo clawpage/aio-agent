@@ -156,6 +156,8 @@ curl -s http://127.0.0.1:4891/healthz
 
 ## 浏览器内存生命周期（空闲释放与按需恢复）
 
+恢复会同时重建 AIO REST 与浏览器 MCP 的连接。镜像中的 MCP 会缓存旧 Puppeteer 页面，因此在恢复完成前精确重启 `mcp-server-browser`，并通过 Codex 使用的 `/mcp` 调用 `browser_tab_list` 验证页面连接；失败保留快照和恢复进度，不误报可用，不自动重放导航、点击等用户操作。该服务使用无状态 HTTP，重连不停止 Codex、终端或其他服务。
+
 沙箱里的 Chromium 常驻会占住几百 MB 渲染内存，即使没人在看。这条功能让**只有浏览器**在
 无人使用时被真正释放，下一次需要时再从快照重建；容器、Codex、终端、code-server、Jupyter
 **都不会**被停掉。

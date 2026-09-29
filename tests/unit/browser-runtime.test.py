@@ -1380,6 +1380,7 @@ def test_restore_finishes_with_reindexed_aio_tabs_and_focuses_the_original_targe
         rt.write_restore_state(path, state)
         with patch.object(rt, "Cdp", lambda **k: cdp), patch.object(rt, "wait_for_ready_state", return_value=True), \
              patch.object(rt, "_current_browser_identity", return_value=(12, 34)), \
+             patch.object(rt, "reconnect_mcp_browser", return_value={"ok": True}), \
              patch.object(rt, "aio_restored_indices", identify), \
              patch.object(rt, "aio_activate_index", lambda i, *a, **k: (activated.append(i) or True, "")):
             for _ in range(2):
@@ -1388,6 +1389,10 @@ def test_restore_finishes_with_reindexed_aio_tabs_and_focuses_the_original_targe
                 assert_false(result["orderVerified"], "不能声称内部编号保持原序")
                 assert_eq(activated[-1], 2, "原选中目标 b 对应当前 index 2")
                 assert_true(rt.read_restore_state(path)["completed"])
+            with patch.object(rt, "reconnect_mcp_browser", return_value={"ok": False, "message": "MCP reconnect failed"}):
+                assert_false(rt.restore_tabs(snapshot, snapshot_path=path)["ok"])
+                assert_false(rt.read_restore_state(path)["completed"], "MCP 失败必须保留待恢复状态")
+            assert_true(rt.restore_tabs(snapshot, snapshot_path=path)["ok"])
             assert_false(any(m in ("Target.createTarget", "Target.closeTarget", "Page.navigate") for m, _ in cdp.calls), "重试不能重建、关闭或重新导航标签")
             assert_true(("Target.activateTarget", {"targetId": "b"}) in cdp.calls)
 
@@ -1998,6 +2003,60 @@ def test_snapshot_has_storage_requires_the_capture_schema() -> None:
     # reason the control plane turns into an honest "cannot release" verdict.
     source = open(os.path.abspath(rt.__file__), encoding="utf-8").read()
     assert_true("snapshot_storage_missing" in source, "停止路径必须报告稳定的 storage 缺失码")
+
+
+@test
+def test_mcp_reconnect_checks_ownership_and_real_page_tool() -> None:
+    from unittest.mock import patch
+    from types import SimpleNamespace
+    import http.client
+    import pwd
+    from contextlib import ExitStack
+    calls = []
+    requests = []
+    owned = True
+    response_body = {"jsonrpc": "2.0", "id": 1, "result": {"content": [{"type": "text", "text": "tabs"}]}}
+    response_status = 200
+    restart_code = 0
+    class Response:
+        status = 200
+        def read(self): return json.dumps(response_body).encode()
+        def getheader(self, name): return "application/json"
+    class Conn:
+        def __init__(self, *args, **kwargs): pass
+        def request(self, method, path, body, headers): requests.append((method, path, json.loads(body)))
+        def getresponse(self):
+            r = Response(); r.status = response_status; return r
+        def close(self): pass
+    def run(argv, **kwargs):
+        calls.append(argv)
+        return SimpleNamespace(returncode=0 if argv[1] == "pid" else restart_code,
+                               stdout="264" if argv[1] == "pid" else "")
+    with ExitStack() as stack:
+        for obj, name, replacement in [
+            (rt.subprocess, "run", run), (rt, "read_cmdline_raw", lambda pid: b"node\0/usr/local/bin/mcp-server-browser\0--port\08100\0" if owned else b"node\0/other/service.js\0"),
+            (rt, "read_stat", lambda pid: (123, "S")), (rt, "same_process", lambda *a: True),
+            (rt, "read_uid", lambda pid: 1000), (pwd, "getpwnam", lambda name: SimpleNamespace(pw_uid=1000)),
+            (http.client, "HTTPConnection", Conn)]:
+            stack.enter_context(patch.object(obj, name, replacement))
+        assert_true(rt.reconnect_mcp_browser()["ok"])
+        assert_eq(calls, [["supervisorctl", "pid", "mcp-server-browser"], ["supervisorctl", "restart", "mcp-server-browser"]])
+        assert_eq(requests[0][1], "/mcp")
+        assert_eq(requests[0][2]["params"]["name"], "browser_tab_list", "不能只探测元数据")
+        response_body = {"result": {"isError": True, "content": [{"text": "Session closed"}]}}
+        assert_false(rt.reconnect_mcp_browser()["ok"], "HTTP 200 工具错误不能当恢复成功")
+        response_body = {"error": {"message": "failed"}}
+        assert_false(rt.reconnect_mcp_browser()["ok"])
+        response_body = {"result": None}
+        assert_false(rt.reconnect_mcp_browser()["ok"])
+        restart_code = 1
+        before = len(requests)
+        assert_false(rt.reconnect_mcp_browser()["ok"])
+        assert_eq(len(requests), before, "重启失败不进入工具探测")
+        owned = False
+        calls.clear()
+        assert_false(rt.reconnect_mcp_browser()["ok"])
+        assert_eq(len(calls), 1, "归属不明时不能重启")
 
 
 # Node helper deadline and redaction are behavior-tested in browser-storage.test.ts.

@@ -2293,11 +2293,73 @@ def restore_tabs(
     # (later) browser can never inherit a stale "completed".
     identity = _current_browser_identity()
     state["tabs"] = entries
+    # Both browser clients must be ready before the snapshot is marked restored.
+    # On failure keep the progress record, so retry reuses tabs and storage.
+    mcp = reconnect_mcp_browser()
+    if not mcp["ok"]:
+        state["completed"] = False
+        write_restore_state(snapshot_path, state)
+        return err(mcp["message"], restoredTabs=restored)
     state["completed"] = True
     state["browserPid"] = identity[0]
     state["browserStarttime"] = identity[1]
     write_restore_state(snapshot_path, state)
     return ok(restoredTabs=restored, orderVerified=bool(snapshot.get("orderVerified", False)) and "tab_order_unverified" not in problems, problems=problems)
+
+
+def reconnect_mcp_browser() -> dict[str, Any]:
+    """Discard the image MCP's stale Puppeteer cache after Chromium recovery.
+
+    REST soft-restart only resets AIO's Playwright connection. The separate
+    mcp-server-browser process can return cached pages even after CDP disconnects.
+    Its streamable HTTP transport is stateless; restart only this named service,
+    then exercise a page-bound tool (tools/list would miss this exact failure).
+    Never retry user actions or close the newly restored browser/pages.
+    """
+    import http.client
+    import pwd
+
+    try:
+        check = subprocess.run(["supervisorctl", "pid", "mcp-server-browser"],
+                               capture_output=True, text=True, timeout=5, check=False)
+        pid = int(check.stdout.strip())
+        if check.returncode != 0 or pid < 0:
+            return err("无法确认浏览器 MCP 服务状态")
+        if pid:
+            argv = parse_argv(read_cmdline_raw(pid))
+            stat = read_stat(pid)
+            if (len(argv) < 2 or os.path.basename(argv[0]) != "node"
+                    or os.path.realpath(argv[1]) != os.path.realpath("/usr/local/bin/mcp-server-browser")
+                    or read_uid(pid) != pwd.getpwnam("gem").pw_uid
+                    or stat is None or not same_process(pid, stat[0])):
+                return err("浏览器 MCP 进程归属不明，未执行重连")
+        result = subprocess.run(["supervisorctl", "restart", "mcp-server-browser"],
+                                capture_output=True, text=True, timeout=20, check=False)
+        if result.returncode != 0:
+            return err("浏览器 MCP 服务重连失败，快照已保留")
+        # Probe through the same AIO MCP entry used by Codex, not only port 8100.
+        conn = http.client.HTTPConnection(AIO_API_HOST, AIO_API_PORT, timeout=15)
+        try:
+            conn.request("POST", "/mcp", body=json.dumps({"jsonrpc": "2.0", "id": 1,
+                "method": "tools/call", "params": {"name": "browser_tab_list", "arguments": {}}}),
+                headers={"Content-Type": "application/json", "Accept": "application/json, text/event-stream"})
+            response = conn.getresponse()
+            raw = response.read().decode("utf-8")
+            # AIO can wrap the stateless upstream response in an SSE event.
+            if "text/event-stream" in (response.getheader("Content-Type") or ""):
+                payload = next(json.loads(line[5:].strip()) for line in raw.splitlines()
+                               if line.startswith("data:") and '"id"' in line)
+            else:
+                payload = json.loads(raw)
+            result = payload.get("result") if isinstance(payload, dict) else None
+            if (response.status != 200 or not isinstance(result, dict) or payload.get("error")
+                    or result.get("isError") or not result.get("content")):
+                return err("浏览器 MCP 页面连接验证失败，快照已保留")
+        finally:
+            conn.close()
+    except (OSError, ValueError, KeyError, StopIteration, subprocess.SubprocessError, http.client.HTTPException):
+        return err("浏览器 MCP 重连或验证超时，快照已保留")
+    return ok()
 
 
 def _restored_count(entries: Sequence[Any]) -> int:
@@ -2389,6 +2451,9 @@ def wake_browser(
         return err("浏览器启动后未在超时内暴露 CDP")
 
     if snapshot is None:
+        mcp = reconnect_mcp_browser()
+        if not mcp["ok"]:
+            return mcp
         return ok(restoredTabs=0, message=f"浏览器已启动，无快照可恢复：{problem}")
 
     restored = restore_tabs(snapshot, snapshot_path=snapshot_path)
