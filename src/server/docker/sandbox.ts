@@ -180,12 +180,54 @@ export class SandboxContainer {
     // so health + user availability must be confirmed before any `docker exec -u gem`.
     await this.waitReady();
     await this.waitUserReady();
+    if(this.#cfg.memberRuntime) await this.isolateNetwork();
     await this.#fixOwnership();
     await this.ensureCodexCli();
     await this.seedWorkspace();
     await this.ensurePrograms();
     await this.waitSurfaces();
     return await this.inspect();
+  }
+
+  /** Apply policy from a trusted read-only helper, never elevate code inside an agent-writable container. */
+  async isolateNetwork():Promise<void> {
+    const image="aio-agent-network-guard:1";
+    const exists=await this.docker(["image","inspect",image,"--format","{{ index .Config.Labels \"aio.network-guard\" }}"]);
+    if(exists.code!==0){
+      const build=await this.docker(["build","-t",image,"-"],{stdin:`FROM ${this.#cfg.sandbox.image}\nUSER root\nRUN apt-get update -qq && apt-get install -y -qq iptables && rm -rf /var/lib/apt/lists/*\nLABEL aio.network-guard="1"\nENTRYPOINT ["/bin/sh"]\n`,timeoutMs:180_000});
+      if(build.code!==0)throw new Error("Unable to build trusted network guard");
+    }else if(exists.stdout.trim()!=="1")throw new Error("Network guard image ownership mismatch");
+    const port=this.#cfg.memberModelPort??4902;
+    const script=`set -eu
+for family in 4 6; do
+  if [ "$family" = 4 ]; then
+    restore=iptables-restore
+    private="0.0.0.0/8 10.0.0.0/8 100.64.0.0/10 127.0.0.0/8 169.254.0.0/16 172.16.0.0/12 192.0.0.0/24 192.168.0.0/16 198.18.0.0/15 224.0.0.0/4 240.0.0.0/4"
+  else
+    restore=ip6tables-restore
+    private="::/128 ::1/128 fc00::/7 fe80::/10 ff00::/8"
+  fi
+  {
+    echo '*filter'
+    echo ':INPUT ACCEPT [0:0]'
+    echo ':FORWARD DROP [0:0]'
+    echo ':OUTPUT ACCEPT [0:0]'
+    echo ':AIO_MEMBER - [0:0]'
+    echo '-A OUTPUT -j AIO_MEMBER'
+    echo '-A AIO_MEMBER -o lo -j ACCEPT'
+    echo '-A AIO_MEMBER -m conntrack --ctdir REPLY --ctstate ESTABLISHED,RELATED -j ACCEPT'
+    if [ "$family" = 4 ]; then
+      for ip in $(getent ahostsv4 host.docker.internal | awk '{print $1}' | sort -u); do
+        echo "-A AIO_MEMBER -d $ip -p tcp --dport ${port} -j ACCEPT"
+      done
+    fi
+    for ip in $private; do echo "-A AIO_MEMBER -d $ip -j REJECT"; done
+    echo COMMIT
+  } | $restore
+done
+`;
+    const applied=await this.docker(["run","--rm","-i","--network",`container:${this.name}`,"--read-only","--user","0","--cap-drop","ALL","--cap-add","NET_ADMIN","--security-opt","no-new-privileges",image],{stdin:script,timeoutMs:60_000});
+    if(applied.code!==0)throw new Error("Unable to enforce member network isolation");
   }
 
   /** Wait until the sandbox user exists inside the container. */
@@ -205,6 +247,13 @@ export class SandboxContainer {
   async create(): Promise<void> {
     const s = this.#cfg.sandbox;
     await this.ensureVolumes();
+    if (s.networkName) {
+      const found = await this.docker(["network", "inspect", s.networkName]);
+      if (found.code !== 0) {
+        const created = await this.docker(["network", "create", "--label", "personal-agent.managed=1", "--opt", "com.docker.network.bridge.enable_icc=false", s.networkName]);
+        if (created.code !== 0) throw new Error("Unable to create isolated sandbox network");
+      }
+    }
     const args = [
       "run",
       "-d",
@@ -212,6 +261,7 @@ export class SandboxContainer {
       this.name,
       "--restart",
       "unless-stopped",
+      ...(s.networkName ? ["--network", s.networkName,"--cap-drop","NET_RAW","--memory","2g","--cpus","2","--pids-limit","1024"] : []),
       "--label",
       "personal-agent.managed=1",
       "-p",

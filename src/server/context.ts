@@ -15,6 +15,7 @@ import type { BrowserRuntimeLike } from "./browser/lifecycle.js";
 import type { TaskService } from "./tasks/service.js";
 
 export interface AppContext {
+  runtimeForUser?: (userId: string) => Promise<AppContext>;
   tasks: TaskService;
   cfg: Config;
   db: Db;

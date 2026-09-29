@@ -57,7 +57,7 @@ export class TaskService {
         this.schedule();
     }
     close(): void { this.#closed = true; this.agent.events.off("event", this.onEvent); }
-    private rows(): TaskRow[] { return this.db.prepare("SELECT * FROM tasks ORDER BY created_at, id").all() as unknown as TaskRow[]; }
+    private rows(): TaskRow[] { return this.db.prepare("SELECT * FROM tasks WHERE (? IS NULL OR conversation_id IN (SELECT id FROM conversations WHERE owner_id=?)) ORDER BY created_at, id").all(this.cfg.runtimeUserId ?? null, this.cfg.runtimeUserId ?? null) as unknown as TaskRow[]; }
     get(id: string): TaskRow | null { return this.db.prepare("SELECT * FROM tasks WHERE id = ?").get(id) as unknown as TaskRow ?? null; }
     ownerId(row: TaskRow): string { return this.agent.getConversation(row.conversation_id)!.owner_id; }
     belongsTo(id: string, userId: string): boolean { const row = this.get(id); return !!row && this.ownerId(row) === userId; }

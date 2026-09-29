@@ -138,6 +138,7 @@ export class SandboxCodexSession {
     // refresh is answered immediately from the host Codex.
     peer.onAnyServerRequest((method, params, id) => {
       if (method === "account/chatgptAuthTokens/refresh") {
+        if (this.#cfg.memberRuntime) return Promise.reject(new Error("ChatGPT credentials are unavailable in member runtimes"));
         return this.#refreshTokens(params as { previousAccountId?: string | null });
       }
       // A background title thread must never raise a UI approval: deny it here
@@ -165,6 +166,10 @@ export class SandboxCodexSession {
       );
       peer.notify("initialized");
 
+      if (this.#cfg.memberRuntime) {
+        if (!this.#bridge?.enabled) throw new Error("Member model provider unavailable");
+        this.#account = {type:"apiKey",email:null,planType:null};
+      } else {
       const tokens = await this.#hostTokens.getTokens();
       await peer.request(
         "account/login/start",
@@ -184,6 +189,7 @@ export class SandboxCodexSession {
         email: account?.account?.email ?? null,
         planType: account?.account?.planType ?? null,
       };
+      }
     } catch (err) {
       // Never leave an orphan docker exec / codex process behind.
       this.#lastError = err instanceof Error ? err.message : String(err);

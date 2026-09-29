@@ -2,11 +2,11 @@
 
 > Canonical repository: <https://github.com/clawpage/aio-agent>
 
-**AIO Agent** 是一个 owner 管理的 self-hosted 的智能体控制台：一个常驻 **AIO Sandbox** 容器，
+**AIO Agent** 是一个 owner 管理的 self-hosted 的智能体控制台：每账号一个独立 **AIO Sandbox** 容器，
 一个常驻 **Codex** 主智能体，中文 UI，桌面与手机功能对等。它适合个人或受信任的小团队把
 Codex + AIO Sandbox 跑在自己的机器上，通过自己的入口访问。
 
-- **账号分级 / self-hosted**：一个 owner 管理配置，可由管理员创建 member 账号；没有注册入口，不是多租户隔离服务，
+- **账号分级 / self-hosted**：一个 owner 管理配置，可由管理员创建 member 账号；没有注册入口，账号间隔离运行环境，
   也不对外提供公共 demo。
 - **Codex + AIO Sandbox**：命令、文件、浏览器、桌面、编辑器、笔记本都发生在容器里；
   控制面只以固定参数调用 Docker，不挂载宿主 home / workspace / `docker.sock`。
@@ -71,7 +71,11 @@ curl -s http://127.0.0.1:4891/healthz
 - owner 保留模型、推理强度和 SOUL 配置。member 的主会话和任务列表只显示本账号内容，不能通过任务 ID 读取、引用或停止他人的任务。
 - member 的派单和执行均由服务端固定为 `deepseek-v4.1-flash` / `high`；忽略客户端模型参数，桥接不可用时拒绝执行，不回退 GPT。owner 的自动标题机制不会用于 member。
 - member 不展示配置入口、模型与推理参数、SOUL 原文；配置/模型/能力清单接口拒绝访问，JSON 与 SSE 隐去模型配置元数据。正常回答内容不会被关键词过滤。
-- **共享环境边界**：账号分级不等于容器隔离。文件、终端、浏览器、运行资源与 agent shell 仍共享，只能给受信任成员使用；需要不互信用户时必须先隔离沙箱和浏览器。此限制也意味着共享环境内的 shell 不是模型计费策略的安全边界。
+- **账号独立环境**：member 的容器、workspace、Codex 记忆/历史、浏览器 profile、终端、任务数据库、SOUL 和文档缓存独立。owner 沿用原容器与数据卷；新成员不复制 owner 的文件或历史。
+- 成员环境默认限制为 2 GiB 内存、2 CPU、1024 个进程，阻止连接内网、宿主服务和其他沙盒；公网仍可访问。网络规则由独立只读守卫容器应用，成员无 NET_ADMIN / NET_RAW 权限。
+- member 不接收 owner 的 ChatGPT token 或模型桥管理密钥。独立模型网关仅接受该账号凭据下的无状态 DeepSeek high 请求，禁用历史响应查询；网关监听 `PA_MEMBER_MODEL_PORT`（默认 4902）。
+- 每个 member 工作区有独立来源 `<工作区首段>-<账号散列>.<域名>`，需配置对应 DNS、TLS 和 tunnel 路由；控制台仍是统一主域名。域名未配置或环境启动失败时拒绝连接，绝不退回 owner 沙盒。
+- 账号配置和登录鉴权由宿主控制面统一管理；容器共享宿主内核，因此这不是抵抗内核漏洞的虚拟机隔离。
 - 创建账号（先构建；使用与服务相同的环境变量/数据目录）：`node --env-file=var/runtime.env bin/create-user.mjs <username>`。Quickstart 使用 `.env`。随机密码写入 `var/user-secrets/<username>.txt`（0600），命令不打印密码、不覆盖已有账号，不提供公开注册。
 
 ## 主会话的克制追问

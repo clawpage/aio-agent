@@ -642,12 +642,12 @@ export function rawUpgrade(port: number, pathname: string, headers: Record<strin
     const socket = net.connect(port, "127.0.0.1", () => {
       const lines = [
         `GET ${pathname} HTTP/1.1`,
-        `Host: 127.0.0.1:${port}`,
+        `Host: ${headers.Host ?? `127.0.0.1:${port}`}`,
         "Connection: Upgrade",
         "Upgrade: websocket",
         "Sec-WebSocket-Version: 13",
         "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==",
-        ...Object.entries(headers).map(([k, v]) => `${k}: ${v}`),
+        ...Object.entries(headers).filter(([k])=>k.toLowerCase()!=="host").map(([k, v]) => `${k}: ${v}`),
         "",
         "",
       ];

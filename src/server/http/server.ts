@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import {memberWorkspaceHost,workspaceConfig} from "../auth/workspaceHost.js";
 import path from "node:path";
 import express, { type NextFunction, type Request, type Response } from "express";
 import type { AppContext } from "../context.js";
@@ -13,6 +14,23 @@ export const WEB_DIST = path.resolve(import.meta.dirname, "..", "..", "..", "dis
 
 function attach(req: Request, ctx: RequestContext | null): void {
   if (ctx) req.paCtx = ctx;
+}
+
+/** Distinct browser origins prevent one account's page scripts/storage reaching another account. */
+function resolveAppRequest(ctx:AppContext,req:import("node:http").IncomingMessage):RequestContext|null {
+  const host=(req.headers.host??'').toLowerCase().replace(/:443$/,'');
+  let cfg=ctx.cfg, workspaceUserId='owner_1';
+  if(ctx.runtimeForUser){
+    for(const user of ctx.db.prepare("SELECT id FROM owners WHERE role='member'").all() as {id:string}[]){
+      if(host===memberWorkspaceHost(ctx.cfg,user.id)){cfg=workspaceConfig(ctx.cfg,user.id);workspaceUserId=user.id;break;}
+    }
+  }
+  const rec=resolveRequest({cfg,sessions:ctx.sessions,req});
+  if(rec?.kind==='workspace'&&ctx.runtimeForUser){
+    rec.workspaceUserId=workspaceUserId;
+    if(rec.session?.ownerId!==workspaceUserId)rec.session=null;
+  }
+  return rec;
 }
 
 export function createApp(ctx: AppContext): express.Express {
@@ -32,7 +50,7 @@ export function createApp(ctx: AppContext): express.Express {
 
   // Host classification happens first: an unknown Host never reaches any handler.
   app.use((req: Request, res: Response, next: NextFunction) => {
-    const resolved = resolveRequest({ cfg: ctx.cfg, sessions: ctx.sessions, req });
+    const resolved = resolveAppRequest(ctx,req);
     if (!resolved) {
       ctx.log.warn("rejected unknown host", { host: req.headers.host ?? null, url: req.url });
       res.status(404).json({ error: "unknown_host", message: "Not Found" });
@@ -110,7 +128,9 @@ export function createApp(ctx: AppContext): express.Express {
         );
       return;
     }
-    const { session, token, csrfToken } = ctx.sessions.create("owner_1", "workspace", {
+    const parent = ctx.db.prepare("SELECT owner_id FROM sessions WHERE id=? AND kind='primary'").get(consumed.sessionId) as {owner_id:string}|undefined;
+    if(!parent || (rec.workspaceUserId && rec.workspaceUserId!==parent.owner_id)){res.status(403).send("Invalid parent session");return;}
+    const { session, token, csrfToken } = ctx.sessions.create(parent.owner_id, "workspace", {
       ip: rec.ip,
       userAgent: req.get("user-agent") ?? undefined,
       parentSessionId: consumed.sessionId,
@@ -123,7 +143,26 @@ export function createApp(ctx: AppContext): express.Express {
     res.redirect(303, next);
   });
 
-  app.use("/api", createApiRouter(ctx));
+  const rootApi=createApiRouter(ctx);
+  const workspaceApis=new Map<string,ReturnType<typeof createApiRouter>>();
+  const tenantApis=new WeakMap<AppContext,ReturnType<typeof createApiRouter>>();
+  app.use("/api", async (req:Request,res:Response,next:NextFunction)=>{
+    const id=req.paCtx?.session?.ownerId;
+    if(ctx.runtimeForUser && req.paCtx?.kind==='workspace' && req.paCtx.workspaceUserId && req.paCtx.workspaceUserId!=='owner_1' && /^\/workspace(\/|$)/.test(req.path)){
+      const account=req.paCtx.workspaceUserId;
+      let api=workspaceApis.get(account);
+      if(!api){api=createApiRouter({...ctx,cfg:workspaceConfig(ctx.cfg,account)});workspaceApis.set(account,api);}
+      api(req,res,next);return;
+    }
+    if(!id || !ctx.runtimeForUser || /^\/(auth|workspace)(\/|$)/.test(req.path)) {rootApi(req,res,next);return;}
+    try {
+      const runtime=await ctx.runtimeForUser(id);
+      if(!ctx.sessions.isLive(req.paCtx!.session!.id)){res.status(401).json({error:"unauthenticated"});return;}
+      let api=tenantApis.get(runtime);
+      if(!api){api=createApiRouter(runtime);tenantApis.set(runtime,api);}
+      api(req,res,next);
+    } catch {res.status(503).json({error:"runtime_unavailable",message:"独立环境暂不可用，请稍后重试"});}
+  });
 
   // Everything else on the companion origin is the authenticated sandbox proxy.
   app.use((req: Request, res: Response, next: NextFunction) => {
@@ -147,7 +186,13 @@ export function createApp(ctx: AppContext): express.Express {
       res.status(401).json({ error: "unauthenticated", message: "工作区需要授权" });
       return;
     }
-    handleProxyHttp({ cfg: ctx.cfg, log: ctx.log, sessions: ctx.sessions, browser: ctx.browser.proxyGate() }, rec, req, res);
+    void (async()=>{
+      try {
+        const runtime=ctx.runtimeForUser?await ctx.runtimeForUser(rec.session!.ownerId):ctx;
+        if(!ctx.sessions.isLive(rec.session!.id)){res.status(401).end();return;}
+        handleProxyHttp({cfg:runtime.cfg,log:runtime.log,sessions:ctx.sessions,browser:runtime.browser.proxyGate()},rec,req,res);
+      } catch {res.status(503).json({error:"runtime_unavailable"});}
+    })();
   });
 
   // Control-plane SPA.
@@ -181,7 +226,7 @@ export function createApp(ctx: AppContext): express.Express {
       "Content-Security-Policy",
       [
         "default-src 'self'",
-        `frame-src 'self' https://${ctx.cfg.workspaceHost}`,
+        `frame-src 'self' https://${ctx.cfg.workspaceHost} ${(ctx.db.prepare("SELECT id FROM owners WHERE role='member'").all() as {id:string}[]).map(u=>"https://"+memberWorkspaceHost(ctx.cfg,u.id)).join(" ")}`,
         "img-src 'self' data: blob:",
         "style-src 'self' 'unsafe-inline'",
         "script-src 'self'",
@@ -220,7 +265,7 @@ function acceptsHtml(req: Request): boolean {
 
 /** WebSocket / CDP upgrades are proxied to the sandbox only on the companion origin. */
 export function handleUpgrade(ctx: AppContext, req: import("node:http").IncomingMessage, socket: import("node:stream").Duplex, head: Buffer): void {
-  const rec = resolveRequest({ cfg: ctx.cfg, sessions: ctx.sessions, req });
+  const rec = resolveAppRequest(ctx,req);
   if (!rec || rec.kind !== "workspace") {
     endSocket(socket, "HTTP/1.1 404 Not Found\r\nConnection: close\r\nContent-Length: 0\r\n\r\n");
     return;
@@ -231,5 +276,11 @@ export function handleUpgrade(ctx: AppContext, req: import("node:http").Incoming
     return;
   }
   rec.session = ctx.sessions.resolve("workspace", token) ?? rec.session;
-  handleProxyUpgrade({ cfg: ctx.cfg, log: ctx.log, sessions: ctx.sessions, browser: ctx.browser.proxyGate() }, rec, req, socket, head);
+  void (async()=>{
+    try {
+      const runtime=ctx.runtimeForUser?await ctx.runtimeForUser(rec.session!.ownerId):ctx;
+      if(!ctx.sessions.isLive(rec.session!.id)){endSocket(socket,"HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n");return;}
+      handleProxyUpgrade({cfg:runtime.cfg,log:runtime.log,sessions:ctx.sessions,browser:runtime.browser.proxyGate()},rec,req,socket,head);
+    } catch {endSocket(socket,"HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\n\r\n");}
+  })();
 }

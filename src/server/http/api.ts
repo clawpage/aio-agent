@@ -1,3 +1,4 @@
+import {workspaceConfig} from "../auth/workspaceHost.js";
 import { isMember, publicPayload } from "../auth/policy.js";
 import {readSoul,writeSoul,SoulError,DEFAULT_SOUL,SOUL_MAX_BYTES} from '../soul.js';
 import { HTML_PREVIEW_CSP, htmlPreviewDocument } from "../documents/html.js";
@@ -83,6 +84,7 @@ function requireSession(req: Request, res: Response, next: NextFunction): void {
  * CSRF header. */
 
 export function workspaceOrigin(ctx: RequestContext, cfg: AppContext["cfg"]): string {
+  if(cfg.memberRuntime)return `https://${cfg.workspaceHost}`;
   if (ctx.hostname === cfg.workspaceHost.toLowerCase()) {
     return `${ctx.secure ? "https" : "http"}://${cfg.workspaceHost}`;
   }
@@ -345,7 +347,7 @@ export function createApiRouter(context: AppContext): Router {
     asyncHandler(async (_req, res) => {
       const [agentStatus, hostAuth, sandboxState, sandboxReady] = await Promise.all([
         agent.status(),
-        hostTokens.status(),
+        cfg.memberRuntime ? Promise.resolve({ok:true,authMethod:null,email:null,planType:null,error:null,expiresAt:null}) : hostTokens.status(),
         container.inspect(),
         container.isReady(),
       ]);
@@ -1420,7 +1422,7 @@ export function createApiRouter(context: AppContext): Router {
     asyncHandler(async (req, res, ctx) => {
       const issued = tickets.issue(ctx.session!.id);
       const next = safeRedirectPath(typeof req.body?.next === "string" ? req.body.next : "/");
-      const origin = workspaceOrigin(ctx, cfg);
+      const origin = workspaceOrigin(ctx, context.runtimeForUser && isMember(db,ctx.session!.ownerId) ? workspaceConfig(cfg,ctx.session!.ownerId) : cfg);
       res.json({
         ticket: issued.ticket,
         expiresAt: issued.expiresAt,

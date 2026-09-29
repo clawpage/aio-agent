@@ -1,4 +1,6 @@
 import http from "node:http";
+import {MemberModelGateway} from "./memberModelGateway.js";
+import {UserRuntimes} from "./tenants.js";
 import { loadConfig, ensureDataDirs, type Config } from "./config.js";
 import { Logger } from "./logger.js";
 import { openDb, type Db } from "./db.js";
@@ -31,6 +33,8 @@ export interface BootstrapOptions {
   log?: Logger;
   /** Skip owner creation (used by tests that pre-seed the DB). */
   skipOwner?: boolean;
+  identity?: {id:string;username:string;role:string};
+  deferAgentInit?: boolean;
   /** Test seams: replace the sandbox-backed collaborators. */
   overrides?: {
     codex?: import("./codex/manager.js").CodexSessionLike;
@@ -48,6 +52,11 @@ export async function bootstrap(opts: BootstrapOptions = {}): Promise<Bootstrapp
     opts.log ??
     new Logger(process.env.PA_LOG_LEVEL === "debug" ? "debug" : "info", `${cfg.logDir}/personal-agent.log`, true);
   const db = openDb(cfg.dbPath);
+
+  if (opts.identity) {
+    const u = opts.identity;
+    db.prepare("INSERT INTO owners (id,username,role,password_hash,password_salt,password_params,created_at) VALUES (?,?,?,'disabled','disabled','{}',?) ON CONFLICT(id) DO UPDATE SET username=excluded.username,role=excluded.role").run(u.id,u.username,u.role,Date.now());
+  }
 
   if (!opts.skipOwner) {
     const result = await ensureOwner(db, {
@@ -116,8 +125,7 @@ export async function bootstrap(opts: BootstrapOptions = {}): Promise<Bootstrapp
     sandboxSurfaces: null,
   };
 
-  await agent.init();
-  tasks.init();
+  if(!opts.deferAgentInit){await agent.init();tasks.init();}
 
   const maintenance = setInterval(() => {
     try {
@@ -275,7 +283,13 @@ export function startRuntimeRecovery(ctx: AppContext, intervalMs = 30_000): Runt
 }
 
 async function main(): Promise<void> {
-  const { ctx, shutdown } = await bootstrap();
+  const config=loadConfig();
+  config.runtimeUserId="owner_1";
+  const { ctx, shutdown } = await bootstrap({config});
+  const modelGateway=new MemberModelGateway(ctx.cfg,ctx.log);
+  await modelGateway.start();
+  const users=new UserRuntimes(ctx,bootstrap,modelGateway);
+  ctx.runtimeForUser=id=>users.resolve(id);
   const app = createApp(ctx);
   const server = http.createServer(app);
   server.on("upgrade", (req, socket, head) => handleUpgrade(ctx, req, socket, head));
@@ -285,6 +299,9 @@ async function main(): Promise<void> {
   });
   ctx.log.info("http server listening", { bind: ctx.cfg.bind, port: ctx.cfg.port });
 
+  for(const user of ctx.db.prepare("SELECT id FROM owners WHERE role='member'").all() as {id:string}[]) {
+    void users.resolve(user.id).catch(()=>ctx.log.error("member runtime unavailable",{userId:user.id}));
+  }
   const recovery = startRuntimeRecovery(ctx);
   void recovery.tick();
   // Independent of the health check above, so a new managed skill reaches a
@@ -299,6 +316,8 @@ async function main(): Promise<void> {
     ctx.log.info("shutting down", { signal });
     recovery.stop();
     server.close();
+    modelGateway.close();
+    await users.shutdown();
     await shutdown();
     setTimeout(() => process.exit(0), 200).unref?.();
   };

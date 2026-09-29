@@ -45,6 +45,9 @@ function bridgeModelIds(): string[] {
 }
 
 export function loadConfig(): {
+  runtimeUserId?: string;
+  memberRuntime?: boolean;
+  memberModelPort?: number;
   port: number;
   bind: string;
   dataDir: string;
@@ -70,6 +73,7 @@ export function loadConfig(): {
   ownerPassword: string;
   ownerPasswordReset: boolean;
   sandbox: {
+    networkName?: string;
     image: string;
     containerName: string;
     hostPort: number;
@@ -216,6 +220,7 @@ export function loadConfig(): {
   return {
     port,
     bind,
+    memberModelPort:envInt("PA_MEMBER_MODEL_PORT",4902),
     dataDir,
     dbPath: envStr("PA_DB_PATH", path.join(dataDir, "personal-agent.sqlite")),
     ownerSecretPath: envStr("PA_OWNER_SECRET_PATH", path.join(dataDir, "owner-secret.txt")),

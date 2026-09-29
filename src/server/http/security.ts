@@ -6,6 +6,7 @@ import { COOKIE_NAMES, parseCookies } from "../auth/sessions.js";
 export type HostKind = "primary" | "workspace";
 
 export interface RequestContext {
+  workspaceUserId?: string;
   kind: HostKind;
   host: string;
   hostname: string;
