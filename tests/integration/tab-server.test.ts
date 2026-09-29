@@ -252,7 +252,7 @@ it.skipIf(!hasChromium)("opens a person's link in their own tab: theirs to opera
   expect((await fetch(`${base}/open`, { method: "POST", body: JSON.stringify({ url: "file:///etc/passwd" }) })).status).toBe(400);
 
   const { tab } = await open(`${origin}/one`);
-  expect(tab).toMatchObject({ key: "person", holder: "human", url: `${origin}/one` });
+  expect(tab).toMatchObject({ key: "person", holder: "human", url: `${origin}/one`, title: "Link /one" });
   // No agent sees it, reads it or acts on it.
   expect(text(await call("Z", "browser_tab_list"))).not.toContain(origin);
   expect((await call("Z", "browser_get_text", { tab: tab.id })).result?.isError).toBe(true);

@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Locator, type Page, type TestInfo } from "@playwright/test";
 import { makeConversation, mockConsole } from "./mock-api";
 import type { Task } from "../../src/web/src/types";
 import fs from "node:fs";
@@ -31,6 +31,8 @@ async function setup(page: Page, rows: Task[] = [], nextBefore:number|null = nul
     await expect(page.getByRole("heading", { name: "主会话", exact: true })).toBeVisible();
     return { rows, bodies, stops };
 }
+/** A real touch tap on touch devices: a mouse click would hide tap-only failures (WebKit drops the click of a prevented press). */
+const press = (info: TestInfo, target: Locator, position?: { x: number; y: number }) => (info.project.use.hasTouch ? target.tap({ position }) : target.click({ position }));
 const send = async (page: Page, text: string) => { await page.getByRole("textbox", { name: "消息", exact: true }).fill(text); await page.getByRole("button", { name: "发送", exact: true }).click(); await expect(page.getByRole("textbox", { name: "消息", exact: true })).toHaveValue(""); };
 test("MP4 attachments and results preview directly in the main inbox",async({page},info)=>{
     const path='/home/gem/workspace/uploads/demo.mp4';
@@ -413,7 +415,7 @@ test("a task that needs you in the browser shows why, hands you its own tab to o
     await expect(panel).toContainText("OpenTable 登录");
     const screen = panel.getByRole("img", { name: /实时画面/ });
     const box = (await screen.boundingBox())!;
-    await screen.click({ position: { x: box.width / 2, y: box.height / 4 } });
+    await press(info, screen, { x: box.width / 2, y: box.height / 4 });
     await expect.poll(() => acts.length).toBe(1);
     expect(acts[0]).toMatchObject({ tab: "t1", action: "click" });
     expect(acts[0].x as number).toBeCloseTo(0.5, 1);
@@ -422,19 +424,19 @@ test("a task that needs you in the browser shows why, hands you its own tab to o
     await expect(field).toHaveAttribute("placeholder", "在这里打字");
     await field.fill("me@example.com");
     await panel.getByRole("button", { name: "发送", exact: true }).click();
-    await panel.getByRole("button", { name: "回车", exact: true }).click();
-    await panel.getByRole("button", { name: "向下滚动", exact: true }).click();
+    await press(info, panel.getByRole("button", { name: "回车", exact: true }));
+    await press(info, panel.getByRole("button", { name: "向下滚动", exact: true }));
     await expect.poll(() => acts.length).toBe(4);
     expect(acts.slice(1)).toEqual([{ tab: "t1", text: "me@example.com" }, { tab: "t1", key: "Enter" }, { tab: "t1", action: "scroll", dy: 600 }]);
     // Zoomed in, a tap still lands on the matching point of the page.
-    await panel.getByRole("button", { name: "放大画面", exact: true }).click();
+    await press(info, panel.getByRole("button", { name: "放大画面", exact: true }));
     const zoomedBox = (await screen.boundingBox())!;
     expect(zoomedBox.width).toBeGreaterThan(box.width * 1.5);
-    await screen.click({ position: { x: zoomedBox.width / 4, y: zoomedBox.height / 10 } });
+    await press(info, screen, { x: zoomedBox.width / 4, y: zoomedBox.height / 10 });
     await expect.poll(() => acts.length).toBe(5);
     expect(acts[4].x as number).toBeCloseTo(0.25, 1);
     expect(acts[4].y as number).toBeCloseTo(0.1, 1);
-    await panel.getByRole("button", { name: "放大画面", exact: true }).click();
+    await press(info, panel.getByRole("button", { name: "放大画面", exact: true }));
     await expect(field).toHaveValue("");
     // The whole panel, input bar included, fits the screen.
     const viewport = page.viewportSize()!;
@@ -488,7 +490,7 @@ test("a link in a reply opens in the person's own tab, operated from the same co
 
     const screen = panel.getByRole("img", { name: /实时画面/ });
     const box = (await screen.boundingBox())!;
-    await screen.click({ position: { x: box.width / 2, y: box.height / 2 } });
+    await press(info, screen, { x: box.width / 2, y: box.height / 2 });
     await expect.poll(() => shots.at(-1)).toBe("t9");
     await panel.getByRole("textbox", { name: "要输入到网页的文字" }).fill("2 人");
     await panel.getByRole("button", { name: "发送", exact: true }).click();

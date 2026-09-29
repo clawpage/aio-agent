@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { api, type PointerInput, type PointerResult } from "../api";
 import { RemoteKeyboard } from "./RemoteKeyboard";
+import { keepFocusTap } from "../keepFocusTap";
 
 const REFRESH_MS = 1500;
 const SCROLL_PX = 600;
@@ -131,19 +132,18 @@ export function TaskConsole({ target, tab, label, primary, closeLabel = "关闭"
             src={shown}
             alt={`${page.title || page.url} 的实时画面，点按即点击网页`}
             // Tapping the picture must not blur the input bar and drop the phone keyboard.
-            onPointerDown={(e) => e.preventDefault()}
-            onClick={(e) => {
-              const box = e.currentTarget.getBoundingClientRect();
-              void act({ action: "click", x: (e.clientX - box.left) / box.width, y: (e.clientY - box.top) / box.height });
-            }}
+            {...keepFocusTap<HTMLImageElement>(({ clientX, clientY, target }) => {
+              const box = target.getBoundingClientRect();
+              void act({ action: "click", x: (clientX - box.left) / box.width, y: (clientY - box.top) / box.height });
+            })}
           />
         </div>
         {notice && <p className="task-console-notice" role="alert">{notice}</p>}
         <div className="task-console-tools" role="group" aria-label="页面操作">
-          <button type="button" className="ghost" aria-label="后退" onPointerDown={(e) => e.preventDefault()} onClick={() => void act({ action: "back" })}>←</button>
-          <button type="button" className="ghost" aria-label="向上滚动" onPointerDown={(e) => e.preventDefault()} onClick={() => void act({ action: "scroll", dy: -SCROLL_PX })}>↑</button>
-          <button type="button" className="ghost" aria-label="向下滚动" onPointerDown={(e) => e.preventDefault()} onClick={() => void act({ action: "scroll", dy: SCROLL_PX })}>↓</button>
-          <button type="button" className="ghost" aria-label="放大画面" aria-pressed={zoomed} onPointerDown={(e) => e.preventDefault()} onClick={() => setZoomed((z) => !z)}>{zoomed ? "缩小" : "放大"}</button>
+          <button type="button" className="ghost" aria-label="后退" {...keepFocusTap(() => void act({ action: "back" }))}>←</button>
+          <button type="button" className="ghost" aria-label="向上滚动" {...keepFocusTap(() => void act({ action: "scroll", dy: -SCROLL_PX }))}>↑</button>
+          <button type="button" className="ghost" aria-label="向下滚动" {...keepFocusTap(() => void act({ action: "scroll", dy: SCROLL_PX }))}>↓</button>
+          <button type="button" className="ghost" aria-label="放大画面" aria-pressed={zoomed} {...keepFocusTap(() => setZoomed((z) => !z))}>{zoomed ? "缩小" : "放大"}</button>
           <span className="spacer" />
           <button type="button" className="ghost tiny" onClick={onReveal}>在工作区打开</button>
         </div>

@@ -363,6 +363,8 @@ async function personOpen(body) {
   if (!/^https?:\/\//i.test(url)) return { status: 400, body: { error: 'bad_url' } };
   const tab = await newTab(PERSON, '你打开的网页');
   await tab.page.goto(url, { waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => undefined);
+  // Nobody else sees this tab: its record carries the page's own title for the person.
+  tab.title = (await tab.page.title().catch(() => '')) || tab.title;
   const old = ownTabs(PERSON).filter((t) => t.id !== tab.id).sort((a, b) => b.lastUsed - a.lastUsed).slice(MAX_PERSON_TABS - 1);
   for (const t of old) await t.page.close().catch(() => undefined);
   return { status: 200, body: { tab: snapshotRecords().find((r) => r.id === tab.id) } };

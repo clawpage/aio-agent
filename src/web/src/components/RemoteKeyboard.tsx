@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
 import { api } from "../api";
+import { keepFocusTap } from "../keepFocusTap";
 
 const KEYS: Array<{ key: string; label: string; aria: string }> = [
   { key: "Enter", label: "⏎", aria: "回车" },
@@ -73,8 +74,7 @@ export function RemoteKeyboard({
             aria-label={k.aria}
             disabled={busy}
             // Pressing a key must not blur the field and drop the phone keyboard.
-            onPointerDown={(e) => e.preventDefault()}
-            onClick={() => void send({ key: k.key })}
+            {...keepFocusTap(() => { if (!busy) void send({ key: k.key }); })}
           >
             {k.label}
           </button>

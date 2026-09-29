@@ -229,8 +229,8 @@ test("phones get a native input bar that types into the page in front; desktops 
   await expect(field).toHaveValue("你好 world");
   await bar.getByRole("button", { name: "发送", exact: true }).click();
   await expect(field).toHaveValue("");
-  await bar.getByRole("button", { name: "回车", exact: true }).click();
-  await bar.getByRole("button", { name: "删除", exact: true }).click();
+  await (info.project.use.hasTouch ? bar.getByRole("button", { name: "回车", exact: true }).tap() : bar.getByRole("button", { name: "回车", exact: true }).click());
+  await (info.project.use.hasTouch ? bar.getByRole("button", { name: "删除", exact: true }).tap() : bar.getByRole("button", { name: "删除", exact: true }).click());
   expect(bodies).toEqual([{ text: "你好 world" }, { text: "你好 world" }, { key: "Enter" }, { key: "Backspace" }]);
   await expect(bar.getByRole("alert")).toHaveCount(0);
 
