@@ -18,6 +18,7 @@ import { SandboxCodexSession } from "./codex/sandboxCodex.js";
 import { AgentManager } from "./codex/manager.js";
 import { BridgeModel } from "./bridgeModel.js";
 import { ClaudeCodeHarness } from "./claudeCode.js";
+import { TabServer } from "./browser/tabs.js";
 import { readAgentSettings } from "./settings.js";
 import { ClaudeCodeSession } from "./codex/claudeSession.js";
 import { HarnessSession } from "./codex/harnessSession.js";
@@ -99,6 +100,8 @@ export async function bootstrap(opts: BootstrapOptions = {}): Promise<Bootstrapp
   // A test seam replaces the container-facing runtime; the state machine itself
   // is always the production one.
   const resolvedBrowserRuntime: BrowserRuntimeLike = opts.overrides?.browserRuntime ?? browserRuntime;
+  // Tab-scoped browser tools need the real sandbox; a test seam keeps the legacy tools.
+  const tabs = opts.overrides?.browserRuntime || opts.overrides?.container ? null : new TabServer(cfg, log, container, browserRuntime);
   const browser = new BrowserService({
     cfg,
     log,
@@ -108,7 +111,7 @@ export async function bootstrap(opts: BootstrapOptions = {}): Promise<Bootstrapp
   });
   // The manager protects the browser for the whole of every managed turn, so a
   // lease must exist before this point (a queued turn can start on construction).
-  const agent = new AgentManager({ cfg, db, log, codex, hostTokens, browser, bridge, claudeCode });
+  const agent = new AgentManager({ cfg, db, log, codex, hostTokens, browser, bridge, claudeCode, tabs });
   const aio = opts.overrides?.aio ?? new AioClient(cfg, log);
 
   const tasks = new TaskService(db, cfg, agent, codex, container);

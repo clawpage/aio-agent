@@ -13,7 +13,8 @@ describe("scoped resources",()=>{
   expect(resourcesConflict([w("tasks")],[w("tasks/one")])).toBe(true);
   expect(resourcesConflict(["workspace"],[r("projects/a")])).toBe(true);
   expect(resourcesConflict(["browser"],[w("projects/a")])).toBe(false);
-  expect(resourcesConflict(["browser"],["browser"])).toBe(true);
+  // Tasks drive their own tabs: two browser tasks never wait on each other.
+  expect(resourcesConflict(["browser"],["browser"])).toBe(false);
  });
  it("normalizes harmless spelling and rejects ambiguous or outside-root paths",()=>{
   expect(normalizeResource(w("projects//a/./"),root)).toBe(w("projects/a"));

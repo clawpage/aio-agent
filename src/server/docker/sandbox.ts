@@ -667,6 +667,12 @@ finally:
     );
   }
 
+  /** Start a long-running sandbox process detached from this control plane (fixed argv). */
+  async execDetached(argv: string[], opts: { user?: string; env?: Record<string, string> } = {}): Promise<DockerRunResult> {
+    const envFlags = Object.entries(opts.env ?? {}).flatMap(([k, v]) => ["-e", `${k}=${v}`]);
+    return await this.docker(["exec", "-d", "-u", opts.user ?? this.#cfg.sandbox.containerUser, ...envFlags, this.name, ...argv], { timeoutMs: 30_000 });
+  }
+
   /**
    * Run a one-shot command inside the sandbox (fixed argv, no shell expansion by
    * us). `stdin` is only ever control-plane content, never user input.

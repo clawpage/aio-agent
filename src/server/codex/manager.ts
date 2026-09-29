@@ -9,6 +9,7 @@ import type { CodexModel, SandboxAccount } from "./sandboxCodex.js";
 import type { HostTokenSource } from "./hostTokens.js";
 import { BridgeModel, CHATGPT_PROVIDER_ID } from "../bridgeModel.js";
 import { CLAUDE_CODE_PROVIDER_ID, type ClaudeCodeHarness } from "../claudeCode.js";
+import { withTabPolicy, type TabServerLike } from "../browser/tabs.js";
 import { AutoTitler, DEFAULT_CONVERSATION_TITLE, TITLE_UPDATED_EVENT, manualTitleMetaKey } from "./autoTitle.js";
 import {
   effectiveAgentSettings,
@@ -38,12 +39,14 @@ export interface CodexSessionLike {
     model?: string;
     modelProvider?: string;
     developerInstructions?: string;
+    /** Names the task to the tab-scoped browser tools (its own tabs only). */
+    browserTaskKey?: string;
   }): Promise<{ threadId: string; model: string; cwd: string; modelProvider: string | null }>;
   forkThread(
     threadId: string,
-    opts: { model?: string; modelProvider?: string; cwd?: string; developerInstructions?: string },
+    opts: { model?: string; modelProvider?: string; cwd?: string; developerInstructions?: string; browserTaskKey?: string },
   ): Promise<{ threadId: string; model: string; cwd: string; modelProvider: string | null }>;
-  resumeThread(threadId: string, developerInstructions?: string): Promise<void>;
+  resumeThread(threadId: string, developerInstructions?: string, browserTaskKey?: string): Promise<void>;
   startTurn(params: {
     threadId: string;
     text: string;
@@ -284,6 +287,8 @@ export class AgentManager {
   #titles: AutoTitler;
   #bridge: BridgeModel | null;
   #claudeCode: ClaudeCodeHarness | null;
+  /** Tab-scoped browser tools: parallel tasks lock tabs, never the whole browser. */
+  #tabs: TabServerLike | null;
 
   #activeTurns = new Map<string, ActiveTurn>();
   #capacity: number;
@@ -323,6 +328,8 @@ export class AgentManager {
     bridge?: BridgeModel | null;
     /** Optional Claude Code harness; absent means every turn runs on Codex. */
     claudeCode?: ClaudeCodeHarness | null;
+    /** Optional tab server; absent keeps the legacy single-page browser tools. */
+    tabs?: TabServerLike | null;
   }) {
     this.#cfg = deps.cfg;
     this.#db = deps.db;
@@ -332,6 +339,7 @@ export class AgentManager {
     this.#browser = deps.browser ?? null;
     this.#bridge = deps.bridge ?? null;
     this.#claudeCode = deps.claudeCode ?? null;
+    this.#tabs = deps.tabs ?? null;
     this.#capacity = Math.max(1, deps.cfg.agent.maxConcurrentTurns);
     this.#titles = new AutoTitler({
       cfg: deps.cfg,
@@ -919,7 +927,12 @@ export class AgentManager {
           }
         })
         .finally(() => {
-          releaseBrowser();
+          // A finished turn's tabs are closed before its browser hold ends, so an
+          // idle release never snapshots (and later restores) them.
+          const closing = this.#tabs
+            ? this.#tabs.release(turn.conversation_id).catch((err) => this.#log.debug("tab release failed", { error: String(err) }))
+            : Promise.resolve();
+          void closing.finally(releaseBrowser);
           this.#activeTurns.delete(turn.conversation_id);
           this.#persistActiveState();
           this.#db.prepare("UPDATE conversations SET status = 'idle', updated_at = ? WHERE id = ?").run(Date.now(), turn.conversation_id);
@@ -967,6 +980,7 @@ export class AgentManager {
     if (this.#browser && turn.browser_required !== 0) {
       try {
         await this.#browser.ready();
+        await this.#tabs?.ensure();
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         this.#log.warn("browser unavailable at turn start", { error: message, turnId: turn.id });
@@ -1005,11 +1019,20 @@ export class AgentManager {
     const switchesHarness =
       Boolean(conversation.codex_thread_id) && (desiredProvider === CLAUDE_CODE_PROVIDER_ID) !== (currentProvider === CLAUDE_CODE_PROVIDER_ID);
     const inputText = switchesHarness ? this.#withPriorContext(conversation.id, turn.id, turn.input_text) : turn.input_text;
-    const developerInstructions = readSoul(this.#cfg).content;
+    const soul = readSoul(this.#cfg).content;
+    const developerInstructions = this.#tabs ? withTabPolicy(soul) : soul;
+    // Every execution thread gets tab tools under its conversation's identity,
+    // which stays the same across its turns, resumes and forks.
+    const browserTaskKey = this.#tabs ? conversation.id : undefined;
+    if (this.#tabs && turn.browser_required === 0) {
+      // Not required, but the agent may still browse: keep the tools reachable.
+      await this.#tabs.ensure().catch((err) => this.#log.debug("tab server unavailable", { error: String(err) }));
+    }
     let threadId = switchesHarness ? null : conversation.codex_thread_id;
     if (!threadId) {
       const started = await this.#codex.startThread({
         developerInstructions,
+        ...(browserTaskKey ? { browserTaskKey } : {}),
         cwd: conversation.cwd ?? undefined,
         model,
         ...(desiredProvider !== CHATGPT_PROVIDER_ID ? { modelProvider: desiredProvider } : {}),
@@ -1033,6 +1056,7 @@ export class AgentManager {
       // the history. Resuming would silently stay on the old provider.
       const forked = await this.#codex.forkThread(threadId, {
         developerInstructions,
+        ...(browserTaskKey ? { browserTaskKey } : {}),
         model,
         // Same rule as the start branch: a ChatGPT thread is forked without a
         // `modelProvider`, so that path never names the provider explicitly.
@@ -1057,7 +1081,8 @@ export class AgentManager {
         forkedFrom: conversation.codex_thread_id,
       });
     } else {
-      await this.#codex.resumeThread(threadId, developerInstructions);
+      if (browserTaskKey) await this.#codex.resumeThread(threadId, developerInstructions, browserTaskKey);
+      else await this.#codex.resumeThread(threadId, developerInstructions);
     }
     // Route later notifications for this thread back to this exact turn even
     // while several conversations are executing at once.
@@ -1240,7 +1265,7 @@ export class AgentManager {
       if (!turn.codex_turn_id || !conversation?.codex_thread_id) return "starting";
       if (!this.#codex.steerTurn) throw new Error("当前执行器不支持运行中补充");
       if (requiresBrowser && turn.browser_required === 0) {
-        try { await this.#browser?.ready(); }
+        try { await this.#browser?.ready(); await this.#tabs?.ensure(); }
         catch { return "browser_unavailable"; }
         // The original task can finish or be stopped during recovery. Never
         // steer stale work or grant browser access before recovery is proven.

@@ -19,6 +19,8 @@ export const WORKSPACE_AGENTS_MD = `# 沙箱工作区说明（由 AIO Agent 自�
 不确定参数时一律先看帮助：\`aio <命令> --help\`。
 
 - 浏览器（真实 Chromium，和 VNC 桌面里是同一个浏览器）
+  - **任务中操作网页请用 MCP 工具 \`aio_tabs\`**（见下文）：每个任务有自己的标签页，可与其他任务并行。
+    下面的 \`aio browser\` 命令操作的是整个浏览器当前可见的页面，只在没有并行任务、手动调试时使用。
   - \`aio browser navigate <url>\`
   - \`aio browser text\`（页面正文）、\`aio browser markdown\`、\`aio browser html\`
   - 截图先建目录再写（示例主题 \`example\`，可换成你自己的）：\`mkdir -p /home/gem/workspace/.scratch/artifacts/example && aio browser screenshot -o /home/gem/workspace/.scratch/artifacts/example/screenshot.png\`（\`--full\` 整页）
@@ -33,6 +35,10 @@ export const WORKSPACE_AGENTS_MD = `# 沙箱工作区说明（由 AIO Agent 自�
 - 沙箱信息：\`aio sandbox --help\`
 
 ## MCP 工具
+
+任务线程注册的是 \`aio_tabs\`（\`http://127.0.0.1:8190/mcp\`）：\`browser_navigate\`、\`browser_get_text\`、
+\`browser_snapshot\`、\`browser_screenshot\`、\`browser_click\`、\`browser_fill\`、\`browser_evaluate\`、
+\`browser_tab_list\` 等，只作用于本任务自己的标签页，登录状态与其他任务共享。
 
 已注册 MCP 服务器 \`aio_browser\`（streamable HTTP：\`http://127.0.0.1:8080/mcp\`）。
 该端点实际提供的工具包括：\`browser_navigate\`、\`browser_get_text\`、\`browser_get_markdown\`、
@@ -213,6 +219,9 @@ remote_plugin = false
 
 [mcp_servers.aio_browser.identity]
 url = "http://127.0.0.1:8080/mcp"
+
+[mcp_servers.aio_tabs.identity]
+url = "http://127.0.0.1:8190/mcp"
 `;
 
 export const CODEX_ISOLATION_OVERRIDES = [

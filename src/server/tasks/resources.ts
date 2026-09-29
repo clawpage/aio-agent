@@ -21,7 +21,8 @@ export function normalizeResource(resource: unknown, root: string): string | nul
 export function resourcesConflict(a: string[], b: string[]): boolean {
     if (a.includes("all") || b.includes("all")) return true;
     return a.some(x => b.some(y => {
-        if (x === "browser" || y === "browser") return x === y;
+        // Each task drives its own tabs; the shared browser itself is never exclusive.
+        if (x === "browser" || y === "browser") return false;
         // Legacy workspace claims remain conservative; do not silently narrow active work.
         if (x === "workspace" || y === "workspace") return true;
         const p = pathClaim(x), q = pathClaim(y);

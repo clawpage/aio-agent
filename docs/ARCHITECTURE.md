@@ -44,7 +44,10 @@
 
 派单器是隔离的临时 Luna 分类线程（read-only、never、ephemeral），输出经校验的 JSON。
 只能引用已存在且更早的任务，防止循环依赖；相关任务结果在派发时重新读取，避免使用陈旧快照。
-并发数复用 `PA_MAX_CONCURRENT_TURNS`；browser/workspace 资源锁在持久化计划上计算，
+并发数复用 `PA_MAX_CONCURRENT_TURNS`；浏览器不是互斥资源：沙箱内的标签页服务（`tab-server.cjs`，loopback `:8190`，
+playwright-core 经 CDP 连接同一个 Chromium）按请求头 `X-AIO-Task`（执行会话 ID）只让任务操作自己开的标签页，
+执行线程经线程级配置（Codex `config.mcp_servers`、Claude Code `--mcp-config`）接入它并关闭 `aio_browser`，回合结束先关闭标签页再释放浏览器租约。
+workspace/路径资源锁在持久化计划上计算，
 只锁冲突资源，不让一个等待任务阻塞所有独立任务。它不是 OS 权限隔离，同账号执行者共享沙箱，跨账号使用不同容器。
 
 派单 JSON 的 `appendTo` 用于识别同一进行中任务的补充（地址、条件、纠正、额外要求）。

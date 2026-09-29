@@ -64,8 +64,10 @@ export class HarnessSession implements CodexSessionLike {
     }
     return this.#codex.forkThread(threadId, opts);
   }
-  resumeThread(threadId: string, developerInstructions?: string) {
-    return isClaudeThread(threadId) ? this.#claude.resumeThread(threadId, developerInstructions) : this.#codex.resumeThread(threadId, developerInstructions);
+  resumeThread(threadId: string, developerInstructions?: string, browserTaskKey?: string) {
+    return isClaudeThread(threadId)
+      ? this.#claude.resumeThread(threadId, developerInstructions, browserTaskKey)
+      : this.#codex.resumeThread(threadId, developerInstructions, browserTaskKey);
   }
   startTurn(params: Parameters<CodexSessionLike["startTurn"]>[0]) {
     return isClaudeThread(params.threadId) ? this.#claude.startTurn(params) : this.#codex.startTurn(params);

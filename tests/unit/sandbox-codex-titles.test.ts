@@ -1,3 +1,4 @@
+import { tabThreadConfig } from '../../src/server/browser/tabs.js';
 import type { BridgeModel } from "../../src/server/bridgeModel.js";
 import { describe, expect, it } from "vitest";
 import { EventEmitter } from "node:events";
@@ -297,4 +298,20 @@ it('shows the reason a planning turn failed, while a failed title stays silent',
   await expect(session.planTask('request','soul')).rejects.toThrow(`任务分配失败：${limit}`);
   expect(await session.generateTitle('hi')).toBeNull();
  } finally {session.close();}
+});
+
+it('opens, forks and resumes task threads with their own tab identity',async()=>{
+ const server=new FakeAppServer();
+ for(const method of ['thread/start','thread/fork'])server.handle(method,()=>({thread:{id:'tab-thread'},model:'gpt-6-sol',cwd:'/workspace'}));
+ server.handle('thread/resume',()=>({}));
+ const session=makeSession(server,200);
+ try {
+  await session.startThread({browserTaskKey:'conv_1'});
+  await session.forkThread('tab-thread',{browserTaskKey:'conv_1'});
+  await session.resumeThread('tab-thread',undefined,'conv_1');
+  await session.startThread({});
+  const sent=server.inbound.filter(r=>['thread/start','thread/fork','thread/resume'].includes(r.method??''));
+  for(const r of sent.slice(0,3))expect(r.params?.config).toEqual(tabThreadConfig('conv_1'));
+  expect(sent[3]?.params?.config).toBeUndefined();
+ }finally{session.close();}
 });

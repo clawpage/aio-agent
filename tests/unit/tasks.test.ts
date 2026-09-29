@@ -255,16 +255,14 @@ describe("main inbox delegation", () => {
         codex.completeTurn(codex.startedTurns[0]!.turnId,"interrupted");await tick();
         expect(tasks.get(update.id)?.status).toBe("running");
     });
-    it("serializes shared browser work but lets a file-only task execute concurrently", async () => {
+    it("runs browser tasks in parallel, each on its own tabs, alongside file-only work", async () => {
         codex.plan = async (p) => JSON.stringify({ title: "task", related: [], dependencies: [], resources: p.includes('"message":"browser') ? ["browser"] : [] });
         const a = submit("browser one"), b = submit("browser two"), c = submit("new doc");
         await tick();
         expect(tasks.get(a.id)?.status).toBe("running");
-        expect(tasks.get(b.id)?.status).toBe("waiting");
-        expect(tasks.get(c.id)?.status).toBe("running");
-        await codex.runTurn(codex.startedTurns[0]!.turnId);
-        await tick();
         expect(tasks.get(b.id)?.status).toBe("running");
+        expect(tasks.get(c.id)?.status).toBe("running");
+        expect(codex.startedTurns).toHaveLength(3);
     });
     it("runs unrelated directory writes and new documents together, queues overlapping writes with a reason", async () => {
         const root="/home/gem/workspace";
@@ -396,9 +394,9 @@ describe("main inbox delegation", () => {
         expect(tasks.list().tasks.find(t=>t.id===extra.id)?.result).toBeNull();
     });
     it("folds supplements into a not-yet-dispatched task including attachments", async()=>{
-        codex.plan=async()=>JSON.stringify({title:"shared",related:[],dependencies:[],resources:["browser"]});
-        const blocking=submit("browser busy");await tick();const parent=submit("plan trip");await tick();
-        codex.plan=async()=>JSON.stringify({title:"extra",appendTo:parent.id,related:[],dependencies:[],resources:["browser"]});
+        codex.plan=async()=>JSON.stringify({title:"shared",related:[],dependencies:[],resources:["write:/home/gem/workspace/projects/shared"]});
+        const blocking=submit("shared files busy");await tick();const parent=submit("plan trip");await tick();
+        codex.plan=async()=>JSON.stringify({title:"extra",appendTo:parent.id,related:[],dependencies:[],resources:["write:/home/gem/workspace/projects/shared"]});
         const extra=tasks.submit({text:"with photo",attachments:[{path:"/home/gem/workspace/uploads/photo.png",kind:"image"}],clientMessageId:"photo"}).task;await tick();
         // Resource held by the first task: wait as a supplement, not a new executor.
         expect(tasks.get(extra.id)?.status).toBe("merging");
@@ -453,16 +451,16 @@ describe("main inbox delegation", () => {
         expect(codex.startedTurns).toHaveLength(1);
     });
     it("waits for additional shared resources before steering, while independent work continues",async()=>{
-        codex.plan=async()=>JSON.stringify({title:"browser",related:[],dependencies:[],resources:["browser"]});
-        submit("browser task");await tick();
+        codex.plan=async()=>JSON.stringify({title:"shared",related:[],dependencies:[],resources:["write:/home/gem/workspace/projects/shared"]});
+        submit("shared files task");await tick();
         codex.plan=async()=>JSON.stringify({title:"document",related:[],dependencies:[],resources:[]});
         const parent=submit("document task");await tick();
-        codex.plan=async()=>JSON.stringify({title:"extra",appendTo:parent.id,related:[],dependencies:[],resources:["browser"]});
-        const extra=submit("add browser research");await tick();
+        codex.plan=async()=>JSON.stringify({title:"extra",appendTo:parent.id,related:[],dependencies:[],resources:["write:/home/gem/workspace/projects/shared"]});
+        const extra=submit("add shared file edits");await tick();
         expect(tasks.get(extra.id)?.status).toBe("merging");expect(codex.steers).toHaveLength(0);
         await codex.runTurn(codex.startedTurns[0]!.turnId);await tick();await tick();
         expect(codex.steers).toHaveLength(1);expect(tasks.get(extra.id)?.status).toBe("merged");
-        expect(JSON.parse(tasks.get(parent.id)!.plan_json!).resources).toEqual(["browser"]);
+        expect(JSON.parse(tasks.get(parent.id)!.plan_json!).resources).toEqual(["write:/home/gem/workspace/projects/shared"]);
     });
     it("does not steer a supplement before a separate prerequisite result is available",async()=>{
         const parent=submit("a"), prerequisite=submit("b");await tick();
@@ -509,7 +507,8 @@ describe("main inbox delegation", () => {
 });
 it("validates plans against known task IDs and serializes intersecting resources", () => {
     expect(parsePlan('{"title":"x","related":[],"dependencies":[],"resources":["unknown"]}', [], null)).toBeNull();
-    expect(resourcesConflict(["browser"], ["browser"])).toBe(true);
+    expect(resourcesConflict(["write:/home/gem/workspace/projects/shared"], ["write:/home/gem/workspace/projects/shared/src"])).toBe(true);
+    expect(resourcesConflict(["browser"], ["browser"])).toBe(false);
     expect(resourcesConflict(["browser"], [])).toBe(false);
 });
 

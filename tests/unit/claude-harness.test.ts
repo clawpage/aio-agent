@@ -336,6 +336,22 @@ describe("ClaudeCodeSession", () => {
     expect(statusOf(events)?.status).toBe("completed");
   });
 
+  it("gives a task's turns its own browser tabs, also after a restart", async () => {
+    const { session, spawns } = makeSession();
+    const mcp = (i: number) => JSON.parse(spawns[i]!.args[spawns[i]!.args.indexOf("--mcp-config") + 1]!) as { mcpServers: Record<string, { headers?: Record<string, string> }> };
+    const { threadId } = await session.startThread({ browserTaskKey: "conv_web" });
+    await session.startTurn({ threadId, text: "hi" });
+    expect(Object.keys(mcp(0).mcpServers)).toEqual(["aio_tabs"]);
+    expect(mcp(0).mcpServers.aio_tabs!.headers).toEqual({ "X-AIO-Task": "conv_web" });
+    spawns[0]!.child.close();
+
+    const restarted = makeSession();
+    await restarted.session.resumeThread(threadId, undefined, "conv_web");
+    await restarted.session.startTurn({ threadId, text: "again" });
+    const args = restarted.spawns[0]!.args;
+    expect(JSON.parse(args[args.indexOf("--mcp-config") + 1]!).mcpServers.aio_tabs.headers).toEqual({ "X-AIO-Task": "conv_web" });
+  });
+
   it("runs one turn per session at a time", async () => {
     const { session } = makeSession();
     const { threadId } = await session.startThread({});
