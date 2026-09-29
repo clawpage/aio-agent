@@ -6,7 +6,7 @@ import type { Config } from "../config.js";
 import { randomId } from "../auth/passwords.js";
 import { AgentManager, TurnConflictError, type AgentEvent, type CodexSessionLike, type TurnAttachment } from "../codex/manager.js";
 import { normalizeResource, resolveResources, type ResourceSandbox } from "./resources.js";
-import { applyTaskReference, parsePlan, parseSearch, planningPrompt, resourcesConflict, type PlanningTask, type TaskPlan } from "./planning.js";
+import { applyTaskReference, parsePlan, parseSearch, planningPrompt, resourcesConflict, type PlanningTask, type PlanReport, type TaskPlan } from "./planning.js";
 import { recordRecall, TaskRecall, type RecallEvent, type RecallSource } from "./recall.js";
 
 /** The dispatcher may ask to search past tasks at most this many times per message. */
@@ -302,13 +302,29 @@ export class TaskService {
                 trace.searches.push(...queries);
                 for (const query of queries) recalled(query, "search", "search", Math.ceil(cap / queries.length));
             }
+            const report: PlanReport = { repairs: [] };
+            let plan = parsePlan(raw ?? null, previous, row.related_task_id, this.cfg.sandbox.containerWorkspaceDir, report);
+            // One more chance with the reason, instead of failing the message outright.
+            if (!plan) {
+                trace.rounds += 1;
+                const prompt = planningPrompt(planningInput, explicit ? previous.filter(t => t.id === explicit.id) : previous, row.related_task_id, this.cfg.sandbox.containerWorkspaceDir, { canSearch: false, searched: trace.searches, correction: report.error ?? "格式不符合要求" });
+                trace.promptChars += prompt.length;
+                raw = await ask(prompt);
+                if (this.#closed || this.get(row.id)?.status !== "planning") return;
+                if (this.taskContext(this.get(row.id)!) !== inputContext) return;
+                const first = report.error;
+                report.error = undefined;
+                plan = parsePlan(raw ?? null, previous, row.related_task_id, this.cfg.sandbox.containerWorkspaceDir, report);
+                report.repairs.unshift(`第一次回答无法使用：${first ?? "格式不符合要求"}，已重问一次`);
+            }
             trace.candidates = [...candidates.values()].map(c => ({ id: c.id, source: c.source, ...(c.rank ? { rank: c.rank, score: c.score } : {}) }));
-            const plan = parsePlan(raw ?? null, previous, row.related_task_id, this.cfg.sandbox.containerWorkspaceDir);
+            trace.repairs = report.repairs;
+            trace.failReason = report.error ?? null;
             measured = true;
             trace.latencyMs = Date.now() - started;
             if (plan) { trace.failed = false; trace.chosen = { related: plan.related, appendTo: plan.appendTo ?? null }; }
             if (!plan)
-                throw new Error("任务分配暂时失败，尚未执行。请重试分配。");
+                throw new Error(`任务分配暂时失败，尚未执行。请重试分配。（派单结果无法使用：${report.error ?? "格式不符合要求"}）`);
             if (explicit) applyTaskReference(plan, this.referenceTarget(row)!);
             const ownerId = plan.appendTo ?? row.id;
             const root = this.cfg.sandbox.containerWorkspaceDir;
@@ -334,7 +350,7 @@ export class TaskService {
         catch (err) {
             if (!this.#closed && this.get(row.id)?.status === "planning") {
                 this.db.prepare("UPDATE tasks SET status='planning_failed',error=? WHERE id=?").run(err instanceof Error ? err.message : "任务分配失败", row.id);
-                if (!measured) { measured = true; trace.latencyMs = Date.now() - started; }
+                if (!measured) { measured = true; trace.latencyMs = Date.now() - started; trace.failReason = err instanceof Error ? err.message : "任务分配失败"; }
             }
         }
         finally {

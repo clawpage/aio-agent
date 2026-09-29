@@ -104,15 +104,17 @@ it("lets the dispatcher search past tasks by keywords, then decide with the hits
   expect(events().at(-1)).toMatchObject({ rounds: 2, searches_json: JSON.stringify(["Zephyr", "固件升级"]) });
   expect(recallStats(db, "owner_1", 7, 10)).toMatchObject({ chosenFromSearch: 1, searchRate: 1, avgRounds: 2 });
 
-  // A dispatcher that never stops searching is cut off: two searches, then it must answer.
+  // A dispatcher that never stops searching is cut off: two searches, then it must answer,
+  // and gets one more chance told why before the message fails.
   codex.prompts = [];
   codex.decide = () => ({ search: ["还要找"] });
   job = submit("随便找找");
   await tick();
-  expect(codex.prompts).toHaveLength(3);
+  expect(codex.prompts).toHaveLength(4);
   expect(view(codex.prompts[2]!).canSearch).toBe(false);
+  expect(codex.prompts[3]).toContain("你上一次的回答无法使用：缺少 title");
   expect(tasks.get(job.id)!.status).toBe("planning_failed");
-  expect(events().at(-1)).toMatchObject({ rounds: 3, failed: 1 });
+  expect(events().at(-1)).toMatchObject({ rounds: 4, failed: 1, fail_reason: "缺少 title" });
 });
 
 it("measures where search ranks a task picked by hand, beyond the recent window", async () => {

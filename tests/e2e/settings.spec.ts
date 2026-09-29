@@ -449,7 +449,7 @@ test("config page shows how well the dispatcher recalls past tasks, per range", 
   await setup(page);
   await openSettings(page, mobile);
   const card = page.getByRole("region", { name: "历史召回" });
-  await expect(card).toContainText("34 次（失败 1）");
+  await expect(card).toContainText("34 次（失败 1 · 自动修正 3）");
   await expect(card).toContainText("召回找到 7、搜索找到 2");
   await expect(card).toContainText("检索能排进前 10 名 83%");
   await card.getByRole("button", { name: "近 30 天" }).click();

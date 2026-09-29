@@ -1,4 +1,7 @@
 import { beforeEach, expect, it } from "vitest";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { openDb, type Db } from "../../src/server/db.js";
 import { DEFAULT_CAP, recallStats, recordRecall, TaskRecall, tokenize, type RecallDoc } from "../../src/server/tasks/recall.js";
 
@@ -58,4 +61,15 @@ it("tunes the cap from where hand-picked tasks ranked, once there is enough evid
   for (let i = 0; i < 10; i++) event(7);
   expect(recall.cap()).toBe(9);
   expect(recallStats(db, "owner_1", 7, recall.cap())).toMatchObject({ dispatches: 60, labelled: 30, recallAtCap: 1 });
+});
+
+it("adds the failure reason and repair columns to a monitoring table from before they existed", () => {
+  const file = `${fs.mkdtempSync(path.join(os.tmpdir(), "recall-"))}/db.sqlite`;
+  const old = openDb(file);
+  old.exec("DROP TABLE recall_events; CREATE TABLE recall_events (id INTEGER PRIMARY KEY AUTOINCREMENT, task_id TEXT NOT NULL, owner_id TEXT NOT NULL, created_at INTEGER NOT NULL, candidates_json TEXT NOT NULL, searches_json TEXT NOT NULL, rounds INTEGER NOT NULL, chosen_json TEXT NOT NULL, gold_task_id TEXT, gold_rank INTEGER, gold_in_window INTEGER, latency_ms INTEGER NOT NULL, prompt_chars INTEGER NOT NULL, failed INTEGER NOT NULL DEFAULT 0)");
+  old.close();
+  const upgraded = openDb(file);
+  recordRecall(upgraded, { taskId: "t", ownerId: "owner_1", candidates: [], searches: [], rounds: 2, chosen: { related: [], appendTo: null }, gold: null, latencyMs: 1, promptChars: 1, failed: false, repairs: ["related 共 20 个，只保留 12 个"] });
+  expect(recallStats(upgraded, "owner_1", 7, 10)).toMatchObject({ dispatches: 1, failed: 0, repaired: 1 });
+  upgraded.close();
 });

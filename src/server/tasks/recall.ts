@@ -145,18 +145,23 @@ export interface RecallEvent {
   latencyMs: number;
   promptChars: number;
   failed: boolean;
+  /** Why the dispatcher's answer could not be used, and what was repaired in it. */
+  failReason?: string | null;
+  repairs?: string[];
 }
 
 export function recordRecall(db: Db, e: RecallEvent): void {
   db.prepare(
-    "INSERT INTO recall_events (task_id, owner_id, created_at, candidates_json, searches_json, rounds, chosen_json, gold_task_id, gold_rank, gold_in_window, latency_ms, prompt_chars, failed) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
-  ).run(e.taskId, e.ownerId, Date.now(), JSON.stringify(e.candidates), JSON.stringify(e.searches), e.rounds, JSON.stringify(e.chosen), e.gold?.id ?? null, e.gold?.rank ?? null, e.gold ? (e.gold.inWindow ? 1 : 0) : null, e.latencyMs, e.promptChars, e.failed ? 1 : 0);
+    "INSERT INTO recall_events (task_id, owner_id, created_at, candidates_json, searches_json, rounds, chosen_json, gold_task_id, gold_rank, gold_in_window, latency_ms, prompt_chars, failed, fail_reason, repairs_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+  ).run(e.taskId, e.ownerId, Date.now(), JSON.stringify(e.candidates), JSON.stringify(e.searches), e.rounds, JSON.stringify(e.chosen), e.gold?.id ?? null, e.gold?.rank ?? null, e.gold ? (e.gold.inWindow ? 1 : 0) : null, e.latencyMs, e.promptChars, e.failed ? 1 : 0, e.failReason ?? null, JSON.stringify(e.repairs ?? []));
 }
 
 export interface RecallStats {
   days: number;
   dispatches: number;
   failed: number;
+  /** Dispatches whose answer had small defects that were repaired instead of failing. */
+  repaired: number;
   /** Dispatches where recall brought at least one task beyond the recent window. */
   withRecall: number;
   avgRecalled: number;
@@ -179,7 +184,7 @@ export interface RecallStats {
 export function recallStats(db: Db, ownerId: string, days: number, cap: number): RecallStats {
   const since = Date.now() - days * 86_400_000;
   const rows = db.prepare("SELECT * FROM recall_events WHERE owner_id=? AND created_at >= ? ORDER BY created_at").all(ownerId, since) as Array<{
-    candidates_json: string; searches_json: string; rounds: number; chosen_json: string; gold_rank: number | null; gold_in_window: number | null; latency_ms: number; prompt_chars: number; failed: number;
+    candidates_json: string; searches_json: string; rounds: number; chosen_json: string; gold_rank: number | null; gold_in_window: number | null; latency_ms: number; prompt_chars: number; failed: number; repairs_json: string;
   }>;
   let withRecall = 0, recalled = 0, searched = 0, rounds = 0, chosen = 0, fromRecall = 0, fromSearch = 0, latency = 0;
   const labelled: Array<number | null> = [];
@@ -207,6 +212,7 @@ export function recallStats(db: Db, ownerId: string, days: number, cap: number):
     days,
     dispatches: rows.length,
     failed: rows.filter((r) => r.failed).length,
+    repaired: rows.filter((r) => !r.failed && r.repairs_json !== "[]").length,
     withRecall,
     avgRecalled: round(recalled / n),
     searchRate: round(searched / n),

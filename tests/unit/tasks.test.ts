@@ -327,12 +327,17 @@ describe("main inbox delegation", () => {
         expect(codex.startedTurns[0]).toMatchObject({ model: "gpt-6-sol", effort: null });
         expect(tasks.get(a.id)?.revision).toBeGreaterThan(0);
     });
-    it("surfaces invalid planning, supports safe planning retry, rejects unknown dependency IDs", async () => {
-        codex.plan = async () => '{"title":"bad","related":["invented"],"dependencies":[],"resources":[]}';
+    it("surfaces invalid planning after one corrected retry, and supports a safe manual retry", async () => {
+        // Resources decide what a task may touch: an invalid claim is never repaired, even on the second try.
+        codex.plan = async () => '{"title":"bad","related":[],"dependencies":[],"resources":["unknown"]}';
         const a = submit("a");
         await tick();
         expect(tasks.get(a.id)?.status).toBe("planning_failed");
+        expect(tasks.get(a.id)?.error).toContain("resources 含无效的资源声明");
+        expect(codex.plans).toHaveLength(2);
+        expect(codex.plans[1]).toContain("你上一次的回答无法使用：resources 含无效的资源声明");
         expect(codex.startedTurns).toHaveLength(0);
+        expect(db.prepare("SELECT failed, fail_reason, rounds FROM recall_events").get()).toMatchObject({ failed: 1, fail_reason: "resources 含无效的资源声明", rounds: 2 });
         codex.plan = async () => '{"title":"ok","related":[],"dependencies":[],"resources":[]}';
         tasks.retryPlanning(a.id);
         await tick();
@@ -512,10 +517,29 @@ it("validates plans against known task IDs and serializes intersecting resources
     expect(resourcesConflict(["browser"], [])).toBe(false);
 });
 
-it("rejects steering to unknown or finished tasks",()=>{
+it("never steers into unknown or finished tasks: a finished target stays as background",()=>{
     const plan={title:"extra",appendTo:"a",related:[],dependencies:[],resources:[]};
-    expect(parsePlan(JSON.stringify(plan),[],null)).toBeNull();
-    expect(parsePlan(JSON.stringify(plan),[{id:"a",title:"a",input_text:"a",status:"completed",result:"done"}],null)).toBeNull();
+    expect(parsePlan(JSON.stringify(plan),[],null)).toMatchObject({appendTo:null,related:[]});
+    const report={repairs:[] as string[]};
+    expect(parsePlan(JSON.stringify(plan),[{id:"a",title:"a",input_text:"a",status:"completed",result:"done"}],null,undefined,report)).toMatchObject({appendTo:null,related:["a"]});
+    expect(report.repairs).toEqual(["appendTo 指向已结束的任务，改为关联背景"]);
+});
+
+it("repairs what does not change what may run, and says why an answer is unusable",()=>{
+    const previous=Array.from({length:20},(_,i)=>({id:`t${i}`,title:`任务${i}`,input_text:"x",status:"completed",result:"ok"}));
+    const report={repairs:[] as string[]} as {repairs:string[];error?:string};
+    // "What have I done?" can relate every task: keep twelve, dependencies first; drop invented ids.
+    const plan=parsePlan('好的，计划如下：\n{"title":"汇总","related":'+JSON.stringify([...previous.map(t=>t.id),"invented"])+',"dependencies":["t19","ghost"],"resources":[],"clarification":"'+"问".repeat(230)+'"}\n以上。',previous,null,undefined,report)!;
+    expect(plan.related).toHaveLength(12);
+    expect(plan.related[0]).toBe("t19");
+    expect(plan.dependencies).toEqual(["t19"]);
+    expect([...plan.clarification!]).toHaveLength(200);
+    expect(report.repairs).toEqual(["dependencies 去掉 1 个不在列表中的 id","clarification 超过 200 字，已截断","related 去掉 1 个不在列表中的 id","related 共 20 个，只保留 12 个"]);
+    for(const [raw,error] of [["不是 JSON","回答不是 JSON"],['{"related":[],"dependencies":[],"resources":[]}',"缺少 title"],['{"title":"x","related":"t1","dependencies":[],"resources":[]}',"related、dependencies、resources 必须是数组"]] as const){
+        const r={repairs:[] as string[]} as {repairs:string[];error?:string};
+        expect(parsePlan(raw,previous,null,undefined,r)).toBeNull();
+        expect(r.error).toBe(error);
+    }
 });
 
 it("bounds an overview to 100 Unicode characters and supports older planner payloads",()=>{
@@ -524,14 +548,14 @@ it("bounds an overview to 100 Unicode characters and supports older planner payl
     expect([...plan.description!]).toHaveLength(100);
     expect(plan.description?.endsWith("…")).toBe(true);
     expect(parsePlan(JSON.stringify(base),[],null)?.description).toContain("计划");
-    expect(parsePlan(JSON.stringify({...base,description:42}),[],null)).toBeNull();
+    expect(parsePlan(JSON.stringify({...base,description:42}),[],null)?.description).toContain("计划");
 });
 
 it("validates optional clarification and allows semantic routing to a waiting question",()=>{
     const base={title:"query",related:[],dependencies:[],resources:[]};
-    expect(parsePlan(JSON.stringify({...base,clarification:42}),[],null)).toBeNull();
-    expect(parsePlan(JSON.stringify({...base,clarification:"问".repeat(201)}),[],null)).toBeNull();
-    expect(parsePlan(JSON.stringify({...base,clarification:"  "}),[],null)).toBeNull();
+    expect(parsePlan(JSON.stringify({...base,clarification:42}),[],null)?.clarification).toBeNull();
+    expect(parsePlan(JSON.stringify({...base,clarification:"问".repeat(201)}),[],null)?.clarification).toHaveLength(200);
+    expect(parsePlan(JSON.stringify({...base,clarification:"  "}),[],null)?.clarification).toBeNull();
     const previous=[{id:"q",title:"flight",input_text:"query",status:"needs_input",result:null}];
     expect(parsePlan(JSON.stringify({...base,appendTo:"q",clarification:"ignored"}),previous,null)).toMatchObject({appendTo:"q",clarification:null});
 });

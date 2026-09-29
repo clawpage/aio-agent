@@ -22,7 +22,7 @@ export function RecallSettings() {
 
   const rows: Array<[string, string]> = stats
     ? [
-        ["派单次数", `${stats.dispatches} 次${stats.failed ? `（失败 ${stats.failed}）` : ""}`],
+        ["派单次数", `${stats.dispatches} 次${stats.failed || stats.repaired ? `（${[stats.failed ? `失败 ${stats.failed}` : "", stats.repaired ? `自动修正 ${stats.repaired}` : ""].filter(Boolean).join(" · ")}）` : ""}`],
         ["带历史召回的派单", `${stats.withRecall} 次 · 平均每次 ${stats.avgRecalled} 条`],
         ["派单器主动搜索", `${pct(stats.searchRate)} · 平均 ${stats.avgRounds} 轮`],
         ["选中的关联任务", `${stats.chosen} 个，其中召回找到 ${stats.chosenFromRecall}、搜索找到 ${stats.chosenFromSearch}`],

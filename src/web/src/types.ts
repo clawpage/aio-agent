@@ -223,6 +223,7 @@ export interface RecallStats {
   days: number;
   dispatches: number;
   failed: number;
+  repaired: number;
   withRecall: number;
   avgRecalled: number;
   searchRate: number;

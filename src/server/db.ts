@@ -175,7 +175,9 @@ CREATE TABLE IF NOT EXISTS recall_events (
   gold_in_window INTEGER,
   latency_ms INTEGER NOT NULL,
   prompt_chars INTEGER NOT NULL,
-  failed INTEGER NOT NULL DEFAULT 0
+  failed INTEGER NOT NULL DEFAULT 0,
+  fail_reason TEXT,
+  repairs_json TEXT NOT NULL DEFAULT '[]'
 );
 CREATE INDEX IF NOT EXISTS idx_recall_events_created ON recall_events(created_at);
 
@@ -223,6 +225,9 @@ function migrate(db: Db): void {
   const taskColumns = db.prepare("PRAGMA table_info(tasks)").all() as Array<{ name: string }>;
   if (!taskColumns.some(c => c.name === "execution_conversation_id")) db.exec("ALTER TABLE tasks ADD COLUMN execution_conversation_id TEXT REFERENCES conversations(id)");
   if (!taskColumns.some(c => c.name === "merged_into")) db.exec("ALTER TABLE tasks ADD COLUMN merged_into TEXT REFERENCES tasks(id)");
+  const recallColumns = db.prepare("PRAGMA table_info(recall_events)").all() as Array<{ name: string }>;
+  if (!recallColumns.some(c => c.name === "fail_reason")) db.exec("ALTER TABLE recall_events ADD COLUMN fail_reason TEXT");
+  if (!recallColumns.some(c => c.name === "repairs_json")) db.exec("ALTER TABLE recall_events ADD COLUMN repairs_json TEXT NOT NULL DEFAULT '[]'");
   const columns = (db.prepare("PRAGMA table_info(turns)").all() as Array<{ name: string }>).map((c) => c.name);
   if (!columns.includes("browser_required")) db.exec("ALTER TABLE turns ADD COLUMN browser_required INTEGER NOT NULL DEFAULT 1");
   if (!columns.includes("model")) {
