@@ -50,6 +50,9 @@ it('binds workspace tickets, HTTP, WebSocket and API collaborators to the authen
   expect((await root.request(`${prefix}/set-cookie`,{host:'workspace',headers:{cookie:`pa_ws_session=${ownerWs.token}`}})).status).toBe(401);
   expect((await root.request('/u/00000000000000000000/set-cookie',{host:'workspace',headers:{cookie:cookies}})).status).toBe(404);
   expect(member.sandbox.requests.filter(r=>r.url.startsWith('/set-cookie'))).toHaveLength(2);
+  // Replaying the spent member ticket: its own session passes, another account's session does not.
+  expect((await root.request(link.pathname+link.search,{host:'workspace',headers:{cookie:cookies}})).status).toBe(303);
+  expect((await root.request(link.pathname+link.search,{host:'workspace',headers:{cookie:`pa_ws_session=${ownerWs.token}`}})).status).toBe(403);
 
   root.ctx.runtimeForUser=async id=>{if(id==='owner_1')return root.ctx;throw Error('failed');};
   expect((await root.request('/api/main',{headers})).status).toBe(503);

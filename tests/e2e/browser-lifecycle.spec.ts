@@ -243,3 +243,28 @@ test("phones get a native input bar that types into the page in front; desktops 
   }
   await page.screenshot({ path: info.outputPath("remote-keyboard.png") });
 });
+
+test("coming back from the background reopens the frame on a fresh one-time ticket", async ({ page }) => {
+  await mockConsole(page, { conversations: [makeConversation(CONV_ID, "回到前台")], browser: {} });
+  let issued = 0;
+  await page.route((url) => url.pathname === "/api/workspace/ticket", (route) => {
+    issued += 1;
+    return route.fulfill({ json: { ticket: `t-${issued}`, origin: "http://127.0.0.1:4289", url: `http://127.0.0.1:4289/browser-ui?ticket=t-${issued}`, expiresAt: Date.now() + 60_000 } });
+  });
+  await page.goto("/");
+  await page.getByRole("button", { name: "工作区", exact: true }).first().click();
+  const frame = page.locator(".workspace iframe");
+  await expect(frame).toHaveAttribute("src", /ticket=t-1$/);
+
+  const setVisibility = (state: "hidden" | "visible") =>
+    page.evaluate((s) => {
+      Object.defineProperty(document, "visibilityState", { configurable: true, get: () => s });
+      document.dispatchEvent(new Event("visibilitychange"));
+    }, state);
+  await setVisibility("hidden");
+  await expect(frame).toHaveCount(0);
+  await setVisibility("visible");
+  // The first ticket was spent by the first load: the frame must not replay it.
+  await expect(frame).toHaveAttribute("src", /ticket=t-2$/);
+  expect(issued).toBe(2);
+});

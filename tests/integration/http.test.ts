@@ -718,6 +718,16 @@ describe("workspace bootstrap tickets", () => {
     // Replay must fail: tickets are single use.
     const replay = await h.request(`/_bootstrap?ticket=${encodeURIComponent(ticket)}`, { host: "workspace" });
     expect(replay.status).toBe(403);
+
+    // A frame that reloads its spent link (a phone back from the background) still
+    // carries its workspace session, which is enough on its own.
+    const wsCookie = boot.headers.getSetCookie().map((c) => c.split(";")[0]).join("; ");
+    const reload = await h.request(`/_bootstrap?ticket=${encodeURIComponent(ticket)}&next=%2Fterminal`, { host: "workspace", headers: { cookie: wsCookie } });
+    expect(reload.status).toBe(303);
+    expect(reload.headers.get("location")).toBe("/terminal");
+    expect(reload.headers.getSetCookie()).toEqual([]);
+    const unsafe = await h.request(`/_bootstrap?ticket=${encodeURIComponent(ticket)}&next=%2F%2Fevil.example.com`, { host: "workspace", headers: { cookie: wsCookie } });
+    expect(unsafe.headers.get("location")).toBe("/");
   });
 
   it("rejects an open-redirect next parameter", async () => {

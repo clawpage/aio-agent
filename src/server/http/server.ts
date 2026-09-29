@@ -124,6 +124,14 @@ export function createApp(ctx: AppContext): express.Express {
     const ticket = typeof req.query.ticket === "string" ? req.query.ticket : "";
     const next = safeRedirectPath(typeof req.query.next === "string" ? req.query.next : "/");
     const consumed = ticket ? ctx.tickets.consume(ticket, { isValidSession: (id) => ctx.sessions.isLive(id) }) : null;
+    // A frame reloaded on its own (a phone returning from the background) replays its
+    // spent ticket; a live workspace session of this account needs no new one.
+    if (!consumed && rec.session?.kind === "workspace") {
+      res.setHeader("Cache-Control", "no-store");
+      res.setHeader("Referrer-Policy", "no-referrer");
+      res.redirect(303, next);
+      return;
+    }
     if (!consumed) {
       ctx.log.warn("rejected workspace bootstrap ticket", { ip: rec.ip });
       res

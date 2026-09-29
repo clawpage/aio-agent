@@ -291,6 +291,21 @@ export function Workspace({ open, status, initialPath, onClose, onNotify, browse
   // Touch screens cannot type into the remote view directly; they get the native input bar.
   const touchDevice = typeof window !== "undefined" && window.matchMedia?.("(pointer: coarse)").matches;
 
+  /**
+   * The frame's ticket was spent by its first load, so a frame unmounted while
+   * hidden (a backgrounded window, a released browser) must come back on a fresh
+   * one, never replay the spent link into "链接已失效".
+   */
+  const frameShown = open && docVisible && !(holdsBrowser && (suspended || restoringBrowser));
+  const frameShownRef = useRef(frameShown);
+  useEffect(() => {
+    const wasShown = frameShownRef.current;
+    frameShownRef.current = frameShown;
+    if (wasShown || !frameShown || !frameSrc || TABS.find((t) => t.id === tab)?.kind !== "frame") return;
+    setFrameSrc(null);
+    void navigateTo(tab);
+  }, [frameShown, frameSrc, navigateTo, tab]);
+
   // Follow document visibility so a hidden console unmounts its frame and stream.
   useEffect(() => {
     const onVisibility = () => setDocVisible(document.visibilityState === "visible");
