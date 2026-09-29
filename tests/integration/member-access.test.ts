@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { startHarness, login, type TestHarness } from '../helpers/harness.js';
 import { createMember } from '../../src/server/auth/owner.js';
+import {readSoul} from '../../src/server/soul.js';
 import { MEMBER_MODEL } from '../../src/server/auth/policy.js';
 let h:TestHarness, dir:string, userId:string;
 let member:Record<string,string>, owner:Record<string,string>;
@@ -40,10 +41,12 @@ it('isolates ledger reads, references, stops, events, replay IDs and planner con
  const a=await submit(owner,'owner-private-task');expect(a.status).toBe(202);
  await vi.waitFor(()=>expect(h.codex.startedTurns.length).toBe(1));
  await h.codex.runTurn(h.codex.startedTurns[0]!.turnId,{text:'owner private result'});
+ const start=vi.spyOn(h.codex,'startThread');const resume=vi.spyOn(h.codex,'resumeThread');
  const b=await submit(member,'member-own-task',{model:'gpt-6-sol',effort:'low',userId:'owner_1'});expect(b.status).toBe(202);
  await vi.waitFor(()=>expect(h.codex.startedTurns.some(t=>t.model===MEMBER_MODEL), JSON.stringify(h.ctx.tasks.get(b.body.task.id))).toBe(true));
  const run=h.codex.startedTurns.find(t=>t.model===MEMBER_MODEL)!;expect(run.effort).toBe('high');expect(h.codex.threadProviders.get(run.threadId)).toBe('opencode_go');
- const planned=planner.mock.calls.find(c=>c[2]===MEMBER_MODEL)!;expect(planned).toBeDefined();expect(planned[0]).not.toContain('owner-private-task');
+ expect(start).toHaveBeenLastCalledWith(expect.objectContaining({developerInstructions:readSoul(h.ctx.cfg).content,model:MEMBER_MODEL}));
+ const planned=planner.mock.calls.find(c=>c[2]===MEMBER_MODEL)!;expect(planned).toBeDefined();expect(planned[1]).toBe(readSoul(h.ctx.cfg).content);expect(planned[0]).not.toContain('owner-private-task');
  const feed=await h.request('/api/main',{headers:member});expect((await feed.json() as any).tasks.map((t:any)=>t.id)).toEqual([b.body.task.id]);
  const ownerFeed=await h.request('/api/main',{headers:owner});expect((await ownerFeed.json() as any).tasks.map((t:any)=>t.id)).not.toContain(b.body.task.id);
  for(const suffix of ['', '/events?format=json','/turns']) expect((await h.request(`/api/conversations/${a.body.task.conversationId}${suffix}`,{headers:member})).status).toBe(404);
@@ -59,6 +62,7 @@ it('isolates ledger reads, references, stops, events, replay IDs and planner con
  await vi.waitFor(()=>expect(h.codex.startedTurns.length).toBe(3));
  expect(h.codex.startedTurns.at(-1)).toMatchObject({threadId:run.threadId,model:MEMBER_MODEL,effort:'high'});
  expect(h.codex.resumedThreads).toContain(run.threadId);
+ expect(resume).toHaveBeenLastCalledWith(run.threadId,readSoul(h.ctx.cfg).content);
  expect(h.codex.titleCalls).toHaveLength(0);
 
 });
