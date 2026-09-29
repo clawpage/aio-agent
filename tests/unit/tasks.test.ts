@@ -17,7 +17,8 @@ class PlanningCodex extends FakeCodex {
         const data = JSON.parse(p.split("\n").at(-1)!);
         return JSON.stringify({ title: data.message, related: [], dependencies: [], resources: [] });
     };
-    async planTask(p: string) { this.plans.push(p); return this.plan(p); }
+    planModels: (string | undefined)[] = [];
+    async planTask(p: string, _soul?: string, model?: string) { this.plans.push(p); this.planModels.push(model); return this.plan(p); }
 }
 const tick = () => new Promise(r => setTimeout(r, 30));
 let db: Db, agent: AgentManager, codex: PlanningCodex, tasks: TaskService;
@@ -48,6 +49,19 @@ describe("main inbox delegation", () => {
         expect(finished.status).toBe("completed");
         expect(finished.startedAt).toBe(10_000);
         expect(finished.completedAt).toBeGreaterThan(10_000);
+    });
+    it("dispatches an owner task on the bridge model it was submitted with, and on the default otherwise", async () => {
+        submit("默认模型"); await tick();
+        expect(codex.planModels.at(-1)).toBeUndefined();
+        writeAgentSettings(db, { model: "deepseek-v4.1-flash", effort: "high" });
+        Object.assign(agent, { usesBridgeModel: (m: string | null) => m === "deepseek-v4.1-flash" });
+        submit("桥模型"); await tick();
+        expect(codex.planModels.at(-1)).toBe("deepseek-v4.1-flash");
+    });
+    it("records the dispatcher's own failure reason on the task", async () => {
+        codex.plan = async () => { throw new Error("任务分配失败：You've hit your usage limit."); };
+        const job = submit("额度用完"); await tick();
+        expect(tasks.get(job.id)).toMatchObject({ status: "planning_failed", error: "任务分配失败：You've hit your usage limit." });
     });
     it("freezes browser dependency from the dispatched resource plan", async () => {
         const chat=submit("hi"); await tick();

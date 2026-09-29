@@ -286,3 +286,15 @@ it('runs member planning through the fixed provider at high effort and refuses a
  const unavailable=makeSession(new FakeAppServer(),200);
  try {await expect(unavailable.planTask('request','soul','deepseek-v4.1-flash')).rejects.toThrow('服务暂时不可用');}finally{unavailable.close();}
 });
+
+it('shows the reason a planning turn failed, while a failed title stays silent',async()=>{
+ const server=new FakeAppServer();
+ server.handle('thread/start',()=>({thread:{id:'quota-thread'}}));
+ const limit="You've hit your usage limit. Try again at Oct 4th.";
+ server.handle('turn/start',()=>{setTimeout(()=>server.notify('turn/completed',{threadId:'quota-thread',turn:{id:'quota-turn',status:'failed',error:{message:limit}}}),5);return {turn:{id:'quota-turn'}};});
+ const session=makeSession(server,200);
+ try {
+  await expect(session.planTask('request','soul')).rejects.toThrow(`任务分配失败：${limit}`);
+  expect(await session.generateTitle('hi')).toBeNull();
+ } finally {session.close();}
+});

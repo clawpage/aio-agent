@@ -255,18 +255,22 @@ export class SandboxCodexSession {
    * threads cannot be re-read afterwards (`thread/read` rejects `includeTurns`).
    */
   async generateTitle(userText: string): Promise<string | null> {
-    return this.#auxiliaryText(buildTitlePrompt(userText, this.#cfg.agent.titleMaxChars), this.#cfg.agent.titleEffort);
+    return (await this.#auxiliaryText(buildTitlePrompt(userText, this.#cfg.agent.titleMaxChars), this.#cfg.agent.titleEffort)).text;
   }
 
   /** Read-only main-agent planning; receives bounded metadata, never executes a task. */
   async planTask(prompt: string, developerInstructions?: string, model?: string): Promise<string | null> {
-    return this.#auxiliaryText(prompt, "high", 90_000, developerInstructions, model);
+    const { text, error } = await this.#auxiliaryText(prompt, "high", 90_000, developerInstructions, model);
+    // A reported reason (such as an exhausted usage limit) is shown on the task
+    // instead of a generic "try again".
+    if (error) throw new Error(`任务分配失败：${error}`);
+    return text;
   }
 
-  async #auxiliaryText(prompt: string, effort: string | null, timeoutMs = this.#cfg.agent.titleTimeoutMs, developerInstructions?: string, requestedModel?: string): Promise<string | null> {
+  async #auxiliaryText(prompt: string, effort: string | null, timeoutMs = this.#cfg.agent.titleTimeoutMs, developerInstructions?: string, requestedModel?: string): Promise<{ text: string | null; error: string | null }> {
     await this.start();
     const peer = this.#peer;
-    if (!peer?.alive) return null;
+    if (!peer?.alive) return { text: null, error: null };
     const model = requestedModel ?? this.#cfg.agent.titleModel;
     if (requestedModel && (this.#bridge?.providerForModel(model) ?? "openai") === "openai") throw new Error("服务暂时不可用，请稍后重试");
     const modelProvider = requestedModel ? this.#bridge!.providerForModel(model) : undefined;
@@ -289,6 +293,7 @@ export class SandboxCodexSession {
     let finalText = "";
     // Only a real `turn/completed {status:"completed"}` may produce a title.
     let turnStatus: string | null = null;
+    let failure: string | null = null;
     let timedOut = false;
     let startFailed = false;
     let startError: unknown = null;
@@ -315,8 +320,9 @@ export class SandboxCodexSession {
         return;
       }
       if (method === "turn/completed") {
-        const turn = p.turn as { status?: string; items?: Array<{ type?: string; text?: string }> } | undefined;
+        const turn = p.turn as { status?: string; items?: Array<{ type?: string; text?: string }>; error?: { message?: unknown } | null } | undefined;
         turnStatus = typeof turn?.status === "string" ? turn.status : "unknown";
+        if (typeof turn?.error?.message === "string" && turn.error.message) failure = turn.error.message;
         const message = (turn?.items ?? []).find((it) => it?.type === "agentMessage" && typeof it.text === "string");
         if (message?.text) finalText = message.text;
         settle();
@@ -367,8 +373,8 @@ export class SandboxCodexSession {
         await this.#interruptAuxTurn(threadId, startPromise, () => turnId);
       }
     }
-    if (turnStatus !== "completed") return null;
-    return finalText || deltas.join("") || null;
+    if (turnStatus !== "completed") return { text: null, error: failure };
+    return { text: finalText || deltas.join("") || null, error: null };
   }
 
   /** Stop a timed-out auxiliary turn without ever blocking on a dead session. */

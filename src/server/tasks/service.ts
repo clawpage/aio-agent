@@ -225,9 +225,15 @@ export class TaskService {
             const planningInput = [inputContext, ...(files.length ? [`已有附件（执行者可以读取其中资料）：${JSON.stringify(files)}`] : [])].filter(Boolean).join("\n\n");
             const prompt = planningPrompt(planningInput, explicit ? previous.filter(t => t.id === explicit.id) : previous, row.related_task_id, this.cfg.sandbox.containerWorkspaceDir);
             const soul = readSoul(this.cfg).content;
+            // The dispatcher runs on the provider the task was submitted for: a
+            // member is fixed to DeepSeek, and an owner who picked a bridge model
+            // is dispatched on that model too, not on the ChatGPT account.
+            const bridgeModel = this.agent.usesBridgeModel(row.model) ? row.model : null;
             const raw = isMember(this.db, this.ownerId(row))
                 ? await this.codex.planTask?.(prompt, soul, MEMBER_MODEL)
-                : await this.codex.planTask?.(prompt, soul);
+                : bridgeModel
+                    ? await this.codex.planTask?.(prompt, soul, bridgeModel)
+                    : await this.codex.planTask?.(prompt, soul);
             if (this.#closed || this.get(row.id)?.status !== "planning")
                 return;
             // A supplement may arrive while the classifier is in flight. Replan
