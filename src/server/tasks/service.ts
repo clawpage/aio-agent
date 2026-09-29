@@ -10,6 +10,7 @@ interface TaskRow {
     id: string;
     client_message_id: string;
     conversation_id: string;
+    execution_conversation_id: string | null;
     turn_id: string | null;
     title: string;
     input_text: string;
@@ -33,7 +34,7 @@ export interface TaskInput {
 }
 const TERMINAL = new Set(["completed", "failed", "interrupted", "unknown"]);
 const DISPATCHED = new Set(["queued", "running", "stopping"]);
-/** The persistent main inbox owns delegation; each executor has its own Codex thread. */
+/** The main inbox owns delegation; manual continuations reuse the same executor thread. */
 export class TaskService {
     #closed = false;
     #planning = false;
@@ -55,13 +56,21 @@ export class TaskService {
     close(): void { this.#closed = true; this.agent.events.off("event", this.onEvent); }
     private rows(): TaskRow[] { return this.db.prepare("SELECT * FROM tasks ORDER BY created_at, id").all() as unknown as TaskRow[]; }
     get(id: string): TaskRow | null { return this.db.prepare("SELECT * FROM tasks WHERE id = ?").get(id) as unknown as TaskRow ?? null; }
+    private executor(row: TaskRow): string { return row.execution_conversation_id ?? row.conversation_id; }
+    /** Referencing an old result while its resumed turn runs supplements that turn. */
+    private referenceTarget(row: TaskRow): TaskRow | null {
+        const ref = row.related_task_id ? this.get(row.related_task_id) : null;
+        if (!ref) return null;
+        const same = this.rows().filter(t => t.id !== row.id && t.created_at < row.created_at && !t.merged_into && this.executor(t) === this.executor(ref));
+        return same.filter(t => ["planning", "needs_input", "waiting", "queued", "running", "stopping"].includes(t.status)).at(-1) ?? ref;
+    }
     ownsConversation(id: string): boolean { return !!this.db.prepare("SELECT 1 FROM tasks WHERE conversation_id=?").get(id); }
     view(row: TaskRow) {
         const plan = row.plan_json ? JSON.parse(row.plan_json) as TaskPlan : null;
         const turn = row.turn_id ? this.db.prepare("SELECT started_at FROM turns WHERE id=?").get(row.turn_id) as { started_at: number | null } | undefined : undefined;
         const parent = row.merged_into ? this.get(row.merged_into) : null;
         return {
-            id: row.id, revision: row.revision, title: row.title, text: row.input_text, conversationId: parent?.conversation_id ?? row.conversation_id, mergedInto: row.merged_into, mergedTitle: parent?.title ?? null,
+            id: row.id, revision: row.revision, title: row.title, text: row.input_text, conversationId: this.executor(parent ?? row), mergedInto: row.merged_into, mergedTitle: parent?.title ?? null,
             status: row.status, result: TERMINAL.has(row.status) ? row.result : null, error: row.error,
             attachments: JSON.parse(row.attachments_json) as TurnAttachment[], relatedTaskId: row.related_task_id,
             relatedTaskTitle: row.related_task_id ? this.get(row.related_task_id)?.title ?? null : null,
@@ -69,7 +78,7 @@ export class TaskService {
             waitReason: this.waitReason(row),
             clarification: row.status === "needs_input" ? plan?.clarification ?? null : null,
             dependencies: plan?.dependencies ?? [], createdAt: row.created_at, startedAt: turn?.started_at ?? null, completedAt: row.completed_at,
-            approvals: this.agent.listPendingRequests(row.conversation_id).length,
+            approvals: TERMINAL.has(row.status) ? 0 : this.agent.listPendingRequests(this.executor(row)).length,
         };
     }
     private claims(row: TaskRow, plan?: TaskPlan): string[] {
@@ -80,7 +89,7 @@ export class TaskService {
     private waitReason(row: TaskRow): { label: string; message: string } | null {
         if (!["waiting", "merging"].includes(row.status) || !row.plan_json) return null;
         const plan = JSON.parse(row.plan_json) as TaskPlan;
-        const reference = row.related_task_id ? this.get(row.related_task_id) : null;
+        const reference = this.referenceTarget(row);
         if (reference?.status === "stopping") return { label: "等待原任务停止", message: `“${reference.title}”停止后继续处理本次要求。` };
         const dependency = plan.dependencies.map(id => this.get(id)).find(t => t && t.status !== "completed");
         if (dependency) return { label: "等待前置任务", message: `等待“${dependency.title}”完成后继续。` };
@@ -137,6 +146,7 @@ export class TaskService {
             const now = Math.max(Date.now(), (last.n ?? 0) + 1);
             this.db.prepare("INSERT INTO tasks (id,client_message_id,conversation_id,title,input_text,attachments_json,related_task_id,model,effort,created_at) VALUES (?,?,?,?,?,?,?,?,?,?)")
                 .run(id, input.clientMessageId, conv.id, title, text, JSON.stringify(attachments), related, frozen.model, frozen.effort, now);
+            if (related) this.db.prepare("UPDATE tasks SET execution_conversation_id=? WHERE id=?").run(this.executor(this.get(related)!), id);
             this.db.exec("COMMIT");
         }
         catch (err) {
@@ -157,7 +167,7 @@ export class TaskService {
             this.db.prepare("UPDATE tasks SET status='interrupted',completed_at=? WHERE id=?").run(Date.now(), id);
         }
         else {
-            const result = await this.agent.interrupt(row.conversation_id);
+            const result = await this.agent.interrupt(this.executor(row));
             if (!result.ok)
                 throw new Error(result.message);
             // An interrupt may complete synchronously; never replace a settled result.
@@ -215,10 +225,13 @@ export class TaskService {
             const plan = parsePlan(raw ?? null, previous, row.related_task_id, this.cfg.sandbox.containerWorkspaceDir);
             if (!plan)
                 throw new Error("任务分配暂时失败，尚未执行。请重试分配。");
-            if (explicit) applyTaskReference(plan, this.get(explicit.id)!);
+            if (explicit) applyTaskReference(plan, this.referenceTarget(row)!);
             const ownerId = plan.appendTo ?? row.id;
             const root = this.cfg.sandbox.containerWorkspaceDir;
             const owned = [`write:${root}/tasks/${ownerId}`, ...files.map(f => normalizeResource(`read:${f.path}`, root) ?? "workspace")];
+            // A resumed executor may update the outputs it already created. Keep
+            // those directories locked too; unrelated task directories stay isolated.
+            if (explicit) owned.push(...this.rows().filter(t => !t.merged_into && t.created_at < row.created_at && this.executor(t) === this.executor(explicit)).map(t => `write:${root}/tasks/${t.id}`));
             // Resolve aliases in the sandbox, never against the Mac filesystem.
             if (this.resourceSandbox) {
                 plan.resources = await resolveResources(plan.resources, root, this.resourceSandbox);
@@ -226,7 +239,7 @@ export class TaskService {
             } else plan.ownedResources = owned;
             if (this.#closed || this.get(row.id)?.status !== "planning") return;
             if (this.taskContext(this.get(row.id)!) !== inputContext) return;
-            if (explicit) applyTaskReference(plan, this.get(explicit.id)!);
+            if (explicit) applyTaskReference(plan, this.referenceTarget(row)!);
             if (plan.appendTo) {
                 this.db.prepare("UPDATE tasks SET title=?,plan_json=?,merged_into=?,status='merging',error=NULL WHERE id=?").run(plan.title,JSON.stringify(plan),plan.appendTo,row.id);
                 return;
@@ -302,7 +315,7 @@ export class TaskService {
                 }
                 this.db.prepare("UPDATE tasks SET status='steering' WHERE id=?").run(row.id);
                 try {
-                    const result=await this.agent.appendTurnInput(parent.conversation_id,parent.turn_id,
+                    const result=await this.agent.appendTurnInput(this.executor(parent),parent.turn_id,
                         `这是用户对当前任务的补充，请合并处理并在最终结果中覆盖，不要当作独立任务。可协作使用的资源更新为：${this.claims(parent, parentPlan).join(',')}。\n\n${row.input_text}${dependencies.length ? `\n\n补充所需的已完成任务资料：${JSON.stringify(dependencies.map(t => ({id:t!.id,result:t!.result?.slice(0,16000)})))}` : ''}`,
                         JSON.parse(row.attachments_json),resources.includes("browser"));
                     if(this.#closed) return;
@@ -323,6 +336,14 @@ export class TaskService {
         const rows = this.rows();
         const active = rows.filter(t => DISPATCHED.has(t.status));
         for (const row of rows.filter(t => t.status === "waiting")) {
+            const reference = this.referenceTarget(row);
+            if (reference?.status === "stopping") continue;
+            if (reference && ["planning", "needs_input", "waiting", "queued", "running"].includes(reference.status)) {
+                const supplement = JSON.parse(row.plan_json!) as TaskPlan;
+                applyTaskReference(supplement, reference);
+                this.db.prepare("UPDATE tasks SET merged_into=?,plan_json=?,status='merging' WHERE id=?").run(reference.id, JSON.stringify(supplement), row.id);
+                this.schedule(); continue;
+            }
             if (active.length >= this.cfg.agent.maxConcurrentTurns)
                 break;
             const plan = JSON.parse(row.plan_json!) as TaskPlan;
@@ -336,11 +357,12 @@ export class TaskService {
                 continue;
             if (active.some(t => resourcesConflict(this.claims(row, plan), this.claims(t))))
                 continue;
+            if (active.some(t => this.executor(t) === this.executor(row))) continue;
             const related = plan.related.map(id => this.get(id)).filter((t): t is TaskRow => !!t);
             const context = related.map(t => ({ id: t.id, message: t.input_text.slice(0, 6000), status: t.status, result: t.result?.slice(0, 16000) }));
             const prompt = [
-                `你是 AIO Agent 主会话委派的独立子 agent。任务 ID：${row.id}。只处理本任务，不递归委派。`,
-                `新文件放在 ${this.cfg.sandbox.containerWorkspaceDir}/tasks/${row.id}/（自行创建），不要散落工作区根目录。共享工作区里可能有其他子 agent；不得覆盖无关文件或修改其他任务目录。`,
+                `你是 AIO Agent 主会话委派的子 agent。任务 ID：${row.id}。${row.execution_conversation_id ? "本轮恢复此前任务的同一会话，保留完整上下文；按用户的新要求继续、补充或更新，不要从零重新做。" : "只处理本任务。"}不递归委派。`,
+                `新文件放在 ${this.cfg.sandbox.containerWorkspaceDir}/tasks/${row.id}/（自行创建），不要散落工作区根目录。共享工作区里可能有其他子 agent；不得覆盖无关文件，只能在本次明确授权的路径内更新已有任务产物。`,
                 `本次获准使用的资源范围：${this.claims(row, plan).join(",")}。read: 只读；write: 可修改该路径及后代；workspace 表示共享环境操作。没有 browser 不操作共享浏览器；没有 workspace 不安装全局依赖或改变共享运行环境。只在声明路径内操作，不修改符号链接或通过链接越过声明范围。需要额外范围时停止并说明，不擅自扩大。沙盒命令无需审批不代表可以越过本任务范围。`,
                 `临时文件、渲染输出、缓存和工具配置也放在 ${this.cfg.sandbox.containerWorkspaceDir}/tasks/${row.id}/.tmp/，设置 TMPDIR 指向该目录；LibreOffice 使用该目录下独立的 UserInstallation。不要复用或清理 /tmp/verify、/tmp/lo-final 等公共路径。结束前等待本任务的写入子进程完成，不留后台写入。`,
                 "你以用户的个人助理身份交付：最终回复直接回答用户要的结论、建议、安排和交付物，先给最有用的结果，不要只说准备做。保留必要的事实来源、未完成事项与会影响用户决策的限制（如尚未预订、日期待确认）。",
@@ -351,7 +373,10 @@ export class TaskService {
                 "本次用户任务：", this.taskContext(row),
             ].join("\n\n");
             try {
-                const { turn } = this.agent.submitTurn({ conversationId: row.conversation_id, clientMessageId: `task:${row.id}`, text: prompt, attachments: [...JSON.parse(row.attachments_json),...this.rows().filter(t=>t.merged_into===row.id && t.status==='merged').flatMap(t=>JSON.parse(t.attachments_json))], requiresBrowser: plan.resources.includes("browser"), frozenSettings: { model: row.model!, effort: row.effort } });
+                // Reserve this specific task before submitTurn synchronously
+                // emits turn.queued; another waiting reference may share the conversation.
+                this.db.prepare("UPDATE tasks SET status='queued' WHERE id=?").run(row.id);
+                const { turn } = this.agent.submitTurn({ conversationId: this.executor(row), clientMessageId: `task:${row.id}`, text: prompt, attachments: [...JSON.parse(row.attachments_json),...this.rows().filter(t=>t.merged_into===row.id && t.status==='merged').flatMap(t=>JSON.parse(t.attachments_json))], requiresBrowser: plan.resources.includes("browser"), frozenSettings: { model: row.model!, effort: row.effort } });
                 this.db.prepare("UPDATE tasks SET turn_id=? WHERE id=?").run(turn.id, row.id);
                 active.push(this.get(row.id)!);
             }
@@ -363,7 +388,9 @@ export class TaskService {
     private onEvent = (event: AgentEvent) => {
         if (this.#closed)
             return;
-        const row = this.db.prepare("SELECT * FROM tasks WHERE conversation_id=?").get(event.conversationId) as unknown as TaskRow | undefined;
+        // Multiple task reports can share one resumed conversation. Attribute
+        // lifecycle events to the exact turn, never rewrite an earlier report.
+        const row = this.db.prepare("SELECT * FROM tasks WHERE COALESCE(execution_conversation_id,conversation_id)=? AND (turn_id=? OR (?='turn.queued' AND turn_id IS NULL AND status='queued')) ORDER BY created_at DESC LIMIT 1").get(event.conversationId, event.turnId, event.type) as unknown as TaskRow | undefined;
         if (!row)
             return;
         if (event.type === "turn.queued")

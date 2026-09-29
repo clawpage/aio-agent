@@ -188,6 +188,43 @@ describe("main inbox delegation", () => {
         expect(tasks.get(update.id)?.merged_into).toBeNull();expect(tasks.get(update.id)?.status).toBe("running");expect(codex.steers).toHaveLength(0);
         expect(codex.startedTurns.at(-1)!.text).toContain("Selected original result");
         expect(JSON.parse(tasks.get(update.id)!.plan_json!).related).toEqual([done.id]);
+        expect(codex.resumedThreads).toEqual([codex.startedTurns[0]!.threadId]);
+        expect(codex.startedTurns.at(-1)!.threadId).toBe(codex.startedTurns[0]!.threadId);
+        expect(tasks.view(tasks.get(update.id)!).conversationId).toBe(done.conversationId);
+        expect(codex.startedThreads).toHaveLength(2); // original + unrelated, no new thread for resume
+        await codex.runTurn(codex.startedTurns.at(-1)!.turnId,{text:"Updated result"});await tick();
+        expect(tasks.get(done.id)?.result).toBe("Selected original result");expect(tasks.get(update.id)?.result).toBe("Updated result");
+    });
+    it("references to an old result steer its active resumed turn, preserving the original report",async()=>{
+        const original=submit('original');await tick();await codex.runTurn(codex.startedTurns[0]!.turnId,{text:'Original report'});await tick();
+        const continuation=submit('continue',original.id);await tick();
+        const supplement=submit('correct the continuation',original.id);await tick();
+        expect(tasks.get(supplement.id)?.merged_into).toBe(continuation.id);expect(tasks.get(supplement.id)?.status).toBe('merged');
+        expect(codex.steers.at(-1)!.threadId).toBe(codex.startedTurns[0]!.threadId);
+        expect(codex.steers.at(-1)!.expectedTurnId).toBe(codex.startedTurns[1]!.turnId);
+        expect(codex.startedThreads).toHaveLength(1);expect(codex.startedTurns).toHaveLength(2);
+        expect(tasks.get(original.id)?.status).toBe('completed');expect(tasks.get(original.id)?.result).toBe('Original report');
+        await tasks.stop(continuation.id);await tick();expect(tasks.get(original.id)?.status).toBe('completed');
+    });
+    it("serializes simultaneous manual references onto one resumed turn",async()=>{
+        const original=submit('original');await tick();await codex.runTurn(codex.startedTurns[0]!.turnId,{text:'Original'});await tick();
+        const first=submit('followup one',original.id),second=submit('followup two',original.id);
+        await tick();await tick();
+        expect(tasks.get(first.id)?.status).toBe('running');expect(tasks.get(second.id)?.status).toBe('merged');
+        expect(tasks.get(second.id)?.merged_into).toBe(first.id);expect(codex.startedTurns).toHaveLength(2);
+        expect(codex.startedThreads).toHaveLength(1);expect(tasks.get(first.id)?.turn_id).not.toBe(tasks.get(original.id)?.turn_id);
+    });
+    it("resumes the same thread for subsequent references and after TaskService reinitialization",async()=>{
+        const original=submit('original');await tick();await codex.runTurn(codex.startedTurns[0]!.turnId,{text:'Original'});await tick();
+        const second=submit('second',original.id);await tick();await codex.runTurn(codex.startedTurns[1]!.turnId,{text:'Second'});await tick();
+        tasks.close();tasks=new TaskService(db,testConfig('/tmp/aio-main-tasks',1,{PA_AUTO_TITLE:'0'}),agent,codex);tasks.init();
+        const third=submit('third',second.id);await tick();
+        expect(codex.resumedThreads).toEqual([codex.startedTurns[0]!.threadId,codex.startedTurns[0]!.threadId]);expect(codex.startedThreads).toHaveLength(1);
+        expect(tasks.view(tasks.get(third.id)!).conversationId).toBe(original.conversationId);
+        const plan=JSON.parse(tasks.get(third.id)!.plan_json!);
+        expect(plan.ownedResources).toContain(`write:/home/gem/workspace/tasks/${original.id}`);
+        expect(plan.ownedResources).toContain(`write:/home/gem/workspace/tasks/${second.id}`);
+        expect(tasks.get(second.id)?.result).toBe('Second');expect(tasks.get(original.id)?.result).toBe('Original');
     });
     it("turns an explicit reference into a followup if its task completes during planning",async()=>{
         const first=submit("first");await tick();let resolve!:(s:string)=>void;

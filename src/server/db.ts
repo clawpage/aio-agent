@@ -132,6 +132,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   revision INTEGER NOT NULL DEFAULT 0,
   client_message_id TEXT NOT NULL UNIQUE,
   conversation_id TEXT NOT NULL UNIQUE REFERENCES conversations(id),
+  execution_conversation_id TEXT REFERENCES conversations(id),
   turn_id TEXT,
   title TEXT NOT NULL,
   input_text TEXT NOT NULL,
@@ -189,6 +190,7 @@ export function openDb(dbPath: string): Db {
  */
 function migrate(db: Db): void {
   const taskColumns = db.prepare("PRAGMA table_info(tasks)").all() as Array<{ name: string }>;
+  if (!taskColumns.some(c => c.name === "execution_conversation_id")) db.exec("ALTER TABLE tasks ADD COLUMN execution_conversation_id TEXT REFERENCES conversations(id)");
   if (!taskColumns.some(c => c.name === "merged_into")) db.exec("ALTER TABLE tasks ADD COLUMN merged_into TEXT REFERENCES tasks(id)");
   const columns = (db.prepare("PRAGMA table_info(turns)").all() as Array<{ name: string }>).map((c) => c.name);
   if (!columns.includes("browser_required")) db.exec("ALTER TABLE turns ADD COLUMN browser_required INTEGER NOT NULL DEFAULT 1");
