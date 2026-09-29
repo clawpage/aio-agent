@@ -43,6 +43,13 @@ export interface TabRecord {
   request: { reason: string; at: number } | null;
 }
 
+/** A person's action goes to the tab they took over; `task` (its key) and `tab` narrow it to one. */
+export interface PersonTarget {
+  task?: string;
+  tab?: string;
+}
+export type PersonResult = { status: number; body: Record<string, unknown> };
+
 /** What the control plane needs from the tab server. */
 export interface TabServerLike {
   ensure(): Promise<void>;
@@ -56,8 +63,10 @@ export interface TabServerLike {
   control(key: string, tab: string, action: "take" | "release"): Promise<TabRecord | null>;
   /** A current preview of one of the task's tabs. */
   screenshot(key: string, tab: string): Promise<{ mimeType: string; data: string; url: string; title: string } | null>;
-  /** Type text or press a key, for a person, into the page in front of the real browser. */
-  input(input: { text?: string; key?: string }): Promise<{ status: number; body: Record<string, unknown> }>;
+  /** Type text or press a key, for a person, into a tab they took over (the latest one unless `tab`/`task` name it). */
+  input(input: PersonTarget & { text?: string; key?: string }): Promise<PersonResult>;
+  /** Tap (x, y as 0..1 of the viewport), scroll or go back, for a person, in a tab they took over. */
+  pointer(input: PersonTarget & { action: "click" | "scroll" | "back"; x?: number; y?: number; dy?: number }): Promise<PersonResult>;
 }
 
 /** An agent asking a person for help waits up to 30 minutes; the MCP clients must wait a bit longer. */
@@ -226,16 +235,27 @@ export class TabServer implements TabServerLike {
     }
   }
 
-  async input(input: { text?: string; key?: string }): Promise<{ status: number; body: Record<string, unknown> }> {
-    // A person may type before any task turn has started the current server version.
+  async input(input: PersonTarget & { text?: string; key?: string }): Promise<PersonResult> {
+    return this.#person("/input", input);
+  }
+
+  async pointer(input: PersonTarget & { action: "click" | "scroll" | "back"; x?: number; y?: number; dy?: number }): Promise<PersonResult> {
+    return this.#person("/pointer", input);
+  }
+
+  async #person(route: "/input" | "/pointer", body: PersonTarget & object): Promise<PersonResult> {
+    if ((body.task !== undefined && !KEY.test(body.task)) || (body.tab !== undefined && !/^t\d{1,9}$/.test(body.tab))) {
+      return { status: 404, body: { error: "no_tab", message: "这个标签页已经关闭或不属于该任务" } };
+    }
+    // A person may act before any task turn has started the current server version.
     try {
       await this.ensure();
     } catch {
       return { status: 503, body: { error: "unavailable", message: "浏览器输入暂不可用，请稍后重试" } };
     }
     const res = await this.#container.execInSandbox(
-      ["curl", "-s", "-m", "20", "-w", "\n%{http_code}", "-X", "POST", "-H", "content-type: application/json", "--data-binary", "@-", `http://127.0.0.1:${TAB_SERVER_PORT}/input`],
-      { timeoutMs: 25_000, stdin: JSON.stringify(input) },
+      ["curl", "-s", "-m", "20", "-w", "\n%{http_code}", "-X", "POST", "-H", "content-type: application/json", "--data-binary", "@-", `http://127.0.0.1:${TAB_SERVER_PORT}${route}`],
+      { timeoutMs: 25_000, stdin: JSON.stringify(body) },
     );
     const cut = res.stdout.lastIndexOf("\n");
     const status = Number(res.stdout.slice(cut + 1));

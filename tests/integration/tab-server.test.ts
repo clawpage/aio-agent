@@ -180,24 +180,61 @@ it.skipIf(!hasChromium)("stops waiting on timeout, on a stopped caller and on a 
   expect((await records("W")).find((t) => t.id === tab)?.request).toBeNull();
 });
 
-it.skipIf(!hasChromium)("lets a person type into the page in front, but not into a task tab its agent still drives", async () => {
-  const tab = tabIdOf(await call("K", "browser_navigate", { url: "data:text/html,<title>Form</title><input id=q autofocus>" }))!;
-  // Keep only this task tab open, so it is unambiguously the page in front.
-  const targetId = (await records("K"))[0] as unknown as { targetId: string };
-  for (const t of (await (await fetch(`${process.env.AIO_TABS_CDP}/json/list`)).json()) as Array<{ id: string; type: string }>) {
-    if (t.type === "page" && t.id !== targetId.targetId) await fetch(`${process.env.AIO_TABS_CDP}/json/close/${t.id}`);
-  }
-  await new Promise((r) => setTimeout(r, 300));
-  const typeIn = async (body: Record<string, unknown>) => fetch(`${base}/input`, { method: "POST", body: JSON.stringify(body) });
+it.skipIf(!hasChromium)("opens every task tab in its own window", async () => {
+  const [x, y] = await Promise.all([call("X", "browser_navigate", { url: page("X", "x") }), call("Y", "browser_navigate", { url: page("Y", "y") })]);
+  expect(tabIdOf(x)).not.toBe(tabIdOf(y));
+  const cdp = await browser.newBrowserCDPSession();
+  const windowOf = async (key: string) => {
+    const { targetId } = (await records(key))[0] as unknown as { targetId: string };
+    return (await cdp.send("Browser.getWindowForTarget", { targetId })).windowId;
+  };
+  expect(await windowOf("X")).not.toBe(await windowOf("Y"));
+  await cdp.detach();
+});
 
+it.skipIf(!hasChromium)("lets a person type and tap only in a tab they took over", async () => {
+  const form = (title: string) => `data:text/html,<title>${title}</title><input id=q autofocus>`;
+  const tabK = tabIdOf(await call("K", "browser_navigate", { url: form("FormK") }))!;
+  const tabL = tabIdOf(await call("L", "browser_navigate", { url: form("FormL") }))!;
+  const typeIn = async (body: Record<string, unknown>) => fetch(`${base}/input`, { method: "POST", body: JSON.stringify(body) });
+  const valueOf = async (key: string) => text(await call(key, "browser_evaluate", { script: "document.querySelector('#q').value" }));
+
+  // Nothing taken over: nothing is typed anywhere, however many pages are open.
   const refused = await typeIn({ text: "hi" });
   expect(refused.status).toBe(409);
-  expect(((await refused.json()) as { message: string }).message).toContain("请先在任务卡片上点“接管”");
+  expect(((await refused.json()) as { message: string }).message).toContain("先在任务卡片上点“接管”");
+  // A named tab its agent still drives is refused too; a tab of another task is not found.
+  expect((await typeIn({ tab: tabK, task: "K", text: "hi" })).status).toBe(409);
+  expect((await typeIn({ tab: tabK, task: "L", text: "hi" })).status).toBe(404);
 
-  await control(tab, "take", "K");
+  await control(tabL, "take", "L");
+  await control(tabK, "take", "K");
+  // Unnamed input goes to the tab taken over last; a named one to that tab.
   expect((await typeIn({ text: "你好 world 👋" })).status).toBe(200);
   expect((await typeIn({ key: "Backspace" })).status).toBe(200);
   expect((await typeIn({ key: "F12" })).status).toBe(400);
-  await control(tab, "release", "K");
-  expect(text(await call("K", "browser_evaluate", { script: "document.querySelector('#q').value" }))).toBe("你好 world 👋".slice(0, -2));
+  expect(((await (await typeIn({ tab: tabL, task: "L", text: "ell" })).json()) as { tab: string }).tab).toBe(tabL);
+  await control(tabK, "release", "K");
+  await control(tabL, "release", "L");
+  expect(await valueOf("K")).toBe("你好 world 👋".slice(0, -2));
+  expect(await valueOf("L")).toBe("ell");
+  expect((await typeIn({ tab: tabL, task: "L", text: "x" })).status).toBe(409);
+});
+
+it.skipIf(!hasChromium)("taps, scrolls and goes back for a person in a held tab", async () => {
+  const tall = "data:text/html,<title>Tall</title><body style='margin:0;height:5000px'><button style='position:fixed;left:0;top:0;width:100vw;height:50vh' onclick=\"document.title='tapped'\">tap</button><input style='position:fixed;left:0;top:50vh;width:100vw;height:50vh'>";
+  const tab = tabIdOf(await call("P", "browser_navigate", { url: page("First", "first") }))!;
+  await call("P", "browser_navigate", { url: tall });
+  const point = async (body: Record<string, unknown>) => fetch(`${base}/pointer`, { method: "POST", body: JSON.stringify({ tab, task: "P", ...body }) });
+  expect((await point({ action: "click", x: 0.5, y: 0.25 })).status).toBe(409);
+
+  await control(tab, "take", "P");
+  expect((await point({ action: "click", x: 2, y: 0.25 })).status).toBe(400);
+  expect((await point({ action: "drag" })).status).toBe(400);
+  expect(await (await point({ action: "click", x: 0.5, y: 0.25 })).json()).toMatchObject({ title: "tapped", editable: false });
+  expect(await (await point({ action: "click", x: 0.5, y: 0.75 })).json()).toMatchObject({ editable: true });
+  expect((await point({ action: "scroll", dy: 800 })).status).toBe(200);
+  const back = (await (await point({ action: "back" })).json()) as { title: string };
+  await control(tab, "release", "P");
+  expect(back.title).toBe("First");
 });

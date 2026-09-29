@@ -16,6 +16,7 @@ const fakeTabs: TabServerLike = {
   list: async (key) => (calls.push(`list:${key ?? "*"}`), [record(key ?? feedKey, "ai")]),
   control: async (key, tab, action) => (calls.push(`${action}:${key}:${tab}`), tab === "t1" ? record(key, action === "take" ? "human" : "ai") : null),
   input: async (input) => (calls.push(`input:${JSON.stringify(input)}`), { status: 409, body: { error: "task_tab", message: "这个页面正由任务「查网页」操作，请先在任务卡片上点“接管”" } }),
+  pointer: async (input) => (calls.push(`pointer:${JSON.stringify(input)}`), { status: 200, body: { tab: input.tab ?? "t1" } }),
   screenshot: async (key, tab) => (calls.push(`shot:${key}:${tab}`), tab === "t1" ? { mimeType: "image/jpeg", data: Buffer.from("jpeg-bytes").toString("base64"), url: "u", title: "t" } : null),
 };
 
@@ -60,7 +61,7 @@ it("shows a task's tabs and lets its owner take over and hand back, keyed by the
   expect((await h.request("/api/tasks/task_unknown/browser", { headers: { cookie } })).status).toBe(404);
 });
 
-it("types for the person into the page in front, and passes the tab server's refusal through", async () => {
+it("types for the person into the tab they took over, and passes the tab server's refusal through", async () => {
   const { cookie, csrf } = await login(h);
   const headers = { cookie, "x-csrf-token": csrf, "content-type": "application/json" };
   expect((await h.request("/api/browser/input", { method: "POST", headers: { cookie, "content-type": "application/json" }, body: JSON.stringify({ text: "x" }) })).status).toBe(403);
@@ -69,4 +70,27 @@ it("types for the person into the page in front, and passes the tab server's ref
   expect(refused.status).toBe(409);
   expect(((await refused.json()) as { message: string }).message).toContain("请先在任务卡片上点“接管”");
   expect(calls).toContain(`input:${JSON.stringify({ text: "你好", key: "Enter" })}`);
+});
+
+it("acts in a task's own tab only for its owner, always naming that task to the tab server", async () => {
+  const { cookie, csrf } = await login(h);
+  const headers = { cookie, "x-csrf-token": csrf, "content-type": "application/json" };
+  const task = ((await (await h.request("/api/tasks", { method: "POST", headers, body: JSON.stringify({ text: "登录网站", clientMessageId: "tab-console" }) })).json()) as { task: { id: string } }).task;
+  const key = h.ctx.tasks.browserKey(task.id)!;
+
+  await h.request(`/api/tasks/${task.id}/browser/input`, { method: "POST", headers, body: JSON.stringify({ tab: "t1", text: "abc" }) });
+  expect(calls).toContain(`input:${JSON.stringify({ text: "abc", task: key, tab: "t1" })}`);
+  // A body cannot redirect the action to another task's tabs.
+  await h.request(`/api/tasks/${task.id}/browser/input`, { method: "POST", headers, body: JSON.stringify({ task: "conv_other", key: "Enter" }) });
+  expect(calls).toContain(`input:${JSON.stringify({ key: "Enter", task: key })}`);
+  expect((await h.request(`/api/tasks/${task.id}/browser/input`, { method: "POST", headers, body: JSON.stringify({ tab: "t1" }) })).status).toBe(400);
+
+  expect((await h.request(`/api/tasks/${task.id}/browser/pointer`, { method: "POST", headers, body: JSON.stringify({ tab: "t1", action: "drag" }) })).status).toBe(400);
+  expect((await h.request(`/api/tasks/${task.id}/browser/pointer`, { method: "POST", headers: { cookie, "content-type": "application/json" }, body: JSON.stringify({ tab: "t1", action: "back" }) })).status).toBe(403);
+  const tapped = await h.request(`/api/tasks/${task.id}/browser/pointer`, { method: "POST", headers, body: JSON.stringify({ tab: "t1", action: "click", x: 0.5, y: "0.2" }) });
+  expect(tapped.status).toBe(200);
+  expect(calls).toContain(`pointer:${JSON.stringify({ task: key, tab: "t1", action: "click", x: 0.5 })}`);
+
+  expect((await h.request("/api/tasks/task_unknown/browser/pointer", { method: "POST", headers, body: JSON.stringify({ tab: "t1", action: "back" }) })).status).toBe(404);
+  expect((await h.request("/api/tasks/task_unknown/browser/input", { method: "POST", headers, body: JSON.stringify({ text: "x" }) })).status).toBe(404);
 });

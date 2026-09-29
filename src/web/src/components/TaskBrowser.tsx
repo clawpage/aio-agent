@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../api";
 import type { Task, TaskTab } from "../types";
+import { TaskConsole } from "./TaskConsole";
 
 const LIVE = new Set(["running", "stopping", "queued"]);
 const REFRESH_MS = 4000;
@@ -20,9 +21,9 @@ function host(url: string): string {
 
 /**
  * A task's browser, inside its card: a live preview of the tab its agent works
- * in, who is driving it, and the hand-over. Taking over brings the task's own
- * tab to the front of the real browser and shuts the agent out of it until you
- * hand it back; an agent that asked for you continues right where it waited.
+ * in, who is driving it, and the hand-over. Taking over shuts the agent out of
+ * the task's own tab and opens a panel operating just that tab, until you hand
+ * it back; an agent that asked for you continues right where it waited.
  */
 export function TaskBrowser({ task, onReveal }: { task: Task; onReveal: () => void }) {
   const [tabs, setTabs] = useState<TaskTab[]>([]);
@@ -30,6 +31,7 @@ export function TaskBrowser({ task, onReveal }: { task: Task; onReveal: () => vo
   const [shotFailed, setShotFailed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [consoleOpen, setConsoleOpen] = useState(false);
   const live = LIVE.has(task.status);
   // The feed summary changes the moment the agent asks for you or you take over.
   const signal = `${task.browser?.tabs ?? 0}:${task.browser?.request ?? ""}:${task.browser?.human ?? false}:${task.status}`;
@@ -62,7 +64,7 @@ export function TaskBrowser({ task, onReveal }: { task: Task; onReveal: () => vo
     try {
       const { tab: updated } = await api.taskBrowserControl(task.id, tab.id, action);
       setTabs((old) => old.map((t) => (t.id === updated.id ? updated : t)));
-      if (action === "take") onReveal();
+      setConsoleOpen(action === "take");
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -88,7 +90,7 @@ export function TaskBrowser({ task, onReveal }: { task: Task; onReveal: () => vo
       {waiting && <p className="task-browser-reason">{tab.request!.reason}</p>}
       {human && <p className="task-browser-hint">{live ? "AI 已暂停操作这个页面。完成后点“交还给 AI”，它会从当前页面继续。" : "任务已结束，你可以查看或继续操作这个页面。"}</p>}
       {!shotFailed && (
-        <button type="button" className="task-browser-shot" onClick={() => void control("take")} disabled={busy} aria-label="在浏览器中打开这个页面">
+        <button type="button" className="task-browser-shot" onClick={() => (human ? setConsoleOpen(true) : void control("take"))} disabled={busy} aria-label="操作这个页面">
           <img src={api.taskBrowserScreenshotUrl(task.id, tab.id, shotAt)} alt={`${tab.title || host(tab.url)} 的页面预览`} loading="lazy" onError={() => setShotFailed(true)} />
         </button>
       )}
@@ -97,11 +99,22 @@ export function TaskBrowser({ task, onReveal }: { task: Task; onReveal: () => vo
         {waiting && <button type="button" className="primary tiny" disabled={busy} onClick={() => void control("take")}>去浏览器操作</button>}
         {human && <>
           <button type="button" className="primary tiny" disabled={busy} onClick={() => void control("release")}>{live ? "完成，交还给 AI" : "结束查看"}</button>
-          <button type="button" className="ghost tiny" onClick={onReveal}>打开浏览器</button>
+          <button type="button" className="ghost tiny" onClick={() => setConsoleOpen(true)}>操作页面</button>
         </>}
         {state === "ai" && <button type="button" className="ghost tiny" disabled={busy} onClick={() => void control("take")}>接管</button>}
         {state === "done" && <button type="button" className="ghost tiny" disabled={busy} onClick={() => void control("take")}>在浏览器中查看</button>}
       </div>
+      {human && consoleOpen && (
+        <TaskConsole
+          taskId={task.id}
+          tab={tab}
+          live={live}
+          busy={busy}
+          onRelease={() => void control("release")}
+          onClose={() => setConsoleOpen(false)}
+          onReveal={() => { setConsoleOpen(false); onReveal(); }}
+        />
+      )}
     </div>
   );
 }

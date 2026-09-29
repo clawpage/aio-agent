@@ -110,8 +110,8 @@ function register(page, key, title, extra = {}) {
   return tab;
 }
 
-async function adoptNew(page, key, title) {
-  const tab = register(page, key, title);
+async function adoptNew(page, key, title, targetId) {
+  const tab = register(page, key, title, targetId ? { targetId } : {});
   await enforceFinishedCap(key);
   await refocusHuman();
   return tab;
@@ -198,8 +198,49 @@ async function reattach(context) {
   save();
 }
 
+/**
+ * Every task tab opens in its own browser window. A background tab of a shared
+ * window stops being composited once it is idle, so capturing it hangs about
+ * half the time; a page alone in its (possibly covered) window keeps rendering,
+ * which keeps screenshots and the person's live view reliable for parallel tasks.
+ */
 async function newTab(key, title) {
-  return adoptNew(await (await browserContext()).newPage(), key, title);
+  const context = await browserContext();
+  const browser = context.browser();
+  const session = await browser.newBrowserCDPSession();
+  try {
+    const { targetId } = await session.send('Target.createTarget', { url: 'about:blank', newWindow: true });
+    // Other tasks may open windows at the same moment: take the page this call created.
+    const known = new Set([...registry.values()].map((t) => t.page));
+    const deadline = Date.now() + 15000;
+    let page = null;
+    while (!page) {
+      for (const candidate of context.pages()) {
+        if (!known.has(candidate) && (await targetIdOf(candidate).catch(() => null)) === targetId) page = candidate;
+      }
+      if (page) break;
+      if (Date.now() > deadline) throw new Error('新开的窗口没有找到');
+      await context.waitForEvent('page', { timeout: 1000 }).catch(() => undefined);
+    }
+    return adoptNew(page, key, title, targetId);
+  } finally {
+    await session.detach().catch(() => undefined);
+  }
+}
+
+/** A capture that cannot hang forever: a stuck compositor fails the call instead. */
+async function capture(page, { fullPage = false, quality = 70 } = {}) {
+  const work = fullPage
+    ? page.screenshot({ type: 'jpeg', quality, fullPage: true, timeout: 15000 })
+    : (async () => {
+        const session = await page.context().newCDPSession(page);
+        try {
+          return Buffer.from((await session.send('Page.captureScreenshot', { format: 'jpeg', quality })).data, 'base64');
+        } finally {
+          await session.detach().catch(() => undefined);
+        }
+      })();
+  return Promise.race([work, new Promise((_, reject) => setTimeout(() => reject(new Error('截图超时，页面可能正在加载，请稍后再试')), 15000))]);
 }
 
 function ownTabs(key) {
@@ -276,30 +317,29 @@ function markFinished(key) {
 /** Keys a person may press from the phone input bar. */
 const PERSON_KEYS = new Set(['Enter', 'Backspace', 'Delete', 'Tab', 'Escape', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight']);
 
-/** The page a person sees in the real browser: the one in front, a tab they took over first. */
-async function frontPage() {
-  const context = await browserContext();
-  const visible = [];
-  for (const page of context.pages()) {
-    const shown = await Promise.race([page.evaluate(() => document.visibilityState === 'visible'), new Promise((r) => setTimeout(() => r(false), 2000))]).catch(() => false);
-    if (shown) visible.push(page);
+/**
+ * The tab a person acts on: the one they took over (a named one, or the latest).
+ * `task` names the task a tab must belong to (`key` is a keyboard key here).
+ * Guessing "the page in front" is not safe: the workspace browser view selects
+ * its own tab, so a guess could type into an unrelated page.
+ */
+function heldTab(body) {
+  if (body.tab) {
+    const tab = registry.get(String(body.tab));
+    if (!tab || tab.page.isClosed() || (body.task && tab.key !== body.task)) return { error: { status: 404, body: { error: 'no_tab', message: '这个标签页已经关闭或不属于该任务' } } };
+    if (tab.holder !== 'human') return { error: { status: 409, body: { error: 'not_held', message: `这个页面正由任务「${tab.title}」操作，请先点“接管”` } } };
+    return { tab };
   }
-  const held = [...registry.values()].filter((t) => t.holder === 'human' && visible.includes(t.page)).sort((a, b) => b.humanSince - a.humanSince)[0];
-  return held ? held.page : visible[0] || null;
+  const tab = [...registry.values()].filter((t) => t.holder === 'human' && !t.page.isClosed()).sort((a, b) => b.humanSince - a.humanSince)[0];
+  if (!tab) return { error: { status: 409, body: { error: 'no_held_tab', message: '先在任务卡片上点“接管”要操作的页面，再在这里输入' } } };
+  return { tab };
 }
 
-/**
- * Type for a person into the page in front (a phone cannot raise its keyboard
- * inside the remote view). A task tab its agent still drives is refused, so the
- * person and the agent never type into one page at once: take it over first.
- */
+/** Type for a person into the tab they took over (a phone cannot raise its keyboard inside a remote view). */
 async function personInput(body) {
-  const page = await frontPage();
-  if (!page) return { status: 404, body: { error: 'no_page', message: '浏览器里没有正在显示的页面' } };
-  const tab = [...registry.values()].find((t) => t.page === page);
-  if (tab && tab.holder !== 'human') {
-    return { status: 409, body: { error: 'task_tab', message: `这个页面正由任务「${tab.title}」操作，请先在任务卡片上点“接管”`, title: tab.title } };
-  }
+  const { tab, error } = heldTab(body);
+  if (error) return error;
+  const page = tab.page;
   if (typeof body.text === 'string' && body.text) {
     if (body.text.length > 2000) return { status: 400, body: { error: 'too_long', message: '一次最多输入 2000 个字' } };
     await page.keyboard.insertText(body.text);
@@ -308,7 +348,37 @@ async function personInput(body) {
     if (!PERSON_KEYS.has(body.key)) return { status: 400, body: { error: 'bad_key' } };
     await page.keyboard.press(body.key);
   }
-  return { status: 200, body: { title: await page.title().catch(() => ''), url: safeUrl(page) } };
+  return { status: 200, body: { tab: tab.id, title: await page.title().catch(() => ''), url: safeUrl(page) } };
+}
+
+/**
+ * Point at the tab the person took over: a tap on its picture (x, y as 0..1 of
+ * the viewport), a scroll, or going back. Only a held tab accepts it.
+ */
+async function personPointer(body) {
+  const { tab, error } = heldTab(body);
+  if (error) return error;
+  const page = tab.page;
+  if (body.action === 'click') {
+    const x = Number(body.x), y = Number(body.y);
+    if (!(x >= 0 && x <= 1 && y >= 0 && y <= 1)) return { status: 400, body: { error: 'bad_point' } };
+    const size = await page.evaluate(() => ({ w: window.innerWidth, h: window.innerHeight }));
+    await page.mouse.click(Math.round(x * size.w), Math.round(y * size.h));
+  } else if (body.action === 'scroll') {
+    const dy = Math.max(-5000, Math.min(5000, Number(body.dy) || 0));
+    await page.mouse.wheel(0, dy);
+  } else if (body.action === 'back') {
+    await page.goBack({ timeout: 15000 }).catch(() => undefined);
+  } else {
+    return { status: 400, body: { error: 'bad_action' } };
+  }
+  await page.waitForTimeout(150);
+  // Tapping a field tells the phone to offer its keyboard.
+  const editable = await page.evaluate(() => {
+    const el = document.activeElement;
+    return Boolean(el && (el.isContentEditable || el.tagName === 'TEXTAREA' || (el.tagName === 'INPUT' && !/^(button|submit|reset|checkbox|radio|file|image|range|color)$/i.test(el.type))));
+  }).catch(() => false);
+  return { status: 200, body: { tab: tab.id, title: await page.title().catch(() => ''), url: safeUrl(page), editable } };
 }
 
 async function pruneFinished() {
@@ -368,7 +438,8 @@ const TOOLS = {
       const tab = await resolveTab(ctx, a.tab, 'read');
       fs.mkdirSync(OUTPUT_DIR, { recursive: true });
       const file = path.join(OUTPUT_DIR, `tab-${tab.id}-${Date.now()}-${crypto.randomBytes(3).toString('hex')}.jpg`);
-      const data = await tab.page.screenshot({ path: file, type: 'jpeg', quality: 70, fullPage: Boolean(a.full_page), timeout: 30000 });
+      const data = await capture(tab.page, { fullPage: Boolean(a.full_page) });
+      fs.writeFileSync(file, data);
       return { content: [{ type: 'image', data: data.toString('base64'), mimeType: 'image/jpeg' }, { type: 'text', text: `${await describe(tab)}\n截图已保存：${file}` }] };
     },
   },
@@ -574,7 +645,7 @@ const server = http.createServer(async (req, res) => {
       if (!tab || tab.page.isClosed()) return send(res, 404, { error: 'no such tab' });
       const key = url.searchParams.get('key');
       if (key && key !== tab.key) return send(res, 403, { error: 'tab belongs to another task' });
-      const data = await tab.page.screenshot({ type: 'jpeg', quality: 55, timeout: 15000 });
+      const data = await capture(tab.page, { quality: 55 });
       return send(res, 200, { mimeType: 'image/jpeg', data: data.toString('base64'), url: safeUrl(tab.page), title: await tab.page.title().catch(() => '') });
     }
     if (req.method === 'POST' && url.pathname === '/finish') {
@@ -585,6 +656,10 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'POST' && url.pathname === '/prune') return send(res, 200, { closed: await pruneFinished() });
     if (req.method === 'POST' && url.pathname === '/input') {
       const out = await personInput(await readJson(req));
+      return send(res, out.status, out.body);
+    }
+    if (req.method === 'POST' && url.pathname === '/pointer') {
+      const out = await personPointer(await readJson(req));
       return send(res, out.status, out.body);
     }
     if (url.pathname !== '/mcp') return send(res, 404, { error: 'not found' });

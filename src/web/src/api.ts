@@ -99,6 +99,9 @@ export const api = {
   browserInput: (input: { text?: string; key?: string }) => request<{ title: string; url: string }>("/api/browser/input", { method: "POST", body: input }),
   taskBrowser: (id: string) => request<{ tabs: import("./types").TaskTab[] }>(`/api/tasks/${encodeURIComponent(id)}/browser`),
   taskBrowserControl: (id: string, tab: string, action: "take" | "release") => request<{ tab: import("./types").TaskTab }>(`/api/tasks/${encodeURIComponent(id)}/browser/control`, { method: "POST", body: { tab, action } }),
+  taskBrowserInput: (id: string, tab: string, input: { text?: string; key?: string }) => request<{ title: string; url: string }>(`/api/tasks/${encodeURIComponent(id)}/browser/input`, { method: "POST", body: { tab, ...input } }),
+  taskBrowserPointer: (id: string, tab: string, input: { action: "click"; x: number; y: number } | { action: "scroll"; dy: number } | { action: "back" }) =>
+    request<{ title: string; url: string; editable?: boolean }>(`/api/tasks/${encodeURIComponent(id)}/browser/pointer`, { method: "POST", body: { tab, ...input } }),
   taskBrowserScreenshotUrl: (id: string, tab: string, at: number) => `/api/tasks/${encodeURIComponent(id)}/browser/screenshot?tab=${encodeURIComponent(tab)}&at=${at}`,
   session: (signal?: AbortSignal) => request<{ authenticated: boolean; role?: "owner" | "member"; username: string | null; expiresAt?: number; secure?: boolean }>("/api/auth/session", {signal,cache:"no-store"}),
   login: (password: string, username = "owner") => request<{ ok: boolean; username: string; expiresAt: number }>("/api/auth/login", { method: "POST", body: { password, username } }),

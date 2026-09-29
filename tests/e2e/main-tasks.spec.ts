@@ -378,7 +378,7 @@ test("failed reference submission preserves target and retry id, changing target
  await page.getByRole('button',{name:'引用任务：任务 2',exact:true}).click();await page.getByRole('button',{name:'发送',exact:true}).click();await expect(page.getByRole('button',{name:'发送',exact:true})).toBeEnabled();
  expect(bodies[2].relatedTaskId).toBe('task-2');expect(bodies[2].clientMessageId).not.toBe(bodies[1].clientMessageId);
 });
-test("a task that needs you in the browser shows why, hands the tab to you and takes it back", async ({ page }, info) => {
+test("a task that needs you in the browser shows why, hands you its own tab to operate and takes it back", async ({ page }, info) => {
     const row: Task = { ...task(1), title: "订餐厅", browser: { tabs: 1, request: "请登录 OpenTable 账号", human: false } };
     const tab = { id: "t1", title: "OpenTable 登录", url: "https://www.opentable.com/signin", lastUsed: 1, finishedAt: null, holder: "ai" as "ai" | "human", request: { reason: "请登录 OpenTable 账号", at: 1 } as { reason: string; at: number } | null };
     const controls: string[] = [];
@@ -391,6 +391,9 @@ test("a task that needs you in the browser shows why, hands the tab to you and t
         row.browser = { tabs: 1, request: tab.request?.reason ?? null, human: tab.holder === "human" };
         await r.fulfill({ json: { tab } });
     });
+    const acts: Array<Record<string, unknown>> = [];
+    await page.route("**/api/tasks/task-1/browser/pointer", async r => { acts.push(r.request().postDataJSON()); await r.fulfill({ json: { title: tab.title, url: tab.url, editable: true } }); });
+    await page.route("**/api/tasks/task-1/browser/input", async r => { acts.push(r.request().postDataJSON()); await r.fulfill({ json: { title: tab.title, url: tab.url } }); });
     await setup(page, [row]);
     const card = page.getByRole("group", { name: "任务浏览器：需要你操作" });
     await expect(card).toContainText("请登录 OpenTable 账号");
@@ -403,16 +406,51 @@ test("a task that needs you in the browser shows why, hands the tab to you and t
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
     expect(overflow).toBeLessThanOrEqual(0);
 
-    // Taking over opens the workspace on the browser, where the task's tab is in front.
+    // Taking over opens a panel operating just this task's tab: tap its picture, scroll, type.
     await card.getByRole("button", { name: "去浏览器操作", exact: true }).click();
     expect(controls).toEqual(["take"]);
-    const closeWorkspace = page.getByRole("button", { name: "关闭工作区", exact: true });
-    await expect(closeWorkspace).toBeVisible();
-    await closeWorkspace.click();
+    const panel = page.getByRole("dialog", { name: "操作任务页面" });
+    await expect(panel).toContainText("OpenTable 登录");
+    const screen = panel.getByRole("img", { name: /实时画面/ });
+    const box = (await screen.boundingBox())!;
+    await screen.click({ position: { x: box.width / 2, y: box.height / 4 } });
+    await expect.poll(() => acts.length).toBe(1);
+    expect(acts[0]).toMatchObject({ tab: "t1", action: "click" });
+    expect(acts[0].x as number).toBeCloseTo(0.5, 1);
+    expect(acts[0].y as number).toBeCloseTo(0.25, 1);
+    const field = panel.getByRole("textbox", { name: "要输入到网页的文字" });
+    await expect(field).toHaveAttribute("placeholder", "在这里打字");
+    await field.fill("me@example.com");
+    await panel.getByRole("button", { name: "发送", exact: true }).click();
+    await panel.getByRole("button", { name: "回车", exact: true }).click();
+    await panel.getByRole("button", { name: "向下滚动", exact: true }).click();
+    await expect.poll(() => acts.length).toBe(4);
+    expect(acts.slice(1)).toEqual([{ tab: "t1", text: "me@example.com" }, { tab: "t1", key: "Enter" }, { tab: "t1", action: "scroll", dy: 600 }]);
+    // Zoomed in, a tap still lands on the matching point of the page.
+    await panel.getByRole("button", { name: "放大画面", exact: true }).click();
+    const zoomedBox = (await screen.boundingBox())!;
+    expect(zoomedBox.width).toBeGreaterThan(box.width * 1.5);
+    await screen.click({ position: { x: zoomedBox.width / 4, y: zoomedBox.height / 10 } });
+    await expect.poll(() => acts.length).toBe(5);
+    expect(acts[4].x as number).toBeCloseTo(0.25, 1);
+    expect(acts[4].y as number).toBeCloseTo(0.1, 1);
+    await panel.getByRole("button", { name: "放大画面", exact: true }).click();
+    await expect(field).toHaveValue("");
+    // The whole panel, input bar included, fits the screen.
+    const viewport = page.viewportSize()!;
+    const bar = (await panel.getByRole("form", { name: "向网页输入" }).boundingBox())!;
+    expect(bar.y + bar.height).toBeLessThanOrEqual(viewport.height + 1);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
+    await page.screenshot({ path: info.outputPath("browser-console.png") });
 
+    // Closing the panel keeps the tab yours; the card reopens it and hands it back.
+    await panel.getByRole("button", { name: "关闭操作面板", exact: true }).click();
+    await expect(panel).toBeHidden();
     const held = page.getByRole("group", { name: "任务浏览器：你正在操作" });
     await expect(held).toContainText("AI 已暂停操作这个页面");
-    await held.getByRole("button", { name: "完成，交还给 AI", exact: true }).click();
+    await held.getByRole("button", { name: "操作页面", exact: true }).click();
+    await panel.getByRole("button", { name: "完成，交还给 AI", exact: true }).click();
     expect(controls).toEqual(["take", "release"]);
+    await expect(panel).toBeHidden();
     await expect(page.getByRole("group", { name: "任务浏览器：AI 操作中" }).getByRole("button", { name: "接管", exact: true })).toBeVisible();
 });

@@ -448,13 +448,35 @@ export function createApiRouter(context: AppContext): Router {
     res.type(shot.mimeType).send(Buffer.from(shot.data, "base64"));
   }));
   // A phone cannot raise its keyboard inside the remote browser view, so its native
-  // input bar types into the page in front through here.
-  router.post("/browser/input", requireKind("primary"), requireSession, asyncHandler(async (req, res) => {
-    if (!context.tabs) { res.status(404).json({ error: "not_found" }); return; }
+  // input bar types into the tab the person took over through here.
+  const heldTab = (req: Request): { tab?: string } => (typeof req.body?.tab === "string" && req.body.tab ? { tab: req.body.tab } : {});
+  const personInput = (req: Request): { text?: string; key?: string } | null => {
     const text = typeof req.body?.text === "string" ? req.body.text : undefined;
     const key = typeof req.body?.key === "string" ? req.body.key : undefined;
-    if (!text && !key) { res.status(400).json({ error: "empty_input" }); return; }
-    const out = await context.tabs.input({ ...(text ? { text } : {}), ...(key ? { key } : {}) });
+    return text || key ? { ...(text ? { text } : {}), ...(key ? { key } : {}) } : null;
+  };
+  router.post("/browser/input", requireKind("primary"), requireSession, asyncHandler(async (req, res) => {
+    if (!context.tabs) { res.status(404).json({ error: "not_found" }); return; }
+    const input = personInput(req);
+    if (!input) { res.status(400).json({ error: "empty_input" }); return; }
+    const out = await context.tabs.input(input);
+    res.status(out.status).json(out.body);
+  }));
+  router.post("/tasks/:id/browser/input", requireKind("primary"), requireSession, asyncHandler(async (req, res) => {
+    const task = taskBrowserKey(req);
+    if (!task || !context.tabs) { res.status(404).json({ error: "not_found" }); return; }
+    const input = personInput(req);
+    if (!input) { res.status(400).json({ error: "empty_input" }); return; }
+    const out = await context.tabs.input({ ...input, task, ...heldTab(req) });
+    res.status(out.status).json(out.body);
+  }));
+  router.post("/tasks/:id/browser/pointer", requireKind("primary"), requireSession, asyncHandler(async (req, res) => {
+    const task = taskBrowserKey(req);
+    if (!task || !context.tabs) { res.status(404).json({ error: "not_found" }); return; }
+    const action = req.body?.action;
+    if (action !== "click" && action !== "scroll" && action !== "back") { res.status(400).json({ error: "bad_action" }); return; }
+    const num = (v: unknown): number | undefined => (typeof v === "number" && Number.isFinite(v) ? v : undefined);
+    const out = await context.tabs.pointer({ task, ...heldTab(req), action, x: num(req.body?.x), y: num(req.body?.y), dy: num(req.body?.dy) });
     res.status(out.status).json(out.body);
   }));
   router.post("/tasks/:id/browser/control", requireKind("primary"), requireSession, asyncHandler(async (req, res) => {
