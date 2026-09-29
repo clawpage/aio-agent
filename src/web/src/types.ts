@@ -217,3 +217,23 @@ export interface TaskTab {
   holder: "ai" | "human";
   request: { reason: string; at: number } | null;
 }
+
+/** How well the dispatcher finds past tasks (see src/server/tasks/recall.ts). */
+export interface RecallStats {
+  days: number;
+  dispatches: number;
+  failed: number;
+  withRecall: number;
+  avgRecalled: number;
+  searchRate: number;
+  avgRounds: number;
+  chosen: number;
+  chosenFromRecall: number;
+  chosenFromSearch: number;
+  labelled: number;
+  recallAtCap: number | null;
+  mrr: number | null;
+  cap: number;
+  avgLatencyMs: number;
+  p90PromptChars: number;
+}

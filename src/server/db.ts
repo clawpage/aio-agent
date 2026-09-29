@@ -154,6 +154,31 @@ CREATE TRIGGER IF NOT EXISTS task_revision AFTER UPDATE ON tasks
 WHEN NEW.revision = OLD.revision
 BEGIN UPDATE tasks SET revision=OLD.revision+1 WHERE id=NEW.id; END;
 
+-- Dispatcher recall: past tasks indexed as CJK bigrams + latin words (BM25),
+-- and what each dispatch saw and chose, for monitoring.
+CREATE VIRTUAL TABLE IF NOT EXISTS task_search USING fts5(task_id UNINDEXED, owner_id UNINDEXED, title, body);
+CREATE TABLE IF NOT EXISTS task_search_state (
+  task_id TEXT PRIMARY KEY,
+  hash TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS recall_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  task_id TEXT NOT NULL,
+  owner_id TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  candidates_json TEXT NOT NULL,
+  searches_json TEXT NOT NULL,
+  rounds INTEGER NOT NULL,
+  chosen_json TEXT NOT NULL,
+  gold_task_id TEXT,
+  gold_rank INTEGER,
+  gold_in_window INTEGER,
+  latency_ms INTEGER NOT NULL,
+  prompt_chars INTEGER NOT NULL,
+  failed INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_recall_events_created ON recall_events(created_at);
+
 CREATE TABLE IF NOT EXISTS agent_state (
   id INTEGER PRIMARY KEY CHECK (id = 1),
   active_turn_id TEXT,

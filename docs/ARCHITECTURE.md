@@ -44,6 +44,10 @@
 
 派单器是隔离的临时 Luna 分类线程（read-only、never、ephemeral），输出经校验的 JSON。
 只能引用已存在且更早的任务，防止循环依赖；相关任务结果在派发时重新读取，避免使用陈旧快照。
+候选任务来自最近窗口、今天的任务和历史召回（`src/server/tasks/recall.ts`）：`task_search` 是 FTS5 表，
+标题与正文预先切成中文二字词和拉丁词后写入，按内容哈希（`task_search_state`）增量同步；每次派单把
+候选来源、搜索与选择写入 `recall_events`，供配置页统计与召回上限自适应。派单器可以返回
+`{search:[...]}` 请求检索，服务端检索后带结果再次询问，轮数与加入数量都有上限。
 并发数复用 `PA_MAX_CONCURRENT_TURNS`；浏览器不是互斥资源：沙箱内的标签页服务（`tab-server.cjs`，loopback `:8190`，
 playwright-core 经 CDP 连接同一个 Chromium）按请求头 `X-AIO-Task`（执行会话 ID）与 `X-AIO-Task-Title` 把每个标签页登记到创建它的任务：创建者可操作，其他任务只读，
 登记表存于 `/tmp/aio-tabs-state.json`，重启后按 CDP targetId 重新认领；执行线程经线程级配置（Codex `config.mcp_servers`、

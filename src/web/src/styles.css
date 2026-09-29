@@ -437,6 +437,12 @@ pre {
 .settings-card .field select { min-height: 44px; width: 100%; }
 .settings-section-head h3 { margin: 0; font-size: 16px; font-weight: 600; }
 .settings-section-head p { margin: 8px 0 0; font-size: 13px; line-height: 1.65; color: var(--text-dim); }
+.recall-range { display: flex; gap: 8px; }
+.recall-stats { display: grid; gap: 10px; margin: 0; }
+.recall-stats div { display: grid; grid-template-columns: minmax(0, 9em) minmax(0, 1fr); gap: 12px; font-size: 13px; line-height: 1.6; }
+.recall-stats dt { color: var(--text-dim); }
+.recall-stats dd { margin: 0; overflow-wrap: anywhere; }
+@media (max-width: 480px) { .recall-stats div { grid-template-columns: minmax(0, 1fr); gap: 2px; } }
 .settings-file-label { margin-left: 8px; font-size: 12px; font-weight: 400; color: var(--text-dim); }
 .settings-fields { display: grid; gap: 18px; }
 .settings-card .banner { margin: 0; }

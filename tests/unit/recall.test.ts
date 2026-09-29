@@ -1,0 +1,61 @@
+import { beforeEach, expect, it } from "vitest";
+import { openDb, type Db } from "../../src/server/db.js";
+import { DEFAULT_CAP, recallStats, recordRecall, TaskRecall, tokenize, type RecallDoc } from "../../src/server/tasks/recall.js";
+
+let db: Db, recall: TaskRecall;
+const TOPICS = ["周报整理", "发票报销", "租房合同", "健身计划", "学英语", "宝宝辅食", "家庭预算", "装修报价", "体检预约", "车险续保", "读书笔记", "照片整理"];
+/** Hundreds of past tasks on everyday topics, then the one a later message means. */
+function seed(owner = "owner_1", n = 300): RecallDoc[] {
+  const docs: RecallDoc[] = Array.from({ length: n }, (_, i) => ({ id: `task_${owner}_${i}`, ownerId: owner, title: `${TOPICS[i % TOPICS.length]} 第${i}次`, body: `帮我处理一下${TOPICS[i % TOPICS.length]}，按上次的格式整理`, result: `已完成${TOPICS[i % TOPICS.length]}` }));
+  return docs;
+}
+beforeEach(() => {
+  db = openDb(":memory:");
+  recall = new TaskRecall(db);
+});
+
+it("splits Chinese into bigrams and keeps latin words and numbers, without filler bigrams", () => {
+  expect(tokenize("杭州西湖亲子游 Plan v2")).toEqual(["杭州", "州西", "西湖", "湖亲", "亲子", "子游", "plan", "v2"]);
+  expect(tokenize("帮我看一下")).toEqual(["我看", "看一"]);
+  expect(tokenize("a 7 猫")).toEqual(["7", "猫"]);
+});
+
+it("finds a task hundreds back by what the message says, and only the clear matches", () => {
+  const docs = seed();
+  docs.splice(40, 0, { id: "task_trip", ownerId: "owner_1", title: "杭州西湖亲子三日游行程", body: "带两岁宝宝去杭州西湖玩三天，住在湖滨附近", result: "三天行程：第一天西湖游船……" });
+  recall.sync(docs);
+  const hits = recall.search("owner_1", "把之前杭州西湖那个行程改成四天");
+  expect(hits[0]?.id).toBe("task_trip");
+  // One clear match brings one task, not the cap's worth of weak ones.
+  expect(hits.length).toBeLessThan(DEFAULT_CAP);
+  expect(recall.search("owner_1", "发票报销").length).toBeLessThanOrEqual(DEFAULT_CAP);
+  expect(recall.search("owner_1", "完全无关的量子力学")).toEqual([]);
+  // The clear match already in view does not make the weak ones behind it look good.
+  expect(recall.search("owner_1", "把之前杭州西湖那个行程改成四天", { exclude: new Set(["task_trip"]) })).toEqual([]);
+});
+
+it("keeps each account's tasks to itself and follows edits and merges", () => {
+  recall.sync([...seed("owner_1", 20), { id: "task_other", ownerId: "owner_2", title: "杭州西湖行程", body: "别人的行程", result: null }]);
+  expect(recall.search("owner_1", "杭州西湖行程")).toEqual([]);
+  expect(recall.search("owner_2", "杭州西湖行程").map((h) => h.id)).toEqual(["task_other"]);
+
+  recall.sync([{ id: "task_other", ownerId: "owner_2", title: "杭州西湖行程", body: "补充：改住灵隐寺附近", result: null }]);
+  expect(recall.search("owner_2", "灵隐寺").map((h) => h.id)).toEqual(["task_other"]);
+  recall.forget(["task_other"]);
+  expect(recall.search("owner_2", "灵隐寺")).toEqual([]);
+});
+
+it("tunes the cap from where hand-picked tasks ranked, once there is enough evidence", () => {
+  const event = (rank: number | null, inWindow = false) =>
+    recordRecall(db, { taskId: "t", ownerId: "owner_1", candidates: [], searches: [], rounds: 1, chosen: { related: [], appendTo: null }, gold: { id: "g", rank, inWindow }, latencyMs: 10, promptChars: 100, failed: false });
+  for (let i = 0; i < 19; i++) event(1);
+  expect(recall.cap()).toBe(DEFAULT_CAP);
+  event(2);
+  expect(recall.cap()).toBe(5);
+  // Picks inside the recent window say nothing about search and do not count.
+  for (let i = 0; i < 30; i++) event(40, true);
+  expect(recall.cap()).toBe(5);
+  for (let i = 0; i < 10; i++) event(7);
+  expect(recall.cap()).toBe(9);
+  expect(recallStats(db, "owner_1", 7, recall.cap())).toMatchObject({ dispatches: 60, labelled: 30, recallAtCap: 1 });
+});

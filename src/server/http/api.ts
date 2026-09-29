@@ -21,6 +21,7 @@ import { parseHttpUrl } from "../aio/client.js";
 import { COOKIE_NAMES, clearSessionCookies, sessionCookies } from "../auth/sessions.js";
 import { safeRedirectPath } from "../auth/tickets.js";
 import { audit } from "../db.js";
+import { recallStats } from "../tasks/recall.js";
 import { DocumentError, type DocumentService } from "../documents/service.js";
 import type { BrowserStatusView } from "../browser/service.js";
 import { documentKind, isRenderableKind, requireWorkspaceFilePath } from "../documents/paths.js";
@@ -753,6 +754,13 @@ export function createApiRouter(context: AppContext): Router {
    * what makes the choice durable across devices and reloads; the response also
    * carries the configured default so the UI can render an explicit "default".
    */
+  // How well the dispatcher finds past tasks (owner only, like all of /settings).
+  router.get("/settings/recall", requireKind("primary"), requireSession, (req, res) => {
+    const days = Math.min(90, Math.max(1, Number(req.query.days) || 7));
+    res.setHeader("Cache-Control", "no-store");
+    res.json({ stats: recallStats(db, ctxOf(req).session!.ownerId, days, context.tasks.recall.cap()) });
+  });
+
   router.get(
     "/settings",
     requireKind("primary"),

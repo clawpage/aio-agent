@@ -29,12 +29,13 @@ const submit=async(headers:Record<string,string>,text:string,extra={})=>{
 it('authenticates the requested username and protects owner configuration',async()=>{
  const session=await h.request('/api/auth/session',{headers:member});expect(await session.json()).toMatchObject({username:'yzmy',role:'member'});
  const wrong=await h.request('/api/auth/login',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({username:'owner',password:'member-password-123'})});expect(wrong.status).toBe(401);
- for(const url of ['/api/settings','/api/SETTINGS/','/api/Settings/Soul','/api/settings/soul','/api/models','/api/capabilities','/api/sandbox/context']) {
+ for(const url of ['/api/settings','/api/SETTINGS/','/api/Settings/Soul','/api/settings/soul','/api/settings/recall','/api/models','/api/capabilities','/api/sandbox/context']) {
   expect((await h.request(url,{headers:member})).status,url).toBe(403);
  }
  expect((await h.request('/api/settings',{method:'PUT',headers:member,body:JSON.stringify({model:'gpt-6-sol',effort:'low'})})).status).toBe(403);
  expect((await h.request('/api/settings/soul',{method:'PUT',headers:member,body:JSON.stringify({content:'override'})})).status).toBe(403);
  expect((await h.request('/api/settings',{headers:owner})).status).toBe(200);
+ const recall=await h.request('/api/settings/recall?days=30',{headers:owner});expect(recall.status).toBe(200);expect(((await recall.json()) as {stats:{days:number;cap:number}}).stats).toMatchObject({days:30,cap:10});
  expect((await h.request('/api/status',{headers:member})).status).toBe(200);
 });
 it('isolates ledger reads, references, stops, events, replay IDs and planner context',async()=>{

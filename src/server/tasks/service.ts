@@ -6,7 +6,15 @@ import type { Config } from "../config.js";
 import { randomId } from "../auth/passwords.js";
 import { AgentManager, TurnConflictError, type AgentEvent, type CodexSessionLike, type TurnAttachment } from "../codex/manager.js";
 import { normalizeResource, resolveResources, type ResourceSandbox } from "./resources.js";
-import { applyTaskReference, parsePlan, planningPrompt, resourcesConflict, type TaskPlan } from "./planning.js";
+import { applyTaskReference, parsePlan, parseSearch, planningPrompt, resourcesConflict, type PlanningTask, type TaskPlan } from "./planning.js";
+import { recordRecall, TaskRecall, type RecallEvent, type RecallSource } from "./recall.js";
+
+/** The dispatcher may ask to search past tasks at most this many times per message. */
+const MAX_SEARCH_ROUNDS = 2;
+/** Today's tasks beyond the recent window, and context-driven recall, are kept small. */
+const TODAY_EXTRA = 10;
+const CONTEXT_RECALL = 3;
+const SHORT_MESSAGE = 30;
 interface TaskRow {
     revision: number;
     id: string;
@@ -44,7 +52,8 @@ export class TaskService {
     #merging = false;
     #mergeAgain = false;
     #scheduled = false;
-    constructor(private db: Db, private cfg: Config, private agent: AgentManager, private codex: CodexSessionLike, private resourceSandbox?: ResourceSandbox) { }
+    readonly recall: TaskRecall;
+    constructor(private db: Db, private cfg: Config, private agent: AgentManager, private codex: CodexSessionLike, private resourceSandbox?: ResourceSandbox) { this.recall = new TaskRecall(db); }
     init(): void {
         // AgentManager reconciles in-flight turns before this runs. Never replay an
         // executor with uncertain side effects. Unsubmitted planning is safe to resume.
@@ -212,36 +221,92 @@ export class TaskService {
         if (!row)
             return;
         this.#planning = true;
+        const started = Date.now();
+        let measured = false;
+        const trace: RecallEvent = { taskId: row.id, ownerId: this.ownerId(row), candidates: [], searches: [], rounds: 0, chosen: { related: [], appendTo: null }, gold: null, latencyMs: 0, promptChars: 0, failed: true };
         try {
-            const all = this.rows().filter(t => this.ownerId(t) === this.ownerId(row) && !t.merged_into && t.created_at < row.created_at).map(t => ({...t,input_text:this.taskContext(t),clarification:t.status === "needs_input" && t.plan_json ? (JSON.parse(t.plan_json) as TaskPlan).clarification ?? null : null}));
+            const everything = this.rows().filter(t => this.ownerId(t) === this.ownerId(row));
+            const all = everything.filter(t => !t.merged_into && t.created_at < row.created_at).map(t => ({...t,input_text:this.taskContext(t),clarification:t.status === "needs_input" && t.plan_json ? (JSON.parse(t.plan_json) as TaskPlan).clarification ?? null : null}));
+            const byId = new Map(all.map(t => [t.id, t]));
+            const candidates = new Map<string, PlanningTask & { source: RecallSource; rank?: number; score?: number }>();
+            const add = (t: PlanningTask, source: RecallSource, hit?: { rank: number; score: number }) => {
+                if (!candidates.has(t.id)) candidates.set(t.id, { ...t, source, ...(hit ? { rank: hit.rank, score: Math.round(hit.score * 100) / 100 } : {}) });
+            };
             // Keep unresolved questions and active work visible even after a
             // burst of unrelated messages; free-text replies have no task picker.
-            const relevant = all.filter(t => t.status === "needs_input" || DISPATCHED.has(t.status)).slice(-24);
-            const previous = [...new Map([...relevant, ...all.slice(-12)].map(t => [t.id,t])).values()];
+            for (const t of all.filter(t => t.status === "needs_input" || DISPATCHED.has(t.status)).slice(-24)) add(t, "active");
+            for (const t of all.slice(-12)) add(t, "recent");
+            const windowIds = new Set(candidates.keys());
             const explicit = row.related_task_id ? this.get(row.related_task_id) : null;
-            if (explicit && !previous.some(t => t.id === explicit.id))
-                previous.push({...explicit,input_text:this.taskContext(explicit),clarification:explicit.status === "needs_input" && explicit.plan_json ? (JSON.parse(explicit.plan_json) as TaskPlan).clarification ?? null : null});
             const inputContext = this.taskContext(row);
+            this.recall.forget(everything.filter(t => t.merged_into).map(t => t.id));
+            this.recall.sync(all.map(t => ({ id: t.id, ownerId: trace.ownerId, title: t.title, body: t.input_text, result: t.result })));
+            // Recall before the dispatcher asks, and its own searches, each add at most `cap` tasks in total.
+            const cap = this.recall.cap();
+            const budget = { pre: cap, search: cap };
+            const recalled = (query: string, source: RecallSource, pool: keyof typeof budget, limit = budget[pool]) => {
+                const take = Math.min(limit, budget[pool]);
+                if (take <= 0) return;
+                for (const hit of this.recall.search(trace.ownerId, query, { exclude: new Set([row.id, ...candidates.keys()]), cap: take })) {
+                    const t = byId.get(hit.id);
+                    if (t) { add(t, source, hit); budget[pool] -= 1; }
+                }
+            };
+            if (explicit) {
+                if (!candidates.has(explicit.id)) add({...explicit,input_text:this.taskContext(explicit),clarification:explicit.status === "needs_input" && explicit.plan_json ? (JSON.parse(explicit.plan_json) as TaskPlan).clarification ?? null : null}, "explicit");
+                // A task pointed at by hand is the answer search should have found: measure where it ranks.
+                const rank = this.recall.rank(trace.ownerId, inputContext).find(h => h.id === explicit.id)?.rank ?? null;
+                trace.gold = { id: explicit.id, rank, inWindow: windowIds.has(explicit.id) };
+            } else {
+                // Today's work is the likeliest context of a new message: inject what the window missed.
+                const today = new Date(row.created_at).toDateString();
+                for (const t of all.filter(t => new Date(t.created_at).toDateString() === today).slice(-(12 + TODAY_EXTRA))) add(t, "today");
+                // Recall by the message itself, before the dispatcher has to ask.
+                recalled(inputContext, "recall", "pre");
+                // A terse follow-up ("改一下那个") says little on its own: recall by today's latest topics too.
+                const latestToday = all.filter(t => new Date(t.created_at).toDateString() === today).slice(-3);
+                if (inputContext.trim().length < SHORT_MESSAGE && latestToday.length)
+                    recalled(`${inputContext}\n${latestToday.map(t => t.title).join("\n")}`, "context", "pre", CONTEXT_RECALL);
+            }
             const files = [row,...this.rows().filter(t=>t.merged_into===row.id && t.status==='merged')]
                 .flatMap(t=>JSON.parse(t.attachments_json) as TurnAttachment[]);
             const planningInput = [inputContext, ...(files.length ? [`已有附件（执行者可以读取其中资料）：${JSON.stringify(files)}`] : [])].filter(Boolean).join("\n\n");
-            const prompt = planningPrompt(planningInput, explicit ? previous.filter(t => t.id === explicit.id) : previous, row.related_task_id, this.cfg.sandbox.containerWorkspaceDir);
             const soul = readSoul(this.cfg).content;
             // The dispatcher runs on the provider the task was submitted for: a
             // member is fixed to DeepSeek, and an owner who picked a bridge model
             // is dispatched on that model too, not on the ChatGPT account.
             const bridgeModel = this.agent.usesBridgeModel(row.model) ? row.model : null;
-            const raw = isMember(this.db, this.ownerId(row))
-                ? await this.codex.planTask?.(prompt, soul, MEMBER_MODEL)
+            const ask = (prompt: string) => isMember(this.db, this.ownerId(row))
+                ? this.codex.planTask?.(prompt, soul, MEMBER_MODEL)
                 : bridgeModel
-                    ? await this.codex.planTask?.(prompt, soul, bridgeModel)
-                    : await this.codex.planTask?.(prompt, soul);
-            if (this.#closed || this.get(row.id)?.status !== "planning")
-                return;
-            // A supplement may arrive while the classifier is in flight. Replan
-            // with the latest input rather than dispatching an outdated decision.
-            if (this.taskContext(this.get(row.id)!) !== inputContext) return;
+                    ? this.codex.planTask?.(prompt, soul, bridgeModel)
+                    : this.codex.planTask?.(prompt, soul);
+            let raw: string | null | undefined;
+            let previous: PlanningTask[] = [];
+            // Agentic recall: the dispatcher may answer with keywords to search all past
+            // tasks; it is asked again with the hits, a bounded number of times.
+            for (;;) {
+                trace.rounds += 1;
+                const canSearch = !explicit && trace.rounds <= MAX_SEARCH_ROUNDS;
+                previous = [...candidates.values()];
+                const prompt = planningPrompt(planningInput, explicit ? previous.filter(t => t.id === explicit.id) : previous, row.related_task_id, this.cfg.sandbox.containerWorkspaceDir, { canSearch, searched: trace.searches });
+                trace.promptChars += prompt.length;
+                raw = await ask(prompt);
+                if (this.#closed || this.get(row.id)?.status !== "planning")
+                    return;
+                // A supplement may arrive while the classifier is in flight. Replan
+                // with the latest input rather than dispatching an outdated decision.
+                if (this.taskContext(this.get(row.id)!) !== inputContext) return;
+                const queries = canSearch ? parseSearch(raw ?? null) : null;
+                if (!queries) break;
+                trace.searches.push(...queries);
+                for (const query of queries) recalled(query, "search", "search", Math.ceil(cap / queries.length));
+            }
+            trace.candidates = [...candidates.values()].map(c => ({ id: c.id, source: c.source, ...(c.rank ? { rank: c.rank, score: c.score } : {}) }));
             const plan = parsePlan(raw ?? null, previous, row.related_task_id, this.cfg.sandbox.containerWorkspaceDir);
+            measured = true;
+            trace.latencyMs = Date.now() - started;
+            if (plan) { trace.failed = false; trace.chosen = { related: plan.related, appendTo: plan.appendTo ?? null }; }
             if (!plan)
                 throw new Error("任务分配暂时失败，尚未执行。请重试分配。");
             if (explicit) applyTaskReference(plan, this.referenceTarget(row)!);
@@ -267,11 +332,17 @@ export class TaskService {
             this.agent.renameConversation(row.conversation_id, plan.title);
         }
         catch (err) {
-            if (!this.#closed && this.get(row.id)?.status === "planning")
+            if (!this.#closed && this.get(row.id)?.status === "planning") {
                 this.db.prepare("UPDATE tasks SET status='planning_failed',error=? WHERE id=?").run(err instanceof Error ? err.message : "任务分配失败", row.id);
+                if (!measured) { measured = true; trace.latencyMs = Date.now() - started; }
+            }
         }
         finally {
             this.#planning = false;
+            // Only a dispatch that reached a decision (or failed to) is measured; a superseded one is not.
+            if (measured) {
+                try { recordRecall(this.db, trace); } catch { /* monitoring never blocks dispatch */ }
+            }
             this.schedule();
         }
     }

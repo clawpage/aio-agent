@@ -431,10 +431,10 @@ test('main settings use consistent cards and keep the mobile header clear',async
   for(const width of mobile?[390,360]:[1440]){
    await page.setViewportSize({width,height:mobile?844:900});
    await page.locator('.settings').evaluate(el=>el.scrollTop=0);
-   const cards=page.locator('.settings-card');await expect(cards).toHaveCount(2);
+   const cards=page.locator('.settings-card');await expect(cards).toHaveCount(3);
    expect(await cards.first().getAttribute('aria-label')).toBe('助理设定');
-   const a=await cards.nth(0).boundingBox(),b=await cards.nth(1).boundingBox();
-   expect(a!.x).toBe(b!.x);expect(a!.width).toBe(b!.width);
+   const a=await cards.nth(0).boundingBox();
+   for(const i of [1,2]){const b=await cards.nth(i).boundingBox();expect(a!.x).toBe(b!.x);expect(a!.width).toBe(b!.width);}
    expect(await page.evaluate(()=>document.documentElement.scrollWidth-innerWidth)).toBeLessThanOrEqual(1);
    if(mobile){const menu=await page.getByRole('button',{name:'打开导航'}).boundingBox();const heading=await page.locator('.settings-head h2').boundingBox();expect(heading!.x).toBeGreaterThanOrEqual(menu!.x+menu!.width);}
    await page.screenshot({path:info.outputPath(`settings-${width}-${theme}.png`)});
@@ -442,4 +442,19 @@ test('main settings use consistent cards and keep the mobile header clear',async
    await expect(page.getByRole('button',{name:'恢复默认',exact:true})).toBeVisible();
   }
  }
+});
+
+test("config page shows how well the dispatcher recalls past tasks, per range", async ({ page }, info) => {
+  const mobile = info.project.name.startsWith("mobile");
+  await setup(page);
+  await openSettings(page, mobile);
+  const card = page.getByRole("region", { name: "历史召回" });
+  await expect(card).toContainText("34 次（失败 1）");
+  await expect(card).toContainText("召回找到 7、搜索找到 2");
+  await expect(card).toContainText("检索能排进前 10 名 83%");
+  await card.getByRole("button", { name: "近 30 天" }).click();
+  await expect(card).toContainText("120 次");
+  await expect(card.getByRole("button", { name: "近 30 天" })).toHaveAttribute("aria-pressed", "true");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
+  await card.screenshot({ path: info.outputPath("recall-card.png") });
 });

@@ -178,6 +178,10 @@ export async function mockConsole(page: Page, opts: MockConsoleOptions): Promise
   await page.route((url) => url.pathname === "/api/models", (route) => json(route, MOCK_MODELS));
 
   await page.route('**/api/settings/soul',route=>json(route,{content:'# SOUL.md\n你是个人助理。',revision:'initial',defaultContent:'# SOUL.md\n你是个人助理。',maxBytes:65536}));
+  await page.route((url) => url.pathname === "/api/settings/recall", (route) => {
+    const days = Number(new URL(route.request().url()).searchParams.get("days"));
+    return json(route, { stats: { days, dispatches: days === 30 ? 120 : 34, failed: 1, withRecall: 21, avgRecalled: 2.4, searchRate: 0.12, avgRounds: 1.15, chosen: 18, chosenFromRecall: 7, chosenFromSearch: 2, labelled: 6, recallAtCap: 0.83, mrr: 0.71, cap: 10, avgLatencyMs: 4200, p90PromptChars: 23800 } });
+  });
   // Unified settings: GET returns the stored choice plus the catalog; PUT mirrors
   // the server's validation (unknown model / unsupported effort -> 400).
   const settingsState = opts.settings ?? { model: null, effort: null };
