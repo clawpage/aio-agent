@@ -1287,6 +1287,30 @@ export function createApiRouter(context: AppContext): Router {
     }),
   );
 
+  router.post("/sandbox/shell-sessions", requireKind("primary"), requireSession,
+    asyncHandler(async (_req, res) => {
+      // Generate the ID here so UI reconnects always bind to one explicit session.
+      const id = randomUUID();
+      const upstream = await sandboxFetch("/v1/shell/sessions/create", {
+        method: "POST", headers: {"content-type":"application/json"},
+        body: JSON.stringify({id, exec_dir:cfg.sandbox.containerWorkspaceDir}),
+      }, 15_000);
+      const result = await upstream.json() as {success?:boolean};
+      if (!upstream.ok || !result.success) { res.status(502).json({message:"创建终端失败，请重试"}); return; }
+      res.status(201).json({id});
+    }),
+  );
+  router.delete("/sandbox/shell-sessions/:id", requireKind("primary"), requireSession,
+    asyncHandler(async (req, res) => {
+      const id = String(req.params.id);
+      if (!/^[a-zA-Z0-9_-]{1,160}$/.test(id)) { res.status(400).json({message:"无效的终端会话 ID"}); return; }
+      const upstream = await sandboxFetch(`/v1/shell/sessions/${encodeURIComponent(id)}`, {method:"DELETE"}, 15_000);
+      const result = await upstream.json() as {success?:boolean};
+      if (!upstream.ok || !result.success) { res.status(502).json({message:"关闭终端失败，会话可能仍在运行，请刷新后核对"}); return; }
+      res.json({ok:true});
+    }),
+  );
+
   /**
    * Upload a file into the sandbox through the control plane. The browser never
    * gets a direct sandbox credential; the server relays to the sandbox API.

@@ -24,7 +24,7 @@ type TabId = "desktop" | "browser" | "terminal" | "files" | "editor" | "notebook
 const TABS: Array<{ id: TabId; label: string; path?: string; kind: "frame" | "native" }> = [
   { id: "desktop", label: "桌面", path: "/vnc/vnc.html?autoconnect=1&resize=scale&path=ws", kind: "frame" },
   { id: "browser", label: "浏览器", path: "/browser-ui", kind: "frame" },
-  { id: "terminal", label: "终端", path: "/terminal", kind: "frame" },
+  { id: "terminal", label: "终端", path: "/terminal", kind: "native" },
   { id: "files", label: "文件", kind: "native" },
   { id: "editor", label: "编辑器", path: "/code-server/", kind: "frame" },
   { id: "notebook", label: "笔记本", path: "/jupyter/lab", kind: "frame" },
@@ -33,6 +33,7 @@ const TABS: Array<{ id: TabId; label: string; path?: string; kind: "frame" | "na
 ];
 
 export function Workspace({ open, status, initialPath, onClose, onNotify, browserNonce, canConfigure = true }: Props) {
+  const [terminalId, setTerminalId] = useState<string | null>(null);
   const [tab, setTab] = useState<TabId>("browser");
   const [frameSrc, setFrameSrc] = useState<string | null>(null);
   const [frameKey, setFrameKey] = useState(0);
@@ -421,6 +422,7 @@ export function Workspace({ open, status, initialPath, onClose, onNotify, browse
   }, [keepAlivePin, onNotify]);
 
   const currentDef = TABS.find((t) => t.id === tab);
+  const externalPath = tab === "terminal" ? (terminalId ? `/terminal?session_id=${encodeURIComponent(terminalId)}` : undefined) : currentDef?.path;
 
   if (!open) return null;
 
@@ -442,8 +444,8 @@ export function Workspace({ open, status, initialPath, onClose, onNotify, browse
           ))}
         </nav>
         <div className="ws-actions">
-          {currentDef?.path && (
-            <button type="button" className="ghost" onClick={() => void openExternal(currentDef.path!)}>
+          {externalPath && (
+            <button type="button" className="ghost" onClick={() => void openExternal(externalPath)}>
               新标签页
             </button>
           )}
@@ -457,7 +459,7 @@ export function Workspace({ open, status, initialPath, onClose, onNotify, browse
       </header>
 
       <div className="ws-body">
-        {tab === "terminal" && <TerminalSessions active={docVisible} onNotify={onNotify}/>}
+        {tab === "terminal" && <TerminalSessions active={docVisible} selectedId={terminalId} onSelect={setTerminalId} onNotify={onNotify}/>}
         {holdsBrowser && (
           <BrowserStatusBar
             status={browserStatus}

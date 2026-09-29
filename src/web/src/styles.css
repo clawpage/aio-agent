@@ -2319,16 +2319,35 @@ textarea:focus {
 
 .file-preview-video { display: block; width: 100%; max-width: 100%; max-height: 65dvh; min-height: 120px; background: #000; border-radius: 8px; }
 
-.terminal-sessions { flex-shrink: 0; padding: 8px 12px; border-bottom: 1px solid var(--border); background: var(--bg); min-width: 0; }
-.terminal-sessions-head { display: flex; align-items: center; gap: 8px; }
-.terminal-sessions-head strong { font-size: 13px; }
-.terminal-sessions ul { margin: 6px 0 0; padding: 0; list-style: none; max-height: min(180px,25dvh); overflow-y: auto; }
-.terminal-sessions li { display: flex; align-items: center; gap: 8px; padding: 6px 0; }
-.terminal-session-info { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
-.terminal-session-info code { font-size: 12px; overflow-wrap: anywhere; user-select: text; }
-.terminal-session-info > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.terminal-session-status { flex-shrink: 0; color: var(--text-dim); }
-.terminal-session-status.running { color: var(--ok); }
+/* Terminal picker stays compact; the session menu overlays instead of shrinking the terminal. */
+.terminal-panel { display:flex; flex-direction:column; flex:1; min-height:0; min-width:0; }
+.terminal-sessions { position:relative; flex-shrink:0; padding:8px 10px; border-bottom:1px solid var(--border); background:var(--bg-soft); min-width:0; z-index:2; }
+.terminal-sessions-head { display:flex; align-items:center; gap:4px; }
+.terminal-picker { display:flex; align-items:center; gap:8px; flex:1; min-width:0; padding:5px 8px; text-align:left; border:1px solid var(--border); border-radius:10px; background:var(--bg); color:var(--text); }
+.terminal-picker-text { min-width:0; flex:1; display:flex; flex-direction:column; gap:2px; }
+.terminal-picker-text strong { font-size:12px; font-family:var(--mono,monospace); }
+.terminal-picker-text small { font-size:11px; color:var(--text-dim); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.terminal-count { font-size:11px; color:var(--text-dim); }
+.terminal-icon { flex-shrink:0; width:36px; height:40px; padding:0; font-size:20px; border-radius:8px; }
+.terminal-session-status { flex-shrink:0; font-size:11px; color:var(--text-dim); }
+.terminal-session-status.running { color:var(--ok); }
+.terminal-session-menu { position:absolute; z-index:5; top:calc(100% + 4px); left:10px; right:10px; padding:6px; background:var(--bg-soft); border:1px solid var(--border); border-radius:12px; box-shadow:0 10px 28px #0003; }
+.terminal-menu-label { padding:6px 8px; font-size:12px; color:var(--text-dim); }
+.terminal-session-menu ul { list-style:none; padding:0; margin:0; max-height:min(300px,45dvh); overflow:auto; }
+.terminal-session-menu li { display:flex; align-items:center; gap:2px; padding:2px; border-radius:8px; }
+.terminal-session-menu li.selected { background:var(--accent-soft); }
+.terminal-session-choice { display:flex; gap:8px; align-items:center; flex:1; min-width:0; padding:8px 6px; border:0; background:transparent; color:var(--text); text-align:left; }
+.terminal-session-info { display:flex; flex-direction:column; flex:1; min-width:0; gap:3px; }
+.terminal-session-info code { font-size:12px; }
+.terminal-session-info > span { font-size:11px; color:var(--text-dim); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.terminal-confirm { display:flex; flex-wrap:wrap; align-items:center; gap:6px; padding-top:8px; font-size:12px; }
+.terminal-confirm > span { flex:1 1 200px; }
+.terminal-screen { flex:1; min-height:0; display:flex; flex-direction:column; background:#1e1e1e; color:#eee; }
+.terminal-screen > iframe { flex:1; width:100%; min-height:0; border:0; }
+.terminal-screen > p, .terminal-screen > div { padding:20px; }
+.terminal-empty { margin:auto; text-align:center; }
+.terminal-empty > span { font-size:32px; opacity:.5; }
+
 
 .task-progress.needs-input { border-left-color: var(--warn); }
 .task-question { border: 1px solid color-mix(in srgb,var(--warn) 45%,var(--border)); border-radius: 14px; padding: 14px 16px; background: color-mix(in srgb,var(--warn) 9%,var(--bg)); color: var(--text); }

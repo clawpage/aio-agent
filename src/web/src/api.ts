@@ -189,6 +189,8 @@ export const api = {
    */
   documentImageUrl: (path: string) => `/api/documents/image?path=${encodeURIComponent(path)}`,
   documentVideoUrl: (path: string) => `/api/documents/video?path=${encodeURIComponent(path)}`,
+  createTerminalSession: () => request<{id:string}>("/api/sandbox/shell-sessions", {method:"POST",body:{}}),
+  closeTerminalSession: (id:string) => request<{ok:boolean}>(`/api/sandbox/shell-sessions/${encodeURIComponent(id)}`, {method:"DELETE"}),
   terminalSessions: (signal?: AbortSignal) => request<{sessions:Array<{id:string;status:string;workingDir:string;lastUsedAt:string|null}>}>("/api/sandbox/shell-sessions", {signal}),
   convertDocument: (path: string, format: string) =>
     request<{ path: string; bytes: number }>("/api/documents/convert", { method: "POST", body: { path, format } }),

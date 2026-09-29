@@ -30,6 +30,7 @@ async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | void
 }
 
 export interface SandboxScript {
+  shellSessionMutation?: {success:boolean};
   /** Payload returned by /v1/shell/exec (or a function of the request body). */
   shell?:
     | { success: boolean; message?: string; data?: Record<string, unknown> }
@@ -84,6 +85,11 @@ export async function startFakeSandbox(): Promise<FakeSandbox> {
         "set-cookie": ["jupyter_token=abc; Path=/; HttpOnly", "pa_session=evil; Path=/", "code=1; Domain=example.com; Path=/"],
       });
       res.end("<html><body>sandbox page</body></html>");
+      return;
+    }
+    if (req.url === "/v1/shell/sessions/create" || (req.method === "DELETE" && req.url?.startsWith("/v1/shell/sessions/"))) {
+      res.writeHead(200, {"content-type":"application/json"});
+      res.end(JSON.stringify(sandboxScript.shellSessionMutation ?? {success:true}));
       return;
     }
     if (req.url === "/v1/shell/exec") {

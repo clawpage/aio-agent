@@ -1080,6 +1080,27 @@ async function bootstrapWorkspaceWithSession(h: TestHarness): Promise<{ cookie: 
 }
 
 describe("document endpoints", () => {
+  it("creates and closes only explicit terminal sessions with auth, CSRF and upstream failure handling",async()=>{
+    const route='/api/sandbox/shell-sessions';
+    const before=h.sandbox.requests.length;
+    expect((await h.request(route,{method:'POST',body:'{}'})).status).toBe(401);
+    expect((await h.request(route+'/session-a',{method:'DELETE'})).status).toBe(401);
+    const {cookie,csrf}=await login(h);
+    expect((await h.request(route+'/session-a',{method:'DELETE',headers:{cookie}})).status).toBe(403);
+    expect(h.sandbox.requests.slice(before).filter(r=>r.url.includes('/shell/sessions'))).toHaveLength(0);
+    const headers={cookie,'x-csrf-token':csrf,'content-type':'application/json'};
+    expect((await h.request(route+'/%2e%2e%2fother',{method:'DELETE',headers})).status).toBe(400);
+    const create=await h.request(route,{method:'POST',headers,body:'{}'});expect(create.status).toBe(201);
+    expect((await create.json() as any).id).toMatch(/^[0-9a-f-]{36}$/);
+    expect((await h.request(route+'/session-a',{method:'DELETE',headers})).status).toBe(200);
+    const deletes=h.sandbox.requests.slice(before).filter(r=>r.method==='DELETE');
+    expect(deletes.map(r=>r.url)).toEqual(['/v1/shell/sessions/session-a']);
+    h.sandbox.script.shellSessionMutation={success:false};
+    try {
+      expect((await h.request(route+'/session-a',{method:'DELETE',headers})).status).toBe(502);
+      expect((await h.request(route,{method:'POST',headers,body:'{}'})).status).toBe(502);
+    }finally{delete h.sandbox.script.shellSessionMutation;}
+  });
   it("lists authenticated live terminal sessions without leaking command contents or creating sessions",async()=>{
     const get=vi.spyOn(h.ctx.aio,'get').mockResolvedValue({success:true,data:{sessions:{alpha:{status:'running',working_dir:'/home/gem/workspace',last_used_at:'2026-09-29T01:00:00Z',current_command:'private command'},beta:{status:'completed'},old:{status:'closed'}}}});
     try {
