@@ -1080,6 +1080,19 @@ async function bootstrapWorkspaceWithSession(h: TestHarness): Promise<{ cookie: 
 }
 
 describe("document endpoints", () => {
+  it("lists authenticated live terminal sessions without leaking command contents or creating sessions",async()=>{
+    const get=vi.spyOn(h.ctx.aio,'get').mockResolvedValue({success:true,data:{sessions:{alpha:{status:'running',working_dir:'/home/gem/workspace',last_used_at:'2026-09-29T01:00:00Z',current_command:'private command'},beta:{status:'completed'},old:{status:'closed'}}}});
+    try {
+      expect((await h.request('/api/sandbox/shell-sessions')).status).toBe(401);expect(get).not.toHaveBeenCalled();
+      const {cookie}=await login(h);
+      const res=await h.request('/api/sandbox/shell-sessions',{headers:{cookie}});
+      expect(res.status).toBe(200);expect(res.headers.get('cache-control')).toBe('no-store');
+      const data=await res.json() as {sessions:Array<{id:string}>};expect(data.sessions.map(s=>s.id)).toEqual(['alpha','beta']);expect(JSON.stringify(data)).not.toContain('private command');
+      expect(get).toHaveBeenCalledWith('/v1/shell/sessions');
+      get.mockResolvedValue({success:false,data:null});expect((await h.request('/api/sandbox/shell-sessions',{headers:{cookie}})).status).toBe(502);
+      get.mockResolvedValue({success:true,data:{sessions:[]}});expect((await h.request('/api/sandbox/shell-sessions',{headers:{cookie}})).status).toBe(502);
+    } finally {get.mockRestore();}
+  });
   it("authenticates video streams, validates paths, and preserves range/HEAD responses",async()=>{
     const {cookie}=await login(h);
     const video=vi.spyOn(h.ctx.documents,'video').mockImplementation(async(_path,range,head)=>new Response(head?null:'part',{

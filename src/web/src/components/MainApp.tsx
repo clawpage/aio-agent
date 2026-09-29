@@ -6,6 +6,8 @@ import { Login } from "./Login";
 import { Settings } from "./Settings";
 import { Workspace } from "./Workspace";
 import { TaskChat } from "./TaskChat";
+import { TaskList } from "./TaskList";
+import {taskStatusLabels,type TaskFeed} from '../taskStatus';
 /** One owner-facing inbox; executor conversations are implementation details. */
 export function MainApp() {
     const [mobile, setMobile] = useState(() => matchMedia("(max-width: 900px)").matches);
@@ -36,8 +38,12 @@ export function MainApp() {
     }, [mobile, menuOpen, closeMenu]);
     const [auth, setAuth] = useState<boolean | null>(null);
     const [status, setStatus] = useState<StatusResponse | null>(null);
-    const [view, setView] = useState<"main" | "settings" | "detail">("main");
+    const [view, setView] = useState<"main" | "tasks" | "settings" | "detail">("main");
+    const [taskFeed,setTaskFeed]=useState<TaskFeed>({tasks:[],nextBefore:null,connected:false});
+    const [detailReturn,setDetailReturn]=useState<'main'|'tasks'>('main');
+    const [detailTask,setDetailTask]=useState<Task|null>(null);
     const [detail, setDetail] = useState<Conversation | null>(null);
+    const detailRequest = useRef(0);
     const [workspace, setWorkspace] = useState(false);
     const [workspacePath, setWorkspacePath] = useState<string | undefined>();
     const [browserNonce, setBrowserNonce] = useState(0);
@@ -91,15 +97,18 @@ export function MainApp() {
         notify(err instanceof Error ? err.message : String(err));
     } }, [notify, revealBrowser]);
     const openWorkspace = useCallback((path?: string) => { setMenuOpen(false); setWorkspacePath(path); setWorkspace(true); }, []);
-    const details = useCallback(async (task: Task) => { try {
-        setDetail((await api.conversation(task.conversationId)).conversation);
+    const details = useCallback(async (task: Task,from:'main'|'tasks'='main') => { const request=++detailRequest.current; try {
+        const conversation=(await api.conversation(task.conversationId)).conversation;
+        if(request!==detailRequest.current)return;
+        setDetail({...conversation,title:task.title});
+        setDetailTask(task);setDetailReturn(from);
         setView("detail");
         setWorkspace(false);
     }
     catch (err) {
         notify(err instanceof Error ? err.message : String(err));
     } }, [notify]);
-    const settings = () => { closeMenu(); setView("settings"); setWorkspace(false); };
+    const settings = () => { detailRequest.current++;closeMenu(); setView("settings"); setWorkspace(false); };
     const logout = async () => { try {
         await api.logout();
         setAuth(false);
@@ -120,17 +129,19 @@ export function MainApp() {
     {mobile && menuOpen && <div className="mobile-menu-backdrop" onClick={closeMenu} aria-hidden="true"/>}
     <aside ref={sidebar} id="main-navigation" className={`sidebar ${menuOpen ? "show-mobile" : ""}`} role={mobile && menuOpen ? "dialog" : undefined} aria-modal={mobile && menuOpen ? true : undefined} aria-label="导航" aria-hidden={mobile && !menuOpen ? true : undefined} inert={mobile && !menuOpen}>
       <button className="mobile-menu-close ghost" aria-label="关闭导航" onClick={closeMenu}>×</button><div className="brand"><span className="brand-mark" aria-hidden/><div><strong>AIO Agent</strong><span className="muted tiny">一个入口，把事情交给我</span></div></div>
-      <button className={`ghost block ${view === "main" ? "active" : ""}`} onClick={() => { closeMenu(); setView("main"); setWorkspace(false); }}>主会话</button>
+      <button className={`ghost block ${view === "main" ? "active" : ""}`} onClick={() => { detailRequest.current++;closeMenu(); setView("main"); setWorkspace(false); }}>主会话</button>
+      <button className={`ghost block ${view === "tasks" ? "active" : ""}`} onClick={() => { detailRequest.current++;closeMenu(); setView("tasks"); setWorkspace(false); }}>任务列表</button>
       <button className="ghost block" onClick={() => { closeMenu(); openWorkspace(); }}>工作区</button>
       <div className="sidebar-foot"><span className="muted tiny">{status?.agent.sessionReady ? "智能体在线" : "正在连接智能体"}</span><button className="ghost block" onClick={() => setTheme(t => t === "dark" ? "light" : "dark")}>{theme === "dark" ? "浅色模式" : "深色模式"}</button><button className="ghost block" onClick={settings}>配置</button><button className="ghost block" onClick={() => void logout()}>退出登录</button></div>
     </aside>
     <main className="main" inert={mobile && menuOpen}>
       {notice && <div className="banner" role="alert">{notice}<button onClick={() => setNotice(null)}>关闭</button></div>}
       {status && !status.agent.sessionReady && <div className="banner error">智能体暂未就绪：{status.agent.lastError ?? "正在连接"}。消息仍会保留。</div>}
-      <div className="view-slot" hidden={view !== "main"}><TaskChat onDetails={t => void details(t)} onOpenLink={u => void openLink(u)} onBrowserNavigate={() => { if (view === "main")
+      <div className="view-slot" hidden={view !== "main"}><TaskChat onFeed={setTaskFeed} onDetails={t => void details(t)} onOpenLink={u => void openLink(u)} onBrowserNavigate={() => { if (view === "main")
         revealBrowser(); }} onExpired={expired}/></div>
+      <div className="view-slot" hidden={view !== 'tasks'}><TaskList feed={taskFeed} onDetails={t=>void details(t,'tasks')} onExpired={expired}/></div>
       {view === "settings" && <Settings onBack={() => setView("main")}/>}
-      {view === "detail" && detail && <div className="task-detail"><div className="task-detail-bar"><button className="ghost" onClick={() => setView("main")}>← 返回主会话</button><span className="muted tiny">过程详情</span></div><Chat key={detail.id} readOnly conversation={detail} status={status} onConversationChanged={() => { }} onStatusChanged={() => void refreshStatus()} onOpenWorkspace={openWorkspace} onOpenBrowserLink={u => void openLink(u)} onAgentBrowserNavigate={revealBrowser}/></div>}
+      {view === "detail" && detail && <div className="task-detail"><div className="task-detail-bar"><button className="ghost" onClick={() => setView(detailReturn)}>← 返回{detailReturn==='tasks'?'任务列表':'主会话'}</button><span className="muted tiny">{taskStatusLabels[(taskFeed.tasks.find(t=>t.id===detailTask?.id)??detailTask)?.status??'']??'过程详情'}</span></div><Chat key={detail.id} readOnly conversation={detail} status={status} onConversationChanged={() => { }} onStatusChanged={() => void refreshStatus()} onOpenWorkspace={openWorkspace} onOpenBrowserLink={u => void openLink(u)} onAgentBrowserNavigate={revealBrowser}/></div>}
     </main>
     <Workspace open={workspace} status={status} initialPath={workspacePath} browserNonce={browserNonce} onClose={() => { setWorkspace(false); setWorkspacePath(undefined); }} onNotify={notify}/>
   </div>;

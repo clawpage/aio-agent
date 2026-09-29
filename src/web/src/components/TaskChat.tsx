@@ -6,13 +6,15 @@ import { itemOpensSandboxBrowser } from "../browserCommand";
 import { AttachmentCards, MessageFileCards } from "./Chat";
 import { Markdown } from "./Markdown";
 import { FilePreview } from "./FilePreview";
+import type {TaskFeed} from '../taskStatus';
 const terminal = new Set(["completed", "failed", "interrupted", "unknown"]);
 const labels: Record<string, string> = { planning: "正在分配…", needs_input: "等待你补充", planning_failed: "分配失败", waiting: "等待依赖或资源", queued: "排队中", running: "Working…", stopping: "正在停止…", completed: "已完成", failed: "执行失败", interrupted: "已停止", unknown: "结果待核对", blocked: "需要补充" };
-export function TaskChat({ onDetails, onOpenLink, onBrowserNavigate, onExpired }: {
+export function TaskChat({ onDetails, onOpenLink, onBrowserNavigate, onExpired, onFeed }: {
     onDetails: (task: Task) => void;
     onOpenLink: (url: string) => void;
     onBrowserNavigate: () => void;
     onExpired: () => void;
+    onFeed?: (feed:TaskFeed)=>void;
 }) {
     const [tasks, setTasks] = useState<Task[]>([]);
     const [nextBefore, setNextBefore] = useState<number | null>(null);
@@ -24,6 +26,7 @@ export function TaskChat({ onDetails, onOpenLink, onBrowserNavigate, onExpired }
     const [error, setError] = useState<string | null>(null);
     const [preview, setPreview] = useState<string | null>(null);
     const [connected, setConnected] = useState(false);
+    useEffect(()=>{onFeed?.({tasks,nextBefore,connected});},[tasks,nextBefore,connected,onFeed]);
     const scroll = useRef<HTMLDivElement>(null);
     const stick = useRef(true);
     const input = useRef<HTMLTextAreaElement>(null);
@@ -144,7 +147,7 @@ export function TaskChat({ onDetails, onOpenLink, onBrowserNavigate, onExpired }
     const feed = tasks.flatMap(t => [{ task: t, report: false, at: t.createdAt }, ...(!t.mergedInto && terminal.has(t.status) ? [{ task: t, report: true, at: t.completedAt ?? t.createdAt }] : [])])
         .sort((a, b) => a.at - b.at || Number(a.report) - Number(b.report) || a.task.id.localeCompare(b.task.id));
     return <section className="chat task-chat">
-    <header className="chat-head"><div className="chat-title"><h2>主会话</h2><span className={`dot ${connected ? "ok" : "warn"}`}/><span className="chat-sub">{active.length ? `${active.length} 个任务处理中` : awaiting.length ? `${awaiting.length} 个任务等你补充` : connected ? "随时可以交给我" : "正在连接…"}</span></div></header>
+    <header className="chat-head"><div className="chat-title"><h2>主会话</h2><span className={`dot ${connected ? "ok" : "warn"}`}/><span className="chat-sub">{active.length ? `${active.length} 个任务处理中${awaiting.length ? ` · ${awaiting.length} 个等你补充` : ""}` : awaiting.length ? `${awaiting.length} 个任务等你补充` : connected ? "随时可以交给我" : "正在连接…"}</span></div></header>
     <div className="chat-scroll task-feed" ref={scroll} onScroll={e => { const n = e.currentTarget; stick.current = n.scrollHeight - n.scrollTop - n.clientHeight < 80; }}>
       {nextBefore && <button className="ghost" onClick={() => void act(async () => { const d = await api.main(nextBefore); stick.current = false; merge(d.tasks); setNextBefore(d.nextBefore); })}>加载更早的任务</button>}
       {!tasks.length && <div className="empty"><h3>把事情交给我</h3><p>可以接着发不同任务。过程会收拢，完成后在这里回报。</p></div>}
@@ -156,10 +159,13 @@ export function TaskChat({ onDetails, onOpenLink, onBrowserNavigate, onExpired }
       </article> : <div className="task-entry" key={t.id} data-task-id={t.id}>
         <article className="msg user"><div className="bubble">{t.relatedTaskId && <small className="muted">引用：{t.relatedTaskTitle ?? tasks.find(task => task.id === t.relatedTaskId)?.title ?? "此前任务"}</small>}<p>{t.text}</p>{t.attachments.length > 0 && <AttachmentCards attachments={t.attachments} onOpen={setPreview}/>}<div className="message-meta"><MessageTime at={t.createdAt} now={now}/></div></div></article>
         {t.mergedInto && <div className="task-supplement"><button className="ghost tiny" onClick={() => onDetails(t)}>{t.status === "merged" ? "已补充到" : t.status === "merging" || t.status === "steering" ? "正在补充到" : t.status === "interrupted" ? "已取消补充" : "补充需要核对"}：{t.mergedTitle}</button>{t.waitReason && <p className="tiny">{t.waitReason.message}</p>}{t.error && <p className="tiny error">{t.error}</p>}</div>}
-        {!t.mergedInto && !terminal.has(t.status) && <div className={`task-progress ${t.status === "running" ? "active" : ""}`}>
+        {!t.mergedInto && !terminal.has(t.status) && <div className={`task-progress ${t.status === "running" ? "active" : ""} ${t.status === "needs_input" ? "needs-input" : ""}`}>
           <button className="task-summary" onClick={() => onDetails(t)} aria-label={`展开任务：${t.title}`}><span className={`dot ${t.approvals ? "warn" : ""}`}/><span className="task-progress-label">{t.approvals ? "需要你确认" : t.waitReason?.label ?? labels[t.status] ?? t.status}</span><span className="task-progress-title">{t.title}</span><span aria-hidden>›</span></button>
           {t.waitReason && <p className="task-intro task-wait-reason">{t.waitReason.message}</p>}
-          {t.status === "needs_input" && t.clarification && <div className="task-question"><p>{t.clarification}</p></div>}
+          {t.status === "needs_input" && t.clarification && <div className="task-question" role="status" aria-label="需要你补充">
+            <div className="task-question-heading"><span aria-hidden="true">?</span><strong>需要你补充</strong></div>
+            <p>{t.clarification}</p><span className="task-question-hint">直接在下方输入回复即可</span>
+          </div>}
           {t.description && ["running", "stopping"].includes(t.status) && <p className="task-intro">{t.description}</p>}
           <TaskDuration task={t} now={now}/>
           {t.error && <p className="tiny">{t.error}</p>}

@@ -5,12 +5,12 @@ import fs from "node:fs";
 function task(n: number, status = "running"): Task {
     return { id: `task-${n}`, revision: 1, title: `任务 ${n}`, text: `请求 ${n}`, conversationId: `child-${n}`, status, result: null, error: null, attachments: [], relatedTaskId: null, dependencies: [], approvals: 0, createdAt: 1000 + n, completedAt: null };
 }
-async function setup(page: Page, rows: Task[] = []) {
+async function setup(page: Page, rows: Task[] = [], nextBefore:number|null = null) {
     const conversations = [makeConversation("old", "保留的旧会话"), ...rows.map(t => makeConversation(t.conversationId, t.title))];
     await mockConsole(page, { conversations });
     const bodies: Array<Record<string, any>> = [];
     const stops: string[] = [];
-    await page.route("**/api/main*", r => r.fulfill({ json: { mode: "tasks", tasks: rows, nextBefore: null } }));
+    await page.route("**/api/main*", r => r.fulfill({ json: { mode: "tasks", tasks: rows, nextBefore } }));
     await page.route("**/api/tasks", async (r) => {
         const body = r.request().postDataJSON();
         bodies.push(body);
@@ -45,6 +45,30 @@ test("MP4 attachments and results preview directly in the main inbox",async({pag
       await page.screenshot({path:info.outputPath('main-mp4.png')});
       await page.getByRole('button',{name:'关闭预览'}).click();
     }
+});
+test('task list shares live statuses, opens each task, preserves draft and returns to the list',async({page},info)=>{
+    const pending={...task(1,'needs_input'),clarification:'请补充出行日期'};
+    const {rows}=await setup(page,[pending,task(2),{...task(3,'completed'),result:'Done',completedAt:Date.now()},{...task(4,'merged'),mergedInto:'task-2'}]);
+    await page.getByRole('textbox',{name:'消息',exact:true}).fill('保留草稿');
+    const openList=async()=>{if(info.project.name.startsWith('mobile'))await page.getByRole('button',{name:'打开导航'}).click();await page.locator('.sidebar').getByRole('button',{name:'任务列表',exact:true}).click();};
+    await openList();await expect(page.getByRole('heading',{name:'任务列表',exact:true})).toBeVisible();
+    await expect(page.locator('.task-list-item')).toHaveCount(3);
+    const row=page.locator('.task-list [data-task-id="task-2"]');await expect(row).toContainText('进行中');
+    Object.assign(rows[1]!,{status:'completed',result:'Updated',completedAt:Date.now()+1,revision:2});await expect(row).toContainText('已完成');
+    await page.getByRole('button',{name:'打开任务：任务 2',exact:true}).click();await expect(page.locator('.task-detail')).toBeVisible();
+    await expect(page.locator('.task-detail h2')).toHaveText('任务 2');await page.getByRole('button',{name:'← 返回任务列表'}).click();await expect(row).toBeVisible();
+    Object.assign(rows[0]!,{status:'failed',clarification:null,error:'Failed',revision:2});await expect(page.locator('.task-list [data-task-id="task-1"]')).toContainText('执行失败');
+    if(info.project.name.startsWith('mobile'))await page.setViewportSize({width:360,height:844});
+    expect(await page.evaluate(()=>document.documentElement.scrollWidth-innerWidth)).toBeLessThanOrEqual(1);await page.screenshot({path:info.outputPath('task-list.png')});
+    if(info.project.name.startsWith('mobile'))await page.getByRole('button',{name:'打开导航'}).click();await page.locator('.sidebar').getByRole('button',{name:'主会话',exact:true}).click();
+    await expect(page.getByRole('textbox',{name:'消息',exact:true})).toHaveValue('保留草稿');
+});
+test('task list can load older pages and keeps them after live refresh',async({page},info)=>{
+    await setup(page,[task(1)],1000);
+    await page.route('**/api/main*',r=>r.fulfill({json:new URL(r.request().url()).searchParams.has('before')?{mode:'tasks',tasks:[{...task(99,'completed'),result:'Old result',completedAt:999}],nextBefore:null}:{mode:'tasks',tasks:[task(1)],nextBefore:1000}}));
+    if(info.project.name.startsWith('mobile'))await page.getByRole('button',{name:'打开导航'}).click();await page.locator('.sidebar').getByRole('button',{name:'任务列表',exact:true}).click();
+    await page.getByRole('button',{name:'加载更早的任务',exact:true}).click();await expect(page.getByRole('button',{name:'打开任务：任务 99',exact:true})).toBeVisible();
+    await expect(page.locator('.task-list-item')).toHaveCount(2);await expect(page.locator('.task-list-page').getByRole('button',{name:'加载更早的任务',exact:true})).toHaveCount(0);
 });
 test("one inbox accepts parallel messages, folds progress, reports completion order and survives reload", async ({ page }, info) => {
     const { rows, bodies } = await setup(page);
@@ -190,11 +214,12 @@ test("clarification stays inline, answers target the right task and unrelated wo
     first.clarification="想从哪里出发、去哪里，哪天出行？";
     second.clarification="这份演示要介绍哪个产品？";
     const {bodies,rows}=await setup(page,[first,second,working]);
-    await expect(page.locator(".chat-sub")).toHaveText("1 个任务处理中");
+    await expect(page.locator(".chat-sub")).toHaveText("1 个任务处理中 · 2 个等你补充");
     await expect(page.locator(".task-question")).toHaveCount(2);
     await page.reload();
     const question=page.locator('.task-entry[data-task-id="task-2"] .task-question');
     await expect(question).toContainText(second.clarification);
+    await expect(question).toHaveAttribute('role','status');await expect(question).toContainText('需要你补充');await expect(question).toContainText('直接在下方输入回复即可');
     await expect(page.getByRole("button",{name:/回答问题|补充此任务|继续此任务|补充任务/})).toHaveCount(0);
     await expect(page.locator(".composer .chip")).toHaveCount(0);
     await send(page,"演示虚构的待办产品");

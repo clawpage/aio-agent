@@ -1209,6 +1209,27 @@ export function createApiRouter(context: AppContext): Router {
     }),
   );
 
+  router.get("/sandbox/shell-sessions", requireKind("primary"), requireSession,
+    asyncHandler(async (_req, res) => {
+      res.setHeader("Cache-Control", "no-store");
+      try {
+        const result = await context.aio.get("/v1/shell/sessions") as {success?:boolean;data?:{sessions?:Record<string,unknown>}};
+        const raw = result?.data?.sessions;
+        if (!result?.success || !raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error("Invalid session list");
+        const sessions = Object.entries(raw).map(([id,value]) => {
+          if (!value || typeof value !== "object") throw new Error("Invalid session");
+          const s = value as Record<string,unknown>;
+          if (typeof s.status !== "string") throw new Error("Missing session status");
+          return {id, status:s.status, workingDir:typeof s.working_dir === "string" ? s.working_dir : "",
+            lastUsedAt:typeof s.last_used_at === "string" ? s.last_used_at : null};
+        }).filter(s => s.status !== "closed");
+        res.json({sessions});
+      } catch {
+        res.status(502).json({error:"sessions_unavailable",message:"暂时无法读取终端会话，请重试"});
+      }
+    }),
+  );
+
   /**
    * Upload a file into the sandbox through the control plane. The browser never
    * gets a direct sandbox credential; the server relays to the sandbox API.

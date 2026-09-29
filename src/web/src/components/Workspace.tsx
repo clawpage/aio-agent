@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, ApiError } from "../api";
 import type { CapabilitiesResponse, DocumentReadiness, FileEntry, StatusResponse } from "../types";
 import { FilePreview } from "./FilePreview";
+import { TerminalSessions } from "./TerminalSessions";
 import { BrowserViewerController } from "../browserViewer";
 import { BrowserStatusBar, fetchBrowserStatus, STATUS_POLL_MS } from "./BrowserStatusBar";
 import { needsRestore } from "../browserStatusView";
@@ -455,6 +456,7 @@ export function Workspace({ open, status, initialPath, onClose, onNotify, browse
       </header>
 
       <div className="ws-body">
+        {tab === "terminal" && <TerminalSessions active={docVisible} onNotify={onNotify}/>}
         {holdsBrowser && (
           <BrowserStatusBar
             status={browserStatus}
