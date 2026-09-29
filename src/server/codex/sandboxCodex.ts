@@ -253,19 +253,22 @@ export class SandboxCodexSession {
   }
 
   /** Read-only main-agent planning; receives bounded metadata, never executes a task. */
-  async planTask(prompt: string, developerInstructions?: string): Promise<string | null> {
-    return this.#auxiliaryText(prompt, "high", 90_000, developerInstructions);
+  async planTask(prompt: string, developerInstructions?: string, model?: string): Promise<string | null> {
+    return this.#auxiliaryText(prompt, "high", 90_000, developerInstructions, model);
   }
 
-  async #auxiliaryText(prompt: string, effort: string | null, timeoutMs = this.#cfg.agent.titleTimeoutMs, developerInstructions?: string): Promise<string | null> {
+  async #auxiliaryText(prompt: string, effort: string | null, timeoutMs = this.#cfg.agent.titleTimeoutMs, developerInstructions?: string, requestedModel?: string): Promise<string | null> {
     await this.start();
     const peer = this.#peer;
     if (!peer?.alive) return null;
-    const model = this.#cfg.agent.titleModel;
+    const model = requestedModel ?? this.#cfg.agent.titleModel;
+    if (requestedModel && (this.#bridge?.providerForModel(model) ?? "openai") === "openai") throw new Error("服务暂时不可用，请稍后重试");
+    const modelProvider = requestedModel ? this.#bridge!.providerForModel(model) : undefined;
     const threadRes = (await peer.request(
       "thread/start",
       {
         ...(developerInstructions !== undefined ? {developerInstructions} : {}),
+        ...(modelProvider ? { modelProvider } : {}),
         ephemeral: true,
         sandbox: "read-only",
         approvalPolicy: "never",

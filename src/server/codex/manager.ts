@@ -1,3 +1,4 @@
+import { isMember, MEMBER_SETTINGS } from "../auth/policy.js";
 import {readSoul} from '../soul.js';
 import { EventEmitter } from "node:events";
 import type { Db } from "../db.js";
@@ -57,13 +58,14 @@ export interface CodexSessionLike {
   steerTurn?(params: {threadId:string;expectedTurnId:string;text:string;attachments?:TurnAttachment[]}): Promise<void>;
   /** One throwaway, tool-free run used only for automatic conversation titles. */
   generateTitle(userText: string): Promise<string | null>;
-  planTask?(prompt: string, developerInstructions?: string): Promise<string | null>;
+  planTask?(prompt: string, developerInstructions?: string, model?: string): Promise<string | null>;
   answer(id: string, result: unknown): boolean;
   close(): void;
 }
 import { randomId } from "../auth/passwords.js";
 
 export interface ConversationRow {
+  owner_id: string;
   id: string;
   title: string;
   codex_thread_id: string | null;
@@ -591,14 +593,14 @@ export class AgentManager {
     return (this.#db.prepare("SELECT * FROM conversations WHERE id = ?").get(id) as ConversationRow | undefined) ?? null;
   }
 
-  createConversation(opts: { title?: string; model?: string | null; cwd?: string | null } = {}): ConversationRow {
+  createConversation(opts: { ownerId?: string; title?: string; model?: string | null; cwd?: string | null } = {}): ConversationRow {
     const now = Date.now();
     const id = randomId("conv");
     const requested = (opts.title ?? "").trim();
     const title = requested || DEFAULT_CONVERSATION_TITLE;
     this.#db
       .prepare("INSERT INTO conversations (id, owner_id, title, model, cwd, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 'idle', ?, ?)")
-      .run(id, "owner_1", title, opts.model ?? null, opts.cwd ?? this.#cfg.sandbox.containerWorkspaceDir, now, now);
+      .run(id, opts.ownerId ?? "owner_1", title, opts.model ?? null, opts.cwd ?? this.#cfg.sandbox.containerWorkspaceDir, now, now);
     // An explicit non-default title at creation is a user choice, not a slot for
     // the automatic titler to overwrite later.
     if (requested) {
@@ -747,7 +749,14 @@ export class AgentManager {
    * (the HTTP route never forwards client model/effort), so the config page is the
    * single source of truth the UI exposes.
    */
+  memberSettings(): { model: string; effort: string } {
+    if ((this.#bridge?.providerForModel(MEMBER_SETTINGS.model) ?? "openai") === "openai") throw new Error("服务暂时不可用，请稍后重试");
+    return { ...MEMBER_SETTINGS };
+  }
+
   resolveSubmitSettings(input: SubmitTurnInput): { model: string; effort: string | null } {
+    const conversation = this.getConversation(input.conversationId);
+    if (conversation && isMember(this.#db, conversation.owner_id)) return this.memberSettings();
     if (input.frozenSettings) return input.frozenSettings;
     const stored = effectiveAgentSettings(this.agentSettings(), this.#modelCatalog, this.#cfg.agent.defaultModel);
     const model = input.model ?? stored.model ?? this.#cfg.agent.defaultModel;
@@ -970,7 +979,9 @@ export class AgentManager {
     // `conversations.model`) must still run the model it was accepted with.
     // Legacy rows without a frozen model fall back to the conversation, then the
     // configured default (never Codex's own gpt-6-astra default).
-    const model = turn.model ?? conversation.model ?? this.#cfg.agent.defaultModel;
+    const policy = isMember(this.#db, conversation.owner_id) ? this.memberSettings() : null;
+    const model = policy?.model ?? turn.model ?? conversation.model ?? this.#cfg.agent.defaultModel;
+    if (policy) turn.effort = policy.effort;
     // The provider is decided by the model that will actually run, and only a
     // bridge model ever resolves to a non-ChatGPT provider. A ChatGPT turn never
     // sends `modelProvider`, so that path stays byte-identical to before.

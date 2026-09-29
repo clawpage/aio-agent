@@ -1,3 +1,4 @@
+import { isMember, publicPayload } from "../auth/policy.js";
 import {readSoul,writeSoul,SoulError,DEFAULT_SOUL,SOUL_MAX_BYTES} from '../soul.js';
 import { HTML_PREVIEW_CSP, htmlPreviewDocument } from "../documents/html.js";
 import express, { type Request, type Response, type NextFunction, type Router } from "express";
@@ -14,7 +15,7 @@ import {
 import type { AgentEvent } from "../codex/manager.js";
 import type { HostKind, RequestContext } from "./security.js";
 import { UNSAFE_METHODS, guardUnsafe, originAllowed } from "./security.js";
-import { BOOTSTRAP_USERNAME, authenticateOwner, getOwner } from "../auth/owner.js";
+import { BOOTSTRAP_USERNAME, authenticateUser, getUser } from "../auth/owner.js";
 import { parseHttpUrl } from "../aio/client.js";
 import { COOKIE_NAMES, clearSessionCookies, sessionCookies } from "../auth/sessions.js";
 import { safeRedirectPath } from "../auth/tickets.js";
@@ -194,6 +195,40 @@ export function createApiRouter(context: AppContext): Router {
     next();
   });
 
+  // Identity-scoped ledger access. Shared sandbox surfaces remain trusted-user facilities.
+  router.use((req, res, next) => {
+    const ctx = ctxOf(req);
+    if (!ctx.session) { next(); return; }
+    const user = getUser(db, ctx.session.ownerId);
+    if (!user) { res.status(401).json({ error: "unauthenticated" }); return; }
+    const restricted = user.role !== "owner";
+    const pathname = req.path.toLowerCase().replace(/\/+$/, "");
+    const ownerPaths = ["/settings", "/models", "/capabilities", "/sandbox/context", "/documents/provision"];
+    if (restricted && ownerPaths.some(p => pathname === p || pathname.startsWith(p + "/"))) {
+      res.status(403).json({ error: "forbidden", message: "此操作仅限所有者" }); return;
+    }
+    const match = /^\/(conversations|tasks)\/([^/]+)/i.exec(req.path);
+    if (match) {
+      const id = decodeURIComponent(match[2]);
+      const own = match[1].toLowerCase() === "tasks" ? context.tasks.belongsTo(id, user.id) : agent.getConversation(id)?.owner_id === user.id;
+      if (!own) { res.status(404).json({ error: "not_found" }); return; }
+    }
+    const approval = /^\/approvals\/([^/]+)\/respond/i.exec(req.path);
+    if (approval) {
+      const row = db.prepare("SELECT c.owner_id FROM server_requests r JOIN conversations c ON c.id=r.conversation_id WHERE r.id=?").get(decodeURIComponent(approval[1])) as {owner_id:string}|undefined;
+      if (row?.owner_id !== user.id) { res.status(404).json({ error: "not_found" }); return; }
+    }
+    if (restricted) {
+      const json = res.json.bind(res);
+      res.json = (body: unknown) => json(publicPayload(body));
+      // Legacy free-form conversations are owner-only; member execution always uses tasks.
+      if (pathname === "/conversations" && req.method !== "GET") {
+        res.status(403).json({ error: "forbidden", message: "请通过主会话提交任务" }); return;
+      }
+    }
+    next();
+  });
+
   // ------------------------------------------------------------------ auth
 
   router.post(
@@ -219,7 +254,8 @@ export function createApiRouter(context: AppContext): Router {
         res.status(400).json({ error: "password_required", message: "请输入密码" });
         return;
       }
-      const owner = await authenticateOwner(db, password);
+      const username = typeof req.body?.username === "string" ? req.body.username.trim() : BOOTSTRAP_USERNAME;
+      const owner = await authenticateUser(db, username, password);
       if (!owner) {
         const after = limiter.recordFailure(ctx.ip);
         audit(db, "login_failed", `failures=${after.failures}`, ctx.ip);
@@ -236,8 +272,8 @@ export function createApiRouter(context: AppContext): Router {
       });
       res.setHeader("Set-Cookie", sessionCookies("primary", token, csrfToken, { secure: ctx.secure, ttlMs: cfg.sessionTtlMs }));
       audit(db, "login_ok", owner.username, ctx.ip);
-      log.info("owner logged in", { ip: ctx.ip });
-      res.json({ ok: true, username: owner.username, expiresAt: session.expiresAt });
+      log.info("user logged in", { ip: ctx.ip });
+      res.json({ ok: true, username: owner.username, role: owner.role, expiresAt: session.expiresAt });
     }),
   );
 
@@ -284,7 +320,7 @@ export function createApiRouter(context: AppContext): Router {
   router.get(
     "/auth/session",
     asyncHandler(async (req, res, ctx) => {
-      const owner = getOwner(db);
+      const owner = ctx.session ? getUser(db, ctx.session.ownerId) : null;
       if (!ctx.session) {
         res.json({ authenticated: false, kind: ctx.kind, username: owner?.username ?? null });
         return;
@@ -292,7 +328,8 @@ export function createApiRouter(context: AppContext): Router {
       res.json({
         authenticated: true,
         kind: ctx.kind,
-        username: owner?.username ?? BOOTSTRAP_USERNAME,
+        username: owner?.username ?? null,
+        role: owner?.role ?? null,
         expiresAt: ctx.session.expiresAt,
         secure: ctx.secure,
       });
@@ -312,6 +349,12 @@ export function createApiRouter(context: AppContext): Router {
         container.inspect(),
         container.isReady(),
       ]);
+      if (isMember(db, ctxOf(_req).session!.ownerId)) {
+        res.json({ agent: { sessionReady: agentStatus.sessionReady, lastError: agentStatus.sessionReady ? null : "服务正在连接" },
+          hostAuth: { ok: hostAuth.ok }, sandbox: { running: sandboxState.running, healthy: sandboxReady, surfaces: context.sandboxSurfaces },
+          workspaceOrigin: workspaceOrigin(ctxOf(_req), cfg) });
+        return;
+      }
       // Refresh surfaces on demand so the dashboard is not stuck on stale data.
       try {
         context.sandboxSurfaces = await container.surfaces();
@@ -346,7 +389,7 @@ export function createApiRouter(context: AppContext): Router {
 
   router.get("/main", requireKind("primary"), requireSession, asyncHandler(async (req, res) => {
     const before = Number(req.query.before ?? Number.MAX_SAFE_INTEGER);
-    res.json({ mode: "tasks", ...context.tasks.list(Number.isSafeInteger(before) && before > 0 ? before : Number.MAX_SAFE_INTEGER) });
+    res.json({ mode: "tasks", ...context.tasks.list(Number.isSafeInteger(before) && before > 0 ? before : Number.MAX_SAFE_INTEGER, ctxOf(req).session!.ownerId) });
   }));
   router.post("/tasks", requireKind("primary"), requireSession, asyncHandler(async (req, res) => {
     try {
@@ -358,7 +401,7 @@ export function createApiRouter(context: AppContext): Router {
         if (!checked.ok) throw new Error(checked.message);
         return { path: checked.path, kind: a.kind === "image" ? "image" as const : "file" as const, name: typeof a.name === "string" ? a.name : "" };
       }) : [];
-      const result = context.tasks.submit({ text: b.text, clientMessageId: b.clientMessageId, attachments, relatedTaskId: typeof b.relatedTaskId === "string" ? b.relatedTaskId : null });
+      const result = context.tasks.submit({ userId: ctxOf(req).session!.ownerId, text: b.text, clientMessageId: b.clientMessageId, attachments, relatedTaskId: typeof b.relatedTaskId === "string" ? b.relatedTaskId : null });
       res.status(result.duplicate ? 200 : 202).json(result);
     } catch (err) {
       res.status(err instanceof TurnConflictError ? 409 : 400).json({ error: "task_submit_failed", message: err instanceof Error ? err.message : "任务提交失败" });
@@ -379,7 +422,7 @@ export function createApiRouter(context: AppContext): Router {
     requireSession,
     asyncHandler(async (req, res) => {
       const includeArchived = req.query.archived === "1";
-      res.json({ conversations: agent.listConversations(includeArchived) });
+      res.json({ conversations: agent.listConversations(includeArchived).filter(c => c.owner_id === ctxOf(req).session!.ownerId) });
     }),
   );
 
@@ -569,7 +612,7 @@ export function createApiRouter(context: AppContext): Router {
     requireSession,
     asyncHandler(async (req, res) => {
       const conversationId = typeof req.query.conversationId === "string" ? req.query.conversationId : undefined;
-      res.json({ approvals: agent.listPendingRequests(conversationId) });
+      res.json({ approvals: agent.listPendingRequests(conversationId).filter(r => agent.getConversation(r.conversation_id)?.owner_id === ctxOf(req).session!.ownerId) });
     }),
   );
 
@@ -1367,7 +1410,7 @@ export function createApiRouter(context: AppContext): Router {
     "/workspace/session",
     requireKind("workspace"),
     asyncHandler(async (_req, res, ctx) => {
-      const owner = getOwner(db);
+      const owner = ctx.session ? getUser(db, ctx.session.ownerId) : null;
       res.json({
         authenticated: Boolean(ctx.session),
         kind: "workspace",
@@ -1568,7 +1611,7 @@ function streamEvents(
     const page = agent.listEvents(conversationId, lastId, REPLAY_PAGE);
     if (!page.length) break;
     for (const event of page) {
-      writeEvent(res, event);
+      writeEvent(res, isMember(context.db, ctx.session!.ownerId) ? publicPayload(event) : event);
       lastId = event.id;
       replayed++;
     }
@@ -1580,7 +1623,7 @@ function streamEvents(
     if (event.conversationId !== conversationId) return;
     if (event.id <= lastId) return;
     lastId = event.id;
-    writeEvent(res, event);
+    writeEvent(res, isMember(context.db, ctx.session!.ownerId) ? publicPayload(event) : event);
   };
   agent.events.on("event", listener);
 

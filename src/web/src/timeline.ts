@@ -950,7 +950,7 @@ export function applyEvent(state: TimelineState, event: AgentEvent): void {
     }
     case "thread.started": {
       const turnId = resolveTurnId(state, event);
-      pushNotice(state, turnId, { kind: "status", id: `thread:${String(p.threadId ?? event.id)}`, text: `已创建会话线程（模型 ${text(p.model)}）`, level: "info" });
+      pushNotice(state, turnId, { kind: "status", id: `thread:${String(p.threadId ?? event.id)}`, text: p.model ? `已创建会话线程（模型 ${text(p.model)}）` : "已开始处理任务", level: "info" });
       return;
     }
     case "error":

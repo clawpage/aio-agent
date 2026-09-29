@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { api, ApiError } from "../api";
 
 export function Login({ onSuccess, notice }: { onSuccess: () => void | Promise<void>; notice?: string | null }) {
+  const [username, setUsername] = useState("owner");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -61,7 +62,7 @@ export function Login({ onSuccess, notice }: { onSuccess: () => void | Promise<v
     setBusy(true);
     setError(null);
     try {
-      await api.login(password);
+      await api.login(password, username);
       setPassword("");
       await onSuccess();
     } catch (err) {
@@ -85,10 +86,10 @@ export function Login({ onSuccess, notice }: { onSuccess: () => void | Promise<v
         }}
       >
         <h1>AIO Agent</h1>
-        <p className="muted">私有部署，仅一个所有者账号，不开放注册。</p>
+        <p className="muted">使用管理员提供的账号登录。</p>
         <label className="field">
           <span>账号</span>
-          <input value="owner" readOnly />
+          <input value={username} onChange={e => setUsername(e.target.value)} autoComplete="username" />
         </label>
         <label className="field">
           <span>密码</span>
@@ -107,10 +108,7 @@ export function Login({ onSuccess, notice }: { onSuccess: () => void | Promise<v
         <button type="submit" className="primary block" disabled={busy || !password}>
           {busy ? "登录中…" : "登录"}
         </button>
-        <p className="muted tiny">
-          首次启动时系统会生成初始密码并写入服务器上的 <code>var/owner-secret.txt</code>（权限 0600）。
-          请在该文件查看或自行设置 <code>PA_OWNER_PASSWORD</code>。
-        </p>
+
       </form>
     </div>
   );

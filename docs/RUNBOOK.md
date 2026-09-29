@@ -137,6 +137,17 @@ docker exec -u gem personal-agent-sandbox \
 
 ## 4. 凭据
 
+创建受信任普通成员（构建后，使用同一生产环境配置）：
+
+```bash
+node --env-file=var/runtime.env bin/create-user.mjs <username>
+```
+
+账号固定 member，随机密码只写 `var/user-secrets/<username>.txt`（0600）；重复执行拒绝覆盖。
+没有注册入口，不改变 owner 密码与会话。member 固定 DeepSeek high，因此上线前需确认 OpenCode Go 桥接可用。
+底层文件/浏览器/终端仍共享，账号分级不代表多租户隔离。
+
+
 - owner 密码：`var/owner-secret.txt`（0600，明文，方便本人查看；git 忽略；从不写日志）。
   **不要**删除或重置已运行实例的密码。确需轮换：
   ```bash

@@ -1,3 +1,4 @@
+import { isMember } from "../auth/policy.js";
 import type { Config } from "../config.js";
 import type { Db } from "../db.js";
 import { getMeta } from "../db.js";
@@ -163,6 +164,8 @@ export class AutoTitler {
    * DB guards the final write.
    */
   scheduleForConversation(conversationId: string): void {
+    const user = this.#db.prepare("SELECT owner_id FROM conversations WHERE id=?").get(conversationId) as {owner_id:string} | undefined;
+    if (user && isMember(this.#db, user.owner_id)) return;
     if (!this.enabled) return;
     if (this.#attempted.has(conversationId)) return;
     const first = this.#firstTurn(conversationId);
@@ -182,7 +185,7 @@ export class AutoTitler {
     const rows = this.#db
       .prepare(
         `SELECT c.id AS id FROM conversations c
-         WHERE c.archived = 0 AND c.title = ?
+         WHERE c.archived = 0 AND c.title = ? AND NOT EXISTS (SELECT 1 FROM owners u WHERE u.id=c.owner_id AND u.role='member')
            AND NOT EXISTS (SELECT 1 FROM meta m WHERE m.key = ? || c.id)
            AND (SELECT t.status FROM turns t WHERE t.conversation_id = c.id ORDER BY t.created_at ASC, t.rowid ASC LIMIT 1) = 'completed'
          ORDER BY c.updated_at ASC`,

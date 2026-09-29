@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { Db } from "../db.js";
-import { generateSecret, hashPassword, verifyPassword, dummyVerify, type PasswordRecord } from "./passwords.js";
+import { randomId, generateSecret, hashPassword, verifyPassword, dummyVerify } from "./passwords.js";
 import type { Logger } from "../logger.js";
 
 export const BOOTSTRAP_USERNAME = "owner";
@@ -25,7 +25,7 @@ export async function ensureOwner(
   db: Db,
   opts: { password: string; secretPath: string; log: Logger; reset?: boolean },
 ): Promise<BootstrapResult> {
-  const existing = db.prepare("SELECT id FROM owners LIMIT 1").get() as { id: string } | undefined;
+  const existing = db.prepare("SELECT id FROM owners WHERE role='owner' LIMIT 1").get() as { id: string } | undefined;
   if (existing && !opts.reset) {
     // Never silently invent a new password for an existing owner: the operator
     // would be locked out with no way to discover the old one.
@@ -82,7 +82,7 @@ export async function ensureOwner(
 
   try {
     db.prepare(
-      "INSERT INTO owners (id, username, password_hash, password_salt, password_params, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+      "INSERT INTO owners (id, username, password_hash, password_salt, password_params, created_at, role) VALUES (?, ?, ?, ?, ?, ?, 'owner')",
     ).run("owner_1", BOOTSTRAP_USERNAME, rec.hash, rec.salt, rec.params, Date.now());
     db.prepare("INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(
       OWNER_SOURCE_META_KEY,
@@ -98,23 +98,33 @@ export async function ensureOwner(
 }
 
 export function getOwner(db: Db): { id: string; username: string } | null {
-  const row = db.prepare("SELECT id, username FROM owners LIMIT 1").get() as
+  const row = db.prepare("SELECT id, username FROM owners WHERE role='owner' LIMIT 1").get() as
     | { id: string; username: string }
     | undefined;
   return row ?? null;
 }
 
-export async function authenticateOwner(db: Db, password: string): Promise<{ id: string; username: string } | null> {
-  const row = db
-    .prepare("SELECT id, username, password_hash, password_salt, password_params FROM owners LIMIT 1")
-    .get() as
-    | { id: string; username: string; password_hash: string; password_salt: string; password_params: string }
-    | undefined;
-  if (!row) {
-    await dummyVerify(password);
-    return null;
-  }
-  const record: PasswordRecord = { hash: row.password_hash, salt: row.password_salt, params: row.password_params };
-  const ok = await verifyPassword(password, record);
-  return ok ? { id: row.id, username: row.username } : null;
+export type UserRole = "owner" | "member";
+export interface User { id: string; username: string; role: UserRole }
+export function getUser(db: Db, id: string): User | null {
+  return db.prepare("SELECT id,username,role FROM owners WHERE id=?").get(id) as User | undefined ?? null;
+}
+export async function createMember(db: Db, username: string, password: string): Promise<User> {
+  if (!/^[a-zA-Z0-9_-]{2,40}$/.test(username) || username === BOOTSTRAP_USERNAME) throw new Error("账号格式无效");
+  if (password.length < 12) throw new Error("密码至少需要12个字符");
+  const rec = await hashPassword(password);
+  const id = randomId("user");
+  db.prepare("INSERT INTO owners (id,username,password_hash,password_salt,password_params,created_at,role) VALUES (?,?,?,?,?,?,'member')")
+    .run(id,username,rec.hash,rec.salt,rec.params,Date.now());
+  return { id, username, role: "member" };
+}
+export async function authenticateUser(db: Db, username: string, password: string): Promise<User | null> {
+  const row = db.prepare("SELECT * FROM owners WHERE username=?").get(username) as
+    (User & { password_hash: string; password_salt: string; password_params: string }) | undefined;
+  if (!row) { await dummyVerify(password); return null; }
+  const ok = await verifyPassword(password, { hash: row.password_hash, salt: row.password_salt, params: row.password_params });
+  return ok ? { id: row.id, username: row.username, role: row.role } : null;
+}
+export async function authenticateOwner(db: Db, password: string): Promise<User | null> {
+  return authenticateUser(db, BOOTSTRAP_USERNAME, password);
 }

@@ -1,0 +1,26 @@
+import {test,expect} from '@playwright/test';
+import {mockConsole} from './mock-api';
+test('member has a clean inbox and no model or prompt configuration',async({page},info)=>{
+ await mockConsole(page,{conversations:[]});
+ await page.route('**/api/auth/session',r=>r.fulfill({json:{authenticated:true,username:'yzmy',role:'member'}}));
+ await page.route('**/api/main*',r=>r.fulfill({json:{mode:'tasks',tasks:[],nextBefore:null}}));
+ const calls:string[]=[];page.on('request',r=>calls.push(new URL(r.url()).pathname));
+ await page.goto('/');await expect(page.getByRole('heading',{name:'主会话',exact:true})).toBeVisible();
+ if(info.project.name.startsWith('mobile'))await page.getByRole('button',{name:'打开导航'}).click();
+ await expect(page.locator('.sidebar').getByRole('button',{name:'任务列表',exact:true})).toBeVisible();
+ await expect(page.getByRole('button',{name:'配置',exact:true})).toHaveCount(0);
+ expect(calls.filter(s=>/^\/api\/(settings|models|capabilities)/.test(s))).toEqual([]);
+ await expect(page.locator('body')).not.toContainText(/DeepSeek|GPT-6|SOUL.md|推理强度/);
+ if(info.project.name.startsWith('mobile')){await page.getByRole('button',{name:'关闭导航'}).click();await page.setViewportSize({width:360,height:844});}
+ expect(await page.evaluate(()=>document.documentElement.scrollWidth-innerWidth)).toBeLessThanOrEqual(1);
+ await page.screenshot({path:info.outputPath('member.png')});
+});
+test('login accepts the supplied account name',async({page})=>{
+ let authenticated=false;let body:any;
+ await mockConsole(page,{conversations:[]});
+ await page.route('**/api/auth/session',r=>r.fulfill({json:{authenticated,username:authenticated?'yzmy':null,role:authenticated?'member':null}}));
+ await page.route('**/api/main*',r=>r.fulfill({json:{mode:'tasks',tasks:[],nextBefore:null}}));
+ await page.route('**/api/auth/login',async r=>{body=r.request().postDataJSON();authenticated=true;await r.fulfill({json:{ok:true,username:'yzmy',role:'member'}});});
+ await page.goto('/login');await page.getByLabel('账号',{exact:true}).fill('yzmy');await page.getByLabel('密码',{exact:true}).fill('test-password');await page.getByRole('button',{name:'登录',exact:true}).click();
+ await expect(page.getByRole('heading',{name:'主会话',exact:true})).toBeVisible();expect(body).toEqual({username:'yzmy',password:'test-password'});expect(new URL(page.url()).pathname).toBe('/');
+});

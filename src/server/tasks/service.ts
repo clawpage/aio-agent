@@ -1,3 +1,4 @@
+import { isMember, MEMBER_MODEL } from "../auth/policy.js";
 import {readSoul} from '../soul.js';
 import { JsonRpcResponseError } from "../codex/jsonrpc.js";
 import type { Db } from "../db.js";
@@ -28,6 +29,7 @@ interface TaskRow {
     completed_at: number | null;
 }
 export interface TaskInput {
+    userId?: string;
     text: string;
     clientMessageId: string;
     attachments?: TurnAttachment[];
@@ -57,6 +59,8 @@ export class TaskService {
     close(): void { this.#closed = true; this.agent.events.off("event", this.onEvent); }
     private rows(): TaskRow[] { return this.db.prepare("SELECT * FROM tasks ORDER BY created_at, id").all() as unknown as TaskRow[]; }
     get(id: string): TaskRow | null { return this.db.prepare("SELECT * FROM tasks WHERE id = ?").get(id) as unknown as TaskRow ?? null; }
+    ownerId(row: TaskRow): string { return this.agent.getConversation(row.conversation_id)!.owner_id; }
+    belongsTo(id: string, userId: string): boolean { const row = this.get(id); return !!row && this.ownerId(row) === userId; }
     private executor(row: TaskRow): string { return row.execution_conversation_id ?? row.conversation_id; }
     /** Referencing an old result while its resumed turn runs supplements that turn. */
     private referenceTarget(row: TaskRow): TaskRow | null {
@@ -100,24 +104,25 @@ export class TaskService {
         const blocker = active.find(t => resourcesConflict(claims, this.claims(t)));
         if (blocker) {
             const browser = claims.includes("browser") && this.claims(blocker).includes("browser");
-            return { label: browser ? "等待浏览器" : "等待文件操作", message: `“${blocker.title}”正在使用${browser ? "共享浏览器" : "同一文件范围或共享环境"}，结束后自动继续。` };
+            return { label: browser ? "等待浏览器" : "等待文件操作", message: `${this.ownerId(blocker) === this.ownerId(row) ? `“${blocker.title}”` : "另一项任务"}正在使用${browser ? "共享浏览器" : "同一文件范围或共享环境"}，结束后自动继续。` };
         }
         if (!parent && active.length >= this.cfg.agent.maxConcurrentTurns) return { label: "等待执行空位", message: `已有 ${this.cfg.agent.maxConcurrentTurns} 个任务执行中，空位释放后自动开始。` };
         return { label: parent ? "正在追加" : "即将开始", message: parent ? "正在将补充交给原任务。" : "已满足执行条件，正在调度。" };
     }
-    list(before = Number.MAX_SAFE_INTEGER) {
-        const rows = this.db.prepare("SELECT * FROM tasks WHERE created_at < ? ORDER BY created_at DESC LIMIT 101").all(before) as unknown as TaskRow[];
+    list(before = Number.MAX_SAFE_INTEGER, userId = "owner_1") {
+        const rows = this.db.prepare("SELECT * FROM tasks WHERE conversation_id IN (SELECT id FROM conversations WHERE owner_id=?) AND created_at < ? ORDER BY created_at DESC LIMIT 101").all(userId, before) as unknown as TaskRow[];
         const page = rows.slice(0, 100);
         const nextBefore = rows.length > 100 ? page.at(-1)!.created_at : null;
         // Polls must also update older unfinished work after a long burst of messages.
-        const pending = before === Number.MAX_SAFE_INTEGER ? this.db.prepare("SELECT * FROM tasks WHERE status NOT IN ('completed','failed','interrupted','unknown','merged')").all() as unknown as TaskRow[] : [];
+        const pending = before === Number.MAX_SAFE_INTEGER ? this.db.prepare("SELECT * FROM tasks WHERE conversation_id IN (SELECT id FROM conversations WHERE owner_id=?) AND status NOT IN ('completed','failed','interrupted','unknown','merged')").all(userId) as unknown as TaskRow[] : [];
         // An old running task can finish outside the admission-time page. Keep
         // recent reports in the live feed too, so it never gets stuck at Working.
-        const finished = before === Number.MAX_SAFE_INTEGER ? this.db.prepare("SELECT * FROM tasks WHERE completed_at IS NOT NULL ORDER BY completed_at DESC LIMIT 100").all() as unknown as TaskRow[] : [];
+        const finished = before === Number.MAX_SAFE_INTEGER ? this.db.prepare("SELECT * FROM tasks WHERE conversation_id IN (SELECT id FROM conversations WHERE owner_id=?) AND completed_at IS NOT NULL ORDER BY completed_at DESC LIMIT 100").all(userId) as unknown as TaskRow[] : [];
         const merged = new Map([...page, ...pending, ...finished].map(r => [r.id, r]));
         return { tasks: [...merged.values()].sort((a, b) => a.created_at - b.created_at).map(r => this.view(r)), nextBefore };
     }
     submit(input: TaskInput) {
+        const userId = input.userId ?? "owner_1";
         const text = input.text.trim();
         const attachments = input.attachments ?? [];
         const requestedRelated = input.relatedTaskId ? this.get(input.relatedTaskId) : null;
@@ -128,19 +133,20 @@ export class TaskService {
             throw new Error("消息或附件超出限制");
         const existing = this.db.prepare("SELECT * FROM tasks WHERE client_message_id = ?").get(input.clientMessageId) as unknown as TaskRow | undefined;
         if (existing) {
+            if (this.ownerId(existing) !== userId) throw new TurnConflictError("消息 ID 已被使用");
             if (existing.input_text !== text || existing.attachments_json !== JSON.stringify(attachments) || existing.related_task_id !== related)
                 throw new TurnConflictError("消息 ID 已对应另一项任务");
             return { task: this.view(existing), duplicate: true };
         }
-        if (related && !this.get(related))
+        if (related && !this.belongsTo(related, userId))
             throw new Error("关联任务不存在");
-        const frozen = this.agent.resolveSubmitSettings({ conversationId: "main", text, clientMessageId: input.clientMessageId });
+        const frozen = isMember(this.db, userId) ? this.agent.memberSettings() : this.agent.resolveSubmitSettings({ conversationId: "main", text, clientMessageId: input.clientMessageId });
         const id = randomId("task");
         const title = [...(text || attachments.map(a => a.name ?? a.path).join("、"))].slice(0, 40).join("");
         // One transaction prevents a failed admission leaving an orphan child.
         this.db.exec("BEGIN IMMEDIATE");
         try {
-            const conv = this.agent.createConversation({ title: `任务：${title}`, model: frozen.model });
+            const conv = this.agent.createConversation({ ownerId: userId, title: `任务：${title}`, model: frozen.model });
             const last = this.db.prepare("SELECT MAX(created_at) AS n FROM tasks").get() as {
                 n: number | null;
             };
@@ -205,7 +211,7 @@ export class TaskService {
             return;
         this.#planning = true;
         try {
-            const all = this.rows().filter(t => !t.merged_into && t.created_at < row.created_at).map(t => ({...t,input_text:this.taskContext(t),clarification:t.status === "needs_input" && t.plan_json ? (JSON.parse(t.plan_json) as TaskPlan).clarification ?? null : null}));
+            const all = this.rows().filter(t => this.ownerId(t) === this.ownerId(row) && !t.merged_into && t.created_at < row.created_at).map(t => ({...t,input_text:this.taskContext(t),clarification:t.status === "needs_input" && t.plan_json ? (JSON.parse(t.plan_json) as TaskPlan).clarification ?? null : null}));
             // Keep unresolved questions and active work visible even after a
             // burst of unrelated messages; free-text replies have no task picker.
             const relevant = all.filter(t => t.status === "needs_input" || DISPATCHED.has(t.status)).slice(-24);
@@ -217,7 +223,11 @@ export class TaskService {
             const files = [row,...this.rows().filter(t=>t.merged_into===row.id && t.status==='merged')]
                 .flatMap(t=>JSON.parse(t.attachments_json) as TurnAttachment[]);
             const planningInput = [inputContext, ...(files.length ? [`已有附件（执行者可以读取其中资料）：${JSON.stringify(files)}`] : [])].filter(Boolean).join("\n\n");
-            const raw = await this.codex.planTask?.(planningPrompt(planningInput, explicit ? previous.filter(t => t.id === explicit.id) : previous, row.related_task_id, this.cfg.sandbox.containerWorkspaceDir),readSoul(this.cfg).content);
+            const prompt = planningPrompt(planningInput, explicit ? previous.filter(t => t.id === explicit.id) : previous, row.related_task_id, this.cfg.sandbox.containerWorkspaceDir);
+            const soul = readSoul(this.cfg).content;
+            const raw = isMember(this.db, this.ownerId(row))
+                ? await this.codex.planTask?.(prompt, soul, MEMBER_MODEL)
+                : await this.codex.planTask?.(prompt, soul);
             if (this.#closed || this.get(row.id)?.status !== "planning")
                 return;
             // A supplement may arrive while the classifier is in flight. Replan

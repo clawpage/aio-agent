@@ -2,7 +2,7 @@
 
 ## 目标形态
 
-一个 owner、一个持久 AIO 沙箱、一个常驻主 Codex 智能体；中文界面；桌面与手机功能对等；
+一个 owner 管理受信任 member、一个持久 AIO 沙箱、一个常驻主 Codex 智能体；中文界面；桌面与手机功能对等；
 公网只通过专用 Cloudflare tunnel 暴露两个精确域名。
 
 ```
@@ -61,7 +61,7 @@ planning_failed 可安全重试分类；blocked 提示前置结果需要核对�
 
 ## 认证与会话
 
-- 只有一个 owner。**没有注册接口**；owner 由 `PA_OWNER_PASSWORD` 或首次启动生成的
+- 一个 owner，可通过本地 `bin/create-user.mjs` 创建 member。**没有注册接口**；owner 由 `PA_OWNER_PASSWORD` 或首次启动生成的
   `var/owner-secret.txt`（0600，git 忽略，从不写日志）建立。
 - 密码用 scrypt（N=16384）加盐存储；比对用 `timingSafeEqual`，未知用户也走一次等价开销。
 - 会话是随机 32 字节不透明 token，DB 只存 SHA-256，cookie 为 `HttpOnly` + `SameSite=Lax`；
@@ -73,6 +73,16 @@ planning_failed 可安全重试分类；blocked 提示前置结果需要核对�
 - 登录失败按 IP 计数，默认 5 次/15 分钟窗口 → 15 分钟锁定。IP 取自 socket；
   只有显式开启 `PA_TRUST_CF_CONNECTING_IP=1`（专用 tunnel 后）才采信 `CF-Connecting-IP`，
   否则 `X-Forwarded-For` 之类的头可被伪造，会绕过限速。
+
+## 账号分级边界
+
+数据库保留兼容表名 `owners`，增加 `role=owner|member`；原 `owner_1` 迁移为 owner，密码与已有 session 不变。
+任务经 conversation.owner_id 绑定账号；列表、详情、事件回放/实时流、审批、引用、停止与派单历史均核对归属。
+owner 维护全局模型与 SOUL；member 派单和执行固定 DeepSeek / high，服务端拒绝覆盖，桥接不可用时失败，不回退 GPT。
+member 不走 owner 的自动标题模型，也不显示配置/模型/提示原文。这里的隐藏指产品配置及结构化元数据，不对正常回答文字做删词处理。
+
+这些是控制面权限和默认执行策略，**不是不互信租户的安全边界**：工作区、浏览器、终端与任意 shell 仍在一个沙箱中共享。
+不应向不互信用户开放；profile/context、按用户文件目录或提示词都不能代替独立运行环境。未来对外多租户必须另建沙箱与凭据隔离。
 
 ## 请求防护
 
@@ -90,8 +100,7 @@ planning_failed 可安全重试分类；blocked 提示前置结果需要核对�
 - 沙箱里的 Codex 以 `docker exec -i ... <卷内固定版本 codex> app-server` 常驻，通过 stdio JSON-RPC 驱动。
   二进制取自持久卷（`/home/gem/.codex/tools/codex-<版本>/node_modules/.bin/codex`），
   不使用镜像 `PATH` 上的旧版本；接管容器时核实版本并自动补齐（失败则明确报错，不静默回退）。
-- 每个轮次的模型在提交时解析并写入会话：客户端显式选择优先，其次沿用会话已存的模型，
-  最后用 `PA_DEFAULT_MODEL`（默认 `gpt-6-sol`）。升级时有一次受 `meta` 键
+- 每个轮次提交时冻结模型设置：owner 使用统一配置，否则用 `PA_DEFAULT_MODEL`（默认 `gpt-6-sol`）；member 强制 DeepSeek high，提交与执行时均检查，不采用客户端覆盖。升级时有一次受 `meta` 键
   （`model_default_migration_v1`）保护的一次性迁移：仍带旧默认值 `gpt-5.5` 的会话改为新默认，
   只改 `model` 列、不动历史；之后用户手动选择（包括 5.5）永久保留。
 - **自动标题**（独立于主对话）：会话首轮 `completed` 后，控制面异步启动一个沙箱内临时线程

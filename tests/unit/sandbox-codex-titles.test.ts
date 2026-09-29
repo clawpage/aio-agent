@@ -1,3 +1,4 @@
+import type { BridgeModel } from "../../src/server/bridgeModel.js";
 import { describe, expect, it } from "vitest";
 import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
@@ -92,10 +93,10 @@ function containerFor(server: FakeAppServer): SandboxContainer {
   return { spawnCodexAppServer: () => server.child } as unknown as SandboxContainer;
 }
 
-function makeSession(server: FakeAppServer, timeoutMs = 30): SandboxCodexSession {
+function makeSession(server: FakeAppServer, timeoutMs = 30, bridge: BridgeModel | null = null): SandboxCodexSession {
   const cfg = testConfig("/tmp/pa-title-stream", 1, {});
   cfg.agent.titleTimeoutMs = timeoutMs;
-  return new SandboxCodexSession(cfg, new Logger("error", undefined, false), containerFor(server), hostTokens);
+  return new SandboxCodexSession(cfg, new Logger("error", undefined, false), containerFor(server), hostTokens, bridge);
 }
 
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -269,4 +270,19 @@ it('sends SOUL as developer instructions for start, fork, resume and the plannin
   expect(server.inbound.find(r=>r.method==='turn/start')?.params?.input).toEqual([{type:'text',text:'planning input'}]);
   await session.resumeThread('soul-thread','');expect(server.inbound.at(-1)?.params?.developerInstructions).toBe('');
  }finally{session.close();}
+});
+
+it('runs member planning through the fixed provider at high effort and refuses an unavailable provider',async()=>{
+ const server=new FakeAppServer();
+ server.handle('thread/start',()=>({thread:{id:'member-plan'}}));
+ server.handle('turn/start',()=>{setTimeout(()=>server.notify('turn/completed',{threadId:'member-plan',turn:{id:'turn-plan',status:'completed',items:[{type:'agentMessage',text:'{}'}]}}),5);return {turn:{id:'turn-plan'}};});
+ const bridge={providerForModel:()=> 'opencode_go',providerConfigArgs:()=>[],providerEnv:()=>({})} as unknown as BridgeModel;
+ const session=makeSession(server,200,bridge);
+ try {
+  expect(await session.planTask('request','soul','deepseek-v4.1-flash')).toBe('{}');
+  expect(server.inbound.find(r=>r.method==='thread/start')?.params).toMatchObject({model:'deepseek-v4.1-flash',modelProvider:'opencode_go',ephemeral:true});
+  expect(server.inbound.find(r=>r.method==='turn/start')?.params).toMatchObject({model:'deepseek-v4.1-flash',effort:'high'});
+ } finally {session.close();}
+ const unavailable=makeSession(new FakeAppServer(),200);
+ try {await expect(unavailable.planTask('request','soul','deepseek-v4.1-flash')).rejects.toThrow('服务暂时不可用');}finally{unavailable.close();}
 });

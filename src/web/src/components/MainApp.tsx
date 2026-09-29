@@ -36,6 +36,7 @@ export function MainApp() {
         document.addEventListener("keydown", key);
         return () => document.removeEventListener("keydown", key);
     }, [mobile, menuOpen, closeMenu]);
+    const [role, setRole] = useState<"owner" | "member">("member");
     const [auth, setAuth] = useState<boolean | null>(null);
     const [status, setStatus] = useState<StatusResponse | null>(null);
     const [view, setView] = useState<"main" | "tasks" | "settings" | "detail">("main");
@@ -56,6 +57,7 @@ export function MainApp() {
             if (location.pathname === "/login") history.replaceState(null, "", "/");
             setNotice(null); setView("main"); setWorkspace(false);
         }
+        setRole(session.role ?? (session.username === "owner" ? "owner" : "member"));
         setAuth(session.authenticated);
     }
     catch {
@@ -137,7 +139,7 @@ export function MainApp() {
       <button className={`ghost block ${view === "main" ? "active" : ""}`} onClick={() => { detailRequest.current++;closeMenu(); setView("main"); setWorkspace(false); }}>主会话</button>
       <button className={`ghost block ${view === "tasks" ? "active" : ""}`} onClick={() => { detailRequest.current++;closeMenu(); setView("tasks"); setWorkspace(false); }}>任务列表</button>
       <button className="ghost block" onClick={() => { closeMenu(); openWorkspace(); }}>工作区</button>
-      <div className="sidebar-foot"><span className="muted tiny">{status?.agent.sessionReady ? "智能体在线" : "正在连接智能体"}</span><button className="ghost block" onClick={() => setTheme(t => t === "dark" ? "light" : "dark")}>{theme === "dark" ? "浅色模式" : "深色模式"}</button><button className="ghost block" onClick={settings}>配置</button><button className="ghost block" onClick={() => void logout()}>退出登录</button></div>
+      <div className="sidebar-foot"><span className="muted tiny">{status?.agent.sessionReady ? "智能体在线" : "正在连接智能体"}</span><button className="ghost block" onClick={() => setTheme(t => t === "dark" ? "light" : "dark")}>{theme === "dark" ? "浅色模式" : "深色模式"}</button>{role === "owner" && <button className="ghost block" onClick={settings}>配置</button>}<button className="ghost block" onClick={() => void logout()}>退出登录</button></div>
     </aside>
     <main className="main" inert={mobile && menuOpen}>
       {notice && <div className="banner" role="alert">{notice}<button onClick={() => setNotice(null)}>关闭</button></div>}
@@ -145,9 +147,9 @@ export function MainApp() {
       <div className="view-slot" hidden={view !== "main"}><TaskChat onFeed={setTaskFeed} onDetails={t => void details(t)} onOpenLink={u => void openLink(u)} onBrowserNavigate={() => { if (view === "main")
         revealBrowser(); }} onExpired={expired}/></div>
       <div className="view-slot" hidden={view !== 'tasks'}><TaskList feed={taskFeed} onDetails={t=>void details(t,'tasks')} onExpired={expired}/></div>
-      {view === "settings" && <Settings onBack={() => setView("main")}/>}
+      {role === "owner" && view === "settings" && <Settings onBack={() => setView("main")}/>}
       {view === "detail" && detail && <div className="task-detail"><div className="task-detail-bar"><button className="ghost" onClick={() => setView(detailReturn)}>← 返回{detailReturn==='tasks'?'任务列表':'主会话'}</button><span className="muted tiny">{taskStatusLabels[(taskFeed.tasks.find(t=>t.id===detailTask?.id)??detailTask)?.status??'']??'过程详情'}</span></div><Chat key={detail.id} readOnly conversation={detail} status={status} onConversationChanged={() => { }} onStatusChanged={() => void refreshStatus()} onOpenWorkspace={openWorkspace} onOpenBrowserLink={u => void openLink(u)} onAgentBrowserNavigate={revealBrowser}/></div>}
     </main>
-    <Workspace open={workspace} status={status} initialPath={workspacePath} browserNonce={browserNonce} onClose={() => { setWorkspace(false); setWorkspacePath(undefined); }} onNotify={notify}/>
+    <Workspace canConfigure={role === "owner"} open={workspace} status={status} initialPath={workspacePath} browserNonce={browserNonce} onClose={() => { setWorkspace(false); setWorkspacePath(undefined); }} onNotify={notify}/>
   </div>;
 }

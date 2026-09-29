@@ -9,6 +9,7 @@ import { needsRestore } from "../browserStatusView";
 import { browserApi, UI_KEEP_ALIVE_NOTE, type BrowserLifecycleStateView } from "../api";
 import { baseName, isPreviewableKind, kindLabel, workspaceFileKind, type WorkspaceFileKind } from "../sandboxLink";
 interface Props {
+  canConfigure?: boolean;
   open: boolean;
   status: StatusResponse | null;
   initialPath?: string;
@@ -31,7 +32,7 @@ const TABS: Array<{ id: TabId; label: string; path?: string; kind: "frame" | "na
   { id: "api", label: "接口与 MCP", kind: "native" },
 ];
 
-export function Workspace({ open, status, initialPath, onClose, onNotify, browserNonce }: Props) {
+export function Workspace({ open, status, initialPath, onClose, onNotify, browserNonce, canConfigure = true }: Props) {
   const [tab, setTab] = useState<TabId>("browser");
   const [frameSrc, setFrameSrc] = useState<string | null>(null);
   const [frameKey, setFrameKey] = useState(0);
@@ -427,7 +428,7 @@ export function Workspace({ open, status, initialPath, onClose, onNotify, browse
     <section className={`workspace ${fullscreen ? "fullscreen" : ""}`}>
       <header className="ws-head">
         <nav className="ws-tabs" role="tablist">
-          {TABS.map((t) => (
+          {TABS.filter(t => canConfigure || t.id !== "api").map((t) => (
             <button
               key={t.id}
               type="button"
@@ -467,7 +468,7 @@ export function Workspace({ open, status, initialPath, onClose, onNotify, browse
             onPinToggle={togglePin}
           />
         )}
-        {tab === "files" && <FilesTab notify={onNotify} onPreview={setFilePreview} />}
+        {tab === "files" && <FilesTab canConfigure={canConfigure} notify={onNotify} onPreview={setFilePreview} />}
         {tab === "preview" && (
           <div className="preview">
             <div className="row">
@@ -503,7 +504,7 @@ export function Workspace({ open, status, initialPath, onClose, onNotify, browse
             )}
           </div>
         )}
-        {tab === "api" && <ApiTab notify={onNotify} />}
+        {canConfigure && tab === "api" && <ApiTab notify={onNotify} />}
         {TABS.find((t) => t.id === tab)?.kind === "frame" && (
           <>
             {holdsBrowser && (suspended || restoringBrowser) ? (
@@ -635,9 +636,11 @@ function optionsForKind(kind: WorkspaceFileKind | null): Array<{ value: string; 
  * never blocks browsing or uploading ordinary files.
  */
 function FilesTab({
+  canConfigure,
   notify,
   onPreview,
 }: {
+  canConfigure: boolean;
   notify: (message: string, level?: "info" | "error") => void;
   onPreview: (path: string) => void;
 }) {
@@ -1043,7 +1046,7 @@ function FilesTab({
             </button>
           </div>
           {convertKind && <p className="muted tiny">当前文件类型：{kindLabel(convertKind)}</p>}
-          {!ready && (
+          {canConfigure && !ready && (
             <p className="muted tiny">
               {readiness?.enabled === false
                 ? "文档处理已被配置关闭；文件浏览、上传与下载不受影响。"
@@ -1114,7 +1117,7 @@ function FilesTab({
           <button type="button" className="ghost" onClick={() => void check(true)} disabled={checking}>
             重新检查
           </button>
-          {!ready && (
+          {canConfigure && !ready && (
             <button type="button" className="primary" onClick={() => void install()} disabled={installing || !readiness?.enabled}>
               {installing ? "安装中…" : "安装/修复"}
             </button>

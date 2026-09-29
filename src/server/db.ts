@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS meta (
 CREATE TABLE IF NOT EXISTS owners (
   id TEXT PRIMARY KEY,
   username TEXT NOT NULL UNIQUE,
+  role TEXT NOT NULL DEFAULT 'member' CHECK (role IN ('owner','member')),
   password_hash TEXT NOT NULL,
   password_salt TEXT NOT NULL,
   password_params TEXT NOT NULL,
@@ -189,6 +190,11 @@ export function openDb(dbPath: string): Db {
  * is added here when the live schema is missing it. Safe to run on every open.
  */
 function migrate(db: Db): void {
+  const users = db.prepare("PRAGMA table_info(owners)").all() as Array<{ name: string }>;
+  if (!users.some(c => c.name === "role")) {
+    db.exec("ALTER TABLE owners ADD COLUMN role TEXT NOT NULL DEFAULT 'member' CHECK (role IN ('owner','member'))");
+    db.exec("UPDATE owners SET role='owner' WHERE id='owner_1'");
+  }
   const taskColumns = db.prepare("PRAGMA table_info(tasks)").all() as Array<{ name: string }>;
   if (!taskColumns.some(c => c.name === "execution_conversation_id")) db.exec("ALTER TABLE tasks ADD COLUMN execution_conversation_id TEXT REFERENCES conversations(id)");
   if (!taskColumns.some(c => c.name === "merged_into")) db.exec("ALTER TABLE tasks ADD COLUMN merged_into TEXT REFERENCES tasks(id)");

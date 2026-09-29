@@ -2,11 +2,11 @@
 
 > Canonical repository: <https://github.com/clawpage/aio-agent>
 
-**AIO Agent** 是一个 single-owner、self-hosted 的智能体控制台：一个常驻 **AIO Sandbox** 容器，
-一个常驻 **Codex** 主智能体，中文 UI，桌面与手机功能对等。它适合个人或单人团队把
+**AIO Agent** 是一个 owner 管理的 self-hosted 的智能体控制台：一个常驻 **AIO Sandbox** 容器，
+一个常驻 **Codex** 主智能体，中文 UI，桌面与手机功能对等。它适合个人或受信任的小团队把
 Codex + AIO Sandbox 跑在自己的机器上，通过自己的入口访问。
 
-- **Single owner / self-hosted**：只有一个 owner 账号，没有注册入口，不是多租户服务，
+- **账号分级 / self-hosted**：一个 owner 管理配置，可由管理员创建 member 账号；没有注册入口，不是多租户隔离服务，
   也不对外提供公共 demo。
 - **Codex + AIO Sandbox**：命令、文件、浏览器、桌面、编辑器、笔记本都发生在容器里；
   控制面只以固定参数调用 Docker，不挂载宿主 home / workspace / `docker.sock`。
@@ -65,6 +65,14 @@ curl -s http://127.0.0.1:4891/healthz
 消息按浏览器本地时区显示“刚刚 / 几分钟前 / 今天 / 昨天 / 日期”，悬停可查看完整时间。
 任务执行中显示实时经过时长，结束后固定为处理用时；不含分配、排队或执行前等待用户补充，
 包含执行中的等待确认。没有实际开始记录、或执行结果未知时不推算处理时长。
+
+## 账号与权限
+
+- owner 保留模型、推理强度和 SOUL 配置。member 的主会话和任务列表只显示本账号内容，不能通过任务 ID 读取、引用或停止他人的任务。
+- member 的派单和执行均由服务端固定为 `deepseek-v4.1-flash` / `high`；忽略客户端模型参数，桥接不可用时拒绝执行，不回退 GPT。owner 的自动标题机制不会用于 member。
+- member 不展示配置入口、模型与推理参数、SOUL 原文；配置/模型/能力清单接口拒绝访问，JSON 与 SSE 隐去模型配置元数据。正常回答内容不会被关键词过滤。
+- **共享环境边界**：账号分级不等于容器隔离。文件、终端、浏览器、运行资源与 agent shell 仍共享，只能给受信任成员使用；需要不互信用户时必须先隔离沙箱和浏览器。此限制也意味着共享环境内的 shell 不是模型计费策略的安全边界。
+- 创建账号（先构建；使用与服务相同的环境变量/数据目录）：`node --env-file=var/runtime.env bin/create-user.mjs <username>`。Quickstart 使用 `.env`。随机密码写入 `var/user-secrets/<username>.txt`（0600），命令不打印密码、不覆盖已有账号，不提供公开注册。
 
 ## 主会话的克制追问
 
