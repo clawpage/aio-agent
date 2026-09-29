@@ -1222,6 +1222,36 @@ def test_parser_defaults_are_conservative() -> None:
 
 
 @test
+def test_wake_starts_blank_only_when_nothing_was_ever_saved() -> None:
+    """A browser that died before its first snapshot must be recoverable."""
+    calls: list[str] = []
+    saved = (rt.verify_helper, rt.start_supervisor, rt.wait_for_cdp, rt.reconnect_mcp_browser)
+    rt.verify_helper = lambda *a, **k: calls.append("verify") or {"ok": True}
+    rt.start_supervisor = lambda *a, **k: calls.append("start") or {"ok": True}
+    rt.wait_for_cdp = lambda *a, **k: True
+    rt.reconnect_mcp_browser = lambda: {"ok": True}
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "browser-snapshot.json")
+            result = rt.wake_browser(path)
+            assert_true(result["ok"], f"从未保存过快照时应启动空白浏览器：{result}")
+            assert_eq(result.get("restoredTabs"), 0, "空白启动不恢复任何标签")
+
+            with open(rt.restore_state_path_for(path), "w", encoding="utf-8") as handle:
+                handle.write("{}")
+            result = rt.wake_browser(path)
+            assert_false(result["ok"], "有恢复记录但快照缺失时必须拒绝")
+            os.unlink(rt.restore_state_path_for(path))
+
+            with open(path, "w", encoding="utf-8") as handle:
+                handle.write("not json")
+            result = rt.wake_browser(path)
+            assert_false(result["ok"], "快照损坏时必须拒绝，不得静默丢弃")
+    finally:
+        rt.verify_helper, rt.start_supervisor, rt.wait_for_cdp, rt.reconnect_mcp_browser = saved
+
+
+@test
 def test_status_and_check_do_not_require_a_lock() -> None:
     """Read-only commands must never be blocked by an in-flight release."""
     source = open(SCRIPT, encoding="utf-8").read()

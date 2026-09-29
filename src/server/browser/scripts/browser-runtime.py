@@ -2429,11 +2429,15 @@ def wake_browser(
 
     A browser is never started into a blank state while a snapshot is pending: the
     tabs are rebuilt first, so a caller can use the browser as soon as this
-    returns. The one exception is a snapshot path with nothing to restore, which
-    only proceeds when the operator explicitly asks for it (`--allow-blank`).
+    returns. A snapshot path with nothing to restore only proceeds when the
+    operator explicitly asks for it (`--allow-blank`), or when nothing was ever
+    saved: no snapshot file and no restore record means the browser was never
+    released (e.g. it crashed on a fresh volume), so there is no state to lose.
+    An unreadable or invalid snapshot still refuses.
     """
     snapshot, problem = read_snapshot(snapshot_path)
-    if snapshot is None and not allow_blank:
+    never_saved = not os.path.exists(snapshot_path) and not os.path.exists(restore_state_path_for(snapshot_path))
+    if snapshot is None and not allow_blank and not never_saved:
         return err(f"没有可恢复的快照，拒绝启动空白浏览器：{problem}", blocked=True)
 
     helper = verify_helper(helper_pid_file, helper_script)

@@ -282,6 +282,11 @@ done
   async create(): Promise<void> {
     const s = this.#cfg.sandbox;
     await this.ensureVolumes();
+    // A fresh named volume is root-owned, and the image starts Chromium at boot, long
+    // before #fixOwnership runs; the browser then dies on EACCES with no snapshot to
+    // restore. Hand the mount root to the sandbox user before the first boot.
+    const owned = await this.docker(["run", "--rm", "--network", "none", "--user", "0", "--entrypoint", "chown", "-v", `${s.browserVolume}:/v`, s.image, "1000:1000", "/v"], { timeoutMs: 60_000 });
+    if (owned.code !== 0) throw new Error(`failed to prepare browser volume: ${owned.stderr.trim()}`);
     if (s.networkName) {
       const found = await this.docker(["network", "inspect", s.networkName]);
       if (found.code !== 0) {
