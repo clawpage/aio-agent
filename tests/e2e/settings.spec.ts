@@ -313,7 +313,9 @@ test("config page has no horizontal overflow in dark and light at each viewport"
 });
 
 test('SOUL editor saves independently, preserves conflict drafts and persists empty clearing',async({page},info)=>{
+ await page.route('**/api/main*',r=>r.fulfill({json:{mode:'tasks',tasks:[],nextBefore:null}}));
  await setup(page,{settingsModels:[]});
+ const openSoul=async()=>{if(info.project.name.startsWith('mobile'))await page.getByRole('button',{name:'打开导航'}).click();await page.locator('.sidebar').getByRole('button',{name:'配置',exact:true}).click();};
  let content='# SOUL.md\n你是小助理。';let revision='one';let conflict=false;
  await page.route('**/api/settings/soul',async r=>{
   if(r.request().method()==='PUT'){
@@ -323,13 +325,13 @@ test('SOUL editor saves independently, preserves conflict drafts and persists em
   }
   return r.fulfill({json:{content,revision,defaultContent:'# SOUL.md\n默认助理',maxBytes:65536}});
  });
- await openSettings(page,info.project.name.startsWith('mobile'));
+ await openSoul();
  const editor=page.getByRole('textbox',{name:'SOUL.md 内容'});
  await expect(editor).toHaveValue(content);
  await editor.fill('# SOUL.md\n我叫 AIO，是你的个人助理。');
  await page.getByRole('button',{name:'保存 SOUL.md',exact:true}).click();
  await expect(page.getByText('SOUL.md 已保存，下次任务开始时生效。',{exact:true})).toBeVisible();
- await page.reload();await openSettings(page,info.project.name.startsWith('mobile'));await expect(editor).toHaveValue(content);
+ await page.reload();await openSoul();await expect(editor).toHaveValue(content);
  conflict=true;await editor.fill('保留未保存草稿');await page.getByRole('button',{name:'保存 SOUL.md',exact:true}).click();
  await expect(page.getByRole('region',{name:'助理设定'}).getByRole('alert')).toContainText('其他页面');await expect(editor).toHaveValue('保留未保存草稿');
  conflict=false;await editor.fill('');await page.getByRole('button',{name:'保存 SOUL.md',exact:true}).click();await expect(page.locator('.soul-saved')).toBeVisible();expect(content).toBe('');
