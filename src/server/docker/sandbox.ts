@@ -45,6 +45,7 @@ export function parseCodexVersion(output: string): string | null {
 export class SandboxContainer {
   #cfg: Config;
   #log: Logger;
+  #peerPolicy:Promise<void>=Promise.resolve();
 
   constructor(cfg: Config, log: Logger) {
     this.#cfg = cfg;
@@ -181,6 +182,7 @@ export class SandboxContainer {
     await this.waitReady();
     await this.waitUserReady();
     if(this.#cfg.memberRuntime) await this.isolateNetwork();
+    else if(this.#cfg.protectedMemberPorts?.length)await this.protectMemberPorts(this.#cfg.protectedMemberPorts);
     await this.#fixOwnership();
     await this.ensureCodexCli();
     await this.seedWorkspace();
@@ -228,6 +230,39 @@ done
 `;
     const applied=await this.docker(["run","--rm","-i","--network",`container:${this.name}`,"--read-only","--user","0","--cap-drop","ALL","--cap-add","NET_ADMIN","--security-opt","no-new-privileges",image],{stdin:script,timeoutMs:60_000});
     if(applied.code!==0)throw new Error("Unable to enforce member network isolation");
+  }
+
+  /** Prevent owner tools accidentally reaching member APIs through Docker Desktop host forwarding. */
+  protectMemberPorts(ports:number[]):Promise<void>{
+    if(ports.some(p=>!Number.isInteger(p)||p<1||p>65535))return Promise.reject(new Error("Invalid peer port"));
+    this.#cfg.protectedMemberPorts=[...new Set([...(this.#cfg.protectedMemberPorts??[]),...ports])];
+    const next=this.#peerPolicy.catch(()=>{}).then(()=>this.#applyPeerPorts(this.#cfg.protectedMemberPorts!));
+    this.#peerPolicy=next;return next;
+  }
+  async #applyPeerPorts(ports:number[]):Promise<void>{
+    if(ports.some(p=>!Number.isInteger(p)||p<1||p>65535))throw new Error("Invalid peer port");
+    this.#cfg.protectedMemberPorts=[...ports];
+    const script=`set -eu
+chain=AIO_PEERS_${Math.random().toString(16).slice(2,14)}
+iptables -N "$chain"
+for ip in 10.0.0.0/8 100.64.0.0/10 169.254.0.0/16 172.16.0.0/12 192.168.0.0/16; do
+  for port in ${ports.join(' ')}; do iptables -A "$chain" -d "$ip" -p tcp --dport "$port" -j REJECT; done
+done
+iptables -I OUTPUT 1 -j "$chain"
+for old in $(iptables -S OUTPUT | awk '$1=="-A" && $3=="-j" && $4 ~ /^AIO_PEERS_/ {print $4}'); do
+  if [ "$old" != "$chain" ]; then iptables -D OUTPUT -j "$old"; iptables -F "$old"; iptables -X "$old"; fi
+done
+# IPv6 host.docker.internal is another route to the same published ports.
+chain6=AIO_PEERS_${Math.random().toString(16).slice(2,14)}
+ip6tables -N "$chain6"
+for port in ${ports.join(' ')}; do ip6tables -A "$chain6" -d fc00::/7 -p tcp --dport "$port" -j REJECT; done
+ip6tables -I OUTPUT 1 -j "$chain6"
+for old in $(ip6tables -S OUTPUT | awk '$1=="-A" && $3=="-j" && $4 ~ /^AIO_PEERS_/ {print $4}'); do
+  if [ "$old" != "$chain6" ]; then ip6tables -D OUTPUT -j "$old"; ip6tables -F "$old"; ip6tables -X "$old"; fi
+done
+`;
+    const applied=await this.docker(["run","--rm","-i","--network",`container:${this.name}`,"--read-only","--user","0","--cap-drop","ALL","--cap-add","NET_ADMIN","--security-opt","no-new-privileges","aio-agent-network-guard:1"],{stdin:script});
+    if(applied.code!==0)throw new Error("Unable to restrict cross-account sandbox ports");
   }
 
   /** Wait until the sandbox user exists inside the container. */

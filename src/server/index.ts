@@ -52,6 +52,7 @@ export async function bootstrap(opts: BootstrapOptions = {}): Promise<Bootstrapp
     opts.log ??
     new Logger(process.env.PA_LOG_LEVEL === "debug" ? "debug" : "info", `${cfg.logDir}/personal-agent.log`, true);
   const db = openDb(cfg.dbPath);
+  if(!cfg.memberRuntime)cfg.protectedMemberPorts=(db.prepare("SELECT value FROM meta WHERE key LIKE 'sandbox_port:%'").all() as {value:string}[]).map(x=>Number(x.value));
 
   if (opts.identity) {
     const u = opts.identity;

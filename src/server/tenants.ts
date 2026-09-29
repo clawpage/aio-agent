@@ -61,6 +61,10 @@ export class UserRuntimes {
     if(runtime.ctx.cfg.sandbox.autostart){
       try{await runtime.ctx.container.ensureRunning();}catch(err){await runtime.shutdown();throw err;}
     }
+    if(runtime.ctx.cfg.sandbox.autostart){
+      const ports=(this.root.db.prepare("SELECT value FROM meta WHERE key LIKE 'sandbox_port:%'").all() as {value:string}[]).map(x=>Number(x.value));
+      try{await this.root.container.protectMemberPorts(ports);}catch(err){await runtime.shutdown();throw err;}
+    }
     await runtime.ctx.agent.init();runtime.ctx.tasks.init();
     if(runtime.ctx.cfg.sandbox.autostart){
       await startSandboxRuntime(runtime.ctx);

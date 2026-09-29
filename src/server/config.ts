@@ -45,6 +45,7 @@ function bridgeModelIds(): string[] {
 }
 
 export function loadConfig(): {
+  protectedMemberPorts?: number[];
   runtimeUserId?: string;
   memberRuntime?: boolean;
   memberModelPort?: number;
