@@ -218,7 +218,9 @@ helper 内、紧挨着信号发生。
   启动时修正 `/home/gem/.config` 等父目录属主并只重启需要的 supervisord 程序（例如 code-server），
   绝不 `restart all`。
 - `BROWSER_NO_SANDBOX=--no-sandbox` 是该镜像在 Docker Desktop 的 Linux VM 里运行 Chromium
-  的必要条件（VM 不支持 user namespace），仅影响容器内部浏览器。
+  的必要条件（VM 不支持 user namespace），仅影响容器内部浏览器。member 容器同样只带这一个固定参数
+  （不继承 owner 的 `PA_SANDBOX_EXTRA_ENV`），隔离边界是容器本身；该参数只在创建容器时生效，
+  已有 member 容器需删除后由控制面重建（命名卷保留）。
 
 ## 数据与持久化
 

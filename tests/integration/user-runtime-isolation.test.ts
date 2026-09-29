@@ -66,6 +66,8 @@ it('derives disjoint persistent data, volumes and networks, coalesces concurrent
   for(const key of ['dbPath','dataDir','logDir'] as const)expect(a[key]).not.toBe(b[key]);
   for(const key of ['workspaceVolume','codexVolume','browserVolume','networkName','containerName','hostPort'] as const){expect(a.sandbox[key]).not.toBe(b.sandbox[key]);expect(a.sandbox[key]).not.toBe(h.ctx.cfg.sandbox[key]);}
   expect(a.memberRuntime).toBe(true);expect(a.bridge.models).toEqual(['deepseek-v4.1-flash']);
+  // Only the fixed Chromium flag reaches a member container, never the owner's extra env.
+  expect(memberConfig({...h.ctx.cfg,sandbox:{...h.ctx.cfg.sandbox,extraEnv:['OWNER_ONLY=1']}},u.id,19001).sandbox.extraEnv).toEqual(['BROWSER_NO_SANDBOX=--no-sandbox']);
   let calls=0;
   const registry=new UserRuntimes(h.ctx,async opts=>{calls++;expect(opts?.identity?.id).toBe(u.id);return {ctx:h.ctx,db:h.ctx.db,shutdown:async()=>{}};});
   await Promise.all([registry.resolve(u.id),registry.resolve(u.id)]);expect(calls).toBe(1);

@@ -16,7 +16,9 @@ export function memberConfig(base: Config, userId: string, port: number): Config
     agent:{...base.agent,defaultModel:'deepseek-v4.1-flash'},
     sandbox:{...base.sandbox,hostPort:port,containerName:`aio-user-${suffix}`,
       networkName:`aio-user-${suffix}`,workspaceVolume:`aio-user-${suffix}-workspace`,
-      codexVolume:`aio-user-${suffix}-codex`,browserVolume:`aio-user-${suffix}-browser`,extraEnv:[]},
+      // Owner PA_SANDBOX_EXTRA_ENV is never inherited; only the fixed flag Chromium needs
+      // on Docker Desktop (no user namespaces for its zygote), or the browser crash-loops.
+      codexVolume:`aio-user-${suffix}-codex`,browserVolume:`aio-user-${suffix}-browser`,extraEnv:['BROWSER_NO_SANDBOX=--no-sandbox']},
     bridge:{...base.bridge,models:['deepseek-v4.1-flash']},
   };
 }
