@@ -1,6 +1,7 @@
 import { HTML_PREVIEW_CSP, htmlPreviewDocument } from "../../src/server/documents/html";
 import { expect, test, type Page, type Route } from "@playwright/test";
 import { makeConversation, mockConsole } from "./mock-api";
+import fs from "node:fs";
 
 /**
  * In-conversation file cards, the unified preview, and the merged 「文件」 tab.
@@ -163,6 +164,43 @@ async function openConversation(page: Page, id: string, markdown: string): Promi
 }
 
 test.describe("in-conversation file cards", () => {
+  test("MP4 card plays, seeks, closes and opens from the workspace on mobile too",async({page},info)=>{
+    const videoPath='/home/gem/workspace/demo.MP4';
+    const bytes=fs.readFileSync(new URL('../fixtures/preview.mp4',import.meta.url));
+    await mockDocuments(page,{files:{'/home/gem/workspace':[{name:'demo.MP4',path:videoPath,size:bytes.length,is_directory:false}]}});
+    await page.route('**/api/documents/video**',route=>{
+      const range=route.request().headers()['range'];const match=/bytes=(\d+)-(\d*)/.exec(range??'');
+      const start=match?Number(match[1]):0,end=match?.[2]?Math.min(Number(match[2]),bytes.length-1):bytes.length-1;
+      return route.fulfill({status:match?206:200,headers:{'content-type':'video/mp4','accept-ranges':'bytes',...(match?{'content-range':`bytes ${start}-${end}/${bytes.length}`}:{})},body:bytes.subarray(start,end+1)});
+    });
+    await openConversation(page,'mp4-preview','[演示视频](/home/gem/workspace/demo.MP4)');
+    await expect(page.getByTestId('file-card')).toHaveAttribute('data-kind','video');
+    await expect(page.getByTestId('file-card')).toContainText('MP4 视频');
+    await page.getByRole('button',{name:'预览 演示视频',exact:true}).click();
+    const player=page.getByTestId('file-preview-video');
+    await expect.poll(()=>player.evaluate(node=>(node as HTMLVideoElement).readyState)).toBeGreaterThanOrEqual(1);
+    await expect(player).toHaveAttribute('playsinline','');await expect(player).toHaveJSProperty('paused',true);
+    await player.evaluate(async node=>{const v=node as HTMLVideoElement;v.muted=true;await v.play();});
+    await expect.poll(()=>player.evaluate(node=>(node as HTMLVideoElement).currentTime)).toBeGreaterThan(0);
+    await player.evaluate(node=>{const v=node as HTMLVideoElement;v.pause();v.currentTime=2;});
+    await expect.poll(()=>player.evaluate(node=>(node as HTMLVideoElement).seeking)).toBe(false);
+    await expect(player).toHaveJSProperty('currentTime',2);
+    if(info.project.name.startsWith('mobile')) await page.setViewportSize({width:360,height:844});
+    expect(await page.evaluate(()=>document.documentElement.scrollWidth-innerWidth)).toBeLessThanOrEqual(1);
+    await page.screenshot({path:info.outputPath('mp4-preview.png')});
+    await expect(page.getByTestId('file-preview-download')).toBeVisible();
+    await page.getByRole('button',{name:'关闭预览'}).click();await expect(player).toHaveCount(0);
+    await page.getByRole('button',{name:'工作区',exact:true}).first().click();await page.getByRole('tab',{name:'文件',exact:true}).click();
+    await page.locator('.file-list > li').filter({hasText:'demo.MP4'}).getByRole('button',{name:'预览',exact:true}).click();
+    await expect.poll(()=>player.evaluate(node=>(node as HTMLVideoElement).readyState)).toBeGreaterThanOrEqual(1);
+  });
+  test("MP4 failures show a retry and preserve original download",async({page})=>{
+    await mockDocuments(page);await page.route('**/api/documents/video**',r=>r.fulfill({status:404,body:'missing'}));
+    await openConversation(page,'mp4-missing','[视频](/home/gem/workspace/missing.mp4)');
+    await page.getByRole('button',{name:'预览 视频',exact:true}).click();
+    await expect(page.getByRole('alert')).toContainText('视频无法播放');await expect(page.getByTestId('file-preview-download')).toBeVisible();
+    await page.getByRole('button',{name:'重试',exact:true}).click();await expect(page.getByRole('alert')).toContainText('视频无法播放');
+  });
   test("a Markdown file reference becomes a card with a thumbnail and a download link", async ({ page }) => {
     await mockDocuments(page);
     await openConversation(page, "conv_e2e_cards", "结果见 [报告](/home/gem/workspace/report.docx) 和 [图片](/home/gem/workspace/garden.png)");

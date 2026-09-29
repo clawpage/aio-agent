@@ -116,6 +116,12 @@ export function FilePreview({ path: initialPath, onClose, onOpenLink, onConvert,
           setPhase("unsupported");
           return;
         }
+        if (kind === "video") {
+          // Native media requests carry the session cookie and use byte ranges;
+          // never download a whole video into an object URL first.
+          setPhase("ready");
+          return;
+        }
         if (kind === "image") {
           // The inline image endpoint (not the download endpoint): it returns a
           // real image content type after sniffing the bytes.
@@ -172,7 +178,7 @@ export function FilePreview({ path: initialPath, onClose, onOpenLink, onConvert,
   }, [kind, path, html, attempt]);
 
   const retry = useCallback(() => setAttempt((n) => n + 1), []);
-  const raster = isPreviewableKind(kind) && kind !== "image";
+  const raster = isPreviewableKind(kind) && kind !== "image" && kind !== "video";
   const refs = useMemo(() => markdown && text ? extractFileRefs(text) : [], [markdown, text]);
   const openLink = async (url: string) => {
     if (onOpenLink) { onOpenLink(url); onClose(); return; }
@@ -233,6 +239,12 @@ export function FilePreview({ path: initialPath, onClose, onOpenLink, onConvert,
               setError("图片无法解码，可能已损坏或不是真正的图片格式");
               setPhase("error");
             }} />
+          )}
+
+          {phase === "ready" && kind === "video" && (
+            <video key={`${path}#${attempt}`} className="file-preview-video" data-testid="file-preview-video"
+              aria-label={`播放 ${name}`} src={api.documentVideoUrl(path)} controls playsInline preload="metadata"
+              onError={() => { setError("视频无法播放：文件可能已移动、损坏，或编码不受浏览器支持。可以重试或下载原文件查看。"); setPhase("error"); }} />
           )}
 
           {phase === "ready" && kind === "text" && text !== null && (

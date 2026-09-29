@@ -1,6 +1,8 @@
 import { HTML_PREVIEW_CSP, htmlPreviewDocument } from "../documents/html.js";
 import express, { type Request, type Response, type NextFunction, type Router } from "express";
 import { randomUUID } from "node:crypto";
+import { Readable } from "node:stream";
+import { pipeline } from "node:stream/promises";
 import type { AppContext } from "../context.js";
 import {
   InvalidConversationTitleError,
@@ -1097,6 +1099,34 @@ export function createApiRouter(context: AppContext): Router {
       res.setHeader("Cache-Control", "no-store");
       res.setHeader("Content-Disposition", "inline");
       res.end(image.bytes);
+    }),
+  );
+
+  router.get("/documents/video", requireKind("primary"), requireSession,
+    documentHandler(async (req, res) => {
+      const target = checkedDocumentPath(String(req.query.path ?? ""));
+      const controller = new AbortController();
+      const cancel = () => controller.abort();
+      res.on("close", cancel);
+      try {
+        const upstream = await context.documents.video(target, req.headers.range, req.method === "HEAD",
+          AbortSignal.any([controller.signal, AbortSignal.timeout(10 * 60_000)]));
+        res.status(upstream.status);
+        res.setHeader("Content-Type", "video/mp4");
+        res.setHeader("X-Content-Type-Options", "nosniff");
+        res.setHeader("Cache-Control", "no-store");
+        res.setHeader("Content-Disposition", "inline");
+        res.setHeader("Accept-Ranges", "bytes");
+        for (const key of ["content-length", "content-range"]) {
+          const value = upstream.headers.get(key); if (value) res.setHeader(key, value);
+        }
+        if (upstream.body && req.method !== "HEAD") {
+          await pipeline(Readable.fromWeb(upstream.body as import("node:stream/web").ReadableStream), res);
+        } else { await upstream.body?.cancel(); res.end(); }
+      } catch (err) {
+        if (res.headersSent || controller.signal.aborted) { res.destroy(); return; }
+        throw err;
+      } finally { res.off("close", cancel); }
     }),
   );
 

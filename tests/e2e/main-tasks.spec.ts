@@ -1,6 +1,7 @@
 import { test, expect, type Page } from "@playwright/test";
 import { makeConversation, mockConsole } from "./mock-api";
 import type { Task } from "../../src/web/src/types";
+import fs from "node:fs";
 function task(n: number, status = "running"): Task {
     return { id: `task-${n}`, revision: 1, title: `任务 ${n}`, text: `请求 ${n}`, conversationId: `child-${n}`, status, result: null, error: null, attachments: [], relatedTaskId: null, dependencies: [], approvals: 0, createdAt: 1000 + n, completedAt: null };
 }
@@ -31,6 +32,20 @@ async function setup(page: Page, rows: Task[] = []) {
     return { rows, bodies, stops };
 }
 const send = async (page: Page, text: string) => { await page.getByRole("textbox", { name: "消息", exact: true }).fill(text); await page.getByRole("button", { name: "发送", exact: true }).click(); await expect(page.getByRole("textbox", { name: "消息", exact: true })).toHaveValue(""); };
+test("MP4 attachments and results preview directly in the main inbox",async({page},info)=>{
+    const path='/home/gem/workspace/uploads/demo.mp4';
+    const row={...task(1,'completed'),attachments:[{name:'demo.mp4',path,kind:'file' as const,size:3641}],result:`[视频结果](${path})`,completedAt:Date.now()};
+    await page.route('**/api/documents/video**',r=>r.fulfill({contentType:'video/mp4',body:fs.readFileSync(new URL('../fixtures/preview.mp4',import.meta.url))}));
+    await setup(page,[row]);
+    for(const label of ['预览 demo.mp4','预览 视频结果']){
+      await page.getByRole('button',{name:label,exact:true}).click();
+      const video=page.getByTestId('file-preview-video');
+      await expect.poll(()=>video.evaluate(n=>(n as HTMLVideoElement).readyState)).toBeGreaterThanOrEqual(1);
+      await expect(page.getByTestId('file-preview-download')).toHaveAttribute('href',`/api/files/download?path=${encodeURIComponent(path)}`);
+      await page.screenshot({path:info.outputPath('main-mp4.png')});
+      await page.getByRole('button',{name:'关闭预览'}).click();
+    }
+});
 test("one inbox accepts parallel messages, folds progress, reports completion order and survives reload", async ({ page }, info) => {
     const { rows, bodies } = await setup(page);
     await expect(page.locator(".chat-head").getByRole("button", { name: "工作区", exact: true })).toHaveCount(0);

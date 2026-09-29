@@ -140,6 +140,44 @@ function baseHandler(opts: {
 }
 
 describe("DocumentService path and revision handling", () => {
+  it("streams video ranges and HEAD from the resolved path without buffering the file", async () => {
+    const {svc}=service(baseHandler({realPath:`${ROOT}/real.mp4`}));
+    const header=Buffer.alloc(32);header.write('ftypisom',4);
+    const calls: Array<{url:string;init?:RequestInit}>=[];
+    const fetcher=vi.spyOn(globalThis,'fetch').mockImplementation(async(url,init)=>{
+      calls.push({url:String(url),init});
+      return init?.headers && new Headers(init.headers).get('range')==='bytes=0-31'
+        ? new Response(header,{status:206,headers:{'content-length':'32'}})
+        : new Response(init?.method==='HEAD'?null:'data',{status:206,headers:{'content-range':'bytes 50-53/100'}});
+    });
+    try {
+      const result=await svc.video(`${ROOT}/alias.MP4`,'bytes=50-53',false,new AbortController().signal);
+      expect(await result.text()).toBe('data');expect(result.status).toBe(206);
+      expect(calls[1]!.url).toContain(encodeURIComponent(`${ROOT}/real.mp4`));expect(new Headers(calls[1]!.init?.headers).get('range')).toBe('bytes=50-53');
+      const head=await svc.video(`${ROOT}/alias.mp4`,undefined,true,new AbortController().signal);
+      expect(head.body).toBeNull();expect(calls.at(-1)!.init?.method).not.toBe('HEAD');
+    } finally {fetcher.mockRestore();}
+  });
+  it("rejects fake MP4, missing files, escaped symlinks and unsupported extensions",async()=>{
+    const fetcher=vi.spyOn(globalThis,'fetch').mockResolvedValue(new Response('<html>not a movie</html>',{status:206}));
+    try {
+      const {svc}=service(baseHandler({realPath:`${ROOT}/fake.mp4`}));
+      await expect(svc.video(`${ROOT}/fake.mp4`,undefined,false,new AbortController().signal)).rejects.toMatchObject({status:415});
+      await expect(svc.video(`${ROOT}/x.html`,undefined,false,new AbortController().signal)).rejects.toMatchObject({status:415});
+      const escaped=service(baseHandler({realPath:'/etc/private.mp4'})).svc;
+      await expect(escaped.video(`${ROOT}/link.mp4`,undefined,false,new AbortController().signal)).rejects.toMatchObject({status:404});
+      expect(fetcher).toHaveBeenCalledTimes(1);
+    } finally {fetcher.mockRestore();}
+  });
+  it("rejects multipart ranges and cancels an upstream that ignores the probe range",async()=>{
+    const {svc}=service(baseHandler({realPath:`${ROOT}/a.mp4`}));const cancel=vi.fn();
+    const fetcher=vi.spyOn(globalThis,'fetch').mockResolvedValue(new Response(new ReadableStream({cancel}),{status:200}));
+    try {
+      const res=await svc.video(`${ROOT}/a.mp4`,'bytes=0-2,5-7',false,new AbortController().signal);
+      expect(res.status).toBe(416);expect(res.headers.get('content-range')).toBe('bytes */100');expect(fetcher).not.toHaveBeenCalled();
+      await expect(svc.video(`${ROOT}/a.mp4`,undefined,false,new AbortController().signal)).rejects.toMatchObject({status:502});expect(cancel).toHaveBeenCalled();
+    } finally {fetcher.mockRestore();}
+  });
   it("refuses a path whose realpath escapes the workspace", async () => {
     const { svc } = service(baseHandler({ realPath: "/etc/passwd" }));
     await expect(svc.render(`${ROOT}/link.docx`)).rejects.toMatchObject({ code: "not_found" });

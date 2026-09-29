@@ -185,6 +185,7 @@ export const api = {
    * the bytes and refuses anything that is not really an image.
    */
   documentImageUrl: (path: string) => `/api/documents/image?path=${encodeURIComponent(path)}`,
+  documentVideoUrl: (path: string) => `/api/documents/video?path=${encodeURIComponent(path)}`,
   convertDocument: (path: string, format: string) =>
     request<{ path: string; bytes: number }>("/api/documents/convert", { method: "POST", body: { path, format } }),
   documentHtmlUrl: (path: string) => `/api/documents/html?path=${encodeURIComponent(path)}`,

@@ -763,6 +763,58 @@ print("venv" if venv_python else "novenv")
     return buffer;
   }
 
+  /** Stream MP4 from the sandbox, preserving range requests for seeking/Safari. */
+  async video(validatedPath: string, range: string | undefined, head: boolean, signal: AbortSignal): Promise<Response> {
+    if (!this.enabled) throw new DocumentError("disabled", "文档工具已由配置关闭", 409);
+    if (documentKind(validatedPath) !== "video") throw new DocumentError("unsupported", "仅支持 MP4 视频预览", 415);
+    const stat = await this.stat(validatedPath);
+    if (!stat.exists) throw new DocumentError("not_found", "文件不存在或已被移动", 404);
+    if (!stat.isFile) throw new DocumentError("not_a_file", "该路径不是普通文件", 400);
+    if (!stat.size) throw new DocumentError("empty_file", "文件是空的（0 字节）", 422);
+    // Only one byte range is needed by media elements. Avoid multipart responses
+    // and validate numbers before handing them to the sandbox HTTP server.
+    if (range && !/^bytes=(?:\d+-\d*|-\d+)$/.test(range)) {
+      return new Response(null, { status: 416, headers: { "content-range": `bytes */${stat.size}` } });
+    }
+    const url = `http://127.0.0.1:${this.#cfg.sandbox.hostPort}/v1/file/download?path=${encodeURIComponent(stat.realPath)}`;
+    const probe = await fetch(url, { headers: { Range: "bytes=0-31" }, signal });
+    // Never buffer a full file when an upstream stops honoring Range.
+    if (probe.status !== 206 || Number(probe.headers.get("content-length")) > 32) {
+      await probe.body?.cancel();
+      throw new DocumentError("sandbox_unreachable", "无法分段读取视频，请重试或下载查看", 502);
+    }
+    const reader = probe.body?.getReader();
+    const prefix = Buffer.alloc(32);
+    let count = 0;
+    try {
+      while (reader && count < prefix.length) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        const length = Math.min(value.length, prefix.length - count);
+        prefix.set(value.subarray(0, length), count); count += length;
+      }
+    } finally { await reader?.cancel(); }
+    if (count < 12 || prefix.toString("ascii", 4, 8) !== "ftyp") {
+      throw new DocumentError("unsupported", "文件不是有效的 MP4 视频", 415);
+    }
+    // AIO's download route does not implement HEAD. Fetch only its headers,
+    // then cancel the body for HEAD rather than exposing that upstream 405.
+    const upstream = await fetch(url, { headers: range ? { Range: range } : {}, signal });
+    if (![200, 206, 416].includes(upstream.status)) {
+      await upstream.body?.cancel();
+      throw new DocumentError("sandbox_unreachable", "无法读取视频，请重试或下载查看", 502);
+    }
+    if (upstream.status === 416) {
+      await upstream.body?.cancel();
+      return new Response(null, {status:416, headers:{"content-range":`bytes */${stat.size}`}});
+    }
+    if (head) {
+      await upstream.body?.cancel();
+      return new Response(null, {status:upstream.status, headers:upstream.headers});
+    }
+    return upstream;
+  }
+
   #store(key: string, result: RenderResult): void {
     const bytes = result.pages.reduce((total, page) => total + page.bytes.byteLength, 0);
     const budget = this.#cfg.documents.cacheMaxBytes;

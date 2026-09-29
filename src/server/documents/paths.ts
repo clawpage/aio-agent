@@ -13,7 +13,7 @@
  * rejected even though the lexical path looked valid.
  */
 
-export type DocumentKind = "image" | "pdf" | "word" | "excel" | "ppt" | "text" | "unsupported";
+export type DocumentKind = "image" | "video" | "pdf" | "word" | "excel" | "ppt" | "text" | "unsupported";
 
 /**
  * Extension classification. Raster images are streamed as-is; pdf/word/excel/ppt
@@ -24,6 +24,7 @@ export type DocumentKind = "image" | "pdf" | "word" | "excel" | "ppt" | "text" |
  * as markup, so agent-produced active content cannot execute in the console.
  */
 const KIND_BY_EXTENSION: Record<string, DocumentKind> = {
+  mp4: "video",
   png: "image",
   jpg: "image",
   jpeg: "image",

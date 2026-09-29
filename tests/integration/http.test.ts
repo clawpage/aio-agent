@@ -1080,6 +1080,24 @@ async function bootstrapWorkspaceWithSession(h: TestHarness): Promise<{ cookie: 
 }
 
 describe("document endpoints", () => {
+  it("authenticates video streams, validates paths, and preserves range/HEAD responses",async()=>{
+    const {cookie}=await login(h);
+    const video=vi.spyOn(h.ctx.documents,'video').mockImplementation(async(_path,range,head)=>new Response(head?null:'part',{
+      status:206,headers:{'content-length':'4','content-range':'bytes 2-5/100'}
+    }));
+    try {
+      const url='/api/documents/video?path=/home/gem/workspace/movie.mp4';
+      expect((await h.request(url)).status).toBe(401);
+      expect((await h.request('/api/documents/video?path=/etc/private.mp4',{headers:{cookie}})).status).toBe(400);
+      expect(video).not.toHaveBeenCalled();
+      const res=await h.request(url,{headers:{cookie,range:'bytes=2-5'}});
+      expect(res.status).toBe(206);expect(res.headers.get('content-type')).toBe('video/mp4');expect(res.headers.get('content-range')).toBe('bytes 2-5/100');expect(res.headers.get('accept-ranges')).toBe('bytes');expect(res.headers.get('content-disposition')).toBe('inline');expect(res.headers.get('cache-control')).toBe('no-store');expect(await res.text()).toBe('part');
+      expect(video.mock.calls[0]![1]).toBe('bytes=2-5');
+      const head=await h.request(url,{method:'HEAD',headers:{cookie}});expect(head.status).toBe(206);expect(await head.text()).toBe('');expect(video.mock.calls.at(-1)![2]).toBe(true);
+      video.mockResolvedValue(new Response(null,{status:416,headers:{'content-range':'bytes */100'}}));
+      const bad=await h.request(url,{headers:{cookie,range:'bytes=999-'}});expect(bad.status).toBe(416);expect(bad.headers.get('content-range')).toBe('bytes */100');
+    } finally {video.mockRestore();}
+  });
   it("serves HTML only with origin isolation, no network and size/path guards", async () => {
     const {cookie}=await login(h);
     const {cookie:wsCookie}=await bootstrapWorkspace(h);

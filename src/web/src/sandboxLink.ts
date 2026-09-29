@@ -31,9 +31,10 @@ export const IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "webp", "gif", "a
  * `text` uses the size-capped text endpoint. Markdown gets a sanitized reading
  * view; HTML/SVG/code remain escaped source, never active documents.
  */
-export type WorkspaceFileKind = "image" | "pdf" | "word" | "excel" | "ppt" | "text" | "unsupported";
+export type WorkspaceFileKind = "image" | "video" | "pdf" | "word" | "excel" | "ppt" | "text" | "unsupported";
 
 const KIND_BY_EXTENSION: Record<string, WorkspaceFileKind> = {
+  mp4: "video",
   png: "image", jpg: "image", jpeg: "image", webp: "image", gif: "image", avif: "image", bmp: "image",
   pdf: "pdf",
   doc: "word", docx: "word", odt: "word", rtf: "word",
@@ -105,6 +106,8 @@ export function workspaceFileKind(path: string): WorkspaceFileKind {
 /** Human label for a kind, used by cards and the preview header. */
 export function kindLabel(kind: WorkspaceFileKind): string {
   switch (kind) {
+    case "video":
+      return "MP4 视频";
     case "image":
       return "图片";
     case "pdf":
@@ -125,6 +128,8 @@ export function kindLabel(kind: WorkspaceFileKind): string {
 /** A short badge shown on a file card; kept ASCII so it renders everywhere. */
 export function kindBadge(kind: WorkspaceFileKind): string {
   switch (kind) {
+    case "video":
+      return "MP4";
     case "image":
       return "IMG";
     case "pdf":
@@ -142,9 +147,9 @@ export function kindBadge(kind: WorkspaceFileKind): string {
   }
 }
 
-/** True for kinds the sandbox can rasterise into page previews. */
+/** Binary kinds with an inline preview (native media or raster pages). */
 export function isPreviewableKind(kind: WorkspaceFileKind): boolean {
-  return kind === "image" || kind === "pdf" || kind === "word" || kind === "excel" || kind === "ppt";
+  return kind === "video" || kind === "image" || kind === "pdf" || kind === "word" || kind === "excel" || kind === "ppt";
 }
 
 /** File name from a workspace path, for display. */

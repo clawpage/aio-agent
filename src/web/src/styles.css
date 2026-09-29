@@ -2301,3 +2301,5 @@ textarea:focus {
 .task-reference > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
 .task-reference strong { font-size: 13px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .task-reference > button { flex-shrink: 0; min-width: 36px; min-height: 36px; padding: 4px; }
+
+.file-preview-video { display: block; width: 100%; max-width: 100%; max-height: 65dvh; min-height: 120px; background: #000; border-radius: 8px; }
