@@ -245,6 +245,83 @@ test("config page explains a text-only bridge model and saves it with its own ef
   await expect(page.getByRole("note")).toHaveCount(0);
 });
 
+test("config page chooses the executor, then only that executor's models", async ({ page }, info) => {
+  const mobile = info.project.name.startsWith("mobile");
+  const claude = (id: string, name: string) => ({
+    id,
+    displayName: `${name}（Claude Code）`,
+    supportedReasoningEfforts: ["low", "medium", "high", "xhigh", "max"],
+    defaultReasoningEffort: null,
+    inputModalities: ["text", "image"],
+    modelProvider: "claude-code",
+  });
+  const settings = await setup(page, {
+    settingsModels: [
+      { id: "gpt-6-sol", displayName: "GPT-6-Sol", supportedReasoningEfforts: ["low", "medium", "high"], defaultReasoningEffort: "medium" },
+      {
+        id: "deepseek-v4.1-flash",
+        displayName: "DeepSeek V4.1 Flash（OpenCode Go）",
+        supportedReasoningEfforts: ["low", "high", "max"],
+        defaultReasoningEffort: "high",
+        inputModalities: ["text"],
+        modelProvider: "opencode_go",
+      },
+      claude("claude-opus-5-5", "Claude Opus 5.5"),
+      claude("claude-sonnet-5-5", "Claude Sonnet 5.5"),
+    ],
+  });
+  let savedBody: unknown;
+  await page.route("**/api/settings", async (route) => {
+    if (route.request().method() === "PUT") savedBody = route.request().postDataJSON();
+    await route.fallback();
+  });
+  const optionValues = (label: string) =>
+    page.getByLabel(label, { exact: true }).locator("option").evaluateAll((options) => options.map((o) => (o as HTMLOptionElement).value));
+
+  await openSettings(page, mobile);
+  await waitForLoadedSettings(page);
+  const executor = page.getByLabel("执行器", { exact: true });
+  await expect(executor).toHaveValue("codex");
+  // Codex keeps its own models (including the bridge ones) and nothing else.
+  expect(await optionValues("模型")).toEqual(["gpt-6-sol", "deepseek-v4.1-flash"]);
+
+  await executor.selectOption("claude-code");
+  await expect(page.getByLabel("模型", { exact: true })).toHaveValue("claude-opus-5-5");
+  expect(await optionValues("模型")).toEqual(["claude-opus-5-5", "claude-sonnet-5-5"]);
+  await expect(page.locator(".settings-fields")).toContainText("主会话派单、任务执行和自动标题都由 Claude Code 完成");
+  // Claude models take images: no text-only note.
+  await expect(page.getByRole("note")).toHaveCount(0);
+  await page.getByLabel("思考强度", { exact: true }).selectOption("xhigh");
+  await page.getByRole("button", { name: "保存", exact: true }).click();
+  await expect(page.locator(".banner.ok")).toContainText("已保存");
+  expect(savedBody).toMatchObject({ model: "claude-opus-5-5", effort: "xhigh" });
+  expect(settings).toMatchObject({ model: "claude-opus-5-5", effort: "xhigh" });
+
+  await mkdir(evidence, { recursive: true });
+  await page.screenshot({ path: `${evidence}/executor-${info.project.name}.png`, fullPage: true });
+
+  // The saved executor comes back after a reload.
+  await page.reload();
+  await openSettings(page, mobile);
+  await waitForLoadedSettings(page);
+  await expect(page.getByLabel("执行器", { exact: true })).toHaveValue("claude-code");
+  await expect(page.getByLabel("模型", { exact: true })).toHaveValue("claude-opus-5-5");
+
+  // Switching back selects the configured Codex default with its own default effort.
+  await page.getByLabel("执行器", { exact: true }).selectOption("codex");
+  await expect(page.getByLabel("模型", { exact: true })).toHaveValue("gpt-6-sol");
+  await expect(page.getByLabel("思考强度", { exact: true })).toHaveValue("");
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+  expect(overflow).toBeLessThanOrEqual(0);
+});
+
+test("config page shows no executor choice when only Codex is configured", async ({ page }, info) => {
+  await setup(page);
+  await openSettings(page, info.project.name.startsWith("mobile"));
+  await waitForLoadedSettings(page);
+  await expect(page.getByLabel("执行器", { exact: true })).toHaveCount(0);
+});
+
 test("config page locks edits while saving and restores defaults", async ({ page }, info) => {
   const mobile = info.project.name.startsWith("mobile");
   await setup(page, { running: true });

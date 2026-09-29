@@ -17,6 +17,10 @@ import { HostTokenSource } from "./codex/hostTokens.js";
 import { SandboxCodexSession } from "./codex/sandboxCodex.js";
 import { AgentManager } from "./codex/manager.js";
 import { BridgeModel } from "./bridgeModel.js";
+import { ClaudeCodeHarness } from "./claudeCode.js";
+import { readAgentSettings } from "./settings.js";
+import { ClaudeCodeSession } from "./codex/claudeSession.js";
+import { HarnessSession } from "./codex/harnessSession.js";
 import { AioClient } from "./aio/client.js";
 import { createApp, handleUpgrade } from "./http/server.js";
 import { TaskService } from "./tasks/service.js";
@@ -87,7 +91,10 @@ export async function bootstrap(opts: BootstrapOptions = {}): Promise<Bootstrapp
   // One bridge instance per process: it owns the single decision about whether
   // the optional OpenCode Go model exists, and holds the key in memory only.
   const bridge = new BridgeModel(cfg, log);
-  const codex = opts.overrides?.codex ?? new SandboxCodexSession(cfg, log, container, hostTokens, bridge);
+  const claudeCode = new ClaudeCodeHarness(cfg, log);
+  const sandboxCodex = new SandboxCodexSession(cfg, log, container, hostTokens, bridge);
+  // Without a Claude Code credential the session is the plain Codex one, exactly as before.
+  const codex = opts.overrides?.codex ?? (claudeCode.enabled ? new HarnessSession(sandboxCodex, new ClaudeCodeSession(cfg, log, container, claudeCode), () => claudeCode.owns(readAgentSettings(db).model ?? cfg.agent.defaultModel)) : sandboxCodex);
   const browserRuntime = new BrowserRuntime(cfg, log, container);
   // A test seam replaces the container-facing runtime; the state machine itself
   // is always the production one.
@@ -101,7 +108,7 @@ export async function bootstrap(opts: BootstrapOptions = {}): Promise<Bootstrapp
   });
   // The manager protects the browser for the whole of every managed turn, so a
   // lease must exist before this point (a queued turn can start on construction).
-  const agent = new AgentManager({ cfg, db, log, codex, hostTokens, browser, bridge });
+  const agent = new AgentManager({ cfg, db, log, codex, hostTokens, browser, bridge, claudeCode });
   const aio = opts.overrides?.aio ?? new AioClient(cfg, log);
 
   const tasks = new TaskService(db, cfg, agent, codex, container);

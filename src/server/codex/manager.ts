@@ -8,6 +8,7 @@ import type { Logger } from "../logger.js";
 import type { CodexModel, SandboxAccount } from "./sandboxCodex.js";
 import type { HostTokenSource } from "./hostTokens.js";
 import { BridgeModel, CHATGPT_PROVIDER_ID } from "../bridgeModel.js";
+import { CLAUDE_CODE_PROVIDER_ID, type ClaudeCodeHarness } from "../claudeCode.js";
 import { AutoTitler, DEFAULT_CONVERSATION_TITLE, TITLE_UPDATED_EVENT, manualTitleMetaKey } from "./autoTitle.js";
 import {
   effectiveAgentSettings,
@@ -131,6 +132,9 @@ export interface PendingRequestRow {
  * keep their existing behaviour.
  */
 const ITEM_LIFECYCLE_METHODS = new Set(["item/started", "item/completed"]);
+
+/** Budget for the earlier conversation carried into a turn that switches harness. */
+const PRIOR_CONTEXT_MAX_CHARS = 24_000;
 
 const DELTA_METHODS = new Set([
   "item/agentMessage/delta",
@@ -279,6 +283,7 @@ export class AgentManager {
   #hostTokens: HostTokenSource;
   #titles: AutoTitler;
   #bridge: BridgeModel | null;
+  #claudeCode: ClaudeCodeHarness | null;
 
   #activeTurns = new Map<string, ActiveTurn>();
   #capacity: number;
@@ -286,6 +291,8 @@ export class AgentManager {
   #deltaTimer: NodeJS.Timeout | null = null;
   #completionWaiters = new Map<string, () => void>();
   #completedTurns = new Map<string, { status: string }>();
+  /** Failure reason a harness reported on `turn/completed`, keyed by its turn id. */
+  #turnErrors = new Map<string, string>();
   #lastError: string | null = null;
   #approvalTimers = new Map<string, NodeJS.Timeout>();
   /**
@@ -314,6 +321,8 @@ export class AgentManager {
     browser?: BrowserGateLike | null;
     /** Optional bridge model; absent means every turn runs on ChatGPT. */
     bridge?: BridgeModel | null;
+    /** Optional Claude Code harness; absent means every turn runs on Codex. */
+    claudeCode?: ClaudeCodeHarness | null;
   }) {
     this.#cfg = deps.cfg;
     this.#db = deps.db;
@@ -322,6 +331,7 @@ export class AgentManager {
     this.#hostTokens = deps.hostTokens;
     this.#browser = deps.browser ?? null;
     this.#bridge = deps.bridge ?? null;
+    this.#claudeCode = deps.claudeCode ?? null;
     this.#capacity = Math.max(1, deps.cfg.agent.maxConcurrentTurns);
     this.#titles = new AutoTitler({
       cfg: deps.cfg,
@@ -982,14 +992,21 @@ export class AgentManager {
     const policy = isMember(this.#db, conversation.owner_id) ? this.memberSettings() : null;
     const model = policy?.model ?? turn.model ?? conversation.model ?? this.#cfg.agent.defaultModel;
     if (policy) turn.effort = policy.effort;
-    // The provider is decided by the model that will actually run, and only a
-    // bridge model ever resolves to a non-ChatGPT provider. A ChatGPT turn never
-    // sends `modelProvider`, so that path stays byte-identical to before.
-    const desiredProvider = this.#bridge?.providerForModel(model) ?? CHATGPT_PROVIDER_ID;
+    // The provider is decided by the model that will actually run: a Claude Code
+    // model runs on that harness, a bridge model on its provider. A ChatGPT turn
+    // never sends `modelProvider`, so that path stays byte-identical to before.
+    const desiredProvider = this.#claudeCode?.owns(model) ? CLAUDE_CODE_PROVIDER_ID : (this.#bridge?.providerForModel(model) ?? CHATGPT_PROVIDER_ID);
     // A conversation with no recorded provider was created on ChatGPT.
     const currentProvider = conversation.model_provider ?? CHATGPT_PROVIDER_ID;
+    // The selected harness runs every new turn, including a follow-up on a
+    // conversation that started on the other one. A Codex thread and a Claude
+    // Code session cannot be forked into each other, so the turn starts a fresh
+    // session that carries the earlier requests and answers as background.
+    const switchesHarness =
+      Boolean(conversation.codex_thread_id) && (desiredProvider === CLAUDE_CODE_PROVIDER_ID) !== (currentProvider === CLAUDE_CODE_PROVIDER_ID);
+    const inputText = switchesHarness ? this.#withPriorContext(conversation.id, turn.id, turn.input_text) : turn.input_text;
     const developerInstructions = readSoul(this.#cfg).content;
-    let threadId = conversation.codex_thread_id;
+    let threadId = switchesHarness ? null : conversation.codex_thread_id;
     if (!threadId) {
       const started = await this.#codex.startThread({
         developerInstructions,
@@ -1008,6 +1025,7 @@ export class AgentManager {
         model: started.model,
         cwd: started.cwd,
         modelProvider: desiredProvider,
+        ...(switchesHarness ? { switchedFrom: conversation.codex_thread_id } : {}),
       });
     } else if (desiredProvider !== currentProvider) {
       // Codex only honours `modelProvider` when a thread is created, so an
@@ -1050,7 +1068,7 @@ export class AgentManager {
     try {
       codexTurnId = await this.#codex.startTurn({
         threadId,
-        text: turn.input_text,
+        text: inputText,
         attachments: parseAttachments(turn.attachments_json),
         model,
         effort: turn.effort,
@@ -1083,6 +1101,8 @@ export class AgentManager {
     }
 
     const status = await this.#waitForTurn(codexTurnId, generation);
+    const reason = this.#turnErrors.get(codexTurnId);
+    this.#turnErrors.delete(codexTurnId);
     this.#flushDeltas();
     if (status === "completed") {
       this.#db.prepare("UPDATE turns SET status = 'completed', completed_at = ? WHERE id = ?").run(Date.now(), turn.id);
@@ -1107,8 +1127,33 @@ export class AgentManager {
           "与沙箱 Codex 的连接中断，本次执行结果未知，可能已产生操作。请先核对沙箱内文件/进程状态，系统不会自动重放该轮次。",
       });
     } else {
-      this.#failTurn(turn, `Codex 轮次结束状态：${status}`);
+      this.#failTurn(turn, reason ? `执行失败：${reason}` : `Codex 轮次结束状态：${status}`);
     }
+  }
+
+  /**
+   * Earlier requests and final answers of a conversation, newest kept first
+   * within a bounded budget, prepended when a turn moves to the other harness.
+   */
+  #withPriorContext(conversationId: string, currentTurnId: string, text: string): string {
+    const turns = this.#db
+      .prepare("SELECT id, input_text FROM turns WHERE conversation_id = ? AND id != ? AND status IN ('completed','failed','interrupted','unknown') ORDER BY created_at ASC, rowid ASC")
+      .all(conversationId, currentTurnId) as Array<{ id: string; input_text: string }>;
+    const entries: string[] = [];
+    let budget = PRIOR_CONTEXT_MAX_CHARS;
+    for (const t of turns.reverse()) {
+      const answers = (this.#db
+        .prepare("SELECT payload FROM events WHERE turn_id = ? AND type = 'item/completed' ORDER BY id")
+        .all(t.id) as Array<{ payload: string }>)
+        .map((row) => (JSON.parse(row.payload) as { item?: { type?: string; text?: string } }).item)
+        .filter((item) => item?.type === "agentMessage" && item.text?.trim());
+      const entry = `用户：${t.input_text.trim()}\n助理：${answers.at(-1)?.text?.trim() ?? "（没有最终回复）"}`;
+      if (entry.length > budget) break;
+      budget -= entry.length;
+      entries.unshift(entry);
+    }
+    if (!entries.length) return text;
+    return `[背景] 这项任务之前由另一个执行器处理过，以下是此前的对话记录（按时间顺序），供你继续时参考：\n\n${entries.join("\n\n")}\n\n[当前消息]\n${text}`;
   }
 
   /** True when a stop was requested for this turn before it was dispatched. */
@@ -1450,9 +1495,10 @@ export class AgentManager {
     const p = (params ?? {}) as Record<string, unknown>;
 
     if (method === "turn/completed") {
-      const turn = p.turn as { id?: string; status?: string } | undefined;
+      const turn = p.turn as { id?: string; status?: string; error?: { message?: unknown } | null } | undefined;
       if (turn?.id) {
         this.#flushDeltas();
+        if (typeof turn.error?.message === "string" && turn.error.message) this.#turnErrors.set(turn.id, turn.error.message);
         this.#completedTurns.set(turn.id, { status: turn.status ?? "completed" });
         const waiter = this.#completionWaiters.get(turn.id);
         if (waiter) {
@@ -1603,7 +1649,7 @@ export class AgentManager {
    * the CLI already reports is never shadowed by the synthetic one.
    */
   #withBridgeModels(models: CodexModel[]): CodexModel[] {
-    const entries = this.#bridge?.modelEntries() ?? [];
+    const entries = [...(this.#bridge?.modelEntries() ?? []), ...(this.#claudeCode?.modelEntries() ?? [])];
     const known = new Set(models.map((m) => m.id));
     const added = entries.filter((entry) => !known.has(entry.id));
     if (added.length === 0) return models;

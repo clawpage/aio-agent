@@ -535,6 +535,8 @@ export function testConfig(dataDir: string, sandboxPort: number, extra: Record<s
     PA_FILE_OP_TIMEOUT_SECONDS: "1",
     PA_OWNER_PASSWORD: "correct horse battery staple",
     PA_LOG_LEVEL: "error",
+    // Deterministic catalog: a host credential must never switch the harness on in tests.
+    PA_CLAUDE_CODE_ENABLED: "off",
     ...extra,
   };
   const saved: Record<string, string | undefined> = {};

@@ -181,6 +181,20 @@ export function loadConfig(): {
     secretsFile: string;
     envKey: string;
   };
+  /** Optional Claude Code harness: an alternative executor for owner task turns. */
+  claudeCode: {
+    enabled: string;
+    /** Pinned CLI, installed into the persistent CODEX_HOME volume like Codex. */
+    version: string;
+    prefix: string;
+    bin: string;
+    /** CLAUDE_CONFIG_DIR inside the sandbox: sessions (for --resume) persist here. */
+    configDir: string;
+    /** Private host file holding CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY. */
+    secretsFile: string;
+    /** Tool-less model for the main-session dispatcher and titles while Claude Code is selected. */
+    auxModel: string;
+  };
   externalBaseUrl: string;
 } {
   const port = envInt("PA_PORT", 4891);
@@ -217,6 +231,8 @@ export function loadConfig(): {
     "PA_SANDBOX_CODEX_BIN",
     path.posix.join(sandboxCodexPrefix, "node_modules", ".bin", "codex"),
   );
+  const claudeCodeVersion = envStr("PA_CLAUDE_CODE_VERSION", "2.1.284");
+  const claudeCodePrefix = `/home/gem/.codex/tools/claude-code-${claudeCodeVersion}`;
 
   return {
     port,
@@ -336,6 +352,17 @@ export function loadConfig(): {
       providerId: envStr("PA_OPENCODE_GO_PROVIDER_ID", "opencode_go"),
       secretsFile: envStr("PA_OPENCODE_GO_SECRETS_FILE", path.join(os.homedir(), ".config", "codex-opencode-go", "secrets.env")),
       envKey: envStr("PA_OPENCODE_GO_ENV_KEY", "LITELLM_MASTER_KEY"),
+    },
+    // Same contract as the bridge: without a credential the harness simply does
+    // not appear, and Codex stays the only executor.
+    claudeCode: {
+      enabled: envStr("PA_CLAUDE_CODE_ENABLED", "auto"),
+      version: claudeCodeVersion,
+      prefix: claudeCodePrefix,
+      bin: path.posix.join(claudeCodePrefix, "node_modules", ".bin", "claude"),
+      configDir: envStr("PA_CLAUDE_CODE_CONFIG_DIR", "/home/gem/.codex/claude-code-home"),
+      secretsFile: envStr("PA_CLAUDE_CODE_SECRETS_FILE", path.join(os.homedir(), ".config", "aio-agent", "claude-code.env")),
+      auxModel: envStr("PA_CLAUDE_CODE_AUX_MODEL", "claude-sonnet-5-5"),
     },
     externalBaseUrl: envStr("PA_EXTERNAL_BASE_URL", ""),
   };

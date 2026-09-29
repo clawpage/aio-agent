@@ -393,6 +393,14 @@ const TOOL_TITLES: Record<string, string> = {
   webSearch: "联网检索",
   plan: "计划",
   reasoning: "思考",
+  // Claude Code tools without a Codex counterpart keep their own item type.
+  Read: "读取文件",
+  Grep: "搜索内容",
+  Glob: "查找文件",
+  WebFetch: "读取网页",
+  Task: "子任务",
+  Agent: "子任务",
+  TodoWrite: "待办清单",
 };
 
 function toolDetail(toolType: string, item: Record<string, unknown>): string {

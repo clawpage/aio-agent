@@ -17,6 +17,14 @@ function effortLabel(value: string): string {
   return EFFORT_LABELS[value] ?? value;
 }
 
+/** The executor a catalog entry runs on; every model belongs to exactly one. */
+type Harness = "codex" | "claude-code";
+const HARNESS_LABELS: Record<Harness, string> = { codex: "Codex", "claude-code": "Claude Code" };
+
+function harnessOf(model: SettingsModel | undefined): Harness {
+  return model?.modelProvider === "claude-code" ? "claude-code" : "codex";
+}
+
 interface Props {
   onBack: () => void;
   /** Inform the shell so the sidebar/nav can reflect a saved change. */
@@ -66,6 +74,10 @@ export function Settings({ onBack, onSaved }: Props) {
   const catalogKnown = models.length > 0;
   const currentModel = useMemo(() => models.find((m) => m.id === model), [models, model]);
   const efforts = currentModel?.supportedReasoningEfforts ?? [];
+  const harness = harnessOf(currentModel);
+  /** The picker only appears when another executor is actually configured. */
+  const harnessChoice = models.some((m) => harnessOf(m) === "claude-code");
+  const harnessModels = harnessChoice ? models.filter((m) => harnessOf(m) === harness) : models;
   // A model with no alternative efforts has nothing to choose; keep the select
   // disabled rather than offering an empty control.
   const effortDisabled = !currentModel || efforts.length === 0;
@@ -108,6 +120,21 @@ export function Settings({ onBack, onSaved }: Props) {
     }
   }, [canSave, effort, model, onSaved]);
 
+  const pickHarness = useCallback(
+    (next: Harness) => {
+      if (next === harness) return;
+      // Switching executor selects that executor's first model (the configured
+      // default when it belongs there) with the model's own default effort.
+      const candidates = models.filter((m) => harnessOf(m) === next);
+      const target = candidates.find((m) => m.id === defaultModel) ?? candidates[0];
+      if (!target) return;
+      setSaved(null);
+      setModel(target.id);
+      setEffort("");
+    },
+    [defaultModel, harness, models],
+  );
+
   const restoreDefaults = useCallback(() => {
     setSaved(null);
     setModel(defaultModel);
@@ -136,7 +163,7 @@ export function Settings({ onBack, onSaved }: Props) {
         <SoulSettings />
 
         <section className="settings-card" aria-label="运行偏好">
-          <div className="settings-section-head"><h3>运行偏好</h3><p>选择处理任务的模型与思考强度。保存后用于新消息，不影响正在执行的任务。</p></div>
+          <div className="settings-section-head"><h3>运行偏好</h3><p>{harnessChoice ? "选择执行器、模型与思考强度。" : "选择处理任务的模型与思考强度。"}保存后用于新消息，不影响正在执行的任务。</p></div>
         {loading && <p className="muted">正在加载…</p>}
 
         {!loading && loadError && (
@@ -161,6 +188,29 @@ export function Settings({ onBack, onSaved }: Props) {
         )}
 
         <div className="settings-fields">
+          {harnessChoice && (
+            <label className="field">
+              <span>执行器</span>
+              <select
+                aria-label="执行器"
+                value={harness}
+                onChange={(e) => pickHarness(e.target.value as Harness)}
+                disabled={locked || !catalogKnown}
+              >
+                {(Object.keys(HARNESS_LABELS) as Harness[]).map((h) => (
+                  <option key={h} value={h}>
+                    {HARNESS_LABELS[h]}
+                  </option>
+                ))}
+              </select>
+              <span className="muted tiny">
+                {harness === "claude-code"
+                  ? "主会话派单、任务执行和自动标题都由 Claude Code 完成；之前在 Codex 上的任务续接时会带上原有记录。"
+                  : "主会话派单、任务执行和自动标题都由 Codex 完成。"}
+              </span>
+            </label>
+          )}
+
           <label className="field">
             <span>模型</span>
             <select
@@ -173,7 +223,7 @@ export function Settings({ onBack, onSaved }: Props) {
                   explicitly unavailable) instead of the select pretending the
                   first catalog entry is the current choice. */}
               {savedModelUnusable && <option value={model}>{model}（当前不可用）</option>}
-              {models.map((m) => (
+              {harnessModels.map((m) => (
                 <option key={m.id} value={m.id}>
                   {m.displayName || m.id}
                   {m.id === defaultModel ? "（默认）" : ""}

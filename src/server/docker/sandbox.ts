@@ -1,4 +1,5 @@
 import { execFile, spawn, type ChildProcess } from "node:child_process";
+import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import type { Config } from "../config.js";
 import type { Logger } from "../logger.js";
@@ -599,6 +600,68 @@ finally:
         "stdio://",
         ...extraConfig,
         ...CODEX_ISOLATION_OVERRIDES,
+      ],
+      { stdio: ["pipe", "pipe", "pipe"], env: { ...process.env, ...secretEnv } },
+    );
+  }
+
+  /**
+   * Ensure the pinned Claude Code CLI exists in the persistent volume, and that
+   * its config dir imports the workspace AGENTS.md (Codex reads that file
+   * natively; Claude Code reads CLAUDE.md). Never silently runs another version.
+   */
+  async ensureClaudeCli(): Promise<void> {
+    const c = this.#cfg.claudeCode;
+    const user = this.#cfg.sandbox.containerUser;
+    const probe = await this.docker(["exec", "-u", user, this.name, c.bin, "--version"], { timeoutMs: 30_000 });
+    if (probe.code !== 0 || !probe.stdout.startsWith(`${c.version} `)) {
+      this.#log.warn("installing pinned sandbox claude code cli", { wanted: c.version, prefix: c.prefix });
+      const install = await this.docker(
+        ["exec", "-u", user, this.name, "npm", "install", "--prefix", c.prefix, "--no-audit", "--no-fund", `@anthropic-ai/claude-code@${c.version}`],
+        { timeoutMs: 600_000 },
+      );
+      if (install.code !== 0) {
+        throw new Error(`沙箱 Claude Code CLI 安装失败（需要 @anthropic-ai/claude-code@${c.version}）：${install.stderr.trim() || install.stdout.trim()}`);
+      }
+      const verify = await this.docker(["exec", "-u", user, this.name, c.bin, "--version"], { timeoutMs: 30_000 });
+      if (verify.code !== 0 || !verify.stdout.startsWith(`${c.version} `)) {
+        throw new Error(`沙箱 Claude Code CLI 安装后校验失败：期望 ${c.version}，实际 ${verify.stdout.trim() || verify.stderr.trim()}`);
+      }
+    }
+    const memory = `@${path.posix.join(this.#cfg.sandbox.containerWorkspaceDir, "AGENTS.md")}\n`;
+    const seeded = await this.docker(
+      ["exec", "-i", "-u", user, this.name, "sh", "-c", 'mkdir -p "$1" && cat > "$1/CLAUDE.md"', "sh", c.configDir],
+      { stdin: memory, timeoutMs: 30_000 },
+    );
+    if (seeded.code !== 0) throw new Error(`Claude Code 配置目录初始化失败：${seeded.stderr.trim()}`);
+  }
+
+  /** Whether the Claude Code session file for this UUID has been written yet. */
+  async claudeSessionExists(sessionId: string): Promise<boolean> {
+    if (!/^[0-9a-f-]{36}$/.test(sessionId)) return false;
+    const res = await this.docker(
+      ["exec", "-u", this.#cfg.sandbox.containerUser, this.name, "find", path.posix.join(this.#cfg.claudeCode.configDir, "projects"), "-maxdepth", "2", "-name", `${sessionId}.jsonl`],
+      { timeoutMs: 30_000 },
+    );
+    return res.code === 0 && res.stdout.trim().length > 0;
+  }
+
+  /** Last resort after an unanswered interrupt: the CLI's argv carries its session UUID. */
+  async killClaudeSession(sessionId: string): Promise<void> {
+    if (!/^[0-9a-f-]{36}$/.test(sessionId)) return;
+    await this.docker(["exec", "-u", this.#cfg.sandbox.containerUser, this.name, "pkill", "-KILL", "-f", sessionId], { timeoutMs: 15_000 });
+  }
+
+  /** One Claude Code print-mode process speaking stream-json over stdio. */
+  spawnClaude(args: string[], secretEnv: Record<string, string>): ChildProcess {
+    const s = this.#cfg.sandbox;
+    const envFlags = Object.keys(secretEnv).flatMap((name) => ["-e", name]);
+    return spawn(
+      "docker",
+      [
+        "exec", "-i", "-u", s.containerUser, "-w", s.containerWorkspaceDir, ...envFlags, this.name,
+        "env", `CLAUDE_CONFIG_DIR=${this.#cfg.claudeCode.configDir}`, "DISABLE_AUTOUPDATER=1",
+        this.#cfg.claudeCode.bin, ...args,
       ],
       { stdio: ["pipe", "pipe", "pipe"], env: { ...process.env, ...secretEnv } },
     );

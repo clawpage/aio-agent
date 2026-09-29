@@ -238,6 +238,34 @@ curl -s http://127.0.0.1:4891/healthz
 
 配置项见 [`.env.example`](.env.example) 的 `PA_OPENCODE_GO_*`。
 
+## 可选：Claude Code 执行器
+
+统一配置页默认只有 Codex 一个执行器。配置了 Claude Code 凭据后，页面会多出「执行器」选项
+（Codex / Claude Code），模型列表按执行器过滤（Claude Code 提供 `claude-opus-5-5`、
+`claude-sonnet-5-5`、`claude-fable-5-1`，思考强度 low～max，留空按 CLI 默认）：
+
+- **选中即全部切换**：主会话派单、子任务执行和自动标题都由 Claude Code 完成。派单与标题使用
+  无工具、不落盘的一次性运行（`--tools ""`，模型 `PA_CLAUDE_CODE_AUX_MODEL`，默认
+  `claude-sonnet-5-5`）；成员账号不提供该执行器，仍固定 Codex + DeepSeek high。
+- **执行方式**：每个任务轮次在沙箱内启动一个 `claude -p` 进程（stream-json 双向流），以
+  `bypassPermissions` 在容器内完整执行（与 Codex 的 `approval_policy=never` 对等），MCP 只挂
+  沙箱内的 `aio_browser`（`--strict-mcp-config`），SOUL.md 通过 `--append-system-prompt` 注入，
+  工作区 `AGENTS.md` 通过配置目录里的 `CLAUDE.md` 导入。事件被翻译成与 Codex 相同的时间线
+  条目（命令、文件修改、MCP、网页检索、回复流），任务结果、停止、重连沿用同一套机制。
+- **会话连续**：控制面预先指定会话 UUID，首轮 `--session-id`、之后 `--resume`（以沙箱内会话文件
+  是否存在为准，重启后判断不变）。运行中补充写入同一进程，收到 CLI 回显才算送达；停止通过
+  控制通道 `interrupt`，15 秒未停再结束进程。进程无结果退出的轮次标记 `unknown`，只影响该轮。
+- **切换执行器**：Codex 线程与 Claude Code 会话不能互相派生。已有任务在另一个执行器上续接时，
+  会新开会话，并把此前的提问与最终回复（上限约 24k 字符）作为背景带入，不会退回原执行器。
+- **固定版本**：CLI 版本固定为 `PA_CLAUDE_CODE_VERSION`（默认 `2.1.284`），首次使用时安装到持久卷，
+  关闭自动升级；版本不符时重新安装并校验，失败如实报错。
+- **凭据**：`CLAUDE_CODE_OAUTH_TOKEN`（宿主上 `claude setup-token` 生成）或 `ANTHROPIC_API_KEY`，
+  先读进程环境，再读 `PA_CLAUDE_CODE_SECRETS_FILE`（默认 `~/.config/aio-agent/claude-code.env`，
+  权限宽于 600/400 拒绝）。只经 `docker exec -e <变量名>` 的子进程环境传入，argv 中只有变量名。
+  与 Codex 桥模型一样，凭据在沙箱进程内可见（CLI 需要读取它）。
+- **已知边界**：Claude Code 自身的子代理（Task）只以一条工具调用出现在时间线，内部过程不展开；
+  CLI 的审批与交互式提问不接入（容器内全权限执行）。
+
 ## 本地开发与测试
 
 ```bash
@@ -312,6 +340,10 @@ npm run build && npx playwright test --config playwright.local.config.ts
 | `PA_OPENCODE_GO_MODEL`（兼容旧配置） | 空 | 设置则只列出这一个桥模型，优先级高于 `PA_OPENCODE_GO_MODELS` |
 | `PA_OPENCODE_GO_PROVIDER_ID` | `opencode_go` | 注入 Codex 的 provider id（与 `~/.codex/opencode-go.config.toml` 保持一致） |
 | `PA_OPENCODE_GO_SECRETS_FILE` / `PA_OPENCODE_GO_ENV_KEY` | `~/.config/codex-opencode-go/secrets.env` / `LITELLM_MASTER_KEY` | 密钥来源（环境变量优先，其次该文件；权限宽于 600/400 拒绝） |
+| `PA_CLAUDE_CODE_ENABLED` | `auto` | 是否提供 Claude Code 执行器；`auto` 仅在取到凭据时出现，另有 `on`/`off` |
+| `PA_CLAUDE_CODE_SECRETS_FILE` | `~/.config/aio-agent/claude-code.env` | `CLAUDE_CODE_OAUTH_TOKEN` 或 `ANTHROPIC_API_KEY` 的私有文件（环境变量优先；权限宽于 600/400 拒绝） |
+| `PA_CLAUDE_CODE_VERSION` | `2.1.284` | 沙箱内固定版 Claude Code CLI（持久卷内，首次使用时安装） |
+| `PA_CLAUDE_CODE_AUX_MODEL` | `claude-sonnet-5-5` | 选中 Claude Code 时派单与自动标题使用的无工具模型 |
 | `PA_SANDBOX_PORT` | `18081` | 沙箱发布到 loopback 的端口 |
 | `PA_OWNER_PASSWORD` | 空 | 设置则用它，否则生成到 `var/owner-secret.txt` |
 | `PA_BROWSER_LIFECYCLE` | `1` | 浏览器空闲释放总开关；关闭则浏览器始终常驻 |
