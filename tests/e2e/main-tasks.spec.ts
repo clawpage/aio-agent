@@ -379,7 +379,7 @@ test("failed reference submission preserves target and retry id, changing target
  expect(bodies[2].relatedTaskId).toBe('task-2');expect(bodies[2].clientMessageId).not.toBe(bodies[1].clientMessageId);
 });
 test("a task that needs you in the browser shows why, hands the tab to you and takes it back", async ({ page }, info) => {
-    const row = { ...task(1), title: "订餐厅", browser: { tabs: 1, request: "请登录 OpenTable 账号", human: false } };
+    const row: Task = { ...task(1), title: "订餐厅", browser: { tabs: 1, request: "请登录 OpenTable 账号", human: false } };
     const tab = { id: "t1", title: "OpenTable 登录", url: "https://www.opentable.com/signin", lastUsed: 1, finishedAt: null, holder: "ai" as "ai" | "human", request: { reason: "请登录 OpenTable 账号", at: 1 } as { reason: string; at: number } | null };
     const controls: string[] = [];
     await page.route("**/api/tasks/task-1/browser", r => r.fulfill({ json: { tabs: [tab] } }));
