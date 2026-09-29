@@ -53,7 +53,7 @@ function cookie(name: string): string {
 
 async function request<T>(
   path: string,
-  init: { method?: string; body?: unknown; signal?: AbortSignal } = {},
+  init: { method?: string; body?: unknown; signal?: AbortSignal; cache?: RequestCache } = {},
 ): Promise<T> {
   const headers: Record<string, string> = {};
   const csrf = cookie("pa_csrf");
@@ -64,6 +64,7 @@ async function request<T>(
     headers,
     credentials: "same-origin",
     signal: init.signal,
+    cache: init.cache,
     body: init.body === undefined ? undefined : JSON.stringify(init.body),
   });
   const text = await res.text();
@@ -95,7 +96,7 @@ export const api = {
   submitTask: (body: { text: string; clientMessageId: string; attachments: Attachment[]; relatedTaskId: string | null }) => request<{ task: import("./types").Task; duplicate: boolean }>("/api/tasks", { method: "POST", body }),
   stopTask: (id: string) => request<{ok:boolean}>(`/api/tasks/${encodeURIComponent(id)}/stop`, {method:"POST",body:{}}),
   retryTaskPlanning: (id: string) => request<{ok:boolean}>(`/api/tasks/${encodeURIComponent(id)}/retry-planning`, {method:"POST",body:{}}),
-  session: () => request<{ authenticated: boolean; username: string | null; expiresAt?: number; secure?: boolean }>("/api/auth/session"),
+  session: (signal?: AbortSignal) => request<{ authenticated: boolean; username: string | null; expiresAt?: number; secure?: boolean }>("/api/auth/session", {signal,cache:"no-store"}),
   login: (password: string) => request<{ ok: boolean; username: string; expiresAt: number }>("/api/auth/login", { method: "POST", body: { password } }),
   logout: () => request<{ ok: boolean }>("/api/auth/logout", { method: "POST", body: {} }),
   refresh: () => request<{ ok: boolean; expiresAt: number }>("/api/auth/refresh", { method: "POST", body: {} }),

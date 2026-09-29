@@ -51,7 +51,12 @@ export function MainApp() {
     const [theme, setTheme] = useState(() => matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark");
     const expired = useCallback(() => { setAuth(false); setMenuOpen(false); setNotice("登录已过期，请重新登录。"); }, []);
     const check = useCallback(async () => { try {
-        setAuth((await api.session()).authenticated);
+        const session = await api.session();
+        if (session.authenticated) {
+            if (location.pathname === "/login") history.replaceState(null, "", "/");
+            setNotice(null); setView("main"); setWorkspace(false);
+        }
+        setAuth(session.authenticated);
     }
     catch {
         setAuth(false);
@@ -123,7 +128,7 @@ export function MainApp() {
     if (auth === null)
         return <div className="boot">加载中…</div>;
     if (!auth)
-        return <Login notice={notice} onSuccess={() => void check()}/>;
+        return <Login notice={notice} onSuccess={check}/>;
     return <div className="app main-inbox-app">
     <button className="mobile-menu-button ghost" ref={menuButton} aria-label="打开导航" aria-expanded={menuOpen} aria-controls="main-navigation" onClick={() => setMenuOpen(true)}><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
     {mobile && menuOpen && <div className="mobile-menu-backdrop" onClick={closeMenu} aria-hidden="true"/>}

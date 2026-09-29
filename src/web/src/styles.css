@@ -412,10 +412,11 @@ pre {
 .settings-body {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  padding: 16px;
-  max-width: 560px;
+  gap: 20px;
+  padding: 24px;
+  max-width: 760px;
   width: 100%;
+  margin: 0 auto;
 }
 
 .settings-intro {
@@ -425,15 +426,29 @@ pre {
 .settings-card {
   display: flex;
   flex-direction: column;
-  gap: 14px;
-  padding: 14px;
+  gap: 18px;
+  padding: 20px;
+  min-width: 0;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--bg-raised);
 }
 
-.settings-card .field select {
-  min-height: 40px;
+.settings-card .field select { min-height: 44px; width: 100%; }
+.settings-section-head h3 { margin: 0; font-size: 16px; font-weight: 600; }
+.settings-section-head p { margin: 8px 0 0; font-size: 13px; line-height: 1.65; color: var(--text-dim); }
+.settings-file-label { margin-left: 8px; font-size: 12px; font-weight: 400; color: var(--text-dim); }
+.settings-fields { display: grid; gap: 18px; }
+.settings-card .banner { margin: 0; }
+.settings-card .settings-actions { border-top: 1px solid var(--border); padding-top: 16px; }
+.settings-actions button { min-height: 40px; }
+@media (max-width: 900px) {
+  .settings-body { padding: 16px 12px 24px; gap: 16px; }
+  .settings-card { padding: 16px; gap: 16px; }
+  .settings-card .field select { font-size: 16px; }
+  .soul-actions { display: grid !important; grid-template-columns: 1fr 1fr; }
+  .soul-actions .spacer { display: none; }
+  .soul-actions .primary { grid-column: 1 / -1; }
 }
 
 .settings-actions {
@@ -2338,8 +2353,6 @@ textarea:focus {
 .task-list-meta { display:flex; gap:12px; align-items:center; font-size:11px; color:var(--text-dim); }
 @media(max-width:900px) { .task-list-scroll { padding:12px; } .task-list-meta { gap:8px; flex-wrap:wrap; } }
 
-.soul-settings { margin-top:24px; }
-.soul-settings h3 { margin:0 0 8px; font-size:16px; }
 .soul-settings textarea { min-height:300px; width:100%; resize:vertical; font:14px/1.65 ui-monospace,SFMono-Regular,Menlo,monospace; overflow-wrap:anywhere; }
 .soul-actions { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
 .soul-saved { color:var(--ok); font-size:13px; }

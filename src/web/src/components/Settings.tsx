@@ -121,17 +121,22 @@ export function Settings({ onBack, onSaved }: Props) {
   return (
     <section className="settings" aria-label="配置">
       <header className="settings-head">
+        <h2>配置</h2>
+        <span className="spacer" />
         <button type="button" className="ghost" onClick={onBack} disabled={saving}>
           ← 返回会话
         </button>
-        <h2>配置</h2>
       </header>
 
       <div className="settings-body">
         <p className="muted settings-intro">
-          这里的设置对之后发送的每条消息生效，并在所有设备间保持一致。修改不会影响正在执行的任务或已有对话。
+          设置你的助理与运行偏好，保存后在所有设备间保持一致。
         </p>
 
+        <SoulSettings />
+
+        <section className="settings-card" aria-label="运行偏好">
+          <div className="settings-section-head"><h3>运行偏好</h3><p>选择处理任务的模型与思考强度。保存后用于新消息，不影响正在执行的任务。</p></div>
         {loading && <p className="muted">正在加载…</p>}
 
         {!loading && loadError && (
@@ -155,7 +160,7 @@ export function Settings({ onBack, onSaved }: Props) {
           </div>
         )}
 
-        <div className="settings-card">
+        <div className="settings-fields">
           <label className="field">
             <span>模型</span>
             <select
@@ -232,9 +237,7 @@ export function Settings({ onBack, onSaved }: Props) {
           </button>
         </div>
 
-        <SoulSettings/>
-
-        <p className="muted tiny">默认配置：模型 {defaultModel || "—"}，思考强度按模型默认。保存后对之后的所有消息生效。</p>
+        </section>
       </div>
     </section>
   );

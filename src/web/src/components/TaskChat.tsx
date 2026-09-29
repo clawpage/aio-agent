@@ -144,6 +144,27 @@ export function TaskChat({ onDetails, onOpenLink, onBrowserNavigate, onExpired, 
     const active = tasks.filter(t => !t.mergedInto && !terminal.has(t.status) && !["planning_failed", "blocked", "needs_input"].includes(t.status));
     const now = useDisplayClock(tasks.some(t => ["running", "stopping"].includes(t.status)));
     const awaiting = tasks.filter(t => !t.mergedInto && t.status === "needs_input");
+    // Keep messages chronological; anchor each live card to its latest accepted
+    // supplement. Its controls and duration always use the original task.
+    const progressAt = new Map<string, Task>();
+    for (const task of tasks) {
+        if (task.mergedInto || terminal.has(task.status)) continue;
+        const anchor = tasks.filter(t => t.mergedInto === task.id && ["merged", "merging", "steering"].includes(t.status))
+            .reduce((latest, t) => t.createdAt >= latest.createdAt ? t : latest, task);
+        progressAt.set(anchor.id, task);
+    }
+    const renderProgress = (t: Task) => <div className={`task-progress ${t.status === "running" ? "active" : ""} ${t.status === "needs_input" ? "needs-input" : ""}`}>
+          <button className="task-summary" onClick={() => onDetails(t)} aria-label={`展开任务：${t.title}`}><span className={`dot ${t.approvals ? "warn" : ""}`}/><span className="task-progress-label">{t.approvals ? "需要你确认" : t.waitReason?.label ?? labels[t.status] ?? t.status}</span><span className="task-progress-title">{t.title}</span><span aria-hidden>›</span></button>
+          {t.waitReason && <p className="task-intro task-wait-reason">{t.waitReason.message}</p>}
+          {t.status === "needs_input" && t.clarification && <div className="task-question" role="status" aria-label="需要你补充">
+            <div className="task-question-heading"><span aria-hidden="true">?</span><strong>需要你补充</strong></div>
+            <p>{t.clarification}</p><span className="task-question-hint">直接在下方输入回复即可</span>
+          </div>}
+          {t.description && ["running", "stopping"].includes(t.status) && <p className="task-intro">{t.description}</p>}
+          <TaskDuration task={t} now={now}/>
+          {t.error && <p className="tiny">{t.error}</p>}
+          <div className="task-actions"><button className="ghost tiny" disabled={busy} onClick={() => quoteTask(t)} aria-label={`引用任务：${t.title}`}>引用任务</button>{t.status === "planning_failed" ? <button className="ghost tiny" onClick={() => void act(() => api.retryTaskPlanning(t.id))}>重试分配</button> : t.status === "blocked" ? null : <button className="ghost tiny" disabled={t.status === "stopping"} onClick={() => void act(() => api.stopTask(t.id))}>停止该任务</button>}</div>
+        </div>;
     const feed = tasks.flatMap(t => [{ task: t, report: false, at: t.createdAt }, ...(!t.mergedInto && terminal.has(t.status) ? [{ task: t, report: true, at: t.completedAt ?? t.createdAt }] : [])])
         .sort((a, b) => a.at - b.at || Number(a.report) - Number(b.report) || a.task.id.localeCompare(b.task.id));
     return <section className="chat task-chat">
@@ -159,18 +180,7 @@ export function TaskChat({ onDetails, onOpenLink, onBrowserNavigate, onExpired, 
       </article> : <div className="task-entry" key={t.id} data-task-id={t.id}>
         <article className="msg user"><div className="bubble">{t.relatedTaskId && <small className="muted">引用：{t.relatedTaskTitle ?? tasks.find(task => task.id === t.relatedTaskId)?.title ?? "此前任务"}</small>}<p>{t.text}</p>{t.attachments.length > 0 && <AttachmentCards attachments={t.attachments} onOpen={setPreview}/>}<div className="message-meta"><MessageTime at={t.createdAt} now={now}/></div></div></article>
         {t.mergedInto && <div className="task-supplement"><button className="ghost tiny" onClick={() => onDetails(t)}>{t.status === "merged" ? "已补充到" : t.status === "merging" || t.status === "steering" ? "正在补充到" : t.status === "interrupted" ? "已取消补充" : "补充需要核对"}：{t.mergedTitle}</button>{t.waitReason && <p className="tiny">{t.waitReason.message}</p>}{t.error && <p className="tiny error">{t.error}</p>}</div>}
-        {!t.mergedInto && !terminal.has(t.status) && <div className={`task-progress ${t.status === "running" ? "active" : ""} ${t.status === "needs_input" ? "needs-input" : ""}`}>
-          <button className="task-summary" onClick={() => onDetails(t)} aria-label={`展开任务：${t.title}`}><span className={`dot ${t.approvals ? "warn" : ""}`}/><span className="task-progress-label">{t.approvals ? "需要你确认" : t.waitReason?.label ?? labels[t.status] ?? t.status}</span><span className="task-progress-title">{t.title}</span><span aria-hidden>›</span></button>
-          {t.waitReason && <p className="task-intro task-wait-reason">{t.waitReason.message}</p>}
-          {t.status === "needs_input" && t.clarification && <div className="task-question" role="status" aria-label="需要你补充">
-            <div className="task-question-heading"><span aria-hidden="true">?</span><strong>需要你补充</strong></div>
-            <p>{t.clarification}</p><span className="task-question-hint">直接在下方输入回复即可</span>
-          </div>}
-          {t.description && ["running", "stopping"].includes(t.status) && <p className="task-intro">{t.description}</p>}
-          <TaskDuration task={t} now={now}/>
-          {t.error && <p className="tiny">{t.error}</p>}
-          <div className="task-actions"><button className="ghost tiny" disabled={busy} onClick={() => quoteTask(t)} aria-label={`引用任务：${t.title}`}>引用任务</button>{t.status === "planning_failed" ? <button className="ghost tiny" onClick={() => void act(() => api.retryTaskPlanning(t.id))}>重试分配</button> : t.status === "blocked" ? null : <button className="ghost tiny" disabled={t.status === "stopping"} onClick={() => void act(() => api.stopTask(t.id))}>停止该任务</button>}</div>
-        </div>}
+        {progressAt.get(t.id) && renderProgress(progressAt.get(t.id)!)}
       </div>)}
     </div>
     {error && <div className="banner error" role="alert">{error}<button onClick={() => setError(null)}>关闭</button></div>}

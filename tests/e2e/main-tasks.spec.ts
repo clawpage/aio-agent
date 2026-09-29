@@ -185,6 +185,8 @@ test("related supplement joins the original task, with one running indicator and
     await send(page,"我民宿住在902 links way，帮我也找好餐厅推荐");
     Object.assign(rows[1]!,{mergedInto:parent.id,mergedTitle:parent.title,conversationId:parent.conversationId,status:"merged",revision:2});
     await expect(page.locator(".task-supplement")).toContainText("已补充到：带娃三天行程");
+    await expect(page.locator('.task-entry[data-task-id="task-1"] .task-progress')).toHaveCount(0);
+    await expect(page.locator('.task-entry[data-task-id="task-2"] .task-progress')).toContainText(parent.title);
     await expect(page.locator(".task-progress")).toHaveCount(1);
     await expect(page.locator(".chat-sub")).toHaveText("1 个任务处理中");
     await page.locator(".task-supplement button").click();
@@ -193,9 +195,19 @@ test("related supplement joins the original task, with one running indicator and
     await page.getByRole("button",{name:"← 返回主会话"}).click();
     await page.reload();
     await expect(page.locator(".task-progress")).toHaveCount(1);
+    await expect(page.locator('.task-entry[data-task-id="task-2"] .task-progress')).toContainText(parent.title);
+    await send(page,"另外帮我写邮件");
+    await send(page,"行程里再加一个休息点");
+    Object.assign(rows[3]!,{mergedInto:parent.id,mergedTitle:parent.title,conversationId:parent.conversationId,status:"merged",revision:2});
+    await expect(page.locator('.task-entry[data-task-id="task-2"] .task-progress')).toHaveCount(0);
+    await expect(page.locator('.task-entry[data-task-id="task-4"] .task-progress')).toContainText(parent.title);
+    await expect(page.locator('.task-entry[data-task-id="task-3"] .task-progress')).toHaveCount(1);
+    await page.locator('.task-entry[data-task-id="task-4"]').getByRole('button',{name:`引用任务：${parent.title}`}).click();
+    await expect(page.locator('.task-reference')).toContainText(parent.title);
     Object.assign(rows[0]!,{status:"completed",result:"包含民宿附近餐厅推荐的完整行程",revision:3,completedAt:Date.now()});
     await expect(page.locator(".task-report")).toHaveCount(1);
-    await expect(page.locator(".task-progress")).toHaveCount(0);
+    await expect(page.locator(".task-progress")).toHaveCount(1);
+    await expect(page.locator('.task-entry[data-task-id="task-3"] .task-progress')).toHaveCount(1);
     await expect(page.locator(".task-report .bubble")).toContainText("餐厅推荐");
     for(const width of info.project.name.startsWith("mobile")?[390,360]:[1440]){
         await page.setViewportSize({width,height:844});

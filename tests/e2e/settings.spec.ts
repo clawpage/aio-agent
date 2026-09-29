@@ -340,3 +340,29 @@ test('SOUL editor saves independently, preserves conflict drafts and persists em
  await editor.scrollIntoViewIfNeeded();expect(await page.evaluate(()=>document.documentElement.scrollWidth-innerWidth)).toBeLessThanOrEqual(1);
  await page.screenshot({path:info.outputPath('soul.png')});
 });
+
+
+test('main settings use consistent cards and keep the mobile header clear',async({page},info)=>{
+ await page.route('**/api/main*',r=>r.fulfill({json:{mode:'tasks',tasks:[],nextBefore:null}}));
+ await setup(page);
+ const mobile=info.project.name.startsWith('mobile');
+ if(mobile)await page.getByRole('button',{name:'打开导航'}).click();
+ await page.locator('.sidebar').getByRole('button',{name:'配置',exact:true}).click();
+ await expect(page.getByRole('textbox',{name:'SOUL.md 内容'})).toBeEnabled();
+ for(const theme of ['light','dark'] as const){
+  await page.evaluate(theme=>{document.documentElement.dataset.theme=theme;},theme);
+  for(const width of mobile?[390,360]:[1440]){
+   await page.setViewportSize({width,height:mobile?844:900});
+   await page.locator('.settings').evaluate(el=>el.scrollTop=0);
+   const cards=page.locator('.settings-card');await expect(cards).toHaveCount(2);
+   expect(await cards.first().getAttribute('aria-label')).toBe('助理设定');
+   const a=await cards.nth(0).boundingBox(),b=await cards.nth(1).boundingBox();
+   expect(a!.x).toBe(b!.x);expect(a!.width).toBe(b!.width);
+   expect(await page.evaluate(()=>document.documentElement.scrollWidth-innerWidth)).toBeLessThanOrEqual(1);
+   if(mobile){const menu=await page.getByRole('button',{name:'打开导航'}).boundingBox();const heading=await page.locator('.settings-head h2').boundingBox();expect(heading!.x).toBeGreaterThanOrEqual(menu!.x+menu!.width);}
+   await page.screenshot({path:info.outputPath(`settings-${width}-${theme}.png`)});
+   await page.getByRole('button',{name:'保存',exact:true}).scrollIntoViewIfNeeded();
+   await expect(page.getByRole('button',{name:'恢复默认',exact:true})).toBeVisible();
+  }
+ }
+});

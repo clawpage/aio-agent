@@ -22,13 +22,13 @@ export function SoulSettings() {
     finally{setBusy(false);}
   };
   return <section className="settings-card soul-settings" aria-label="助理设定">
-    <div><h3>助理设定 · SOUL.md</h3><p className="muted tiny">定义助理的身份、语气和做事方式。内容将作为系统指令注入，保存后从下一次任务规划、启动或继续任务时生效，不改变正在执行的轮次。</p></div>
+    <div className="settings-section-head"><h3>助理设定 <span className="settings-file-label">SOUL.md</span></h3><p>定义助理的身份、语气和做事方式。保存后作为系统指令，用于下一次任务规划、启动或继续任务。</p></div>
     <label className="field"><span>SOUL.md 内容</span><textarea aria-label="SOUL.md 内容" value={content} onChange={e=>{setContent(e.target.value);setSaved(false);}} disabled={busy||!loaded} spellCheck={false}/></label>
     <div className="muted tiny">{bytes.toLocaleString()} / 65,536 字节 · 可留空以清除自定义设定</div>
-    {error&&<p className="error" role="alert">{error} 重新加载会替换当前草稿，请先复制保留。</p>}
-    {saved&&<p className="soul-saved" role="status">SOUL.md 已保存，下次任务开始时生效。</p>}
-    <div className="soul-actions">
-      <button className="ghost" disabled={busy} onClick={()=>void load()}>重新加载 SOUL.md</button>
+    {error&&<p className="banner error" role="alert">{error} 重新加载会替换当前草稿，请先复制保留。</p>}
+    {saved&&<p className="banner ok soul-saved" role="status">SOUL.md 已保存，下次任务开始时生效。</p>}
+    <div className="settings-actions soul-actions">
+      <button className="ghost" aria-label="重新加载 SOUL.md" disabled={busy} onClick={()=>void load()}>重新加载</button>
       <button className="ghost" disabled={busy||!loaded} onClick={()=>{setContent(loaded!.defaultContent);setSaved(false);}}>填入默认设定</button>
       <span className="spacer"/>
       <button className="primary" disabled={busy||!loaded||bytes>(loaded?.maxBytes??65536)||content===loaded.content} onClick={()=>void save()}>{busy?'处理中…':'保存 SOUL.md'}</button>

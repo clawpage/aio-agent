@@ -268,7 +268,7 @@ function LegacyApp() {
   }
 
   if (!session.authenticated) {
-    return <Login notice={notice} onSuccess={() => void loadSession()} />;
+    return <Login notice={notice} onSuccess={loadSession} />;
   }
 
   const active = conversations.find((c) => c.id === activeId) ?? null;
