@@ -230,3 +230,26 @@ export const CODEX_ISOLATION_OVERRIDES = [
   "-c", "features.remote_plugin=false",
   "-c", "apps._default.enabled=false",
 ];
+
+/**
+ * User-level CLAUDE.md for the Claude Code harness. It reads the workspace rules
+ * Codex reads natively, and the same long-term memory Codex keeps: switching
+ * executor must not make the assistant forget earlier work. Codex owns that
+ * directory (it rebuilds it from its sessions), so Claude Code only reads it.
+ */
+export function claudeCodeUserMemory(workspaceDir: string, codexHome: string): string {
+  const memories = `${codexHome}/memories`;
+  return `@${workspaceDir}/AGENTS.md
+
+# 长期记忆（与 Codex 执行器共用）
+
+下面是此前积累的长期记忆总览（包括在 Codex 执行器上完成的工作）：
+
+@${memories}/memory_summary.md
+
+- 用户问到过去做过的事、之前的安排或偏好时，先查这些记忆，不要直接说没有记录。
+- 需要细节时，在 \`${memories}/MEMORY.md\` 里按关键词找到对应任务组，再读其中列出的 \`${memories}/rollout_summaries/\` 摘要；任务产出的文件在 \`${workspaceDir}/tasks/\` 下。
+- 记忆可能过时：价格、路况、天气、营业时间等随时间变化的信息，使用前重新核实。
+- 这个目录由 Codex 自动维护，只读，不要修改。
+`;
+}

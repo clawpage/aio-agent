@@ -26,3 +26,23 @@ it("hands the fresh browser volume to the sandbox user before the first boot", a
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+it("gives Claude Code the workspace rules and the long-term memory Codex keeps", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pa-claude-md-"));
+  try {
+    const cfg = testConfig(dir, 18999);
+    const container = new SandboxContainer(cfg, new Logger("error", undefined, false));
+    let claudeMd = "";
+    vi.spyOn(container, "docker").mockImplementation(async (args: string[], opts?: { stdin?: string }) => {
+      if (args.at(-1) === cfg.claudeCode.configDir) claudeMd = opts?.stdin ?? "";
+      return { code: 0, stdout: `${cfg.claudeCode.version} (Claude Code)`, stderr: "" };
+    });
+    await container.ensureClaudeCli();
+    expect(claudeMd.split("\n")[0]).toBe("@/home/gem/workspace/AGENTS.md");
+    expect(claudeMd).toContain("\n@/home/gem/.codex/memories/memory_summary.md\n");
+    expect(claudeMd).toContain("/home/gem/.codex/memories/MEMORY.md");
+    expect(claudeMd).toContain("不要直接说没有记录");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

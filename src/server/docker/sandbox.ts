@@ -7,6 +7,7 @@ import {
   CODEX_CONFIG_TOML,
   CODEX_ISOLATION_MARKER,
   CODEX_ISOLATION_OVERRIDES,
+  claudeCodeUserMemory,
   CODEX_REQUIREMENTS_TOML,
   DOCUMENT_SKILL_DIR,
   DOCUMENT_SKILL_MD,
@@ -608,7 +609,8 @@ finally:
   /**
    * Ensure the pinned Claude Code CLI exists in the persistent volume, and that
    * its config dir imports the workspace AGENTS.md (Codex reads that file
-   * natively; Claude Code reads CLAUDE.md). Never silently runs another version.
+   * natively; Claude Code reads CLAUDE.md) and the long-term memory Codex keeps.
+   * Never silently runs another version.
    */
   async ensureClaudeCli(): Promise<void> {
     const c = this.#cfg.claudeCode;
@@ -628,7 +630,7 @@ finally:
         throw new Error(`沙箱 Claude Code CLI 安装后校验失败：期望 ${c.version}，实际 ${verify.stdout.trim() || verify.stderr.trim()}`);
       }
     }
-    const memory = `@${path.posix.join(this.#cfg.sandbox.containerWorkspaceDir, "AGENTS.md")}\n`;
+    const memory = claudeCodeUserMemory(this.#cfg.sandbox.containerWorkspaceDir, this.#cfg.sandbox.containerCodexHome);
     const seeded = await this.docker(
       ["exec", "-i", "-u", user, this.name, "sh", "-c", 'mkdir -p "$1" && cat > "$1/CLAUDE.md"', "sh", c.configDir],
       { stdin: memory, timeoutMs: 30_000 },
