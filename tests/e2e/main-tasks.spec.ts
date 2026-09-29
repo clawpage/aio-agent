@@ -51,7 +51,22 @@ test('task list shares live statuses, opens each task, preserves draft and retur
     const {rows}=await setup(page,[pending,task(2),{...task(3,'completed'),result:'Done',completedAt:Date.now()},{...task(4,'merged'),mergedInto:'task-2'}]);
     await page.getByRole('textbox',{name:'消息',exact:true}).fill('保留草稿');
     const openList=async()=>{if(info.project.name.startsWith('mobile'))await page.getByRole('button',{name:'打开导航'}).click();await page.locator('.sidebar').getByRole('button',{name:'任务列表',exact:true}).click();};
+    const mainHeader=await page.locator('.task-chat .chat-head').boundingBox();
     await openList();await expect(page.getByRole('heading',{name:'任务列表',exact:true})).toBeVisible();
+    if(info.project.name.startsWith('mobile')) {
+      for(const width of [390,360]) {
+        await page.setViewportSize({width,height:844});
+        const header=await page.locator('.task-list-page > .chat-head').boundingBox();
+        const menu=await page.getByRole('button',{name:'打开导航'}).boundingBox();
+        const title=await page.locator('.task-list-page h2').boundingBox();
+        const first=await page.locator('.task-list-item').first().boundingBox();
+        expect(header!.height).toBe(mainHeader!.height);
+        expect(menu!.y).toBeGreaterThanOrEqual(header!.y);
+        expect(menu!.y+menu!.height).toBeLessThanOrEqual(header!.y+header!.height);
+        expect(title!.x).toBeGreaterThanOrEqual(menu!.x+menu!.width);
+        expect(first!.y).toBeGreaterThanOrEqual(header!.y+header!.height);
+      }
+    }
     await expect(page.locator('.task-list-item')).toHaveCount(3);
     const row=page.locator('.task-list [data-task-id="task-2"]');await expect(row).toContainText('进行中');
     Object.assign(rows[1]!,{status:'completed',result:'Updated',completedAt:Date.now()+1,revision:2});await expect(row).toContainText('已完成');
