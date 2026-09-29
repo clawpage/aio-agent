@@ -273,6 +273,44 @@ function markFinished(key) {
   return count;
 }
 
+/** Keys a person may press from the phone input bar. */
+const PERSON_KEYS = new Set(['Enter', 'Backspace', 'Delete', 'Tab', 'Escape', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight']);
+
+/** The page a person sees in the real browser: the one in front, a tab they took over first. */
+async function frontPage() {
+  const context = await browserContext();
+  const visible = [];
+  for (const page of context.pages()) {
+    const shown = await Promise.race([page.evaluate(() => document.visibilityState === 'visible'), new Promise((r) => setTimeout(() => r(false), 2000))]).catch(() => false);
+    if (shown) visible.push(page);
+  }
+  const held = [...registry.values()].filter((t) => t.holder === 'human' && visible.includes(t.page)).sort((a, b) => b.humanSince - a.humanSince)[0];
+  return held ? held.page : visible[0] || null;
+}
+
+/**
+ * Type for a person into the page in front (a phone cannot raise its keyboard
+ * inside the remote view). A task tab its agent still drives is refused, so the
+ * person and the agent never type into one page at once: take it over first.
+ */
+async function personInput(body) {
+  const page = await frontPage();
+  if (!page) return { status: 404, body: { error: 'no_page', message: '浏览器里没有正在显示的页面' } };
+  const tab = [...registry.values()].find((t) => t.page === page);
+  if (tab && tab.holder !== 'human') {
+    return { status: 409, body: { error: 'task_tab', message: `这个页面正由任务「${tab.title}」操作，请先在任务卡片上点“接管”`, title: tab.title } };
+  }
+  if (typeof body.text === 'string' && body.text) {
+    if (body.text.length > 2000) return { status: 400, body: { error: 'too_long', message: '一次最多输入 2000 个字' } };
+    await page.keyboard.insertText(body.text);
+  }
+  if (body.key !== undefined) {
+    if (!PERSON_KEYS.has(body.key)) return { status: 400, body: { error: 'bad_key' } };
+    await page.keyboard.press(body.key);
+  }
+  return { status: 200, body: { title: await page.title().catch(() => ''), url: safeUrl(page) } };
+}
+
 async function pruneFinished() {
   let closed = 0;
   for (const tab of [...registry.values()]) {
@@ -545,6 +583,10 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, { finished: markFinished(body.key) });
     }
     if (req.method === 'POST' && url.pathname === '/prune') return send(res, 200, { closed: await pruneFinished() });
+    if (req.method === 'POST' && url.pathname === '/input') {
+      const out = await personInput(await readJson(req));
+      return send(res, out.status, out.body);
+    }
     if (url.pathname !== '/mcp') return send(res, 404, { error: 'not found' });
     if (req.method === 'DELETE') return send(res, 200, {});
     if (req.method !== 'POST') return send(res, 405, { error: 'method not allowed' });

@@ -2393,3 +2393,10 @@ textarea:focus {
 .task-browser .task-actions { margin-top: 8px; }
 /* The hand-over is the one action on the card: keep it a real, readable primary button. */
 .task-browser .task-actions button.primary { padding: 6px 12px; color: #fff; }
+
+/* Phone input bar under the remote browser/desktop view. */
+.remote-keyboard { flex: none; padding: 8px 10px calc(8px + env(safe-area-inset-bottom)); border-top: 1px solid var(--border); background: var(--bg-soft); }
+.remote-keyboard-row { display: flex; gap: 6px; align-items: center; min-width: 0; }
+.remote-keyboard-row input { flex: 1 1 auto; min-width: 0; font-size: 16px; padding: 8px 10px; }
+.remote-keyboard-row button { flex: none; min-width: 40px; padding: 8px 10px; }
+.remote-keyboard-notice { margin: 0 0 6px; font-size: 12px; color: var(--warn); line-height: 1.5; }

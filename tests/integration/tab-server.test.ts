@@ -179,3 +179,25 @@ it.skipIf(!hasChromium)("stops waiting on timeout, on a stopped caller and on a 
   expect(text(await finished)).toContain("停止等待");
   expect((await records("W")).find((t) => t.id === tab)?.request).toBeNull();
 });
+
+it.skipIf(!hasChromium)("lets a person type into the page in front, but not into a task tab its agent still drives", async () => {
+  const tab = tabIdOf(await call("K", "browser_navigate", { url: "data:text/html,<title>Form</title><input id=q autofocus>" }))!;
+  // Keep only this task tab open, so it is unambiguously the page in front.
+  const targetId = (await records("K"))[0] as unknown as { targetId: string };
+  for (const t of (await (await fetch(`${process.env.AIO_TABS_CDP}/json/list`)).json()) as Array<{ id: string; type: string }>) {
+    if (t.type === "page" && t.id !== targetId.targetId) await fetch(`${process.env.AIO_TABS_CDP}/json/close/${t.id}`);
+  }
+  await new Promise((r) => setTimeout(r, 300));
+  const typeIn = async (body: Record<string, unknown>) => fetch(`${base}/input`, { method: "POST", body: JSON.stringify(body) });
+
+  const refused = await typeIn({ text: "hi" });
+  expect(refused.status).toBe(409);
+  expect(((await refused.json()) as { message: string }).message).toContain("请先在任务卡片上点“接管”");
+
+  await control(tab, "take", "K");
+  expect((await typeIn({ text: "你好 world 👋" })).status).toBe(200);
+  expect((await typeIn({ key: "Backspace" })).status).toBe(200);
+  expect((await typeIn({ key: "F12" })).status).toBe(400);
+  await control(tab, "release", "K");
+  expect(text(await call("K", "browser_evaluate", { script: "document.querySelector('#q').value" }))).toBe("你好 world 👋".slice(0, -2));
+});

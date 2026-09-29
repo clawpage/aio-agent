@@ -56,6 +56,8 @@ export interface TabServerLike {
   control(key: string, tab: string, action: "take" | "release"): Promise<TabRecord | null>;
   /** A current preview of one of the task's tabs. */
   screenshot(key: string, tab: string): Promise<{ mimeType: string; data: string; url: string; title: string } | null>;
+  /** Type text or press a key, for a person, into the page in front of the real browser. */
+  input(input: { text?: string; key?: string }): Promise<{ status: number; body: Record<string, unknown> }>;
 }
 
 /** An agent asking a person for help waits up to 30 minutes; the MCP clients must wait a bit longer. */
@@ -221,6 +223,21 @@ export class TabServer implements TabServerLike {
       return (JSON.parse(res.stdout) as { tab: TabRecord }).tab;
     } catch {
       return null;
+    }
+  }
+
+  async input(input: { text?: string; key?: string }): Promise<{ status: number; body: Record<string, unknown> }> {
+    const res = await this.#container.execInSandbox(
+      ["curl", "-s", "-m", "20", "-w", "\n%{http_code}", "-X", "POST", "-H", "content-type: application/json", "--data-binary", "@-", `http://127.0.0.1:${TAB_SERVER_PORT}/input`],
+      { timeoutMs: 25_000, stdin: JSON.stringify(input) },
+    );
+    const cut = res.stdout.lastIndexOf("\n");
+    const status = Number(res.stdout.slice(cut + 1));
+    if (res.code !== 0 || !status) return { status: 503, body: { error: "unavailable", message: "浏览器输入暂不可用，请稍后重试" } };
+    try {
+      return { status, body: JSON.parse(res.stdout.slice(0, cut)) as Record<string, unknown> };
+    } catch {
+      return { status: 502, body: { error: "bad_response" } };
     }
   }
 

@@ -96,6 +96,7 @@ export const api = {
   submitTask: (body: { text: string; clientMessageId: string; attachments: Attachment[]; relatedTaskId: string | null }) => request<{ task: import("./types").Task; duplicate: boolean }>("/api/tasks", { method: "POST", body }),
   stopTask: (id: string) => request<{ok:boolean}>(`/api/tasks/${encodeURIComponent(id)}/stop`, {method:"POST",body:{}}),
   retryTaskPlanning: (id: string) => request<{ok:boolean}>(`/api/tasks/${encodeURIComponent(id)}/retry-planning`, {method:"POST",body:{}}),
+  browserInput: (input: { text?: string; key?: string }) => request<{ title: string; url: string }>("/api/browser/input", { method: "POST", body: input }),
   taskBrowser: (id: string) => request<{ tabs: import("./types").TaskTab[] }>(`/api/tasks/${encodeURIComponent(id)}/browser`),
   taskBrowserControl: (id: string, tab: string, action: "take" | "release") => request<{ tab: import("./types").TaskTab }>(`/api/tasks/${encodeURIComponent(id)}/browser/control`, { method: "POST", body: { tab, action } }),
   taskBrowserScreenshotUrl: (id: string, tab: string, at: number) => `/api/tasks/${encodeURIComponent(id)}/browser/screenshot?tab=${encodeURIComponent(tab)}&at=${at}`,

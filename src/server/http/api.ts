@@ -447,6 +447,16 @@ export function createApiRouter(context: AppContext): Router {
     res.setHeader("Cache-Control", "no-store");
     res.type(shot.mimeType).send(Buffer.from(shot.data, "base64"));
   }));
+  // A phone cannot raise its keyboard inside the remote browser view, so its native
+  // input bar types into the page in front through here.
+  router.post("/browser/input", requireKind("primary"), requireSession, asyncHandler(async (req, res) => {
+    if (!context.tabs) { res.status(404).json({ error: "not_found" }); return; }
+    const text = typeof req.body?.text === "string" ? req.body.text : undefined;
+    const key = typeof req.body?.key === "string" ? req.body.key : undefined;
+    if (!text && !key) { res.status(400).json({ error: "empty_input" }); return; }
+    const out = await context.tabs.input({ ...(text ? { text } : {}), ...(key ? { key } : {}) });
+    res.status(out.status).json(out.body);
+  }));
   router.post("/tasks/:id/browser/control", requireKind("primary"), requireSession, asyncHandler(async (req, res) => {
     const key = taskBrowserKey(req);
     const action = req.body?.action;

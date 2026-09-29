@@ -198,3 +198,48 @@ test("failed focus recovery keeps an honest retry state and retry reveals the br
   await expect(page.locator('.workspace iframe')).toBeVisible();
   await expect(page.locator('.frame-hint')).toHaveCount(0);
 });
+
+test("phones get a native input bar that types into the page in front; desktops do not", async ({ page, isMobile }, info) => {
+  await mockConsole(page, { conversations: [makeConversation(CONV_ID, "手机输入")] });
+  const bodies: Array<Record<string, unknown>> = [];
+  let refuse = true;
+  await page.route("**/api/browser/input", async (r) => {
+    bodies.push(r.request().postDataJSON());
+    if (refuse) {
+      refuse = false;
+      await r.fulfill({ status: 409, json: { error: "task_tab", message: "这个页面正由任务「订餐厅」操作，请先在任务卡片上点“接管”" } });
+    } else await r.fulfill({ json: { title: "登录", url: "https://example.com/login" } });
+  });
+  await page.goto("/");
+  await page.getByRole("button", { name: "工作区", exact: true }).first().click();
+  const bar = page.getByRole("form", { name: "向网页输入" });
+  if (!isMobile) {
+    await expect(page.locator(".ws-body iframe").first()).toBeVisible();
+    await expect(bar).toHaveCount(0);
+    return;
+  }
+  const field = bar.getByRole("textbox", { name: "要输入到网页的文字" });
+  await expect(field).toBeVisible();
+  await expect(field).toHaveAttribute("enterkeyhint", "send");
+
+  // The phone's return key sends the text only; the page refusing it is explained.
+  await field.fill("你好 world");
+  await field.press("Enter");
+  await expect(bar.getByRole("alert")).toContainText("请先在任务卡片上点“接管”");
+  await expect(field).toHaveValue("你好 world");
+  await bar.getByRole("button", { name: "发送", exact: true }).click();
+  await expect(field).toHaveValue("");
+  await bar.getByRole("button", { name: "回车", exact: true }).click();
+  await bar.getByRole("button", { name: "删除", exact: true }).click();
+  expect(bodies).toEqual([{ text: "你好 world" }, { text: "你好 world" }, { key: "Enter" }, { key: "Backspace" }]);
+  await expect(bar.getByRole("alert")).toHaveCount(0);
+
+  for (const width of [390, 360]) {
+    await page.setViewportSize({ width, height: 844 });
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+    expect(overflow).toBeLessThanOrEqual(0);
+    const box = await bar.boundingBox();
+    expect(box!.x + box!.width).toBeLessThanOrEqual(width + 0.5);
+  }
+  await page.screenshot({ path: info.outputPath("remote-keyboard.png") });
+});

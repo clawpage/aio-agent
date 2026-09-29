@@ -15,6 +15,7 @@ const fakeTabs: TabServerLike = {
   prune: async () => undefined,
   list: async (key) => (calls.push(`list:${key ?? "*"}`), [record(key ?? feedKey, "ai")]),
   control: async (key, tab, action) => (calls.push(`${action}:${key}:${tab}`), tab === "t1" ? record(key, action === "take" ? "human" : "ai") : null),
+  input: async (input) => (calls.push(`input:${JSON.stringify(input)}`), { status: 409, body: { error: "task_tab", message: "这个页面正由任务「查网页」操作，请先在任务卡片上点“接管”" } }),
   screenshot: async (key, tab) => (calls.push(`shot:${key}:${tab}`), tab === "t1" ? { mimeType: "image/jpeg", data: Buffer.from("jpeg-bytes").toString("base64"), url: "u", title: "t" } : null),
 };
 
@@ -57,4 +58,15 @@ it("shows a task's tabs and lets its owner take over and hand back, keyed by the
   expect(calls).toEqual(expect.arrayContaining([`list:${key}`, `shot:${key}:t1`, `take:${key}:t1`, `release:${key}:t1`]));
 
   expect((await h.request("/api/tasks/task_unknown/browser", { headers: { cookie } })).status).toBe(404);
+});
+
+it("types for the person into the page in front, and passes the tab server's refusal through", async () => {
+  const { cookie, csrf } = await login(h);
+  const headers = { cookie, "x-csrf-token": csrf, "content-type": "application/json" };
+  expect((await h.request("/api/browser/input", { method: "POST", headers: { cookie, "content-type": "application/json" }, body: JSON.stringify({ text: "x" }) })).status).toBe(403);
+  expect((await h.request("/api/browser/input", { method: "POST", headers, body: JSON.stringify({}) })).status).toBe(400);
+  const refused = await h.request("/api/browser/input", { method: "POST", headers, body: JSON.stringify({ text: "你好", key: "Enter" }) });
+  expect(refused.status).toBe(409);
+  expect(((await refused.json()) as { message: string }).message).toContain("请先在任务卡片上点“接管”");
+  expect(calls).toContain(`input:${JSON.stringify({ text: "你好", key: "Enter" })}`);
 });

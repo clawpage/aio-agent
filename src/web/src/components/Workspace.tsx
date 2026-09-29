@@ -1,3 +1,4 @@
+import { RemoteKeyboard } from "./RemoteKeyboard";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, ApiError } from "../api";
 import type { CapabilitiesResponse, DocumentReadiness, FileEntry, StatusResponse } from "../types";
@@ -287,6 +288,8 @@ export function Workspace({ open, status, initialPath, onClose, onNotify, browse
 
   /** The browser/desktop panels are the only ones that need a live Chromium. */
   const holdsBrowser = open && (tab === "browser" || tab === "desktop");
+  // Touch screens cannot type into the remote view directly; they get the native input bar.
+  const touchDevice = typeof window !== "undefined" && window.matchMedia?.("(pointer: coarse)").matches;
 
   // Follow document visibility so a hidden console unmounts its frame and stream.
   useEffect(() => {
@@ -543,6 +546,7 @@ export function Workspace({ open, status, initialPath, onClose, onNotify, browse
             ) : (
               <p className="muted">正在建立工作区会话…</p>
             )}
+            {holdsBrowser && touchDevice && frameSrc && docVisible && !suspended && !restoringBrowser && <RemoteKeyboard />}
             {frameError && <div className="frame-hint error">{frameError}</div>}
             {frameStatus === "timeout" && (
               <div className="frame-hint">
