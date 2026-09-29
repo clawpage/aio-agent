@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "../api";
 import type { Task, TaskTab } from "../types";
-import { TaskConsole } from "./TaskConsole";
+import { TaskConsole, taskConsoleTarget } from "./TaskConsole";
 
 const LIVE = new Set(["running", "stopping", "queued"]);
 const REFRESH_MS = 4000;
@@ -32,6 +32,7 @@ export function TaskBrowser({ task, onReveal }: { task: Task; onReveal: () => vo
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [consoleOpen, setConsoleOpen] = useState(false);
+  const consoleTarget = useMemo(() => taskConsoleTarget(task.id), [task.id]);
   const live = LIVE.has(task.status);
   // The feed summary changes the moment the agent asks for you or you take over.
   const signal = `${task.browser?.tabs ?? 0}:${task.browser?.request ?? ""}:${task.browser?.human ?? false}:${task.status}`;
@@ -106,11 +107,10 @@ export function TaskBrowser({ task, onReveal }: { task: Task; onReveal: () => vo
       </div>
       {human && consoleOpen && (
         <TaskConsole
-          taskId={task.id}
+          target={consoleTarget}
           tab={tab}
-          live={live}
-          busy={busy}
-          onRelease={() => void control("release")}
+          label="操作任务页面"
+          primary={{ label: live ? "完成，交还给 AI" : "结束查看", busy, onClick: () => void control("release") }}
           onClose={() => setConsoleOpen(false)}
           onReveal={() => { setConsoleOpen(false); onReveal(); }}
         />

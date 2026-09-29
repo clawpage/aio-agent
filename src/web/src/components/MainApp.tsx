@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, ApiError } from "../api";
-import type { Conversation, StatusResponse, Task } from "../types";
+import type { Conversation, StatusResponse, Task, TaskTab } from "../types";
+import { personConsoleTarget, TaskConsole } from "./TaskConsole";
 import { Chat } from "./Chat";
 import { Login } from "./Login";
 import { Settings } from "./Settings";
@@ -49,6 +50,9 @@ export function MainApp() {
     const [workspacePath, setWorkspacePath] = useState<string | undefined>();
     const [browserNonce, setBrowserNonce] = useState(0);
     const [notice, setNotice] = useState<string | null>(null);
+    // A link opened from a reply: its own tab, operated from the same console as a taken-over task tab.
+    const [linkTab, setLinkTab] = useState<TaskTab | null>(null);
+    const [linkOpening, setLinkOpening] = useState(false);
     const [theme, setTheme] = useState(() => matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark");
     const expired = useCallback(() => { setAuth(false); setMenuOpen(false); setNotice("登录已过期，请重新登录。"); }, []);
     const check = useCallback(async () => { try {
@@ -96,13 +100,25 @@ export function MainApp() {
     }, [auth, expired, refreshStatus]);
     const notify = useCallback((message: string) => setNotice(message), []);
     const revealBrowser = useCallback(() => { setWorkspace(true); setBrowserNonce(n => n + 1); }, []);
-    const openLink = useCallback(async (url: string) => { try {
-        await api.openBrowserTab(url);
-        revealBrowser();
-    }
-    catch (err) {
-        notify(err instanceof Error ? err.message : String(err));
-    } }, [notify, revealBrowser]);
+    const openLink = useCallback(async (url: string) => {
+        setLinkOpening(true);
+        try {
+            const opened = await api.openBrowserTab(url);
+            // Without the tab server there is no tab of the person's own: show the whole browser instead.
+            if (opened.tab) setLinkTab(opened.tab);
+            else revealBrowser();
+        }
+        catch (err) {
+            notify(err instanceof Error ? err.message : String(err));
+        }
+        finally {
+            setLinkOpening(false);
+        }
+    }, [notify, revealBrowser]);
+    const closeLink = useCallback((visited: string[]) => {
+        setLinkTab(null);
+        for (const id of visited) void api.personBrowserClose(id).catch(() => undefined);
+    }, []);
     const openWorkspace = useCallback((path?: string) => { setMenuOpen(false); setWorkspacePath(path); setWorkspace(true); }, []);
     const details = useCallback(async (task: Task,from:'main'|'tasks'='main') => { const request=++detailRequest.current; try {
         const conversation=(await api.conversation(task.conversationId)).conversation;
@@ -149,6 +165,8 @@ export function MainApp() {
       {role === "owner" && view === "settings" && <Settings onBack={() => setView("main")}/>}
       {view === "detail" && detail && <div className="task-detail"><div className="task-detail-bar"><button className="ghost" onClick={() => setView(detailReturn)}>← 返回{detailReturn==='tasks'?'任务列表':'主会话'}</button><span className="muted tiny">{taskStatusLabels[(taskFeed.tasks.find(t=>t.id===detailTask?.id)??detailTask)?.status??'']??'过程详情'}</span></div><Chat key={detail.id} readOnly conversation={detail} status={status} onConversationChanged={() => { }} onStatusChanged={() => void refreshStatus()} onOpenWorkspace={openWorkspace} onOpenBrowserLink={u => void openLink(u)}/></div>}
     </main>
+    {linkOpening && <div className="task-console-overlay" role="presentation"><div className="task-console task-console-opening" role="status">正在打开链接…</div></div>}
+    {linkTab && <TaskConsole key={linkTab.id} target={personConsoleTarget} tab={linkTab} label="操作网页" closeLabel="关闭页面" onClose={closeLink} onReveal={() => { setLinkTab(null); revealBrowser(); }}/>}
     <Workspace canConfigure={role === "owner"} open={workspace} status={status} initialPath={workspacePath} browserNonce={browserNonce} onClose={() => { setWorkspace(false); setWorkspacePath(undefined); }} onNotify={notify}/>
   </div>;
 }

@@ -17,6 +17,8 @@ const fakeTabs: TabServerLike = {
   control: async (key, tab, action) => (calls.push(`${action}:${key}:${tab}`), tab === "t1" ? record(key, action === "take" ? "human" : "ai") : null),
   input: async (input) => (calls.push(`input:${JSON.stringify(input)}`), { status: 409, body: { error: "task_tab", message: "这个页面正由任务「查网页」操作，请先在任务卡片上点“接管”" } }),
   pointer: async (input) => (calls.push(`pointer:${JSON.stringify(input)}`), { status: 200, body: { tab: input.tab ?? "t1" } }),
+  open: async (url) => (calls.push(`open:${url}`), { status: 200, body: { tab: { ...record("person", "human"), id: "t7", url } } }),
+  close: async (tab) => (calls.push(`close:${tab}`), { status: 200, body: { closed: tab } }),
   screenshot: async (key, tab) => (calls.push(`shot:${key}:${tab}`), tab === "t1" ? { mimeType: "image/jpeg", data: Buffer.from("jpeg-bytes").toString("base64"), url: "u", title: "t" } : null),
 };
 
@@ -93,4 +95,27 @@ it("acts in a task's own tab only for its owner, always naming that task to the 
 
   expect((await h.request("/api/tasks/task_unknown/browser/pointer", { method: "POST", headers, body: JSON.stringify({ tab: "t1", action: "back" }) })).status).toBe(404);
   expect((await h.request("/api/tasks/task_unknown/browser/input", { method: "POST", headers, body: JSON.stringify({ text: "x" }) })).status).toBe(404);
+});
+
+it("opens a link from a reply in the person's own tab, and operates only that key's tabs", async () => {
+  const { cookie, csrf } = await login(h);
+  const headers = { cookie, "x-csrf-token": csrf, "content-type": "application/json" };
+  const opened = await h.request("/api/browser/tabs", { method: "POST", headers, body: JSON.stringify({ url: "https://example.com/a" }) });
+  expect(opened.status).toBe(200);
+  expect(((await opened.json()) as { tab: TabRecord }).tab).toMatchObject({ id: "t7", key: "person", holder: "human" });
+  expect(calls).toContain("open:https://example.com/a");
+  expect((await h.request("/api/browser/tabs", { method: "POST", headers, body: JSON.stringify({ url: "javascript:alert(1)" }) })).status).toBe(400);
+
+  // A body cannot point these routes at a task's key.
+  await h.request("/api/browser/person/input", { method: "POST", headers, body: JSON.stringify({ tab: "t7", text: "hi", task: "conv_x" }) });
+  expect(calls).toContain(`input:${JSON.stringify({ text: "hi", task: "person", tab: "t7" })}`);
+  await h.request("/api/browser/person/pointer", { method: "POST", headers, body: JSON.stringify({ tab: "t7", action: "back" }) });
+  expect(calls).toContain(`pointer:${JSON.stringify({ task: "person", tab: "t7", action: "back" })}`);
+  expect((await h.request("/api/browser/person/pointer", { method: "POST", headers, body: JSON.stringify({ tab: "t7", action: "drag" }) })).status).toBe(400);
+  expect((await h.request("/api/browser/person/screenshot?tab=t1", { headers: { cookie } })).status).toBe(200);
+  expect(calls).toContain("shot:person:t1");
+  expect((await h.request("/api/browser/person/close", { method: "POST", headers, body: JSON.stringify({ tab: "t7" }) })).status).toBe(200);
+  expect(calls).toContain("close:t7");
+  expect((await h.request("/api/browser/person/close", { method: "POST", headers: { cookie, "content-type": "application/json" }, body: JSON.stringify({ tab: "t7" }) })).status).toBe(403);
+  expect((await h.request("/api/browser/person/screenshot?tab=t1")).status).toBe(401);
 });

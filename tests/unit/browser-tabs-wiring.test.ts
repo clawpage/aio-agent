@@ -38,6 +38,8 @@ beforeEach(async () => {
     screenshot: async () => null,
     input: async () => ({ status: 200, body: {} }),
     pointer: async () => ({ status: 200, body: {} }),
+    open: async () => ({ status: 200, body: {} }),
+    close: async () => ({ status: 200, body: {} }),
   };
   const browser = { reserveTurn: () => () => void log.push("lease-end"), ready: async () => void log.push("ready") };
   agent = new AgentManager({ cfg: testConfig("/tmp/pa-tabs-wiring", 1), db, codex, log: new Logger("error", undefined, false), hostTokens: {} as HostTokenSource, browser, tabs });
@@ -93,7 +95,7 @@ it("destroys finished tasks' tabs right before an idle snapshot, and only then",
     stop: async () => (calls.push("stop"), {}),
     wake: async () => (calls.push("wake"), {}),
   } as unknown as BrowserRuntimeLike;
-  const wrapped = pruneBeforeSnapshot(runtime, { ensure: async () => undefined, finish: async () => undefined, prune: async () => void calls.push("prune"), list: async () => [], control: async () => null, screenshot: async () => null, input: async () => ({ status: 200, body: {} }), pointer: async () => ({ status: 200, body: {} }) });
+  const wrapped = pruneBeforeSnapshot(runtime, { ensure: async () => undefined, finish: async () => undefined, prune: async () => void calls.push("prune"), list: async () => [], control: async () => null, screenshot: async () => null, input: async () => ({ status: 200, body: {} }), pointer: async () => ({ status: 200, body: {} }), open: async () => ({ status: 200, body: {} }), close: async () => ({ status: 200, body: {} }) });
   await wrapped.status();
   await wrapped.wake();
   await wrapped.snapshot();

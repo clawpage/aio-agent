@@ -454,3 +454,50 @@ test("a task that needs you in the browser shows why, hands you its own tab to o
     await expect(panel).toBeHidden();
     await expect(page.getByRole("group", { name: "任务浏览器：AI 操作中" }).getByRole("button", { name: "接管", exact: true })).toBeVisible();
 });
+test("a link in a reply opens in the person's own tab, operated from the same console as a hand-over", async ({ page }, info) => {
+    const row: Task = { ...task(1, "completed"), title: "找餐厅", result: "推荐这家：[Nopa 订位](https://www.opentable.com/r/nopa)", completedAt: 2000 };
+    const calls: Array<{ route: string; body: Record<string, unknown> }> = [];
+    const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==", "base64");
+    const shots: string[] = [];
+    await page.route("**/api/browser/person/screenshot*", r => { shots.push(new URL(r.request().url()).searchParams.get("tab")!); return r.fulfill({ contentType: "image/png", body: png }); });
+    await page.route("**/api/browser/person/*", async r => {
+        const route = new URL(r.request().url()).pathname.split("/").pop()!;
+        if (route === "screenshot") return r.fallback();
+        const body = r.request().postDataJSON();
+        calls.push({ route, body });
+        // The page opens a window on the first tap: the console follows it.
+        const current = route === "pointer" && calls.filter(c => c.route === "pointer").length === 1 ? "t9" : undefined;
+        await r.fulfill({ json: { title: "OpenTable", url: "https://www.opentable.com/r/nopa", editable: false, ...(current ? { current } : {}), closed: body.tab } });
+    });
+    await setup(page, [row]);
+    let opened: string | null = null;
+    await page.route("**/api/browser/tabs", async r => {
+        opened = r.request().postDataJSON().url;
+        await new Promise(res => setTimeout(res, 300));
+        await r.fulfill({ json: { ok: true, message: "已打开", data: null, tab: { id: "t8", key: "person", title: "你打开的网页", url: opened, createdAt: 1, lastUsed: 1, finishedAt: null, holder: "human", humanSince: 1, request: null } } });
+    });
+    await page.getByRole("link", { name: "Nopa 订位" }).click();
+    await expect(page.getByRole("status")).toContainText("正在打开链接");
+    const panel = page.getByRole("dialog", { name: "操作网页" });
+    await expect(panel).toBeVisible();
+    expect(opened).toBe("https://www.opentable.com/r/nopa");
+    // No workspace, no host tab: the page is operated right here.
+    await expect(page.locator(".workspace")).toHaveCount(0);
+    expect(page.context().pages()).toHaveLength(1);
+    await expect.poll(() => shots.at(-1)).toBe("t8");
+
+    const screen = panel.getByRole("img", { name: /实时画面/ });
+    const box = (await screen.boundingBox())!;
+    await screen.click({ position: { x: box.width / 2, y: box.height / 2 } });
+    await expect.poll(() => shots.at(-1)).toBe("t9");
+    await panel.getByRole("textbox", { name: "要输入到网页的文字" }).fill("2 人");
+    await panel.getByRole("button", { name: "发送", exact: true }).click();
+    await expect.poll(() => calls.find(c => c.route === "input")?.body).toEqual({ tab: "t9", text: "2 人" });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
+    await page.screenshot({ path: info.outputPath("link-console.png") });
+
+    // Closing the panel closes every tab it showed.
+    await panel.getByRole("button", { name: "关闭操作面板" }).click();
+    await expect(panel).toBeHidden();
+    await expect.poll(() => calls.filter(c => c.route === "close").map(c => c.body.tab).sort()).toEqual(["t8", "t9"]);
+});

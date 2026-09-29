@@ -62,7 +62,7 @@ async function call(task: string | null, name: string, args: Record<string, unkn
 }
 const text = (r: Rpc) => (r.result?.content ?? []).map((c) => c.text ?? "<image>").join("\n");
 const post = async (route: string, body: unknown = {}) => (await fetch(`${base}${route}`, { method: "POST", body: JSON.stringify(body) })).json();
-type TabRecord = { id: string; key: string; title: string; finishedAt: number | null; holder: string; request: { reason: string } | null };
+type TabRecord = { id: string; key: string; title: string; finishedAt: number | null; holder: string; request: { reason: string } | null; url?: string };
 const records = async (key?: string) => ((await (await fetch(`${base}/tabs${key ? `?key=${key}` : ""}`)).json()) as { tabs: TabRecord[] }).tabs;
 const control = async (tab: string, action: string, key?: string) => fetch(`${base}/control`, { method: "POST", body: JSON.stringify({ tab, action, key }) });
 const page = (title: string, body: string) => `data:text/html,<title>${title}</title><p id="p">${body}</p><input id="q"><a href="data:text/html,<title>Next</title>next">go</a>`;
@@ -237,4 +237,45 @@ it.skipIf(!hasChromium)("taps, scrolls and goes back for a person in a held tab"
   const back = (await (await point({ action: "back" })).json()) as { title: string };
   await control(tab, "release", "P");
   expect(back.title).toBe("First");
+});
+
+it.skipIf(!hasChromium)("opens a person's link in their own tab: theirs to operate, invisible to every agent", async () => {
+  const site = (await import("node:http")).createServer((req, res) => {
+    res.setHeader("content-type", "text/html; charset=utf-8");
+    res.end(req.url === "/popup"
+      ? "<title>Popup</title><p>popup</p>"
+      : `<title>Link ${req.url}</title><body style="margin:0"><button style="position:fixed;left:0;top:0;width:100vw;height:50vh" onclick="window.open('/popup')">open</button><input id=q style="position:fixed;left:0;top:50vh;width:100vw;height:50vh">`);
+  });
+  await new Promise<void>((r) => site.listen(0, "127.0.0.1", r));
+  const origin = `http://127.0.0.1:${(site.address() as net.AddressInfo).port}`;
+  const open = async (url: string) => (await (await fetch(`${base}/open`, { method: "POST", body: JSON.stringify({ url }) })).json()) as { tab: TabRecord & { targetId: string } };
+  expect((await fetch(`${base}/open`, { method: "POST", body: JSON.stringify({ url: "file:///etc/passwd" }) })).status).toBe(400);
+
+  const { tab } = await open(`${origin}/one`);
+  expect(tab).toMatchObject({ key: "person", holder: "human", url: `${origin}/one` });
+  // No agent sees it, reads it or acts on it.
+  expect(text(await call("Z", "browser_tab_list"))).not.toContain(origin);
+  expect((await call("Z", "browser_get_text", { tab: tab.id })).result?.isError).toBe(true);
+  expect(text(await call("Z", "browser_get_text", { tab: tab.id }))).toContain("用户正在操作");
+
+  // The person types and taps without taking anything over; a window the page opens becomes theirs too.
+  const act = async (route: string, body: Record<string, unknown>) => (await (await fetch(`${base}${route}`, { method: "POST", body: JSON.stringify({ task: "person", tab: tab.id, ...body }) })).json()) as { current: string; editable?: boolean };
+  expect(await act("/pointer", { action: "click", x: 0.5, y: 0.75 })).toMatchObject({ editable: true, current: tab.id });
+  await act("/input", { text: "hello" });
+  const opened = await act("/pointer", { action: "click", x: 0.5, y: 0.25 });
+  await new Promise((r) => setTimeout(r, 500));
+  const popup = (await records("person")).find((t) => t.id !== tab.id)!;
+  expect(popup).toMatchObject({ holder: "human", url: `${origin}/popup` });
+  expect((await act("/pointer", { action: "back" })).current).toBe(popup.id);
+  expect(opened.current === popup.id || opened.current === tab.id).toBe(true);
+
+  // Only the person's own tabs close from here, and only their latest three stay open.
+  expect((await fetch(`${base}/close`, { method: "POST", body: JSON.stringify({ tab: tabIdOf(await call("Z", "browser_navigate", { url: page("Zed", "z") })) }) })).status).toBe(404);
+  for (const n of ["two", "three", "four"]) await open(`${origin}/${n}`);
+  const mine = await records("person");
+  expect(mine).toHaveLength(3);
+  expect(mine.map((t) => t.url)).not.toContain(`${origin}/one`);
+  expect((await fetch(`${base}/close`, { method: "POST", body: JSON.stringify({ tab: mine[0]!.id }) })).status).toBe(200);
+  expect(await records("person")).toHaveLength(2);
+  site.close();
 });

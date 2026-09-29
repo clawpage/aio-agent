@@ -48,6 +48,12 @@ const INSTRUCTIONS = [
 
 /** tabId -> { id, page, key, title, targetId, createdAt, lastUsed, finishedAt, holder, humanSince, request } */
 const registry = new Map();
+/**
+ * Links a person opens from a reply live under this key: always theirs to
+ * operate, never listed, read or operated by any agent.
+ */
+const PERSON = 'person';
+const MAX_PERSON_TABS = 3;
 /** key -> tabId the task is currently working in */
 const cursors = new Map();
 let seq = 0;
@@ -93,7 +99,7 @@ function register(page, key, title, extra = {}) {
   const now = Date.now();
   const tab = {
     id, page, key, title, targetId: extra.targetId || null, createdAt: extra.createdAt || now, lastUsed: extra.lastUsed || now, finishedAt: extra.finishedAt ?? null,
-    holder: extra.holder === 'human' ? 'human' : 'ai', humanSince: extra.humanSince ?? null, request: extra.request ?? null,
+    holder: extra.holder === 'human' || key === PERSON ? 'human' : 'ai', humanSince: extra.humanSince ?? (key === PERSON ? now : null), request: extra.request ?? null,
   };
   registry.set(id, tab);
   if (!extra.id) cursors.set(key, id);
@@ -348,7 +354,26 @@ async function personInput(body) {
     if (!PERSON_KEYS.has(body.key)) return { status: 400, body: { error: 'bad_key' } };
     await page.keyboard.press(body.key);
   }
-  return { status: 200, body: { tab: tab.id, title: await page.title().catch(() => ''), url: safeUrl(page) } };
+  return { status: 200, body: { tab: tab.id, current: cursors.get(tab.key) || tab.id, title: await page.title().catch(() => ''), url: safeUrl(page) } };
+}
+
+/** Open a link for a person in a tab of their own (its own window), keeping only their latest few. */
+async function personOpen(body) {
+  const url = String(body.url || '');
+  if (!/^https?:\/\//i.test(url)) return { status: 400, body: { error: 'bad_url' } };
+  const tab = await newTab(PERSON, '你打开的网页');
+  await tab.page.goto(url, { waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => undefined);
+  const old = ownTabs(PERSON).filter((t) => t.id !== tab.id).sort((a, b) => b.lastUsed - a.lastUsed).slice(MAX_PERSON_TABS - 1);
+  for (const t of old) await t.page.close().catch(() => undefined);
+  return { status: 200, body: { tab: snapshotRecords().find((r) => r.id === tab.id) } };
+}
+
+/** A person closes a tab they opened; task tabs are never closed from here. */
+async function personClose(body) {
+  const tab = registry.get(String(body.tab || ''));
+  if (!tab || tab.page.isClosed() || tab.key !== PERSON) return { status: 404, body: { error: 'no_tab' } };
+  await tab.page.close().catch(() => undefined);
+  return { status: 200, body: { closed: tab.id } };
 }
 
 /**
@@ -373,12 +398,13 @@ async function personPointer(body) {
     return { status: 400, body: { error: 'bad_action' } };
   }
   await page.waitForTimeout(150);
+  tab.lastUsed = Date.now();
   // Tapping a field tells the phone to offer its keyboard.
   const editable = await page.evaluate(() => {
     const el = document.activeElement;
     return Boolean(el && (el.isContentEditable || el.tagName === 'TEXTAREA' || (el.tagName === 'INPUT' && !/^(button|submit|reset|checkbox|radio|file|image|range|color)$/i.test(el.type))));
   }).catch(() => false);
-  return { status: 200, body: { tab: tab.id, title: await page.title().catch(() => ''), url: safeUrl(page), editable } };
+  return { status: 200, body: { tab: tab.id, current: cursors.get(tab.key) || tab.id, title: await page.title().catch(() => ''), url: safeUrl(page), editable } };
 }
 
 async function pruneFinished() {
@@ -509,9 +535,11 @@ const TOOLS = {
     run: async (ctx) => {
       await browserContext();
       const current = cursors.get(ctx.key);
-      const rows = await Promise.all([...registry.values()].filter((t) => !t.page.isClosed()).map(async (t) => {
+      const rows = await Promise.all([...registry.values()].filter((t) => !t.page.isClosed() && t.key !== PERSON).map(async (t) => {
         const own = t.key === ctx.key;
-        const who = t.holder === 'human' ? '用户正在操作，暂不可用' : own ? '本任务，可操作' : `任务「${t.title}」${t.finishedAt ? '（已结束）' : ''}，只读`;
+        // What a person is doing in a tab is theirs: not even its title or address.
+        if (t.holder === 'human') return { own, line: `${t.id === current ? '*' : ' '} [${t.id}] （用户正在操作，内容不可见） — ${own ? '本任务' : `任务「${t.title}」`}，暂不可用` };
+        const who = own ? '本任务，可操作' : `任务「${t.title}」${t.finishedAt ? '（已结束）' : ''}，只读`;
         return { own, line: `${t.id === current ? '*' : ' '} [${t.id}] ${await t.page.title().catch(() => '')} ${safeUrl(t.page)} — ${who}` };
       }));
       if (!rows.length) return textResult('还没有任务创建的标签页。');
@@ -656,6 +684,14 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'POST' && url.pathname === '/prune') return send(res, 200, { closed: await pruneFinished() });
     if (req.method === 'POST' && url.pathname === '/input') {
       const out = await personInput(await readJson(req));
+      return send(res, out.status, out.body);
+    }
+    if (req.method === 'POST' && url.pathname === '/open') {
+      const out = await personOpen(await readJson(req));
+      return send(res, out.status, out.body);
+    }
+    if (req.method === 'POST' && url.pathname === '/close') {
+      const out = await personClose(await readJson(req));
       return send(res, out.status, out.body);
     }
     if (req.method === 'POST' && url.pathname === '/pointer') {

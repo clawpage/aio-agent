@@ -43,6 +43,9 @@ export interface TabRecord {
   request: { reason: string; at: number } | null;
 }
 
+/** The tab server's key for links a person opens from a reply: theirs alone, invisible to agents. */
+export const PERSON_KEY = "person";
+
 /** A person's action goes to the tab they took over; `task` (its key) and `tab` narrow it to one. */
 export interface PersonTarget {
   task?: string;
@@ -67,6 +70,10 @@ export interface TabServerLike {
   input(input: PersonTarget & { text?: string; key?: string }): Promise<PersonResult>;
   /** Tap (x, y as 0..1 of the viewport), scroll or go back, for a person, in a tab they took over. */
   pointer(input: PersonTarget & { action: "click" | "scroll" | "back"; x?: number; y?: number; dy?: number }): Promise<PersonResult>;
+  /** Open a link for a person in a tab of their own, in its own window. */
+  open(url: string): Promise<PersonResult>;
+  /** Close a tab the person opened. */
+  close(tab: string): Promise<PersonResult>;
 }
 
 /** An agent asking a person for help waits up to 30 minutes; the MCP clients must wait a bit longer. */
@@ -243,7 +250,15 @@ export class TabServer implements TabServerLike {
     return this.#person("/pointer", input);
   }
 
-  async #person(route: "/input" | "/pointer", body: PersonTarget & object): Promise<PersonResult> {
+  async open(url: string): Promise<PersonResult> {
+    return this.#person("/open", { url } as PersonTarget & { url: string });
+  }
+
+  async close(tab: string): Promise<PersonResult> {
+    return this.#person("/close", { tab });
+  }
+
+  async #person(route: "/input" | "/pointer" | "/open" | "/close", body: PersonTarget & object): Promise<PersonResult> {
     if ((body.task !== undefined && !KEY.test(body.task)) || (body.tab !== undefined && !/^t\d{1,9}$/.test(body.tab))) {
       return { status: 404, body: { error: "no_tab", message: "这个标签页已经关闭或不属于该任务" } };
     }

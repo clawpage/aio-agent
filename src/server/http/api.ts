@@ -22,6 +22,7 @@ import { COOKIE_NAMES, clearSessionCookies, sessionCookies } from "../auth/sessi
 import { safeRedirectPath } from "../auth/tickets.js";
 import { audit } from "../db.js";
 import { recallStats } from "../tasks/recall.js";
+import { PERSON_KEY } from "../browser/tabs.js";
 import { DocumentError, type DocumentService } from "../documents/service.js";
 import type { BrowserStatusView } from "../browser/service.js";
 import { documentKind, isRenderableKind, requireWorkspaceFilePath } from "../documents/paths.js";
@@ -461,6 +462,34 @@ export function createApiRouter(context: AppContext): Router {
     const input = personInput(req);
     if (!input) { res.status(400).json({ error: "empty_input" }); return; }
     const out = await context.tabs.input(input);
+    res.status(out.status).json(out.body);
+  }));
+  // The person's own tabs (links opened from a reply): only ever the "person" key.
+  const personTab = (req: Request): string => String((req.method === "GET" ? req.query.tab : req.body?.tab) ?? "");
+  router.get("/browser/person/screenshot", requireKind("primary"), requireSession, asyncHandler(async (req, res) => {
+    const shot = context.tabs ? await context.tabs.screenshot(PERSON_KEY, personTab(req)) : null;
+    if (!shot) { res.status(404).json({ error: "not_found" }); return; }
+    res.setHeader("Cache-Control", "no-store");
+    res.type(shot.mimeType).send(Buffer.from(shot.data, "base64"));
+  }));
+  router.post("/browser/person/input", requireKind("primary"), requireSession, asyncHandler(async (req, res) => {
+    if (!context.tabs) { res.status(404).json({ error: "not_found" }); return; }
+    const input = personInput(req);
+    if (!input) { res.status(400).json({ error: "empty_input" }); return; }
+    const out = await context.tabs.input({ ...input, task: PERSON_KEY, tab: personTab(req) });
+    res.status(out.status).json(out.body);
+  }));
+  router.post("/browser/person/pointer", requireKind("primary"), requireSession, asyncHandler(async (req, res) => {
+    if (!context.tabs) { res.status(404).json({ error: "not_found" }); return; }
+    const action = req.body?.action;
+    if (action !== "click" && action !== "scroll" && action !== "back") { res.status(400).json({ error: "bad_action" }); return; }
+    const num = (v: unknown): number | undefined => (typeof v === "number" && Number.isFinite(v) ? v : undefined);
+    const out = await context.tabs.pointer({ task: PERSON_KEY, tab: personTab(req), action, x: num(req.body?.x), y: num(req.body?.y), dy: num(req.body?.dy) });
+    res.status(out.status).json(out.body);
+  }));
+  router.post("/browser/person/close", requireKind("primary"), requireSession, asyncHandler(async (req, res) => {
+    if (!context.tabs) { res.status(404).json({ error: "not_found" }); return; }
+    const out = await context.tabs.close(personTab(req));
     res.status(out.status).json(out.body);
   }));
   router.post("/tasks/:id/browser/input", requireKind("primary"), requireSession, asyncHandler(async (req, res) => {
@@ -1482,6 +1511,12 @@ export function createApiRouter(context: AppContext): Router {
       if (!checked.ok) {
         res.status(400).json({ error: "bad_url", message: checked.message });
         return;
+      }
+      // A link the person opens gets a tab of their own, operated from the console
+      // like a taken-over task tab; without the tab server it is a plain browser tab.
+      if (context.tabs) {
+        const opened = await context.tabs.open(checked.url);
+        if (opened.status === 200 && opened.body.tab) { res.json({ ok: true, message: "已打开", data: null, tab: opened.body.tab }); return; }
       }
       const result = await aio.createBrowserTab(checked.url);
       if (!result.ok) {
