@@ -15,7 +15,6 @@ import {
   type TimelineState,
   type WorkingBlock,
 } from "../timeline";
-import { itemOpensSandboxBrowser } from "../browserCommand";
 import { Markdown } from "./Markdown";
 import { FilePreview } from "./FilePreview";
 import { FileCard } from "./FileCard";
@@ -31,8 +30,6 @@ interface Props {
   onOpenWorkspace: (path?: string) => void;
   /** Open a Markdown link as a real tab in the sandbox browser. */
   onOpenBrowserLink: (url: string) => void;
-  /** The agent itself navigated the sandbox browser; reveal that view. */
-  onAgentBrowserNavigate: () => void;
 }
 
 const APPROVAL_LABELS: Record<string, string> = {
@@ -58,7 +55,6 @@ export function Chat({
   onStatusChanged,
   onOpenWorkspace,
   onOpenBrowserLink,
-  onAgentBrowserNavigate,
 }: Props) {
   const [timeline, setTimeline] = useState<TimelineState>(() => emptyTimeline());
   const now = useDisplayClock();
@@ -94,20 +90,11 @@ export function Chat({
   onChangedRef.current = onConversationChanged;
   const onStatusRef = useRef(onStatusChanged);
   onStatusRef.current = onStatusChanged;
-  // Same rule as the other stream callbacks: keep the latest handler in a ref so
-  // a new identity never re-runs the effect and reconnects the SSE stream.
-  const onBrowserNavRef = useRef(onAgentBrowserNavigate);
-  onBrowserNavRef.current = onAgentBrowserNavigate;
-
   // Load history, then stream. Reconnects resume from the last seen event id.
   useEffect(() => {
     let disposed = false;
     let close: (() => void) | null = null;
     let retry: number | null = null;
-    // Replayed history must never move the workspace. Live events only start
-    // after the stream reports `replay.complete`; every (re)connect resets this
-    // so a reconnect's replay is treated like history too.
-    let liveEvents = false;
     setTimeline(emptyTimeline());
     setConnected(false);
     lastIdRef.current = 0;
@@ -117,20 +104,10 @@ export function Chat({
     };
 
     const connect = () => {
-      liveEvents = false;
       close = openEventStream(conversation.id, lastIdRef.current, {
         onEvent: (event: AgentEvent) => {
           if (event.id <= lastIdRef.current) return;
           lastIdRef.current = event.id;
-          // The agent itself navigated the sandbox browser: reveal that view, but
-          // only on this open chat page and only if it is in the foreground, so a
-          // background tab never steals focus.
-          if (liveEvents && event.type === "item/started") {
-            const item = (event.payload?.item ?? null) as Record<string, unknown> | null;
-            if (itemOpensSandboxBrowser(item) && document.visibilityState === "visible" && document.hasFocus()) {
-              onBrowserNavRef.current();
-            }
-          }
           setTimeline((prev) => {
             const next = cloneTimeline(prev);
             applyEvent(next, event);
@@ -146,7 +123,6 @@ export function Chat({
         },
         onOpen: () => {
           setConnected(true);
-          liveEvents = true;
         },
         onError: () => {
           setConnected(false);

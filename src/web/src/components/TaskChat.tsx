@@ -2,17 +2,15 @@ import { MessageTime, TaskDuration, useDisplayClock } from "./MessageTime";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, openEventStream } from "../api";
 import type { Attachment, Task } from "../types";
-import { itemOpensSandboxBrowser } from "../browserCommand";
 import { AttachmentCards, MessageFileCards } from "./Chat";
 import { Markdown } from "./Markdown";
 import { FilePreview } from "./FilePreview";
 import type {TaskFeed} from '../taskStatus';
 const terminal = new Set(["completed", "failed", "interrupted", "unknown"]);
 const labels: Record<string, string> = { planning: "正在分配…", needs_input: "等待你补充", planning_failed: "分配失败", waiting: "等待依赖或资源", queued: "排队中", running: "Working…", stopping: "正在停止…", completed: "已完成", failed: "执行失败", interrupted: "已停止", unknown: "结果待核对", blocked: "需要补充" };
-export function TaskChat({ onDetails, onOpenLink, onBrowserNavigate, onExpired, onFeed }: {
+export function TaskChat({ onDetails, onOpenLink, onExpired, onFeed }: {
     onDetails: (task: Task) => void;
     onOpenLink: (url: string) => void;
-    onBrowserNavigate: () => void;
     onExpired: () => void;
     onFeed?: (feed:TaskFeed)=>void;
 }) {
@@ -35,8 +33,8 @@ export function TaskChat({ onDetails, onOpenLink, onBrowserNavigate, onExpired, 
         signature: string;
         id: string;
     } | null>(null);
-    const callbacks = useRef({ onBrowserNavigate, onExpired });
-    callbacks.current = { onBrowserNavigate, onExpired };
+    const callbacks = useRef({ onExpired });
+    callbacks.current = { onExpired };
     const merge = useCallback((fresh: Task[]) => setTasks(old => {
         const map = new Map(old.map(t => [t.id, t]));
         for (const t of fresh)
@@ -72,8 +70,6 @@ export function TaskChat({ onDetails, onOpenLink, onBrowserNavigate, onExpired, 
             return openEventStream(id, 0, {
                 onOpen: () => { live = true; }, onError: () => { live = false; }, onRevoked: () => callbacks.current.onExpired(),
                 onEvent: event => {
-                    if (live && event.type === "item/started" && itemOpensSandboxBrowser(event.payload.item as Record<string, unknown>) && document.visibilityState === "visible" && document.hasFocus())
-                        callbacks.current.onBrowserNavigate();
                     if (live && ["turn.finished", "turn.failed", "approval.requested", "approval.resolved"].includes(event.type))
                         void refresh();
                 },

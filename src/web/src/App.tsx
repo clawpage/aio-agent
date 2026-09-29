@@ -357,7 +357,6 @@ function LegacyApp() {
                 setWorkspaceOpen(true);
               }}
               onOpenBrowserLink={(url) => void openBrowserLink(url)}
-              onAgentBrowserNavigate={revealSandboxBrowser}
             />
           ) : (
             <div className="empty">
