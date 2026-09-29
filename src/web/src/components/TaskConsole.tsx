@@ -111,7 +111,7 @@ export function TaskConsole({ taskId, tab, live, busy, onRelease, onClose, onRev
           <button type="button" className="ghost tiny" onClick={onReveal}>在工作区打开</button>
         </div>
         <RemoteKeyboard
-          placeholder={fieldTapped ? "在这里打字" : "先点上面的输入框"}
+          placeholder={fieldTapped ? "在这里打字" : "先点上方输入框"}
           onSend={async (input) => { await api.taskBrowserInput(taskId, tab.id, input); refresh(); }}
         />
       </div>
