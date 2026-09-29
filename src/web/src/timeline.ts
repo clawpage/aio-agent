@@ -962,6 +962,8 @@ export function applyEvent(state: TimelineState, event: AgentEvent): void {
       });
       return;
     case "warning":
+      // Provider catalog diagnostics belong in runtime logs, not the chat UI.
+      if (/^Model metadata for .+ not found\.\s*Defaulting to fallback metadata\b/i.test(text(p.message))) return;
       pushNotice(state, resolveTurnId(state, event), {
         kind: "status",
         id: `warn:${event.id}`,
