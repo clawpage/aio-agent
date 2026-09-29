@@ -1,6 +1,7 @@
 import { CLAUDE_CODE_PROVIDER_ID, isClaudeThread } from "../claudeCode.js";
 import type { CodexSessionLike, TurnAttachment } from "./manager.js";
 import type { ClaudeCodeSession } from "./claudeSession.js";
+import type { BrowserTask } from "../browser/tabs.js";
 
 /**
  * One session surface over two harnesses.
@@ -64,10 +65,10 @@ export class HarnessSession implements CodexSessionLike {
     }
     return this.#codex.forkThread(threadId, opts);
   }
-  resumeThread(threadId: string, developerInstructions?: string, browserTaskKey?: string) {
+  resumeThread(threadId: string, developerInstructions?: string, browserTask?: BrowserTask) {
     return isClaudeThread(threadId)
-      ? this.#claude.resumeThread(threadId, developerInstructions, browserTaskKey)
-      : this.#codex.resumeThread(threadId, developerInstructions, browserTaskKey);
+      ? this.#claude.resumeThread(threadId, developerInstructions, browserTask)
+      : this.#codex.resumeThread(threadId, developerInstructions, browserTask);
   }
   startTurn(params: Parameters<CodexSessionLike["startTurn"]>[0]) {
     return isClaudeThread(params.threadId) ? this.#claude.startTurn(params) : this.#codex.startTurn(params);

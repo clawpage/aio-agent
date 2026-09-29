@@ -18,7 +18,7 @@ import { SandboxCodexSession } from "./codex/sandboxCodex.js";
 import { AgentManager } from "./codex/manager.js";
 import { BridgeModel } from "./bridgeModel.js";
 import { ClaudeCodeHarness } from "./claudeCode.js";
-import { TabServer } from "./browser/tabs.js";
+import { pruneBeforeSnapshot, TabServer } from "./browser/tabs.js";
 import { readAgentSettings } from "./settings.js";
 import { ClaudeCodeSession } from "./codex/claudeSession.js";
 import { HarnessSession } from "./codex/harnessSession.js";
@@ -107,7 +107,7 @@ export async function bootstrap(opts: BootstrapOptions = {}): Promise<Bootstrapp
     log,
     // A test override replaces only the container-facing runtime, so the state
     // machine under test is the same one production uses.
-    runtime: resolvedBrowserRuntime,
+    runtime: tabs ? pruneBeforeSnapshot(resolvedBrowserRuntime, tabs) : resolvedBrowserRuntime,
   });
   // The manager protects the browser for the whole of every managed turn, so a
   // lease must exist before this point (a queued turn can start on construction).

@@ -6,7 +6,7 @@ import type { SandboxContainer } from "../docker/sandbox.js";
 import { CLAUDE_CODE_PROVIDER_ID, CLAUDE_THREAD_PREFIX, type ClaudeCodeHarness } from "../claudeCode.js";
 import type { TurnAttachment } from "./manager.js";
 import { ClaudeStreamTranslator } from "./claudeTranslator.js";
-import { tabMcpServers } from "../browser/tabs.js";
+import { tabMcpServers, type BrowserTask } from "../browser/tabs.js";
 import { buildTitlePrompt } from "./autoTitle.js";
 import { JsonRpcResponseError } from "./jsonrpc.js";
 
@@ -19,8 +19,8 @@ function notDelivered(): Error {
  * Browser tools for a turn: the task's own tabs when it has a task identity,
  * otherwise the legacy single-page endpoint the sandbox Codex is limited to.
  */
-function mcpConfig(browserTaskKey: string | undefined): string {
-  return JSON.stringify({ mcpServers: browserTaskKey ? tabMcpServers(browserTaskKey) : { aio_browser: { type: "http", url: "http://127.0.0.1:8080/mcp" } } });
+function mcpConfig(browserTask: BrowserTask | undefined): string {
+  return JSON.stringify({ mcpServers: browserTask ? tabMcpServers(browserTask) : { aio_browser: { type: "http", url: "http://127.0.0.1:8080/mcp" } } });
 }
 
 /** How long a mid-turn addition may wait for the CLI to echo it as consumed. */
@@ -82,7 +82,7 @@ export class ClaudeCodeSession {
   #harness: ClaudeCodeHarness;
   #runs = new Map<string, Run>();
   #instructions = new Map<string, string>();
-  #browserKeys = new Map<string, string>();
+  #browserTasks = new Map<string, BrowserTask>();
   #onNotification: ((method: string, params: unknown) => void) | null = null;
   #installing: Promise<void> | null = null;
 
@@ -109,17 +109,17 @@ export class ClaudeCodeSession {
     return this.#installing;
   }
 
-  async startThread(opts: { model?: string; developerInstructions?: string; browserTaskKey?: string }): Promise<{ threadId: string; model: string; cwd: string; modelProvider: string }> {
+  async startThread(opts: { model?: string; developerInstructions?: string; browserTask?: BrowserTask }): Promise<{ threadId: string; model: string; cwd: string; modelProvider: string }> {
     if (!this.#harness.enabled) throw new Error("Claude Code 执行器未启用");
     const threadId = `${CLAUDE_THREAD_PREFIX}${randomUUID()}`;
     if (opts.developerInstructions !== undefined) this.#instructions.set(threadId, opts.developerInstructions);
-    if (opts.browserTaskKey) this.#browserKeys.set(threadId, opts.browserTaskKey);
+    if (opts.browserTask) this.#browserTasks.set(threadId, opts.browserTask);
     return { threadId, model: opts.model ?? "", cwd: this.#cfg.sandbox.containerWorkspaceDir, modelProvider: CLAUDE_CODE_PROVIDER_ID };
   }
 
-  async resumeThread(threadId: string, developerInstructions?: string, browserTaskKey?: string): Promise<void> {
+  async resumeThread(threadId: string, developerInstructions?: string, browserTask?: BrowserTask): Promise<void> {
     if (developerInstructions !== undefined) this.#instructions.set(threadId, developerInstructions);
-    if (browserTaskKey) this.#browserKeys.set(threadId, browserTaskKey);
+    if (browserTask) this.#browserTasks.set(threadId, browserTask);
   }
 
   async startTurn(params: { threadId: string; text: string; attachments?: TurnAttachment[]; model?: string | null; effort?: string | null }): Promise<string> {
@@ -139,7 +139,7 @@ export class ClaudeCodeSession {
       "--replay-user-messages",
       // Full access inside the container, like Codex's approval_policy=never.
       "--permission-mode", "bypassPermissions",
-      "--strict-mcp-config", "--mcp-config", mcpConfig(this.#browserKeys.get(threadId)),
+      "--strict-mcp-config", "--mcp-config", mcpConfig(this.#browserTasks.get(threadId)),
       "--setting-sources", "user,project",
       resume ? "--resume" : "--session-id", sessionId,
       ...(params.model ? ["--model", params.model] : []),

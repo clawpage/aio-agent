@@ -9,7 +9,7 @@ import type { CodexModel, SandboxAccount } from "./sandboxCodex.js";
 import type { HostTokenSource } from "./hostTokens.js";
 import { BridgeModel, CHATGPT_PROVIDER_ID } from "../bridgeModel.js";
 import { CLAUDE_CODE_PROVIDER_ID, type ClaudeCodeHarness } from "../claudeCode.js";
-import { withTabPolicy, type TabServerLike } from "../browser/tabs.js";
+import { withTabPolicy, type BrowserTask, type TabServerLike } from "../browser/tabs.js";
 import { AutoTitler, DEFAULT_CONVERSATION_TITLE, TITLE_UPDATED_EVENT, manualTitleMetaKey } from "./autoTitle.js";
 import {
   effectiveAgentSettings,
@@ -39,14 +39,14 @@ export interface CodexSessionLike {
     model?: string;
     modelProvider?: string;
     developerInstructions?: string;
-    /** Names the task to the tab-scoped browser tools (its own tabs only). */
-    browserTaskKey?: string;
+    /** The task the tab-scoped browser tools record this thread's tabs against. */
+    browserTask?: BrowserTask;
   }): Promise<{ threadId: string; model: string; cwd: string; modelProvider: string | null }>;
   forkThread(
     threadId: string,
-    opts: { model?: string; modelProvider?: string; cwd?: string; developerInstructions?: string; browserTaskKey?: string },
+    opts: { model?: string; modelProvider?: string; cwd?: string; developerInstructions?: string; browserTask?: BrowserTask },
   ): Promise<{ threadId: string; model: string; cwd: string; modelProvider: string | null }>;
-  resumeThread(threadId: string, developerInstructions?: string, browserTaskKey?: string): Promise<void>;
+  resumeThread(threadId: string, developerInstructions?: string, browserTask?: BrowserTask): Promise<void>;
   startTurn(params: {
     threadId: string;
     text: string;
@@ -927,12 +927,12 @@ export class AgentManager {
           }
         })
         .finally(() => {
-          // A finished turn's tabs are closed before its browser hold ends, so an
-          // idle release never snapshots (and later restores) them.
-          const closing = this.#tabs
-            ? this.#tabs.release(turn.conversation_id).catch((err) => this.#log.debug("tab release failed", { error: String(err) }))
+          // The task's tabs are marked finished (kept for a follow-up, destroyed on
+          // demand) before its browser hold ends.
+          const finishing = this.#tabs
+            ? this.#tabs.finish(turn.conversation_id).catch((err) => this.#log.debug("tab finish failed", { error: String(err) }))
             : Promise.resolve();
-          void closing.finally(releaseBrowser);
+          void finishing.finally(releaseBrowser);
           this.#activeTurns.delete(turn.conversation_id);
           this.#persistActiveState();
           this.#db.prepare("UPDATE conversations SET status = 'idle', updated_at = ? WHERE id = ?").run(Date.now(), turn.conversation_id);
@@ -1023,7 +1023,7 @@ export class AgentManager {
     const developerInstructions = this.#tabs ? withTabPolicy(soul) : soul;
     // Every execution thread gets tab tools under its conversation's identity,
     // which stays the same across its turns, resumes and forks.
-    const browserTaskKey = this.#tabs ? conversation.id : undefined;
+    const browserTask = this.#tabs ? { key: conversation.id, title: conversation.title } : undefined;
     if (this.#tabs && turn.browser_required === 0) {
       // Not required, but the agent may still browse: keep the tools reachable.
       await this.#tabs.ensure().catch((err) => this.#log.debug("tab server unavailable", { error: String(err) }));
@@ -1032,7 +1032,7 @@ export class AgentManager {
     if (!threadId) {
       const started = await this.#codex.startThread({
         developerInstructions,
-        ...(browserTaskKey ? { browserTaskKey } : {}),
+        ...(browserTask ? { browserTask } : {}),
         cwd: conversation.cwd ?? undefined,
         model,
         ...(desiredProvider !== CHATGPT_PROVIDER_ID ? { modelProvider: desiredProvider } : {}),
@@ -1056,7 +1056,7 @@ export class AgentManager {
       // the history. Resuming would silently stay on the old provider.
       const forked = await this.#codex.forkThread(threadId, {
         developerInstructions,
-        ...(browserTaskKey ? { browserTaskKey } : {}),
+        ...(browserTask ? { browserTask } : {}),
         model,
         // Same rule as the start branch: a ChatGPT thread is forked without a
         // `modelProvider`, so that path never names the provider explicitly.
@@ -1081,7 +1081,7 @@ export class AgentManager {
         forkedFrom: conversation.codex_thread_id,
       });
     } else {
-      if (browserTaskKey) await this.#codex.resumeThread(threadId, developerInstructions, browserTaskKey);
+      if (browserTask) await this.#codex.resumeThread(threadId, developerInstructions, browserTask);
       else await this.#codex.resumeThread(threadId, developerInstructions);
     }
     // Route later notifications for this thread back to this exact turn even

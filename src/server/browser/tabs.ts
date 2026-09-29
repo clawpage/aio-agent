@@ -5,19 +5,35 @@ import type { Config } from "../config.js";
 import type { Logger } from "../logger.js";
 import type { SandboxContainer } from "../docker/sandbox.js";
 import { redact, type BrowserRuntime } from "./runtime.js";
+import type { BrowserRuntimeLike } from "./lifecycle.js";
 
 /** Loopback MCP endpoint of the tab server inside every sandbox. */
 export const TAB_SERVER_PORT = 8190;
 export const TAB_SERVER_URL = `http://127.0.0.1:${TAB_SERVER_PORT}/mcp`;
 /** Header that names the task (its execution conversation) on every tool call. */
 export const TAB_TASK_HEADER = "X-AIO-Task";
+/** Percent-encoded task title, recorded against every tab the task creates. */
+export const TAB_TASK_TITLE_HEADER = "X-AIO-Task-Title";
+
+/** The task an execution thread works for: tabs are recorded against it. */
+export interface BrowserTask {
+  key: string;
+  title: string;
+}
+
+function taskHeaders(task: BrowserTask): Record<string, string> {
+  return { [TAB_TASK_HEADER]: task.key, [TAB_TASK_TITLE_HEADER]: encodeURIComponent(task.title.slice(0, 120)) };
+}
 const SCRIPT_NAME = "tab-server.cjs";
 const KEY = /^[A-Za-z0-9_-]{1,80}$/;
 
-/** What the agent manager needs: tab tools running, and a task's tabs closed when its turn ends. */
+/** What the control plane needs from the tab server. */
 export interface TabServerLike {
   ensure(): Promise<void>;
-  release(key: string): Promise<void>;
+  /** A task's turn ended: its tabs stay (a follow-up continues on them) until destroyed on demand. */
+  finish(key: string): Promise<void>;
+  /** Destroy every finished task's tabs, e.g. before the browser is released for idleness. */
+  prune(): Promise<void>;
 }
 
 /**
@@ -25,21 +41,38 @@ export interface TabServerLike {
  * the task's own identity, and the global-page browser server switched off so
  * parallel tasks can never steer each other's tabs.
  */
-export function tabThreadConfig(key: string): Record<string, unknown> {
-  return { mcp_servers: { aio_browser: { enabled: false }, aio_tabs: { url: TAB_SERVER_URL, http_headers: { [TAB_TASK_HEADER]: key } } } };
+export function tabThreadConfig(task: BrowserTask): Record<string, unknown> {
+  return { mcp_servers: { aio_browser: { enabled: false }, aio_tabs: { url: TAB_SERVER_URL, http_headers: taskHeaders(task) } } };
 }
 
 /** The same wiring for a Claude Code turn (`--mcp-config`). */
-export function tabMcpServers(key: string): Record<string, unknown> {
-  return { aio_tabs: { type: "http", url: TAB_SERVER_URL, headers: { [TAB_TASK_HEADER]: key } } };
+export function tabMcpServers(task: BrowserTask): Record<string, unknown> {
+  return { aio_tabs: { type: "http", url: TAB_SERVER_URL, headers: taskHeaders(task) } };
 }
 
 /** Appended to an execution thread's instructions: browser work goes through its own tabs. */
 export const TAB_POLICY =
-  "浏览器操作只使用 aio_tabs 工具：每个任务有自己的标签页，可与其他任务并行；不要使用 `aio browser` 命令行或 /v1/browser 接口，它们操作整个浏览器的当前页面，会打断并行任务。";
+  "浏览器操作只使用 aio_tabs 工具：你只能操作本任务创建的标签页，其他任务的标签页只能只读查看，可与其他任务并行；不要使用 `aio browser` 命令行或 /v1/browser 接口，它们操作整个浏览器的当前页面，会打断并行任务。";
 
 export function withTabPolicy(instructions: string): string {
   return instructions.trim() ? `${instructions.trimEnd()}\n\n${TAB_POLICY}` : TAB_POLICY;
+}
+
+/**
+ * The browser is only released for idleness when no task, viewer or pin holds
+ * it; finished tasks' tabs are destroyed right before that snapshot, so they are
+ * never saved and later restored as tabs nobody owns.
+ */
+export function pruneBeforeSnapshot(runtime: BrowserRuntimeLike, tabs: TabServerLike): BrowserRuntimeLike {
+  return {
+    status: (opts) => runtime.status(opts),
+    snapshot: async (opts) => {
+      await tabs.prune().catch(() => undefined);
+      return runtime.snapshot(opts);
+    },
+    stop: (opts) => runtime.stop(opts),
+    wake: (opts) => runtime.wake(opts),
+  };
 }
 
 /**
@@ -119,13 +152,20 @@ export class TabServer implements TabServerLike {
     throw new Error("浏览器标签页服务启动后未在超时内就绪");
   }
 
-  /** Close a task's tabs. Best effort: a server that is gone has no tabs left to close. */
-  async release(key: string): Promise<void> {
-    if (!KEY.test(key)) return;
+  /** Best effort: a server that is gone has no tabs left to mark or close. */
+  async #post(route: string, body: unknown): Promise<void> {
     const res = await this.#container.execInSandbox(
-      ["curl", "-s", "-m", "10", "-X", "POST", "-H", "content-type: application/json", "--data-binary", "@-", `http://127.0.0.1:${TAB_SERVER_PORT}/release`],
-      { timeoutMs: 15_000, stdin: JSON.stringify({ key }) },
+      ["curl", "-s", "-f", "-m", "20", "-X", "POST", "-H", "content-type: application/json", "--data-binary", "@-", `http://127.0.0.1:${TAB_SERVER_PORT}${route}`],
+      { timeoutMs: 25_000, stdin: JSON.stringify(body) },
     );
-    if (res.code !== 0) this.#log.debug("tab release skipped", { key, error: redact(res.stderr || res.stdout) });
+    if (res.code !== 0) this.#log.debug("tab server call skipped", { route, error: redact(res.stderr || res.stdout) });
+  }
+
+  async finish(key: string): Promise<void> {
+    if (KEY.test(key)) await this.#post("/finish", { key });
+  }
+
+  async prune(): Promise<void> {
+    await this.#post("/prune", {});
   }
 }

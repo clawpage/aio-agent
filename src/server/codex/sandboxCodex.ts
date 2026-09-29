@@ -1,4 +1,4 @@
-import { tabThreadConfig } from "../browser/tabs.js";
+import { tabThreadConfig, type BrowserTask } from "../browser/tabs.js";
 import type { Config } from "../config.js";
 import type { Logger } from "../logger.js";
 import type { SandboxContainer } from "../docker/sandbox.js";
@@ -438,13 +438,13 @@ export class SandboxCodexSession {
   }
 
   async startThread(
-    opts: { cwd?: string; model?: string; modelProvider?: string; developerInstructions?: string; browserTaskKey?: string } = {},
+    opts: { cwd?: string; model?: string; modelProvider?: string; developerInstructions?: string; browserTask?: BrowserTask } = {},
   ): Promise<{ threadId: string; model: string; cwd: string; modelProvider: string | null }> {
     await this.start();
     const res = (await this.#peer!.request(
       "thread/start",
       {
-        ...(opts.browserTaskKey ? { config: tabThreadConfig(opts.browserTaskKey) } : {}),
+        ...(opts.browserTask ? { config: tabThreadConfig(opts.browserTask) } : {}),
         cwd: opts.cwd ?? this.#cfg.sandbox.containerWorkspaceDir,
         approvalPolicy: "never",
         sandbox: "danger-full-access",
@@ -466,14 +466,14 @@ export class SandboxCodexSession {
    */
   async forkThread(
     threadId: string,
-    opts: { model?: string; modelProvider?: string; cwd?: string; developerInstructions?: string; browserTaskKey?: string } = {},
+    opts: { model?: string; modelProvider?: string; cwd?: string; developerInstructions?: string; browserTask?: BrowserTask } = {},
   ): Promise<{ threadId: string; model: string; cwd: string; modelProvider: string | null }> {
     await this.start();
     const res = (await this.#peer!.request(
       "thread/fork",
       {
         threadId,
-        ...(opts.browserTaskKey ? { config: tabThreadConfig(opts.browserTaskKey) } : {}),
+        ...(opts.browserTask ? { config: tabThreadConfig(opts.browserTask) } : {}),
         approvalPolicy: "never",
         sandbox: "danger-full-access",
         ...(opts.cwd ? { cwd: opts.cwd } : {}),
@@ -486,9 +486,9 @@ export class SandboxCodexSession {
     return { threadId: res.thread.id, model: res.model, cwd: res.cwd, modelProvider: res.modelProvider ?? null };
   }
 
-  async resumeThread(threadId: string, developerInstructions?: string, browserTaskKey?: string): Promise<void> {
+  async resumeThread(threadId: string, developerInstructions?: string, browserTask?: BrowserTask): Promise<void> {
     await this.start();
-    await this.#peer!.request("thread/resume", { threadId, approvalPolicy: "never", sandbox: "danger-full-access", ...(developerInstructions !== undefined ? {developerInstructions} : {}), ...(browserTaskKey ? { config: tabThreadConfig(browserTaskKey) } : {}) }, 60_000);
+    await this.#peer!.request("thread/resume", { threadId, approvalPolicy: "never", sandbox: "danger-full-access", ...(developerInstructions !== undefined ? {developerInstructions} : {}), ...(browserTask ? { config: tabThreadConfig(browserTask) } : {}) }, 60_000);
   }
 
   async startTurn(params: {

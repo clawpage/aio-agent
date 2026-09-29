@@ -306,12 +306,13 @@ it('opens, forks and resumes task threads with their own tab identity',async()=>
  server.handle('thread/resume',()=>({}));
  const session=makeSession(server,200);
  try {
-  await session.startThread({browserTaskKey:'conv_1'});
-  await session.forkThread('tab-thread',{browserTaskKey:'conv_1'});
-  await session.resumeThread('tab-thread',undefined,'conv_1');
+  const task={key:'conv_1',title:'查网页'};
+  await session.startThread({browserTask:task});
+  await session.forkThread('tab-thread',{browserTask:task});
+  await session.resumeThread('tab-thread',undefined,task);
   await session.startThread({});
   const sent=server.inbound.filter(r=>['thread/start','thread/fork','thread/resume'].includes(r.method??''));
-  for(const r of sent.slice(0,3))expect(r.params?.config).toEqual(tabThreadConfig('conv_1'));
+  for(const r of sent.slice(0,3))expect(r.params?.config).toEqual(tabThreadConfig(task));
   expect(sent[3]?.params?.config).toBeUndefined();
  }finally{session.close();}
 });
