@@ -1,5 +1,5 @@
 import fs from "node:fs";
-import {memberWorkspaceHost,workspaceConfig} from "../auth/workspaceHost.js";
+import {MEMBER_WORKSPACE_PREFIX,userNamespace,workspaceConfig} from "../auth/workspaceHost.js";
 import path from "node:path";
 import express, { type NextFunction, type Request, type Response } from "express";
 import type { AppContext } from "../context.js";
@@ -16,20 +16,28 @@ function attach(req: Request, ctx: RequestContext | null): void {
   if (ctx) req.paCtx = ctx;
 }
 
-/** Distinct browser origins prevent one account's page scripts/storage reaching another account. */
+/**
+ * Which account a companion-origin request belongs to. A member workspace URL
+ * carries `/u/<namespace>`: the prefix is stripped before any handler runs, and
+ * a workspace session of any other account is dropped (fail closed). Requests
+ * without the prefix (absolute sub-resources such as `/jupyter/static/...`)
+ * belong to the account of the workspace session itself, so every request still
+ * reaches only that session's own sandbox.
+ */
 function resolveAppRequest(ctx:AppContext,req:import("node:http").IncomingMessage):RequestContext|null {
-  const host=(req.headers.host??'').toLowerCase().replace(/:443$/,'');
-  let cfg=ctx.cfg, workspaceUserId='owner_1';
-  if(ctx.runtimeForUser){
-    for(const user of ctx.db.prepare("SELECT id FROM owners WHERE role='member'").all() as {id:string}[]){
-      if(host===memberWorkspaceHost(ctx.cfg,user.id)){cfg=workspaceConfig(ctx.cfg,user.id);workspaceUserId=user.id;break;}
-    }
+  const rec=resolveRequest({cfg:ctx.cfg,sessions:ctx.sessions,req});
+  if(rec?.kind!=='workspace'||!ctx.runtimeForUser)return rec;
+  const match=MEMBER_WORKSPACE_PREFIX.exec(req.url??'');
+  if(!match){
+    rec.workspaceUserId=rec.session?.ownerId??'owner_1';
+    return rec;
   }
-  const rec=resolveRequest({cfg,sessions:ctx.sessions,req});
-  if(rec?.kind==='workspace'&&ctx.runtimeForUser){
-    rec.workspaceUserId=workspaceUserId;
-    if(rec.session?.ownerId!==workspaceUserId)rec.session=null;
-  }
+  const member=(ctx.db.prepare("SELECT id FROM owners WHERE role='member'").all() as {id:string}[]).find(u=>userNamespace(u.id)===match[1]);
+  if(!member)return null;
+  const rest=(req.url??'').slice(match[0].length);
+  req.url=rest.startsWith('/')?rest:`/${rest}`;
+  rec.workspaceUserId=member.id;
+  if(rec.session?.ownerId!==member.id)rec.session=null;
   return rec;
 }
 
@@ -151,7 +159,7 @@ export function createApp(ctx: AppContext): express.Express {
     if(ctx.runtimeForUser && req.paCtx?.kind==='workspace' && req.paCtx.workspaceUserId && req.paCtx.workspaceUserId!=='owner_1' && /^\/workspace(\/|$)/.test(req.path)){
       const account=req.paCtx.workspaceUserId;
       let api=workspaceApis.get(account);
-      if(!api){api=createApiRouter({...ctx,cfg:workspaceConfig(ctx.cfg,account)});workspaceApis.set(account,api);}
+      if(!api){api=createApiRouter({...ctx,cfg:workspaceConfig(ctx.cfg)});workspaceApis.set(account,api);}
       api(req,res,next);return;
     }
     if(!id || !ctx.runtimeForUser || /^\/(auth|workspace)(\/|$)/.test(req.path)) {rootApi(req,res,next);return;}
@@ -226,7 +234,7 @@ export function createApp(ctx: AppContext): express.Express {
       "Content-Security-Policy",
       [
         "default-src 'self'",
-        `frame-src 'self' https://${ctx.cfg.workspaceHost} ${(ctx.db.prepare("SELECT id FROM owners WHERE role='member'").all() as {id:string}[]).map(u=>"https://"+memberWorkspaceHost(ctx.cfg,u.id)).join(" ")}`,
+        `frame-src 'self' https://${ctx.cfg.workspaceHost}`,
         "img-src 'self' data: blob:",
         "style-src 'self' 'unsafe-inline'",
         "script-src 'self'",

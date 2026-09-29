@@ -74,7 +74,7 @@ curl -s http://127.0.0.1:4891/healthz
 - **账号独立环境**：member 的容器、workspace、Codex 记忆/历史、浏览器 profile、终端、任务数据库、SOUL 和文档缓存独立。owner 沿用原容器与数据卷；新成员不复制 owner 的文件或历史。
 - 成员环境默认限制为 2 GiB 内存、2 CPU、1024 个进程，阻止连接内网、宿主服务和其他沙盒；公网仍可访问。网络规则由独立只读守卫容器应用，成员无 NET_ADMIN / NET_RAW 权限。
 - member 不接收 owner 的 ChatGPT token 或模型桥管理密钥。独立模型网关仅接受该账号凭据下的无状态 DeepSeek high 请求，禁用历史响应查询；网关监听 `PA_MEMBER_MODEL_PORT`（默认 4902）。
-- 每个 member 工作区有独立来源 `<工作区首段>-<账号散列>.<域名>`，需配置对应 DNS、TLS 和 tunnel 路由；控制台仍是统一主域名。域名未配置或环境启动失败时拒绝连接，绝不退回 owner 沙盒。
+- 每个 member 工作区在同一个工作区域名下用路径区分：`<工作区域名>/u/<账号散列>/...`，不需要新增 DNS、TLS 或 tunnel 路由。前缀与工作区会话账号不一致时一律 401，未知前缀 404；页面里不带前缀的绝对路径子资源（如 Jupyter 的 `/jupyter/static/...`）按工作区会话所属账号路由，只会到达该账号自己的沙盒。环境启动失败时拒绝连接，绝不退回 owner 沙盒。账号共用同一个浏览器来源，因此同一浏览器先后登录不同账号时，工作区页面（code-server、Jupyter 等）的浏览器端存储是共用的；沙盒文件、进程与记忆的隔离不受影响。
 - 账号配置和登录鉴权由宿主控制面统一管理；容器共享宿主内核，因此这不是抵抗内核漏洞的虚拟机隔离。
 - 创建账号（先构建；使用与服务相同的环境变量/数据目录）：`node --env-file=var/runtime.env bin/create-user.mjs <username>`。Quickstart 使用 `.env`。随机密码写入 `var/user-secrets/<username>.txt`（0600），命令不打印密码、不覆盖已有账号，不提供公开注册。
 

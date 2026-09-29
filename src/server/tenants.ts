@@ -10,7 +10,7 @@ import {getUser} from './auth/owner.js';
 export function memberConfig(base: Config, userId: string, port: number): Config {
   const suffix=userNamespace(userId);
   const dataDir=path.join(base.dataDir,'users',suffix);
-  return {...workspaceConfig(base,userId), runtimeUserId:userId, memberRuntime:true, dataDir,
+  return {...workspaceConfig(base), runtimeUserId:userId, memberRuntime:true, dataDir,
     dbPath:path.join(dataDir,'agent.sqlite'),logDir:path.join(dataDir,'logs'),
     ownerPassword:'',ownerPasswordReset:false,ownerSecretPath:path.join(dataDir,'unused-secret'),
     agent:{...base.agent,defaultModel:'deepseek-v4.1-flash'},

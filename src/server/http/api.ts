@@ -1,4 +1,4 @@
-import {workspaceConfig} from "../auth/workspaceHost.js";
+import {memberWorkspacePrefix} from "../auth/workspaceHost.js";
 import { isMember, publicPayload } from "../auth/policy.js";
 import {readSoul,writeSoul,SoulError,DEFAULT_SOUL,SOUL_MAX_BYTES} from '../soul.js';
 import { HTML_PREVIEW_CSP, htmlPreviewDocument } from "../documents/html.js";
@@ -84,7 +84,6 @@ function requireSession(req: Request, res: Response, next: NextFunction): void {
  * CSRF header. */
 
 export function workspaceOrigin(ctx: RequestContext, cfg: AppContext["cfg"]): string {
-  if(cfg.memberRuntime)return `https://${cfg.workspaceHost}`;
   if (ctx.hostname === cfg.workspaceHost.toLowerCase()) {
     return `${ctx.secure ? "https" : "http"}://${cfg.workspaceHost}`;
   }
@@ -1421,13 +1420,15 @@ export function createApiRouter(context: AppContext): Router {
     requireSession,
     asyncHandler(async (req, res, ctx) => {
       const issued = tickets.issue(ctx.session!.id);
-      const next = safeRedirectPath(typeof req.body?.next === "string" ? req.body.next : "/");
-      const origin = workspaceOrigin(ctx, context.runtimeForUser && isMember(db,ctx.session!.ownerId) ? workspaceConfig(cfg,ctx.session!.ownerId) : cfg);
+      // A member's workspace lives under its own path prefix on the shared companion origin.
+      const prefix = context.runtimeForUser && isMember(db, ctx.session!.ownerId) ? memberWorkspacePrefix(ctx.session!.ownerId) : "";
+      const next = prefix + safeRedirectPath(typeof req.body?.next === "string" ? req.body.next : "/");
+      const origin = workspaceOrigin(ctx, cfg);
       res.json({
         ticket: issued.ticket,
         expiresAt: issued.expiresAt,
         origin,
-        url: `${origin}/_bootstrap?ticket=${encodeURIComponent(issued.ticket)}&next=${encodeURIComponent(next)}`,
+        url: `${origin}${prefix}/_bootstrap?ticket=${encodeURIComponent(issued.ticket)}&next=${encodeURIComponent(next)}`,
       });
     }),
   );

@@ -1,16 +1,16 @@
 import {it,expect} from 'vitest';
 import {startHarness,login,rawUpgrade} from '../helpers/harness.js';
 import {createMember} from '../../src/server/auth/owner.js';
-import {memberWorkspaceHost,workspaceConfig} from '../../src/server/auth/workspaceHost.js';
+import {memberWorkspacePrefix,workspaceConfig} from '../../src/server/auth/workspaceHost.js';
 import {memberConfig,UserRuntimes} from '../../src/server/tenants.js';
 
-it('binds workspace tickets, HTTP, WebSocket and API collaborators to the authenticated member, never owner',async()=>{
+it('binds workspace tickets, HTTP, WebSocket and API collaborators to the authenticated member by path, never owner',async()=>{
  const root=await startHarness(), member=await startHarness();
  try{
   const user=await createMember(root.ctx.db,'isolated-user','member-secret-123');
   member.ctx.db.prepare("INSERT INTO owners(id,username,role,password_hash,password_salt,password_params,created_at) VALUES (?,?,'member','x','x','{}',0)").run(user.id,user.username);
   member.ctx.sessions=root.ctx.sessions;member.ctx.tickets=root.ctx.tickets;
-  const host=memberWorkspaceHost(root.ctx.cfg,user.id);member.ctx.cfg={...member.ctx.cfg,...workspaceConfig(root.ctx.cfg,user.id),sandbox:member.ctx.cfg.sandbox};
+  const prefix=memberWorkspacePrefix(user.id);member.ctx.cfg={...member.ctx.cfg,...workspaceConfig(root.ctx.cfg),sandbox:member.ctx.cfg.sandbox};
   root.ctx.runtimeForUser=async id=>{if(id==='owner_1')return root.ctx;if(id===user.id)return member.ctx;throw Error('unknown');};
   const owner=await login(root);
   const ownerConv=root.ctx.agent.createConversation({title:'private owner conversation'});
@@ -22,23 +22,38 @@ it('binds workspace tickets, HTTP, WebSocket and API collaborators to the authen
   await root.request('/api/sandbox/shell-sessions',{headers});
   expect(member.sandbox.requests.some(r=>r.url==='/v1/shell/sessions')).toBe(true);
   expect(root.sandbox.requests.some(r=>r.url==='/v1/shell/sessions')).toBe(false);
-  const ticket=await root.request('/api/workspace/ticket',{method:'POST',headers,body:'{}'});
-  const link=(await ticket.json() as {url:string}).url;
-  const boot=await root.request(new URL(link).pathname+new URL(link).search,{host:'workspace',hostHeader:host});
+
+  // The member ticket points at the shared companion origin under the member's own path.
+  const ticket=await root.request('/api/workspace/ticket',{method:'POST',headers,body:JSON.stringify({next:'/terminal'})});
+  const link=new URL((await ticket.json() as {url:string}).url);
+  expect(link.pathname).toBe(`${prefix}/_bootstrap`);
+  expect(link.searchParams.get('next')).toBe(`${prefix}/terminal`);
+  const boot=await root.request(link.pathname+link.search,{host:'workspace'});
   expect(boot.status).toBe(303);
+  expect(boot.headers.get('location')).toBe(`${prefix}/terminal`);
   const cookies=boot.headers.getSetCookie().map(c=>c.split(';')[0]!).join('; ');
   const token=/pa_ws_session=([^;]+)/.exec(cookies)![1];
   expect(root.ctx.sessions.resolve('workspace',token)?.ownerId).toBe(user.id);
-  const r=await root.request('/set-cookie',{host:'workspace',hostHeader:host,headers:{cookie:cookies}});expect(r.status).toBe(200);
-  expect(member.sandbox.requests.some(r=>r.url==='/set-cookie')).toBe(true);
-  expect(root.sandbox.requests.some(r=>r.url==='/set-cookie')).toBe(false);
-  const ws=await rawUpgrade(root.primaryPort,'/v1/shell/ws',{Host:host,Origin:`https://${host}`,Cookie:cookies,'Sec-WebSocket-Key':'isolation'});
+
+  // Prefixed requests reach the member sandbox with the prefix removed.
+  expect((await root.request(`${prefix}/set-cookie`,{host:'workspace',headers:{cookie:cookies}})).status).toBe(200);
+  // Absolute sub-resources without the prefix follow the workspace session's own account.
+  expect((await root.request('/set-cookie?absolute=1',{host:'workspace',headers:{cookie:cookies}})).status).toBe(200);
+  expect(member.sandbox.requests.filter(r=>r.url.startsWith('/set-cookie')).map(r=>r.url)).toEqual(['/set-cookie','/set-cookie?absolute=1']);
+  expect(root.sandbox.requests.some(r=>r.url.startsWith('/set-cookie')||r.url.startsWith('/u/'))).toBe(false);
+  const ws=await rawUpgrade(root.primaryPort,`${prefix}/v1/shell/ws`,{Host:`127.0.0.1:${root.primaryPort}`,Origin:`http://127.0.0.1:${root.primaryPort}`,Cookie:cookies,'Sec-WebSocket-Key':'isolation'});
   expect(ws.statusLine).toContain('101');
-  expect((await root.request('/set-cookie',{host:'workspace',headers:{cookie:cookies}})).status).toBe(401);
-  expect((await root.request('/api/workspace/session',{host:'workspace',hostHeader:host,headers:{cookie:cookies}})).status).toBe(200);
+  expect((await root.request('/api/workspace/session',{host:'workspace',headers:{cookie:cookies}})).status).toBe(200);
+
+  // Fail closed: another account's session never opens this member's path, and an unknown path is not found.
+  const ownerWs=root.ctx.sessions.create('owner_1','workspace');
+  expect((await root.request(`${prefix}/set-cookie`,{host:'workspace',headers:{cookie:`pa_ws_session=${ownerWs.token}`}})).status).toBe(401);
+  expect((await root.request('/u/00000000000000000000/set-cookie',{host:'workspace',headers:{cookie:cookies}})).status).toBe(404);
+  expect(member.sandbox.requests.filter(r=>r.url.startsWith('/set-cookie'))).toHaveLength(2);
+
   root.ctx.runtimeForUser=async id=>{if(id==='owner_1')return root.ctx;throw Error('failed');};
   expect((await root.request('/api/main',{headers})).status).toBe(503);
-  expect((await root.request('/set-cookie',{host:'workspace',hostHeader:host,headers:{cookie:cookies}})).status).toBe(503);
+  expect((await root.request(`${prefix}/set-cookie`,{host:'workspace',headers:{cookie:cookies}})).status).toBe(503);
   expect((await root.request('/api/main',{headers:{cookie:owner.cookie}})).status).toBe(200);
  }finally{await member.shutdown();await root.shutdown();}
 });
