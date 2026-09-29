@@ -284,3 +284,30 @@ test("waiting identifies its blocker and updates without a revision bump",async(
  Object.assign(rows[0]!,{status:"running",revision:2,waitReason:null});
  await expect(page.locator('.task-progress-label')).toHaveText("Working…");await expect(page.locator('.task-wait-reason')).toHaveCount(0);
 });
+
+test("manual task reference persists with the draft, is cancellable, and binds the submitted target",async({page},info)=>{
+ const finished={...task(2,"completed"),result:"原任务结果",completedAt:2000};
+ const {bodies}=await setup(page,[task(1),finished]);
+ const input=page.getByRole('textbox',{name:'消息',exact:true});await input.fill('保留我的补充');
+ await page.getByRole('button',{name:'引用任务：任务 1',exact:true}).click();
+ await expect(page.locator('.task-reference')).toContainText('任务 1');await expect(input).toBeFocused();await expect(input).toHaveValue('保留我的补充');
+ if(info.project.name.startsWith('mobile')) await page.getByRole('button',{name:'打开导航'}).click();
+ await page.locator('.sidebar').getByRole('button',{name:'配置',exact:true}).click();
+ await page.getByRole('button',{name:'← 返回会话'}).click();await expect(page.locator('.task-reference')).toContainText('任务 1');
+ await page.getByRole('button',{name:'引用任务：任务 2',exact:true}).click();await expect(page.locator('.task-reference')).toContainText('任务 2');
+ await page.screenshot({path:info.outputPath('task-reference.png'),animations:'disabled'});
+ const widths=info.project.name.startsWith('mobile')?[390,360]:[1440];
+ for(const width of widths){await page.setViewportSize({width,height:844});expect(await page.evaluate(()=>document.documentElement.scrollWidth-document.documentElement.clientWidth)).toBeLessThanOrEqual(1);}
+ await page.getByRole('button',{name:'发送',exact:true}).click();await expect(page.locator('.task-reference')).toHaveCount(0);
+ expect(bodies[0]?.relatedTaskId).toBe('task-2');await expect(page.locator('.msg.user small')).toContainText('任务 2');
+ await page.getByRole('button',{name:'引用任务：任务 1',exact:true}).click();await page.getByRole('button',{name:'取消引用任务'}).click();await send(page,'无引用的新任务');expect(bodies[1]?.relatedTaskId).toBeNull();
+});
+test("failed reference submission preserves target and retry id, changing target creates a new id",async({page})=>{
+ await setup(page,[task(1),task(2)]);const bodies:any[]=[];
+ await page.route('**/api/tasks',async route=>{bodies.push(route.request().postDataJSON());await route.fulfill({status:503,json:{message:'重试'}});});
+ await page.getByRole('textbox',{name:'消息',exact:true}).fill('同样的补充');await page.getByRole('button',{name:'引用任务：任务 1',exact:true}).click();
+ for(let i=0;i<2;i++){await page.getByRole('button',{name:'发送',exact:true}).click();await expect(page.getByRole('button',{name:'发送',exact:true})).toBeEnabled();await expect(page.locator('.task-reference')).toContainText('任务 1');}
+ expect(bodies[0].clientMessageId).toBe(bodies[1].clientMessageId);
+ await page.getByRole('button',{name:'引用任务：任务 2',exact:true}).click();await page.getByRole('button',{name:'发送',exact:true}).click();await expect(page.getByRole('button',{name:'发送',exact:true})).toBeEnabled();
+ expect(bodies[2].relatedTaskId).toBe('task-2');expect(bodies[2].clientMessageId).not.toBe(bodies[1].clientMessageId);
+});

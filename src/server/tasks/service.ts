@@ -4,7 +4,7 @@ import type { Config } from "../config.js";
 import { randomId } from "../auth/passwords.js";
 import { AgentManager, TurnConflictError, type AgentEvent, type CodexSessionLike, type TurnAttachment } from "../codex/manager.js";
 import { normalizeResource, resolveResources, type ResourceSandbox } from "./resources.js";
-import { parsePlan, planningPrompt, resourcesConflict, type TaskPlan } from "./planning.js";
+import { applyTaskReference, parsePlan, planningPrompt, resourcesConflict, type TaskPlan } from "./planning.js";
 interface TaskRow {
     revision: number;
     id: string;
@@ -64,6 +64,7 @@ export class TaskService {
             id: row.id, revision: row.revision, title: row.title, text: row.input_text, conversationId: parent?.conversation_id ?? row.conversation_id, mergedInto: row.merged_into, mergedTitle: parent?.title ?? null,
             status: row.status, result: TERMINAL.has(row.status) ? row.result : null, error: row.error,
             attachments: JSON.parse(row.attachments_json) as TurnAttachment[], relatedTaskId: row.related_task_id,
+            relatedTaskTitle: row.related_task_id ? this.get(row.related_task_id)?.title ?? null : null,
             description: plan?.description ?? null,
             waitReason: this.waitReason(row),
             clarification: row.status === "needs_input" ? plan?.clarification ?? null : null,
@@ -79,6 +80,8 @@ export class TaskService {
     private waitReason(row: TaskRow): { label: string; message: string } | null {
         if (!["waiting", "merging"].includes(row.status) || !row.plan_json) return null;
         const plan = JSON.parse(row.plan_json) as TaskPlan;
+        const reference = row.related_task_id ? this.get(row.related_task_id) : null;
+        if (reference?.status === "stopping") return { label: "等待原任务停止", message: `“${reference.title}”停止后继续处理本次要求。` };
         const dependency = plan.dependencies.map(id => this.get(id)).find(t => t && t.status !== "completed");
         if (dependency) return { label: "等待前置任务", message: `等待“${dependency.title}”完成后继续。` };
         const parent = row.merged_into ? this.get(row.merged_into) : null;
@@ -203,7 +206,7 @@ export class TaskService {
             const files = [row,...this.rows().filter(t=>t.merged_into===row.id && t.status==='merged')]
                 .flatMap(t=>JSON.parse(t.attachments_json) as TurnAttachment[]);
             const planningInput = [inputContext, ...(files.length ? [`已有附件（执行者可以读取其中资料）：${JSON.stringify(files)}`] : [])].filter(Boolean).join("\n\n");
-            const raw = await this.codex.planTask?.(planningPrompt(planningInput, previous, row.related_task_id, this.cfg.sandbox.containerWorkspaceDir));
+            const raw = await this.codex.planTask?.(planningPrompt(planningInput, explicit ? previous.filter(t => t.id === explicit.id) : previous, row.related_task_id, this.cfg.sandbox.containerWorkspaceDir));
             if (this.#closed || this.get(row.id)?.status !== "planning")
                 return;
             // A supplement may arrive while the classifier is in flight. Replan
@@ -212,11 +215,7 @@ export class TaskService {
             const plan = parsePlan(raw ?? null, previous, row.related_task_id, this.cfg.sandbox.containerWorkspaceDir);
             if (!plan)
                 throw new Error("任务分配暂时失败，尚未执行。请重试分配。");
-            if (explicit?.status === "needs_input") {
-                plan.appendTo = explicit.id;
-                plan.clarification = null;
-                plan.dependencies = plan.dependencies.filter(id => id !== explicit.id);
-            }
+            if (explicit) applyTaskReference(plan, this.get(explicit.id)!);
             const ownerId = plan.appendTo ?? row.id;
             const root = this.cfg.sandbox.containerWorkspaceDir;
             const owned = [`write:${root}/tasks/${ownerId}`, ...files.map(f => normalizeResource(`read:${f.path}`, root) ?? "workspace")];
@@ -227,14 +226,11 @@ export class TaskService {
             } else plan.ownedResources = owned;
             if (this.#closed || this.get(row.id)?.status !== "planning") return;
             if (this.taskContext(this.get(row.id)!) !== inputContext) return;
+            if (explicit) applyTaskReference(plan, this.get(explicit.id)!);
             if (plan.appendTo) {
                 this.db.prepare("UPDATE tasks SET title=?,plan_json=?,merged_into=?,status='merging',error=NULL WHERE id=?").run(plan.title,JSON.stringify(plan),plan.appendTo,row.id);
                 return;
             }
-            // An explicitly related active task must settle before its successor uses
-            // the shared context/files. Unrelated tasks remain fully parallel.
-            if (explicit && ["planning", "needs_input", "waiting", "queued", "running", "stopping"].includes(explicit.status) && !plan.dependencies.includes(explicit.id))
-                plan.dependencies.push(explicit.id);
             this.db.prepare("UPDATE tasks SET title=?,plan_json=?,status=?,error=NULL WHERE id=?").run(plan.title, JSON.stringify(plan), plan.clarification ? "needs_input" : "waiting", row.id);
             this.agent.renameConversation(row.conversation_id, plan.title);
         }
@@ -330,6 +326,7 @@ export class TaskService {
             if (active.length >= this.cfg.agent.maxConcurrentTurns)
                 break;
             const plan = JSON.parse(row.plan_json!) as TaskPlan;
+            if (row.related_task_id && this.get(row.related_task_id)?.status === "stopping") continue;
             const deps = plan.dependencies.map(id => this.get(id));
             if (deps.some(d => !d || ["blocked", "planning_failed"].includes(d.status) || (TERMINAL.has(d.status) && d.status !== "completed"))) {
                 this.db.prepare("UPDATE tasks SET status='blocked',error=? WHERE id=?").run("前置任务没有成功完成。请核对结果后补充一个关联任务，不会自动继续执行。", row.id);

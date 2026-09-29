@@ -16,6 +16,7 @@ export function TaskChat({ onDetails, onOpenLink, onBrowserNavigate, onExpired }
 }) {
     const [tasks, setTasks] = useState<Task[]>([]);
     const [nextBefore, setNextBefore] = useState<number | null>(null);
+    const [reference, setReference] = useState<{ id: string; title: string } | null>(null);
     const [draft, setDraft] = useState("");
     const [attachments, setAttachments] = useState<Attachment[]>([]);
     const [busy, setBusy] = useState(false);
@@ -77,20 +78,26 @@ export function TaskChat({ onDetails, onOpenLink, onBrowserNavigate, onExpired }
         });
         return () => closes.forEach(close => close());
     }, [runningIds, refresh]);
+    const quoteTask = (task: Task) => {
+        setReference({ id: task.mergedInto ?? task.id, title: task.mergedTitle ?? task.title });
+        input.current?.focus();
+    };
     const send = async () => {
         if (busy || uploading || (!draft.trim() && !attachments.length))
             return;
         const text = draft.trim();
-        const signature = JSON.stringify({ text, attachments });
+        const relatedTaskId = reference?.id ?? null;
+        const signature = JSON.stringify({ text, attachments, relatedTaskId });
         const id = pending.current?.signature === signature ? pending.current.id : crypto.randomUUID();
         pending.current = { signature, id };
         setBusy(true);
         setError(null);
         try {
-            const { task } = await api.submitTask({ text, attachments, relatedTaskId: null, clientMessageId: id });
+            const { task } = await api.submitTask({ text, attachments, relatedTaskId, clientMessageId: id });
             stick.current = true;
             merge([task]);
             setDraft("");
+            setReference(null);
             setAttachments([]);
             pending.current = null;
             void refresh();
@@ -145,9 +152,9 @@ export function TaskChat({ onDetails, onOpenLink, onBrowserNavigate, onExpired }
         <div className="task-report-heading"><span>{t.title}</span><span className="muted tiny">{labels[t.status]}</span></div>
         <div className="bubble"><Markdown source={t.result || (t.status === "completed" ? "任务已结束，但没有返回文字结果，请打开详情核对。" : t.error || labels[t.status] || t.status)} onOpenLink={onOpenLink} onOpenFile={setPreview}/>{t.result && <MessageFileCards text={t.result} onOpen={setPreview}/>}{t.error && t.result && <p className="error">{t.error}</p>}</div>
         <div className="message-meta"><MessageTime at={t.completedAt} now={now}/><TaskDuration task={t} now={now}/></div>
-        <div className="task-actions"><button className="ghost tiny" onClick={() => onDetails(t)}>查看过程</button></div>
+        <div className="task-actions"><button className="ghost tiny" disabled={busy} onClick={() => quoteTask(t)} aria-label={`引用任务：${t.title}`}>引用任务</button><button className="ghost tiny" onClick={() => onDetails(t)}>查看过程</button></div>
       </article> : <div className="task-entry" key={t.id} data-task-id={t.id}>
-        <article className="msg user"><div className="bubble">{t.relatedTaskId && <small className="muted">关联任务</small>}<p>{t.text}</p>{t.attachments.length > 0 && <AttachmentCards attachments={t.attachments} onOpen={setPreview}/>}<div className="message-meta"><MessageTime at={t.createdAt} now={now}/></div></div></article>
+        <article className="msg user"><div className="bubble">{t.relatedTaskId && <small className="muted">引用：{t.relatedTaskTitle ?? tasks.find(task => task.id === t.relatedTaskId)?.title ?? "此前任务"}</small>}<p>{t.text}</p>{t.attachments.length > 0 && <AttachmentCards attachments={t.attachments} onOpen={setPreview}/>}<div className="message-meta"><MessageTime at={t.createdAt} now={now}/></div></div></article>
         {t.mergedInto && <div className="task-supplement"><button className="ghost tiny" onClick={() => onDetails(t)}>{t.status === "merged" ? "已补充到" : t.status === "merging" || t.status === "steering" ? "正在补充到" : t.status === "interrupted" ? "已取消补充" : "补充需要核对"}：{t.mergedTitle}</button>{t.waitReason && <p className="tiny">{t.waitReason.message}</p>}{t.error && <p className="tiny error">{t.error}</p>}</div>}
         {!t.mergedInto && !terminal.has(t.status) && <div className={`task-progress ${t.status === "running" ? "active" : ""}`}>
           <button className="task-summary" onClick={() => onDetails(t)} aria-label={`展开任务：${t.title}`}><span className={`dot ${t.approvals ? "warn" : ""}`}/><span className="task-progress-label">{t.approvals ? "需要你确认" : t.waitReason?.label ?? labels[t.status] ?? t.status}</span><span className="task-progress-title">{t.title}</span><span aria-hidden>›</span></button>
@@ -156,14 +163,15 @@ export function TaskChat({ onDetails, onOpenLink, onBrowserNavigate, onExpired }
           {t.description && ["running", "stopping"].includes(t.status) && <p className="task-intro">{t.description}</p>}
           <TaskDuration task={t} now={now}/>
           {t.error && <p className="tiny">{t.error}</p>}
-          <div className="task-actions">{t.status === "planning_failed" ? <button className="ghost tiny" onClick={() => void act(() => api.retryTaskPlanning(t.id))}>重试分配</button> : t.status === "blocked" ? null : <button className="ghost tiny" disabled={t.status === "stopping"} onClick={() => void act(() => api.stopTask(t.id))}>停止该任务</button>}</div>
+          <div className="task-actions"><button className="ghost tiny" disabled={busy} onClick={() => quoteTask(t)} aria-label={`引用任务：${t.title}`}>引用任务</button>{t.status === "planning_failed" ? <button className="ghost tiny" onClick={() => void act(() => api.retryTaskPlanning(t.id))}>重试分配</button> : t.status === "blocked" ? null : <button className="ghost tiny" disabled={t.status === "stopping"} onClick={() => void act(() => api.stopTask(t.id))}>停止该任务</button>}</div>
         </div>}
       </div>)}
     </div>
     {error && <div className="banner error" role="alert">{error}<button onClick={() => setError(null)}>关闭</button></div>}
     <div className="composer">
+      {reference && <div className="task-reference" role="status"><div><span className="muted tiny">引用任务</span><strong title={reference.title}>{reference.title}</strong></div><button type="button" className="ghost" disabled={busy} aria-label="取消引用任务" onClick={() => { setReference(null); input.current?.focus(); }}>×</button></div>}
       {!!attachments.length && <div className="chips">{attachments.map(a => <span className="chip" key={a.path}>{a.name}<button aria-label="移除附件" disabled={busy} onClick={() => setAttachments(old => old.filter(x => x.path !== a.path))}>×</button></span>)}</div>}
-      <textarea ref={input} rows={2} value={draft} aria-label="消息" placeholder="交给我一个任务，也可以直接补充或回答…" disabled={busy} onChange={e => setDraft(e.target.value)} onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+      <textarea ref={input} rows={2} value={draft} aria-label="消息" placeholder={reference ? "补充、继续或更新这个任务…" : "交给我一个任务，也可以直接补充或回答…"} disabled={busy} onChange={e => setDraft(e.target.value)} onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
         e.preventDefault();
         void send();
     } }}/>

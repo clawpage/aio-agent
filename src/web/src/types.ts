@@ -197,6 +197,7 @@ export interface Task {
   error: string | null;
   attachments: Attachment[];
   relatedTaskId: string | null;
+  relatedTaskTitle?: string | null;
   dependencies: string[];
   approvals: number;
   createdAt: number;

@@ -2295,3 +2295,9 @@ textarea:focus {
 .message-time, .task-duration { font-variant-numeric: tabular-nums; white-space: nowrap; }
 .task-duration { color: var(--text-dim); font-size: 11px; line-height: 1.5; }
 .task-progress > .task-duration { display: block; margin: 5px 4px; }
+
+/* Explicit task references stay attached to the draft, including mobile. */
+.task-reference { display: flex; align-items: center; gap: 8px; border-left: 3px solid var(--accent); background: var(--bg); border-radius: 8px; padding: 8px 10px; min-width: 0; }
+.task-reference > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+.task-reference strong { font-size: 13px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.task-reference > button { flex-shrink: 0; min-width: 36px; min-height: 36px; padding: 4px; }

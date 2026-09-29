@@ -159,7 +159,8 @@ describe("main inbox delegation", () => {
     it("waits for related output, gives it to the successor, and does not block an unrelated task", async () => {
         const first = submit("create document");
         await tick();
-        const next = submit("revise document", first.id);
+        codex.plan=async p=>{const {message}=JSON.parse(p.split("\n").at(-1)!);return JSON.stringify({title:message,related:message==="revise document"?[first.id]:[],dependencies:message==="revise document"?[first.id]:[],resources:[]});};
+        const next = submit("revise document");
         const independent = submit("calculate");
         await tick();
         expect(tasks.get(next.id)?.status).toBe("waiting");
@@ -168,6 +169,40 @@ describe("main inbox delegation", () => {
         await tick();
         expect(tasks.get(next.id)?.status).toBe("running");
         expect(codex.startedTurns.at(-1)!.text).toContain("report.docx");
+    });
+    it("honors an explicit active target even when the model redirects or invents task IDs",async()=>{
+        const first=submit("first"), other=submit("other");await tick();
+        codex.plan=async()=>JSON.stringify({title:"correction",appendTo:other.id,related:["invented"],dependencies:["invented"],resources:[]});
+        const extra=submit("correct the first",first.id);await tick();
+        expect(tasks.get(extra.id)?.merged_into).toBe(first.id);expect(tasks.get(extra.id)?.status).toBe("merged");
+        expect(codex.steers).toHaveLength(1);expect(codex.steers[0]!.threadId).toBe(codex.startedTurns[0]!.threadId);
+        const context=JSON.parse(codex.plans.at(-1)!.split("\n").at(-1)!);expect(context.previous.map((t:{id:string})=>t.id)).toEqual([first.id]);
+        expect(JSON.parse(tasks.get(extra.id)!.plan_json!).dependencies).toEqual([]);
+        expect(tasks.view(tasks.get(extra.id)!).relatedTaskTitle).toBe("first");
+    });
+    it("continues a finished reference without being hijacked by an unrelated running task",async()=>{
+        const done=submit("done");await tick();await codex.runTurn(codex.startedTurns[0]!.turnId,{text:"Selected original result"});await tick();
+        const other=submit("other");await tick();
+        codex.plan=async()=>JSON.stringify({title:"update",appendTo:other.id,related:[other.id],dependencies:[other.id],resources:[]});
+        const update=submit("update the result",done.id);await tick();
+        expect(tasks.get(update.id)?.merged_into).toBeNull();expect(tasks.get(update.id)?.status).toBe("running");expect(codex.steers).toHaveLength(0);
+        expect(codex.startedTurns.at(-1)!.text).toContain("Selected original result");
+        expect(JSON.parse(tasks.get(update.id)!.plan_json!).related).toEqual([done.id]);
+    });
+    it("turns an explicit reference into a followup if its task completes during planning",async()=>{
+        const first=submit("first");await tick();let resolve!:(s:string)=>void;
+        codex.plan=()=>new Promise(r=>resolve=r);const update=submit("new detail",first.id);await tick();
+        await codex.runTurn(codex.startedTurns[0]!.turnId,{text:"Fresh final result"});
+        resolve(JSON.stringify({title:"detail",appendTo:null,related:[],dependencies:[],resources:[]}));await tick();await tick();
+        expect(tasks.get(update.id)?.status).toBe("running");expect(tasks.get(update.id)?.merged_into).toBeNull();expect(codex.steers).toHaveLength(0);
+        expect(codex.startedTurns.at(-1)!.text).toContain("Fresh final result");
+    });
+    it("waits for a referenced task to stop, then proceeds even when it was interrupted",async()=>{
+        const first=submit("first");await tick();db.prepare("UPDATE tasks SET status='stopping' WHERE id=?").run(first.id);
+        const update=submit("continue after stop",first.id);await tick();expect(tasks.get(update.id)?.status).toBe("waiting");
+        expect(tasks.view(tasks.get(update.id)!).waitReason?.label).toBe("等待原任务停止");
+        codex.completeTurn(codex.startedTurns[0]!.turnId,"interrupted");await tick();
+        expect(tasks.get(update.id)?.status).toBe("running");
     });
     it("serializes shared browser work but lets a file-only task execute concurrently", async () => {
         codex.plan = async (p) => JSON.stringify({ title: "task", related: [], dependencies: [], resources: p.includes('"message":"browser') ? ["browser"] : [] });
@@ -258,7 +293,8 @@ describe("main inbox delegation", () => {
     it("does not treat a failed dependency as a successful result", async () => {
         const a = submit("a");
         await tick();
-        const b = submit("b", a.id);
+        codex.plan=async()=>JSON.stringify({title:"dependent",related:[a.id],dependencies:[a.id],resources:[]});
+        const b = submit("b");
         await tick();
         codex.completeTurn(codex.startedTurns[0]!.turnId, "failed");
         await tick();
