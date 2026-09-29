@@ -99,8 +99,11 @@ check("bootstrap redirects", boot.status === 303, `status=${boot.status} -> ${bo
 const companionAttrs = (companion.attributes.get("pa_ws_session") ?? []).join(";").toLowerCase();
 check("companion cookie is HttpOnly", companionAttrs.includes("httponly"));
 if (COMPANION.startsWith("https://")) check("companion cookie is Secure", companionAttrs.includes("secure"));
-const replay = await call(companion, bootUrl);
+const replay = await call(new Jar("replay"), bootUrl);
 check("ticket is single-use", replay.status === 403, `status=${replay.status}`);
+// A frame reloading its spent link keeps working on its own workspace session, without a new one.
+const reload = await call(companion, bootUrl);
+check("spent ticket with live session passes through", reload.status === 303 && !reload.headers.get("set-cookie"), `status=${reload.status}`);
 
 // 5. Companion session + real terminal API through the authenticated proxy
 const wsSession = await call(companion, `${COMPANION}/api/workspace/session`);
