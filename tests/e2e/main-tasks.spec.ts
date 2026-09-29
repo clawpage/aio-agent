@@ -378,3 +378,41 @@ test("failed reference submission preserves target and retry id, changing target
  await page.getByRole('button',{name:'引用任务：任务 2',exact:true}).click();await page.getByRole('button',{name:'发送',exact:true}).click();await expect(page.getByRole('button',{name:'发送',exact:true})).toBeEnabled();
  expect(bodies[2].relatedTaskId).toBe('task-2');expect(bodies[2].clientMessageId).not.toBe(bodies[1].clientMessageId);
 });
+test("a task that needs you in the browser shows why, hands the tab to you and takes it back", async ({ page }, info) => {
+    const row = { ...task(1), title: "订餐厅", browser: { tabs: 1, request: "请登录 OpenTable 账号", human: false } };
+    const tab = { id: "t1", title: "OpenTable 登录", url: "https://www.opentable.com/signin", lastUsed: 1, finishedAt: null, holder: "ai" as "ai" | "human", request: { reason: "请登录 OpenTable 账号", at: 1 } as { reason: string; at: number } | null };
+    const controls: string[] = [];
+    await page.route("**/api/tasks/task-1/browser", r => r.fulfill({ json: { tabs: [tab] } }));
+    await page.route("**/api/tasks/task-1/browser/screenshot*", r => r.fulfill({ contentType: "image/png", body: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==", "base64") }));
+    await page.route("**/api/tasks/task-1/browser/control", async r => {
+        const { action } = r.request().postDataJSON();
+        controls.push(action);
+        Object.assign(tab, action === "take" ? { holder: "human" } : { holder: "ai", request: null });
+        row.browser = { tabs: 1, request: tab.request?.reason ?? null, human: tab.holder === "human" };
+        await r.fulfill({ json: { tab } });
+    });
+    await setup(page, [row]);
+    const card = page.getByRole("group", { name: "任务浏览器：需要你操作" });
+    await expect(card).toContainText("请登录 OpenTable 账号");
+    await expect(card.getByRole("img", { name: /页面预览/ })).toBeVisible();
+    await expect(page.locator(".chat-sub")).toContainText("1 个等你操作浏览器");
+    await expect(page.getByRole("button", { name: "展开任务：订餐厅" })).toContainText("需要你操作浏览器");
+    const primary = card.getByRole("button", { name: "去浏览器操作", exact: true });
+    expect(await primary.evaluate((n) => getComputedStyle(n).color)).toBe("rgb(255, 255, 255)");
+    await page.screenshot({ path: info.outputPath("browser-request.png"), fullPage: true });
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+    expect(overflow).toBeLessThanOrEqual(0);
+
+    // Taking over opens the workspace on the browser, where the task's tab is in front.
+    await card.getByRole("button", { name: "去浏览器操作", exact: true }).click();
+    expect(controls).toEqual(["take"]);
+    const closeWorkspace = page.getByRole("button", { name: "关闭工作区", exact: true });
+    await expect(closeWorkspace).toBeVisible();
+    await closeWorkspace.click();
+
+    const held = page.getByRole("group", { name: "任务浏览器：你正在操作" });
+    await expect(held).toContainText("AI 已暂停操作这个页面");
+    await held.getByRole("button", { name: "完成，交还给 AI", exact: true }).click();
+    expect(controls).toEqual(["take", "release"]);
+    await expect(page.getByRole("group", { name: "任务浏览器：AI 操作中" }).getByRole("button", { name: "接管", exact: true })).toBeVisible();
+});

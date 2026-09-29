@@ -11,6 +11,11 @@
  * destroyed on demand: when the task closes them, when too many finished tabs
  * pile up, or when the control plane prunes them before releasing the browser.
  *
+ * A person can take control of a task's tab (the control plane brings it to the
+ * front of the real browser). While a person holds a tab no agent may read or
+ * act on it. The agent can ask for that hand-over itself (browser_request_human)
+ * and waits in place until the person hands the tab back.
+ *
  * Runs inside the sandbox as the sandbox user, listening on loopback only. It
  * coordinates tasks of one account; it is not a security boundary between them.
  */
@@ -25,6 +30,7 @@ const CDP = process.env.AIO_TABS_CDP || 'http://127.0.0.1:9222';
 const OUTPUT_DIR = process.env.AIO_TABS_OUTPUT || '/home/gem/workspace/.scratch/artifacts/browser';
 const STATE_FILE = process.env.AIO_TABS_STATE || '/tmp/aio-tabs-state.json';
 const MAX_FINISHED_TABS = Number(process.env.AIO_TABS_MAX_FINISHED || 8);
+const HUMAN_WAIT_MS = Number(process.env.AIO_TABS_HUMAN_WAIT_MS || 30 * 60 * 1000);
 const MAX_TEXT = 60000;
 const KEY = /^[A-Za-z0-9_-]{1,80}$/;
 const { chromium } = require(process.env.AIO_TABS_PLAYWRIGHT || '/opt/aio-browser/playwright-core');
@@ -32,20 +38,22 @@ const { chromium } = require(process.env.AIO_TABS_PLAYWRIGHT || '/opt/aio-browse
 const INSTRUCTIONS = [
   '浏览器请只用 aio_tabs 的工具。每个标签页记录着创建它的任务：只有创建它的任务能操作（打开网址、点击、填写、执行脚本、关闭），其他任务只能只读查看（正文、HTML、页面结构、截图）。',
   '只读查看其他任务的页面时，先用 browser_tab_list 找到标签页编号（如 t3），再把它作为 tab 参数传给读取类工具。',
+  '需要用户本人在浏览器里操作时，调用 browser_request_human 说明原因并等待：登录、验证码、二次验证、输入密码或支付信息、付款、下单、发送消息、修改账号设置等不可撤销的最后一步，或需要用户判断的页面。不要在对话里索要密码或验证码。',
+  '用户交还后先读取页面确认当前状态再继续；结果不确定的操作不要自动重做，先让用户核对。用户正在操作的标签页你不能读取或操作。',
   '不要使用 `aio browser` 命令行或 /v1/browser 接口：它们操作的是整个浏览器当前可见的页面，会打断其他正在并行的任务。',
   '选择器使用 Playwright 语法：CSS（#id、.class）、text=登录、role=button[name="搜索"]；不确定时先用 browser_snapshot 查看页面结构。',
 ].join('\n');
 
 // ----------------------------------------------------------------- registry
 
-/** tabId -> { id, page, key, title, targetId, createdAt, lastUsed, finishedAt } */
+/** tabId -> { id, page, key, title, targetId, createdAt, lastUsed, finishedAt, holder, humanSince, request } */
 const registry = new Map();
 /** key -> tabId the task is currently working in */
 const cursors = new Map();
 let seq = 0;
 
 function snapshotRecords() {
-  return [...registry.values()].map(({ id, page, key, title, targetId, createdAt, lastUsed, finishedAt }) => ({ id, key, title, targetId, url: safeUrl(page), createdAt, lastUsed, finishedAt }));
+  return [...registry.values()].map(({ id, page, key, title, targetId, createdAt, lastUsed, finishedAt, holder, humanSince, request }) => ({ id, key, title, targetId, url: safeUrl(page), createdAt, lastUsed, finishedAt, holder, humanSince, request }));
 }
 
 function safeUrl(page) {
@@ -83,13 +91,17 @@ async function targetIdOf(page) {
 function register(page, key, title, extra = {}) {
   const id = extra.id || `t${++seq}`;
   const now = Date.now();
-  const tab = { id, page, key, title, targetId: extra.targetId || null, createdAt: extra.createdAt || now, lastUsed: extra.lastUsed || now, finishedAt: extra.finishedAt ?? null };
+  const tab = {
+    id, page, key, title, targetId: extra.targetId || null, createdAt: extra.createdAt || now, lastUsed: extra.lastUsed || now, finishedAt: extra.finishedAt ?? null,
+    holder: extra.holder === 'human' ? 'human' : 'ai', humanSince: extra.humanSince ?? null, request: extra.request ?? null,
+  };
   registry.set(id, tab);
   if (!extra.id) cursors.set(key, id);
   // A link that opens a new window belongs to the same task and becomes its current tab.
   page.on('popup', (popup) => { void adoptNew(popup, key, title); });
   page.on('close', () => {
     registry.delete(id);
+    settleWaiters(id, 'closed');
     if (cursors.get(key) === id) cursors.delete(key);
     save();
   });
@@ -101,7 +113,57 @@ function register(page, key, title, extra = {}) {
 async function adoptNew(page, key, title) {
   const tab = register(page, key, title);
   await enforceFinishedCap(key);
+  await refocusHuman();
   return tab;
+}
+
+/** A new tab opened by any task must never pull the page a person is typing in to the back. */
+async function refocusHuman() {
+  const held = [...registry.values()].filter((t) => t.holder === 'human' && !t.page.isClosed()).sort((a, b) => b.humanSince - a.humanSince)[0];
+  if (held) await held.page.bringToFront().catch(() => undefined);
+}
+
+// ------------------------------------------------------- human hand-over
+
+/** tabId -> Set<resolve>: agents waiting for a person to hand a tab back. */
+const waiters = new Map();
+
+function settleWaiters(tabId, outcome) {
+  for (const resolve of waiters.get(tabId) || []) resolve(outcome);
+  waiters.delete(tabId);
+}
+
+function waitForHuman(tab, signal) {
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = (outcome) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      waiters.get(tab.id)?.delete(finish);
+      resolve(outcome);
+    };
+    const timer = setTimeout(() => finish('timeout'), HUMAN_WAIT_MS);
+    if (!waiters.has(tab.id)) waiters.set(tab.id, new Set());
+    waiters.get(tab.id).add(finish);
+    signal?.addEventListener('abort', () => finish('aborted'), { once: true });
+  });
+}
+
+/** A person takes a task's tab: it comes to the front and agents are shut out until it is handed back. */
+async function takeControl(tab) {
+  tab.holder = 'human';
+  tab.humanSince = Date.now();
+  save();
+  await tab.page.bringToFront().catch(() => undefined);
+}
+
+function releaseControl(tab) {
+  tab.holder = 'ai';
+  tab.humanSince = null;
+  tab.request = null;
+  save();
+  settleWaiters(tab.id, 'released');
 }
 
 // ------------------------------------------------------------------ browser
@@ -179,7 +241,7 @@ async function currentOwn(key, title, create) {
  * The tab a call works on. Reading may name any recorded tab; acting only ever
  * touches a tab the calling task created.
  */
-async function resolveTab(ctx, tabId, mode, create = false) {
+async function resolveTab(ctx, tabId, mode, create = false, allowHuman = false) {
   await browserContext();
   let tab;
   if (tabId) {
@@ -191,6 +253,9 @@ async function resolveTab(ctx, tabId, mode, create = false) {
   } else {
     tab = await currentOwn(ctx.key, ctx.title, create);
   }
+  if (tab.holder === 'human' && !allowHuman) {
+    throw new Error(`用户正在操作标签页 ${tab.id}，交还前不能读取或操作它。需要等用户完成时，调用 browser_request_human 说明你在等什么。`);
+  }
   tab.lastUsed = Date.now();
   return tab;
 }
@@ -199,6 +264,8 @@ function markFinished(key) {
   let count = 0;
   for (const tab of ownTabs(key)) {
     tab.finishedAt = Date.now();
+    tab.request = null;
+    settleWaiters(tab.id, 'finished');
     count += 1;
   }
   cursors.delete(key);
@@ -309,6 +376,25 @@ const TOOLS = {
       return textResult('等待完成');
     },
   },
+  browser_request_human: {
+    mode: 'write',
+    description: '请用户本人在浏览器里操作并等待交还（最长 30 分钟）：登录、验证码、二次验证、输入密码或支付信息、付款、下单、发送消息、修改账号设置等，或需要用户判断的页面。reason 用一句话告诉用户要做什么。',
+    input: { reason: str, tab: ownTabArg }, required: ['reason'],
+    run: async (ctx, a, signal) => {
+      const tab = await resolveTab(ctx, a.tab, 'write', false, true);
+      tab.request = { reason: String(a.reason || '').slice(0, 300) || '需要你在浏览器里操作', at: Date.now() };
+      save();
+      const outcome = await waitForHuman(tab, signal);
+      if (outcome === 'released') {
+        return textResult(`用户已交还控制权。${await describe(tab)}\n用户可能已经完成操作或改变了页面，继续前先读取页面确认状态。`);
+      }
+      if (tab.request) { tab.request = null; save(); }
+      if (outcome === 'timeout') {
+        return { content: [{ type: 'text', text: `等了 ${Math.round(HUMAN_WAIT_MS / 60000)} 分钟，用户还没有交还标签页 ${tab.id}。请结束这一轮，告诉用户需要在浏览器里做什么；用户处理后可以引用这个任务继续。` }], isError: true };
+      }
+      return { content: [{ type: 'text', text: `停止等待：${outcome === 'closed' ? '标签页已关闭' : '任务已结束或被停止'}。` }], isError: true };
+    },
+  },
   browser_tab_list: {
     mode: 'read', description: '列出标签页及其创建任务：本任务的可操作，其他任务的只读。', input: {},
     run: async (ctx) => {
@@ -316,7 +402,7 @@ const TOOLS = {
       const current = cursors.get(ctx.key);
       const rows = await Promise.all([...registry.values()].filter((t) => !t.page.isClosed()).map(async (t) => {
         const own = t.key === ctx.key;
-        const who = own ? '本任务，可操作' : `任务「${t.title}」${t.finishedAt ? '（已结束）' : ''}，只读`;
+        const who = t.holder === 'human' ? '用户正在操作，暂不可用' : own ? '本任务，可操作' : `任务「${t.title}」${t.finishedAt ? '（已结束）' : ''}，只读`;
         return { own, line: `${t.id === current ? '*' : ' '} [${t.id}] ${await t.page.title().catch(() => '')} ${safeUrl(t.page)} — ${who}` };
       }));
       if (!rows.length) return textResult('还没有任务创建的标签页。');
@@ -357,13 +443,13 @@ function serialized(key, fn) {
   return next;
 }
 
-async function callTool(ctx, name, args) {
+async function callTool(ctx, name, args, signal) {
   const tool = TOOLS[name];
   if (!tool) return { content: [{ type: 'text', text: `未知工具：${name}` }], isError: true };
   try {
     return await serialized(ctx.key, async () => {
       touchTask(ctx.key, ctx.title);
-      const result = await tool.run(ctx, args || {});
+      const result = await tool.run(ctx, args || {}, signal);
       save();
       return result;
     });
@@ -381,7 +467,7 @@ function taskOf(req) {
   return { key, title: title.slice(0, 120) };
 }
 
-async function handleRpc(req, message) {
+async function handleRpc(req, message, signal) {
   const { method, id, params } = message;
   if (id === undefined || id === null) return null; // notification
   const reply = (result) => ({ jsonrpc: '2.0', id, result });
@@ -401,7 +487,7 @@ async function handleRpc(req, message) {
     case 'tools/call': {
       const ctx = taskOf(req);
       if (!KEY.test(ctx.key)) return fail(-32602, 'missing task identity');
-      return reply(await callTool(ctx, params && params.name, params && params.arguments));
+      return reply(await callTool(ctx, params && params.name, params && params.arguments, signal));
     }
     default:
       return fail(-32601, `unknown method ${method}`);
@@ -431,7 +517,28 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, { ok: true, version: VERSION, pid: process.pid, tabs: registry.size });
     }
     // Control-plane endpoints: the ownership record, a finished turn, and on-demand destruction.
-    if (req.method === 'GET' && url.pathname === '/tabs') return send(res, 200, { tabs: snapshotRecords() });
+    if (req.method === 'GET' && url.pathname === '/tabs') {
+      const key = url.searchParams.get('key');
+      return send(res, 200, { tabs: snapshotRecords().filter((t) => !key || t.key === key) });
+    }
+    if (req.method === 'POST' && url.pathname === '/control') {
+      const body = await readJson(req);
+      const tab = registry.get(String(body.tab || ''));
+      if (!tab || tab.page.isClosed()) return send(res, 404, { error: 'no such tab' });
+      if (body.key && body.key !== tab.key) return send(res, 403, { error: 'tab belongs to another task' });
+      if (body.action === 'take') await takeControl(tab);
+      else if (body.action === 'release') releaseControl(tab);
+      else return send(res, 400, { error: 'bad action' });
+      return send(res, 200, { tab: snapshotRecords().find((t) => t.id === tab.id) });
+    }
+    if (req.method === 'GET' && url.pathname === '/screenshot') {
+      const tab = registry.get(String(url.searchParams.get('tab') || ''));
+      if (!tab || tab.page.isClosed()) return send(res, 404, { error: 'no such tab' });
+      const key = url.searchParams.get('key');
+      if (key && key !== tab.key) return send(res, 403, { error: 'tab belongs to another task' });
+      const data = await tab.page.screenshot({ type: 'jpeg', quality: 55, timeout: 15000 });
+      return send(res, 200, { mimeType: 'image/jpeg', data: data.toString('base64'), url: safeUrl(tab.page), title: await tab.page.title().catch(() => '') });
+    }
     if (req.method === 'POST' && url.pathname === '/finish') {
       const body = await readJson(req);
       if (!KEY.test(String(body.key || ''))) return send(res, 400, { error: 'bad key' });
@@ -444,11 +551,14 @@ const server = http.createServer(async (req, res) => {
     const body = await readJson(req);
     const headers = {};
     if (!Array.isArray(body) && body.method === 'initialize') headers['mcp-session-id'] = crypto.randomUUID();
+    // A caller that gives up (a stopped turn) ends any wait it started.
+    const abort = new AbortController();
+    res.on('close', () => { if (!res.writableEnded) abort.abort(); });
     if (Array.isArray(body)) {
-      const out = (await Promise.all(body.map((m) => handleRpc(req, m)))).filter(Boolean);
+      const out = (await Promise.all(body.map((m) => handleRpc(req, m, abort.signal)))).filter(Boolean);
       return out.length ? send(res, 200, out, headers) : send(res, 202, undefined, headers);
     }
-    const out = await handleRpc(req, body);
+    const out = await handleRpc(req, body, abort.signal);
     return out ? send(res, 200, out, headers) : send(res, 202, undefined, headers);
   } catch (err) {
     return send(res, 400, { error: err && err.message ? err.message : 'bad request' });

@@ -27,6 +27,22 @@ function taskHeaders(task: BrowserTask): Record<string, string> {
 const SCRIPT_NAME = "tab-server.cjs";
 const KEY = /^[A-Za-z0-9_-]{1,80}$/;
 
+/** One tab as the control plane sees it (the tab server's ownership record). */
+export interface TabRecord {
+  id: string;
+  key: string;
+  title: string;
+  url: string;
+  createdAt: number;
+  lastUsed: number;
+  finishedAt: number | null;
+  /** Who drives the tab right now: the task's agent, or a person who took it over. */
+  holder: "ai" | "human";
+  humanSince: number | null;
+  /** The agent asked a person to act in this tab, and is waiting for it back. */
+  request: { reason: string; at: number } | null;
+}
+
 /** What the control plane needs from the tab server. */
 export interface TabServerLike {
   ensure(): Promise<void>;
@@ -34,7 +50,16 @@ export interface TabServerLike {
   finish(key: string): Promise<void>;
   /** Destroy every finished task's tabs, e.g. before the browser is released for idleness. */
   prune(): Promise<void>;
+  /** A task's tabs (or every recorded tab), with who controls each and any pending request for a person. */
+  list(key?: string): Promise<TabRecord[]>;
+  /** A person takes a task's tab (brought to the front, agents shut out) or hands it back. */
+  control(key: string, tab: string, action: "take" | "release"): Promise<TabRecord | null>;
+  /** A current preview of one of the task's tabs. */
+  screenshot(key: string, tab: string): Promise<{ mimeType: string; data: string; url: string; title: string } | null>;
 }
+
+/** An agent asking a person for help waits up to 30 minutes; the MCP clients must wait a bit longer. */
+export const TAB_TOOL_TIMEOUT_SEC = 31 * 60;
 
 /**
  * Per-thread MCP wiring for an execution thread: the tab-scoped server under
@@ -42,7 +67,7 @@ export interface TabServerLike {
  * parallel tasks can never steer each other's tabs.
  */
 export function tabThreadConfig(task: BrowserTask): Record<string, unknown> {
-  return { mcp_servers: { aio_browser: { enabled: false }, aio_tabs: { url: TAB_SERVER_URL, http_headers: taskHeaders(task) } } };
+  return { mcp_servers: { aio_browser: { enabled: false }, aio_tabs: { url: TAB_SERVER_URL, http_headers: taskHeaders(task), tool_timeout_sec: TAB_TOOL_TIMEOUT_SEC } } };
 }
 
 /** The same wiring for a Claude Code turn (`--mcp-config`). */
@@ -52,7 +77,8 @@ export function tabMcpServers(task: BrowserTask): Record<string, unknown> {
 
 /** Appended to an execution thread's instructions: browser work goes through its own tabs. */
 export const TAB_POLICY =
-  "浏览器操作只使用 aio_tabs 工具：你只能操作本任务创建的标签页，其他任务的标签页只能只读查看，可与其他任务并行；不要使用 `aio browser` 命令行或 /v1/browser 接口，它们操作整个浏览器的当前页面，会打断并行任务。";
+  "浏览器操作只使用 aio_tabs 工具：你只能操作本任务创建的标签页，其他任务的标签页只能只读查看，可与其他任务并行；不要使用 `aio browser` 命令行或 /v1/browser 接口，它们操作整个浏览器的当前页面，会打断并行任务。" +
+  "遇到登录、验证码、二次验证、输入密码或支付信息、付款、下单、发送消息、修改账号设置等需要用户本人完成或不可撤销的最后一步，调用 browser_request_human 说明原因并等待用户交还，不要在对话里索要密码或验证码，也不要替用户完成付款或下单；交还后先读取页面确认状态再继续，结果不确定的操作不要自动重做。";
 
 export function withTabPolicy(instructions: string): string {
   return instructions.trim() ? `${instructions.trimEnd()}\n\n${TAB_POLICY}` : TAB_POLICY;
@@ -167,5 +193,39 @@ export class TabServer implements TabServerLike {
 
   async prune(): Promise<void> {
     await this.#post("/prune", {});
+  }
+
+  async #get<T>(route: string): Promise<T | null> {
+    const res = await this.#container.execInSandbox(["curl", "-s", "-f", "-m", "20", `http://127.0.0.1:${TAB_SERVER_PORT}${route}`], { timeoutMs: 25_000 });
+    if (res.code !== 0) return null;
+    try {
+      return JSON.parse(res.stdout) as T;
+    } catch {
+      return null;
+    }
+  }
+
+  async list(key?: string): Promise<TabRecord[]> {
+    if (key !== undefined && !KEY.test(key)) return [];
+    return (await this.#get<{ tabs: TabRecord[] }>(key ? `/tabs?key=${key}` : "/tabs"))?.tabs ?? [];
+  }
+
+  async control(key: string, tab: string, action: "take" | "release"): Promise<TabRecord | null> {
+    if (!KEY.test(key) || !/^t\d{1,9}$/.test(tab)) return null;
+    const res = await this.#container.execInSandbox(
+      ["curl", "-s", "-f", "-m", "20", "-X", "POST", "-H", "content-type: application/json", "--data-binary", "@-", `http://127.0.0.1:${TAB_SERVER_PORT}/control`],
+      { timeoutMs: 25_000, stdin: JSON.stringify({ key, tab, action }) },
+    );
+    if (res.code !== 0) return null;
+    try {
+      return (JSON.parse(res.stdout) as { tab: TabRecord }).tab;
+    } catch {
+      return null;
+    }
+  }
+
+  async screenshot(key: string, tab: string): Promise<{ mimeType: string; data: string; url: string; title: string } | null> {
+    if (!KEY.test(key) || !/^t\d{1,9}$/.test(tab)) return null;
+    return await this.#get(`/screenshot?tab=${tab}&key=${key}`);
   }
 }

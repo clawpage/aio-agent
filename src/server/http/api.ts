@@ -390,7 +390,19 @@ export function createApiRouter(context: AppContext): Router {
 
   router.get("/main", requireKind("primary"), requireSession, asyncHandler(async (req, res) => {
     const before = Number(req.query.before ?? Number.MAX_SAFE_INTEGER);
-    res.json({ mode: "tasks", ...context.tasks.list(Number.isSafeInteger(before) && before > 0 ? before : Number.MAX_SAFE_INTEGER, ctxOf(req).session!.ownerId) });
+    const page = context.tasks.list(Number.isSafeInteger(before) && before > 0 ? before : Number.MAX_SAFE_INTEGER, ctxOf(req).session!.ownerId);
+    // One read of the tab record shows, per task, whether it has tabs, is waiting for
+    // the person in the browser, or is being driven by the person right now.
+    const tabs = context.tabs ? await context.tabs.list().catch(() => []) : [];
+    const byKey = new Map<string, typeof tabs>();
+    for (const tab of tabs) byKey.set(tab.key, [...(byKey.get(tab.key) ?? []), tab]);
+    const tasks = page.tasks.map((task) => {
+      const own = task.mergedInto ? undefined : byKey.get(task.conversationId);
+      if (!own?.length) return task;
+      const requested = own.find((t) => t.request && t.holder === "ai");
+      return { ...task, browser: { tabs: own.length, request: requested?.request?.reason ?? null, human: own.some((t) => t.holder === "human") } };
+    });
+    res.json({ mode: "tasks", ...page, tasks });
   }));
   router.post("/tasks", requireKind("primary"), requireSession, asyncHandler(async (req, res) => {
     try {
@@ -415,6 +427,34 @@ export function createApiRouter(context: AppContext): Router {
   router.post("/tasks/:id/retry-planning", requireKind("primary"), requireSession, asyncHandler(async (req, res) => {
     try { context.tasks.retryPlanning(param(req, "id")); res.json({ ok: true }); }
     catch (err) { res.status(409).json({ error: "retry_refused", message: err instanceof Error ? err.message : "无法重试" }); }
+  }));
+
+  // A task's browser tabs: what its agent is doing there, and the person taking over or handing back.
+  const taskBrowserKey = (req: Request): string | null => {
+    const id = param(req, "id");
+    return context.tasks.belongsTo(id, ctxOf(req).session!.ownerId) ? context.tasks.browserKey(id) : null;
+  };
+  router.get("/tasks/:id/browser", requireKind("primary"), requireSession, asyncHandler(async (req, res) => {
+    const key = taskBrowserKey(req);
+    if (!key) { res.status(404).json({ error: "not_found" }); return; }
+    res.setHeader("Cache-Control", "no-store");
+    res.json({ tabs: context.tabs ? await context.tabs.list(key) : [] });
+  }));
+  router.get("/tasks/:id/browser/screenshot", requireKind("primary"), requireSession, asyncHandler(async (req, res) => {
+    const key = taskBrowserKey(req);
+    const shot = key && context.tabs ? await context.tabs.screenshot(key, String(req.query.tab ?? "")) : null;
+    if (!shot) { res.status(404).json({ error: "not_found" }); return; }
+    res.setHeader("Cache-Control", "no-store");
+    res.type(shot.mimeType).send(Buffer.from(shot.data, "base64"));
+  }));
+  router.post("/tasks/:id/browser/control", requireKind("primary"), requireSession, asyncHandler(async (req, res) => {
+    const key = taskBrowserKey(req);
+    const action = req.body?.action;
+    if (!key || !context.tabs) { res.status(404).json({ error: "not_found" }); return; }
+    if (action !== "take" && action !== "release") { res.status(400).json({ error: "bad_action" }); return; }
+    const tab = await context.tabs.control(key, String(req.body?.tab ?? ""), action);
+    if (!tab) { res.status(404).json({ error: "tab_not_found", message: "这个标签页已经关闭或不属于该任务" }); return; }
+    res.json({ tab });
   }));
 
   router.get(

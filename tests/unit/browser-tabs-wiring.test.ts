@@ -33,6 +33,9 @@ beforeEach(async () => {
     // The finish is slow on purpose: the browser hold must outlive it.
     finish: (key: string) => new Promise<void>((resolve) => { log.push(`finish:${key}`); releaseGate = () => { log.push("finished"); resolve(); }; }),
     prune: async () => void log.push("prune"),
+    list: async () => [],
+    control: async () => null,
+    screenshot: async () => null,
   };
   const browser = { reserveTurn: () => () => void log.push("lease-end"), ready: async () => void log.push("ready") };
   agent = new AgentManager({ cfg: testConfig("/tmp/pa-tabs-wiring", 1), db, codex, log: new Logger("error", undefined, false), hostTokens: {} as HostTokenSource, browser, tabs });
@@ -74,7 +77,8 @@ it("records every execution thread's tabs against its task and marks them finish
 it("wires Codex threads and Claude Code turns to the task's identity and title", () => {
   const headers = { "X-AIO-Task": "conv_1", "X-AIO-Task-Title": encodeURIComponent("任务：订机票") };
   expect(tabThreadConfig({ key: "conv_1", title: "任务：订机票" })).toEqual({
-    mcp_servers: { aio_browser: { enabled: false }, aio_tabs: { url: "http://127.0.0.1:8190/mcp", http_headers: headers } },
+    // A browser hand-over waits up to 30 minutes inside one tool call; the client must allow it.
+    mcp_servers: { aio_browser: { enabled: false }, aio_tabs: { url: "http://127.0.0.1:8190/mcp", http_headers: headers, tool_timeout_sec: 31 * 60 } },
   });
   expect(tabMcpServers({ key: "conv_1", title: "任务：订机票" })).toEqual({ aio_tabs: { type: "http", url: "http://127.0.0.1:8190/mcp", headers } });
 });
@@ -87,7 +91,7 @@ it("destroys finished tasks' tabs right before an idle snapshot, and only then",
     stop: async () => (calls.push("stop"), {}),
     wake: async () => (calls.push("wake"), {}),
   } as unknown as BrowserRuntimeLike;
-  const wrapped = pruneBeforeSnapshot(runtime, { ensure: async () => undefined, finish: async () => undefined, prune: async () => void calls.push("prune") });
+  const wrapped = pruneBeforeSnapshot(runtime, { ensure: async () => undefined, finish: async () => undefined, prune: async () => void calls.push("prune"), list: async () => [], control: async () => null, screenshot: async () => null });
   await wrapped.status();
   await wrapped.wake();
   await wrapped.snapshot();

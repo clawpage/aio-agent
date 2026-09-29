@@ -203,4 +203,17 @@ export interface Task {
   createdAt: number;
   startedAt?: number | null;
   completedAt: number | null;
+  /** Present when the task has browser tabs: its agent's tabs, a request for you, or you in control. */
+  browser?: { tabs: number; request: string | null; human: boolean };
+}
+
+/** One browser tab a task created, as the tab record keeps it. */
+export interface TaskTab {
+  id: string;
+  title: string;
+  url: string;
+  lastUsed: number;
+  finishedAt: number | null;
+  holder: "ai" | "human";
+  request: { reason: string; at: number } | null;
 }

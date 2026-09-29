@@ -5,11 +5,14 @@ import type { Attachment, Task } from "../types";
 import { AttachmentCards, MessageFileCards } from "./Chat";
 import { Markdown } from "./Markdown";
 import { FilePreview } from "./FilePreview";
+import { TaskBrowser } from "./TaskBrowser";
 import type {TaskFeed} from '../taskStatus';
 const terminal = new Set(["completed", "failed", "interrupted", "unknown"]);
 const labels: Record<string, string> = { planning: "正在分配…", needs_input: "等待你补充", planning_failed: "分配失败", waiting: "等待依赖或资源", queued: "排队中", running: "Working…", stopping: "正在停止…", completed: "已完成", failed: "执行失败", interrupted: "已停止", unknown: "结果待核对", blocked: "需要补充" };
-export function TaskChat({ onDetails, onOpenLink, onExpired, onFeed }: {
+export function TaskChat({ onDetails, onOpenLink, onExpired, onFeed, onRevealBrowser }: {
     onDetails: (task: Task) => void;
+    /** Open the workspace on the browser, where a taken-over task tab is in front. */
+    onRevealBrowser: () => void;
     onOpenLink: (url: string) => void;
     onExpired: () => void;
     onFeed?: (feed:TaskFeed)=>void;
@@ -140,6 +143,7 @@ export function TaskChat({ onDetails, onOpenLink, onExpired, onFeed }: {
     const active = tasks.filter(t => !t.mergedInto && !terminal.has(t.status) && !["planning_failed", "blocked", "needs_input"].includes(t.status));
     const now = useDisplayClock(tasks.some(t => ["running", "stopping"].includes(t.status)));
     const awaiting = tasks.filter(t => !t.mergedInto && t.status === "needs_input");
+    const browserAsks = tasks.filter(t => !t.mergedInto && !terminal.has(t.status) && t.browser?.request);
     // Keep messages chronological; anchor each live card to its latest accepted
     // supplement. Its controls and duration always use the original task.
     const progressAt = new Map<string, Task>();
@@ -150,13 +154,14 @@ export function TaskChat({ onDetails, onOpenLink, onExpired, onFeed }: {
         progressAt.set(anchor.id, task);
     }
     const renderProgress = (t: Task) => <div className={`task-progress ${t.status === "running" ? "active" : ""} ${t.status === "needs_input" ? "needs-input" : ""}`}>
-          <button className="task-summary" onClick={() => onDetails(t)} aria-label={`展开任务：${t.title}`}><span className={`dot ${t.approvals ? "warn" : ""}`}/><span className="task-progress-label">{t.approvals ? "需要你确认" : t.waitReason?.label ?? labels[t.status] ?? t.status}</span><span className="task-progress-title">{t.title}</span><span aria-hidden>›</span></button>
+          <button className="task-summary" onClick={() => onDetails(t)} aria-label={`展开任务：${t.title}`}><span className={`dot ${t.approvals || t.browser?.request ? "warn" : ""}`}/><span className="task-progress-label">{t.approvals ? "需要你确认" : t.browser?.request && t.status === "running" ? "需要你操作浏览器" : t.waitReason?.label ?? labels[t.status] ?? t.status}</span><span className="task-progress-title">{t.title}</span><span aria-hidden>›</span></button>
           {t.waitReason && <p className="task-intro task-wait-reason">{t.waitReason.message}</p>}
           {t.status === "needs_input" && t.clarification && <div className="task-question" role="status" aria-label="需要你补充">
             <div className="task-question-heading"><span aria-hidden="true">?</span><strong>需要你补充</strong></div>
             <p>{t.clarification}</p><span className="task-question-hint">直接在下方输入回复即可</span>
           </div>}
           {t.description && ["running", "stopping"].includes(t.status) && <p className="task-intro">{t.description}</p>}
+          <TaskBrowser task={t} onReveal={onRevealBrowser}/>
           <TaskDuration task={t} now={now}/>
           {t.error && <p className="tiny">{t.error}</p>}
           <div className="task-actions"><button className="ghost tiny" disabled={busy} onClick={() => quoteTask(t)} aria-label={`引用任务：${t.title}`}>引用任务</button>{t.status === "planning_failed" ? <button className="ghost tiny" onClick={() => void act(() => api.retryTaskPlanning(t.id))}>重试分配</button> : t.status === "blocked" ? null : <button className="ghost tiny" disabled={t.status === "stopping"} onClick={() => void act(() => api.stopTask(t.id))}>停止该任务</button>}</div>
@@ -164,13 +169,14 @@ export function TaskChat({ onDetails, onOpenLink, onExpired, onFeed }: {
     const feed = tasks.flatMap(t => [{ task: t, report: false, at: t.createdAt }, ...(!t.mergedInto && terminal.has(t.status) ? [{ task: t, report: true, at: t.completedAt ?? t.createdAt }] : [])])
         .sort((a, b) => a.at - b.at || Number(a.report) - Number(b.report) || a.task.id.localeCompare(b.task.id));
     return <section className="chat task-chat">
-    <header className="chat-head"><div className="chat-title"><h2>主会话</h2><span className={`dot ${connected ? "ok" : "warn"}`}/><span className="chat-sub">{active.length ? `${active.length} 个任务处理中${awaiting.length ? ` · ${awaiting.length} 个等你补充` : ""}` : awaiting.length ? `${awaiting.length} 个任务等你补充` : connected ? "随时可以交给我" : "正在连接…"}</span></div></header>
+    <header className="chat-head"><div className="chat-title"><h2>主会话</h2><span className={`dot ${connected ? "ok" : "warn"}`}/><span className="chat-sub">{active.length ? `${active.length} 个任务处理中${browserAsks.length ? ` · ${browserAsks.length} 个等你操作浏览器` : ""}${awaiting.length ? ` · ${awaiting.length} 个等你补充` : ""}` : awaiting.length ? `${awaiting.length} 个任务等你补充` : connected ? "随时可以交给我" : "正在连接…"}</span></div></header>
     <div className="chat-scroll task-feed" ref={scroll} onScroll={e => { const n = e.currentTarget; stick.current = n.scrollHeight - n.scrollTop - n.clientHeight < 80; }}>
       {nextBefore && <button className="ghost" onClick={() => void act(async () => { const d = await api.main(nextBefore); stick.current = false; merge(d.tasks); setNextBefore(d.nextBefore); })}>加载更早的任务</button>}
       {!tasks.length && <div className="empty"><h3>把事情交给我</h3><p>可以接着发不同任务。过程会收拢，完成后在这里回报。</p></div>}
       {feed.map(({ task: t, report }) => report ? <article className={`msg assistant task-report ${t.status}`} key={`${t.id}:report`} data-task-id={t.id}>
         <div className="task-report-heading"><span>{t.title}</span><span className="muted tiny">{labels[t.status]}</span></div>
         <div className="bubble"><Markdown source={t.result || (t.status === "completed" ? "任务已结束，但没有返回文字结果，请打开详情核对。" : t.error || labels[t.status] || t.status)} onOpenLink={onOpenLink} onOpenFile={setPreview}/>{t.result && <MessageFileCards text={t.result} onOpen={setPreview}/>}{t.error && t.result && <p className="error">{t.error}</p>}</div>
+        <TaskBrowser task={t} onReveal={onRevealBrowser}/>
         <div className="message-meta"><MessageTime at={t.completedAt} now={now}/><TaskDuration task={t} now={now}/></div>
         <div className="task-actions"><button className="ghost tiny" disabled={busy} onClick={() => quoteTask(t)} aria-label={`引用任务：${t.title}`}>引用任务</button><button className="ghost tiny" onClick={() => onDetails(t)}>查看过程</button></div>
       </article> : <div className="task-entry" key={t.id} data-task-id={t.id}>

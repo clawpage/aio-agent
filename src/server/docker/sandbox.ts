@@ -1,5 +1,6 @@
 import { execFile, spawn, type ChildProcess } from "node:child_process";
 import path from "node:path";
+import { TAB_TOOL_TIMEOUT_SEC } from "../browser/tabs.js";
 import { setTimeout as delay } from "node:timers/promises";
 import type { Config } from "../config.js";
 import type { Logger } from "../logger.js";
@@ -663,6 +664,8 @@ finally:
       [
         "exec", "-i", "-u", s.containerUser, "-w", s.containerWorkspaceDir, ...envFlags, this.name,
         "env", `CLAUDE_CONFIG_DIR=${this.#cfg.claudeCode.configDir}`, "DISABLE_AUTOUPDATER=1",
+        // A browser hand-over waits up to 30 minutes for the person inside one tool call.
+        `MCP_TOOL_TIMEOUT=${TAB_TOOL_TIMEOUT_SEC * 1000}`,
         this.#cfg.claudeCode.bin, ...args,
       ],
       { stdio: ["pipe", "pipe", "pipe"], env: { ...process.env, ...secretEnv } },

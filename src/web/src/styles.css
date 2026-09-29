@@ -2376,3 +2376,20 @@ textarea:focus {
 .soul-actions { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
 .soul-saved { color:var(--ok); font-size:13px; }
 @media(max-width:900px) { .soul-settings textarea { font-size:16px; } }
+
+/* A task's browser inside its card: preview, who drives it, and the hand-over. */
+.task-browser { margin: 10px 0 4px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 14px; background: var(--bg-soft); min-width: 0; }
+.task-browser.request { border-color: color-mix(in srgb,var(--warn) 55%,var(--border)); background: color-mix(in srgb,var(--warn) 9%,var(--bg)); }
+.task-browser.human { border-color: color-mix(in srgb,var(--accent) 50%,var(--border)); }
+.task-browser-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; min-width: 0; font-size: 13px; }
+.task-browser-state { flex: none; padding: 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; background: var(--accent-soft); color: var(--accent); }
+.task-browser-state.request { background: color-mix(in srgb,var(--warn) 18%,transparent); color: var(--warn); }
+.task-browser-state.done { background: transparent; color: var(--text-dim); border: 1px solid var(--border); }
+.task-browser-site { flex: 1 1 160px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.task-browser-reason { margin: 8px 0 0; font-size: 15px; line-height: 1.6; overflow-wrap: anywhere; }
+.task-browser-hint { margin: 8px 0 0; font-size: 12px; color: var(--text-dim); line-height: 1.6; }
+.task-browser-shot { display: block; width: 100%; margin: 8px 0 0; padding: 0; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; background: var(--bg); cursor: pointer; }
+.task-browser-shot img { display: block; width: 100%; max-height: 220px; object-fit: cover; object-position: top; }
+.task-browser .task-actions { margin-top: 8px; }
+/* The hand-over is the one action on the card: keep it a real, readable primary button. */
+.task-browser .task-actions button.primary { padding: 6px 12px; color: #fff; }

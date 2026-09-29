@@ -1,3 +1,4 @@
+import type { TabServerLike } from "./browser/tabs.js";
 import type { Config } from "./config.js";
 import type { Db } from "./db.js";
 import type { Logger } from "./logger.js";
@@ -41,6 +42,8 @@ export interface AppContext {
    * here too instead of only inside `browser`.
    */
   browserRuntime: BrowserRuntimeLike;
+  /** Tab-scoped browser tools (null in tests without a real sandbox). */
+  tabs: TabServerLike | null;
   startedAt: number;
   /** Last sandbox setup error, surfaced truthfully in status (never a secret). */
   sandboxSetupError: string | null;

@@ -131,6 +131,7 @@ export async function bootstrap(opts: BootstrapOptions = {}): Promise<Bootstrapp
     documents,
     browser,
     browserRuntime: resolvedBrowserRuntime,
+    tabs,
     startedAt: Date.now(),
     sandboxSetupError: null,
     sandboxSurfaces: null,

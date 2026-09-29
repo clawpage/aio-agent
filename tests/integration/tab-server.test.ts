@@ -43,6 +43,7 @@ beforeAll(async () => {
   process.env.AIO_TABS_OUTPUT = dir;
   process.env.AIO_TABS_STATE = path.join(dir, "state.json");
   process.env.AIO_TABS_MAX_FINISHED = "2";
+  process.env.AIO_TABS_HUMAN_WAIT_MS = "3000";
   await startServer();
 });
 
@@ -53,15 +54,17 @@ afterAll(async () => {
 });
 
 type Rpc = { result?: { content: Array<{ type: string; text?: string }>; isError?: boolean }; error?: { message: string } };
-async function call(task: string | null, name: string, args: Record<string, unknown> = {}): Promise<Rpc> {
+async function call(task: string | null, name: string, args: Record<string, unknown> = {}, signal?: AbortSignal): Promise<Rpc> {
   const headers: Record<string, string> = { "content-type": "application/json" };
   if (task) Object.assign(headers, { "x-aio-task": task, "x-aio-task-title": encodeURIComponent(`任务${task}`) });
-  const res = await fetch(`${base}/mcp`, { method: "POST", headers, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } }) });
+  const res = await fetch(`${base}/mcp`, { method: "POST", headers, signal, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } }) });
   return (await res.json()) as Rpc;
 }
 const text = (r: Rpc) => (r.result?.content ?? []).map((c) => c.text ?? "<image>").join("\n");
 const post = async (route: string, body: unknown = {}) => (await fetch(`${base}${route}`, { method: "POST", body: JSON.stringify(body) })).json();
-const records = async () => ((await (await fetch(`${base}/tabs`)).json()) as { tabs: Array<{ id: string; key: string; title: string; finishedAt: number | null }> }).tabs;
+type TabRecord = { id: string; key: string; title: string; finishedAt: number | null; holder: string; request: { reason: string } | null };
+const records = async (key?: string) => ((await (await fetch(`${base}/tabs${key ? `?key=${key}` : ""}`)).json()) as { tabs: TabRecord[] }).tabs;
+const control = async (tab: string, action: string, key?: string) => fetch(`${base}/control`, { method: "POST", body: JSON.stringify({ tab, action, key }) });
 const page = (title: string, body: string) => `data:text/html,<title>${title}</title><p id="p">${body}</p><input id="q"><a href="data:text/html,<title>Next</title>next">go</a>`;
 const tabIdOf = (r: Rpc) => /标签页 (t\d+)/.exec(text(r))?.[1];
 
@@ -127,4 +130,52 @@ it.skipIf(!hasChromium)("re-claims recorded tabs after the server restarts", asy
   expect((await records()).map((t) => [t.id, t.key]).sort()).toEqual(beforeRestart.map((t) => [t.id, t.key]).sort());
   const tabF = beforeRestart.find((t) => t.key === "F")!.id;
   expect(text(await call("A", "browser_click", { selector: "text=go", tab: tabF }))).toContain("其他任务只能只读访问");
+});
+
+it.skipIf(!hasChromium)("hands a tab to a person and back: the agent waits in place, nobody else touches it meanwhile", async () => {
+  const tab = tabIdOf(await call("H", "browser_navigate", { url: page("Login", "please sign in") }))!;
+  const waiting = call("H", "browser_request_human", { reason: "请登录你的账号" });
+  await new Promise((r) => setTimeout(r, 200));
+  expect((await records("H"))[0]).toMatchObject({ id: tab, holder: "ai", request: { reason: "请登录你的账号" } });
+
+  // Only the owning task may hand it over.
+  expect((await control(tab, "take", "someone-else")).status).toBe(403);
+  expect((await control(tab, "take", "H")).status).toBe(200);
+  expect((await records("H"))[0]?.holder).toBe("human");
+  // While a person holds it no agent may even read it.
+  const blocked = await call("OTHER", "browser_get_text", { tab });
+  expect(text(blocked)).toContain("用户正在操作");
+  // The control plane can still show the person a preview.
+  const shot = (await (await fetch(`${base}/screenshot?tab=${tab}&key=H`)).json()) as { mimeType: string; data: string };
+  expect(shot.mimeType).toBe("image/jpeg");
+  expect(shot.data.length).toBeGreaterThan(100);
+  expect((await fetch(`${base}/screenshot?tab=${tab}&key=OTHER`)).status).toBe(403);
+
+  expect((await control(tab, "release", "H")).status).toBe(200);
+  const handedBack = await waiting;
+  expect(text(handedBack)).toContain("用户已交还控制权");
+  expect((await records("H"))[0]).toMatchObject({ holder: "ai", request: null });
+  expect(text(await call("OTHER", "browser_get_text", { tab }))).toContain("please sign in");
+});
+
+it.skipIf(!hasChromium)("stops waiting on timeout, on a stopped caller and on a finished task, clearing the request", async () => {
+  const tab = tabIdOf(await call("W", "browser_navigate", { url: page("Wait", "wait") }))!;
+  const timedOut = await call("W", "browser_request_human", { reason: "等你" });
+  expect(timedOut.result?.isError).toBe(true);
+  expect(text(timedOut)).toContain("还没有交还");
+  expect((await records("W"))[0]?.request).toBeNull();
+
+  const stop = new AbortController();
+  const aborted = call("W", "browser_request_human", { reason: "等你" }, stop.signal).catch(() => null);
+  await new Promise((r) => setTimeout(r, 200));
+  stop.abort();
+  await aborted;
+  await new Promise((r) => setTimeout(r, 200));
+  expect((await records("W"))[0]?.request).toBeNull();
+
+  const finished = call("W", "browser_request_human", { reason: "等你" });
+  await new Promise((r) => setTimeout(r, 200));
+  await post("/finish", { key: "W" });
+  expect(text(await finished)).toContain("停止等待");
+  expect((await records("W")).find((t) => t.id === tab)?.request).toBeNull();
 });

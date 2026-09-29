@@ -62,6 +62,8 @@ export class TaskService {
     ownerId(row: TaskRow): string { return this.agent.getConversation(row.conversation_id)!.owner_id; }
     belongsTo(id: string, userId: string): boolean { const row = this.get(id); return !!row && this.ownerId(row) === userId; }
     private executor(row: TaskRow): string { return row.execution_conversation_id ?? row.conversation_id; }
+    /** The identity a task's browser tabs are recorded under: its execution conversation. */
+    browserKey(id: string): string | null { const row = this.get(id); return row ? this.executor(row) : null; }
     /** Referencing an old result while its resumed turn runs supplements that turn. */
     private referenceTarget(row: TaskRow): TaskRow | null {
         const ref = row.related_task_id ? this.get(row.related_task_id) : null;
