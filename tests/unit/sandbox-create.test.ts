@@ -68,13 +68,16 @@ it("aligns the sandbox browser identity once: its own Linux UA, the egress time 
       const stdout = execFileSync("python3", ["-c", script, args.at(-1)!], { encoding: "utf8" });
       return { code: 0, stdout, stderr: "" };
     });
-    expect(await container.alignBrowserIdentity("America/Los_Angeles")).toBe(true);
+    // No Chromium runs here, so nothing is restarted; the config is rewritten for its next start.
+    expect(await container.alignBrowserIdentity("America/Los_Angeles")).toBe(false);
     expect(calls[0]).toEqual(expect.arrayContaining(["exec", "-u", "root"]));
     const browser = JSON.parse(fs.readFileSync(configPath, "utf8")).browser as { args: string[]; env: Record<string, string> };
     expect(browser.args).toEqual(["--mute-audio", "--time-zone-for-testing=America/Los_Angeles", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist", "--use-angle=swiftshader"]);
     expect(browser.env).toEqual({ TZ: "America/Los_Angeles", DISPLAY: ":99" });
-    // Already aligned: nothing is rewritten and Chromium is left running.
+    // Already aligned: nothing more to write.
+    const before = fs.readFileSync(configPath, "utf8");
     expect(await container.alignBrowserIdentity("America/Los_Angeles")).toBe(false);
+    expect(fs.readFileSync(configPath, "utf8")).toBe(before);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
