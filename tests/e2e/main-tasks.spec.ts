@@ -471,6 +471,10 @@ test("a link in a reply opens in the person's own tab, operated from the same co
         const current = route === "pointer" && calls.filter(c => c.route === "pointer").length === 1 ? "t9" : undefined;
         await r.fulfill({ json: { title: "OpenTable", url: "https://www.opentable.com/r/nopa", editable: false, ...(current ? { current } : {}), closed: body.tab } });
     });
+    const lease: string[] = [];
+    await page.route("**/api/browser/viewer/heartbeat", r => { lease.push("heartbeat"); return r.fulfill({ json: { ok: true, generation: 1, status: {} } }); });
+    await page.route("**/api/browser/viewer/release", r => { lease.push("release"); return r.fulfill({ json: { ok: true } }); });
+    await page.route("**/api/browser/wake", r => { lease.push("wake"); return r.fulfill({ json: { ok: true, status: {} } }); });
     await setup(page, [row]);
     let opened: string | null = null;
     await page.route("**/api/browser/tabs", async r => {
@@ -498,9 +502,12 @@ test("a link in a reply opens in the person's own tab, operated from the same co
     expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
     await page.screenshot({ path: info.outputPath("link-console.png") });
 
-    // Closing the panel closes every tab it showed.
+    // While the panel is open someone is watching: the browser is kept awake (and woken if it slept).
+    expect(lease.slice(0, 2)).toEqual(["heartbeat", "wake"]);
+    // Closing the panel closes every tab it showed, and lets the browser go idle again.
     await panel.getByRole("button", { name: "关闭操作面板" }).click();
     await expect(panel).toBeHidden();
+    await expect.poll(() => lease.at(-1)).toBe("release");
     await expect.poll(() => calls.filter(c => c.route === "close").map(c => c.body.tab).sort()).toEqual(["t8", "t9"]);
 });
 test("dispatching shows a calm sorting animation and what the dispatcher weighs, and stays still for reduced motion", async ({ page }, info) => {

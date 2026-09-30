@@ -1513,6 +1513,14 @@ export function createApiRouter(context: AppContext): Router {
         res.status(400).json({ error: "bad_url", message: checked.message });
         return;
       }
+      // An idle browser may have been released: bring it back before opening anything.
+      // Failures answer 503 with the reason (a 502 is replaced by the edge's own page).
+      try {
+        await context.browser.wake();
+      } catch (err) {
+        res.status(503).json({ error: "browser_wake_failed", message: err instanceof Error ? err.message : "浏览器恢复失败，请稍后重试" });
+        return;
+      }
       // A link the person opens gets a tab of their own, operated from the console
       // like a taken-over task tab; without the tab server it is a plain browser tab.
       if (context.tabs) {
@@ -1521,7 +1529,7 @@ export function createApiRouter(context: AppContext): Router {
       }
       const result = await aio.createBrowserTab(checked.url);
       if (!result.ok) {
-        res.status(502).json({ error: "browser_tab_failed", message: result.message });
+        res.status(503).json({ error: "browser_tab_failed", message: `打开链接失败：${result.message}` });
         return;
       }
       res.json({ ok: true, message: result.message, data: result.data ?? null });

@@ -632,8 +632,22 @@ describe("conversation management and sandbox browser tabs", () => {
       headers,
       body: JSON.stringify({ url: "https://example.com/" }),
     });
-    expect(failed.status).toBe(502);
+    // 503 with the reason: an edge proxy replaces a 502 body with its own page.
+    expect(failed.status).toBe(503);
     expect(((await failed.json()) as { message: string }).message).toContain("模拟浏览器错误");
+    h.sandbox.script.browserTab = undefined;
+
+    // A released browser is brought back before the tab opens; a failed restore says why.
+    const wake = h.ctx.browser.wake;
+    let woke = 0;
+    h.ctx.browser.wake = async () => { woke += 1; };
+    expect((await h.request("/api/browser/tabs", { method: "POST", headers, body: JSON.stringify({ url: "https://example.com/" }) })).status).toBe(200);
+    expect(woke).toBe(1);
+    h.ctx.browser.wake = async () => { throw new Error("浏览器恢复失败，快照仍然保留"); };
+    const asleep = await h.request("/api/browser/tabs", { method: "POST", headers, body: JSON.stringify({ url: "https://example.com/" }) });
+    expect(asleep.status).toBe(503);
+    expect(await asleep.json()).toMatchObject({ error: "browser_wake_failed", message: "浏览器恢复失败，快照仍然保留" });
+    h.ctx.browser.wake = wake;
   });
 });
 

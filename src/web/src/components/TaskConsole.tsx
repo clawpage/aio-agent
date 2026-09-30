@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { api, type PointerInput, type PointerResult } from "../api";
+import { api, ApiError, browserApi, type PointerInput, type PointerResult } from "../api";
+import { BrowserViewerController } from "../browserViewer";
 import { RemoteKeyboard } from "./RemoteKeyboard";
 import { keepFocusTap } from "../keepFocusTap";
 
@@ -74,6 +75,32 @@ export function TaskConsole({ target, tab, label, primary, closeLabel = "关闭"
     }, REFRESH_MS);
     return () => window.clearInterval(timer);
   }, [refresh]);
+
+  // Someone is looking at this browser: keep it from being released as idle while the
+  // console is on screen, and bring it back if it already was.
+  useEffect(() => {
+    const viewer = new BrowserViewerController({
+      transport: {
+        heartbeat: async (id, generation) => {
+          try {
+            return { kind: "ok", generation: (await browserApi.heartbeat(id, generation)).generation };
+          } catch (err) {
+            return err instanceof ApiError && err.code === "stale_viewer" ? { kind: "stale" } : { kind: "error", message: err instanceof Error ? err.message : String(err) };
+          }
+        },
+        release: async (id, generation) => { await browserApi.releaseViewer(id, generation).catch(() => undefined); },
+      },
+    });
+    const join = () => void viewer.claim().then(() => browserApi.wake()).catch(() => undefined);
+    const onVisibility = () => (document.visibilityState === "visible" ? join() : void viewer.release());
+    join();
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibility);
+      void viewer.release();
+      viewer.dispose();
+    };
+  }, []);
 
   // A phone keyboard shrinks only the visual viewport: keep the panel (and its input bar) inside it.
   useEffect(() => {
