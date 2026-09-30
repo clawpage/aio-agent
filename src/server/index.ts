@@ -184,6 +184,9 @@ export async function startSandboxRuntime(ctx: AppContext): Promise<void> {
     } catch (err) {
       log.warn("sandbox browser identity not aligned", { error: err instanceof Error ? err.message : String(err) });
     }
+    // A tab server from an older version stays attached to every page (an older one
+    // left automation traces sites detect); replace it now rather than at the next task.
+    void ctx.tabs?.ensure().catch((err) => log.warn("browser tab server not refreshed", { error: String(err) }));
   } catch (err) {
     ctx.sandboxSetupError = err instanceof Error ? err.message : String(err);
     log.error("sandbox container failed to start", { error: ctx.sandboxSetupError });
