@@ -48,6 +48,8 @@ export function TaskBrowser({ task, onReveal }: { task: Task; onReveal: () => vo
   }, [task.id]);
 
   useEffect(() => {
+    // The feed says which tasks have tabs: the rest never ask the sandbox.
+    if (!task.browser?.tabs) return;
     void load();
     if (!live) return;
     const timer = window.setInterval(() => {

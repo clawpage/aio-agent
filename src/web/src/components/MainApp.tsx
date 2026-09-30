@@ -60,7 +60,8 @@ export function MainApp() {
     const [theme, setTheme] = useState(() => matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark");
     const expired = useCallback(() => { setAuth(false); setMenuOpen(false); setNotice("登录已过期，请重新登录。"); }, []);
     const check = useCallback(async () => { try {
-        const session = await api.session();
+        // A stuck request falls back to the login screen, which keeps checking and restores the session.
+        const session = await api.session(AbortSignal.timeout(10000));
         if (session.authenticated && session.username) {
             const at = pathUser();
             // An address without an account (the root, /login, an old link) becomes your own.

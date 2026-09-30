@@ -223,9 +223,14 @@ export class TabServer implements TabServerLike {
     }
   }
 
+  #listing: Promise<TabRecord[]> | null = null;
+
   async list(key?: string): Promise<TabRecord[]> {
     if (key !== undefined && !KEY.test(key)) return [];
-    return (await this.#get<{ tabs: TabRecord[] }>(key ? `/tabs?key=${key}` : "/tabs"))?.tabs ?? [];
+    if (key) return (await this.#get<{ tabs: TabRecord[] }>(`/tabs?key=${key}`))?.tabs ?? [];
+    // Every feed read wants the whole record: concurrent ones share one sandbox call.
+    this.#listing ??= this.#get<{ tabs: TabRecord[] }>("/tabs").then((r) => r?.tabs ?? []).finally(() => { this.#listing = null; });
+    return this.#listing;
   }
 
   async control(key: string, tab: string, action: "take" | "release"): Promise<TabRecord | null> {

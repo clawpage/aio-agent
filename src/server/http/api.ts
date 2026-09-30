@@ -395,7 +395,8 @@ export function createApiRouter(context: AppContext): Router {
     const page = context.tasks.list(Number.isSafeInteger(before) && before > 0 ? before : Number.MAX_SAFE_INTEGER, ctxOf(req).session!.ownerId);
     // One read of the tab record shows, per task, whether it has tabs, is waiting for
     // the person in the browser, or is being driven by the person right now.
-    const tabs = context.tabs ? await context.tabs.list().catch(() => []) : [];
+    // The feed must not wait on a slow sandbox: past two seconds it shows tasks without browser state.
+    const tabs = context.tabs ? await Promise.race([context.tabs.list().catch(() => []), new Promise<[]>((r) => setTimeout(() => r([]), 2000).unref())]) : [];
     const byKey = new Map<string, typeof tabs>();
     for (const tab of tabs) byKey.set(tab.key, [...(byKey.get(tab.key) ?? []), tab]);
     const tasks = page.tasks.map((task) => {

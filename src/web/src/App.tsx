@@ -697,6 +697,7 @@ function RenameDialog({
 /** Rolling upgrades: a new bundle can still talk to an older control plane. */
 export function App() {
   const [mode, setMode] = useState<"loading" | "tasks" | "legacy">("loading");
-  useEffect(() => { void api.main().then(() => setMode("tasks")).catch(err => setMode(err instanceof ApiError && err.status === 404 ? "legacy" : "tasks")); }, []);
+  // Only a 404 means an older control plane; a slow or failed answer must not hold the page on "加载中…".
+  useEffect(() => { void api.main(undefined, AbortSignal.timeout(8000)).then(() => setMode("tasks")).catch(err => setMode(err instanceof ApiError && err.status === 404 ? "legacy" : "tasks")); }, []);
   return mode === "loading" ? <div className="boot">加载中…</div> : mode === "legacy" ? <LegacyApp /> : <MainApp />;
 }

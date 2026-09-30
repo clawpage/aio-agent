@@ -536,3 +536,25 @@ test("a finished task's browser card stays inside the screen, however long the p
     expect(await page.locator(".task-feed").evaluate(n => n.scrollWidth - n.clientWidth)).toBeLessThanOrEqual(0);
     await page.screenshot({ path: info.outputPath("report-browser.png") });
 });
+test("only tasks that used the browser ask for their tabs", async ({ page }) => {
+    const asked: string[] = [];
+    await page.route("**/api/tasks/*/browser", r => { asked.push(new URL(r.request().url()).pathname.split("/")[3]!); return r.fulfill({ json: { tabs: [] } }); });
+    await setup(page, [
+        { ...task(1, "completed"), result: "好", completedAt: 2000 },
+        { ...task(2, "completed"), result: "好", completedAt: 2001, browser: { tabs: 1, request: null, human: false } },
+        { ...task(3, "running") },
+    ]);
+    await expect.poll(() => asked).toEqual(["task-2"]);
+    await page.waitForTimeout(500);
+    expect(asked).toEqual(["task-2"]);
+});
+test("a stuck first request never holds the page on loading", async ({ page }) => {
+    await mockConsole(page, { conversations: [] });
+    let calls = 0;
+    await page.route("**/api/main*", r => (++calls === 1 ? new Promise(() => undefined) : r.fulfill({ json: { mode: "tasks", tasks: [], nextBefore: null } })));
+    await page.clock.install();
+    await page.goto("/");
+    await expect(page.getByText("加载中…")).toBeVisible();
+    await page.clock.fastForward(9000);
+    await expect(page.getByRole("heading", { name: "主会话", exact: true })).toBeVisible();
+});

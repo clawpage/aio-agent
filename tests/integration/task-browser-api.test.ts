@@ -119,3 +119,18 @@ it("opens a link from a reply in the person's own tab, and operates only that ke
   expect((await h.request("/api/browser/person/close", { method: "POST", headers: { cookie, "content-type": "application/json" }, body: JSON.stringify({ tab: "t7" }) })).status).toBe(403);
   expect((await h.request("/api/browser/person/screenshot?tab=t1")).status).toBe(401);
 });
+
+it("answers the feed without waiting on a stuck sandbox", async () => {
+  const { cookie } = await login(h);
+  const list = fakeTabs.list;
+  fakeTabs.list = () => new Promise(() => undefined);
+  try {
+    const started = Date.now();
+    const res = await h.request("/api/main", { headers: { cookie } });
+    expect(res.status).toBe(200);
+    expect(Date.now() - started).toBeLessThan(4000);
+    expect(((await res.json()) as { tasks: Array<{ browser?: unknown }> }).tasks.every((t) => !t.browser)).toBe(true);
+  } finally {
+    fakeTabs.list = list;
+  }
+});
