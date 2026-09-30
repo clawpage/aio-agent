@@ -285,6 +285,14 @@ export function startRuntimeRecovery(ctx: AppContext, intervalMs = 30_000): Runt
           // is brought back once, restoring its saved logins, and then stays.
           const seen = ctx.browser.status();
           if (!ctx.cfg.browser.releaseWhenIdle && (seen.state === "asleep" || seen.restorePending)) await ctx.browser.wake();
+          // Only between tasks and outside a wake/restore, which use those clients themselves.
+          const agent = await ctx.agent.status();
+          const now = ctx.browser.status();
+          const settled = (now.state === "awake" || now.state === "idle") && !now.restorePending;
+          if (settled && agent.activeTurns.length === 0 && agent.queuedTurns === 0) {
+            const dropped = await ctx.container.dropImageCdpClients();
+            if (dropped.length) ctx.log.info("image browser clients disconnected", { dropped });
+          }
         } catch (err) {
           ctx.log.debug?.("browser observe probe failed", { error: err instanceof Error ? err.message : String(err) });
         }

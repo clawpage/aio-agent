@@ -147,3 +147,30 @@ describe("resident browser", () => {
     }
   });
 });
+
+describe("image browser clients", () => {
+  it("are disconnected only between tasks and outside a wake or restore", async () => {
+    let drops = 0;
+    let activeTurns: unknown[] = [];
+    let queuedTurns = 0;
+    let browserState = "awake";
+    const ctx = makeCtx({ ready: true, running: true, codexReady: true }, { ensureRunning: 0, ensureSession: 0 }) as unknown as Record<string, any>;
+    ctx.cfg = { sandbox: { autostart: true }, browser: { enabled: true, releaseWhenIdle: false } };
+    ctx.container.dropImageCdpClients = async () => (drops++, ["python-server"]);
+    ctx.agent.status = async () => ({ activeTurns, queuedTurns });
+    ctx.browser = { observe: async () => undefined, wake: async () => undefined, status: () => ({ state: browserState, restorePending: false }) };
+    const recovery = startRuntimeRecovery(ctx as unknown as AppContext, 60_000);
+    await recovery.tick();
+    expect(drops).toBe(1);
+    activeTurns = [{ conversationId: "c" }];
+    await recovery.tick();
+    activeTurns = [];
+    queuedTurns = 1;
+    await recovery.tick();
+    queuedTurns = 0;
+    browserState = "restoring";
+    await recovery.tick();
+    expect(drops).toBe(1);
+    recovery.stop();
+  });
+});

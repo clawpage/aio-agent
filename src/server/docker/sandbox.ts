@@ -713,6 +713,31 @@ finally:
    * us). `stdin` is only ever control-plane content, never user input.
    */
   /**
+   * Disconnect the image's own browser clients from Chromium. python-server's
+   * browser API and mcp-server-browser attach with unpatched Playwright/Puppeteer
+   * the first time they are used (the browser wake path does so) and never let
+   * go; while attached, sites detect every page of the browser as automated.
+   * Both reconnect on their next use. python-server also serves the terminal (a
+   * long-lived websocket that its session list does not show), so it is
+   * restarted only with no connection to it and no shell command running.
+   * Returns what restarted.
+   */
+  async dropImageCdpClients(): Promise<string[]> {
+    const script = `set -u
+tabs=$(pgrep -fc "^node $1/tab-server.cjs" || true)
+driver=$(ps -eo args | grep -c "[p]laywright/driver/node .*run-driver" || true)
+conns=$(ss -tnH state established "( dport = :9222 )" | wc -l)
+if [ $((conns - tabs - driver)) -gt 0 ]; then supervisorctl restart mcp-server-browser >/dev/null 2>&1 && echo mcp-server-browser; fi
+if [ "$driver" -gt 0 ]; then
+  busy=$(curl -s -m 5 http://127.0.0.1:8091/v1/shell/sessions | python3 -c 'import json,sys; s=json.load(sys.stdin)["data"]["sessions"].values(); print(sum(1 for v in s if v.get("status") != "completed" or v.get("current_command")))' 2>/dev/null || echo unknown)
+  clients=$(ss -tnH state established "( sport = :8091 )" | wc -l)
+  if [ "$busy" = 0 ] && [ "$clients" = 0 ]; then supervisorctl restart python-server >/dev/null 2>&1 && echo python-server; fi
+fi`;
+    const res = await this.execInSandbox(["sh", "-c", script, "sh", this.#cfg.browser.toolDir], { timeoutMs: 60_000, user: "root" });
+    return res.stdout.split("\n").map((line) => line.trim()).filter(Boolean);
+  }
+
+  /**
    * Make the sandbox Chromium present itself consistently, so sites do not take it
    * for a bot: the image spoofs a Mac user agent on a Linux browser (the page reads
    * `Linux x86_64` and the client hints disagree with the UA), pins a Singapore time
