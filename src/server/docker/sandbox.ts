@@ -304,7 +304,9 @@ done
       this.name,
       "--restart",
       "unless-stopped",
-      ...(s.networkName ? ["--network", s.networkName,"--cap-drop","NET_RAW","--memory","2g","--cpus","2","--pids-limit","1024"] : []),
+      // Every sandbox, the owner's included, is capped at 2 GB; members are also limited in CPU and processes.
+      "--memory", "2g",
+      ...(s.networkName ? ["--network", s.networkName,"--cap-drop","NET_RAW","--cpus","2","--pids-limit","1024"] : []),
       "--label",
       "personal-agent.managed=1",
       "-p",

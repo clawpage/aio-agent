@@ -22,6 +22,11 @@ it("hands the fresh browser volume to the sandbox user before the first boot", a
     expect(chown).toBeGreaterThanOrEqual(0);
     expect(chown).toBeLessThan(boot);
     expect(calls[chown]).toEqual(expect.arrayContaining(["--network", "none", `${cfg.sandbox.browserVolume}:/v`, "1000:1000", "/v"]));
+    // The owner's sandbox (no isolated network) is capped at 2 GB like a member's.
+    expect(cfg.sandbox.networkName).toBeFalsy();
+    const run = calls[boot]!;
+    expect(run[run.indexOf("--memory") + 1]).toBe("2g");
+    expect(run).not.toContain("--cpus");
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
