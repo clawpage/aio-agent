@@ -22,5 +22,28 @@ test('login accepts the supplied account name',async({page})=>{
  await page.route('**/api/main*',r=>r.fulfill({json:{mode:'tasks',tasks:[],nextBefore:null}}));
  await page.route('**/api/auth/login',async r=>{body=r.request().postDataJSON();authenticated=true;await r.fulfill({json:{ok:true,username:'yzmy',role:'member'}});});
  await page.goto('/login');await page.getByLabel('账号',{exact:true}).fill('yzmy');await page.getByLabel('密码',{exact:true}).fill('test-password');await page.getByRole('button',{name:'登录',exact:true}).click();
- await expect(page.getByRole('heading',{name:'主会话',exact:true})).toBeVisible();expect(body).toEqual({username:'yzmy',password:'test-password'});expect(new URL(page.url()).pathname).toBe('/');
+ await expect(page.getByRole('heading',{name:'主会话',exact:true})).toBeVisible();expect(body).toEqual({username:'yzmy',password:'test-password'});expect(new URL(page.url()).pathname).toBe('/u/yzmy');
+});
+test('each account has its own address; another account\'s address says whose it is',async({page},info)=>{
+ let authenticated=true;
+ await mockConsole(page,{conversations:[]});
+ await page.route('**/api/auth/session',r=>r.fulfill({json:{authenticated,username:authenticated?'owner':null,role:authenticated?'owner':null}}));
+ await page.route('**/api/main*',r=>r.fulfill({json:{mode:'tasks',tasks:[],nextBefore:null}}));
+ await page.route('**/api/auth/logout',async r=>{authenticated=false;await r.fulfill({json:{ok:true}});});
+ const main=page.getByRole('heading',{name:'主会话',exact:true});
+ // The root becomes the signed-in account's own address, keeping the query.
+ await page.goto('/?x=1');await expect(main).toBeVisible();
+ expect(new URL(page.url()).pathname+new URL(page.url()).search).toBe('/u/owner?x=1');
+ // Another account's address shows none of the signed-in account's data, and says so.
+ await page.goto('/u/yzmy');
+ const notice=page.getByRole('alert');
+ await expect(notice).toContainText('这是 yzmy 的页面');await expect(notice).toContainText('当前登录的是 owner');
+ await expect(main).toHaveCount(0);
+ expect(await page.evaluate(()=>document.documentElement.scrollWidth-innerWidth)).toBeLessThanOrEqual(1);
+ await page.screenshot({path:info.outputPath('foreign.png')});
+ await notice.getByRole('button',{name:'回到我的页面'}).click();
+ await expect(main).toBeVisible();expect(new URL(page.url()).pathname).toBe('/u/owner');
+ // Switching: sign out there, and the login form is ready for the account the address names.
+ await page.goto('/u/yzmy');await page.getByRole('button',{name:'退出并登录 yzmy'}).click();
+ await expect(page.getByLabel('账号',{exact:true})).toHaveValue('yzmy');
 });

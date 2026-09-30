@@ -14,7 +14,7 @@ test('valid HttpOnly cookie enters the main inbox even on /login without showing
  await page.route('**/api/auth/session',async r=>{cookieSeen=(await page.context().cookies(r.request().url())).some(c=>c.name==='pa_session'&&c.value==='valid-fixture');return r.fulfill({json:{authenticated:cookieSeen,username:'owner'},headers:{'cache-control':'no-store'}});});
  page.on('request',r=>{if(r.url().endsWith('/api/auth/login'))logins++;});
  await page.addInitScript(()=>{(window as any).loginShown=false;new MutationObserver(()=>{if(document.querySelector('input[type="password"]'))(window as any).loginShown=true;}).observe(document,{childList:true,subtree:true});});
- await page.goto('/login');await expect(inbox(page)).toBeVisible();expect(new URL(page.url()).pathname).toBe('/');expect(cookieSeen).toBe(true);expect(logins).toBe(0);
+ await page.goto('/login');await expect(inbox(page)).toBeVisible();expect(new URL(page.url()).pathname).toBe('/u/owner');expect(cookieSeen).toBe(true);expect(logins).toBe(0);
  expect(await page.evaluate(()=>(window as any).loginShown)).toBe(false);expect(await page.evaluate(()=>document.cookie)).not.toContain('valid-fixture');
 });
 

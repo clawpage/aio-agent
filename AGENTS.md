@@ -5,7 +5,7 @@
 ## 项目定位
 
 **AIO Agent**：owner 管理、self-hosted 的智能体控制台 + 每账号独立 AIO 沙箱 + 主 Codex 智能体，
-中文 UI。owner 可在配置页把执行器切换为 Claude Code（可选，需凭据；派单、执行、标题一并切换）。用户只操作一个主会话，独立请求委派到子任务，相关补充追加到原任务；不展示旧会话历史入口。支持 owner/member 账号分级；任务与对话按账号归属隔离，普通用户固定 DeepSeek high，配置与模型信息仅 owner 可见。每个 member 使用独立容器、文件卷、Codex 数据卷、浏览器卷、运行数据库和工作区路径（`/u/<账号散列>`，不新增域名）；没有注册入口，不对外提供公共 demo；未登录一律 401。
+中文 UI。owner 可在配置页把执行器切换为 Claude Code（可选，需凭据；派单、执行、标题一并切换）。用户只操作一个主会话，独立请求委派到子任务，相关补充追加到原任务；不展示旧会话历史入口。支持 owner/member 账号分级；任务与对话按账号归属隔离，普通用户固定 DeepSeek high，配置与模型信息仅 owner 可见。每个 member 使用独立容器、文件卷、Codex 数据卷、浏览器卷、运行数据库和工作区路径（`/u/<用户名>`，兼容旧的 `/u/<账号散列>`，不新增域名；主控制台地址同样是 `/u/<用户名>`）；没有注册入口，不对外提供公共 demo；未登录一律 401。
 公网入口（`PA_PRIMARY_HOST` / `PA_WORKSPACE_HOST`）由使用者自行填写，见 `.env.example` 的
 `agent.example.com` / `workspace.example.com` 占位。
 

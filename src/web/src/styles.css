@@ -104,6 +104,10 @@ pre {
   height: 100dvh;
   color: var(--text-dim);
 }
+.foreign-account { align-content: center; gap: 12px; padding: 16px; text-align: center; }
+.foreign-account h2 { margin: 0; color: var(--text); overflow-wrap: anywhere; }
+.foreign-account p { margin: 0; overflow-wrap: anywhere; }
+.foreign-account-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
 
 .sidebar {
   display: flex;

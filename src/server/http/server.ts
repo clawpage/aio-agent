@@ -1,5 +1,5 @@
 import fs from "node:fs";
-import {MEMBER_WORKSPACE_PREFIX,userNamespace,workspaceConfig} from "../auth/workspaceHost.js";
+import {WORKSPACE_PREFIX,userNamespace,workspaceConfig} from "../auth/workspaceHost.js";
 import path from "node:path";
 import express, { type NextFunction, type Request, type Response } from "express";
 import type { AppContext } from "../context.js";
@@ -17,27 +17,28 @@ function attach(req: Request, ctx: RequestContext | null): void {
 }
 
 /**
- * Which account a companion-origin request belongs to. A member workspace URL
- * carries `/u/<namespace>`: the prefix is stripped before any handler runs, and
- * a workspace session of any other account is dropped (fail closed). Requests
- * without the prefix (absolute sub-resources such as `/jupyter/static/...`)
- * belong to the account of the workspace session itself, so every request still
- * reaches only that session's own sandbox.
+ * Which account a companion-origin request belongs to. A workspace URL carries
+ * `/u/<username>` (or, from older links, a member's `/u/<namespace>`): the prefix
+ * is stripped before any handler runs, and a workspace session of any other
+ * account is dropped (fail closed). Requests without the prefix, or with a
+ * `/u/...` that names no account (a sandbox app's own path), belong to the
+ * account of the workspace session itself, so every request still reaches only
+ * that session's own sandbox.
  */
 function resolveAppRequest(ctx:AppContext,req:import("node:http").IncomingMessage):RequestContext|null {
   const rec=resolveRequest({cfg:ctx.cfg,sessions:ctx.sessions,req});
   if(rec?.kind!=='workspace'||!ctx.runtimeForUser)return rec;
-  const match=MEMBER_WORKSPACE_PREFIX.exec(req.url??'');
-  if(!match){
+  const match=WORKSPACE_PREFIX.exec(req.url??'');
+  const users=match?ctx.db.prepare("SELECT id,username,role FROM owners").all() as {id:string;username:string;role:string}[]:[];
+  const account=match?users.find(u=>u.username===match[1])??users.find(u=>u.role==='member'&&userNamespace(u.id)===match[1]):undefined;
+  if(!match||!account){
     rec.workspaceUserId=rec.session?.ownerId??'owner_1';
     return rec;
   }
-  const member=(ctx.db.prepare("SELECT id FROM owners WHERE role='member'").all() as {id:string}[]).find(u=>userNamespace(u.id)===match[1]);
-  if(!member)return null;
   const rest=(req.url??'').slice(match[0].length);
   req.url=rest.startsWith('/')?rest:`/${rest}`;
-  rec.workspaceUserId=member.id;
-  if(rec.session?.ownerId!==member.id)rec.session=null;
+  rec.workspaceUserId=account.id;
+  if(rec.session?.ownerId!==account.id)rec.session=null;
   return rec;
 }
 

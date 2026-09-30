@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { api, ApiError } from "../api";
 
-export function Login({ onSuccess, notice }: { onSuccess: () => void | Promise<void>; notice?: string | null }) {
-  const [username, setUsername] = useState("owner");
+export function Login({ onSuccess, notice, username: named }: { onSuccess: () => void | Promise<void>; notice?: string | null; username?: string }) {
+  const [username, setUsername] = useState(named ?? "owner");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);

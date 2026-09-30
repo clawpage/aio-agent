@@ -2,12 +2,17 @@ import {createHash} from 'node:crypto';
 import type {Config} from '../config.js';
 export const userNamespace=(id:string)=>createHash('sha256').update(id).digest('hex').slice(0,20);
 /**
- * Member workspaces share the one companion origin; a path prefix names the
- * account (`/u/<namespace>`), so no per-account DNS record is needed.
+ * Every account's workspace shares the one companion origin; a path prefix names
+ * the account by username (`/u/<username>`), like the console's own addresses, so
+ * no per-account DNS record is needed. Container and volume names keep using
+ * `userNamespace`: renaming them would orphan existing data.
  */
-export const memberWorkspacePrefix=(id:string)=>`/u/${userNamespace(id)}`;
-/** `/u/<namespace>` at the start of a request URL, followed by `/`, `?` or the end. */
-export const MEMBER_WORKSPACE_PREFIX=/^\/u\/([0-9a-f]{20})(?=[/?]|$)/;
+export const workspacePrefix=(username:string)=>`/u/${username}`;
+/**
+ * `/u/<username>` (or, for links made before, `/u/<namespace>`) at the start of a
+ * request URL, followed by `/`, `?` or the end.
+ */
+export const WORKSPACE_PREFIX=/^\/u\/([A-Za-z0-9_-]{2,40})(?=[/?]|$)/;
 export function workspaceConfig(cfg:Config):Config {
  return {...cfg,memberRuntime:true};
 }

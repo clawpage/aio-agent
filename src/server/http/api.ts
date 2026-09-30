@@ -1,4 +1,4 @@
-import {memberWorkspacePrefix} from "../auth/workspaceHost.js";
+import {workspacePrefix} from "../auth/workspaceHost.js";
 import { isMember, publicPayload } from "../auth/policy.js";
 import {readSoul,writeSoul,SoulError,DEFAULT_SOUL,SOUL_MAX_BYTES} from '../soul.js';
 import { HTML_PREVIEW_CSP, htmlPreviewDocument } from "../documents/html.js";
@@ -1536,7 +1536,7 @@ export function createApiRouter(context: AppContext): Router {
     asyncHandler(async (req, res, ctx) => {
       const issued = tickets.issue(ctx.session!.id);
       // A member's workspace lives under its own path prefix on the shared companion origin.
-      const prefix = context.runtimeForUser && isMember(db, ctx.session!.ownerId) ? memberWorkspacePrefix(ctx.session!.ownerId) : "";
+      const prefix = context.runtimeForUser ? workspacePrefix(getUser(db, ctx.session!.ownerId)!.username) : "";
       const next = prefix + safeRedirectPath(typeof req.body?.next === "string" ? req.body.next : "/");
       const origin = workspaceOrigin(ctx, cfg);
       res.json({

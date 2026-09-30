@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { api, ApiError } from "../api";
 import type { Conversation, StatusResponse, Task, TaskTab } from "../types";
 import { personConsoleTarget, TaskConsole } from "./TaskConsole";
+import { homePath, pathUser } from "../userPath";
 import { Chat } from "./Chat";
 import { Login } from "./Login";
 import { Settings } from "./Settings";
@@ -38,6 +39,9 @@ export function MainApp() {
         return () => document.removeEventListener("keydown", key);
     }, [mobile, menuOpen, closeMenu]);
     const [role, setRole] = useState<"owner" | "member">("member");
+    const [username, setUsername] = useState<string | null>(null);
+    /** The address names another account than the one signed in. */
+    const [foreign, setForeign] = useState<string | null>(null);
     const [auth, setAuth] = useState<boolean | null>(null);
     const [status, setStatus] = useState<StatusResponse | null>(null);
     const [view, setView] = useState<"main" | "tasks" | "settings" | "detail">("main");
@@ -57,8 +61,12 @@ export function MainApp() {
     const expired = useCallback(() => { setAuth(false); setMenuOpen(false); setNotice("登录已过期，请重新登录。"); }, []);
     const check = useCallback(async () => { try {
         const session = await api.session();
-        if (session.authenticated) {
-            if (location.pathname === "/login") history.replaceState(null, "", "/");
+        if (session.authenticated && session.username) {
+            const at = pathUser();
+            // An address without an account (the root, /login, an old link) becomes your own.
+            if (!at) history.replaceState(null, "", homePath(session.username) + location.search);
+            setForeign(at && at !== session.username ? at : null);
+            setUsername(session.username);
             setNotice(null); setView("main"); setWorkspace(false);
         }
         setRole(session.role ?? (session.username === "owner" ? "owner" : "member"));
@@ -135,6 +143,7 @@ export function MainApp() {
     const logout = async () => { try {
         await api.logout();
         setAuth(false);
+        setForeign(null);
         setMenuOpen(false);
         setDetail(null);
         setWorkspace(false);
@@ -146,7 +155,16 @@ export function MainApp() {
     if (auth === null)
         return <div className="boot">加载中…</div>;
     if (!auth)
-        return <Login notice={notice} onSuccess={check}/>;
+        return <Login notice={notice} onSuccess={check} username={pathUser() ?? undefined}/>;
+    if (foreign && username)
+        return <div className="boot foreign-account" role="alert">
+          <h2>这是 {foreign} 的页面</h2>
+          <p>当前登录的是 {username}。同一浏览器一次只能登录一个账号。</p>
+          <div className="foreign-account-actions">
+            <button className="primary" onClick={() => void logout()}>退出并登录 {foreign}</button>
+            <button className="ghost" onClick={() => { history.replaceState(null, "", homePath(username)); setForeign(null); }}>回到我的页面</button>
+          </div>
+        </div>;
     return <div className="app main-inbox-app">
     <button className="mobile-menu-button ghost" ref={menuButton} aria-label="打开导航" aria-expanded={menuOpen} aria-controls="main-navigation" onClick={() => setMenuOpen(true)}><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
     {mobile && menuOpen && <div className="mobile-menu-backdrop" onClick={closeMenu} aria-hidden="true"/>}
