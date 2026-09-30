@@ -45,5 +45,5 @@ test('each account has its own address; another account\'s address says whose it
  await expect(main).toBeVisible();expect(new URL(page.url()).pathname).toBe('/u/owner');
  // Switching: sign out there, and the login form is ready for the account the address names.
  await page.goto('/u/yzmy');await page.getByRole('button',{name:'退出并登录 yzmy'}).click();
- await expect(page.getByLabel('账号',{exact:true})).toHaveValue('yzmy');
+ await expect(page.getByLabel('账号',{exact:true})).toHaveValue('yzmy');expect(new URL(page.url()).pathname).toBe('/u/yzmy');
 });

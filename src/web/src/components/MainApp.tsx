@@ -142,8 +142,10 @@ export function MainApp() {
         notify(err instanceof Error ? err.message : String(err));
     } }, [notify]);
     const settings = () => { detailRequest.current++;closeMenu(); setView("settings"); setWorkspace(false); };
-    const logout = async () => { try {
+    // Signing out leaves the account's address; switching to another account keeps its address to name it on the form.
+    const logout = async (keepAddress = false) => { try {
         await api.logout();
+        if (!keepAddress) history.replaceState(null, "", "/login");
         setAuth(false);
         setForeign(null);
         setMenuOpen(false);
@@ -163,7 +165,7 @@ export function MainApp() {
           <h2>这是 {foreign} 的页面</h2>
           <p>当前登录的是 {username}。同一浏览器一次只能登录一个账号。</p>
           <div className="foreign-account-actions">
-            <button className="primary" onClick={() => void logout()}>退出并登录 {foreign}</button>
+            <button className="primary" onClick={() => void logout(true)}>退出并登录 {foreign}</button>
             <button className="ghost" onClick={() => { history.replaceState(null, "", homePath(username)); setForeign(null); }}>回到我的页面</button>
           </div>
         </div>;
