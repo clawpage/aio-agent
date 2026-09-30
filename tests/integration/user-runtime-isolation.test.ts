@@ -76,6 +76,10 @@ it('derives disjoint persistent data, volumes and networks, coalesces concurrent
   // Only the fixed Chromium flag reaches a member container, never the owner's extra env.
   expect(memberConfig({...h.ctx.cfg,sandbox:{...h.ctx.cfg.sandbox,extraEnv:['OWNER_ONLY=1']}},u.id,19001).sandbox.extraEnv).toEqual(['BROWSER_NO_SANDBOX=--no-sandbox']);
   expect(a.memberModel).toBe('deepseek-v4.1-flash');
+  // Member browsers are released when idle (the owner's stays resident) unless switched off.
+  expect(h.ctx.cfg.browser.releaseWhenIdle).toBe(false);
+  expect(a.browser.releaseWhenIdle).toBe(true);
+  expect(memberConfig({...h.ctx.cfg,browser:{...h.ctx.cfg.browser,memberReleaseWhenIdle:false}},u.id,19001).browser.releaseWhenIdle).toBe(false);
   // Only the administrator's assignment picks another model, and only from the member list.
   expect(()=>memberConfig(h.ctx.cfg,u.id,19001,'claude-opus-5-5')).toThrow('Unsupported member model');
   h.ctx.db.prepare('INSERT INTO meta(key,value) VALUES(?,?)').run(`member_model:${u.id}`,'claude-sonnet-5-5');

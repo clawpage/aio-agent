@@ -195,8 +195,8 @@ member 首次访问或服务启动时创建独立 `aio-user-<散列>` 容器及�
 
 ## 6.1 浏览器内存生命周期（空闲释放 / 按需恢复）
 
-默认不释放（`PA_BROWSER_RELEASE_IDLE=0`）：每账号一个常驻浏览器，登录状态留在同一进程；后台巡检发现浏览器处于已释放状态会自动恢复一次。
-以下释放/恢复流程只在设为 `1` 时生效。
+owner 默认不释放（`PA_BROWSER_RELEASE_IDLE=0`）：一个常驻浏览器，登录状态留在同一进程；后台巡检发现它处于已释放状态会自动恢复一次。
+成员默认空闲释放（`PA_MEMBER_BROWSER_RELEASE_IDLE=1`，空闲时长同 `PA_BROWSER_IDLE_SECONDS`）。以下释放/恢复流程只对开启释放的账号生效。
 
 只有**沙箱 Chromium** 会被释放，容器与 Codex/终端/code-server/Jupyter 不受影响。控制面从不
 自己发信号：它把受管 helper 写进持久卷再按子命令调用，helper 负责核对归属后才可安全停/启。

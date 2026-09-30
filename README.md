@@ -194,11 +194,11 @@ curl -s http://127.0.0.1:4891/healthz
 
 ## 浏览器内存生命周期（空闲释放与按需恢复）
 
-> **默认常驻（不释放）**：每个账号只有一个浏览器，默认一直运行，登录状态（包括只在本次运行有效的会话 cookie）
+> **owner 常驻，成员空闲释放**：每个账号只有一个浏览器。owner 的默认一直运行，登录状态（包括只在本次运行有效的会话 cookie）
 > 始终留在同一个 Chromium 进程里，不再依赖快照导出/导入来接续。以前每空闲 5 分钟就停掉 Chromium 再从快照恢复，
 > 恢复失败时网站会变成未登录。浏览器若因升级或崩溃处于已释放状态，后台巡检会自动恢复一次，之后保持常驻。
 > 状态条显示“常驻，登录状态一直保留”，不再有“保留浏览器”按钮。需要恢复空闲释放以节省内存时设
-> `PA_BROWSER_RELEASE_IDLE=1`，下面的释放规则才生效。智能体被要求只用这一个浏览器，不得另起浏览器或清除站点数据。
+> `PA_BROWSER_RELEASE_IDLE=1`，下面的释放规则才生效。成员浏览器默认按下面的规则空闲释放（`PA_MEMBER_BROWSER_RELEASE_IDLE=1`，设 `0` 回到常驻）：成员不常用浏览器，一个常驻的 Chromium 约占 500 MB；实测（Chromium 154）快照加释放约 20 秒、释放后容器少约 370 MB，下次使用时冷启动约 17 秒，cookie（含会话 cookie）全部恢复。智能体被要求只用这一个浏览器，不得另起浏览器或清除站点数据。
 >
 > **浏览器身份一致（少被网站拦截）**：镜像默认让 Linux 上的 Chromium 冒充 Mac 的 UA（页面读到的平台与 UA、客户端提示互相矛盾）、时区写死新加坡、关闭 GPU（没有 WebGL），这些都是反爬系统（如 eBay 的 Akamai）判定机器人的强信号。控制面在每次沙箱就绪时对齐：保留 Chromium 自己的 Linux UA，时区用 `PA_BROWSER_TIMEZONE`（默认 `America/Los_Angeles`，应与出口网络所在地一致），通过 SwiftShader 启用 WebGL；有改动时优雅重启一次浏览器。
 
@@ -385,7 +385,8 @@ npm run build && npx playwright test --config playwright.local.config.ts
 | `PA_SANDBOX_PORT` | `18081` | 沙箱发布到 loopback 的端口 |
 | `PA_OWNER_PASSWORD` | 空 | 设置则用它，否则生成到 `var/owner-secret.txt` |
 | `PA_BROWSER_LIFECYCLE` | `1` | 浏览器空闲释放总开关；关闭则浏览器始终常驻 |
-| `PA_BROWSER_RELEASE_IDLE` | `0` | 是否在无占用时释放浏览器；默认 `0` 常驻，登录状态一直保留 |
+| `PA_BROWSER_RELEASE_IDLE` | `0` | 是否在无占用时释放 owner 的浏览器；默认 `0` 常驻，登录状态一直保留 |
+| `PA_MEMBER_BROWSER_RELEASE_IDLE` | `1` | 是否在无占用时释放成员的浏览器；默认 `1`，下次使用时从快照冷启动 |
 | `PA_BROWSER_IDLE_SECONDS` | `300` | 开启空闲释放时，无占用后释放浏览器的空闲时长（下限 30 秒） |
 | `PA_BROWSER_VIEWER_TTL_SECONDS` | `60` | 观看心跳租约有效期（下限 10 秒）；到期即释放 |
 | `PA_BROWSER_DIRTY_INPUT_POLICY` | `block` | 页面有未提交输入时 `block`（保守拒绝释放）/`warn` |

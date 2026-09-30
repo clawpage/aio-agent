@@ -153,6 +153,12 @@ export function loadConfig(): {
      * account keeps one resident browser so its logins stay valid.
      */
     releaseWhenIdle: boolean;
+    /**
+     * The same for member runtimes, on by default: their browsers are used now and
+     * then, and a released one comes back from its snapshot (logins included) on
+     * the next use.
+     */
+    memberReleaseWhenIdle: boolean;
     /** The browser's time zone; it should match where its network egress is. */
     timezone: string;
     /**
@@ -355,6 +361,7 @@ export function loadConfig(): {
       // Releasing an idle browser meant stopping Chromium and carrying logins over
       // in a snapshot; failed restores dropped them. Keep it resident unless asked.
       releaseWhenIdle: envStr("PA_BROWSER_RELEASE_IDLE", "0") === "1",
+      memberReleaseWhenIdle: envStr("PA_MEMBER_BROWSER_RELEASE_IDLE", "1") === "1",
       timezone: envStr("PA_BROWSER_TIMEZONE", "America/Los_Angeles"),
       // Chromium 154 for Ubuntu 22.04 arm64 from the xtradeb PPA (a regular build: Cloudflare stalls
       // Chrome for Testing, and Google ships no arm64 Chrome), plus the two Ubuntu libraries it needs
