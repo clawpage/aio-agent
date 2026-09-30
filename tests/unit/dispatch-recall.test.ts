@@ -141,7 +141,7 @@ it("brings the rest of today's tasks, and recalls by today's topics for a terse 
   submit("改一下");
   await tick();
   const previous = view(codex.prompts[0]!).data.previous;
-  expect(previous.filter((t) => t.source === "today").map((t) => t.id)).toEqual(todays.slice(0, 8));
+  expect(previous.filter((t) => t.source === "today").map((t) => t.id)).toEqual(todays.slice(0, 8).reverse());
   // "改一下" names nothing; today's latest topic (vaccines) brings the older vaccine schedule.
   expect(previous.find((t) => t.id === old[7])?.source).toBe("context");
 });

@@ -4,7 +4,7 @@ import { AgentManager } from "../../src/server/codex/manager.js";
 import type { HostTokenSource } from "../../src/server/codex/hostTokens.js";
 import { TaskService } from "../../src/server/tasks/service.js";
 import { JsonRpcResponseError } from "../../src/server/codex/jsonrpc.js";
-import { parsePlan, resourcesConflict } from "../../src/server/tasks/planning.js";
+import { parsePlan, planningPrompt, resourcesConflict } from "../../src/server/tasks/planning.js";
 import { Logger } from "../../src/server/logger.js";
 import { writeAgentSettings } from "../../src/server/settings.js";
 import { FakeCodex, testConfig } from "../helpers/harness.js";
@@ -523,6 +523,21 @@ it("never steers into unknown or finished tasks: a finished target stays as back
     const report={repairs:[] as string[]};
     expect(parsePlan(JSON.stringify(plan),[{id:"a",title:"a",input_text:"a",status:"completed",result:"done"}],null,undefined,report)).toMatchObject({appendTo:null,related:["a"]});
     expect(report.repairs).toEqual(["appendTo 指向已结束的任务，改为关联背景"]);
+});
+
+it("lists the dispatcher's tasks newest first, so a bare follow-up lands on the adjacent conversation",()=>{
+    // Badcase: "有实体的 sim 卡槽吗？" right after a Pixel search was tied to an older iKKO SIM task,
+    // because a same-day date could not tell the dispatcher which task was adjacent.
+    const at=(h:number,m:number)=>new Date(2026,8,30,h,m).getTime();
+    const previous=[
+        {id:"ikko",title:"核实 iKKO 的 eSIM 方案",input_text:"ikko",status:"completed",result:"ok",created_at:at(15,2),source:"today"},
+        {id:"pixel",title:"在 eBay 上找 Pixel 手机",input_text:"pixel",status:"completed",result:"ok",created_at:at(15,58),source:"recent"},
+        {id:"root",title:"选好 root 的手机",input_text:"root",status:"completed",result:"ok",created_at:at(15,56),source:"recent"},
+    ];
+    const prompt=planningPrompt("有实体的 sim 卡槽吗？",previous,null);
+    const listed=JSON.parse(prompt.split("\n").at(-1)!).previous as {id:string;order:number;time:string}[];
+    expect(listed.map(t=>[t.id,t.order,t.time])).toEqual([["pixel",1,"15:58"],["root",2,"15:56"],["ikko",3,"15:02"]]);
+    expect(prompt).toContain("相邻优先");
 });
 
 it("repairs what does not change what may run, and says why an answer is unusable",()=>{
