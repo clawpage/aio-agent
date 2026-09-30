@@ -16,6 +16,9 @@ export const CLAUDE_THREAD_PREFIX = "claude-";
 /** Credential names the CLI understands, in lookup order. */
 const CREDENTIAL_KEYS = ["CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"] as const;
 
+/** A member sandbox authenticates to the member gateway with its own token under this name. */
+export const MEMBER_GATEWAY_TOKEN_KEY = "ANTHROPIC_AUTH_TOKEN";
+
 const CLAUDE_EFFORTS = ["low", "medium", "high", "xhigh", "max"];
 
 /**
@@ -51,10 +54,13 @@ export interface ClaudeCodeStatus {
 /**
  * The optional Claude Code harness decision, made once per process.
  *
- * Owner-only: a member runtime never gets it (members are fixed to DeepSeek on
- * Codex). The credential comes from the environment or a permission-checked
- * private file, and only ever reaches the sandbox through a `docker exec`
+ * The owner's credential comes from the environment or a permission-checked
+ * private file, and only ever reaches the owner sandbox through a `docker exec`
  * child environment, never argv, logs, the database or the browser.
+ *
+ * A member runtime gets the harness only when its assigned model is a Claude
+ * model; its sandbox then holds just that member's gateway token and address.
+ * The member gateway adds the owner's credential on the host.
  */
 export class ClaudeCodeHarness {
   #cfg: Config;
@@ -70,7 +76,12 @@ export class ClaudeCodeHarness {
     if (this.#status) return this.#status;
     const off = (reason: string): ClaudeCodeStatus => ({ enabled: false, reason, envKey: null, secret: null });
     const setting = parseEnabledSetting(this.#cfg.claudeCode.enabled);
-    if (this.#cfg.memberRuntime) return (this.#status = off("成员账号不提供 Claude Code 执行器"));
+    if (this.#cfg.memberRuntime) {
+      // Never the process environment or the owner's file: those hold the owner's credential.
+      if (!this.#cfg.claudeCode.gatewayUrl) return (this.#status = off("成员账号未分配 Claude 模型"));
+      const file = readSecretFile(this.#cfg.claudeCode.secretsFile, MEMBER_GATEWAY_TOKEN_KEY);
+      return (this.#status = file.ok ? this.#enable(MEMBER_GATEWAY_TOKEN_KEY, file.value, "file") : off(file.reason));
+    }
     if (setting === "off") return (this.#status = off("PA_CLAUDE_CODE_ENABLED 已显式关闭"));
 
     const reasons: string[] = [];
@@ -99,7 +110,7 @@ export class ClaudeCodeHarness {
   /** Catalog entries added to the model picker; empty while the harness is off. */
   modelEntries(): CodexModel[] {
     if (!this.enabled) return [];
-    return CLAUDE_MODELS.map((m) => ({
+    return this.#models().map((m) => ({
       id: m.id,
       model: m.id,
       displayName: m.displayName,
@@ -115,13 +126,22 @@ export class ClaudeCodeHarness {
 
   /** Whether a turn using `model` must run on Claude Code. */
   owns(model: string): boolean {
-    return this.enabled && CLAUDE_MODELS.some((m) => m.id === model);
+    return this.enabled && this.#models().some((m) => m.id === model);
+  }
+
+  /** A member runs only the model assigned to it. */
+  #models() {
+    return this.#cfg.memberRuntime ? CLAUDE_MODELS.filter((m) => m.id === this.#cfg.memberModel) : CLAUDE_MODELS;
   }
 
   /** Child environment for `docker exec`; the value never appears in argv. */
   credentialEnv(): Record<string, string> {
     const status = this.status();
-    return status.enabled && status.envKey && status.secret ? { [status.envKey]: status.secret } : {};
+    if (!status.enabled || !status.envKey || !status.secret) return {};
+    const gateway = this.#cfg.claudeCode.gatewayUrl;
+    return gateway
+      ? { [status.envKey]: status.secret, ANTHROPIC_BASE_URL: gateway, CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1" }
+      : { [status.envKey]: status.secret };
   }
 }
 

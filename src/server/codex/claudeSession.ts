@@ -97,6 +97,11 @@ export class ClaudeCodeSession {
     this.#onNotification = handler;
   }
 
+  /** Whether `model` runs on this harness. */
+  owns(model: string): boolean {
+    return this.#harness.owns(model);
+  }
+
   #emit(method: string, params: Record<string, unknown>): void {
     this.#onNotification?.(method, params);
   }

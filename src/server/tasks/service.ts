@@ -1,4 +1,4 @@
-import { isMember, MEMBER_MODEL } from "../auth/policy.js";
+import { isMember } from "../auth/policy.js";
 import {readSoul} from '../soul.js';
 import { JsonRpcResponseError } from "../codex/jsonrpc.js";
 import type { Db } from "../db.js";
@@ -273,11 +273,11 @@ export class TaskService {
             const planningInput = [inputContext, ...(files.length ? [`已有附件（执行者可以读取其中资料）：${JSON.stringify(files)}`] : [])].filter(Boolean).join("\n\n");
             const soul = readSoul(this.cfg).content;
             // The dispatcher runs on the provider the task was submitted for: a
-            // member is fixed to DeepSeek, and an owner who picked a bridge model
+            // member on its assigned model, and an owner who picked a bridge model
             // is dispatched on that model too, not on the ChatGPT account.
             const bridgeModel = this.agent.usesBridgeModel(row.model) ? row.model : null;
             const ask = (prompt: string) => isMember(this.db, this.ownerId(row))
-                ? this.codex.planTask?.(prompt, soul, MEMBER_MODEL)
+                ? this.codex.planTask?.(prompt, soul, this.agent.memberSettings().model)
                 : bridgeModel
                     ? this.codex.planTask?.(prompt, soul, bridgeModel)
                     : this.codex.planTask?.(prompt, soul);

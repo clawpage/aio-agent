@@ -84,9 +84,31 @@ describe("ClaudeCodeHarness", () => {
     expect(harness.credentialEnv()).toEqual({});
   });
 
-  it("is never offered to a member runtime or when switched off", () => {
+  it("is never offered to a member runtime without an assigned Claude model, or when switched off", () => {
     expect(new ClaudeCodeHarness({ ...enabledConfig(), memberRuntime: true }, log).enabled).toBe(false);
     expect(new ClaudeCodeHarness(enabledConfig({ PA_CLAUDE_CODE_ENABLED: "off" }), log).enabled).toBe(false);
+  });
+
+  it("gives an assigned member only its gateway token and address, never the owner's credential", () => {
+    process.env.CLAUDE_CODE_OAUTH_TOKEN = SECRET;
+    const base = enabledConfig();
+    const member = {
+      ...base, memberRuntime: true, memberModel: "claude-sonnet-5-5",
+      claudeCode: { ...base.claudeCode, secretsFile: secretsFile("ANTHROPIC_AUTH_TOKEN=member-gateway-token\n"), gatewayUrl: "http://host.docker.internal:4902/u/user_a/anthropic" },
+    };
+    const harness = new ClaudeCodeHarness(member, log);
+    expect(harness.enabled).toBe(true);
+    expect(harness.credentialEnv()).toEqual({
+      ANTHROPIC_AUTH_TOKEN: "member-gateway-token",
+      ANTHROPIC_BASE_URL: "http://host.docker.internal:4902/u/user_a/anthropic",
+      CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
+    });
+    expect(JSON.stringify(harness.credentialEnv())).not.toContain(SECRET);
+    expect(harness.modelEntries().map((m) => m.id)).toEqual(["claude-sonnet-5-5"]);
+    expect(harness.owns("claude-opus-5-5")).toBe(false);
+    // The owner's own credential file is not a member token source either.
+    const noToken = { ...member, claudeCode: { ...member.claudeCode, secretsFile: base.claudeCode.secretsFile } };
+    expect(new ClaudeCodeHarness(noToken, log).enabled).toBe(false);
   });
 });
 
@@ -406,6 +428,7 @@ describe("HarnessSession", () => {
     Object.assign(claude, {
       planTask: async () => (aux.push("plan"), "{}"),
       generateTitle: async () => (aux.push("title"), "t"),
+      owns: (model: string) => model === "claude-sonnet-5-5",
     });
     const harness = new HarnessSession(codex, claude, () => selected);
     await harness.startThread({ modelProvider: CLAUDE_CODE_PROVIDER_ID });
@@ -423,7 +446,7 @@ describe("HarnessSession", () => {
     await expect(harness.forkThread(codexThread.threadId, { modelProvider: CLAUDE_CODE_PROVIDER_ID })).rejects.toThrow();
 
     // The dispatcher and titles follow the owner's harness choice; an explicit
-    // model (the member policy) always stays on Codex.
+    // model (the member policy) runs on that model's harness.
     await harness.generateTitle("x");
     expect(aux).toEqual([]);
     selected = true;
@@ -432,6 +455,9 @@ describe("HarnessSession", () => {
     expect(aux).toEqual(["plan", "title"]);
     await harness.planTask("p", undefined, "deepseek-v4.1-flash");
     expect(aux).toEqual(["plan", "title"]);
+    selected = false;
+    await harness.planTask("p", undefined, "claude-sonnet-5-5");
+    expect(aux).toEqual(["plan", "title", "plan"]);
   });
 });
 
@@ -469,6 +495,31 @@ describe("AgentManager with the Claude Code harness", () => {
     await tick();
     const row = db.prepare("SELECT model_provider FROM conversations WHERE id = ?").get(conv.id) as { model_provider: string };
     expect(row.model_provider).toBe(CLAUDE_CODE_PROVIDER_ID);
+  });
+
+  it("runs a member assigned Claude on Claude Code with its fixed model, whatever the client asks", async () => {
+    const base = enabledConfig();
+    const cfg = {
+      ...base, memberRuntime: true, memberModel: "claude-sonnet-5-5", agent: { ...base.agent, defaultModel: "claude-sonnet-5-5" },
+      claudeCode: { ...base.claudeCode, secretsFile: secretsFile("ANTHROPIC_AUTH_TOKEN=member-gateway-token\n"), gatewayUrl: "http://host.docker.internal:4902/u/user_m/anthropic" },
+    };
+    const memberDb = openDb(":memory:");
+    memberDb.prepare("INSERT INTO owners(id,username,role,password_hash,password_salt,password_params,created_at) VALUES ('user_m','cr','member','x','x','{}',0)").run();
+    const hostTokens = { status: async () => ({ ok: true }) } as unknown as HostTokenSource;
+    const member = new AgentManager({ cfg, db: memberDb, log, codex, hostTokens, claudeCode: new ClaudeCodeHarness(cfg, log) });
+    await member.init();
+    try {
+      expect(member.memberSettings()).toEqual({ model: "claude-sonnet-5-5", effort: "high" });
+      const conv = member.createConversation({ ownerId: "user_m", title: "member" });
+      member.submitTurn({ conversationId: conv.id, text: "hi", clientMessageId: "m1", model: "claude-fable-5-1", effort: "max" });
+      await tick();
+      const threadId = codex.startedThreads[0]!.threadId;
+      expect(codex.threadProviders.get(threadId)).toBe(CLAUDE_CODE_PROVIDER_ID);
+      expect(codex.startedTurns[0]).toMatchObject({ model: "claude-sonnet-5-5", effort: "high" });
+    } finally {
+      member.shutdown();
+      memberDb.close();
+    }
   });
 
   it("moves a follow-up to the selected harness with the earlier exchange as background", async () => {

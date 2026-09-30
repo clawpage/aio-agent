@@ -5,15 +5,17 @@ import type {AppContext} from './context.js';
 import {bootstrap, startSandboxRuntime, startRuntimeRecovery, type Bootstrapped} from './index.js';
 import type {MemberModelGateway} from './memberModelGateway.js';
 import {getUser} from './auth/owner.js';
+import {MEMBER_MODEL,MEMBER_MODELS} from './auth/policy.js';
 
 /** A stable opaque namespace: no user-controlled paths, names, ports or upstreams. */
-export function memberConfig(base: Config, userId: string, port: number): Config {
+export function memberConfig(base: Config, userId: string, port: number, model: string = MEMBER_MODEL): Config {
+  if(!MEMBER_MODELS.includes(model))throw new Error('Unsupported member model');
   const suffix=userNamespace(userId);
   const dataDir=path.join(base.dataDir,'users',suffix);
-  return {...workspaceConfig(base), runtimeUserId:userId, memberRuntime:true, dataDir,
+  return {...workspaceConfig(base), runtimeUserId:userId, memberRuntime:true, memberModel:model, dataDir,
     dbPath:path.join(dataDir,'agent.sqlite'),logDir:path.join(dataDir,'logs'),
     ownerPassword:'',ownerPasswordReset:false,ownerSecretPath:path.join(dataDir,'unused-secret'),
-    agent:{...base.agent,defaultModel:'deepseek-v4.1-flash'},
+    agent:{...base.agent,defaultModel:model},
     sandbox:{...base.sandbox,hostPort:port,containerName:`aio-user-${suffix}`,
       networkName:`aio-user-${suffix}`,workspaceVolume:`aio-user-${suffix}-workspace`,
       // Owner PA_SANDBOX_EXTRA_ENV is never inherited; only the fixed flag Chromium needs
@@ -51,7 +53,9 @@ export class UserRuntimes {
       if(port>65535)throw new Error('No sandbox ports available');
       this.root.db.prepare('INSERT INTO meta(key,value) VALUES(?,?)').run(key,String(port));
     }
-    const config=memberConfig(this.root.cfg,user.id,port);
+    // The administrator's assignment (`member_model:<id>`); members cannot change it.
+    const assigned=this.root.db.prepare('SELECT value FROM meta WHERE key=?').get(`member_model:${user.id}`) as {value:string}|undefined;
+    const config=memberConfig(this.root.cfg,user.id,port,assigned?.value??MEMBER_MODEL);
     if(config.sandbox.autostart&&!this.gateway)throw new Error("Member gateway unavailable");
     this.gateway?.provision(config);
     const runtime=await this.factory({config,skipOwner:true,identity:user,deferAgentInit:true});

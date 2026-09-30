@@ -2,7 +2,11 @@ import type { Db } from "../db.js";
 import { getUser } from "./owner.js";
 
 export const MEMBER_MODEL = "deepseek-v4.1-flash";
-export const MEMBER_SETTINGS = { model: MEMBER_MODEL, effort: "high" } as const;
+/** Runs on Claude Code through the member gateway, with the owner's credential kept on the host. */
+export const MEMBER_CLAUDE_MODEL = "claude-sonnet-5-5";
+/** The models an administrator may assign to a member (`bin/set-user-model.mjs`). */
+export const MEMBER_MODELS: readonly string[] = [MEMBER_MODEL, MEMBER_CLAUDE_MODEL];
+export const MEMBER_EFFORT = "high";
 export function isMember(db: Db, userId: string): boolean {
   return getUser(db, userId)?.role === "member";
 }

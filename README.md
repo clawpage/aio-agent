@@ -69,14 +69,15 @@ curl -s http://127.0.0.1:4891/healthz
 ## 账号与权限
 
 - owner 保留模型、推理强度和 SOUL 配置。member 的主会话和任务列表只显示本账号内容，不能通过任务 ID 读取、引用或停止他人的任务。
-- member 的派单和执行均由服务端固定为 `deepseek-v4.1-flash` / `high`；忽略客户端模型参数，桥接不可用时拒绝执行，不回退 GPT。owner 的自动标题机制不会用于 member。
+- member 的派单和执行均由服务端固定为管理员分配的模型 / `high`：默认 `deepseek-v4.1-flash`（Codex），也可分配 `claude-sonnet-5-5`（Claude Code）。忽略客户端模型参数，分配的模型不可用时拒绝执行，不回退 GPT。owner 的自动标题机制不会用于 member。
 - member 不展示配置入口、模型与推理参数、SOUL 原文；配置/模型/能力清单接口拒绝访问，JSON 与 SSE 隐去模型配置元数据。正常回答内容不会被关键词过滤。
 - **账号独立环境**：member 的容器、workspace、Codex 记忆/历史、浏览器 profile、终端、任务数据库、SOUL 和文档缓存独立。owner 沿用原容器与数据卷；新成员不复制 owner 的文件或历史。
 - 成员环境默认限制为 2 GiB 内存、2 CPU、1024 个进程，阻止连接内网、宿主服务和其他沙盒；公网仍可访问。网络规则由独立只读守卫容器应用，成员无 NET_ADMIN / NET_RAW 权限。
-- member 不接收 owner 的 ChatGPT token 或模型桥管理密钥。独立模型网关仅接受该账号凭据下的无状态 DeepSeek high 请求，禁用历史响应查询；网关监听 `PA_MEMBER_MODEL_PORT`（默认 4902）。
+- member 不接收 owner 的 ChatGPT token、模型桥管理密钥或 Claude Code 凭据。独立模型网关仅接受该账号凭据下的无状态 DeepSeek high 请求，禁用历史响应查询；分配了 Claude 的账号还可以请求 Messages API（仅 `/v1/messages` 与 `/v1/messages/count_tokens`），模型强制改为分配的模型，owner 的 Claude Code 凭据由网关在宿主侧附加，沙盒内只有该账号自己的网关令牌。网关监听 `PA_MEMBER_MODEL_PORT`（默认 4902）。
 - 每个账号都有自己的路径：主控制台是 `<主域名>/u/<用户名>`（根路径和 `/login` 登录后自动跳到自己的地址；同一浏览器一次只登录一个账号，打开别人的地址只显示“这是 X 的页面”，可退出后登录该账号或回到自己的页面）；工作区在同一个工作区域名下是 `<工作区域名>/u/<用户名>/...`（owner 也是 `/u/owner`，旧的根路径和 member 的 `/u/<账号散列>` 链接仍可用），不需要新增 DNS、TLS 或 tunnel 路由。容器与卷名仍按账号散列命名，不会改名。前缀与工作区会话账号不一致时一律 401；不对应任何账号的 `/u/...` 视为沙盒应用自己的路径，按会话账号路由；页面里不带前缀的绝对路径子资源（如 Jupyter 的 `/jupyter/static/...`）按工作区会话所属账号路由，只会到达该账号自己的沙盒。环境启动失败时拒绝连接，绝不退回 owner 沙盒。账号共用同一个浏览器来源，因此同一浏览器先后登录不同账号时，工作区页面（code-server、Jupyter 等）的浏览器端存储是共用的；沙盒文件、进程与记忆的隔离不受影响。
 - 账号配置和登录鉴权由宿主控制面统一管理；容器共享宿主内核，因此这不是抵抗内核漏洞的虚拟机隔离。
 - 创建账号（先构建；使用与服务相同的环境变量/数据目录）：`node --env-file=var/runtime.env bin/create-user.mjs <username>`。Quickstart 使用 `.env`。随机密码写入 `var/user-secrets/<username>.txt`（0600），命令不打印密码、不覆盖已有账号，不提供公开注册。
+- 分配成员模型：`node --env-file=var/runtime.env bin/set-user-model.mjs <username> <deepseek-v4.1-flash|claude-sonnet-5-5>`，重启服务后生效。分配 Claude 需要 owner 已配置 Claude Code 凭据，用量计入 owner 的 Claude 账号。
 
 ## 主会话的克制追问
 
@@ -258,7 +259,7 @@ curl -s http://127.0.0.1:4891/healthz
 
 - **选中即全部切换**：主会话派单、子任务执行和自动标题都由 Claude Code 完成。派单与标题使用
   无工具、不落盘的一次性运行（`--tools ""`，模型 `PA_CLAUDE_CODE_AUX_MODEL`，默认
-  `claude-sonnet-5-5`）；成员账号不提供该执行器，仍固定 Codex + DeepSeek high。
+  `claude-sonnet-5-5`）。成员账号默认不提供该执行器；被分配 `claude-sonnet-5-5` 的成员经成员模型网关使用它（见账号分级）。
 - **执行方式**：每个任务轮次在沙箱内启动一个 `claude -p` 进程（stream-json 双向流），以
   `bypassPermissions` 在容器内完整执行（与 Codex 的 `approval_policy=never` 对等），MCP 只挂
   沙箱内的 `aio_browser`（`--strict-mcp-config`），SOUL.md 通过 `--append-system-prompt` 注入，
@@ -356,6 +357,7 @@ npm run build && npx playwright test --config playwright.local.config.ts
 | `PA_CLAUDE_CODE_SECRETS_FILE` | `~/.config/aio-agent/claude-code.env` | `CLAUDE_CODE_OAUTH_TOKEN` 或 `ANTHROPIC_API_KEY` 的私有文件（环境变量优先；权限宽于 600/400 拒绝） |
 | `PA_CLAUDE_CODE_VERSION` | `2.1.284` | 沙箱内固定版 Claude Code CLI（持久卷内，首次使用时安装） |
 | `PA_CLAUDE_CODE_AUX_MODEL` | `claude-sonnet-5-5` | 选中 Claude Code 时派单与自动标题使用的无工具模型 |
+| `PA_ANTHROPIC_API_BASE_URL` | `https://api.anthropic.com` | 成员模型网关转发 Claude 请求的上游 |
 | `PA_SANDBOX_PORT` | `18081` | 沙箱发布到 loopback 的端口 |
 | `PA_OWNER_PASSWORD` | 空 | 设置则用它，否则生成到 `var/owner-secret.txt` |
 | `PA_BROWSER_LIFECYCLE` | `1` | 浏览器空闲释放总开关；关闭则浏览器始终常驻 |

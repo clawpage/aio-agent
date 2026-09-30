@@ -10,8 +10,8 @@ import type { BrowserTask } from "../browser/tabs.js";
  * catalog). Task threads created with the Claude Code provider run on Claude
  * Code, and every later call for such a thread is routed by its id, which
  * survives restarts. While the owner has Claude Code selected, the dispatcher
- * and titles run there as well; an explicit model (the member policy) keeps
- * the dispatcher on Codex.
+ * and titles run there as well. An explicit model (the member policy) decides
+ * the dispatcher's harness by that model.
  */
 export class HarnessSession implements CodexSessionLike {
   #codex: CodexSessionLike;
@@ -85,7 +85,7 @@ export class HarnessSession implements CodexSessionLike {
     return this.#claudeSelected() ? this.#claude.generateTitle(userText) : this.#codex.generateTitle(userText);
   }
   planTask(prompt: string, developerInstructions?: string, model?: string) {
-    if (!model && this.#claudeSelected()) return this.#claude.planTask(prompt, developerInstructions);
+    if (model ? this.#claude.owns(model) : this.#claudeSelected()) return this.#claude.planTask(prompt, developerInstructions);
     if (!this.#codex.planTask) return Promise.resolve(null);
     return this.#codex.planTask(prompt, developerInstructions, model);
   }

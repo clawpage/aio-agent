@@ -48,6 +48,8 @@ export function loadConfig(): {
   protectedMemberPorts?: number[];
   runtimeUserId?: string;
   memberRuntime?: boolean;
+  /** The one model a member runtime runs; set by the tenant layer, never by the member. */
+  memberModel?: string;
   memberModelPort?: number;
   port: number;
   bind: string;
@@ -201,6 +203,14 @@ export function loadConfig(): {
     secretsFile: string;
     /** Tool-less model for the main-session dispatcher and titles while Claude Code is selected. */
     auxModel: string;
+    /** Upstream the member gateway forwards Claude requests to with the owner's credential. */
+    apiBaseUrl: string;
+    /**
+     * Member runtimes only: the gateway address the sandbox CLI talks to. The
+     * owner's credential never enters a member sandbox; `secretsFile` then holds
+     * that member's own gateway token.
+     */
+    gatewayUrl?: string;
   };
   externalBaseUrl: string;
 } {
@@ -374,6 +384,7 @@ export function loadConfig(): {
       configDir: envStr("PA_CLAUDE_CODE_CONFIG_DIR", "/home/gem/.codex/claude-code-home"),
       secretsFile: envStr("PA_CLAUDE_CODE_SECRETS_FILE", path.join(os.homedir(), ".config", "aio-agent", "claude-code.env")),
       auxModel: envStr("PA_CLAUDE_CODE_AUX_MODEL", "claude-sonnet-5-5"),
+      apiBaseUrl: envStr("PA_ANTHROPIC_API_BASE_URL", "https://api.anthropic.com"),
     },
     externalBaseUrl: envStr("PA_EXTERNAL_BASE_URL", ""),
   };
