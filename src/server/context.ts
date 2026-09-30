@@ -1,3 +1,4 @@
+import type { ShareStore } from "./share.js";
 import type { TabServerLike } from "./browser/tabs.js";
 import type { Config } from "./config.js";
 import type { Db } from "./db.js";
@@ -17,6 +18,8 @@ import type { TaskService } from "./tasks/service.js";
 
 export interface AppContext {
   runtimeForUser?: (userId: string) => Promise<AppContext>;
+  /** Public share pages (root context only). */
+  share?: ShareStore;
   tasks: TaskService;
   cfg: Config;
   db: Db;

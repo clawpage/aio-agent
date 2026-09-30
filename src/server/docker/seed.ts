@@ -253,3 +253,151 @@ export function claudeCodeUserMemory(workspaceDir: string, codexHome: string): s
 - 这个目录由 Codex 自动维护，只读，不要修改。
 `;
 }
+
+/**
+ * Public share pages. The CLI and its skill are managed like the document
+ * skill; the per-runtime config holding the share token is written beside the
+ * CLI only when the control plane provisioned sharing.
+ */
+export const SHARE_TOOL_DIR = "tools/aio-share";
+export const SHARE_SKILL_DIR = "skills/aio-share";
+export const SHARE_CLI_PY = String.raw`#!/usr/bin/env python3
+"""aio-share: publish a page directory as a public web page (managed by AIO Agent)."""
+import argparse, base64, json, os, re, sys, urllib.error, urllib.request
+
+CONFIG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
+NAME = re.compile(r"^[a-z0-9][a-z0-9-]{0,62}$")
+MAX_FILES, MAX_BYTES = 200, 20 * 1024 * 1024
+
+
+def fail(message):
+    print(json.dumps({"ok": False, "error": message}, ensure_ascii=False))
+    sys.exit(1)
+
+
+def call(method, path, body=None):
+    try:
+        with open(CONFIG) as f:
+            cfg = json.load(f)
+    except OSError:
+        fail("分享功能未启用：缺少 " + CONFIG)
+    data = None if body is None else json.dumps(body).encode()
+    req = urllib.request.Request(cfg["endpoint"] + path, data=data, method=method,
+                                 headers={"authorization": "Bearer " + cfg["token"], "content-type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=120) as res:
+            raw = res.read()
+            return json.loads(raw) if raw else {}
+    except urllib.error.HTTPError as err:
+        try:
+            fail(json.loads(err.read()).get("error") or "HTTP %d" % err.code)
+        except ValueError:
+            fail("HTTP %d" % err.code)
+    except OSError as err:
+        fail("无法连接分享服务：%s" % err)
+
+
+def collect(root):
+    files, total = [], 0
+    for base, dirs, names in os.walk(root):
+        dirs[:] = sorted(d for d in dirs if not d.startswith("."))
+        for name in sorted(names):
+            if name.startswith("."):
+                continue
+            full = os.path.join(base, name)
+            if os.path.islink(full) or not os.path.isfile(full):
+                continue
+            rel = os.path.relpath(full, root).replace(os.sep, "/")
+            with open(full, "rb") as f:
+                data = f.read()
+            total += len(data)
+            files.append({"path": rel, "data": base64.b64encode(data).decode()})
+    if not any(f["path"] == "index.html" for f in files):
+        fail("目录里没有 index.html：" + root)
+    if len(files) > MAX_FILES:
+        fail("文件数 %d 超过上限 %d" % (len(files), MAX_FILES))
+    if total > MAX_BYTES:
+        fail("总大小 %.1f MB 超过上限 20 MB" % (total / 1024 / 1024))
+    return files
+
+
+def main():
+    parser = argparse.ArgumentParser(prog="aio-share", description="把页面目录发布成公开网页；同名再次发布即更新，链接不变。")
+    sub = parser.add_subparsers(dest="cmd", required=True)
+    p = sub.add_parser("publish", help="发布或更新页面")
+    p.add_argument("dir", help="页面目录，必须包含 index.html")
+    p.add_argument("--name", help="页面名（小写字母、数字、连字符），默认取目录名")
+    p.add_argument("--title", help="页面标题（用于列表）")
+    sub.add_parser("list", help="列出已发布的页面")
+    d = sub.add_parser("delete", help="删除页面（链接随即失效）")
+    d.add_argument("name")
+    args = parser.parse_args()
+
+    if args.cmd == "list":
+        print(json.dumps(call("GET", "/pages"), ensure_ascii=False, indent=2))
+    elif args.cmd == "delete":
+        if not NAME.match(args.name):
+            fail("页面名不合法：" + args.name)
+        call("DELETE", "/pages/" + args.name)
+        print(json.dumps({"ok": True, "deleted": args.name}, ensure_ascii=False))
+    else:
+        root = os.path.abspath(args.dir)
+        if not os.path.isdir(root):
+            fail("不是目录：" + root)
+        name = args.name or re.sub(r"[^a-z0-9-]+", "-", os.path.basename(root).lower()).strip("-")[:63]
+        if not NAME.match(name):
+            fail("页面名不合法，请用 --name 指定小写字母、数字和连字符组成的名字")
+        page = call("POST", "/pages/" + name, {"title": args.title, "files": collect(root)})
+        page["ok"] = True
+        print(json.dumps(page, ensure_ascii=False, indent=2))
+
+
+if __name__ == "__main__":
+    main()
+`;
+
+export const SHARE_SKILL_MD = `---
+name: aio-share
+description: Publish a web page the user can share with anyone as a public link (/u/<user>/share/<name>/). Use when the user wants a shareable page, a link to send others, or to update, list or delete pages already shared.
+---
+
+# 分享网页（公开）
+
+把一个页面目录发布成**任何人拿到链接都能打开**的网页。没有密码、没有私密模式。
+
+## 发布前必须确认
+
+- 页面是公开的：不要放用户没有明确同意公开的个人信息（住址、电话、证件、行程细节、账号、内部链接），
+  也不要放任何密钥或令牌。拿不准时先问用户。
+- 用户只是想看结果、没说要分享时，不要发布；在工作区里做好页面给用户看即可。
+
+## 做页面
+
+1. 页面目录放在 \`/home/gem/workspace/share/<name>/\`，入口必须是 \`index.html\`。
+   \`<name>\` 用小写字母、数字、连字符，简短有意义（如 \`tokyo-trip-plan\`），它就是链接的一部分。
+2. 优先做成单个自包含的 \`index.html\`；需要图片、CSS、JS 时放在同一目录里用**相对路径**引用。
+   上限 200 个文件、总计 20 MB，以点开头的文件不会上传。
+3. 适配手机（\`<meta name="viewport" content="width=device-width, initial-scale=1">\`），中文字体要有回退。
+4. 页面在隔离环境中运行：脚本可以执行，也可以请求允许跨域的外部接口，
+   但**不能使用 cookie、localStorage、sessionStorage**，也不能读写工作区。需要保存状态的交互不要做。
+5. 发布前先在沙箱浏览器里打开 \`file:///home/gem/workspace/share/<name>/index.html\` 检查效果。
+
+## 发布、更新、查看、删除
+
+命令（不在 PATH 上，用绝对路径）：
+
+\`\`\`bash
+python3 /home/gem/.codex/tools/aio-share/aio-share.py publish /home/gem/workspace/share/<name> --title "页面标题"
+python3 /home/gem/.codex/tools/aio-share/aio-share.py list
+python3 /home/gem/.codex/tools/aio-share/aio-share.py delete <name>
+\`\`\`
+
+- \`publish\` 默认用目录名作页面名，也可用 \`--name\` 指定。输出 JSON，其中 \`url\` 就是公开链接。
+- **同名再次发布就是更新**，链接不变，旧内容被整体替换。新建页面前先 \`list\`，避免覆盖已有页面。
+- 删除后链接立即失效，无法恢复；只在用户要求时删除。
+- 命令失败时如实转述 \`error\`，不要假装发布成功。
+
+## 交付
+
+把 \`url\` 用简短有意义的标题作为链接发给用户，并说明「任何拿到链接的人都能看到」。
+`;

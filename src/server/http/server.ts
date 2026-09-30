@@ -72,6 +72,9 @@ export function createApp(ctx: AppContext): express.Express {
     next();
   });
 
+  // Public share pages: the one unauthenticated path on the workspace origin, served in a CSP sandbox.
+  app.use((req: Request, res: Response, next: NextFunction) => (ctx.share ? ctx.share.serve()(req, res, next) : next()));
+
   // Minimal, unauthenticated liveness/readiness. No identities, ids or errors.
   app.get("/healthz", (_req, res) => {
     void (async () => {

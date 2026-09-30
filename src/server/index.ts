@@ -1,5 +1,6 @@
 import http from "node:http";
 import {MemberModelGateway} from "./memberModelGateway.js";
+import {ShareStore} from "./share.js";
 import {UserRuntimes} from "./tenants.js";
 import { loadConfig, ensureDataDirs, type Config } from "./config.js";
 import { Logger } from "./logger.js";
@@ -308,7 +309,13 @@ async function main(): Promise<void> {
   const config=loadConfig();
   config.runtimeUserId="owner_1";
   const { ctx, shutdown } = await bootstrap({config});
-  const modelGateway=new MemberModelGateway(ctx.cfg,ctx.log);
+  const account=(sql:string,value:string)=>(ctx.db.prepare(sql).get(value) as {v:string}|undefined)?.v??null;
+  ctx.share=new ShareStore({cfg:ctx.cfg,port:ctx.cfg.memberModelPort??4902,
+    usernameOf:id=>account("SELECT username AS v FROM owners WHERE id=?",id),
+    userIdOf:name=>account("SELECT id AS v FROM owners WHERE username=?",name)});
+  // The owner sandbox receives its token when refreshSandboxContent seeds it below.
+  ctx.share.provision(ctx.cfg);
+  const modelGateway=new MemberModelGateway(ctx.cfg,ctx.log,ctx.share);
   await modelGateway.start();
   const users=new UserRuntimes(ctx,bootstrap,modelGateway);
   ctx.runtimeForUser=id=>users.resolve(id);

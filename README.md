@@ -12,7 +12,7 @@ Codex + AIO Sandbox 跑在自己的机器上，通过自己的入口访问。
   控制面只以固定参数调用 Docker，不挂载宿主 home / workspace / `docker.sock`。
 - **中文 UI**：登录、对话、审批、配置、工作区全部为中文界面。
 - **两个来源**：控制台（主站）与伴随工作区（AIO 全部界面）是两个不同来源，都要求登录，
-  未登录一律 401。
+  未登录一律 401。唯一例外是工作区来源上的公开分享页 `/u/<用户名>/share/<页面名>/`（见「分享网页」）。
 
 本仓库的公开安装入口（Quickstart）只依赖本仓库与宿主已安装的 Docker + Codex CLI；
 公共域名由使用者自行填写，仓库不附带任何公共 demo 入口。
@@ -174,6 +174,23 @@ curl -s http://127.0.0.1:4891/healthz
 所有解析与转换都发生在沙箱容器内，控制面只以固定 argv 调用固定容器命令；路径先经工作区范围
 校验（拒绝越界、symlink 逃逸、选项注入），图片/文本与 MP4 预览均需鉴权；MP4 还验证容器头并保留 Range/206/416 语义，
 下载主动内容一律 `attachment`。转换结果写成**新文件**，绝不覆盖原文件。
+
+## 分享网页（公开）
+
+沙箱内置 `aio-share` skill（Codex 与 Claude Code 都能用）：智能体把页面目录
+（`/home/gem/workspace/share/<页面名>/`，入口 `index.html`，可带相对路径的图片/CSS/JS）
+用 `python3 /home/gem/.codex/tools/aio-share/aio-share.py publish <目录>` 发布，得到
+`https://<工作区域名>/u/<用户名>/share/<页面名>/`，任何拿到链接的人都能打开；短地址
+`/u/<用户名>/share?<页面名>` 会跳转到它。只有公开页面，没有密码或私密模式。
+
+- **发布**走成员模型网关（`PA_MEMBER_MODEL_PORT`）的 `/share/<账号>/pages[/<页面名>]`，只认该运行时自己的分享令牌
+  （宿主 `<数据目录>/share-token`，沙箱内 `~/.codex/tools/aio-share/config.json`，0600）。同名再次发布即整体替换，
+  链接不变；另有 `list` / `delete`。
+- **快照存在宿主** `<PA_DATA_DIR>/shares/<账号>/<页面名>/`，访问时只读这份快照、从不触碰沙箱，所以公开流量不会给沙箱加负载，
+  沙箱停了页面也照常可看。每页上限 200 个文件、20 MB，每个账号 100 页；路径拒绝 `..`、隐藏文件、反斜杠与控制字符。
+- **隔离**：页面放在工作区来源而不是主站（AI 生成内容不上主站），每个响应都带
+  `Content-Security-Policy: sandbox allow-scripts …`（无 `allow-same-origin`），页面运行在不透明来源里，
+  读不到工作区会话、调不了工作区接口，也用不了 cookie / localStorage。另带 `nosniff`、`no-referrer`、`noindex`，不设置任何 cookie。
 
 ## 浏览器内存生命周期（空闲释放与按需恢复）
 

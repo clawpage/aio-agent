@@ -12,6 +12,10 @@ import {
   CODEX_REQUIREMENTS_TOML,
   DOCUMENT_SKILL_DIR,
   DOCUMENT_SKILL_MD,
+  SHARE_CLI_PY,
+  SHARE_SKILL_DIR,
+  SHARE_SKILL_MD,
+  SHARE_TOOL_DIR,
   WORKSPACE_AGENTS_MD,
 } from "./seed.js";
 
@@ -548,7 +552,31 @@ done
     } else {
       await this.writeFileInSandbox(`${skillDir}/SKILL.md`, DOCUMENT_SKILL_MD);
     }
+    await this.seedShare();
     await this.enforceCodexIsolation();
+  }
+
+  /**
+   * The share skill for both executors (Codex skills and the Claude Code config
+   * directory) plus the CLI and this runtime's publish token. Like the document
+   * skill, a failure is logged and never blocks the sandbox.
+   */
+  async seedShare(): Promise<void> {
+    const s = this.#cfg.sandbox;
+    const share = this.#cfg.share;
+    if (!share) return;
+    const toolDir = `${s.containerCodexHome}/${SHARE_TOOL_DIR}`;
+    const skillDirs = [`${s.containerCodexHome}/${SHARE_SKILL_DIR}`, `${this.#cfg.claudeCode.configDir}/${SHARE_SKILL_DIR}`];
+    try {
+      const mkdir = await this.execInSandbox(["mkdir", "-p", toolDir, ...skillDirs], { timeoutMs: 15_000 });
+      if (mkdir.code !== 0) throw new Error((mkdir.stderr || mkdir.stdout).trim().slice(0, 200));
+      await this.writeFileInSandbox(`${toolDir}/aio-share.py`, SHARE_CLI_PY);
+      await this.writeFileInSandbox(`${toolDir}/config.json`, JSON.stringify(share));
+      await this.execInSandbox(["chmod", "600", `${toolDir}/config.json`], { timeoutMs: 15_000 });
+      for (const dir of skillDirs) await this.writeFileInSandbox(`${dir}/SKILL.md`, SHARE_SKILL_MD);
+    } catch (err) {
+      this.#log.warn("could not seed the sandbox share skill", { error: String(err).slice(0, 200) });
+    }
   }
 
   /** A separate managed policy avoids rewriting the user's persistent config. */

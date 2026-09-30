@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { SandboxContainer } from "../../src/server/docker/sandbox.js";
-import { CODEX_CONFIG_TOML, DOCUMENT_SKILL_DIR, DOCUMENT_SKILL_MD, WORKSPACE_AGENTS_MD } from "../../src/server/docker/seed.js";
+import { CODEX_CONFIG_TOML, DOCUMENT_SKILL_DIR, DOCUMENT_SKILL_MD, SHARE_CLI_PY, SHARE_SKILL_MD, WORKSPACE_AGENTS_MD } from "../../src/server/docker/seed.js";
 import { Logger } from "../../src/server/logger.js";
 import { testConfig } from "../helpers/harness.js";
 
@@ -83,6 +83,37 @@ describe("sandbox workspace seed", () => {
     expect(execCalls.some((argv) => argv[0] === "mkdir" && argv[1] === "-p" && argv[2].endsWith(DOCUMENT_SKILL_DIR))).toBe(
       true,
     );
+  });
+
+  it("gives both executors the share skill, the CLI and this runtime's token only when sharing is provisioned", async () => {
+    const seed = async (share?: { endpoint: string; token: string }) => {
+      const cfg = { ...testConfig("/tmp/pa-share-seed-test", 1), share };
+      const container = new SandboxContainer(cfg, new Logger("error", undefined, false));
+      vi.spyOn(container, "enforceCodexIsolation").mockResolvedValue();
+      const calls: Array<{ path: string; content: string }> = [];
+      container.writeFileInSandbox = (async (filePath: string, content: string) => {
+        calls.push({ path: filePath, content });
+      }) as typeof container.writeFileInSandbox;
+      const execCalls: string[][] = [];
+      container.execInSandbox = (async (argv: string[]) => (execCalls.push(argv), { code: 0, stdout: "", stderr: "" })) as typeof container.execInSandbox;
+      await container.seedWorkspace();
+      return { cfg, calls, execCalls };
+    };
+    const none = await seed();
+    expect(none.calls.some((c) => c.path.includes("aio-share"))).toBe(false);
+
+    const share = { endpoint: "http://host.docker.internal:4902/share/owner_1", token: "a".repeat(64) };
+    const { cfg, calls, execCalls } = await seed(share);
+    const skills = calls.filter((c) => c.path.endsWith("/skills/aio-share/SKILL.md"));
+    expect(skills.map((c) => c.path).sort()).toEqual([
+      `${cfg.claudeCode.configDir}/skills/aio-share/SKILL.md`,
+      `${cfg.sandbox.containerCodexHome}/skills/aio-share/SKILL.md`,
+    ].sort());
+    for (const s of skills) expect(s.content).toBe(SHARE_SKILL_MD);
+    expect(calls.find((c) => c.path.endsWith("/tools/aio-share/aio-share.py"))?.content).toBe(SHARE_CLI_PY);
+    const config = calls.find((c) => c.path.endsWith("/tools/aio-share/config.json"));
+    expect(JSON.parse(config!.content)).toEqual(share);
+    expect(execCalls).toContainEqual(["chmod", "600", config!.path]);
   });
 
   it("does not fail the whole seed when the skill directory cannot be created", async () => {

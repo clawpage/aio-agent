@@ -51,6 +51,8 @@ export function loadConfig(): {
   /** The one model a member runtime runs; set by the tenant layer, never by the member. */
   memberModel?: string;
   memberModelPort?: number;
+  /** Publish capability handed to this runtime's sandbox (`aio-share`); set by the share store. */
+  share?: { endpoint: string; token: string };
   port: number;
   bind: string;
   dataDir: string;
