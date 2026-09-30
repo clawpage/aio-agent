@@ -232,6 +232,12 @@ export interface BrowserLifecycleOptions {
   enabled?: boolean;
   /** Quiet period with no holders before the browser is released. */
   idleMs?: number;
+  /**
+   * `false` keeps the browser resident: nothing holding it is not a reason to
+   * stop it, so cookies (session ones included) live on in the same process
+   * instead of depending on a snapshot being exported and imported intact.
+   */
+  releaseWhenIdle?: boolean;
   /** A viewer lease that is not refreshed within this window stops counting. */
   viewerTtlMs?: number;
   /** Delay before an automatic retry after a failed sleep/wake. */
@@ -257,6 +263,7 @@ export interface BrowserLifecycleOptions {
 const DEFAULTS = {
   enabled: true,
   idleMs: 5 * 60_000,
+  releaseWhenIdle: true,
   viewerTtlMs: 60_000,
   retryDelayMs: 60_000,
   snapshotTimeoutMs: 45_000,
@@ -285,6 +292,7 @@ export class BrowserLifecycle {
   #onEvent: ((event: LifecycleEvent) => void) | undefined;
   #enabled: boolean;
   #idleMs: number;
+  #releaseWhenIdle: boolean;
   #viewerTtlMs: number;
   #retryDelayMs: number;
   #snapshotTimeoutMs: number;
@@ -372,6 +380,7 @@ export class BrowserLifecycle {
     this.#onEvent = opts.onEvent;
     this.#enabled = opts.enabled ?? DEFAULTS.enabled;
     this.#idleMs = Math.max(0, opts.idleMs ?? DEFAULTS.idleMs);
+    this.#releaseWhenIdle = opts.releaseWhenIdle ?? DEFAULTS.releaseWhenIdle;
     this.#viewerTtlMs = Math.max(0, opts.viewerTtlMs ?? DEFAULTS.viewerTtlMs);
     this.#retryDelayMs = Math.max(0, opts.retryDelayMs ?? DEFAULTS.retryDelayMs);
     this.#snapshotTimeoutMs = opts.snapshotTimeoutMs ?? DEFAULTS.snapshotTimeoutMs;
@@ -398,6 +407,7 @@ status(): BrowserLifecycleStatus {
     const now = this.#clock.now();
     return {
       enabled: this.#enabled,
+      resident: !this.#releaseWhenIdle,
       state: this.#state,
       idleDeadline: this.#idleDeadline,
       since: this.#since,
@@ -1204,6 +1214,11 @@ status(): BrowserLifecycleStatus {
     // it would discard the tabs the user is waiting for.
     if (this.#pendingRestore) return;
     this.#cancelIdle();
+    // A resident browser is idle but never counts down to a release.
+    if (!this.#releaseWhenIdle) {
+      this.#setState("idle");
+      return;
+    }
     const delay = this.#idleMs;
     this.#idleDeadline = this.#clock.now() + delay;
     this.#setState("idle");

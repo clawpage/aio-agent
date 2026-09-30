@@ -96,6 +96,7 @@ export function tabMcpServers(task: BrowserTask): Record<string, unknown> {
 /** Appended to an execution thread's instructions: browser work goes through its own tabs. */
 export const TAB_POLICY =
   "浏览器操作只使用 aio_tabs 工具：你只能操作本任务创建的标签页，其他任务的标签页只能只读查看，可与其他任务并行；不要使用 `aio browser` 命令行或 /v1/browser 接口，它们操作整个浏览器的当前页面，会打断并行任务。" +
+  "每个用户只有这一个浏览器，里面有用户的登录状态：不要自己另起浏览器（例如 Playwright/Puppeteer 的 launch、headless Chrome、新的用户数据目录），那样没有登录状态，也不要清除 cookie 或站点数据。" +
   "遇到登录、验证码、二次验证、输入密码或支付信息、付款、下单、发送消息、修改账号设置等需要用户本人完成或不可撤销的最后一步，调用 browser_request_human 说明原因并等待用户交还，不要在对话里索要密码或验证码，也不要替用户完成付款或下单；交还后先读取页面确认状态再继续，结果不确定的操作不要自动重做。";
 
 export function withTabPolicy(instructions: string): string {

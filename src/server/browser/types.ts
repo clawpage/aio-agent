@@ -59,6 +59,8 @@ export type LifecycleErrorCode =
 export interface BrowserLifecycleStatus {
   /** False when the feature is disabled by configuration. */
   enabled: boolean;
+  /** Never released for idleness: one live browser per account, logins kept in place. */
+  resident: boolean;
   state: BrowserLifecycleState;
   /** Unix ms when the browser is released; null while it is held awake. */
   idleDeadline: number | null;

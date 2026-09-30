@@ -144,6 +144,11 @@ export function loadConfig(): {
   browser: {
     /** Master switch; when off the browser lifecycle is a no-op (always awake). */
     enabled: boolean;
+    /**
+     * Whether a browser nobody holds is released at all. Off by default: each
+     * account keeps one resident browser so its logins stay valid.
+     */
+    releaseWhenIdle: boolean;
     /** How long the browser may sit with no task/viewer/activity hold before sleeping. */
     idleMs: number;
     /** Viewer heartbeat validity; a viewer that stops heartbeating loses its hold. */
@@ -326,6 +331,9 @@ export function loadConfig(): {
     },
     browser: {
       enabled: envStr("PA_BROWSER_LIFECYCLE", "1") === "1",
+      // Releasing an idle browser meant stopping Chromium and carrying logins over
+      // in a snapshot; failed restores dropped them. Keep it resident unless asked.
+      releaseWhenIdle: envStr("PA_BROWSER_RELEASE_IDLE", "0") === "1",
       // A five minute default keeps a browser that nobody is looking at from
       // holding hundreds of MB of renderer memory; the floor stops a
       // misconfiguration from thrashing the browser on every navigation.

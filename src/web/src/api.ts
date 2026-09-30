@@ -220,6 +220,8 @@ export const api = {
 
 export interface BrowserLifecycleStateView {
   enabled: boolean;
+  /** Never released for idleness: logins stay in the one live browser. */
+  resident?: boolean;
   state: string;
   stateLabel: string;
   idleDeadline: number | null;

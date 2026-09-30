@@ -134,6 +134,7 @@ export class BrowserService {
       runtime: opts.runtime,
       enabled: opts.cfg.browser.enabled,
       idleMs: opts.cfg.browser.idleMs,
+      releaseWhenIdle: opts.cfg.browser.releaseWhenIdle,
       viewerTtlMs: opts.cfg.browser.viewerTtlMs,
       clock: opts.clock,
       log: opts.log,

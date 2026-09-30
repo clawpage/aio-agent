@@ -456,6 +456,8 @@ describe("browser status view derivation", () => {
     expect(describeOccupancy({ ...base, leases: { ...base.leases, pins: 1 } })).toContain("手动保留 1");
     expect(describeOccupancy({ ...base })).toContain("没有占用");
     expect(describeOccupancy({ ...base, enabled: false })).toContain("已关闭");
+    // A resident browser with nothing holding it is not waiting to be released.
+    expect(describeOccupancy({ ...base, resident: true })).toBe("常驻，登录状态一直保留");
   });
 
   it("formats the idle countdown and clamps at zero", () => {

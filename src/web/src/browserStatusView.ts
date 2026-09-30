@@ -63,7 +63,8 @@ export function describeOccupancy(status: BrowserLifecycleStateView | null): str
   const pins = status.leases.pins > 0 ? status.leases.pins : status.holds;
   if (pins > 0) parts.push(`手动保留 ${pins}`);
   if (parts.length === 0) {
-    return status.restorePending ? "没有占用，但快照尚未恢复" : "当前没有占用";
+    if (status.restorePending) return "没有占用，但快照尚未恢复";
+    return status.resident ? "常驻，登录状态一直保留" : "当前没有占用";
   }
   return `占用原因：${parts.join("、")}`;
 }

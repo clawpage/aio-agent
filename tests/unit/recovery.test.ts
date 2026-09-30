@@ -117,3 +117,33 @@ describe("runtime recovery loop", () => {
     expect(counters.ensureRunning).toBe(1);
   });
 });
+
+describe("resident browser", () => {
+  const withBrowser = (releaseWhenIdle: boolean, status: { state: string; restorePending: boolean }) => {
+    const woke: number[] = [];
+    const ctx = makeCtx({ ready: true, running: true, codexReady: true }, { ensureRunning: 0, ensureSession: 0 });
+    Object.assign(ctx, {
+      cfg: { sandbox: { autostart: true }, browser: { enabled: true, releaseWhenIdle } },
+      browser: { observe: async () => undefined, status: () => status, wake: async () => void woke.push(1) },
+    });
+    return { ctx, woke };
+  };
+
+  it("brings a released browser back once, so each account keeps one live browser with its logins", async () => {
+    const { ctx, woke } = withBrowser(false, { state: "asleep", restorePending: true });
+    const recovery = startRuntimeRecovery(ctx, 60_000);
+    await recovery.tick();
+    expect(woke).toHaveLength(1);
+    recovery.stop();
+  });
+
+  it("leaves a running browser alone, and a released one when idle release was asked for", async () => {
+    for (const [release, state] of [[false, "idle"], [true, "asleep"]] as const) {
+      const { ctx, woke } = withBrowser(release, { state, restorePending: state === "asleep" });
+      const recovery = startRuntimeRecovery(ctx, 60_000);
+      await recovery.tick();
+      expect(woke).toHaveLength(0);
+      recovery.stop();
+    }
+  });
+});

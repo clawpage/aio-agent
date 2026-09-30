@@ -452,6 +452,25 @@ describe("BrowserLifecycle idle release", () => {
     life.shutdown();
   });
 
+  it("a resident browser is never released, however long nothing holds it", async () => {
+    const runtime = makeRuntime();
+    const { life, clock } = makeLifecycle(runtime, { releaseWhenIdle: false });
+    expect(life.status().state).toBe("idle");
+    expect(life.status().idleDeadline).toBeNull();
+    // Holders come and go; the browser stays up with its cookies in the same process.
+    const viewer = life.touchViewer("v1", "s1");
+    clock.advance(120_000);
+    await settle();
+    if (viewer) life.releaseViewer("v1", viewer.generation, "s1");
+    clock.advance(24 * 3_600_000);
+    await settle();
+    expect(runtime.calls.snapshot).toBe(0);
+    expect(runtime.calls.stop).toBe(0);
+    expect(life.status().state).toBe("idle");
+    expect(life.status().idleDeadline).toBeNull();
+    life.shutdown();
+  });
+
   it("a permanent pin never releases the browser", async () => {
     const runtime = makeRuntime();
     const { life, clock } = makeLifecycle(runtime);

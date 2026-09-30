@@ -76,9 +76,12 @@ export function BrowserStatusBar({ status, watching, onWake, onNotify, pinned, o
         </button>
       )}
       {restoring && <span className="bs-restoring">正在恢复…</span>}
-      <button type="button" className="link bs-pin" onClick={onPinToggle}>
-        {pinned ? "取消保留" : "保留浏览器"}
-      </button>
+      {/* A resident browser is never released, so there is nothing to keep. */}
+      {!status?.resident && (
+        <button type="button" className="link bs-pin" onClick={onPinToggle}>
+          {pinned ? "取消保留" : "保留浏览器"}
+        </button>
+      )}
     </div>
   );
 }

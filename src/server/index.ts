@@ -271,6 +271,10 @@ export function startRuntimeRecovery(ctx: AppContext, intervalMs = 30_000): Runt
       if (ready && ctx.cfg.browser.enabled) {
         try {
           await ctx.browser.observe();
+          // A resident browser found released (before an upgrade, or after a crash)
+          // is brought back once, restoring its saved logins, and then stays.
+          const seen = ctx.browser.status();
+          if (!ctx.cfg.browser.releaseWhenIdle && (seen.state === "asleep" || seen.restorePending)) await ctx.browser.wake();
         } catch (err) {
           ctx.log.debug?.("browser observe probe failed", { error: err instanceof Error ? err.message : String(err) });
         }

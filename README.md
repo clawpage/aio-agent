@@ -176,6 +176,12 @@ curl -s http://127.0.0.1:4891/healthz
 
 ## 浏览器内存生命周期（空闲释放与按需恢复）
 
+> **默认常驻（不释放）**：每个账号只有一个浏览器，默认一直运行，登录状态（包括只在本次运行有效的会话 cookie）
+> 始终留在同一个 Chromium 进程里，不再依赖快照导出/导入来接续。以前每空闲 5 分钟就停掉 Chromium 再从快照恢复，
+> 恢复失败时网站会变成未登录。浏览器若因升级或崩溃处于已释放状态，后台巡检会自动恢复一次，之后保持常驻。
+> 状态条显示“常驻，登录状态一直保留”，不再有“保留浏览器”按钮。需要恢复空闲释放以节省内存时设
+> `PA_BROWSER_RELEASE_IDLE=1`，下面的释放规则才生效。智能体被要求只用这一个浏览器，不得另起浏览器或清除站点数据。
+
 恢复会同时重建 AIO REST 与浏览器 MCP 的连接。镜像中的 MCP 会缓存旧 Puppeteer 页面，因此在恢复完成前精确重启 `mcp-server-browser`，并通过 Codex 使用的 `/mcp` 调用 `browser_tab_list` 验证页面连接；失败保留快照和恢复进度，不误报可用，不自动重放导航、点击等用户操作。该服务使用无状态 HTTP，重连不停止 Codex、终端或其他服务。
 
 沙箱里的 Chromium 常驻会占住几百 MB 渲染内存，即使没人在看。这条功能让**只有浏览器**在
@@ -351,7 +357,8 @@ npm run build && npx playwright test --config playwright.local.config.ts
 | `PA_SANDBOX_PORT` | `18081` | 沙箱发布到 loopback 的端口 |
 | `PA_OWNER_PASSWORD` | 空 | 设置则用它，否则生成到 `var/owner-secret.txt` |
 | `PA_BROWSER_LIFECYCLE` | `1` | 浏览器空闲释放总开关；关闭则浏览器始终常驻 |
-| `PA_BROWSER_IDLE_SECONDS` | `300` | 无占用后释放浏览器的空闲时长（下限 30 秒） |
+| `PA_BROWSER_RELEASE_IDLE` | `0` | 是否在无占用时释放浏览器；默认 `0` 常驻，登录状态一直保留 |
+| `PA_BROWSER_IDLE_SECONDS` | `300` | 开启空闲释放时，无占用后释放浏览器的空闲时长（下限 30 秒） |
 | `PA_BROWSER_VIEWER_TTL_SECONDS` | `60` | 观看心跳租约有效期（下限 10 秒）；到期即释放 |
 | `PA_BROWSER_DIRTY_INPUT_POLICY` | `block` | 页面有未提交输入时 `block`（保守拒绝释放）/`warn` |
 

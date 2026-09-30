@@ -107,6 +107,7 @@ function browserStatusPayload(status: BrowserStatusView): Record<string, unknown
   const idleRemainingMs = status.idleDeadline === null ? null : Math.max(0, status.idleDeadline - Date.now());
   return {
     enabled: status.enabled,
+    resident: status.resident,
     state: status.state,
     stateLabel: BROWSER_STATE_LABELS[status.state] ?? status.state,
     idleDeadline: status.idleDeadline,
