@@ -317,3 +317,28 @@ it.skipIf(!hasChromium)("reconnects past a hung page left in the browser, closin
   const titles = ((await (await fetch(`${process.env.AIO_TABS_CDP}/json/list`)).json()) as Array<{ type: string; title: string }>).filter((t) => t.type === "page").map((t) => t.title);
   expect(titles).not.toContain("Stray");
 }, 90_000);
+
+it.skipIf(!hasChromium)("cleans up finished and ownerless pages on request, never a running task's or a person's, always leaving one", async () => {
+  const done = tabIdOf(await call("C1", "browser_navigate", { url: page("Done", "done") }))!;
+  await post("/finish", { key: "C1" });
+  const running = tabIdOf(await call("C2", "browser_navigate", { url: page("Running", "running") }))!;
+  const held = tabIdOf(await call("C3", "browser_navigate", { url: page("Held", "held") }))!;
+  await post("/finish", { key: "C3" });
+  await control(held, "take", "C3");
+  // Any task may run the cleanup, e.g. when the person says "close them all".
+  const res = await call("Z", "browser_tabs_cleanup");
+  expect(res.result?.isError).toBeFalsy();
+  expect(text(res)).toContain(running);
+  const left = (await records()).map((t) => t.id);
+  expect(left).not.toContain(done);
+  expect(left).toEqual(expect.arrayContaining([running, held]));
+  await control(held, "release", "C3");
+  // Closing the last tabs still leaves the browser a page (Chromium may exit with its last window).
+  await post("/finish", { key: "C2" });
+  await post("/finish", { key: "C3" });
+  await call("Z", "browser_tabs_cleanup");
+  expect((await records()).map((t) => t.id)).not.toEqual(expect.arrayContaining([running]));
+  expect((await records()).map((t) => t.id)).not.toContain(held);
+  const pages = ((await (await fetch(`${process.env.AIO_TABS_CDP}/json/list`)).json()) as Array<{ type: string }>).filter((t) => t.type === "page");
+  expect(pages.length).toBeGreaterThanOrEqual(1);
+}, 60_000);

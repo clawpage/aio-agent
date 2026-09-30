@@ -30,6 +30,8 @@ const CDP = process.env.AIO_TABS_CDP || 'http://127.0.0.1:9222';
 const OUTPUT_DIR = process.env.AIO_TABS_OUTPUT || '/home/gem/workspace/.scratch/artifacts/browser';
 const STATE_FILE = process.env.AIO_TABS_STATE || '/tmp/aio-tabs-state.json';
 const MAX_FINISHED_TABS = Number(process.env.AIO_TABS_MAX_FINISHED || 8);
+/** A finished task's tabs stay this long for a follow-up, then close on their own. */
+const FINISHED_TTL_MS = Number(process.env.AIO_TABS_FINISHED_TTL_MS || 10 * 60 * 1000);
 const HUMAN_WAIT_MS = Number(process.env.AIO_TABS_HUMAN_WAIT_MS || 30 * 60 * 1000);
 /** No browser tool may hang a task: past this it fails with a reason (waiting for a person excepted). */
 const TOOL_DEADLINE_MS = Number(process.env.AIO_TABS_TOOL_DEADLINE_MS || 90 * 1000);
@@ -455,14 +457,33 @@ async function personPointer(body) {
   return { status: 200, body: { tab: tab.id, current: cursors.get(tab.key) || tab.id, title: await page.title().catch(() => ''), url: safeUrl(page), editable } };
 }
 
+/**
+ * Close pages, always leaving one open: Chromium may exit with its last window,
+ * and a restart would drop the session cookies the resident browser keeps.
+ */
+async function closeKeepingOne(pages) {
+  const context = await browserContext();
+  const doomed = new Set(pages.filter((p) => !p.isClosed()));
+  if (doomed.size && context.pages().every((p) => doomed.has(p) || p.isClosed())) await context.newPage().catch(() => undefined);
+  for (const page of doomed) await page.close().catch(() => undefined);
+  return doomed.size;
+}
+
+/** Finished tasks' tabs nobody is operating (older than `olderThan` ms, if given). */
+function finishedTabs(olderThan = 0) {
+  const now = Date.now();
+  return [...registry.values()].filter((t) => t.finishedAt && t.holder !== 'human' && now - t.finishedAt >= olderThan);
+}
+
 async function pruneFinished() {
-  let closed = 0;
-  for (const tab of [...registry.values()]) {
-    if (!tab.finishedAt) continue;
-    await tab.page.close().catch(() => undefined);
-    closed += 1;
-  }
-  return closed;
+  return closeKeepingOne(finishedTabs().map((t) => t.page));
+}
+
+/** Pages no task or person owns (leftover blank windows, pages from before the tab record). */
+async function strayPages() {
+  const context = await browserContext();
+  const owned = new Set([...registry.values()].map((t) => t.page));
+  return context.pages().filter((p) => !owned.has(p));
 }
 
 // -------------------------------------------------------------------- tools
@@ -604,7 +625,19 @@ const TOOLS = {
   },
   browser_tab_close: {
     mode: 'write', description: '关闭本任务创建的某个标签页（默认当前标签页）。', input: { tab: ownTabArg },
-    run: async (ctx, a) => { const tab = await resolveTab(ctx, a.tab, 'write'); await tab.page.close(); return textResult(`已关闭 ${tab.id}`); },
+    run: async (ctx, a) => { const tab = await resolveTab(ctx, a.tab, 'write'); await closeKeepingOne([tab.page]); return textResult(`已关闭 ${tab.id}`); },
+  },
+  browser_tabs_cleanup: {
+    mode: 'write',
+    description: '清理浏览器：关闭所有已结束任务的标签页，以及不属于任何任务的页面（如空白页）。用户要求关闭/清理标签页时使用。进行中任务的标签页和用户正在操作的页面不会被关闭；浏览器总会保留一个空白页。',
+    input: {},
+    run: async () => {
+      const finished = finishedTabs();
+      const stray = await strayPages();
+      const closed = await closeKeepingOne([...finished.map((t) => t.page), ...stray]);
+      const kept = [...registry.values()].filter((t) => !t.page.isClosed() && !finished.includes(t));
+      return textResult(`已关闭 ${closed} 个页面。${kept.length ? `保留 ${kept.length} 个（进行中任务或用户正在操作）：${kept.map((t) => `${t.id}「${t.title}」`).join('、')}` : '没有保留其他任务的页面。'}`);
+    },
   },
 };
 
@@ -788,6 +821,11 @@ const server = http.createServer(async (req, res) => {
 });
 
 if (require.main === module) {
+  // Finished tasks' tabs close on their own once nobody can follow up on them.
+  setInterval(() => {
+    const due = finishedTabs(FINISHED_TTL_MS);
+    if (due.length) void serialized('__sweep__', () => closeKeepingOne(due.map((t) => t.page))).catch(() => undefined);
+  }, Math.min(60_000, FINISHED_TTL_MS)).unref();
   // One task's stray failure must never take every task's browser tools down with it.
   process.on('unhandledRejection', (err) => process.stderr.write(`unhandled rejection: ${err && err.stack ? err.stack : err}\n`));
   server.listen(PORT, '127.0.0.1', () => process.stdout.write(`aio_tabs ${VERSION} listening on ${PORT}\n`));
