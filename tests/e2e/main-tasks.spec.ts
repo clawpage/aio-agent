@@ -493,6 +493,9 @@ test("dispatching shows a calm sorting animation and what the dispatcher weighs,
     await page.emulateMedia({ colorScheme: "light", reducedMotion: "no-preference" });
     const card = page.locator('[data-task-id="task-1"] .task-progress');
     await expect(card.locator(".task-progress-label")).toHaveText("正在分配");
+    // Nothing has run yet: the card does not open empty details.
+    await expect(page.getByRole("button", { name: /展开任务/ })).toHaveCount(0);
+    await expect(card.locator(".task-summary")).not.toContainText("›");
     const glyph = card.locator(".dispatch-glyph i").first();
     await expect(glyph).toBeVisible();
     expect(await glyph.evaluate(n => getComputedStyle(n).animationName)).toBe("dispatch-sort");

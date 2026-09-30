@@ -171,9 +171,15 @@ export function TaskChat({ onDetails, onOpenLink, onExpired, onFeed, onRevealBro
         progressAt.set(anchor.id, task);
     }
     const renderProgress = (t: Task) => <div className={`task-progress turn-${turnOf(t)} ${t.status === "running" || t.status === "planning" ? "active" : ""} ${t.status === "planning" ? "planning" : ""} ${t.status === "needs_input" ? "needs-input" : ""}`}>
-          <button className="task-summary" onClick={() => onDetails(t)} aria-label={`展开任务：${t.title}`}>{t.status === "planning"
-            ? <span className="dispatch-glyph" aria-hidden="true"><i/><i/><i/></span>
-            : <span className={`dot ${t.approvals || t.browser?.request ? "warn" : ""}`}/>}<span className="task-progress-label" key={t.status}>{t.approvals ? "需要你确认" : t.browser?.request && t.status === "running" ? "需要你操作浏览器" : t.waitReason?.label ?? labels[t.status] ?? t.status}</span><span className="task-progress-title">{t.title}</span><span aria-hidden>›</span></button>
+          {(() => {
+            const summary = <>{t.status === "planning"
+              ? <span className="dispatch-glyph" aria-hidden="true"><i/><i/><i/></span>
+              : <span className={`dot ${t.approvals || t.browser?.request ? "warn" : ""}`}/>}<span className="task-progress-label" key={t.status}>{t.approvals ? "需要你确认" : t.browser?.request && t.status === "running" ? "需要你操作浏览器" : t.waitReason?.label ?? labels[t.status] ?? t.status}</span><span className="task-progress-title">{t.title}</span></>;
+            // Still being dispatched (or dispatch failed): nothing has run yet, so there are no details to open.
+            return t.status === "planning" || t.status === "planning_failed"
+              ? <div className="task-summary">{summary}</div>
+              : <button className="task-summary" onClick={() => onDetails(t)} aria-label={`展开任务：${t.title}`}>{summary}<span aria-hidden>›</span></button>;
+          })()}
           {t.status === "planning" && <DispatchHint/>}
           {t.waitReason && <p className="task-intro task-wait-reason">{t.waitReason.message}</p>}
           {t.status === "needs_input" && t.clarification && <div className="task-question" role="status" aria-label="需要你补充">
