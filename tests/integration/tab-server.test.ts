@@ -44,6 +44,8 @@ beforeAll(async () => {
   process.env.AIO_TABS_STATE = path.join(dir, "state.json");
   process.env.AIO_TABS_MAX_FINISHED = "2";
   process.env.AIO_TABS_HUMAN_WAIT_MS = "3000";
+  process.env.AIO_TABS_TOOL_DEADLINE_MS = "4000";
+  process.env.AIO_TABS_PROBE_MS = "1500";
   await startServer();
 });
 
@@ -281,3 +283,37 @@ it.skipIf(!hasChromium)("opens a person's link in their own tab: theirs to opera
   expect(await records("person")).toHaveLength(2);
   site.close();
 });
+
+it.skipIf(!hasChromium)("never lets a browser tool hang a task, and clears a hung page", async () => {
+  const tab = tabIdOf(await call("Q", "browser_navigate", { url: page("Slow", "slow") }))!;
+  // A script that never settles: the call fails with a reason, the tab stays, and the next call is not stuck behind it.
+  const pending = await call("Q", "browser_evaluate", { script: "new Promise(() => {})" });
+  expect(pending.result?.isError).toBe(true);
+  expect(text(pending)).toContain("超过 4 秒");
+  expect(text(await call("Q", "browser_get_text"))).toContain("slow");
+  // A renderer spinning forever is hung: its tab is closed so nothing else waits on it.
+  const spun = await call("Q", "browser_evaluate", { script: "while (true) {}" });
+  expect(text(spun)).toContain(`标签页 ${tab} 已无响应，已关闭`);
+  await new Promise((r) => setTimeout(r, 500));
+  expect((await records("Q")).map((t) => t.id)).not.toContain(tab);
+}, 30_000);
+
+it.skipIf(!hasChromium)("reconnects past a hung page left in the browser, closing it", async () => {
+  const stray = await browser.newPage();
+  await stray.goto("data:text/html,<title>Stray</title>stray");
+  void stray.evaluate("while (true) {}").catch(() => undefined);
+  await new Promise((r) => setTimeout(r, 300));
+  server.close();
+  await startServer();
+  // The reconnect heals in the background; with this test's 4 s tool deadline the
+  // first call may give up first (production allows 90 s), a later one succeeds.
+  let opened = await call("R", "browser_navigate", { url: page("After", "after") });
+  for (let i = 0; i < 20 && opened.result?.isError; i++) {
+    await new Promise((r) => setTimeout(r, 2000));
+    opened = await call("R", "browser_navigate", { url: page("After", "after") });
+  }
+  expect(opened.result?.isError, text(opened)).toBeFalsy();
+  expect(text(await call("R", "browser_get_text"))).toContain("after");
+  const titles = ((await (await fetch(`${process.env.AIO_TABS_CDP}/json/list`)).json()) as Array<{ type: string; title: string }>).filter((t) => t.type === "page").map((t) => t.title);
+  expect(titles).not.toContain("Stray");
+}, 90_000);

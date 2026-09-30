@@ -31,6 +31,10 @@ const OUTPUT_DIR = process.env.AIO_TABS_OUTPUT || '/home/gem/workspace/.scratch/
 const STATE_FILE = process.env.AIO_TABS_STATE || '/tmp/aio-tabs-state.json';
 const MAX_FINISHED_TABS = Number(process.env.AIO_TABS_MAX_FINISHED || 8);
 const HUMAN_WAIT_MS = Number(process.env.AIO_TABS_HUMAN_WAIT_MS || 30 * 60 * 1000);
+/** No browser tool may hang a task: past this it fails with a reason (waiting for a person excepted). */
+const TOOL_DEADLINE_MS = Number(process.env.AIO_TABS_TOOL_DEADLINE_MS || 90 * 1000);
+/** A page that cannot evaluate `1` this fast, twice, is hung (a crashed or starved renderer). */
+const PROBE_MS = Number(process.env.AIO_TABS_PROBE_MS || 5000);
 const MAX_TEXT = 60000;
 const KEY = /^[A-Za-z0-9_-]{1,80}$/;
 const { chromium } = require(process.env.AIO_TABS_PLAYWRIGHT || '/opt/aio-browser/playwright-core');
@@ -94,6 +98,14 @@ async function targetIdOf(page) {
   }
 }
 
+function forget(tab) {
+  if (registry.get(tab.id) !== tab) return;
+  registry.delete(tab.id);
+  settleWaiters(tab.id, 'closed');
+  if (cursors.get(tab.key) === tab.id) cursors.delete(tab.key);
+  save();
+}
+
 function register(page, key, title, extra = {}) {
   const id = extra.id || `t${++seq}`;
   const now = Date.now();
@@ -105,12 +117,7 @@ function register(page, key, title, extra = {}) {
   if (!extra.id) cursors.set(key, id);
   // A link that opens a new window belongs to the same task and becomes its current tab.
   page.on('popup', (popup) => { void adoptNew(popup, key, title); });
-  page.on('close', () => {
-    registry.delete(id);
-    settleWaiters(id, 'closed');
-    if (cursors.get(key) === id) cursors.delete(key);
-    save();
-  });
+  page.on('close', () => forget(tab));
   if (!tab.targetId) targetIdOf(page).then((t) => { tab.targetId = t; save(); }).catch(() => undefined);
   save();
   return tab;
@@ -176,9 +183,45 @@ function releaseControl(tab) {
 
 let connecting = null;
 
+/** Whether a page target answers a trivial evaluation over its own raw CDP socket. */
+function answers(target) {
+  return new Promise((resolve) => {
+    let ws;
+    const timer = setTimeout(() => { try { ws.close(); } catch { /* gone */ } resolve(false); }, PROBE_MS);
+    try {
+      ws = new WebSocket(target.webSocketDebuggerUrl);
+      ws.onopen = () => ws.send(JSON.stringify({ id: 1, method: 'Runtime.evaluate', params: { expression: '1', returnByValue: true } }));
+      ws.onmessage = () => { clearTimeout(timer); try { ws.close(); } catch { /* done */ } resolve(true); };
+      ws.onerror = () => { clearTimeout(timer); resolve(false); };
+    } catch { clearTimeout(timer); resolve(false); }
+  });
+}
+
+/**
+ * Close pages whose renderer is hung. One hung page stalls every CDP client that
+ * attaches to all pages (a connect never finishes), so a dead page would take
+ * every task's browser tools down with it. A hung page is unusable anyway; what
+ * was closed is logged by URL for the person.
+ */
+async function closeHungPages() {
+  const list = await (await fetch(`${CDP}/json/list`, { signal: AbortSignal.timeout(5000) })).json();
+  const closed = [];
+  for (const target of list.filter((t) => t.type === 'page')) {
+    if ((await answers(target)) || (await answers(target))) continue;
+    await fetch(`${CDP}/json/close/${target.id}`, { signal: AbortSignal.timeout(5000) }).catch(() => undefined);
+    closed.push(target.url);
+  }
+  if (closed.length) process.stdout.write(`closed hung pages: ${closed.join(' ')}\n`);
+  return closed;
+}
+
 async function browserContext() {
   if (!connecting) {
-    connecting = chromium.connectOverCDP(CDP).then(async (browser) => {
+    connecting = chromium.connectOverCDP(CDP, { timeout: 20000 }).catch(async (err) => {
+      // A hung page blocks the connect: clear the dead pages once and try again.
+      if (!(await closeHungPages().catch(() => [])).length) throw err;
+      return chromium.connectOverCDP(CDP, { timeout: 20000 });
+    }).then(async (browser) => {
       // A released or restarted Chromium invalidates every page handle.
       browser.on('disconnected', () => { connecting = null; registry.clear(); cursors.clear(); });
       await reattach(browser.contexts()[0]);
@@ -585,13 +628,34 @@ function serialized(key, fn) {
   return next;
 }
 
+/** Run a tool within the deadline; past it, say so, and close this task's current tab if its page is hung. */
+function bounded(ctx, run) {
+  let timer;
+  const late = new Promise((_, reject) => { timer = setTimeout(async () => {
+    let note = '请稍后重试，或换一种做法。';
+    const tab = registry.get(cursors.get(ctx.key) || '');
+    const target = tab && tab.targetId && (await fetch(`${CDP}/json/list`, { signal: AbortSignal.timeout(5000) }).then((r) => r.json()).catch(() => [])).find((t) => t.id === tab.targetId);
+    if (target && !(await answers(target)) && !(await answers(target))) {
+      await fetch(`${CDP}/json/close/${target.id}`, { signal: AbortSignal.timeout(5000) }).catch(() => undefined);
+      // A hung page reports its close late: forget it now so nobody picks it again.
+      forget(tab);
+      note = `标签页 ${tab.id} 已无响应，已关闭；需要时用 browser_navigate 重新打开。`;
+    }
+    reject(new Error(`操作超过 ${Math.round(TOOL_DEADLINE_MS / 1000)} 秒没有完成。${note}`));
+  }, TOOL_DEADLINE_MS); });
+  return Promise.race([run, late]).finally(() => clearTimeout(timer));
+}
+
 async function callTool(ctx, name, args, signal) {
   const tool = TOOLS[name];
   if (!tool) return { content: [{ type: 'text', text: `未知工具：${name}` }], isError: true };
   try {
     return await serialized(ctx.key, async () => {
       touchTask(ctx.key, ctx.title);
-      const result = await tool.run(ctx, args || {}, signal);
+      // Waiting for a person has its own clock; everything else is bounded, and a
+      // late run is left behind so this task's next call is not stuck behind it.
+      const run = tool.run(ctx, args || {}, signal);
+      const result = name === 'browser_request_human' ? await run : await bounded(ctx, run);
       save();
       return result;
     });
