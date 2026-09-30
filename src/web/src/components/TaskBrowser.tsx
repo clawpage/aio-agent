@@ -32,6 +32,8 @@ export function TaskBrowser({ task, onReveal }: { task: Task; onReveal: () => vo
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [consoleOpen, setConsoleOpen] = useState(false);
+  // Watching the agent's page in the big view, before (or without) taking it over.
+  const [watching, setWatching] = useState(false);
   const consoleTarget = useMemo(() => taskConsoleTarget(task.id), [task.id]);
   const live = LIVE.has(task.status);
   // The feed summary changes the moment the agent asks for you or you take over.
@@ -68,6 +70,7 @@ export function TaskBrowser({ task, onReveal }: { task: Task; onReveal: () => vo
       const { tab: updated } = await api.taskBrowserControl(task.id, tab.id, action);
       setTabs((old) => old.map((t) => (t.id === updated.id ? updated : t)));
       setConsoleOpen(action === "take");
+      setWatching(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -93,7 +96,7 @@ export function TaskBrowser({ task, onReveal }: { task: Task; onReveal: () => vo
       {waiting && <p className="task-browser-reason">{tab.request!.reason}</p>}
       {human && <p className="task-browser-hint">{live ? "AI 已暂停操作这个页面。完成后点“交还给 AI”，它会从当前页面继续。" : "任务已结束，你可以查看或继续操作这个页面。"}</p>}
       {!shotFailed && (
-        <button type="button" className="task-browser-shot" onClick={() => (human ? setConsoleOpen(true) : void control("take"))} disabled={busy} aria-label="操作这个页面">
+        <button type="button" className="task-browser-shot" onClick={() => (human ? setConsoleOpen(true) : setWatching(true))} disabled={busy} aria-label={human ? "操作这个页面" : "查看这个页面"}>
           <img src={api.taskBrowserScreenshotUrl(task.id, tab.id, shotAt)} alt={`${tab.title || host(tab.url)} 的页面预览`} loading="lazy" onError={() => setShotFailed(true)} />
         </button>
       )}
@@ -105,16 +108,19 @@ export function TaskBrowser({ task, onReveal }: { task: Task; onReveal: () => vo
           <button type="button" className="ghost tiny" onClick={() => setConsoleOpen(true)}>操作页面</button>
         </>}
         {state === "ai" && <button type="button" className="ghost tiny" disabled={busy} onClick={() => void control("take")}>接管</button>}
-        {state === "done" && <button type="button" className="ghost tiny" disabled={busy} onClick={() => void control("take")}>在浏览器中查看</button>}
+        {state === "done" && <button type="button" className="ghost tiny" disabled={busy} onClick={() => setWatching(true)}>在浏览器中查看</button>}
       </div>
-      {human && consoleOpen && (
+      {((human && consoleOpen) || (!human && watching)) && (
         <TaskConsole
           target={consoleTarget}
           tab={tab}
-          label="操作任务页面"
-          primary={{ label: live ? "完成，交还给 AI" : "结束查看", busy, onClick: () => void control("release") }}
-          onClose={() => setConsoleOpen(false)}
-          onReveal={() => { setConsoleOpen(false); onReveal(); }}
+          watching={!human}
+          label={human ? "操作任务页面" : "查看任务页面"}
+          primary={human
+            ? { label: live ? "完成，交还给 AI" : "结束查看", busy, onClick: () => void control("release") }
+            : { label: live ? "人工接管" : "操作这个页面", busy, onClick: () => void control("take") }}
+          onClose={() => { setConsoleOpen(false); setWatching(false); }}
+          onReveal={() => { setConsoleOpen(false); setWatching(false); onReveal(); }}
         />
       )}
     </div>

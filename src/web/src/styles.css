@@ -2480,6 +2480,7 @@ textarea:focus {
 .task-browser .task-actions { margin-top: 8px; }
 /* The hand-over is the one action on the card: keep it a real, readable primary button. */
 .task-browser .task-actions button.primary, .task-console-head button.primary { padding: 6px 12px; background: var(--you); border-color: var(--you); color: var(--on-you); font-weight: 700; }
+.task-console.watching .task-console-head { background: var(--ai-soft); border-bottom-color: color-mix(in srgb, var(--ai) 35%, var(--border)); }
 
 
 /* Operating one task's tab you took over: its live picture, page controls and the input bar. */

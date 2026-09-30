@@ -428,6 +428,14 @@ async function personClose(body) {
  * the viewport), a scroll, or going back. Only a held tab accepts it.
  */
 async function personPointer(body) {
+  // Watching a task's tab (without taking it) still brings its window to the top
+  // of the desktop; stacking windows changes nothing for the agent driving it.
+  if (body.action === 'focus') {
+    const watched = registry.get(String(body.tab || ''));
+    if (!watched || watched.page.isClosed() || (body.task && watched.key !== body.task)) return { status: 404, body: { error: 'no_tab', message: '这个标签页已经关闭或不属于该任务' } };
+    await watched.page.bringToFront().catch(() => undefined);
+    return { status: 200, body: { tab: watched.id, current: cursors.get(watched.key) || watched.id, title: await watched.page.title().catch(() => ''), url: safeUrl(watched.page) } };
+  }
   const { tab, error } = heldTab(body);
   if (error) return error;
   const page = tab.page;
@@ -441,9 +449,6 @@ async function personPointer(body) {
     await page.mouse.wheel(0, dy);
   } else if (body.action === 'back') {
     await page.goBack({ timeout: 15000 }).catch(() => undefined);
-  } else if (body.action === 'focus') {
-    // The person watches the whole desktop (noVNC): put this tab's window on top.
-    await page.bringToFront().catch(() => undefined);
   } else {
     return { status: 400, body: { error: 'bad_action' } };
   }

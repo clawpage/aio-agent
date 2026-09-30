@@ -415,7 +415,7 @@ test("a task that needs you in the browser shows why, hands you its own tab to o
     const panel = page.getByRole("dialog", { name: "操作任务页面" });
     await expect(panel).toContainText("OpenTable 登录");
     await expect(panel.locator('iframe[title="沙箱桌面"]')).toHaveAttribute("src", /vnc\.html/);
-    expect(acts).toEqual([{ tab: "t1", action: "focus" }]);
+    await expect.poll(() => acts).toEqual([{ tab: "t1", action: "focus" }]);
     expect(tickets.at(-1)).toContain("/vnc/vnc.html");
     // Another window may have come up in the desktop: one tap puts this page back on top.
     await press(info, panel.getByRole("button", { name: "切回这个页面", exact: true }));
@@ -473,8 +473,12 @@ test("a link in a reply opens in the person's own tab, operated on the desktop l
     expect(page.context().pages()).toHaveLength(1);
     await expect(panel).toContainText("OpenTable: Nopa");
     await expect(panel.locator('iframe[title="沙箱桌面"]')).toHaveAttribute("src", /vnc\.html/);
-    // The browser is kept awake (woken if it slept) before its window is raised and the desktop opens.
-    expect(order.slice(0, 4)).toEqual(["heartbeat", "wake", "focus:t8", "ticket"]);
+    // The browser is kept awake (woken if it slept) before its window is raised; the desktop opens alongside.
+    await expect.poll(() => order.includes("focus:t8")).toBe(true);
+    const at = (step: string) => order.indexOf(step);
+    expect(at("heartbeat")).toBeLessThan(at("wake"));
+    expect(at("wake")).toBeLessThan(at("focus:t8"));
+    expect(order).toContain("ticket");
     expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
     await page.screenshot({ path: info.outputPath("link-console.png") });
 
@@ -538,4 +542,44 @@ test("a stuck first request never holds the page on loading", async ({ page }) =
     await expect(page.getByText("加载中…")).toBeVisible();
     await page.clock.fastForward(9000);
     await expect(page.getByRole("heading", { name: "主会话", exact: true })).toBeVisible();
+});
+test("tapping the preview watches the agent's page first; only taking over pauses the agent", async ({ page }, info) => {
+    const row: Task = { ...task(1), title: "查摄影资料", browser: { tabs: 1, request: null, human: false } };
+    const tab = { id: "t1", title: "DuckDuckGo 搜索", url: "https://html.duckduckgo.com/html/?q=exif", lastUsed: 1, finishedAt: null, holder: "ai" as "ai" | "human", request: null };
+    const controls: string[] = [];
+    await page.route("**/api/tasks/task-1/browser", r => r.fulfill({ json: { tabs: [tab] } }));
+    await page.route("**/api/tasks/task-1/browser/screenshot*", r => r.fulfill({ contentType: "image/png", body: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==", "base64") }));
+    await page.route("**/api/tasks/task-1/browser/control", async r => {
+        const { action } = r.request().postDataJSON();
+        controls.push(action);
+        tab.holder = action === "take" ? "human" : "ai";
+        row.browser = { tabs: 1, request: null, human: tab.holder === "human" };
+        await r.fulfill({ json: { tab } });
+    });
+    const focused: string[] = [];
+    await page.route("**/api/tasks/task-1/browser/pointer", async r => { focused.push(r.request().postDataJSON().action); await r.fulfill({ json: { title: tab.title, url: tab.url } }); });
+    await setup(page, [row]);
+    const tickets: string[] = [];
+    await page.route("**/api/workspace/ticket", async r => { tickets.push(r.request().postDataJSON().next); await r.fulfill({ json: { ticket: "t", origin: "http://127.0.0.1:4289", url: `http://127.0.0.1:4289/vnc/vnc.html?ticket=t${tickets.length}`, expiresAt: Date.now() + 60_000 } }); });
+
+    const card = page.getByRole("group", { name: "任务浏览器：AI 操作中" });
+    await press(info, card.getByRole("button", { name: "查看这个页面" }));
+    const watch = page.getByRole("dialog", { name: "查看任务页面" });
+    await expect(watch).toBeVisible();
+    // Watching: the agent keeps its page, the desktop is view-only, the window is brought up.
+    expect(controls).toEqual([]);
+    await expect.poll(() => tickets.at(-1)).toContain("view_only=1");
+    await expect.poll(() => focused).toEqual(["focus"]);
+    await expect(watch).toContainText("AI 正在操作");
+    await page.screenshot({ path: info.outputPath("watch-console.png") });
+
+    // Taking over pauses the agent and makes the same desktop interactive.
+    await press(info, watch.getByRole("button", { name: "人工接管", exact: true }));
+    const operate = page.getByRole("dialog", { name: "操作任务页面" });
+    await expect(operate).toBeVisible();
+    expect(controls).toEqual(["take"]);
+    await expect.poll(() => tickets.at(-1)).not.toContain("view_only");
+    await press(info, operate.getByRole("button", { name: "完成，交还给 AI", exact: true }));
+    expect(controls).toEqual(["take", "release"]);
+    await expect(operate).toBeHidden();
 });

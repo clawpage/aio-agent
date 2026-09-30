@@ -23,10 +23,13 @@ export const personConsoleTarget: ConsoleTarget = {
  * Operating one browser tab from any screen, in the sandbox desktop (noVNC): the
  * tab's own window is brought to the top, so what the person sees, taps and
  * types into (noVNC's keyboard button raises the phone keyboard) is that page.
- * Used for a task tab you took over and for a link you opened.
+ * Used for a task tab you took over and for a link you opened. `watching` shows
+ * the same desktop view-only while the agent keeps working: nothing a tap does
+ * reaches the page until the person takes over (the primary action).
  */
-export function TaskConsole({ target, tab, label, primary, closeLabel = "关闭", onClose, onReveal }: {
+export function TaskConsole({ target, tab, label, primary, watching = false, closeLabel = "关闭", onClose, onReveal }: {
   target: ConsoleTarget;
+  watching?: boolean;
   tab: { id: string; title: string; url: string };
   label: string;
   primary?: { label: string; busy: boolean; onClick: () => void };
@@ -68,15 +71,7 @@ export function TaskConsole({ target, tab, label, primary, closeLabel = "关闭"
       if (!cancelled) await focus();
     };
     const onVisibility = () => (document.visibilityState === "visible" ? void join() : void viewer.release());
-    void (async () => {
-      await join();
-      try {
-        const ticket = await api.ticket(DESKTOP_PATH);
-        if (!cancelled) setSrc(ticket.url);
-      } catch (err) {
-        if (!cancelled) setNotice(err instanceof Error ? err.message : String(err));
-      }
-    })();
+    void join();
     document.addEventListener("visibilitychange", onVisibility);
     return () => {
       cancelled = true;
@@ -85,6 +80,17 @@ export function TaskConsole({ target, tab, label, primary, closeLabel = "关闭"
       viewer.dispose();
     };
   }, [focus]);
+
+  // The desktop on a fresh one-time ticket: view-only while watching, interactive once taken over.
+  useEffect(() => {
+    let cancelled = false;
+    setSrc(null);
+    api.ticket(watching ? `${DESKTOP_PATH}&view_only=1` : DESKTOP_PATH).then(
+      (ticket) => { if (!cancelled) setSrc(ticket.url); },
+      (err) => { if (!cancelled) setNotice(err instanceof Error ? err.message : String(err)); },
+    );
+    return () => { cancelled = true; };
+  }, [watching]);
 
   // A phone keyboard shrinks only the visual viewport: keep the panel inside it.
   useEffect(() => {
@@ -107,7 +113,7 @@ export function TaskConsole({ target, tab, label, primary, closeLabel = "关闭"
 
   return createPortal(
     <div ref={overlay} className="task-console-overlay" role="presentation" onClick={(e) => { if (e.target === e.currentTarget) close(); }}>
-      <div className="task-console" role="dialog" aria-modal="true" aria-label={label}>
+      <div className={`task-console ${watching ? "watching" : ""}`} role="dialog" aria-modal="true" aria-label={label}>
         <header className="task-console-head">
           <span className="task-console-title" title={tab.url}>{tab.title || tab.url}</span>
           {primary && <button type="button" className="primary" disabled={primary.busy} onClick={primary.onClick}>{primary.label}</button>}
@@ -118,7 +124,7 @@ export function TaskConsole({ target, tab, label, primary, closeLabel = "关闭"
         </div>
         {notice && <p className="task-console-notice" role="alert">{notice}</p>}
         <div className="task-console-tools" role="group" aria-label="页面操作">
-          <span className="muted tiny task-console-hint">键盘在左侧工具栏</span>
+          <span className="muted tiny task-console-hint">{watching ? "AI 正在操作，你只能看；点“人工接管”后 AI 会暂停" : "键盘在左侧工具栏"}</span>
           <span className="spacer" />
           <button type="button" className="ghost tiny" onClick={() => void focus()}>切回这个页面</button>
           <button type="button" className="ghost tiny" onClick={onReveal}>在工作区打开</button>

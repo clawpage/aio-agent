@@ -229,6 +229,8 @@ it.skipIf(!hasChromium)("taps, scrolls and goes back for a person in a held tab"
   await call("P", "browser_navigate", { url: tall });
   const point = async (body: Record<string, unknown>) => fetch(`${base}/pointer`, { method: "POST", body: JSON.stringify({ tab, task: "P", ...body }) });
   expect((await point({ action: "click", x: 0.5, y: 0.25 })).status).toBe(409);
+  // Watching without taking over may still bring the page's window up, nothing more.
+  expect((await point({ action: "focus" })).status).toBe(200);
 
   await control(tab, "take", "P");
   expect((await point({ action: "click", x: 2, y: 0.25 })).status).toBe(400);
