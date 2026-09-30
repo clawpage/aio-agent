@@ -21,7 +21,7 @@ test('login accepts the supplied account name',async({page})=>{
  await page.route('**/api/auth/session',r=>r.fulfill({json:{authenticated,username:authenticated?'yzmy':null,role:authenticated?'member':null}}));
  await page.route('**/api/main*',r=>r.fulfill({json:{mode:'tasks',tasks:[],nextBefore:null}}));
  await page.route('**/api/auth/login',async r=>{body=r.request().postDataJSON();authenticated=true;await r.fulfill({json:{ok:true,username:'yzmy',role:'member'}});});
- await page.goto('/login');await page.getByLabel('账号',{exact:true}).fill('yzmy');await page.getByLabel('密码',{exact:true}).fill('test-password');await page.getByRole('button',{name:'登录',exact:true}).click();
+ await page.goto('/login');await expect(page.getByLabel('账号',{exact:true})).toHaveValue('');await expect(page.getByLabel('账号',{exact:true})).toBeFocused();await page.getByLabel('账号',{exact:true}).fill('yzmy');await page.getByLabel('密码',{exact:true}).fill('test-password');await page.getByRole('button',{name:'登录',exact:true}).click();
  await expect(page.getByRole('heading',{name:'主会话',exact:true})).toBeVisible();expect(body).toEqual({username:'yzmy',password:'test-password'});expect(new URL(page.url()).pathname).toBe('/u/yzmy');
 });
 test('each account has its own address; another account\'s address says whose it is',async({page},info)=>{

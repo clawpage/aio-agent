@@ -3,7 +3,7 @@ import { api, ApiError } from "../api";
 import { BrandMark } from "./Brand";
 
 export function Login({ onSuccess, notice, username: named }: { onSuccess: () => void | Promise<void>; notice?: string | null; username?: string }) {
-  const [username, setUsername] = useState(named ?? "owner");
+  const [username, setUsername] = useState(named ?? "");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -90,14 +90,14 @@ export function Login({ onSuccess, notice, username: named }: { onSuccess: () =>
         <p className="muted">什么事情都在我这里一站解决吧。用管理员给你的账号登录。</p>
         <label className="field">
           <span>账号</span>
-          <input value={username} onChange={e => setUsername(e.target.value)} autoComplete="username" />
+          <input value={username} onChange={e => setUsername(e.target.value)} autoComplete="username" autoFocus={!named} />
         </label>
         <label className="field">
           <span>密码</span>
           <input
             type="password"
             value={password}
-            autoFocus
+            autoFocus={Boolean(named)}
             autoComplete="current-password"
             onChange={(e) => setPassword(e.target.value)}
             placeholder="请输入访问密码"
@@ -106,7 +106,7 @@ export function Login({ onSuccess, notice, username: named }: { onSuccess: () =>
         {sessionError && <div className="banner warn" role="status">暂时无法验证登录状态，网络恢复后会自动重试。</div>}
         {notice && <div className="banner warn">{notice}</div>}
         {error && <div className="banner error">{error}</div>}
-        <button type="submit" className="primary block" disabled={busy || !password}>
+        <button type="submit" className="primary block" disabled={busy || !password || !username.trim()}>
           {busy ? "登录中…" : "登录"}
         </button>
 
