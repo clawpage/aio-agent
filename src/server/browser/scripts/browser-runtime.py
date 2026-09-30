@@ -64,6 +64,8 @@ DEFAULT_PROFILE_DIR = "/home/gem/.config/browser"
 # field; `/v1/browser/tabs` does, and is authoritative for tab order + focus.
 AIO_API_HOST = "127.0.0.1"
 AIO_API_PORT = 8080
+MCP_PROBE_DEADLINE_S = 15.0
+MCP_PROBE_INTERVAL_S = 0.5
 AIO_TABS_PATH = "/v1/browser/tabs"
 
 # Chromium leaves `.crdownload` markers next to an in-flight download. Honest
@@ -2316,7 +2318,6 @@ def reconnect_mcp_browser() -> dict[str, Any]:
     then exercise a page-bound tool (tools/list would miss this exact failure).
     Never retry user actions or close the newly restored browser/pages.
     """
-    import http.client
     import pwd
 
     try:
@@ -2337,7 +2338,25 @@ def reconnect_mcp_browser() -> dict[str, Any]:
                                 capture_output=True, text=True, timeout=20, check=False)
         if result.returncode != 0:
             return err("浏览器 MCP 服务重连失败，快照已保留")
-        # Probe through the same AIO MCP entry used by Codex, not only port 8100.
+    except (OSError, ValueError, KeyError, subprocess.SubprocessError):
+        return err("浏览器 MCP 重连或验证超时，快照已保留")
+    # `supervisorctl restart` returns once node is spawned, before it listens on
+    # 8100; a probe in that window gets AIO's "Client failed to connect". The
+    # probe is a read-only tab list, so retrying it until the deadline is safe.
+    deadline = time.monotonic() + MCP_PROBE_DEADLINE_S
+    while True:
+        if _probe_mcp_page_tool():
+            return ok()
+        if time.monotonic() >= deadline:
+            return err("浏览器 MCP 页面连接验证失败，快照已保留")
+        time.sleep(MCP_PROBE_INTERVAL_S)
+
+
+def _probe_mcp_page_tool() -> bool:
+    """Exercise a page-bound tool through the same AIO MCP entry used by Codex."""
+    import http.client
+
+    try:
         conn = http.client.HTTPConnection(AIO_API_HOST, AIO_API_PORT, timeout=15)
         try:
             conn.request("POST", "/mcp", body=json.dumps({"jsonrpc": "2.0", "id": 1,
@@ -2352,14 +2371,12 @@ def reconnect_mcp_browser() -> dict[str, Any]:
             else:
                 payload = json.loads(raw)
             result = payload.get("result") if isinstance(payload, dict) else None
-            if (response.status != 200 or not isinstance(result, dict) or payload.get("error")
-                    or result.get("isError") or not result.get("content")):
-                return err("浏览器 MCP 页面连接验证失败，快照已保留")
+            return not (response.status != 200 or not isinstance(result, dict) or payload.get("error")
+                        or result.get("isError") or not result.get("content"))
         finally:
             conn.close()
-    except (OSError, ValueError, KeyError, StopIteration, subprocess.SubprocessError, http.client.HTTPException):
-        return err("浏览器 MCP 重连或验证超时，快照已保留")
-    return ok()
+    except (OSError, ValueError, KeyError, StopIteration, http.client.HTTPException):
+        return False
 
 
 def _restored_count(entries: Sequence[Any]) -> int:

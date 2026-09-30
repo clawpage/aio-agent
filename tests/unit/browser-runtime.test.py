@@ -2048,13 +2048,19 @@ def test_mcp_reconnect_checks_ownership_and_real_page_tool() -> None:
     response_body = {"jsonrpc": "2.0", "id": 1, "result": {"content": [{"type": "text", "text": "tabs"}]}}
     response_status = 200
     restart_code = 0
+    refuse_connects = 0
     class Response:
         status = 200
         def read(self): return json.dumps(response_body).encode()
         def getheader(self, name): return "application/json"
     class Conn:
         def __init__(self, *args, **kwargs): pass
-        def request(self, method, path, body, headers): requests.append((method, path, json.loads(body)))
+        def request(self, method, path, body, headers):
+            nonlocal refuse_connects
+            requests.append((method, path, json.loads(body)))
+            if refuse_connects:
+                refuse_connects -= 1
+                raise ConnectionRefusedError("8100 not listening yet")
         def getresponse(self):
             r = Response(); r.status = response_status; return r
         def close(self): pass
@@ -2067,12 +2073,21 @@ def test_mcp_reconnect_checks_ownership_and_real_page_tool() -> None:
             (rt.subprocess, "run", run), (rt, "read_cmdline_raw", lambda pid: b"node\0/usr/local/bin/mcp-server-browser\0--port\08100\0" if owned else b"node\0/other/service.js\0"),
             (rt, "read_stat", lambda pid: (123, "S")), (rt, "same_process", lambda *a: True),
             (rt, "read_uid", lambda pid: 1000), (pwd, "getpwnam", lambda name: SimpleNamespace(pw_uid=1000)),
-            (http.client, "HTTPConnection", Conn)]:
+            (http.client, "HTTPConnection", Conn), (rt, "MCP_PROBE_DEADLINE_S", 0.05),
+            (rt, "MCP_PROBE_INTERVAL_S", 0.01)]:
             stack.enter_context(patch.object(obj, name, replacement))
         assert_true(rt.reconnect_mcp_browser()["ok"])
         assert_eq(calls, [["supervisorctl", "pid", "mcp-server-browser"], ["supervisorctl", "restart", "mcp-server-browser"]])
         assert_eq(requests[0][1], "/mcp")
         assert_eq(requests[0][2]["params"]["name"], "browser_tab_list", "不能只探测元数据")
+        # supervisorctl restart returns before node listens: the first probe is refused.
+        refuse_connects = 2
+        before = len(requests)
+        assert_true(rt.reconnect_mcp_browser()["ok"], "MCP 刚重启未监听时应重试探测")
+        assert_eq(len(requests) - before, 3, "拒连两次后第三次探测成功")
+        refuse_connects = 10**6
+        assert_false(rt.reconnect_mcp_browser()["ok"], "超过截止时间仍拒连才算失败")
+        refuse_connects = 0
         response_body = {"result": {"isError": True, "content": [{"text": "Session closed"}]}}
         assert_false(rt.reconnect_mcp_browser()["ok"], "HTTP 200 工具错误不能当恢复成功")
         response_body = {"error": {"message": "failed"}}
