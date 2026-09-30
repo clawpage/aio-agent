@@ -1,4 +1,3 @@
-import { RemoteKeyboard } from "./RemoteKeyboard";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, ApiError } from "../api";
 import type { CapabilitiesResponse, DocumentReadiness, FileEntry, StatusResponse } from "../types";
@@ -7,6 +6,7 @@ import { TerminalSessions } from "./TerminalSessions";
 import { BrowserViewerController } from "../browserViewer";
 import { BrowserStatusBar, fetchBrowserStatus, STATUS_POLL_MS } from "./BrowserStatusBar";
 import { needsRestore } from "../browserStatusView";
+import { DESKTOP_PATH } from "./TaskConsole";
 import { browserApi, UI_KEEP_ALIVE_NOTE, type BrowserLifecycleStateView } from "../api";
 import { baseName, isPreviewableKind, kindLabel, workspaceFileKind, type WorkspaceFileKind } from "../sandboxLink";
 interface Props {
@@ -20,11 +20,11 @@ interface Props {
   browserNonce?: number;
 }
 
-type TabId = "desktop" | "browser" | "terminal" | "files" | "editor" | "notebook" | "preview" | "api";
+type TabId = "browser" | "terminal" | "files" | "editor" | "notebook" | "preview" | "api";
 
 const TABS: Array<{ id: TabId; label: string; path?: string; kind: "frame" | "native" }> = [
-  { id: "desktop", label: "桌面", path: "/vnc/vnc.html?autoconnect=1&resize=scale&path=ws", kind: "frame" },
-  { id: "browser", label: "浏览器", path: "/browser-ui", kind: "frame" },
+  // The browser is shown on the sandbox desktop (noVNC): its own keyboard, gestures and windows.
+  { id: "browser", label: "浏览器", path: DESKTOP_PATH, kind: "frame" },
   { id: "terminal", label: "终端", path: "/terminal", kind: "native" },
   { id: "files", label: "文件", kind: "native" },
   { id: "editor", label: "编辑器", path: "/code-server/", kind: "frame" },
@@ -221,7 +221,7 @@ export function Workspace({ open, status, initialPath, onClose, onNotify, browse
 
   // The load event is authoritative; the timer only covers a frame that never fires it.
   useEffect(() => {
-    if (!frameSrc || !docVisible || ((tab === "browser" || tab === "desktop") && (suspended || restoringBrowser))) return;
+    if (!frameSrc || !docVisible || (tab === "browser" && (suspended || restoringBrowser))) return;
     setFrameStatus("loading");
     const timer = window.setTimeout(
       () =>
@@ -287,9 +287,7 @@ export function Workspace({ open, status, initialPath, onClose, onNotify, browse
   const viewer = viewerRef.current;
 
   /** The browser/desktop panels are the only ones that need a live Chromium. */
-  const holdsBrowser = open && (tab === "browser" || tab === "desktop");
-  // Touch screens cannot type into the remote view directly; they get the native input bar.
-  const touchDevice = typeof window !== "undefined" && window.matchMedia?.("(pointer: coarse)").matches;
+  const holdsBrowser = open && tab === "browser";
 
   /**
    * The frame's ticket was spent by its first load, so a frame unmounted while
@@ -561,7 +559,6 @@ export function Workspace({ open, status, initialPath, onClose, onNotify, browse
             ) : (
               <p className="muted">正在建立工作区会话…</p>
             )}
-            {holdsBrowser && touchDevice && frameSrc && docVisible && !suspended && !restoringBrowser && <RemoteKeyboard />}
             {frameError && <div className="frame-hint error">{frameError}</div>}
             {frameStatus === "timeout" && (
               <div className="frame-hint">

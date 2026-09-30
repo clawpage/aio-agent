@@ -14,8 +14,8 @@
 
 | 界面 | 路径 | 说明 |
 | --- | --- | --- |
-| 桌面（noVNC） | `/vnc/vnc.html?autoconnect=1&resize=scale&path=ws` | 真实 X11 桌面，手机可点击/输入 |
-| 浏览器控制台 | `/browser-ui` | CDP 调试与页面操作 |
+| 桌面（noVNC） | `/vnc/vnc.html?autoconnect=1&resize=scale&reconnect=1&path=ws` | 真实 X11 桌面，手机可点击/输入；工作区“浏览器”标签与任务操作面板都用它 |
+| 浏览器控制台 | `/browser-ui` | CDP 调试与页面操作（控制台不再使用：工作区“浏览器”标签和任务操作面板都用上面的 noVNC 桌面） |
 | 交互终端 | `/terminal` | tmux 终端会话 |
 | 代码编辑器 | `/code-server/` | VS Code Web |
 | JupyterLab | `/jupyter/lab` | 多内核笔记本 |

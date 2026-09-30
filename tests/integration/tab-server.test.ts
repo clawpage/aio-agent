@@ -234,6 +234,8 @@ it.skipIf(!hasChromium)("taps, scrolls and goes back for a person in a held tab"
   expect(await (await point({ action: "click", x: 0.5, y: 0.25 })).json()).toMatchObject({ title: "tapped", editable: false });
   expect(await (await point({ action: "click", x: 0.5, y: 0.75 })).json()).toMatchObject({ editable: true });
   expect((await point({ action: "scroll", dy: 800 })).status).toBe(200);
+  // The person watches the whole desktop: focus puts this tab's page in front.
+  expect((await point({ action: "focus" })).status).toBe(200);
   const back = (await (await point({ action: "back" })).json()) as { title: string };
   await control(tab, "release", "P");
   expect(back.title).toBe("First");

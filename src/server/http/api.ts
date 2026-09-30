@@ -483,7 +483,7 @@ export function createApiRouter(context: AppContext): Router {
   router.post("/browser/person/pointer", requireKind("primary"), requireSession, asyncHandler(async (req, res) => {
     if (!context.tabs) { res.status(404).json({ error: "not_found" }); return; }
     const action = req.body?.action;
-    if (action !== "click" && action !== "scroll" && action !== "back") { res.status(400).json({ error: "bad_action" }); return; }
+    if (action !== "click" && action !== "scroll" && action !== "back" && action !== "focus") { res.status(400).json({ error: "bad_action" }); return; }
     const num = (v: unknown): number | undefined => (typeof v === "number" && Number.isFinite(v) ? v : undefined);
     const out = await context.tabs.pointer({ task: PERSON_KEY, tab: personTab(req), action, x: num(req.body?.x), y: num(req.body?.y), dy: num(req.body?.dy) });
     res.status(out.status).json(out.body);
@@ -505,7 +505,7 @@ export function createApiRouter(context: AppContext): Router {
     const task = taskBrowserKey(req);
     if (!task || !context.tabs) { res.status(404).json({ error: "not_found" }); return; }
     const action = req.body?.action;
-    if (action !== "click" && action !== "scroll" && action !== "back") { res.status(400).json({ error: "bad_action" }); return; }
+    if (action !== "click" && action !== "scroll" && action !== "back" && action !== "focus") { res.status(400).json({ error: "bad_action" }); return; }
     const num = (v: unknown): number | undefined => (typeof v === "number" && Number.isFinite(v) ? v : undefined);
     const out = await context.tabs.pointer({ task, ...heldTab(req), action, x: num(req.body?.x), y: num(req.body?.y), dy: num(req.body?.dy) });
     res.status(out.status).json(out.body);

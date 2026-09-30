@@ -2481,23 +2481,17 @@ textarea:focus {
 /* The hand-over is the one action on the card: keep it a real, readable primary button. */
 .task-browser .task-actions button.primary, .task-console-head button.primary { padding: 6px 12px; background: var(--you); border-color: var(--you); color: var(--on-you); font-weight: 700; }
 
-/* Phone input bar under the remote browser/desktop view. */
-.remote-keyboard { flex: none; padding: 8px 10px calc(8px + env(safe-area-inset-bottom)); border-top: 1px solid var(--border); background: var(--bg-soft); }
-.remote-keyboard-row { display: flex; gap: 6px; align-items: center; min-width: 0; }
-.remote-keyboard-row input { flex: 1 1 auto; min-width: 0; font-size: 16px; padding: 8px 10px; }
-.remote-keyboard-row button { flex: none; min-width: 40px; padding: 8px 10px; }
-.remote-keyboard-notice { margin: 0 0 6px; font-size: 12px; color: var(--warn); line-height: 1.5; }
 
 /* Operating one task's tab you took over: its live picture, page controls and the input bar. */
 .task-console-overlay { position: fixed; top: 0; left: 0; right: 0; height: 100dvh; z-index: 110; display: flex; align-items: center; justify-content: center; padding: 16px; background: rgba(0,0,0,.6); }
-.task-console { display: flex; flex-direction: column; width: min(1040px, 100%); max-height: 100%; overflow: hidden; border: 1px solid var(--border); border-radius: 14px; background: var(--bg-raised); }
+.task-console { display: flex; flex-direction: column; width: min(1040px, 100%); height: min(860px, 100%); max-height: 100%; overflow: hidden; border: 1px solid var(--border); border-radius: 14px; background: var(--bg-raised); }
 .task-console-head { flex: none; display: flex; align-items: center; gap: 8px; min-width: 0; padding: 8px 10px; border-bottom: 1px solid color-mix(in srgb,var(--you) 35%,var(--border)); background: var(--you-soft); }
 .task-console-title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; font-weight: 600; }
 .task-console-head button { flex: none; }
-.task-console-screen { flex: 1 1 auto; min-height: 0; overflow: auto; background: var(--bg); }
-.task-console-screen p { margin: 8px 10px; }
-.task-console-screen.zoomed img { width: 200%; max-width: none; }
-.task-console-screen img { display: block; width: 100%; height: auto; cursor: pointer; touch-action: manipulation; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+.task-console-screen { position: relative; flex: 1 1 auto; min-height: 0; overflow: hidden; background: #000; }
+.task-console-screen iframe { display: block; width: 100%; height: 100%; border: 0; }
+.task-console-screen p { margin: 8px 10px; color: #cfcbe0; }
+.task-console-hint { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .task-console-notice { flex: none; margin: 0; padding: 6px 10px 0; font-size: 12px; color: var(--warn); line-height: 1.5; }
 .task-console-tools { flex: none; display: flex; align-items: center; gap: 6px; padding: 6px 10px; border-top: 1px solid var(--border); }
 .task-console-tools button { min-width: 40px; }

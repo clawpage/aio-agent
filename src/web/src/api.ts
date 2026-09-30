@@ -89,7 +89,7 @@ async function request<T>(
   return (parsed ?? {}) as T;
 }
 
-export type PointerInput = { action: "click"; x: number; y: number } | { action: "scroll"; dy: number } | { action: "back" };
+export type PointerInput = { action: "click"; x: number; y: number } | { action: "scroll"; dy: number } | { action: "back" } | { action: "focus" };
 /** `current`: the tab the page's key is on now (a link may have opened a new window). */
 export type PointerResult = { title: string; url: string; editable?: boolean; current?: string };
 
@@ -101,17 +101,13 @@ export const api = {
   submitTask: (body: { text: string; clientMessageId: string; attachments: Attachment[]; relatedTaskId: string | null }) => request<{ task: import("./types").Task; duplicate: boolean }>("/api/tasks", { method: "POST", body }),
   stopTask: (id: string) => request<{ok:boolean}>(`/api/tasks/${encodeURIComponent(id)}/stop`, {method:"POST",body:{}}),
   retryTaskPlanning: (id: string) => request<{ok:boolean}>(`/api/tasks/${encodeURIComponent(id)}/retry-planning`, {method:"POST",body:{}}),
-  browserInput: (input: { text?: string; key?: string }) => request<{ title: string; url: string }>("/api/browser/input", { method: "POST", body: input }),
   taskBrowser: (id: string) => request<{ tabs: import("./types").TaskTab[] }>(`/api/tasks/${encodeURIComponent(id)}/browser`),
   taskBrowserControl: (id: string, tab: string, action: "take" | "release") => request<{ tab: import("./types").TaskTab }>(`/api/tasks/${encodeURIComponent(id)}/browser/control`, { method: "POST", body: { tab, action } }),
-  taskBrowserInput: (id: string, tab: string, input: { text?: string; key?: string }) => request<{ title: string; url: string }>(`/api/tasks/${encodeURIComponent(id)}/browser/input`, { method: "POST", body: { tab, ...input } }),
   taskBrowserPointer: (id: string, tab: string, input: PointerInput) =>
     request<PointerResult>(`/api/tasks/${encodeURIComponent(id)}/browser/pointer`, { method: "POST", body: { tab, ...input } }),
   /** The person's own tabs: links opened from a reply. */
-  personBrowserInput: (tab: string, input: { text?: string; key?: string }) => request<{ title: string; url: string }>("/api/browser/person/input", { method: "POST", body: { tab, ...input } }),
   personBrowserPointer: (tab: string, input: PointerInput) => request<PointerResult>("/api/browser/person/pointer", { method: "POST", body: { tab, ...input } }),
   personBrowserClose: (tab: string) => request<{ closed: string }>("/api/browser/person/close", { method: "POST", body: { tab } }),
-  personBrowserScreenshotUrl: (tab: string, at: number) => `/api/browser/person/screenshot?tab=${encodeURIComponent(tab)}&at=${at}`,
   taskBrowserScreenshotUrl: (id: string, tab: string, at: number) => `/api/tasks/${encodeURIComponent(id)}/browser/screenshot?tab=${encodeURIComponent(tab)}&at=${at}`,
   session: (signal?: AbortSignal) => request<{ authenticated: boolean; role?: "owner" | "member"; username: string | null; expiresAt?: number; secure?: boolean }>("/api/auth/session", {signal,cache:"no-store"}),
   login: (password: string, username = "owner") => request<{ ok: boolean; username: string; expiresAt: number }>("/api/auth/login", { method: "POST", body: { password, username } }),

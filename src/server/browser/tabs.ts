@@ -69,7 +69,7 @@ export interface TabServerLike {
   /** Type text or press a key, for a person, into a tab they took over (the latest one unless `tab`/`task` name it). */
   input(input: PersonTarget & { text?: string; key?: string }): Promise<PersonResult>;
   /** Tap (x, y as 0..1 of the viewport), scroll or go back, for a person, in a tab they took over. */
-  pointer(input: PersonTarget & { action: "click" | "scroll" | "back"; x?: number; y?: number; dy?: number }): Promise<PersonResult>;
+  pointer(input: PersonTarget & { action: "click" | "scroll" | "back" | "focus"; x?: number; y?: number; dy?: number }): Promise<PersonResult>;
   /** Open a link for a person in a tab of their own, in its own window. */
   open(url: string): Promise<PersonResult>;
   /** Close a tab the person opened. */
@@ -251,7 +251,7 @@ export class TabServer implements TabServerLike {
     return this.#person("/input", input);
   }
 
-  async pointer(input: PersonTarget & { action: "click" | "scroll" | "back"; x?: number; y?: number; dy?: number }): Promise<PersonResult> {
+  async pointer(input: PersonTarget & { action: "click" | "scroll" | "back" | "focus"; x?: number; y?: number; dy?: number }): Promise<PersonResult> {
     return this.#person("/pointer", input);
   }
 

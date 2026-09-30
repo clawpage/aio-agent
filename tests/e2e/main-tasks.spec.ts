@@ -394,9 +394,10 @@ test("a task that needs you in the browser shows why, hands you its own tab to o
         await r.fulfill({ json: { tab } });
     });
     const acts: Array<Record<string, unknown>> = [];
-    await page.route("**/api/tasks/task-1/browser/pointer", async r => { acts.push(r.request().postDataJSON()); await r.fulfill({ json: { title: tab.title, url: tab.url, editable: true } }); });
-    await page.route("**/api/tasks/task-1/browser/input", async r => { acts.push(r.request().postDataJSON()); await r.fulfill({ json: { title: tab.title, url: tab.url } }); });
+    await page.route("**/api/tasks/task-1/browser/pointer", async r => { acts.push(r.request().postDataJSON()); await r.fulfill({ json: { title: tab.title, url: tab.url } }); });
     await setup(page, [row]);
+    const tickets: string[] = [];
+    await page.route("**/api/workspace/ticket", async r => { tickets.push(r.request().postDataJSON().next); await r.fulfill({ json: { ticket: "t", origin: "http://127.0.0.1:4289", url: "http://127.0.0.1:4289/vnc/vnc.html?ticket=t", expiresAt: Date.now() + 60_000 } }); });
     const card = page.getByRole("group", { name: "任务浏览器：需要你操作" });
     await expect(card).toContainText("请登录 OpenTable 账号");
     await expect(card.getByRole("img", { name: /页面预览/ })).toBeVisible();
@@ -408,40 +409,23 @@ test("a task that needs you in the browser shows why, hands you its own tab to o
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
     expect(overflow).toBeLessThanOrEqual(0);
 
-    // Taking over opens a panel operating just this task's tab: tap its picture, scroll, type.
+    // Taking over opens the sandbox desktop (noVNC) with this task's window put on top.
     await card.getByRole("button", { name: "去浏览器操作", exact: true }).click();
     expect(controls).toEqual(["take"]);
     const panel = page.getByRole("dialog", { name: "操作任务页面" });
     await expect(panel).toContainText("OpenTable 登录");
-    const screen = panel.getByRole("img", { name: /实时画面/ });
-    const box = (await screen.boundingBox())!;
-    await press(info, screen, { x: box.width / 2, y: box.height / 4 });
-    await expect.poll(() => acts.length).toBe(1);
-    expect(acts[0]).toMatchObject({ tab: "t1", action: "click" });
-    expect(acts[0].x as number).toBeCloseTo(0.5, 1);
-    expect(acts[0].y as number).toBeCloseTo(0.25, 1);
-    const field = panel.getByRole("textbox", { name: "要输入到网页的文字" });
-    await expect(field).toHaveAttribute("placeholder", "在这里打字");
-    await field.fill("me@example.com");
-    await panel.getByRole("button", { name: "发送", exact: true }).click();
-    await press(info, panel.getByRole("button", { name: "回车", exact: true }));
-    await press(info, panel.getByRole("button", { name: "向下滚动", exact: true }));
-    await expect.poll(() => acts.length).toBe(4);
-    expect(acts.slice(1)).toEqual([{ tab: "t1", text: "me@example.com" }, { tab: "t1", key: "Enter" }, { tab: "t1", action: "scroll", dy: 600 }]);
-    // Zoomed in, a tap still lands on the matching point of the page.
-    await press(info, panel.getByRole("button", { name: "放大画面", exact: true }));
-    const zoomedBox = (await screen.boundingBox())!;
-    expect(zoomedBox.width).toBeGreaterThan(box.width * 1.5);
-    await press(info, screen, { x: zoomedBox.width / 4, y: zoomedBox.height / 10 });
-    await expect.poll(() => acts.length).toBe(5);
-    expect(acts[4].x as number).toBeCloseTo(0.25, 1);
-    expect(acts[4].y as number).toBeCloseTo(0.1, 1);
-    await press(info, panel.getByRole("button", { name: "放大画面", exact: true }));
-    await expect(field).toHaveValue("");
-    // The whole panel, input bar included, fits the screen.
+    await expect(panel.locator('iframe[title="沙箱桌面"]')).toHaveAttribute("src", /vnc\.html/);
+    expect(acts).toEqual([{ tab: "t1", action: "focus" }]);
+    expect(tickets.at(-1)).toContain("/vnc/vnc.html");
+    // Another window may have come up in the desktop: one tap puts this page back on top.
+    await press(info, panel.getByRole("button", { name: "切回这个页面", exact: true }));
+    await expect.poll(() => acts.length).toBe(2);
+    expect(acts[1]).toEqual({ tab: "t1", action: "focus" });
+    // The desktop fills the panel, and the panel fits the screen.
     const viewport = page.viewportSize()!;
-    const bar = (await panel.getByRole("form", { name: "向网页输入" }).boundingBox())!;
-    expect(bar.y + bar.height).toBeLessThanOrEqual(viewport.height + 1);
+    const desktop = (await panel.locator("iframe").boundingBox())!;
+    expect(desktop.height).toBeGreaterThan(viewport.height * 0.5);
+    expect(desktop.y + desktop.height).toBeLessThanOrEqual(viewport.height + 1);
     expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
     await page.screenshot({ path: info.outputPath("browser-console.png") });
 
@@ -456,59 +440,49 @@ test("a task that needs you in the browser shows why, hands you its own tab to o
     await expect(panel).toBeHidden();
     await expect(page.getByRole("group", { name: "任务浏览器：AI 操作中" }).getByRole("button", { name: "接管", exact: true })).toBeVisible();
 });
-test("a link in a reply opens in the person's own tab, operated from the same console as a hand-over", async ({ page }, info) => {
+test("a link in a reply opens in the person's own tab, operated on the desktop like a hand-over", async ({ page }, info) => {
     const row: Task = { ...task(1, "completed"), title: "找餐厅", result: "推荐这家：[Nopa 订位](https://www.opentable.com/r/nopa)", completedAt: 2000 };
     const calls: Array<{ route: string; body: Record<string, unknown> }> = [];
-    const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==", "base64");
-    const shots: string[] = [];
-    await page.route("**/api/browser/person/screenshot*", r => { shots.push(new URL(r.request().url()).searchParams.get("tab")!); return r.fulfill({ contentType: "image/png", body: png }); });
+    const order: string[] = [];
     await page.route("**/api/browser/person/*", async r => {
         const route = new URL(r.request().url()).pathname.split("/").pop()!;
-        if (route === "screenshot") return r.fallback();
         const body = r.request().postDataJSON();
         calls.push({ route, body });
-        // The page opens a window on the first tap: the console follows it.
-        const current = route === "pointer" && calls.filter(c => c.route === "pointer").length === 1 ? "t9" : undefined;
-        await r.fulfill({ json: { title: "OpenTable", url: "https://www.opentable.com/r/nopa", editable: false, ...(current ? { current } : {}), closed: body.tab } });
+        if (route === "pointer") order.push(`focus:${body.tab}`);
+        await r.fulfill({ json: { title: "OpenTable", url: "https://www.opentable.com/r/nopa", closed: body.tab } });
     });
     const lease: string[] = [];
-    await page.route("**/api/browser/viewer/heartbeat", r => { lease.push("heartbeat"); return r.fulfill({ json: { ok: true, generation: 1, status: {} } }); });
+    await page.route("**/api/browser/viewer/heartbeat", r => { lease.push("heartbeat"); order.push("heartbeat"); return r.fulfill({ json: { ok: true, generation: 1, status: {} } }); });
     await page.route("**/api/browser/viewer/release", r => { lease.push("release"); return r.fulfill({ json: { ok: true } }); });
-    await page.route("**/api/browser/wake", r => { lease.push("wake"); return r.fulfill({ json: { ok: true, status: {} } }); });
+    await page.route("**/api/browser/wake", r => { lease.push("wake"); order.push("wake"); return r.fulfill({ json: { ok: true, status: {} } }); });
     await setup(page, [row]);
+    await page.route("**/api/workspace/ticket", async r => { order.push("ticket"); await r.fulfill({ json: { ticket: "t", origin: "http://127.0.0.1:4289", url: "http://127.0.0.1:4289/vnc/vnc.html?ticket=t", expiresAt: Date.now() + 60_000 } }); });
     let opened: string | null = null;
     await page.route("**/api/browser/tabs", async r => {
         opened = r.request().postDataJSON().url;
         await new Promise(res => setTimeout(res, 300));
-        await r.fulfill({ json: { ok: true, message: "已打开", data: null, tab: { id: "t8", key: "person", title: "你打开的网页", url: opened, createdAt: 1, lastUsed: 1, finishedAt: null, holder: "human", humanSince: 1, request: null } } });
+        await r.fulfill({ json: { ok: true, message: "已打开", data: null, tab: { id: "t8", key: "person", title: "OpenTable: Nopa", url: opened, createdAt: 1, lastUsed: 1, finishedAt: null, holder: "human", humanSince: 1, request: null } } });
     });
     await page.getByRole("link", { name: "Nopa 订位" }).click();
     await expect(page.getByRole("status")).toContainText("正在打开链接");
     const panel = page.getByRole("dialog", { name: "操作网页" });
     await expect(panel).toBeVisible();
     expect(opened).toBe("https://www.opentable.com/r/nopa");
-    // No workspace, no host tab: the page is operated right here.
+    // No workspace, no host tab: the page is operated right here, on the desktop, with its window on top.
     await expect(page.locator(".workspace")).toHaveCount(0);
     expect(page.context().pages()).toHaveLength(1);
-    await expect.poll(() => shots.at(-1)).toBe("t8");
-
-    const screen = panel.getByRole("img", { name: /实时画面/ });
-    const box = (await screen.boundingBox())!;
-    await press(info, screen, { x: box.width / 2, y: box.height / 2 });
-    await expect.poll(() => shots.at(-1)).toBe("t9");
-    await panel.getByRole("textbox", { name: "要输入到网页的文字" }).fill("2 人");
-    await panel.getByRole("button", { name: "发送", exact: true }).click();
-    await expect.poll(() => calls.find(c => c.route === "input")?.body).toEqual({ tab: "t9", text: "2 人" });
+    await expect(panel).toContainText("OpenTable: Nopa");
+    await expect(panel.locator('iframe[title="沙箱桌面"]')).toHaveAttribute("src", /vnc\.html/);
+    // The browser is kept awake (woken if it slept) before its window is raised and the desktop opens.
+    expect(order.slice(0, 4)).toEqual(["heartbeat", "wake", "focus:t8", "ticket"]);
     expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
     await page.screenshot({ path: info.outputPath("link-console.png") });
 
-    // While the panel is open someone is watching: the browser is kept awake (and woken if it slept).
-    expect(lease.slice(0, 2)).toEqual(["heartbeat", "wake"]);
-    // Closing the panel closes every tab it showed, and lets the browser go idle again.
+    // Closing the panel closes the page, and lets the browser go idle again.
     await panel.getByRole("button", { name: "关闭操作面板" }).click();
     await expect(panel).toBeHidden();
     await expect.poll(() => lease.at(-1)).toBe("release");
-    await expect.poll(() => calls.filter(c => c.route === "close").map(c => c.body.tab).sort()).toEqual(["t8", "t9"]);
+    await expect.poll(() => calls.filter(c => c.route === "close").map(c => c.body.tab)).toEqual(["t8"]);
 });
 test("dispatching shows a calm sorting animation and what the dispatcher weighs, and stays still for reduced motion", async ({ page }, info) => {
     await setup(page, [{ ...task(1, "planning"), title: "帮我订周六晚上的餐厅" }]);

@@ -396,6 +396,9 @@ async function personPointer(body) {
     await page.mouse.wheel(0, dy);
   } else if (body.action === 'back') {
     await page.goBack({ timeout: 15000 }).catch(() => undefined);
+  } else if (body.action === 'focus') {
+    // The person watches the whole desktop (noVNC): put this tab's window on top.
+    await page.bringToFront().catch(() => undefined);
   } else {
     return { status: 400, body: { error: 'bad_action' } };
   }
