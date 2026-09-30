@@ -53,13 +53,13 @@ it("gives Claude Code the workspace rules and the long-term memory Codex keeps",
   }
 });
 
-it("aligns the sandbox browser identity once: its own Linux UA, the egress time zone, WebGL on", async () => {
+it("aligns the sandbox browser identity once: its own Linux UA, the egress time zone, WebGL on, site isolation back, Chrome's TLS extension", async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pa-identity-"));
   try {
     const cfg = testConfig(dir, 18999);
     const container = new SandboxContainer(cfg, new Logger("error", undefined, false));
     const configPath = path.join(dir, "browser-supervisor.json");
-    fs.writeFileSync(configPath, JSON.stringify({ browser: { args: ["--user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)", "--disable-gpu", "--mute-audio", "--time-zone-for-testing=Asia/Singapore"], env: { TZ: "Asia/Singapore", DISPLAY: ":99" } } }));
+    fs.writeFileSync(configPath, JSON.stringify({ browser: { args: ["--user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)", "--disable-gpu", "--mute-audio", "--disable-site-isolation-trials", "--use-angle=swiftshader", "--time-zone-for-testing=Asia/Singapore"], env: { TZ: "Asia/Singapore", DISPLAY: ":99" } } }));
     const calls: string[][] = [];
     // Run the real script against a temp config instead of the container's.
     vi.spyOn(container, "docker").mockImplementation(async (args: string[]) => {
@@ -72,7 +72,7 @@ it("aligns the sandbox browser identity once: its own Linux UA, the egress time 
     expect(await container.alignBrowserIdentity("America/Los_Angeles")).toBe(false);
     expect(calls[0]).toEqual(expect.arrayContaining(["exec", "-u", "root"]));
     const browser = JSON.parse(fs.readFileSync(configPath, "utf8")).browser as { args: string[]; env: Record<string, string>; binary: string };
-    expect(browser.args).toEqual(["--mute-audio", "--time-zone-for-testing=America/Los_Angeles", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist", "--use-angle=swiftshader"]);
+    expect(browser.args).toEqual(["--mute-audio", "--time-zone-for-testing=America/Los_Angeles", "--enable-features=AddTLSServerHandshakePadding", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"]);
     expect(browser.env).toEqual({ TZ: "America/Los_Angeles", DISPLAY: ":99" });
     expect(browser.binary).toBe("/usr/local/bin/browser");
     // Already aligned: nothing more to write.
@@ -84,37 +84,48 @@ it("aligns the sandbox browser identity once: its own Linux UA, the egress time 
   }
 });
 
-it("points the browser at a newer build when one is installed, and back at the image browser without it", async () => {
+it("points the browser at a newer build with its libraries, merges the TLS feature, and goes back to the image browser without it", async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pa-binary-"));
   try {
     const container = new SandboxContainer(testConfig(dir, 18999), new Logger("error", undefined, false));
     const configPath = path.join(dir, "browser-supervisor.json");
-    fs.writeFileSync(configPath, JSON.stringify({ browser: { binary: "/usr/local/bin/browser", args: ["--time-zone-for-testing=America/Los_Angeles", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist", "--use-angle=swiftshader"], env: { TZ: "America/Los_Angeles" } } }));
+    fs.writeFileSync(configPath, JSON.stringify({ browser: { binary: "/usr/local/bin/browser", args: ["--enable-features=Foo", "--time-zone-for-testing=America/Los_Angeles"], env: { TZ: "America/Los_Angeles" } } }));
     vi.spyOn(container, "docker").mockImplementation(async (args: string[]) => {
       const script = args[args.indexOf("-c") + 1]!.replace("/var/run/gem/browser-supervisor.json", configPath);
       return { code: 0, stdout: execFileSync("python3", ["-c", script, ...args.slice(args.indexOf("-c") + 2)], { encoding: "utf8" }), stderr: "" };
     });
-    const binary = () => (JSON.parse(fs.readFileSync(configPath, "utf8")).browser as { binary: string }).binary;
-    await container.alignBrowserIdentity("America/Los_Angeles", "/opt/aio-browser/chromium-7d8a4b4ff289/chrome-linux-arm64/chrome");
-    expect(binary()).toBe("/opt/aio-browser/chromium-7d8a4b4ff289/chrome-linux-arm64/chrome");
+    const browser = () => JSON.parse(fs.readFileSync(configPath, "utf8")).browser as { binary: string; args: string[]; env: Record<string, string> };
+    const build = { binary: "/opt/aio-browser/chromium-abc/root/usr/lib/chromium/chromium", libraryPath: "/opt/aio-browser/chromium-abc/root/usr/lib/aarch64-linux-gnu" };
+    await container.alignBrowserIdentity("America/Los_Angeles", build);
+    expect(browser().binary).toBe(build.binary);
+    expect(browser().env).toEqual({ TZ: "America/Los_Angeles", LD_LIBRARY_PATH: build.libraryPath });
+    expect(browser().args.filter((a) => a.startsWith("--enable-features="))).toEqual(["--enable-features=Foo,AddTLSServerHandshakePadding"]);
     await container.alignBrowserIdentity("America/Los_Angeles");
-    expect(binary()).toBe("/usr/local/bin/browser");
+    expect(browser().binary).toBe("/usr/local/bin/browser");
+    expect(browser().env).toEqual({ TZ: "America/Los_Angeles" });
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
 
-it("installs a pinned browser build as root, and leaves another CPU architecture on the image browser", async () => {
+it("unpacks pinned browser packages as root, and leaves another CPU architecture on the image browser", async () => {
   const container = new SandboxContainer(testConfig("/tmp/pa-build", 18999), new Logger("error", undefined, false));
-  const build = { url: "https://cdn.example/chrome.zip", sha256: "a".repeat(64), arch: "aarch64" };
+  const build = { packages: [{ url: "https://pkg.example/chromium.deb", sha256: "a".repeat(64) }, { url: "https://pkg.example/common.deb", sha256: "b".repeat(64) }], arch: "aarch64" };
   const calls: Array<{ argv: string[]; user?: string }> = [];
-  let answer = "/opt/aio-browser/chromium-aaaaaaaaaaaa/chrome-linux-arm64/chrome\n";
+  let answer = "/opt/aio-browser/chromium-0123456789ab\n";
   container.execInSandbox = (async (argv: string[], opts?: { user?: string }) => (calls.push({ argv, user: opts?.user }), { code: 0, stdout: answer, stderr: "" })) as typeof container.execInSandbox;
-  expect(await container.ensureBrowserBuild(build)).toBe("/opt/aio-browser/chromium-aaaaaaaaaaaa/chrome-linux-arm64/chrome");
+  expect(await container.ensureBrowserBuild(build)).toEqual({
+    binary: "/opt/aio-browser/chromium-0123456789ab/root/usr/lib/chromium/chromium",
+    libraryPath: "/opt/aio-browser/chromium-0123456789ab/root/usr/lib/aarch64-linux-gnu",
+  });
   expect(calls[0]!.user).toBe("root");
-  expect(calls[0]!.argv.slice(-4)).toEqual([build.url, build.sha256, "aarch64", "/opt/aio-browser/chromium-aaaaaaaaaaaa"]);
+  expect(calls[0]!.argv.slice(-4)).toEqual([build.packages[0]!.url, build.packages[0]!.sha256, build.packages[1]!.url, build.packages[1]!.sha256]);
   expect(calls[0]!.argv[2]).toContain("sha256sum -c");
+  expect(calls[0]!.argv[2]).toContain("dpkg-deb -x");
+  // An old build is only removed when no running process uses it.
+  expect(calls[0]!.argv[2]).toContain('grep -qsF "$old/" /proc/[0-9]*/cmdline || rm -rf "$old"');
   answer = "other-arch\n";
   expect(await container.ensureBrowserBuild(build)).toBeNull();
-  await expect(container.ensureBrowserBuild({ ...build, sha256: "not-a-hash" })).rejects.toThrow("checksum");
+  await expect(container.ensureBrowserBuild({ ...build, packages: [{ url: "https://pkg.example/x.deb", sha256: "not-a-hash" }] })).rejects.toThrow("package list");
+  await expect(container.ensureBrowserBuild({ ...build, packages: [{ url: "http://pkg.example/x.deb", sha256: "a".repeat(64) }] })).rejects.toThrow("package list");
 });

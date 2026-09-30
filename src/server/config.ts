@@ -156,11 +156,12 @@ export function loadConfig(): {
     /** The browser's time zone; it should match where its network egress is. */
     timezone: string;
     /**
-     * A newer Chromium than the image ships (sites reject its old build), installed
-     * into `toolDir` when the sandbox starts, only on `arch` (`uname -m`) and only
-     * if the download matches `sha256`. Null keeps the image's own browser.
+     * A newer Chromium than the image ships (sites reject its old build): Debian
+     * packages unpacked (never installed) into `toolDir` when the sandbox starts,
+     * only on `arch` (`uname -m`) and only if every download matches its `sha256`.
+     * Null keeps the image's own browser.
      */
-    build: { url: string; sha256: string; arch: string } | null;
+    build: { packages: Array<{ url: string; sha256: string }>; arch: string } | null;
     /** How long the browser may sit with no task/viewer/activity hold before sleeping. */
     idleMs: number;
     /** Viewer heartbeat validity; a viewer that stops heartbeating loses its hold. */
@@ -355,10 +356,19 @@ export function loadConfig(): {
       // in a snapshot; failed restores dropped them. Keep it resident unless asked.
       releaseWhenIdle: envStr("PA_BROWSER_RELEASE_IDLE", "0") === "1",
       timezone: envStr("PA_BROWSER_TIMEZONE", "America/Los_Angeles"),
-      // Chromium 153 for linux-arm64 (Playwright's build of Chrome for Testing; Google ships none for arm64).
+      // Chromium 154 for Ubuntu 22.04 arm64 from the xtradeb PPA (a regular build: Cloudflare stalls
+      // Chrome for Testing, and Google ships no arm64 Chrome), plus the two Ubuntu libraries it needs
+      // that the image lacks. Override with comma-separated `url#sha256` entries.
       build: envStr("PA_BROWSER_BUILD", "on") === "off" ? null : {
-        url: envStr("PA_BROWSER_BUILD_URL", "https://cdn.playwright.dev/builds/cft/153.0.8010.12/linux-arm64/chrome-linux-arm64.zip"),
-        sha256: envStr("PA_BROWSER_BUILD_SHA256", "7d8a4b4ff289efe44a06501a519df142c4c18fff7aaf1c1401a3fbb12b3bd069"),
+        packages: envStr("PA_BROWSER_BUILD_PACKAGES", [
+          "https://launchpad.net/~xtradeb/+archive/ubuntu/apps/+files/chromium_154.0.8037.57-1xtradeb1.2204.1_arm64.deb#f1baa0efd51730e88e47ec10f020a03d0af071e5c0410a8ea66847e6390b2e33",
+          "https://launchpad.net/~xtradeb/+archive/ubuntu/apps/+files/chromium-common_154.0.8037.57-1xtradeb1.2204.1_arm64.deb#7f9084c52d7b511540a7d21c1b208a5cfe4ae08d74bfd0a40ecaad60cfc157fe",
+          "https://launchpad.net/ubuntu/+archive/primary/+files/libopenh264-6_2.2.0+dfsg-2_arm64.deb#7c954033634a7c8980e1d6179afcd4a0edd1924a020caa46628386e8c77d75aa",
+          "https://launchpad.net/ubuntu/+archive/primary/+files/libxnvctrl0_510.47.03-0ubuntu1.22.04.1_arm64.deb#2dd5ef51664f355fd28d6264ca63102fe507c65bcd74c27c8b07f432c98bf618",
+        ].join(",")).split(",").map((entry) => {
+          const [url = "", sha256 = ""] = entry.trim().split("#");
+          return { url, sha256 };
+        }),
         arch: envStr("PA_BROWSER_BUILD_ARCH", "aarch64"),
       },
       // A five minute default keeps a browser that nobody is looking at from

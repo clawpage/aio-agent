@@ -1,4 +1,5 @@
 import { execFile, spawn, type ChildProcess } from "node:child_process";
+import { createHash } from "node:crypto";
 import path from "node:path";
 import { TAB_TOOL_TIMEOUT_SEC } from "../browser/tabs.js";
 import { setTimeout as delay } from "node:timers/promises";
@@ -741,71 +742,101 @@ fi`;
   }
 
   /**
-   * Install the configured Chromium build into the root-managed tool directory,
-   * once: a present build answers immediately. The download must match the pinned
-   * SHA-256 and is unpacked beside the target before it replaces it. Returns the
-   * browser binary, or null on another CPU architecture (the image browser stays).
+   * Unpack the configured Chromium packages into the root-managed tool directory,
+   * once: a present build answers immediately. Every download must match its
+   * pinned SHA-256, and the tree is built beside the target before replacing it;
+   * builds from other configurations are removed once no process runs from them
+   * (deleting a running browser's files hangs it). Returns the browser and the
+   * library directory it needs, or null on another CPU architecture.
    */
-  async ensureBrowserBuild(build: { url: string; sha256: string; arch: string }): Promise<string | null> {
-    if (!/^[a-f0-9]{64}$/.test(build.sha256)) throw new Error("Invalid browser build checksum");
-    const dir = path.posix.join(this.#cfg.browser.toolDir, `chromium-${build.sha256.slice(0, 12)}`);
+  async ensureBrowserBuild(build: { packages: Array<{ url: string; sha256: string }>; arch: string }): Promise<{ binary: string; libraryPath: string } | null> {
+    if (!build.packages.length || build.packages.some((p) => !/^[a-f0-9]{64}$/.test(p.sha256) || !/^https:\/\//.test(p.url))) {
+      throw new Error("Invalid browser build package list");
+    }
+    const id = createHash("sha256").update(build.packages.map((p) => p.sha256).join(",")).digest("hex").slice(0, 12);
+    const dir = path.posix.join(this.#cfg.browser.toolDir, `chromium-${id}`);
     const script = `set -eu
-url=$1 sum=$2 arch=$3 dir=$4
+arch=$1 dir=$2; shift 2
 [ "$(uname -m)" = "$arch" ] || { echo other-arch; exit 0; }
-bin=$(ls -d "$dir"/*/chrome 2>/dev/null | head -n 1 || true)
-if [ -z "$bin" ]; then
-  tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
-  curl -fsSL --retry 2 -o "$tmp/build.zip" "$url"
-  echo "$sum  $tmp/build.zip" | sha256sum -c - >/dev/null
-  unzip -q "$tmp/build.zip" -d "$tmp/unpacked"
-  mkdir -p "$(dirname "$dir")"; rm -rf "$dir"; mv "$tmp/unpacked" "$dir"; chmod -R a+rX "$dir"
-  bin=$(ls -d "$dir"/*/chrome | head -n 1)
+if [ ! -x "$dir/root/usr/lib/chromium/chromium" ]; then
+  tmp=$(mktemp -d "$dir.XXXXXX"); trap 'rm -rf "$tmp"' EXIT
+  while [ $# -gt 0 ]; do
+    curl -fsSL --retry 2 -o "$tmp/pkg.deb" "$1"
+    echo "$2  $tmp/pkg.deb" | sha256sum -c - >/dev/null
+    dpkg-deb -x "$tmp/pkg.deb" "$tmp/root"
+    rm -f "$tmp/pkg.deb"; shift 2
+  done
+  chmod -R a+rX "$tmp"; rm -rf "$dir"; mv "$tmp" "$dir"
 fi
-"$bin" --version >/dev/null
-echo "$bin"`;
-    const res = await this.execInSandbox(["sh", "-c", script, "sh", build.url, build.sha256, build.arch, dir], { user: "root", timeoutMs: 600_000 });
+# A build the running browser still uses goes on a later start, once the browser has moved off it.
+for old in "$(dirname "$dir")"/chromium-*; do
+  [ "$old" = "$dir" ] || grep -qsF "$old/" /proc/[0-9]*/cmdline || rm -rf "$old"
+done
+LD_LIBRARY_PATH="$dir/root/usr/lib/aarch64-linux-gnu" "$dir/root/usr/lib/chromium/chromium" --version >/dev/null
+echo "$dir"`;
+    const args = build.packages.flatMap((p) => [p.url, p.sha256]);
+    const res = await this.execInSandbox(["sh", "-c", script, "sh", build.arch, dir, ...args], { user: "root", timeoutMs: 600_000 });
     const out = res.stdout.trim().split("\n").pop() ?? "";
     if (res.code !== 0 || !out) throw new Error(`Cannot install the browser build: ${(res.stderr || res.stdout).trim().slice(0, 300)}`);
-    return out === "other-arch" ? null : out;
+    if (out === "other-arch") return null;
+    return { binary: `${out}/root/usr/lib/chromium/chromium`, libraryPath: `${out}/root/usr/lib/aarch64-linux-gnu` };
   }
 
   /**
    * Make the sandbox Chromium present itself consistently, so sites do not take it
    * for a bot: the image spoofs a Mac user agent on a Linux browser (the page reads
    * `Linux x86_64` and the client hints disagree with the UA), pins a Singapore time
-   * zone behind a US address, and turns the GPU off so WebGL is missing. The image
+   * zone behind a US address, turns the GPU off so WebGL is missing, and runs with
+   * site isolation off, which stalls Cloudflare's challenge. The image
    * rewrites the browser config on every container start, so this runs whenever the
    * sandbox comes up: it keeps Chromium's own (Linux) user agent, uses `timezone`,
-   * and enables WebGL through SwiftShader; a running Chromium that still carries the
+   * enables WebGL (software rendering, left to ANGLE's own choice: forcing SwiftShader
+   * also stalls Cloudflare), restores site isolation and sends the TLS extension
+   * current Chrome sends; a running Chromium that still carries the
    * old identity is stopped gracefully and the image's supervisor starts it again
-   * with the new config. `binary` is the browser to run (a newer build from
-   * `ensureBrowserBuild`, or the image's own); before a running profile first moves
+   * with the new config. `build` is the browser to run (a newer build from
+   * `ensureBrowserBuild`, or null for the image's own); before a running profile first moves
    * to another binary it is archived to `backupPath`, since a newer Chromium
    * upgrades the profile in a way the old one cannot open. Returns true when
    * Chromium was restarted.
    */
-  async alignBrowserIdentity(timezone: string, binary = IMAGE_BROWSER, backupPath = path.posix.join(this.#cfg.sandbox.containerCodexHome, "aio-browser", "profile-before-browser-change.tgz")): Promise<boolean> {
+  async alignBrowserIdentity(
+    timezone: string,
+    build: { binary: string; libraryPath: string } | null = null,
+    backupPath = path.posix.join(this.#cfg.sandbox.containerCodexHome, "aio-browser", "profile-before-browser-change.tgz"),
+  ): Promise<boolean> {
     const script = `
 import json, os, signal, sys, tarfile
 path = '/var/run/gem/browser-supervisor.json'
 if not os.path.exists(path): print('absent'); raise SystemExit(0)
 config = json.load(open(path))
 browser = config.get('browser') or {}
-tz, binary, backup = sys.argv[1], sys.argv[2], sys.argv[3]
+tz, binary, libs, backup = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+# Cloudflare's challenge stalls with ANGLE forced onto SwiftShader or with site isolation off.
+DROP = ('--disable-gpu', '--use-angle=swiftshader', '--disable-site-isolation-trials')
+# The TLS extension current Chrome on Linux sends; without it eBay refuses the handshake.
+PAD = 'AddTLSServerHandshakePadding'
 old = list(browser.get('args') or [])
 old_binary = browser.get('binary')
-args, zoned = [], False
+args, zoned, featured = [], False, False
 for a in old:
-    if a.startswith('--user-agent=') or a == '--disable-gpu': continue
+    if a.startswith('--user-agent=') or a in DROP: continue
     if a.startswith('--time-zone-for-testing='):
         if zoned: continue
         a, zoned = '--time-zone-for-testing=' + tz, True
+    if a.startswith('--enable-features='):
+        feats = [f for f in a.split('=', 1)[1].split(',') if f]
+        if PAD not in feats: feats.append(PAD)
+        a, featured = '--enable-features=' + ','.join(feats), True
     args.append(a)
 if not zoned: args.append('--time-zone-for-testing=' + tz)
-for flag in ('--enable-unsafe-swiftshader', '--ignore-gpu-blocklist', '--use-angle=swiftshader'):
+if not featured: args.append('--enable-features=' + PAD)
+for flag in ('--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'):
     if flag not in args: args.append(flag)
 env = dict(browser.get('env') or {})
 env['TZ'] = tz
+if libs: env['LD_LIBRARY_PATH'] = libs
+else: env.pop('LD_LIBRARY_PATH', None)
 if args != old or env != (browser.get('env') or {}) or old_binary != binary:
     browser['args'] = args
     browser['env'] = env
@@ -832,11 +863,12 @@ for pid in (os.listdir('/proc') if os.path.isdir('/proc') else []):
     # Chromium may rewrite its argv into one space-joined string.
     cmd = [x for x in raw.split(b'\\0') if x]
     if len(cmd) == 1: cmd = cmd[0].split(b' ')
-    if not cmd or os.path.basename(cmd[0]) != b'chrome' or any(x.startswith(b'--type=') for x in cmd): continue
+    if not cmd or os.path.basename(cmd[0]) not in (b'chrome', b'chromium') or any(x.startswith(b'--type=') for x in cmd): continue
     if not profile or ('--user-data-dir=' + profile).encode() not in cmd: continue
     other = os.path.realpath(cmd[0].decode()) != want
     moving = moving or other
-    if other or any(x.startswith(b'--user-agent=') or x == b'--disable-gpu' for x in cmd) or (b'--time-zone-for-testing=' + tz.encode()) not in cmd:
+    padded = any(x.startswith(b'--enable-features=') and PAD.encode() in x.split(b'=', 1)[1].split(b',') for x in cmd)
+    if other or not padded or any(x.startswith(b'--user-agent=') or x.decode() in DROP for x in cmd) or (b'--time-zone-for-testing=' + tz.encode()) not in cmd:
         stale.append(int(pid))
 if moving and not os.path.exists(backup):
     os.makedirs(os.path.dirname(backup), exist_ok=True)
@@ -848,7 +880,7 @@ if moving and not os.path.exists(backup):
 for pid in stale: os.kill(pid, signal.SIGTERM)
 print('restarted' if stale else 'same')
 `;
-    const result = await this.execInSandbox(["python3", "-c", script, timezone, binary, backupPath], { user: "root", timeoutMs: 120_000 });
+    const result = await this.execInSandbox(["python3", "-c", script, timezone, build?.binary ?? IMAGE_BROWSER, build?.libraryPath ?? "", backupPath], { user: "root", timeoutMs: 120_000 });
     if (result.code !== 0) throw new Error(`Cannot align the sandbox browser: ${result.stderr.trim() || result.stdout.trim()}`);
     return result.stdout.trim() === "restarted";
   }
