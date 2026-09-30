@@ -190,7 +190,7 @@ test("related supplement joins the original task, with one running indicator and
     await expect(page.locator('.task-entry[data-task-id="task-1"] .task-progress')).toHaveCount(0);
     await expect(page.locator('.task-entry[data-task-id="task-2"] .task-progress')).toContainText(parent.title);
     await expect(page.locator(".task-progress")).toHaveCount(1);
-    await expect(page.locator(".chat-sub")).toHaveText("1 个任务处理中");
+    await expect(page.locator(".chat-sub .turn-pill")).toHaveText(["1 件在办"]);
     await page.locator(".task-supplement button").click();
     await expect(page.locator(".task-detail")).toBeVisible();
     await expect(page.locator(".task-detail .chat-head").getByRole("button", { name: "工作区", exact: true })).toHaveCount(0);
@@ -243,7 +243,7 @@ test("clarification stays inline, answers target the right task and unrelated wo
     first.clarification="想从哪里出发、去哪里，哪天出行？";
     second.clarification="这份演示要介绍哪个产品？";
     const {bodies,rows}=await setup(page,[first,second,working]);
-    await expect(page.locator(".chat-sub")).toHaveText("1 个任务处理中 · 2 个等你补充");
+    await expect(page.locator(".chat-sub .turn-pill")).toHaveText(["2 件等你补充", "1 件在办"]);
     await expect(page.locator(".task-question")).toHaveCount(2);
     await page.reload();
     const question=page.locator('.task-entry[data-task-id="task-2"] .task-question');
@@ -351,7 +351,7 @@ test("waiting identifies its blocker and updates without a revision bump",async(
  rows[0]!.waitReason={label:"等待执行空位",message:"已有 3 个任务执行中，空位释放后自动开始。"};
  await expect(page.locator('.task-progress-label')).toHaveText("等待执行空位");
  Object.assign(rows[0]!,{status:"running",revision:2,waitReason:null});
- await expect(page.locator('.task-progress-label')).toHaveText("Working…");await expect(page.locator('.task-wait-reason')).toHaveCount(0);
+ await expect(page.locator('.task-progress-label')).toHaveText("在办");await expect(page.locator('.task-wait-reason')).toHaveCount(0);
 });
 
 test("manual task reference persists with the draft, is cancellable, and binds the submitted target",async({page},info)=>{
@@ -400,7 +400,7 @@ test("a task that needs you in the browser shows why, hands you its own tab to o
     const card = page.getByRole("group", { name: "任务浏览器：需要你操作" });
     await expect(card).toContainText("请登录 OpenTable 账号");
     await expect(card.getByRole("img", { name: /页面预览/ })).toBeVisible();
-    await expect(page.locator(".chat-sub")).toContainText("1 个等你操作浏览器");
+    await expect(page.locator(".chat-sub .turn-pill.you")).toHaveText("1 件等你操作浏览器");
     await expect(page.getByRole("button", { name: "展开任务：订餐厅" })).toContainText("需要你操作浏览器");
     const primary = card.getByRole("button", { name: "去浏览器操作", exact: true });
     expect(await primary.evaluate((n) => getComputedStyle(n).color)).toBe("rgb(255, 255, 255)");

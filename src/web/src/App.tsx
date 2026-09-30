@@ -7,6 +7,7 @@ import { Chat } from "./components/Chat";
 import { Login } from "./components/Login";
 import { Settings } from "./components/Settings";
 import { Workspace } from "./components/Workspace";
+import { BrandMark } from "./components/Brand";
 
 type SessionState = { checked: boolean; authenticated: boolean; username: string | null };
 
@@ -281,9 +282,9 @@ function LegacyApp() {
     <div className="app">
       <aside className={`sidebar ${mobilePane === "list" ? "show-mobile" : ""}`}>
         <div className="brand">
-          <span className="brand-mark" aria-hidden />
+          <BrandMark />
           <div>
-            <strong>AIO Agent</strong>
+            <strong>一站</strong>
             <span className="muted tiny">Codex + AIO 沙箱</span>
           </div>
         </div>

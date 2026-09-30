@@ -138,7 +138,7 @@ export function workingLabel(status: WorkingStatus): string {
     case "queued":
       return "已排队等待";
     case "running":
-      return "Working…";
+      return "处理中…";
     case "stopping":
       return "正在停止…";
     case "done":
@@ -182,7 +182,7 @@ export function segmentIsActive(group: WorkingBlock): boolean {
 /**
  * Header text for one activity segment.
  *
- * Only the turn's open segment reads as in progress (`Working…`, `正在停止…`,
+ * Only the turn's open segment reads as in progress (`处理中…`, `正在停止…`,
  * `已排队等待`). Every other segment is history and must never carry
  * in-progress wording — not even while the turn is still running: a segment
  * closed by later prose is a finished record. History says what the segment
@@ -195,7 +195,7 @@ export function segmentLabel(group: WorkingBlock, toolCount?: number): string {
   const reasoningCount = group.children.length - count;
   const live = !group.closed && (group.status === "running" || group.status === "stopping" || group.status === "queued");
   if (live) return workingLabel(group.status);
-  // History: describe what the segment recorded, never "Working…".
+  // History: describe what the segment recorded, never "处理中…".
   const done = count > 0 ? `执行了 ${count} 项操作` : reasoningCount > 0 ? "思考摘要" : "";
   if (!done) return workingLabel(group.status);
   // The turn's own terminal outcome wins over the generic failure note, so a

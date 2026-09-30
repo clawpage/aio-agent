@@ -237,3 +237,11 @@ SQLite（`var/personal-agent.sqlite`，WAL）保存 owner、会话、对话、�
 浏览器重连、控制面重启、容器重启都不会丢历史；被中断的轮次带明确状态而不是静默重试。
 
 存储工具使用锁定的 Playwright 1.63.0。其公开 `setStorageState` 没有超时参数，因此受管 helper 使用同版本 channel 的 timeout，使库内部的 finally 在 CDP 断开前关闭临时页。升级版本须重新验证真实超时清理、启动时存储及标签顺序。受管可执行工具目录及其祖先必须由 root 控制；持久快照和可重建工具分别存放。
+
+## 界面品牌（一站）
+
+配色表达“现在该谁动”：靛紫是 AI 在办（也是品牌主色），琥珀是轮到你（全站唯一醒目的颜色），松绿是办完，朱红是出错；
+中性色带一点靛紫。令牌集中在 `src/web/src/styles.css` 顶部（`--ai` / `--you` / `--done` / `--error` 及 `-soft` 浅底、
+`--on-accent` / `--on-you` 按钮文字色），深色为默认，浅色随系统或侧栏切换。任务卡左侧 4px 色条（`turn-ai` / `turn-you` /
+`turn-err`；结果卡按完成或失败）、顶部计数胶囊、浏览器卡片和操作面板都只用这四种语义色。标志是一道弧线交出琥珀色圆点
+（`src/web/src/components/Brand.tsx`、`src/web/public/favicon.svg` 与主屏图标）。

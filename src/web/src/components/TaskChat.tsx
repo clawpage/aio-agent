@@ -19,7 +19,13 @@ function DispatchHint() {
     }, []);
     return <p className="task-dispatch-hint"><span key={i}>{DISPATCH_HINTS[i]}</span></p>;
 }
-const labels: Record<string, string> = { planning: "正在分配", needs_input: "等待你补充", planning_failed: "分配失败", waiting: "等待依赖或资源", queued: "排队中", running: "Working…", stopping: "正在停止…", completed: "已完成", failed: "执行失败", interrupted: "已停止", unknown: "结果待核对", blocked: "需要补充" };
+/** Whose move it is: the person's (amber), the AI's (indigo), or stuck on an error (red). */
+function turnOf(t: Task): "you" | "ai" | "err" {
+    if (t.approvals || t.browser?.request || t.status === "needs_input" || t.status === "blocked") return "you";
+    if (["planning_failed", "merge_failed", "merge_unknown", "failed", "unknown"].includes(t.status)) return "err";
+    return "ai";
+}
+const labels: Record<string, string> = { planning: "正在分配", needs_input: "等待你补充", planning_failed: "分配失败", waiting: "等待依赖或资源", queued: "排队中", running: "在办", stopping: "正在停止…", completed: "已完成", failed: "执行失败", interrupted: "已停止", unknown: "结果待核对", blocked: "需要补充" };
 export function TaskChat({ onDetails, onOpenLink, onExpired, onFeed, onRevealBrowser }: {
     onDetails: (task: Task) => void;
     /** Open the workspace on the browser, where a taken-over task tab is in front. */
@@ -164,7 +170,7 @@ export function TaskChat({ onDetails, onOpenLink, onExpired, onFeed, onRevealBro
             .reduce((latest, t) => t.createdAt >= latest.createdAt ? t : latest, task);
         progressAt.set(anchor.id, task);
     }
-    const renderProgress = (t: Task) => <div className={`task-progress ${t.status === "running" || t.status === "planning" ? "active" : ""} ${t.status === "planning" ? "planning" : ""} ${t.status === "needs_input" ? "needs-input" : ""}`}>
+    const renderProgress = (t: Task) => <div className={`task-progress turn-${turnOf(t)} ${t.status === "running" || t.status === "planning" ? "active" : ""} ${t.status === "planning" ? "planning" : ""} ${t.status === "needs_input" ? "needs-input" : ""}`}>
           <button className="task-summary" onClick={() => onDetails(t)} aria-label={`展开任务：${t.title}`}>{t.status === "planning"
             ? <span className="dispatch-glyph" aria-hidden="true"><i/><i/><i/></span>
             : <span className={`dot ${t.approvals || t.browser?.request ? "warn" : ""}`}/>}<span className="task-progress-label" key={t.status}>{t.approvals ? "需要你确认" : t.browser?.request && t.status === "running" ? "需要你操作浏览器" : t.waitReason?.label ?? labels[t.status] ?? t.status}</span><span className="task-progress-title">{t.title}</span><span aria-hidden>›</span></button>
@@ -183,7 +189,9 @@ export function TaskChat({ onDetails, onOpenLink, onExpired, onFeed, onRevealBro
     const feed = tasks.flatMap(t => [{ task: t, report: false, at: t.createdAt }, ...(!t.mergedInto && terminal.has(t.status) ? [{ task: t, report: true, at: t.completedAt ?? t.createdAt }] : [])])
         .sort((a, b) => a.at - b.at || Number(a.report) - Number(b.report) || a.task.id.localeCompare(b.task.id));
     return <section className="chat task-chat">
-    <header className="chat-head"><div className="chat-title"><h2>主会话</h2><span className={`dot ${connected ? "ok" : "warn"}`}/><span className="chat-sub">{active.length ? `${active.length} 个任务处理中${browserAsks.length ? ` · ${browserAsks.length} 个等你操作浏览器` : ""}${awaiting.length ? ` · ${awaiting.length} 个等你补充` : ""}` : awaiting.length ? `${awaiting.length} 个任务等你补充` : connected ? "随时可以交给我" : "正在连接…"}</span></div></header>
+    <header className="chat-head"><div className="chat-title"><h2>主会话</h2><span className={`dot ${connected ? "ok" : "warn"}`}/><span className="chat-sub">{active.length || awaiting.length
+        ? <>{awaiting.length > 0 && <span className="turn-pill you">{awaiting.length} 件等你补充</span>}{browserAsks.length > 0 && <span className="turn-pill you">{browserAsks.length} 件等你操作浏览器</span>}{active.length - browserAsks.length > 0 && <span className="turn-pill ai">{active.length - browserAsks.length} 件在办</span>}</>
+        : connected ? "随时可以交给我" : "正在连接…"}</span></div></header>
     <div className="chat-scroll task-feed" ref={scroll} onScroll={e => { const n = e.currentTarget; stick.current = n.scrollHeight - n.scrollTop - n.clientHeight < 80; }}>
       {nextBefore && <button className="ghost" onClick={() => void act(async () => { const d = await api.main(nextBefore); stick.current = false; merge(d.tasks); setNextBefore(d.nextBefore); })}>加载更早的任务</button>}
       {!tasks.length && <div className="empty"><h3>把事情交给我</h3><p>可以接着发不同任务。过程会收拢，完成后在这里回报。</p></div>}

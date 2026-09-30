@@ -199,7 +199,7 @@ test.describe("working group", () => {
     await emit(event("turn.started", { turnId: "t1" }, "t1"));
     await emit(event("item/started", { item: { id: "c1", type: "commandExecution", command: "sleep 1" } }, "t1"));
     await expect(group(page)).toHaveClass(/\bactive\b/);
-    await expect(page.locator(".working-label")).toHaveText("Working…");
+    await expect(page.locator(".working-label")).toHaveText("处理中…");
     expect(await page.locator(".working-label").evaluate((el) => getComputedStyle(el).animationName)).not.toBe("none");
 
     await emit(event("turn.finished", { turnId: "t1", status: "completed" }, "t1"));
@@ -218,7 +218,7 @@ test.describe("working group", () => {
     await emit(event("turn.started", { turnId: "t1" }, "t1"));
     await emit(event("item/started", { item: { id: "f1", type: "commandExecution", command: "boom" } }, "t1"));
     await emit(event("item/completed", { item: { id: "f1", type: "commandExecution", status: "failed" } }, "t1"));
-    await expect(page.locator(".working-label")).toHaveText("Working…");
+    await expect(page.locator(".working-label")).toHaveText("处理中…");
     await expect(page.locator(".working-head")).not.toContainText("工具出错");
     await page.locator(".working-head").click();
     await expect(page.locator(".working-body .tool.error")).toHaveCount(1);
@@ -255,7 +255,7 @@ test.describe("working group", () => {
     // Two isolated rows: the finished first turn stays static while the second runs.
     await expect(page.locator(".working")).toHaveCount(2);
     await expect(page.locator(".working-label").nth(0)).toHaveText("执行了 1 项操作");
-    await expect(page.locator(".working-label").nth(1)).toHaveText("Working…");
+    await expect(page.locator(".working-label").nth(1)).toHaveText("处理中…");
     await expect(group(page, 0)).not.toHaveClass(/\bactive\b/);
     await expect(group(page, 1)).toHaveClass(/\bactive\b/);
 
@@ -273,7 +273,7 @@ test.describe("working group", () => {
     await page.evaluate((e) => (window as unknown as { __paEmit: (x: unknown) => void }).__paEmit(e), event("turn.started", { turnId: "t1" }, "t1"));
     await page.evaluate((e) => (window as unknown as { __paEmit: (x: unknown) => void }).__paEmit(e), event("item/started", { item: { id: "c1", type: "commandExecution", command: "ls" } }, "t1"));
 
-    await expect(page.locator(".working-label")).toHaveText("Working…");
+    await expect(page.locator(".working-label")).toHaveText("处理中…");
     expect(await page.locator(".working-label").evaluate((el) => getComputedStyle(el).animationName)).toBe("none");
     const sweep = page.locator(".working-sweep");
     expect(await sweep.evaluate((el) => getComputedStyle(el).animationName)).toBe("none");
@@ -394,7 +394,7 @@ test.describe("interleaved activity segments", () => {
     await expect(group(page, 0)).not.toHaveClass(/\bactive\b/);
     // Only the trailing row is current.
     await expect(page.locator(".working.active")).toHaveCount(1);
-    await expect(page.locator(".working-label").last()).toHaveText("Working…");
+    await expect(page.locator(".working-label").last()).toHaveText("处理中…");
   });
 
   test("keeps the live row last when a blank agentMessage start precedes the tool", async ({ page }) => {
@@ -438,7 +438,7 @@ test.describe("interleaved activity segments", () => {
     await expect(page.locator(".msg.assistant")).toHaveCount(1);
     await expect(page.locator(".msg.assistant")).toContainText("结论如下。");
     await expect(page.locator(".working.active")).toHaveCount(1);
-    await expect(page.locator(".working-label").last()).toHaveText("Working…");
+    await expect(page.locator(".working-label").last()).toHaveText("处理中…");
   });
 
   test("keeps a visible status line above the live row and never below it", async ({ page }) => {
@@ -481,7 +481,7 @@ test.describe("working group height and presence", () => {
 
     // The row exists immediately, collapsed, and says it is working.
     await expect(group(page)).toBeVisible();
-    await expect(page.locator(".working-label")).toHaveText("Working…");
+    await expect(page.locator(".working-label")).toHaveText("处理中…");
     await expect(head(page)).toHaveAttribute("aria-expanded", "false");
 
     // Expanding an activity-free turn gives an honest line, not a fake summary.
@@ -499,7 +499,7 @@ test.describe("working group height and presence", () => {
     // While the turn runs, the prose is followed by the live activity row.
     await expect(page.locator(".msg.assistant")).toContainText("只有正文的回答。");
     await expect(group(page)).toBeVisible();
-    await expect(page.locator(".working-label")).toHaveText("Working…");
+    await expect(page.locator(".working-label")).toHaveText("处理中…");
     await head(page).click();
     await expect(page.locator(".working-body .working-empty")).toHaveText("正在处理…");
 
@@ -519,7 +519,7 @@ test.describe("working group height and presence", () => {
 
     // The row survives the blank summary, still animating, with no empty box.
     await expect(group(page)).toBeVisible();
-    await expect(page.locator(".working-label")).toHaveText("Working…");
+    await expect(page.locator(".working-label")).toHaveText("处理中…");
     await head(page).click();
     await expect(page.locator(".working-body .reasoning")).toHaveCount(0);
     await expect(page.locator(".working-body .working-empty")).toHaveText("正在处理…");

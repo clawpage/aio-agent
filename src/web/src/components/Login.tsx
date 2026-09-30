@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { api, ApiError } from "../api";
+import { BrandMark } from "./Brand";
 
 export function Login({ onSuccess, notice, username: named }: { onSuccess: () => void | Promise<void>; notice?: string | null; username?: string }) {
   const [username, setUsername] = useState(named ?? "owner");
@@ -85,8 +86,8 @@ export function Login({ onSuccess, notice, username: named }: { onSuccess: () =>
           void submit();
         }}
       >
-        <h1>AIO Agent</h1>
-        <p className="muted">使用管理员提供的账号登录。</p>
+        <h1 className="login-brand"><BrandMark size={40}/>一站</h1>
+        <p className="muted">把事情交给我，需要你的时候我会叫你。用管理员给你的账号登录。</p>
         <label className="field">
           <span>账号</span>
           <input value={username} onChange={e => setUsername(e.target.value)} autoComplete="username" />

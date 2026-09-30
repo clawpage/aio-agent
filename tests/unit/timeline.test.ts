@@ -960,7 +960,7 @@ describe("interleaved activity segments", () => {
     expect(groups(failed).every((g) => !segmentIsActive(g))).toBe(true);
   });
 
-  it("never calls a closed history segment 'Working…', even while its turn still runs", () => {
+  it("never calls a closed history segment '处理中…', even while its turn still runs", () => {
     const state = feed([
       ev("turn.started", { turnId: "t1" }, "t1"),
       ev("stream.delta", { itemId: "r1", kind: "item/reasoning/summaryTextDelta", delta: "先想一下" }, "t1"),
@@ -978,7 +978,7 @@ describe("interleaved activity segments", () => {
     const live = groups(state)[1]!;
     expect(segmentIsActive(live)).toBe(true);
     expect(segmentStatusTone(live)).toBe("active");
-    expect(segmentLabel(live)).toBe("Working…");
+    expect(segmentLabel(live)).toBe("处理中…");
   });
 
   it("orders reasoning → assistant prose → live row and labels each honestly", () => {
@@ -994,10 +994,10 @@ describe("interleaved activity segments", () => {
     expect(segments.map((g) => g.turnId)).toEqual(["t1", "t1"]);
     expect(state.groupIndex.get(segments[0]!.id)!).toBeLessThan(state.index.get("item:m1")!);
     expect(state.index.get("item:m1")!).toBeLessThan(state.groupIndex.get(segments[1]!.id)!);
-    // History keeps the neutral wording; the live row is the only "Working…".
+    // History keeps the neutral wording; the live row is the only "处理中…".
     expect(segmentLabel(segments[0]!)).toBe("思考摘要");
     expect(segmentStatusTone(segments[0]!)).toBe("history");
-    expect(segmentLabel(segments[1]!)).toBe("Working…");
+    expect(segmentLabel(segments[1]!)).toBe("处理中…");
     expect(segmentStatusTone(segments[1]!)).toBe("active");
   });
 
