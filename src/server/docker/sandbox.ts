@@ -40,6 +40,9 @@ export interface DockerRunResult {
  * Parsed and compared exactly: a substring check would accept `0.156.10` as
  * `0.156.1` and silently run the wrong binary.
  */
+/** The image's own browser entry point, restored when no newer build is in use. */
+export const IMAGE_BROWSER = "/usr/local/bin/browser";
+
 export function parseCodexVersion(output: string): string | null {
   const match = /codex-cli\s+(\S+)/.exec(output);
   return match ? match[1] : null;
@@ -738,6 +741,35 @@ fi`;
   }
 
   /**
+   * Install the configured Chromium build into the root-managed tool directory,
+   * once: a present build answers immediately. The download must match the pinned
+   * SHA-256 and is unpacked beside the target before it replaces it. Returns the
+   * browser binary, or null on another CPU architecture (the image browser stays).
+   */
+  async ensureBrowserBuild(build: { url: string; sha256: string; arch: string }): Promise<string | null> {
+    if (!/^[a-f0-9]{64}$/.test(build.sha256)) throw new Error("Invalid browser build checksum");
+    const dir = path.posix.join(this.#cfg.browser.toolDir, `chromium-${build.sha256.slice(0, 12)}`);
+    const script = `set -eu
+url=$1 sum=$2 arch=$3 dir=$4
+[ "$(uname -m)" = "$arch" ] || { echo other-arch; exit 0; }
+bin=$(ls -d "$dir"/*/chrome 2>/dev/null | head -n 1 || true)
+if [ -z "$bin" ]; then
+  tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
+  curl -fsSL --retry 2 -o "$tmp/build.zip" "$url"
+  echo "$sum  $tmp/build.zip" | sha256sum -c - >/dev/null
+  unzip -q "$tmp/build.zip" -d "$tmp/unpacked"
+  mkdir -p "$(dirname "$dir")"; rm -rf "$dir"; mv "$tmp/unpacked" "$dir"; chmod -R a+rX "$dir"
+  bin=$(ls -d "$dir"/*/chrome | head -n 1)
+fi
+"$bin" --version >/dev/null
+echo "$bin"`;
+    const res = await this.execInSandbox(["sh", "-c", script, "sh", build.url, build.sha256, build.arch, dir], { user: "root", timeoutMs: 600_000 });
+    const out = res.stdout.trim().split("\n").pop() ?? "";
+    if (res.code !== 0 || !out) throw new Error(`Cannot install the browser build: ${(res.stderr || res.stdout).trim().slice(0, 300)}`);
+    return out === "other-arch" ? null : out;
+  }
+
+  /**
    * Make the sandbox Chromium present itself consistently, so sites do not take it
    * for a bot: the image spoofs a Mac user agent on a Linux browser (the page reads
    * `Linux x86_64` and the client hints disagree with the UA), pins a Singapore time
@@ -746,17 +778,22 @@ fi`;
    * sandbox comes up: it keeps Chromium's own (Linux) user agent, uses `timezone`,
    * and enables WebGL through SwiftShader; a running Chromium that still carries the
    * old identity is stopped gracefully and the image's supervisor starts it again
-   * with the new config. Returns true when Chromium was restarted.
+   * with the new config. `binary` is the browser to run (a newer build from
+   * `ensureBrowserBuild`, or the image's own); before a running profile first moves
+   * to another binary it is archived to `backupPath`, since a newer Chromium
+   * upgrades the profile in a way the old one cannot open. Returns true when
+   * Chromium was restarted.
    */
-  async alignBrowserIdentity(timezone: string): Promise<boolean> {
+  async alignBrowserIdentity(timezone: string, binary = IMAGE_BROWSER, backupPath = path.posix.join(this.#cfg.sandbox.containerCodexHome, "aio-browser", "profile-before-browser-change.tgz")): Promise<boolean> {
     const script = `
-import json, os, signal, sys
+import json, os, signal, sys, tarfile
 path = '/var/run/gem/browser-supervisor.json'
 if not os.path.exists(path): print('absent'); raise SystemExit(0)
 config = json.load(open(path))
 browser = config.get('browser') or {}
-tz = sys.argv[1]
+tz, binary, backup = sys.argv[1], sys.argv[2], sys.argv[3]
 old = list(browser.get('args') or [])
+old_binary = browser.get('binary')
 args, zoned = [], False
 for a in old:
     if a.startswith('--user-agent=') or a == '--disable-gpu': continue
@@ -769,15 +806,25 @@ for flag in ('--enable-unsafe-swiftshader', '--ignore-gpu-blocklist', '--use-ang
     if flag not in args: args.append(flag)
 env = dict(browser.get('env') or {})
 env['TZ'] = tz
-if args != old or env != (browser.get('env') or {}):
+if args != old or env != (browser.get('env') or {}) or old_binary != binary:
     browser['args'] = args
     browser['env'] = env
+    browser['binary'] = binary
     config['browser'] = browser
     with open(path + '.tmp', 'w') as f: json.dump(config, f, indent=2)
     os.chmod(path + '.tmp', 0o644)
     os.replace(path + '.tmp', path)
-# Restart only a running Chromium that still carries the old identity.
-stale = []
+# Chrome-branded builds read managed policies from their own directory.
+try:
+    if not os.path.lexists('/etc/opt/chrome/policies') and os.path.isdir('/etc/chromium/policies'):
+        os.makedirs('/etc/opt/chrome', exist_ok=True)
+        os.symlink('/etc/chromium/policies', '/etc/opt/chrome/policies')
+except OSError:
+    pass
+# Restart only a running Chromium that still carries the old identity or binary.
+profile = browser.get('user_data_dir')
+want = os.path.realpath(binary)
+stale, moving = [], False
 for pid in (os.listdir('/proc') if os.path.isdir('/proc') else []):
     if not pid.isdigit(): continue
     try: raw = open('/proc/%s/cmdline' % pid, 'rb').read()
@@ -785,13 +832,23 @@ for pid in (os.listdir('/proc') if os.path.isdir('/proc') else []):
     # Chromium may rewrite its argv into one space-joined string.
     cmd = [x for x in raw.split(b'\\0') if x]
     if len(cmd) == 1: cmd = cmd[0].split(b' ')
-    if not cmd or cmd[0] != b'/opt/browser/chrome' or not any(x.startswith(b'--user-data-dir=') for x in cmd) or any(x.startswith(b'--type=') for x in cmd): continue
-    if any(x.startswith(b'--user-agent=') or x == b'--disable-gpu' for x in cmd) or (b'--time-zone-for-testing=' + tz.encode()) not in cmd:
+    if not cmd or os.path.basename(cmd[0]) != b'chrome' or any(x.startswith(b'--type=') for x in cmd): continue
+    if not profile or ('--user-data-dir=' + profile).encode() not in cmd: continue
+    other = os.path.realpath(cmd[0].decode()) != want
+    moving = moving or other
+    if other or any(x.startswith(b'--user-agent=') or x == b'--disable-gpu' for x in cmd) or (b'--time-zone-for-testing=' + tz.encode()) not in cmd:
         stale.append(int(pid))
+if moving and not os.path.exists(backup):
+    os.makedirs(os.path.dirname(backup), exist_ok=True)
+    skip = ('Singleton', 'Cache', 'Code Cache', 'GPUCache', 'GrShaderCache', 'ShaderCache', 'DawnCache')
+    with tarfile.open(backup + '.tmp', 'w:gz') as tar:
+        tar.add(profile, arcname='browser', filter=lambda t: None if os.path.basename(t.name).startswith(skip) else t)
+    os.chmod(backup + '.tmp', 0o600)
+    os.replace(backup + '.tmp', backup)
 for pid in stale: os.kill(pid, signal.SIGTERM)
 print('restarted' if stale else 'same')
 `;
-    const result = await this.execInSandbox(["python3", "-c", script, timezone], { user: "root", timeoutMs: 30_000 });
+    const result = await this.execInSandbox(["python3", "-c", script, timezone, binary, backupPath], { user: "root", timeoutMs: 120_000 });
     if (result.code !== 0) throw new Error(`Cannot align the sandbox browser: ${result.stderr.trim() || result.stdout.trim()}`);
     return result.stdout.trim() === "restarted";
   }

@@ -155,6 +155,12 @@ export function loadConfig(): {
     releaseWhenIdle: boolean;
     /** The browser's time zone; it should match where its network egress is. */
     timezone: string;
+    /**
+     * A newer Chromium than the image ships (sites reject its old build), installed
+     * into `toolDir` when the sandbox starts, only on `arch` (`uname -m`) and only
+     * if the download matches `sha256`. Null keeps the image's own browser.
+     */
+    build: { url: string; sha256: string; arch: string } | null;
     /** How long the browser may sit with no task/viewer/activity hold before sleeping. */
     idleMs: number;
     /** Viewer heartbeat validity; a viewer that stops heartbeating loses its hold. */
@@ -349,6 +355,12 @@ export function loadConfig(): {
       // in a snapshot; failed restores dropped them. Keep it resident unless asked.
       releaseWhenIdle: envStr("PA_BROWSER_RELEASE_IDLE", "0") === "1",
       timezone: envStr("PA_BROWSER_TIMEZONE", "America/Los_Angeles"),
+      // Chromium 153 for linux-arm64 (Playwright's build of Chrome for Testing; Google ships none for arm64).
+      build: envStr("PA_BROWSER_BUILD", "on") === "off" ? null : {
+        url: envStr("PA_BROWSER_BUILD_URL", "https://cdn.playwright.dev/builds/cft/153.0.8010.12/linux-arm64/chrome-linux-arm64.zip"),
+        sha256: envStr("PA_BROWSER_BUILD_SHA256", "7d8a4b4ff289efe44a06501a519df142c4c18fff7aaf1c1401a3fbb12b3bd069"),
+        arch: envStr("PA_BROWSER_BUILD_ARCH", "aarch64"),
+      },
       // A five minute default keeps a browser that nobody is looking at from
       // holding hundreds of MB of renderer memory; the floor stops a
       // misconfiguration from thrashing the browser on every navigation.

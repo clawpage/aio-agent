@@ -202,6 +202,11 @@ curl -s http://127.0.0.1:4891/healthz
 >
 > **浏览器身份一致（少被网站拦截）**：镜像默认让 Linux 上的 Chromium 冒充 Mac 的 UA（页面读到的平台与 UA、客户端提示互相矛盾）、时区写死新加坡、关闭 GPU（没有 WebGL），这些都是反爬系统（如 eBay 的 Akamai）判定机器人的强信号。控制面在每次沙箱就绪时对齐：保留 Chromium 自己的 Linux UA，时区用 `PA_BROWSER_TIMEZONE`（默认 `America/Los_Angeles`，应与出口网络所在地一致），通过 SwiftShader 启用 WebGL；有改动时优雅重启一次浏览器。
 
+> **较新的 Chromium**：镜像自带的 Chromium 146 已落后约半年，eBay 等站点在第一个请求（TLS 握手阶段）就直接拒绝它，与页面指纹无关。沙箱就绪时，控制面把固定版本的 Chromium 153（Playwright 为 linux-arm64 构建的 Chrome for Testing）安装到 `/opt/aio-browser/chromium-<校验和前缀>/`：下载必须与固定的 SHA-256 一致，已安装时立即跳过；然后把镜像浏览器守护进程的可执行文件指向它并优雅重启一次，镜像的托管策略同步链接到 `/etc/opt/chrome/policies`。仅在 `PA_BROWSER_BUILD_ARCH`（默认 `aarch64`）上启用；其他架构、下载或校验失败时保留镜像浏览器。可用 `PA_BROWSER_BUILD_URL` / `PA_BROWSER_BUILD_SHA256` 换成别的构建，`PA_BROWSER_BUILD=off` 回到镜像浏览器。
+> 新版 Chromium 会升级浏览器 profile，旧版随后无法打开它。第一次换用其他可执行文件前，profile（去掉缓存）会备份到持久卷的 `~/.codex/aio-browser/profile-before-browser-change.tgz`（0600）；回退到旧版时先停浏览器，再用这份备份替换 `/home/gem/.config/browser`。
+
+> **镜像自带的浏览器客户端不常驻**：python-server 的浏览器接口与 `mcp-server-browser` 第一次被用到（包括下面的恢复流程）就用未修补的 Playwright / Puppeteer 连上浏览器且不再断开，期间网站会把每个页面都判为自动化，python-server 还会把主线程的 `navigator.languages` 固定为 `en-US`，与 Worker 不一致。巡检在没有任务在跑、浏览器也不在唤醒或恢复时断开它们（下次使用时自动重连）；python-server 同时承载终端，只在它没有任何连接（终端的 WebSocket 不出现在会话列表里）且没有正在执行的 shell 命令时重启。
+
 恢复会同时重建 AIO REST 与浏览器 MCP 的连接。镜像中的 MCP 会缓存旧 Puppeteer 页面，因此在恢复完成前精确重启 `mcp-server-browser`，并通过 Codex 使用的 `/mcp` 调用 `browser_tab_list` 验证页面连接；失败保留快照和恢复进度，不误报可用，不自动重放导航、点击等用户操作。该服务使用无状态 HTTP，重连不停止 Codex、终端或其他服务。
 
 沙箱里的 Chromium 常驻会占住几百 MB 渲染内存，即使没人在看。这条功能让**只有浏览器**在

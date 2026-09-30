@@ -180,7 +180,16 @@ export async function startSandboxRuntime(ctx: AppContext): Promise<void> {
     log.info("sandbox container ready", { name: state.image, healthy: state.healthy });
     // Sites block a browser whose identity does not add up; best effort, never fatal.
     try {
-      if (await container.alignBrowserIdentity(cfg.browser.timezone)) log.info("sandbox browser identity aligned", { timezone: cfg.browser.timezone });
+      // Sites also reject the image's old Chromium build; a newer one replaces it when configured.
+      let binary: string | null = null;
+      if (cfg.browser.build) {
+        try {
+          binary = await container.ensureBrowserBuild(cfg.browser.build);
+        } catch (err) {
+          log.warn("browser build not installed; keeping the image browser", { error: err instanceof Error ? err.message : String(err) });
+        }
+      }
+      if (await container.alignBrowserIdentity(cfg.browser.timezone, binary ?? undefined)) log.info("sandbox browser identity aligned", { timezone: cfg.browser.timezone, binary: binary ?? "image" });
     } catch (err) {
       log.warn("sandbox browser identity not aligned", { error: err instanceof Error ? err.message : String(err) });
     }

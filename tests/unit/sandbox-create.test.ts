@@ -65,15 +65,16 @@ it("aligns the sandbox browser identity once: its own Linux UA, the egress time 
     vi.spyOn(container, "docker").mockImplementation(async (args: string[]) => {
       calls.push(args);
       const script = args[args.indexOf("-c") + 1]!.replace("/var/run/gem/browser-supervisor.json", configPath);
-      const stdout = execFileSync("python3", ["-c", script, args.at(-1)!], { encoding: "utf8" });
+      const stdout = execFileSync("python3", ["-c", script, ...args.slice(args.indexOf("-c") + 2)], { encoding: "utf8" });
       return { code: 0, stdout, stderr: "" };
     });
     // No Chromium runs here, so nothing is restarted; the config is rewritten for its next start.
     expect(await container.alignBrowserIdentity("America/Los_Angeles")).toBe(false);
     expect(calls[0]).toEqual(expect.arrayContaining(["exec", "-u", "root"]));
-    const browser = JSON.parse(fs.readFileSync(configPath, "utf8")).browser as { args: string[]; env: Record<string, string> };
+    const browser = JSON.parse(fs.readFileSync(configPath, "utf8")).browser as { args: string[]; env: Record<string, string>; binary: string };
     expect(browser.args).toEqual(["--mute-audio", "--time-zone-for-testing=America/Los_Angeles", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist", "--use-angle=swiftshader"]);
     expect(browser.env).toEqual({ TZ: "America/Los_Angeles", DISPLAY: ":99" });
+    expect(browser.binary).toBe("/usr/local/bin/browser");
     // Already aligned: nothing more to write.
     const before = fs.readFileSync(configPath, "utf8");
     expect(await container.alignBrowserIdentity("America/Los_Angeles")).toBe(false);
@@ -81,4 +82,39 @@ it("aligns the sandbox browser identity once: its own Linux UA, the egress time 
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+it("points the browser at a newer build when one is installed, and back at the image browser without it", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pa-binary-"));
+  try {
+    const container = new SandboxContainer(testConfig(dir, 18999), new Logger("error", undefined, false));
+    const configPath = path.join(dir, "browser-supervisor.json");
+    fs.writeFileSync(configPath, JSON.stringify({ browser: { binary: "/usr/local/bin/browser", args: ["--time-zone-for-testing=America/Los_Angeles", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist", "--use-angle=swiftshader"], env: { TZ: "America/Los_Angeles" } } }));
+    vi.spyOn(container, "docker").mockImplementation(async (args: string[]) => {
+      const script = args[args.indexOf("-c") + 1]!.replace("/var/run/gem/browser-supervisor.json", configPath);
+      return { code: 0, stdout: execFileSync("python3", ["-c", script, ...args.slice(args.indexOf("-c") + 2)], { encoding: "utf8" }), stderr: "" };
+    });
+    const binary = () => (JSON.parse(fs.readFileSync(configPath, "utf8")).browser as { binary: string }).binary;
+    await container.alignBrowserIdentity("America/Los_Angeles", "/opt/aio-browser/chromium-7d8a4b4ff289/chrome-linux-arm64/chrome");
+    expect(binary()).toBe("/opt/aio-browser/chromium-7d8a4b4ff289/chrome-linux-arm64/chrome");
+    await container.alignBrowserIdentity("America/Los_Angeles");
+    expect(binary()).toBe("/usr/local/bin/browser");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+it("installs a pinned browser build as root, and leaves another CPU architecture on the image browser", async () => {
+  const container = new SandboxContainer(testConfig("/tmp/pa-build", 18999), new Logger("error", undefined, false));
+  const build = { url: "https://cdn.example/chrome.zip", sha256: "a".repeat(64), arch: "aarch64" };
+  const calls: Array<{ argv: string[]; user?: string }> = [];
+  let answer = "/opt/aio-browser/chromium-aaaaaaaaaaaa/chrome-linux-arm64/chrome\n";
+  container.execInSandbox = (async (argv: string[], opts?: { user?: string }) => (calls.push({ argv, user: opts?.user }), { code: 0, stdout: answer, stderr: "" })) as typeof container.execInSandbox;
+  expect(await container.ensureBrowserBuild(build)).toBe("/opt/aio-browser/chromium-aaaaaaaaaaaa/chrome-linux-arm64/chrome");
+  expect(calls[0]!.user).toBe("root");
+  expect(calls[0]!.argv.slice(-4)).toEqual([build.url, build.sha256, "aarch64", "/opt/aio-browser/chromium-aaaaaaaaaaaa"]);
+  expect(calls[0]!.argv[2]).toContain("sha256sum -c");
+  answer = "other-arch\n";
+  expect(await container.ensureBrowserBuild(build)).toBeNull();
+  await expect(container.ensureBrowserBuild({ ...build, sha256: "not-a-hash" })).rejects.toThrow("checksum");
 });
