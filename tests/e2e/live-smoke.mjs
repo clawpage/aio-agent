@@ -166,14 +166,14 @@ for (const surface of ["/terminal", "/vnc/vnc.html", "/code-server/", "/jupyter/
   check(`unauthenticated ${surface} denied`, res.status === 401, `status=${res.status}`);
 }
 
-// 11. Open-redirect attempt on the bootstrap target must fall back to "/"
+// 11. Open-redirect attempt on the bootstrap target must fall back to the account's own workspace root
 const redirectTicket = await call(primary, `${PRIMARY}/api/workspace/ticket`, {
   method: "POST",
   json: { next: "//evil.example.com/steal" },
   headers: { origin: PRIMARY, "x-csrf-token": csrfCookie ?? "" },
 });
 const redirectBoot = await call(companion, redirectTicket.json?.url);
-check("open redirect neutralised", redirectBoot.status === 303 && redirectBoot.headers.get("location") === "/", `location=${redirectBoot.headers.get("location")}`);
+check("open redirect neutralised", redirectBoot.status === 303 && /^\/(u\/[A-Za-z0-9_-]{2,40}\/)?$/.test(redirectBoot.headers.get("location") ?? ""), `location=${redirectBoot.headers.get("location")}`);
 
 // 12. Real WebSocket upgrade on the companion origin (authenticated 101, anonymous 401)
 async function wsUpgrade(url, cookie) {
