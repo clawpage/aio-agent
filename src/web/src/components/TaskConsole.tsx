@@ -118,7 +118,7 @@ export function TaskConsole({ target, tab, label, primary, closeLabel = "关闭"
         </div>
         {notice && <p className="task-console-notice" role="alert">{notice}</p>}
         <div className="task-console-tools" role="group" aria-label="页面操作">
-          <span className="muted tiny task-console-hint">点左侧工具栏的键盘按钮打字，双指拖动滚动</span>
+          <span className="muted tiny task-console-hint">键盘在左侧工具栏</span>
           <span className="spacer" />
           <button type="button" className="ghost tiny" onClick={() => void focus()}>切回这个页面</button>
           <button type="button" className="ghost tiny" onClick={onReveal}>在工作区打开</button>

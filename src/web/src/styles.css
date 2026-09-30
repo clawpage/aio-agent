@@ -2494,7 +2494,7 @@ textarea:focus {
 .task-console-hint { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .task-console-notice { flex: none; margin: 0; padding: 6px 10px 0; font-size: 12px; color: var(--warn); line-height: 1.5; }
 .task-console-tools { flex: none; display: flex; align-items: center; gap: 6px; padding: 6px 10px; border-top: 1px solid var(--border); }
-.task-console-tools button { min-width: 40px; }
+.task-console-tools button { min-width: 40px; white-space: nowrap; flex: none; }
 .task-console.task-console-opening { width: auto; height: auto; padding: 16px 20px; font-size: 14px; }
 @media (max-width: 720px) {
   .task-console-overlay { padding: 0; }
