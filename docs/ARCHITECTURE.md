@@ -49,7 +49,7 @@
 候选来源、搜索与选择写入 `recall_events`，供配置页统计与召回上限自适应。派单器可以返回
 `{search:[...]}` 请求检索，服务端检索后带结果再次询问，轮数与加入数量都有上限。
 并发数复用 `PA_MAX_CONCURRENT_TURNS`；浏览器不是互斥资源：沙箱内的标签页服务（`tab-server.cjs`，loopback `:8190`，
-playwright-core 经 CDP 连接同一个 Chromium）按请求头 `X-AIO-Task`（执行会话 ID）与 `X-AIO-Task-Title` 把每个标签页登记到创建它的任务：创建者可操作，其他任务只读，
+patchright-core 经 CDP 连接同一个 Chromium；不用 playwright-core，是因为常驻连接会给每个页面留下可被网站检测的 `Runtime.enable` 痕迹）按请求头 `X-AIO-Task`（执行会话 ID）与 `X-AIO-Task-Title` 把每个标签页登记到创建它的任务：创建者可操作，其他任务只读，
 登记表存于 `/tmp/aio-tabs-state.json`，重启后按 CDP targetId 重新认领；执行线程经线程级配置（Codex `config.mcp_servers`、
 Claude Code `--mcp-config`）接入它并关闭 `aio_browser`。回合结束只标记“已结束”（续接复用），按需销毁：超过 8 个已结束标签页
 按最久未用关闭，浏览器空闲释放前的快照之前清理全部已结束标签页（`pruneBeforeSnapshot`）。

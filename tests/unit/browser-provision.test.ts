@@ -10,7 +10,7 @@ function fixture(){
  const files=new Map<string,string>();const writes:string[]=[];let fail=false;let version='one';
  const read=fs.readFileSync;
  vi.spyOn(fs,'readFileSync').mockImplementation(((p:any,...args:any[])=>{
-  if(String(p).endsWith('playwright-core.tgz'))return Buffer.from(version);
+  if(String(p).endsWith('patchright-core.tgz'))return Buffer.from(version);
   return (read as any)(p,...args);
  }) as any);
  const container={

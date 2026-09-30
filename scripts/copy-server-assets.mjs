@@ -25,8 +25,8 @@ for (const [from, to] of assetTrees) {
 // Build the offline runtime dependency from the exact lockfile dependency.
 // No registry request, browser download, or checked-in generated archive.
 const require = createRequire(import.meta.url);
-const packageDir = path.dirname(require.resolve("playwright-core/package.json"));
+const packageDir = path.dirname(require.resolve("patchright-core/package.json"));
 const vendor = path.join(root, "dist/server/browser/vendor");
 await mkdir(vendor, { recursive: true });
-execFileSync("tar", ["-czf", path.join(vendor, "playwright-core.tgz"), "-C", packageDir, "."]);
-console.log("packaged offline playwright-core runtime");
+execFileSync("tar", ["-czf", path.join(vendor, "patchright-core.tgz"), "-C", packageDir, "."]);
+console.log("packaged offline patchright-core runtime");

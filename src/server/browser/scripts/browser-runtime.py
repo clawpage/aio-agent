@@ -84,8 +84,8 @@ DEFAULT_SNAPSHOT_PATH = "/home/gem/.codex/tools/aio-browser/browser-snapshot.jso
 # script. It is the only component that reads/writes cookies + localStorage +
 # IndexedDB; this process never serializes those values itself.
 STORAGE_HELPER_NAME = "browser-storage.cjs"
-# Vendored playwright-core lives beside the helper (commented in README).
-STORAGE_VENDOR_NAME = "playwright-core"
+# Vendored patchright-core lives beside the helper (commented in README).
+STORAGE_VENDOR_NAME = "patchright-core"
 
 # Node interpreters, tried in order. A browser image does not promise a `node`
 # on PATH for root, so the absolute candidates come first.
@@ -322,7 +322,7 @@ def find_node() -> str | None:
 
 
 def storage_helper_paths(helper_dir: str | None = None) -> tuple[str, str]:
-    """(helper script, vendored playwright-core dir) inside the managed tool dir."""
+    """(helper script, vendored patchright-core dir) inside the managed tool dir."""
     base = helper_dir or os.path.dirname(os.path.abspath(__file__))
     return os.path.join(base, STORAGE_HELPER_NAME), os.path.join(base, STORAGE_VENDOR_NAME)
 

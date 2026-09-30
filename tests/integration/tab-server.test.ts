@@ -39,7 +39,7 @@ beforeAll(async () => {
   browser = await chromium.launch({ headless: true, args: [`--remote-debugging-port=${cdpPort}`] });
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "tabs-"));
   process.env.AIO_TABS_CDP = `http://127.0.0.1:${cdpPort}`;
-  process.env.AIO_TABS_PLAYWRIGHT = require.resolve("playwright-core");
+  process.env.AIO_TABS_PLAYWRIGHT = require.resolve("patchright-core");
   process.env.AIO_TABS_OUTPUT = dir;
   process.env.AIO_TABS_STATE = path.join(dir, "state.json");
   process.env.AIO_TABS_MAX_FINISHED = "2";
@@ -97,6 +97,10 @@ it.skipIf(!hasChromium)("records each tab's creator: it alone may act, others ma
   expect((await call(null, "browser_get_text")).error?.message).toBe("missing task identity");
   expect((await call("B", "browser_get_text", { tab: "t999" })).result?.isError).toBe(true);
   expect(text(await call("A", "browser_get_text"))).toContain("alpha body");
+  // The agent's script runs in the page's own world, so it sees what the page's scripts defined.
+  await call("G", "browser_navigate", { url: "data:text/html,<title>G</title><script>window.pageGlobal = 42</script>" });
+  expect(text(await call("G", "browser_evaluate", { script: "window.pageGlobal" }))).toBe("42");
+  await call("G", "browser_tab_close", {});
 });
 
 it.skipIf(!hasChromium)("keeps a finished task's tabs for a follow-up and destroys them on demand", async () => {

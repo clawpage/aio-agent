@@ -29,13 +29,14 @@ import type { SnapshotWarning } from "./types.js";
 const SCRIPT_NAME = "browser-runtime.py";
 const MARKER_NAME = ".browser-runtime.sha256";
 /**
- * The node storage helper and its vendored playwright-core. They live beside the
+ * The node storage helper and its vendored patchright-core (Playwright without
+ * the CDP traces sites use to flag automation). They live beside the
  * python helper so the container never has to download a package: the tree is
  * shipped as one version-pinned tarball and extracted through the managed tool dir.
  */
 const STORAGE_HELPER_NAME = "browser-storage.cjs";
-const STORAGE_VENDOR_DIR = "playwright-core";
-const STORAGE_VENDOR_TGZ = "playwright-core.tgz";
+const STORAGE_VENDOR_DIR = "patchright-core";
+const STORAGE_VENDOR_TGZ = "patchright-core.tgz";
 const STORAGE_MARKER_NAME = ".browser-storage.sha256";
 
 /** Strip URLs and long opaque blobs; mirrors the container-side redaction. */
@@ -163,7 +164,7 @@ p.mkdir(parents=True, exist_ok=True, mode=0o755)
   }
 
   /**
-   * Install the node storage helper and its vendored playwright-core. A missing
+   * Install the node storage helper and its vendored patchright-core. A missing
    * dependency is a hard failure for the caller: a snapshot without cookies /
    * localStorage / IndexedDB is not a complete snapshot and must never authorise
    * a release. The tarball is extracted as root into a managed directory, never

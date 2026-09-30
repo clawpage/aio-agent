@@ -39,7 +39,9 @@ const TOOL_DEADLINE_MS = Number(process.env.AIO_TABS_TOOL_DEADLINE_MS || 90 * 10
 const PROBE_MS = Number(process.env.AIO_TABS_PROBE_MS || 5000);
 const MAX_TEXT = 60000;
 const KEY = /^[A-Za-z0-9_-]{1,80}$/;
-const { chromium } = require(process.env.AIO_TABS_PLAYWRIGHT || '/opt/aio-browser/playwright-core');
+// patchright-core: Playwright's API without Runtime.enable, whose traces let sites flag every page
+// of this browser as automated while the server stays connected.
+const { chromium } = require(process.env.AIO_TABS_PLAYWRIGHT || '/opt/aio-browser/patchright-core');
 
 const INSTRUCTIONS = [
   '浏览器请只用 aio_tabs 的工具。每个标签页记录着创建它的任务：只有创建它的任务能操作（打开网址、点击、填写、执行脚本、关闭），其他任务只能只读查看（正文、HTML、页面结构、截图）。',
@@ -573,7 +575,7 @@ const TOOLS = {
   },
   browser_evaluate: {
     mode: 'write', description: '在本任务的标签页执行一段 JavaScript 表达式并返回结果（可能改变页面，所以只限本任务创建的标签页）。', input: { script: str, tab: ownTabArg }, required: ['script'],
-    run: async (ctx, a) => { const tab = await resolveTab(ctx, a.tab, 'write'); const value = await tab.page.evaluate(a.script); return textResult(typeof value === 'string' ? value : JSON.stringify(value, null, 2) ?? String(value)); },
+    run: async (ctx, a) => { const tab = await resolveTab(ctx, a.tab, 'write'); const value = await tab.page.evaluate(a.script, undefined, undefined, false); return textResult(typeof value === 'string' ? value : JSON.stringify(value, null, 2) ?? String(value)); },
   },
   browser_wait: {
     mode: 'read', description: '等待：selector 出现，或 text 出现，或固定毫秒 ms（最长 60 秒）。', input: { selector: str, text: str, ms: num, tab: tabArg },

@@ -122,7 +122,7 @@ export function pruneBeforeSnapshot(runtime: BrowserRuntimeLike, tabs: TabServer
 
 /**
  * Keeps the tab server running inside the sandbox. The script lives in the
- * root-managed browser tool directory next to the vendored playwright-core, runs
+ * root-managed browser tool directory next to the vendored patchright-core, runs
  * as the sandbox user on loopback, and is restarted when its version changes.
  */
 export class TabServer implements TabServerLike {
@@ -182,7 +182,7 @@ export class TabServer implements TabServerLike {
       env: {
         AIO_TABS_VERSION: version,
         AIO_TABS_PORT: String(TAB_SERVER_PORT),
-        AIO_TABS_PLAYWRIGHT: path.posix.join(this.#cfg.browser.toolDir, "playwright-core"),
+        AIO_TABS_PLAYWRIGHT: path.posix.join(this.#cfg.browser.toolDir, "patchright-core"),
         AIO_TABS_OUTPUT: path.posix.join(this.#cfg.sandbox.containerWorkspaceDir, ".scratch", "artifacts", "browser"),
       },
     });
