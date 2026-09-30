@@ -149,6 +149,8 @@ export function loadConfig(): {
      * account keeps one resident browser so its logins stay valid.
      */
     releaseWhenIdle: boolean;
+    /** The browser's time zone; it should match where its network egress is. */
+    timezone: string;
     /** How long the browser may sit with no task/viewer/activity hold before sleeping. */
     idleMs: number;
     /** Viewer heartbeat validity; a viewer that stops heartbeating loses its hold. */
@@ -334,6 +336,7 @@ export function loadConfig(): {
       // Releasing an idle browser meant stopping Chromium and carrying logins over
       // in a snapshot; failed restores dropped them. Keep it resident unless asked.
       releaseWhenIdle: envStr("PA_BROWSER_RELEASE_IDLE", "0") === "1",
+      timezone: envStr("PA_BROWSER_TIMEZONE", "America/Los_Angeles"),
       // A five minute default keeps a browser that nobody is looking at from
       // holding hundreds of MB of renderer memory; the floor stops a
       // misconfiguration from thrashing the browser on every navigation.

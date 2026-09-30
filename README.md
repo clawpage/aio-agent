@@ -181,6 +181,8 @@ curl -s http://127.0.0.1:4891/healthz
 > 恢复失败时网站会变成未登录。浏览器若因升级或崩溃处于已释放状态，后台巡检会自动恢复一次，之后保持常驻。
 > 状态条显示“常驻，登录状态一直保留”，不再有“保留浏览器”按钮。需要恢复空闲释放以节省内存时设
 > `PA_BROWSER_RELEASE_IDLE=1`，下面的释放规则才生效。智能体被要求只用这一个浏览器，不得另起浏览器或清除站点数据。
+>
+> **浏览器身份一致（少被网站拦截）**：镜像默认让 Linux 上的 Chromium 冒充 Mac 的 UA（页面读到的平台与 UA、客户端提示互相矛盾）、时区写死新加坡、关闭 GPU（没有 WebGL），这些都是反爬系统（如 eBay 的 Akamai）判定机器人的强信号。控制面在每次沙箱就绪时对齐：保留 Chromium 自己的 Linux UA，时区用 `PA_BROWSER_TIMEZONE`（默认 `America/Los_Angeles`，应与出口网络所在地一致），通过 SwiftShader 启用 WebGL；有改动时优雅重启一次浏览器。
 
 恢复会同时重建 AIO REST 与浏览器 MCP 的连接。镜像中的 MCP 会缓存旧 Puppeteer 页面，因此在恢复完成前精确重启 `mcp-server-browser`，并通过 Codex 使用的 `/mcp` 调用 `browser_tab_list` 验证页面连接；失败保留快照和恢复进度，不误报可用，不自动重放导航、点击等用户操作。该服务使用无状态 HTTP，重连不停止 Codex、终端或其他服务。
 

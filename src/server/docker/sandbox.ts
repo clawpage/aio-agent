@@ -684,6 +684,58 @@ finally:
    * Run a one-shot command inside the sandbox (fixed argv, no shell expansion by
    * us). `stdin` is only ever control-plane content, never user input.
    */
+  /**
+   * Make the sandbox Chromium present itself consistently, so sites do not take it
+   * for a bot: the image spoofs a Mac user agent on a Linux browser (the page reads
+   * `Linux x86_64` and the client hints disagree with the UA), pins a Singapore time
+   * zone behind a US address, and turns the GPU off so WebGL is missing. The image
+   * rewrites the browser config on every container start, so this runs whenever the
+   * sandbox comes up: it keeps Chromium's own (Linux) user agent, uses `timezone`,
+   * and enables WebGL through SwiftShader; when anything changed it stops Chromium
+   * gracefully and the image's supervisor starts it again with the new config.
+   * Returns true when Chromium was restarted.
+   */
+  async alignBrowserIdentity(timezone: string): Promise<boolean> {
+    const script = `
+import json, os, signal, sys
+path = '/var/run/gem/browser-supervisor.json'
+if not os.path.exists(path): print('absent'); raise SystemExit(0)
+config = json.load(open(path))
+browser = config.get('browser') or {}
+tz = sys.argv[1]
+old = list(browser.get('args') or [])
+args, zoned = [], False
+for a in old:
+    if a.startswith('--user-agent=') or a == '--disable-gpu': continue
+    if a.startswith('--time-zone-for-testing='):
+        if zoned: continue
+        a, zoned = '--time-zone-for-testing=' + tz, True
+    args.append(a)
+if not zoned: args.append('--time-zone-for-testing=' + tz)
+for flag in ('--enable-unsafe-swiftshader', '--ignore-gpu-blocklist', '--use-angle=swiftshader'):
+    if flag not in args: args.append(flag)
+env = dict(browser.get('env') or {})
+env['TZ'] = tz
+if args == old and env == (browser.get('env') or {}): print('same'); raise SystemExit(0)
+browser['args'] = args
+browser['env'] = env
+config['browser'] = browser
+with open(path + '.tmp', 'w') as f: json.dump(config, f, indent=2)
+os.chmod(path + '.tmp', 0o644)
+os.replace(path + '.tmp', path)
+for pid in (os.listdir('/proc') if os.path.isdir('/proc') else []):
+    if not pid.isdigit(): continue
+    try: cmd = open('/proc/%s/cmdline' % pid, 'rb').read().split(b'\\0')
+    except OSError: continue
+    if cmd and cmd[0] == b'/opt/browser/chrome' and any(a.startswith(b'--user-data-dir=') for a in cmd):
+        os.kill(int(pid), signal.SIGTERM)
+print('restarted')
+`;
+    const result = await this.execInSandbox(["python3", "-c", script, timezone], { user: "root", timeoutMs: 30_000 });
+    if (result.code !== 0) throw new Error(`Cannot align the sandbox browser: ${result.stderr.trim() || result.stdout.trim()}`);
+    return result.stdout.trim() === "restarted";
+  }
+
   async execInSandbox(
     argv: string[],
     opts: { timeoutMs?: number; user?: string; stdin?: string } = {},

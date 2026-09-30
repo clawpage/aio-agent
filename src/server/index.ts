@@ -177,6 +177,12 @@ export async function startSandboxRuntime(ctx: AppContext): Promise<void> {
   try {
     const state = await container.ensureRunning();
     log.info("sandbox container ready", { name: state.image, healthy: state.healthy });
+    // Sites block a browser whose identity does not add up; best effort, never fatal.
+    try {
+      if (await container.alignBrowserIdentity(cfg.browser.timezone)) log.info("sandbox browser identity aligned", { timezone: cfg.browser.timezone });
+    } catch (err) {
+      log.warn("sandbox browser identity not aligned", { error: err instanceof Error ? err.message : String(err) });
+    }
   } catch (err) {
     ctx.sandboxSetupError = err instanceof Error ? err.message : String(err);
     log.error("sandbox container failed to start", { error: ctx.sandboxSetupError });
