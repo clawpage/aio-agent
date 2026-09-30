@@ -521,3 +521,18 @@ test("dispatching shows a calm sorting animation and what the dispatcher weighs,
     expect(await glyph.evaluate(n => getComputedStyle(n).animationName)).toBe("none");
     expect(await hint.locator("span").evaluate(n => getComputedStyle(n).animationName)).toBe("none");
 });
+test("a finished task's browser card stays inside the screen, however long the page title", async ({ page }, info) => {
+    const row: Task = { ...task(1, "completed"), title: "核查 Amazon Baby Registry 额度实际花在哪里", result: "查到了。", completedAt: 2000, browser: { tabs: 1, request: null, human: false } };
+    const title = "Amazon.com: Baby Registry: Hatch Baby completion discount purchase history and eligible orders";
+    await page.route("**/api/tasks/task-1/browser", r => r.fulfill({ json: { tabs: [{ id: "t1", title, url: "https://www.amazon.com/baby-reg/completion-discount/purchase-history-and-more", lastUsed: 1, finishedAt: 2, holder: "ai", request: null }] } }));
+    await page.route("**/api/tasks/task-1/browser/screenshot*", r => r.fulfill({ contentType: "image/png", body: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==", "base64") }));
+    await setup(page, [row]);
+    const card = page.locator('.task-report .task-browser');
+    await expect(card).toBeVisible();
+    const report = (await page.locator(".task-report").boundingBox())!;
+    const box = (await card.boundingBox())!;
+    expect(box.x + box.width).toBeLessThanOrEqual(report.x + report.width + 1);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
+    expect(await page.locator(".task-feed").evaluate(n => n.scrollWidth - n.clientWidth)).toBeLessThanOrEqual(0);
+    await page.screenshot({ path: info.outputPath("report-browser.png") });
+});

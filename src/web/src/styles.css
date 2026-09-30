@@ -2407,6 +2407,8 @@ textarea:focus {
 
 /* A task's browser inside its card: preview, who drives it, and the hand-over. */
 .task-browser { margin: 10px 0 4px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 14px; background: var(--bg-soft); min-width: 0; }
+/* In a report (a column that sizes children to their content) a long unwrapped title would widen the card past the screen. */
+.task-report > .task-browser { align-self: stretch; box-sizing: border-box; max-width: 100%; }
 .task-browser.request { border-color: color-mix(in srgb,var(--warn) 55%,var(--border)); background: color-mix(in srgb,var(--warn) 9%,var(--bg)); }
 .task-browser.human { border-color: color-mix(in srgb,var(--accent) 50%,var(--border)); }
 .task-browser-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; min-width: 0; font-size: 13px; }
