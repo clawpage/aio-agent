@@ -47,6 +47,8 @@ export class SandboxIdle {
   #parking: Promise<void> | null = null;
   #waking: Promise<void> | null = null;
   #ticking = false;
+  /** Last reason the sandbox counted as in use, logged once per change. */
+  #reason: string | null = null;
   #timer: ReturnType<typeof setInterval> | null = null;
 
   constructor(opts: SandboxIdleOptions) {
@@ -167,7 +169,9 @@ export class SandboxIdle {
     if (this.#ticking || this.#state !== "running") return;
     this.#ticking = true;
     try {
-      if (await this.busyReason()) {
+      const busy = await this.busyReason();
+      this.#note(busy);
+      if (busy) {
         this.#lastActive = this.#now();
         return;
       }
@@ -176,6 +180,7 @@ export class SandboxIdle {
       if (!state.running) return;
       // A probe that fails says nothing about idleness: keep the container.
       const inside = await this.probe().catch(() => "probe_failed");
+      this.#note(inside);
       if (inside) {
         this.#lastActive = this.#now();
         return;
@@ -189,6 +194,12 @@ export class SandboxIdle {
     } finally {
       this.#ticking = false;
     }
+  }
+
+  #note(reason: string | null): void {
+    if (reason === this.#reason) return;
+    this.#reason = reason;
+    this.#ctx.log.info(reason ? "sandbox in use" : "sandbox quiet", reason ? { reason } : {});
   }
 
   async #park(): Promise<void> {
