@@ -123,6 +123,8 @@ describe("whole-container idle stop", () => {
   it.each([
     ["a running shell command", (w: ReturnType<typeof setup>["world"]) => { w.shell = ["completed", "running"]; }],
     ["a command still running past its output timeout", (w: ReturnType<typeof setup>["world"]) => { w.shell = ["no_change_timeout"]; }],
+    ["CPU use outside the browser", (w: ReturnType<typeof setup>["world"]) => { w.cpu = 40; }],
+    ["an unknown CPU reading", (w: ReturnType<typeof setup>["world"]) => { w.cpu = null; }],
   ])("checks inside the container before stopping: %s keeps it", async (_name, busy) => {
     const { clock, world, idle } = setup();
     busy(world);
@@ -135,26 +137,6 @@ describe("whole-container idle stop", () => {
     clock.now += IDLE - 1;
     await idle.tick();
     expect(world.calls).toEqual([]);
-  });
-
-  it.each([
-    ["CPU use", 40],
-    ["an unknown CPU reading", null],
-  ])("measures CPU after releasing the browser: %s keeps the container", async (_name, cpu) => {
-    const { clock, world, idle } = setup();
-    world.cpu = cpu;
-    clock.now += IDLE;
-    await idle.tick();
-    // The browser's own rendering is gone by then; it comes back on demand.
-    expect(world.calls).toEqual(["sleep"]);
-    expect(idle.state).toBe("running");
-    world.cpu = 1;
-    clock.now += IDLE - 1;
-    await idle.tick();
-    expect(world.calls).toEqual(["sleep"]);
-    clock.now += 1;
-    await idle.tick();
-    expect(world.calls).toEqual(["sleep", "sleep", "stop"]);
   });
 
   it("does not stop when the browser could not be snapshotted", async () => {

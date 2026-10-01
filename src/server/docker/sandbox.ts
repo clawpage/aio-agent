@@ -497,14 +497,16 @@ done
   }
 
   /**
-   * The container's average CPU use over `seconds` (percent of one core, from its
-   * cgroup), or null when unknown. One `docker stats` sample swings too much.
+   * Average CPU use over `seconds` of everything in the container except the
+   * browser (percent of one core), or null when unknown. Chromium is left out:
+   * its own rendering is not anyone's work, and a browser that was never released
+   * would otherwise always count. Reaped children's time is included, so a build
+   * of many short processes still shows.
    */
   async cpuPercent(seconds = 10): Promise<number | null> {
-    const read = 'sed -n "s/^usage_usec //p" /sys/fs/cgroup/cpu.stat';
-    const res = await this.docker(["exec", this.name, "sh", "-c", `a=$(${read}); sleep ${seconds}; b=$(${read}); echo $((b-a))`], { timeoutMs: (seconds + 20) * 1000 });
-    const usec = Number(res.stdout.trim());
-    return res.code === 0 && res.stdout.trim() !== "" && Number.isFinite(usec) ? usec / (seconds * 10_000) : null;
+    const res = await this.docker(["exec", "-i", this.name, "python3", "-"], { stdin: workCpuScript(seconds), timeoutMs: (seconds + 20) * 1000 });
+    const value = Number(res.stdout.trim());
+    return res.code === 0 && res.stdout.trim() !== "" && Number.isFinite(value) ? value : null;
   }
 
   async stop(): Promise<void> {
@@ -905,4 +907,29 @@ print('restarted' if stale else 'same')
       { timeoutMs: opts.timeoutMs ?? 60_000, stdin: opts.stdin },
     );
   }
+}
+
+/** Python run inside the sandbox by `cpuPercent`; reads /proc only. */
+function workCpuScript(seconds: number): string {
+  return `import os, time
+def snap():
+    out = {}
+    for pid in os.listdir("/proc"):
+        if not pid.isdigit() or pid == str(os.getpid()):
+            continue
+        try:
+            raw = open("/proc/%s/stat" % pid).read()
+        except OSError:
+            continue
+        if raw[raw.index("(") + 1:raw.rindex(")")].startswith("chrom"):
+            continue
+        f = raw[raw.rindex(")") + 2:].split()
+        out[pid] = sum(int(x) for x in f[11:15])
+    return out
+a = snap()
+time.sleep(${seconds})
+b = snap()
+used = sum(v - a.get(p, 0) for p, v in b.items() if v >= a.get(p, 0))
+print(used / os.sysconf("SC_CLK_TCK") / ${seconds} * 100)
+`;
 }
