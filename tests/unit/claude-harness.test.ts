@@ -224,7 +224,7 @@ class FakeChild extends EventEmitter {
 
 const flush = () => new Promise((r) => setTimeout(r, 10));
 
-function makeSession() {
+function makeSession(patch: Partial<ReturnType<typeof enabledConfig>> = {}) {
   const spawns: Array<{ args: string[]; env: Record<string, string>; child: FakeChild }> = [];
   const existing = new Set<string>();
   const killed: string[] = [];
@@ -238,7 +238,7 @@ function makeSession() {
       return child;
     },
   } as unknown as SandboxContainer;
-  const cfg = enabledConfig();
+  const cfg = { ...enabledConfig(), ...patch };
   const session = new ClaudeCodeSession(cfg, log, container, new ClaudeCodeHarness(cfg, log));
   const events: Array<{ method: string; params: Record<string, unknown> }> = [];
   session.onNotification((method, params) => events.push({ method, params: params as Record<string, unknown> }));
@@ -372,6 +372,19 @@ describe("ClaudeCodeSession", () => {
     await restarted.session.startTurn({ threadId, text: "again" });
     const args = restarted.spawns[0]!.args;
     expect(JSON.parse(args[args.indexOf("--mcp-config") + 1]!).mcpServers.aio_tabs.headers["X-AIO-Task"]).toBe("conv_web");
+  });
+
+  it("adds the knowledge base to a task's turns only when this runtime was granted it", async () => {
+    const url = "http://host.docker.internal:4902/kb/token/mcp";
+    const { session, spawns } = makeSession({ kb: { url } });
+    const servers = (i: number) => JSON.parse(spawns[i]!.args[spawns[i]!.args.indexOf("--mcp-config") + 1]!).mcpServers;
+    const task = await session.startThread({ browserTask: { key: "conv_kb", title: "查资料" } });
+    await session.startTurn({ threadId: task.threadId, text: "hi" });
+    expect(Object.keys(servers(0))).toEqual(["aio_tabs", "aio_kb"]);
+    expect(servers(0).aio_kb).toEqual({ type: "http", url });
+    const plain = await session.startThread({});
+    await session.startTurn({ threadId: plain.threadId, text: "hi" });
+    expect(Object.keys(servers(1))).toEqual(["aio_browser"]);
   });
 
   it("runs one turn per session at a time", async () => {

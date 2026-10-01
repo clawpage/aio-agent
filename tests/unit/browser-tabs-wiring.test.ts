@@ -6,6 +6,8 @@ import { Logger } from "../../src/server/logger.js";
 import { pruneBeforeSnapshot, TAB_POLICY, tabMcpServers, tabThreadConfig, type BrowserTask } from "../../src/server/browser/tabs.js";
 import type { BrowserRuntimeLike } from "../../src/server/browser/lifecycle.js";
 import { FakeCodex, testConfig } from "../helpers/harness.js";
+import { KB_POLICY } from "../../src/server/kb.js";
+import type { Config } from "../../src/server/config.js";
 
 class RecordingCodex extends FakeCodex {
   threadOpts: Array<{ browserTask?: BrowserTask; developerInstructions?: string }> = [];
@@ -20,7 +22,7 @@ class RecordingCodex extends FakeCodex {
 }
 
 const tick = (ms = 30) => new Promise((r) => setTimeout(r, ms));
-let db: Db, agent: AgentManager, codex: RecordingCodex;
+let db: Db, agent: AgentManager, codex: RecordingCodex, cfg: Config;
 const log: string[] = [];
 let releaseGate!: () => void;
 
@@ -42,13 +44,28 @@ beforeEach(async () => {
     close: async () => ({ status: 200, body: {} }),
   };
   const browser = { reserveTurn: () => () => void log.push("lease-end"), ready: async () => void log.push("ready") };
-  agent = new AgentManager({ cfg: testConfig("/tmp/pa-tabs-wiring", 1), db, codex, log: new Logger("error", undefined, false), hostTokens: {} as HostTokenSource, browser, tabs });
+  cfg = testConfig("/tmp/pa-tabs-wiring", 1);
+  agent = new AgentManager({ cfg, db, codex, log: new Logger("error", undefined, false), hostTokens: {} as HostTokenSource, browser, tabs });
   await agent.init();
 });
 
 afterEach(() => {
   agent.shutdown();
   db.close();
+});
+
+it("tells the executor about the knowledge base only when this runtime was granted it", async () => {
+  const plain = agent.createConversation({ title: "没有知识库" });
+  agent.submitTurn({ conversationId: plain.id, text: "hi", clientMessageId: "k1" });
+  await tick();
+  expect(codex.threadOpts[0]?.developerInstructions).not.toContain(KB_POLICY);
+
+  cfg.kb = { url: "http://host.docker.internal:4902/kb/token/mcp" };
+  const granted = agent.createConversation({ title: "有知识库" });
+  agent.submitTurn({ conversationId: granted.id, text: "hi", clientMessageId: "k2" });
+  await tick();
+  expect(codex.threadOpts[1]?.developerInstructions).toContain(TAB_POLICY);
+  expect(codex.threadOpts[1]?.developerInstructions?.endsWith(KB_POLICY)).toBe(true);
 });
 
 it("records every execution thread's tabs against its task and marks them finished before the browser hold ends", async () => {

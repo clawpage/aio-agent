@@ -224,6 +224,11 @@ url = "http://127.0.0.1:8080/mcp"
 url = "http://127.0.0.1:8190/mcp"
 `;
 
+/** The policy for one runtime: the sandbox's own servers, plus the knowledge base when this account was granted it. */
+export function codexRequirementsToml(cfg: { kb?: { url: string } }): string {
+  return cfg.kb ? `${CODEX_REQUIREMENTS_TOML}\n[mcp_servers.aio_kb.identity]\nurl = ${JSON.stringify(cfg.kb.url)}\n` : CODEX_REQUIREMENTS_TOML;
+}
+
 export const CODEX_ISOLATION_OVERRIDES = [
   "-c", "features.apps=false",
   "-c", "features.plugins=false",

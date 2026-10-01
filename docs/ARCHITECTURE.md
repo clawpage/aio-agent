@@ -215,6 +215,7 @@ helper 内、紧挨着信号发生。
   `features.apps`、`features.plugins`、`features.remote_plugin`，并设置 `apps._default.enabled=false`。
   控制面在每次接管容器时安装独立的 `/etc/codex/requirements.toml`（root 管理），固定这三个
   feature 为 false；MCP 白名单只接受 `aio_browser` 的精确 URL `http://127.0.0.1:8080/mcp`。
+  获准使用知识库的运行时另有一条 `aio_kb`，URL 是它自己在成员网关上的能力地址；其他账号的策略里没有这一条。
   app-server 启动参数再次关闭相同入口；现有用户 config、AGENTS 与 Mac 连接配置不覆盖。
   遇到不属于 personal-agent 的 requirements 文件时拒绝覆盖并阻止运行时启动，需人工合并。
   此规则隔离的是 Codex 工具接入；不声称共享账号访问 token 已变为模型专用权限，也不隔离

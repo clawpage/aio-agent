@@ -1,5 +1,6 @@
 import { tabThreadConfig, type BrowserTask } from "../browser/tabs.js";
 import { decisionThreadServers } from "../decision.js";
+import { kbThreadServers } from "../kb.js";
 import type { Config } from "../config.js";
 import type { Logger } from "../logger.js";
 import type { SandboxContainer } from "../docker/sandbox.js";
@@ -438,11 +439,11 @@ export class SandboxCodexSession {
     }));
   }
 
-  /** An execution thread (one with a task identity) gets its tab tools and the decision tool. */
+  /** An execution thread (one with a task identity) gets its tab tools, the decision tool and the knowledge base. */
   #executionConfig(task: BrowserTask | undefined): { config?: Record<string, unknown> } {
     if (!task) return {};
     const tabs = tabThreadConfig(task) as { mcp_servers: Record<string, unknown> };
-    return { config: { ...tabs, mcp_servers: { ...tabs.mcp_servers, ...decisionThreadServers(this.#cfg) } } };
+    return { config: { ...tabs, mcp_servers: { ...tabs.mcp_servers, ...decisionThreadServers(this.#cfg), ...kbThreadServers(this.#cfg) } } };
   }
 
   async startThread(

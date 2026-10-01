@@ -3,6 +3,7 @@ import {MemberModelGateway} from "./memberModelGateway.js";
 import {ShareStore} from "./share.js";
 import {Jev} from "./jev.js";
 import {DecisionGateway} from "./decision.js";
+import {KbGateway} from "./kb.js";
 import {UserRuntimes} from "./tenants.js";
 import { loadConfig, ensureDataDirs, type Config } from "./config.js";
 import { Logger } from "./logger.js";
@@ -352,7 +353,9 @@ async function main(): Promise<void> {
   ctx.share.provision(ctx.cfg);
   const decision=new DecisionGateway({cfg:ctx.cfg,db:ctx.db,jev:ctx.jev!,log:ctx.log,port:ctx.cfg.memberModelPort??4902});
   decision.provision(ctx.cfg);
-  const modelGateway=new MemberModelGateway(ctx.cfg,ctx.log,ctx.share,decision);
+  const kb=new KbGateway({cfg:ctx.cfg,log:ctx.log,port:ctx.cfg.memberModelPort??4902,usernameOf:id=>account("SELECT username AS v FROM owners WHERE id=?",id)});
+  kb.provision(ctx.cfg);
+  const modelGateway=new MemberModelGateway(ctx.cfg,ctx.log,ctx.share,decision,kb);
   await modelGateway.start();
   const users=new UserRuntimes(ctx,bootstrap,modelGateway);
   ctx.runtimeForUser=id=>users.resolve(id);

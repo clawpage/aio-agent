@@ -251,6 +251,20 @@ export function loadConfig(): {
   };
   /** The decision tool reachable from this runtime's sandbox; set by the decision gateway. */
   decision?: { url: string };
+  /**
+   * An optional knowledge-base MCP server on the host. The control plane holds its
+   * bearer token; the owner and the listed members reach it only through the
+   * gateway, every other account never sees it. Without a URL the feature is absent.
+   */
+  kbMcp: {
+    upstreamUrl: string;
+    /** Private host file holding KB_MCP_TOKEN (the environment wins). */
+    secretsFile: string;
+    /** Member usernames granted the knowledge base; the owner always has it. */
+    members: string[];
+  };
+  /** The knowledge-base tools reachable from this runtime's sandbox; set by the knowledge-base gateway. */
+  kb?: { url: string };
   externalBaseUrl: string;
 } {
   const port = envInt("PA_PORT", 4891);
@@ -450,6 +464,11 @@ export function loadConfig(): {
       secretsFile: envStr("PA_JEV_SECRETS_FILE", path.join(os.homedir(), ".config", "aio-agent", "jev.env")),
       timeoutMs: Math.max(5_000, envInt("PA_JEV_TIMEOUT_SECONDS", 30) * 1000),
       dispatchTimeoutMs: Math.max(2_000, envInt("PA_JEV_DISPATCH_TIMEOUT_SECONDS", 15) * 1000),
+    },
+    kbMcp: {
+      upstreamUrl: envStr("PA_KB_MCP_URL", ""),
+      secretsFile: envStr("PA_KB_MCP_SECRETS_FILE", path.join(os.homedir(), ".config", "aio-agent", "kb-mcp.env")),
+      members: parseList(envStr("PA_KB_MCP_MEMBERS", "")),
     },
     externalBaseUrl: envStr("PA_EXTERNAL_BASE_URL", ""),
   };

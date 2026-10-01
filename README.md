@@ -106,6 +106,7 @@ curl -s http://127.0.0.1:4891/healthz
   的能力没有接入沙箱，也不暴露 Docker socket 或 home 目录。
 - **MCP 隔离**：沙箱的 Codex 禁用账号 Apps/Connector、插件及远程插件目录，MCP 只允许
   `aio_browser` 的沙箱内地址。独立系统策略同时覆盖当前与新沙箱，不改变 Mac 上的邮箱连接。
+  owner 接入知识库后，获准账号另放行它自己的 `aio_kb` 地址（见下文“知识库”）。
 - **统一登录**：不在沙箱里重新登录。控制面从 Mac 上已有 `codex login` 通过官方方法
   `account/read {refreshToken:true}` + `getAuthStatus` 取访问 token，只把访问 token 交给沙箱
   （refresh token 永不离开 Mac）；沙箱 401 时由控制面按需重新取。
@@ -193,6 +194,21 @@ key 只留在宿主进程。它有两个用途：
   地址是成员模型网关上的 `/decision/<该运行时的令牌>/mcp`；工具参数为 `question`、`options`（id → 含义，2–20 个）、可选 `context` 和 `rules`。
   沙箱只拿到这个地址，拿不到 Jev key；每次调用的账号、问题、选项数、选择、置信度、耗时和用量记入宿主库 `decision_events`。不设调用限额。
   没有 key 时这个工具和派单第二意见都不出现。
+
+## 知识库（可选，按账号授权）
+
+owner 可以把宿主机上的一个知识库 MCP 服务（streamable HTTP）接给执行会话。设置 `PA_KB_MCP_URL` 后：
+
+- **谁能用**：owner，以及 `PA_KB_MCP_MEMBERS` 列出的成员用户名。其余账号的会话里没有这个服务，也拿不到可用的地址。
+  名单在服务重启时生效；移出名单的账号，原地址随之失效（403）。
+- **怎么接**：获准账号的执行会话（Codex 线程级 MCP、Claude Code `--mcp-config`）注册 MCP 服务 `aio_kb`，
+  地址是成员模型网关上的 `/kb/<该运行时的令牌>/mcp`。网关把请求转给上游，附上 `Authorization: Bearer <令牌>`
+  和 `X-Aio-User: <用户名>`（供上游记审计）。上游令牌从 `PA_KB_MCP_SECRETS_FILE`（权限须 600/400；环境变量
+  `KB_MCP_TOKEN` 优先）读取，只留在宿主进程；没有令牌时这个功能不出现。
+- **隔离**：成员沙箱只能访问宿主机的网关端口，上游服务应只监听 loopback 并校验令牌。Codex 的受管策略只为
+  获准的运行时放行这一条精确地址。上游拒绝网关令牌或不可达时，工具调用得到 502，任务的其余部分不受影响。
+- 这是把宿主侧资料交给沙箱的通道，给什么内容完全由上游服务决定：上游应当只读，且只提供整理过、允许
+  这些账号看到的内容。网关不缓存、不落库任何知识库内容。
 
 ## 分享网页（公开）
 
@@ -418,6 +434,9 @@ npm run build && npx playwright test --config playwright.local.config.ts
 | `PA_JEV_SECRETS_FILE` | `~/.config/aio-agent/jev.env` | `TYPESAFE_API_KEY` 的私有文件（环境变量优先；权限宽于 600/400 拒绝）；缺省则不提供 Jev |
 | `PA_JEV_ENDPOINT` / `PA_JEV_MODEL` | `https://api.typesafe.ai/v1/systemone` / `jev-latest` | Jev 接口与模型 |
 | `PA_JEV_TIMEOUT_SECONDS` / `PA_JEV_DISPATCH_TIMEOUT_SECONDS` | `30` / `15` | `decide` 工具与派单第二意见各自的等待上限 |
+| `PA_KB_MCP_URL` | 空 | 宿主机上知识库 MCP 服务的地址（如 `http://127.0.0.1:4797/mcp`）；为空则不提供知识库 |
+| `PA_KB_MCP_SECRETS_FILE` | `~/.config/aio-agent/kb-mcp.env` | `KB_MCP_TOKEN` 的私有文件（环境变量优先；权限宽于 600/400 拒绝）；取不到则不提供知识库 |
+| `PA_KB_MCP_MEMBERS` | 空 | 获准使用知识库的成员用户名，逗号分隔；owner 始终可用 |
 | `PA_ANTHROPIC_API_BASE_URL` | `https://api.anthropic.com` | 成员模型网关转发 Claude 请求的上游 |
 | `PA_SANDBOX_PORT` | `18081` | 沙箱发布到 loopback 的端口 |
 | `PA_OWNER_PASSWORD` | 空 | 设置则用它，否则生成到 `var/owner-secret.txt` |

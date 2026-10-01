@@ -8,6 +8,7 @@ import type { TurnAttachment } from "./manager.js";
 import { ClaudeStreamTranslator } from "./claudeTranslator.js";
 import { tabMcpServers, type BrowserTask } from "../browser/tabs.js";
 import { decisionMcpServers } from "../decision.js";
+import { kbMcpServers } from "../kb.js";
 import { buildTitlePrompt } from "./autoTitle.js";
 import { JsonRpcResponseError } from "./jsonrpc.js";
 
@@ -21,7 +22,7 @@ function notDelivered(): Error {
  * otherwise the legacy single-page endpoint the sandbox Codex is limited to.
  */
 function mcpConfig(browserTask: BrowserTask | undefined, cfg: Config): string {
-  return JSON.stringify({ mcpServers: browserTask ? { ...tabMcpServers(browserTask), ...decisionMcpServers(cfg) } : { aio_browser: { type: "http", url: "http://127.0.0.1:8080/mcp" } } });
+  return JSON.stringify({ mcpServers: browserTask ? { ...tabMcpServers(browserTask), ...decisionMcpServers(cfg), ...kbMcpServers(cfg) } : { aio_browser: { type: "http", url: "http://127.0.0.1:8080/mcp" } } });
 }
 
 /** How long a mid-turn addition may wait for the CLI to echo it as consumed. */

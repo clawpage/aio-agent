@@ -10,6 +10,7 @@ import {ClaudeCodeHarness,MEMBER_GATEWAY_TOKEN_KEY} from './claudeCode.js';
 import {MEMBER_CLAUDE_MODEL} from './auth/policy.js';
 import type {ShareStore} from './share.js';
 import type {DecisionGateway} from './decision.js';
+import type {KbGateway} from './kb.js';
 
 /** The CLI's subscription credential needs this beta on the Messages API. */
 const OAUTH_BETA='oauth-2025-04-20';
@@ -23,7 +24,7 @@ export class MemberModelGateway {
   private tokens=new Map<string,string>();
   private claudeModels=new Map<string,string>();
   private server:http.Server|null=null;
-  constructor(private cfg:Config,private log:Logger,private share?:ShareStore,private decision?:DecisionGateway){}
+  constructor(private cfg:Config,private log:Logger,private share?:ShareStore,private decision?:DecisionGateway,private kb?:KbGateway){}
   provision(cfg:Config):void {
     fs.mkdirSync(cfg.dataDir,{recursive:true,mode:0o700});
     const file=path.join(cfg.dataDir,'model-token');
@@ -36,6 +37,7 @@ export class MemberModelGateway {
     cfg.bridge={...cfg.bridge,envKey,secretsFile:secret,enabled:'on',baseUrl:`http://host.docker.internal:${this.cfg.memberModelPort??4902}/u/${cfg.runtimeUserId}/v1`};
     this.share?.provision(cfg);
     this.decision?.provision(cfg);
+    this.kb?.provision(cfg);
     if(cfg.memberModel!==MEMBER_CLAUDE_MODEL){this.claudeModels.delete(cfg.runtimeUserId!);return;}
     const claudeSecret=path.join(cfg.dataDir,'claude.env');
     fs.writeFileSync(claudeSecret,`${MEMBER_GATEWAY_TOKEN_KEY}=${token}\n`,{mode:0o600});
@@ -50,6 +52,7 @@ export class MemberModelGateway {
       // The same sandbox-to-host channel carries share publishing, under its own per-runtime token.
       if(this.share&&(req.url??'').startsWith('/share/')){await this.share.handleApi(req,res);return;}
       if(this.decision&&(req.url??'').startsWith('/decision/')){await this.decision.handle(req,res);return;}
+      if(this.kb&&(req.url??'').startsWith('/kb/')){await this.kb.handle(req,res);return;}
       const match=/^\/u\/(user_[a-zA-Z0-9]+)\/v1\/responses$/.exec(req.url??'');
       const messages=/^\/u\/(user_[a-zA-Z0-9]+)\/anthropic(\/v1\/messages(?:\/count_tokens)?)(\?beta=true)?$/.exec(req.url??'');
       const userId=match?.[1]??messages?.[1];

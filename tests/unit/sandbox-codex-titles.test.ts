@@ -300,6 +300,21 @@ it('shows the reason a planning turn failed, while a failed title stays silent',
  } finally {session.close();}
 });
 
+it('adds the knowledge base to a task thread only when this runtime was granted it',async()=>{
+ const server=new FakeAppServer();
+ server.handle('thread/start',()=>({thread:{id:'kb-thread'},model:'gpt-6-sol',cwd:'/workspace'}));
+ const cfg={...testConfig("/tmp/pa-title-stream",1,{}),kb:{url:'http://host.docker.internal:4902/kb/token/mcp'}};
+ const session=new SandboxCodexSession(cfg,new Logger("error",undefined,false),containerFor(server),hostTokens,null);
+ try {
+  const task={key:'conv_1',title:'查资料'};
+  await session.startThread({browserTask:task});
+  await session.startThread({});
+  const sent=server.inbound.filter(r=>r.method==='thread/start');
+  expect(sent[0]?.params?.config).toEqual({mcp_servers:{...(tabThreadConfig(task) as {mcp_servers:object}).mcp_servers,aio_kb:{url:cfg.kb.url,tool_timeout_sec:40}}});
+  expect(sent[1]?.params?.config).toBeUndefined();
+ }finally{session.close();}
+});
+
 it('opens, forks and resumes task threads with their own tab identity',async()=>{
  const server=new FakeAppServer();
  for(const method of ['thread/start','thread/fork'])server.handle(method,()=>({thread:{id:'tab-thread'},model:'gpt-6-sol',cwd:'/workspace'}));

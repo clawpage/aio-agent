@@ -10,7 +10,7 @@ import {
   CODEX_ISOLATION_MARKER,
   CODEX_ISOLATION_OVERRIDES,
   claudeCodeUserMemory,
-  CODEX_REQUIREMENTS_TOML,
+  codexRequirementsToml,
   DOCUMENT_SKILL_DIR,
   DOCUMENT_SKILL_MD,
   SHARE_CLI_PY,
@@ -615,7 +615,7 @@ try:
 finally:
     if os.path.exists(temporary): os.unlink(temporary)
 `;
-    const result = await this.execInSandbox(["python3", "-c", script, CODEX_ISOLATION_MARKER, CODEX_REQUIREMENTS_TOML], { user: "root" });
+    const result = await this.execInSandbox(["python3", "-c", script, CODEX_ISOLATION_MARKER, codexRequirementsToml(this.#cfg)], { user: "root" });
     if (result.code !== 0) throw new Error(`Cannot enforce sandbox Codex MCP isolation: ${result.stderr.trim() || result.stdout.trim()}`);
   }
 

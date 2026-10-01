@@ -288,6 +288,11 @@ app-server 的 `mcpServerStatus/list` 与 `app/list` 只验元数据，应分别
 清单。验收不需要读取或发送任何邮件。启动参数和 requirements 变化需重启本服务的 Codex
 进程才对已运行实例生效；先核对 running/queued 轮次，不能静默中断任务。
 
+接入知识库（`PA_KB_MCP_URL`）后，获准账号的沙箱里 `/etc/codex/requirements.toml` 多一条
+`[mcp_servers.aio_kb.identity]`，URL 是该运行时自己的网关地址；未获准的账号没有这一条。验收：在获准
+账号的沙箱里用 `-c 'mcp_servers.aio_kb.url="<该地址>"' mcp list --json` 应看到 `aio_kb` 可启用，
+换成任何别的 URL 则被 requirements 拒绝；未获准账号用同样的命令也应被拒绝。
+
 以上为工具接入隔离，不是共享账号 token 的服务端权限裁剪；需要更强的独立信任边界时应
 另外使用没有个人 Connector 的账号/凭据与受控网络出口。
 
