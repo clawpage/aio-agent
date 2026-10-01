@@ -431,10 +431,10 @@ test('main settings use consistent cards and keep the mobile header clear',async
   for(const width of mobile?[390,360]:[1440]){
    await page.setViewportSize({width,height:mobile?844:900});
    await page.locator('.settings').evaluate(el=>el.scrollTop=0);
-   const cards=page.locator('.settings-card');await expect(cards).toHaveCount(3);
+   const cards=page.locator('.settings-card');await expect(cards).toHaveCount(4);
    expect(await cards.first().getAttribute('aria-label')).toBe('助理设定');
    const a=await cards.nth(0).boundingBox();
-   for(const i of [1,2]){const b=await cards.nth(i).boundingBox();expect(a!.x).toBe(b!.x);expect(a!.width).toBe(b!.width);}
+   for(const i of [1,2,3]){const b=await cards.nth(i).boundingBox();expect(a!.x).toBe(b!.x);expect(a!.width).toBe(b!.width);}
    expect(await page.evaluate(()=>document.documentElement.scrollWidth-innerWidth)).toBeLessThanOrEqual(1);
    if(mobile){const menu=await page.getByRole('button',{name:'打开导航'}).boundingBox();const heading=await page.locator('.settings-head h2').boundingBox();expect(heading!.x).toBeGreaterThanOrEqual(menu!.x+menu!.width);}
    await page.screenshot({path:info.outputPath(`settings-${width}-${theme}.png`)});
