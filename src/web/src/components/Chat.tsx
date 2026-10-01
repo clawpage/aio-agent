@@ -18,6 +18,8 @@ import {
 import { Markdown } from "./Markdown";
 import { FilePreview } from "./FilePreview";
 import { FileCard } from "./FileCard";
+import { ShareCard } from "./ShareCard";
+import { extractShareLinks } from "../shareLinks";
 import { extractFileRefs, attachmentRefs } from "../fileRefs";
 import { isPreviewableKind, workspaceFileKind } from "../sandboxLink";
 
@@ -440,14 +442,25 @@ export function Chat({
  * itself is pure, so a delta that adds no new reference produces the same array.
  */
 export function MessageFileCards({ text, onOpen }: { text: string; onOpen: (path: string) => void }) {
-  const refs = useMemo(() => extractFileRefs(text), [text]);
-  if (refs.length === 0) return null;
+  // Embedded images and videos already show inside the message; everything else gets a card.
+  const refs = useMemo(() => extractFileRefs(text).filter((ref) => !(ref.image && (ref.kind === "image" || ref.kind === "video"))), [text]);
+  const shares = useMemo(() => extractShareLinks(text), [text]);
+  if (refs.length === 0 && shares.length === 0) return null;
   return (
-    <div className="file-cards" data-testid="message-file-cards">
-      {refs.map((ref) => (
-        <FileCard key={ref.path} path={ref.path} name={ref.name} title={ref.title} kind={ref.kind} onOpen={onOpen} />
-      ))}
-    </div>
+    <>
+      {shares.length > 0 && (
+        <div className="share-cards" data-testid="message-share-cards">
+          {shares.map((link) => <ShareCard key={link.url} link={link} />)}
+        </div>
+      )}
+      {refs.length > 0 && (
+        <div className="file-cards" data-testid="message-file-cards">
+          {refs.map((ref) => (
+            <FileCard key={ref.path} path={ref.path} name={ref.name} title={ref.title} kind={ref.kind} onOpen={onOpen} />
+          ))}
+        </div>
+      )}
+    </>
   );
 }
 

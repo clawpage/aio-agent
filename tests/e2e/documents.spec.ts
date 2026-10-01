@@ -163,6 +163,47 @@ async function openConversation(page: Page, id: string, markdown: string): Promi
   await expect(page.getByTestId("message-file-cards")).toBeVisible({ timeout: 60_000 });
 }
 
+test.describe("rich messages", () => {
+  test("an embedded workspace image shows where it was written, loads through the documents API and opens the preview", async ({ page }) => {
+    await mockDocuments(page);
+    const id = "conv_e2e_inline_image";
+    await mockConsole(page, { conversations: [makeConversation(id, "图文")], sse: { [id]: sseWithMarkdown("花园如下：\n\n![花园](/home/gem/workspace/garden.png)\n\n后面的说明文字") } });
+    await page.goto("/");
+    const img = page.locator(".markdown img[data-sandbox-image]");
+    await expect(img).toBeVisible({ timeout: 60_000 });
+    await expect.poll(() => img.evaluate((el) => (el as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);
+    // In place, between the two paragraphs, and not repeated as a card below.
+    const order = await page.locator(".markdown").last().evaluate((el) => [...el.children].map((c) => c.tagName === "P" ? (c.querySelector("img") ? "IMG" : c.textContent) : c.tagName));
+    expect(order).toEqual(["花园如下：", "IMG", "后面的说明文字"]);
+    await expect(page.getByTestId("message-file-cards")).toHaveCount(0);
+    await img.click();
+    await expect(page.getByRole("dialog")).toBeVisible();
+  });
+
+  test("a share page link becomes a card with the full address that copies and opens", async ({ page, browserName }, info) => {
+    if (browserName === "chromium") await page.context().grantPermissions(["clipboard-read", "clipboard-write"]).catch(() => undefined);
+    const id = "conv_e2e_share_card";
+    const url = "https://agent-workspace.clawpage.ai/u/owner/share/tokyo-trip/";
+    await mockConsole(page, { conversations: [makeConversation(id, "分享")], sse: { [id]: sseWithMarkdown(`页面做好了：[东京三日行程](${url})，代码里的 \`${url}\` 不算。`) } });
+    await page.goto("/");
+    const card = page.getByTestId("share-card");
+    await expect(card).toHaveCount(1, { timeout: 60_000 });
+    await expect(card).toContainText("东京三日行程");
+    await expect(card.getByTestId("share-card-url")).toHaveText(url);
+    await expect(card.getByRole("link", { name: "打开" })).toHaveAttribute("href", url);
+    await expect(card.getByRole("link", { name: "打开" })).toHaveAttribute("target", "_blank");
+    await card.getByRole("button", { name: "复制链接" }).click();
+    if (browserName === "chromium") {
+      await expect(card.getByRole("button", { name: "已复制" })).toBeVisible();
+      expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(url);
+    } else {
+      await expect(card.getByRole("button", { name: /已复制|复制失败/ })).toBeVisible();
+    }
+    expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1);
+    await page.screenshot({ path: info.outputPath("share-card.png") });
+  });
+});
+
 test.describe("in-conversation file cards", () => {
   test("MP4 card plays, seeks, closes and opens from the workspace on mobile too",async({page},info)=>{
     const videoPath='/home/gem/workspace/demo.MP4';

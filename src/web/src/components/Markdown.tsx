@@ -1,7 +1,8 @@
-import { useCallback, useMemo, type KeyboardEvent, type MouseEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, type KeyboardEvent, type MouseEvent } from "react";
 import { marked } from "marked";
 import DOMPurify from "dompurify";
-import { isSandboxLink, isWorkspaceFilePath, workspaceFilePathFromHref } from "../sandboxLink";
+import { api } from "../api";
+import { isSandboxLink, isWorkspaceFilePath, workspaceFileKind, workspaceFilePathFromHref } from "../sandboxLink";
 
 marked.setOptions({ gfm: true, breaks: true });
 
@@ -31,15 +32,22 @@ marked.use({
       return `<a href="${escapeAttr(href)}"${titleAttr}>${text}</a>`;
     },
     /**
-     * A workspace image reference renders as nothing here: the sanitizer only
-     * keeps `https?` srcs, and a bare `<img>` with a stripped src is a broken
-     * element. The file card below the message (with its lazy thumbnail) is the
-     * real affordance, and it opens the same preview.
+     * Images and MP4s in the workspace show where the message put them. They are
+     * emitted without a source (the sanitizer only keeps `https?` URIs); after
+     * sanitising, the component re-checks each path and loads it through the
+     * authenticated document endpoints. Other workspace files render nothing here
+     * and appear as file cards below the message.
      */
     image({ href, title, text }) {
-      if (workspaceFilePathFromHref(href)) return "";
       const titleAttr = title ? ` title="${escapeAttr(title)}"` : "";
-      return `<img src="${escapeAttr(href)}" alt="${escapeAttr(text)}"${titleAttr}>`;
+      const filePath = workspaceFilePathFromHref(href);
+      if (filePath) {
+        const kind = workspaceFileKind(filePath);
+        if (kind === "image") return `<img class="inline-media" data-sandbox-image="${escapeAttr(filePath)}" alt="${escapeAttr(text)}"${titleAttr}>`;
+        if (kind === "video") return `<video class="inline-media" data-sandbox-video="${escapeAttr(filePath)}" controls playsinline preload="metadata"${titleAttr}></video>`;
+        return "";
+      }
+      return `<img class="inline-media" src="${escapeAttr(href)}" alt="${escapeAttr(text)}" loading="lazy"${titleAttr}>`;
     },
   },
 });
@@ -79,7 +87,7 @@ export function Markdown({
       // applied to every non-URI-safe attribute, it must be marked URI-safe or
       // DOMPurify would strip `tabindex="0"` and break keyboard focus.
       ADD_URI_SAFE_ATTR: ["tabindex"],
-      ADD_ATTR: ["target", "rel", "data-sandbox-file", "role", "tabindex"],
+      ADD_ATTR: ["target", "rel", "data-sandbox-file", "data-sandbox-image", "data-sandbox-video", "role", "tabindex", "controls", "playsinline", "preload", "loading"],
       ...(document ? {
         FORBID_TAGS: ["form", "input", "button", "textarea", "select", "option", "iframe", "object", "embed", "svg", "math", "style"],
         FORBID_ATTR: ["style", "id", "name"],
@@ -88,8 +96,63 @@ export function Markdown({
     return clean.replace(/<a /g, '<a target="_blank" rel="noopener noreferrer" ');
   }, [source, document]);
 
+  // Load inline workspace media once each element is near the viewport.
+  const root = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const container = root.current;
+    if (!container) return;
+    const urls: string[] = [];
+    const controller = new AbortController();
+    const fail = (img: HTMLImageElement) => {
+      const note = window.document.createElement("span");
+      note.className = "inline-media-failed muted tiny";
+      note.textContent = `图片暂时无法显示：${img.alt || img.getAttribute("data-sandbox-image")?.split("/").pop() || ""}`;
+      img.replaceWith(note);
+    };
+    const load = (el: Element) => {
+      if (el instanceof HTMLVideoElement) {
+        const path = el.getAttribute("data-sandbox-video") ?? "";
+        if (isWorkspaceFilePath(path) && workspaceFileKind(path) === "video") el.src = api.documentVideoUrl(path);
+        return;
+      }
+      const img = el as HTMLImageElement;
+      const path = img.getAttribute("data-sandbox-image") ?? "";
+      if (!isWorkspaceFilePath(path) || workspaceFileKind(path) !== "image") return fail(img);
+      void (async () => {
+        try {
+          const res = await fetch(api.documentImageUrl(path), { credentials: "same-origin", signal: controller.signal });
+          // Only an image response may reach the <img>, whatever answered.
+          if (!res.ok || !(res.headers.get("content-type") ?? "").startsWith("image/")) throw new Error("unavailable");
+          const blob = await res.blob();
+          if (!blob.size) throw new Error("empty");
+          const url = URL.createObjectURL(blob);
+          urls.push(url);
+          img.src = url;
+        } catch (err) {
+          if (!(err instanceof DOMException && err.name === "AbortError")) fail(img);
+        }
+      })();
+    };
+    const media = [...container.querySelectorAll("img[data-sandbox-image], video[data-sandbox-video]")];
+    let observer: IntersectionObserver | null = null;
+    if (typeof IntersectionObserver === "function") {
+      observer = new IntersectionObserver((entries) => {
+        for (const entry of entries) if (entry.isIntersecting) { observer!.unobserve(entry.target); load(entry.target); }
+      }, { rootMargin: "200px" });
+      media.forEach((el) => observer!.observe(el));
+    } else media.forEach(load);
+    return () => { observer?.disconnect(); controller.abort(); urls.forEach((url) => URL.revokeObjectURL(url)); };
+  }, [html]);
+
   const onClick = useCallback(
     (event: MouseEvent<HTMLDivElement>) => {
+      const image = (event.target as HTMLElement | null)?.closest?.("img[data-sandbox-image]");
+      const imagePath = image?.getAttribute("data-sandbox-image") ?? "";
+      if (onOpenFile && imagePath && isWorkspaceFilePath(imagePath)) {
+        event.preventDefault();
+        onOpenFile(imagePath);
+        return;
+      }
       const anchor = (event.target as HTMLElement | null)?.closest?.("[data-sandbox-file]") ?? (event.target as HTMLElement | null)?.closest?.("a");
       if (!anchor) return;
       const file = anchor.getAttribute("data-sandbox-file") ?? "";
@@ -128,5 +191,5 @@ export function Markdown({
   );
 
   // eslint-disable-next-line jsx-a11y/no-static-element-interactions, jsx-a11y/click-events-have-key-events
-  return <div className="markdown" onClick={onClick} onKeyDown={onKeyDown} dangerouslySetInnerHTML={{ __html: html }} />;
+  return <div ref={root} className="markdown" onClick={onClick} onKeyDown={onKeyDown} dangerouslySetInnerHTML={{ __html: html }} />;
 }
