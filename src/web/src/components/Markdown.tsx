@@ -3,6 +3,8 @@ import { marked } from "marked";
 import DOMPurify from "dompurify";
 import { api } from "../api";
 import { isSandboxLink, isWorkspaceFilePath, workspaceFileKind, workspaceFilePathFromHref } from "../sandboxLink";
+import { splitMapBlocks } from "../mapBlocks";
+import { MapCard } from "./MapCard";
 
 marked.setOptions({ gfm: true, breaks: true });
 
@@ -67,17 +69,32 @@ marked.use({
  * remaining anchor inert. The console must not hand a link to a host program
  * (for example the host mail client); such content stays selectable text.
  */
-export function Markdown({
-  source,
-  onOpenLink,
-  onOpenFile,
-  document = false,
-}: {
+type MarkdownProps = {
   source: string;
   document?: boolean;
   onOpenLink?: (url: string) => void;
   onOpenFile?: (path: string) => void;
-}) {
+};
+
+/** A message: Markdown, with any ```map blocks drawn as map cards where they stand. */
+export function Markdown(props: MarkdownProps) {
+  const parts = useMemo(() => splitMapBlocks(props.source ?? ""), [props.source]);
+  if (parts.length === 1 && parts[0]!.kind === "text") return <MarkdownBlock {...props} source={parts[0]!.text} />;
+  return (
+    <>
+      {parts.map((part, i) => part.kind === "map"
+        ? <MapCard key={i} place={part.place} />
+        : <MarkdownBlock key={i} {...props} source={part.text} />)}
+    </>
+  );
+}
+
+function MarkdownBlock({
+  source,
+  onOpenLink,
+  onOpenFile,
+  document = false,
+}: MarkdownProps) {
   const html = useMemo(() => {
     const rendered = marked.parse(source ?? "", { async: false }) as string;
     const clean = DOMPurify.sanitize(rendered, {

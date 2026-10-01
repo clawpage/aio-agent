@@ -7,6 +7,7 @@ import { randomUUID } from "node:crypto";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { exitTerminal, TERMINAL_ID, TerminalRegistry } from "../terminals.js";
+import { maps, MapService } from "../maps.js";
 import type { AppContext } from "../context.js";
 import {
   InvalidConversationTitleError,
@@ -1403,6 +1404,33 @@ export function createApiRouter(context: AppContext): Router {
       const upstream = await sandboxFetch("/v1/shell/terminal-url");
       const json = (await upstream.json()) as { success?: boolean; data?: string };
       res.json({ ok: Boolean(json.success), url: json.data ?? null });
+    }),
+  );
+
+  /** Map tiles for map cards in messages, proxied so the console stays same-origin (see MapService). */
+  router.get("/map/tiles/:z/:x/:y", requireKind("primary"), requireSession,
+    asyncHandler(async (req, res) => {
+      const [z, x, y] = [req.params.z, req.params.x, req.params.y].map((v) => (/^\d{1,7}$/.test(String(v)) ? Number(v) : -1)) as [number, number, number];
+      if (!MapService.validTile(z, x, y)) { res.status(400).json({error:"bad_tile"}); return; }
+      const tile = await maps.tile(z, x, y).catch(() => null);
+      if (!tile) { res.status(502).json({error:"tile_unavailable"}); return; }
+      res.setHeader("Content-Type", "image/png");
+      res.setHeader("Cache-Control", "private, max-age=604800");
+      res.setHeader("X-Content-Type-Options", "nosniff");
+      res.end(tile);
+    }),
+  );
+  /** Where an address is, for a map card that came without coordinates. */
+  router.get("/map/geocode", requireKind("primary"), requireSession,
+    asyncHandler(async (req, res) => {
+      const q = typeof req.query.q === "string" ? req.query.q.trim() : "";
+      if (!q || q.length > 200) { res.status(400).json({error:"bad_query",message:"缺少有效的地址"}); return; }
+      try {
+        res.setHeader("Cache-Control", "private, max-age=86400");
+        res.json({place: await maps.geocode(q)});
+      } catch {
+        res.status(502).json({error:"geocode_unavailable",message:"暂时无法定位这个地址"});
+      }
     }),
   );
 
