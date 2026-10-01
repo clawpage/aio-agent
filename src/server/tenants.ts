@@ -23,6 +23,8 @@ export function memberConfig(base: Config, userId: string, port: number, model: 
       // on Docker Desktop (no user namespaces for its zygote), or the browser crash-loops.
       codexVolume:`aio-user-${suffix}-codex`,browserVolume:`aio-user-${suffix}-browser`,extraEnv:['BROWSER_NO_SANDBOX=--no-sandbox']},
     bridge:{...base.bridge,models:['deepseek-v4.1-flash']},
+    // The owner's knowledge-base address is never inherited; the gateway grants a listed member its own.
+    kb:undefined,
   };
 }
 

@@ -33,7 +33,8 @@ it("offers the knowledge base to the owner and the listed members only, keeping 
   const gateway = new MemberModelGateway(cfg, h.ctx.log, undefined, undefined, kb);
   await gateway.start();
   try {
-    const owner = { ...cfg, runtimeUserId: "owner_1", dataDir: path.join(h.dataDir, "owner-runtime") };
+    // As in production: the owner is provisioned on the very config every member config is derived from.
+    const owner = Object.assign(cfg, { runtimeUserId: "owner_1", dataDir: path.join(h.dataDir, "owner-runtime") });
     kb.provision(owner);
     const granted = memberConfig(cfg, "user_granted", 18091);
     gateway.provision(granted);
