@@ -71,7 +71,8 @@ export function TerminalSessions({active,selectedId,onSelect,onNotify}:{active:b
     catch(err){setActionError(err instanceof Error?err.message:'关闭终端失败，请刷新核对');}
     finally{locked.current=false;setMutation(null);setAttempt(n=>n+1);}
   };
-  const requestClose=(s:Session)=>{if(s.status==='running'||s.status==='waiting')setConfirm(s);else void close(s);};
+  // The sandbox cannot say whether a command is running in a terminal, and closing interrupts it: always ask.
+  const requestClose=(s:Session)=>setConfirm(s);
   return <section className="terminal-panel" aria-label="终端会话">
     <section ref={root} className="terminal-sessions" aria-label="活跃 Shell 会话">
       <div className="terminal-sessions-head">

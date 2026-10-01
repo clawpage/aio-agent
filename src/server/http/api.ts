@@ -6,6 +6,7 @@ import express, { type Request, type Response, type NextFunction, type Router } 
 import { randomUUID } from "node:crypto";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
+import { exitTerminal, TERMINAL_ID, TerminalRegistry } from "../terminals.js";
 import type { AppContext } from "../context.js";
 import {
   InvalidConversationTitleError,
@@ -1405,20 +1406,16 @@ export function createApiRouter(context: AppContext): Router {
     }),
   );
 
+  // Interactive terminals only: see TerminalRegistry for why the sandbox's own list is not used.
+  const terminals = new TerminalRegistry(db);
   router.get("/sandbox/shell-sessions", requireKind("primary"), requireSession,
     asyncHandler(async (_req, res) => {
       res.setHeader("Cache-Control", "no-store");
       try {
-        const result = await context.aio.get("/v1/shell/sessions") as {success?:boolean;data?:{sessions?:Record<string,unknown>}};
-        const raw = result?.data?.sessions;
-        if (!result?.success || !raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error("Invalid session list");
-        const sessions = Object.entries(raw).map(([id,value]) => {
-          if (!value || typeof value !== "object") throw new Error("Invalid session");
-          const s = value as Record<string,unknown>;
-          if (typeof s.status !== "string") throw new Error("Missing session status");
-          return {id, status:s.status, workingDir:typeof s.working_dir === "string" ? s.working_dir : "",
-            lastUsedAt:typeof s.last_used_at === "string" ? s.last_used_at : null};
-        }).filter(s => s.status !== "closed");
+        const state = await container.inspect();
+        const sessions = terminals.list(state.startedAt, state.running).map((t) => ({
+          id: t.id, status: "ready", workingDir: cfg.sandbox.containerWorkspaceDir, lastUsedAt: new Date(t.createdAt).toISOString(),
+        }));
         res.json({sessions});
       } catch {
         res.status(502).json({error:"sessions_unavailable",message:"暂时无法读取终端会话，请重试"});
@@ -1428,24 +1425,27 @@ export function createApiRouter(context: AppContext): Router {
 
   router.post("/sandbox/shell-sessions", requireKind("primary"), requireSession,
     asyncHandler(async (_req, res) => {
-      // Generate the ID here so UI reconnects always bind to one explicit session.
-      const id = randomUUID();
-      const upstream = await sandboxFetch("/v1/shell/sessions/create", {
-        method: "POST", headers: {"content-type":"application/json"},
-        body: JSON.stringify({id, exec_dir:cfg.sandbox.containerWorkspaceDir}),
-      }, 15_000);
-      const result = await upstream.json() as {success?:boolean};
-      if (!upstream.ok || !result.success) { res.status(502).json({message:"创建终端失败，请重试"}); return; }
+      // The terminal page attaches only to sessions made here, not to /v1/shell/sessions/create ones.
+      const upstream = await sandboxFetch("/v1/shell/terminal-url", {}, 15_000);
+      const result = await upstream.json().catch(() => null) as {success?:boolean;data?:unknown}|null;
+      let id: string | null = null;
+      try { id = typeof result?.data === "string" ? new URL(result.data).searchParams.get("session_id") : null; } catch { id = null; }
+      if (!upstream.ok || !result?.success || !id || !TERMINAL_ID.test(id)) { res.status(502).json({message:"创建终端失败，请重试"}); return; }
+      terminals.add(id);
       res.status(201).json({id});
     }),
   );
   router.delete("/sandbox/shell-sessions/:id", requireKind("primary"), requireSession,
     asyncHandler(async (req, res) => {
       const id = String(req.params.id);
-      if (!/^[a-zA-Z0-9_-]{1,160}$/.test(id)) { res.status(400).json({message:"无效的终端会话 ID"}); return; }
-      const upstream = await sandboxFetch(`/v1/shell/sessions/${encodeURIComponent(id)}`, {method:"DELETE"}, 15_000);
-      const result = await upstream.json() as {success?:boolean};
-      if (!upstream.ok || !result.success) { res.status(502).json({message:"关闭终端失败，会话可能仍在运行，请刷新后核对"}); return; }
+      if (!TERMINAL_ID.test(id)) { res.status(400).json({message:"无效的终端会话 ID"}); return; }
+      if (!terminals.has(id)) { res.status(404).json({message:"终端不存在或已结束"}); return; }
+      try {
+        await exitTerminal(cfg.sandbox.hostPort, id);
+      } catch {
+        res.status(502).json({message:"关闭终端失败，会话可能仍在运行，请刷新后核对"}); return;
+      }
+      terminals.remove(id);
       res.json({ok:true});
     }),
   );

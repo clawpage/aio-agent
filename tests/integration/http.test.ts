@@ -1104,39 +1104,67 @@ async function bootstrapWorkspaceWithSession(h: TestHarness): Promise<{ cookie: 
 }
 
 describe("document endpoints", () => {
-  it("creates and closes only explicit terminal sessions with auth, CSRF and upstream failure handling",async()=>{
+  it("creates attachable terminals, lists only those, and closes them by exiting their shell",async()=>{
     const route='/api/sandbox/shell-sessions';
     const before=h.sandbox.requests.length;
     expect((await h.request(route,{method:'POST',body:'{}'})).status).toBe(401);
     expect((await h.request(route+'/session-a',{method:'DELETE'})).status).toBe(401);
+    expect((await h.request(route)).status).toBe(401);
     const {cookie,csrf}=await login(h);
     expect((await h.request(route+'/session-a',{method:'DELETE',headers:{cookie}})).status).toBe(403);
-    expect(h.sandbox.requests.slice(before).filter(r=>r.url.includes('/shell/sessions'))).toHaveLength(0);
+    expect(h.sandbox.requests.slice(before).filter(r=>r.url.includes('/shell/'))).toHaveLength(0);
     const headers={cookie,'x-csrf-token':csrf,'content-type':'application/json'};
     expect((await h.request(route+'/%2e%2e%2fother',{method:'DELETE',headers})).status).toBe(400);
+    // The agent's command shells are never listed: the terminal page cannot attach to them.
+    const get=vi.spyOn(h.ctx.aio,'get');
+    const empty=await h.request(route,{headers:{cookie}});
+    expect(empty.headers.get('cache-control')).toBe('no-store');
+    expect(((await empty.json()) as {sessions:unknown[]}).sessions).toEqual([]);
+    expect(get).not.toHaveBeenCalled();get.mockRestore();
+    // Created through /v1/shell/terminal-url, the one the terminal page attaches to.
     const create=await h.request(route,{method:'POST',headers,body:'{}'});expect(create.status).toBe(201);
-    expect((await create.json() as any).id).toMatch(/^[0-9a-f-]{36}$/);
-    expect((await h.request(route+'/session-a',{method:'DELETE',headers})).status).toBe(200);
-    const deletes=h.sandbox.requests.slice(before).filter(r=>r.method==='DELETE');
-    expect(deletes.map(r=>r.url)).toEqual(['/v1/shell/sessions/session-a']);
+    const {id}=await create.json() as {id:string};
+    expect(h.sandbox.requests.slice(before).map(r=>r.url)).toContain('/v1/shell/terminal-url');
+    expect(h.sandbox.requests.slice(before).some(r=>r.url.includes('/v1/shell/sessions/create'))).toBe(false);
+    const listed=(await (await h.request(route,{headers:{cookie}})).json()) as {sessions:Array<{id:string;status:string;workingDir:string}>};
+    expect(listed.sessions.map(s=>s.id)).toEqual([id]);
+    expect(listed.sessions[0]).toMatchObject({status:'ready',workingDir:'/home/gem/workspace'});
+    // Closing interrupts and exits the shell, then forgets it; an unknown id is not ours to close.
+    expect((await h.request(route+'/session-a',{method:'DELETE',headers})).status).toBe(404);
+    expect((await h.request(route+'/'+id,{method:'DELETE',headers})).status).toBe(200);
+    expect(h.sandbox.script.terminals?.get(id)).toEqual(['\u0003exit\n']);
+    expect(((await (await h.request(route,{headers:{cookie}})).json()) as {sessions:unknown[]}).sessions).toEqual([]);
+    // A frame still attached holds the only websocket slot: the close retries until it is released.
+    const held=(await (await h.request(route,{method:'POST',headers,body:'{}'})).json()) as {id:string};
+    h.sandbox.script.busyTerminals!.add(held.id);
+    setTimeout(()=>h.sandbox.script.busyTerminals!.delete(held.id),700);
+    expect((await h.request(route+'/'+held.id,{method:'DELETE',headers})).status).toBe(200);
+    expect(h.sandbox.script.terminals?.get(held.id)).toEqual(['\u0003exit\n']);
+    // A terminal the sandbox no longer has (its shell exited) closes cleanly too.
+    const gone=(await (await h.request(route,{method:'POST',headers,body:'{}'})).json()) as {id:string};
+    h.sandbox.script.terminals!.delete(gone.id);
+    expect((await h.request(route+'/'+gone.id,{method:'DELETE',headers})).status).toBe(200);
     h.sandbox.script.shellSessionMutation={success:false};
     try {
-      expect((await h.request(route+'/session-a',{method:'DELETE',headers})).status).toBe(502);
       expect((await h.request(route,{method:'POST',headers,body:'{}'})).status).toBe(502);
     }finally{delete h.sandbox.script.shellSessionMutation;}
   });
-  it("lists authenticated live terminal sessions without leaking command contents or creating sessions",async()=>{
-    const get=vi.spyOn(h.ctx.aio,'get').mockResolvedValue({success:true,data:{sessions:{alpha:{status:'running',working_dir:'/home/gem/workspace',last_used_at:'2026-09-29T01:00:00Z',current_command:'private command'},beta:{status:'completed'},old:{status:'closed'}}}});
+  it("forgets terminals from before the container's current start, and lists none while it is stopped",async()=>{
+    const {cookie,csrf}=await login(h);
+    const headers={cookie,'x-csrf-token':csrf,'content-type':'application/json'};
+    const route='/api/sandbox/shell-sessions';
+    const {id}=(await (await h.request(route,{method:'POST',headers,body:'{}'})).json()) as {id:string};
+    const inspect=vi.spyOn(h.ctx.container,'inspect');
     try {
-      expect((await h.request('/api/sandbox/shell-sessions')).status).toBe(401);expect(get).not.toHaveBeenCalled();
-      const {cookie}=await login(h);
-      const res=await h.request('/api/sandbox/shell-sessions',{headers:{cookie}});
-      expect(res.status).toBe(200);expect(res.headers.get('cache-control')).toBe('no-store');
-      const data=await res.json() as {sessions:Array<{id:string}>};expect(data.sessions.map(s=>s.id)).toEqual(['alpha','beta']);expect(JSON.stringify(data)).not.toContain('private command');
-      expect(get).toHaveBeenCalledWith('/v1/shell/sessions');
-      get.mockResolvedValue({success:false,data:null});expect((await h.request('/api/sandbox/shell-sessions',{headers:{cookie}})).status).toBe(502);
-      get.mockResolvedValue({success:true,data:{sessions:[]}});expect((await h.request('/api/sandbox/shell-sessions',{headers:{cookie}})).status).toBe(502);
-    } finally {get.mockRestore();}
+      inspect.mockResolvedValue({exists:true,running:false,healthy:false,image:'x',startedAt:null,managedLabel:'1',mounts:[]});
+      expect(((await (await h.request(route,{headers:{cookie}})).json()) as {sessions:unknown[]}).sessions).toEqual([]);
+      const second=(await (await h.request(route,{method:'POST',headers,body:'{}'})).json()) as {id:string};
+      inspect.mockResolvedValue({exists:true,running:true,healthy:true,image:'x',startedAt:new Date(Date.now()+60_000).toISOString(),managedLabel:'1',mounts:[]});
+      expect(((await (await h.request(route,{headers:{cookie}})).json()) as {sessions:unknown[]}).sessions).toEqual([]);
+      expect(second.id).not.toBe(id);
+      inspect.mockRejectedValue(new Error('docker down'));
+      expect((await h.request(route,{headers:{cookie}})).status).toBe(502);
+    } finally {inspect.mockRestore();}
   });
   it("authenticates video streams, validates paths, and preserves range/HEAD responses",async()=>{
     const {cookie}=await login(h);

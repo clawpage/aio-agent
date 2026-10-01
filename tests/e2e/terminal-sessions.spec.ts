@@ -33,8 +33,8 @@ test('compact terminal picker switches, creates and closes sessions while preser
   await panel.getByRole('button',{name:'复制 session ID shell-idle',exact:true}).click();expect(await page.evaluate(()=>(window as any).copied)).toBe('shell-idle');
   await panel.getByRole('button',{name:'切换到终端 shell-idle',exact:true}).click();await expect(frame).toHaveAttribute('src',/session_id=shell-idle/);await expect(picker).toHaveAttribute('aria-expanded','false');
   expect(paths).toContain('/terminal?session_id=shell-idle');
-  failClose=true;await page.getByRole('button',{name:'关闭当前终端'}).click();await expect(panel.getByRole('alert')).toContainText('关闭失败');await expect(frame).toHaveAttribute('src',/session_id=shell-idle/);
-  failClose=false;await page.getByRole('button',{name:'关闭当前终端'}).click();await expect(frame).toHaveAttribute('src',new RegExp(running));
+  failClose=true;await page.getByRole('button',{name:'关闭当前终端'}).click();await page.getByRole('button',{name:'确认关闭'}).click();await expect(panel.getByRole('alert')).toContainText('关闭失败');await expect(frame).toHaveAttribute('src',/session_id=shell-idle/);
+  failClose=false;await page.getByRole('button',{name:'关闭当前终端'}).click();await page.getByRole('button',{name:'确认关闭'}).click();await expect(frame).toHaveAttribute('src',new RegExp(running));
   await page.getByRole('button',{name:'关闭当前终端'}).click();await expect(panel.getByRole('alert')).toContainText('会终止');expect(deleted).not.toContain(running);
   await page.getByRole('button',{name:'取消',exact:true}).click();await expect(frame).toBeVisible();
   if(info.project.name.startsWith('mobile'))await page.setViewportSize({width:360,height:844});
@@ -44,7 +44,7 @@ test('compact terminal picker switches, creates and closes sessions while preser
   await page.getByRole('tab',{name:'文件',exact:true}).click();const before=reads;await page.waitForTimeout(5500);expect(reads).toBe(before);await expect(panel).toHaveCount(0);
   await page.getByRole('tab',{name:'终端',exact:true}).click();await expect(frame).toHaveAttribute('src',/session_id=shell-new/);
   fail=true;await page.getByRole('button',{name:'刷新终端会话'}).click();await expect(panel.getByRole('alert')).toContainText('上次读取结果');
-  fail=false;await page.getByRole('button',{name:'关闭当前终端'}).click();await expect(frame).toHaveAttribute('src',new RegExp(running));
+  fail=false;await page.getByRole('button',{name:'关闭当前终端'}).click();await page.getByRole('button',{name:'确认关闭'}).click();await expect(frame).toHaveAttribute('src',new RegExp(running));
   await page.getByRole('button',{name:'关闭当前终端'}).click();await page.getByRole('button',{name:'确认关闭'}).click();await expect(page.getByText('暂无活跃终端',{exact:true})).toBeVisible();await expect(frame).toHaveCount(0);
   expect(deleted).toEqual(['shell-idle','shell-idle','shell-new',running]);
 });

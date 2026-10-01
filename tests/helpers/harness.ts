@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { AddressInfo } from "node:net";
 import type { Duplex } from "node:stream";
+import { WebSocketServer } from "ws";
 import { bootstrap } from "../../src/server/index.js";
 import { loadConfig, type Config } from "../../src/server/config.js";
 import { Logger } from "../../src/server/logger.js";
@@ -31,6 +32,10 @@ async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | void
 
 export interface SandboxScript {
   shellSessionMutation?: {success:boolean};
+  /** Terminal sessions the fake terminal websocket knows (`?session_id=`); input sent to each is recorded. */
+  terminals?: Map<string, string[]>;
+  /** Terminals whose single websocket slot is taken (a frame still attached). */
+  busyTerminals?: Set<string>;
   /** Payload returned by /v1/shell/exec (or a function of the request body). */
   shell?:
     | { success: boolean; message?: string; data?: Record<string, unknown> }
@@ -85,6 +90,13 @@ export async function startFakeSandbox(): Promise<FakeSandbox> {
         "set-cookie": ["jupyter_token=abc; Path=/; HttpOnly", "pa_session=evil; Path=/", "code=1; Domain=example.com; Path=/"],
       });
       res.end("<html><body>sandbox page</body></html>");
+      return;
+    }
+    if (req.url === "/v1/shell/terminal-url") {
+      const id = `term-${requests.length}`;
+      (sandboxScript.terminals ??= new Map()).set(id, []);
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify(sandboxScript.shellSessionMutation?.success === false ? { success: false } : { success: true, data: `http://127.0.0.1/terminal?session_id=${id}` }));
       return;
     }
     if (req.url === "/v1/shell/sessions/create" || (req.method === "DELETE" && req.url?.startsWith("/v1/shell/sessions/"))) {
@@ -192,7 +204,23 @@ export async function startFakeSandbox(): Promise<FakeSandbox> {
   });
 
   const upgraded = new Set<Duplex>();
-  server.on("upgrade", (req, socket) => {
+  // The terminal websocket as the sandbox speaks it: an unknown session gets an error, a known one "ready".
+  const terminalWs = new WebSocketServer({ noServer: true });
+  const busyTerminals = sandboxScript.busyTerminals ??= new Set<string>();
+  server.on("upgrade", (req, socket, head) => {
+    const sessionId = new URL(req.url ?? "/", "http://x").searchParams.get("session_id");
+    if (req.url?.startsWith("/v1/shell/ws") && sessionId) {
+      upgraded.add(socket);
+      socket.on("close", () => upgraded.delete(socket));
+      terminalWs.handleUpgrade(req, socket, head, (ws) => {
+        const inputs = sandboxScript.terminals?.get(sessionId);
+        if (!inputs) { ws.send(JSON.stringify({ type: "error", data: "Session not found" })); ws.close(); return; }
+        if (busyTerminals.has(sessionId)) { ws.send(JSON.stringify({ type: "error", data: "Session already has an active WebSocket connection" })); ws.close(); return; }
+        ws.on("message", (raw) => { const m = JSON.parse(String(raw)) as { type: string; data: string }; if (m.type === "input") inputs.push(m.data); });
+        ws.send(JSON.stringify({ type: "terminal_restored", data: `Session ${sessionId.slice(0, 8)} restored` }));
+      });
+      return;
+    }
     upgraded.add(socket);
     socket.on("close", () => upgraded.delete(socket));
     // Raw WebSocket-ish echo handshake for proxy tests.

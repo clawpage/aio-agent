@@ -19,9 +19,9 @@ it('binds workspace tickets, HTTP, WebSocket and API collaborators to the authen
   const main=await root.request('/api/main',{headers});expect(main.status).toBe(200);expect(await main.text()).not.toContain(ownerConv.id);
   expect((await root.request('/api/conversations/'+ownerConv.id,{headers})).status).toBe(404);
   expect((await root.request('/api/settings',{headers})).status).toBe(403);
-  await root.request('/api/sandbox/shell-sessions',{headers});
-  expect(member.sandbox.requests.some(r=>r.url==='/v1/shell/sessions')).toBe(true);
-  expect(root.sandbox.requests.some(r=>r.url==='/v1/shell/sessions')).toBe(false);
+  expect((await root.request('/api/sandbox/shell-sessions',{method:'POST',headers,body:'{}'})).status).toBe(201);
+  expect(member.sandbox.requests.some(r=>r.url==='/v1/shell/terminal-url')).toBe(true);
+  expect(root.sandbox.requests.some(r=>r.url==='/v1/shell/terminal-url')).toBe(false);
 
   // The member ticket points at the shared companion origin under the member's own path.
   const ticket=await root.request('/api/workspace/ticket',{method:'POST',headers,body:JSON.stringify({next:'/terminal'})});
