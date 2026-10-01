@@ -496,6 +496,13 @@ done
     }
   }
 
+  /** The container's CPU use right now (one `docker stats` sample), or null when unknown. */
+  async cpuPercent(): Promise<number | null> {
+    const res = await this.docker(["stats", "--no-stream", "--format", "{{.CPUPerc}}", this.name], { timeoutMs: 20_000 });
+    const value = Number.parseFloat(res.stdout.trim().replace(/%$/, ""));
+    return res.code === 0 && Number.isFinite(value) ? value : null;
+  }
+
   async stop(): Promise<void> {
     await this.docker(["stop", "--time", "20", this.name], { timeoutMs: 60_000 });
   }

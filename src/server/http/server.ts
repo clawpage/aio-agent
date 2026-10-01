@@ -12,6 +12,17 @@ import { audit } from "../db.js";
 
 export const WEB_DIST = path.resolve(import.meta.dirname, "..", "..", "..", "dist", "web");
 
+/** Control API calls served by the sandbox; a container stopped for idleness starts first. */
+const SANDBOX_API = /^\/(files|documents|sandbox|models)(\/|$)|^\/browser\/(?!status$)|^\/tasks\/[^/]+\/browser/;
+
+/** Only a page load (a person opening or reloading a workspace page) may start a stopped container. */
+function isNavigation(req: import("node:http").IncomingMessage): boolean {
+  return req.headers["sec-fetch-mode"] === "navigate";
+}
+const PARKED_HTML = `<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>环境已休眠</title>` +
+  `<body style="font-family:system-ui;background:#111;color:#eee;padding:2rem"><h1>环境空闲已休眠</h1>` +
+  `<p>刷新页面即可唤醒（约半分钟），或回到主控制台。</p></body></html>`;
+
 function attach(req: Request, ctx: RequestContext | null): void {
   if (ctx) req.paCtx = ctx;
 }
@@ -180,6 +191,10 @@ export function createApp(ctx: AppContext): express.Express {
       if(!ctx.sessions.isLive(req.paCtx!.session!.id)){res.status(401).json({error:"unauthenticated"});return;}
       let api=tenantApis.get(runtime);
       if(!api){api=createApiRouter(runtime);tenantApis.set(runtime,api);}
+      if(runtime.idle && SANDBOX_API.test(req.path)){
+        const release=runtime.idle.hold();res.on("close",release);
+        await runtime.idle.wake();
+      }
       api(req,res,next);
     } catch {res.status(503).json({error:"runtime_unavailable",message:"独立环境暂不可用，请稍后重试"});}
   });
@@ -209,6 +224,16 @@ export function createApp(ctx: AppContext): express.Express {
     void (async()=>{
       try {
         const runtime=ctx.runtimeForUser?await ctx.runtimeForUser(rec.session!.ownerId):ctx;
+        if(runtime.idle){
+          // A refused request must not count as use either, or it would cancel a stop in progress.
+          if(!await runtime.idle.enter(isNavigation(req))){
+            res.setHeader("Cache-Control","no-store");
+            if(acceptsHtml(req))res.status(503).type("html").send(PARKED_HTML);
+            else res.status(503).json({error:"sandbox_parked",message:"环境空闲已休眠，刷新页面即可唤醒"});
+            return;
+          }
+          const release=runtime.idle.hold();res.on("close",release);
+        }
         if(!ctx.sessions.isLive(rec.session!.id)){res.status(401).end();return;}
         handleProxyHttp({cfg:runtime.cfg,log:runtime.log,sessions:ctx.sessions,browser:runtime.browser.proxyGate()},rec,req,res);
       } catch {res.status(503).json({error:"runtime_unavailable"});}
@@ -299,8 +324,14 @@ export function handleUpgrade(ctx: AppContext, req: import("node:http").Incoming
   void (async()=>{
     try {
       const runtime=ctx.runtimeForUser?await ctx.runtimeForUser(rec.session!.ownerId):ctx;
+      // An open socket is not use by itself (a hidden tab keeps its editor socket); only its start wakes.
+      if(runtime.idle){
+        if(!await runtime.idle.enter(false)){endSocket(socket,"HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\nContent-Length: 0\r\n\r\n");return;}
+        runtime.idle.touch();
+      }
       if(!ctx.sessions.isLive(rec.session!.id)){endSocket(socket,"HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n");return;}
-      handleProxyUpgrade({cfg:runtime.cfg,log:runtime.log,sessions:ctx.sessions,browser:runtime.browser.proxyGate()},rec,req,socket,head);
+      const idle=runtime.idle;
+      handleProxyUpgrade({cfg:runtime.cfg,log:runtime.log,sessions:ctx.sessions,browser:runtime.browser.proxyGate(),activity:idle?()=>idle.touch():undefined},rec,req,socket,head);
     } catch {endSocket(socket,"HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\n\r\n");}
   })();
 }

@@ -49,6 +49,8 @@ export interface ProxyDeps {
   cfg: Config;
   log: Logger;
   sessions: SessionStore;
+  /** Called on client bytes of a proxied socket (typing in a workspace tab); an open socket alone is not use. */
+  activity?: () => void;
   /**
    * Optional browser lifecycle gate. When present, a request whose path is
    * genuinely browser/CDP/VNC bound holds a lease for the whole connection, so
@@ -562,6 +564,7 @@ export function handleProxyUpgrade(
       // From here on both directions stream with backpressure handling.
       pipeWithBackpressure(upstreamSocket, clientSocket);
       pipeWithBackpressure(clientSocket, upstreamSocket);
+      if (deps.activity) clientSocket.on("data", deps.activity);
     };
 
     upstreamSocket.on("connect", () => {

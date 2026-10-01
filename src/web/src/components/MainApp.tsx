@@ -103,12 +103,18 @@ export function MainApp() {
                 expired();
         } };
         const timer = setInterval(() => void renew(), 15 * 60000);
+        // Only while the console is actually on screen: this is the foreground half of idle detection.
+        const present = () => { if (document.visibilityState === "visible")
+            void api.presence().catch(() => undefined); };
+        present();
+        const presence = setInterval(present, 20000);
         const visible = () => { if (document.visibilityState === "visible") {
+            present();
             void refreshStatus();
             void renew();
         } };
         document.addEventListener("visibilitychange", visible);
-        return () => { clearInterval(poll); clearInterval(timer); document.removeEventListener("visibilitychange", visible); };
+        return () => { clearInterval(poll); clearInterval(timer); clearInterval(presence); document.removeEventListener("visibilitychange", visible); };
     }, [auth, expired, refreshStatus]);
     const notify = useCallback((message: string) => setNotice(message), []);
     const revealBrowser = useCallback(() => { setWorkspace(true); setBrowserNonce(n => n + 1); }, []);
@@ -183,7 +189,9 @@ export function MainApp() {
     </aside>
     <main className="main" inert={mobile && menuOpen}>
       {notice && <div className="banner" role="alert">{notice}<button onClick={() => setNotice(null)}>关闭</button></div>}
-      {status && !status.agent.sessionReady && <div className="banner error">智能体暂未就绪：{status.agent.lastError ?? "正在连接"}。消息仍会保留。</div>}
+      {status && !status.agent.sessionReady && (status.sandbox.idle
+        ? <div className="banner warn">环境空闲已休眠，正在唤醒（约半分钟）。消息仍会保留，唤醒后自动执行。</div>
+        : <div className="banner error">智能体暂未就绪：{status.agent.lastError ?? "正在连接"}。消息仍会保留。</div>)}
       <div className="view-slot" hidden={view !== "main"}><TaskChat debug={role === "owner" && debug} onFeed={setTaskFeed} onDetails={t => void details(t)} onOpenLink={u => void openLink(u)} onExpired={expired} onRevealBrowser={revealBrowser}/></div>
       <div className="view-slot" hidden={view !== 'tasks'}><TaskList feed={taskFeed} onDetails={t=>void details(t,'tasks')} onExpired={expired}/></div>
       {role === "owner" && view === "settings" && <Settings onBack={() => setView("main")}/>}

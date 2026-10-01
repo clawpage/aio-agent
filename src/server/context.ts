@@ -16,6 +16,7 @@ import type { BrowserService } from "./browser/service.js";
 import type { BrowserRuntimeLike } from "./browser/lifecycle.js";
 
 import type { TaskService } from "./tasks/service.js";
+import type { SandboxIdle } from "./docker/idle.js";
 
 export interface AppContext {
   runtimeForUser?: (userId: string) => Promise<AppContext>;
@@ -24,6 +25,8 @@ export interface AppContext {
   /** Jev structured decisions (host-side key; absent without one). */
   jev?: Jev;
   tasks: TaskService;
+  /** Whole-container idle stop/start; absent when the runtime keeps its container up. */
+  idle?: SandboxIdle;
   cfg: Config;
   db: Db;
   log: Logger;

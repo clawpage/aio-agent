@@ -29,6 +29,7 @@ import { AioClient } from "./aio/client.js";
 import { createApp, handleUpgrade } from "./http/server.js";
 import { TaskService } from "./tasks/service.js";
 import type { AppContext } from "./context.js";
+import { SandboxIdle } from "./docker/idle.js";
 
 export interface Bootstrapped {
   ctx: AppContext;
@@ -276,7 +277,8 @@ export function startRuntimeRecovery(ctx: AppContext, intervalMs = 30_000): Runt
   let inFlight = false;
 
   const tick = async (): Promise<void> => {
-    if (stopped || inFlight) return;
+    // A container stopped (or being started) for idleness is not broken; only wake() brings it back.
+    if (stopped || inFlight || ctx.idle?.managing) return;
     inFlight = true;
     try {
       const [ready, state] = await Promise.all([ctx.container.isReady(), ctx.container.inspect()]);
@@ -329,6 +331,15 @@ export function startRuntimeRecovery(ctx: AppContext, intervalMs = 30_000): Runt
   };
 }
 
+/** Whole-container idle stop/start for a runtime configured for it (members by default). */
+export function startSandboxIdle(ctx: AppContext, intervalMs = 30_000): SandboxIdle | null {
+  if (!ctx.cfg.sandbox.autostart || !ctx.cfg.sandbox.releaseWhenIdle) return null;
+  const idle = new SandboxIdle({ ctx, idleMs: ctx.cfg.sandbox.idleMs, start: startSandboxRuntime, intervalMs });
+  ctx.idle = idle;
+  ctx.agent.setSandboxGate(() => idle.wake());
+  return idle;
+}
+
 async function main(): Promise<void> {
   const config=loadConfig();
   config.runtimeUserId="owner_1";
@@ -359,6 +370,7 @@ async function main(): Promise<void> {
   }
   const recovery = startRuntimeRecovery(ctx);
   void recovery.tick();
+  const idle = startSandboxIdle(ctx);
   // Independent of the health check above, so a new managed skill reaches a
   // sandbox that is already running. Never awaited: chat startup must not wait
   // on the sandbox.
@@ -370,6 +382,7 @@ async function main(): Promise<void> {
     closing = true;
     ctx.log.info("shutting down", { signal });
     recovery.stop();
+    idle?.stop();
     server.close();
     modelGateway.close();
     await users.shutdown();

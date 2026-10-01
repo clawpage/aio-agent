@@ -2,7 +2,7 @@ import path from 'node:path';
 import {userNamespace,workspaceConfig} from './auth/workspaceHost.js';
 import type {Config} from './config.js';
 import type {AppContext} from './context.js';
-import {bootstrap, startSandboxRuntime, startRuntimeRecovery, type Bootstrapped} from './index.js';
+import {bootstrap, startSandboxRuntime, startRuntimeRecovery, startSandboxIdle, type Bootstrapped} from './index.js';
 import type {MemberModelGateway} from './memberModelGateway.js';
 import {getUser} from './auth/owner.js';
 import {MEMBER_MODEL,MEMBER_MODELS} from './auth/policy.js';
@@ -17,7 +17,7 @@ export function memberConfig(base: Config, userId: string, port: number, model: 
     ownerPassword:'',ownerPasswordReset:false,ownerSecretPath:path.join(dataDir,'unused-secret'),
     agent:{...base.agent,defaultModel:model},
     browser:{...base.browser,releaseWhenIdle:base.browser.memberReleaseWhenIdle},
-    sandbox:{...base.sandbox,hostPort:port,containerName:`aio-user-${suffix}`,
+    sandbox:{...base.sandbox,releaseWhenIdle:base.sandbox.memberReleaseWhenIdle,hostPort:port,containerName:`aio-user-${suffix}`,
       networkName:`aio-user-${suffix}`,workspaceVolume:`aio-user-${suffix}-workspace`,
       // Owner PA_SANDBOX_EXTRA_ENV is never inherited; only the fixed flag Chromium needs
       // on Docker Desktop (no user namespaces for its zygote), or the browser crash-loops.
@@ -29,7 +29,7 @@ export function memberConfig(base: Config, userId: string, port: number, model: 
 /** Fail closed: a missing/failed member runtime can never fall through to owner. */
 export class UserRuntimes {
   private entries=new Map<string,Promise<Bootstrapped>>();
-  private recoveries: Array<ReturnType<typeof startRuntimeRecovery>>=[];
+  private recoveries: Array<{stop():void}>=[];
   constructor(private root: AppContext, private factory=bootstrap, private gateway?:MemberModelGateway) {}
   async resolve(id:string):Promise<AppContext> {
     const user=getUser(this.root.db,id);
@@ -77,6 +77,7 @@ export class UserRuntimes {
       await startSandboxRuntime(runtime.ctx);
       if(runtime.ctx.sandboxSetupError){await runtime.shutdown();throw new Error('用户独立环境启动失败');}
       const recovery=startRuntimeRecovery(runtime.ctx);this.recoveries.push(recovery);
+      const idle=startSandboxIdle(runtime.ctx);if(idle)this.recoveries.push(idle);
     }
     return runtime;
   }

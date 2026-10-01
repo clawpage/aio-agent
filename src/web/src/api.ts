@@ -115,6 +115,8 @@ export const api = {
   logout: () => request<{ ok: boolean }>("/api/auth/logout", { method: "POST", body: {} }),
   refresh: () => request<{ ok: boolean; expiresAt: number }>("/api/auth/refresh", { method: "POST", body: {} }),
   status: () => request<StatusResponse>("/api/status"),
+  /** The console is on screen: keeps the account's container up, and starts a stopped one. */
+  presence: () => request<{ ok: boolean }>("/api/presence", { method: "POST", body: {} }),
 
   conversations: (includeArchived = false) =>
     request<{ conversations: Conversation[] }>(`/api/conversations${includeArchived ? "?archived=1" : ""}`),

@@ -235,6 +235,16 @@ docker exec -i -u root personal-agent-sandbox python3 - status \
 
 > 不要在有人正在看浏览器、或有任务在跑时执行上面的 stop/wake。
 
+## 6.2 整个容器空闲休眠
+
+成员默认开启（`PA_MEMBER_SANDBOX_RELEASE_IDLE=1`），owner 默认关闭（`PA_SANDBOX_RELEASE_IDLE=0`）。
+沙箱不在用、控制台也不在前台，两者都持续 `PA_SANDBOX_IDLE_SECONDS`（默认 300）后：先检查容器里有没有仍在运行的 shell 命令、CPU 是否 ≥ 5%，再给浏览器做快照，然后 `docker stop` 容器。判定细节见 README「整个容器空闲休眠」。
+
+- 看状态：`grep -E "sandbox (stopped after idle|waking from idle)|sandbox idle" var/users/*/logs/personal-agent.log`；`docker ps -a --filter name=aio-user-` 里 `Exited` 是休眠，不是故障。
+- 休眠时巡检会跳过这个容器，不要手动 `docker start`：控制面会以为它还在休眠，就不会把 Codex 会话接回来。要唤醒就打开该成员的控制台，或在工作区页面刷新一下。
+- 已知窗口：成员容器刚启动、还没装好出站隔离规则之前，有几秒不受网络限制（镜像自带的服务在跑，智能体进程还没启动）。休眠后容器启停变频繁，这个窗口出现得也更多。
+- 每次重启服务都会先把所有成员容器拉起来；没人用的话 5 分钟后会再停掉。
+
 ## 7. 崩溃恢复验证（唯一可靠方式）
 
 ```bash

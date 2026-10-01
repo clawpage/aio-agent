@@ -353,9 +353,11 @@ export function createApiRouter(context: AppContext): Router {
         container.inspect(),
         container.isReady(),
       ]);
+      // A container stopped for idleness is asleep, not broken; the console's own heartbeat is waking it.
+      const idle = context.idle && context.idle.state !== "running" ? context.idle.state : null;
       if (isMember(db, ctxOf(_req).session!.ownerId)) {
         res.json({ agent: { sessionReady: agentStatus.sessionReady, lastError: agentStatus.sessionReady ? null : "服务正在连接" },
-          hostAuth: { ok: hostAuth.ok }, sandbox: { running: sandboxState.running, healthy: sandboxReady, surfaces: context.sandboxSurfaces },
+          hostAuth: { ok: hostAuth.ok }, sandbox: { running: sandboxState.running, healthy: sandboxReady, surfaces: context.sandboxSurfaces, idle },
           workspaceOrigin: workspaceOrigin(ctxOf(_req), cfg) });
         return;
       }
@@ -376,9 +378,25 @@ export function createApiRouter(context: AppContext): Router {
           managed: sandboxState.managedLabel === "1",
           setupError: context.sandboxSetupError,
           surfaces: context.sandboxSurfaces,
+          idle,
         },
         workspaceOrigin: workspaceOrigin(ctxOf(_req), cfg),
       });
+    }),
+  );
+
+  /**
+   * The console is visible on a screen (sent every 20 s while it is). Together
+   * with sandbox use this decides when an idle container is stopped, and a
+   * stopped one starts warming up the moment its owner comes back.
+   */
+  router.post(
+    "/presence",
+    requireKind("primary"),
+    requireSession,
+    asyncHandler(async (_req, res) => {
+      context.idle?.foreground();
+      res.json({ ok: true });
     }),
   );
 

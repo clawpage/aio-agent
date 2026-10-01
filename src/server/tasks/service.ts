@@ -316,6 +316,8 @@ export class TaskService {
                 previous = [...candidates.values()];
                 const prompt = planningPrompt(planningInput, explicit ? previous.filter(t => t.id === explicit.id) : previous, row.related_task_id, this.cfg.sandbox.containerWorkspaceDir, { canSearch, searched: trace.searches }, { timeline: timelineText, hint });
                 trace.promptChars += prompt.length;
+                // The dispatcher runs on the sandbox Codex: a container stopped for idleness starts first.
+                await this.agent.ensureSandbox();
                 raw = await ask(prompt);
                 if (this.#closed || this.get(row.id)?.status !== "planning")
                     return;

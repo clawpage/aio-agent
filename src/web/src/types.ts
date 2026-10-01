@@ -105,7 +105,7 @@ export interface StatusResponse {
     error: string | null;
     expiresAt: number | null;
   };
-  sandbox: { name: string; running: boolean; healthy: boolean; image: string | null; managed: boolean; setupError?: string | null };
+  sandbox: { name: string; running: boolean; healthy: boolean; image: string | null; managed: boolean; setupError?: string | null; idle?: "parking" | "parked" | "waking" | null };
   workspaceOrigin: string;
 }
 

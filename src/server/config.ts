@@ -96,6 +96,14 @@ export function loadConfig(): {
     codexVersion: string;
     codexPrefix: string;
     codexBin: string;
+    /**
+     * Stop the whole container once it is unused and the console is not in the
+     * foreground for `idleMs`; it starts again on the next use. Off for the owner.
+     */
+    releaseWhenIdle: boolean;
+    /** The same for member runtimes, on by default. */
+    memberReleaseWhenIdle: boolean;
+    idleMs: number;
   };
   documents: {
     /** Master switch for sandbox document conversion (preview rasterisation). */
@@ -332,6 +340,9 @@ export function loadConfig(): {
       codexVersion: sandboxCodexVersion,
       codexPrefix: sandboxCodexPrefix,
       codexBin: sandboxCodexBin,
+      releaseWhenIdle: envStr("PA_SANDBOX_RELEASE_IDLE", "0") === "1",
+      memberReleaseWhenIdle: envStr("PA_MEMBER_SANDBOX_RELEASE_IDLE", "1") === "1",
+      idleMs: Math.max(60_000, envInt("PA_SANDBOX_IDLE_SECONDS", 300) * 1000),
     },
     documents: {
       // Conversion runs entirely inside the sandbox with fixed argv; the control

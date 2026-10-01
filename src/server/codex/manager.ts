@@ -316,6 +316,8 @@ export class AgentManager {
   #codexGeneration = 0;
   /** Optional browser lifecycle gate; absent means no browser release management. */
   #browser: BrowserGateLike | null;
+  /** Starts a sandbox container stopped for idleness; absent while it is kept running. */
+  #sandboxGate: (() => Promise<void>) | null = null;
 
   constructor(deps: {
     cfg: Config;
@@ -969,6 +971,8 @@ export class AgentManager {
 
     this.#db.prepare("UPDATE conversations SET status = 'running', updated_at = ? WHERE id = ?").run(Date.now(), conversation.id);
     this.#appendEvent(conversation.id, turn.id, "turn.started", { turnId: turn.id });
+    // A container stopped for idleness starts again before anything uses it.
+    await this.ensureSandbox();
 
     // The turn holds a browser lease already (reserved synchronously in #pump).
     // Only tasks whose frozen resource plan needs a browser wait for it.
@@ -1653,6 +1657,15 @@ export class AgentManager {
 
   async ensureSession(): Promise<void> {
     await this.#codex.start();
+  }
+
+  setSandboxGate(gate: () => Promise<void>): void {
+    this.#sandboxGate = gate;
+  }
+
+  /** Bring a sandbox stopped for idleness back before using it; immediate otherwise. */
+  async ensureSandbox(): Promise<void> {
+    await this.#sandboxGate?.();
   }
 
   /**
