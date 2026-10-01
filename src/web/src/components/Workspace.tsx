@@ -7,6 +7,7 @@ import { BrowserViewerController } from "../browserViewer";
 import { BrowserStatusBar, fetchBrowserStatus, STATUS_POLL_MS } from "./BrowserStatusBar";
 import { needsRestore } from "../browserStatusView";
 import { DESKTOP_PATH } from "./TaskConsole";
+import { AppIcon } from "./AppIcon";
 import { browserApi, UI_KEEP_ALIVE_NOTE, type BrowserLifecycleStateView } from "../api";
 import { baseName, isPreviewableKind, kindLabel, workspaceFileKind, type WorkspaceFileKind } from "../sandboxLink";
 interface Props {
@@ -45,6 +46,9 @@ export function Workspace({ open, status, initialPath, onClose, onNotify, browse
   const navGenRef = useRef(0);
   const userNavigatedRef = useRef(false);
   const [fullscreen, setFullscreen] = useState(false);
+  /** The app window is closed or minimized to the Dock: only the desktop shows. */
+  const [minimized, setMinimized] = useState(false);
+  const clock = useClock();
   const [previewPath, setPreviewPath] = useState("/");
   const [previewSrc, setPreviewSrc] = useState<string | null>(null);
   /** Workspace file shown in the unified preview dialog (null = closed). */
@@ -91,6 +95,7 @@ export function Workspace({ open, status, initialPath, onClose, onNotify, browse
       const def = TABS.find((t) => t.id === id);
       userNavigatedRef.current = true;
       setTab(id);
+      setMinimized(false);
       setFrameError(null);
       // Bump the generation for every navigation, including native tabs: a frame
       // result that is still in flight must not land after the user left the frame.
@@ -287,14 +292,14 @@ export function Workspace({ open, status, initialPath, onClose, onNotify, browse
   const viewer = viewerRef.current;
 
   /** The browser/desktop panels are the only ones that need a live Chromium. */
-  const holdsBrowser = open && tab === "browser";
+  const holdsBrowser = open && tab === "browser" && !minimized;
 
   /**
    * The frame's ticket was spent by its first load, so a frame unmounted while
    * hidden (a backgrounded window, a released browser) must come back on a fresh
    * one, never replay the spent link into "链接已失效".
    */
-  const frameShown = open && docVisible && !(holdsBrowser && (suspended || restoringBrowser));
+  const frameShown = open && !minimized && docVisible && !(holdsBrowser && (suspended || restoringBrowser));
   const frameShownRef = useRef(frameShown);
   useEffect(() => {
     const wasShown = frameShownRef.current;
@@ -438,148 +443,185 @@ export function Workspace({ open, status, initialPath, onClose, onNotify, browse
   }, [keepAlivePin, onNotify]);
 
   const currentDef = TABS.find((t) => t.id === tab);
+  const apps = TABS.filter((t) => canConfigure || t.id !== "api");
   const externalPath = tab === "terminal" ? (terminalId ? `/terminal?session_id=${encodeURIComponent(terminalId)}` : undefined) : currentDef?.path;
 
   if (!open) return null;
 
   return (
-    <section className={`workspace ${fullscreen ? "fullscreen" : ""}`}>
-      <header className="ws-head">
-        <nav className="ws-tabs" role="tablist">
-          {TABS.filter(t => canConfigure || t.id !== "api").map((t) => (
-            <button
-              key={t.id}
-              type="button"
-              role="tab"
-              aria-selected={tab === t.id}
-              className={tab === t.id ? "active" : ""}
-              onClick={() => void navigateTo(t.id)}
-            >
-              {t.label}
-            </button>
-          ))}
-        </nav>
-        <div className="ws-actions">
-          {externalPath && (
-            <button type="button" className="ghost" onClick={() => void openExternal(externalPath)}>
-              新标签页
-            </button>
-          )}
-          <button type="button" className="ghost" onClick={() => setFullscreen((v) => !v)}>
-            {fullscreen ? "退出全屏" : "全屏"}
+    <section className={`workspace desktop ${fullscreen ? "fullscreen" : ""}`}>
+      <header className="ws-head menubar">
+        <span className="menubar-app">{minimized ? "桌面" : currentDef?.label}</span>
+        {!minimized && externalPath && (
+          <button type="button" className="menubar-item" onClick={() => void openExternal(externalPath)}>
+            新标签页
           </button>
-          <button type="button" className="ghost" onClick={onClose} aria-label="关闭工作区">
-            关闭
-          </button>
-        </div>
+        )}
+        <span className="menubar-spacer" />
+        <time className="menubar-clock" dateTime={clock.iso}>{clock.label}</time>
+        <button type="button" className="menubar-item" onClick={onClose} aria-label="关闭工作区" title="关闭工作区">
+          ✕
+        </button>
       </header>
 
-      <div className="ws-body">
-        {tab === "terminal" && <TerminalSessions active={docVisible} selectedId={terminalId} onSelect={setTerminalId} onNotify={onNotify}/>}
-        {holdsBrowser && (
-          <BrowserStatusBar
-            status={browserStatus}
-            watching={watching}
-            onWake={wakeBrowser}
-            onNotify={onNotify}
-            pinned={keepAlivePin}
-            onPinToggle={togglePin}
-          />
-        )}
-        {tab === "files" && <FilesTab canConfigure={canConfigure} notify={onNotify} onPreview={setFilePreview} />}
-        {tab === "preview" && (
-          <div className="preview">
-            <div className="row">
-              <input
-                value={previewPath}
-                onChange={(e) => setPreviewPath(e.target.value)}
-                placeholder="路径（/jupyter/lab）或端口（3000）"
-              />
-              <button
-                type="button"
-                className="primary"
-                onClick={() => void openPreview(previewPath)}
-              >
-                打开
+      <div className="desktop-area">
+        {minimized ? (
+          <div className="desktop-icons">
+            {apps.map((t) => (
+              <button key={t.id} type="button" className="desktop-icon" onClick={() => void navigateTo(t.id)}>
+                <AppIcon app={t.id} size={52} />
+                <span>{t.label}</span>
               </button>
-              <button type="button" className="ghost" onClick={() => void openExternal(normalizePreviewTarget(previewPath))}>
-                新标签页
-              </button>
+            ))}
+          </div>
+        ) : (
+          <div className="window" role="tabpanel" aria-label={currentDef?.label}>
+            <div className="window-titlebar">
+              <div className="traffic-lights">
+                <button type="button" className="light close" aria-label="关闭窗口" title="关闭窗口" onClick={() => { setMinimized(true); setFullscreen(false); }} />
+                <button type="button" className="light minimize" aria-label="最小化" title="最小化" onClick={() => { setMinimized(true); setFullscreen(false); }} />
+                <button type="button" className="light zoom" aria-label={fullscreen ? "退出全屏" : "全屏"} title={fullscreen ? "退出全屏" : "全屏"} onClick={() => setFullscreen((v) => !v)} />
+              </div>
+              <span className="window-title">{currentDef?.label}</span>
             </div>
-            <p className="muted tiny">
-              端口会通过沙箱的代理入口打开（例如 3000 → <code>/proxy/3000/</code>），用于访问你在沙箱里启动的服务。
-            </p>
-            {previewSrc ? (
-              <iframe
-                key={previewSrc}
-                src={previewSrc}
-                title="预览"
-                sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-downloads"
-                onLoad={() => setSessionReady(true)}
-              />
-            ) : (
-              <p className="muted">输入沙箱内的路径（例如 /jupyter/lab 或你自己生成的 HTML 文件）。</p>
-            )}
+            <div className="ws-body">
+              {tab === "terminal" && <TerminalSessions active={docVisible} selectedId={terminalId} onSelect={setTerminalId} onNotify={onNotify}/>}
+              {holdsBrowser && (
+                <BrowserStatusBar
+                  status={browserStatus}
+                  watching={watching}
+                  onWake={wakeBrowser}
+                  onNotify={onNotify}
+                  pinned={keepAlivePin}
+                  onPinToggle={togglePin}
+                />
+              )}
+              {tab === "files" && <FilesTab canConfigure={canConfigure} notify={onNotify} onPreview={setFilePreview} />}
+              {tab === "preview" && (
+                <div className="preview">
+                  <div className="row">
+                    <input
+                      value={previewPath}
+                      onChange={(e) => setPreviewPath(e.target.value)}
+                      placeholder="路径（/jupyter/lab）或端口（3000）"
+                    />
+                    <button
+                      type="button"
+                      className="primary"
+                      onClick={() => void openPreview(previewPath)}
+                    >
+                      打开
+                    </button>
+                    <button type="button" className="ghost" onClick={() => void openExternal(normalizePreviewTarget(previewPath))}>
+                      新标签页
+                    </button>
+                  </div>
+                  <p className="muted tiny">
+                    端口会通过沙箱的代理入口打开（例如 3000 → <code>/proxy/3000/</code>），用于访问你在沙箱里启动的服务。
+                  </p>
+                  {previewSrc ? (
+                    <iframe
+                      key={previewSrc}
+                      src={previewSrc}
+                      title="预览"
+                      sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-downloads"
+                      onLoad={() => setSessionReady(true)}
+                    />
+                  ) : (
+                    <p className="muted">输入沙箱内的路径（例如 /jupyter/lab 或你自己生成的 HTML 文件）。</p>
+                  )}
+                </div>
+              )}
+              {canConfigure && tab === "api" && <ApiTab notify={onNotify} />}
+              {TABS.find((t) => t.id === tab)?.kind === "frame" && (
+                <>
+                  {holdsBrowser && (suspended || restoringBrowser) ? (
+                    <div className="frame-hint">
+                      <p>
+                        {restoringBrowser ? "正在按快照恢复浏览器…" : browserStatus?.lastErrorCode === "wake_failed" ? "浏览器恢复尚未完成，现有标签和快照已保留" : "浏览器已释放以节省内存"}
+                        {browserStatus?.restorePending ? "，上一次快照仍在等待恢复。" : "。"}
+                      </p>
+                      <p className="muted tiny">恢复后会按保存的标签、滚动位置与站点会话重建页面；正在进行的下载和未提交的表单不会被恢复。</p>
+                      <button
+                        type="button"
+                        className="primary"
+                        disabled={restoringBrowser}
+                        onClick={() =>
+                          void wakeBrowser().catch((err) => onNotify(err instanceof Error ? err.message : String(err), "error"))
+                        }
+                      >
+                        {restoringBrowser ? "正在恢复…" : "重试恢复浏览器"}
+                      </button>
+                    </div>
+                  ) : !docVisible ? (
+                    <p className="muted">窗口在后台，已暂停该面板并释放浏览器占用。</p>
+                  ) : frameSrc ? (
+                    <iframe
+                      key={frameKey}
+                      src={frameSrc}
+                      title={currentDef?.label ?? "沙箱"}
+                      allow="clipboard-read; clipboard-write; fullscreen"
+                      onLoad={() => {
+                        setFrameStatus("loaded");
+                        setSessionReady(true);
+                      }}
+                    />
+                  ) : (
+                    <p className="muted">正在建立工作区会话…</p>
+                  )}
+                  {frameError && <div className="frame-hint error">{frameError}</div>}
+                  {frameStatus === "timeout" && (
+                    <div className="frame-hint">
+                      页面加载超时。
+                      <button type="button" className="link" onClick={() => currentDef?.path && void openExternal(currentDef.path)}>
+                        在新标签页打开
+                      </button>
+                      <button type="button" className="link" onClick={() => void navigateTo(tab)}>
+                        重试
+                      </button>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
           </div>
         )}
-        {canConfigure && tab === "api" && <ApiTab notify={onNotify} />}
-        {TABS.find((t) => t.id === tab)?.kind === "frame" && (
-          <>
-            {holdsBrowser && (suspended || restoringBrowser) ? (
-              <div className="frame-hint">
-                <p>
-                  {restoringBrowser ? "正在按快照恢复浏览器…" : browserStatus?.lastErrorCode === "wake_failed" ? "浏览器恢复尚未完成，现有标签和快照已保留" : "浏览器已释放以节省内存"}
-                  {browserStatus?.restorePending ? "，上一次快照仍在等待恢复。" : "。"}
-                </p>
-                <p className="muted tiny">恢复后会按保存的标签、滚动位置与站点会话重建页面；正在进行的下载和未提交的表单不会被恢复。</p>
-                <button
-                  type="button"
-                  className="primary"
-                  disabled={restoringBrowser}
-                  onClick={() =>
-                    void wakeBrowser().catch((err) => onNotify(err instanceof Error ? err.message : String(err), "error"))
-                  }
-                >
-                  {restoringBrowser ? "正在恢复…" : "重试恢复浏览器"}
-                </button>
-              </div>
-            ) : !docVisible ? (
-              <p className="muted">窗口在后台，已暂停该面板并释放浏览器占用。</p>
-            ) : frameSrc ? (
-              <iframe
-                key={frameKey}
-                src={frameSrc}
-                title={currentDef?.label ?? "沙箱"}
-                allow="clipboard-read; clipboard-write; fullscreen"
-                onLoad={() => {
-                  setFrameStatus("loaded");
-                  setSessionReady(true);
-                }}
-              />
-            ) : (
-              <p className="muted">正在建立工作区会话…</p>
-            )}
-            {frameError && <div className="frame-hint error">{frameError}</div>}
-            {frameStatus === "timeout" && (
-              <div className="frame-hint">
-                页面加载超时。
-                <button type="button" className="link" onClick={() => currentDef?.path && void openExternal(currentDef.path)}>
-                  在新标签页打开
-                </button>
-                <button type="button" className="link" onClick={() => void navigateTo(tab)}>
-                  重试
-                </button>
-              </div>
-            )}
-          </>
-        )}
       </div>
+
+      <nav className="dock" role="tablist" aria-label="应用">
+        {apps.map((t) => (
+          <button
+            key={t.id}
+            type="button"
+            role="tab"
+            aria-label={t.label}
+            aria-selected={tab === t.id && !minimized}
+            className={`dock-item ${tab === t.id ? "running" : ""}`}
+            title={t.label}
+            onClick={() => void navigateTo(t.id)}
+          >
+            <AppIcon app={t.id} />
+            <span className="dock-label">{t.label}</span>
+          </button>
+        ))}
+      </nav>
       {filePreview && <FilePreview path={filePreview} onClose={() => setFilePreview(null)} onOpenLink={async url => {
         try { await api.openBrowserTab(url); await navigateTo("browser"); }
         catch (err) { onNotify(err instanceof Error ? err.message : String(err), "error"); }
       }} />}
     </section>
   );
+}
+
+/** The menu bar clock (周四 01:23), refreshed on the minute. */
+function useClock(): { label: string; iso: string } {
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(new Date()), 15_000);
+    return () => window.clearInterval(timer);
+  }, []);
+  const label = `${new Intl.DateTimeFormat("zh-CN", { weekday: "short" }).format(now)} ${now.toTimeString().slice(0, 5)}`;
+  return { label, iso: now.toISOString() };
 }
 
 /** Fixed workspace root inside the AIO sandbox (matches the control plane). */

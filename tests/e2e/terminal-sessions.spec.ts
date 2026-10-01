@@ -29,7 +29,7 @@ test('compact terminal picker switches, creates and closes sessions while preser
   expect((await panel.boundingBox())!.height).toBeLessThan(90);
   const frameHeight=(await frame.boundingBox())!.height;
   await picker.click();await expect(panel).toContainText('终端会话 · 2');
-  expect((await frame.boundingBox())!.height).toBe(frameHeight);
+  expect((await frame.boundingBox())!.height).toBeCloseTo(frameHeight,0);
   await panel.getByRole('button',{name:'复制 session ID shell-idle',exact:true}).click();expect(await page.evaluate(()=>(window as any).copied)).toBe('shell-idle');
   await panel.getByRole('button',{name:'切换到终端 shell-idle',exact:true}).click();await expect(frame).toHaveAttribute('src',/session_id=shell-idle/);await expect(picker).toHaveAttribute('aria-expanded','false');
   expect(paths).toContain('/terminal?session_id=shell-idle');

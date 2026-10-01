@@ -97,9 +97,9 @@ test.describe("layout sanity", () => {
     expect(overflow).toBeLessThanOrEqual(1);
   });
 
-  test("workspace tab bar does not overflow its header", async ({ page }) => {
+  test("workspace dock does not overflow the screen", async ({ page }) => {
     await openWorkspace(page);
-    const tabs = page.locator(".ws-tabs");
+    const tabs = page.locator(".dock");
     await expect(tabs).toBeVisible();
     const metrics = await tabs.evaluate((el) => ({ scroll: el.scrollWidth, client: el.clientWidth }));
     expect(metrics.client).toBeGreaterThan(0);
