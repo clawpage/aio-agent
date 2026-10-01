@@ -220,7 +220,8 @@ export class SandboxIdle {
         // The snapshot is what brings the logins back on the next start.
         const slept = await ctx.browser.sleepNow();
         if (slept.verdict !== "asleep" && ctx.browser.status().state !== "asleep") {
-          ctx.log.info("sandbox idle stop skipped: browser not released", { verdict: slept.verdict });
+          // The message is one of the lifecycle's fixed, secret-free sentences.
+          ctx.log.info("sandbox idle stop skipped: browser not released", { verdict: slept.verdict, message: slept.message });
           this.#state = "running";
           this.#lastActive = this.#now();
           return;
