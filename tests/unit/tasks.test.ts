@@ -153,7 +153,12 @@ describe("main inbox delegation", () => {
         expect(tasks.get(second.id)?.status).toBe("running");
         expect(codex.startedTurns).toHaveLength(1);
         expect(codex.startedTurns[0]?.text).toContain("只回答第二个");
-        expect(codex.startedTurns[0]?.text).not.toContain("第一个任务");
+        // The task itself carries only its own messages; the other task appears only as
+        // labelled background in the main-session timeline.
+        const [background, own] = codex.startedTurns[0]!.text.split("本次用户任务：");
+        expect(own).not.toContain("第一个任务");
+        expect(background).toMatch(new RegExp(`用户：「第一个任务」 → 任务 ${first.id}`));
+        expect(background).toMatch(/▶ \[\d\d:\d\d\] 用户：「第二个任务」  ← 本次消息/);
     });
     it("accepts four messages immediately, runs three isolated child threads, reports out of order without cross-talk", async () => {
         const jobs = ["a", "b", "c", "d"].map(t => submit(t));
@@ -573,4 +578,79 @@ it("validates optional clarification and allows semantic routing to a waiting qu
     expect(parsePlan(JSON.stringify({...base,clarification:"  "}),[],null)?.clarification).toBeNull();
     const previous=[{id:"q",title:"flight",input_text:"query",status:"needs_input",result:null}];
     expect(parsePlan(JSON.stringify({...base,appendTo:"q",clarification:"ignored"}),previous,null)).toMatchObject({appendTo:"q",clarification:null});
+});
+describe("main-session order, Jev's second opinion and resuming a finished session", () => {
+    const planWith = (extra: (message: string) => Record<string, unknown>) => async (p: string) => {
+        const data = JSON.parse(p.split("\n").at(-1)!);
+        return JSON.stringify({ title: data.message.slice(0, 20), related: [], dependencies: [], resources: [], ...extra(data.message) });
+    };
+    it("resumes the finished task a reply answers, in its own session, with the question and the timeline", async () => {
+        const order = submit("帮我在 eBay 买那台 Pixel"); await tick();
+        const first = codex.startedTurns[0]!;
+        await codex.runTurn(first.turnId, { text: "找到了，$499，卖家评分 99%。需要你授权我用已保存的卡付款吗？" }); await tick();
+        expect(tasks.get(order.id)!.status).toBe("completed");
+        codex.plan = planWith(m => ({ resume: m === "已授权" ? order.id : null }));
+        submit("讲个笑话"); await tick();
+        const reply = submit("已授权"); await tick(); await tick();
+        expect(tasks.get(reply.id)!.related_task_id).toBe(order.id);
+        const turn = codex.startedTurns.find(t => t.text.endsWith("已授权"))!;
+        // Same execution session as the order, not a fresh one with a summary.
+        expect(turn.threadId).toBe(first.threadId);
+        expect(turn.text).toContain(`本次消息接续任务 ${order.id}`);
+        expect(turn.text).toContain("该任务最后问用户：「需要你授权我用已保存的卡付款吗？」");
+        // The conversation in order: the order, the unrelated joke, then this reply.
+        const lines = turn.text.split("\n").filter(l => /\[\d\d:\d\d\] 用户：/.test(l));
+        expect(lines.map(l => l.match(/用户：「(.*?)」/)![1])).toEqual(["帮我在 eBay 买那台 Pixel", "讲个笑话", "已授权"]);
+        expect(lines[0]).toContain("助理最后问：「需要你授权我用已保存的卡付款吗？」");
+        expect(lines[2]).toMatch(/^▶ .*← 本次消息$/);
+    });
+    it("gives the dispatcher Jev's pick with the timeline, records it, and dispatches without it when Jev fails", async () => {
+        const asked: Array<Record<string, any>> = [];
+        let fail = false;
+        const jev = {
+            enabled: true,
+            decide: async (state: Record<string, unknown>, questions: Record<string, { criteria: Record<string, string> }>) => {
+                asked.push({ state, questions });
+                if (fail) throw new Error("Jev 返回 HTTP 503");
+                const ids = Object.keys(questions.target!.criteria);
+                const pick = ids[0]!;
+                return { answers: { target: { choice: pick, confidence: 0.9, probabilities: Object.fromEntries(ids.map(id => [id, id === pick ? 0.9 : 0.1 / (ids.length - 1)])) } }, usage: null, latencyMs: 7 };
+            },
+        };
+        tasks.close();
+        tasks = new TaskService(db, testConfig("/tmp/aio-main-tasks", 1, { PA_AUTO_TITLE: "0" }), agent, codex, undefined, jev as never);
+        tasks.init();
+        const trip = submit("规划东京三天行程"); await tick();
+        submit("酒店要靠近新宿"); await tick(); await tick();
+        const q = asked.at(-1)!;
+        expect(Object.keys(q.questions.target.criteria)).toEqual([trip.id, "NEW"]);
+        expect(q.questions.target.criteria[trip.id]).toContain("规划东京三天行程");
+        expect(q.state.main_session_timeline).toContain("「规划东京三天行程」");
+        const prompt = JSON.parse(codex.plans.at(-1)!.split("\n").at(-1)!);
+        expect(prompt.decisionHint).toEqual({ taskId: trip.id, probability: 0.9, confident: true });
+        expect(prompt.mainSessionTimeline).toMatch(/▶ .*「酒店要靠近新宿」/);
+        const recorded = db.prepare("SELECT jev_json FROM recall_events ORDER BY id DESC LIMIT 1").get() as { jev_json: string };
+        expect(JSON.parse(recorded.jev_json)).toMatchObject({ choice: trip.id, confident: true, latencyMs: 7 });
+        fail = true;
+        const next = submit("再加一天镰仓"); await tick(); await tick();
+        expect(["running", "merged", "waiting", "queued", "merging"]).toContain(tasks.get(next.id)!.status);
+        expect(JSON.parse(codex.plans.at(-1)!.split("\n").at(-1)!).decisionHint).toBeUndefined();
+        const failed = db.prepare("SELECT jev_json FROM recall_events ORDER BY id DESC LIMIT 1").get() as { jev_json: string };
+        expect(JSON.parse(failed.jev_json)).toEqual({ error: "Jev 返回 HTTP 503" });
+    });
+    it("repairs resume: an active target becomes an append, an unknown one is dropped, and it never doubles an append", () => {
+        const previous = [
+            { id: "t_done", title: "a", input_text: "a", status: "completed", result: "要授权吗？" },
+            { id: "t_run", title: "b", input_text: "b", status: "running", result: null },
+            { id: "t_blocked", title: "c", input_text: "c", status: "blocked", result: null },
+        ];
+        const plan = (extra: Record<string, unknown>) => { const report = { repairs: [] as string[] }; return { plan: parsePlan(JSON.stringify({ title: "x", related: [], dependencies: [], resources: [], clarification: "还要问吗？", ...extra }), previous, null, "/home/gem/workspace", report), report }; };
+        expect(plan({ resume: "t_done" }).plan).toMatchObject({ resume: "t_done", appendTo: null, clarification: null, related: ["t_done"] });
+        expect(plan({ resume: "t_run" }).plan).toMatchObject({ resume: null, appendTo: "t_run" });
+        expect(plan({ resume: "t_missing" }).plan).toMatchObject({ resume: null });
+        expect(plan({ resume: "t_blocked" }).plan).toMatchObject({ resume: null, related: ["t_blocked"] });
+        const both = plan({ resume: "t_done", appendTo: "t_run" });
+        expect(both.plan).toMatchObject({ resume: null, appendTo: "t_run" });
+        expect(both.report.repairs.join()).toContain("同时给出");
+    });
 });

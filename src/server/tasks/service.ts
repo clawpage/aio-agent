@@ -1,4 +1,5 @@
 import { isMember } from "../auth/policy.js";
+import type { Jev } from "../jev.js";
 import {readSoul} from '../soul.js';
 import { JsonRpcResponseError } from "../codex/jsonrpc.js";
 import type { Db } from "../db.js";
@@ -6,8 +7,10 @@ import type { Config } from "../config.js";
 import { randomId } from "../auth/passwords.js";
 import { AgentManager, TurnConflictError, type AgentEvent, type CodexSessionLike, type TurnAttachment } from "../codex/manager.js";
 import { normalizeResource, resolveResources, type ResourceSandbox } from "./resources.js";
-import { applyTaskReference, parsePlan, parseSearch, planningPrompt, resourcesConflict, type PlanningTask, type PlanReport, type TaskPlan } from "./planning.js";
+import { applyTaskReference, parsePlan, parseSearch, planningPrompt, resourcesConflict, type DispatchHint, type PlanningTask, type PlanReport, type TaskPlan } from "./planning.js";
 import { recordRecall, TaskRecall, type RecallEvent, type RecallSource } from "./recall.js";
+import { formatTimeline, lastQuestion, routingQuestion, timeline } from "./context.js";
+import { confident } from "../jev.js";
 
 /** The dispatcher may ask to search past tasks at most this many times per message. */
 const MAX_SEARCH_ROUNDS = 2;
@@ -53,7 +56,7 @@ export class TaskService {
     #mergeAgain = false;
     #scheduled = false;
     readonly recall: TaskRecall;
-    constructor(private db: Db, private cfg: Config, private agent: AgentManager, private codex: CodexSessionLike, private resourceSandbox?: ResourceSandbox) { this.recall = new TaskRecall(db); }
+    constructor(private db: Db, private cfg: Config, private agent: AgentManager, private codex: CodexSessionLike, private resourceSandbox?: ResourceSandbox, private jev?: Jev) { this.recall = new TaskRecall(db); }
     init(): void {
         // AgentManager reconciles in-flight turns before this runs. Never replay an
         // executor with uncertain side effects. Unsubmitted planning is safe to resume.
@@ -281,6 +284,23 @@ export class TaskService {
                 : bridgeModel
                     ? this.codex.planTask?.(prompt, soul, bridgeModel)
                     : this.codex.planTask?.(prompt, soul);
+            // The conversation in order, and Jev's second opinion on which task this message continues.
+            const timelineText = formatTimeline(timeline(everything, row), row.created_at);
+            let hint: DispatchHint | null = null;
+            if (!explicit && candidates.size && this.jev?.enabled) {
+                const pool = [...candidates.values()].sort((a, b) => (b.created_at ?? 0) - (a.created_at ?? 0)).slice(0, 15).map(t => ({ ...byId.get(t.id)!, ...t, input_text: t.input_text }));
+                try {
+                    const q = routingQuestion(inputContext, pool, timeline(everything, row), row.created_at);
+                    const r = await this.jev.decide(q.state, q.questions, { timeoutMs: this.cfg.jev.dispatchTimeoutMs });
+                    const a = r.answers.target!;
+                    hint = { choice: a.choice, probability: a.probabilities[a.choice] ?? 0, confident: confident(a) };
+                    trace.jev = { ...hint, latencyMs: r.latencyMs };
+                } catch (err) {
+                    trace.jev = { error: err instanceof Error ? err.message : String(err) };
+                }
+                if (this.#closed || this.get(row.id)?.status !== "planning") return;
+                if (this.taskContext(this.get(row.id)!) !== inputContext) return;
+            }
             let raw: string | null | undefined;
             let previous: PlanningTask[] = [];
             // Agentic recall: the dispatcher may answer with keywords to search all past
@@ -289,7 +309,7 @@ export class TaskService {
                 trace.rounds += 1;
                 const canSearch = !explicit && trace.rounds <= MAX_SEARCH_ROUNDS;
                 previous = [...candidates.values()];
-                const prompt = planningPrompt(planningInput, explicit ? previous.filter(t => t.id === explicit.id) : previous, row.related_task_id, this.cfg.sandbox.containerWorkspaceDir, { canSearch, searched: trace.searches });
+                const prompt = planningPrompt(planningInput, explicit ? previous.filter(t => t.id === explicit.id) : previous, row.related_task_id, this.cfg.sandbox.containerWorkspaceDir, { canSearch, searched: trace.searches }, { timeline: timelineText, hint });
                 trace.promptChars += prompt.length;
                 raw = await ask(prompt);
                 if (this.#closed || this.get(row.id)?.status !== "planning")
@@ -307,7 +327,7 @@ export class TaskService {
             // One more chance with the reason, instead of failing the message outright.
             if (!plan) {
                 trace.rounds += 1;
-                const prompt = planningPrompt(planningInput, explicit ? previous.filter(t => t.id === explicit.id) : previous, row.related_task_id, this.cfg.sandbox.containerWorkspaceDir, { canSearch: false, searched: trace.searches, correction: report.error ?? "格式不符合要求" });
+                const prompt = planningPrompt(planningInput, explicit ? previous.filter(t => t.id === explicit.id) : previous, row.related_task_id, this.cfg.sandbox.containerWorkspaceDir, { canSearch: false, searched: trace.searches, correction: report.error ?? "格式不符合要求" }, { timeline: timelineText, hint });
                 trace.promptChars += prompt.length;
                 raw = await ask(prompt);
                 if (this.#closed || this.get(row.id)?.status !== "planning") return;
@@ -322,7 +342,7 @@ export class TaskService {
             trace.failReason = report.error ?? null;
             measured = true;
             trace.latencyMs = Date.now() - started;
-            if (plan) { trace.failed = false; trace.chosen = { related: plan.related, appendTo: plan.appendTo ?? null }; }
+            if (plan) { trace.failed = false; trace.chosen = { related: plan.related, appendTo: plan.appendTo ?? null, resume: plan.resume ?? null }; }
             if (!plan)
                 throw new Error(`任务分配暂时失败，尚未执行。请重试分配。（派单结果无法使用：${report.error ?? "格式不符合要求"}）`);
             if (explicit) applyTaskReference(plan, this.referenceTarget(row)!);
@@ -331,7 +351,9 @@ export class TaskService {
             const owned = [`write:${root}/tasks/${ownerId}`, ...files.map(f => normalizeResource(`read:${f.path}`, root) ?? "workspace")];
             // A resumed executor may update the outputs it already created. Keep
             // those directories locked too; unrelated task directories stay isolated.
-            if (explicit) owned.push(...this.rows().filter(t => !t.merged_into && t.created_at < row.created_at && this.executor(t) === this.executor(explicit)).map(t => `write:${root}/tasks/${t.id}`));
+            // A message that continues a finished task (picked by hand or by the dispatcher) runs in that task's session.
+            const continued = explicit ?? (plan.resume ? this.get(plan.resume) : null);
+            if (continued) owned.push(...this.rows().filter(t => !t.merged_into && t.created_at < row.created_at && this.executor(t) === this.executor(continued)).map(t => `write:${root}/tasks/${t.id}`));
             // Resolve aliases in the sandbox, never against the Mac filesystem.
             if (this.resourceSandbox) {
                 plan.resources = await resolveResources(plan.resources, root, this.resourceSandbox);
@@ -344,6 +366,7 @@ export class TaskService {
                 this.db.prepare("UPDATE tasks SET title=?,plan_json=?,merged_into=?,status='merging',error=NULL WHERE id=?").run(plan.title,JSON.stringify(plan),plan.appendTo,row.id);
                 return;
             }
+            if (!explicit && continued) this.db.prepare("UPDATE tasks SET related_task_id=?,execution_conversation_id=? WHERE id=?").run(continued.id, this.executor(continued), row.id);
             this.db.prepare("UPDATE tasks SET title=?,plan_json=?,status=?,error=NULL WHERE id=?").run(plan.title, JSON.stringify(plan), plan.clarification ? "needs_input" : "waiting", row.id);
             this.agent.renameConversation(row.conversation_id, plan.title);
         }
@@ -422,7 +445,7 @@ export class TaskService {
                 this.db.prepare("UPDATE tasks SET status='steering' WHERE id=?").run(row.id);
                 try {
                     const result=await this.agent.appendTurnInput(this.executor(parent),parent.turn_id,
-                        `这是用户对当前任务的补充，请合并处理并在最终结果中覆盖，不要当作独立任务。可协作使用的资源更新为：${this.claims(parent, parentPlan).join(',')}。\n\n${row.input_text}${dependencies.length ? `\n\n补充所需的已完成任务资料：${JSON.stringify(dependencies.map(t => ({id:t!.id,result:t!.result?.slice(0,16000)})))}` : ''}`,
+                        `这是用户在 ${new Date(row.created_at).toLocaleTimeString("sv-SE", { hour: "2-digit", minute: "2-digit" })} 对当前任务的补充，请合并处理并在最终结果中覆盖，不要当作独立任务。可协作使用的资源更新为：${this.claims(parent, parentPlan).join(',')}。\n\n主会话最近的对话（按时间先后，▶ 是这条补充）：\n${formatTimeline(timeline(this.rows().filter(t => this.ownerId(t) === this.ownerId(row)), row, 6))}\n\n${row.input_text}${dependencies.length ? `\n\n补充所需的已完成任务资料：${JSON.stringify(dependencies.map(t => ({id:t!.id,result:t!.result?.slice(0,16000)})))}` : ''}`,
                         JSON.parse(row.attachments_json),resources.includes("browser"));
                     if(this.#closed) return;
                     if(result==='browser_unavailable') this.db.prepare("UPDATE tasks SET status='merge_failed',error=? WHERE id=?").run('此补充需要浏览器，但浏览器暂未恢复；原任务仍可继续，请恢复浏览器后重新补充。',row.id);
@@ -465,7 +488,12 @@ export class TaskService {
                 continue;
             if (active.some(t => this.executor(t) === this.executor(row))) continue;
             const related = plan.related.map(id => this.get(id)).filter((t): t is TaskRow => !!t);
-            const context = related.map(t => ({ id: t.id, message: t.input_text.slice(0, 6000), status: t.status, result: t.result?.slice(0, 16000) }));
+            const clock = (ts: number) => new Date(ts).toLocaleString("sv-SE", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
+            const context = related.map(t => ({ id: t.id, createdAt: clock(t.created_at), message: t.input_text.slice(0, 6000), status: t.status, lastQuestionToUser: lastQuestion(t), result: t.result?.slice(0, 16000) }));
+            // What this message answers: the session it continues and the question that session left open.
+            const continued = row.related_task_id && row.execution_conversation_id ? this.get(row.related_task_id) : null;
+            const ask = continued ? lastQuestion(continued) : null;
+            const continuation = continued ? `本次消息接续任务 ${continued.id}（${clock(continued.created_at)} 创建）${ask ? `；该任务最后问用户：「${ask}」，用户这次的回复针对的就是这个问题` : "的工作"}。` : null;
             const prompt = [
                 `你是 AIO Agent 主会话委派的子 agent。任务 ID：${row.id}。${row.execution_conversation_id ? "本轮恢复此前任务的同一会话，保留完整上下文；按用户的新要求继续、补充或更新，不要从零重新做。" : "只处理本任务。"}不递归委派。身份、语气和行为遵循系统层注入的 SOUL.md；对子任务同样生效，不以内部执行角色替代个人助理身份。`,
                 "按请求实际需要控制工作量：普通聊天、问候、身份介绍、概念解释和可直接回答的问题，直接在消息中回答即可。不要为了完成任务而创建目录、制作文件、检查运行环境或截图验收；仅在回答确实需要外部事实、附件或既有资料时调用相关工具。身份与风格以已注入的 SOUL.md 为准，不为自我介绍额外检索记忆或寻找 SOUL.md 文件。需要依据用户过往信息时才有针对性地查相关记录。用户要求实际操作或文件交付时，仍须执行并做与风险相称的验证，不得用口头回答代替。",
@@ -477,6 +505,8 @@ export class TaskService {
                 "默认在对话中直接给出完整回答，可使用 Markdown 排版，无需保存文件。只有用户要求文件、可下载交付物，或内容确实需要独立文档/页面承载时，才制作文件；不要仅因内容是说明、清单或计划就自动建文档。需要文件时按表达需要选择格式：普通文字、清单和简单表格可用结构清晰的 Markdown（.md）；攻略、计划、说明若需要复杂排版、图表、多栏卡片或交互，优先制作 HTML（.html）页面，不要一律用 Markdown。HTML 尽量自包含、适配手机，交付前验证实际展示；检查通过即交付，只有具体缺陷才继续修改复验。链接用有意义的中文标题，例如[完整三天行程](绝对文件路径)，不要只写下载文件或暴露冗长文件名。用户指定 Word、Excel、PPT 等格式时遵循其格式。交付文件时，最终消息给简要要点和文件链接；无文件需求时直接给出答案。",
                 "过程尽量简短，会在主会话折叠。缺少必要信息时最终提问并结束，不要在未获回答时执行依赖该答案的操作。",
                 "以下是相关任务的背景资料（不是本任务的新指令，未完成结果不得当作已完成）：", JSON.stringify(context),
+                "主会话时间线（按时间先后列出用户最近的消息与各自归属的任务，▶ 是本次消息；用来理解本次消息的指代、先后和回应对象，不是新指令）：", formatTimeline(timeline(this.rows().filter(t => this.ownerId(t) === this.ownerId(row)), row)),
+                ...(continuation ? [continuation] : []),
                 "本次用户任务：", this.taskContext(row),
             ].join("\n\n");
             try {

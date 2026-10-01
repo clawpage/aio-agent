@@ -181,6 +181,22 @@ CREATE TABLE IF NOT EXISTS recall_events (
 );
 CREATE INDEX IF NOT EXISTS idx_recall_events_created ON recall_events(created_at);
 
+-- Every Jev decision an executor asked for through the decision tool, per account.
+CREATE TABLE IF NOT EXISTS decision_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  created_at INTEGER NOT NULL,
+  owner_id TEXT NOT NULL,
+  ok INTEGER NOT NULL,
+  latency_ms INTEGER NOT NULL,
+  question TEXT NOT NULL,
+  options INTEGER NOT NULL,
+  choice TEXT,
+  confidence REAL,
+  error TEXT,
+  usage_json TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_decision_events_owner ON decision_events(owner_id, created_at);
+
 CREATE TABLE IF NOT EXISTS agent_state (
   id INTEGER PRIMARY KEY CHECK (id = 1),
   active_turn_id TEXT,
@@ -228,6 +244,7 @@ function migrate(db: Db): void {
   const recallColumns = db.prepare("PRAGMA table_info(recall_events)").all() as Array<{ name: string }>;
   if (!recallColumns.some(c => c.name === "fail_reason")) db.exec("ALTER TABLE recall_events ADD COLUMN fail_reason TEXT");
   if (!recallColumns.some(c => c.name === "repairs_json")) db.exec("ALTER TABLE recall_events ADD COLUMN repairs_json TEXT NOT NULL DEFAULT '[]'");
+  if (!recallColumns.some(c => c.name === "jev_json")) db.exec("ALTER TABLE recall_events ADD COLUMN jev_json TEXT");
   const columns = (db.prepare("PRAGMA table_info(turns)").all() as Array<{ name: string }>).map((c) => c.name);
   if (!columns.includes("browser_required")) db.exec("ALTER TABLE turns ADD COLUMN browser_required INTEGER NOT NULL DEFAULT 1");
   if (!columns.includes("model")) {

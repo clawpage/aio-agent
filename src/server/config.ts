@@ -227,6 +227,22 @@ export function loadConfig(): {
      */
     gatewayUrl?: string;
   };
+  /**
+   * Jev (TypeSafe System One) structured decisions: the dispatcher's second opinion
+   * and the executors' decision tool. The key stays in the control plane; sandboxes
+   * reach Jev only through the gateway. Without a key both features are absent.
+   */
+  jev: {
+    endpoint: string;
+    model: string;
+    /** Private host file holding TYPESAFE_API_KEY (the environment wins). */
+    secretsFile: string;
+    timeoutMs: number;
+    /** How long a dispatch waits for Jev before deciding without it. */
+    dispatchTimeoutMs: number;
+  };
+  /** The decision tool reachable from this runtime's sandbox; set by the decision gateway. */
+  decision?: { url: string };
   externalBaseUrl: string;
 } {
   const port = envInt("PA_PORT", 4891);
@@ -416,6 +432,13 @@ export function loadConfig(): {
       secretsFile: envStr("PA_CLAUDE_CODE_SECRETS_FILE", path.join(os.homedir(), ".config", "aio-agent", "claude-code.env")),
       auxModel: envStr("PA_CLAUDE_CODE_AUX_MODEL", "claude-sonnet-5-5"),
       apiBaseUrl: envStr("PA_ANTHROPIC_API_BASE_URL", "https://api.anthropic.com"),
+    },
+    jev: {
+      endpoint: envStr("PA_JEV_ENDPOINT", "https://api.typesafe.ai/v1/systemone"),
+      model: envStr("PA_JEV_MODEL", "jev-latest"),
+      secretsFile: envStr("PA_JEV_SECRETS_FILE", path.join(os.homedir(), ".config", "aio-agent", "jev.env")),
+      timeoutMs: Math.max(5_000, envInt("PA_JEV_TIMEOUT_SECONDS", 30) * 1000),
+      dispatchTimeoutMs: Math.max(2_000, envInt("PA_JEV_DISPATCH_TIMEOUT_SECONDS", 15) * 1000),
     },
     externalBaseUrl: envStr("PA_EXTERNAL_BASE_URL", ""),
   };

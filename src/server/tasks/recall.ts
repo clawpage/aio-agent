@@ -139,7 +139,7 @@ export interface RecallEvent {
   candidates: Array<{ id: string; source: RecallSource; rank?: number; score?: number }>;
   searches: string[];
   rounds: number;
-  chosen: { related: string[]; appendTo: string | null };
+  chosen: { related: string[]; appendTo: string | null; resume?: string | null };
   /** A task the person pointed at by hand, and where search alone would have ranked it. */
   gold: { id: string; rank: number | null; inWindow: boolean } | null;
   latencyMs: number;
@@ -148,12 +148,14 @@ export interface RecallEvent {
   /** Why the dispatcher's answer could not be used, and what was repaired in it. */
   failReason?: string | null;
   repairs?: string[];
+  /** Jev's second opinion and how long it took, or why it was unavailable. */
+  jev?: { choice: string; probability: number; confident: boolean; latencyMs: number } | { error: string } | null;
 }
 
 export function recordRecall(db: Db, e: RecallEvent): void {
   db.prepare(
-    "INSERT INTO recall_events (task_id, owner_id, created_at, candidates_json, searches_json, rounds, chosen_json, gold_task_id, gold_rank, gold_in_window, latency_ms, prompt_chars, failed, fail_reason, repairs_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-  ).run(e.taskId, e.ownerId, Date.now(), JSON.stringify(e.candidates), JSON.stringify(e.searches), e.rounds, JSON.stringify(e.chosen), e.gold?.id ?? null, e.gold?.rank ?? null, e.gold ? (e.gold.inWindow ? 1 : 0) : null, e.latencyMs, e.promptChars, e.failed ? 1 : 0, e.failReason ?? null, JSON.stringify(e.repairs ?? []));
+    "INSERT INTO recall_events (task_id, owner_id, created_at, candidates_json, searches_json, rounds, chosen_json, gold_task_id, gold_rank, gold_in_window, latency_ms, prompt_chars, failed, fail_reason, repairs_json, jev_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+  ).run(e.taskId, e.ownerId, Date.now(), JSON.stringify(e.candidates), JSON.stringify(e.searches), e.rounds, JSON.stringify(e.chosen), e.gold?.id ?? null, e.gold?.rank ?? null, e.gold ? (e.gold.inWindow ? 1 : 0) : null, e.latencyMs, e.promptChars, e.failed ? 1 : 0, e.failReason ?? null, JSON.stringify(e.repairs ?? []), e.jev ? JSON.stringify(e.jev) : null);
 }
 
 export interface RecallStats {

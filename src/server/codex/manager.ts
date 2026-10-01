@@ -10,6 +10,7 @@ import type { HostTokenSource } from "./hostTokens.js";
 import { BridgeModel, CHATGPT_PROVIDER_ID } from "../bridgeModel.js";
 import { CLAUDE_CODE_PROVIDER_ID, type ClaudeCodeHarness } from "../claudeCode.js";
 import { withTabPolicy, type BrowserTask, type TabServerLike } from "../browser/tabs.js";
+import { DECISION_POLICY } from "../decision.js";
 import { AutoTitler, DEFAULT_CONVERSATION_TITLE, TITLE_UPDATED_EVENT, manualTitleMetaKey } from "./autoTitle.js";
 import {
   effectiveAgentSettings,
@@ -1023,7 +1024,8 @@ export class AgentManager {
       Boolean(conversation.codex_thread_id) && (desiredProvider === CLAUDE_CODE_PROVIDER_ID) !== (currentProvider === CLAUDE_CODE_PROVIDER_ID);
     const inputText = switchesHarness ? this.#withPriorContext(conversation.id, turn.id, turn.input_text) : turn.input_text;
     const soul = readSoul(this.#cfg).content;
-    const developerInstructions = this.#tabs ? withTabPolicy(soul) : soul;
+    const withTabs = this.#tabs ? withTabPolicy(soul) : soul;
+    const developerInstructions = this.#cfg.decision ? `${withTabs.trimEnd()}\n\n${DECISION_POLICY}`.trim() : withTabs;
     // Every execution thread gets tab tools under its conversation's identity,
     // which stays the same across its turns, resumes and forks.
     const browserTask = this.#tabs ? { key: conversation.id, title: conversation.title } : undefined;

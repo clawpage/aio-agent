@@ -7,6 +7,7 @@ import { CLAUDE_CODE_PROVIDER_ID, CLAUDE_THREAD_PREFIX, type ClaudeCodeHarness }
 import type { TurnAttachment } from "./manager.js";
 import { ClaudeStreamTranslator } from "./claudeTranslator.js";
 import { tabMcpServers, type BrowserTask } from "../browser/tabs.js";
+import { decisionMcpServers } from "../decision.js";
 import { buildTitlePrompt } from "./autoTitle.js";
 import { JsonRpcResponseError } from "./jsonrpc.js";
 
@@ -19,8 +20,8 @@ function notDelivered(): Error {
  * Browser tools for a turn: the task's own tabs when it has a task identity,
  * otherwise the legacy single-page endpoint the sandbox Codex is limited to.
  */
-function mcpConfig(browserTask: BrowserTask | undefined): string {
-  return JSON.stringify({ mcpServers: browserTask ? tabMcpServers(browserTask) : { aio_browser: { type: "http", url: "http://127.0.0.1:8080/mcp" } } });
+function mcpConfig(browserTask: BrowserTask | undefined, cfg: Config): string {
+  return JSON.stringify({ mcpServers: browserTask ? { ...tabMcpServers(browserTask), ...decisionMcpServers(cfg) } : { aio_browser: { type: "http", url: "http://127.0.0.1:8080/mcp" } } });
 }
 
 /** How long a mid-turn addition may wait for the CLI to echo it as consumed. */
@@ -144,7 +145,7 @@ export class ClaudeCodeSession {
       "--replay-user-messages",
       // Full access inside the container, like Codex's approval_policy=never.
       "--permission-mode", "bypassPermissions",
-      "--strict-mcp-config", "--mcp-config", mcpConfig(this.#browserTasks.get(threadId)),
+      "--strict-mcp-config", "--mcp-config", mcpConfig(this.#browserTasks.get(threadId), this.#cfg),
       "--setting-sources", "user,project",
       resume ? "--resume" : "--session-id", sessionId,
       ...(params.model ? ["--model", params.model] : []),

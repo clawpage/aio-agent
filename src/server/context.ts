@@ -1,4 +1,5 @@
 import type { ShareStore } from "./share.js";
+import type { Jev } from "./jev.js";
 import type { TabServerLike } from "./browser/tabs.js";
 import type { Config } from "./config.js";
 import type { Db } from "./db.js";
@@ -20,6 +21,8 @@ export interface AppContext {
   runtimeForUser?: (userId: string) => Promise<AppContext>;
   /** Public share pages (root context only). */
   share?: ShareStore;
+  /** Jev structured decisions (host-side key; absent without one). */
+  jev?: Jev;
   tasks: TaskService;
   cfg: Config;
   db: Db;

@@ -1,6 +1,8 @@
 import http from "node:http";
 import {MemberModelGateway} from "./memberModelGateway.js";
 import {ShareStore} from "./share.js";
+import {Jev} from "./jev.js";
+import {DecisionGateway} from "./decision.js";
 import {UserRuntimes} from "./tenants.js";
 import { loadConfig, ensureDataDirs, type Config } from "./config.js";
 import { Logger } from "./logger.js";
@@ -115,8 +117,10 @@ export async function bootstrap(opts: BootstrapOptions = {}): Promise<Bootstrapp
   const agent = new AgentManager({ cfg, db, log, codex, hostTokens, browser, bridge, claudeCode, tabs });
   const aio = opts.overrides?.aio ?? new AioClient(cfg, log);
 
-  const tasks = new TaskService(db, cfg, agent, codex, container);
+  const jev = new Jev(cfg, log);
+  const tasks = new TaskService(db, cfg, agent, codex, container, jev);
   const ctx: AppContext = {
+    jev,
     tasks,
     cfg,
     db,
@@ -335,7 +339,9 @@ async function main(): Promise<void> {
     userIdOf:name=>account("SELECT id AS v FROM owners WHERE username=?",name)});
   // The owner sandbox receives its token when refreshSandboxContent seeds it below.
   ctx.share.provision(ctx.cfg);
-  const modelGateway=new MemberModelGateway(ctx.cfg,ctx.log,ctx.share);
+  const decision=new DecisionGateway({cfg:ctx.cfg,db:ctx.db,jev:ctx.jev!,log:ctx.log,port:ctx.cfg.memberModelPort??4902});
+  decision.provision(ctx.cfg);
+  const modelGateway=new MemberModelGateway(ctx.cfg,ctx.log,ctx.share,decision);
   await modelGateway.start();
   const users=new UserRuntimes(ctx,bootstrap,modelGateway);
   ctx.runtimeForUser=id=>users.resolve(id);

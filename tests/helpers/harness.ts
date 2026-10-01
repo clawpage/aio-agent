@@ -537,6 +537,9 @@ export function testConfig(dataDir: string, sandboxPort: number, extra: Record<s
     PA_LOG_LEVEL: "error",
     // Deterministic catalog: a host credential must never switch the harness on in tests.
     PA_CLAUDE_CODE_ENABLED: "off",
+    // Jev is paid and external: tests never reach it unless they configure a fake one.
+    PA_JEV_SECRETS_FILE: path.join(dataDir, "no-jev.env"),
+    PA_JEV_ENDPOINT: "http://127.0.0.1:9/jev-disabled-in-tests",
     ...extra,
   };
   const saved: Record<string, string | undefined> = {};

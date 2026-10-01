@@ -1,4 +1,5 @@
 import { tabThreadConfig, type BrowserTask } from "../browser/tabs.js";
+import { decisionThreadServers } from "../decision.js";
 import type { Config } from "../config.js";
 import type { Logger } from "../logger.js";
 import type { SandboxContainer } from "../docker/sandbox.js";
@@ -437,6 +438,13 @@ export class SandboxCodexSession {
     }));
   }
 
+  /** An execution thread (one with a task identity) gets its tab tools and the decision tool. */
+  #executionConfig(task: BrowserTask | undefined): { config?: Record<string, unknown> } {
+    if (!task) return {};
+    const tabs = tabThreadConfig(task) as { mcp_servers: Record<string, unknown> };
+    return { config: { ...tabs, mcp_servers: { ...tabs.mcp_servers, ...decisionThreadServers(this.#cfg) } } };
+  }
+
   async startThread(
     opts: { cwd?: string; model?: string; modelProvider?: string; developerInstructions?: string; browserTask?: BrowserTask } = {},
   ): Promise<{ threadId: string; model: string; cwd: string; modelProvider: string | null }> {
@@ -444,7 +452,7 @@ export class SandboxCodexSession {
     const res = (await this.#peer!.request(
       "thread/start",
       {
-        ...(opts.browserTask ? { config: tabThreadConfig(opts.browserTask) } : {}),
+        ...this.#executionConfig(opts.browserTask),
         cwd: opts.cwd ?? this.#cfg.sandbox.containerWorkspaceDir,
         approvalPolicy: "never",
         sandbox: "danger-full-access",
@@ -473,7 +481,7 @@ export class SandboxCodexSession {
       "thread/fork",
       {
         threadId,
-        ...(opts.browserTask ? { config: tabThreadConfig(opts.browserTask) } : {}),
+        ...this.#executionConfig(opts.browserTask),
         approvalPolicy: "never",
         sandbox: "danger-full-access",
         ...(opts.cwd ? { cwd: opts.cwd } : {}),
