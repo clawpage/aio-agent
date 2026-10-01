@@ -154,14 +154,21 @@ export class SandboxIdle {
     return null;
   }
 
-  /** Work inside the container the control plane did not start: running shell commands, CPU. */
+  /** Shell commands the agent or the terminal left running inside the container. */
   async probe(): Promise<string | null> {
     const result = (await this.#ctx.aio.get("/v1/shell/sessions")) as { data?: { sessions?: Record<string, { status?: unknown }> } };
     const sessions = Object.values(result?.data?.sessions ?? {});
     if (sessions.some((s) => typeof s?.status === "string" && RUNNING_SHELL.has(s.status))) return "shell";
-    const cpu = await this.#ctx.container.cpuPercent();
-    if (cpu === null || cpu >= this.#cpuBusyPercent) return "cpu";
     return null;
+  }
+
+  /**
+   * Other work nobody told us about (a build, a notebook kernel). Measured after
+   * the browser is released, whose own rendering would otherwise always count.
+   */
+  async #cpuBusy(): Promise<string | null> {
+    const cpu = await this.#ctx.container.cpuPercent().catch(() => null);
+    return cpu === null || cpu >= this.#cpuBusyPercent ? "cpu" : null;
   }
 
   /** One decision pass; runs every `intervalMs`, never overlapping. */
@@ -218,6 +225,14 @@ export class SandboxIdle {
           this.#lastActive = this.#now();
           return;
         }
+      }
+      const cpu = await this.#cpuBusy();
+      if (cpu) {
+        // The browser comes back on demand; the buffer starts over.
+        this.#note(cpu);
+        this.#state = "running";
+        this.#lastActive = this.#now();
+        return;
       }
       if (await interrupted()) {
         this.#state = "running";
