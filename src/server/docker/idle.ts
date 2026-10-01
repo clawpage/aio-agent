@@ -219,7 +219,11 @@ export class SandboxIdle {
       if (ctx.cfg.browser.enabled) {
         // The snapshot is what brings the logins back on the next start.
         const slept = await ctx.browser.sleepNow();
-        if (slept.verdict !== "asleep" && ctx.browser.status().state !== "asleep") {
+        const seen = ctx.browser.status();
+        // A snapshot still waiting to be restored is the real state: the running
+        // browser was never used since (any use restores first), so stopping it
+        // loses nothing and the snapshot comes back on the next use.
+        if (slept.verdict !== "asleep" && seen.state !== "asleep" && !seen.restorePending) {
           // The message is one of the lifecycle's fixed, secret-free sentences.
           ctx.log.info("sandbox idle stop skipped: browser not released", { verdict: slept.verdict, message: slept.message });
           this.#state = "running";

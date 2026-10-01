@@ -18,6 +18,7 @@ function setup() {
     shell: [] as string[],
     cpu: 1 as number | null,
     sleepVerdict: "asleep",
+    restorePending: false,
     calls: [] as string[],
     onSleep: () => {},
   };
@@ -36,7 +37,7 @@ function setup() {
         world.onSleep();
         return { verdict: world.sleepVerdict };
       },
-      status: () => ({ state: world.sleepVerdict === "asleep" ? "asleep" : "awake" }),
+      status: () => ({ state: world.sleepVerdict === "asleep" ? "asleep" : "awake", restorePending: world.restorePending }),
     },
     aio: { get: async () => ({ data: { sessions: Object.fromEntries(world.shell.map((status, i) => [`s${i}`, { status }])) } }) },
     container: {
@@ -163,6 +164,16 @@ describe("whole-container idle stop", () => {
     await idle.tick();
     expect(world.calls).toEqual(["sleep"]);
     expect(idle.state).toBe("running");
+  });
+
+  it("stops anyway when the browser holds back only for a snapshot still waiting to be restored", async () => {
+    const { clock, world, idle } = setup();
+    world.sleepVerdict = "blocked";
+    world.restorePending = true;
+    clock.now += IDLE;
+    await idle.tick();
+    expect(world.calls).toEqual(["sleep", "stop"]);
+    expect(idle.state).toBe("parked");
   });
 
   it("cancels the stop when someone arrives during the snapshot", async () => {
