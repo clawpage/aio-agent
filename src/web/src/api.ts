@@ -96,6 +96,7 @@ export type PointerResult = { title: string; url: string; editable?: boolean; cu
 export const api = {
   soul: () => request<{content:string;revision:string;defaultContent:string;maxBytes:number}>('/api/settings/soul'),
   recallStats: (days: number) => request<{ stats: import('./types').RecallStats }>(`/api/settings/recall?days=${days}`),
+  dispatchLog: (taskId: string) => request<import('./types').DispatchLog>(`/api/settings/dispatch-log/${encodeURIComponent(taskId)}`),
   saveSoul: (body:{content:string;revision:string}) => request<{ok:true;content:string;revision:string}>('/api/settings/soul',{method:'PUT',body}),
   main: (before?: number, signal?: AbortSignal) => request<{ mode: "tasks"; tasks: import("./types").Task[]; nextBefore: number | null }>(`/api/main${before ? `?before=${before}` : ""}`, { signal }),
   submitTask: (body: { text: string; clientMessageId: string; attachments: Attachment[]; relatedTaskId: string | null }) => request<{ task: import("./types").Task; duplicate: boolean }>("/api/tasks", { method: "POST", body }),

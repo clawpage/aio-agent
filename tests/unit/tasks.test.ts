@@ -654,3 +654,40 @@ describe("main-session order, Jev's second opinion and resuming a finished sessi
         expect(both.report.repairs.join()).toContain("同时给出");
     });
 });
+describe("owner dispatch log", () => {
+    it("records each dispatch step by step and reads it back with titles", async () => {
+        const jev = { enabled: true, decide: async (_s: unknown, questions: Record<string, { criteria: Record<string, string> }>) => {
+            const ids = Object.keys(questions.target!.criteria);
+            return { answers: { target: { choice: ids[0]!, confidence: 0.9, probabilities: Object.fromEntries(ids.map(id => [id, id === ids[0] ? 0.9 : 0.1 / (ids.length - 1)])) } }, usage: null, latencyMs: 4 };
+        } };
+        tasks.close();
+        tasks = new TaskService(db, testConfig("/tmp/aio-main-tasks", 1, { PA_AUTO_TITLE: "0" }), agent, codex, undefined, jev as never);
+        tasks.init();
+        const trip = submit("规划东京三天行程"); await tick();
+        let round = 0;
+        codex.plan = async p => {
+            const data = JSON.parse(p.split("\n").at(-1)!);
+            round += 1;
+            return round === 1 ? JSON.stringify({ search: ["东京"] }) : JSON.stringify({ title: data.message, related: [trip.id], dependencies: [], resources: [] });
+        };
+        const hotel = submit("酒店要靠近新宿"); await tick(); await tick();
+        const { dispatchLog } = await import("../../src/server/tasks/recall.js");
+        const [entry] = dispatchLog(db, "owner_1", hotel.id);
+        expect(entry!.steps.map(s => s.kind)).toEqual(["context", "jev", "ask", "ask", "plan"]);
+        const [context, decided, search, answer, plan] = entry!.steps as any[];
+        expect(context.timeline).toMatch(/▶ .*「酒店要靠近新宿」/);
+        expect(decided.result).toMatchObject({ choice: trip.id, confident: true, latencyMs: 4 });
+        expect(search).toMatchObject({ round: 1, searched: ["东京"] });
+        expect(search.prompt).toContain("你是 AIO Agent 的主会话派单器");
+        expect(answer.answer).toContain("酒店要靠近新宿");
+        expect(plan.plan).toMatchObject({ related: [trip.id] });
+        expect(entry!.candidates.find(c => c.id === trip.id)?.title).toBe("规划东京三天行程");
+        // A dispatch that cannot produce a plan logs why.
+        codex.plan = async () => "这不是 JSON";
+        const broken = submit("坏掉的派单"); await tick(); await tick();
+        const [failed] = dispatchLog(db, "owner_1", broken.id);
+        expect(failed!.failed).toBe(true);
+        expect(failed!.steps.map(s => s.kind)).toEqual(["context", "jev", "ask", "ask", "failed"]);
+        expect((failed!.steps[3] as any).correction).toBe("回答不是 JSON");
+    });
+});

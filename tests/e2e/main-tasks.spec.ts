@@ -586,3 +586,37 @@ test("tapping the preview watches the agent's page first; only taking over pause
     expect(controls).toEqual(["take", "release"]);
     await expect(operate).toBeHidden();
 });
+test("owner debug mode shows each message's dispatch log step by step", async ({ page }, info) => {
+    const trip = { ...task(1, "completed"), title: "规划行程", text: "规划东京三天", result: "好的，要再加美食推荐吗？", completedAt: Date.now() };
+    const reply = { ...task(2, "completed"), title: "美食推荐", text: "要", relatedTaskId: "task-1", result: "推荐如下", completedAt: Date.now() };
+    await page.route("**/api/settings/dispatch-log/task-2", r => r.fulfill({ json: { task: { id: "task-2", title: "美食推荐", text: "要", status: "completed" }, entries: [{
+        at: Date.now(), latencyMs: 2400, rounds: 1, promptChars: 5200, failed: false, failReason: null, repairs: [],
+        candidates: [{ id: "task-1", source: "recent", title: "规划行程" }],
+        searches: [], chosen: { related: ["task-1"], appendTo: null, resume: "task-1" }, jev: { choice: "task-1", probability: 0.99, confident: true, latencyMs: 140 },
+        steps: [
+            { kind: "context", at: Date.now(), timeline: "  [14:00] 用户：「规划东京三天」 → 任务 task-1「规划行程」（completed）；助理最后问：「要再加美食推荐吗？」\n▶ [14:05] 用户：「要」  ← 本次消息", candidates: 1 },
+            { kind: "jev", at: Date.now(), criteria: { "task-1": "第1近（14:00）「规划行程」", NEW: "独立新请求" }, result: { choice: "task-1", probabilities: { "task-1": 0.99, NEW: 0.01 }, confident: true, latencyMs: 140 } },
+            { kind: "ask", at: Date.now(), round: 1, prompt: "你是 AIO Agent 的主会话派单器……", answer: "{\"title\":\"美食推荐\",\"resume\":\"task-1\"}" },
+            { kind: "plan", at: Date.now(), plan: { title: "美食推荐", resume: "task-1", related: ["task-1"] }, repairs: [] },
+        ],
+    }] } }));
+    await setup(page, [trip, reply]);
+    // Off by default: nothing extra on the messages.
+    await expect(page.getByRole("button", { name: /派单日志/ })).toHaveCount(0);
+    await page.evaluate(() => localStorage.setItem("aio.debug", "1"));
+    await page.reload();
+    await expect(page.getByRole("button", { name: "派单日志：美食推荐" })).toBeVisible();
+    await press(info, page.getByRole("button", { name: "派单日志：美食推荐" }));
+    const dialog = page.getByRole("dialog", { name: "派单日志" });
+    await expect(dialog).toContainText("续接「规划行程」的原执行会话");
+    await expect(dialog).toContainText("助理最后问：「要再加美食推荐吗？」");
+    await expect(dialog).toContainText("选择 「规划行程」（99%，有把握，作为强提示，140 ms）");
+    await expect(dialog).toContainText("派单器第 1 轮");
+    await expect(dialog).toContainText("\"resume\": \"task-1\"");
+    await dialog.getByText(/完整提示词/).click();
+    await expect(dialog).toContainText("你是 AIO Agent 的主会话派单器");
+    expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1);
+    await page.screenshot({ path: info.outputPath("dispatch-log.png") });
+    await page.keyboard.press("Escape");
+    await expect(dialog).toHaveCount(0);
+});

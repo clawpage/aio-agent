@@ -8,7 +8,7 @@ import { randomId } from "../auth/passwords.js";
 import { AgentManager, TurnConflictError, type AgentEvent, type CodexSessionLike, type TurnAttachment } from "../codex/manager.js";
 import { normalizeResource, resolveResources, type ResourceSandbox } from "./resources.js";
 import { applyTaskReference, parsePlan, parseSearch, planningPrompt, resourcesConflict, type DispatchHint, type PlanningTask, type PlanReport, type TaskPlan } from "./planning.js";
-import { recordRecall, TaskRecall, type RecallEvent, type RecallSource } from "./recall.js";
+import { recordRecall, STEP_ANSWER_CHARS, STEP_PROMPT_CHARS, TaskRecall, type RecallEvent, type RecallSource } from "./recall.js";
 import { formatTimeline, lastQuestion, routingQuestion, timeline } from "./context.js";
 import { confident } from "../jev.js";
 
@@ -226,7 +226,8 @@ export class TaskService {
         this.#planning = true;
         const started = Date.now();
         let measured = false;
-        const trace: RecallEvent = { taskId: row.id, ownerId: this.ownerId(row), candidates: [], searches: [], rounds: 0, chosen: { related: [], appendTo: null }, gold: null, latencyMs: 0, promptChars: 0, failed: true };
+        const trace: RecallEvent = { taskId: row.id, ownerId: this.ownerId(row), candidates: [], searches: [], rounds: 0, chosen: { related: [], appendTo: null }, gold: null, latencyMs: 0, promptChars: 0, failed: true, steps: [] };
+        const steps = trace.steps!;
         try {
             const everything = this.rows().filter(t => this.ownerId(t) === this.ownerId(row));
             const all = everything.filter(t => !t.merged_into && t.created_at < row.created_at).map(t => ({...t,input_text:this.taskContext(t),clarification:t.status === "needs_input" && t.plan_json ? (JSON.parse(t.plan_json) as TaskPlan).clarification ?? null : null}));
@@ -286,17 +287,21 @@ export class TaskService {
                     : this.codex.planTask?.(prompt, soul);
             // The conversation in order, and Jev's second opinion on which task this message continues.
             const timelineText = formatTimeline(timeline(everything, row), row.created_at);
+            steps.push({ kind: "context", at: Date.now(), timeline: timelineText, candidates: candidates.size });
             let hint: DispatchHint | null = null;
             if (!explicit && candidates.size && this.jev?.enabled) {
                 const pool = [...candidates.values()].sort((a, b) => (b.created_at ?? 0) - (a.created_at ?? 0)).slice(0, 15).map(t => ({ ...byId.get(t.id)!, ...t, input_text: t.input_text }));
+                const q = routingQuestion(inputContext, pool, timeline(everything, row), row.created_at);
+                const criteria = q.questions.target!.criteria;
                 try {
-                    const q = routingQuestion(inputContext, pool, timeline(everything, row), row.created_at);
                     const r = await this.jev.decide(q.state, q.questions, { timeoutMs: this.cfg.jev.dispatchTimeoutMs });
                     const a = r.answers.target!;
                     hint = { choice: a.choice, probability: a.probabilities[a.choice] ?? 0, confident: confident(a) };
                     trace.jev = { ...hint, latencyMs: r.latencyMs };
+                    steps.push({ kind: "jev", at: Date.now(), criteria, result: { choice: a.choice, probabilities: a.probabilities, confident: hint.confident, latencyMs: r.latencyMs } });
                 } catch (err) {
                     trace.jev = { error: err instanceof Error ? err.message : String(err) };
+                    steps.push({ kind: "jev", at: Date.now(), criteria, error: trace.jev.error });
                 }
                 if (this.#closed || this.get(row.id)?.status !== "planning") return;
                 if (this.taskContext(this.get(row.id)!) !== inputContext) return;
@@ -318,6 +323,7 @@ export class TaskService {
                 // with the latest input rather than dispatching an outdated decision.
                 if (this.taskContext(this.get(row.id)!) !== inputContext) return;
                 const queries = canSearch ? parseSearch(raw ?? null) : null;
+                steps.push({ kind: "ask", at: Date.now(), round: trace.rounds, prompt: prompt.slice(0, STEP_PROMPT_CHARS), answer: raw?.slice(0, STEP_ANSWER_CHARS) ?? null, ...(queries ? { searched: queries } : {}) });
                 if (!queries) break;
                 trace.searches.push(...queries);
                 for (const query of queries) recalled(query, "search", "search", Math.ceil(cap / queries.length));
@@ -333,6 +339,7 @@ export class TaskService {
                 if (this.#closed || this.get(row.id)?.status !== "planning") return;
                 if (this.taskContext(this.get(row.id)!) !== inputContext) return;
                 const first = report.error;
+                steps.push({ kind: "ask", at: Date.now(), round: trace.rounds, prompt: prompt.slice(0, STEP_PROMPT_CHARS), answer: raw?.slice(0, STEP_ANSWER_CHARS) ?? null, correction: first ?? "格式不符合要求" });
                 report.error = undefined;
                 plan = parsePlan(raw ?? null, previous, row.related_task_id, this.cfg.sandbox.containerWorkspaceDir, report);
                 report.repairs.unshift(`第一次回答无法使用：${first ?? "格式不符合要求"}，已重问一次`);
@@ -342,7 +349,7 @@ export class TaskService {
             trace.failReason = report.error ?? null;
             measured = true;
             trace.latencyMs = Date.now() - started;
-            if (plan) { trace.failed = false; trace.chosen = { related: plan.related, appendTo: plan.appendTo ?? null, resume: plan.resume ?? null }; }
+            if (plan) { trace.failed = false; trace.chosen = { related: plan.related, appendTo: plan.appendTo ?? null, resume: plan.resume ?? null }; steps.push({ kind: "plan", at: Date.now(), plan, repairs: report.repairs }); }
             if (!plan)
                 throw new Error(`任务分配暂时失败，尚未执行。请重试分配。（派单结果无法使用：${report.error ?? "格式不符合要求"}）`);
             if (explicit) applyTaskReference(plan, this.referenceTarget(row)!);
@@ -374,6 +381,7 @@ export class TaskService {
             if (!this.#closed && this.get(row.id)?.status === "planning") {
                 this.db.prepare("UPDATE tasks SET status='planning_failed',error=? WHERE id=?").run(err instanceof Error ? err.message : "任务分配失败", row.id);
                 if (!measured) { measured = true; trace.latencyMs = Date.now() - started; trace.failReason = err instanceof Error ? err.message : "任务分配失败"; }
+                steps.push({ kind: "failed", at: Date.now(), reason: err instanceof Error ? err.message : "任务分配失败" });
             }
         }
         finally {

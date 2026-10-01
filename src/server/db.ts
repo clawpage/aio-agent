@@ -245,6 +245,7 @@ function migrate(db: Db): void {
   if (!recallColumns.some(c => c.name === "fail_reason")) db.exec("ALTER TABLE recall_events ADD COLUMN fail_reason TEXT");
   if (!recallColumns.some(c => c.name === "repairs_json")) db.exec("ALTER TABLE recall_events ADD COLUMN repairs_json TEXT NOT NULL DEFAULT '[]'");
   if (!recallColumns.some(c => c.name === "jev_json")) db.exec("ALTER TABLE recall_events ADD COLUMN jev_json TEXT");
+  if (!recallColumns.some(c => c.name === "steps_json")) db.exec("ALTER TABLE recall_events ADD COLUMN steps_json TEXT");
   const columns = (db.prepare("PRAGMA table_info(turns)").all() as Array<{ name: string }>).map((c) => c.name);
   if (!columns.includes("browser_required")) db.exec("ALTER TABLE turns ADD COLUMN browser_required INTEGER NOT NULL DEFAULT 1");
   if (!columns.includes("model")) {

@@ -7,6 +7,7 @@ import { BrandMark } from "./Brand";
 import { Chat } from "./Chat";
 import { Login } from "./Login";
 import { Settings } from "./Settings";
+import { useDebugMode } from "../debugMode";
 import { Workspace } from "./Workspace";
 import { TaskChat } from "./TaskChat";
 import { TaskList } from "./TaskList";
@@ -40,6 +41,7 @@ export function MainApp() {
         return () => document.removeEventListener("keydown", key);
     }, [mobile, menuOpen, closeMenu]);
     const [role, setRole] = useState<"owner" | "member">("member");
+    const [debug] = useDebugMode();
     const [username, setUsername] = useState<string | null>(null);
     /** The address names another account than the one signed in. */
     const [foreign, setForeign] = useState<string | null>(null);
@@ -182,7 +184,7 @@ export function MainApp() {
     <main className="main" inert={mobile && menuOpen}>
       {notice && <div className="banner" role="alert">{notice}<button onClick={() => setNotice(null)}>关闭</button></div>}
       {status && !status.agent.sessionReady && <div className="banner error">智能体暂未就绪：{status.agent.lastError ?? "正在连接"}。消息仍会保留。</div>}
-      <div className="view-slot" hidden={view !== "main"}><TaskChat onFeed={setTaskFeed} onDetails={t => void details(t)} onOpenLink={u => void openLink(u)} onExpired={expired} onRevealBrowser={revealBrowser}/></div>
+      <div className="view-slot" hidden={view !== "main"}><TaskChat debug={role === "owner" && debug} onFeed={setTaskFeed} onDetails={t => void details(t)} onOpenLink={u => void openLink(u)} onExpired={expired} onRevealBrowser={revealBrowser}/></div>
       <div className="view-slot" hidden={view !== 'tasks'}><TaskList feed={taskFeed} onDetails={t=>void details(t,'tasks')} onExpired={expired}/></div>
       {role === "owner" && view === "settings" && <Settings onBack={() => setView("main")}/>}
       {view === "detail" && detail && <div className="task-detail"><div className="task-detail-bar"><button className="ghost" onClick={() => setView(detailReturn)}>← 返回{detailReturn==='tasks'?'任务列表':'主会话'}</button><span className="muted tiny">{taskStatusLabels[(taskFeed.tasks.find(t=>t.id===detailTask?.id)??detailTask)?.status??'']??'过程详情'}</span></div><Chat key={detail.id} readOnly conversation={detail} status={status} onConversationChanged={() => { }} onStatusChanged={() => void refreshStatus()} onOpenWorkspace={openWorkspace} onOpenBrowserLink={u => void openLink(u)}/></div>}

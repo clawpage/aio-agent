@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { api, openEventStream } from "../api";
 import type { Attachment, Task } from "../types";
 import { AttachmentCards, MessageFileCards } from "./Chat";
+import { DispatchLog } from "./DispatchLog";
 import { Markdown } from "./Markdown";
 import { FilePreview } from "./FilePreview";
 import { TaskBrowser } from "./TaskBrowser";
@@ -26,7 +27,9 @@ function turnOf(t: Task): "you" | "ai" | "err" {
     return "ai";
 }
 const labels: Record<string, string> = { planning: "正在分配", needs_input: "等待你补充", planning_failed: "分配失败", waiting: "等待依赖或资源", queued: "排队中", running: "在办", stopping: "正在停止…", completed: "已完成", failed: "执行失败", interrupted: "已停止", unknown: "结果待核对", blocked: "需要补充" };
-export function TaskChat({ onDetails, onOpenLink, onExpired, onFeed, onRevealBrowser }: {
+export function TaskChat({ onDetails, onOpenLink, onExpired, onFeed, onRevealBrowser, debug = false }: {
+    /** Owner debug mode: each message offers its dispatch log. */
+    debug?: boolean;
     onDetails: (task: Task) => void;
     /** Open the workspace on the browser, where a taken-over task tab is in front. */
     onRevealBrowser: () => void;
@@ -35,6 +38,7 @@ export function TaskChat({ onDetails, onOpenLink, onExpired, onFeed, onRevealBro
     onFeed?: (feed:TaskFeed)=>void;
 }) {
     const [tasks, setTasks] = useState<Task[]>([]);
+    const [dispatchLogFor, setDispatchLogFor] = useState<string | null>(null);
     const [nextBefore, setNextBefore] = useState<number | null>(null);
     const [reference, setReference] = useState<{ id: string; title: string } | null>(null);
     const [draft, setDraft] = useState("");
@@ -210,6 +214,7 @@ export function TaskChat({ onDetails, onOpenLink, onExpired, onFeed, onRevealBro
       </article> : <div className="task-entry" key={t.id} data-task-id={t.id}>
         <article className="msg user"><div className="bubble">{t.relatedTaskId && <small className="muted">引用：{t.relatedTaskTitle ?? tasks.find(task => task.id === t.relatedTaskId)?.title ?? "此前任务"}</small>}<p>{t.text}</p>{t.attachments.length > 0 && <AttachmentCards attachments={t.attachments} onOpen={setPreview}/>}<div className="message-meta"><MessageTime at={t.createdAt} now={now}/></div></div></article>
         {t.mergedInto && <div className="task-supplement"><button className="ghost tiny" onClick={() => onDetails(t)}>{t.status === "merged" ? "已补充到" : t.status === "merging" || t.status === "steering" ? "正在补充到" : t.status === "interrupted" ? "已取消补充" : "补充需要核对"}：{t.mergedTitle}</button>{t.waitReason && <p className="tiny">{t.waitReason.message}</p>}{t.error && <p className="tiny error">{t.error}</p>}</div>}
+        {debug && <div className="task-actions debug-actions"><button className="ghost tiny" onClick={() => setDispatchLogFor(t.id)} aria-label={`派单日志：${t.title}`}>派单日志</button></div>}
         {progressAt.get(t.id) && renderProgress(progressAt.get(t.id)!)}
       </div>)}
     </div>
@@ -224,5 +229,6 @@ export function TaskChat({ onDetails, onOpenLink, onExpired, onFeed, onRevealBro
       <div className="composer-row"><label className={`file-button ${busy || uploading ? "disabled" : ""}`}>{uploading ? "上传中…" : "附件"}<input type="file" multiple className="file-input" aria-label="添加附件" data-testid="attachment-input" disabled={busy || uploading} onChange={e => { void pick(e.target.files); e.target.value = ""; }}/></label><span className="spacer"/><button className="primary" disabled={busy || uploading || (!draft.trim() && !attachments.length)} onClick={() => void send()}>{busy ? "提交中…" : "发送"}</button></div>
     </div>
     {preview && <FilePreview path={preview} onClose={() => setPreview(null)} onOpenLink={onOpenLink}/>}
+    {debug && dispatchLogFor && <DispatchLog taskId={dispatchLogFor} onClose={() => setDispatchLogFor(null)}/>}
   </section>;
 }

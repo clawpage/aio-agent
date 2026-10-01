@@ -150,12 +150,25 @@ export interface RecallEvent {
   repairs?: string[];
   /** Jev's second opinion and how long it took, or why it was unavailable. */
   jev?: { choice: string; probability: number; confident: boolean; latencyMs: number } | { error: string } | null;
+  /** The dispatch step by step (owner debug log): what each party was asked and answered. */
+  steps?: DispatchStep[];
 }
+
+export type DispatchStep =
+  | { kind: "context"; at: number; timeline: string; candidates: number }
+  | { kind: "jev"; at: number; criteria: Record<string, string>; result?: { choice: string; probabilities: Record<string, number>; confident: boolean; latencyMs: number }; error?: string }
+  | { kind: "ask"; at: number; round: number; prompt: string; answer: string | null; searched?: string[]; correction?: string }
+  | { kind: "plan"; at: number; plan: unknown; repairs: string[] }
+  | { kind: "failed"; at: number; reason: string };
+
+/** Debug log entries are capped so one dispatch never bloats the database. */
+export const STEP_PROMPT_CHARS = 40_000;
+export const STEP_ANSWER_CHARS = 8_000;
 
 export function recordRecall(db: Db, e: RecallEvent): void {
   db.prepare(
-    "INSERT INTO recall_events (task_id, owner_id, created_at, candidates_json, searches_json, rounds, chosen_json, gold_task_id, gold_rank, gold_in_window, latency_ms, prompt_chars, failed, fail_reason, repairs_json, jev_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-  ).run(e.taskId, e.ownerId, Date.now(), JSON.stringify(e.candidates), JSON.stringify(e.searches), e.rounds, JSON.stringify(e.chosen), e.gold?.id ?? null, e.gold?.rank ?? null, e.gold ? (e.gold.inWindow ? 1 : 0) : null, e.latencyMs, e.promptChars, e.failed ? 1 : 0, e.failReason ?? null, JSON.stringify(e.repairs ?? []), e.jev ? JSON.stringify(e.jev) : null);
+    "INSERT INTO recall_events (task_id, owner_id, created_at, candidates_json, searches_json, rounds, chosen_json, gold_task_id, gold_rank, gold_in_window, latency_ms, prompt_chars, failed, fail_reason, repairs_json, jev_json, steps_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+  ).run(e.taskId, e.ownerId, Date.now(), JSON.stringify(e.candidates), JSON.stringify(e.searches), e.rounds, JSON.stringify(e.chosen), e.gold?.id ?? null, e.gold?.rank ?? null, e.gold ? (e.gold.inWindow ? 1 : 0) : null, e.latencyMs, e.promptChars, e.failed ? 1 : 0, e.failReason ?? null, JSON.stringify(e.repairs ?? []), e.jev ? JSON.stringify(e.jev) : null, e.steps?.length ? JSON.stringify(e.steps) : null);
 }
 
 export interface RecallStats {
@@ -233,4 +246,47 @@ export function recallStats(db: Db, ownerId: string, days: number, cap: number):
 
 function round(v: number): number {
   return Math.round(v * 100) / 100;
+}
+
+export interface DispatchLogEntry {
+  at: number;
+  latencyMs: number;
+  rounds: number;
+  promptChars: number;
+  failed: boolean;
+  failReason: string | null;
+  repairs: string[];
+  candidates: Array<{ id: string; source: RecallSource; rank?: number; score?: number; title: string | null }>;
+  searches: string[];
+  chosen: RecallEvent["chosen"];
+  jev: RecallEvent["jev"];
+  steps: DispatchStep[];
+}
+
+/** Every dispatch of one task, newest first, with the titles of the tasks it mentions. */
+export function dispatchLog(db: Db, ownerId: string, taskId: string): DispatchLogEntry[] {
+  const rows = db.prepare("SELECT * FROM recall_events WHERE task_id=? AND owner_id=? ORDER BY id DESC LIMIT 20").all(taskId, ownerId) as Array<Record<string, unknown>>;
+  const parse = <T>(value: unknown, fallback: T): T => {
+    try { return value ? (JSON.parse(String(value)) as T) : fallback; } catch { return fallback; }
+  };
+  const entries = rows.map((r) => ({
+    at: Number(r.created_at),
+    latencyMs: Number(r.latency_ms),
+    rounds: Number(r.rounds),
+    promptChars: Number(r.prompt_chars),
+    failed: Number(r.failed) === 1,
+    failReason: (r.fail_reason as string | null) ?? null,
+    repairs: parse<string[]>(r.repairs_json, []),
+    candidates: parse<RecallEvent["candidates"]>(r.candidates_json, []).map((c) => ({ ...c, title: null as string | null })),
+    searches: parse<string[]>(r.searches_json, []),
+    chosen: parse<RecallEvent["chosen"]>(r.chosen_json, { related: [], appendTo: null }),
+    jev: parse<RecallEvent["jev"]>(r.jev_json, null),
+    steps: parse<DispatchStep[]>(r.steps_json, []),
+  }));
+  const ids = [...new Set(entries.flatMap((e) => e.candidates.map((c) => c.id)))];
+  if (ids.length) {
+    const titles = new Map((db.prepare(`SELECT id,title FROM tasks WHERE id IN (${ids.map(() => "?").join(",")})`).all(...ids) as Array<{ id: string; title: string }>).map((t) => [t.id, t.title]));
+    for (const e of entries) for (const c of e.candidates) c.title = titles.get(c.id) ?? null;
+  }
+  return entries;
 }

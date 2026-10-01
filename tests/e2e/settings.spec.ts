@@ -458,3 +458,16 @@ test("config page shows how well the dispatcher recalls past tasks, per range", 
   expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
   await card.screenshot({ path: info.outputPath("recall-card.png") });
 });
+
+test("the debug switch is remembered by this browser", async ({ page }, info) => {
+  await setup(page);
+  await openSettings(page, info.project.name.startsWith("mobile"));
+  const toggle = page.getByRole("checkbox", { name: /已关闭|已开启/ });
+  await expect(toggle).not.toBeChecked();
+  await toggle.check();
+  await expect(page.getByText("已开启", { exact: true })).toBeVisible();
+  expect(await page.evaluate(() => localStorage.getItem("aio.debug"))).toBe("1");
+  await page.reload();
+  await openSettings(page, info.project.name.startsWith("mobile"));
+  await expect(page.getByRole("checkbox", { name: "已开启" })).toBeChecked();
+});

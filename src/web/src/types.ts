@@ -238,3 +238,31 @@ export interface RecallStats {
   avgLatencyMs: number;
   p90PromptChars: number;
 }
+
+/** Owner debug: how one message was dispatched, step by step. */
+export type DispatchStep =
+  | { kind: "context"; at: number; timeline: string; candidates: number }
+  | { kind: "jev"; at: number; criteria: Record<string, string>; result?: { choice: string; probabilities: Record<string, number>; confident: boolean; latencyMs: number }; error?: string }
+  | { kind: "ask"; at: number; round: number; prompt: string; answer: string | null; searched?: string[]; correction?: string }
+  | { kind: "plan"; at: number; plan: Record<string, unknown>; repairs: string[] }
+  | { kind: "failed"; at: number; reason: string };
+
+export interface DispatchLogEntry {
+  at: number;
+  latencyMs: number;
+  rounds: number;
+  promptChars: number;
+  failed: boolean;
+  failReason: string | null;
+  repairs: string[];
+  candidates: Array<{ id: string; source: string; rank?: number; score?: number; title: string | null }>;
+  searches: string[];
+  chosen: { related: string[]; appendTo: string | null; resume?: string | null };
+  jev: { choice: string; probability: number; confident: boolean; latencyMs: number } | { error: string } | null;
+  steps: DispatchStep[];
+}
+
+export interface DispatchLog {
+  task: { id: string; title: string; text: string; status: string };
+  entries: DispatchLogEntry[];
+}

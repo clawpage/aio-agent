@@ -21,7 +21,7 @@ import { parseHttpUrl } from "../aio/client.js";
 import { COOKIE_NAMES, clearSessionCookies, sessionCookies } from "../auth/sessions.js";
 import { safeRedirectPath } from "../auth/tickets.js";
 import { audit } from "../db.js";
-import { recallStats } from "../tasks/recall.js";
+import { dispatchLog, recallStats } from "../tasks/recall.js";
 import { PERSON_KEY } from "../browser/tabs.js";
 import { DocumentError, type DocumentService } from "../documents/service.js";
 import type { BrowserStatusView } from "../browser/service.js";
@@ -790,6 +790,15 @@ export function createApiRouter(context: AppContext): Router {
     const days = Math.min(90, Math.max(1, Number(req.query.days) || 7));
     res.setHeader("Cache-Control", "no-store");
     res.json({ stats: recallStats(db, ctxOf(req).session!.ownerId, days, context.tasks.recall.cap()) });
+  });
+
+  // Owner debug: how one message was dispatched, step by step (owner only, like all of /settings).
+  router.get("/settings/dispatch-log/:taskId", requireKind("primary"), requireSession, (req, res) => {
+    const ownerId = ctxOf(req).session!.ownerId;
+    const task = db.prepare("SELECT id,title,input_text,status FROM tasks WHERE id=?").get(String(req.params.taskId)) as { id: string; title: string; input_text: string; status: string } | undefined;
+    res.setHeader("Cache-Control", "no-store");
+    if (!task || !context.tasks.belongsTo(task.id, ownerId)) { res.status(404).json({ error: "not_found", message: "任务不存在" }); return; }
+    res.json({ task: { id: task.id, title: task.title, text: task.input_text, status: task.status }, entries: dispatchLog(db, ownerId, task.id) });
   });
 
   router.get(

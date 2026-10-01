@@ -1,5 +1,6 @@
 import {SoulSettings} from './SoulSettings';
 import { RecallSettings } from './RecallSettings';
+import { DebugSettings } from './DebugSettings';
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "../api";
 import type { AgentSettings, SettingsModel } from "../types";
@@ -291,6 +292,7 @@ export function Settings({ onBack, onSaved }: Props) {
         </section>
 
         <RecallSettings />
+        <DebugSettings />
       </div>
     </section>
   );
