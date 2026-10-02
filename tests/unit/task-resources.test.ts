@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { normalizeResource, resourcesConflict, resolveResources } from "../../src/server/tasks/resources.js";
-import { parsePlan } from "../../src/server/tasks/planning.js";
+import { normalizeResource, resourcesConflict, resolveResources } from "../../src/control/tasks/resources.js";
+import { parsePlan } from "../../src/control/tasks/planning.js";
 const root="/home/gem/workspace", w=(p:string)=>`write:${root}/${p}`, r=(p:string)=>`read:${root}/${p}`;
 describe("scoped resources",()=>{
  it("allows independent writes and shared reads, serializes overlap in either direction",()=>{

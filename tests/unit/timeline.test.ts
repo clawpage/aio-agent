@@ -17,8 +17,8 @@ import {
   type TimelineState,
   type ToolBlock,
   type WorkingBlock,
-} from "../../src/web/src/timeline";
-import type { AgentEvent } from "../../src/web/src/types";
+} from "../../src/ui/src/timeline";
+import type { AgentEvent } from "../../src/ui/src/types";
 
 /** Every tool block, whether it sits inside a working group or (legacy) top level. */
 function tools(state: TimelineState): ToolBlock[] {

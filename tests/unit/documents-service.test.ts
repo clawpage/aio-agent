@@ -2,10 +2,10 @@ import { describe, expect, it, vi } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { DocumentError, DocumentService } from "../../src/server/documents/service.js";
-import { loadConfig, type Config } from "../../src/server/config.js";
-import { Logger } from "../../src/server/logger.js";
-import type { SandboxContainer, DockerRunResult } from "../../src/server/docker/sandbox.js";
+import { DocumentError, DocumentService } from "../../src/control/documents/service.js";
+import { loadConfig, type Config } from "../../src/control/config.js";
+import { Logger } from "../../src/control/logger.js";
+import type { SandboxContainer, DockerRunResult } from "../../src/control/docker/sandbox.js";
 
 const ROOT = "/home/gem/workspace";
 

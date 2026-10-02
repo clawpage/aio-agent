@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { classifyHost, clientIp, originAllowed, hostnameOf } from "../../src/server/http/security.js";
-import { filterUpstreamCookie, frameAncestorsValue, rewriteSetCookie, sanitizeResponseHeaders } from "../../src/server/http/proxy.js";
-import { safeRedirectPath } from "../../src/server/auth/tickets.js";
-import { loadConfig } from "../../src/server/config.js";
+import { classifyHost, clientIp, originAllowed, hostnameOf } from "../../src/control/http/security.js";
+import { filterUpstreamCookie, frameAncestorsValue, rewriteSetCookie, sanitizeResponseHeaders } from "../../src/control/http/proxy.js";
+import { safeRedirectPath } from "../../src/control/auth/tickets.js";
+import { loadConfig } from "../../src/control/config.js";
 import type { IncomingMessage } from "node:http";
 
 function cfg() {

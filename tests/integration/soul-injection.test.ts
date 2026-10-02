@@ -1,6 +1,6 @@
 import {it,expect,vi} from 'vitest';
 import {startHarness} from '../helpers/harness.js';
-import {readSoul,writeSoul} from '../../src/server/soul.js';
+import {readSoul,writeSoul} from '../../src/control/soul.js';
 
 it('reads current SOUL for planning, new execution and resume without rewriting user text or the active turn',async()=>{
  const h=await startHarness();

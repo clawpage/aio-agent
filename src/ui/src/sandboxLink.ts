@@ -25,7 +25,7 @@ export const IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "webp", "gif", "a
 
 /**
  * How the console should present a workspace file. Mirrors the server-side
- * classification (`src/server/documents/paths.ts`): the server is authoritative
+ * classification (`src/control/documents/paths.ts`): the server is authoritative
  * and re-validates, this only decides which control to render.
  *
  * `text` uses the size-capped text endpoint. Markdown gets a sanitized reading

@@ -4,12 +4,12 @@ import fs from "node:fs";
 import os from "node:os";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { SHARE_CLI_PY } from "../../src/server/docker/seed.js";
+import { SHARE_CLI_PY } from "../../src/control/docker/seed.js";
 import { startHarness } from "../helpers/harness.js";
-import { createMember } from "../../src/server/auth/owner.js";
-import { MemberModelGateway } from "../../src/server/memberModelGateway.js";
-import { ShareStore } from "../../src/server/share.js";
-import { memberConfig } from "../../src/server/tenants.js";
+import { createMember } from "../../src/control/auth/owner.js";
+import { MemberModelGateway } from "../../src/control/memberModelGateway.js";
+import { ShareStore } from "../../src/control/share.js";
+import { memberConfig } from "../../src/control/tenants.js";
 
 const b64 = (text: string | Buffer) => Buffer.from(text).toString("base64");
 

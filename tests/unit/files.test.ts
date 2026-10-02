@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fileOperationError, interpretShellResult, requireAbsoluteSandboxPath, shellQuote } from "../../src/server/http/api";
+import { fileOperationError, interpretShellResult, requireAbsoluteSandboxPath, shellQuote } from "../../src/control/http/api";
 
 describe("sandbox shell result interpretation", () => {
   it("accepts a completed command with exit code 0", () => {

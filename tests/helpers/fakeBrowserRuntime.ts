@@ -4,7 +4,7 @@ import type {
   SnapshotOutcome,
   StopOutcome,
   WakeOutcome,
-} from "../../src/server/browser/lifecycle.js";
+} from "../../src/control/browser/lifecycle.js";
 
 /**
  * Scripted container-side browser runtime for tests.

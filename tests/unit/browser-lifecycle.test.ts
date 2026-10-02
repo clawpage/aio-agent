@@ -4,9 +4,9 @@ import {
   type BrowserRuntimeLike,
   type LifecycleClock,
   type RuntimeStatus,
-} from "../../src/server/browser/lifecycle.js";
-import type { SnapshotOutcome, StopOutcome, WakeOutcome } from "../../src/server/browser/lifecycle.js";
-import type { SnapshotWarning } from "../../src/server/browser/types.js";
+} from "../../src/control/browser/lifecycle.js";
+import type { SnapshotOutcome, StopOutcome, WakeOutcome } from "../../src/control/browser/lifecycle.js";
+import type { SnapshotWarning } from "../../src/control/browser/types.js";
 
 /**
  * Controllable clock so idle countdowns, viewer TTLs and expiry timers are

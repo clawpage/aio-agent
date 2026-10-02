@@ -3,8 +3,8 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { SandboxContainer } from "../../src/server/docker/sandbox.js";
-import { Logger } from "../../src/server/logger.js";
+import { SandboxContainer } from "../../src/control/docker/sandbox.js";
+import { Logger } from "../../src/control/logger.js";
 import { testConfig } from "../helpers/harness.js";
 
 it("hands the fresh browser volume to the sandbox user before the first boot", async () => {

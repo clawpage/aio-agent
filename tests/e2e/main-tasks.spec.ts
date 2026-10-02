@@ -1,6 +1,6 @@
 import { test, expect, type Locator, type Page, type TestInfo } from "@playwright/test";
 import { makeConversation, mockConsole } from "./mock-api";
-import type { Task } from "../../src/web/src/types";
+import type { Task } from "../../src/ui/src/types";
 import fs from "node:fs";
 function task(n: number, status = "running"): Task {
     return { id: `task-${n}`, revision: 1, title: `任务 ${n}`, text: `请求 ${n}`, conversationId: `child-${n}`, status, result: null, error: null, attachments: [], relatedTaskId: null, dependencies: [], approvals: 0, createdAt: 1000 + n, completedAt: null };

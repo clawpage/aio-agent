@@ -101,7 +101,7 @@ export class BrowserRuntime implements BrowserRuntimeLike {
     const body = fs.readFileSync(path.join(import.meta.dirname, "scripts", STORAGE_HELPER_NAME), "utf8");
     const bundled = path.join(import.meta.dirname, "vendor", STORAGE_VENDOR_TGZ);
     const vendor = fs.readFileSync(fs.existsSync(bundled) ? bundled :
-      path.resolve(import.meta.dirname, "../../../dist/server/browser/vendor", STORAGE_VENDOR_TGZ));
+      path.resolve(import.meta.dirname, "../../../dist/control/browser/vendor", STORAGE_VENDOR_TGZ));
     const digest = createHash("sha256").update(body).update(vendor).digest("hex");
     return { body, vendor, digest };
   }

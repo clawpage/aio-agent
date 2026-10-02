@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { loadConfig } from "../../src/server/config.js";
+import { loadConfig } from "../../src/control/config.js";
 
 /**
  * `PA_MAX_CONCURRENT_TURNS` is clamped to the reviewed 1..3 window so an

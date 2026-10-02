@@ -1,7 +1,7 @@
 import { describe, expect, it, beforeEach, afterEach } from "vitest";
-import { openDb, getMeta, type Db } from "../../src/server/db.js";
-import { writeAgentSettings } from "../../src/server/settings.js";
-import { Logger } from "../../src/server/logger.js";
+import { openDb, getMeta, type Db } from "../../src/control/db.js";
+import { writeAgentSettings } from "../../src/control/settings.js";
+import { Logger } from "../../src/control/logger.js";
 import {
   AgentManager,
   InvalidConversationTitleError,
@@ -9,9 +9,9 @@ import {
   buildApprovalResponse,
   parseAttachments,
   type AgentEvent,
-} from "../../src/server/codex/manager.js";
+} from "../../src/control/codex/manager.js";
 import { FakeCodex, testConfig } from "../helpers/harness.js";
-import type { HostTokenSource } from "../../src/server/codex/hostTokens.js";
+import type { HostTokenSource } from "../../src/control/codex/hostTokens.js";
 
 function seedConversation(db: Db, id: string, model: string | null): void {
   const now = Date.now();

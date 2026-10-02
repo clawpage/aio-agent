@@ -1,19 +1,19 @@
 import { describe, expect, it, beforeEach, afterEach } from "vitest";
-import { openDb, type Db } from "../../src/server/db.js";
-import { Logger } from "../../src/server/logger.js";
-import { AgentManager, type BrowserGateLike } from "../../src/server/codex/manager.js";
+import { openDb, type Db } from "../../src/control/db.js";
+import { Logger } from "../../src/control/logger.js";
+import { AgentManager, type BrowserGateLike } from "../../src/control/codex/manager.js";
 import { FakeCodex, testConfig } from "../helpers/harness.js";
-import type { HostTokenSource } from "../../src/server/codex/hostTokens.js";
-import { shouldProtectBrowser } from "../../src/server/http/proxy.js";
-import { isBrowserBoundPath, isStaticAssetPath } from "../../src/server/browser/service.js";
-import { BrowserViewerController } from "../../src/web/src/browserViewer.js";
+import type { HostTokenSource } from "../../src/control/codex/hostTokens.js";
+import { shouldProtectBrowser } from "../../src/control/http/proxy.js";
+import { isBrowserBoundPath, isStaticAssetPath } from "../../src/control/browser/service.js";
+import { BrowserViewerController } from "../../src/ui/src/browserViewer.js";
 import {
   describeOccupancy,
   idleCountdownText,
   needsRestore,
   refusalReason,
   statusTone,
-} from "../../src/web/src/browserStatusView.js";
+} from "../../src/ui/src/browserStatusView.js";
 
 const tick = (ms = 30) => new Promise((r) => setTimeout(r, ms));
 

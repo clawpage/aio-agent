@@ -1,9 +1,9 @@
 import { defineConfig } from "vite";
 export default defineConfig({
-  root: "src/web",
+  root: "src/ui",
   esbuild: { jsx: "automatic" },
   build: {
-    outDir: "../../dist/web",
+    outDir: "../../dist/ui",
     emptyOutDir: true,
     sourcemap: false,
   },

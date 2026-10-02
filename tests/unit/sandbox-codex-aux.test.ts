@@ -1,13 +1,13 @@
-import { tabThreadConfig } from '../../src/server/browser/tabs.js';
-import type { BridgeModel } from "../../src/server/bridgeModel.js";
+import { tabThreadConfig } from '../../src/control/browser/tabs.js';
+import type { BridgeModel } from "../../src/control/bridgeModel.js";
 import { describe, expect, it } from "vitest";
 import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
 import type { ChildProcess } from "node:child_process";
-import { SandboxCodexSession } from "../../src/server/codex/sandboxCodex.js";
-import { Logger } from "../../src/server/logger.js";
-import type { SandboxContainer } from "../../src/server/docker/sandbox.js";
-import type { HostTokenSource } from "../../src/server/codex/hostTokens.js";
+import { SandboxCodexSession } from "../../src/control/codex/sandboxCodex.js";
+import { Logger } from "../../src/control/logger.js";
+import type { SandboxContainer } from "../../src/control/docker/sandbox.js";
+import type { HostTokenSource } from "../../src/control/codex/hostTokens.js";
 import { testConfig } from "../helpers/harness.js";
 
 interface Inbound {

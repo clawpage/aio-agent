@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { messageTime, taskDuration, formatDuration } from "../../src/web/src/messageTime";
+import { messageTime, taskDuration, formatDuration } from "../../src/ui/src/messageTime";
 const now = new Date(2026, 8, 27, 14, 30).getTime();
 describe("friendly message metadata", () => {
   it("uses local calendar days and distinguishes relative, same-day, yesterday and older messages", () => {

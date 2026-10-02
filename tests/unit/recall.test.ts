@@ -2,8 +2,8 @@ import { beforeEach, expect, it } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { openDb, type Db } from "../../src/server/db.js";
-import { DEFAULT_CAP, recallStats, recordRecall, TaskRecall, tokenize, type RecallDoc } from "../../src/server/tasks/recall.js";
+import { openDb, type Db } from "../../src/control/db.js";
+import { DEFAULT_CAP, recallStats, recordRecall, TaskRecall, tokenize, type RecallDoc } from "../../src/control/tasks/recall.js";
 
 let db: Db, recall: TaskRecall;
 const TOPICS = ["周报整理", "发票报销", "租房合同", "健身计划", "学英语", "宝宝辅食", "家庭预算", "装修报价", "体检预约", "车险续保", "读书笔记", "照片整理"];

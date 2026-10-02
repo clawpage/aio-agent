@@ -1,8 +1,8 @@
 import {it,expect} from 'vitest';
 import {startHarness,login,rawUpgrade} from '../helpers/harness.js';
-import {createMember} from '../../src/server/auth/owner.js';
-import {userNamespace,workspacePrefix,workspaceConfig} from '../../src/server/auth/workspaceHost.js';
-import {memberConfig,UserRuntimes} from '../../src/server/tenants.js';
+import {createMember} from '../../src/control/auth/owner.js';
+import {userNamespace,workspacePrefix,workspaceConfig} from '../../src/control/auth/workspaceHost.js';
+import {memberConfig,UserRuntimes} from '../../src/control/tenants.js';
 
 it('binds workspace tickets, HTTP, WebSocket and API collaborators to the authenticated member by path, never owner',async()=>{
  const root=await startHarness(), member=await startHarness();

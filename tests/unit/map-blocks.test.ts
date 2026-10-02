@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { gcj02ToWgs84, navLinks, parsePlace, platformOf, splitMapBlocks, tilesFor, wgs84ToGcj02, worldPixel } from "../../src/web/src/mapBlocks.js";
-import { MapService } from "../../src/server/maps.js";
+import { gcj02ToWgs84, navLinks, parsePlace, platformOf, splitMapBlocks, tilesFor, wgs84ToGcj02, worldPixel } from "../../src/ui/src/mapBlocks.js";
+import { MapService } from "../../src/control/maps.js";
 
 const block = (json: string) => "```map\n" + json + "\n```";
 

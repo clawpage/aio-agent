@@ -2,11 +2,11 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { openDb, type Db } from "../../src/server/db.js";
-import { SessionStore } from "../../src/server/auth/sessions.js";
-import { ensureOwner } from "../../src/server/auth/owner.js";
-import { Logger } from "../../src/server/logger.js";
-import { TicketStore } from "../../src/server/auth/tickets.js";
+import { openDb, type Db } from "../../src/control/db.js";
+import { SessionStore } from "../../src/control/auth/sessions.js";
+import { ensureOwner } from "../../src/control/auth/owner.js";
+import { Logger } from "../../src/control/logger.js";
+import { TicketStore } from "../../src/control/auth/tickets.js";
 
 /**
  * Owner password rotation must invalidate every existing login, including the
@@ -57,7 +57,7 @@ describe("owner password rotation", () => {
     expect(tickets.consume(ticket.ticket, { isValidSession: (id) => sessions.isLive(id) })).toBeNull();
 
     // The new password works; the old one does not.
-    const { verifyPassword } = await import("../../src/server/auth/passwords.js");
+    const { verifyPassword } = await import("../../src/control/auth/passwords.js");
     const row = db.prepare("SELECT password_hash, password_salt, password_params FROM owners LIMIT 1").get() as {
       password_hash: string;
       password_salt: string;

@@ -3,11 +3,11 @@ import {DatabaseSync} from 'node:sqlite';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import {openDb} from '../../src/server/db.js';
-import {ensureOwner,createMember,authenticateUser,getUser} from '../../src/server/auth/owner.js';
-import {hashPassword} from '../../src/server/auth/passwords.js';
-import {Logger} from '../../src/server/logger.js';
-import {SessionStore} from '../../src/server/auth/sessions.js';
+import {openDb} from '../../src/control/db.js';
+import {ensureOwner,createMember,authenticateUser,getUser} from '../../src/control/auth/owner.js';
+import {hashPassword} from '../../src/control/auth/passwords.js';
+import {Logger} from '../../src/control/logger.js';
+import {SessionStore} from '../../src/control/auth/sessions.js';
 it('migrates an existing owner without changing password or live sessions and never bootstraps over a member',async()=>{
  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'aio-user-migration-'));const file=path.join(dir,'db.sqlite');
  const old=new DatabaseSync(file);old.exec('CREATE TABLE owners (id TEXT PRIMARY KEY,username TEXT NOT NULL UNIQUE,password_hash TEXT NOT NULL,password_salt TEXT NOT NULL,password_params TEXT NOT NULL,created_at INTEGER NOT NULL)');

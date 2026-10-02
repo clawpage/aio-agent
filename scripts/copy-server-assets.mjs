@@ -1,6 +1,6 @@
 // The document and browser tools are shell/python assets, not TypeScript, so
 // `tsc` does not emit them. Copy them next to the compiled service so
-// `dist/server` is a complete, runnable artifact (each service reads its assets
+// `dist/control` is a complete, runnable artifact (each service reads its assets
 // relative to its own directory).
 import { cp, mkdir } from "node:fs/promises";
 import path from "node:path";
@@ -11,8 +11,8 @@ const root = path.resolve(import.meta.dirname, "..");
 
 /** [source directory, dist directory] pairs, kept in the same tree layout. */
 const assetTrees = [
-  ["src/server/documents/scripts", "dist/server/documents/scripts"],
-  ["src/server/browser/scripts", "dist/server/browser/scripts"],
+  ["src/control/documents/scripts", "dist/control/documents/scripts"],
+  ["src/control/browser/scripts", "dist/control/browser/scripts"],
 ];
 
 for (const [from, to] of assetTrees) {
@@ -26,7 +26,7 @@ for (const [from, to] of assetTrees) {
 // No registry request, browser download, or checked-in generated archive.
 const require = createRequire(import.meta.url);
 const packageDir = path.dirname(require.resolve("patchright-core/package.json"));
-const vendor = path.join(root, "dist/server/browser/vendor");
+const vendor = path.join(root, "dist/control/browser/vendor");
 await mkdir(vendor, { recursive: true });
 execFileSync("tar", ["-czf", path.join(vendor, "patchright-core.tgz"), "-C", packageDir, "."]);
 console.log("packaged offline patchright-core runtime");

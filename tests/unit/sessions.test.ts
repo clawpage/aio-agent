@@ -1,6 +1,6 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
-import { openDb, type Db } from "../../src/server/db.js";
-import { SessionStore } from "../../src/server/auth/sessions.js";
+import { openDb, type Db } from "../../src/control/db.js";
+import { SessionStore } from "../../src/control/auth/sessions.js";
 
 const TTL = 60 * 60_000; // 1 hour
 const RENEW = 30 * 60_000; // renew every 30 minutes

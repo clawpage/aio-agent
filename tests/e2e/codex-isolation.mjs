@@ -1,11 +1,11 @@
 // Real sandbox metadata only: no model turn, mailbox read, or MCP tool execution.
 // Run after building and starting production: npm run smoke:isolation.
 import assert from "node:assert/strict";
-import { loadConfig } from "../../dist/server/config.js";
-import { SandboxContainer } from "../../dist/server/docker/sandbox.js";
-import { HostTokenSource } from "../../dist/server/codex/hostTokens.js";
-import { JsonRpcPeer } from "../../dist/server/codex/jsonrpc.js";
-import { Logger } from "../../dist/server/logger.js";
+import { loadConfig } from "../../dist/control/config.js";
+import { SandboxContainer } from "../../dist/control/docker/sandbox.js";
+import { HostTokenSource } from "../../dist/control/codex/hostTokens.js";
+import { JsonRpcPeer } from "../../dist/control/codex/jsonrpc.js";
+import { Logger } from "../../dist/control/logger.js";
 
 const cfg = loadConfig();
 const log = new Logger("error", undefined, false);

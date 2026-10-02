@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { attachmentRefs, extractFileRefs } from "../../src/web/src/fileRefs.js";
+import { attachmentRefs, extractFileRefs } from "../../src/ui/src/fileRefs.js";
 
 const ROOT = "/home/gem/workspace";
 

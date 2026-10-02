@@ -132,7 +132,7 @@ if (fs.existsSync(srcDir)) {
   const srcNewest = newestMtime(srcDir);
   const distMtime = fs.statSync(SERVER_ENTRY).mtimeMs;
   if (srcNewest > distMtime) {
-    log("fatal: src/server is newer than dist; run npm run build:server before starting");
+    log("fatal: src/control is newer than dist; run npm run build:server before starting");
     process.exit(1);
   }
 }

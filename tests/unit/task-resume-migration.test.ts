@@ -2,7 +2,7 @@ import {expect,it} from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import {openDb} from '../../src/server/db.js';
+import {openDb} from '../../src/control/db.js';
 
 it('adds executor references to old databases without changing task history, idempotently',()=>{
   const dir=fs.mkdtempSync(path.join(os.tmpdir(),'aio-resume-migration-'));

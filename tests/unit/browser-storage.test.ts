@@ -5,7 +5,7 @@ import path from 'node:path';
 import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 const exec=promisify(execFile);
-const helper=path.resolve('src/server/browser/scripts/browser-storage.cjs');
+const helper=path.resolve('src/control/browser/scripts/browser-storage.cjs');
 async function run(hang:boolean){
  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'browser-storage-test-'));
  try {

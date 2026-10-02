@@ -10,7 +10,7 @@ import { chromium, type Browser } from "playwright-core";
 // browser installed, so the test only runs where Playwright's Chromium exists.
 const hasChromium = fs.existsSync(chromium.executablePath());
 const require = createRequire(import.meta.url);
-const SCRIPT = require.resolve("../../src/server/browser/scripts/tab-server.cjs");
+const SCRIPT = require.resolve("../../src/control/browser/scripts/tab-server.cjs");
 
 async function freePort(): Promise<number> {
   return await new Promise((resolve) => {

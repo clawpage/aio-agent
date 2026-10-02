@@ -2,7 +2,7 @@ import {afterEach,describe,it,expect} from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import {readSoul,writeSoul,DEFAULT_SOUL,SOUL_MAX_BYTES} from '../../src/server/soul.js';
+import {readSoul,writeSoul,DEFAULT_SOUL,SOUL_MAX_BYTES} from '../../src/control/soul.js';
 const dirs:string[]=[];
 afterEach(()=>{for(const dir of dirs.splice(0))fs.rmSync(dir,{recursive:true,force:true});});
 describe('SOUL.md persistence',()=>{

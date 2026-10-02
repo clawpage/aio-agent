@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { login, startHarness, type TestHarness } from "../helpers/harness.js";
-import type { TabRecord, TabServerLike } from "../../src/server/browser/tabs.js";
+import type { TabRecord, TabServerLike } from "../../src/control/browser/tabs.js";
 
 let h: TestHarness;
 const calls: string[] = [];

@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { login, rawUpgrade, startHarness, type TestHarness } from "../helpers/harness.js";
-import type { SandboxIdle } from "../../src/server/docker/idle.js";
+import type { SandboxIdle } from "../../src/control/docker/idle.js";
 
 let h: TestHarness;
 

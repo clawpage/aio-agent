@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatTimeline, lastQuestion, routingQuestion, timeline, type ContextTask } from "../../src/server/tasks/context.js";
+import { formatTimeline, lastQuestion, routingQuestion, timeline, type ContextTask } from "../../src/control/tasks/context.js";
 
 const at = (h: number, m: number) => new Date(2026, 8, 30, h, m).getTime();
 const task = (id: string, created: number, extra: Partial<ContextTask> = {}): ContextTask => ({ id, title: id, input_text: id, status: "completed", result: null, merged_into: null, plan_json: null, created_at: created, ...extra });

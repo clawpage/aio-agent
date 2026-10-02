@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { describeNow, describeSchedule, formatWhen, nextRun, validateSchedule, zonedTime, type ScheduleSpec } from "../../src/server/tasks/schedules.js";
+import { describeNow, describeSchedule, formatWhen, nextRun, validateSchedule, zonedTime, type ScheduleSpec } from "../../src/control/tasks/schedules.js";
 
 const LA = "America/Los_Angeles";
 const at = (iso: string) => Date.parse(iso);

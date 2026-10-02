@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { login, startHarness, type TestHarness } from "../helpers/harness.js";
-import { maps } from "../../src/server/maps.js";
+import { maps } from "../../src/control/maps.js";
 
 let h: TestHarness;
 beforeAll(async () => { h = await startHarness(); });

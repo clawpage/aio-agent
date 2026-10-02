@@ -1,12 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { openDb, type Db } from "../../src/server/db.js";
-import { AgentManager } from "../../src/server/codex/manager.js";
-import type { HostTokenSource } from "../../src/server/codex/hostTokens.js";
-import { TaskService } from "../../src/server/tasks/service.js";
-import { JsonRpcResponseError } from "../../src/server/codex/jsonrpc.js";
-import { parsePlan, planningPrompt, resourcesConflict } from "../../src/server/tasks/planning.js";
-import { Logger } from "../../src/server/logger.js";
-import { writeAgentSettings } from "../../src/server/settings.js";
+import { openDb, type Db } from "../../src/control/db.js";
+import { AgentManager } from "../../src/control/codex/manager.js";
+import type { HostTokenSource } from "../../src/control/codex/hostTokens.js";
+import { TaskService } from "../../src/control/tasks/service.js";
+import { JsonRpcResponseError } from "../../src/control/codex/jsonrpc.js";
+import { parsePlan, planningPrompt, resourcesConflict } from "../../src/control/tasks/planning.js";
+import { Logger } from "../../src/control/logger.js";
+import { writeAgentSettings } from "../../src/control/settings.js";
 import { FakeCodex, testConfig } from "../helpers/harness.js";
 class PlanningCodex extends FakeCodex {
     plans: string[] = [];
@@ -671,7 +671,7 @@ describe("owner dispatch log", () => {
             return round === 1 ? JSON.stringify({ search: ["东京"] }) : JSON.stringify({ title: data.message, related: [trip.id], dependencies: [], resources: [] });
         };
         const hotel = submit("酒店要靠近新宿"); await tick(); await tick();
-        const { dispatchLog } = await import("../../src/server/tasks/recall.js");
+        const { dispatchLog } = await import("../../src/control/tasks/recall.js");
         const [entry] = dispatchLog(db, "owner_1", hotel.id);
         expect(entry!.steps.map(s => s.kind)).toEqual(["context", "jev", "ask", "ask", "plan"]);
         const [context, decided, search, answer, plan] = entry!.steps as any[];

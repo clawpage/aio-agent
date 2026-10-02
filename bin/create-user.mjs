@@ -2,10 +2,10 @@
 // Local administrator command. Never accepts or prints plaintext passwords.
 import fs from 'node:fs';
 import path from 'node:path';
-import { loadConfig } from '../dist/server/config.js';
-import { openDb } from '../dist/server/db.js';
-import { createMember } from '../dist/server/auth/owner.js';
-import { generateSecret } from '../dist/server/auth/passwords.js';
+import { loadConfig } from '../dist/control/config.js';
+import { openDb } from '../dist/control/db.js';
+import { createMember } from '../dist/control/auth/owner.js';
+import { generateSecret } from '../dist/control/auth/passwords.js';
 
 const username = process.argv[2];
 if (!username || !/^[a-zA-Z0-9_-]{2,40}$/.test(username) || username === 'owner') throw new Error('用法: node bin/create-user.mjs <普通用户账号>');

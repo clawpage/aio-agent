@@ -238,7 +238,7 @@ export interface TaskTab {
   request: { reason: string; at: number } | null;
 }
 
-/** How well the dispatcher finds past tasks (see src/server/tasks/recall.ts). */
+/** How well the dispatcher finds past tasks (see src/control/tasks/recall.ts). */
 export interface RecallStats {
   days: number;
   dispatches: number;

@@ -3,8 +3,8 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import {startHarness} from '../helpers/harness.js';
-import {MemberModelGateway} from '../../src/server/memberModelGateway.js';
-import {memberConfig} from '../../src/server/tenants.js';
+import {MemberModelGateway} from '../../src/control/memberModelGateway.js';
+import {memberConfig} from '../../src/control/tenants.js';
 it('exposes only stateless high-effort DeepSeek, never the bridge master key or response lookup',async()=>{
  const h=await startHarness();let body:any,auth:string|undefined;
  const upstream=http.createServer(async(req,res)=>{auth=req.headers.authorization;let data='';for await(const chunk of req)data+=chunk;body=JSON.parse(data);res.setHeader('content-type','text/event-stream');res.end('data: {"ok":true}\n\n');});

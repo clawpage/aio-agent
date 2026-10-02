@@ -1,4 +1,4 @@
-import { HTML_PREVIEW_CSP, htmlPreviewDocument } from "../../src/server/documents/html";
+import { HTML_PREVIEW_CSP, htmlPreviewDocument } from "../../src/control/documents/html";
 import { expect, test, type Page, type Route } from "@playwright/test";
 import { makeConversation, mockConsole } from "./mock-api";
 import fs from "node:fs";

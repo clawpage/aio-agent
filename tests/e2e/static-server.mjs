@@ -1,5 +1,5 @@
 /**
- * Minimal static server for the built web app (`dist/web`), used as the
+ * Minimal static server for the built web app (`dist/ui`), used as the
  * Playwright `webServer` by `playwright.local.config.ts`.
  *
  * It deliberately never proxies `/api`: every API call in the local specs is
@@ -13,10 +13,10 @@ import { fileURLToPath } from "node:url";
 const port = Number(process.argv[2] ?? 4288);
 // Default to the checked-in build output, but let a local run point at a
 // scratch `--outDir` build (PA_TEST_WEB_ROOT is an absolute path) so verifying
-// source changes never has to overwrite the served `dist/web` bundle.
+// source changes never has to overwrite the served `dist/ui` bundle.
 const root = process.env.PA_TEST_WEB_ROOT
   ? path.resolve(process.env.PA_TEST_WEB_ROOT)
-  : path.resolve(fileURLToPath(new URL("../../dist/web", import.meta.url)));
+  : path.resolve(fileURLToPath(new URL("../../dist/ui", import.meta.url)));
 
 const MIME = {
   ".html": "text/html; charset=utf-8",

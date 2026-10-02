@@ -2,8 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { BridgeModel } from "../../src/server/bridgeModel.js";
-import { Logger } from "../../src/server/logger.js";
+import { BridgeModel } from "../../src/control/bridgeModel.js";
+import { Logger } from "../../src/control/logger.js";
 import { testConfig } from "../helpers/harness.js";
 
 const SECRET_VALUE = "sk-test-spawn-secret-value-0002";
@@ -24,7 +24,7 @@ vi.mock("node:child_process", async (importOriginal) => {
   };
 });
 
-const { SandboxContainer } = await import("../../src/server/docker/sandbox.js");
+const { SandboxContainer } = await import("../../src/control/docker/sandbox.js");
 
 function tmpDir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), "pa-spawn-test-"));

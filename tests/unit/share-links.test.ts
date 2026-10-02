@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { extractShareLinks, isShareUrl } from "../../src/web/src/shareLinks.js";
+import { extractShareLinks, isShareUrl } from "../../src/ui/src/shareLinks.js";
 
 describe("share links in a message", () => {
   it("finds share pages linked or written bare, once each, and ignores code and other links", () => {

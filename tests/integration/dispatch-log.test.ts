@@ -1,6 +1,6 @@
 import { expect, it } from "vitest";
 import { startHarness, login } from "../helpers/harness.js";
-import { createMember } from "../../src/server/auth/owner.js";
+import { createMember } from "../../src/control/auth/owner.js";
 
 it("serves a message's dispatch log to the owner only", async () => {
   const h = await startHarness();

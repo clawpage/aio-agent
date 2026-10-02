@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { openDb } from "../../src/server/db.js";
+import { openDb } from "../../src/control/db.js";
 import {
   AGENT_SETTINGS_META_KEY,
   effectiveAgentSettings,
@@ -7,7 +7,7 @@ import {
   validateAgentSettings,
   writeAgentSettings,
   type ValidatableModel,
-} from "../../src/server/settings.js";
+} from "../../src/control/settings.js";
 
 const MODELS: ValidatableModel[] = [
   { id: "gpt-6-sol", supportedReasoningEfforts: ["low", "medium", "high"], defaultReasoningEffort: "medium" },

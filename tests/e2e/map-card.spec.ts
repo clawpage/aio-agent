@@ -2,7 +2,7 @@ import { test, expect, type Page } from "@playwright/test";
 import fs from "node:fs";
 import { mockConsole } from "./mock-api";
 
-const TILE = fs.readFileSync(new URL("../../src/web/public/icon-192.png", import.meta.url));
+const TILE = fs.readFileSync(new URL("../../src/ui/public/icon-192.png", import.meta.url));
 
 function task(result: string) {
   return { id: "task-1", revision: 1, title: "周末去哪", text: "推荐个地方", conversationId: "child-1", status: "completed", result, error: null, attachments: [], relatedTaskId: null, dependencies: [], approvals: 0, createdAt: 1000, completedAt: Date.now() };

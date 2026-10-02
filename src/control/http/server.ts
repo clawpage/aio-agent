@@ -10,7 +10,7 @@ import { COOKIE_NAMES, sessionCookies } from "../auth/sessions.js";
 import { safeRedirectPath } from "../auth/tickets.js";
 import { audit } from "../db.js";
 
-export const WEB_DIST = path.resolve(import.meta.dirname, "..", "..", "..", "dist", "web");
+export const WEB_DIST = path.resolve(import.meta.dirname, "..", "..", "..", "dist", "ui");
 
 /** Control API calls served by the sandbox; a container stopped for idleness starts first. */
 const SANDBOX_API = /^\/(files|documents|sandbox|models)(\/|$)|^\/browser\/(?!status$)|^\/tasks\/[^/]+\/browser/;

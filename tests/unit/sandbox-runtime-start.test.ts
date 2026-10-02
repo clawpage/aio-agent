@@ -1,7 +1,7 @@
 import { expect, it, vi } from "vitest";
-import { startSandboxRuntime } from "../../src/server/index.js";
-import type { AppContext } from "../../src/server/context.js";
-import { Logger } from "../../src/server/logger.js";
+import { startSandboxRuntime } from "../../src/control/index.js";
+import type { AppContext } from "../../src/control/context.js";
+import { Logger } from "../../src/control/logger.js";
 import { testConfig } from "../helpers/harness.js";
 
 it("replaces an outdated tab server as soon as the sandbox is up, not at the next task", async () => {

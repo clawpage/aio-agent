@@ -3,10 +3,10 @@ import os from "node:os";
 import path from "node:path";
 import { EventEmitter } from "node:events";
 import { describe, expect, it, vi } from "vitest";
-import { openDb } from "../../src/server/db.js";
-import { Logger } from "../../src/server/logger.js";
-import { loadVapidKeys, notificationText, PushService, startTaskNotifications, taskNotification, validEndpoint } from "../../src/server/push.js";
-import type { AppContext } from "../../src/server/context.js";
+import { openDb } from "../../src/control/db.js";
+import { Logger } from "../../src/control/logger.js";
+import { loadVapidKeys, notificationText, PushService, startTaskNotifications, taskNotification, validEndpoint } from "../../src/control/push.js";
+import type { AppContext } from "../../src/control/context.js";
 
 const log = new Logger("error", undefined, false);
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), "push-"));

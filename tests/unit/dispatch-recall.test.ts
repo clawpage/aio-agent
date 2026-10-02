@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, expect, it } from "vitest";
-import { openDb, type Db } from "../../src/server/db.js";
-import { AgentManager } from "../../src/server/codex/manager.js";
-import type { HostTokenSource } from "../../src/server/codex/hostTokens.js";
-import { TaskService } from "../../src/server/tasks/service.js";
-import { recallStats } from "../../src/server/tasks/recall.js";
-import { Logger } from "../../src/server/logger.js";
+import { openDb, type Db } from "../../src/control/db.js";
+import { AgentManager } from "../../src/control/codex/manager.js";
+import type { HostTokenSource } from "../../src/control/codex/hostTokens.js";
+import { TaskService } from "../../src/control/tasks/service.js";
+import { recallStats } from "../../src/control/tasks/recall.js";
+import { Logger } from "../../src/control/logger.js";
 import { FakeCodex, testConfig } from "../helpers/harness.js";
 
 type Entry = { id: string; title: string; source?: string; date?: string; input_text: string };

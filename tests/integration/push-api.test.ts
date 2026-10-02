@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, expect, it, vi } from "vitest";
 import { login, startHarness, type TestHarness } from "../helpers/harness.js";
-import { PushService } from "../../src/server/push.js";
+import { PushService } from "../../src/control/push.js";
 
 let h: TestHarness;
 const send = vi.fn(async () => ({ statusCode: 201 }));

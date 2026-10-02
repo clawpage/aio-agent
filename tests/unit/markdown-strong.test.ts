@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Marked } from "marked";
-import { cjkStrong } from "../../src/web/src/markdownStrong.js";
+import { cjkStrong } from "../../src/ui/src/markdownStrong.js";
 
 const md = new Marked({ gfm: true, breaks: true });
 md.use({ extensions: [cjkStrong] });

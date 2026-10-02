@@ -9,7 +9,7 @@ import {
   requireWorkspaceFilePath,
   splitPath,
   withExtension,
-} from "../../src/server/documents/paths.js";
+} from "../../src/control/documents/paths.js";
 
 const ROOT = "/home/gem/workspace";
 

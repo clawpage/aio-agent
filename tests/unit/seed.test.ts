@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
-import { SandboxContainer } from "../../src/server/docker/sandbox.js";
-import { CODEX_CONFIG_TOML, DOCUMENT_SKILL_DIR, DOCUMENT_SKILL_MD, SHARE_CLI_PY, SHARE_SKILL_MD, WORKSPACE_AGENTS_MD } from "../../src/server/docker/seed.js";
-import { Logger } from "../../src/server/logger.js";
+import { SandboxContainer } from "../../src/control/docker/sandbox.js";
+import { CODEX_CONFIG_TOML, DOCUMENT_SKILL_DIR, DOCUMENT_SKILL_MD, SHARE_CLI_PY, SHARE_SKILL_MD, WORKSPACE_AGENTS_MD } from "../../src/control/docker/seed.js";
+import { Logger } from "../../src/control/logger.js";
 import { testConfig } from "../helpers/harness.js";
 
 describe("sandbox workspace seed", () => {

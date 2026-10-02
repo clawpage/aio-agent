@@ -3,10 +3,10 @@ import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
 import { startHarness } from "../helpers/harness.js";
-import { MemberModelGateway } from "../../src/server/memberModelGateway.js";
-import { DecisionGateway, decisionMcpServers, decisionThreadServers } from "../../src/server/decision.js";
-import { Jev } from "../../src/server/jev.js";
-import { memberConfig } from "../../src/server/tenants.js";
+import { MemberModelGateway } from "../../src/control/memberModelGateway.js";
+import { DecisionGateway, decisionMcpServers, decisionThreadServers } from "../../src/control/decision.js";
+import { Jev } from "../../src/control/jev.js";
+import { memberConfig } from "../../src/control/tenants.js";
 
 it("offers every account Jev's decision through its own MCP URL, keeping the key on the host and recording each call", async () => {
   const h = await startHarness();

@@ -12,7 +12,7 @@ export default defineConfig({
   testDir: "tests/e2e",
   testMatch: /.*\.spec\.ts/,
   // Specs that fully mock the control plane (`page.route`) run under
-  // playwright.local.config.ts against the static `dist/web` build. They must
+  // playwright.local.config.ts against the static `dist/ui` build. They must
   // never run against a real deployment: they need no server, and one of them
   // writes visual-QA screenshots to the workspace.
   testIgnore: [

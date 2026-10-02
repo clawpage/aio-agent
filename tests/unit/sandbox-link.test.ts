@@ -5,7 +5,7 @@ import {
   workspaceFileKind,
   workspaceFilePathFromHref,
   SANDBOX_WORKSPACE_ROOT,
-} from "../../src/web/src/sandboxLink.js";
+} from "../../src/ui/src/sandboxLink.js";
 
 describe("sandbox link classification", () => {
   it("accepts only absolute http/https URLs for the sandbox browser", () => {

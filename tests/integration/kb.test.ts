@@ -3,10 +3,10 @@ import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
 import { startHarness } from "../helpers/harness.js";
-import { MemberModelGateway } from "../../src/server/memberModelGateway.js";
-import { KbGateway, kbMcpServers, kbThreadServers } from "../../src/server/kb.js";
-import { codexRequirementsToml } from "../../src/server/docker/seed.js";
-import { memberConfig } from "../../src/server/tenants.js";
+import { MemberModelGateway } from "../../src/control/memberModelGateway.js";
+import { KbGateway, kbMcpServers, kbThreadServers } from "../../src/control/kb.js";
+import { codexRequirementsToml } from "../../src/control/docker/seed.js";
+import { memberConfig } from "../../src/control/tenants.js";
 
 const USERS: Record<string, string> = { owner_1: "owner", user_granted: "cr", user_other: "yzmy" };
 

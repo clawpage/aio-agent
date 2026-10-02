@@ -8,12 +8,12 @@
     "node": ">=24.0.0"
   },
   "scripts": {
-    "build": "npm run build:web && npm run build:server",
+    "build": "npm run build:ui && npm run build:server",
     "build:server": "tsc -p tsconfig.server.json && node scripts/copy-server-assets.mjs",
-    "build:web": "vite build",
-    "dev:server": "tsx watch src/server/index.ts",
-    "dev:web": "vite",
-    "start": "node dist/server/index.js",
+    "build:ui": "vite build",
+    "dev:server": "tsx watch src/control/index.ts",
+    "dev:ui": "vite",
+    "start": "node dist/control/index.js",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.server.json --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",

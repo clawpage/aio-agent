@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { startRuntimeRecovery } from "../../src/server/index.js";
-import { Logger } from "../../src/server/logger.js";
-import type { AppContext } from "../../src/server/context.js";
+import { startRuntimeRecovery } from "../../src/control/index.js";
+import { Logger } from "../../src/control/logger.js";
+import type { AppContext } from "../../src/control/context.js";
 
 interface Counters {
   ensureRunning: number;

@@ -1,13 +1,13 @@
 import { afterEach, beforeEach, expect, it } from "vitest";
-import { AgentManager } from "../../src/server/codex/manager.js";
-import type { HostTokenSource } from "../../src/server/codex/hostTokens.js";
-import { openDb, type Db } from "../../src/server/db.js";
-import { Logger } from "../../src/server/logger.js";
-import { pruneBeforeSnapshot, TAB_POLICY, tabMcpServers, tabThreadConfig, type BrowserTask } from "../../src/server/browser/tabs.js";
-import type { BrowserRuntimeLike } from "../../src/server/browser/lifecycle.js";
+import { AgentManager } from "../../src/control/codex/manager.js";
+import type { HostTokenSource } from "../../src/control/codex/hostTokens.js";
+import { openDb, type Db } from "../../src/control/db.js";
+import { Logger } from "../../src/control/logger.js";
+import { pruneBeforeSnapshot, TAB_POLICY, tabMcpServers, tabThreadConfig, type BrowserTask } from "../../src/control/browser/tabs.js";
+import type { BrowserRuntimeLike } from "../../src/control/browser/lifecycle.js";
 import { FakeCodex, testConfig } from "../helpers/harness.js";
-import { KB_POLICY } from "../../src/server/kb.js";
-import type { Config } from "../../src/server/config.js";
+import { KB_POLICY } from "../../src/control/kb.js";
+import type { Config } from "../../src/control/config.js";
 
 class RecordingCodex extends FakeCodex {
   threadOpts: Array<{ browserTask?: BrowserTask; developerInstructions?: string }> = [];
@@ -121,7 +121,7 @@ it("destroys finished tasks' tabs right before an idle snapshot, and only then",
 });
 
 it("makes sure the current tab server runs before typing for a person", async () => {
-  const { TabServer } = await import("../../src/server/browser/tabs.js");
+  const { TabServer } = await import("../../src/control/browser/tabs.js");
   const seen: string[] = [];
   const container = {
     execInSandbox: async (argv: string[]) => {

@@ -6,14 +6,14 @@ import path from "node:path";
 import { AddressInfo } from "node:net";
 import type { Duplex } from "node:stream";
 import { WebSocketServer } from "ws";
-import { bootstrap } from "../../src/server/index.js";
-import { loadConfig, type Config } from "../../src/server/config.js";
-import { Logger } from "../../src/server/logger.js";
-import type { AppContext } from "../../src/server/context.js";
-import type { CodexModel, SandboxAccount } from "../../src/server/codex/sandboxCodex.js";
-import type { CodexSessionLike } from "../../src/server/codex/manager.js";
-import type { SandboxContainer } from "../../src/server/docker/sandbox.js";
-import { createApp, handleUpgrade } from "../../src/server/http/server.js";
+import { bootstrap } from "../../src/control/index.js";
+import { loadConfig, type Config } from "../../src/control/config.js";
+import { Logger } from "../../src/control/logger.js";
+import type { AppContext } from "../../src/control/context.js";
+import type { CodexModel, SandboxAccount } from "../../src/control/codex/sandboxCodex.js";
+import type { CodexSessionLike } from "../../src/control/codex/manager.js";
+import type { SandboxContainer } from "../../src/control/docker/sandbox.js";
+import { createApp, handleUpgrade } from "../../src/control/http/server.js";
 import { FakeBrowserRuntime } from "./fakeBrowserRuntime.js";
 
 async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | void> {
