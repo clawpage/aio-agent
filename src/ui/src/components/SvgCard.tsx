@@ -1,4 +1,13 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+
+/**
+ * An SVG with no absolute width (only a viewBox, or a percentage) has no size of
+ * its own as an image and collapses to a thumbnail: it takes the message's width.
+ */
+export function svgIsFluid(code: string): boolean {
+  const root = /<svg\b[^>]*>/i.exec(code)?.[0] ?? "";
+  return !/\swidth\s*=\s*["']?\s*\d+(\.\d+)?(px)?\s*["'\s/>]/i.test(root);
+}
 
 /**
  * One SVG from a message, drawn by an <img> from a blob: in an image an SVG runs
@@ -9,6 +18,7 @@ export function SvgCard({ code }: { code: string }) {
   const [url, setUrl] = useState<string | null>(null);
   const [source, setSource] = useState(false);
   const [broken, setBroken] = useState(false);
+  const fluid = useMemo(() => svgIsFluid(code), [code]);
   useEffect(() => {
     const next = URL.createObjectURL(new Blob([code], { type: "image/svg+xml" }));
     setUrl(next);
@@ -17,7 +27,7 @@ export function SvgCard({ code }: { code: string }) {
   }, [code]);
   const showSource = source || broken;
   return (
-    <figure className="svg-card">
+    <figure className={`svg-card${fluid ? " svg-fluid" : ""}`}>
       {showSource ? (
         <pre className="svg-source"><code>{code}</code></pre>
       ) : (

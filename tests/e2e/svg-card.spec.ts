@@ -54,3 +54,23 @@ test("a workspace SVG shows inline and as a file card picture", async ({ page })
   await expect.poll(() => images).toContain("/home/gem/workspace/out/hostile.svg");
   expect(await page.evaluate(() => (window as unknown as { __svgRan?: number }).__svgRan)).toBeUndefined();
 });
+
+test("an SVG with only a viewBox fills the message width at its own proportions; a sized one keeps its size", async ({ page }, info) => {
+  const WIDE = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 320"><rect width="640" height="320" fill="#eef4ff"/><circle cx="320" cy="160" r="120" fill="#8f86ff"/></svg>';
+  await setup(page, `示意图：\n\n\`\`\`svg\n${WIDE}\n\`\`\`\n\n小图：\n\n\`\`\`svg\n${CHART}\n\`\`\``);
+  const cards = page.locator(".svg-card");
+  await expect(cards).toHaveCount(2, { timeout: 60_000 });
+  const wide = cards.first().locator("img.svg-image");
+  await expect(wide).toBeVisible();
+  const bubble = page.locator(".bubble").filter({ has: cards.first() });
+  const text = await bubble.locator(".markdown").first().boundingBox();
+  const box = (await wide.boundingBox())!;
+  expect(box.width).toBeGreaterThan(text!.width * 0.85);
+  expect(Math.abs(box.width / box.height - 2)).toBeLessThan(0.05);
+  const small = (await cards.nth(1).locator("img.svg-image").boundingBox())!;
+  expect(Math.round(small.width)).toBe(120);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
+  await cards.first().scrollIntoViewIfNeeded();
+  await page.waitForTimeout(400);
+  await page.screenshot({ path: info.outputPath("svg-fluid.png") });
+});

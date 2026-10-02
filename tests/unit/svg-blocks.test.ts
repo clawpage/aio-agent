@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { looksLikeSvg } from "../../src/common/svg.js";
 import { SVG_MAX_CHARS, splitSvgBlocks } from "../../src/ui/src/svgBlocks.js";
+import { svgIsFluid } from "../../src/ui/src/components/SvgCard.js";
 
 const SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><circle cx="5" cy="5" r="4"/></svg>';
 
@@ -37,4 +38,15 @@ describe("splitSvgBlocks", () => {
     const xml = `\`\`\`xml\n${SVG}\n\`\`\``;
     expect(splitSvgBlocks(xml)).toEqual([{ kind: "text", text: xml }]);
   });
+});
+
+it("gives the message width to an SVG with no absolute width of its own", () => {
+  // Only a viewBox (what agents usually write), or a relative width: no size as an image.
+  expect(svgIsFluid('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 320" font-family="sans-serif"><rect stroke-width="2"/></svg>')).toBe(true);
+  expect(svgIsFluid('<svg width="100%" viewBox="0 0 10 10"></svg>')).toBe(true);
+  expect(svgIsFluid("<svg width='auto'></svg>")).toBe(true);
+  // An absolute width is the author's size: kept (and capped to the message).
+  expect(svgIsFluid('<svg xmlns="http://www.w3.org/2000/svg" width="120" height="80"></svg>')).toBe(false);
+  expect(svgIsFluid("<svg width='640px' viewBox='0 0 640 320'></svg>")).toBe(false);
+  expect(svgIsFluid('<svg\n  width="48"\n  height="48">')).toBe(false);
 });

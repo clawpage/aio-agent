@@ -2932,6 +2932,9 @@ textarea:focus {
   background: #fff;
   border-radius: 8px;
 }
+/* No size of its own (see svgIsFluid): as wide as the message, at its own proportions. */
+.svg-card.svg-fluid { width: 100%; }
+.svg-fluid .svg-image { width: 100%; object-fit: contain; }
 .svg-source {
   max-width: min(640px, 100%);
   max-height: 320px;
