@@ -2,27 +2,56 @@
 
 ## 目标形态
 
-一个 owner 管理 member、每账号独立持久 AIO 沙箱和 Codex 智能体；中文界面；桌面与手机功能对等；
-公网只通过专用 Cloudflare tunnel 暴露两个精确域名。
+一个 owner 管理 member、每账号独立持久 AIO 沙箱和智能体；中文界面；桌面与手机功能对等；
+公网只通过专用 Cloudflare tunnel 暴露两个精确域名。系统分三层，各自构建、各自一个镜像，
+可以同机也可以分机部署：
 
 ```
-浏览器 ──TLS──> agent.clawpage.ai ──┐
-浏览器 ──TLS──> agent-workspace.clawpage.ai ──┤
-                                            └─> cloudflared（专用 tunnel）
-                                                  └─> Node 控制面 127.0.0.1:4891
-                                                        ├─ 主域：SPA + /api + SSE
-                                                        ├─ 伴随域：AIO 反向代理（HTTP + WS）
-                                                        ├─ docker exec -i ─> 沙箱 codex app-server
-                                                        └─ 宿主机 codex app-server（仅取 token）
-沙箱容器 personal-agent-sandbox（镜像固定 1.11.0）
-  ├─ volume personal-agent-workspace -> /home/gem/workspace
-  ├─ volume personal-agent-codex     -> /home/gem/.codex
-  └─ volume personal-agent-browser   -> /home/gem/.config/browser
+浏览器 ──TLS──> agent.clawpage.ai ───────────> cloudflared（专用 tunnel）
+浏览器 ──TLS──> agent-workspace.clawpage.ai ──┘        │
+                                                      ├─> 界面层 ui :4891（src/ui/edge.mjs）
+                                                      │     ├─ 控制台静态文件（dist/ui）
+                                                      │     └─ /api/* 原样转发 ─┐
+                                                      └─> 控制层 control :4892 ◀┘（src/control）
+                                                            ├─ 主域 /api + SSE；伴随域 AIO 反向代理（HTTP + WS）
+                                                            ├─ 成员网关 :4902（沙箱经 host.docker.internal 回连）
+                                                            └─ 只经沙箱节点触达容器 ──> 沙箱层 sandboxd :4894（src/sandbox）
+                                                                  ├─ 唯一持有 Docker 的组件（固定操作、节点令牌）
+                                                                  ├─ 容器内执行 / 流式执行（Codex、Claude Code 的 stdio）
+                                                                  └─ 网页端口代理 ──> 沙箱容器（每账号一个，镜像固定 1.11.0）
+沙箱容器 personal-agent-sandbox / aio-user-<散列>
+  ├─ volume …-workspace -> /home/gem/workspace
+  ├─ volume …-codex     -> /home/gem/.codex
+  └─ volume …-browser   -> /home/gem/.config/browser
 ```
 
-## 同源策略：两个站点、一个进程
+## 三层与兼容契约
 
-控制面按 `Host` 头把请求分成两类，两者共用同一个 Node 进程但**cookie 与来源互相独立**：
+| 层 | 代码 | 职责 | 状态 |
+| --- | --- | --- | --- |
+| 界面 | `src/ui` | 控制台 SPA；edge 只提供静态文件并把 `/api` 原样转给控制面，网页与 API 同源，cookie/CSRF 模型不变 | 无状态、无密钥 |
+| 控制 | `src/control` | 账号、会话、任务与派单、智能体会话、浏览器/空闲策略、文档、推送、伴随站代理、成员网关；沙箱里的一切（CLI、skill、策略、浏览器设置、noVNC 补丁）都从这里经节点下发 | SQLite 与密钥（数据卷） |
+| 沙箱 | `src/sandbox` | sandboxd：按校验过的规格创建或接管容器（允许的镜像、只用命名卷、成员网络与资源上限、出站守卫、对端端口守卫、归属标签），其余只提供固定操作 | 无（容器与卷在 Docker 里） |
+| 共享 | `src/common` | 节点协议 `protocol.ts`、兼容版本 `version.ts`、日志、密钥文件读取 | — |
+
+层之间不互相 import（`tests/unit/layers.test.ts`）。控制面与节点之间只有 `protocol.ts` 定义的 HTTP/WebSocket：
+`ensure`（规格）、`inspect`、`stop`、`restart`、`peer-ports`、`exec`（一次性命令，stdin 与密钥环境变量分开传）、
+`spawn`（WebSocket 上的流式命令，控制面把它当子进程用）、以及带 `x-aio-sandbox` 头的网页端口代理。每个请求都要
+节点令牌和兼容的协议范围（`x-aio-protocol`），否则 401/409。节点不接受 Docker 参数、宿主路径或挂载。
+
+账号到节点的分配记录在根库 `meta` 的 `sandbox_node:<账号>`：已有账号固定在第一个节点（卷在那里），新账号放到
+剩余内存最多的节点；配置里没有该节点时直接报错，绝不在别处重建。控制面在别的机器时，节点上的网关中继
+（`PA_SANDBOXD_GATEWAY_UPSTREAM`）让沙箱照旧经 `host.docker.internal:<网关端口>` 回连。
+
+兼容版本在 `src/common/version.ts`：控制面 API 版本与最低兼容版本、节点协议版本、控制面能驱动的协议范围。
+镜像 label 带着这些数字，`deploy/aio.mjs` 在 `compose up` 前拒绝不兼容组合；运行时控制面拒绝协议不符的节点
+（`/healthz` 的 `compatible`），界面 edge 只在控制面提供所需 API 时健康，网页在版本不符时提示。
+
+控制面容器里没有 Codex 安装（`PA_HOST_CODEX=off`）：不向沙箱下发 ChatGPT token，只提供 Claude Code 与桥模型。
+
+## 同源策略：两个站点
+
+控制面按 `Host` 头把请求分成两类（主站请求经界面层转来，Host 不变），**cookie 与来源互相独立**：
 
 | | 主站 `agent.clawpage.ai` | 伴随站 `agent-workspace.clawpage.ai` |
 |---|---|---|
@@ -44,7 +73,7 @@
 
 派单器是隔离的临时 Luna 分类线程（read-only、never、ephemeral），输出经校验的 JSON。
 只能引用已存在且更早的任务，防止循环依赖；相关任务结果在派发时重新读取，避免使用陈旧快照。
-候选任务来自最近窗口、今天的任务和历史召回（`src/server/tasks/recall.ts`）：`task_search` 是 FTS5 表，
+候选任务来自最近窗口、今天的任务和历史召回（`src/control/tasks/recall.ts`）：`task_search` 是 FTS5 表，
 标题与正文预先切成中文二字词和拉丁词后写入，按内容哈希（`task_search_state`）增量同步；每次派单把
 候选来源、搜索与选择写入 `recall_events`，供配置页统计与召回上限自适应。派单器可以返回
 `{search:[...]}` 请求检索，服务端检索后带结果再次询问，轮数与加入数量都有上限。
@@ -110,7 +139,8 @@ HTTP、SSE、WebSocket、文件预览、上传、终端与浏览器都走同一�
 
 ## 执行模型
 
-- 沙箱里的 Codex 以 `docker exec -i ... <卷内固定版本 codex> app-server` 常驻，通过 stdio JSON-RPC 驱动。
+- 沙箱里的 Codex 以 `docker exec -i ... <卷内固定版本 codex> app-server` 常驻（由 sandboxd 执行，stdio 经节点的
+  WebSocket 流转给控制面），通过 stdio JSON-RPC 驱动。
   二进制取自持久卷（`/home/gem/.codex/tools/codex-<版本>/node_modules/.bin/codex`），
   不使用镜像 `PATH` 上的旧版本；接管容器时核实版本并自动补齐（失败则明确报错，不静默回退）。
 - 每个轮次提交时冻结模型设置：owner 使用统一配置，否则用 `PA_DEFAULT_MODEL`（默认 `gpt-6-sol`）；member 强制 DeepSeek high，提交与执行时均检查，不采用客户端覆盖。升级时有一次受 `meta` 键
@@ -162,11 +192,11 @@ HTTP、SSE、WebSocket、文件预览、上传、终端与浏览器都走同一�
 ## 浏览器内存生命周期
 
 沙箱 Chromium 在无人使用时会被**真正释放**（不是 `SIGSTOP`，也不是停容器），下次按需从快照
-重建。控制面本身从不向进程发信号：它把**受管 helper**（`src/server/browser/scripts/browser-runtime.py`，
+重建。控制面本身从不向进程发信号：它把**受管 helper**（`src/control/browser/scripts/browser-runtime.py`，
 随构建复制到 `dist`，接管时以 root 写进持久卷并校验 digest）按子命令调用，归属核对与信号都在
 helper 内、紧挨着信号发生。
 
-- **状态机**（`src/server/browser/lifecycle.ts`）：`awake / idle / snapshotting / asleep / restoring / error`。
+- **状态机**（`src/control/browser/lifecycle.ts`）：`awake / idle / snapshotting / asleep / restoring / error`。
   聚合四类占用：主 turn（整轮同步租约）、观看者（可见面板心跳、TTL 过期）、进行中的浏览器
   HTTP/WS 调用、以及操作者 pin。默认空闲 5 分钟后进入 `snapshotting`。
 - **竞态防护**：租约同步预留在任何 `await` 之前；快照后再**重新核对**租约，若中途有新增占用则
@@ -216,8 +246,9 @@ helper 内、紧挨着信号发生。
   此规则隔离的是 Codex 工具接入；不声称共享账号访问 token 已变为模型专用权限，也不隔离
   用户在沙箱浏览器中主动登录的网站。沙箱 root/自定义客户端仍属于原有可信执行边界。
 - 只挂载三个命名卷（工作区、CODEX_HOME、浏览器 profile）；不挂载宿主机 home、
-  `/var/run/docker.sock` 或任何 workspace 路径。
-- 容器内以 `gem`(uid 1000) 运行；Node 控制面只以固定参数调用 Docker（固定的容器名、
+  `/var/run/docker.sock` 或任何 workspace 路径。Docker socket 只在 sandboxd 手里（它不运行用户代码，
+  沙箱访问不到它的端口：成员沙箱的出站守卫拒绝私网地址，节点 API 还要令牌）。
+- 容器内以 `gem`(uid 1000) 运行；sandboxd 只以固定参数调用 Docker（固定的容器名、
   固定卷名），没有任意宿主机 shell 通道。
 - 容器创建前会校验**归属标签**、**镜像**与**卷挂载**，名字被别的容器占用时拒绝接管；
   启动时修正 `/home/gem/.config` 等父目录属主并只重启需要的 supervisord 程序（例如 code-server），
@@ -237,7 +268,7 @@ SQLite（`var/personal-agent.sqlite`，WAL）保存 owner、会话、对话、�
 ## 界面品牌（一站）
 
 配色表达“现在该谁动”：靛紫是 AI 在办（也是品牌主色），琥珀是轮到你（全站唯一醒目的颜色），松绿是办完，朱红是出错；
-中性色带一点靛紫。令牌集中在 `src/web/src/styles.css` 顶部（`--ai` / `--you` / `--done` / `--error` 及 `-soft` 浅底、
+中性色带一点靛紫。令牌集中在 `src/ui/src/styles.css` 顶部（`--ai` / `--you` / `--done` / `--error` 及 `-soft` 浅底、
 `--on-accent` / `--on-you` 按钮文字色），深色为默认，浅色随系统或侧栏切换。任务卡左侧 4px 色条（`turn-ai` / `turn-you` /
 `turn-err`；结果卡按完成或失败）、顶部计数胶囊、浏览器卡片和操作面板都只用这四种语义色。标志是一道弧线交出琥珀色圆点
-（`src/web/src/components/Brand.tsx`、`src/web/public/favicon.svg` 与主屏图标）。
+（`src/ui/src/components/Brand.tsx`、`src/ui/public/favicon.svg` 与主屏图标）。

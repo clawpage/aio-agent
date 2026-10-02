@@ -95,7 +95,7 @@ docker exec -u gem personal-agent-sandbox \
 # 加 `docker exec -i` 重定向；注意在项目根目录执行：
 docker exec -i -u root personal-agent-sandbox \
   bash -s -- /home/gem/.codex/tools/aio-doc gem \
-  < src/server/documents/scripts/install-root.sh
+  < src/control/documents/scripts/install-root.sh
 
 # 用户层：venv + python-docx/openpyxl/python-pptx/pypdf/reportlab（gem 自己的脚本，可读路径执行）
 docker exec -u gem personal-agent-sandbox \
@@ -189,7 +189,7 @@ owner 默认不释放（`PA_BROWSER_RELEASE_IDLE=0`）：一个常驻浏览器�
 ```bash
 # 只读状态（父端验收用；绝不停/不停/不唤醒）
 docker exec -i -u root personal-agent-sandbox python3 - status \
-  < src/server/browser/scripts/browser-runtime.py
+  < src/control/browser/scripts/browser-runtime.py
 # 期望：真实运行时 {"ok":true,"browserRunning":true,"browserAttribution":"owned",...}
 # 无法确认归属时必须是 browserRunning:null + "unknown"，绝不当作"不存在"。
 ```
@@ -208,7 +208,7 @@ docker exec -i -u root personal-agent-sandbox python3 - status \
 cd /path/to/aio-agent
 # 0) 只读确认没有正在运行的任务/观看者，并记录当前 Chrome PID/starttime
 docker exec -i -u root personal-agent-sandbox python3 - status \
-  < src/server/browser/scripts/browser-runtime.py
+  < src/control/browser/scripts/browser-runtime.py
 # 1) 快照 -> 睡眠 -> 唤醒，逐步执行并观察真实 PID 变化与标签恢复
 #    snapshot:  docker exec ... python3 /opt/aio-browser/browser-runtime.py snapshot --snapshot <snapshotPath>
 #    stop:      docker exec ... python3 /opt/aio-browser/browser-runtime.py stop --snapshot <snapshotPath> \

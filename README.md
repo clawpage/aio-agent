@@ -9,22 +9,26 @@ Codex + AIO Sandbox 跑在自己的机器上，通过自己的入口访问。
 - **账号分级 / self-hosted**：一个 owner 管理配置，可由管理员创建 member 账号；没有注册入口，账号间隔离运行环境，
   也不对外提供公共 demo。
 - **Codex + AIO Sandbox**：命令、文件、浏览器、桌面、编辑器、笔记本都发生在容器里；
-  控制面只以固定参数调用 Docker，不挂载宿主 home / workspace / `docker.sock`。
+  沙箱容器不挂载宿主 home / workspace / `docker.sock`，只有不运行用户代码的沙箱守护进程 sandboxd 以固定参数调用 Docker。
+- **三层可分开部署**：界面（`src/ui`）、控制（`src/control`）、沙箱（`src/sandbox`）各自构建、各自一个镜像，
+  可以放在同一台机器或分开放；上线前和运行时都会校验版本兼容（见 [deploy/README.md](deploy/README.md)）。
 - **中文 UI**：登录、对话、审批、配置、工作区全部为中文界面。
 - **两个来源**：控制台（主站）与伴随工作区（AIO 全部界面）是两个不同来源，都要求登录，
   未登录一律 401。唯一例外是工作区来源上的公开分享页 `/u/<用户名>/share/<页面名>/`（见「分享网页」）。
 
-本仓库的公开安装入口（Quickstart）只依赖本仓库与宿主已安装的 Docker + Codex CLI；
+本仓库的公开安装入口（Quickstart）只依赖本仓库与宿主已安装的 Docker（三个 Node 进程方式另需 Codex CLI 或 Claude 凭据）；
 公共域名由使用者自行填写，仓库不附带任何公共 demo 入口。
 
 ## Quickstart
 
-前置条件：
+最省事的方式是 Docker Compose：三个镜像（界面、控制、沙箱）一条命令起齐，见 [deploy/README.md](deploy/README.md)。
+
+也可以直接在宿主机上跑三个 Node 进程。前置条件：
 
 - Node.js **>= 24**（见 `package.json` 的 `engines`）
-- 宿主已安装 **Docker**（AIO Agent 用它启动固定版沙箱容器）
-- 宿主 **Codex CLI 已登录**（`codex login`；控制面通过官方方法从宿主机取访问 token，
-  refresh token 永不离开宿主机）——这是真实运行时依赖，不是可选项
+- 宿主已安装 **Docker**（sandboxd 用它启动固定版沙箱容器）
+- 模型凭据：宿主 **Codex CLI 已登录**（`codex login`；控制面通过官方方法从宿主机取访问 token，
+  refresh token 永不离开宿主机），或 Claude Code 凭据（`PA_CLAUDE_CODE_SECRETS_FILE`）配合 `PA_HOST_CODEX=off`
 
 ```bash
 git clone https://github.com/clawpage/aio-agent.git
@@ -32,7 +36,11 @@ cd aio-agent
 npm ci
 cp .env.example .env
 npm run build
-node --env-file=.env dist/server/index.js
+# 控制面与沙箱节点共用的令牌
+printf 'AIO_SANDBOX_NODE_TOKEN=%s\n' "$(openssl rand -hex 32)" > var/sandbox-node.env && chmod 600 var/sandbox-node.env
+PA_SANDBOXD_TOKEN_FILE=var/sandbox-node.env node dist/sandbox/index.js &   # 沙箱层 sandboxd :4894
+node --env-file=.env dist/control/index.js &                                # 控制层 :4892
+node src/ui/edge.mjs                                                        # 界面层 :4891
 ```
 
 `node --env-file=.env` 只在这次启动读取仓库根目录的 `.env`（Quickstart 的配置入口）。
@@ -43,24 +51,25 @@ node --env-file=.env dist/server/index.js
 
 本机访问（两个不同来源，本地开发时分别对应）：
 
-- 控制台（主站）：<http://localhost:4891>
-- 伴随工作区：<http://127.0.0.1:4891>
+- 控制台（主站，经界面层）：<http://localhost:4891>
+- 伴随工作区（控制层）：<http://127.0.0.1:4892>
 
 生产使用者**必须**覆盖 `PA_PRIMARY_HOST` / `PA_WORKSPACE_HOST` 为自己的域名；
 `.env.example` 中的 `agent.example.com` / `workspace.example.com` 只是占位示例，
 不是公共 demo，也没有对应的公共实例。健康检查：
 
 ```bash
-curl -s http://127.0.0.1:4891/healthz
+curl -s http://127.0.0.1:4892/healthz   # 控制层（compatible = 能驱动沙箱节点）
+curl -s http://127.0.0.1:4891/healthz   # 界面层（控制层提供它需要的 API 版本）
 ```
 
 > **兼容保留的运行时标识**：为兼容既有部署，容器名 `personal-agent-sandbox`、命名卷
 > `personal-agent-workspace` / `-codex` / `-browser`、SQLite 文件名 `personal-agent.sqlite`、
 > cookie 名 `pa_*` 与 `PA_*` 环境变量前缀**保持不变**——这些承载既有容器、卷、数据库与登录
 > 状态，改名会丢数据或中断服务。health `service` 字段与 Codex `clientInfo.name` 里的旧标识
-> 只是为兼容已有集成而保留，不是品牌。品牌层为 **一站**（英文 AIO Agent）：页面标题、侧栏、登录页与图标用“一站”，包名与文档仍称 AIO Agent。配色语义：靛紫 = AI 在办（也是品牌主色），琥珀 = 轮到你（全站唯一醒目色），松绿 = 办完，朱红 = 出错；令牌定义在 `src/web/src/styles.css` 顶部，新界面只用这些令牌，不写死颜色。
+> 只是为兼容已有集成而保留，不是品牌。品牌层为 **一站**（英文 AIO Agent）：页面标题、侧栏、登录页与图标用“一站”，包名与文档仍称 AIO Agent。配色语义：靛紫 = AI 在办（也是品牌主色），琥珀 = 轮到你（全站唯一醒目色），松绿 = 办完，朱红 = 出错；令牌定义在 `src/ui/src/styles.css` 顶部，新界面只用这些令牌，不写死颜色。
 
-移动端使用左上角导航按钮打开左侧边栏，不占用底部对话空间；主会话、工作区、配置、主题和退出入口统一放在侧栏。Agent 操作浏览器不会自动展开工作区或切换当前工作区标签；用户可从侧栏手动打开，点击回复中的网页链接会在沙盒浏览器里新开一个属于你的标签页（独立窗口），并直接弹出与“接管”相同的操作面板：面板里是沙箱桌面（noVNC），打开时先把这个标签页的窗口提到最前；点按即点击，双指拖动滚动，noVNC 左侧工具栏的键盘按钮可唤起手机键盘（镜像自带的 noVNC 1.4.0 在手机上有两个问题：键盘一次点按会发成两个键，长按会按住右键 —— 网站的「按住确认你是真人」因此在手机上永远过不了。控制面在沙箱启动时给它打了补丁：一次点按一个键，长按 1 秒后按住左键，双指点按仍是右键；见 `src/server/docker/novncPatch.ts`）；页面被别的窗口盖住时点“切回这个页面”。这类标签页只归你：智能体的标签页列表看不到、也不能读取或操作它们，最多保留最近 3 个，关闭面板即关闭。需要完整桌面时点面板里的“在工作区打开”。标签页服务不可用时退回为打开工作区浏览器。
+移动端使用左上角导航按钮打开左侧边栏，不占用底部对话空间；主会话、工作区、配置、主题和退出入口统一放在侧栏。Agent 操作浏览器不会自动展开工作区或切换当前工作区标签；用户可从侧栏手动打开，点击回复中的网页链接会在沙盒浏览器里新开一个属于你的标签页（独立窗口），并直接弹出与“接管”相同的操作面板：面板里是沙箱桌面（noVNC），打开时先把这个标签页的窗口提到最前；点按即点击，双指拖动滚动，noVNC 左侧工具栏的键盘按钮可唤起手机键盘（镜像自带的 noVNC 1.4.0 在手机上有两个问题：键盘一次点按会发成两个键，长按会按住右键 —— 网站的「按住确认你是真人」因此在手机上永远过不了。控制面在沙箱启动时给它打了补丁：一次点按一个键，长按 1 秒后按住左键，双指点按仍是右键；见 `src/control/sandbox/novncPatch.ts`）；页面被别的窗口盖住时点“切回这个页面”。这类标签页只归你：智能体的标签页列表看不到、也不能读取或操作它们，最多保留最近 3 个，关闭面板即关闭。需要完整桌面时点面板里的“在工作区打开”。标签页服务不可用时退回为打开工作区浏览器。
 
 消息按浏览器本地时区显示“刚刚 / 几分钟前 / 今天 / 昨天 / 日期”，悬停可查看完整时间。
 任务执行中显示实时经过时长，结束后固定为处理用时；不含分配、排队或执行前等待用户补充，
@@ -378,32 +387,32 @@ npm test                 # 单元 + 集成测试（自带假沙箱，无需 Dock
 npm run typecheck
 ```
 
-本机运行（不经过任何 tunnel，只用 loopback）：
+本机运行（不经过任何 tunnel，只用 loopback）：先按 Quickstart 起三个进程，或分别用
+`npm run dev:sandbox` / `npm run dev:control`（tsx watch）/ `npm run dev:ui`（Vite 开发服务器，`/api` 代理到 :4892）。
 
 ```bash
-PA_BIND=127.0.0.1 PA_PORT=4891 node dist/server/index.js
+curl -s http://127.0.0.1:4892/healthz
 # 首次启动会生成 owner 密码到 var/owner-secret.txt（0600，git 忽略，从不写日志）
-curl -s http://127.0.0.1:4891/healthz
 ```
 
-浏览器打开 `http://localhost:4891`（控制台；本地开发中 `127.0.0.1:4891` 是伴随站，
+浏览器打开 `http://localhost:4891`（控制台，经界面层；本地开发中 `127.0.0.1:4892` 是伴随站，
 两者是不同来源，跨站规则与线上一致）。
 
 > 可选：本仓库最初用 workspace 根目录的统一 launcher 管理现有部署
-> （`tools/start.sh start|restart|stop|status personal-agent`）。它属于**现有部署的可选管理方式**，
-> 不是公开安装的必要步骤；公开使用者用上面的 `node --env-file=.env dist/server/index.js` 即可。
+> （`tools/start.sh start|restart|stop|status personal-agent`），它运行 `bin/serve`（三个宿主进程或 compose，
+> 见运行手册）。它属于**现有部署的可选管理方式**，不是公开安装的必要步骤。
 
 ## 验收（分四层，各层职责不同）
 
 ```bash
 npm test                 # 1) vitest 单元 + 集成（自带假沙箱，不需要 Docker/网络）
-npm run smoke            # 2) HTTP + WebSocket 冒烟（默认本地 localhost:4891 + 127.0.0.1:4891）
+npm run smoke            # 2) HTTP + WebSocket 冒烟（默认本地 localhost:4891 + 127.0.0.1:4892）
 npx playwright test      # 3) 真实浏览器 UI（默认本地 http://localhost:4891）
 # 真实公网验收：显式指定两个 origin（缺省只跑本地）
 PA_PRIMARY_ORIGIN=https://agent.example.com \
 PA_COMPANION_ORIGIN=https://workspace.example.com npm run smoke
 
-# 本地假后端 UI 验收：静态 dist/web + 全部 /api 由 page.route mock，不会访问任何实例
+# 本地假后端 UI 验收：静态 dist/ui + 全部 /api 由 page.route mock，不会访问任何实例
 npx playwright install chromium webkit # 首次准备浏览器运行时
 npm run build && npx playwright test --config playwright.local.config.ts
 ```
@@ -414,7 +423,7 @@ npm run build && npx playwright test --config playwright.local.config.ts
 | `python3 tests/unit/browser-runtime.test.py` | 容器内受管 helper 的纯函数与安全边界：真实 flattened cmdline 归属、`unknown` 不等于 `absent`、快照 schema/原子 0600、精确 PID/starttime 校验后才停、按 origin 限定且在导航前注入 `sessionStorage`、AIO soft 重连与激活 index、错误脱敏 |
 | `npm run smoke` | 真实 HTTPS 登录与 cookie 属性、模型列表、一次性票据（重放与开放重定向）、伴随站会话与跨源续期、经鉴权的 shell 调用、上传与列目录、跨源写入拒绝、原生界面可达、未登录时各表面一律 401、**真实 WebSocket 升级**（已登录 101 / 未登录 401） |
 | `npx playwright test` | 登录界面（错误密码与正确密码）、对话页输入区不含任何模型/思考控件、统一配置页默认选中 GPT-6-Sol（桌面侧栏与手机底导航入口）、打开工作区后立刻切标签的竞态、连续切换最终落在最后点击的标签、真实文件列表与 code-server 可达、无横向溢出 |
-| `npx playwright test --config playwright.local.config.ts` | 会话文件卡片与统一预览（图片缩略图/分页翻页/下载/失败重试/360px 无溢出）、工作区「文件」唯一入口/上传/目录导航/转换/迟到结果不跳目录、本地假后端（默认 `dist/web`，可用 `PA_TEST_WEB_ROOT` 指向 scratch 构建 + 全部 `/api` 由 `page.route` mock）：会话 `⋯` 菜单/重命名/归档/恢复且无删除、失败重命名保留输入、运行态与 `prefers-reduced-motion`、Markdown 链接只进沙箱浏览器（`mailto:`/相对链接保持不可导航）、归档行标题不可点、统一配置页保存/刷新持久化/跨会话生效/失败反馈/无模型列表时禁用保存/返回会话保留草稿、活动段混排（文本/活动多段次序、当前条唯一且置底、段独立展开且增量不重置、迟到日志回原段、空占位不切段、状态行在活动段之上）、默认收起/点击与键盘展开收起/终态停动画/审批露出/长历史展开自然高度（段自身不滚动）与行可达（桌面 1440×900，手机 390/360 含 WebKit，短视口与暗亮无溢出） |
+| `npx playwright test --config playwright.local.config.ts` | 会话文件卡片与统一预览（图片缩略图/分页翻页/下载/失败重试/360px 无溢出）、工作区「文件」唯一入口/上传/目录导航/转换/迟到结果不跳目录、本地假后端（默认 `dist/ui`，可用 `PA_TEST_WEB_ROOT` 指向 scratch 构建 + 全部 `/api` 由 `page.route` mock）：会话 `⋯` 菜单/重命名/归档/恢复且无删除、失败重命名保留输入、运行态与 `prefers-reduced-motion`、Markdown 链接只进沙箱浏览器（`mailto:`/相对链接保持不可导航）、归档行标题不可点、统一配置页保存/刷新持久化/跨会话生效/失败反馈/无模型列表时禁用保存/返回会话保留草稿、活动段混排（文本/活动多段次序、当前条唯一且置底、段独立展开且增量不重置、迟到日志回原段、空占位不切段、状态行在活动段之上）、默认收起/点击与键盘展开收起/终态停动画/审批露出/长历史展开自然高度（段自身不滚动）与行可达（桌面 1440×900，手机 390/360 含 WebKit，短视口与暗亮无溢出） |
 | 人工/父端验收 | VNC 桌面帧流、浏览器 CDP 帧流、手机 390/360 实际交互与截图 |
 
 `npm run smoke` 会读取 `var/owner-secret.txt`（或用 `PA_OWNER_SECRET_FILE` 指定）。
@@ -426,7 +435,17 @@ npm run build && npx playwright test --config playwright.local.config.ts
 
 | 变量 | 默认 | 说明 |
 | --- | --- | --- |
-| `PA_PORT` / `PA_BIND` | `4891` / `127.0.0.1` | 控制面监听地址 |
+| `PA_PORT` / `PA_BIND` | `4892` / `127.0.0.1` | 控制面监听地址 |
+| `PA_UI_PORT` | `4891` | 界面层所在端口（本机开发时允许 `localhost:<端口>` 作为控制台来源） |
+| `PA_SANDBOX_NODES` | `local=http://127.0.0.1:4894` | 控制面驱动的沙箱节点（`名字=地址`，逗号分隔；第一个承载已有账号，新账号放到剩余内存最多的节点） |
+| `PA_SANDBOX_NODE_TOKENS_FILE` | `var/sandbox-node.env` | 节点令牌：先按节点名取，取不到用 `AIO_SANDBOX_NODE_TOKEN` |
+| `PA_HOST_CODEX` | `on` | `off` 表示本机没有 Codex 登录（控制面容器）：owner 用 Claude Code 或桥模型，不提供 ChatGPT 模型 |
+| `PA_OPENCODE_GO_UPSTREAM_URL` | 桥地址里的 `host.docker.internal` 换成 `127.0.0.1` | 控制面自己访问桥的地址（成员网关转发用）；在容器里设为 `http://host.docker.internal:4017/v1` |
+| `PA_SANDBOXD_PORT` / `PA_SANDBOXD_BIND` / `PA_SANDBOXD_TOKEN_FILE` | `4894` / `127.0.0.1` / 无 | sandboxd 监听地址与节点令牌文件（键 `AIO_SANDBOX_NODE_TOKEN`） |
+| `PA_SANDBOXD_IMAGES` | `ghcr.io/agent-infra/sandbox:1.11.0` | sandboxd 允许的沙箱镜像，其他一律拒绝 |
+| `PA_SANDBOXD_CONTAINER_HOST` | `127.0.0.1` | sandboxd 访问沙箱发布端口的地址；在 Docker Desktop 容器里是 `host.docker.internal` |
+| `PA_SANDBOXD_GATEWAY_UPSTREAM` | 空 | 控制面在别的机器时，sandboxd 把沙箱回连的网关请求中继过去（配 `PA_SANDBOXD_GATEWAY_BIND/PORT`） |
+| `AIO_UI_PORT` / `AIO_CONTROL_URL` / `AIO_WORKSPACE_ORIGIN` | `4891` / `http://127.0.0.1:4892` / 空 | 界面层 edge 的监听端口、控制面地址、允许嵌入的工作区来源（CSP） |
 | `PA_PRIMARY_HOST` / `PA_WORKSPACE_HOST` | 源码默认 `agent.clawpage.ai` / `agent-workspace.clawpage.ai`（当前部署） | **生产使用者必须覆盖**为自己的两个精确域名；`.env.example` 用 `agent.example.com` / `workspace.example.com` 占位 |
 | `PA_TRUST_CF_CONNECTING_IP` | `0` | 仅当请求确实经由自己可信的反向代理（会覆盖 `CF-Connecting-IP`）时才设为 `1`；否则限速可被伪造头绕过 |
 | `PA_SANDBOX_IMAGE` | `ghcr.io/agent-infra/sandbox:1.11.0` | 固定镜像，升级需人工确认 |
@@ -467,6 +486,7 @@ npm run build && npx playwright test --config playwright.local.config.ts
 
 ## 文档
 
+- [部署](deploy/README.md)：三层镜像、Docker Compose、多机、版本兼容、数据卷
 - [运行手册](docs/RUNBOOK.md)：启停、健康、日志、凭据、tunnel/DNS、故障处理
 - [架构与安全边界](docs/ARCHITECTURE.md)：两个来源、会话与 CSRF、执行模型、token 边界
 - [AIO 能力清单](docs/AIO-CAPABILITIES.md)：按固定镜像实测的 140 个接口与原生界面入口
