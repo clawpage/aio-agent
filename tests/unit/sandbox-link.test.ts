@@ -70,9 +70,10 @@ describe("sandbox link classification", () => {
     expect(workspaceFileKind(`${SANDBOX_WORKSPACE_ROOT}/x.docx`)).toBe("word");
     expect(workspaceFileKind(`${SANDBOX_WORKSPACE_ROOT}/x.xlsx`)).toBe("excel");
     expect(workspaceFileKind(`${SANDBOX_WORKSPACE_ROOT}/x.pptx`)).toBe("ppt");
-    // Markdown source, HTML and SVG are shown as escaped text, never markup.
+    // Markdown source and HTML are shown as escaped text, never markup; SVG is a picture in an <img>.
     expect(workspaceFileKind(`${SANDBOX_WORKSPACE_ROOT}/x.txt`)).toBe("text");
-    expect(workspaceFileKind(`${SANDBOX_WORKSPACE_ROOT}/x.svg`)).toBe("text");
+    expect(workspaceFileKind(`${SANDBOX_WORKSPACE_ROOT}/x.html`)).toBe("text");
+    expect(workspaceFileKind(`${SANDBOX_WORKSPACE_ROOT}/x.svg`)).toBe("image");
     expect(workspaceFileKind(`${SANDBOX_WORKSPACE_ROOT}/x.png.txt`)).toBe("text");
     // Nothing is guessed: an unknown extension is download-only.
     expect(workspaceFileKind(`${SANDBOX_WORKSPACE_ROOT}/x`)).toBe("unsupported");

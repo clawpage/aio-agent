@@ -10,7 +10,7 @@ import path from "node:path";
  */
 const ROOT = path.resolve(import.meta.dirname, "..", "..", "src");
 const LAYERS = ["ui", "control", "sandbox", "common"] as const;
-const UI_SAFE_COMMON = new Set(["version"]);
+const UI_SAFE_COMMON = new Set(["version", "svg"]);
 
 function files(dir: string): string[] {
   return fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => {

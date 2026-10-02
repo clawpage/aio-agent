@@ -3,9 +3,11 @@ import { marked } from "marked";
 import DOMPurify from "dompurify";
 import { api, API_CREDENTIALS } from "../api";
 import { isSandboxLink, isWorkspaceFilePath, workspaceFileKind, workspaceFilePathFromHref } from "../sandboxLink";
-import { splitMapBlocks } from "../mapBlocks";
+import { splitMapBlocks, type MessagePart } from "../mapBlocks";
+import { splitSvgBlocks, type SvgPart } from "../svgBlocks";
 import { cjkStrong } from "../markdownStrong";
 import { MapCard } from "./MapCard";
+import { SvgCard } from "./SvgCard";
 
 marked.setOptions({ gfm: true, breaks: true });
 
@@ -78,15 +80,20 @@ type MarkdownProps = {
   onOpenFile?: (path: string) => void;
 };
 
-/** A message: Markdown, with any ```map blocks drawn as map cards where they stand. */
+/** A message: Markdown, with ```map blocks drawn as map cards and ```svg blocks as pictures where they stand. */
 export function Markdown(props: MarkdownProps) {
-  const parts = useMemo(() => splitMapBlocks(props.source ?? ""), [props.source]);
+  const parts = useMemo(
+    () => splitMapBlocks(props.source ?? "").flatMap<MessagePart | SvgPart>((part) => (part.kind === "text" ? splitSvgBlocks(part.text) : [part])),
+    [props.source],
+  );
   if (parts.length === 1 && parts[0]!.kind === "text") return <MarkdownBlock {...props} source={parts[0]!.text} />;
   return (
     <>
       {parts.map((part, i) => part.kind === "map"
         ? <MapCard key={i} place={part.place} />
-        : <MarkdownBlock key={i} {...props} source={part.text} />)}
+        : part.kind === "svg"
+          ? <SvgCard key={i} code={part.code} />
+          : <MarkdownBlock key={i} {...props} source={part.text} />)}
     </>
   );
 }

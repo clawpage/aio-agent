@@ -29,20 +29,21 @@ export const IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "webp", "gif", "a
  * and re-validates, this only decides which control to render.
  *
  * `text` uses the size-capped text endpoint. Markdown gets a sanitized reading
- * view; HTML/SVG/code remain escaped source, never active documents.
+ * view; HTML/code remain escaped source, never active documents. SVG is an image,
+ * drawn only by an <img>, where its scripts never run.
  */
 export type WorkspaceFileKind = "image" | "video" | "pdf" | "word" | "excel" | "ppt" | "text" | "unsupported";
 
 const KIND_BY_EXTENSION: Record<string, WorkspaceFileKind> = {
   mp4: "video",
-  png: "image", jpg: "image", jpeg: "image", webp: "image", gif: "image", avif: "image", bmp: "image",
+  png: "image", jpg: "image", jpeg: "image", webp: "image", gif: "image", avif: "image", bmp: "image", svg: "image",
   pdf: "pdf",
   doc: "word", docx: "word", odt: "word", rtf: "word",
   xls: "excel", xlsx: "excel", ods: "excel",
   ppt: "ppt", pptx: "ppt", odp: "ppt",
   txt: "text", md: "text", markdown: "text", log: "text", csv: "text", tsv: "text", json: "text",
   yml: "text", yaml: "text", toml: "text", ini: "text", conf: "text", xml: "text",
-  html: "text", htm: "text", svg: "text", css: "text",
+  html: "text", htm: "text", css: "text",
   js: "text", mjs: "text", cjs: "text", ts: "text", tsx: "text", jsx: "text",
   py: "text", sh: "text", sql: "text", diff: "text", patch: "text",
 };

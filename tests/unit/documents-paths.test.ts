@@ -75,9 +75,10 @@ describe("document kind classification", () => {
     expect(documentKind(`${ROOT}/x.png.txt`)).toBe("text");
   });
 
-  it("treats HTML and SVG as text, never as renderable markup", () => {
+  it("treats HTML as text, never as renderable markup, and SVG as an image (drawn only by an <img>)", () => {
     expect(documentKind(`${ROOT}/x.html`)).toBe("text");
-    expect(documentKind(`${ROOT}/x.svg`)).toBe("text");
+    expect(documentKind(`${ROOT}/x.svg`)).toBe("image");
+    expect(documentKind(`${ROOT}/x.SVG`)).toBe("image");
     expect(isRenderableKind("text")).toBe(false);
   });
 

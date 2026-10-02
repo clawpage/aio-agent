@@ -20,8 +20,10 @@ export type DocumentKind = "image" | "video" | "pdf" | "word" | "excel" | "ppt" 
  * are rendered to page rasters inside the sandbox; text is shown escaped with a
  * size cap. Everything else is download-only — never guessed as renderable.
  *
- * HTML and SVG are deliberately `text`: they are displayed escaped, never parsed
- * as markup, so agent-produced active content cannot execute in the console.
+ * HTML is deliberately `text`: it is displayed escaped, never parsed as markup, so
+ * agent-produced active content cannot execute in the console. SVG is an `image`:
+ * it is only ever drawn by an <img> (and served under a sandboxing CSP), where its
+ * scripts never run and it loads nothing.
  */
 const KIND_BY_EXTENSION: Record<string, DocumentKind> = {
   mp4: "video",
@@ -32,6 +34,7 @@ const KIND_BY_EXTENSION: Record<string, DocumentKind> = {
   gif: "image",
   avif: "image",
   bmp: "image",
+  svg: "image",
   pdf: "pdf",
   doc: "word",
   docx: "word",
@@ -58,7 +61,6 @@ const KIND_BY_EXTENSION: Record<string, DocumentKind> = {
   xml: "text",
   html: "text",
   htm: "text",
-  svg: "text",
   css: "text",
   js: "text",
   mjs: "text",

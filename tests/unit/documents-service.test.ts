@@ -388,6 +388,28 @@ describe("DocumentService image", () => {
   });
 });
 
+describe("DocumentService SVG images", () => {
+  it("serves a real SVG as image/svg+xml and refuses other markup behind an .svg name", async () => {
+    const svg = '<?xml version="1.0"?>\n<!-- chart -->\n<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><rect width="10" height="10"/></svg>';
+    const { svc } = service(baseHandler({ realPath: `${ROOT}/chart.svg`, size: String(svg.length) }));
+    let body = svg;
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response(new TextEncoder().encode(body), { status: 200 }));
+    try {
+      const result = await svc.image(`${ROOT}/chart.svg`);
+      expect(result.contentType).toBe("image/svg+xml");
+      expect(result.bytes.toString("utf8")).toBe(svg);
+      body = "<html><script>alert(1)</script></html>";
+      await expect(svc.image(`${ROOT}/chart.svg`)).rejects.toMatchObject({ code: "unsupported" });
+      // SVG text behind a raster name is not a PNG either.
+      const png = service(baseHandler({ realPath: `${ROOT}/a.png`, size: "100" }));
+      body = svg;
+      await expect(png.svc.image(`${ROOT}/a.png`)).rejects.toMatchObject({ code: "unsupported" });
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+});
+
 describe("DocumentService readiness", () => {
   it("reports not-ready as data rather than throwing", async () => {
     const { svc } = service(() => ({ code: 0, stdout: `${JSON.stringify({ ok: true, ready: false, previewReady: false, authoringReady: false, missing: ["libreoffice"] })}\n`, stderr: "" }));

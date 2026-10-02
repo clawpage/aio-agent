@@ -4,8 +4,10 @@ import path from "node:path";
 import type { Config } from "../config.js";
 import type { Logger } from "../../common/logger.js";
 import type { SandboxContainer } from "../sandbox/container.js";
+import { looksLikeSvg } from "../../common/svg.js";
 import {
   documentKind,
+  extensionOf,
   isInsideWorkspace,
   isRenderableKind,
   quoteArg,
@@ -981,7 +983,8 @@ print("venv" if venv_python else "novenv")
       throw new DocumentError("too_large", `图片超过 ${formatBytes(MAX_IMAGE_BYTES)}，请下载后查看`, 413);
     }
     const bytes = await this.#fetchSandboxFile(stat.realPath);
-    const contentType = sniffImage(bytes);
+    // An .svg must really be an SVG; a raster extension must hold raster bytes.
+    const contentType = extensionOf(validatedPath) === "svg" ? (looksLikeSvg(bytes.toString("utf8")) ? "image/svg+xml" : null) : sniffImage(bytes);
     if (!contentType) {
       throw new DocumentError("unsupported", "文件内容不是可识别的图片格式", 415);
     }

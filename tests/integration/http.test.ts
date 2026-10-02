@@ -1209,6 +1209,23 @@ describe("document endpoints", () => {
       expect((await h.request("/api/documents/html?path=/home/gem/workspace/demo.html",{host:"workspace",headers:{cookie:wsCookie}})).status).toBe(413);
     } finally {text.mockRestore();}
   });
+  it("serves a workspace SVG only as an image under a scriptless sandbox CSP", async () => {
+    const { cookie } = await login(h);
+    const image = vi.spyOn(h.ctx.documents, "image").mockResolvedValue({ bytes: Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>'), contentType: "image/svg+xml" });
+    try {
+      const res = await h.request("/api/documents/image?path=/home/gem/workspace/chart.svg", { headers: { cookie } });
+      expect(res.status).toBe(200);
+      expect(res.headers.get("content-type")).toBe("image/svg+xml");
+      expect(res.headers.get("x-content-type-options")).toBe("nosniff");
+      const csp = res.headers.get("content-security-policy")!;
+      expect(csp).toContain("default-src 'none'");
+      expect(csp).toMatch(/(^|; )sandbox($|;)/);
+      expect(csp).not.toContain("allow-scripts");
+    } finally {
+      image.mockRestore();
+    }
+  });
+
   it("requires a session for every document route", async () => {
     for (const path of [
       "/api/documents/readiness",

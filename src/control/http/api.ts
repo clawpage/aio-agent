@@ -1344,6 +1344,9 @@ export function createApiRouter(context: AppContext): Router {
       const image = await context.documents.image(target);
       res.setHeader("Content-Type", image.contentType);
       res.setHeader("X-Content-Type-Options", "nosniff");
+      // An SVG opened on its own (not through an <img>) still runs no script and
+      // loads nothing: an opaque, scriptless origin.
+      res.setHeader("Content-Security-Policy", "default-src 'none'; img-src data:; style-src 'unsafe-inline'; font-src data:; sandbox");
       res.setHeader("Cache-Control", "no-store");
       res.setHeader("Content-Disposition", "inline");
       res.end(image.bytes);
