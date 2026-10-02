@@ -5,6 +5,7 @@ import type { Attachment, Task } from "../types";
 import { AttachmentCards, MessageFileCards } from "./Chat";
 import { DispatchLog } from "./DispatchLog";
 import { Markdown } from "./Markdown";
+import { ChoiceList } from "./ChoiceList";
 import { FilePreview } from "./FilePreview";
 import { TaskBrowser } from "./TaskBrowser";
 import type {TaskFeed} from '../taskStatus';
@@ -41,6 +42,8 @@ export function TaskChat({ onDetails, onOpenLink, onExpired, onFeed, onRevealBro
     const [dispatchLogFor, setDispatchLogFor] = useState<string | null>(null);
     const [nextBefore, setNextBefore] = useState<number | null>(null);
     const [reference, setReference] = useState<{ id: string; title: string } | null>(null);
+    /** Answers tapped, by the task (and its revision) they answer. */
+    const [choosing, setChoosing] = useState<Record<string, string>>({});
     const [draft, setDraft] = useState("");
     const [attachments, setAttachments] = useState<Attachment[]>([]);
     const [busy, setBusy] = useState(false);
@@ -133,6 +136,29 @@ export function TaskChat({ onDetails, onOpenLink, onExpired, onFeed, onRevealBro
             setBusy(false);
         }
     };
+    /**
+     * A tapped answer: sent as the reply to that task, without touching the draft.
+     * The same tap (same task revision and answer) is never sent twice.
+     */
+    const choose = async (t: Task, option: string) => {
+        // Keyed by revision: once the task moves on (or asks again), its old tap no longer counts.
+        const key = `${t.id}:${t.revision}`;
+        if (choosing[key]) return;
+        setChoosing(old => ({ ...old, [key]: option }));
+        setError(null);
+        try {
+            const { task } = await api.submitTask({ text: option, attachments: [], relatedTaskId: t.id, clientMessageId: `choice:${key}:${option}` });
+            stick.current = true;
+            merge([task]);
+            void refresh();
+        }
+        catch (err) {
+            setChoosing(old => { const next = { ...old }; delete next[key]; return next; });
+            setError(`${err instanceof Error ? err.message : String(err)}（可以再点一次）`);
+        }
+    };
+    /** The reply a finished task got after it asked, if any: its answers are then closed. */
+    const replyTo = (t: Task) => tasks.find(x => x.id !== t.id && (x.relatedTaskId === t.id || x.mergedInto === t.id) && x.createdAt >= (t.completedAt ?? t.createdAt));
     const pick = async (files: FileList | null) => {
         if (!files)
             return;
@@ -188,7 +214,9 @@ export function TaskChat({ onDetails, onOpenLink, onExpired, onFeed, onRevealBro
           {t.waitReason && <p className="task-intro task-wait-reason">{t.waitReason.message}</p>}
           {t.status === "needs_input" && t.clarification && <div className="task-question" role="status" aria-label="需要你补充">
             <div className="task-question-heading"><span aria-hidden="true">?</span><strong>需要你补充</strong></div>
-            <p>{t.clarification}</p><span className="task-question-hint">直接在下方输入回复即可</span>
+            <p>{t.clarification}</p>
+            {t.options?.length ? <ChoiceList options={t.options} chosen={choosing[`${t.id}:${t.revision}`] ?? null} onChoose={option => void choose(t, option)}/> : null}
+            <span className="task-question-hint">{t.options?.length ? "点选一个，或直接在下方输入" : "直接在下方输入回复即可"}</span>
           </div>}
           {t.description && ["running", "stopping"].includes(t.status) && <p className="task-intro">{t.description}</p>}
           <TaskBrowser task={t} onReveal={onRevealBrowser}/>
@@ -207,7 +235,7 @@ export function TaskChat({ onDetails, onOpenLink, onExpired, onFeed, onRevealBro
       {!tasks.length && <div className="empty"><h3>把事情交给我</h3><p>可以接着发不同任务。过程会收拢，完成后在这里回报。</p></div>}
       {feed.map(({ task: t, report }) => report ? <article className={`msg assistant task-report ${t.status}`} key={`${t.id}:report`} data-task-id={t.id}>
         <div className="task-report-heading"><span>{t.title}</span>{t.schedule && <span className="schedule-badge">定时 · {t.schedule.rule}</span>}<span className="muted tiny">{labels[t.status]}</span></div>
-        <div className="bubble"><Markdown source={t.result || (t.status === "completed" ? "任务已结束，但没有返回文字结果，请打开详情核对。" : t.error || labels[t.status] || t.status)} onOpenLink={onOpenLink} onOpenFile={setPreview}/>{t.result && <MessageFileCards text={t.result} onOpen={setPreview}/>}{t.error && t.result && <p className="error">{t.error}</p>}</div>
+        <div className="bubble"><Markdown source={t.result || (t.status === "completed" ? "任务已结束，但没有返回文字结果，请打开详情核对。" : t.error || labels[t.status] || t.status)} onOpenLink={onOpenLink} onOpenFile={setPreview} choices={{ onChoose: option => void choose(t, option), chosen: choosing[`${t.id}:${t.revision}`] ?? replyTo(t)?.text ?? null }}/>{t.result && <MessageFileCards text={t.result} onOpen={setPreview}/>}{t.error && t.result && <p className="error">{t.error}</p>}</div>
         <TaskBrowser task={t} onReveal={onRevealBrowser}/>
         <div className="message-meta"><MessageTime at={t.completedAt} now={now}/><TaskDuration task={t} now={now}/></div>
         <div className="task-actions"><button className="ghost tiny" disabled={busy} onClick={() => quoteTask(t)} aria-label={`引用任务：${t.title}`}>引用任务</button><button className="ghost tiny" onClick={() => onDetails(t)}>查看过程</button></div>

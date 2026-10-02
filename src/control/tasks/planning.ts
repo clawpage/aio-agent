@@ -23,6 +23,8 @@ export interface TaskPlan {
     title: string;
     description?: string;
     clarification?: string | null;
+    /** Answers the person can tap instead of typing, when the question is a pick among a few. */
+    options?: string[] | null;
     related: string[];
     dependencies: string[];
     resources: string[];
@@ -81,7 +83,7 @@ export function planningPrompt(text: string, previous: PlanningTask[], explicit:
     const ordered = [...previous].sort((a, b) => (b.created_at ?? -Infinity) - (a.created_at ?? -Infinity));
     return [
         "你是 AIO Agent 的主会话派单器。先判断新消息是已有任务的补充还是独立新任务。只做分类，绝不执行任务、调用工具或读取文件。",
-        "只返回 JSON：{title:string,description:string,appendTo:string|null,resume:string|null,related:string[],dependencies:string[],resources:string[],clarification:string|null}。标题不超过40字。",
+        "只返回 JSON：{title:string,description:string,appendTo:string|null,resume:string|null,related:string[],dependencies:string[],resources:string[],clarification:string|null,options:string[]|null}。标题不超过40字。",
         "主会话时序最重要：mainSessionTimeline 按时间先后列出用户最近的消息、各自归属的任务和助理最后向用户问的问题，最后一条（▶）就是本消息。理解指代、简短回复和确认时，先看它紧挨着的前文。",
         "resume 默认 null。当本消息是在回应某个已结束任务（completed/failed/interrupted/unknown）最后向用户提出的问题或确认请求（例如该任务最后问“需要你授权……吗？”，用户回“已授权/可以/确认”），或要求在那个任务原有的现场继续（同一页面、同一流程、同一份交付物接着做），resume 填该任务 id：系统会续接它原来的执行会话，保留完整上下文。resume 与 appendTo 互斥（进行中的任务用 appendTo），resume 的任务也要放进 related。只是借鉴旧任务的结果、但开始一件新的事时不要 resume，用 related 关联即可。",
         "decisionHint 若存在，是独立判断模型（Jev）按主会话时间线给出的：本消息最可能接续的任务 id（NEW 表示独立新任务）及概率。confident=true 时，除非消息明确点名了别的任务里的实体，按它决定 appendTo/resume/related；confident=false 时只作参考。",
@@ -90,6 +92,7 @@ export function planningPrompt(text: string, previous: PlanningTask[], explicit:
         "相邻优先：previous 按创建时间从新到旧排列，order=1 是紧挨着本消息之前的任务，time 是创建时刻。越相邻的任务越可能是本消息的上下文。没有明确主语的追问（如“有实体卡槽吗”“多少钱”“这个呢”“那个颜色”）默认承接 order 最小的那条相关对话，其话题就是本消息的对象，related 必须包含它。只有消息明确点名了更早任务里的实体（产品名、人名、地点、文件等），或最近几项与本消息明显无关时，才关联更早的任务；不能仅因为关键词与更早任务重合（例如都提到 SIM、价格）就越过最近的对话。appendTo 仍须语义上属于同一任务。",
         "用户补充正在进行任务的地址、条件、纠正、偏好、答案或同一交付物的额外要求，appendTo 必须选该任务id，直接追加，不创建依赖任务。例如先规划带娃三天旅游，后说民宿住在某地址并推荐餐厅，属于同一行程任务补充。",
         "clarification 默认 null。仅当缺少决定任务能否有效开展的关键信息、无法从当前消息或明确相关的历史上下文得知、也无法合理默认时，才用一句简短自然的问题一次问齐（不超过200字）。例如实际查机票缺目的地或出行日期，应问缺少的项；只有预算、航司、酒店档次、排版风格等非必要偏好未提供时，不追问，合理默认后开展工作。用户要一般建议、方法、开放式探索、愿意灵活日期或目的地时，不强迫提供精确条件。不要要求用户重复已提供的资料，不编造日期或目的地。若已有附件可能包含所缺资料，应先让执行者读取附件，不因你尚未读取附件而提问。",
+        "options 默认 null。clarification 是在几个明确答案里选一个时（例如哪个品牌、哪一家店、哪一天、要不要），同时给 options：2–5 个简短选项，每项是可以直接作为回答的完整说法（不超过30字），按最可能的排在前面，可以包含“都比较一下”这类合并选项，不要“其他”；用户可点选，也可自己输入。开放式问题（需要用户说出日期、地址、具体数字等）options 为 null。",
         "克制追问：不要做问卷，不为追求完美反复询问，不索取无关个人信息。只问当前真正阻塞的项；用户明确说自行决定时尽量给可行默认方案。若消息是对 needs_input 任务问题的回答或部分回答，appendTo 指向该任务，clarification=null，原任务将结合回答重新判断。无关新任务正常创建，不当作回答。显式关联 needs_input 的消息优先作为该任务的回答。",
         "只能向 planning/needs_input/waiting/queued/running 的任务追加。同主题但明确要求独立交付、等前一项完成再做，或无关任务，appendTo=null，按新任务和依赖处理。不能把所有消息都追加给最后一项；必须语义上属于同一任务。",
         "related 是理解本任务有帮助的历史任务id；无关任务不要关联。dependencies 是必须先完成才可执行的任务id，必须也在related里。",
@@ -214,6 +217,7 @@ export function parsePlan(raw: string | null, previous: PlanningTask[], explicit
     }
     else if (p.clarification != null && typeof p.clarification !== "string") report.repairs.push("clarification 不是文字，已忽略");
     if (appendTo || resume || schedule || scheduleAction) clarification = null;
+    const options = clarification ? parseOptions((p as { options?: unknown }).options, report) : null;
     // What must stay first when trimming: the reference, the append or resume target, then dependencies.
     const all = [...new Set([...(explicit ? [explicit] : []), ...(appendTo ? [appendTo] : []), ...(resume ? [resume] : []), ...dependencies, ...known(p.related, "related"), ...background])];
     if (all.length > MAX_RELATED) report.repairs.push(`related 共 ${all.length} 个，只保留 ${MAX_RELATED} 个`);
@@ -223,5 +227,30 @@ export function parsePlan(raw: string | null, previous: PlanningTask[], explicit
     const overview = ((typeof p.description === "string" ? p.description.trim() : "") || `我会围绕“${p.title.trim()}”梳理需要处理的重点，完成后给你整理好的结果和需要关注的事项。`).replace(/\s+/g, " ");
     const chars = [...overview];
     const description = chars.length > 100 ? chars.slice(0, 99).join("") + "…" : overview;
-    return { title: [...p.title.trim()].slice(0, 40).join(""), related, dependencies: dependencies.filter(id => id !== appendTo && id !== resume && kept.has(id)), resources: [...new Set(resources as string[])], appendTo, resume, description, clarification, ...(schedule ? { schedule } : {}), ...(scheduleAction ? { scheduleAction } : {}) };
+    return { title: [...p.title.trim()].slice(0, 40).join(""), related, dependencies: dependencies.filter(id => id !== appendTo && id !== resume && kept.has(id)), resources: [...new Set(resources as string[])], appendTo, resume, description, clarification, ...(options ? { options } : {}), ...(schedule ? { schedule } : {}), ...(scheduleAction ? { scheduleAction } : {}) };
+}
+
+/** 2–5 distinct short answers, or null; anything else is dropped with a note, never fails the plan. */
+function parseOptions(raw: unknown, report: PlanReport): string[] | null {
+    if (raw == null) return null;
+    if (!Array.isArray(raw)) {
+        report.repairs.push("options 不是列表，已忽略");
+        return null;
+    }
+    const seen = new Set<string>();
+    const options: string[] = [];
+    for (const item of raw) {
+        if (typeof item !== "string") continue;
+        const text = item.replace(/\s+/g, " ").trim();
+        if (!text || [...text].length > 30 || seen.has(text)) continue;
+        seen.add(text);
+        options.push(text);
+    }
+    if (options.length > 5) report.repairs.push("options 超过 5 个，只保留前 5 个");
+    const kept = options.slice(0, 5);
+    if (kept.length < 2) {
+        report.repairs.push("options 不足 2 个有效选项，已忽略");
+        return null;
+    }
+    return kept;
 }

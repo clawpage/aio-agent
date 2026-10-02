@@ -2855,6 +2855,52 @@ textarea:focus {
   font-size: 13px;
 }
 
+/* ------------------------------------------------------------- answer choices */
+/* A question's answers to tap: one per row, the one sent checked, the rest then closed. */
+.choice-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 460px;
+  margin: 10px 0 6px;
+}
+.choice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 14px;
+  text-align: left;
+  font: inherit;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px dashed color-mix(in srgb, var(--text-dim) 55%, var(--border));
+  border-radius: 12px;
+  cursor: pointer;
+  transition: border-color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease);
+}
+.choice:hover:not(:disabled) { border-color: var(--accent); border-style: solid; }
+.choice:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.choice:disabled { cursor: default; opacity: 0.55; }
+.choice.picked {
+  opacity: 1;
+  border: 1.5px solid var(--text);
+  background: var(--bg-raised);
+}
+.choice-check {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  font-size: 14px;
+  color: var(--bg);
+  background: var(--text);
+}
+
 /* ------------------------------------------------------------- svg cards */
 /* An SVG from a message, drawn as a picture (an <img>), its source one tap away. */
 .svg-card {

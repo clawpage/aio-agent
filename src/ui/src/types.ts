@@ -184,6 +184,8 @@ export interface DocumentRender {
 export interface Task {
   waitReason?: { label: string; message: string } | null;
   clarification?: string | null;
+  /** Answers to tap for a pending question. */
+  options?: string[] | null;
   description?: string | null;
   mergedInto?: string | null;
   mergedTitle?: string | null;

@@ -93,6 +93,39 @@ describe("main inbox delegation", () => {
         expect(codex.startedTurns[1]?.text).toContain("巴黎到罗马");
         expect(tasks.submit({text:"示例：巴黎到罗马，10月12日",relatedTaskId:parent.id,clientMessageId:"示例：巴黎到罗马，10月12日"}).duplicate).toBe(true);
     });
+    it("offers tappable answers with a question, and sends a tapped one straight back without a second dispatch", async () => {
+        codex.plan = async p => {
+            const data = JSON.parse(p.split("\n").at(-1)!);
+            const answered = data.message.includes("用户补充：");
+            return JSON.stringify({title:"水奶比价",related:[],dependencies:[],resources:[],
+                clarification: answered ? null : "你平时给宝宝喝哪个牌子的水奶？",
+                options: answered ? null : ["Similac（雅培）","Enfamil（美赞臣）","两个牌子都比一下"]});
+        };
+        const parent=submit("比价amazon和target水奶价格"); await tick();
+        const view=tasks.list().tasks.find(t=>t.id===parent.id)!;
+        expect(view).toMatchObject({status:"needs_input",clarification:"你平时给宝宝喝哪个牌子的水奶？",options:["Similac（雅培）","Enfamil（美赞臣）","两个牌子都比一下"]});
+        const asked=codex.plans.length;
+        const reply=submit("Enfamil（美赞臣）",parent.id); await tick(); await tick();
+        expect(tasks.get(reply.id)).toMatchObject({status:"merged",merged_into:parent.id});
+        // The tap itself was not dispatched; only the original task was re-planned, with the answer.
+        expect(codex.plans.length).toBe(asked+1);
+        expect(codex.plans.at(-1)).toContain("用户补充：Enfamil（美赞臣）");
+        expect(tasks.get(parent.id)?.status).toBe("running");
+        expect(tasks.list().tasks.find(t=>t.id===parent.id)?.options).toBeNull();
+    });
+    it("dispatches a typed answer to a question with options as usual", async () => {
+        let parentId="";
+        codex.plan = async p => {
+            const data = JSON.parse(p.split("\n").at(-1)!);
+            return JSON.stringify({title:"水奶比价",related:[],dependencies:[],resources:[],appendTo:data.message==="喝美赞臣的"?parentId:null,
+                clarification: data.message.includes("用户补充：") || data.message==="喝美赞臣的" ? null : "哪个牌子？", options:["雅培","美赞臣"]});
+        };
+        const parent=submit("比价水奶"); parentId=parent.id; await tick();
+        const asked=codex.plans.length;
+        const reply=submit("喝美赞臣的",parent.id); await tick(); await tick();
+        expect(tasks.get(reply.id)?.merged_into).toBe(parent.id);
+        expect(codex.plans.length).toBe(asked+2);
+    });
     it("routes a free-text partial answer, asks only the remaining essential, and survives restart without execution", async () => {
         let parentId="";
         codex.plan=async p=>{
@@ -569,6 +602,20 @@ it("bounds an overview to 100 Unicode characters and supports older planner payl
     expect(plan.description?.endsWith("…")).toBe(true);
     expect(parsePlan(JSON.stringify(base),[],null)?.description).toContain("计划");
     expect(parsePlan(JSON.stringify({...base,description:42}),[],null)?.description).toContain("计划");
+});
+
+it("keeps 2–5 short distinct answers with a question, and none without one",()=>{
+    const base={title:"q",related:[],dependencies:[],resources:[]};
+    const parse=(extra:Record<string,unknown>)=>{const report={repairs:[] as string[]};return {plan:parsePlan(JSON.stringify({...base,...extra}),[],null,undefined,report)!,report};};
+    expect(parse({clarification:"哪个牌子？",options:[" 雅培 ","美赞臣","雅培"]}).plan.options).toEqual(["雅培","美赞臣"]);
+    expect(parse({clarification:null,options:["雅培","美赞臣"]}).plan.options).toBeUndefined();
+    const many=parse({clarification:"选哪个？",options:["一","二","三","四","五","六"]});
+    expect(many.plan.options).toEqual(["一","二","三","四","五"]);
+    expect(many.report.repairs).toContain("options 超过 5 个，只保留前 5 个");
+    const thin=parse({clarification:"选哪个？",options:["只有一个","问".repeat(31)]});
+    expect(thin.plan.options).toBeUndefined();
+    expect(thin.report.repairs).toContain("options 不足 2 个有效选项，已忽略");
+    expect(parse({clarification:"选哪个？",options:"雅培"}).report.repairs).toContain("options 不是列表，已忽略");
 });
 
 it("validates optional clarification and allows semantic routing to a waiting question",()=>{

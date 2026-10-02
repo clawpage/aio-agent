@@ -5,9 +5,11 @@ import { api, API_CREDENTIALS } from "../api";
 import { isSandboxLink, isWorkspaceFilePath, workspaceFileKind, workspaceFilePathFromHref } from "../sandboxLink";
 import { splitMapBlocks, type MessagePart } from "../mapBlocks";
 import { splitSvgBlocks, type SvgPart } from "../svgBlocks";
+import { splitChoiceBlocks, type ChoicePart } from "../choices";
 import { cjkStrong } from "../markdownStrong";
 import { MapCard } from "./MapCard";
 import { SvgCard } from "./SvgCard";
+import { ChoiceList } from "./ChoiceList";
 
 marked.setOptions({ gfm: true, breaks: true });
 
@@ -78,12 +80,19 @@ type MarkdownProps = {
   document?: boolean;
   onOpenLink?: (url: string) => void;
   onOpenFile?: (path: string) => void;
+  /** Where a ```choices answer goes when tapped; without it the answers are only shown. */
+  choices?: { onChoose: (option: string) => void; chosen: string | null; disabled?: boolean };
 };
 
-/** A message: Markdown, with ```map blocks drawn as map cards and ```svg blocks as pictures where they stand. */
+/**
+ * A message: Markdown, with ```map blocks drawn as map cards, ```svg blocks as
+ * pictures and ```choices blocks as answers to tap, where they stand.
+ */
 export function Markdown(props: MarkdownProps) {
   const parts = useMemo(
-    () => splitMapBlocks(props.source ?? "").flatMap<MessagePart | SvgPart>((part) => (part.kind === "text" ? splitSvgBlocks(part.text) : [part])),
+    () => splitMapBlocks(props.source ?? "")
+      .flatMap<MessagePart | SvgPart>((part) => (part.kind === "text" ? splitSvgBlocks(part.text) : [part]))
+      .flatMap<MessagePart | SvgPart | ChoicePart>((part) => (part.kind === "text" ? splitChoiceBlocks(part.text) : [part])),
     [props.source],
   );
   if (parts.length === 1 && parts[0]!.kind === "text") return <MarkdownBlock {...props} source={parts[0]!.text} />;
@@ -93,7 +102,9 @@ export function Markdown(props: MarkdownProps) {
         ? <MapCard key={i} place={part.place} />
         : part.kind === "svg"
           ? <SvgCard key={i} code={part.code} />
-          : <MarkdownBlock key={i} {...props} source={part.text} />)}
+          : part.kind === "choices"
+            ? <ChoiceList key={i} options={part.options} chosen={props.choices?.chosen ?? null} disabled={props.choices?.disabled} onChoose={props.choices?.onChoose} />
+            : <MarkdownBlock key={i} {...props} source={part.text} />)}
     </>
   );
 }

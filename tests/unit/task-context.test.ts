@@ -11,6 +11,8 @@ describe("main-session context", () => {
     // A question far from the end is not what the task is waiting on.
     expect(lastQuestion({ status: "completed", plan_json: null, result: `要不要看看别的？${"后面是很长的总结。".repeat(20)}` })).toBeNull();
     expect(lastQuestion({ status: "needs_input", plan_json: JSON.stringify({ clarification: "去哪个城市？" }), result: null })).toBe("去哪个城市？");
+    // Tappable answers after the question do not hide it.
+    expect(lastQuestion({ status: "completed", plan_json: null, result: `两家都有货。你要哪种规格？\n\n\`\`\`choices\n${JSON.stringify(["32 盎司 6 瓶装（$19.99）", "2 盎司 48 瓶装（$42.50）", "两种都要比价，帮我算单价"])}\n\`\`\`` })).toBe("你要哪种规格？");
   });
   it("lists the latest messages oldest first, attributes supplements and marks the current one", () => {
     const now = at(15, 0);

@@ -44,7 +44,8 @@ export function lastQuestion(task: Pick<ContextTask, "plan_json" | "result" | "s
       if (task.status === "needs_input" && q) return clip(q, 200);
     } catch { /* an unreadable plan has no question */ }
   }
-  const result = task.result?.trim();
+  // Tappable answers (a ```choices block) follow the question; the question is what is asked.
+  const result = task.result?.replace(/```choices[ \t]*\r?\n[\s\S]*?```\s*$/, "").trim();
   if (!result) return null;
   const tail = result.slice(-400);
   const at = Math.max(tail.lastIndexOf("？"), tail.lastIndexOf("?"));
