@@ -10,6 +10,9 @@ services:
       - path: ${AIO_CONTROL_ENV_FILE:-control.env}
         required: false
     environment:
+      # Times the agent reads (the main-session timeline, "today") are local times:
+      # keep them in the deployment's zone, like PA_BROWSER_TIMEZONE.
+      TZ: ${AIO_TZ:-America/Los_Angeles}
       PA_DATA_DIR: /data
       PA_BIND: 0.0.0.0
       PA_PORT: "4892"
