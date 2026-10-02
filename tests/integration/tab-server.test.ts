@@ -70,6 +70,14 @@ const control = async (tab: string, action: string, key?: string) => fetch(`${ba
 const page = (title: string, body: string) => `data:text/html,<title>${title}</title><p id="p">${body}</p><input id="q"><a href="data:text/html,<title>Next</title>next">go</a>`;
 const tabIdOf = (r: Rpc) => /标签页 (t\d+)/.exec(text(r))?.[1];
 
+it.skipIf(!hasChromium)("tells the agent to retry a human check in a fresh tab before asking the person", async () => {
+  const res = await fetch(`${base}/mcp`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: {} }) });
+  const instructions = ((await res.json()) as { result: { instructions: string } }).result.instructions;
+  const rule = instructions.split("\n").find((line) => line.includes("Press & Hold"))!;
+  expect(rule).toContain("browser_tab_new");
+  expect(rule.indexOf("browser_tab_new")).toBeLessThan(rule.indexOf("browser_request_human"));
+});
+
 it.skipIf(!hasChromium)("records each tab's creator: it alone may act, others may only read", async () => {
   const [a, b] = await Promise.all([call("A", "browser_navigate", { url: page("Alpha", "alpha body") }), call("B", "browser_navigate", { url: page("Beta", "beta body") })]);
   const tabA = tabIdOf(a)!, tabB = tabIdOf(b)!;
