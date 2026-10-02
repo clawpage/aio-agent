@@ -168,8 +168,16 @@ export class TabServer implements TabServerLike {
 
   async #doEnsure(): Promise<void> {
     const { body, version } = this.#script();
-    const health = await this.#health();
+    let health = await this.#health();
     if (health?.version === version) return;
+    if (!health) {
+      // A server whose event loop is stuck still holds the port, so a new one could never
+      // listen: ask once more, then stop exactly this script's process (nothing else matches).
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+      health = await this.#health();
+      if (health?.version === version) return;
+      if (!health) await this.#container.execInSandbox(["pkill", "-KILL", "-f", "-x", `node ${this.scriptPath}`], { timeoutMs: 10_000 });
+    }
     await this.#runtime.ensureScripts();
     await this.#container.writeFileInSandbox(this.scriptPath, body, { user: "root" });
     const chmod = await this.#container.execInSandbox(["chmod", "0755", this.scriptPath], { timeoutMs: 15_000, user: "root" });

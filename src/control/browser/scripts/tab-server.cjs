@@ -125,6 +125,11 @@ function register(page, key, title, extra = {}) {
   // A link that opens a new window belongs to the same task and becomes its current tab.
   page.on('popup', (popup) => { void adoptNew(popup, key, title); });
   page.on('close', () => forget(tab));
+  // A crashed renderer never recovers: close its tab so no tool or person waits on it.
+  page.on('crash', () => {
+    process.stdout.write(`closed crashed page: ${page.url()}\n`);
+    void page.close().catch(() => undefined);
+  });
   if (!tab.targetId) targetIdOf(page).then((t) => { tab.targetId = t; save(); }).catch(() => undefined);
   save();
   return tab;

@@ -2,10 +2,12 @@
 // `tsc` does not emit them. Copy them next to the compiled service so
 // `dist/control` is a complete, runnable artifact (each service reads its assets
 // relative to its own directory).
-import { cp, mkdir } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, rm } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { createRequire } from "node:module";
 import { execFileSync } from "node:child_process";
+import { patchPatchright } from "./patchright-patch.mjs";
 
 const root = path.resolve(import.meta.dirname, "..");
 
@@ -24,9 +26,17 @@ for (const [from, to] of assetTrees) {
 
 // Build the offline runtime dependency from the exact lockfile dependency.
 // No registry request, browser download, or checked-in generated archive.
+// It is patched in a staging copy (see patchright-patch.mjs); node_modules stays as installed.
 const require = createRequire(import.meta.url);
 const packageDir = path.dirname(require.resolve("patchright-core/package.json"));
 const vendor = path.join(root, "dist/control/browser/vendor");
 await mkdir(vendor, { recursive: true });
-execFileSync("tar", ["-czf", path.join(vendor, "patchright-core.tgz"), "-C", packageDir, "."]);
-console.log("packaged offline patchright-core runtime");
+const staging = await mkdtemp(path.join(os.tmpdir(), "patchright-core-"));
+try {
+  await cp(packageDir, staging, { recursive: true });
+  patchPatchright(staging);
+  execFileSync("tar", ["-czf", path.join(vendor, "patchright-core.tgz"), "-C", staging, "."]);
+} finally {
+  await rm(staging, { recursive: true, force: true });
+}
+console.log("packaged offline patchright-core runtime (patched)");

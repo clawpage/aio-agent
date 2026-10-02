@@ -1,4 +1,7 @@
 import { afterEach, beforeEach, expect, it } from "vitest";
+import fs from "node:fs";
+import path from "node:path";
+import { createHash } from "node:crypto";
 import { AgentManager } from "../../src/control/codex/manager.js";
 import type { HostTokenSource } from "../../src/control/codex/hostTokens.js";
 import { openDb, type Db } from "../../src/control/db.js";
@@ -142,3 +145,41 @@ it("makes sure the current tab server runs before typing for a person", async ()
   expect(out.status).toBe(503);
   expect(seen).not.toContain("/input");
 }, 20_000);
+
+/** A container whose tab server answers health checks as scripted; every other call is recorded. */
+function scriptedTabServer(answers: Array<"silent" | "current">) {
+  const version = createHash("sha256").update(fs.readFileSync(path.resolve(import.meta.dirname, "../../src/control/browser/scripts/tab-server.cjs"), "utf8")).digest("hex").slice(0, 16);
+  const seen: string[] = [];
+  let started = false;
+  const container = {
+    execInSandbox: async (argv: string[]) => {
+      if (argv.some((a) => a.endsWith("/healthz"))) {
+        const answer = started ? "current" : answers.shift() ?? "silent";
+        seen.push(`health:${answer}`);
+        return answer === "current" ? { code: 0, stdout: JSON.stringify({ version }), stderr: "" } : { code: 28, stdout: "", stderr: "" };
+      }
+      seen.push(argv.join(" "));
+      return { code: 0, stdout: "", stderr: "" };
+    },
+    writeFileInSandbox: async () => undefined,
+    execDetached: async () => { seen.push("start"); started = true; return { code: 0, stdout: "", stderr: "" }; },
+  };
+  return { container, seen };
+}
+
+it("stops a tab server that holds the port but no longer answers, then starts the current one", async () => {
+  const { TabServer } = await import("../../src/control/browser/tabs.js");
+  const { container, seen } = scriptedTabServer(["silent", "silent"]);
+  const tabs = new TabServer(testConfig("/tmp/pa-tabs-stuck", 1), new Logger("error", undefined, false), container as never, { ensureScripts: async () => undefined } as never);
+  await tabs.ensure();
+  // Only that exact script's process is killed (its event loop is stuck, so only SIGKILL ends it).
+  expect(seen.filter((s) => !s.startsWith("chmod"))).toEqual(["health:silent", "health:silent", `pkill -KILL -f -x node ${tabs.scriptPath}`, "start", "health:current"]);
+});
+
+it("leaves a tab server alone when it answers the second time", async () => {
+  const { TabServer } = await import("../../src/control/browser/tabs.js");
+  const { container, seen } = scriptedTabServer(["silent", "current"]);
+  const tabs = new TabServer(testConfig("/tmp/pa-tabs-busy", 1), new Logger("error", undefined, false), container as never, { ensureScripts: async () => undefined } as never);
+  await tabs.ensure();
+  expect(seen).toEqual(["health:silent", "health:current"]);
+});

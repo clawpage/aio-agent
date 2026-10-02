@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { createRequire } from "node:module";
 import { chromium, type Browser } from "playwright-core";
+import { patchedPatchright } from "../helpers/patchright.js";
 
 // The real tab server against a real headless Chromium over CDP. CI has no
 // browser installed, so the test only runs where Playwright's Chromium exists.
@@ -22,6 +23,7 @@ async function freePort(): Promise<number> {
 }
 
 let browser: Browser;
+let patchright = "";
 let base = "";
 let server: import("node:http").Server;
 
@@ -39,7 +41,9 @@ beforeAll(async () => {
   browser = await chromium.launch({ headless: true, args: [`--remote-debugging-port=${cdpPort}`] });
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "tabs-"));
   process.env.AIO_TABS_CDP = `http://127.0.0.1:${cdpPort}`;
-  process.env.AIO_TABS_PLAYWRIGHT = require.resolve("patchright-core");
+  // The library as the sandbox runs it: patched by the build (scripts/patchright-patch.mjs).
+  patchright = await patchedPatchright();
+  process.env.AIO_TABS_PLAYWRIGHT = patchright;
   process.env.AIO_TABS_OUTPUT = dir;
   process.env.AIO_TABS_STATE = path.join(dir, "state.json");
   process.env.AIO_TABS_MAX_FINISHED = "2";
@@ -53,6 +57,7 @@ afterAll(async () => {
   if (!hasChromium) return;
   server.close();
   await browser.close();
+  fs.rmSync(patchright, { recursive: true, force: true });
 });
 
 type Rpc = { result?: { content: Array<{ type: string; text?: string }>; isError?: boolean }; error?: { message: string } };
@@ -398,3 +403,20 @@ it.skipIf(!hasChromium)("stops a service worker once no page of its site is open
     open.srv.close();
   }
 }, 60_000);
+
+it.skipIf(!hasChromium)("closes a tab whose renderer crashed and keeps serving every other task", async () => {
+  const tab = tabIdOf(await call("K", "browser_navigate", { url: page("Kaboom", "k") }))!;
+  const { targetId } = (await records("K")).find((t) => t.id === tab) as TabRecord & { targetId: string };
+  const target = ((await (await fetch(`${process.env.AIO_TABS_CDP}/json/list`)).json()) as Array<{ id: string; webSocketDebuggerUrl: string }>).find((t) => t.id === targetId)!;
+  await new Promise<void>((resolve) => {
+    const ws = new WebSocket(target.webSocketDebuggerUrl);
+    ws.onopen = () => ws.send(JSON.stringify({ id: 1, method: "Page.crash" }));
+    ws.onclose = () => resolve(); ws.onerror = () => resolve(); setTimeout(resolve, 3000);
+  });
+  await expect.poll(async () => (await records("K")).map((t) => t.id), { timeout: 10_000 }).not.toContain(tab);
+  expect(await (await fetch(`${base}/healthz`)).json()).toMatchObject({ ok: true });
+  expect((await call("K", "browser_get_text", { tab })).result?.isError).toBe(true);
+  // The task carries on in a fresh tab.
+  expect(text(await call("K", "browser_navigate", { url: page("Again", "again body") }))).toContain("Again");
+  expect(text(await call("K", "browser_get_text"))).toContain("again body");
+});

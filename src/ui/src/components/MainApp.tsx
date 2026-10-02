@@ -15,6 +15,11 @@ import { ScheduleList } from "./ScheduleList";
 import { PushToggle } from "./PushToggle";
 import {taskStatusLabels,type TaskFeed} from '../taskStatus';
 /** One owner-facing inbox; executor conversations are implementation details. */
+/** The site a link goes to, named on the opening card. */
+function hostOf(url: string): string {
+    try { return new URL(url).host || url; } catch { return url; }
+}
+
 export function MainApp() {
     const [mobile, setMobile] = useState(() => matchMedia("(max-width: 900px)").matches);
     const [menuOpen, setMenuOpen] = useState(false);
@@ -61,7 +66,8 @@ export function MainApp() {
     const [notice, setNotice] = useState<string | null>(null);
     // A link opened from a reply: its own tab, operated from the same console as a taken-over task tab.
     const [linkTab, setLinkTab] = useState<TaskTab | null>(null);
-    const [linkOpening, setLinkOpening] = useState<string | null>(null);
+    // What is being opened in the sandbox browser, and how to give up on it.
+    const [opening, setOpening] = useState<{ title: string; detail: string; slow: boolean; controller: AbortController } | null>(null);
     const [theme, setTheme] = useState(() => matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark");
     const expired = useCallback(() => { setAuth(false); setMenuOpen(false); setNotice("登录已过期，请重新登录。"); }, []);
     const check = useCallback(async () => { try {
@@ -120,23 +126,32 @@ export function MainApp() {
     }, [auth, expired, refreshStatus]);
     const notify = useCallback((message: string) => setNotice(message), []);
     const revealBrowser = useCallback(() => { setWorkspace(true); setBrowserNonce(n => n + 1); }, []);
-    const openTab = useCallback(async (opening: string, open: () => Promise<{ tab?: TaskTab }>) => {
-        setLinkOpening(opening);
+    const openTab = useCallback(async (title: string, detail: string, open: (signal: AbortSignal) => Promise<{ tab?: TaskTab }>) => {
+        // Never a dead end: the person can cancel, and a browser that does not answer gives up on its own.
+        const controller = new AbortController();
+        let timedOut = false;
+        const timeout = setTimeout(() => { timedOut = true; controller.abort(); }, 60_000);
+        const slow = setTimeout(() => setOpening(o => (o?.controller === controller ? { ...o, slow: true } : o)), 8_000);
+        setOpening({ title, detail, slow: false, controller });
         try {
-            const opened = await open();
+            const opened = await open(controller.signal);
+            if (controller.signal.aborted) return;
             // Without the tab server there is no tab of the person's own: show the whole browser instead.
             if (opened.tab) setLinkTab(opened.tab);
             else revealBrowser();
         }
         catch (err) {
-            notify(err instanceof Error ? err.message : String(err));
+            if (timedOut) notify("打开超时：沙箱浏览器暂时没有响应，请稍后重试。");
+            else if (!controller.signal.aborted) notify(err instanceof Error ? err.message : String(err));
         }
         finally {
-            setLinkOpening(null);
+            clearTimeout(timeout);
+            clearTimeout(slow);
+            setOpening(o => (o?.controller === controller ? null : o));
         }
     }, [notify, revealBrowser]);
-    const openLink = useCallback((url: string) => openTab("正在打开链接…", () => api.openBrowserTab(url)), [openTab]);
-    const openFileInBrowser = useCallback((path: string) => openTab("正在打开页面…", () => api.openBrowserFile(path)), [openTab]);
+    const openLink = useCallback((url: string) => openTab("正在打开链接", hostOf(url), signal => api.openBrowserTab(url, signal)), [openTab]);
+    const openFileInBrowser = useCallback((path: string) => openTab("正在打开页面", path.split("/").pop() || path, signal => api.openBrowserFile(path, signal)), [openTab]);
     const closeLink = useCallback((visited: string[]) => {
         setLinkTab(null);
         for (const id of visited) void api.personBrowserClose(id).catch(() => undefined);
@@ -203,7 +218,17 @@ export function MainApp() {
       {role === "owner" && view === "settings" && <Settings onBack={() => setView("main")}/>}
       {view === "detail" && detail && <div className="task-detail"><div className="task-detail-bar"><button className="ghost" onClick={() => setView(detailReturn)}>← 返回{detailReturn==='tasks'?'任务列表':'主会话'}</button><span className="muted tiny">{taskStatusLabels[(taskFeed.tasks.find(t=>t.id===detailTask?.id)??detailTask)?.status??'']??'过程详情'}</span></div><Chat key={detail.id} readOnly conversation={detail} status={status} onConversationChanged={() => { }} onStatusChanged={() => void refreshStatus()} onOpenWorkspace={openWorkspace} onOpenBrowserLink={u => void openLink(u)} onOpenBrowserFile={p => void openFileInBrowser(p)}/></div>}
     </main>
-    {linkOpening && <div className="task-console-overlay" role="presentation"><div className="task-console task-console-opening" role="status">{linkOpening}</div></div>}
+    {opening && <div className="task-console-overlay opening-overlay" role="presentation">
+      <div className="opening-card" role="status" aria-live="polite">
+        <span className="opening-spinner" aria-hidden="true"/>
+        <div className="opening-text">
+          <strong>{opening.title}</strong>
+          <span className="opening-detail">{opening.detail}</span>
+          <span className="opening-hint">{opening.slow ? "比平时慢：浏览器可能正在唤醒，通常半分钟内好" : "在沙箱浏览器里加载"}</span>
+        </div>
+        <button type="button" className="ghost" onClick={() => opening.controller.abort()}>取消</button>
+      </div>
+    </div>}
     {linkTab && <TaskConsole key={linkTab.id} target={personConsoleTarget} tab={linkTab} label="操作网页" closeLabel="关闭页面" onClose={closeLink} onReveal={() => { setLinkTab(null); revealBrowser(); }}/>}
     <Workspace canConfigure={role === "owner"} open={workspace} status={status} initialPath={workspacePath} browserNonce={browserNonce} onClose={() => { setWorkspace(false); setWorkspacePath(undefined); }} onNotify={notify}/>
   </div>;

@@ -500,9 +500,17 @@ test("an HTML page too large to preview inline opens in full in the person's own
     const opened: string[] = [];
     await page.route("**/api/browser/files", async r => {
         opened.push(r.request().postDataJSON().path);
+        await new Promise(res => setTimeout(res, 1200));
         await r.fulfill({ json: { ok: true, tab: { id: "t9", key: "person", title: "销售报表", url: "file:///home/gem/workspace/report.html", createdAt: 1, lastUsed: 1, finishedAt: null, holder: "human", humanSince: 1, request: null } } });
     });
     await page.getByRole("button", { name: "预览 销售报表" }).click();
+    // While it loads: what is opening, and a way out.
+    const card = page.locator(".opening-card");
+    await expect(card).toContainText("正在打开页面");
+    await expect(card).toContainText("report.html");
+    await expect(card.getByRole("button", { name: "取消" })).toBeVisible();
+    await page.waitForTimeout(350);
+    await page.screenshot({ path: info.outputPath("opening-card.png") });
     // No dead end telling the person to download: the page opens in full, in the console, once.
     const panel = page.getByRole("dialog", { name: "操作网页" });
     await expect(panel).toBeVisible();
@@ -523,6 +531,18 @@ test("an HTML page too large to preview inline opens in full in the person's own
     await expect(panel).toBeVisible();
     await expect(preview).toHaveCount(0);
     expect(opened).toHaveLength(2);
+    await panel.getByRole("button", { name: "关闭操作面板" }).click();
+
+    // A browser that does not answer is never a dead end: cancelling leaves the conversation as it was.
+    await page.unroute("**/api/browser/files");
+    await page.route("**/api/browser/files", () => undefined);
+    await page.getByRole("button", { name: "预览 销售报表" }).click();
+    await page.getByRole("dialog", { name: "预览 report.html" }).getByRole("button", { name: "在浏览器打开" }).click();
+    await expect(card).toBeVisible();
+    await card.getByRole("button", { name: "取消" }).click();
+    await expect(card).toHaveCount(0);
+    await expect(panel).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "预览 销售报表" })).toBeVisible();
 });
 test("dispatching shows a calm sorting animation and what the dispatcher weighs, and stays still for reduced motion", async ({ page }, info) => {
     await setup(page, [{ ...task(1, "planning"), title: "帮我订周六晚上的餐厅" }]);
