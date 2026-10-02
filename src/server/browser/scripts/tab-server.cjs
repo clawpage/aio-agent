@@ -37,6 +37,8 @@ const HUMAN_WAIT_MS = Number(process.env.AIO_TABS_HUMAN_WAIT_MS || 30 * 60 * 100
 const TOOL_DEADLINE_MS = Number(process.env.AIO_TABS_TOOL_DEADLINE_MS || 90 * 1000);
 /** A page that cannot evaluate `1` this fast, twice, is hung (a crashed or starved renderer). */
 const PROBE_MS = Number(process.env.AIO_TABS_PROBE_MS || 5000);
+/** A site's service worker is stopped this long after its last page or frame closed. */
+const IDLE_WORKER_MS = Number(process.env.AIO_TABS_IDLE_WORKER_MS || 60 * 1000);
 const MAX_TEXT = 60000;
 const KEY = /^[A-Za-z0-9_-]{1,80}$/;
 // patchright-core: Playwright's API without Runtime.enable, whose traces let sites flag every page
@@ -218,6 +220,41 @@ async function closeHungPages() {
   }
   if (closed.length) process.stdout.write(`closed hung pages: ${closed.join(' ')}\n`);
   return closed;
+}
+
+const originOf = (url) => { try { return new URL(url).origin; } catch { return ''; } };
+/** service worker targetId -> when it was first seen with no page or frame of its origin open */
+const idleWorkers = new Map();
+
+/**
+ * Stop service workers that no open page or frame uses. Chromium stops an idle
+ * worker by itself after about 30 s, but not while a debugger is attached, and
+ * this server's connection attaches to every worker: without this sweep each
+ * site visited keeps a renderer process alive until the browser is released.
+ * Closing a worker target only stops the worker; its registration stays and it
+ * starts again on the site's next visit. Never connects to the browser itself.
+ */
+async function closeIdleWorkers(now = Date.now()) {
+  const browser = connecting && (await connecting.catch(() => null));
+  if (!browser) return [];
+  const session = await browser.newBrowserCDPSession();
+  try {
+    const { targetInfos } = await session.send('Target.getTargets');
+    const inUse = new Set(targetInfos.filter((t) => t.type === 'page' || t.type === 'iframe').map((t) => originOf(t.url)));
+    const idle = targetInfos.filter((t) => t.type === 'service_worker' && !inUse.has(originOf(t.url)));
+    for (const id of [...idleWorkers.keys()]) if (!idle.some((t) => t.targetId === id)) idleWorkers.delete(id);
+    const closed = [];
+    for (const worker of idle) {
+      if (!idleWorkers.has(worker.targetId)) idleWorkers.set(worker.targetId, now);
+      if (now - idleWorkers.get(worker.targetId) < IDLE_WORKER_MS) continue;
+      const { success } = await session.send('Target.closeTarget', { targetId: worker.targetId }).catch(() => ({ success: false }));
+      if (success) closed.push(worker.url);
+    }
+    if (closed.length) process.stdout.write(`stopped idle service workers: ${closed.join(' ')}\n`);
+    return closed;
+  } finally {
+    await session.detach().catch(() => undefined);
+  }
 }
 
 async function browserContext() {
@@ -834,9 +871,10 @@ if (require.main === module) {
     const due = finishedTabs(FINISHED_TTL_MS);
     if (due.length) void serialized('__sweep__', () => closeKeepingOne(due.map((t) => t.page))).catch(() => undefined);
   }, Math.min(60_000, FINISHED_TTL_MS)).unref();
+  setInterval(() => void closeIdleWorkers().catch(() => undefined), 30_000).unref();
   // One task's stray failure must never take every task's browser tools down with it.
   process.on('unhandledRejection', (err) => process.stderr.write(`unhandled rejection: ${err && err.stack ? err.stack : err}\n`));
   server.listen(PORT, '127.0.0.1', () => process.stdout.write(`aio_tabs ${VERSION} listening on ${PORT}\n`));
 }
 
-module.exports = { TOOLS, toolList, handleRpc, server };
+module.exports = { TOOLS, toolList, handleRpc, server, closeIdleWorkers };

@@ -356,3 +356,40 @@ it.skipIf(!hasChromium)("cleans up finished and ownerless pages on request, neve
   const pages = ((await (await fetch(`${process.env.AIO_TABS_CDP}/json/list`)).json()) as Array<{ type: string }>).filter((t) => t.type === "page");
   expect(pages.length).toBeGreaterThanOrEqual(1);
 }, 60_000);
+
+it.skipIf(!hasChromium)("stops a service worker once no page of its site is open, keeping its registration", async () => {
+  // This server's CDP connection attaches to every worker, which keeps Chromium from stopping idle ones.
+  const http = await import("node:http");
+  const site = async () => {
+    const srv = http.createServer((req, res) => {
+      if (req.url === "/sw.js") return res.writeHead(200, { "content-type": "text/javascript" }).end("self.addEventListener('fetch', () => {});");
+      res.writeHead(200, { "content-type": "text/html" }).end("<title>SW</title><script>navigator.serviceWorker.register('/sw.js')</script>");
+    });
+    await new Promise<void>((resolve) => srv.listen(0, "127.0.0.1", resolve));
+    return { srv, url: `http://127.0.0.1:${(srv.address() as net.AddressInfo).port}/` };
+  };
+  const [closed, open] = [await site(), await site()];
+  const workers = async () => ((await (await fetch(`${process.env.AIO_TABS_CDP}/json/list`)).json()) as Array<{ type: string; url: string }>)
+    .filter((t) => t.type === "service_worker").map((t) => t.url);
+  const until = async (ok: () => Promise<boolean>) => { for (let i = 0; i < 50 && !(await ok()); i++) await new Promise((r) => setTimeout(r, 200)); };
+  const sweep = (require(SCRIPT) as { closeIdleWorkers: (now?: number) => Promise<string[]> }).closeIdleWorkers;
+  try {
+    await call("W1", "browser_navigate", { url: closed.url });
+    await call("W2", "browser_navigate", { url: open.url });
+    await until(async () => (await workers()).length >= 2);
+    await call("W1", "browser_tab_close", {});
+    // The first sweep only notes the idle worker; it is stopped once idle long enough.
+    expect(await sweep()).toEqual([]);
+    expect(await sweep(Date.now() + 61_000)).toEqual([`${closed.url}sw.js`]);
+    await until(async () => !(await workers()).includes(`${closed.url}sw.js`));
+    expect(await workers()).toEqual([`${open.url}sw.js`]);
+    // Still registered: the next visit is controlled by it again.
+    await call("W1", "browser_navigate", { url: closed.url });
+    expect(text(await call("W1", "browser_evaluate", { script: "navigator.serviceWorker.getRegistrations().then((r) => r.length)" }))).toContain("1");
+  } finally {
+    await call("W1", "browser_tab_close", {});
+    await call("W2", "browser_tab_close", {});
+    closed.srv.close();
+    open.srv.close();
+  }
+}, 60_000);
