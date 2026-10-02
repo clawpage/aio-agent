@@ -10,6 +10,7 @@
  *   node deploy/aio.mjs down | ps | logs [service] | config
  *   node deploy/aio.mjs import-data <dir>    copy a control data directory into the data volume
  *   node deploy/aio.mjs export-data <dir>    copy the data volume out (backup, rollback, moving machines)
+ *   node deploy/aio.mjs codex-login [status] log the control plane into ChatGPT (device code), or show the login
  *
  * Settings come from AIO_ENV_FILE (default deploy/aio.env; see deploy/aio.env.example).
  * AIO_LAYERS picks the layers this machine runs (default ui,control,sandbox): a
@@ -268,6 +269,12 @@ switch (command) {
     break;
   case "export-data":
     exportData(rest[0] && path.resolve(rest[0]));
+    break;
+  case "codex-login":
+    // The deployment's own login, kept in the data volume: it never shares a refresh token with another machine.
+    compose(["exec", ...(process.stdin.isTTY ? [] : ["-T"]), "control", "sh", "-c",
+      'mkdir -p -m 700 "$PA_HOST_CODEX_HOME" && CODEX_HOME="$PA_HOST_CODEX_HOME" exec codex login "$@"', "sh",
+      ...(rest[0] === "status" ? ["status"] : ["--device-auth"])]);
     break;
   case "ps":
   case "logs":

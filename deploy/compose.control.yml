@@ -16,7 +16,9 @@ services:
       PA_DATA_DIR: /data
       PA_BIND: 0.0.0.0
       PA_PORT: "4892"
-      PA_HOST_CODEX: "off"
+      # ChatGPT models: on once `deploy/aio.mjs codex-login` has logged the control plane in.
+      PA_HOST_CODEX: ${AIO_HOST_CODEX:-off}
+      PA_HOST_CODEX_HOME: /data/codex-home
       # Sandboxes reach the gateway at host.docker.internal:<this port>.
       PA_MEMBER_MODEL_PORT: ${AIO_GATEWAY_PORT:-4902}
       PA_SANDBOX_NODES: ${AIO_SANDBOX_NODES:-local=http://sandbox:4894}

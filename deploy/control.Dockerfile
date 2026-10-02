@@ -14,6 +14,11 @@ RUN npx tsc -p tsconfig.server.json && node scripts/copy-server-assets.mjs
 FROM node:26-bookworm-slim
 WORKDIR /app
 ENV NODE_ENV=production
+# The Codex CLI keeps this deployment's own ChatGPT login (in the data volume, made with
+# `deploy/aio.mjs codex-login`) and refreshes it; sandboxes only get short-lived tokens.
+# Same version as the sandboxes' Codex (PA_SANDBOX_CODEX_VERSION in src/control/config.ts).
+ARG CODEX_VERSION=0.156.1
+RUN npm install -g --no-audit --no-fund @openai/codex@${CODEX_VERSION} && npm cache clean --force
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev --no-audit --no-fund && npm cache clean --force
 COPY --from=build /app/dist/control ./dist/control
@@ -28,8 +33,8 @@ ARG AIO_SANDBOX_PROTOCOL_MAX=
 LABEL ai.aio.component="control" ai.aio.version="${AIO_VERSION}" \
   ai.aio.api="${AIO_API}" ai.aio.api.min="${AIO_API_MIN}" \
   ai.aio.sandbox-protocol.min="${AIO_SANDBOX_PROTOCOL_MIN}" ai.aio.sandbox-protocol.max="${AIO_SANDBOX_PROTOCOL_MAX}"
-# No Codex installation in here: owner turns run on Claude Code or the bridge models.
-ENV AIO_VERSION=${AIO_VERSION} PA_DATA_DIR=/data PA_BIND=0.0.0.0 PA_PORT=4892 PA_HOST_CODEX=off
+# ChatGPT models stay off until the deployment has logged in (compose: AIO_HOST_CODEX=on).
+ENV AIO_VERSION=${AIO_VERSION} PA_DATA_DIR=/data PA_BIND=0.0.0.0 PA_PORT=4892 PA_HOST_CODEX=off PA_HOST_CODEX_HOME=/data/codex-home
 USER node
 VOLUME ["/data"]
 EXPOSE 4892 4902
