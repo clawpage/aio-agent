@@ -170,6 +170,9 @@ export const api = {
   /** Open a link in a new tab of the sandbox's real Chromium (validated server-side). */
   openBrowserTab: (url: string) =>
     request<{ ok: boolean; message: string; data: unknown; tab?: import("./types").TaskTab }>("/api/browser/tabs", { method: "POST", body: { url } }),
+  /** Open a workspace HTML page in full in a new tab of the sandbox's Chromium (no inline size cap). */
+  openBrowserFile: (path: string) =>
+    request<{ ok: boolean; tab: import("./types").TaskTab }>("/api/browser/files", { method: "POST", body: { path } }),
   capabilities: () => request<CapabilitiesResponse>("/api/capabilities"),
   sandboxContext: () => request<{ context: string | null }>("/api/sandbox/context"),
 

@@ -488,6 +488,42 @@ test("a link in a reply opens in the person's own tab, operated on the desktop l
     await expect.poll(() => lease.at(-1)).toBe("release");
     await expect.poll(() => calls.filter(c => c.route === "close").map(c => c.body.tab)).toEqual(["t8"]);
 });
+test("an HTML page too large to preview inline opens in full in the person's own browser tab", async ({ page }, info) => {
+    const row: Task = { ...task(1, "completed"), title: "做报表", result: "做好了：[销售报表](/home/gem/workspace/report.html)", completedAt: 2000 };
+    await page.route("**/api/browser/person/*", r => r.fulfill({ json: { title: "销售报表", url: "file:///home/gem/workspace/report.html", closed: r.request().postDataJSON().tab } }));
+    await page.route("**/api/browser/viewer/heartbeat", r => r.fulfill({ json: { ok: true, generation: 1, status: {} } }));
+    await page.route("**/api/browser/viewer/release", r => r.fulfill({ json: { ok: true } }));
+    await page.route("**/api/browser/wake", r => r.fulfill({ json: { ok: true, status: {} } }));
+    await setup(page, [row]);
+    await page.route("**/api/workspace/ticket", r => r.fulfill({ json: { ticket: "t", origin: "http://127.0.0.1:4289", url: "http://127.0.0.1:4289/vnc/vnc.html?ticket=t", expiresAt: Date.now() + 60_000 } }));
+    await page.route("**/api/documents/text**", r => r.fulfill({ status: 413, json: { error: "too_large", message: "文件 636.7 KB 超过内联显示上限（256.0 KB），请下载后查看" } }));
+    const opened: string[] = [];
+    await page.route("**/api/browser/files", async r => {
+        opened.push(r.request().postDataJSON().path);
+        await r.fulfill({ json: { ok: true, tab: { id: "t9", key: "person", title: "销售报表", url: "file:///home/gem/workspace/report.html", createdAt: 1, lastUsed: 1, finishedAt: null, holder: "human", humanSince: 1, request: null } } });
+    });
+    await page.getByRole("button", { name: "预览 销售报表" }).click();
+    // No dead end telling the person to download: the page opens in full, in the console, once.
+    const panel = page.getByRole("dialog", { name: "操作网页" });
+    await expect(panel).toBeVisible();
+    await expect(panel).toContainText("销售报表");
+    expect(opened).toEqual(["/home/gem/workspace/report.html"]);
+    await expect(page.getByRole("dialog", { name: "预览 report.html" })).toHaveCount(0);
+    await expect(page.getByText("超过内联显示上限")).toHaveCount(0);
+    await page.screenshot({ path: info.outputPath("large-html-console.png") });
+    await panel.getByRole("button", { name: "关闭操作面板" }).click();
+    await expect(panel).toBeHidden();
+
+    // A page small enough to preview inline can still be opened in the browser from the preview.
+    await page.unroute("**/api/documents/text**");
+    await page.route("**/api/documents/text**", r => r.fulfill({ json: { text: "<h1>报表</h1>", truncated: false } }));
+    await page.getByRole("button", { name: "预览 销售报表" }).click();
+    const preview = page.getByRole("dialog", { name: "预览 report.html" });
+    await preview.getByRole("button", { name: "在浏览器打开" }).click();
+    await expect(panel).toBeVisible();
+    await expect(preview).toHaveCount(0);
+    expect(opened).toHaveLength(2);
+});
 test("dispatching shows a calm sorting animation and what the dispatcher weighs, and stays still for reduced motion", async ({ page }, info) => {
     await setup(page, [{ ...task(1, "planning"), title: "帮我订周六晚上的餐厅" }]);
     await page.emulateMedia({ colorScheme: "light", reducedMotion: "no-preference" });

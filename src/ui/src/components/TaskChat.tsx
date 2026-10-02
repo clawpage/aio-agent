@@ -28,13 +28,15 @@ function turnOf(t: Task): "you" | "ai" | "err" {
     return "ai";
 }
 const labels: Record<string, string> = { planning: "正在分配", needs_input: "等待你补充", planning_failed: "分配失败", waiting: "等待依赖或资源", queued: "排队中", running: "在办", stopping: "正在停止…", completed: "已完成", failed: "执行失败", interrupted: "已停止", unknown: "结果待核对", blocked: "需要补充" };
-export function TaskChat({ onDetails, onOpenLink, onExpired, onFeed, onRevealBrowser, debug = false }: {
+export function TaskChat({ onDetails, onOpenLink, onOpenFileInBrowser, onExpired, onFeed, onRevealBrowser, debug = false }: {
     /** Owner debug mode: each message offers its dispatch log. */
     debug?: boolean;
     onDetails: (task: Task) => void;
     /** Open the workspace on the browser, where a taken-over task tab is in front. */
     onRevealBrowser: () => void;
     onOpenLink: (url: string) => void;
+    /** Open a workspace HTML page in full in the sandbox browser. */
+    onOpenFileInBrowser?: (path: string) => void;
     onExpired: () => void;
     onFeed?: (feed:TaskFeed)=>void;
 }) {
@@ -256,7 +258,7 @@ export function TaskChat({ onDetails, onOpenLink, onExpired, onFeed, onRevealBro
     } }}/>
       <div className="composer-row"><label className={`file-button ${busy || uploading ? "disabled" : ""}`}>{uploading ? "上传中…" : "附件"}<input type="file" multiple className="file-input" aria-label="添加附件" data-testid="attachment-input" disabled={busy || uploading} onChange={e => { void pick(e.target.files); e.target.value = ""; }}/></label><span className="spacer"/><button className="primary" disabled={busy || uploading || (!draft.trim() && !attachments.length)} onClick={() => void send()}>{busy ? "提交中…" : "发送"}</button></div>
     </div>
-    {preview && <FilePreview path={preview} onClose={() => setPreview(null)} onOpenLink={onOpenLink}/>}
+    {preview && <FilePreview path={preview} onClose={() => setPreview(null)} onOpenLink={onOpenLink} onOpenInBrowser={onOpenFileInBrowser}/>}
     {debug && dispatchLogFor && <DispatchLog taskId={dispatchLogFor} onClose={() => setDispatchLogFor(null)}/>}
   </section>;
 }

@@ -652,6 +652,44 @@ describe("conversation management and sandbox browser tabs", () => {
     expect(await asleep.json()).toMatchObject({ error: "browser_wake_failed", message: "浏览器恢复失败，快照仍然保留" });
     h.ctx.browser.wake = wake;
   });
+
+  it("opens a workspace HTML page in a tab of the person's own, by its resolved file:// address", async () => {
+    const { cookie, csrf } = await login(h);
+    const headers = { cookie, "x-csrf-token": csrf, "content-type": "application/json" };
+    const opened: string[] = [];
+    const tabs = h.ctx.tabs;
+    h.ctx.tabs = {
+      open: async (url: string) => (opened.push(url), { status: 200, body: { tab: { id: "t9", key: "person", title: "你打开的网页", url, createdAt: 1, lastUsed: 1, finishedAt: null, holder: "human", humanSince: null, request: null } } }),
+    } as unknown as NonNullable<typeof h.ctx.tabs>;
+    const stat = vi.spyOn(h.ctx.documents, "stat").mockResolvedValue({ exists: true, isFile: true, size: 652_000, mtimeToken: "m", realPath: "/home/gem/workspace/报告 1.html" });
+    const wake = h.ctx.browser.wake;
+    let woke = 0;
+    h.ctx.browser.wake = async () => { woke += 1; };
+    try {
+      const post = (path: string, extra: Record<string, string> = headers) => h.request("/api/browser/files", { method: "POST", headers: extra, body: JSON.stringify({ path }) });
+      expect((await post("/home/gem/workspace/link.html", { cookie, "content-type": "application/json" })).status).toBe(403);
+      const ok = await post("/home/gem/workspace/link.html");
+      expect(ok.status).toBe(200);
+      expect(await ok.json()).toMatchObject({ ok: true, tab: { id: "t9" } });
+      // The symlink's resolved target is what opens, percent-encoded as a file URL.
+      expect(opened).toEqual(["file:///home/gem/workspace/%E6%8A%A5%E5%91%8A%201.html"]);
+      expect(woke).toBe(1);
+
+      expect((await post("/etc/x.html")).status).toBe(400);
+      expect((await post("/home/gem/workspace/a.png")).status).toBe(415);
+      stat.mockResolvedValueOnce({ exists: false, isFile: false, size: 0, mtimeToken: "", realPath: "" });
+      expect((await post("/home/gem/workspace/gone.html")).status).toBe(404);
+      h.ctx.browser.wake = async () => { throw new Error("浏览器恢复失败，快照仍然保留"); };
+      const asleep = await post("/home/gem/workspace/link.html");
+      expect(asleep.status).toBe(503);
+      expect(await asleep.json()).toMatchObject({ error: "browser_wake_failed" });
+      expect(opened).toHaveLength(1);
+    } finally {
+      stat.mockRestore();
+      h.ctx.browser.wake = wake;
+      h.ctx.tabs = tabs;
+    }
+  });
 });
 
 describe("sandbox proxy", () => {

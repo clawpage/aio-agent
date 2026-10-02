@@ -608,6 +608,9 @@ export function Workspace({ open, status, initialPath, onClose, onNotify, browse
       {filePreview && <FilePreview path={filePreview} onClose={() => setFilePreview(null)} onOpenLink={async url => {
         try { await api.openBrowserTab(url); await navigateTo("browser"); }
         catch (err) { onNotify(err instanceof Error ? err.message : String(err), "error"); }
+      }} onOpenInBrowser={async path => {
+        try { await api.openBrowserFile(path); await navigateTo("browser"); }
+        catch (err) { onNotify(err instanceof Error ? err.message : String(err), "error"); }
       }} />}
     </section>
   );

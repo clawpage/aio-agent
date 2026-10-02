@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { api, API_CREDENTIALS } from "../api";
+import { api, API_CREDENTIALS, ApiError } from "../api";
 import {
   baseName,
   isMarkdownPath,
@@ -19,6 +19,7 @@ import { extractFileRefs } from "../fileRefs";
  * Images use typed blobs; Office/PDF are rasterised; Markdown is sanitized.
  * HTML uses an authenticated endpoint with CSP sandbox plus a sandboxed iframe
  * (scripts allowed, same-origin/storage/parent access and network disallowed).
+ * An HTML page too large to inline opens in full in the sandbox's real browser.
  * Plain text is escaped and all text previews are capped. Downloads remain
  * attachment-only and preserve the original bytes.
  */
@@ -44,15 +45,18 @@ interface Props {
   path: string;
   onClose: () => void;
   onOpenLink?: (url: string) => void;
+  /** Open an HTML page in full in the sandbox's real browser (scripts and network work there). */
+  onOpenInBrowser?: (path: string) => void;
   /** Offered for kinds the sandbox tools can convert (e.g. Word → PDF). */
   onConvert?: (path: string, target: string) => void;
   /** Extra actions rendered in the footer (workspace integration). */
   actions?: React.ReactNode;
 }
 
-type Phase = "loading" | "ready" | "error" | "unsupported";
+/** "browser": an HTML page over the inline cap, shown in the sandbox browser instead. */
+type Phase = "loading" | "ready" | "error" | "unsupported" | "browser";
 
-export function FilePreview({ path: initialPath, onClose, onOpenLink, onConvert, actions }: Props) {
+export function FilePreview({ path: initialPath, onClose, onOpenLink, onOpenInBrowser, onConvert, actions }: Props) {
   const [path, setPath] = useState(initialPath);
   const [history, setHistory] = useState<string[]>([]);
   const [sourceView, setSourceView] = useState(false);
@@ -74,6 +78,8 @@ export function FilePreview({ path: initialPath, onClose, onOpenLink, onConvert,
   const [truncated, setTruncated] = useState(false);
   const [pageFailed, setPageFailed] = useState(false);
   const [attempt, setAttempt] = useState(0);
+  const [browserNote, setBrowserNote] = useState<string | null>(null);
+  const autoOpened = useRef<string | null>(null);
   const closeRef = useRef<HTMLButtonElement | null>(null);
 
   // Focus the close control so Escape/Enter work immediately after opening.
@@ -109,6 +115,7 @@ export function FilePreview({ path: initialPath, onClose, onOpenLink, onConvert,
     setTotalPages(0);
     setTruncated(false);
     setPageFailed(false);
+    setBrowserNote(null);
 
     void (async () => {
       try {
@@ -166,6 +173,10 @@ export function FilePreview({ path: initialPath, onClose, onOpenLink, onConvert,
         // An aborted request rejects with an AbortError; that is the expected
         // result of switching files, not a failure to show the user.
         if (controller.signal.aborted) return;
+        if (html && err instanceof ApiError && err.status === 413) {
+          setPhase("browser");
+          return;
+        }
         setError(err instanceof Error ? err.message : String(err));
         setPhase("error");
       }
@@ -185,6 +196,21 @@ export function FilePreview({ path: initialPath, onClose, onOpenLink, onConvert,
     try { await api.openBrowserTab(url); }
     catch (err) { setError(err instanceof Error ? err.message : String(err)); }
   };
+  const openInBrowser = async () => {
+    if (onOpenInBrowser) { onOpenInBrowser(path); onClose(); return; }
+    setBrowserNote("正在沙箱浏览器中打开…");
+    try {
+      await api.openBrowserFile(path);
+      setBrowserNote("已在沙箱浏览器的新标签页中打开，可到工作区「浏览器」里查看。");
+    }
+    catch (err) { setBrowserNote(err instanceof Error ? err.message : String(err)); }
+  };
+  // A page too large to inline goes straight to the browser, once per file.
+  useEffect(() => {
+    if (phase !== "browser" || autoOpened.current === path) return;
+    autoOpened.current = path;
+    void openInBrowser();
+  }, [phase, path]);
 
   return (
     <div
@@ -231,6 +257,13 @@ export function FilePreview({ path: initialPath, onClose, onOpenLink, onConvert,
             <div className="file-preview-note" role="status">
               <p>该格式暂不支持在线预览。</p>
               <p className="muted tiny">你可以直接下载原文件，或在工作区「文件」页对它有转换入口时把它转换成可预览的格式。</p>
+            </div>
+          )}
+
+          {phase === "browser" && (
+            <div className="file-preview-note" role="status" data-testid="file-preview-browser-note">
+              <p>页面较大，超过内联预览上限，改用沙箱浏览器完整打开。</p>
+              {browserNote && <p className="muted tiny">{browserNote}</p>}
             </div>
           )}
 
@@ -311,6 +344,11 @@ export function FilePreview({ path: initialPath, onClose, onOpenLink, onConvert,
             </button>
           )}
           {actions}
+          {html && (phase === "ready" || phase === "browser") && (
+            <button type="button" className="ghost" onClick={() => void openInBrowser()} data-testid="file-preview-open-browser">
+              在浏览器打开
+            </button>
+          )}
           <a className="primary" href={api.downloadUrl(path)} download={name} data-testid="file-preview-download">
             下载
           </a>

@@ -32,6 +32,8 @@ interface Props {
   onOpenWorkspace: (path?: string) => void;
   /** Open a Markdown link as a real tab in the sandbox browser. */
   onOpenBrowserLink: (url: string) => void;
+  /** Open a workspace HTML page in full in the sandbox browser. */
+  onOpenBrowserFile?: (path: string) => void;
 }
 
 const APPROVAL_LABELS: Record<string, string> = {
@@ -57,6 +59,7 @@ export function Chat({
   onStatusChanged,
   onOpenWorkspace,
   onOpenBrowserLink,
+  onOpenBrowserFile,
 }: Props) {
   const [timeline, setTimeline] = useState<TimelineState>(() => emptyTimeline());
   const now = useDisplayClock();
@@ -428,7 +431,7 @@ export function Chat({
       </div>
 
       }
-      {previewPath && <FilePreview path={previewPath} onClose={() => setPreviewPath(null)} onOpenLink={onOpenBrowserLink} />}
+      {previewPath && <FilePreview path={previewPath} onClose={() => setPreviewPath(null)} onOpenLink={onOpenBrowserLink} onOpenInBrowser={onOpenBrowserFile} />}
     </section>
   );
 }

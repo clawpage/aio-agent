@@ -442,10 +442,20 @@ async function personInput(body) {
   return { status: 200, body: { tab: tab.id, current: cursors.get(tab.key) || tab.id, title: await page.title().catch(() => ''), url: safeUrl(page) } };
 }
 
-/** Open a link for a person in a tab of their own (its own window), keeping only their latest few. */
+/** A page in the person's workspace (the control plane resolved the path); `..` is normalized by the parse. */
+function isWorkspaceFile(url) {
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === 'file:' && !parsed.host && parsed.pathname.startsWith('/home/gem/workspace/');
+  } catch {
+    return false;
+  }
+}
+
+/** Open a link or workspace page for a person in a tab of their own (its own window), keeping only their latest few. */
 async function personOpen(body) {
   const url = String(body.url || '');
-  if (!/^https?:\/\//i.test(url)) return { status: 400, body: { error: 'bad_url' } };
+  if (!/^https?:\/\//i.test(url) && !isWorkspaceFile(url)) return { status: 400, body: { error: 'bad_url' } };
   const tab = await newTab(PERSON, '你打开的网页');
   await tab.page.goto(url, { waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => undefined);
   // Nobody else sees this tab: its record carries the page's own title for the person.

@@ -61,7 +61,7 @@ export function MainApp() {
     const [notice, setNotice] = useState<string | null>(null);
     // A link opened from a reply: its own tab, operated from the same console as a taken-over task tab.
     const [linkTab, setLinkTab] = useState<TaskTab | null>(null);
-    const [linkOpening, setLinkOpening] = useState(false);
+    const [linkOpening, setLinkOpening] = useState<string | null>(null);
     const [theme, setTheme] = useState(() => matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark");
     const expired = useCallback(() => { setAuth(false); setMenuOpen(false); setNotice("登录已过期，请重新登录。"); }, []);
     const check = useCallback(async () => { try {
@@ -120,10 +120,10 @@ export function MainApp() {
     }, [auth, expired, refreshStatus]);
     const notify = useCallback((message: string) => setNotice(message), []);
     const revealBrowser = useCallback(() => { setWorkspace(true); setBrowserNonce(n => n + 1); }, []);
-    const openLink = useCallback(async (url: string) => {
-        setLinkOpening(true);
+    const openTab = useCallback(async (opening: string, open: () => Promise<{ tab?: TaskTab }>) => {
+        setLinkOpening(opening);
         try {
-            const opened = await api.openBrowserTab(url);
+            const opened = await open();
             // Without the tab server there is no tab of the person's own: show the whole browser instead.
             if (opened.tab) setLinkTab(opened.tab);
             else revealBrowser();
@@ -132,9 +132,11 @@ export function MainApp() {
             notify(err instanceof Error ? err.message : String(err));
         }
         finally {
-            setLinkOpening(false);
+            setLinkOpening(null);
         }
     }, [notify, revealBrowser]);
+    const openLink = useCallback((url: string) => openTab("正在打开链接…", () => api.openBrowserTab(url)), [openTab]);
+    const openFileInBrowser = useCallback((path: string) => openTab("正在打开页面…", () => api.openBrowserFile(path)), [openTab]);
     const closeLink = useCallback((visited: string[]) => {
         setLinkTab(null);
         for (const id of visited) void api.personBrowserClose(id).catch(() => undefined);
@@ -195,13 +197,13 @@ export function MainApp() {
       {status && !status.agent.sessionReady && (status.sandbox.idle
         ? <div className="banner warn">环境空闲已休眠，正在唤醒（约半分钟）。消息仍会保留，唤醒后自动执行。</div>
         : <div className="banner error">智能体暂未就绪：{status.agent.lastError ?? "正在连接"}。消息仍会保留。</div>)}
-      <div className="view-slot" hidden={view !== "main"}><TaskChat debug={role === "owner" && debug} onFeed={setTaskFeed} onDetails={t => void details(t)} onOpenLink={u => void openLink(u)} onExpired={expired} onRevealBrowser={revealBrowser}/></div>
+      <div className="view-slot" hidden={view !== "main"}><TaskChat debug={role === "owner" && debug} onFeed={setTaskFeed} onDetails={t => void details(t)} onOpenLink={u => void openLink(u)} onOpenFileInBrowser={p => void openFileInBrowser(p)} onExpired={expired} onRevealBrowser={revealBrowser}/></div>
       <div className="view-slot" hidden={view !== 'tasks'}><TaskList feed={taskFeed} onDetails={t=>void details(t,'tasks')} onExpired={expired}/></div>
       <div className="view-slot" hidden={view !== 'schedules'}><ScheduleList active={view === 'schedules'} onExpired={expired} onOpenTask={id => { const t = taskFeed.tasks.find(task => task.id === id); if (t) void details(t, 'tasks'); else setView('main'); }}/></div>
       {role === "owner" && view === "settings" && <Settings onBack={() => setView("main")}/>}
-      {view === "detail" && detail && <div className="task-detail"><div className="task-detail-bar"><button className="ghost" onClick={() => setView(detailReturn)}>← 返回{detailReturn==='tasks'?'任务列表':'主会话'}</button><span className="muted tiny">{taskStatusLabels[(taskFeed.tasks.find(t=>t.id===detailTask?.id)??detailTask)?.status??'']??'过程详情'}</span></div><Chat key={detail.id} readOnly conversation={detail} status={status} onConversationChanged={() => { }} onStatusChanged={() => void refreshStatus()} onOpenWorkspace={openWorkspace} onOpenBrowserLink={u => void openLink(u)}/></div>}
+      {view === "detail" && detail && <div className="task-detail"><div className="task-detail-bar"><button className="ghost" onClick={() => setView(detailReturn)}>← 返回{detailReturn==='tasks'?'任务列表':'主会话'}</button><span className="muted tiny">{taskStatusLabels[(taskFeed.tasks.find(t=>t.id===detailTask?.id)??detailTask)?.status??'']??'过程详情'}</span></div><Chat key={detail.id} readOnly conversation={detail} status={status} onConversationChanged={() => { }} onStatusChanged={() => void refreshStatus()} onOpenWorkspace={openWorkspace} onOpenBrowserLink={u => void openLink(u)} onOpenBrowserFile={p => void openFileInBrowser(p)}/></div>}
     </main>
-    {linkOpening && <div className="task-console-overlay" role="presentation"><div className="task-console task-console-opening" role="status">正在打开链接…</div></div>}
+    {linkOpening && <div className="task-console-overlay" role="presentation"><div className="task-console task-console-opening" role="status">{linkOpening}</div></div>}
     {linkTab && <TaskConsole key={linkTab.id} target={personConsoleTarget} tab={linkTab} label="操作网页" closeLabel="关闭页面" onClose={closeLink} onReveal={() => { setLinkTab(null); revealBrowser(); }}/>}
     <Workspace canConfigure={role === "owner"} open={workspace} status={status} initialPath={workspacePath} browserNonce={browserNonce} onClose={() => { setWorkspace(false); setWorkspacePath(undefined); }} onNotify={notify}/>
   </div>;

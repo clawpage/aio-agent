@@ -4,6 +4,7 @@ import {readSoul,writeSoul,SoulError,DEFAULT_SOUL,SOUL_MAX_BYTES} from '../soul.
 import { HTML_PREVIEW_CSP, htmlPreviewDocument } from "../documents/html.js";
 import express, { type Request, type Response, type NextFunction, type Router } from "express";
 import { randomUUID } from "node:crypto";
+import { pathToFileURL } from "node:url";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { exitTerminal, TERMINAL_ID, TerminalRegistry } from "../terminals.js";
@@ -1642,6 +1643,47 @@ export function createApiRouter(context: AppContext): Router {
         return;
       }
       res.json({ ok: true, message: result.message, data: result.data ?? null });
+    }),
+  );
+
+  /**
+   * Open a workspace HTML page in a tab of the person's own in the sandbox
+   * Chromium, shown in the console like an opened link. A page too large for
+   * the inline preview, or one that loads its own images, styles and scripts,
+   * renders there in full. The file stays inside the sandbox: only its resolved
+   * path inside the workspace becomes a file:// address there.
+   */
+  router.post(
+    "/browser/files",
+    requireKind("primary"),
+    requireSession,
+    documentHandler(async (req, res) => {
+      const target = checkedDocumentPath(String(req.body?.path ?? ""));
+      if (!/\.(html?|xhtml)$/i.test(target)) {
+        res.status(415).json({ error: "unsupported", message: "只有 HTML 页面可以在浏览器里打开" });
+        return;
+      }
+      const stat = await context.documents.stat(target);
+      if (!stat.exists || !stat.isFile) {
+        res.status(404).json({ error: "not_found", message: "文件不存在或已被移动" });
+        return;
+      }
+      if (!context.tabs) {
+        res.status(503).json({ error: "browser_unavailable", message: "沙箱浏览器暂不可用" });
+        return;
+      }
+      try {
+        await context.browser.wake();
+      } catch (err) {
+        res.status(503).json({ error: "browser_wake_failed", message: err instanceof Error ? err.message : "浏览器恢复失败，请稍后重试" });
+        return;
+      }
+      const opened = await context.tabs.open(pathToFileURL(stat.realPath).href);
+      if (opened.status !== 200 || !opened.body.tab) {
+        res.status(503).json({ error: "browser_tab_failed", message: "在浏览器里打开页面失败，请稍后重试" });
+        return;
+      }
+      res.json({ ok: true, tab: opened.body.tab });
     }),
   );
 

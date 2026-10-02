@@ -267,7 +267,9 @@ it.skipIf(!hasChromium)("opens a person's link in their own tab: theirs to opera
   await new Promise<void>((r) => site.listen(0, "127.0.0.1", r));
   const origin = `http://127.0.0.1:${(site.address() as net.AddressInfo).port}`;
   const open = async (url: string) => (await (await fetch(`${base}/open`, { method: "POST", body: JSON.stringify({ url }) })).json()) as { tab: TabRecord & { targetId: string } };
-  expect((await fetch(`${base}/open`, { method: "POST", body: JSON.stringify({ url: "file:///etc/passwd" }) })).status).toBe(400);
+  for (const bad of ["file:///etc/passwd", "file:///home/gem/workspace/../../../etc/passwd", "file://host/home/gem/workspace/a.html", "javascript:alert(1)"]) {
+    expect((await fetch(`${base}/open`, { method: "POST", body: JSON.stringify({ url: bad }) })).status, bad).toBe(400);
+  }
 
   const { tab } = await open(`${origin}/one`);
   expect(tab).toMatchObject({ key: "person", holder: "human", url: `${origin}/one`, title: "Link /one" });
@@ -295,6 +297,9 @@ it.skipIf(!hasChromium)("opens a person's link in their own tab: theirs to opera
   expect(mine.map((t) => t.url)).not.toContain(`${origin}/one`);
   expect((await fetch(`${base}/close`, { method: "POST", body: JSON.stringify({ tab: mine[0]!.id }) })).status).toBe(200);
   expect(await records("person")).toHaveLength(2);
+  // A workspace page the control plane resolved opens like a link.
+  expect((await fetch(`${base}/open`, { method: "POST", body: JSON.stringify({ url: "file:///home/gem/workspace/%E6%8A%A5%E5%91%8A.html" }) })).status).toBe(200);
+  expect(await records("person")).toHaveLength(3);
   site.close();
 });
 
