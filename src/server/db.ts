@@ -150,6 +150,26 @@ CREATE TABLE IF NOT EXISTS tasks (
   completed_at INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_tasks_created ON tasks(created_at);
+
+-- Scheduled and recurring tasks: each due run starts a task (tasks.schedule_id).
+CREATE TABLE IF NOT EXISTS schedules (
+  id TEXT PRIMARY KEY,
+  owner_id TEXT NOT NULL,
+  title TEXT NOT NULL,
+  instruction TEXT NOT NULL,
+  spec_json TEXT NOT NULL,
+  timezone TEXT NOT NULL,
+  resources_json TEXT NOT NULL DEFAULT '[]',
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','paused','done')),
+  next_run_at INTEGER,
+  last_run_at INTEGER,
+  last_task_id TEXT,
+  run_count INTEGER NOT NULL DEFAULT 0,
+  source_task_id TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_schedules_due ON schedules(status, next_run_at);
 CREATE TRIGGER IF NOT EXISTS task_revision AFTER UPDATE ON tasks
 WHEN NEW.revision = OLD.revision
 BEGIN UPDATE tasks SET revision=OLD.revision+1 WHERE id=NEW.id; END;
@@ -241,6 +261,7 @@ function migrate(db: Db): void {
   const taskColumns = db.prepare("PRAGMA table_info(tasks)").all() as Array<{ name: string }>;
   if (!taskColumns.some(c => c.name === "execution_conversation_id")) db.exec("ALTER TABLE tasks ADD COLUMN execution_conversation_id TEXT REFERENCES conversations(id)");
   if (!taskColumns.some(c => c.name === "merged_into")) db.exec("ALTER TABLE tasks ADD COLUMN merged_into TEXT REFERENCES tasks(id)");
+  if (!taskColumns.some(c => c.name === "schedule_id")) db.exec("ALTER TABLE tasks ADD COLUMN schedule_id TEXT");
   const recallColumns = db.prepare("PRAGMA table_info(recall_events)").all() as Array<{ name: string }>;
   if (!recallColumns.some(c => c.name === "fail_reason")) db.exec("ALTER TABLE recall_events ADD COLUMN fail_reason TEXT");
   if (!recallColumns.some(c => c.name === "repairs_json")) db.exec("ALTER TABLE recall_events ADD COLUMN repairs_json TEXT NOT NULL DEFAULT '[]'");

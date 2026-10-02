@@ -2617,7 +2617,7 @@ textarea:focus {
   .mobile-menu-button { display: flex; align-items: center; justify-content: center; position: fixed; top: calc(6px + env(safe-area-inset-top)); left: 8px; width: 44px; height: 44px; padding: 0; z-index: 71; border-color: transparent; }
   .mobile-menu-close { display: block; position: absolute; top: calc(6px + env(safe-area-inset-top)); right: 8px; width: 44px; height: 44px; padding: 0; font-size: 28px; border-color: transparent; }
   .mobile-menu-backdrop { position: fixed; inset: 0; z-index: 85; background: rgb(0 0 0 / .4); backdrop-filter: blur(2px); }
-  .main-inbox-app .main > .banner, .main-inbox-app .task-chat .chat-head, .main-inbox-app .task-list-page > .chat-head, .main-inbox-app .settings-head, .main-inbox-app .task-detail-bar, .main-inbox-app .workspace .ws-head { padding-left: 60px; min-height: calc(56px + env(safe-area-inset-top)); }
+  .main-inbox-app .main > .banner, .main-inbox-app .task-chat .chat-head, .main-inbox-app .task-list-page > .chat-head, .main-inbox-app .schedule-page > .chat-head, .main-inbox-app .settings-head, .main-inbox-app .task-detail-bar, .main-inbox-app .workspace .ws-head { padding-left: 60px; min-height: calc(56px + env(safe-area-inset-top)); }
   .main-inbox-app .workspace:not(.fullscreen) { bottom: 0; }
   .main-inbox-app .composer { padding-bottom: max(12px, env(safe-area-inset-bottom)); }
 }
@@ -2719,7 +2719,7 @@ textarea:focus {
 .task-question > p { margin: 10px 0; font-size: 15px; line-height: 1.65; white-space: pre-wrap; overflow-wrap: anywhere; }
 .task-question-hint { display: block; font-size: 12px; color: var(--text-dim); }
 
-.task-list-page { display:flex; flex-direction:column; height:100%; min-height:0; }
+.task-list-page, .schedule-page { display:flex; flex-direction:column; height:100%; min-height:0; }
 .task-list-scroll { overflow:auto; padding:20px; flex:1; }
 .task-list { list-style:none; margin:0 auto 16px; padding:0; max-width:1000px; display:grid; gap:12px; }
 .task-list-item { display:block; text-align:left; width:100%; padding:16px; border:1px solid var(--border); border-radius:14px; background:var(--bg-soft); color:var(--text); }
@@ -2962,4 +2962,30 @@ textarea:focus {
   /* A bottom sheet on phones, within thumb reach. */
   .map-sheet-backdrop { place-items: end stretch; padding: 0; }
   .map-sheet { width: 100%; border-radius: var(--radius-card) var(--radius-card) 0 0; padding-bottom: calc(16px + env(safe-area-inset-bottom)); }
+}
+
+/* ------------------------------------------------------------ schedules */
+.schedule-hint { margin: 4px 2px 12px; line-height: 1.6; }
+.schedule-item { cursor: default; }
+.schedule-rule { margin: 4px 0 2px; font-size: 14px; font-weight: 600; color: var(--text); }
+.schedule-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 10px; }
+.schedule-badge {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 20px;
+  color: var(--accent);
+  background: var(--accent-soft);
+  white-space: nowrap;
+}
+/* A run a schedule started: nobody typed it, so it is not shown as your message. */
+.schedule-run-note {
+  align-self: center;
+  margin: 6px auto;
+  padding: 4px 12px;
+  border-radius: 20px;
+  font-size: 12px;
+  color: var(--text-dim);
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  text-align: center;
 }

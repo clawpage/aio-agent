@@ -11,6 +11,8 @@ import { applyTaskReference, parsePlan, parseSearch, planningPrompt, resourcesCo
 import { recordRecall, STEP_ANSWER_CHARS, STEP_PROMPT_CHARS, TaskRecall, type RecallEvent, type RecallSource } from "./recall.js";
 import { formatTimeline, lastQuestion, routingQuestion, timeline } from "./context.js";
 import { confident } from "../jev.js";
+import { describeNow, describeSchedule, formatWhen, MAX_ACTIVE_SCHEDULES, nextRun, type ScheduleSpec } from "./schedules.js";
+import type { PlanningSchedule, ScheduleActionName } from "./planning.js";
 
 /** The dispatcher may ask to search past tasks at most this many times per message. */
 const MAX_SEARCH_ROUNDS = 2;
@@ -38,7 +40,29 @@ interface TaskRow {
     error: string | null;
     created_at: number;
     completed_at: number | null;
+    schedule_id: string | null;
 }
+interface ScheduleRow {
+    id: string;
+    owner_id: string;
+    title: string;
+    instruction: string;
+    spec_json: string;
+    timezone: string;
+    resources_json: string;
+    status: "active" | "paused" | "done";
+    next_run_at: number | null;
+    last_run_at: number | null;
+    last_task_id: string | null;
+    run_count: number;
+    source_task_id: string | null;
+    created_at: number;
+    updated_at: number;
+}
+/** How often due schedules are checked; a run starts at most this late. */
+const SCHEDULE_TICK_MS = 30_000;
+/** A previous run in one of these states no longer holds the next one back. */
+const RUN_SETTLED = new Set(["completed", "failed", "interrupted", "unknown", "needs_input", "planning_failed", "blocked", "merge_failed", "merge_unknown", "merged"]);
 export interface TaskInput {
     userId?: string;
     text: string;
@@ -55,6 +79,7 @@ export class TaskService {
     #merging = false;
     #mergeAgain = false;
     #scheduled = false;
+    #ticker: ReturnType<typeof setInterval> | null = null;
     readonly recall: TaskRecall;
     constructor(private db: Db, private cfg: Config, private agent: AgentManager, private codex: CodexSessionLike, private resourceSandbox?: ResourceSandbox, private jev?: Jev) { this.recall = new TaskRecall(db); }
     init(): void {
@@ -67,8 +92,11 @@ export class TaskService {
         }
         this.agent.events.on("event", this.onEvent);
         this.schedule();
+        this.#ticker = setInterval(() => this.runDueSchedules(), SCHEDULE_TICK_MS);
+        this.#ticker.unref?.();
+        this.runDueSchedules();
     }
-    close(): void { this.#closed = true; this.agent.events.off("event", this.onEvent); }
+    close(): void { this.#closed = true; this.agent.events.off("event", this.onEvent); if (this.#ticker) clearInterval(this.#ticker); }
     private rows(): TaskRow[] { return this.db.prepare("SELECT * FROM tasks WHERE (? IS NULL OR conversation_id IN (SELECT id FROM conversations WHERE owner_id=?)) ORDER BY created_at, id").all(this.cfg.runtimeUserId ?? null, this.cfg.runtimeUserId ?? null) as unknown as TaskRow[]; }
     get(id: string): TaskRow | null { return this.db.prepare("SELECT * FROM tasks WHERE id = ?").get(id) as unknown as TaskRow ?? null; }
     ownerId(row: TaskRow): string { return this.agent.getConversation(row.conversation_id)!.owner_id; }
@@ -97,6 +125,7 @@ export class TaskService {
             waitReason: this.waitReason(row),
             clarification: row.status === "needs_input" ? plan?.clarification ?? null : null,
             dependencies: plan?.dependencies ?? [], createdAt: row.created_at, startedAt: turn?.started_at ?? null, completedAt: row.completed_at,
+            schedule: row.schedule_id ? this.scheduleLabel(row.schedule_id) ?? { id: row.schedule_id, title: row.title, rule: "定时任务已删除" } : null,
             approvals: TERMINAL.has(row.status) ? 0 : this.agent.listPendingRequests(this.executor(row)).length,
         };
     }
@@ -287,6 +316,7 @@ export class TaskService {
                     : this.codex.planTask?.(prompt, soul);
             // The conversation in order, and Jev's second opinion on which task this message continues.
             const timelineText = formatTimeline(timeline(everything, row), row.created_at);
+            const scheduling = { now: Date.now(), timezone: this.cfg.browser.timezone, schedules: this.planningSchedules(trace.ownerId) };
             steps.push({ kind: "context", at: Date.now(), timeline: timelineText, candidates: candidates.size });
             let hint: DispatchHint | null = null;
             if (!explicit && candidates.size && this.jev?.enabled) {
@@ -314,7 +344,7 @@ export class TaskService {
                 trace.rounds += 1;
                 const canSearch = !explicit && trace.rounds <= MAX_SEARCH_ROUNDS;
                 previous = [...candidates.values()];
-                const prompt = planningPrompt(planningInput, explicit ? previous.filter(t => t.id === explicit.id) : previous, row.related_task_id, this.cfg.sandbox.containerWorkspaceDir, { canSearch, searched: trace.searches }, { timeline: timelineText, hint });
+                const prompt = planningPrompt(planningInput, explicit ? previous.filter(t => t.id === explicit.id) : previous, row.related_task_id, this.cfg.sandbox.containerWorkspaceDir, { canSearch, searched: trace.searches }, { timeline: timelineText, hint, now: describeNow(scheduling.now, scheduling.timezone), timezone: scheduling.timezone, schedules: scheduling.schedules });
                 trace.promptChars += prompt.length;
                 // The dispatcher runs on the sandbox Codex: a container stopped for idleness starts first.
                 await this.agent.ensureSandbox();
@@ -331,11 +361,11 @@ export class TaskService {
                 for (const query of queries) recalled(query, "search", "search", Math.ceil(cap / queries.length));
             }
             const report: PlanReport = { repairs: [] };
-            let plan = parsePlan(raw ?? null, previous, row.related_task_id, this.cfg.sandbox.containerWorkspaceDir, report);
+            let plan = parsePlan(raw ?? null, previous, row.related_task_id, this.cfg.sandbox.containerWorkspaceDir, report, scheduling);
             // One more chance with the reason, instead of failing the message outright.
             if (!plan) {
                 trace.rounds += 1;
-                const prompt = planningPrompt(planningInput, explicit ? previous.filter(t => t.id === explicit.id) : previous, row.related_task_id, this.cfg.sandbox.containerWorkspaceDir, { canSearch: false, searched: trace.searches, correction: report.error ?? "格式不符合要求" }, { timeline: timelineText, hint });
+                const prompt = planningPrompt(planningInput, explicit ? previous.filter(t => t.id === explicit.id) : previous, row.related_task_id, this.cfg.sandbox.containerWorkspaceDir, { canSearch: false, searched: trace.searches, correction: report.error ?? "格式不符合要求" }, { timeline: timelineText, hint, now: describeNow(scheduling.now, scheduling.timezone), timezone: scheduling.timezone, schedules: scheduling.schedules });
                 trace.promptChars += prompt.length;
                 raw = await ask(prompt);
                 if (this.#closed || this.get(row.id)?.status !== "planning") return;
@@ -343,7 +373,7 @@ export class TaskService {
                 const first = report.error;
                 steps.push({ kind: "ask", at: Date.now(), round: trace.rounds, prompt: prompt.slice(0, STEP_PROMPT_CHARS), answer: raw?.slice(0, STEP_ANSWER_CHARS) ?? null, correction: first ?? "格式不符合要求" });
                 report.error = undefined;
-                plan = parsePlan(raw ?? null, previous, row.related_task_id, this.cfg.sandbox.containerWorkspaceDir, report);
+                plan = parsePlan(raw ?? null, previous, row.related_task_id, this.cfg.sandbox.containerWorkspaceDir, report, scheduling);
                 report.repairs.unshift(`第一次回答无法使用：${first ?? "格式不符合要求"}，已重问一次`);
             }
             trace.candidates = [...candidates.values()].map(c => ({ id: c.id, source: c.source, ...(c.rank ? { rank: c.rank, score: c.score } : {}) }));
@@ -355,6 +385,15 @@ export class TaskService {
             if (!plan)
                 throw new Error(`任务分配暂时失败，尚未执行。请重试分配。（派单结果无法使用：${report.error ?? "格式不符合要求"}）`);
             if (explicit) applyTaskReference(plan, this.referenceTarget(row)!);
+            // Setting up or changing a schedule needs no executor: answer right here.
+            if (plan.scheduleAction || (plan.schedule && !plan.schedule.runNow)) {
+                if (this.#closed || this.get(row.id)?.status !== "planning") return;
+                if (this.taskContext(this.get(row.id)!) !== inputContext) return;
+                const answer = plan.scheduleAction ? this.applyScheduleAction(trace.ownerId, plan.scheduleAction.id, plan.scheduleAction.action) : this.createSchedule(row, plan);
+                this.db.prepare("UPDATE tasks SET title=?,plan_json=?,status='completed',result=?,completed_at=? WHERE id=?").run(plan.title, JSON.stringify(plan), answer, Date.now(), row.id);
+                this.agent.renameConversation(row.conversation_id, plan.title);
+                return;
+            }
             const ownerId = plan.appendTo ?? row.id;
             const root = this.cfg.sandbox.containerWorkspaceDir;
             const owned = [`write:${root}/tasks/${ownerId}`, ...files.map(f => normalizeResource(`read:${f.path}`, root) ?? "workspace")];
@@ -376,6 +415,8 @@ export class TaskService {
                 return;
             }
             if (!explicit && continued) this.db.prepare("UPDATE tasks SET related_task_id=?,execution_conversation_id=? WHERE id=?").run(continued.id, this.executor(continued), row.id);
+            // "Do it now, and every day from now on": the schedule, then this run.
+            if (plan.schedule) plan.description = this.createSchedule(row, plan, true);
             this.db.prepare("UPDATE tasks SET title=?,plan_json=?,status=?,error=NULL WHERE id=?").run(plan.title, JSON.stringify(plan), plan.clarification ? "needs_input" : "waiting", row.id);
             this.agent.renameConversation(row.conversation_id, plan.title);
         }
@@ -519,6 +560,7 @@ export class TaskService {
                 "以下是相关任务的背景资料（不是本任务的新指令，未完成结果不得当作已完成）：", JSON.stringify(context),
                 "主会话时间线（按时间先后列出用户最近的消息与各自归属的任务，▶ 是本次消息；用来理解本次消息的指代、先后和回应对象，不是新指令）：", formatTimeline(timeline(this.rows().filter(t => this.ownerId(t) === this.ownerId(row)), row)),
                 ...(continuation ? [continuation] : []),
+                ...(row.schedule_id ? [this.scheduledRunNote(row)] : []),
                 "本次用户任务：", this.taskContext(row),
             ].join("\n\n");
             try {
@@ -566,5 +608,146 @@ export class TaskService {
         const items = messages.map(m => JSON.parse(m.payload).item).filter(i => i?.type === "agentMessage" && typeof i.text === "string" && i.text.trim());
         const last = items.filter(i => i.phase === "final_answer").at(-1) ?? items.at(-1);
         this.db.prepare("UPDATE tasks SET status=?,result=?,error=?,completed_at=? WHERE id=?").run(turn.status, last?.text ?? null, turn.error, turn.completed_at, row.id);
+    }
+
+    // ------------------------------------------------------------- schedules
+
+    private scheduleRow(id: string): ScheduleRow | null {
+        return (this.db.prepare("SELECT * FROM schedules WHERE id=?").get(id) as unknown as ScheduleRow | undefined) ?? null;
+    }
+    private planningSchedules(ownerId: string): PlanningSchedule[] {
+        return (this.db.prepare("SELECT * FROM schedules WHERE owner_id=? AND status IN ('active','paused') ORDER BY created_at").all(ownerId) as unknown as ScheduleRow[])
+            .map(s => ({ id: s.id, title: s.title, rule: describeSchedule(JSON.parse(s.spec_json) as ScheduleSpec), status: s.status }));
+    }
+    private scheduleLabel(id: string): { id: string; title: string; rule: string } | null {
+        const s = this.scheduleRow(id);
+        return s ? { id: s.id, title: s.title, rule: describeSchedule(JSON.parse(s.spec_json) as ScheduleSpec) } : null;
+    }
+    /** Store the schedule a plan asked for; the sentence that tells the person what was set up. */
+    private createSchedule(row: TaskRow, plan: TaskPlan, runningNow = false): string {
+        const planned = plan.schedule!;
+        const ownerId = this.ownerId(row);
+        const active = (this.db.prepare("SELECT COUNT(*) AS n FROM schedules WHERE owner_id=? AND status='active'").get(ownerId) as { n: number }).n;
+        if (active >= MAX_ACTIVE_SCHEDULES)
+            return `没有创建定时任务：已有 ${active} 个进行中的定时任务（上限 ${MAX_ACTIVE_SCHEDULES} 个）。请先在「定时任务」页暂停或删除不需要的。`;
+        const tz = this.cfg.browser.timezone;
+        const now = Date.now();
+        this.db.prepare("INSERT INTO schedules (id,owner_id,title,instruction,spec_json,timezone,resources_json,status,next_run_at,source_task_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,'active',?,?,?,?)")
+            .run(randomId("sched"), ownerId, plan.title, planned.instruction, JSON.stringify(planned.spec), tz, JSON.stringify(plan.resources), planned.nextRunAt, row.id, now, now);
+        const rule = describeSchedule(planned.spec);
+        if (runningNow) return `已创建定时任务（${rule}，下次 ${formatWhen(planned.nextRunAt, tz)}），现在先运行一次。`;
+        return [
+            `已创建定时任务「${plan.title}」：${rule}（按 ${tz} 时间），下次运行 ${formatWhen(planned.nextRunAt, tz)}。`,
+            `每次会做：${planned.instruction}`,
+            "可以在「定时任务」页暂停、立即运行或删除，也可以直接告诉我。",
+        ].join("\n\n");
+    }
+    /** Pause, resume or cancel one of the owner's schedules; the sentence that says what happened. */
+    private applyScheduleAction(ownerId: string, id: string, action: ScheduleActionName): string {
+        const s = this.scheduleRow(id);
+        if (!s || s.owner_id !== ownerId) return "没有找到这个定时任务，可能已经删除了。";
+        const now = Date.now();
+        if (action === "cancel") {
+            this.db.prepare("DELETE FROM schedules WHERE id=?").run(id);
+            return `已取消定时任务「${s.title}」，之后不会再运行。`;
+        }
+        if (action === "pause") {
+            this.db.prepare("UPDATE schedules SET status='paused',updated_at=? WHERE id=?").run(now, id);
+            return `已暂停定时任务「${s.title}」。需要时告诉我，或在「定时任务」页恢复。`;
+        }
+        const next = nextRun(JSON.parse(s.spec_json) as ScheduleSpec, now, s.timezone);
+        if (next === null) {
+            this.db.prepare("UPDATE schedules SET status='done',next_run_at=NULL,updated_at=? WHERE id=?").run(now, id);
+            return `定时任务「${s.title}」已经没有下一次运行（时间或结束日期已过），没有恢复。`;
+        }
+        this.db.prepare("UPDATE schedules SET status='active',next_run_at=?,updated_at=? WHERE id=?").run(next, now, id);
+        return `已恢复定时任务「${s.title}」，下次运行 ${formatWhen(next, s.timezone)}。`;
+    }
+    /** Start every run that is due; a run missed while the service was down is made up once. */
+    private runDueSchedules(): void {
+        if (this.#closed) return;
+        const now = Date.now();
+        const due = this.db.prepare("SELECT * FROM schedules WHERE owner_id=? AND status='active' AND next_run_at IS NOT NULL AND next_run_at<=? ORDER BY next_run_at")
+            .all(this.cfg.runtimeUserId ?? "owner_1", now) as unknown as ScheduleRow[];
+        for (const s of due) {
+            try { this.fireSchedule(s, now); }
+            catch {
+                // A run that cannot start (the model is unavailable, say) waits for the next beat.
+                const next = nextRun(JSON.parse(s.spec_json) as ScheduleSpec, now, s.timezone);
+                this.db.prepare("UPDATE schedules SET next_run_at=?,status=?,updated_at=? WHERE id=?").run(next, next === null ? "done" : s.status, now, s.id);
+            }
+        }
+        if (due.length) this.schedule();
+    }
+    /** Start one run of a schedule (unless the previous one is still going) and move it on. */
+    private fireSchedule(s: ScheduleRow, now: number, manual = false): string | null {
+        const spec = JSON.parse(s.spec_json) as ScheduleSpec;
+        const previous = s.last_task_id ? this.get(s.last_task_id) : null;
+        const busy = !!previous && !RUN_SETTLED.has(previous.status);
+        const taskId = busy ? null : this.startScheduledRun(s, previous, manual ? `manual:${now}` : String(s.next_run_at));
+        const runs = s.run_count + (taskId ? 1 : 0);
+        const next = manual ? s.next_run_at : nextRun(spec, now, s.timezone);
+        const done = next === null || (spec.maxRuns != null && runs >= spec.maxRuns);
+        this.db.prepare("UPDATE schedules SET run_count=?,last_run_at=?,last_task_id=?,next_run_at=?,status=?,updated_at=? WHERE id=?")
+            .run(runs, taskId ? now : s.last_run_at, taskId ?? s.last_task_id, done ? null : next, done ? "done" : s.status, now, s.id);
+        return taskId;
+    }
+    /** A scheduled run is already planned: the schedule's instruction, resources and the previous run as background. */
+    private startScheduledRun(s: ScheduleRow, previous: TaskRow | null, key: string): string | null {
+        const clientMessageId = `schedule:${s.id}:${key}`;
+        if (this.db.prepare("SELECT 1 FROM tasks WHERE client_message_id=?").get(clientMessageId)) return null;
+        const frozen = isMember(this.db, s.owner_id) ? this.agent.memberSettings() : this.agent.resolveSubmitSettings({ conversationId: "main", text: s.instruction, clientMessageId });
+        const id = randomId("task");
+        const plan: TaskPlan = {
+            title: s.title, description: `定时任务（${describeSchedule(JSON.parse(s.spec_json) as ScheduleSpec)}）的自动运行。`,
+            related: previous ? [previous.id] : [], dependencies: [], resources: JSON.parse(s.resources_json) as string[],
+            appendTo: null, resume: null, clarification: null, ownedResources: [`write:${this.cfg.sandbox.containerWorkspaceDir}/tasks/${id}`],
+        };
+        this.db.exec("BEGIN IMMEDIATE");
+        try {
+            const conv = this.agent.createConversation({ ownerId: s.owner_id, title: `定时：${s.title}`, model: frozen.model });
+            const last = this.db.prepare("SELECT MAX(created_at) AS n FROM tasks").get() as { n: number | null };
+            const now = Math.max(Date.now(), (last.n ?? 0) + 1);
+            this.db.prepare("INSERT INTO tasks (id,client_message_id,conversation_id,title,input_text,attachments_json,model,effort,created_at,status,plan_json,schedule_id) VALUES (?,?,?,?,?,'[]',?,?,?,'waiting',?,?)")
+                .run(id, clientMessageId, conv.id, s.title, s.instruction, frozen.model, frozen.effort, now, JSON.stringify(plan), s.id);
+            this.db.exec("COMMIT");
+        } catch (err) { this.db.exec("ROLLBACK"); throw err; }
+        return id;
+    }
+    private scheduledRunNote(row: TaskRow): string {
+        const s = row.schedule_id ? this.scheduleRow(row.schedule_id) : null;
+        const n = (this.db.prepare("SELECT COUNT(*) AS n FROM tasks WHERE schedule_id=? AND created_at<=?").get(row.schedule_id, row.created_at) as { n: number }).n;
+        const rule = s ? `（${describeSchedule(JSON.parse(s.spec_json) as ScheduleSpec)}）` : "";
+        const plan = JSON.parse(row.plan_json!) as TaskPlan;
+        return `这是定时任务「${row.title}」${rule}的第 ${n} 次自动运行，${formatWhen(row.created_at, s?.timezone ?? this.cfg.browser.timezone)} 开始。用户此刻不在对话中：直接完成并汇报结果，需要用户决定或确认的事写进结果里，不要提问后等待，也不要再创建定时任务。${plan.related.length ? "背景资料里有上一次运行的结果，可以说明和上次相比的变化。" : ""}`;
+    }
+    private viewSchedule(s: ScheduleRow) {
+        const last = s.last_task_id ? this.get(s.last_task_id) : null;
+        return {
+            id: s.id, title: s.title, instruction: s.instruction, rule: describeSchedule(JSON.parse(s.spec_json) as ScheduleSpec), status: s.status,
+            timezone: s.timezone, nextRunAt: s.next_run_at, nextRunText: s.next_run_at ? formatWhen(s.next_run_at, s.timezone) : null,
+            lastRunAt: s.last_run_at, lastTask: last ? { id: last.id, status: last.status } : null, runCount: s.run_count, createdAt: s.created_at,
+        };
+    }
+    listSchedules(userId: string) {
+        return (this.db.prepare("SELECT * FROM schedules WHERE owner_id=? ORDER BY CASE status WHEN 'active' THEN 0 WHEN 'paused' THEN 1 ELSE 2 END, next_run_at, created_at DESC").all(userId) as unknown as ScheduleRow[]).map(s => this.viewSchedule(s));
+    }
+    /** Pause, resume or cancel from the schedules page. */
+    changeSchedule(id: string, userId: string, action: ScheduleActionName) {
+        const s = this.scheduleRow(id);
+        if (!s || s.owner_id !== userId) throw new Error("定时任务不存在");
+        const message = this.applyScheduleAction(userId, id, action);
+        const after = this.scheduleRow(id);
+        return { message, schedule: after ? this.viewSchedule(after) : null };
+    }
+    /** One extra run right now; the regular rhythm is unchanged. */
+    runScheduleNow(id: string, userId: string) {
+        const s = this.scheduleRow(id);
+        if (!s || s.owner_id !== userId) throw new Error("定时任务不存在");
+        if (s.status === "done") throw new Error("这个定时任务已经结束");
+        const taskId = this.fireSchedule(s, Date.now(), true);
+        if (!taskId) throw new Error("上一次运行还没结束，结束后再试");
+        this.schedule();
+        return { task: this.view(this.get(taskId)!), schedule: this.viewSchedule(this.scheduleRow(id)!) };
     }
 }

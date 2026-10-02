@@ -8,6 +8,7 @@ import type {
   ModelInfo,
   SettingsResponse,
   StatusResponse,
+  Schedule,
   Turn,
 } from "./types";
 
@@ -115,6 +116,9 @@ export const api = {
   logout: () => request<{ ok: boolean }>("/api/auth/logout", { method: "POST", body: {} }),
   refresh: () => request<{ ok: boolean; expiresAt: number }>("/api/auth/refresh", { method: "POST", body: {} }),
   status: () => request<StatusResponse>("/api/status"),
+  schedules: () => request<{ schedules: Schedule[] }>("/api/schedules", { cache: "no-store" }),
+  scheduleAction: (id: string, action: "pause" | "resume" | "cancel" | "run") =>
+    request<{ message?: string; schedule: Schedule | null }>(`/api/schedules/${encodeURIComponent(id)}/${action}`, { method: "POST", body: {} }),
   /** The console is on screen: keeps the account's container up, and starts a stopped one. */
   presence: () => request<{ ok: boolean }>("/api/presence", { method: "POST", body: {} }),
 

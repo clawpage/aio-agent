@@ -453,6 +453,24 @@ export function createApiRouter(context: AppContext): Router {
     catch (err) { res.status(409).json({ error: "retry_refused", message: err instanceof Error ? err.message : "无法重试" }); }
   }));
 
+  // Scheduled and recurring tasks: created by asking in the main session, managed here.
+  router.get("/schedules", requireKind("primary"), requireSession, asyncHandler(async (req, res) => {
+    res.setHeader("Cache-Control", "no-store");
+    res.json({ schedules: context.tasks.listSchedules(ctxOf(req).session!.ownerId) });
+  }));
+  router.post("/schedules/:id/:action", requireKind("primary"), requireSession, asyncHandler(async (req, res) => {
+    const action = param(req, "action");
+    const userId = ctxOf(req).session!.ownerId;
+    try {
+      if (action === "run") { res.json(context.tasks.runScheduleNow(param(req, "id"), userId)); return; }
+      if (action !== "pause" && action !== "resume" && action !== "cancel") { res.status(404).json({ error: "not_found" }); return; }
+      res.json(context.tasks.changeSchedule(param(req, "id"), userId, action));
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "操作失败";
+      res.status(message === "定时任务不存在" ? 404 : 409).json({ error: "schedule_refused", message });
+    }
+  }));
+
   // A task's browser tabs: what its agent is doing there, and the person taking over or handing back.
   const taskBrowserKey = (req: Request): string | null => {
     const id = param(req, "id");

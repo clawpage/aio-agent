@@ -205,6 +205,24 @@ export interface Task {
   completedAt: number | null;
   /** Present when the task has browser tabs: its agent's tabs, a request for you, or you in control. */
   browser?: { tabs: number; request: string | null; human: boolean };
+  /** Set on a run a schedule started (nobody typed it then). */
+  schedule?: { id: string; title: string; rule: string } | null;
+}
+
+/** A scheduled or recurring task, created by asking in the main session. */
+export interface Schedule {
+  id: string;
+  title: string;
+  instruction: string;
+  rule: string;
+  status: "active" | "paused" | "done";
+  timezone: string;
+  nextRunAt: number | null;
+  nextRunText: string | null;
+  lastRunAt: number | null;
+  lastTask: { id: string; status: string } | null;
+  runCount: number;
+  createdAt: number;
 }
 
 /** One browser tab a task created, as the tab record keeps it. */
