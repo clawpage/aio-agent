@@ -6,7 +6,9 @@
 // forever, and every task's browser tools stop with it. The patch fails such a
 // call the way a detached frame does. The build refuses a version it does not fit.
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
 
 const MARK = "/* aio: fail on a dead session */";
 const RETRY = /^( *)if \(this\._isDetached\(\)\) throw new Error\("Frame was detached"\);\n\1return this\._context\(world\);$/gm;
@@ -25,4 +27,21 @@ export function patchPatchright(packageDir) {
   });
   if (count !== 2) throw new Error(`patchright-core: expected 2 context retries to patch, found ${count}; re-check scripts/patchright-patch.mjs for this version`);
   fs.writeFileSync(file, patched);
+}
+
+/**
+ * Pack a patched copy of the package at `packageDir` into `tarball`. The staging
+ * directory is world-readable like the installed package: the archive's root
+ * entry carries its mode, and the sandbox user must be able to load what root extracts.
+ */
+export function packPatchright(packageDir, tarball) {
+  const staging = fs.mkdtempSync(path.join(os.tmpdir(), "patchright-core-"));
+  try {
+    fs.chmodSync(staging, 0o755);
+    fs.cpSync(packageDir, staging, { recursive: true });
+    patchPatchright(staging);
+    execFileSync("tar", ["-czf", tarball, "-C", staging, "."]);
+  } finally {
+    fs.rmSync(staging, { recursive: true, force: true });
+  }
 }

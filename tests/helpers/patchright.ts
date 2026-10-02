@@ -18,3 +18,7 @@ export async function patchedPatchright(): Promise<string> {
 export async function patchFn(): Promise<(dir: string) => void> {
   return ((await import(PATCH)) as { patchPatchright: (dir: string) => void }).patchPatchright;
 }
+
+export async function packFn(): Promise<(dir: string, tarball: string) => void> {
+  return ((await import(PATCH)) as { packPatchright: (dir: string, tarball: string) => void }).packPatchright;
+}

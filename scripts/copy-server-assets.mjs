@@ -2,12 +2,10 @@
 // `tsc` does not emit them. Copy them next to the compiled service so
 // `dist/control` is a complete, runnable artifact (each service reads its assets
 // relative to its own directory).
-import { cp, mkdir, mkdtemp, rm } from "node:fs/promises";
-import os from "node:os";
+import { cp, mkdir } from "node:fs/promises";
 import path from "node:path";
 import { createRequire } from "node:module";
-import { execFileSync } from "node:child_process";
-import { patchPatchright } from "./patchright-patch.mjs";
+import { packPatchright } from "./patchright-patch.mjs";
 
 const root = path.resolve(import.meta.dirname, "..");
 
@@ -31,12 +29,5 @@ const require = createRequire(import.meta.url);
 const packageDir = path.dirname(require.resolve("patchright-core/package.json"));
 const vendor = path.join(root, "dist/control/browser/vendor");
 await mkdir(vendor, { recursive: true });
-const staging = await mkdtemp(path.join(os.tmpdir(), "patchright-core-"));
-try {
-  await cp(packageDir, staging, { recursive: true });
-  patchPatchright(staging);
-  execFileSync("tar", ["-czf", path.join(vendor, "patchright-core.tgz"), "-C", staging, "."]);
-} finally {
-  await rm(staging, { recursive: true, force: true });
-}
+packPatchright(packageDir, path.join(vendor, "patchright-core.tgz"));
 console.log("packaged offline patchright-core runtime (patched)");

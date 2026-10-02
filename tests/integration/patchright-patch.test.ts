@@ -4,7 +4,8 @@ import os from "node:os";
 import path from "node:path";
 import { execFile } from "node:child_process";
 import { chromium } from "playwright-core";
-import { patchedPatchright, patchFn } from "../helpers/patchright.js";
+import { createRequire } from "node:module";
+import { packFn, patchedPatchright, patchFn } from "../helpers/patchright.js";
 
 // Real headless Chromium, like tab-server.test.ts: skipped where Playwright's Chromium is missing.
 const hasChromium = fs.existsSync(chromium.executablePath());
@@ -44,3 +45,22 @@ it("is idempotent and refuses a patchright-core it does not fit", async () => {
     fs.rmSync(other, { recursive: true, force: true });
   }
 });
+
+it("packs a tarball the sandbox user can load after root extracts it", async () => {
+  const pack = await packFn();
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "patchright-pack-"));
+  try {
+    const tarball = path.join(dir, "patchright-core.tgz");
+    pack(path.dirname(createRequire(import.meta.url).resolve("patchright-core/package.json")), tarball);
+    // The root entry's mode becomes the extracted directory's mode (a 0700 one locked the tab server out).
+    const listing = await new Promise<string>((resolve, reject) => execFile("tar", ["-tvzf", tarball], { maxBuffer: 64 * 1024 * 1024 }, (err, out) => (err ? reject(err) : resolve(out))));
+    const root = listing.split("\n").find((line) => / \.\/?$/.test(line))!;
+    expect(root.slice(0, 10)).toBe("drwxr-xr-x");
+    const out = path.join(dir, "out");
+    fs.mkdirSync(out);
+    await new Promise<void>((resolve, reject) => execFile("tar", ["-xzf", tarball, "-C", out], (err) => (err ? reject(err) : resolve())));
+    expect(fs.readFileSync(path.join(out, "lib", "coreBundle.js"), "utf8").match(/aio: fail on a dead session/g)).toHaveLength(2);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}, 60_000);
