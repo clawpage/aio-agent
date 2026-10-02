@@ -142,7 +142,7 @@ export class SandboxCodexSession {
     // refresh is answered immediately from the host Codex.
     peer.onAnyServerRequest((method, params, id) => {
       if (method === "account/chatgptAuthTokens/refresh") {
-        if (this.#cfg.memberRuntime) return Promise.reject(new Error("ChatGPT credentials are unavailable in member runtimes"));
+        if (this.#cfg.memberRuntime || !this.#cfg.hostCodex.enabled) return Promise.reject(new Error("ChatGPT credentials are unavailable in this runtime"));
         return this.#refreshTokens(params as { previousAccountId?: string | null });
       }
       // A background title thread must never raise a UI approval: deny it here
@@ -173,6 +173,10 @@ export class SandboxCodexSession {
       if (this.#cfg.memberRuntime) {
         if (!this.#bridge?.enabled) throw new Error("Member model provider unavailable");
         this.#account = {type:"apiKey",email:null,planType:null};
+      } else if (!this.#cfg.hostCodex.enabled) {
+        // No ChatGPT login here: this Codex serves only the bridge provider, and
+        // Claude Code turns run on their own credential.
+        this.#account = { type: this.#bridge?.enabled ? "apiKey" : "none", email: null, planType: null };
       } else {
       const tokens = await this.#hostTokens.getTokens();
       await peer.request(

@@ -118,6 +118,7 @@ export class HostTokenSource {
    * cached token is missing or close to expiry. Concurrent callers share one refresh.
    */
   async getTokens(opts: { force?: boolean } = {}): Promise<HostTokens> {
+    if (!this.#cfg.hostCodex.enabled) throw new Error("本部署未启用宿主 Codex 登录（PA_HOST_CODEX=off）");
     const skew = this.#cfg.hostCodex.tokenRefreshSkewMs;
     if (!opts.force && this.#cache && this.#cache.expiresAt - Date.now() > skew) {
       return this.#cache;
@@ -189,6 +190,8 @@ export class HostTokenSource {
 
   /** Secret-free health snapshot for /healthz and the UI. Never stays "ok" past expiry. */
   async status(): Promise<HostAuthStatus> {
+    // Nothing to be logged in to: owner turns run on Claude Code or the bridge models.
+    if (!this.#cfg.hostCodex.enabled) return { ok: true, authMethod: "disabled", email: null, planType: null, expiresAt: null, error: null };
     const now = Date.now();
     const fresh =
       this.#lastStatus?.ok &&

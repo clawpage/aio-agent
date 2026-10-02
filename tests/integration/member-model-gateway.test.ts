@@ -10,7 +10,7 @@ it('exposes only stateless high-effort DeepSeek, never the bridge master key or 
  const upstream=http.createServer(async(req,res)=>{auth=req.headers.authorization;let data='';for await(const chunk of req)data+=chunk;body=JSON.parse(data);res.setHeader('content-type','text/event-stream');res.end('data: {"ok":true}\n\n');});
  await new Promise<void>(resolve=>upstream.listen(0,'127.0.0.1',resolve));
  const file=path.join(h.dataDir,'bridge-key');fs.writeFileSync(file,'LITELLM_MASTER_KEY=master-private-key\n',{mode:0o600});
- const cfg={...h.ctx.cfg,memberModelPort:0,bridge:{...h.ctx.cfg.bridge,enabled:'on',secretsFile:file,baseUrl:`http://127.0.0.1:${(upstream.address() as any).port}/v1`}};
+ const cfg={...h.ctx.cfg,memberModelPort:0,bridge:{...h.ctx.cfg.bridge,enabled:'on',secretsFile:file,baseUrl:`http://host.docker.internal:${(upstream.address() as any).port}/v1`,upstreamUrl:`http://127.0.0.1:${(upstream.address() as any).port}/v1`}};
  const gateway=new MemberModelGateway(cfg,h.ctx.log);await gateway.start();
  try{
   const a=memberConfig(cfg,'user_alpha',18082),b=memberConfig(cfg,'user_beta',18083);gateway.provision(a);gateway.provision(b);

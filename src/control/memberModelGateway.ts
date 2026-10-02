@@ -81,8 +81,7 @@ export class MemberModelGateway {
         if(input.previous_response_id||input.conversation||input.background){res.writeHead(400).end();return;}
         const state=bridge.status();if(!state.enabled||!state.secret)throw new Error('Provider unavailable');
         input.model='deepseek-v4.1-flash';input.reasoning={effort:'high'};input.store=false;
-        const base=new URL(state.baseUrl);if(base.hostname==='host.docker.internal')base.hostname='127.0.0.1';
-        const upstream=await fetch(base.toString().replace(/\/$/,'')+'/responses',{method:'POST',headers:{'content-type':'application/json',authorization:`Bearer ${state.secret}`},body:JSON.stringify(input),signal:abort.signal});
+        const upstream=await fetch(this.cfg.bridge.upstreamUrl.replace(/\/$/,'')+'/responses',{method:'POST',headers:{'content-type':'application/json',authorization:`Bearer ${state.secret}`},body:JSON.stringify(input),signal:abort.signal});
         res.writeHead(upstream.status,{'content-type':upstream.headers.get('content-type')??'application/json','cache-control':'no-store'});
         if(upstream.body)Readable.fromWeb(upstream.body as never).on('error',()=>res.destroy()).pipe(res);else res.end();
       }catch{if(!res.headersSent)res.writeHead(502);res.end();}

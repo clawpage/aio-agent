@@ -241,6 +241,20 @@ describe("AgentManager with the bridge enabled", () => {
     db.close();
   });
 
+  it("offers only models with their own provider when there is no host Codex login", async () => {
+    const file = writeSecrets(dir, `LITELLM_MASTER_KEY=${SECRET_VALUE}\n`);
+    const off = makeBridgeManager({ PA_OPENCODE_GO_SECRETS_FILE: file, PA_HOST_CODEX: "off" });
+    await off.agent.init();
+    try {
+      const ids = (await off.agent.listModels()).map((m) => m.id);
+      expect(ids).toContain("deepseek-v4.1-flash");
+      expect(ids.some((id) => id.startsWith("gpt-"))).toBe(false);
+    } finally {
+      off.agent.shutdown();
+      off.db.close();
+    }
+  });
+
   it("adds the bridge model to the catalog without changing the configured default", async () => {
     const models = await agent.listModels();
     const bridgeEntry = models.find((m) => m.id === "deepseek-v4.1-flash");

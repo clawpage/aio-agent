@@ -1628,7 +1628,9 @@ export class AgentManager {
    * never runs implicitly, and the UI labels the default from `isDefault`.
    */
   async listModels() {
-    const models = this.#withBridgeModels(await this.#codex.listModels());
+    const all = this.#withBridgeModels(await this.#codex.listModels());
+    // Without a ChatGPT login only models with their own provider can run.
+    const models = this.#cfg.hostCodex.enabled || this.#cfg.memberRuntime ? all : all.filter((m) => m.modelProvider && m.modelProvider !== CHATGPT_PROVIDER_ID);
     // Cache the catalog so a later synchronous submit can validate the unified
     // effort without another Codex round trip.
     this.#modelCatalog = models;

@@ -329,3 +329,25 @@ it('opens, forks and resumes task threads with their own tab identity',async()=>
   expect(sent[3]?.params?.config).toBeUndefined();
  }finally{session.close();}
 });
+
+describe("SandboxCodexSession without a host Codex login (PA_HOST_CODEX=off)", () => {
+  it("starts the sandbox Codex without asking for ChatGPT tokens and refuses token refreshes", async () => {
+    const server = new FakeAppServer();
+    let asked = 0;
+    const tokens = { getTokens: async () => (asked++, { accessToken: "token", chatgptAccountId: "acct", planType: "pro", expiresAt: Date.now() + 3_600_000 }) } as unknown as HostTokenSource;
+    const cfg = testConfig("/tmp/pa-no-host-codex", 1, { PA_HOST_CODEX: "off" });
+    const session = new SandboxCodexSession(cfg, new Logger("error", undefined, false), containerFor(server), tokens, null, 30);
+    try {
+      await session.start();
+      expect(session.ready).toBe(true);
+      expect(asked).toBe(0);
+      expect(server.inbound.some((m) => m.method === "account/login/start")).toBe(false);
+      expect(session.account).toEqual({ type: "none", email: null, planType: null });
+      server.serverRequest(901, "account/chatgptAuthTokens/refresh", {});
+      await wait(20);
+      expect(server.responses().find((m) => m.id === 901)?.error).toBeTruthy();
+    } finally {
+      session.close();
+    }
+  });
+});

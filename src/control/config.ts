@@ -139,6 +139,13 @@ export function loadConfig(): {
     dailyFeed: boolean;
   };
   hostCodex: {
+    /**
+     * Whether the owner's ChatGPT login comes from a Codex installation next to
+     * this process. Off where none exists (the control-plane container): owner
+     * turns then run on Claude Code or the bridge models, and ChatGPT models are
+     * not offered.
+     */
+    enabled: boolean;
     bin: string;
     home: string;
     tokenRefreshSkewMs: number;
@@ -203,7 +210,10 @@ export function loadConfig(): {
    */
   bridge: {
     enabled: string;
+    /** The bridge as sandboxes reach it. */
     baseUrl: string;
+    /** The bridge as this process reaches it (the member gateway forwards there). */
+    upstreamUrl: string;
     /** Every bridged model id, in the order the picker should show them. */
     models: string[];
     providerId: string;
@@ -392,6 +402,7 @@ export function loadConfig(): {
       dailyFeed: envStr("PA_DAILY_FEED", "1") === "1",
     },
     hostCodex: {
+      enabled: envStr("PA_HOST_CODEX", "on") !== "off",
       bin: envStr("PA_HOST_CODEX_BIN", "codex"),
       home: envStr("PA_HOST_CODEX_HOME", path.join(os.homedir(), ".codex")),
       tokenRefreshSkewMs: envInt("PA_HOST_TOKEN_SKEW_HOURS", 6) * 3600_000,
@@ -441,6 +452,8 @@ export function loadConfig(): {
     bridge: {
       enabled: envStr("PA_OPENCODE_GO_ENABLED", "auto"),
       baseUrl: envStr("PA_OPENCODE_GO_BASE_URL", "http://host.docker.internal:4017/v1"),
+      // On the host, the sandboxes' host.docker.internal is this machine's loopback.
+      upstreamUrl: envStr("PA_OPENCODE_GO_UPSTREAM_URL", envStr("PA_OPENCODE_GO_BASE_URL", "http://host.docker.internal:4017/v1").replace("//host.docker.internal", "//127.0.0.1")),
       models: bridgeModelIds(),
       providerId: envStr("PA_OPENCODE_GO_PROVIDER_ID", "opencode_go"),
       secretsFile: envStr("PA_OPENCODE_GO_SECRETS_FILE", path.join(os.homedir(), ".config", "codex-opencode-go", "secrets.env")),
