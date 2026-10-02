@@ -20,6 +20,9 @@ const MAX_SEARCH_ROUNDS = 2;
 const TODAY_EXTRA = 10;
 const CONTEXT_RECALL = 3;
 const SHORT_MESSAGE = 30;
+/** Jev weighs the latest tasks and, beyond them, every task recall found for the message. */
+const JEV_RECENT = 15;
+const RECALLED = new Set<RecallSource>(["recall", "context"]);
 interface TaskRow {
     revision: number;
     id: string;
@@ -348,7 +351,11 @@ export class TaskService {
             steps.push({ kind: "context", at: Date.now(), timeline: timelineText, candidates: candidates.size });
             let hint: DispatchHint | null = null;
             if (!explicit && candidates.size && this.jev?.enabled) {
-                const pool = [...candidates.values()].sort((a, b) => (b.created_at ?? 0) - (a.created_at ?? 0)).slice(0, 15).map(t => ({ ...byId.get(t.id)!, ...t, input_text: t.input_text }));
+                // The latest tasks, plus the older ones recalled by what the message says: a message
+                // that names an old task's subject must be able to land on it.
+                const byTime = [...candidates.values()].sort((a, b) => (b.created_at ?? 0) - (a.created_at ?? 0));
+                const pool = [...byTime.filter(t => !RECALLED.has(t.source)).slice(0, JEV_RECENT), ...byTime.filter(t => RECALLED.has(t.source))]
+                    .map(t => ({ ...byId.get(t.id)!, ...t, input_text: t.input_text, recalled: RECALLED.has(t.source) }));
                 const q = routingQuestion(inputContext, pool, timeline(everything, row), row.created_at);
                 const criteria = q.questions.target!.criteria;
                 try {

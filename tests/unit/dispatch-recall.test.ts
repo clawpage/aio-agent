@@ -25,16 +25,16 @@ const DAY = 86_400_000;
 const TOPICS = ["周报整理", "发票报销", "租房合同", "健身计划", "学英语", "宝宝辅食", "家庭预算", "装修报价", "体检预约", "车险续保", "读书笔记", "照片整理"];
 
 /** A long history of finished tasks, oldest first; returns the ids by index. */
-function history(n: number, special: Record<number, { title: string; input: string; result: string }> = {}, start = Date.now() - 60 * DAY): string[] {
+function history(n: number, special: Record<number, { title: string; input: string; result: string }> = {}, start = Date.now() - 60 * DAY, prefix = "h"): string[] {
   const ids: string[] = [];
   const insert = db.prepare("INSERT INTO tasks (id,client_message_id,conversation_id,title,input_text,status,result,created_at,completed_at) VALUES (?,?,?,?,?,'completed',?,?,?)");
   for (let i = 0; i < n; i++) {
     const topic = TOPICS[i % TOPICS.length]!;
     const t = special[i] ?? { title: `${topic} 第${i}次`, input: `帮我处理一下${topic}，按上次的格式整理`, result: `已完成${topic}` };
     const conv = agent.createConversation({ ownerId: "owner_1", title: t.title });
-    const id = `task_h${i}`;
+    const id = `task_${prefix}${i}`;
     const at = start + i * 60_000;
-    insert.run(id, `h${i}`, conv.id, t.title, t.input, t.result, at, at + 1000);
+    insert.run(id, `${prefix}${i}`, conv.id, t.title, t.input, t.result, at, at + 1000);
     ids.push(id);
   }
   return ids;
@@ -57,6 +57,31 @@ afterEach(async () => {
   await tick();
   agent.shutdown();
   db.close();
+});
+
+it("asks Jev about the tasks recall found for the message, not only the latest ones", async () => {
+  const ids = history(300, { 20: { title: "杭州西湖亲子三日游行程", input: "带两岁宝宝去杭州西湖玩三天，住湖滨", result: "第一天西湖游船" } });
+  // A busy day: more of today's tasks than Jev's recent window holds.
+  history(20, {}, Date.now() - 30 * 60_000, "today");
+  const asked: Array<Record<string, string>> = [];
+  const jev = { enabled: true, decide: async (_s: unknown, questions: Record<string, { criteria: Record<string, string> }>) => {
+    const criteria = questions.target!.criteria;
+    asked.push(criteria);
+    return { answers: { target: { choice: "NEW", confidence: 1, probabilities: Object.fromEntries(Object.keys(criteria).map((id) => [id, id === "NEW" ? 1 : 0])) } }, usage: null, latencyMs: 1 };
+  } };
+  tasks.close();
+  tasks = new TaskService(db, testConfig("/tmp/aio-dispatch-recall", 1), agent, codex, undefined, jev as never);
+  tasks.init();
+  submit("把之前杭州西湖那个行程改成四天");
+  await tick();
+  expect(asked).toHaveLength(1);
+  const criteria = asked[0]!;
+  expect(criteria[ids[20]!]).toMatch(/^按内容召回的较早任务（.*）「杭州西湖亲子三日游行程」/);
+  // The latest fifteen are still there, ranked by recency.
+  const latest = Object.entries(criteria).filter(([, text]) => /^第\d+近/.test(text));
+  expect(latest).toHaveLength(15);
+  expect(latest[0]![1]).toMatch(/^第1近/);
+  expect(latest.every(([id]) => id.startsWith("task_today"))).toBe(true);
 });
 
 it("recalls a task hundreds back into the dispatcher's view before it has to ask, with a short excerpt and its date", async () => {

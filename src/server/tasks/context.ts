@@ -91,13 +91,15 @@ export const NEW_TASK = "NEW";
  * or is it new. Candidates carry their order, time, status and open question so
  * a terse reply lands on the task that is actually waiting for it.
  */
-export function routingQuestion(message: string, candidates: Array<ContextTask & { clarification?: string | null }>, entries: TimelineEntry[], now = Date.now()): { state: Record<string, unknown>; questions: Record<string, JevQuestion> } {
-  const ordered = [...candidates].sort((a, b) => b.created_at - a.created_at);
+export function routingQuestion(message: string, candidates: Array<ContextTask & { clarification?: string | null; recalled?: boolean }>, entries: TimelineEntry[], now = Date.now()): { state: Record<string, unknown>; questions: Record<string, JevQuestion> } {
+  const byTime = [...candidates].sort((a, b) => b.created_at - a.created_at);
+  // The latest tasks by rank, then the older ones recall found by what the message says.
+  const ordered = [...byTime.filter((t) => !t.recalled), ...byTime.filter((t) => t.recalled)];
   const criteria: Record<string, string> = {};
   ordered.forEach((t, i) => {
     const ask = lastQuestion(t);
     criteria[t.id] = [
-      `第${i + 1}近（${time(t.created_at, now)}）「${clip(t.title, 40)}」状态 ${t.status}`,
+      `${t.recalled ? "按内容召回的较早任务" : `第${i + 1}近`}（${time(t.created_at, now)}）「${clip(t.title, 40)}」状态 ${t.status}`,
       `用户原话：${clip(t.input_text, 200)}`,
       ask ? `助理最后问用户：${ask}` : t.result ? `结果摘要：${clip(t.result, 200)}` : "",
     ].filter(Boolean).join("；");
@@ -113,7 +115,7 @@ export function routingQuestion(message: string, candidates: Array<ContextTask &
           rules: [
             "按主会话时间线的先后理解：越接近本消息的对话越可能是它的对象。",
             "简短的确认或回复（如“已授权”“可以”“好的”“就这个”“第二个”“改成周六”）回应的是时间上最近一次向用户提问或请求确认的任务。",
-            "消息明确点名了某个任务里的实体（人名、地点、商品、文件、网站）时，以点名的为准，即使它不是最近的。",
+            "消息明确点名了某个任务里的实体（人名、地点、商品、文件、网站）时，以点名的为准，即使它不是最近的（包括按内容召回的较早任务）。",
             "只是关键词与旧任务重合、语义上是新的请求时，选 NEW。",
           ],
         },
