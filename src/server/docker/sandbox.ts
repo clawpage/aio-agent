@@ -5,7 +5,7 @@ import { TAB_TOOL_TIMEOUT_SEC } from "../browser/tabs.js";
 import { setTimeout as delay } from "node:timers/promises";
 import type { Config } from "../config.js";
 import type { Logger } from "../logger.js";
-import { NOVNC_HTML_PATH, NOVNC_UI_PATH, patchNoVncHtml, patchNoVncUi } from "./novncPatch.js";
+import { NOVNC_HTML_PATH, NOVNC_RFB_PATH, NOVNC_UI_PATH, patchNoVncHtml, patchNoVncRfb, patchNoVncUi } from "./novncPatch.js";
 import {
   CODEX_CONFIG_TOML,
   CODEX_ISOLATION_MARKER,
@@ -815,15 +815,16 @@ echo "$dir"`;
    * Chromium was restarted.
    */
   /**
-   * Stop one phone keyboard tap from typing twice on the desktop (see
-   * novncPatch). The image stays pinned; its noVNC file is patched in place once
-   * per container. True when it changed the file.
+   * Make the desktop work from a phone (see novncPatch): one keyboard tap types
+   * one key, and a long press holds the left button. The image stays pinned; its
+   * noVNC files are patched in place once per container. True when a file changed.
    */
   async patchNoVnc(): Promise<boolean> {
-    // The script first, then the page that loads it under its new URL.
+    // Imported modules first, then the files that load them under their new URLs.
+    const rfb = await this.#patchFile(NOVNC_RFB_PATH, patchNoVncRfb);
     const ui = await this.#patchFile(NOVNC_UI_PATH, patchNoVncUi);
     const page = await this.#patchFile(NOVNC_HTML_PATH, patchNoVncHtml);
-    return ui || page;
+    return rfb || ui || page;
   }
 
   /** Rewrite one root-owned file in the container through `patch`; true when it changed. */
