@@ -180,6 +180,16 @@ test.describe("rich messages", () => {
     await expect(page.getByRole("dialog")).toBeVisible();
   });
 
+  test("bold labels that end in full-width punctuation render bold, without stray asterisks", async ({ page }) => {
+    const id = "conv_e2e_cjk_bold";
+    const message = "**原因：**报道普遍认为是监管问题。\n**Grok 的隐私风险：**xAI 正被欧洲监管机构调查。\n**绕路：**我不建议。\n**时效：**几周就会变。";
+    await mockConsole(page, { conversations: [makeConversation(id, "加粗")], sse: { [id]: sseWithMarkdown(message) } });
+    await page.goto("/");
+    const body = page.locator(".markdown").last();
+    await expect(body.locator("strong")).toHaveText(["原因：", "Grok 的隐私风险：", "绕路：", "时效："], { timeout: 60_000 });
+    await expect(body).not.toContainText("**");
+  });
+
   test("a share page link becomes a card with the full address that copies and opens", async ({ page, browserName }, info) => {
     if (browserName === "chromium") await page.context().grantPermissions(["clipboard-read", "clipboard-write"]).catch(() => undefined);
     const id = "conv_e2e_share_card";

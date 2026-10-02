@@ -4,6 +4,7 @@ import DOMPurify from "dompurify";
 import { api } from "../api";
 import { isSandboxLink, isWorkspaceFilePath, workspaceFileKind, workspaceFilePathFromHref } from "../sandboxLink";
 import { splitMapBlocks } from "../mapBlocks";
+import { cjkStrong } from "../markdownStrong";
 import { MapCard } from "./MapCard";
 
 marked.setOptions({ gfm: true, breaks: true });
@@ -21,6 +22,7 @@ function escapeAttr(value: string): string {
  * image `src` can never become a host `/home/gem/...` request.
  */
 marked.use({
+  extensions: [cjkStrong],
   renderer: {
     link({ href, title, tokens }) {
       const text = this.parser.parseInline(tokens);
