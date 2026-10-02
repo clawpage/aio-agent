@@ -443,6 +443,8 @@ fi`;
     const script = `set -eu
 arch=$1 dir=$2; shift 2
 [ "$(uname -m)" = "$arch" ] || { echo other-arch; exit 0; }
+# A fresh container has no tool directory yet (the browser helper creates it later).
+mkdir -p "$(dirname "$dir")"
 if [ ! -x "$dir/root/usr/lib/chromium/chromium" ]; then
   tmp=$(mktemp -d "$dir.XXXXXX"); trap 'rm -rf "$tmp"' EXIT
   while [ $# -gt 0 ]; do

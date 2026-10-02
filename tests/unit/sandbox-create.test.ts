@@ -95,6 +95,9 @@ it("unpacks pinned browser packages as root, and leaves another CPU architecture
   expect(calls[0]!.user).toBe("root");
   expect(calls[0]!.argv.slice(-4)).toEqual([build.packages[0]!.url, build.packages[0]!.sha256, build.packages[1]!.url, build.packages[1]!.sha256]);
   expect(calls[0]!.argv[2]).toContain("sha256sum -c");
+  // A fresh container has no tool directory yet: it is created before the build is unpacked beside it.
+  expect(calls[0]!.argv[2].indexOf('mkdir -p "$(dirname "$dir")"')).toBeGreaterThan(-1);
+  expect(calls[0]!.argv[2].indexOf('mkdir -p "$(dirname "$dir")"')).toBeLessThan(calls[0]!.argv[2].indexOf("mktemp"));
   expect(calls[0]!.argv[2]).toContain("dpkg-deb -x");
   // An old build is only removed when no running process uses it.
   expect(calls[0]!.argv[2]).toContain('grep -qsF "$old/" /proc/[0-9]*/cmdline || rm -rf "$old"');
