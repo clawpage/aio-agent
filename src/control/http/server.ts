@@ -1,6 +1,4 @@
-import fs from "node:fs";
 import {WORKSPACE_PREFIX,userNamespace,workspaceConfig} from "../auth/workspaceHost.js";
-import path from "node:path";
 import express, { type NextFunction, type Request, type Response } from "express";
 import type { AppContext } from "../context.js";
 import { createApiRouter } from "./api.js";
@@ -10,7 +8,6 @@ import { COOKIE_NAMES, sessionCookies } from "../auth/sessions.js";
 import { safeRedirectPath } from "../auth/tickets.js";
 import { audit } from "../db.js";
 
-export const WEB_DIST = path.resolve(import.meta.dirname, "..", "..", "..", "dist", "ui");
 
 /** Control API calls served by the sandbox; a container stopped for idleness starts first. */
 const SANDBOX_API = /^\/(files|documents|sandbox|models)(\/|$)|^\/browser\/(?!status$)|^\/tasks\/[^/]+\/browser/;
@@ -240,49 +237,7 @@ export function createApp(ctx: AppContext): express.Express {
     })();
   });
 
-  // Control-plane SPA.
-  const hasBuild = fs.existsSync(path.join(WEB_DIST, "index.html"));
-  if (hasBuild) {
-    app.use(
-      express.static(WEB_DIST, {
-        index: false,
-        setHeaders: (res) => {
-          res.setHeader("X-Content-Type-Options", "nosniff");
-        },
-      }),
-    );
-  }
-  app.use((req: Request, res: Response, next: NextFunction) => {
-    const rec = req.paCtx!;
-    if (rec.kind !== "primary" || req.method !== "GET") {
-      next();
-      return;
-    }
-    if (req.path.startsWith("/api") || req.path === "/healthz") {
-      next();
-      return;
-    }
-    if (!hasBuild) {
-      res.status(503).type("html").send("<h1>前端尚未构建</h1><p>请先运行 npm run build:web</p>");
-      return;
-    }
-    res.setHeader("X-Content-Type-Options", "nosniff");
-    res.setHeader(
-      "Content-Security-Policy",
-      [
-        "default-src 'self'",
-        `frame-src 'self' https://${ctx.cfg.workspaceHost}`,
-        "img-src 'self' data: blob:",
-        "style-src 'self' 'unsafe-inline'",
-        "script-src 'self'",
-        "connect-src 'self'",
-        "base-uri 'none'",
-        "object-src 'none'",
-        "frame-ancestors 'none'",
-      ].join("; "),
-    );
-    res.sendFile(path.join(WEB_DIST, "index.html"));
-  });
+  // The console itself is the UI layer's (src/ui, served by its edge); this process only answers the API.
 
   // Final fallbacks.
   app.use((req: Request, res: Response) => {

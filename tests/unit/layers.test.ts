@@ -10,7 +10,7 @@ import path from "node:path";
  */
 const ROOT = path.resolve(import.meta.dirname, "..", "..", "src");
 const LAYERS = ["ui", "control", "sandbox", "common"] as const;
-const UI_SAFE_COMMON = new Set(["version.ts"]);
+const UI_SAFE_COMMON = new Set(["version"]);
 
 function files(dir: string): string[] {
   return fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
@@ -31,7 +31,7 @@ it("keeps every layer to itself and to src/common", () => {
         if (targetLayer === layer) continue;
         const where = `${path.relative(ROOT, file)} -> ${target}`;
         if (targetLayer !== "common" || layer === "common") problems.push(where);
-        else if (layer === "ui" && !UI_SAFE_COMMON.has(rest.join("/").replace(/\.js$/, ".ts"))) problems.push(`${where} (not browser-safe)`);
+        else if (layer === "ui" && !UI_SAFE_COMMON.has(rest.join("/").replace(/\.(js|ts)$/, ""))) problems.push(`${where} (not browser-safe)`);
       }
     }
   }

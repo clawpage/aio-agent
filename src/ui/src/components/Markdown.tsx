@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, type KeyboardEvent, type MouseEvent } from "react";
 import { marked } from "marked";
 import DOMPurify from "dompurify";
-import { api } from "../api";
+import { api, API_CREDENTIALS } from "../api";
 import { isSandboxLink, isWorkspaceFilePath, workspaceFileKind, workspaceFilePathFromHref } from "../sandboxLink";
 import { splitMapBlocks } from "../mapBlocks";
 import { cjkStrong } from "../markdownStrong";
@@ -139,7 +139,7 @@ function MarkdownBlock({
       if (!isWorkspaceFilePath(path) || workspaceFileKind(path) !== "image") return fail(img);
       void (async () => {
         try {
-          const res = await fetch(api.documentImageUrl(path), { credentials: "same-origin", signal: controller.signal });
+          const res = await fetch(api.documentImageUrl(path), { credentials: API_CREDENTIALS, signal: controller.signal });
           // Only an image response may reach the <img>, whatever answered.
           if (!res.ok || !(res.headers.get("content-type") ?? "").startsWith("image/")) throw new Error("unavailable");
           const blob = await res.blob();

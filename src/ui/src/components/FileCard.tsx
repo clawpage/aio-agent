@@ -1,5 +1,5 @@
 import { memo, useEffect, useRef, useState } from "react";
-import { api } from "../api";
+import { api, API_CREDENTIALS } from "../api";
 import { isMarkdownPath, isHtmlPath, kindBadge, kindLabel, type WorkspaceFileKind } from "../sandboxLink";
 
 /**
@@ -46,7 +46,7 @@ export const FileCard = memo(function FileCard({ path, name, title, kind, onOpen
       void (async () => {
         try {
           const res = await fetch(api.documentImageUrl(path), {
-            credentials: "same-origin",
+            credentials: API_CREDENTIALS,
             signal: controller.signal,
           });
           if (!res.ok) throw new Error("thumbnail unavailable");

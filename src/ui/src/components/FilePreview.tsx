@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { api } from "../api";
+import { api, API_CREDENTIALS } from "../api";
 import {
   baseName,
   isMarkdownPath,
@@ -125,7 +125,7 @@ export function FilePreview({ path: initialPath, onClose, onOpenLink, onConvert,
         if (kind === "image") {
           // The inline image endpoint (not the download endpoint): it returns a
           // real image content type after sniffing the bytes.
-          const res = await fetch(api.documentImageUrl(path), { credentials: "same-origin", signal: controller.signal });
+          const res = await fetch(api.documentImageUrl(path), { credentials: API_CREDENTIALS, signal: controller.signal });
           if (!res.ok) throw new Error("无法加载文件（可能已被移动或删除）");
           const blob = await res.blob();
           if (controller.signal.aborted) return;

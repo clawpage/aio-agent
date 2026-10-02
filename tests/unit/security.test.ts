@@ -14,8 +14,10 @@ describe("host classification", () => {
     const c = cfg();
     expect(classifyHost(c, "agent.clawpage.ai")).toBe("primary");
     expect(classifyHost(c, "agent-workspace.clawpage.ai")).toBe("workspace");
+    // The console through the UI edge, and the control plane itself.
     expect(classifyHost(c, "localhost:4891")).toBe("primary");
-    expect(classifyHost(c, "127.0.0.1:4891")).toBe("workspace");
+    expect(classifyHost(c, "localhost:4892")).toBe("primary");
+    expect(classifyHost(c, "127.0.0.1:4892")).toBe("workspace");
   });
 
   it("rejects unknown hosts and host:port mismatches", () => {

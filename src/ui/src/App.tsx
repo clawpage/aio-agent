@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { api, ApiError } from "./api";
+import { api, ApiError, versionMismatch } from "./api";
 import type { Conversation, StatusResponse } from "./types";
 import { MainApp } from "./components/MainApp";
 import { Chat } from "./components/Chat";
@@ -698,7 +698,13 @@ function RenameDialog({
 /** Rolling upgrades: a new bundle can still talk to an older control plane. */
 export function App() {
   const [mode, setMode] = useState<"loading" | "tasks" | "legacy">("loading");
+  const [mismatch, setMismatch] = useState<string | null>(null);
   // Only a 404 means an older control plane; a slow or failed answer must not hold the page on "加载中…".
   useEffect(() => { void api.main(undefined, AbortSignal.timeout(8000)).then(() => setMode("tasks")).catch(err => setMode(err instanceof ApiError && err.status === 404 ? "legacy" : "tasks")); }, []);
-  return mode === "loading" ? <div className="boot">加载中…</div> : mode === "legacy" ? <LegacyApp /> : <MainApp />;
+  // The UI and the control plane deploy separately: say so when they no longer fit together.
+  useEffect(() => { void versionMismatch().then(setMismatch); }, []);
+  return <>
+    {mismatch && <div className="banner error version-banner" role="alert">{mismatch}</div>}
+    {mode === "loading" ? <div className="boot">加载中…</div> : mode === "legacy" ? <LegacyApp /> : <MainApp />}
+  </>;
 }

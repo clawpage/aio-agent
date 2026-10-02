@@ -280,12 +280,14 @@ export function loadConfig(): {
    */
   sandboxNodes: { nodes: Array<{ name: string; url: string }>; tokensFile: string };
 } {
-  const port = envInt("PA_PORT", 4891);
+  const port = envInt("PA_PORT", 4892);
+  // The UI edge in front of this process; on loopback the console is opened there.
+  const uiPort = envInt("PA_UI_PORT", 4891);
   const bind = envStr("PA_BIND", "127.0.0.1");
   const dataDir = envStr("PA_DATA_DIR", path.join(PROJECT_ROOT, "var"));
   const primaryHost = envStr("PA_PRIMARY_HOST", "agent.clawpage.ai").toLowerCase();
   const workspaceHost = envStr("PA_WORKSPACE_HOST", "agent-workspace.clawpage.ai").toLowerCase();
-  const loopbackHosts = [`localhost:${port}`, `127.0.0.1:${port}`, `[::1]:${port}`, "localhost", "127.0.0.1"];
+  const loopbackHosts = [`localhost:${port}`, `127.0.0.1:${port}`, `[::1]:${port}`, `localhost:${uiPort}`, "localhost", "127.0.0.1"];
   const allowedHosts = [
     ...parseList(envStr("PA_ALLOWED_HOSTS", "")).map((h) => h.toLowerCase()),
     primaryHost,
@@ -297,6 +299,7 @@ export function loadConfig(): {
   const primaryOrigins = [
     ...parseList(envStr("PA_PRIMARY_ORIGINS", "")),
     `https://${primaryHost}`,
+    `http://localhost:${uiPort}`,
     `http://localhost:${port}`,
     `http://127.0.0.1:${port}`,
   ];

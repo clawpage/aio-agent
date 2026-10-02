@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { navLinks, platformOf, tilesFor, type MapPlace } from "../mapBlocks";
+import { apiUrl, API_CREDENTIALS } from "../api";
 
 /** Tiles around a point, drawn from the console's own tile proxy; no map library. */
 function MapView({ place, zoom, height }: { place: MapPlace; zoom: number; height: number }) {
@@ -19,7 +20,7 @@ function MapView({ place, zoom, height }: { place: MapPlace; zoom: number; heigh
   return (
     <div ref={box} className="map-view" style={{ height }}>
       {tiles.map((t) => (
-        <img key={t.key} src={`/api/map/tiles/${t.z}/${t.x}/${t.y}`} alt="" draggable={false} style={{ left: t.left, top: t.top }} />
+        <img key={t.key} src={apiUrl(`/api/map/tiles/${t.z}/${t.x}/${t.y}`)} alt="" draggable={false} style={{ left: t.left, top: t.top }} />
       ))}
       <svg className="map-pin" width="28" height="38" viewBox="0 0 28 38" aria-hidden="true">
         <path d="M14 1C6.8 1 1 6.7 1 13.8 1 23.5 14 37 14 37s13-13.5 13-23.2C27 6.7 21.2 1 14 1Z" />
@@ -95,7 +96,7 @@ export function MapCard({ place: given }: { place: MapPlace }) {
     const controller = new AbortController();
     void (async () => {
       try {
-        const res = await fetch(`/api/map/geocode?q=${encodeURIComponent(given.address ?? given.name)}`, { credentials: "same-origin", signal: controller.signal });
+        const res = await fetch(apiUrl(`/api/map/geocode?q=${encodeURIComponent(given.address ?? given.name)}`), { credentials: API_CREDENTIALS, signal: controller.signal });
         const body = (await res.json()) as { place?: { lat: number; lng: number } | null };
         if (res.ok && body.place) setPlace({ ...given, lat: body.place.lat, lng: body.place.lng });
       } catch {

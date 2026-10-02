@@ -11,6 +11,21 @@ import type {
   Schedule,
   Turn,
 } from "./types";
+import { API_VERSION, apiCompatible } from "../../common/version";
+
+/**
+ * Where the control plane's API lives. Empty (the default) means this page's own
+ * origin, which is how the web console is served; a packaged app sets
+ * VITE_AIO_API_BASE at build time to talk to a control plane elsewhere.
+ */
+export const API_BASE = String(import.meta.env.VITE_AIO_API_BASE ?? "").replace(/\/$/, "");
+/** Same-origin pages send their cookies only to themselves; a remote API needs them sent across. */
+export const API_CREDENTIALS: RequestCredentials = API_BASE ? "include" : "same-origin";
+
+/** An API path (`/api/...`) as a URL this page can request or embed. */
+export function apiUrl(path: string): string {
+  return `${API_BASE}${path}`;
+}
 
 /** Short Chinese fallback for responses that carry no usable JSON message. */
 export function friendlyStatusMessage(status: number): string {
@@ -60,10 +75,10 @@ async function request<T>(
   const csrf = cookie("pa_csrf");
   if (init.body !== undefined) headers["content-type"] = "application/json";
   if (csrf) headers["x-csrf-token"] = csrf;
-  const res = await fetch(path, {
+  const res = await fetch(apiUrl(path), {
     method: init.method ?? "GET",
     headers,
-    credentials: "same-origin",
+    credentials: API_CREDENTIALS,
     signal: init.signal,
     cache: init.cache,
     body: init.body === undefined ? undefined : JSON.stringify(init.body),
@@ -110,7 +125,7 @@ export const api = {
   /** The person's own tabs: links opened from a reply. */
   personBrowserPointer: (tab: string, input: PointerInput) => request<PointerResult>("/api/browser/person/pointer", { method: "POST", body: { tab, ...input } }),
   personBrowserClose: (tab: string) => request<{ closed: string }>("/api/browser/person/close", { method: "POST", body: { tab } }),
-  taskBrowserScreenshotUrl: (id: string, tab: string, at: number) => `/api/tasks/${encodeURIComponent(id)}/browser/screenshot?tab=${encodeURIComponent(tab)}&at=${at}`,
+  taskBrowserScreenshotUrl: (id: string, tab: string, at: number) => apiUrl(`/api/tasks/${encodeURIComponent(id)}/browser/screenshot?tab=${encodeURIComponent(tab)}&at=${at}`),
   session: (signal?: AbortSignal) => request<{ authenticated: boolean; role?: "owner" | "member"; username: string | null; expiresAt?: number; secure?: boolean }>("/api/auth/session", {signal,cache:"no-store"}),
   login: (password: string, username = "owner") => request<{ ok: boolean; username: string; expiresAt: number }>("/api/auth/login", { method: "POST", body: { password, username } }),
   logout: () => request<{ ok: boolean }>("/api/auth/logout", { method: "POST", body: {} }),
@@ -186,7 +201,7 @@ export const api = {
   writeFile: (path: string, content: string) => request<{ ok: boolean }>("/api/files/write", { method: "POST", body: { path, content } }),
   deleteFile: (path: string) => request<{ ok: boolean }>("/api/files/delete", { method: "POST", body: { path } }),
   mkdir: (path: string) => request<{ ok: boolean }>("/api/files/mkdir", { method: "POST", body: { path } }),
-  downloadUrl: (path: string) => `/api/files/download?path=${encodeURIComponent(path)}`,
+  downloadUrl: (path: string) => apiUrl(`/api/files/download?path=${encodeURIComponent(path)}`),
 
   /**
    * Sandbox document tools. The control plane validates the path (lexically and
@@ -205,20 +220,20 @@ export const api = {
   documentRender: (path: string, signal?: AbortSignal) =>
     request<import("./types").DocumentRender>(`/api/documents/render?path=${encodeURIComponent(path)}`, { signal }),
   documentPageUrl: (path: string, page: number) =>
-    `/api/documents/page?path=${encodeURIComponent(path)}&page=${page}`,
+    apiUrl(`/api/documents/page?path=${encodeURIComponent(path)}&page=${page}`),
   /**
    * Inline image URL. Not the download endpoint: that one is octet-stream with an
    * attachment disposition, which an `<img>` will not render. The server sniffs
    * the bytes and refuses anything that is not really an image.
    */
-  documentImageUrl: (path: string) => `/api/documents/image?path=${encodeURIComponent(path)}`,
-  documentVideoUrl: (path: string) => `/api/documents/video?path=${encodeURIComponent(path)}`,
+  documentImageUrl: (path: string) => apiUrl(`/api/documents/image?path=${encodeURIComponent(path)}`),
+  documentVideoUrl: (path: string) => apiUrl(`/api/documents/video?path=${encodeURIComponent(path)}`),
   createTerminalSession: () => request<{id:string}>("/api/sandbox/shell-sessions", {method:"POST",body:{}}),
   closeTerminalSession: (id:string) => request<{ok:boolean}>(`/api/sandbox/shell-sessions/${encodeURIComponent(id)}`, {method:"DELETE"}),
   terminalSessions: (signal?: AbortSignal) => request<{sessions:Array<{id:string;status:string;workingDir:string;lastUsedAt:string|null}>}>("/api/sandbox/shell-sessions", {signal}),
   convertDocument: (path: string, format: string) =>
     request<{ path: string; bytes: number }>("/api/documents/convert", { method: "POST", body: { path, format } }),
-  documentHtmlUrl: (path: string) => `/api/documents/html?path=${encodeURIComponent(path)}`,
+  documentHtmlUrl: (path: string) => apiUrl(`/api/documents/html?path=${encodeURIComponent(path)}`),
   documentText: (path: string, signal?: AbortSignal) =>
     request<{ path: string; text: string; size: number; truncated: boolean }>(
       `/api/documents/text?path=${encodeURIComponent(path)}`,
@@ -310,7 +325,7 @@ export function openEventStream(
     onRevoked?: () => void;
   },
 ): () => void {
-  const source = new EventSource(`/api/conversations/${encodeURIComponent(conversationId)}/events?since=${since}`);
+  const source = new EventSource(apiUrl(`/api/conversations/${encodeURIComponent(conversationId)}/events?since=${since}`), { withCredentials: Boolean(API_BASE) });
   const handle = (raw: MessageEvent) => {
     try {
       handlers.onEvent(JSON.parse(raw.data) as import("./types").AgentEvent);
@@ -349,4 +364,20 @@ export function openEventStream(
   source.onmessage = handle;
   source.onerror = () => handlers.onError?.();
   return () => source.close();
+}
+
+/**
+ * Null when this page and the control plane speak compatible API versions, else
+ * a message for the person. A page cached from an older or newer release is told
+ * to reload instead of half-working.
+ */
+export async function versionMismatch(): Promise<string | null> {
+  try {
+    const v = await request<{ api: number; apiMin: number }>("/api/version", { cache: "no-store" });
+    if (apiCompatible(API_VERSION, v.api, v.apiMin)) return null;
+    return `界面与服务版本不兼容（界面需要接口 v${API_VERSION}，服务提供 v${v.apiMin}–v${v.api}）。请刷新页面；仍然提示时需要更新${v.api < API_VERSION ? "服务" : "界面"}。`;
+  } catch {
+    // An older control plane has no version endpoint; it is served as before (see App's legacy mode).
+    return null;
+  }
 }

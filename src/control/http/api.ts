@@ -8,6 +8,8 @@ import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { exitTerminal, TERMINAL_ID, TerminalRegistry } from "../terminals.js";
 import { maps, MapService } from "../maps.js";
+import { API_MIN, API_VERSION } from "../../common/version.js";
+import { appVersion } from "../../common/build.js";
 import type { AppContext } from "../context.js";
 import {
   InvalidConversationTitleError,
@@ -341,6 +343,12 @@ export function createApiRouter(context: AppContext): Router {
       });
     }),
   );
+
+  // The API version this control plane serves: a UI (web or packaged) built for another one says so.
+  router.get("/version", (_req, res) => {
+    res.setHeader("Cache-Control", "no-store");
+    res.json({ component: "control", version: appVersion(), api: API_VERSION, apiMin: API_MIN });
+  });
 
   // ------------------------------------------------------------- status/health
 
