@@ -199,6 +199,12 @@ export async function startSandboxRuntime(ctx: AppContext): Promise<void> {
     } catch (err) {
       log.warn("sandbox browser identity not aligned", { error: err instanceof Error ? err.message : String(err) });
     }
+    // Phone keyboards typed every tap twice through the image's noVNC; best effort, never fatal.
+    try {
+      if (await container.patchNoVnc()) log.info("sandbox noVNC keyboard patched");
+    } catch (err) {
+      log.warn("sandbox noVNC keyboard not patched", { error: err instanceof Error ? err.message : String(err) });
+    }
     // A tab server from an older version stays attached to every page (an older one
     // left automation traces sites detect); replace it now rather than at the next task.
     void ctx.tabs?.ensure().catch((err) => log.warn("browser tab server not refreshed", { error: String(err) }));
