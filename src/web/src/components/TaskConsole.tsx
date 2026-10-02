@@ -4,7 +4,8 @@ import { api, ApiError, browserApi } from "../api";
 import { BrowserViewerController } from "../browserViewer";
 
 /** The sandbox desktop in noVNC: scaled to fit, reconnecting on its own. */
-export const DESKTOP_PATH = "/vnc/vnc.html?autoconnect=1&resize=scale&reconnect=1&path=ws";
+// `aio=1`: a new URL, so phones load the patched noVNC instead of a cached copy (see novncPatch).
+export const DESKTOP_PATH = "/vnc/vnc.html?autoconnect=1&resize=scale&reconnect=1&path=ws&aio=1";
 
 /** How a console puts its tab's window on top of the desktop: a task's tab, or the person's own. */
 export interface ConsoleTarget {

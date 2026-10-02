@@ -10,6 +10,9 @@
  * backspace that was sent that way within the last 100 ms.
  */
 export const NOVNC_UI_PATH = "/opt/novnc/app/ui.js";
+export const NOVNC_HTML_PATH = "/opt/novnc/vnc.html";
+const UI_SCRIPT = 'src="app/ui.js"';
+const UI_SCRIPT_PATCHED = 'src="app/ui.js?aio=1"';
 const MARKER = "/* aio-agent: one tap, one key */";
 
 const KEY_EVENT = `    keyEvent(keysym, code, down) {
@@ -53,4 +56,17 @@ ${KEY_EVENT}        if (down) UI.recentTouchKeys.push({ keysym, at: Date.now() }
             UI.rfb.sendKey(keysym);
         }
 `);
+}
+
+/**
+ * The image serves noVNC without Cache-Control and with a 2023 Last-Modified,
+ * so a phone may keep the unpatched ui.js for months on heuristic freshness.
+ * Loading it under a new URL makes every browser fetch the patched file (the
+ * console also asks for vnc.html under a new URL, see DESKTOP_PATH). Null when
+ * vnc.html is not the version this patch knows.
+ */
+export function patchNoVncHtml(source: string): string | null {
+  if (source.includes(UI_SCRIPT_PATCHED)) return source;
+  if (source.split(UI_SCRIPT).length !== 2) return null;
+  return source.replace(UI_SCRIPT, UI_SCRIPT_PATCHED);
 }

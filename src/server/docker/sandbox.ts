@@ -5,7 +5,7 @@ import { TAB_TOOL_TIMEOUT_SEC } from "../browser/tabs.js";
 import { setTimeout as delay } from "node:timers/promises";
 import type { Config } from "../config.js";
 import type { Logger } from "../logger.js";
-import { NOVNC_UI_PATH, patchNoVncUi } from "./novncPatch.js";
+import { NOVNC_HTML_PATH, NOVNC_UI_PATH, patchNoVncHtml, patchNoVncUi } from "./novncPatch.js";
 import {
   CODEX_CONFIG_TOML,
   CODEX_ISOLATION_MARKER,
@@ -820,17 +820,25 @@ echo "$dir"`;
    * per container. True when it changed the file.
    */
   async patchNoVnc(): Promise<boolean> {
-    const read = await this.docker(["exec", this.name, "cat", NOVNC_UI_PATH], { timeoutMs: 20_000 });
-    if (read.code !== 0) throw new Error(`noVNC not readable: ${read.stderr.trim()}`);
-    const patched = patchNoVncUi(read.stdout);
-    if (patched === null) throw new Error("noVNC is not the version the keyboard patch knows");
+    // The script first, then the page that loads it under its new URL.
+    const ui = await this.#patchFile(NOVNC_UI_PATH, patchNoVncUi);
+    const page = await this.#patchFile(NOVNC_HTML_PATH, patchNoVncHtml);
+    return ui || page;
+  }
+
+  /** Rewrite one root-owned file in the container through `patch`; true when it changed. */
+  async #patchFile(file: string, patch: (source: string) => string | null): Promise<boolean> {
+    const read = await this.docker(["exec", this.name, "cat", file], { timeoutMs: 20_000 });
+    if (read.code !== 0) throw new Error(`${file} not readable: ${read.stderr.trim()}`);
+    const patched = patch(read.stdout);
+    if (patched === null) throw new Error(`${file} is not the version the keyboard patch knows`);
     if (patched === read.stdout) return false;
     const write = await this.docker(
       ["exec", "-i", "-u", "root", this.name, "python3", "-c",
-        "import os,sys; p=sys.argv[1]; t=p+'.aio-tmp'; open(t,'wb').write(sys.stdin.buffer.read()); os.chmod(t,0o644); os.replace(t,p)", NOVNC_UI_PATH],
+        "import os,sys; p=sys.argv[1]; t=p+'.aio-tmp'; open(t,'wb').write(sys.stdin.buffer.read()); os.chmod(t,0o644); os.replace(t,p)", file],
       { stdin: patched, timeoutMs: 20_000 },
     );
-    if (write.code !== 0) throw new Error(`noVNC not patched: ${write.stderr.trim()}`);
+    if (write.code !== 0) throw new Error(`${file} not patched: ${write.stderr.trim()}`);
     return true;
   }
 
