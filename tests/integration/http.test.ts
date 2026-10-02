@@ -212,8 +212,17 @@ describe("conversation and agent endpoints", () => {
     const body = (await res.json()) as Record<string, unknown>;
     expect(body.ok).toBe(true);
     expect(body.service).toBe("personal-agent");
+    // What a compose healthcheck reads: the sandbox node answers and speaks a protocol this build drives.
+    expect(body.compatible).toBe(true);
     expect(JSON.stringify(body)).not.toContain("owner@example.com");
     expect(body.agent).toBeUndefined();
+  });
+
+  it("tells any UI which API version it serves, without a session", async () => {
+    const res = await h.request("/api/version");
+    expect(res.status).toBe(200);
+    expect(res.headers.get("cache-control")).toBe("no-store");
+    expect(await res.json()).toEqual({ component: "control", version: expect.any(String), api: 1, apiMin: 1 });
   });
 });
 

@@ -1,0 +1,16 @@
+# Build context for deploy/*.Dockerfile: sources only. Runtime data (var/) holds
+# databases and credentials and must never reach an image.
+**/node_modules
+var
+dist
+.git
+.github
+test-results
+playwright-report
+coverage
+tests
+docs
+**/.DS_Store
+**/__pycache__
+.env
+.env.*

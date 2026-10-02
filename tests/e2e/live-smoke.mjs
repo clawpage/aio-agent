@@ -10,7 +10,7 @@ import http from "node:http";
 //   PA_PRIMARY_ORIGIN=https://agent.example.com \
 //   PA_COMPANION_ORIGIN=https://workspace.example.com npm run smoke
 const PRIMARY = process.env.PA_PRIMARY_ORIGIN ?? "http://localhost:4891";
-const COMPANION = process.env.PA_COMPANION_ORIGIN ?? "http://127.0.0.1:4891";
+const COMPANION = process.env.PA_COMPANION_ORIGIN ?? "http://127.0.0.1:4892";
 const secretFile = process.env.PA_OWNER_SECRET_FILE ?? process.argv[2] ?? "var/owner-secret.txt";
 const password = fs.readFileSync(path.resolve(secretFile), "utf8").trim();
 

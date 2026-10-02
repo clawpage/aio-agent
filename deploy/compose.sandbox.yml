@@ -1,0 +1,25 @@
+# Sandbox layer: sandboxd on a machine that runs sandbox containers.
+# Use through deploy/aio.mjs, which checks image compatibility before `up`.
+name: ${AIO_PROJECT:-aio}
+services:
+  sandbox:
+    image: ${AIO_IMAGE_PREFIX:-}aio-agent-sandbox:${AIO_SANDBOX_VERSION:?run through deploy/aio.mjs}
+    restart: unless-stopped
+    environment:
+      PA_SANDBOXD_TOKEN_FILE: /run/secrets/sandbox-node
+      # How this container reaches the ports sandboxes publish on the machine's loopback.
+      PA_SANDBOXD_CONTAINER_HOST: ${AIO_SANDBOXD_CONTAINER_HOST:-host.docker.internal}
+      PA_SANDBOXD_IMAGES: ${AIO_SANDBOX_IMAGES:-ghcr.io/agent-infra/sandbox:1.11.0}
+      PA_SANDBOXD_ADD_HOST_GATEWAY: ${AIO_SANDBOXD_ADD_HOST_GATEWAY:-0}
+    volumes:
+      # The only Docker access in the system. sandboxd runs no user code, needs the
+      # node token for every call and is not reachable from sandboxes (AGENTS.md rule 3).
+      - /var/run/docker.sock:/var/run/docker.sock
+    secrets: [sandbox-node]
+    networks: [aio]
+networks:
+  aio:
+    name: ${AIO_PROJECT:-aio}-net
+secrets:
+  sandbox-node:
+    file: ${AIO_SECRET_NODE_TOKEN:?the node token file (deploy/aio.mjs init creates one)}

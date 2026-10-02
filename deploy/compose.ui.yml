@@ -1,0 +1,20 @@
+# UI layer: the console and its edge (static files + /api pass-through to the control plane).
+# Use through deploy/aio.mjs, which checks image compatibility before `up`.
+name: ${AIO_PROJECT:-aio}
+services:
+  ui:
+    image: ${AIO_IMAGE_PREFIX:-}aio-agent-ui:${AIO_UI_VERSION:?run through deploy/aio.mjs}
+    restart: unless-stopped
+    environment:
+      AIO_CONTROL_URL: ${AIO_CONTROL_URL:-http://control:4892}
+      AIO_WORKSPACE_ORIGIN: ${AIO_WORKSPACE_ORIGIN:-}
+    ports:
+      - ${AIO_UI_PUBLISH:-127.0.0.1:4891}:4891
+    depends_on:
+      control:
+        condition: service_healthy
+        required: false
+    networks: [aio]
+networks:
+  aio:
+    name: ${AIO_PROJECT:-aio}-net

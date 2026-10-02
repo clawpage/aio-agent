@@ -2,17 +2,22 @@
 /**
  * Production supervisor for personal-agent.
  *
- * Runs two children and keeps them alive:
- *   1. the Node control-plane server (serves the SPA, API, SSE and the
- *      authenticated AIO companion proxy on loopback)
- *   2. the dedicated Cloudflare tunnel that publishes the two exact hostnames
- *
- * Both are restarted with backoff if they exit. SIGTERM/SIGINT are forwarded so
+ * Runs the three layers and the dedicated Cloudflare tunnel, restarting any
+ * child that exits (with backoff) and forwarding SIGTERM/SIGINT so
  * `tools/start.sh stop personal-agent` shuts everything down cleanly.
  *
+ * PA_DEPLOY (var/runtime.env) picks how the layers run:
+ *   compose  the three images under Docker Compose (deploy/aio.mjs, settings in
+ *            var/deploy/aio.env); sandbox containers are not compose services and
+ *            keep running across restarts
+ *   host     (default) three Node processes on this machine: sandboxd on :4894,
+ *            the control plane on :4892 and the UI edge on :4891
+ *
+ * Either way the tunnel sends the console host to :4891 and the workspace host to :4892.
  * Optional runtime overrides: var/runtime.env (KEY=VALUE per line).
  */
 import { spawn } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
@@ -22,7 +27,7 @@ const VAR = path.join(ROOT, "var");
 const LOGS = path.join(VAR, "logs");
 const CLOUDFLARED = process.env.PA_CLOUDFLARED_BIN ?? "/opt/homebrew/bin/cloudflared";
 const TUNNEL_CONFIG = path.join(VAR, "cloudflared", "config.yml");
-const SERVER_ENTRY = path.join(ROOT, "dist", "server", "index.js");
+const NODE_TOKEN = path.join(VAR, "sandbox-node.env");
 
 fs.mkdirSync(LOGS, { recursive: true });
 
@@ -42,11 +47,13 @@ function loadRuntimeEnv() {
 
 const baseEnv = {
   PA_BIND: "127.0.0.1",
-  PA_PORT: "4891",
+  PA_PORT: "4892",
+  PA_UI_PORT: "4891",
   // Behind the dedicated tunnel the edge overwrites CF-Connecting-IP.
   PA_TRUST_CF_CONNECTING_IP: "1",
   ...loadRuntimeEnv(),
 };
+const mode = baseEnv.PA_DEPLOY === "compose" ? "compose" : "host";
 
 function log(message) {
   const line = JSON.stringify({ ts: new Date().toISOString(), supervisor: "personal-agent", msg: message });
@@ -112,12 +119,7 @@ function shutdown(signal) {
 process.on("SIGTERM", () => shutdown("SIGTERM"));
 process.on("SIGINT", () => shutdown("SIGINT"));
 
-if (!fs.existsSync(SERVER_ENTRY)) {
-  log(`fatal: ${SERVER_ENTRY} missing; run npm run build:server first`);
-  process.exit(1);
-}
-
-/** Refuse to serve a stale build: dist older than the newest source file. */
+/** Refuse to serve a stale build: a dist tree older than the newest source file. */
 function newestMtime(dir) {
   let newest = 0;
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -127,17 +129,49 @@ function newestMtime(dir) {
   }
   return newest;
 }
-const srcDir = path.join(ROOT, "src", "server");
-if (fs.existsSync(srcDir)) {
-  const srcNewest = newestMtime(srcDir);
-  const distMtime = fs.statSync(SERVER_ENTRY).mtimeMs;
-  if (srcNewest > distMtime) {
-    log("fatal: src/control is newer than dist; run npm run build:server before starting");
+function requireBuild(layer, entry) {
+  if (!fs.existsSync(entry)) {
+    log(`fatal: ${entry} missing; run npm run build first`);
     process.exit(1);
+  }
+  for (const src of [path.join(ROOT, "src", layer), path.join(ROOT, "src", "common")]) {
+    if (fs.existsSync(src) && newestMtime(src) > fs.statSync(entry).mtimeMs) {
+      log(`fatal: ${path.relative(ROOT, src)} is newer than ${path.relative(ROOT, entry)}; run npm run build before starting`);
+      process.exit(1);
+    }
   }
 }
 
-startChild("personal-agent", process.execPath, [SERVER_ENTRY], baseEnv, { required: true });
+/** The shared secret between the control plane and sandboxd on this machine. */
+function ensureNodeToken() {
+  if (fs.existsSync(NODE_TOKEN)) return;
+  fs.writeFileSync(NODE_TOKEN, `AIO_SANDBOX_NODE_TOKEN=${randomBytes(32).toString("hex")}\n`, { mode: 0o600, flag: "wx" });
+  log("generated the sandbox node token");
+}
+
+if (mode === "compose") {
+  // deploy/aio.mjs checks the images fit together, brings them up and stops them on SIGTERM.
+  startChild("personal-agent", process.execPath, [path.join(ROOT, "deploy", "aio.mjs"), "run"], { ...baseEnv, AIO_ENV_FILE: baseEnv.AIO_ENV_FILE ?? path.join(VAR, "deploy", "aio.env") }, { required: true });
+} else {
+  const sandboxEntry = path.join(ROOT, "dist", "sandbox", "index.js");
+  const controlEntry = path.join(ROOT, "dist", "control", "index.js");
+  const uiEntry = path.join(ROOT, "src", "ui", "edge.mjs");
+  requireBuild("sandbox", sandboxEntry);
+  requireBuild("control", controlEntry);
+  if (!fs.existsSync(path.join(ROOT, "dist", "ui", "index.html"))) {
+    log("fatal: dist/ui missing; run npm run build first");
+    process.exit(1);
+  }
+  ensureNodeToken();
+  startChild("personal-agent-sandboxd", process.execPath, [sandboxEntry], { ...baseEnv, PA_SANDBOXD_TOKEN_FILE: NODE_TOKEN, PA_SANDBOXD_DATA_DIR: path.join(VAR, "sandboxd") }, { required: true });
+  startChild("personal-agent", process.execPath, [controlEntry], baseEnv, { required: true });
+  startChild("personal-agent-ui", process.execPath, [uiEntry], {
+    ...baseEnv,
+    AIO_UI_PORT: baseEnv.PA_UI_PORT,
+    AIO_CONTROL_URL: `http://127.0.0.1:${baseEnv.PA_PORT}`,
+    AIO_WORKSPACE_ORIGIN: `https://${baseEnv.PA_WORKSPACE_HOST ?? "agent-workspace.clawpage.ai"}`,
+  }, { required: true });
+}
 
 if (fs.existsSync(TUNNEL_CONFIG)) {
   startChild("personal-agent-tunnel", CLOUDFLARED, ["--no-autoupdate", "--config", TUNNEL_CONFIG, "tunnel", "run"], baseEnv, {

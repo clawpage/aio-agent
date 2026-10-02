@@ -86,7 +86,7 @@ export function createApp(ctx: AppContext): express.Express {
   // Minimal, unauthenticated liveness/readiness. No identities, ids or errors.
   app.get("/healthz", (_req, res) => {
     void (async () => {
-      const [sandbox, hostAuth] = await Promise.all([ctx.container.isReady(), ctx.hostTokens.status()]);
+      const [sandbox, hostAuth, node] = await Promise.all([ctx.container.isReady(), ctx.hostTokens.status(), ctx.container.node.check()]);
       const agentStatus = await ctx.agent.status();
       // Editor/notebook/terminal readiness is part of real health, not just /health.
       const surfaces = ctx.sandboxSurfaces ?? {};
@@ -103,6 +103,8 @@ export function createApp(ctx: AppContext): express.Express {
         servicesReady,
         agentReady,
         ready: dependenciesReady && agentReady,
+        // This control plane can drive the sandbox node (protocol versions fit and it answers).
+        compatible: node.ok,
       });
     })();
   });

@@ -177,3 +177,32 @@ describe("control plane <-> sandbox node", () => {
     expect(status).toBe(401);
   });
 });
+
+describe("gateway relay on a remote sandbox node", () => {
+  it("forwards sandbox gateway calls to the control plane unchanged, streaming the answer", async () => {
+    const { createGatewayRelay } = await import("../../src/sandbox/relay.js");
+    const seen: Array<{ url?: string; method?: string; auth?: string; body: string }> = [];
+    const gateway = http.createServer((req, res) => {
+      let body = "";
+      req.on("data", (c) => (body += c));
+      req.on("end", () => {
+        seen.push({ url: req.url, method: req.method, auth: req.headers.authorization, body });
+        res.writeHead(403, { "content-type": "text/event-stream" });
+        res.write("data: one\n\n");
+        setTimeout(() => res.end("data: two\n\n"), 50);
+      });
+    });
+    await new Promise<void>((resolve) => gateway.listen(0, "127.0.0.1", resolve));
+    const relay = createGatewayRelay(`http://127.0.0.1:${(gateway.address() as AddressInfo).port}`, new Logger("error", undefined, false));
+    await new Promise<void>((resolve) => relay.listen(0, "127.0.0.1", resolve));
+    try {
+      const res = await fetch(`http://127.0.0.1:${(relay.address() as AddressInfo).port}/u/user_x/v1/responses?q=1`, { method: "POST", body: "{}", headers: { authorization: "Bearer member-token" } });
+      expect(res.status).toBe(403);
+      expect(await res.text()).toBe("data: one\n\ndata: two\n\n");
+      expect(seen).toEqual([{ url: "/u/user_x/v1/responses?q=1", method: "POST", auth: "Bearer member-token", body: "{}" }]);
+    } finally {
+      relay.close();
+      gateway.close();
+    }
+  });
+});

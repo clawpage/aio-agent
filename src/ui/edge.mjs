@@ -59,8 +59,7 @@ export function createEdge({ dist, control, workspaceOrigin = "", log = () => un
     if (compat.value && Date.now() - compat.at < 30_000) return compat.value;
     let value;
     try {
-      const res = await fetch(new URL("api/version", upstream), { signal: AbortSignal.timeout(5000) });
-      const v = await res.json();
+      const v = await getJson("/api/version");
       const ok = Number.isInteger(build.api) && build.api >= v.apiMin && build.api <= v.api;
       value = { ok, ui: build, control: { version: v.version, api: v.api, apiMin: v.apiMin } };
     } catch (err) {
@@ -68,6 +67,30 @@ export function createEdge({ dist, control, workspaceOrigin = "", log = () => un
     }
     compat = { at: Date.now(), value };
     return value;
+  }
+
+  /**
+   * A GET to the control plane under a loopback Host it always accepts: the
+   * compose service name is not one of its allowed hosts, and it is right to refuse it.
+   */
+  function getJson(pathname) {
+    return new Promise((resolve, reject) => {
+      const req = client.get({ host: upstream.hostname, port: upstreamPort, path: pathname, headers: { host: "localhost" }, timeout: 5000 }, (res) => {
+        let body = "";
+        res.setEncoding("utf8");
+        res.on("data", (c) => (body += c));
+        res.on("end", () => {
+          try {
+            if (res.statusCode !== 200) throw new Error(`HTTP ${res.statusCode}`);
+            resolve(JSON.parse(body));
+          } catch (err) {
+            reject(err);
+          }
+        });
+      });
+      req.on("timeout", () => req.destroy(new Error("timeout")));
+      req.on("error", reject);
+    });
   }
 
   function proxy(req, res) {

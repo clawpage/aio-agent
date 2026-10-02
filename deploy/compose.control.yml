@@ -1,0 +1,56 @@
+# Control layer: accounts, tasks, agents, the workspace origin and the sandboxes' gateway.
+# Use through deploy/aio.mjs, which checks image compatibility before `up`.
+name: ${AIO_PROJECT:-aio}
+services:
+  control:
+    image: ${AIO_IMAGE_PREFIX:-}aio-agent-control:${AIO_CONTROL_VERSION:?run through deploy/aio.mjs}
+    restart: unless-stopped
+    env_file:
+      # Deployment settings (hosts, knowledge base URL, ...); see deploy/README.md.
+      - path: ${AIO_CONTROL_ENV_FILE:-control.env}
+        required: false
+    environment:
+      PA_DATA_DIR: /data
+      PA_BIND: 0.0.0.0
+      PA_PORT: "4892"
+      PA_HOST_CODEX: "off"
+      # Sandboxes reach the gateway at host.docker.internal:<this port>.
+      PA_MEMBER_MODEL_PORT: ${AIO_GATEWAY_PORT:-4902}
+      PA_SANDBOX_NODES: ${AIO_SANDBOX_NODES:-local=http://sandbox:4894}
+      PA_SANDBOX_NODE_TOKENS_FILE: /run/secrets/sandbox-node
+      PA_CLAUDE_CODE_SECRETS_FILE: /run/secrets/claude-code
+      PA_JEV_SECRETS_FILE: /run/secrets/jev
+      PA_KB_MCP_SECRETS_FILE: /run/secrets/kb-mcp
+      PA_OPENCODE_GO_SECRETS_FILE: /run/secrets/opencode-go
+    volumes:
+      - control-data:/data
+    ports:
+      # The workspace origin (and the API for clients that are not the UI edge).
+      - ${AIO_CONTROL_PUBLISH:-127.0.0.1:4892}:4892
+      - 127.0.0.1:${AIO_GATEWAY_PORT:-4902}:${AIO_GATEWAY_PORT:-4902}
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    depends_on:
+      sandbox:
+        condition: service_healthy
+        required: false
+    secrets: [sandbox-node, claude-code, jev, kb-mcp, opencode-go]
+    networks: [aio]
+networks:
+  aio:
+    name: ${AIO_PROJECT:-aio}-net
+volumes:
+  control-data:
+    name: ${AIO_CONTROL_DATA:-aio-control-data}
+secrets:
+  sandbox-node:
+    file: ${AIO_SECRET_NODE_TOKEN:?the node token file (deploy/aio.mjs init creates one)}
+  # Optional credentials; /dev/null leaves the feature off.
+  claude-code:
+    file: ${AIO_SECRET_CLAUDE_CODE:-/dev/null}
+  jev:
+    file: ${AIO_SECRET_JEV:-/dev/null}
+  kb-mcp:
+    file: ${AIO_SECRET_KB_MCP:-/dev/null}
+  opencode-go:
+    file: ${AIO_SECRET_OPENCODE_GO:-/dev/null}

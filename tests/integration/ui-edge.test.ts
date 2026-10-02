@@ -116,6 +116,8 @@ describe("UI edge", () => {
     const ok = await fetch(`${base}/healthz`);
     expect(ok.status).toBe(200);
     expect(await ok.json()).toMatchObject({ ok: true, ui: { api: 1 }, control: { api: 1, apiMin: 1 } });
+    // Asked under a loopback Host the control plane accepts, not the compose service name.
+    expect(seen.some((h) => h.host === "localhost")).toBe(true);
     api = { api: 3, apiMin: 2 };
     const { server, compatible } = createEdge({ dist, control: `http://127.0.0.1:${(control.address() as AddressInfo).port}` });
     try {

@@ -15,6 +15,7 @@ npm-debug.log*
 /vite.config.ts.timestamp-*
 
 # Local environment / secrets
+/deploy/*.env
 .env
 .env.*
 !.env.example
