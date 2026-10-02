@@ -5,7 +5,7 @@ import path from "node:path";
 import { startHarness } from "../helpers/harness.js";
 import { MemberModelGateway } from "../../src/control/memberModelGateway.js";
 import { KbGateway, kbMcpServers, kbThreadServers } from "../../src/control/kb.js";
-import { codexRequirementsToml } from "../../src/control/docker/seed.js";
+import { codexRequirementsToml } from "../../src/control/sandbox/seed.js";
 import { memberConfig } from "../../src/control/tenants.js";
 
 const USERS: Record<string, string> = { owner_1: "owner", user_granted: "cr", user_other: "yzmy" };

@@ -1,7 +1,7 @@
 import { expect, it, vi } from "vitest";
 import { startSandboxRuntime } from "../../src/control/index.js";
 import type { AppContext } from "../../src/control/context.js";
-import { Logger } from "../../src/control/logger.js";
+import { Logger } from "../../src/common/logger.js";
 import { testConfig } from "../helpers/harness.js";
 
 it("replaces an outdated tab server as soon as the sandbox is up, not at the next task", async () => {
@@ -9,7 +9,7 @@ it("replaces an outdated tab server as soon as the sandbox is up, not at the nex
   const ensure = vi.fn(async () => undefined);
   const ctx = {
     cfg, log: new Logger("error", undefined, false), sandboxSetupError: null, sandboxSurfaces: null,
-    container: { ensureRunning: async () => ({ image: "img", healthy: true }), alignBrowserIdentity: async () => false, surfaces: async () => ({}) },
+    container: { node: { check: async () => ({ ok: true }) }, ensureRunning: async () => ({ image: "img", healthy: true }), alignBrowserIdentity: async () => false, surfaces: async () => ({}) },
     agent: { ensureSession: async () => undefined },
     tabs: { ensure },
   } as unknown as AppContext;

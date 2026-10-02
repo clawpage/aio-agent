@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, it } from "vitest";
 import { AgentManager } from "../../src/control/codex/manager.js";
 import type { HostTokenSource } from "../../src/control/codex/hostTokens.js";
 import { openDb, type Db } from "../../src/control/db.js";
-import { Logger } from "../../src/control/logger.js";
+import { Logger } from "../../src/common/logger.js";
 import { pruneBeforeSnapshot, TAB_POLICY, tabMcpServers, tabThreadConfig, type BrowserTask } from "../../src/control/browser/tabs.js";
 import type { BrowserRuntimeLike } from "../../src/control/browser/lifecycle.js";
 import { FakeCodex, testConfig } from "../helpers/harness.js";

@@ -4,7 +4,7 @@ import type http from "node:http";
 import { randomBytes, randomUUID } from "node:crypto";
 import type { Config } from "./config.js";
 import type { Db } from "./db.js";
-import type { Logger } from "./logger.js";
+import type { Logger } from "../common/logger.js";
 import { confident, type Jev } from "./jev.js";
 
 /**

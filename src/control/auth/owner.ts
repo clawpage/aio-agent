@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import type { Db } from "../db.js";
 import { randomId, generateSecret, hashPassword, verifyPassword, dummyVerify } from "./passwords.js";
-import type { Logger } from "../logger.js";
+import type { Logger } from "../../common/logger.js";
 
 export const BOOTSTRAP_USERNAME = "owner";
 

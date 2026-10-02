@@ -17,7 +17,7 @@
  */
 
 import type { Config } from "../config.js";
-import type { Logger } from "../logger.js";
+import type { Logger } from "../../common/logger.js";
 import type { BrowserRuntimeLike, LifecycleClock, LifecycleEvent } from "./lifecycle.js";
 import { BrowserLifecycle } from "./lifecycle.js";
 import type { BrowserLifecycleStatus, LeaseSummary, PinLease, ViewerLease } from "./types.js";

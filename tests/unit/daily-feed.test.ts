@@ -3,7 +3,7 @@ import { openDb, type Db } from "../../src/control/db.js";
 import { AgentManager } from "../../src/control/codex/manager.js";
 import type { HostTokenSource } from "../../src/control/codex/hostTokens.js";
 import { TaskService } from "../../src/control/tasks/service.js";
-import { Logger } from "../../src/control/logger.js";
+import { Logger } from "../../src/common/logger.js";
 import { taskNotification } from "../../src/control/push.js";
 import { FakeCodex, testConfig } from "../helpers/harness.js";
 

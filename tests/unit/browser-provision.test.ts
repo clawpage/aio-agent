@@ -2,8 +2,8 @@ import {afterEach, it, expect, vi} from 'vitest';
 import fs from 'node:fs';
 import {BrowserRuntime} from '../../src/control/browser/runtime.js';
 import type {Config} from '../../src/control/config.js';
-import type {SandboxContainer} from '../../src/control/docker/sandbox.js';
-import {Logger} from '../../src/control/logger.js';
+import type {SandboxContainer} from '../../src/control/sandbox/container.js';
+import {Logger} from '../../src/common/logger.js';
 const cfg={browser:{toolDir:'/opt/aio-browser',snapshotPath:'/state/snapshot.json'}} as Config;
 afterEach(()=>vi.restoreAllMocks());
 function fixture(){

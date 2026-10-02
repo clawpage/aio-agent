@@ -5,7 +5,7 @@ import {randomBytes,timingSafeEqual} from 'node:crypto';
 import {Readable} from 'node:stream';
 import type {Config} from './config.js';
 import {BridgeModel} from './bridgeModel.js';
-import type {Logger} from './logger.js';
+import type {Logger} from '../common/logger.js';
 import {ClaudeCodeHarness,MEMBER_GATEWAY_TOKEN_KEY} from './claudeCode.js';
 import {MEMBER_CLAUDE_MODEL} from './auth/policy.js';
 import type {ShareStore} from './share.js';

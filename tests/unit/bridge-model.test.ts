@@ -2,11 +2,12 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { BridgeModel, CHATGPT_PROVIDER_ID, expandHome, readSecretFile } from "../../src/control/bridgeModel.js";
-import { Logger } from "../../src/control/logger.js";
+import { BridgeModel, CHATGPT_PROVIDER_ID } from "../../src/control/bridgeModel.js";
+import { expandHome, readSecretFile } from "../../src/common/secrets.js";
+import { Logger } from "../../src/common/logger.js";
 import { AgentManager, TurnInputUnsupportedError } from "../../src/control/codex/manager.js";
 import { openDb, type Db } from "../../src/control/db.js";
-import { SandboxContainer } from "../../src/control/docker/sandbox.js";
+import { SandboxContainer } from "../../src/control/sandbox/container.js";
 import { FakeCodex, testConfig } from "../helpers/harness.js";
 import type { HostTokenSource } from "../../src/control/codex/hostTokens.js";
 

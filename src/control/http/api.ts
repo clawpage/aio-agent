@@ -974,7 +974,7 @@ export function createApiRouter(context: AppContext): Router {
   // ------------------------------------------------------- sandbox helpers
 
   const sandboxFetch = async (pathname: string, init: RequestInit = {}, timeoutMs = 60_000) => {
-    return await fetch(`http://127.0.0.1:${cfg.sandbox.hostPort}${pathname}`, {
+    return await container.fetch(pathname, {
       ...init,
       signal: AbortSignal.timeout(timeoutMs),
     });
@@ -1511,7 +1511,7 @@ export function createApiRouter(context: AppContext): Router {
       if (!TERMINAL_ID.test(id)) { res.status(400).json({message:"无效的终端会话 ID"}); return; }
       if (!terminals.has(id)) { res.status(404).json({message:"终端不存在或已结束"}); return; }
       try {
-        await exitTerminal(cfg.sandbox.hostPort, id);
+        await exitTerminal(container.upstream(), id);
       } catch {
         res.status(502).json({message:"关闭终端失败，会话可能仍在运行，请刷新后核对"}); return;
       }
@@ -1572,7 +1572,7 @@ export function createApiRouter(context: AppContext): Router {
       const form = new FormData();
       form.append("file", new Blob([new Uint8Array(buffer)]), safeName);
       form.append("path", target);
-      const upstream = await fetch(`http://127.0.0.1:${cfg.sandbox.hostPort}/v1/file/upload`, {
+      const upstream = await container.fetch("/v1/file/upload", {
         method: "POST",
         body: form,
         signal: AbortSignal.timeout(60_000),

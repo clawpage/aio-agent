@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
 import type { ChildProcess } from "node:child_process";
 import type { Config } from "../config.js";
-import type { Logger } from "../logger.js";
-import type { SandboxContainer } from "../docker/sandbox.js";
+import type { Logger } from "../../common/logger.js";
+import type { SandboxContainer } from "../sandbox/container.js";
 import { CLAUDE_CODE_PROVIDER_ID, CLAUDE_THREAD_PREFIX, type ClaudeCodeHarness } from "../claudeCode.js";
 import type { TurnAttachment } from "./manager.js";
 import { ClaudeStreamTranslator } from "./claudeTranslator.js";

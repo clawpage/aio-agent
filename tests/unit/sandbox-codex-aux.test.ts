@@ -5,8 +5,8 @@ import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
 import type { ChildProcess } from "node:child_process";
 import { SandboxCodexSession } from "../../src/control/codex/sandboxCodex.js";
-import { Logger } from "../../src/control/logger.js";
-import type { SandboxContainer } from "../../src/control/docker/sandbox.js";
+import { Logger } from "../../src/common/logger.js";
+import type { SandboxContainer } from "../../src/control/sandbox/container.js";
 import type { HostTokenSource } from "../../src/control/codex/hostTokens.js";
 import { testConfig } from "../helpers/harness.js";
 

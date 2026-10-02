@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { SandboxIdle } from "../../src/control/docker/idle.js";
+import { SandboxIdle } from "../../src/control/sandbox/idle.js";
 import { startRuntimeRecovery } from "../../src/control/index.js";
-import { Logger } from "../../src/control/logger.js";
+import { Logger } from "../../src/common/logger.js";
 import type { AppContext } from "../../src/control/context.js";
 
 const IDLE = 300_000;

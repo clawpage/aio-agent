@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
-import { SandboxContainer } from "../../src/control/docker/sandbox.js";
-import { CODEX_CONFIG_TOML, DOCUMENT_SKILL_DIR, DOCUMENT_SKILL_MD, SHARE_CLI_PY, SHARE_SKILL_MD, WORKSPACE_AGENTS_MD } from "../../src/control/docker/seed.js";
-import { Logger } from "../../src/control/logger.js";
-import { testConfig } from "../helpers/harness.js";
+import { SandboxContainer } from "../../src/control/sandbox/container.js";
+import { CODEX_CONFIG_TOML, DOCUMENT_SKILL_DIR, DOCUMENT_SKILL_MD, SHARE_CLI_PY, SHARE_SKILL_MD, WORKSPACE_AGENTS_MD } from "../../src/control/sandbox/seed.js";
+import { Logger } from "../../src/common/logger.js";
+import { testConfig, testNode } from "../helpers/harness.js";
 
 describe("sandbox workspace seed", () => {
   it("documents the project and scratch layout so artifacts do not land in the root", () => {
@@ -36,7 +36,7 @@ describe("sandbox workspace seed", () => {
 
   it("writes AGENTS.md and config.toml only when absent so customisations survive", async () => {
     const cfg = testConfig("/tmp/pa-seed-test", 1);
-    const container = new SandboxContainer(cfg, new Logger("error", undefined, false));
+    const container = new SandboxContainer(cfg, new Logger("error", undefined, false), testNode());
     const isolation = vi.spyOn(container, "enforceCodexIsolation").mockResolvedValue();
     const calls: Array<{ path: string; content: string; opts: unknown }> = [];
     container.writeFileInSandbox = (async (filePath: string, content: string, opts?: unknown) => {
@@ -57,7 +57,7 @@ describe("sandbox workspace seed", () => {
 
   it("writes the document skill into the controlled skills directory for existing sandboxes too", async () => {
     const cfg = testConfig("/tmp/pa-skill-test", 1);
-    const container = new SandboxContainer(cfg, new Logger("error", undefined, false));
+    const container = new SandboxContainer(cfg, new Logger("error", undefined, false), testNode());
     vi.spyOn(container, "enforceCodexIsolation").mockResolvedValue();
     const calls: Array<{ path: string; content: string; opts: unknown }> = [];
     container.writeFileInSandbox = (async (filePath: string, content: string, opts?: unknown) => {
@@ -88,7 +88,7 @@ describe("sandbox workspace seed", () => {
   it("gives both executors the share skill, the CLI and this runtime's token only when sharing is provisioned", async () => {
     const seed = async (share?: { endpoint: string; token: string }) => {
       const cfg = { ...testConfig("/tmp/pa-share-seed-test", 1), share };
-      const container = new SandboxContainer(cfg, new Logger("error", undefined, false));
+      const container = new SandboxContainer(cfg, new Logger("error", undefined, false), testNode());
       vi.spyOn(container, "enforceCodexIsolation").mockResolvedValue();
       const calls: Array<{ path: string; content: string }> = [];
       container.writeFileInSandbox = (async (filePath: string, content: string) => {
@@ -120,7 +120,7 @@ describe("sandbox workspace seed", () => {
     // A missing skill is a degradation, not a reason to leave the console
     // without a sandbox: AGENTS.md still names the document tools.
     const cfg = testConfig("/tmp/pa-skill-fail-test", 1);
-    const container = new SandboxContainer(cfg, new Logger("error", undefined, false));
+    const container = new SandboxContainer(cfg, new Logger("error", undefined, false), testNode());
     vi.spyOn(container, "enforceCodexIsolation").mockResolvedValue();
     const written: string[] = [];
     container.writeFileInSandbox = (async (filePath: string) => {
@@ -146,7 +146,7 @@ describe("sandbox workspace seed", () => {
   });
 
   it("fails startup when the managed isolation policy cannot be installed", async () => {
-    const container = new SandboxContainer(testConfig("/tmp/pa-policy-test", 1), new Logger("error", undefined, false));
+    const container = new SandboxContainer(testConfig("/tmp/pa-policy-test", 1), new Logger("error", undefined, false), testNode());
     vi.spyOn(container, "writeFileInSandbox").mockResolvedValue();
     vi.spyOn(container, "execInSandbox").mockResolvedValue({ code: 1, stdout: "", stderr: "Existing unmanaged Codex requirements; merge policy explicitly" });
     await expect(container.seedWorkspace()).rejects.toThrow("Cannot enforce sandbox Codex MCP isolation");

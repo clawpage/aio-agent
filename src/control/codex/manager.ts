@@ -4,7 +4,7 @@ import { EventEmitter } from "node:events";
 import type { Db } from "../db.js";
 import { getMeta, setMeta } from "../db.js";
 import type { Config } from "../config.js";
-import type { Logger } from "../logger.js";
+import type { Logger } from "../../common/logger.js";
 import type { CodexModel, SandboxAccount } from "./sandboxCodex.js";
 import type { HostTokenSource } from "./hostTokens.js";
 import { BridgeModel, CHATGPT_PROVIDER_ID } from "../bridgeModel.js";

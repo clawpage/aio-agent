@@ -5,7 +5,7 @@ import path from "node:path";
 import { openDb, type Db } from "../../src/control/db.js";
 import { SessionStore } from "../../src/control/auth/sessions.js";
 import { ensureOwner } from "../../src/control/auth/owner.js";
-import { Logger } from "../../src/control/logger.js";
+import { Logger } from "../../src/common/logger.js";
 import { TicketStore } from "../../src/control/auth/tickets.js";
 
 /**

@@ -4,8 +4,8 @@ import type http from "node:http";
 import { randomBytes } from "node:crypto";
 import { Readable } from "node:stream";
 import type { Config } from "./config.js";
-import type { Logger } from "./logger.js";
-import { expandHome, readSecretFile } from "./bridgeModel.js";
+import type { Logger } from "../common/logger.js";
+import { expandHome, readSecretFile } from "../common/secrets.js";
 
 /**
  * The knowledge base: an MCP server the owner runs on the host, offered to the

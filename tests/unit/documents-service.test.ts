@@ -4,8 +4,8 @@ import os from "node:os";
 import path from "node:path";
 import { DocumentError, DocumentService } from "../../src/control/documents/service.js";
 import { loadConfig, type Config } from "../../src/control/config.js";
-import { Logger } from "../../src/control/logger.js";
-import type { SandboxContainer, DockerRunResult } from "../../src/control/docker/sandbox.js";
+import { Logger } from "../../src/common/logger.js";
+import type { SandboxContainer, DockerRunResult } from "../../src/control/sandbox/container.js";
 
 const ROOT = "/home/gem/workspace";
 
@@ -36,6 +36,10 @@ class FakeContainer {
   }
   async writeFileInSandbox(target: string, content: string): Promise<void> {
     this.written.set(target, content);
+  }
+  /** The sandbox's web port; tests intercept the global fetch underneath. */
+  async fetch(pathname: string, init?: RequestInit): Promise<Response> {
+    return await fetch(`http://sandbox.test${pathname}`, init);
   }
 }
 

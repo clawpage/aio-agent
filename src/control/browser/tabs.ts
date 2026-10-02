@@ -2,8 +2,8 @@ import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import type { Config } from "../config.js";
-import type { Logger } from "../logger.js";
-import type { SandboxContainer } from "../docker/sandbox.js";
+import type { Logger } from "../../common/logger.js";
+import type { SandboxContainer } from "../sandbox/container.js";
 import { redact, type BrowserRuntime } from "./runtime.js";
 import type { BrowserRuntimeLike } from "./lifecycle.js";
 

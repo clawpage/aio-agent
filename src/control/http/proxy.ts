@@ -1,12 +1,15 @@
 import http from "node:http";
+import https from "node:https";
 import net from "node:net";
+import tls from "node:tls";
 import type { Duplex } from "node:stream";
 import type { Config } from "../config.js";
+import type { SandboxUpstream } from "../sandbox/node.js";
 import type { RequestContext } from "./security.js";
 import { originAllowed, UNSAFE_METHODS } from "./security.js";
 import { COOKIE_NAMES, parseCookies } from "../auth/sessions.js";
 import type { SessionStore } from "../auth/sessions.js";
-import type { Logger } from "../logger.js";
+import type { Logger } from "../../common/logger.js";
 import { isBrowserBoundPath, isStaticAssetPath } from "../browser/service.js";
 
 const CONTROL_COOKIES = new Set(Object.values(COOKIE_NAMES).flatMap((n) => [n.session, n.csrf]));
@@ -49,6 +52,8 @@ export interface ProxyDeps {
   cfg: Config;
   log: Logger;
   sessions: SessionStore;
+  /** The sandbox's web port, reached through its node. */
+  upstream: SandboxUpstream;
   /** Called on client bytes of a proxied socket (typing in a workspace tab); an open socket alone is not use. */
   activity?: () => void;
   /**
@@ -190,7 +195,8 @@ export function buildUpstreamHeaders(ctx: RequestContext, req: http.IncomingMess
     const lower = key.toLowerCase();
     if (HOP_BY_HOP.has(lower)) continue;
     if (STRIPPED_REQUEST_HEADERS.has(lower)) continue;
-    if (lower.startsWith("x-pa-")) continue;
+    // Control-plane and node headers are only ever set here, never taken from the client.
+    if (lower.startsWith("x-pa-") || lower.startsWith("x-aio-")) continue;
     headers[key] = value;
   }
   const cookie = filterUpstreamCookie(req.headers.cookie);
@@ -261,13 +267,13 @@ export function endSocket(socket: Duplex, response: string): void {
   socket.on("close", () => clearTimeout(timer));
 }
 
-function upstreamRequestLine(req: http.IncomingMessage, ctx: RequestContext): string[] {
+function upstreamRequestLine(req: http.IncomingMessage, ctx: RequestContext, upstream: SandboxUpstream): string[] {
   const lines: string[] = [`${req.method} ${req.url} HTTP/1.1`];
   for (const [key, value] of Object.entries(req.headers)) {
     if (value === undefined) continue;
     const lower = key.toLowerCase();
     if (STRIPPED_REQUEST_HEADERS.has(lower)) continue;
-    if (lower.startsWith("x-pa-")) continue;
+    if (lower.startsWith("x-pa-") || lower.startsWith("x-aio-")) continue;
     if (Array.isArray(value)) {
       for (const v of value) lines.push(`${key}: ${v}`);
     } else {
@@ -280,6 +286,7 @@ function upstreamRequestLine(req: http.IncomingMessage, ctx: RequestContext): st
   lines.push(`X-Forwarded-Host: ${ctx.host}`);
   lines.push(`X-Forwarded-Proto: ${ctx.secure ? "https" : "http"}`);
   lines.push(`X-Forwarded-For: ${ctx.ip}`);
+  for (const [key, value] of Object.entries(upstream.headers)) lines.push(`${key}: ${value}`);
   return lines;
 }
 
@@ -369,12 +376,13 @@ function proxyHttpUpstream(
 ): void {
   const { cfg, log } = deps;
 
-  const upstream = http.request({
-    host: "127.0.0.1",
-    port: cfg.sandbox.hostPort,
+  const node = deps.upstream;
+  const upstream = (node.url.protocol === "https:" ? https : http).request({
+    host: node.url.hostname,
+    port: nodePort(node.url),
     method: req.method,
     path: req.url,
-    headers: buildUpstreamHeaders(ctx, req),
+    headers: { ...buildUpstreamHeaders(ctx, req), ...node.headers },
   });
 
   // Bound connection + response-header latency only; streamed bodies stay unbounded.
@@ -490,7 +498,11 @@ export function handleProxyUpgrade(
       return;
     }
 
-    const upstreamSocket: net.Socket = net.connect(cfg.sandbox.hostPort, "127.0.0.1");
+    const node = deps.upstream;
+    const upstreamSocket: net.Socket =
+      node.url.protocol === "https:"
+        ? tls.connect({ host: node.url.hostname, port: nodePort(node.url), servername: node.url.hostname })
+        : net.connect(nodePort(node.url), node.url.hostname);
     upstream = upstreamSocket;
     let handshakeDone = false;
     const connectTimer = setTimeout(() => {
@@ -567,8 +579,8 @@ export function handleProxyUpgrade(
       if (deps.activity) clientSocket.on("data", deps.activity);
     };
 
-    upstreamSocket.on("connect", () => {
-      upstreamSocket.write(upstreamRequestLine(req, ctx).join("\r\n") + "\r\n\r\n");
+    upstreamSocket.on(node.url.protocol === "https:" ? "secureConnect" : "connect", () => {
+      upstreamSocket.write(upstreamRequestLine(req, ctx, node).join("\r\n") + "\r\n\r\n");
       if (head.length) upstreamSocket.write(head);
       upstreamSocket.on("data", onUpstreamData);
       // Client bytes that arrive before the handshake completes stay buffered by
@@ -588,4 +600,8 @@ export function handleProxyUpgrade(
     clientSocket.on("close", () => close("client-close"));
     upstreamSocket.on("close", () => close("upstream-close"));
   })();
+}
+
+function nodePort(url: URL): number {
+  return Number(url.port) || (url.protocol === "https:" ? 443 : 80);
 }

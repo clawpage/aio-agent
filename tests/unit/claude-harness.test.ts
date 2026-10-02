@@ -11,9 +11,9 @@ import { HarnessSession } from "../../src/control/codex/harnessSession.js";
 import { JsonRpcResponseError } from "../../src/control/codex/jsonrpc.js";
 import { AgentManager } from "../../src/control/codex/manager.js";
 import type { HostTokenSource } from "../../src/control/codex/hostTokens.js";
-import type { SandboxContainer } from "../../src/control/docker/sandbox.js";
+import type { SandboxContainer } from "../../src/control/sandbox/container.js";
 import { openDb, type Db } from "../../src/control/db.js";
-import { Logger } from "../../src/control/logger.js";
+import { Logger } from "../../src/common/logger.js";
 import { FakeCodex, testConfig } from "../helpers/harness.js";
 
 const SECRET = "sk-ant-oat-test-secret-0003";

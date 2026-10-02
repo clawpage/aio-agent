@@ -1,5 +1,6 @@
 import WebSocket from "ws";
 import type { Db } from "./db.js";
+import type { SandboxUpstream } from "./sandbox/node.js";
 
 /** Session ids the sandbox hands out (UUIDs); anything else never reaches a URL. */
 export const TERMINAL_ID = /^[a-zA-Z0-9_-]{1,160}$/;
@@ -68,11 +69,11 @@ class TerminalBusy extends Error {}
  * Resolves "gone" when the sandbox no longer has it; rejects when it could not
  * be reached, so the caller never reports a close that did not happen.
  */
-export async function exitTerminal(port: number, id: string, opts: { attempts?: number; retryMs?: number; timeoutMs?: number } = {}): Promise<"exited" | "gone"> {
+export async function exitTerminal(upstream: SandboxUpstream, id: string, opts: { attempts?: number; retryMs?: number; timeoutMs?: number } = {}): Promise<"exited" | "gone"> {
   const attempts = opts.attempts ?? 6;
   for (let attempt = 1; ; attempt += 1) {
     try {
-      return await exitOnce(port, id, opts.timeoutMs ?? 8000);
+      return await exitOnce(upstream, id, opts.timeoutMs ?? 8000);
     } catch (err) {
       if (!(err instanceof TerminalBusy) || attempt >= attempts) throw err;
       await new Promise((resolve) => setTimeout(resolve, opts.retryMs ?? 600));
@@ -80,9 +81,11 @@ export async function exitTerminal(port: number, id: string, opts: { attempts?: 
   }
 }
 
-function exitOnce(port: number, id: string, timeoutMs: number): Promise<"exited" | "gone"> {
+function exitOnce(upstream: SandboxUpstream, id: string, timeoutMs: number): Promise<"exited" | "gone"> {
   return new Promise((resolve, reject) => {
-    const ws = new WebSocket(`ws://127.0.0.1:${port}/v1/shell/ws?session_id=${encodeURIComponent(id)}`);
+    const url = new URL(`v1/shell/ws?session_id=${encodeURIComponent(id)}`, upstream.url);
+    url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+    const ws = new WebSocket(url, { headers: upstream.headers });
     let settled = false;
     const finish = (err: Error | null, outcome?: "exited" | "gone") => {
       if (settled) return;

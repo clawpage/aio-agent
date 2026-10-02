@@ -7,6 +7,7 @@ import {startTaskNotifications} from './push.js';
 import type {MemberModelGateway} from './memberModelGateway.js';
 import {getUser} from './auth/owner.js';
 import {MEMBER_MODEL,MEMBER_MODELS} from './auth/policy.js';
+import type {SandboxNodes} from './sandbox/nodes.js';
 
 /** A stable opaque namespace: no user-controlled paths, names, ports or upstreams. */
 export function memberConfig(base: Config, userId: string, port: number, model: string = MEMBER_MODEL): Config {
@@ -33,7 +34,7 @@ export function memberConfig(base: Config, userId: string, port: number, model: 
 export class UserRuntimes {
   private entries=new Map<string,Promise<Bootstrapped>>();
   private recoveries: Array<{stop():void}>=[];
-  constructor(private root: AppContext, private factory=bootstrap, private gateway?:MemberModelGateway) {}
+  constructor(private root: AppContext, private factory=bootstrap, private gateway?:MemberModelGateway, private nodes?:SandboxNodes) {}
   async resolve(id:string):Promise<AppContext> {
     const user=getUser(this.root.db,id);
     if(!user) throw new Error('Unknown account');
@@ -62,7 +63,9 @@ export class UserRuntimes {
     const config=memberConfig(this.root.cfg,user.id,port,assigned?.value??MEMBER_MODEL);
     if(config.sandbox.autostart&&!this.gateway)throw new Error("Member gateway unavailable");
     this.gateway?.provision(config);
-    const runtime=await this.factory({config,skipOwner:true,identity:user,deferAgentInit:true});
+    // A member keeps the node its sandbox was created on; a new one goes where there is room.
+    const node=this.nodes&&config.sandbox.autostart?await this.nodes.assign(this.root.db,user.id,Boolean(row)):undefined;
+    const runtime=await this.factory({config,skipOwner:true,identity:user,deferAgentInit:true,...(node?{node}:{})});
     // Authentication remains central; all agent/files/browser collaborators and
     // their state stores belong exclusively to the member runtime.
     runtime.ctx.sessions=this.root.sessions;

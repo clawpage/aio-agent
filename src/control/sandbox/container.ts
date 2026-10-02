@@ -1,10 +1,12 @@
-import { execFile, spawn, type ChildProcess } from "node:child_process";
+import type { ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
 import path from "node:path";
 import { TAB_TOOL_TIMEOUT_SEC } from "../browser/tabs.js";
 import { setTimeout as delay } from "node:timers/promises";
 import type { Config } from "../config.js";
-import type { Logger } from "../logger.js";
+import type { Logger } from "../../common/logger.js";
+import type { ContainerState, ExecRequest, ExecResult, SandboxSpec } from "../../common/protocol.js";
+import type { SandboxNode, SandboxUpstream } from "./node.js";
 import { NOVNC_HTML_PATH, NOVNC_RFB_PATH, NOVNC_UI_PATH, patchNoVncHtml, patchNoVncRfb, patchNoVncUi } from "./novncPatch.js";
 import {
   CODEX_CONFIG_TOML,
@@ -21,21 +23,9 @@ import {
   WORKSPACE_AGENTS_MD,
 } from "./seed.js";
 
-export interface ContainerState {
-  exists: boolean;
-  running: boolean;
-  healthy: boolean;
-  image: string | null;
-  startedAt: string | null;
-  managedLabel: string | null;
-  mounts: Array<{ name: string; source: string; destination: string; type: string }>;
-}
-
-export interface DockerRunResult {
-  code: number;
-  stdout: string;
-  stderr: string;
-}
+export type { ContainerState };
+/** One finished command inside the sandbox. */
+export type DockerRunResult = ExecResult;
 
 /**
  * Version reported by `<codexBin> --version`, e.g. `codex-cli 0.156.1`.
@@ -51,389 +41,73 @@ export function parseCodexVersion(output: string): string | null {
 }
 
 /**
- * Owns exactly one named sandbox container. Every Docker invocation uses a fixed
- * argument list (never a shell), so no caller can smuggle extra flags or paths.
+ * One account's sandbox container, as the control plane sees it. The container
+ * itself lives on a sandbox node (sandboxd), which owns Docker there; this class
+ * turns the control plane's needs into the node's fixed operations and keeps
+ * everything that is about the agent runtime (CLIs, skills, policies, browser
+ * set-up) on this side.
  */
 export class SandboxContainer {
   #cfg: Config;
   #log: Logger;
-  #peerPolicy:Promise<void>=Promise.resolve();
+  #node: SandboxNode;
 
-  constructor(cfg: Config, log: Logger) {
+  constructor(cfg: Config, log: Logger, node: SandboxNode) {
     this.#cfg = cfg;
     this.#log = log;
+    this.#node = node;
   }
 
   get name(): string {
     return this.#cfg.sandbox.containerName;
   }
 
-  get baseUrl(): string {
-    return `http://127.0.0.1:${this.#cfg.sandbox.hostPort}`;
+  /** The node this sandbox lives on. */
+  get node(): SandboxNode {
+    return this.#node;
   }
 
-  async docker(args: string[], opts: { timeoutMs?: number; stdin?: string } = {}): Promise<DockerRunResult> {
-    return await new Promise((resolve, reject) => {
-      const child = execFile(
-        "docker",
-        args,
-        { timeout: opts.timeoutMs ?? 60_000, maxBuffer: 32 * 1024 * 1024 },
-        (err, stdout, stderr) => {
-          if (err && (err as NodeJS.ErrnoException).code === "ENOENT") {
-            reject(new Error("docker CLI not found on PATH"));
-            return;
-          }
-          const code = err && typeof (err as { code?: unknown }).code === "number" ? (err as { code: number }).code : err ? 1 : 0;
-          resolve({ code, stdout: String(stdout ?? ""), stderr: String(stderr ?? "") });
-        },
-      );
-      // `-i` is always passed to docker exec, so stdin must always be closed:
-      // an open pipe would let a command that reads stdin wait forever. `stdin`
-      // itself is only ever control-plane content - this is how a
-      // control-plane-owned script reaches a root shell without being written to
-      // a sandbox-writable path.
-      child.stdin?.on("error", () => undefined);
-      child.stdin?.end(opts.stdin ?? "");
-    });
-  }
-
-  async inspect(): Promise<ContainerState> {
-    const res = await this.docker(
-      [
-        "inspect",
-        "--format",
-        '{{json .State}}|{{.Config.Image}}|{{index .Config.Labels "personal-agent.managed"}}|{{json .Mounts}}',
-        this.name,
-      ],
-      { timeoutMs: 15_000 },
-    );
-    if (res.code !== 0 || !res.stdout.trim()) {
-      return { exists: false, running: false, healthy: false, image: null, startedAt: null, managedLabel: null, mounts: [] };
-    }
-    const [stateJson, image, managedLabel, mountsJson] = res.stdout.trim().split("|");
-    let state: { Status?: string; Health?: { Status?: string }; StartedAt?: string } = {};
-    let mounts: Array<{ Name?: string; Source?: string; Destination?: string; Type?: string }> = [];
-    try {
-      state = JSON.parse(stateJson);
-    } catch {
-      /* ignore malformed inspect output */
-    }
-    try {
-      mounts = JSON.parse(mountsJson ?? "[]");
-    } catch {
-      /* ignore malformed mount output */
-    }
+  /** What the node needs to create or adopt this container. */
+  spec(): SandboxSpec {
+    const s = this.#cfg.sandbox;
+    const member = this.#cfg.memberRuntime && s.networkName ? { networkName: s.networkName, gatewayPort: this.#cfg.memberModelPort ?? 4902 } : undefined;
     return {
-      exists: true,
-      running: state.Status === "running",
-      healthy: state.Health?.Status === "healthy" || (state.Status === "running" && !state.Health),
-      image: image ?? null,
-      startedAt: state.StartedAt ?? null,
-      managedLabel: managedLabel ?? null,
-      mounts: mounts.map((m) => ({
-        name: m.Name ?? "",
-        source: m.Source ?? "",
-        destination: m.Destination ?? "",
-        type: m.Type ?? "",
-      })),
+      name: this.name,
+      image: s.image,
+      hostPort: s.hostPort,
+      workspaceVolume: s.workspaceVolume,
+      codexVolume: s.codexVolume,
+      browserVolume: s.browserVolume,
+      containerWorkspaceDir: s.containerWorkspaceDir,
+      containerCodexHome: s.containerCodexHome,
+      containerUser: s.containerUser,
+      extraEnv: s.extraEnv,
+      ...(member ? { member } : this.#cfg.protectedMemberPorts?.length ? { peerPorts: this.#cfg.protectedMemberPorts } : {}),
     };
   }
 
-  /**
-   * Refuse to reuse a container that merely shares our name. Only a container we
-   * created (ownership label), from the pinned image, with the expected volume
-   * mounts is accepted; anything else is an operator-visible error.
-   */
-  assertOwned(state: ContainerState): void {
-    if (!state.exists) return;
-    const s = this.#cfg.sandbox;
-    if (state.managedLabel !== "1") {
-      throw new Error(
-        `容器名 ${this.name} 已被非本系统创建的容器占用（缺少 personal-agent.managed=1 标签）。请先人工确认并重命名或移除该容器。`,
-      );
-    }
-    if (state.image && state.image !== s.image) {
-      throw new Error(`容器 ${this.name} 使用的镜像 ${state.image} 与固定镜像 ${s.image} 不一致，已停止自动接管。`);
-    }
-    const expected: Array<[string, string]> = [
-      [s.workspaceVolume, s.containerWorkspaceDir],
-      [s.codexVolume, s.containerCodexHome],
-      [s.browserVolume, "/home/gem/.config/browser"],
-    ];
-    for (const [volume, destination] of expected) {
-      // Docker Desktop reports the bind source as an internal /var/lib/docker path,
-      // so match on the volume name as well as the source path.
-      const found = state.mounts.some(
-        (m) => m.destination === destination && (m.name === volume || m.source.endsWith(volume) || m.source.includes(`${volume}/`)),
-      );
-      if (!found) {
-        throw new Error(`容器 ${this.name} 缺少持久卷挂载 ${volume} -> ${destination}，为避免数据丢失已停止接管。`);
-      }
-    }
-  }
-
-  async ensureVolumes(): Promise<void> {
-    const { workspaceVolume, codexVolume, browserVolume } = this.#cfg.sandbox;
-    for (const vol of [workspaceVolume, codexVolume, browserVolume]) {
-      const res = await this.docker(["volume", "create", vol], { timeoutMs: 20_000 });
-      if (res.code !== 0) throw new Error(`failed to create volume ${vol}: ${res.stderr.trim()}`);
-    }
+  async inspect(): Promise<ContainerState> {
+    return await this.#node.inspect(this.name);
   }
 
   async ensureRunning(): Promise<ContainerState> {
-    const state = await this.inspect();
-    this.assertOwned(state);
-    if (!state.exists) {
-      await this.create();
-    } else if (!state.running) {
-      const res = await this.docker(["start", this.name], { timeoutMs: 60_000 });
-      if (res.code !== 0) throw new Error(`failed to start sandbox: ${res.stderr.trim()}`);
-    }
-    // Order matters: the image entrypoint creates the `gem` user during startup,
-    // so health + user availability must be confirmed before any `docker exec -u gem`.
-    await this.waitReady();
-    await this.waitUserReady();
-    if(this.#cfg.memberRuntime) await this.isolateNetwork();
-    else if(this.#cfg.protectedMemberPorts?.length)await this.protectMemberPorts(this.#cfg.protectedMemberPorts);
-    await this.#fixOwnership();
+    // The node creates or starts the container, waits for it, isolates its network
+    // and fixes ownership; the agent runtime inside is provisioned from here.
+    await this.#node.ensure(this.name, { spec: this.spec(), readyTimeoutMs: this.#cfg.sandbox.readyTimeoutMs });
     await this.ensureCodexCli();
     await this.seedWorkspace();
-    await this.ensurePrograms();
     await this.waitSurfaces();
     return await this.inspect();
   }
 
-  /** Apply policy from a trusted read-only helper, never elevate code inside an agent-writable container. */
-  async isolateNetwork():Promise<void> {
-    const image="aio-agent-network-guard:1";
-    const exists=await this.docker(["image","inspect",image,"--format","{{ index .Config.Labels \"aio.network-guard\" }}"]);
-    if(exists.code!==0){
-      const build=await this.docker(["build","-t",image,"-"],{stdin:`FROM ${this.#cfg.sandbox.image}\nUSER root\nRUN apt-get update -qq && apt-get install -y -qq iptables && rm -rf /var/lib/apt/lists/*\nLABEL aio.network-guard="1"\nENTRYPOINT ["/bin/sh"]\n`,timeoutMs:180_000});
-      if(build.code!==0)throw new Error("Unable to build trusted network guard");
-    }else if(exists.stdout.trim()!=="1")throw new Error("Network guard image ownership mismatch");
-    const port=this.#cfg.memberModelPort??4902;
-    const script=`set -eu
-for family in 4 6; do
-  if [ "$family" = 4 ]; then
-    restore=iptables-restore
-    private="0.0.0.0/8 10.0.0.0/8 100.64.0.0/10 127.0.0.0/8 169.254.0.0/16 172.16.0.0/12 192.0.0.0/24 192.168.0.0/16 198.18.0.0/15 224.0.0.0/4 240.0.0.0/4"
-  else
-    restore=ip6tables-restore
-    private="::/128 ::1/128 fc00::/7 fe80::/10 ff00::/8"
-  fi
-  {
-    echo '*filter'
-    echo ':INPUT ACCEPT [0:0]'
-    echo ':FORWARD DROP [0:0]'
-    echo ':OUTPUT ACCEPT [0:0]'
-    echo ':AIO_MEMBER - [0:0]'
-    echo '-A OUTPUT -j AIO_MEMBER'
-    echo '-A AIO_MEMBER -o lo -j ACCEPT'
-    echo '-A AIO_MEMBER -m conntrack --ctdir REPLY --ctstate ESTABLISHED,RELATED -j ACCEPT'
-    if [ "$family" = 4 ]; then
-      for ip in $(getent ahostsv4 host.docker.internal | awk '{print $1}' | sort -u); do
-        echo "-A AIO_MEMBER -d $ip -p tcp --dport ${port} -j ACCEPT"
-      done
-    fi
-    for ip in $private; do echo "-A AIO_MEMBER -d $ip -j REJECT"; done
-    echo COMMIT
-  } | $restore
-done
-`;
-    const applied=await this.docker(["run","--rm","-i","--network",`container:${this.name}`,"--read-only","--user","0","--cap-drop","ALL","--cap-add","NET_ADMIN","--security-opt","no-new-privileges",image],{stdin:script,timeoutMs:60_000});
-    if(applied.code!==0)throw new Error("Unable to enforce member network isolation");
-  }
-
-  /** Prevent owner tools accidentally reaching member APIs through Docker Desktop host forwarding. */
+  /** Prevent the owner's tools reaching member APIs through Docker Desktop host forwarding. */
   protectMemberPorts(ports:number[]):Promise<void>{
     if(ports.some(p=>!Number.isInteger(p)||p<1||p>65535))return Promise.reject(new Error("Invalid peer port"));
     this.#cfg.protectedMemberPorts=[...new Set([...(this.#cfg.protectedMemberPorts??[]),...ports])];
-    const next=this.#peerPolicy.catch(()=>{}).then(()=>this.#applyPeerPorts(this.#cfg.protectedMemberPorts!));
-    this.#peerPolicy=next;return next;
-  }
-  async #applyPeerPorts(ports:number[]):Promise<void>{
-    if(ports.some(p=>!Number.isInteger(p)||p<1||p>65535))throw new Error("Invalid peer port");
-    this.#cfg.protectedMemberPorts=[...ports];
-    const script=`set -eu
-chain=AIO_PEERS_${Math.random().toString(16).slice(2,14)}
-iptables -N "$chain"
-for ip in 10.0.0.0/8 100.64.0.0/10 169.254.0.0/16 172.16.0.0/12 192.168.0.0/16; do
-  for port in ${ports.join(' ')}; do iptables -A "$chain" -d "$ip" -p tcp --dport "$port" -j REJECT; done
-done
-iptables -I OUTPUT 1 -j "$chain"
-for old in $(iptables -S OUTPUT | awk '$1=="-A" && $3=="-j" && $4 ~ /^AIO_PEERS_/ {print $4}'); do
-  if [ "$old" != "$chain" ]; then iptables -D OUTPUT -j "$old"; iptables -F "$old"; iptables -X "$old"; fi
-done
-# IPv6 host.docker.internal is another route to the same published ports.
-chain6=AIO_PEERS_${Math.random().toString(16).slice(2,14)}
-ip6tables -N "$chain6"
-for port in ${ports.join(' ')}; do ip6tables -A "$chain6" -d fc00::/7 -p tcp --dport "$port" -j REJECT; done
-ip6tables -I OUTPUT 1 -j "$chain6"
-for old in $(ip6tables -S OUTPUT | awk '$1=="-A" && $3=="-j" && $4 ~ /^AIO_PEERS_/ {print $4}'); do
-  if [ "$old" != "$chain6" ]; then ip6tables -D OUTPUT -j "$old"; ip6tables -F "$old"; ip6tables -X "$old"; fi
-done
-`;
-    const applied=await this.docker(["run","--rm","-i","--network",`container:${this.name}`,"--read-only","--user","0","--cap-drop","ALL","--cap-add","NET_ADMIN","--security-opt","no-new-privileges","aio-agent-network-guard:1"],{stdin:script});
-    if(applied.code!==0)throw new Error("Unable to restrict cross-account sandbox ports");
+    return this.#node.peerPorts(this.name,this.#cfg.protectedMemberPorts);
   }
 
-  /** Wait until the sandbox user exists inside the container. */
-  async waitUserReady(timeoutMs = 60_000): Promise<void> {
-    const user = this.#cfg.sandbox.containerUser;
-    const deadline = Date.now() + timeoutMs;
-    let last = "";
-    while (Date.now() < deadline) {
-      const res = await this.docker(["exec", "-u", user, this.name, "id", "-u", user], { timeoutMs: 15_000 });
-      if (res.code === 0) return;
-      last = res.stderr.trim();
-      await delay(1000);
-    }
-    throw new Error(`sandbox user ${user} not ready after ${Math.round(timeoutMs / 1000)}s: ${last}`);
-  }
-
-  async create(): Promise<void> {
-    const s = this.#cfg.sandbox;
-    await this.ensureVolumes();
-    // A fresh named volume is root-owned, and the image starts Chromium at boot, long
-    // before #fixOwnership runs; the browser then dies on EACCES with no snapshot to
-    // restore. Hand the mount root to the sandbox user before the first boot.
-    const owned = await this.docker(["run", "--rm", "--network", "none", "--user", "0", "--entrypoint", "chown", "-v", `${s.browserVolume}:/v`, s.image, "1000:1000", "/v"], { timeoutMs: 60_000 });
-    if (owned.code !== 0) throw new Error(`failed to prepare browser volume: ${owned.stderr.trim()}`);
-    if (s.networkName) {
-      const found = await this.docker(["network", "inspect", s.networkName]);
-      if (found.code !== 0) {
-        const created = await this.docker(["network", "create", "--label", "personal-agent.managed=1", "--opt", "com.docker.network.bridge.enable_icc=false", s.networkName]);
-        if (created.code !== 0) throw new Error("Unable to create isolated sandbox network");
-      }
-    }
-    const args = [
-      "run",
-      "-d",
-      "--name",
-      this.name,
-      "--restart",
-      "unless-stopped",
-      // Every sandbox, the owner's included, is capped at 2 GB; members are also limited in CPU and processes.
-      "--memory", "2g",
-      ...(s.networkName ? ["--network", s.networkName,"--cap-drop","NET_RAW","--cpus","2","--pids-limit","1024"] : []),
-      "--label",
-      "personal-agent.managed=1",
-      "-p",
-      `127.0.0.1:${s.hostPort}:8080`,
-      "-v",
-      `${s.workspaceVolume}:${s.containerWorkspaceDir}`,
-      "-v",
-      `${s.codexVolume}:${s.containerCodexHome}`,
-      "-v",
-      `${s.browserVolume}:/home/gem/.config/browser`,
-      "-e",
-      `WORKSPACE=${s.containerWorkspaceDir}`,
-      ...s.extraEnv.flatMap((e) => ["-e", e]),
-      s.image,
-    ];
-    this.#log.info("creating sandbox container", { name: this.name, image: s.image, hostPort: s.hostPort });
-    const res = await this.docker(args, { timeoutMs: 180_000 });
-    if (res.code !== 0) throw new Error(`failed to create sandbox: ${res.stderr.trim()}`);
-  }
-
-  /**
-   * Directories the sandbox user must own. Mounting a named volume below
-   * ~/.config makes Docker create the parent as root, which used to break
-   * code-server (EACCES mkdir '~/.config/code-server'), so the parent itself is
-   * included — not just the mounted child.
-   */
-  static readonly FIXED_OWNERSHIP_DIRS = [
-    "/home/gem/workspace",
-    "/home/gem/.codex",
-    "/home/gem/.config",
-    "/home/gem/.config/browser",
-    "/home/gem/.config/code-server",
-    "/home/gem/.local/share/code-server",
-    "/home/gem/.local/share/jupyter",
-    "/home/gem/.jupyter",
-  ];
-
-  async #fixOwnership(): Promise<void> {
-    const dirs = SandboxContainer.FIXED_OWNERSHIP_DIRS;
-    const script = `${dirs.map((d) => `mkdir -p ${d}`).join(" && ")} && chown -R 1000:1000 ${dirs.join(" ")}`;
-    const res = await this.docker(["exec", "-u", "root", this.name, "bash", "-lc", script], { timeoutMs: 90_000 });
-    if (res.code !== 0) {
-      throw new Error(`failed to prepare sandbox ownership: ${res.stderr.trim() || res.stdout.trim()}`);
-    }
-  }
-
-  /**
-   * Ensure the pinned Codex CLI exists in the persistent volume.
-   *
-   * The AIO image keeps its own (older) Codex on PATH; the agent must run the
-   * versioned binary in the personal-agent-codex volume instead. If it is
-   * missing (fresh volume, container rebuild) or has the wrong version it is
-   * installed once from npm. Failure is raised, never silently downgraded: a
-   * stale binary would make the configured default model unusable.
-   */
-  async ensureCodexCli(): Promise<{ version: string; installed: boolean }> {
-    const s = this.#cfg.sandbox;
-    const probe = await this.docker(["exec", "-u", s.containerUser, this.name, s.codexBin, "--version"], { timeoutMs: 30_000 });
-    const found = parseCodexVersion(probe.stdout);
-    if (probe.code === 0 && found === s.codexVersion) return { version: found, installed: false };
-
-    this.#log.warn("installing pinned sandbox codex cli", {
-      wanted: s.codexVersion,
-      found: found ?? (probe.stdout.trim() || probe.stderr.trim()),
-      prefix: s.codexPrefix,
-    });
-    const install = await this.docker(
-      [
-        "exec",
-        "-u",
-        s.containerUser,
-        this.name,
-        "npm",
-        "install",
-        "--prefix",
-        s.codexPrefix,
-        "--no-audit",
-        "--no-fund",
-        `@openai/codex@${s.codexVersion}`,
-      ],
-      { timeoutMs: 600_000 },
-    );
-    if (install.code !== 0) {
-      throw new Error(
-        `沙箱 Codex CLI 安装失败（需要 @openai/codex@${s.codexVersion}）：${install.stderr.trim() || install.stdout.trim()}`,
-      );
-    }
-    const verify = await this.docker(["exec", "-u", s.containerUser, this.name, s.codexBin, "--version"], { timeoutMs: 30_000 });
-    const installed = parseCodexVersion(verify.stdout);
-    if (verify.code !== 0 || installed !== s.codexVersion) {
-      throw new Error(
-        `沙箱 Codex CLI 安装后校验失败：期望 ${s.codexVersion}，实际 ${installed ?? (verify.stdout.trim() || verify.stderr.trim())}`,
-      );
-    }
-    return { version: s.codexVersion, installed: true };
-  }
-
-  /**
-   * Make sure the in-container supervisord programs we depend on are running.
-   * Only the named programs are touched — never the whole supervisor.
-   */
-  async ensurePrograms(programs = ["code-server"]): Promise<Record<string, string>> {
-    const statuses: Record<string, string> = {};
-    for (const program of programs) {
-      const res = await this.docker(["exec", "-u", "root", this.name, "supervisorctl", "status", program], {
-        timeoutMs: 20_000,
-      });
-      const line = (res.stdout.trim() || res.stderr.trim()).split("\n")[0] ?? "";
-      statuses[program] = line;
-      if (/FATAL|STOPPED|EXITED|BACKOFF|STARTING/.test(line)) {
-        this.#log.warn("starting sandbox program", { program, status: line });
-        await this.docker(["exec", "-u", "root", this.name, "supervisorctl", "start", program], { timeoutMs: 30_000 });
-      }
-    }
-    return statuses;
-  }
-
-  /** Reachability of the sandbox's own web surfaces, probed through the published port. */
+  /** Reachability of the sandbox's own web surfaces, probed through the node. */
   async surfaces(): Promise<Record<string, boolean>> {
     const targets: Record<string, string> = {
       terminal: "/terminal",
@@ -446,7 +120,8 @@ done
     await Promise.all(
       Object.entries(targets).map(async ([name, path]) => {
         try {
-          const res = await fetch(`${this.baseUrl}${path}`, { redirect: "manual", signal: AbortSignal.timeout(6000) });
+          const res = await this.fetch(path, { redirect: "manual", signal: AbortSignal.timeout(6000) });
+          await res.body?.cancel();
           out[name] = res.status < 500;
         } catch {
           out[name] = false;
@@ -472,25 +147,10 @@ done
     }
   }
 
-  async waitReady(timeoutMs = this.#cfg.sandbox.readyTimeoutMs): Promise<void> {
-    const deadline = Date.now() + timeoutMs;
-    let lastError = "";
-    while (Date.now() < deadline) {
-      try {
-        const res = await fetch(`${this.baseUrl}/health`, { signal: AbortSignal.timeout(5000) });
-        if (res.ok) return;
-        lastError = `health ${res.status}`;
-      } catch (err) {
-        lastError = String(err);
-      }
-      await delay(2000);
-    }
-    throw new Error(`sandbox not ready after ${Math.round(timeoutMs / 1000)}s: ${lastError}`);
-  }
-
   async isReady(): Promise<boolean> {
     try {
-      const res = await fetch(`${this.baseUrl}/health`, { signal: AbortSignal.timeout(4000) });
+      const res = await this.fetch("/health", { signal: AbortSignal.timeout(4000) });
+      await res.body?.cancel();
       return res.ok;
     } catch {
       return false;
@@ -505,19 +165,27 @@ done
    * of many short processes still shows.
    */
   async cpuPercent(seconds = 10): Promise<number | null> {
-    const res = await this.docker(["exec", "-i", this.name, "python3", "-"], { stdin: workCpuScript(seconds), timeoutMs: (seconds + 20) * 1000 });
-    const value = Number(res.stdout.trim());
-    return res.code === 0 && res.stdout.trim() !== "" && Number.isFinite(value) ? value : null;
+    const res = await this.execInSandbox(["python3", "-"], { user: "root", stdin: workCpuScript(seconds), timeoutMs: (seconds + 20) * 1000 }).catch(() => null);
+    const value = Number(res?.stdout.trim());
+    return res?.code === 0 && res.stdout.trim() !== "" && Number.isFinite(value) ? value : null;
   }
 
   async stop(): Promise<void> {
-    await this.docker(["stop", "--time", "20", this.name], { timeoutMs: 60_000 });
+    await this.#node.stop(this.name);
   }
 
   async restart(): Promise<ContainerState> {
-    await this.docker(["restart", "--time", "20", this.name], { timeoutMs: 180_000 });
-    await this.waitReady();
-    return await this.inspect();
+    return await this.#node.restart(this.name, this.#cfg.sandbox.readyTimeoutMs);
+  }
+
+  /** `fetch` against the sandbox's web port (its AIO API and surfaces). */
+  async fetch(pathname: string, init: RequestInit = {}): Promise<Response> {
+    return await this.#node.fetch(this.name, pathname, init);
+  }
+
+  /** Where raw HTTP/WebSocket proxying of this sandbox's web port goes. */
+  upstream(): SandboxUpstream {
+    return this.#node.upstream(this.name);
   }
 
   /** Write a file inside the sandbox by streaming content to stdin (content is never shell-interpolated). */
@@ -527,21 +195,44 @@ done
     opts: { user?: string; onlyIfAbsent?: boolean } = {},
   ): Promise<void> {
     const script = opts.onlyIfAbsent ? '[ -f "$1" ] || cat > "$1"' : 'cat > "$1"';
-    await new Promise<void>((resolve, reject) => {
-      const child = spawn(
-        "docker",
-        ["exec", "-i", "-u", opts.user ?? this.#cfg.sandbox.containerUser, this.name, "bash", "-lc", script, "write-file", filePath],
-        { stdio: ["pipe", "pipe", "pipe"] },
-      );
-      let stderr = "";
-      child.stderr?.on("data", (d) => (stderr += d.toString()));
-      child.on("error", reject);
-      child.on("close", (code) =>
-        code === 0 ? resolve() : reject(new Error(`failed to write ${filePath}: ${stderr.trim()}`)),
-      );
-      child.stdin?.on("error", () => undefined);
-      child.stdin?.end(content);
+    const res = await this.execInSandbox(["bash", "-lc", script, "write-file", filePath], { user: opts.user, stdin: content, timeoutMs: 120_000 });
+    if (res.code !== 0) throw new Error(`failed to write ${filePath}: ${res.stderr.trim()}`);
+  }
+
+  /**
+   * Ensure the pinned Codex CLI exists in the persistent volume.
+   *
+   * The AIO image keeps its own (older) Codex on PATH; the agent must run the
+   * versioned binary in the personal-agent-codex volume instead. If it is
+   * missing (fresh volume, container rebuild) or has the wrong version it is
+   * installed once from npm. Failure is raised, never silently downgraded: a
+   * stale binary would make the configured default model unusable.
+   */
+  async ensureCodexCli(): Promise<{ version: string; installed: boolean }> {
+    const s = this.#cfg.sandbox;
+    const probe = await this.execInSandbox([s.codexBin, "--version"], { timeoutMs: 30_000 });
+    const found = parseCodexVersion(probe.stdout);
+    if (probe.code === 0 && found === s.codexVersion) return { version: found, installed: false };
+
+    this.#log.warn("installing pinned sandbox codex cli", {
+      wanted: s.codexVersion,
+      found: found ?? (probe.stdout.trim() || probe.stderr.trim()),
+      prefix: s.codexPrefix,
     });
+    const install = await this.execInSandbox(["npm", "install", "--prefix", s.codexPrefix, "--no-audit", "--no-fund", `@openai/codex@${s.codexVersion}`], { timeoutMs: 600_000 });
+    if (install.code !== 0) {
+      throw new Error(
+        `沙箱 Codex CLI 安装失败（需要 @openai/codex@${s.codexVersion}）：${install.stderr.trim() || install.stdout.trim()}`,
+      );
+    }
+    const verify = await this.execInSandbox([s.codexBin, "--version"], { timeoutMs: 30_000 });
+    const installed = parseCodexVersion(verify.stdout);
+    if (verify.code !== 0 || installed !== s.codexVersion) {
+      throw new Error(
+        `沙箱 Codex CLI 安装后校验失败：期望 ${s.codexVersion}，实际 ${installed ?? (verify.stdout.trim() || verify.stderr.trim())}`,
+      );
+    }
+    return { version: s.codexVersion, installed: true };
   }
 
   /**
@@ -632,27 +323,10 @@ finally:
    */
   spawnCodexAppServer(extraConfig: string[] = [], secretEnv: Record<string, string> = {}): ChildProcess {
     const s = this.#cfg.sandbox;
-    const envFlags = Object.keys(secretEnv).flatMap((name) => ["-e", name]);
-    return spawn(
-      "docker",
-      [
-        "exec",
-        "-i",
-        "-u",
-        s.containerUser,
-        ...envFlags,
-        this.name,
-        "env",
-        `CODEX_HOME=${s.containerCodexHome}`,
-        s.codexBin,
-        "app-server",
-        "--listen",
-        "stdio://",
-        ...extraConfig,
-        ...CODEX_ISOLATION_OVERRIDES,
-      ],
-      { stdio: ["pipe", "pipe", "pipe"], env: { ...process.env, ...secretEnv } },
-    );
+    return this.spawnInSandbox({
+      argv: ["env", `CODEX_HOME=${s.containerCodexHome}`, s.codexBin, "app-server", "--listen", "stdio://", ...extraConfig, ...CODEX_ISOLATION_OVERRIDES],
+      env: secretEnv,
+    });
   }
 
   /**
@@ -664,66 +338,61 @@ finally:
   async ensureClaudeCli(): Promise<void> {
     const c = this.#cfg.claudeCode;
     const user = this.#cfg.sandbox.containerUser;
-    const probe = await this.docker(["exec", "-u", user, this.name, c.bin, "--version"], { timeoutMs: 30_000 });
+    const probe = await this.execInSandbox([c.bin, "--version"], { user, timeoutMs: 30_000 });
     if (probe.code !== 0 || !probe.stdout.startsWith(`${c.version} `)) {
       this.#log.warn("installing pinned sandbox claude code cli", { wanted: c.version, prefix: c.prefix });
-      const install = await this.docker(
-        ["exec", "-u", user, this.name, "npm", "install", "--prefix", c.prefix, "--no-audit", "--no-fund", `@anthropic-ai/claude-code@${c.version}`],
-        { timeoutMs: 600_000 },
-      );
+      const install = await this.execInSandbox(["npm", "install", "--prefix", c.prefix, "--no-audit", "--no-fund", `@anthropic-ai/claude-code@${c.version}`], { user, timeoutMs: 600_000 });
       if (install.code !== 0) {
         throw new Error(`沙箱 Claude Code CLI 安装失败（需要 @anthropic-ai/claude-code@${c.version}）：${install.stderr.trim() || install.stdout.trim()}`);
       }
-      const verify = await this.docker(["exec", "-u", user, this.name, c.bin, "--version"], { timeoutMs: 30_000 });
+      const verify = await this.execInSandbox([c.bin, "--version"], { user, timeoutMs: 30_000 });
       if (verify.code !== 0 || !verify.stdout.startsWith(`${c.version} `)) {
         throw new Error(`沙箱 Claude Code CLI 安装后校验失败：期望 ${c.version}，实际 ${verify.stdout.trim() || verify.stderr.trim()}`);
       }
     }
     const memory = claudeCodeUserMemory(this.#cfg.sandbox.containerWorkspaceDir, this.#cfg.sandbox.containerCodexHome);
-    const seeded = await this.docker(
-      ["exec", "-i", "-u", user, this.name, "sh", "-c", 'mkdir -p "$1" && cat > "$1/CLAUDE.md"', "sh", c.configDir],
-      { stdin: memory, timeoutMs: 30_000 },
-    );
+    const seeded = await this.execInSandbox(["sh", "-c", 'mkdir -p "$1" && cat > "$1/CLAUDE.md"', "sh", c.configDir], { user, stdin: memory, timeoutMs: 30_000 });
     if (seeded.code !== 0) throw new Error(`Claude Code 配置目录初始化失败：${seeded.stderr.trim()}`);
   }
 
   /** Whether the Claude Code session file for this UUID has been written yet. */
   async claudeSessionExists(sessionId: string): Promise<boolean> {
     if (!/^[0-9a-f-]{36}$/.test(sessionId)) return false;
-    const res = await this.docker(
-      ["exec", "-u", this.#cfg.sandbox.containerUser, this.name, "find", path.posix.join(this.#cfg.claudeCode.configDir, "projects"), "-maxdepth", "2", "-name", `${sessionId}.jsonl`],
-      { timeoutMs: 30_000 },
-    );
+    const res = await this.execInSandbox(["find", path.posix.join(this.#cfg.claudeCode.configDir, "projects"), "-maxdepth", "2", "-name", `${sessionId}.jsonl`], { timeoutMs: 30_000 });
     return res.code === 0 && res.stdout.trim().length > 0;
   }
 
   /** Last resort after an unanswered interrupt: the CLI's argv carries its session UUID. */
   async killClaudeSession(sessionId: string): Promise<void> {
     if (!/^[0-9a-f-]{36}$/.test(sessionId)) return;
-    await this.docker(["exec", "-u", this.#cfg.sandbox.containerUser, this.name, "pkill", "-KILL", "-f", sessionId], { timeoutMs: 15_000 });
+    await this.execInSandbox(["pkill", "-KILL", "-f", sessionId], { timeoutMs: 15_000 });
   }
 
   /** One Claude Code print-mode process speaking stream-json over stdio. */
   spawnClaude(args: string[], secretEnv: Record<string, string>): ChildProcess {
-    const s = this.#cfg.sandbox;
-    const envFlags = Object.keys(secretEnv).flatMap((name) => ["-e", name]);
-    return spawn(
-      "docker",
-      [
-        "exec", "-i", "-u", s.containerUser, "-w", s.containerWorkspaceDir, ...envFlags, this.name,
+    return this.spawnInSandbox({
+      argv: [
         "env", `CLAUDE_CONFIG_DIR=${this.#cfg.claudeCode.configDir}`, "DISABLE_AUTOUPDATER=1",
         // A browser hand-over waits up to 30 minutes for the person inside one tool call.
         `MCP_TOOL_TIMEOUT=${TAB_TOOL_TIMEOUT_SEC * 1000}`,
         this.#cfg.claudeCode.bin, ...args,
       ],
-      { stdio: ["pipe", "pipe", "pipe"], env: { ...process.env, ...secretEnv } },
-    );
+      workdir: this.#cfg.sandbox.containerWorkspaceDir,
+      env: secretEnv,
+    });
+  }
+
+  /**
+   * A long-lived command inside the sandbox speaking over stdio. `env` values
+   * travel to the node separately from argv and never appear in a process listing.
+   */
+  spawnInSandbox(req: { argv: string[]; user?: string; workdir?: string; env?: Record<string, string> }): ChildProcess {
+    return this.#node.spawn(this.name, { argv: req.argv, user: req.user ?? this.#cfg.sandbox.containerUser, ...(req.workdir ? { workdir: req.workdir } : {}), env: req.env ?? {} });
   }
 
   /** Start a long-running sandbox process detached from this control plane (fixed argv). */
   async execDetached(argv: string[], opts: { user?: string; env?: Record<string, string> } = {}): Promise<DockerRunResult> {
-    const envFlags = Object.entries(opts.env ?? {}).flatMap(([k, v]) => ["-e", `${k}=${v}`]);
-    return await this.docker(["exec", "-d", "-u", opts.user ?? this.#cfg.sandbox.containerUser, ...envFlags, this.name, ...argv], { timeoutMs: 30_000 });
+    return await this.#node.exec(this.name, { argv, user: opts.user ?? this.#cfg.sandbox.containerUser, env: opts.env ?? {}, detached: true }).catch(failed);
   }
 
   /**
@@ -829,15 +498,14 @@ echo "$dir"`;
 
   /** Rewrite one root-owned file in the container through `patch`; true when it changed. */
   async #patchFile(file: string, patch: (source: string) => string | null): Promise<boolean> {
-    const read = await this.docker(["exec", this.name, "cat", file], { timeoutMs: 20_000 });
+    const read = await this.execInSandbox(["cat", file], { user: "root", timeoutMs: 20_000 });
     if (read.code !== 0) throw new Error(`${file} not readable: ${read.stderr.trim()}`);
     const patched = patch(read.stdout);
     if (patched === null) throw new Error(`${file} is not the version the keyboard patch knows`);
     if (patched === read.stdout) return false;
-    const write = await this.docker(
-      ["exec", "-i", "-u", "root", this.name, "python3", "-c",
-        "import os,sys; p=sys.argv[1]; t=p+'.aio-tmp'; open(t,'wb').write(sys.stdin.buffer.read()); os.chmod(t,0o644); os.replace(t,p)", file],
-      { stdin: patched, timeoutMs: 20_000 },
+    const write = await this.execInSandbox(
+      ["python3", "-c", "import os,sys; p=sys.argv[1]; t=p+'.aio-tmp'; open(t,'wb').write(sys.stdin.buffer.read()); os.chmod(t,0o644); os.replace(t,p)", file],
+      { user: "root", stdin: patched, timeoutMs: 20_000 },
     );
     if (write.code !== 0) throw new Error(`${file} not patched: ${write.stderr.trim()}`);
     return true;
@@ -932,11 +600,19 @@ print('restarted' if stale else 'same')
     argv: string[],
     opts: { timeoutMs?: number; user?: string; stdin?: string } = {},
   ): Promise<DockerRunResult> {
-    return await this.docker(
-      ["exec", "-i", "-u", opts.user ?? this.#cfg.sandbox.containerUser, this.name, ...argv],
-      { timeoutMs: opts.timeoutMs ?? 60_000, stdin: opts.stdin },
-    );
+    const req: ExecRequest = { argv, user: opts.user ?? this.#cfg.sandbox.containerUser, timeoutMs: opts.timeoutMs ?? 60_000 };
+    if (opts.stdin !== undefined) req.stdin = opts.stdin;
+    return await this.#node.exec(this.name, req).catch(failed);
   }
+}
+
+/**
+ * A command the node could not run (unreachable, refused, timed out) reads like
+ * one that failed, as `docker exec` did when the daemon was down: callers check
+ * the code and report it.
+ */
+function failed(err: unknown): DockerRunResult {
+  return { code: 1, stdout: "", stderr: err instanceof Error ? err.message : String(err) };
 }
 
 /** Python run inside the sandbox by `cpuPercent`; reads /proc only. */

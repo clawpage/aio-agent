@@ -263,6 +263,12 @@ export function loadConfig(): {
   /** The knowledge-base tools reachable from this runtime's sandbox; set by the knowledge-base gateway. */
   kb?: { url: string };
   externalBaseUrl: string;
+  /**
+   * The sandbox nodes (sandboxd) this control plane drives, in order; the first
+   * is where existing accounts live. Each node's token is read from `tokensFile`
+   * under the node's name, else under AIO_SANDBOX_NODE_TOKEN.
+   */
+  sandboxNodes: { nodes: Array<{ name: string; url: string }>; tokensFile: string };
 } {
   const port = envInt("PA_PORT", 4891);
   const bind = envStr("PA_BIND", "127.0.0.1");
@@ -465,6 +471,13 @@ export function loadConfig(): {
       members: parseList(envStr("PA_KB_MCP_MEMBERS", "")),
     },
     externalBaseUrl: envStr("PA_EXTERNAL_BASE_URL", ""),
+    sandboxNodes: {
+      nodes: parseList(envStr("PA_SANDBOX_NODES", "local=http://127.0.0.1:4894")).map((entry) => {
+        const at = entry.indexOf("=");
+        return at > 0 ? { name: entry.slice(0, at).trim(), url: entry.slice(at + 1).trim() } : { name: "local", url: entry };
+      }),
+      tokensFile: envStr("PA_SANDBOX_NODE_TOKENS_FILE", path.join(dataDir, "sandbox-node.env")),
+    },
   };
 }
 

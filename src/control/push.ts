@@ -3,7 +3,7 @@ import path from "node:path";
 import webpush from "web-push";
 import type { AppContext } from "./context.js";
 import type { Db } from "./db.js";
-import type { Logger } from "./logger.js";
+import type { Logger } from "../common/logger.js";
 
 /**
  * Notifications on the person's phone through the standard Web Push protocol:

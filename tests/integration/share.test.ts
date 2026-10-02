@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { SHARE_CLI_PY } from "../../src/control/docker/seed.js";
+import { SHARE_CLI_PY } from "../../src/control/sandbox/seed.js";
 import { startHarness } from "../helpers/harness.js";
 import { createMember } from "../../src/control/auth/owner.js";
 import { MemberModelGateway } from "../../src/control/memberModelGateway.js";

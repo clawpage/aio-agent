@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import { describe, expect, it } from "vitest";
-import { NOVNC_ASSET_VERSION, patchNoVncHtml, patchNoVncRfb, patchNoVncUi } from "../../src/control/docker/novncPatch.js";
+import { NOVNC_ASSET_VERSION, patchNoVncHtml, patchNoVncRfb, patchNoVncUi } from "../../src/control/sandbox/novncPatch.js";
 import { DESKTOP_PATH } from "../../src/ui/src/components/TaskConsole.js";
 
 // app/ui.js and core/rfb.js exactly as the pinned image ships them (noVNC 1.4.0).

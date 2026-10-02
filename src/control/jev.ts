@@ -1,6 +1,6 @@
 import type { Config } from "./config.js";
-import type { Logger } from "./logger.js";
-import { expandHome, readSecretFile } from "./bridgeModel.js";
+import type { Logger } from "../common/logger.js";
+import { expandHome, readSecretFile } from "../common/secrets.js";
 
 /**
  * Jev (TypeSafe System One): one request asks one or more choice questions about

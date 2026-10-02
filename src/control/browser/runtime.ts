@@ -20,8 +20,8 @@ import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import type { Config } from "../config.js";
-import type { Logger } from "../logger.js";
-import type { SandboxContainer } from "../docker/sandbox.js";
+import type { Logger } from "../../common/logger.js";
+import type { SandboxContainer } from "../sandbox/container.js";
 import type { BrowserRuntimeLike, RuntimeStatus, SnapshotOutcome, StopOutcome, WakeOutcome } from "./lifecycle.js";
 import type { SnapshotWarning } from "./types.js";
 

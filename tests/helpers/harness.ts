@@ -8,13 +8,14 @@ import type { Duplex } from "node:stream";
 import { WebSocketServer } from "ws";
 import { bootstrap } from "../../src/control/index.js";
 import { loadConfig, type Config } from "../../src/control/config.js";
-import { Logger } from "../../src/control/logger.js";
+import { Logger } from "../../src/common/logger.js";
 import type { AppContext } from "../../src/control/context.js";
 import type { CodexModel, SandboxAccount } from "../../src/control/codex/sandboxCodex.js";
 import type { CodexSessionLike } from "../../src/control/codex/manager.js";
-import type { SandboxContainer } from "../../src/control/docker/sandbox.js";
+import type { SandboxContainer } from "../../src/control/sandbox/container.js";
 import { createApp, handleUpgrade } from "../../src/control/http/server.js";
 import { FakeBrowserRuntime } from "./fakeBrowserRuntime.js";
+import { SandboxNode } from "../../src/control/sandbox/node.js";
 
 async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | void> {
   let timer: NodeJS.Timeout | undefined;
@@ -536,6 +537,23 @@ function rawRequest(
   });
 }
 
+/**
+ * The web side of a container stub: requests go straight to a fake sandbox on
+ * `port`, the way the node would forward them.
+ */
+export function directSandbox(port: number) {
+  return {
+    fetch: (pathname: string, init?: RequestInit) => fetch(`http://127.0.0.1:${port}${pathname}`, init),
+    upstream: () => ({ url: new URL(`http://127.0.0.1:${port}/`), headers: {} as Record<string, string> }),
+    node: { name: "local", check: async () => ({ ok: true, version: "test", protocol: 1, error: null }) },
+  };
+}
+
+/** A node nothing listens on: for units whose sandbox calls are all stubbed. */
+export function testNode(): SandboxNode {
+  return new SandboxNode("local", "http://127.0.0.1:9", "test-node-token");
+}
+
 export function testConfig(dataDir: string, sandboxPort: number, extra: Record<string, string> = {}): Config {
   const env: Record<string, string> = {
     PA_PORT: "0",
@@ -584,6 +602,7 @@ export async function startHarness(
   const cfg = testConfig(dataDir, sandbox.port, extraEnv);
   const codex = new FakeCodex();
   const containerStub = {
+    ...directSandbox(sandbox.port),
     name: cfg.sandbox.containerName,
     isReady: async () => true,
     inspect: async () => ({

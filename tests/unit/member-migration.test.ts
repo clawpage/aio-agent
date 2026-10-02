@@ -6,7 +6,7 @@ import path from 'node:path';
 import {openDb} from '../../src/control/db.js';
 import {ensureOwner,createMember,authenticateUser,getUser} from '../../src/control/auth/owner.js';
 import {hashPassword} from '../../src/control/auth/passwords.js';
-import {Logger} from '../../src/control/logger.js';
+import {Logger} from '../../src/common/logger.js';
 import {SessionStore} from '../../src/control/auth/sessions.js';
 it('migrates an existing owner without changing password or live sessions and never bootstraps over a member',async()=>{
  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'aio-user-migration-'));const file=path.join(dir,'db.sqlite');

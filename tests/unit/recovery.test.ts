@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { startRuntimeRecovery } from "../../src/control/index.js";
-import { Logger } from "../../src/control/logger.js";
+import { Logger } from "../../src/common/logger.js";
 import type { AppContext } from "../../src/control/context.js";
 
 interface Counters {
@@ -11,6 +11,7 @@ interface Counters {
 function makeCtx(state: { ready: boolean; running: boolean; codexReady: boolean; fail?: boolean }, counters: Counters): AppContext {
   const container = {
     name: "personal-agent-sandbox",
+    node: { check: async () => ({ ok: true, version: "test", protocol: 1, error: null }) },
     isReady: async () => state.ready,
     inspect: async () => ({
       exists: true,

@@ -2,8 +2,8 @@ import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import type { Config } from "../config.js";
-import type { Logger } from "../logger.js";
-import type { SandboxContainer } from "../docker/sandbox.js";
+import type { Logger } from "../../common/logger.js";
+import type { SandboxContainer } from "../sandbox/container.js";
 import {
   documentKind,
   isInsideWorkspace,
@@ -755,8 +755,7 @@ print("venv" if venv_python else "novenv")
   }
 
   async #fetchSandboxFile(target: string): Promise<Buffer> {
-    const url = `http://127.0.0.1:${this.#cfg.sandbox.hostPort}/v1/file/download?path=${encodeURIComponent(target)}`;
-    const res = await fetch(url, { signal: AbortSignal.timeout(60_000) });
+    const res = await this.#container.fetch(`/v1/file/download?path=${encodeURIComponent(target)}`, { signal: AbortSignal.timeout(60_000) });
     if (!res.ok) throw new DocumentError("page_unavailable", "无法从沙箱读取预览图片", 502);
     const buffer = Buffer.from(await res.arrayBuffer());
     if (buffer.byteLength === 0) throw new DocumentError("page_unavailable", "预览图片为空", 502);
@@ -776,8 +775,8 @@ print("venv" if venv_python else "novenv")
     if (range && !/^bytes=(?:\d+-\d*|-\d+)$/.test(range)) {
       return new Response(null, { status: 416, headers: { "content-range": `bytes */${stat.size}` } });
     }
-    const url = `http://127.0.0.1:${this.#cfg.sandbox.hostPort}/v1/file/download?path=${encodeURIComponent(stat.realPath)}`;
-    const probe = await fetch(url, { headers: { Range: "bytes=0-31" }, signal });
+    const url = `/v1/file/download?path=${encodeURIComponent(stat.realPath)}`;
+    const probe = await this.#container.fetch(url, { headers: { Range: "bytes=0-31" }, signal });
     // Never buffer a full file when an upstream stops honoring Range.
     if (probe.status !== 206 || Number(probe.headers.get("content-length")) > 32) {
       await probe.body?.cancel();
@@ -799,7 +798,7 @@ print("venv" if venv_python else "novenv")
     }
     // AIO's download route does not implement HEAD. Fetch only its headers,
     // then cancel the body for HEAD rather than exposing that upstream 405.
-    const upstream = await fetch(url, { headers: range ? { Range: range } : {}, signal });
+    const upstream = await this.#container.fetch(url, { headers: range ? { Range: range } : {}, signal });
     if (![200, 206, 416].includes(upstream.status)) {
       await upstream.body?.cancel();
       throw new DocumentError("sandbox_unreachable", "无法读取视频，请重试或下载查看", 502);
@@ -933,8 +932,8 @@ print("venv" if venv_python else "novenv")
         413,
       );
     }
-    const res = await fetch(
-      `http://127.0.0.1:${this.#cfg.sandbox.hostPort}/v1/file/read`,
+    const res = await this.#container.fetch(
+      "/v1/file/read",
       {
         method: "POST",
         headers: { "content-type": "application/json" },

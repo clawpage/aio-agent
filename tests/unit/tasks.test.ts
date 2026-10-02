@@ -5,7 +5,7 @@ import type { HostTokenSource } from "../../src/control/codex/hostTokens.js";
 import { TaskService } from "../../src/control/tasks/service.js";
 import { JsonRpcResponseError } from "../../src/control/codex/jsonrpc.js";
 import { parsePlan, planningPrompt, resourcesConflict } from "../../src/control/tasks/planning.js";
-import { Logger } from "../../src/control/logger.js";
+import { Logger } from "../../src/common/logger.js";
 import { writeAgentSettings } from "../../src/control/settings.js";
 import { FakeCodex, testConfig } from "../helpers/harness.js";
 class PlanningCodex extends FakeCodex {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseCodexVersion } from "../../src/control/docker/sandbox.js";
+import { parseCodexVersion } from "../../src/control/sandbox/container.js";
 
 describe("sandbox Codex CLI version parsing", () => {
   it("reads the version from real `codex --version` output", () => {

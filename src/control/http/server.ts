@@ -235,7 +235,7 @@ export function createApp(ctx: AppContext): express.Express {
           const release=runtime.idle.hold();res.on("close",release);
         }
         if(!ctx.sessions.isLive(rec.session!.id)){res.status(401).end();return;}
-        handleProxyHttp({cfg:runtime.cfg,log:runtime.log,sessions:ctx.sessions,browser:runtime.browser.proxyGate()},rec,req,res);
+        handleProxyHttp({cfg:runtime.cfg,log:runtime.log,sessions:ctx.sessions,upstream:runtime.container.upstream(),browser:runtime.browser.proxyGate()},rec,req,res);
       } catch {res.status(503).json({error:"runtime_unavailable"});}
     })();
   });
@@ -331,7 +331,7 @@ export function handleUpgrade(ctx: AppContext, req: import("node:http").Incoming
       }
       if(!ctx.sessions.isLive(rec.session!.id)){endSocket(socket,"HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n");return;}
       const idle=runtime.idle;
-      handleProxyUpgrade({cfg:runtime.cfg,log:runtime.log,sessions:ctx.sessions,browser:runtime.browser.proxyGate(),activity:idle?()=>idle.touch():undefined},rec,req,socket,head);
+      handleProxyUpgrade({cfg:runtime.cfg,log:runtime.log,sessions:ctx.sessions,upstream:runtime.container.upstream(),browser:runtime.browser.proxyGate(),activity:idle?()=>idle.touch():undefined},rec,req,socket,head);
     } catch {endSocket(socket,"HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\n\r\n");}
   })();
 }

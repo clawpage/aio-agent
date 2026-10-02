@@ -2,29 +2,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import type { ChildProcess } from "node:child_process";
 import { BridgeModel } from "../../src/control/bridgeModel.js";
-import { Logger } from "../../src/control/logger.js";
-import { testConfig } from "../helpers/harness.js";
+import { SandboxContainer } from "../../src/control/sandbox/container.js";
+import { Logger } from "../../src/common/logger.js";
+import { testConfig, testNode } from "../helpers/harness.js";
 
 const SECRET_VALUE = "sk-test-spawn-secret-value-0002";
-const spawnCalls: Array<{ command: string; args: string[]; env: Record<string, string> | undefined }> = [];
-
-// Intercept the docker CLI launch so the real argv and child environment can be
-// inspected. Nothing is executed.
-vi.mock("node:child_process", async (importOriginal) => {
-  // Keep the real module's other exports (the container uses `execFile`), and
-  // only intercept the spawn that launches the sandbox Codex process.
-  const actual = await importOriginal<typeof import("node:child_process")>();
-  return {
-    ...actual,
-    spawn: (command: string, args: string[], options?: { env?: Record<string, string> }) => {
-      spawnCalls.push({ command, args, env: options?.env });
-      return { stdin: null, stdout: null, stderr: null, on: () => undefined, kill: () => undefined };
-    },
-  };
-});
-
-const { SandboxContainer } = await import("../../src/control/docker/sandbox.js");
 
 function tmpDir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), "pa-spawn-test-"));
@@ -33,7 +17,6 @@ function tmpDir(): string {
 const cleanups: Array<() => void> = [];
 
 beforeEach(() => {
-  spawnCalls.length = 0;
   delete process.env.LITELLM_MASTER_KEY;
 });
 
@@ -41,6 +24,17 @@ afterEach(() => {
   for (const fn of cleanups.splice(0)) fn();
   delete process.env.LITELLM_MASTER_KEY;
 });
+
+/** The container with its node's streamed commands captured instead of sent. */
+function capture(cfg: ReturnType<typeof testConfig>) {
+  const container = new SandboxContainer(cfg, new Logger("error", undefined, false), testNode());
+  const calls: Array<{ name: string; argv: string[]; user: string; env?: Record<string, string> }> = [];
+  vi.spyOn(container.node, "spawn").mockImplementation((name, req) => {
+    calls.push({ name, ...req });
+    return {} as ChildProcess;
+  });
+  return { container, calls };
+}
 
 describe("sandbox Codex launch with the bridge enabled", () => {
   it("defines the provider on the command line and keeps the key out of argv", () => {
@@ -51,38 +45,35 @@ describe("sandbox Codex launch with the bridge enabled", () => {
     fs.chmodSync(file, 0o600);
     const cfg = testConfig("/tmp/pa-spawn-bridge", 1, { PA_OPENCODE_GO_SECRETS_FILE: file });
     const bridge = new BridgeModel(cfg, new Logger("error", undefined, false));
-    const container = new SandboxContainer(cfg, new Logger("error", undefined, false));
+    const { container, calls } = capture(cfg);
 
     container.spawnCodexAppServer(["-c", 'approval_policy="on-request"'], bridge.providerEnv());
 
-    expect(spawnCalls.length).toBe(1);
-    const { command, args, env } = spawnCalls[0]!;
-    expect(command).toBe("docker");
-    const argv = args.join(" ");
-    // Docker's own -e only names the variable; the value never reaches argv.
-    expect(argv).toContain("-e LITELLM_MASTER_KEY");
-    expect(argv).not.toContain(SECRET_VALUE);
+    expect(calls.length).toBe(1);
+    const { name, argv, user, env } = calls[0]!;
+    expect(name).toBe(cfg.sandbox.containerName);
+    expect(user).toBe(cfg.sandbox.containerUser);
+    // The value travels to the node beside argv, never inside it.
+    expect(argv.join(" ")).not.toContain(SECRET_VALUE);
     expect(env?.LITELLM_MASTER_KEY).toBe(SECRET_VALUE);
     // The provider itself is defined by the -c overrides the session appends;
     // the launch helper must not have to know about them.
-    expect(argv).not.toContain("model_providers");
+    expect(argv.join(" ")).not.toContain("model_providers");
   });
 
   it("leaves the ChatGPT-only command line unchanged when no key is available", () => {
     const cfg = testConfig("/tmp/pa-spawn-plain", 1, { PA_OPENCODE_GO_SECRETS_FILE: "/nonexistent/secrets.env" });
     const bridge = new BridgeModel(cfg, new Logger("error", undefined, false));
-    const container = new SandboxContainer(cfg, new Logger("error", undefined, false));
+    const { container, calls } = capture(cfg);
 
     container.spawnCodexAppServer(["-c", 'approval_policy="on-request"'], bridge.providerEnv());
 
-    const { args, env } = spawnCalls[0]!;
-    const argv = args.join(" ");
-    expect(argv).not.toContain("model_providers");
-    expect(argv).not.toContain("-e ");
-    expect(argv).not.toContain("LITELLM_MASTER_KEY");
+    const { argv, env } = calls[0]!;
+    expect(argv.slice(0, 6)).toEqual(["env", `CODEX_HOME=${cfg.sandbox.containerCodexHome}`, cfg.sandbox.codexBin, "app-server", "--listen", "stdio://"]);
+    expect(argv.join(" ")).not.toContain("model_providers");
     expect(env?.LITELLM_MASTER_KEY).toBeUndefined();
     // The isolation flags still come last and stay intact.
-    expect(args.slice(-8)).toEqual([
+    expect(argv.slice(-8)).toEqual([
       "-c",
       "features.apps=false",
       "-c",

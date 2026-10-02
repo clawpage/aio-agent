@@ -2,14 +2,15 @@
 // Run after building and starting production: npm run smoke:isolation.
 import assert from "node:assert/strict";
 import { loadConfig } from "../../dist/control/config.js";
-import { SandboxContainer } from "../../dist/control/docker/sandbox.js";
+import { SandboxContainer } from "../../dist/control/sandbox/container.js";
+import { SandboxNodes } from "../../dist/control/sandbox/nodes.js";
 import { HostTokenSource } from "../../dist/control/codex/hostTokens.js";
 import { JsonRpcPeer } from "../../dist/control/codex/jsonrpc.js";
-import { Logger } from "../../dist/control/logger.js";
+import { Logger } from "../../dist/common/logger.js";
 
 const cfg = loadConfig();
 const log = new Logger("error", undefined, false);
-const sandbox = new SandboxContainer(cfg, log);
+const sandbox = new SandboxContainer(cfg, log, new SandboxNodes(cfg).nodes[0]);
 const host = new HostTokenSource(cfg, log);
 let peer;
 async function cli(args) {
@@ -19,7 +20,7 @@ async function cli(args) {
   return result.stdout;
 }
 try {
-  sandbox.assertOwned(await sandbox.inspect());
+  assert.equal((await sandbox.inspect()).managedLabel, "1", "the sandbox must be one this system manages");
   const features = await cli(["-c", "features.apps=true", "-c", "features.plugins=true", "-c", "features.remote_plugin=true", "features", "list"]);
   for (const name of ["apps", "plugins", "remote_plugin"]) {
     assert.match(features, new RegExp(`^${name}\\s+\\S+\\s+false$`, "m"), "system policy must override attempted re-enabling");

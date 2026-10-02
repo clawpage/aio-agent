@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import type { Config } from "../config.js";
-import type { Logger } from "../logger.js";
+import type { Logger } from "../../common/logger.js";
 import { JsonRpcPeer } from "./jsonrpc.js";
 
 export interface HostTokens {

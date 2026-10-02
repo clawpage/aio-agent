@@ -3,11 +3,11 @@ import type { Jev } from "./jev.js";
 import type { TabServerLike } from "./browser/tabs.js";
 import type { Config } from "./config.js";
 import type { Db } from "./db.js";
-import type { Logger } from "./logger.js";
+import type { Logger } from "../common/logger.js";
 import type { SessionStore } from "./auth/sessions.js";
 import type { TicketStore } from "./auth/tickets.js";
 import type { LoginRateLimiter } from "./auth/ratelimit.js";
-import type { SandboxContainer } from "./docker/sandbox.js";
+import type { SandboxContainer } from "./sandbox/container.js";
 import type { HostTokenSource } from "./codex/hostTokens.js";
 import type { AgentManager, CodexSessionLike } from "./codex/manager.js";
 import type { AioClient } from "./aio/client.js";
@@ -16,7 +16,7 @@ import type { BrowserService } from "./browser/service.js";
 import type { BrowserRuntimeLike } from "./browser/lifecycle.js";
 
 import type { TaskService } from "./tasks/service.js";
-import type { SandboxIdle } from "./docker/idle.js";
+import type { SandboxIdle } from "./sandbox/idle.js";
 import type { PushService } from "./push.js";
 
 export interface AppContext {

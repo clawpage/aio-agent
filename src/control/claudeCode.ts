@@ -1,7 +1,7 @@
 import type { Config } from "./config.js";
-import type { Logger } from "./logger.js";
+import type { Logger } from "../common/logger.js";
 import type { CodexModel } from "./codex/sandboxCodex.js";
-import { expandHome, readSecretFile } from "./bridgeModel.js";
+import { expandHome, readSecretFile } from "../common/secrets.js";
 
 /**
  * Provider id recorded on conversations that run on the Claude Code harness.

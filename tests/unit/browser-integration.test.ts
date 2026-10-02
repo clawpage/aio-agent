@@ -1,6 +1,6 @@
 import { describe, expect, it, beforeEach, afterEach } from "vitest";
 import { openDb, type Db } from "../../src/control/db.js";
-import { Logger } from "../../src/control/logger.js";
+import { Logger } from "../../src/common/logger.js";
 import { AgentManager, type BrowserGateLike } from "../../src/control/codex/manager.js";
 import { FakeCodex, testConfig } from "../helpers/harness.js";
 import type { HostTokenSource } from "../../src/control/codex/hostTokens.js";

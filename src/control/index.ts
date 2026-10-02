@@ -7,13 +7,15 @@ import {DecisionGateway} from "./decision.js";
 import {KbGateway} from "./kb.js";
 import {UserRuntimes} from "./tenants.js";
 import { loadConfig, ensureDataDirs, type Config } from "./config.js";
-import { Logger } from "./logger.js";
+import { Logger } from "../common/logger.js";
 import { openDb, type Db } from "./db.js";
 import { SessionStore } from "./auth/sessions.js";
 import { TicketStore } from "./auth/tickets.js";
 import { LoginRateLimiter } from "./auth/ratelimit.js";
 import { ensureOwner } from "./auth/owner.js";
-import { SandboxContainer } from "./docker/sandbox.js";
+import { SandboxContainer } from "./sandbox/container.js";
+import type { SandboxNode } from "./sandbox/node.js";
+import { SandboxNodes } from "./sandbox/nodes.js";
 import { DocumentService } from "./documents/service.js";
 import { BrowserRuntime } from "./browser/runtime.js";
 import { BrowserService } from "./browser/service.js";
@@ -31,7 +33,7 @@ import { AioClient } from "./aio/client.js";
 import { createApp, handleUpgrade } from "./http/server.js";
 import { TaskService } from "./tasks/service.js";
 import type { AppContext } from "./context.js";
-import { SandboxIdle } from "./docker/idle.js";
+import { SandboxIdle } from "./sandbox/idle.js";
 import { PushService, startTaskNotifications } from "./push.js";
 
 export interface Bootstrapped {
@@ -47,6 +49,10 @@ export interface BootstrapOptions {
   skipOwner?: boolean;
   identity?: {id:string;username:string;role:string};
   deferAgentInit?: boolean;
+  /** The node this runtime's sandbox lives on (members: chosen by the tenant layer). */
+  node?: SandboxNode;
+  /** The configured sandbox nodes (the owner's runtime picks its node from them). */
+  nodes?: SandboxNodes;
   /** Test seams: replace the sandbox-backed collaborators. */
   overrides?: {
     codex?: import("./codex/manager.js").CodexSessionLike;
@@ -93,7 +99,7 @@ export async function bootstrap(opts: BootstrapOptions = {}): Promise<Bootstrapp
     windowMs: cfg.loginWindowMs,
     lockoutMs: cfg.loginLockoutMs,
   });
-  const container = opts.overrides?.container ?? new SandboxContainer(cfg, log);
+  const container = opts.overrides?.container ?? new SandboxContainer(cfg, log, opts.node ?? await ownerNode(cfg, db, opts.nodes));
   const documents = opts.overrides?.documents ?? new DocumentService(cfg, log, container);
   const hostTokens = new HostTokenSource(cfg, log);
   // One bridge instance per process: it owns the single decision about whether
@@ -119,7 +125,7 @@ export async function bootstrap(opts: BootstrapOptions = {}): Promise<Bootstrapp
   // The manager protects the browser for the whole of every managed turn, so a
   // lease must exist before this point (a queued turn can start on construction).
   const agent = new AgentManager({ cfg, db, log, codex, hostTokens, browser, bridge, claudeCode, tabs });
-  const aio = opts.overrides?.aio ?? new AioClient(cfg, log);
+  const aio = opts.overrides?.aio ?? new AioClient(log, container);
 
   const jev = new Jev(cfg, log);
   const tasks = new TaskService(db, cfg, agent, codex, container, jev);
@@ -176,6 +182,11 @@ export async function bootstrap(opts: BootstrapOptions = {}): Promise<Bootstrapp
   return { ctx, db, shutdown };
 }
 
+/** The owner's sandbox stays on the first node unless the database records another. */
+async function ownerNode(cfg: Config, db: Db, nodes = new SandboxNodes(cfg)): Promise<SandboxNode> {
+  return cfg.memberRuntime ? nodes.nodes[0]! : await nodes.assign(db, cfg.runtimeUserId ?? "owner_1", true);
+}
+
 /** Bring the sandbox container and Codex session up in the background. */
 export async function startSandboxRuntime(ctx: AppContext): Promise<void> {
   const { cfg, log, container, agent } = ctx;
@@ -184,6 +195,9 @@ export async function startSandboxRuntime(ctx: AppContext): Promise<void> {
     return;
   }
   try {
+    // A node this control plane cannot drive is refused before anything is asked of it.
+    const compat = await container.node.check(0);
+    if (!compat.ok) throw new Error(compat.error ?? "沙箱节点不可用");
     const state = await container.ensureRunning();
     log.info("sandbox container ready", { name: state.image, healthy: state.healthy });
     // Sites block a browser whose identity does not add up; best effort, never fatal.
@@ -349,7 +363,8 @@ export function startSandboxIdle(ctx: AppContext, intervalMs = 30_000): SandboxI
 async function main(): Promise<void> {
   const config=loadConfig();
   config.runtimeUserId="owner_1";
-  const { ctx, shutdown } = await bootstrap({config});
+  const nodes = new SandboxNodes(config);
+  const { ctx, shutdown } = await bootstrap({config, nodes});
   const account=(sql:string,value:string)=>(ctx.db.prepare(sql).get(value) as {v:string}|undefined)?.v??null;
   ctx.share=new ShareStore({cfg:ctx.cfg,port:ctx.cfg.memberModelPort??4902,
     usernameOf:id=>account("SELECT username AS v FROM owners WHERE id=?",id),
@@ -365,7 +380,7 @@ async function main(): Promise<void> {
   // Phone notifications: one key pair and one subscription store for every account.
   ctx.push=new PushService({db:ctx.db,log:ctx.log,keyFile:path.join(ctx.cfg.dataDir,"vapid.json"),subject:`https://${ctx.cfg.primaryHost}`});
   const ownerNotifications=startTaskNotifications(ctx,ctx.push);
-  const users=new UserRuntimes(ctx,bootstrap,modelGateway);
+  const users=new UserRuntimes(ctx,bootstrap,modelGateway,nodes);
   ctx.runtimeForUser=id=>users.resolve(id);
   const app = createApp(ctx);
   const server = http.createServer(app);

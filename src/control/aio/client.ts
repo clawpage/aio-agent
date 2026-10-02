@@ -1,5 +1,9 @@
-import type { Config } from "../config.js";
-import type { Logger } from "../logger.js";
+import type { Logger } from "../../common/logger.js";
+
+/** What the client needs of the sandbox: requests to its web port (through its node). */
+export interface SandboxWeb {
+  fetch(pathname: string, init?: RequestInit): Promise<Response>;
+}
 
 export interface CapabilityEndpoint {
   method: string;
@@ -31,28 +35,24 @@ export interface CapabilityInventory {
  * image instead of upstream documentation.
  */
 export class AioClient {
-  #cfg: Config;
+  #sandbox: SandboxWeb;
   #log: Logger;
   #cache: { at: number; inventory: CapabilityInventory } | null = null;
 
-  constructor(cfg: Config, log: Logger) {
-    this.#cfg = cfg;
+  constructor(log: Logger, sandbox: SandboxWeb) {
+    this.#sandbox = sandbox;
     this.#log = log.child("aio");
   }
 
-  get baseUrl(): string {
-    return `http://127.0.0.1:${this.#cfg.sandbox.hostPort}`;
-  }
-
   async get(pathname: string, timeoutMs = 15_000): Promise<unknown> {
-    const res = await fetch(`${this.baseUrl}${pathname}`, { signal: AbortSignal.timeout(timeoutMs) });
+    const res = await this.#sandbox.fetch(pathname, { signal: AbortSignal.timeout(timeoutMs) });
     if (!res.ok) throw new Error(`${pathname} -> HTTP ${res.status}`);
     return await res.json();
   }
 
   async health(): Promise<boolean> {
     try {
-      const res = await fetch(`${this.baseUrl}/health`, { signal: AbortSignal.timeout(4000) });
+      const res = await this.#sandbox.fetch(`/health`, { signal: AbortSignal.timeout(4000) });
       return res.ok;
     } catch {
       return false;
@@ -70,7 +70,7 @@ export class AioClient {
 
   async version(): Promise<string | null> {
     try {
-      const res = await fetch(`${this.baseUrl}/v1/openapi.json`, { signal: AbortSignal.timeout(8000) });
+      const res = await this.#sandbox.fetch(`/v1/openapi.json`, { signal: AbortSignal.timeout(8000) });
       if (!res.ok) return null;
       const doc = (await res.json()) as { info?: { version?: string } };
       return doc.info?.version ?? null;
@@ -80,7 +80,7 @@ export class AioClient {
   }
 
   async openApiPaths(): Promise<Record<string, Record<string, { summary?: string }>>> {
-    const res = await fetch(`${this.baseUrl}/v1/openapi.json`, { signal: AbortSignal.timeout(10_000) });
+    const res = await this.#sandbox.fetch(`/v1/openapi.json`, { signal: AbortSignal.timeout(10_000) });
     if (!res.ok) throw new Error(`openapi -> HTTP ${res.status}`);
     const doc = (await res.json()) as { paths?: Record<string, Record<string, { summary?: string }>> };
     return doc.paths ?? {};
@@ -129,7 +129,7 @@ export class AioClient {
     let res: Response;
     let json: { success?: boolean; message?: string; data?: unknown } | null = null;
     try {
-      res = await fetch(`${this.baseUrl}/v1/browser/tabs`, {
+      res = await this.#sandbox.fetch(`/v1/browser/tabs`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ url }),
