@@ -69,7 +69,8 @@ describe("sandbox Codex launch with the bridge enabled", () => {
     container.spawnCodexAppServer(["-c", 'approval_policy="on-request"'], bridge.providerEnv());
 
     const { argv, env } = calls[0]!;
-    expect(argv.slice(0, 6)).toEqual(["env", `CODEX_HOME=${cfg.sandbox.containerCodexHome}`, cfg.sandbox.codexBin, "app-server", "--listen", "stdio://"]);
+    // The agent runs on the deployment's clock, not the image's TZ=Asia/Singapore.
+    expect(argv.slice(0, 7)).toEqual(["env", `CODEX_HOME=${cfg.sandbox.containerCodexHome}`, "TZ=America/Los_Angeles", cfg.sandbox.codexBin, "app-server", "--listen", "stdio://"]);
     expect(argv.join(" ")).not.toContain("model_providers");
     expect(env?.LITELLM_MASTER_KEY).toBeUndefined();
     // The isolation flags still come last and stay intact.
@@ -83,5 +84,18 @@ describe("sandbox Codex launch with the bridge enabled", () => {
       "-c",
       "apps._default.enabled=false",
     ]);
+  });
+});
+
+describe("sandbox clock", () => {
+  it("runs Claude Code on the deployment's zone and gives new sandboxes that zone", () => {
+    const cfg = testConfig("/tmp/pa-spawn-tz", 1, { PA_BROWSER_TIMEZONE: "America/New_York" });
+    const { container, calls } = capture(cfg);
+    container.spawnClaude(["-p"], {});
+    expect(calls[0]!.argv).toContain("TZ=America/New_York");
+    expect(container.spec().extraEnv).toContain("TZ=America/New_York");
+    // An operator's own TZ in PA_SANDBOX_EXTRA_ENV wins.
+    const own = capture(testConfig("/tmp/pa-spawn-tz2", 1, { PA_SANDBOX_EXTRA_ENV: "BROWSER_NO_SANDBOX=--no-sandbox,TZ=Europe/Paris" }));
+    expect(own.container.spec().extraEnv.filter((e) => e.startsWith("TZ="))).toEqual(["TZ=Europe/Paris"]);
   });
 });

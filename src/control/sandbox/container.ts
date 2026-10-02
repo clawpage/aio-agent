@@ -81,7 +81,8 @@ export class SandboxContainer {
       containerWorkspaceDir: s.containerWorkspaceDir,
       containerCodexHome: s.containerCodexHome,
       containerUser: s.containerUser,
-      extraEnv: s.extraEnv,
+      // The image pins TZ=Asia/Singapore; a new sandbox lives in the deployment's zone instead.
+      extraEnv: s.extraEnv.some((e) => e.startsWith("TZ=")) ? s.extraEnv : [...s.extraEnv, `TZ=${this.#cfg.browser.timezone}`],
       ...(member ? { member } : this.#cfg.protectedMemberPorts?.length ? { peerPorts: this.#cfg.protectedMemberPorts } : {}),
     };
   }
@@ -324,7 +325,8 @@ finally:
   spawnCodexAppServer(extraConfig: string[] = [], secretEnv: Record<string, string> = {}): ChildProcess {
     const s = this.#cfg.sandbox;
     return this.spawnInSandbox({
-      argv: ["env", `CODEX_HOME=${s.containerCodexHome}`, s.codexBin, "app-server", "--listen", "stdio://", ...extraConfig, ...CODEX_ISOLATION_OVERRIDES],
+      // The agent's clock ("today", `date`) is the deployment's zone, not the image's TZ.
+      argv: ["env", `CODEX_HOME=${s.containerCodexHome}`, `TZ=${this.#cfg.browser.timezone}`, s.codexBin, "app-server", "--listen", "stdio://", ...extraConfig, ...CODEX_ISOLATION_OVERRIDES],
       env: secretEnv,
     });
   }
@@ -372,7 +374,7 @@ finally:
   spawnClaude(args: string[], secretEnv: Record<string, string>): ChildProcess {
     return this.spawnInSandbox({
       argv: [
-        "env", `CLAUDE_CONFIG_DIR=${this.#cfg.claudeCode.configDir}`, "DISABLE_AUTOUPDATER=1",
+        "env", `CLAUDE_CONFIG_DIR=${this.#cfg.claudeCode.configDir}`, "DISABLE_AUTOUPDATER=1", `TZ=${this.#cfg.browser.timezone}`,
         // A browser hand-over waits up to 30 minutes for the person inside one tool call.
         `MCP_TOOL_TIMEOUT=${TAB_TOOL_TIMEOUT_SEC * 1000}`,
         this.#cfg.claudeCode.bin, ...args,

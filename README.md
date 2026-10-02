@@ -477,6 +477,7 @@ npm run build && npx playwright test --config playwright.local.config.ts
 | `PA_BROWSER_RELEASE_IDLE` | `0` | 是否在无占用时释放 owner 的浏览器；默认 `0` 常驻，登录状态一直保留 |
 | `PA_MEMBER_BROWSER_RELEASE_IDLE` | `1` | 是否在无占用时释放成员的浏览器；默认 `1`，下次使用时从快照冷启动 |
 | `PA_BROWSER_IDLE_SECONDS` | `300` | 开启空闲释放时，无占用后释放浏览器的空闲时长（下限 30 秒） |
+| `PA_BROWSER_TIMEZONE` | `America/Los_Angeles` | 部署所在时区：沙箱浏览器、定时任务、智能体进程的时钟（`date`、"今天"）都用它；镜像自带的 `TZ=Asia/Singapore` 只对新建沙箱的容器环境改正，已有容器里人工开的终端仍是镜像时区 |
 | `PA_DAILY_FEED` | `1` | 给每个账号内置每日 08:00 的推送（前一天有消息才运行）；设 `0` 不再创建 |
 | `PA_SANDBOX_RELEASE_IDLE` | `0` | 是否在空闲时停掉 owner 的整个沙箱容器；默认 `0` 常驻 |
 | `PA_MEMBER_SANDBOX_RELEASE_IDLE` | `1` | 是否在空闲时停掉成员的整个沙箱容器；下次使用时再启动 |
