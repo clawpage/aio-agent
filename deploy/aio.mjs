@@ -154,6 +154,18 @@ function compose(args) {
  */
 function run() {
   check();
+  // Moving an existing host deployment over: its data directory seeds an empty volume
+  // once, while nothing else is running. A volume that has a database is never touched.
+  const seed = settings.AIO_SEED_DATA_FROM;
+  if (seed && layers.includes("control") && !volumeHasData()) {
+    console.log(`aio: seeding ${volume} from ${seed}`);
+    importData(path.resolve(ROOT, seed), () => runStack());
+    return;
+  }
+  runStack();
+}
+
+function runStack() {
   const up = spawnSync("docker", [...composeArgs(), "up", "-d", "--remove-orphans", "--wait", "--wait-timeout", settings.AIO_WAIT_SECONDS ?? "180"], { cwd: ROOT, stdio: "inherit", env: composeEnv() });
   if (up.status !== 0) die("compose up failed");
   const logs = spawn("docker", [...composeArgs(), "logs", "-f", "--since", "1s"], { cwd: ROOT, stdio: "inherit", env: composeEnv() });
@@ -187,7 +199,7 @@ function init() {
  * lives in a named volume. These copy it in and out with the control plane
  * stopped, so a database is never copied mid-write.
  */
-const DATA_SKIP = ["cloudflared", "runtime.env", "deploy", "backups", ".auth", ".playwright", ".playwright-local", ".playwright-artifacts", "server.pid"];
+const DATA_SKIP = ["cloudflared", "runtime.env", "deploy", "backups", "logs", "sandboxd", "sandbox-node.env", ".auth", ".playwright", ".playwright-local", ".playwright-artifacts", "server.pid"];
 const volume = settings.AIO_CONTROL_DATA ?? "aio-control-data";
 
 function controlRunning() {
@@ -195,18 +207,26 @@ function controlRunning() {
   return out.stdout.trim().length > 0;
 }
 
-function importData(dir) {
+function importData(dir, done = () => undefined) {
   if (!dir || !fs.statSync(dir, { throwIfNoEntry: false })?.isDirectory()) die("import-data needs a directory");
   if (controlRunning()) die(`a container is using ${volume}; stop the control plane first`);
-  const skip = (name) => DATA_SKIP.includes(name) || name.startsWith("domain-migration") || name.startsWith("task-browser-gate-backup");
+  const skip = (name) => DATA_SKIP.includes(name) || name.includes(".pre-compose-") || name.startsWith("domain-migration") || name.startsWith("task-browser-gate-backup");
   const entries = fs.readdirSync(dir).filter((name) => !skip(name));
-  const tar = spawn("tar", ["-C", dir, "-cf", "-", ...entries], { stdio: ["ignore", "pipe", "inherit"] });
+  // COPYFILE_DISABLE: macOS tar would otherwise add ._* metadata files for every entry.
+  const tar = spawn("tar", ["--no-xattrs", "-C", dir, "-cf", "-", ...entries], { stdio: ["ignore", "pipe", "inherit"], env: { ...process.env, COPYFILE_DISABLE: "1" } });
   const load = spawn("docker", ["run", "--rm", "-i", "--network", "none", "--user", "0", "--entrypoint", "sh", "-v", `${volume}:/data`, imageOf("control"), "-c", "tar -C /data -xf - && chown -R 1000:1000 /data && chmod 700 /data"], { stdio: ["pipe", "inherit", "inherit"] });
   tar.stdout.pipe(load.stdin);
   load.on("exit", (code) => {
     if (code !== 0) die("import failed");
     console.log(`aio: imported ${entries.length} entries from ${dir} into ${volume}`);
+    done();
   });
+}
+
+/** Whether the data volume already holds a control plane's database. */
+function volumeHasData() {
+  const probe = spawnSync("docker", ["run", "--rm", "--network", "none", "--entrypoint", "test", "-v", `${volume}:/data:ro`, imageOf("control"), "-f", "/data/personal-agent.sqlite"]);
+  return probe.status === 0;
 }
 
 function exportData(dir) {

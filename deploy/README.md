@@ -60,6 +60,9 @@ node deploy/aio.mjs export-data /path/to/backup   # 控制面停止时，把数�
 node deploy/aio.mjs import-data /path/to/var      # 控制面停止时，把一个数据目录拷进数据卷
 ```
 
+从宿主进程部署迁过来时，设 `AIO_SEED_DATA_FROM=var`：`run`（`bin/serve` 的 compose 模式）在数据卷还没有数据库时，
+先在什么都没运行的时刻把这个目录拷进卷，再启动；卷里已有数据库就不会再动它。
+
 ## 已知限制
 
 - 只在 macOS + Docker Desktop 上验证过。Linux 机器需要 `AIO_SANDBOXD_ADD_HOST_GATEWAY=1`，且 sandboxd
