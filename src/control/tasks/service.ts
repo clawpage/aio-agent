@@ -11,7 +11,7 @@ import { applyTaskReference, parsePlan, parseSearch, planningPrompt, resourcesCo
 import { recordRecall, STEP_ANSWER_CHARS, STEP_PROMPT_CHARS, TaskRecall, type RecallEvent, type RecallSource } from "./recall.js";
 import { formatTimeline, lastQuestion, routingQuestion, timeline } from "./context.js";
 import { confident } from "../jev.js";
-import { describeNow, describeSchedule, formatWhen, MAX_ACTIVE_SCHEDULES, nextRun, type ScheduleSpec } from "./schedules.js";
+import { describeNow, describeSchedule, formatWhen, MAX_ACTIVE_SCHEDULES, nextRun, validateSchedule, type ScheduleSpec } from "./schedules.js";
 import type { PlanningSchedule, ScheduleActionName } from "./planning.js";
 
 /** The dispatcher may ask to search past tasks at most this many times per message. */
@@ -728,24 +728,48 @@ export class TaskService {
             "推送记录 feedHistory（新到旧）：", JSON.stringify(feedHistory),
         ].join("\n\n");
     }
+    /** Store one schedule for the account (the cap applies however it was asked for); its id, or why not. */
+    private insertSchedule(ownerId: string, s: { title: string; instruction: string; spec: ScheduleSpec; nextRunAt: number; resources: string[]; sourceTaskId: string | null }): { id: string } | { refused: string } {
+        const active = (this.db.prepare("SELECT COUNT(*) AS n FROM schedules WHERE owner_id=? AND status='active' AND builtin IS NULL").get(ownerId) as { n: number }).n;
+        if (active >= MAX_ACTIVE_SCHEDULES)
+            return { refused: `没有创建定时任务：已有 ${active} 个进行中的定时任务（上限 ${MAX_ACTIVE_SCHEDULES} 个）。请先在「定时任务」页暂停或删除不需要的。` };
+        const id = randomId("sched");
+        const now = Date.now();
+        this.db.prepare("INSERT INTO schedules (id,owner_id,title,instruction,spec_json,timezone,resources_json,status,next_run_at,source_task_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,'active',?,?,?,?)")
+            .run(id, ownerId, s.title, s.instruction, JSON.stringify(s.spec), this.cfg.browser.timezone, JSON.stringify(s.resources), s.nextRunAt, s.sourceTaskId, now, now);
+        return { id };
+    }
+    /** What was set up, for the person. */
+    private scheduleCreated(title: string, instruction: string, spec: ScheduleSpec, nextRunAt: number): string {
+        const tz = this.cfg.browser.timezone;
+        return [
+            `已创建定时任务「${title}」：${describeSchedule(spec)}（按 ${tz} 时间），下次运行 ${formatWhen(nextRunAt, tz)}。`,
+            `每次会做：${instruction}`,
+            "可以在「定时任务」页暂停、立即运行或删除，也可以直接告诉我。",
+        ].join("\n\n");
+    }
     /** Store the schedule a plan asked for; the sentence that tells the person what was set up. */
     private createSchedule(row: TaskRow, plan: TaskPlan, runningNow = false): string {
         const planned = plan.schedule!;
-        const ownerId = this.ownerId(row);
-        const active = (this.db.prepare("SELECT COUNT(*) AS n FROM schedules WHERE owner_id=? AND status='active' AND builtin IS NULL").get(ownerId) as { n: number }).n;
-        if (active >= MAX_ACTIVE_SCHEDULES)
-            return `没有创建定时任务：已有 ${active} 个进行中的定时任务（上限 ${MAX_ACTIVE_SCHEDULES} 个）。请先在「定时任务」页暂停或删除不需要的。`;
-        const tz = this.cfg.browser.timezone;
-        const now = Date.now();
-        this.db.prepare("INSERT INTO schedules (id,owner_id,title,instruction,spec_json,timezone,resources_json,status,next_run_at,source_task_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,'active',?,?,?,?)")
-            .run(randomId("sched"), ownerId, plan.title, planned.instruction, JSON.stringify(planned.spec), tz, JSON.stringify(plan.resources), planned.nextRunAt, row.id, now, now);
-        const rule = describeSchedule(planned.spec);
-        if (runningNow) return `已创建定时任务（${rule}，下次 ${formatWhen(planned.nextRunAt, tz)}），现在先运行一次。`;
-        return [
-            `已创建定时任务「${plan.title}」：${rule}（按 ${tz} 时间），下次运行 ${formatWhen(planned.nextRunAt, tz)}。`,
-            `每次会做：${planned.instruction}`,
-            "可以在「定时任务」页暂停、立即运行或删除，也可以直接告诉我。",
-        ].join("\n\n");
+        const stored = this.insertSchedule(this.ownerId(row), { title: plan.title, instruction: planned.instruction, spec: planned.spec, nextRunAt: planned.nextRunAt, resources: plan.resources, sourceTaskId: row.id });
+        if ("refused" in stored) return stored.refused;
+        if (runningNow) return `已创建定时任务（${describeSchedule(planned.spec)}，下次 ${formatWhen(planned.nextRunAt, this.cfg.browser.timezone)}），现在先运行一次。`;
+        return this.scheduleCreated(plan.title, planned.instruction, planned.spec, planned.nextRunAt);
+    }
+    /**
+     * An executor's schedule tool (scheduleTool.ts): set up a schedule for the account,
+     * kept here and run as new tasks whatever conversation asked for it.
+     */
+    createScheduleFor(userId: string, input: { title?: unknown; instruction?: unknown; schedule?: unknown; needsBrowser?: unknown }): { ok: true; message: string; schedule: ReturnType<TaskService["viewSchedule"]> } | { ok: false; error: string } {
+        const title = typeof input.title === "string" ? [...input.title.trim()].slice(0, 40).join("") : "";
+        const instruction = typeof input.instruction === "string" ? input.instruction.trim().slice(0, 2000) : "";
+        if (!title) return { ok: false, error: "title 不能为空" };
+        if (!instruction) return { ok: false, error: "instruction 不能为空：写每次运行要做的事" };
+        const checked = validateSchedule(input.schedule, Date.now(), this.cfg.browser.timezone);
+        if ("error" in checked) return { ok: false, error: checked.error };
+        const stored = this.insertSchedule(userId, { title, instruction, spec: checked.spec, nextRunAt: checked.next, resources: input.needsBrowser === false ? [] : ["browser"], sourceTaskId: null });
+        if ("refused" in stored) return { ok: false, error: stored.refused };
+        return { ok: true, message: this.scheduleCreated(title, instruction, checked.spec, checked.next), schedule: this.viewSchedule(this.scheduleRow(stored.id)!) };
     }
     /** Pause, resume or cancel one of the owner's schedules; the sentence that says what happened. */
     private applyScheduleAction(ownerId: string, id: string, action: ScheduleActionName): string {

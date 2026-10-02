@@ -27,6 +27,8 @@ export function memberConfig(base: Config, userId: string, port: number, model: 
     bridge:{...base.bridge,models:['deepseek-v4.1-flash']},
     // The owner's knowledge-base address is never inherited; the gateway grants a listed member its own.
     kb:undefined,
+    // Nor the owner's schedule tool: the gateway gives every member one that reaches only its own schedules.
+    schedule:undefined,
   };
 }
 

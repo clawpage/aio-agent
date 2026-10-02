@@ -224,9 +224,15 @@ url = "http://127.0.0.1:8080/mcp"
 url = "http://127.0.0.1:8190/mcp"
 `;
 
-/** The policy for one runtime: the sandbox's own servers, plus the knowledge base when this account was granted it. */
-export function codexRequirementsToml(cfg: { kb?: { url: string } }): string {
-  return cfg.kb ? `${CODEX_REQUIREMENTS_TOML}\n[mcp_servers.aio_kb.identity]\nurl = ${JSON.stringify(cfg.kb.url)}\n` : CODEX_REQUIREMENTS_TOML;
+/**
+ * The policy for one runtime: the sandbox's own servers, plus the gateway tools this
+ * account was given (Codex disables a thread's MCP server whose exact URL is not listed).
+ */
+export function codexRequirementsToml(cfg: { decision?: { url: string }; schedule?: { url: string }; kb?: { url: string } }): string {
+  const gateway = ([["aio_decision", cfg.decision], ["aio_schedule", cfg.schedule], ["aio_kb", cfg.kb]] as const)
+    .filter(([, server]) => server)
+    .map(([name, server]) => `\n[mcp_servers.${name}.identity]\nurl = ${JSON.stringify(server!.url)}\n`);
+  return CODEX_REQUIREMENTS_TOML + gateway.join("");
 }
 
 export const CODEX_ISOLATION_OVERRIDES = [

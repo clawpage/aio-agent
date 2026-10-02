@@ -9,6 +9,7 @@ import { ClaudeStreamTranslator } from "./claudeTranslator.js";
 import { tabMcpServers, type BrowserTask } from "../browser/tabs.js";
 import { decisionMcpServers } from "../decision.js";
 import { kbMcpServers } from "../kb.js";
+import { scheduleMcpServers } from "../scheduleTool.js";
 import { JsonRpcResponseError } from "./jsonrpc.js";
 
 /** A definite refusal: the addition was never consumed (the task service treats it as not delivered). */
@@ -21,8 +22,15 @@ function notDelivered(): Error {
  * otherwise the legacy single-page endpoint the sandbox Codex is limited to.
  */
 function mcpConfig(browserTask: BrowserTask | undefined, cfg: Config): string {
-  return JSON.stringify({ mcpServers: browserTask ? { ...tabMcpServers(browserTask), ...decisionMcpServers(cfg), ...kbMcpServers(cfg) } : { aio_browser: { type: "http", url: "http://127.0.0.1:8080/mcp" } } });
+  return JSON.stringify({ mcpServers: browserTask ? { ...tabMcpServers(browserTask), ...decisionMcpServers(cfg), ...scheduleMcpServers(cfg), ...kbMcpServers(cfg) } : { aio_browser: { type: "http", url: "http://127.0.0.1:8080/mcp" } } });
 }
+
+/**
+ * The CLI's own timers live and die with its session (one `-p` run): an agent that saw
+ * them told people schedules end with the conversation. The account's schedules are
+ * aio_schedule's.
+ */
+export const SESSION_TIMER_TOOLS = ["CronCreate", "CronDelete", "CronList", "ScheduleWakeup"];
 
 /** How long a mid-turn addition may wait for the CLI to echo it as consumed. */
 const STEER_ACK_TIMEOUT_MS = 30_000;
@@ -146,6 +154,8 @@ export class ClaudeCodeSession {
       // Full access inside the container, like Codex's approval_policy=never.
       "--permission-mode", "bypassPermissions",
       "--strict-mcp-config", "--mcp-config", mcpConfig(this.#browserTasks.get(threadId), this.#cfg),
+      // One `=` argument: the flag is variadic and would swallow what follows.
+      `--disallowedTools=${SESSION_TIMER_TOOLS.join(",")}`,
       "--setting-sources", "user,project",
       resume ? "--resume" : "--session-id", sessionId,
       ...(params.model ? ["--model", params.model] : []),

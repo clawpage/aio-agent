@@ -258,6 +258,8 @@ export function loadConfig(): {
   };
   /** The decision tool reachable from this runtime's sandbox; set by the decision gateway. */
   decision?: { url: string };
+  /** The account's schedule tool reachable from this runtime's sandbox; set by the schedule gateway. */
+  schedule?: { url: string };
   /**
    * An optional knowledge-base MCP server on the host. The control plane holds its
    * bearer token; the owner and the listed members reach it only through the
