@@ -4,16 +4,24 @@
 
 ## 1. 服务组成
 
+当前部署（2026-10-02 起）以 Docker Compose 运行三层（`var/runtime.env` 里 `PA_DEPLOY=compose`，
+设置在 `var/deploy/aio.env` 与 `var/deploy/control.env`）：
+
 | 组件 | 说明 | 入口 |
 | --- | --- | --- |
-| workspace launcher | 统一服务管理 | `/Users/mengxiao/workspace/tools/start.sh start\|restart\|stop\|status personal-agent` |
-| 项目守护 `bin/serve` | 守护 Node 服务 + 专用 tunnel，转发 SIGTERM | `projects/personal-agent/bin/serve` |
-| Node 控制面 | SPA、`/api`、SSE、AIO 代理 | `127.0.0.1:4891` |
-| 专用 tunnel | 只发布两个精确域名 | `var/cloudflared/config.yml` |
-| 沙箱容器 | AIO 1.11.0，随容器重启策略 `unless-stopped` | `personal-agent-sandbox`，loopback `18081` |
+| workspace launcher | 统一服务管理（launchd 下的守护会在几秒内拉起被停掉的服务） | `/Users/mengxiao/workspace/tools/start.sh start\|restart\|stop\|status personal-agent` |
+| 项目守护 `bin/serve` | 运行 `deploy/aio.mjs run`（校验镜像 → `compose up -d --wait` → 跟随日志，SIGTERM 时 `compose stop`）+ 专用 tunnel | `projects/personal-agent/bin/serve` |
+| 界面层 `aio-ui-1` | 控制台静态文件 + `/api` 原样转给控制层 | `127.0.0.1:4891`（主站入口） |
+| 控制层 `aio-control-1` | API、SSE、伴随站代理、成员网关；数据在卷 `aio-control-data`；无 Docker 访问、无 Codex 登录（`PA_HOST_CODEX=off`） | `127.0.0.1:4892`（伴随站入口）、网关 `127.0.0.1:4902` |
+| 沙箱层 `aio-sandbox-1` | sandboxd，唯一挂载 `docker.sock` 的容器 | compose 网络内 `sandbox:4894` |
+| 专用 tunnel | 主站 → 4891，伴随站与旧域名 → 4892 | `var/cloudflared/config.yml` |
+| 沙箱容器 | AIO 1.11.0，重启策略 `unless-stopped`，不是 compose 服务（重启服务不影响它们） | `personal-agent-sandbox`（loopback 18081）、`aio-user-<散列>` |
 
-PID 在 `.pids/personal-agent.pid`（即 `bin/serve`），日志在 `.logs/personal-agent.log`
-（守护）与 `projects/personal-agent/var/logs/*.log`（应用、tunnel 各自独立）。
+PID 在 `.pids/personal-agent.pid`（即 `bin/serve`）。日志：`.logs/personal-agent.log`（守护）、
+`var/logs/personal-agent.log`（三层容器的合并日志流）、`docker logs aio-control-1` 等。
+
+`PA_DEPLOY=host`（默认）是不用镜像的另一种运行方式：`bin/serve` 起三个宿主进程（sandboxd :4894、控制层 :4892、
+界面层 :4891），数据在 `var/`，节点令牌 `var/sandbox-node.env` 自动生成。
 
 ## 2. 日常操作
 
@@ -27,9 +35,11 @@ PID 在 `.pids/personal-agent.pid`（即 `bin/serve`），日志在 `.logs/perso
 # 停止
 /Users/mengxiao/workspace/tools/start.sh stop personal-agent
 
-# 健康：ready 需要 dependenciesReady && servicesReady && agentReady 同时为真
-curl -s http://127.0.0.1:4891/healthz
-# {"ok":true,"dependenciesReady":true,"servicesReady":true,"agentReady":true,"ready":true,...}
+# 健康：ready 需要 dependenciesReady && servicesReady && agentReady 同时为真；compatible = 能驱动沙箱节点
+curl -s http://127.0.0.1:4892/healthz
+# {"ok":true,"dependenciesReady":true,"servicesReady":true,"agentReady":true,"ready":true,"compatible":true,...}
+curl -s http://127.0.0.1:4891/healthz       # 界面层：控制层提供它需要的 API 版本
+cd projects/personal-agent && AIO_ENV_FILE=var/deploy/aio.env node deploy/aio.mjs ps
 
 # 公网两处入口
 curl -s -o /dev/null -w '%{http_code}\n' https://agent.clawpage.ai/                 # 200 登录页
@@ -45,8 +55,10 @@ curl -s -o /dev/null -w '%{http_code}\n' https://agent-workspace.clawpage.ai/ter
 ```bash
 cd projects/personal-agent
 npm run typecheck && npm test
-npm run build                      # 必须先构建，bin/serve 会拒绝启动早于 src 的 dist
-/Users/mengxiao/workspace/tools/start.sh restart personal-agent
+npm run build                      # host 模式需要；bin/serve 会拒绝启动早于 src 的 dist
+node deploy/aio.mjs build          # compose 模式：重建三个镜像（只改了某层时可只建那层）
+AIO_ENV_FILE=var/deploy/aio.env node deploy/aio.mjs check
+/Users/mengxiao/workspace/tools/start.sh restart personal-agent   # 先确认没有进行中的任务
 # npm run smoke 默认只打本地；当前部署要对公网冒烟必须显式给出两个 origin：
 PA_PRIMARY_ORIGIN=https://agent.clawpage.ai \
 PA_COMPANION_ORIGIN=https://agent-workspace.clawpage.ai npm run smoke
@@ -125,29 +137,35 @@ docker exec -u gem personal-agent-sandbox \
 创建受信任普通成员（构建后，使用同一生产环境配置）：
 
 ```bash
-node --env-file=var/runtime.env bin/create-user.mjs <username>
+node --env-file=var/runtime.env bin/create-user.mjs <username>           # host 模式
+docker exec aio-control-1 node bin/create-user.mjs <username>          # compose 模式（密码写在卷内 /data/user-secrets/）
 ```
 
 账号固定 member，随机密码只写 `var/user-secrets/<username>.txt`（0600）；重复执行拒绝覆盖。
 没有注册入口，不改变 owner 密码与会话。member 固定 DeepSeek high，因此上线前需确认 OpenCode Go 桥接可用。
-member 首次访问或服务启动时创建独立 `aio-user-<散列>` 容器及三卷，数据存在 `var/users/<散列>/`；owner 原卷保留。
+member 首次访问或服务启动时创建独立 `aio-user-<散列>` 容器及三卷，数据存在控制层数据目录的 `users/<散列>/`；owner 原卷保留。
 成员工作区与 owner 共用 `agent-workspace.clawpage.ai`，用路径 `/u/<散列>/` 区分账号，无需新增 CNAME/TLS/tunnel；前缀与会话账号不符时 401，不会回退 owner 工作区。
 成员模型网关仅监听无状态 DeepSeek 请求（默认端口 4902），凭据按账号存放 `var/users/<散列>/model-token`，不可公开。网络守卫镜像 `aio-agent-network-guard:1` 从固定沙箱镜像构建，独立只读运行并只授予 NET_ADMIN。
 运行验收必须包括：两个账号的同名文件互不可见；任务/HTTP/WS 指向各自容器；成员不能 TCP 连接 owner 容器与宿主私网服务；成员卷没有 owner auth.json/记忆；成员无法读取 owner 历史响应。
 
 
-- owner 密码：`var/owner-secret.txt`（0600，明文，方便本人查看；git 忽略；从不写日志）。
-  **不要**删除或重置已运行实例的密码。确需轮换：
+- owner 密码：`var/owner-secret.txt`（0600，明文，方便本人查看；git 忽略；从不写日志；compose 模式下卷内
+  `/data/owner-secret.txt` 是生效的那份）。**不要**删除或重置已运行实例的密码。compose 模式确需轮换：在
+  `var/deploy/control.env` 临时加 `PA_OWNER_PASSWORD_RESET=1`，重启一次，看到 “owner password rotated” 后删掉这行
+  再重启，并用 `docker exec aio-control-1 cat /data/owner-secret.txt` 更新 `var/owner-secret.txt`。host 模式轮换：
   ```bash
   /Users/mengxiao/workspace/tools/start.sh stop personal-agent                       # 必须先停，避免第二个进程争用端口与数据库
   cd /Users/mengxiao/workspace/projects/personal-agent     # 用绝对路径，避免相对路径找不到 start.sh
-  PA_OWNER_PASSWORD_RESET=1 node dist/server/index.js       # 生成新密码、覆盖 secret 文件并吊销全部旧会话
+  PA_OWNER_PASSWORD_RESET=1 node dist/control/index.js      # 生成新密码、覆盖 secret 文件并吊销全部旧会话
   # 看到 “owner password rotated” 后 Ctrl-C 结束
   /Users/mengxiao/workspace/tools/start.sh start personal-agent
   ```
   轮换会同时撤销所有已登录会话，旧密码与旧 cookie 立即失效。
-- 沙箱 Codex 登录由 Mac 上已有 `codex login` 提供；失效时 `/healthz.ready=false`，
-  控制台顶部显示明确提示，恢复方式是在 Mac 上重新 `codex login`，无需改配置。
+- host 模式下沙箱 Codex 登录由 Mac 上已有 `codex login` 提供；失效时 `/healthz.ready=false`，
+  控制台顶部显示明确提示，恢复方式是在 Mac 上重新 `codex login`，无需改配置。compose 模式不用 Codex 登录
+  （`PA_HOST_CODEX=off`）：owner 走 Claude Code（`~/.config/aio-agent/claude-code.env` 只读挂载进控制层），
+  不提供 ChatGPT 模型。
+- compose 模式的凭据都是只读挂载的原文件（`var/deploy/aio.env` 的 `AIO_SECRET_*`），镜像里不含密钥。
 - tunnel 凭据：`var/cloudflared/credentials.json`（0600）。不要复制到别处或提交。
 
 ## 5. Tunnel 与 DNS
@@ -233,12 +251,16 @@ docker exec -i -u root personal-agent-sandbox python3 - status \
 ## 7. 崩溃恢复验证（唯一可靠方式）
 
 ```bash
+# compose 模式：容器崩溃由 Docker 的 unless-stopped 拉起；守护链本身这样验
 cd /Users/mengxiao/workspace
+docker exec aio-control-1 kill -TERM 1  # 控制层进程退出（docker kill/stop 算人工停止，不会自动拉起）
+sleep 15 && docker inspect aio-control-1 --format '{{.State.Status}} restarts={{.RestartCount}}'   # running，次数 +1（2026-10-02 实测 6 秒恢复）
+curl -s http://127.0.0.1:4892/healthz   # 应恢复 ready:true、compatible:true
+# host 模式：杀子进程，bin/serve 应在 ~3s 后拉起
 SERVE=$(cat .pids/personal-agent.pid)
-CHILD=$(pgrep -P "$SERVE" -f 'dist/server/index.js' | head -1)
-kill -9 "$CHILD"                        # 守护应在 ~3s 后拉起新子进程
-sleep 6 && pgrep -P "$SERVE" -f 'dist/server/index.js'
-curl -s http://127.0.0.1:4891/healthz   # 应恢复 ready:true
+CHILD=$(pgrep -P "$SERVE" -f 'dist/control/index.js' | head -1)
+kill -9 "$CHILD"
+sleep 6 && pgrep -P "$SERVE" -f 'dist/control/index.js'
 grep -E 'exited code|started pid' .logs/personal-agent.log
 ```
 
@@ -248,14 +270,26 @@ grep -E 'exited code|started pid' .logs/personal-agent.log
 
 | 数据 | 位置 | 备份价值 |
 | --- | --- | --- |
-| 对话、事件、会话、票据 | `var/personal-agent.sqlite`（含 `-wal`/`-shm`） | 高（历史与登录态） |
-| 工作区文件 | docker volume `personal-agent-workspace` | 高 |
-| Codex 会话状态 | docker volume `personal-agent-codex` | 中（同时保存固定版 Codex CLI 二进制） |
+| 对话、事件、会话、票据、成员库、推送密钥、分享快照 | compose：卷 `aio-control-data`（`/data`）；host：`var/` | 高（历史与登录态） |
+| 工作区文件 | docker volume `personal-agent-workspace`（成员 `aio-user-<散列>-workspace`） | 高 |
+| Codex / Claude Code 会话状态 | docker volume `personal-agent-codex` | 中（同时保存固定版 CLI） |
 | 浏览器 profile | docker volume `personal-agent-browser` | 低 |
-| owner 密码 | `var/owner-secret.txt` | 高（丢失需重置） |
-| tunnel 凭据 | `var/cloudflared/credentials.json` | 高 |
+| owner 密码 | 卷内 `/data/owner-secret.txt`；`var/owner-secret.txt` 是迁移前的同一份（`npm run smoke` 读它） | 高（丢失需重置） |
+| tunnel 凭据 | `var/cloudflared/`（宿主机，不进卷） | 高 |
+| 节点令牌、部署设置 | `var/deploy/`（0600） | 中（丢失可重新生成令牌后重启） |
 
-备份 SQLite 时先 `docker`/服务停止或用 `sqlite3 .backup`，避免复制到半写状态的 WAL。
+compose 模式下 `var/` 里的数据库是 2026-10-02 迁移前的旧副本，**不再更新**（迁移前的一致备份在
+`var/backups/pre-compose-20261002-034925/`）。备份与回退：
+
+```bash
+cd projects/personal-agent
+# 卷 → 目录（控制层必须先停：stop 后 launchd 守护几秒内会拉起，故在同一条命令里做完）
+/Users/mengxiao/workspace/tools/start.sh stop personal-agent && \
+  AIO_ENV_FILE=var/deploy/aio.env node deploy/aio.mjs export-data /path/to/backup
+```
+
+退回 host 模式：先把卷导出，用导出的数据库替换 `var/` 里的旧副本，再把 `var/runtime.env` 的 `PA_DEPLOY`
+改成 `host` 并重启；跳过导出会让控制层用上迁移前的旧数据。
 
 ## 9. Codex MCP 隔离验收
 
