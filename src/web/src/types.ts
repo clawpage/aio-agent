@@ -206,7 +206,7 @@ export interface Task {
   /** Present when the task has browser tabs: its agent's tabs, a request for you, or you in control. */
   browser?: { tabs: number; request: string | null; human: boolean };
   /** Set on a run a schedule started (nobody typed it then). */
-  schedule?: { id: string; title: string; rule: string } | null;
+  schedule?: { id: string; title: string; rule: string; builtin?: string } | null;
 }
 
 /** A scheduled or recurring task, created by asking in the main session. */
@@ -223,6 +223,8 @@ export interface Schedule {
   lastTask: { id: string; status: string } | null;
   runCount: number;
   createdAt: number;
+  /** Set on a schedule every account gets (the daily feed): it can be paused, not deleted. */
+  builtin?: string | null;
 }
 
 /** One browser tab a task created, as the tab record keeps it. */

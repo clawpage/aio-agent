@@ -58,7 +58,15 @@ interface ScheduleRow {
     source_task_id: string | null;
     created_at: number;
     updated_at: number;
+    builtin: string | null;
 }
+/** The built-in daily feed: a schedule every account gets. */
+const DAILY_FEED = "daily_feed";
+const FEED_SPEC: ScheduleSpec = { kind: "daily", at: "08:00" };
+/** The machine-readable lines a feed run ends with; never shown to the person. */
+const FEED_TOPICS = /<!--\s*feed-topics:\s*(\[[\s\S]*?\])\s*-->/;
+const FEED_EMPTY = /<!--\s*feed-empty\s*-->/;
+const FEED_MARKERS = /\s*<!--\s*feed-(?:topics:[\s\S]*?|empty\s*)-->\s*/g;
 /** How often due schedules are checked; a run starts at most this late. */
 const SCHEDULE_TICK_MS = 30_000;
 /** A previous run in one of these states no longer holds the next one back. */
@@ -94,6 +102,7 @@ export class TaskService {
         }
         this.agent.events.on("event", this.onEvent);
         this.schedule();
+        this.ensureDailyFeed();
         this.#ticker = setInterval(() => this.runDueSchedules(), SCHEDULE_TICK_MS);
         this.#ticker.unref?.();
         this.runDueSchedules();
@@ -118,6 +127,8 @@ export class TaskService {
     private notifyChange(id: string, before: string): void {
         const row = this.get(id);
         if (!row || row.status === before || row.merged_into || !this.#notifier) return;
+        // A daily feed with nothing to say stays silent on the phone.
+        if (row.schedule_id && FEED_EMPTY.test(row.result ?? "") && this.scheduleRow(row.schedule_id)?.builtin === DAILY_FEED) return;
         if (["completed", "failed", "unknown", "needs_input"].includes(row.status)) {
             try { this.#notifier(this.view(row)); } catch { /* a notification never breaks the task flow */ }
         }
@@ -135,7 +146,7 @@ export class TaskService {
         const parent = row.merged_into ? this.get(row.merged_into) : null;
         return {
             id: row.id, revision: row.revision, title: row.title, text: row.input_text, conversationId: this.executor(parent ?? row), mergedInto: row.merged_into, mergedTitle: parent?.title ?? null,
-            status: row.status, result: TERMINAL.has(row.status) ? row.result : null, error: row.error,
+            status: row.status, result: TERMINAL.has(row.status) ? this.shownResult(row) : null, error: row.error,
             attachments: JSON.parse(row.attachments_json) as TurnAttachment[], relatedTaskId: row.related_task_id,
             relatedTaskTitle: row.related_task_id ? this.get(row.related_task_id)?.title ?? null : null,
             description: plan?.description ?? null,
@@ -626,6 +637,7 @@ export class TaskService {
         const items = messages.map(m => JSON.parse(m.payload).item).filter(i => i?.type === "agentMessage" && typeof i.text === "string" && i.text.trim());
         const last = items.filter(i => i.phase === "final_answer").at(-1) ?? items.at(-1);
         this.db.prepare("UPDATE tasks SET status=?,result=?,error=?,completed_at=? WHERE id=?").run(turn.status, last?.text ?? null, turn.error, turn.completed_at, row.id);
+        if (turn.status === "completed") this.recordFeed(this.get(row.id)!);
         this.notifyChange(row.id, row.status);
     }
 
@@ -638,15 +650,72 @@ export class TaskService {
         return (this.db.prepare("SELECT * FROM schedules WHERE owner_id=? AND status IN ('active','paused') ORDER BY created_at").all(ownerId) as unknown as ScheduleRow[])
             .map(s => ({ id: s.id, title: s.title, rule: describeSchedule(JSON.parse(s.spec_json) as ScheduleSpec), status: s.status }));
     }
-    private scheduleLabel(id: string): { id: string; title: string; rule: string } | null {
+    private scheduleLabel(id: string): { id: string; title: string; rule: string; builtin?: string } | null {
         const s = this.scheduleRow(id);
-        return s ? { id: s.id, title: s.title, rule: describeSchedule(JSON.parse(s.spec_json) as ScheduleSpec) } : null;
+        return s ? { id: s.id, title: s.title, rule: describeSchedule(JSON.parse(s.spec_json) as ScheduleSpec), ...(s.builtin ? { builtin: s.builtin } : {}) } : null;
+    }
+    /** A feed run's machine lines (topics, nothing-today) stay out of what the person reads. */
+    private shownResult(row: TaskRow): string | null {
+        if (!row.result || !row.schedule_id || this.scheduleRow(row.schedule_id)?.builtin !== DAILY_FEED) return row.result;
+        return row.result.replace(FEED_MARKERS, "\n").trim();
+    }
+    /** Every account gets the daily feed once; afterwards it is the person's to pause or resume. */
+    private ensureDailyFeed(): void {
+        if (!this.cfg.agent.dailyFeed) return;
+        const ownerId = this.cfg.runtimeUserId ?? "owner_1";
+        if (!this.db.prepare("SELECT 1 FROM owners WHERE id=?").get(ownerId)) return;
+        if (this.db.prepare("SELECT 1 FROM schedules WHERE owner_id=? AND builtin=?").get(ownerId, DAILY_FEED)) return;
+        const tz = this.cfg.browser.timezone;
+        const now = Date.now();
+        this.db.prepare("INSERT INTO schedules (id,owner_id,title,instruction,spec_json,timezone,resources_json,status,next_run_at,created_at,updated_at,builtin) VALUES (?,?,?,?,?,?,?,'active',?,?,?,?)")
+            .run(randomId("sched"), ownerId, "每日推送", "根据你过往的任务，整理今天你可能感兴趣的内容和需要的提醒", JSON.stringify(FEED_SPEC), tz, JSON.stringify(["browser"]), nextRun(FEED_SPEC, now, tz), now, now, DAILY_FEED);
+    }
+    /** Did the person send anything (not a scheduled run) since `since`? */
+    private spokeSince(ownerId: string, since: number): boolean {
+        return !!this.db.prepare("SELECT 1 FROM tasks WHERE schedule_id IS NULL AND created_at>=? AND conversation_id IN (SELECT id FROM conversations WHERE owner_id=?) LIMIT 1").get(since, ownerId);
+    }
+    /** Remember what a finished feed run covered. */
+    private recordFeed(row: TaskRow): void {
+        if (!row.schedule_id || this.scheduleRow(row.schedule_id)?.builtin !== DAILY_FEED) return;
+        let topics: string[] = [];
+        try {
+            const match = FEED_TOPICS.exec(row.result ?? "");
+            const parsed = match ? JSON.parse(match[1]!) as unknown : [];
+            topics = Array.isArray(parsed) ? parsed.filter((t): t is string => typeof t === "string" && !!t.trim()).map(t => t.trim().slice(0, 60)).slice(0, 10) : [];
+        } catch { topics = []; }
+        this.db.prepare("INSERT INTO feed_history (task_id,owner_id,created_at,topics_json,empty) VALUES (?,?,?,?,?) ON CONFLICT(task_id) DO UPDATE SET topics_json=excluded.topics_json,empty=excluded.empty")
+            .run(row.id, this.ownerId(row), row.created_at, JSON.stringify(topics), FEED_EMPTY.test(row.result ?? "") ? 1 : 0);
+    }
+    /** What a feed run works from: every earlier task of the person, and what recent feeds said and whether anything followed. */
+    private feedBrief(row: TaskRow): string {
+        const ownerId = this.ownerId(row);
+        const tz = this.cfg.browser.timezone;
+        const date = (ts: number) => describeNow(ts, tz);
+        const cut = (text: string | null, n: number) => { const c = [...(text ?? "").replace(/\s+/g, " ").trim()]; return c.length > n ? c.slice(0, n - 1).join("") + "…" : c.join(""); };
+        const mine = this.db.prepare("SELECT * FROM tasks WHERE schedule_id IS NULL AND merged_into IS NULL AND created_at<? AND conversation_id IN (SELECT id FROM conversations WHERE owner_id=?) ORDER BY created_at DESC LIMIT 150").all(row.created_at, ownerId) as unknown as TaskRow[];
+        const tasks = mine.map(t => ({ date: date(t.created_at), title: t.title, request: cut(t.input_text, 160), status: t.status, result: cut(t.result, 200) }));
+        const feeds = this.db.prepare("SELECT * FROM feed_history WHERE owner_id=? AND created_at<? ORDER BY created_at DESC LIMIT 14").all(ownerId, row.created_at) as Array<{ created_at: number; topics_json: string; empty: number }>;
+        const feedHistory = feeds.map((f, i) => {
+            const until = i === 0 ? row.created_at : feeds[i - 1]!.created_at;
+            const after = mine.filter(t => t.created_at > f.created_at && t.created_at < until).map(t => t.title).slice(0, 8);
+            return { date: date(f.created_at), topics: JSON.parse(f.topics_json) as string[], nothingToday: !!f.empty, userTasksAfter: after };
+        });
+        return [
+            `这是内置的「每日推送」（每天 08:00）在 ${date(row.created_at)} 的自动运行。用户此刻不在对话中。你的工作：根据用户过往的全部任务记录，挑出今天他最可能感兴趣、或需要提醒的 1-5 件事，像贴心的私人助理一样简短告诉他。`,
+            "从任务记录里找线索：关注过的商品和价格（例如某款电脑、婴儿用品）、在比价或犹豫要不要买的东西、临近的日期和预约（证件、疫苗、账单、出行）、做了一半或说过以后再看的事、长期关心的话题。记录不限于最近一天，越早的兴趣越要核实是否仍然相关。",
+            "需要最新信息时（价格、库存、天气、新闻）用浏览器或网络查证，只报告查到的事实并附来源链接；查不到就不写，不编造。只写有实际变化或与今天相关的事，例如“你关注的 Mac Studio 在 Best Buy 降到 $1,799，比上周低 $200”；没有变化的例行信息不写。",
+            "避免打扰：参考 feedHistory（最近几次推送的话题，以及之后用户的新任务 userTasksAfter）。同一话题最近已连续推过 3 次、而之后用户没有任何相关的新任务，说明他已不再关注，停止推送这个话题，除非出现重大新变化；用户最近新任务里体现的新兴趣优先；昨天说过且没有变化的不再重复。",
+            "格式：第一行“今日为你留意”，下面每件事一条，每条一两句话，必要时附链接或地图卡片；适合在手机上点开快速读完。今天确实没有值得说的，只回复一句“今天没有需要特别提醒的事”，并在末尾单独一行写 <!--feed-empty-->。",
+            "最后单独一行写 <!--feed-topics: [\"话题1\", \"话题2\"]-->，列出本次写到的话题（简短中文，例如“Mac Studio 降价”“Roy 疫苗预约”）；系统用它调整之后的推送，用户看不到这一行。不要提问后等待，不要创建定时任务。",
+            "用户的任务记录（新到旧）：", JSON.stringify(tasks),
+            "推送记录 feedHistory（新到旧）：", JSON.stringify(feedHistory),
+        ].join("\n\n");
     }
     /** Store the schedule a plan asked for; the sentence that tells the person what was set up. */
     private createSchedule(row: TaskRow, plan: TaskPlan, runningNow = false): string {
         const planned = plan.schedule!;
         const ownerId = this.ownerId(row);
-        const active = (this.db.prepare("SELECT COUNT(*) AS n FROM schedules WHERE owner_id=? AND status='active'").get(ownerId) as { n: number }).n;
+        const active = (this.db.prepare("SELECT COUNT(*) AS n FROM schedules WHERE owner_id=? AND status='active' AND builtin IS NULL").get(ownerId) as { n: number }).n;
         if (active >= MAX_ACTIVE_SCHEDULES)
             return `没有创建定时任务：已有 ${active} 个进行中的定时任务（上限 ${MAX_ACTIVE_SCHEDULES} 个）。请先在「定时任务」页暂停或删除不需要的。`;
         const tz = this.cfg.browser.timezone;
@@ -666,6 +735,10 @@ export class TaskService {
         const s = this.scheduleRow(id);
         if (!s || s.owner_id !== ownerId) return "没有找到这个定时任务，可能已经删除了。";
         const now = Date.now();
+        if (action === "cancel" && s.builtin) {
+            this.db.prepare("UPDATE schedules SET status='paused',updated_at=? WHERE id=?").run(now, id);
+            return `「${s.title}」是内置的定时任务，已为你关闭。想恢复时告诉我，或在「定时任务」页重新开启。`;
+        }
         if (action === "cancel") {
             this.db.prepare("DELETE FROM schedules WHERE id=?").run(id);
             return `已取消定时任务「${s.title}」，之后不会再运行。`;
@@ -702,7 +775,9 @@ export class TaskService {
     private fireSchedule(s: ScheduleRow, now: number, manual = false): string | null {
         const spec = JSON.parse(s.spec_json) as ScheduleSpec;
         const previous = s.last_task_id ? this.get(s.last_task_id) : null;
-        const busy = !!previous && !RUN_SETTLED.has(previous.status);
+        // The daily feed stays quiet unless the person sent something in the past day.
+        const quiet = s.builtin === DAILY_FEED && !manual && !this.spokeSince(s.owner_id, now - 24 * 3600_000);
+        const busy = quiet || (!!previous && !RUN_SETTLED.has(previous.status));
         const taskId = busy ? null : this.startScheduledRun(s, previous, manual ? `manual:${now}` : String(s.next_run_at));
         const runs = s.run_count + (taskId ? 1 : 0);
         const next = manual ? s.next_run_at : nextRun(spec, now, s.timezone);
@@ -719,7 +794,7 @@ export class TaskService {
         const id = randomId("task");
         const plan: TaskPlan = {
             title: s.title, description: `定时任务（${describeSchedule(JSON.parse(s.spec_json) as ScheduleSpec)}）的自动运行。`,
-            related: previous ? [previous.id] : [], dependencies: [], resources: JSON.parse(s.resources_json) as string[],
+            related: previous && s.builtin !== DAILY_FEED ? [previous.id] : [], dependencies: [], resources: JSON.parse(s.resources_json) as string[],
             appendTo: null, resume: null, clarification: null, ownedResources: [`write:${this.cfg.sandbox.containerWorkspaceDir}/tasks/${id}`],
         };
         this.db.exec("BEGIN IMMEDIATE");
@@ -735,6 +810,7 @@ export class TaskService {
     }
     private scheduledRunNote(row: TaskRow): string {
         const s = row.schedule_id ? this.scheduleRow(row.schedule_id) : null;
+        if (s?.builtin === DAILY_FEED) return this.feedBrief(row);
         const n = (this.db.prepare("SELECT COUNT(*) AS n FROM tasks WHERE schedule_id=? AND created_at<=?").get(row.schedule_id, row.created_at) as { n: number }).n;
         const rule = s ? `（${describeSchedule(JSON.parse(s.spec_json) as ScheduleSpec)}）` : "";
         const plan = JSON.parse(row.plan_json!) as TaskPlan;
@@ -746,6 +822,7 @@ export class TaskService {
             id: s.id, title: s.title, instruction: s.instruction, rule: describeSchedule(JSON.parse(s.spec_json) as ScheduleSpec), status: s.status,
             timezone: s.timezone, nextRunAt: s.next_run_at, nextRunText: s.next_run_at ? formatWhen(s.next_run_at, s.timezone) : null,
             lastRunAt: s.last_run_at, lastTask: last ? { id: last.id, status: last.status } : null, runCount: s.run_count, createdAt: s.created_at,
+            builtin: s.builtin,
         };
     }
     listSchedules(userId: string) {

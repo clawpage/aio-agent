@@ -135,6 +135,8 @@ export function loadConfig(): {
     maxConcurrentTurns: number;
     /** Reasoning summary mode requested for main turns (`none` disables summaries). */
     reasoningSummary: "none" | "auto" | "concise" | "detailed";
+    /** Give every account the built-in daily feed schedule (08:00, only after a day with messages). */
+    dailyFeed: boolean;
   };
   hostCodex: {
     bin: string;
@@ -381,6 +383,7 @@ export function loadConfig(): {
       // chain-of-thought; `concise` keeps the UI rows short and non-empty only
       // when there is real summary text.
       reasoningSummary: envEnum("PA_REASONING_SUMMARY", ["none", "auto", "concise", "detailed"], "concise"),
+      dailyFeed: envStr("PA_DAILY_FEED", "1") === "1",
     },
     hostCodex: {
       bin: envStr("PA_HOST_CODEX_BIN", "codex"),

@@ -171,6 +171,15 @@ CREATE TABLE IF NOT EXISTS schedules (
 );
 CREATE INDEX IF NOT EXISTS idx_schedules_due ON schedules(status, next_run_at);
 
+-- What each daily feed run covered, so later runs can drop topics the person stopped caring about.
+CREATE TABLE IF NOT EXISTS feed_history (
+  task_id TEXT PRIMARY KEY,
+  owner_id TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  topics_json TEXT NOT NULL DEFAULT '[]',
+  empty INTEGER NOT NULL DEFAULT 0
+);
+
 -- Web Push subscriptions of each account's browsers (phones added to the home screen).
 CREATE TABLE IF NOT EXISTS push_subscriptions (
   endpoint TEXT PRIMARY KEY,
@@ -274,6 +283,8 @@ function migrate(db: Db): void {
   if (!taskColumns.some(c => c.name === "execution_conversation_id")) db.exec("ALTER TABLE tasks ADD COLUMN execution_conversation_id TEXT REFERENCES conversations(id)");
   if (!taskColumns.some(c => c.name === "merged_into")) db.exec("ALTER TABLE tasks ADD COLUMN merged_into TEXT REFERENCES tasks(id)");
   if (!taskColumns.some(c => c.name === "schedule_id")) db.exec("ALTER TABLE tasks ADD COLUMN schedule_id TEXT");
+  const scheduleColumns = db.prepare("PRAGMA table_info(schedules)").all() as Array<{ name: string }>;
+  if (!scheduleColumns.some(c => c.name === "builtin")) db.exec("ALTER TABLE schedules ADD COLUMN builtin TEXT");
   const recallColumns = db.prepare("PRAGMA table_info(recall_events)").all() as Array<{ name: string }>;
   if (!recallColumns.some(c => c.name === "fail_reason")) db.exec("ALTER TABLE recall_events ADD COLUMN fail_reason TEXT");
   if (!recallColumns.some(c => c.name === "repairs_json")) db.exec("ALTER TABLE recall_events ADD COLUMN repairs_json TEXT NOT NULL DEFAULT '[]'");

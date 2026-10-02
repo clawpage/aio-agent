@@ -47,7 +47,8 @@ export function ScheduleList({ active, onExpired, onOpenTask }: { active: boolea
       {items && !items.length && <div className="empty"><h3>还没有定时任务</h3><p>在主会话里说出时间和要做的事，就会出现在这里。</p></div>}
       <ul className="task-list">{(items ?? []).map((s) => <li key={s.id} data-schedule-id={s.id}>
         <div className="task-list-item schedule-item">
-          <div className="task-list-top"><strong>{s.title}</strong><span className={`task-status-badge ${STATUS[s.status].tone}`}>{STATUS[s.status].label}</span></div>
+          <div className="task-list-top"><strong>{s.title}{s.builtin && <span className="schedule-builtin">内置</span>}</strong><span className={`task-status-badge ${STATUS[s.status].tone}`}>{STATUS[s.status].label}</span></div>
+          {s.builtin === "daily_feed" && <p className="muted tiny">前一天发过消息才会推送，根据你过往的任务整理今天值得留意的内容；不再关注的话题会自动少推。</p>}
           <p className="schedule-rule">{s.rule}{s.nextRunText && s.status === "active" ? <span className="muted"> · 下次 {s.nextRunText}</span> : null}</p>
           <p className="task-list-summary">{s.instruction}</p>
           <div className="task-list-meta">
@@ -60,7 +61,7 @@ export function ScheduleList({ active, onExpired, onOpenTask }: { active: boolea
               {s.status === "active" && <button className="ghost tiny" disabled={busy === s.id} onClick={() => void act(s, "pause")}>暂停</button>}
               {s.status === "paused" && <button className="ghost tiny" disabled={busy === s.id} onClick={() => void act(s, "resume")}>恢复</button>}
               {s.status !== "done" && <button className="ghost tiny" disabled={busy === s.id} onClick={() => void act(s, "run")}>立即运行一次</button>}
-              <button className="ghost tiny" disabled={busy === s.id} onClick={() => setConfirm(s.id)}>删除</button>
+              {!s.builtin && <button className="ghost tiny" disabled={busy === s.id} onClick={() => setConfirm(s.id)}>删除</button>}
             </div>}
         </div>
       </li>)}</ul>

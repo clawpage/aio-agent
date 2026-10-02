@@ -13,7 +13,8 @@ const run = { id: "task-run", revision: 1, title: "每日天气提醒", text: "�
 async function setup(page: Page) {
   await mockConsole(page, { conversations: [] });
   await page.route("**/api/main*", (r) => r.fulfill({ json: { mode: "tasks", tasks: [run], nextBefore: null } }));
-  let items = [schedule(), schedule({ id: "sched-2", title: "价格监控", rule: "每 2 小时", status: "paused", nextRunText: null, lastTask: null, runCount: 0 })];
+  let items = [schedule(), schedule({ id: "sched-2", title: "价格监控", rule: "每 2 小时", status: "paused", nextRunText: null, lastTask: null, runCount: 0 }),
+    schedule({ id: "sched-feed", title: "每日推送", instruction: "根据你过往的任务，整理今天你可能感兴趣的内容和需要的提醒", builtin: "daily_feed", lastTask: null, runCount: 0 })];
   const actions: string[] = [];
   await page.route("**/api/schedules", (r) => r.fulfill({ json: { schedules: items } }));
   await page.route("**/api/schedules/*/*", (r) => {
@@ -48,6 +49,12 @@ test("the schedules page lists rules and pauses, resumes, runs and deletes them"
   await expect(weather.locator(".task-status-badge")).toHaveText("进行中");
   await expect(list.locator('[data-schedule-id="sched-2"] .task-status-badge')).toHaveText("已暂停");
   await expect(list).toContainText("在主会话里直接说就能创建");
+  // The built-in daily feed can be paused or run, never deleted.
+  const builtin = list.locator('[data-schedule-id="sched-feed"]');
+  await expect(builtin).toContainText("内置");
+  await expect(builtin).toContainText("前一天发过消息才会推送");
+  await expect(builtin.getByRole("button", { name: "删除" })).toHaveCount(0);
+  await expect(builtin.getByRole("button", { name: "暂停" })).toBeVisible();
   await page.screenshot({ path: info.outputPath("schedules.png") });
 
   await weather.getByRole("button", { name: "暂停" }).click();

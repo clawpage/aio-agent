@@ -129,6 +129,7 @@ export class PushService {
 /** A reply as one short line for a lock screen: no Markdown, code or map blocks. */
 export function notificationText(text: string | null | undefined, max = 140): string {
   const plain = (text ?? "")
+    .replace(/<!--[\s\S]*?-->/g, " ")
     .replace(/```[\s\S]*?```/g, " ")
     .replace(/!\[[^\]]*\]\([^)]*\)/g, " ")
     .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
@@ -139,10 +140,16 @@ export function notificationText(text: string | null | undefined, max = 140): st
   return chars.length > max ? chars.slice(0, max - 1).join("") + "…" : plain;
 }
 
-type TaskView = { id: string; title: string; status: string; result: string | null; error: string | null; clarification: string | null };
+type TaskView = { id: string; title: string; status: string; result: string | null; error: string | null; clarification: string | null; schedule?: { builtin?: string } | null };
 
 /** What a task's news looks like on the phone, or null for news that is not worth a notification. */
 export function taskNotification(task: TaskView): PushPayload | null {
+  // The daily feed reads as what it is; its first line ("今日为你留意") is the title already.
+  if (task.schedule?.builtin === "daily_feed") {
+    if (task.status !== "completed") return null;
+    const body = notificationText((task.result ?? "").replace(/^\s*今日为你留意[：:]?\s*/, ""));
+    return body ? { title: "今日为你留意", body, tag: "daily-feed" } : null;
+  }
   if (task.status === "completed") return { title: `已完成：${task.title}`, body: notificationText(task.result) || "任务已完成，打开一站查看。", tag: task.id };
   if (task.status === "failed") return { title: `没有完成：${task.title}`, body: notificationText(task.error) || "执行失败，打开一站查看。", tag: task.id };
   if (task.status === "unknown") return { title: `结果待核对：${task.title}`, body: "连接中断，结果需要你核对。", tag: task.id };
