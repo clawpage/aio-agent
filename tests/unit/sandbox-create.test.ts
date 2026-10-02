@@ -82,6 +82,35 @@ it("points the browser at a newer build with its libraries, merges the TLS featu
   }
 });
 
+it("clears a browser profile lock left by a recreated container, and keeps this container's own", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pa-profile-lock-"));
+  try {
+    const container = new SandboxContainer(testConfig(dir, 18999), new Logger("error", undefined, false), testNode());
+    const profile = path.join(dir, "browser");
+    fs.mkdirSync(profile);
+    const configPath = path.join(dir, "browser-supervisor.json");
+    fs.writeFileSync(configPath, JSON.stringify({ browser: { user_data_dir: profile, args: ["--time-zone-for-testing=America/Los_Angeles", "--enable-features=AddTLSServerHandshakePadding", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"], env: { TZ: "America/Los_Angeles" }, binary: "/usr/local/bin/browser" } }));
+    vi.spyOn(container, "execInSandbox").mockImplementation(async (args: string[]) => {
+      const script = args[args.indexOf("-c") + 1]!.replace("/var/run/gem/browser-supervisor.json", configPath);
+      return { code: 0, stdout: execFileSync("python3", ["-c", script, ...args.slice(args.indexOf("-c") + 2)], { encoding: "utf8" }), stderr: "" };
+    });
+    const lock = (target: string) => {
+      for (const name of ["SingletonLock", "SingletonCookie", "SingletonSocket"]) fs.rmSync(path.join(profile, name), { force: true });
+      fs.symlinkSync(target, path.join(profile, "SingletonLock"));
+      fs.symlinkSync("1234", path.join(profile, "SingletonCookie"));
+      fs.symlinkSync("/tmp/org.chromium.Chromium.x/SingletonSocket", path.join(profile, "SingletonSocket"));
+    };
+    lock("1567baabfe53-88261");
+    await container.alignBrowserIdentity("America/Los_Angeles");
+    expect(fs.readdirSync(profile).filter((n) => n.startsWith("Singleton"))).toEqual([]);
+    lock(`${os.hostname()}-4242`);
+    await container.alignBrowserIdentity("America/Los_Angeles");
+    expect(fs.readlinkSync(path.join(profile, "SingletonLock"))).toBe(`${os.hostname()}-4242`);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 it("unpacks pinned browser packages as root, and leaves another CPU architecture on the image browser", async () => {
   const container = new SandboxContainer(testConfig("/tmp/pa-build", 18999), new Logger("error", undefined, false), testNode());
   const build = { packages: [{ url: "https://pkg.example/chromium.deb", sha256: "a".repeat(64) }, { url: "https://pkg.example/common.deb", sha256: "b".repeat(64) }], arch: "aarch64" };

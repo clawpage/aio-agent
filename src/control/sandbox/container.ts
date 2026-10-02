@@ -521,7 +521,7 @@ echo "$dir"`;
     backupPath = path.posix.join(this.#cfg.sandbox.containerCodexHome, "aio-browser", "profile-before-browser-change.tgz"),
   ): Promise<boolean> {
     const script = `
-import json, os, signal, sys, tarfile
+import json, os, signal, socket, sys, tarfile
 path = '/var/run/gem/browser-supervisor.json'
 if not os.path.exists(path): print('absent'); raise SystemExit(0)
 config = json.load(open(path))
@@ -571,6 +571,20 @@ except OSError:
 profile = browser.get('user_data_dir')
 want = os.path.realpath(binary)
 stale, moving = [], False
+# A profile carried over from a recreated container still holds that container's
+# lock (<hostname>-<pid>); Chromium then refuses it as in use on another computer
+# and never opens CDP. Only this container mounts the profile, so the lock is dead.
+foreign = False
+if profile:
+    try:
+        holder = os.readlink(os.path.join(profile, 'SingletonLock'))
+    except OSError:
+        holder = None
+    if holder and holder.rsplit('-', 1)[0] != socket.gethostname():
+        foreign = True
+        for name in ('SingletonLock', 'SingletonCookie', 'SingletonSocket'):
+            try: os.unlink(os.path.join(profile, name))
+            except OSError: pass
 for pid in (os.listdir('/proc') if os.path.isdir('/proc') else []):
     if not pid.isdigit(): continue
     try: raw = open('/proc/%s/cmdline' % pid, 'rb').read()
@@ -583,7 +597,7 @@ for pid in (os.listdir('/proc') if os.path.isdir('/proc') else []):
     other = os.path.realpath(cmd[0].decode()) != want
     moving = moving or other
     padded = any(x.startswith(b'--enable-features=') and PAD.encode() in x.split(b'=', 1)[1].split(b',') for x in cmd)
-    if other or not padded or any(x.startswith(b'--user-agent=') or x.decode() in DROP for x in cmd) or (b'--time-zone-for-testing=' + tz.encode()) not in cmd:
+    if foreign or other or not padded or any(x.startswith(b'--user-agent=') or x.decode() in DROP for x in cmd) or (b'--time-zone-for-testing=' + tz.encode()) not in cmd:
         stale.append(int(pid))
 if moving and not os.path.exists(backup):
     os.makedirs(os.path.dirname(backup), exist_ok=True)
