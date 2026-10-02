@@ -1,4 +1,5 @@
 import http from "node:http";
+import path from "node:path";
 import {MemberModelGateway} from "./memberModelGateway.js";
 import {ShareStore} from "./share.js";
 import {Jev} from "./jev.js";
@@ -31,6 +32,7 @@ import { createApp, handleUpgrade } from "./http/server.js";
 import { TaskService } from "./tasks/service.js";
 import type { AppContext } from "./context.js";
 import { SandboxIdle } from "./docker/idle.js";
+import { PushService, startTaskNotifications } from "./push.js";
 
 export interface Bootstrapped {
   ctx: AppContext;
@@ -360,6 +362,9 @@ async function main(): Promise<void> {
   kb.provision(ctx.cfg);
   const modelGateway=new MemberModelGateway(ctx.cfg,ctx.log,ctx.share,decision,kb);
   await modelGateway.start();
+  // Phone notifications: one key pair and one subscription store for every account.
+  ctx.push=new PushService({db:ctx.db,log:ctx.log,keyFile:path.join(ctx.cfg.dataDir,"vapid.json"),subject:`https://${ctx.cfg.primaryHost}`});
+  const ownerNotifications=startTaskNotifications(ctx,ctx.push);
   const users=new UserRuntimes(ctx,bootstrap,modelGateway);
   ctx.runtimeForUser=id=>users.resolve(id);
   const app = createApp(ctx);
@@ -389,6 +394,7 @@ async function main(): Promise<void> {
     ctx.log.info("shutting down", { signal });
     recovery.stop();
     idle?.stop();
+    ownerNotifications.stop();
     server.close();
     modelGateway.close();
     await users.shutdown();

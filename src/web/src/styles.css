@@ -2989,3 +2989,8 @@ textarea:focus {
   border: 1px solid var(--border);
   text-align: center;
 }
+
+/* ---------------------------------------------------- phone notifications */
+.push-toggle { display: flex; flex-direction: column; gap: 4px; margin: 4px 0; }
+.push-on { display: flex; align-items: center; gap: 6px; padding: 4px 12px; }
+.push-on .tiny:first-child { flex: 1; color: var(--done); }

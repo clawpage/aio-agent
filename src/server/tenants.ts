@@ -3,6 +3,7 @@ import {userNamespace,workspaceConfig} from './auth/workspaceHost.js';
 import type {Config} from './config.js';
 import type {AppContext} from './context.js';
 import {bootstrap, startSandboxRuntime, startRuntimeRecovery, startSandboxIdle, type Bootstrapped} from './index.js';
+import {startTaskNotifications} from './push.js';
 import type {MemberModelGateway} from './memberModelGateway.js';
 import {getUser} from './auth/owner.js';
 import {MEMBER_MODEL,MEMBER_MODELS} from './auth/policy.js';
@@ -67,6 +68,7 @@ export class UserRuntimes {
     runtime.ctx.sessions=this.root.sessions;
     runtime.ctx.tickets=this.root.tickets;
     runtime.ctx.limiter=this.root.limiter;
+    runtime.ctx.push=this.root.push;
     if(runtime.ctx.cfg.sandbox.autostart){
       try{await runtime.ctx.container.ensureRunning();}catch(err){await runtime.shutdown();throw err;}
     }
@@ -75,6 +77,7 @@ export class UserRuntimes {
       try{await this.root.container.protectMemberPorts(ports);}catch(err){await runtime.shutdown();throw err;}
     }
     await runtime.ctx.agent.init();runtime.ctx.tasks.init();
+    if(runtime.ctx.push)this.recoveries.push(startTaskNotifications(runtime.ctx,runtime.ctx.push));
     if(runtime.ctx.cfg.sandbox.autostart){
       await startSandboxRuntime(runtime.ctx);
       if(runtime.ctx.sandboxSetupError){await runtime.shutdown();throw new Error('用户独立环境启动失败');}

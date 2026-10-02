@@ -117,6 +117,10 @@ export const api = {
   refresh: () => request<{ ok: boolean; expiresAt: number }>("/api/auth/refresh", { method: "POST", body: {} }),
   status: () => request<StatusResponse>("/api/status"),
   schedules: () => request<{ schedules: Schedule[] }>("/api/schedules", { cache: "no-store" }),
+  pushInfo: () => request<{ supported: boolean; publicKey?: string; devices?: number }>("/api/push", { cache: "no-store" }),
+  pushSubscribe: (subscription: PushSubscriptionJSON) => request<{ ok: boolean; devices: number }>("/api/push/subscribe", { method: "POST", body: { subscription } }),
+  pushUnsubscribe: (endpoint: string) => request<{ ok: boolean }>("/api/push/unsubscribe", { method: "POST", body: { endpoint } }),
+  pushTest: () => request<{ sent: number }>("/api/push/test", { method: "POST", body: {} }),
   scheduleAction: (id: string, action: "pause" | "resume" | "cancel" | "run") =>
     request<{ message?: string; schedule: Schedule | null }>(`/api/schedules/${encodeURIComponent(id)}/${action}`, { method: "POST", body: {} }),
   /** The console is on screen: keeps the account's container up, and starts a stopped one. */

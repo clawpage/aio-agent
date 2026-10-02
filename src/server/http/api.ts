@@ -396,11 +396,35 @@ export function createApiRouter(context: AppContext): Router {
     "/presence",
     requireKind("primary"),
     requireSession,
-    asyncHandler(async (_req, res) => {
+    asyncHandler(async (req, res) => {
       context.idle?.foreground();
+      context.push?.presence(ctxOf(req).session!.ownerId);
       res.json({ ok: true });
     }),
   );
+
+  /** Phone notifications (Web Push): the key to subscribe with, and this account's devices. */
+  router.get("/push", requireKind("primary"), requireSession, asyncHandler(async (req, res) => {
+    res.setHeader("Cache-Control", "no-store");
+    res.json(context.push ? { supported: true, publicKey: context.push.publicKey, devices: context.push.count(ctxOf(req).session!.ownerId) } : { supported: false });
+  }));
+  router.post("/push/subscribe", requireKind("primary"), requireSession, asyncHandler(async (req, res) => {
+    if (!context.push) { res.status(404).json({ error: "push_unavailable", message: "通知暂不可用" }); return; }
+    try {
+      context.push.subscribe(ctxOf(req).session!.ownerId, req.body?.subscription ?? {}, req.get("user-agent") ?? "");
+      res.json({ ok: true, devices: context.push.count(ctxOf(req).session!.ownerId) });
+    } catch (err) { res.status(400).json({ error: "bad_subscription", message: err instanceof Error ? err.message : "订阅无效" }); }
+  }));
+  router.post("/push/unsubscribe", requireKind("primary"), requireSession, asyncHandler(async (req, res) => {
+    const endpoint = typeof req.body?.endpoint === "string" ? req.body.endpoint : "";
+    if (context.push && endpoint) context.push.unsubscribe(ctxOf(req).session!.ownerId, endpoint);
+    res.json({ ok: true });
+  }));
+  router.post("/push/test", requireKind("primary"), requireSession, asyncHandler(async (req, res) => {
+    if (!context.push) { res.status(404).json({ error: "push_unavailable", message: "通知暂不可用" }); return; }
+    const sent = await context.push.notify(ctxOf(req).session!.ownerId, { title: "一站通知已开启", body: "任务完成、需要你补充或确认时，会在这里提醒你。", tag: "test" }, { force: true });
+    res.json({ sent });
+  }));
 
   router.get(
     "/health",

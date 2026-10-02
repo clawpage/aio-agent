@@ -12,6 +12,7 @@ import { Workspace } from "./Workspace";
 import { TaskChat } from "./TaskChat";
 import { TaskList } from "./TaskList";
 import { ScheduleList } from "./ScheduleList";
+import { PushToggle } from "./PushToggle";
 import {taskStatusLabels,type TaskFeed} from '../taskStatus';
 /** One owner-facing inbox; executor conversations are implementation details. */
 export function MainApp() {
@@ -187,7 +188,7 @@ export function MainApp() {
       <button className={`ghost block ${view === "tasks" ? "active" : ""}`} onClick={() => { detailRequest.current++;closeMenu(); setView("tasks"); setWorkspace(false); }}>任务列表</button>
       <button className={`ghost block ${view === "schedules" ? "active" : ""}`} onClick={() => { detailRequest.current++;closeMenu(); setView("schedules"); setWorkspace(false); }}>定时任务</button>
       <button className="ghost block" onClick={() => { closeMenu(); openWorkspace(); }}>工作区</button>
-      <div className="sidebar-foot"><span className="muted tiny">{status?.agent.sessionReady ? "智能体在线" : "正在连接智能体"}</span><button className="ghost block" onClick={() => setTheme(t => t === "dark" ? "light" : "dark")}>{theme === "dark" ? "浅色模式" : "深色模式"}</button>{role === "owner" && <button className={`ghost block ${view === "settings" ? "active" : ""}`} onClick={settings}>配置</button>}<button className="ghost block" onClick={() => void logout()}>退出登录</button></div>
+      <div className="sidebar-foot"><span className="muted tiny">{status?.agent.sessionReady ? "智能体在线" : "正在连接智能体"}</span><PushToggle/><button className="ghost block" onClick={() => setTheme(t => t === "dark" ? "light" : "dark")}>{theme === "dark" ? "浅色模式" : "深色模式"}</button>{role === "owner" && <button className={`ghost block ${view === "settings" ? "active" : ""}`} onClick={settings}>配置</button>}<button className="ghost block" onClick={() => void logout()}>退出登录</button></div>
     </aside>
     <main className="main" inert={mobile && menuOpen}>
       {notice && <div className="banner" role="alert">{notice}<button onClick={() => setNotice(null)}>关闭</button></div>}

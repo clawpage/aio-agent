@@ -80,6 +80,8 @@ export class TaskService {
     #mergeAgain = false;
     #scheduled = false;
     #ticker: ReturnType<typeof setInterval> | null = null;
+    /** Told when a task finishes, fails or needs an answer (phone notifications). */
+    #notifier: ((task: ReturnType<TaskService["view"]>) => void) | null = null;
     readonly recall: TaskRecall;
     constructor(private db: Db, private cfg: Config, private agent: AgentManager, private codex: CodexSessionLike, private resourceSandbox?: ResourceSandbox, private jev?: Jev) { this.recall = new TaskRecall(db); }
     init(): void {
@@ -111,6 +113,21 @@ export class TaskService {
         const same = this.rows().filter(t => t.id !== row.id && t.created_at < row.created_at && !t.merged_into && this.executor(t) === this.executor(ref));
         return same.filter(t => ["planning", "needs_input", "waiting", "queued", "running", "stopping"].includes(t.status)).at(-1) ?? ref;
     }
+    setNotifier(notifier: ((task: ReturnType<TaskService["view"]>) => void) | null): void { this.#notifier = notifier; }
+    /** Tell the notifier about a status this task just reached, if it is news for the person. */
+    private notifyChange(id: string, before: string): void {
+        const row = this.get(id);
+        if (!row || row.status === before || row.merged_into || !this.#notifier) return;
+        if (["completed", "failed", "unknown", "needs_input"].includes(row.status)) {
+            try { this.#notifier(this.view(row)); } catch { /* a notification never breaks the task flow */ }
+        }
+    }
+    /** The task whose execution session this conversation is (the newest one sharing it). */
+    taskForConversation(conversationId: string): { id: string; title: string } | null {
+        const row = this.db.prepare("SELECT id,title FROM tasks WHERE COALESCE(execution_conversation_id,conversation_id)=? AND merged_into IS NULL ORDER BY created_at DESC LIMIT 1").get(conversationId) as { id: string; title: string } | undefined;
+        return row ?? null;
+    }
+    hasRunning(): boolean { return this.rows().some(t => DISPATCHED.has(t.status)); }
     ownsConversation(id: string): boolean { return !!this.db.prepare("SELECT 1 FROM tasks WHERE conversation_id=?").get(id); }
     view(row: TaskRow) {
         const plan = row.plan_json ? JSON.parse(row.plan_json) as TaskPlan : null;
@@ -419,6 +436,7 @@ export class TaskService {
             if (plan.schedule) plan.description = this.createSchedule(row, plan, true);
             this.db.prepare("UPDATE tasks SET title=?,plan_json=?,status=?,error=NULL WHERE id=?").run(plan.title, JSON.stringify(plan), plan.clarification ? "needs_input" : "waiting", row.id);
             this.agent.renameConversation(row.conversation_id, plan.title);
+            this.notifyChange(row.id, "planning");
         }
         catch (err) {
             if (!this.#closed && this.get(row.id)?.status === "planning") {
@@ -608,6 +626,7 @@ export class TaskService {
         const items = messages.map(m => JSON.parse(m.payload).item).filter(i => i?.type === "agentMessage" && typeof i.text === "string" && i.text.trim());
         const last = items.filter(i => i.phase === "final_answer").at(-1) ?? items.at(-1);
         this.db.prepare("UPDATE tasks SET status=?,result=?,error=?,completed_at=? WHERE id=?").run(turn.status, last?.text ?? null, turn.error, turn.completed_at, row.id);
+        this.notifyChange(row.id, row.status);
     }
 
     // ------------------------------------------------------------- schedules

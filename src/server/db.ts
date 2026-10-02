@@ -170,6 +170,18 @@ CREATE TABLE IF NOT EXISTS schedules (
   updated_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_schedules_due ON schedules(status, next_run_at);
+
+-- Web Push subscriptions of each account's browsers (phones added to the home screen).
+CREATE TABLE IF NOT EXISTS push_subscriptions (
+  endpoint TEXT PRIMARY KEY,
+  owner_id TEXT NOT NULL,
+  p256dh TEXT NOT NULL,
+  auth TEXT NOT NULL,
+  user_agent TEXT NOT NULL DEFAULT '',
+  created_at INTEGER NOT NULL,
+  last_ok_at INTEGER,
+  failures INTEGER NOT NULL DEFAULT 0
+);
 CREATE TRIGGER IF NOT EXISTS task_revision AFTER UPDATE ON tasks
 WHEN NEW.revision = OLD.revision
 BEGIN UPDATE tasks SET revision=OLD.revision+1 WHERE id=NEW.id; END;
