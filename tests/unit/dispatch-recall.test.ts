@@ -45,7 +45,7 @@ const events = () => db.prepare("SELECT * FROM recall_events ORDER BY id").all()
 beforeEach(async () => {
   db = openDb(":memory:");
   codex = new DispatchCodex();
-  const cfg = testConfig("/tmp/aio-dispatch-recall", 1, { PA_AUTO_TITLE: "0" });
+  const cfg = testConfig("/tmp/aio-dispatch-recall", 1);
   agent = new AgentManager({ db, cfg, codex, log: new Logger("error", undefined, false), hostTokens: {} as HostTokenSource });
   await agent.init();
   tasks = new TaskService(db, cfg, agent, codex);

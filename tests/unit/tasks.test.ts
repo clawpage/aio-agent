@@ -26,7 +26,7 @@ const submit = (text: string, relatedTaskId?: string) => tasks.submit({ text, cl
 beforeEach(async () => {
     db = openDb(":memory:");
     codex = new PlanningCodex();
-    const cfg = testConfig("/tmp/aio-main-tasks", 1, { PA_AUTO_TITLE: "0" });
+    const cfg = testConfig("/tmp/aio-main-tasks", 1);
     agent = new AgentManager({ db, cfg, codex, log: new Logger("error", undefined, false), hostTokens: {} as HostTokenSource });
     await agent.init();
     tasks = new TaskService(db, cfg, agent, codex);
@@ -236,7 +236,7 @@ describe("main inbox delegation", () => {
     it("resumes the same thread for subsequent references and after TaskService reinitialization",async()=>{
         const original=submit('original');await tick();await codex.runTurn(codex.startedTurns[0]!.turnId,{text:'Original'});await tick();
         const second=submit('second',original.id);await tick();await codex.runTurn(codex.startedTurns[1]!.turnId,{text:'Second'});await tick();
-        tasks.close();tasks=new TaskService(db,testConfig('/tmp/aio-main-tasks',1,{PA_AUTO_TITLE:'0'}),agent,codex);tasks.init();
+        tasks.close();tasks=new TaskService(db,testConfig('/tmp/aio-main-tasks',1),agent,codex);tasks.init();
         const third=submit('third',second.id);await tick();
         expect(codex.resumedThreads).toEqual([codex.startedTurns[0]!.threadId,codex.startedTurns[0]!.threadId]);expect(codex.startedThreads).toHaveLength(1);
         expect(tasks.view(tasks.get(third.id)!).conversationId).toBe(original.conversationId);
@@ -368,7 +368,7 @@ describe("main inbox delegation", () => {
         await tick();
         tasks.close();
         agent.shutdown();
-        const cfg = testConfig("/tmp/aio-main-tasks", 1, { PA_AUTO_TITLE: "0" });
+        const cfg = testConfig("/tmp/aio-main-tasks", 1);
         codex = new PlanningCodex();
         agent = new AgentManager({ db, cfg, codex, log: new Logger("error", undefined, false), hostTokens: {} as HostTokenSource });
         await agent.init();
@@ -618,7 +618,7 @@ describe("main-session order, Jev's second opinion and resuming a finished sessi
             },
         };
         tasks.close();
-        tasks = new TaskService(db, testConfig("/tmp/aio-main-tasks", 1, { PA_AUTO_TITLE: "0" }), agent, codex, undefined, jev as never);
+        tasks = new TaskService(db, testConfig("/tmp/aio-main-tasks", 1), agent, codex, undefined, jev as never);
         tasks.init();
         const trip = submit("规划东京三天行程"); await tick();
         submit("酒店要靠近新宿"); await tick(); await tick();
@@ -661,7 +661,7 @@ describe("owner dispatch log", () => {
             return { answers: { target: { choice: ids[0]!, confidence: 0.9, probabilities: Object.fromEntries(ids.map(id => [id, id === ids[0] ? 0.9 : 0.1 / (ids.length - 1)])) } }, usage: null, latencyMs: 4 };
         } };
         tasks.close();
-        tasks = new TaskService(db, testConfig("/tmp/aio-main-tasks", 1, { PA_AUTO_TITLE: "0" }), agent, codex, undefined, jev as never);
+        tasks = new TaskService(db, testConfig("/tmp/aio-main-tasks", 1), agent, codex, undefined, jev as never);
         tasks.init();
         const trip = submit("规划东京三天行程"); await tick();
         let round = 0;

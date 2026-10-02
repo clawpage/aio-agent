@@ -475,7 +475,7 @@ describe("conversation management and sandbox browser tabs", () => {
     expect(((await renamed.json()) as { conversation: { title: string } }).conversation.title).toBe("改名成功");
   });
 
-  it("rejects a blank or over-long rename with 400 without touching the row or manual marker", async () => {
+  it("rejects a blank or over-long rename with 400 without touching the row", async () => {
     const { cookie, csrf } = await login(h);
     const headers = { cookie, "x-csrf-token": csrf, "content-type": "application/json" };
 
@@ -485,9 +485,6 @@ describe("conversation management and sandbox browser tabs", () => {
         "INSERT INTO conversations (id, owner_id, title, model, cwd, status, archived, created_at, updated_at) VALUES ('conv_title_guard', 'owner_1', '原始标题', NULL, NULL, 'idle', 0, ?, ?)",
       )
       .run(now, now);
-    const manualKey = "title_manual:conv_title_guard";
-    expect(h.ctx.db.prepare("SELECT value FROM meta WHERE key = ?").get(manualKey)).toBeUndefined();
-
     try {
       for (const bad of ["", "   ", "x".repeat(201), null, 42]) {
         const res = await h.request("/api/conversations/conv_title_guard", {
@@ -499,12 +496,11 @@ describe("conversation management and sandbox browser tabs", () => {
         expect(((await res.json()) as { error: string }).error).toBe("invalid_title");
       }
 
-      // Neither the stored title nor the manual-title marker moved.
+      // The stored title did not move.
       const row = h.ctx.db.prepare("SELECT title FROM conversations WHERE id = 'conv_title_guard'").get() as { title: string };
       expect(row.title).toBe("原始标题");
-      expect(h.ctx.db.prepare("SELECT value FROM meta WHERE key = ?").get(manualKey)).toBeUndefined();
 
-      // A valid, trimmed title still renames and records the manual marker.
+      // A valid, trimmed title still renames.
       const ok = await h.request("/api/conversations/conv_title_guard", {
         method: "PATCH",
         headers,
@@ -512,11 +508,9 @@ describe("conversation management and sandbox browser tabs", () => {
       });
       expect(ok.status).toBe(200);
       expect(((await ok.json()) as { conversation: { title: string } }).conversation.title).toBe("长".repeat(200));
-      expect(h.ctx.db.prepare("SELECT value FROM meta WHERE key = ?").get(manualKey)).toBeTruthy();
     } finally {
       h.ctx.db.prepare("DELETE FROM events WHERE conversation_id = 'conv_title_guard'").run();
       h.ctx.db.prepare("DELETE FROM conversations WHERE id = 'conv_title_guard'").run();
-      h.ctx.db.prepare("DELETE FROM meta WHERE key = ?").run(manualKey);
     }
   });
 

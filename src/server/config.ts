@@ -126,16 +126,11 @@ export function loadConfig(): {
   agent: {
     /** Model a turn uses when neither the client nor the conversation picked one. */
     defaultModel: string;
-    /** Generate a conversation title from the first turn with an isolated Luna run. */
-    autoTitle: boolean;
-    /** Model used only for the auxiliary title run; never the main conversation model. */
+    /**
+     * Model of the Codex main-session dispatcher's isolated read-only run; never the
+     * main conversation model. Keeps its historical env name, PA_TITLE_MODEL.
+     */
     titleModel: string;
-    /** Reasoning effort for the auxiliary title run (Luna supports low..max, not minimal). */
-    titleEffort: string;
-    /** Upper bound on a generated title, in Unicode code points. */
-    titleMaxChars: number;
-    /** Hard timeout for one auxiliary title run. */
-    titleTimeoutMs: number;
     /** Upper bound on concurrent main Codex turns across conversations. */
     maxConcurrentTurns: number;
     /** Reasoning summary mode requested for main turns (`none` disables summaries). */
@@ -374,13 +369,9 @@ export function loadConfig(): {
     },
     agent: {
       defaultModel: envStr("PA_DEFAULT_MODEL", "gpt-6-sol"),
-      // Only the auxiliary title run uses a different model; the main agent stays
-      // on PA_DEFAULT_MODEL. Disabling this keeps the sandbox untouched by titles.
-      autoTitle: envStr("PA_AUTO_TITLE", "1") === "1",
+      // Only the dispatcher's auxiliary run uses a different model; the main agent
+      // stays on PA_DEFAULT_MODEL.
       titleModel: envStr("PA_TITLE_MODEL", "gpt-6-luna"),
-      titleEffort: envStr("PA_TITLE_EFFORT", "low"),
-      titleMaxChars: envInt("PA_TITLE_MAX_CHARS", 24),
-      titleTimeoutMs: envInt("PA_TITLE_TIMEOUT_SECONDS", 30) * 1000,
       // At most three main turns run at once across different conversations; a
       // fourth conversation waits in FIFO order for a slot to free. One
       // conversation still runs at most one turn at a time. The env value is

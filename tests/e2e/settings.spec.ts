@@ -288,7 +288,7 @@ test("config page chooses the executor, then only that executor's models", async
   await executor.selectOption("claude-code");
   await expect(page.getByLabel("模型", { exact: true })).toHaveValue("claude-opus-5-5");
   expect(await optionValues("模型")).toEqual(["claude-opus-5-5", "claude-sonnet-5-5"]);
-  await expect(page.locator(".settings-fields")).toContainText("主会话派单、任务执行和自动标题都由 Claude Code 完成");
+  await expect(page.locator(".settings-fields")).toContainText("主会话派单和任务执行都由 Claude Code 完成");
   // Claude models take images: no text-only note.
   await expect(page.getByRole("note")).toHaveCount(0);
   await page.getByLabel("思考强度", { exact: true }).selectOption("xhigh");

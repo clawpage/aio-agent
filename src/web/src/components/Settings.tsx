@@ -207,8 +207,8 @@ export function Settings({ onBack, onSaved }: Props) {
               </select>
               <span className="muted tiny">
                 {harness === "claude-code"
-                  ? "主会话派单、任务执行和自动标题都由 Claude Code 完成；之前在 Codex 上的任务续接时会带上原有记录。"
-                  : "主会话派单、任务执行和自动标题都由 Codex 完成。"}
+                  ? "主会话派单和任务执行都由 Claude Code 完成；之前在 Codex 上的任务续接时会带上原有记录。"
+                  : "主会话派单和任务执行都由 Codex 完成。"}
               </span>
             </label>
           )}

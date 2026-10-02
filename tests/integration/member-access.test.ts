@@ -64,7 +64,6 @@ it('isolates ledger reads, references, stops, events, replay IDs and planner con
  expect(h.codex.startedTurns.at(-1)).toMatchObject({threadId:run.threadId,model:MEMBER_MODEL,effort:'high'});
  expect(h.codex.resumedThreads).toContain(run.threadId);
  expect(resume).toHaveBeenLastCalledWith(run.threadId,readSoul(h.ctx.cfg).content);
- expect(h.codex.titleCalls).toHaveLength(0);
 
 });
 it('fails closed when the fixed provider is unavailable instead of using GPT',async()=>{

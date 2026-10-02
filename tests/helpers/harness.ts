@@ -291,13 +291,6 @@ export class FakeCodex implements CodexSessionLike {
   #manualTurns = new Map<string, { threadId: string; resolve: () => void }>();
   /** Set to make startThread fail. */
   failStart = false;
-  /** Scripted automatic-title behavior. */
-  titleResult: string | null = "自动标题";
-  /** When set, the title is derived from the input (to distinguish conversations). */
-  titleResultFor: ((userText: string) => string | null) | null = null;
-  titleCalls: string[] = [];
-  failTitle = false;
-  titleDelayMs = 0;
   /** When set, `startTurn` waits for it to resolve before returning a turn id. */
   startTurnGate: Promise<void> | null = null;
 
@@ -447,14 +440,6 @@ export class FakeCodex implements CodexSessionLike {
 
   async interrupt(threadId: string, turnId: string): Promise<void> {
     this.interrupted.push({ threadId, turnId });
-  }
-
-  async generateTitle(userText: string): Promise<string | null> {
-    this.titleCalls.push(userText);
-    if (this.titleDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, this.titleDelayMs));
-    if (this.failTitle) throw new Error("title generation failed");
-    if (this.titleResultFor) return this.titleResultFor(userText);
-    return this.titleResult;
   }
 
   answer(id: string, result: unknown): boolean {

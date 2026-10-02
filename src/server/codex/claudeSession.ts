@@ -9,7 +9,6 @@ import { ClaudeStreamTranslator } from "./claudeTranslator.js";
 import { tabMcpServers, type BrowserTask } from "../browser/tabs.js";
 import { decisionMcpServers } from "../decision.js";
 import { kbMcpServers } from "../kb.js";
-import { buildTitlePrompt } from "./autoTitle.js";
 import { JsonRpcResponseError } from "./jsonrpc.js";
 
 /** A definite refusal: the addition was never consumed (the task service treats it as not delivered). */
@@ -302,10 +301,6 @@ export class ClaudeCodeSession {
    */
   planTask(prompt: string, developerInstructions?: string): Promise<string | null> {
     return this.#oneShot(prompt, "high", 90_000, developerInstructions);
-  }
-
-  generateTitle(userText: string): Promise<string | null> {
-    return this.#oneShot(buildTitlePrompt(userText, this.#cfg.agent.titleMaxChars), "low", this.#cfg.agent.titleTimeoutMs);
   }
 
   async #oneShot(prompt: string, effort: string, timeoutMs: number, developerInstructions?: string): Promise<string | null> {

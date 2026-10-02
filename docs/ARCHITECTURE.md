@@ -88,7 +88,7 @@ planning_failed 可安全重试分类；blocked 提示前置结果需要核对�
 数据库保留兼容表名 `owners`，增加 `role=owner|member`；原 `owner_1` 迁移为 owner，密码与已有 session 不变。
 任务经 conversation.owner_id 绑定账号；列表、详情、事件回放/实时流、审批、引用、停止与派单历史均核对归属。
 owner 维护自己的模型与 SOUL，各 member 从默认 SOUL 开始独立保存；member 派单和执行固定 DeepSeek / high，服务端拒绝覆盖，桥接不可用时失败，不回退 GPT。
-member 不走 owner 的自动标题模型，也不显示配置/模型/提示原文。这里的隐藏指产品配置及结构化元数据，不对正常回答文字做删词处理。
+member 不显示配置/模型/提示原文。这里的隐藏指产品配置及结构化元数据，不对正常回答文字做删词处理。
 
 `UserRuntimes` 按服务器查证的账号身份选择完整运行环境，禁止客户端指定容器、端口、目录或上游。
 member 使用独立容器和三个独立卷、独立宿主任务 DB / SOUL / 缓存、独立网络和工作区路径（同一工作区域名下的 `/u/<用户名>/`，owner 同样是 `/u/owner`，兼容旧的 `/u/<账号散列>/`；不带前缀的子资源按工作区会话的账号路由；容器与卷名仍用账号散列）。主控制台同样按 `/u/<用户名>` 区分地址，登录状态仍是整站一个会话。所有沙箱容器（owner 在内）内存上限 2 GB（`--memory 2g`，交换区合计 4 GB）；member 另限 2 核 CPU、1024 个进程。改上限只影响新建的容器，已有容器用 `docker update --memory 2g --memory-swap 4g <容器>` 在线生效，无需重建。
@@ -116,20 +116,15 @@ HTTP、SSE、WebSocket、文件预览、上传、终端与浏览器都走同一�
 - 每个轮次提交时冻结模型设置：owner 使用统一配置，否则用 `PA_DEFAULT_MODEL`（默认 `gpt-6-sol`）；member 强制 DeepSeek high，提交与执行时均检查，不采用客户端覆盖。升级时有一次受 `meta` 键
   （`model_default_migration_v1`）保护的一次性迁移：仍带旧默认值 `gpt-5.5` 的会话改为新默认，
   只改 `model` 列、不动历史；之后用户手动选择（包括 5.5）永久保留。
-- **自动标题**（独立于主对话）：会话首轮 `completed` 后，控制面异步启动一个沙箱内临时线程
-  （`thread/start {ephemeral:true, sandbox:"read-only", approvalPolicy:"never", model: PA_TITLE_MODEL}`），
-  把首条用户消息交给它生成短标题；首轮只有附件时用附件名/类型构造输入。只有临时线程被
-  `threadSubscriber` 接管，其通知、审批、delta 不会进入用户会话（`#conversationForThread` 对
-  未知线程不再回退到活动会话）。只有 `turn/completed` 状态为 `completed` 才采用结果；超时/失败
-  返回 `null`，超时时 best-effort `turn/interrupt`，并把该临时线程标记为 tombstone：直到真正收到
-  `turn/completed` 或会话关闭前，它的所有通知继续丢弃，避免迟到的 delta 被 `#bufferDelta` 记到主会话。
-  写库用 `UPDATE ... WHERE title='新会话' AND archived=0 AND NOT EXISTS(meta.title_manual:<id>)`
-  单条原子守卫；手动改名与 `meta.title_manual:<id>` 写入在同一 SQLite 事务，成功后发
-  `conversation.title_updated`。只重命名仍为默认名且从未手动改名的会话；失败保留原名，
-  同一进程不重试、下次启动可重试；旧会话在 Codex 就绪后串行补名。
+- **派单器的临时线程**（Codex 执行器时，独立于主对话）：主会话派单在沙箱内启动一个临时线程
+  （`thread/start {ephemeral:true, sandbox:"read-only", approvalPolicy:"never", model: PA_TITLE_MODEL}`，
+  effort high，90 秒）。只有临时线程被 `threadSubscriber` 接管，其通知、审批、delta 不会进入用户会话
+  （`#conversationForThread` 对未知线程不回退到活动会话）。只有 `turn/completed` 状态为 `completed`
+  才采用结果；超时返回 `null` 并 best-effort `turn/interrupt`，同时把该线程标记为 tombstone：直到
+  真正收到 `turn/completed` 或会话关闭前，它的所有通知继续丢弃，避免迟到的 delta 被 `#bufferDelta`
+  记到主会话。会话标题由派单器按任务给出（早先的“首轮自动标题”已移除）。
 - **旧版会话管理兼容接口**（当前主界面不展示）：每个会话只有一个 `⋯` 菜单（重命名；活跃项归档、归档项恢复），**没有删除**。
-  重命名走 `PATCH /api/conversations/:id {title}`，与自动标题共用 `meta.title_manual:<id>` 保护，手动标题
-  不会被自动重写。为保持“最多一个活跃空白默认会话”，空标题创建会复用已有空白默认；把零轮次会话
+  重命名走 `PATCH /api/conversations/:id {title}`，成功后发 `conversation.title_updated`。为保持“最多一个活跃空白默认会话”，空标题创建会复用已有空白默认；把零轮次会话
   改名成 `新会话`、或恢复另一个零轮次 `新会话` 而已有活跃空白时，服务端返回 409（归档项仍可恢复，
   有消息的会话不受影响）。归档只改 `archived` 标志，不清除沙箱文件或远端 Codex 数据。
   侧栏排序不依赖 `updated_at`（重命名、归档、恢复、状态变化都会改它）：唯一活跃的空白默认会话

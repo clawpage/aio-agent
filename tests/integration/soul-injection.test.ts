@@ -3,7 +3,7 @@ import {startHarness} from '../helpers/harness.js';
 import {readSoul,writeSoul} from '../../src/server/soul.js';
 
 it('reads current SOUL for planning, new execution and resume without rewriting user text or the active turn',async()=>{
- const h=await startHarness({PA_AUTO_TITLE:'0'});
+ const h=await startHarness();
  try {
   const start=vi.spyOn(h.codex,'startThread');const resume=vi.spyOn(h.codex,'resumeThread');
   const plan=vi.fn().mockResolvedValue(JSON.stringify({title:'身份测试',related:[],dependencies:[],resources:[]}));

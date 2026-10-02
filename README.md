@@ -69,7 +69,7 @@ curl -s http://127.0.0.1:4891/healthz
 ## 账号与权限
 
 - owner 保留模型、推理强度和 SOUL 配置。member 的主会话和任务列表只显示本账号内容，不能通过任务 ID 读取、引用或停止他人的任务。
-- member 的派单和执行均由服务端固定为管理员分配的模型 / `high`：默认 `deepseek-v4.1-flash`（Codex），也可分配 `claude-sonnet-5-5`（Claude Code）。忽略客户端模型参数，分配的模型不可用时拒绝执行，不回退 GPT。owner 的自动标题机制不会用于 member。
+- member 的派单和执行均由服务端固定为管理员分配的模型 / `high`：默认 `deepseek-v4.1-flash`（Codex），也可分配 `claude-sonnet-5-5`（Claude Code）。忽略客户端模型参数，分配的模型不可用时拒绝执行，不回退 GPT。会话标题由派单器按任务给出。
 - member 不展示配置入口、模型与推理参数、SOUL 原文；配置/模型/能力清单接口拒绝访问，JSON 与 SSE 隐去模型配置元数据。正常回答内容不会被关键词过滤。
 - **账号独立环境**：member 的容器、workspace、Codex 记忆/历史、浏览器 profile、终端、任务数据库、SOUL 和文档缓存独立。owner 沿用原容器与数据卷；新成员不复制 owner 的文件或历史。
 - 成员环境默认限制为 2 GiB 内存、2 CPU、1024 个进程，阻止连接内网、宿主服务和其他沙盒；公网仍可访问。网络规则由独立只读守卫容器应用，成员无 NET_ADMIN / NET_RAW 权限。
@@ -112,9 +112,6 @@ curl -s http://127.0.0.1:4891/healthz
   （refresh token 永不离开 Mac）；沙箱 401 时由控制面按需重新取。
 - **持久化**：工作区、CODEX_HOME、浏览器 profile 各一个命名卷；控制面重启、容器重启、
   浏览器断线都不丢历史。断线不会中断智能体，重连自动补齐事件。
-- **自动标题**：每个会话首轮完成后，用沙箱内一个独立的临时 Luna 线程（`ephemeral` +
-  `read-only` + `never` 审批）根据首条用户消息命名；不占用主执行队列、不改变主对话模型，
-  失败保留“新会话”，用户手动改过的标题永不覆盖。
 
 ## 一个主会话，多个任务
 
@@ -331,7 +328,7 @@ owner 可以把宿主机上的一个知识库 MCP 服务（streamable HTTP）接
 （Codex / Claude Code），模型列表按执行器过滤（Claude Code 提供 `claude-opus-5-5`、
 `claude-sonnet-5-5`、`claude-fable-5-1`，思考强度 low～max，留空按 CLI 默认）：
 
-- **选中即全部切换**：主会话派单、子任务执行和自动标题都由 Claude Code 完成。派单与标题使用
+- **选中即全部切换**：主会话派单和子任务执行都由 Claude Code 完成。派单使用
   无工具、不落盘的一次性运行（`--tools ""`，模型 `PA_CLAUDE_CODE_AUX_MODEL`，默认
   `claude-sonnet-5-5`）。成员账号默认不提供该执行器；被分配 `claude-sonnet-5-5` 的成员经成员模型网关使用它（见账号分级）。
 - **执行方式**：每个任务轮次在沙箱内启动一个 `claude -p` 进程（stream-json 双向流），以
@@ -394,7 +391,7 @@ npm run build && npx playwright test --config playwright.local.config.ts
 
 | 层 | 覆盖 |
 | --- | --- |
-| `npm test` | 未登录绕过、会话过期/轮换/吊销与已建立连接被关闭、Host/Origin/CSRF 校验、重定向安全、代理 HTTP 与 WebSocket（对假沙箱）、事件回放与 delta 顺序、重复提交与跨会话冲突、停止语义、未知结果不重放、shell 支撑的文件操作只报真实结果、自动标题（首轮一次性、手动优先、失败保留、替换守卫、旧会话补名、超时后迟到事件隔离）、会话生命周期（空标题复用、重命名/恢复默认标题冲突 409、无删除接口）、沙箱浏览器标签 URL 校验、**浏览器生命周期**（状态机竞态/多观看者 TTL/任务租约单飞/快照失败不停止/恢复 single-flight/归属未知 fail-closed/状态轮询不唤醒、浏览器 API 鉴权+CSRF+注销清理、代理只保护 browser/CDP/VNC 且拒绝时释放租约） |
+| `npm test` | 未登录绕过、会话过期/轮换/吊销与已建立连接被关闭、Host/Origin/CSRF 校验、重定向安全、代理 HTTP 与 WebSocket（对假沙箱）、事件回放与 delta 顺序、重复提交与跨会话冲突、停止语义、未知结果不重放、shell 支撑的文件操作只报真实结果、派单临时线程的隔离（超时后迟到事件不混入用户会话）、会话生命周期（空标题复用、重命名/恢复默认标题冲突 409、无删除接口）、沙箱浏览器标签 URL 校验、**浏览器生命周期**（状态机竞态/多观看者 TTL/任务租约单飞/快照失败不停止/恢复 single-flight/归属未知 fail-closed/状态轮询不唤醒、浏览器 API 鉴权+CSRF+注销清理、代理只保护 browser/CDP/VNC 且拒绝时释放租约） |
 | `python3 tests/unit/browser-runtime.test.py` | 容器内受管 helper 的纯函数与安全边界：真实 flattened cmdline 归属、`unknown` 不等于 `absent`、快照 schema/原子 0600、精确 PID/starttime 校验后才停、按 origin 限定且在导航前注入 `sessionStorage`、AIO soft 重连与激活 index、错误脱敏 |
 | `npm run smoke` | 真实 HTTPS 登录与 cookie 属性、模型列表、一次性票据（重放与开放重定向）、伴随站会话与跨源续期、经鉴权的 shell 调用、上传与列目录、跨源写入拒绝、原生界面可达、未登录时各表面一律 401、**真实 WebSocket 升级**（已登录 101 / 未登录 401） |
 | `npx playwright test` | 登录界面（错误密码与正确密码）、对话页输入区不含任何模型/思考控件、统一配置页默认选中 GPT-6-Sol（桌面侧栏与手机底导航入口）、打开工作区后立刻切标签的竞态、连续切换最终落在最后点击的标签、真实文件列表与 code-server 可达、无横向溢出 |
@@ -416,9 +413,7 @@ npm run build && npx playwright test --config playwright.local.config.ts
 | `PA_SANDBOX_IMAGE` | `ghcr.io/agent-infra/sandbox:1.11.0` | 固定镜像，升级需人工确认 |
 | `PA_SANDBOX_CODEX_VERSION` | `0.156.1` | 沙箱内固定版 Codex CLI（在持久卷里，升级见运行手册） |
 | `PA_DEFAULT_MODEL` | `gpt-6-sol` | 未在统一配置页另选时的默认模型；配置页的模型/思考强度保存于 owner `meta`，对之后所有消息生效，提交时按 turn 冻结 |
-| `PA_AUTO_TITLE` | `1` | 首轮完成后自动命名会话；只用首条用户消息，失败保留“新会话” |
-| `PA_TITLE_MODEL` / `PA_TITLE_EFFORT` | `gpt-6-luna` / `low` | 只用于自动标题的隔离临时线程（read-only、never、ephemeral） |
-| `PA_TITLE_MAX_CHARS` | `24` | 生成标题的最大字符数 |
+| `PA_TITLE_MODEL` | `gpt-6-luna` | Codex 执行器时主会话派单器的隔离临时线程（read-only、never、ephemeral）所用模型，派单固定 high；变量名沿用旧称 |
 | `PA_MAX_CONCURRENT_TURNS` | `3` | 跨会话同时执行的主 turn 上限（取值 clamp 到 1–3）；同一会话始终串行，排队 FIFO |
 | `PA_REASONING_SUMMARY` | `concise` | 主 turn 的思考摘要模式（`concise`/`auto`/`detailed`/`none`），不展示原始思维链 |
 | `PA_OPENCODE_GO_ENABLED` | `auto` | 是否列出 OpenCode Go 桥模型；`auto` 仅在有密钥时出现，另有 `on`/`off` |
@@ -430,7 +425,7 @@ npm run build && npx playwright test --config playwright.local.config.ts
 | `PA_CLAUDE_CODE_ENABLED` | `auto` | 是否提供 Claude Code 执行器；`auto` 仅在取到凭据时出现，另有 `on`/`off` |
 | `PA_CLAUDE_CODE_SECRETS_FILE` | `~/.config/aio-agent/claude-code.env` | `CLAUDE_CODE_OAUTH_TOKEN` 或 `ANTHROPIC_API_KEY` 的私有文件（环境变量优先；权限宽于 600/400 拒绝） |
 | `PA_CLAUDE_CODE_VERSION` | `2.1.284` | 沙箱内固定版 Claude Code CLI（持久卷内，首次使用时安装） |
-| `PA_CLAUDE_CODE_AUX_MODEL` | `claude-sonnet-5-5` | 选中 Claude Code 时派单与自动标题使用的无工具模型 |
+| `PA_CLAUDE_CODE_AUX_MODEL` | `claude-sonnet-5-5` | 选中 Claude Code 时派单使用的无工具模型 |
 | `PA_JEV_SECRETS_FILE` | `~/.config/aio-agent/jev.env` | `TYPESAFE_API_KEY` 的私有文件（环境变量优先；权限宽于 600/400 拒绝）；缺省则不提供 Jev |
 | `PA_JEV_ENDPOINT` / `PA_JEV_MODEL` | `https://api.typesafe.ai/v1/systemone` / `jev-latest` | Jev 接口与模型 |
 | `PA_JEV_TIMEOUT_SECONDS` / `PA_JEV_DISPATCH_TIMEOUT_SECONDS` | `30` / `15` | `decide` 工具与派单第二意见各自的等待上限 |

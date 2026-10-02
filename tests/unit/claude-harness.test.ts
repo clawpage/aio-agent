@@ -415,11 +415,11 @@ describe("ClaudeCodeSession auxiliary runs", () => {
 
   it("returns nothing for a failed auxiliary run", async () => {
     const { session, spawns } = makeSession();
-    const title = session.generateTitle("hi");
+    const plan = session.planTask("hi");
     await flush();
     spawns[0]!.child.send({ type: "result", subtype: "success", is_error: true, result: "Not logged in" });
     spawns[0]!.child.close();
-    expect(await title).toBeNull();
+    expect(await plan).toBeNull();
   });
 });
 
@@ -440,7 +440,6 @@ describe("HarnessSession", () => {
     const aux: string[] = [];
     Object.assign(claude, {
       planTask: async () => (aux.push("plan"), "{}"),
-      generateTitle: async () => (aux.push("title"), "t"),
       owns: (model: string) => model === "claude-sonnet-5-5",
     });
     const harness = new HarnessSession(codex, claude, () => selected);
@@ -458,19 +457,18 @@ describe("HarnessSession", () => {
     await expect(harness.forkThread("claude-x", {})).rejects.toThrow();
     await expect(harness.forkThread(codexThread.threadId, { modelProvider: CLAUDE_CODE_PROVIDER_ID })).rejects.toThrow();
 
-    // The dispatcher and titles follow the owner's harness choice; an explicit
-    // model (the member policy) runs on that model's harness.
-    await harness.generateTitle("x");
+    // The dispatcher follows the owner's harness choice; an explicit model (the
+    // member policy) runs on that model's harness.
+    await harness.planTask("p");
     expect(aux).toEqual([]);
     selected = true;
     await harness.planTask("p");
-    await harness.generateTitle("x");
-    expect(aux).toEqual(["plan", "title"]);
+    expect(aux).toEqual(["plan"]);
     await harness.planTask("p", undefined, "deepseek-v4.1-flash");
-    expect(aux).toEqual(["plan", "title"]);
+    expect(aux).toEqual(["plan"]);
     selected = false;
     await harness.planTask("p", undefined, "claude-sonnet-5-5");
-    expect(aux).toEqual(["plan", "title", "plan"]);
+    expect(aux).toEqual(["plan", "plan"]);
   });
 });
 

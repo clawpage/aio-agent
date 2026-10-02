@@ -81,9 +81,6 @@ export class HarnessSession implements CodexSessionLike {
     if (!this.#codex.steerTurn) return Promise.reject(new Error("当前执行器不支持运行中补充"));
     return this.#codex.steerTurn(params);
   }
-  generateTitle(userText: string) {
-    return this.#claudeSelected() ? this.#claude.generateTitle(userText) : this.#codex.generateTitle(userText);
-  }
   planTask(prompt: string, developerInstructions?: string, model?: string) {
     if (model ? this.#claude.owns(model) : this.#claudeSelected()) return this.#claude.planTask(prompt, developerInstructions);
     if (!this.#codex.planTask) return Promise.resolve(null);

@@ -7,7 +7,6 @@ import type { SandboxContainer } from "../docker/sandbox.js";
 import type { BridgeModel } from "../bridgeModel.js";
 import { JsonRpcPeer } from "./jsonrpc.js";
 import type { HostTokenSource } from "./hostTokens.js";
-import { buildTitlePrompt } from "./autoTitle.js";
 
 export interface SandboxAccount {
   email: string | null;
@@ -51,7 +50,7 @@ export class SandboxCodexSession {
   #onServerRequest: ((id: string, method: string, params: unknown) => void) | null = null;
   #onClosed: ((reason: string) => void) | null = null;
   /**
-   * Auxiliary ephemeral threads (auto-title) and the listeners that own their
+   * Auxiliary ephemeral threads (the dispatcher) and the listeners that own their
    * notifications. Routing by thread id keeps their events, approvals and deltas
    * completely out of the user's main conversation stream.
    */
@@ -74,6 +73,8 @@ export class SandboxCodexSession {
     container: SandboxContainer,
     hostTokens: HostTokenSource,
     bridge: BridgeModel | null = null,
+    /** How long one dispatcher run may take. */
+    private readonly planTimeoutMs = 90_000,
   ) {
     this.#cfg = cfg;
     this.#log = log.child("sandbox-codex");
@@ -257,20 +258,16 @@ export class SandboxCodexSession {
    * conversation. Text is captured from live notifications because ephemeral
    * threads cannot be re-read afterwards (`thread/read` rejects `includeTurns`).
    */
-  async generateTitle(userText: string): Promise<string | null> {
-    return (await this.#auxiliaryText(buildTitlePrompt(userText, this.#cfg.agent.titleMaxChars), this.#cfg.agent.titleEffort)).text;
-  }
-
   /** Read-only main-agent planning; receives bounded metadata, never executes a task. */
   async planTask(prompt: string, developerInstructions?: string, model?: string): Promise<string | null> {
-    const { text, error } = await this.#auxiliaryText(prompt, "high", 90_000, developerInstructions, model);
+    const { text, error } = await this.#auxiliaryText(prompt, "high", this.planTimeoutMs, developerInstructions, model);
     // A reported reason (such as an exhausted usage limit) is shown on the task
     // instead of a generic "try again".
     if (error) throw new Error(`任务分配失败：${error}`);
     return text;
   }
 
-  async #auxiliaryText(prompt: string, effort: string | null, timeoutMs = this.#cfg.agent.titleTimeoutMs, developerInstructions?: string, requestedModel?: string): Promise<{ text: string | null; error: string | null }> {
+  async #auxiliaryText(prompt: string, effort: string | null, timeoutMs: number, developerInstructions?: string, requestedModel?: string): Promise<{ text: string | null; error: string | null }> {
     await this.start();
     const peer = this.#peer;
     if (!peer?.alive) return { text: null, error: null };

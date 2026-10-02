@@ -95,15 +95,14 @@ function containerFor(server: FakeAppServer): SandboxContainer {
 }
 
 function makeSession(server: FakeAppServer, timeoutMs = 30, bridge: BridgeModel | null = null): SandboxCodexSession {
-  const cfg = testConfig("/tmp/pa-title-stream", 1, {});
-  cfg.agent.titleTimeoutMs = timeoutMs;
-  return new SandboxCodexSession(cfg, new Logger("error", undefined, false), containerFor(server), hostTokens, bridge);
+  const cfg = testConfig("/tmp/pa-aux-stream", 1, {});
+  return new SandboxCodexSession(cfg, new Logger("error", undefined, false), containerFor(server), hostTokens, bridge, timeoutMs);
 }
 
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-describe("SandboxCodexSession auto-title isolation", () => {
-  it("drops late notifications from a timed-out title thread and interrupts it", async () => {
+describe("SandboxCodexSession dispatcher thread isolation", () => {
+  it("drops late notifications from a timed-out dispatcher thread and interrupts it", async () => {
     const server = new FakeAppServer();
     server.handle("thread/start", () => ({ thread: { id: "aux_1" } }));
     server.handle("turn/start", () => ({ turn: { id: "turn_aux_1" } }));
@@ -112,15 +111,15 @@ describe("SandboxCodexSession auto-title isolation", () => {
     session.onNotification((method, params) => forwarded.push({ method, params }));
 
     try {
-      // The scripted turn never completes, so the title run times out.
-      expect(await session.generateTitle("第一轮用户消息")).toBeNull();
+      // The scripted turn never completes, so the dispatcher run times out.
+      expect(await session.planTask("第一轮用户消息")).toBeNull();
 
       // The main conversation is mid-turn (delta for a real thread is forwarded).
       server.notify("item/agentMessage/delta", { threadId: "main_1", turnId: "turn_main", itemId: "i2", delta: "正常增量" });
       // A late delta/item for the auxiliary thread must never reach the manager,
       // otherwise the manager's active-conversation delta buffer would record it.
-      server.notify("item/agentMessage/delta", { threadId: "aux_1", turnId: "turn_aux_1", itemId: "i1", delta: "标题泄漏" });
-      server.notify("item/completed", { threadId: "aux_1", turnId: "turn_aux_1", item: { id: "i1", type: "agentMessage", text: "标题泄漏" } });
+      server.notify("item/agentMessage/delta", { threadId: "aux_1", turnId: "turn_aux_1", itemId: "i1", delta: "派单泄漏" });
+      server.notify("item/completed", { threadId: "aux_1", turnId: "turn_aux_1", item: { id: "i1", type: "agentMessage", text: "派单泄漏" } });
       await wait(20);
       expect(forwarded).toEqual([
         { method: "item/agentMessage/delta", params: { threadId: "main_1", turnId: "turn_main", itemId: "i2", delta: "正常增量" } },
@@ -152,7 +151,7 @@ describe("SandboxCodexSession auto-title isolation", () => {
     session.onNotification((method) => forwarded.push(method));
 
     try {
-      expect(await session.generateTitle("第一轮")).toBeNull();
+      expect(await session.planTask("第一轮")).toBeNull();
       // The interrupted turn finally reports completion: the tombstone is dropped.
       server.notify("turn/completed", { threadId: "aux_2", turn: { id: "turn_aux_2", status: "interrupted" } });
       await wait(10);
@@ -165,18 +164,18 @@ describe("SandboxCodexSession auto-title isolation", () => {
     }
   });
 
-  it("returns a title only for a completed auxiliary turn", async () => {
+  it("returns text only for a completed auxiliary turn", async () => {
     const server = new FakeAppServer();
     server.handle("thread/start", () => ({ thread: { id: "aux_3" } }));
     server.handle("turn/start", () => {
-      server.notify("item/agentMessage/delta", { threadId: "aux_3", turnId: "turn_aux_3", itemId: "i1", delta: "失败标题" });
+      server.notify("item/agentMessage/delta", { threadId: "aux_3", turnId: "turn_aux_3", itemId: "i1", delta: "失败结果" });
       server.notify("turn/completed", { threadId: "aux_3", turn: { id: "turn_aux_3", status: "failed" } });
       return { turn: { id: "turn_aux_3" } };
     });
     const session = makeSession(server, 200);
 
     try {
-      expect(await session.generateTitle("第一轮")).toBeNull();
+      expect(await session.planTask("第一轮")).toBeNull();
     } finally {
       session.close();
     }
@@ -189,11 +188,11 @@ describe("SandboxCodexSession auto-title isolation", () => {
     const session = makeSession(server, 200);
 
     try {
-      const resultPromise = session.generateTitle("第一轮");
+      const resultPromise = session.planTask("第一轮");
       await wait(10);
-      server.notify("item/agentMessage/delta", { threadId: "aux_4", turnId: "turn_aux_4", itemId: "i1", delta: "清晰标题" });
+      server.notify("item/agentMessage/delta", { threadId: "aux_4", turnId: "turn_aux_4", itemId: "i1", delta: "{\"title\":\"x\"}" });
       server.notify("turn/completed", { threadId: "aux_4", turn: { id: "turn_aux_4", status: "completed" } });
-      expect(await resultPromise).toBe("清晰标题");
+      expect(await resultPromise).toBe("{\"title\":\"x\"}");
     } finally {
       session.close();
     }
@@ -288,7 +287,7 @@ it('runs member planning through the fixed provider at high effort and refuses a
  try {await expect(unavailable.planTask('request','soul','deepseek-v4.1-flash')).rejects.toThrow('服务暂时不可用');}finally{unavailable.close();}
 });
 
-it('shows the reason a planning turn failed, while a failed title stays silent',async()=>{
+it('shows the reason a planning turn failed',async()=>{
  const server=new FakeAppServer();
  server.handle('thread/start',()=>({thread:{id:'quota-thread'}}));
  const limit="You've hit your usage limit. Try again at Oct 4th.";
@@ -296,7 +295,6 @@ it('shows the reason a planning turn failed, while a failed title stays silent',
  const session=makeSession(server,200);
  try {
   await expect(session.planTask('request','soul')).rejects.toThrow(`任务分配失败：${limit}`);
-  expect(await session.generateTitle('hi')).toBeNull();
  } finally {session.close();}
 });
 

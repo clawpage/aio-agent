@@ -10,7 +10,7 @@ it("replaces an outdated tab server as soon as the sandbox is up, not at the nex
   const ctx = {
     cfg, log: new Logger("error", undefined, false), sandboxSetupError: null, sandboxSurfaces: null,
     container: { ensureRunning: async () => ({ image: "img", healthy: true }), alignBrowserIdentity: async () => false, surfaces: async () => ({}) },
-    agent: { ensureSession: async () => undefined, scheduleTitleBackfill: () => undefined },
+    agent: { ensureSession: async () => undefined },
     tabs: { ensure },
   } as unknown as AppContext;
   await startSandboxRuntime(ctx);
