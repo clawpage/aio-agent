@@ -13,6 +13,22 @@ it("protects the main inbox and task writes with authentication and CSRF", async
         mode: string;
     }).mode).toBe("tasks");
 });
+it("answers a poll for the feed version it already holds in a few bytes", async () => {
+    const { cookie, csrf } = await login(h);
+    const first = (await (await h.request("/api/main", { headers: { cookie } })).json()) as { version: string; tasks: unknown[] };
+    expect(first.version).toMatch(/^[\w-]{22}$/);
+    const same = await h.request(`/api/main?v=${first.version}`, { headers: { cookie } });
+    expect(same.headers.get("cache-control")).toBe("no-store");
+    const text = await same.text();
+    expect(JSON.parse(text)).toEqual({ mode: "tasks", unchanged: true, version: first.version });
+    expect(text.length).toBeLessThan(100);
+    // Any change is a new version, and the whole page again.
+    await h.request("/api/tasks", { method: "POST", headers: { cookie, "x-csrf-token": csrf, "content-type": "application/json" }, body: JSON.stringify({ text: "版本变了", clientMessageId: "feed-version" }) });
+    const changed = (await (await h.request(`/api/main?v=${first.version}`, { headers: { cookie } })).json()) as { version: string; unchanged?: boolean; tasks: Array<{ text: string }> };
+    expect(changed.unchanged).toBeUndefined();
+    expect(changed.version).not.toBe(first.version);
+    expect(changed.tasks.some((t) => t.text === "版本变了")).toBe(true);
+});
 it("accepts parallel tasks, deduplicates message retries and keeps child threads out of history", async () => {
     const { cookie, csrf } = await login(h);
     const headers = { cookie, "x-csrf-token": csrf, "content-type": "application/json" };

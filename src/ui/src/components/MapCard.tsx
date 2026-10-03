@@ -20,7 +20,7 @@ function MapView({ place, zoom, height }: { place: MapPlace; zoom: number; heigh
   return (
     <div ref={box} className="map-view" style={{ height }}>
       {tiles.map((t) => (
-        <img key={t.key} src={apiUrl(`/api/map/tiles/${t.z}/${t.x}/${t.y}`)} alt="" draggable={false} style={{ left: t.left, top: t.top }} />
+        <img key={t.key} src={apiUrl(`/api/map/tiles/${t.z}/${t.x}/${t.y}`)} alt="" loading="lazy" draggable={false} style={{ left: t.left, top: t.top }} />
       ))}
       <svg className="map-pin" width="28" height="38" viewBox="0 0 28 38" aria-hidden="true">
         <path d="M14 1C6.8 1 1 6.7 1 13.8 1 23.5 14 37 14 37s13-13.5 13-23.2C27 6.7 21.2 1 14 1Z" />

@@ -81,8 +81,10 @@ test('task list shares live statuses, opens each task, preserves draft and retur
     await expect(page.getByRole('textbox',{name:'消息',exact:true})).toHaveValue('保留草稿');
 });
 test('task list can load older pages and keeps them after live refresh',async({page},info)=>{
-    await setup(page,[task(1)],1000);
-    await page.route('**/api/main*',r=>r.fulfill({json:new URL(r.request().url()).searchParams.has('before')?{mode:'tasks',tasks:[{...task(99,'completed'),result:'Old result',completedAt:999}],nextBefore:null}:{mode:'tasks',tasks:[task(1)],nextBefore:1000}}));
+    // A main session taller than the screen: it would load older tasks by itself only near its top.
+    const recent={...task(1,'completed'),result:'很长的结果。'.repeat(400),completedAt:2000};
+    await setup(page,[recent],1000);
+    await page.route('**/api/main*',r=>r.fulfill({json:new URL(r.request().url()).searchParams.has('before')?{mode:'tasks',tasks:[{...task(99,'completed'),result:'Old result',completedAt:999}],nextBefore:null}:{mode:'tasks',tasks:[recent],nextBefore:1000}}));
     if(info.project.name.startsWith('mobile'))await page.getByRole('button',{name:'打开导航'}).click();await page.locator('.sidebar').getByRole('button',{name:'任务列表',exact:true}).click();
     await page.getByRole('button',{name:'加载更早的任务',exact:true}).click();await expect(page.getByRole('button',{name:'打开任务：任务 99',exact:true})).toBeVisible();
     await expect(page.locator('.task-list-item')).toHaveCount(2);await expect(page.locator('.task-list-page').getByRole('button',{name:'加载更早的任务',exact:true})).toHaveCount(0);

@@ -27,6 +27,17 @@ export function svgSize(code: string): { width: number; height: number } {
   return { width: 800, height: 600 };
 }
 
+/**
+ * The room a drawing holds while its lazy image waits off screen, so the feed
+ * does not jump: only when it declares its proportions (a viewBox, or a width
+ * and a height in pixels).
+ */
+function heldSize(code: string): { width: number; height: number } | null {
+  const root = /<svg\b[^>]*>/i.exec(code)?.[0] ?? "";
+  const px = (name: string) => new RegExp(`\\s${name}\\s*=\\s*["']?\\s*\\d+(?:\\.\\d+)?(?:px)?\\s*["'\\s/>]`, "i").test(root);
+  return /\sviewBox\s*=/i.test(root) || (px("width") && px("height")) ? svgSize(code) : null;
+}
+
 /** A file name from the drawing's <title>, or a plain one. */
 function fileStem(code: string): string {
   const title = /<title[^>]*>([^<]{1,80})<\/title>/i.exec(code)?.[1]?.trim();
@@ -132,6 +143,7 @@ export function SvgCard({ code }: { code: string }) {
   const [broken, setBroken] = useState(false);
   const [viewing, setViewing] = useState(false);
   const fluid = useMemo(() => svgIsFluid(code), [code]);
+  const size = useMemo(() => heldSize(code), [code]);
   useEffect(() => {
     const next = URL.createObjectURL(new Blob([code], { type: "image/svg+xml" }));
     setUrl(next);
@@ -145,7 +157,7 @@ export function SvgCard({ code }: { code: string }) {
       ) : (
         url && (
           <button type="button" className="svg-open" onClick={() => setViewing(true)} aria-label="查看大图">
-            <img className="svg-image" src={url} alt="SVG 图" onError={() => setBroken(true)} />
+            <img className="svg-image" src={url} alt="SVG 图" {...(size ? { width: Math.round(size.width), height: Math.round(size.height) } : {})} loading="lazy" decoding="async" onError={() => setBroken(true)} />
           </button>
         )
       )}

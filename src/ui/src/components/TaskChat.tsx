@@ -1,5 +1,5 @@
 import { MessageTime, TaskDuration, useDisplayClock } from "./MessageTime";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { api, openEventStream } from "../api";
 import type { Attachment, Task } from "../types";
 import { AttachmentCards, MessageFileCards } from "./Chat";
@@ -71,11 +71,15 @@ export function TaskChat({ onDetails, onOpenLink, onOpenFileInBrowser, onExpired
                 map.set(t.id, t);
         return [...map.values()].sort((a, b) => a.createdAt - b.createdAt);
     }), []);
+    /** The feed version on screen: an unchanged feed is not downloaded again. */
+    const version = useRef<string | null>(null);
     const refresh = useCallback(async () => {
         try {
-            const data = await api.main();
-            merge(data.tasks);
+            const data = await api.mainSince(version.current);
             setConnected(true);
+            if (data.unchanged) return;
+            version.current = data.version;
+            merge(data.tasks);
             if (!pageLoaded.current) {
                 setNextBefore(data.nextBefore);
                 pageLoaded.current = true;
@@ -92,6 +96,45 @@ export function TaskChat({ onDetails, onOpenLink, onOpenFileInBrowser, onExpired
     useEffect(() => { void refresh(); const timer = window.setInterval(() => void refresh(), 2500); return () => clearInterval(timer); }, [refresh]);
     useEffect(() => { if (scroll.current && stick.current)
         scroll.current.scrollTop = scroll.current.scrollHeight; }, [tasks]);
+    // Older tasks load on their own as the top of the feed comes near, and what was on screen stays put.
+    const olderTop = useRef<HTMLDivElement>(null);
+    const loadingOlder = useRef(false);
+    const [olderState, setOlderState] = useState<"idle" | "loading" | "failed">("idle");
+    const anchor = useRef<{ el: Element; top: number } | null>(null);
+    const loadOlder = useCallback(async () => {
+        if (!nextBefore || loadingOlder.current) return;
+        loadingOlder.current = true;
+        setOlderState("loading");
+        try {
+            const d = await api.main(nextBefore);
+            const first = scroll.current?.querySelector("[data-task-id]");
+            anchor.current = first ? { el: first, top: first.getBoundingClientRect().top } : null;
+            stick.current = false;
+            merge(d.tasks);
+            setNextBefore(d.nextBefore);
+            setOlderState("idle");
+        }
+        catch (err) {
+            setOlderState("failed");
+            if ((err as { status?: number }).status === 401) callbacks.current.onExpired();
+        }
+        finally {
+            loadingOlder.current = false;
+        }
+    }, [nextBefore, merge]);
+    useLayoutEffect(() => {
+        const n = scroll.current, a = anchor.current;
+        if (!n || !a) return;
+        anchor.current = null;
+        n.scrollTop += a.el.getBoundingClientRect().top - a.top;
+    }, [tasks]);
+    useEffect(() => {
+        const n = scroll.current, top = olderTop.current;
+        if (!n || !top || !nextBefore || typeof IntersectionObserver !== "function") return;
+        const observer = new IntersectionObserver(entries => { if (entries.some(e => e.isIntersecting)) void loadOlder(); }, { root: n, rootMargin: "300px 0px 0px 0px" });
+        observer.observe(top);
+        return () => observer.disconnect();
+    }, [nextBefore, loadOlder]);
     const runningIds = tasks.filter(t => ["running", "queued"].includes(t.status)).map(t => t.conversationId).sort().join(",");
     useEffect(() => {
         const closes = runningIds.split(",").filter(Boolean).map(id => {
@@ -233,7 +276,9 @@ export function TaskChat({ onDetails, onOpenLink, onOpenFileInBrowser, onExpired
         ? <>{awaiting.length > 0 && <span className="turn-pill you">{awaiting.length} 件等你补充</span>}{browserAsks.length > 0 && <span className="turn-pill you">{browserAsks.length} 件等你操作浏览器</span>}{active.length - browserAsks.length > 0 && <span className="turn-pill ai">{active.length - browserAsks.length} 件在办</span>}</>
         : connected ? "随时可以交给我" : "正在连接…"}</span></div></header>
     <div className="chat-scroll task-feed" ref={scroll} onScroll={e => { const n = e.currentTarget; stick.current = n.scrollHeight - n.scrollTop - n.clientHeight < 80; }}>
-      {nextBefore && <button className="ghost" onClick={() => void act(async () => { const d = await api.main(nextBefore); stick.current = false; merge(d.tasks); setNextBefore(d.nextBefore); })}>加载更早的任务</button>}
+      {nextBefore && <div className="feed-older" ref={olderTop}>{olderState === "failed"
+        ? <button className="ghost tiny" onClick={() => void loadOlder()}>更早的任务没加载出来，点此重试</button>
+        : <span className="muted tiny">{olderState === "loading" ? "正在加载更早的任务…" : ""}</span>}</div>}
       {!tasks.length && <div className="empty"><h3>把事情交给我</h3><p>可以接着发不同任务。过程会收拢，完成后在这里回报。</p></div>}
       {feed.map(({ task: t, report }) => report ? <article className={`msg assistant task-report ${t.status}`} key={`${t.id}:report`} data-task-id={t.id}>
         <div className="task-report-heading"><span>{t.title}</span>{t.schedule && <span className="schedule-badge">定时 · {t.schedule.rule}</span>}<span className="muted tiny">{labels[t.status]}</span></div>

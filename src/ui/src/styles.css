@@ -2546,6 +2546,8 @@ textarea:focus {
 .main-inbox-app .sidebar button.ghost.block:hover { background: var(--bg-raised); color: var(--text); }
 .main-inbox-app .sidebar button.ghost.block.active { background: var(--ai-soft); color: var(--ai); font-weight: 600; }
 .task-feed { gap: 22px; }
+/* The top of the feed: older tasks load as it comes near. */
+.feed-older { display: flex; justify-content: center; min-height: 24px; }
 .task-entry { flex-shrink: 0; display: flex; flex-direction: column; gap: 10px; }
 .task-entry .msg.user { width: 100%; max-width: none; }
 .task-entry .msg.user .bubble { max-width: 88%; }

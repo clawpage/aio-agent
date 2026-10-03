@@ -3,7 +3,7 @@ import { isMember, publicPayload } from "../auth/policy.js";
 import {readSoul,writeSoul,SoulError,DEFAULT_SOUL,SOUL_MAX_BYTES} from '../soul.js';
 import { HTML_PREVIEW_CSP, htmlPreviewDocument } from "../documents/html.js";
 import express, { type Request, type Response, type NextFunction, type Router } from "express";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { pathToFileURL } from "node:url";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
@@ -459,7 +459,11 @@ export function createApiRouter(context: AppContext): Router {
       const requested = own.find((t) => t.request && t.holder === "ai");
       return { ...task, browser: { tabs: own.length, request: requested?.request?.reason ?? null, human: own.some((t) => t.holder === "human") } };
     });
-    res.json({ mode: "tasks", ...page, tasks });
+    // A poll names the version it holds; an unchanged feed answers in a few bytes instead of the whole page.
+    const body = { mode: "tasks", ...page, tasks };
+    const version = createHash("sha256").update(JSON.stringify(body)).digest("base64url").slice(0, 22);
+    res.setHeader("Cache-Control", "no-store");
+    res.json(req.query.v === version ? { mode: "tasks", unchanged: true, version } : { ...body, version });
   }));
   router.post("/tasks", requireKind("primary"), requireSession, asyncHandler(async (req, res) => {
     try {

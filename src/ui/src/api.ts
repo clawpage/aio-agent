@@ -114,7 +114,9 @@ export const api = {
   recallStats: (days: number) => request<{ stats: import('./types').RecallStats }>(`/api/settings/recall?days=${days}`),
   dispatchLog: (taskId: string) => request<import('./types').DispatchLog>(`/api/settings/dispatch-log/${encodeURIComponent(taskId)}`),
   saveSoul: (body:{content:string;revision:string}) => request<{ok:true;content:string;revision:string}>('/api/settings/soul',{method:'PUT',body}),
-  main: (before?: number, signal?: AbortSignal) => request<{ mode: "tasks"; tasks: import("./types").Task[]; nextBefore: number | null }>(`/api/main${before ? `?before=${before}` : ""}`, { signal }),
+  main: (before?: number, signal?: AbortSignal) => request<{ mode: "tasks"; tasks: import("./types").Task[]; nextBefore: number | null; version: string }>(`/api/main${before ? `?before=${before}` : ""}`, { signal }),
+  /** The live first page, unless it is still the version the caller holds. */
+  mainSince: (version: string | null) => request<{ mode: "tasks"; unchanged: true; version: string } | { mode: "tasks"; unchanged?: undefined; tasks: import("./types").Task[]; nextBefore: number | null; version: string }>(`/api/main${version ? `?v=${encodeURIComponent(version)}` : ""}`),
   submitTask: (body: { text: string; clientMessageId: string; attachments: Attachment[]; relatedTaskId: string | null }) => request<{ task: import("./types").Task; duplicate: boolean }>("/api/tasks", { method: "POST", body }),
   stopTask: (id: string) => request<{ok:boolean}>(`/api/tasks/${encodeURIComponent(id)}/stop`, {method:"POST",body:{}}),
   retryTaskPlanning: (id: string) => request<{ok:boolean}>(`/api/tasks/${encodeURIComponent(id)}/retry-planning`, {method:"POST",body:{}}),

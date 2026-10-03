@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState, type RefObject } from "react";
 import { api, API_CREDENTIALS } from "../api";
 import type { Product } from "../productBlocks";
 
@@ -31,8 +31,23 @@ export function useMessageImage(src: string | null): { url: string | null; faile
   return state;
 }
 
+/** Whether an element has come near the viewport; it stays true once it has. */
+function useNearViewport(ref: RefObject<Element | null>): boolean {
+  const [near, setNear] = useState(typeof IntersectionObserver !== "function");
+  useEffect(() => {
+    const el = ref.current;
+    if (near || !el) return;
+    const observer = new IntersectionObserver((entries) => { if (entries.some((e) => e.isIntersecting)) setNear(true); }, { rootMargin: "300px" });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [near, ref]);
+  return near;
+}
+
 function ProductCard({ item, onOpenLink, onOpenFile }: { item: Product; onOpenLink?: (url: string) => void; onOpenFile?: (path: string) => void }) {
-  const picture = useMessageImage(item.image);
+  // A picture is fetched (through the sandbox for a web one) only once its card comes near the screen.
+  const card = useRef<HTMLElement>(null);
+  const picture = useMessageImage(useNearViewport(card) ? item.image : null);
   const local = item.image?.startsWith("/") ? item.image : null;
   const media = picture.url
     ? <img src={picture.url} alt={item.name} loading="lazy" />
@@ -45,7 +60,7 @@ function ProductCard({ item, onOpenLink, onOpenFile }: { item: Product; onOpenLi
       </span>
     );
   return (
-    <article className="product-card" role="listitem" aria-label={item.name}>
+    <article ref={card} className="product-card" role="listitem" aria-label={item.name}>
       {local && onOpenFile && picture.url
         ? <button type="button" className="product-media" onClick={() => onOpenFile(local)} aria-label={`查看 ${item.name} 的大图`}>{media}</button>
         : <div className="product-media">{media}</div>}
