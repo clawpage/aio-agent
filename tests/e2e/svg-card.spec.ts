@@ -1,9 +1,17 @@
-import { test, expect, type Page } from "@playwright/test";
+import fs from "node:fs";
+import { test, expect, type Download, type Page } from "@playwright/test";
 import { mockConsole } from "./mock-api";
 
 const CHART = '<svg xmlns="http://www.w3.org/2000/svg" width="120" height="80" viewBox="0 0 120 80"><rect width="120" height="80" fill="#4cc38a"/><circle cx="60" cy="40" r="24" fill="#8f86ff"/></svg>';
 // Script inside an SVG must never run in the console, whether drawn inline or from a file.
 const HOSTILE = '<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" onload="window.__svgRan=1"><script>window.__svgRan=1</script><rect width="40" height="40" fill="#ff7369"/></svg>';
+
+/** The size a downloaded PNG really has. */
+async function pngSize(file: Download): Promise<[number, number]> {
+  const bytes = fs.readFileSync((await file.path())!);
+  expect([...bytes.subarray(0, 4)]).toEqual([0x89, 0x50, 0x4e, 0x47]);
+  return [bytes.readUInt32BE(16), bytes.readUInt32BE(20)];
+}
 
 function task(result: string) {
   return { id: "task-1", revision: 1, title: "画图", text: "画个图", conversationId: "child-1", status: "completed", result, error: null, attachments: [], relatedTaskId: null, dependencies: [], approvals: 0, createdAt: 1000, completedAt: Date.now() };
@@ -22,7 +30,7 @@ async function setup(page: Page, result: string) {
   return { images };
 }
 
-test("an ```svg block in a reply is drawn as a picture, with its source one tap away", async ({ page }, info) => {
+test("an ```svg block in a reply is drawn as a picture that opens full screen and downloads as a PNG", async ({ page }, info) => {
   await setup(page, `图在这里：\n\n\`\`\`svg\n${CHART}\n\`\`\`\n\n绿色是背景。\n\n\`\`\`svg\n${HOSTILE}\n\`\`\``);
   const cards = page.locator(".svg-card");
   await expect(cards).toHaveCount(2, { timeout: 60_000 });
@@ -37,10 +45,30 @@ test("an ```svg block in a reply is drawn as a picture, with its source one tap 
   await page.waitForTimeout(600);
   await page.screenshot({ path: info.outputPath("svg-card.png") });
 
-  await cards.first().getByRole("button", { name: "看源码" }).click();
-  await expect(cards.first().locator("pre.svg-source")).toContainText('<circle cx="60"');
-  await cards.first().getByRole("button", { name: "看图" }).click();
-  await expect(cards.first().locator("img.svg-image")).toBeVisible();
+  // No source button: the picture opens full screen and downloads as a picture.
+  await expect(cards.first().getByRole("button", { name: "看源码" })).toHaveCount(0);
+  await cards.first().getByRole("button", { name: "看大图", exact: true }).click();
+  const viewer = page.getByRole("dialog", { name: "查看大图" });
+  await expect(viewer).toBeVisible();
+  await expect.poll(() => viewer.locator("img").evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth)).toBeGreaterThan(0);
+  await viewer.locator("img").click();
+  await expect(viewer.locator(".image-viewer-stage")).toHaveClass(/zoomed/);
+  // Zoomed in, it opens on the middle of the drawing.
+  await expect.poll(() => viewer.locator(".image-viewer-stage").evaluate((el) => el.scrollLeft > 0 && Math.abs(el.scrollLeft - (el.scrollWidth - el.clientWidth) / 2) < 2)).toBe(true);
+  await page.waitForTimeout(300);
+  await page.screenshot({ path: info.outputPath("svg-viewer-zoomed.png") });
+  await page.keyboard.press("Escape");
+  await expect(viewer).toHaveCount(0);
+  // Tapping the picture itself opens it too; the download is a sharp PNG on a white page.
+  await cards.first().getByRole("button", { name: "查看大图", exact: true }).click();
+  await expect(viewer).toBeVisible();
+  await page.waitForTimeout(300);
+  await page.screenshot({ path: info.outputPath("svg-viewer.png") });
+  const [file] = await Promise.all([page.waitForEvent("download"), viewer.getByRole("button", { name: "下载" }).click()]);
+  expect(file.suggestedFilename()).toBe("图片.png");
+  expect(await pngSize(file)).toEqual([480, 320]);
+  await viewer.getByRole("button", { name: "关闭" }).click();
+  await expect(viewer).toHaveCount(0);
   // The hostile one draws, and its script did not run.
   await expect.poll(() => cards.nth(1).locator("img").evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth)).toBe(40);
   expect(await page.evaluate(() => (window as unknown as { __svgRan?: number }).__svgRan)).toBeUndefined();
@@ -56,7 +84,7 @@ test("a workspace SVG shows inline and as a file card picture", async ({ page })
 });
 
 test("an SVG with only a viewBox fills the message width at its own proportions; a sized one keeps its size", async ({ page }, info) => {
-  const WIDE = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 320"><rect width="640" height="320" fill="#eef4ff"/><circle cx="320" cy="160" r="120" fill="#8f86ff"/></svg>';
+  const WIDE = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 320"><title>Roy 一天</title><rect width="640" height="320" fill="#eef4ff"/><circle cx="320" cy="160" r="120" fill="#8f86ff"/></svg>';
   await setup(page, `示意图：\n\n\`\`\`svg\n${WIDE}\n\`\`\`\n\n小图：\n\n\`\`\`svg\n${CHART}\n\`\`\``);
   const cards = page.locator(".svg-card");
   await expect(cards).toHaveCount(2, { timeout: 60_000 });
@@ -73,4 +101,8 @@ test("an SVG with only a viewBox fills the message width at its own proportions;
   await cards.first().scrollIntoViewIfNeeded();
   await page.waitForTimeout(400);
   await page.screenshot({ path: info.outputPath("svg-fluid.png") });
+  // A drawing with only a viewBox downloads at its own proportions, named by its <title>.
+  const [file] = await Promise.all([page.waitForEvent("download"), cards.first().getByRole("button", { name: "下载" }).click()]);
+  expect(file.suggestedFilename()).toBe("Roy_一天.png");
+  expect(await pngSize(file)).toEqual([2000, 1000]);
 });
