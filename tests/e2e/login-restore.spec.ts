@@ -56,3 +56,12 @@ test('visible login page retries periodically when another tab logs in without a
  await page.route('**/api/auth/session',r=>r.fulfill({json:{authenticated:valid,username:'owner'}}));
  await page.goto('/');await expect(password(page)).toBeVisible();valid=true;await page.clock.runFor(15001);await expect(inbox(page)).toBeVisible();
 });
+
+test('fields on a touch screen are 16px, so iPhone Safari never zooms the page into them',async({page},info)=>{
+ await setup(page);
+ await page.route('**/api/auth/session',r=>r.fulfill({json:{authenticated:false}}));
+ await page.goto('/');await expect(password(page)).toBeVisible();
+ // Safari zooms into a focused field whose text is under 16px; a mouse-driven desktop keeps the page's 15px.
+ const expected=info.project.name.startsWith('mobile')?'16px':'15px';
+ for(const field of [page.getByLabel('账号',{exact:true}),password(page)])expect(await field.evaluate(el=>getComputedStyle(el).fontSize)).toBe(expected);
+});

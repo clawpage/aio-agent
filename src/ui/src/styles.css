@@ -581,6 +581,17 @@ textarea:focus {
   box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
+/* iPhone Safari zooms the whole page into a focused field whose text is under
+   16px, and the page stays zoomed: on a touch screen fields get 16px text. */
+@media (hover: none) and (pointer: coarse) {
+  input,
+  select,
+  textarea,
+  .rename-field input {
+    font-size: 16px;
+  }
+}
+
 .field {
   display: flex;
   flex-direction: column;
