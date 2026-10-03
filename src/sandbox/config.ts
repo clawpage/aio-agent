@@ -15,6 +15,8 @@ export interface SandboxdConfig {
   containerHost: string;
   /** Give new sandboxes `host.docker.internal` (Linux Docker lacks it; Docker Desktop has it). */
   addHostGateway: boolean;
+  /** Memory cap (`docker run --memory`) for sandboxes created on this node, e.g. `2g`, `4g`. */
+  memory: string;
   logDir: string | null;
   /**
    * Forward sandboxes' gateway traffic (models, share, decisions, knowledge base)
@@ -32,6 +34,8 @@ function env(name: string, fallback = ""): string {
 export function loadSandboxdConfig(): SandboxdConfig {
   const upstream = env("PA_SANDBOXD_GATEWAY_UPSTREAM");
   const dataDir = env("PA_SANDBOXD_DATA_DIR");
+  const memory = env("PA_SANDBOXD_MEMORY", "2g");
+  if (!/^[1-9][0-9]*[mg]$/i.test(memory)) throw new Error(`PA_SANDBOXD_MEMORY must look like 2g or 4096m, got ${memory}`);
   return {
     port: Number.parseInt(env("PA_SANDBOXD_PORT", "4894"), 10),
     bind: env("PA_SANDBOXD_BIND", "127.0.0.1"),
@@ -39,6 +43,7 @@ export function loadSandboxdConfig(): SandboxdConfig {
     images: env("PA_SANDBOXD_IMAGES", env("PA_SANDBOX_IMAGE", "ghcr.io/agent-infra/sandbox:1.11.0")).split(",").map((s) => s.trim()).filter(Boolean),
     containerHost: env("PA_SANDBOXD_CONTAINER_HOST", "127.0.0.1"),
     addHostGateway: env("PA_SANDBOXD_ADD_HOST_GATEWAY", "0") === "1",
+    memory,
     logDir: dataDir ? path.join(dataDir, "logs") : null,
     gateway: upstream
       ? { upstream, bind: env("PA_SANDBOXD_GATEWAY_BIND", "127.0.0.1"), port: Number.parseInt(env("PA_SANDBOXD_GATEWAY_PORT", "4902"), 10) }

@@ -68,7 +68,7 @@ beforeAll(async () => {
   const webPort = (web.address() as AddressInfo).port;
   const log = new Logger("error", undefined, false);
   const driver = new SandboxDriver(
-    { port: 0, bind: "127.0.0.1", tokenFile: "", images: ["img"], containerHost: "127.0.0.1", addHostGateway: false, logDir: null, gateway: null },
+    { port: 0, bind: "127.0.0.1", tokenFile: "", images: ["img"], containerHost: "127.0.0.1", addHostGateway: false, memory: "2g", logDir: null, gateway: null },
     log,
     new LocalDocker(webPort) as unknown as DockerCli,
   );

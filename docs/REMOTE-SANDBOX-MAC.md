@@ -42,6 +42,7 @@ PA_SANDBOXD_GATEWAY_UPSTREAM=http://100.110.16.34:4902
 PA_SANDBOXD_GATEWAY_BIND=127.0.0.1
 PA_SANDBOXD_GATEWAY_PORT=4902
 PA_SANDBOXD_IMAGES=ghcr.io/agent-infra/sandbox:1.11.0
+PA_SANDBOXD_MEMORY=4g
 ```
 
 `~/Library/LaunchAgents` 中的 `ai.aio.sandboxd`、`ai.aio.bridge-relay`、`ai.aio.keep-awake`
@@ -59,8 +60,10 @@ PA_SANDBOXD_IMAGES=ghcr.io/agent-infra/sandbox:1.11.0
 | xjy | aio-user-29e13a1607be44ab4dbf | 18084 | 4 GiB |
 
 成员仍限定 2 CPU、1024 PID，使用独立 bridge 网络、禁 NET_RAW，并由现有 network-guard 设置内网隔离。
-当前四个容器设置 `--memory 4g --memory-swap 4g`，重启保留。**源码创建默认仍为 2 GiB**；
-新增账号或删除后自动重建的容器须在节点执行以下命令，再验证 `HostConfig.Memory=4294967296`：
+迁移的四个容器手工设为 `--memory 4g --memory-swap 4g`，重启保留。源码默认仍为 2 GiB，
+本节点由 `sandbox.env` 的 `PA_SANDBOXD_MEMORY=4g` 让新建容器（新增账号、删除后自动重建）同样是 4 GiB
+（交换区按 Docker 默认合计 8 GiB）。改这一项要重启 sandboxd，只影响之后新建的容器；已有容器在节点上用
+`docker update` 在线修改。创建后可核对 `HostConfig.Memory=4294967296`：
 
 ```bash
 export PATH=/Applications/Docker.app/Contents/Resources/bin:$HOME/.local/bin:$PATH

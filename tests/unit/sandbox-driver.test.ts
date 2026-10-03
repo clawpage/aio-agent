@@ -6,7 +6,7 @@ import { Logger } from "../../src/common/logger.js";
 import type { ExecResult, SandboxSpec } from "../../src/common/protocol.js";
 import { execError, SandboxDriver, specError } from "../../src/sandbox/driver.js";
 import type { DockerCli } from "../../src/sandbox/docker.js";
-import type { SandboxdConfig } from "../../src/sandbox/config.js";
+import { loadSandboxdConfig, type SandboxdConfig } from "../../src/sandbox/config.js";
 
 const IMAGE = "ghcr.io/agent-infra/sandbox:1.11.0";
 
@@ -27,7 +27,7 @@ function spec(over: Partial<SandboxSpec> = {}): SandboxSpec {
 }
 
 function config(over: Partial<SandboxdConfig> = {}): SandboxdConfig {
-  return { port: 0, bind: "127.0.0.1", tokenFile: "", images: [IMAGE], containerHost: "127.0.0.1", addHostGateway: false, logDir: null, gateway: null, ...over };
+  return { port: 0, bind: "127.0.0.1", tokenFile: "", images: [IMAGE], containerHost: "127.0.0.1", addHostGateway: false, memory: "2g", logDir: null, gateway: null, ...over };
 }
 
 /** Records every docker call and answers like a container that does not exist yet. */
@@ -106,6 +106,30 @@ describe("sandbox node driver", () => {
     expect(run).not.toContain("--cpus");
     expect(run).toEqual(expect.arrayContaining(["--add-host", "host.docker.internal:host-gateway"]));
     expect(docker.calls.some((c) => c.args.includes("container:personal-agent-sandbox") && c.stdin?.includes("18082 18083"))).toBe(true);
+  });
+
+  it("gives new sandboxes the node's own memory cap", async () => {
+    const docker = new FakeDocker();
+    const driver = new SandboxDriver(config({ memory: "4g" }), log, docker as unknown as DockerCli);
+    const port = await healthServer();
+    await driver.ensure(spec({ hostPort: port, member: { networkName: "aio-user-abc", gatewayPort: 4902 } }), 10_000);
+    const run = docker.calls.find((c) => c.args[0] === "run" && c.args[1] === "-d")!.args;
+    expect(run[run.indexOf("--memory") + 1]).toBe("4g");
+  });
+
+  it("reads the node's memory cap, 2 GB by default, and refuses a malformed one", () => {
+    const saved = process.env.PA_SANDBOXD_MEMORY;
+    try {
+      delete process.env.PA_SANDBOXD_MEMORY;
+      expect(loadSandboxdConfig().memory).toBe("2g");
+      process.env.PA_SANDBOXD_MEMORY = "4g";
+      expect(loadSandboxdConfig().memory).toBe("4g");
+      process.env.PA_SANDBOXD_MEMORY = "4 GB";
+      expect(() => loadSandboxdConfig()).toThrow(/PA_SANDBOXD_MEMORY/);
+    } finally {
+      if (saved === undefined) delete process.env.PA_SANDBOXD_MEMORY;
+      else process.env.PA_SANDBOXD_MEMORY = saved;
+    }
   });
 
   it("refuses specs that could reach the host, and commands it cannot pass through intact", () => {

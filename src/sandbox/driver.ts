@@ -260,9 +260,10 @@ export class SandboxDriver {
       spec.name,
       "--restart",
       "unless-stopped",
-      // Every sandbox, the owner's included, is capped at 2 GB; members are also limited in CPU and processes.
+      // Every sandbox, the owner's included, gets the node's memory cap (2 GB unless the node
+      // says otherwise); members are also limited in CPU and processes.
       "--memory",
-      "2g",
+      this.#cfg.memory,
       ...(spec.member ? ["--network", spec.member.networkName, "--cap-drop", "NET_RAW", "--cpus", "2", "--pids-limit", "1024"] : []),
       ...(this.#cfg.addHostGateway ? ["--add-host", "host.docker.internal:host-gateway"] : []),
       "--label",
