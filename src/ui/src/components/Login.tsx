@@ -87,7 +87,7 @@ export function Login({ onSuccess, notice, username: named }: { onSuccess: () =>
         }}
       >
         <h1 className="login-brand"><BrandMark size={40}/>一站</h1>
-        <p className="muted">什么事情都在我这里一站解决吧。用管理员给你的账号登录。</p>
+        <p className="muted">什么事情都在这里一站解决吧。用管理员给你的账号登录。</p>
         <label className="field">
           <span>账号</span>
           <input value={username} onChange={e => setUsername(e.target.value)} autoComplete="username" autoFocus={!named} />
