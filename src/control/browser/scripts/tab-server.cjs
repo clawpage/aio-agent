@@ -55,7 +55,7 @@ const { chromium } = require(process.env.AIO_TABS_PLAYWRIGHT || '/opt/aio-browse
 const INSTRUCTIONS = [
   '浏览器请只用 aio_tabs 的工具。每个标签页记录着创建它的任务：只有创建它的任务能操作（打开网址、点击、填写、执行脚本、关闭），其他任务只能只读查看（正文、HTML、页面结构、截图）。',
   '只读查看其他任务的页面时，先用 browser_tab_list 找到标签页编号（如 t3），再把它作为 tab 参数传给读取类工具。',
-  '页面要求用账号密码登录时，先让登录表单出现，再调用 browser_login：密码器把用户保存的账号密码直接填进页面并提交，你看不到密码；用户没保存过时会被请去填写，也可能改为自己在浏览器里输入。不要用 browser_fill 或 browser_type 输入密码，不要读取密码框的内容。',
+  '页面要求登录时（账号密码，或「用 Google 登录」这类按钮），先让登录入口出现，再调用 browser_login：密码器把用户保存的账号密码直接填进页面并提交，你看不到密码；用户为这个网站记的是 Google 登录时，它会告诉你点 Google 登录按钮、选哪个账号；用户没保存过时会被请去选择，也可能改为自己在浏览器里登录。不要用 browser_fill 或 browser_type 输入密码，不要读取密码框的内容。',
   '需要用户本人在浏览器里操作时，调用 browser_request_human 说明原因并等待：验证码、二次验证、扫码登录、支付信息、付款、下单、发送消息、修改账号设置等不可撤销的最后一步，或需要用户判断的页面。不要在对话里索要密码或验证码。',
   '遇到「按住确认你是真人」（Press & Hold）、滑块、勾选框等人机验证时，不要自己反复点击、拖动或刷新：同一个标签页里的验证会话一旦被判为机器，之后人来按也过不了。先用 browser_tab_new 在新标签页重新打开同一网址，再用 browser_tab_close 关掉旧标签页；新标签页通常直接通过。新标签页仍出现验证，才调用 browser_request_human 请用户在这个新标签页里完成。',
   '用户交还后先读取页面确认当前状态再继续；结果不确定的操作不要自动重做，先让用户核对。用户正在操作的标签页你不能读取或操作。',
@@ -547,6 +547,14 @@ async function vaultLogin(body) {
   const tab = registry.get(String(body.tab || ''));
   if (!tab || tab.page.isClosed() || (body.key && tab.key !== body.key)) return { status: 404, body: { error: 'no_tab', message: '这个标签页已经关闭或不属于该任务' } };
   if (!tab.request || tab.request.kind !== 'login' || tab.holder !== 'ai') return { status: 409, body: { error: 'no_request', message: '这个页面没有在等待登录' } };
+  if (body.method === 'google') {
+    // Nothing secret: the browser already holds the person's Google login. The agent uses the site's Google button.
+    if (!siteCovers(String(body.site || ''), hostOf(safeUrl(tab.page)))) return { status: 409, body: { error: 'site_changed', message: '页面已经不在这个网站' } };
+    tab.request = null;
+    save();
+    settleWaiters(tab.id, { login: 'google', account: typeof body.username === 'string' ? body.username.slice(0, 200) : '' });
+    return { status: 200, body: { result: 'google' } };
+  }
   if (typeof body.username !== 'string' || typeof body.password !== 'string' || !body.password || body.password.length > 1000 || body.username.length > 200) return { status: 400, body: { error: 'bad_request' } };
   if (!siteCovers(String(body.site || ''), hostOf(safeUrl(tab.page)))) return { status: 409, body: { error: 'site_changed', message: '页面已经不在这个网站，没有填入' } };
   tab.locked = true;
@@ -1001,7 +1009,7 @@ const TOOLS = {
   },
   browser_login: {
     mode: 'write',
-    description: '用密码器登录当前页面（先让账号密码表单出现）：系统把用户保存的账号密码直接填进页面并提交，你看不到密码，也不要自己填写或读取密码。用户没保存过时会被请去填写，也可以改为自己在浏览器里输入（最长等 30 分钟）。返回后先读取页面确认是否登录成功。',
+    description: '用密码器登录当前页面（先让账号密码表单或 Google 登录按钮出现）：账号密码由系统直接填进页面并提交，你看不到密码，也不要自己填写或读取密码；用户为这个网站记的是 Google 登录时，会告诉你点 Google 登录按钮、选哪个 Google 账号。用户没保存过时会被请去选择，也可以改为自己在浏览器里登录（最长等 30 分钟）。返回后先读取页面确认是否登录成功。',
     input: { tab: ownTabArg },
     run: async (ctx, a, signal) => {
       const tab = await resolveTab(ctx, a.tab, 'write', false, true);
@@ -1012,6 +1020,10 @@ const TOOLS = {
       const outcome = await waitForHuman(tab, signal);
       if (outcome && outcome.login === 'submitted') {
         return textResult(`密码器已填入账号密码并提交。${await describe(tab)}\n先读取页面确认是否登录成功。页面提示账号或密码错误时不要重复调用，告诉用户到密码器里核对；还要验证码或二次验证时调用 browser_request_human。`);
+      }
+      if (outcome && outcome.login === 'google') {
+        const which = outcome.account ? `Google 账号 ${outcome.account}` : '浏览器里已登录的 Google 账号';
+        return textResult(`用户为 ${site} 记录的是「用 Google 登录」，用${which}。点页面上「使用 Google 登录」「Continue with Google」「Sign in with Google」之类的按钮（找不到就先点登录入口）；跳到 Google 账号选择页时选${outcome.account ? '这个账号' : '已登录的账号'}，出现授权确认就点继续。不要再调用 browser_login，也不要输入任何密码；Google 要求输入密码、验证码或二次验证时调用 browser_request_human。完成后读取页面确认已经登录。${await describe(tab)}`);
       }
       if (outcome && outcome.login === 'username_only') {
         return textResult(`密码器已填入账号并进入下一步，但没有出现密码输入框。${await describe(tab)}\n读取页面确认状态；出现密码框后再调用一次 browser_login。`);

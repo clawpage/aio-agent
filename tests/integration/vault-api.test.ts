@@ -100,3 +100,16 @@ it("answers a task's sign-in request from the vault without the password ever co
   expect((await send("/api/tasks/task_missing/browser/login", "POST", { tab: "t1", entryId: saved[0]!.id })).status).toBe(404);
   expect(logins).toHaveLength(2);
 });
+
+it("saves a site as Google sign-in and answers a sign-in request with it", async () => {
+  const created = (await json(await send("/api/vault", "POST", { site: "notion.so", method: "google", username: "max@gmail.com" }))).entry as { id: string; method: string };
+  expect(created.method).toBe("google");
+  expect((await send(`/api/vault/${created.id}/reveal`, "POST", {})).status).toBe(404);
+  expect((await send("/api/vault", "POST", { site: "x.com", method: "sms", username: "" })).status).toBe(400);
+  const task = (await json(await send("/api/tasks", "POST", { text: "登录 notion", clientMessageId: "vault-google" }))).task as { id: string };
+  const key = h.ctx.tasks.browserKey(task.id)!;
+  tabs = [{ id: "t1", key, title: "Notion", url: "https://www.notion.so/login", createdAt: 1, lastUsed: 1, finishedAt: null, holder: "ai", humanSince: null, request: { kind: "login", site: "www.notion.so", reason: "需要登录", at: 9 } }];
+  const before = logins.length;
+  expect((await send(`/api/tasks/${task.id}/browser/login`, "POST", { tab: "t1", entryId: created.id })).status).toBe(200);
+  expect(logins.slice(before)).toEqual([{ key, tab: "t1", account: { site: "www.notion.so", method: "google", username: "max@gmail.com" } }]);
+});

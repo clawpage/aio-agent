@@ -651,6 +651,18 @@ it.skipIf(!hasChromium)("signs in from the vault: the agent only asks, the page 
     expect(text(await none)).toContain("没有找到账号或密码输入框");
     expect(received).toHaveLength(3);
 
+    // A site that signs in with Google: nothing is typed, the agent is told which button and account.
+    await call("V", "browser_navigate", { url: `${origin}/login`, tab });
+    const google = ask("V");
+    await asked("V");
+    expect((await login({ key: "V", tab, site: "example.com", method: "google", username: "max@gmail.com" })).body.error).toBe("site_changed");
+    expect((await login({ key: "V", tab, site: "127.0.0.1", method: "google", username: "max@gmail.com" })).body.result).toBe("google");
+    const told = text(await google);
+    expect(told).toContain("用 Google 登录");
+    expect(told).toContain("Google 账号 max@gmail.com");
+    expect(received).toHaveLength(3);
+    expect((await records("V"))[0]?.request).toBeNull();
+
     // Skipping the vault: the person signs in by hand, as before.
     await call("V", "browser_navigate", { url: `${origin}/login`, tab });
     const manual = ask("V");

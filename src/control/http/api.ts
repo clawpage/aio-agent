@@ -612,7 +612,7 @@ export function createApiRouter(context: AppContext): Router {
     if (!tab || ctxOf(req).session!.ownerId !== (cfg.runtimeUserId ?? "owner_1")) { res.status(404).json({ error: "tab_not_found", message: "这个标签页已经关闭或不属于该任务" }); return; }
     res.setHeader("Cache-Control", "no-store");
     try {
-      const out = await vaultLogin(context, tab, { entryId: req.body?.entryId, username: req.body?.username, password: req.body?.password, save: req.body?.save });
+      const out = await vaultLogin(context, tab, { entryId: req.body?.entryId, username: req.body?.username, password: req.body?.password, save: req.body?.save, method: req.body?.method });
       if (out.ok) res.json({ result: out.result });
       else res.status(out.status).json({ error: out.error, message: out.message });
     } catch (err) {
@@ -644,14 +644,14 @@ export function createApiRouter(context: AppContext): Router {
     const v = vault(req, res);
     if (!v) return;
     try {
-      res.status(201).json({ entry: v.create({ site: req.body?.site, username: req.body?.username, password: req.body?.password }) });
+      res.status(201).json({ entry: v.create({ site: req.body?.site, username: req.body?.username, password: req.body?.password, method: req.body?.method }) });
     } catch (err) { vaultFailure(res, err); }
   }));
   router.put("/vault/:id", requireKind("primary"), requireSession, asyncHandler(async (req, res) => {
     const v = vault(req, res);
     if (!v) return;
     try {
-      const entry = v.update(param(req, "id"), { site: req.body?.site, username: req.body?.username, password: req.body?.password });
+      const entry = v.update(param(req, "id"), { site: req.body?.site, username: req.body?.username, password: req.body?.password, method: req.body?.method });
       if (entry) res.json({ entry });
       else res.status(404).json({ error: "not_found", message: "密码器里没有这个账号" });
     } catch (err) { vaultFailure(res, err); }

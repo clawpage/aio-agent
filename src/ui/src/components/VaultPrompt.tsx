@@ -3,6 +3,7 @@ import { api } from "../api";
 import type { TaskTab, VaultEntry } from "../types";
 
 const OUTCOME: Record<string, string> = {
+  google: "已告诉 AI 用 Google 登录，它会点页面上的 Google 按钮。",
   no_form: "页面上没找到账号密码输入框，AI 会先把登录表单打开。",
   username_only: "账号已填入，等密码框出现后会再问一次。",
   failed: "没能填进这个页面，可以改为自己输入。",
@@ -29,7 +30,7 @@ export function VaultPrompt({ taskId, tab, busy, onDone, onManual }: { taskId: s
     return () => { alive = false; };
   }, [site]);
 
-  const send = async (account: { entryId: string } | { username: string; password: string; save: boolean }) => {
+  const send = async (account: { entryId: string } | { username: string; password: string; save: boolean } | { method: "google"; username: string; save: boolean }) => {
     setSending(true);
     setMessage(null);
     try {
@@ -47,9 +48,9 @@ export function VaultPrompt({ taskId, tab, busy, onDone, onManual }: { taskId: s
   const off = busy || sending;
   return (
     <div className="vault-prompt" data-testid="vault-prompt">
-      <p className="task-browser-reason">需要登录 <strong>{site}</strong>。在密码器里填一次，AI 只负责把它填进页面，看不到密码。</p>
+      <p className="task-browser-reason">需要登录 <strong>{site}</strong>。在密码器里填一次，AI 只负责把它填进页面，看不到密码；这个网站用 Google 登录的话直接点「用 Google 登录」，不用填密码。</p>
       {saved.length > 0 && <div className="vault-saved">
-        {saved.map((e) => <button key={e.id} type="button" className="primary tiny" disabled={off} onClick={() => void send({ entryId: e.id })}>用 {e.username || "已保存的账号"} 登录</button>)}
+        {saved.map((e) => <button key={e.id} type="button" className="primary tiny" disabled={off} onClick={() => void send({ entryId: e.id })}>{e.method === "google" ? `用 Google 登录${e.username ? `（${e.username}）` : ""}` : `用 ${e.username || "已保存的账号"} 登录`}</button>)}
       </div>}
       <form className="vault-form" onSubmit={(e) => { e.preventDefault(); if (password) void send({ username, password, save }); }}>
         <label className="field"><span>账号</span><input value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="off" autoCapitalize="none" spellCheck={false} placeholder="用户名 / 邮箱 / 手机号" /></label>
@@ -57,6 +58,7 @@ export function VaultPrompt({ taskId, tab, busy, onDone, onManual }: { taskId: s
         <label className="vault-save tiny"><input type="checkbox" checked={save} onChange={(e) => setSave(e.target.checked)} /> 存进密码器，下次自动登录</label>
         <div className="task-actions">
           <button type="submit" className="primary tiny" disabled={off || !password}>{sending ? "正在填入…" : "填入并登录"}</button>
+          <button type="button" className="ghost tiny" disabled={off} onClick={() => void send({ method: "google", username: username.trim(), save })} title="不用密码：AI 点网站的 Google 登录按钮，账号栏填了 Gmail 就选那个账号">用 Google 登录</button>
           <button type="button" className="ghost tiny" disabled={off} onClick={onManual}>跳过，自己在浏览器里输入</button>
         </div>
       </form>

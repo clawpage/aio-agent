@@ -129,11 +129,11 @@ export const api = {
   personBrowserPointer: (tab: string, input: PointerInput) => request<PointerResult>("/api/browser/person/pointer", { method: "POST", body: { tab, ...input } }),
   personBrowserClose: (tab: string) => request<{ closed: string }>("/api/browser/person/close", { method: "POST", body: { tab } }),
   /** Answer a task's sign-in request from the vault: a saved account, or one typed now (saved unless `save` is false). */
-  taskBrowserLogin: (id: string, tab: string, account: { entryId: string } | { username: string; password: string; save: boolean }) =>
+  taskBrowserLogin: (id: string, tab: string, account: { entryId: string } | { username: string; password: string; save: boolean } | { method: "google"; username: string; save: boolean }) =>
     request<{ result: string }>(`/api/tasks/${encodeURIComponent(id)}/browser/login`, { method: "POST", body: { tab, ...account } }),
   vault: (site?: string) => request<{ entries: import("./types").VaultEntry[] }>(`/api/vault${site ? `?site=${encodeURIComponent(site)}` : ""}`, { cache: "no-store" }),
-  vaultCreate: (entry: { site: string; username: string; password: string }) => request<{ entry: import("./types").VaultEntry }>("/api/vault", { method: "POST", body: entry }),
-  vaultUpdate: (id: string, entry: { site?: string; username?: string; password?: string }) => request<{ entry: import("./types").VaultEntry }>(`/api/vault/${encodeURIComponent(id)}`, { method: "PUT", body: entry }),
+  vaultCreate: (entry: { site: string; username: string; password?: string; method?: "password" | "google" }) => request<{ entry: import("./types").VaultEntry }>("/api/vault", { method: "POST", body: entry }),
+  vaultUpdate: (id: string, entry: { site?: string; username?: string; password?: string; method?: "password" | "google" }) => request<{ entry: import("./types").VaultEntry }>(`/api/vault/${encodeURIComponent(id)}`, { method: "PUT", body: entry }),
   vaultDelete: (id: string) => request<{ ok: boolean }>(`/api/vault/${encodeURIComponent(id)}`, { method: "DELETE" }),
   vaultReveal: (id: string) => request<{ password: string }>(`/api/vault/${encodeURIComponent(id)}/reveal`, { method: "POST", body: {} }),
   taskBrowserScreenshotUrl: (id: string, tab: string, at: number) => apiUrl(`/api/tasks/${encodeURIComponent(id)}/browser/screenshot?tab=${encodeURIComponent(tab)}&at=${at}`),

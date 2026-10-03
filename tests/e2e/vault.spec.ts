@@ -52,7 +52,7 @@ test("a sign-in request asks for the account on the card, and only the outcome c
 });
 
 test("a saved account signs in with one tap; skipping hands the page over as before", async ({ page }) => {
-  const saved: VaultEntry[] = [{ id: "vault_1", site: "opentable.com", username: "max@example.com", createdAt: 1, updatedAt: 1, lastUsedAt: null }];
+  const saved: VaultEntry[] = [{ id: "vault_1", site: "opentable.com", method: "password", username: "max@example.com", createdAt: 1, updatedAt: 1, lastUsedAt: null }];
   const { logins, controls } = await setup(page, saved);
   const card = page.getByRole("group", { name: "任务浏览器：需要登录" });
   await expect(card.getByRole("button", { name: "用 max@example.com 登录" })).toBeVisible();
@@ -62,7 +62,7 @@ test("a saved account signs in with one tap; skipping hands the page over as bef
 });
 
 test("the vault page lists accounts, shows a password only when asked, and edits and removes them", async ({ page }, info) => {
-  const entries: VaultEntry[] = [{ id: "vault_1", site: "github.com", username: "max", createdAt: 1, updatedAt: 1, lastUsedAt: Date.UTC(2026, 9, 2) }];
+  const entries: VaultEntry[] = [{ id: "vault_1", site: "github.com", method: "password", username: "max", createdAt: 1, updatedAt: 1, lastUsedAt: Date.UTC(2026, 9, 2) }];
   await mockConsole(page, { conversations: [] });
   await page.route("**/api/main*", (r) => r.fulfill({ json: { mode: "tasks", tasks: [], nextBefore: null } }));
   const writes: Array<{ method: string; path: string; body: unknown }> = [];
@@ -73,7 +73,7 @@ test("the vault page lists accounts, shows a password only when asked, and edits
     const body = r.request().postDataJSON();
     writes.push({ method, path: url.pathname, body });
     if (url.pathname.endsWith("/reveal")) return r.fulfill({ json: { password: "hunter2" } });
-    if (method === "POST") { entries.push({ id: "vault_2", site: body.site, username: body.username, createdAt: 2, updatedAt: 2, lastUsedAt: null }); return r.fulfill({ status: 201, json: { entry: entries.at(-1) } }); }
+    if (method === "POST") { entries.push({ id: "vault_2", site: body.site, method: body.method ?? "password", username: body.username, createdAt: 2, updatedAt: 2, lastUsedAt: null }); return r.fulfill({ status: 201, json: { entry: entries.at(-1) } }); }
     if (method === "DELETE") { entries.splice(entries.findIndex((e) => url.pathname.endsWith(e.id)), 1); return r.fulfill({ json: { ok: true } }); }
     return r.fulfill({ json: { entry: entries[0] } });
   });
@@ -92,16 +92,66 @@ test("the vault page lists accounts, shows a password only when asked, and edits
   await vault.getByRole("button", { name: "添加账号" }).click();
   const form = vault.getByRole("form", { name: "添加账号" });
   await form.getByLabel("网站").fill("example.org");
-  await form.getByLabel("账号").fill("me");
-  await form.getByLabel("密码").fill("pw");
+  await form.getByLabel("账号", { exact: true }).fill("me");
+  await form.getByLabel("密码", { exact: true }).fill("pw");
   if (info.project.name.startsWith("mobile")) await page.setViewportSize({ width: 360, height: 844 });
   await page.screenshot({ path: info.outputPath("vault-page.png"), fullPage: true });
   expect(await overflow(page)).toBeLessThanOrEqual(0);
   await form.getByRole("button", { name: "保存" }).click();
   await expect(vault).toContainText("example.org");
-  expect(writes.find((w) => w.method === "POST" && w.path === "/api/vault")?.body).toEqual({ site: "example.org", username: "me", password: "pw" });
+  expect(writes.find((w) => w.method === "POST" && w.path === "/api/vault")?.body).toEqual({ site: "example.org", method: "password", username: "me", password: "pw" });
 
   await vault.locator('[data-vault-id="vault_2"]').getByRole("button", { name: "删除" }).click();
   await vault.getByRole("button", { name: "确认删除" }).click();
   await expect(vault).not.toContainText("example.org");
+});
+
+test("a site that signs in with Google is answered with one tap and saved without a password", async ({ page }) => {
+  const { logins } = await setup(page, []);
+  const card = page.getByRole("group", { name: "任务浏览器：需要登录" });
+  await card.getByLabel("账号", { exact: true }).fill("max@gmail.com");
+  await card.getByRole("button", { name: "用 Google 登录" }).click();
+  await expect.poll(() => logins.length).toBe(1);
+  expect(logins[0]).toEqual({ tab: "t1", method: "google", username: "max@gmail.com", save: true });
+});
+
+test("a saved Google sign-in shows as one, on the card and on the vault page, with no password to show", async ({ page }, info) => {
+  const google: VaultEntry = { id: "vault_g", site: "notion.so", method: "google", username: "", createdAt: 1, updatedAt: 1, lastUsedAt: null };
+  const { logins } = await setup(page, [google]);
+  const card = page.getByRole("group", { name: "任务浏览器：需要登录" });
+  await card.getByRole("button", { name: "用 Google 登录", exact: true }).first().click();
+  await expect.poll(() => logins).toEqual([{ tab: "t1", entryId: "vault_g" }]);
+
+  if (info.project.name.startsWith("mobile")) await page.getByRole("button", { name: "打开导航" }).click();
+  await page.locator(".sidebar").getByRole("button", { name: "密码器", exact: true }).click();
+  const row = page.getByRole("region", { name: "密码器" }).locator('[data-vault-id="vault_g"]');
+  await expect(row).toContainText("用 Google 登录（浏览器里已登录的账号）");
+  await expect(row.getByRole("button", { name: "显示密码" })).toHaveCount(0);
+  await expect(row.getByTestId("vault-password")).toHaveCount(0);
+});
+
+test("the vault page saves a site as Google sign-in, with no password field", async ({ page }, info) => {
+  const entries: VaultEntry[] = [];
+  await mockConsole(page, { conversations: [] });
+  await page.route("**/api/main*", (r) => r.fulfill({ json: { mode: "tasks", tasks: [], nextBefore: null } }));
+  const posted: unknown[] = [];
+  await page.route("**/api/vault**", async (r) => {
+    if (r.request().method() === "GET") return r.fulfill({ json: { entries } });
+    const body = r.request().postDataJSON();
+    posted.push(body);
+    entries.push({ id: "vault_1", site: body.site, method: body.method, username: body.username, createdAt: 1, updatedAt: 1, lastUsedAt: null });
+    return r.fulfill({ status: 201, json: { entry: entries[0] } });
+  });
+  await page.goto("/");
+  if (info.project.name.startsWith("mobile")) await page.getByRole("button", { name: "打开导航" }).click();
+  await page.locator(".sidebar").getByRole("button", { name: "密码器", exact: true }).click();
+  const vault = page.getByRole("region", { name: "密码器" });
+  await vault.getByRole("button", { name: "添加账号" }).click();
+  const form = vault.getByRole("form", { name: "添加账号" });
+  await form.getByLabel("网站").fill("figma.com");
+  await form.getByLabel("登录方式").selectOption("google");
+  await expect(form.getByLabel("密码", { exact: true })).toHaveCount(0);
+  await form.getByRole("button", { name: "保存" }).click();
+  await expect(vault).toContainText("用 Google 登录（浏览器里已登录的账号）");
+  expect(posted).toEqual([{ site: "figma.com", method: "google", username: "" }]);
 });

@@ -3265,6 +3265,8 @@ button.map-card-switch { flex: 0 0 auto; padding: 4px 10px; }
 .vault-add { margin: 0 2px 12px; }
 .vault-row { display: flex; align-items: baseline; gap: 10px; margin: 6px 0 0; min-width: 0; }
 .vault-row > .muted { flex: none; width: 2.5em; }
+.vault-form select { width: 100%; min-width: 0; }
+.vault-google { font-family: inherit; }
 .vault-value { min-width: 0; overflow-wrap: anywhere; font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace); font-size: 14px; }
 .schedule-badge {
   font-size: 11px;

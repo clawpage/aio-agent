@@ -245,6 +245,8 @@ export interface TaskTab {
 export interface VaultEntry {
   id: string;
   site: string;
+  /** Google: no password; the agent uses the site's Google button (with `username` as the Google account, if any). */
+  method: "password" | "google";
   username: string;
   createdAt: number;
   updatedAt: number;

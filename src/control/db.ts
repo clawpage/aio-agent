@@ -158,6 +158,7 @@ CREATE TABLE IF NOT EXISTS vault_entries (
   site TEXT NOT NULL,
   username TEXT NOT NULL,
   secret TEXT NOT NULL,
+  method TEXT NOT NULL DEFAULT 'password' CHECK (method IN ('password','google')),
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
   last_used_at INTEGER
@@ -297,6 +298,8 @@ function migrate(db: Db): void {
   if (!taskColumns.some(c => c.name === "schedule_id")) db.exec("ALTER TABLE tasks ADD COLUMN schedule_id TEXT");
   const scheduleColumns = db.prepare("PRAGMA table_info(schedules)").all() as Array<{ name: string }>;
   if (!scheduleColumns.some(c => c.name === "builtin")) db.exec("ALTER TABLE schedules ADD COLUMN builtin TEXT");
+  const vaultColumns = db.prepare("PRAGMA table_info(vault_entries)").all() as Array<{ name: string }>;
+  if (!vaultColumns.some(c => c.name === "method")) db.exec("ALTER TABLE vault_entries ADD COLUMN method TEXT NOT NULL DEFAULT 'password' CHECK (method IN ('password','google'))");
   const recallColumns = db.prepare("PRAGMA table_info(recall_events)").all() as Array<{ name: string }>;
   if (!recallColumns.some(c => c.name === "fail_reason")) db.exec("ALTER TABLE recall_events ADD COLUMN fail_reason TEXT");
   if (!recallColumns.some(c => c.name === "repairs_json")) db.exec("ALTER TABLE recall_events ADD COLUMN repairs_json TEXT NOT NULL DEFAULT '[]'");

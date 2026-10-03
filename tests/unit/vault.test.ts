@@ -162,3 +162,51 @@ describe("signing in from the vault", () => {
     }
   });
 });
+
+describe("signing in with Google", () => {
+  const tab = (over: Partial<TabRecord> = {}): TabRecord => ({
+    id: "t1", key: "conv_1", title: "任务", url: "https://www.notion.so/login", createdAt: 1, lastUsed: 1, finishedAt: null, holder: "ai", humanSince: null,
+    request: { kind: "login", site: "www.notion.so", reason: "需要登录", at: 100 }, ...over,
+  });
+  const world = (tabs: TabRecord[] = []) => {
+    const logins: unknown[] = [];
+    const ctx = { vault, log: new Logger("error", undefined, false), tasks: { hasRunning: () => true },
+      tabs: { list: async () => tabs, login: async (_k: string, _t: string, account: unknown) => (logins.push(account), { status: 200, body: { result: "google" } }) } } as unknown as AppContext;
+    return { ctx, logins };
+  };
+
+  it("keeps a site's Google sign-in without any secret, and turns it into a password one only with a password", () => {
+    const entry = vault.create({ site: "notion.so", method: "google", username: "" });
+    expect(entry).toMatchObject({ site: "notion.so", method: "google", username: "" });
+    expect(vault.secret(entry.id)).toBeNull();
+    expect((db.prepare("SELECT secret FROM vault_entries").get() as { secret: string }).secret).toBe("");
+    expect(vault.update(entry.id, { username: "max@gmail.com" })).toMatchObject({ method: "google", username: "max@gmail.com" });
+    expect(() => vault.update(entry.id, { method: "password" })).toThrow("密码");
+    vault.update(entry.id, { method: "password", password: SECRET });
+    expect(vault.secret(entry.id)).toBe(SECRET);
+    vault.update(entry.id, { method: "google" });
+    expect(vault.secret(entry.id)).toBeNull();
+    expect(() => vault.create({ site: "x.com", method: "facebook", username: "" })).toThrow("登录方式");
+  });
+
+  it("tells the page to use Google with the saved account, and saves a typed one under the page's site", async () => {
+    const google = vault.create({ site: "notion.so", method: "google", username: "max@gmail.com" });
+    const { ctx, logins } = world();
+    expect(await vaultLogin(ctx, tab(), { entryId: google.id })).toEqual({ ok: true, result: "google" });
+    expect(logins).toEqual([{ site: "www.notion.so", method: "google", username: "max@gmail.com" }]);
+    expect(vault.get(google.id)?.lastUsedAt).not.toBeNull();
+    // Chosen on the card for a site with nothing saved: remembered as Google, once.
+    const figma = tab({ url: "https://www.figma.com/login" });
+    await vaultLogin(ctx, figma, { method: "google", username: "" });
+    await vaultLogin(ctx, figma, { method: "google", username: "work@gmail.com" });
+    expect(vault.matching("www.figma.com")).toMatchObject([{ site: "www.figma.com", method: "google", username: "work@gmail.com" }]);
+  });
+
+  it("answers by itself when a site's only entry is its Google sign-in", async () => {
+    vault.create({ site: "notion.so", method: "google", username: "" });
+    const { ctx, logins } = world([tab()]);
+    const auto = startVaultAutofill(ctx, 60_000);
+    try { await auto.tick(); } finally { auto.stop(); }
+    expect(logins).toEqual([{ site: "www.notion.so", method: "google", username: "" }]);
+  });
+});
