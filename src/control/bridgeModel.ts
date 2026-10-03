@@ -46,6 +46,15 @@ const BRIDGE_MODEL_SPECS: Record<string, BridgeModelSpec> = {
     defaultReasoningEffort: "high",
     inputModalities: BRIDGE_TEXT_ONLY,
   },
+  // Only a member's runtime serves this one here: its gateway sends it to the
+  // owner's ChatGPT login. Values from the model catalog bundled with Codex 0.160.
+  "gpt-6.1-sol": {
+    displayName: "GPT-6.1 Sol",
+    description: "经成员模型网关使用 owner 的 ChatGPT 登录；凭据只在宿主侧附加。",
+    supportedReasoningEfforts: ["low", "medium", "high", "xhigh", "max", "ultra"],
+    defaultReasoningEffort: "low",
+    inputModalities: ["text", "image"],
+  },
 };
 
 /** Metadata for one bridged model id; unknown ids get the conservative defaults. */
@@ -236,6 +245,6 @@ export class BridgeModel {
 
   /** Whether this model can only take text (so an image must be refused early). */
   isTextOnly(model: string): boolean {
-    return this.providerForModel(model) !== CHATGPT_PROVIDER_ID;
+    return this.providerForModel(model) !== CHATGPT_PROVIDER_ID && !bridgeModelSpec(model).inputModalities.includes("image");
   }
 }

@@ -82,6 +82,10 @@ it('derives disjoint persistent data, volumes and networks, coalesces concurrent
   expect(memberConfig({...h.ctx.cfg,browser:{...h.ctx.cfg.browser,memberReleaseWhenIdle:false}},u.id,19001).browser.releaseWhenIdle).toBe(false);
   // Only the administrator's assignment picks another model, and only from the member list.
   expect(()=>memberConfig(h.ctx.cfg,u.id,19001,'claude-opus-5-5')).toThrow('Unsupported member model');
+  // A GPT member's model is what its gateway provider serves; a Claude member keeps DeepSeek there.
+  const g=memberConfig(h.ctx.cfg,u.id,19001,'gpt-6.1-sol');
+  expect(g.bridge.models).toEqual(['gpt-6.1-sol']);expect(g.agent.defaultModel).toBe('gpt-6.1-sol');
+  expect(memberConfig(h.ctx.cfg,u.id,19001,'claude-sonnet-5-5').bridge.models).toEqual(['deepseek-v4.1-flash']);
   h.ctx.db.prepare('INSERT INTO meta(key,value) VALUES(?,?)').run(`member_model:${u.id}`,'claude-sonnet-5-5');
   let calls=0;
   const registry=new UserRuntimes(h.ctx,async opts=>{calls++;expect(opts?.identity?.id).toBe(u.id);expect(opts?.config?.memberModel).toBe('claude-sonnet-5-5');expect(opts?.config?.agent.defaultModel).toBe('claude-sonnet-5-5');return {ctx:h.ctx,db:h.ctx.db,shutdown:async()=>{}};});

@@ -472,3 +472,42 @@ describe("AgentManager without the bridge", () => {
     db.close();
   });
 });
+
+describe("A member assigned GPT", () => {
+  it("runs on its gateway provider with images allowed, and fails closed without the control plane's ChatGPT login", async () => {
+    const dir = tmpDir();
+    cleanups.push(() => fs.rmSync(dir, { recursive: true, force: true }));
+    const file = writeSecrets(dir, `AIO_MEMBER_MODEL_TOKEN=${"a".repeat(64)}\n`);
+    const base = testConfig("/tmp/pa-member-gpt", 1, { PA_OPENCODE_GO_SECRETS_FILE: file });
+    const cfg = {
+      ...base, memberRuntime: true, memberModel: "gpt-6.1-sol", agent: { ...base.agent, defaultModel: "gpt-6.1-sol" },
+      bridge: { ...base.bridge, envKey: "AIO_MEMBER_MODEL_TOKEN", models: ["gpt-6.1-sol"] },
+    };
+    const log = new Logger("error", undefined, false);
+    const bridge = new BridgeModel(cfg, log);
+    expect(bridge.providerForModel("gpt-6.1-sol")).toBe("opencode_go");
+    expect(bridge.isTextOnly("gpt-6.1-sol")).toBe(false);
+    expect(bridge.modelEntries()[0]?.inputModalities).toEqual(["text", "image"]);
+
+    const db = openDb(":memory:");
+    db.prepare("INSERT INTO owners(id,username,role,password_hash,password_salt,password_params,created_at) VALUES ('user_g','xjy','member','x','x','{}',0)").run();
+    const codex = new FakeCodex();
+    const hostTokens = { status: async () => ({ ok: true }) } as unknown as HostTokenSource;
+    const member = new AgentManager({ cfg, db, log, codex, hostTokens, bridge });
+    await member.init();
+    const off = new AgentManager({ cfg: { ...cfg, hostCodex: { ...cfg.hostCodex, enabled: false } }, db, log, codex: new FakeCodex(), hostTokens, bridge });
+    try {
+      expect(member.memberSettings()).toEqual({ model: "gpt-6.1-sol", effort: "high" });
+      const conv = member.createConversation({ ownerId: "user_g", title: "member" });
+      member.submitTurn({ conversationId: conv.id, text: "hi", clientMessageId: "g1", model: "gpt-6-astra", effort: "max" });
+      await tick();
+      expect(codex.threadProviders.get(codex.startedThreads[0]!.threadId)).toBe("opencode_go");
+      expect(codex.startedTurns[0]).toMatchObject({ model: "gpt-6.1-sol", effort: "high" });
+      expect(() => off.memberSettings()).toThrow("服务暂时不可用");
+    } finally {
+      member.shutdown();
+      off.shutdown();
+      db.close();
+    }
+  });
+});

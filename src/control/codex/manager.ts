@@ -1,4 +1,4 @@
-import { isMember, MEMBER_EFFORT, MEMBER_MODEL } from "../auth/policy.js";
+import { isMember, MEMBER_EFFORT, MEMBER_GPT_MODEL, MEMBER_MODEL } from "../auth/policy.js";
 import {readSoul} from '../soul.js';
 import { EventEmitter } from "node:events";
 import type { Db } from "../db.js";
@@ -732,8 +732,10 @@ export class AgentManager {
    */
   memberSettings(): { model: string; effort: string } {
     const model = this.#cfg.memberModel ?? MEMBER_MODEL;
-    // Fail closed: an unavailable member model never falls back to the ChatGPT account.
-    const available = this.#claudeCode?.owns(model) || (this.#bridge?.providerForModel(model) ?? "openai") !== "openai";
+    // Fail closed: an unavailable member model never falls back to the ChatGPT account,
+    // and a GPT member runs only while the control plane has its own ChatGPT login.
+    const available = (this.#claudeCode?.owns(model) || (this.#bridge?.providerForModel(model) ?? "openai") !== "openai")
+      && (model !== MEMBER_GPT_MODEL || this.#cfg.hostCodex.enabled);
     if (!available) throw new Error("服务暂时不可用，请稍后重试");
     return { model, effort: MEMBER_EFFORT };
   }

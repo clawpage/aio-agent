@@ -6,7 +6,7 @@ import {bootstrap, startSandboxRuntime, startRuntimeRecovery, startSandboxIdle, 
 import {startTaskNotifications} from './push.js';
 import type {MemberModelGateway} from './memberModelGateway.js';
 import {getUser} from './auth/owner.js';
-import {MEMBER_MODEL,MEMBER_MODELS} from './auth/policy.js';
+import {MEMBER_GPT_MODEL,MEMBER_MODEL,MEMBER_MODELS} from './auth/policy.js';
 import type {SandboxNodes} from './sandbox/nodes.js';
 
 /** A stable opaque namespace: no user-controlled paths, names, ports or upstreams. */
@@ -24,7 +24,8 @@ export function memberConfig(base: Config, userId: string, port: number, model: 
       // Owner PA_SANDBOX_EXTRA_ENV is never inherited; only the fixed flag Chromium needs
       // on Docker Desktop (no user namespaces for its zygote), or the browser crash-loops.
       codexVolume:`aio-user-${suffix}-codex`,browserVolume:`aio-user-${suffix}-browser`,extraEnv:['BROWSER_NO_SANDBOX=--no-sandbox']},
-    bridge:{...base.bridge,models:['deepseek-v4.1-flash']},
+    // A GPT member's model is the one its gateway provider serves; everyone else keeps DeepSeek there.
+    bridge:{...base.bridge,models:[model===MEMBER_GPT_MODEL?model:MEMBER_MODEL]},
     // The owner's knowledge-base address is never inherited; the gateway grants a listed member its own.
     kb:undefined,
     // Nor the owner's schedule tool: the gateway gives every member one that reaches only its own schedules.

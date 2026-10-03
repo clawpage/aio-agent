@@ -7,25 +7,30 @@ import type {Config} from './config.js';
 import {BridgeModel} from './bridgeModel.js';
 import type {Logger} from '../common/logger.js';
 import {ClaudeCodeHarness,MEMBER_GATEWAY_TOKEN_KEY} from './claudeCode.js';
-import {MEMBER_CLAUDE_MODEL} from './auth/policy.js';
+import {MEMBER_CLAUDE_MODEL,MEMBER_EFFORT,MEMBER_GPT_MODEL} from './auth/policy.js';
 import type {ShareStore} from './share.js';
 import type {DecisionGateway} from './decision.js';
 import type {KbGateway} from './kb.js';
 import type {ScheduleGateway} from './scheduleTool.js';
+import type {HostTokenSource} from './codex/hostTokens.js';
 
 /** The CLI's subscription credential needs this beta on the Messages API. */
 const OAUTH_BETA='oauth-2025-04-20';
+/** Request metadata the member's Codex sends that ChatGPT may read; never its gateway token. */
+const CODEX_HEADERS=/^(accept|user-agent|originator|version|session-id|thread-id|x-client-request-id|x-codex-[a-z0-9-]+|x-openai-internal-codex-[a-z0-9-]+)$/;
 
 /**
  * Member capabilities authorize stateless DeepSeek inference only, never bridge admin/history APIs,
  * and, for a member assigned Claude, the Messages API on that one model with the owner's
- * credential added here on the host.
+ * credential added here on the host. A member assigned GPT gets the same stateless Responses
+ * route, sent to ChatGPT with the control plane's own login added here.
  */
 export class MemberModelGateway {
   private tokens=new Map<string,string>();
   private claudeModels=new Map<string,string>();
+  private gptUsers=new Set<string>();
   private server:http.Server|null=null;
-  constructor(private cfg:Config,private log:Logger,private share?:ShareStore,private decision?:DecisionGateway,private kb?:KbGateway,private schedule?:ScheduleGateway){}
+  constructor(private cfg:Config,private log:Logger,private share?:ShareStore,private decision?:DecisionGateway,private kb?:KbGateway,private schedule?:ScheduleGateway,private hostTokens?:Pick<HostTokenSource,'getTokens'|'invalidate'>){}
   provision(cfg:Config):void {
     fs.mkdirSync(cfg.dataDir,{recursive:true,mode:0o700});
     const file=path.join(cfg.dataDir,'model-token');
@@ -40,6 +45,7 @@ export class MemberModelGateway {
     this.decision?.provision(cfg);
     this.kb?.provision(cfg);
     this.schedule?.provision(cfg);
+    if(cfg.memberModel===MEMBER_GPT_MODEL)this.gptUsers.add(cfg.runtimeUserId!);else this.gptUsers.delete(cfg.runtimeUserId!);
     if(cfg.memberModel!==MEMBER_CLAUDE_MODEL){this.claudeModels.delete(cfg.runtimeUserId!);return;}
     const claudeSecret=path.join(cfg.dataDir,'claude.env');
     fs.writeFileSync(claudeSecret,`${MEMBER_GATEWAY_TOKEN_KEY}=${token}\n`,{mode:0o600});
@@ -82,6 +88,21 @@ export class MemberModelGateway {
           return;
         }
         if(input.previous_response_id||input.conversation||input.background){res.writeHead(400).end();return;}
+        if(this.gptUsers.has(userId!)){
+          // Fails closed (502) when the control plane has no ChatGPT login; it never falls back to DeepSeek.
+          if(!this.hostTokens)throw new Error('Provider unavailable');
+          const tokens=await this.hostTokens.getTokens();
+          const reasoning=input.reasoning&&typeof input.reasoning==='object'?input.reasoning:{};
+          input.model=MEMBER_GPT_MODEL;input.reasoning={...reasoning,effort:MEMBER_EFFORT};input.store=false;delete input.service_tier;
+          const headers:Record<string,string>={'content-type':'application/json',authorization:`Bearer ${tokens.accessToken}`,'chatgpt-account-id':tokens.chatgptAccountId};
+          for(const [name,value] of Object.entries(req.headers))if(typeof value==='string'&&CODEX_HEADERS.test(name))headers[name]=value;
+          const upstream=await fetch(this.cfg.hostCodex.chatgptUrl.replace(/\/$/,'')+'/responses',{method:'POST',headers,body:JSON.stringify(input),signal:abort.signal});
+          // A rejected token is fetched afresh on the next request.
+          if(upstream.status===401)this.hostTokens.invalidate();
+          res.writeHead(upstream.status,{'content-type':upstream.headers.get('content-type')??'application/json','cache-control':'no-store'});
+          if(upstream.body)Readable.fromWeb(upstream.body as never).on('error',()=>res.destroy()).pipe(res);else res.end();
+          return;
+        }
         const state=bridge.status();if(!state.enabled||!state.secret)throw new Error('Provider unavailable');
         input.model='deepseek-v4.1-flash';input.reasoning={effort:'high'};input.store=false;
         const upstream=await fetch(this.cfg.bridge.upstreamUrl.replace(/\/$/,'')+'/responses',{method:'POST',headers:{'content-type':'application/json',authorization:`Bearer ${state.secret}`},body:JSON.stringify(input),signal:abort.signal});

@@ -150,6 +150,8 @@ export function loadConfig(): {
     home: string;
     tokenRefreshSkewMs: number;
     requestTimeoutMs: number;
+    /** Codex's ChatGPT backend, where the member gateway sends a GPT member's requests. */
+    chatgptUrl: string;
   };
   /**
    * Only the sandbox Chromium is ever put to sleep. The container, Codex,
@@ -412,6 +414,7 @@ export function loadConfig(): {
       home: envStr("PA_HOST_CODEX_HOME", path.join(os.homedir(), ".codex")),
       tokenRefreshSkewMs: envInt("PA_HOST_TOKEN_SKEW_HOURS", 6) * 3600_000,
       requestTimeoutMs: envInt("PA_HOST_CODEX_TIMEOUT_SECONDS", 10) * 1000,
+      chatgptUrl: envStr("PA_CHATGPT_CODEX_URL", "https://chatgpt.com/backend-api/codex"),
     },
     browser: {
       enabled: envStr("PA_BROWSER_LIFECYCLE", "1") === "1",
