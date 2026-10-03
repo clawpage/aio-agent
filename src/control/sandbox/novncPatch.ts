@@ -13,6 +13,10 @@
  * - A long press held the right mouse button, so "press and hold" checks (the
  *   PerimeterX button on Target and others) could never pass by touch. It now
  *   holds the left button; a two-finger tap stays the right click.
+ * - A pinch (or a two-finger scroll whose fingers drifted) sent Ctrl + wheel,
+ *   which zooms the remote page, and Chrome keeps a zoom per site: Amazon stuck
+ *   at 150% laid out 853 px wide, as if on a phone. A pinch now does nothing to
+ *   the page; a phone reads the desktop at twice its width and pans instead.
  */
 export const NOVNC_UI_PATH = "/opt/novnc/app/ui.js";
 export const NOVNC_HTML_PATH = "/opt/novnc/vnc.html";
@@ -25,7 +29,7 @@ export const NOVNC_RFB_PATH = "/opt/novnc/core/rfb.js";
  * the console opens vnc.html with it too, see DESKTOP_PATH); bump it whenever a
  * patched file changes.
  */
-export const NOVNC_ASSET_VERSION = 2;
+export const NOVNC_ASSET_VERSION = 3;
 
 const KEYBOARD_MARKER = "/* aio-agent: one tap, one key */";
 const KEY_EVENT = `    keyEvent(keysym, code, down) {
@@ -93,11 +97,25 @@ const LONGPRESS = (down: boolean, mask: string) => `                    case 'lo
                         this._fakeMouseMove(ev, pos.x, pos.y);
                         this._handleMouseButton(pos.x, pos.y, ${down}, ${mask});`;
 
-/** The patched core/rfb.js (a long press holds the left button); null when unknown. */
-export function patchNoVncRfb(source: string): string | null {
+function patchLongpress(source: string): string | null {
   if (source.includes(LONGPRESS_MARKER)) return source;
   if (source.split(LONGPRESS(true, "0x4")).length !== 2 || source.split(LONGPRESS(false, "0x4")).length !== 2) return null;
   return source
     .replace(LONGPRESS(true, "0x4"), `                    ${LONGPRESS_MARKER}\n${LONGPRESS(true, "0x1")}`)
     .replace(LONGPRESS(false, "0x4"), LONGPRESS(false, "0x1"));
+}
+
+const PINCH_MARKER = "/* aio-agent: a pinch never zooms the remote page */";
+/** The pinch's Ctrl + wheel (page zoom), from its magnitude to the Ctrl release. */
+const PINCH_ZOOM = /( +)magnitude = Math\.hypot\(ev\.detail\.magnitudeX, ev\.detail\.magnitudeY\);\n[^]*?GESTURE_ZOOMSENS[^]*?this\._handleKeyEvent\(KeyTable\.XK_Control_L, "ControlLeft", false\);\n/g;
+
+function patchPinch(source: string): string | null {
+  if (source.includes(PINCH_MARKER)) return source;
+  return replaceOne(source, PINCH_ZOOM, `$1${PINCH_MARKER}\n`);
+}
+
+/** The patched core/rfb.js (a long press holds the left button, a pinch zooms nothing); null when unknown. */
+export function patchNoVncRfb(source: string): string | null {
+  const longpress = patchLongpress(source);
+  return longpress && patchPinch(longpress);
 }

@@ -49,6 +49,30 @@ describe("noVNC long press", () => {
   });
 });
 
+describe("noVNC pinch", () => {
+  const zoomsPage = /GESTURE_ZOOMSENS\) \{\s+this\._handleKeyEvent\(KeyTable\.XK_Control_L, "ControlLeft", true\);/;
+
+  it("never sends the remote page Ctrl + wheel, which Chrome keeps as a per-site zoom", () => {
+    expect(rfb).toMatch(zoomsPage);
+    const patched = patchNoVncRfb(rfb)!;
+    expect(patched).not.toMatch(zoomsPage);
+    expect(patched).toContain("/* aio-agent: a pinch never zooms the remote page */");
+    // The pinch still moves the pointer; the two-finger scroll is untouched.
+    expect(patched).toMatch(/case 'pinch':\s+\/\/ Always scroll in the same position\.[^]*?this\._fakeMouseMove\(ev, pos\.x, pos\.y\);\s+\/\* aio-agent: a pinch never zooms the remote page \*\/\s+break;/);
+    expect(patched).toContain("this._handleMouseButton(pos.x, pos.y, true, 0x8);");
+    expect(changedLines(rfb, patched)).toBeLessThan(5);
+  });
+
+  it("is added to an rfb.js an older version patched for the long press only", () => {
+    const patched = patchNoVncRfb(rfb)!;
+    const longpressOnly = patched.replace(/( +)\/\* aio-agent: a pinch never zooms the remote page \*\/\n/, (_m, pad: string) => rfb.slice(rfb.indexOf(`${pad}magnitude = Math.hypot`), rfb.indexOf('this._handleKeyEvent(KeyTable.XK_Control_L, "ControlLeft", false);\n', rfb.indexOf(`${pad}magnitude = Math.hypot`)) + 'this._handleKeyEvent(KeyTable.XK_Control_L, "ControlLeft", false);\n'.length));
+    expect(longpressOnly).toMatch(zoomsPage);
+    expect(longpressOnly).toContain("/* aio-agent: a long press holds the left button */");
+    expect(patchNoVncRfb(longpressOnly)).toBe(patched);
+    expect(patchNoVncRfb(patched)).toBe(patched);
+  });
+});
+
 describe("noVNC page", () => {
   // The line from the pinned image's vnc.html.
   const page = '<head>\n    <script type="module" crossorigin="anonymous" src="app/ui.js"></script>\n</head>';
