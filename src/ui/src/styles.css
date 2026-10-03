@@ -2083,6 +2083,9 @@ textarea:focus {
 .file-preview {
   width: min(920px, 100%);
   max-height: calc(100vh - 32px);
+  /* iPhone Safari's 100vh is taller than the screen while its toolbars show:
+     the dialog would be centred with its top above the screen. */
+  max-height: calc(100dvh - 32px);
   background: var(--bg-raised);
   border: 1px solid var(--border);
   border-radius: 14px;
@@ -2123,8 +2126,19 @@ textarea:focus {
 .file-preview-body img {
   max-width: 100%;
   max-height: 100%;
+  /* Auto margins centre it, and unlike align-items never push an oversized
+     picture's top out of reach. */
+  margin: auto;
   object-fit: contain;
   border-radius: 8px;
+}
+
+/* A picture fits whole: the dialog takes the screen's height, so the picture's
+   max-height has a height to resolve against (a max-height alone gives none,
+   and a portrait overflowed with its top cut off). */
+.file-preview:has(.file-preview-body > img) {
+  height: calc(100vh - 32px);
+  height: calc(100dvh - 32px);
 }
 
 .file-preview-foot {
@@ -2157,6 +2171,12 @@ textarea:focus {
 
   .file-preview {
     max-height: calc(100vh - 16px);
+    max-height: calc(100dvh - 16px);
+  }
+
+  .file-preview:has(.file-preview-body > img) {
+    height: calc(100vh - 16px);
+    height: calc(100dvh - 16px);
   }
 
   .file-preview-body {
