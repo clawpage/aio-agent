@@ -109,3 +109,33 @@ export function attachmentRefs(
   }
   return refs;
 }
+
+const MEDIA_LINE = /^(\s*(?:[-*+]\s+|\d+[.)]\s+)?)\[([^\]\n]+)\]\((<[^>\n]+>|[^)\s]+)\)\s*$/;
+
+/**
+ * A link to an audio or video file on a line of its own ("[新生儿啼哭（23秒）](/…/cry.mp3)")
+ * is shown as that media, in place, like `![…](…)`: the agent puts it where it belongs
+ * in the message, and it should not read as a bare link with the same file again as a
+ * card at the bottom. A link inside a sentence stays a link (and keeps its card).
+ * Code fences are left alone.
+ */
+export function embedMediaLinks(markdown: string): string {
+  if (!markdown || !/\.(?:mp4|m4v|mov|webm|mp3|m4a|aac|wav|ogg|oga|opus|flac)\b/i.test(markdown)) return markdown;
+  let fence: string | null = null;
+  return markdown.split("\n").map((line) => {
+    const opener = /^\s*(`{3,}|~{3,})/.exec(line);
+    if (opener) {
+      if (fence === null) fence = opener[1]![0]!;
+      else if (opener[1]![0] === fence) fence = null;
+      return line;
+    }
+    if (fence !== null) return line;
+    const m = MEDIA_LINE.exec(line);
+    if (!m) return line;
+    const href = m[3]!.replace(/^<|>$/g, "");
+    const path = workspaceFilePathFromHref(href.includes(" ") ? encodeURI(href) : href);
+    if (!path) return line;
+    const kind = workspaceFileKind(path);
+    return kind === "audio" || kind === "video" ? `${m[1]}![${m[2]}](${m[3]})` : line;
+  }).join("\n");
+}

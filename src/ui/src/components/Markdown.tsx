@@ -3,6 +3,7 @@ import { marked } from "marked";
 import DOMPurify from "dompurify";
 import { api, API_CREDENTIALS } from "../api";
 import { isSandboxLink, isWorkspaceFilePath, workspaceFileKind, workspaceFilePathFromHref } from "../sandboxLink";
+import { embedMediaLinks } from "../fileRefs";
 import { splitMapBlocks, type MessagePart } from "../mapBlocks";
 import { splitSvgBlocks, type SvgPart } from "../svgBlocks";
 import { splitChoiceBlocks, type ChoicePart } from "../choices";
@@ -54,8 +55,15 @@ marked.use({
       if (filePath) {
         const kind = workspaceFileKind(filePath);
         if (kind === "image") return `<img class="inline-media" data-sandbox-image="${escapeAttr(filePath)}" alt="${escapeAttr(text)}"${titleAttr}>`;
-        if (kind === "video") return `<video class="inline-media" data-sandbox-video="${escapeAttr(filePath)}" controls playsinline preload="metadata"${titleAttr}></video>`;
-        if (kind === "audio") return `<audio class="inline-audio" data-sandbox-audio="${escapeAttr(filePath)}" controls preload="metadata"${titleAttr || ` title="${escapeAttr(text)}"`}></audio>`;
+        // Audio and video are a small card: what it is (tap to open the preview, which also downloads) and the player.
+        if (kind === "video" || kind === "audio") {
+          const label = escapeAttr(text || filePath.slice(filePath.lastIndexOf("/") + 1));
+          const caption = `<figcaption><span class="media-card-icon" aria-hidden="true">${kind === "video" ? "▶" : "♪"}</span><a role="button" tabindex="0" data-sandbox-file="${escapeAttr(filePath)}">${label}</a></figcaption>`;
+          const player = kind === "video"
+            ? `<video class="inline-media" data-sandbox-video="${escapeAttr(filePath)}" controls playsinline preload="metadata"${titleAttr}></video>`
+            : `<audio class="inline-audio" data-sandbox-audio="${escapeAttr(filePath)}" controls preload="metadata" title="${escapeAttr(text)}"></audio>`;
+          return `<figure class="media-card" data-kind="${kind}">${caption}${player}</figure>`;
+        }
         return "";
       }
       // A web picture never loads from its host (the CSP admits only this origin):
@@ -126,7 +134,8 @@ function MarkdownBlock({
   document = false,
 }: MarkdownProps) {
   const html = useMemo(() => {
-    const rendered = marked.parse(source ?? "", { async: false }) as string;
+    // In a message, a media link on a line of its own plays where it stands (see embedMediaLinks).
+    const rendered = marked.parse(document ? source ?? "" : embedMediaLinks(source ?? ""), { async: false }) as string;
     const clean = DOMPurify.sanitize(rendered, {
       // Only web URLs survive sanitisation; everything else loses its href.
       ALLOWED_URI_REGEXP: /^(?:https?):/i,
@@ -160,7 +169,15 @@ function MarkdownBlock({
       if (el instanceof HTMLMediaElement) {
         const attr = el instanceof HTMLVideoElement ? "data-sandbox-video" : "data-sandbox-audio";
         const path = el.getAttribute(attr) ?? "";
-        if (isWorkspaceFilePath(path) && workspaceFileKind(path) === (el instanceof HTMLVideoElement ? "video" : "audio")) el.src = api.documentMediaUrl(path);
+        if (!isWorkspaceFilePath(path) || workspaceFileKind(path) !== (el instanceof HTMLVideoElement ? "video" : "audio")) return;
+        // A file that cannot play says so in words; the title above still opens the preview and the download.
+        el.addEventListener("error", () => {
+          const note = window.document.createElement("span");
+          note.className = "inline-media-failed muted tiny";
+          note.textContent = "暂时放不了（文件可能已移动，或这个浏览器不支持这种格式）：点上面的标题打开预览或下载。";
+          el.replaceWith(note);
+        }, { once: true });
+        el.src = api.documentMediaUrl(path);
         return;
       }
       const img = el as HTMLImageElement;

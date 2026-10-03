@@ -22,7 +22,7 @@ import { ShareCard } from "./ShareCard";
 import { extractShareLinks } from "../shareLinks";
 import { VideoEmbed } from "./VideoEmbed";
 import { extractVideoLinks } from "../videoLinks";
-import { extractFileRefs, attachmentRefs } from "../fileRefs";
+import { extractFileRefs, attachmentRefs, embedMediaLinks } from "../fileRefs";
 import { isPreviewableKind, workspaceFileKind } from "../sandboxLink";
 
 interface Props {
@@ -449,7 +449,7 @@ export function Chat({
  */
 export function MessageFileCards({ text, onOpen }: { text: string; onOpen: (path: string) => void }) {
   // Embedded images, videos and audio already show inside the message; everything else gets a card.
-  const refs = useMemo(() => extractFileRefs(text).filter((ref) => !(ref.image && (ref.kind === "image" || ref.kind === "video" || ref.kind === "audio"))), [text]);
+  const refs = useMemo(() => extractFileRefs(embedMediaLinks(text)).filter((ref) => !(ref.image && (ref.kind === "image" || ref.kind === "video" || ref.kind === "audio"))), [text]);
   const shares = useMemo(() => extractShareLinks(text), [text]);
   const videos = useMemo(() => extractVideoLinks(text), [text]);
   if (refs.length === 0 && shares.length === 0 && videos.length === 0) return null;

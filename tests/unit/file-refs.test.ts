@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { attachmentRefs, extractFileRefs } from "../../src/ui/src/fileRefs.js";
+import { attachmentRefs, embedMediaLinks, extractFileRefs } from "../../src/ui/src/fileRefs.js";
 
 const ROOT = "/home/gem/workspace";
 
@@ -102,4 +102,32 @@ it("uses descriptive document link titles without replacing the real download na
   const [ref]=extractFileRefs('[完整行程](/home/gem/workspace/trip.md)');
   expect(ref).toMatchObject({title:'完整行程',name:'trip.md',path:'/home/gem/workspace/trip.md'});
   expect(extractFileRefs('[下载文件](/home/gem/workspace/trip.md)')[0]?.title).toBeUndefined();
+});
+
+
+describe("audio and video links on a line of their own", () => {
+  const W = "/home/gem/workspace/tasks/t1";
+  it("become the media where they stand; links in a sentence, other files and code stay as they are", () => {
+    const text = [
+      "🎧 短版 · 23 秒：新生儿持续大哭。",
+      `[新生儿啼哭（23秒）](${W}/新生儿啼哭_23秒.mp3)`,
+      `- [演示视频](${W}/demo.MOV)`,
+      `1. [语音](<${W}/voice note.m4a>)`,
+      `另一段见 [长版](${W}/cry-54.mp3)，可以下载。`,
+      `[报告](${W}/report.docx)`,
+      `[外部](https://example.com/a.mp3)`,
+      "```",
+      `[代码里](${W}/x.mp3)`,
+      "```",
+    ].join("\n");
+    const out = embedMediaLinks(text).split("\n");
+    expect(out[1]).toBe(`![新生儿啼哭（23秒）](${W}/新生儿啼哭_23秒.mp3)`);
+    expect(out[2]).toBe(`- ![演示视频](${W}/demo.MOV)`);
+    expect(out[3]).toBe(`1. ![语音](<${W}/voice note.m4a>)`);
+    for (const i of [0, 4, 5, 6, 7, 8, 9]) expect(out[i]).toBe(text.split("\n")[i]);
+    // Embedded ones get no card; the one in a sentence keeps its card.
+    const cards = extractFileRefs(embedMediaLinks(text)).filter((r) => !r.image).map((r) => r.name);
+    expect(cards).toEqual(["cry-54.mp3", "report.docx"]);
+    expect(embedMediaLinks("no media here")).toBe("no media here");
+  });
 });

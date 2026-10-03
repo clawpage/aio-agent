@@ -224,7 +224,7 @@ test.describe("in-conversation file cards", () => {
       const start=match?Number(match[1]):0,end=match?.[2]?Math.min(Number(match[2]),bytes.length-1):bytes.length-1;
       return route.fulfill({status:match?206:200,headers:{'content-type':'video/mp4','accept-ranges':'bytes',...(match?{'content-range':`bytes ${start}-${end}/${bytes.length}`}:{})},body:bytes.subarray(start,end+1)});
     });
-    await openConversation(page,'mp4-preview','[演示视频](/home/gem/workspace/demo.MP4)');
+    await openConversation(page,'mp4-preview','演示见 [演示视频](/home/gem/workspace/demo.MP4)。');
     await expect(page.getByTestId('file-card')).toHaveAttribute('data-kind','video');
     await expect(page.getByTestId('file-card')).toContainText('视频 · 点击播放');
     await page.getByRole('button',{name:'预览 演示视频',exact:true}).click();
@@ -260,7 +260,7 @@ test.describe("in-conversation file cards", () => {
       const start=match?Number(match[1]):0,end=match?.[2]?Math.min(Number(match[2]),bytes.length-1):bytes.length-1;
       return route.fulfill({status:match?206:200,headers:{'content-type':'audio/wav','accept-ranges':'bytes',...(match?{'content-range':`bytes ${start}-${end}/${bytes.length}`}:{})},body:bytes.subarray(start,end+1)});
     });
-    await openConversation(page,'audio-card','两段哭声：\n\n![短哭声](/home/gem/workspace/cry-short.wav)\n\n[新生儿啼哭（23秒）](/home/gem/workspace/新生儿啼哭_23秒.wav)');
+    await openConversation(page,'audio-card','两段哭声：\n\n![短哭声](/home/gem/workspace/cry-short.wav)\n\n长版见 [新生儿啼哭（23秒）](/home/gem/workspace/新生儿啼哭_23秒.wav)，可以下载。');
     // A linked audio file is a card with a player; nothing loads until play.
     const card=page.getByTestId('file-card');
     await expect(card).toHaveCount(1);
@@ -270,9 +270,10 @@ test.describe("in-conversation file cards", () => {
     await inCard.evaluate(async node=>{const a=node as HTMLAudioElement;a.muted=true;await a.play();});
     await expect.poll(()=>inCard.evaluate(node=>(node as HTMLAudioElement).currentTime)).toBeGreaterThan(0);
     await inCard.evaluate(node=>(node as HTMLAudioElement).pause());
-    // An embedded one is a player where the message put it, with no card of its own.
-    const inline=page.locator('audio.inline-audio');
+    // An embedded one is a card with its title and player where the message put it, with no card of its own below.
+    const inline=page.locator('figure.media-card[data-kind="audio"] audio.inline-audio');
     await expect(inline).toHaveCount(1);
+    await expect(page.locator('figure.media-card figcaption')).toHaveText(/短哭声/);
     await expect.poll(()=>inline.evaluate(node=>(node as HTMLAudioElement).readyState)).toBeGreaterThanOrEqual(1);
     expect(asked).toContain('/home/gem/workspace/cry-short.wav');
     if(info.project.name.startsWith('mobile')) await page.setViewportSize({width:360,height:844});
@@ -287,7 +288,7 @@ test.describe("in-conversation file cards", () => {
   });
   test("MP4 failures show a retry and preserve original download",async({page})=>{
     await mockDocuments(page);await page.route('**/api/documents/media**',r=>r.fulfill({status:404,body:'missing'}));
-    await openConversation(page,'mp4-missing','[视频](/home/gem/workspace/missing.mp4)');
+    await openConversation(page,'mp4-missing','见 [视频](/home/gem/workspace/missing.mp4)。');
     await page.getByRole('button',{name:'预览 视频',exact:true}).click();
     await expect(page.getByRole('alert')).toContainText('视频无法播放');await expect(page.getByTestId('file-preview-download')).toBeVisible();
     await page.getByRole('button',{name:'重试',exact:true}).click();await expect(page.getByRole('alert')).toContainText('视频无法播放');

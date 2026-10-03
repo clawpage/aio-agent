@@ -59,8 +59,8 @@ test("a YouTube or Bilibili link in a result plays in place in the main inbox", 
 });
 test("MP4 attachments and results preview directly in the main inbox",async({page},info)=>{
     const path='/home/gem/workspace/uploads/demo.mp4';
-    const row={...task(1,'completed'),attachments:[{name:'demo.mp4',path,kind:'file' as const,size:3641}],result:`[视频结果](${path})`,completedAt:Date.now()};
-    await page.route('**/api/documents/video**',r=>r.fulfill({contentType:'video/mp4',body:fs.readFileSync(new URL('../fixtures/preview.mp4',import.meta.url))}));
+    const row={...task(1,'completed'),attachments:[{name:'demo.mp4',path,kind:'file' as const,size:3641}],result:`结果见 [视频结果](${path})。`,completedAt:Date.now()};
+    await page.route('**/api/documents/media**',r=>r.fulfill({contentType:'video/mp4',body:fs.readFileSync(new URL('../fixtures/preview.mp4',import.meta.url))}));
     await setup(page,[row]);
     for(const label of ['预览 demo.mp4','预览 视频结果']){
       await page.getByRole('button',{name:label,exact:true}).click();
@@ -409,6 +409,49 @@ test("failed reference submission preserves target and retry id, changing target
  expect(bodies[0].clientMessageId).toBe(bodies[1].clientMessageId);
  await page.getByRole('button',{name:'引用任务：任务 2',exact:true}).click();await page.getByRole('button',{name:'发送',exact:true}).click();await expect(page.getByRole('button',{name:'发送',exact:true})).toBeEnabled();
  expect(bodies[2].relatedTaskId).toBe('task-2');expect(bodies[2].clientMessageId).not.toBe(bodies[1].clientMessageId);
+});
+test("audio and video in a report play where the report puts them, with cards only for what it mentions in passing", async ({ page }, info) => {
+    const W = "/home/gem/workspace/tasks/task-1";
+    const result = [
+        "给你找了两段新生儿哭声：",
+        "",
+        "🎧 **短版 · 23 秒**：新生儿持续大哭，用来测试或做提示音比较合适。",
+        `[新生儿啼哭（23秒）](${W}/新生儿啼哭_23秒.wav)`,
+        "",
+        "🎧 **长版 · 54 秒**：哭声断断续续，更接近真实场景。",
+        `[新生儿啼哭（54秒）](${W}/新生儿啼哭_54秒.wav)`,
+        "",
+        `录屏演示：`,
+        `[监控器演示](${W}/demo.mp4)`,
+        "",
+        `原始素材也打包在 [素材说明](${W}/README.md) 里。`,
+    ].join("\n");
+    const row: Task = { ...task(1, "completed"), title: "找新生儿哭声音频", result, completedAt: 2000 };
+    await page.route("**/api/documents/media**", (r) => r.fulfill({ status: 404, body: "" }));
+    await setup(page, [row]);
+    const report = page.locator(`article.task-report[data-task-id="task-1"]`);
+    const media = report.locator("figure.media-card");
+    await expect(media).toHaveCount(3);
+    await expect(media.nth(0)).toHaveAttribute("data-kind", "audio");
+    await expect(media.nth(0).locator("figcaption")).toHaveText(/新生儿啼哭（23秒）/);
+    await expect(media.nth(2)).toHaveAttribute("data-kind", "video");
+    // In the order the report wrote them: the first clip right after its description.
+    const order = await report.locator(".markdown").evaluate((el) => [...el.querySelectorAll("p, figure")].map((n) => n.tagName === "FIGURE" ? `[${n.querySelector("figcaption")!.textContent}]` : n.textContent!.slice(0, 8)));
+    expect(order.indexOf("[♪新生儿啼哭（23秒）]")).toBe(order.findIndex((t) => t.includes("短版")) + 1);
+    // No bare links to them and no duplicate cards: only the file mentioned in a sentence gets a card.
+    await expect(report.locator(".markdown a:not(figcaption a)", { hasText: "新生儿啼哭" })).toHaveCount(0);
+    await expect(report.getByTestId("file-card")).toHaveCount(1);
+    await expect(report.getByTestId("file-card")).toHaveAttribute("data-kind", "markdown");
+    // The clips 404 here: each card says so in words instead of a broken player.
+    await expect(media.nth(0)).toContainText("暂时放不了");
+    // The title opens the preview.
+    await media.nth(0).locator("figcaption a").click();
+    // (The clip itself 404s here, so the preview may show its error: either way it is this file's preview.)
+    await expect(page.getByTestId("file-preview-download")).toBeVisible();
+    await page.getByRole("button", { name: "关闭预览" }).click();
+    if (info.project.name.startsWith("mobile")) await page.setViewportSize({ width: 360, height: 844 });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1);
+    await report.screenshot({ path: info.outputPath("media-report.png") });
 });
 test("a task that needs you in the browser shows why, hands you its own tab to operate and takes it back", async ({ page }, info) => {
     const row: Task = { ...task(1), title: "订餐厅", browser: { tabs: 1, request: "请登录 OpenTable 账号", human: false } };

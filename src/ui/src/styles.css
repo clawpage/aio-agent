@@ -2208,6 +2208,14 @@ textarea:focus {
   display: block;
   margin: 6px 0;
 }
+/* Audio or video a message plays where it was written: what it is, then the player, in one card. */
+.markdown .media-card { margin: 10px 0; padding: 10px 12px 12px; border: 1px solid var(--border); border-radius: 14px; background: var(--bg-soft); max-width: 520px; }
+.markdown li > .media-card, .markdown li .media-card { margin: 6px 0 4px; }
+.markdown .media-card figcaption { display: flex; align-items: center; gap: 8px; min-width: 0; margin: 0 0 8px; font-size: 14px; font-weight: 600; line-height: 1.4; }
+.markdown .media-card figcaption a { min-width: 0; color: inherit; text-decoration: none; overflow-wrap: anywhere; cursor: pointer; }
+.markdown .media-card-icon { flex: none; display: inline-grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; background: var(--accent-soft, rgba(99, 91, 255, 0.14)); color: var(--accent); font-size: 12px; }
+.markdown .media-card .inline-audio { max-width: none; margin: 0; }
+.markdown .media-card video.inline-media { margin: 0; }
 
 /* A YouTube or Bilibili video a message links to, playing in place at 16:9. */
 .video-embeds {
