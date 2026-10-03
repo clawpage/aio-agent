@@ -2625,7 +2625,7 @@ textarea:focus {
   .main-inbox-app .sidebar { display: flex; z-index: 90; width: min(300px, 85vw); inset: 0 auto 0 0; padding-top: calc(58px + env(safe-area-inset-top)); padding-bottom: calc(16px + env(safe-area-inset-bottom)); overflow-y: auto; visibility: hidden; }
   .main-inbox-app .sidebar.show-mobile { visibility: visible; }
   .mobile-menu-button { display: flex; align-items: center; justify-content: center; position: fixed; top: calc(6px + env(safe-area-inset-top)); left: 8px; width: 44px; height: 44px; padding: 0; z-index: 71; border-color: transparent; }
-  .mobile-menu-close { display: block; position: absolute; top: calc(6px + env(safe-area-inset-top)); right: 8px; width: 44px; height: 44px; padding: 0; font-size: 28px; border-color: transparent; }
+  .mobile-menu-close { display: flex; align-items: center; justify-content: center; position: absolute; top: calc(6px + env(safe-area-inset-top)); right: 8px; width: 44px; height: 44px; padding: 0; border-color: transparent; }
   .mobile-menu-backdrop { position: fixed; inset: 0; z-index: 85; background: rgb(0 0 0 / .4); backdrop-filter: blur(2px); }
   .main-inbox-app .main > .banner, .main-inbox-app .task-chat .chat-head, .main-inbox-app .task-list-page > .chat-head, .main-inbox-app .schedule-page > .chat-head, .main-inbox-app .settings-head, .main-inbox-app .task-detail-bar, .main-inbox-app .workspace .ws-head { padding-left: 60px; min-height: calc(56px + env(safe-area-inset-top)); }
   .main-inbox-app .workspace:not(.fullscreen) { bottom: 0; }
