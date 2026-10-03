@@ -44,6 +44,7 @@ function makeCtx(state: { ready: boolean; running: boolean; codexReady: boolean;
     container,
     agent,
     codex,
+    documents: { ensureProvisioned: async () => undefined },
     sandboxSetupError: null,
     sandboxSurfaces: { terminal: true, codeServer: true, jupyter: true },
   } as unknown as AppContext;

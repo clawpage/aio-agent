@@ -489,6 +489,38 @@ describe("DocumentService provisioning", () => {
     expect(container.users[userIndex]).not.toBe("root");
   });
 
+  it("installs by itself what a sandbox is missing, and only then", async () => {
+    const world = { installed: false, installs: 0 };
+    const NOT_READY = JSON.stringify({ ...JSON.parse(READY), ready: false, authoringReady: false, previewReady: false, missing: ["libreoffice", "python-pptx"] });
+    const { svc, container } = service((argv) => {
+      if (isProbe(argv)) return world.installed ? probe([]) : probe(["soffice"], { writable: false });
+      if (argv[0] === "bash" && String(argv[1]).endsWith("provision.sh")) {
+        if (String(argv[2] ?? "") !== "install") return { code: 0, stdout: `${world.installed ? READY : NOT_READY}\n`, stderr: "" };
+        world.installs += 1;
+        world.installed = true;
+        return { code: 0, stdout: `${JSON.stringify({ ok: true, code: "installed", message: "文档工具安装完成" })}\n`, stderr: "" };
+      }
+      if (argv.includes("aio-doc-root-install")) return { code: 0, stdout: '{"ok":true,"code":"root_installed","aptRan":true,"message":"系统依赖已安装"}\n', stderr: "" };
+      return undefined;
+    });
+    // A new sandbox: three callers at once (a start, a wake, the owner's repair button) share one install.
+    await Promise.all([svc.ensureProvisioned(), svc.ensureProvisioned(), svc.provision()]);
+    expect(world.installs).toBe(1);
+    expect(container.users.filter((user) => user === "root")).toHaveLength(1);
+    expect((await svc.readiness()).ready).toBe(true);
+    // The next start finds everything in place: one check, nothing run as root.
+    const before = container.calls.length;
+    await svc.ensureProvisioned();
+    expect(world.installs).toBe(1);
+    expect(container.users.slice(before)).not.toContain("root");
+  });
+
+  it("installs nothing when documents are switched off", async () => {
+    const { svc, container } = service(() => undefined, { PA_DOCUMENTS_ENABLED: "0" });
+    await svc.ensureProvisioned();
+    expect(container.calls).toEqual([]);
+  });
+
   it("does not run the root step when the tools are already ready", async () => {
     const { svc, container } = service((argv) => {
       if (isProbe(argv)) return probe([]);

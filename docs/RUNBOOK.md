@@ -115,8 +115,14 @@ PA_COMPANION_ORIGIN=https://agent-workspace.clawpage.ai npm run smoke
 工具装在**持久工具目录** `/home/gem/.codex/tools/aio-doc`（不在镜像里，卷保留即保留），
 分两层：root 只做系统包与目录权限，gem 用户建 venv 并安装 Python 库。
 
-**推荐：在工作区「文件」页底部展开「文档处理」，点「安装/修复」**。它会先把控制面当前源码里的脚本
-部署进沙箱，再依次跑 root 层与用户层安装，fresh/新重建环境最可靠。
+**每个沙箱（owner 与全部成员）自带这套工具**：容器每次启动（服务重启接管、休眠唤醒、新账号首次创建、
+容器重建）后，控制面在后台做一次就绪检查，缺什么装什么，不需要任何人点按钮；已就绪的沙箱只多一次检查。
+新环境第一次安装约一两分钟，期间聊天和任务照常，日志里是 `document tools missing; installing` →
+`document tools installed`，失败是 `document tools not installed`（常见原因是沙箱没有网络出口）。
+文档 skill（`aio-documents`）同时写入 Codex 与 Claude Code 两个执行器的 skill 目录。
+
+owner 仍可在工作区「文件」页底部展开「文档处理」点「安装/修复」手动重试；它与后台安装共用同一次执行，
+不会同时跑两个 apt。
 
 也可以在**项目根目录**手工执行等价的两步（`cd` 到本仓库根再运行）：
 

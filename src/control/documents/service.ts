@@ -217,6 +217,7 @@ export class DocumentService {
   #readiness: DocumentReadiness | null = null;
   #readinessAt = 0;
   #readinessInFlight: Promise<DocumentReadiness> | null = null;
+  #provisionInFlight: Promise<{ ok: boolean; message: string; readiness: DocumentReadiness }> | null = null;
   #inflight = new Map<string, Promise<RenderResult>>();
   #scriptsHash: string | null = null;
   #scriptsReady = false;
@@ -429,14 +430,36 @@ export class DocumentService {
    *   2. the sandbox user creates the isolated venv, installs the Python
    *      libraries, and publishes the CLI inside that directory.
    *
-   * Both steps are idempotent and report failure as data. Explicit and
-   * operator-triggered; nothing here is on a request hot path.
+   * Both steps are idempotent and report failure as data. Nothing here is on a
+   * request hot path: it runs in the background after a sandbox start
+   * (`ensureProvisioned`) or when the owner asks for a repair. Callers that
+   * arrive while an install is running share it, so apt never runs twice at once.
    */
   async provision(): Promise<{ ok: boolean; message: string; readiness: DocumentReadiness }> {
     if (!this.#cfg.documents.enabled) {
       throw new DocumentError("disabled", "文档工具已由配置关闭", 409);
     }
+    this.#provisionInFlight ??= this.#provision().finally(() => {
+      this.#provisionInFlight = null;
+    });
+    return await this.#provisionInFlight;
+  }
 
+  /**
+   * Every sandbox comes with the document tools: after a start, whatever is
+   * missing (a new account, a container that was created again) is installed
+   * without anyone asking. A sandbox that already has them costs one check.
+   */
+  async ensureProvisioned(): Promise<void> {
+    if (!this.#cfg.documents.enabled) return;
+    if ((await this.readiness(true)).ready) return;
+    this.#log.info("document tools missing; installing");
+    const result = await this.provision();
+    if (result.ok) this.#log.info("document tools installed", { message: result.message });
+    else this.#log.warn("document tools not installed", { message: result.message, missing: result.readiness.missing });
+  }
+
+  async #provision(): Promise<{ ok: boolean; message: string; readiness: DocumentReadiness }> {
     // Ordering matters. `ensureScripts()` writes into the managed tool directory,
     // which on an already-provisioned sandbox is owned by root - so calling it
     // first would throw and the root repair step could never run. The read-only

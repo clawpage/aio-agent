@@ -73,14 +73,16 @@ describe("sandbox workspace seed", () => {
 
     await container.seedWorkspace();
 
-    const skill = calls.find((c) => c.path.endsWith(`/${DOCUMENT_SKILL_DIR}/SKILL.md`));
-    expect(skill).toBeDefined();
-    expect(skill?.content).toBe(DOCUMENT_SKILL_MD);
+    // Both executors: Codex skills and the Claude Code config directory.
+    const skills = calls.filter((c) => c.path.endsWith(`/${DOCUMENT_SKILL_DIR}/SKILL.md`));
+    expect(skills.map((c) => c.path)).toEqual([`${cfg.sandbox.containerCodexHome}/${DOCUMENT_SKILL_DIR}/SKILL.md`, `${cfg.claudeCode.configDir}/${DOCUMENT_SKILL_DIR}/SKILL.md`]);
+    for (const c of skills) expect(c.content).toBe(DOCUMENT_SKILL_MD);
+    const skill = skills[0];
     // Managed, not `onlyIfAbsent`: a tool-path change must reach existing
     // sandboxes. AGENTS.md/config.toml keep the user's own edits, this does not
     // overwrite any other skill.
     expect(skill?.opts ?? {}).not.toMatchObject({ onlyIfAbsent: true });
-    expect(execCalls.some((argv) => argv[0] === "mkdir" && argv[1] === "-p" && argv[2].endsWith(DOCUMENT_SKILL_DIR))).toBe(
+    expect(execCalls.some((argv) => argv[0] === "mkdir" && argv[1] === "-p" && argv[2].endsWith(DOCUMENT_SKILL_DIR) && argv[3] === `${cfg.claudeCode.configDir}/${DOCUMENT_SKILL_DIR}`)).toBe(
       true,
     );
   });

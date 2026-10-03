@@ -229,6 +229,8 @@ export async function startSandboxRuntime(ctx: AppContext): Promise<void> {
     // A tab server from an older version stays attached to every page (an older one
     // left automation traces sites detect); replace it now rather than at the next task.
     void ctx.tabs?.ensure().catch((err) => log.warn("browser tab server not refreshed", { error: String(err) }));
+    // Word, Excel and PowerPoint tools belong to every sandbox; install what is missing in the background.
+    void ctx.documents.ensureProvisioned().catch((err) => log.warn("document tools not checked", { error: String(err) }));
   } catch (err) {
     ctx.sandboxSetupError = err instanceof Error ? err.message : String(err);
     log.error("sandbox container failed to start", { error: ctx.sandboxSetupError });

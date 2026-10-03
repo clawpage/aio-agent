@@ -99,8 +99,9 @@ export const WORKSPACE_AGENTS_MD = `# 沙箱工作区说明（由 AIO Agent 自�
 `;
 
 /**
- * Sandbox document skill. Written into the controlled CODEX_HOME skills
- * directory so both new and existing sandboxes can discover the document tools.
+ * Sandbox document skill. Written into both executors' skill directories (Codex
+ * skills and the Claude Code config directory) so new and existing sandboxes can
+ * discover the document tools.
  * It is self-contained: it names the actual in-container CLI and libraries and
  * never refers to a host tool, a host skill package, or a network service.
  *
@@ -123,7 +124,8 @@ description: Create, modify and convert Word/Excel/PowerPoint/PDF documents insi
 /home/gem/.codex/tools/aio-doc/bin/aio-doc doctor        # 一次输出 CLI 与 Python 库的就绪状态
 \`\`\`
 
-未就绪时不要假装成功：告诉用户工具未安装，并让其在工作区「文件」页底部展开「文档处理」，点「安装/修复」。
+这些工具每个沙箱都自带，沙箱启动后自动安装，不需要用户操作。未就绪说明还在安装（新环境第一次约一两分钟）：
+等一会儿再运行一次 \`doctor\`；仍未就绪就如实告诉用户文档工具暂时不可用，不要假装成功。
 
 ## 首选入口：\`aio-doc\`
 

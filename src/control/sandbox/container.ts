@@ -247,12 +247,13 @@ export class SandboxContainer {
     await this.writeFileInSandbox(`${s.containerWorkspaceDir}/AGENTS.md`, WORKSPACE_AGENTS_MD, { onlyIfAbsent: true });
     await this.writeFileInSandbox(`${s.containerCodexHome}/config.toml`, CODEX_CONFIG_TOML, { onlyIfAbsent: true });
     // The document skill is managed, not `onlyIfAbsent`: it must reach existing
-    // sandboxes too, and it writes to exactly one skill directory so no user
-    // skill or instruction is ever touched. Its directory is created first -
-    // `cat >` cannot create a missing parent, so on a fresh sandbox the write
-    // would otherwise fail and take the whole startup path down with it.
-    const skillDir = `${s.containerCodexHome}/${DOCUMENT_SKILL_DIR}`;
-    const mkdir = await this.execInSandbox(["mkdir", "-p", skillDir], { timeoutMs: 15_000 });
+    // sandboxes too, and it writes to exactly one skill directory per executor
+    // (Codex skills and the Claude Code config directory) so no user skill or
+    // instruction is ever touched. The directories are created first - `cat >`
+    // cannot create a missing parent, so on a fresh sandbox the write would
+    // otherwise fail and take the whole startup path down with it.
+    const skillDirs = [`${s.containerCodexHome}/${DOCUMENT_SKILL_DIR}`, `${this.#cfg.claudeCode.configDir}/${DOCUMENT_SKILL_DIR}`];
+    const mkdir = await this.execInSandbox(["mkdir", "-p", ...skillDirs], { timeoutMs: 15_000 });
     if (mkdir.code !== 0) {
       // A missing skill must never block the sandbox: the agent can still be
       // told about the tools through AGENTS.md.
@@ -260,7 +261,7 @@ export class SandboxContainer {
         error: (mkdir.stderr || mkdir.stdout).trim().slice(0, 200),
       });
     } else {
-      await this.writeFileInSandbox(`${skillDir}/SKILL.md`, DOCUMENT_SKILL_MD);
+      for (const dir of skillDirs) await this.writeFileInSandbox(`${dir}/SKILL.md`, DOCUMENT_SKILL_MD);
     }
     await this.seedShare();
     await this.enforceCodexIsolation();
