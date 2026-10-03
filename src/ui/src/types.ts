@@ -241,6 +241,9 @@ export interface TaskTab {
   request: { reason: string; at: number; kind?: "login"; site?: string } | null;
 }
 
+/** Sign-in steps the agent wrote for a site and the vault keeps (counts only; the steps stay on the server). */
+export interface VaultScript { site: string; steps: number; successes: number; failures: number; lastNote: string | null; updatedAt: number }
+
 /** An account saved in the password vault. The password is fetched only when the person asks to see it. */
 export interface VaultEntry {
   id: string;

@@ -6,7 +6,7 @@ const OUTCOME: Record<string, string> = {
   google: "已告诉 AI 用 Google 登录，它会点页面上的 Google 按钮。",
   no_form: "页面上没找到账号密码输入框，AI 会先把登录表单打开。",
   username_only: "账号已填入，等密码框出现后会再问一次。",
-  failed: "没能填进这个页面，可以改为自己输入。",
+  failed: "这次没登录上，AI 会改写登录步骤再试，最多 3 次。",
 };
 
 /**
@@ -34,9 +34,9 @@ export function VaultPrompt({ taskId, tab, busy, onDone, onManual }: { taskId: s
     setSending(true);
     setMessage(null);
     try {
-      const { result } = await api.taskBrowserLogin(taskId, tab.id, account);
+      const { result, error } = await api.taskBrowserLogin(taskId, tab.id, account);
       setPassword("");
-      setMessage(OUTCOME[result] ?? null);
+      setMessage(result === "failed" && error ? `这次没登录上（${error}），AI 会改写登录步骤再试，最多 3 次。` : OUTCOME[result] ?? null);
       onDone();
     } catch (err) {
       setMessage(err instanceof Error ? err.message : String(err));

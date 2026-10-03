@@ -17,8 +17,11 @@
  * and waits in place until the person hands the tab back.
  *
  * A sign-in goes through the person's password vault (browser_login): the agent
- * only asks, the control plane types the saved account and password into the
- * page (POST /login) while the tab is locked, and no tool ever returns them.
+ * writes the steps (what to click, which box takes the account and which the
+ * password, as placeholders), the control plane sends the saved account and
+ * password (POST /login), and this server runs the steps with them while the
+ * tab is locked. No tool ever returns either value. The agent reports whether
+ * it worked (browser_login_report); steps that worked are kept for the site.
  *
  * Runs inside the sandbox as the sandbox user, listening on loopback only. It
  * coordinates tasks of one account; it is not a security boundary between them.
@@ -55,7 +58,7 @@ const { chromium } = require(process.env.AIO_TABS_PLAYWRIGHT || '/opt/aio-browse
 const INSTRUCTIONS = [
   '浏览器请只用 aio_tabs 的工具。每个标签页记录着创建它的任务：只有创建它的任务能操作（打开网址、点击、填写、执行脚本、关闭），其他任务只能只读查看（正文、HTML、页面结构、截图）。',
   '只读查看其他任务的页面时，先用 browser_tab_list 找到标签页编号（如 t3），再把它作为 tab 参数传给读取类工具。',
-  '页面要求登录时（账号密码，或「用 Google 登录」这类按钮），先让登录入口出现，再调用 browser_login：密码器把用户保存的账号密码直接填进页面并提交，你看不到密码；用户为这个网站记的是 Google 登录时，它会告诉你点 Google 登录按钮、选哪个账号；用户没保存过时会被请去选择，也可能改为自己在浏览器里登录。不要用 browser_fill 或 browser_type 输入密码，不要读取密码框的内容。',
+  '网站要登录时调用 browser_login：先用 browser_snapshot 看清登录框，写出 steps（从当前页面重新加载开始：点开登录入口、把 {{username}} 填进账号框、{{password}} 填进密码框、提交），密码器代入用户保存的值执行，你看不到值；这个网站以前成功过的步骤会自动沿用，可以省略 steps。之后读取页面，用 browser_login_report 报告是否成功；失败时按返回的出错步骤改写 steps 重试，最多 3 次，仍不行就调用 browser_request_human。用户为这个网站记的是 Google 登录时，它会告诉你点 Google 按钮、选哪个账号。不要用 browser_fill 或 browser_type 输入密码，不要读取密码框的内容。',
   '需要用户本人在浏览器里操作时，调用 browser_request_human 说明原因并等待：验证码、二次验证、扫码登录、支付信息、付款、下单、发送消息、修改账号设置等不可撤销的最后一步，或需要用户判断的页面。不要在对话里索要密码或验证码。',
   '遇到「按住确认你是真人」（Press & Hold）、滑块、勾选框等人机验证时，不要自己反复点击、拖动或刷新：同一个标签页里的验证会话一旦被判为机器，之后人来按也过不了。先用 browser_tab_new 在新标签页重新打开同一网址，再用 browser_tab_close 关掉旧标签页；新标签页通常直接通过。新标签页仍出现验证，才调用 browser_request_human 请用户在这个新标签页里完成。',
   '用户交还后先读取页面确认当前状态再继续；结果不确定的操作不要自动重做，先让用户核对。用户正在操作的标签页你不能读取或操作。',
@@ -82,7 +85,7 @@ const cursors = new Map();
 let seq = 0;
 
 function snapshotRecords() {
-  return [...registry.values()].map(({ id, page, key, title, targetId, createdAt, lastUsed, finishedAt, holder, humanSince, request }) => ({ id, key, title, targetId, url: safeUrl(page), createdAt, lastUsed, finishedAt, holder, humanSince, request }));
+  return [...registry.values()].map(({ id, page, key, title, targetId, createdAt, lastUsed, finishedAt, holder, humanSince, request, loginReport }) => ({ id, key, title, targetId, url: safeUrl(page), createdAt, lastUsed, finishedAt, holder, humanSince, request, loginReport: loginReport || null }));
 }
 
 function safeUrl(page) {
@@ -523,6 +526,92 @@ async function fillLogin(tab, username, password) {
   return 'submitted';
 }
 
+/** Tries at one site's sign-in, per tab, before the agent must hand it to the person. */
+const MAX_LOGIN_TRIES = Number(process.env.AIO_TABS_MAX_LOGIN_TRIES || 3);
+const STEP_ACTIONS = new Set(['click', 'fill', 'press', 'wait', 'select']);
+const STEP_KEYS = new Set(['Enter', 'Tab', 'Escape', 'ArrowDown', 'ArrowUp', 'Space']);
+const PLACEHOLDERS = new Set(['{{username}}', '{{password}}']);
+
+/** The agent's sign-in steps, checked; a string says what is wrong. Placeholders stand for the vault's values. */
+function loginSteps(raw) {
+  if (raw === undefined || raw === null) return null;
+  if (!Array.isArray(raw) || !raw.length || raw.length > 15) return 'steps 要是 1–15 步的列表';
+  const steps = [];
+  for (const [i, step] of raw.entries()) {
+    const n = i + 1;
+    if (!step || typeof step !== 'object' || !STEP_ACTIONS.has(step.action)) return `第 ${n} 步的 action 只能是 click、fill、press、wait、select`;
+    const out = { action: step.action };
+    if (step.selector !== undefined) {
+      if (typeof step.selector !== 'string' || !step.selector.trim() || step.selector.length > 300) return `第 ${n} 步的 selector 不对`;
+      out.selector = step.selector;
+    }
+    if (['click', 'fill', 'select'].includes(step.action) && !out.selector) return `第 ${n} 步（${step.action}）要写 selector`;
+    if (step.action === 'fill' || step.action === 'select') {
+      if (typeof step.value !== 'string' || step.value.length > 200) return `第 ${n} 步要写 value（账号密码用 {{username}}、{{password}}）`;
+      if (/\{\{/.test(step.value) && !PLACEHOLDERS.has(step.value)) return `第 ${n} 步：占位符只能是整格的 {{username}} 或 {{password}}`;
+      if (step.action === 'select' && PLACEHOLDERS.has(step.value)) return `第 ${n} 步：下拉框不能填账号密码`;
+      out.value = step.value;
+    }
+    if (step.action === 'press') {
+      if (!STEP_KEYS.has(step.key)) return `第 ${n} 步的 key 只能是 ${[...STEP_KEYS].join('、')}`;
+      out.key = step.key;
+    }
+    if (step.action === 'wait') {
+      if (!out.selector && !(Number(step.ms) > 0)) return `第 ${n} 步（wait）要写 selector 或 ms`;
+      if (step.ms !== undefined) out.ms = Math.min(10000, Math.max(0, Number(step.ms) || 0));
+    }
+    steps.push(out);
+  }
+  if (!steps.some((s) => s.value === '{{password}}')) return 'steps 里要有一步把 {{password}} 填进密码框';
+  return steps;
+}
+
+/** A failure message the agent may read: never the values that were being typed. */
+function scrub(message, secrets) {
+  // eslint-disable-next-line no-control-regex
+  let text = String(message || '').replace(/\u001b\[[0-9;]*m/g, '').split('\n').slice(0, 4).join('\n').slice(0, 400);
+  for (const secret of secrets) if (secret) text = text.split(secret).join('***');
+  return text;
+}
+
+const describeStep = (step, i) => `第 ${i + 1} 步（${step.action}${step.selector ? ` ${step.selector}` : ''}${step.key ? ` ${step.key}` : ''}）`;
+
+/**
+ * Run sign-in steps from a fresh load of `startUrl`, so an agent's script cannot
+ * already be watching the page, and a kept script replays the same way. The
+ * password only goes into a real password box.
+ */
+async function runLoginSteps(tab, steps, startUrl, username, password) {
+  const page = tab.page;
+  await page.goto(startUrl, { waitUntil: 'domcontentloaded', timeout: 3 * VAULT_STEP_MS });
+  for (const [i, step] of steps.entries()) {
+    try {
+      const target = step.selector ? page.locator(step.selector).first() : null;
+      if (step.action === 'click') await target.click({ timeout: VAULT_STEP_MS });
+      else if (step.action === 'fill') {
+        const value = step.value === '{{username}}' ? username : step.value === '{{password}}' ? password : step.value;
+        if (step.value === '{{password}}') {
+          const type = await target.evaluate((el) => (el.getAttribute('type') || '').toLowerCase(), undefined, { timeout: VAULT_STEP_MS });
+          if (type !== 'password') return { result: 'failed', step: i, error: `${describeStep(step, i)}指向的不是密码框（type=${type || 'text'}），密码只会填进密码框` };
+        }
+        await target.fill(value, { timeout: VAULT_STEP_MS });
+      } else if (step.action === 'select') await target.selectOption(step.value, { timeout: VAULT_STEP_MS });
+      else if (step.action === 'press') {
+        if (target) await target.press(step.key, { timeout: VAULT_STEP_MS });
+        else await page.keyboard.press(step.key);
+      } else if (step.action === 'wait') {
+        if (target) await target.waitFor({ timeout: VAULT_STEP_MS });
+        else await page.waitForTimeout(step.ms);
+      }
+    } catch (err) {
+      return { result: 'failed', step: i, error: `${describeStep(step, i)}失败：${scrub(err && err.message, [username, password])}` };
+    }
+  }
+  await page.waitForLoadState('domcontentloaded', { timeout: VAULT_STEP_MS }).catch(() => undefined);
+  await page.waitForTimeout(1500);
+  return { result: 'submitted' };
+}
+
 /** Whatever is still sitting in a password box is removed before any agent may read the page again. */
 async function clearPasswords(page) {
   for (const frame of page.frames()) {
@@ -557,22 +646,31 @@ async function vaultLogin(body) {
   }
   if (typeof body.username !== 'string' || typeof body.password !== 'string' || !body.password || body.password.length > 1000 || body.username.length > 200) return { status: 400, body: { error: 'bad_request' } };
   if (!siteCovers(String(body.site || ''), hostOf(safeUrl(tab.page)))) return { status: 409, body: { error: 'site_changed', message: '页面已经不在这个网站，没有填入' } };
+  // The agent's steps for this request, else the steps kept for the site (from where they worked), else the guess.
+  const own = Array.isArray(tab.request.steps) ? tab.request.steps : null;
+  const kept = own ? null : loginSteps(body.steps);
+  const steps = own || (Array.isArray(kept) ? kept : null);
+  const startUrl = own ? tab.request.url : (typeof body.startUrl === 'string' && siteCovers(String(body.site || ''), hostOf(body.startUrl)) ? body.startUrl : safeUrl(tab.page));
   tab.locked = true;
-  let result;
+  let outcome;
   try {
-    result = await fillLogin(tab, body.username, body.password);
-  } catch {
-    // The reason may quote what was being typed: it is never passed on.
-    result = 'failed';
+    outcome = steps ? await runLoginSteps(tab, steps, startUrl, body.username, body.password) : { result: await fillLogin(tab, body.username, body.password) };
+  } catch (err) {
+    // The reason may quote what was being typed: it is scrubbed before anyone sees it.
+    outcome = { result: 'failed', error: scrub(err && err.message, [body.username, body.password]) };
   } finally {
     await clearPasswords(tab.page);
     tab.locked = false;
   }
+  const source = own ? 'agent' : steps ? 'kept' : 'guess';
+  // A try that failed counts now; one that submitted counts when the agent reports what the page shows.
+  if (outcome.result === 'submitted') tab.lastLogin = { site: String(body.site), steps, startUrl, source };
+  else if (outcome.result !== 'username_only') tab.loginTries = (tab.loginTries || 0) + 1;
   // Whatever happened, the agent hears it and carries on; it never hears the account or the password.
   tab.request = null;
   save();
-  settleWaiters(tab.id, { login: result });
-  return { status: 200, body: { result } };
+  settleWaiters(tab.id, { login: outcome.result, step: outcome.step, error: outcome.error, source });
+  return { status: 200, body: { result: outcome.result, ...(outcome.error ? { error: outcome.error } : {}) } };
 }
 
 /** Keys a person may press from the phone input bar. */
@@ -1009,30 +1107,44 @@ const TOOLS = {
   },
   browser_login: {
     mode: 'write',
-    description: '用密码器登录当前页面（先让账号密码表单或 Google 登录按钮出现）：账号密码由系统直接填进页面并提交，你看不到密码，也不要自己填写或读取密码；用户为这个网站记的是 Google 登录时，会告诉你点 Google 登录按钮、选哪个 Google 账号。用户没保存过时会被请去选择，也可以改为自己在浏览器里登录（最长等 30 分钟）。返回后先读取页面确认是否登录成功。',
-    input: { tab: ownTabArg },
+    description: '用密码器登录当前网站。先用 browser_snapshot 看清登录框，再写 steps：从当前页面重新加载后开始，依次点开登录入口、把 {{username}} 填进账号框、把 {{password}} 填进密码框（必须是 type=password 的框）、提交。系统把用户保存的账号密码代进占位符执行，你看不到值。用户为这个网站记的是 Google 登录时，会告诉你点 Google 按钮、选哪个账号。没保存过时会请用户填写（最长等 30 分钟）。返回后读取页面，调用 browser_login_report 报告是否登录成功。',
+    input: {
+      steps: {
+        type: 'array',
+        description: '登录步骤，最多 15 步。每步 {action: click|fill|press|wait|select, selector?, value?, key?, ms?}；value 写 {{username}} 或 {{password}} 时代入密码器的值。上次在这个网站成功过的步骤会自动沿用，可以省略。',
+        items: { type: 'object', properties: { action: str, selector: str, value: str, key: str, ms: num }, required: ['action'] },
+      },
+      tab: ownTabArg,
+    },
     run: async (ctx, a, signal) => {
       const tab = await resolveTab(ctx, a.tab, 'write', false, true);
       const site = hostOf(safeUrl(tab.page));
       if (!site) return { content: [{ type: 'text', text: '当前标签页不是网页，先用 browser_navigate 打开要登录的网站。' }], isError: true };
-      tab.request = { kind: 'login', site, reason: `需要登录 ${site}`, at: Date.now() };
+      if ((tab.loginTries || 0) >= MAX_LOGIN_TRIES) {
+        return { content: [{ type: 'text', text: `这个网站已经试了 ${tab.loginTries} 次都没登录上，不要再调用 browser_login：调用 browser_request_human 请用户自己在浏览器里登录，说明卡在哪一步。` }], isError: true };
+      }
+      const steps = loginSteps(a.steps);
+      if (typeof steps === 'string') return { content: [{ type: 'text', text: `steps 不能用：${steps}。改好后再调用。` }], isError: true };
+      tab.request = { kind: 'login', site, reason: `需要登录 ${site}`, at: Date.now(), ...(steps ? { steps, url: safeUrl(tab.page) } : {}) };
       save();
       const outcome = await waitForHuman(tab, signal);
+      const left = Math.max(0, MAX_LOGIN_TRIES - (tab.loginTries || 0));
+      const used = outcome && outcome.source === 'kept' ? '（用的是上次在这个网站成功的步骤）' : '';
       if (outcome && outcome.login === 'submitted') {
-        return textResult(`密码器已填入账号密码并提交。${await describe(tab)}\n先读取页面确认是否登录成功。页面提示账号或密码错误时不要重复调用，告诉用户到密码器里核对；还要验证码或二次验证时调用 browser_request_human。`);
+        return textResult(`密码器已${outcome.source === 'guess' ? '' : '按步骤'}填入账号密码并提交${used}。${await describe(tab)}\n读取页面确认是否登录成功，然后调用 browser_login_report 报告结果（成功的步骤会记下来下次用）。页面提示账号或密码错误时报告失败并告诉用户到密码器里核对；还要验证码或二次验证时调用 browser_request_human。`);
       }
       if (outcome && outcome.login === 'google') {
         const which = outcome.account ? `Google 账号 ${outcome.account}` : '浏览器里已登录的 Google 账号';
         return textResult(`用户为 ${site} 记录的是「用 Google 登录」，用${which}。点页面上「使用 Google 登录」「Continue with Google」「Sign in with Google」之类的按钮（找不到就先点登录入口）；跳到 Google 账号选择页时选${outcome.account ? '这个账号' : '已登录的账号'}，出现授权确认就点继续。不要再调用 browser_login，也不要输入任何密码；Google 要求输入密码、验证码或二次验证时调用 browser_request_human。完成后读取页面确认已经登录。${await describe(tab)}`);
       }
       if (outcome && outcome.login === 'username_only') {
-        return textResult(`密码器已填入账号并进入下一步，但没有出现密码输入框。${await describe(tab)}\n读取页面确认状态；出现密码框后再调用一次 browser_login。`);
-      }
-      if (outcome && outcome.login === 'no_form') {
-        return { content: [{ type: 'text', text: '页面上没有找到账号或密码输入框。先点开登录入口让表单出现，再调用 browser_login；找不到入口时调用 browser_request_human 请用户自己登录。' }], isError: true };
+        return textResult(`密码器已填入账号并进入下一步，但没有出现密码输入框。${await describe(tab)}\n读取页面确认状态，写出 steps 后再调用 browser_login。`);
       }
       if (outcome && outcome.login) {
-        return { content: [{ type: 'text', text: '密码器没能把账号密码填进这个页面（表单可能不是普通输入框）。调用 browser_request_human 请用户自己在浏览器里登录。' }], isError: true };
+        const why = outcome.error || (outcome.login === 'no_form' ? '页面上没有找到账号或密码输入框' : '没能填进这个页面');
+        return { content: [{ type: 'text', text: left > 0
+          ? `登录没有完成${used}：${why}。\n用 browser_snapshot 看清登录框，改写 steps 后再调用 browser_login（steps 从当前页面重新加载开始，要包含点开登录框的步骤）。还能再试 ${left} 次。`
+          : `登录没有完成：${why}。已经试了 ${MAX_LOGIN_TRIES} 次，不要再调用 browser_login：调用 browser_request_human 请用户自己登录，说明卡在哪一步。` }], isError: true };
       }
       if (outcome === 'released') {
         return textResult(`用户选择自己在浏览器里登录，并已交还控制权。${await describe(tab)}\n继续前先读取页面确认状态。`);
@@ -1042,6 +1154,24 @@ const TOOLS = {
         return { content: [{ type: 'text', text: `等了 ${Math.round(HUMAN_WAIT_MS / 60000)} 分钟，用户还没有处理标签页 ${tab.id} 的登录。请结束这一轮，告诉用户这个网站需要登录；用户处理后可以引用这个任务继续。` }], isError: true };
       }
       return { content: [{ type: 'text', text: `停止等待：${outcome === 'closed' ? '标签页已关闭' : '任务已结束或被停止'}。` }], isError: true };
+    },
+  },
+  browser_login_report: {
+    mode: 'write',
+    description: 'browser_login 之后读取页面，报告是否真的登录成功：ok=true 时这次的步骤会记下来，下次登录这个网站直接用；ok=false 时 note 写一句卡在哪（例如“提交后提示密码错误”“还停在登录框”）。',
+    input: { ok: { type: 'boolean' }, note: str, tab: ownTabArg }, required: ['ok'],
+    run: async (ctx, a) => {
+      const tab = await resolveTab(ctx, a.tab, 'write');
+      if (!tab.lastLogin) return { content: [{ type: 'text', text: '这个标签页最近没有用密码器登录过。' }], isError: true };
+      const ok = a.ok === true;
+      tab.loginReport = { ...tab.lastLogin, ok, note: String(a.note || '').slice(0, 300), at: Date.now() };
+      if (ok) tab.loginTries = 0;
+      else tab.loginTries = (tab.loginTries || 0) + 1;
+      tab.lastLogin = null;
+      save();
+      if (ok) return textResult('已记下：这个网站下次登录直接用这些步骤。');
+      const left = Math.max(0, MAX_LOGIN_TRIES - tab.loginTries);
+      return textResult(left > 0 ? `已记下这次失败。改写 steps 后再调用 browser_login，还能再试 ${left} 次；是账号或密码错误的话，告诉用户到密码器里核对，不要重试。` : `已经试了 ${MAX_LOGIN_TRIES} 次，不要再调用 browser_login：调用 browser_request_human 请用户自己登录。`);
     },
   },
   browser_tab_list: {

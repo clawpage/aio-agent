@@ -65,6 +65,7 @@ beforeAll(async () => {
   process.env.AIO_TABS_HUMAN_WAIT_MS = "3000";
   process.env.AIO_TABS_TOOL_DEADLINE_MS = "4000";
   process.env.AIO_TABS_PROBE_MS = "1500";
+  process.env.AIO_TABS_VAULT_STEP_MS = "1200";
   await startServer();
 });
 
@@ -84,7 +85,7 @@ async function call(task: string | null, name: string, args: Record<string, unkn
 }
 const text = (r: Rpc) => (r.result?.content ?? []).map((c) => c.text ?? "<image>").join("\n");
 const post = async (route: string, body: unknown = {}) => (await fetch(`${base}${route}`, { method: "POST", body: JSON.stringify(body) })).json();
-type TabRecord = { id: string; key: string; title: string; finishedAt: number | null; holder: string; request: { reason: string } | null; url?: string };
+type TabRecord = { id: string; key: string; title: string; finishedAt: number | null; holder: string; request: { reason: string } | null; url?: string; loginReport?: unknown };
 const records = async (key?: string) => ((await (await fetch(`${base}/tabs${key ? `?key=${key}` : ""}`)).json()) as { tabs: TabRecord[] }).tabs;
 const control = async (tab: string, action: string, key?: string) => fetch(`${base}/control`, { method: "POST", body: JSON.stringify({ tab, action, key }) });
 const page = (title: string, body: string) => `data:text/html,<title>${title}</title><p id="p">${body}</p><input id="q"><a href="data:text/html,<title>Next</title>next">go</a>`;
@@ -673,6 +674,90 @@ it.skipIf(!hasChromium)("signs in from the vault: the agent only asks, the page 
     expect(text(await manual)).toContain("用户选择自己在浏览器里登录");
   } finally {
     await post("/finish", { key: "V" });
+    site.close();
+  }
+});
+
+it.skipIf(!hasChromium)("signs in with steps the agent wrote, from the vault's values: retries on a step's error, refuses the password outside a password box, gives up after three tries", async () => {
+  const SECRET = "pw-秘密-123";
+  const received: string[] = [];
+  // Like 99 Ranch: the sign-in lives in a dialog behind a button, behind a tab that defaults to a text code.
+  const home = `<!doctype html><meta charset="utf-8"><title>Shop</title><button id="open">Sign in / Sign up</button>
+    <div id="dlg" hidden><button id="code">Code login</button><button id="pw">Password login</button>
+      <form id="f" method="post" action="/done"><input id="acct" name="acct" placeholder="Phone or email"><input id="secret" name="secret" type="password" hidden><input id="note" name="note"><button>Log in</button></form></div>
+    <script>const $ = (id) => document.getElementById(id); $("open").onclick = () => { $("dlg").hidden = false; }; $("pw").onclick = () => { $("secret").hidden = false; };</script>`;
+  const site = (await import("node:http")).createServer((req, res) => {
+    res.setHeader("content-type", "text/html; charset=utf-8");
+    if (req.method === "POST") { let b = ""; req.on("data", (c) => (b += c)); req.on("end", () => { received.push(decodeURIComponent(b)); res.end("<title>Account</title>welcome"); }); return; }
+    res.end(home);
+  });
+  await new Promise<void>((resolve) => site.listen(0, "127.0.0.1", resolve));
+  const origin = `http://127.0.0.1:${(site.address() as net.AddressInfo).port}`;
+  const login = async (body: Record<string, unknown>) => (await (await fetch(`${base}/login`, { method: "POST", body: JSON.stringify(body) })).json()) as { result?: string; error?: string };
+  const asked = async (task: string) => { for (let i = 0; i < 60 && !(await records(task)).some((t) => (t.request as { kind?: string } | null)?.kind === "login"); i += 1) await new Promise((r) => setTimeout(r, 50)); };
+  const cred = { site: "127.0.0.1", username: "max@example.com", password: SECRET };
+  const good = [
+    { action: "click", selector: "#open" }, { action: "click", selector: "text=Password login" },
+    { action: "fill", selector: "#acct", value: "{{username}}" }, { action: "fill", selector: "#secret", value: "{{password}}" },
+    { action: "press", selector: "#secret", key: "Enter" },
+  ];
+  try {
+    const tab = tabIdOf(await call("S", "browser_navigate", { url: origin }))!;
+    // Steps are checked before anyone is asked.
+    expect(text(await call("S", "browser_login", { steps: [{ action: "click", selector: "#open" }] }))).toContain("{{password}}");
+    expect(text(await call("S", "browser_login", { steps: [{ action: "fill", selector: "#acct", value: "x{{password}}" }] }))).toContain("占位符");
+
+    // The password is only ever typed into a password box: aimed at another box, nothing is typed and the try counts.
+    const sneaky = call("S", "browser_login", { steps: [...good.slice(0, 2), { action: "fill", selector: "#note", value: "{{password}}" }] });
+    await asked("S");
+    expect((await login({ key: "S", tab, ...cred })).result).toBe("failed");
+    expect(text(await sneaky)).toContain("不是密码框");
+    expect(text(await sneaky)).toContain("还能再试 2 次");
+
+    // A step that does not match: the agent hears which step and why, never a value.
+    const wrong = call("S", "browser_login", { steps: [{ action: "click", selector: "#open" }, { action: "fill", selector: "#secret", value: "{{password}}" }] });
+    await asked("S");
+    expect((await login({ key: "S", tab, ...cred })).result).toBe("failed");
+    const told = text(await wrong);
+    expect(told).toContain("第 2 步（fill #secret）失败");
+    expect(told).toContain("还能再试 1 次");
+    expect(told).not.toContain(SECRET);
+    expect(received).toEqual([]);
+
+    // Revised steps open the dialog, switch to the password tab and sign in.
+    const right = call("S", "browser_login", { steps: good });
+    await asked("S");
+    expect((await login({ key: "S", tab, ...cred })).result).toBe("submitted");
+    expect(text(await right)).toContain("browser_login_report");
+    expect(received).toEqual([`acct=max@example.com&secret=${SECRET}&note=`]);
+    expect(JSON.stringify(await records("S"))).not.toContain(SECRET);
+    // The agent reports what the page shows; the steps it used come with the report, for the vault to keep.
+    expect(text(await call("S", "browser_login_report", { ok: true }))).toContain("已记下");
+    const report = (await records("S"))[0]!.loginReport as unknown as { ok: boolean; steps: unknown[]; startUrl: string; source: string };
+    expect(report).toMatchObject({ ok: true, source: "agent", startUrl: `${origin}/` });
+    expect(report.steps).toEqual(good);
+
+    // Next time the agent asks without steps, the kept ones (sent by the vault) replay from where they worked.
+    await call("S", "browser_navigate", { url: `${origin}/elsewhere`, tab });
+    const again = call("S", "browser_login");
+    await asked("S");
+    expect((await login({ key: "S", tab, ...cred, steps: good, startUrl: `${origin}/` })).result).toBe("submitted");
+    expect(text(await again)).toContain("上次在这个网站成功的步骤");
+    expect(received).toHaveLength(2);
+
+    // Three failed tries and the agent is told to hand it to the person.
+    for (const note of ["还停在登录框", "提示密码错误", "又失败"]) {
+      const t = call("S", "browser_login", { steps: good });
+      await asked("S");
+      await login({ key: "S", tab, ...cred });
+      await t;
+      await call("S", "browser_login_report", { ok: false, note });
+    }
+    const refused = text(await call("S", "browser_login", { steps: good }));
+    expect(refused).toContain("browser_request_human");
+    expect(refused).toContain("不要再调用 browser_login");
+  } finally {
+    await post("/finish", { key: "S" });
     site.close();
   }
 });

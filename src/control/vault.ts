@@ -4,7 +4,7 @@ import path from "node:path";
 import type { Db } from "./db.js";
 import type { Logger } from "../common/logger.js";
 import type { AppContext } from "./context.js";
-import type { TabRecord } from "./browser/tabs.js";
+import type { LoginStep, TabRecord } from "./browser/tabs.js";
 import { randomId } from "./auth/passwords.js";
 
 /**
@@ -43,6 +43,17 @@ interface Row {
   created_at: number;
   updated_at: number;
   last_used_at: number | null;
+}
+
+/** Sign-in steps kept for a site: written by the agent (placeholders only), with how they fared. */
+export interface VaultScript {
+  site: string;
+  steps: LoginStep[];
+  startUrl: string;
+  successes: number;
+  failures: number;
+  lastNote: string | null;
+  updatedAt: number;
 }
 
 export const VAULT_MAX_ENTRIES = 200;
@@ -219,13 +230,43 @@ export class Vault {
     return Number(this.#db.prepare("DELETE FROM vault_entries WHERE id = ? AND owner_id = ?").run(id, this.#ownerId).changes) > 0;
   }
 
+  /** The steps kept for the site a page is on (its own host first, then a parent domain). */
+  script(host: string): VaultScript | null {
+    const rows = this.#db.prepare("SELECT * FROM vault_scripts WHERE owner_id = ?").all(this.#ownerId) as unknown as Array<{ site: string; steps_json: string; start_url: string; successes: number; failures: number; last_note: string | null; updated_at: number }>;
+    const row = rows.filter((r) => siteCovers(r.site, host)).sort((a, b) => b.site.length - a.site.length)[0];
+    return row ? { site: row.site, steps: JSON.parse(row.steps_json) as LoginStep[], startUrl: row.start_url, successes: row.successes, failures: row.failures, lastNote: row.last_note, updatedAt: row.updated_at } : null;
+  }
+
+  scripts(): VaultScript[] {
+    const rows = this.#db.prepare("SELECT site FROM vault_scripts WHERE owner_id = ? ORDER BY site").all(this.#ownerId) as Array<{ site: string }>;
+    return rows.map((r) => this.script(r.site)!);
+  }
+
+  /** The agent said a sign-in worked or not. Steps that worked become the site's; a failure is noted on what it used. */
+  noteLogin(report: { site: string; steps: LoginStep[] | null; startUrl: string; ok: boolean; note: string }): void {
+    const now = Date.now();
+    const kept = this.#db.prepare("SELECT steps_json FROM vault_scripts WHERE owner_id = ? AND site = ?").get(this.#ownerId, report.site) as { steps_json: string } | undefined;
+    const same = kept && report.steps && kept.steps_json === JSON.stringify(report.steps);
+    if (report.ok && report.steps) {
+      if (same) this.#db.prepare("UPDATE vault_scripts SET successes = successes + 1, start_url = ?, last_note = NULL, updated_at = ? WHERE owner_id = ? AND site = ?").run(report.startUrl, now, this.#ownerId, report.site);
+      else this.#db.prepare("INSERT INTO vault_scripts (owner_id, site, steps_json, start_url, successes, failures, updated_at) VALUES (?,?,?,?,1,0,?) ON CONFLICT(owner_id, site) DO UPDATE SET steps_json = excluded.steps_json, start_url = excluded.start_url, successes = 1, failures = 0, last_note = NULL, updated_at = excluded.updated_at")
+        .run(this.#ownerId, report.site, JSON.stringify(report.steps), report.startUrl, now);
+    } else if (!report.ok && (same || !report.steps)) {
+      this.#db.prepare("UPDATE vault_scripts SET failures = failures + 1, last_note = ?, updated_at = ? WHERE owner_id = ? AND site = ?").run(report.note.slice(0, 300) || null, now, this.#ownerId, report.site);
+    }
+  }
+
+  forgetScript(site: string): boolean {
+    return Number(this.#db.prepare("DELETE FROM vault_scripts WHERE owner_id = ? AND site = ?").run(this.#ownerId, site).changes) > 0;
+  }
+
   used(id: string): void {
     this.#db.prepare("UPDATE vault_entries SET last_used_at = ? WHERE id = ? AND owner_id = ?").run(Date.now(), id, this.#ownerId);
   }
 }
 
 /** What a sign-in attempt came to; never the account or the password. */
-export type VaultLoginResult = { ok: true; result: string } | { ok: false; status: number; error: string; message: string };
+export type VaultLoginResult = { ok: true; result: string; error?: string } | { ok: false; status: number; error: string; message: string };
 
 /** Sign in on a tab whose agent asked, with a saved account or with one the person just typed. */
 export async function vaultLogin(
@@ -270,10 +311,12 @@ export async function vaultLogin(
       entryId = same ? ctx.vault.update(same.id, { password })!.id : ctx.vault.create({ site: host, username, password }).id;
     }
   }
-  const out = await ctx.tabs.login(tab.key, tab.id, method === "google" ? { site: host, method, username } : { site: host, username, password });
+  // The agent's own steps travel with its request; otherwise the steps that worked on this site last time.
+  const kept = method === "password" && !tab.request?.steps ? ctx.vault.script(host) : null;
+  const out = await ctx.tabs.login(tab.key, tab.id, method === "google" ? { site: host, method, username } : { site: host, username, password, ...(kept ? { steps: kept.steps, startUrl: kept.startUrl } : {}) });
   if (out.status !== 200) return fail(out.status, String(out.body.error ?? "failed"), String(out.body.message ?? "没能填入，请稍后重试"));
   if (entryId && (out.body.result === "submitted" || out.body.result === "google")) ctx.vault.used(entryId);
-  return { ok: true, result: String(out.body.result ?? "") };
+  return { ok: true, result: String(out.body.result ?? ""), ...(typeof out.body.error === "string" ? { error: out.body.error } : {}) };
 }
 
 /**
@@ -281,15 +324,24 @@ export async function vaultLogin(
  * waiting on. Anything less certain (no account, several, or a second request
  * right after a sign-in that did not take) is left for the person to decide.
  */
-export function startVaultAutofill(ctx: AppContext, intervalMs = 2500, retryAfterMs = 10 * 60_000): { stop(): void; tick(): Promise<void> } {
+export function startVaultAutofill(ctx: AppContext, intervalMs = 2500, maxTries = 3): { stop(): void; tick(): Promise<void> } {
   const seen = new Set<string>();
-  const filled = new Map<string, number>();
+  const reported = new Set<string>();
+  /** tab:site -> automatic tries; the agent revises its steps between them, the person decides after. */
+  const tries = new Map<string, number>();
   let busy = false;
   const tick = async (): Promise<void> => {
     if (busy || !ctx.tabs || !ctx.vault || !ctx.tasks.hasRunning()) return;
     busy = true;
     try {
       for (const tab of await ctx.tabs.list()) {
+        const report = tab.loginReport;
+        if (report && !reported.has(`${tab.id}:${report.at}`)) {
+          reported.add(`${tab.id}:${report.at}`);
+          if (report.source !== "guess" || !report.ok) ctx.vault.noteLogin(report);
+          if (report.ok) tries.delete(`${tab.id}:${report.site}`);
+          ctx.log.info("vault sign-in reported", { site: report.site, ok: report.ok, source: report.source });
+        }
         if (tab.request?.kind !== "login" || tab.holder !== "ai") continue;
         const request = `${tab.id}:${tab.request.at}`;
         if (seen.has(request)) continue;
@@ -297,8 +349,8 @@ export function startVaultAutofill(ctx: AppContext, intervalMs = 2500, retryAfte
         const host = siteOfUrl(tab.url);
         const entries = host ? ctx.vault.matching(host) : [];
         const again = `${tab.id}:${host}`;
-        if (entries.length !== 1 || Date.now() - (filled.get(again) ?? 0) < retryAfterMs) continue;
-        filled.set(again, Date.now());
+        if (entries.length !== 1 || (tries.get(again) ?? 0) >= maxTries) continue;
+        tries.set(again, (tries.get(again) ?? 0) + 1);
         const out = await vaultLogin(ctx, tab, { entryId: entries[0]!.id });
         ctx.log.info("vault sign-in", { site: host, result: out.ok ? out.result : out.error });
       }

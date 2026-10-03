@@ -66,12 +66,14 @@ test("the vault page lists accounts, shows a password only when asked, and edits
   await mockConsole(page, { conversations: [] });
   await page.route("**/api/main*", (r) => r.fulfill({ json: { mode: "tasks", tasks: [], nextBefore: null } }));
   const writes: Array<{ method: string; path: string; body: unknown }> = [];
+  const scripts = [{ site: "github.com", steps: 4, successes: 3, failures: 1, lastNote: "要短信验证码", updatedAt: 1 }];
   await page.route("**/api/vault**", async (r) => {
     const url = new URL(r.request().url());
     const method = r.request().method();
-    if (method === "GET") return r.fulfill({ json: { entries } });
-    const body = r.request().postDataJSON();
+    if (method === "GET") return r.fulfill({ json: { entries, scripts } });
+    const body = method === "DELETE" ? null : r.request().postDataJSON();
     writes.push({ method, path: url.pathname, body });
+    if (url.pathname.startsWith("/api/vault/scripts/")) { scripts.length = 0; return r.fulfill({ json: { ok: true } }); }
     if (url.pathname.endsWith("/reveal")) return r.fulfill({ json: { password: "hunter2" } });
     if (method === "POST") { entries.push({ id: "vault_2", site: body.site, method: body.method ?? "password", username: body.username, createdAt: 2, updatedAt: 2, lastUsedAt: null }); return r.fulfill({ status: 201, json: { entry: entries.at(-1) } }); }
     if (method === "DELETE") { entries.splice(entries.findIndex((e) => url.pathname.endsWith(e.id)), 1); return r.fulfill({ json: { ok: true } }); }
@@ -88,6 +90,13 @@ test("the vault page lists accounts, shows a password only when asked, and edits
   await expect(vault.getByTestId("vault-password")).toHaveText("hunter2");
   await vault.getByRole("button", { name: "隐藏密码" }).click();
   await expect(vault.getByTestId("vault-password")).toHaveText("••••••••");
+
+  // The steps the agent wrote for this site, how they fared, and a way to drop them.
+  const script = vault.locator('[data-vault-id="vault_1"]').getByTestId("vault-script");
+  await expect(script).toContainText("AI 写的登录步骤已记住（4 步，成功 3 次，之后失败 1 次：要短信验证码）");
+  await script.getByRole("button", { name: "清除" }).click();
+  await expect(script).toContainText("还没有：AI 第一次登录成功后记下");
+  expect(writes.some((w) => w.method === "DELETE" && w.path === "/api/vault/scripts/github.com")).toBe(true);
 
   await vault.getByRole("button", { name: "添加账号" }).click();
   const form = vault.getByRole("form", { name: "添加账号" });

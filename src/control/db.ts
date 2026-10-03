@@ -164,6 +164,19 @@ CREATE TABLE IF NOT EXISTS vault_entries (
   last_used_at INTEGER
 );
 
+-- Sign-in steps that worked on a site (written by the agent, with placeholders, never values), and how they fared since.
+CREATE TABLE IF NOT EXISTS vault_scripts (
+  owner_id TEXT NOT NULL,
+  site TEXT NOT NULL,
+  steps_json TEXT NOT NULL,
+  start_url TEXT NOT NULL,
+  successes INTEGER NOT NULL DEFAULT 0,
+  failures INTEGER NOT NULL DEFAULT 0,
+  last_note TEXT,
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY (owner_id, site)
+);
+
 -- Scheduled and recurring tasks: each due run starts a task (tasks.schedule_id).
 CREATE TABLE IF NOT EXISTS schedules (
   id TEXT PRIMARY KEY,

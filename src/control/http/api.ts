@@ -613,7 +613,7 @@ export function createApiRouter(context: AppContext): Router {
     res.setHeader("Cache-Control", "no-store");
     try {
       const out = await vaultLogin(context, tab, { entryId: req.body?.entryId, username: req.body?.username, password: req.body?.password, save: req.body?.save, method: req.body?.method });
-      if (out.ok) res.json({ result: out.result });
+      if (out.ok) res.json({ result: out.result, ...(out.error ? { error: out.error } : {}) });
       else res.status(out.status).json({ error: out.error, message: out.message });
     } catch (err) {
       if (!(err instanceof VaultError)) throw err;
@@ -638,7 +638,8 @@ export function createApiRouter(context: AppContext): Router {
     const v = vault(req, res);
     if (!v) return;
     const site = typeof req.query.site === "string" ? normalizeSite(req.query.site) : null;
-    res.json({ entries: site ? v.matching(site) : v.list() });
+    // The kept sign-in steps carry selectors and placeholders only, never a value.
+    res.json({ entries: site ? v.matching(site) : v.list(), scripts: site ? [] : v.scripts().map(({ site: s, successes, failures, lastNote, updatedAt, steps }) => ({ site: s, successes, failures, lastNote, updatedAt, steps: steps.length })) });
   }));
   router.post("/vault", requireKind("primary"), requireSession, asyncHandler(async (req, res) => {
     const v = vault(req, res);
@@ -661,6 +662,12 @@ export function createApiRouter(context: AppContext): Router {
     if (!v) return;
     if (v.remove(param(req, "id"))) res.json({ ok: true });
     else res.status(404).json({ error: "not_found", message: "密码器里没有这个账号" });
+  }));
+  router.delete("/vault/scripts/:site", requireKind("primary"), requireSession, asyncHandler(async (req, res) => {
+    const v = vault(req, res);
+    if (!v) return;
+    if (v.forgetScript(param(req, "site"))) res.json({ ok: true });
+    else res.status(404).json({ error: "not_found", message: "这个网站没有记下的登录步骤" });
   }));
   router.post("/vault/:id/reveal", requireKind("primary"), requireSession, asyncHandler(async (req, res) => {
     const v = vault(req, res);

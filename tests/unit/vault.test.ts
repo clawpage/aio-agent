@@ -138,28 +138,79 @@ describe("signing in from the vault", () => {
     expect(await vaultLogin(ctx, page, { username: "max", password: "" })).toMatchObject({ ok: false, status: 400 });
   });
 
-  it("signs in by itself when exactly one account fits, once per request, and leaves a second request to the person", async () => {
+  it("signs in by itself when exactly one account fits: each request once, up to three tries on a tab, then leaves it to the person", async () => {
     vault.create({ site: "github.com", username: "max", password: SECRET });
     const tabs = [tabRecord()];
     const { ctx, logins } = world(tabs);
     const auto = startVaultAutofill(ctx, 60_000);
+    const ask = async (at: number) => { tabs[0] = tabRecord({ request: { kind: "login", site: "github.com", reason: "r", at } }); await auto.tick(); };
     try {
       await auto.tick();
       await auto.tick();
       expect(logins).toHaveLength(1);
-      // The agent asks again on the same tab right after: the saved password did not work, so the person decides.
-      tabs[0] = tabRecord({ request: { kind: "login", site: "github.com", reason: "需要登录 github.com", at: 200 } });
-      await auto.tick();
-      expect(logins).toHaveLength(1);
+      // The agent revises its steps and asks again: answered, twice more.
+      await ask(200);
+      await ask(300);
+      expect(logins).toHaveLength(3);
+      // A fourth try on the same tab is the person's to decide.
+      await ask(400);
+      expect(logins).toHaveLength(3);
       // Two accounts for a site, no account, or a plain request for the person: never automatic.
       vault.create({ site: "github.com", username: "work", password: "x" });
-      tabs[0] = tabRecord({ id: "t2", request: { kind: "login", site: "github.com", reason: "r", at: 300 } });
-      tabs.push(tabRecord({ id: "t3", url: "https://unknown.example/login", request: { kind: "login", site: "unknown.example", reason: "r", at: 300 } }), tabRecord({ id: "t4", request: { reason: "验证码", at: 300 } }));
+      tabs[0] = tabRecord({ id: "t2", request: { kind: "login", site: "github.com", reason: "r", at: 500 } });
+      tabs.push(tabRecord({ id: "t3", url: "https://unknown.example/login", request: { kind: "login", site: "unknown.example", reason: "r", at: 500 } }), tabRecord({ id: "t4", request: { reason: "验证码", at: 500 } }));
       await auto.tick();
-      expect(logins).toHaveLength(1);
+      expect(logins).toHaveLength(3);
     } finally {
       auto.stop();
     }
+  });
+});
+
+describe("kept sign-in steps", () => {
+  const steps = [{ action: "click" as const, selector: "#open" }, { action: "fill" as const, selector: "#user", value: "{{username}}" }, { action: "fill" as const, selector: "#pw", value: "{{password}}" }];
+  const page = (over: Partial<TabRecord> = {}): TabRecord => ({
+    id: "t1", key: "conv_1", title: "任务", url: "https://www.99ranch.com/en_US", createdAt: 1, lastUsed: 1, finishedAt: null, holder: "ai", humanSince: null,
+    request: { kind: "login", site: "www.99ranch.com", reason: "r", at: 100 }, loginReport: null, ...over,
+  });
+
+  it("keeps steps the agent reported working, counts later results against them, and replaces them when new steps work", () => {
+    expect(vault.script("www.99ranch.com")).toBeNull();
+    vault.noteLogin({ site: "www.99ranch.com", steps, startUrl: "https://www.99ranch.com/en_US", ok: true, note: "" });
+    expect(vault.script("www.99ranch.com")).toMatchObject({ site: "www.99ranch.com", steps, successes: 1, failures: 0 });
+    vault.noteLogin({ site: "www.99ranch.com", steps, startUrl: "https://www.99ranch.com/en_US", ok: false, note: "提交后还停在登录框" });
+    vault.noteLogin({ site: "www.99ranch.com", steps, startUrl: "https://www.99ranch.com/en_US", ok: true, note: "" });
+    expect(vault.script("www.99ranch.com")).toMatchObject({ successes: 2, failures: 1, lastNote: null });
+    // A failure of other steps says nothing about the kept ones; other steps that work replace them.
+    const other = [...steps.slice(1)];
+    vault.noteLogin({ site: "www.99ranch.com", steps: other, startUrl: "https://www.99ranch.com/", ok: false, note: "x" });
+    expect(vault.script("www.99ranch.com")?.failures).toBe(1);
+    vault.noteLogin({ site: "www.99ranch.com", steps: other, startUrl: "https://www.99ranch.com/", ok: true, note: "" });
+    expect(vault.script("www.99ranch.com")).toMatchObject({ steps: other, startUrl: "https://www.99ranch.com/", successes: 1, failures: 0 });
+    // Kept per account, and forgettable.
+    expect(new Vault(db, dir, "user_2").script("www.99ranch.com")).toBeNull();
+    expect(vault.scripts().map((s) => s.site)).toEqual(["www.99ranch.com"]);
+    expect(vault.forgetScript("www.99ranch.com")).toBe(true);
+    expect(vault.script("www.99ranch.com")).toBeNull();
+  });
+
+  it("sends the kept steps when the agent asks without its own, never over its own, and learns from its reports", async () => {
+    const entry = vault.create({ site: "99ranch.com", username: "max", password: SECRET });
+    vault.noteLogin({ site: "www.99ranch.com", steps, startUrl: "https://www.99ranch.com/en_US", ok: true, note: "" });
+    const logins: Array<Record<string, unknown>> = [];
+    const tabs: TabRecord[] = [];
+    const ctx = { vault, log: new Logger("error", undefined, false), tasks: { hasRunning: () => true },
+      tabs: { list: async () => tabs, login: async (_k: string, _t: string, account: Record<string, unknown>) => (logins.push(account), { status: 200, body: { result: "submitted" } }) } } as unknown as AppContext;
+    await vaultLogin(ctx, page(), { entryId: entry.id });
+    expect(logins[0]).toEqual({ site: "www.99ranch.com", username: "max", password: SECRET, steps, startUrl: "https://www.99ranch.com/en_US" });
+    await vaultLogin(ctx, page({ request: { kind: "login", site: "www.99ranch.com", reason: "r", at: 2, steps: steps.slice(0, 2) } }), { entryId: entry.id });
+    expect(logins[1]).toEqual({ site: "www.99ranch.com", username: "max", password: SECRET });
+
+    // A report on a tab is learned once.
+    tabs.push(page({ request: null, loginReport: { site: "www.99ranch.com", steps, startUrl: "https://www.99ranch.com/en_US", source: "kept", ok: false, note: "要短信验证码", at: 9 } }));
+    const auto = startVaultAutofill(ctx, 60_000);
+    try { await auto.tick(); await auto.tick(); } finally { auto.stop(); }
+    expect(vault.script("www.99ranch.com")).toMatchObject({ failures: 1, lastNote: "要短信验证码" });
   });
 });
 

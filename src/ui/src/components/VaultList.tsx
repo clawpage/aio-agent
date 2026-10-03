@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, ApiError } from "../api";
-import type { VaultEntry } from "../types";
+import type { VaultEntry, VaultScript } from "../types";
 
 interface Draft { id: string | null; site: string; method: "password" | "google"; username: string; password: string; wasGoogle: boolean }
 
@@ -11,6 +11,7 @@ interface Draft { id: string | null; site: string; method: "password" | "google"
  */
 export function VaultList({ active, onExpired }: { active: boolean; onExpired: () => void }) {
   const [items, setItems] = useState<VaultEntry[] | null>(null);
+  const [scripts, setScripts] = useState<VaultScript[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [shown, setShown] = useState<Record<string, string>>({});
   const [draft, setDraft] = useState<Draft | null>(null);
@@ -22,7 +23,7 @@ export function VaultList({ active, onExpired }: { active: boolean; onExpired: (
     setError(err instanceof Error ? err.message : fallback);
   }, [onExpired]);
   const load = useCallback(async () => {
-    try { setItems((await api.vault()).entries); setError(null); }
+    try { const r = await api.vault(); setItems(r.entries); setScripts(r.scripts ?? []); setError(null); }
     catch (err) { fail(err, "读取失败"); }
   }, [fail]);
   useEffect(() => {
@@ -54,6 +55,12 @@ export function VaultList({ active, onExpired }: { active: boolean; onExpired: (
     } catch (err) { fail(err, "保存失败"); }
     finally { setBusy(false); }
   };
+  const forget = async (site: string) => {
+    try { await api.vaultForgetScript(site); await load(); }
+    catch (err) { fail(err, "清除失败"); }
+  };
+  /** The kept steps for an entry's site (its own host, or a parent domain), as the server matches them. */
+  const scriptFor = (site: string) => scripts.filter((s) => site === s.site || site.endsWith(`.${s.site}`) || s.site.endsWith(`.${site}`)).sort((a, b) => b.site.length - a.site.length)[0];
   const remove = async (id: string) => {
     setBusy(true);
     try { await api.vaultDelete(id); setConfirm(null); await load(); }
@@ -86,6 +93,9 @@ export function VaultList({ active, onExpired }: { active: boolean; onExpired: (
             : <>
               <p className="vault-row"><span className="muted tiny">账号</span><span className="vault-value">{e.username || "（未填）"}</span></p>
               <p className="vault-row"><span className="muted tiny">密码</span><span className="vault-value" data-testid="vault-password">{shown[e.id] ?? "••••••••"}</span></p>
+              {(() => { const s = scriptFor(e.site); return <p className="vault-row" data-testid="vault-script"><span className="muted tiny">步骤</span><span className="vault-script">{s
+                ? <>AI 写的登录步骤已记住（{s.steps} 步，成功 {s.successes} 次{s.failures ? `，之后失败 ${s.failures} 次${s.lastNote ? `：${s.lastNote}` : ""}` : ""}）<button type="button" className="link tiny" onClick={() => void forget(s.site)}>清除</button></>
+                : <span className="muted">还没有：AI 第一次登录成功后记下</span>}</span></p>; })()}
             </>}
           {confirm === e.id
             ? <div className="schedule-actions" role="alert"><span className="tiny">删除后 AI 不能再用它登录。</span><button className="ghost tiny" onClick={() => setConfirm(null)}>取消</button><button className="danger tiny" disabled={busy} onClick={() => void remove(e.id)}>确认删除</button></div>

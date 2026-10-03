@@ -113,3 +113,14 @@ it("saves a site as Google sign-in and answers a sign-in request with it", async
   expect((await send(`/api/tasks/${task.id}/browser/login`, "POST", { tab: "t1", entryId: created.id })).status).toBe(200);
   expect(logins.slice(before)).toEqual([{ key, tab: "t1", account: { site: "www.notion.so", method: "google", username: "max@gmail.com" } }]);
 });
+
+it("lists the kept sign-in steps by site without their content, and forgets them", async () => {
+  h.ctx.vault!.noteLogin({ site: "www.99ranch.com", steps: [{ action: "fill", selector: "#pw", value: "{{password}}" }], startUrl: "https://www.99ranch.com/", ok: true, note: "" });
+  const listed = await json(await h.request("/api/vault", { headers: { cookie } }));
+  expect(listed.scripts).toEqual([expect.objectContaining({ site: "www.99ranch.com", steps: 1, successes: 1, failures: 0 })]);
+  expect(JSON.stringify(listed.scripts)).not.toContain("#pw");
+  expect((await send("/api/vault/scripts/www.99ranch.com", "DELETE", undefined, { cookie, "content-type": "application/json" })).status).toBe(403);
+  expect((await send("/api/vault/scripts/www.99ranch.com", "DELETE")).status).toBe(200);
+  expect((await json(await h.request("/api/vault", { headers: { cookie } }))).scripts).toEqual([]);
+  expect((await send("/api/vault/scripts/www.99ranch.com", "DELETE")).status).toBe(404);
+});
