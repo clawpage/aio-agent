@@ -81,6 +81,13 @@ check("models from live API", (models.json?.models ?? []).length > 0, (models.js
 const conversations = await call(primary, `${PRIMARY}/api/conversations`, { headers: { origin: PRIMARY } });
 const main = await call(primary, `${PRIMARY}/api/main`, { headers: { origin: PRIMARY } });
 check("single main task inbox readable", main.status === 200 && main.json?.mode === "tasks" && Array.isArray(main.json?.tasks));
+// A poll naming the version it holds gets a few bytes back, not the page (a feed that changed in between is fetched again).
+let feed = main, same = null;
+for (let i = 0; i < 3 && !same?.json?.unchanged; i += 1) {
+  if (same) feed = same;
+  same = await call(primary, `${PRIMARY}/api/main?v=${encodeURIComponent(feed.json?.version ?? "")}`, { headers: { origin: PRIMARY } });
+}
+check("unchanged main feed answers in a few bytes", same?.status === 200 && same.json?.unchanged === true && same.text.length < 100, `${feed.text.length} -> ${same?.text.length} bytes`);
 check(
   "conversation list readable",
   conversations.status === 200 && Array.isArray(conversations.json?.conversations),
