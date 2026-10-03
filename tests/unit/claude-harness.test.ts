@@ -389,6 +389,16 @@ describe("ClaudeCodeSession", () => {
     expect(Object.keys(servers(1))).toEqual(["aio_browser"]);
   });
 
+  it("adds the image tool to a task's turns only when this runtime has one", async () => {
+    const url = "http://host.docker.internal:4902/image/token/mcp";
+    const { session, spawns } = makeSession({ image: { url } });
+    const servers = (i: number) => JSON.parse(spawns[i]!.args[spawns[i]!.args.indexOf("--mcp-config") + 1]!).mcpServers;
+    const task = await session.startThread({ browserTask: { key: "conv_img", title: "画图" } });
+    await session.startTurn({ threadId: task.threadId, text: "hi" });
+    expect(Object.keys(servers(0))).toEqual(["aio_tabs", "aio_image"]);
+    expect(servers(0).aio_image).toEqual({ type: "http", url });
+  });
+
   it("runs one turn per session at a time", async () => {
     const { session } = makeSession();
     const { threadId } = await session.startThread({});

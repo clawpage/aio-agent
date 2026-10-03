@@ -262,6 +262,8 @@ export function loadConfig(): {
   decision?: { url: string };
   /** The account's schedule tool reachable from this runtime's sandbox; set by the schedule gateway. */
   schedule?: { url: string };
+  /** The image tool on the member gateway (imageTool.ts), when the control plane has a ChatGPT login. */
+  image?: { url: string };
   /**
    * An optional knowledge-base MCP server on the host. The control plane holds its
    * bearer token; the owner and the listed members reach it only through the

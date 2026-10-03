@@ -11,6 +11,7 @@ import type { BrowserRuntimeLike } from "../../src/control/browser/lifecycle.js"
 import { FakeCodex, testConfig } from "../helpers/harness.js";
 import { KB_POLICY } from "../../src/control/kb.js";
 import { SCHEDULE_POLICY } from "../../src/control/scheduleTool.js";
+import { IMAGE_POLICY } from "../../src/control/imageTool.js";
 import type { Config } from "../../src/control/config.js";
 
 class RecordingCodex extends FakeCodex {
@@ -84,6 +85,20 @@ it("tells the executor its schedules are the account's, kept outside the convers
   await tick();
   expect(codex.threadOpts[1]?.developerInstructions).toContain(SCHEDULE_POLICY);
   expect(SCHEDULE_POLICY).toContain("不要说定时任务只在当前会话有效");
+});
+
+it("tells the executor to draw pictures with the image tool only when this runtime has one", async () => {
+  const plain = agent.createConversation({ title: "没有出图工具" });
+  agent.submitTurn({ conversationId: plain.id, text: "hi", clientMessageId: "i1" });
+  await tick();
+  expect(codex.threadOpts[0]?.developerInstructions).not.toContain(IMAGE_POLICY);
+
+  cfg.image = { url: "http://host.docker.internal:4902/image/token/mcp" };
+  const granted = agent.createConversation({ title: "有出图工具" });
+  agent.submitTurn({ conversationId: granted.id, text: "hi", clientMessageId: "i2" });
+  await tick();
+  expect(codex.threadOpts[1]?.developerInstructions).toContain(IMAGE_POLICY);
+  expect(IMAGE_POLICY).toContain("![说明](路径)");
 });
 
 it("records every execution thread's tabs against its task and marks them finished before the browser hold ends", async () => {

@@ -13,6 +13,7 @@ import { withTabPolicy, type BrowserTask, type TabServerLike } from "../browser/
 import { DECISION_POLICY } from "../decision.js";
 import { KB_POLICY } from "../kb.js";
 import { SCHEDULE_POLICY } from "../scheduleTool.js";
+import { IMAGE_POLICY } from "../imageTool.js";
 import { DEFAULT_CONVERSATION_TITLE, TITLE_UPDATED_EVENT } from "./conversationTitle.js";
 import {
   effectiveAgentSettings,
@@ -991,7 +992,7 @@ export class AgentManager {
     const inputText = switchesHarness ? this.#withPriorContext(conversation.id, turn.id, turn.input_text) : turn.input_text;
     const soul = readSoul(this.#cfg).content;
     const withTabs = this.#tabs ? withTabPolicy(soul) : soul;
-    const policies = [this.#cfg.decision ? DECISION_POLICY : "", this.#cfg.schedule ? SCHEDULE_POLICY : "", this.#cfg.kb ? KB_POLICY : ""].filter(Boolean);
+    const policies = [this.#cfg.decision ? DECISION_POLICY : "", this.#cfg.schedule ? SCHEDULE_POLICY : "", this.#cfg.image ? IMAGE_POLICY : "", this.#cfg.kb ? KB_POLICY : ""].filter(Boolean);
     const developerInstructions = policies.length ? [withTabs.trimEnd(), ...policies].join("\n\n").trim() : withTabs;
     // Every execution thread gets tab tools under its conversation's identity,
     // which stays the same across its turns, resumes and forks.
