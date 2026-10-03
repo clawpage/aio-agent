@@ -642,6 +642,8 @@ function reclaimMemory(reason, { need = 0, exceptKey = null } = {}) {
     if (connecting) noteStrays(await strayPages().catch(() => []));
     const goal = Math.min(m.max * MEM_LOW, m.max - need);
     if (reason === 'poll' ? m.used < m.max * MEM_HIGH : m.used <= goal) return [];
+    // Right after a restart nothing is attached yet: connecting re-claims the recorded tabs, so they can be weighed.
+    if (!connecting) await browserContext().catch(() => null);
     const deep = reason !== 'poll' || m.used >= m.max * MEM_CRITICAL;
     const now = Date.now();
     const byAge = (a, b) => a.lastUsed - b.lastUsed;

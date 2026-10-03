@@ -548,6 +548,13 @@ it.skipIf(!hasChromium)("frees memory near the limit, least valuable pages first
     // The server reports its memory for the control plane.
     expect(await (await fetch(`${base}/healthz`)).json()).toMatchObject({ memory: { usedMb: 906, maxMb: 954, oomKills: 0 } });
     expect((await records("MR")).map((t) => t.id)).toContain(running);
+
+    // After a restart nothing is attached yet: pressure alone attaches, re-claims the record and frees.
+    await post("/finish", { key: "MN" });
+    server.close();
+    await startServer();
+    const { reclaimMemory: restarted } = require(SCRIPT) as { reclaimMemory: (reason: string) => Promise<string[]> };
+    expect((await restarted("oom")).join(" ")).toContain("Needed");
   } finally {
     setMemory(0.1);
     await control(held, "release");
