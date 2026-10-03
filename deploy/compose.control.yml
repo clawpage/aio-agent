@@ -35,10 +35,7 @@ services:
       - 127.0.0.1:${AIO_GATEWAY_PORT:-4902}:${AIO_GATEWAY_PORT:-4902}
     extra_hosts:
       - host.docker.internal:host-gateway
-    depends_on:
-      sandbox:
-        condition: service_healthy
-        required: false
+    # Nodes can be remote; the control layer checks their protocol and readiness itself.
     secrets: [sandbox-node, claude-code, jev, kb-mcp, opencode-go]
     networks: [aio]
 networks:

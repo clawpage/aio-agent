@@ -4,21 +4,23 @@
 
 ## 1. 服务组成
 
-当前部署（2026-10-02 起）以 Docker Compose 运行三层（`var/runtime.env` 里 `PA_DEPLOY=compose`，
-设置在 `var/deploy/aio.env` 与 `var/deploy/control.env`）：
+当前部署（2026-10-02）在当前 Mac 以 Docker Compose 运行界面与控制层，沙箱层及全部用户沙箱
+在 Intel Mac `old-mb` 上运行。`var/runtime.env` 里 `PA_DEPLOY=compose`，当前机设置在
+`var/deploy/aio.env` 与 `var/deploy/control.env`；节点配置与迁移回退见 [Intel 远程沙箱部署](REMOTE-SANDBOX-MAC.md)。
 
 | 组件 | 说明 | 入口 |
 | --- | --- | --- |
 | workspace launcher | 统一服务管理（launchd 下的守护会在几秒内拉起被停掉的服务） | `/Users/mengxiao/workspace/tools/start.sh start\|restart\|stop\|status personal-agent` |
 | 项目守护 `bin/serve` | 运行 `deploy/aio.mjs run`（校验镜像 → `compose up -d --wait` → 跟随日志，SIGTERM 时 `compose stop`）+ 专用 tunnel | `projects/personal-agent/bin/serve` |
 | 界面层 `aio-ui-1` | 控制台静态文件 + `/api` 原样转给控制层 | `127.0.0.1:4891`（主站入口） |
-| 控制层 `aio-control-1` | API、SSE、伴随站代理、成员网关；数据在卷 `aio-control-data`；无 Docker 访问、无 Codex 登录（`PA_HOST_CODEX=off`） | `127.0.0.1:4892`（伴随站入口）、网关 `127.0.0.1:4902` |
-| 沙箱层 `aio-sandbox-1` | sandboxd，唯一挂载 `docker.sock` 的容器 | compose 网络内 `sandbox:4894` |
+| 控制层 `aio-control-1` | API、SSE、伴随站代理、成员网关；数据在当前机卷 `aio-control-data`；无 Docker 访问；控制面 Codex 登录开启，支持分配 GPT 的成员 | `127.0.0.1:4892`（伴随站入口）、网关 `127.0.0.1:4902` |
+| 沙箱层 `ai.aio.sandboxd` | old-mb 上的 Node/launchd 服务，持有该机 Docker 访问 | 本机 `127.0.0.1:4894`，经 Tailscale Serve 提供 `100.80.219.88:4894` |
 | 专用 tunnel | 主站 → 4891，伴随站与旧域名 → 4892 | `var/cloudflared/config.yml` |
-| 沙箱容器 | AIO 1.11.0，重启策略 `unless-stopped`，不是 compose 服务（重启服务不影响它们） | `personal-agent-sandbox`（loopback 18081）、`aio-user-<散列>` |
+| 沙箱容器 | old-mb 上的 AIO 1.11.0 amd64，现有四个用户各 4 GiB 上限，重启策略 `unless-stopped`，不是 compose 服务 | `personal-agent-sandbox`（节点 loopback 18081）、`aio-user-<散列>` |
 
 PID 在 `.pids/personal-agent.pid`（即 `bin/serve`）。日志：`.logs/personal-agent.log`（守护）、
 `var/logs/personal-agent.log`（三层容器的合并日志流）、`docker logs aio-control-1` 等。
+下文的 `docker exec personal-agent-sandbox ...` 等用户容器命令须在 old-mb 执行；控制面命令仍在当前机执行。
 
 `PA_DEPLOY=host`（默认）是不用镜像的另一种运行方式：`bin/serve` 起三个宿主进程（sandboxd :4894、控制层 :4892、
 界面层 :4891），数据在 `var/`，节点令牌 `var/sandbox-node.env` 自动生成。
