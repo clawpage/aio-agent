@@ -1210,7 +1210,7 @@ describe("document endpoints", () => {
   });
   it("authenticates video streams, validates paths, and preserves range/HEAD responses",async()=>{
     const {cookie}=await login(h);
-    const video=vi.spyOn(h.ctx.documents,'video').mockImplementation(async(_path,range,head)=>new Response(head?null:'part',{
+    const video=vi.spyOn(h.ctx.documents,'media').mockImplementation(async(_path,range,head)=>new Response(head?null:'part',{
       status:206,headers:{'content-length':'4','content-range':'bytes 2-5/100'}
     }));
     try {
@@ -1224,6 +1224,12 @@ describe("document endpoints", () => {
       const head=await h.request(url,{method:'HEAD',headers:{cookie}});expect(head.status).toBe(206);expect(await head.text()).toBe('');expect(video.mock.calls.at(-1)![2]).toBe(true);
       video.mockResolvedValue(new Response(null,{status:416,headers:{'content-range':'bytes */100'}}));
       const bad=await h.request(url,{headers:{cookie,range:'bytes=999-'}});expect(bad.status).toBe(416);expect(bad.headers.get('content-range')).toBe('bytes */100');
+      // Audio goes through the same route, with its own type; the old route name still answers.
+      const mp3=await h.request('/api/documents/media?path=/home/gem/workspace/cry.mp3',{headers:{cookie,range:'bytes=0-'}});
+      expect(mp3.headers.get('content-type')).toBe('audio/mpeg');expect(mp3.headers.get('accept-ranges')).toBe('bytes');
+      expect((await h.request('/api/documents/media?path=/home/gem/workspace/clip.mov',{headers:{cookie}})).headers.get('content-type')).toBe('video/quicktime');
+      expect((await h.request('/api/documents/media?path=/home/gem/workspace/song.flac',{headers:{cookie}})).headers.get('content-type')).toBe('audio/flac');
+      expect((await h.request('/api/documents/media?path=/home/gem/workspace/song.flac')).status).toBe(401);
     } finally {video.mockRestore();}
   });
   it("serves HTML only with origin isolation, no network and size/path guards", async () => {

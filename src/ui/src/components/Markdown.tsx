@@ -42,7 +42,7 @@ marked.use({
       return `<a href="${escapeAttr(href)}"${titleAttr}>${text}</a>`;
     },
     /**
-     * Images and MP4s in the workspace show where the message put them. They are
+     * Images, videos and audio in the workspace show where the message put them. They are
      * emitted without a source (the sanitizer only keeps `https?` URIs); after
      * sanitising, the component re-checks each path and loads it through the
      * authenticated document endpoints. Other workspace files render nothing here
@@ -55,6 +55,7 @@ marked.use({
         const kind = workspaceFileKind(filePath);
         if (kind === "image") return `<img class="inline-media" data-sandbox-image="${escapeAttr(filePath)}" alt="${escapeAttr(text)}"${titleAttr}>`;
         if (kind === "video") return `<video class="inline-media" data-sandbox-video="${escapeAttr(filePath)}" controls playsinline preload="metadata"${titleAttr}></video>`;
+        if (kind === "audio") return `<audio class="inline-audio" data-sandbox-audio="${escapeAttr(filePath)}" controls preload="metadata"${titleAttr || ` title="${escapeAttr(text)}"`}></audio>`;
         return "";
       }
       // A web picture never loads from its host (the CSP admits only this origin):
@@ -133,7 +134,7 @@ function MarkdownBlock({
       // applied to every non-URI-safe attribute, it must be marked URI-safe or
       // DOMPurify would strip `tabindex="0"` and break keyboard focus.
       ADD_URI_SAFE_ATTR: ["tabindex"],
-      ADD_ATTR: ["target", "rel", "data-sandbox-file", "data-sandbox-image", "data-sandbox-video", "data-web-image", "role", "tabindex", "controls", "playsinline", "preload", "loading"],
+      ADD_ATTR: ["target", "rel", "data-sandbox-file", "data-sandbox-image", "data-sandbox-video", "data-sandbox-audio", "data-web-image", "role", "tabindex", "controls", "playsinline", "preload", "loading"],
       ...(document ? {
         FORBID_TAGS: ["form", "input", "button", "textarea", "select", "option", "iframe", "object", "embed", "svg", "math", "style"],
         FORBID_ATTR: ["style", "id", "name"],
@@ -156,9 +157,10 @@ function MarkdownBlock({
       img.replaceWith(note);
     };
     const load = (el: Element) => {
-      if (el instanceof HTMLVideoElement) {
-        const path = el.getAttribute("data-sandbox-video") ?? "";
-        if (isWorkspaceFilePath(path) && workspaceFileKind(path) === "video") el.src = api.documentVideoUrl(path);
+      if (el instanceof HTMLMediaElement) {
+        const attr = el instanceof HTMLVideoElement ? "data-sandbox-video" : "data-sandbox-audio";
+        const path = el.getAttribute(attr) ?? "";
+        if (isWorkspaceFilePath(path) && workspaceFileKind(path) === (el instanceof HTMLVideoElement ? "video" : "audio")) el.src = api.documentMediaUrl(path);
         return;
       }
       const img = el as HTMLImageElement;
@@ -180,7 +182,7 @@ function MarkdownBlock({
         }
       })();
     };
-    const media = [...container.querySelectorAll("img[data-sandbox-image], img[data-web-image], video[data-sandbox-video]")];
+    const media = [...container.querySelectorAll("img[data-sandbox-image], img[data-web-image], video[data-sandbox-video], audio[data-sandbox-audio]")];
     let observer: IntersectionObserver | null = null;
     if (typeof IntersectionObserver === "function") {
       observer = new IntersectionObserver((entries) => {

@@ -32,10 +32,11 @@ export const IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "webp", "gif", "a
  * view; HTML/code remain escaped source, never active documents. SVG is an image,
  * drawn only by an <img>, where its scripts never run.
  */
-export type WorkspaceFileKind = "image" | "video" | "pdf" | "word" | "excel" | "ppt" | "text" | "unsupported";
+export type WorkspaceFileKind = "image" | "video" | "audio" | "pdf" | "word" | "excel" | "ppt" | "text" | "unsupported";
 
 const KIND_BY_EXTENSION: Record<string, WorkspaceFileKind> = {
-  mp4: "video",
+  mp4: "video", m4v: "video", mov: "video", webm: "video",
+  mp3: "audio", m4a: "audio", aac: "audio", wav: "audio", ogg: "audio", oga: "audio", opus: "audio", flac: "audio",
   png: "image", jpg: "image", jpeg: "image", webp: "image", gif: "image", avif: "image", bmp: "image", svg: "image",
   pdf: "pdf",
   doc: "word", docx: "word", odt: "word", rtf: "word",
@@ -108,7 +109,9 @@ export function workspaceFileKind(path: string): WorkspaceFileKind {
 export function kindLabel(kind: WorkspaceFileKind): string {
   switch (kind) {
     case "video":
-      return "MP4 视频";
+      return "视频";
+    case "audio":
+      return "音频";
     case "image":
       return "图片";
     case "pdf":
@@ -130,7 +133,9 @@ export function kindLabel(kind: WorkspaceFileKind): string {
 export function kindBadge(kind: WorkspaceFileKind): string {
   switch (kind) {
     case "video":
-      return "MP4";
+      return "VIDEO";
+    case "audio":
+      return "AUDIO";
     case "image":
       return "IMG";
     case "pdf":
@@ -150,7 +155,7 @@ export function kindBadge(kind: WorkspaceFileKind): string {
 
 /** Binary kinds with an inline preview (native media or raster pages). */
 export function isPreviewableKind(kind: WorkspaceFileKind): boolean {
-  return kind === "video" || kind === "image" || kind === "pdf" || kind === "word" || kind === "excel" || kind === "ppt";
+  return kind === "video" || kind === "audio" || kind === "image" || kind === "pdf" || kind === "word" || kind === "excel" || kind === "ppt";
 }
 
 /** File name from a workspace path, for display. */

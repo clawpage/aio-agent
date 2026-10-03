@@ -445,8 +445,8 @@ export function Chat({
  * itself is pure, so a delta that adds no new reference produces the same array.
  */
 export function MessageFileCards({ text, onOpen }: { text: string; onOpen: (path: string) => void }) {
-  // Embedded images and videos already show inside the message; everything else gets a card.
-  const refs = useMemo(() => extractFileRefs(text).filter((ref) => !(ref.image && (ref.kind === "image" || ref.kind === "video"))), [text]);
+  // Embedded images, videos and audio already show inside the message; everything else gets a card.
+  const refs = useMemo(() => extractFileRefs(text).filter((ref) => !(ref.image && (ref.kind === "image" || ref.kind === "video" || ref.kind === "audio"))), [text]);
   const shares = useMemo(() => extractShareLinks(text), [text]);
   if (refs.length === 0 && shares.length === 0) return null;
   return (

@@ -7,6 +7,7 @@ import type { SandboxContainer } from "../sandbox/container.js";
 import { looksLikeSvg } from "../../common/svg.js";
 import {
   documentKind,
+  mediaSignatureMatches,
   extensionOf,
   isInsideWorkspace,
   isRenderableKind,
@@ -810,10 +811,12 @@ print("venv" if venv_python else "novenv")
     return buffer;
   }
 
-  /** Stream MP4 from the sandbox, preserving range requests for seeking/Safari. */
-  async video(validatedPath: string, range: string | undefined, head: boolean, signal: AbortSignal): Promise<Response> {
+  /** Stream audio or video from the sandbox, preserving range requests for seeking/Safari. */
+  async media(validatedPath: string, range: string | undefined, head: boolean, signal: AbortSignal): Promise<Response> {
     if (!this.enabled) throw new DocumentError("disabled", "文档工具已由配置关闭", 409);
-    if (documentKind(validatedPath) !== "video") throw new DocumentError("unsupported", "仅支持 MP4 视频预览", 415);
+    const kind = documentKind(validatedPath);
+    if (kind !== "video" && kind !== "audio") throw new DocumentError("unsupported", "仅支持音频和视频播放", 415);
+    const noun = kind === "video" ? "视频" : "音频";
     const stat = await this.stat(validatedPath);
     if (!stat.exists) throw new DocumentError("not_found", "文件不存在或已被移动", 404);
     if (!stat.isFile) throw new DocumentError("not_a_file", "该路径不是普通文件", 400);
@@ -828,7 +831,7 @@ print("venv" if venv_python else "novenv")
     // Never buffer a full file when an upstream stops honoring Range.
     if (probe.status !== 206 || Number(probe.headers.get("content-length")) > 32) {
       await probe.body?.cancel();
-      throw new DocumentError("sandbox_unreachable", "无法分段读取视频，请重试或下载查看", 502);
+      throw new DocumentError("sandbox_unreachable", `无法分段读取${noun}，请重试或下载查看`, 502);
     }
     const reader = probe.body?.getReader();
     const prefix = Buffer.alloc(32);
@@ -841,15 +844,15 @@ print("venv" if venv_python else "novenv")
         prefix.set(value.subarray(0, length), count); count += length;
       }
     } finally { await reader?.cancel(); }
-    if (count < 12 || prefix.toString("ascii", 4, 8) !== "ftyp") {
-      throw new DocumentError("unsupported", "文件不是有效的 MP4 视频", 415);
+    if (!mediaSignatureMatches(validatedPath, prefix.subarray(0, count))) {
+      throw new DocumentError("unsupported", `文件内容不是有效的${noun}（和扩展名不符）`, 415);
     }
     // AIO's download route does not implement HEAD. Fetch only its headers,
     // then cancel the body for HEAD rather than exposing that upstream 405.
     const upstream = await this.#container.fetch(url, { headers: range ? { Range: range } : {}, signal });
     if (![200, 206, 416].includes(upstream.status)) {
       await upstream.body?.cancel();
-      throw new DocumentError("sandbox_unreachable", "无法读取视频，请重试或下载查看", 502);
+      throw new DocumentError("sandbox_unreachable", `无法读取${noun}，请重试或下载查看`, 502);
     }
     if (upstream.status === 416) {
       await upstream.body?.cancel();

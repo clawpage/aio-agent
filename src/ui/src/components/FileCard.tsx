@@ -31,6 +31,7 @@ export interface FileCardProps {
 export const FileCard = memo(function FileCard({ path, name, title, kind, onOpen }: FileCardProps) {
   const [thumbUrl, setThumbUrl] = useState<string | null>(null);
   const [thumbFailed, setThumbFailed] = useState(false);
+  const [audioFailed, setAudioFailed] = useState(false);
   const image = kind === "image";
   const html = isHtmlPath(path);
   const markdown = isMarkdownPath(path);
@@ -118,7 +119,7 @@ export const FileCard = memo(function FileCard({ path, name, title, kind, onOpen
           <span className="file-card-name">{title || name}</span>
           {title && <span className="file-card-filename muted tiny">{name}</span>}
           <span className="muted tiny">
-            {html ? "HTML 页面" : markdown ? "Markdown 文档" : kindLabel(kind)}{kind !== "unsupported" ? " · 点击预览" : " · 可下载"}
+            {html ? "HTML 页面" : markdown ? "Markdown 文档" : kindLabel(kind)}{kind === "video" ? " · 点击播放" : kind === "audio" ? " · 可直接播放" : kind !== "unsupported" ? " · 点击预览" : " · 可下载"}
             {image && thumbFailed ? "（缩略图不可用，点开查看）" : ""}
           </span>
         </span>
@@ -126,6 +127,12 @@ export const FileCard = memo(function FileCard({ path, name, title, kind, onOpen
       <a className="file-card-download" href={api.downloadUrl(path)} download={name} data-testid="file-card-download">
         下载
       </a>
+      {/* Nothing loads until play is pressed (preload none), so a long history stays light. */}
+      {kind === "audio" && (
+        <audio className="file-card-audio" data-testid="file-card-audio" src={api.documentMediaUrl(path)} controls preload="none" aria-label={`播放 ${title || name}`}
+          onError={(e) => { if ((e.currentTarget as HTMLAudioElement).error) setAudioFailed(true); }} />
+      )}
+      {kind === "audio" && audioFailed && <p className="file-card-note muted tiny" role="status">这个音频在当前浏览器放不了，可以下载后播放。</p>}
     </div>
   );
 });

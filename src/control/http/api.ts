@@ -32,7 +32,7 @@ import { PERSON_KEY } from "../browser/tabs.js";
 import { normalizeSite, vaultLogin, VaultError, type Vault } from "../vault.js";
 import { DocumentError, type DocumentService } from "../documents/service.js";
 import type { BrowserStatusView } from "../browser/service.js";
-import { documentKind, isRenderableKind, requireWorkspaceFilePath } from "../documents/paths.js";
+import { documentKind, isRenderableKind, mediaType, requireWorkspaceFilePath } from "../documents/paths.js";
 
 declare global {
   // eslint-disable-next-line @typescript-eslint/no-namespace
@@ -1453,17 +1453,18 @@ export function createApiRouter(context: AppContext): Router {
     }),
   );
 
-  router.get("/documents/video", requireKind("primary"), requireSession,
+  // Audio and video for the console's players (`/documents/video` is the older name, kept for open pages).
+  router.get(["/documents/media", "/documents/video"], requireKind("primary"), requireSession,
     documentHandler(async (req, res) => {
       const target = checkedDocumentPath(String(req.query.path ?? ""));
       const controller = new AbortController();
       const cancel = () => controller.abort();
       res.on("close", cancel);
       try {
-        const upstream = await context.documents.video(target, req.headers.range, req.method === "HEAD",
+        const upstream = await context.documents.media(target, req.headers.range, req.method === "HEAD",
           AbortSignal.any([controller.signal, AbortSignal.timeout(10 * 60_000)]));
         res.status(upstream.status);
-        res.setHeader("Content-Type", "video/mp4");
+        res.setHeader("Content-Type", mediaType(target) ?? "application/octet-stream");
         res.setHeader("X-Content-Type-Options", "nosniff");
         res.setHeader("Cache-Control", "no-store");
         res.setHeader("Content-Disposition", "inline");

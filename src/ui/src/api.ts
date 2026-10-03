@@ -244,7 +244,8 @@ export const api = {
   documentImageUrl: (path: string) => apiUrl(`/api/documents/image?path=${encodeURIComponent(path)}`),
   /** A web picture in a message, fetched by the account's own sandbox (https only). */
   webImageUrl: (url: string) => apiUrl(`/api/documents/web-image?url=${encodeURIComponent(url)}`),
-  documentVideoUrl: (path: string) => apiUrl(`/api/documents/video?path=${encodeURIComponent(path)}`),
+  /** Audio or video, streamed with byte ranges for the native players. */
+  documentMediaUrl: (path: string) => apiUrl(`/api/documents/media?path=${encodeURIComponent(path)}`),
   createTerminalSession: () => request<{id:string}>("/api/sandbox/shell-sessions", {method:"POST",body:{}}),
   closeTerminalSession: (id:string) => request<{ok:boolean}>(`/api/sandbox/shell-sessions/${encodeURIComponent(id)}`, {method:"DELETE"}),
   terminalSessions: (signal?: AbortSignal) => request<{sessions:Array<{id:string;status:string;workingDir:string;lastUsedAt:string|null}>}>("/api/sandbox/shell-sessions", {signal}),

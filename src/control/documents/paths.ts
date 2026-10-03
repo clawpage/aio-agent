@@ -13,7 +13,7 @@
  * rejected even though the lexical path looked valid.
  */
 
-export type DocumentKind = "image" | "video" | "pdf" | "word" | "excel" | "ppt" | "text" | "unsupported";
+export type DocumentKind = "image" | "video" | "audio" | "pdf" | "word" | "excel" | "ppt" | "text" | "unsupported";
 
 /**
  * Extension classification. Raster images are streamed as-is; pdf/word/excel/ppt
@@ -27,6 +27,17 @@ export type DocumentKind = "image" | "video" | "pdf" | "word" | "excel" | "ppt" 
  */
 const KIND_BY_EXTENSION: Record<string, DocumentKind> = {
   mp4: "video",
+  m4v: "video",
+  mov: "video",
+  webm: "video",
+  mp3: "audio",
+  m4a: "audio",
+  aac: "audio",
+  wav: "audio",
+  ogg: "audio",
+  oga: "audio",
+  opus: "audio",
+  flac: "audio",
   png: "image",
   jpg: "image",
   jpeg: "image",
@@ -86,6 +97,40 @@ export function extensionOf(path: string): string {
 
 export function documentKind(path: string): DocumentKind {
   return KIND_BY_EXTENSION[extensionOf(path)] ?? "unsupported";
+}
+
+/** The content type a media file is served with, by extension. */
+const MEDIA_TYPES: Record<string, string> = {
+  mp4: "video/mp4", m4v: "video/mp4", mov: "video/quicktime", webm: "video/webm",
+  mp3: "audio/mpeg", m4a: "audio/mp4", aac: "audio/aac", wav: "audio/wav",
+  ogg: "audio/ogg", oga: "audio/ogg", opus: "audio/ogg", flac: "audio/flac",
+};
+
+export function mediaType(path: string): string | null {
+  return MEDIA_TYPES[extensionOf(path)] ?? null;
+}
+
+/**
+ * Whether a file's first bytes are the format its extension claims, so a file
+ * renamed to .mp3 is never served to a media element as audio.
+ */
+export function mediaSignatureMatches(path: string, head: Uint8Array): boolean {
+  const ascii = (from: number, to: number) => String.fromCharCode(...head.subarray(from, to));
+  const box = head.length >= 8 ? ascii(4, 8) : "";
+  const id3 = head.length >= 3 && ascii(0, 3) === "ID3";
+  const sync = head.length >= 2 && head[0] === 0xff && (head[1]! & 0xe0) === 0xe0;
+  switch (extensionOf(path)) {
+    case "mp4": case "m4v": case "m4a": return box === "ftyp";
+    // QuickTime files from older cameras start with the movie or data atom instead.
+    case "mov": return ["ftyp", "moov", "mdat", "free", "wide", "skip"].includes(box);
+    case "webm": return head.length >= 4 && head[0] === 0x1a && head[1] === 0x45 && head[2] === 0xdf && head[3] === 0xa3;
+    case "mp3": return id3 || sync;
+    case "aac": return id3 || (head.length >= 2 && head[0] === 0xff && (head[1]! & 0xf6) === 0xf0) || (head.length >= 4 && ascii(0, 4) === "ADIF");
+    case "wav": return head.length >= 12 && ascii(0, 4) === "RIFF" && ascii(8, 12) === "WAVE";
+    case "ogg": case "oga": case "opus": return head.length >= 4 && ascii(0, 4) === "OggS";
+    case "flac": return id3 || (head.length >= 4 && ascii(0, 4) === "fLaC");
+    default: return false;
+  }
 }
 
 export function isRenderableKind(kind: DocumentKind): boolean {

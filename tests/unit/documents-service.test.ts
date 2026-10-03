@@ -155,10 +155,10 @@ describe("DocumentService path and revision handling", () => {
         : new Response(init?.method==='HEAD'?null:'data',{status:206,headers:{'content-range':'bytes 50-53/100'}});
     });
     try {
-      const result=await svc.video(`${ROOT}/alias.MP4`,'bytes=50-53',false,new AbortController().signal);
+      const result=await svc.media(`${ROOT}/alias.MP4`,'bytes=50-53',false,new AbortController().signal);
       expect(await result.text()).toBe('data');expect(result.status).toBe(206);
       expect(calls[1]!.url).toContain(encodeURIComponent(`${ROOT}/real.mp4`));expect(new Headers(calls[1]!.init?.headers).get('range')).toBe('bytes=50-53');
-      const head=await svc.video(`${ROOT}/alias.mp4`,undefined,true,new AbortController().signal);
+      const head=await svc.media(`${ROOT}/alias.mp4`,undefined,true,new AbortController().signal);
       expect(head.body).toBeNull();expect(calls.at(-1)!.init?.method).not.toBe('HEAD');
     } finally {fetcher.mockRestore();}
   });
@@ -166,20 +166,49 @@ describe("DocumentService path and revision handling", () => {
     const fetcher=vi.spyOn(globalThis,'fetch').mockResolvedValue(new Response('<html>not a movie</html>',{status:206}));
     try {
       const {svc}=service(baseHandler({realPath:`${ROOT}/fake.mp4`}));
-      await expect(svc.video(`${ROOT}/fake.mp4`,undefined,false,new AbortController().signal)).rejects.toMatchObject({status:415});
-      await expect(svc.video(`${ROOT}/x.html`,undefined,false,new AbortController().signal)).rejects.toMatchObject({status:415});
+      await expect(svc.media(`${ROOT}/fake.mp4`,undefined,false,new AbortController().signal)).rejects.toMatchObject({status:415});
+      await expect(svc.media(`${ROOT}/x.html`,undefined,false,new AbortController().signal)).rejects.toMatchObject({status:415});
       const escaped=service(baseHandler({realPath:'/etc/private.mp4'})).svc;
-      await expect(escaped.video(`${ROOT}/link.mp4`,undefined,false,new AbortController().signal)).rejects.toMatchObject({status:404});
+      await expect(escaped.media(`${ROOT}/link.mp4`,undefined,false,new AbortController().signal)).rejects.toMatchObject({status:404});
       expect(fetcher).toHaveBeenCalledTimes(1);
     } finally {fetcher.mockRestore();}
+  });
+  it("streams audio and other video formats whose first bytes match their extension, and refuses one that does not",async()=>{
+    const heads: Record<string, Buffer> = {
+      "song.mp3": Buffer.concat([Buffer.from("ID3"), Buffer.alloc(29)]),
+      "raw.mp3": Buffer.concat([Buffer.from([0xff, 0xfb, 0x90, 0x64]), Buffer.alloc(28)]),
+      "voice.m4a": Buffer.concat([Buffer.alloc(4), Buffer.from("ftypM4A "), Buffer.alloc(20)]),
+      "cry.wav": Buffer.concat([Buffer.from("RIFF"), Buffer.alloc(4), Buffer.from("WAVE"), Buffer.alloc(20)]),
+      "note.ogg": Buffer.concat([Buffer.from("OggS"), Buffer.alloc(28)]),
+      "note.opus": Buffer.concat([Buffer.from("OggS"), Buffer.alloc(28)]),
+      "track.flac": Buffer.concat([Buffer.from("fLaC"), Buffer.alloc(28)]),
+      "clip.webm": Buffer.concat([Buffer.from([0x1a, 0x45, 0xdf, 0xa3]), Buffer.alloc(28)]),
+      "old.mov": Buffer.concat([Buffer.alloc(4), Buffer.from("moov"), Buffer.alloc(24)]),
+      "radio.aac": Buffer.concat([Buffer.from([0xff, 0xf1, 0x50, 0x80]), Buffer.alloc(28)]),
+    };
+    for (const [name, header] of Object.entries(heads)) {
+      const {svc}=service(baseHandler({realPath:`${ROOT}/${name}`}));
+      const fetcher=vi.spyOn(globalThis,'fetch').mockImplementation(async(_url,init)=>new Headers(init?.headers).get('range')==='bytes=0-31'
+        ? new Response(new Uint8Array(header),{status:206,headers:{'content-length':'32'}})
+        : new Response('data',{status:200}));
+      try { expect((await svc.media(`${ROOT}/${name}`,undefined,false,new AbortController().signal)).status, name).toBe(200); }
+      finally {fetcher.mockRestore();}
+    }
+    // A video renamed to .mp3, or a page renamed to .wav, is not audio.
+    for (const [name, header] of [["fake.mp3", heads["voice.m4a"]!], ["fake.wav", Buffer.from("<html>".padEnd(32))]] as const) {
+      const {svc}=service(baseHandler({realPath:`${ROOT}/${name}`}));
+      const fetcher=vi.spyOn(globalThis,'fetch').mockResolvedValue(new Response(new Uint8Array(header),{status:206,headers:{'content-length':'32'}}));
+      try { await expect(svc.media(`${ROOT}/${name}`,undefined,false,new AbortController().signal)).rejects.toMatchObject({status:415}); }
+      finally {fetcher.mockRestore();}
+    }
   });
   it("rejects multipart ranges and cancels an upstream that ignores the probe range",async()=>{
     const {svc}=service(baseHandler({realPath:`${ROOT}/a.mp4`}));const cancel=vi.fn();
     const fetcher=vi.spyOn(globalThis,'fetch').mockResolvedValue(new Response(new ReadableStream({cancel}),{status:200}));
     try {
-      const res=await svc.video(`${ROOT}/a.mp4`,'bytes=0-2,5-7',false,new AbortController().signal);
+      const res=await svc.media(`${ROOT}/a.mp4`,'bytes=0-2,5-7',false,new AbortController().signal);
       expect(res.status).toBe(416);expect(res.headers.get('content-range')).toBe('bytes */100');expect(fetcher).not.toHaveBeenCalled();
-      await expect(svc.video(`${ROOT}/a.mp4`,undefined,false,new AbortController().signal)).rejects.toMatchObject({status:502});expect(cancel).toHaveBeenCalled();
+      await expect(svc.media(`${ROOT}/a.mp4`,undefined,false,new AbortController().signal)).rejects.toMatchObject({status:502});expect(cancel).toHaveBeenCalled();
     } finally {fetcher.mockRestore();}
   });
   it("refuses a path whose realpath escapes the workspace", async () => {

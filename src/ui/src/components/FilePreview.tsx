@@ -123,7 +123,7 @@ export function FilePreview({ path: initialPath, onClose, onOpenLink, onOpenInBr
           setPhase("unsupported");
           return;
         }
-        if (kind === "video") {
+        if (kind === "video" || kind === "audio") {
           // Native media requests carry the session cookie and use byte ranges;
           // never download a whole video into an object URL first.
           setPhase("ready");
@@ -189,7 +189,7 @@ export function FilePreview({ path: initialPath, onClose, onOpenLink, onOpenInBr
   }, [kind, path, html, attempt]);
 
   const retry = useCallback(() => setAttempt((n) => n + 1), []);
-  const raster = isPreviewableKind(kind) && kind !== "image" && kind !== "video";
+  const raster = isPreviewableKind(kind) && kind !== "image" && kind !== "video" && kind !== "audio";
   const refs = useMemo(() => markdown && text ? extractFileRefs(text) : [], [markdown, text]);
   const openLink = async (url: string) => {
     if (onOpenLink) { onOpenLink(url); onClose(); return; }
@@ -276,8 +276,16 @@ export function FilePreview({ path: initialPath, onClose, onOpenLink, onOpenInBr
 
           {phase === "ready" && kind === "video" && (
             <video key={`${path}#${attempt}`} className="file-preview-video" data-testid="file-preview-video"
-              aria-label={`播放 ${name}`} src={api.documentVideoUrl(path)} controls playsInline preload="metadata"
+              aria-label={`播放 ${name}`} src={api.documentMediaUrl(path)} controls playsInline preload="metadata"
               onError={() => { setError("视频无法播放：文件可能已移动、损坏，或编码不受浏览器支持。可以重试或下载原文件查看。"); setPhase("error"); }} />
+          )}
+
+          {phase === "ready" && kind === "audio" && (
+            <div className="file-preview-audio">
+              <span className="file-preview-audio-name">{name}</span>
+              <audio key={`${path}#${attempt}`} data-testid="file-preview-audio" aria-label={`播放 ${name}`} src={api.documentMediaUrl(path)} controls preload="metadata"
+                onError={() => { setError("音频无法播放：文件可能已移动、损坏，或格式不受这个浏览器支持。可以重试或下载原文件。"); setPhase("error"); }} />
+            </div>
           )}
 
           {phase === "ready" && kind === "text" && text !== null && (
