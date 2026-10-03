@@ -357,9 +357,9 @@ export function startRuntimeRecovery(ctx: AppContext, intervalMs = 30_000): Runt
 }
 
 /** Whole-container idle stop/start for a runtime configured for it (members by default). */
-export function startSandboxIdle(ctx: AppContext, intervalMs = 30_000): SandboxIdle | null {
+export function startSandboxIdle(ctx: AppContext, intervalMs = 30_000, parked = false): SandboxIdle | null {
   if (!ctx.cfg.sandbox.autostart || !ctx.cfg.sandbox.releaseWhenIdle) return null;
-  const idle = new SandboxIdle({ ctx, idleMs: ctx.cfg.sandbox.idleMs, start: startSandboxRuntime, intervalMs });
+  const idle = new SandboxIdle({ ctx, idleMs: ctx.cfg.sandbox.idleMs, start: startSandboxRuntime, intervalMs, parked });
   ctx.idle = idle;
   ctx.agent.setSandboxGate(() => idle.wake());
   return idle;

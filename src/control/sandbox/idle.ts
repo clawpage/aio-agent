@@ -18,6 +18,8 @@ export interface SandboxIdleOptions {
   /** Container CPU above this is work nobody told us about (a build, a kernel). */
   cpuBusyPercent?: number;
   intervalMs?: number;
+  /** The container was found stopped when the runtime was created: it stays stopped until the first use. */
+  parked?: boolean;
   now?: () => number;
 }
 
@@ -59,6 +61,7 @@ export class SandboxIdle {
     this.#cpuBusyPercent = opts.cpuBusyPercent ?? 5;
     this.#now = opts.now ?? Date.now;
     this.#lastActive = this.#now();
+    if (opts.parked) this.#state = "parked";
     if (opts.intervalMs) {
       this.#timer = setInterval(() => void this.tick(), opts.intervalMs);
       this.#timer.unref?.();

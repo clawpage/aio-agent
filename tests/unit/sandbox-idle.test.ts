@@ -6,10 +6,10 @@ import type { AppContext } from "../../src/control/context.js";
 
 const IDLE = 300_000;
 
-function setup() {
+function setup(parked = false) {
   const clock = { now: 1_000_000 };
   const world = {
-    running: true,
+    running: !parked,
     activeTurns: 0,
     queuedTurns: 0,
     approvals: 0,
@@ -55,6 +55,7 @@ function setup() {
   const idle = new SandboxIdle({
     ctx,
     idleMs: IDLE,
+    parked,
     now: () => clock.now,
     start: async () => {
       world.calls.push("start");
@@ -199,6 +200,25 @@ describe("whole-container idle stop", () => {
     await idle.tick();
     await Promise.all([idle.wake(), idle.wake(), idle.enter(true)]);
     expect(world.calls.filter((c) => c === "start")).toHaveLength(1);
+  });
+
+  it("leaves a container found stopped at start alone until its first use", async () => {
+    const { clock, world, ctx, idle } = setup(true);
+    expect(idle.state).toBe("parked");
+    // Neither the idle pass nor the recovery loop starts it, however long nobody comes.
+    clock.now += IDLE;
+    await idle.tick();
+    const recovery = startRuntimeRecovery(ctx, 60_000);
+    await recovery.tick();
+    recovery.stop();
+    expect(await idle.enter(false)).toBe(false);
+    expect(world.calls).toEqual([]);
+    expect(world.running).toBe(false);
+    // The console coming to the foreground and a task arriving start it once.
+    idle.foreground();
+    await Promise.all([idle.wake(), idle.wake()]);
+    expect(world.calls).toEqual(["start"]);
+    expect(idle.state).toBe("running");
   });
 
   it("keeps the recovery loop from restarting a container stopped for idleness", async () => {

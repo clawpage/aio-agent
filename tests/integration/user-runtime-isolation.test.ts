@@ -3,6 +3,7 @@ import {startHarness,login,rawUpgrade} from '../helpers/harness.js';
 import {createMember} from '../../src/control/auth/owner.js';
 import {userNamespace,workspacePrefix,workspaceConfig} from '../../src/control/auth/workspaceHost.js';
 import {memberConfig,UserRuntimes} from '../../src/control/tenants.js';
+import type {AppContext} from '../../src/control/context.js';
 
 it('binds workspace tickets, HTTP, WebSocket and API collaborators to the authenticated member by path, never owner',async()=>{
  const root=await startHarness(), member=await startHarness();
@@ -93,6 +94,53 @@ it('derives disjoint persistent data, volumes and networks, coalesces concurrent
   expect(await registry.resolve('owner_1')).toBe(h.ctx);
   await expect(registry.resolve('user_unknown')).rejects.toThrow('Unknown account');
   await registry.shutdown();
+ }finally{await h.shutdown();}
+});
+
+it('creates a runtime without starting a container found stopped; a running or missing one is brought up as before',async()=>{
+ const h=await startHarness();
+ try{
+  Object.assign(h.ctx.container,{protectMemberPorts:async()=>{}});
+  const make=(state:{exists:boolean;running:boolean},releaseWhenIdle=true)=>{
+   const calls:string[]=[];
+   const ctx={
+    cfg:{...h.ctx.cfg,browser:{...h.ctx.cfg.browser,enabled:false},sandbox:{...h.ctx.cfg.sandbox,autostart:true,releaseWhenIdle}},log:h.ctx.log,db:h.ctx.db,sandboxSetupError:null,sandboxSurfaces:null,
+    container:{node:{check:async()=>({ok:true})},inspect:async()=>state,isReady:async()=>state.running,
+     ensureRunning:async()=>{calls.push('ensureRunning');state.exists=state.running=true;return {image:'img',healthy:true};},alignBrowserIdentity:async()=>false,patchNoVnc:async()=>false,surfaces:async()=>({})},
+    agent:{init:async()=>{calls.push('agent.init');},setSandboxGate:()=>{calls.push('gate');},ensureSession:async()=>{calls.push('session');},status:async()=>({activeTurns:[],queuedTurns:0}),listPendingRequests:()=>[]},
+    tasks:{init:()=>{calls.push('tasks.init');}},codex:{ready:true},
+   } as unknown as AppContext;
+   return {ctx,calls};
+  };
+  let n=0;
+  const create=async(state:{exists:boolean;running:boolean},releaseWhenIdle=true)=>{
+   const u=await createMember(h.ctx.db,`lazy-user-${++n}`,'member-secret-123');
+   const made=make(state,releaseWhenIdle);
+   const registry=new UserRuntimes(h.ctx,async()=>({ctx:made.ctx,db:h.ctx.db,shutdown:async()=>{}}));
+   await registry.resolve(u.id);
+   return {...made,registry};
+  };
+  // Stopped: nothing starts it, and the gate is in place before queued work resumes.
+  const asleep=await create({exists:true,running:false});
+  expect(asleep.calls).toEqual(['gate','agent.init','tasks.init']);
+  expect(asleep.ctx.idle?.state).toBe('parked');
+  // The first use brings up the container and the session, once.
+  await Promise.all([asleep.ctx.idle!.wake(),asleep.ctx.idle!.wake()]);
+  expect(asleep.calls.slice(3)).toEqual(['ensureRunning','session']);
+  expect(asleep.ctx.idle?.state).toBe('running');
+  await asleep.registry.shutdown();
+  // Running (someone may be using it) and missing (a new account) are brought up at creation.
+  for(const state of [{exists:true,running:true},{exists:false,running:false}]){
+   const up=await create(state);
+   expect(up.calls).toEqual(['ensureRunning','agent.init','tasks.init','ensureRunning','session','gate']);
+   expect(up.ctx.idle?.state).toBe('running');
+   await up.registry.shutdown();
+  }
+  // With idle stopping switched off nothing would wake it later, so it starts now.
+  const resident=await create({exists:true,running:false},false);
+  expect(resident.calls).toEqual(['ensureRunning','agent.init','tasks.init','ensureRunning','session']);
+  expect(resident.ctx.idle).toBeUndefined();
+  await resident.registry.shutdown();
  }finally{await h.shutdown();}
 });
 

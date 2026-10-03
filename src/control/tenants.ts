@@ -77,20 +77,33 @@ export class UserRuntimes {
     runtime.ctx.tickets=this.root.tickets;
     runtime.ctx.limiter=this.root.limiter;
     runtime.ctx.push=this.root.push;
+    // A container found stopped stays stopped: its account's first use starts it, so a
+    // service start no longer wakes every account. Only where idle stopping is on;
+    // without it nothing would start the container later.
+    let asleep=false;
     if(runtime.ctx.cfg.sandbox.autostart){
-      try{await runtime.ctx.container.ensureRunning();}catch(err){await runtime.shutdown();throw err;}
+      try{
+        const state=runtime.ctx.cfg.sandbox.releaseWhenIdle?await runtime.ctx.container.inspect():null;
+        asleep=Boolean(state?.exists&&!state.running);
+        if(!asleep)await runtime.ctx.container.ensureRunning();
+      }catch(err){await runtime.shutdown();throw err;}
     }
     if(runtime.ctx.cfg.sandbox.autostart){
       const ports=(this.root.db.prepare("SELECT value FROM meta WHERE key LIKE 'sandbox_port:%'").all() as {value:string}[]).map(x=>Number(x.value));
       try{await this.root.container.protectMemberPorts(ports);}catch(err){await runtime.shutdown();throw err;}
     }
+    // The gate goes in before queued work resumes, or it would run against the stopped container.
+    let idle=asleep?startSandboxIdle(runtime.ctx,undefined,true):null;
     await runtime.ctx.agent.init();runtime.ctx.tasks.init();
     if(runtime.ctx.push)this.recoveries.push(startTaskNotifications(runtime.ctx,runtime.ctx.push));
     if(runtime.ctx.cfg.sandbox.autostart){
-      await startSandboxRuntime(runtime.ctx);
-      if(runtime.ctx.sandboxSetupError){await runtime.shutdown();throw new Error('用户独立环境启动失败');}
+      if(asleep)runtime.ctx.log.info('sandbox left stopped at start');
+      else{
+        await startSandboxRuntime(runtime.ctx);
+        if(runtime.ctx.sandboxSetupError){await runtime.shutdown();throw new Error('用户独立环境启动失败');}
+      }
       const recovery=startRuntimeRecovery(runtime.ctx);this.recoveries.push(recovery);
-      const idle=startSandboxIdle(runtime.ctx);if(idle)this.recoveries.push(idle);
+      idle??=startSandboxIdle(runtime.ctx);if(idle)this.recoveries.push(idle);
     }
     return runtime;
   }
