@@ -197,6 +197,8 @@ export function MainApp() {
             <button className="ghost" onClick={() => { history.replaceState(null, "", homePath(username)); setForeign(null); }}>回到我的页面</button>
           </div>
         </div>;
+    // An environment that is starting or waking says nothing: the wait is part of the first request. Only a start that failed is reported.
+    const startFailed = status && !status.agent.sessionReady && !status.sandbox.idle ? status.sandbox.setupError ?? null : null;
     return <div className="app main-inbox-app">
     <button className="mobile-menu-button ghost" ref={menuButton} aria-label="打开导航" aria-expanded={menuOpen} aria-controls="main-navigation" onClick={() => setMenuOpen(true)}><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
     {mobile && menuOpen && <div className="mobile-menu-backdrop" onClick={closeMenu} aria-hidden="true"/>}
@@ -207,13 +209,11 @@ export function MainApp() {
       <button className={`ghost block ${view === "schedules" ? "active" : ""}`} onClick={() => { detailRequest.current++;closeMenu(); setView("schedules"); setWorkspace(false); }}>定时任务</button>
       {role === 'owner' && <button className={`ghost block ${view === 'usage' ? 'active' : ''}`} onClick={() => { detailRequest.current++;closeMenu();setView('usage');setWorkspace(false); }}>用量看板</button>}
       <button className="ghost block" onClick={() => { closeMenu(); openWorkspace(); }}>工作区</button>
-      <div className="sidebar-foot"><span className="muted tiny">{status?.agent.sessionReady ? "智能体在线" : "正在连接智能体"}</span><PushToggle/><button className="ghost block" onClick={() => setTheme(t => t === "dark" ? "light" : "dark")}>{theme === "dark" ? "浅色模式" : "深色模式"}</button>{role === "owner" && <button className={`ghost block ${view === "settings" ? "active" : ""}`} onClick={settings}>配置</button>}<button className="ghost block" onClick={() => void logout()}>退出登录</button></div>
+      <div className="sidebar-foot"><span className="muted tiny">{!status || startFailed ? "正在连接智能体" : "智能体在线"}</span><PushToggle/><button className="ghost block" onClick={() => setTheme(t => t === "dark" ? "light" : "dark")}>{theme === "dark" ? "浅色模式" : "深色模式"}</button>{role === "owner" && <button className={`ghost block ${view === "settings" ? "active" : ""}`} onClick={settings}>配置</button>}<button className="ghost block" onClick={() => void logout()}>退出登录</button></div>
     </aside>
     <main className="main" inert={mobile && menuOpen}>
       {notice && <div className="banner" role="alert">{notice}<button onClick={() => setNotice(null)}>关闭</button></div>}
-      {status && !status.agent.sessionReady && (status.sandbox.idle
-        ? <div className="banner warn">环境空闲已休眠，正在唤醒（约半分钟）。消息仍会保留，唤醒后自动执行。</div>
-        : <div className="banner error">智能体暂未就绪：{status.agent.lastError ?? "正在连接"}。消息仍会保留。</div>)}
+      {startFailed && <div className="banner error">智能体暂未就绪：{startFailed}。消息仍会保留。</div>}
       <div className="view-slot" hidden={view !== "main"}><TaskChat debug={role === "owner" && debug} onFeed={setTaskFeed} onDetails={t => void details(t)} onOpenLink={u => void openLink(u)} onOpenFileInBrowser={p => void openFileInBrowser(p)} onExpired={expired} onRevealBrowser={revealBrowser}/></div>
       <div className="view-slot" hidden={view !== 'tasks'}><TaskList feed={taskFeed} onDetails={t=>void details(t,'tasks')} onExpired={expired}/></div>
       <div className="view-slot" hidden={view !== 'schedules'}><ScheduleList active={view === 'schedules'} onExpired={expired} onOpenTask={id => { const t = taskFeed.tasks.find(task => task.id === id); if (t) void details(t, 'tasks'); else setView('main'); }}/></div>

@@ -47,16 +47,28 @@ test('each account has its own address; another account\'s address says whose it
  await page.goto('/u/yzmy');await page.getByRole('button',{name:'退出并登录 yzmy'}).click();
  await expect(page.getByLabel('账号',{exact:true})).toHaveValue('yzmy');expect(new URL(page.url()).pathname).toBe('/u/yzmy');
 });
-test('a sleeping environment says it is waking, and the visible console sends its heartbeat',async({page},info)=>{
- await mockConsole(page,{conversations:[],status:{agent:{sessionReady:false,account:null,activeTurnId:null,activeConversationId:null,queuedTurns:0,lastError:'服务正在连接'},hostAuth:{ok:true},sandbox:{running:false,healthy:false,idle:'waking'},workspaceOrigin:'http://127.0.0.1'} as never});
+const notReady=(sandbox:object)=>({agent:{sessionReady:false,account:null,activeTurnId:null,activeConversationId:null,queuedTurns:0,lastError:'服务正在连接'},hostAuth:{ok:true},sandbox,workspaceOrigin:'http://127.0.0.1'} as never);
+for(const [state,sandbox] of [['waking from idle',{running:false,healthy:false,idle:'waking'}],['still starting',{running:true,healthy:false,idle:null,setupError:null}]] as const)
+test(`an environment ${state} says nothing, and the visible console sends its heartbeat`,async({page},info)=>{
+ await mockConsole(page,{conversations:[],status:notReady(sandbox)});
  await page.route('**/api/auth/session',r=>r.fulfill({json:{authenticated:true,username:'yzmy',role:'member'}}));
  await page.route('**/api/main*',r=>r.fulfill({json:{mode:'tasks',tasks:[],nextBefore:null}}));
  let beats=0;await page.route('**/api/presence',r=>{beats+=1;return r.fulfill({json:{ok:true}});});
  await page.goto('/');
- await expect(page.getByText('环境空闲已休眠，正在唤醒')).toBeVisible();
- await expect(page.locator('.banner.error')).toHaveCount(0);
+ // The status has arrived: the console looks as it does when everything is up.
+ await expect(page.locator('.sidebar-foot')).toContainText('智能体在线');
+ await expect(page.locator('.banner')).toHaveCount(0);
+ await expect(page.locator('body')).not.toContainText(/休眠|唤醒|未就绪|正在连接/);
  await expect.poll(()=>beats).toBeGreaterThan(0);
  if(info.project.name.startsWith('mobile'))await page.setViewportSize({width:360,height:844});
  expect(await page.evaluate(()=>document.documentElement.scrollWidth-innerWidth)).toBeLessThanOrEqual(1);
- await page.screenshot({path:info.outputPath('waking.png')});
+ await page.screenshot({path:info.outputPath('quiet.png')});
+});
+test('a start that failed is still reported',async({page})=>{
+ await mockConsole(page,{conversations:[],status:notReady({running:false,healthy:false,idle:null,setupError:'服务正在连接'})});
+ await page.route('**/api/auth/session',r=>r.fulfill({json:{authenticated:true,username:'yzmy',role:'member'}}));
+ await page.route('**/api/main*',r=>r.fulfill({json:{mode:'tasks',tasks:[],nextBefore:null}}));
+ await page.goto('/');
+ await expect(page.locator('.banner.error')).toHaveText('智能体暂未就绪：服务正在连接。消息仍会保留。');
+ await expect(page.locator('.sidebar-foot')).toContainText('正在连接智能体');
 });

@@ -375,7 +375,8 @@ export function createApiRouter(context: AppContext): Router {
       const idle = context.idle && context.idle.state !== "running" ? context.idle.state : null;
       if (isMember(db, ctxOf(_req).session!.ownerId)) {
         res.json({ agent: { sessionReady: agentStatus.sessionReady, lastError: agentStatus.sessionReady ? null : "服务正在连接" },
-          hostAuth: { ok: hostAuth.ok }, sandbox: { running: sandboxState.running, healthy: sandboxReady, surfaces: context.sandboxSurfaces, idle },
+          // A member learns that the start failed, not why.
+          hostAuth: { ok: hostAuth.ok }, sandbox: { running: sandboxState.running, healthy: sandboxReady, setupError: context.sandboxSetupError ? "服务正在连接" : null, surfaces: context.sandboxSurfaces, idle },
           workspaceOrigin: workspaceOrigin(ctxOf(_req), cfg) });
         return;
       }
