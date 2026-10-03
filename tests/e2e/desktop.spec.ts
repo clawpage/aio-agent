@@ -39,6 +39,40 @@ test("the workspace is a desktop: a menu bar, one app window, a Dock, and minimi
     expect(Math.abs((await frame.evaluate((el) => el.scrollLeft)) - (geometry.scroll - geometry.box) / 2)).toBeLessThan(2);
     await frame.evaluate((el) => { el.scrollLeft = 150; });
     expect(await frame.evaluate((el) => el.scrollLeft)).toBeGreaterThan(100);
+    // A finger on the black strip pans sideways only; a vertical swipe moves neither the view nor the page.
+    // (Touch gestures are synthesised through Chromium's CDP; WebKit checks the layout only.)
+    const strip = page.getByRole("toolbar", { name: "桌面操作" });
+    const cdp = info.project.name === "mobile-webkit" ? null : await page.context().newCDPSession(page);
+    const swipe = cdp && (async (xDistance: number, yDistance: number) => {
+      const at = (await strip.boundingBox())!;
+      await cdp.send("Input.synthesizeScrollGesture", { x: at.x + at.width / 2, y: at.y + at.height / 2, xDistance, yDistance, gestureSourceType: "touch", speed: 1200 });
+    });
+    const at = () => frame.evaluate((el) => ({ left: el.scrollLeft, top: el.scrollTop, page: document.scrollingElement!.scrollTop }));
+    if (swipe) {
+      const before = await at();
+      await swipe(0, -300);
+      expect(await at()).toEqual(before);
+      await swipe(-120, 0);
+      expect((await at()).left).toBeGreaterThan(before.left + 60);
+    }
+    // Too short for the zoomed picture (an open keyboard, a short panel), it shrinks to fit the height instead
+    // of growing a vertical scroll, and the whole picture stays above the toolbar.
+    await page.setViewportSize({ width: 390, height: 520 });
+    await expect.poll(() => frame.evaluate((el) => el.scrollHeight - el.clientHeight)).toBeLessThanOrEqual(0);
+    const fit = await frame.evaluate((el) => {
+      const pic = el.querySelector("iframe")!.getBoundingClientRect(), bar = el.querySelector(".desktop-bar")!.getBoundingClientRect();
+      return { top: pic.top - el.getBoundingClientRect().top, gap: bar.top - pic.bottom, width: pic.width, fitted: Math.min(el.clientWidth * 1.6, (el.clientHeight - 52) * 1.25) };
+    });
+    expect(fit.top).toBeGreaterThanOrEqual(0);
+    expect(fit.gap).toBeGreaterThanOrEqual(-1);
+    expect(Math.abs(fit.width - fit.fitted)).toBeLessThan(2);
+    await page.screenshot({ path: info.outputPath("desktop-browser-short.png") });
+    if (swipe) {
+      const short = await at();
+      await swipe(0, -300);
+      expect(await at()).toEqual(short);
+    }
+    await page.setViewportSize({ width: 390, height: 844 });
   } else {
     expect(Math.abs(geometry.frame - geometry.box)).toBeLessThan(2);
   }

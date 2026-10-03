@@ -95,8 +95,11 @@ export function DesktopFrame({ src, title, onLoad, interactive = true }: { src: 
     }
   };
 
-  const width = Math.round(size.width * PHONE_ZOOM);
+  // It only pans sideways: where the room above the toolbar is too short for the zoomed picture (a short
+  // panel, an open keyboard) the picture shrinks to that height, centred if it ends up narrower than the screen.
+  const width = Math.max(0, Math.floor(Math.min(size.width * PHONE_ZOOM, (size.height - BAR_HEIGHT) / DESKTOP_ASPECT)));
   const height = Math.round(width * DESKTOP_ASPECT);
+  const left = Math.max(0, Math.floor((size.width - width) / 2));
   // The picture centred in the room above the bottom strip; the toolbar at the very bottom of that strip.
   const room = Math.max(0, size.height - height - BAR_HEIGHT);
   const above = Math.floor(room / 2);
@@ -108,7 +111,7 @@ export function DesktopFrame({ src, title, onLoad, interactive = true }: { src: 
         title={title}
         allow="clipboard-read; clipboard-write; fullscreen"
         onLoad={() => { post({ type: "bar", on: zoomed }); onLoad?.(); }}
-        style={zoomed ? { width, height, marginTop: above } : undefined}
+        style={zoomed ? { width, height, marginTop: above, marginLeft: left } : undefined}
       />
       {zoomed && (
         <div className="desktop-bar" style={{ width: size.width, marginTop: room - above }} role="toolbar" aria-label="桌面操作">
