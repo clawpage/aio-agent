@@ -456,7 +456,7 @@ npm run build && npx playwright test --config playwright.local.config.ts
 | `PA_PRIMARY_HOST` / `PA_WORKSPACE_HOST` | 源码默认 `agent.clawpage.ai` / `agent-workspace.clawpage.ai`（当前部署） | **生产使用者必须覆盖**为自己的两个精确域名；`.env.example` 用 `agent.example.com` / `workspace.example.com` 占位 |
 | `PA_TRUST_CF_CONNECTING_IP` | `0` | 仅当请求确实经由自己可信的反向代理（会覆盖 `CF-Connecting-IP`）时才设为 `1`；否则限速可被伪造头绕过 |
 | `PA_SANDBOX_IMAGE` | `ghcr.io/agent-infra/sandbox:1.11.0` | 固定镜像，升级需人工确认 |
-| `PA_SANDBOX_CODEX_VERSION` | `0.156.1` | 沙箱内固定版 Codex CLI（在持久卷里，升级见运行手册） |
+| `PA_SANDBOX_CODEX_VERSION` | `0.160.0` | 沙箱内固定版 Codex CLI（在持久卷里，升级见运行手册） |
 | `PA_DEFAULT_MODEL` | `gpt-6-sol` | 未在统一配置页另选时的默认模型；配置页的模型/思考强度保存于 owner `meta`，对之后所有消息生效，提交时按 turn 冻结 |
 | `PA_TITLE_MODEL` | `gpt-6-luna` | Codex 执行器时主会话派单器的隔离临时线程（read-only、never、ephemeral）所用模型，派单固定 high；变量名沿用旧称 |
 | `PA_MAX_CONCURRENT_TURNS` | `3` | 跨会话同时执行的主 turn 上限（取值 clamp 到 1–3）；同一会话始终串行，排队 FIFO |
@@ -532,6 +532,6 @@ npm run build && npx playwright test --config playwright.local.config.ts
 - JupyterLab 首次加载会出现 `Shared module @jupyter-widgets/base doesn't exist in shared scope`
   的第三方 widget 前端告警；内核执行本身正常（`/v1/jupyter/execute` 实测返回 stdout）。
 - 沙箱镜像固定不自动升级；升级步骤见运行手册（需人工确认并复验浏览器与编辑器）。
-- 沙箱里的 Codex CLI 不是镜像自带的那份，而是持久卷内固定版本（默认 `0.156.1`），
+- 沙箱里的 Codex CLI 不是镜像自带的那份，而是持久卷内固定版本（默认 `0.160.0`），
   控制面接管容器时核实/补齐，失败会明确报错而不是回退旧版；升级见运行手册。
 - 只有本机 loopback 明文调试时才允许非 Secure cookie；公网一律 `Secure`。

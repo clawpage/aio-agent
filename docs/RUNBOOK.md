@@ -70,7 +70,7 @@ PA_COMPANION_ORIGIN=https://agent-workspace.clawpage.ai npm run smoke
 
 | 配置 | 默认值 | 说明 |
 | --- | --- | --- |
-| `PA_SANDBOX_CODEX_VERSION` | `0.156.1` | 固定版本；安装前缀与二进制路径都由它推导，不会与路径不一致 |
+| `PA_SANDBOX_CODEX_VERSION` | `0.160.0` | 固定版本；安装前缀与二进制路径都由它推导，不会与路径不一致 |
 | `PA_DEFAULT_MODEL` | `gpt-6-sol` | 新会话与旧会话后续轮次的默认模型；`/api/models` 也以它标记默认项 |
 | `PA_TITLE_MODEL` | `gpt-6-luna` | 主会话派单器（Codex 执行器时）的临时线程模型，派单固定 high / 90 秒；变量名沿用旧称 |
 

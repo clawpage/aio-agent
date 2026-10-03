@@ -18,7 +18,7 @@ ENV NODE_ENV=production
 # `deploy/aio.mjs codex-login`) and refreshes it; sandboxes only get short-lived tokens.
 # Same version as the sandboxes' Codex (PA_SANDBOX_CODEX_VERSION in src/control/config.ts).
 # It verifies TLS against the system store, which the slim image lacks (Node carries its own).
-ARG CODEX_VERSION=0.156.1
+ARG CODEX_VERSION=0.160.0
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/* \
   && npm install -g --no-audit --no-fund @openai/codex@${CODEX_VERSION} && npm cache clean --force
 COPY package.json package-lock.json ./

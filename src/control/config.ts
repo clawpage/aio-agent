@@ -313,7 +313,7 @@ export function loadConfig(): {
 
   // Pinned Codex CLI in the persistent CODEX_HOME volume. One version drives
   // both the install prefix and the binary path so they can never drift apart.
-  const sandboxCodexVersion = envStr("PA_SANDBOX_CODEX_VERSION", "0.156.1");
+  const sandboxCodexVersion = envStr("PA_SANDBOX_CODEX_VERSION", "0.160.0");
   const sandboxCodexPrefix = envStr("PA_SANDBOX_CODEX_PREFIX", `/home/gem/.codex/tools/codex-${sandboxCodexVersion}`);
   const sandboxCodexBin = envStr(
     "PA_SANDBOX_CODEX_BIN",
