@@ -14,7 +14,8 @@ async function setup(page: Page) {
   await mockConsole(page, { conversations: [] });
   await page.route("**/api/main*", (r) => r.fulfill({ json: { mode: "tasks", tasks: [run], nextBefore: null } }));
   let items = [schedule(), schedule({ id: "sched-2", title: "价格监控", rule: "每 2 小时", status: "paused", nextRunText: null, lastTask: null, runCount: 0 }),
-    schedule({ id: "sched-feed", title: "每日推送", instruction: "根据你过往的任务，整理今天你可能感兴趣的内容和需要的提醒", builtin: "daily_feed", lastTask: null, runCount: 0 })];
+    schedule({ id: "sched-feed", title: "每日推送", instruction: "每天看一下 Gmail 有没有要交的账单，少说新闻", builtin: "daily_feed", lastTask: null, runCount: 0,
+      feed: { customized: true, memory: [{ id: "fm1", kind: "care", text: "Roy 的疫苗和体检预约", source: "user" }, { id: "fm2", kind: "avoid", text: "加密货币行情", source: "feed" }] } })];
   const actions: string[] = [];
   await page.route("**/api/schedules", (r) => r.fulfill({ json: { schedules: items } }));
   await page.route("**/api/schedules/*/*", (r) => {
@@ -53,6 +54,10 @@ test("the schedules page lists rules and pauses, resumes, runs and deletes them"
   const builtin = list.locator('[data-schedule-id="sched-feed"]');
   await expect(builtin).toContainText("内置");
   await expect(builtin).toContainText("前一天发过消息才会推送");
+  // The feed shows the person's own instruction and what it keeps in mind, learnt entries marked as such.
+  await expect(builtin.locator(".task-list-summary")).toHaveText("你的要求每天看一下 Gmail 有没有要交的账单，少说新闻");
+  const memory = builtin.getByRole("list", { name: "推送记住的内容" }).getByRole("listitem");
+  await expect(memory).toHaveText(["关心Roy 的疫苗和体检预约", "不再推加密货币行情 · 从你的反馈学到"]);
   await expect(builtin.getByRole("button", { name: "删除" })).toHaveCount(0);
   await expect(builtin.getByRole("button", { name: "暂停" })).toBeVisible();
   await page.screenshot({ path: info.outputPath("schedules.png") });

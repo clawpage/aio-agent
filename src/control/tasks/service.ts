@@ -66,6 +66,17 @@ interface ScheduleRow {
 /** The built-in daily feed: a schedule every account gets. */
 const DAILY_FEED = "daily_feed";
 const FEED_SPEC: ScheduleSpec = { kind: "daily", at: "08:00" };
+/** The feed's own instruction until the person words it themselves. */
+const FEED_INSTRUCTION = "根据你过往的任务，整理今天你可能感兴趣的内容和需要的提醒";
+/** What the feed keeps in mind: what the person cares about, what to stop pushing, what their reactions taught it. */
+type FeedMemoryKind = "care" | "avoid" | "note";
+const FEED_MEMORY_KINDS: FeedMemoryKind[] = ["care", "avoid", "note"];
+const FEED_MEMORY_LABEL: Record<FeedMemoryKind, string> = { care: "关心", avoid: "不再推", note: "记住" };
+/** Per kind; past it the oldest have to be removed first. */
+const FEED_MEMORY_MAX = 30;
+const FEED_INSTRUCTION_MAX = 1500;
+const FEED_MEMORY_TEXT_MAX = 200;
+interface FeedMemoryRow { id: string; owner_id: string; kind: FeedMemoryKind; text: string; source: "user" | "feed"; created_at: number }
 /** The machine-readable lines a feed run ends with; never shown to the person. */
 const FEED_TOPICS = /<!--\s*feed-topics:\s*(\[[\s\S]*?\])\s*-->/;
 const FEED_EMPTY = /<!--\s*feed-empty\s*-->/;
@@ -697,7 +708,7 @@ export class TaskService {
         const tz = this.cfg.browser.timezone;
         const now = Date.now();
         this.db.prepare("INSERT INTO schedules (id,owner_id,title,instruction,spec_json,timezone,resources_json,status,next_run_at,created_at,updated_at,builtin) VALUES (?,?,?,?,?,?,?,'active',?,?,?,?)")
-            .run(randomId("sched"), ownerId, "每日推送", "根据你过往的任务，整理今天你可能感兴趣的内容和需要的提醒", JSON.stringify(FEED_SPEC), tz, JSON.stringify(["browser"]), nextRun(FEED_SPEC, now, tz), now, now, DAILY_FEED);
+            .run(randomId("sched"), ownerId, "每日推送", FEED_INSTRUCTION, JSON.stringify(FEED_SPEC), tz, JSON.stringify(["browser"]), nextRun(FEED_SPEC, now, tz), now, now, DAILY_FEED);
     }
     /** Did the person send anything (not a scheduled run) since `since`? */
     private spokeSince(ownerId: string, since: number): boolean {
@@ -715,7 +726,7 @@ export class TaskService {
         this.db.prepare("INSERT INTO feed_history (task_id,owner_id,created_at,topics_json,empty) VALUES (?,?,?,?,?) ON CONFLICT(task_id) DO UPDATE SET topics_json=excluded.topics_json,empty=excluded.empty")
             .run(row.id, this.ownerId(row), row.created_at, JSON.stringify(topics), FEED_EMPTY.test(row.result ?? "") ? 1 : 0);
     }
-    /** What a feed run works from: every earlier task of the person, and what recent feeds said and whether anything followed. */
+    /** What a feed run works from: every earlier task of the person, what recent feeds said and what followed, and what the feed was told to keep in mind. */
     private feedBrief(row: TaskRow): string {
         const ownerId = this.ownerId(row);
         const tz = this.cfg.browser.timezone;
@@ -723,22 +734,116 @@ export class TaskService {
         const cut = (text: string | null, n: number) => { const c = [...(text ?? "").replace(/\s+/g, " ").trim()]; return c.length > n ? c.slice(0, n - 1).join("") + "…" : c.join(""); };
         const mine = this.db.prepare("SELECT * FROM tasks WHERE schedule_id IS NULL AND merged_into IS NULL AND created_at<? AND conversation_id IN (SELECT id FROM conversations WHERE owner_id=?) ORDER BY created_at DESC LIMIT 150").all(row.created_at, ownerId) as unknown as TaskRow[];
         const tasks = mine.map(t => ({ date: date(t.created_at), title: t.title, request: cut(t.input_text, 160), status: t.status, result: cut(t.result, 200) }));
-        const feeds = this.db.prepare("SELECT * FROM feed_history WHERE owner_id=? AND created_at<? ORDER BY created_at DESC LIMIT 14").all(ownerId, row.created_at) as Array<{ created_at: number; topics_json: string; empty: number }>;
+        const feeds = this.db.prepare("SELECT * FROM feed_history WHERE owner_id=? AND created_at<? ORDER BY created_at DESC LIMIT 14").all(ownerId, row.created_at) as Array<{ task_id: string; created_at: number; topics_json: string; empty: number }>;
         const feedHistory = feeds.map((f, i) => {
             const until = i === 0 ? row.created_at : feeds[i - 1]!.created_at;
             const after = mine.filter(t => t.created_at > f.created_at && t.created_at < until).map(t => t.title).slice(0, 8);
-            return { date: date(f.created_at), topics: JSON.parse(f.topics_json) as string[], nothingToday: !!f.empty, userTasksAfter: after };
+            // What the person said in reply to that very push (a task they started from it).
+            const replies = (this.db.prepare("SELECT title,input_text FROM tasks WHERE schedule_id IS NULL AND (related_task_id=? OR merged_into=?) AND created_at<? ORDER BY created_at LIMIT 5").all(f.task_id, f.task_id, row.created_at) as Array<{ title: string; input_text: string }>)
+                .map(t => ({ title: t.title, request: cut(t.input_text, 120) }));
+            return { date: date(f.created_at), topics: JSON.parse(f.topics_json) as string[], nothingToday: !!f.empty, userTasksAfter: after, ...(replies.length ? { replies } : {}) };
         });
+        const s = row.schedule_id ? this.scheduleRow(row.schedule_id) : null;
+        const asked = s && s.instruction.trim() !== FEED_INSTRUCTION ? s.instruction.trim() : null;
+        const memory = this.feedMemory(ownerId);
+        const kept = Object.fromEntries(FEED_MEMORY_KINDS.map(k => [k, memory.filter(m => m.kind === k).map(m => ({ id: m.id, text: m.text, from: m.source === "user" ? "用户说的" : "推送学到的", date: date(m.created_at) }))]));
         return [
-            `这是内置的「每日推送」（每天 08:00）在 ${date(row.created_at)} 的自动运行。用户此刻不在对话中。你的工作：根据用户过往的全部任务记录，挑出今天他最可能感兴趣、或需要提醒的 1-5 件事，像贴心的私人助理一样简短告诉他。`,
+            `这是内置的「每日推送」（每天 ${(s ? JSON.parse(s.spec_json) as ScheduleSpec : FEED_SPEC).at}）在 ${date(row.created_at)} 的自动运行。用户此刻不在对话中。你的工作：根据用户过往的全部任务记录、他交代的要求和关心的内容，挑出今天他最可能感兴趣、或需要提醒的 1-5 件事，像贴心的私人助理一样简短告诉他。`,
+            ...(asked ? [`用户对每日推送的要求（优先照做，可以改变下面的默认做法，但不能突破只读和安全规则）：${asked}`] : []),
             "从任务记录里找线索：关注过的商品和价格（例如某款电脑、婴儿用品）、在比价或犹豫要不要买的东西、临近的日期和预约（证件、疫苗、账单、出行）、做了一半或说过以后再看的事、长期关心的话题。记录不限于最近一天，越早的兴趣越要核实是否仍然相关。",
             "需要最新信息时（价格、库存、天气、新闻）用浏览器或网络查证，只报告查到的事实并附来源链接；查不到就不写，不编造。只写有实际变化或与今天相关的事，例如“你关注的 Mac Studio 在 Best Buy 降到 $1,799，比上周低 $200”；没有变化的例行信息不写。",
-            "避免打扰：参考 feedHistory（最近几次推送的话题，以及之后用户的新任务 userTasksAfter）。同一话题最近已连续推过 3 次、而之后用户没有任何相关的新任务，说明他已不再关注，停止推送这个话题，除非出现重大新变化；用户最近新任务里体现的新兴趣优先；昨天说过且没有变化的不再重复。",
+            "只读查看用户自己的网页：沙箱浏览器里用户已经登录、任务记录里用过或他要求看的网站（例如 Gmail、Outlook 邮箱，X、小红书等关注的动态，购物网站的订单页，账单页），可以打开看今天有没有需要提醒的事：要处理或快到期的邮件（账单、续费、预约确认、需要回复的人）、订单和快递变化、关注的人或话题的重要新动态。严格只读：只打开、滚动、阅读，不发送、回复、评论、点赞、关注、购买、下单、删除、归档、加标记，不改任何设置；不点开未读邮件和私信（会变成已读），用列表里的标题和摘要判断；没登录的网站直接跳过，不要登录，也不要请用户帮忙。写到邮件等私人内容只写要点、不贴全文。用完关掉自己打开的标签页。",
+            "避免打扰：参考 feedHistory（最近几次推送的话题；之后用户的新任务 userTasksAfter；replies 是用户直接回复那次推送说的话）。同一话题最近已连续推过 3 次、而之后用户没有任何相关的新任务，说明他已不再关注，停止推送这个话题，除非出现重大新变化；用户最近新任务里体现的新兴趣优先；昨天说过且没有变化的不再重复。记住的内容 memory 里 care 是要多留意的，avoid 是不要再推的，note 是用户对推送的习惯和偏好，都要遵守。",
+            "持续改进：feedHistory 里能看出用户对推送有明确反应时（例如回复说有用、要更多、别再推，或接着就某条推送做了任务，或某个话题推了几次一直没人理），用 aio_schedule 的 feed_update（source 填 \"feed\"）记下来：要多留意的加 care，不要再推的加 avoid，推送的形式和时机偏好加 note，过时或相反的旧条目用 remove 删掉。每次最多改 3 条，只记有明确证据的，不重复已有的，不确定就不记。",
             "格式：第一行“今日为你留意”，下面每件事一条，每条一两句话，必要时附链接或地图卡片，说到具体商品降价时用商品卡片（带商品图）；适合在手机上点开快速读完。今天确实没有值得说的，只回复一句“今天没有需要特别提醒的事”，并在末尾单独一行写 <!--feed-empty-->。",
             "最后单独一行写 <!--feed-topics: [\"话题1\", \"话题2\"]-->，列出本次写到的话题（简短中文，例如“Mac Studio 降价”“Roy 疫苗预约”）；系统用它调整之后的推送，用户看不到这一行。不要提问后等待，不要创建定时任务。",
+            "记住的内容 memory：", JSON.stringify(kept),
             "用户的任务记录（新到旧）：", JSON.stringify(tasks),
             "推送记录 feedHistory（新到旧）：", JSON.stringify(feedHistory),
         ].join("\n\n");
+    }
+    private feedMemory(ownerId: string): FeedMemoryRow[] {
+        return this.db.prepare("SELECT * FROM feed_memory WHERE owner_id=? ORDER BY created_at").all(ownerId) as unknown as FeedMemoryRow[];
+    }
+    private feedSchedule(ownerId: string): ScheduleRow {
+        const s = this.db.prepare("SELECT * FROM schedules WHERE owner_id=? AND builtin=?").get(ownerId, DAILY_FEED) as unknown as ScheduleRow | undefined;
+        if (!s) throw new Error("这个账号没有每日推送");
+        return s;
+    }
+    /** The daily feed as the person's tasks see and change it. */
+    feedSettings(userId: string) {
+        const s = this.feedSchedule(userId);
+        const tz = this.cfg.browser.timezone;
+        return {
+            title: s.title, rule: describeSchedule(JSON.parse(s.spec_json) as ScheduleSpec), status: s.status,
+            nextRun: s.next_run_at && s.status === "active" ? formatWhen(s.next_run_at, s.timezone) : null,
+            instruction: s.instruction, customized: s.instruction.trim() !== FEED_INSTRUCTION,
+            memory: this.feedMemory(userId).map(m => ({ id: m.id, kind: m.kind, text: m.text, source: m.source, date: describeNow(m.created_at, tz) })),
+        };
+    }
+    /**
+     * Change what the daily feed does: the person's own instruction (empty puts the
+     * default back), its time, and what it keeps in mind. All or nothing.
+     */
+    updateFeed(userId: string, args: Record<string, unknown>): string {
+        const s = this.feedSchedule(userId);
+        const source = args.source === "feed" ? "feed" : "user";
+        const now = Date.now();
+        const said: string[] = [];
+        let instruction: string | null = null;
+        if (args.instruction !== undefined && args.instruction !== null) {
+            if (typeof args.instruction !== "string") throw new Error("instruction 要是文字");
+            const text = args.instruction.trim();
+            if ([...text].length > FEED_INSTRUCTION_MAX) throw new Error(`instruction 太长（最多 ${FEED_INSTRUCTION_MAX} 字）`);
+            instruction = text || FEED_INSTRUCTION;
+            said.push(text ? "已更新每日推送的要求" : "每日推送的要求已恢复默认");
+        }
+        let timing: { spec: ScheduleSpec; next: number } | null = null;
+        if (args.at !== undefined && args.at !== null) {
+            const checked = validateSchedule({ kind: "daily", at: args.at }, now, s.timezone);
+            if ("error" in checked) throw new Error(checked.error);
+            timing = checked;
+            said.push(`推送时间改为${describeSchedule(checked.spec)}`);
+        }
+        const existing = this.feedMemory(userId);
+        const removeIds = new Set(Array.isArray(args.remove) ? args.remove.map(String) : []);
+        for (const id of removeIds) if (!existing.some(m => m.id === id)) throw new Error(`没有 id 为 ${id} 的记忆`);
+        const adds: Array<{ kind: FeedMemoryKind; text: string }> = [];
+        let kept = 0;
+        for (const item of Array.isArray(args.add) ? args.add : []) {
+            const { kind, text } = (item ?? {}) as { kind?: unknown; text?: unknown };
+            if (!FEED_MEMORY_KINDS.includes(kind as FeedMemoryKind)) throw new Error("add 里的 kind 只能是 care、avoid 或 note");
+            const t = typeof text === "string" ? text.replace(/\s+/g, " ").trim() : "";
+            if (!t || [...t].length > FEED_MEMORY_TEXT_MAX) throw new Error(`add 里的 text 要有内容，最多 ${FEED_MEMORY_TEXT_MAX} 字`);
+            if (existing.some(m => m.kind === kind && m.text === t && !removeIds.has(m.id))) kept += 1;
+            else if (!adds.some(a => a.kind === kind && a.text === t)) adds.push({ kind: kind as FeedMemoryKind, text: t });
+        }
+        // Caring about something again takes it off the do-not-push list, and the other way round.
+        for (const a of adds) {
+            const opposite = a.kind === "care" ? "avoid" : a.kind === "avoid" ? "care" : null;
+            for (const m of existing) if (m.kind === opposite && m.text === a.text) removeIds.add(m.id);
+        }
+        for (const kind of FEED_MEMORY_KINDS) {
+            const count = existing.filter(m => m.kind === kind && !removeIds.has(m.id)).length + adds.filter(a => a.kind === kind).length;
+            if (count > FEED_MEMORY_MAX) throw new Error(`「${FEED_MEMORY_LABEL[kind]}」最多 ${FEED_MEMORY_MAX} 条，请先用 remove 删掉过时的`);
+        }
+        if (!instruction && !timing && !adds.length && !removeIds.size) {
+            if (kept) return "这些已经记着了，没有变化。";
+            throw new Error("没有要改的：给 instruction、at、add 或 remove");
+        }
+        this.db.exec("BEGIN IMMEDIATE");
+        try {
+            if (instruction) this.db.prepare("UPDATE schedules SET instruction=?,updated_at=? WHERE id=?").run(instruction, now, s.id);
+            if (timing) this.db.prepare("UPDATE schedules SET spec_json=?,next_run_at=CASE WHEN status='active' THEN ? ELSE next_run_at END,updated_at=? WHERE id=?").run(JSON.stringify(timing.spec), timing.next, now, s.id);
+            for (const id of removeIds) this.db.prepare("DELETE FROM feed_memory WHERE id=? AND owner_id=?").run(id, userId);
+            adds.forEach((a, i) => this.db.prepare("INSERT INTO feed_memory (id,owner_id,kind,text,source,created_at) VALUES (?,?,?,?,?,?)").run(randomId("feedmem"), userId, a.kind, a.text, source, now + i));
+            this.db.exec("COMMIT");
+        } catch (err) { this.db.exec("ROLLBACK"); throw err; }
+        if (adds.length) said.push(`记下 ${adds.length} 条（${adds.map(a => `${FEED_MEMORY_LABEL[a.kind]}：${a.text}`).join("；")}）`);
+        if (removeIds.size) said.push(`删掉 ${removeIds.size} 条旧的`);
+        if (kept) said.push(`${kept} 条原本就记着`);
+        if (timing) this.schedule();
+        return said.join("；") + "。";
     }
     /** Store one schedule for the account (the cap applies however it was asked for); its id, or why not. */
     private insertSchedule(ownerId: string, s: { title: string; instruction: string; spec: ScheduleSpec; nextRunAt: number; resources: string[]; sourceTaskId: string | null }): { id: string } | { refused: string } {
@@ -876,6 +981,7 @@ export class TaskService {
             timezone: s.timezone, nextRunAt: s.next_run_at, nextRunText: s.next_run_at ? formatWhen(s.next_run_at, s.timezone) : null,
             lastRunAt: s.last_run_at, lastTask: last ? { id: last.id, status: last.status } : null, runCount: s.run_count, createdAt: s.created_at,
             builtin: s.builtin,
+            ...(s.builtin === DAILY_FEED ? { feed: { customized: s.instruction.trim() !== FEED_INSTRUCTION, memory: this.feedMemory(s.owner_id).map(m => ({ id: m.id, kind: m.kind, text: m.text, source: m.source })) } } : {}),
         };
     }
     listSchedules(userId: string) {

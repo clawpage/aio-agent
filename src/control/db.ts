@@ -206,6 +206,18 @@ CREATE TABLE IF NOT EXISTS feed_history (
   empty INTEGER NOT NULL DEFAULT 0
 );
 
+-- What the daily feed should keep in mind for the person: what they care about, what to stop
+-- pushing, and what their reactions taught it. Written by the person's own tasks and by feed runs.
+CREATE TABLE IF NOT EXISTS feed_memory (
+  id TEXT PRIMARY KEY,
+  owner_id TEXT NOT NULL,
+  kind TEXT NOT NULL CHECK (kind IN ('care','avoid','note')),
+  text TEXT NOT NULL,
+  source TEXT NOT NULL CHECK (source IN ('user','feed')),
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_feed_memory_owner ON feed_memory(owner_id, created_at);
+
 -- Web Push subscriptions of each account's browsers (phones added to the home screen).
 CREATE TABLE IF NOT EXISTS push_subscriptions (
   endpoint TEXT PRIMARY KEY,

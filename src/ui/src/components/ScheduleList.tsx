@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { api, ApiError } from "../api";
 import type { Schedule } from "../types";
 
+const FEED_KIND = { care: "关心", avoid: "不再推", note: "记住" } as const;
 const STATUS: Record<Schedule["status"], { label: string; tone: string }> = {
   active: { label: "进行中", tone: "working" },
   paused: { label: "已暂停", tone: "" },
@@ -48,9 +49,12 @@ export function ScheduleList({ active, onExpired, onOpenTask }: { active: boolea
       <ul className="task-list">{(items ?? []).map((s) => <li key={s.id} data-schedule-id={s.id}>
         <div className="task-list-item schedule-item">
           <div className="task-list-top"><strong>{s.title}{s.builtin && <span className="schedule-builtin">内置</span>}</strong><span className={`task-status-badge ${STATUS[s.status].tone}`}>{STATUS[s.status].label}</span></div>
-          {s.builtin === "daily_feed" && <p className="muted tiny">前一天发过消息才会推送，根据你过往的任务整理今天值得留意的内容；不再关注的话题会自动少推。</p>}
+          {s.builtin === "daily_feed" && <p className="muted tiny">前一天发过消息才会推送：根据你过往的任务整理今天值得留意的内容，只读看看你已登录的邮箱和关注的动态；记住你的反馈，不再关注的话题会自动少推。想改要求、时间或关心的内容，在主会话里直接说。</p>}
           <p className="schedule-rule">{s.rule}{s.nextRunText && s.status === "active" ? <span className="muted"> · 下次 {s.nextRunText}</span> : null}</p>
-          <p className="task-list-summary">{s.instruction}</p>
+          <p className="task-list-summary">{s.feed?.customized ? <span className="schedule-feed-label">你的要求</span> : null}{s.instruction}</p>
+          {s.feed && s.feed.memory.length > 0 && <ul className="schedule-feed-memory" aria-label="推送记住的内容">
+            {s.feed.memory.map((m) => <li key={m.id} data-kind={m.kind}><span className="schedule-feed-label">{FEED_KIND[m.kind]}</span>{m.text}{m.source === "feed" && <span className="muted"> · 从你的反馈学到</span>}</li>)}
+          </ul>}
           <div className="task-list-meta">
             <span className="muted tiny">已运行 {s.runCount} 次</span>
             {s.lastTask && <button className="link tiny" onClick={() => onOpenTask(s.lastTask!.id)}>上次：{RUN_LABEL[s.lastTask.status] ?? s.lastTask.status}</button>}

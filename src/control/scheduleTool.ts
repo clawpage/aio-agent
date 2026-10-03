@@ -69,6 +69,40 @@ const TOOLS = [
       required: ["id", "action"],
     },
   },
+  {
+    name: "feed_get",
+    description:
+      "查看内置的「每日推送」：推送时间、状态、用户给它的要求（instruction；customized=false 表示还是默认的一句话），以及它记住的内容 memory（care 要多留意的、avoid 不要再推的、note 用户对推送的习惯和偏好，source 是 user 用户说的或 feed 推送自己学到的）。" +
+      "每日推送每次运行时，系统会自带一份完整说明：读用户过往的全部任务、联网查证最新信息、只读查看用户已登录的邮箱和动态、参考最近几次推送和用户的反应避免重复，再加上这里的要求和记忆。向用户介绍或修改推送前先用它看清现状。",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "feed_update",
+    description:
+      "修改内置的「每日推送」。用于：用户想改推送要做的事或要看的地方（例如“每天推送时帮我看看 Gmail 有没有账单”“推送少说新闻”），改推送时间，告诉你他关心或不想再看的内容，或对某条推送给出反馈（有用、想多看、别再推）——这些都要用它记下，之后每天的推送都会照做。" +
+      "instruction 会整段替换用户原来的要求：在原有要求上改写，别丢掉原来还有效的内容；传空字符串恢复默认。add 加记忆，remove 按 feed_get 给的 id 删记忆；每类最多 30 条。不要为调整推送另建定时任务。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        instruction: { type: "string", description: "用户对每日推送的完整要求（最多 1500 字），会附在系统说明里优先照做；空字符串恢复默认" },
+        at: { type: "string", description: "新的每天推送时间 HH:MM（24 小时制）" },
+        add: {
+          type: "array",
+          description: "要记下的内容",
+          items: {
+            type: "object",
+            properties: {
+              kind: { type: "string", enum: ["care", "avoid", "note"], description: "care 要多留意的事或来源；avoid 不要再推的话题；note 对推送形式、时机的偏好" },
+              text: { type: "string", description: "一句话（200 字以内），例如“Roy 的疫苗和体检预约”“不要再推加密货币行情”“只在有降价时才提商品”" },
+            },
+            required: ["kind", "text"],
+          },
+        },
+        remove: { type: "array", items: { type: "string" }, description: "要删掉的记忆 id（feed_get 给出）：过时的或和新说法相反的" },
+        source: { type: "string", enum: ["user", "feed"], description: "user：用户在对话里说的（默认）；feed：每日推送自己从用户的反应里学到的" },
+      },
+    },
+  },
 ];
 
 /** Thread-level MCP wiring for a Codex executor. */
@@ -82,7 +116,8 @@ export function scheduleMcpServers(cfg: Config): Record<string, unknown> {
 }
 
 export const SCHEDULE_POLICY =
-  "用户要求将来某个时间做某事、按规律重复做、或“帮我盯着…”“到时候提醒我…”时，用 aio_schedule 的 schedule_create 建立定时任务：它保存在一站的账号里，跨对话、跨会话长期有效，到点自动新建任务执行并把结果发到主会话。不要说定时任务只在当前会话有效，也不要因此让用户改用别的提醒方式；需要时可以先现在查一次，再建定时任务。定时任务自己的自动运行里不要再创建新的定时任务。";
+  "用户要求将来某个时间做某事、按规律重复做、或“帮我盯着…”“到时候提醒我…”时，用 aio_schedule 的 schedule_create 建立定时任务：它保存在一站的账号里，跨对话、跨会话长期有效，到点自动新建任务执行并把结果发到主会话。不要说定时任务只在当前会话有效，也不要因此让用户改用别的提醒方式；需要时可以先现在查一次，再建定时任务。定时任务自己的自动运行里不要再创建新的定时任务。" +
+  "每个账号自带一个内置的「每日推送」：用户想改它做什么、看哪里、几点推送，说了自己关心或不想再看的内容，或对某条推送给出反馈（有用、想多看、别再推），用 feed_get 看现状、feed_update 修改或记下，不要另建定时任务。";
 
 export class ScheduleGateway {
   #port: number;
@@ -177,9 +212,11 @@ export class ScheduleGateway {
         return created.ok ? text(`${created.message}\n\nid: ${created.schedule.id}`) : text(created.error, true);
       }
       if (name === "schedule_list") {
-        const list = tasks.listSchedules(userId).map((s) => ({ id: s.id, title: s.title, rule: s.rule, status: s.status, nextRun: s.nextRunText, instruction: s.instruction, ...(s.builtin ? { builtin: true } : {}) }));
+        const list = tasks.listSchedules(userId).map((s) => ({ id: s.id, title: s.title, rule: s.rule, status: s.status, nextRun: s.nextRunText, instruction: s.instruction, ...(s.builtin ? { builtin: true, note: "内置的每日推送：完整设置和记忆用 feed_get 查看，用 feed_update 修改" } : {}) }));
         return text(list.length ? list : "还没有定时任务。");
       }
+      if (name === "feed_get") return text(tasks.feedSettings(userId));
+      if (name === "feed_update") return text(tasks.updateFeed(userId, args));
       const action = args.action;
       if (action !== "pause" && action !== "resume" && action !== "cancel") return text("action 只能是 pause、resume 或 cancel", true);
       return text(tasks.changeSchedule(String(args.id ?? ""), userId, action).message);

@@ -227,6 +227,8 @@ export interface Schedule {
   createdAt: number;
   /** Set on a schedule every account gets (the daily feed): it can be paused, not deleted. */
   builtin?: string | null;
+  /** The daily feed only: whether the person worded its instruction, and what it keeps in mind. */
+  feed?: { customized: boolean; memory: Array<{ id: string; kind: "care" | "avoid" | "note"; text: string; source: "user" | "feed" }> };
 }
 
 /** One browser tab a task created, as the tab record keeps it. */
