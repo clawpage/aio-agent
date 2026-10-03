@@ -480,13 +480,19 @@ test("a link in a reply opens in the person's own tab, operated on the desktop l
     expect(page.context().pages()).toHaveLength(1);
     await expect(panel).toContainText("OpenTable: Nopa");
     await expect(panel.locator('iframe[title="沙箱桌面"]')).toHaveAttribute("src", /vnc\.html/);
-    // On a phone the desktop is twice the screen's width; a swipe on the black around it pans.
+    // On a phone the desktop is 1.6 times the screen's width; a swipe on the black around it pans.
     const frame = panel.locator(".desktop-frame");
     const geometry = await frame.evaluate((el) => ({ box: el.clientWidth, frame: el.querySelector("iframe")!.getBoundingClientRect().width, scroll: el.scrollWidth }));
     if (info.project.name.startsWith("mobile")) {
-        expect(Math.abs(geometry.frame - geometry.box * 2)).toBeLessThan(2);
-        expect(geometry.scroll).toBeGreaterThan(geometry.box * 1.9);
-        await expect(panel.getByText("在黑色区域左右滑动，查看整个页面")).toBeVisible();
+        expect(Math.abs(geometry.frame - geometry.box * 1.6)).toBeLessThan(2);
+        expect(geometry.scroll).toBeGreaterThan(geometry.box * 1.5);
+        // The desktop's controls sit in the black strip under it, where noVNC's left bar used to be.
+        const bar = panel.getByRole("toolbar", { name: "桌面操作" });
+        await expect(bar).toContainText("左右滑动看全部");
+        for (const name of ["键盘", "粘贴", "回车", "Tab", "Esc"]) await expect(bar.getByRole("button", { name, exact: true })).toBeVisible();
+        const fits = await bar.evaluate((el) => { const r = el.getBoundingClientRect(), p = el.closest(".desktop-frame")!.getBoundingClientRect(); return r.left >= p.left - 1 && r.right <= p.right + 1 && r.bottom <= p.bottom + 1; });
+        expect(fits).toBe(true);
+        await page.screenshot({ path: info.outputPath("desktop-bar.png") });
         await frame.evaluate((el) => { el.scrollLeft = 150; });
         expect(await frame.evaluate((el) => el.scrollLeft)).toBeGreaterThan(100);
         await frame.evaluate((el) => { el.scrollLeft = 0; });

@@ -2,11 +2,11 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { api, ApiError, browserApi } from "../api";
 import { BrowserViewerController } from "../browserViewer";
-import { DesktopFrame } from "./DesktopFrame";
+import { DesktopFrame, usePhoneDesktop } from "./DesktopFrame";
 
 /** The sandbox desktop in noVNC: scaled to fit, reconnecting on its own. */
 // `aio=<NOVNC_ASSET_VERSION>`: a new URL, so phones load the patched noVNC instead of a cached copy (see novncPatch).
-export const DESKTOP_PATH = "/vnc/vnc.html?autoconnect=1&resize=scale&reconnect=1&path=ws&aio=3";
+export const DESKTOP_PATH = "/vnc/vnc.html?autoconnect=1&resize=scale&reconnect=1&path=ws&aio=4";
 
 /** How a console puts its tab's window on top of the desktop: a task's tab, or the person's own. */
 export interface ConsoleTarget {
@@ -43,6 +43,7 @@ export function TaskConsole({ target, tab, label, primary, watching = false, clo
   const [src, setSrc] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const overlay = useRef<HTMLDivElement>(null);
+  const phone = usePhoneDesktop();
 
   const focus = useCallback(async () => {
     try {
@@ -122,11 +123,11 @@ export function TaskConsole({ target, tab, label, primary, watching = false, clo
           <button type="button" className="ghost" onClick={close} aria-label="关闭操作面板">{closeLabel}</button>
         </header>
         <div className="task-console-screen">
-          {src ? <DesktopFrame src={src} title="沙箱桌面" /> : <p className="muted tiny">正在打开桌面…</p>}
+          {src ? <DesktopFrame src={src} title="沙箱桌面" interactive={!watching} /> : <p className="muted tiny">正在打开桌面…</p>}
         </div>
         {notice && <p className="task-console-notice" role="alert">{notice}</p>}
         <div className="task-console-tools" role="group" aria-label="页面操作">
-          <span className="muted tiny task-console-hint">{watching ? "AI 正在操作，你只能看；点“人工接管”后 AI 会暂停" : "键盘在左侧工具栏"}</span>
+          <span className="muted tiny task-console-hint">{watching ? "AI 正在操作，你只能看；点“人工接管”后 AI 会暂停" : phone ? "键盘在画面下方" : "点一下页面即可用键盘输入"}</span>
           <span className="spacer" />
           <button type="button" className="ghost tiny" onClick={() => void focus()}>切回这个页面</button>
           <button type="button" className="ghost tiny" onClick={onReveal}>在工作区打开</button>

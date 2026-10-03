@@ -16,7 +16,12 @@
  * - A pinch (or a two-finger scroll whose fingers drifted) sent Ctrl + wheel,
  *   which zooms the remote page, and Chrome keeps a zoom per site: Amazon stuck
  *   at 150% laid out 853 px wide, as if on a phone. A pinch now does nothing to
- *   the page; a phone reads the desktop at twice its width and pans instead.
+ *   the page; a phone reads the desktop zoomed in and pans instead.
+ * - On a phone the console draws its own toolbar under the desktop (keyboard,
+ *   paste, Esc/Tab/Enter) in the black strip that pans the view. It asks noVNC
+ *   to hide its own control bar on the left and sends it keys and text by
+ *   postMessage; only the embedding page (window.parent) is listened to, and
+ *   only our own origins may frame this page (frame-ancestors).
  */
 export const NOVNC_UI_PATH = "/opt/novnc/app/ui.js";
 export const NOVNC_HTML_PATH = "/opt/novnc/vnc.html";
@@ -29,7 +34,7 @@ export const NOVNC_RFB_PATH = "/opt/novnc/core/rfb.js";
  * the console opens vnc.html with it too, see DESKTOP_PATH); bump it whenever a
  * patched file changes.
  */
-export const NOVNC_ASSET_VERSION = 3;
+export const NOVNC_ASSET_VERSION = 4;
 
 const KEYBOARD_MARKER = "/* aio-agent: one tap, one key */";
 const KEY_EVENT = `    keyEvent(keysym, code, down) {
@@ -81,10 +86,51 @@ ${KEY_EVENT}        if (down) UI.recentTouchKeys.push({ keysym, at: Date.now() }
 `);
 }
 
+const HOST_BAR_MARKER = "/* aio-agent: the console's toolbar drives this desktop */";
+const UI_EXPORT = "\nexport default UI;\n";
+const HOST_BAR = `
+${HOST_BAR_MARKER}
+// The console's own toolbar (in the black strip under the zoomed desktop) replaces the
+// control bar on the left. Only the page that frames this one is listened to.
+if (window.parent !== window) {
+    const style = document.createElement('style');
+    style.textContent = 'html.aio-host-bar #noVNC_control_bar_anchor, html.aio-host-bar #noVNC_control_bar_hint { display: none !important; }';
+    document.head.appendChild(style);
+    const KEYS = {
+        Enter: [KeyTable.XK_Return, "Enter"], Backspace: [KeyTable.XK_BackSpace, "Backspace"], Tab: [KeyTable.XK_Tab, "Tab"],
+        Escape: [KeyTable.XK_Escape, "Escape"], ArrowUp: [KeyTable.XK_Up, "ArrowUp"], ArrowDown: [KeyTable.XK_Down, "ArrowDown"],
+        ArrowLeft: [KeyTable.XK_Left, "ArrowLeft"], ArrowRight: [KeyTable.XK_Right, "ArrowRight"],
+    };
+    window.addEventListener('message', (e) => {
+        const m = e.data;
+        if (e.source !== window.parent || !m || m.aio !== 'desktop') return;
+        if (m.type === 'bar') { document.documentElement.classList.toggle('aio-host-bar', m.on === true); return; }
+        if (!UI.rfb) return;
+        if (m.type === 'key' && KEYS[m.key]) UI.rfb.sendKey(...KEYS[m.key]);
+        else if (m.type === 'text' && typeof m.text === 'string') {
+            for (const ch of m.text.slice(0, 2000)) UI.rfb.sendKey(keysyms.lookup(ch.codePointAt(0)));
+        } else if (m.type === 'paste' && typeof m.text === 'string') {
+            // Into the desktop's clipboard, then Ctrl+V into the focused page.
+            UI.rfb.clipboardPasteFrom(m.text.slice(0, 100000));
+            UI.rfb.sendKey(KeyTable.XK_Control_L, "ControlLeft", true);
+            UI.rfb.sendKey(KeyTable.XK_v, "KeyV");
+            UI.rfb.sendKey(KeyTable.XK_Control_L, "ControlLeft", false);
+        }
+    });
+}
+`;
+
+function patchHostBar(source: string): string | null {
+  if (source.includes(HOST_BAR_MARKER)) return source;
+  if (source.split(UI_EXPORT).length !== 2) return null;
+  return source.replace(UI_EXPORT, `\n${HOST_BAR}${UI_EXPORT}`);
+}
+
 /** The patched app/ui.js; null when its code is not the version these patches know. */
 export function patchNoVncUi(source: string): string | null {
   const keyboard = patchKeyboard(source);
-  return keyboard === null ? null : replaceOne(keyboard, RFB_IMPORT, `import RFB from "../core/rfb.js?aio=${NOVNC_ASSET_VERSION}";`);
+  const bar = keyboard && patchHostBar(keyboard);
+  return bar === null ? null : replaceOne(bar, RFB_IMPORT, `import RFB from "../core/rfb.js?aio=${NOVNC_ASSET_VERSION}";`);
 }
 
 /** The patched vnc.html (loads ui.js under the current version); null when unknown. */

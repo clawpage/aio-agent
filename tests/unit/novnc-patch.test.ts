@@ -14,7 +14,9 @@ describe("noVNC phone keyboard patch", () => {
     expect(patched).toContain("if (down) UI.recentTouchKeys.push({ keysym, at: Date.now() });");
     expect(patched).toContain("if (UI.takeTouchKey(keysym)) continue;");
     expect(patched).toContain("if (UI.takeTouchKey(KeyTable.XK_BackSpace)) continue;");
-    expect(changedLines(ui, patched)).toBeLessThan(25);
+    // The keyboard fix alone (the toolbar block after it is its own piece, tested below).
+    const keyboardOnly = patched.slice(0, patched.indexOf("\n/* aio-agent: the console's toolbar drives this desktop */"));
+    expect(changedLines(ui, keyboardOnly)).toBeLessThan(25);
   });
 
   it("loads the patched rfb.js under the current asset version", () => {
@@ -87,5 +89,26 @@ describe("noVNC page", () => {
 
   it("is opened by the console under the same version", () => {
     expect(DESKTOP_PATH).toContain(`&aio=${NOVNC_ASSET_VERSION}`);
+  });
+});
+
+describe("noVNC under the console's toolbar", () => {
+  it("lets only the framing page hide the left bar and send keys, text and a paste", () => {
+    const patched = patchNoVncUi(ui)!;
+    expect(patched).toContain("/* aio-agent: the console's toolbar drives this desktop */");
+    expect(patched).toContain("if (e.source !== window.parent || !m || m.aio !== 'desktop') return;");
+    expect(patched).toContain("html.aio-host-bar #noVNC_control_bar_anchor");
+    expect(patched).toContain("UI.rfb.clipboardPasteFrom(m.text.slice(0, 100000));");
+    // Still a module that ends by exporting UI, and patched once.
+    expect(patched.trimEnd().endsWith("export default UI;")).toBe(true);
+    expect(patchNoVncUi(patched)).toBe(patched);
+  });
+
+  it("is added to a ui.js an older version patched for the keyboard only", () => {
+    const patched = patchNoVncUi(ui)!;
+    const start = patched.indexOf("\n/* aio-agent: the console's toolbar drives this desktop */");
+    const older = patched.slice(0, start - 1) + patched.slice(patched.indexOf("\nexport default UI;\n"));
+    expect(older).not.toContain("aio-host-bar");
+    expect(patchNoVncUi(older)).toBe(patched);
   });
 });

@@ -1,7 +1,7 @@
 import { test, expect } from "@playwright/test";
 import { mockConsole } from "./mock-api";
 
-/** The desktop frame's geometry: on a phone twice the box's width, panned by scrolling the box. */
+/** The desktop frame's geometry: on a phone 1.6 times the box's width, panned by scrolling the box. */
 async function desktopGeometry(frame: import("@playwright/test").Locator) {
   return frame.evaluate((el) => ({ box: el.clientWidth, frame: el.querySelector("iframe")!.getBoundingClientRect().width, scroll: el.scrollWidth }));
 }
@@ -29,12 +29,12 @@ test("the workspace is a desktop: a menu bar, one app window, a Dock, and minimi
   await expect(desk.locator(".menubar-app")).toHaveText("浏览器");
   await expect(desk.locator(".window-title")).toHaveText("浏览器");
   await expect(desk.locator(".window iframe")).toBeVisible();
-  // On a phone the browser desktop is drawn twice the width and pans; on a wide screen it fits.
+  // On a phone the browser desktop is drawn 1.6 times the width and pans; on a wide screen it fits.
   const frame = desk.locator(".desktop-frame");
   const geometry = await desktopGeometry(frame);
   if (mobile) {
-    expect(Math.abs(geometry.frame - geometry.box * 2)).toBeLessThan(2);
-    expect(geometry.scroll).toBeGreaterThan(geometry.box * 1.9);
+    expect(Math.abs(geometry.frame - geometry.box * 1.6)).toBeLessThan(2);
+    expect(geometry.scroll).toBeGreaterThan(geometry.box * 1.5);
     await frame.evaluate((el) => { el.scrollLeft = 150; });
     expect(await frame.evaluate((el) => el.scrollLeft)).toBeGreaterThan(100);
   } else {
