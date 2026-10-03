@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { gcj02ToWgs84, navLinks, parsePlace, platformOf, splitMapBlocks, tilesFor, wgs84ToGcj02, worldPixel } from "../../src/ui/src/mapBlocks.js";
+import { gcj02ToWgs84, mapLinks, parsePlace, platformOf, splitMapBlocks, tilesFor, wgs84ToGcj02, worldPixel } from "../../src/ui/src/mapBlocks.js";
 import { MapService } from "../../src/control/maps.js";
 
 const block = (json: string) => "```map\n" + json + "\n```";
@@ -51,31 +51,43 @@ describe("map blocks in a message", () => {
   });
 });
 
-describe("navigation links", () => {
+describe("map app links", () => {
   const place = { name: "Café & Bar", address: "上海市黄浦区", lat: 31.2304, lng: 121.4737, zoom: 15 };
 
   it("offers the platform's own choice first: Android asks the system, iOS opens Apple Maps", () => {
-    const android = navLinks(place, "android");
+    const android = mapLinks(place, "android");
     expect(android[0]!.href).toBe("geo:31.2304,121.4737?q=31.2304,121.4737(Caf%C3%A9%20%26%20Bar)");
     expect(android.map((l) => l.id)).not.toContain("apple");
-    const ios = navLinks(place, "ios");
+    const ios = mapLinks(place, "ios");
     expect(ios[0]!.id).toBe("apple");
     expect(ios.map((l) => l.id)).toEqual(["apple", "amap", "baidu", "google", "waze"]);
-    expect(ios.find((l) => l.id === "baidu")!.href).toMatch(/^baidumap:\/\/map\/direction\?/);
-    expect(navLinks(place, "other").find((l) => l.id === "baidu")!.href).toMatch(/^https:\/\/api\.map\.baidu\.com\/marker\?/);
+    expect(ios.find((l) => l.id === "baidu")!.href).toMatch(/^baidumap:\/\/map\/marker\?/);
+    expect(mapLinks(place, "other").find((l) => l.id === "baidu")!.href).toMatch(/^https:\/\/api\.map\.baidu\.com\/marker\?/);
+  });
+
+  it("shows the place, never starts directions", () => {
+    const ios = Object.fromEntries(mapLinks(place, "ios").map((l) => [l.id, l.href]));
+    expect(ios.apple).toBe("https://maps.apple.com/?ll=31.2304,121.4737&q=Caf%C3%A9%20%26%20Bar");
+    expect(ios.google).toBe("https://www.google.com/maps/search/?api=1&query=31.2304,121.4737");
+    expect(ios.waze).toBe("https://waze.com/ul?ll=31.2304,121.4737");
+    for (const platform of ["ios", "android", "other"] as const) {
+      for (const link of [...mapLinks(place, platform), ...mapLinks({ ...place, lat: null, lng: null }, platform)]) {
+        expect(link.href).not.toMatch(/daddr|dirflg|\/dir\/|navigation|direction|navigate=yes/);
+      }
+    }
   });
 
   it("hands Chinese map apps GCJ-02 coordinates and encodes names", () => {
-    const amap = navLinks(place, "ios").find((l) => l.id === "amap")!.href;
+    const amap = mapLinks(place, "ios").find((l) => l.id === "amap")!.href;
     const [gLat, gLng] = wgs84ToGcj02(place.lat, place.lng);
-    expect(amap).toContain(`to=${gLng},${gLat},Caf%C3%A9%20%26%20Bar`);
-    expect(amap).toContain("coordinate=gaode");
-    expect(navLinks(place, "ios").find((l) => l.id === "google")!.href).toContain("destination=31.2304,121.4737");
+    expect(amap).toBe(`https://uri.amap.com/marker?position=${gLng},${gLat}&name=Caf%C3%A9%20%26%20Bar&coordinate=gaode&callnative=1&src=yizhan`);
+    expect(mapLinks(place, "ios").find((l) => l.id === "baidu")!.href).toContain(`location=${gLat},${gLng}`);
   });
 
   it("searches by address when the place could not be located", () => {
-    const links = navLinks({ ...place, lat: null, lng: null }, "ios");
-    expect(links.find((l) => l.id === "apple")!.href).toBe(`https://maps.apple.com/?daddr=${encodeURIComponent("上海市黄浦区")}&dirflg=d`);
+    const links = mapLinks({ ...place, lat: null, lng: null }, "ios");
+    expect(links.find((l) => l.id === "apple")!.href).toBe(`https://maps.apple.com/?q=${encodeURIComponent("上海市黄浦区")}`);
+    expect(links.find((l) => l.id === "google")!.href).toBe(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent("上海市黄浦区")}`);
     expect(links.every((l) => !l.href.includes("null"))).toBe(true);
   });
 

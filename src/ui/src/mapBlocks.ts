@@ -137,7 +137,7 @@ export function tilesFor(lat: number, lng: number, zoom: number, width: number, 
   return tiles;
 }
 
-// ---------------------------------------------------------------- navigation
+// ---------------------------------------------------------------- map apps
 
 export type Platform = "ios" | "android" | "other";
 
@@ -147,46 +147,47 @@ export function platformOf(userAgent: string): Platform {
   return "other";
 }
 
-export interface NavLink {
+export interface MapLink {
   id: string;
   label: string;
   href: string;
 }
 
 /**
- * Links that hand the destination to a navigation app. Web pages cannot see
- * which apps are installed, so every common one is offered, the platform's own
- * first; on Android `geo:` lets the system ask which installed app to use. The
- * https forms open the app when it is installed and the web map otherwise.
+ * Links that show the place in a map app; the person starts directions there
+ * if they want them. Web pages cannot see which apps are installed, so every
+ * common one is offered, the platform's own first; on Android `geo:` lets the
+ * system ask which installed app to use. The https forms open the app when it
+ * is installed and the web map otherwise.
  */
-export function navLinks(place: MapPlace, platform: Platform): NavLink[] {
+export function mapLinks(place: MapPlace, platform: Platform): MapLink[] {
   const name = place.name;
   const query = place.address ?? place.name;
   const e = encodeURIComponent;
-  const links: NavLink[] = [];
+  const links: MapLink[] = [];
   if (place.lat !== null && place.lng !== null) {
     const { lat, lng } = place;
     const [gLat, gLng] = wgs84ToGcj02(lat, lng);
-    if (platform === "android") links.push({ id: "system", label: "选择已安装的导航应用", href: `geo:${lat},${lng}?q=${lat},${lng}(${e(name)})` });
-    if (platform !== "android") links.push({ id: "apple", label: "苹果地图", href: `https://maps.apple.com/?daddr=${lat},${lng}&q=${e(name)}&dirflg=d` });
-    links.push({ id: "amap", label: "高德地图", href: `https://uri.amap.com/navigation?to=${gLng},${gLat},${e(name)}&mode=car&coordinate=gaode&callnative=1&src=yizhan` });
+    if (platform === "android") links.push({ id: "system", label: "选择已安装的地图应用", href: `geo:${lat},${lng}?q=${lat},${lng}(${e(name)})` });
+    if (platform !== "android") links.push({ id: "apple", label: "苹果地图", href: `https://maps.apple.com/?ll=${lat},${lng}&q=${e(name)}` });
+    links.push({ id: "amap", label: "高德地图", href: `https://uri.amap.com/marker?position=${gLng},${gLat}&name=${e(name)}&coordinate=gaode&callnative=1&src=yizhan` });
     links.push({
       id: "baidu",
       label: "百度地图",
       href: platform === "other"
         ? `https://api.map.baidu.com/marker?location=${gLat},${gLng}&title=${e(name)}&content=${e(query)}&coord_type=gcj02&output=html&src=yizhan`
-        : `baidumap://map/direction?destination=${e(`latlng:${gLat},${gLng}|name:${name}`)}&coord_type=gcj02&mode=driving&src=yizhan`,
+        : `baidumap://map/marker?location=${gLat},${gLng}&title=${e(name)}&content=${e(query)}&coord_type=gcj02&src=yizhan`,
     });
-    links.push({ id: "google", label: "Google 地图", href: `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}&travelmode=driving` });
-    links.push({ id: "waze", label: "Waze", href: `https://waze.com/ul?ll=${lat},${lng}&navigate=yes` });
+    links.push({ id: "google", label: "Google 地图", href: `https://www.google.com/maps/search/?api=1&query=${lat},${lng}` });
+    links.push({ id: "waze", label: "Waze", href: `https://waze.com/ul?ll=${lat},${lng}` });
   } else {
     // Not located: every app can still search the address itself.
-    if (platform === "android") links.push({ id: "system", label: "选择已安装的导航应用", href: `geo:0,0?q=${e(query)}` });
-    if (platform !== "android") links.push({ id: "apple", label: "苹果地图", href: `https://maps.apple.com/?daddr=${e(query)}&dirflg=d` });
+    if (platform === "android") links.push({ id: "system", label: "选择已安装的地图应用", href: `geo:0,0?q=${e(query)}` });
+    if (platform !== "android") links.push({ id: "apple", label: "苹果地图", href: `https://maps.apple.com/?q=${e(query)}` });
     links.push({ id: "amap", label: "高德地图", href: `https://uri.amap.com/search?keyword=${e(query)}&callnative=1&src=yizhan` });
     links.push({ id: "baidu", label: "百度地图", href: `https://api.map.baidu.com/geocoder?address=${e(query)}&output=html&src=yizhan` });
-    links.push({ id: "google", label: "Google 地图", href: `https://www.google.com/maps/dir/?api=1&destination=${e(query)}&travelmode=driving` });
-    links.push({ id: "waze", label: "Waze", href: `https://waze.com/ul?q=${e(query)}&navigate=yes` });
+    links.push({ id: "google", label: "Google 地图", href: `https://www.google.com/maps/search/?api=1&query=${e(query)}` });
+    links.push({ id: "waze", label: "Waze", href: `https://waze.com/ul?q=${e(query)}` });
   }
   return links;
 }
