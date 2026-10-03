@@ -34,7 +34,7 @@ const WEB_IMAGE_FAILED_TTL_MS = 5 * 60_000;
 /** Runs in the sandbox with the URL as its only argument; prints the bytes as base64. */
 const WEB_IMAGE_SCRIPT = `import base64, sys, urllib.request
 limit = ${MAX_WEB_IMAGE_BYTES}
-req = urllib.request.Request(sys.argv[1], headers={"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36", "Accept": "image/avif,image/webp,image/png,image/jpeg,image/*;q=0.8"})
+req = urllib.request.Request(sys.argv[1], headers={"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36", "Accept": "image/webp,image/png,image/jpeg,image/*;q=0.8"})
 try:
     with urllib.request.urlopen(req, timeout=15) as r:
         data = r.read(limit + 1)
