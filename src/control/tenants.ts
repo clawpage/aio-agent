@@ -94,7 +94,7 @@ export class UserRuntimes {
     }
     // The gate goes in before queued work resumes, or it would run against the stopped container.
     let idle=asleep?startSandboxIdle(runtime.ctx,undefined,true):null;
-    await runtime.ctx.agent.init();runtime.ctx.tasks.init();
+    await runtime.ctx.agent.init({cold:asleep});runtime.ctx.tasks.init();
     if(runtime.ctx.push)this.recoveries.push(startTaskNotifications(runtime.ctx,runtime.ctx.push));
     if(runtime.ctx.cfg.sandbox.autostart){
       if(asleep)runtime.ctx.log.info('sandbox left stopped at start');

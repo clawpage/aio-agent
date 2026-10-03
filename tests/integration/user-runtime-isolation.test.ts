@@ -107,7 +107,7 @@ it('creates a runtime without starting a container found stopped; a running or m
     cfg:{...h.ctx.cfg,browser:{...h.ctx.cfg.browser,enabled:false},sandbox:{...h.ctx.cfg.sandbox,autostart:true,releaseWhenIdle}},log:h.ctx.log,db:h.ctx.db,sandboxSetupError:null,sandboxSurfaces:null,
     container:{node:{check:async()=>({ok:true})},inspect:async()=>state,isReady:async()=>state.running,
      ensureRunning:async()=>{calls.push('ensureRunning');state.exists=state.running=true;return {image:'img',healthy:true};},alignBrowserIdentity:async()=>false,patchNoVnc:async()=>false,surfaces:async()=>({})},
-    agent:{init:async()=>{calls.push('agent.init');},setSandboxGate:()=>{calls.push('gate');},ensureSession:async()=>{calls.push('session');},status:async()=>({activeTurns:[],queuedTurns:0}),listPendingRequests:()=>[]},
+    agent:{init:async(o?:{cold?:boolean})=>{calls.push(o?.cold?'agent.init cold':'agent.init');},setSandboxGate:()=>{calls.push('gate');},ensureSession:async()=>{calls.push('session');},status:async()=>({activeTurns:[],queuedTurns:0}),listPendingRequests:()=>[]},
     tasks:{init:()=>{calls.push('tasks.init');}},codex:{ready:true},
    } as unknown as AppContext;
    return {ctx,calls};
@@ -120,9 +120,9 @@ it('creates a runtime without starting a container found stopped; a running or m
    await registry.resolve(u.id);
    return {...made,registry};
   };
-  // Stopped: nothing starts it, and the gate is in place before queued work resumes.
+  // Stopped: nothing starts it or asks anything of it, and the gate is in place before queued work resumes.
   const asleep=await create({exists:true,running:false});
-  expect(asleep.calls).toEqual(['gate','agent.init','tasks.init']);
+  expect(asleep.calls).toEqual(['gate','agent.init cold','tasks.init']);
   expect(asleep.ctx.idle?.state).toBe('parked');
   // The first use brings up the container and the session, once.
   await Promise.all([asleep.ctx.idle!.wake(),asleep.ctx.idle!.wake()]);

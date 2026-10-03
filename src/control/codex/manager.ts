@@ -348,7 +348,8 @@ export class AgentManager {
     this.events.setMaxListeners(0);
   }
 
-  async init(): Promise<void> {
+  /** `cold`: the sandbox is known to be stopped, so nothing is asked of it yet. */
+  async init(opts: { cold?: boolean } = {}): Promise<void> {
     this.#reconcileInterrupted();
     this.#migrateLegacyDefaultModel();
     this.#backfillTurnModels();
@@ -361,7 +362,7 @@ export class AgentManager {
     // Prime the model catalog so a submit can re-validate a stored effort without
     // the user having to open the config page first. Best-effort: a cold sandbox
     // simply leaves the cache empty and the stored value is kept as-is.
-    void this.refreshModelCatalog();
+    if (!opts.cold) void this.refreshModelCatalog();
   }
 
   /**

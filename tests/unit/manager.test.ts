@@ -45,6 +45,22 @@ describe("AgentManager", () => {
     db.close();
   });
 
+  it("asks a sandbox known to be stopped for nothing at init", async () => {
+    const asked = async (cold: boolean) => {
+      const made = makeManager();
+      let calls = 0;
+      const listModels = made.codex.listModels.bind(made.codex);
+      made.codex.listModels = async () => { calls += 1; return listModels(); };
+      await made.agent.init({ cold });
+      await tick();
+      made.agent.shutdown();
+      made.db.close();
+      return calls;
+    };
+    expect(await asked(false)).toBe(1);
+    expect(await asked(true)).toBe(0);
+  });
+
   it("treats a repeated clientMessageId with identical payload as a duplicate", async () => {
     const conv = agent.createConversation({ title: "t" });
     const first = agent.submitTurn({ conversationId: conv.id, text: "hi", clientMessageId: "m1" });
