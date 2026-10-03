@@ -163,6 +163,9 @@ export function taskNotification(task: TaskView): PushPayload | null {
  * browser hand-over lives in the sandbox's tab server, so it is checked while
  * tasks run (the sandbox is awake then anyway).
  */
+/** How long the vault gets to answer a sign-in before the person is told about it. */
+const VAULT_GRACE_MS = 10_000;
+
 export function startTaskNotifications(ctx: AppContext, push: PushService, intervalMs = 20_000): { stop(): void } {
   const ownerId = ctx.cfg.runtimeUserId ?? "owner_1";
   const send = (payload: PushPayload | null) => {
@@ -183,6 +186,8 @@ export function startTaskNotifications(ctx: AppContext, push: PushService, inter
     void ctx.tabs.list().then((tabs) => {
       for (const tab of tabs) {
         if (!tab.request || tab.holder !== "ai") continue;
+        // The vault answers a sign-in it has an account for within seconds: only one still waiting is the person's.
+        if (tab.request.kind === "login" && Date.now() - tab.request.at < VAULT_GRACE_MS) continue;
         const key = `${tab.id}:${tab.request.at}`;
         if (asked.has(key)) continue;
         asked.add(key);

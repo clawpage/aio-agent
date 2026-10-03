@@ -39,8 +39,8 @@ export interface TabRecord {
   /** Who drives the tab right now: the task's agent, or a person who took it over. */
   holder: "ai" | "human";
   humanSince: number | null;
-  /** The agent asked a person to act in this tab, and is waiting for it back. */
-  request: { reason: string; at: number } | null;
+  /** The agent asked a person to act in this tab, or asked the vault to sign in (`kind`), and is waiting. */
+  request: { reason: string; at: number; kind?: "login"; site?: string } | null;
 }
 
 /** The tab server's key for links a person opens from a reply: theirs alone, invisible to agents. */
@@ -64,6 +64,8 @@ export interface TabServerLike {
   list(key?: string): Promise<TabRecord[]>;
   /** A person takes a task's tab (brought to the front, agents shut out) or hands it back. */
   control(key: string, tab: string, action: "take" | "release"): Promise<TabRecord | null>;
+  /** Sign in for the person on a tab whose agent asked the vault: the account goes into the page, never back. */
+  login(key: string, tab: string, account: { site: string; username: string; password: string }): Promise<PersonResult>;
   /** A current preview of one of the task's tabs. */
   screenshot(key: string, tab: string): Promise<{ mimeType: string; data: string; url: string; title: string } | null>;
   /** Type text or press a key, for a person, into a tab they took over (the latest one unless `tab`/`task` name it). */
@@ -97,7 +99,8 @@ export function tabMcpServers(task: BrowserTask): Record<string, unknown> {
 export const TAB_POLICY =
   "浏览器操作只使用 aio_tabs 工具：你只能操作本任务创建的标签页，其他任务的标签页只能只读查看，可与其他任务并行；不要使用 `aio browser` 命令行或 /v1/browser 接口，它们操作整个浏览器的当前页面，会打断并行任务。" +
   "每个用户只有这一个浏览器，里面有用户的登录状态：不要自己另起浏览器（例如 Playwright/Puppeteer 的 launch、headless Chrome、新的用户数据目录），那样没有登录状态，也不要清除 cookie 或站点数据。" +
-  "遇到登录、验证码、二次验证、输入密码或支付信息、付款、下单、发送消息、修改账号设置等需要用户本人完成或不可撤销的最后一步，调用 browser_request_human 说明原因并等待用户交还，不要在对话里索要密码或验证码，也不要替用户完成付款或下单；交还后先读取页面确认状态再继续，结果不确定的操作不要自动重做。";
+  "页面要求用账号密码登录时，先让登录表单出现，再调用 browser_login：密码器会把用户保存的账号密码直接填进页面并提交，你看不到密码，也不要自己填写、读取或向用户索要密码；返回后先读取页面确认是否登录成功。" +
+  "遇到验证码、二次验证、扫码登录、支付信息、付款、下单、发送消息、修改账号设置等需要用户本人完成或不可撤销的最后一步，调用 browser_request_human 说明原因并等待用户交还，不要在对话里索要密码或验证码，也不要替用户完成付款或下单；交还后先读取页面确认状态再继续，结果不确定的操作不要自动重做。";
 
 export function withTabPolicy(instructions: string): string {
   return instructions.trim() ? `${instructions.trimEnd()}\n\n${TAB_POLICY}` : TAB_POLICY;
@@ -272,7 +275,13 @@ export class TabServer implements TabServerLike {
     return this.#person("/close", { tab });
   }
 
-  async #person(route: "/input" | "/pointer" | "/open" | "/close", body: PersonTarget & object): Promise<PersonResult> {
+  async login(key: string, tab: string, account: { site: string; username: string; password: string }): Promise<PersonResult> {
+    if (!KEY.test(key)) return { status: 404, body: { error: "no_tab", message: "这个标签页已经关闭或不属于该任务" } };
+    // The account travels on stdin, never in a command line; filling and submitting can take a while.
+    return this.#person("/login", { key, tab, ...account } as PersonTarget & object, 60);
+  }
+
+  async #person(route: "/input" | "/pointer" | "/open" | "/close" | "/login", body: PersonTarget & object, seconds = 20): Promise<PersonResult> {
     if ((body.task !== undefined && !KEY.test(body.task)) || (body.tab !== undefined && !/^t\d{1,9}$/.test(body.tab))) {
       return { status: 404, body: { error: "no_tab", message: "这个标签页已经关闭或不属于该任务" } };
     }
@@ -283,8 +292,8 @@ export class TabServer implements TabServerLike {
       return { status: 503, body: { error: "unavailable", message: "浏览器输入暂不可用，请稍后重试" } };
     }
     const res = await this.#container.execInSandbox(
-      ["curl", "-s", "-m", "20", "-w", "\n%{http_code}", "-X", "POST", "-H", "content-type: application/json", "--data-binary", "@-", `http://127.0.0.1:${TAB_SERVER_PORT}${route}`],
-      { timeoutMs: 25_000, stdin: JSON.stringify(body) },
+      ["curl", "-s", "-m", String(seconds), "-w", "\n%{http_code}", "-X", "POST", "-H", "content-type: application/json", "--data-binary", "@-", `http://127.0.0.1:${TAB_SERVER_PORT}${route}`],
+      { timeoutMs: (seconds + 5) * 1000, stdin: JSON.stringify(body) },
     );
     const cut = res.stdout.lastIndexOf("\n");
     const status = Number(res.stdout.slice(cut + 1));

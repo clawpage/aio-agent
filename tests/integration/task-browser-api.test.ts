@@ -19,6 +19,7 @@ const fakeTabs: TabServerLike = {
   pointer: async (input) => (calls.push(`pointer:${JSON.stringify(input)}`), { status: 200, body: { tab: input.tab ?? "t1" } }),
   open: async (url) => (calls.push(`open:${url}`), { status: 200, body: { tab: { ...record("person", "human"), id: "t7", url } } }),
   close: async (tab) => (calls.push(`close:${tab}`), { status: 200, body: { closed: tab } }),
+  login: async () => ({ status: 409, body: { error: "no_request" } }),
   screenshot: async (key, tab) => (calls.push(`shot:${key}:${tab}`), tab === "t1" ? { mimeType: "image/jpeg", data: Buffer.from("jpeg-bytes").toString("base64"), url: "u", title: "t" } : null),
 };
 

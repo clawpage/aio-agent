@@ -37,6 +37,7 @@ import { createApp, handleUpgrade } from "./http/server.js";
 import { TaskService } from "./tasks/service.js";
 import type { AppContext } from "./context.js";
 import { SandboxIdle } from "./sandbox/idle.js";
+import { startVaultAutofill, Vault } from "./vault.js";
 import { PushService, startTaskNotifications } from "./push.js";
 
 export interface Bootstrapped {
@@ -137,6 +138,7 @@ export async function bootstrap(opts: BootstrapOptions = {}): Promise<Bootstrapp
   const ctx: AppContext = {
     jev,
     tasks,
+    vault: new Vault(db, cfg.dataDir, cfg.runtimeUserId ?? "owner_1"),
     cfg,
     db,
     log,
@@ -396,6 +398,7 @@ async function main(): Promise<void> {
   // Phone notifications: one key pair and one subscription store for every account.
   ctx.push=new PushService({db:ctx.db,log:ctx.log,keyFile:path.join(ctx.cfg.dataDir,"vapid.json"),subject:`https://${ctx.cfg.primaryHost}`});
   const ownerNotifications=startTaskNotifications(ctx,ctx.push);
+  const ownerVault=startVaultAutofill(ctx);
   const users=new UserRuntimes(ctx,bootstrap,modelGateway,nodes);
   ctx.runtimeForUser=id=>users.resolve(id);
   const app = createApp(ctx);
@@ -426,6 +429,7 @@ async function main(): Promise<void> {
     recovery.stop();
     idle?.stop();
     ownerNotifications.stop();
+    ownerVault.stop();
     server.close();
     modelGateway.close();
     await users.shutdown();

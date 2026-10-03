@@ -29,6 +29,7 @@ import { safeRedirectPath } from "../auth/tickets.js";
 import { audit } from "../db.js";
 import { dispatchLog, recallStats } from "../tasks/recall.js";
 import { PERSON_KEY } from "../browser/tabs.js";
+import { normalizeSite, vaultLogin, VaultError, type Vault } from "../vault.js";
 import { DocumentError, type DocumentService } from "../documents/service.js";
 import type { BrowserStatusView } from "../browser/service.js";
 import { documentKind, isRenderableKind, requireWorkspaceFilePath } from "../documents/paths.js";
@@ -602,6 +603,71 @@ export function createApiRouter(context: AppContext): Router {
     const tab = await context.tabs.control(key, String(req.body?.tab ?? ""), action);
     if (!tab) { res.status(404).json({ error: "tab_not_found", message: "这个标签页已经关闭或不属于该任务" }); return; }
     res.json({ tab });
+  }));
+  // The person answers a task's sign-in request from the vault: a saved account, or one typed here
+  // (saved unless they say not to). The account goes into the page; the response only says what happened.
+  router.post("/tasks/:id/browser/login", requireKind("primary"), requireSession, asyncHandler(async (req, res) => {
+    const key = taskBrowserKey(req);
+    const tab = key && context.tabs ? (await context.tabs.list(key)).find((t) => t.id === String(req.body?.tab ?? "")) : undefined;
+    if (!tab || ctxOf(req).session!.ownerId !== (cfg.runtimeUserId ?? "owner_1")) { res.status(404).json({ error: "tab_not_found", message: "这个标签页已经关闭或不属于该任务" }); return; }
+    res.setHeader("Cache-Control", "no-store");
+    try {
+      const out = await vaultLogin(context, tab, { entryId: req.body?.entryId, username: req.body?.username, password: req.body?.password, save: req.body?.save });
+      if (out.ok) res.json({ result: out.result });
+      else res.status(out.status).json({ error: out.error, message: out.message });
+    } catch (err) {
+      if (!(err instanceof VaultError)) throw err;
+      res.status(err.status).json({ error: err.code, message: err.message });
+    }
+  }));
+
+  // ------------------------------------------------------------ password vault
+  // The account's saved sign-ins. A password is returned by one call only, to the signed-in person who asks for it.
+  // Only the account this runtime belongs to: a request that reached another account's runtime gets nothing.
+  const vault = (req: Request, res: Response): Vault | null => {
+    res.setHeader("Cache-Control", "no-store");
+    const own = context.vault && ctxOf(req).session!.ownerId === (cfg.runtimeUserId ?? "owner_1") ? context.vault : null;
+    if (!own) res.status(404).json({ error: "not_found" });
+    return own;
+  };
+  const vaultFailure = (res: Response, err: unknown): void => {
+    if (!(err instanceof VaultError)) throw err;
+    res.status(err.status).json({ error: err.code, message: err.message });
+  };
+  router.get("/vault", requireKind("primary"), requireSession, asyncHandler(async (req, res) => {
+    const v = vault(req, res);
+    if (!v) return;
+    const site = typeof req.query.site === "string" ? normalizeSite(req.query.site) : null;
+    res.json({ entries: site ? v.matching(site) : v.list() });
+  }));
+  router.post("/vault", requireKind("primary"), requireSession, asyncHandler(async (req, res) => {
+    const v = vault(req, res);
+    if (!v) return;
+    try {
+      res.status(201).json({ entry: v.create({ site: req.body?.site, username: req.body?.username, password: req.body?.password }) });
+    } catch (err) { vaultFailure(res, err); }
+  }));
+  router.put("/vault/:id", requireKind("primary"), requireSession, asyncHandler(async (req, res) => {
+    const v = vault(req, res);
+    if (!v) return;
+    try {
+      const entry = v.update(param(req, "id"), { site: req.body?.site, username: req.body?.username, password: req.body?.password });
+      if (entry) res.json({ entry });
+      else res.status(404).json({ error: "not_found", message: "密码器里没有这个账号" });
+    } catch (err) { vaultFailure(res, err); }
+  }));
+  router.delete("/vault/:id", requireKind("primary"), requireSession, asyncHandler(async (req, res) => {
+    const v = vault(req, res);
+    if (!v) return;
+    if (v.remove(param(req, "id"))) res.json({ ok: true });
+    else res.status(404).json({ error: "not_found", message: "密码器里没有这个账号" });
+  }));
+  router.post("/vault/:id/reveal", requireKind("primary"), requireSession, asyncHandler(async (req, res) => {
+    const v = vault(req, res);
+    if (!v) return;
+    const password = v.secret(param(req, "id"));
+    if (password === null) res.status(404).json({ error: "not_found", message: "密码器里没有这个账号，或它的密码读不出来了" });
+    else res.json({ password });
   }));
 
   router.get(

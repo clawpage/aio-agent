@@ -151,6 +151,18 @@ CREATE TABLE IF NOT EXISTS tasks (
 );
 CREATE INDEX IF NOT EXISTS idx_tasks_created ON tasks(created_at);
 
+-- The password vault: accounts the agent may sign in with; secret is AES-256-GCM, its key is not in this file.
+CREATE TABLE IF NOT EXISTS vault_entries (
+  id TEXT PRIMARY KEY,
+  owner_id TEXT NOT NULL,
+  site TEXT NOT NULL,
+  username TEXT NOT NULL,
+  secret TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  last_used_at INTEGER
+);
+
 -- Scheduled and recurring tasks: each due run starts a task (tasks.schedule_id).
 CREATE TABLE IF NOT EXISTS schedules (
   id TEXT PRIMARY KEY,

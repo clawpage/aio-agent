@@ -237,7 +237,18 @@ export interface TaskTab {
   lastUsed: number;
   finishedAt: number | null;
   holder: "ai" | "human";
-  request: { reason: string; at: number } | null;
+  /** The agent waits for the person; `kind: "login"` is a sign-in the password vault can answer. */
+  request: { reason: string; at: number; kind?: "login"; site?: string } | null;
+}
+
+/** An account saved in the password vault. The password is fetched only when the person asks to see it. */
+export interface VaultEntry {
+  id: string;
+  site: string;
+  username: string;
+  createdAt: number;
+  updatedAt: number;
+  lastUsedAt: number | null;
 }
 
 /** How well the dispatcher finds past tasks (see src/control/tasks/recall.ts). */

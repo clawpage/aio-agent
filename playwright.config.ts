@@ -23,6 +23,7 @@ export default defineConfig({
     /conversation-management\.spec\.ts/,
     /chat-motion\.spec\.ts/,
     /menu-qa\.spec\.ts/,
+    /vault\.spec\.ts/,
   ],
   // Failure artifacts (traces/snapshots) can contain typed secrets such as the
   // owner password, so they are written under the git-ignored var/ directory

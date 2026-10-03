@@ -18,6 +18,7 @@ import type { BrowserRuntimeLike } from "./browser/lifecycle.js";
 import type { TaskService } from "./tasks/service.js";
 import type { SandboxIdle } from "./sandbox/idle.js";
 import type { PushService } from "./push.js";
+import type { Vault } from "./vault.js";
 
 export interface AppContext {
   runtimeForUser?: (userId: string) => Promise<AppContext>;
@@ -28,6 +29,8 @@ export interface AppContext {
   tasks: TaskService;
   /** Phone notifications (Web Push), shared by every account; absent in tests. */
   push?: PushService;
+  /** The account's password vault; absent in runtimes built by hand in tests. */
+  vault?: Vault;
   /** Whole-container idle stop/start; absent when the runtime keeps its container up. */
   idle?: SandboxIdle;
   cfg: Config;

@@ -561,3 +561,106 @@ it.skipIf(!hasChromium)("frees memory near the limit, least valuable pages first
     site.close();
   }
 });
+
+it.skipIf(!hasChromium)("signs in from the vault: the agent only asks, the page gets the account and password, no tool ever returns them", async () => {
+  const SECRET = "s3cret-пароль-密码";
+  const received: string[] = [];
+  const html = (body: string) => `<!doctype html><meta charset="utf-8"><title>Sign in</title>${body}`;
+  const pages: Record<string, string> = {
+    "/login": html(`<form method="post" action="/done"><input name="q" type="search"><input name="username"><input type="password" name="password"><button>登录</button></form>`),
+    // A script-driven form: nothing navigates, and the framework mirrors the value into the attribute.
+    "/spa": html(`<form id="f"><input name="email" type="email"><input type="password" name="password"><button>Sign in</button></form><script>
+      const pw = document.querySelector('[type=password]'); pw.addEventListener('input', () => pw.setAttribute('value', pw.value));
+      document.getElementById('f').addEventListener('submit', (e) => { e.preventDefault(); fetch('/done', { method: 'POST', body: new URLSearchParams(new FormData(e.target)) }); });
+    </script>`),
+    "/first": html(`<form method="get" action="/second"><input type="email" name="email"><button>Next</button></form>`),
+    "/second": html(`<form method="post" action="/done"><input type="password" name="password"><button>Sign in</button></form>`),
+    "/none": html(`<p>no form here</p>`),
+  };
+  const site = (await import("node:http")).createServer((req, res) => {
+    const url = new URL(req.url ?? "/", "http://x");
+    if (req.method === "POST") {
+      let body = "";
+      req.on("data", (c) => (body += c));
+      req.on("end", () => { received.push(decodeURIComponent(body.replace(/\+/g, " "))); res.setHeader("content-type", "text/html; charset=utf-8"); res.end("<title>Welcome</title>signed in"); });
+      return;
+    }
+    res.setHeader("content-type", "text/html; charset=utf-8");
+    res.end(pages[url.pathname] ?? "<title>404</title>");
+  });
+  await new Promise<void>((resolve) => site.listen(0, "127.0.0.1", resolve));
+  const origin = `http://127.0.0.1:${(site.address() as net.AddressInfo).port}`;
+  const login = async (body: Record<string, unknown>) => {
+    const res = await fetch(`${base}/login`, { method: "POST", body: JSON.stringify(body) });
+    return { status: res.status, body: (await res.json()) as { result?: string; error?: string } };
+  };
+  /** The agent asks and waits; the control plane answers once the request is on record. */
+  const ask = (task: string) => call(task, "browser_login");
+  const asked = async (task: string) => {
+    for (let i = 0; i < 60 && !(await records(task)).some((t) => (t.request as { kind?: string } | null)?.kind === "login"); i += 1) await new Promise((r) => setTimeout(r, 50));
+  };
+  const cred = { site: "127.0.0.1", username: "max@example.com", password: SECRET };
+  try {
+    // Nothing is typed unless the task's agent asked for it.
+    const tab = tabIdOf(await call("V", "browser_navigate", { url: `${origin}/login` }))!;
+    expect((await login({ key: "V", tab, ...cred })).status).toBe(409);
+
+    const waiting = ask("V");
+    await asked("V");
+    expect((await records("V"))[0]?.request).toMatchObject({ kind: "login", site: "127.0.0.1" });
+    // Another task's key, and an account saved for another site, are both refused.
+    expect((await login({ key: "OTHER", tab, ...cred })).status).toBe(404);
+    expect((await login({ key: "V", tab, ...cred, site: "example.com" })).body.error).toBe("site_changed");
+    expect(received).toEqual([]);
+    expect((await login({ key: "V", tab, ...cred })).body.result).toBe("submitted");
+    const answered = await waiting;
+    expect(text(answered)).toContain("密码器已填入账号密码并提交");
+    expect(text(answered)).toContain("Welcome");
+    expect(JSON.stringify(answered)).not.toContain(SECRET);
+    expect(JSON.stringify(answered)).not.toContain("max@example.com");
+    // The account went into the box before the password box, not into the search box.
+    expect(received).toEqual([`q=&username=max@example.com&password=${SECRET}`]);
+    expect((await records("V"))[0]?.request).toBeNull();
+    expect(fs.readFileSync(process.env.AIO_TABS_STATE!, "utf8")).not.toContain(SECRET);
+
+    // A form that stays on screen: what was typed is gone before the agent can read the page again.
+    await call("V", "browser_navigate", { url: `${origin}/spa`, tab });
+    // A script the agent ran earlier cannot watch the typing: the page is loaded afresh first.
+    await call("V", "browser_evaluate", { tab, script: "document.addEventListener('input', (e) => { window.__spy = (window.__spy || '') + e.target.value; }, true); 1" });
+    const spa = ask("V");
+    await asked("V");
+    expect((await login({ key: "V", tab, ...cred })).body.result).toBe("submitted");
+    expect(JSON.stringify(await spa)).not.toContain(SECRET);
+    expect(received[1]).toBe(`email=max@example.com&password=${SECRET}`);
+    expect(text(await call("V", "browser_evaluate", { tab, script: "JSON.stringify([document.querySelector('[type=password]').value, String(window.__spy)])" }))).toBe('["","undefined"]');
+    expect(text(await call("V", "browser_get_html", { tab }))).not.toContain(SECRET);
+
+    // Account first, password on the next page.
+    await call("V", "browser_navigate", { url: `${origin}/first`, tab });
+    const twoStep = ask("V");
+    await asked("V");
+    expect((await login({ key: "V", tab, ...cred })).body.result).toBe("submitted");
+    expect(text(await twoStep)).toContain("Welcome");
+    expect(received[2]).toBe(`password=${SECRET}`);
+
+    // No form: the agent is told to open one, and nothing is typed anywhere.
+    await call("V", "browser_navigate", { url: `${origin}/none`, tab });
+    const none = ask("V");
+    await asked("V");
+    expect((await login({ key: "V", tab, ...cred })).body.result).toBe("no_form");
+    expect(text(await none)).toContain("没有找到账号或密码输入框");
+    expect(received).toHaveLength(3);
+
+    // Skipping the vault: the person signs in by hand, as before.
+    await call("V", "browser_navigate", { url: `${origin}/login`, tab });
+    const manual = ask("V");
+    await asked("V");
+    expect((await control(tab, "take", "V")).status).toBe(200);
+    expect((await login({ key: "V", tab, ...cred })).body.error).toBe("no_request");
+    expect((await control(tab, "release", "V")).status).toBe(200);
+    expect(text(await manual)).toContain("用户选择自己在浏览器里登录");
+  } finally {
+    await post("/finish", { key: "V" });
+    site.close();
+  }
+});

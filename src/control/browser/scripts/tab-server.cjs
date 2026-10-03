@@ -16,6 +16,10 @@
  * act on it. The agent can ask for that hand-over itself (browser_request_human)
  * and waits in place until the person hands the tab back.
  *
+ * A sign-in goes through the person's password vault (browser_login): the agent
+ * only asks, the control plane types the saved account and password into the
+ * page (POST /login) while the tab is locked, and no tool ever returns them.
+ *
  * Runs inside the sandbox as the sandbox user, listening on loopback only. It
  * coordinates tasks of one account; it is not a security boundary between them.
  */
@@ -51,7 +55,8 @@ const { chromium } = require(process.env.AIO_TABS_PLAYWRIGHT || '/opt/aio-browse
 const INSTRUCTIONS = [
   '浏览器请只用 aio_tabs 的工具。每个标签页记录着创建它的任务：只有创建它的任务能操作（打开网址、点击、填写、执行脚本、关闭），其他任务只能只读查看（正文、HTML、页面结构、截图）。',
   '只读查看其他任务的页面时，先用 browser_tab_list 找到标签页编号（如 t3），再把它作为 tab 参数传给读取类工具。',
-  '需要用户本人在浏览器里操作时，调用 browser_request_human 说明原因并等待：登录、验证码、二次验证、输入密码或支付信息、付款、下单、发送消息、修改账号设置等不可撤销的最后一步，或需要用户判断的页面。不要在对话里索要密码或验证码。',
+  '页面要求用账号密码登录时，先让登录表单出现，再调用 browser_login：密码器把用户保存的账号密码直接填进页面并提交，你看不到密码；用户没保存过时会被请去填写，也可能改为自己在浏览器里输入。不要用 browser_fill 或 browser_type 输入密码，不要读取密码框的内容。',
+  '需要用户本人在浏览器里操作时，调用 browser_request_human 说明原因并等待：验证码、二次验证、扫码登录、支付信息、付款、下单、发送消息、修改账号设置等不可撤销的最后一步，或需要用户判断的页面。不要在对话里索要密码或验证码。',
   '遇到「按住确认你是真人」（Press & Hold）、滑块、勾选框等人机验证时，不要自己反复点击、拖动或刷新：同一个标签页里的验证会话一旦被判为机器，之后人来按也过不了。先用 browser_tab_new 在新标签页重新打开同一网址，再用 browser_tab_close 关掉旧标签页；新标签页通常直接通过。新标签页仍出现验证，才调用 browser_request_human 请用户在这个新标签页里完成。',
   '用户交还后先读取页面确认当前状态再继续；结果不确定的操作不要自动重做，先让用户核对。用户正在操作的标签页你不能读取或操作。',
   '不要使用 `aio browser` 命令行或 /v1/browser 接口：它们操作的是整个浏览器当前可见的页面，会打断其他正在并行的任务。',
@@ -60,7 +65,11 @@ const INSTRUCTIONS = [
 
 // ----------------------------------------------------------------- registry
 
-/** tabId -> { id, page, key, title, targetId, createdAt, lastUsed, finishedAt, holder, humanSince, request } */
+/**
+ * tabId -> { id, page, key, title, targetId, createdAt, lastUsed, finishedAt, holder, humanSince, request }
+ * plus, never saved: `locked` (the vault is typing into it) and `scripted` (an
+ * agent ran its own script in the current document).
+ */
 const registry = new Map();
 /**
  * Links a person opens from a reply live under this key: always theirs to
@@ -128,6 +137,8 @@ function register(page, key, title, extra = {}) {
   // A link that opens a new window belongs to the same task and becomes its current tab.
   page.on('popup', (popup) => { void adoptNew(popup, key, title); });
   page.on('close', () => forget(tab));
+  // A new document carries none of the scripts an agent evaluated in the last one.
+  page.on('domcontentloaded', () => { tab.scripted = false; });
   // A crashed renderer never recovers: close its tab so no tool or person waits on it.
   page.on('crash', () => {
     process.stdout.write(`closed crashed page: ${page.url()}\n`);
@@ -396,6 +407,7 @@ async function resolveTab(ctx, tabId, mode, create = false, allowHuman = false) 
   } else {
     tab = await currentOwn(ctx.key, ctx.title, create);
   }
+  if (tab.locked) throw new Error(`密码器正在标签页 ${tab.id} 填写登录信息，稍后再试。`);
   if (tab.holder === 'human' && !allowHuman) {
     throw new Error(`用户正在操作标签页 ${tab.id}，交还前不能读取或操作它。需要等用户完成时，调用 browser_request_human 说明你在等什么。`);
   }
@@ -414,6 +426,145 @@ function markFinished(key) {
   cursors.delete(key);
   save();
   return count;
+}
+
+// ------------------------------------------------------------ password vault
+
+function hostOf(url) {
+  try {
+    const u = new URL(url);
+    return u.protocol === 'http:' || u.protocol === 'https:' ? u.hostname.toLowerCase() : '';
+  } catch { return ''; }
+}
+
+/** A saved site covers its own host and its subdomains. */
+function siteCovers(site, host) {
+  return Boolean(site) && (host === site || host.endsWith(`.${site}`));
+}
+
+const VAULT_STEP_MS = Number(process.env.AIO_TABS_VAULT_STEP_MS || 8000);
+const LIKELY_USERNAME = 'input[autocomplete~="username" i], input[type="email"], input[name*="user" i], input[name*="email" i], input[name*="login" i], input[name*="account" i], input[name*="phone" i], input[id*="user" i], input[id*="email" i], input[id*="login" i], input[id*="account" i]';
+
+/** The first frame showing a password box, with the box; else the first showing a likely account box. */
+async function loginFields(page) {
+  for (const frame of page.frames()) {
+    const password = await frame.locator('input[type="password"]:visible').first().elementHandle({ timeout: 300 }).catch(() => null);
+    if (!password) continue;
+    // The account box is the nearest text box before the password box, in its form.
+    const username = (await password.evaluateHandle((el) => {
+      const usable = (i) => ['text', 'email', 'tel'].includes((i.getAttribute('type') || 'text').toLowerCase()) && !i.disabled && !i.readOnly && i.offsetParent !== null;
+      const inputs = [...(el.form || document).querySelectorAll('input')];
+      const before = inputs.slice(0, inputs.indexOf(el)).filter(usable);
+      return before[before.length - 1] || null;
+    })).asElement();
+    return { frame, password, username };
+  }
+  for (const frame of page.frames()) {
+    const username = await frame.locator(LIKELY_USERNAME).locator('visible=true').first().elementHandle({ timeout: 300 }).catch(() => null);
+    if (username) return { frame, password: null, username };
+  }
+  return null;
+}
+
+/**
+ * Press Enter in the box; a form that ignores Enter gets its submit button
+ * clicked. A form that sent something is not submitted a second time, even when
+ * it stays on screen.
+ */
+async function submitLogin(page, box) {
+  const before = safeUrl(page);
+  let sent = false;
+  const onRequest = (request) => { if (request.method() !== 'GET') sent = true; };
+  page.on('request', onRequest);
+  const settled = async (ms) => {
+    const until = Date.now() + ms;
+    while (Date.now() < until) {
+      if (safeUrl(page) !== before || !(await box.isVisible().catch(() => false))) return true;
+      if (sent) { await page.waitForTimeout(1500); return true; }
+      await page.waitForTimeout(150);
+    }
+    return false;
+  };
+  try {
+    await box.press('Enter', { timeout: VAULT_STEP_MS });
+    if (await settled(2500)) return;
+    const button = (await box.evaluateHandle((el) => (el.form || document).querySelector('button[type="submit"], input[type="submit"], button:not([type])'))).asElement();
+    if (button) await button.click({ timeout: VAULT_STEP_MS }).catch(() => undefined);
+    await settled(VAULT_STEP_MS);
+  } finally {
+    page.off('request', onRequest);
+  }
+}
+
+/** Type the account and password into the sign-in form and submit it. Nothing here returns or logs either. */
+async function fillLogin(tab, username, password) {
+  const page = tab.page;
+  // A script the agent evaluated could watch the typing: start from a clean document.
+  if (tab.scripted) await page.reload({ waitUntil: 'domcontentloaded', timeout: 2 * VAULT_STEP_MS });
+  let fields = await loginFields(page);
+  if (!fields) return 'no_form';
+  if (!fields.password) {
+    // An account-first sign-in: the password box appears after the account is submitted.
+    await fields.username.fill(username, { timeout: VAULT_STEP_MS });
+    await submitLogin(page, fields.username);
+    const until = Date.now() + VAULT_STEP_MS;
+    do {
+      fields = await loginFields(page);
+      if (fields && fields.password) break;
+      await page.waitForTimeout(250);
+    } while (Date.now() < until);
+    if (!fields || !fields.password) return 'username_only';
+  } else if (fields.username && username) {
+    await fields.username.fill(username, { timeout: VAULT_STEP_MS });
+  }
+  await fields.password.fill(password, { timeout: VAULT_STEP_MS });
+  await submitLogin(page, fields.password);
+  await page.waitForLoadState('domcontentloaded', { timeout: VAULT_STEP_MS }).catch(() => undefined);
+  return 'submitted';
+}
+
+/** Whatever is still sitting in a password box is removed before any agent may read the page again. */
+async function clearPasswords(page) {
+  for (const frame of page.frames()) {
+    await frame.evaluate(() => {
+      const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+      for (const el of document.querySelectorAll('input[type="password"]')) {
+        if (!el.value) continue;
+        set.call(el, '');
+        el.setAttribute('value', '');
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+    }).catch(() => undefined);
+  }
+}
+
+/**
+ * The control plane signs in for the person on a tab whose agent asked
+ * (browser_login) and is waiting. Only then, and only while the page is still
+ * on the site the account was saved for. The tab is locked meanwhile.
+ */
+async function vaultLogin(body) {
+  const tab = registry.get(String(body.tab || ''));
+  if (!tab || tab.page.isClosed() || (body.key && tab.key !== body.key)) return { status: 404, body: { error: 'no_tab', message: '这个标签页已经关闭或不属于该任务' } };
+  if (!tab.request || tab.request.kind !== 'login' || tab.holder !== 'ai') return { status: 409, body: { error: 'no_request', message: '这个页面没有在等待登录' } };
+  if (typeof body.username !== 'string' || typeof body.password !== 'string' || !body.password || body.password.length > 1000 || body.username.length > 200) return { status: 400, body: { error: 'bad_request' } };
+  if (!siteCovers(String(body.site || ''), hostOf(safeUrl(tab.page)))) return { status: 409, body: { error: 'site_changed', message: '页面已经不在这个网站，没有填入' } };
+  tab.locked = true;
+  let result;
+  try {
+    result = await fillLogin(tab, body.username, body.password);
+  } catch {
+    // The reason may quote what was being typed: it is never passed on.
+    result = 'failed';
+  } finally {
+    await clearPasswords(tab.page);
+    tab.locked = false;
+  }
+  // Whatever happened, the agent hears it and carries on; it never hears the account or the password.
+  tab.request = null;
+  save();
+  settleWaiters(tab.id, { login: result });
+  return { status: 200, body: { result } };
 }
 
 /** Keys a person may press from the phone input bar. */
@@ -817,7 +968,7 @@ const TOOLS = {
   },
   browser_evaluate: {
     mode: 'write', description: '在本任务的标签页执行一段 JavaScript 表达式并返回结果（可能改变页面，所以只限本任务创建的标签页）。', input: { script: str, tab: ownTabArg }, required: ['script'],
-    run: async (ctx, a) => { const tab = await resolveTab(ctx, a.tab, 'write'); const value = await tab.page.evaluate(a.script, undefined, undefined, false); return textResult(typeof value === 'string' ? value : JSON.stringify(value, null, 2) ?? String(value)); },
+    run: async (ctx, a) => { const tab = await resolveTab(ctx, a.tab, 'write'); tab.scripted = true; const value = await tab.page.evaluate(a.script, undefined, undefined, false); return textResult(typeof value === 'string' ? value : JSON.stringify(value, null, 2) ?? String(value)); },
   },
   browser_wait: {
     mode: 'read', description: '等待：selector 出现，或 text 出现，或固定毫秒 ms（最长 60 秒）。', input: { selector: str, text: str, ms: num, tab: tabArg },
@@ -844,6 +995,39 @@ const TOOLS = {
       if (tab.request) { tab.request = null; save(); }
       if (outcome === 'timeout') {
         return { content: [{ type: 'text', text: `等了 ${Math.round(HUMAN_WAIT_MS / 60000)} 分钟，用户还没有交还标签页 ${tab.id}。请结束这一轮，告诉用户需要在浏览器里做什么；用户处理后可以引用这个任务继续。` }], isError: true };
+      }
+      return { content: [{ type: 'text', text: `停止等待：${outcome === 'closed' ? '标签页已关闭' : '任务已结束或被停止'}。` }], isError: true };
+    },
+  },
+  browser_login: {
+    mode: 'write',
+    description: '用密码器登录当前页面（先让账号密码表单出现）：系统把用户保存的账号密码直接填进页面并提交，你看不到密码，也不要自己填写或读取密码。用户没保存过时会被请去填写，也可以改为自己在浏览器里输入（最长等 30 分钟）。返回后先读取页面确认是否登录成功。',
+    input: { tab: ownTabArg },
+    run: async (ctx, a, signal) => {
+      const tab = await resolveTab(ctx, a.tab, 'write', false, true);
+      const site = hostOf(safeUrl(tab.page));
+      if (!site) return { content: [{ type: 'text', text: '当前标签页不是网页，先用 browser_navigate 打开要登录的网站。' }], isError: true };
+      tab.request = { kind: 'login', site, reason: `需要登录 ${site}`, at: Date.now() };
+      save();
+      const outcome = await waitForHuman(tab, signal);
+      if (outcome && outcome.login === 'submitted') {
+        return textResult(`密码器已填入账号密码并提交。${await describe(tab)}\n先读取页面确认是否登录成功。页面提示账号或密码错误时不要重复调用，告诉用户到密码器里核对；还要验证码或二次验证时调用 browser_request_human。`);
+      }
+      if (outcome && outcome.login === 'username_only') {
+        return textResult(`密码器已填入账号并进入下一步，但没有出现密码输入框。${await describe(tab)}\n读取页面确认状态；出现密码框后再调用一次 browser_login。`);
+      }
+      if (outcome && outcome.login === 'no_form') {
+        return { content: [{ type: 'text', text: '页面上没有找到账号或密码输入框。先点开登录入口让表单出现，再调用 browser_login；找不到入口时调用 browser_request_human 请用户自己登录。' }], isError: true };
+      }
+      if (outcome && outcome.login) {
+        return { content: [{ type: 'text', text: '密码器没能把账号密码填进这个页面（表单可能不是普通输入框）。调用 browser_request_human 请用户自己在浏览器里登录。' }], isError: true };
+      }
+      if (outcome === 'released') {
+        return textResult(`用户选择自己在浏览器里登录，并已交还控制权。${await describe(tab)}\n继续前先读取页面确认状态。`);
+      }
+      if (tab.request) { tab.request = null; save(); }
+      if (outcome === 'timeout') {
+        return { content: [{ type: 'text', text: `等了 ${Math.round(HUMAN_WAIT_MS / 60000)} 分钟，用户还没有处理标签页 ${tab.id} 的登录。请结束这一轮，告诉用户这个网站需要登录；用户处理后可以引用这个任务继续。` }], isError: true };
       }
       return { content: [{ type: 'text', text: `停止等待：${outcome === 'closed' ? '标签页已关闭' : '任务已结束或被停止'}。` }], isError: true };
     },
@@ -937,7 +1121,7 @@ async function callTool(ctx, name, args, signal) {
       // Waiting for a person has its own clock; everything else is bounded, and a
       // late run is left behind so this task's next call is not stuck behind it.
       const run = tool.run(ctx, args || {}, signal);
-      const result = name === 'browser_request_human' ? await run : await bounded(ctx, run);
+      const result = name === 'browser_request_human' || name === 'browser_login' ? await run : await bounded(ctx, run);
       save();
       return result;
     });
@@ -1038,6 +1222,10 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'POST' && url.pathname === '/prune') return send(res, 200, { closed: await pruneFinished() });
     if (req.method === 'POST' && url.pathname === '/input') {
       const out = await personInput(await readJson(req));
+      return send(res, out.status, out.body);
+    }
+    if (req.method === 'POST' && url.pathname === '/login') {
+      const out = await vaultLogin(await readJson(req));
       return send(res, out.status, out.body);
     }
     if (req.method === 'POST' && url.pathname === '/open') {

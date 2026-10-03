@@ -4,6 +4,7 @@ import type {Config} from './config.js';
 import type {AppContext} from './context.js';
 import {bootstrap, startSandboxRuntime, startRuntimeRecovery, startSandboxIdle, type Bootstrapped} from './index.js';
 import {startTaskNotifications} from './push.js';
+import {startVaultAutofill} from './vault.js';
 import type {MemberModelGateway} from './memberModelGateway.js';
 import {getUser} from './auth/owner.js';
 import {MEMBER_GPT_MODEL,MEMBER_MODEL,MEMBER_MODELS} from './auth/policy.js';
@@ -96,6 +97,7 @@ export class UserRuntimes {
     let idle=asleep?startSandboxIdle(runtime.ctx,undefined,true):null;
     await runtime.ctx.agent.init({cold:asleep});runtime.ctx.tasks.init();
     if(runtime.ctx.push)this.recoveries.push(startTaskNotifications(runtime.ctx,runtime.ctx.push));
+    this.recoveries.push(startVaultAutofill(runtime.ctx));
     if(runtime.ctx.cfg.sandbox.autostart){
       if(asleep)runtime.ctx.log.info('sandbox left stopped at start');
       else{

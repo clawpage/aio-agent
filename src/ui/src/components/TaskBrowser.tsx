@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "../api";
 import type { Task, TaskTab } from "../types";
 import { TaskConsole, taskConsoleTarget } from "./TaskConsole";
+import { VaultPrompt } from "./VaultPrompt";
 
 const LIVE = new Set(["running", "stopping", "queued"]);
 const REFRESH_MS = 4000;
@@ -80,8 +81,10 @@ export function TaskBrowser({ task, onReveal }: { task: Task; onReveal: () => vo
 
   const waiting = Boolean(tab.request) && tab.holder === "ai";
   const human = tab.holder === "human";
+  // A sign-in the password vault can answer; everything else is for the person in the browser.
+  const signIn = waiting && tab.request!.kind === "login";
   const state = waiting ? "request" : human ? "human" : live ? "ai" : "done";
-  const label = { request: "需要你操作", human: "你正在操作", ai: "AI 操作中", done: "已结束" }[state];
+  const label = signIn ? "需要登录" : { request: "需要你操作", human: "你正在操作", ai: "AI 操作中", done: "已结束" }[state];
 
   return (
     <div className={`task-browser ${state}`} role="group" aria-label={`任务浏览器：${label}`}>
@@ -93,7 +96,8 @@ export function TaskBrowser({ task, onReveal }: { task: Task; onReveal: () => vo
         </span>
         {tabs.length > 1 && <span className="muted tiny">共 {tabs.length} 个标签页</span>}
       </div>
-      {waiting && <p className="task-browser-reason">{tab.request!.reason}</p>}
+      {waiting && !signIn && <p className="task-browser-reason">{tab.request!.reason}</p>}
+      {signIn && <VaultPrompt taskId={task.id} tab={tab} busy={busy} onDone={() => void load()} onManual={() => void control("take")} />}
       {human && <p className="task-browser-hint">{live ? "AI 已暂停操作这个页面。完成后点“交还给 AI”，它会从当前页面继续。" : "任务已结束，你可以查看或继续操作这个页面。"}</p>}
       {!shotFailed && (
         <button type="button" className="task-browser-shot" onClick={() => (human ? setConsoleOpen(true) : setWatching(true))} disabled={busy} aria-label={human ? "操作这个页面" : "查看这个页面"}>
@@ -102,7 +106,7 @@ export function TaskBrowser({ task, onReveal }: { task: Task; onReveal: () => vo
       )}
       {error && <p className="error tiny">{error}</p>}
       <div className="task-actions">
-        {waiting && <button type="button" className="primary tiny" disabled={busy} onClick={() => void control("take")}>去浏览器操作</button>}
+        {waiting && !signIn && <button type="button" className="primary tiny" disabled={busy} onClick={() => void control("take")}>去浏览器操作</button>}
         {human && <>
           <button type="button" className="primary tiny" disabled={busy} onClick={() => void control("release")}>{live ? "完成，交还给 AI" : "结束查看"}</button>
           <button type="button" className="ghost tiny" onClick={() => setConsoleOpen(true)}>操作页面</button>
