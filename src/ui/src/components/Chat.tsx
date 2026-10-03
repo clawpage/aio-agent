@@ -20,6 +20,8 @@ import { FilePreview } from "./FilePreview";
 import { FileCard } from "./FileCard";
 import { ShareCard } from "./ShareCard";
 import { extractShareLinks } from "../shareLinks";
+import { VideoEmbed } from "./VideoEmbed";
+import { extractVideoLinks } from "../videoLinks";
 import { extractFileRefs, attachmentRefs } from "../fileRefs";
 import { isPreviewableKind, workspaceFileKind } from "../sandboxLink";
 
@@ -437,7 +439,8 @@ export function Chat({
 }
 
 /**
- * Cards for the workspace files one agent message points at.
+ * Cards for the workspace files one agent message points at, the share pages it
+ * links to, and players for the YouTube and Bilibili videos it links to.
  *
  * Extraction is memoised on the message text: an incremental `stream.delta`
  * appends text, so React reconciles the existing cards (keyed by path) instead of
@@ -448,9 +451,15 @@ export function MessageFileCards({ text, onOpen }: { text: string; onOpen: (path
   // Embedded images, videos and audio already show inside the message; everything else gets a card.
   const refs = useMemo(() => extractFileRefs(text).filter((ref) => !(ref.image && (ref.kind === "image" || ref.kind === "video" || ref.kind === "audio"))), [text]);
   const shares = useMemo(() => extractShareLinks(text), [text]);
-  if (refs.length === 0 && shares.length === 0) return null;
+  const videos = useMemo(() => extractVideoLinks(text), [text]);
+  if (refs.length === 0 && shares.length === 0 && videos.length === 0) return null;
   return (
     <>
+      {videos.length > 0 && (
+        <div className="video-embeds" data-testid="message-videos">
+          {videos.map((video) => <VideoEmbed key={video.key} video={video} />)}
+        </div>
+      )}
       {shares.length > 0 && (
         <div className="share-cards" data-testid="message-share-cards">
           {shares.map((link) => <ShareCard key={link.url} link={link} />)}

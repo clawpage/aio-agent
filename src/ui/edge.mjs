@@ -43,7 +43,8 @@ export function createEdge({ dist, control, workspaceOrigin = "", log = () => un
   const build = readBuild(root);
   const csp = [
     "default-src 'self'",
-    `frame-src 'self'${workspaceOrigin ? ` ${workspaceOrigin}` : ""}`,
+    // The workspace, and the YouTube / Bilibili players a message embeds (VIDEO_EMBED_ORIGINS in src/videoLinks.ts).
+    `frame-src 'self'${workspaceOrigin ? ` ${workspaceOrigin}` : ""} https://www.youtube-nocookie.com https://player.bilibili.com https://www.bilibili.com`,
     "img-src 'self' data: blob:",
     "style-src 'self' 'unsafe-inline'",
     "script-src 'self'",

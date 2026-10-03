@@ -6,6 +6,7 @@ import path from "node:path";
 import type { AddressInfo } from "node:net";
 import WebSocket, { WebSocketServer } from "ws";
 import { createEdge } from "../../src/ui/edge.mjs";
+import { VIDEO_EMBED_ORIGINS } from "../../src/ui/src/videoLinks.js";
 
 let control: http.Server;
 let edge: http.Server;
@@ -57,7 +58,7 @@ describe("UI edge", () => {
       expect(await res.text()).toContain("<title>一站</title>");
       expect(res.headers.get("cache-control")).toBe("no-cache");
       const csp = res.headers.get("content-security-policy")!;
-      expect(csp).toContain("frame-src 'self' https://agent-workspace.example.com");
+      expect(csp).toContain(`frame-src 'self' https://agent-workspace.example.com ${VIDEO_EMBED_ORIGINS.join(" ")};`);
       expect(csp).toContain("frame-ancestors 'none'");
     }
     const asset = await fetch(`${base}/assets/app-abc123.js`);
