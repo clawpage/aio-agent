@@ -431,6 +431,18 @@ it.skipIf(!hasChromium)("saves a product picture into the workspace, by element 
       res.setHeader("content-type", "image/png"); res.end(png); return;
     }
     if (req.url === "/logo.svg") { res.setHeader("content-type", "image/svg+xml"); res.end("<svg xmlns='http://www.w3.org/2000/svg'/>"); return; }
+    // A product page declaring its picture, with a version parameter its CDN insists on.
+    if (req.url === "/shared.png?v=Q0wv&trace=1") {
+      if (!String(req.headers.referer ?? "").endsWith("/declared")) { res.writeHead(403).end(); return; }
+      res.setHeader("content-type", "image/png"); res.end(png); return;
+    }
+    if (req.url === "/shared.png") { res.writeHead(404).end(); return; }
+    if (req.url === "/declared") { res.setHeader("content-type", "text/html; charset=utf-8"); res.end('<meta property="og:image" content="/shared.png?v=Q0wv&trace=1"><title>Declared</title><img src="/item.png" width="300" height="300">'); return; }
+    if (req.url === "/gallery") { res.setHeader("content-type", "text/html; charset=utf-8"); res.end('<title>Gallery</title><img src="/logo-small.png" width="40" height="40"><img id="big" src="/item.png?big" width="320" height="320">'); return; }
+    if (req.url === "/item.png?big") {
+      if (!String(req.headers.referer ?? "").endsWith("/gallery")) { res.writeHead(403).end(); return; }
+      res.setHeader("content-type", "image/png"); res.end(png); return;
+    }
     res.setHeader("content-type", "text/html; charset=utf-8");
     res.end('<title>Product</title><div id="gallery"><img id="main" src="/item.png" width="40" height="40"></div><div id="card" style="width:200px;height:100px;background:#2a6">卡片</div>');
   });
@@ -457,10 +469,19 @@ it.skipIf(!hasChromium)("saves a product picture into the workspace, by element 
     [{ selector: "#card", path: `${ws}/../escape.jpg` }, "climbing out"],
     [{ selector: "#card", path: `${ws}/tasks/t1/card.txt` }, "not a picture"],
     [{ url: "/logo.svg", path: `${ws}/tasks/t1/logo.png` }, "an SVG"],
-    [{ path: `${ws}/tasks/t1/none.jpg` }, "nothing to save"],
+    [{ path: `${ws}/tasks/t1/none.jpg` }, "no picture on the page to pick"],
   ] as const) {
     expect((await call("S", "browser_save_image", args)).result?.isError, why).toBe(true);
   }
   expect(fs.existsSync(path.join(ws, "..", "escape.jpg"))).toBe(false);
+
+  // Only a path: the page's declared picture, fetched exactly (no one copies its address).
+  await call("S", "browser_navigate", { url: `${origin}/declared` });
+  expect(text(await call("S", "browser_save_image", { path: `${ws}/tasks/t1/declared.png` }))).toContain("已保存");
+  expect(fs.readFileSync(`${ws}/tasks/t1/declared.png`).equals(png)).toBe(true);
+  // No declared picture: the largest one on the page.
+  await call("S", "browser_navigate", { url: `${origin}/gallery` });
+  expect(text(await call("S", "browser_save_image", { path: `${ws}/tasks/t1/largest.png` }))).toContain("已保存");
+  expect(fs.readFileSync(`${ws}/tasks/t1/largest.png`).equals(png)).toBe(true);
   site.close();
 });

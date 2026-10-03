@@ -603,7 +603,7 @@ const TOOLS = {
   },
   browser_save_image: {
     mode: 'read',
-    description: '把网页上的商品图或局部截图存进工作区，给回答里的商品卡片和图文混排用：给 selector 时，元素是图片或含有图片（例如商品主图）就下载这张图的原图，否则截取这个元素；给 url 时下载这张图片（例如主图 img 的 src，或页面的 og:image）。下载都以这个标签页的身份（Cookie、Referer）进行。path 是保存位置：工作区内的绝对路径，以 .jpg/.png/.webp 结尾，放在本任务目录里。返回保存的路径，回答里直接引用它（可只读查看其他任务的标签页）。',
+    description: '把网页上的商品图存进工作区，给回答里的商品卡片和图文混排用。在商品页上只给 path：自动存这一页的商品主图（页面声明的 og:image，没有就取页面上最大的图片）。在搜索结果等列表页上用 selector 指向那件商品的图片元素：元素是图片或含有图片就下载原图，否则截取这个元素。也可以给 url。都以这个标签页的身份（Cookie、Referer）下载，不必也不要手抄图片网址。path 是保存位置：工作区内的绝对路径，以 .jpg/.png/.webp 结尾，放在本任务目录里。返回保存的路径，回答里直接引用它（可只读查看其他任务的标签页）。',
     input: { path: { type: 'string', description: '保存到的绝对路径，例如 /home/gem/workspace/tasks/<任务目录>/saros-10r.jpg' }, selector: { type: 'string', description: '要截取的元素（Playwright 选择器）' }, url: { type: 'string', description: '要下载的图片地址（可以是相对地址）' }, tab: tabArg },
     required: ['path'],
     run: async (ctx, a) => {
@@ -637,7 +637,23 @@ const TOOLS = {
           data = await element.screenshot({ type: png ? 'png' : 'jpeg', ...(png ? {} : { quality: 85 }), timeout: 15000, animations: 'disabled' });
         }
       } else if (a.url) data = await download(a.url);
-      else throw new Error('需要 selector（图片元素或要截取的元素）或 url（图片地址）之一');
+      else {
+        // Only a path: the page's own main picture, the one it declares for sharing, else its largest.
+        const source = await tab.page.evaluate(() => {
+          const meta = document.querySelector('meta[property="og:image"], meta[name="og:image"], meta[property="twitter:image"], meta[name="twitter:image"]');
+          if (meta && meta.content) return new URL(meta.content, location.href).href;
+          let best = null; let area = 0;
+          for (const img of document.querySelectorAll('img')) {
+            const r = img.getBoundingClientRect();
+            if (r.width < 80 || r.height < 80 || r.width * r.height <= area) continue;
+            area = r.width * r.height;
+            best = img.getAttribute('data-old-hires') || img.currentSrc || img.src || null;
+          }
+          return best;
+        });
+        if (!source || !/^https?:/i.test(source)) throw new Error('这一页没找到商品主图：用 selector 指向商品图片元素，或给 url');
+        data = await download(source);
+      }
       if (!data.length || data.length > MAX_SAVED_IMAGE) throw new Error(data.length ? '图片超过 8 MB' : '得到的图片是空的');
       fs.mkdirSync(path.dirname(target), { recursive: true });
       fs.writeFileSync(target, data);
