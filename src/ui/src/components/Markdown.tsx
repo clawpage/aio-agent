@@ -6,10 +6,12 @@ import { isSandboxLink, isWorkspaceFilePath, workspaceFileKind, workspaceFilePat
 import { splitMapBlocks, type MessagePart } from "../mapBlocks";
 import { splitSvgBlocks, type SvgPart } from "../svgBlocks";
 import { splitChoiceBlocks, type ChoicePart } from "../choices";
+import { splitProductBlocks, type ProductPart } from "../productBlocks";
 import { cjkStrong } from "../markdownStrong";
 import { MapCard } from "./MapCard";
 import { SvgCard } from "./SvgCard";
 import { ChoiceList } from "./ChoiceList";
+import { ProductCards } from "./ProductCards";
 
 marked.setOptions({ gfm: true, breaks: true });
 
@@ -55,7 +57,10 @@ marked.use({
         if (kind === "video") return `<video class="inline-media" data-sandbox-video="${escapeAttr(filePath)}" controls playsinline preload="metadata"${titleAttr}></video>`;
         return "";
       }
-      return `<img class="inline-media" src="${escapeAttr(href)}" alt="${escapeAttr(text)}" loading="lazy"${titleAttr}>`;
+      // A web picture never loads from its host (the CSP admits only this origin):
+      // the component fetches it through the account's sandbox. Only https.
+      if (!/^https:\/\//i.test(href)) return "";
+      return `<img class="inline-media" data-web-image="${escapeAttr(href)}" alt="${escapeAttr(text)}"${titleAttr}>`;
     },
   },
 });
@@ -86,13 +91,15 @@ type MarkdownProps = {
 
 /**
  * A message: Markdown, with ```map blocks drawn as map cards, ```svg blocks as
- * pictures and ```choices blocks as answers to tap, where they stand.
+ * pictures, ```products blocks as product cards and ```choices blocks as answers
+ * to tap, where they stand.
  */
 export function Markdown(props: MarkdownProps) {
   const parts = useMemo(
     () => splitMapBlocks(props.source ?? "")
       .flatMap<MessagePart | SvgPart>((part) => (part.kind === "text" ? splitSvgBlocks(part.text) : [part]))
-      .flatMap<MessagePart | SvgPart | ChoicePart>((part) => (part.kind === "text" ? splitChoiceBlocks(part.text) : [part])),
+      .flatMap<MessagePart | SvgPart | ChoicePart>((part) => (part.kind === "text" ? splitChoiceBlocks(part.text) : [part]))
+      .flatMap<MessagePart | SvgPart | ChoicePart | ProductPart>((part) => (part.kind === "text" ? splitProductBlocks(part.text) : [part])),
     [props.source],
   );
   if (parts.length === 1 && parts[0]!.kind === "text") return <MarkdownBlock {...props} source={parts[0]!.text} />;
@@ -102,6 +109,8 @@ export function Markdown(props: MarkdownProps) {
         ? <MapCard key={i} place={part.place} />
         : part.kind === "svg"
           ? <SvgCard key={i} code={part.code} />
+          : part.kind === "products"
+            ? <ProductCards key={i} items={part.items} onOpenLink={props.onOpenLink} onOpenFile={props.onOpenFile} />
           : part.kind === "choices"
             ? <ChoiceList key={i} options={part.options} chosen={props.choices?.chosen ?? null} disabled={props.choices?.disabled} onChoose={props.choices?.onChoose} />
             : <MarkdownBlock key={i} {...props} source={part.text} />)}
@@ -124,7 +133,7 @@ function MarkdownBlock({
       // applied to every non-URI-safe attribute, it must be marked URI-safe or
       // DOMPurify would strip `tabindex="0"` and break keyboard focus.
       ADD_URI_SAFE_ATTR: ["tabindex"],
-      ADD_ATTR: ["target", "rel", "data-sandbox-file", "data-sandbox-image", "data-sandbox-video", "role", "tabindex", "controls", "playsinline", "preload", "loading"],
+      ADD_ATTR: ["target", "rel", "data-sandbox-file", "data-sandbox-image", "data-sandbox-video", "data-web-image", "role", "tabindex", "controls", "playsinline", "preload", "loading"],
       ...(document ? {
         FORBID_TAGS: ["form", "input", "button", "textarea", "select", "option", "iframe", "object", "embed", "svg", "math", "style"],
         FORBID_ATTR: ["style", "id", "name"],
@@ -143,7 +152,7 @@ function MarkdownBlock({
     const fail = (img: HTMLImageElement) => {
       const note = window.document.createElement("span");
       note.className = "inline-media-failed muted tiny";
-      note.textContent = `图片暂时无法显示：${img.alt || img.getAttribute("data-sandbox-image")?.split("/").pop() || ""}`;
+      note.textContent = `图片暂时无法显示：${img.alt || img.getAttribute("data-sandbox-image")?.split("/").pop() || img.getAttribute("data-web-image") || ""}`;
       img.replaceWith(note);
     };
     const load = (el: Element) => {
@@ -153,11 +162,12 @@ function MarkdownBlock({
         return;
       }
       const img = el as HTMLImageElement;
+      const web = img.getAttribute("data-web-image");
       const path = img.getAttribute("data-sandbox-image") ?? "";
-      if (!isWorkspaceFilePath(path) || workspaceFileKind(path) !== "image") return fail(img);
+      if (web !== null ? !/^https:\/\//i.test(web) : !isWorkspaceFilePath(path) || workspaceFileKind(path) !== "image") return fail(img);
       void (async () => {
         try {
-          const res = await fetch(api.documentImageUrl(path), { credentials: API_CREDENTIALS, signal: controller.signal });
+          const res = await fetch(web !== null ? api.webImageUrl(web) : api.documentImageUrl(path), { credentials: API_CREDENTIALS, signal: controller.signal });
           // Only an image response may reach the <img>, whatever answered.
           if (!res.ok || !(res.headers.get("content-type") ?? "").startsWith("image/")) throw new Error("unavailable");
           const blob = await res.blob();
@@ -170,7 +180,7 @@ function MarkdownBlock({
         }
       })();
     };
-    const media = [...container.querySelectorAll("img[data-sandbox-image], video[data-sandbox-video]")];
+    const media = [...container.querySelectorAll("img[data-sandbox-image], img[data-web-image], video[data-sandbox-video]")];
     let observer: IntersectionObserver | null = null;
     if (typeof IntersectionObserver === "function") {
       observer = new IntersectionObserver((entries) => {

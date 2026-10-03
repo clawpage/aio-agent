@@ -26,6 +26,25 @@ const MAX_RENDER_PAGES = 50;
 const MAX_PAGE_BYTES = 12 * 1024 * 1024;
 /** An image served inline is bounded too, so a huge "image" cannot be streamed. */
 const MAX_IMAGE_BYTES = 12 * 1024 * 1024;
+/** A web picture in a message (a product photo, say): fetched by the sandbox, bounded, cached. */
+const MAX_WEB_IMAGE_BYTES = 6 * 1024 * 1024;
+const WEB_IMAGE_CACHE_BYTES = 64 * 1024 * 1024;
+const WEB_IMAGE_TTL_MS = 24 * 3600_000;
+const WEB_IMAGE_FAILED_TTL_MS = 5 * 60_000;
+/** Runs in the sandbox with the URL as its only argument; prints the bytes as base64. */
+const WEB_IMAGE_SCRIPT = `import base64, sys, urllib.request
+limit = ${MAX_WEB_IMAGE_BYTES}
+req = urllib.request.Request(sys.argv[1], headers={"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36", "Accept": "image/avif,image/webp,image/png,image/jpeg,image/*;q=0.8"})
+try:
+    with urllib.request.urlopen(req, timeout=15) as r:
+        data = r.read(limit + 1)
+except Exception as e:
+    sys.stderr.write(type(e).__name__)
+    sys.exit(2)
+if len(data) > limit:
+    sys.exit(3)
+sys.stdout.write(base64.b64encode(data).decode())
+`;
 
 /**
  * Identify an image by its leading bytes. The extension already said "image";
@@ -105,7 +124,8 @@ export type DocumentErrorCode =
   | "busy"
   | "sandbox_unreachable"
   | "bad_request"
-  | "page_unavailable";
+  | "page_unavailable"
+  | "fetch_failed";
 
 export class DocumentError extends Error {
   readonly code: DocumentErrorCode;
@@ -200,6 +220,9 @@ export class DocumentService {
   #inflight = new Map<string, Promise<RenderResult>>();
   #scriptsHash: string | null = null;
   #scriptsReady = false;
+  #webImages = new Map<string, { bytes: Buffer; contentType: string; at: number } | { failed: DocumentError; at: number }>();
+  #webImageBytes = 0;
+  #webImageInflight = new Map<string, Promise<{ bytes: Buffer; contentType: string }>>();
 
   constructor(cfg: Config, log: Logger, container: SandboxContainer) {
     this.#cfg = cfg;
@@ -989,6 +1012,65 @@ print("venv" if venv_python else "novenv")
       throw new DocumentError("unsupported", "文件内容不是可识别的图片格式", 415);
     }
     return { bytes, contentType };
+  }
+
+  /**
+   * A web picture a message shows. The account's own sandbox downloads it (it can
+   * reach the web anyway, so the control plane gains no fetch-anything ability),
+   * and only raster image bytes come back: never SVG, HTML or a redirect target's
+   * error page. Results are cached; a failure is remembered briefly.
+   */
+  async webImage(raw: string): Promise<{ bytes: Buffer; contentType: string }> {
+    let url: URL;
+    try {
+      url = new URL(raw);
+    } catch {
+      throw new DocumentError("bad_request", "图片地址无效", 400);
+    }
+    if (url.protocol !== "https:" || url.username || url.password || raw.length > 2048) throw new DocumentError("bad_request", "只能显示 https 图片", 400);
+    const key = url.href;
+    const cached = this.#webImages.get(key);
+    if (cached && Date.now() - cached.at < ("failed" in cached ? WEB_IMAGE_FAILED_TTL_MS : WEB_IMAGE_TTL_MS)) {
+      if ("failed" in cached) throw cached.failed;
+      return { bytes: cached.bytes, contentType: cached.contentType };
+    }
+    let pending = this.#webImageInflight.get(key);
+    if (!pending) {
+      pending = this.#fetchWebImage(key).finally(() => this.#webImageInflight.delete(key));
+      this.#webImageInflight.set(key, pending);
+    }
+    return pending;
+  }
+
+  async #fetchWebImage(key: string): Promise<{ bytes: Buffer; contentType: string }> {
+    const remember = (entry: { bytes: Buffer; contentType: string } | { failed: DocumentError }) => {
+      const old = this.#webImages.get(key);
+      if (old && "bytes" in old) this.#webImageBytes -= old.bytes.length;
+      this.#webImages.delete(key);
+      this.#webImages.set(key, { ...entry, at: Date.now() });
+      if ("bytes" in entry) this.#webImageBytes += entry.bytes.length;
+      // Oldest first: a Map iterates in insertion order.
+      for (const [k, v] of this.#webImages) {
+        if (this.#webImageBytes <= WEB_IMAGE_CACHE_BYTES && this.#webImages.size <= 500) break;
+        this.#webImages.delete(k);
+        if ("bytes" in v) this.#webImageBytes -= v.bytes.length;
+      }
+    };
+    const result = await this.#container.execInSandbox(["python3", "-c", WEB_IMAGE_SCRIPT, key], { timeoutMs: 25_000 });
+    let failure: DocumentError | null = null;
+    let bytes = Buffer.alloc(0);
+    if (result.code === 3) failure = new DocumentError("too_large", `图片超过 ${formatBytes(MAX_WEB_IMAGE_BYTES)}`, 413);
+    else if (result.code !== 0) failure = new DocumentError("fetch_failed", "图片暂时取不到", 502);
+    else bytes = Buffer.from(result.stdout.trim(), "base64");
+    const contentType = failure ? null : sniffImage(bytes);
+    if (!failure && !contentType) failure = new DocumentError("unsupported", "地址返回的不是图片", 415);
+    if (failure) {
+      remember({ failed: failure });
+      throw failure;
+    }
+    const image = { bytes, contentType: contentType! };
+    remember(image);
+    return image;
   }
 
   /** Drop one file's cached renders (used after a document-tool write). */

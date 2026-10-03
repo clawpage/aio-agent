@@ -45,6 +45,7 @@ beforeAll(async () => {
   patchright = await patchedPatchright();
   process.env.AIO_TABS_PLAYWRIGHT = patchright;
   process.env.AIO_TABS_OUTPUT = dir;
+  process.env.AIO_TABS_WORKSPACE = path.join(dir, "workspace");
   process.env.AIO_TABS_STATE = path.join(dir, "state.json");
   process.env.AIO_TABS_MAX_FINISHED = "2";
   process.env.AIO_TABS_HUMAN_WAIT_MS = "3000";
@@ -419,4 +420,41 @@ it.skipIf(!hasChromium)("closes a tab whose renderer crashed and keeps serving e
   // The task carries on in a fresh tab.
   expect(text(await call("K", "browser_navigate", { url: page("Again", "again body") }))).toContain("Again");
   expect(text(await call("K", "browser_get_text"))).toContain("again body");
+});
+
+it.skipIf(!hasChromium)("saves a product picture into the workspace, by element or by address with the page's own referer", async () => {
+  const png = Buffer.from("89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000a49444154789c6360000002000100ffff03000006000557bfabd40000000049454e44ae426082", "hex");
+  const site = (await import("node:http")).createServer((req, res) => {
+    // A store that refuses its pictures to anyone but its own pages.
+    if (req.url === "/item.png") {
+      if (!String(req.headers.referer ?? "").endsWith("/product")) { res.writeHead(403).end(); return; }
+      res.setHeader("content-type", "image/png"); res.end(png); return;
+    }
+    if (req.url === "/logo.svg") { res.setHeader("content-type", "image/svg+xml"); res.end("<svg xmlns='http://www.w3.org/2000/svg'/>"); return; }
+    res.setHeader("content-type", "text/html; charset=utf-8");
+    res.end('<title>Product</title><img id="main" src="/item.png" width="40" height="40"><div id="card" style="width:200px;height:100px;background:#2a6">卡片</div>');
+  });
+  await new Promise<void>((r) => site.listen(0, "127.0.0.1", r));
+  const origin = `http://127.0.0.1:${(site.address() as net.AddressInfo).port}`;
+  const ws = process.env.AIO_TABS_WORKSPACE!;
+  await call("S", "browser_navigate", { url: `${origin}/product` });
+
+  const card = await call("S", "browser_save_image", { selector: "#card", path: `${ws}/tasks/t1/card.jpg` });
+  expect(text(card)).toContain(`已保存：${ws}/tasks/t1/card.jpg`);
+  expect([...fs.readFileSync(`${ws}/tasks/t1/card.jpg`).subarray(0, 3)]).toEqual([0xff, 0xd8, 0xff]);
+  const saved = await call("S", "browser_save_image", { url: "/item.png", path: `${ws}/tasks/t1/item.png` });
+  expect(saved.result?.isError).toBeUndefined();
+  expect(fs.readFileSync(`${ws}/tasks/t1/item.png`).equals(png)).toBe(true);
+
+  for (const [args, why] of [
+    [{ selector: "#card", path: "/etc/card.jpg" }, "outside the workspace"],
+    [{ selector: "#card", path: `${ws}/../escape.jpg` }, "climbing out"],
+    [{ selector: "#card", path: `${ws}/tasks/t1/card.txt` }, "not a picture"],
+    [{ url: "/logo.svg", path: `${ws}/tasks/t1/logo.png` }, "an SVG"],
+    [{ path: `${ws}/tasks/t1/none.jpg` }, "nothing to save"],
+  ] as const) {
+    expect((await call("S", "browser_save_image", args)).result?.isError, why).toBe(true);
+  }
+  expect(fs.existsSync(path.join(ws, "..", "escape.jpg"))).toBe(false);
+  site.close();
 });

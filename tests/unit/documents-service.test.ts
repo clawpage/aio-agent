@@ -585,3 +585,37 @@ describe("DocumentError", () => {
     expect(err).toBeInstanceOf(Error);
   });
 });
+
+describe("web pictures in messages", () => {
+  const ok = (bytes: Buffer): DockerRunResult => ({ code: 0, stdout: bytes.toString("base64"), stderr: "" });
+  const fetches = (container: FakeContainer) => container.calls.filter((argv) => argv[0] === "python3" && argv[1] === "-c");
+
+  it("lets the account's sandbox fetch an https picture, once, and returns only image bytes", async () => {
+    const { svc, container } = service((argv) => (argv[0] === "python3" ? ok(PNG) : undefined));
+    const url = "https://m.media-amazon.com/images/I/saros.png";
+    const [a, b] = await Promise.all([svc.webImage(url), svc.webImage(url)]);
+    expect(a).toEqual({ bytes: PNG, contentType: "image/png" });
+    expect(b.bytes.equals(PNG)).toBe(true);
+    // Fixed code, the URL as its only argument: nothing of it reaches a shell.
+    expect(fetches(container)).toEqual([["python3", "-c", expect.stringContaining("urllib.request"), url]]);
+    await svc.webImage(url);
+    expect(fetches(container)).toHaveLength(1);
+  });
+
+  it("refuses what is not an https picture, and remembers a failure for a while", async () => {
+    const { svc, container } = service((argv) => {
+      if (argv[0] !== "python3") return undefined;
+      if (argv[3]!.endsWith("page.html")) return ok(Buffer.from("<html><script>alert(1)</script></html>"));
+      if (argv[3]!.endsWith("huge.jpg")) return { code: 3, stdout: "", stderr: "" };
+      return { code: 2, stdout: "", stderr: "URLError" };
+    });
+    for (const bad of ["http://example.com/a.png", "javascript:alert(1)", "https://user:pw@example.com/a.png", "not a url", `https://example.com/${"a".repeat(2100)}.png`]) {
+      await expect(svc.webImage(bad), bad).rejects.toMatchObject({ status: 400 });
+    }
+    await expect(svc.webImage("https://example.com/page.html")).rejects.toMatchObject({ status: 415 });
+    await expect(svc.webImage("https://example.com/huge.jpg")).rejects.toMatchObject({ status: 413 });
+    await expect(svc.webImage("https://example.com/down.jpg")).rejects.toMatchObject({ status: 502 });
+    await expect(svc.webImage("https://example.com/down.jpg")).rejects.toBeInstanceOf(DocumentError);
+    expect(fetches(container).map((argv) => argv[3])).toEqual(["https://example.com/page.html", "https://example.com/huge.jpg", "https://example.com/down.jpg"]);
+  });
+});

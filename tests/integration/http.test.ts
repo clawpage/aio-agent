@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import net from "node:net";
 import { login, rawUpgrade, startHarness, type TestHarness } from "../helpers/harness.js";
+import { DocumentError } from "../../src/control/documents/service.js";
 
 let h: TestHarness;
 
@@ -1246,6 +1247,28 @@ describe("document endpoints", () => {
       text.mockResolvedValue({text:"partial",size:999999,truncated:true});
       expect((await h.request("/api/documents/html?path=/home/gem/workspace/demo.html",{host:"workspace",headers:{cookie:wsCookie}})).status).toBe(413);
     } finally {text.mockRestore();}
+  });
+  it("serves a web picture for a message only to a signed-in console, fetched by the sandbox", async () => {
+    const { cookie } = await login(h);
+    const png = Buffer.from("png-bytes");
+    const web = vi.spyOn(h.ctx.documents, "webImage").mockImplementation(async (url) => {
+      if (url.endsWith("gone.jpg")) throw new DocumentError("fetch_failed", "图片暂时取不到", 502);
+      return { bytes: png, contentType: "image/png" };
+    });
+    try {
+      const url = encodeURIComponent("https://m.media-amazon.com/images/I/a.png");
+      expect((await h.request(`/api/documents/web-image?url=${url}`)).status).toBe(401);
+      const res = await h.request(`/api/documents/web-image?url=${url}`, { headers: { cookie } });
+      expect(res.status).toBe(200);
+      expect(res.headers.get("content-type")).toBe("image/png");
+      expect(res.headers.get("x-content-type-options")).toBe("nosniff");
+      expect(res.headers.get("content-security-policy")).toContain("sandbox");
+      expect(await res.text()).toBe("png-bytes");
+      expect(web).toHaveBeenCalledWith("https://m.media-amazon.com/images/I/a.png");
+      const gone = await h.request(`/api/documents/web-image?url=${encodeURIComponent("https://x.example/gone.jpg")}`, { headers: { cookie } });
+      expect(gone.status).toBe(502);
+      expect(await gone.json()).toMatchObject({ error: "fetch_failed" });
+    } finally { web.mockRestore(); }
   });
   it("serves a workspace SVG only as an image under a scriptless sandbox CSP", async () => {
     const { cookie } = await login(h);

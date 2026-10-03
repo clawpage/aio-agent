@@ -2911,6 +2911,88 @@ textarea:focus {
   background: var(--text);
 }
 
+/* --------------------------------------------------------- product cards */
+/* A ```products block: each item's picture beside its price, store and reasons, one card each. */
+.product-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr));
+  gap: 10px;
+  margin: 10px 0;
+}
+.product-card {
+  display: flex;
+  gap: 12px;
+  min-width: 0;
+  padding: 10px;
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+}
+.product-media {
+  flex: none;
+  width: 104px;
+  height: 104px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  /* Product photos assume a white page, in the dark theme too. */
+  background: #fff;
+  border: 0;
+  border-radius: 10px;
+}
+button.product-media { cursor: zoom-in; }
+.product-media img { width: 100%; height: 100%; object-fit: contain; }
+.product-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  color: color-mix(in srgb, var(--text-dim) 60%, transparent);
+  background: var(--bg-raised);
+}
+.product-placeholder.loading { animation: breathe 1.6s var(--ease) infinite; }
+.product-body { display: flex; flex-direction: column; gap: 4px; min-width: 0; flex: 1; }
+.product-title { display: flex; align-items: flex-start; gap: 6px; min-width: 0; }
+.product-name { font-weight: 600; line-height: 1.35; overflow-wrap: anywhere; }
+.product-badge {
+  flex: none;
+  padding: 1px 6px;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--ai);
+  background: var(--ai-soft);
+  border-radius: 6px;
+}
+.product-price { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.product-price strong { font-size: 18px; }
+.product-price s { font-size: 13px; color: var(--text-dim); }
+.product-meta { display: flex; gap: 10px; flex-wrap: wrap; font-size: 13px; color: var(--text-dim); }
+.product-points { margin: 2px 0 0; padding-left: 18px; font-size: 13px; line-height: 1.5; }
+.product-note { margin: 0; font-size: 13px; color: var(--text-dim); line-height: 1.5; }
+.product-link {
+  align-self: flex-start;
+  margin-top: 6px;
+  padding: 4px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 20px;
+  color: var(--accent);
+  text-decoration: none;
+  background: var(--accent-soft);
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  border-radius: 999px;
+  transition: filter var(--dur-fast) var(--ease);
+}
+.product-link:hover { filter: brightness(1.08); }
+.product-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+@media (max-width: 480px) {
+  .product-media { width: 88px; height: 88px; }
+  .product-price strong { font-size: 17px; }
+}
+
 /* ------------------------------------------------------------- svg cards */
 /* An SVG from a message, drawn as a picture (an <img>), its source one tap away. */
 .svg-card {

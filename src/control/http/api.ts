@@ -1354,6 +1354,20 @@ export function createApiRouter(context: AppContext): Router {
     }),
   );
 
+  // A web picture in a message (a product photo): the console's CSP admits only
+  // this origin, so the account's sandbox fetches it and only image bytes return.
+  router.get("/documents/web-image", requireKind("primary"), requireSession,
+    documentHandler(async (req, res) => {
+      const image = await context.documents.webImage(String(req.query.url ?? ""));
+      res.setHeader("Content-Type", image.contentType);
+      res.setHeader("X-Content-Type-Options", "nosniff");
+      res.setHeader("Content-Security-Policy", "default-src 'none'; sandbox");
+      res.setHeader("Cache-Control", "private, max-age=86400");
+      res.setHeader("Content-Disposition", "inline");
+      res.end(image.bytes);
+    }),
+  );
+
   router.get("/documents/video", requireKind("primary"), requireSession,
     documentHandler(async (req, res) => {
       const target = checkedDocumentPath(String(req.query.path ?? ""));

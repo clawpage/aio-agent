@@ -29,6 +29,9 @@ const PORT = Number(process.env.AIO_TABS_PORT || 8190);
 const CDP = process.env.AIO_TABS_CDP || 'http://127.0.0.1:9222';
 const OUTPUT_DIR = process.env.AIO_TABS_OUTPUT || '/home/gem/workspace/.scratch/artifacts/browser';
 const STATE_FILE = process.env.AIO_TABS_STATE || '/tmp/aio-tabs-state.json';
+/** Where browser_save_image may write (the person's workspace). */
+const WORKSPACE = process.env.AIO_TABS_WORKSPACE || '/home/gem/workspace';
+const MAX_SAVED_IMAGE = 8 * 1024 * 1024;
 const MAX_FINISHED_TABS = Number(process.env.AIO_TABS_MAX_FINISHED || 8);
 /** A finished task's tabs stay this long for a follow-up, then close on their own. */
 const FINISHED_TTL_MS = Number(process.env.AIO_TABS_FINISHED_TTL_MS || 10 * 60 * 1000);
@@ -596,6 +599,34 @@ const TOOLS = {
       const data = await capture(tab.page, { fullPage: Boolean(a.full_page) });
       fs.writeFileSync(file, data);
       return { content: [{ type: 'image', data: data.toString('base64'), mimeType: 'image/jpeg' }, { type: 'text', text: `${await describe(tab)}\n截图已保存：${file}` }] };
+    },
+  },
+  browser_save_image: {
+    mode: 'read',
+    description: '把网页上的商品图或局部截图存进工作区，给回答里的商品卡片和图文混排用：给 selector 时截取这个元素（例如商品主图、商品卡片区域）；给 url 时以这个标签页的身份（Cookie、Referer）下载这张图片（例如主图 img 的 src，或页面的 og:image）。path 是保存位置：工作区内的绝对路径，以 .jpg/.png/.webp 结尾，放在本任务目录里。返回保存的路径，回答里直接引用它（可只读查看其他任务的标签页）。',
+    input: { path: { type: 'string', description: '保存到的绝对路径，例如 /home/gem/workspace/tasks/<任务目录>/saros-10r.jpg' }, selector: { type: 'string', description: '要截取的元素（Playwright 选择器）' }, url: { type: 'string', description: '要下载的图片地址（可以是相对地址）' }, tab: tabArg },
+    required: ['path'],
+    run: async (ctx, a) => {
+      const tab = await resolveTab(ctx, a.tab, 'read');
+      const target = path.posix.normalize(String(a.path || ''));
+      if (!target.startsWith(`${WORKSPACE}/`) || !/\.(jpe?g|png|webp)$/i.test(target)) throw new Error(`path 必须是 ${WORKSPACE} 里以 .jpg、.png 或 .webp 结尾的绝对路径`);
+      let data;
+      if (a.selector) {
+        const png = /\.png$/i.test(target);
+        data = await tab.page.locator(String(a.selector)).first().screenshot({ type: png ? 'png' : 'jpeg', ...(png ? {} : { quality: 85 }), timeout: 15000, animations: 'disabled' });
+      } else if (a.url) {
+        const from = new URL(String(a.url), tab.page.url());
+        if (!/^https?:$/.test(from.protocol)) throw new Error('url 必须是 http(s) 图片地址');
+        const res = await tab.page.context().request.get(from.href, { headers: { referer: tab.page.url() }, timeout: 20000, maxRedirects: 5 });
+        if (!res.ok()) throw new Error(`图片下载失败：HTTP ${res.status()}`);
+        const type = String(res.headers()['content-type'] || '');
+        if (!type.startsWith('image/') || type.includes('svg')) throw new Error(`这个地址返回的不是位图（${type || '未知类型'}），换主图的地址或改用 selector 截图`);
+        data = await res.body();
+      } else throw new Error('需要 selector（截取元素）或 url（下载图片）之一');
+      if (!data.length || data.length > MAX_SAVED_IMAGE) throw new Error(data.length ? '图片超过 8 MB' : '得到的图片是空的');
+      fs.mkdirSync(path.dirname(target), { recursive: true });
+      fs.writeFileSync(target, data);
+      return textResult(`已保存：${target}（${Math.max(1, Math.round(data.length / 1024))} KB）`);
     },
   },
   browser_click: {
