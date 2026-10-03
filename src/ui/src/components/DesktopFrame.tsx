@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 /** The sandbox desktop's own size (Xvnc -geometry 1280x1024 in the image): noVNC draws it at this aspect. */
 const DESKTOP_ASPECT = 1024 / 1280;
@@ -51,6 +51,12 @@ export function DesktopFrame({ src, title, onLoad, interactive = true }: { src: 
     return () => observer.disconnect();
   }, []);
   const zoomed = phone && size.width > 0;
+  // Zoomed, the view opens on the middle of the desktop; it is centred again only when the width changes
+  // (a turned phone), never when a keyboard changes the height, so a pan the person made stays.
+  useLayoutEffect(() => {
+    const el = box.current;
+    if (el && zoomed) el.scrollLeft = Math.max(0, (el.scrollWidth - el.clientWidth) / 2);
+  }, [zoomed, size.width]);
 
   const post = useCallback((message: DesktopMessage) => {
     frame.current?.contentWindow?.postMessage({ aio: "desktop", ...message }, "*");

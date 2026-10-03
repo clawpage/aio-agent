@@ -35,6 +35,8 @@ test("the workspace is a desktop: a menu bar, one app window, a Dock, and minimi
   if (mobile) {
     expect(Math.abs(geometry.frame - geometry.box * 1.6)).toBeLessThan(2);
     expect(geometry.scroll).toBeGreaterThan(geometry.box * 1.5);
+    // It opens on the middle of the desktop, not its left edge.
+    expect(Math.abs((await frame.evaluate((el) => el.scrollLeft)) - (geometry.scroll - geometry.box) / 2)).toBeLessThan(2);
     await frame.evaluate((el) => { el.scrollLeft = 150; });
     expect(await frame.evaluate((el) => el.scrollLeft)).toBeGreaterThan(100);
   } else {

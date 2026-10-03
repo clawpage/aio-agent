@@ -486,6 +486,8 @@ test("a link in a reply opens in the person's own tab, operated on the desktop l
     if (info.project.name.startsWith("mobile")) {
         expect(Math.abs(geometry.frame - geometry.box * 1.6)).toBeLessThan(2);
         expect(geometry.scroll).toBeGreaterThan(geometry.box * 1.5);
+        // It opens on the middle of the desktop, not its left edge.
+        expect(Math.abs((await frame.evaluate((el) => el.scrollLeft)) - (geometry.scroll - geometry.box) / 2)).toBeLessThan(2);
         // The desktop's controls sit in the black strip under it, where noVNC's left bar used to be.
         const bar = panel.getByRole("toolbar", { name: "桌面操作" });
         await expect(bar).toContainText("左右滑动看全部");
