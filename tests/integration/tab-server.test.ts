@@ -432,7 +432,7 @@ it.skipIf(!hasChromium)("saves a product picture into the workspace, by element 
     }
     if (req.url === "/logo.svg") { res.setHeader("content-type", "image/svg+xml"); res.end("<svg xmlns='http://www.w3.org/2000/svg'/>"); return; }
     res.setHeader("content-type", "text/html; charset=utf-8");
-    res.end('<title>Product</title><img id="main" src="/item.png" width="40" height="40"><div id="card" style="width:200px;height:100px;background:#2a6">卡片</div>');
+    res.end('<title>Product</title><div id="gallery"><img id="main" src="/item.png" width="40" height="40"></div><div id="card" style="width:200px;height:100px;background:#2a6">卡片</div>');
   });
   await new Promise<void>((r) => site.listen(0, "127.0.0.1", r));
   const origin = `http://127.0.0.1:${(site.address() as net.AddressInfo).port}`;
@@ -445,6 +445,12 @@ it.skipIf(!hasChromium)("saves a product picture into the workspace, by element 
   const saved = await call("S", "browser_save_image", { url: "/item.png", path: `${ws}/tasks/t1/item.png` });
   expect(saved.result?.isError).toBeUndefined();
   expect(fs.readFileSync(`${ws}/tasks/t1/item.png`).equals(png)).toBe(true);
+  // A picture element (or one holding a picture) is downloaded as the original, with the page's referer.
+  for (const selector of ["#main", "#gallery"]) {
+    const target = `${ws}/tasks/t1/by-${selector.slice(1)}.png`;
+    expect((await call("S", "browser_save_image", { selector, path: target })).result?.isError, selector).toBeUndefined();
+    expect(fs.readFileSync(target).equals(png), selector).toBe(true);
+  }
 
   for (const [args, why] of [
     [{ selector: "#card", path: "/etc/card.jpg" }, "outside the workspace"],
