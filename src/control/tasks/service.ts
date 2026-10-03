@@ -6,8 +6,8 @@ import type { Db } from "../db.js";
 import type { Config } from "../config.js";
 import { randomId } from "../auth/passwords.js";
 import { AgentManager, TurnConflictError, type AgentEvent, type CodexSessionLike, type TurnAttachment } from "../codex/manager.js";
-import { normalizeResource, resolveResources, type ResourceSandbox } from "./resources.js";
-import { applyTaskReference, parsePlan, parseSearch, planningPrompt, resourcesConflict, type DispatchHint, type PlanningTask, type PlanReport, type TaskPlan } from "./planning.js";
+import { claimsConflict, normalizeResource, resolveResources, type Claims, type ResourceSandbox } from "./resources.js";
+import { applyTaskReference, parsePlan, parseSearch, planningPrompt, type DispatchHint, type PlanningTask, type PlanReport, type TaskPlan } from "./planning.js";
 import { recordRecall, STEP_ANSWER_CHARS, STEP_PROMPT_CHARS, TaskRecall, type RecallEvent, type RecallSource } from "./recall.js";
 import { formatRelevance, formatTimeline, jevRelevance, lastQuestion, routingQuestion, timeline, type JevRelevance } from "./context.js";
 import { confident } from "../jev.js";
@@ -162,9 +162,14 @@ export class TaskService {
         };
     }
     private claims(row: TaskRow, plan?: TaskPlan): string[] {
+        const { declared, own } = this.held(row, plan);
+        return [...new Set([...declared, ...own])];
+    }
+    /** The dispatcher's claims, apart from what the server reserves for the task alone. */
+    private held(row: TaskRow, plan?: TaskPlan): Claims {
         const p = plan ?? (row.plan_json ? JSON.parse(row.plan_json) as TaskPlan : null);
-        if (!p) return ["all"];
-        return [...new Set([...p.resources, `write:${this.cfg.sandbox.containerWorkspaceDir}/tasks/${row.id}`, ...(p.ownedResources ?? [])])];
+        if (!p) return { declared: ["all"], own: [] };
+        return { declared: p.resources, own: [`write:${this.cfg.sandbox.containerWorkspaceDir}/tasks/${row.id}`, ...(p.ownedResources ?? [])] };
     }
     private waitReason(row: TaskRow): { label: string; message: string } | null {
         if (!["waiting", "merging"].includes(row.status) || !row.plan_json) return null;
@@ -176,7 +181,7 @@ export class TaskService {
         const parent = row.merged_into ? this.get(row.merged_into) : null;
         const claims = parent ? [...this.claims(parent), ...this.claims(row)] : this.claims(row);
         const active = this.rows().filter(t => DISPATCHED.has(t.status) && t.id !== parent?.id);
-        const blocker = active.find(t => resourcesConflict(claims, this.claims(t)));
+        const blocker = active.find(t => (parent ? [parent, row] : [row]).some(mine => claimsConflict(this.held(mine), this.held(t))));
         if (blocker) {
             const browser = claims.includes("browser") && this.claims(blocker).includes("browser");
             return { label: browser ? "等待浏览器" : "等待文件操作", message: `${this.ownerId(blocker) === this.ownerId(row) ? `“${blocker.title}”` : "另一项任务"}正在使用${browser ? "共享浏览器" : "同一文件范围或共享环境"}，结束后自动继续。` };
@@ -532,7 +537,7 @@ export class TaskService {
                 const parentPlan=JSON.parse(parent.plan_json) as TaskPlan;
                 const resources=[...new Set([...parentPlan.resources,...plan.resources])];
                 const otherActive=this.rows().filter(t=>t.id!==parent.id && DISPATCHED.has(t.status));
-                if(otherActive.some(t=>resourcesConflict([...this.claims(parent, parentPlan), ...this.claims(row, plan)],this.claims(t)))) continue;
+                if(otherActive.some(t=>claimsConflict(this.held(parent, parentPlan),this.held(t)) || claimsConflict(this.held(row, plan),this.held(t)))) continue;
                 // Reserve the expanded resource set before sending the update.
                 parentPlan.resources=resources;
                 parentPlan.ownedResources=[...new Set([...(parentPlan.ownedResources ?? []),...(plan.ownedResources ?? [])])];
@@ -584,7 +589,7 @@ export class TaskService {
             }
             if (deps.some(d => d!.status !== "completed"))
                 continue;
-            if (active.some(t => resourcesConflict(this.claims(row, plan), this.claims(t))))
+            if (active.some(t => claimsConflict(this.held(row, plan), this.held(t))))
                 continue;
             if (active.some(t => this.executor(t) === this.executor(row))) continue;
             const related = plan.related.map(id => this.get(id)).filter((t): t is TaskRow => !!t);

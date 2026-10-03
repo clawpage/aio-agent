@@ -311,13 +311,26 @@ describe("main inbox delegation", () => {
         const waiting=tasks.view(tasks.get(overlap.id)!);expect(waiting.status).toBe("waiting");expect(waiting.waitReason?.label).toBe("等待文件操作");expect(waiting.waitReason?.message).toContain("“a”");
         codex.completeTurn(codex.startedTurns[0]!.turnId);await tick();expect(tasks.get(overlap.id)?.status).toBe("running");expect(tasks.view(tasks.get(overlap.id)!).waitReason).toBeNull();
     });
-    it("protects implicit task directories and keeps legacy broad workspace claims conservative",async()=>{
+    it("protects implicit task directories from path claims over them",async()=>{
         const doc=submit("document");await tick();
         codex.plan=async()=>JSON.stringify({title:"delete tasks",related:[],dependencies:[],resources:["write:/home/gem/workspace/tasks"]});
         const deletion=submit("delete task directories");await tick();expect(tasks.get(deletion.id)?.status).toBe("waiting");
-        codex.plan=async()=>JSON.stringify({title:"legacy",related:[],dependencies:[],resources:["workspace"]});
-        const broad=submit("global install");await tick();expect(tasks.get(broad.id)?.status).toBe("waiting");
-        codex.completeTurn(codex.startedTurns[0]!.turnId);await tick();expect(tasks.get(deletion.id)?.status).toBe("running");expect(tasks.get(broad.id)?.status).toBe("waiting");
+        codex.completeTurn(codex.startedTurns[0]!.turnId);await tick();expect(tasks.get(doc.id)?.status).toBe("completed");expect(tasks.get(deletion.id)?.status).toBe("running");
+    });
+    it("runs a shared-environment task beside tasks that declared nothing; it waits only for declared scopes",async()=>{
+        const plan=(title:string,...resources:string[])=>{codex.plan=async()=>JSON.stringify({title,related:[],dependencies:[],resources});};
+        plan("research","browser");const research=submit("browse reviews");await tick();
+        plan("install","workspace");const install=submit("global install");await tick();
+        plan("chat");const chat=submit("quick question");await tick();
+        for(const t of [research,install,chat]) expect(tasks.get(t.id)?.status).toBe("running");
+        // Leave a free slot, so what follows waits for claims and not for a place.
+        codex.completeTurn(codex.startedTurns[2]!.turnId);await tick();expect(tasks.get(chat.id)?.status).toBe("completed");
+        plan("edit","write:/home/gem/workspace/projects/a");const edit=submit("edit project");await tick();
+        plan("second install","workspace");const second=submit("another global install");await tick();
+        for(const t of [edit,second]){const waiting=tasks.view(tasks.get(t.id)!);expect(waiting.status).toBe("waiting");expect(waiting.waitReason?.label).toBe("等待文件操作");expect(waiting.waitReason?.message).toContain("“install”");}
+        codex.completeTurn(codex.startedTurns[1]!.turnId);await tick();
+        expect(tasks.get(install.id)?.status).toBe("completed");expect(tasks.get(edit.id)?.status).toBe("running");
+        const still=tasks.view(tasks.get(second.id)!);expect(still.status).toBe("waiting");expect(still.waitReason?.message).toContain("“edit”");
     });
     it("waits for a scoped resource upgrade without reserving it or blocking independent work",async()=>{
         codex.plan=async()=>JSON.stringify({title:"writer",related:[],dependencies:[],resources:["write:/home/gem/workspace/projects/a"]});

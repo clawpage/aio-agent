@@ -102,7 +102,7 @@ export function planningPrompt(text: string, previous: PlanningTask[], explicit:
         "代词、‘继续/改一下/刚才那个’按相邻优先结合最近的相关任务理解；需要尚未产出的文件或结果时必须声明依赖，不能臆造已完成。",
         "修复 failed、unknown、blocked、planning_failed 任务时可以 related 引用背景，但不要把它列为必须成功完成的 dependencies。",
         `资源按最小必要范围声明：browser 表示共享浏览器；read:绝对路径 表示读取已有文件/目录；write:绝对路径 表示修改或删除该文件/目录。路径必须在 ${workspaceRoot} 内，父目录覆盖后代；同一目录只读可并行。仅使用用户消息、附件或相关任务结果中明确的真实路径，不猜项目路径。`,
-        "workspace 仅用于全局安装依赖、改变共享运行环境、全工作区操作，或确实要修改已有内容但无法确定路径。已知路径的项目安装依赖/修改/删除申请该项目的 write 路径，不锁整个工作区。",
+        `workspace 仅用于全局安装依赖、改变共享运行环境，或确实要修改已有内容但无法确定路径；它只与其他 workspace 任务及声明了路径的任务互相等待，不影响只在各自任务目录里工作的任务。要动整个工作区（清空、整体移动或打包全部内容）时申请 write:${workspaceRoot}，等其他任务都结束。已知路径的项目安装依赖/修改/删除申请该项目的 write 路径，不锁整个工作区。`,
         "制作新的 PPT、Word、Excel、Markdown、HTML、图片等交付物默认 resources=[]，使用预装工具并在本任务目录生成、转换、检查、删除临时文件，都不需要 workspace。不要因为要运行 shell/Python/LibreOffice 就申请 workspace；不得臆测需要全局安装依赖。只有实际要修改已有共享内容才申请对应写锁；读取已知附件加 read 路径。纯推理为空。",
         "previous 只列出近期、进行中、今天的任务，以及按本消息从全部历史任务中检索召回的任务；source 标明来源（recent/active 近期与进行中，today 今天，recall/context 自动召回，search 按你的关键词检索，explicit 用户指定），date、time 为创建日期与时刻，order 为从新到旧的顺位。召回的任务只给摘录。",
         search.canSearch

@@ -23,12 +23,25 @@ export function resourcesConflict(a: string[], b: string[]): boolean {
     return a.some(x => b.some(y => {
         // Each task drives its own tabs; the shared browser itself is never exclusive.
         if (x === "browser" || y === "browser") return false;
-        // Legacy workspace claims remain conservative; do not silently narrow active work.
+        // Against bare claim lists `workspace` stays conservative; claimsConflict narrows a declared one.
         if (x === "workspace" || y === "workspace") return true;
         const p = pathClaim(x), q = pathClaim(y);
         if (!p || !q) return true;
         return (p.mode === "write" || q.mode === "write") && (within(p.path, q.path) || within(q.path, p.path));
     }));
+}
+/** What a task holds: `declared` by the dispatcher, `own` reserved by the server for that task alone (its directory, its attachments). */
+export interface Claims { declared: string[]; own: string[] }
+/**
+ * A declared `workspace` is the shared environment (global installs, writes of
+ * unknown scope), not other tasks' own directories: it waits only for what
+ * another task declared. A `workspace` among `own` claims is the resolver's
+ * fallback and still waits for everything.
+ */
+export function claimsConflict(a: Claims, b: Claims): boolean {
+    const flat = (c: Claims) => [...c.declared.filter(r => r !== "workspace"), ...c.own];
+    const shared = (c: Claims, other: Claims) => c.declared.includes("workspace") && resourcesConflict(["workspace"], other.declared);
+    return resourcesConflict(flat(a), flat(b)) || shared(a, b) || shared(b, a);
 }
 export interface ResourceSandbox {
     execInSandbox(argv: string[], opts?: { timeoutMs?: number; stdin?: string }): Promise<{ code: number; stdout: string }>;

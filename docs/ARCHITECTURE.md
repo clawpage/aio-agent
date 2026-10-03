@@ -83,7 +83,8 @@ patchright-core 经 CDP 连接同一个 Chromium；不用 playwright-core，是�
 Claude Code `--mcp-config`）接入它并关闭 `aio_browser`。回合结束只标记“已结束”（续接复用），按需销毁：超过 8 个已结束标签页
 按最久未用关闭，浏览器空闲释放前的快照之前清理全部已结束标签页（`pruneBeforeSnapshot`）。
 workspace/路径资源锁在持久化计划上计算，
-只锁冲突资源，不让一个等待任务阻塞所有独立任务。它不是 OS 权限隔离，同账号执行者共享沙箱，跨账号使用不同容器。
+只锁冲突资源，不让一个等待任务阻塞所有独立任务。派单器声明的 `workspace`（共享环境）只与其他任务声明的范围互斥，
+不与服务端为每个任务自动保留的任务目录和附件互斥（`claimsConflict`，`src/control/tasks/resources.ts`）。它不是 OS 权限隔离，同账号执行者共享沙箱，跨账号使用不同容器。
 
 派单 JSON 的 `appendTo` 用于识别同一进行中任务的补充（地址、条件、纠正、额外要求）。
 尚未派发时合入原始输入；排队时更新 turn 输入；执行中通过 [Codex turn/steer](https://learn.chatgpt.com/docs/app-server#steer-an-active-turn) 和 `expectedTurnId` 追加到同一轮，只有收到匹配回执才标记 merged。
