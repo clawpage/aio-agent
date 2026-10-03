@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { api, ApiError, browserApi } from "../api";
 import { BrowserViewerController } from "../browserViewer";
+import { DesktopFrame } from "./DesktopFrame";
 
 /** The sandbox desktop in noVNC: scaled to fit, reconnecting on its own. */
 // `aio=<NOVNC_ASSET_VERSION>`: a new URL, so phones load the patched noVNC instead of a cached copy (see novncPatch).
@@ -121,7 +122,7 @@ export function TaskConsole({ target, tab, label, primary, watching = false, clo
           <button type="button" className="ghost" onClick={close} aria-label="关闭操作面板">{closeLabel}</button>
         </header>
         <div className="task-console-screen">
-          {src ? <iframe src={src} title="沙箱桌面" allow="clipboard-read; clipboard-write" /> : <p className="muted tiny">正在打开桌面…</p>}
+          {src ? <DesktopFrame src={src} title="沙箱桌面" /> : <p className="muted tiny">正在打开桌面…</p>}
         </div>
         {notice && <p className="task-console-notice" role="alert">{notice}</p>}
         <div className="task-console-tools" role="group" aria-label="页面操作">

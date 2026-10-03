@@ -2778,6 +2778,11 @@ textarea:focus {
 .task-console-head button { flex: none; }
 .task-console-screen { position: relative; flex: 1 1 auto; min-height: 0; overflow: hidden; background: #000; }
 .task-console-screen iframe { display: block; width: 100%; height: 100%; border: 0; }
+/* The sandbox desktop: fitted on a wide screen; on a phone twice the width, the black around it pans. */
+.desktop-frame { position: relative; flex: 1 1 auto; width: 100%; height: 100%; min-height: 0; overflow: hidden; background: #000; }
+.ws-body .desktop-frame iframe, .desktop-frame iframe { display: block; flex: none; width: 100%; height: 100%; border: 0; background: #000; }
+.desktop-frame.zoomed { overflow: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
+.desktop-frame-hint { position: sticky; left: 0; margin: 10px 0; text-align: center; font-size: 12px; color: rgba(255, 255, 255, 0.55); pointer-events: none; }
 .task-console-screen p { margin: 8px 10px; color: #cfcbe0; }
 .task-console-hint { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .task-console-notice { flex: none; margin: 0; padding: 6px 10px 0; font-size: 12px; color: var(--warn); line-height: 1.5; }

@@ -7,6 +7,7 @@ import { BrowserViewerController } from "../browserViewer";
 import { BrowserStatusBar, fetchBrowserStatus, STATUS_POLL_MS } from "./BrowserStatusBar";
 import { needsRestore } from "../browserStatusView";
 import { DESKTOP_PATH } from "./TaskConsole";
+import { DesktopFrame } from "./DesktopFrame";
 import { AppIcon } from "./AppIcon";
 import { browserApi, UI_KEEP_ALIVE_NOTE, type BrowserLifecycleStateView } from "../api";
 import { baseName, isPreviewableKind, kindLabel, workspaceFileKind, type WorkspaceFileKind } from "../sandboxLink";
@@ -555,6 +556,16 @@ export function Workspace({ open, status, initialPath, onClose, onNotify, browse
                     </div>
                   ) : !docVisible ? (
                     <p className="muted">窗口在后台，已暂停该面板并释放浏览器占用。</p>
+                  ) : frameSrc && tab === "browser" ? (
+                    <DesktopFrame
+                      key={frameKey}
+                      src={frameSrc}
+                      title={currentDef?.label ?? "沙箱"}
+                      onLoad={() => {
+                        setFrameStatus("loaded");
+                        setSessionReady(true);
+                      }}
+                    />
                   ) : frameSrc ? (
                     <iframe
                       key={frameKey}

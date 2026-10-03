@@ -478,6 +478,19 @@ test("a link in a reply opens in the person's own tab, operated on the desktop l
     expect(page.context().pages()).toHaveLength(1);
     await expect(panel).toContainText("OpenTable: Nopa");
     await expect(panel.locator('iframe[title="沙箱桌面"]')).toHaveAttribute("src", /vnc\.html/);
+    // On a phone the desktop is twice the screen's width; a swipe on the black around it pans.
+    const frame = panel.locator(".desktop-frame");
+    const geometry = await frame.evaluate((el) => ({ box: el.clientWidth, frame: el.querySelector("iframe")!.getBoundingClientRect().width, scroll: el.scrollWidth }));
+    if (info.project.name.startsWith("mobile")) {
+        expect(Math.abs(geometry.frame - geometry.box * 2)).toBeLessThan(2);
+        expect(geometry.scroll).toBeGreaterThan(geometry.box * 1.9);
+        await expect(panel.getByText("在黑色区域左右滑动，查看整个页面")).toBeVisible();
+        await frame.evaluate((el) => { el.scrollLeft = 150; });
+        expect(await frame.evaluate((el) => el.scrollLeft)).toBeGreaterThan(100);
+        await frame.evaluate((el) => { el.scrollLeft = 0; });
+    } else {
+        expect(Math.abs(geometry.frame - geometry.box)).toBeLessThan(2);
+    }
     // The browser is kept awake (woken if it slept) before its window is raised; the desktop opens alongside.
     await expect.poll(() => order.includes("focus:t8")).toBe(true);
     const at = (step: string) => order.indexOf(step);
