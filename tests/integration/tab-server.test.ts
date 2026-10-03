@@ -24,6 +24,14 @@ async function freePort(): Promise<number> {
 
 let browser: Browser;
 let patchright = "";
+let cgroup = "";
+/** The fake cgroup the server reads: a 1 GB limit, `fraction` of it in use. */
+const setMemory = (fraction: number, kills = 0) => {
+  fs.writeFileSync(path.join(cgroup, "memory.max"), "1000000000\n");
+  fs.writeFileSync(path.join(cgroup, "memory.current"), `${Math.round(fraction * 1e9)}\n`);
+  fs.writeFileSync(path.join(cgroup, "memory.stat"), "anon 1\ninactive_file 0\n");
+  fs.writeFileSync(path.join(cgroup, "memory.events"), `oom 0\noom_kill ${kills}\n`);
+};
 let base = "";
 let server: import("node:http").Server;
 
@@ -46,6 +54,12 @@ beforeAll(async () => {
   process.env.AIO_TABS_PLAYWRIGHT = patchright;
   process.env.AIO_TABS_OUTPUT = dir;
   process.env.AIO_TABS_WORKSPACE = path.join(dir, "workspace");
+  cgroup = path.join(dir, "cgroup");
+  fs.mkdirSync(cgroup);
+  setMemory(0.1);
+  process.env.AIO_TABS_CGROUP = cgroup;
+  process.env.AIO_TABS_PERSON_IDLE_MS = "300";
+  process.env.AIO_TABS_STRAY_IDLE_MS = "300";
   process.env.AIO_TABS_STATE = path.join(dir, "state.json");
   process.env.AIO_TABS_MAX_FINISHED = "2";
   process.env.AIO_TABS_HUMAN_WAIT_MS = "3000";
@@ -484,4 +498,59 @@ it.skipIf(!hasChromium)("saves a product picture into the workspace, by element 
   expect(text(await call("S", "browser_save_image", { path: `${ws}/tasks/t1/largest.png` }))).toContain("已保存");
   expect(fs.readFileSync(`${ws}/tasks/t1/largest.png`).equals(png)).toBe(true);
   site.close();
+});
+
+it.skipIf(!hasChromium)("frees memory near the limit, least valuable pages first, never a running task's or a held tab", async () => {
+  const { reclaimMemory } = require(SCRIPT) as { reclaimMemory: (reason: string) => Promise<string[]> };
+  const html = (title: string, extra = "") => `data:text/html,<title>${title}</title>${extra}`;
+  // A running task, a finished one, one taken over by the person, the person's own idle page, and a page nobody tracks.
+  const running = tabIdOf(await call("MR", "browser_navigate", { url: html("Running") }))!;
+  await call("MF", "browser_navigate", { url: html("Finished") });
+  await post("/finish", { key: "MF" });
+  const held = tabIdOf(await call("MH", "browser_navigate", { url: html("Held") }))!;
+  expect((await control(held, "take")).status).toBe(200);
+  const site = (await import("node:http")).createServer((_req, res) => { res.setHeader("content-type", "text/html"); res.end("<title>Person</title>person"); });
+  await new Promise<void>((r) => site.listen(0, "127.0.0.1", r));
+  const personUrl = `http://127.0.0.1:${(site.address() as net.AddressInfo).port}/`;
+  expect((await fetch(`${base}/open`, { method: "POST", body: JSON.stringify({ url: personUrl }) })).status).toBe(200);
+  await fetch(`${process.env.AIO_TABS_CDP}/json/new?${encodeURIComponent(html("Stray"))}`, { method: "PUT" });
+  // And one the person was typing into.
+  const typing = (await (await fetch(`${process.env.AIO_TABS_CDP}/json/new?${encodeURIComponent(html("Typing", "<input id=q>"))}`, { method: "PUT" })).json()) as { webSocketDebuggerUrl: string };
+  const typed = await new Promise<string>((resolve) => {
+    const ws = new WebSocket(typing.webSocketDebuggerUrl);
+    // Once the field exists (the page may still be loading), type into it.
+    const expression = "new Promise((done) => { const t = setInterval(() => { const q = document.querySelector('#q'); if (q) { clearInterval(t); q.value = '还没提交的话'; done(q.value); } }, 20); })";
+    ws.onopen = () => ws.send(JSON.stringify({ id: 1, method: "Runtime.evaluate", params: { expression, awaitPromise: true, returnByValue: true } }));
+    ws.onmessage = (e) => { const m = JSON.parse(String(e.data)); if (m.id === 1) { ws.close(); resolve(m.result?.result?.value); } };
+  });
+  expect(typed).toBe("还没提交的话");
+  await new Promise((r) => setTimeout(r, 600));
+  const titles = async () => ((await (await fetch(`${process.env.AIO_TABS_CDP}/json/list`)).json()) as Array<{ type: string; title: string }>).filter((t) => t.type === "page").map((t) => t.title);
+  try {
+    // Below the high mark nothing is touched.
+    setMemory(0.8);
+    expect(await reclaimMemory("poll")).toEqual([]);
+    // High but not critical: finished tabs, then the person's idle tabs; untracked pages stay.
+    setMemory(0.88);
+    const first = await reclaimMemory("poll");
+    expect(first.join(" ")).toContain("Finished");
+    expect(first).toContain(personUrl);
+    expect(first.join(" ")).not.toContain("Stray");
+    expect(await titles()).toEqual(expect.arrayContaining(["Running", "Held", "Stray"]));
+    // A page about to open goes all the way: an untracked page left alone gives way too.
+    await new Promise((r) => setTimeout(r, 400));
+    setMemory(0.95);
+    await call("MN", "browser_navigate", { url: html("Needed") });
+    const left = await titles();
+    expect(left).not.toContain("Stray");
+    expect(left).toEqual(expect.arrayContaining(["Running", "Held", "Needed", "Typing"]));
+    expect(left).not.toContain("Finished");
+    // The server reports its memory for the control plane.
+    expect(await (await fetch(`${base}/healthz`)).json()).toMatchObject({ memory: { usedMb: 906, maxMb: 954, oomKills: 0 } });
+    expect((await records("MR")).map((t) => t.id)).toContain(running);
+  } finally {
+    setMemory(0.1);
+    await control(held, "release");
+    site.close();
+  }
 });

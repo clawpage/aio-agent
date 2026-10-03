@@ -132,6 +132,8 @@ function register(page, key, title, extra = {}) {
   page.on('crash', () => {
     process.stdout.write(`closed crashed page: ${page.url()}\n`);
     void page.close().catch(() => undefined);
+    // Most crashes here are the memory limit: make room before the task tries again.
+    void reclaimMemory('crash').catch(() => undefined);
   });
   if (!tab.targetId) targetIdOf(page).then((t) => { tab.targetId = t; save(); }).catch(() => undefined);
   save();
@@ -305,6 +307,7 @@ async function reattach(context) {
  */
 async function newTab(key, title) {
   const context = await browserContext();
+  await makeRoom(key);
   const browser = context.browser();
   const session = await browser.newBrowserCDPSession();
   try {
@@ -549,6 +552,127 @@ async function strayPages() {
   return context.pages().filter((p) => !owned.has(p));
 }
 
+// ------------------------------------------------------------------- memory
+
+/*
+ * The browser, the agent and the tools share one cgroup memory limit; past it the
+ * kernel kills a renderer ("Target crashed") or worse. Pages that matter less give
+ * way first: finished tasks' tabs, then the person's tabs left idle, and when
+ * memory is nearly gone (or a page is about to open, or one just died) pages
+ * nobody tracks that nobody is using. A running task's tabs and tabs a person has
+ * taken over are never closed.
+ */
+const CGROUP = process.env.AIO_TABS_CGROUP || '/sys/fs/cgroup';
+const MEM_HIGH = Number(process.env.AIO_TABS_MEM_HIGH || 0.85);
+const MEM_CRITICAL = Number(process.env.AIO_TABS_MEM_CRITICAL || 0.92);
+const MEM_LOW = Number(process.env.AIO_TABS_MEM_LOW || 0.75);
+/** What a page about to open should find free: a heavy store page alone takes a few hundred MB. */
+const MEM_NEED = Number(process.env.AIO_TABS_MEM_NEED_MB || 400) * 1024 * 1024;
+const PERSON_IDLE_MS = Number(process.env.AIO_TABS_PERSON_IDLE_MS || 10 * 60 * 1000);
+/** An untracked page left on the same address this long is taken as not in use. */
+const STRAY_IDLE_MS = Number(process.env.AIO_TABS_STRAY_IDLE_MS || 15 * 60 * 1000);
+const MEM_POLL_MS = Number(process.env.AIO_TABS_MEM_POLL_MS || 5000);
+
+/** The cgroup's working set (reclaimable page cache left out) and its OOM kills; null without a limit. */
+function memory() {
+  try {
+    const read = (file) => fs.readFileSync(path.join(CGROUP, file), 'utf8');
+    const max = Number(read('memory.max').trim());
+    const current = Number(read('memory.current').trim());
+    if (!(max > 0) || !(current >= 0)) return null;
+    const inactive = Number((/^inactive_file (\d+)$/m.exec(read('memory.stat')) || [])[1] || 0);
+    const kills = Number((/^oom_kill (\d+)$/m.exec(read('memory.events')) || [])[1] || 0);
+    return { used: Math.max(0, current - inactive), max, kills };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * When each untracked page last changed address. Focus cannot tell what the person
+ * is using (every page of this browser reports focus and visibility), but a page
+ * in use moves on; one left on the same address for a long while is not in use.
+ */
+const strayChanges = new WeakMap();
+function noteStrays(pages) {
+  const now = Date.now();
+  for (const page of pages) {
+    const url = safeUrl(page);
+    const seen = strayChanges.get(page);
+    if (!seen || seen.url !== url) strayChanges.set(page, { url, since: now });
+  }
+}
+
+/**
+ * Untracked pages not in use: on the same address for a while, and known to hold
+ * nothing typed. A page that does not answer in time is kept (hung pages have
+ * their own cleanup); unsaved words are never the price of memory.
+ */
+async function unusedStrays() {
+  const pages = await strayPages();
+  noteStrays(pages);
+  const now = Date.now();
+  const out = [];
+  for (const page of pages) {
+    const seen = strayChanges.get(page);
+    if (!seen || now - seen.since < STRAY_IDLE_MS) continue;
+    const typed = await Promise.race([
+      page.evaluate(() => [...document.querySelectorAll('input, textarea')].some((el) => !/^(hidden|submit|button|reset|checkbox|radio|file|image|range|color)$/i.test(el.type || '') && el.value !== el.defaultValue)
+        || [...document.querySelectorAll('[contenteditable=""], [contenteditable="true"]')].some((el) => el.textContent.trim())),
+      new Promise((resolve) => setTimeout(() => resolve(null), 3000)),
+    ]).catch(() => null);
+    if (typed !== false) continue;
+    out.push(page);
+  }
+  return out.sort((a, b) => strayChanges.get(a).since - strayChanges.get(b).since);
+}
+
+let reclaiming = null;
+/**
+ * Free memory by closing pages, least valuable first, until the working set is
+ * back under the low mark (and `need` bytes are free). `poll` acts only above the
+ * high mark and reaches untracked pages only when memory is critical; a page about
+ * to open, a crash and an OOM kill go all the way. Returns the closed pages' URLs.
+ */
+function reclaimMemory(reason, { need = 0, exceptKey = null } = {}) {
+  reclaiming ??= (async () => {
+    let m = memory();
+    if (!m) return [];
+    // Every look also notes which untracked pages moved on, so their idleness is known when it matters.
+    if (connecting) noteStrays(await strayPages().catch(() => []));
+    const goal = Math.min(m.max * MEM_LOW, m.max - need);
+    if (reason === 'poll' ? m.used < m.max * MEM_HIGH : m.used <= goal) return [];
+    const deep = reason !== 'poll' || m.used >= m.max * MEM_CRITICAL;
+    const now = Date.now();
+    const byAge = (a, b) => a.lastUsed - b.lastUsed;
+    const tiers = [
+      () => finishedTabs().filter((t) => t.key !== exceptKey).sort(byAge).map((t) => t.page),
+      () => [...registry.values()].filter((t) => t.key === PERSON && t.key !== exceptKey && now - t.lastUsed >= PERSON_IDLE_MS).sort(byAge).map((t) => t.page),
+      ...(deep ? [unusedStrays] : []),
+    ];
+    const closed = [];
+    for (const tier of tiers) {
+      for (const page of await tier()) {
+        if (m.used <= goal) break;
+        if (page.isClosed()) continue;
+        const url = safeUrl(page);
+        await closeKeepingOne([page]);
+        closed.push(url);
+        // A renderer takes a moment to exit and give its memory back.
+        await new Promise((resolve) => setTimeout(resolve, 400));
+        m = memory() || m;
+      }
+      if (m.used <= goal) break;
+    }
+    if (closed.length) process.stdout.write(`freed memory (${reason}, ${Math.round(m.used / 1048576)}/${Math.round(m.max / 1048576)} MB): closed ${closed.join(' ')}\n`);
+    return closed;
+  })().finally(() => { reclaiming = null; });
+  return reclaiming;
+}
+
+/** Make room before a task or person opens a page: the page that is wanted comes before pages that are not. */
+const makeRoom = (exceptKey) => reclaimMemory('page', { need: MEM_NEED, exceptKey }).catch(() => []);
+
 // -------------------------------------------------------------------- tools
 
 const clip = (text) => (text.length > MAX_TEXT ? `${text.slice(0, MAX_TEXT)}\n…（内容过长，已截断）` : text);
@@ -567,6 +691,7 @@ const TOOLS = {
     mode: 'write', description: '在本任务自己的标签页打开网址（没有标签页时自动新建）。', input: { url: str, tab: ownTabArg }, required: ['url'],
     run: async (ctx, a) => {
       const tab = await resolveTab(ctx, a.tab, 'write', true);
+      await makeRoom(ctx.key);
       await tab.page.goto(a.url, { waitUntil: 'domcontentloaded', timeout: 60000 });
       return textResult(await describe(tab));
     },
@@ -815,7 +940,9 @@ async function callTool(ctx, name, args, signal) {
       return result;
     });
   } catch (err) {
-    return { content: [{ type: 'text', text: `浏览器操作失败：${err && err.message ? err.message : String(err)}` }], isError: true };
+    const message = err && err.message ? err.message : String(err);
+    const hint = /crashed/i.test(message) ? '\n页面被系统结束（多半是内存不够），已关闭它并腾出闲置页面的内存；用 browser_navigate 重新打开再试一次。' : '';
+    return { content: [{ type: 'text', text: `浏览器操作失败：${message}${hint}` }], isError: true };
   }
 }
 
@@ -875,7 +1002,8 @@ const server = http.createServer(async (req, res) => {
   try {
     const url = new URL(req.url, 'http://localhost');
     if (req.method === 'GET' && url.pathname === '/healthz') {
-      return send(res, 200, { ok: true, version: VERSION, pid: process.pid, tabs: registry.size });
+      const m = memory();
+      return send(res, 200, { ok: true, version: VERSION, pid: process.pid, tabs: registry.size, ...(m ? { memory: { usedMb: Math.round(m.used / 1048576), maxMb: Math.round(m.max / 1048576), oomKills: m.kills } } : {}) });
     }
     // Control-plane endpoints: the ownership record, a finished turn, and on-demand destruction.
     if (req.method === 'GET' && url.pathname === '/tabs') {
@@ -949,9 +1077,18 @@ if (require.main === module) {
     if (due.length) void serialized('__sweep__', () => closeKeepingOne(due.map((t) => t.page))).catch(() => undefined);
   }, Math.min(60_000, FINISHED_TTL_MS)).unref();
   setInterval(() => void closeIdleWorkers().catch(() => undefined), 30_000).unref();
+  // Watch the memory limit: an OOM kill since the last look frees memory at once.
+  let kills = memory()?.kills ?? 0;
+  setInterval(() => {
+    const m = memory();
+    if (!m) return;
+    const killed = m.kills > kills;
+    kills = m.kills;
+    void reclaimMemory(killed ? 'oom' : 'poll').catch(() => undefined);
+  }, MEM_POLL_MS).unref();
   // One task's stray failure must never take every task's browser tools down with it.
   process.on('unhandledRejection', (err) => process.stderr.write(`unhandled rejection: ${err && err.stack ? err.stack : err}\n`));
   server.listen(PORT, '127.0.0.1', () => process.stdout.write(`aio_tabs ${VERSION} listening on ${PORT}\n`));
 }
 
-module.exports = { TOOLS, toolList, handleRpc, server, closeIdleWorkers };
+module.exports = { TOOLS, toolList, handleRpc, server, closeIdleWorkers, reclaimMemory };
