@@ -1,6 +1,7 @@
 import { normalizeResource } from "./resources.js";
 export { resourcesConflict } from "./resources.js";
 import { validateSchedule, type ScheduleSpec } from "./schedules.js";
+import type { JevRelevance } from "./context.js";
 
 /** A schedule the dispatcher asked for, already validated (see schedules.ts). */
 export interface PlannedSchedule {
@@ -37,6 +38,8 @@ export interface TaskPlan {
     schedule?: PlannedSchedule | null;
     /** The message pauses, resumes or cancels one of the account's schedules. */
     scheduleAction?: { id: string; action: ScheduleActionName } | null;
+    /** Jev's reading of which earlier task this message continues, passed on to the executor. */
+    jev?: JevRelevance | null;
 }
 /** Jev's second opinion on which task the message continues (`NEW` for none). */
 export interface DispatchHint {

@@ -685,6 +685,38 @@ describe("main-session order, Jev's second opinion and resuming a finished sessi
         const failed = db.prepare("SELECT jev_json FROM recall_events ORDER BY id DESC LIMIT 1").get() as { jev_json: string };
         expect(JSON.parse(failed.jev_json)).toEqual({ error: "Jev 返回 HTTP 503" });
     });
+    it("passes Jev's reading on to the executor, next to the timeline, and nothing when Jev fails", async () => {
+        let fail = false;
+        const jev = {
+            enabled: true,
+            decide: async (_state: unknown, questions: Record<string, { criteria: Record<string, string> }>) => {
+                if (fail) throw new Error("Jev 返回 HTTP 503");
+                const ids = Object.keys(questions.target!.criteria);
+                const pick = ids.find(id => id !== "NEW")!;
+                return { answers: { target: { choice: pick, confidence: 0.9, probabilities: Object.fromEntries(ids.map(id => [id, id === pick ? 0.8 : id === "NEW" ? 0.2 : 0])) } }, usage: null, latencyMs: 3 };
+            },
+        };
+        tasks.close();
+        tasks = new TaskService(db, testConfig("/tmp/aio-main-tasks", 1), agent, codex, undefined, jev as never);
+        tasks.init();
+        const order = submit("帮我在 eBay 买那台 Pixel"); await tick();
+        await codex.runTurn(codex.startedTurns[0]!.turnId, { text: "找到了，$499。需要你授权我用已保存的卡付款吗？" }); await tick();
+        codex.plan = planWith(m => ({ resume: m === "已授权" ? order.id : null }));
+        const reply = submit("已授权"); await tick(); await tick();
+        expect(JSON.parse(tasks.get(reply.id)!.plan_json!).jev).toEqual({ choice: order.id, confident: true, ranked: [{ id: order.id, p: 0.8 }, { id: "NEW", p: 0.2 }] });
+        const turn = codex.startedTurns.find(t => t.text.endsWith("已授权"))!;
+        const line = turn.text.split("\n").find(l => l.includes("用户：「帮我在 eBay 买那台 Pixel」"))!;
+        expect(line).toContain("〔Jev：本次消息接续它 80%〕");
+        expect(turn.text).toContain("Jev 的相关性判断");
+        expect(turn.text).toContain(`- 任务 ${order.id}「帮我在 eBay 买那台 Pixel」（completed，`);
+        expect(turn.text).toMatch(/：80%，Jev 首选（高置信）；助理最后问：「需要你授权我用已保存的卡付款吗？」/);
+        expect(turn.text).toContain("- 独立的新请求：20%");
+        await codex.runTurn(turn.turnId, { text: "已付款。" }); await tick();
+        fail = true;
+        submit("讲个笑话"); await tick(); await tick();
+        const joke = codex.startedTurns.find(t => t.text.endsWith("讲个笑话"))!;
+        expect(joke.text).not.toContain("Jev");
+    });
     it("repairs resume: an active target becomes an append, an unknown one is dropped, and it never doubles an append", () => {
         const previous = [
             { id: "t_done", title: "a", input_text: "a", status: "completed", result: "要授权吗？" },

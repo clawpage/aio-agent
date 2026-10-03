@@ -1,4 +1,4 @@
-import type { JevQuestion } from "../jev.js";
+import { confident, type JevAnswer, type JevQuestion } from "../jev.js";
 
 /**
  * Chronological context of the main session. The user talks to one input box;
@@ -73,16 +73,57 @@ const time = (ts: number, now: number) => {
   return new Date(now).toDateString() === d.toDateString() ? hm : `${d.toLocaleDateString("sv-SE")} ${hm}`;
 };
 
-/** The timeline as lines an executor can read: when, what the user said, which task, what it last asked. */
-export function formatTimeline(entries: TimelineEntry[], now = Date.now()): string {
+const percent = (p: number) => `${Math.round(p * 100)}%`;
+
+/**
+ * The timeline as lines an executor can read: when, what the user said, which task, what it last asked,
+ * and, given Jev's reading of this message, how likely it continues that task.
+ */
+export function formatTimeline(entries: TimelineEntry[], now = Date.now(), relevance?: JevRelevance | null): string {
+  const likely = new Map(relevance?.ranked.map((r) => [r.id, r.p]));
   return entries
     .map((e) => {
       const head = `${e.current ? "▶ " : "  "}[${time(e.at, now)}] 用户：「${e.text}」`;
       if (e.current) return `${head}  ← 本次消息`;
       const where = e.taskId === e.id ? `任务 ${e.taskId}「${clip(e.title, 30)}」（${e.status}）` : `补充给任务 ${e.taskId}「${clip(e.title, 30)}」（${e.status}）`;
-      return `${head} → ${where}${e.ask ? `；助理最后问：「${e.ask}」` : ""}`;
+      const p = likely.get(e.taskId);
+      return `${head} → ${where}${e.ask ? `；助理最后问：「${e.ask}」` : ""}${p === undefined ? "" : `〔Jev：本次消息接续它 ${percent(p)}〕`}`;
     })
     .join("\n");
+}
+
+/** Jev's reading of which earlier task a message continues: the likeliest few, kept with the plan for the executor. */
+export interface JevRelevance {
+  choice: string;
+  confident: boolean;
+  /** Probability per task id (or `NEW`), likeliest first. */
+  ranked: Array<{ id: string; p: number }>;
+}
+
+export function jevRelevance(answer: JevAnswer, max = 3, min = 0.1): JevRelevance {
+  const ranked = Object.entries(answer.probabilities)
+    .filter(([, p]) => p >= min)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, max)
+    .map(([id, p]) => ({ id, p: Math.round(p * 100) / 100 }));
+  return { choice: answer.choice, confident: confident(answer), ranked };
+}
+
+/**
+ * Jev's reading as lines for the executor: each likely task with its time, status and what it left
+ * (its open question, or the start of its result), so the executor can build on it instead of redoing it.
+ */
+export function formatRelevance(relevance: JevRelevance, get: (id: string) => ContextTask | null | undefined, now = Date.now()): string | null {
+  const lines = relevance.ranked.flatMap(({ id, p }) => {
+    const mark = id === relevance.choice ? `，Jev 首选${relevance.confident ? "（高置信）" : ""}` : "";
+    if (id === NEW_TASK) return [`- 独立的新请求：${percent(p)}${mark}`];
+    const t = get(id);
+    if (!t) return [];
+    const ask = lastQuestion(t);
+    const left = ask ? `；助理最后问：「${ask}」` : t.result ? `；结果开头：${clip(t.result, 120)}` : "";
+    return [`- 任务 ${t.id}「${clip(t.title, 30)}」（${t.status}，${time(t.created_at, now)}）：${percent(p)}${mark}${left}`];
+  });
+  return lines.length ? lines.join("\n") : null;
 }
 
 export const NEW_TASK = "NEW";

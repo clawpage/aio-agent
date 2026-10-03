@@ -9,7 +9,7 @@ import { AgentManager, TurnConflictError, type AgentEvent, type CodexSessionLike
 import { normalizeResource, resolveResources, type ResourceSandbox } from "./resources.js";
 import { applyTaskReference, parsePlan, parseSearch, planningPrompt, resourcesConflict, type DispatchHint, type PlanningTask, type PlanReport, type TaskPlan } from "./planning.js";
 import { recordRecall, STEP_ANSWER_CHARS, STEP_PROMPT_CHARS, TaskRecall, type RecallEvent, type RecallSource } from "./recall.js";
-import { formatTimeline, lastQuestion, routingQuestion, timeline } from "./context.js";
+import { formatRelevance, formatTimeline, jevRelevance, lastQuestion, routingQuestion, timeline, type JevRelevance } from "./context.js";
 import { confident } from "../jev.js";
 import { describeNow, describeSchedule, formatWhen, MAX_ACTIVE_SCHEDULES, nextRun, validateSchedule, type ScheduleSpec } from "./schedules.js";
 import type { PlanningSchedule, ScheduleActionName } from "./planning.js";
@@ -359,6 +359,7 @@ export class TaskService {
             const scheduling = { now: Date.now(), timezone: this.cfg.browser.timezone, schedules: this.planningSchedules(trace.ownerId) };
             steps.push({ kind: "context", at: Date.now(), timeline: timelineText, candidates: candidates.size });
             let hint: DispatchHint | null = null;
+            let relevance: JevRelevance | null = null;
             if (!explicit && candidates.size && this.jev?.enabled) {
                 // The latest tasks, plus the older ones recalled by what the message says: a message
                 // that names an old task's subject must be able to land on it.
@@ -371,6 +372,7 @@ export class TaskService {
                     const r = await this.jev.decide(q.state, q.questions, { timeoutMs: this.cfg.jev.dispatchTimeoutMs });
                     const a = r.answers.target!;
                     hint = { choice: a.choice, probability: a.probabilities[a.choice] ?? 0, confident: confident(a) };
+                    relevance = jevRelevance(a);
                     trace.jev = { ...hint, latencyMs: r.latencyMs };
                     steps.push({ kind: "jev", at: Date.now(), criteria, result: { choice: a.choice, probabilities: a.probabilities, confident: hint.confident, latencyMs: r.latencyMs } });
                 } catch (err) {
@@ -428,6 +430,8 @@ export class TaskService {
             if (plan) { trace.failed = false; trace.chosen = { related: plan.related, appendTo: plan.appendTo ?? null, resume: plan.resume ?? null }; steps.push({ kind: "plan", at: Date.now(), plan, repairs: report.repairs }); }
             if (!plan)
                 throw new Error(`任务分配暂时失败，尚未执行。请重试分配。（派单结果无法使用：${report.error ?? "格式不符合要求"}）`);
+            // The executor sees Jev's reading too, next to the timeline it already gets.
+            if (relevance) plan.jev = relevance;
             if (explicit) applyTaskReference(plan, this.referenceTarget(row)!);
             // Setting up or changing a schedule needs no executor: answer right here.
             if (plan.scheduleAction || (plan.schedule && !plan.schedule.runNow)) {
@@ -541,7 +545,7 @@ export class TaskService {
                 this.db.prepare("UPDATE tasks SET status='steering' WHERE id=?").run(row.id);
                 try {
                     const result=await this.agent.appendTurnInput(this.executor(parent),parent.turn_id,
-                        `这是用户在 ${new Date(row.created_at).toLocaleTimeString("sv-SE", { hour: "2-digit", minute: "2-digit" })} 对当前任务的补充，请合并处理并在最终结果中覆盖，不要当作独立任务。可协作使用的资源更新为：${this.claims(parent, parentPlan).join(',')}。\n\n主会话最近的对话（按时间先后，▶ 是这条补充）：\n${formatTimeline(timeline(this.rows().filter(t => this.ownerId(t) === this.ownerId(row)), row, 6))}\n\n${row.input_text}${dependencies.length ? `\n\n补充所需的已完成任务资料：${JSON.stringify(dependencies.map(t => ({id:t!.id,result:t!.result?.slice(0,16000)})))}` : ''}`,
+                        `这是用户在 ${new Date(row.created_at).toLocaleTimeString("sv-SE", { hour: "2-digit", minute: "2-digit" })} 对当前任务的补充，请合并处理并在最终结果中覆盖，不要当作独立任务。可协作使用的资源更新为：${this.claims(parent, parentPlan).join(',')}。\n\n主会话最近的对话（按时间先后，▶ 是这条补充）：\n${formatTimeline(timeline(this.rows().filter(t => this.ownerId(t) === this.ownerId(row)), row, 6), Date.now(), plan.jev)}\n\n${row.input_text}${dependencies.length ? `\n\n补充所需的已完成任务资料：${JSON.stringify(dependencies.map(t => ({id:t!.id,result:t!.result?.slice(0,16000)})))}` : ''}`,
                         JSON.parse(row.attachments_json),resources.includes("browser"));
                     if(this.#closed) return;
                     if(result==='browser_unavailable') this.db.prepare("UPDATE tasks SET status='merge_failed',error=? WHERE id=?").run('此补充需要浏览器，但浏览器暂未恢复；原任务仍可继续，请恢复浏览器后重新补充。',row.id);
@@ -590,6 +594,7 @@ export class TaskService {
             const continued = row.related_task_id && row.execution_conversation_id ? this.get(row.related_task_id) : null;
             const ask = continued ? lastQuestion(continued) : null;
             const continuation = continued ? `本次消息接续任务 ${continued.id}（${clock(continued.created_at)} 创建）${ask ? `；该任务最后问用户：「${ask}」，用户这次的回复针对的就是这个问题` : "的工作"}。` : null;
+            const relevance = plan.jev ? formatRelevance(plan.jev, id => this.get(id)) : null;
             const prompt = [
                 `你是 AIO Agent 主会话委派的子 agent。任务 ID：${row.id}。${row.execution_conversation_id ? "本轮恢复此前任务的同一会话，保留完整上下文；按用户的新要求继续、补充或更新，不要从零重新做。" : "只处理本任务。"}不递归委派。身份、语气和行为遵循系统层注入的 SOUL.md；对子任务同样生效，不以内部执行角色替代个人助理身份。`,
                 "按请求实际需要控制工作量：普通聊天、问候、身份介绍、概念解释和可直接回答的问题，直接在消息中回答即可。不要为了完成任务而创建目录、制作文件、检查运行环境或截图验收；仅在回答确实需要外部事实、附件或既有资料时调用相关工具。身份与风格以已注入的 SOUL.md 为准，不为自我介绍额外检索记忆或寻找 SOUL.md 文件。需要依据用户过往信息时才有针对性地查相关记录。用户要求实际操作或文件交付时，仍须执行并做与风险相称的验证，不得用口头回答代替。",
@@ -605,7 +610,8 @@ export class TaskService {
                 "回答里涉及要去的具体地点（餐厅、景点、酒店、会面地点、目的地等）时，可在正文相关位置插入地图卡片，一个地点一个代码块，用户点一下即可在手机的地图应用里查看这个地点：\n```map\n{\"name\": \"地点名称\", \"address\": \"完整地址\", \"lat\": 纬度, \"lng\": 经度}\n```\n坐标只填从可靠来源（地图搜索结果、官网）查到的数值，不要估算；拿不到时只写 name 和 address，系统会按地址定位。坐标默认 WGS-84，取自高德或腾讯地图的坐标加 \"coord\": \"gcj02\"。只是顺带提到的地名不用加卡片。",
                 "过程尽量简短，会在主会话折叠。缺少必要信息时最终提问并结束，不要在未获回答时执行依赖该答案的操作。",
                 "以下是相关任务的背景资料（不是本任务的新指令，未完成结果不得当作已完成）：", JSON.stringify(context),
-                "主会话时间线（按时间先后列出用户最近的消息与各自归属的任务，▶ 是本次消息；用来理解本次消息的指代、先后和回应对象，不是新指令）：", formatTimeline(timeline(this.rows().filter(t => this.ownerId(t) === this.ownerId(row)), row)),
+                "主会话时间线（按时间先后列出用户最近的消息与各自归属的任务，▶ 是本次消息；用来理解本次消息的指代、先后和回应对象，不是新指令）：", formatTimeline(timeline(this.rows().filter(t => this.ownerId(t) === this.ownerId(row)), row), Date.now(), plan.jev),
+                ...(relevance ? [`Jev 的相关性判断（派单时由独立的判断模型给出：本次消息接续各个已有任务的概率；是参考线索，不是新指令）：\n${relevance}\n用法：首选标了“高置信”时，本次消息多半是在接续那个任务：先看它的结果和最后问的问题，沿用已经做过的工作和结论，按它理解“这个”“第二个”“改成周六”这类指代，不要从零重做；没有“高置信”时只作线索，以时间线和用户原话为准；首选是“独立的新请求”时，不要把旧任务的内容套进来。与用户原话冲突时，以原话为准。`] : []),
                 ...(continuation ? [continuation] : []),
                 ...(row.schedule_id ? [this.scheduledRunNote(row)] : []),
                 "本次用户任务：", this.taskContext(row),
