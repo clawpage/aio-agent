@@ -11,6 +11,7 @@ import {UserRuntimes} from "./tenants.js";
 import { loadConfig, ensureDataDirs, type Config } from "./config.js";
 import { Logger } from "../common/logger.js";
 import { openDb, type Db } from "./db.js";
+import { UsageLedger } from './usage.js';
 import { SessionStore } from "./auth/sessions.js";
 import { TicketStore } from "./auth/tickets.js";
 import { LoginRateLimiter } from "./auth/ratelimit.js";
@@ -108,9 +109,11 @@ export async function bootstrap(opts: BootstrapOptions = {}): Promise<Bootstrapp
   // the optional OpenCode Go model exists, and holds the key in memory only.
   const bridge = new BridgeModel(cfg, log);
   const claudeCode = new ClaudeCodeHarness(cfg, log);
-  const sandboxCodex = new SandboxCodexSession(cfg, log, container, hostTokens, bridge);
+  const usage = new UsageLedger(db, cfg.runtimeUserId ?? 'owner_1');
+  usage.backfill();
+  const sandboxCodex = new SandboxCodexSession(cfg, log, container, hostTokens, bridge, 90_000, usage);
   // Without a Claude Code credential the session is the plain Codex one, exactly as before.
-  const codex = opts.overrides?.codex ?? (claudeCode.enabled ? new HarnessSession(sandboxCodex, new ClaudeCodeSession(cfg, log, container, claudeCode), () => claudeCode.owns(readAgentSettings(db).model ?? cfg.agent.defaultModel)) : sandboxCodex);
+  const codex = opts.overrides?.codex ?? (claudeCode.enabled ? new HarnessSession(sandboxCodex, new ClaudeCodeSession(cfg, log, container, claudeCode, usage), () => claudeCode.owns(readAgentSettings(db).model ?? cfg.agent.defaultModel)) : sandboxCodex);
   const browserRuntime = new BrowserRuntime(cfg, log, container);
   // A test seam replaces the container-facing runtime; the state machine itself
   // is always the production one.

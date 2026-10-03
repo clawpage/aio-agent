@@ -88,6 +88,17 @@ curl -s http://127.0.0.1:4891/healthz   # 界面层（控制层提供它需要�
 - 创建账号（先构建；使用与服务相同的环境变量/数据目录）：`node --env-file=var/runtime.env bin/create-user.mjs <username>`。Quickstart 使用 `.env`。随机密码写入 `var/user-secrets/<username>.txt`（0600），命令不打印密码、不覆盖已有账号，不提供公开注册。
 - 分配成员模型：`node --env-file=var/runtime.env bin/set-user-model.mjs <username> <deepseek-v4.1-flash|claude-sonnet-5-5|gpt-6.1-sol>`（compose 模式：`docker compose -p aio exec control node bin/set-user-model.mjs ...`），重启服务后生效。分配 Claude 需要 owner 已配置 Claude Code 凭据，用量计入 owner 的 Claude 账号；分配 `gpt-6.1-sol` 需要控制面已用 `codex-login` 登录 ChatGPT（`AIO_HOST_CODEX=on`），用量计入该 ChatGPT 账号。
 
+## 用量看板
+
+owner 侧栏的「用量看板」按账号显示每天的 token 趋势、输入/输出/缓存汇总和每日明细，
+支持最近 7、30、90 天与单账号筛选。统计时区取 `PA_BROWSER_TIMEZONE`（默认洛杉矶），
+每 30 秒刷新。成员无入口，`GET /api/usage?days=30` 仅 owner 可访问。
+
+计数持久保存在控制面各账号数据库，包括 Codex / Claude 执行、派单和标题调用。
+缓存读取与写入属于输入，总 token = 输入 + 输出。历史只回填已保存的 Codex 用量事件；
+旧 Claude、旧派单、缺失报告、外部客户端、图片生成与 Jev 不计入，不推算账单或订阅额度。
+采集开始时间与最早记录显示在看板底部。具体口径见 [运行手册](docs/RUNBOOK.md#token-用量统计)。
+
 ## 主会话的克制追问
 
 派单时，只有缺少无法合理默认的关键条件才会在主会话提问。例如实际查询机票缺目的地或日期，

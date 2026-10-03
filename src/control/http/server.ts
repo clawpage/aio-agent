@@ -184,7 +184,7 @@ export function createApp(ctx: AppContext): express.Express {
       if(!api){api=createApiRouter({...ctx,cfg:workspaceConfig(ctx.cfg)});workspaceApis.set(account,api);}
       api(req,res,next);return;
     }
-    if(!id || !ctx.runtimeForUser || /^\/(auth|workspace)(\/|$)/.test(req.path)) {rootApi(req,res,next);return;}
+    if(!id || !ctx.runtimeForUser || /^\/(auth|workspace|usage)(\/|$)/i.test(req.path)) {rootApi(req,res,next);return;}
     try {
       const runtime=await ctx.runtimeForUser(id);
       if(!ctx.sessions.isLive(req.paCtx!.session!.id)){res.status(401).json({error:"unauthenticated"});return;}

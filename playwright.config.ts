@@ -16,6 +16,7 @@ export default defineConfig({
   // never run against a real deployment: they need no server, and one of them
   // writes visual-QA screenshots to the workspace.
   testIgnore: [
+    /usage\.spec\.ts/,
     /browser-auto-open\.spec\.ts/,
     /browser-link\.spec\.ts/,
     /archived-list\.spec\.ts/,

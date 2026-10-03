@@ -110,6 +110,7 @@ export type PointerInput = { action: "click"; x: number; y: number } | { action:
 export type PointerResult = { title: string; url: string; editable?: boolean; current?: string };
 
 export const api = {
+  usage: (days: number, signal?: AbortSignal) => request<import('../../common/usage').UsageReport>(`/api/usage?days=${days}`, { signal, cache: 'no-store' }),
   soul: () => request<{content:string;revision:string;defaultContent:string;maxBytes:number}>('/api/settings/soul'),
   recallStats: (days: number) => request<{ stats: import('./types').RecallStats }>(`/api/settings/recall?days=${days}`),
   dispatchLog: (taskId: string) => request<import('./types').DispatchLog>(`/api/settings/dispatch-log/${encodeURIComponent(taskId)}`),

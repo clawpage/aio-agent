@@ -7,6 +7,7 @@ import { BrandMark } from "./Brand";
 import { Chat } from "./Chat";
 import { Login } from "./Login";
 import { Settings } from "./Settings";
+import { UsageDashboard } from './UsageDashboard';
 import { useDebugMode } from "../debugMode";
 import { Workspace } from "./Workspace";
 import { TaskChat } from "./TaskChat";
@@ -54,7 +55,7 @@ export function MainApp() {
     const [foreign, setForeign] = useState<string | null>(null);
     const [auth, setAuth] = useState<boolean | null>(null);
     const [status, setStatus] = useState<StatusResponse | null>(null);
-    const [view, setView] = useState<"main" | "tasks" | "schedules" | "settings" | "detail">("main");
+    const [view, setView] = useState<"main" | "tasks" | "schedules" | "usage" | "settings" | "detail">("main");
     const [taskFeed,setTaskFeed]=useState<TaskFeed>({tasks:[],nextBefore:null,connected:false});
     const [detailReturn,setDetailReturn]=useState<'main'|'tasks'>('main');
     const [detailTask,setDetailTask]=useState<Task|null>(null);
@@ -204,6 +205,7 @@ export function MainApp() {
       <button className={`ghost block ${view === "main" ? "active" : ""}`} onClick={() => { detailRequest.current++;closeMenu(); setView("main"); setWorkspace(false); }}>主会话</button>
       <button className={`ghost block ${view === "tasks" ? "active" : ""}`} onClick={() => { detailRequest.current++;closeMenu(); setView("tasks"); setWorkspace(false); }}>任务列表</button>
       <button className={`ghost block ${view === "schedules" ? "active" : ""}`} onClick={() => { detailRequest.current++;closeMenu(); setView("schedules"); setWorkspace(false); }}>定时任务</button>
+      {role === 'owner' && <button className={`ghost block ${view === 'usage' ? 'active' : ''}`} onClick={() => { detailRequest.current++;closeMenu();setView('usage');setWorkspace(false); }}>用量看板</button>}
       <button className="ghost block" onClick={() => { closeMenu(); openWorkspace(); }}>工作区</button>
       <div className="sidebar-foot"><span className="muted tiny">{status?.agent.sessionReady ? "智能体在线" : "正在连接智能体"}</span><PushToggle/><button className="ghost block" onClick={() => setTheme(t => t === "dark" ? "light" : "dark")}>{theme === "dark" ? "浅色模式" : "深色模式"}</button>{role === "owner" && <button className={`ghost block ${view === "settings" ? "active" : ""}`} onClick={settings}>配置</button>}<button className="ghost block" onClick={() => void logout()}>退出登录</button></div>
     </aside>
@@ -216,6 +218,7 @@ export function MainApp() {
       <div className="view-slot" hidden={view !== 'tasks'}><TaskList feed={taskFeed} onDetails={t=>void details(t,'tasks')} onExpired={expired}/></div>
       <div className="view-slot" hidden={view !== 'schedules'}><ScheduleList active={view === 'schedules'} onExpired={expired} onOpenTask={id => { const t = taskFeed.tasks.find(task => task.id === id); if (t) void details(t, 'tasks'); else setView('main'); }}/></div>
       {role === "owner" && view === "settings" && <Settings onBack={() => setView("main")}/>}
+      {role === 'owner' && view === 'usage' && <UsageDashboard onExpired={expired}/>}
       {view === "detail" && detail && <div className="task-detail"><div className="task-detail-bar"><button className="ghost" onClick={() => setView(detailReturn)}>← 返回{detailReturn==='tasks'?'任务列表':'主会话'}</button><span className="muted tiny">{taskStatusLabels[(taskFeed.tasks.find(t=>t.id===detailTask?.id)??detailTask)?.status??'']??'过程详情'}</span></div><Chat key={detail.id} readOnly conversation={detail} status={status} onConversationChanged={() => { }} onStatusChanged={() => void refreshStatus()} onOpenWorkspace={openWorkspace} onOpenBrowserLink={u => void openLink(u)} onOpenBrowserFile={p => void openFileInBrowser(p)}/></div>}
     </main>
     {opening && <div className="task-console-overlay opening-overlay" role="presentation">

@@ -54,6 +54,28 @@ curl -s -o /dev/null -w '%{http_code}\n' https://agent-workspace.clawpage.ai/ter
 
 ## 3. 构建与升级
 
+### Token 用量统计
+
+- owner 侧栏「用量看板」；`GET /api/usage?days=7|30|90`。主站认证且仅 owner，成员 403。
+  查询直接读取控制机的根库与账号库，不会创建执行器或唤醒远程沙盒。
+- 每账号的控制数据库增量增加 `token_usage`、`token_usage_counters`、`token_usage_meta` 三表；
+  只保存数字、时间和内部去重键，不复制消息或凭据。随原控制数据备份，不在沙盒节点记账。
+- Codex 在辅助线程路由之前采集 `thread/tokenUsage/updated`：按线程累计值求差；首次只计
+  `last`（防止把续接线程的旧累计值计入今天），重复/迟到/回退快照不增加用量。基线持久化，
+  服务重启不会重复计数。首次启动按原事件时间回填本账号已有 Codex 事件，幂等。
+- Claude 使用 result 的 `modelUsage`（含子代理）按会话和模型累计值求差；没有该字段时，
+  使用 result `usage` 并按 UUID 去重。首次观察到旧会话续接时只计本轮主循环 usage，
+  再建立累计基线，不把缺日期的旧累计值补到今天。旧子代理用量可能缺失。
+  依据 [Claude 官方用量口径](https://code.claude.com/docs/en/agent-sdk/cost-tracking)。
+- Claude cache read / creation 与普通 input 相加；Codex input 已含缓存。输出已含 reasoning，
+  不重复相加。总 token = 输入 + 输出，不等于供应商计费额度。
+- 日期按 `PA_BROWSER_TIMEZONE` 的日历日归属（默认 `America/Los_Angeles`），包含今天；
+  夏令时按 IANA 时区处理。跨午夜的累计差值在报告收到的日期入账。
+- 覆盖限制：旧 Claude 与旧辅助调用未落库；不估算缺失事件、未报告的失败/中断、计数回退、
+  外部客户端、图片生成或 Jev。控制数据缺失/损坏的账号标为不可用；从未运行的账号无记录。
+  看板展示各账号实时采集开始时间和最早记录；无记录不代表供应商实际零消耗。
+- 本功能只重建 `ui control` 两层并定点重启，不重建用户沙盒或改变 4 GiB 配额。
+
 ```bash
 cd projects/personal-agent
 npm run typecheck && npm test

@@ -1,4 +1,5 @@
 import {workspacePrefix} from "../auth/workspaceHost.js";
+import {usageReport} from '../usage.js';
 import { isMember, publicPayload } from "../auth/policy.js";
 import {readSoul,writeSoul,SoulError,DEFAULT_SOUL,SOUL_MAX_BYTES} from '../soul.js';
 import { HTML_PREVIEW_CSP, htmlPreviewDocument } from "../documents/html.js";
@@ -212,7 +213,7 @@ export function createApiRouter(context: AppContext): Router {
     if (!user) { res.status(401).json({ error: "unauthenticated" }); return; }
     const restricted = user.role !== "owner";
     const pathname = req.path.toLowerCase().replace(/\/+$/, "");
-    const ownerPaths = ["/settings", "/models", "/capabilities", "/sandbox/context", "/documents/provision"];
+    const ownerPaths = ["/usage", "/settings", "/models", "/capabilities", "/sandbox/context", "/documents/provision"];
     if (restricted && ownerPaths.some(p => pathname === p || pathname.startsWith(p + "/"))) {
       res.status(403).json({ error: "forbidden", message: "此操作仅限所有者" }); return;
     }
@@ -239,6 +240,12 @@ export function createApiRouter(context: AppContext): Router {
   });
 
   // ------------------------------------------------------------------ auth
+  router.get('/usage', requireKind('primary'), requireSession, asyncHandler(async (req, res) => {
+    const days = req.query.days === undefined ? 30 : Number(req.query.days);
+    if (![7,30,90].includes(days)) { res.status(400).json({error:'invalid_days',message:'请选择 7、30 或 90 天'}); return; }
+    res.setHeader('Cache-Control','no-store');
+    res.json(usageReport(db,cfg,days));
+  }));
 
   router.post(
     "/auth/login",

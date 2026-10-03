@@ -3251,3 +3251,41 @@ button.map-card-switch { flex: 0 0 auto; padding: 4px 10px; }
 .push-on { display: flex; align-items: center; gap: 6px; padding: 4px 12px; }
 .push-on .tiny:first-child { flex: 1; color: var(--done); }
 .schedule-builtin { margin-left: 8px; padding: 1px 6px; border-radius: 6px; font-size: 11px; font-weight: 500; color: var(--text-dim); background: var(--bg-raised); border: 1px solid var(--border); vertical-align: middle; }
+
+/* Owner usage dashboard: calendar-day trends, shared brand tokens. */
+.usage-dashboard { flex: 1; min-height: 0; overflow-y: auto; padding: 28px; display: flex; flex-direction: column; gap: 18px; }
+.usage-header { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.usage-header h1, .usage-chart h2, .usage-table-wrap h2 { margin: 0; }
+.usage-header p { margin: 8px 0 0; }
+.usage-dashboard h2 { font-size: 16px; }
+.usage-filters { display: flex; gap: 16px; flex-wrap: wrap; }
+.usage-filters label { display: flex; flex-direction: column; gap: 8px; font-size: 13px; min-width: 145px; }
+.usage-filters select { font-size: 16px; }
+.usage-metrics { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 12px; }
+.usage-metrics article, .usage-chart, .usage-table-wrap { padding: 18px; border: 1px solid var(--border); background: var(--bg-soft); border-radius: var(--radius-card); }
+.usage-metrics article { display: flex; flex-direction: column; gap: 10px; }
+.usage-metrics strong { font-size: clamp(20px,2.4vw,32px); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.usage-chart svg { width: 100%; height: auto; display: block; margin-top: 12px; }
+.usage-chart text { fill: var(--text-dim); font-size: 13px; }
+.usage-legend { display: flex; flex-wrap: wrap; gap: 16px; }
+.usage-legend span { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; }
+.usage-legend i { width: 10px; height: 10px; border-radius: 50%; }
+.usage-table-wrap { overflow-x: auto; flex-shrink: 0; }
+.usage-table-wrap table { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 13px; font-variant-numeric: tabular-nums; }
+.usage-table-wrap th, .usage-table-wrap td { padding: 12px 8px; text-align: right; border-bottom: 1px solid var(--border); white-space: nowrap; }
+.usage-table-wrap th:first-child { text-align: left; }
+.usage-table-wrap small { display: block; color: var(--text-dim); font-weight: normal; margin-top: 4px; }
+.usage-table-wrap summary { cursor: pointer; }
+.usage-note { line-height: 1.7; margin: 0; }
+.usage-coverage { margin: 0; padding-left: 18px; line-height: 1.8; }
+@media (max-width: 720px) {
+  .usage-dashboard { padding: 60px 14px 24px; gap: 16px; }
+  .usage-header h1 { font-size: 24px; }
+  .usage-header button { flex-shrink: 0; }
+  .usage-metrics { grid-template-columns: 1fr; }
+  .usage-metrics article { padding: 14px; }
+  .usage-chart, .usage-table-wrap { padding: 12px; }
+  .usage-chart text { font-size: 30px; }
+  .usage-filters { gap: 12px; }
+  .usage-filters label { flex: 1; min-width: 120px; }
+}

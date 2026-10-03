@@ -9,6 +9,8 @@ import { Logger } from "../../src/common/logger.js";
 import type { SandboxContainer } from "../../src/control/sandbox/container.js";
 import type { HostTokenSource } from "../../src/control/codex/hostTokens.js";
 import { testConfig } from "../helpers/harness.js";
+import { openDb } from '../../src/control/db.js';
+import { UsageLedger } from '../../src/control/usage.js';
 
 interface Inbound {
   jsonrpc?: string;
@@ -94,14 +96,26 @@ function containerFor(server: FakeAppServer): SandboxContainer {
   return { spawnCodexAppServer: () => server.child } as unknown as SandboxContainer;
 }
 
-function makeSession(server: FakeAppServer, timeoutMs = 30, bridge: BridgeModel | null = null): SandboxCodexSession {
+function makeSession(server: FakeAppServer, timeoutMs = 30, bridge: BridgeModel | null = null, usage?: UsageLedger): SandboxCodexSession {
   const cfg = testConfig("/tmp/pa-aux-stream", 1, {});
-  return new SandboxCodexSession(cfg, new Logger("error", undefined, false), containerFor(server), hostTokens, bridge, timeoutMs);
+  return new SandboxCodexSession(cfg, new Logger("error", undefined, false), containerFor(server), hostTokens, bridge, timeoutMs, usage);
 }
 
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 describe("SandboxCodexSession dispatcher thread isolation", () => {
+  it('records late auxiliary usage without leaking its events to the conversation', async () => {
+    const db=openDb(':memory:'),server=new FakeAppServer();
+    server.handle('thread/start',()=>({thread:{id:'aux-usage'}}));server.handle('turn/start',()=>({turn:{id:'turn'}}));
+    const session=makeSession(server,30,null,new UsageLedger(db));const forwarded:unknown[]=[];session.onNotification((m,p)=>forwarded.push([m,p]));
+    try {
+      await session.planTask('classify');
+      server.notify('thread/tokenUsage/updated',{threadId:'aux-usage',tokenUsage:{total:{inputTokens:100,outputTokens:4},last:{inputTokens:100,outputTokens:4}}});
+      await wait(20);
+      expect(db.prepare('SELECT SUM(input) input,SUM(output) output FROM token_usage').get()).toMatchObject({input:100,output:4});
+      expect(forwarded).toEqual([]);
+    } finally {session.close();db.close();}
+  });
   it("drops late notifications from a timed-out dispatcher thread and interrupts it", async () => {
     const server = new FakeAppServer();
     server.handle("thread/start", () => ({ thread: { id: "aux_1" } }));

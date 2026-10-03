@@ -9,6 +9,7 @@ import type { SandboxContainer } from "../sandbox/container.js";
 import type { BridgeModel } from "../bridgeModel.js";
 import { JsonRpcPeer } from "./jsonrpc.js";
 import type { HostTokenSource } from "./hostTokens.js";
+import type { UsageLedger } from '../usage.js';
 
 export interface SandboxAccount {
   email: string | null;
@@ -77,6 +78,7 @@ export class SandboxCodexSession {
     bridge: BridgeModel | null = null,
     /** How long one dispatcher run may take. */
     private readonly planTimeoutMs = 90_000,
+    private readonly usage?: UsageLedger,
   ) {
     this.#cfg = cfg;
     this.#log = log.child("sandbox-codex");
@@ -232,6 +234,10 @@ export class SandboxCodexSession {
   }
 
   #routeNotification(method: string, params: unknown): void {
+    // Observe before auxiliary routing: dispatch/title calls also consume tokens.
+    if (method === 'thread/tokenUsage/updated') {
+      try { this.usage?.codex(params); } catch { this.#log.error('token usage persistence failed'); }
+    }
     const threadId = (params as { threadId?: unknown } | undefined)?.threadId;
     if (typeof threadId === "string") {
       const subscribers = this.#threadSubscribers.get(threadId);

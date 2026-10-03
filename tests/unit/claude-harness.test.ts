@@ -13,6 +13,7 @@ import { AgentManager } from "../../src/control/codex/manager.js";
 import type { HostTokenSource } from "../../src/control/codex/hostTokens.js";
 import type { SandboxContainer } from "../../src/control/sandbox/container.js";
 import { openDb, type Db } from "../../src/control/db.js";
+import { UsageLedger } from '../../src/control/usage.js';
 import { Logger } from "../../src/common/logger.js";
 import { FakeCodex, testConfig } from "../helpers/harness.js";
 
@@ -224,7 +225,7 @@ class FakeChild extends EventEmitter {
 
 const flush = () => new Promise((r) => setTimeout(r, 10));
 
-function makeSession(patch: Partial<ReturnType<typeof enabledConfig>> = {}) {
+function makeSession(patch: Partial<ReturnType<typeof enabledConfig>> = {}, usage?: UsageLedger) {
   const spawns: Array<{ args: string[]; env: Record<string, string>; child: FakeChild }> = [];
   const existing = new Set<string>();
   const killed: string[] = [];
@@ -239,7 +240,7 @@ function makeSession(patch: Partial<ReturnType<typeof enabledConfig>> = {}) {
     },
   } as unknown as SandboxContainer;
   const cfg = { ...enabledConfig(), ...patch };
-  const session = new ClaudeCodeSession(cfg, log, container, new ClaudeCodeHarness(cfg, log));
+  const session = new ClaudeCodeSession(cfg, log, container, new ClaudeCodeHarness(cfg, log), usage);
   const events: Array<{ method: string; params: Record<string, unknown> }> = [];
   session.onNotification((method, params) => events.push({ method, params: params as Record<string, unknown> }));
   return { session, spawns, existing, killed, events };
@@ -249,6 +250,16 @@ const statusOf = (events: Array<{ method: string; params: Record<string, unknown
   (events.find((e) => e.method === "turn/completed")?.params.turn as { status?: string; error?: { message: string } } | undefined);
 
 describe("ClaudeCodeSession", () => {
+  it('persists actual executor and auxiliary result counters, including failure spend',async()=>{
+    const db=openDb(':memory:');const {session,spawns}=makeSession({},new UsageLedger(db));
+    try {
+      const {threadId}=await session.startThread({model:'claude-opus-5-5'});await session.startTurn({threadId,text:'hello'});
+      spawns[0].child.send({type:'result',is_error:true,uuid:'r1',modelUsage:{opus:{inputTokens:10,outputTokens:2,cacheReadInputTokens:20}}});spawns[0].child.close();
+      const plan=session.planTask('classify');await flush();
+      spawns[1].child.send({type:'result',result:'{}',uuid:'r2',usage:{input_tokens:3,output_tokens:1,cache_creation_input_tokens:4}});spawns[1].child.close();await plan;
+      expect(db.prepare('SELECT SUM(input) input,SUM(output) output FROM token_usage').get()).toMatchObject({input:37,output:3});
+    }finally{session.close();db.close();}
+  });
   it("starts a session with fixed flags, then resumes it on the next turn", async () => {
     const { session, spawns, existing, events } = makeSession();
     const { threadId } = await session.startThread({ model: "claude-opus-5-5", developerInstructions: "你是助理" });

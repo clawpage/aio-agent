@@ -43,6 +43,7 @@ const PENDING_STEER_GRACE_MS = 10_000;
 type Json = Record<string, unknown>;
 
 interface Run {
+  resumed: boolean;
   threadId: string;
   sessionId: string;
   turnId: string;
@@ -96,7 +97,7 @@ export class ClaudeCodeSession {
   #onNotification: ((method: string, params: unknown) => void) | null = null;
   #installing: Promise<void> | null = null;
 
-  constructor(cfg: Config, log: Logger, container: SandboxContainer, harness: ClaudeCodeHarness) {
+  constructor(cfg: Config, log: Logger, container: SandboxContainer, harness: ClaudeCodeHarness, private readonly usage?: import('../usage.js').UsageLedger) {
     this.#cfg = cfg;
     this.#log = log.child("claude-code-session");
     this.#container = container;
@@ -166,6 +167,7 @@ export class ClaudeCodeSession {
     const turnId = `cturn_${randomUUID()}`;
     const child = this.#container.spawnClaude(args, this.#harness.credentialEnv());
     const run: Run = {
+      resumed: resume,
       threadId,
       sessionId,
       turnId,
@@ -227,6 +229,7 @@ export class ClaudeCodeSession {
       return;
     }
     if (event.type === "result") {
+      try { this.usage?.claude(event, run.sessionId, run.resumed); } catch { this.#log.error('token usage persistence failed'); }
       run.result = event;
       if (run.pendingSteers.length === 0) {
         run.child.stdin?.end();
@@ -356,6 +359,7 @@ export class ClaudeCodeSession {
     }
     try {
       const result = JSON.parse(stdout) as Json;
+      try { this.usage?.claude(result, sessionId, false); } catch { this.#log.error('token usage persistence failed'); }
       if (result.is_error || typeof result.result !== "string") {
         this.#log.warn("claude code auxiliary run failed", { message: resultMessage(result, stderr) });
         return null;
