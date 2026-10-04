@@ -93,6 +93,15 @@ describe("noVNC page", () => {
 });
 
 describe("noVNC under the console's toolbar", () => {
+  it("adds the host pinch relay to a desktop patched by the previous toolbar version", () => {
+    const patched = patchNoVncUi(ui)!;
+    const start = patched.indexOf("\n/* aio-agent: pinch scales the host preview */");
+    const older = patched.slice(0, start - 1) + patched.slice(patched.indexOf("\nexport default UI;"));
+    expect(patchNoVncUi(older)).toBe(patched);
+    expect(patched).toContain("e.detail.type !== 'pinch'");
+    expect(patched).toContain("e.stopImmediatePropagation();");
+    expect(patched).toContain("ratio: magnitude / startMagnitude");
+  });
   it("lets only the framing page hide the left bar and send keys, text and a paste", () => {
     const patched = patchNoVncUi(ui)!;
     expect(patched).toContain("/* aio-agent: the console's toolbar drives this desktop */");

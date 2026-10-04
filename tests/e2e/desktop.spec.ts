@@ -55,17 +55,16 @@ test("the workspace is a desktop: a menu bar, one app window, a Dock, and minimi
       await swipe(-120, 0);
       expect((await at()).left).toBeGreaterThan(before.left + 60);
     }
-    // Too short for the zoomed picture (an open keyboard, a short panel), it shrinks to fit the height instead
-    // of growing a vertical scroll, and the whole picture stays above the toolbar.
+    // A short panel keeps the page readable at the same scale, with the toolbar over the clipped picture.
     await page.setViewportSize({ width: 390, height: 520 });
-    await expect.poll(() => frame.evaluate((el) => el.scrollHeight - el.clientHeight)).toBeLessThanOrEqual(0);
+    await expect.poll(async () => (await desktopGeometry(frame)).frame).toBeCloseTo(geometry.frame, 0);
     const fit = await frame.evaluate((el) => {
-      const pic = el.querySelector("iframe")!.getBoundingClientRect(), bar = el.querySelector(".desktop-bar")!.getBoundingClientRect();
-      return { top: pic.top - el.getBoundingClientRect().top, gap: bar.top - pic.bottom, width: pic.width, fitted: Math.min(el.clientWidth * 1.6, (el.clientHeight - 52) * 1.25) };
+      const pic = el.querySelector("iframe")!.getBoundingClientRect(), bar = el.querySelector(".desktop-bar")!.getBoundingClientRect(), box = el.getBoundingClientRect();
+      return { top: pic.top - box.top, bottom: bar.bottom - box.bottom, barTop: bar.top - box.top };
     });
     expect(fit.top).toBeGreaterThanOrEqual(0);
-    expect(fit.gap).toBeGreaterThanOrEqual(-1);
-    expect(Math.abs(fit.width - fit.fitted)).toBeLessThan(2);
+    expect(fit.bottom).toBeLessThanOrEqual(1);
+    expect(fit.barTop).toBeGreaterThanOrEqual(0);
     await page.screenshot({ path: info.outputPath("desktop-browser-short.png") });
     if (swipe) {
       const short = await at();

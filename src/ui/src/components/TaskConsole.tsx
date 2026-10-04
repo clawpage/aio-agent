@@ -6,7 +6,7 @@ import { DesktopFrame, usePhoneDesktop } from "./DesktopFrame";
 
 /** The sandbox desktop in noVNC: scaled to fit, reconnecting on its own. */
 // `aio=<NOVNC_ASSET_VERSION>`: a new URL, so phones load the patched noVNC instead of a cached copy (see novncPatch).
-export const DESKTOP_PATH = "/vnc/vnc.html?autoconnect=1&resize=scale&reconnect=1&path=ws&aio=4";
+export const DESKTOP_PATH = "/vnc/vnc.html?autoconnect=1&resize=scale&reconnect=1&path=ws&aio=5";
 
 /** How often an open console tells the sandbox its tab is still the one on screen (the sandbox forgets after 45 s). */
 const CONSOLE_PIN_RENEW_MS = 15_000;

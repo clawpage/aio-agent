@@ -16,7 +16,7 @@
  * - A pinch (or a two-finger scroll whose fingers drifted) sent Ctrl + wheel,
  *   which zooms the remote page, and Chrome keeps a zoom per site: Amazon stuck
  *   at 150% laid out 853 px wide, as if on a phone. A pinch now does nothing to
- *   the page; a phone reads the desktop zoomed in and pans instead.
+ *   the page; the console scales the preview itself when fingers pinch.
  * - On a phone the console draws its own toolbar under the desktop (keyboard,
  *   paste, Esc/Tab/Enter) in the black strip that pans the view. It asks noVNC
  *   to hide its own control bar on the left and sends it keys and text by
@@ -34,7 +34,7 @@ export const NOVNC_RFB_PATH = "/opt/novnc/core/rfb.js";
  * the console opens vnc.html with it too, see DESKTOP_PATH); bump it whenever a
  * patched file changes.
  */
-export const NOVNC_ASSET_VERSION = 4;
+export const NOVNC_ASSET_VERSION = 5;
 
 const KEYBOARD_MARKER = "/* aio-agent: one tap, one key */";
 const KEY_EVENT = `    keyEvent(keysym, code, down) {
@@ -126,11 +126,41 @@ function patchHostBar(source: string): string | null {
   return source.replace(UI_EXPORT, `\n${HOST_BAR}${UI_EXPORT}`);
 }
 
+const HOST_PINCH_MARKER = "/* aio-agent: pinch scales the host preview */";
+const HOST_PINCH = `
+${HOST_PINCH_MARKER}
+if (window.parent !== window) {
+    let startMagnitude = 0;
+    const pinch = (e) => {
+        if (e.detail.type !== 'pinch' || !document.documentElement.classList.contains('aio-host-bar')) return;
+        // Consume only a pinch. Taps, long presses and two-finger scrolling still reach noVNC.
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        const magnitude = Math.hypot(e.detail.magnitudeX, e.detail.magnitudeY);
+        const phase = e.type === 'gesturestart' ? 'start' : e.type === 'gestureend' ? 'end' : 'move';
+        if (phase === 'start') startMagnitude = magnitude;
+        if (startMagnitude > 0) window.parent.postMessage({
+            aio: 'desktop', type: 'pinch', phase,
+            ratio: magnitude / startMagnitude, x: e.detail.clientX / window.innerWidth,
+        }, '*');
+        if (phase === 'end') startMagnitude = 0;
+    };
+    for (const name of ['gesturestart', 'gesturemove', 'gestureend']) document.addEventListener(name, pinch, true);
+}
+`;
+
+function patchHostPinch(source: string): string | null {
+  if (source.includes(HOST_PINCH_MARKER)) return source;
+  if (source.split(UI_EXPORT).length !== 2) return null;
+  return source.replace(UI_EXPORT, `\n${HOST_PINCH}${UI_EXPORT}`);
+}
+
 /** The patched app/ui.js; null when its code is not the version these patches know. */
 export function patchNoVncUi(source: string): string | null {
   const keyboard = patchKeyboard(source);
   const bar = keyboard && patchHostBar(keyboard);
-  return bar === null ? null : replaceOne(bar, RFB_IMPORT, `import RFB from "../core/rfb.js?aio=${NOVNC_ASSET_VERSION}";`);
+  const pinch = bar && patchHostPinch(bar);
+  return pinch === null ? null : replaceOne(pinch, RFB_IMPORT, `import RFB from "../core/rfb.js?aio=${NOVNC_ASSET_VERSION}";`);
 }
 
 /** The patched vnc.html (loads ui.js under the current version); null when unknown. */

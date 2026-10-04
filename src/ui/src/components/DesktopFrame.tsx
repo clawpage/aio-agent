@@ -6,6 +6,8 @@ const DESKTOP_ASPECT = 1024 / 1280;
 const PHONE = "(max-width: 720px)";
 /** …so it is drawn this many screen widths wide, and the black around it pans the view. */
 const PHONE_ZOOM = 1.6;
+const MIN_ZOOM = 1;
+const MAX_ZOOM = 3.2;
 /** The toolbar's height in the bottom strip (padding included, safe area aside). */
 const BAR_HEIGHT = 52;
 
@@ -38,6 +40,10 @@ export function DesktopFrame({ src, title, onLoad, interactive = true }: { src: 
   const input = useRef<HTMLTextAreaElement>(null);
   const [size, setSize] = useState({ width: 0, height: 0 });
   const [typing, setTyping] = useState(false);
+  const [zoom, setZoom] = useState(PHONE_ZOOM);
+  const zoomRef = useRef(PHONE_ZOOM);
+  const pinch = useRef<{ zoom: number; x: number; anchor: number } | null>(null);
+  const pendingPan = useRef<number | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const phone = usePhoneDesktop();
   useEffect(() => {
@@ -51,6 +57,28 @@ export function DesktopFrame({ src, title, onLoad, interactive = true }: { src: 
     return () => observer.disconnect();
   }, []);
   const zoomed = phone && size.width > 0;
+  useEffect(() => {
+    if (!zoomed) return;
+    const receive = (event: MessageEvent) => {
+      const el = box.current, picture = frame.current;
+      const m = event.data;
+      if (!el || !picture || event.source !== picture.contentWindow || event.origin !== new URL(src, location.href).origin ||
+        !m || m.aio !== "desktop" || m.type !== "pinch" || !Number.isFinite(m.ratio) || m.ratio <= 0 || !Number.isFinite(m.x)) return;
+      if (m.phase === "start") {
+        const x = Math.max(0, Math.min(1, m.x));
+        pinch.current = { zoom: zoomRef.current, x, anchor: picture.getBoundingClientRect().left - el.getBoundingClientRect().left + x * picture.clientWidth };
+      } else if (m.phase === "move" && pinch.current) {
+        const gesture = pinch.current;
+        const next = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, gesture.zoom * m.ratio));
+        if (next === zoomRef.current) return;
+        pendingPan.current = gesture.x * Math.floor(el.clientWidth * next) - gesture.anchor;
+        zoomRef.current = next;
+        setZoom(next);
+      } else if (m.phase === "end") pinch.current = null;
+    };
+    window.addEventListener("message", receive);
+    return () => { window.removeEventListener("message", receive); pinch.current = null; };
+  }, [zoomed, src]);
   // Zoomed, the view opens on the middle of the desktop; it is centred again only when the width changes
   // (a turned phone), never when a keyboard changes the height, so a pan the person made stays.
   useLayoutEffect(() => {
@@ -95,14 +123,20 @@ export function DesktopFrame({ src, title, onLoad, interactive = true }: { src: 
     }
   };
 
-  // It only pans sideways: where the room above the toolbar is too short for the zoomed picture (a short
-  // panel, an open keyboard) the picture shrinks to that height, centred if it ends up narrower than the screen.
-  const width = Math.max(0, Math.floor(Math.min(size.width * PHONE_ZOOM, (size.height - BAR_HEIGHT) / DESKTOP_ASPECT)));
+  // Keep the picture's scale tied to the phone's width. A keyboard changes the available height,
+  // so clip the picture below the toolbar instead of shrinking the page while someone types.
+  const width = Math.max(0, Math.floor(size.width * zoom));
   const height = Math.round(width * DESKTOP_ASPECT);
   const left = Math.max(0, Math.floor((size.width - width) / 2));
   // The picture centred in the room above the bottom strip; the toolbar at the very bottom of that strip.
   const room = Math.max(0, size.height - height - BAR_HEIGHT);
   const above = Math.floor(room / 2);
+  useLayoutEffect(() => {
+    if (box.current && pendingPan.current !== null) {
+      box.current.scrollLeft = pendingPan.current;
+      pendingPan.current = null;
+    }
+  }, [width]);
   return (
     <div ref={box} className={`desktop-frame${zoomed ? " zoomed" : ""}`}>
       <iframe
@@ -114,7 +148,7 @@ export function DesktopFrame({ src, title, onLoad, interactive = true }: { src: 
         style={zoomed ? { width, height, marginTop: above, marginLeft: left } : undefined}
       />
       {zoomed && (
-        <div className="desktop-bar" style={{ width: size.width, marginTop: room - above }} role="toolbar" aria-label="桌面操作">
+        <div className="desktop-bar" style={{ width: size.width, marginTop: size.height - height - BAR_HEIGHT - above }} role="toolbar" aria-label="桌面操作">
           {interactive && <>
             <button type="button" className={typing ? "active" : ""} onClick={openKeyboard} aria-pressed={typing}>键盘</button>
             <button type="button" onClick={() => void paste()}>粘贴</button>
@@ -122,7 +156,7 @@ export function DesktopFrame({ src, title, onLoad, interactive = true }: { src: 
             <button type="button" onClick={() => post({ type: "key", key: "Tab" })}>Tab</button>
             <button type="button" onClick={() => post({ type: "key", key: "Escape" })}>Esc</button>
           </>}
-          <span className="desktop-bar-hint">{note ?? "左右滑动看全部"}</span>
+          <span className="desktop-bar-hint">{note ?? "双指缩放 · 左右滑动"}</span>
           <textarea
             ref={input}
             className="desktop-bar-input"
