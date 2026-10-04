@@ -421,7 +421,7 @@ npm run build && npx playwright test --config playwright.local.config.ts
 | 层 | 覆盖 |
 | --- | --- |
 | `npm test` | 未登录绕过、会话过期/轮换/吊销与已建立连接被关闭、Host/Origin/CSRF 校验、重定向安全、代理 HTTP 与 WebSocket（对假沙箱）、事件回放与 delta 顺序、重复提交与跨会话冲突、停止语义、未知结果不重放、shell 支撑的文件操作只报真实结果、派单临时线程的隔离（超时后迟到事件不混入用户会话）、会话生命周期（空标题复用、重命名/恢复默认标题冲突 409、无删除接口）、沙箱浏览器标签 URL 校验、**浏览器生命周期**（状态机竞态/多观看者 TTL/任务租约单飞/快照失败不停止/恢复 single-flight/归属未知 fail-closed/状态轮询不唤醒、浏览器 API 鉴权+CSRF+注销清理、代理只保护 browser/CDP/VNC 且拒绝时释放租约） |
-| `python3 tests/unit/browser-runtime.test.py` | 容器内受管 helper 的纯函数与安全边界：真实 flattened cmdline 归属、`unknown` 不等于 `absent`、快照 schema/原子 0600、精确 PID/starttime 校验后才停、按 origin 限定且在导航前注入 `sessionStorage`、AIO soft 重连与激活 index、错误脱敏 |
+| `python3 tests/unit/browser-runtime.test.py`（`npm test` 会接着 vitest 一起跑） | 容器内受管 helper 的纯函数与安全边界：真实 flattened cmdline 归属、`unknown` 不等于 `absent`、快照 schema/原子 0600、精确 PID/starttime 校验后才停、按 origin 限定且在导航前注入 `sessionStorage`、AIO soft 重连与激活 index、错误脱敏 |
 | `npm run smoke` | 真实 HTTPS 登录与 cookie 属性、模型列表、一次性票据（重放与开放重定向）、伴随站会话与跨源续期、经鉴权的 shell 调用、上传与列目录、跨源写入拒绝、原生界面可达、未登录时各表面一律 401、**真实 WebSocket 升级**（已登录 101 / 未登录 401） |
 | `npx playwright test` | 登录界面（错误密码与正确密码）、对话页输入区不含任何模型/思考控件、统一配置页默认选中 GPT-6-Sol（桌面侧栏与手机底导航入口）、打开工作区后立刻切标签的竞态、连续切换最终落在最后点击的标签、真实文件列表与 code-server 可达、无横向溢出 |
 | `npx playwright test --config playwright.local.config.ts` | 会话文件卡片与统一预览（图片缩略图/分页翻页/下载/失败重试/360px 无溢出）、工作区「文件」唯一入口/上传/目录导航/转换/迟到结果不跳目录、本地假后端（可用 `PA_TEST_PORT` 指定测试端口；默认 `dist/ui`，可用 `PA_TEST_WEB_ROOT` 指向 scratch 构建 + 全部 `/api` 由 `page.route` mock）：会话 `⋯` 菜单/重命名/归档/恢复且无删除、失败重命名保留输入、运行态与 `prefers-reduced-motion`、公网链接打开设备浏览器、内网 IP 链接保留沙箱浏览器（`mailto:`/相对链接保持不可导航）、四向安全区与长弹窗/键盘回归、归档行标题不可点、统一配置页保存/刷新持久化/跨会话生效/失败反馈/无模型列表时禁用保存/返回会话保留草稿、活动段混排（文本/活动多段次序、当前条唯一且置底、段独立展开且增量不重置、迟到日志回原段、空占位不切段、状态行在活动段之上）、默认收起/点击与键盘展开收起/终态停动画/审批露出/长历史展开自然高度（段自身不滚动）与行可达（桌面 1440×900，手机 390/360 含 WebKit，短视口与暗亮无溢出） |
@@ -479,6 +479,25 @@ npm run build && npx playwright test --config playwright.local.config.ts
 | `PA_SANDBOX_IDLE_SECONDS` | `300` | 沙箱不在用且控制台不在前台，持续多久后停容器（下限 60 秒） |
 | `PA_BROWSER_VIEWER_TTL_SECONDS` | `60` | 观看心跳租约有效期（下限 10 秒）；到期即释放 |
 | `PA_BROWSER_DIRTY_INPUT_POLICY` | `block` | 页面有未提交输入时 `block`（保守拒绝释放）/`warn` |
+
+其他可调项（一般不用改，默认值即源码默认）：
+
+| 变量 | 默认 | 说明 |
+| --- | --- | --- |
+| `PA_DB_PATH` / `PA_OWNER_SECRET_PATH` | `<数据目录>/personal-agent.sqlite` / `<数据目录>/owner-secret.txt` | 数据库与 owner 明文密码文件的位置 |
+| `PA_ALLOWED_HOSTS` / `PA_PRIMARY_ORIGINS` / `PA_WORKSPACE_ORIGINS` | 空 | 在两个精确域名之外额外放行的 Host、控制台来源、工作区来源（逗号分隔） |
+| `PA_ALLOW_INSECURE_LOOPBACK_COOKIES` | `1` | 仅 localhost 明文访问时允许不带 `Secure` 的 cookie（本地开发） |
+| `PA_SESSION_TTL_HOURS` / `PA_SESSION_RENEW_MINUTES` | `720` / `60` | 登录会话有效期与闲置续期间隔 |
+| `PA_TICKET_TTL_SECONDS` | `60` | 工作区一次性票据有效期 |
+| `PA_LOGIN_MAX_FAILURES` / `PA_LOGIN_WINDOW_MINUTES` / `PA_LOGIN_LOCKOUT_MINUTES` | `5` / `15` / `15` | 同一 IP 密码（或邀请码）错误的次数、统计窗口与锁定时长 |
+| `PA_PROXY_CONNECT_TIMEOUT_SECONDS` | `30` | 伴随站代理连到沙箱的超时 |
+| `PA_FILE_OP_TIMEOUT_SECONDS` | `30` | 工作区文件操作（列目录、读写、上传）的超时 |
+| `PA_SANDBOX_READY_TIMEOUT_SECONDS` | `180` | 等沙箱容器健康就绪的上限 |
+| `PA_SANDBOX_USER` | `gem` | 沙箱内运行用户代码的账号 |
+| `PA_SANDBOX_WORKSPACE_VOLUME` / `PA_SANDBOX_CODEX_VOLUME` / `PA_SANDBOX_BROWSER_VOLUME` | `personal-agent-workspace` / `personal-agent-codex` / `personal-agent-browser` | owner 沙箱的三个命名卷（改名会丢数据，见「兼容保留的运行时标识」） |
+| `PA_HOST_CODEX_BIN` / `PA_HOST_CODEX_HOME` | `codex` / `~/.codex` | 本机 Codex CLI 与其登录目录（`PA_HOST_CODEX=on` 时取 ChatGPT 凭据） |
+| `PA_HOST_CODEX_TIMEOUT_SECONDS` / `PA_HOST_TOKEN_SKEW_HOURS` | `10` / `6` | 向本机 Codex 取凭据的超时；令牌剩余不足多少小时就提前刷新 |
+| `PA_SANDBOXD_ADD_HOST_GATEWAY` | `0` | sandboxd 给新沙箱加 `host.docker.internal`（Linux Docker 需要，Docker Desktop 自带） |
 
 ## 文档
 

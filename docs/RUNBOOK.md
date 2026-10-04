@@ -148,7 +148,7 @@ docker exec -u gem personal-agent-sandbox \
 
 两步都幂等、可重复执行；已就绪时走 fast path，只刷新 CLI，不跑 apt/pip。
 
-- 控制面每次启动会**非阻塞**同步一次工具脚本（含已发布的 `bin/aio-doc`），只做 digest 比对
+- 控制面每次启动会**非阻塞**同步一次工具脚本（含 `src/control/documents/scripts/aio-doc`，发布到沙箱的 `tools/aio-doc/bin/aio-doc`），只做 digest 比对
   与写文件，不跑 apt/pip，不会拖慢聊天启动；失败只记日志。
 - **重建/换新沙箱后系统包要重装**：venv 在持久卷里会保留，但 apt 系统包（LibreOffice、
   poppler、字体）属于容器层，随容器重建消失，需重新执行上面的 root 层安装，再跑一次就绪检查。
@@ -218,7 +218,7 @@ member 首次访问或服务启动时创建独立 `aio-user-<散列>` 容器及�
 
 | 现象 | 原因 | 处理 |
 | --- | --- | --- |
-| `bin/serve` 拒绝启动并提示 dist 过期 | 改了 `src/server` 没重新构建 | `npm run build:server` 后再启动 |
+| `bin/serve` 拒绝启动并提示 dist 过期 | 改了 `src/control`、`src/sandbox` 或 `src/common` 没重新构建 | `npm run build:server` 后再启动 |
 | `/healthz.ready=false` 且 `servicesReady=false` | 沙箱内某程序未运行 | `docker exec personal-agent-sandbox supervisorctl status`；对失败程序单独 `supervisorctl start <prog>`，**不要** `supervisorctl restart all` |
 | code-server 反复 `EACCES mkdir '/home/gem/.config/code-server'` | 挂载卷导致 `/home/gem/.config` 变为 root 属主 | 控制面启动时会修正属主；手工修：`docker exec -u root personal-agent-sandbox chown -R 1000:1000 /home/gem/.config /home/gem/.local/share/code-server` 然后只 `supervisorctl start code-server` |
 | 终端/VNC/Jupyter 502 | 沙箱未就绪或刚被重启 | 看 `/healthz` 与容器状态；控制面每 30 s 自动重试接管容器与 Codex |
