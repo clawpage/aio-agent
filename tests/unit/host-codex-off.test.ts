@@ -10,8 +10,3 @@ it("reports nothing to log in to and never starts the host Codex when it is off"
   await expect(source.getTokens()).rejects.toThrow("PA_HOST_CODEX=off");
   expect(testConfig("/tmp/pa-host-codex-on", 1).hostCodex.enabled).toBe(true);
 });
-
-it("reaches the bridge from the host on loopback unless told otherwise", () => {
-  expect(testConfig("/tmp/pa-bridge-up", 1).bridge.upstreamUrl).toBe("http://127.0.0.1:4017/v1");
-  expect(testConfig("/tmp/pa-bridge-up", 1, { PA_OPENCODE_GO_UPSTREAM_URL: "http://host.docker.internal:4017/v1" }).bridge.upstreamUrl).toBe("http://host.docker.internal:4017/v1");
-});

@@ -11,8 +11,9 @@ let member:Record<string,string>, owner:Record<string,string>;
 const planner=vi.fn(async(_prompt:string,_soul?:string,_model?:string)=>JSON.stringify({title:'处理请求',related:[],dependencies:[],resources:[]}));
 beforeAll(async()=>{
  dir=fs.mkdtempSync(path.join(os.tmpdir(),'aio-members-'));
- const secret=path.join(dir,'bridge.env');fs.writeFileSync(secret,'LITELLM_MASTER_KEY=test-member-key\n',{mode:0o600});
- h=await startHarness({PA_OPENCODE_GO_SECRETS_FILE:secret,PA_MAX_CONCURRENT_TURNS:'3'});
+ const secret=path.join(dir,'model.env');fs.writeFileSync(secret,'AIO_MEMBER_MODEL_TOKEN=test-member-token\n',{mode:0o600});
+ // The member's turns reach its model through the gateway provider, as on a member runtime.
+ h=await startHarness({PA_MAX_CONCURRENT_TURNS:'3'},{configure:cfg=>{cfg.bridge={...cfg.bridge,enabled:'on',models:[MEMBER_MODEL],baseUrl:'http://host.docker.internal:4902/u/user_m/v1',secretsFile:secret};}});
  Object.assign(h.codex,{planTask:planner});
  userId=(await createMember(h.ctx.db,'yzmy','member-password-123')).id;
  const res=await h.request('/api/auth/login',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({username:'yzmy',password:'member-password-123'})});
@@ -49,7 +50,7 @@ it('isolates ledger reads, references, stops, events, replay IDs and planner con
  const start=vi.spyOn(h.codex,'startThread');const resume=vi.spyOn(h.codex,'resumeThread');
  const b=await submit(member,'member-own-task',{model:'gpt-6-sol',effort:'low',userId:'owner_1'});expect(b.status).toBe(202);
  await vi.waitFor(()=>expect(h.codex.startedTurns.some(t=>t.model===MEMBER_MODEL), JSON.stringify(h.ctx.tasks.get(b.body.task.id))).toBe(true));
- const run=h.codex.startedTurns.find(t=>t.model===MEMBER_MODEL)!;expect(run.effort).toBe('high');expect(h.codex.threadProviders.get(run.threadId)).toBe('opencode_go');
+ const run=h.codex.startedTurns.find(t=>t.model===MEMBER_MODEL)!;expect(run.effort).toBe('high');expect(h.codex.threadProviders.get(run.threadId)).toBe('aio_gateway');
  expect(start).toHaveBeenLastCalledWith(expect.objectContaining({developerInstructions:readSoul(h.ctx.cfg).content,model:MEMBER_MODEL}));
  const planned=planner.mock.calls.find(c=>c[2]===MEMBER_MODEL)!;expect(planned).toBeDefined();expect(planned[1]).toBe(readSoul(h.ctx.cfg).content);expect(planned[0]).not.toContain('owner-private-task');
  const feed=await h.request('/api/main',{headers:member});expect((await feed.json() as any).tasks.map((t:any)=>t.id)).toEqual([b.body.task.id]);
@@ -70,8 +71,8 @@ it('isolates ledger reads, references, stops, events, replay IDs and planner con
  expect(resume).toHaveBeenLastCalledWith(run.threadId,readSoul(h.ctx.cfg).content);
 
 });
-it('fails closed when the fixed provider is unavailable instead of using GPT',async()=>{
- const disabled=await startHarness({PA_OPENCODE_GO_ENABLED:'off'});
+it('fails closed when the gateway provider is unavailable instead of using the owner ChatGPT login',async()=>{
+ const disabled=await startHarness();
  try {const user=await createMember(disabled.ctx.db,'member2','member-password-456');
  expect(()=>disabled.ctx.tasks.submit({userId:user.id,text:'hi',clientMessageId:'blocked'})).toThrow('服务暂时不可用');
  expect(disabled.codex.startedTurns).toHaveLength(0);

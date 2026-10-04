@@ -1673,11 +1673,6 @@ export class AgentManager {
     }
   }
 
-  /** Whether `model` runs on the optional bridge provider instead of the ChatGPT account. */
-  usesBridgeModel(model: string | null): boolean {
-    return Boolean(model) && (this.#bridge?.providerForModel(model!) ?? CHATGPT_PROVIDER_ID) !== CHATGPT_PROVIDER_ID;
-  }
-
   /** Whether a model catalog has been observed (settings UI disables saving when not). */
   hasModelCatalog(): boolean {
     return this.#modelCatalog.length > 0;

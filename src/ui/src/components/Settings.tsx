@@ -90,8 +90,8 @@ export function Settings({ onBack, onSaved }: Props) {
   const canSave = !loading && !saving && catalogKnown && Boolean(model) && !savedModelUnusable;
   const isDefaultChoice = Boolean(defaultModel) && model === defaultModel && effort === "";
   /**
-   * A non-ChatGPT catalog entry (the optional OpenCode Go bridge) is text-only,
-   * so the page says so instead of letting an image attachment fail on send.
+   * A catalog entry on another provider that takes only text: the page says so
+   * instead of letting an image attachment fail on send.
    */
   const textOnlyHint = Boolean(currentModel?.modelProvider) && currentModel?.inputModalities?.includes("image") === false;
 

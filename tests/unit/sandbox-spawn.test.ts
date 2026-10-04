@@ -17,12 +17,12 @@ function tmpDir(): string {
 const cleanups: Array<() => void> = [];
 
 beforeEach(() => {
-  delete process.env.LITELLM_MASTER_KEY;
+  delete process.env.AIO_MEMBER_MODEL_TOKEN;
 });
 
 afterEach(() => {
   for (const fn of cleanups.splice(0)) fn();
-  delete process.env.LITELLM_MASTER_KEY;
+  delete process.env.AIO_MEMBER_MODEL_TOKEN;
 });
 
 /** The container with its node's streamed commands captured instead of sent. */
@@ -41,9 +41,13 @@ describe("sandbox Codex launch with the bridge enabled", () => {
     const dir = tmpDir();
     cleanups.push(() => fs.rmSync(dir, { recursive: true, force: true }));
     const file = path.join(dir, "secrets.env");
-    fs.writeFileSync(file, `LITELLM_MASTER_KEY=${SECRET_VALUE}\n`, { mode: 0o600 });
+    fs.writeFileSync(file, `AIO_MEMBER_MODEL_TOKEN=${SECRET_VALUE}\n`, { mode: 0o600 });
     fs.chmodSync(file, 0o600);
-    const cfg = testConfig("/tmp/pa-spawn-bridge", 1, { PA_OPENCODE_GO_SECRETS_FILE: file });
+    const base = testConfig("/tmp/pa-spawn-bridge", 1);
+    const cfg = {
+      ...base,
+      bridge: { ...base.bridge, enabled: "on", baseUrl: "http://host.docker.internal:4902/u/user_g/v1", models: ["gpt-6.1-sol"], secretsFile: file },
+    };
     const bridge = new BridgeModel(cfg, new Logger("error", undefined, false));
     const { container, calls } = capture(cfg);
 
@@ -55,14 +59,14 @@ describe("sandbox Codex launch with the bridge enabled", () => {
     expect(user).toBe(cfg.sandbox.containerUser);
     // The value travels to the node beside argv, never inside it.
     expect(argv.join(" ")).not.toContain(SECRET_VALUE);
-    expect(env?.LITELLM_MASTER_KEY).toBe(SECRET_VALUE);
+    expect(env?.AIO_MEMBER_MODEL_TOKEN).toBe(SECRET_VALUE);
     // The provider itself is defined by the -c overrides the session appends;
     // the launch helper must not have to know about them.
     expect(argv.join(" ")).not.toContain("model_providers");
   });
 
   it("leaves the ChatGPT-only command line unchanged when no key is available", () => {
-    const cfg = testConfig("/tmp/pa-spawn-plain", 1, { PA_OPENCODE_GO_SECRETS_FILE: "/nonexistent/secrets.env" });
+    const cfg = testConfig("/tmp/pa-spawn-plain", 1);
     const bridge = new BridgeModel(cfg, new Logger("error", undefined, false));
     const { container, calls } = capture(cfg);
 
@@ -72,7 +76,7 @@ describe("sandbox Codex launch with the bridge enabled", () => {
     // The agent runs on the deployment's clock, not the image's TZ=Asia/Singapore.
     expect(argv.slice(0, 7)).toEqual(["env", `CODEX_HOME=${cfg.sandbox.containerCodexHome}`, "TZ=America/Los_Angeles", cfg.sandbox.codexBin, "app-server", "--listen", "stdio://"]);
     expect(argv.join(" ")).not.toContain("model_providers");
-    expect(env?.LITELLM_MASTER_KEY).toBeUndefined();
+    expect(env?.AIO_MEMBER_MODEL_TOKEN).toBeUndefined();
     // The isolation flags still come last and stay intact.
     expect(argv.slice(-8)).toEqual([
       "-c",

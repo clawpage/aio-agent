@@ -31,19 +31,6 @@ export function parseList(v: string): string[] {
     .filter(Boolean);
 }
 
-/**
- * Bridged OpenCode Go model ids, in picker order.
- *
- * `PA_OPENCODE_GO_MODELS` is the multi-model list; the older single-model
- * `PA_OPENCODE_GO_MODEL` still wins when it is set, so an existing deployment
- * that pinned one model keeps exactly that one.
- */
-function bridgeModelIds(): string[] {
-  const single = envStr("PA_OPENCODE_GO_MODEL", "");
-  if (single) return [single];
-  return parseList(envStr("PA_OPENCODE_GO_MODELS", "deepseek-v4.1-flash,mimo-v2.6-pro"));
-}
-
 export function loadConfig(): {
   protectedMemberPorts?: number[];
   runtimeUserId?: string;
@@ -143,9 +130,8 @@ export function loadConfig(): {
   hostCodex: {
     /**
      * Whether the owner's ChatGPT login comes from a Codex installation next to
-     * this process. Off where none exists (the control-plane container): owner
-     * turns then run on Claude Code or the bridge models, and ChatGPT models are
-     * not offered.
+     * this process. Off where none exists: owner turns then run on Claude Code,
+     * and ChatGPT models are not offered.
      */
     enabled: boolean;
     bin: string;
@@ -205,20 +191,15 @@ export function loadConfig(): {
     dirtyInputPolicy: "block" | "warn";
   };
   /**
-   * Optional OpenCode Go / LiteLLM bridge models. `enabled` is auto by default:
-   * the models are offered only when a key can actually be read.
-   *
-   * `PA_OPENCODE_GO_MODEL` (single id) is still honoured and wins over
-   * `PA_OPENCODE_GO_MODELS`, so an existing single-model deployment keeps
-   * exactly the one it configured.
+   * The provider a member's sandbox Codex reaches its model through: the member
+   * gateway on the host, which adds the owner's credential there. Off for the
+   * owner's own runtime; the member gateway switches it on per member runtime.
    */
   bridge: {
     enabled: string;
-    /** The bridge as sandboxes reach it. */
+    /** The member gateway as the sandbox reaches it. */
     baseUrl: string;
-    /** The bridge as this process reaches it (the member gateway forwards there). */
-    upstreamUrl: string;
-    /** Every bridged model id, in the order the picker should show them. */
+    /** The model ids it serves (a GPT member's one model). */
     models: string[];
     providerId: string;
     secretsFile: string;
@@ -460,20 +441,16 @@ export function loadConfig(): {
       // never released, so no user-visible work can be lost by accident.
       dirtyInputPolicy: envEnum("PA_BROWSER_DIRTY_INPUT_POLICY", ["block", "warn"] as const, "block"),
     },
-    // The bridge is a local convenience, never a hard dependency: with no key
-    // the model simply does not appear and the ChatGPT path is untouched.
+    // Only member runtimes use it: the member gateway fills it in for each one.
     bridge: {
-      enabled: envStr("PA_OPENCODE_GO_ENABLED", "auto"),
-      baseUrl: envStr("PA_OPENCODE_GO_BASE_URL", "http://host.docker.internal:4017/v1"),
-      // On the host, the sandboxes' host.docker.internal is this machine's loopback.
-      upstreamUrl: envStr("PA_OPENCODE_GO_UPSTREAM_URL", envStr("PA_OPENCODE_GO_BASE_URL", "http://host.docker.internal:4017/v1").replace("//host.docker.internal", "//127.0.0.1")),
-      models: bridgeModelIds(),
-      providerId: envStr("PA_OPENCODE_GO_PROVIDER_ID", "opencode_go"),
-      secretsFile: envStr("PA_OPENCODE_GO_SECRETS_FILE", path.join(os.homedir(), ".config", "codex-opencode-go", "secrets.env")),
-      envKey: envStr("PA_OPENCODE_GO_ENV_KEY", "LITELLM_MASTER_KEY"),
+      enabled: "off",
+      baseUrl: "",
+      models: [],
+      providerId: "aio_gateway",
+      secretsFile: "",
+      envKey: "AIO_MEMBER_MODEL_TOKEN",
     },
-    // Same contract as the bridge: without a credential the harness simply does
-    // not appear, and Codex stays the only executor.
+    // Without a credential the harness simply does not appear, and Codex stays the only executor.
     claudeCode: {
       enabled: envStr("PA_CLAUDE_CODE_ENABLED", "auto"),
       version: claudeCodeVersion,

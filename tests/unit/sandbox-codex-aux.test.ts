@@ -290,15 +290,15 @@ it('runs member planning through the fixed provider at high effort and refuses a
  const server=new FakeAppServer();
  server.handle('thread/start',()=>({thread:{id:'member-plan'}}));
  server.handle('turn/start',()=>{setTimeout(()=>server.notify('turn/completed',{threadId:'member-plan',turn:{id:'turn-plan',status:'completed',items:[{type:'agentMessage',text:'{}'}]}}),5);return {turn:{id:'turn-plan'}};});
- const bridge={providerForModel:()=> 'opencode_go',providerConfigArgs:()=>[],providerEnv:()=>({})} as unknown as BridgeModel;
+ const bridge={providerForModel:()=> 'aio_gateway',providerConfigArgs:()=>[],providerEnv:()=>({})} as unknown as BridgeModel;
  const session=makeSession(server,200,bridge);
  try {
-  expect(await session.planTask('request','soul','deepseek-v4.1-flash')).toBe('{}');
-  expect(server.inbound.find(r=>r.method==='thread/start')?.params).toMatchObject({model:'deepseek-v4.1-flash',modelProvider:'opencode_go',ephemeral:true});
-  expect(server.inbound.find(r=>r.method==='turn/start')?.params).toMatchObject({model:'deepseek-v4.1-flash',effort:'high'});
+  expect(await session.planTask('request','soul','gpt-6.1-sol')).toBe('{}');
+  expect(server.inbound.find(r=>r.method==='thread/start')?.params).toMatchObject({model:'gpt-6.1-sol',modelProvider:'aio_gateway',ephemeral:true});
+  expect(server.inbound.find(r=>r.method==='turn/start')?.params).toMatchObject({model:'gpt-6.1-sol',effort:'high'});
  } finally {session.close();}
  const unavailable=makeSession(new FakeAppServer(),200);
- try {await expect(unavailable.planTask('request','soul','deepseek-v4.1-flash')).rejects.toThrow('服务暂时不可用');}finally{unavailable.close();}
+ try {await expect(unavailable.planTask('request','soul','gpt-6.1-sol')).rejects.toThrow('服务暂时不可用');}finally{unavailable.close();}
 });
 
 it('shows the reason a planning turn failed',async()=>{

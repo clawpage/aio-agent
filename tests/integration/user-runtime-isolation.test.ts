@@ -73,20 +73,20 @@ it('derives disjoint persistent data, volumes and networks, coalesces concurrent
   const a=memberConfig(h.ctx.cfg,u.id,19001),b=memberConfig(h.ctx.cfg,'user_other',19002);
   for(const key of ['dbPath','dataDir','logDir'] as const)expect(a[key]).not.toBe(b[key]);
   for(const key of ['workspaceVolume','codexVolume','browserVolume','networkName','containerName','hostPort'] as const){expect(a.sandbox[key]).not.toBe(b.sandbox[key]);expect(a.sandbox[key]).not.toBe(h.ctx.cfg.sandbox[key]);}
-  expect(a.memberRuntime).toBe(true);expect(a.bridge.models).toEqual(['deepseek-v4.1-flash']);
+  expect(a.memberRuntime).toBe(true);expect(a.bridge.models).toEqual(['gpt-6.1-sol']);
   // Only the fixed Chromium flag reaches a member container, never the owner's extra env.
   expect(memberConfig({...h.ctx.cfg,sandbox:{...h.ctx.cfg.sandbox,extraEnv:['OWNER_ONLY=1']}},u.id,19001).sandbox.extraEnv).toEqual(['BROWSER_NO_SANDBOX=--no-sandbox']);
-  expect(a.memberModel).toBe('deepseek-v4.1-flash');
+  expect(a.memberModel).toBe('gpt-6.1-sol');
   // Member browsers are released when idle (the owner's stays resident) unless switched off.
   expect(h.ctx.cfg.browser.releaseWhenIdle).toBe(false);
   expect(a.browser.releaseWhenIdle).toBe(true);
   expect(memberConfig({...h.ctx.cfg,browser:{...h.ctx.cfg.browser,memberReleaseWhenIdle:false}},u.id,19001).browser.releaseWhenIdle).toBe(false);
   // Only the administrator's assignment picks another model, and only from the member list.
   expect(()=>memberConfig(h.ctx.cfg,u.id,19001,'claude-opus-5-5')).toThrow('Unsupported member model');
-  // A GPT member's model is what its gateway provider serves; a Claude member keeps DeepSeek there.
+  // A GPT member's model is what its gateway provider serves; a Claude member's runs on Claude Code.
   const g=memberConfig(h.ctx.cfg,u.id,19001,'gpt-6.1-sol');
   expect(g.bridge.models).toEqual(['gpt-6.1-sol']);expect(g.agent.defaultModel).toBe('gpt-6.1-sol');
-  expect(memberConfig(h.ctx.cfg,u.id,19001,'claude-sonnet-5-5').bridge.models).toEqual(['deepseek-v4.1-flash']);
+  expect(memberConfig(h.ctx.cfg,u.id,19001,'claude-sonnet-5-5').bridge.models).toEqual([]);
   h.ctx.db.prepare('INSERT INTO meta(key,value) VALUES(?,?)').run(`member_model:${u.id}`,'claude-sonnet-5-5');
   let calls=0;
   const registry=new UserRuntimes(h.ctx,async opts=>{calls++;expect(opts?.identity?.id).toBe(u.id);expect(opts?.config?.memberModel).toBe('claude-sonnet-5-5');expect(opts?.config?.agent.defaultModel).toBe('claude-sonnet-5-5');return {ctx:h.ctx,db:h.ctx.db,shutdown:async()=>{}};});
@@ -94,6 +94,12 @@ it('derives disjoint persistent data, volumes and networks, coalesces concurrent
   expect(await registry.resolve('owner_1')).toBe(h.ctx);
   await expect(registry.resolve('user_unknown')).rejects.toThrow('Unknown account');
   await registry.shutdown();
+  // An assignment no longer offered (DeepSeek, removed) runs on the default instead of failing.
+  h.ctx.db.prepare('UPDATE meta SET value=? WHERE key=?').run('deepseek-v4.1-flash',`member_model:${u.id}`);
+  let fallback:string|undefined;
+  const legacy=new UserRuntimes(h.ctx,async opts=>{fallback=opts?.config?.memberModel;return {ctx:h.ctx,db:h.ctx.db,shutdown:async()=>{}};});
+  await legacy.resolve(u.id);expect(fallback).toBe('gpt-6.1-sol');
+  await legacy.shutdown();
  }finally{await h.shutdown();}
 });
 

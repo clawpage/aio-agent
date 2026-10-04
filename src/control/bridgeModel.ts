@@ -5,21 +5,15 @@ import { expandHome, readSecretFile } from "../common/secrets.js";
 
 /**
  * Provider id Codex uses for its own ChatGPT-account provider. A conversation
- * with no stored provider always resolves to this one, so the ChatGPT path
- * stays exactly what it was before an optional bridge existed.
+ * with no stored provider always resolves to this one.
  */
 export const CHATGPT_PROVIDER_ID = "openai";
 
-const BRIDGE_TEXT_ONLY: string[] = ["text"];
-
 /**
- * Per-model metadata for the models the local OpenCode Go bridge serves.
- *
- * Everything here is verified against the upstream endpoint, not copied from
- * the bridge config: a model must not advertise a thinking level the upstream
- * rejects, or the settings page would let an owner save a combination whose
- * every turn fails. An id that is not listed gets the conservative defaults
- * below (no `max`, text-only), which is the safe direction to be wrong in.
+ * Per-model metadata for what a member's gateway provider serves. A member
+ * assigned GPT reaches the owner's ChatGPT login through it; the values come
+ * from the model catalog bundled with Codex 0.160. An id that is not listed
+ * gets conservative defaults (text-only, no `max`).
  */
 interface BridgeModelSpec {
   displayName: string;
@@ -28,26 +22,7 @@ interface BridgeModelSpec {
   defaultReasoningEffort: string;
   inputModalities: string[];
 }
-
 const BRIDGE_MODEL_SPECS: Record<string, BridgeModelSpec> = {
-  "deepseek-v4.1-flash": {
-    displayName: "DeepSeek V4.1 Flash（OpenCode Go）",
-    description: "OpenCode Go（本机 LiteLLM 桥）提供的 DeepSeek 模型；仅支持文本输入。",
-    supportedReasoningEfforts: ["low", "high", "max"],
-    defaultReasoningEffort: "high",
-    inputModalities: BRIDGE_TEXT_ONLY,
-  },
-  "mimo-v2.6-pro": {
-    displayName: "MiMo V2.6 Pro（OpenCode Go）",
-    // The upstream answers HTTP 400 "Invalid request parameters" for `max`, so
-    // it is deliberately absent here rather than offered and then rejected.
-    description: "OpenCode Go（本机 LiteLLM 桥）提供的 MiMo 模型；仅支持文本输入，思考强度最高到 high。",
-    supportedReasoningEfforts: ["low", "high"],
-    defaultReasoningEffort: "high",
-    inputModalities: BRIDGE_TEXT_ONLY,
-  },
-  // Only a member's runtime serves this one here: its gateway sends it to the
-  // owner's ChatGPT login. Values from the model catalog bundled with Codex 0.160.
   "gpt-6.1-sol": {
     displayName: "GPT-6.1 Sol",
     description: "经成员模型网关使用 owner 的 ChatGPT 登录；凭据只在宿主侧附加。",
@@ -57,15 +32,15 @@ const BRIDGE_MODEL_SPECS: Record<string, BridgeModelSpec> = {
   },
 };
 
-/** Metadata for one bridged model id; unknown ids get the conservative defaults. */
+/** Metadata for one gateway model id; unknown ids get the conservative defaults. */
 function bridgeModelSpec(model: string): BridgeModelSpec {
   return (
     BRIDGE_MODEL_SPECS[model] ?? {
-      displayName: `${model}（OpenCode Go）`,
-      description: "OpenCode Go（本机 LiteLLM 桥）提供的模型；仅支持文本输入。",
+      displayName: model,
+      description: "经成员模型网关提供的模型；仅支持文本输入。",
       supportedReasoningEfforts: ["low", "high"],
       defaultReasoningEffort: "high",
-      inputModalities: BRIDGE_TEXT_ONLY,
+      inputModalities: ["text"],
     }
   );
 }
@@ -88,7 +63,7 @@ export interface BridgeStatus {
   setting: BridgeEnabledSetting;
 }
 
-/** Modes accepted by `PA_OPENCODE_GO_ENABLED`; anything else degrades to auto. */
+/** Modes accepted for `bridge.enabled`; anything else degrades to auto. */
 function parseEnabledSetting(raw: string): BridgeEnabledSetting {
   const value = raw.trim().toLowerCase();
   if (value === "" || value === "auto") return "auto";
@@ -99,14 +74,14 @@ function parseEnabledSetting(raw: string): BridgeEnabledSetting {
 }
 
 /**
- * The optional OpenCode Go / LiteLLM bridge model.
+ * A member runtime's model provider: the member gateway on the host.
  *
- * Everything about the bridge lives here, so the control plane has exactly one
- * place that decides whether the extra model exists, how the provider reaches
- * the sandbox Codex process, and which provider a given model must run on. The
- * key is read from the process environment or a permission-checked private file
- * and is never logged, stored in the database, placed in argv, or sent to the
- * browser.
+ * Everything about it lives here, so the control plane has exactly one place
+ * that decides whether the provider exists, how it reaches the sandbox Codex
+ * process, and which provider a given model must run on. The member's gateway
+ * token is read from a permission-checked private file and is never logged,
+ * stored in the database, placed in argv, or sent to the browser. The owner's
+ * runtime has none: its turns run on its ChatGPT login or Claude Code.
  */
 export class BridgeModel {
   #cfg: Config;
@@ -131,7 +106,7 @@ export class BridgeModel {
       setting,
     } as const;
     if (setting === "off") {
-      this.#status = { ...base, enabled: false, reason: "PA_OPENCODE_GO_ENABLED 已显式关闭", secret: null };
+      this.#status = { ...base, enabled: false, reason: "未启用成员模型网关", secret: null };
       return this.#status;
     }
 
@@ -149,14 +124,14 @@ export class BridgeModel {
       const message = reason ?? `环境变量 ${b.envKey} 未设置且密钥文件不可用`;
       // An explicit opt-in that cannot work must be loud, and either way the
       // model list never advertises a model whose every turn would fail.
-      if (setting === "on") this.#log.warn("桥模型已要求启用但取不到密钥，保持关闭", { reason: message });
-      else this.#log.debug("桥模型未启用", { reason: message });
+      if (setting === "on") this.#log.warn("成员模型网关已要求启用但取不到令牌，保持关闭", { reason: message });
+      else this.#log.debug("成员模型网关未启用", { reason: message });
       this.#status = { ...base, enabled: false, reason: message, secret: null };
       return this.#status;
     }
 
     this.#status = { ...base, enabled: true, reason: null, secret };
-    this.#log.info("桥模型已启用", {
+    this.#log.info("成员模型网关已启用", {
       models: b.models,
       provider: b.providerId,
       baseUrl: b.baseUrl,
@@ -201,8 +176,8 @@ export class BridgeModel {
 
   /**
    * `-c` overrides that define the provider on the Codex command line, so the
-   * sandbox never needs its `config.toml` rewritten. Empty while the bridge is
-   * off, which keeps the ChatGPT-only command line exactly as it was.
+   * sandbox never needs its `config.toml` rewritten. Empty while it is off,
+   * which keeps the ChatGPT-only command line exactly as it was.
    */
   providerConfigArgs(): string[] {
     const status = this.status();
@@ -210,7 +185,7 @@ export class BridgeModel {
     const key = `model_providers.${status.providerId}`;
     return [
       "-c",
-      `${key}.name="OpenCode Go (LiteLLM Responses bridge)"`,
+      `${key}.name="AIO member gateway"`,
       "-c",
       `${key}.base_url="${status.baseUrl}"`,
       "-c",

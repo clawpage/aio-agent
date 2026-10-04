@@ -8,10 +8,10 @@
 
 | 位置 | 服务与数据 |
 | --- | --- |
-| 当前 Mac `100.110.16.34` | UI :4891、control :4892、成员网关 :4902、模型桥 :4017、卷 `aio-control-data` |
-| old-mb `100.80.219.88` | sandboxd :4894、网关中继 :4902、模型桥中继 :4017、四个用户容器及 12 个卷 |
+| 当前 Mac `100.110.16.34` | UI :4891、control :4892、成员网关 :4902、卷 `aio-control-data` |
+| old-mb `100.80.219.88` | sandboxd :4894、网关中继 :4902、四个用户容器及 12 个卷 |
 
-所有宿主监听均绑定 loopback。当前机 Tailscale Serve 将 :4902/:4017 转到本机同端口；
+所有宿主监听均绑定 loopback。当前机 Tailscale Serve 将 :4902 转到本机同端口；
 old-mb Serve 将 :4894 转到本机 sandboxd。仅 tailnet 可达，不使用 Funnel。
 短名 `old-mb` 在当前机不解析时使用 Tailscale IP；完整 DNS 名是 `old-mb.tail8dae86.ts.net`。
 
@@ -26,7 +26,11 @@ AIO_HOST_CODEX=on
 节点名 `local` 沿用数据库中的既有分配，仅其 URL 改为远程地址；不要随意改名或清空分配。
 节点令牌经 SSH 复制到 old-mb 的 `var/remote-node/node-token.env`（0600），模型长效凭据留在控制面。
 成员在自己的容器中访问 `host.docker.internal:4902`，由节点中继返回当前机网关，再按账号附加凭据。
-owner 的模型桥访问 `host.docker.internal:4017`，经独立中继返回当前机。用户容器不挂宿主目录或 Docker socket。
+用户容器不挂宿主目录或 Docker socket。
+
+2026-10-04 移除 OpenCode Go 桥（DeepSeek / MiMo）后，原来的 :4017 链路全部停用：当前机的 LiteLLM 服务
+`codex-opencode-go` 和 Tailscale Serve 的 :4017 转发、old-mb 的 `ai.aio.bridge-relay` 都已停止。
+`ai.aio.bridge-relay` 只做了 `launchctl disable` 加 `bootout`，plist 保留未删。
 
 old-mb 仓库 `/Users/max/workspace/projects/aio-agent`，节点构建基于 `6b7cff0`（协议 1）。
 Node 24.21.0 安装在 `/Users/max/.local`，Docker Desktop 4.93.0 / Engine 29.8.1
@@ -45,8 +49,8 @@ PA_SANDBOXD_IMAGES=ghcr.io/agent-infra/sandbox:1.11.0
 PA_SANDBOXD_MEMORY=4g
 ```
 
-`~/Library/LaunchAgents` 中的 `ai.aio.sandboxd`、`ai.aio.bridge-relay`、`ai.aio.keep-awake`
-登录后自动启动并由 launchd 保活。Docker Desktop 设置 AutoStart，VM 总额度 24 GiB、8 CPU。
+`~/Library/LaunchAgents` 中的 `ai.aio.sandboxd`、`ai.aio.keep-awake`
+登录后自动启动并由 launchd 保活（`ai.aio.bridge-relay` 已停用，见上）。Docker Desktop 设置 AutoStart，VM 总额度 24 GiB、8 CPU。
 笔记本须接电、保持开盖；`caffeinate -s` 防止接电时系统空闲休眠，不承诺合盖运行。
 重启后需 max 登录 macOS，Docker Desktop 与 Tailscale 启动后才能服务；未开启自动登录。
 
@@ -96,7 +100,6 @@ export PATH=/Applications/Docker.app/Contents/Resources/bin:$HOME/.local/bin:$PA
 docker info --format '{{.NCPU}} {{.MemTotal}}'
 docker ps -a --filter label=personal-agent.managed=1
 launchctl print gui/501/ai.aio.sandboxd
-launchctl print gui/501/ai.aio.bridge-relay
 curl -s http://127.0.0.1:4894/healthz
 launchctl kickstart -k gui/501/ai.aio.sandboxd
 ```

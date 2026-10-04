@@ -4,7 +4,6 @@ import path from 'node:path';
 import {randomBytes,timingSafeEqual} from 'node:crypto';
 import {Readable} from 'node:stream';
 import type {Config} from './config.js';
-import {BridgeModel} from './bridgeModel.js';
 import type {Logger} from '../common/logger.js';
 import {ClaudeCodeHarness,MEMBER_GATEWAY_TOKEN_KEY} from './claudeCode.js';
 import {MEMBER_CLAUDE_MODEL,MEMBER_EFFORT,MEMBER_GPT_MODEL} from './auth/policy.js';
@@ -21,10 +20,10 @@ const OAUTH_BETA='oauth-2025-04-20';
 const CODEX_HEADERS=/^(accept|user-agent|originator|version|session-id|thread-id|x-client-request-id|x-codex-[a-z0-9-]+|x-openai-internal-codex-[a-z0-9-]+)$/;
 
 /**
- * Member capabilities authorize stateless DeepSeek inference only, never bridge admin/history APIs,
- * and, for a member assigned Claude, the Messages API on that one model with the owner's
- * credential added here on the host. A member assigned GPT gets the same stateless Responses
- * route, sent to ChatGPT with the control plane's own login added here.
+ * Member capabilities authorize stateless inference on the member's one assigned model only:
+ * a member assigned GPT gets the Responses route, sent to ChatGPT with the control plane's own
+ * login added here on the host; a member assigned Claude gets the Messages API on that model
+ * with the owner's credential added here. Nothing else is forwarded.
  */
 export class MemberModelGateway {
   private tokens=new Map<string,string>();
@@ -56,7 +55,6 @@ export class MemberModelGateway {
   }
   get port():number {return (this.server?.address() as {port:number}|null)?.port??this.cfg.memberModelPort??4902;}
   async start():Promise<void>{
-    const bridge=new BridgeModel(this.cfg,this.log);
     const claude=new ClaudeCodeHarness(this.cfg,this.log);
     this.server=http.createServer(async(req,res)=>{
       // The same sandbox-to-host channel carries share publishing, under its own per-runtime token.
@@ -68,7 +66,7 @@ export class MemberModelGateway {
       const match=/^\/u\/(user_[a-zA-Z0-9]+)\/v1\/responses$/.exec(req.url??'');
       const messages=/^\/u\/(user_[a-zA-Z0-9]+)\/anthropic(\/v1\/messages(?:\/count_tokens)?)(\?beta=true)?$/.exec(req.url??'');
       const userId=match?.[1]??messages?.[1];
-      const expected=userId&&(match||this.claudeModels.has(userId))?this.tokens.get(userId):null;
+      const expected=userId&&((match&&this.gptUsers.has(userId))||(messages&&this.claudeModels.has(userId)))?this.tokens.get(userId):null;
       const supplied=(req.headers.authorization??'').replace(/^Bearer /,'');
       if(req.method!=='POST'||!expected||!/^[a-f0-9]{64}$/.test(supplied)||!timingSafeEqual(Buffer.from(supplied),Buffer.from(expected))){res.writeHead(403).end();return;}
       const abort=new AbortController();res.on('close',()=>abort.abort());
@@ -92,7 +90,7 @@ export class MemberModelGateway {
         }
         if(input.previous_response_id||input.conversation||input.background){res.writeHead(400).end();return;}
         if(this.gptUsers.has(userId!)){
-          // Fails closed (502) when the control plane has no ChatGPT login; it never falls back to DeepSeek.
+          // Fails closed (502) when the control plane has no ChatGPT login; there is nothing to fall back to.
           if(!this.hostTokens)throw new Error('Provider unavailable');
           const tokens=await this.hostTokens.getTokens();
           const reasoning=input.reasoning&&typeof input.reasoning==='object'?input.reasoning:{};
@@ -106,11 +104,7 @@ export class MemberModelGateway {
           if(upstream.body)Readable.fromWeb(upstream.body as never).on('error',()=>res.destroy()).pipe(res);else res.end();
           return;
         }
-        const state=bridge.status();if(!state.enabled||!state.secret)throw new Error('Provider unavailable');
-        input.model='deepseek-v4.1-flash';input.reasoning={effort:'high'};input.store=false;
-        const upstream=await fetch(this.cfg.bridge.upstreamUrl.replace(/\/$/,'')+'/responses',{method:'POST',headers:{'content-type':'application/json',authorization:`Bearer ${state.secret}`},body:JSON.stringify(input),signal:abort.signal});
-        res.writeHead(upstream.status,{'content-type':upstream.headers.get('content-type')??'application/json','cache-control':'no-store'});
-        if(upstream.body)Readable.fromWeb(upstream.body as never).on('error',()=>res.destroy()).pipe(res);else res.end();
+        res.writeHead(403).end();
       }catch{if(!res.headersSent)res.writeHead(502);res.end();}
     });
     await new Promise<void>((resolve,reject)=>{this.server!.once('error',reject);this.server!.listen(this.cfg.memberModelPort??4902,'0.0.0.0',resolve);});

@@ -25,8 +25,8 @@ export function memberConfig(base: Config, userId: string, port: number, model: 
       // Owner PA_SANDBOX_EXTRA_ENV is never inherited; only the fixed flag Chromium needs
       // on Docker Desktop (no user namespaces for its zygote), or the browser crash-loops.
       codexVolume:`aio-user-${suffix}-codex`,browserVolume:`aio-user-${suffix}-browser`,extraEnv:['BROWSER_NO_SANDBOX=--no-sandbox']},
-    // A GPT member's model is the one its gateway provider serves; everyone else keeps DeepSeek there.
-    bridge:{...base.bridge,models:[model===MEMBER_GPT_MODEL?model:MEMBER_MODEL]},
+    // A GPT member's model is the one its gateway provider serves; a Claude member's runs on Claude Code.
+    bridge:{...base.bridge,models:model===MEMBER_GPT_MODEL?[model]:[]},
     // The owner's knowledge-base address is never inherited; the gateway grants a listed member its own.
     kb:undefined,
     // Nor the owner's schedule tool: the gateway gives every member one that reaches only its own schedules.
@@ -66,7 +66,8 @@ export class UserRuntimes {
     }
     // The administrator's assignment (`member_model:<id>`); members cannot change it.
     const assigned=this.root.db.prepare('SELECT value FROM meta WHERE key=?').get(`member_model:${user.id}`) as {value:string}|undefined;
-    const config=memberConfig(this.root.cfg,user.id,port,assigned?.value??MEMBER_MODEL);
+    // An assignment no longer offered (DeepSeek, before it was removed) falls back to the default.
+    const config=memberConfig(this.root.cfg,user.id,port,assigned&&MEMBER_MODELS.includes(assigned.value)?assigned.value:MEMBER_MODEL);
     if(config.sandbox.autostart&&!this.gateway)throw new Error("Member gateway unavailable");
     this.gateway?.provision(config);
     // A member keeps the node its sandbox was created on; a new one goes where there is room.

@@ -164,9 +164,9 @@ describe("sandbox node driver", () => {
     expect(exec.args).toEqual(["exec", "-i", "-u", "gem", "-e", "KEY", "aio-user-abc", "printenv", "KEY"]);
     expect(exec.env).toEqual({ KEY: "s3cret-value" });
     expect(exec.stdin).toBe("in");
-    await driver.spawn("aio-user-abc", { argv: ["codex", "app-server"], user: "gem", workdir: "/home/gem/workspace", env: { LITELLM_MASTER_KEY: "k-123" } });
-    expect(docker.spawned[0]!.args).toEqual(["exec", "-i", "-u", "gem", "-w", "/home/gem/workspace", "-e", "LITELLM_MASTER_KEY", "aio-user-abc", "codex", "app-server"]);
+    await driver.spawn("aio-user-abc", { argv: ["codex", "app-server"], user: "gem", workdir: "/home/gem/workspace", env: { AIO_MEMBER_MODEL_TOKEN: "k-123" } });
+    expect(docker.spawned[0]!.args).toEqual(["exec", "-i", "-u", "gem", "-w", "/home/gem/workspace", "-e", "AIO_MEMBER_MODEL_TOKEN", "aio-user-abc", "codex", "app-server"]);
     expect(docker.spawned[0]!.args.join(" ")).not.toContain("k-123");
-    expect(docker.spawned[0]!.env).toEqual({ LITELLM_MASTER_KEY: "k-123" });
+    expect(docker.spawned[0]!.env).toEqual({ AIO_MEMBER_MODEL_TOKEN: "k-123" });
   });
 });

@@ -650,11 +650,11 @@ test.describe("working group height and presence", () => {
 
 test("hides model metadata fallback warnings while retaining actionable warnings and errors", async ({page},info) => {
   await openChat(page);
-  await emit(page,event("warning",{message:"Model metadata for `deepseek-v4.1-flash` not found. Defaulting to fallback metadata; this can degrade performance and cause issues."}));
+  await emit(page,event("warning",{message:"Model metadata for `gpt-6.1-sol` not found. Defaulting to fallback metadata; this can degrade performance and cause issues."}));
   await emit(page,event("warning",{message:"连接暂时中断，请稍后重试"}));
   await emit(page,event("error",{message:"文件保存失败"}));
   await expect(page.locator(".chat")).not.toContainText("Model metadata");
-  await expect(page.locator(".chat")).not.toContainText("deepseek-v4.1-flash");
+  await expect(page.locator(".chat")).not.toContainText("gpt-6.1-sol");
   await expect(page.locator(".chat")).toContainText("连接暂时中断，请稍后重试");
   await expect(page.locator(".chat")).toContainText("文件保存失败");
   await page.screenshot({path:info.outputPath("metadata-warning-hidden.png")});

@@ -591,6 +591,8 @@ export function testConfig(dataDir: string, sandboxPort: number, extra: Record<s
 export interface StartHarnessOptions {
   /** Replace the scripted browser runtime, e.g. to script a container failure. */
   browserRuntime?: FakeBrowserRuntime;
+  /** Adjust the loaded config before bootstrap, for settings no environment variable controls. */
+  configure?: (cfg: Config) => void;
 }
 
 export async function startHarness(
@@ -600,6 +602,7 @@ export async function startHarness(
   const sandbox = await startFakeSandbox();
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "personal-agent-test-"));
   const cfg = testConfig(dataDir, sandbox.port, extraEnv);
+  options.configure?.(cfg);
   const codex = new FakeCodex();
   const containerStub = {
     ...directSandbox(sandbox.port),

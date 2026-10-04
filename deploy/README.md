@@ -24,7 +24,7 @@ node deploy/aio.mjs ps | logs control | down
 首次启动在数据卷里生成 owner 密码：`docker compose -p aio exec control cat /data/owner-secret.txt`。
 管理员命令在容器里运行，例如 `docker compose -p aio exec control node bin/create-user.mjs <账号>`。
 
-owner 的任务可以跑在 ChatGPT 模型、Claude Code（`AIO_SECRET_CLAUDE_CODE`）或桥模型（`AIO_SECRET_OPENCODE_GO`）上。
+owner 的任务可以跑在 ChatGPT 模型或 Claude Code（`AIO_SECRET_CLAUDE_CODE`）上。
 ChatGPT 默认关闭：控制面镜像自带 Codex CLI（与沙箱同版本），先执行 `node deploy/aio.mjs codex-login`，按提示在浏览器打开
 链接、输入一次性代码完成登录（设备码登录；ChatGPT 设置里需允许 Codex 设备码授权），再在 `aio.env` 设 `AIO_HOST_CODEX=on`
 并重启。这是这套部署自己的登录，存在数据卷的 `/data/codex-home`，由容器里的 Codex 自行刷新；不要把别处的 `~/.codex`

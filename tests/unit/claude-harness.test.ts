@@ -487,7 +487,7 @@ describe("HarnessSession", () => {
     selected = true;
     await harness.planTask("p");
     expect(aux).toEqual(["plan"]);
-    await harness.planTask("p", undefined, "deepseek-v4.1-flash");
+    await harness.planTask("p", undefined, "gpt-6.1-sol");
     expect(aux).toEqual(["plan"]);
     selected = false;
     await harness.planTask("p", undefined, "claude-sonnet-5-5");

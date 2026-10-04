@@ -26,7 +26,6 @@ services:
       PA_CLAUDE_CODE_SECRETS_FILE: /run/secrets/claude-code
       PA_JEV_SECRETS_FILE: /run/secrets/jev
       PA_KB_MCP_SECRETS_FILE: /run/secrets/kb-mcp
-      PA_OPENCODE_GO_SECRETS_FILE: /run/secrets/opencode-go
     volumes:
       - control-data:/data
     ports:
@@ -36,7 +35,7 @@ services:
     extra_hosts:
       - host.docker.internal:host-gateway
     # Nodes can be remote; the control layer checks their protocol and readiness itself.
-    secrets: [sandbox-node, claude-code, jev, kb-mcp, opencode-go]
+    secrets: [sandbox-node, claude-code, jev, kb-mcp]
     networks: [aio]
 networks:
   aio:
@@ -54,5 +53,3 @@ secrets:
     file: ${AIO_SECRET_JEV:-/dev/null}
   kb-mcp:
     file: ${AIO_SECRET_KB_MCP:-/dev/null}
-  opencode-go:
-    file: ${AIO_SECRET_OPENCODE_GO:-/dev/null}

@@ -106,8 +106,8 @@ export async function bootstrap(opts: BootstrapOptions = {}): Promise<Bootstrapp
   const container = opts.overrides?.container ?? new SandboxContainer(cfg, log, opts.node ?? await ownerNode(cfg, db, opts.nodes));
   const documents = opts.overrides?.documents ?? new DocumentService(cfg, log, container);
   const hostTokens = new HostTokenSource(cfg, log);
-  // One bridge instance per process: it owns the single decision about whether
-  // the optional OpenCode Go model exists, and holds the key in memory only.
+  // One instance per process: on a member runtime it is the provider that reaches
+  // the member gateway (holding the member's token in memory only); off for the owner.
   const bridge = new BridgeModel(cfg, log);
   const claudeCode = new ClaudeCodeHarness(cfg, log);
   const usage = new UsageLedger(db, cfg.runtimeUserId ?? 'owner_1');

@@ -5,13 +5,20 @@ import path from "node:path";
 import { BridgeModel, CHATGPT_PROVIDER_ID } from "../../src/control/bridgeModel.js";
 import { expandHome, readSecretFile } from "../../src/common/secrets.js";
 import { Logger } from "../../src/common/logger.js";
-import { AgentManager, TurnInputUnsupportedError } from "../../src/control/codex/manager.js";
+import { AgentManager } from "../../src/control/codex/manager.js";
 import { openDb, type Db } from "../../src/control/db.js";
 import { SandboxContainer } from "../../src/control/sandbox/container.js";
 import { FakeCodex, testConfig } from "../helpers/harness.js";
 import type { HostTokenSource } from "../../src/control/codex/hostTokens.js";
+import type { Config } from "../../src/control/config.js";
 
 const SECRET_VALUE = "sk-test-bridge-secret-value-0001";
+const GATEWAY_URL = "http://host.docker.internal:4902/u/user_g/v1";
+
+/** A runtime whose provider is the member gateway, as the gateway provisions a member's. */
+function gatewayConfig(cfg: Config, secretsFile: string, models = ["gpt-6.1-sol"]): Config {
+  return { ...cfg, bridge: { ...cfg.bridge, enabled: "on", baseUrl: GATEWAY_URL, secretsFile, models } };
+}
 
 /** One private 0600 secrets file per test, laid out like the real bridge's. */
 function writeSecrets(dir: string, body: string, mode = 0o600): string {
@@ -28,12 +35,12 @@ function tmpDir(): string {
 const cleanups: Array<() => void> = [];
 
 beforeEach(() => {
-  delete process.env.LITELLM_MASTER_KEY;
+  delete process.env.AIO_MEMBER_MODEL_TOKEN;
 });
 
 afterEach(() => {
   for (const fn of cleanups.splice(0)) fn();
-  delete process.env.LITELLM_MASTER_KEY;
+  delete process.env.AIO_MEMBER_MODEL_TOKEN;
 });
 
 describe("bridge secret file parsing", () => {
@@ -41,9 +48,9 @@ describe("bridge secret file parsing", () => {
     const dir = tmpDir();
     cleanups.push(() => fs.rmSync(dir, { recursive: true, force: true }));
     const file = path.join(dir, "secrets.env");
-    fs.writeFileSync(file, `# comment\nOTHER_KEY=nope\nLITELLM_MASTER_KEY="${SECRET_VALUE}"\n`, { mode: 0o600 });
+    fs.writeFileSync(file, `# comment\nOTHER_KEY=nope\nAIO_MEMBER_MODEL_TOKEN="${SECRET_VALUE}"\n`, { mode: 0o600 });
     fs.chmodSync(file, 0o600);
-    expect(readSecretFile(file, "LITELLM_MASTER_KEY")).toEqual({ ok: true, value: SECRET_VALUE });
+    expect(readSecretFile(file, "AIO_MEMBER_MODEL_TOKEN")).toEqual({ ok: true, value: SECRET_VALUE });
     // A key that is not present is a clean miss, never a partial read.
     expect(readSecretFile(file, "MISSING_KEY").ok).toBe(false);
   });
@@ -51,8 +58,8 @@ describe("bridge secret file parsing", () => {
   it("refuses a secrets file that is readable by group or others", () => {
     const dir = tmpDir();
     cleanups.push(() => fs.rmSync(dir, { recursive: true, force: true }));
-    const file = writeSecrets(dir, `LITELLM_MASTER_KEY=${SECRET_VALUE}\n`, 0o644);
-    const result = readSecretFile(file, "LITELLM_MASTER_KEY");
+    const file = writeSecrets(dir, `AIO_MEMBER_MODEL_TOKEN=${SECRET_VALUE}\n`, 0o644);
+    const result = readSecretFile(file, "AIO_MEMBER_MODEL_TOKEN");
     expect(result.ok).toBe(false);
     // The refusal must explain itself without ever echoing the value.
     expect(result.ok === false && result.reason).toContain("600");
@@ -60,7 +67,7 @@ describe("bridge secret file parsing", () => {
   });
 
   it("treats a missing file as unavailable instead of throwing", () => {
-    const result = readSecretFile("/nonexistent/pa-bridge/secrets.env", "LITELLM_MASTER_KEY");
+    const result = readSecretFile("/nonexistent/pa-bridge/secrets.env", "AIO_MEMBER_MODEL_TOKEN");
     expect(result.ok).toBe(false);
   });
 
@@ -72,7 +79,7 @@ describe("bridge secret file parsing", () => {
 
 describe("BridgeModel configuration", () => {
   it("stays disabled with no key and offers no provider arguments or catalog entry", () => {
-    const cfg = testConfig("/tmp/pa-bridge-off", 1, { PA_OPENCODE_GO_SECRETS_FILE: "/nonexistent/secrets.env" });
+    const cfg = gatewayConfig(testConfig("/tmp/pa-bridge-off", 1), "/nonexistent/secrets.env");
     const bridge = new BridgeModel(cfg, new Logger("error", undefined, false));
     expect(bridge.enabled).toBe(false);
     expect(bridge.modelEntries()).toEqual([]);
@@ -82,135 +89,69 @@ describe("BridgeModel configuration", () => {
     // With no bridge, every model resolves to the ChatGPT provider.
     expect(bridge.providerForModel("gpt-6-sol")).toBe(CHATGPT_PROVIDER_ID);
     expect(bridge.isTextOnly("gpt-6-sol")).toBe(false);
-    // Neither bridged id may be claimed while the bridge is off.
-    expect(bridge.providerForModel("deepseek-v4.1-flash")).toBe(CHATGPT_PROVIDER_ID);
-    expect(bridge.providerForModel("mimo-v2.6-pro")).toBe(CHATGPT_PROVIDER_ID);
-    expect(bridge.isTextOnly("mimo-v2.6-pro")).toBe(false);
+    // The configured gateway model may not be claimed while the provider is off.
+    expect(bridge.providerForModel("gpt-6.1-sol")).toBe(CHATGPT_PROVIDER_ID);
+    // Nor is anything on by default: only the member gateway switches it on.
+    expect(new BridgeModel(testConfig("/tmp/pa-bridge-default", 1), new Logger("error", undefined, false)).enabled).toBe(false);
   });
 
   it("enables the provider and catalog entry when a permission-clean key file exists", () => {
     const dir = tmpDir();
     cleanups.push(() => fs.rmSync(dir, { recursive: true, force: true }));
-    const file = writeSecrets(dir, `LITELLM_MASTER_KEY=${SECRET_VALUE}\n`);
-    const cfg = testConfig("/tmp/pa-bridge-on", 1, { PA_OPENCODE_GO_SECRETS_FILE: file });
+    const file = writeSecrets(dir, `AIO_MEMBER_MODEL_TOKEN=${SECRET_VALUE}\n`);
+    const cfg = gatewayConfig(testConfig("/tmp/pa-bridge-on", 1), file);
     const bridge = new BridgeModel(cfg, new Logger("error", undefined, false));
     expect(bridge.enabled).toBe(true);
 
-    // Both bridged models are offered, in configured order.
-    expect(bridge.modelIds).toEqual(["deepseek-v4.1-flash", "mimo-v2.6-pro"]);
-    const entries = bridge.modelEntries();
-    expect(entries.map((e) => e.id)).toEqual(["deepseek-v4.1-flash", "mimo-v2.6-pro"]);
-    for (const entry of entries) {
-      expect(entry.displayName).toContain("OpenCode Go");
-      expect(entry.modelProvider).toBe("opencode_go");
-      expect(entry.isDefault).toBe(false);
-      // Both are text-only; neither may advertise image input.
-      expect(entry.inputModalities).toEqual(["text"]);
-      // A bridged model always has a concrete default effort.
-      expect(entry.supportedReasoningEfforts).toContain(entry.defaultReasoningEffort);
-    }
-
-    const [deepseek, mimo] = entries;
-    expect(deepseek?.supportedReasoningEfforts).toEqual(["low", "high", "max"]);
-    expect(deepseek?.defaultReasoningEffort).toBe("high");
-    // mimo must not advertise `max`: the upstream rejects it with HTTP 400.
-    expect(mimo?.supportedReasoningEfforts).toEqual(["low", "high"]);
-    expect(mimo?.supportedReasoningEfforts).not.toContain("max");
-    expect(mimo?.defaultReasoningEffort).toBe("high");
-    expect(mimo?.displayName).toContain("MiMo");
+    expect(bridge.modelIds).toEqual(["gpt-6.1-sol"]);
+    const [entry] = bridge.modelEntries();
+    expect(entry?.id).toBe("gpt-6.1-sol");
+    expect(entry?.displayName).toBe("GPT-6.1 Sol");
+    expect(entry?.modelProvider).toBe("aio_gateway");
+    expect(entry?.isDefault).toBe(false);
+    expect(entry?.inputModalities).toEqual(["text", "image"]);
+    // A gateway model always has a concrete default effort.
+    expect(entry?.supportedReasoningEfforts).toContain(entry?.defaultReasoningEffort);
 
     const args = bridge.providerConfigArgs();
-    expect(args.join(" ")).toContain('model_providers.opencode_go.base_url="http://host.docker.internal:4017/v1"');
-    expect(args.join(" ")).toContain('model_providers.opencode_go.wire_api="responses"');
-    expect(args.join(" ")).toContain('model_providers.opencode_go.env_key="LITELLM_MASTER_KEY"');
+    expect(args.join(" ")).toContain(`model_providers.aio_gateway.base_url="${GATEWAY_URL}"`);
+    expect(args.join(" ")).toContain('model_providers.aio_gateway.wire_api="responses"');
+    expect(args.join(" ")).toContain('model_providers.aio_gateway.env_key="AIO_MEMBER_MODEL_TOKEN"');
     // The key value is never in the arguments, only the variable name.
     expect(args.join(" ")).not.toContain(SECRET_VALUE);
 
-    expect(bridge.providerForModel("deepseek-v4.1-flash")).toBe("opencode_go");
-    expect(bridge.providerForModel("mimo-v2.6-pro")).toBe("opencode_go");
-    expect(bridge.isTextOnly("deepseek-v4.1-flash")).toBe(true);
-    expect(bridge.isTextOnly("mimo-v2.6-pro")).toBe(true);
+    expect(bridge.providerForModel("gpt-6.1-sol")).toBe("aio_gateway");
+    expect(bridge.isTextOnly("gpt-6.1-sol")).toBe(false);
     expect(bridge.providerForModel("gpt-6-sol")).toBe(CHATGPT_PROVIDER_ID);
     expect(bridge.isTextOnly("gpt-6-sol")).toBe(false);
-  });
-
-  it("honours PA_OPENCODE_GO_MODELS and keeps the legacy single-model variable working", () => {
-    const dir = tmpDir();
-    cleanups.push(() => fs.rmSync(dir, { recursive: true, force: true }));
-    const file = writeSecrets(dir, `LITELLM_MASTER_KEY=${SECRET_VALUE}\n`);
-
-    const custom = new BridgeModel(
-      testConfig("/tmp/pa-bridge-models", 1, {
-        PA_OPENCODE_GO_SECRETS_FILE: file,
-        PA_OPENCODE_GO_MODELS: "mimo-v2.6-pro",
-      }),
-      new Logger("error", undefined, false),
-    );
-    expect(custom.modelIds).toEqual(["mimo-v2.6-pro"]);
-    expect(custom.providerForModel("mimo-v2.6-pro")).toBe("opencode_go");
-    // deepseek is not configured here, so it must not be claimed by the bridge.
-    expect(custom.providerForModel("deepseek-v4.1-flash")).toBe(CHATGPT_PROVIDER_ID);
-
-    // An existing deployment that pinned one model keeps exactly that one.
-    const legacy = new BridgeModel(
-      testConfig("/tmp/pa-bridge-legacy", 1, {
-        PA_OPENCODE_GO_SECRETS_FILE: file,
-        PA_OPENCODE_GO_MODEL: "deepseek-v4.1-flash",
-        PA_OPENCODE_GO_MODELS: "mimo-v2.6-pro,deepseek-v4.1-flash",
-      }),
-      new Logger("error", undefined, false),
-    );
-    expect(legacy.modelIds).toEqual(["deepseek-v4.1-flash"]);
-    expect(legacy.modelEntries().map((e) => e.id)).toEqual(["deepseek-v4.1-flash"]);
   });
 
   it("keeps an unknown bridged id conservative instead of inventing capabilities", () => {
     const dir = tmpDir();
     cleanups.push(() => fs.rmSync(dir, { recursive: true, force: true }));
-    const file = writeSecrets(dir, `LITELLM_MASTER_KEY=${SECRET_VALUE}\n`);
+    const file = writeSecrets(dir, `AIO_MEMBER_MODEL_TOKEN=${SECRET_VALUE}\n`);
     const bridge = new BridgeModel(
-      testConfig("/tmp/pa-bridge-unknown", 1, {
-        PA_OPENCODE_GO_SECRETS_FILE: file,
-        PA_OPENCODE_GO_MODELS: "some-future-model",
-      }),
+      gatewayConfig(testConfig("/tmp/pa-bridge-unknown", 1), file, ["some-future-model"]),
       new Logger("error", undefined, false),
     );
     const entry = bridge.modelEntries()[0];
     expect(entry?.id).toBe("some-future-model");
+    expect(entry?.displayName).toBe("some-future-model");
     expect(entry?.supportedReasoningEfforts).toEqual(["low", "high"]);
     expect(entry?.supportedReasoningEfforts).not.toContain("max");
     expect(entry?.inputModalities).toEqual(["text"]);
-  });
-
-  it("prefers the process environment over the file and honours an explicit off switch", () => {
-    const dir = tmpDir();
-    cleanups.push(() => fs.rmSync(dir, { recursive: true, force: true }));
-    const file = writeSecrets(dir, `LITELLM_MASTER_KEY=from-file\n`);
-    process.env.LITELLM_MASTER_KEY = SECRET_VALUE;
-    const fromEnv = new BridgeModel(
-      testConfig("/tmp/pa-bridge-env", 1, { PA_OPENCODE_GO_SECRETS_FILE: file }),
-      new Logger("error", undefined, false),
-    );
-    expect(fromEnv.providerEnv()).toEqual({ LITELLM_MASTER_KEY: SECRET_VALUE });
-
-    const off = new BridgeModel(
-      testConfig("/tmp/pa-bridge-off2", 1, { PA_OPENCODE_GO_SECRETS_FILE: file, PA_OPENCODE_GO_ENABLED: "0" }),
-      new Logger("error", undefined, false),
-    );
-    // Even with a readable key, an explicit opt-out keeps the model out.
-    expect(off.enabled).toBe(false);
-    expect(off.modelEntries()).toEqual([]);
+    expect(bridge.isTextOnly("some-future-model")).toBe(true);
   });
 });
 
-function makeBridgeManager(extraEnv: Record<string, string>): {
+function makeBridgeManager(secretsFile: string): {
   agent: AgentManager;
   codex: FakeCodex;
   db: Db;
   bridge: BridgeModel;
 } {
   const codex = new FakeCodex();
-  const cfg = testConfig("/tmp/pa-manager-bridge", 1, extraEnv);
+  const cfg = gatewayConfig(testConfig("/tmp/pa-manager-bridge", 1), secretsFile);
   const bridge = new BridgeModel(cfg, new Logger("error", undefined, false));
   const hostTokens = {
     status: async () => ({ ok: true, authMethod: "chatgpt", email: null, planType: null, expiresAt: null, error: null }),
@@ -231,8 +172,8 @@ describe("AgentManager with the bridge enabled", () => {
   beforeEach(async () => {
     dir = tmpDir();
     cleanups.push(() => fs.rmSync(dir, { recursive: true, force: true }));
-    const file = writeSecrets(dir, `LITELLM_MASTER_KEY=${SECRET_VALUE}\n`);
-    ({ agent, codex, db } = makeBridgeManager({ PA_OPENCODE_GO_SECRETS_FILE: file }));
+    const file = writeSecrets(dir, `AIO_MEMBER_MODEL_TOKEN=${SECRET_VALUE}\n`);
+    ({ agent, codex, db } = makeBridgeManager(file));
     await agent.init();
   });
 
@@ -241,46 +182,13 @@ describe("AgentManager with the bridge enabled", () => {
     db.close();
   });
 
-  it("offers only models with their own provider when there is no host Codex login", async () => {
-    const file = writeSecrets(dir, `LITELLM_MASTER_KEY=${SECRET_VALUE}\n`);
-    const off = makeBridgeManager({ PA_OPENCODE_GO_SECRETS_FILE: file, PA_HOST_CODEX: "off" });
-    await off.agent.init();
-    try {
-      const ids = (await off.agent.listModels()).map((m) => m.id);
-      expect(ids).toContain("deepseek-v4.1-flash");
-      expect(ids.some((id) => id.startsWith("gpt-"))).toBe(false);
-    } finally {
-      off.agent.shutdown();
-      off.db.close();
-    }
-  });
-
   it("adds the bridge model to the catalog without changing the configured default", async () => {
     const models = await agent.listModels();
-    const bridgeEntry = models.find((m) => m.id === "deepseek-v4.1-flash");
-    expect(bridgeEntry?.modelProvider).toBe("opencode_go");
-    expect(bridgeEntry?.inputModalities).toEqual(["text"]);
+    const bridgeEntry = models.find((m) => m.id === "gpt-6.1-sol");
+    expect(bridgeEntry?.modelProvider).toBe("aio_gateway");
+    expect(bridgeEntry?.inputModalities).toEqual(["text", "image"]);
     // The app default is still the ChatGPT model the product ships with.
     expect(models.filter((m) => m.isDefault).map((m) => m.id)).toEqual(["gpt-6-sol"]);
-  });
-
-  it("saves and runs the bridge model with one of its own thinking levels", async () => {
-    const saved = agent.saveAgentSettings({ model: "deepseek-v4.1-flash", effort: "max" }, await agent.listModels());
-    expect(saved.ok).toBe(true);
-    // An effort the bridge model does not offer is still refused.
-    const bad = agent.saveAgentSettings({ model: "deepseek-v4.1-flash", effort: "medium" }, await agent.listModels());
-    expect(bad.ok).toBe(false);
-
-    const conv = agent.createConversation({ title: "bridge" });
-    agent.submitTurn({ conversationId: conv.id, text: "hi", clientMessageId: "b1" });
-    await tick();
-    // A brand-new conversation starts straight on the bridge provider.
-    expect(codex.startedThreads.length).toBe(1);
-    const threadId = codex.startedThreads[0]!.threadId;
-    expect(codex.threadProviders.get(threadId)).toBe("opencode_go");
-    expect(codex.startedTurns[0]?.model).toBe("deepseek-v4.1-flash");
-    codex.completeTurn(codex.startedTurns[0]!.turnId);
-    await tick();
   });
 
   it("forks the thread when the provider changes and resumes when it does not", async () => {
@@ -300,13 +208,13 @@ describe("AgentManager with the bridge enabled", () => {
     expect(codex.forkedThreads.length).toBe(0);
 
     // Switch to the bridge model: the provider must change, which requires a fork.
-    agent.saveAgentSettings({ model: "deepseek-v4.1-flash", effort: "high" }, await agent.listModels());
+    agent.saveAgentSettings({ model: "gpt-6.1-sol", effort: "high" }, await agent.listModels());
     agent.submitTurn({ conversationId: conv.id, text: "three", clientMessageId: "s3" });
     await tick();
     expect(codex.forkedThreads.length).toBe(1);
-    expect(codex.forkedThreads[0]?.modelProvider).toBe("opencode_go");
+    expect(codex.forkedThreads[0]?.modelProvider).toBe("aio_gateway");
     const forked = codex.forkedThreads[0]!.threadId;
-    expect(codex.threadProviders.get(forked)).toBe("opencode_go");
+    expect(codex.threadProviders.get(forked)).toBe("aio_gateway");
     // The forked thread is the one now used for turns.
     expect(codex.startedTurns[2]?.threadId).toBe(forked);
     codex.completeTurn(codex.startedTurns[2]!.turnId);
@@ -316,7 +224,7 @@ describe("AgentManager with the bridge enabled", () => {
       model_provider: string | null;
       codex_thread_id: string | null;
     };
-    expect(row.model_provider).toBe("opencode_go");
+    expect(row.model_provider).toBe("aio_gateway");
     expect(row.codex_thread_id).toBe(forked);
 
     // Switching back to ChatGPT forks again rather than failing on the bridge thread.
@@ -333,23 +241,6 @@ describe("AgentManager with the bridge enabled", () => {
     await tick();
   });
 
-  it("refuses an image attachment on the text-only bridge model before the turn starts", async () => {
-    agent.saveAgentSettings({ model: "deepseek-v4.1-flash", effort: null }, await agent.listModels());
-    const conv = agent.createConversation({ title: "text-only" });
-    expect(() =>
-      agent.submitTurn({
-        conversationId: conv.id,
-        text: "look",
-        clientMessageId: "i1",
-        attachments: [{ path: "/home/gem/workspace/a.png", kind: "image" }],
-      }),
-    ).toThrow(TurnInputUnsupportedError);
-    // Nothing was queued and Codex was never asked to run it.
-    expect(codex.startedTurns.length).toBe(0);
-    const rows = db.prepare("SELECT COUNT(*) AS n FROM turns").get() as { n: number };
-    expect(rows.n).toBe(0);
-  });
-
   it("still accepts an image on a ChatGPT model", async () => {
     const conv = agent.createConversation({ title: "images-ok" });
     agent.submitTurn({
@@ -363,88 +254,12 @@ describe("AgentManager with the bridge enabled", () => {
     codex.completeTurn(codex.startedTurns[0]!.turnId);
     await tick();
   });
-
-  it("lists both bridged models with their own thinking levels", async () => {
-    const models = await agent.listModels();
-    const ids = models.map((m) => m.id);
-    expect(ids).toContain("deepseek-v4.1-flash");
-    expect(ids).toContain("mimo-v2.6-pro");
-
-    const deepseek = models.find((m) => m.id === "deepseek-v4.1-flash");
-    expect(deepseek?.supportedReasoningEfforts).toEqual(["low", "high", "max"]);
-    expect(deepseek?.modelProvider).toBe("opencode_go");
-
-    const mimo = models.find((m) => m.id === "mimo-v2.6-pro");
-    expect(mimo?.supportedReasoningEfforts).toEqual(["low", "high"]);
-    expect(mimo?.defaultReasoningEffort).toBe("high");
-    expect(mimo?.inputModalities).toEqual(["text"]);
-    expect(mimo?.modelProvider).toBe("opencode_go");
-
-    // The app default is still the ChatGPT model the product ships with.
-    expect(models.filter((m) => m.isDefault).map((m) => m.id)).toEqual(["gpt-6-sol"]);
-  });
-
-  it("saves and runs mimo on the bridge provider, but refuses its unsupported max", async () => {
-    // `max` is rejected upstream for mimo, so it must not be savable here.
-    const bad = agent.saveAgentSettings({ model: "mimo-v2.6-pro", effort: "max" }, await agent.listModels());
-    expect(bad.ok).toBe(false);
-
-    const saved = agent.saveAgentSettings({ model: "mimo-v2.6-pro", effort: "high" }, await agent.listModels());
-    expect(saved.ok).toBe(true);
-
-    const conv = agent.createConversation({ title: "mimo" });
-    agent.submitTurn({ conversationId: conv.id, text: "hi", clientMessageId: "m1" });
-    await tick();
-    expect(codex.startedThreads.length).toBe(1);
-    const threadId = codex.startedThreads[0]!.threadId;
-    expect(codex.threadProviders.get(threadId)).toBe("opencode_go");
-    expect(codex.startedTurns[0]?.model).toBe("mimo-v2.6-pro");
-    // The frozen effort is the one that was saved, not silently upgraded.
-    expect(codex.startedTurns[0]?.effort).toBe("high");
-    codex.completeTurn(codex.startedTurns[0]!.turnId);
-    await tick();
-  });
-
-  it("refuses an image attachment on mimo as well", async () => {
-    agent.saveAgentSettings({ model: "mimo-v2.6-pro", effort: null }, await agent.listModels());
-    const conv = agent.createConversation({ title: "mimo-text-only" });
-    expect(() =>
-      agent.submitTurn({
-        conversationId: conv.id,
-        text: "look",
-        clientMessageId: "m3",
-        attachments: [{ path: "/home/gem/workspace/a.png", kind: "image" }],
-      }),
-    ).toThrow(TurnInputUnsupportedError);
-    expect(codex.startedTurns.length).toBe(0);
-  });
-
-  it("keeps both bridged models on one provider thread when switching between them", async () => {
-    // Both slugs share the same provider, so switching between them must not
-    // force a thread fork the way crossing to ChatGPT does.
-    agent.saveAgentSettings({ model: "deepseek-v4.1-flash", effort: "high" }, await agent.listModels());
-    const conv = agent.createConversation({ title: "bridged-pair" });
-    agent.submitTurn({ conversationId: conv.id, text: "one", clientMessageId: "p1" });
-    await tick();
-    codex.completeTurn(codex.startedTurns[0]!.turnId);
-    await tick();
-    expect(codex.forkedThreads.length).toBe(0);
-
-    agent.saveAgentSettings({ model: "mimo-v2.6-pro", effort: "low" }, await agent.listModels());
-    agent.submitTurn({ conversationId: conv.id, text: "two", clientMessageId: "p2" });
-    await tick();
-    expect(codex.forkedThreads.length).toBe(0);
-    expect(codex.startedTurns[1]?.model).toBe("mimo-v2.6-pro");
-    expect(codex.threadProviders.get(codex.startedTurns[1]!.threadId)).toBe("opencode_go");
-    codex.completeTurn(codex.startedTurns[1]!.turnId);
-    await tick();
-  });
 });
 
 describe("AgentManager without the bridge", () => {
   it("never offers the bridge model and never sends a provider", async () => {
     const codex = new FakeCodex();
-    const cfg = testConfig("/tmp/pa-manager-nobridge", 1, { PA_OPENCODE_GO_SECRETS_FILE: "/nonexistent/secrets.env" });
+    const cfg = testConfig("/tmp/pa-manager-nobridge", 1);
     const db = openDb(":memory:");
     const bridge = new BridgeModel(cfg, new Logger("error", undefined, false));
     const agent = new AgentManager({
@@ -457,7 +272,7 @@ describe("AgentManager without the bridge", () => {
     });
     await agent.init();
     const models = await agent.listModels();
-    expect(models.some((m) => m.id === "deepseek-v4.1-flash")).toBe(false);
+    expect(models.some((m) => m.modelProvider)).toBe(false);
 
     const conv = agent.createConversation({ title: "plain" });
     agent.submitTurn({ conversationId: conv.id, text: "hi", clientMessageId: "n1" });
@@ -478,14 +293,11 @@ describe("A member assigned GPT", () => {
     const dir = tmpDir();
     cleanups.push(() => fs.rmSync(dir, { recursive: true, force: true }));
     const file = writeSecrets(dir, `AIO_MEMBER_MODEL_TOKEN=${"a".repeat(64)}\n`);
-    const base = testConfig("/tmp/pa-member-gpt", 1, { PA_OPENCODE_GO_SECRETS_FILE: file });
-    const cfg = {
-      ...base, memberRuntime: true, memberModel: "gpt-6.1-sol", agent: { ...base.agent, defaultModel: "gpt-6.1-sol" },
-      bridge: { ...base.bridge, envKey: "AIO_MEMBER_MODEL_TOKEN", models: ["gpt-6.1-sol"] },
-    };
+    const base = gatewayConfig(testConfig("/tmp/pa-member-gpt", 1), file);
+    const cfg = { ...base, memberRuntime: true, memberModel: "gpt-6.1-sol", agent: { ...base.agent, defaultModel: "gpt-6.1-sol" } };
     const log = new Logger("error", undefined, false);
     const bridge = new BridgeModel(cfg, log);
-    expect(bridge.providerForModel("gpt-6.1-sol")).toBe("opencode_go");
+    expect(bridge.providerForModel("gpt-6.1-sol")).toBe("aio_gateway");
     expect(bridge.isTextOnly("gpt-6.1-sol")).toBe(false);
     expect(bridge.modelEntries()[0]?.inputModalities).toEqual(["text", "image"]);
 
@@ -501,7 +313,7 @@ describe("A member assigned GPT", () => {
       const conv = member.createConversation({ ownerId: "user_g", title: "member" });
       member.submitTurn({ conversationId: conv.id, text: "hi", clientMessageId: "g1", model: "gpt-6-astra", effort: "max" });
       await tick();
-      expect(codex.threadProviders.get(codex.startedThreads[0]!.threadId)).toBe("opencode_go");
+      expect(codex.threadProviders.get(codex.startedThreads[0]!.threadId)).toBe("aio_gateway");
       expect(codex.startedTurns[0]).toMatchObject({ model: "gpt-6.1-sol", effort: "high" });
       expect(() => off.memberSettings()).toThrow("服务暂时不可用");
     } finally {
