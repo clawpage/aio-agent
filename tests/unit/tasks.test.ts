@@ -3,6 +3,7 @@ import { openDb, type Db } from "../../src/control/db.js";
 import { AgentManager } from "../../src/control/codex/manager.js";
 import type { HostTokenSource } from "../../src/control/codex/hostTokens.js";
 import { TaskService } from "../../src/control/tasks/service.js";
+import { executorQuestion } from "../../src/control/tasks/executorQuestion.js";
 import { JsonRpcResponseError } from "../../src/control/codex/jsonrpc.js";
 import { parsePlan, planningPrompt, resourcesConflict } from "../../src/control/tasks/planning.js";
 import { Logger } from "../../src/common/logger.js";
@@ -24,6 +25,17 @@ class PlanningCodex extends FakeCodex {
 const tick = () => new Promise(r => setTimeout(r, 30));
 let db: Db, agent: AgentManager, codex: PlanningCodex, tasks: TaskService;
 const submit = (text: string, relatedTaskId?: string) => tasks.submit({ text, clientMessageId: text, relatedTaskId }).task;
+describe("executor question protocol", () => {
+    it("accepts an explicit blocking question and keeps preceding progress", () => {
+        expect(executorQuestion('已查记录。\n```ask_user\n{"question":"查哪个城市？","options":["圣何塞","旧金山"]}\n```'))
+            .toEqual({question:"查哪个城市？",options:["圣何塞","旧金山"],result:"已查记录。"});
+    });
+    it("recognizes the legacy missing-city request but not an optional follow-up", () => {
+        expect(executorQuestion("你想看哪个城市的天气？发城市名或邮编就行，我查今天的气温、降雨和出门穿什么。")?.question).toContain("哪个城市");
+        expect(executorQuestion("圣何塞今天 22°C。还想看明天吗？")).toBeNull();
+        expect(executorQuestion('```ask_user\n{"question":""}\n```')).toBeNull();
+    });
+});
 beforeEach(async () => {
     db = openDb(":memory:");
     codex = new PlanningCodex();
@@ -81,9 +93,12 @@ describe("main inbox delegation", () => {
         expect(entry?.steps.find(s=>s.kind==="plan")).toMatchObject({plan:{clarification:null}});
         await codex.runTurn(codex.startedTurns[0]!.turnId,{text:"请告诉我出发地、目的地和日期？"});
         await tick();
-        expect(tasks.get(parent.id)).toMatchObject({status:"completed",result:"请告诉我出发地、目的地和日期？"});
+        expect(tasks.get(parent.id)).toMatchObject({status:"needs_input",result:null});
+        expect(tasks.view(tasks.get(parent.id)!).clarification).toBe("请告诉我出发地、目的地和日期？");
         const reply=submit("巴黎到罗马，10月12日",parent.id); await tick();
         expect(tasks.get(reply.id)?.execution_conversation_id).toBe(tasks.get(parent.id)?.conversation_id);
+        expect(tasks.get(reply.id)?.merged_into).toBeNull();
+        expect(tasks.get(parent.id)?.status).toBe("completed");
         expect(codex.startedTurns.at(-1)?.text).toContain("巴黎到罗马，10月12日");
     });
     it("routes an unreferenced reply to a completed executor question", async () => {
@@ -95,10 +110,38 @@ describe("main inbox delegation", () => {
         };
         const first=submit("从巴黎查机票");firstId=first.id;await tick();
         await codex.runTurn(codex.startedTurns[0]!.turnId,{text:"请告诉我目的地和日期？"});await tick();
+        expect(tasks.get(first.id)?.status).toBe("needs_input");
         const answer=submit("罗马，11月12日");await tick();
         expect(tasks.get(answer.id)?.execution_conversation_id).toBe(tasks.get(first.id)?.conversation_id);
+        expect(tasks.get(answer.id)?.merged_into).toBeNull();
+        expect(tasks.get(first.id)?.status).toBe("completed");
+        expect(tasks.get(first.id)?.result).toContain("已收到补充，结果请看后续任务");
+        expect((JSON.parse(tasks.get(first.id)!.plan_json!) as {answeredBy?:string}).answeredBy).toBe(answer.id);
         expect(codex.startedTurns.at(-1)?.text).toContain("罗马，11月12日");
         expect(codex.startedTurns.at(-1)?.text).toContain("请告诉我目的地和日期？");
+    });
+    it("holds a structured executor question and resumes its thread after a selected answer", async () => {
+        const first=submit("查天气");await tick();
+        expect(codex.startedTurns[0]?.text).toContain("```ask_user");
+        await codex.runTurn(codex.startedTurns[0]!.turnId,{text:'已查到天气源。\n```ask_user\n{"question":"查哪个城市？","options":["圣何塞","旧金山"]}\n```'});await tick();
+        const pending=tasks.view(tasks.get(first.id)!);
+        expect(pending).toMatchObject({status:"needs_input",result:null,clarification:"查哪个城市？",options:["圣何塞","旧金山"]});
+        expect(tasks.list().tasks.some(t=>t.id===first.id && t.status==="needs_input")).toBe(true);
+        const second=submit("圣何塞",first.id);await tick();
+        expect(tasks.get(first.id)?.status).toBe("completed");
+        expect(tasks.get(second.id)?.status).toBe("running");
+        expect(tasks.get(second.id)?.merged_into).toBeNull();
+        expect(codex.startedTurns.at(-1)?.threadId).toBe(codex.startedTurns[0]?.threadId);
+        expect(codex.startedTurns.at(-1)?.text).toContain("该任务最后问用户：「查哪个城市？」");
+        await codex.runTurn(codex.startedTurns.at(-1)!.turnId,{text:"圣何塞今天 22°C。"});await tick();
+        expect(tasks.get(second.id)?.result).toBe("圣何塞今天 22°C。");
+        expect(tasks.view(tasks.get(first.id)!).clarification).toBeNull();
+    });
+    it("can stop an executor task awaiting a user answer without interrupting its finished turn", async () => {
+        const first=submit("查天气");await tick();
+        await codex.runTurn(codex.startedTurns[0]!.turnId,{text:'```ask_user\n{"question":"查哪个城市？"}\n```'});await tick();
+        await tasks.stop(first.id);
+        expect(tasks.get(first.id)?.status).toBe("interrupted");
     });
     it("keeps simultaneous incomplete requests independent while executors decide whether to ask", async () => {
         codex.plan=async p=>{

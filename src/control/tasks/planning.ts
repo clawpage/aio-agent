@@ -26,6 +26,8 @@ export interface TaskPlan {
     clarification?: string | null;
     /** Answers the person can tap instead of typing, when the question is a pick among a few. */
     options?: string[] | null;
+    /** A later task took the user's answer and resumed this executor thread. */
+    answeredBy?: string;
     related: string[];
     dependencies: string[];
     resources: string[];
