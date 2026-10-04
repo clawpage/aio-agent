@@ -1,6 +1,7 @@
 import {it,expect,vi} from 'vitest';
 import {startHarness} from '../helpers/harness.js';
 import {readSoul,writeSoul} from '../../src/control/soul.js';
+import {EXPERIENCE_POLICY} from '../../src/control/codex/experience.js';
 
 it('reads current SOUL for planning, new execution and resume without rewriting user text or the active turn',async()=>{
  const h=await startHarness();
@@ -13,7 +14,7 @@ it('reads current SOUL for planning, new execution and resume without rewriting 
   const task=h.ctx.tasks.submit({text:'你是谁',clientMessageId:'soul-identity'}).task;
   await vi.waitFor(()=>expect(h.codex.startedTurns.length).toBe(1));
   expect(plan).toHaveBeenCalledWith(expect.stringContaining('你是谁'),firstSoul);
-  expect(start).toHaveBeenCalledWith(expect.objectContaining({developerInstructions:firstSoul}));
+  expect(start).toHaveBeenCalledWith(expect.objectContaining({developerInstructions:`${firstSoul}\n\n${EXPERIENCE_POLICY}`}));
   expect(h.codex.startedTurns[0]!.text).not.toContain(firstSoul);
   const prompt=h.codex.startedTurns[0]!.text;
   expect(prompt).toContain('默认在对话中直接给出完整回答');
@@ -27,7 +28,7 @@ it('reads current SOUL for planning, new execution and resume without rewriting 
   await vi.waitFor(()=>expect(h.ctx.tasks.get(task.id)?.status).toBe('completed'));
   h.ctx.tasks.submit({text:'继续',clientMessageId:'soul-resume',relatedTaskId:task.id});
   await vi.waitFor(()=>expect(h.codex.startedTurns.length).toBe(2));
-  expect(resume).toHaveBeenLastCalledWith(h.codex.startedTurns[0]!.threadId,nextSoul);
+  expect(resume).toHaveBeenLastCalledWith(h.codex.startedTurns[0]!.threadId,`${nextSoul}\n\n${EXPERIENCE_POLICY}`);
   expect(start).toHaveBeenCalledTimes(1);
   h.codex.completeTurn(h.codex.startedTurns[1]!.turnId);
  }finally{await h.shutdown();}

@@ -7,7 +7,7 @@ import type { Config } from "../config.js";
 import type { Logger } from "../../common/logger.js";
 import type { SandboxContainer } from "../sandbox/container.js";
 import type { BridgeModel } from "../bridgeModel.js";
-import { JsonRpcPeer } from "./jsonrpc.js";
+import { JsonRpcPeer, JsonRpcTimeoutError } from "./jsonrpc.js";
 import type { HostTokenSource } from "./hostTokens.js";
 import type { UsageLedger } from '../usage.js';
 
@@ -79,6 +79,7 @@ export class SandboxCodexSession {
     /** How long one dispatcher run may take. */
     private readonly planTimeoutMs = 90_000,
     private readonly usage?: UsageLedger,
+    private readonly auxiliaryStartTimeoutMs = 60_000,
   ) {
     this.#cfg = cfg;
     this.#log = log.child("sandbox-codex");
@@ -234,6 +235,9 @@ export class SandboxCodexSession {
   }
 
   #routeNotification(method: string, params: unknown): void {
+    // thread/started can arrive before thread/start's reply (even after timeout).
+    // An ephemeral classifier is never a user conversation.
+    if (method === "thread/started" && (params as { thread?: { ephemeral?: boolean } })?.thread?.ephemeral) return;
     // Observe before auxiliary routing: dispatch/title calls also consume tokens.
     if (method === 'thread/tokenUsage/updated') {
       try { this.usage?.codex(params); } catch { this.#log.error('token usage persistence failed'); }
@@ -272,7 +276,17 @@ export class SandboxCodexSession {
    */
   /** Read-only main-agent planning; receives bounded metadata, never executes a task. */
   async planTask(prompt: string, developerInstructions?: string, model?: string): Promise<string | null> {
-    const { text, error } = await this.#auxiliaryText(prompt, "high", this.planTimeoutMs, developerInstructions, model);
+    let result;
+    try {
+      result = await this.#auxiliaryText(prompt, "high", this.planTimeoutMs, developerInstructions, model);
+    } catch (err) {
+      // Only thread creation is safe to repeat: no turn has been sent. Never
+      // replay turn/start or task execution after unknown delivery.
+      if (!(err instanceof JsonRpcTimeoutError) || err.method !== "thread/start") throw err;
+      this.#log.warn("dispatcher thread creation timed out; retrying once");
+      result = await this.#auxiliaryText(prompt, "high", this.planTimeoutMs, developerInstructions, model);
+    }
+    const { text, error } = result;
     // A reported reason (such as an exhausted usage limit) is shown on the task
     // instead of a generic "try again".
     if (error) throw new Error(`任务分配失败：${error}`);
@@ -296,8 +310,13 @@ export class SandboxCodexSession {
         approvalPolicy: "never",
         model,
         cwd: this.#cfg.sandbox.containerWorkspaceDir,
+        // Dispatch needs only supplied metadata. Do not initialize the legacy
+        // shared browser MCP or load unrelated CLI memories during thread/start.
+        config: { features: { memories: false }, mcp_servers: {
+          aio_browser: { enabled: false, url: "http://127.0.0.1:8080/mcp" },
+        } },
       },
-      60_000,
+      this.auxiliaryStartTimeoutMs,
     )) as { thread: { id: string } };
     const threadId = threadRes.thread.id;
 

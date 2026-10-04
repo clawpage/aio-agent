@@ -42,6 +42,9 @@ const STATE_FILE = process.env.AIO_TABS_STATE || '/tmp/aio-tabs-state.json';
 const WORKSPACE = process.env.AIO_TABS_WORKSPACE || '/home/gem/workspace';
 const MAX_SAVED_IMAGE = 8 * 1024 * 1024;
 const MAX_FINISHED_TABS = Number(process.env.AIO_TABS_MAX_FINISHED || 8);
+/** Heavy flight/store pages must not exhaust the agent's shared cgroup. */
+const MAX_TASK_TABS = Math.max(1, Number(process.env.AIO_TABS_MAX_TASK_TABS || 3));
+const openingTabs = new Map();
 /** A finished task's tabs stay this long for a follow-up, then close on their own. */
 const FINISHED_TTL_MS = Number(process.env.AIO_TABS_FINISHED_TTL_MS || 10 * 60 * 1000);
 const HUMAN_WAIT_MS = Number(process.env.AIO_TABS_HUMAN_WAIT_MS || 30 * 60 * 1000);
@@ -60,6 +63,7 @@ const { chromium } = require(process.env.AIO_TABS_PLAYWRIGHT || '/opt/aio-browse
 const INSTRUCTIONS = [
   '浏览器请只用 aio_tabs 的工具。每个标签页记录着创建它的任务：只有创建它的任务能操作（打开网址、点击、填写、执行脚本、关闭），其他任务只能只读查看（正文、HTML、页面结构、截图）。',
   '只读查看其他任务的页面时，先用 browser_tab_list 找到标签页编号（如 t3），再把它作为 tab 参数传给读取类工具。',
+  '逐项查航班、价格等时复用本任务的标签页，保存必要结果后换网址，不为每个日期或候选保留一页。本任务最多同时保留 3 页；遇到内存紧张，关闭自己已读取完成的页面再继续，不关闭用户接管或其他任务的页面。',
   '网站要登录时调用 browser_login：先用 browser_snapshot 看清登录框，写出 steps（从当前页面重新加载开始：点开登录入口、把 {{username}} 填进账号框、{{password}} 填进密码框、提交），密码器代入用户保存的值执行，你看不到值；这个网站以前成功过的步骤会自动沿用，可以省略 steps。之后读取页面，用 browser_login_report 报告是否成功；失败时按返回的出错步骤改写 steps 重试，最多 3 次，仍不行就调用 browser_request_human。用户为这个网站记的是 Google 登录时，它会告诉你点 Google 按钮、选哪个账号。不要用 browser_fill 或 browser_type 输入密码，不要读取密码框的内容。',
   '需要用户本人在浏览器里操作时，调用 browser_request_human 说明原因并等待：验证码、二次验证、扫码登录、支付信息、付款、下单、发送消息、修改账号设置等不可撤销的最后一步，或需要用户判断的页面。不要在对话里索要密码或验证码。',
   '遇到「按住确认你是真人」（Press & Hold）、滑块、勾选框等人机验证时，不要自己反复点击、拖动或刷新：同一个标签页里的验证会话一旦被判为机器，之后人来按也过不了。先用 browser_tab_new 在新标签页重新打开同一网址，再用 browser_tab_close 关掉旧标签页；新标签页通常直接通过。新标签页仍出现验证，才调用 browser_request_human 请用户在这个新标签页里完成。',
@@ -358,9 +362,19 @@ async function reattach(context) {
 async function newTab(key, title) {
   const context = await browserContext();
   await makeRoom(key);
+  const pending = openingTabs.get(key) || 0;
+  if (key !== PERSON && ownTabs(key).length + pending >= MAX_TASK_TABS) {
+    throw new Error(`本任务最多同时保留 ${MAX_TASK_TABS} 个标签页。用 browser_tab_list 查看，复用已有标签页（browser_navigate 传 tab），或关闭自己已读完的页面再新建；不要关闭用户接管的页面。`);
+  }
+  const m = memory();
+  if (m && m.used + MEM_NEED > m.max) {
+    throw new Error('沙箱内存紧张，暂不新建标签页。请复用已有标签页，或先关闭本任务已读取完成的页面再继续；这不是浏览器权限问题。');
+  }
+  openingTabs.set(key, pending + 1);
   const browser = context.browser();
-  const session = await browser.newBrowserCDPSession();
+  let session;
   try {
+    session = await browser.newBrowserCDPSession();
     // While a person looks at another tab the window opens without taking focus (keepFront still guards its stacking).
     const { targetId } = await session.send('Target.createTarget', { url: 'about:blank', newWindow: true, background: Boolean(frontTab()) });
     // Other tasks may open windows at the same moment: take the page this call created.
@@ -377,7 +391,9 @@ async function newTab(key, title) {
     }
     return adoptNew(page, key, title, targetId);
   } finally {
-    await session.detach().catch(() => undefined);
+    openingTabs.set(key, Math.max(0, (openingTabs.get(key) || 1) - 1));
+    if (!openingTabs.get(key)) openingTabs.delete(key);
+    await session?.detach().catch(() => undefined);
   }
 }
 

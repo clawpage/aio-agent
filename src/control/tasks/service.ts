@@ -306,10 +306,11 @@ export class TaskService {
         const trace: RecallEvent = { taskId: row.id, ownerId: this.ownerId(row), candidates: [], searches: [], rounds: 0, chosen: { related: [], appendTo: null }, gold: null, latencyMs: 0, promptChars: 0, failed: true, steps: [] };
         const steps = trace.steps!;
         try {
-            // A tapped answer to a pending question needs no dispatch: it goes straight back to that task.
+            // An explicit reply to a pending question already has an authoritative
+            // target. Free text (including "look it up") needs no second classifier.
             const asked = row.related_task_id ? this.get(row.related_task_id) : null;
             const askedPlan = asked?.status === "needs_input" && asked.plan_json ? JSON.parse(asked.plan_json) as TaskPlan : null;
-            if (asked && askedPlan?.options?.includes(row.input_text.trim()) && !(JSON.parse(row.attachments_json) as unknown[]).length) {
+            if (asked && askedPlan) {
                 const plan: TaskPlan = { title: [...row.input_text.trim()].slice(0, 40).join(""), description: `回答“${askedPlan.clarification ?? asked.title}”`, related: [asked.id], dependencies: [], resources: [], appendTo: asked.id, resume: null, clarification: null };
                 this.db.prepare("UPDATE tasks SET title=?,plan_json=?,merged_into=?,status='merging',error=NULL WHERE id=?").run(plan.title, JSON.stringify(plan), asked.id, row.id);
                 return;

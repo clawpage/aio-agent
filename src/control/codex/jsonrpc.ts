@@ -24,6 +24,12 @@ export class JsonRpcResponseError extends Error {
   }
 }
 
+export class JsonRpcTimeoutError extends Error {
+  constructor(public method: string, label: string, timeoutMs: number) {
+    super(`${label} request ${method} timed out after ${timeoutMs}ms`);
+  }
+}
+
 export type ServerRequestHandler = (
   method: string,
   params: unknown,
@@ -101,7 +107,7 @@ export class JsonRpcPeer extends EventEmitter<PeerEvents> {
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.#pending.delete(id);
-        reject(new Error(`${this.label} request ${method} timed out after ${timeoutMs}ms`));
+        reject(new JsonRpcTimeoutError(method, this.label, timeoutMs));
       }, timeoutMs);
       timer.unref?.();
       this.#pending.set(id, { method, resolve, reject, timer });

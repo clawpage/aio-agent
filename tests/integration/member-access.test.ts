@@ -5,6 +5,7 @@ import path from 'node:path';
 import { startHarness, login, type TestHarness } from '../helpers/harness.js';
 import { createMember } from '../../src/control/auth/owner.js';
 import {readSoul} from '../../src/control/soul.js';
+import {EXPERIENCE_POLICY} from '../../src/control/codex/experience.js';
 import { MEMBER_MODEL } from '../../src/control/auth/policy.js';
 let h:TestHarness, dir:string, userId:string;
 let member:Record<string,string>, owner:Record<string,string>;
@@ -51,7 +52,7 @@ it('isolates ledger reads, references, stops, events, replay IDs and planner con
  const b=await submit(member,'member-own-task',{model:'gpt-6-sol',effort:'low',userId:'owner_1'});expect(b.status).toBe(202);
  await vi.waitFor(()=>expect(h.codex.startedTurns.some(t=>t.model===MEMBER_MODEL), JSON.stringify(h.ctx.tasks.get(b.body.task.id))).toBe(true));
  const run=h.codex.startedTurns.find(t=>t.model===MEMBER_MODEL)!;expect(run.effort).toBe('high');expect(h.codex.threadProviders.get(run.threadId)).toBe('aio_gateway');
- expect(start).toHaveBeenLastCalledWith(expect.objectContaining({developerInstructions:readSoul(h.ctx.cfg).content,model:MEMBER_MODEL}));
+ expect(start).toHaveBeenLastCalledWith(expect.objectContaining({developerInstructions:`${readSoul(h.ctx.cfg).content.trimEnd()}\n\n${EXPERIENCE_POLICY}`,model:MEMBER_MODEL}));
  const planned=planner.mock.calls.find(c=>c[2]===MEMBER_MODEL)!;expect(planned).toBeDefined();expect(planned[1]).toBe(readSoul(h.ctx.cfg).content);expect(planned[0]).not.toContain('owner-private-task');
  const feed=await h.request('/api/main',{headers:member});expect((await feed.json() as any).tasks.map((t:any)=>t.id)).toEqual([b.body.task.id]);
  const ownerFeed=await h.request('/api/main',{headers:owner});expect((await ownerFeed.json() as any).tasks.map((t:any)=>t.id)).not.toContain(b.body.task.id);
@@ -68,7 +69,7 @@ it('isolates ledger reads, references, stops, events, replay IDs and planner con
  await vi.waitFor(()=>expect(h.codex.startedTurns.length).toBe(3));
  expect(h.codex.startedTurns.at(-1)).toMatchObject({threadId:run.threadId,model:MEMBER_MODEL,effort:'high'});
  expect(h.codex.resumedThreads).toContain(run.threadId);
- expect(resume).toHaveBeenLastCalledWith(run.threadId,readSoul(h.ctx.cfg).content);
+ expect(resume).toHaveBeenLastCalledWith(run.threadId,`${readSoul(h.ctx.cfg).content.trimEnd()}\n\n${EXPERIENCE_POLICY}`);
 
 });
 it('fails closed when the gateway provider is unavailable instead of using the owner ChatGPT login',async()=>{

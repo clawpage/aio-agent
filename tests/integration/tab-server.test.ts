@@ -539,6 +539,26 @@ it.skipIf(!hasChromium)("saves a product picture into the workspace, by element 
   site.close();
 });
 
+it.skipIf(!hasChromium)("bounds concurrent new tabs while allowing reuse and preserving held pages", async () => {
+  const attempts = await Promise.all(Array.from({length:5},(_,i)=>call("CAP", "browser_tab_new", {url:page(`cap-${i}`, "saved result")})));
+  expect(attempts.filter(r=>!r.result?.isError)).toHaveLength(3);
+  expect(attempts.filter(r=>r.result?.isError).every(r=>text(r).includes("最多同时保留 3"))).toBe(true);
+  const tabs = await records("CAP");
+  expect(tabs).toHaveLength(3);
+  const held=tabs[0]!.id, reused=tabs[1]!.id;
+  await control(held,"take");
+  try {
+    expect((await call("CAP","browser_navigate",{tab:reused,url:page("reused", "next date")})).result?.isError).not.toBe(true);
+    expect((await records("CAP")).find(t=>t.id===held)?.holder).toBe("human");
+    await call("CAP","browser_tab_close",{tab:reused});
+    expect((await call("CAP","browser_tab_new",{url:page("replacement", "next date")})).result?.isError).not.toBe(true);
+    expect(await records("CAP")).toHaveLength(3);
+  } finally {
+    await control(held,"release");
+    for(const tab of await records("CAP"))await call("CAP","browser_tab_close",{tab:tab.id});
+  }
+});
+
 it.skipIf(!hasChromium)("frees memory near the limit, least valuable pages first, never a running task's or a held tab", async () => {
   const { reclaimMemory } = require(SCRIPT) as { reclaimMemory: (reason: string) => Promise<string[]> };
   const html = (title: string, extra = "") => `data:text/html,<title>${title}</title>${extra}`;
@@ -579,17 +599,25 @@ it.skipIf(!hasChromium)("frees memory near the limit, least valuable pages first
     // A page about to open goes all the way: an untracked page left alone gives way too.
     await new Promise((r) => setTimeout(r, 400));
     setMemory(0.95);
-    await call("MN", "browser_navigate", { url: html("Needed") });
+    const refused = await call("MN", "browser_navigate", { url: html("Needed") });
+    expect(refused.result?.isError).toBe(true);
+    expect(text(refused)).toContain("沙箱内存紧张");
     const left = await titles();
     expect(left).not.toContain("Stray");
-    expect(left).toEqual(expect.arrayContaining(["Running", "Held", "Needed", "Typing"]));
+    expect(left).toEqual(expect.arrayContaining(["Running", "Held", "Typing"]));
+    expect(left).not.toContain("Needed");
     expect(left).not.toContain("Finished");
     // The server reports its memory for the control plane.
     expect(await (await fetch(`${base}/healthz`)).json()).toMatchObject({ memory: { usedMb: 906, maxMb: 954, oomKills: 0 } });
     expect((await records("MR")).map((t) => t.id)).toContain(running);
 
+    // Once pressure clears the same request works; no permissions were lost.
+    setMemory(0.1);
+    expect((await call("MN", "browser_navigate", { url: html("Needed") })).result?.isError).not.toBe(true);
+
     // After a restart nothing is attached yet: pressure alone attaches, re-claims the record and frees.
     await post("/finish", { key: "MN" });
+    setMemory(0.95);
     server.close();
     await startServer();
     const { reclaimMemory: restarted } = require(SCRIPT) as { reclaimMemory: (reason: string) => Promise<string[]> };

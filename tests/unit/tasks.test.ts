@@ -109,7 +109,7 @@ describe("main inbox delegation", () => {
         expect(tasks.get(parent.id)?.status).toBe("running");
         expect(tasks.list().tasks.find(t=>t.id===parent.id)?.options).toBeNull();
     });
-    it("dispatches a typed answer to a question with options as usual", async () => {
+    it("sends an explicitly referenced typed answer directly back to its question", async () => {
         let parentId="";
         codex.plan = async p => {
             const data = JSON.parse(p.split("\n").at(-1)!);
@@ -120,7 +120,22 @@ describe("main inbox delegation", () => {
         const asked=codex.plans.length;
         const reply=submit("喝美赞臣的",parent.id); await tick(); await tick();
         expect(tasks.get(reply.id)?.merged_into).toBe(parent.id);
-        expect(codex.plans.length).toBe(asked+2);
+        expect(codex.plans.length).toBe(asked+1);
+    });
+    it("keeps a look-it-up correction on the travel task without classifying the reply", async () => {
+        codex.plan = async p => {
+            const data = JSON.parse(p.split("\n").at(-1)!);
+            if (data.message === "多大你自己查去") throw new Error("thread/start unavailable");
+            return JSON.stringify({title:"带娃行程",related:[],dependencies:[],resources:["browser"],
+                clarification:data.message.includes("用户补充：") ? null : "孩子届时多大？"});
+        };
+        const parent=submit("11月底带娃回家"); await tick();
+        const asked=codex.plans.length;
+        const reply=submit("多大你自己查去",parent.id); await tick(); await tick();
+        expect(tasks.get(reply.id)).toMatchObject({status:"merged",merged_into:parent.id});
+        expect(tasks.get(parent.id)?.status).toBe("running");
+        expect(codex.plans.length).toBe(asked+1);
+        expect(codex.startedTurns[0]?.text).toContain("多大你自己查去");
     });
     it("routes a free-text partial answer, asks only the remaining essential, and survives restart without execution", async () => {
         let parentId="";

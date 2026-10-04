@@ -82,7 +82,9 @@ class FakeAppServer {
       if (msg.id !== undefined && msg.method) {
         const handler = this.#handlers.get(msg.method);
         const result = handler ? handler(msg.params ?? {}) : {};
-        this.#stdout.write(JSON.stringify({ jsonrpc: "2.0", id: msg.id, result }) + "\n");
+        const reply = (value: unknown) => this.#stdout.write(JSON.stringify({ jsonrpc: "2.0", id: msg.id, result: value }) + "\n");
+        if (result instanceof Promise) void result.then(reply);
+        else reply(result);
       }
     }
   }
@@ -96,14 +98,42 @@ function containerFor(server: FakeAppServer): SandboxContainer {
   return { spawnCodexAppServer: () => server.child } as unknown as SandboxContainer;
 }
 
-function makeSession(server: FakeAppServer, timeoutMs = 30, bridge: BridgeModel | null = null, usage?: UsageLedger): SandboxCodexSession {
+function makeSession(server: FakeAppServer, timeoutMs = 30, bridge: BridgeModel | null = null, usage?: UsageLedger, startTimeoutMs = 60_000): SandboxCodexSession {
   const cfg = testConfig("/tmp/pa-aux-stream", 1, {});
-  return new SandboxCodexSession(cfg, new Logger("error", undefined, false), containerFor(server), hostTokens, bridge, timeoutMs, usage);
+  return new SandboxCodexSession(cfg, new Logger("error", undefined, false), containerFor(server), hostTokens, bridge, timeoutMs, usage, startTimeoutMs);
 }
 
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 describe("SandboxCodexSession dispatcher thread isolation", () => {
+  it("retries only thread creation once, without starting a turn on its late orphan", async () => {
+    const server=new FakeAppServer(); let starts=0;
+    server.handle("thread/start",async()=>{const n=++starts;if(n===1)await wait(60);return {thread:{id:`aux-${n}`}};});
+    server.handle("turn/start",p=>{setTimeout(()=>server.notify("turn/completed",{threadId:p.threadId,turn:{status:"completed",items:[{type:"agentMessage",text:"{}"}]}}),5);return {turn:{id:"turn"}};});
+    const session=makeSession(server,200,null,undefined,20),forwarded:unknown[]=[];
+    session.onNotification((m,p)=>forwarded.push([m,p]));
+    try {
+      expect(await session.planTask("classify")).toBe("{}");
+      expect(starts).toBe(2);
+      expect(server.inbound.filter(m=>m.method==="turn/start").map(m=>m.params?.threadId)).toEqual(["aux-2"]);
+      server.notify("thread/started",{thread:{id:"aux-1",ephemeral:true}});
+      await wait(70);
+      expect(forwarded).toEqual([]);
+      const config=server.inbound.find(m=>m.method==="thread/start")?.params?.config;
+      expect(config).toMatchObject({features:{memories:false},mcp_servers:{aio_browser:{enabled:false,url:"http://127.0.0.1:8080/mcp"}}});
+    }finally{session.close();}
+  });
+  it("stops after two thread creation timeouts without executing a turn",async()=>{
+    const server=new FakeAppServer();
+    server.handle("thread/start",async()=>{await wait(90);return {thread:{id:"late"}};});
+    const session=makeSession(server,200,null,undefined,20);
+    try {
+      await expect(session.planTask("classify")).rejects.toThrow("request thread/start timed out");
+      expect(server.inbound.filter(m=>m.method==="thread/start")).toHaveLength(2);
+      expect(server.inbound.some(m=>m.method==="turn/start")).toBe(false);
+      await wait(100);
+    }finally{session.close();}
+  });
   it('records late auxiliary usage without leaking its events to the conversation', async () => {
     const db=openDb(':memory:'),server=new FakeAppServer();
     server.handle('thread/start',()=>({thread:{id:'aux-usage'}}));server.handle('turn/start',()=>({turn:{id:'turn'}}));
