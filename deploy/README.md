@@ -17,6 +17,7 @@ cp deploy/aio.env.example deploy/aio.env       # 按需填写；控制面的 PA_
 node deploy/aio.mjs init                       # 生成节点令牌（控制面与 sandboxd 共用）
 node deploy/aio.mjs build                      # 构建三个镜像，打上版本与协议号 label
 node deploy/aio.mjs up                         # 先校验镜像兼容，再 compose up 并等待全部健康
+node deploy/aio.mjs refresh [ui]               # 只替换指定服务（默认 ui）为当前镜像；控制面和其上的任务不受影响
 node deploy/aio.mjs ps | logs control | down
 ```
 

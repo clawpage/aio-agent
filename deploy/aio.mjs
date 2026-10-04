@@ -7,6 +7,8 @@
  *   node deploy/aio.mjs check                verify the selected images fit together
  *   node deploy/aio.mjs up                   check, then `docker compose up -d` and wait for health
  *   node deploy/aio.mjs run                  for a process supervisor: up, follow the logs, stop on SIGTERM
+ *   node deploy/aio.mjs refresh [service...] replace only these running services (default ui) with their current
+ *                                            images; the others, the control plane's tasks included, keep running
  *   node deploy/aio.mjs down | ps | logs [service] | config
  *   node deploy/aio.mjs import-data <dir>    copy a control data directory into the data volume
  *   node deploy/aio.mjs export-data <dir>    copy the data volume out (backup, rollback, moving machines)
@@ -260,6 +262,11 @@ switch (command) {
     break;
   case "run":
     run();
+    break;
+  case "refresh":
+    // Every layer's file is loaded (nothing counts as an orphan) and only the named services are recreated.
+    check();
+    compose(["up", "-d", "--no-deps", "--wait", "--wait-timeout", settings.AIO_WAIT_SECONDS ?? "180", ...(rest.length ? rest : ["ui"])]);
     break;
   case "down":
     compose(["down", "--remove-orphans"]);
