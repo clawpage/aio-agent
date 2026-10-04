@@ -14,3 +14,5 @@ docs
 **/__pycache__
 .env
 .env.*
+# The mobile app shell (src/ui/tauri) is built on a Mac, never in an image.
+src/ui/tauri

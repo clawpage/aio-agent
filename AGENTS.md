@@ -25,6 +25,7 @@ cookie 名 `pa_*` 与 `PA_*` 前缀**保持不变**——它们承载既有容�
 | `src/ui/` | 界面层：React + Vite 中文前端（构建产物 `dist/ui`）与 `edge.mjs`（静态文件 + `/api` 原样转发给控制面，默认 :4891） |
 | `src/control/` | 控制层：配置、SQLite、鉴权、任务与智能体、伴随站代理、成员网关；只经沙箱节点触达容器，自身不碰 Docker（默认 :4892） |
 | `src/sandbox/` | 沙箱层：sandboxd，唯一持有 Docker 的进程；按校验过的参数创建/接管沙箱容器，只提供固定操作（检查、启停、容器内执行与流式执行、网页端口代理、网关中继），每个请求都要节点令牌（默认 :4894） |
+| `src/ui/tauri/` | 界面层的 iOS/Android 外壳（Tauri 2）：全屏 web view 打开已部署的控制台，与 web 版共用 `src/ui/src` 同一套界面代码；只放原生适配（安全区、键盘、图标、签名），见该目录 README；不进 Docker 镜像 |
 | `src/common/` | 三层共享：控制面与沙箱节点的协议（`protocol.ts`）、兼容版本号（`version.ts`）、日志、密钥文件读取 |
 | `deploy/` | 三个镜像的 Dockerfile、分层 compose 文件、`aio.mjs`（构建、上线前按镜像 label 校验兼容、启停、数据卷导入导出），见 `deploy/README.md` |
 | `tests/unit/`、`tests/integration/` | vitest；集成测试自带假沙箱和假节点，不需要 Docker |
