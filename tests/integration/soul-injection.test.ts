@@ -13,7 +13,7 @@ it('reads current SOUL for planning, new execution and resume without rewriting 
   writeSoul(h.ctx.cfg,firstSoul,readSoul(h.ctx.cfg).revision);
   const task=h.ctx.tasks.submit({text:'你是谁',clientMessageId:'soul-identity'}).task;
   await vi.waitFor(()=>expect(h.codex.startedTurns.length).toBe(1));
-  expect(plan).toHaveBeenCalledWith(expect.stringContaining('你是谁'),firstSoul);
+  expect(plan).toHaveBeenCalledWith(expect.stringContaining('你是谁'),firstSoul,undefined,expect.any(Function));
   expect(start).toHaveBeenCalledWith(expect.objectContaining({developerInstructions:`${firstSoul}\n\n${EXPERIENCE_POLICY}`}));
   expect(h.codex.startedTurns[0]!.text).not.toContain(firstSoul);
   const prompt=h.codex.startedTurns[0]!.text;

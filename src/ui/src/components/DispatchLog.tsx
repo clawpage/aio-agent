@@ -55,6 +55,23 @@ function Step({ step, name }: { step: DispatchStep; name: (id: string) => string
           <details><summary>完整提示词（{step.prompt.length.toLocaleString()} 字）</summary><pre>{step.prompt}</pre></details>
         </li>
       );
+    case "timing": {
+      const t = step.timing;
+      const stages = [
+        ["排队", t.queueMs], ["准备候选", t.contextMs], ["Jev 判断", t.jevMs],
+        ["沙箱就绪", t.sandboxMs], ["模型连接", t.connectionMs],
+        ["创建会话", t.threadStartMs], ["提交请求", t.turnStartMs],
+        ["提交至首字", t.firstTextMs], ["首字至完成", t.finishMs],
+        ["模型调用", t.classifierMs], ["本轮总计", t.totalMs],
+      ] as const;
+      return (
+        <li>
+          <h4>派单耗时 · 第 {step.round} 轮 <span className="muted tiny">{clock(step.at)}</span></h4>
+          <p>{t.model ?? "模型未返回"}{t.effort ? ` · ${t.effort}` : ""}{t.attempts && t.attempts > 1 ? ` · 建会话尝试 ${t.attempts} 次` : ""}</p>
+          <p className="muted tiny">{stages.filter(([, ms]) => ms !== undefined).map(([label, ms]) => `${label} ${ms} ms`).join(" · ")}</p>
+        </li>
+      );
+    }
     case "plan":
       return (
         <li>

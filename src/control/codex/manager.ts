@@ -6,6 +6,7 @@ import { getMeta, setMeta } from "../db.js";
 import type { Config } from "../config.js";
 import type { Logger } from "../../common/logger.js";
 import type { CodexModel, SandboxAccount } from "./sandboxCodex.js";
+import type { DispatchTimingSink } from "./dispatchTiming.js";
 import type { HostTokenSource } from "./hostTokens.js";
 import { BridgeModel, CHATGPT_PROVIDER_ID } from "../bridgeModel.js";
 import { CLAUDE_CODE_PROVIDER_ID, type ClaudeCodeHarness } from "../claudeCode.js";
@@ -66,7 +67,7 @@ export interface CodexSessionLike {
   interrupt(threadId: string, turnId: string): Promise<void>;
   steerTurn?(params: {threadId:string;expectedTurnId:string;text:string;attachments?:TurnAttachment[]}): Promise<void>;
   /** One throwaway, tool-free run used only for automatic conversation titles. */
-  planTask?(prompt: string, developerInstructions?: string, model?: string): Promise<string | null>;
+  planTask?(prompt: string, developerInstructions?: string, model?: string, onTiming?: DispatchTimingSink): Promise<string | null>;
   answer(id: string, result: unknown): boolean;
   close(): void;
 }

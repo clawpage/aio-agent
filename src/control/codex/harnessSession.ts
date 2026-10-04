@@ -2,6 +2,7 @@ import { CLAUDE_CODE_PROVIDER_ID, isClaudeThread } from "../claudeCode.js";
 import type { CodexSessionLike, TurnAttachment } from "./manager.js";
 import type { ClaudeCodeSession } from "./claudeSession.js";
 import type { BrowserTask } from "../browser/tabs.js";
+import type { DispatchTimingSink } from "./dispatchTiming.js";
 
 /**
  * One session surface over two harnesses.
@@ -81,10 +82,10 @@ export class HarnessSession implements CodexSessionLike {
     if (!this.#codex.steerTurn) return Promise.reject(new Error("当前执行器不支持运行中补充"));
     return this.#codex.steerTurn(params);
   }
-  planTask(prompt: string, developerInstructions?: string, model?: string) {
-    if (model ? this.#claude.owns(model) : this.#claudeSelected()) return this.#claude.planTask(prompt, developerInstructions);
+  planTask(prompt: string, developerInstructions?: string, model?: string, onTiming?: DispatchTimingSink) {
+    if (model ? this.#claude.owns(model) : this.#claudeSelected()) return this.#claude.planTask(prompt, developerInstructions, onTiming);
     if (!this.#codex.planTask) return Promise.resolve(null);
-    return this.#codex.planTask(prompt, developerInstructions, model);
+    return this.#codex.planTask(prompt, developerInstructions, model, onTiming);
   }
   answer(id: string, result: unknown) {
     return this.#codex.answer(id, result);

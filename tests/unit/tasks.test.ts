@@ -19,7 +19,7 @@ class PlanningCodex extends FakeCodex {
         return JSON.stringify({ title: data.message, related: [], dependencies: [], resources: [] });
     };
     planModels: (string | undefined)[] = [];
-    async planTask(p: string, _soul?: string, model?: string) { this.plans.push(p); this.planModels.push(model); return this.plan(p); }
+    async planTask(p: string, _soul?: string, model?: string, onTiming?: (timing: Record<string, string | number>) => void) { this.plans.push(p); this.planModels.push(model); onTiming?.({model:model ?? "fake-luna",effort:"high",connectionMs:2,threadStartMs:3,turnStartMs:4,firstTextMs:5,finishMs:6,classifierMs:20}); return this.plan(p); }
 }
 const tick = () => new Promise(r => setTimeout(r, 30));
 let db: Db, agent: AgentManager, codex: PlanningCodex, tasks: TaskService;
@@ -67,142 +67,50 @@ describe("main inbox delegation", () => {
         const web=submit("打开网页"); await tick();
         expect(db.prepare("SELECT browser_required FROM turns WHERE id=?").get(tasks.get(web.id)!.turn_id)?.browser_required).toBe(1);
     });
-    it("asks once for essentials, keeps the original task, and does not reserve browser resources while waiting", async () => {
-        codex.plan = async p => {
-            const data = JSON.parse(p.split("\n").at(-1)!);
-            const answered = data.message.includes("用户补充：");
-            return JSON.stringify({title:"航班查询",related:[],dependencies:[],resources:data.message.includes("机票") ? ["browser"] : [],
-                clarification:data.message.includes("机票") && !answered ? "从哪里出发、去哪儿，哪天出行？" : null});
-        };
+    it("starts execution even when an old dispatcher answer tries to ask first", async () => {
+        codex.plan = async () => JSON.stringify({title:"航班查询",related:[],dependencies:[],resources:["browser"],
+            clarification:"从哪里出发、去哪儿，哪天出行？",options:["巴黎到罗马"]});
         const parent=submit("查机票"); await tick();
-        expect(tasks.get(parent.id)?.status).toBe("needs_input");
-        expect(tasks.list().tasks[0]?.clarification).toContain("哪天");
-        expect(codex.startedTurns).toHaveLength(0);
-        const other=submit("写一个短故事"); await tick();
-        expect(tasks.get(other.id)?.status).toBe("running");
-        const reply=submit("示例：巴黎到罗马，10月12日",parent.id); await tick(); await tick();
-        expect(tasks.get(reply.id)?.status).toBe("merged");
-        expect(tasks.get(reply.id)?.merged_into).toBe(parent.id);
         expect(tasks.get(parent.id)?.status).toBe("running");
-        expect(tasks.list().tasks.find(t=>t.id===parent.id)?.clarification).toBeNull();
-        expect(codex.startedTurns).toHaveLength(2);
-        expect(codex.startedTurns[1]?.text).toContain("巴黎到罗马");
-        expect(tasks.submit({text:"示例：巴黎到罗马，10月12日",relatedTaskId:parent.id,clientMessageId:"示例：巴黎到罗马，10月12日"}).duplicate).toBe(true);
-    });
-    it("offers tappable answers with a question, and sends a tapped one straight back without a second dispatch", async () => {
-        codex.plan = async p => {
-            const data = JSON.parse(p.split("\n").at(-1)!);
-            const answered = data.message.includes("用户补充：");
-            return JSON.stringify({title:"水奶比价",related:[],dependencies:[],resources:[],
-                clarification: answered ? null : "你平时给宝宝喝哪个牌子的水奶？",
-                options: answered ? null : ["Similac（雅培）","Enfamil（美赞臣）","两个牌子都比一下"]});
-        };
-        const parent=submit("比价amazon和target水奶价格"); await tick();
-        const view=tasks.list().tasks.find(t=>t.id===parent.id)!;
-        expect(view).toMatchObject({status:"needs_input",clarification:"你平时给宝宝喝哪个牌子的水奶？",options:["Similac（雅培）","Enfamil（美赞臣）","两个牌子都比一下"]});
-        const asked=codex.plans.length;
-        const reply=submit("Enfamil（美赞臣）",parent.id); await tick(); await tick();
-        expect(tasks.get(reply.id)).toMatchObject({status:"merged",merged_into:parent.id});
-        // The tap itself was not dispatched; only the original task was re-planned, with the answer.
-        expect(codex.plans.length).toBe(asked+1);
-        expect(codex.plans.at(-1)).toContain("用户补充：Enfamil（美赞臣）");
-        expect(tasks.get(parent.id)?.status).toBe("running");
-        expect(tasks.list().tasks.find(t=>t.id===parent.id)?.options).toBeNull();
-    });
-    it("sends an explicitly referenced typed answer directly back to its question", async () => {
-        let parentId="";
-        codex.plan = async p => {
-            const data = JSON.parse(p.split("\n").at(-1)!);
-            return JSON.stringify({title:"水奶比价",related:[],dependencies:[],resources:[],appendTo:data.message==="喝美赞臣的"?parentId:null,
-                clarification: data.message.includes("用户补充：") || data.message==="喝美赞臣的" ? null : "哪个牌子？", options:["雅培","美赞臣"]});
-        };
-        const parent=submit("比价水奶"); parentId=parent.id; await tick();
-        const asked=codex.plans.length;
-        const reply=submit("喝美赞臣的",parent.id); await tick(); await tick();
-        expect(tasks.get(reply.id)?.merged_into).toBe(parent.id);
-        expect(codex.plans.length).toBe(asked+1);
-    });
-    it("keeps a look-it-up correction on the travel task without classifying the reply", async () => {
-        codex.plan = async p => {
-            const data = JSON.parse(p.split("\n").at(-1)!);
-            if (data.message === "多大你自己查去") throw new Error("thread/start unavailable");
-            return JSON.stringify({title:"带娃行程",related:[],dependencies:[],resources:["browser"],
-                clarification:data.message.includes("用户补充：") ? null : "孩子届时多大？"});
-        };
-        const parent=submit("11月底带娃回家"); await tick();
-        const asked=codex.plans.length;
-        const reply=submit("多大你自己查去",parent.id); await tick(); await tick();
-        expect(tasks.get(reply.id)).toMatchObject({status:"merged",merged_into:parent.id});
-        expect(tasks.get(parent.id)?.status).toBe("running");
-        expect(codex.plans.length).toBe(asked+1);
-        expect(codex.startedTurns[0]?.text).toContain("多大你自己查去");
-    });
-    it("routes a free-text partial answer, asks only the remaining essential, and survives restart without execution", async () => {
-        let parentId="";
-        codex.plan=async p=>{
-            const data=JSON.parse(p.split("\n").at(-1)!);
-            return JSON.stringify({title:"机票",related:[],dependencies:[],resources:["browser"],
-                appendTo:data.message==="去罗马"?parentId:null,
-                clarification:data.message.includes("用户补充：")?"哪天出发？":"去哪儿，哪天出发？"});
-        };
-        const parent=submit("从巴黎查机票");parentId=parent.id;await tick();
-        const answer=submit("去罗马");await tick();await tick();
-        expect(tasks.get(answer.id)?.status).toBe("merged");
-        expect(tasks.list().tasks.find(t=>t.id===parent.id)?.clarification).toBe("哪天出发？");
-        tasks.close();
-        tasks=new TaskService(db,testConfig("/tmp/aio-main-tasks",1),agent,codex);tasks.init();await tick();
-        expect(tasks.get(parent.id)?.status).toBe("needs_input");
-        expect(codex.startedTurns).toHaveLength(0);
-        await tasks.stop(parent.id);
-        expect(tasks.get(parent.id)?.status).toBe("interrupted");
-        expect(tasks.list().tasks.find(t=>t.id===parent.id)?.clarification).toBeNull();
-    });
-    it("includes attached information in preflight context instead of asking the user to repeat it",async()=>{
-        const job=tasks.submit({text:"按附件的航线和日期查机票",clientMessageId:"with-file",attachments:[{kind:"file",path:"/home/gem/workspace/uploads/requirements.md",name:"requirements.md"}]}).task;
-        await tick();
-        expect(codex.plans[0]).toContain("已有附件");
-        expect(codex.plans[0]).toContain("requirements.md");
-        expect(tasks.get(job.id)?.status).toBe("running");
-    });
-    it("keeps an older question visible and routes a short answer without an explicit task id",async()=>{
-        const question="从巴黎出发，去哪里、哪天？";
-        codex.plan=async p=>{
-            const data=JSON.parse(p.split("\n").at(-1)!);
-            const parent=data.previous.find((t:{clarification?:string})=>t.clarification===question);
-            return JSON.stringify({title:"机票",related:[],dependencies:[],resources:[],
-                appendTo:data.message==="罗马，11月12日"?parent?.id:null,
-                clarification:data.message.includes("用户补充：")||parent?null:question});
-        };
-        const first=tasks.submit({text:"查机票"+"说明".repeat(1000),clientMessageId:"long-question"}).task;await tick();
-        for(let i=0;i<13;i++){
-            const c=agent.createConversation({title:"其他已完成任务"});
-            db.prepare("INSERT INTO tasks(id,client_message_id,conversation_id,title,input_text,status,created_at) VALUES(?,?,?,?,?,'completed',?)")
-              .run(`old-${i}`,`old-${i}`,c.id,"other","unrelated",tasks.get(first.id)!.created_at+i+1);
-        }
-        const answer=submit("罗马，11月12日");await tick();await tick();
-        expect(tasks.get(answer.id)?.merged_into).toBe(first.id);
-        expect(tasks.get(first.id)?.status).toBe("running");
+        expect(tasks.list().tasks[0]).toMatchObject({clarification:null,options:null});
         expect(codex.startedTurns).toHaveLength(1);
-        expect(codex.startedTurns[0]?.text).toContain("罗马，11月12日");
+        expect(codex.startedTurns[0]?.text).toContain("查机票");
+        const { dispatchLog } = await import("../../src/control/tasks/recall.js");
+        const [entry] = dispatchLog(db,"owner_1",parent.id);
+        expect(entry?.steps.find(s=>s.kind==="timing")).toMatchObject({timing:{model:"fake-luna",effort:"high",firstTextMs:5,finishMs:6}});
+        expect(entry?.steps.find(s=>s.kind==="plan")).toMatchObject({plan:{clarification:null}});
+        await codex.runTurn(codex.startedTurns[0]!.turnId,{text:"请告诉我出发地、目的地和日期？"});
+        await tick();
+        expect(tasks.get(parent.id)).toMatchObject({status:"completed",result:"请告诉我出发地、目的地和日期？"});
+        const reply=submit("巴黎到罗马，10月12日",parent.id); await tick();
+        expect(tasks.get(reply.id)?.execution_conversation_id).toBe(tasks.get(parent.id)?.conversation_id);
+        expect(codex.startedTurns.at(-1)?.text).toContain("巴黎到罗马，10月12日");
     });
-    it("keeps simultaneous questions and their explicit answers separate",async()=>{
+    it("routes an unreferenced reply to a completed executor question", async () => {
+        let firstId="";
         codex.plan=async p=>{
             const data=JSON.parse(p.split("\n").at(-1)!);
-            return JSON.stringify({title:data.message.slice(0,20),related:[],dependencies:[],resources:[],
-                clarification:data.message.includes("用户补充：")?null:"请提供任务的目标？"});
+            return JSON.stringify({title:"机票",related:firstId?[firstId]:[],dependencies:[],resources:[],
+                resume:data.message==="罗马，11月12日"?firstId:null});
+        };
+        const first=submit("从巴黎查机票");firstId=first.id;await tick();
+        await codex.runTurn(codex.startedTurns[0]!.turnId,{text:"请告诉我目的地和日期？"});await tick();
+        const answer=submit("罗马，11月12日");await tick();
+        expect(tasks.get(answer.id)?.execution_conversation_id).toBe(tasks.get(first.id)?.conversation_id);
+        expect(codex.startedTurns.at(-1)?.text).toContain("罗马，11月12日");
+        expect(codex.startedTurns.at(-1)?.text).toContain("请告诉我目的地和日期？");
+    });
+    it("keeps simultaneous incomplete requests independent while executors decide whether to ask", async () => {
+        codex.plan=async p=>{
+            const data=JSON.parse(p.split("\n").at(-1)!);
+            return JSON.stringify({title:data.message.slice(0,20),related:[],dependencies:[],resources:[],clarification:"请提供任务的目标？"});
         };
         const first=submit("第一个任务"),second=submit("第二个任务");await tick();
-        submit("只回答第二个",second.id);await tick();await tick();
-        expect(tasks.get(first.id)?.status).toBe("needs_input");
+        expect(tasks.get(first.id)?.status).toBe("running");
         expect(tasks.get(second.id)?.status).toBe("running");
-        expect(codex.startedTurns).toHaveLength(1);
-        expect(codex.startedTurns[0]?.text).toContain("只回答第二个");
-        // The task itself carries only its own messages; the other task appears only as
-        // labelled background in the main-session timeline.
-        const [background, own] = codex.startedTurns[0]!.text.split("本次用户任务：");
-        expect(own).not.toContain("第一个任务");
-        expect(background).toMatch(new RegExp(`用户：「第一个任务」 → 任务 ${first.id}`));
-        expect(background).toMatch(/▶ \[\d\d:\d\d\] 用户：「第二个任务」  ← 本次消息/);
+        expect(codex.startedTurns).toHaveLength(2);
+        expect(codex.startedTurns[0]?.text).toContain("第一个任务");
+        expect(codex.startedTurns[1]?.text).toContain("第二个任务");
     });
     it("accepts four messages immediately, runs three isolated child threads, reports out of order without cross-talk", async () => {
         const jobs = ["a", "b", "c", "d"].map(t => submit(t));
@@ -784,10 +692,11 @@ describe("owner dispatch log", () => {
         const hotel = submit("酒店要靠近新宿"); await tick(); await tick();
         const { dispatchLog } = await import("../../src/control/tasks/recall.js");
         const [entry] = dispatchLog(db, "owner_1", hotel.id);
-        expect(entry!.steps.map(s => s.kind)).toEqual(["context", "jev", "ask", "ask", "plan"]);
-        const [context, decided, search, answer, plan] = entry!.steps as any[];
+        expect(entry!.steps.map(s => s.kind)).toEqual(["context", "jev", "timing", "ask", "timing", "ask", "plan"]);
+        const [context, decided, timing, search, , answer, plan] = entry!.steps as any[];
         expect(context.timeline).toMatch(/▶ .*「酒店要靠近新宿」/);
         expect(decided.result).toMatchObject({ choice: trip.id, confident: true, latencyMs: 4 });
+        expect(timing.timing).toMatchObject({ model: "fake-luna", effort: "high", connectionMs: 2 });
         expect(search).toMatchObject({ round: 1, searched: ["东京"] });
         expect(search.prompt).toContain("你是 AIO Agent 的主会话派单器");
         expect(answer.answer).toContain("酒店要靠近新宿");
@@ -798,7 +707,7 @@ describe("owner dispatch log", () => {
         const broken = submit("坏掉的派单"); await tick(); await tick();
         const [failed] = dispatchLog(db, "owner_1", broken.id);
         expect(failed!.failed).toBe(true);
-        expect(failed!.steps.map(s => s.kind)).toEqual(["context", "jev", "ask", "ask", "failed"]);
-        expect((failed!.steps[3] as any).correction).toBe("回答不是 JSON");
+        expect(failed!.steps.map(s => s.kind)).toEqual(["context", "jev", "timing", "ask", "timing", "ask", "failed"]);
+        expect((failed!.steps[5] as any).correction).toBe("回答不是 JSON");
     });
 });

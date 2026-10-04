@@ -25,7 +25,7 @@ beforeEach(async () => {
 });
 afterEach(async () => { tasks.close(); for (const t of codex.startedTurns) codex.completeTurn(t.turnId); await tick(); agent.shutdown(); db.close(); });
 
-it("tells the notifier when a task finishes or needs an answer, once each, and finds tasks by conversation", async () => {
+it("notifies completed tasks after execution without treating a dispatcher question as user input", async () => {
   const seen: Array<{ title: string; status: string }> = [];
   tasks.setNotifier((t) => seen.push({ title: t.title, status: t.status }));
   const job = tasks.submit({ text: "查天气", clientMessageId: "m1" }).task;
@@ -37,6 +37,10 @@ it("tells the notifier when a task finishes or needs an answer, once each, and f
   await tick();
   tasks.submit({ text: "帮我订机票", clientMessageId: "m2" });
   await tick();
-  expect(seen).toEqual([{ title: "查天气", status: "completed" }, { title: "帮我订机票", status: "needs_input" }]);
+  expect(seen).toEqual([{ title: "查天气", status: "completed" }]);
+  expect(tasks.list().tasks.find(t=>t.title==="帮我订机票")?.status).toBe("running");
+  codex.completeTurn(codex.startedTurns[1]!.turnId);
+  await tick();
+  expect(seen).toEqual([{ title: "查天气", status: "completed" }, { title: "帮我订机票", status: "completed" }]);
   tasks.setNotifier(null);
 });

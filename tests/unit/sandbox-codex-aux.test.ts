@@ -316,6 +316,23 @@ it('sends SOUL as developer instructions for start, fork, resume and the plannin
  }finally{session.close();}
 });
 
+it('records the actual dispatcher model and stage timings from notifications',async()=>{
+ const server=new FakeAppServer();
+ server.handle('thread/start',()=>({thread:{id:'timed-plan'}}));
+ server.handle('turn/start',()=>{
+  setTimeout(()=>server.notify('item/agentMessage/delta',{threadId:'timed-plan',delta:'{'}),5);
+  setTimeout(()=>server.notify('turn/completed',{threadId:'timed-plan',turn:{status:'completed',items:[{type:'agentMessage',text:'{}'}]}}),10);
+  return {turn:{id:'timed-turn'}};
+ });
+ const session=makeSession(server,200), timing:Record<string,string|number>={};
+ try {
+  expect(await session.planTask('classify',undefined,undefined,part=>Object.assign(timing,part))).toBe('{}');
+  expect(timing).toMatchObject({model:'gpt-6-luna',effort:'high',attempts:1});
+  for(const key of ['connectionMs','threadStartMs','turnStartMs','firstTextMs','finishMs','classifierMs']) expect(timing[key]).toEqual(expect.any(Number));
+  expect(timing.classifierMs).toBeGreaterThanOrEqual(timing.firstTextMs as number);
+ }finally{session.close();}
+});
+
 it('runs member planning through the fixed provider at high effort and refuses an unavailable provider',async()=>{
  const server=new FakeAppServer();
  server.handle('thread/start',()=>({thread:{id:'member-plan'}}));

@@ -5,6 +5,7 @@ import type { Logger } from "../../common/logger.js";
 import type { SandboxContainer } from "../sandbox/container.js";
 import { CLAUDE_CODE_PROVIDER_ID, CLAUDE_THREAD_PREFIX, type ClaudeCodeHarness } from "../claudeCode.js";
 import type { TurnAttachment } from "./manager.js";
+import type { DispatchTimingSink } from "./dispatchTiming.js";
 import { ClaudeStreamTranslator } from "./claudeTranslator.js";
 import { tabMcpServers, type BrowserTask } from "../browser/tabs.js";
 import { decisionMcpServers } from "../decision.js";
@@ -313,8 +314,11 @@ export class ClaudeCodeSession {
    * The main-session dispatcher on Claude Code: one tool-less, non-persisted
    * run that only classifies, like the Codex read-only ephemeral thread.
    */
-  planTask(prompt: string, developerInstructions?: string): Promise<string | null> {
-    return this.#oneShot(prompt, "high", 90_000, developerInstructions);
+  async planTask(prompt: string, developerInstructions?: string, onTiming?: DispatchTimingSink): Promise<string | null> {
+    const started = Date.now();
+    onTiming?.({ model: this.#cfg.claudeCode.auxModel, effort: "high", attempts: 1 });
+    try { return await this.#oneShot(prompt, "high", 90_000, developerInstructions); }
+    finally { onTiming?.({ classifierMs: Date.now() - started }); }
   }
 
   async #oneShot(prompt: string, effort: string, timeoutMs: number, developerInstructions?: string): Promise<string | null> {

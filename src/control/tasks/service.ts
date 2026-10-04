@@ -9,6 +9,7 @@ import { AgentManager, TurnConflictError, type AgentEvent, type CodexSessionLike
 import { claimsConflict, normalizeResource, resolveResources, type Claims, type ResourceSandbox } from "./resources.js";
 import { applyTaskReference, parsePlan, parseSearch, planningPrompt, type DispatchHint, type PlanningTask, type PlanReport, type TaskPlan } from "./planning.js";
 import { recordRecall, STEP_ANSWER_CHARS, STEP_PROMPT_CHARS, TaskRecall, type RecallEvent, type RecallSource } from "./recall.js";
+import type { DispatchTimingSink } from "../codex/dispatchTiming.js";
 import { formatRelevance, formatTimeline, jevRelevance, lastQuestion, routingQuestion, timeline, type JevRelevance } from "./context.js";
 import { confident } from "../jev.js";
 import { describeNow, describeSchedule, formatWhen, MAX_ACTIVE_SCHEDULES, nextRun, validateSchedule, type ScheduleSpec } from "./schedules.js";
@@ -363,9 +364,31 @@ export class TaskService {
             const planningInput = [inputContext, ...(files.length ? [`已有附件（执行者可以读取其中资料）：${JSON.stringify(files)}`] : [])].filter(Boolean).join("\n\n");
             const soul = readSoul(this.cfg).content;
             // A member's dispatcher runs on its assigned model; the owner's on the default dispatch model.
-            const ask = (prompt: string) => isMember(this.db, this.ownerId(row))
-                ? this.codex.planTask?.(prompt, soul, this.agent.memberSettings().model)
-                : this.codex.planTask?.(prompt, soul);
+            const ask = (prompt: string, onTiming: DispatchTimingSink) => isMember(this.db, this.ownerId(row))
+                ? this.codex.planTask?.(prompt, soul, this.agent.memberSettings().model, onTiming)
+                : this.codex.planTask?.(prompt, soul, undefined, onTiming);
+            const askWithTiming = async (prompt: string, round: number) => {
+                const phaseStarted = Date.now();
+                const contextAt = steps.find(s => s.kind === "context")?.at;
+                const jevAt = steps.find(s => s.kind === "jev")?.at;
+                const step: Extract<(typeof steps)[number], { kind: "timing" }> = {
+                    kind: "timing", at: phaseStarted, round,
+                    timing: {
+                        queueMs: Math.max(0, Number(started - row.created_at)),
+                        ...(contextAt ? { contextMs: contextAt - started } : {}),
+                        ...(contextAt && jevAt ? { jevMs: jevAt - contextAt } : {}),
+                    },
+                };
+                steps.push(step);
+                try {
+                    // A parked sandbox must wake before the classifier starts.
+                    await this.agent.ensureSandbox();
+                    step.timing.sandboxMs = Date.now() - phaseStarted;
+                    return await ask(prompt, timing => Object.assign(step.timing, timing));
+                } finally {
+                    step.timing.totalMs = Date.now() - phaseStarted;
+                }
+            };
             // The conversation in order, and Jev's second opinion on which task this message continues.
             const timelineText = formatTimeline(timeline(everything, row), row.created_at);
             const scheduling = { now: Date.now(), timezone: this.cfg.browser.timezone, schedules: this.planningSchedules(trace.ownerId) };
@@ -404,9 +427,7 @@ export class TaskService {
                 previous = [...candidates.values()];
                 const prompt = planningPrompt(planningInput, explicit ? previous.filter(t => t.id === explicit.id) : previous, row.related_task_id, this.cfg.sandbox.containerWorkspaceDir, { canSearch, searched: trace.searches }, { timeline: timelineText, hint, now: describeNow(scheduling.now, scheduling.timezone), timezone: scheduling.timezone, schedules: scheduling.schedules });
                 trace.promptChars += prompt.length;
-                // The dispatcher runs on the sandbox Codex: a container stopped for idleness starts first.
-                await this.agent.ensureSandbox();
-                raw = await ask(prompt);
+                raw = await askWithTiming(prompt, trace.rounds);
                 if (this.#closed || this.get(row.id)?.status !== "planning")
                     return;
                 // A supplement may arrive while the classifier is in flight. Replan
@@ -425,7 +446,7 @@ export class TaskService {
                 trace.rounds += 1;
                 const prompt = planningPrompt(planningInput, explicit ? previous.filter(t => t.id === explicit.id) : previous, row.related_task_id, this.cfg.sandbox.containerWorkspaceDir, { canSearch: false, searched: trace.searches, correction: report.error ?? "格式不符合要求" }, { timeline: timelineText, hint, now: describeNow(scheduling.now, scheduling.timezone), timezone: scheduling.timezone, schedules: scheduling.schedules });
                 trace.promptChars += prompt.length;
-                raw = await ask(prompt);
+                raw = await askWithTiming(prompt, trace.rounds);
                 if (this.#closed || this.get(row.id)?.status !== "planning") return;
                 if (this.taskContext(this.get(row.id)!) !== inputContext) return;
                 const first = report.error;
@@ -434,6 +455,9 @@ export class TaskService {
                 plan = parsePlan(raw ?? null, previous, row.related_task_id, this.cfg.sandbox.containerWorkspaceDir, report, scheduling);
                 report.repairs.unshift(`第一次回答无法使用：${first ?? "格式不符合要求"}，已重问一次`);
             }
+            // Old model output may still contain a preflight question. The
+            // executor has the tools and history needed to decide whether to ask.
+            if (plan) { plan.clarification = null; delete plan.options; }
             trace.candidates = [...candidates.values()].map(c => ({ id: c.id, source: c.source, ...(c.rank ? { rank: c.rank, score: c.score } : {}) }));
             trace.repairs = report.repairs;
             trace.failReason = report.error ?? null;

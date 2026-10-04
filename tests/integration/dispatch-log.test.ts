@@ -16,7 +16,7 @@ it("serves a message's dispatch log to the owner only", async () => {
     }).toBe(1);
     const log = (await (await h.request(`/api/settings/dispatch-log/${task.id}`, { headers: owner })).json()) as any;
     expect(log.task).toMatchObject({ id: task.id, text: "明天天气怎么样" });
-    expect(log.entries[0].steps.map((s: { kind: string }) => s.kind)).toEqual(["context", "ask", "plan"]);
+    expect(log.entries[0].steps.map((s: { kind: string }) => s.kind)).toEqual(["context", "timing", "ask", "plan"]);
     expect((await h.request("/api/settings/dispatch-log/task_missing", { headers: owner })).status).toBe(404);
 
     await createMember(h.ctx.db, "cr", "member-password-123");

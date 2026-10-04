@@ -293,6 +293,7 @@ export interface RecallStats {
 export type DispatchStep =
   | { kind: "context"; at: number; timeline: string; candidates: number }
   | { kind: "jev"; at: number; criteria: Record<string, string>; result?: { choice: string; probabilities: Record<string, number>; confident: boolean; latencyMs: number }; error?: string }
+  | { kind: "timing"; at: number; round: number; timing: { model?: string; effort?: string; queueMs?: number; contextMs?: number; jevMs?: number; sandboxMs?: number; connectionMs?: number; threadStartMs?: number; turnStartMs?: number; firstTextMs?: number; finishMs?: number; classifierMs?: number; totalMs?: number; attempts?: number } }
   | { kind: "ask"; at: number; round: number; prompt: string; answer: string | null; searched?: string[]; correction?: string }
   | { kind: "plan"; at: number; plan: Record<string, unknown>; repairs: string[] }
   | { kind: "failed"; at: number; reason: string };

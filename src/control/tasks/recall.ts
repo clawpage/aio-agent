@@ -157,6 +157,7 @@ export interface RecallEvent {
 export type DispatchStep =
   | { kind: "context"; at: number; timeline: string; candidates: number }
   | { kind: "jev"; at: number; criteria: Record<string, string>; result?: { choice: string; probabilities: Record<string, number>; confident: boolean; latencyMs: number }; error?: string }
+  | { kind: "timing"; at: number; round: number; timing: import("../codex/dispatchTiming.js").DispatchTiming }
   | { kind: "ask"; at: number; round: number; prompt: string; answer: string | null; searched?: string[]; correction?: string }
   | { kind: "plan"; at: number; plan: unknown; repairs: string[] }
   | { kind: "failed"; at: number; reason: string };

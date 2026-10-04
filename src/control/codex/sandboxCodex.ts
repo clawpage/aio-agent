@@ -8,6 +8,7 @@ import type { Logger } from "../../common/logger.js";
 import type { SandboxContainer } from "../sandbox/container.js";
 import type { BridgeModel } from "../bridgeModel.js";
 import { JsonRpcPeer, JsonRpcTimeoutError } from "./jsonrpc.js";
+import type { DispatchTimingSink } from "./dispatchTiming.js";
 import type { HostTokenSource } from "./hostTokens.js";
 import type { UsageLedger } from '../usage.js';
 
@@ -275,16 +276,23 @@ export class SandboxCodexSession {
    * threads cannot be re-read afterwards (`thread/read` rejects `includeTurns`).
    */
   /** Read-only main-agent planning; receives bounded metadata, never executes a task. */
-  async planTask(prompt: string, developerInstructions?: string, model?: string): Promise<string | null> {
+  async planTask(prompt: string, developerInstructions?: string, model?: string, onTiming?: DispatchTimingSink): Promise<string | null> {
+    const started = Date.now();
+    onTiming?.({ model: model ?? this.#cfg.agent.titleModel, effort: "high", attempts: 1 });
     let result;
     try {
-      result = await this.#auxiliaryText(prompt, "high", this.planTimeoutMs, developerInstructions, model);
-    } catch (err) {
-      // Only thread creation is safe to repeat: no turn has been sent. Never
-      // replay turn/start or task execution after unknown delivery.
-      if (!(err instanceof JsonRpcTimeoutError) || err.method !== "thread/start") throw err;
-      this.#log.warn("dispatcher thread creation timed out; retrying once");
-      result = await this.#auxiliaryText(prompt, "high", this.planTimeoutMs, developerInstructions, model);
+      try {
+        result = await this.#auxiliaryText(prompt, "high", this.planTimeoutMs, developerInstructions, model, onTiming);
+      } catch (err) {
+        // Only thread creation is safe to repeat: no turn has been sent. Never
+        // replay turn/start or task execution after unknown delivery.
+        if (!(err instanceof JsonRpcTimeoutError) || err.method !== "thread/start") throw err;
+        this.#log.warn("dispatcher thread creation timed out; retrying once");
+        onTiming?.({ attempts: 2 });
+        result = await this.#auxiliaryText(prompt, "high", this.planTimeoutMs, developerInstructions, model, onTiming);
+      }
+    } finally {
+      onTiming?.({ classifierMs: Date.now() - started });
     }
     const { text, error } = result;
     // A reported reason (such as an exhausted usage limit) is shown on the task
@@ -293,13 +301,16 @@ export class SandboxCodexSession {
     return text;
   }
 
-  async #auxiliaryText(prompt: string, effort: string | null, timeoutMs: number, developerInstructions?: string, requestedModel?: string): Promise<{ text: string | null; error: string | null }> {
+  async #auxiliaryText(prompt: string, effort: string | null, timeoutMs: number, developerInstructions?: string, requestedModel?: string, onTiming?: DispatchTimingSink): Promise<{ text: string | null; error: string | null }> {
+    const connectionStarted = Date.now();
     await this.start();
+    onTiming?.({ connectionMs: Date.now() - connectionStarted });
     const peer = this.#peer;
     if (!peer?.alive) return { text: null, error: null };
     const model = requestedModel ?? this.#cfg.agent.titleModel;
     if (requestedModel && (this.#bridge?.providerForModel(model) ?? "openai") === "openai") throw new Error("服务暂时不可用，请稍后重试");
     const modelProvider = requestedModel ? this.#bridge!.providerForModel(model) : undefined;
+    const threadStarted = Date.now();
     const threadRes = (await peer.request(
       "thread/start",
       {
@@ -318,10 +329,13 @@ export class SandboxCodexSession {
       },
       this.auxiliaryStartTimeoutMs,
     )) as { thread: { id: string } };
+    onTiming?.({ threadStartMs: Date.now() - threadStarted });
     const threadId = threadRes.thread.id;
 
     const deltas: string[] = [];
     let finalText = "";
+    let firstTextAt: number | null = null;
+    let turnSubmittedAt: number | null = null;
     // Only a real `turn/completed {status:"completed"}` may produce a title.
     let turnStatus: string | null = null;
     let failure: string | null = null;
@@ -342,6 +356,10 @@ export class SandboxCodexSession {
     const listener = (method: string, params: unknown) => {
       const p = (params ?? {}) as Record<string, unknown>;
       if (method === "item/agentMessage/delta" && typeof p.delta === "string") {
+        if (firstTextAt === null) {
+          firstTextAt = Date.now();
+          if (turnSubmittedAt !== null) onTiming?.({ firstTextMs: firstTextAt - turnSubmittedAt });
+        }
         deltas.push(p.delta);
         return;
       }
@@ -351,6 +369,7 @@ export class SandboxCodexSession {
         return;
       }
       if (method === "turn/completed") {
+        if (firstTextAt !== null) onTiming?.({ finishMs: Date.now() - firstTextAt });
         const turn = p.turn as { status?: string; items?: Array<{ type?: string; text?: string }>; error?: { message?: unknown } | null } | undefined;
         turnStatus = typeof turn?.status === "string" ? turn.status : "unknown";
         if (typeof turn?.error?.message === "string" && turn.error.message) failure = turn.error.message;
@@ -367,6 +386,7 @@ export class SandboxCodexSession {
     timer.unref?.();
     // The start promise always settles the wait (success, failure or timeout) so
     // this method never outlives its configured budget waiting on the turn.
+    turnSubmittedAt = Date.now();
     const startPromise = (peer.request(
       "turn/start",
       {
@@ -378,6 +398,7 @@ export class SandboxCodexSession {
       60_000,
     ) as Promise<{ turn?: { id?: string } }>).then(
       (res) => {
+        onTiming?.({ turnStartMs: Date.now() - turnSubmittedAt! });
         turnId = res?.turn?.id ?? null;
       },
       (err) => {
