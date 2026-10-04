@@ -118,7 +118,8 @@ pre {
 .app {
   display: grid;
   grid-template-columns: 264px minmax(0, 1fr);
-  height: 100dvh;
+  /* --keyboard-viewport: the area left above an iPhone keyboard (MainApp sets it while one is up). */
+  height: var(--keyboard-viewport, 100dvh);
   width: 100%;
   overflow: hidden;
 }

@@ -107,6 +107,24 @@ export function MainApp() {
     }, [expired]);
     useEffect(() => { void check(); }, [check]);
     useEffect(() => { document.documentElement.dataset.theme = theme; }, [theme]);
+    // iOS does not shrink 100dvh for its keyboard; it scrolls the whole page instead, so the header
+    // slides off (under the status bar in the app). While a keyboard is up, the app is sized to the
+    // area above it and the page stays at the top. Android resizes the page itself.
+    useEffect(() => {
+        const vv = window.visualViewport;
+        if (!vv) return;
+        const root = document.documentElement;
+        const fit = () => {
+            const keyboard = window.innerHeight - vv.height > 120;
+            if (keyboard) root.style.setProperty("--keyboard-viewport", `${Math.round(vv.height)}px`);
+            else root.style.removeProperty("--keyboard-viewport");
+            if (keyboard && (window.scrollY > 0 || vv.offsetTop > 0)) window.scrollTo(0, 0);
+        };
+        vv.addEventListener("resize", fit);
+        vv.addEventListener("scroll", fit);
+        fit();
+        return () => { vv.removeEventListener("resize", fit); vv.removeEventListener("scroll", fit); root.style.removeProperty("--keyboard-viewport"); };
+    }, []);
     useEffect(() => {
         if (!auth)
             return;
