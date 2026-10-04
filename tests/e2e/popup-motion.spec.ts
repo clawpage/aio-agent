@@ -24,16 +24,23 @@ async function setup(page: Page) {
 /** Observe real rendered positions during CSS animations, without disabling motion. */
 async function audit(page: Page, selector: string) {
   await page.evaluate(selector => {
-    const logs: Record<string, { start: number; middle?: number; connected?: boolean }> = {};
+    const logs: Record<string, { horizontal: boolean; start: number; crossStart: number; middle?: number; crossMiddle?: number; connected?: boolean }> = {};
     (window as any).motionAudit = logs;
     document.addEventListener("animationstart", event => {
       const target = event.target as HTMLElement;
-      if (!target.matches(selector) || !["popup-up", "popup-down"].includes(event.animationName)) return;
-      const log: (typeof logs)[string] = logs[event.animationName] = { start: target.getBoundingClientRect().y };
+      if (!target.matches(selector) || !["popup-up", "popup-down", "drawer-in", "drawer-out"].includes(event.animationName)) return;
+      const horizontal = event.animationName.startsWith("drawer-");
+      const phase = ["popup-up", "drawer-in"].includes(event.animationName) ? "enter" : "exit";
+      const rect = target.getBoundingClientRect();
+      const log: (typeof logs)[string] = logs[phase] = { horizontal, start: horizontal ? rect.x : rect.y, crossStart: horizontal ? rect.y : rect.x };
       const animation = target.getAnimations().find(a => (a as CSSAnimation).animationName === event.animationName)!;
       const sample = () => {
         if (!target.isConnected) return;
-        if (Number(animation.currentTime) >= 70) { log.middle = target.getBoundingClientRect().y; log.connected = target.isConnected; }
+        if (Number(animation.currentTime) >= 70) {
+          const rect = target.getBoundingClientRect();
+          log.middle = horizontal ? rect.x : rect.y; log.crossMiddle = horizontal ? rect.y : rect.x;
+          log.connected = target.isConnected;
+        }
         else requestAnimationFrame(sample);
       };
       requestAnimationFrame(sample);
@@ -42,20 +49,28 @@ async function audit(page: Page, selector: string) {
 }
 
 async function entered(page: Page, selector: string) {
-  await expect.poll(() => page.evaluate(() => (window as any).motionAudit["popup-up"]?.middle !== undefined)).toBe(true);
-  const log = await page.evaluate(() => (window as any).motionAudit["popup-up"]);
-  expect(log.middle).toBeLessThan(log.start - 20);
+  await expect.poll(() => page.evaluate(() => (window as any).motionAudit.enter?.middle !== undefined)).toBe(true);
+  const log = await page.evaluate(() => (window as any).motionAudit.enter);
+  expect(log.horizontal).toBe(selector === ".sidebar");
+  if (log.horizontal) {
+    expect(log.middle).toBeGreaterThan(log.start + 20);
+    expect(Math.abs(log.crossMiddle - log.crossStart)).toBeLessThan(1);
+  } else expect(log.middle).toBeLessThan(log.start - 20);
   await expect.poll(() => page.locator(selector).evaluate(n => n.getAnimations().length)).toBe(0);
 }
 
 async function exited(page: Page, selector: string) {
   await expect(page.locator(selector)).toHaveCount(0);
-  const log = await page.evaluate(() => (window as any).motionAudit["popup-down"]);
+  const log = await page.evaluate(() => (window as any).motionAudit.exit);
   expect(log.connected).toBe(true);
-  expect(log.middle).toBeGreaterThan(log.start + 20);
+  expect(log.horizontal).toBe(selector === ".sidebar");
+  if (log.horizontal) {
+    expect(log.middle).toBeLessThan(log.start - 20);
+    expect(Math.abs(log.crossMiddle - log.crossStart)).toBeLessThan(1);
+  } else expect(log.middle).toBeGreaterThan(log.start + 20);
 }
 
-test("reading, nested previews, maps, logs, browser/loading and mobile navigation slide up and down", async ({ page }, info) => {
+test("sheets slide vertically while mobile task navigation slides horizontally", async ({ page }, info) => {
   await setup(page);
   if (info.project.name.startsWith("mobile")) {
     await audit(page, ".sidebar");

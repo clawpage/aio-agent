@@ -3494,15 +3494,19 @@ button.map-card-switch { flex: 0 0 auto; padding: 4px 10px; }
 [data-popup-motion="exit"] > :is(.modal, .file-preview, .task-console, .opening-card, .map-sheet, .full-message) {
   animation: popup-down calc(var(--popup-exit-ms) * 1ms) ease-in forwards;
 }
-:is(.image-viewer, .conv-menu, .toast, .sidebar, .workspace)[data-popup-motion="enter"] {
+:is(.image-viewer, .conv-menu, .toast, .workspace)[data-popup-motion="enter"] {
   animation: popup-up 280ms cubic-bezier(.16, 1, .3, 1);
 }
-:is(.image-viewer, .conv-menu, .toast, .sidebar, .workspace)[data-popup-motion="exit"] {
+:is(.image-viewer, .conv-menu, .toast, .workspace)[data-popup-motion="exit"] {
   animation: popup-down calc(var(--popup-exit-ms) * 1ms) ease-in forwards;
 }
+.sidebar[data-popup-motion="enter"] { animation: drawer-in 280ms cubic-bezier(.16, 1, .3, 1); }
+.sidebar[data-popup-motion="exit"] { animation: drawer-out calc(var(--popup-exit-ms) * 1ms) ease-in forwards; }
 :is(.modal-backdrop, .file-preview-overlay, .task-console-overlay, .map-sheet-backdrop, .full-message-backdrop)[data-popup-motion] { overflow: clip; }
 @keyframes popup-up { from { translate: 0 var(--viewport-height); } to { translate: 0 0; } }
 @keyframes popup-down { from { translate: 0 0; } to { translate: 0 var(--viewport-height); } }
+@keyframes drawer-in { from { translate: -102% 0; } to { translate: 0 0; } }
+@keyframes drawer-out { from { translate: 0 0; } to { translate: -102% 0; } }
 @keyframes popup-fade-in { from { opacity: 0; } to { opacity: 1; } }
 @keyframes popup-fade-out { from { opacity: 1; } to { opacity: 0; } }
 @media (prefers-reduced-motion: reduce) {
