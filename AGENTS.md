@@ -13,7 +13,7 @@
 `personal-agent-workspace` / `-codex` / `-browser`、SQLite 文件名 `personal-agent.sqlite`、
 cookie 名 `pa_*` 与 `PA_*` 前缀**保持不变**——它们承载既有容器、卷、数据库与登录状态，改名会
 丢数据或中断服务。health `service` 字段与 Codex `clientInfo.name` 的旧值仅为兼容已有集成保留，
-不是品牌。品牌层为 **一站**（英文 AIO Agent）：页面标题、侧栏、登录页与图标用“一站”，包名与文档仍称 AIO Agent。标志是线路图上的一站：一条线（一）穿过一个站点（站），走过的一段实、前方的一段淡，琥珀色站心表示轮到你；`src/ui/src/components/Brand.tsx` 与 `src/ui/public/` 下的 favicon、PNG 图标、manifest 必须同步修改。配色语义：靛紫 = AI 在办（也是品牌主色），琥珀 = 轮到你（全站唯一醒目色），松绿 = 办完，朱红 = 出错；令牌定义在 `src/ui/src/styles.css` 顶部，新界面只用这些令牌，不写死颜色。
+不是品牌。品牌层为 **一站**（英文 AIO Agent）：页面标题、侧栏、登录页与图标用“一站”，包名与文档仍称 AIO Agent。标志是线路图上的一站：一条线（一）穿过一个站点（站），走过的一段实、前方的一段淡，琥珀色站心表示轮到你；`src/ui/src/components/Brand.tsx` 与 `src/ui/public/` 下的 favicon、PNG 图标、manifest，以及移动端图标源 `src/ui/tauri/icon/`（改后按该目录 README 重新生成）必须同步修改。配色语义：靛紫 = AI 在办（也是品牌主色），琥珀 = 轮到你（全站唯一醒目色），松绿 = 办完，朱红 = 出错；令牌定义在 `src/ui/src/styles.css` 顶部，新界面只用这些令牌，不写死颜色。
 
 ## 目录与职责
 

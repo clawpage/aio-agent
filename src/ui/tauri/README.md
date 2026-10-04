@@ -18,7 +18,11 @@ The page gets no Tauri IPC; `fallback/` is only shown if the remote page cannot 
 - Android: the Rust library is linked for 16 KB pages (`src-tauri/build.rs`).
 - Home-screen name 一站: `gen/apple/project.yml` (`CFBundleDisplayName`, then
   `xcodegen generate`) and `gen/android/app/src/main/res/values/strings.xml`.
-- Icons come from `src/ui/public/icon-512.png`: `npm run -- tauri icon ../public/icon-512.png`.
+- Icons: the 一站 mark (`src/ui/public/favicon.svg`) full bleed in `icon/app-icon.svg`, plus a
+  glyph-only foreground and a solid background for the Android adaptive icon. Regenerate with
+  `npm run -- tauri icon icon/icon.json`, which writes into `gen/` directly; then flatten the
+  iOS PNGs to opaque RGB (the App Store rejects alpha) and copy them over `src-tauri/icons/ios`
+  and `src-tauri/icons/android`.
 
 Re-running `tauri ios init` / `android init` overwrites `gen/`: re-apply the three
 `gen/` changes above.
