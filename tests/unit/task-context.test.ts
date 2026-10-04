@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatRelevance, formatTimeline, jevRelevance, lastQuestion, routingQuestion, timeline, type ContextTask } from "../../src/control/tasks/context.js";
+import { dispatchAdvice, formatRelevance, formatTimeline, jevRelevance, lastQuestion, routingQuestion, timeline, type ContextTask } from "../../src/control/tasks/context.js";
 
 const at = (h: number, m: number) => new Date(2026, 8, 30, h, m).getTime();
 const task = (id: string, created: number, extra: Partial<ContextTask> = {}): ContextTask => ({ id, title: id, input_text: id, status: "completed", result: null, merged_into: null, plan_json: null, created_at: created, ...extra });
@@ -46,7 +46,7 @@ describe("main-session context", () => {
     // Below one in ten is noise: it is not passed on.
     expect(relevance).toEqual({ choice: "t1", confident: true, ranked: [{ id: "t1", p: 0.82 }, { id: "NEW", p: 0.15 }] });
     const lines = formatTimeline(timeline(tasks, tasks[2]!), now, relevance).split("\n");
-    expect(lines[0]).toMatch(/任务 t1「买 Pixel」.*〔Jev：本次消息接续它 82%〕$/);
+    expect(lines[0]).toMatch(/任务 t1「买 Pixel」.*〔Jev：相关性 82%〕$/);
     expect(lines[1]).not.toContain("Jev");
     expect(lines[2]).toMatch(/^▶ .*← 本次消息$/);
     const byId = new Map(tasks.map(t => [t.id, t]));
@@ -65,13 +65,22 @@ describe("main-session context", () => {
     // Without a reading the timeline is unchanged.
     expect(formatTimeline(timeline(tasks, tasks[2]!), now)).not.toContain("Jev");
   });
-  it("asks Jev to choose among candidates newest first, with their open questions, or NEW", () => {
-    const tasks = [task("t1", at(14, 0), { result: "要授权吗？" }), task("t2", at(14, 30))];
+  it("asks Jev for independent task relevance and a new/steer/resume recommendation", () => {
+    const tasks = [task("t1", at(14, 0), { result: "要授权吗？" }), task("t2", at(14, 30), {status:"running"}), task("t4", at(14, 20), {status:"blocked"})];
     const q = routingQuestion("已授权", tasks, timeline([...tasks, task("t3", at(14, 40), { input_text: "已授权" })], task("t3", at(14, 40))), at(15, 0));
-    const criteria = q.questions.target!.criteria;
-    expect(Object.keys(criteria)).toEqual(["t2", "t1", "NEW"]);
-    expect(criteria.t1).toContain("助理最后问用户：要授权吗？");
-    expect(criteria.t2).toMatch(/^第1近（14:30）/);
+    const criteria = q.questions.route!.criteria;
+    expect(Object.keys(criteria)).toEqual(["steer:t2", "resume:t1", "NEW"]);
+    expect(criteria["resume:t1"]).toContain("助理最后问用户：要授权吗？");
+    expect(criteria["steer:t2"]).toMatch(/^第1近（14:30）/);
+    expect(Object.keys(q.questions["relevance:t1"]!.criteria)).toEqual(["related", "unrelated"]);
+    expect(q.questions["relevance:t4"]).toBeDefined();
+    expect(criteria["resume:t4"]).toBeUndefined();
+    const advice = dispatchAdvice({
+      route: {choice:"resume:t1",confidence:0.9,probabilities:{"steer:t2":0.1,"resume:t1":0.8,NEW:0.1}},
+      "relevance:t1": {choice:"related",confidence:0.9,probabilities:{related:0.9,unrelated:0.1}},
+      "relevance:t2": {choice:"unrelated",confidence:0.8,probabilities:{related:0.2,unrelated:0.8}},
+    }, tasks);
+    expect(advice).toMatchObject({choice:"t1",scores:{t1:0.9,t2:0.2},suggestion:{kind:"resume",taskId:"t1",probability:0.8}});
     expect(q.state.message).toBe("已授权");
     expect(String(q.state.main_session_timeline)).toContain("▶ [14:40]");
   });

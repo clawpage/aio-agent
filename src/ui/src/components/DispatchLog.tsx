@@ -30,13 +30,16 @@ function Step({ step, name }: { step: DispatchStep; name: (id: string) => string
     case "jev":
       return (
         <li>
-          <h4>Jev 判断接续哪个任务 <span className="muted tiny">{clock(step.at)}</span></h4>
-          {step.result ? (
+          <h4>Jev 相关性与接续建议 <span className="muted tiny">{clock(step.at)}</span></h4>
+          {step.result?.suggestion ? (
+            <p>建议 <strong>{step.result.suggestion.kind === "new" ? "新任务" : `${step.result.suggestion.kind === "steer" ? "追加" : "续接"}「${name(step.result.suggestion.taskId!)}」`}</strong>（{pct(step.result.suggestion.probability)}，{step.result.confident ? "高置信" : "不确定"}，{step.result.latencyMs} ms）；由 Luna 最终决定。</p>
+          ) : step.result ? (
             <p>
               选择 <strong>{step.result.choice === "NEW" ? "新任务" : `「${name(step.result.choice)}」`}</strong>（{pct(step.result.probabilities[step.result.choice] ?? 0)}，
               {step.result.confident ? "有把握，作为强提示" : "不确定，只作参考"}，{step.result.latencyMs} ms）
             </p>
           ) : <p className="error">不可用：{step.error}</p>}
+          {step.result?.scores && <ul className="dispatch-log-probs">{Object.entries(step.result.scores).sort((a,b)=>b[1]-a[1]).map(([id,p])=><li key={id}>{name(id)} · 相关性 {pct(p)}</li>)}</ul>}
           {step.result && (
             <ul className="dispatch-log-probs">
               {Object.entries(step.result.probabilities).sort((a, b) => b[1] - a[1]).map(([id, p]) => <li key={id}>{pct(p)} · {id === "NEW" ? "新任务" : name(id)}</li>)}

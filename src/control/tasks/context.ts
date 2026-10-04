@@ -87,7 +87,7 @@ export function formatTimeline(entries: TimelineEntry[], now = Date.now(), relev
       if (e.current) return `${head}  ← 本次消息`;
       const where = e.taskId === e.id ? `任务 ${e.taskId}「${clip(e.title, 30)}」（${e.status}）` : `补充给任务 ${e.taskId}「${clip(e.title, 30)}」（${e.status}）`;
       const p = likely.get(e.taskId);
-      return `${head} → ${where}${e.ask ? `；助理最后问：「${e.ask}」` : ""}${p === undefined ? "" : `〔Jev：本次消息接续它 ${percent(p)}〕`}`;
+      return `${head} → ${where}${e.ask ? `；助理最后问：「${e.ask}」` : ""}${p === undefined ? "" : `〔Jev：相关性 ${percent(p)}〕`}`;
     })
     .join("\n");
 }
@@ -98,6 +98,12 @@ export interface JevRelevance {
   confident: boolean;
   /** Probability per task id (or `NEW`), likeliest first. */
   ranked: Array<{ id: string; p: number }>;
+  /** Independent probability that each recalled task is relevant to this message. */
+  scores?: Record<string, number>;
+  /** Jev's advice; Luna still makes the final routing decision. */
+  suggestion?: { kind: "new" | "steer" | "resume"; taskId: string | null; probability: number };
+  /** Full model answers supplied to Luna and the executor for auditability. */
+  answers?: Record<string, JevAnswer>;
 }
 
 export function jevRelevance(answer: JevAnswer, max = 3, min = 0.1): JevRelevance {
@@ -114,7 +120,10 @@ export function jevRelevance(answer: JevAnswer, max = 3, min = 0.1): JevRelevanc
  * (its open question, or the start of its result), so the executor can build on it instead of redoing it.
  */
 export function formatRelevance(relevance: JevRelevance, get: (id: string) => ContextTask | null | undefined, now = Date.now()): string | null {
-  const lines = relevance.ranked.flatMap(({ id, p }) => {
+  const suggestion = relevance.suggestion;
+  const lines = [
+    ...(suggestion ? [`- Jev 建议：${suggestion.kind === "new" ? "新任务" : `${suggestion.kind === "steer" ? "追加" : "续接"}任务 ${suggestion.taskId}`}（${percent(suggestion.probability)}，${relevance.confident ? "高置信" : "不确定"}）；最终由 Luna 决定。`] : []),
+    ...relevance.ranked.flatMap(({ id, p }) => {
     const mark = id === relevance.choice ? `，Jev 首选${relevance.confident ? "（高置信）" : ""}` : "";
     if (id === NEW_TASK) return [`- 独立的新请求：${percent(p)}${mark}`];
     const t = get(id);
@@ -122,43 +131,72 @@ export function formatRelevance(relevance: JevRelevance, get: (id: string) => Co
     const ask = lastQuestion(t);
     const left = ask ? `；助理最后问：「${ask}」` : t.result ? `；结果开头：${clip(t.result, 120)}` : "";
     return [`- 任务 ${t.id}「${clip(t.title, 30)}」（${t.status}，${time(t.created_at, now)}）：${percent(p)}${mark}${left}`];
-  });
+  }),
+  ];
   return lines.length ? lines.join("\n") : null;
 }
 
 export const NEW_TASK = "NEW";
+
+export function dispatchAdvice(answers: Record<string, JevAnswer>, candidates: Array<{ id: string }>): JevRelevance {
+  const route = answers.route!;
+  const [kind, id] = route.choice === NEW_TASK ? ["new", null] : route.choice.split(":", 2);
+  const taskId = id && candidates.some(t => t.id === id) ? id : null;
+  const scores = Object.fromEntries(candidates.map(t => [t.id, Math.round((answers[`relevance:${t.id}`]?.probabilities.related ?? 0) * 100) / 100]));
+  const ranked = Object.entries(scores).map(([taskId, p]) => ({ id: taskId, p }))
+    .filter(item => item.p >= 0.1).sort((a, b) => b.p - a.p).slice(0, 6);
+  return {
+    choice: taskId ?? NEW_TASK,
+    confident: confident(route),
+    ranked,
+    scores,
+    suggestion: { kind: taskId && kind === "steer" ? "steer" : taskId && kind === "resume" ? "resume" : "new", taskId, probability: Math.round((route.probabilities[route.choice] ?? 0) * 100) / 100 },
+    answers,
+  };
+}
 
 /**
  * Jev's question for the dispatcher: which candidate does this message continue,
  * or is it new. Candidates carry their order, time, status and open question so
  * a terse reply lands on the task that is actually waiting for it.
  */
-export function routingQuestion(message: string, candidates: Array<ContextTask & { clarification?: string | null; recalled?: boolean }>, entries: TimelineEntry[], now = Date.now()): { state: Record<string, unknown>; questions: Record<string, JevQuestion> } {
+export function routingQuestion(message: string, candidates: Array<ContextTask & { clarification?: string | null; recalled?: boolean; turn_id?: string | null; latestMessage?: string | null }>, entries: TimelineEntry[], now = Date.now()): { state: Record<string, unknown>; questions: Record<string, JevQuestion> } {
   const byTime = [...candidates].sort((a, b) => b.created_at - a.created_at);
   // The latest tasks by rank, then the older ones recall found by what the message says.
   const ordered = [...byTime.filter((t) => !t.recalled), ...byTime.filter((t) => t.recalled)];
   const criteria: Record<string, string> = {};
+  const questions: Record<string, JevQuestion> = {};
   ordered.forEach((t, i) => {
     const ask = lastQuestion(t);
-    criteria[t.id] = [
+    const description = [
       `${t.recalled ? "按内容召回的较早任务" : `第${i + 1}近`}（${time(t.created_at, now)}）「${clip(t.title, 40)}」状态 ${t.status}`,
       `用户原话：${clip(t.input_text, 200)}`,
-      ask ? `助理最后问用户：${ask}` : t.result ? `结果摘要：${clip(t.result, 200)}` : "",
+      ask ? `助理最后问用户：${ask}` : "",
+      t.result ? `结果摘要：${clip(t.result, 200)}` : "",
+      t.latestMessage && t.latestMessage !== t.result ? `最新助理消息：${clip(t.latestMessage, 200)}` : "",
     ].filter(Boolean).join("；");
+    const mode = ["planning", "waiting", "queued", "running"].includes(t.status) || (t.status === "needs_input" && !t.turn_id) ? "steer"
+      : ["completed", "failed", "interrupted", "unknown"].includes(t.status) || (t.status === "needs_input" && !!t.turn_id) ? "resume" : null;
+    if (mode) criteria[`${mode}:${t.id}`] = description;
+    questions[`relevance:${t.id}`] = {
+      criteria: { related: "这条消息与该任务的用户消息、结果或最新进展直接相关", unrelated: "仅有表面词汇重合，或是独立的新事项" },
+      instructions: { goal: `单独评估本条消息与任务 ${t.id} 的语义相关性，不与其他任务的分数做归一化。`, task: description },
+    };
   });
-  criteria[NEW_TASK] = "与以上任务都无关的独立新请求";
+  criteria[NEW_TASK] = "作为新任务处理；可以参考旧任务的背景或结果，但本次有独立目标和交付物";
   return {
     state: { now: new Date(now).toISOString(), main_session_timeline: formatTimeline(entries, now), message: clip(message, 2000) },
     questions: {
-      target: {
+      ...questions,
+      route: {
         criteria,
         instructions: {
-          goal: "判断用户在主会话里发的这条新消息，是在接续哪个已有任务（回答它的问题、补充或修改它），还是独立的新请求。",
+          goal: "建议本消息按独立新任务处理，还是继续某个存量业务。steer 表示追加到仍在执行的任务；resume 表示开启同一执行会话的新轮次。只给建议，由 Luna 最终决定。",
           rules: [
             "按主会话时间线的先后理解：越接近本消息的对话越可能是它的对象。",
             "简短的确认或回复（如“已授权”“可以”“好的”“就这个”“第二个”“改成周六”）回应的是时间上最近一次向用户提问或请求确认的任务。",
             "消息明确点名了某个任务里的实体（人名、地点、商品、文件、网站）时，以点名的为准，即使它不是最近的（包括按内容召回的较早任务）。",
-            "只是关键词与旧任务重合、语义上是新的请求时，选 NEW。",
+            "只是关键词与旧任务重合，或虽借鉴旧结果但要做独立新目标时，选 NEW。",
           ],
         },
       },

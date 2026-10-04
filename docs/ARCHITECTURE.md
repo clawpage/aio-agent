@@ -71,12 +71,10 @@
 旧会话管理 API 为兼容保留，但任务所属 conversation 禁止通过旧接口追加 turn 或重命名/归档。
 新前端只展示主会话、配置和工作区，不展示旧会话历史入口。
 
-派单器是隔离的临时 Luna 分类线程（read-only、never、ephemeral），输出经校验的 JSON。
+派单按数据库时序、倒排召回、Jev、Luna 顺序进行。owner 选 Codex 时，最终派单器是隔离的临时 Luna 分类线程（read-only、never、ephemeral），输出经校验的 JSON；owner 选 Claude 或 member 账号时沿用各自配置的派单模型。
 只能引用已存在且更早的任务，防止循环依赖；相关任务结果在派发时重新读取，避免使用陈旧快照。
-候选任务来自最近窗口、今天的任务和历史召回（`src/control/tasks/recall.ts`）：`task_search` 是 FTS5 表，
-标题与正文预先切成中文二字词和拉丁词后写入，按内容哈希（`task_search_state`）增量同步；每次派单把
-候选来源、搜索与选择写入 `recall_events`，供配置页统计与召回上限自适应。派单器可以返回
-`{search:[...]}` 请求检索，服务端检索后带结果再次询问，轮数与加入数量都有上限。
+候选任务分为进行中与已结束两组，分别取最近 5 个，再从历史倒排检索补充最多 4 个（总数最多 14 个）。`task_search` 是 FTS5 表，
+标题、任务用户消息（含补充）、任务结果及可用的最新助理消息预先切成中文二字词和拉丁词写入，按内容哈希（`task_search_state`）增量同步；短消息再结合邻近任务标题检索。Jev 对候选逐项独立评分，并建议 new/steer/resume；召回原文与 Jev 原始回答交给 Luna，由 Luna 决定标题、简述和最终路由。Luna 不进行搜索，也不提出预先追问；缺少用户独有条件时由执行会话决定是否追问。Jev 失败时 Luna 仍根据召回决策。候选来源、搜索、Jev 回答、Luna 计划和分阶段耗时写入 `recall_events`；两模型判断也进入执行会话的上下文。
 并发数复用 `PA_MAX_CONCURRENT_TURNS`；浏览器不是互斥资源：沙箱内的标签页服务（`tab-server.cjs`，loopback `:8190`，
 patchright-core 经 CDP 连接同一个 Chromium；不用 playwright-core，是因为常驻连接会给每个页面留下可被网站检测的 `Runtime.enable` 痕迹）按请求头 `X-AIO-Task`（执行会话 ID）与 `X-AIO-Task-Title` 把每个标签页登记到创建它的任务：创建者可操作，其他任务只读，
 登记表存于 `/tmp/aio-tabs-state.json`，重启后按 CDP targetId 重新认领；执行线程经线程级配置（Codex `config.mcp_servers`、
@@ -86,7 +84,7 @@ workspace/路径资源锁在持久化计划上计算，
 只锁冲突资源，不让一个等待任务阻塞所有独立任务。派单器声明的 `workspace`（共享环境）只与其他任务声明的范围互斥，
 不与服务端为每个任务自动保留的任务目录和附件互斥（`claimsConflict`，`src/control/tasks/resources.ts`）。它不是 OS 权限隔离，同账号执行者共享沙箱，跨账号使用不同容器。
 
-派单 JSON 的 `appendTo` 用于识别同一进行中任务的补充（地址、条件、纠正、额外要求）。
+派单 JSON 的 `decision` 是正式 new/steer/resume 决定；服务端按目标任务状态校验并归一化为 `appendTo` 或 `resume`。`appendTo` 用于识别同一进行中任务的补充（地址、条件、纠正、额外要求）。
 尚未派发时合入原始输入；排队时更新 turn 输入；执行中通过 [Codex turn/steer](https://learn.chatgpt.com/docs/app-server#steer-an-active-turn) 和 `expectedTurnId` 追加到同一轮，只有收到匹配回执才标记 merged。
 补充状态为 merging → steering → merged；启动中等待 Codex turn ID，新增资源与其他执行任务冲突时等待资源。
 原任务恰好结束且确认未送达时，转为带原结果的后续任务；RPC 明确拒绝标记 merge_failed，断线、超时或重启中的 steering 标记 merge_unknown，绝不自动重发。

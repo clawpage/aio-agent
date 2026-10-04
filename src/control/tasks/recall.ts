@@ -19,6 +19,8 @@ export interface RecallDoc {
   /** The task's own input with its supplements. */
   body: string;
   result: string | null;
+  /** Latest executor message when the task has not produced a final result. */
+  latestMessage?: string | null;
 }
 
 export interface RecallHit {
@@ -74,7 +76,8 @@ export class TaskRecall {
     const insert = this.#db.prepare("INSERT INTO task_search (task_id, owner_id, title, body) VALUES (?,?,?,?)");
     const mark = this.#db.prepare("INSERT INTO task_search_state (task_id, hash) VALUES (?,?) ON CONFLICT(task_id) DO UPDATE SET hash=excluded.hash");
     for (const doc of docs) {
-      const body = `${doc.body.slice(0, DOC_BODY_CHARS)}\n${(doc.result ?? "").slice(0, DOC_RESULT_CHARS)}`;
+      const latest = doc.latestMessage && doc.latestMessage !== doc.result ? doc.latestMessage : "";
+      const body = `${doc.body.slice(0, DOC_BODY_CHARS)}\n${(doc.result ?? "").slice(0, DOC_RESULT_CHARS)}\n${latest.slice(0, DOC_RESULT_CHARS)}`;
       const hash = createHash("sha1").update(`${doc.ownerId}\0${doc.title}\0${body}`).digest("hex");
       if (known.get(doc.id) === hash) continue;
       remove.run(doc.id);
@@ -149,14 +152,14 @@ export interface RecallEvent {
   failReason?: string | null;
   repairs?: string[];
   /** Jev's second opinion and how long it took, or why it was unavailable. */
-  jev?: { choice: string; probability: number; confident: boolean; latencyMs: number } | { error: string } | null;
+  jev?: { choice: string; probability: number; confident: boolean; latencyMs: number; scores?: Record<string, number>; suggestion?: { kind: string; taskId: string | null; probability: number }; answers?: Record<string, import("../jev.js").JevAnswer> } | { error: string } | null;
   /** The dispatch step by step (owner debug log): what each party was asked and answered. */
   steps?: DispatchStep[];
 }
 
 export type DispatchStep =
   | { kind: "context"; at: number; timeline: string; candidates: number }
-  | { kind: "jev"; at: number; criteria: Record<string, string>; result?: { choice: string; probabilities: Record<string, number>; confident: boolean; latencyMs: number }; error?: string }
+  | { kind: "jev"; at: number; criteria: Record<string, string>; result?: { choice: string; probabilities: Record<string, number>; confident: boolean; latencyMs: number; scores?: Record<string, number>; suggestion?: { kind: string; taskId: string | null; probability: number }; answers?: Record<string, import("../jev.js").JevAnswer> }; error?: string }
   | { kind: "timing"; at: number; round: number; timing: import("../codex/dispatchTiming.js").DispatchTiming }
   | { kind: "ask"; at: number; round: number; prompt: string; answer: string | null; searched?: string[]; correction?: string }
   | { kind: "plan"; at: number; plan: unknown; repairs: string[] }
@@ -181,7 +184,7 @@ export interface RecallStats {
   /** Dispatches where recall brought at least one task beyond the recent window. */
   withRecall: number;
   avgRecalled: number;
-  /** Dispatches where the dispatcher asked to search, and the average number of rounds. */
+  /** Dispatches that ran database recall, and the average Luna answer rounds. */
   searchRate: number;
   avgRounds: number;
   /** Chosen related/append targets, and how many of them only recall or search had surfaced. */
@@ -209,7 +212,7 @@ export function recallStats(db: Db, ownerId: string, days: number, cap: number):
     const extra = candidates.filter((c) => c.source === "recall" || c.source === "context" || c.source === "search" || c.source === "today");
     if (extra.length) withRecall += 1;
     recalled += extra.length;
-    if (r.rounds > 1) searched += 1;
+    if ((JSON.parse(r.searches_json) as string[]).length > 0) searched += 1;
     rounds += r.rounds;
     latency += r.latency_ms;
     const pick = JSON.parse(r.chosen_json) as RecallEvent["chosen"];

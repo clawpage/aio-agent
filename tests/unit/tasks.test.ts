@@ -23,6 +23,16 @@ class PlanningCodex extends FakeCodex {
     async planTask(p: string, _soul?: string, model?: string, onTiming?: (timing: Record<string, string | number>) => void) { this.plans.push(p); this.planModels.push(model); onTiming?.({model:model ?? "fake-luna",effort:"high",connectionMs:2,threadStartMs:3,turnStartMs:4,firstTextMs:5,finishMs:6,classifierMs:20}); return this.plan(p); }
 }
 const tick = () => new Promise(r => setTimeout(r, 30));
+const fakeJevAnswers = (questions: Record<string, {criteria:Record<string,string>}>, preferred: string) => {
+    const ids=Object.keys(questions.route!.criteria);
+    const pick=preferred==="NEW" ? "NEW" : ids.find(id=>id.endsWith(`:${preferred}`))!;
+    return Object.fromEntries(Object.keys(questions).map(name=>{
+        if(name==="route") return [name,{choice:pick,confidence:0.9,probabilities:Object.fromEntries(ids.map(id=>[id,id===pick?0.8:0.2/(ids.length-1)]))}];
+        const taskId=name.slice("relevance:".length);
+        const related=taskId===preferred?0.8:0.1;
+        return [name,{choice:related>=0.5?"related":"unrelated",confidence:0.9,probabilities:{related,unrelated:1-related}}];
+    }));
+};
 let db: Db, agent: AgentManager, codex: PlanningCodex, tasks: TaskService;
 const submit = (text: string, relatedTaskId?: string) => tasks.submit({ text, clientMessageId: text, relatedTaskId }).task;
 describe("executor question protocol", () => {
@@ -538,12 +548,24 @@ it("validates plans against known task IDs and serializes intersecting resources
     expect(resourcesConflict(["browser"], [])).toBe(false);
 });
 
-it("never steers into unknown or finished tasks: a finished target stays as background",()=>{
+it("converts a stale steering target to resume rather than sending to a finished turn",()=>{
     const plan={title:"extra",appendTo:"a",related:[],dependencies:[],resources:[]};
     expect(parsePlan(JSON.stringify(plan),[],null)).toMatchObject({appendTo:null,related:[]});
     const report={repairs:[] as string[]};
-    expect(parsePlan(JSON.stringify(plan),[{id:"a",title:"a",input_text:"a",status:"completed",result:"done"}],null,undefined,report)).toMatchObject({appendTo:null,related:["a"]});
-    expect(report.repairs).toEqual(["appendTo 指向已结束的任务，改为关联背景"]);
+    expect(parsePlan(JSON.stringify(plan),[{id:"a",title:"a",input_text:"a",status:"completed",result:"done"}],null,undefined,report)).toMatchObject({appendTo:null,resume:"a",decision:{kind:"resume",taskId:"a"},related:["a"]});
+    expect(report.repairs).toEqual(["steer 指向已结束的执行轮次，改为 resume"]);
+});
+
+it("uses Luna's formal decision and enforces the actual turn state",()=>{
+    const previous=[
+        {id:"live",title:"live",input_text:"work",status:"running",result:null},
+        {id:"done",title:"done",input_text:"work",status:"completed",result:"result"},
+    ];
+    const plan=(decision:unknown,extra:Record<string,unknown>={})=>parsePlan(JSON.stringify({title:"继续处理",description:"接着做同一件事",decision,related:[],dependencies:[],resources:[],...extra}),previous,null)!;
+    expect(plan({kind:"new",taskId:null},{appendTo:"live"})).toMatchObject({appendTo:null,resume:null,decision:{kind:"new",taskId:null}});
+    expect(plan({kind:"steer",taskId:"done"})).toMatchObject({appendTo:null,resume:"done",decision:{kind:"resume",taskId:"done"}});
+    expect(plan({kind:"resume",taskId:"live"})).toMatchObject({appendTo:"live",resume:null,decision:{kind:"steer",taskId:"live"}});
+    expect(plan({kind:"resume",taskId:"missing"})).toMatchObject({appendTo:null,resume:null,decision:{kind:"new",taskId:null}});
 });
 
 it("lists the dispatcher's tasks newest first, so a bare follow-up lands on the adjacent conversation",()=>{
@@ -614,6 +636,21 @@ describe("main-session order, Jev's second opinion and resuming a finished sessi
         const data = JSON.parse(p.split("\n").at(-1)!);
         return JSON.stringify({ title: data.message.slice(0, 20), related: [], dependencies: [], resources: [], ...extra(data.message) });
     };
+    it("lets Luna overrule Jev and passes both outputs to a steered executor", async () => {
+        const jev={enabled:true,decide:async (_state:unknown,questions:Record<string,{criteria:Record<string,string>}>)=>({answers:fakeJevAnswers(questions,"NEW"),usage:null,latencyMs:2})};
+        tasks.close();tasks=new TaskService(db,testConfig("/tmp/aio-main-tasks",1),agent,codex,undefined,jev as never);tasks.init();
+        const first=submit("规划东京行程");await tick();
+        codex.plan=async p=>{
+            const data=JSON.parse(p.split("\n").at(-1)!);
+            expect(data.jevJudgment).toMatchObject({suggestion:{kind:"new",taskId:null,probability:0.8}});
+            return JSON.stringify({title:"调整东京行程",description:"把酒店改到新宿附近",decision:{kind:"steer",taskId:first.id},related:[first.id],dependencies:[],resources:[]});
+        };
+        const change=submit("酒店改在新宿");await tick();
+        expect(tasks.get(change.id)?.status).toBe("merged");
+        expect(codex.steers[0]?.text).toContain('"suggestion":{"kind":"new"');
+        expect(codex.steers[0]?.text).toContain('"decision":{"kind":"steer"');
+        expect(JSON.parse(tasks.get(change.id)!.plan_json!)).toMatchObject({decision:{kind:"steer",taskId:first.id},jev:{suggestion:{kind:"new"}}});
+    });
     it("resumes the finished task a reply answers, in its own session, with the question and the timeline", async () => {
         const order = submit("帮我在 eBay 买那台 Pixel"); await tick();
         const first = codex.startedTurns[0]!;
@@ -642,9 +679,8 @@ describe("main-session order, Jev's second opinion and resuming a finished sessi
             decide: async (state: Record<string, unknown>, questions: Record<string, { criteria: Record<string, string> }>) => {
                 asked.push({ state, questions });
                 if (fail) throw new Error("Jev 返回 HTTP 503");
-                const ids = Object.keys(questions.target!.criteria);
-                const pick = ids[0]!;
-                return { answers: { target: { choice: pick, confidence: 0.9, probabilities: Object.fromEntries(ids.map(id => [id, id === pick ? 0.9 : 0.1 / (ids.length - 1)])) } }, usage: null, latencyMs: 7 };
+                const pick = Object.keys(questions.route!.criteria)[0]!.split(":").at(-1)!;
+                return { answers: fakeJevAnswers(questions,pick), usage: null, latencyMs: 7 };
             },
         };
         tasks.close();
@@ -653,18 +689,19 @@ describe("main-session order, Jev's second opinion and resuming a finished sessi
         const trip = submit("规划东京三天行程"); await tick();
         submit("酒店要靠近新宿"); await tick(); await tick();
         const q = asked.at(-1)!;
-        expect(Object.keys(q.questions.target.criteria)).toEqual([trip.id, "NEW"]);
-        expect(q.questions.target.criteria[trip.id]).toContain("规划东京三天行程");
+        expect(Object.keys(q.questions.route.criteria)).toEqual([`steer:${trip.id}`, "NEW"]);
+        expect(q.questions.route.criteria[`steer:${trip.id}`]).toContain("规划东京三天行程");
+        expect(Object.keys(q.questions[`relevance:${trip.id}`].criteria)).toEqual(["related","unrelated"]);
         expect(q.state.main_session_timeline).toContain("「规划东京三天行程」");
         const prompt = JSON.parse(codex.plans.at(-1)!.split("\n").at(-1)!);
-        expect(prompt.decisionHint).toEqual({ taskId: trip.id, probability: 0.9, confident: true });
+        expect(prompt.jevJudgment).toMatchObject({ scores:{[trip.id]:0.8},suggestion:{kind:"steer",taskId:trip.id,probability:0.8} });
         expect(prompt.mainSessionTimeline).toMatch(/▶ .*「酒店要靠近新宿」/);
         const recorded = db.prepare("SELECT jev_json FROM recall_events ORDER BY id DESC LIMIT 1").get() as { jev_json: string };
         expect(JSON.parse(recorded.jev_json)).toMatchObject({ choice: trip.id, confident: true, latencyMs: 7 });
         fail = true;
         const next = submit("再加一天镰仓"); await tick(); await tick();
         expect(["running", "merged", "waiting", "queued", "merging"]).toContain(tasks.get(next.id)!.status);
-        expect(JSON.parse(codex.plans.at(-1)!.split("\n").at(-1)!).decisionHint).toBeUndefined();
+        expect(JSON.parse(codex.plans.at(-1)!.split("\n").at(-1)!).jevJudgment).toBeUndefined();
         const failed = db.prepare("SELECT jev_json FROM recall_events ORDER BY id DESC LIMIT 1").get() as { jev_json: string };
         expect(JSON.parse(failed.jev_json)).toEqual({ error: "Jev 返回 HTTP 503" });
     });
@@ -674,9 +711,8 @@ describe("main-session order, Jev's second opinion and resuming a finished sessi
             enabled: true,
             decide: async (_state: unknown, questions: Record<string, { criteria: Record<string, string> }>) => {
                 if (fail) throw new Error("Jev 返回 HTTP 503");
-                const ids = Object.keys(questions.target!.criteria);
-                const pick = ids.find(id => id !== "NEW")!;
-                return { answers: { target: { choice: pick, confidence: 0.9, probabilities: Object.fromEntries(ids.map(id => [id, id === pick ? 0.8 : id === "NEW" ? 0.2 : 0])) } }, usage: null, latencyMs: 3 };
+                const pick = Object.keys(questions.route!.criteria).find(id => id !== "NEW")!.split(":").at(-1)!;
+                return { answers: fakeJevAnswers(questions,pick), usage: null, latencyMs: 3 };
             },
         };
         tasks.close();
@@ -686,14 +722,15 @@ describe("main-session order, Jev's second opinion and resuming a finished sessi
         await codex.runTurn(codex.startedTurns[0]!.turnId, { text: "找到了，$499。需要你授权我用已保存的卡付款吗？" }); await tick();
         codex.plan = planWith(m => ({ resume: m === "已授权" ? order.id : null }));
         const reply = submit("已授权"); await tick(); await tick();
-        expect(JSON.parse(tasks.get(reply.id)!.plan_json!).jev).toEqual({ choice: order.id, confident: true, ranked: [{ id: order.id, p: 0.8 }, { id: "NEW", p: 0.2 }] });
+        expect(JSON.parse(tasks.get(reply.id)!.plan_json!).jev).toMatchObject({ choice: order.id, confident: true, scores:{[order.id]:0.8},suggestion:{kind:"resume",taskId:order.id,probability:0.8} });
         const turn = codex.startedTurns.find(t => t.text.endsWith("已授权"))!;
         const line = turn.text.split("\n").find(l => l.includes("用户：「帮我在 eBay 买那台 Pixel」"))!;
-        expect(line).toContain("〔Jev：本次消息接续它 80%〕");
-        expect(turn.text).toContain("Jev 的相关性判断");
+        expect(line).toContain("〔Jev：相关性 80%〕");
+        expect(turn.text).toContain("Jev 的逐任务相关性与路由建议");
+        expect(turn.text).toContain('"luna":{"title"');
         expect(turn.text).toContain(`- 任务 ${order.id}「帮我在 eBay 买那台 Pixel」（completed，`);
         expect(turn.text).toMatch(/：80%，Jev 首选（高置信）；助理最后问：「需要你授权我用已保存的卡付款吗？」/);
-        expect(turn.text).toContain("- 独立的新请求：20%");
+        expect(turn.text).toContain(`Jev 建议：续接任务 ${order.id}（80%`);
         await codex.runTurn(turn.turnId, { text: "已付款。" }); await tick();
         fail = true;
         submit("讲个笑话"); await tick(); await tick();
@@ -719,31 +756,29 @@ describe("main-session order, Jev's second opinion and resuming a finished sessi
 describe("owner dispatch log", () => {
     it("records each dispatch step by step and reads it back with titles", async () => {
         const jev = { enabled: true, decide: async (_s: unknown, questions: Record<string, { criteria: Record<string, string> }>) => {
-            const ids = Object.keys(questions.target!.criteria);
-            return { answers: { target: { choice: ids[0]!, confidence: 0.9, probabilities: Object.fromEntries(ids.map(id => [id, id === ids[0] ? 0.9 : 0.1 / (ids.length - 1)])) } }, usage: null, latencyMs: 4 };
+            const pick=Object.keys(questions.route!.criteria)[0]!.split(":").at(-1)!;
+            return { answers:fakeJevAnswers(questions,pick), usage:null, latencyMs:4 };
         } };
         tasks.close();
         tasks = new TaskService(db, testConfig("/tmp/aio-main-tasks", 1), agent, codex, undefined, jev as never);
         tasks.init();
         const trip = submit("规划东京三天行程"); await tick();
-        let round = 0;
         codex.plan = async p => {
             const data = JSON.parse(p.split("\n").at(-1)!);
-            round += 1;
-            return round === 1 ? JSON.stringify({ search: ["东京"] }) : JSON.stringify({ title: data.message, related: [trip.id], dependencies: [], resources: [] });
+            return JSON.stringify({ title: data.message, description:"调整酒店到新宿附近",decision:{kind:"steer",taskId:trip.id}, related: [trip.id], dependencies: [], resources: [] });
         };
         const hotel = submit("酒店要靠近新宿"); await tick(); await tick();
         const { dispatchLog } = await import("../../src/control/tasks/recall.js");
         const [entry] = dispatchLog(db, "owner_1", hotel.id);
-        expect(entry!.steps.map(s => s.kind)).toEqual(["context", "jev", "timing", "ask", "timing", "ask", "plan"]);
-        const [context, decided, timing, search, , answer, plan] = entry!.steps as any[];
+        expect(entry!.steps.map(s => s.kind)).toEqual(["context", "jev", "timing", "ask", "plan"]);
+        const [context, decided, timing, answer, plan] = entry!.steps as any[];
         expect(context.timeline).toMatch(/▶ .*「酒店要靠近新宿」/);
-        expect(decided.result).toMatchObject({ choice: trip.id, confident: true, latencyMs: 4 });
+        expect(decided.result).toMatchObject({ choice: trip.id, confident: true, latencyMs: 4, scores:{[trip.id]:0.8},suggestion:{kind:"steer",taskId:trip.id} });
         expect(timing.timing).toMatchObject({ model: "fake-luna", effort: "high", connectionMs: 2 });
-        expect(search).toMatchObject({ round: 1, searched: ["东京"] });
-        expect(search.prompt).toContain("你是 AIO Agent 的主会话派单器");
+        expect(answer).toMatchObject({ round: 1 });
+        expect(answer.prompt).toContain("Luna 派单器");
         expect(answer.answer).toContain("酒店要靠近新宿");
-        expect(plan.plan).toMatchObject({ related: [trip.id] });
+        expect(plan.plan).toMatchObject({ decision:{kind:"steer",taskId:trip.id},related: [trip.id] });
         expect(entry!.candidates.find(c => c.id === trip.id)?.title).toBe("规划东京三天行程");
         // A dispatch that cannot produce a plan logs why.
         codex.plan = async () => "这不是 JSON";
