@@ -31,7 +31,7 @@ import { audit } from "../db.js";
 import { dispatchLog, recallStats } from "../tasks/recall.js";
 import { PERSON_KEY } from "../browser/tabs.js";
 import { normalizeSite, vaultLogin, VaultError, type Vault } from "../vault.js";
-import { DocumentError, type DocumentService } from "../documents/service.js";
+import { DocumentError } from "../documents/service.js";
 import type { BrowserStatusView } from "../browser/service.js";
 import { documentKind, isRenderableKind, mediaType, requireWorkspaceFilePath } from "../documents/paths.js";
 
@@ -345,7 +345,7 @@ export function createApiRouter(context: AppContext): Router {
       context.browser.releaseViewersForSession(session.id);
       for (const linked of sessions.linkedIds(session.id)) context.browser.releaseViewersForSession(linked);
       sessions.revoke(session.id, "logout");
-      sessions.revokeLinked("primary", session.id, "parent-logout");
+      sessions.revokeLinked(session.id, "parent-logout");
       res.setHeader("Set-Cookie", clearSessionCookies("primary", ctx.secure));
       audit(db, "logout", undefined, ctx.ip);
       res.json({ ok: true });

@@ -199,14 +199,11 @@ export interface BrowserSnapshot {
 }
 
 /**
- * Current writer schema. Schema 2 adds the full cookies/localStorage/IndexedDB
- * capture; schema 1 snapshots remain readable but never authorise a release,
- * because restoring them would silently log the user out.
+ * Schema 2 snapshots carry the full cookies/localStorage/IndexedDB capture
+ * (written by `browser-runtime.py`); schema 1 ones remain readable but never
+ * authorise a release, because restoring them would silently log the user out.
+ * Schemas whose restore is complete enough to release the browser for:
  */
-export const SNAPSHOT_SCHEMA = 2 as const;
-/** Schemas this control plane can still parse (readable, not necessarily safe to stop on). */
-export const READABLE_SNAPSHOT_SCHEMAS: readonly number[] = [1, 2];
-/** Schemas whose restore is complete enough to release the browser for. */
 export const STORAGE_SNAPSHOT_SCHEMA = 2 as const;
 /** Every schema that carries the full cookies/localStorage/IndexedDB capture. */
 export const STORAGE_SNAPSHOT_SCHEMAS: readonly number[] = [STORAGE_SNAPSHOT_SCHEMA];

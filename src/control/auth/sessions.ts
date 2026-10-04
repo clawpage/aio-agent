@@ -1,4 +1,3 @@
-import crypto from "node:crypto";
 import { EventEmitter } from "node:events";
 import type { Db } from "../db.js";
 import { generateSecret, randomId, safeEqual, sha256Hex } from "./passwords.js";
@@ -178,7 +177,7 @@ export class SessionStore {
   }
 
   /** Revoke workspace companion sessions derived from a primary session. */
-  revokeLinked(kind: SessionKind, sessionId: string, reason = "parent-logout"): number {
+  revokeLinked(sessionId: string, reason = "parent-logout"): number {
     const rows = this.#db
       .prepare("SELECT id FROM sessions WHERE parent_session_id = ? AND revoked_at IS NULL")
       .all(sessionId) as { id: string }[];
@@ -270,8 +269,4 @@ export function clearSessionCookies(kind: SessionKind, secure: boolean): string[
     serializeCookie({ name: names.session, value: "", httpOnly: true, secure, sameSite: "Lax", maxAgeSeconds: 0 }),
     serializeCookie({ name: names.csrf, value: "", httpOnly: false, secure, sameSite: "Lax", maxAgeSeconds: 0 }),
   ];
-}
-
-export function newTokenHash(token: string): string {
-  return crypto.createHash("sha256").update(token).digest("hex");
 }

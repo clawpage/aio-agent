@@ -31,7 +31,7 @@ it("offers every account Jev's decision through its own MCP URL, keeping the key
   delete process.env.TYPESAFE_API_KEY;
   const cfg = { ...h.ctx.cfg, memberModelPort: 0, jev: { ...h.ctx.cfg.jev, secretsFile: keyFile, endpoint: `http://127.0.0.1:${(upstream.address() as any).port}/v1/systemone` } };
   const jev = new Jev(cfg, h.ctx.log);
-  const decision = new DecisionGateway({ cfg, db: h.ctx.db, jev, log: h.ctx.log, port: 0 });
+  const decision = new DecisionGateway({ db: h.ctx.db, jev, log: h.ctx.log, port: 0 });
   const gateway = new MemberModelGateway(cfg, h.ctx.log, undefined, decision);
   await gateway.start();
   try {
@@ -88,7 +88,7 @@ it("offers no decision tool while Jev has no key", async () => {
     const saved = process.env.TYPESAFE_API_KEY;
     delete process.env.TYPESAFE_API_KEY;
     const cfg = { ...h.ctx.cfg, jev: { ...h.ctx.cfg.jev, secretsFile: path.join(h.dataDir, "missing.env") } };
-    const decision = new DecisionGateway({ cfg, db: h.ctx.db, jev: new Jev(cfg, h.ctx.log), log: h.ctx.log, port: 0 });
+    const decision = new DecisionGateway({ db: h.ctx.db, jev: new Jev(cfg, h.ctx.log), log: h.ctx.log, port: 0 });
     const runtime = { ...cfg, runtimeUserId: "owner_1" };
     decision.provision(runtime);
     expect(runtime.decision).toBeUndefined();

@@ -296,9 +296,6 @@ INSERT OR IGNORE INTO agent_state (id, active_turn_id, active_conversation_id, q
   VALUES (1, NULL, NULL, '[]', 0);
 `;
 
-/** Tables that hold auth material and must be wipeable in tests. */
-export const AUTH_TABLES = ["sessions", "login_failures", "workspace_tickets"];
-
 export function openDb(dbPath: string): Db {
   if (dbPath !== ":memory:") {
     fs.mkdirSync(path.dirname(dbPath), { recursive: true, mode: 0o700 });

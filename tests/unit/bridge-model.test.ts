@@ -7,7 +7,6 @@ import { expandHome, readSecretFile } from "../../src/common/secrets.js";
 import { Logger } from "../../src/common/logger.js";
 import { AgentManager } from "../../src/control/codex/manager.js";
 import { openDb, type Db } from "../../src/control/db.js";
-import { SandboxContainer } from "../../src/control/sandbox/container.js";
 import { FakeCodex, testConfig } from "../helpers/harness.js";
 import type { HostTokenSource } from "../../src/control/codex/hostTokens.js";
 import type { Config } from "../../src/control/config.js";

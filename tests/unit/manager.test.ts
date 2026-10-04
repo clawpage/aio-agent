@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeEach, afterEach } from "vitest";
-import { openDb, getMeta, type Db } from "../../src/control/db.js";
+import { openDb, type Db } from "../../src/control/db.js";
 import { writeAgentSettings } from "../../src/control/settings.js";
 import { Logger } from "../../src/common/logger.js";
 import {

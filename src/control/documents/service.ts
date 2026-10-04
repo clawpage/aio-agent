@@ -24,7 +24,6 @@ const CONVERT_TARGETS = new Set(["pdf", "docx", "xlsx", "pptx", "csv", "txt", "o
 const MAX_SOURCE_BYTES = 100 * 1024 * 1024;
 const MAX_RENDER_PAGES = 50;
 /** A single raster page above this is refused before it enters the cache. */
-const MAX_PAGE_BYTES = 12 * 1024 * 1024;
 /** An image served inline is bounded too, so a huge "image" cannot be streamed. */
 const MAX_IMAGE_BYTES = 12 * 1024 * 1024;
 /** A web picture in a message (a product photo, say): fetched by the sandbox, bounded, cached. */
@@ -220,7 +219,6 @@ export class DocumentService {
   #readinessInFlight: Promise<DocumentReadiness> | null = null;
   #provisionInFlight: Promise<{ ok: boolean; message: string; readiness: DocumentReadiness }> | null = null;
   #inflight = new Map<string, Promise<RenderResult>>();
-  #scriptsHash: string | null = null;
   #scriptsReady = false;
   #webImages = new Map<string, { bytes: Buffer; contentType: string; at: number } | { failed: DocumentError; at: number }>();
   #webImageBytes = 0;
@@ -271,7 +269,6 @@ export class DocumentService {
     const marker = await this.#container.execInSandbox(["cat", markerPath], { timeoutMs: 15_000 });
     if (marker.code === 0 && marker.stdout.trim() === digest) {
       this.#scriptsReady = true;
-      this.#scriptsHash = digest;
       return;
     }
     const mkdir = await this.#container.execInSandbox(["mkdir", "-p", scriptDir], { timeoutMs: 15_000 });
@@ -328,7 +325,6 @@ export class DocumentService {
     }
     await this.#container.writeFileInSandbox(markerPath, `${digest}\n`);
     this.#scriptsReady = true;
-    this.#scriptsHash = digest;
   }
 
   #scriptPath(name: ScriptName): string {
@@ -636,18 +632,6 @@ print("venv" if venv_python else "novenv")
       mtimeToken: mtime.trim(),
       realPath,
     };
-  }
-
-  /**
-   * Resolve a validated path to the container's real path, refusing anything
-   * that leaves the workspace. Used before a cache lookup so a cache entry can
-   * never be served for a path that now resolves somewhere else.
-   */
-  async #requireRealPath(validatedPath: string): Promise<string> {
-    const stat = await this.stat(validatedPath);
-    if (!stat.exists) throw new DocumentError("not_found", "文件不存在或已被移动", 404);
-    if (!stat.isFile) throw new DocumentError("not_a_file", "该路径不是普通文件", 400);
-    return stat.realPath;
   }
 
   /** Render (or serve from cache) the page rasters of one workspace document. */

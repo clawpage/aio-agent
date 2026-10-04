@@ -534,14 +534,11 @@ export function handleProxyUpgrade(
      * not buffer unbounded data in memory when one side is slower.
      */
     const pipeWithBackpressure = (from: Duplex, to: Duplex) => {
-      let paused = false;
       const onData = (chunk: Buffer) => {
         if (to.destroyed || from.destroyed) return;
         if (to.write(chunk) === false) {
-          paused = true;
           from.pause();
           to.once("drain", () => {
-            paused = false;
             if (!from.destroyed) from.resume();
           });
         }

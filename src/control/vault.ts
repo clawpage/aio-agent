@@ -2,7 +2,6 @@ import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import type { Db } from "./db.js";
-import type { Logger } from "../common/logger.js";
 import type { AppContext } from "./context.js";
 import type { LoginStep, TabRecord } from "./browser/tabs.js";
 import { randomId } from "./auth/passwords.js";

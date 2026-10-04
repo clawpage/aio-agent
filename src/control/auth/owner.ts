@@ -97,13 +97,6 @@ export async function ensureOwner(
   return { created: true, generatedSecretPath };
 }
 
-export function getOwner(db: Db): { id: string; username: string } | null {
-  const row = db.prepare("SELECT id, username FROM owners WHERE role='owner' LIMIT 1").get() as
-    | { id: string; username: string }
-    | undefined;
-  return row ?? null;
-}
-
 export type UserRole = "owner" | "member";
 export interface User { id: string; username: string; role: UserRole }
 export function getUser(db: Db, id: string): User | null {
@@ -124,7 +117,4 @@ export async function authenticateUser(db: Db, username: string, password: strin
   if (!row) { await dummyVerify(password); return null; }
   const ok = await verifyPassword(password, { hash: row.password_hash, salt: row.password_salt, params: row.password_params });
   return ok ? { id: row.id, username: row.username, role: row.role } : null;
-}
-export async function authenticateOwner(db: Db, password: string): Promise<User | null> {
-  return authenticateUser(db, BOOTSTRAP_USERNAME, password);
 }

@@ -381,7 +381,7 @@ async function main(): Promise<void> {
     userIdOf:name=>account("SELECT id AS v FROM owners WHERE username=?",name)});
   // The owner sandbox receives its token when refreshSandboxContent seeds it below.
   ctx.share.provision(ctx.cfg);
-  const decision=new DecisionGateway({cfg:ctx.cfg,db:ctx.db,jev:ctx.jev!,log:ctx.log,port:ctx.cfg.memberModelPort??4902});
+  const decision=new DecisionGateway({db:ctx.db,jev:ctx.jev!,log:ctx.log,port:ctx.cfg.memberModelPort??4902});
   decision.provision(ctx.cfg);
   const kb=new KbGateway({cfg:ctx.cfg,log:ctx.log,port:ctx.cfg.memberModelPort??4902,usernameOf:id=>account("SELECT username AS v FROM owners WHERE id=?",id)});
   kb.provision(ctx.cfg);

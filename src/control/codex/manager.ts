@@ -1560,7 +1560,7 @@ export class AgentManager {
     const route = this.#routeContext(params);
     if (!route) return;
     const itemId = String(params.itemId ?? params.turnId ?? "stream");
-    const text = extractDeltaText(method, params);
+    const text = extractDeltaText(params);
     if (!text) return;
     const key = `${route.conversationId}:${itemId}:${method}`;
     const existing = this.#deltaBuffers.get(key);
@@ -1705,7 +1705,7 @@ export function parseAttachments(json: string | null | undefined): TurnAttachmen
   }
 }
 
-export function extractDeltaText(method: string, params: Record<string, unknown>): string {
+function extractDeltaText(params: Record<string, unknown>): string {
   const candidates = ["delta", "text", "output", "chunk"];
   for (const key of candidates) {
     const v = params[key];

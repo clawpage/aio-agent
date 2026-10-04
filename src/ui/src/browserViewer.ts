@@ -68,8 +68,6 @@ export class BrowserViewerController {
   #held = false;
   /** A heartbeat was attempted since the last release, even if its reply is late. */
   #mayHaveLease = false;
-  /** True once a join/release raced a heartbeat, so its late reply is dropped. */
-  #heartbeatInFlight = false;
   #timer: ReturnType<typeof setInterval> | null = null;
   #disposed = false;
 
@@ -108,14 +106,12 @@ export class BrowserViewerController {
     // First join for this incarnation: mint a new generation.
     const generation = this.#generation + 1;
     this.#generation = generation;
-    this.#heartbeatInFlight = true;
     const result = await this.#send(generation);
     // A release (or a newer join) landed while this heartbeat was in flight: its
     // reply describes an incarnation that is no longer current.
     if (this.#disposed || generation !== this.#generation) {
       return this.#held ? this.#generation : 0;
     }
-    this.#heartbeatInFlight = false;
     return this.#handleHeartbeat(result, generation, true);
   }
 
@@ -140,12 +136,10 @@ export class BrowserViewerController {
       }
       const retryGeneration = generation + 1;
       this.#generation = retryGeneration;
-      this.#heartbeatInFlight = true;
       const retried = await this.#send(retryGeneration);
       if (this.#disposed || retryGeneration !== this.#generation) {
         return this.#held ? this.#generation : 0;
       }
-      this.#heartbeatInFlight = false;
       if (retried.kind === "ok") {
         this.#held = true;
         this.#armTimer();

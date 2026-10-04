@@ -307,7 +307,7 @@ describe("main inbox delegation", () => {
     });
     it("waits for a scoped resource upgrade without reserving it or blocking independent work",async()=>{
         codex.plan=async()=>JSON.stringify({title:"writer",related:[],dependencies:[],resources:["write:/home/gem/workspace/projects/a"]});
-        const writer=submit("writer");await tick();
+        submit("writer");await tick();
         codex.plan=async()=>JSON.stringify({title:"doc",related:[],dependencies:[],resources:[]});
         const doc=submit("doc");await tick();
         codex.plan=async()=>JSON.stringify({title:"extra",appendTo:doc.id,related:[],dependencies:[],resources:["read:/home/gem/workspace/projects/a/report.md"]});
@@ -431,7 +431,7 @@ describe("main inbox delegation", () => {
     });
     it("folds supplements into a not-yet-dispatched task including attachments", async()=>{
         codex.plan=async()=>JSON.stringify({title:"shared",related:[],dependencies:[],resources:["write:/home/gem/workspace/projects/shared"]});
-        const blocking=submit("shared files busy");await tick();const parent=submit("plan trip");await tick();
+        submit("shared files busy");await tick();const parent=submit("plan trip");await tick();
         codex.plan=async()=>JSON.stringify({title:"extra",appendTo:parent.id,related:[],dependencies:[],resources:["write:/home/gem/workspace/projects/shared"]});
         const extra=tasks.submit({text:"with photo",attachments:[{path:"/home/gem/workspace/uploads/photo.png",kind:"image"}],clientMessageId:"photo"}).task;await tick();
         // Resource held by the first task: wait as a supplement, not a new executor.

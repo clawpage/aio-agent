@@ -12,7 +12,6 @@ import {
   segmentStatusTone,
   workingLabel,
   type AssistantBlock,
-  type Block,
   type ReasoningBlock,
   type TimelineState,
   type ToolBlock,

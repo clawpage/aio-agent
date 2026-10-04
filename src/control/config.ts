@@ -52,7 +52,6 @@ export function loadConfig(): {
   allowedHosts: string[];
   primaryOrigins: string[];
   workspaceOrigins: string[];
-  loopbackHosts: string[];
   allowInsecureLoopbackCookies: boolean;
   trustCfConnectingIp: boolean;
   proxyConnectTimeoutMs: number;
@@ -263,7 +262,6 @@ export function loadConfig(): {
   };
   /** The knowledge-base tools reachable from this runtime's sandbox; set by the knowledge-base gateway. */
   kb?: { url: string };
-  externalBaseUrl: string;
   /**
    * The sandbox nodes (sandboxd) this control plane drives, in order; the first
    * is where existing accounts live. Each node's token is read from `tokensFile`
@@ -325,7 +323,6 @@ export function loadConfig(): {
     allowedHosts,
     primaryOrigins,
     workspaceOrigins,
-    loopbackHosts,
     allowInsecureLoopbackCookies: envStr("PA_ALLOW_INSECURE_LOOPBACK_COOKIES", "1") === "1",
     // Only enable behind the dedicated Cloudflare tunnel; otherwise XFF/CF headers are spoofable.
     trustCfConnectingIp: envStr("PA_TRUST_CF_CONNECTING_IP", "0") === "1",
@@ -475,7 +472,6 @@ export function loadConfig(): {
       secretsFile: envStr("PA_KB_MCP_SECRETS_FILE", path.join(os.homedir(), ".config", "aio-agent", "kb-mcp.env")),
       members: parseList(envStr("PA_KB_MCP_MEMBERS", "")),
     },
-    externalBaseUrl: envStr("PA_EXTERNAL_BASE_URL", ""),
     sandboxNodes: {
       nodes: parseList(envStr("PA_SANDBOX_NODES", "local=http://127.0.0.1:4894")).map((entry) => {
         const at = entry.indexOf("=");

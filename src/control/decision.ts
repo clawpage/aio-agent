@@ -47,15 +47,13 @@ export const DECISION_POLICY =
   "需要在几个明确候选之间取舍、且判断依据已经齐全时，可调用 aio_decision 的 decide 工具获得独立判断（带概率）；它只给建议，不代替你核实事实，也不是用户授权。";
 
 export class DecisionGateway {
-  #cfg: Config;
   #db: Db;
   #jev: Jev;
   #log: Logger;
   #port: number;
   #tokens = new Map<string, string>();
 
-  constructor(opts: { cfg: Config; db: Db; jev: Jev; log: Logger; port: number }) {
-    this.#cfg = opts.cfg;
+  constructor(opts: { db: Db; jev: Jev; log: Logger; port: number }) {
     this.#db = opts.db;
     this.#jev = opts.jev;
     this.#log = opts.log.child("decision");

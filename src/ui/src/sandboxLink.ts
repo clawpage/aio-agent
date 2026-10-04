@@ -20,9 +20,6 @@
 /** Fixed workspace root inside the AIO sandbox (matches `sandbox.containerWorkspaceDir`). */
 export const SANDBOX_WORKSPACE_ROOT = "/home/gem/workspace";
 
-/** Image extensions that may be shown in the in-conversation lightbox. */
-export const IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "webp", "gif", "avif", "bmp"]);
-
 /**
  * How the console should present a workspace file. Mirrors the server-side
  * classification (`src/control/documents/paths.ts`): the server is authoritative

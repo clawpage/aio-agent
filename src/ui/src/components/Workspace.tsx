@@ -11,7 +11,7 @@ import { DESKTOP_PATH } from "./TaskConsole";
 import { DesktopFrame } from "./DesktopFrame";
 import { AppIcon } from "./AppIcon";
 import { browserApi, UI_KEEP_ALIVE_NOTE, type BrowserLifecycleStateView } from "../api";
-import { baseName, isPreviewableKind, kindLabel, workspaceFileKind, type WorkspaceFileKind } from "../sandboxLink";
+import { baseName, kindLabel, workspaceFileKind, type WorkspaceFileKind } from "../sandboxLink";
 interface Props {
   canConfigure?: boolean;
   open: boolean;
@@ -57,7 +57,6 @@ export function Workspace({ open, status, initialPath, onClose, onNotify, browse
   const [filePreview, setFilePreview] = useState<string | null>(null);
   const [frameStatus, setFrameStatus] = useState<"idle" | "loading" | "loaded" | "timeout">("idle");
   const origin = status?.workspaceOrigin ?? originHint;
-  const bootstrapping = useRef(false);
   /** True while this window holds a viewer lease on the sandbox browser. */
   const [watching, setWatching] = useState(false);
   /** Read-only lifecycle status; polling it never wakes or extends the browser. */

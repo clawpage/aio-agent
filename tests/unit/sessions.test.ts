@@ -90,7 +90,7 @@ describe("SessionStore renewal and revocation", () => {
     const ws = sessions.create("owner_1", "workspace", { parentSessionId: primary.session.id });
     expect(sessions.isLive(ws.session.id)).toBe(true);
     sessions.revoke(primary.session.id, "logout");
-    sessions.revokeLinked("primary", primary.session.id, "parent-logout");
+    sessions.revokeLinked(primary.session.id, "parent-logout");
     expect(sessions.isLive(ws.session.id)).toBe(false);
     expect(sessions.resolve("workspace", ws.token)).toBeNull();
   });

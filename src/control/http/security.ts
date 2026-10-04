@@ -1,6 +1,6 @@
 import type { IncomingMessage } from "node:http";
 import type { Config } from "../config.js";
-import type { Session, SessionKind, SessionStore } from "../auth/sessions.js";
+import type { Session, SessionStore } from "../auth/sessions.js";
 import { COOKIE_NAMES, parseCookies } from "../auth/sessions.js";
 
 export type HostKind = "primary" | "workspace";

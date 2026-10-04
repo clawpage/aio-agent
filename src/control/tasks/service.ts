@@ -422,7 +422,7 @@ export class TaskService {
                 ? formatTimeline(timeline(everything, row).filter(entry => entry.current || !zeroIds.has(entry.taskId)), row.created_at)
                 : timelineText;
             trace.rounds = 1;
-            const prompt = planningPrompt(planningInput, lunaCandidates, row.related_task_id, this.cfg.sandbox.containerWorkspaceDir, { canSearch: false, searched: [] }, { timeline: lunaTimeline, jev: relevance, now: describeNow(scheduling.now, scheduling.timezone), timezone: scheduling.timezone, schedules: scheduling.schedules });
+            const prompt = planningPrompt(planningInput, lunaCandidates, row.related_task_id, { timeline: lunaTimeline, jev: relevance, now: describeNow(scheduling.now, scheduling.timezone), timezone: scheduling.timezone, schedules: scheduling.schedules });
             trace.promptChars += prompt.length;
             let raw = await askWithTiming(prompt, 1);
             if (this.#closed || this.get(row.id)?.status !== "planning") return;
@@ -433,7 +433,7 @@ export class TaskService {
             // One more chance with the reason, instead of failing the message outright.
             if (!plan) {
                 trace.rounds += 1;
-                const prompt = planningPrompt(planningInput, lunaCandidates, row.related_task_id, this.cfg.sandbox.containerWorkspaceDir, { canSearch: false, searched: [], correction: report.error ?? "格式不符合要求" }, { timeline: lunaTimeline, jev: relevance, now: describeNow(scheduling.now, scheduling.timezone), timezone: scheduling.timezone, schedules: scheduling.schedules });
+                const prompt = planningPrompt(planningInput, lunaCandidates, row.related_task_id, { correction: report.error ?? "格式不符合要求", timeline: lunaTimeline, jev: relevance, now: describeNow(scheduling.now, scheduling.timezone), timezone: scheduling.timezone, schedules: scheduling.schedules });
                 trace.promptChars += prompt.length;
                 raw = await askWithTiming(prompt, trace.rounds);
                 if (this.#closed || this.get(row.id)?.status !== "planning") return;
