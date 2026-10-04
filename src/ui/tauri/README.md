@@ -49,8 +49,18 @@ adb install -r src-tauri/gen/android/app/build/outputs/apk/universal/debug/app-u
 adb shell am start -n com.mengxiao.aioagent/.MainActivity
 ```
 
-A device build for an iPhone goes through `npm run -- tauri ios dev "<device name>"`
-(the Rust build step talks back to the CLI), with signing set in `gen/apple/project.yml`.
+A device build for an iPhone signs with the team in `tauri.conf.json`
+(`bundle.iOS.developmentTeam`, automatic signing; the device has to be registered on that team):
+
+```bash
+env -u NODE_ENV npm run -- tauri ios build --debug --target aarch64
+xcrun devicectl list devices
+xcrun devicectl device install app --device <identifier> src-tauri/gen/apple/build/arm64/AIOAgent.ipa
+```
+
+The team is a personal (free) team, so the profile expires after 7 days and the app then stops
+opening until it is rebuilt and installed again. The first time, the phone has to trust the developer
+in Settings → General → VPN & Device Management.
 
 ## Verified (2026-10-03)
 
