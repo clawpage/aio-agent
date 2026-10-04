@@ -74,15 +74,13 @@
 派单按数据库时序、倒排召回、Jev、Luna 顺序进行。owner 选 Codex 时，最终派单器是隔离的临时 Luna 分类线程（read-only、never、ephemeral），输出经校验的 JSON；owner 选 Claude 或 member 账号时沿用各自配置的派单模型。
 只能引用已存在且更早的任务，防止循环依赖；相关任务结果在派发时重新读取，避免使用陈旧快照。
 候选任务分为进行中与已结束两组，分别取最近 5 个，再从历史倒排检索补充最多 4 个（总数最多 14 个）。`task_search` 是 FTS5 表，
-标题、任务用户消息（含补充）、任务结果及可用的最新助理消息预先切成中文二字词和拉丁词写入，按内容哈希（`task_search_state`）增量同步；短消息再结合邻近任务标题检索。Jev 对候选逐项独立评分，并建议 new/steer/resume；召回原文与 Jev 原始回答交给 Luna，由 Luna 决定标题、简述和最终路由。Luna 不进行搜索，也不提出预先追问；缺少用户独有条件时由执行会话决定是否追问。Jev 失败时 Luna 仍根据召回决策。候选来源、搜索、Jev 回答、Luna 计划和分阶段耗时写入 `recall_events`；两模型判断也进入执行会话的上下文。
+标题、任务用户消息（含补充）、任务结果及可用的最新助理消息预先切成中文二字词和拉丁词写入，按内容哈希（`task_search_state`）增量同步；短消息再结合邻近任务标题检索。Jev 对候选逐项独立评分，并建议 new/steer/resume；显示为 0% 的任务详情及时间线片段不交给 Luna，用户显式引用除外。Luna 使用 low 推理强度决定标题、简述和最终路由；不进行搜索、预先追问或资源分配。执行者按用户授权自行使用文件、浏览器和工具，旧计划的资源字段只用于队列协调或浏览器预热，不是权限边界。Jev 失败时 Luna 仍根据召回决策。候选来源、搜索、Jev 回答、Luna 计划和分阶段耗时写入 `recall_events`；两模型判断也进入执行会话的上下文。
 并发数复用 `PA_MAX_CONCURRENT_TURNS`；浏览器不是互斥资源：沙箱内的标签页服务（`tab-server.cjs`，loopback `:8190`，
 patchright-core 经 CDP 连接同一个 Chromium；不用 playwright-core，是因为常驻连接会给每个页面留下可被网站检测的 `Runtime.enable` 痕迹）按请求头 `X-AIO-Task`（执行会话 ID）与 `X-AIO-Task-Title` 把每个标签页登记到创建它的任务：创建者可操作，其他任务只读，
 登记表存于 `/tmp/aio-tabs-state.json`，重启后按 CDP targetId 重新认领；执行线程经线程级配置（Codex `config.mcp_servers`、
 Claude Code `--mcp-config`）接入它并关闭 `aio_browser`。回合结束只标记“已结束”（续接复用），按需销毁：超过 8 个已结束标签页
 按最久未用关闭，浏览器空闲释放前的快照之前清理全部已结束标签页（`pruneBeforeSnapshot`）。
-workspace/路径资源锁在持久化计划上计算，
-只锁冲突资源，不让一个等待任务阻塞所有独立任务。派单器声明的 `workspace`（共享环境）只与其他任务声明的范围互斥，
-不与服务端为每个任务自动保留的任务目录和附件互斥（`claimsConflict`，`src/control/tasks/resources.ts`）。它不是 OS 权限隔离，同账号执行者共享沙箱，跨账号使用不同容器。
+新派单不声明资源，也不限制执行者可用的文件、浏览器或工具；服务端仍为任务目录保留调度记录，并对旧计划中的资源提示做冲突排队（`claimsConflict`，`src/control/tasks/resources.ts`）。这些提示不是 OS 权限隔离；同账号执行者共享沙箱，跨账号使用不同容器。
 
 派单 JSON 的 `decision` 是正式 new/steer/resume 决定；服务端按目标任务状态校验并归一化为 `appendTo` 或 `resume`。`appendTo` 用于识别同一进行中任务的补充（地址、条件、纠正、额外要求）。
 尚未派发时合入原始输入；排队时更新 turn 输入；执行中通过 [Codex turn/steer](https://learn.chatgpt.com/docs/app-server#steer-an-active-turn) 和 `expectedTurnId` 追加到同一轮，只有收到匹配回执才标记 merged。
@@ -147,7 +145,7 @@ HTTP、SSE、WebSocket、文件预览、上传、终端与浏览器都走同一�
   只改 `model` 列、不动历史；之后用户手动选择（包括 5.5）永久保留。
 - **派单器的临时线程**（Codex 执行器时，独立于主对话）：主会话派单在沙箱内启动一个临时线程
   （`thread/start {ephemeral:true, sandbox:"read-only", approvalPolicy:"never", model: PA_TITLE_MODEL}`，
-  effort high，90 秒）。只有临时线程被 `threadSubscriber` 接管，其通知、审批、delta 不会进入用户会话
+  Luna effort low、其他模型 high，90 秒）。只有临时线程被 `threadSubscriber` 接管，其通知、审批、delta 不会进入用户会话
   （`#conversationForThread` 对未知线程不回退到活动会话）。只有 `turn/completed` 状态为 `completed`
   才采用结果；超时返回 `null` 并 best-effort `turn/interrupt`，同时把该线程标记为 tombstone：直到
   真正收到 `turn/completed` 或会话关闭前，它的所有通知继续丢弃，避免迟到的 delta 被 `#bufferDelta`

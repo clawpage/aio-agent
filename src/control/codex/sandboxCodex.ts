@@ -278,18 +278,21 @@ export class SandboxCodexSession {
   /** Read-only main-agent planning; receives bounded metadata, never executes a task. */
   async planTask(prompt: string, developerInstructions?: string, model?: string, onTiming?: DispatchTimingSink): Promise<string | null> {
     const started = Date.now();
-    onTiming?.({ model: model ?? this.#cfg.agent.titleModel, effort: "high", attempts: 1 });
+    // Only the owner's Luna classifier uses low effort. Member dispatchers
+    // retain their server-assigned model/high policy, as do other owner models.
+    const effort = !model && this.#cfg.agent.titleModel === "gpt-6-luna" ? "low" : "high";
+    onTiming?.({ model: model ?? this.#cfg.agent.titleModel, effort, attempts: 1 });
     let result;
     try {
       try {
-        result = await this.#auxiliaryText(prompt, "high", this.planTimeoutMs, developerInstructions, model, onTiming);
+        result = await this.#auxiliaryText(prompt, effort, this.planTimeoutMs, developerInstructions, model, onTiming);
       } catch (err) {
         // Only thread creation is safe to repeat: no turn has been sent. Never
         // replay turn/start or task execution after unknown delivery.
         if (!(err instanceof JsonRpcTimeoutError) || err.method !== "thread/start") throw err;
         this.#log.warn("dispatcher thread creation timed out; retrying once");
         onTiming?.({ attempts: 2 });
-        result = await this.#auxiliaryText(prompt, "high", this.planTimeoutMs, developerInstructions, model, onTiming);
+        result = await this.#auxiliaryText(prompt, effort, this.planTimeoutMs, developerInstructions, model, onTiming);
       }
     } finally {
       onTiming?.({ classifierMs: Date.now() - started });

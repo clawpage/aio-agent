@@ -852,7 +852,7 @@ test("owner debug mode shows each message's dispatch log step by step", async ({
         steps: [
             { kind: "context", at: Date.now(), timeline: "  [14:00] 用户：「规划东京三天」 → 任务 task-1「规划行程」（completed）；助理最后问：「要再加美食推荐吗？」\n▶ [14:05] 用户：「要」  ← 本次消息", candidates: 1 },
             { kind: "jev", at: Date.now(), criteria: { "resume:task-1": "第1近（14:00）「规划行程」", NEW: "独立新请求" }, result: { choice: "task-1", probabilities: { "task-1": 0.99, NEW: 0.01 }, scores:{"task-1":0.94}, suggestion:{kind:"resume",taskId:"task-1",probability:0.99}, confident: true, latencyMs: 140 } },
-            { kind: "timing", at: Date.now(), round: 1, timing: { model: "gpt-6-luna", effort: "high", sandboxMs: 1, connectionMs: 0, threadStartMs: 60, turnStartMs: 35, firstTextMs: 900, finishMs: 120, classifierMs: 1115, totalMs: 1116 } },
+            { kind: "timing", at: Date.now(), round: 1, timing: { model: "gpt-6-luna", effort: "low", sandboxMs: 1, connectionMs: 0, threadStartMs: 60, turnStartMs: 35, firstTextMs: 900, finishMs: 120, classifierMs: 1115, totalMs: 1116 } },
             { kind: "ask", at: Date.now(), round: 1, prompt: "你是 AIO Agent 的 Luna 派单器……", answer: "{\"title\":\"美食推荐\",\"decision\":{\"kind\":\"resume\",\"taskId\":\"task-1\"}}" },
             { kind: "plan", at: Date.now(), plan: { title: "美食推荐", description:"补充东京美食推荐",decision:{kind:"resume",taskId:"task-1"}, resume: "task-1", related: ["task-1"] }, repairs: [] },
         ],

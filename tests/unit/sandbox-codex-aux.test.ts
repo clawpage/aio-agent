@@ -327,7 +327,8 @@ it('records the actual dispatcher model and stage timings from notifications',as
  const session=makeSession(server,200), timing:Record<string,string|number>={};
  try {
   expect(await session.planTask('classify',undefined,undefined,part=>Object.assign(timing,part))).toBe('{}');
-  expect(timing).toMatchObject({model:'gpt-6-luna',effort:'high',attempts:1});
+  expect(timing).toMatchObject({model:'gpt-6-luna',effort:'low',attempts:1});
+  expect(server.inbound.find(r=>r.method==='turn/start')?.params).toMatchObject({model:'gpt-6-luna',effort:'low'});
   for(const key of ['connectionMs','threadStartMs','turnStartMs','firstTextMs','finishMs','classifierMs']) expect(timing[key]).toEqual(expect.any(Number));
   expect(timing.classifierMs).toBeGreaterThanOrEqual(timing.firstTextMs as number);
  }finally{session.close();}

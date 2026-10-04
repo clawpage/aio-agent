@@ -33,8 +33,6 @@ export interface TaskPlan {
     related: string[];
     dependencies: string[];
     resources: string[];
-    /** Server-generated claims for this task directory and input files. */
-    ownedResources?: string[];
     appendTo?: string | null;
     /** A finished task whose execution session this message continues (it keeps that session's full context). */
     resume?: string | null;
@@ -94,10 +92,10 @@ export function planningPrompt(text: string, previous: PlanningTask[], explicit:
     const ordered = [...previous].sort((a, b) => (b.created_at ?? -Infinity) - (a.created_at ?? -Infinity));
     return [
         "你是 AIO Agent 的 Luna 派单器。数据库已按时序和倒排文档召回任务，Jev 已逐项评分并建议接续方式。只做最终派单，不执行任务、调用工具或再次搜索。",
-        "只返回一个 JSON：{title:string,description:string,decision:{kind:\"new\"|\"steer\"|\"resume\",taskId:string|null},related:string[],dependencies:string[],resources:string[]}。核心是给本次工作起准确的标题（不超过40字）、写给用户看的任务简述（不超过100字），并正式决定新任务、追加进行中的任务，还是续接已结束执行会话。decision=steer/resume 时必须填写候选 taskId；new 时 taskId=null。缺少资料也要启动执行任务，是否追问由执行者判断。不要输出 clarification 或 options。",
+        "只返回一个 JSON：{title:string,description:string,decision:{kind:\"new\"|\"steer\"|\"resume\",taskId:string|null},related:string[],dependencies:string[]}。核心是给本次工作起准确的标题（不超过40字）、写给用户看的任务简述（不超过100字），并正式决定新任务、追加进行中的任务，还是续接已结束执行会话。decision=steer/resume 时必须填写候选 taskId；new 时 taskId=null。执行者自行选择需要的浏览器、文件和工具；你不分配或限制资源。缺少资料也要启动执行任务，是否追问由执行者判断。不要输出 resources、clarification 或 options。",
         "主会话时序最重要：mainSessionTimeline 按时间先后列出用户最近的消息、各自归属的任务和助理最后向用户问的问题，最后一条（▶）就是本消息。理解指代、简短回复和确认时，先看它紧挨着的前文。",
         "decision.kind=steer：本消息补充仍在执行的任务；decision.kind=resume：回答已结束任务的问题，或接着做同一页面、流程、交付物。两者都把 taskId 放入 related。只借鉴旧结果来开始新事，选 new 并用 related 引背景。",
-        "网页流程中的‘继续填写’‘基本信息你填’‘付款我来’等补充，继续原任务现场：进行中选 steer，已结束选 resume，并声明 browser；不要只用 related 新开会话。",
+        "网页流程中的‘继续填写’‘基本信息你填’‘付款我来’等补充，继续原任务现场：进行中选 steer，已结束选 resume；不要只用 related 新开会话。",
         "jevJudgment 是 Jev 的原始判断：逐任务独立相关性概率和 new/steer/resume 路由建议。把它与召回原文、主会话时序一同判断；Jev 是证据，不是最终决定。用户显式引用优先。",
         "description 是任务启动时给用户看的整体说明，用第一人称中文、100字以内，结合这次请求与已有背景，说清准备处理哪些重点和交付什么；不是重复标题，也不是宣称已经完成。只生成这一次，不写持续进度，不罗列模型、skill、工具或命令。不编造未提供的条件或承诺未授权的预订等操作。",
         "用户通过同一个主输入框自然交流，无需选择任务。先结合每个任务的 clarification（待回答问题）、输入和结果理解新消息；简短的日期、地点、条件或纠正也可以是回答，不能仅因字少当作独立任务。已完成任务的后续纠正、补查和修改用 resume 保留现场，related 同时关联背景。",
@@ -110,10 +108,7 @@ export function planningPrompt(text: string, previous: PlanningTask[], explicit:
         "related 是理解本任务有帮助的历史任务id；无关任务不要关联。dependencies 是必须先完成才可执行的任务id，必须也在related里。",
         "代词、‘继续/改一下/刚才那个’按相邻优先结合最近的相关任务理解；需要尚未产出的文件或结果时必须声明依赖，不能臆造已完成。",
         "修复 failed、unknown、blocked、planning_failed 任务时可以 related 引用背景，但不要把它列为必须成功完成的 dependencies。",
-        `资源按最小必要范围声明：browser 表示任务预计需要网页，应提前恢复浏览器，不是浏览器操作授权。查询实时信息、比价、找商品图片、进入购物车或结账、填写网页表单（含“继续”“基本信息你填”这类补充）都声明 browser；不能只按查资料或填写本地文档分类。read:绝对路径 表示读取已有文件/目录；write:绝对路径 表示修改或删除该文件/目录。路径必须在 ${workspaceRoot} 内，父目录覆盖后代；同一目录只读可并行。仅使用用户消息、附件或相关任务结果中明确的真实路径，不猜项目路径。`,
-        `workspace 仅用于全局安装依赖、改变共享运行环境，或确实要修改已有内容但无法确定路径；它只与其他 workspace 任务及声明了路径的任务互相等待，不影响只在各自任务目录里工作的任务。要动整个工作区（清空、整体移动或打包全部内容）时申请 write:${workspaceRoot}，等其他任务都结束。已知路径的项目安装依赖/修改/删除申请该项目的 write 路径，不锁整个工作区。`,
-        "制作新的 PPT、Word、Excel、Markdown、HTML、图片等交付物默认 resources=[]，使用预装工具并在本任务目录生成、转换、检查、删除临时文件，都不需要 workspace。不要因为要运行 shell/Python/LibreOffice 就申请 workspace；不得臆测需要全局安装依赖。只有实际要修改已有共享内容才申请对应写锁；读取已知附件加 read 路径。纯推理为空。",
-        "previous 由数据库时序与倒排文档召回，group 区分 active 与 finished；每项含任务用户消息、任务结果和可用的最新助理消息。source 标明近期、进行中、召回或用户指定。已完成召回，本轮必须直接返回正式决策，不要返回 search。",
+        "previous 由数据库时序与倒排文档召回，Jev 相关性为 0 的任务已省略详情（用户显式引用除外）；group 区分 active 与 finished。每项含任务用户消息、任务结果和可用的最新助理消息。source 标明近期、进行中、召回或用户指定。已完成召回，本轮必须直接返回正式决策，不要返回 search。",
         ...(search.correction ? [`你上一次的回答无法使用：${search.correction}。这次只返回一个符合上述格式的 JSON 计划，不要任何其他文字，不要再搜索。`] : []),
         "定时与循环：消息要求在将来某个时间做、或按规律重复做（例如“明天上午9点提醒我…”“每天早上8点查…”“每周一三…”“每2小时看一下…”“每月1号…”）时，信息完整才加上 schedule：{kind:\"once\"|\"daily\"|\"weekly\"|\"monthly\"|\"interval\", at:\"HH:MM\"（interval 不用）, date:\"YYYY-MM-DD\"（仅 once）, weekdays:[1-7，1=周一]（仅 weekly）, monthDay:1-31（仅 monthly）, everyMinutes:至少15（仅 interval）, maxRuns:次数或null, until:\"YYYY-MM-DD\"或null, instruction:每次运行要做的事（一句可独立执行的话，不含时间安排，例如“查旧金山今天的天气，提醒是否需要带伞”）, runNow:用户还要求现在先做一次时 true}。时间按 now 和 timezone 换算；时间或规律说得不清楚时不给 schedule，直接交执行者核对并决定是否追问。没有定时或循环要求时不要给 schedule。调整内置「每日推送」交给执行者用推送设置工具修改。有 schedule 时 title 写成定时任务名称，decision.kind=new。",
         "盯与提醒也是定时：“帮我盯着/关注/留意…”“到时候提醒我…”“X号帮我看看…”这类请求，条件和节奏明确时给 schedule，instruction 写清查什么及何时通知。节奏不明显或需核对截止日期时不给 schedule，交执行者查资料并决定是否追问。用户也想现在先看一次时 runNow 为 true。",
@@ -160,7 +155,7 @@ export function parsePlan(raw: string | null, previous: PlanningTask[], explicit
         return fail("回答不是 JSON");
     }
     if (!p || typeof p.title !== "string" || !p.title.trim()) return fail("缺少 title");
-    if (!Array.isArray(p.related) || !Array.isArray(p.dependencies) || !Array.isArray(p.resources)) return fail("related、dependencies、resources 必须是数组");
+    if (!Array.isArray(p.related) || !Array.isArray(p.dependencies)) return fail("related、dependencies 必须是数组");
     if (p.decision) {
         const { kind, taskId } = p.decision;
         if (kind === "new") { p.appendTo = null; p.resume = null; }
@@ -230,8 +225,11 @@ export function parsePlan(raw: string | null, previous: PlanningTask[], explicit
         if (resume) background.push(resume);
         appendTo = null; resume = null;
     }
-    const resources = p.resources.map(r => normalizeResource(r, workspaceRoot));
-    if (resources.length > 24 || resources.some(r => r === null)) return fail("resources 含无效的资源声明");
+    // Legacy plans may still carry resource hints for queueing/prewarming.
+    // Luna no longer declares them and they never grant or deny executor access.
+    const rawResources = Array.isArray(p.resources) ? p.resources.slice(0, 24) : [];
+    const resources = rawResources.map(r => normalizeResource(r, workspaceRoot)).filter((r): r is string => r !== null);
+    if (Array.isArray(p.resources) && resources.length !== p.resources.length) report.repairs.push("已忽略无效或过多的旧资源提示");
     let clarification: string | null = null;
     if (typeof p.clarification === "string" && p.clarification.trim()) {
         const chars = [...p.clarification.trim()];
@@ -250,7 +248,7 @@ export function parsePlan(raw: string | null, previous: PlanningTask[], explicit
     const overview = ((typeof p.description === "string" ? p.description.trim() : "") || `我会围绕“${p.title.trim()}”梳理需要处理的重点，完成后给你整理好的结果和需要关注的事项。`).replace(/\s+/g, " ");
     const chars = [...overview];
     const description = chars.length > 100 ? chars.slice(0, 99).join("") + "…" : overview;
-    return { title: [...p.title.trim()].slice(0, 40).join(""), related, dependencies: dependencies.filter(id => id !== appendTo && id !== resume && kept.has(id)), resources: [...new Set(resources as string[])], appendTo, resume, decision: { kind: appendTo ? "steer" : resume ? "resume" : "new", taskId: appendTo ?? resume }, description, clarification, ...(options ? { options } : {}), ...(schedule ? { schedule } : {}), ...(scheduleAction ? { scheduleAction } : {}) };
+    return { title: [...p.title.trim()].slice(0, 40).join(""), related, dependencies: dependencies.filter(id => id !== appendTo && id !== resume && kept.has(id)), resources: [...new Set(resources)], appendTo, resume, decision: { kind: appendTo ? "steer" : resume ? "resume" : "new", taskId: appendTo ?? resume }, description, clarification, ...(options ? { options } : {}), ...(schedule ? { schedule } : {}), ...(scheduleAction ? { scheduleAction } : {}) };
 }
 
 /** 2–5 distinct short answers, or null; anything else is dropped with a note, never fails the plan. */

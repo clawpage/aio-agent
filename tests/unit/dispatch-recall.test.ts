@@ -8,7 +8,7 @@ import { Logger } from "../../src/common/logger.js";
 import { FakeCodex, testConfig } from "../helpers/harness.js";
 
 type Entry = { id: string; title: string; source?: string; date?: string; input_text: string; group:string; result?:string; latestMessage?:string };
-type Data = { message: string; previous: Entry[]; jevJudgment?: Record<string,unknown> };
+type Data = { message: string; previous: Entry[]; mainSessionTimeline?: string; jevJudgment?: { scores?: Record<string,number> } };
 /** The Luna view is the last JSON line; document recall is already complete. */
 const view = (p: string) => ({ data: JSON.parse(p.split("\n").at(-1)!) as Data });
 const jevAnswers = (questions: Record<string,{criteria:Record<string,string>}>, preferred="NEW") => {
@@ -91,6 +91,38 @@ it("asks Jev about the tasks recall found for the message, not only the latest o
   expect(latest).toHaveLength(5);
   expect(latest[0]![1]).toMatch(/^第1近/);
   expect(latest.every(([id]) => id.startsWith("resume:task_today"))).toBe(true);
+});
+
+it("omits Jev 0%-related task details from Luna, while keeping explicit references", async () => {
+  const ids = history(2, {
+    0: { title: "无关的旧花园计划", input: "花园专属输入标记", result: "花园专属结果标记" },
+    1: { title: "相关的行程计划", input: "安排火车行程", result: "行程已整理" },
+  });
+  const jev = { enabled: true, decide: async (_state: unknown, questions: Record<string, { criteria: Record<string, string> }>) => {
+    const routeIds = Object.keys(questions.route!.criteria);
+    return { answers: Object.fromEntries(Object.keys(questions).map(name => name === "route"
+      ? [name, { choice: "NEW", confidence: 0.9, probabilities: Object.fromEntries(routeIds.map(id => [id, id === "NEW" ? 1 : 0])) }]
+      : [name, { choice: name === `relevance:${ids[0]}` ? "unrelated" : "related", confidence: 0.9,
+        probabilities: name === `relevance:${ids[0]}` ? { related: 0, unrelated: 1 } : { related: 0.8, unrelated: 0.2 } }])), usage: null, latencyMs: 1 };
+  } };
+  tasks.close();
+  tasks = new TaskService(db, testConfig("/tmp/aio-dispatch-recall", 1), agent, codex, undefined, jev as never);
+  tasks.init();
+  submit("帮我看看行程");
+  await tick();
+  const prompt = codex.prompts.at(-1)!;
+  const data = view(prompt).data;
+  expect(data.previous.map(t => t.id)).toEqual([ids[1]]);
+  expect(data.jevJudgment?.scores?.[ids[0]!]).toBe(0);
+  expect(prompt).not.toContain("花园专属输入标记");
+  expect(prompt).not.toContain("花园专属结果标记");
+  expect(data.mainSessionTimeline).not.toContain("无关的旧花园计划");
+  expect(JSON.parse(events().at(-1)!.candidates_json as string)).toEqual(expect.arrayContaining([expect.objectContaining({ id: ids[0] })]));
+
+  submit("继续花园计划", ids[0]);
+  await tick();
+  expect(view(codex.prompts.at(-1)!).data.previous.map(t => t.id)).toEqual([ids[0]]);
+  expect(codex.prompts.at(-1)).toContain("花园专属结果标记");
 });
 
 it("recalls a task hundreds back into the dispatcher's view before it has to ask, with a short excerpt and its date", async () => {

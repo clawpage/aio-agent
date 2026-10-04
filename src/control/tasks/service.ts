@@ -6,7 +6,7 @@ import type { Db } from "../db.js";
 import type { Config } from "../config.js";
 import { randomId } from "../auth/passwords.js";
 import { AgentManager, TurnConflictError, type AgentEvent, type CodexSessionLike, type TurnAttachment } from "../codex/manager.js";
-import { claimsConflict, normalizeResource, resolveResources, type Claims, type ResourceSandbox } from "./resources.js";
+import { claimsConflict, resolveResources, type Claims, type ResourceSandbox } from "./resources.js";
 import { applyTaskReference, parsePlan, planningPrompt, type PlanningTask, type PlanReport, type TaskPlan } from "./planning.js";
 import { executorQuestion } from "./executorQuestion.js";
 import { recordRecall, STEP_ANSWER_CHARS, STEP_PROMPT_CHARS, TaskRecall, type RecallEvent, type RecallSource } from "./recall.js";
@@ -178,7 +178,7 @@ export class TaskService {
     private held(row: TaskRow, plan?: TaskPlan): Claims {
         const p = plan ?? (row.plan_json ? JSON.parse(row.plan_json) as TaskPlan : null);
         if (!p) return { declared: ["all"], own: [] };
-        return { declared: p.resources, own: [`write:${this.cfg.sandbox.containerWorkspaceDir}/tasks/${row.id}`, ...(p.ownedResources ?? [])] };
+        return { declared: p.resources ?? [], own: [`write:${this.cfg.sandbox.containerWorkspaceDir}/tasks/${row.id}`] };
     }
     private waitReason(row: TaskRow): { label: string; message: string } | null {
         if (!["waiting", "merging"].includes(row.status) || !row.plan_json) return null;
@@ -412,19 +412,28 @@ export class TaskService {
                 if (this.taskContext(this.get(row.id)!) !== inputContext) return;
             }
             const previous: PlanningTask[] = [...candidates.values()];
+            // Jev's displayed 0% means the task cannot help Luna classify this
+            // message. Keep the full candidate set in the dispatch log, but do
+            // not send that task's input/result/latest message (or its timeline
+            // excerpt) to Luna. An explicit user reference always wins.
+            const zeroIds = new Set(previous.filter(t => t.id !== explicit?.id && relevance?.scores?.[t.id] === 0).map(t => t.id));
+            const lunaCandidates = previous.filter(t => !zeroIds.has(t.id));
+            const lunaTimeline = zeroIds.size
+                ? formatTimeline(timeline(everything, row).filter(entry => entry.current || !zeroIds.has(entry.taskId)), row.created_at)
+                : timelineText;
             trace.rounds = 1;
-            const prompt = planningPrompt(planningInput, explicit ? previous.filter(t => t.id === explicit.id) : previous, row.related_task_id, this.cfg.sandbox.containerWorkspaceDir, { canSearch: false, searched: [] }, { timeline: timelineText, jev: relevance, now: describeNow(scheduling.now, scheduling.timezone), timezone: scheduling.timezone, schedules: scheduling.schedules });
+            const prompt = planningPrompt(planningInput, lunaCandidates, row.related_task_id, this.cfg.sandbox.containerWorkspaceDir, { canSearch: false, searched: [] }, { timeline: lunaTimeline, jev: relevance, now: describeNow(scheduling.now, scheduling.timezone), timezone: scheduling.timezone, schedules: scheduling.schedules });
             trace.promptChars += prompt.length;
             let raw = await askWithTiming(prompt, 1);
             if (this.#closed || this.get(row.id)?.status !== "planning") return;
             if (this.taskContext(this.get(row.id)!) !== inputContext) return;
             steps.push({ kind: "ask", at: Date.now(), round: 1, prompt: prompt.slice(0, STEP_PROMPT_CHARS), answer: raw?.slice(0, STEP_ANSWER_CHARS) ?? null });
             const report: PlanReport = { repairs: [] };
-            let plan = parsePlan(raw ?? null, previous, row.related_task_id, this.cfg.sandbox.containerWorkspaceDir, report, scheduling);
+            let plan = parsePlan(raw ?? null, lunaCandidates, row.related_task_id, this.cfg.sandbox.containerWorkspaceDir, report, scheduling);
             // One more chance with the reason, instead of failing the message outright.
             if (!plan) {
                 trace.rounds += 1;
-                const prompt = planningPrompt(planningInput, explicit ? previous.filter(t => t.id === explicit.id) : previous, row.related_task_id, this.cfg.sandbox.containerWorkspaceDir, { canSearch: false, searched: [], correction: report.error ?? "格式不符合要求" }, { timeline: timelineText, jev: relevance, now: describeNow(scheduling.now, scheduling.timezone), timezone: scheduling.timezone, schedules: scheduling.schedules });
+                const prompt = planningPrompt(planningInput, lunaCandidates, row.related_task_id, this.cfg.sandbox.containerWorkspaceDir, { canSearch: false, searched: [], correction: report.error ?? "格式不符合要求" }, { timeline: lunaTimeline, jev: relevance, now: describeNow(scheduling.now, scheduling.timezone), timezone: scheduling.timezone, schedules: scheduling.schedules });
                 trace.promptChars += prompt.length;
                 raw = await askWithTiming(prompt, trace.rounds);
                 if (this.#closed || this.get(row.id)?.status !== "planning") return;
@@ -432,7 +441,7 @@ export class TaskService {
                 const first = report.error;
                 steps.push({ kind: "ask", at: Date.now(), round: trace.rounds, prompt: prompt.slice(0, STEP_PROMPT_CHARS), answer: raw?.slice(0, STEP_ANSWER_CHARS) ?? null, correction: first ?? "格式不符合要求" });
                 report.error = undefined;
-                plan = parsePlan(raw ?? null, previous, row.related_task_id, this.cfg.sandbox.containerWorkspaceDir, report, scheduling);
+                plan = parsePlan(raw ?? null, lunaCandidates, row.related_task_id, this.cfg.sandbox.containerWorkspaceDir, report, scheduling);
                 report.repairs.unshift(`第一次回答无法使用：${first ?? "格式不符合要求"}，已重问一次`);
             }
             // Old model output may still contain a preflight question. The
@@ -470,19 +479,11 @@ export class TaskService {
                 this.agent.renameConversation(row.conversation_id, plan.title);
                 return;
             }
-            const ownerId = plan.appendTo ?? row.id;
             const root = this.cfg.sandbox.containerWorkspaceDir;
-            const owned = [`write:${root}/tasks/${ownerId}`, ...files.map(f => normalizeResource(`read:${f.path}`, root) ?? "workspace")];
-            // A resumed executor may update the outputs it already created. Keep
-            // those directories locked too; unrelated task directories stay isolated.
-            // A message that continues a finished task (picked by hand or by the dispatcher) runs in that task's session.
-            const continued = explicit ?? (plan.resume ? this.get(plan.resume) : null);
-            if (continued) owned.push(...this.rows().filter(t => !t.merged_into && t.created_at < row.created_at && this.executor(t) === this.executor(continued)).map(t => `write:${root}/tasks/${t.id}`));
-            // Resolve aliases in the sandbox, never against the Mac filesystem.
-            if (this.resourceSandbox) {
+            // Historical resource hints only coordinate queueing/prewarming;
+            // they are not an authorization boundary for the executor.
+            if (this.resourceSandbox && plan.resources.length)
                 plan.resources = await resolveResources(plan.resources, root, this.resourceSandbox);
-                plan.ownedResources = await resolveResources(owned, root, this.resourceSandbox);
-            } else plan.ownedResources = owned;
             if (this.#closed || this.get(row.id)?.status !== "planning") return;
             if (this.taskContext(this.get(row.id)!) !== inputContext) return;
             if (explicit && !plan.resume) applyTaskReference(plan, this.referenceTarget(row)!);
@@ -590,7 +591,6 @@ export class TaskService {
                 if(otherActive.some(t=>claimsConflict(this.held(parent, parentPlan),this.held(t)) || claimsConflict(this.held(row, plan),this.held(t)))) continue;
                 // Reserve the expanded resource set before sending the update.
                 parentPlan.resources=resources;
-                parentPlan.ownedResources=[...new Set([...(parentPlan.ownedResources ?? []),...(plan.ownedResources ?? [])])];
                 parentPlan.related=[...new Set([...parentPlan.related,...plan.related.filter(id=>id!==parent.id)])];
                 this.db.prepare('UPDATE tasks SET plan_json=? WHERE id=?').run(JSON.stringify(parentPlan),parent.id);
                 if(!parent.turn_id) {
@@ -600,7 +600,7 @@ export class TaskService {
                 this.db.prepare("UPDATE tasks SET status='steering' WHERE id=?").run(row.id);
                 try {
                     const result=await this.agent.appendTurnInput(this.executor(parent),parent.turn_id,
-                        `这是用户在 ${new Date(row.created_at).toLocaleTimeString("sv-SE", { hour: "2-digit", minute: "2-digit" })} 对当前任务的补充，请合并处理并在最终结果中覆盖，不要当作独立任务。可协作使用的资源更新为：${this.claims(parent, parentPlan).join(',')}。\n\n主会话最近的对话（按时间先后，▶ 是这条补充）：\n${formatTimeline(timeline(this.rows().filter(t => this.ownerId(t) === this.ownerId(row)), row, 6), Date.now(), plan.jev)}\n\n派单判断（仅作背景）：${JSON.stringify({jev:plan.jev ?? null,luna:{title:plan.title,description:plan.description,decision:plan.decision}})}\n\n${row.input_text}${dependencies.length ? `\n\n补充所需的已完成任务资料：${JSON.stringify(dependencies.map(t => ({id:t!.id,result:t!.result?.slice(0,16000)})))}` : ''}`,
+                        `这是用户在 ${new Date(row.created_at).toLocaleTimeString("sv-SE", { hour: "2-digit", minute: "2-digit" })} 对当前任务的补充，请合并处理并在最终结果中覆盖，不要当作独立任务。按用户要求自行使用所需的文件、浏览器和工具，不受派单资源提示限制。\n\n主会话最近的对话（按时间先后，▶ 是这条补充）：\n${formatTimeline(timeline(this.rows().filter(t => this.ownerId(t) === this.ownerId(row)), row, 6), Date.now(), plan.jev)}\n\n派单判断（仅作背景）：${JSON.stringify({jev:plan.jev ?? null,luna:{title:plan.title,description:plan.description,decision:plan.decision}})}\n\n${row.input_text}${dependencies.length ? `\n\n补充所需的已完成任务资料：${JSON.stringify(dependencies.map(t => ({id:t!.id,result:t!.result?.slice(0,16000)})))}` : ''}`,
                         JSON.parse(row.attachments_json),resources.includes("browser"));
                     if(this.#closed) return;
                     if(result==='browser_unavailable') this.db.prepare("UPDATE tasks SET status='merge_failed',error=? WHERE id=?").run('此补充需要浏览器，但浏览器暂未恢复；原任务仍可继续，请恢复浏览器后重新补充。',row.id);
@@ -654,7 +654,7 @@ export class TaskService {
                 `你是 AIO Agent 主会话委派的子 agent。任务 ID：${row.id}。${row.execution_conversation_id ? "本轮恢复此前任务的同一会话，保留完整上下文；按用户的新要求继续、补充或更新，不要从零重新做。" : "只处理本任务。"}不递归委派。身份、语气和行为遵循系统层注入的 SOUL.md；对子任务同样生效，不以内部执行角色替代个人助理身份。`,
                 "按请求实际需要控制工作量：普通聊天、问候、身份介绍、概念解释和可直接回答的问题，直接在消息中回答即可。不要为了完成任务而创建目录、制作文件、检查运行环境或截图验收；仅在回答确实需要外部事实、附件或既有资料时调用相关工具。身份与风格以已注入的 SOUL.md 为准，不为自我介绍额外检索记忆或寻找 SOUL.md 文件。需要依据用户过往信息时才有针对性地查相关记录。用户要求实际操作或文件交付时，仍须执行并做与风险相称的验证，不得用口头回答代替。",
                 `只有确实需要写文件时才创建任务目录。新文件放在 ${this.cfg.sandbox.containerWorkspaceDir}/tasks/${row.id}/（按需创建），不要散落工作区根目录。共享工作区里可能有其他子 agent；不得覆盖无关文件，只能在本次明确授权的路径内更新已有任务产物。`,
-                `本次文件与共享环境资源范围：${this.claims(row, plan).join(",")}。read: 只读；write: 可修改该路径及后代；workspace 表示共享环境操作。browser 仅表示启动前预热；即使没有声明 browser，也可按用户请求使用本任务的 aio_tabs 工具，工具会按需恢复浏览器并限制标签页归属。没有 workspace 不安装全局依赖或改变共享运行环境。只在声明路径内操作，不修改符号链接或通过链接越过声明范围。需要额外文件或共享环境范围时停止并说明，不擅自扩大。沙盒命令无需审批不代表可以越过本任务范围。`,
+                "按用户任务实际需要使用文件、浏览器和其他工具；派单器的资源提示不限制你的能力。aio_tabs 会按需恢复浏览器并执行标签页归属限制。只修改用户授权的内容，避免覆盖其他任务的文件；共享工作区中若发现并发修改，先核对即时状态。沙盒命令无需审批不代表获得了用户未授权的操作权限。",
                 `如需运行工具生成临时文件、渲染输出、缓存或工具配置，放在 ${this.cfg.sandbox.containerWorkspaceDir}/tasks/${row.id}/.tmp/，设置 TMPDIR 指向该目录；LibreOffice 使用该目录下独立的 UserInstallation。不要复用或清理 /tmp/verify、/tmp/lo-final 等公共路径。结束前等待本任务的写入子进程完成，不留后台写入。`,
                 "你以用户的个人助理身份交付：最终回复直接回答用户要的结论、建议、安排和交付物，先给最有用的结果，不要只说准备做。保留必要的事实来源、未完成事项与会影响用户决策的限制（如尚未预订、日期待确认）。",
                 "用户明确不关心实现过程：最终回复不汇报使用了哪些 skill、工具、命令、API、子 agent 或文件创建/检查步骤；除非用户专门询问这些技术细节。需要说明的执行与验证细节放在 commentary 过程里，不要放进最终回报或交付文档。不要删掉有用的依据、链接或不确定性来假装结果更确定。",
@@ -1001,7 +1001,7 @@ export class TaskService {
         const plan: TaskPlan = {
             title: s.title, description: `定时任务（${describeSchedule(JSON.parse(s.spec_json) as ScheduleSpec)}）的自动运行。`,
             related: previous && s.builtin !== DAILY_FEED ? [previous.id] : [], dependencies: [], resources: JSON.parse(s.resources_json) as string[],
-            appendTo: null, resume: null, clarification: null, ownedResources: [`write:${this.cfg.sandbox.containerWorkspaceDir}/tasks/${id}`],
+            appendTo: null, resume: null, clarification: null,
         };
         this.db.exec("BEGIN IMMEDIATE");
         try {

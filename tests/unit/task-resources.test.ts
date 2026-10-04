@@ -35,7 +35,7 @@ describe("scoped resources",()=>{
   for(const value of [w("../secret"),w("a/../b"),w("*"),"write:relative","write:/etc","write:/home/gem/workspace-other/a",{},"write:/"])
    expect(normalizeResource(value,root)).toBeNull();
   const parsed=parsePlan(JSON.stringify({title:"x",related:[],dependencies:[],resources:[w("projects//a/"),r("input.md")],ownedResources:["browser"]}),[],null);
-  expect(parsed?.resources).toEqual([w("projects/a"),r("input.md")]);expect(parsed?.ownedResources).toBeUndefined();
+  expect(parsed?.resources).toEqual([w("projects/a"),r("input.md")]);expect(parsed && "ownedResources" in parsed).toBe(false);
  });
  it("preserves real and lexical paths, failing conservatively on outside symlinks or resolver failure",async()=>{
   const sandbox={execInSandbox:async()=>({code:0,stdout:JSON.stringify([root+"/projects/real"])})};

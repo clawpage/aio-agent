@@ -98,7 +98,7 @@ PA_COMPANION_ORIGIN=https://agent-workspace.clawpage.ai npm run smoke
 | --- | --- | --- |
 | `PA_SANDBOX_CODEX_VERSION` | `0.160.0` | 固定版本；安装前缀与二进制路径都由它推导，不会与路径不一致 |
 | `PA_DEFAULT_MODEL` | `gpt-6-sol` | 新会话与旧会话后续轮次的默认模型；`/api/models` 也以它标记默认项 |
-| `PA_TITLE_MODEL` | `gpt-6-luna` | 主会话派单器（Codex 执行器时）的临时线程模型，派单固定 high / 90 秒；变量名沿用旧称 |
+| `PA_TITLE_MODEL` | `gpt-6-luna` | 主会话派单器（Codex 执行器时）的临时线程模型，Luna low / 90 秒；其他模型 high，变量名沿用旧称 |
 
 - 二进制路径：`/home/gem/.codex/tools/codex-<版本>/node_modules/.bin/codex`（在 `personal-agent-codex` 卷内）。
 - 每次接管容器时控制面会核实版本；缺失或版本不符时用
@@ -365,7 +365,7 @@ app-server 的 `mcpServerStatus/list` 与 `app/list` 只验元数据，应分别
 ## 10. 派单超时、反复追问与页面压力
 
 先区分派单模型与执行模型：owner 选择 GPT 时，执行按其设置运行，派单使用
-`PA_TITLE_MODEL`（默认 `gpt-6-luna`，high）；选择 Claude 时，派单走 Claude auxiliary
+`PA_TITLE_MODEL`（默认 `gpt-6-luna`，low）；选择 Claude 时，派单走 Claude auxiliary
 model。不能只凭任务卡上的执行模型，把分配失败归因于该模型的回答质量。
 
 - 从 `recall_events.fail_reason`、`latency_ms` 与任务错误区分会话创建超时、模型结果无效、

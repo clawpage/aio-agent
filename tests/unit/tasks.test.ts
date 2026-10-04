@@ -84,7 +84,8 @@ describe("main inbox delegation", () => {
         expect(db.prepare("SELECT browser_required FROM turns WHERE id=?").get(first.turn_id)?.browser_required).toBe(0);
         const prompt = codex.startedTurns[0]!.text;
         expect(prompt).not.toContain("没有 browser 不操作");
-        expect(prompt).toContain("即使没有声明 browser，也可按用户请求使用本任务的 aio_tabs 工具");
+        expect(prompt).toContain("按用户任务实际需要使用文件、浏览器和其他工具");
+        expect(prompt).not.toContain("本次文件与共享环境资源范围");
         codex.plan=async()=>JSON.stringify({title:"网页",related:[],dependencies:[],resources:["browser"]});
         const web=submit("打开网页"); await tick();
         expect(db.prepare("SELECT browser_required FROM turns WHERE id=?").get(tasks.get(web.id)!.turn_id)?.browser_required).toBe(1);
@@ -246,8 +247,8 @@ describe("main inbox delegation", () => {
         expect(codex.resumedThreads).toEqual([codex.startedTurns[0]!.threadId,codex.startedTurns[0]!.threadId]);expect(codex.startedThreads).toHaveLength(1);
         expect(tasks.view(tasks.get(third.id)!).conversationId).toBe(original.conversationId);
         const plan=JSON.parse(tasks.get(third.id)!.plan_json!);
-        expect(plan.ownedResources).toContain(`write:/home/gem/workspace/tasks/${original.id}`);
-        expect(plan.ownedResources).toContain(`write:/home/gem/workspace/tasks/${second.id}`);
+        expect(plan.ownedResources).toBeUndefined();
+        expect(codex.startedTurns.at(-1)!.text).toContain("按用户任务实际需要使用文件、浏览器和其他工具");
         expect(tasks.get(second.id)?.result).toBe('Second');expect(tasks.get(original.id)?.result).toBe('Original');
     });
     it("turns an explicit reference into a followup if its task completes during planning",async()=>{
@@ -351,16 +352,15 @@ describe("main inbox delegation", () => {
         expect(tasks.get(a.id)?.revision).toBeGreaterThan(0);
     });
     it("surfaces invalid planning after one corrected retry, and supports a safe manual retry", async () => {
-        // Resources decide what a task may touch: an invalid claim is never repaired, even on the second try.
-        codex.plan = async () => '{"title":"bad","related":[],"dependencies":[],"resources":["unknown"]}';
+        codex.plan = async () => '{"related":[],"dependencies":[]}';
         const a = submit("a");
         await tick();
         expect(tasks.get(a.id)?.status).toBe("planning_failed");
-        expect(tasks.get(a.id)?.error).toContain("resources 含无效的资源声明");
+        expect(tasks.get(a.id)?.error).toContain("缺少 title");
         expect(codex.plans).toHaveLength(2);
-        expect(codex.plans[1]).toContain("你上一次的回答无法使用：resources 含无效的资源声明");
+        expect(codex.plans[1]).toContain("你上一次的回答无法使用：缺少 title");
         expect(codex.startedTurns).toHaveLength(0);
-        expect(db.prepare("SELECT failed, fail_reason, rounds FROM recall_events").get()).toMatchObject({ failed: 1, fail_reason: "resources 含无效的资源声明", rounds: 2 });
+        expect(db.prepare("SELECT failed, fail_reason, rounds FROM recall_events").get()).toMatchObject({ failed: 1, fail_reason: "缺少 title", rounds: 2 });
         codex.plan = async () => '{"title":"ok","related":[],"dependencies":[],"resources":[]}';
         tasks.retryPlanning(a.id);
         await tick();
@@ -541,8 +541,9 @@ describe("main inbox delegation", () => {
         expect(tasks.list().tasks.find(t=>t.id===jobs[0]!.id)?.status).toBe("completed");
     });
 });
-it("validates plans against known task IDs and serializes intersecting resources", () => {
-    expect(parsePlan('{"title":"x","related":[],"dependencies":[],"resources":["unknown"]}', [], null)).toBeNull();
+it("ignores invalid legacy resource hints and serializes intersecting valid hints", () => {
+    expect(parsePlan('{"title":"x","related":[],"dependencies":[],"resources":["unknown"]}', [], null)?.resources).toEqual([]);
+    expect(parsePlan('{"title":"x","related":[],"dependencies":[]}', [], null)?.resources).toEqual([]);
     expect(resourcesConflict(["write:/home/gem/workspace/projects/shared"], ["write:/home/gem/workspace/projects/shared/src"])).toBe(true);
     expect(resourcesConflict(["browser"], ["browser"])).toBe(false);
     expect(resourcesConflict(["browser"], [])).toBe(false);
@@ -593,7 +594,7 @@ it("repairs what does not change what may run, and says why an answer is unusabl
     expect(plan.dependencies).toEqual(["t19"]);
     expect([...plan.clarification!]).toHaveLength(200);
     expect(report.repairs).toEqual(["dependencies 去掉 1 个不在列表中的 id","clarification 超过 200 字，已截断","related 去掉 1 个不在列表中的 id","related 共 20 个，只保留 12 个"]);
-    for(const [raw,error] of [["不是 JSON","回答不是 JSON"],['{"related":[],"dependencies":[],"resources":[]}',"缺少 title"],['{"title":"x","related":"t1","dependencies":[],"resources":[]}',"related、dependencies、resources 必须是数组"]] as const){
+    for(const [raw,error] of [["不是 JSON","回答不是 JSON"],['{"related":[],"dependencies":[],"resources":[]}',"缺少 title"],['{"title":"x","related":"t1","dependencies":[],"resources":[]}',"related、dependencies 必须是数组"]] as const){
         const r={repairs:[] as string[]} as {repairs:string[];error?:string};
         expect(parsePlan(raw,previous,null,undefined,r)).toBeNull();
         expect(r.error).toBe(error);
