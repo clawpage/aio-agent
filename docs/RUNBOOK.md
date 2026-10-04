@@ -174,7 +174,7 @@ docker exec aio-control-1 node bin/create-user.mjs <username>          # compose
 ```
 
 账号固定 member，随机密码只写 `var/user-secrets/<username>.txt`（0600）；重复执行拒绝覆盖。
-没有注册入口，不改变 owner 密码与会话。member 固定 DeepSeek high，因此上线前需确认 OpenCode Go 桥接可用。
+也可凭 owner 在配置页「邀请码」生成的一次性邀请码在 `/register` 自助注册（同样只建 member）；注册页提示的申请邮箱来自 `PA_INVITE_EMAIL`（当前部署写在 `var/deploy/control.env`，为 invitation@clawpage.ai）。两种方式都不改变 owner 密码与会话。member 固定 DeepSeek high，因此上线前需确认 OpenCode Go 桥接可用。
 member 首次访问或服务启动时创建独立 `aio-user-<散列>` 容器及三卷，数据存在控制层数据目录的 `users/<散列>/`；owner 原卷保留。
 成员工作区与 owner 共用 `agent-workspace.clawpage.ai`，用路径 `/u/<散列>/` 区分账号，无需新增 CNAME/TLS/tunnel；前缀与会话账号不符时 401，不会回退 owner 工作区。
 成员模型网关仅监听无状态 DeepSeek 请求，以及分配了模型的成员的 Claude Messages / `gpt-6.1-sol` Responses 请求（默认端口 4902，owner 凭据只在宿主侧附加），凭据按账号存放 `var/users/<散列>/model-token`，不可公开。网络守卫镜像 `aio-agent-network-guard:1` 从固定沙箱镜像构建，独立只读运行并只授予 NET_ADMIN。
