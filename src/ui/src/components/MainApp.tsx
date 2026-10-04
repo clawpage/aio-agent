@@ -115,7 +115,8 @@ export function MainApp() {
         if (!vv) return;
         const root = document.documentElement;
         const fit = () => {
-            const keyboard = window.innerHeight - vv.height > 120;
+            // Even a hardware keyboard's accessory bar (about 44 points) scrolls the page; a pinch-zoom is not a keyboard.
+            const keyboard = window.innerHeight - vv.height > 30 && Math.abs(vv.scale - 1) < 0.01;
             if (keyboard) root.style.setProperty("--keyboard-viewport", `${Math.round(vv.height)}px`);
             else root.style.removeProperty("--keyboard-viewport");
             root.classList.toggle("keyboard-open", keyboard);
