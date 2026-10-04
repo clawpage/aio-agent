@@ -2764,6 +2764,8 @@ textarea:focus {
   .main-inbox-app .main > .banner, .main-inbox-app .task-chat .chat-head, .main-inbox-app .task-list-page > .chat-head, .main-inbox-app .schedule-page > .chat-head, .main-inbox-app .settings-head, .main-inbox-app .task-detail-bar, .main-inbox-app .workspace .ws-head { padding-left: 60px; min-height: calc(56px + env(safe-area-inset-top)); }
   .main-inbox-app .workspace:not(.fullscreen) { bottom: 0; }
   .main-inbox-app .composer { padding-bottom: max(12px, env(safe-area-inset-bottom)); }
+  /* The keyboard covers the home indicator: no room is kept for it. */
+  .keyboard-open .main-inbox-app .composer { padding-bottom: 12px; }
 }
 @media (prefers-reduced-motion: reduce) { .main-inbox-app .sidebar { transition: none; } }
 

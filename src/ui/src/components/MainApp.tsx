@@ -118,12 +118,13 @@ export function MainApp() {
             const keyboard = window.innerHeight - vv.height > 120;
             if (keyboard) root.style.setProperty("--keyboard-viewport", `${Math.round(vv.height)}px`);
             else root.style.removeProperty("--keyboard-viewport");
+            root.classList.toggle("keyboard-open", keyboard);
             if (keyboard && (window.scrollY > 0 || vv.offsetTop > 0)) window.scrollTo(0, 0);
         };
         vv.addEventListener("resize", fit);
         vv.addEventListener("scroll", fit);
         fit();
-        return () => { vv.removeEventListener("resize", fit); vv.removeEventListener("scroll", fit); root.style.removeProperty("--keyboard-viewport"); };
+        return () => { vv.removeEventListener("resize", fit); vv.removeEventListener("scroll", fit); root.style.removeProperty("--keyboard-viewport"); root.classList.remove("keyboard-open"); };
     }, []);
     useEffect(() => {
         if (!auth)
