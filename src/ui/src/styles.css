@@ -2775,6 +2775,9 @@ textarea:focus {
   .mobile-menu-close { display: flex; align-items: center; justify-content: center; position: absolute; top: calc(6px + env(safe-area-inset-top)); right: 8px; width: 44px; height: 44px; padding: 0; border-color: transparent; }
   .mobile-menu-backdrop { position: fixed; inset: 0; z-index: 85; background: rgb(0 0 0 / .4); backdrop-filter: blur(2px); }
   .main-inbox-app .main > .banner, .main-inbox-app .task-chat .chat-head, .main-inbox-app .task-list-page > .chat-head, .main-inbox-app .schedule-page > .chat-head, .main-inbox-app .settings-head, .main-inbox-app .task-detail-bar, .main-inbox-app .workspace .ws-head { padding-left: 60px; min-height: calc(56px + env(safe-area-inset-top)); }
+  /* In a task's detail view the back bar is the top edge, so it alone clears the status bar. */
+  .main-inbox-app .task-detail-bar { padding-top: calc(8px + env(safe-area-inset-top)); }
+  .main-inbox-app .task-detail .chat-head { padding-top: 8px; }
   .main-inbox-app .workspace:not(.fullscreen) { bottom: 0; }
   .main-inbox-app .composer { padding-bottom: max(12px, env(safe-area-inset-bottom)); }
   /* The keyboard covers the home indicator: no room is kept for it. */
