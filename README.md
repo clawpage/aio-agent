@@ -6,7 +6,7 @@
 一个常驻 **Codex** 主智能体，中文 UI，桌面与手机功能对等。它适合个人或受信任的小团队把
 Codex + AIO Sandbox 跑在自己的机器上，通过自己的入口访问。
 
-- **账号分级 / self-hosted**：一个 owner 管理配置，可由管理员创建 member 账号；没有注册入口，账号间隔离运行环境，
+- **账号分级 / self-hosted**：一个 owner 管理配置，可由管理员创建 member 账号，或凭 owner 发的一次性邀请码在登录页注册；账号间隔离运行环境，
   也不对外提供公共 demo。
 - **Codex + AIO Sandbox**：命令、文件、浏览器、桌面、编辑器、笔记本都发生在容器里；
   沙箱容器不挂载宿主 home / workspace / `docker.sock`，只有不运行用户代码的沙箱守护进程 sandboxd 以固定参数调用 Docker。
@@ -85,7 +85,8 @@ curl -s http://127.0.0.1:4891/healthz   # 界面层（控制层提供它需要�
 - member 不接收 owner 的 ChatGPT token、模型桥管理密钥或 Claude Code 凭据。独立模型网关仅接受该账号凭据下的无状态 DeepSeek high 请求，禁用历史响应查询；分配了 Claude 的账号还可以请求 Messages API（仅 `/v1/messages` 与 `/v1/messages/count_tokens`），模型强制改为分配的模型，owner 的 Claude Code 凭据由网关在宿主侧附加，沙盒内只有该账号自己的网关令牌。分配了 `gpt-6.1-sol` 的账号走同一条无状态 Responses 路由，网关改发到 ChatGPT（`PA_CHATGPT_CODEX_URL`），模型固定为 `gpt-6.1-sol`、思考强度 high、`store:false`、去掉 `service_tier`，控制面自己的 ChatGPT 登录（`codex-login`）由网关在宿主侧附加；控制面没有 ChatGPT 登录时该账号直接报服务不可用，不会退回 DeepSeek。网关监听 `PA_MEMBER_MODEL_PORT`（默认 4902）。
 - 每个账号都有自己的路径：主控制台是 `<主域名>/u/<用户名>`（根路径和 `/login` 登录后自动跳到自己的地址；同一浏览器一次只登录一个账号，打开别人的地址只显示“这是 X 的页面”，可退出后登录该账号或回到自己的页面）；工作区在同一个工作区域名下是 `<工作区域名>/u/<用户名>/...`（owner 也是 `/u/owner`，旧的根路径和 member 的 `/u/<账号散列>` 链接仍可用），不需要新增 DNS、TLS 或 tunnel 路由。容器与卷名仍按账号散列命名，不会改名。前缀与工作区会话账号不一致时一律 401；不对应任何账号的 `/u/...` 视为沙盒应用自己的路径，按会话账号路由；页面里不带前缀的绝对路径子资源（如 Jupyter 的 `/jupyter/static/...`）按工作区会话所属账号路由，只会到达该账号自己的沙盒。环境启动失败时拒绝连接，绝不退回 owner 沙盒。账号共用同一个浏览器来源，因此同一浏览器先后登录不同账号时，工作区页面（code-server、Jupyter 等）的浏览器端存储是共用的；沙盒文件、进程与记忆的隔离不受影响。
 - 账号配置和登录鉴权由宿主控制面统一管理；容器共享宿主内核，因此这不是抵抗内核漏洞的虚拟机隔离。
-- 创建账号（先构建；使用与服务相同的环境变量/数据目录）：`node --env-file=var/runtime.env bin/create-user.mjs <username>`。Quickstart 使用 `.env`。随机密码写入 `var/user-secrets/<username>.txt`（0600），命令不打印密码、不覆盖已有账号，不提供公开注册。
+- 创建账号（先构建；使用与服务相同的环境变量/数据目录）：`node --env-file=var/runtime.env bin/create-user.mjs <username>`。Quickstart 使用 `.env`。随机密码写入 `var/user-secrets/<username>.txt`（0600），命令不打印密码、不覆盖已有账号。
+- **邀请码注册**：登录页（或直接打开 `/register`）可切换到注册，填账号（2–40 位小写字母、数字、`-`、`_`）、密码（至少 12 位）和邀请码。邀请码由 owner 在配置页「邀请码」里生成，格式 `XXXX-XXXX-XXXX`，只能用一次：注册成功即作废，未使用的可以手动作废；领用与建号在同一个事务里，两人同时用同一个码只会建成一个账号。注册出来的是普通 member（默认模型同上），注册后直接登录。猜错邀请码与输错密码共用同一套按 IP 的失败锁定。注册页提示去哪里申请邀请码：设置 `PA_INVITE_EMAIL` 后显示该邮箱，否则提示向管理员索取。
 - 分配成员模型：`node --env-file=var/runtime.env bin/set-user-model.mjs <username> <deepseek-v4.1-flash|claude-sonnet-5-5|gpt-6.1-sol>`（compose 模式：`docker compose -p aio exec control node bin/set-user-model.mjs ...`），重启服务后生效。分配 Claude 需要 owner 已配置 Claude Code 凭据，用量计入 owner 的 Claude 账号；分配 `gpt-6.1-sol` 需要控制面已用 `codex-login` 登录 ChatGPT（`AIO_HOST_CODEX=on`），用量计入该 ChatGPT 账号。
 
 ## 用量看板

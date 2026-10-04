@@ -17,8 +17,8 @@ export interface BootstrapResult {
 export const OWNER_SOURCE_META_KEY = "owner_bootstrap_source";
 
 /**
- * Ensure exactly one owner exists. There is deliberately no registration route:
- * the owner either comes from PA_OWNER_PASSWORD or from a locally generated
+ * Ensure exactly one owner exists. Registration (auth/invites.ts) only ever creates
+ * members; the owner either comes from PA_OWNER_PASSWORD or from a locally generated
  * secret file (chmod 0600, git-ignored). The secret is never logged.
  */
 export async function ensureOwner(

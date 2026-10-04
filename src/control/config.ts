@@ -75,6 +75,8 @@ export function loadConfig(): {
   loginMaxFailures: number;
   loginWindowMs: number;
   loginLockoutMs: number;
+  /** Where the register form tells people to ask for an invite code; empty means "ask the administrator". */
+  inviteEmail: string;
   ownerPassword: string;
   ownerPasswordReset: boolean;
   sandbox: {
@@ -351,6 +353,7 @@ export function loadConfig(): {
     loginMaxFailures: envInt("PA_LOGIN_MAX_FAILURES", 5),
     loginWindowMs: envInt("PA_LOGIN_WINDOW_MINUTES", 15) * 60_000,
     loginLockoutMs: envInt("PA_LOGIN_LOCKOUT_MINUTES", 15) * 60_000,
+    inviteEmail: /^[^\s@<>"]+@[^\s@<>"]+\.[^\s@<>"]+$/.test(envStr("PA_INVITE_EMAIL").trim()) ? envStr("PA_INVITE_EMAIL").trim() : "",
     ownerPassword: envStr("PA_OWNER_PASSWORD", ""),
     // Opt-in operator action: rotate the owner password and rewrite the local secret file.
     ownerPasswordReset: envStr("PA_OWNER_PASSWORD_RESET", "0") === "1",

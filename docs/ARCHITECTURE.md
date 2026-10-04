@@ -100,7 +100,7 @@ planning_failed 可安全重试分类；blocked 提示前置结果需要核对�
 
 ## 认证与会话
 
-- 一个 owner，可通过本地 `bin/create-user.mjs` 创建 member。**没有注册接口**；owner 由 `PA_OWNER_PASSWORD` 或首次启动生成的
+- 一个 owner，可通过本地 `bin/create-user.mjs` 创建 member，或由 member 凭 owner 生成的一次性邀请码经 `POST /api/auth/register` 自助注册（`src/control/auth/invites.ts`）；owner 由 `PA_OWNER_PASSWORD` 或首次启动生成的
   `var/owner-secret.txt`（0600，git 忽略，从不写日志）建立。
 - 密码用 scrypt（N=16384）加盐存储；比对用 `timingSafeEqual`，未知用户也走一次等价开销。
 - 会话是随机 32 字节不透明 token，DB 只存 SHA-256，cookie 为 `HttpOnly` + `SameSite=Lax`；

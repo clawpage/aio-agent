@@ -259,6 +259,16 @@ export interface VaultEntry {
 }
 
 /** How well the dispatcher finds past tasks (see src/control/tasks/recall.ts). */
+/** A one-time register code (owner settings). */
+export interface Invite {
+  code: string;
+  note: string;
+  createdAt: number;
+  usedAt: number | null;
+  usedBy: string | null;
+  revokedAt: number | null;
+}
+
 export interface RecallStats {
   days: number;
   dispatches: number;

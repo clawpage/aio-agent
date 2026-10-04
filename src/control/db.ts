@@ -45,6 +45,15 @@ CREATE TABLE IF NOT EXISTS sessions (
 CREATE INDEX IF NOT EXISTS idx_sessions_prev ON sessions(prev_token_hash);
 CREATE INDEX IF NOT EXISTS idx_sessions_parent ON sessions(parent_session_id);
 
+CREATE TABLE IF NOT EXISTS invites (
+  code TEXT PRIMARY KEY,
+  note TEXT NOT NULL DEFAULT '',
+  created_at INTEGER NOT NULL,
+  used_at INTEGER,
+  used_by TEXT REFERENCES owners(id),
+  revoked_at INTEGER
+);
+
 CREATE TABLE IF NOT EXISTS login_failures (
   ip TEXT PRIMARY KEY,
   failures INTEGER NOT NULL DEFAULT 0,

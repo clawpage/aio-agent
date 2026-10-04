@@ -23,6 +23,7 @@ import type { AgentEvent } from "../codex/manager.js";
 import type { HostKind, RequestContext } from "./security.js";
 import { UNSAFE_METHODS, guardUnsafe, originAllowed } from "./security.js";
 import { BOOTSTRAP_USERNAME, authenticateUser, getUser } from "../auth/owner.js";
+import { RegisterError, createInvite, listInvites, registerWithInvite, revokeInvite } from "../auth/invites.js";
 import { parseHttpUrl } from "../aio/client.js";
 import { COOKIE_NAMES, clearSessionCookies, sessionCookies } from "../auth/sessions.js";
 import { safeRedirectPath } from "../auth/tickets.js";
@@ -294,6 +295,44 @@ export function createApiRouter(context: AppContext): Router {
     }),
   );
 
+  // Self-registration needs a one-time invite code from the owner (auth/invites.ts).
+  router.post(
+    "/auth/register",
+    requireKind("primary"),
+    asyncHandler(async (req, res, ctx) => {
+      // Unauthenticated like login: no session-bound CSRF, so check Origin explicitly.
+      if (!ctx.origin || !originAllowed(cfg, "primary", ctx.origin)) {
+        res.status(403).json({ error: "origin_denied", message: "来源站点不被允许" });
+        return;
+      }
+      const state = limiter.state(ctx.ip);
+      if (state.locked) {
+        res.status(429).json({ error: "rate_limited", message: `尝试次数过多，请在 ${Math.ceil(state.retryAfterMs / 60000)} 分钟后重试` });
+        return;
+      }
+      const str = (v: unknown) => (typeof v === "string" ? v : "");
+      let user;
+      try {
+        user = await registerWithInvite(db, { username: str(req.body?.username), password: str(req.body?.password), code: str(req.body?.inviteCode) });
+      } catch (err) {
+        if (!(err instanceof RegisterError)) throw err;
+        // Guessing codes counts like guessing passwords.
+        if (err.code === "invalid_invite" || err.code === "invite_used") {
+          const after = limiter.recordFailure(ctx.ip);
+          audit(db, "register_failed", `${err.code} failures=${after.failures}`, ctx.ip);
+        }
+        res.status(err.status).json({ error: err.code, message: err.message });
+        return;
+      }
+      limiter.recordSuccess(ctx.ip);
+      const { session, token, csrfToken } = sessions.create(user.id, "primary", { ip: ctx.ip, userAgent: req.get("user-agent") ?? undefined });
+      res.setHeader("Set-Cookie", sessionCookies("primary", token, csrfToken, { secure: ctx.secure, ttlMs: cfg.sessionTtlMs }));
+      audit(db, "register_ok", user.username, ctx.ip);
+      log.info("user registered", { ip: ctx.ip });
+      res.json({ ok: true, username: user.username, role: user.role, expiresAt: session.expiresAt });
+    }),
+  );
+
   router.post(
     "/auth/logout",
     requireKind("primary"),
@@ -339,7 +378,7 @@ export function createApiRouter(context: AppContext): Router {
     asyncHandler(async (req, res, ctx) => {
       const owner = ctx.session ? getUser(db, ctx.session.ownerId) : null;
       if (!ctx.session) {
-        res.json({ authenticated: false, kind: ctx.kind, username: owner?.username ?? null });
+        res.json({ authenticated: false, kind: ctx.kind, username: owner?.username ?? null, inviteEmail: cfg.inviteEmail || null });
         return;
       }
       res.json({
@@ -947,6 +986,22 @@ export function createApiRouter(context: AppContext): Router {
     const days = Math.min(90, Math.max(1, Number(req.query.days) || 7));
     res.setHeader("Cache-Control", "no-store");
     res.json({ stats: recallStats(db, ctxOf(req).session!.ownerId, days, context.tasks.recall.cap()) });
+  });
+
+  // Invite codes for self-registration (owner only, like all of /settings).
+  router.get("/settings/invites", requireKind("primary"), requireSession, (_req, res) => {
+    res.setHeader("Cache-Control", "no-store");
+    res.json({ invites: listInvites(db) });
+  });
+  router.post("/settings/invites", requireKind("primary"), requireSession, (req, res) => {
+    const invite = createInvite(db, typeof req.body?.note === "string" ? req.body.note : "");
+    audit(db, "invite_created", undefined, ctxOf(req).ip);
+    res.json({ invite });
+  });
+  router.delete("/settings/invites/:code", requireKind("primary"), requireSession, (req, res) => {
+    if (!revokeInvite(db, String(req.params.code))) { res.status(409).json({ error: "not_revocable", message: "这个邀请码已经用过或已作废" }); return; }
+    audit(db, "invite_revoked", undefined, ctxOf(req).ip);
+    res.json({ ok: true });
   });
 
   // Owner debug: how one message was dispatched, step by step (owner only, like all of /settings).

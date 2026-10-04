@@ -475,6 +475,16 @@ pre {
 .recall-stats dt { color: var(--text-dim); }
 .recall-stats dd { margin: 0; overflow-wrap: anywhere; }
 @media (max-width: 480px) { .recall-stats div { grid-template-columns: minmax(0, 1fr); gap: 2px; } }
+.invite-new { display: flex; gap: 8px; }
+.invite-new input { flex: 1; min-width: 0; }
+.invite-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.invite-list li { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; }
+.invite-list li.done { opacity: 0.6; }
+.invite-main { display: grid; gap: 2px; flex: 1; min-width: 0; }
+.invite-main code { font-size: 15px; letter-spacing: 0.06em; }
+.invite-main span { overflow-wrap: anywhere; }
+.invite-actions { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+@media (max-width: 480px) { .invite-new { flex-direction: column; } }
 .settings-file-label { margin-left: 8px; font-size: 12px; font-weight: 400; color: var(--text-dim); }
 .settings-fields { display: grid; gap: 18px; }
 .settings-card .banner { margin: 0; }
@@ -713,6 +723,9 @@ textarea:focus {
   font-size: 22px;
 }
 .login-card h1.login-brand { display: flex; align-items: center; gap: 12px; font-size: 30px; letter-spacing: 0.08em; }
+.login-invite { margin: -2px 0 0; line-height: 1.6; }
+.login-invite a { color: var(--accent); }
+.login-switch { margin: 2px 0 0; text-align: center; }
 
 /* ------------------------------------------------------------------ chat */
 
