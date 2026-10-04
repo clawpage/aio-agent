@@ -2416,6 +2416,11 @@ textarea:focus {
   border-radius: 8px;
 }
 
+/* The execution page: the task the person asked, with the executor's full brief on request. */
+.dispatch-text { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; min-width: 0; }
+.dispatch-label { padding: 1px 8px; border-radius: 999px; font-size: 12px; background: var(--accent-soft); color: var(--accent); }
+.dispatch-text .plain { align-self: stretch; }
+.dispatch-toggle { padding: 0; }
 .file-card-audio { flex: 1 1 100%; width: 100%; min-width: 0; height: 40px; margin-top: 8px; }
 .file-card-note { flex: 1 1 100%; margin: 4px 0 0; }
 .inline-audio { display: block; width: 100%; max-width: 480px; height: 40px; margin: 8px 0; }

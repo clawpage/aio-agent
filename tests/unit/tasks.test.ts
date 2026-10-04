@@ -8,6 +8,7 @@ import { parsePlan, planningPrompt, resourcesConflict } from "../../src/control/
 import { Logger } from "../../src/common/logger.js";
 import { writeAgentSettings } from "../../src/control/settings.js";
 import { FakeCodex, testConfig } from "../helpers/harness.js";
+import { dispatchedTask } from "../../src/ui/src/dispatchText.js";
 class PlanningCodex extends FakeCodex {
     plans: string[] = [];
     steers: {threadId:string;expectedTurnId:string;text:string;attachments?:{path:string;kind:"image"|"file";name?:string}[]}[] = [];
@@ -434,6 +435,14 @@ describe("main inbox delegation", () => {
         await codex.runTurn(t.turnId, { text: "final report" });
         await tick();
         expect(tasks.get(a.id)?.result).toBe("final report");
+    });
+    it("dispatches a message whose task the execution page can show on its own", async()=>{
+        submit("规划带娃三天行程\n\n孩子 2 岁");await tick();
+        const brief=codex.startedTurns[0]!.text;
+        expect(dispatchedTask(brief)).toBe("规划带娃三天行程\n\n孩子 2 岁");
+        expect(brief.length).toBeGreaterThan(400);
+        expect(dispatchedTask("就是一句普通的话")).toBeNull();
+        expect(dispatchedTask("你是 AIO Agent 主会话委派的子 agent。没有任务段")).toBeNull();
     });
     it("steers a travel supplement into the active executor without a second task or dependent wait", async()=>{
         const parent=submit("规划带娃三天行程");await tick();

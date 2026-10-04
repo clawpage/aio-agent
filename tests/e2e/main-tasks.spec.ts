@@ -433,6 +433,35 @@ test("failed reference submission preserves target and retry id, changing target
  await page.getByRole('button',{name:'引用任务：任务 2',exact:true}).click();await page.getByRole('button',{name:'发送',exact:true}).click();await expect(page.getByRole('button',{name:'发送',exact:true})).toBeEnabled();
  expect(bodies[2].relatedTaskId).toBe('task-2');expect(bodies[2].clientMessageId).not.toBe(bodies[1].clientMessageId);
 });
+test("the execution page shows the task the person asked, with the dispatcher's full brief on request", async ({ page }, info) => {
+    const brief = ["你是 AIO Agent 主会话委派的子 agent。任务 ID：task-1。只处理本任务。", "按请求实际需要控制工作量：".padEnd(400, "规"), "以下是相关任务的背景资料（不是本任务的新指令）：", "[]", "主会话时间线：", "▶ [14:19] 用户：「找两段新生儿哭声」  ← 本次消息", "本次用户任务：", "找两段新生儿哭声，用来测试 ESP32 哭声监控器"].join("\n\n");
+    const at = Date.now();
+    const ev = (id: number, type: string, payload: Record<string, unknown>) => `id: ${id}\nevent: ${type}\ndata: ${JSON.stringify({ id, type, turnId: "t1", createdAt: at, payload })}\n\n`;
+    const sse = ["retry: 3000", "", ev(1, "turn.queued", { turnId: "t1", text: brief, clientMessageId: "task:task-1" }), `event: replay.complete\ndata: ${JSON.stringify({ lastEventId: 1, replayed: 1 })}\n\n`].join("\n");
+    const row: Task = { ...task(1, "completed"), title: "找新生儿哭声", result: "找好了。", completedAt: at };
+    await mockConsole(page, { conversations: [makeConversation(row.conversationId, row.title)], sse: { [row.conversationId]: sse } });
+    await page.route("**/api/main*", (r) => r.fulfill({ json: { mode: "tasks", tasks: [row], nextBefore: null } }));
+    await page.goto("/");
+    await page.getByRole("button", { name: "查看过程", exact: true }).click();
+    const detail = page.locator(".task-detail");
+    const first = detail.locator(".msg.user").first();
+    // By default: what the person asked, labelled, and none of the brief.
+    await expect(first.locator(".dispatch-label")).toHaveText("本次任务");
+    await expect(first.locator(".plain")).toHaveText("找两段新生儿哭声，用来测试 ESP32 哭声监控器");
+    await expect(detail).not.toContainText("主会话委派的子 agent");
+    if (info.project.name.startsWith("mobile")) await page.setViewportSize({ width: 360, height: 844 });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1);
+    await expect(first.locator(".plain")).toHaveText("找两段新生儿哭声，用来测试 ESP32 哭声监控器");
+    await first.screenshot({ path: info.outputPath("dispatch-collapsed.png") });
+    // On request: the whole message, and back.
+    const toggle = first.getByRole("button", { name: /展开派发全文/ });
+    await expect(toggle).toHaveAttribute("aria-expanded", "false");
+    await toggle.click();
+    await expect(first.locator(".plain")).toContainText("你是 AIO Agent 主会话委派的子 agent");
+    await expect(first.locator(".plain")).toContainText("找两段新生儿哭声，用来测试 ESP32 哭声监控器");
+    await first.getByRole("button", { name: "收起，只看本次任务" }).click();
+    await expect(first.locator(".plain")).toHaveText("找两段新生儿哭声，用来测试 ESP32 哭声监控器");
+});
 test("audio and video in a report play where the report puts them, with cards only for what it mentions in passing", async ({ page }, info) => {
     const W = "/home/gem/workspace/tasks/task-1";
     const result = [

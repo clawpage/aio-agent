@@ -23,6 +23,7 @@ import { extractShareLinks } from "../shareLinks";
 import { VideoEmbed } from "./VideoEmbed";
 import { extractVideoLinks } from "../videoLinks";
 import { extractFileRefs, attachmentRefs, embedMediaLinks } from "../fileRefs";
+import { dispatchedTask } from "../dispatchText";
 import { isPreviewableKind, workspaceFileKind } from "../sandboxLink";
 
 interface Props {
@@ -495,6 +496,25 @@ export function AttachmentCards({
   );
 }
 
+/**
+ * A user message. One the main session dispatched to an execution session shows
+ * the task the person wrote; the executor's full brief opens on request.
+ */
+function UserText({ text }: { text: string }) {
+  const task = useMemo(() => dispatchedTask(text), [text]);
+  const [full, setFull] = useState(false);
+  if (!task) return <div className="plain">{text}</div>;
+  return (
+    <div className="dispatch-text">
+      <span className="dispatch-label">本次任务</span>
+      <div className="plain">{full ? text : task}</div>
+      <button type="button" className="link tiny dispatch-toggle" aria-expanded={full} onClick={() => setFull((v) => !v)}>
+        {full ? "收起，只看本次任务" : `展开派发全文（${text.length} 字）`}
+      </button>
+    </div>
+  );
+}
+
 function BlockView({
   block,
   now,
@@ -518,7 +538,7 @@ function BlockView({
     return (
       <article className="msg user">
         <div className="bubble">
-          {block.text && <div className="plain">{block.text}</div>}
+          {block.text && <UserText text={block.text} />}
           {block.attachments.length > 0 && (
             <AttachmentCards attachments={block.attachments} onOpen={onOpenFile} />
           )}
