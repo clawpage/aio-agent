@@ -1,7 +1,7 @@
 import { test, expect } from "@playwright/test";
 import { mockConsole } from "./mock-api";
 
-/** The desktop frame's geometry: on a phone 1.6 times the box's width, panned by scrolling the box. */
+/** The desktop frame's geometry: on a phone 1.3 times the box's width, panned by scrolling the box. */
 async function desktopGeometry(frame: import("@playwright/test").Locator) {
   return frame.evaluate((el) => ({ box: el.clientWidth, frame: el.querySelector("iframe")!.getBoundingClientRect().width, scroll: el.scrollWidth }));
 }
@@ -29,16 +29,17 @@ test("the workspace is a desktop: a menu bar, one app window, a Dock, and minimi
   await expect(desk.locator(".menubar-app")).toHaveText("浏览器");
   await expect(desk.locator(".window-title")).toHaveText("浏览器");
   await expect(desk.locator(".window iframe")).toBeVisible();
-  // On a phone the browser desktop is drawn 1.6 times the width and pans; on a wide screen it fits.
+  // On a phone the browser desktop is drawn 1.3 times the width and pans; on a wide screen it fits.
   const frame = desk.locator(".desktop-frame");
+  await expect.poll(() => desk.evaluate(n => n.getAnimations().length)).toBe(0);
   const geometry = await desktopGeometry(frame);
   if (mobile) {
-    expect(Math.abs(geometry.frame - geometry.box * 1.6)).toBeLessThan(2);
-    expect(geometry.scroll).toBeGreaterThan(geometry.box * 1.5);
+    expect(Math.abs(geometry.frame - geometry.box * 1.3)).toBeLessThan(2);
+    expect(geometry.scroll).toBeGreaterThan(geometry.box * 1.25);
     // It opens on the middle of the desktop, not its left edge.
     expect(Math.abs((await frame.evaluate((el) => el.scrollLeft)) - (geometry.scroll - geometry.box) / 2)).toBeLessThan(2);
-    await frame.evaluate((el) => { el.scrollLeft = 150; });
-    expect(await frame.evaluate((el) => el.scrollLeft)).toBeGreaterThan(100);
+    await frame.evaluate((el) => { el.scrollLeft = 40; });
+    expect(await frame.evaluate((el) => el.scrollLeft)).toBeGreaterThan(30);
     // A finger on the black strip pans sideways only; a vertical swipe moves neither the view nor the page.
     // (Touch gestures are synthesised through Chromium's CDP; WebKit checks the layout only.)
     const strip = page.getByRole("toolbar", { name: "桌面操作" });

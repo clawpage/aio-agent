@@ -1,5 +1,6 @@
 :root {
   /* Each viewport surface owns these insets once; nested headers do not. */
+  --popup-exit-ms: 220;
   --safe-top: env(safe-area-inset-top, 0px);
   --safe-right: env(safe-area-inset-right, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
@@ -3481,3 +3482,71 @@ button.map-card-switch { flex: 0 0 auto; padding: 4px 10px; }
   .usage-filters { gap: 12px; }
   .usage-filters label { flex: 1; min-width: 120px; }
 }
+
+
+/* All popup surfaces share entry and exit; PopupPresence owns their lifetime.
+ * Animate panels separately so fixed descendants keep viewport positioning. */
+[data-popup-motion="enter"] { animation: popup-fade-in 280ms ease-out; }
+[data-popup-motion="exit"] { animation: popup-fade-out calc(var(--popup-exit-ms) * 1ms) ease-in forwards; pointer-events: none; }
+[data-popup-motion] > :is(.modal, .file-preview, .task-console, .opening-card, .map-sheet, .full-message) {
+  animation: popup-up 280ms cubic-bezier(.16, 1, .3, 1);
+}
+[data-popup-motion="exit"] > :is(.modal, .file-preview, .task-console, .opening-card, .map-sheet, .full-message) {
+  animation: popup-down calc(var(--popup-exit-ms) * 1ms) ease-in forwards;
+}
+:is(.image-viewer, .conv-menu, .toast, .sidebar, .workspace)[data-popup-motion="enter"] {
+  animation: popup-up 280ms cubic-bezier(.16, 1, .3, 1);
+}
+:is(.image-viewer, .conv-menu, .toast, .sidebar, .workspace)[data-popup-motion="exit"] {
+  animation: popup-down calc(var(--popup-exit-ms) * 1ms) ease-in forwards;
+}
+:is(.modal-backdrop, .file-preview-overlay, .task-console-overlay, .map-sheet-backdrop, .full-message-backdrop)[data-popup-motion] { overflow: clip; }
+@keyframes popup-up { from { translate: 0 var(--viewport-height); } to { translate: 0 0; } }
+@keyframes popup-down { from { translate: 0 0; } to { translate: 0 var(--viewport-height); } }
+@keyframes popup-fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes popup-fade-out { from { opacity: 1; } to { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  [data-popup-motion], [data-popup-motion] > :is(.modal, .file-preview, .task-console, .opening-card, .map-sheet, .full-message) { animation: none !important; }
+}
+
+
+.composer-icon { display: block; flex: none; }
+.composer-row > button, .composer-row > .file-button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+.composer-icon.spinning { animation: opening-spin .8s linear infinite; }
+@media (max-width: 900px) {
+  /* A floating input card: idle is one line; focus or a draft exposes the tray. */
+  .composer, .main-inbox-app .composer {
+    position: relative; margin: 8px 12px 12px; padding: 6px; gap: 0;
+    border: 1px solid var(--border); border-radius: 28px;
+    background: var(--bg-raised); box-shadow: 0 6px 24px rgb(0 0 0 / .16);
+    transition: border-radius 180ms ease, box-shadow 180ms ease;
+  }
+  .composer textarea, .task-chat .composer textarea {
+    width: 100%; height: 44px; min-height: 44px;
+    max-height: max(64px, calc(var(--safe-height) * .25));
+    padding: 11px 48px; border: 0; border-radius: 0;
+    background: transparent; outline: none; box-shadow: none;
+    font-size: 16px; line-height: 22px;
+  }
+  .composer textarea::placeholder { white-space: nowrap; text-overflow: ellipsis; }
+  .composer-row { position: relative; height: 0; gap: 0; }
+  .composer-row > .file-button, .composer-row > button {
+    position: absolute; bottom: 0; width: 44px; height: 44px;
+    min-height: 44px; min-width: 44px; padding: 0; border-radius: 50%;
+  }
+  .composer-row > .file-button { left: 0; border-color: transparent; background: transparent; }
+  .composer-row > button { right: 0; }
+  .composer-row > .spacer, .composer-button-label { display: none; }
+  .composer:has(textarea:focus), .composer.has-content { border-radius: 22px; }
+  .composer:has(textarea:focus) { border-color: color-mix(in srgb, var(--accent) 50%, var(--border)); }
+  .composer:has(textarea:focus) textarea, .composer.has-content textarea {
+    min-height: clamp(64px, calc(var(--safe-height) * .12), 100px); padding: 8px 10px;
+  }
+  .composer:has(textarea:focus) .composer-row, .composer.has-content .composer-row { height: 48px; }
+  .composer .chips, .composer .task-reference { margin: 4px 6px 6px; }
+  .composer .chip button, .composer .task-reference button { display: inline-flex; align-items: center; justify-content: center; }
+  .composer .chip .composer-icon, .composer .task-reference .composer-icon { width: 16px; height: 16px; }
+  .composer .queue-hint { margin: 4px 6px; }
+  .chat.running .composer::before { inset: -1px; height: auto; border-radius: inherit; z-index: -1; }
+}
+@media (prefers-reduced-motion: reduce) { .composer { transition: none; } .composer-icon.spinning { animation: none; } }

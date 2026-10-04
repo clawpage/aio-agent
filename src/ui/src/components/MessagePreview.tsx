@@ -1,3 +1,4 @@
+import { PopupPresence, PopupSurface } from "./PopupMotion";
 import { useLayoutEffect, useRef, useState, type ReactNode, type KeyboardEvent } from "react";
 import { createPortal } from "react-dom";
 import { isSandboxLink } from "../sandboxLink";
@@ -11,6 +12,8 @@ export function MessagePreview({ children, title, user = false }: { children: Re
   const wasOpen = useRef(false);
   const [clipped, setClipped] = useState(false);
   const [open, setOpen] = useState(false);
+  const [reading, setReading] = useState(false);
+  const show = () => { setReading(true); setOpen(true); };
 
   useLayoutEffect(() => {
     const view = viewport.current!, body = content.current!;
@@ -39,11 +42,11 @@ export function MessagePreview({ children, title, user = false }: { children: Re
   }, []);
 
   useLayoutEffect(() => {
-    if (viewport.current) viewport.current.inert = open;
-    if (open) close.current?.focus();
+    if (viewport.current) viewport.current.inert = reading;
+    if (reading) close.current?.focus();
     else if (wasOpen.current) more.current?.focus({ preventScroll: true });
-    wasOpen.current = open;
-  }, [open]);
+    wasOpen.current = reading;
+  }, [reading]);
   const dismiss = () => setOpen(false);
   const keys = (event: KeyboardEvent<HTMLDivElement>) => {
     // React portal events bubble through the reading page too. A nested image,
@@ -57,14 +60,14 @@ export function MessagePreview({ children, title, user = false }: { children: Re
     else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
   };
   return <>
-    <div ref={viewport} className={`bubble message-preview${clipped ? " clipped" : ""}`} data-testid="message-preview" aria-hidden={open || undefined} onClick={event => {
+    <div ref={viewport} className={`bubble message-preview${clipped ? " clipped" : ""}`} data-testid="message-preview" aria-hidden={reading || undefined} onClick={event => {
       // Visible links/cards keep their own actions. Tapping the message text opens it.
-      if (!event.defaultPrevented && clipped && !window.getSelection()?.toString() && !(event.target as HTMLElement).closest("a, button, input, textarea, select, video, audio")) setOpen(true);
+      if (!event.defaultPrevented && clipped && !window.getSelection()?.toString() && !(event.target as HTMLElement).closest("a, button, input, textarea, select, video, audio")) show();
     }}>
       <div ref={content} className="message-preview-content">{children}</div>
-      {clipped && <button ref={more} type="button" className="message-more" onClick={() => setOpen(true)} aria-label={`点击看更多：${title}`}>点击看更多</button>}
+      {clipped && <button ref={more} type="button" className="message-more" onClick={show} aria-label={`点击看更多：${title}`}>点击看更多</button>}
     </div>
-    {open && createPortal(<div className="full-message-backdrop" onClick={event => { if (event.target === event.currentTarget) dismiss(); }}><div className="full-message" role="dialog" aria-modal="true" aria-label={`完整消息：${title}`} onKeyDown={keys} onClick={event => {
+    <PopupPresence onExited={() => setReading(false)}>{open && createPortal(<PopupSurface className="full-message-backdrop" onClick={event => { if (event.target === event.currentTarget) dismiss(); }}><div className="full-message" role="dialog" aria-modal="true" aria-label={`完整消息：${title}`} onKeyDown={keys} onClick={event => {
       if (!event.currentTarget.contains(event.target as Node)) return;
       const link = (event.target as HTMLElement).closest("a[href], [data-browser-link]");
       const url = link?.getAttribute("href") ?? link?.getAttribute("data-browser-link") ?? "";
@@ -74,6 +77,6 @@ export function MessagePreview({ children, title, user = false }: { children: Re
       <div className="full-message-grabber" aria-hidden="true" />
       <header className="full-message-head"><strong>{title}</strong><button ref={close} type="button" className="ghost" onClick={dismiss} aria-label="关闭消息">关闭</button></header>
       <div className={`full-message-body${user ? " user" : ""}`}><article className="full-message-content">{children}</article></div>
-    </div></div>, document.body)}
+    </div></PopupSurface>, document.body)}</PopupPresence>
   </>;
 }

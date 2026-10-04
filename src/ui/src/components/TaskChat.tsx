@@ -1,3 +1,5 @@
+import { ComposerIcon, useComposerHeight } from "./ComposerControls";
+import { PopupPresence } from "./PopupMotion";
 import { MessageTime, TaskDuration, useDisplayClock } from "./MessageTime";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { api, openEventStream } from "../api";
@@ -58,6 +60,7 @@ export function TaskChat({ onDetails, onOpenLink, onOpenFileInBrowser, onExpired
     const scroll = useRef<HTMLDivElement>(null);
     const stick = useRef(true);
     const input = useRef<HTMLTextAreaElement>(null);
+    useComposerHeight(input, draft);
     const pageLoaded = useRef(false);
     const pending = useRef<{
         signature: string;
@@ -295,16 +298,16 @@ export function TaskChat({ onDetails, onOpenLink, onOpenFileInBrowser, onExpired
       </div>)}
     </div>
     {error && <div className="banner error" role="alert">{error}<button onClick={() => setError(null)}>关闭</button></div>}
-    <div className="composer">
-      {reference && <div className="task-reference" role="status"><div><span className="muted tiny">引用任务</span><strong title={reference.title}>{reference.title}</strong></div><button type="button" className="ghost" disabled={busy} aria-label="取消引用任务" onClick={() => { setReference(null); input.current?.focus(); }}>×</button></div>}
-      {!!attachments.length && <div className="chips">{attachments.map(a => <span className="chip" key={a.path}>{a.name}<button aria-label="移除附件" disabled={busy} onClick={() => setAttachments(old => old.filter(x => x.path !== a.path))}>×</button></span>)}</div>}
-      <textarea ref={input} rows={2} value={draft} aria-label="消息" placeholder={reference ? "补充、继续或更新这个任务…" : "交给我一个任务，也可以直接补充或回答…"} disabled={busy} onChange={e => setDraft(e.target.value)} onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+    <div className={`composer${draft || attachments.length || reference || uploading ? " has-content" : ""}`}>
+      {reference && <div className="task-reference" role="status"><div><span className="muted tiny">引用任务</span><strong title={reference.title}>{reference.title}</strong></div><button type="button" className="ghost" disabled={busy} aria-label="取消引用任务" onClick={() => { setReference(null); input.current?.focus(); }}><ComposerIcon kind="close"/></button></div>}
+      {!!attachments.length && <div className="chips">{attachments.map(a => <span className="chip" key={a.path}>{a.name}<button aria-label="移除附件" disabled={busy} onClick={() => setAttachments(old => old.filter(x => x.path !== a.path))}><ComposerIcon kind="close"/></button></span>)}</div>}
+      <textarea ref={input} rows={2} value={draft} aria-label="消息" placeholder={reference ? "继续补充这个任务…" : "交给我一个任务…"} disabled={busy} onChange={e => setDraft(e.target.value)} onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
         e.preventDefault();
         void send();
     } }}/>
-      <div className="composer-row"><label className={`file-button ${busy || uploading ? "disabled" : ""}`}>{uploading ? "上传中…" : "附件"}<input type="file" multiple className="file-input" aria-label="添加附件" data-testid="attachment-input" disabled={busy || uploading} onChange={e => { void pick(e.target.files); e.target.value = ""; }}/></label><span className="spacer"/><button className="primary" disabled={busy || uploading || (!draft.trim() && !attachments.length)} onClick={() => void send()}>{busy ? "提交中…" : "发送"}</button></div>
+      <div className="composer-row"><label className={`file-button ${busy || uploading ? "disabled" : ""}`}><ComposerIcon kind={uploading ? "busy" : "attach"}/><span className="composer-button-label">{uploading ? "上传中…" : "附件"}</span><input type="file" multiple className="file-input" aria-label="添加附件" data-testid="attachment-input" disabled={busy || uploading} onChange={e => { void pick(e.target.files); e.target.value = ""; }}/></label><span className="spacer"/><button className="primary" disabled={busy || uploading || (!draft.trim() && !attachments.length)} onClick={() => void send()} aria-label={busy ? "提交中…" : "发送"} title="发送"><ComposerIcon kind={busy ? "busy" : "send"}/><span className="composer-button-label">{busy ? "提交中…" : "发送"}</span></button></div>
     </div>
-    {preview && <FilePreview path={preview} onClose={() => setPreview(null)} onOpenLink={onOpenLink} onOpenInBrowser={onOpenFileInBrowser}/>}
-    {debug && dispatchLogFor && <DispatchLog taskId={dispatchLogFor} onClose={() => setDispatchLogFor(null)}/>}
+    <PopupPresence>{preview && <FilePreview path={preview} onClose={() => setPreview(null)} onOpenLink={onOpenLink} onOpenInBrowser={onOpenFileInBrowser}/>}</PopupPresence>
+    <PopupPresence>{debug && dispatchLogFor && <DispatchLog taskId={dispatchLogFor} onClose={() => setDispatchLogFor(null)}/>}</PopupPresence>
   </section>;
 }

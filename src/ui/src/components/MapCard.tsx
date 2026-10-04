@@ -1,3 +1,4 @@
+import { PopupPresence, PopupSurface } from "./PopupMotion";
 import { openNativeBrowser } from "../deviceBrowser";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -72,7 +73,7 @@ function MapSheet({ place, current, onClose }: { place: MapPlace; current: strin
   const located = place.lat !== null && place.lng !== null;
   const links = mapLinks(place, platformOf(navigator.userAgent));
   return createPortal(
-    <div className="map-sheet-backdrop" onClick={onClose}>
+    <PopupSurface className="map-sheet-backdrop" onClick={onClose}>
       <div className="map-sheet" role="dialog" aria-modal="true" aria-label={`在地图中查看 ${place.name}`} onClick={(e) => e.stopPropagation()}>
         <header className="map-sheet-head">
           <div>
@@ -103,7 +104,7 @@ function MapSheet({ place, current, onClose }: { place: MapPlace; current: strin
         </ul>
         <p className="muted tiny map-sheet-note">选过的应用会记在这台设备上，之后点地点直接用它打开。网页看不到手机装了哪些应用，未安装的会打开网页版或没有反应。</p>
       </div>
-    </div>,
+    </PopupSurface>,
     document.body,
   );
 }
@@ -120,7 +121,7 @@ export function MapCard({ place: given }: { place: MapPlace }) {
   const saved = useSavedApp();
   const focusBack = useRef<HTMLButtonElement | HTMLAnchorElement | null>(null);
   // Back to the card itself: a tap does not focus a button in Safari, so there is no "previous focus" to restore.
-  const closeSheet = useCallback(() => { setOpen(false); focusBack.current?.focus(); }, []);
+  const closeSheet = useCallback(() => { setOpen(false); }, []);
   useEffect(() => {
     if (given.lat !== null) return;
     const controller = new AbortController();
@@ -172,7 +173,7 @@ export function MapCard({ place: given }: { place: MapPlace }) {
           </button>
         )}
       </div>
-      {open && <MapSheet place={place} current={app?.id ?? null} onClose={closeSheet} />}
+      <PopupPresence onExited={() => focusBack.current?.focus()}>{open && <MapSheet place={place} current={app?.id ?? null} onClose={closeSheet} />}</PopupPresence>
     </>
   );
 }

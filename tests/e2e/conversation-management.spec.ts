@@ -60,6 +60,7 @@ test.describe("conversation management", () => {
     await expect(open).toBeVisible();
     await expect(open.getByRole("menuitem")).toHaveText(["重命名", "归档"]);
     await expect(open.getByRole("menuitem", { name: /删除/ })).toHaveCount(0);
+    await expect.poll(() => open.evaluate(n => n.getAnimations().length)).toBe(0);
     const box = await open.boundingBox();
     const viewport = page.viewportSize()!;
     expect(box).not.toBeNull();

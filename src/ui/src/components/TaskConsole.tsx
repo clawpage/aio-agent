@@ -1,3 +1,4 @@
+import { PopupSurface } from "./PopupMotion";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { api, ApiError, browserApi } from "../api";
@@ -127,7 +128,7 @@ export function TaskConsole({ target, tab, label, primary, watching = false, clo
   }, [close]);
 
   return createPortal(
-    <div ref={overlay} className="task-console-overlay" role="presentation" onClick={(e) => { if (e.target === e.currentTarget) close(); }}>
+    <PopupSurface ref={overlay} className="task-console-overlay" role="presentation" onClick={(e) => { if (e.target === e.currentTarget) close(); }}>
       <div className={`task-console ${watching ? "watching" : ""}`} role="dialog" aria-modal="true" aria-label={label}>
         <header className="task-console-head">
           <span className="task-console-title" title={tab.url}>{tab.title || tab.url}</span>
@@ -145,7 +146,7 @@ export function TaskConsole({ target, tab, label, primary, watching = false, clo
           <button type="button" className="ghost tiny" onClick={onReveal}>在工作区打开</button>
         </div>
       </div>
-    </div>,
+    </PopupSurface>,
     document.body,
   );
 }

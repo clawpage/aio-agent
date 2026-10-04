@@ -34,7 +34,8 @@ async function assertLayout(page: Page) {
   });
   expect(metrics.width).toBeLessThanOrEqual(metrics.viewport);
   expect(metrics.composer.height).toBeLessThan(170);
-  expect(Math.abs(metrics.composer.bottom - metrics.nav.top)).toBeLessThan(2);
+  expect(metrics.nav.top - metrics.composer.bottom).toBeGreaterThanOrEqual(10);
+  expect(metrics.nav.top - metrics.composer.bottom).toBeLessThanOrEqual(14);
   expect(Math.abs(metrics.attachment.top - metrics.send.top)).toBeLessThan(2);
   expect(metrics.title.height).toBeLessThan(28);
   expect(metrics.title.width).toBeGreaterThan(45);

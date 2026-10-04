@@ -1,3 +1,5 @@
+import { createPortal } from "react-dom";
+import { PopupSurface } from "./PopupMotion";
 import { useEffect, useState } from "react";
 import { api } from "../api";
 import type { DispatchLog as Log, DispatchLogEntry, DispatchStep } from "../types";
@@ -86,8 +88,8 @@ export function DispatchLog({ taskId, onClose }: { taskId: string; onClose: () =
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  return (
-    <div className="file-preview-overlay" role="presentation" onClick={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+  return createPortal(
+    <PopupSurface className="file-preview-overlay" role="presentation" onClick={(event) => { if (event.target === event.currentTarget) onClose(); }}>
       <div className="file-preview dispatch-log" role="dialog" aria-modal="true" aria-label="派单日志">
         <header className="file-preview-head">
           <span className="file-preview-name">派单日志{log ? ` · ${log.task.title}` : ""}</span>
@@ -124,6 +126,7 @@ export function DispatchLog({ taskId, onClose }: { taskId: string; onClose: () =
           })}
         </div>
       </div>
-    </div>
+    </PopupSurface>,
+    document.body,
   );
 }

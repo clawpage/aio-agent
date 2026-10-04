@@ -1,3 +1,4 @@
+import { PopupPresence, PopupSurface } from "./PopupMotion";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, ApiError } from "../api";
 import type { CapabilitiesResponse, DocumentReadiness, FileEntry, StatusResponse } from "../types";
@@ -447,10 +448,8 @@ export function Workspace({ open, status, initialPath, onClose, onNotify, browse
   const apps = TABS.filter((t) => canConfigure || t.id !== "api");
   const externalPath = tab === "terminal" ? (terminalId ? `/terminal?session_id=${encodeURIComponent(terminalId)}` : undefined) : currentDef?.path;
 
-  if (!open) return null;
-
   return (
-    <section className={`workspace desktop ${fullscreen ? "fullscreen" : ""}`}>
+    <PopupPresence>{open && <PopupSurface as="section" className={`workspace desktop ${fullscreen ? "fullscreen" : ""}`}>
       <header className="ws-head menubar">
         <span className="menubar-app">{minimized ? "桌面" : currentDef?.label}</span>
         {!minimized && externalPath && (
@@ -616,14 +615,14 @@ export function Workspace({ open, status, initialPath, onClose, onNotify, browse
           </button>
         ))}
       </nav>
-      {filePreview && <FilePreview path={filePreview} onClose={() => setFilePreview(null)} onOpenLink={async url => {
+      <PopupPresence>{filePreview && <FilePreview path={filePreview} onClose={() => setFilePreview(null)} onOpenLink={async url => {
         try { await api.openBrowserTab(url); await navigateTo("browser"); }
         catch (err) { onNotify(err instanceof Error ? err.message : String(err), "error"); }
       }} onOpenInBrowser={async path => {
         try { await api.openBrowserFile(path); await navigateTo("browser"); }
         catch (err) { onNotify(err instanceof Error ? err.message : String(err), "error"); }
-      }} />}
-    </section>
+      }} />}</PopupPresence>
+    </PopupSurface>}</PopupPresence>
   );
 }
 

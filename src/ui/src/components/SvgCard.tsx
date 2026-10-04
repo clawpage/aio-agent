@@ -1,3 +1,4 @@
+import { PopupPresence, PopupSurface } from "./PopupMotion";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
@@ -117,7 +118,7 @@ function SvgViewer({ url, code, onClose }: { url: string; code: string; onClose:
   }, [onClose]);
   const ratio = width / height;
   return createPortal(
-    <div className="image-viewer" role="dialog" aria-modal="true" aria-label="查看大图">
+    <PopupSurface className="image-viewer" role="dialog" aria-modal="true" aria-label="查看大图">
       <div className="image-viewer-bar">
         <span className="image-viewer-hint">{zoom ? "拖动查看，点图缩回" : "点图放大"}</span>
         <button type="button" className="ghost" onClick={() => void download(code)}>下载</button>
@@ -128,7 +129,7 @@ function SvgViewer({ url, code, onClose }: { url: string; code: string; onClose:
           <img src={url} alt="大图" onClick={() => setZoom((z) => !z)} />
         </div>
       </div>
-    </div>,
+    </PopupSurface>,
     document.body,
   );
 }
@@ -169,7 +170,7 @@ export function SvgCard({ code }: { code: string }) {
           </>
         )}
       </figcaption>
-      {viewing && url && !broken && <SvgViewer url={url} code={code} onClose={() => setViewing(false)} />}
+      <PopupPresence>{viewing && url && !broken && <SvgViewer url={url} code={code} onClose={() => setViewing(false)} />}</PopupPresence>
     </figure>
   );
 }

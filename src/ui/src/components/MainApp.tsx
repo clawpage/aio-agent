@@ -1,3 +1,5 @@
+import { useKeyboardViewport } from "../useKeyboardViewport";
+import { PopupPresence, PopupSurface } from "./PopupMotion";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, ApiError } from "../api";
 import type { Conversation, StatusResponse, Task, TaskTab } from "../types";
@@ -32,11 +34,12 @@ async function pushEndpoint(): Promise<string | undefined> {
 }
 
 export function MainApp() {
+    useKeyboardViewport();
     const [mobile, setMobile] = useState(() => matchMedia("(max-width: 900px)").matches);
     const [menuOpen, setMenuOpen] = useState(false);
     const menuButton = useRef<HTMLButtonElement>(null);
     const sidebar = useRef<HTMLElement>(null);
-    const closeMenu = useCallback(() => { setMenuOpen(false); menuButton.current?.focus(); }, []);
+    const closeMenu = useCallback(() => { setMenuOpen(false); }, []);
     useEffect(() => {
         const query = matchMedia("(max-width: 900px)");
         const change = () => { setMobile(query.matches); setMenuOpen(false); };
@@ -109,44 +112,6 @@ export function MainApp() {
     }, [expired]);
     useEffect(() => { void check(); }, [check]);
     useEffect(() => { document.documentElement.dataset.theme = theme; }, [theme]);
-    // iOS does not shrink 100dvh for its keyboard; it scrolls the whole page instead, so the header
-    // slides off (under the status bar in the app). While a keyboard is up, the app is sized to the
-    // area above it and the page stays at the top. Android resizes the page itself.
-    // What a keyboard leaves visible: the visual viewport, or, when only a hardware keyboard's bar
-    // shows and the visual viewport keeps its size, the part the page was scrolled away from.
-    useEffect(() => {
-        const vv = window.visualViewport;
-        if (!vv) return;
-        const root = document.documentElement;
-        const typing = () => { const el = document.activeElement; return !!el && (el.tagName === "TEXTAREA" || (el.tagName === "INPUT" && !["button", "checkbox", "radio", "submit", "file", "range"].includes((el as HTMLInputElement).type)) || (el as HTMLElement).isContentEditable); };
-        let held: number | null = null;
-        const fit = () => {
-            const full = root.clientHeight;
-            const scrolled = Math.max(window.scrollY, vv.offsetTop);
-            const zoomed = Math.abs(vv.scale - 1) > 0.01;
-            let visible = Math.min(vv.height, full - scrolled);
-            // Once the page is put back at the top a bar no longer shows as scroll: keep what was measured while typing.
-            if (typing() && held !== null) visible = Math.min(visible, held);
-            const keyboard = !zoomed && full - visible > 30 && (typing() || full - vv.height > 30);
-            held = keyboard && typing() ? visible : null;
-            if (keyboard) root.style.setProperty("--keyboard-viewport", `${Math.round(visible)}px`);
-            else root.style.removeProperty("--keyboard-viewport");
-            root.classList.toggle("keyboard-open", keyboard);
-            if (keyboard && scrolled > 0) window.scrollTo(0, 0);
-        };
-        const later = () => window.setTimeout(fit, 50);
-        vv.addEventListener("resize", fit);
-        vv.addEventListener("scroll", fit);
-        window.addEventListener("scroll", fit);
-        document.addEventListener("focusin", later);
-        document.addEventListener("focusout", later);
-        fit();
-        return () => {
-            vv.removeEventListener("resize", fit); vv.removeEventListener("scroll", fit); window.removeEventListener("scroll", fit);
-            document.removeEventListener("focusin", later); document.removeEventListener("focusout", later);
-            root.style.removeProperty("--keyboard-viewport"); root.classList.remove("keyboard-open");
-        };
-    }, []);
     useEffect(() => {
         if (!auth)
             return;
@@ -253,8 +218,10 @@ export function MainApp() {
     const startFailed = status && !status.agent.sessionReady && !status.sandbox.idle ? status.sandbox.setupError ?? null : null;
     return <div className="app main-inbox-app">
     <button className="mobile-menu-button ghost" ref={menuButton} aria-label="打开导航" aria-expanded={menuOpen} aria-controls="main-navigation" onClick={() => setMenuOpen(true)}><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
-    {mobile && menuOpen && <div className="mobile-menu-backdrop" onClick={closeMenu} aria-hidden="true"/>}
-    <aside ref={sidebar} id="main-navigation" className={`sidebar ${menuOpen ? "show-mobile" : ""}`} role={mobile && menuOpen ? "dialog" : undefined} aria-modal={mobile && menuOpen ? true : undefined} aria-label="导航" aria-hidden={mobile && !menuOpen ? true : undefined} inert={mobile && !menuOpen}>
+    <PopupPresence animate={mobile} onExited={() => menuButton.current?.focus()}>
+    {(!mobile || menuOpen) && <>
+    {mobile && <PopupSurface className="mobile-menu-backdrop" onClick={closeMenu} aria-hidden="true"/>}
+    <PopupSurface as="aside" ref={sidebar} id="main-navigation" className={`sidebar ${menuOpen ? "show-mobile" : ""}`} role={mobile && menuOpen ? "dialog" : undefined} aria-modal={mobile && menuOpen ? true : undefined} aria-label="导航" aria-hidden={mobile && !menuOpen ? true : undefined} inert={mobile && !menuOpen}>
       <button className="mobile-menu-close ghost" aria-label="关闭导航" onClick={closeMenu}><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden><path d="M6 6l12 12M18 6L6 18"/></svg></button><div className="brand"><BrandMark/><div><strong>一站</strong><span className="muted tiny">什么事情都在这里一站解决吧</span></div></div>
       <button className={`ghost block ${view === "main" ? "active" : ""}`} onClick={() => { detailRequest.current++;closeMenu(); setView("main"); setWorkspace(false); }}>主会话</button>
       <button className={`ghost block ${view === "tasks" ? "active" : ""}`} onClick={() => { detailRequest.current++;closeMenu(); setView("tasks"); setWorkspace(false); }}>任务列表</button>
@@ -263,7 +230,9 @@ export function MainApp() {
       {role === 'owner' && <button className={`ghost block ${view === 'usage' ? 'active' : ''}`} onClick={() => { detailRequest.current++;closeMenu();setView('usage');setWorkspace(false); }}>用量看板</button>}
       <button className="ghost block" onClick={() => { closeMenu(); openWorkspace(); }}>工作区</button>
       <div className="sidebar-foot"><span className="muted tiny">{!status || startFailed ? "正在连接智能体" : "智能体在线"}</span><PushToggle/><button className="ghost block" onClick={() => setTheme(t => t === "dark" ? "light" : "dark")}>{theme === "dark" ? "浅色模式" : "深色模式"}</button>{role === "owner" && <button className={`ghost block ${view === "settings" ? "active" : ""}`} onClick={settings}>配置</button>}<button className="ghost block" onClick={() => void logout()}>退出登录</button></div>
-    </aside>
+    </PopupSurface>
+    </>}
+    </PopupPresence>
     <main className="main" inert={mobile && menuOpen}>
       {notice && <div className="banner" role="alert">{notice}<button onClick={() => setNotice(null)}>关闭</button></div>}
       {startFailed && <div className="banner error">智能体暂未就绪：{startFailed}。消息仍会保留。</div>}
@@ -275,7 +244,7 @@ export function MainApp() {
       {role === 'owner' && view === 'usage' && <UsageDashboard onExpired={expired}/>}
       {view === "detail" && detail && <div className="task-detail"><div className="task-detail-bar"><button className="ghost" onClick={() => setView(detailReturn)}>← 返回{detailReturn==='tasks'?'任务列表':'主会话'}</button><span className="muted tiny">{taskStatusLabels[(taskFeed.tasks.find(t=>t.id===detailTask?.id)??detailTask)?.status??'']??'过程详情'}</span></div><Chat key={detail.id} readOnly conversation={detail} status={status} onConversationChanged={() => { }} onStatusChanged={() => void refreshStatus()} onOpenWorkspace={openWorkspace} onOpenBrowserLink={u => void openLink(u)} onOpenBrowserFile={p => void openFileInBrowser(p)}/></div>}
     </main>
-    {opening && <div className="task-console-overlay opening-overlay" role="presentation">
+    <PopupPresence>{opening && <PopupSurface className="task-console-overlay opening-overlay" role="presentation">
       <div className="opening-card" role="status" aria-live="polite">
         <span className="opening-spinner" aria-hidden="true"/>
         <div className="opening-text">
@@ -285,8 +254,8 @@ export function MainApp() {
         </div>
         <button type="button" className="ghost" onClick={() => opening.controller.abort()}>取消</button>
       </div>
-    </div>}
-    {linkTab && <TaskConsole key={linkTab.id} target={personConsoleTarget} tab={linkTab} label="操作网页" closeLabel="关闭页面" onClose={closeLink} onReveal={() => { setLinkTab(null); revealBrowser(); }}/>}
+    </PopupSurface>}</PopupPresence>
+    <PopupPresence>{linkTab && <TaskConsole key={linkTab.id} target={personConsoleTarget} tab={linkTab} label="操作网页" closeLabel="关闭页面" onClose={closeLink} onReveal={() => { setLinkTab(null); revealBrowser(); }}/>}</PopupPresence>
     <Workspace canConfigure={role === "owner"} open={workspace} status={status} initialPath={workspacePath} browserNonce={browserNonce} onClose={() => { setWorkspace(false); setWorkspacePath(undefined); }} onNotify={notify}/>
   </div>;
 }

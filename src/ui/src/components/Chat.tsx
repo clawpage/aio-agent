@@ -1,3 +1,5 @@
+import { ComposerIcon, useComposerHeight } from "./ComposerControls";
+import { PopupPresence } from "./PopupMotion";
 import { MessageTime, useDisplayClock } from "./MessageTime";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, openEventStream } from "../api";
@@ -88,12 +90,7 @@ export function Chat({
   const stickRef = useRef(true);
   const stateRef = useRef<TimelineState>(timeline);
   stateRef.current = timeline;
-  useEffect(() => {
-    const input = draftRef.current;
-    if (!input) return;
-    input.style.height = "auto";
-    input.style.height = `${input.scrollHeight}px`;
-  }, [draft]);
+  useComposerHeight(draftRef, draft);
   // Stream handlers must not re-run the effect (the SSE connection would drop).
   const onChangedRef = useRef(onConversationChanged);
   onChangedRef.current = onConversationChanged;
@@ -367,14 +364,14 @@ export function Chat({
         </div>
       )}
 
-      {!readOnly && <div className="composer">
+      {!readOnly && <div className={`composer${draft || attachments.length || uploading ? " has-content" : ""}`}>
         {attachments.length > 0 && (
           <div className="chips">
             {attachments.map((a) => (
               <span className="chip" key={a.path}>
                 {a.kind === "image" ? "🖼" : "📄"} {a.name}
                 <button type="button" onClick={() => setAttachments((prev) => prev.filter((x) => x.path !== a.path))} aria-label="移除附件">
-                  ×
+                  <ComposerIcon kind="close"/>
                 </button>
               </span>
             ))}
@@ -401,7 +398,8 @@ export function Chat({
               disabled while an upload or a send is in flight so picking a file
               can never race the composer being cleared on send. */}
           <label className={`file-button ${uploading || busy ? "disabled" : ""}`} aria-disabled={uploading || busy}>
-            {uploading ? "上传中…" : "附件"}
+            <ComposerIcon kind={uploading ? "busy" : "attach"}/>
+            <span className="composer-button-label">{uploading ? "上传中…" : "附件"}</span>
             <input
               type="file"
               multiple
@@ -417,17 +415,19 @@ export function Chat({
           </label>
           <span className="spacer" />
           {running && activeHere ? (
-            <button type="button" className="danger" onClick={() => void stop()}>
-              停止
+            <button type="button" className="danger" onClick={() => void stop()} aria-label="停止" title="停止">
+              <ComposerIcon kind="stop"/><span className="composer-button-label">停止</span>
             </button>
           ) : (
             <button
               type="button"
               className="primary"
+              aria-label={willQueue ? "排队发送" : "发送"}
+              title={willQueue ? "排队发送" : "发送"}
               onClick={() => void send()}
               disabled={busy || uploading || (!draft.trim() && attachments.length === 0)}
             >
-              {willQueue ? "排队发送" : "发送"}
+              <ComposerIcon kind={busy ? "busy" : "send"}/><span className="composer-button-label">{willQueue ? "排队发送" : "发送"}</span>
             </button>
           )}
         </div>
@@ -435,7 +435,7 @@ export function Chat({
       </div>
 
       }
-      {previewPath && <FilePreview path={previewPath} onClose={() => setPreviewPath(null)} onOpenLink={onOpenBrowserLink} onOpenInBrowser={onOpenBrowserFile} />}
+      <PopupPresence>{previewPath && <FilePreview path={previewPath} onClose={() => setPreviewPath(null)} onOpenLink={onOpenBrowserLink} onOpenInBrowser={onOpenBrowserFile} />}</PopupPresence>
     </section>
   );
 }

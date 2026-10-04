@@ -1,3 +1,5 @@
+import { createPortal } from "react-dom";
+import { PopupSurface } from "./PopupMotion";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, API_CREDENTIALS, ApiError } from "../api";
 import { isSandboxLink } from "../sandboxLink";
@@ -215,8 +217,8 @@ export function FilePreview({ path: initialPath, onClose, onOpenLink, onOpenInBr
     void openInBrowser();
   }, [phase, path]);
 
-  return (
-    <div
+  return createPortal(
+    <PopupSurface
       className="file-preview-overlay"
       role="presentation"
       onClick={(event) => {
@@ -365,6 +367,7 @@ export function FilePreview({ path: initialPath, onClose, onOpenLink, onOpenInBr
           </a>
         </footer>
       </div>
-    </div>
+    </PopupSurface>,
+    document.body,
   );
 }

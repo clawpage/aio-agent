@@ -28,6 +28,7 @@ test("long main messages cap at 80%, open in a nine-tenths sheet and retain devi
   await more.click();
   const dialog = page.getByRole("dialog", { name: "完整消息：长消息", exact: true });
   await expect(dialog).toBeVisible();
+  await expect.poll(() => dialog.evaluate(n => n.getAnimations().length)).toBe(0);
   const sheet = (await dialog.boundingBox())!;
   const bottomInset = info.project.name.startsWith("mobile") ? 34 : 0;
   expect(Math.abs(sheet.height - (cap / .8 * .9 + bottomInset))).toBeLessThan(1);

@@ -1,3 +1,5 @@
+import { useKeyboardViewport } from "./useKeyboardViewport";
+import { PopupPresence, PopupSurface } from "./components/PopupMotion";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { isSandboxLink } from "./sandboxLink";
@@ -17,6 +19,7 @@ type SessionState = { checked: boolean; authenticated: boolean; username: string
 const TITLE_MAX_CHARS = 200;
 
 function LegacyApp() {
+  useKeyboardViewport();
   const [session, setSession] = useState<SessionState>({ checked: false, authenticated: false, username: null });
   const [notice, setNotice] = useState<string | null>(null);
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -423,7 +426,7 @@ function LegacyApp() {
         </button>
       </nav>
 
-      {renameTarget && (
+      <PopupPresence>{renameTarget && (
         <RenameDialog
           conversation={renameTarget}
           onCancel={() => setRenameTarget(null)}
@@ -433,9 +436,9 @@ function LegacyApp() {
             notify("已重命名");
           }}
         />
-      )}
+      )}</PopupPresence>
 
-      {toast && <div className={`toast ${toast.level}`}>{toast.text}</div>}
+      <PopupPresence>{toast && <PopupSurface className={`toast ${toast.level}`}>{toast.text}</PopupSurface>}</PopupPresence>
     </div>
   );
 }
@@ -466,6 +469,7 @@ function ConversationRow({
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const firstItemRef = useRef<HTMLButtonElement>(null);
+  const [pendingAction, setPendingAction] = useState<(() => void) | null>(null);
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
 
@@ -541,6 +545,7 @@ function ConversationRow({
         type="button"
         className="conv-menu-button"
         ref={triggerRef}
+        disabled={pendingAction !== null}
         aria-haspopup="menu"
         aria-expanded={open}
         aria-label={`${title} 的操作`}
@@ -548,10 +553,10 @@ function ConversationRow({
       >
         ⋯
       </button>
-      {open &&
+      <PopupPresence onExited={() => { setPendingAction(null); pendingAction?.(); }}>{open &&
         pos &&
         createPortal(
-          <div
+          <PopupSurface
             ref={menuRef}
             className="conv-menu"
             role="menu"
@@ -576,8 +581,8 @@ function ConversationRow({
                 role="menuitem"
                 className="conv-menu-item"
                 onClick={() => {
+                  setPendingAction(() => () => onRestore(conversation));
                   close();
-                  onRestore(conversation);
                 }}
               >
                 恢复
@@ -588,16 +593,16 @@ function ConversationRow({
                 role="menuitem"
                 className="conv-menu-item"
                 onClick={() => {
+                  setPendingAction(() => () => onArchive(conversation));
                   close();
-                  onArchive(conversation);
                 }}
               >
                 归档
               </button>
             )}
-          </div>,
+          </PopupSurface>,
           document.body,
-        )}
+        )}</PopupPresence>
     </div>
   );
 }
@@ -655,7 +660,7 @@ function RenameDialog({
   }, [onSave, value]);
 
   return (
-    <div
+    <PopupSurface
       className="modal-backdrop"
       role="presentation"
       onMouseDown={(event) => {
@@ -694,7 +699,7 @@ function RenameDialog({
           </button>
         </div>
       </div>
-    </div>
+    </PopupSurface>
   );
 }
 

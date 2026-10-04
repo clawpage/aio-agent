@@ -5,7 +5,7 @@ const DESKTOP_ASPECT = 1024 / 1280;
 /** A phone's screen (not a narrow panel on a desktop, which keeps the fitted view): fitted, the desktop is too small to read… */
 const PHONE = "(max-width: 720px)";
 /** …so it is drawn this many screen widths wide, and the black around it pans the view. */
-const PHONE_ZOOM = 1.6;
+const PHONE_ZOOM = 1.3;
 const MIN_ZOOM = 1;
 const MAX_ZOOM = 3.2;
 /** The toolbar's height in the bottom strip (padding included, safe area aside). */

@@ -1,3 +1,4 @@
+import { PopupPresence } from "./PopupMotion";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "../api";
 import type { Task, TaskTab } from "../types";
@@ -114,7 +115,7 @@ export function TaskBrowser({ task, onReveal }: { task: Task; onReveal: () => vo
         {state === "ai" && <button type="button" className="ghost tiny" disabled={busy} onClick={() => void control("take")}>接管</button>}
         {state === "done" && <button type="button" className="ghost tiny" disabled={busy} onClick={() => setWatching(true)}>在浏览器中查看</button>}
       </div>
-      {((human && consoleOpen) || (!human && watching)) && (
+      <PopupPresence>{((human && consoleOpen) || (!human && watching)) && (
         <TaskConsole
           target={consoleTarget}
           tab={tab}
@@ -126,7 +127,7 @@ export function TaskBrowser({ task, onReveal }: { task: Task; onReveal: () => vo
           onClose={() => { setConsoleOpen(false); setWatching(false); }}
           onReveal={() => { setConsoleOpen(false); setWatching(false); onReveal(); }}
         />
-      )}
+      )}</PopupPresence>
     </div>
   );
 }
