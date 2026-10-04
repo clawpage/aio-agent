@@ -82,16 +82,16 @@ curl -s http://127.0.0.1:4891/healthz   # 界面层（控制层提供它需要�
 ## 账号与权限
 
 - owner 保留模型、推理强度和 SOUL 配置。member 的主会话和任务列表只显示本账号内容，不能通过任务 ID 读取、引用或停止他人的任务。
-- member 的派单和执行均由服务端固定为管理员分配的模型 / `high`：默认 `deepseek-v4.1-flash`（Codex），也可分配 `claude-sonnet-5-5`（Claude Code）。忽略客户端模型参数，分配的模型不可用时拒绝执行，不回退 GPT。会话标题由派单器按任务给出。
+- member 的派单和执行均由服务端固定为管理员分配的模型 / `high`：默认 `gpt-6.1-sol`（Codex，经成员模型网关使用控制面的 ChatGPT 登录），也可分配 `claude-sonnet-5-5`（Claude Code）。忽略客户端模型参数，分配的模型不可用时拒绝执行，不换用别的模型。会话标题由派单器按任务给出。
 - member 不展示配置入口、模型与推理参数、SOUL 原文；配置/模型/能力清单接口拒绝访问，JSON 与 SSE 隐去模型配置元数据。正常回答内容不会被关键词过滤。
 - **账号独立环境**：member 的容器、workspace、Codex 记忆/历史、浏览器 profile、终端、任务数据库、SOUL 和文档缓存独立。owner 沿用原容器与数据卷；新成员不复制 owner 的文件或历史。
 - 成员环境默认限制为 2 GiB 内存、2 CPU、1024 个进程，阻止连接内网、宿主服务和其他沙盒；公网仍可访问。网络规则由独立只读守卫容器应用，成员无 NET_ADMIN / NET_RAW 权限。
-- member 不接收 owner 的 ChatGPT token、模型桥管理密钥或 Claude Code 凭据。独立模型网关仅接受该账号凭据下的无状态 DeepSeek high 请求，禁用历史响应查询；分配了 Claude 的账号还可以请求 Messages API（仅 `/v1/messages` 与 `/v1/messages/count_tokens`），模型强制改为分配的模型，owner 的 Claude Code 凭据由网关在宿主侧附加，沙盒内只有该账号自己的网关令牌。分配了 `gpt-6.1-sol` 的账号走同一条无状态 Responses 路由，网关改发到 ChatGPT（`PA_CHATGPT_CODEX_URL`），模型固定为 `gpt-6.1-sol`、思考强度 high、`store:false`、去掉 `service_tier`，控制面自己的 ChatGPT 登录（`codex-login`）由网关在宿主侧附加；控制面没有 ChatGPT 登录时该账号直接报服务不可用，不会退回 DeepSeek。网关监听 `PA_MEMBER_MODEL_PORT`（默认 4902）。
+- member 不接收 owner 的 ChatGPT token 或 Claude Code 凭据。独立模型网关只转发该账号凭据下、分配给它的那一个模型，其余一律拒绝：分配了 Claude 的账号可以请求 Messages API（仅 `/v1/messages` 与 `/v1/messages/count_tokens`），模型强制改为分配的模型，owner 的 Claude Code 凭据由网关在宿主侧附加，沙盒内只有该账号自己的网关令牌。分配了 `gpt-6.1-sol` 的账号走无状态 Responses 路由（禁用历史响应查询），网关发到 ChatGPT（`PA_CHATGPT_CODEX_URL`），模型固定为 `gpt-6.1-sol`、思考强度 high、`store:false`、去掉 `service_tier`，控制面自己的 ChatGPT 登录（`codex-login`）由网关在宿主侧附加；控制面没有 ChatGPT 登录时该账号直接报服务不可用。网关监听 `PA_MEMBER_MODEL_PORT`（默认 4902）。
 - 每个账号都有自己的路径：主控制台是 `<主域名>/u/<用户名>`（根路径和 `/login` 登录后自动跳到自己的地址；同一浏览器一次只登录一个账号，打开别人的地址只显示“这是 X 的页面”，可退出后登录该账号或回到自己的页面）；工作区在同一个工作区域名下是 `<工作区域名>/u/<用户名>/...`（owner 也是 `/u/owner`，旧的根路径和 member 的 `/u/<账号散列>` 链接仍可用），不需要新增 DNS、TLS 或 tunnel 路由。容器与卷名仍按账号散列命名，不会改名。前缀与工作区会话账号不一致时一律 401；不对应任何账号的 `/u/...` 视为沙盒应用自己的路径，按会话账号路由；页面里不带前缀的绝对路径子资源（如 Jupyter 的 `/jupyter/static/...`）按工作区会话所属账号路由，只会到达该账号自己的沙盒。环境启动失败时拒绝连接，绝不退回 owner 沙盒。账号共用同一个浏览器来源，因此同一浏览器先后登录不同账号时，工作区页面（code-server、Jupyter 等）的浏览器端存储是共用的；沙盒文件、进程与记忆的隔离不受影响。
 - 账号配置和登录鉴权由宿主控制面统一管理；容器共享宿主内核，因此这不是抵抗内核漏洞的虚拟机隔离。
 - 创建账号（先构建；使用与服务相同的环境变量/数据目录）：`node --env-file=var/runtime.env bin/create-user.mjs <username>`。Quickstart 使用 `.env`。随机密码写入 `var/user-secrets/<username>.txt`（0600），命令不打印密码、不覆盖已有账号。
 - **邀请码注册**：登录页（或直接打开 `/register`）可切换到注册，填账号（2–40 位小写字母、数字、`-`、`_`）、密码（至少 12 位）和邀请码。邀请码由 owner 在配置页「邀请码」里生成，格式 `XXXX-XXXX-XXXX`，只能用一次：注册成功即作废，未使用的可以手动作废；领用与建号在同一个事务里，两人同时用同一个码只会建成一个账号。注册出来的是普通 member（默认模型同上），注册后直接登录。猜错邀请码与输错密码共用同一套按 IP 的失败锁定。注册页提示去哪里申请邀请码：设置 `PA_INVITE_EMAIL` 后显示该邮箱，否则提示向管理员索取。
-- 分配成员模型：`node --env-file=var/runtime.env bin/set-user-model.mjs <username> <deepseek-v4.1-flash|claude-sonnet-5-5|gpt-6.1-sol>`（compose 模式：`docker compose -p aio exec control node bin/set-user-model.mjs ...`），重启服务后生效。分配 Claude 需要 owner 已配置 Claude Code 凭据，用量计入 owner 的 Claude 账号；分配 `gpt-6.1-sol` 需要控制面已用 `codex-login` 登录 ChatGPT（`AIO_HOST_CODEX=on`），用量计入该 ChatGPT 账号。
+- 分配成员模型：`node --env-file=var/runtime.env bin/set-user-model.mjs <username> <gpt-6.1-sol|claude-sonnet-5-5>`（compose 模式：`docker compose -p aio exec control node bin/set-user-model.mjs ...`），重启服务后生效。分配 Claude 需要 owner 已配置 Claude Code 凭据，用量计入 owner 的 Claude 账号；分配 `gpt-6.1-sol` 需要控制面已用 `codex-login` 登录 ChatGPT（`AIO_HOST_CODEX=on`），用量计入该 ChatGPT 账号。
 
 ## 用量看板
 
@@ -356,41 +356,6 @@ owner 可以把宿主机上的一个知识库 MCP 服务（streamable HTTP）接
 - **唤醒**：控制台回到前台就立刻开始预热；派单、执行任务、打开文件/文档/浏览器、加载工作区页面也会先等容器启动（约半分钟）。隐藏标签页里编辑器的自动重连和后台轮询**不会**唤醒，否则每次停完马上又被叫醒；工作区单独标签页里刷新一下即可唤醒。
 - 休眠期间后台巡检不会把容器拉起，服务重启也不会：停着的容器按休眠接管，定时任务等后台工作照常，用到时才启动。控制台不提示休眠、唤醒或启动中：页面一显示就开始唤醒，没起来之前发的消息照常保留，等待算在这次请求的耗时里；只有启动失败才显示「智能体暂未就绪」。
 
-## 可选：OpenCode Go 桥模型（DeepSeek / MiMo）
-
-统一配置页的模型选择器默认只有 ChatGPT 账号的模型。若本机已装并运行
-`tools/codex-opencode-go`（本地 LiteLLM 的 Responses 桥，监听 `127.0.0.1:4017`，
-上游 `https://opencode.ai/zen/go/v1`），控制面会把桥上的每个模型都列进选择器
-（默认 `deepseek-v4.1-flash` 与 `mimo-v2.6-pro`），可以和 ChatGPT 模型自由切换：
-
-- **自动启用**：`PA_OPENCODE_GO_ENABLED=auto`（默认）只在能取到密钥时才列出这些模型；
-  取不到就完全不出现，ChatGPT 路径与今天完全一致。`on` 会要求启用（取不到密钥会打警告）
-  并保持关闭，`off` 显式关闭。
-- **模型清单**：`PA_OPENCODE_GO_MODELS`（逗号分隔，默认两个模型）。旧变量
-  `PA_OPENCODE_GO_MODEL` 仍可用，设置它等价于只列出那一个模型（优先级更高），
-  既有单模型部署行为不变。
-- **每个模型的思考强度**：DeepSeek 支持 `low`/`high`/`max`，MiMo 上游拒绝 `max`
-  （HTTP 400），只提供 `low`/`high`；两者默认都是 `high`。选择器只列出各模型
-  真实可用的档位，所以不会存下一个每次执行都失败的组合。
-- **密钥**：优先读进程环境变量 `LITELLM_MASTER_KEY`，否则读私有文件
-  `~/.config/codex-opencode-go/secrets.env`（逐行 `KEY=VALUE`，**不执行**）。
-  文件权限宽于 `600`/`400` 时**拒绝使用**并给出可读日志。密钥不写日志、数据库、argv
-  或前端；传给 `docker exec` 时 argv 只出现变量名（`-e LITELLM_MASTER_KEY`），值走子进程环境。
-- **沙箱可达性**：容器内用 `http://host.docker.internal:4017/v1` 访问宿主桥，
-  不是 `127.0.0.1`。provider 用 `-c` 覆盖在命令行注入，不改动容器内 `config.toml`，
-  也不动固定镜像与既有隔离参数。
-- **切换语义**：Codex 只在创建线程时才认 `modelProvider`（`thread/resume` 传它不生效），
-  所以同一个会话换模型若跨了 provider，控制面会用 `thread/fork` 续在新 provider 上并保留
-  历史；provider 不变时仍走普通 resume。ChatGPT 会话的启动/恢复/派生一如既往**不发送**
-  `modelProvider`。
-- **仅支持文本**：两个桥模型的 `inputModalities` 都只有 `text`，带图片的提交会在提交阶段
-  就被拒绝（HTTP 400 `input_unsupported`，中文提示），不会等远端报错。
-- **已知边界**：密钥在沙箱内对进程可见（Codex 需要读取它）——这是该桥的固有代价，
-  与本项目「不桥接宿主机能力」的既有边界不冲突，但请自行评估；桥不可用时该模型只是不出现，
-  不会影响控制面启动。
-
-配置项见 [`.env.example`](.env.example) 的 `PA_OPENCODE_GO_*`。
-
 ## 可选：Claude Code 执行器
 
 统一配置页默认只有 Codex 一个执行器。配置了 Claude Code 凭据后，页面会多出「执行器」选项
@@ -480,8 +445,7 @@ npm run build && npx playwright test --config playwright.local.config.ts
 | `PA_UI_PORT` | `4891` | 界面层所在端口（本机开发时允许 `localhost:<端口>` 作为控制台来源） |
 | `PA_SANDBOX_NODES` | `local=http://127.0.0.1:4894` | 控制面驱动的沙箱节点（`名字=地址`，逗号分隔；第一个承载已有账号，新账号放到剩余内存最多的节点） |
 | `PA_SANDBOX_NODE_TOKENS_FILE` | `var/sandbox-node.env` | 节点令牌：先按节点名取，取不到用 `AIO_SANDBOX_NODE_TOKEN` |
-| `PA_HOST_CODEX` | `on` | `off` 表示本机没有 Codex 登录（控制面容器）：owner 用 Claude Code 或桥模型，不提供 ChatGPT 模型 |
-| `PA_OPENCODE_GO_UPSTREAM_URL` | 桥地址里的 `host.docker.internal` 换成 `127.0.0.1` | 控制面自己访问桥的地址（成员网关转发用）；在容器里设为 `http://host.docker.internal:4017/v1` |
+| `PA_HOST_CODEX` | `on` | `off` 表示本机没有 Codex 登录（控制面容器）：owner 用 Claude Code，不提供 ChatGPT 模型 |
 | `PA_SANDBOXD_PORT` / `PA_SANDBOXD_BIND` / `PA_SANDBOXD_TOKEN_FILE` | `4894` / `127.0.0.1` / 无 | sandboxd 监听地址与节点令牌文件（键 `AIO_SANDBOX_NODE_TOKEN`） |
 | `PA_SANDBOXD_IMAGES` | `ghcr.io/agent-infra/sandbox:1.11.0` | sandboxd 允许的沙箱镜像，其他一律拒绝 |
 | `PA_SANDBOXD_CONTAINER_HOST` | `127.0.0.1` | sandboxd 访问沙箱发布端口的地址；在 Docker Desktop 容器里是 `host.docker.internal` |
@@ -495,12 +459,6 @@ npm run build && npx playwright test --config playwright.local.config.ts
 | `PA_TITLE_MODEL` | `gpt-6-luna` | Codex 执行器时主会话派单器的隔离临时线程（read-only、never、ephemeral）所用模型，派单固定 high；变量名沿用旧称 |
 | `PA_MAX_CONCURRENT_TURNS` | `3` | 跨会话同时执行的主 turn 上限（取值 clamp 到 1–3）；同一会话始终串行，排队 FIFO |
 | `PA_REASONING_SUMMARY` | `concise` | 主 turn 的思考摘要模式（`concise`/`auto`/`detailed`/`none`），不展示原始思维链 |
-| `PA_OPENCODE_GO_ENABLED` | `auto` | 是否列出 OpenCode Go 桥模型；`auto` 仅在有密钥时出现，另有 `on`/`off` |
-| `PA_OPENCODE_GO_BASE_URL` | `http://host.docker.internal:4017/v1` | 沙箱内可达的 LiteLLM Responses 桥地址 |
-| `PA_OPENCODE_GO_MODELS` | `deepseek-v4.1-flash,mimo-v2.6-pro` | 桥模型 id 列表（逗号分隔），决定选择器里出现哪些桥模型 |
-| `PA_OPENCODE_GO_MODEL`（兼容旧配置） | 空 | 设置则只列出这一个桥模型，优先级高于 `PA_OPENCODE_GO_MODELS` |
-| `PA_OPENCODE_GO_PROVIDER_ID` | `opencode_go` | 注入 Codex 的 provider id（与 `~/.codex/opencode-go.config.toml` 保持一致） |
-| `PA_OPENCODE_GO_SECRETS_FILE` / `PA_OPENCODE_GO_ENV_KEY` | `~/.config/codex-opencode-go/secrets.env` / `LITELLM_MASTER_KEY` | 密钥来源（环境变量优先，其次该文件；权限宽于 600/400 拒绝） |
 | `PA_CLAUDE_CODE_ENABLED` | `auto` | 是否提供 Claude Code 执行器；`auto` 仅在取到凭据时出现，另有 `on`/`off` |
 | `PA_CLAUDE_CODE_SECRETS_FILE` | `~/.config/aio-agent/claude-code.env` | `CLAUDE_CODE_OAUTH_TOKEN` 或 `ANTHROPIC_API_KEY` 的私有文件（环境变量优先；权限宽于 600/400 拒绝） |
 | `PA_CLAUDE_CODE_VERSION` | `2.1.284` | 沙箱内固定版 Claude Code CLI（持久卷内，首次使用时安装） |
