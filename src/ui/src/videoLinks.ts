@@ -18,6 +18,8 @@ export interface VideoLink {
   title: string | null;
   /** The player to frame. */
   embed: string;
+  /** The video's own page, rebuilt from its id: on a phone it opens in the browser, or the provider's app. */
+  page: string;
 }
 
 /** At most this many players per message. */
@@ -66,6 +68,7 @@ export function parseVideoUrl(href: string): Omit<VideoLink, "title"> | null {
       provider: "youtube",
       url: href,
       embed: `https://www.youtube-nocookie.com/embed/${id}?rel=0&playsinline=1${start ? `&start=${start}` : ""}`,
+      page: `https://www.youtube.com/watch?v=${id}${start ? `&t=${start}s` : ""}`,
     };
   }
 
@@ -81,9 +84,19 @@ export function parseVideoUrl(href: string): Omit<VideoLink, "title"> | null {
       provider: "bilibili",
       url: href,
       embed: `https://player.bilibili.com/player.html?${id}&page=${page}&autoplay=0&high_quality=1${start ? `&t=${start}` : ""}`,
+      page: `https://www.bilibili.com/video/${bvid ?? `av${m[2]}`}/${page > 1 || start ? `?${[page > 1 ? `p=${page}` : "", start ? `t=${start}` : ""].filter(Boolean).join("&")}` : ""}`,
     };
   }
   return null;
+}
+
+/**
+ * A phone or tablet (by its user agent, as the map card decides which map app to use):
+ * there a video opens in the browser, which hands it to the YouTube or Bilibili app
+ * when one is installed, instead of playing in the page.
+ */
+export function opensVideosOutside(userAgent: string): boolean {
+  return /iPhone|iPad|iPod|Android/i.test(userAgent) || (/Macintosh/i.test(userAgent) && /Mobile/i.test(userAgent));
 }
 
 export function extractVideoLinks(markdown: string): VideoLink[] {

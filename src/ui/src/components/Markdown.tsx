@@ -4,6 +4,7 @@ import DOMPurify from "dompurify";
 import { api, API_CREDENTIALS } from "../api";
 import { isSandboxLink, isWorkspaceFilePath, workspaceFileKind, workspaceFilePathFromHref } from "../sandboxLink";
 import { embedMediaLinks } from "../fileRefs";
+import { opensVideosOutside, parseVideoUrl } from "../videoLinks";
 import { splitMapBlocks, type MessagePart } from "../mapBlocks";
 import { splitSvgBlocks, type SvgPart } from "../svgBlocks";
 import { splitChoiceBlocks, type ChoicePart } from "../choices";
@@ -230,6 +231,9 @@ function MarkdownBlock({
         return;
       }
       const href = anchor.getAttribute("href") ?? "";
+      // On a phone a video link opens in the browser (and from there the YouTube or
+      // Bilibili app), not the sandbox: the anchor already carries target=_blank.
+      if (parseVideoUrl(href) && opensVideosOutside(navigator.userAgent)) return;
       if (onOpenLink && isSandboxLink(href)) {
         // Always intercept http/https: even a modified/ctrl-click goes to the
         // sandbox browser rather than the host.

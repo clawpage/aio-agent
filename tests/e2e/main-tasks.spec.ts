@@ -34,27 +34,50 @@ async function setup(page: Page, rows: Task[] = [], nextBefore:number|null = nul
 /** A real touch tap on touch devices: a mouse click would hide tap-only failures (WebKit drops the click of a prevented press). */
 const press = (info: TestInfo, target: Locator, position?: { x: number; y: number }) => (info.project.use.hasTouch ? target.tap({ position }) : target.click({ position }));
 const send = async (page: Page, text: string) => { await page.getByRole("textbox", { name: "消息", exact: true }).fill(text); await page.getByRole("button", { name: "发送", exact: true }).click(); await expect(page.getByRole("textbox", { name: "消息", exact: true })).toHaveValue(""); };
-test("a YouTube or Bilibili link in a result plays in place in the main inbox", async ({ page }, info) => {
+test("a YouTube or Bilibili link in a result plays in place on a computer, and opens in the browser or app on a phone", async ({ page }, info) => {
     const players: string[] = [];
     for (const host of ["https://www.youtube-nocookie.com/**", "https://player.bilibili.com/**"]) {
         await page.route(host, r => { players.push(r.request().url()); return r.fulfill({ contentType: "text/html", body: "<body style='margin:0;background:#222;color:#fff'>player</body>" }); });
     }
+    await page.context().route(/^https:\/\/www\.(youtube|bilibili)\.com\//, r => r.fulfill({ contentType: "text/html", body: "video page" }));
     const result = "找到两个讲解：\n\n- [3Blue1Brown 讲神经网络](https://www.youtube.com/watch?v=aircAruvnKk&t=90)\n- https://www.bilibili.com/video/BV1bx411c7ux/?p=2\n\n代码里的 `https://youtu.be/dQw4w9WgXcQ` 不算。";
     await setup(page, [{ ...task(1, "completed"), result, completedAt: Date.now() }]);
-    const videos = page.getByTestId("message-videos").locator("iframe");
-    await expect(videos).toHaveCount(2);
-    await expect(videos.nth(0)).toHaveAttribute("src", "https://www.youtube-nocookie.com/embed/aircAruvnKk?rel=0&playsinline=1&start=90");
-    await expect(videos.nth(0)).toHaveAttribute("title", "YouTube 视频：3Blue1Brown 讲神经网络");
-    await expect(videos.nth(1)).toHaveAttribute("src", "https://player.bilibili.com/player.html?bvid=BV1bx411c7ux&page=2&autoplay=0&high_quality=1");
-    await expect(videos.nth(0)).toHaveAttribute("sandbox", "allow-scripts allow-same-origin allow-presentation");
-    // The players load, at 16:9, inside the message, with nothing overflowing a phone.
-    await expect.poll(() => players.length).toBeGreaterThanOrEqual(1);
-    const box = (await videos.nth(0).boundingBox())!;
-    expect(Math.abs(box.width / box.height - 16 / 9)).toBeLessThan(0.02);
+    const videos = page.getByTestId("message-videos");
+    if (info.project.name.startsWith("mobile")) {
+        // On a phone: no player in the page, a card per video that opens its page in a new tab (the browser, or the app).
+        await expect(videos.locator("iframe")).toHaveCount(0);
+        const cards = videos.locator("a.video-link");
+        await expect(cards).toHaveCount(2);
+        await expect(cards.nth(0)).toHaveAttribute("href", "https://www.youtube.com/watch?v=aircAruvnKk&t=90s");
+        await expect(cards.nth(0)).toHaveAttribute("target", "_blank");
+        await expect(cards.nth(0)).toContainText("3Blue1Brown 讲神经网络");
+        await expect(cards.nth(0)).toContainText("在 YouTube 打开");
+        await expect(cards.nth(1)).toHaveAttribute("href", "https://www.bilibili.com/video/BV1bx411c7ux/?p=2");
+        await expect(cards.nth(1)).toContainText("在 B 站 打开");
+        const [tab] = await Promise.all([page.context().waitForEvent("page"), cards.nth(0).click()]);
+        await expect.poll(() => tab.url()).toBe("https://www.youtube.com/watch?v=aircAruvnKk&t=90s");
+        await tab.close();
+        // The link in the text does the same instead of going to the sandbox browser.
+        const [tab2] = await Promise.all([page.context().waitForEvent("page"), page.locator(".markdown").getByRole("link", { name: "3Blue1Brown 讲神经网络", exact: true }).click()]);
+        await expect.poll(() => tab2.url()).toBe("https://www.youtube.com/watch?v=aircAruvnKk&t=90");
+        await tab2.close();
+        expect(players).toEqual([]);
+    } else {
+        const frames = videos.locator("iframe");
+        await expect(frames).toHaveCount(2);
+        await expect(frames.nth(0)).toHaveAttribute("src", "https://www.youtube-nocookie.com/embed/aircAruvnKk?rel=0&playsinline=1&start=90");
+        await expect(frames.nth(0)).toHaveAttribute("title", "YouTube 视频：3Blue1Brown 讲神经网络");
+        await expect(frames.nth(1)).toHaveAttribute("src", "https://player.bilibili.com/player.html?bvid=BV1bx411c7ux&page=2&autoplay=0&high_quality=1");
+        await expect(frames.nth(0)).toHaveAttribute("sandbox", "allow-scripts allow-same-origin allow-presentation");
+        // The players load, at 16:9, inside the message.
+        await expect.poll(() => players.length).toBeGreaterThanOrEqual(1);
+        const box = (await frames.nth(0).boundingBox())!;
+        expect(Math.abs(box.width / box.height - 16 / 9)).toBeLessThan(0.02);
+        // The link itself still opens the page in the sandbox browser.
+        await expect(page.getByRole("link", { name: "3Blue1Brown 讲神经网络" })).toHaveAttribute("href", "https://www.youtube.com/watch?v=aircAruvnKk&t=90");
+    }
     expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1);
-    // The link itself still opens the page in the sandbox browser.
-    await expect(page.getByRole("link", { name: "3Blue1Brown 讲神经网络" })).toHaveAttribute("href", "https://www.youtube.com/watch?v=aircAruvnKk&t=90");
-    await page.getByTestId("message-videos").scrollIntoViewIfNeeded();
+    await videos.scrollIntoViewIfNeeded();
     await page.screenshot({ path: info.outputPath("main-videos.png") });
 });
 test("MP4 attachments and results preview directly in the main inbox",async({page},info)=>{
