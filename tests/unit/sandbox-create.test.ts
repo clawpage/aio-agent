@@ -82,6 +82,54 @@ it("points the browser at a newer build with its libraries, merges the TLS featu
   }
 });
 
+it("recognizes a native Chromium behind its root-owned launcher without restarting it, but still restarts a different build", async () => {
+  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "pa-launcher-")));
+  try {
+    const container = new SandboxContainer(testConfig(dir, 18999), new Logger("error", undefined, false), testNode());
+    const profile = path.join(dir, "profile"), binary = path.join(dir, "native", "chromium");
+    const launcher = path.join(dir, "start-native.sh"), configPath = path.join(dir, "browser-supervisor.json");
+    const proc = path.join(dir, "proc"), backup = path.join(dir, "profile-backup.tgz");
+    fs.mkdirSync(path.dirname(binary)); fs.mkdirSync(profile); fs.mkdirSync(proc);
+    fs.writeFileSync(binary, "native binary");
+    const wrapper = `#!/bin/sh\nexport LD_LIBRARY_PATH=/opt/native/lib\nexec ${binary} "$@"\n`;
+    fs.writeFileSync(launcher, wrapper, { mode: 0o755 });
+    const args = ["--time-zone-for-testing=America/Los_Angeles", "--enable-features=AddTLSServerHandshakePadding", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"];
+    const writeProcess = (executable: string) => fs.writeFileSync(path.join(proc, "456"), [executable, `--user-data-dir=${profile}`, ...args].join("\0") + "\0");
+    fs.writeFileSync(configPath, JSON.stringify({ browser: { binary: launcher, user_data_dir: profile, args, env: { TZ: "America/Los_Angeles" } } }));
+    let rootOwned = true;
+    let signals: string[] = [];
+    vi.spyOn(container, "execInSandbox").mockImplementation(async (argv: string[]) => {
+      const original = argv[argv.indexOf("-c") + 1]!;
+      const script = original.replace("/var/run/gem/browser-supervisor.json", configPath)
+        .replaceAll("'/proc'", JSON.stringify(proc)).replace("'/proc/%s/cmdline'", JSON.stringify(`${proc}/%s`));
+      // A fake /proc and signal sink make the regression safe on Linux as well
+      // as macOS. Only fixture ownership is changed, without requiring root.
+      const setup = `import os\nfrom types import SimpleNamespace\nreal_stat = os.stat\ndef fixture_stat(p, *a, **kw):\n s=real_stat(p,*a,**kw)\n return SimpleNamespace(st_uid=${rootOwned ? "0" : "1000"},st_mode=s.st_mode) if str(p) in ${JSON.stringify([launcher, binary])} else s\nos.stat=fixture_stat\nos.kill=lambda pid,sig: print('SIGNAL',pid,int(sig))\n`;
+      const stdout = execFileSync("python3", ["-c", setup + script, ...argv.slice(argv.indexOf("-c") + 2)], { encoding: "utf8" });
+      signals = stdout.split("\n").filter(line => line.startsWith("SIGNAL"));
+      return { code: 0, stdout: stdout.trim().split("\n").at(-1)! + "\n", stderr: "" };
+    });
+    writeProcess(binary);
+    expect(await container.alignBrowserIdentity("America/Los_Angeles", { binary: launcher, libraryPath: "" }, backup)).toBe(false);
+    expect(signals).toEqual([]);
+    expect(fs.existsSync(backup)).toBe(false);
+    // Repeated control-plane starts keep the same browser and profile.
+    expect(await container.alignBrowserIdentity("America/Los_Angeles", { binary: launcher, libraryPath: "" }, backup)).toBe(false);
+    writeProcess(path.join(dir, "old", "chromium"));
+    expect(await container.alignBrowserIdentity("America/Los_Angeles", { binary: launcher, libraryPath: "" }, backup)).toBe(true);
+    expect(signals).toEqual(["SIGNAL 456 15"]);
+    expect(fs.existsSync(backup)).toBe(true);
+    writeProcess(binary);
+    rootOwned = false;
+    expect(await container.alignBrowserIdentity("America/Los_Angeles", { binary: launcher, libraryPath: "" }, backup)).toBe(true);
+    rootOwned = true;
+    fs.writeFileSync(launcher, wrapper.replace(`exec ${binary}`, `exec env ${binary}`));
+    expect(await container.alignBrowserIdentity("America/Los_Angeles", { binary: launcher, libraryPath: "" }, backup)).toBe(true);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 it("clears a browser profile lock left by a recreated container, and keeps this container's own", async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pa-profile-lock-"));
   try {

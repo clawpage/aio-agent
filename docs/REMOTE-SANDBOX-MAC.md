@@ -84,6 +84,12 @@ docker inspect --format '{{.Name}} {{.HostConfig.Memory}} {{.HostConfig.MemorySw
 和 Ubuntu openh264/xnvctrl 包；无需改业务代码或固定基础镜像版本。
 容器删除重建时不能直接让旧资料在默认 146 浏览器下启动，须先补齐同样的原生入口。
 
+控制面核对运行中的浏览器时，要识别包装器实际 `exec` 的 Chromium 路径，不能直接把
+`/opt/aio-browser/start-native.sh` 与进程命令行比较。`alignBrowserIdentity` 只解析 root
+拥有且不可被组/其他用户写入的简单原生包装器；匹配时保留进程，实际换版本仍备份 profile
+并重启。曾经的直接路径比较会在每次控制面启动时误重启 owner 浏览器，打断页面验证与接管。
+验收：在同一真实沙箱连续运行两次身份核对，都应返回 `same`，Chromium PID/starttime 不变。
+
 旧的固定 Codex、Claude Code 目录与文档 venv 仅移到卷内
 `/home/gem/.codex/tools/arm64-before-migration-20261002`，保留为备份；执行工具重新安装 Intel 版本。
 工作区里的用户自装原生依赖需要按项目重新构建，不直接复用 ARM 二进制。

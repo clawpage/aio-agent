@@ -522,7 +522,7 @@ echo "$dir"`;
     backupPath = path.posix.join(this.#cfg.sandbox.containerCodexHome, "aio-browser", "profile-before-browser-change.tgz"),
   ): Promise<boolean> {
     const script = `
-import json, os, signal, socket, sys, tarfile
+import json, os, shlex, signal, socket, sys, tarfile
 path = '/var/run/gem/browser-supervisor.json'
 if not os.path.exists(path): print('absent'); raise SystemExit(0)
 config = json.load(open(path))
@@ -570,7 +570,27 @@ except OSError:
     pass
 # Restart only a running Chromium that still carries the old identity or binary.
 profile = browser.get('user_data_dir')
-want = os.path.realpath(binary)
+def configured_executable(entry):
+    resolved = os.path.realpath(entry)
+    # The Intel deployment's root-owned launcher exports its native libraries
+    # and execs Chromium. Its path never appears in Chromium's argv. Read only
+    # this simple launcher shape; do not run a shell or guess unknown scripts.
+    try:
+        info = os.stat(resolved)
+        if info.st_uid != 0 or info.st_mode & 0o022: return resolved
+        with open(resolved, 'rb') as f: raw = f.read(4097)
+        if len(raw) > 4096 or not raw.startswith(b'#!/bin/sh\\n'): return resolved
+        lines = [line.strip() for line in raw.decode().splitlines() if line.strip()]
+        if len(lines) != 3 or not lines[1].startswith('export LD_LIBRARY_PATH='): return resolved
+        command = shlex.split(lines[2])
+        if len(command) != 3 or command[0] != 'exec' or command[2] != '$@' or not os.path.isabs(command[1]): return resolved
+        target = os.path.realpath(command[1])
+        info = os.stat(target)
+        if info.st_uid == 0 and not info.st_mode & 0o022: return target
+    except (OSError, UnicodeError, ValueError):
+        pass
+    return resolved
+want = configured_executable(binary)
 stale, moving = [], False
 # A profile carried over from a recreated container still holds that container's
 # lock (<hostname>-<pid>); Chromium then refuses it as in use on another computer
