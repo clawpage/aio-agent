@@ -90,7 +90,8 @@ export function Login({ onSuccess, notice, username: named }: { onSuccess: () =>
         <p className="muted">什么事情都在这里一站解决吧。用管理员给你的账号登录。</p>
         <label className="field">
           <span>账号</span>
-          <input value={username} onChange={e => setUsername(e.target.value)} autoComplete="username" autoFocus={!named} />
+          {/* Account names are matched exactly: a phone must not capitalize or "correct" them. */}
+          <input value={username} onChange={e => setUsername(e.target.value)} autoComplete="username" autoCapitalize="none" autoCorrect="off" spellCheck={false} autoFocus={!named} />
         </label>
         <label className="field">
           <span>密码</span>
