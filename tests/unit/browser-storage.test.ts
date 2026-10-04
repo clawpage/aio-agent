@@ -1,4 +1,7 @@
 import {it, expect} from 'vitest';
+import net from 'node:net';
+import {spawn} from 'node:child_process';
+import {chromium} from 'playwright-core';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -9,7 +12,7 @@ const helper=path.resolve('src/control/browser/scripts/browser-storage.cjs');
 async function run(hang:boolean){
  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'browser-storage-test-'));
  try {
-  fs.writeFileSync(path.join(dir,'index.js'), `const fs=require('node:fs');module.exports={chromium:{connectOverCDP:async()=>({contexts:()=>[{_channel:{setStorageState:async()=>{await new Promise(r=>${hang?'void r':'setTimeout(r,120)'});fs.writeFileSync(${JSON.stringify(path.join(dir,'applied'))},'yes')}}}],newBrowserCDPSession:async()=>({}),close:async()=>fs.writeFileSync(${JSON.stringify(path.join(dir,'cleaned'))},'yes')})}}`);
+  fs.writeFileSync(path.join(dir,'index.js'), `const fs=require('node:fs');module.exports={chromium:{connectOverCDP:async()=>({contexts:()=>[{cookies:async()=>[],_channel:{setStorageState:async()=>{await new Promise(r=>${hang?'void r':'setTimeout(r,120)'});fs.writeFileSync(${JSON.stringify(path.join(dir,'applied'))},'yes')}}}],newBrowserCDPSession:async()=>({}),close:async()=>fs.writeFileSync(${JSON.stringify(path.join(dir,'cleaned'))},'yes')})}}`);
   const state=path.join(dir,'state.json');fs.writeFileSync(state,JSON.stringify({cookies:[{value:'private-test-secret'}],origins:[]}));
   const started=Date.now();
   let output='',code=0;
@@ -36,3 +39,57 @@ it('closes a probe whose creation response arrives after the deadline',async()=>
   expect(fs.existsSync(path.join(dir,'out'))).toBe(false);
  }finally{fs.rmSync(dir,{recursive:true,force:true})}
 });
+
+// A real Chromium: a profile that already holds cookies keeps them (and gets back
+// only the session cookies a restart lost); an empty profile is rebuilt whole.
+const hasChromium=fs.existsSync(chromium.executablePath());
+async function freePort(){return new Promise<number>(resolve=>{const srv=net.createServer().listen(0,'127.0.0.1',()=>{const {port}=srv.address() as net.AddressInfo;srv.close(()=>resolve(port));});});}
+async function withBrowser(fn:(endpoint:string)=>Promise<void>){
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'browser-storage-real-'));
+ const port=await freePort();
+ const proc=spawn(chromium.executablePath(),['--headless=new',`--remote-debugging-port=${port}`,`--user-data-dir=${path.join(dir,'profile')}`,'--no-first-run','about:blank'],{stdio:'ignore'});
+ const endpoint=`http://127.0.0.1:${port}`;
+ try{
+  for(let i=0;i<100;i++){try{if((await fetch(`${endpoint}/json/version`)).ok)break;}catch{/* starting */}await new Promise(r=>setTimeout(r,100));}
+  await fn(endpoint);
+ }finally{const gone=new Promise(r=>proc.once('exit',r));proc.kill('SIGKILL');await gone;fs.rmSync(dir,{recursive:true,force:true,maxRetries:5,retryDelay:100});}
+}
+async function importState(endpoint:string,state:unknown){
+ const file=path.join(fs.mkdtempSync(path.join(os.tmpdir(),'browser-storage-in-')),'state.json');
+ fs.writeFileSync(file,JSON.stringify({schema:1,state}));
+ try{return JSON.parse((await exec(process.execPath,[helper,'import','--vendor',path.resolve('node_modules/playwright-core'),'--endpoint',endpoint,'--in',file],{timeout:20000})).stdout);}
+ finally{fs.rmSync(path.dirname(file),{recursive:true,force:true});}
+}
+const later=Math.floor(Date.now()/1000)+86400*365;
+const snapshot={cookies:[
+ {name:'a1',value:'old-device',domain:'.example.test',path:'/',expires:later,httpOnly:false,secure:false,sameSite:'Lax'},
+ {name:'web_session',value:'old-session',domain:'.example.test',path:'/',expires:-1,httpOnly:true,secure:false,sameSite:'Lax'},
+ {name:'lost_on_restart',value:'s',domain:'.example.test',path:'/',expires:-1,httpOnly:false,secure:false,sameSite:'Lax'},
+ {name:'stale',value:'x',domain:'.example.test',path:'/',expires:Math.floor(Date.now()/1000)-60,httpOnly:false,secure:false,sameSite:'Lax'},
+],origins:[]};
+it.skipIf(!hasChromium)('never rolls a live profile back to a snapshot, and adds back only what it lost',()=>withBrowser(async(endpoint)=>{
+ const browser=await chromium.connectOverCDP(endpoint);
+ try{
+  const context=browser.contexts()[0]!;
+  // Since the snapshot the person signed in again and the site renewed its device id.
+  await context.addCookies([
+   {name:'a1',value:'new-device',domain:'.example.test',path:'/',expires:later},
+   {name:'web_session',value:'new-session',domain:'.example.test',path:'/',expires:later},
+   {name:'since',value:'1',domain:'.example.test',path:'/',expires:later},
+  ]);
+  const out=await importState(endpoint,snapshot);
+  expect(out).toMatchObject({ok:true,merged:{kept:3,added:1}});
+  const jar=Object.fromEntries((await context.cookies()).map(c=>[c.name,c.value]));
+  expect(jar).toEqual({a1:'new-device',web_session:'new-session',since:'1',lost_on_restart:'s'});
+ }finally{await browser.close();}
+}),30000);
+it.skipIf(!hasChromium)('rebuilds an empty profile from the snapshot whole',()=>withBrowser(async(endpoint)=>{
+ const out=await importState(endpoint,snapshot);
+ expect(out.ok).toBe(true);
+ expect(out.merged).toBeUndefined();
+ const browser=await chromium.connectOverCDP(endpoint);
+ try{
+  const jar=Object.fromEntries((await browser.contexts()[0]!.cookies()).map(c=>[c.name,c.value]));
+  expect(jar).toMatchObject({a1:'old-device',web_session:'old-session',lost_on_restart:'s'});
+ }finally{await browser.close();}
+}),30000);

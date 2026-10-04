@@ -131,15 +131,32 @@ async function main() {
       const payload = JSON.parse(fs.readFileSync(args.in, 'utf8'));
       const state = payload.state ?? payload;
       if (!Array.isArray(state.cookies) || !Array.isArray(state.origins)) throw new StorageError('bad_state');
-      // Playwright 1.63.0 public setStorageState hard-codes no timeout. Use the
-      // same pinned channel with a server-side deadline so its finally closes
-      // the internal storage page *before* we detach CDP. An outer Promise.race
-      // alone leaves that page behind. Keep cleanup headroom for the server.
-      if (!context._channel?.setStorageState) throw new StorageError('vendor_incompatible');
-      await step(context._channel.setStorageState({ storageState: state }, {
-        timeout: Math.max(1, LIMIT - (Date.now() - started) - 100),
-      }));
-      result = { state };
+      // The profile lives on a volume: a stopped browser keeps its cookies,
+      // localStorage and IndexedDB, and loses only session cookies. A profile
+      // that still holds cookies is newer than any snapshot (a login since, a
+      // site's device id), and replacing it from one rolled sites back to an old
+      // state: signed out, and seen as a new device on the next sign-in. So it
+      // only gets back the snapshot's cookies it is missing; nothing it has is
+      // changed. Only an empty profile is rebuilt from the snapshot whole.
+      const live = await step(context.cookies());
+      if (live.length) {
+        const key = (c) => `${c.name}\n${c.domain}\n${c.path}\n${c.partitionKey ?? ''}`;
+        const have = new Set(live.map(key));
+        const now = Date.now() / 1000;
+        const missing = state.cookies.filter((c) => !have.has(key(c)) && !(c.expires > 0 && c.expires <= now));
+        if (missing.length) await step(context.addCookies(missing));
+        result = { state, merged: { kept: live.length, added: missing.length } };
+      } else {
+        // Playwright 1.63.0 public setStorageState hard-codes no timeout. Use the
+        // same pinned channel with a server-side deadline so its finally closes
+        // the internal storage page *before* we detach CDP. An outer Promise.race
+        // alone leaves that page behind. Keep cleanup headroom for the server.
+        if (!context._channel?.setStorageState) throw new StorageError('vendor_incompatible');
+        await step(context._channel.setStorageState({ storageState: state }, {
+          timeout: Math.max(1, LIMIT - (Date.now() - started) - 100),
+        }));
+        result = { state };
+      }
     }
   } catch (error) {
     expired = true;
@@ -158,7 +175,7 @@ async function main() {
     fs.chmodSync(args.out, 0o600);
   }
   process.stdout.write(JSON.stringify({ ok: true, cookies: state.cookies.length, origins: state.origins.length,
-    requestedOrigins: result.requestedOrigins,
+    requestedOrigins: result.requestedOrigins, merged: result.merged,
     localStorageEntries: state.origins.reduce((n, o) => n + (o.localStorage?.length || 0), 0),
     indexedDbDatabases: state.origins.reduce((n, o) => n + (o.indexedDB?.length || 0), 0) }) + '\n');
 }
