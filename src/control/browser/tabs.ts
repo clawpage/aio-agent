@@ -102,6 +102,7 @@ export function tabMcpServers(task: BrowserTask): Record<string, unknown> {
 
 /** Appended to an execution thread's instructions: browser work goes through its own tabs. */
 export const TAB_POLICY =
+  "每个执行任务都可按用户请求使用自己的 aio_tabs 浏览器工具；派单 resources 中的 browser 只是提前唤醒浏览器的提示，缺少它不代表没有浏览器权限。实际工具调用会按需检查并恢复浏览器。需要网页查询、商品图片或填写表单时直接调用工具，不要仅凭资源列表声称没有权限；实际失败时按工具错误说明未完成部分。" +
   "浏览器操作只使用 aio_tabs 工具：你只能操作本任务创建的标签页，其他任务的标签页只能只读查看，可与其他任务并行；不要使用 `aio browser` 命令行或 /v1/browser 接口，它们操作整个浏览器的当前页面，会打断并行任务。" +
   "每个用户只有这一个浏览器，里面有用户的登录状态：不要自己另起浏览器（例如 Playwright/Puppeteer 的 launch、headless Chrome、新的用户数据目录），那样没有登录状态，也不要清除 cookie 或站点数据。" +
   "网站要登录时调用 browser_login：先看清登录框，写出 steps（点开登录入口、把 {{username}} 填进账号框、{{password}} 填进密码框、提交），密码器代入用户保存的值执行，你看不到值，也不要自己填写、读取或向用户索要密码；以前成功过的步骤会自动沿用。之后读取页面，用 browser_login_report 报告是否成功；失败按出错的步骤改写 steps 重试，最多 3 次，仍不行就调用 browser_request_human。用户为这个网站记的是 Google 登录时，它会告诉你点 Google 按钮、选哪个账号。" +
@@ -196,6 +197,7 @@ export class TabServer implements TabServerLike {
     }
     const started = await this.#container.execDetached(["sh", "-c", 'exec node "$1" >>/tmp/aio-tabs.log 2>&1', "sh", this.scriptPath], {
       env: {
+        ...(this.#cfg.browser.readyGateway ? { AIO_TABS_READY_URL: this.#cfg.browser.readyGateway.url, AIO_TABS_READY_TOKEN: this.#cfg.browser.readyGateway.token } : {}),
         AIO_TABS_VERSION: version,
         AIO_TABS_PORT: String(TAB_SERVER_PORT),
         AIO_TABS_PLAYWRIGHT: path.posix.join(this.#cfg.browser.toolDir, "patchright-core"),

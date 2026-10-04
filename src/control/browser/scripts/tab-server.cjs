@@ -34,6 +34,8 @@ const path = require('node:path');
 const VERSION = process.env.AIO_TABS_VERSION || 'dev';
 const PORT = Number(process.env.AIO_TABS_PORT || 8190);
 const CDP = process.env.AIO_TABS_CDP || 'http://127.0.0.1:9222';
+const READY_URL = process.env.AIO_TABS_READY_URL;
+const READY_TOKEN = process.env.AIO_TABS_READY_TOKEN;
 const OUTPUT_DIR = process.env.AIO_TABS_OUTPUT || '/home/gem/workspace/.scratch/artifacts/browser';
 const STATE_FILE = process.env.AIO_TABS_STATE || '/tmp/aio-tabs-state.json';
 /** Where browser_save_image may write (the person's workspace). */
@@ -1299,6 +1301,16 @@ async function callTool(ctx, name, args, signal) {
   if (!tool) return { content: [{ type: 'text', text: `未知工具：${name}` }], isError: true };
   try {
     return await serialized(ctx.key, async () => {
+      // The dispatcher's resource prediction is not an access grant. A task can
+      // discover it needs a browser later; recover it before any tool side effect.
+      if (READY_URL) {
+        const ready = await fetch(READY_URL, {
+          method: 'POST', headers: { authorization: `Bearer ${READY_TOKEN}` },
+          signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(120000)]) : AbortSignal.timeout(120000),
+        });
+        await ready.body?.cancel();
+        if (!ready.ok) throw new Error('浏览器暂未就绪，自动恢复失败；请稍后重试。不是浏览器授权缺失。');
+      }
       touchTask(ctx.key, ctx.title);
       // Waiting for a person has its own clock; everything else is bounded, and a
       // late run is left behind so this task's next call is not stuck behind it.

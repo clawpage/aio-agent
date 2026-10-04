@@ -11,6 +11,7 @@ import type {ShareStore} from './share.js';
 import type {DecisionGateway} from './decision.js';
 import type {KbGateway} from './kb.js';
 import type {ScheduleGateway} from './scheduleTool.js';
+import type {BrowserGateway} from './browser/gateway.js';
 import type {HostTokenSource} from './codex/hostTokens.js';
 import type {ImageGateway} from './imageTool.js';
 
@@ -30,7 +31,7 @@ export class MemberModelGateway {
   private claudeModels=new Map<string,string>();
   private gptUsers=new Set<string>();
   private server:http.Server|null=null;
-  constructor(private cfg:Config,private log:Logger,private share?:ShareStore,private decision?:DecisionGateway,private kb?:KbGateway,private schedule?:ScheduleGateway,private hostTokens?:Pick<HostTokenSource,'getTokens'|'invalidate'>,private image?:ImageGateway){}
+  constructor(private cfg:Config,private log:Logger,private share?:ShareStore,private decision?:DecisionGateway,private kb?:KbGateway,private schedule?:ScheduleGateway,private hostTokens?:Pick<HostTokenSource,'getTokens'|'invalidate'>,private image?:ImageGateway,private browser?:BrowserGateway){}
   provision(cfg:Config):void {
     fs.mkdirSync(cfg.dataDir,{recursive:true,mode:0o700});
     const file=path.join(cfg.dataDir,'model-token');
@@ -46,6 +47,7 @@ export class MemberModelGateway {
     this.kb?.provision(cfg);
     this.schedule?.provision(cfg);
     this.image?.provision(cfg);
+    this.browser?.provision(cfg);
     if(cfg.memberModel===MEMBER_GPT_MODEL)this.gptUsers.add(cfg.runtimeUserId!);else this.gptUsers.delete(cfg.runtimeUserId!);
     if(cfg.memberModel!==MEMBER_CLAUDE_MODEL){this.claudeModels.delete(cfg.runtimeUserId!);return;}
     const claudeSecret=path.join(cfg.dataDir,'claude.env');
@@ -63,6 +65,7 @@ export class MemberModelGateway {
       if(this.kb&&(req.url??'').startsWith('/kb/')){await this.kb.handle(req,res);return;}
       if(this.schedule&&(req.url??'').startsWith('/schedule/')){await this.schedule.handle(req,res);return;}
       if(this.image&&(req.url??'').startsWith('/image/')){await this.image.handle(req,res);return;}
+      if(this.browser&&(req.url??'').startsWith('/browser/')){await this.browser.handle(req,res);return;}
       const match=/^\/u\/(user_[a-zA-Z0-9]+)\/v1\/responses$/.exec(req.url??'');
       const messages=/^\/u\/(user_[a-zA-Z0-9]+)\/anthropic(\/v1\/messages(?:\/count_tokens)?)(\?beta=true)?$/.exec(req.url??'');
       const userId=match?.[1]??messages?.[1];

@@ -19,7 +19,7 @@ export function memberConfig(base: Config, userId: string, port: number, model: 
     dbPath:path.join(dataDir,'agent.sqlite'),logDir:path.join(dataDir,'logs'),
     ownerPassword:'',ownerPasswordReset:false,ownerSecretPath:path.join(dataDir,'unused-secret'),
     agent:{...base.agent,defaultModel:model},
-    browser:{...base.browser,releaseWhenIdle:base.browser.memberReleaseWhenIdle},
+    browser:{...base.browser,readyGateway:undefined,releaseWhenIdle:base.browser.memberReleaseWhenIdle},
     sandbox:{...base.sandbox,releaseWhenIdle:base.sandbox.memberReleaseWhenIdle,hostPort:port,containerName:`aio-user-${suffix}`,
       networkName:`aio-user-${suffix}`,workspaceVolume:`aio-user-${suffix}-workspace`,
       // Owner PA_SANDBOX_EXTRA_ENV is never inherited; only the fixed flag Chromium needs

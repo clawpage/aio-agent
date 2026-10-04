@@ -60,6 +60,9 @@ describe("main inbox delegation", () => {
         const chat=submit("hi"); await tick();
         const first=tasks.get(chat.id)!;
         expect(db.prepare("SELECT browser_required FROM turns WHERE id=?").get(first.turn_id)?.browser_required).toBe(0);
+        const prompt = codex.startedTurns[0]!.text;
+        expect(prompt).not.toContain("没有 browser 不操作");
+        expect(prompt).toContain("即使没有声明 browser，也可按用户请求使用本任务的 aio_tabs 工具");
         codex.plan=async()=>JSON.stringify({title:"网页",related:[],dependencies:[],resources:["browser"]});
         const web=submit("打开网页"); await tick();
         expect(db.prepare("SELECT browser_required FROM turns WHERE id=?").get(tasks.get(web.id)!.turn_id)?.browser_required).toBe(1);

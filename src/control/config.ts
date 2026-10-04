@@ -148,6 +148,8 @@ export function loadConfig(): {
    * the tabs from a snapshot when the browser is next needed.
    */
   browser: {
+    /** Account-scoped readiness callback used only when an actual browser tool runs. */
+    readyGateway?: { url: string; token: string };
     /** Master switch; when off the browser lifecycle is a no-op (always awake). */
     enabled: boolean;
     /**

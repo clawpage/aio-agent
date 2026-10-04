@@ -3,6 +3,7 @@ import fs from "node:fs";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
+import http from "node:http";
 import { createRequire } from "node:module";
 import { chromium, type Browser } from "playwright-core";
 import { patchedPatchright } from "../helpers/patchright.js";
@@ -34,6 +35,9 @@ const setMemory = (fraction: number, kills = 0) => {
 };
 let base = "";
 let server: import("node:http").Server;
+let readyServer: http.Server;
+let readyCalls = 0;
+let readyStatus = 200;
 
 /** Load a fresh copy of the server module (a restart), listening on its own port. */
 async function startServer(): Promise<void> {
@@ -46,7 +50,17 @@ async function startServer(): Promise<void> {
 beforeAll(async () => {
   if (!hasChromium) return;
   const cdpPort = await freePort();
-  browser = await chromium.launch({ headless: true, args: [`--remote-debugging-port=${cdpPort}`] });
+  readyServer = http.createServer(async (req, res) => {
+    readyCalls += 1;
+    expect(req.method).toBe("POST");
+    expect(req.headers.authorization).toBe("Bearer test-ready-token");
+    // No Chromium exists until a real tool call passes the recovery barrier.
+    if (readyStatus === 200 && !browser) browser = await chromium.launch({ headless: true, args: [`--remote-debugging-port=${cdpPort}`] });
+    res.writeHead(readyStatus).end();
+  });
+  await new Promise<void>(resolve => readyServer.listen(0, "127.0.0.1", resolve));
+  process.env.AIO_TABS_READY_URL = `http://127.0.0.1:${(readyServer.address() as net.AddressInfo).port}/browser/ready`;
+  process.env.AIO_TABS_READY_TOKEN = "test-ready-token";
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "tabs-"));
   process.env.AIO_TABS_CDP = `http://127.0.0.1:${cdpPort}`;
   // The library as the sandbox runs it: patched by the build (scripts/patchright-patch.mjs).
@@ -72,6 +86,9 @@ beforeAll(async () => {
 afterAll(async () => {
   if (!hasChromium) return;
   server.close();
+  readyServer.close();
+  delete process.env.AIO_TABS_READY_URL;
+  delete process.env.AIO_TABS_READY_TOKEN;
   await browser.close();
   fs.rmSync(patchright, { recursive: true, force: true });
 });
@@ -90,6 +107,27 @@ const records = async (key?: string) => ((await (await fetch(`${base}/tabs${key 
 const control = async (tab: string, action: string, key?: string) => fetch(`${base}/control`, { method: "POST", body: JSON.stringify({ tab, action, key }) });
 const page = (title: string, body: string) => `data:text/html,<title>${title}</title><p id="p">${body}</p><input id="q"><a href="data:text/html,<title>Next</title>next">go</a>`;
 const tabIdOf = (r: Rpc) => /标签页 (t\d+)/.exec(text(r))?.[1];
+
+it.skipIf(!hasChromium)("cold-starts on tool use, leaves metadata asleep and never navigates after recovery fails", async () => {
+  const before = readyCalls;
+  await fetch(`${base}/mcp`, { method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }) });
+  expect(readyCalls).toBe(before);
+  expect(browser).toBeUndefined();
+  readyStatus = 503;
+  try {
+    const failed = await call("lazy", "browser_navigate", { url: page("lazy", "must not open") });
+    expect(failed.result?.isError).toBe(true);
+    expect(text(failed)).toContain("自动恢复失败");
+    expect(await records("lazy")).toEqual([]);
+    expect(browser).toBeUndefined();
+  } finally { readyStatus = 200; }
+  const opened = await call("lazy", "browser_navigate", { url: page("lazy", "recovered") });
+  expect(opened.result?.isError).not.toBe(true);
+  expect(text(await call("lazy", "browser_get_text"))).toContain("recovered");
+  await call("lazy", "browser_tab_close");
+  expect(readyCalls).toBe(before + 4);
+});
 
 it.skipIf(!hasChromium)("tells the agent to retry a human check in a fresh tab before asking the person", async () => {
   const res = await fetch(`${base}/mcp`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: {} }) });

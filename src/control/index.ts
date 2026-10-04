@@ -22,6 +22,7 @@ import { SandboxNodes } from "./sandbox/nodes.js";
 import { DocumentService } from "./documents/service.js";
 import { BrowserRuntime } from "./browser/runtime.js";
 import { BrowserService } from "./browser/service.js";
+import { BrowserGateway } from "./browser/gateway.js";
 import type { BrowserRuntimeLike } from "./browser/lifecycle.js";
 import { HostTokenSource } from "./codex/hostTokens.js";
 import { SandboxCodexSession } from "./codex/sandboxCodex.js";
@@ -393,7 +394,14 @@ async function main(): Promise<void> {
     chatgptUrl:ctx.cfg.hostCodex.chatgptUrl,workspace:ctx.cfg.sandbox.containerWorkspaceDir,
     filesFor:async id=>sandboxImageFiles(id===ctx.cfg.runtimeUserId?ctx:await ctx.runtimeForUser!(id))}):undefined;
   image?.provision(ctx.cfg);
-  const modelGateway=new MemberModelGateway(ctx.cfg,ctx.log,ctx.share,decision,kb,schedule,ctx.hostTokens,image);
+  const browserGateway=new BrowserGateway({port:ctx.cfg.memberModelPort??4902,log:ctx.log,
+    readyFor:async id=>{
+      const runtime=id===ctx.cfg.runtimeUserId?ctx:await ctx.runtimeForUser!(id);
+      await runtime.agent.ensureSandbox();
+      await runtime.browser.withCall("call",()=>undefined);
+    }});
+  browserGateway.provision(ctx.cfg);
+  const modelGateway=new MemberModelGateway(ctx.cfg,ctx.log,ctx.share,decision,kb,schedule,ctx.hostTokens,image,browserGateway);
   await modelGateway.start();
   // Phone notifications: one key pair and one subscription store for every account.
   ctx.push=new PushService({db:ctx.db,log:ctx.log,keyFile:path.join(ctx.cfg.dataDir,"vapid.json"),subject:`https://${ctx.cfg.primaryHost}`});
