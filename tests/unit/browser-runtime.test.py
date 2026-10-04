@@ -25,7 +25,7 @@ sys.dont_write_bytecode = True
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))
-SCRIPT = os.path.join(REPO, "src", "server", "browser", "scripts", "browser-runtime.py")
+SCRIPT = os.path.join(REPO, "src", "control", "browser", "scripts", "browser-runtime.py")
 
 
 def load_module() -> Any:

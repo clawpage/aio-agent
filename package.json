@@ -18,7 +18,7 @@
     "start:sandbox": "node dist/sandbox/index.js",
     "start:ui": "node src/ui/edge.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.server.json --noEmit",
-    "test": "vitest run",
+    "test": "vitest run && python3 tests/unit/browser-runtime.test.py",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
     "smoke": "node tests/e2e/live-smoke.mjs",
