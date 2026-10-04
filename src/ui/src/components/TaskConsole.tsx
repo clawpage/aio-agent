@@ -8,6 +8,9 @@ import { DesktopFrame, usePhoneDesktop } from "./DesktopFrame";
 // `aio=<NOVNC_ASSET_VERSION>`: a new URL, so phones load the patched noVNC instead of a cached copy (see novncPatch).
 export const DESKTOP_PATH = "/vnc/vnc.html?autoconnect=1&resize=scale&reconnect=1&path=ws&aio=4";
 
+/** How often an open console tells the sandbox its tab is still the one on screen (the sandbox forgets after 45 s). */
+const CONSOLE_PIN_RENEW_MS = 15_000;
+
 /** How a console puts its tab's window on top of the desktop: a task's tab, or the person's own. */
 export interface ConsoleTarget {
   focus: (tab: string) => Promise<unknown>;
@@ -51,6 +54,15 @@ export function TaskConsole({ target, tab, label, primary, watching = false, clo
     } catch (err) {
       setNotice(err instanceof Error ? err.message : String(err));
     }
+  }, [target, tab.id]);
+
+  // While the console is on screen its tab stays on top of the desktop: the sandbox keeps the
+  // tab it was last told about above other tasks' new windows for a short while, so renew it.
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === "visible") void target.focus(tab.id).catch(() => undefined);
+    }, CONSOLE_PIN_RENEW_MS);
+    return () => window.clearInterval(timer);
   }, [target, tab.id]);
 
   // Someone is looking at this browser: keep it from being released as idle while the

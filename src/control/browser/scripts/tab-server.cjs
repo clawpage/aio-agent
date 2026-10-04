@@ -157,14 +157,47 @@ function register(page, key, title, extra = {}) {
 async function adoptNew(page, key, title, targetId) {
   const tab = register(page, key, title, targetId ? { targetId } : {});
   await enforceFinishedCap(key);
-  await refocusHuman();
+  const front = frontTab();
+  if (front && front.key === key && front.id !== tab.id) {
+    // The page the person is looking at opened it (a link they clicked), or the task they
+    // watch moved on: show the new window, and keep that one on top from now on.
+    if (pinned && pinned.tabId === front.id) pin(tab);
+    return tab;
+  }
+  keepFront();
   return tab;
 }
 
-/** A new tab opened by any task must never pull the page a person is typing in to the back. */
-async function refocusHuman() {
-  const held = [...registry.values()].filter((t) => t.holder === 'human' && !t.page.isClosed()).sort((a, b) => b.humanSince - a.humanSince)[0];
-  if (held) await held.page.bringToFront().catch(() => undefined);
+// -------------------------------------------------- what the person looks at
+
+/**
+ * The tab a person's open browser console shows. It stays on top of the desktop
+ * whatever other tasks open meanwhile: openbox raises every new window when it maps
+ * it, a moment after Chromium has returned, so a new window of another task would
+ * otherwise cover the page the person watches or operates. Set when a console shows
+ * a tab (and renewed while it stays open), and when a person takes a tab over.
+ */
+const PIN_MS = Number(process.env.AIO_TABS_PIN_MS || 45 * 1000);
+let pinned = null;
+
+function pin(tab) {
+  pinned = { tabId: tab.id, until: Date.now() + PIN_MS };
+}
+
+/** The tab that must stay on top: the one an open console shows, else the latest a person took over. */
+function frontTab() {
+  if (pinned && pinned.until > Date.now()) {
+    const tab = registry.get(pinned.tabId);
+    if (tab && !tab.page.isClosed()) return tab;
+  }
+  return [...registry.values()].filter((t) => t.holder === 'human' && !t.page.isClosed()).sort((a, b) => b.humanSince - a.humanSince)[0] || null;
+}
+
+/** Bring the front tab back on top now, and again after a late-mapping window could have covered it. */
+function keepFront() {
+  const raise = () => { const tab = frontTab(); if (tab) void tab.page.bringToFront().catch(() => undefined); };
+  raise();
+  for (const ms of [250, 800, 2000]) setTimeout(raise, ms).unref();
 }
 
 // ------------------------------------------------------- human hand-over
@@ -199,6 +232,7 @@ async function takeControl(tab) {
   tab.holder = 'human';
   tab.humanSince = Date.now();
   save();
+  pin(tab);
   await tab.page.bringToFront().catch(() => undefined);
 }
 
@@ -325,7 +359,8 @@ async function newTab(key, title) {
   const browser = context.browser();
   const session = await browser.newBrowserCDPSession();
   try {
-    const { targetId } = await session.send('Target.createTarget', { url: 'about:blank', newWindow: true });
+    // While a person looks at another tab the window opens without taking focus (keepFront still guards its stacking).
+    const { targetId } = await session.send('Target.createTarget', { url: 'about:blank', newWindow: true, background: Boolean(frontTab()) });
     // Other tasks may open windows at the same moment: take the page this call created.
     const known = new Set([...registry.values()].map((t) => t.page));
     const deadline = Date.now() + 15000;
@@ -725,6 +760,9 @@ async function personOpen(body) {
   const url = String(body.url || '');
   if (!/^https?:\/\//i.test(url) && !isWorkspaceFile(url)) return { status: 400, body: { error: 'bad_url' } };
   const tab = await newTab(PERSON, '你打开的网页');
+  // The person asked for this page: it is what they look at now.
+  pin(tab);
+  await tab.page.bringToFront().catch(() => undefined);
   await tab.page.goto(url, { waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => undefined);
   // Nobody else sees this tab: its record carries the page's own title for the person.
   tab.title = (await tab.page.title().catch(() => '')) || tab.title;
@@ -751,6 +789,8 @@ async function personPointer(body) {
   if (body.action === 'focus') {
     const watched = registry.get(String(body.tab || ''));
     if (!watched || watched.page.isClosed() || (body.task && watched.key !== body.task)) return { status: 404, body: { error: 'no_tab', message: '这个标签页已经关闭或不属于该任务' } };
+    // The console keeps showing this tab: other tasks' new windows go underneath it.
+    pin(watched);
     await watched.page.bringToFront().catch(() => undefined);
     return { status: 200, body: { tab: watched.id, current: cursors.get(watched.key) || watched.id, title: await watched.page.title().catch(() => ''), url: safeUrl(watched.page) } };
   }
