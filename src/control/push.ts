@@ -92,22 +92,27 @@ export class PushService {
     return (this.#db.prepare("SELECT COUNT(*) AS n FROM push_subscriptions WHERE owner_id=?").get(ownerId) as { n: number }).n;
   }
 
-  /** The console is on screen (its presence heartbeat). */
-  presence(ownerId: string, now = Date.now()): void {
-    this.#seen.set(ownerId, now);
+  /**
+   * The console is on screen on one device (its presence heartbeat). Only that device,
+   * named by its own push subscription, is spared notifications meanwhile: a console
+   * left open on a computer must not silence the phone.
+   */
+  presence(ownerId: string, endpoint: unknown, now = Date.now()): void {
+    if (typeof endpoint === "string" && validEndpoint(endpoint)) this.#seen.set(`${ownerId}\n${endpoint}`, now);
   }
 
-  foreground(ownerId: string, now = Date.now()): boolean {
-    return now - (this.#seen.get(ownerId) ?? 0) < FOREGROUND_MS;
+  /** Whether this device shows the console right now. */
+  foreground(ownerId: string, endpoint: string, now = Date.now()): boolean {
+    return now - (this.#seen.get(`${ownerId}\n${endpoint}`) ?? 0) < FOREGROUND_MS;
   }
 
-  /** Send to every device of the account; skipped while the console is on screen unless forced. Returns how many accepted it. */
+  /** Send to every device of the account except one showing the console now (unless forced). Returns how many accepted it. */
   async notify(ownerId: string, payload: PushPayload, opts: { force?: boolean } = {}): Promise<number> {
-    if (!opts.force && this.foreground(ownerId)) return 0;
     const rows = this.#db.prepare("SELECT endpoint,p256dh,auth FROM push_subscriptions WHERE owner_id=?").all(ownerId) as Array<{ endpoint: string; p256dh: string; auth: string }>;
-    let sent = 0;
+    let sent = 0, onScreen = 0, failed = 0;
     await Promise.all(rows.map(async (row) => {
       if (!validEndpoint(row.endpoint)) return;
+      if (!opts.force && this.foreground(ownerId, row.endpoint)) { onScreen += 1; return; }
       try {
         await this.#send({ endpoint: row.endpoint, keys: { p256dh: row.p256dh, auth: row.auth } }, JSON.stringify({ url: "/", ...payload }), {
           TTL: 24 * 3600, urgency: "normal", vapidDetails: { subject: this.#subject, publicKey: this.publicKey, privateKey: this.#privateKey },
@@ -119,9 +124,12 @@ export class PushService {
         // 404/410: the browser dropped this subscription for good.
         if (status === 404 || status === 410) this.#db.prepare("DELETE FROM push_subscriptions WHERE endpoint=?").run(row.endpoint);
         else this.#db.prepare("UPDATE push_subscriptions SET failures=failures+1 WHERE endpoint=?").run(row.endpoint);
+        failed += 1;
         this.#log.warn("push not delivered", { status: status ?? null, host: new URL(row.endpoint).hostname });
       }
     }));
+    // Every decision is visible afterwards: what was sent, and to how many devices, or why not.
+    this.#log.info("push", { owner: ownerId, tag: payload.tag ?? null, devices: rows.length, sent, onScreen, failed, ...(opts.force ? { forced: true } : {}) });
     return sent;
   }
 }

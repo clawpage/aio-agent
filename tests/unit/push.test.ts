@@ -49,7 +49,7 @@ describe("phone notifications", () => {
     expect(push.count("member_1")).toBe(0);
   });
 
-  it("sends signed, to every device, but not while the console is on screen unless forced", async () => {
+  it("sends signed, to every device except the one showing the console, unless forced", async () => {
     const { push, send } = service();
     push.subscribe("owner_1", sub());
     push.subscribe("owner_1", sub("https://fcm.googleapis.com/fcm/send/other"));
@@ -59,10 +59,20 @@ describe("phone notifications", () => {
     expect(options.vapidDetails).toMatchObject({ subject: "https://agent.example.com", publicKey: push.publicKey });
     expect(options.TTL).toBe(86400);
     expect(subscription.endpoint).toBeTruthy();
-    push.presence("owner_1");
-    expect(await push.notify("owner_1", { title: "x", body: "y" })).toBe(0);
+    // A console on screen without notifications on (a computer) silences nothing.
+    push.presence("owner_1", undefined);
+    expect(await push.notify("owner_1", { title: "x", body: "y" })).toBe(2);
+    // The device showing the console is spared; the other still hears about it.
+    push.presence("owner_1", subscription.endpoint);
+    expect(push.foreground("owner_1", subscription.endpoint)).toBe(true);
+    send.mockClear();
+    expect(await push.notify("owner_1", { title: "x", body: "y" })).toBe(1);
+    expect((send.mock.calls[0] as unknown as [{ endpoint: string }])[0].endpoint).not.toBe(subscription.endpoint);
     expect(await push.notify("owner_1", { title: "x", body: "y" }, { force: true })).toBe(2);
-    expect(push.foreground("owner_1", Date.now() + 60_000)).toBe(false);
+    expect(push.foreground("owner_1", subscription.endpoint, Date.now() + 60_000)).toBe(false);
+    // Another account's heartbeat with this address changes nothing here.
+    push.presence("owner_2", "https://fcm.googleapis.com/fcm/send/other");
+    expect(push.foreground("owner_1", "https://fcm.googleapis.com/fcm/send/other")).toBe(false);
   });
 
   it("drops a subscription the push service says is gone", async () => {

@@ -416,7 +416,8 @@ export function createApiRouter(context: AppContext): Router {
     requireSession,
     asyncHandler(async (req, res) => {
       context.idle?.foreground();
-      context.push?.presence(ctxOf(req).session!.ownerId);
+      // The device's own push subscription, when it has one: only that device stays quiet while on screen.
+      context.push?.presence(ctxOf(req).session!.ownerId, req.body?.endpoint);
       res.json({ ok: true });
     }),
   );

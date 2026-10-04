@@ -22,6 +22,13 @@ function hostOf(url: string): string {
     try { return new URL(url).host || url; } catch { return url; }
 }
 
+/** This device's push subscription address, if notifications are on here. */
+async function pushEndpoint(): Promise<string | undefined> {
+    if (!("serviceWorker" in navigator) || !("PushManager" in window)) return undefined;
+    const registration = await navigator.serviceWorker.getRegistration("/").catch(() => undefined);
+    return (await registration?.pushManager.getSubscription().catch(() => null))?.endpoint;
+}
+
 export function MainApp() {
     const [mobile, setMobile] = useState(() => matchMedia("(max-width: 900px)").matches);
     const [menuOpen, setMenuOpen] = useState(false);
@@ -114,8 +121,9 @@ export function MainApp() {
         } };
         const timer = setInterval(() => void renew(), 15 * 60000);
         // Only while the console is actually on screen: this is the foreground half of idle detection.
+        // It names this device's push subscription (if any), so only this device skips notifications while on screen.
         const present = () => { if (document.visibilityState === "visible")
-            void api.presence().catch(() => undefined); };
+            void pushEndpoint().then((endpoint) => api.presence(endpoint)).catch(() => undefined); };
         present();
         const presence = setInterval(present, 20000);
         const visible = () => { if (document.visibilityState === "visible") {

@@ -23,9 +23,12 @@ it("subscribes this account's device, sends a test, marks presence and unsubscri
   expect((await h.request("/api/push/subscribe", { method: "POST", headers: { cookie }, body: JSON.stringify({ subscription }) })).status).toBe(403);
   expect((await h.request("/api/push/subscribe", { method: "POST", headers, body: JSON.stringify({ subscription: { ...subscription, endpoint: "http://169.254.169.254/latest" } }) })).status).toBe(400);
   expect(await (await h.request("/api/push/subscribe", { method: "POST", headers, body: JSON.stringify({ subscription }) })).json()).toEqual({ ok: true, devices: 1 });
-  // The test notification goes out even while the console is on screen.
+  // A console on screen elsewhere (no subscription named) leaves this device notified...
   await h.request("/api/presence", { method: "POST", headers, body: "{}" });
-  expect(h.ctx.push!.foreground("owner_1")).toBe(true);
+  expect(h.ctx.push!.foreground("owner_1", subscription.endpoint)).toBe(false);
+  // ...while this device showing the console is spared, but the test notification still goes out.
+  await h.request("/api/presence", { method: "POST", headers, body: JSON.stringify({ endpoint: subscription.endpoint }) });
+  expect(h.ctx.push!.foreground("owner_1", subscription.endpoint)).toBe(true);
   expect(await (await h.request("/api/push/test", { method: "POST", headers, body: "{}" })).json()).toEqual({ sent: 1 });
   expect(send).toHaveBeenCalledTimes(1);
   await h.request("/api/push/unsubscribe", { method: "POST", headers, body: JSON.stringify({ endpoint: subscription.endpoint }) });
