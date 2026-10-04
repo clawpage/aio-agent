@@ -2,9 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, type KeyboardEvent, type Mouse
 import { marked } from "marked";
 import DOMPurify from "dompurify";
 import { api, API_CREDENTIALS } from "../api";
-import { isSandboxLink, isWorkspaceFilePath, workspaceFileKind, workspaceFilePathFromHref } from "../sandboxLink";
+import { isWebLink, isSandboxLink, isWorkspaceFilePath, workspaceFileKind, workspaceFilePathFromHref } from "../sandboxLink";
+import { openNativeBrowser } from "../deviceBrowser";
 import { embedMediaLinks } from "../fileRefs";
-import { opensVideosOutside, parseVideoUrl } from "../videoLinks";
 import { splitMapBlocks, type MessagePart } from "../mapBlocks";
 import { splitSvgBlocks, type SvgPart } from "../svgBlocks";
 import { splitChoiceBlocks, type ChoicePart } from "../choices";
@@ -231,14 +231,14 @@ function MarkdownBlock({
         return;
       }
       const href = anchor.getAttribute("href") ?? "";
-      // On a phone a video link opens in the browser (and from there the YouTube or
-      // Bilibili app), not the sandbox: the anchor already carries target=_blank.
-      if (parseVideoUrl(href) && opensVideosOutside(navigator.userAgent)) return;
       if (onOpenLink && isSandboxLink(href)) {
-        // Always intercept http/https: even a modified/ctrl-click goes to the
-        // sandbox browser rather than the host.
+        // Private IP links stay reachable from the sandbox network.
         event.preventDefault();
         onOpenLink(href);
+        return;
+      }
+      if (isWebLink(href) && !isSandboxLink(href)) {
+        if (openNativeBrowser(href)) event.preventDefault();
         return;
       }
       // Never let any other href navigate the host page, or trigger a host

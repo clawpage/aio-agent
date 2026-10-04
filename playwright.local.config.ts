@@ -10,7 +10,7 @@ import { defineConfig, devices } from "@playwright/test";
  *   npm run build
  *   npx playwright test --config playwright.local.config.ts tests/e2e/browser-auto-open.spec.ts
  */
-const PORT = 4288;
+const PORT = Number(process.env.PA_TEST_PORT ?? 4288);
 
 export default defineConfig({
   testDir: "tests/e2e",
@@ -30,6 +30,9 @@ export default defineConfig({
     "**/documents.spec.ts",
     "**/mobile-chat.spec.ts",
     "**/settings.spec.ts",
+    "**/safe-area.spec.ts",
+    "**/device-links.spec.ts",
+    "**/message-preview.spec.ts",
     "**/working.spec.ts",
     "**/main-tasks.spec.ts",
     "**/terminal-sessions.spec.ts",
@@ -81,6 +84,9 @@ export default defineConfig({
         "**/browser-lifecycle.spec.ts",
         "**/mobile-chat.spec.ts",
         "**/settings.spec.ts",
+        "**/safe-area.spec.ts",
+        "**/device-links.spec.ts",
+        "**/message-preview.spec.ts",
         "**/working.spec.ts",
     "**/main-tasks.spec.ts",
         "**/terminal-sessions.spec.ts",

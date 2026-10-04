@@ -1,5 +1,7 @@
 import { memo, useEffect, useState } from "react";
 import type { ShareLink } from "../shareLinks";
+import { openNativeBrowser } from "../deviceBrowser";
+import { isSandboxLink } from "../sandboxLink";
 
 async function copyText(text: string): Promise<boolean> {
   try {
@@ -25,7 +27,7 @@ async function copyText(text: string): Promise<boolean> {
  * sheet where the device has one, and opening it in the person's own browser (it
  * is a public page meant for other people, not something to drive in the sandbox).
  */
-export const ShareCard = memo(function ShareCard({ link }: { link: ShareLink }) {
+export const ShareCard = memo(function ShareCard({ link, onOpenLink }: { link: ShareLink; onOpenLink?: (url: string) => void }) {
   const [copied, setCopied] = useState<"ok" | "failed" | null>(null);
   useEffect(() => {
     if (!copied) return;
@@ -49,7 +51,8 @@ export const ShareCard = memo(function ShareCard({ link }: { link: ShareLink }) 
             分享
           </button>
         )}
-        <a className="ghost tiny share-card-open" href={link.url} target="_blank" rel="noopener noreferrer">打开</a>
+        <a className="ghost tiny share-card-open" href={link.url} target="_blank" rel="noopener noreferrer" onClick={event => { if (isSandboxLink(link.url)) { event.preventDefault(); onOpenLink?.(link.url); }
+          else if (openNativeBrowser(link.url)) event.preventDefault(); }}>打开</a>
       </div>
     </div>
   );

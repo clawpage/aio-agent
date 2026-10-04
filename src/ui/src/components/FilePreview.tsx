@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, API_CREDENTIALS, ApiError } from "../api";
+import { isSandboxLink } from "../sandboxLink";
+import { openDeviceBrowser } from "../deviceBrowser";
 import {
   baseName,
   isMarkdownPath,
@@ -192,6 +194,7 @@ export function FilePreview({ path: initialPath, onClose, onOpenLink, onOpenInBr
   const raster = isPreviewableKind(kind) && kind !== "image" && kind !== "video" && kind !== "audio";
   const refs = useMemo(() => markdown && text ? extractFileRefs(text) : [], [markdown, text]);
   const openLink = async (url: string) => {
+    if (!isSandboxLink(url)) { openDeviceBrowser(url); return; }
     if (onOpenLink) { onOpenLink(url); onClose(); return; }
     try { await api.openBrowserTab(url); }
     catch (err) { setError(err instanceof Error ? err.message : String(err)); }

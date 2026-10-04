@@ -1,3 +1,4 @@
+import { openNativeBrowser } from "../deviceBrowser";
 import { memo } from "react";
 import { opensVideosOutside, type VideoLink } from "../videoLinks";
 
@@ -15,7 +16,7 @@ export const VideoEmbed = memo(function VideoEmbed({ video }: { video: VideoLink
   const label = PROVIDER[video.provider];
   if (opensVideosOutside(navigator.userAgent)) {
     return (
-      <a className="video-link" data-provider={video.provider} href={video.page} target="_blank" rel="noopener noreferrer" aria-label={`在${label}打开${video.title ? `：${video.title}` : "视频"}`}>
+      <a className="video-link" data-provider={video.provider} href={video.page} onClick={event => { if (openNativeBrowser(video.page)) event.preventDefault(); }} target="_blank" rel="noopener noreferrer" aria-label={`在${label}打开${video.title ? `：${video.title}` : "视频"}`}>
         <span className="video-link-play" aria-hidden="true">▶</span>
         <span className="video-link-text">
           <span className="video-link-title">{video.title ?? `${label} 视频`}</span>

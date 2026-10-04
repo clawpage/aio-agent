@@ -3,8 +3,8 @@
  *
  * Two kinds of href are meaningful:
  *
- *  - An absolute http/https URL is the only kind of link the console hands to
- *    the sandbox browser.
+ *  - Absolute http/https URLs open on the device. Only private IP URLs use
+ *    the sandbox browser; hostnames are never resolved to classify links.
  *  - An absolute path inside the sandbox workspace (`/home/gem/workspace/...`)
  *    is a file the agent produced; it is previewed (raster images) or downloaded
  *    through the authenticated control-plane API.
@@ -49,7 +49,7 @@ const KIND_BY_EXTENSION: Record<string, WorkspaceFileKind> = {
   py: "text", sh: "text", sql: "text", diff: "text", patch: "text",
 };
 
-export function isSandboxLink(href: string): boolean {
+export function isWebLink(href: string): boolean {
   if (!href) return false;
   let parsed: URL;
   try {
@@ -60,6 +60,27 @@ export function isSandboxLink(href: string): boolean {
     return false;
   }
   return parsed.protocol === "http:" || parsed.protocol === "https:";
+}
+
+/** Private IPv4, carrier-grade NAT/Tailscale, loopback and local IPv6. */
+export function isSandboxLink(href: string): boolean {
+  if (!isWebLink(href)) return false;
+  const host = new URL(href).hostname;
+  if (/^\d+\.\d+\.\d+\.\d+$/.test(host)) {
+    const [a, b] = host.split(".").map(Number);
+    return a === 10 || a === 127 || a === 0 ||
+      (a === 172 && b! >= 16 && b! <= 31) ||
+      (a === 192 && b === 168) || (a === 169 && b === 254) ||
+      (a === 100 && b! >= 64 && b! <= 127);
+  }
+  if (!host.startsWith("[")) return false;
+  const ip = host.slice(1, -1).toLowerCase();
+  if (ip === "::" || ip === "::1" || /^(?:fc|fd)[0-9a-f]{2}:|^fe[89ab][0-9a-f]:/.test(ip)) return true;
+  // WHATWG normalizes dotted IPv4-mapped IPv6 into two hexadecimal groups.
+  const mapped = /^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(ip);
+  if (!mapped) return false;
+  const first = parseInt(mapped[1]!, 16), last = parseInt(mapped[2]!, 16);
+  return isSandboxLink(`http://${first >> 8}.${first & 255}.${last >> 8}.${last & 255}/`);
 }
 
 /**

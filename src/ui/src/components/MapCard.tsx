@@ -1,3 +1,4 @@
+import { openNativeBrowser } from "../deviceBrowser";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { mapLinks, platformOf, tilesFor, type MapPlace } from "../mapBlocks";
@@ -93,7 +94,7 @@ function MapSheet({ place, current, onClose }: { place: MapPlace; current: strin
         <ul className="map-nav-list">
           {links.map((link) => (
             <li key={link.id}>
-              <a {...linkProps(link.href)} data-nav={link.id} onClick={() => { saveApp(link.id); onClose(); }}>
+              <a {...linkProps(link.href)} data-nav={link.id} onClick={event => { if (openNativeBrowser(link.href)) event.preventDefault(); saveApp(link.id); onClose(); }}>
                 <span>{link.label}</span>
                 <span aria-hidden="true">{link.id === current ? "当前 ›" : "›"}</span>
               </a>
@@ -158,9 +159,9 @@ export function MapCard({ place: given }: { place: MapPlace }) {
       <div className="map-card">
         {app ? (
           <>
-            {map && <a {...linkProps(app.href)} className="map-card-map" tabIndex={-1} aria-hidden="true">{map}</a>}
+            {map && <a {...linkProps(app.href)} className="map-card-map" onClick={event => { if (openNativeBrowser(app.href)) event.preventDefault(); }} tabIndex={-1} aria-hidden="true">{map}</a>}
             <div className="map-card-info">
-              <a {...linkProps(app.href)} ref={(el) => { focusBack.current = el; }} className="map-card-open" aria-label={`在${app.id === "system" ? "地图应用" : app.label}中查看：${place.name}`}>{text}</a>
+              <a {...linkProps(app.href)} ref={(el) => { focusBack.current = el; }} className="map-card-open" onClick={event => { if (openNativeBrowser(app.href)) event.preventDefault(); }} aria-label={`在${app.id === "system" ? "地图应用" : app.label}中查看：${place.name}`}>{text}</a>
               <button type="button" className="map-card-switch ghost tiny" onClick={() => setOpen(true)} aria-label="换个地图应用">换</button>
             </div>
           </>

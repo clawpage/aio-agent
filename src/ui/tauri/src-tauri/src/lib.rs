@@ -25,12 +25,16 @@ pub fn run() {
 /// WKWebView keeps it out of the bottom safe area and a white strip shows there.
 #[cfg(target_os = "ios")]
 fn full_screen_on_ios(webview: tauri::webview::PlatformWebview) {
-    use objc2::{msg_send, runtime::AnyObject};
+    use objc2::{msg_send, runtime::{AnyClass, AnyObject}};
     // UIScrollViewContentInsetAdjustmentBehavior.never
     const NEVER: isize = 2;
     unsafe {
         let wk = webview.inner() as *mut AnyObject;
         let scroll: *mut AnyObject = msg_send![wk, scrollView];
         let _: () = msg_send![scroll, setContentInsetAdjustmentBehavior: NEVER];
+        // Resolve Swift through Objective-C at runtime: Cargo builds its cdylib
+        // before Xcode links the app's Swift sources.
+        let browser = AnyClass::get(c"AIODeviceBrowser").expect("native browser bridge");
+        let _: () = msg_send![browser, installDeviceBrowser: wk];
     }
 }

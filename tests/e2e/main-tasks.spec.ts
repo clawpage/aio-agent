@@ -74,7 +74,7 @@ test("a YouTube or Bilibili link in a result plays in place on a computer, and o
         await expect.poll(() => players.length).toBeGreaterThanOrEqual(1);
         const box = (await frames.nth(0).boundingBox())!;
         expect(Math.abs(box.width / box.height - 16 / 9)).toBeLessThan(0.02);
-        // The link itself still opens the page in the sandbox browser.
+        // The link itself opens the page in the device browser.
         await expect(page.getByRole("link", { name: "3Blue1Brown 讲神经网络" })).toHaveAttribute("href", "https://www.youtube.com/watch?v=aircAruvnKk&t=90");
     }
     expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1);
@@ -567,7 +567,7 @@ test("a task that needs you in the browser shows why, hands you its own tab to o
     await expect(page.getByRole("group", { name: "任务浏览器：AI 操作中" }).getByRole("button", { name: "接管", exact: true })).toBeVisible();
 });
 test("a link in a reply opens in the person's own tab, operated on the desktop like a hand-over", async ({ page }, info) => {
-    const row: Task = { ...task(1, "completed"), title: "找餐厅", result: "推荐这家：[Nopa 订位](https://www.opentable.com/r/nopa)", completedAt: 2000 };
+    const row: Task = { ...task(1, "completed"), title: "找餐厅", result: "推荐这家：[Nopa 订位](http://192.168.1.20/r/nopa)", completedAt: 2000 };
     const calls: Array<{ route: string; body: Record<string, unknown> }> = [];
     const order: string[] = [];
     await page.route("**/api/browser/person/*", async r => {
@@ -575,7 +575,7 @@ test("a link in a reply opens in the person's own tab, operated on the desktop l
         const body = r.request().postDataJSON();
         calls.push({ route, body });
         if (route === "pointer") order.push(`focus:${body.tab}`);
-        await r.fulfill({ json: { title: "OpenTable", url: "https://www.opentable.com/r/nopa", closed: body.tab } });
+        await r.fulfill({ json: { title: "OpenTable", url: "http://192.168.1.20/r/nopa", closed: body.tab } });
     });
     const lease: string[] = [];
     await page.route("**/api/browser/viewer/heartbeat", r => { lease.push("heartbeat"); order.push("heartbeat"); return r.fulfill({ json: { ok: true, generation: 1, status: {} } }); });
@@ -596,7 +596,7 @@ test("a link in a reply opens in the person's own tab, operated on the desktop l
     await expect(page.getByRole("status")).toContainText("正在打开链接");
     const panel = page.getByRole("dialog", { name: "操作网页" });
     await expect(panel).toBeVisible();
-    expect(opened).toBe("https://www.opentable.com/r/nopa");
+    expect(opened).toBe("http://192.168.1.20/r/nopa");
     // No workspace, no host tab: the page is operated right here, on the desktop, with its window on top.
     await expect(page.locator(".workspace")).toHaveCount(0);
     expect(page.context().pages()).toHaveLength(1);

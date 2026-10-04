@@ -11,6 +11,7 @@
 		1CC63D77C0ABA3C5BDD5F61C /* CoreGraphics.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 4BD95568272B9EE4FDA725B4 /* CoreGraphics.framework */; };
 		2784B3A88BF2A7E0CAB71441 /* QuartzCore.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 6BF15AE332B022EE18EA3B9E /* QuartzCore.framework */; };
 		2C6119EFA34FA736B1AEB7BA /* MetalKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 4580647AEC8BE2493C9E69FC /* MetalKit.framework */; };
+		3D968DEE3ECB9A19A99D83CB /* SafariServices.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = E7055801B203050C9DD0FBAE /* SafariServices.framework */; };
 		40961B71F520AF4F3A94D89B /* Metal.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = E0BE080E2CC17E9BC1E396D2 /* Metal.framework */; };
 		4A79E8588FF62B162298325A /* assets in Resources */ = {isa = PBXBuildFile; fileRef = 64D566DCD20E89D389748590 /* assets */; };
 		4B9A0BA151298A4C02F7F1D0 /* WebKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 6168494EC78E45023E0D83E0 /* WebKit.framework */; };
@@ -18,6 +19,7 @@
 		8EC7FF2B61822C90ABE7E3FF /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 8FB3085F98BE3BB4E135B227 /* LaunchScreen.storyboard */; };
 		9A9947E4208F04DA650E2F3B /* UIKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 5E1DECBD0A98B1B2CF2C5933 /* UIKit.framework */; };
 		BE5C79DC2428D591BA0A1018 /* main.mm in Sources */ = {isa = PBXBuildFile; fileRef = 779DE91E2D7D05F7B07CA819 /* main.mm */; };
+		C4627A9B83620F437D087C13 /* DeviceBrowser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4818F11747B1F60A501FE826 /* DeviceBrowser.swift */; };
 		FA0055BCDD39DEB5A691BC40 /* Security.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = E7A371CF2340447F59190DCB /* Security.framework */; };
 /* End PBXBuildFile section */
 
@@ -25,6 +27,7 @@
 		344A0799E5A1397CEEB0310A /* libapp.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; path = libapp.a; sourceTree = "<group>"; };
 		4312470B2DA91F3B9E398215 /* aio-agent-tauri_iOS.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = "aio-agent-tauri_iOS.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		4580647AEC8BE2493C9E69FC /* MetalKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = MetalKit.framework; path = System/Library/Frameworks/MetalKit.framework; sourceTree = SDKROOT; };
+		4818F11747B1F60A501FE826 /* DeviceBrowser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceBrowser.swift; sourceTree = "<group>"; };
 		4BD95568272B9EE4FDA725B4 /* CoreGraphics.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreGraphics.framework; path = System/Library/Frameworks/CoreGraphics.framework; sourceTree = SDKROOT; };
 		5E1DECBD0A98B1B2CF2C5933 /* UIKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = UIKit.framework; path = System/Library/Frameworks/UIKit.framework; sourceTree = SDKROOT; };
 		6168494EC78E45023E0D83E0 /* WebKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WebKit.framework; path = System/Library/Frameworks/WebKit.framework; sourceTree = SDKROOT; };
@@ -39,6 +42,7 @@
 		CBB5F56BA32FF91C52228292 /* bindings.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = bindings.h; sourceTree = "<group>"; };
 		D21F570ECC79ECE2F5FAD9EF /* main.rs */ = {isa = PBXFileReference; path = main.rs; sourceTree = "<group>"; };
 		E0BE080E2CC17E9BC1E396D2 /* Metal.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Metal.framework; path = System/Library/Frameworks/Metal.framework; sourceTree = SDKROOT; };
+		E7055801B203050C9DD0FBAE /* SafariServices.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SafariServices.framework; path = System/Library/Frameworks/SafariServices.framework; sourceTree = SDKROOT; };
 		E7A371CF2340447F59190DCB /* Security.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Security.framework; path = System/Library/Frameworks/Security.framework; sourceTree = SDKROOT; };
 /* End PBXFileReference section */
 
@@ -55,6 +59,7 @@
 				FA0055BCDD39DEB5A691BC40 /* Security.framework in Frameworks */,
 				9A9947E4208F04DA650E2F3B /* UIKit.framework in Frameworks */,
 				4B9A0BA151298A4C02F7F1D0 /* WebKit.framework in Frameworks */,
+				3D968DEE3ECB9A19A99D83CB /* SafariServices.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -94,6 +99,7 @@
 				E0BE080E2CC17E9BC1E396D2 /* Metal.framework */,
 				4580647AEC8BE2493C9E69FC /* MetalKit.framework */,
 				6BF15AE332B022EE18EA3B9E /* QuartzCore.framework */,
+				E7055801B203050C9DD0FBAE /* SafariServices.framework */,
 				E7A371CF2340447F59190DCB /* Security.framework */,
 				5E1DECBD0A98B1B2CF2C5933 /* UIKit.framework */,
 				6168494EC78E45023E0D83E0 /* WebKit.framework */,
@@ -127,6 +133,7 @@
 		B76BACDB15403B1D699DFA76 /* aio-agent-tauri */ = {
 			isa = PBXGroup;
 			children = (
+				4818F11747B1F60A501FE826 /* DeviceBrowser.swift */,
 				779DE91E2D7D05F7B07CA819 /* main.mm */,
 				81EFA87C923B650BB53487CB /* bindings */,
 			);
@@ -245,6 +252,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				C4627A9B83620F437D087C13 /* DeviceBrowser.swift in Sources */,
 				BE5C79DC2428D591BA0A1018 /* main.mm in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

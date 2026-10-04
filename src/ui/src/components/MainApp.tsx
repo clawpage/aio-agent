@@ -16,6 +16,8 @@ import { ScheduleList } from "./ScheduleList";
 import { VaultList } from "./VaultList";
 import { PushToggle } from "./PushToggle";
 import {taskStatusLabels,type TaskFeed} from '../taskStatus';
+import { isSandboxLink } from "../sandboxLink";
+import { openDeviceBrowser } from "../deviceBrowser";
 /** One owner-facing inbox; executor conversations are implementation details. */
 /** The site a link goes to, named on the opening card. */
 function hostOf(url: string): string {
@@ -198,7 +200,10 @@ export function MainApp() {
             setOpening(o => (o?.controller === controller ? null : o));
         }
     }, [notify, revealBrowser]);
-    const openLink = useCallback((url: string) => openTab("正在打开链接", hostOf(url), signal => api.openBrowserTab(url, signal)), [openTab]);
+    const openLink = useCallback((url: string) => {
+        if (!isSandboxLink(url)) { openDeviceBrowser(url); return; }
+        return openTab("正在打开链接", hostOf(url), signal => api.openBrowserTab(url, signal));
+    }, [openTab]);
     const openFileInBrowser = useCallback((path: string) => openTab("正在打开页面", path.split("/").pop() || path, signal => api.openBrowserFile(path, signal)), [openTab]);
     const closeLink = useCallback((visited: string[]) => {
         setLinkTab(null);

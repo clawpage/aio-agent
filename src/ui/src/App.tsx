@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { isSandboxLink } from "./sandboxLink";
+import { openDeviceBrowser } from "./deviceBrowser";
 import { api, ApiError, versionMismatch } from "./api";
 import type { Conversation, StatusResponse } from "./types";
 import { MainApp } from "./components/MainApp";
@@ -241,6 +243,7 @@ function LegacyApp() {
    */
   const openBrowserLink = useCallback(
     async (url: string) => {
+      if (!isSandboxLink(url)) { openDeviceBrowser(url); return; }
       try {
         await api.openBrowserTab(url);
         revealSandboxBrowser();

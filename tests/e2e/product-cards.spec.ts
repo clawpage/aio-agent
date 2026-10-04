@@ -61,8 +61,13 @@ test("a products block is drawn as cards: picture, price, store, reasons and a l
   await page.waitForTimeout(400);
   await page.screenshot({ path: info.outputPath("product-cards.png") });
 
-  await first.getByRole("button", { name: "去看看" }).click();
-  await expect.poll(() => opened).toEqual(["https://www.costco.com/roborock-ultra2.html"]);
+  await page.context().route("https://www.costco.com/**", r => r.fulfill({ contentType: "text/html", body: "<h1>Product</h1>" }));
+  const popup = page.waitForEvent("popup");
+  await first.getByRole("link", { name: "去看看" }).click();
+  const tab = await popup;
+  await expect.poll(() => tab.url()).toBe("https://www.costco.com/roborock-ultra2.html");
+  expect(opened).toEqual([]);
+  await tab.close();
 });
 
 test("a web picture in a message loads through the sandbox, never from its host", async ({ page }) => {

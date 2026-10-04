@@ -24,7 +24,8 @@ import { VideoEmbed } from "./VideoEmbed";
 import { extractVideoLinks } from "../videoLinks";
 import { extractFileRefs, attachmentRefs, embedMediaLinks } from "../fileRefs";
 import { dispatchedTask } from "../dispatchText";
-import { isPreviewableKind, workspaceFileKind } from "../sandboxLink";
+import { isPreviewableKind, isSandboxLink, workspaceFileKind } from "../sandboxLink";
+import { openNativeBrowser } from "../deviceBrowser";
 
 interface Props {
   readOnly?: boolean;
@@ -33,7 +34,7 @@ interface Props {
   onConversationChanged: () => void;
   onStatusChanged: () => void;
   onOpenWorkspace: (path?: string) => void;
-  /** Open a Markdown link as a real tab in the sandbox browser. */
+  /** Route a link to the device browser, or to the sandbox for private IPs. */
   onOpenBrowserLink: (url: string) => void;
   /** Open a workspace HTML page in full in the sandbox browser. */
   onOpenBrowserFile?: (path: string) => void;
@@ -448,7 +449,7 @@ export function Chat({
  * rebuilding the list — the cards never flicker or reset mid-stream. Extraction
  * itself is pure, so a delta that adds no new reference produces the same array.
  */
-export function MessageFileCards({ text, onOpen }: { text: string; onOpen: (path: string) => void }) {
+export function MessageFileCards({ text, onOpen, onOpenLink }: { text: string; onOpen: (path: string) => void; onOpenLink?: (url: string) => void }) {
   // Embedded images, videos and audio already show inside the message; everything else gets a card.
   const refs = useMemo(() => extractFileRefs(embedMediaLinks(text)).filter((ref) => !(ref.image && (ref.kind === "image" || ref.kind === "video" || ref.kind === "audio"))), [text]);
   const shares = useMemo(() => extractShareLinks(text), [text]);
@@ -463,7 +464,7 @@ export function MessageFileCards({ text, onOpen }: { text: string; onOpen: (path
       )}
       {shares.length > 0 && (
         <div className="share-cards" data-testid="message-share-cards">
-          {shares.map((link) => <ShareCard key={link.url} link={link} />)}
+          {shares.map((link) => <ShareCard key={link.url} link={link} onOpenLink={onOpenLink} />)}
         </div>
       )}
       {refs.length > 0 && (
@@ -560,7 +561,7 @@ function BlockView({
       <article className="msg assistant">
         <div className="bubble">
           <Markdown source={block.text} onOpenLink={onOpenBrowserLink} onOpenFile={onOpenFile} />
-          <MessageFileCards text={block.text} onOpen={onOpenFile} />
+          <MessageFileCards text={block.text} onOpen={onOpenFile} onOpenLink={onOpenBrowserLink} />
           {block.streaming && <span className="caret" aria-hidden />}
           <div className="message-meta"><MessageTime at={block.createdAt} now={now}/></div>
         </div>
@@ -592,7 +593,7 @@ function BlockView({
   }
 
   if (block.kind === "approval") {
-    return <ApprovalCard block={block} onRespond={onRespond} />;
+    return <ApprovalCard block={block} onRespond={onRespond} onOpenLink={onOpenBrowserLink} />;
   }
 
   const status = block as Extract<Block, { kind: "status" }>;
@@ -730,9 +731,11 @@ interface Question {
 function ApprovalCard({
   block,
   onRespond,
+  onOpenLink,
 }: {
   block: Extract<Block, { kind: "approval" }>;
   onRespond: (requestId: string, decision: string, extra?: unknown) => void;
+  onOpenLink: (url: string) => void;
 }) {
   const params = block.payload as Record<string, unknown>;
   const resolved = block.status === "resolved";
@@ -894,7 +897,10 @@ function ApprovalCard({
 
       {!resolved && elicitationUrl && (
         <div className="approval-actions">
-          <a className="link" href={elicitationUrl} target="_blank" rel="noopener noreferrer">
+          <a className="link" href={elicitationUrl} target="_blank" rel="noopener noreferrer" onClick={event => {
+            if (isSandboxLink(elicitationUrl)) { event.preventDefault(); onOpenLink(elicitationUrl); }
+            else if (openNativeBrowser(elicitationUrl)) event.preventDefault();
+          }}>
             打开授权页面
           </a>
           <button type="button" className="primary" onClick={() => onRespond(block.requestId, "accept")}>

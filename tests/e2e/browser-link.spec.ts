@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 import { makeConversation, mockConsole } from "./mock-api";
 
 /**
- * Assistant Markdown links: an absolute http/https link in an agent reply must
+ * Assistant Markdown links: a private IP http/https link in an agent reply must
  * open as a real tab in the sandbox browser through the authenticated
  * control-plane API, never as a host browser tab. Every control-plane call is
  * mocked by `mockConsole`, so the spec is deterministic and never depends on a
@@ -11,7 +11,7 @@ import { makeConversation, mockConsole } from "./mock-api";
  */
 
 const CONV_ID = "conv_e2e_browser_link";
-const LINK = "https://example.com/e2e-target";
+const LINK = "http://192.168.1.20/e2e-target";
 
 function sseWithMarkdown(markdown: string): string {
   const event = {
@@ -30,7 +30,7 @@ function sseWithMarkdown(markdown: string): string {
 }
 
 test.describe("assistant markdown links", () => {
-  test("an absolute http link opens in the sandbox browser, not a host tab", async ({ page }) => {
+  test("a private IP http link opens in the sandbox browser, not a host tab", async ({ page }) => {
     let requested: string | null = null;
     await mockConsole(page, {
       conversations: [makeConversation(CONV_ID, "链接测试")],

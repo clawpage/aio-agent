@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
 import { api, API_CREDENTIALS } from "../api";
+import { isSandboxLink } from "../sandboxLink";
+import { openNativeBrowser } from "../deviceBrowser";
 import type { Product } from "../productBlocks";
 
 /**
@@ -83,9 +85,9 @@ function ProductCard({ item, onOpenLink, onOpenFile }: { item: Product; onOpenLi
         )}
         {item.points.length > 0 && <ul className="product-points">{item.points.map((p, i) => <li key={i}>{p}</li>)}</ul>}
         {item.note && <p className="product-note">{item.note}</p>}
-        {item.url && (onOpenLink
-          ? <button type="button" className="product-link" onClick={() => onOpenLink(item.url!)}>去看看</button>
-          : <a className="product-link" href={item.url} target="_blank" rel="noopener noreferrer">去看看</a>)}
+        {item.url && (onOpenLink && isSandboxLink(item.url)
+          ? <button type="button" className="product-link" data-browser-link={item.url} onClick={() => onOpenLink(item.url!)}>去看看</button>
+          : <a className="product-link" href={item.url} target="_blank" rel="noopener noreferrer" onClick={event => { if (openNativeBrowser(item.url!)) event.preventDefault(); }}>去看看</a>)}
       </div>
     </article>
   );

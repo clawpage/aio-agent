@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  isWebLink,
   isSandboxLink,
   isWorkspaceFilePath,
   workspaceFileKind,
@@ -8,9 +9,9 @@ import {
 } from "../../src/ui/src/sandboxLink.js";
 
 describe("sandbox link classification", () => {
-  it("accepts only absolute http/https URLs for the sandbox browser", () => {
+  it("accepts only absolute http/https web URLs", () => {
     for (const href of ["http://example.com", "https://example.com/a?b=1#c"]) {
-      expect(isSandboxLink(href), href).toBe(true);
+      expect(isWebLink(href), href).toBe(true);
     }
     for (const href of [
       "",
@@ -23,8 +24,22 @@ describe("sandbox link classification", () => {
       "#frag",
       "foo/bar",
     ]) {
-      expect(isSandboxLink(href), href).toBe(false);
+      expect(isWebLink(href), href).toBe(false);
     }
+  });
+
+  it("only sends private IP web URLs to the sandbox, without resolving domain names", () => {
+    for (const host of ["10.0.0.1", "172.16.0.1", "172.31.255.255", "192.168.1.10", "127.0.0.1", "0.0.0.0", "169.254.1.1", "100.64.0.1", "100.127.255.255", "[::1]", "[::]", "[fd00::1]", "[fc00::1]", "[fe80::1]", "[febf::1]", "[::ffff:192.168.1.1]", "[::ffff:10.0.0.1]"]) {
+      expect(isSandboxLink(`https://${host}:8443/path?q=1#part`), host).toBe(true);
+    }
+    for (const host of ["example.com", "localhost", "private.local", "192.168.1.1.evil.com", "8.8.8.8", "172.15.255.255", "172.32.0.1", "100.63.255.255", "100.128.0.1", "[2001:4860:4860::8888]", "[::ffff:8.8.8.8]"]) {
+      expect(isSandboxLink(`https://${host}/`), host).toBe(false);
+    }
+    // URL parsing normalizes shorthand, integer and hexadecimal IPv4 forms.
+    expect(isSandboxLink("http://127.1/")).toBe(true);
+    expect(isSandboxLink("http://0x7f000001/")).toBe(true);
+    expect(isSandboxLink("https://192.168.1.1@public.example/")).toBe(false);
+    expect(isSandboxLink("file://192.168.1.1/test")).toBe(false);
   });
 
   it("accepts decoded absolute workspace paths and rejects everything else", () => {

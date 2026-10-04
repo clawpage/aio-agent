@@ -704,7 +704,7 @@ test.describe("unified 文件 tab", () => {
 
 test("Markdown deliverables have readable titles, formatted preview, source toggle and safe links", async ({ page }, info) => {
   await mockDocuments(page);
-  const md = '# 三天两晚完整行程\n\n先看 **安排重点**。\n\n## 每日安排\n\n| 日期 | 活动 |\n| --- | --- |\n| 第一天 | 抵达休息 |\n| 第二天 | 湖边散步 |\n\n> 出发前确认开放时间。\n\n[官方信息](https://example.com/travel)\n\n' + Array.from({length:24},(_,i)=>`### 第 ${i+1} 项提醒\n\n保持舒适的节奏，预留休息时间。`).join('\n\n') + '\n\n最后一项检查';
+  const md = '# 三天两晚完整行程\n\n先看 **安排重点**。\n\n## 每日安排\n\n| 日期 | 活动 |\n| --- | --- |\n| 第一天 | 抵达休息 |\n| 第二天 | 湖边散步 |\n\n> 出发前确认开放时间。\n\n[官方信息](http://192.168.1.20/travel)\n\n' + Array.from({length:24},(_,i)=>`### 第 ${i+1} 项提醒\n\n保持舒适的节奏，预留休息时间。`).join('\n\n') + '\n\n最后一项检查';
   await page.route('**/api/documents/text**', r => r.fulfill({json:{text:md,truncated:false}}));
   let opened: string | null = null;
   await openConversation(page,'conv_markdown_reader','已整理好 [完整三天行程](/home/gem/workspace/long-trip-document.md)。');
@@ -731,7 +731,7 @@ test("Markdown deliverables have readable titles, formatted preview, source togg
   }
   await page.screenshot({path:`/Users/mengxiao/workspace/.scratch/artifacts/aio-result-preview/${info.project.name}-reader.png`,animations:'disabled'});
   await dialog.getByRole('link',{name:'官方信息'}).click();
-  await expect.poll(()=>opened).toBe('https://example.com/travel');
+  await expect.poll(()=>opened).toBe('http://192.168.1.20/travel');
   await expect(dialog).toHaveCount(0);
 });
 
