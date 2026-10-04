@@ -1,7 +1,7 @@
 import { test, expect } from "@playwright/test";
 import { mockConsole } from "./mock-api";
 
-test("long main messages cap at 80%, open fully and retain device/private links and draft", async ({ page }, info) => {
+test("long main messages cap at 80%, open in a nine-tenths sheet and retain device/private links and draft", async ({ page }, info) => {
   const opened: string[] = [];
   await mockConsole(page, { conversations: [], onBrowserTab: url => opened.push(url) });
   const result = `[公开链接](https://external.example/start)\n\n` + Array.from({ length: 50 }, (_, i) => `第 ${i + 1} 段：完整正文可以一直读到最后。`).join("\n\n") + "\n\n[末尾公开链接](https://external.example/end)\n\n[内网链接](http://192.168.1.8/page)\n\n完整正文结束";
@@ -28,6 +28,11 @@ test("long main messages cap at 80%, open fully and retain device/private links 
   await more.click();
   const dialog = page.getByRole("dialog", { name: "完整消息：长消息", exact: true });
   await expect(dialog).toBeVisible();
+  const sheet = (await dialog.boundingBox())!;
+  const bottomInset = info.project.name.startsWith("mobile") ? 34 : 0;
+  expect(Math.abs(sheet.height - (cap / .8 * .9 + bottomInset))).toBeLessThan(1);
+  expect(sheet.y).toBeGreaterThan(page.viewportSize()!.height * .09);
+  expect(Math.abs(sheet.y + sheet.height - page.viewportSize()!.height)).toBeLessThan(1);
   await expect(dialog.getByRole("button", { name: "关闭消息" })).toBeFocused();
   const body = dialog.locator(".full-message-body");
   await expect(dialog.locator(".bubble")).toHaveCount(0);
@@ -40,7 +45,7 @@ test("long main messages cap at 80%, open fully and retain device/private links 
   const popup = page.waitForEvent("popup"); await last.click(); const tab = await popup;
   await expect.poll(() => tab.url()).toBe("https://external.example/end"); await tab.close();
   expect(opened).toEqual([]);
-  await page.screenshot({ path: info.outputPath("full-message.png") });
+  await page.screenshot({ path: info.outputPath("message-sheet.png") });
   await dialog.getByRole("button", { name: "关闭消息" }).click();
   await expect(dialog).toHaveCount(0); await expect(more).toBeFocused();
   await more.click();
@@ -50,9 +55,12 @@ test("long main messages cap at 80%, open fully and retain device/private links 
   await page.getByRole("button", { name: "关闭工作区" }).click();
   await expect(dialog).toHaveCount(0);
   await expect(page.getByRole("textbox", { name: "消息", exact: true })).toHaveValue("保留草稿");
-  // Text, the bottom hint, and keyboard all reach the same full-page view.
+  // Text, the bottom hint, and keyboard all reach the same reading sheet.
   await preview.locator(".markdown p").nth(1).click();
   await expect(dialog).toBeVisible(); await page.keyboard.press("Escape"); await expect(dialog).toHaveCount(0);
+  await more.click();
+  await page.locator(".full-message-backdrop").click({ position: { x: 10, y: 5 } });
+  await expect(dialog).toHaveCount(0);
   await page.getByRole("button", { name: "点击看更多：用户消息", exact: true }).click();
   const user = page.getByRole("dialog", { name: "完整消息：用户消息", exact: true });
   await expect(user).toContainText("用户原始需求第 90 行");

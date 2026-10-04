@@ -64,15 +64,16 @@ export function MessagePreview({ children, title, user = false }: { children: Re
       <div ref={content} className="message-preview-content">{children}</div>
       {clipped && <button ref={more} type="button" className="message-more" onClick={() => setOpen(true)} aria-label={`点击看更多：${title}`}>点击看更多</button>}
     </div>
-    {open && createPortal(<div className="full-message" role="dialog" aria-modal="true" aria-label={`完整消息：${title}`} onKeyDown={keys} onClick={event => {
+    {open && createPortal(<div className="full-message-backdrop" onClick={event => { if (event.target === event.currentTarget) dismiss(); }}><div className="full-message" role="dialog" aria-modal="true" aria-label={`完整消息：${title}`} onKeyDown={keys} onClick={event => {
       if (!event.currentTarget.contains(event.target as Node)) return;
       const link = (event.target as HTMLElement).closest("a[href], [data-browser-link]");
       const url = link?.getAttribute("href") ?? link?.getAttribute("data-browser-link") ?? "";
       // The sandbox may open its workspace fallback underneath the reading page.
       if (isSandboxLink(url)) dismiss();
     }}>
+      <div className="full-message-grabber" aria-hidden="true" />
       <header className="full-message-head"><strong>{title}</strong><button ref={close} type="button" className="ghost" onClick={dismiss} aria-label="关闭消息">关闭</button></header>
       <div className={`full-message-body${user ? " user" : ""}`}><article className="full-message-content">{children}</article></div>
-    </div>, document.body)}
+    </div></div>, document.body)}
   </>;
 }
