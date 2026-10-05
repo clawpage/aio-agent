@@ -2731,6 +2731,18 @@ textarea:focus {
 .feed-latest-anchor { position: relative; height: 0; z-index: 5; }
 .feed-latest { position: absolute; right: 16px; bottom: 12px; display: flex; align-items: center; justify-content: center; width: 44px; height: 44px; min-height: 44px; padding: 0; border-radius: 50%; border: 1px solid var(--border); background: var(--bg-raised); color: var(--text); box-shadow: 0 6px 20px rgb(0 0 0 / .18); opacity: 0; transform: translateY(12px) scale(.85); pointer-events: none; transition: opacity 180ms ease, transform 220ms cubic-bezier(.2, .9, .3, 1.2); }
 .feed-latest.show { opacity: 1; transform: none; pointer-events: auto; }
+/* Tasks waiting for the person, off screen: amber bubbles above the composer, each leading to its card. */
+.needs-you { position: absolute; left: 8px; right: 68px; bottom: 0; display: flex; gap: 8px; padding: 10px 4px 14px; overflow-x: auto; scrollbar-width: none; pointer-events: none; -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent); mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent); }
+.needs-you::-webkit-scrollbar { display: none; }
+.needs-you-bubble { pointer-events: auto; flex: none; display: inline-flex; align-items: center; gap: 6px; max-width: min(320px, 78%); min-height: 40px; padding: 0 14px 0 10px; border: none; border-radius: 999px; background: var(--you); color: var(--on-you); font-size: 14px; box-shadow: 0 3px 10px rgb(0 0 0 / .18); cursor: pointer; animation: needs-you-in 260ms cubic-bezier(.2, .9, .3, 1.25); }
+.needs-you-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: currentColor; animation: breathe 1.6s ease-in-out infinite; }
+.needs-you-kind { flex: none; font-weight: 600; }
+.needs-you-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.task-feed.has-needs-you { padding-bottom: 64px; }
+.task-progress.attention { animation: needs-you-flash 1.6s ease-out; }
+@keyframes needs-you-in { from { opacity: 0; transform: translateY(10px) scale(.9); } to { opacity: 1; transform: none; } }
+@keyframes needs-you-flash { 0%, 60% { box-shadow: 0 0 0 3px var(--you); } 100% { box-shadow: 0 0 0 0 transparent; } }
+@media (prefers-reduced-motion: reduce) { .needs-you-bubble, .needs-you-dot, .task-progress.attention { animation: none; } .task-progress.attention { box-shadow: 0 0 0 3px var(--you); } }
 @media (prefers-reduced-motion: reduce) { .feed-latest { transition: none; } }
 /* The top of the feed: older tasks load as it comes near. */
 .feed-older { display: flex; justify-content: center; min-height: 24px; }

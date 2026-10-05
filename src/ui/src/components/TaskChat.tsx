@@ -30,6 +30,12 @@ function turnOf(t: Task): "you" | "ai" | "err" {
     if (["planning_failed", "merge_failed", "merge_unknown", "failed", "unknown"].includes(t.status)) return "err";
     return "ai";
 }
+/** What a task waiting for the person wants, in a word or two. */
+function waitingLabel(t: Task): string {
+    if (t.approvals) return "等你确认";
+    if (t.browser?.request) return "等你操作浏览器";
+    return t.status === "blocked" ? "需要补充" : "等你补充";
+}
 const labels: Record<string, string> = { planning: "正在分配", needs_input: "等待你补充", planning_failed: "分配失败", waiting: "等待依赖或资源", queued: "排队中", running: "在办", stopping: "正在停止…", completed: "已完成", failed: "执行失败", interrupted: "已停止", unknown: "结果待核对", blocked: "需要补充" };
 export function TaskChat({ onDetails, onOpenLink, onOpenFileInBrowser, onExpired, onFeed, onRevealBrowser, debug = false }: {
     /** Owner debug mode: each message offers its dispatch log. */
@@ -283,7 +289,41 @@ export function TaskChat({ onDetails, onOpenLink, onOpenFileInBrowser, onExpired
             .reduce((latest, t) => t.createdAt >= latest.createdAt ? t : latest, task);
         progressAt.set(anchor.id, task);
     }
-    const renderProgress = (t: Task) => <div className={`task-progress turn-${turnOf(t)} ${t.status === "running" || t.status === "planning" ? "active" : ""} ${t.status === "planning" ? "planning" : ""} ${t.status === "needs_input" ? "needs-input" : ""}`}>
+    // Tasks waiting for the person whose card is not on screen: a bubble above the composer leads to each.
+    const needsYou = tasks.filter(t => !t.mergedInto && !terminal.has(t.status) && turnOf(t) === "you");
+    const needsKey = needsYou.map(t => t.id).join(",");
+    const [onScreen, setOnScreen] = useState<ReadonlySet<string>>(() => new Set());
+    useEffect(() => {
+        const root = scroll.current;
+        if (!root || !needsKey || typeof IntersectionObserver !== "function") { setOnScreen(new Set()); return; }
+        const observer = new IntersectionObserver(entries => setOnScreen(old => {
+            const next = new Set(old);
+            for (const e of entries) {
+                const id = (e.target as HTMLElement).dataset.progressFor!;
+                if (e.isIntersecting) next.add(id); else next.delete(id);
+            }
+            return next;
+        }), { root, threshold: 0.6 });
+        for (const id of needsKey.split(",")) {
+            const card = root.querySelector(`[data-progress-for="${CSS.escape(id)}"]`);
+            if (card) observer.observe(card);
+        }
+        return () => observer.disconnect();
+    }, [needsKey, tasks.length]);
+    const waiting = needsYou.filter(t => !onScreen.has(t.id));
+    // The bubbles take room at the bottom of the feed: the latest message stays above them.
+    const bubbles = waiting.length > 0;
+    useEffect(() => { const n = scroll.current; if (n && stick.current) n.scrollTop = n.scrollHeight; }, [bubbles]);
+    const showWaiting = (id: string) => {
+        const card = scroll.current?.querySelector<HTMLElement>(`[data-progress-for="${CSS.escape(id)}"]`);
+        if (!card) return;
+        card.scrollIntoView({ block: "center", behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+        card.classList.remove("attention");
+        void card.offsetWidth;
+        card.classList.add("attention");
+        window.setTimeout(() => card.classList.remove("attention"), 1800);
+    };
+    const renderProgress = (t: Task) => <div data-progress-for={t.id} className={`task-progress turn-${turnOf(t)} ${t.status === "running" || t.status === "planning" ? "active" : ""} ${t.status === "planning" ? "planning" : ""} ${t.status === "needs_input" ? "needs-input" : ""}`}>
           {(() => {
             const summary = <>{t.status === "planning"
               ? <span className="dispatch-glyph" aria-hidden="true"><i/><i/><i/></span>
@@ -313,7 +353,7 @@ export function TaskChat({ onDetails, onOpenLink, onOpenFileInBrowser, onExpired
     <header className="chat-head"><div className="chat-title"><h2>主会话</h2><span className={`dot ${connected ? "ok" : "warn"}`}/><span className="chat-sub">{active.length || awaiting.length
         ? <>{awaiting.length > 0 && <span className="turn-pill you">{awaiting.length} 件等你补充</span>}{browserAsks.length > 0 && <span className="turn-pill you">{browserAsks.length} 件等你操作浏览器</span>}{active.length - browserAsks.length > 0 && <span className="turn-pill ai">{active.length - browserAsks.length} 件在办</span>}</>
         : connected ? "随时可以交给我" : "正在连接…"}</span></div></header>
-    <div className="chat-scroll task-feed" ref={scroll} onScroll={e => onFeedScroll(e.currentTarget)}>
+    <div className={`chat-scroll task-feed${bubbles ? " has-needs-you" : ""}`} ref={scroll} onScroll={e => onFeedScroll(e.currentTarget)}>
       {nextBefore && <div className="feed-older" ref={olderTop}>{olderState === "failed"
         ? <button className="ghost tiny" onClick={() => void loadOlder()}>更早的任务没加载出来，点此重试</button>
         : <span className="muted tiny">{olderState === "loading" ? "正在加载更早的任务…" : ""}</span>}</div>}
@@ -331,7 +371,7 @@ export function TaskChat({ onDetails, onOpenLink, onOpenFileInBrowser, onExpired
         {progressAt.get(t.id) && renderProgress(progressAt.get(t.id)!)}
       </div>)}
     </div>
-    <div className="feed-latest-anchor"><button type="button" className={`feed-latest${away ? " show" : ""}`} aria-label="回到最新消息" title="回到最新消息" aria-hidden={!away} tabIndex={away ? 0 : -1} onClick={toLatest}><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 5v14M6 13l6 6 6-6"/></svg></button></div>
+    <div className="feed-latest-anchor">{waiting.length > 0 && <div className="needs-you" role="group" aria-label="等你处理的任务">{waiting.map(t => <button type="button" key={t.id} className="needs-you-bubble" onClick={() => showWaiting(t.id)} aria-label={`${waitingLabel(t)}：${t.title}，点击查看`}><span className="needs-you-dot" aria-hidden="true"/><span className="needs-you-kind">{waitingLabel(t)}</span><span className="needs-you-title">{t.title}</span></button>)}</div>}<button type="button" className={`feed-latest${away ? " show" : ""}`} aria-label="回到最新消息" title="回到最新消息" aria-hidden={!away} tabIndex={away ? 0 : -1} onClick={toLatest}><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 5v14M6 13l6 6 6-6"/></svg></button></div>
     {error && <div className="banner error" role="alert">{error}<button onClick={() => setError(null)}>关闭</button></div>}
     <div className={`composer${draft || attachments.length || reference || uploading ? " has-content" : ""}`}>
       {reference && <div className="task-reference" role="status"><div><span className="muted tiny">引用任务</span><strong title={reference.title}>{reference.title}</strong></div><button type="button" className="ghost" disabled={busy} aria-label="取消引用任务" onClick={() => { setReference(null); input.current?.focus(); }}><ComposerIcon kind="close"/></button></div>}
