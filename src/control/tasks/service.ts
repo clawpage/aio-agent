@@ -137,11 +137,6 @@ export class TaskService {
         const same = this.rows().filter(t => t.id !== row.id && t.created_at < row.created_at && !t.merged_into && this.executor(t) === this.executor(ref));
         return same.filter(t => ["planning", "needs_input", "waiting", "queued", "running", "stopping"].includes(t.status)).at(-1) ?? ref;
     }
-    /** Whether the referenced session still has work on it (a question it asked is answered at once). */
-    private referenceWorking(row: TaskRow): boolean {
-        const reference = this.referenceTarget(row);
-        return !!reference && ["planning", "waiting", "queued", "running", "stopping"].includes(reference.status);
-    }
     setNotifier(notifier: ((task: ReturnType<TaskService["view"]>) => void) | null): void { this.#notifier = notifier; }
     /** Tell the notifier about a status this task just reached, if it is news for the person. */
     private notifyChange(id: string, before: string): void {
@@ -199,7 +194,6 @@ export class TaskService {
         const plan = JSON.parse(row.plan_json) as TaskPlan;
         const reference = this.referenceTarget(row);
         if (reference?.status === "stopping") return { label: "等待原任务停止", message: `“${reference.title}”停止后继续处理本次要求。` };
-        if (reference && this.referenceWorking(row)) return { label: "等待原任务", message: `“${reference.title}”这一轮结束后，接着在同一个会话里处理本次要求。` };
         const dependency = plan.dependencies.map(id => this.get(id)).find(t => t && t.status !== "completed");
         if (dependency) return { label: "等待前置任务", message: `等待“${dependency.title}”完成后继续。` };
         const parent = row.merged_into ? this.get(row.merged_into) : null;
@@ -690,8 +684,15 @@ export class TaskService {
         const rows = this.rows();
         const active = rows.filter(t => DISPATCHED.has(t.status));
         for (const row of rows.filter(t => t.status === "waiting")) {
-            // A referenced task's session takes the reply as its next turn, once the work on it ends.
-            if (this.referenceWorking(row)) continue;
+            const reference = this.referenceTarget(row);
+            if (reference?.status === "stopping") continue;
+            // Work still under way on the referenced session takes the message as a steer.
+            if (reference && ["planning", "waiting", "queued", "running"].includes(reference.status)) {
+                const supplement = JSON.parse(row.plan_json!) as TaskPlan;
+                applyTaskReference(supplement, reference);
+                this.db.prepare("UPDATE tasks SET merged_into=?,plan_json=?,status='merging' WHERE id=?").run(reference.id, JSON.stringify(supplement), row.id);
+                this.schedule(); continue;
+            }
             if (active.length >= this.cfg.agent.maxConcurrentTurns)
                 break;
             const plan = JSON.parse(row.plan_json!) as TaskPlan;
