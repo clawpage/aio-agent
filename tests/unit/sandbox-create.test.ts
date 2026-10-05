@@ -232,6 +232,8 @@ async function dropCdpClients(world: { procs: Array<{ pid: number; ppid: number;
     fs.mkdirSync(bin); fs.mkdirSync(fx);
     const stub = (name: string, body: string) => fs.writeFileSync(path.join(bin, name), `#!/bin/sh\n${body}\n`, { mode: 0o755 });
     stub("ss", 'case "$*" in *8091*) : ;; *) cat "$FX/ss9222" ;; esac');
+    // Socket owners are only visible to the sandbox user: the script asks as that user.
+    stub("runuser", '[ "$1 $2 $3" = "-u gem --" ] || exit 9; shift 3; exec "$@"');
     stub("supervisorctl", 'case "$1" in pid) cat "$FX/pid-$2" 2>/dev/null || echo 0 ;; restart) echo "$2" >> "$FX/restarted" ;; esac');
     stub("ps", 'case "$2" in args) cat "$FX/ps-args" ;; *) cat "$FX/ps-tree" ;; esac');
     stub("pgrep", 'cat "$FX/pgrep"');

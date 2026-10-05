@@ -462,7 +462,9 @@ finally:
    */
   async dropImageCdpClients(): Promise<string[]> {
     const script = `set -u
-cdp=" $(ss -tnpH state established "( dport = :9222 )" | grep -o "pid=[0-9]*" | cut -d= -f2 | tr "\\n" " ")"
+# The clients run as the sandbox user, and this root lacks the capability to see other users'
+# sockets: ask as that user, or no socket ever shows its owner.
+cdp=" $(runuser -u "$1" -- ss -tnpH state established "( dport = :9222 )" | grep -o "pid=[0-9]*" | cut -d= -f2 | tr "\\n" " ")"
 # A supervised program and every process under it (its CDP client may be a child).
 tree() {
   all=$(supervisorctl pid "$1" 2>/dev/null || true); case "$all" in ""|0|*[!0-9]*) return;; esac
@@ -477,7 +479,7 @@ if attached python-server; then
   clients=$(ss -tnH state established "( sport = :8091 )" | wc -l)
   if [ "$busy" = 0 ] && [ "$clients" = 0 ]; then supervisorctl restart python-server >/dev/null 2>&1 && echo python-server; fi
 fi`;
-    const res = await this.execInSandbox(["sh", "-c", script], { timeoutMs: 60_000, user: "root" });
+    const res = await this.execInSandbox(["sh", "-c", script, "sh", this.#cfg.sandbox.containerUser], { timeoutMs: 60_000, user: "root" });
     return res.stdout.split("\n").map((line) => line.trim()).filter(Boolean);
   }
 
