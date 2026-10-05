@@ -452,20 +452,32 @@ finally:
    * Both reconnect on their next use. python-server also serves the terminal (a
    * long-lived websocket that its session list does not show), so it is
    * restarted only with no connection to it and no shell command running.
+   * A client counts as attached only when a socket to Chromium's debugging port
+   * belongs to its own process tree: counting processes or sockets instead let
+   * the lazily connecting tab server hide an attached mcp-server-browser, or its
+   * short-lived sockets trigger a needless restart. "Running" shell statuses are
+   * the set idle.ts's RUNNING_SHELL uses; any other status is finished, so a
+   * session that ended some other way never keeps python-server attached.
    * Returns what restarted.
    */
   async dropImageCdpClients(): Promise<string[]> {
     const script = `set -u
-tabs=$(pgrep -fc "^node $1/tab-server.cjs" || true)
-driver=$(ps -eo args | grep -c "[p]laywright/driver/node .*run-driver" || true)
-conns=$(ss -tnH state established "( dport = :9222 )" | wc -l)
-if [ $((conns - tabs - driver)) -gt 0 ]; then supervisorctl restart mcp-server-browser >/dev/null 2>&1 && echo mcp-server-browser; fi
-if [ "$driver" -gt 0 ]; then
+cdp=" $(ss -tnpH state established "( dport = :9222 )" | grep -o "pid=[0-9]*" | cut -d= -f2 | tr "\\n" " ")"
+# A supervised program and every process under it (its CDP client may be a child).
+tree() {
+  all=$(supervisorctl pid "$1" 2>/dev/null || true); case "$all" in ""|0|*[!0-9]*) return;; esac
+  new=$all
+  while [ -n "$new" ]; do new=$(ps -eo pid=,ppid= | awk -v p=" $new " 'index(p, " " $2 " ") { printf "%s ", $1 }'); all="$all $new"; done
+  echo "$all"
+}
+attached() { for p in $(tree "$1"); do case "$cdp " in *" $p "*) return 0;; esac; done; return 1; }
+if attached mcp-server-browser; then supervisorctl restart mcp-server-browser >/dev/null 2>&1 && echo mcp-server-browser; fi
+if attached python-server; then
   busy=$(curl -s -m 5 http://127.0.0.1:8091/v1/shell/sessions | python3 -c 'import json,sys; s=json.load(sys.stdin)["data"]["sessions"].values(); print(sum(1 for v in s if v.get("status") != "completed" or v.get("current_command")))' 2>/dev/null || echo unknown)
   clients=$(ss -tnH state established "( sport = :8091 )" | wc -l)
   if [ "$busy" = 0 ] && [ "$clients" = 0 ]; then supervisorctl restart python-server >/dev/null 2>&1 && echo python-server; fi
 fi`;
-    const res = await this.execInSandbox(["sh", "-c", script, "sh", this.#cfg.browser.toolDir], { timeoutMs: 60_000, user: "root" });
+    const res = await this.execInSandbox(["sh", "-c", script], { timeoutMs: 60_000, user: "root" });
     return res.stdout.split("\n").map((line) => line.trim()).filter(Boolean);
   }
 

@@ -216,3 +216,69 @@ it("writes a managed policy that keeps cookies when the browser exits, once, as 
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+/**
+ * Run dropImageCdpClients' real script against a fake container: stub `ss`,
+ * `supervisorctl`, `ps`, `pgrep` and `curl` describe the processes, which of
+ * them hold a socket to Chromium's debugging port, and python-server's shells.
+ */
+async function dropCdpClients(world: { procs: Array<{ pid: number; ppid: number; args: string }>; cdpSockets: number[]; supervised: Record<string, number>; sessions?: Record<string, { status: string }> }) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pa-cdp-clients-"));
+  try {
+    const cfg = testConfig(dir, 18999);
+    const container = new SandboxContainer(cfg, new Logger("error", undefined, false), testNode());
+    const bin = path.join(dir, "bin"), fx = path.join(dir, "fx");
+    fs.mkdirSync(bin); fs.mkdirSync(fx);
+    const stub = (name: string, body: string) => fs.writeFileSync(path.join(bin, name), `#!/bin/sh\n${body}\n`, { mode: 0o755 });
+    stub("ss", 'case "$*" in *8091*) : ;; *) cat "$FX/ss9222" ;; esac');
+    stub("supervisorctl", 'case "$1" in pid) cat "$FX/pid-$2" 2>/dev/null || echo 0 ;; restart) echo "$2" >> "$FX/restarted" ;; esac');
+    stub("ps", 'case "$2" in args) cat "$FX/ps-args" ;; *) cat "$FX/ps-tree" ;; esac');
+    stub("pgrep", 'cat "$FX/pgrep"');
+    stub("curl", 'cat "$FX/sessions"');
+    // GNU wc prints a bare count; macOS pads it, which the script's `= 0` test would never match.
+    stub("wc", '/usr/bin/wc "$@" | tr -d " "');
+    const line = (pid: number, i: number) => `ESTAB 0 0 127.0.0.1:${40000 + i} 127.0.0.1:9222 users:(("node",pid=${pid},fd=${20 + i}))\n`;
+    fs.writeFileSync(path.join(fx, "ss9222"), world.cdpSockets.map(line).join(""));
+    for (const [name, pid] of Object.entries(world.supervised)) fs.writeFileSync(path.join(fx, `pid-${name}`), `${pid}\n`);
+    fs.writeFileSync(path.join(fx, "ps-tree"), world.procs.map((p) => `${p.pid} ${p.ppid}\n`).join(""));
+    fs.writeFileSync(path.join(fx, "ps-args"), world.procs.map((p) => `${p.args}\n`).join(""));
+    fs.writeFileSync(path.join(fx, "pgrep"), `${world.procs.filter((p) => p.args.startsWith(`node ${cfg.browser.toolDir}/tab-server.cjs`)).length}\n`);
+    fs.writeFileSync(path.join(fx, "sessions"), JSON.stringify({ data: { sessions: world.sessions ?? {} } }));
+    vi.spyOn(container, "execInSandbox").mockImplementation(async (argv: string[]) => ({
+      code: 0, stderr: "",
+      stdout: execFileSync(argv[0]!, argv.slice(1), { encoding: "utf8", env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, FX: fx } }),
+    }));
+    const said = await container.dropImageCdpClients();
+    const restarted = fs.existsSync(path.join(fx, "restarted")) ? fs.readFileSync(path.join(fx, "restarted"), "utf8").split("\n").filter(Boolean) : [];
+    expect(said).toEqual(restarted);
+    return said;
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+const IMAGE_PROCS = [
+  { pid: 100, ppid: 1, args: "sh -c npx mcp-server-browser" },
+  { pid: 101, ppid: 100, args: "node /usr/lib/node_modules/mcp-server-browser/cli.js" },
+  { pid: 200, ppid: 1, args: "python3 -m python_server" },
+  { pid: 300, ppid: 1, args: "node /opt/aio-browser/tab-server.cjs" },
+];
+const DRIVER = { pid: 201, ppid: 200, args: "/usr/lib/python3/site-packages/playwright/driver/node /usr/lib/python3/site-packages/playwright/driver/package/cli.js run-driver" };
+const SUPERVISED = { "mcp-server-browser": 100, "python-server": 200 };
+
+it("restarts mcp-server-browser when its own child holds a CDP socket, even while the tab server is running but not connected", async () => {
+  expect(await dropCdpClients({ procs: IMAGE_PROCS, cdpSockets: [101], supervised: SUPERVISED })).toEqual(["mcp-server-browser"]);
+});
+
+it("leaves mcp-server-browser alone when the only CDP sockets are the tab server's, however many", async () => {
+  expect(await dropCdpClients({ procs: IMAGE_PROCS, cdpSockets: [300, 300], supervised: SUPERVISED })).toEqual([]);
+  expect(await dropCdpClients({ procs: IMAGE_PROCS, cdpSockets: [], supervised: SUPERVISED })).toEqual([]);
+});
+
+it("restarts python-server only when its Playwright driver is attached and no shell command is still running", async () => {
+  const procs = [...IMAGE_PROCS, DRIVER];
+  expect(await dropCdpClients({ procs, cdpSockets: [201, 300], supervised: SUPERVISED, sessions: { a: { status: "completed" } } })).toEqual(["python-server"]);
+  expect(await dropCdpClients({ procs, cdpSockets: [201], supervised: SUPERVISED, sessions: { a: { status: "running" } } })).toEqual([]);
+  expect(await dropCdpClients({ procs, cdpSockets: [201], supervised: SUPERVISED, sessions: { a: { status: "no_change_timeout" } } })).toEqual([]);
+  expect(await dropCdpClients({ procs, cdpSockets: [300], supervised: SUPERVISED, sessions: {} })).toEqual([]);
+});
