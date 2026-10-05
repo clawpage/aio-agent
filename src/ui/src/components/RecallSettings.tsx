@@ -4,7 +4,7 @@ import type { RecallStats } from "../types";
 
 const pct = (v: number | null) => (v === null ? "—" : `${Math.round(v * 100)}%`);
 
-/** How well the dispatcher reaches past tasks: what recall injected, what it asked to search, what got chosen. */
+/** How well the dispatcher reaches past tasks: what recall injected and what got chosen. */
 export function RecallSettings() {
   const [days, setDays] = useState(7);
   const [stats, setStats] = useState<RecallStats | null>(null);
@@ -25,9 +25,9 @@ export function RecallSettings() {
         ["派单次数", `${stats.dispatches} 次${stats.failed || stats.repaired ? `（${[stats.failed ? `失败 ${stats.failed}` : "", stats.repaired ? `自动修正 ${stats.repaired}` : ""].filter(Boolean).join(" · ")}）` : ""}`],
         ["带历史召回的派单", `${stats.withRecall} 次 · 平均每次 ${stats.avgRecalled} 条`],
         ["数据库历史检索", `${pct(stats.searchRate)} · Luna 平均 ${stats.avgRounds} 轮`],
-        ["选中的关联任务", `${stats.chosen} 个，其中召回找到 ${stats.chosenFromRecall}、搜索找到 ${stats.chosenFromSearch}`],
+        ["选中的关联任务", `${stats.chosen} 个，其中召回找到 ${stats.chosenFromRecall}`],
         ["手动引用的老任务", stats.labelled ? `${stats.labelled} 次 · 检索能排进前 ${stats.cap} 名 ${pct(stats.recallAtCap)} · MRR ${stats.mrr ?? "—"}` : "暂无"],
-        ["当前召回上限", `${stats.cap} 条（手动引用满 20 次后按实际排名自动调整）`],
+        ["每次召回上限", `${stats.cap} 条`],
         ["平均派单耗时", `${(stats.avgLatencyMs / 1000).toFixed(1)} 秒 · 提示词 P90 ${stats.p90PromptChars.toLocaleString()} 字`],
       ]
     : [];

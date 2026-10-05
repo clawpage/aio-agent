@@ -37,7 +37,7 @@ it('authenticates the requested username and protects owner configuration',async
  expect((await h.request('/api/settings',{method:'PUT',headers:member,body:JSON.stringify({model:'gpt-6-sol',effort:'low'})})).status).toBe(403);
  expect((await h.request('/api/settings/soul',{method:'PUT',headers:member,body:JSON.stringify({content:'override'})})).status).toBe(403);
  expect((await h.request('/api/settings',{headers:owner})).status).toBe(200);
- const recall=await h.request('/api/settings/recall?days=30',{headers:owner});expect(recall.status).toBe(200);expect(((await recall.json()) as {stats:{days:number;cap:number}}).stats).toMatchObject({days:30,cap:10});
+ const recall=await h.request('/api/settings/recall?days=30',{headers:owner});expect(recall.status).toBe(200);expect(((await recall.json()) as {stats:{days:number;cap:number}}).stats).toMatchObject({days:30,cap:4});
  const status=async()=>{const r=await h.request('/api/status',{headers:member});expect(r.status).toBe(200);return (await r.json() as {sandbox:{setupError:string|null}}).sandbox.setupError;};
  expect(await status()).toBeNull();
  // A member learns that the start failed, never why.

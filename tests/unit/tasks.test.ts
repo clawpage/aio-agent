@@ -605,7 +605,7 @@ it("lists the dispatcher's tasks newest first, so a bare follow-up lands on the 
     // because a same-day date could not tell the dispatcher which task was adjacent.
     const at=(h:number,m:number)=>new Date(2026,8,30,h,m).getTime();
     const previous=[
-        {id:"ikko",title:"核实 iKKO 的 eSIM 方案",input_text:"ikko",status:"completed",result:"ok",created_at:at(15,2),source:"today"},
+        {id:"ikko",title:"核实 iKKO 的 eSIM 方案",input_text:"ikko",status:"completed",result:"ok",created_at:at(15,2),source:"recall"},
         {id:"pixel",title:"在 eBay 上找 Pixel 手机",input_text:"pixel",status:"completed",result:"ok",created_at:at(15,58),source:"recent"},
         {id:"root",title:"选好 root 的手机",input_text:"root",status:"completed",result:"ok",created_at:at(15,56),source:"recent"},
     ];
@@ -680,7 +680,9 @@ describe("main-session order, Jev's second opinion and resuming a finished sessi
         };
         const change=submit("酒店改在新宿");await tick();
         expect(tasks.get(change.id)?.status).toBe("merged");
-        expect(codex.steers[0]?.text).toContain('"suggestion":{"kind":"new"');
+        expect(codex.steers[0]?.text).toContain("Jev 建议：新任务");
+        // Jev's reading reaches the executor once, readable, not as its raw answers.
+        expect(codex.steers[0]?.text).not.toContain('"probabilities"');
         expect(codex.steers[0]?.text).toContain('"decision":{"kind":"steer"');
         expect(JSON.parse(tasks.get(change.id)!.plan_json!)).toMatchObject({decision:{kind:"steer",taskId:first.id},jev:{suggestion:{kind:"new"}}});
     });
@@ -760,7 +762,8 @@ describe("main-session order, Jev's second opinion and resuming a finished sessi
         const line = turn.text.split("\n").find(l => l.includes("用户：「帮我在 eBay 买那台 Pixel」"))!;
         expect(line).toContain("〔Jev：相关性 80%〕");
         expect(turn.text).toContain("Jev 的逐任务相关性与路由建议");
-        expect(turn.text).toContain('"luna":{"title"');
+        expect(turn.text).toContain('Luna 的派单判断');
+        expect(turn.text).not.toContain('"probabilities"');
         expect(turn.text).toContain(`- 任务 ${order.id}「帮我在 eBay 买那台 Pixel」（completed，`);
         expect(turn.text).toMatch(/：80%，Jev 首选（高置信）；助理最后问：「需要你授权我用已保存的卡付款吗？」/);
         expect(turn.text).toContain(`Jev 建议：续接任务 ${order.id}（80%`);

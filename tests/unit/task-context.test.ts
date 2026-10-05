@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { dispatchAdvice, formatRelevance, formatTimeline, jevRelevance, lastQuestion, routingQuestion, timeline, type ContextTask } from "../../src/control/tasks/context.js";
+import { dispatchAdvice, formatRelevance, formatTimeline, lastQuestion, routingQuestion, timeline, type ContextTask } from "../../src/control/tasks/context.js";
 
 const at = (h: number, m: number) => new Date(2026, 8, 30, h, m).getTime();
 const task = (id: string, created: number, extra: Partial<ContextTask> = {}): ContextTask => ({ id, title: id, input_text: id, status: "completed", result: null, merged_into: null, plan_json: null, created_at: created, ...extra });
@@ -55,9 +55,7 @@ describe("main-session context", () => {
       task("t2", at(14, 30), { title: "讲笑话", input_text: "讲个笑话", result: "好的，笑话是……" }),
       task("t3", at(14, 40), { input_text: "已授权", status: "planning" }),
     ];
-    const relevance = jevRelevance({ choice: "t1", confidence: 0.9, probabilities: { t1: 0.82, t2: 0.03, NEW: 0.15 } });
-    // Below one in ten is noise: it is not passed on.
-    expect(relevance).toEqual({ choice: "t1", confident: true, ranked: [{ id: "t1", p: 0.82 }, { id: "NEW", p: 0.15 }] });
+    const relevance = { choice: "t1", confident: true, ranked: [{ id: "t1", p: 0.82 }, { id: "NEW", p: 0.15 }] };
     const lines = formatTimeline(timeline(tasks, tasks[2]!), now, relevance).split("\n");
     expect(lines[0]).toMatch(/任务 t1「买 Pixel」.*〔Jev：相关性 82%〕$/);
     expect(lines[1]).not.toContain("Jev");
@@ -68,8 +66,7 @@ describe("main-session context", () => {
       "- 独立的新请求：15%",
     ]);
     // An unsure reading says so; a task that no longer exists is left out.
-    const unsure = jevRelevance({ choice: "t2", confidence: 0.5, probabilities: { t1: 0.4, t2: 0.45, NEW: 0.15 } });
-    expect(unsure.confident).toBe(false);
+    const unsure = { choice: "t2", confident: false, ranked: [{ id: "t2", p: 0.45 }, { id: "t1", p: 0.4 }, { id: "NEW", p: 0.15 }] };
     expect(formatRelevance(unsure, id => (id === "t1" ? undefined : byId.get(id)), now)!.split("\n")).toEqual([
       "- 任务 t2「讲笑话」（completed，14:30）：45%，Jev 首选；结果开头：好的，笑话是……",
       "- 独立的新请求：15%",

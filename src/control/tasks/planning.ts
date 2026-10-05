@@ -43,12 +43,6 @@ export interface TaskPlan {
     /** Jev's reading of which earlier task this message continues, passed on to the executor. */
     jev?: JevRelevance | null;
 }
-/** Jev's second opinion on which task the message continues (`NEW` for none). */
-export interface DispatchHint {
-    choice: string;
-    probability: number;
-    confident: boolean;
-}
 export interface PlanningTask {
     id: string;
     title: string;
@@ -63,7 +57,7 @@ export interface PlanningTask {
     source?: string;
 }
 /** Tasks reached only through recall carry a short excerpt; the recent window keeps full detail. */
-const RECALLED = new Set(["today", "recall", "context", "search"]);
+const RECALLED = new Set(["recall", "context"]);
 /**
  * A UI-selected reference always continues that task's own execution session as a new turn
  * (after any turn still running on it); the dispatcher only names the work. Only a task that
@@ -99,8 +93,8 @@ export function planningPrompt(text: string, previous: PlanningTask[], explicit:
         "related 是理解本任务有帮助的历史任务id；无关任务不要关联。dependencies 是必须先完成才可执行的任务id，必须也在related里。",
         "代词、‘继续/改一下/刚才那个’按相邻优先结合最近的相关任务理解；需要尚未产出的文件或结果时必须声明依赖，不能臆造已完成。",
         "修复 failed、unknown、blocked、planning_failed 任务时可以 related 引用背景，但不要把它列为必须成功完成的 dependencies。",
-        "previous 由数据库时序与倒排文档召回，Jev 相关性为 0 的任务已省略详情（用户显式引用除外）；group 区分 active 与 finished。每项含任务用户消息、任务结果和可用的最新助理消息。source 标明近期、进行中、召回或用户指定。已完成召回，本轮必须直接返回正式决策，不要返回 search。",
-        ...(context.correction ? [`你上一次的回答无法使用：${context.correction}。这次只返回一个符合上述格式的 JSON 计划，不要任何其他文字，不要再搜索。`] : []),
+        "previous 由数据库时序与倒排文档召回，Jev 相关性为 0 的任务已省略详情（用户显式引用除外）；group 区分 active 与 finished。每项含任务用户消息、任务结果和可用的最新助理消息。source 标明近期、进行中、召回或用户指定。",
+        ...(context.correction ? [`你上一次的回答无法使用：${context.correction}。这次只返回一个符合上述格式的 JSON 计划，不要任何其他文字。`] : []),
         "定时与循环：消息要求在将来某个时间做、或按规律重复做（例如“明天上午9点提醒我…”“每天早上8点查…”“每周一三…”“每2小时看一下…”“每月1号…”）时，信息完整才加上 schedule：{kind:\"once\"|\"daily\"|\"weekly\"|\"monthly\"|\"interval\", at:\"HH:MM\"（interval 不用）, date:\"YYYY-MM-DD\"（仅 once）, weekdays:[1-7，1=周一]（仅 weekly）, monthDay:1-31（仅 monthly）, everyMinutes:至少15（仅 interval）, maxRuns:次数或null, until:\"YYYY-MM-DD\"或null, instruction:每次运行要做的事（一句可独立执行的话，不含时间安排，例如“查旧金山今天的天气，提醒是否需要带伞”）, runNow:用户还要求现在先做一次时 true}。时间按 now 和 timezone 换算；时间或规律说得不清楚时不给 schedule，直接交执行者核对并决定是否追问。没有定时或循环要求时不要给 schedule。调整内置「每日推送」交给执行者用推送设置工具修改。有 schedule 时 title 写成定时任务名称，decision.kind=new。",
         "盯与提醒也是定时：“帮我盯着/关注/留意…”“到时候提醒我…”“X号帮我看看…”这类请求，条件和节奏明确时给 schedule，instruction 写清查什么及何时通知。节奏不明显或需核对截止日期时不给 schedule，交执行者查资料并决定是否追问。用户也想现在先看一次时 runNow 为 true。",
         "existingSchedules 是本账号已有的定时任务（id、标题、规则、状态）。用户要求暂停、恢复、取消或删除其中某个时，给 scheduleAction：{id, action:\"pause\"|\"resume\"|\"cancel\"}，不给 schedule；要改时间或内容时，cancel 旧的并给出新的 schedule。",

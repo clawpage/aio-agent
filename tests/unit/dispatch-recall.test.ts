@@ -144,7 +144,7 @@ it("recalls a task hundreds back into the dispatcher's view before it has to ask
 
   const [event] = events();
   expect(event).toMatchObject({ task_id: job.id, rounds: 1, failed: 0, gold_task_id: null });
-  expect(recallStats(db, "owner_1", 7, tasks.recall.cap())).toMatchObject({ dispatches: 1, withRecall: 1, chosen: 1, chosenFromRecall: 1, searchRate: 1 });
+  expect(recallStats(db, "owner_1", 7)).toMatchObject({ dispatches: 1, withRecall: 1, chosen: 1, chosenFromRecall: 1, searchRate: 1 });
 });
 
 it("finishes inverted-index recall before Luna and only retries malformed output", async () => {

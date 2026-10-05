@@ -985,7 +985,7 @@ export function createApiRouter(context: AppContext): Router {
   router.get("/settings/recall", requireKind("primary"), requireSession, (req, res) => {
     const days = Math.min(90, Math.max(1, Number(req.query.days) || 7));
     res.setHeader("Cache-Control", "no-store");
-    res.json({ stats: recallStats(db, ctxOf(req).session!.ownerId, days, context.tasks.recall.cap()) });
+    res.json({ stats: recallStats(db, ctxOf(req).session!.ownerId, days) });
   });
 
   // Invite codes for self-registration (owner only, like all of /settings).

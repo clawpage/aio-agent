@@ -58,10 +58,8 @@ const QUERY_CHARS = 2000;
 const QUERY_TERMS = 48;
 /** A hit this far below the best one is noise, whatever the cap allows. */
 const RELATIVE_FLOOR = 0.3;
-export const DEFAULT_CAP = 10;
-const MIN_CAP = 5;
-/** Labelled events needed before the cap follows observed ranks. */
-const TUNE_MIN_SAMPLES = 20;
+/** At most this many tasks per recall query reach the dispatcher. */
+export const RECALL_CAP = 4;
 
 export class TaskRecall {
   readonly #db: Db;
@@ -112,28 +110,16 @@ export class TaskRecall {
    * best one, so a message with one clear match brings one task, not ten.
    */
   search(ownerId: string, query: string, opts: { exclude?: Set<string>; cap?: number } = {}): RecallHit[] {
-    const cap = opts.cap ?? this.cap();
+    const cap = opts.cap ?? RECALL_CAP;
     const hits = this.rank(ownerId, query, cap + (opts.exclude?.size ?? 0));
     // Measured against the best match even when that one is already shown, so a
     // clear match in view does not let weak ones in behind it.
     const best = hits[0]?.score ?? 0;
     return hits.filter((h) => !opts.exclude?.has(h.id) && h.score >= best * RELATIVE_FLOOR).slice(0, cap);
   }
-
-  /**
-   * The cap follows what monitoring measured: when a person had to point at a
-   * task by hand, where the search ranked it. Until there is enough of that,
-   * the default holds.
-   */
-  cap(): number {
-    const ranks = (this.#db.prepare("SELECT gold_rank FROM recall_events WHERE gold_rank IS NOT NULL AND gold_in_window=0 ORDER BY created_at DESC LIMIT 100").all() as Array<{ gold_rank: number }>).map((r) => r.gold_rank).sort((a, b) => a - b);
-    if (ranks.length < TUNE_MIN_SAMPLES) return DEFAULT_CAP;
-    const p90 = ranks[Math.min(ranks.length - 1, Math.ceil(ranks.length * 0.9) - 1)]!;
-    return Math.max(MIN_CAP, Math.min(DEFAULT_CAP, p90 + 2));
-  }
 }
 
-export type RecallSource = "recent" | "active" | "today" | "recall" | "context" | "search" | "explicit";
+export type RecallSource = "recent" | "active" | "recall" | "context" | "explicit";
 
 export interface RecallEvent {
   taskId: string;
@@ -161,7 +147,7 @@ export type DispatchStep =
   | { kind: "context"; at: number; timeline: string; candidates: number }
   | { kind: "jev"; at: number; criteria: Record<string, string>; result?: { choice: string; probabilities: Record<string, number>; confident: boolean; latencyMs: number; scores?: Record<string, number>; suggestion?: { kind: string; taskId: string | null; probability: number }; answers?: Record<string, import("../jev.js").JevAnswer> }; error?: string }
   | { kind: "timing"; at: number; round: number; timing: import("../codex/dispatchTiming.js").DispatchTiming }
-  | { kind: "ask"; at: number; round: number; prompt: string; answer: string | null; searched?: string[]; correction?: string }
+  | { kind: "ask"; at: number; round: number; prompt: string; answer: string | null; correction?: string }
   | { kind: "plan"; at: number; plan: unknown; repairs: string[] }
   | { kind: "failed"; at: number; reason: string };
 
@@ -187,11 +173,10 @@ export interface RecallStats {
   /** Dispatches that ran database recall, and the average Luna answer rounds. */
   searchRate: number;
   avgRounds: number;
-  /** Chosen related/append targets, and how many of them only recall or search had surfaced. */
+  /** Chosen related/append targets, and how many of them only recall had surfaced. */
   chosen: number;
   chosenFromRecall: number;
-  chosenFromSearch: number;
-  /** Hand-picked references outside the recent window: how often search alone ranked them within the cap. */
+  /** Hand-picked references outside the recent window: how often recall alone ranked them within the cap. */
   labelled: number;
   recallAtCap: number | null;
   mrr: number | null;
@@ -200,16 +185,16 @@ export interface RecallStats {
   p90PromptChars: number;
 }
 
-export function recallStats(db: Db, ownerId: string, days: number, cap: number): RecallStats {
+export function recallStats(db: Db, ownerId: string, days: number, cap = RECALL_CAP): RecallStats {
   const since = Date.now() - days * 86_400_000;
   const rows = db.prepare("SELECT * FROM recall_events WHERE owner_id=? AND created_at >= ? ORDER BY created_at").all(ownerId, since) as Array<{
     candidates_json: string; searches_json: string; rounds: number; chosen_json: string; gold_rank: number | null; gold_in_window: number | null; latency_ms: number; prompt_chars: number; failed: number; repairs_json: string;
   }>;
-  let withRecall = 0, recalled = 0, searched = 0, rounds = 0, chosen = 0, fromRecall = 0, fromSearch = 0, latency = 0;
+  let withRecall = 0, recalled = 0, searched = 0, rounds = 0, chosen = 0, fromRecall = 0, latency = 0;
   const labelled: Array<number | null> = [];
   for (const r of rows) {
     const candidates = JSON.parse(r.candidates_json) as RecallEvent["candidates"];
-    const extra = candidates.filter((c) => c.source === "recall" || c.source === "context" || c.source === "search" || c.source === "today");
+    const extra = candidates.filter((c) => c.source === "recall" || c.source === "context");
     if (extra.length) withRecall += 1;
     recalled += extra.length;
     if ((JSON.parse(r.searches_json) as string[]).length > 0) searched += 1;
@@ -220,8 +205,7 @@ export function recallStats(db: Db, ownerId: string, days: number, cap: number):
     for (const id of new Set([...pick.related, ...(pick.appendTo ? [pick.appendTo] : [])])) {
       chosen += 1;
       const s = source.get(id);
-      if (s === "recall" || s === "context" || s === "today") fromRecall += 1;
-      if (s === "search") fromSearch += 1;
+      if (s === "recall" || s === "context") fromRecall += 1;
     }
     if (r.gold_in_window === 0) labelled.push(r.gold_rank);
   }
@@ -238,7 +222,6 @@ export function recallStats(db: Db, ownerId: string, days: number, cap: number):
     avgRounds: round(rounds / n),
     chosen,
     chosenFromRecall: fromRecall,
-    chosenFromSearch: fromSearch,
     labelled: labelled.length,
     recallAtCap: labelled.length ? round(labelled.filter((r) => r !== null && r <= cap).length / labelled.length) : null,
     mrr: labelled.length ? round(labelled.reduce<number>((sum, r) => sum + (r ? 1 / r : 0), 0) / labelled.length) : null,

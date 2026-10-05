@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { api } from "../api";
 import type { DispatchLog as Log, DispatchLogEntry, DispatchStep } from "../types";
 
+// "today" and "search" only appear in dispatch logs recorded before those sources were removed.
 const SOURCES: Record<string, string> = {
   active: "进行中", recent: "最近", today: "今天", recall: "召回", context: "上下文召回", search: "搜索", explicit: "手动引用",
 };
@@ -53,7 +54,6 @@ function Step({ step, name }: { step: DispatchStep; name: (id: string) => string
         <li>
           <h4>派单器第 {step.round} 轮 <span className="muted tiny">{clock(step.at)}</span></h4>
           {step.correction && <p className="error tiny">上一轮回答无法使用，带着原因重问：{step.correction}</p>}
-          {step.searched && <p>要求检索历史任务：{step.searched.map((q) => `「${q}」`).join("、")}</p>}
           <pre>{step.answer ?? "（没有回答）"}</pre>
           <details><summary>完整提示词（{step.prompt.length.toLocaleString()} 字）</summary><pre>{step.prompt}</pre></details>
         </li>

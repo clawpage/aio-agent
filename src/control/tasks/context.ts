@@ -111,15 +111,6 @@ export interface JevRelevance {
   answers?: Record<string, JevAnswer>;
 }
 
-export function jevRelevance(answer: JevAnswer, max = 3, min = 0.1): JevRelevance {
-  const ranked = Object.entries(answer.probabilities)
-    .filter(([, p]) => p >= min)
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, max)
-    .map(([id, p]) => ({ id, p: Math.round(p * 100) / 100 }));
-  return { choice: answer.choice, confident: confident(answer), ranked };
-}
-
 /**
  * Jev's reading as lines for the executor: each likely task with its time, status and what it left
  * (its open question, or the start of its result), so the executor can build on it instead of redoing it.
