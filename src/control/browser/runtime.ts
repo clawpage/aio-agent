@@ -64,6 +64,9 @@ function readStorageCounts(
   };
 }
 
+/** Exit code of the tool-directory check when root's ownership rule is violated. */
+const OWNERSHIP_VIOLATION = 3;
+
 interface HelperResult {
   ok: boolean;
   message?: string | null;
@@ -116,20 +119,25 @@ export class BrowserRuntime implements BrowserRuntimeLike {
   async ensureScripts(): Promise<void> {
     if (this.#provisioned) return this.#provisioned;
     this.#provisioned = (async () => {
-      // Root must not execute scripts below sandbox-user-writable ancestors.
+      // Root must not execute scripts below sandbox-user-writable ancestors. A violation
+      // exits with its own code: any other failure (a stopped container, an unreachable
+      // node) says nothing about who owns the directory.
       const secure = await this.#container.execInSandbox(["python3", "-c", `
 import os, pathlib, stat, sys
 p = pathlib.Path(sys.argv[1])
-if not p.is_absolute() or ".." in p.parts: sys.exit(1)
+if not p.is_absolute() or ".." in p.parts: sys.exit(${OWNERSHIP_VIOLATION})
 for part in [p, *p.parents]:
-    if part.is_symlink(): sys.exit(1)
+    if part.is_symlink(): sys.exit(${OWNERSHIP_VIOLATION})
     if not part.exists(): continue
     s = part.stat()
-    if not stat.S_ISDIR(s.st_mode) or s.st_uid != 0: sys.exit(1)
-    if s.st_mode & 0o022 and not (part != p and s.st_mode & stat.S_ISVTX): sys.exit(1)
+    if not stat.S_ISDIR(s.st_mode) or s.st_uid != 0: sys.exit(${OWNERSHIP_VIOLATION})
+    if s.st_mode & 0o022 and not (part != p and s.st_mode & stat.S_ISVTX): sys.exit(${OWNERSHIP_VIOLATION})
 p.mkdir(parents=True, exist_ok=True, mode=0o755)
 `, this.#cfg.browser.toolDir], { timeoutMs: 15_000, user: "root" });
-      if (secure.code !== 0) throw new Error("浏览器工具目录必须由 root 管理且不可由沙盒用户替换");
+      if (secure.code === OWNERSHIP_VIOLATION) throw new Error("浏览器工具目录必须由 root 管理且不可由沙盒用户替换");
+      if (secure.code !== 0) {
+        throw new Error(`无法检查浏览器工具目录，沙盒可能未运行或不可达（exit ${secure.code}）：${redact(secure.stderr || secure.stdout)}`);
+      }
       const { body, digest } = this.#script();
       const marker = path.posix.join(this.#cfg.browser.toolDir, MARKER_NAME);
       const current = await this.#container.execInSandbox(["cat", marker], { timeoutMs: 15_000, user: "root" });
@@ -201,10 +209,16 @@ p.mkdir(parents=True, exist_ok=True, mode=0o755)
   /** Run one helper subcommand and parse its single-line JSON result. */
   async #run(argv: string[], timeoutMs: number): Promise<HelperResult> {
     await this.ensureScripts();
-    const result = await this.#container.execInSandbox(["python3", this.scriptPath, ...argv], {
-      timeoutMs,
-      user: "root",
-    });
+    const exec = () => this.#container.execInSandbox(["python3", this.scriptPath, ...argv], { timeoutMs, user: "root" });
+    let result = await exec();
+    if (result.code === 2 && /can't open file/i.test(result.stderr)) {
+      // The tool directory lives in the container, not a volume: a recreated container
+      // lost it while this process still remembered provisioning it. Provision again, once.
+      this.#log.warn("browser runtime helper missing; provisioning it again", { path: this.scriptPath });
+      this.#provisioned = null;
+      await this.ensureScripts();
+      result = await exec();
+    }
     const text = (result.stdout || "").trim();
     if (!text) {
       return { ok: false, message: `浏览器运行时无输出（exit ${result.code}）：${redact(result.stderr)}` };
