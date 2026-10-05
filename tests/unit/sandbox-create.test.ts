@@ -189,3 +189,30 @@ it("unpacks pinned browser packages as root, and leaves another CPU architecture
   await expect(container.ensureBrowserBuild({ ...build, packages: [{ url: "https://pkg.example/x.deb", sha256: "not-a-hash" }] })).rejects.toThrow("package list");
   await expect(container.ensureBrowserBuild({ ...build, packages: [{ url: "http://pkg.example/x.deb", sha256: "a".repeat(64) }] })).rejects.toThrow("package list");
 });
+
+it("writes a managed policy that keeps cookies when the browser exits, once, as root", async () => {
+  // The image's Preferences keep cookies for the session only; without this every browser exit signed the person out everywhere.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pa-cookie-policy-"));
+  try {
+    const cfg = testConfig(dir, 18999);
+    const container = new SandboxContainer(cfg, new Logger("error", undefined, false), testNode());
+    const file = path.join(dir, "policies", "managed", "aio-cookies.json");
+    const users: string[] = [];
+    vi.spyOn(container, "execInSandbox").mockImplementation(async (argv: string[], opts?: { user?: string; stdin?: string }) => {
+      users.push(opts?.user ?? "");
+      try {
+        const stdout = execFileSync(argv[0]!, argv.slice(1), { encoding: "utf8", input: opts?.stdin, stdio: ["pipe", "pipe", "pipe"] });
+        return { code: 0, stdout, stderr: "" };
+      } catch (err) {
+        return { code: 1, stdout: "", stderr: String(err) };
+      }
+    });
+    expect(await container.keepBrowserCookies(file)).toBe(true);
+    expect(JSON.parse(fs.readFileSync(file, "utf8"))).toEqual({ DefaultCookiesSetting: 1 });
+    expect(fs.statSync(file).mode & 0o777).toBe(0o644);
+    expect(await container.keepBrowserCookies(file)).toBe(false);
+    expect(new Set(users)).toEqual(new Set(["root"]));
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

@@ -131,7 +131,8 @@ async function main() {
       const payload = JSON.parse(fs.readFileSync(args.in, 'utf8'));
       const state = payload.state ?? payload;
       if (!Array.isArray(state.cookies) || !Array.isArray(state.origins)) throw new StorageError('bad_state');
-      // The profile lives on a volume: a stopped browser keeps its cookies,
+      // The profile lives on a volume and a managed policy keeps cookies when the
+      // browser exits (SandboxContainer.keepBrowserCookies): a stopped browser keeps its cookies,
       // localStorage and IndexedDB, and loses only session cookies. A profile
       // that still holds cookies is newer than any snapshot (a login since, a
       // site's device id), and replacing it from one rolled sites back to an old

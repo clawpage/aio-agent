@@ -531,6 +531,26 @@ echo "$dir"`;
    * Chromium was restarted.
    */
   /**
+   * Keep cookies when the browser exits. The image copies its own Preferences over
+   * the profile's on every container start, and they keep cookies for the session
+   * only: every browser exit (a deploy, an identity check, an idle stop) deleted
+   * every cookie and signed the person out of every site. A managed policy outranks
+   * those Preferences, survives the copy, and Chromium reloads its policy directory
+   * while running. True when the file changed.
+   */
+  async keepBrowserCookies(file = "/etc/chromium/policies/managed/aio-cookies.json"): Promise<boolean> {
+    const body = `${JSON.stringify({ DefaultCookiesSetting: 1 })}\n`;
+    const read = await this.execInSandbox(["cat", file], { user: "root", timeoutMs: 20_000 });
+    if (read.code === 0 && read.stdout === body) return false;
+    const write = await this.execInSandbox(
+      ["python3", "-c", "import os,sys; p=sys.argv[1]; os.makedirs(os.path.dirname(p), exist_ok=True); t=p+'.aio-tmp'; open(t,'w').write(sys.stdin.read()); os.chmod(t,0o644); os.replace(t,p)", file],
+      { user: "root", stdin: body, timeoutMs: 20_000 },
+    );
+    if (write.code !== 0) throw new Error(`browser cookie policy not written: ${write.stderr.trim()}`);
+    return true;
+  }
+
+  /**
    * Make the desktop work from a phone (see novncPatch): one keyboard tap types
    * one key, and a long press holds the left button. The image stays pinned; its
    * noVNC files are patched in place once per container. True when a file changed.

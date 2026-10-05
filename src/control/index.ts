@@ -208,6 +208,12 @@ export async function startSandboxRuntime(ctx: AppContext): Promise<void> {
     if (!compat.ok) throw new Error(compat.error ?? "沙箱节点不可用");
     const state = await container.ensureRunning();
     log.info("sandbox container ready", { name: state.image, healthy: state.healthy });
+    // Before anything restarts the browser: without it, every browser exit deletes every cookie.
+    try {
+      if (await container.keepBrowserCookies()) log.info("sandbox browser keeps cookies across restarts");
+    } catch (err) {
+      log.warn("sandbox browser cookie policy not written", { error: err instanceof Error ? err.message : String(err) });
+    }
     // Sites block a browser whose identity does not add up; best effort, never fatal.
     try {
       // Sites also reject the image's old Chromium build; a newer one replaces it when configured.

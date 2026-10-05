@@ -2407,7 +2407,8 @@ def restore_pending(
 
     if fresh and state.get("completed") is True:
         # A snapshot is restored once. A later browser (a restart, a crash) runs
-        # on the profile volume, which already holds everything since; applying
+        # on the profile volume, which keeps its cookies across exits (a managed
+        # policy overrides the image's session-only setting); applying
         # the old snapshot again put back cookies sites had replaced or removed
         # (signing the user out) and reopened tabs closed long ago.
         return False
