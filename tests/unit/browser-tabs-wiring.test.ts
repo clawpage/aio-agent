@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, expect, it } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
 import { createHash } from "node:crypto";
@@ -211,4 +211,55 @@ it("leaves a tab server alone when it answers the second time", async () => {
   const tabs = new TabServer(testConfig("/tmp/pa-tabs-busy", 1), new Logger("error", undefined, false), container as never, { ensureScripts: async () => undefined } as never);
   await tabs.ensure();
   expect(seen).toEqual(["health:silent", "health:current"]);
+});
+
+it("waits for a vault sign-in as long as its longest run can take", async () => {
+  const { TabServer } = await import("../../src/control/browser/tabs.js");
+  const { container } = scriptedTabServer(["current"]);
+  const calls: Array<{ argv: string[]; timeoutMs?: number }> = [];
+  const exec = container.execInSandbox;
+  container.execInSandbox = async (argv: string[], opts?: { timeoutMs?: number }) => { calls.push({ argv, timeoutMs: opts?.timeoutMs }); return exec(argv); };
+  const tabs = new TabServer(testConfig("/tmp/pa-tabs-login", 1), new Logger("error", undefined, false), container as never, { ensureScripts: async () => undefined } as never);
+  await tabs.login("conv_1", "t1", { site: "example.com", username: "u", password: "p" });
+  const login = calls.find((c) => c.argv.some((a) => a.endsWith("/login")))!;
+  const seconds = Number(login.argv[login.argv.indexOf("-m") + 1]);
+  // Giving up earlier leaves the run typing while the vault asks again into the same page:
+  // a 3-step load, 15 steps that each check a password box and fill it, then settling (8 s a step).
+  expect(seconds).toBeGreaterThanOrEqual(3 * 8 + 15 * 2 * 8 + 8 + 1.5);
+  expect(login.timeoutMs).toBeGreaterThan(seconds * 1000);
+});
+
+it("says so when a turn's end never reached the tab server", async () => {
+  const { TabServer } = await import("../../src/control/browser/tabs.js");
+  const container = { execInSandbox: async () => ({ code: 22, stdout: "", stderr: "curl: (22) The requested URL returned error: 500" }) };
+  const lines: string[] = [];
+  const spy = vi.spyOn(process.stderr, "write").mockImplementation((chunk) => { lines.push(String(chunk)); return true; });
+  try {
+    await new TabServer(testConfig("/tmp/pa-tabs-finish", 1), new Logger("info", undefined, true), container as never, {} as never).finish("conv_1");
+  } finally {
+    spy.mockRestore();
+  }
+  expect(lines.join("")).toMatch(/"level":"warn".*"route":"\/finish"/);
+});
+
+it("marks the tabs of a turn cut off by a restart finished, unless the sandbox is known to be stopped", async () => {
+  const finished: string[] = [];
+  const tabs = {
+    ensure: async () => undefined, finish: async (key: string) => void finished.push(key), prune: async () => undefined, list: async () => [], control: async () => null, screenshot: async () => null,
+    input: async () => ({ status: 200, body: {} }), pointer: async () => ({ status: 200, body: {} }), open: async () => ({ status: 200, body: {} }), close: async () => ({ status: 200, body: {} }), login: async () => ({ status: 409, body: {} }),
+  };
+  const restart = async (cold: boolean) => {
+    const conv = agent.createConversation({ title: cold ? "沙箱已停" : "重启前在用浏览器" });
+    db.prepare("INSERT INTO turns (id, conversation_id, client_message_id, status, input_text, created_at) VALUES (?,?,?,?,?,?)").run(`turn_${conv.id}`, conv.id, `m_${conv.id}`, "running", "x", Date.now());
+    const fresh = new AgentManager({ cfg, db, codex: new RecordingCodex(), log: new Logger("error", undefined, false), tabs });
+    await fresh.init({ cold });
+    await tick();
+    fresh.shutdown();
+    return conv.id;
+  };
+  // A stopped sandbox has no tab server to tell (and nothing is asked of it).
+  await restart(true);
+  expect(finished).toEqual([]);
+  const cut = await restart(false);
+  expect(finished).toEqual([cut]);
 });

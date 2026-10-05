@@ -109,6 +109,12 @@ export interface TabServerLike {
 
 /** An agent asking a person for help waits up to 30 minutes; the MCP clients must wait a bit longer. */
 export const TAB_TOOL_TIMEOUT_SEC = 31 * 60;
+/**
+ * A vault sign-in's longest run: a 24 s load, 15 steps of up to 16 s (a password
+ * box is checked, then filled), 9.5 s to settle. Waiting less gives up on a run
+ * that is still typing; the vault would then ask again into the same page.
+ */
+export const LOGIN_TIMEOUT_SEC = 300;
 
 /**
  * Per-thread MCP wiring for an execution thread: the tab-scoped server under
@@ -246,7 +252,8 @@ export class TabServer implements TabServerLike {
       ["curl", "-s", "-f", "-m", "20", "-X", "POST", "-H", "content-type: application/json", "--data-binary", "@-", `http://127.0.0.1:${TAB_SERVER_PORT}${route}`],
       { timeoutMs: 25_000, stdin: JSON.stringify(body) },
     );
-    if (res.code !== 0) this.#log.debug("tab server call skipped", { route, error: redact(res.stderr || res.stdout) });
+    // A /finish that never lands leaves the task's tabs counted as a running task's, kept from every cleanup.
+    if (res.code !== 0) this.#log.warn("tab server call failed", { route, error: redact(res.stderr || res.stdout) });
   }
 
   async finish(key: string): Promise<void> {
@@ -310,7 +317,7 @@ export class TabServer implements TabServerLike {
   async login(key: string, tab: string, account: { site: string; username: string; password: string; steps?: LoginStep[]; startUrl?: string } | { site: string; method: "google"; username: string }): Promise<PersonResult> {
     if (!KEY.test(key)) return { status: 404, body: { error: "no_tab", message: "这个标签页已经关闭或不属于该任务" } };
     // The account travels on stdin, never in a command line; filling and submitting can take a while.
-    return this.#person("/login", { key, tab, ...account } as unknown as PersonTarget & object, 60);
+    return this.#person("/login", { key, tab, ...account } as unknown as PersonTarget & object, LOGIN_TIMEOUT_SEC);
   }
 
   async #person(route: "/input" | "/pointer" | "/open" | "/close" | "/login", body: PersonTarget & object, seconds = 20): Promise<PersonResult> {

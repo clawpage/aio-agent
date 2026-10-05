@@ -364,7 +364,7 @@ export class AgentManager {
 
   /** `cold`: the sandbox is known to be stopped, so nothing is asked of it yet. */
   async init(opts: { cold?: boolean } = {}): Promise<void> {
-    this.#reconcileInterrupted();
+    this.#reconcileInterrupted(Boolean(opts.cold));
     this.#migrateLegacyDefaultModel();
     this.#backfillTurnModels();
     this.#archiveDuplicateBlankConversations();
@@ -381,9 +381,12 @@ export class AgentManager {
 
   /**
    * Anything left running/queued after a restart is marked explicitly instead of
-   * being silently retried, so the user always sees what happened.
+   * being silently retried, so the user always sees what happened. A turn cut off
+   * while running never told the tab server it ended: its tabs are marked finished
+   * now, or they would count as a running task's forever (a stopped sandbox has
+   * no tab server left to tell).
    */
-  #reconcileInterrupted(): void {
+  #reconcileInterrupted(cold: boolean): void {
     const stale = this.#db
       .prepare("SELECT id, conversation_id, status FROM turns WHERE status IN ('running','queued')")
       .all() as unknown as { id: string; conversation_id: string; status: string }[];
@@ -401,6 +404,7 @@ export class AgentManager {
           message:
             "服务重启时该轮次正在执行，执行结果未知，可能已在沙箱内产生操作（文件、进程、浏览器状态）。请先核对沙箱状态，确认后再重新发送；系统不会自动重放该轮次。",
         });
+        if (this.#tabs && !cold) void this.#tabs.finish(turn.conversation_id).catch((err) => this.#log.warn("tab finish failed", { error: String(err) }));
       } else {
         this.#db
           .prepare("UPDATE turns SET status = 'interrupted', error = ?, completed_at = ? WHERE id = ?")
@@ -911,7 +915,7 @@ export class AgentManager {
           // The task's tabs are marked finished (kept for a follow-up, destroyed on
           // demand) before its browser hold ends.
           const finishing = this.#tabs
-            ? this.#tabs.finish(turn.conversation_id).catch((err) => this.#log.debug("tab finish failed", { error: String(err) }))
+            ? this.#tabs.finish(turn.conversation_id).catch((err) => this.#log.warn("tab finish failed", { error: String(err) }))
             : Promise.resolve();
           void finishing.finally(releaseBrowser);
           this.#activeTurns.delete(turn.conversation_id);
