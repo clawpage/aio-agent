@@ -13,6 +13,8 @@
  *   node deploy/aio.mjs import-data <dir>    copy a control data directory into the data volume
  *   node deploy/aio.mjs export-data <dir>    copy the data volume out (backup, rollback, moving machines)
  *   node deploy/aio.mjs codex-login [status] log the control plane into ChatGPT (device code), or show the login
+ *   node deploy/aio.mjs busy [--wait <s>]    exit 0 when no account has a task planning, waiting or running (safe to
+ *                                            restart), else list them and exit 3; --wait keeps checking up to <s> seconds
  *
  * Settings come from AIO_ENV_FILE (default deploy/aio.env; see deploy/aio.env.example).
  * AIO_LAYERS picks the layers this machine runs (default ui,control,sandbox): a
@@ -245,6 +247,51 @@ function exportData(dir) {
   });
 }
 
+/**
+ * Work in flight on every account, read inside the control container (its data
+ * lives in the volume). A restart now would leave a running turn `unknown` and
+ * drop queued ones, so deploys check this first.
+ */
+const BUSY_SCRIPT = `
+import {DatabaseSync} from "node:sqlite"; import fs from "node:fs"; import path from "node:path";
+import {loadConfig} from "/app/dist/control/config.js";
+const cfg = loadConfig(); const files = [["owner", cfg.dbPath]];
+const users = path.join(cfg.dataDir, "users");
+if (fs.existsSync(users)) for (const d of fs.readdirSync(users)) { const f = path.join(users, d, "agent.sqlite"); if (fs.existsSync(f)) files.push([d.slice(0, 8), f]); }
+const out = [];
+for (const [account, file] of files) {
+  const db = new DatabaseSync(file, { readOnly: true });
+  for (const r of db.prepare("SELECT title, status FROM tasks WHERE status IN ('planning','waiting','queued','running','stopping','merging','steering')").all()) out.push({ account, title: r.title, status: r.status });
+  const turns = db.prepare("SELECT count(*) AS n FROM turns WHERE status IN ('queued','running')").get().n;
+  if (turns && !out.some((t) => t.account === account)) out.push({ account, title: "(对话轮次)", status: turns + " running" });
+  db.close();
+}
+console.log(JSON.stringify(out));
+`;
+
+function inFlight() {
+  const res = spawnSync("docker", [...composeArgs(), "exec", "-T", "control", "node", "--input-type=module", "-e", BUSY_SCRIPT], { cwd: ROOT, env: composeEnv(), encoding: "utf8" });
+  if (res.status !== 0) die(`cannot read the control plane's tasks: ${(res.stderr || res.stdout || "").trim().split("\n").at(-1)}`);
+  return JSON.parse(res.stdout.trim().split("\n").at(-1));
+}
+
+async function busy(args) {
+  if (!layers.includes("control")) { console.log("aio: no control layer on this machine; nothing to drain"); return; }
+  const at = args.indexOf("--wait");
+  const waitSeconds = at >= 0 ? Number(args[at + 1]) || 0 : 0;
+  const deadline = Date.now() + waitSeconds * 1000;
+  for (;;) {
+    const work = inFlight();
+    if (!work.length) { console.log("aio: idle, safe to restart"); return; }
+    if (Date.now() >= deadline) {
+      console.log(`aio: busy, ${work.length} in flight:`);
+      for (const w of work) console.log(`  [${w.account}] ${w.status}  ${w.title}`);
+      process.exit(3);
+    }
+    await new Promise((r) => setTimeout(r, 15_000));
+  }
+}
+
 const [command = "help", ...rest] = process.argv.slice(2);
 switch (command) {
   case "init":
@@ -282,6 +329,9 @@ switch (command) {
     compose(["exec", ...(process.stdin.isTTY ? [] : ["-T"]), "control", "sh", "-c",
       'mkdir -p -m 700 "$PA_HOST_CODEX_HOME" && CODEX_HOME="$PA_HOST_CODEX_HOME" exec codex login "$@"', "sh",
       ...(rest[0] === "status" ? ["status"] : ["--device-auth"])]);
+    break;
+  case "busy":
+    await busy(rest);
     break;
   case "ps":
   case "logs":

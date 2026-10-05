@@ -82,7 +82,8 @@ npm run typecheck && npm test
 npm run build                      # host 模式需要；bin/serve 会拒绝启动早于 src 的 dist
 node deploy/aio.mjs build          # compose 模式：重建三个镜像（只改了某层时可只建那层）
 AIO_ENV_FILE=var/deploy/aio.env node deploy/aio.mjs check
-/Users/mengxiao/workspace/tools/start.sh restart personal-agent   # 先确认没有进行中的任务
+AIO_ENV_FILE=var/deploy/aio.env node deploy/aio.mjs busy --wait 1200   # 等到所有账号都没有派单、排队或执行中的任务（最多 20 分钟）
+/Users/mengxiao/workspace/tools/start.sh restart personal-agent   # 自动先跑上面的 busy：有任务在跑就拒绝重启；确需打断用 FORCE=1
 # 只改了界面（含移动端，App 加载的就是这个界面）时不用等任务结束：只换 ui 容器，控制面不重启
 AIO_ENV_FILE=var/deploy/aio.env node deploy/aio.mjs build ui && AIO_ENV_FILE=var/deploy/aio.env node deploy/aio.mjs refresh ui
 # npm run smoke 默认只打本地；当前部署要对公网冒烟必须显式给出两个 origin：
