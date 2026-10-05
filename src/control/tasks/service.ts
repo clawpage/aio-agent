@@ -18,6 +18,8 @@ import type { PlanningSchedule, ScheduleActionName } from "./planning.js";
 /** Bounded context keeps both live work and older matches in one Jev call. */
 const ACTIVE_CANDIDATES = 5;
 const RECENT_CANDIDATES = 5;
+/** Scheduled runs (the daily feed, reminders) may take at most this many of the recent slots. */
+const RECENT_SCHEDULED_CANDIDATES = 1;
 const RECALL_CANDIDATES = 4;
 const MAX_CANDIDATES = 14;
 const RECALLED = new Set<RecallSource>(["recall", "context"]);
@@ -340,7 +342,14 @@ export class TaskService {
             const activeTasks = all.filter(t => ["planning", "needs_input", "waiting", "blocked"].includes(t.status) || DISPATCHED.has(t.status));
             const finishedTasks = all.filter(t => !activeTasks.includes(t));
             for (const t of activeTasks.slice(-ACTIVE_CANDIDATES)) add(t, "active");
-            for (const t of finishedTasks.slice(-RECENT_CANDIDATES)) add(t, "recent");
+            // Newest first; a daily run must not push the person's own recent work out of view.
+            // It stays reachable through recall and an explicit reference (a reply to a push).
+            let recent = 0, scheduledRecent = 0;
+            for (const t of [...finishedTasks].reverse()) {
+                if (recent >= RECENT_CANDIDATES) break;
+                if (byId.get(t.id)?.schedule_id && ++scheduledRecent > RECENT_SCHEDULED_CANDIDATES) continue;
+                add(t, "recent"); recent += 1;
+            }
             const windowIds = new Set(candidates.keys());
             const explicit = row.related_task_id ? this.get(row.related_task_id) : null;
             const inputContext = this.taskContext(row);
@@ -366,7 +375,7 @@ export class TaskService {
                 // Terse follow-ups can omit the entity; query the inverted index
                 // once more with the adjacent task titles, still before Jev.
                 if (inputContext.trim().length < 30 && candidates.size < MAX_CANDIDATES)
-                    recalled(`${inputContext}\n${all.slice(-3).map(t => t.title).join("\n")}`, "context");
+                    recalled(`${inputContext}\n${all.filter(t => !t.schedule_id).slice(-3).map(t => t.title).join("\n")}`, "context");
             }
             const files = [row,...this.rows().filter(t=>t.merged_into===row.id && t.status==='merged')]
                 .flatMap(t=>JSON.parse(t.attachments_json) as TurnAttachment[]);

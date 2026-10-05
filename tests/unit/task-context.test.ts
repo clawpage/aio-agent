@@ -35,6 +35,19 @@ describe("main-session context", () => {
     ]);
     expect(timeline(tasks, tasks[3]!, 2).map(e => e.id)).toEqual(["t2", "t3"]);
   });
+  it("labels a scheduled run's instruction as a scheduled run, not as something the user said", () => {
+    const now = at(9, 0);
+    const tasks = [
+      task("feed", at(8, 0), { input_text: "根据你过往的任务，整理今天你可能感兴趣的内容和需要的提醒", schedule_id: "sched_feed", title: "每日推送" }),
+      task("reply", at(8, 30), { input_text: "第二条展开说说" }),
+    ];
+    expect(formatTimeline(timeline(tasks, tasks[1]!), now).split("\n")).toEqual([
+      "  [08:00] 定时运行：「根据你过往的任务，整理今天你可能感兴趣的内容和需要的提醒」 → 任务 feed「每日推送」（completed）",
+      "▶ [08:30] 用户：「第二条展开说说」  ← 本次消息",
+    ]);
+    // The run itself sees its instruction as this run, not as the user's message.
+    expect(formatTimeline(timeline(tasks, tasks[0]!), now)).toBe("▶ [08:00] 定时运行：「根据你过往的任务，整理今天你可能感兴趣的内容和需要的提醒」  ← 本次运行");
+  });
   it("keeps Jev's likeliest tasks for the executor and marks them in the timeline and its own lines", () => {
     const now = at(15, 0);
     const tasks = [

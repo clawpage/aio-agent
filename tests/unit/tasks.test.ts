@@ -204,6 +204,18 @@ describe("main inbox delegation", () => {
         expect(tasks.get(next.id)?.status).toBe("running");
         expect(codex.startedTurns.at(-1)!.text).toContain("report.docx");
     });
+    it("lets scheduled runs take at most one of the recent slots the dispatcher sees",async()=>{
+        const finish=async(text:string)=>{const t=submit(text);await tick();await codex.runTurn(codex.startedTurns.at(-1)!.turnId,{text:`${text} 完成`});await tick();return t;};
+        const mine=[await finish("比较两款婴儿车"),await finish("查明天天气"),await finish("订周六餐厅")];
+        const runs=[await finish("推送一"),await finish("推送二"),await finish("推送三")];
+        for(const r of runs)db.prepare("UPDATE tasks SET schedule_id='sched_feed' WHERE id=?").run(r.id);
+        submit("新的问题");await tick();
+        const seen=JSON.parse(codex.plans.at(-1)!.split("\n").at(-1)!).previous.map((t:{id:string})=>t.id);
+        for(const t of mine)expect(seen).toContain(t.id);
+        // Only the newest run; the others no longer crowd out the person's own work.
+        expect(seen).toContain(runs[2]!.id);
+        expect(seen.filter((id:string)=>runs.some(r=>r.id===id))).toHaveLength(1);
+    });
     it("a reference to a running task resumes its session after the running turn, whatever the model routes",async()=>{
         const first=submit("first"), other=submit("other");await tick();
         codex.plan=async()=>JSON.stringify({title:"correction",appendTo:other.id,related:["invented"],dependencies:["invented"],resources:[]});

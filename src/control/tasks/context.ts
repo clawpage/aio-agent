@@ -16,6 +16,8 @@ export interface ContextTask {
   merged_into: string | null;
   plan_json: string | null;
   created_at: number;
+  /** Set on a run a schedule started (the daily feed included): nobody typed it. */
+  schedule_id?: string | null;
 }
 
 export interface TimelineEntry {
@@ -29,6 +31,8 @@ export interface TimelineEntry {
   /** What the assistant last asked the user on that task, if anything. */
   ask: string | null;
   current: boolean;
+  /** A scheduled run's instruction, not something the user said. */
+  scheduled?: boolean;
 }
 
 const clip = (text: string, n: number) => {
@@ -63,7 +67,7 @@ export function timeline(tasks: ContextTask[], current: ContextTask, max = 10): 
     .slice(-max)
     .map((t) => {
       const owner = (t.merged_into && byId.get(t.merged_into)) || t;
-      return { id: t.id, at: t.created_at, text: clip(t.input_text, 160), taskId: owner.id, title: owner.title, status: owner.status, ask: owner.id === current.id ? null : lastQuestion(owner), current: t.id === current.id };
+      return { id: t.id, at: t.created_at, text: clip(t.input_text, 160), taskId: owner.id, title: owner.title, status: owner.status, ask: owner.id === current.id ? null : lastQuestion(owner), current: t.id === current.id, ...(t.schedule_id ? { scheduled: true } : {}) };
     });
 }
 
@@ -83,8 +87,9 @@ export function formatTimeline(entries: TimelineEntry[], now = Date.now(), relev
   const likely = new Map(relevance?.ranked.map((r) => [r.id, r.p]));
   return entries
     .map((e) => {
-      const head = `${e.current ? "▶ " : "  "}[${time(e.at, now)}] 用户：「${e.text}」`;
-      if (e.current) return `${head}  ← 本次消息`;
+      // A scheduled run's instruction is labelled as such: the user did not type it.
+      const head = `${e.current ? "▶ " : "  "}[${time(e.at, now)}] ${e.scheduled ? "定时运行" : "用户"}：「${e.text}」`;
+      if (e.current) return `${head}  ← 本次${e.scheduled ? "运行" : "消息"}`;
       const where = e.taskId === e.id ? `任务 ${e.taskId}「${clip(e.title, 30)}」（${e.status}）` : `补充给任务 ${e.taskId}「${clip(e.title, 30)}」（${e.status}）`;
       const p = likely.get(e.taskId);
       return `${head} → ${where}${e.ask ? `；助理最后问：「${e.ask}」` : ""}${p === undefined ? "" : `〔Jev：相关性 ${percent(p)}〕`}`;
