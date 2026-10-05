@@ -94,7 +94,7 @@ export function planningPrompt(text: string, previous: PlanningTask[], explicit:
         "用户补充正在进行任务的地址、条件、纠正、偏好、答案或同一交付物的额外要求，选 steer 直接追加，不创建依赖任务。",
         "你看不到知识库、长期记忆、邮箱或附件正文，不等于执行者查不到。姓名别名、孩子生日与出行时年龄、已有地址、既往安排和偏好等可检索事实，以及缺少目的地、日期等关键条件，都交给执行任务先核对；执行者决定是否需要向用户追问。不要把历史限制套到新的不同任务。",
         "‘你自己查去’‘从记忆找’通常是原任务的继续指令；结合原执行轮次是否结束选 steer 或 resume。价格纠正、登录后的后续操作也要续接原现场。",
-        "旧任务可能处于 needs_input：用户回答它的问题时，执行轮次尚未结束用 steer；执行轮次已结束用 resume，在同一执行会话开启新轮次。派单不得提出新问题或给用户选项。",
+        "旧任务可能处于 needs_input：它的执行轮次已结束并向用户提了问题；用户回答它时用 resume，在同一执行会话开启新轮次。派单不得提出新问题或给用户选项。",
         "只能对仍在执行的任务用 steer；已结束轮次用 resume。同主题但明确要求独立交付、等前一项完成再做，或无关任务，选 new 并按需声明依赖。不能把所有消息都追加给最后一项。",
         "related 是理解本任务有帮助的历史任务id；无关任务不要关联。dependencies 是必须先完成才可执行的任务id，必须也在related里。",
         "代词、‘继续/改一下/刚才那个’按相邻优先结合最近的相关任务理解；需要尚未产出的文件或结果时必须声明依赖，不能臆造已完成。",
@@ -116,11 +116,11 @@ export interface PlanReport {
     repairs: string[];
     error?: string;
 }
-const ACTIVE = ["planning", "needs_input", "waiting", "queued", "running"];
-/** Finished tasks whose execution session may be continued. */
-const RESUMABLE = ["completed", "failed", "interrupted", "unknown"];
-const canSteer = (task: PlanningTask) => ACTIVE.includes(task.status) && !(task.status === "needs_input" && task.turn_id);
-const canResume = (task: PlanningTask) => RESUMABLE.includes(task.status) || (task.status === "needs_input" && !!task.turn_id);
+const ACTIVE = ["planning", "waiting", "queued", "running"];
+/** Finished tasks whose execution session may be continued; needs_input is a finished turn that asked the user. */
+const RESUMABLE = ["completed", "failed", "interrupted", "unknown", "needs_input"];
+const canSteer = (task: PlanningTask) => ACTIVE.includes(task.status);
+const canResume = (task: PlanningTask) => RESUMABLE.includes(task.status);
 const MAX_RELATED = 12;
 /** The JSON object in a model answer, even when it is fenced or wrapped in a sentence. */
 function jsonText(raw: string): string {

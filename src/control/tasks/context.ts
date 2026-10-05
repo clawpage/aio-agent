@@ -180,7 +180,7 @@ export function routingQuestion(message: string, candidates: Array<ContextTask &
       t.result ? `结果摘要：${clip(t.result, 200)}` : "",
       t.latestMessage && t.latestMessage !== t.result ? `最新助理消息：${clip(t.latestMessage, 200)}` : "",
     ].filter(Boolean).join("；");
-    const mode = ["planning", "waiting", "queued", "running"].includes(t.status) || (t.status === "needs_input" && !t.turn_id) ? "steer"
+    const mode = ["planning", "waiting", "queued", "running"].includes(t.status) ? "steer"
       : ["completed", "failed", "interrupted", "unknown"].includes(t.status) || (t.status === "needs_input" && !!t.turn_id) ? "resume" : null;
     if (mode) criteria[`${mode}:${t.id}`] = description;
     questions[`relevance:${t.id}`] = {

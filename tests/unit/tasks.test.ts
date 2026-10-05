@@ -655,13 +655,14 @@ it("keeps 2–5 short distinct answers with a question, and none without one",()
     expect(parse({clarification:"选哪个？",options:"雅培"}).report.repairs).toContain("options 不是列表，已忽略");
 });
 
-it("validates optional clarification and allows semantic routing to a waiting question",()=>{
+it("validates optional clarification and resumes the finished turn that asked a question",()=>{
     const base={title:"query",related:[],dependencies:[],resources:[]};
     expect(parsePlan(JSON.stringify({...base,clarification:42}),[],null)?.clarification).toBeNull();
     expect(parsePlan(JSON.stringify({...base,clarification:"问".repeat(201)}),[],null)?.clarification).toHaveLength(200);
     expect(parsePlan(JSON.stringify({...base,clarification:"  "}),[],null)?.clarification).toBeNull();
     const previous=[{id:"q",title:"flight",input_text:"query",status:"needs_input",result:null}];
-    expect(parsePlan(JSON.stringify({...base,appendTo:"q",clarification:"ignored"}),previous,null)).toMatchObject({appendTo:"q",clarification:null});
+    // A task waits for input only after its turn ended with a question: the answer resumes that turn's thread.
+    expect(parsePlan(JSON.stringify({...base,appendTo:"q",clarification:"ignored"}),previous,null)).toMatchObject({appendTo:null,resume:"q",clarification:null});
 });
 describe("main-session order, Jev's second opinion and resuming a finished session", () => {
     const planWith = (extra: (message: string) => Record<string, unknown>) => async (p: string) => {

@@ -139,7 +139,7 @@ export class TaskService {
     /** Whether the referenced session still has work on it (a question it asked is answered at once). */
     private referenceWorking(row: TaskRow): boolean {
         const reference = this.referenceTarget(row);
-        return !!reference && ["planning", "needs_input", "waiting", "queued", "running", "stopping"].includes(reference.status) && !(reference.status === "needs_input" && reference.turn_id);
+        return !!reference && ["planning", "waiting", "queued", "running", "stopping"].includes(reference.status);
     }
     setNotifier(notifier: ((task: ReturnType<TaskService["view"]>) => void) | null): void { this.#notifier = notifier; }
     /** Tell the notifier about a status this task just reached, if it is news for the person. */
@@ -316,15 +316,6 @@ export class TaskService {
         const trace: RecallEvent = { taskId: row.id, ownerId: this.ownerId(row), candidates: [], searches: [], rounds: 0, chosen: { related: [], appendTo: null }, gold: null, latencyMs: 0, promptChars: 0, failed: true, steps: [] };
         const steps = trace.steps!;
         try {
-            // An explicit reply to a pending question already has an authoritative
-            // target. Free text (including "look it up") needs no second classifier.
-            const asked = row.related_task_id ? this.get(row.related_task_id) : null;
-            const askedPlan = asked?.status === "needs_input" && !asked.turn_id && asked.plan_json ? JSON.parse(asked.plan_json) as TaskPlan : null;
-            if (asked && askedPlan) {
-                const plan: TaskPlan = { title: [...row.input_text.trim()].slice(0, 40).join(""), description: `回答“${askedPlan.clarification ?? asked.title}”`, related: [asked.id], dependencies: [], resources: [], appendTo: asked.id, resume: null, clarification: null };
-                this.db.prepare("UPDATE tasks SET title=?,plan_json=?,merged_into=?,status='merging',error=NULL WHERE id=?").run(plan.title, JSON.stringify(plan), asked.id, row.id);
-                return;
-            }
             const everything = this.rows().filter(t => this.ownerId(t) === this.ownerId(row));
             const all = everything.filter(t => !t.merged_into && t.created_at < row.created_at).map(t => ({
                 ...t,
@@ -517,7 +508,7 @@ export class TaskService {
             else if (row.execution_conversation_id) this.db.prepare("UPDATE tasks SET execution_conversation_id=NULL WHERE id=?").run(row.id);
             // "Do it now, and every day from now on": the schedule, then this run.
             if (plan.schedule) plan.description = this.createSchedule(row, plan, true);
-            this.db.prepare("UPDATE tasks SET title=?,plan_json=?,status=?,error=NULL WHERE id=?").run(plan.title, JSON.stringify(plan), plan.clarification ? "needs_input" : "waiting", row.id);
+            this.db.prepare("UPDATE tasks SET title=?,plan_json=?,status=?,error=NULL WHERE id=?").run(plan.title, JSON.stringify(plan), "waiting", row.id);
             if (finalContinued?.status === "needs_input" && finalContinued.turn_id) {
                 const answeredPlan = JSON.parse(finalContinued.plan_json!) as TaskPlan;
                 answeredPlan.answeredBy = row.id;
@@ -595,19 +586,6 @@ export class TaskService {
                     this.fallbackSupplement(row); this.schedule(); continue;
                 }
                 if(parent.status==='stopping' || !parent.plan_json) continue;
-                // Answering a preflight question does not need executor slots or
-                // shared resources. Persist the answer and re-evaluate the SAME task.
-                if (!parent.turn_id && (parent.status === 'needs_input' ||
-                    (parent.status === 'planning' && (JSON.parse(parent.plan_json) as TaskPlan).clarification))) {
-                    this.db.exec('BEGIN IMMEDIATE');
-                    try {
-                        this.db.prepare("UPDATE tasks SET status='merged',completed_at=? WHERE id=?").run(Date.now(),row.id);
-                        this.db.prepare("UPDATE tasks SET status='planning',error=NULL WHERE id=?").run(parent.id);
-                        this.db.exec('COMMIT');
-                    } catch (err) { this.db.exec('ROLLBACK'); throw err; }
-                    this.schedule();
-                    continue;
-                }
                 const plan=JSON.parse(row.plan_json!) as TaskPlan;
                 const dependencies = plan.dependencies.map(id => this.get(id));
                 if (dependencies.some(t => !t || ['blocked','planning_failed'].includes(t.status) || (TERMINAL.has(t.status) && t.status !== 'completed'))) {
