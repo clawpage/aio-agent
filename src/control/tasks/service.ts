@@ -134,6 +134,11 @@ export class TaskService {
         const same = this.rows().filter(t => t.id !== row.id && t.created_at < row.created_at && !t.merged_into && this.executor(t) === this.executor(ref));
         return same.filter(t => ["planning", "needs_input", "waiting", "queued", "running", "stopping"].includes(t.status)).at(-1) ?? ref;
     }
+    /** Whether the referenced session still has work on it (a question it asked is answered at once). */
+    private referenceWorking(row: TaskRow): boolean {
+        const reference = this.referenceTarget(row);
+        return !!reference && ["planning", "needs_input", "waiting", "queued", "running", "stopping"].includes(reference.status) && !(reference.status === "needs_input" && reference.turn_id);
+    }
     setNotifier(notifier: ((task: ReturnType<TaskService["view"]>) => void) | null): void { this.#notifier = notifier; }
     /** Tell the notifier about a status this task just reached, if it is news for the person. */
     private notifyChange(id: string, before: string): void {
@@ -189,6 +194,7 @@ export class TaskService {
         const plan = JSON.parse(row.plan_json) as TaskPlan;
         const reference = this.referenceTarget(row);
         if (reference?.status === "stopping") return { label: "等待原任务停止", message: `“${reference.title}”停止后继续处理本次要求。` };
+        if (reference && this.referenceWorking(row)) return { label: "等待原任务", message: `“${reference.title}”这一轮结束后，接着在同一个会话里处理本次要求。` };
         const dependency = plan.dependencies.map(id => this.get(id)).find(t => t && t.status !== "completed");
         if (dependency) return { label: "等待前置任务", message: `等待“${dependency.title}”完成后继续。` };
         const parent = row.merged_into ? this.get(row.merged_into) : null;
@@ -397,7 +403,8 @@ export class TaskService {
             const scheduling = { now: Date.now(), timezone: this.cfg.browser.timezone, schedules: this.planningSchedules(trace.ownerId) };
             steps.push({ kind: "context", at: Date.now(), timeline: timelineText, candidates: candidates.size });
             let relevance: JevRelevance | null = null;
-            if (candidates.size && this.jev?.enabled) {
+            // A referenced message's route is fixed: no second opinion is needed.
+            if (!explicit && candidates.size && this.jev?.enabled) {
                 const pool = [...candidates.values()].map(t => ({ ...byId.get(t.id)!, ...t, recalled: RECALLED.has(t.source) }));
                 const q = routingQuestion(inputContext, pool, timeline(everything, row), row.created_at);
                 const criteria = q.questions.route!.criteria;
@@ -637,14 +644,8 @@ export class TaskService {
         const rows = this.rows();
         const active = rows.filter(t => DISPATCHED.has(t.status));
         for (const row of rows.filter(t => t.status === "waiting")) {
-            const reference = this.referenceTarget(row);
-            if (reference?.status === "stopping") continue;
-            if (reference && ["planning", "needs_input", "waiting", "queued", "running"].includes(reference.status) && !(reference.status === "needs_input" && reference.turn_id)) {
-                const supplement = JSON.parse(row.plan_json!) as TaskPlan;
-                applyTaskReference(supplement, reference);
-                this.db.prepare("UPDATE tasks SET merged_into=?,plan_json=?,status='merging' WHERE id=?").run(reference.id, JSON.stringify(supplement), row.id);
-                this.schedule(); continue;
-            }
+            // A referenced task's session takes the reply as its next turn, once the work on it ends.
+            if (this.referenceWorking(row)) continue;
             if (active.length >= this.cfg.agent.maxConcurrentTurns)
                 break;
             const plan = JSON.parse(row.plan_json!) as TaskPlan;

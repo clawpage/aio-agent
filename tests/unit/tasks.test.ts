@@ -195,15 +195,19 @@ describe("main inbox delegation", () => {
         expect(tasks.get(next.id)?.status).toBe("running");
         expect(codex.startedTurns.at(-1)!.text).toContain("report.docx");
     });
-    it("honors an explicit active target even when the model redirects or invents task IDs",async()=>{
+    it("a reference to a running task resumes its session after the running turn, whatever the model routes",async()=>{
         const first=submit("first"), other=submit("other");await tick();
         codex.plan=async()=>JSON.stringify({title:"correction",appendTo:other.id,related:["invented"],dependencies:["invented"],resources:[]});
         const extra=submit("correct the first",first.id);await tick();
-        expect(tasks.get(extra.id)?.merged_into).toBe(first.id);expect(tasks.get(extra.id)?.status).toBe("merged");
-        expect(codex.steers).toHaveLength(1);expect(codex.steers[0]!.threadId).toBe(codex.startedTurns[0]!.threadId);
+        expect(tasks.get(extra.id)).toMatchObject({status:"waiting",merged_into:null});expect(codex.steers).toHaveLength(0);
+        expect(JSON.parse(tasks.get(extra.id)!.plan_json!)).toMatchObject({resume:first.id,appendTo:null,decision:{kind:"resume",taskId:first.id},dependencies:[]});
+        expect(tasks.view(tasks.get(extra.id)!).waitReason?.label).toBe("等待原任务");
         const context=JSON.parse(codex.plans.at(-1)!.split("\n").at(-1)!);expect(context.previous.map((t:{id:string})=>t.id)).toEqual([first.id]);
-        expect(JSON.parse(tasks.get(extra.id)!.plan_json!).dependencies).toEqual([]);
-        expect(tasks.view(tasks.get(extra.id)!).relatedTaskTitle).toBe("correction");
+        expect(tasks.view(tasks.get(extra.id)!).relatedTaskTitle).toBe("first");
+        await codex.runTurn(codex.startedTurns[0]!.turnId,{text:"First done"});await tick();await tick();
+        expect(tasks.get(extra.id)?.status).toBe("running");
+        expect(codex.startedTurns.at(-1)!.threadId).toBe(codex.startedTurns[0]!.threadId);
+        expect(tasks.get(first.id)).toMatchObject({status:"completed",title:"first",result:"First done"});
     });
     it("continues a finished reference without being hijacked by an unrelated running task",async()=>{
         const done=submit("done");await tick();await codex.runTurn(codex.startedTurns[0]!.turnId,{text:"Selected original result"});await tick();
@@ -220,24 +224,27 @@ describe("main inbox delegation", () => {
         await codex.runTurn(codex.startedTurns.at(-1)!.turnId,{text:"Updated result"});await tick();
         expect(tasks.get(done.id)?.result).toBe("Selected original result");expect(tasks.get(update.id)?.result).toBe("Updated result");
     });
-    it("references to an old result steer its active resumed turn, preserving the original report",async()=>{
+    it("references to an old result queue behind its resumed turn, preserving the original report",async()=>{
         const original=submit('original');await tick();await codex.runTurn(codex.startedTurns[0]!.turnId,{text:'Original report'});await tick();
         const continuation=submit('continue',original.id);await tick();
         const supplement=submit('correct the continuation',original.id);await tick();
-        expect(tasks.get(supplement.id)?.merged_into).toBe(continuation.id);expect(tasks.get(supplement.id)?.status).toBe('merged');
-        expect(codex.steers.at(-1)!.threadId).toBe(codex.startedTurns[0]!.threadId);
-        expect(codex.steers.at(-1)!.expectedTurnId).toBe(codex.startedTurns[1]!.turnId);
+        expect(tasks.get(supplement.id)).toMatchObject({status:'waiting',merged_into:null,related_task_id:original.id});expect(codex.steers).toHaveLength(0);
         expect(codex.startedThreads).toHaveLength(1);expect(codex.startedTurns).toHaveLength(2);
+        await codex.runTurn(codex.startedTurns[1]!.turnId,{text:'Continued'});await tick();await tick();
+        expect(tasks.get(supplement.id)?.status).toBe('running');expect(codex.startedTurns).toHaveLength(3);
+        expect(codex.startedTurns[2]!.threadId).toBe(codex.startedTurns[0]!.threadId);expect(codex.startedThreads).toHaveLength(1);
         expect(tasks.get(original.id)?.status).toBe('completed');expect(tasks.get(original.id)?.result).toBe('Original report');
-        await tasks.stop(continuation.id);await tick();expect(tasks.get(original.id)?.status).toBe('completed');
+        expect(tasks.get(continuation.id)?.result).toBe('Continued');
+        await tasks.stop(supplement.id);await tick();expect(tasks.get(original.id)?.status).toBe('completed');
     });
-    it("serializes simultaneous manual references onto one resumed turn",async()=>{
+    it("runs simultaneous manual references one after another on the same session",async()=>{
         const original=submit('original');await tick();await codex.runTurn(codex.startedTurns[0]!.turnId,{text:'Original'});await tick();
         const first=submit('followup one',original.id),second=submit('followup two',original.id);
         await tick();await tick();
-        expect(tasks.get(first.id)?.status).toBe('running');expect(tasks.get(second.id)?.status).toBe('merged');
-        expect(tasks.get(second.id)?.merged_into).toBe(first.id);expect(codex.startedTurns).toHaveLength(2);
-        expect(codex.startedThreads).toHaveLength(1);expect(tasks.get(first.id)?.turn_id).not.toBe(tasks.get(original.id)?.turn_id);
+        expect(tasks.get(first.id)?.status).toBe('running');expect(tasks.get(second.id)).toMatchObject({status:'waiting',merged_into:null});
+        expect(codex.startedTurns).toHaveLength(2);expect(codex.startedThreads).toHaveLength(1);expect(tasks.get(first.id)?.turn_id).not.toBe(tasks.get(original.id)?.turn_id);
+        await codex.runTurn(codex.startedTurns[1]!.turnId,{text:'One'});await tick();await tick();
+        expect(tasks.get(second.id)?.status).toBe('running');expect(codex.startedTurns).toHaveLength(3);expect(codex.startedThreads).toHaveLength(1);
     });
     it("resumes the same thread for subsequent references and after TaskService reinitialization",async()=>{
         const original=submit('original');await tick();await codex.runTurn(codex.startedTurns[0]!.turnId,{text:'Original'});await tick();
