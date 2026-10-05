@@ -154,11 +154,14 @@ export type DispatchStep =
 /** Debug log entries are capped so one dispatch never bloats the database. */
 export const STEP_PROMPT_CHARS = 40_000;
 export const STEP_ANSWER_CHARS = 8_000;
+/** The step-by-step log (tens of KB per dispatch) is kept this long; the stats columns stay. */
+export const STEP_RETENTION_MS = 14 * 86_400_000;
 
 export function recordRecall(db: Db, e: RecallEvent): void {
   db.prepare(
     "INSERT INTO recall_events (task_id, owner_id, created_at, candidates_json, searches_json, rounds, chosen_json, gold_task_id, gold_rank, gold_in_window, latency_ms, prompt_chars, failed, fail_reason, repairs_json, jev_json, steps_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
   ).run(e.taskId, e.ownerId, Date.now(), JSON.stringify(e.candidates), JSON.stringify(e.searches), e.rounds, JSON.stringify(e.chosen), e.gold?.id ?? null, e.gold?.rank ?? null, e.gold ? (e.gold.inWindow ? 1 : 0) : null, e.latencyMs, e.promptChars, e.failed ? 1 : 0, e.failReason ?? null, JSON.stringify(e.repairs ?? []), e.jev ? JSON.stringify(e.jev) : null, e.steps?.length ? JSON.stringify(e.steps) : null);
+  db.prepare("UPDATE recall_events SET steps_json = NULL WHERE created_at < ? AND steps_json IS NOT NULL").run(Date.now() - STEP_RETENTION_MS);
 }
 
 export interface RecallStats {

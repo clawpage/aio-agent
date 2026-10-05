@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { openDb, type Db } from "../../src/control/db.js";
-import { RECALL_CAP, recallStats, recordRecall, TaskRecall, tokenize, type RecallDoc } from "../../src/control/tasks/recall.js";
+import { RECALL_CAP, STEP_RETENTION_MS, recallStats, recordRecall, TaskRecall, tokenize, type RecallDoc } from "../../src/control/tasks/recall.js";
 
 let db: Db, recall: TaskRecall;
 const TOPICS = ["周报整理", "发票报销", "租房合同", "健身计划", "学英语", "宝宝辅食", "家庭预算", "装修报价", "体检预约", "车险续保", "读书笔记", "照片整理"];
@@ -55,6 +55,16 @@ it("measures hand-picked tasks against the cap recall actually uses", () => {
   // Picks inside the recent window say nothing about recall and do not count.
   event(40, true);
   expect(recallStats(db, "owner_1", 7)).toMatchObject({ dispatches: 5, labelled: 4, recallAtCap: 0.5, cap: RECALL_CAP });
+});
+
+it("keeps the step-by-step dispatch log for a while, and the stats for longer", () => {
+  const event = { taskId: "t", ownerId: "owner_1", candidates: [], searches: [], rounds: 1, chosen: { related: [], appendTo: null }, gold: null, latencyMs: 10, promptChars: 100, failed: false, steps: [{ kind: "failed" as const, at: 1, reason: "x" }] };
+  recordRecall(db, event);
+  db.prepare("UPDATE recall_events SET created_at = ?").run(Date.now() - STEP_RETENTION_MS - 1);
+  recordRecall(db, event);
+  const rows = db.prepare("SELECT steps_json IS NOT NULL AS kept FROM recall_events ORDER BY id").all() as Array<{ kept: number }>;
+  expect(rows.map((r) => r.kept)).toEqual([0, 1]);
+  expect(recallStats(db, "owner_1", 30)).toMatchObject({ dispatches: 2 });
 });
 
 it("adds the failure reason and repair columns to a monitoring table from before they existed", () => {
