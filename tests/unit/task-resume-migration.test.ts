@@ -9,6 +9,8 @@ it('adds executor references to old databases without changing task history, ide
   const file=path.join(dir,'test.sqlite');
   try {
     const old=openDb(file);
+    // A database from before the column never had the index over it either.
+    old.exec("DROP INDEX idx_tasks_execution");
     old.exec("ALTER TABLE tasks DROP COLUMN execution_conversation_id");
     old.exec("INSERT INTO conversations(id,owner_id,title,created_at,updated_at) VALUES('conv','owner','Task',1,1)");
     old.exec("INSERT INTO tasks(id,client_message_id,conversation_id,title,input_text,status,result,created_at,completed_at) VALUES('task','message','conv','Task','Original input','completed','Original result',1,2)");

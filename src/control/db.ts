@@ -350,6 +350,15 @@ function migrate(db: Db): void {
   if (!conversationColumns.includes("model_provider")) {
     db.exec("ALTER TABLE conversations ADD COLUMN model_provider TEXT");
   }
+  // Lookups on every Codex notification and every task event; created here,
+  // after the columns they cover are guaranteed to exist.
+  db.exec(`
+CREATE INDEX IF NOT EXISTS idx_conversations_thread ON conversations(codex_thread_id);
+CREATE INDEX IF NOT EXISTS idx_turns_codex ON turns(codex_turn_id);
+CREATE INDEX IF NOT EXISTS idx_events_turn ON events(turn_id);
+CREATE INDEX IF NOT EXISTS idx_tasks_execution ON tasks(COALESCE(execution_conversation_id, conversation_id));
+CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
+`);
 }
 
 export function getMeta(db: Db, key: string): string | null {
