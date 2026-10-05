@@ -4,7 +4,7 @@ import { isMember, publicPayload } from "../auth/policy.js";
 import {readSoul,writeSoul,SoulError,DEFAULT_SOUL,SOUL_MAX_BYTES} from '../soul.js';
 import { HTML_PREVIEW_CSP, htmlPreviewDocument } from "../documents/html.js";
 import express, { type Request, type Response, type NextFunction, type Router } from "express";
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import { pathToFileURL } from "node:url";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
@@ -12,6 +12,7 @@ import { exitTerminal, TERMINAL_ID, TerminalRegistry } from "../terminals.js";
 import { maps, MapService } from "../maps.js";
 import { API_MIN, API_VERSION } from "../../common/version.js";
 import { appVersion } from "../../common/build.js";
+import { readSecretFile } from "../../common/secrets.js";
 import type { AppContext } from "../context.js";
 import {
   InvalidConversationTitleError,
@@ -529,6 +530,40 @@ export function createApiRouter(context: AppContext): Router {
     } catch (err) {
       res.status(err instanceof TurnConflictError ? 409 : 400).json({ error: "task_submit_failed", message: err instanceof Error ? err.message : "任务提交失败" });
     }
+  }));
+  // ---------------------------------------------------------------- gadget
+  // The voice gadget (the desk device) speaks for the owner with a bearer token
+  // from cfg.gadgetTokenPath instead of a login; no cookies, so no CSRF to check.
+  const gadgetOwner = (req: Request, res: Response): string | null => {
+    const secret = readSecretFile(cfg.gadgetTokenPath, "AIO_GADGET_TOKEN");
+    const given = /^Bearer\s+(\S+)$/i.exec(req.get("authorization") ?? "")?.[1];
+    const digest = (s: string) => createHash("sha256").update(s).digest();
+    const ownerId = cfg.runtimeUserId ?? "owner_1";
+    if (!secret.ok || !given || !timingSafeEqual(digest(secret.value), digest(given)) || getUser(db, ownerId)?.role !== "owner") {
+      res.status(401).json({ error: "unauthenticated" });
+      return null;
+    }
+    return ownerId;
+  };
+  router.post("/gadget/messages", requireKind("primary"), asyncHandler(async (req, res) => {
+    const ownerId = gadgetOwner(req, res);
+    if (!ownerId) return;
+    try {
+      const b = req.body ?? {};
+      if (typeof b.text !== "string" || typeof b.clientMessageId !== "string") throw new Error("消息格式不正确");
+      const row = context.tasks.submitGadget({ userId: ownerId, text: b.text, clientMessageId: b.clientMessageId });
+      res.status(202).json(context.tasks.gadgetReply(row.id, ownerId));
+    } catch (err) {
+      res.status(err instanceof TurnConflictError ? 409 : 400).json({ error: "gadget_submit_failed", message: err instanceof Error ? err.message : "提交失败" });
+    }
+  }));
+  router.get("/gadget/messages/:id", requireKind("primary"), asyncHandler(async (req, res) => {
+    const ownerId = gadgetOwner(req, res);
+    if (!ownerId) return;
+    const reply = context.tasks.gadgetReply(param(req, "id"), ownerId);
+    res.setHeader("Cache-Control", "no-store");
+    if (!reply) { res.status(404).json({ error: "not_found" }); return; }
+    res.json(reply);
   }));
   router.post("/tasks/:id/stop", requireKind("primary"), requireSession, asyncHandler(async (req, res) => {
     try { await context.tasks.stop(param(req, "id")); res.json({ ok: true }); }

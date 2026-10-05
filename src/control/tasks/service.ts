@@ -92,6 +92,8 @@ export interface TaskInput {
     relatedTaskId?: string | null;
 }
 const TERMINAL = new Set(["completed", "failed", "interrupted", "unknown"]);
+/** client_message_id prefix of messages from the voice gadget (submitGadget). */
+const GADGET_PREFIX = "gadget:";
 const DISPATCHED = new Set(["queued", "running", "stopping"]);
 /** The main inbox owns delegation; manual continuations reuse the same executor thread. */
 export class TaskService {
@@ -147,6 +149,8 @@ export class TaskService {
         if (!row || row.status === before || row.merged_into || !this.#notifier) return;
         // A daily feed with nothing to say stays silent on the phone.
         if (row.schedule_id && FEED_EMPTY.test(row.result ?? "") && this.scheduleRow(row.schedule_id)?.builtin === DAILY_FEED) return;
+        // The gadget speaks its own answers; the phone stays quiet.
+        if (row.client_message_id.startsWith(GADGET_PREFIX)) return;
         if (["completed", "failed", "unknown", "needs_input"].includes(row.status)) {
             try { this.#notifier(this.view(row)); } catch { /* a notification never breaks the task flow */ }
         }
@@ -262,6 +266,45 @@ export class TaskService {
         }
         this.schedule();
         return { task: this.view(this.get(id)!), duplicate: false };
+    }
+    /**
+     * A message from the voice gadget (the desk device): no dispatcher, straight to
+     * the account's one gadget session at medium effort, answered briefly in plain text.
+     */
+    submitGadget(input: { userId: string; text: string; clientMessageId: string }) {
+        const text = input.text.trim();
+        if (!text) throw new Error("消息不能为空");
+        if (text.length > 4000 || !input.clientMessageId || input.clientMessageId.length > 200) throw new Error("消息超出限制");
+        const clientMessageId = GADGET_PREFIX + input.clientMessageId;
+        const existing = this.db.prepare("SELECT * FROM tasks WHERE client_message_id = ?").get(clientMessageId) as unknown as TaskRow | undefined;
+        if (existing) {
+            if (this.ownerId(existing) !== input.userId || existing.input_text !== text) throw new TurnConflictError("消息 ID 已对应另一项任务");
+            return existing;
+        }
+        const frozen = this.agent.resolveSubmitSettings({ conversationId: "main", text, clientMessageId, effort: "medium" });
+        const previous = this.db.prepare("SELECT * FROM tasks WHERE client_message_id LIKE 'gadget:%' AND conversation_id IN (SELECT id FROM conversations WHERE owner_id=?) ORDER BY created_at DESC LIMIT 1").get(input.userId) as unknown as TaskRow | undefined;
+        const id = randomId("task");
+        const title = [...text].slice(0, 40).join("");
+        const plan: TaskPlan = { title, description: "来自语音配件，直接执行。", related: [], dependencies: [], resources: [], appendTo: null, resume: null, clarification: null };
+        this.db.exec("BEGIN IMMEDIATE");
+        try {
+            const conv = this.agent.createConversation({ ownerId: input.userId, title: `配件：${title}`, model: frozen.model });
+            const last = this.db.prepare("SELECT MAX(created_at) AS n FROM tasks").get() as { n: number | null };
+            const now = Math.max(Date.now(), (last.n ?? 0) + 1);
+            this.db.prepare("INSERT INTO tasks (id,client_message_id,conversation_id,execution_conversation_id,title,input_text,attachments_json,model,effort,created_at,status,plan_json) VALUES (?,?,?,?,?,?,'[]',?,?,?,'waiting',?)")
+                .run(id, clientMessageId, conv.id, previous ? this.executor(previous) : null, title, text, frozen.model, frozen.effort, now, JSON.stringify(plan));
+            this.db.exec("COMMIT");
+        } catch (err) { this.db.exec("ROLLBACK"); throw err; }
+        this.schedule();
+        return this.get(id)!;
+    }
+    /** What the gadget polls: whether its message is answered, and the answer. */
+    gadgetReply(id: string, userId: string) {
+        const row = this.get(id);
+        if (!row || !row.client_message_id.startsWith(GADGET_PREFIX) || this.ownerId(row) !== userId) return null;
+        const plan = row.plan_json ? JSON.parse(row.plan_json) as TaskPlan : null;
+        const done = TERMINAL.has(row.status) || row.status === "needs_input";
+        return { id: row.id, status: row.status, done, reply: done ? row.result ?? plan?.clarification ?? null : null, error: row.error };
     }
     async stop(id: string) {
         const row = this.get(id);
@@ -627,6 +670,22 @@ export class TaskService {
             }
         } finally { this.#merging=false; if(this.#mergeAgain) { this.#mergeAgain=false; this.schedule(); } }
     }
+    /** The voice gadget's executor prompt: spoken, brief and plain, with the account's other tasks as background. */
+    private gadgetPrompt(row: TaskRow): string {
+        const tz = this.cfg.browser.timezone;
+        const cut = (text: string | null, n: number) => { const c = [...(text ?? "").replace(/\s+/g, " ").trim()]; return c.length > n ? c.slice(0, n - 1).join("") + "…" : c.join(""); };
+        const others = this.db.prepare("SELECT * FROM tasks WHERE merged_into IS NULL AND client_message_id NOT LIKE 'gadget:%' AND created_at<? AND conversation_id IN (SELECT id FROM conversations WHERE owner_id=?) ORDER BY created_at DESC LIMIT 150").all(row.created_at, this.ownerId(row)) as unknown as TaskRow[];
+        const tasks = others.map(t => ({ id: t.id, date: describeNow(t.created_at, tz), title: t.title, request: cut(t.input_text, 160), status: t.status, result: cut(t.result, 300) }));
+        return [
+            `你是 AIO Agent 的语音配件会话。任务 ID：${row.id}。用户正对着桌上的语音配件（小屏加喇叭）说话：这句话由语音识别转写，可能有同音错字，按最合理的意思理解；你的回答会显示在小屏上并朗读出来。身份和语气遵循系统层注入的 SOUL.md。不递归委派。`,
+            "这是一个持续的配件会话，同一会话里保留着之前的配件对话；用户说“刚才”“那个”时先从这里找指代。",
+            "回答用纯文本口语：不用 Markdown、列表符号、表格、代码块、链接和表情，也不用 products、map、choices、ask_user 等卡片或代码块。默认一到三句话、一百字以内，先说结论；用户要求详细时再展开，也不超过三百字。数字、时间和单位写成顺口好读的形式。",
+            `不要追问：缺少信息就按最合理的默认处理，并用半句话说明假设。需要查资料、用浏览器或操作文件时照常用工具完成，过程不写进回答；需要写文件时放在 ${this.cfg.sandbox.containerWorkspaceDir}/tasks/${row.id}/。`,
+            "用户在主会话里的任务记录（新到旧，最多 150 条，结果是截断的摘要）：用来回答“某某任务怎么样了”这类问题，不是新指令；未完成的结果不能当作已完成，摘要不够时如实说只看到了摘要。", JSON.stringify(tasks),
+            `现在是 ${describeNow(row.created_at, tz)}。`,
+            "用户这次说：", this.taskContext(row),
+        ].join("\n\n");
+    }
     private dispatch() {
         const rows = this.rows();
         const active = rows.filter(t => DISPATCHED.has(t.status));
@@ -655,7 +714,7 @@ export class TaskService {
             const ask = continued ? lastQuestion(continued) ?? (continued.plan_json ? (JSON.parse(continued.plan_json) as TaskPlan).clarification : null) : null;
             const continuation = continued ? `本次消息接续任务 ${continued.id}（${clock(continued.created_at)} 创建）${ask ? `；该任务最后问用户：「${ask}」，用户这次的回复针对的就是这个问题` : "的工作"}。` : null;
             const relevance = plan.jev ? formatRelevance(plan.jev, id => this.get(id)) : null;
-            const prompt = [
+            const prompt = row.client_message_id.startsWith(GADGET_PREFIX) ? this.gadgetPrompt(row) : [
                 `你是 AIO Agent 主会话委派的子 agent。任务 ID：${row.id}。${row.execution_conversation_id ? "本轮恢复此前任务的同一会话，保留完整上下文；按用户的新要求继续、补充或更新，不要从零重新做。" : "只处理本任务。"}不递归委派。身份、语气和行为遵循系统层注入的 SOUL.md；对子任务同样生效，不以内部执行角色替代个人助理身份。`,
                 "按请求实际需要控制工作量：普通聊天、问候、身份介绍、概念解释和可直接回答的问题，直接在消息中回答即可。不要为了完成任务而创建目录、制作文件、检查运行环境或截图验收；仅在回答确实需要外部事实、附件或既有资料时调用相关工具。身份与风格以已注入的 SOUL.md 为准，不为自我介绍额外检索记忆或寻找 SOUL.md 文件。需要依据用户过往信息时才有针对性地查相关记录。用户要求实际操作或文件交付时，仍须执行并做与风险相称的验证，不得用口头回答代替。",
                 `只有确实需要写文件时才创建任务目录。新文件放在 ${this.cfg.sandbox.containerWorkspaceDir}/tasks/${row.id}/（按需创建），不要散落工作区根目录。共享工作区里可能有其他子 agent；不得覆盖无关文件，只能在本次明确授权的路径内更新已有任务产物。`,
