@@ -1,6 +1,6 @@
 import { test, expect, type Locator, type Page } from "@playwright/test";
 import fs from "node:fs";
-import { makeConversation, mockConsole } from "./mock-api";
+import { makeConversation, mockConsole, mockTaskList } from "./mock-api";
 
 const picture = fs.readFileSync(new URL("../../src/ui/public/icon-192.png", import.meta.url));
 const result = `[报告](/home/gem/workspace/report.md)\n\n![图片](/home/gem/workspace/picture.png)\n\n[操作网页](http://192.168.1.20)\n\n\`\`\`svg\n<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 100"><rect width="200" height="100" fill="#8f86ff"/></svg>\n\`\`\`\n\n\`\`\`map\n{"name":"金门大桥","address":"San Francisco","lat":37.8199,"lng":-122.4783}\n\`\`\``;
@@ -9,6 +9,7 @@ const task = { id: "safe-task", revision: 1, title: "安全区验证", text: "�
 async function setup(page: Page) {
   await mockConsole(page, { conversations: [makeConversation(task.conversationId, task.title)] });
   await page.route("**/api/main*", r => r.fulfill({ json: { mode: "tasks", tasks: [task], nextBefore: null } }));
+  await mockTaskList(page, () => [task]);
   await page.route("**/api/settings/dispatch-log/*", r => r.fulfill({ json: {
     task, entries: [{ at: 1000, latencyMs: 100, rounds: 1, promptChars: 1000, failed: false, repairs: [], candidates: [], searches: [], chosen: { related: [], appendTo: null, resume: null }, jev: null,
       steps: [{ kind: "context", at: 1000, timeline: "长日志内容\n".repeat(100), candidates: 0 }, { kind: "ask", at: 1000, round: 1, prompt: "完整提示\n".repeat(100), answer: "最终结果" }],

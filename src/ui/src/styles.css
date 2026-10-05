@@ -2960,7 +2960,7 @@ textarea:focus {
 .task-group[data-group="working"] .task-group-head { color:var(--accent); }
 .task-group-count { font-size:11px; font-weight:400; color:var(--text-dim); font-variant-numeric:tabular-nums; }
 .task-tag { border:1px solid var(--border); border-radius:6px; padding:0 6px; line-height:18px; font-size:11px; color:var(--text-dim); }
-.task-list-more { display:block; margin:0 auto; }
+.task-list-end { min-height:1px; padding:4px 0 16px; text-align:center; }
 @media(max-width:900px) { .task-list-scroll { padding:12px; } .task-list-meta { gap:8px; flex-wrap:wrap; } .task-group-head { top:-12px; } .task-list-tools { gap:8px; } .task-filters { flex-wrap:nowrap; overflow-x:auto; scrollbar-width:none; width:100%; } .task-filter { flex:none; } .task-search { max-width:none; margin-left:0; flex-basis:100%; } }
 
 .soul-settings textarea { min-height:300px; width:100%; resize:vertical; font:14px/1.65 ui-monospace,SFMono-Regular,Menlo,monospace; overflow-wrap:anywhere; }

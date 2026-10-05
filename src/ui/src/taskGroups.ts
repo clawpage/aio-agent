@@ -1,30 +1,16 @@
 import type {Task} from './types';
+import {taskBucket,type TaskFilter} from '../../common/taskList';
 
-export type TaskFilter='all'|'attention'|'working'|'done'|'stopped';
 export const taskFilters:{id:TaskFilter;label:string}[]=[
   {id:'all',label:'全部'},{id:'attention',label:'轮到你'},{id:'working',label:'进行中'},{id:'done',label:'已完成'},{id:'stopped',label:'失败·停止'},
 ];
 export interface TaskGroup {key:string;label:string;tasks:Task[]}
 
-const ATTENTION=['needs_input','blocked','unknown','merge_unknown'];
-const WORKING=['planning','waiting','queued','running','stopping','merging','steering'];
 const DAY=86_400_000;
 const WEEKDAYS=['周日','周一','周二','周三','周四','周五','周六'];
 
-/** Which filter a task falls under; a browser waiting on the person counts as their turn. */
-export function taskFilterOf(task:Task):Exclude<TaskFilter,'all'> {
-  if(ATTENTION.includes(task.status)||task.browser?.request)return 'attention';
-  if(WORKING.includes(task.status))return 'working';
-  return ['completed','merged'].includes(task.status)?'done':'stopped';
-}
-
 /** The moment a row shows and is dated by: when it finished, else when it was asked. */
 export const taskTime=(task:Task)=>task.completedAt??task.createdAt;
-
-export function matchesQuery(task:Task,query:string):boolean {
-  const q=query.trim().toLowerCase();
-  return !q||[task.title,task.description,task.clarification,task.text,task.schedule?.title].some(s=>s?.toLowerCase().includes(q));
-}
 
 const startOfDay=(at:number)=>{const d=new Date(at);d.setHours(0,0,0,0);return d.getTime();};
 
@@ -40,29 +26,19 @@ export function dateBucket(at:number,now:number):{key:string;label:string} {
 }
 
 /**
- * Newest first. Under "all", what is the person's turn and what is still running
- * come first as their own groups; everything else is grouped by date.
+ * Places rows, in the order the server sent them, under headings. Under "all"
+ * the server puts the person's turn and running work first; they get their own
+ * groups, and everything else is grouped by date.
  */
 export function groupTasks(tasks:Task[],filter:TaskFilter,now:number):TaskGroup[] {
-  const sorted=[...tasks].sort((a,b)=>taskTime(b)-taskTime(a));
-  const groups:TaskGroup[]=[];
-  const dated=new Map<string,TaskGroup>();
-  if(filter==='all')for(const id of ['attention','working'] as const){
-    const rows=sorted.filter(t=>taskFilterOf(t)===id);
-    if(rows.length)groups.push({key:id,label:taskFilters.find(f=>f.id===id)!.label,tasks:rows});
-  }
-  for(const t of sorted){
-    if(filter==='all'?['attention','working'].includes(taskFilterOf(t)):taskFilterOf(t)!==filter)continue;
-    const {key,label}=dateBucket(taskTime(t),now);
-    let group=dated.get(key);
-    if(!group){group={key,label,tasks:[]};dated.set(key,group);groups.push(group);}
+  const groups=new Map<string,TaskGroup>();
+  for(const t of tasks){
+    const bucket=taskBucket(t.status,Boolean(t.browser?.request));
+    const pinned=filter==='all'&&(bucket==='attention'||bucket==='working');
+    const {key,label}=pinned?{key:bucket,label:taskFilters.find(f=>f.id===bucket)!.label}:dateBucket(taskTime(t),now);
+    let group=groups.get(key);
+    if(!group){group={key,label,tasks:[]};groups.set(key,group);}
     group.tasks.push(t);
   }
-  return groups;
-}
-
-export function filterCounts(tasks:Task[]):Record<TaskFilter,number> {
-  const counts:Record<TaskFilter,number>={all:tasks.length,attention:0,working:0,done:0,stopped:0};
-  for(const t of tasks)counts[taskFilterOf(t)]++;
-  return counts;
+  return [...groups.values()];
 }

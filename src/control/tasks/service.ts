@@ -14,6 +14,7 @@ import type { DispatchTimingSink } from "../codex/dispatchTiming.js";
 import { dispatchAdvice, formatRelevance, formatTimeline, lastQuestion, routingQuestion, timeline, type JevRelevance } from "./context.js";
 import { describeNow, describeSchedule, formatWhen, MAX_ACTIVE_SCHEDULES, nextRun, validateSchedule, type ScheduleSpec } from "./schedules.js";
 import type { PlanningSchedule, ScheduleActionName } from "./planning.js";
+import { ATTENTION_STATUSES, DONE_STATUSES, WORKING_STATUSES, type TaskBucket, type TaskCounts, type TaskFilter, type TaskListPage } from "../../common/taskList.js";
 
 /** Bounded context keeps both live work and older matches in one Jev call. */
 const ACTIVE_CANDIDATES = 5;
@@ -92,6 +93,16 @@ export interface TaskInput {
     relatedTaskId?: string | null;
 }
 const TERMINAL = new Set(["completed", "failed", "interrupted", "unknown"]);
+/** The task list's keyset cursor: [rank, time, id] of the last row a page held. */
+const encodeCursor = (key: [number, number, string]) => Buffer.from(JSON.stringify(key)).toString("base64url");
+export class TaskCursorError extends Error {}
+function decodeCursor(cursor: string): [number, number, string] {
+    try {
+        const key = JSON.parse(Buffer.from(cursor, "base64url").toString("utf8")) as unknown;
+        if (Array.isArray(key) && key.length === 3 && Number.isInteger(key[0]) && Number.isFinite(key[1]) && typeof key[2] === "string") return key as [number, number, string];
+    } catch { /* falls through */ }
+    throw new TaskCursorError("分页位置无效");
+}
 /** client_message_id prefix of messages from the voice gadget (submitGadget). */
 const GADGET_PREFIX = "gadget:";
 const DISPATCHED = new Set(["queued", "running", "stopping"]);
@@ -218,6 +229,49 @@ export class TaskService {
         const finished = before === Number.MAX_SAFE_INTEGER ? this.db.prepare("SELECT * FROM tasks WHERE conversation_id IN (SELECT id FROM conversations WHERE owner_id=?) AND completed_at IS NOT NULL ORDER BY completed_at DESC LIMIT 100").all(userId) as unknown as TaskRow[] : [];
         const merged = new Map([...page, ...pending, ...finished].map(r => [r.id, r]));
         return { tasks: [...merged.values()].sort((a, b) => a.created_at - b.created_at).map(r => this.view(r)), nextBefore };
+    }
+    /**
+     * The task list: counts over all of the account's tasks (narrowed only by the
+     * search) and one page of the filtered list. Under "all", the person's turn and
+     * running work come first; everything else is newest first by when it finished,
+     * else when it was asked. `asking` names the task conversations whose browser
+     * waits on the person (that state lives in the tab record, not in this table).
+     */
+    page(opts: { userId: string; filter: TaskFilter; query?: string; cursor?: string | null; limit?: number; asking?: string[] }): TaskListPage<ReturnType<TaskService["view"]>> {
+        const quoted = (statuses: readonly string[]) => statuses.map(s => `'${s}'`).join(",");
+        const query = (opts.query ?? "").trim();
+        const params: Record<string, string | number> = { user: opts.userId, asking: JSON.stringify(opts.asking ?? []) };
+        let search = "";
+        if (query) {
+            params.like = `%${query.replace(/[\\%_]/g, c => `\\${c}`)}%`;
+            search = ` AND (${["t.title", "t.input_text", "t.result", "json_extract(t.plan_json,'$.description')", "json_extract(t.plan_json,'$.clarification')", "s.title"].map(c => `${c} LIKE @like ESCAPE '\\'`).join(" OR ")})`;
+        }
+        const base = `SELECT t.*, COALESCE(t.completed_at, t.created_at) AS at,
+            CASE WHEN t.status IN (${quoted(ATTENTION_STATUSES)}) OR COALESCE(t.execution_conversation_id, t.conversation_id) IN (SELECT value FROM json_each(@asking)) THEN 'attention'
+                 WHEN t.status IN (${quoted(WORKING_STATUSES)}) THEN 'working'
+                 WHEN t.status IN (${quoted(DONE_STATUSES)}) THEN 'done' ELSE 'stopped' END AS bucket
+            FROM tasks t LEFT JOIN schedules s ON s.id = t.schedule_id
+            WHERE t.merged_into IS NULL AND t.conversation_id IN (SELECT id FROM conversations WHERE owner_id = @user)${search}`;
+        const counts: TaskCounts = { all: 0, attention: 0, working: 0, done: 0, stopped: 0 };
+        for (const row of this.db.prepare(`SELECT bucket, COUNT(*) AS n FROM (${base}) GROUP BY bucket`).all(params) as { bucket: TaskBucket; n: number }[]) {
+            counts[row.bucket] = row.n;
+            counts.all += row.n;
+        }
+        const rank = opts.filter === "all" ? "CASE bucket WHEN 'attention' THEN 0 WHEN 'working' THEN 1 ELSE 2 END" : "0";
+        let where = opts.filter === "all" ? "1" : "bucket = @filter";
+        if (opts.filter !== "all") params.filter = opts.filter;
+        if (opts.cursor) {
+            const [rk, at, id] = decodeCursor(opts.cursor);
+            Object.assign(params, { rk, at, id });
+            where += " AND (rk > @rk OR (rk = @rk AND (at < @at OR (at = @at AND id < @id))))";
+        }
+        const limit = Math.min(Math.max(Math.trunc(opts.limit ?? 30), 1), 200);
+        params.limit = limit + 1;
+        const rows = this.db.prepare(`SELECT * FROM (SELECT b.*, ${rank} AS rk FROM (${base}) b) WHERE ${where} ORDER BY rk, at DESC, id DESC LIMIT @limit`)
+            .all(params) as unknown as (TaskRow & { rk: number; at: number })[];
+        const page = rows.slice(0, limit);
+        const last = page.at(-1);
+        return { counts, tasks: page.map(r => this.view(r)), nextCursor: rows.length > limit && last ? encodeCursor([last.rk, last.at, last.id]) : null };
     }
     submit(input: TaskInput) {
         const userId = input.userId ?? "owner_1";

@@ -11,6 +11,8 @@ import { pipeline } from "node:stream/promises";
 import { exitTerminal, TERMINAL_ID, TerminalRegistry } from "../terminals.js";
 import { maps, MapService } from "../maps.js";
 import { API_MIN, API_VERSION } from "../../common/version.js";
+import { TASK_FILTERS, type TaskFilter } from "../../common/taskList.js";
+import { TaskCursorError } from "../tasks/service.js";
 import { appVersion } from "../../common/build.js";
 import { readSecretFile } from "../../common/secrets.js";
 import type { AppContext } from "../context.js";
@@ -494,26 +496,52 @@ export function createApiRouter(context: AppContext): Router {
 
   // -------------------------------------------------------- conversations
 
-  router.get("/main", requireKind("primary"), requireSession, asyncHandler(async (req, res) => {
-    const before = Number(req.query.before ?? Number.MAX_SAFE_INTEGER);
-    const page = context.tasks.list(Number.isSafeInteger(before) && before > 0 ? before : Number.MAX_SAFE_INTEGER, ctxOf(req).session!.ownerId);
-    // One read of the tab record shows, per task, whether it has tabs, is waiting for
-    // the person in the browser, or is being driven by the person right now.
-    // The feed must not wait on a slow sandbox: past two seconds it shows tasks without browser state.
+  // One read of the tab record shows, per task, whether it has tabs, is waiting for
+  // the person in the browser, or is being driven by the person right now.
+  // A task feed must not wait on a slow sandbox: past two seconds it shows tasks without browser state.
+  const browserState = async () => {
     const tabs = context.tabs ? await Promise.race([context.tabs.list().catch(() => []), new Promise<[]>((r) => setTimeout(() => r([]), 2000).unref())]) : [];
     const byKey = new Map<string, typeof tabs>();
     for (const tab of tabs) byKey.set(tab.key, [...(byKey.get(tab.key) ?? []), tab]);
-    const tasks = page.tasks.map((task) => {
+    const asking = [...byKey].filter(([, own]) => own.some((t) => t.request && t.holder === "ai")).map(([key]) => key);
+    const decorate = <T extends { mergedInto?: string | null; conversationId: string }>(task: T) => {
       const own = task.mergedInto ? undefined : byKey.get(task.conversationId);
       if (!own?.length) return task;
       const requested = own.find((t) => t.request && t.holder === "ai");
       return { ...task, browser: { tabs: own.length, request: requested?.request?.reason ?? null, human: own.some((t) => t.holder === "human") } };
-    });
+    };
+    return { asking, decorate };
+  };
+
+  router.get("/main", requireKind("primary"), requireSession, asyncHandler(async (req, res) => {
+    const before = Number(req.query.before ?? Number.MAX_SAFE_INTEGER);
+    const page = context.tasks.list(Number.isSafeInteger(before) && before > 0 ? before : Number.MAX_SAFE_INTEGER, ctxOf(req).session!.ownerId);
+    const { decorate } = await browserState();
+    const tasks = page.tasks.map(decorate);
     // A poll names the version it holds; an unchanged feed answers in a few bytes instead of the whole page.
     const body = { mode: "tasks", ...page, tasks };
     const version = createHash("sha256").update(JSON.stringify(body)).digest("base64url").slice(0, 22);
     res.setHeader("Cache-Control", "no-store");
     res.json(req.query.v === version ? { mode: "tasks", unchanged: true, version } : { ...body, version });
+  }));
+  // The task list: counts by status, then one filtered page at a time (keyset cursor).
+  router.get("/tasks", requireKind("primary"), requireSession, asyncHandler(async (req, res) => {
+    const filter = String(req.query.filter ?? "all") as TaskFilter;
+    const query = typeof req.query.q === "string" ? req.query.q : "";
+    const cursor = typeof req.query.cursor === "string" && req.query.cursor ? req.query.cursor : null;
+    if (!TASK_FILTERS.includes(filter) || query.length > 200) {
+      res.status(400).json({ error: "bad_request", message: "筛选条件无效" });
+      return;
+    }
+    const { asking, decorate } = await browserState();
+    try {
+      const page = context.tasks.page({ userId: ctxOf(req).session!.ownerId, filter, query, cursor, limit: Number(req.query.limit ?? 30) || 30, asking });
+      res.setHeader("Cache-Control", "no-store");
+      res.json({ ...page, tasks: page.tasks.map(decorate) });
+    } catch (err) {
+      if (!(err instanceof TaskCursorError)) throw err;
+      res.status(400).json({ error: "bad_request", message: err.message });
+    }
   }));
   router.post("/tasks", requireKind("primary"), requireSession, asyncHandler(async (req, res) => {
     try {

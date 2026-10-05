@@ -223,7 +223,7 @@ describe("conversation and agent endpoints", () => {
     const res = await h.request("/api/version");
     expect(res.status).toBe(200);
     expect(res.headers.get("cache-control")).toBe("no-store");
-    expect(await res.json()).toEqual({ component: "control", version: expect.any(String), api: 1, apiMin: 1 });
+    expect(await res.json()).toEqual({ component: "control", version: expect.any(String), api: 2, apiMin: 1 });
   });
 });
 

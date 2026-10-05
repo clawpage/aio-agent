@@ -10,7 +10,7 @@
  */
 
 /** The control plane's HTTP API version the UI is written against. */
-export const API_VERSION = 1;
+export const API_VERSION = 2;
 /** The oldest UI API version this control plane still serves. */
 export const API_MIN = 1;
 

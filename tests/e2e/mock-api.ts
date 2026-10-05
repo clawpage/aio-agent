@@ -1,4 +1,6 @@
 import type { Page, Route } from "@playwright/test";
+import { taskBucket, type TaskCounts, type TaskFilter } from "../../src/common/taskList";
+import type { Task } from "../../src/ui/src/types";
 
 /**
  * Fully mocked control-plane API for the local Playwright run. Every route the
@@ -354,4 +356,28 @@ export async function mockConsole(page: Page, opts: MockConsoleOptions): Promise
       return json(route, { ok: true, status: payload() });
     });
   }
+}
+
+/**
+ * GET /api/tasks over a spec's own rows, by the server's rules: counts over every
+ * row (narrowed only by the search), the person's turn and running work first
+ * under "all", then newest first. The cursor here is just an offset.
+ */
+export async function mockTaskList(page: Page, source: () => Task[]): Promise<void> {
+  await page.route((url) => url.pathname === "/api/tasks", (route) => {
+    if (route.request().method() !== "GET") return route.fallback();
+    const u = new URL(route.request().url());
+    const filter = (u.searchParams.get("filter") ?? "all") as TaskFilter;
+    const q = (u.searchParams.get("q") ?? "").toLowerCase();
+    const limit = Number(u.searchParams.get("limit") ?? 30);
+    const offset = Number(u.searchParams.get("cursor") ?? 0);
+    const bucket = (t: Task) => taskBucket(t.status, Boolean(t.browser?.request));
+    const at = (t: Task) => t.completedAt ?? t.createdAt;
+    const rank = (t: Task) => (filter === "all" ? ({ attention: 0, working: 1 } as Record<string, number>)[bucket(t)] ?? 2 : 0);
+    const found = source().filter((t) => !t.mergedInto && (!q || [t.title, t.text, t.description, t.clarification, t.result, t.schedule?.title].some((s) => s?.toLowerCase().includes(q))));
+    const counts: TaskCounts = { all: found.length, attention: 0, working: 0, done: 0, stopped: 0 };
+    for (const t of found) counts[bucket(t)]++;
+    const list = found.filter((t) => filter === "all" || bucket(t) === filter).sort((a, b) => rank(a) - rank(b) || at(b) - at(a) || (a.id < b.id ? 1 : -1));
+    return route.fulfill({ contentType: "application/json", body: JSON.stringify({ counts, tasks: list.slice(offset, offset + limit), nextCursor: offset + limit < list.length ? String(offset + limit) : null }) });
+  });
 }

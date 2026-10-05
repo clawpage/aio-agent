@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { dateBucket, filterCounts, groupTasks, matchesQuery, taskFilterOf } from "../../src/ui/src/taskGroups";
+import { dateBucket, groupTasks } from "../../src/ui/src/taskGroups";
+import { taskBucket } from "../../src/common/taskList";
 import type { Task } from "../../src/ui/src/types";
 
 const now = new Date(2026, 9, 4, 14, 30).getTime(); // Sunday
@@ -21,44 +22,32 @@ describe("task list grouping", () => {
     expect(dateBucket(new Date(2025, 11, 30).getTime(), now).label).toBe("2025年12月");
   });
 
-  it("classifies the person's turn, running work, done and stopped", () => {
-    expect(taskFilterOf(task("needs_input", now))).toBe("attention");
-    expect(taskFilterOf(task("unknown", now))).toBe("attention");
-    expect(taskFilterOf(task("running", now, { browser: { tabs: 1, request: "请登录", human: false } }))).toBe("attention");
-    expect(taskFilterOf(task("steering", now))).toBe("working");
-    expect(taskFilterOf(task("completed", now))).toBe("done");
-    expect(taskFilterOf(task("interrupted", now))).toBe("stopped");
-    expect(taskFilterOf(task("planning_failed", now))).toBe("stopped");
+  it("classifies the person's turn, running work, done and stopped the same way the server does", () => {
+    expect(taskBucket("needs_input")).toBe("attention");
+    expect(taskBucket("unknown")).toBe("attention");
+    expect(taskBucket("running", true)).toBe("attention");
+    expect(taskBucket("steering")).toBe("working");
+    expect(taskBucket("completed")).toBe("done");
+    expect(taskBucket("interrupted")).toBe("stopped");
+    expect(taskBucket("planning_failed")).toBe("stopped");
   });
 
-  it("puts the person's turn and running work first under all, then dates newest first", () => {
-    const old = task("completed", at(9, 2));
-    const today = task("completed", at(10, 4, 9));
-    const failedToday = task("failed", at(10, 4, 11));
-    const yesterday = task("completed", at(10, 3));
-    const running = task("running", at(9, 30));
+  it("keeps the server's order and pins the person's turn and running work under all", () => {
     const asking = task("needs_input", at(10, 2));
-    const groups = groupTasks([old, today, running, yesterday, asking, failedToday], "all", now);
-    expect(groups.map((g) => [g.label, g.tasks.map((t) => t.id)])).toEqual([
+    const running = task("running", at(9, 30));
+    const failedToday = task("failed", at(10, 4, 11));
+    const today = task("completed", at(10, 4, 9));
+    const yesterday = task("completed", at(10, 3));
+    const old = task("completed", at(9, 2));
+    const order = [asking, running, failedToday, today, yesterday, old];
+    expect(groupTasks(order, "all", now).map((g) => [g.label, g.tasks.map((t) => t.id)])).toEqual([
       ["轮到你", [asking.id]],
       ["进行中", [running.id]],
       ["今天", [failedToday.id, today.id]],
       ["昨天", [yesterday.id]],
       ["9月", [old.id]],
     ]);
-  });
-
-  it("a status filter keeps only that status, still grouped by date", () => {
-    const a = task("completed", at(10, 4)), b = task("failed", at(10, 4)), c = task("completed", at(9, 1));
-    expect(groupTasks([a, b, c], "done", now).map((g) => [g.label, g.tasks.map((t) => t.id)])).toEqual([["今天", [a.id]], ["9月", [c.id]]]);
-    expect(groupTasks([a, c], "stopped", now)).toEqual([]);
-    expect(filterCounts([a, b, c])).toEqual({ all: 3, attention: 0, working: 0, done: 2, stopped: 1 });
-  });
-
-  it("searches title, description, the request, the question and the schedule's name", () => {
-    const t = task("completed", now, { title: "订机票", description: "东京往返", text: "帮我看 Reddit", clarification: "几号出发？",
-      schedule: { id: "s", title: "每日账单检查", rule: "每天" } });
-    for (const q of ["机票", "东京", "reddit", "几号", "账单", "  "]) expect(matchesQuery(t, q)).toBe(true);
-    expect(matchesQuery(t, "酒店")).toBe(false);
+    // Under a status filter every row is grouped by date.
+    expect(groupTasks([asking], "attention", now).map((g) => g.label)).toEqual(["周五 · 10月2日"]);
   });
 });

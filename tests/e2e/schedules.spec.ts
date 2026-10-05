@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
-import { mockConsole } from "./mock-api";
+import { mockConsole, mockTaskList } from "./mock-api";
 
 const schedule = (over: Record<string, unknown> = {}) => ({
   id: "sched-1", title: "每日天气提醒", instruction: "查旧金山今天的天气，提醒是否需要带伞", rule: "每天 08:00", status: "active",
@@ -13,6 +13,7 @@ const run = { id: "task-run", revision: 1, title: "每日天气提醒", text: "�
 async function setup(page: Page) {
   await mockConsole(page, { conversations: [] });
   await page.route("**/api/main*", (r) => r.fulfill({ json: { mode: "tasks", tasks: [run], nextBefore: null } }));
+  await mockTaskList(page, () => [run]);
   let items = [schedule(), schedule({ id: "sched-2", title: "价格监控", rule: "每 2 小时", status: "paused", nextRunText: null, lastTask: null, runCount: 0 }),
     schedule({ id: "sched-feed", title: "每日推送", instruction: "每天看一下 Gmail 有没有要交的账单，少说新闻", builtin: "daily_feed", lastTask: null, runCount: 0,
       feed: { customized: true, memory: [{ id: "fm1", kind: "care", text: "Roy 的疫苗和体检预约", source: "user" }, { id: "fm2", kind: "avoid", text: "加密货币行情", source: "feed" }] } })];
@@ -81,6 +82,7 @@ test("the schedules page lists rules and pauses, resumes, runs and deletes them"
 test("a schedule is edited on the page: several times a day, or a few irregular dates", async ({ page }, info) => {
   await mockConsole(page, { conversations: [] });
   await page.route("**/api/main*", (r) => r.fulfill({ json: { mode: "tasks", tasks: [], nextBefore: null } }));
+  await mockTaskList(page, () => []);
   let item: ReturnType<typeof schedule> & { spec?: unknown; needsBrowser?: boolean } = schedule({ spec: { kind: "daily", at: "08:00" }, needsBrowser: true });
   const sent: Array<Record<string, unknown>> = [];
   await page.route("**/api/schedules", (r) => r.fulfill({ json: { schedules: [item] } }));
