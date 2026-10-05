@@ -142,9 +142,10 @@ function register(page, key, title, extra = {}) {
     holder: extra.holder === 'human' || key === PERSON ? 'human' : 'ai', humanSince: extra.humanSince ?? (key === PERSON ? now : null), request: extra.request ?? null,
   };
   registry.set(id, tab);
-  if (!extra.id) cursors.set(key, id);
-  // A link that opens a new window belongs to the same task and becomes its current tab.
-  page.on('popup', (popup) => { void adoptNew(popup, key, title); });
+  if (!extra.id && !extra.keepCursor) cursors.set(key, id);
+  // A link that opens a new window belongs to the same task and becomes its current tab; one
+  // opened from a tab a person holds (a payment window) is theirs too, and the agent stays where it was.
+  page.on('popup', (popup) => { void adoptNew(popup, key, title, tab.holder === 'human' && key !== PERSON ? { holder: 'human', humanSince: Date.now(), keepCursor: true } : {}); });
   page.on('close', () => forget(tab));
   // A new document carries none of the scripts an agent evaluated in the last one.
   page.on('domcontentloaded', () => { tab.scripted = false; });
@@ -160,8 +161,8 @@ function register(page, key, title, extra = {}) {
   return tab;
 }
 
-async function adoptNew(page, key, title, targetId) {
-  const tab = register(page, key, title, targetId ? { targetId } : {});
+async function adoptNew(page, key, title, extra = {}) {
+  const tab = register(page, key, title, extra);
   await enforceFinishedCap(key);
   const front = frontTab();
   if (front && front.key === key && front.id !== tab.id) {
@@ -246,6 +247,8 @@ function releaseControl(tab) {
   tab.holder = 'ai';
   tab.humanSince = null;
   tab.request = null;
+  // Handed back is where the agent carries on: not a tab left idle.
+  tab.lastUsed = Date.now();
   save();
   settleWaiters(tab.id, 'released');
 }
@@ -361,19 +364,20 @@ async function reattach(context) {
  */
 async function newTab(key, title) {
   const context = await browserContext();
-  await makeRoom(key);
+  // A task at its cap is refused before anyone's pages are closed to make room for a page it cannot open.
   const pending = openingTabs.get(key) || 0;
   if (key !== PERSON && ownTabs(key).length + pending >= MAX_TASK_TABS) {
     throw new Error(`本任务最多同时保留 ${MAX_TASK_TABS} 个标签页。用 browser_tab_list 查看，复用已有标签页（browser_navigate 传 tab），或关闭自己已读完的页面再新建；不要关闭用户接管的页面。`);
-  }
-  const m = memory();
-  if (m && m.used + MEM_NEED > m.max) {
-    throw new Error('沙箱内存紧张，暂不新建标签页。请复用已有标签页，或先关闭本任务已读取完成的页面再继续；这不是浏览器权限问题。');
   }
   openingTabs.set(key, pending + 1);
   const browser = context.browser();
   let session;
   try {
+    await makeRoom(key);
+    const m = memory();
+    if (m && m.used + MEM_NEED > m.max) {
+      throw new Error('沙箱内存紧张，暂不新建标签页。请复用已有标签页，或先关闭本任务已读取完成的页面再继续；这不是浏览器权限问题。');
+    }
     session = await browser.newBrowserCDPSession();
     // While a person looks at another tab the window opens without taking focus (keepFront still guards its stacking).
     const { targetId } = await session.send('Target.createTarget', { url: 'about:blank', newWindow: true, background: Boolean(frontTab()) });
@@ -389,7 +393,7 @@ async function newTab(key, title) {
       if (Date.now() > deadline) throw new Error('新开的窗口没有找到');
       await context.waitForEvent('page', { timeout: 1000 }).catch(() => undefined);
     }
-    return adoptNew(page, key, title, targetId);
+    return adoptNew(page, key, title, { targetId });
   } finally {
     openingTabs.set(key, Math.max(0, (openingTabs.get(key) || 1) - 1));
     if (!openingTabs.get(key)) openingTabs.delete(key);
@@ -416,9 +420,10 @@ function ownTabs(key) {
   return [...registry.values()].filter((t) => t.key === key && !t.page.isClosed());
 }
 
-/** Destroy on demand: keep at most MAX_FINISHED_TABS finished tabs, oldest-used first to go. */
+/** Destroy on demand: keep at most MAX_FINISHED_TABS finished tabs, oldest-used first to go; never one a person holds or looks at. */
 async function enforceFinishedCap(exceptKey) {
-  const finished = [...registry.values()].filter((t) => t.finishedAt && t.key !== exceptKey).sort((a, b) => a.lastUsed - b.lastUsed);
+  const front = frontTab();
+  const finished = finishedTabs().filter((t) => t.key !== exceptKey && t !== front).sort((a, b) => a.lastUsed - b.lastUsed);
   while (finished.length > MAX_FINISHED_TABS) {
     const tab = finished.shift();
     await tab.page.close().catch(() => undefined);
@@ -472,6 +477,8 @@ async function resolveTab(ctx, tabId, mode, create = false, allowHuman = false) 
     throw new Error(`用户正在操作标签页 ${tab.id}，交还前不能读取或操作它。需要等用户完成时，调用 browser_request_human 说明你在等什么。`);
   }
   tab.lastUsed = Date.now();
+  // The call's own record of its tab: a call past its deadline checks this one, not the task's current tab.
+  ctx.tab = tab;
   return tab;
 }
 
@@ -693,6 +700,8 @@ async function vaultLogin(body) {
   const tab = registry.get(String(body.tab || ''));
   if (!tab || tab.page.isClosed() || (body.key && tab.key !== body.key)) return { status: 404, body: { error: 'no_tab', message: '这个标签页已经关闭或不属于该任务' } };
   if (!tab.request || tab.request.kind !== 'login' || tab.holder !== 'ai') return { status: 409, body: { error: 'no_request', message: '这个页面没有在等待登录' } };
+  // A retry while the first run still types (its caller gave up) would leave a run unlocking the page under the other.
+  if (tab.locked) return { status: 409, body: { error: 'busy', message: '密码器正在这个页面填写登录信息，请稍候' } };
   if (body.method === 'google') {
     // Nothing secret: the browser already holds the person's Google login. The agent uses the site's Google button.
     if (!siteCovers(String(body.site || ''), hostOf(safeUrl(tab.page)))) return { status: 409, body: { error: 'site_changed', message: '页面已经不在这个网站' } };
@@ -746,7 +755,7 @@ function heldTab(body) {
     if (tab.holder !== 'human') return { error: { status: 409, body: { error: 'not_held', message: `这个页面正由任务「${tab.title}」操作，请先点“接管”` } } };
     return { tab };
   }
-  const tab = [...registry.values()].filter((t) => t.holder === 'human' && !t.page.isClosed()).sort((a, b) => b.humanSince - a.humanSince)[0];
+  const tab = [...registry.values()].filter((t) => t.holder === 'human' && !t.page.isClosed() && (!body.task || t.key === body.task)).sort((a, b) => b.humanSince - a.humanSince)[0];
   if (!tab) return { error: { status: 409, body: { error: 'no_held_tab', message: '先在任务卡片上点“接管”要操作的页面，再在这里输入' } } };
   return { tab };
 }
@@ -764,6 +773,7 @@ async function personInput(body) {
     if (!PERSON_KEYS.has(body.key)) return { status: 400, body: { error: 'bad_key' } };
     await page.keyboard.press(body.key);
   }
+  tab.lastUsed = Date.now();
   return { status: 200, body: { tab: tab.id, current: cursors.get(tab.key) || tab.id, title: await page.title().catch(() => ''), url: safeUrl(page) } };
 }
 
@@ -813,6 +823,7 @@ async function personPointer(body) {
     if (!watched || watched.page.isClosed() || (body.task && watched.key !== body.task)) return { status: 404, body: { error: 'no_tab', message: '这个标签页已经关闭或不属于该任务' } };
     // The console keeps showing this tab: other tasks' new windows go underneath it.
     pin(watched);
+    watched.lastUsed = Date.now();
     await watched.page.bringToFront().catch(() => undefined);
     return { status: 200, body: { tab: watched.id, current: cursors.get(watched.key) || watched.id, title: await watched.page.title().catch(() => ''), url: safeUrl(watched.page) } };
   }
@@ -935,10 +946,10 @@ async function strayPages() {
  * The browser, the agent and the tools share one cgroup memory limit; past it the
  * kernel kills a renderer ("Target crashed") or worse. Pages that matter less give
  * way first: finished tasks' tabs, then the person's tabs left idle, and when
- * memory is nearly gone (or a page is about to open, or one just died) pages
- * nobody tracks that nobody is using, and last running tasks' idle tabs beyond
- * the one each works in. The tab a running task works in and tabs a person has
- * taken over are never closed.
+ * memory is nearly gone (or a page about to open would not fit, or one just died)
+ * pages nobody tracks that nobody is using, and last running tasks' idle tabs
+ * beyond the one each works in. The tab a running task works in, tabs a person
+ * has taken over and the tab a person looks at are never closed.
  */
 const CGROUP = process.env.AIO_TABS_CGROUP || '/sys/fs/cgroup';
 const MEM_HIGH = Number(process.env.AIO_TABS_MEM_HIGH || 0.85);
@@ -997,25 +1008,31 @@ async function holdsNothingTyped(page) {
   return typed === false;
 }
 
-/** Untracked pages not in use: on the same address for a while, and known to hold nothing typed. */
+/** Whether an untracked page has stayed on the same address long enough to count as not in use. */
+function strayIdle(page) {
+  const seen = strayChanges.get(page);
+  return Boolean(seen) && Date.now() - seen.since >= STRAY_IDLE_MS;
+}
+
+/** Untracked pages not in use: on the same address for a while, the longest first. */
 async function unusedStrays() {
   const pages = await strayPages();
   noteStrays(pages);
-  const now = Date.now();
-  const out = [];
-  for (const page of pages) {
-    const seen = strayChanges.get(page);
-    if (!seen || now - seen.since < STRAY_IDLE_MS) continue;
-    if (await holdsNothingTyped(page)) out.push(page);
-  }
-  return out.sort((a, b) => strayChanges.get(a).since - strayChanges.get(b).since);
+  return pages.filter(strayIdle).sort((a, b) => strayChanges.get(a).since - strayChanges.get(b).since);
 }
 
-/** The tab a task works in: its current one, else the one it used last. */
+/**
+ * The tab a task works in: of the tabs its agent drives, the one used last. A call
+ * naming its tab works in it as much as one on the current tab does.
+ */
 function workingTab(key) {
-  const current = registry.get(cursors.get(key));
-  if (current && !current.page.isClosed()) return current;
-  return ownTabs(key).sort((a, b) => b.lastUsed - a.lastUsed)[0] || null;
+  return ownTabs(key).filter((t) => t.holder === 'ai').sort((a, b) => b.lastUsed - a.lastUsed)[0] || null;
+}
+
+/** A running task's tab beyond the one it works in, left alone a while. */
+function isSpare(t) {
+  return t.key !== PERSON && !t.finishedAt && t.holder === 'ai' && !t.locked && !t.request
+    && !t.page.isClosed() && workingTab(t.key) !== t && Date.now() - t.lastUsed >= SPARE_IDLE_MS;
 }
 
 /**
@@ -1024,71 +1041,87 @@ function workingTab(key) {
  * extra pages never keep another task out of the browser. The task holding the
  * most tabs gives first, its least recently used first.
  */
-async function spareTabs() {
-  const now = Date.now();
+function spareTabs() {
   const held = new Map();
   for (const t of registry.values()) if (!t.page.isClosed()) held.set(t.key, (held.get(t.key) || 0) + 1);
-  const spare = [...registry.values()].filter((t) => t.key !== PERSON && !t.finishedAt && t.holder === 'ai' && !t.locked && !t.request
-    && !t.page.isClosed() && workingTab(t.key) !== t && now - t.lastUsed >= SPARE_IDLE_MS)
-    .sort((a, b) => held.get(b.key) - held.get(a.key) || a.lastUsed - b.lastUsed);
-  const out = [];
-  for (const t of spare) if (await holdsNothingTyped(t.page)) out.push(t.page);
-  return out;
+  return [...registry.values()].filter(isSpare).sort((a, b) => held.get(b.key) - held.get(a.key) || a.lastUsed - b.lastUsed).map((t) => t.page);
 }
 
 /** Tab id -> the address it was on, for tabs closed to free memory: a task asking for one learns why it is gone. */
 const reclaimed = new Map();
+const recordOf = (page) => [...registry.values()].find((t) => t.page === page) || null;
 function noteReclaimed(page) {
-  const tab = [...registry.values()].find((t) => t.page === page);
+  const tab = recordOf(page);
   if (!tab) return;
   reclaimed.set(tab.id, safeUrl(page));
   if (reclaimed.size > 200) reclaimed.delete(reclaimed.keys().next().value);
 }
 
+/** The run in flight: { reason, need, exceptKey, run }. */
 let reclaiming = null;
 /**
  * Free memory by closing pages, least valuable first, until the working set is
  * back under the low mark (and `need` bytes are free). `poll` acts only above the
  * high mark and reaches untracked pages only when memory is critical; a page about
- * to open, a crash and an OOM kill go all the way. Returns the closed pages' URLs.
+ * to open goes that far only when it would not fit otherwise; a crash and an OOM
+ * kill go all the way. A request that reaches further than the run in flight, or
+ * makes room for another page, runs again once that one is done instead of
+ * settling for it. Returns the closed pages' URLs.
  */
 function reclaimMemory(reason, { need = 0, exceptKey = null } = {}) {
-  reclaiming ??= (async () => {
-    let m = memory();
-    if (!m) return [];
-    // Every look also notes which untracked pages moved on, so their idleness is known when it matters.
-    if (connecting) noteStrays(await strayPages().catch(() => []));
-    const goal = Math.min(m.max * MEM_LOW, m.max - need);
-    if (reason === 'poll' ? m.used < m.max * MEM_HIGH : m.used <= goal) return [];
-    // Right after a restart nothing is attached yet: connecting re-claims the recorded tabs, so they can be weighed.
-    if (!connecting) await browserContext().catch(() => null);
-    const deep = reason !== 'poll' || m.used >= m.max * MEM_CRITICAL;
-    const now = Date.now();
-    const byAge = (a, b) => a.lastUsed - b.lastUsed;
-    const tiers = [
-      () => finishedTabs().filter((t) => t.key !== exceptKey).sort(byAge).map((t) => t.page),
-      () => [...registry.values()].filter((t) => t.key === PERSON && t.key !== exceptKey && now - t.lastUsed >= PERSON_IDLE_MS).sort(byAge).map((t) => t.page),
-      ...(deep ? [unusedStrays, spareTabs] : []),
-    ];
-    const closed = [];
-    for (const tier of tiers) {
-      for (const page of await tier()) {
-        if (m.used <= goal) break;
-        if (page.isClosed()) continue;
-        const url = safeUrl(page);
-        noteReclaimed(page);
-        await closeKeepingOne([page]);
-        closed.push(url);
-        // A renderer takes a moment to exit and give its memory back.
-        await new Promise((resolve) => setTimeout(resolve, 400));
-        m = memory() || m;
-      }
+  const busy = reclaiming;
+  if (busy && (reason === 'poll' || (busy.reason !== 'poll' && busy.need === need && busy.exceptKey === exceptKey))) return busy.run;
+  const entry = { reason, need, exceptKey, run: null };
+  // Cleared before the run settles, so a request made after it never joins a finished run.
+  entry.run = (busy ? busy.run.catch(() => []) : Promise.resolve()).then(() => reclaimOnce(reason, need, exceptKey)).finally(() => { if (reclaiming === entry) reclaiming = null; });
+  reclaiming = entry;
+  return entry.run;
+}
+
+async function reclaimOnce(reason, need, exceptKey) {
+  let m = memory();
+  if (!m) return [];
+  // Every look also notes which untracked pages moved on, so their idleness is known when it matters.
+  if (connecting) noteStrays(await strayPages().catch(() => []));
+  const goal = Math.min(m.max * MEM_LOW, m.max - need);
+  if (reason === 'poll' ? m.used < m.max * MEM_HIGH : m.used <= goal) return [];
+  // Right after a restart nothing is attached yet: connecting re-claims the recorded tabs, so they can be weighed.
+  if (!connecting) await browserContext().catch(() => null);
+  const deep = reason === 'poll' ? m.used >= m.max * MEM_CRITICAL : reason !== 'page' || m.used + need > m.max;
+  const byAge = (a, b) => a.lastUsed - b.lastUsed;
+  const finished = (t) => t.finishedAt && t.holder !== 'human' && t.key !== exceptKey;
+  const personIdle = (t) => t.key === PERSON && t.key !== exceptKey && Date.now() - t.lastUsed >= PERSON_IDLE_MS;
+  // A recorded page still passing its tier's test, not being signed in, and not the one a person looks at.
+  const tracked = (test) => (page) => { const t = recordOf(page); return Boolean(t) && !t.locked && t !== frontTab() && test(t); };
+  // Each tier: its pages, least valuable first; the test each must still pass when its turn comes; whether it may hold unsaved words.
+  const tiers = [
+    { pages: () => [...registry.values()].filter(finished).sort(byAge).map((t) => t.page), ok: tracked(finished) },
+    { pages: () => [...registry.values()].filter(personIdle).sort(byAge).map((t) => t.page), ok: tracked(personIdle), typed: true },
+    ...(deep ? [
+      { pages: unusedStrays, ok: (page) => { noteStrays([page]); return !recordOf(page) && strayIdle(page); }, typed: true },
+      { pages: spareTabs, ok: tracked(isSpare), typed: true },
+    ] : []),
+  ];
+  const closed = [];
+  for (const tier of tiers) {
+    for (const page of await tier.pages()) {
       if (m.used <= goal) break;
+      // Each close waits and each probe can take seconds: a page listed earlier may since have been
+      // taken over, asked about, used again or brought to the front. It is judged again right before it goes.
+      if (page.isClosed() || !tier.ok(page)) continue;
+      if (tier.typed && (!(await holdsNothingTyped(page)) || page.isClosed() || !tier.ok(page))) continue;
+      const url = safeUrl(page);
+      noteReclaimed(page);
+      await closeKeepingOne([page]);
+      closed.push(url);
+      // A renderer takes a moment to exit and give its memory back.
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      m = memory() || m;
     }
-    if (closed.length) process.stdout.write(`freed memory (${reason}, ${Math.round(m.used / 1048576)}/${Math.round(m.max / 1048576)} MB): closed ${closed.join(' ')}\n`);
-    return closed;
-  })().finally(() => { reclaiming = null; });
-  return reclaiming;
+    if (m.used <= goal) break;
+  }
+  if (closed.length) process.stdout.write(`freed memory (${reason}, ${Math.round(m.used / 1048576)}/${Math.round(m.max / 1048576)} MB): closed ${closed.join(' ')}\n`);
+  return closed;
 }
 
 /** Make room before a task or person opens a page: the page that is wanted comes before pages that are not. */
@@ -1354,7 +1387,7 @@ const TOOLS = {
   },
   browser_tab_new: {
     mode: 'write', description: '为本任务新开一个标签页并切换过去，可选打开网址。', input: { url: str },
-    run: async (ctx, a) => { const tab = await newTab(ctx.key, ctx.title); if (a.url) await tab.page.goto(a.url, { waitUntil: 'domcontentloaded', timeout: 60000 }); return textResult(await describe(tab)); },
+    run: async (ctx, a) => { const tab = await newTab(ctx.key, ctx.title); ctx.tab = tab; if (a.url) await tab.page.goto(a.url, { waitUntil: 'domcontentloaded', timeout: 60000 }); return textResult(await describe(tab)); },
   },
   browser_tab_select: {
     mode: 'write', description: '切换到本任务创建的某个标签页。', input: { tab: ownTabArg }, required: ['tab'],
@@ -1398,14 +1431,15 @@ function serialized(key, fn) {
   return next;
 }
 
-/** Run a tool within the deadline; past it, say so, and close this task's current tab if its page is hung. */
+/** Run a tool within the deadline; past it, say so, and close the tab it used if that page is hung (never one a person holds). */
 function bounded(ctx, run) {
   let timer;
   const late = new Promise((_, reject) => { timer = setTimeout(async () => {
     let note = '请稍后重试，或换一种做法。';
-    const tab = registry.get(cursors.get(ctx.key) || '');
+    const tab = ctx.tab && registry.get(ctx.tab.id) === ctx.tab && ctx.tab.holder !== 'human' ? ctx.tab : null;
     const target = tab && tab.targetId && (await fetch(`${CDP}/json/list`, { signal: AbortSignal.timeout(5000) }).then((r) => r.json()).catch(() => [])).find((t) => t.id === tab.targetId);
-    if (target && !(await answers(target)) && !(await answers(target))) {
+    // Probing takes seconds: a person may have taken the tab over meanwhile.
+    if (target && !(await answers(target)) && !(await answers(target)) && tab.holder !== 'human') {
       await fetch(`${CDP}/json/close/${target.id}`, { signal: AbortSignal.timeout(5000) }).catch(() => undefined);
       // A hung page reports its close late: forget it now so nobody picks it again.
       forget(tab);

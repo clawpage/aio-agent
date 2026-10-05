@@ -26,10 +26,10 @@ async function freePort(): Promise<number> {
 let browser: Browser;
 let patchright = "";
 let cgroup = "";
-/** The fake cgroup the server reads: a 1 GB limit, `fraction` of it in use. */
-const setMemory = (fraction: number, kills = 0) => {
-  fs.writeFileSync(path.join(cgroup, "memory.max"), "1000000000\n");
-  fs.writeFileSync(path.join(cgroup, "memory.current"), `${Math.round(fraction * 1e9)}\n`);
+/** The fake cgroup the server reads: a 1 GB limit (or `max` bytes), `fraction` of it in use. */
+const setMemory = (fraction: number, kills = 0, max = 1e9) => {
+  fs.writeFileSync(path.join(cgroup, "memory.max"), `${max}\n`);
+  fs.writeFileSync(path.join(cgroup, "memory.current"), `${Math.round(fraction * max)}\n`);
   fs.writeFileSync(path.join(cgroup, "memory.stat"), "anon 1\ninactive_file 0\n");
   fs.writeFileSync(path.join(cgroup, "memory.events"), `oom 0\noom_kill ${kills}\n`);
 };
@@ -573,6 +573,8 @@ it.skipIf(!hasChromium)("frees memory near the limit, least valuable pages first
   await new Promise<void>((r) => site.listen(0, "127.0.0.1", r));
   const personUrl = `http://127.0.0.1:${(site.address() as net.AddressInfo).port}/`;
   expect((await fetch(`${base}/open`, { method: "POST", body: JSON.stringify({ url: personUrl }) })).status).toBe(200);
+  // The console has moved on to the held tab: the person's own page is no longer the one they look at.
+  expect((await fetch(`${base}/pointer`, { method: "POST", body: JSON.stringify({ action: "focus", tab: held, task: "MH" }) })).status).toBe(200);
   await fetch(`${process.env.AIO_TABS_CDP}/json/new?${encodeURIComponent(html("Stray"))}`, { method: "PUT" });
   // And one the person was typing into.
   const typing = (await (await fetch(`${process.env.AIO_TABS_CDP}/json/new?${encodeURIComponent(html("Typing", "<input id=q>"))}`, { method: "PUT" })).json()) as { webSocketDebuggerUrl: string };
@@ -639,6 +641,8 @@ it.skipIf(!hasChromium)("makes another task's idle extra tabs give way when memo
   const other = tabIdOf(await call("SB", "browser_navigate", { url: html("Other") }))!;
   // What the task typed and has not sent yet is never the price of memory.
   expect((await call("SA", "browser_fill", { tab: drafted, selector: "#q", text: "还没发出去的帖子" })).result?.isError).not.toBe(true);
+  // …and carries on in the tab it works in.
+  expect((await call("SA", "browser_scroll", { tab: working })).result?.isError).not.toBe(true);
   try {
     // While memory allows, nothing of a running task is touched.
     setMemory(0.88);
@@ -893,3 +897,258 @@ it.skipIf(!hasChromium)("shows the person every open page, a task's or one nobod
   await post("/finish", { key: "OV" });
   site.close();
 }, 60_000);
+
+// ------------------------------------------------ each test below starts from an empty record
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+type Reclaim = (reason: string, opts?: { need?: number; exceptKey?: string }) => Promise<string[]>;
+const reclaim: Reclaim = (reason, opts) => (require(SCRIPT) as { reclaimMemory: Reclaim }).reclaimMemory(reason, opts);
+const plain = (title: string, extra = "") => `data:text/html,<title>${title}</title>${extra}`;
+/** Close every recorded tab (handing held ones back first), so nothing pinned or left over weighs in. */
+async function clearTabs(): Promise<void> {
+  setMemory(0.1);
+  // A tool call passes the ready barrier, so the browser exists even when this test runs alone.
+  await call("SETUP", "browser_tab_list");
+  for (const t of await records()) {
+    if (t.key === "person") { await post("/close", { tab: t.id }); continue; }
+    if (t.holder === "human") await control(t.id, "release");
+    await call(t.key, "browser_tab_close", { tab: t.id });
+  }
+  expect(await records()).toEqual([]);
+}
+async function siteOf(handler: http.RequestListener): Promise<{ origin: string; close: () => void }> {
+  const site = http.createServer(handler);
+  await new Promise<void>((r) => site.listen(0, "127.0.0.1", r));
+  return { origin: `http://127.0.0.1:${(site.address() as net.AddressInfo).port}`, close: () => site.close() };
+}
+
+it.skipIf(!hasChromium)("signs in on a tab one run at a time: a second vault request while one is typing is refused", async () => {
+  await clearTabs();
+  const received: string[] = [];
+  const site = await siteOf((req, res) => {
+    res.setHeader("content-type", "text/html; charset=utf-8");
+    if (req.method === "POST") { let b = ""; req.on("data", (c) => (b += c)); req.on("end", () => { received.push(b); res.end("<title>In</title>in"); }); return; }
+    res.end('<title>Sign in</title><form method="post" action="/done"><input id="u" name="u"><input id="p" name="p" type="password"><button>Go</button></form>');
+  });
+  const login = async (body: Record<string, unknown>) => {
+    const res = await fetch(`${base}/login`, { method: "POST", body: JSON.stringify(body) });
+    return { status: res.status, body: (await res.json()) as { result?: string; error?: string } };
+  };
+  try {
+    const tab = tabIdOf(await call("VL", "browser_navigate", { url: `${site.origin}/login` }))!;
+    // A slow first step keeps the first run typing while the second request arrives (a retry after a timeout).
+    const steps = [{ action: "wait", ms: 1000 }, { action: "fill", selector: "#u", value: "{{username}}" }, { action: "fill", selector: "#p", value: "{{password}}" }, { action: "press", selector: "#p", key: "Enter" }];
+    const waiting = call("VL", "browser_login", { steps });
+    await expect.poll(async () => (await records("VL"))[0]?.request).toMatchObject({ kind: "login" });
+    const cred = { key: "VL", tab, site: "127.0.0.1", username: "max", password: "pw-1" };
+    const first = login(cred);
+    await sleep(300);
+    expect((await login(cred)).status).toBe(409);
+    expect((await first).body.result).toBe("submitted");
+    expect(text(await waiting)).toContain("按步骤填入账号密码并提交");
+    expect(received).toEqual(["u=max&p=pw-1"]);
+  } finally {
+    site.close();
+  }
+});
+
+it.skipIf(!hasChromium)("keeps a finished tab the person took over, or is looking at, when the finished-tab cap closes others", async () => {
+  await clearTabs();
+  const open = async (key: string) => tabIdOf(await call(key, "browser_navigate", { url: page(key, key) }))!;
+  const held = await open("FA");
+  await post("/finish", { key: "FA" });
+  const watched = await open("FB");
+  await post("/finish", { key: "FB" });
+  // "Please pay yourself": the person took a finished task's tab over; the console shows another one.
+  expect((await control(held, "take", "FA")).status).toBe(200);
+  expect(await post("/pointer", { action: "focus", tab: watched, task: "FB" })).toMatchObject({ tab: watched });
+  try {
+    for (const k of ["FC", "FD", "FE"]) {
+      await open(k);
+      await post("/finish", { key: k });
+    }
+    await open("FF");
+    const left = await records();
+    expect(left.map((t) => t.id)).toEqual(expect.arrayContaining([held, watched]));
+    // The cap still holds for the others: the oldest of them went.
+    expect(left.filter((t) => t.finishedAt && t.id !== held && t.id !== watched).map((t) => t.key)).toEqual(["FD", "FE"]);
+  } finally {
+    await control(held, "release", "FA");
+  }
+});
+
+it.skipIf(!hasChromium)("gives the person a window opened from the tab they hold, and leaves the task's cursor where it was", async () => {
+  await clearTabs();
+  const site = await siteOf((req, res) => {
+    res.setHeader("content-type", "text/html; charset=utf-8");
+    res.end(req.url === "/pay"
+      ? '<title>Pay</title><p>card form</p><input id="card" autofocus>'
+      : `<title>Shop</title><body style="margin:0"><button style="position:fixed;left:0;top:0;width:100vw;height:100vh" onclick="window.open('/pay')">pay</button>`);
+  });
+  try {
+    const opener = tabIdOf(await call("PO", "browser_navigate", { url: `${site.origin}/` }))!;
+    expect((await control(opener, "take", "PO")).status).toBe(200);
+    await post("/pointer", { tab: opener, task: "PO", action: "click", x: 0.5, y: 0.5 });
+    await expect.poll(async () => (await records("PO")).length).toBe(2);
+    const popup = (await records("PO")).find((t) => t.id !== opener)!;
+    expect(popup).toMatchObject({ holder: "human" });
+    // The agent's next call does not land in the payment window…
+    const read = await call("PO", "browser_get_text");
+    expect(read.result?.isError).toBe(true);
+    expect(text(read)).toContain("用户正在操作");
+    // …and the person's phone input goes into it.
+    expect((await fetch(`${base}/input`, { method: "POST", body: JSON.stringify({ task: "PO", tab: popup.id, text: "4242" }) })).status).toBe(200);
+  } finally {
+    site.close();
+  }
+});
+
+it.skipIf(!hasChromium)("frees memory without closing a page the person looks at, has typed into or just used", async () => {
+  await clearTabs();
+  const site = await siteOf((req, res) => {
+    res.setHeader("content-type", "text/html; charset=utf-8");
+    res.end(`<title>P ${req.url}</title><input style="position:fixed;left:0;top:0;width:100vw;height:100vh">`);
+  });
+  const open = async (url: string) => ((await (await fetch(`${base}/open`, { method: "POST", body: JSON.stringify({ url }) })).json()) as { tab: TabRecord }).tab.id;
+  const act = (route: string, tab: string, body: Record<string, unknown>) => fetch(`${base}${route}`, { method: "POST", body: JSON.stringify({ task: "person", tab, ...body }) });
+  try {
+    await open(`${site.origin}/idle`);
+    const typed = await open(`${site.origin}/typed`);
+    const used = await open(`${site.origin}/used`);
+    await act("/pointer", typed, { action: "click", x: 0.5, y: 0.5 });
+    expect((await act("/input", typed, { text: "还没发出去的话" })).status).toBe(200);
+    const watched = tabIdOf(await call("FT", "browser_navigate", { url: plain("Watched") }))!;
+    await post("/finish", { key: "FT" });
+    // The console shows the finished task's tab.
+    await post("/pointer", { action: "focus", tab: watched, task: "FT" });
+    await sleep(400);
+    // A key pressed on the phone: that tab is in use, however long ago it opened.
+    expect((await act("/input", used, { key: "ArrowDown" })).status).toBe(200);
+    setMemory(0.88);
+    const closed = await reclaim("poll");
+    expect(closed).toContain(`${site.origin}/idle`);
+    expect((await records()).map((t) => t.id)).toEqual(expect.arrayContaining([watched, typed, used]));
+  } finally {
+    setMemory(0.1);
+    site.close();
+  }
+});
+
+it.skipIf(!hasChromium)("checks each page again right before closing it: one the person took over meanwhile stays", async () => {
+  await clearTabs();
+  await call("RY", "browser_navigate", { url: plain("RY") });
+  await post("/finish", { key: "RY" });
+  for (const i of [1, 2, 3]) await call("RX", "browser_tab_new", { url: plain(`RX${i}`) });
+  await post("/finish", { key: "RX" });
+  const last = (await records("RX")).at(-1)!.id;
+  setMemory(0.88);
+  try {
+    // Each close waits for the renderer to give its memory back; the person takes the last tab over meanwhile.
+    const run = reclaim("poll");
+    await sleep(500);
+    expect((await control(last, "take", "RX")).status).toBe(200);
+    const closed = await run;
+    expect(closed.join(" ")).not.toContain("RX3");
+    expect((await records()).map((t) => t.id)).toContain(last);
+  } finally {
+    setMemory(0.1);
+  }
+});
+
+it.skipIf(!hasChromium)("keeps the tab a task works in by its number, and a tab just handed back, when memory is short", async () => {
+  await clearTabs();
+  const worked = tabIdOf(await call("WT", "browser_tab_new", { url: plain("Worked") }))!;
+  await call("WT", "browser_tab_new", { url: plain("OpenedLast") });
+  const handed = tabIdOf(await call("WR", "browser_tab_new", { url: plain("Handed") }))!;
+  await call("WR", "browser_tab_new", { url: plain("WRlast") });
+  const elsewhere = tabIdOf(await call("WE", "browser_navigate", { url: plain("Elsewhere") }))!;
+  expect((await control(handed, "take", "WR")).status).toBe(200);
+  await sleep(400);
+  // The task keeps working in its first tab, naming it.
+  expect((await call("WT", "browser_scroll", { tab: worked })).result?.isError).toBeFalsy();
+  await sleep(400);
+  expect((await control(handed, "release", "WR")).status).toBe(200);
+  // The console moves on to another task's tab: neither is the one on top.
+  await post("/pointer", { action: "focus", tab: elsewhere, task: "WE" });
+  setMemory(0.95);
+  try {
+    await call("WN", "browser_navigate", { url: plain("Needed") });
+    expect((await records()).map((t) => t.id)).toEqual(expect.arrayContaining([worked, handed]));
+  } finally {
+    setMemory(0.1);
+  }
+});
+
+it.skipIf(!hasChromium)("refuses a task at its tab cap before closing anyone's pages, and a page that fits closes no other task's tab", async () => {
+  await clearTabs();
+  for (const i of [1, 2, 3]) await call("CA", "browser_tab_new", { url: plain(`CA${i}`) });
+  const spare = tabIdOf(await call("CB", "browser_tab_new", { url: plain("CBspare") }))!;
+  await call("CB", "browser_tab_new", { url: plain("CBworking") });
+  const nav = tabIdOf(await call("NA", "browser_navigate", { url: plain("NA") }))!;
+  await sleep(400);
+  try {
+    setMemory(0.95);
+    const refused = await call("CA", "browser_tab_new", { url: plain("CA4") });
+    expect(text(refused)).toContain("最多同时保留 3");
+    expect((await records()).map((t) => t.id)).toContain(spare);
+    // 3.2 of 4 GB in use: above the low mark, but the page fits: nobody else's tab gives way.
+    setMemory(0.8, 0, 4e9);
+    expect((await call("NA", "browser_navigate", { url: plain("NA2"), tab: nav })).result?.isError).toBeFalsy();
+    expect((await records()).map((t) => t.id)).toContain(spare);
+  } finally {
+    setMemory(0.1);
+  }
+});
+
+it.skipIf(!hasChromium)("does not let a crash's memory request settle for a lighter look already running", async () => {
+  await clearTabs();
+  await fetch(`${process.env.AIO_TABS_CDP}/json/new?${encodeURIComponent(plain("Joined stray"))}`, { method: "PUT" });
+  await sleep(300);
+  // A look notes the untracked page; it counts as unused once it has stayed put a while.
+  await reclaim("poll");
+  await sleep(400);
+  setMemory(0.88);
+  try {
+    const [poll, crash] = await Promise.all([reclaim("poll"), reclaim("crash")]);
+    expect(poll.join(" ")).not.toContain("Joined");
+    expect(crash.join(" ")).toContain("Joined");
+  } finally {
+    setMemory(0.1);
+  }
+});
+
+it.skipIf(!hasChromium)("types for a person only into a held tab of the task named", async () => {
+  await clearTabs();
+  const held = tabIdOf(await call("HT", "browser_navigate", { url: plain("Held", "<input id=q autofocus>") }))!;
+  expect((await control(held, "take", "HT")).status).toBe(200);
+  const typeIn = (body: Record<string, unknown>) => fetch(`${base}/input`, { method: "POST", body: JSON.stringify(body) });
+  expect((await typeIn({ task: "OTHER", text: "x" })).status).toBe(409);
+  expect((await typeIn({ task: "person", text: "x" })).status).toBe(409);
+  expect((await fetch(`${base}/pointer`, { method: "POST", body: JSON.stringify({ task: "OTHER", action: "scroll", dy: 10 }) })).status).toBe(409);
+  expect((await typeIn({ task: "HT", text: "ok" })).status).toBe(200);
+  await control(held, "release", "HT");
+  expect(text(await call("HT", "browser_evaluate", { script: "document.querySelector('#q').value" }))).toBe("ok");
+});
+
+it.skipIf(!hasChromium)("past the deadline closes the hung tab the tool used, never the person's", async () => {
+  await clearTabs();
+  const stuck = tabIdOf(await call("BT", "browser_tab_new", { url: plain("Stuck") }))!;
+  const busy = tabIdOf(await call("BT", "browser_tab_new", { url: plain("Busy") }))!;
+  const { targetId } = (await records("BT")).find((t) => t.id === busy) as TabRecord & { targetId: string };
+  const target = ((await (await fetch(`${process.env.AIO_TABS_CDP}/json/list`)).json()) as Array<{ id: string; webSocketDebuggerUrl: string }>).find((t) => t.id === targetId)!;
+  try {
+    // The task's current tab runs a heavy script, and the person has taken it over.
+    await new Promise<void>((resolve) => {
+      const ws = new WebSocket(target.webSocketDebuggerUrl);
+      ws.onopen = () => { ws.send(JSON.stringify({ id: 1, method: "Runtime.evaluate", params: { expression: "while (true) {}" } })); setTimeout(() => { ws.close(); resolve(); }, 300); };
+    });
+    void control(busy, "take", "BT").catch(() => undefined);
+    await expect.poll(async () => (await records("BT")).find((t) => t.id === busy)?.holder).toBe("human");
+    const r = await call("BT", "browser_evaluate", { tab: stuck, script: "while (true) {}" });
+    expect(text(r)).toContain(`标签页 ${stuck} 已无响应，已关闭`);
+    expect((await records("BT")).find((t) => t.id === busy)).toMatchObject({ holder: "human" });
+  } finally {
+    await fetch(`${process.env.AIO_TABS_CDP}/json/close/${targetId}`).catch(() => undefined);
+    await expect.poll(async () => (await records("BT")).map((t) => t.id)).not.toContain(busy);
+  }
+}, 30_000);
