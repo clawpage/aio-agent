@@ -143,6 +143,9 @@ const ITEM_LIFECYCLE_METHODS = new Set(["item/started", "item/completed"]);
 
 /** Budget for the earlier conversation carried into a turn that switches harness. */
 const PRIOR_CONTEXT_MAX_CHARS = 24_000;
+/** Per exchange, so one long answer cannot use up the whole budget. */
+const PRIOR_REQUEST_CHARS = 2_000;
+const PRIOR_ANSWER_CHARS = 6_000;
 
 const DELTA_METHODS = new Set([
   "item/agentMessage/delta",
@@ -1125,11 +1128,17 @@ export class AgentManager {
   /**
    * Earlier requests and final answers of a conversation, newest kept first
    * within a bounded budget, prepended when a turn moves to the other harness.
+   * A task's turn carries the whole executor prompt; the person's request is
+   * the task's own text. The oldest exchange that does not fit is cut short.
    */
   #withPriorContext(conversationId: string, currentTurnId: string, text: string): string {
     const turns = this.#db
-      .prepare("SELECT id, input_text FROM turns WHERE conversation_id = ? AND id != ? AND status IN ('completed','failed','interrupted','unknown') ORDER BY created_at ASC, rowid ASC")
-      .all(conversationId, currentTurnId) as Array<{ id: string; input_text: string }>;
+      .prepare(
+        `SELECT t.id, COALESCE(k.input_text, t.input_text) AS request FROM turns t LEFT JOIN tasks k ON k.turn_id = t.id
+         WHERE t.conversation_id = ? AND t.id != ? AND t.status IN ('completed','failed','interrupted','unknown') ORDER BY t.created_at ASC, t.rowid ASC`,
+      )
+      .all(conversationId, currentTurnId) as Array<{ id: string; request: string }>;
+    const clip = (s: string, max: number) => (s.length > max ? `${s.slice(0, max)}…` : s);
     const entries: string[] = [];
     let budget = PRIOR_CONTEXT_MAX_CHARS;
     for (const t of turns.reverse()) {
@@ -1138,10 +1147,10 @@ export class AgentManager {
         .all(t.id) as Array<{ payload: string }>)
         .map((row) => (JSON.parse(row.payload) as { item?: { type?: string; text?: string } }).item)
         .filter((item) => item?.type === "agentMessage" && item.text?.trim());
-      const entry = `用户：${t.input_text.trim()}\n助理：${answers.at(-1)?.text?.trim() ?? "（没有最终回复）"}`;
-      if (entry.length > budget) break;
+      const entry = `用户：${clip(t.request.trim(), PRIOR_REQUEST_CHARS)}\n助理：${clip(answers.at(-1)?.text?.trim() ?? "（没有最终回复）", PRIOR_ANSWER_CHARS)}`;
+      entries.unshift(entry.length > budget ? `${entry.slice(0, budget)}…` : entry);
       budget -= entry.length;
-      entries.unshift(entry);
+      if (budget <= 0) break;
     }
     if (!entries.length) return text;
     return `[背景] 这项任务之前由另一个执行器处理过，以下是此前的对话记录（按时间顺序），供你继续时参考：\n\n${entries.join("\n\n")}\n\n[当前消息]\n${text}`;

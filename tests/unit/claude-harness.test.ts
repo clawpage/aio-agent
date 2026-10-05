@@ -585,6 +585,35 @@ describe("AgentManager with the Claude Code harness", () => {
     await tick();
   });
 
+  it("carries a task's own request, not its executor prompt, and cuts long history short instead of dropping it", async () => {
+    const conv = agent.createConversation({ title: "task session" });
+    const ask = async (text: string, id: string, answer: string) => {
+      const { turn } = agent.submitTurn({ conversationId: conv.id, text, clientMessageId: id });
+      await tick();
+      const started = codex.startedTurns.at(-1)!;
+      codex.emitNotification("item/completed", { threadId: started.threadId, turnId: started.turnId, item: { type: "agentMessage", id: `a-${id}`, text: answer } });
+      codex.completeTurn(started.turnId);
+      await tick();
+      return turn;
+    };
+    await ask("早先的请求", "p1", "早先的回答");
+    const executorPrompt = `你是 AIO Agent 主会话委派的子 agent。${"规则".repeat(20_000)}\n\n本次用户任务：\n\n帮我订东京酒店`;
+    const taskTurn = await ask(executorPrompt, "p2", `订好了。${"细节".repeat(10_000)}`);
+    db.prepare("INSERT INTO tasks(id,client_message_id,conversation_id,turn_id,title,input_text,status,created_at) VALUES ('task_1','m_task',?,?,'订酒店','帮我订东京酒店','completed',1)").run(conv.id, taskTurn.id);
+
+    agent.saveAgentSettings({ model: "claude-sonnet-5-5", effort: "high" }, await agent.listModels());
+    agent.submitTurn({ conversationId: conv.id, text: "改成新宿", clientMessageId: "p3" });
+    await tick();
+    const moved = codex.startedTurns.at(-1)!.text;
+    expect(moved).toContain("用户：帮我订东京酒店\n助理：订好了。");
+    expect(moved).not.toContain("主会话委派的子 agent");
+    // The latest exchange is clipped, and the one before it still comes along.
+    expect(moved).toContain("用户：早先的请求\n助理：早先的回答");
+    expect(moved.length).toBeLessThan(30_000);
+    codex.completeTurn(codex.startedTurns.at(-1)!.turnId);
+    await tick();
+  });
+
   it("records the harness's failure reason on the turn", async () => {
     agent.saveAgentSettings({ model: "claude-opus-5-5", effort: null }, await agent.listModels());
     const conv = agent.createConversation({ title: "fail" });
