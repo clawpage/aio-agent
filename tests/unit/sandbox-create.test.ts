@@ -1,5 +1,6 @@
 import { expect, it, vi } from "vitest";
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -286,4 +287,32 @@ it("restarts python-server only when its Playwright driver is attached and no sh
 it("does not count a shell session that ended in another terminal status as busy, the same running set idle.ts uses", async () => {
   // Only `running` and `no_change_timeout` still run a command; anything else kept python-server's driver attached forever.
   expect(await dropCdpClients({ procs: [...IMAGE_PROCS, DRIVER], cdpSockets: [201], supervised: SUPERVISED, sessions: { a: { status: "terminated" }, b: { status: "completed" } } })).toEqual(["python-server"]);
+});
+
+it("never deletes another start's download in progress while clearing old browser builds", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pa-build-clean-"));
+  try {
+    const toolDir = path.join(dir, "aio-browser");
+    const container = new SandboxContainer(testConfig(dir, 18999, { PA_BROWSER_TOOL_DIR: toolDir }), new Logger("error", undefined, false), testNode());
+    const build = { packages: [{ url: "https://pkg.example/chromium.deb", sha256: "a".repeat(64) }], arch: execFileSync("uname", ["-m"], { encoding: "utf8" }).trim() };
+    const id = createHash("sha256").update("a".repeat(64)).digest("hex").slice(0, 12);
+    // This configuration's build is already present, so the run goes straight to the cleanup.
+    const current = path.join(toolDir, `chromium-${id}`);
+    fs.mkdirSync(path.join(current, "root/usr/lib/chromium"), { recursive: true });
+    fs.writeFileSync(path.join(current, "root/usr/lib/chromium/chromium"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+    const oldBuild = path.join(toolDir, "chromium-0123456789ab");
+    const downloading = path.join(toolDir, `chromium-${id}.Ab12Cd`);
+    const abandoned = path.join(toolDir, "chromium-0123456789ab.Zz9876");
+    for (const d of [oldBuild, downloading, abandoned]) fs.mkdirSync(d, { recursive: true });
+    const hoursAgo = new Date(Date.now() - 2 * 3600_000);
+    fs.utimesSync(abandoned, hoursAgo, hoursAgo);
+    vi.spyOn(container, "execInSandbox").mockImplementation(async (argv: string[]) => ({ code: 0, stderr: "", stdout: execFileSync(argv[0]!, argv.slice(1), { encoding: "utf8" }) }));
+    expect((await container.ensureBrowserBuild(build))?.binary).toBe(path.join(current, "root/usr/lib/chromium/chromium"));
+    expect(fs.existsSync(oldBuild)).toBe(false);
+    expect(fs.existsSync(downloading)).toBe(true);
+    // A download a killed start left behind still goes once nothing has touched it for an hour.
+    expect(fs.existsSync(abandoned)).toBe(false);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });

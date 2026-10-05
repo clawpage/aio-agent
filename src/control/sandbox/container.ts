@@ -511,9 +511,13 @@ if [ ! -x "$dir/root/usr/lib/chromium/chromium" ]; then
   chmod -R a+rX "$tmp"; rm -rf "$dir"; mv "$tmp" "$dir"
 fi
 # A build the running browser still uses goes on a later start, once the browser has moved off it.
+# chromium-<id>.XXXXXX is another start's download in progress (its own trap removes it).
 for old in "$(dirname "$dir")"/chromium-*; do
+  case "\${old##*/}" in *.*) continue;; esac
   [ "$old" = "$dir" ] || grep -qsF "$old/" /proc/[0-9]*/cmdline || rm -rf "$old"
 done
+# One a killed start left behind goes once nothing has touched it for an hour.
+find "$(dirname "$dir")" -maxdepth 1 -name "chromium-*.*" -mmin +60 -exec rm -rf {} + || true
 LD_LIBRARY_PATH="$dir/root/usr/lib/aarch64-linux-gnu" "$dir/root/usr/lib/chromium/chromium" --version >/dev/null
 echo "$dir"`;
     const args = build.packages.flatMap((p) => [p.url, p.sha256]);
