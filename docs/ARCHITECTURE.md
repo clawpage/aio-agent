@@ -259,7 +259,7 @@ helper 内、紧挨着信号发生。
 SQLite（`var/personal-agent.sqlite`，WAL）保存 owner、会话、对话、轮次、事件、审批与票据。
 浏览器重连、控制面重启、容器重启都不会丢历史；被中断的轮次带明确状态而不是静默重试。
 
-存储工具使用锁定的 Playwright 1.63.0。其公开 `setStorageState` 没有超时参数，因此受管 helper 使用同版本 channel 的 timeout，使库内部的 finally 在 CDP 断开前关闭临时页。升级版本须重新验证真实超时清理、启动时存储及标签顺序。受管可执行工具目录及其祖先必须由 root 控制；持久快照和可重建工具分别存放。
+存储工具使用锁定的 Playwright 1.63.0。导入不用 `setStorageState`：它会先清空整个 HTTP 缓存、注销 service worker，并删除每个 origin 的 localStorage/IndexedDB/OPFS（OPFS 根本没有导出）。profile 里已有 cookie 时只补回缺的 cookie；cookie 为空时补回全部 cookie，并在受管临时页里只写入缺少的 localStorage 键和不存在的 IndexedDB 库，什么都不清空。升级版本须重新验证真实超时清理、启动时存储及标签顺序。受管可执行工具目录及其祖先必须由 root 控制；持久快照和可重建工具分别存放。
 
 ## 界面品牌（一站）
 

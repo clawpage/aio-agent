@@ -98,6 +98,57 @@ async function capture() {
   }
   return { state, requestedOrigins: origins.length };
 }
+// Write into one origin only what the profile does not hold yet: missing
+// localStorage keys and missing IndexedDB databases. Nothing is cleared first.
+async function fillOrigin(entry) {
+  const page = await probeFor(entry.origin);
+  await step(page.evaluate(async ({ localStorage: pairs = [], indexedDB: databases = [] }) => {
+    // Playwright's encoding of non-JSON IndexedDB values (Date, typed arrays...).
+    const arrays = { i8: Int8Array, ui8: Uint8Array, ui8c: Uint8ClampedArray, i16: Int16Array, ui16: Uint16Array,
+      i32: Int32Array, ui32: Uint32Array, f32: Float32Array, f64: Float64Array, bi64: BigInt64Array, bui64: BigUint64Array };
+    const bytes = (b64) => Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+    const decode = (v, refs = new Map()) => {
+      if (v === null || typeof v !== 'object') return v;
+      if ('ref' in v) return refs.get(v.ref);
+      if ('v' in v) return { null: null, NaN: NaN, Infinity: Infinity, '-Infinity': -Infinity, '-0': -0 }[v.v];
+      if ('d' in v) return new Date(v.d);
+      if ('u' in v) return new URL(v.u);
+      if ('bi' in v) return BigInt(v.bi);
+      if ('r' in v) return new RegExp(v.r.p, v.r.f);
+      if ('e' in v) return Object.assign(new Error(v.e.m), { name: v.e.n, stack: v.e.s });
+      if ('ta' in v) return new arrays[v.ta.k](bytes(v.ta.b).buffer);
+      if ('ab' in v) return bytes(v.ab.b).buffer;
+      if ('a' in v) { const out = []; refs.set(v.id, out); for (const item of v.a) out.push(decode(item, refs)); return out; }
+      if ('o' in v) {
+        const out = {}; refs.set(v.id, out);
+        for (const { k, v: item } of v.o) if (k !== '__proto__') out[k] = decode(item, refs);
+        return out;
+      }
+      return undefined;
+    };
+    for (const { name, value } of pairs) if (localStorage.getItem(name) === null) localStorage.setItem(name, value);
+    const present = new Set((await indexedDB.databases()).map((db) => db.name));
+    for (const db of databases) {
+      if (present.has(db.name)) continue;
+      await new Promise((resolve, reject) => {
+        const open = indexedDB.open(db.name, db.version);
+        open.onupgradeneeded = () => {
+          for (const store of db.stores) {
+            const created = open.result.createObjectStore(store.name,
+              { autoIncrement: store.autoIncrement, keyPath: store.keyPathArray ?? store.keyPath });
+            for (const index of store.indexes) created.createIndex(index.name, index.keyPathArray ?? index.keyPath,
+              { unique: index.unique, multiEntry: index.multiEntry });
+            for (const record of store.records) {
+              created.add(record.value ?? decode(record.valueEncoded), record.key ?? decode(record.keyEncoded));
+            }
+          }
+        };
+        open.onsuccess = () => { open.result.close(); resolve(); };
+        open.onerror = () => reject(open.error);
+      });
+    }
+  }, entry));
+}
 async function cleanup() {
   let ok = true;
   try { await bounded(Promise.allSettled([...creations]), 1000); } catch { ok = false; }
@@ -140,22 +191,26 @@ async function main() {
       // only gets back the snapshot's cookies it is missing; nothing it has is
       // changed. Only an empty profile is rebuilt from the snapshot whole.
       const live = await step(context.cookies());
+      const now = Date.now() / 1000;
+      const unexpired = (c) => !(c.expires > 0 && c.expires <= now);
       if (live.length) {
         const key = (c) => `${c.name}\n${c.domain}\n${c.path}\n${c.partitionKey ?? ''}`;
         const have = new Set(live.map(key));
-        const now = Date.now() / 1000;
-        const missing = state.cookies.filter((c) => !have.has(key(c)) && !(c.expires > 0 && c.expires <= now));
+        const missing = state.cookies.filter((c) => !have.has(key(c)) && unexpired(c));
         if (missing.length) await step(context.addCookies(missing));
         result = { state, merged: { kept: live.length, added: missing.length } };
       } else {
-        // Playwright 1.63.0 public setStorageState hard-codes no timeout. Use the
-        // same pinned channel with a server-side deadline so its finally closes
-        // the internal storage page *before* we detach CDP. An outer Promise.race
-        // alone leaves that page behind. Keep cleanup headroom for the server.
-        if (!context._channel?.setStorageState) throw new StorageError('vendor_incompatible');
-        await step(context._channel.setStorageState({ storageState: state }, {
-          timeout: Math.max(1, LIMIT - (Date.now() - started) - 100),
-        }));
+        // Not Playwright's setStorageState: it clears before writing - the whole
+        // HTTP cache, service workers, and every localStorage/IndexedDB/OPFS entry
+        // of each origin (OPFS is not even captured). An empty jar does not mean
+        // an empty profile, so only what is missing is added.
+        const cookies = state.cookies.filter(unexpired);
+        if (cookies.length) await step(context.addCookies(cookies));
+        for (const entry of state.origins) {
+          if (/^https?:\/\//.test(entry.origin) && (entry.localStorage?.length || entry.indexedDB?.length)) {
+            await fillOrigin(entry);
+          }
+        }
         result = { state };
       }
     }

@@ -12,7 +12,7 @@ const helper=path.resolve('src/control/browser/scripts/browser-storage.cjs');
 async function run(hang:boolean){
  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'browser-storage-test-'));
  try {
-  fs.writeFileSync(path.join(dir,'index.js'), `const fs=require('node:fs');module.exports={chromium:{connectOverCDP:async()=>({contexts:()=>[{cookies:async()=>[],_channel:{setStorageState:async()=>{await new Promise(r=>${hang?'void r':'setTimeout(r,120)'});fs.writeFileSync(${JSON.stringify(path.join(dir,'applied'))},'yes')}}}],newBrowserCDPSession:async()=>({}),close:async()=>fs.writeFileSync(${JSON.stringify(path.join(dir,'cleaned'))},'yes')})}}`);
+  fs.writeFileSync(path.join(dir,'index.js'), `const fs=require('node:fs');module.exports={chromium:{connectOverCDP:async()=>({contexts:()=>[{cookies:async()=>[],addCookies:async()=>{await new Promise(r=>${hang?'void r':'setTimeout(r,120)'});fs.writeFileSync(${JSON.stringify(path.join(dir,'applied'))},'yes')}}],newBrowserCDPSession:async()=>({}),close:async()=>fs.writeFileSync(${JSON.stringify(path.join(dir,'cleaned'))},'yes')})}}`);
   const state=path.join(dir,'state.json');fs.writeFileSync(state,JSON.stringify({cookies:[{value:'private-test-secret'}],origins:[]}));
   const started=Date.now();
   let output='',code=0;
@@ -91,5 +91,35 @@ it.skipIf(!hasChromium)('rebuilds an empty profile from the snapshot whole',()=>
  try{
   const jar=Object.fromEntries((await browser.contexts()[0]!.cookies()).map(c=>[c.name,c.value]));
   expect(jar).toMatchObject({a1:'old-device',web_session:'old-session',lost_on_restart:'s'});
+ }finally{await browser.close();}
+}),30000);
+it.skipIf(!hasChromium)('rebuilding an empty cookie jar never clears what the profile already holds',()=>withBrowser(async(endpoint)=>{
+ const browser=await chromium.connectOverCDP(endpoint);
+ try{
+  const page=await browser.contexts()[0]!.newPage();
+  await page.route('**/*',route=>route.fulfill({status:200,contentType:'text/html',body:'<html></html>'}));
+  await page.goto('https://example.test/');
+  // Signed out (no cookies), but the profile still holds this site's local data.
+  await page.evaluate(async()=>{
+   localStorage.setItem('kept','live');localStorage.setItem('shared','live');
+   await new Promise((resolve,reject)=>{const open=indexedDB.open('live-db',1);open.onupgradeneeded=()=>open.result.createObjectStore('s');open.onsuccess=()=>{open.result.close();resolve(null);};open.onerror=reject;});
+   const file=await (await navigator.storage.getDirectory()).getFileHandle('draft.txt',{create:true});
+   const writer=await file.createWritable();await writer.write('unsaved');await writer.close();
+  });
+  const out=await importState(endpoint,{cookies:snapshot.cookies,origins:[{origin:'https://example.test',
+   localStorage:[{name:'shared',value:'old'},{name:'restored',value:'old'}],
+   indexedDB:[{name:'old-db',version:2,stores:[{name:'s',autoIncrement:false,indexes:[],records:[
+    {key:'plain',value:{a:1}},{key:'when',valueEncoded:{d:'2026-01-02T03:04:05.000Z'}}]}]}]}]});
+  expect(out.ok).toBe(true);
+  const after=await page.evaluate(async()=>{
+   const read=(key:string)=>new Promise(resolve=>{const open=indexedDB.open('old-db');open.onsuccess=()=>{const get=open.result.transaction('s').objectStore('s').get(key);get.onsuccess=()=>{open.result.close();resolve(get.result);};};});
+   const when=await read('when') as Date;
+   return {ls:{...localStorage},dbs:(await indexedDB.databases()).map(d=>d.name).sort(),plain:await read('plain'),when:when instanceof Date?when.toISOString():null,
+    opfs:await (await (await (await navigator.storage.getDirectory()).getFileHandle('draft.txt')).getFile()).text()};
+  });
+  expect(after).toEqual({ls:{kept:'live',shared:'live',restored:'old'},dbs:['live-db','old-db'],plain:{a:1},when:'2026-01-02T03:04:05.000Z',opfs:'unsaved'});
+  const jar=Object.fromEntries((await browser.contexts()[0]!.cookies()).map(c=>[c.name,c.value]));
+  expect(jar).toMatchObject({a1:'old-device',web_session:'old-session',lost_on_restart:'s'});
+  expect(jar.stale).toBeUndefined();
  }finally{await browser.close();}
 }),30000);
