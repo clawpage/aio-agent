@@ -334,7 +334,7 @@ it('records the actual dispatcher model and stage timings from notifications',as
  }finally{session.close();}
 });
 
-it('runs member planning through the fixed provider at high effort and refuses an unavailable provider',async()=>{
+it('runs member planning through the fixed provider at low effort and refuses an unavailable provider',async()=>{
  const server=new FakeAppServer();
  server.handle('thread/start',()=>({thread:{id:'member-plan'}}));
  server.handle('turn/start',()=>{setTimeout(()=>server.notify('turn/completed',{threadId:'member-plan',turn:{id:'turn-plan',status:'completed',items:[{type:'agentMessage',text:'{}'}]}}),5);return {turn:{id:'turn-plan'}};});
@@ -343,7 +343,8 @@ it('runs member planning through the fixed provider at high effort and refuses a
  try {
   expect(await session.planTask('request','soul','gpt-6.1-sol')).toBe('{}');
   expect(server.inbound.find(r=>r.method==='thread/start')?.params).toMatchObject({model:'gpt-6.1-sol',modelProvider:'aio_gateway',ephemeral:true});
-  expect(server.inbound.find(r=>r.method==='turn/start')?.params).toMatchObject({model:'gpt-6.1-sol',effort:'high'});
+  // Dispatch is one short JSON answer: a GPT member's dispatcher runs at low, like the owner's Luna.
+  expect(server.inbound.find(r=>r.method==='turn/start')?.params).toMatchObject({model:'gpt-6.1-sol',effort:'low'});
  } finally {session.close();}
  const unavailable=makeSession(new FakeAppServer(),200);
  try {await expect(unavailable.planTask('request','soul','gpt-6.1-sol')).rejects.toThrow('服务暂时不可用');}finally{unavailable.close();}
@@ -375,11 +376,13 @@ it('adds the knowledge base to a task thread only when this runtime was granted 
  }finally{session.close();}
 });
 
-it('opens, forks and resumes task threads with their own tab identity',async()=>{
+it('opens, forks and resumes task threads with their own tab identity and every task tool',async()=>{
  const server=new FakeAppServer();
  for(const method of ['thread/start','thread/fork'])server.handle(method,()=>({thread:{id:'tab-thread'},model:'gpt-6-sol',cwd:'/workspace'}));
  server.handle('thread/resume',()=>({}));
- const session=makeSession(server,200);
+ // A resumed thread (after an app-server restart or a sandbox idle-stop) must keep the same tools as a new one.
+ const cfg={...testConfig("/tmp/pa-title-stream",1,{}),kb:{url:'http://host.docker.internal:4902/kb/token/mcp'},schedule:{url:'http://host.docker.internal:4902/schedule/token/mcp'}};
+ const session=new SandboxCodexSession(cfg,new Logger("error",undefined,false),containerFor(server),hostTokens,null);
  try {
   const task={key:'conv_1',title:'查网页'};
   await session.startThread({browserTask:task});
@@ -387,7 +390,9 @@ it('opens, forks and resumes task threads with their own tab identity',async()=>
   await session.resumeThread('tab-thread',undefined,task);
   await session.startThread({});
   const sent=server.inbound.filter(r=>['thread/start','thread/fork','thread/resume'].includes(r.method??''));
-  for(const r of sent.slice(0,3))expect(r.params?.config).toEqual(tabThreadConfig(task));
+  const tools=(r:{params?:Record<string,any>})=>Object.keys(r.params?.config?.mcp_servers??{});
+  expect(tools(sent[0]!)).toEqual(expect.arrayContaining([...Object.keys((tabThreadConfig(task) as {mcp_servers:object}).mcp_servers),'aio_kb','aio_schedule']));
+  for(const r of sent.slice(1,3))expect(r.params?.config).toEqual(sent[0]!.params?.config);
   expect(sent[3]?.params?.config).toBeUndefined();
  }finally{session.close();}
 });

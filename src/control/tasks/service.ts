@@ -150,7 +150,11 @@ export class TaskService {
         const row = this.db.prepare("SELECT id,title FROM tasks WHERE COALESCE(execution_conversation_id,conversation_id)=? AND merged_into IS NULL ORDER BY created_at DESC LIMIT 1").get(conversationId) as { id: string; title: string } | undefined;
         return row ?? null;
     }
-    hasRunning(): boolean { return this.rows().some(t => DISPATCHED.has(t.status)); }
+    /** Polled every few seconds (vault autofill, push): one indexed lookup, not the whole table. */
+    hasRunning(): boolean {
+        const owner = this.cfg.runtimeUserId ?? null;
+        return !!this.db.prepare(`SELECT 1 FROM tasks WHERE status IN (${[...DISPATCHED].map(() => "?").join(",")}) AND (? IS NULL OR conversation_id IN (SELECT id FROM conversations WHERE owner_id=?)) LIMIT 1`).get(...DISPATCHED, owner, owner);
+    }
     ownsConversation(id: string): boolean { return !!this.db.prepare("SELECT 1 FROM tasks WHERE conversation_id=?").get(id); }
     view(row: TaskRow) {
         const plan = row.plan_json ? JSON.parse(row.plan_json) as TaskPlan : null;

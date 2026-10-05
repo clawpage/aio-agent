@@ -42,5 +42,7 @@ it("notifies completed tasks after execution without treating a dispatcher quest
   codex.completeTurn(codex.startedTurns[1]!.turnId);
   await tick();
   expect(seen).toEqual([{ title: "查天气", status: "completed" }, { title: "帮我订机票", status: "completed" }]);
+  // Nothing dispatched any more: the cheap poll says so too.
+  expect(tasks.hasRunning()).toBe(false);
   tasks.setNotifier(null);
 });

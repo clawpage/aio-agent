@@ -89,6 +89,11 @@ it('sends only a GPT-assigned member to ChatGPT on its model, adding the control
   expect(seen[0].headers).toMatchObject({authorization:'Bearer owner-chatgpt-access','chatgpt-account-id':'acct_owner',originator:'personal-agent','session-id':'s1','x-codex-turn-metadata':'{"turn_id":"t1"}','x-openai-internal-codex-responses-lite':'true'});
   expect(seen[0].headers['x-openai-account-routing-override']).toBeUndefined();expect(seen[0].headers.cookie).toBeUndefined();
   expect(JSON.stringify(seen[0].headers)).not.toContain(token(a));
+  // The member's dispatcher may ask for less than high (low/medium); anything above stays high.
+  await post('user_alpha',token(a),{reasoning:{effort:'low'},input:'route'});
+  expect(seen.at(-1).body.reasoning).toEqual({effort:'low'});
+  await post('user_alpha',token(a),{reasoning:{effort:'xhigh'},input:'route'});
+  expect(seen.at(-1).body.reasoning).toEqual({effort:'high'});
   // A rejected token is dropped so the next request fetches a fresh one.
   expect((await post('user_alpha',token(a),{input:'expired'})).status).toBe(401);expect(invalidated).toBe(1);
   // A Claude member has no Responses route even with its own valid token.

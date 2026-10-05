@@ -1,3 +1,4 @@
+import { MEMBER_GPT_MODEL } from "../auth/policy.js";
 import { tabThreadConfig, type BrowserTask } from "../browser/tabs.js";
 import { decisionThreadServers } from "../decision.js";
 import { kbThreadServers } from "../kb.js";
@@ -278,9 +279,10 @@ export class SandboxCodexSession {
   /** Read-only main-agent planning; receives bounded metadata, never executes a task. */
   async planTask(prompt: string, developerInstructions?: string, model?: string, onTiming?: DispatchTimingSink): Promise<string | null> {
     const started = Date.now();
-    // Only the owner's Luna classifier uses low effort. Member dispatchers
-    // retain their server-assigned model/high policy, as do other owner models.
-    const effort = !model && this.#cfg.agent.titleModel === "gpt-6-luna" ? "low" : "high";
+    // Dispatch is one short JSON answer: low effort on Luna and on a member's GPT
+    // (the member gateway lets a request ask for less than high, never more).
+    // Other dispatch models keep high.
+    const effort = (!model && this.#cfg.agent.titleModel === "gpt-6-luna") || model === MEMBER_GPT_MODEL ? "low" : "high";
     onTiming?.({ model: model ?? this.#cfg.agent.titleModel, effort, attempts: 1 });
     let result;
     try {
@@ -549,7 +551,7 @@ export class SandboxCodexSession {
 
   async resumeThread(threadId: string, developerInstructions?: string, browserTask?: BrowserTask): Promise<void> {
     await this.start();
-    await this.#peer!.request("thread/resume", { threadId, approvalPolicy: "never", sandbox: "danger-full-access", ...(developerInstructions !== undefined ? {developerInstructions} : {}), ...(browserTask ? { config: tabThreadConfig(browserTask) } : {}) }, 60_000);
+    await this.#peer!.request("thread/resume", { threadId, approvalPolicy: "never", sandbox: "danger-full-access", ...(developerInstructions !== undefined ? {developerInstructions} : {}), ...this.#executionConfig(browserTask) }, 60_000);
   }
 
   async startTurn(params: {

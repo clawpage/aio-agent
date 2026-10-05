@@ -7,6 +7,8 @@ import type {Config} from './config.js';
 import type {Logger} from '../common/logger.js';
 import {ClaudeCodeHarness,MEMBER_GATEWAY_TOKEN_KEY} from './claudeCode.js';
 import {MEMBER_CLAUDE_MODEL,MEMBER_EFFORT,MEMBER_GPT_MODEL} from './auth/policy.js';
+/** Efforts a member's GPT request may ask for; anything else (xhigh and up, or none) runs at high. */
+const MEMBER_GPT_EFFORTS=['low','medium','high'];
 import type {ShareStore} from './share.js';
 import type {DecisionGateway} from './decision.js';
 import type {KbGateway} from './kb.js';
@@ -97,7 +99,10 @@ export class MemberModelGateway {
           if(!this.hostTokens)throw new Error('Provider unavailable');
           const tokens=await this.hostTokens.getTokens();
           const reasoning=input.reasoning&&typeof input.reasoning==='object'?input.reasoning:{};
-          input.model=MEMBER_GPT_MODEL;input.reasoning={...reasoning,effort:MEMBER_EFFORT};input.store=false;delete input.service_tier;
+          // The member's executor runs at high; its dispatcher may ask for less. Never more than high.
+          const asked=(reasoning as {effort?:unknown}).effort;
+          const effort=typeof asked==='string'&&MEMBER_GPT_EFFORTS.includes(asked)?asked:MEMBER_EFFORT;
+          input.model=MEMBER_GPT_MODEL;input.reasoning={...reasoning,effort};input.store=false;delete input.service_tier;
           const headers:Record<string,string>={'content-type':'application/json',authorization:`Bearer ${tokens.accessToken}`,'chatgpt-account-id':tokens.chatgptAccountId};
           for(const [name,value] of Object.entries(req.headers))if(typeof value==='string'&&CODEX_HEADERS.test(name))headers[name]=value;
           const upstream=await fetch(this.cfg.hostCodex.chatgptUrl.replace(/\/$/,'')+'/responses',{method:'POST',headers,body:JSON.stringify(input),signal:abort.signal});
