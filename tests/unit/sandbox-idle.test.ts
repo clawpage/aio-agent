@@ -20,6 +20,8 @@ function setup(parked = false) {
     sleepVerdict: "asleep",
     restorePending: false,
     calls: [] as string[],
+    /** What the browser lifecycle was told about the container. */
+    container: [] as string[],
     onSleep: () => {},
   };
   const ctx = {
@@ -38,6 +40,8 @@ function setup(parked = false) {
         return { verdict: world.sleepVerdict };
       },
       status: () => ({ state: world.sleepVerdict === "asleep" ? "asleep" : "awake", restorePending: world.restorePending }),
+      containerStopped: () => void world.container.push("stopped"),
+      containerStarted: () => void world.container.push("started"),
     },
     aio: { get: async () => ({ data: { sessions: Object.fromEntries(world.shell.map((status, i) => [`s${i}`, { status }])) } }) },
     container: {
@@ -67,6 +71,22 @@ function setup(parked = false) {
 }
 
 describe("whole-container idle stop", () => {
+  it("tells the browser when the container is stopped and when it runs again", async () => {
+    const parked = setup(true);
+    // Found stopped at start: the browser's countdown must not run against it.
+    expect(parked.world.container).toEqual(["stopped"]);
+    await parked.idle.wake();
+    expect(parked.world.container).toEqual(["stopped", "started"]);
+
+    const { clock, world, idle } = setup();
+    clock.now += IDLE;
+    await idle.tick();
+    expect(world.calls).toEqual(["sleep", "stop"]);
+    expect(world.container).toEqual(["stopped"]);
+    await idle.wake();
+    expect(world.container).toEqual(["stopped", "started"]);
+  });
+
   it("stops the container after five quiet minutes, browser snapshot first", async () => {
     const { clock, world, ctx, idle } = setup();
     await idle.tick();

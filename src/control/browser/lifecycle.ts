@@ -369,6 +369,21 @@ export class BrowserLifecycle {
   #stopSourcePid: number | null = null;
   #stopSourceStarttime: number | null = null;
 
+  /**
+   * True while the sandbox container itself is stopped (the whole-container idle
+   * stop). Nothing in it can be probed, snapshotted or stopped, so every timer is
+   * off until `containerStarted()`.
+   */
+  #suspended = false;
+  /** Set by a container stop: no sleep cycle may run before a reconcile succeeds again. */
+  #unproven = false;
+  /** Bumped on every container stop, so a reconcile from before it cannot vouch for after. */
+  #containerGen = 0;
+  /** True while a sleep cycle waits on the reconcile it requires first. */
+  #sleepGating = false;
+  /** Held by `runExclusive`; wake/restore and sleep cycles wait for it. */
+  #exclusive: Promise<void> | null = null;
+
   #disposed = false;
   #nextId: () => string;
   #seq = 0;
@@ -544,15 +559,28 @@ status(): BrowserLifecycleStatus {
         this.#emit("reconciled", "检测到浏览器正在运行，已同步为可用状态");
       }
       this.#asleep = false;
-    } else if (this.#pendingRestore) {
+    } else if (this.#pendingRestore && res.browserRunning === true) {
       // A pending restore that the runtime no longer reports is done: the tabs are
-      // back and the browser is usable again.
+      // back and the browser is usable again. Only a running browser can prove
+      // that; after a failed wake nothing runs and the restore is still owed.
       this.#pendingRestore = false;
       this.#forgetPendingIdentity();
       this.#restoredSnapshotAt = res.restoredSnapshotAt ?? this.#snapshotAt;
       this.#clearError();
       this.#resumeUsable();
       this.#emit("reconciled", "快照已恢复到运行中的浏览器");
+    } else if (
+      res.browserRunning === true &&
+      !this.#asleep &&
+      !this.#pendingRestore &&
+      (this.#lastErrorCode === "runtime_error" || this.#lastErrorCode === "reconcile_failed")
+    ) {
+      // The runtime could not be reached or errored earlier, but this probe proves
+      // the same browser runs, owned, with nothing owed: the error is stale. Other
+      // codes explain why a release was refused and stay until the next cycle.
+      this.#cancelRetry();
+      this.#clearError();
+      if (this.#state === "error") this.#resumeUsable();
     }
     if (typeof res.snapshotAt === "number" && this.#snapshotAt === null) this.#snapshotAt = res.snapshotAt;
     return this.status();
@@ -574,12 +602,19 @@ status(): BrowserLifecycleStatus {
    */
   #reconcile(): Promise<void> {
     if (this.#reconciled) return this.#reconciled;
-    const promise = this.#runReconcile().catch((err) => {
-      // A failed barrier must not be cached as done: drop the memo so the next
-      // ready() tries again, and keep a stable, secret-free code surfaced.
-      if (this.#reconciled === promise) this.#reconciled = null;
-      throw err;
-    });
+    const gen = this.#containerGen;
+    const promise = this.#runReconcile().then(
+      () => {
+        // Proven again, unless the container stopped while the probe was out.
+        if (gen === this.#containerGen) this.#unproven = false;
+      },
+      (err) => {
+        // A failed barrier must not be cached as done: drop the memo so the next
+        // ready() tries again, and keep a stable, secret-free code surfaced.
+        if (this.#reconciled === promise) this.#reconciled = null;
+        throw err;
+      },
+    );
     this.#reconciled = promise;
     return promise;
   }
@@ -588,9 +623,11 @@ status(): BrowserLifecycleStatus {
     const deadline = this.#clock.now() + this.#reconcileTimeoutMs;
     for (;;) {
       // Never probe underneath an in-flight transition this process owns: the
-      // cycle re-checks ownership itself and will settle the state.
-      if (this.#sleepPromise || this.#wakePromise) {
-        await (this.#sleepPromise ?? this.#wakePromise)?.catch(() => undefined);
+      // cycle re-checks ownership itself and will settle the state. A sleep cycle
+      // that is itself waiting on this reconcile is not waited for.
+      const inFlight = (this.#sleepGating ? null : this.#sleepPromise) ?? this.#wakePromise;
+      if (inFlight) {
+        await inFlight.catch(() => undefined);
         continue;
       }
       const epochAtStart = this.#epoch;
@@ -926,6 +963,7 @@ status(): BrowserLifecycleStatus {
     // being torn down (and never races a half-finished stop).
     const sleepInFlight = this.#sleepPromise;
     if (sleepInFlight) await sleepInFlight.catch(() => undefined);
+    await this.#waitExclusive();
     // Read-only reconcile barrier. A freshly constructed lifecycle starts out
     // trusting its own optimistic state, but the container may already hold a
     // sleeping browser - or a browser a previous control plane still owes a
@@ -952,6 +990,7 @@ status(): BrowserLifecycleStatus {
     this.#assertUsable();
     const sleepInFlight = this.#sleepPromise;
     if (sleepInFlight) await sleepInFlight.catch(() => undefined);
+    await this.#waitExclusive();
     await this.#reconcile();
     if (!this.#asleep && !this.#pendingRestore) {
       if (this.#state === "error" && this.#browserRunning === true && !this.#pendingRestore) {
@@ -984,6 +1023,74 @@ status(): BrowserLifecycleStatus {
       return { verdict: "blocked", message, warnings: [], savedAt: this.#snapshotAt };
     }
     return this.#runSleepCycle();
+  }
+
+  /**
+   * The sandbox container was stopped (or found stopped at start). Nothing in it
+   * can be probed or released, so every timer goes off - otherwise the countdown
+   * would exec into a stopped container every minute, and a leftover retry would
+   * snapshot the fresh browser of the next start over the one holding the tabs.
+   * What was proven about the browser no longer holds.
+   */
+  containerStopped(): void {
+    if (this.#disposed || !this.#enabled) return;
+    this.#suspended = true;
+    this.#unproven = true;
+    this.#containerGen += 1;
+    this.#cancelIdle();
+    this.#cancelRetry();
+    this.#cancelExpiry();
+    this.#reconciled = null;
+    this.#browserRunning = null;
+  }
+
+  /**
+   * The container is up again. Reconcile with what it really holds (a restore
+   * the new browser still owes, or no browser yet) before the countdown re-arms;
+   * a sleep cycle re-runs the reconcile first while it has not succeeded.
+   */
+  containerStarted(): void {
+    if (this.#disposed || !this.#enabled || !this.#suspended) return;
+    this.#suspended = false;
+    const gen = this.#containerGen;
+    const rearm = () => {
+      if (this.#disposed || this.#suspended || gen !== this.#containerGen) return;
+      this.#armExpiry();
+      this.#onHolderRemoved();
+    };
+    this.#reconcile().then(rearm, (err) => {
+      this.#log.warn?.("browser reconcile after container start failed", { detail: sanitizeDetail(err) });
+      rearm();
+    });
+  }
+
+  /**
+   * Run `fn` while no wake/restore or sleep cycle runs: it waits for one in
+   * flight, and one requested meanwhile waits for `fn`. For work that disturbs
+   * the browser's own clients (restarting the image's CDP clients). `fn` must not
+   * call `ready()`/`wake()`, which would wait for itself.
+   */
+  async runExclusive<T>(fn: () => Promise<T> | T): Promise<T> {
+    this.#assertUsable();
+    for (;;) {
+      const busy = this.#sleepPromise ?? this.#wakePromise ?? this.#exclusive;
+      if (!busy) break;
+      await busy.catch(() => undefined);
+    }
+    let done!: () => void;
+    this.#exclusive = new Promise<void>((resolve) => {
+      done = resolve;
+    });
+    try {
+      return await fn();
+    } finally {
+      this.#exclusive = null;
+      done();
+    }
+  }
+
+  async #waitExclusive(): Promise<void> {
+    while (this.#exclusive) await this.#exclusive;
   }
 
   /** Stop the idle countdown and refuse further operations. Never stops a browser. */
@@ -1209,7 +1316,7 @@ status(): BrowserLifecycleStatus {
   }
 
   #scheduleIdle(): void {
-    if (this.#disposed || !this.#enabled) return;
+    if (this.#disposed || !this.#enabled || this.#suspended) return;
     // A countdown must not run for a browser that still owes a restore: stopping
     // it would discard the tabs the user is waiting for.
     if (this.#pendingRestore) return;
@@ -1252,7 +1359,7 @@ status(): BrowserLifecycleStatus {
    */
   #armExpiry(): void {
     this.#cancelExpiry();
-    if (this.#disposed || !this.#enabled) return;
+    if (this.#disposed || !this.#enabled || this.#suspended) return;
     // Expiry only matters for holders; a pending restore is handled by ready().
     if (this.#pendingRestore) return;
     const now = this.#clock.now();
@@ -1278,10 +1385,10 @@ status(): BrowserLifecycleStatus {
   }
 
   #scheduleRetry(): void {
-    if (this.#disposed || !this.#enabled || this.#retryTimer !== null) return;
+    if (this.#disposed || !this.#enabled || this.#suspended || this.#retryTimer !== null) return;
     this.#retryTimer = this.#clock.setTimeout(() => {
       this.#retryTimer = null;
-      if (this.#disposed || !this.#enabled) return;
+      if (this.#disposed || !this.#enabled || this.#suspended) return;
       if (this.#asleep || this.#hasHolders() || this.#pendingRestore) return;
       void this.#runSleepCycle().catch(() => undefined);
     }, this.#retryDelayMs);
@@ -1298,6 +1405,7 @@ status(): BrowserLifecycleStatus {
     if (!this.#asleep && !this.#pendingRestore) return;
     if (this.#wakePromise) return this.#wakePromise;
     const promise = (async () => {
+      await this.#waitExclusive();
       this.#cancelRetry();
       // `restoring into a running browser` is the post-restart reconciliation
       // case: Chromium is up but its tabs still have to be rebuilt.
@@ -1365,6 +1473,27 @@ status(): BrowserLifecycleStatus {
   }
 
   async #sleepCycle(): Promise<SleepOutcome> {
+    await this.#waitExclusive();
+    if (this.#suspended) {
+      // The container is stopped: there is nothing to snapshot or release.
+      return { verdict: "cancelled", message: null, warnings: this.#warnings, savedAt: this.#snapshotAt };
+    }
+    if (this.#unproven) {
+      // The container stopped since the last reconcile: the browser running now
+      // may still owe the restore of the snapshot holding the user's tabs, and
+      // snapshotting it would overwrite that snapshot. Reconcile first.
+      this.#sleepGating = true;
+      try {
+        await this.#reconcile();
+      } catch {
+        const message = this.#lastError ?? ERROR_MESSAGES.reconcile_failed;
+        this.#emit("sleep.blocked", message);
+        this.#scheduleRetry();
+        return { verdict: "blocked", message, warnings: this.#warnings, savedAt: this.#snapshotAt };
+      } finally {
+        this.#sleepGating = false;
+      }
+    }
     if (this.#asleep) {
       return { verdict: "asleep", message: null, warnings: this.#warnings, savedAt: this.#snapshotAt };
     }
@@ -1445,6 +1574,14 @@ status(): BrowserLifecycleStatus {
     // Without a fully attributed source the runtime could release a process the
     // user is still typing in, so an inconclusive probe refuses instead.
     const source = await this.#captureStopSource();
+    // The probe can take as long as the stop timeout: a lease taken meanwhile
+    // (a turn starting) must still cancel the stop, exactly as after the snapshot.
+    if (this.#hasHolders() || !this.#enabled || this.#disposed) {
+      this.#clearError();
+      this.#setState("awake");
+      this.#emit("sleep.cancelled", "核对浏览器期间出现新的占用，已取消释放");
+      return { verdict: "cancelled", message: "核对浏览器期间出现新的占用，已取消释放", warnings: this.#warnings, savedAt: this.#snapshotAt };
+    }
     if (source.kind === "already-gone") {
       // The release already happened; nothing is left to signal. Record it and let
       // the next caller rebuild from the snapshot we just wrote.
@@ -1466,7 +1603,7 @@ status(): BrowserLifecycleStatus {
           : source.kind === "storage-missing"
             ? "snapshot_storage_missing"
             : source.kind === "transition-busy"
-              ? "restore_pending"
+              ? "transition_busy"
               : "stop_unattributed";
       const { message } = this.#fail(code);
       this.#log.warn?.("browser stop blocked", { reason: source.kind });
@@ -1613,6 +1750,7 @@ const ERROR_MESSAGES: Record<LifecycleErrorCode, string> = {
   snapshot_storage_missing: "快照缺少 cookies/本地存储/IndexedDB，已放弃释放浏览器以免丢失登录状态",
   reconcile_failed: "无法确认浏览器真实状态，已阻止使用浏览器",
   restore_pending: "存在尚未恢复到运行中浏览器的快照，暂不释放浏览器",
+  transition_busy: "另一个进程正在停止或恢复浏览器，暂不释放；稍后自动重试",
   stop_failed: "停止浏览器失败，正在核对真实状态",
   stop_unattributed: "无法确认正在运行的浏览器归属，已放弃释放浏览器",
   wake_failed: "恢复浏览器失败，快照仍然保留",

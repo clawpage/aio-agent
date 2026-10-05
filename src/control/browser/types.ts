@@ -52,6 +52,7 @@ export type LifecycleErrorCode =
   | "stop_failed"
   | "stop_unattributed"
   | "restore_pending"
+  | "transition_busy"
   | "wake_failed"
   | "reconcile_failed"
   | "runtime_error";

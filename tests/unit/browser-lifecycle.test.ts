@@ -1421,3 +1421,220 @@ it('does not reuse an initial success after an unknown ownership observation', a
   await expect(life.ready()).rejects.toThrow();
   life.shutdown();
 });
+
+describe("BrowserLifecycle while the container is stopped", () => {
+  /** A runtime whose every call fails while its container is stopped, as the real exec does. */
+  function stoppable(script: RuntimeScript = {}) {
+    const runtime = makeRuntime(script);
+    const world = { up: false };
+    const { status, snapshot, stop } = runtime;
+    const down = () => new Error("浏览器工具目录检查失败：container is not running");
+    runtime.status = async (opts) => {
+      if (!world.up) {
+        runtime.calls.status += 1;
+        throw down();
+      }
+      return await status.call(runtime, opts);
+    };
+    runtime.snapshot = async (opts) => {
+      if (!world.up) {
+        runtime.calls.snapshot += 1;
+        throw down();
+      }
+      return await snapshot.call(runtime, opts);
+    };
+    runtime.stop = async (opts) => (world.up ? await stop.call(runtime, opts) : (runtime.calls.stop += 1, { ok: false }));
+    return { runtime, world };
+  }
+
+  it("never snapshots a stopped container, and reconciles with the new browser before releasing it", async () => {
+    // The fresh browser of the next start still owes the restore of the snapshot with the tabs.
+    const { runtime, world } = stoppable({ restorePending: true, pid: 77, pendingBrowserPid: 50 });
+    const { life, clock } = makeLifecycle(runtime);
+    life.containerStopped(); // a member runtime found its container stopped at start
+    for (let i = 0; i < 30; i += 1) {
+      clock.advance(60_000);
+      await settle();
+    }
+    expect(runtime.calls).toMatchObject({ status: 0, snapshot: 0, stop: 0 });
+    expect(life.status().lastErrorCode).toBeNull();
+    expect(life.status().idleDeadline).toBeNull();
+
+    world.up = true;
+    life.containerStarted();
+    await settle();
+    expect(runtime.calls.status).toBe(1);
+    expect(life.status().restorePending).toBe(true);
+    for (let i = 0; i < 30; i += 1) {
+      clock.advance(60_000);
+      await settle();
+    }
+    // The snapshot holding the tabs is never overwritten by the blank browser.
+    expect(runtime.calls.snapshot).toBe(0);
+    expect(runtime.calls.stop).toBe(0);
+    life.shutdown();
+  });
+
+  it("drops a retry left by a failed cycle when the container stops", async () => {
+    const { runtime, world } = stoppable();
+    world.up = true;
+    const { life, clock } = makeLifecycle(runtime);
+    runtime.snapshot = async () => {
+      runtime.calls.snapshot += 1;
+      throw new Error("exec failed");
+    };
+    clock.advance(300_000);
+    await settle();
+    expect(runtime.calls.snapshot).toBe(1);
+    expect(life.status().lastErrorCode).toBe("runtime_error");
+    world.up = false;
+    life.containerStopped();
+    for (let i = 0; i < 30; i += 1) {
+      clock.advance(60_000);
+      await settle();
+    }
+    expect(runtime.calls.snapshot).toBe(1);
+    expect(clock.pendingTimers).toBe(0);
+    life.shutdown();
+  });
+
+  it("reconciles before a sleep cycle when the reconcile at container start failed", async () => {
+    const { runtime, world } = stoppable({ restorePending: [true], pid: 77, pendingBrowserPid: 50 });
+    const { life, clock } = makeLifecycle(runtime);
+    life.containerStopped();
+    life.containerStarted(); // the start failed: the container is still down
+    await settle();
+    expect(life.status().lastErrorCode).toBe("reconcile_failed");
+    world.up = true; // the recovery loop brought it up
+    clock.advance(300_000);
+    await settle();
+    expect(life.status().restorePending).toBe(true);
+    expect(runtime.calls.snapshot).toBe(0);
+    expect(runtime.calls.stop).toBe(0);
+    life.shutdown();
+  });
+
+  it("releases normally once the container is back and nothing is owed", async () => {
+    const { runtime, world } = stoppable();
+    const { life, clock } = makeLifecycle(runtime);
+    life.containerStopped();
+    world.up = true;
+    life.containerStarted();
+    await settle();
+    expect(life.status().idleDeadline).toBe(clock.now() + 300_000);
+    clock.advance(300_000);
+    await settle();
+    expect(runtime.calls.snapshot).toBe(1);
+    expect(life.status().state).toBe("asleep");
+    life.shutdown();
+  });
+});
+
+describe("BrowserLifecycle review fixes", () => {
+  it("keeps a restore owed after a failed wake while no browser runs", async () => {
+    const runtime = makeRuntime();
+    const { life } = makeLifecycle(runtime, { releaseWhenIdle: false });
+    runtime.script.browserRunning = false;
+    await life.observeRuntime();
+    expect(life.status().state).toBe("asleep");
+    runtime.wake = async () => ({ ok: false, message: "cdp timeout" });
+    await expect(life.wake()).rejects.toThrow("恢复浏览器失败");
+    await life.observeRuntime();
+    const status = life.status();
+    expect(status.state).toBe("error");
+    expect(status.restorePending).toBe(true);
+    expect(status.lastErrorCode).toBe("wake_failed");
+    // The next wake still restores instead of handing out a dead browser.
+    runtime.wake = async () => ({ ok: true, restoredTabs: 1 });
+    runtime.script.browserRunning = true;
+    await life.wake();
+    expect(life.status().restorePending).toBe(false);
+    life.shutdown();
+  });
+
+  it("cancels the stop when a lease arrives during the pre-stop probe", async () => {
+    const runtime = makeRuntime();
+    const { life } = makeLifecycle(runtime);
+    let lease: { release(): void } | null = null;
+    runtime.gates.status = () => {
+      lease ??= life.reserve("turn");
+      return undefined;
+    };
+    const out = await life.sleepNow();
+    expect(out.verdict).toBe("cancelled");
+    expect(runtime.calls.stop).toBe(0);
+    expect(life.status().state).toBe("awake");
+    lease!.release();
+    life.shutdown();
+  });
+
+  it("names a transition held by another process instead of an owed restore", async () => {
+    const runtime = makeRuntime({ transitionBusy: true });
+    const { life } = makeLifecycle(runtime);
+    const out = await life.sleepNow();
+    expect(out.verdict).toBe("blocked");
+    expect(life.status().lastErrorCode).toBe("transition_busy");
+    expect(life.status().lastError).not.toContain("快照");
+    expect(runtime.calls.stop).toBe(0);
+    life.shutdown();
+  });
+
+  it("clears a stale runtime error once a probe proves the browser healthy", async () => {
+    const runtime = makeRuntime();
+    const { life, clock } = makeLifecycle(runtime);
+    const snapshot = runtime.snapshot;
+    runtime.snapshot = async () => {
+      throw new Error("exec failed");
+    };
+    clock.advance(300_000);
+    await settle();
+    expect(life.status().lastErrorCode).toBe("runtime_error");
+    life.touchViewer("w1", "s1", 1);
+    expect(life.status().state).toBe("awake");
+    runtime.snapshot = snapshot;
+    await life.observeRuntime();
+    expect(life.status().lastErrorCode).toBeNull();
+    expect(life.status().lastError).toBeNull();
+    expect(life.status().state).toBe("awake");
+    life.shutdown();
+  });
+
+  it("holds a wake and a release back while an exclusive section runs", async () => {
+    const runtime = makeRuntime();
+    const { life, clock } = makeLifecycle(runtime);
+    clock.advance(300_000);
+    await settle();
+    expect(life.status().state).toBe("asleep");
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const section = life.runExclusive(() => gate);
+    await settle();
+    const woke = life.wake();
+    await settle();
+    expect(runtime.calls.wake).toBe(0);
+    release();
+    await section;
+    await woke;
+    expect(runtime.calls.wake).toBe(1);
+    // And an exclusive section waits for a release in flight.
+    let releaseSnapshot!: () => void;
+    runtime.gates.snapshot = new Promise<void>((resolve) => {
+      releaseSnapshot = resolve;
+    });
+    const slept = life.sleepNow();
+    await settle();
+    let ran = false;
+    const after = life.runExclusive(() => {
+      ran = true;
+    });
+    await settle();
+    expect(ran).toBe(false);
+    releaseSnapshot();
+    await slept;
+    await after;
+    expect(ran).toBe(true);
+    life.shutdown();
+  });
+});

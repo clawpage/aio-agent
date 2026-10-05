@@ -215,6 +215,21 @@ export class BrowserService {
     await this.#lifecycle.wake();
   }
 
+  /** The sandbox container stopped (or was found stopped): every browser timer goes off. */
+  containerStopped(): void {
+    this.#lifecycle.containerStopped();
+  }
+
+  /** The sandbox container is up again: reconcile before any release is considered. */
+  containerStarted(): void {
+    this.#lifecycle.containerStarted();
+  }
+
+  /** Run `fn` with no wake/restore or release in flight, and none starting until it ends. */
+  async runExclusive<T>(fn: () => Promise<T> | T): Promise<T> {
+    return await this.#lifecycle.runExclusive(fn);
+  }
+
   /** Run one sleep cycle now (used by tests and a manual "release now" action). */
   async sleepNow() {
     return await this.#lifecycle.sleepNow();

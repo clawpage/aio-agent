@@ -61,7 +61,11 @@ export class SandboxIdle {
     this.#cpuBusyPercent = opts.cpuBusyPercent ?? 5;
     this.#now = opts.now ?? Date.now;
     this.#lastActive = this.#now();
-    if (opts.parked) this.#state = "parked";
+    if (opts.parked) {
+      this.#state = "parked";
+      // Nothing can be probed or released in a stopped container: the browser's timers stay off.
+      if (this.#ctx.cfg.browser.enabled) this.#ctx.browser.containerStopped();
+    }
     if (opts.intervalMs) {
       this.#timer = setInterval(() => void this.tick(), opts.intervalMs);
       this.#timer.unref?.();
@@ -133,6 +137,8 @@ export class SandboxIdle {
         // Running again either way: a failed start is the recovery loop's to retry.
         this.#state = "running";
         this.#lastActive = this.#now();
+        // The browser reconciles with what the container holds before any release.
+        if (this.#ctx.cfg.browser.enabled) this.#ctx.browser.containerStarted();
       }
       if (this.#ctx.sandboxSetupError) throw new Error("沙箱启动失败，请稍后重试");
     })().finally(() => {
@@ -236,6 +242,7 @@ export class SandboxIdle {
       if (after.running) throw new Error("container still running after stop");
       ctx.sandboxSurfaces = null;
       this.#state = "parked";
+      if (ctx.cfg.browser.enabled) ctx.browser.containerStopped();
       ctx.log.info("sandbox stopped after idle", { idleSeconds: Math.round((this.#now() - this.#lastActive) / 1000) });
     } catch (err) {
       this.#state = "running";

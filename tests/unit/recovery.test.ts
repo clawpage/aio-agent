@@ -160,7 +160,8 @@ describe("image browser clients", () => {
     ctx.cfg = { sandbox: { autostart: true }, browser: { enabled: true, releaseWhenIdle: false } };
     ctx.container.dropImageCdpClients = async () => (drops++, ["python-server"]);
     ctx.agent.status = async () => ({ activeTurns, queuedTurns });
-    ctx.browser = { observe: async () => undefined, wake: async () => undefined, status: () => ({ state: browserState, restorePending: false }) };
+    ctx.browser = { observe: async () => undefined, wake: async () => undefined, status: () => ({ state: browserState, restorePending: false }),
+      runExclusive: async (fn: () => Promise<unknown>) => await fn() };
     const recovery = startRuntimeRecovery(ctx as unknown as AppContext, 60_000);
     await recovery.tick();
     expect(drops).toBe(1);
@@ -173,6 +174,31 @@ describe("image browser clients", () => {
     browserState = "restoring";
     await recovery.tick();
     expect(drops).toBe(1);
+    recovery.stop();
+  });
+
+  it("are disconnected with no browser wake or release running, reading the state inside", async () => {
+    const order: string[] = [];
+    const ctx = makeCtx({ ready: true, running: true, codexReady: true }, { ensureRunning: 0, ensureSession: 0 }) as unknown as Record<string, any>;
+    ctx.cfg = { sandbox: { autostart: true }, browser: { enabled: true, releaseWhenIdle: true } };
+    ctx.container.dropImageCdpClients = async () => (order.push("drop"), []);
+    ctx.agent.status = async () => ({ activeTurns: [], queuedTurns: 0 });
+    ctx.browser = {
+      observe: async () => undefined,
+      wake: async () => undefined,
+      status: () => (order.push("status"), { state: "awake", restorePending: false }),
+      runExclusive: async (fn: () => Promise<unknown>) => {
+        order.push("enter");
+        try {
+          return await fn();
+        } finally {
+          order.push("leave");
+        }
+      },
+    };
+    const recovery = startRuntimeRecovery(ctx as unknown as AppContext, 60_000);
+    await recovery.tick();
+    expect(order.slice(order.indexOf("enter"))).toEqual(["enter", "status", "drop", "leave"]);
     recovery.stop();
   });
 });
