@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 import { SandboxContainer } from "../../src/control/sandbox/container.js";
-import { CODEX_CONFIG_TOML, DOCUMENT_SKILL_DIR, DOCUMENT_SKILL_MD, SHARE_CLI_PY, SHARE_SKILL_MD, WORKSPACE_AGENTS_BEGIN, WORKSPACE_AGENTS_END, WORKSPACE_AGENTS_MD, refreshWorkspaceAgents } from "../../src/control/sandbox/seed.js";
+import { CODEX_CONFIG_TOML, DOCUMENT_SKILL_DIR, DOCUMENT_SKILL_MD, MAIL_BINARIES, MAIL_INSTALL_SH, MAIL_RO_SH, MAIL_SETUP_PY, MAIL_SKILL_MD, SHARE_CLI_PY, SHARE_SKILL_MD, WORKSPACE_AGENTS_BEGIN, WORKSPACE_AGENTS_END, WORKSPACE_AGENTS_MD, refreshWorkspaceAgents } from "../../src/control/sandbox/seed.js";
 import { Logger } from "../../src/common/logger.js";
 import { testConfig, testNode } from "../helpers/harness.js";
 
@@ -150,6 +150,49 @@ describe("sandbox workspace seed", () => {
     const config = calls.find((c) => c.path.endsWith("/tools/aio-share/config.json"));
     expect(JSON.parse(config!.content)).toEqual(share);
     expect(execCalls).toContainEqual(["chmod", "600", config!.path]);
+  });
+
+  it("gives every sandbox the mail skill, its scripts and the pinned himalaya/ortie on PATH", async () => {
+    const cfg = testConfig("/tmp/pa-mail-seed-test", 1);
+    const container = new SandboxContainer(cfg, new Logger("error", undefined, false), testNode());
+    vi.spyOn(container, "enforceCodexIsolation").mockResolvedValue();
+    const calls: Array<{ path: string; content: string }> = [];
+    container.writeFileInSandbox = (async (filePath: string, content: string) => {
+      calls.push({ path: filePath, content });
+    }) as typeof container.writeFileInSandbox;
+    const execs: Array<{ argv: string[]; user?: string }> = [];
+    container.execInSandbox = (async (argv: string[], opts?: { user?: string }) => (execs.push({ argv, user: opts?.user }), { code: 0, stdout: "", stderr: "" })) as typeof container.execInSandbox;
+    await container.seedWorkspace();
+
+    const toolDir = `${cfg.sandbox.containerCodexHome}/tools/himalaya-email`;
+    const skills = calls.filter((c) => c.path.endsWith("/skills/himalaya-email/SKILL.md"));
+    expect(skills.map((c) => c.path).sort()).toEqual([`${cfg.claudeCode.configDir}/skills/himalaya-email/SKILL.md`, `${cfg.sandbox.containerCodexHome}/skills/himalaya-email/SKILL.md`].sort());
+    for (const c of skills) expect(c.content).toBe(MAIL_SKILL_MD);
+    expect(calls.find((c) => c.path === `${toolDir}/mail-ro`)?.content).toBe(MAIL_RO_SH);
+    expect(calls.find((c) => c.path === `${toolDir}/setup_accounts.py`)?.content).toBe(MAIL_SETUP_PY);
+    // Installed as the sandbox user into the volume, then linked onto PATH as root.
+    expect(execs).toContainEqual({ argv: ["sh", "-c", MAIL_INSTALL_SH, "mail-install", toolDir], user: undefined });
+    const link = execs.find((e) => e.user === "root" && e.argv.join(" ").includes("/usr/local/bin/himalaya"));
+    expect(link?.argv[2]).toBe(`ln -sfn ${toolDir}/bin/himalaya /usr/local/bin/himalaya && ln -sfn ${toolDir}/bin/ortie /usr/local/bin/ortie`);
+
+    // A failed download degrades the mail skill only, never the sandbox.
+    container.execInSandbox = (async (argv: string[]) => ({ code: argv[0] === "sh" && argv[3] === "mail-install" ? 1 : 0, stdout: "", stderr: "curl: (6)" })) as typeof container.execInSandbox;
+    await expect(container.seedWorkspace()).resolves.toBeUndefined();
+  });
+
+  it("pins each mail binary by version and checksum and keeps OAuth app values out of the repository", () => {
+    for (const b of MAIL_BINARIES) {
+      expect(MAIL_INSTALL_SH).toContain(`/releases/download/v${b.version}/${b.name}.$arch-linux.tgz`);
+      for (const sha of Object.values(b.sha256)) expect(MAIL_INSTALL_SH).toContain(sha);
+    }
+    expect(MAIL_INSTALL_SH).toContain("sha256sum -c");
+    // Deployment configuration, read from oauth-clients.json at setup time.
+    expect(MAIL_SETUP_PY).toContain("oauth-clients.json");
+    expect(MAIL_SETUP_PY).not.toMatch(/apps\.googleusercontent\.com|client-secret\.raw = "/);
+    // Sending is allowed only after the user confirms a preview.
+    expect(MAIL_SKILL_MD).toContain("发送前必须确认");
+    expect(MAIL_SKILL_MD).toContain("--send");
+    expect(MAIL_RO_SH).toContain("不是只读命令，已拒绝");
   });
 
   it("does not fail the whole seed when the skill directory cannot be created", async () => {

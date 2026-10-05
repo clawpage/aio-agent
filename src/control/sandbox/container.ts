@@ -16,6 +16,13 @@ import {
   codexRequirementsToml,
   DOCUMENT_SKILL_DIR,
   DOCUMENT_SKILL_MD,
+  MAIL_BINARIES,
+  MAIL_INSTALL_SH,
+  MAIL_RO_SH,
+  MAIL_SETUP_PY,
+  MAIL_SKILL_DIR,
+  MAIL_SKILL_MD,
+  MAIL_TOOL_DIR,
   SHARE_CLI_PY,
   SHARE_SKILL_DIR,
   SHARE_SKILL_MD,
@@ -269,7 +276,37 @@ export class SandboxContainer {
       for (const dir of skillDirs) await this.writeFileInSandbox(`${dir}/SKILL.md`, DOCUMENT_SKILL_MD);
     }
     await this.seedShare();
+    await this.seedMail();
     await this.enforceCodexIsolation();
+  }
+
+  /**
+   * The mail skill for both executors, its scripts, and the pinned `himalaya`
+   * and `ortie` binaries. The binaries are installed into the persistent tool
+   * directory (downloaded once, checked against the pinned sha256) and linked
+   * into /usr/local/bin, which a recreated container loses, so the link is
+   * redone on every start. Like the other skills, a failure is logged and never
+   * blocks the sandbox.
+   */
+  async seedMail(): Promise<void> {
+    const s = this.#cfg.sandbox;
+    const toolDir = `${s.containerCodexHome}/${MAIL_TOOL_DIR}`;
+    const skillDirs = [`${s.containerCodexHome}/${MAIL_SKILL_DIR}`, `${this.#cfg.claudeCode.configDir}/${MAIL_SKILL_DIR}`];
+    try {
+      const mkdir = await this.execInSandbox(["mkdir", "-p", toolDir, ...skillDirs], { timeoutMs: 15_000 });
+      if (mkdir.code !== 0) throw new Error((mkdir.stderr || mkdir.stdout).trim().slice(0, 200));
+      await this.writeFileInSandbox(`${toolDir}/mail-ro`, MAIL_RO_SH);
+      await this.writeFileInSandbox(`${toolDir}/setup_accounts.py`, MAIL_SETUP_PY);
+      await this.execInSandbox(["chmod", "755", `${toolDir}/mail-ro`, `${toolDir}/setup_accounts.py`], { timeoutMs: 15_000 });
+      for (const dir of skillDirs) await this.writeFileInSandbox(`${dir}/SKILL.md`, MAIL_SKILL_MD);
+      const install = await this.execInSandbox(["sh", "-c", MAIL_INSTALL_SH, "mail-install", toolDir], { timeoutMs: 600_000 });
+      if (install.code !== 0) throw new Error(`install: ${(install.stderr || install.stdout).trim().slice(0, 200)}`);
+      const links = MAIL_BINARIES.map((b) => `ln -sfn ${toolDir}/bin/${b.name} /usr/local/bin/${b.name}`).join(" && ");
+      const link = await this.execInSandbox(["sh", "-c", links], { user: "root", timeoutMs: 15_000 });
+      if (link.code !== 0) throw new Error(`link: ${(link.stderr || link.stdout).trim().slice(0, 200)}`);
+    } catch (err) {
+      this.#log.warn("could not seed the sandbox mail skill", { error: String(err).slice(0, 200) });
+    }
   }
 
   /**

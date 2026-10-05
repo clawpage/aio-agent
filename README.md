@@ -289,6 +289,21 @@ owner 可以把宿主机上的一个知识库 MCP 服务（streamable HTTP）接
   `Content-Security-Policy: sandbox allow-scripts …`（无 `allow-same-origin`），页面运行在不透明来源里，
   读不到工作区会话、调不了工作区接口，也用不了 cookie / localStorage。另带 `nosniff`、`no-referrer`、`noindex`，不设置任何 cookie。
 
+## 邮件（Gmail / Outlook）
+
+每个账号的沙箱都内置 `himalaya-email` skill（Codex 与 Claude Code 都能用），命令是 `himalaya`：
+
+- **工具**：`himalaya` 与取 OAuth 令牌的 `ortie`，都是固定版本、按架构核对 sha256 的静态构建（版本与校验和在
+  `src/control/sandbox/seed.ts` 的 `MAIL_BINARIES`）。每次沙箱启动时缺了或版本不对才从 GitHub release 下载，装进
+  持久卷 `~/.codex/tools/himalaya-email/bin/`，再链接到 `/usr/local/bin`（容器重建后自动重新链接）。下载失败只记日志，
+  不影响沙箱启动。
+- **默认只读，发送前确认**：查看类命令走 `~/.codex/tools/himalaya-email/mail-ro`（只放行查看命令、不标已读）；
+  发信、回复、转发可以做，但智能体必须先给出预览（收件人、主题、正文、附件），用户本次明确确认后才加 `--send` 发出。
+  删除、移动、改标记同样先确认。授权范围是完整邮箱权限，这些约束只靠 skill 与包装脚本。
+- **OAuth 应用不进仓库**：`setup_accounts.py` 从同目录的 `oauth-clients.json`
+  （`{"google":{"client_id","client_secret"},"microsoft":{"client_id"}}`）读取 OAuth 应用；文件不存在时提示需要管理员配置，
+  不会写出半成品配置。账号令牌在沙箱内 `~/.local/share/mail-oauth/`（0600）。
+
 ## 浏览器内存生命周期（空闲释放与按需恢复）
 
 > **owner 常驻，成员空闲释放**：每个账号只有一个浏览器。owner 的默认一直运行，登录状态（包括只在本次运行有效的会话 cookie）
