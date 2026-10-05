@@ -604,6 +604,14 @@ export function createApiRouter(context: AppContext): Router {
     const id = param(req, "id");
     return context.tasks.belongsTo(id, ctxOf(req).session!.ownerId) ? context.tasks.browserKey(id) : null;
   };
+  // One of the account's tasks, for a console address that names it (`/u/<name>/tasks/<id>`).
+  router.get("/tasks/:id", requireKind("primary"), requireSession, (req, res) => {
+    const id = param(req, "id");
+    const row = context.tasks.belongsTo(id, ctxOf(req).session!.ownerId) ? context.tasks.get(id) : null;
+    if (!row) { res.status(404).json({ error: "not_found" }); return; }
+    res.setHeader("Cache-Control", "no-store");
+    res.json({ task: context.tasks.view(row) });
+  });
   router.get("/tasks/:id/browser", requireKind("primary"), requireSession, asyncHandler(async (req, res) => {
     const key = taskBrowserKey(req);
     if (!key) { res.status(404).json({ error: "not_found" }); return; }

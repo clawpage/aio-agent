@@ -157,3 +157,15 @@ it("gives the signed-in person an overview of every open page, a preview of each
   expect((await front("0000000000000000", { "x-csrf-token": csrf })).status).toBe(404);
   expect(calls).toEqual(expect.arrayContaining(["overview", "overview-shot:A1B2C3D4E5F60718", "front:A1B2C3D4E5F60718"]));
 });
+
+it("gives one of the account's tasks by id, for a console address that names it", async () => {
+  const { cookie, csrf } = await login(h);
+  const headers = { cookie, "x-csrf-token": csrf, "content-type": "application/json" };
+  const task = ((await (await h.request("/api/tasks", { method: "POST", headers, body: JSON.stringify({ text: "按地址打开的任务", clientMessageId: "by-id" }) })).json()) as { task: { id: string } }).task;
+  expect((await h.request(`/api/tasks/${task.id}`)).status).toBe(401);
+  const res = await h.request(`/api/tasks/${task.id}`, { headers: { cookie } });
+  expect(res.status).toBe(200);
+  expect(res.headers.get("cache-control")).toBe("no-store");
+  expect(((await res.json()) as { task: { id: string; text: string } }).task).toMatchObject({ id: task.id, text: "按地址打开的任务" });
+  expect((await h.request("/api/tasks/task_unknown", { headers: { cookie } })).status).toBe(404);
+});

@@ -121,6 +121,7 @@ export const api = {
   submitTask: (body: { text: string; clientMessageId: string; attachments: Attachment[]; relatedTaskId: string | null }) => request<{ task: import("./types").Task; duplicate: boolean }>("/api/tasks", { method: "POST", body }),
   stopTask: (id: string) => request<{ok:boolean}>(`/api/tasks/${encodeURIComponent(id)}/stop`, {method:"POST",body:{}}),
   retryTaskPlanning: (id: string) => request<{ok:boolean}>(`/api/tasks/${encodeURIComponent(id)}/retry-planning`, {method:"POST",body:{}}),
+  task: (id: string) => request<{ task: import("./types").Task }>(`/api/tasks/${encodeURIComponent(id)}`, { cache: "no-store" }),
   taskBrowser: (id: string) => request<{ tabs: import("./types").TaskTab[] }>(`/api/tasks/${encodeURIComponent(id)}/browser`),
   taskBrowserControl: (id: string, tab: string, action: "take" | "release") => request<{ tab: import("./types").TaskTab }>(`/api/tasks/${encodeURIComponent(id)}/browser/control`, { method: "POST", body: { tab, action } }),
   taskBrowserPointer: (id: string, tab: string, input: PointerInput) =>
