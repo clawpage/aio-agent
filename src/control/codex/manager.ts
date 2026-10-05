@@ -1,4 +1,5 @@
 import { isMember, MEMBER_EFFORT, MEMBER_GPT_MODEL, MEMBER_MODEL } from "../auth/policy.js";
+import { JsonRpcTimeoutError } from "./jsonrpc.js";
 import {readSoul} from '../soul.js';
 import { EventEmitter } from "node:events";
 import type { Db } from "../db.js";
@@ -158,6 +159,12 @@ const DELTA_METHODS = new Set([
 ]);
 
 const APPROVAL_TIMEOUT_MS = 15 * 60_000;
+/**
+ * A turn asked to stop that never reports back gives up its slot after this
+ * long, as `unknown`. Only after a stop: a running turn may legitimately wait
+ * much longer (for a person to sign in, say), so there is no overall timeout.
+ */
+const STOP_GRACE_MS = 2 * 60_000;
 
 /**
  * The model every conversation defaulted to before this deployment. Conversations
@@ -299,6 +306,9 @@ export class AgentManager {
   #deltaBuffers = new Map<string, { conversationId: string; turnId: string | null; itemId: string; kind: string; text: string }>();
   #deltaTimer: NodeJS.Timeout | null = null;
   #completionWaiters = new Map<string, () => void>();
+  /** Codex turn id -> the timer that releases a stopped turn which never completes. */
+  #stopTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  #stopGraceMs: number;
   #completedTurns = new Map<string, { status: string }>();
   /** Failure reason a harness reported on `turn/completed`, keyed by its turn id. */
   #turnErrors = new Map<string, string>();
@@ -336,7 +346,10 @@ export class AgentManager {
     claudeCode?: ClaudeCodeHarness | null;
     /** Optional tab server; absent keeps the legacy single-page browser tools. */
     tabs?: TabServerLike | null;
+    /** How long a stopped turn may take to report back (tests shorten it). */
+    stopGraceMs?: number;
   }) {
+    this.#stopGraceMs = deps.stopGraceMs ?? STOP_GRACE_MS;
     this.#cfg = deps.cfg;
     this.#db = deps.db;
     this.#log = deps.log.child("agent");
@@ -516,6 +529,8 @@ export class AgentManager {
   // ---------------------------------------------------------------- events
 
   #appendEvent(conversationId: string, turnId: string | null, type: string, payload: unknown): AgentEvent {
+    // AGENTS.md rule 7: buffered output goes in first, so no event lands ahead of text produced before it.
+    if (type !== "stream.delta") this.#flushDeltas();
     const now = Date.now();
     const res = this.#db
       .prepare("INSERT INTO events (conversation_id, turn_id, type, payload, created_at) VALUES (?, ?, ?, ?, ?)")
@@ -1078,8 +1093,9 @@ export class AgentManager {
       });
     } catch (err) {
       // The turn may already have been accepted by Codex before the transport
-      // failed; treat that as unknown rather than a clean failure.
-      if (this.#codexGeneration !== generation || !this.#codex.ready) {
+      // failed, or before the request timed out: unknown, not a clean failure.
+      // Only a definite rejection (an error answer) means it never started.
+      if (this.#codexGeneration !== generation || !this.#codex.ready || err instanceof JsonRpcTimeoutError) {
         throw new TurnOutcomeUnknownError("启动轮次时与沙箱 Codex 的连接中断，执行结果未知");
       }
       throw err;
@@ -1094,6 +1110,7 @@ export class AgentManager {
       | { cancel_requested: number }
       | undefined;
     if (cancelRow?.cancel_requested) {
+      this.#armStopGrace(codexTurnId);
       try {
         await this.#codex.interrupt(threadId, codexTurnId);
       } catch (err) {
@@ -1104,6 +1121,8 @@ export class AgentManager {
     const status = await this.#waitForTurn(codexTurnId, generation);
     const reason = this.#turnErrors.get(codexTurnId);
     this.#turnErrors.delete(codexTurnId);
+    clearTimeout(this.#stopTimers.get(codexTurnId));
+    this.#stopTimers.delete(codexTurnId);
     this.#flushDeltas();
     if (status === "completed") {
       this.#db.prepare("UPDATE turns SET status = 'completed', completed_at = ? WHERE id = ?").run(Date.now(), turn.id);
@@ -1112,14 +1131,14 @@ export class AgentManager {
       this.#db.prepare("UPDATE turns SET status = 'interrupted', completed_at = ? WHERE id = ?").run(Date.now(), turn.id);
       this.#appendEvent(conversation.id, turn.id, "turn.finished", { turnId: turn.id, status: "interrupted" });
     } else if (status === "unknown") {
+      const cause = reason ?? "与沙箱 Codex 的连接中断";
       this.#db
         .prepare("UPDATE turns SET status = 'unknown', error = ?, completed_at = ? WHERE id = ?")
-        .run("与沙箱 Codex 的连接中断，本次执行结果未知", Date.now(), turn.id);
+        .run(`${cause}，本次执行结果未知`, Date.now(), turn.id);
       this.#appendEvent(conversation.id, turn.id, "turn.finished", {
         turnId: turn.id,
         status: "unknown",
-        message:
-          "与沙箱 Codex 的连接中断，本次执行结果未知，可能已产生操作。请先核对沙箱内文件/进程状态，系统不会自动重放该轮次。",
+        message: `${cause}，本次执行结果未知，可能已产生操作。请先核对沙箱内文件/进程状态，系统不会自动重放该轮次。`,
       });
     } else {
       this.#failTurn(turn, reason ? `执行失败：${reason}` : `Codex 轮次结束状态：${status}`);
@@ -1189,6 +1208,22 @@ export class AgentManager {
         reason: "codex_disconnected",
       });
     }
+  }
+
+  /** Release a stopped turn's waiter as `unknown` if it has not completed within the grace period. */
+  #armStopGrace(codexTurnId: string): void {
+    if (this.#stopTimers.has(codexTurnId)) return;
+    const timer = setTimeout(() => {
+      this.#stopTimers.delete(codexTurnId);
+      const waiter = this.#completionWaiters.get(codexTurnId);
+      if (!waiter) return;
+      this.#completionWaiters.delete(codexTurnId);
+      this.#completedTurns.set(codexTurnId, { status: "unknown" });
+      this.#turnErrors.set(codexTurnId, `停止请求发出后 ${Math.round(this.#stopGraceMs / 60_000)} 分钟仍未结束`);
+      waiter();
+    }, this.#stopGraceMs);
+    timer.unref?.();
+    this.#stopTimers.set(codexTurnId, timer);
   }
 
   #markTurnUnknown(turn: TurnRow, message: string): void {
@@ -1280,7 +1315,15 @@ export class AgentManager {
 
     const conversation = this.getConversation(conversationId);
     if (running.codex_turn_id && conversation?.codex_thread_id) {
-      await this.#codex.interrupt(conversation.codex_thread_id, running.codex_turn_id);
+      // Armed before the request: a stop that is lost or never answered still frees the slot.
+      this.#armStopGrace(running.codex_turn_id);
+      try {
+        await this.#codex.interrupt(conversation.codex_thread_id, running.codex_turn_id);
+      } catch (err) {
+        this.#log.warn("interrupt not delivered", { error: String(err) });
+        this.#appendEvent(conversationId, running.id, "turn.interrupt_requested", { turnId: running.id, stage: "running", delivered: false });
+        return { ok: true, status: "running", message: "停止请求暂未送达沙箱；如果两分钟内仍未结束，会标为结果待核对" };
+      }
       this.#appendEvent(conversationId, running.id, "turn.interrupt_requested", { turnId: running.id, stage: "running" });
       return { ok: true, status: "running", message: "已请求停止当前执行" };
     }
