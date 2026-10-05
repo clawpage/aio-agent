@@ -68,6 +68,17 @@ it('blames the directory owner only for a real ownership violation, not a stoppe
  expect(check).not.toMatch(/sys\.exit\(1\)/);
  expect(check.match(/sys\.exit\(3\)/g)).toHaveLength(4);
 });
+it('bounds the helper stop and the whole wake inside their exec timeouts',async()=>{
+ const f=scripted(argv=>isHelper(argv)?{code:0,stdout:'{"ok":true}',stderr:''}:undefined);
+ await f.runtime.stop({timeoutMs:30_000,sourcePid:5,sourceStarttime:9});
+ await f.runtime.wake({timeoutMs:90_000});
+ await f.runtime.stop({timeoutMs:6_000});
+ const helper=f.execs.filter(isHelper);
+ const flag=(argv:string[],name:string)=>argv[argv.indexOf(name)+1];
+ expect(flag(helper[0]!,'--timeout-s')).toBe('25');
+ expect(flag(helper[1]!,'--deadline-s')).toBe('80');
+ expect(flag(helper[2]!,'--timeout-s')).toBe('5');
+});
 it('provisions the helper again when a recreated container lost it',async()=>{
  let lost=false;
  const f=scripted(argv=>{

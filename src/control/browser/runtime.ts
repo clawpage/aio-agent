@@ -292,16 +292,23 @@ p.mkdir(parents=True, exist_ok=True, mode=0o755)
     // ownership against the same process rather than trusting the pid file alone.
     if (typeof opts.sourcePid === "number") argv.push("--source-pid", String(opts.sourcePid));
     if (typeof opts.sourceStarttime === "number") argv.push("--source-starttime", String(opts.sourceStarttime));
-    const res = await this.#run(argv, opts.timeoutMs ?? this.#cfg.browser.stopTimeoutMs);
+    const timeoutMs = opts.timeoutMs ?? this.#cfg.browser.stopTimeoutMs;
+    // The helper's whole stop must end before the exec is abandoned, or it keeps going unseen.
+    argv.push("--timeout-s", String(Math.max(5, Math.floor(timeoutMs / 1000) - 5)));
+    const res = await this.#run(argv, timeoutMs);
     return { ok: res.ok, message: typeof res.message === "string" ? redact(res.message) : null,
       reason: typeof res.reason === "string" ? res.reason : null };
   }
 
   async wake(opts: { timeoutMs?: number } = {}): Promise<WakeOutcome> {
     const timeoutMs = opts.timeoutMs ?? this.#cfg.browser.wakeTimeoutMs;
-    // The helper's own wait budget must fit inside the exec timeout.
+    // The helper's own budget - the wait and the restore after it - must fit inside the exec timeout.
     const res = await this.#run(
-      ["wake", ...this.#baseArgs(), "--wait-ms", String(Math.max(1_000, timeoutMs - 5_000))],
+      [
+        "wake", ...this.#baseArgs(),
+        "--wait-ms", String(Math.max(1_000, timeoutMs - 5_000)),
+        "--deadline-s", String(Math.max(5, Math.floor((timeoutMs - 10_000) / 1000))),
+      ],
       timeoutMs,
     );
     return {
