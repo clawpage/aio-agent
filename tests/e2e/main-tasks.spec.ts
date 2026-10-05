@@ -136,6 +136,36 @@ test('task list can load older pages and keeps them after live refresh',async({p
     await page.getByRole('button',{name:'加载更早的任务',exact:true}).click();await expect(page.getByRole('button',{name:'打开任务：任务 99',exact:true})).toBeVisible();
     await expect(page.locator('.task-list-item')).toHaveCount(2);await expect(page.locator('.task-list-page').getByRole('button',{name:'加载更早的任务',exact:true})).toHaveCount(0);
 });
+test('task list groups by turn, running and date, and filters by status and text',async({page},info)=>{
+    const day=86_400_000,noon=new Date();noon.setHours(12,0,0,0);
+    const done=(n:number,at:number,extra:Partial<Task>={})=>({...task(n,'completed'),result:'Done',createdAt:at-60_000,completedAt:at,...extra});
+    await setup(page,[
+      {...task(1,'needs_input'),clarification:'请补充出行日期',createdAt:noon.getTime()-3*day},
+      {...task(2),createdAt:noon.getTime()-day},
+      done(3,noon.getTime(),{title:'订东京机票'}),
+      {...done(4,noon.getTime()-day),status:'failed',error:'Failed'},
+      done(5,noon.getTime()-40*day,{schedule:{id:'s1',title:'每日账单检查',rule:'每天 9:00'}}),
+    ]);
+    if(info.project.name.startsWith('mobile'))await page.getByRole('button',{name:'打开导航'}).click();await page.locator('.sidebar').getByRole('button',{name:'任务列表',exact:true}).click();
+    const list=page.locator('.task-list-page'),heads=list.locator('.task-group-head');
+    await expect(heads).toHaveCount(5);
+    expect(await list.locator('.task-group').evaluateAll(els=>els.map(e=>e.getAttribute('aria-label')))).toEqual(['轮到你','进行中','今天','昨天',expect.stringMatching(/月$/)]);
+    await expect(list.locator('.task-group[data-group="attention"] [data-task-id="task-1"]')).toBeVisible();
+    await expect(list.locator('[data-task-id="task-5"] .task-tag')).toHaveText('定时');
+    const filter=(name:string)=>page.getByRole('group',{name:'按状态筛选'}).getByRole('button',{name:new RegExp(`^${name}`)});
+    await expect(filter('轮到你')).toContainText('1');
+    await filter('已完成').click();await expect(filter('已完成')).toHaveAttribute('aria-pressed','true');
+    await expect(list.locator('.task-list-item')).toHaveCount(2);await expect(heads.first()).toHaveText(/今天/);
+    await filter('失败·停止').click();await expect(list.locator('.task-list-item')).toHaveCount(1);await expect(list.locator('[data-task-id="task-4"]')).toBeVisible();
+    await filter('全部').click();
+    await page.getByRole('searchbox',{name:'搜索任务'}).fill('账单');await expect(list.locator('.task-list-item')).toHaveCount(1);await expect(list.locator('[data-task-id="task-5"]')).toBeVisible();
+    await page.getByRole('searchbox',{name:'搜索任务'}).fill('不存在的任务');await expect(page.getByRole('heading',{name:'没有符合条件的任务'})).toBeVisible();
+    if(info.project.name.startsWith('mobile'))await page.setViewportSize({width:360,height:844});
+    expect(await page.evaluate(()=>document.documentElement.scrollWidth-innerWidth)).toBeLessThanOrEqual(1);
+    await page.getByRole('button',{name:'清除筛选'}).click();await expect(list.locator('.task-list-item')).toHaveCount(5);
+    await expect(page.getByRole('searchbox',{name:'搜索任务'})).toHaveValue('');
+    await page.screenshot({path:info.outputPath('task-list-groups.png')});
+});
 test("one inbox accepts parallel messages, folds progress, reports completion order and survives reload", async ({ page }, info) => {
     const { rows, bodies } = await setup(page);
     await expect(page.locator(".chat-head").getByRole("button", { name: "工作区", exact: true })).toHaveCount(0);
