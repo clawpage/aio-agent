@@ -30,4 +30,22 @@ describe("schedules API", () => {
     expect((await h.request("/api/schedules/sched-own/cancel", { method: "POST", headers, body: "{}" })).status).toBe(200);
     expect(h.ctx.db.prepare("SELECT id FROM schedules WHERE builtin IS NULL ORDER BY id").all()).toEqual([{ id: "sched-other" }]);
   });
+
+  it("edits one of the account's schedules: name, what it does, its rule; never another's or the built-in feed", async () => {
+    insert("sched-edit", "owner_1");
+    const { cookie, csrf } = await login(h);
+    const patch = (id: string, body: unknown, headers: Record<string, string> = { "x-csrf-token": csrf }) => h.request(`/api/schedules/${id}`, { method: "PATCH", headers: { cookie, "content-type": "application/json", ...headers }, body: JSON.stringify(body) });
+    expect((await h.request("/api/schedules/sched-edit", { method: "PATCH", body: "{}" })).status).toBe(401);
+    expect((await patch("sched-edit", { title: "x" }, {})).status).toBe(403);
+    const dates = [5, 12].map((n) => new Date(Date.now() + n * 86400_000).toISOString().slice(0, 10));
+    const edited = await patch("sched-edit", { title: "交材料", instruction: "提醒交材料", schedule: { kind: "dates", dates: [`${dates[0]} 09:00`, `${dates[1]} 14:30`] }, needsBrowser: false });
+    expect(edited.status).toBe(200);
+    expect(await edited.json()).toMatchObject({ message: expect.stringContaining("已更新定时任务「交材料」"), schedule: { id: "sched-edit", title: "交材料", instruction: "提醒交材料", needsBrowser: false, spec: { kind: "dates" }, rule: expect.stringContaining("（共 2 次）") } });
+    const bad = await patch("sched-edit", { schedule: { kind: "daily", times: ["8点"] } });
+    expect(bad.status).toBe(409);
+    expect(await bad.json()).toMatchObject({ error: "schedule_refused", message: expect.stringContaining("times") });
+    expect((await patch("sched-other", { title: "x" })).status).toBe(404);
+    const feed = (h.ctx.db.prepare("SELECT id FROM schedules WHERE owner_id='owner_1' AND builtin='daily_feed'").get() as { id: string }).id;
+    expect((await patch(feed, { title: "改名" })).status).toBe(409);
+  });
 });

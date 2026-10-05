@@ -579,6 +579,13 @@ export function createApiRouter(context: AppContext): Router {
     res.setHeader("Cache-Control", "no-store");
     res.json({ schedules: context.tasks.listSchedules(ctxOf(req).session!.ownerId) });
   }));
+  // Edit a schedule from the page: any of title, instruction, schedule (the whole new rule), needsBrowser.
+  router.patch("/schedules/:id", requireKind("primary"), requireSession, asyncHandler(async (req, res) => {
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const changed = context.tasks.updateScheduleFor(ctxOf(req).session!.ownerId, { id: param(req, "id"), title: body.title, instruction: body.instruction, schedule: body.schedule, needsBrowser: body.needsBrowser });
+    if (changed.ok) { res.json({ message: changed.message, schedule: changed.schedule }); return; }
+    res.status(changed.error === "定时任务不存在" ? 404 : 409).json({ error: "schedule_refused", message: changed.error });
+  }));
   router.post("/schedules/:id/:action", requireKind("primary"), requireSession, asyncHandler(async (req, res) => {
     const action = param(req, "action");
     const userId = ctxOf(req).session!.ownerId;

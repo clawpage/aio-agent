@@ -5,12 +5,16 @@
  * schedules and starts each run.
  */
 
-export type ScheduleKind = "once" | "daily" | "weekly" | "monthly" | "interval";
+export type ScheduleKind = "once" | "daily" | "weekly" | "monthly" | "interval" | "dates";
 
 export interface ScheduleSpec {
   kind: ScheduleKind;
-  /** Local "HH:MM" (all kinds but interval). */
+  /** Local "HH:MM" (once, daily, weekly, monthly); with `times`, the first of them. */
   at?: string;
+  /** Several local "HH:MM" a day, in order (daily, weekly, monthly). */
+  times?: string[];
+  /** Irregular local "YYYY-MM-DD HH:MM" moments, in order (dates). */
+  dates?: string[];
   /** Local "YYYY-MM-DD" (once). */
   date?: string;
   /** 1 = Monday … 7 = Sunday (weekly). */
@@ -29,10 +33,13 @@ export interface ScheduleSpec {
 /** Shorter intervals would mostly burn model time on unchanged answers. */
 export const MIN_INTERVAL_MINUTES = 15;
 export const MAX_ACTIVE_SCHEDULES = 20;
+export const MAX_TIMES_A_DAY = 12;
+export const MAX_DATES = 60;
 
-const KINDS: ScheduleKind[] = ["once", "daily", "weekly", "monthly", "interval"];
+const KINDS: ScheduleKind[] = ["once", "daily", "weekly", "monthly", "interval", "dates"];
 const TIME = /^([01]\d|2[0-3]):([0-5]\d)$/;
 const DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
+const MOMENT = /^(\d{4}-\d{2}-\d{2}) ([01]\d|2[0-3]):([0-5]\d)$/;
 const WEEKDAY_NAMES = ["", "一", "二", "三", "四", "五", "六", "日"];
 
 interface Local { y: number; m: number; d: number; h: number; mi: number; weekday: number }
@@ -68,6 +75,9 @@ function calendar(y: number, m: number, d: number) {
 
 const hm = (at: string) => { const [, h, mi] = TIME.exec(at)!; return [+h!, +mi!] as const; };
 const ymd = (date: string) => { const [, y, m, d] = DATE.exec(date)!; return [+y!, +m!, +d!] as const; };
+/** The times of day a rule runs at. */
+const timesOf = (spec: ScheduleSpec) => spec.times?.length ? spec.times : [spec.at!];
+const momentAt = (moment: string, tz: string) => { const [date, time] = moment.split(" "); return zonedTime(...ymd(date!), ...hm(time!), tz); };
 
 /** The first run strictly after `after`, or null when the rule has none left. */
 export function nextRun(spec: ScheduleSpec, after: number, tz: string): number | null {
@@ -80,22 +90,24 @@ export function nextRun(spec: ScheduleSpec, after: number, tz: string): number |
     const [y, m, d] = ymd(spec.date!);
     const t = zonedTime(y, m, d, ...hm(spec.at!), tz);
     next = t > after ? t : null;
+  } else if (spec.kind === "dates") {
+    next = spec.dates!.map((moment) => momentAt(moment, tz)).filter((t) => t > after).sort((a, b) => a - b)[0] ?? null;
   } else {
-    const [h, mi] = hm(spec.at!);
+    const times = timesOf(spec).map(hm);
+    // The earliest of the day's times still ahead, on the first day that has one.
+    const firstOn = (y: number, m: number, d: number) => times.map(([h, mi]) => zonedTime(y, m, d, h, mi, tz)).filter((t) => t > after).sort((a, b) => a - b)[0] ?? null;
     const today = local(after, tz);
     if (spec.kind === "monthly") {
       for (let i = 0; i < 14 && next === null; i++) {
         const first = calendar(today.y, today.m + i, 1);
         const last = calendar(first.y, first.m + 1, 0).d;
-        const t = zonedTime(first.y, first.m, Math.min(spec.monthDay!, last), h, mi, tz);
-        if (t > after) next = t;
+        next = firstOn(first.y, first.m, Math.min(spec.monthDay!, last));
       }
     } else {
       for (let i = 0; i < 9 && next === null; i++) {
         const day = calendar(today.y, today.m, today.d + i);
         if (spec.kind === "weekly" && !spec.weekdays!.includes(day.weekday)) continue;
-        const t = zonedTime(day.y, day.m, day.d, h, mi, tz);
-        if (t > after) next = t;
+        next = firstOn(day.y, day.m, day.d);
       }
     }
   }
@@ -128,6 +140,17 @@ export function validateSchedule(raw: unknown, now: number, tz: string): { spec:
     if (!Number.isInteger(every) || every < MIN_INTERVAL_MINUTES || every > 31 * 24 * 60) return { error: `schedule.everyMinutes 须是 ${MIN_INTERVAL_MINUTES} 到 44640 之间的整数` };
     spec.everyMinutes = every;
     spec.anchorAt = now;
+  } else if (kind === "dates") {
+    const dates = Array.isArray(r.dates) ? [...new Set(r.dates.map((d) => String(d).trim().replace("T", " ")))].sort() : [];
+    if (!dates.length || dates.length > MAX_DATES) return { error: `schedule.dates 须是 1 到 ${MAX_DATES} 个 "YYYY-MM-DD HH:MM"` };
+    const bad = dates.find((d) => !MOMENT.test(d) || !validDate(d.slice(0, 10)));
+    if (bad) return { error: `schedule.dates 里的「${bad}」不是有效的 "YYYY-MM-DD HH:MM"` };
+    spec.dates = dates;
+  } else if (kind !== "once" && Array.isArray(r.times) && r.times.length) {
+    const times = [...new Set(r.times.map(String))].sort();
+    if (times.length > MAX_TIMES_A_DAY || times.some((t) => !TIME.test(t))) return { error: `schedule.times 须是 1 到 ${MAX_TIMES_A_DAY} 个 HH:MM（24 小时制）` };
+    spec.at = times[0];
+    if (times.length > 1) spec.times = times;
   } else {
     if (typeof r.at !== "string" || !TIME.test(r.at)) return { error: "schedule.at 须是 HH:MM（24 小时制）" };
     spec.at = r.at;
@@ -149,25 +172,30 @@ export function validateSchedule(raw: unknown, now: number, tz: string): { spec:
   if (r.maxRuns != null) {
     const n = Number(r.maxRuns);
     if (!Number.isInteger(n) || n < 1 || n > 1000) return { error: "schedule.maxRuns 须是 1-1000 的整数或 null" };
-    if (kind !== "once") spec.maxRuns = n;
+    if (kind !== "once" && kind !== "dates") spec.maxRuns = n;
   }
   if (r.until != null) {
     if (!validDate(r.until)) return { error: "schedule.until 须是有效的 YYYY-MM-DD 或 null" };
-    if (kind !== "once") spec.until = r.until;
+    if (kind !== "once" && kind !== "dates") spec.until = r.until;
   }
   const next = nextRun(spec, now, tz);
-  if (next === null) return { error: kind === "once" ? "这个时间已经过去了" : "按这个规则已经没有下一次运行（结束日期已过）" };
+  if (next === null) return { error: kind === "once" ? "这个时间已经过去了" : kind === "dates" ? "这些时间都已经过去了" : "按这个规则已经没有下一次运行（结束日期已过）" };
   return { spec, next };
 }
 
-/** The rule in words: "每天 08:00", "每周一、三 09:30", "每 2 小时"… */
+/** The rule in words: "每天 08:00", "每周一、三 09:30", "每 2 小时", "10月8日 09:00、10月15日 14:30（共 2 次）"… */
 export function describeSchedule(spec: ScheduleSpec): string {
   const md = (date: string) => { const [, m, d] = ymd(date); return `${m}月${d}日`; };
+  const at = spec.kind === "once" || spec.kind === "dates" || spec.kind === "interval" ? "" : timesOf(spec).join("、");
   let text: string;
   if (spec.kind === "once") text = `${md(spec.date!)} ${spec.at}（一次）`;
-  else if (spec.kind === "daily") text = `每天 ${spec.at}`;
-  else if (spec.kind === "weekly") text = `每周${spec.weekdays!.map((d) => WEEKDAY_NAMES[d]).join("、")} ${spec.at}`;
-  else if (spec.kind === "monthly") text = `每月 ${spec.monthDay} 日 ${spec.at}`;
+  else if (spec.kind === "dates") {
+    const shown = spec.dates!.slice(0, 3).map((d) => `${md(d.slice(0, 10))} ${d.slice(11)}`).join("、");
+    text = `${shown}${spec.dates!.length > 3 ? " 等" : ""}（共 ${spec.dates!.length} 次）`;
+  }
+  else if (spec.kind === "daily") text = `每天 ${at}`;
+  else if (spec.kind === "weekly") text = `每周${spec.weekdays!.map((d) => WEEKDAY_NAMES[d]).join("、")} ${at}`;
+  else if (spec.kind === "monthly") text = `每月 ${spec.monthDay} 日 ${at}`;
   else text = spec.everyMinutes! % 60 === 0 ? `每 ${spec.everyMinutes! / 60} 小时` : `每 ${spec.everyMinutes} 分钟`;
   if (spec.maxRuns) text += `，共 ${spec.maxRuns} 次`;
   if (spec.until) text += `，到 ${md(spec.until)}为止`;

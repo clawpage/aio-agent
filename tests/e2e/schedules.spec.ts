@@ -77,3 +77,50 @@ test("the schedules page lists rules and pauses, resumes, runs and deletes them"
   if (info.project.name.startsWith("mobile")) await page.setViewportSize({ width: 360, height: 844 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1);
 });
+
+test("a schedule is edited on the page: several times a day, or a few irregular dates", async ({ page }, info) => {
+  await mockConsole(page, { conversations: [] });
+  await page.route("**/api/main*", (r) => r.fulfill({ json: { mode: "tasks", tasks: [], nextBefore: null } }));
+  let item: ReturnType<typeof schedule> & { spec?: unknown; needsBrowser?: boolean } = schedule({ spec: { kind: "daily", at: "08:00" }, needsBrowser: true });
+  const sent: Array<Record<string, unknown>> = [];
+  await page.route("**/api/schedules", (r) => r.fulfill({ json: { schedules: [item] } }));
+  await page.route("**/api/schedules/sched-1", (r) => {
+    const body = r.request().postDataJSON() as Record<string, unknown> & { schedule: { kind: string; times?: string[]; dates?: string[] } };
+    expect(r.request().method()).toBe("PATCH");
+    sent.push(body);
+    if (body.schedule.kind === "dates" && body.schedule.dates!.some((d) => d.startsWith("2020"))) return r.fulfill({ status: 409, json: { error: "schedule_refused", message: "这些时间都已经过去了" } });
+    const rule = body.schedule.kind === "dates" ? "10月8日 09:00、10月15日 14:30（共 2 次）" : `每天 ${body.schedule.times!.join("、")}`;
+    item = { ...item, title: body.title as string, instruction: body.instruction as string, rule, spec: body.schedule, needsBrowser: body.needsBrowser as boolean };
+    return r.fulfill({ json: { message: `已更新定时任务「${item.title}」：${rule}，下次运行 10月3日 周六 07:30。\n\n每次会做：${item.instruction}`, schedule: item } });
+  });
+  await page.goto("/");
+  if (info.project.name.startsWith("mobile")) await page.getByRole("button", { name: "打开导航" }).click();
+  await page.locator(".sidebar").getByRole("button", { name: "定时任务", exact: true }).click();
+  const row = page.locator('[data-schedule-id="sched-1"]');
+  await row.getByRole("button", { name: "修改" }).click();
+  const form = page.getByRole("form", { name: /^修改定时任务：/ });
+  await expect(page.getByRole("form", { name: "修改定时任务：每日天气提醒" })).toBeVisible();
+  await expect(form.getByLabel("运行规则")).toHaveValue("daily");
+  await expect(form.getByLabel("时间（一天多次用逗号隔开）")).toHaveValue("08:00");
+  await form.getByLabel("时间（一天多次用逗号隔开）").fill("07:30，18:00");
+  await form.getByLabel("名称").fill("天气提醒（早晚）");
+  await form.screenshot({ path: info.outputPath("schedule-edit.png") });
+  await form.getByRole("button", { name: "保存" }).click();
+  await expect(page.getByRole("status")).toContainText("已更新定时任务「天气提醒（早晚）」：每天 07:30、18:00");
+  expect(sent[0]).toMatchObject({ title: "天气提醒（早晚）", instruction: "查旧金山今天的天气，提醒是否需要带伞", needsBrowser: true, schedule: { kind: "daily", times: ["07:30", "18:00"], maxRuns: null, until: null } });
+  await expect(row).toContainText("每天 07:30、18:00");
+
+  // Irregular dates: one a line; a refusal is shown and the form stays open.
+  await row.getByRole("button", { name: "修改" }).click();
+  await form.getByLabel("运行规则").selectOption("dates");
+  await form.getByLabel("运行时间（一行一个）").fill("2020-10-08 09:00");
+  await form.getByRole("button", { name: "保存" }).click();
+  await expect(page.getByRole("alert")).toContainText("这些时间都已经过去了");
+  await expect(form).toBeVisible();
+  await form.getByLabel("运行时间（一行一个）").fill("2099-10-08 09:00\n2099-10-15 14:30\n");
+  await form.getByLabel("运行时用浏览器查网页").uncheck();
+  await form.getByRole("button", { name: "保存" }).click();
+  await expect(row).toContainText("10月8日 09:00、10月15日 14:30（共 2 次）");
+  expect(sent.at(-1)).toMatchObject({ needsBrowser: false, schedule: { kind: "dates", dates: ["2099-10-08 09:00", "2099-10-15 14:30"] } });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
+});

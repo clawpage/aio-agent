@@ -522,7 +522,15 @@ export class TaskService {
             if (plan.scheduleAction || (plan.schedule && !plan.schedule.runNow)) {
                 if (this.#closed || this.get(row.id)?.status !== "planning") return;
                 if (this.taskContext(this.get(row.id)!) !== inputContext) return;
-                const answer = plan.scheduleAction ? this.applyScheduleAction(trace.ownerId, plan.scheduleAction.id, plan.scheduleAction.action) : this.createSchedule(row, plan);
+                let answer: string;
+                if (plan.scheduleAction?.action === "update") {
+                    const changed = this.updateScheduleFor(trace.ownerId, { id: plan.scheduleAction.id, title: plan.title, instruction: plan.schedule!.instruction, schedule: plan.schedule!.spec });
+                    answer = changed.ok ? changed.message : `没有修改定时任务：${changed.error}`;
+                } else {
+                    // Cancelling one schedule and setting up another in the same message does both.
+                    const action = plan.scheduleAction?.action;
+                    answer = [action ? this.applyScheduleAction(trace.ownerId, plan.scheduleAction!.id, action) : null, plan.schedule ? this.createSchedule(row, plan) : null].filter(Boolean).join("\n\n");
+                }
                 this.db.prepare("UPDATE tasks SET title=?,plan_json=?,status='completed',result=?,completed_at=? WHERE id=?").run(plan.title, JSON.stringify(plan), answer, Date.now(), row.id);
                 this.agent.renameConversation(row.conversation_id, plan.title);
                 return;
@@ -795,7 +803,7 @@ export class TaskService {
     }
     private planningSchedules(ownerId: string): PlanningSchedule[] {
         return (this.db.prepare("SELECT * FROM schedules WHERE owner_id=? AND status IN ('active','paused') ORDER BY created_at").all(ownerId) as unknown as ScheduleRow[])
-            .map(s => ({ id: s.id, title: s.title, rule: describeSchedule(JSON.parse(s.spec_json) as ScheduleSpec), status: s.status }));
+            .map(s => ({ id: s.id, title: s.title, rule: describeSchedule(JSON.parse(s.spec_json) as ScheduleSpec), status: s.status, instruction: s.instruction.slice(0, 400) }));
     }
     private scheduleLabel(id: string): { id: string; title: string; rule: string; builtin?: string } | null {
         const s = this.scheduleRow(id);
@@ -995,6 +1003,45 @@ export class TaskService {
         if ("refused" in stored) return { ok: false, error: stored.refused };
         return { ok: true, message: this.scheduleCreated(title, instruction, checked.spec, checked.next), schedule: this.viewSchedule(this.scheduleRow(stored.id)!) };
     }
+    /**
+     * Change one of the account's schedules: its name, what each run does, its rule, whether
+     * runs use the browser. A new rule counts its runs (maxRuns) afresh from now, and an ended
+     * schedule with runs ahead starts again within the active cap. The built-in feed is
+     * changed through its own settings instead.
+     */
+    updateScheduleFor(userId: string, input: { id?: unknown; title?: unknown; instruction?: unknown; schedule?: unknown; needsBrowser?: unknown }): { ok: true; message: string; schedule: ReturnType<TaskService["viewSchedule"]> } | { ok: false; error: string } {
+        const s = this.scheduleRow(String(input.id ?? ""));
+        if (!s || s.owner_id !== userId) return { ok: false, error: "定时任务不存在" };
+        if (s.builtin) return { ok: false, error: `「${s.title}」是内置的每日推送，请用推送设置修改（feed_update），这里不能改` };
+        let title = s.title, instruction = s.instruction, resources = s.resources_json;
+        if (input.title !== undefined) {
+            title = typeof input.title === "string" ? [...input.title.trim()].slice(0, 40).join("") : "";
+            if (!title) return { ok: false, error: "title 不能为空" };
+        }
+        if (input.instruction !== undefined) {
+            instruction = typeof input.instruction === "string" ? input.instruction.trim().slice(0, 2000) : "";
+            if (!instruction) return { ok: false, error: "instruction 不能为空：写每次运行要做的事" };
+        }
+        if (typeof input.needsBrowser === "boolean") resources = JSON.stringify(input.needsBrowser ? ["browser"] : []);
+        const now = Date.now();
+        let spec = JSON.parse(s.spec_json) as ScheduleSpec, next = s.next_run_at, status = s.status, runCount = s.run_count;
+        if (input.schedule !== undefined) {
+            const checked = validateSchedule(input.schedule, now, s.timezone);
+            if ("error" in checked) return { ok: false, error: checked.error };
+            ({ spec, next } = checked);
+            runCount = 0;
+            if (status === "done") {
+                const active = (this.db.prepare("SELECT COUNT(*) AS n FROM schedules WHERE owner_id=? AND status='active' AND builtin IS NULL").get(userId) as { n: number }).n;
+                if (active >= MAX_ACTIVE_SCHEDULES) return { ok: false, error: `已有 ${active} 个进行中的定时任务（上限 ${MAX_ACTIVE_SCHEDULES} 个），这个已结束的不能再开始。请先暂停或删除不需要的。` };
+                status = "active";
+            }
+        }
+        this.db.prepare("UPDATE schedules SET title=?,instruction=?,spec_json=?,resources_json=?,status=?,next_run_at=?,run_count=?,updated_at=? WHERE id=?")
+            .run(title, instruction, JSON.stringify(spec), resources, status, status === "done" ? null : next, runCount, now, s.id);
+        const tz = s.timezone;
+        const when = status === "paused" ? "目前已暂停，恢复后按新的时间运行。" : status === "done" ? "已经没有下一次运行。" : `下次运行 ${formatWhen(next!, tz)}。`;
+        return { ok: true, message: [`已更新定时任务「${title}」：${describeSchedule(spec)}（按 ${tz} 时间），${when}`, `每次会做：${instruction}`].join("\n\n"), schedule: this.viewSchedule(this.scheduleRow(s.id)!) };
+    }
     /** Pause, resume or cancel one of the owner's schedules; the sentence that says what happened. */
     private applyScheduleAction(ownerId: string, id: string, action: ScheduleActionName): string {
         const s = this.scheduleRow(id);
@@ -1084,7 +1131,7 @@ export class TaskService {
     private viewSchedule(s: ScheduleRow) {
         const last = s.last_task_id ? this.get(s.last_task_id) : null;
         return {
-            id: s.id, title: s.title, instruction: s.instruction, rule: describeSchedule(JSON.parse(s.spec_json) as ScheduleSpec), status: s.status,
+            id: s.id, title: s.title, instruction: s.instruction, rule: describeSchedule(JSON.parse(s.spec_json) as ScheduleSpec), spec: JSON.parse(s.spec_json) as ScheduleSpec, needsBrowser: (JSON.parse(s.resources_json) as string[]).includes("browser"), status: s.status,
             timezone: s.timezone, nextRunAt: s.next_run_at, nextRunText: s.next_run_at ? formatWhen(s.next_run_at, s.timezone) : null,
             lastRunAt: s.last_run_at, lastTask: last ? { id: last.id, status: last.status } : null, runCount: s.run_count, createdAt: s.created_at,
             builtin: s.builtin,

@@ -152,6 +152,8 @@ export const api = {
   pushSubscribe: (subscription: PushSubscriptionJSON) => request<{ ok: boolean; devices: number }>("/api/push/subscribe", { method: "POST", body: { subscription } }),
   pushUnsubscribe: (endpoint: string) => request<{ ok: boolean }>("/api/push/unsubscribe", { method: "POST", body: { endpoint } }),
   pushTest: () => request<{ sent: number }>("/api/push/test", { method: "POST", body: {} }),
+  scheduleUpdate: (id: string, changes: { title?: string; instruction?: string; schedule?: import("./types").ScheduleSpec; needsBrowser?: boolean }) =>
+    request<{ message: string; schedule: Schedule }>(`/api/schedules/${encodeURIComponent(id)}`, { method: "PATCH", body: changes }),
   scheduleAction: (id: string, action: "pause" | "resume" | "cancel" | "run") =>
     request<{ message?: string; schedule: Schedule | null }>(`/api/schedules/${encodeURIComponent(id)}/${action}`, { method: "POST", body: {} }),
   /** The console is on screen: keeps the account's container up, and starts a stopped one. */

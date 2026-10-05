@@ -3426,6 +3426,13 @@ button.map-card-switch { flex: 0 0 auto; padding: 4px 10px; }
 .schedule-item { cursor: default; }
 .schedule-rule { margin: 4px 0 2px; font-size: 14px; font-weight: 600; color: var(--text); }
 .schedule-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 10px; }
+.schedule-edit { margin: 10px 0 0; }
+.schedule-edit .schedule-edit-wide { grid-column: 1 / -1; }
+.schedule-edit textarea { width: 100%; min-width: 0; resize: vertical; font: inherit; }
+.schedule-weekdays { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin: 0; padding: 0; border: 0; }
+.schedule-weekdays legend { width: 100%; padding: 0; margin-bottom: 4px; }
+.schedule-weekdays label { display: inline-flex; align-items: center; gap: 3px; }
+.schedule-weekdays input { width: auto; margin: 0; }
 /* Password vault: the sign-in prompt on a task card, and the vault page. */
 .vault-prompt { margin-top: 2px; }
 .vault-saved { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }

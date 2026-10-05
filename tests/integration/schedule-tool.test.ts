@@ -35,7 +35,7 @@ it("gives every account a schedule tool that creates and manages its own schedul
     expect((await init.json()).result).toMatchObject({ serverInfo: { name: "aio_schedule" }, instructions: SCHEDULE_POLICY });
     expect((await rpc(member.schedule!.url, { jsonrpc: "2.0", method: "notifications/initialized" })).status).toBe(202);
     const tools = (await (await rpc(member.schedule!.url, { jsonrpc: "2.0", id: 2, method: "tools/list" })).json()).result.tools as Array<{ name: string; description: string }>;
-    expect(tools.map((t) => t.name)).toEqual(["schedule_create", "schedule_list", "schedule_change", "task_list", "task_get", "feed_get", "feed_update"]);
+    expect(tools.map((t) => t.name)).toEqual(["schedule_create", "schedule_list", "schedule_change", "schedule_update", "task_list", "task_get", "feed_get", "feed_update"]);
     // The description says what the session-bound timers never could.
     expect(tools[0]!.description).toContain("不属于当前对话或会话");
 
@@ -66,6 +66,20 @@ it("gives every account a schedule tool that creates and manages its own schedul
     expect(mine.map((s) => s.title)).toEqual(expect.arrayContaining(["盯 Prime Day 扫地机价格", "每周一提醒交房租"]));
     const ownerList = (await call(owner.schedule!.url, "schedule_list", {})).content[0]!.text;
     expect(ownerList).not.toContain("扫地机");
+    // An existing schedule is edited in place: the list gives the rule as it can be sent back.
+    const rent = (mine as Array<{ id: string; title: string; schedule: Record<string, unknown>; needsBrowser: boolean }>).find((s) => s.title === "每周一提醒交房租")!;
+    expect(rent).toMatchObject({ schedule: { kind: "weekly", at: "08:00", weekdays: [1] }, needsBrowser: false });
+    const twice = await call(member.schedule!.url, "schedule_update", { id: rent.id, schedule: { ...rent.schedule, times: ["08:00", "20:00"], weekdays: [1, 5] } });
+    expect(twice.isError).toBeUndefined();
+    expect(twice.content[0]!.text).toContain("已更新定时任务「每周一提醒交房租」：每周一、五 08:00、20:00");
+    const days = [3, 9, 17].map((n) => new Date(Date.now() + n * 86400_000).toISOString().slice(0, 10));
+    const irregular = await call(member.schedule!.url, "schedule_update", { id: rent.id, title: "交材料提醒", instruction: "提醒用户交材料", schedule: { kind: "dates", dates: [`${days[1]} 14:30`, `${days[0]} 09:00`, `${days[2]} 08:00`] } });
+    expect(irregular.isError).toBeUndefined();
+    expect(irregular.content[0]!.text).toContain("已更新定时任务「交材料提醒」");
+    expect(irregular.content[0]!.text).toContain("（共 3 次）");
+    expect(JSON.parse((h.ctx.db.prepare("SELECT spec_json FROM schedules WHERE id=?").get(rent.id) as { spec_json: string }).spec_json)).toEqual({ kind: "dates", dates: [`${days[0]} 09:00`, `${days[1]} 14:30`, `${days[2]} 08:00`] });
+    expect((await call(member.schedule!.url, "schedule_update", { id: rent.id, schedule: { kind: "dates", dates: ["2020-01-01 09:00"] } })).content[0]!.text).toContain("这些时间都已经过去了");
+    expect((await call(owner.schedule!.url, "schedule_update", { id: rent.id, title: "改别人的" })).isError).toBe(true);
     expect((await call(owner.schedule!.url, "schedule_change", { id: row.id, action: "pause" })).isError).toBe(true);
     expect((await call(member.schedule!.url, "schedule_change", { id: row.id, action: "pause" })).content[0]!.text).toContain("已暂停");
     expect((await call(member.schedule!.url, "schedule_change", { id: row.id, action: "explode" })).isError).toBe(true);
@@ -81,6 +95,8 @@ it("gives every account a schedule tool that creates and manages its own schedul
     expect(updated.content[0]!.text).toContain("已更新每日推送的要求");
     expect(JSON.parse((await call(owner.schedule!.url, "feed_get", {})).content[0]!.text)).toMatchObject({ customized: true, instruction: "推送时看看 Gmail 有没有账单", memory: [{ kind: "avoid", text: "加密货币行情", source: "user" }] });
     expect((await call(owner.schedule!.url, "feed_update", { add: [{ kind: "avoid" }] })).isError).toBe(true);
+    const feedId = (h.ctx.db.prepare("SELECT id FROM schedules WHERE owner_id='owner_1' AND builtin='daily_feed'").get() as { id: string }).id;
+    expect((await call(owner.schedule!.url, "schedule_update", { id: feedId, title: "改名" })).content[0]!.text).toContain("feed_update");
     // The member's tool never reaches the owner's feed.
     const memberFeed = await call(member.schedule!.url, "feed_update", { instruction: "改别人的推送" });
     expect(memberFeed.isError).toBe(true);

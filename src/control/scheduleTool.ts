@@ -5,7 +5,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import type { Config } from "./config.js";
 import type { Logger } from "../common/logger.js";
 import type { TaskService } from "./tasks/service.js";
-import { MIN_INTERVAL_MINUTES } from "./tasks/schedules.js";
+import { MAX_DATES, MAX_TIMES_A_DAY, MIN_INTERVAL_MINUTES } from "./tasks/schedules.js";
 
 /**
  * The schedule tool: the account's scheduled tasks, offered to its executors as one
@@ -19,8 +19,10 @@ const SCHEDULE_SCHEMA = {
   type: "object",
   description: "运行规则；时间按用户本地时区理解（和沙箱里 date 命令显示的时区一致）",
   properties: {
-    kind: { type: "string", enum: ["once", "daily", "weekly", "monthly", "interval"], description: "once 一次；daily 每天；weekly 每周几；monthly 每月几号；interval 每隔若干分钟" },
-    at: { type: "string", description: "HH:MM（24 小时制），interval 以外都要" },
+    kind: { type: "string", enum: ["once", "daily", "weekly", "monthly", "interval", "dates"], description: "once 一次；daily 每天；weekly 每周几；monthly 每月几号；interval 每隔若干分钟；dates 几个不规律的日期时间" },
+    at: { type: "string", description: "HH:MM（24 小时制）：once、daily、weekly、monthly 要（一天多次时用 times）" },
+    times: { type: "array", items: { type: "string" }, description: `一天要运行多次时的几个 HH:MM（最多 ${MAX_TIMES_A_DAY} 个），代替 at；仅 daily、weekly、monthly` },
+    dates: { type: "array", items: { type: "string" }, description: `几个不规律的运行时间，每个是 "YYYY-MM-DD HH:MM"（最多 ${MAX_DATES} 个），仅 dates，例如 ["2026-10-08 09:00", "2026-10-15 14:30"]` },
     date: { type: "string", description: "YYYY-MM-DD，仅 once" },
     weekdays: { type: "array", items: { type: "integer" }, description: "1-7（1=周一），仅 weekly" },
     monthDay: { type: "integer", description: "1-31（短月取最后一天），仅 monthly" },
@@ -54,12 +56,12 @@ const TOOLS = [
   },
   {
     name: "schedule_list",
-    description: "列出用户已有的定时任务：id、名称、规则、状态、下次运行时间、每次要做的事。创建前先看看有没有相同的；暂停、恢复或取消前用它找到 id。",
+    description: "列出用户已有的定时任务：id、名称、规则（rule 是给人看的说法，schedule 是可直接改了交给 schedule_update 的规则）、状态、下次运行时间、每次要做的事。创建前先看看有没有相同的；修改、暂停、恢复或取消前用它找到 id。",
     inputSchema: { type: "object", properties: {} },
   },
   {
     name: "schedule_change",
-    description: "暂停（pause）、恢复（resume）或取消（cancel，彻底删除）一个定时任务。要改时间或要做的事时，cancel 旧的再用 schedule_create 建新的。",
+    description: "暂停（pause）、恢复（resume）或取消（cancel，彻底删除）一个定时任务。要改时间或要做的事，用 schedule_update。",
     inputSchema: {
       type: "object",
       properties: {
@@ -67,6 +69,22 @@ const TOOLS = [
         action: { type: "string", enum: ["pause", "resume", "cancel"] },
       },
       required: ["id", "action"],
+    },
+  },
+  {
+    name: "schedule_update",
+    description:
+      "修改一个已有的定时任务：名称、每次要做的事、运行规则（改时间、加减运行时间、改成几个不规律的日期）、是否要用浏览器。只传要改的字段；改规则时传改后完整的 schedule（可以在 schedule_list 给出的 schedule 上改）。改了规则后运行次数（maxRuns）从现在重新算，已结束的定时任务如果还有下一次会重新开始。内置的每日推送用 feed_update 改。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        id: { type: "string", description: "schedule_list 给出的 id" },
+        title: { type: "string", description: "新的名称（40 字以内）" },
+        instruction: { type: "string", description: "新的每次运行要做的事，写法同 schedule_create" },
+        schedule: SCHEDULE_SCHEMA,
+        needsBrowser: { type: "boolean", description: "运行时是否要用浏览器" },
+      },
+      required: ["id"],
     },
   },
   {
@@ -137,7 +155,7 @@ export function scheduleMcpServers(cfg: Config): Record<string, unknown> {
 }
 
 export const SCHEDULE_POLICY =
-  "用户要求将来某个时间做某事、按规律重复做、或“帮我盯着…”“到时候提醒我…”时，用 aio_schedule 的 schedule_create 建立定时任务：它保存在一站的账号里，跨对话、跨会话长期有效，到点自动新建任务执行并把结果发到主会话。不要说定时任务只在当前会话有效，也不要因此让用户改用别的提醒方式；需要时可以先现在查一次，再建定时任务。定时任务自己的自动运行里不要再创建新的定时任务。" +
+  "用户要求将来某个时间做某事、按规律重复做、或“帮我盯着…”“到时候提醒我…”时，用 aio_schedule 的 schedule_create 建立定时任务（几个不规律的日期用 kind=dates，一天多次用 times）：它保存在一站的账号里，跨对话、跨会话长期有效，到点自动新建任务执行并把结果发到主会话。不要说定时任务只在当前会话有效，也不要因此让用户改用别的提醒方式；需要时可以先现在查一次，再建定时任务。定时任务自己的自动运行里不要再创建新的定时任务。用户要改已有定时任务的时间、次数或内容时，先 schedule_list 找到它，再用 schedule_update 修改，不要删掉重建。" +
   "每个账号自带一个内置的「每日推送」：用户想改它做什么、看哪里、几点推送，说了自己关心或不想再看的内容，或对某条推送给出反馈（有用、想多看、别再推），用 feed_get 看现状、feed_update 修改或记下，不要另建定时任务。";
 
 export class ScheduleGateway {
@@ -233,7 +251,7 @@ export class ScheduleGateway {
         return created.ok ? text(`${created.message}\n\nid: ${created.schedule.id}`) : text(created.error, true);
       }
       if (name === "schedule_list") {
-        const list = tasks.listSchedules(userId).map((s) => ({ id: s.id, title: s.title, rule: s.rule, status: s.status, nextRun: s.nextRunText, instruction: s.instruction, ...(s.builtin ? { builtin: true, note: "内置的每日推送：完整设置和记忆用 feed_get 查看，用 feed_update 修改" } : {}) }));
+        const list = tasks.listSchedules(userId).map(({ spec: { anchorAt: _anchor, ...schedule }, ...s }) => ({ id: s.id, title: s.title, rule: s.rule, schedule, status: s.status, nextRun: s.nextRunText, instruction: s.instruction, needsBrowser: s.needsBrowser, ...(s.builtin ? { builtin: true, note: "内置的每日推送：完整设置和记忆用 feed_get 查看，用 feed_update 修改" } : {}) }));
         return text(list.length ? list : "还没有定时任务。");
       }
       if (name === "task_list") {
@@ -243,6 +261,10 @@ export class ScheduleGateway {
       if (name === "task_get") {
         const detail = tasks.taskDetailFor(userId, String(args.id ?? ""));
         return detail ? text(detail) : text("没有这个任务", true);
+      }
+      if (name === "schedule_update") {
+        const changed = tasks.updateScheduleFor(userId, args);
+        return changed.ok ? text(changed.message) : text(changed.error, true);
       }
       if (name === "feed_get") return text(tasks.feedSettings(userId));
       if (name === "feed_update") return text(tasks.updateFeed(userId, args));

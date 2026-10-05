@@ -49,6 +49,40 @@ describe("schedule times in the person's time zone", () => {
   });
 });
 
+describe("several times a day and irregular dates", () => {
+  it("runs a daily rule at each of its times, then the next day's first", () => {
+    const twice: ScheduleSpec = { kind: "daily", at: "08:00", times: ["08:00", "18:30"] };
+    expect(formatWhen(nextRun(twice, at("2026-10-02T14:00:00Z"), LA)!, LA)).toBe("10月2日 周五 08:00");
+    expect(formatWhen(nextRun(twice, at("2026-10-02T16:00:00Z"), LA)!, LA)).toBe("10月2日 周五 18:30");
+    expect(formatWhen(nextRun(twice, at("2026-10-03T02:00:00Z"), LA)!, LA)).toBe("10月3日 周六 08:00");
+    const weekly: ScheduleSpec = { kind: "weekly", at: "09:00", times: ["09:00", "21:00"], weekdays: [1] };
+    expect(formatWhen(nextRun(weekly, at("2026-10-05T17:00:00Z"), LA)!, LA)).toBe("10月5日 周一 21:00");
+    const monthly: ScheduleSpec = { kind: "monthly", at: "07:00", times: ["07:00", "12:00"], monthDay: 2 };
+    expect(formatWhen(nextRun(monthly, at("2026-10-02T17:00:00Z"), LA)!, LA)).toBe("10月2日 周五 12:00");
+  });
+
+  it("runs irregular dates in order and ends after the last", () => {
+    const dates: ScheduleSpec = { kind: "dates", dates: ["2026-10-08 09:00", "2026-10-15 14:30", "2026-11-02 08:00"] };
+    expect(formatWhen(nextRun(dates, at("2026-10-02T17:00:00Z"), LA)!, LA)).toBe("10月8日 周四 09:00");
+    expect(formatWhen(nextRun(dates, at("2026-10-08T16:00:00Z"), LA)!, LA)).toBe("10月15日 周四 14:30");
+    expect(formatWhen(nextRun(dates, at("2026-10-20T00:00:00Z"), LA)!, LA)).toBe("11月2日 周一 08:00"); // PST by then
+    expect(nextRun(dates, at("2026-11-03T00:00:00Z"), LA)).toBeNull();
+  });
+
+  it("normalises and checks the lists", () => {
+    const now = at("2026-10-02T17:00:00Z");
+    expect(validateSchedule({ kind: "daily", times: ["18:00", "08:00", "18:00"] }, now, LA)).toMatchObject({ spec: { kind: "daily", at: "08:00", times: ["08:00", "18:00"] } });
+    expect(validateSchedule({ kind: "daily", times: ["08:00"] }, now, LA)).toEqual(expect.objectContaining({ spec: { kind: "daily", at: "08:00" } }));
+    expect(validateSchedule({ kind: "dates", dates: ["2026-10-15T14:30", "2026-10-08 09:00", "2026-09-01 09:00"], maxRuns: 2, until: "2026-12-01" }, now, LA)).toMatchObject({ spec: { kind: "dates", dates: ["2026-09-01 09:00", "2026-10-08 09:00", "2026-10-15 14:30"] }, next: at("2026-10-08T16:00:00Z") });
+    const error = (raw: unknown) => (validateSchedule(raw, now, LA) as { error?: string }).error;
+    expect(error({ kind: "daily", times: ["8点"] })).toContain("times");
+    expect(error({ kind: "daily", times: Array.from({ length: 13 }, (_, i) => `${String(i + 8).padStart(2, "0")}:00`) })).toContain("12");
+    expect(error({ kind: "dates", dates: [] })).toContain("dates");
+    expect(error({ kind: "dates", dates: ["2026-02-30 09:00"] })).toContain("2026-02-30 09:00");
+    expect(error({ kind: "dates", dates: ["2026-10-01 09:00"] })).toBe("这些时间都已经过去了");
+  });
+});
+
 describe("validating what the dispatcher proposed", () => {
   const now = at("2026-10-02T17:00:00Z"); // Fri 10:00 PDT
 
@@ -81,6 +115,10 @@ describe("saying it back", () => {
     expect(describeSchedule({ kind: "interval", everyMinutes: 120 })).toBe("每 2 小时");
     expect(describeSchedule({ kind: "interval", everyMinutes: 45, until: "2026-10-09" })).toBe("每 45 分钟，到 10月9日为止");
     expect(describeSchedule({ kind: "once", at: "15:00", date: "2026-10-03" })).toBe("10月3日 15:00（一次）");
+    expect(describeSchedule({ kind: "daily", at: "08:00", times: ["08:00", "18:30"] })).toBe("每天 08:00、18:30");
+    expect(describeSchedule({ kind: "weekly", at: "09:00", times: ["09:00", "21:00"], weekdays: [1, 5] })).toBe("每周一、五 09:00、21:00");
+    expect(describeSchedule({ kind: "dates", dates: ["2026-10-08 09:00", "2026-10-15 14:30"] })).toBe("10月8日 09:00、10月15日 14:30（共 2 次）");
+    expect(describeSchedule({ kind: "dates", dates: ["2026-10-08 09:00", "2026-10-15 14:30", "2026-11-02 08:00", "2026-12-01 10:00"] })).toBe("10月8日 09:00、10月15日 14:30、11月2日 08:00 等（共 4 次）");
     expect(describeNow(at("2026-10-02T17:05:00Z"), LA)).toBe("2026-10-02 周五 10:05");
   });
 });

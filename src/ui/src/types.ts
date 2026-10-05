@@ -211,12 +211,31 @@ export interface Task {
   schedule?: { id: string; title: string; rule: string; builtin?: string } | null;
 }
 
+/** When a schedule runs (the control plane's ScheduleSpec). */
+export interface ScheduleSpec {
+  kind: "once" | "daily" | "weekly" | "monthly" | "interval" | "dates";
+  at?: string;
+  /** Several "HH:MM" a day (daily, weekly, monthly). */
+  times?: string[];
+  /** Irregular "YYYY-MM-DD HH:MM" moments (dates). */
+  dates?: string[];
+  date?: string;
+  weekdays?: number[];
+  monthDay?: number;
+  everyMinutes?: number;
+  maxRuns?: number | null;
+  until?: string | null;
+}
+
 /** A scheduled or recurring task, created by asking in the main session. */
 export interface Schedule {
   id: string;
   title: string;
   instruction: string;
   rule: string;
+  /** The rule itself, for editing. */
+  spec: ScheduleSpec;
+  needsBrowser: boolean;
   status: "active" | "paused" | "done";
   timezone: string;
   nextRunAt: number | null;

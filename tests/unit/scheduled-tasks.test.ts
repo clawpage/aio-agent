@@ -150,6 +150,50 @@ describe("running schedules", () => {
     expect(schedules()).toHaveLength(0);
   });
 
+  it("changes a schedule in place by asking: same schedule, new times, its runs counted afresh", async () => {
+    const before = schedules()[0]!;
+    db.prepare("UPDATE schedules SET run_count=3 WHERE id=?").run(before.id);
+    codex.plan = (data) => ({ title: "天气提醒（早晚）", related: [], dependencies: [], resources: [], scheduleAction: { id: data.existingSchedules![0]!.id, action: "update" }, schedule: { kind: "daily", times: ["07:30", "18:00"], instruction: daily.instruction } });
+    const change = submit("天气提醒改成早上7点半和晚上6点各一次");
+    await tick();
+    expect(tasks.get(change.id)).toMatchObject({ status: "completed", result: expect.stringContaining("已更新定时任务「天气提醒（早晚）」：每天 07:30、18:00") });
+    expect(codex.startedTurns).toHaveLength(0);
+    const [after] = schedules();
+    expect(after).toMatchObject({ id: before.id, title: "天气提醒（早晚）", status: "active", run_count: 0 });
+    expect(JSON.parse(after!.spec_json as string)).toEqual({ kind: "daily", at: "07:30", times: ["07:30", "18:00"] });
+    // The dispatcher saw what each existing schedule does, to keep it when only the time changes.
+    expect(JSON.parse(codex.prompts.at(-1)!.split("\n").at(-1)!).existingSchedules[0]).toMatchObject({ id: before.id, instruction: daily.instruction });
+  });
+
+  it("refuses a change without the new rule, and does both when one message cancels a schedule and sets up another", async () => {
+    const before = schedules()[0]!;
+    codex.plan = (data) => ({ title: "改天气", related: [], dependencies: [], resources: [], scheduleAction: { id: data.existingSchedules![0]!.id, action: "update" } });
+    const vague = submit("天气提醒改一下");
+    await tick(); await tick();
+    expect(tasks.get(vague.id)?.status).toBe("planning_failed");
+    expect(schedules()[0]).toMatchObject({ id: before.id, spec_json: before.spec_json });
+    codex.plan = (data) => ({ title: "交材料提醒", related: [], dependencies: [], resources: [], scheduleAction: { id: data.existingSchedules![0]!.id, action: "cancel" }, schedule: { kind: "dates", dates: ["2099-10-08 09:00", "2099-10-15 14:30"], instruction: "提醒用户交材料" } });
+    const swap = submit("不用天气提醒了，改成10月8号上午9点和15号下午两点半提醒我交材料");
+    await tick();
+    const result = tasks.get(swap.id)!.result!;
+    expect(result).toContain("已取消定时任务「每日天气提醒」");
+    expect(result).toContain("已创建定时任务「交材料提醒」：10月8日 09:00、10月15日 14:30（共 2 次）");
+    expect(schedules().map((x) => x.title)).toEqual(["交材料提醒"]);
+  });
+
+  it("edits from the page or a tool: an ended schedule with runs ahead starts again, a paused one stays paused", () => {
+    const id = schedules()[0]!.id;
+    expect(tasks.updateScheduleFor("someone_else", { id, title: "x" })).toEqual({ ok: false, error: "定时任务不存在" });
+    expect(tasks.updateScheduleFor("owner_1", { id, title: "  " })).toEqual({ ok: false, error: "title 不能为空" });
+    expect(tasks.updateScheduleFor("owner_1", { id, schedule: { kind: "daily", at: "25:00" } })).toMatchObject({ ok: false, error: expect.stringContaining("HH:MM") });
+    db.prepare("UPDATE schedules SET status='done',next_run_at=NULL WHERE id=?").run(id);
+    const revived = tasks.updateScheduleFor("owner_1", { id, schedule: { kind: "weekly", at: "09:00", weekdays: [2] }, needsBrowser: false });
+    expect(revived).toMatchObject({ ok: true, schedule: { status: "active", rule: "每周二 09:00", needsBrowser: false, spec: { kind: "weekly" } } });
+    tasks.changeSchedule(id, "owner_1", "pause");
+    const renamed = tasks.updateScheduleFor("owner_1", { id, instruction: "查天气和空气质量", schedule: { kind: "daily", times: ["08:00", "12:00"] } });
+    expect(renamed).toMatchObject({ ok: true, message: expect.stringContaining("目前已暂停"), schedule: { status: "paused", instruction: "查天气和空气质量", rule: "每天 08:00、12:00" } });
+  });
+
   it("runs once on demand without changing the regular time", async () => {
     const before = schedules()[0]!;
     const { task, schedule } = tasks.runScheduleNow(before.id, "owner_1");
