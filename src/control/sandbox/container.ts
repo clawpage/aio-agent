@@ -574,9 +574,12 @@ tz, binary, libs, backup = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
 DROP = ('--disable-gpu', '--use-angle=swiftshader', '--disable-site-isolation-trials')
 # The TLS extension current Chrome on Linux sends; without it eBay refuses the handshake.
 PAD = 'AddTLSServerHandshakePadding'
+# A page a tab navigated away from stays alive in the back/forward cache, its ad
+# iframes' processes and all; agents hop sites in one tab and never go back.
+NO_BFCACHE = 'BackForwardCache'
 old = list(browser.get('args') or [])
 old_binary = browser.get('binary')
-args, zoned, featured = [], False, False
+args, zoned, featured, disabled = [], False, False, False
 for a in old:
     if a.startswith('--user-agent=') or a in DROP: continue
     if a.startswith('--time-zone-for-testing='):
@@ -586,9 +589,14 @@ for a in old:
         feats = [f for f in a.split('=', 1)[1].split(',') if f]
         if PAD not in feats: feats.append(PAD)
         a, featured = '--enable-features=' + ','.join(feats), True
+    if a.startswith('--disable-features='):
+        feats = [f for f in a.split('=', 1)[1].split(',') if f]
+        if NO_BFCACHE not in feats: feats.append(NO_BFCACHE)
+        a, disabled = '--disable-features=' + ','.join(feats), True
     args.append(a)
 if not zoned: args.append('--time-zone-for-testing=' + tz)
 if not featured: args.append('--enable-features=' + PAD)
+if not disabled: args.append('--disable-features=' + NO_BFCACHE)
 for flag in ('--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'):
     if flag not in args: args.append(flag)
 env = dict(browser.get('env') or {})
@@ -660,7 +668,8 @@ for pid in (os.listdir('/proc') if os.path.isdir('/proc') else []):
     other = os.path.realpath(cmd[0].decode()) != want
     moving = moving or other
     padded = any(x.startswith(b'--enable-features=') and PAD.encode() in x.split(b'=', 1)[1].split(b',') for x in cmd)
-    if foreign or other or not padded or any(x.startswith(b'--user-agent=') or x.decode() in DROP for x in cmd) or (b'--time-zone-for-testing=' + tz.encode()) not in cmd:
+    cached = not any(x.startswith(b'--disable-features=') and NO_BFCACHE.encode() in x.split(b'=', 1)[1].split(b',') for x in cmd)
+    if foreign or other or not padded or cached or any(x.startswith(b'--user-agent=') or x.decode() in DROP for x in cmd) or (b'--time-zone-for-testing=' + tz.encode()) not in cmd:
         stale.append(int(pid))
 if moving and not os.path.exists(backup):
     os.makedirs(os.path.dirname(backup), exist_ok=True)

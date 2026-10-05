@@ -63,7 +63,7 @@ const { chromium } = require(process.env.AIO_TABS_PLAYWRIGHT || '/opt/aio-browse
 const INSTRUCTIONS = [
   '浏览器请只用 aio_tabs 的工具。每个标签页记录着创建它的任务：只有创建它的任务能操作（打开网址、点击、填写、执行脚本、关闭），其他任务只能只读查看（正文、HTML、页面结构、截图）。',
   '只读查看其他任务的页面时，先用 browser_tab_list 找到标签页编号（如 t3），再把它作为 tab 参数传给读取类工具。',
-  '逐项查航班、价格等时复用本任务的标签页，保存必要结果后换网址，不为每个日期或候选保留一页。本任务最多同时保留 3 页；遇到内存紧张，关闭自己已读取完成的页面再继续，不关闭用户接管或其他任务的页面。',
+  '逐项查航班、价格等时复用本任务的标签页，保存必要结果后换网址，不为每个日期或候选保留一页。本任务最多同时保留 3 页；浏览器由多个任务共用，内存紧张时只保证每个任务正在用的那一页，其余闲置的页会让给其他任务（关闭后按原网址重新打开即可）。遇到内存紧张，关闭自己已读取完成的页面再继续，不关闭用户接管或其他任务的页面。',
   '网站要登录时调用 browser_login：先用 browser_snapshot 看清登录框，写出 steps（从当前页面重新加载开始：点开登录入口、把 {{username}} 填进账号框、{{password}} 填进密码框、提交），密码器代入用户保存的值执行，你看不到值；这个网站以前成功过的步骤会自动沿用，可以省略 steps。之后读取页面，用 browser_login_report 报告是否成功；失败时按返回的出错步骤改写 steps 重试，最多 3 次，仍不行就调用 browser_request_human。用户为这个网站记的是 Google 登录时，它会告诉你点 Google 按钮、选哪个账号。不要用 browser_fill 或 browser_type 输入密码，不要读取密码框的内容。',
   '需要用户本人在浏览器里操作时，调用 browser_request_human 说明原因并等待：验证码、二次验证、扫码登录、支付信息、付款、下单、发送消息、修改账号设置等不可撤销的最后一步，或需要用户判断的页面。不要在对话里索要密码或验证码。',
   '遇到「按住确认你是真人」（Press & Hold）、滑块、勾选框等人机验证时，不要自己反复点击、拖动或刷新：同一个标签页里的验证会话一旦被判为机器，之后人来按也过不了。先用 browser_tab_new 在新标签页重新打开同一网址，再用 browser_tab_close 关掉旧标签页；新标签页通常直接通过。新标签页仍出现验证，才调用 browser_request_human 请用户在这个新标签页里完成。',
@@ -456,7 +456,11 @@ async function resolveTab(ctx, tabId, mode, create = false, allowHuman = false) 
   let tab;
   if (tabId) {
     tab = registry.get(String(tabId));
-    if (!tab || tab.page.isClosed()) throw new Error(`没有标签页 ${tabId}，请先用 browser_tab_list 查看。`);
+    if (!tab || tab.page.isClosed()) {
+      const url = reclaimed.get(String(tabId));
+      if (url) throw new Error(`标签页 ${tabId} 已为腾出内存关闭（当时停在 ${url}）。需要时用 browser_navigate 重新打开这个网址。`);
+      throw new Error(`没有标签页 ${tabId}，请先用 browser_tab_list 查看。`);
+    }
     if (mode === 'write' && tab.key !== ctx.key) {
       throw new Error(`标签页 ${tab.id} 由任务「${tab.title}」创建，其他任务只能只读访问（读取正文、HTML、结构或截图）。`);
     }
@@ -932,7 +936,8 @@ async function strayPages() {
  * kernel kills a renderer ("Target crashed") or worse. Pages that matter less give
  * way first: finished tasks' tabs, then the person's tabs left idle, and when
  * memory is nearly gone (or a page is about to open, or one just died) pages
- * nobody tracks that nobody is using. A running task's tabs and tabs a person has
+ * nobody tracks that nobody is using, and last running tasks' idle tabs beyond
+ * the one each works in. The tab a running task works in and tabs a person has
  * taken over are never closed.
  */
 const CGROUP = process.env.AIO_TABS_CGROUP || '/sys/fs/cgroup';
@@ -944,6 +949,8 @@ const MEM_NEED = Number(process.env.AIO_TABS_MEM_NEED_MB || 400) * 1024 * 1024;
 const PERSON_IDLE_MS = Number(process.env.AIO_TABS_PERSON_IDLE_MS || 10 * 60 * 1000);
 /** An untracked page left on the same address this long is taken as not in use. */
 const STRAY_IDLE_MS = Number(process.env.AIO_TABS_STRAY_IDLE_MS || 15 * 60 * 1000);
+/** A running task's extra tab untouched this long may give way to another task's page. */
+const SPARE_IDLE_MS = Number(process.env.AIO_TABS_SPARE_IDLE_MS || 60 * 1000);
 const MEM_POLL_MS = Number(process.env.AIO_TABS_MEM_POLL_MS || 5000);
 
 /** The cgroup's working set (reclaimable page cache left out) and its OOM kills; null without a limit. */
@@ -977,10 +984,20 @@ function noteStrays(pages) {
 }
 
 /**
- * Untracked pages not in use: on the same address for a while, and known to hold
- * nothing typed. A page that does not answer in time is kept (hung pages have
- * their own cleanup); unsaved words are never the price of memory.
+ * Whether a page is known to hold nothing typed. A page that does not answer in
+ * time counts as holding something (hung pages have their own cleanup); unsaved
+ * words are never the price of memory.
  */
+async function holdsNothingTyped(page) {
+  const typed = await Promise.race([
+    page.evaluate(() => [...document.querySelectorAll('input, textarea')].some((el) => !/^(hidden|submit|button|reset|checkbox|radio|file|image|range|color)$/i.test(el.type || '') && el.value !== el.defaultValue)
+      || [...document.querySelectorAll('[contenteditable=""], [contenteditable="true"]')].some((el) => el.textContent.trim())),
+    new Promise((resolve) => setTimeout(() => resolve(null), 3000)),
+  ]).catch(() => null);
+  return typed === false;
+}
+
+/** Untracked pages not in use: on the same address for a while, and known to hold nothing typed. */
 async function unusedStrays() {
   const pages = await strayPages();
   noteStrays(pages);
@@ -989,15 +1006,43 @@ async function unusedStrays() {
   for (const page of pages) {
     const seen = strayChanges.get(page);
     if (!seen || now - seen.since < STRAY_IDLE_MS) continue;
-    const typed = await Promise.race([
-      page.evaluate(() => [...document.querySelectorAll('input, textarea')].some((el) => !/^(hidden|submit|button|reset|checkbox|radio|file|image|range|color)$/i.test(el.type || '') && el.value !== el.defaultValue)
-        || [...document.querySelectorAll('[contenteditable=""], [contenteditable="true"]')].some((el) => el.textContent.trim())),
-      new Promise((resolve) => setTimeout(() => resolve(null), 3000)),
-    ]).catch(() => null);
-    if (typed !== false) continue;
-    out.push(page);
+    if (await holdsNothingTyped(page)) out.push(page);
   }
   return out.sort((a, b) => strayChanges.get(a).since - strayChanges.get(b).since);
+}
+
+/** The tab a task works in: its current one, else the one it used last. */
+function workingTab(key) {
+  const current = registry.get(cursors.get(key));
+  if (current && !current.page.isClosed()) return current;
+  return ownTabs(key).sort((a, b) => b.lastUsed - a.lastUsed)[0] || null;
+}
+
+/**
+ * Running tasks' tabs beyond the one each works in, left alone a while. Every
+ * running task is sure of one tab; more only while memory allows, so one task's
+ * extra pages never keep another task out of the browser. The task holding the
+ * most tabs gives first, its least recently used first.
+ */
+async function spareTabs() {
+  const now = Date.now();
+  const held = new Map();
+  for (const t of registry.values()) if (!t.page.isClosed()) held.set(t.key, (held.get(t.key) || 0) + 1);
+  const spare = [...registry.values()].filter((t) => t.key !== PERSON && !t.finishedAt && t.holder === 'ai' && !t.locked && !t.request
+    && !t.page.isClosed() && workingTab(t.key) !== t && now - t.lastUsed >= SPARE_IDLE_MS)
+    .sort((a, b) => held.get(b.key) - held.get(a.key) || a.lastUsed - b.lastUsed);
+  const out = [];
+  for (const t of spare) if (await holdsNothingTyped(t.page)) out.push(t.page);
+  return out;
+}
+
+/** Tab id -> the address it was on, for tabs closed to free memory: a task asking for one learns why it is gone. */
+const reclaimed = new Map();
+function noteReclaimed(page) {
+  const tab = [...registry.values()].find((t) => t.page === page);
+  if (!tab) return;
+  reclaimed.set(tab.id, safeUrl(page));
+  if (reclaimed.size > 200) reclaimed.delete(reclaimed.keys().next().value);
 }
 
 let reclaiming = null;
@@ -1023,7 +1068,7 @@ function reclaimMemory(reason, { need = 0, exceptKey = null } = {}) {
     const tiers = [
       () => finishedTabs().filter((t) => t.key !== exceptKey).sort(byAge).map((t) => t.page),
       () => [...registry.values()].filter((t) => t.key === PERSON && t.key !== exceptKey && now - t.lastUsed >= PERSON_IDLE_MS).sort(byAge).map((t) => t.page),
-      ...(deep ? [unusedStrays] : []),
+      ...(deep ? [unusedStrays, spareTabs] : []),
     ];
     const closed = [];
     for (const tier of tiers) {
@@ -1031,6 +1076,7 @@ function reclaimMemory(reason, { need = 0, exceptKey = null } = {}) {
         if (m.used <= goal) break;
         if (page.isClosed()) continue;
         const url = safeUrl(page);
+        noteReclaimed(page);
         await closeKeepingOne([page]);
         closed.push(url);
         // A renderer takes a moment to exit and give its memory back.

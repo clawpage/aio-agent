@@ -74,6 +74,7 @@ beforeAll(async () => {
   process.env.AIO_TABS_CGROUP = cgroup;
   process.env.AIO_TABS_PERSON_IDLE_MS = "300";
   process.env.AIO_TABS_STRAY_IDLE_MS = "300";
+  process.env.AIO_TABS_SPARE_IDLE_MS = "300";
   process.env.AIO_TABS_STATE = path.join(dir, "state.json");
   process.env.AIO_TABS_MAX_FINISHED = "2";
   process.env.AIO_TABS_HUMAN_WAIT_MS = "3000";
@@ -626,6 +627,38 @@ it.skipIf(!hasChromium)("frees memory near the limit, least valuable pages first
     setMemory(0.1);
     await control(held, "release");
     site.close();
+  }
+});
+
+it.skipIf(!hasChromium)("makes another task's idle extra tabs give way when memory is short, keeping the tab each task works in", async () => {
+  const html = (title: string, extra = "") => `data:text/html,<title>${title}</title>${extra}`;
+  // One task spread over three tabs (it works in the last), another in one.
+  const drafted = tabIdOf(await call("SA", "browser_tab_new", { url: html("Drafted", "<input id=q>") }))!;
+  const spare = tabIdOf(await call("SA", "browser_tab_new", { url: html("Spare") }))!;
+  const working = tabIdOf(await call("SA", "browser_tab_new", { url: html("Working") }))!;
+  const other = tabIdOf(await call("SB", "browser_navigate", { url: html("Other") }))!;
+  // What the task typed and has not sent yet is never the price of memory.
+  expect((await call("SA", "browser_fill", { tab: drafted, selector: "#q", text: "还没发出去的帖子" })).result?.isError).not.toBe(true);
+  try {
+    // While memory allows, nothing of a running task is touched.
+    setMemory(0.88);
+    const { reclaimMemory } = require(SCRIPT) as { reclaimMemory: (reason: string) => Promise<string[]> };
+    expect((await reclaimMemory("poll")).join(" ")).not.toContain("Spare");
+    await new Promise((r) => setTimeout(r, 400));
+    // A third task needs room: the extra tab nobody is using gives way.
+    setMemory(0.95);
+    await call("SC", "browser_navigate", { url: html("Third") });
+    const left = (await records()).map((t) => t.id);
+    expect(left).not.toContain(spare);
+    expect(left).toEqual(expect.arrayContaining([drafted, working, other]));
+    // The task learns why the tab is gone and how to get it back.
+    const gone = await call("SA", "browser_get_text", { tab: spare });
+    expect(gone.result?.isError).toBe(true);
+    expect(text(gone)).toContain("已为腾出内存关闭");
+    expect(text(gone)).toContain("Spare");
+  } finally {
+    setMemory(0.1);
+    for (const key of ["SA", "SB", "SC"]) for (const tab of await records(key)) await call(key, "browser_tab_close", { tab: tab.id });
   }
 });
 

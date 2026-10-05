@@ -27,7 +27,7 @@ it("gives Claude Code the workspace rules and the long-term memory Codex keeps",
   }
 });
 
-it("aligns the sandbox browser identity once: its own Linux UA, the egress time zone, WebGL on, site isolation back, Chrome's TLS extension", async () => {
+it("aligns the sandbox browser identity once: its own Linux UA, the egress time zone, WebGL on, site isolation back, Chrome's TLS extension, no back/forward cache", async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pa-identity-"));
   try {
     const cfg = testConfig(dir, 18999);
@@ -46,7 +46,7 @@ it("aligns the sandbox browser identity once: its own Linux UA, the egress time 
     expect(await container.alignBrowserIdentity("America/Los_Angeles")).toBe(false);
     expect(users[0]).toBe("root");
     const browser = JSON.parse(fs.readFileSync(configPath, "utf8")).browser as { args: string[]; env: Record<string, string>; binary: string };
-    expect(browser.args).toEqual(["--mute-audio", "--time-zone-for-testing=America/Los_Angeles", "--enable-features=AddTLSServerHandshakePadding", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"]);
+    expect(browser.args).toEqual(["--mute-audio", "--time-zone-for-testing=America/Los_Angeles", "--enable-features=AddTLSServerHandshakePadding", "--disable-features=BackForwardCache", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"]);
     expect(browser.env).toEqual({ TZ: "America/Los_Angeles", DISPLAY: ":99" });
     expect(browser.binary).toBe("/usr/local/bin/browser");
     // Already aligned: nothing more to write.
@@ -58,12 +58,12 @@ it("aligns the sandbox browser identity once: its own Linux UA, the egress time 
   }
 });
 
-it("points the browser at a newer build with its libraries, merges the TLS feature, and goes back to the image browser without it", async () => {
+it("points the browser at a newer build with its libraries, merges the TLS feature and the disabled cache, and goes back to the image browser without it", async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pa-binary-"));
   try {
     const container = new SandboxContainer(testConfig(dir, 18999), new Logger("error", undefined, false), testNode());
     const configPath = path.join(dir, "browser-supervisor.json");
-    fs.writeFileSync(configPath, JSON.stringify({ browser: { binary: "/usr/local/bin/browser", args: ["--enable-features=Foo", "--time-zone-for-testing=America/Los_Angeles"], env: { TZ: "America/Los_Angeles" } } }));
+    fs.writeFileSync(configPath, JSON.stringify({ browser: { binary: "/usr/local/bin/browser", args: ["--enable-features=Foo", "--disable-features=Translate", "--time-zone-for-testing=America/Los_Angeles"], env: { TZ: "America/Los_Angeles" } } }));
     vi.spyOn(container, "execInSandbox").mockImplementation(async (args: string[]) => {
       const script = args[args.indexOf("-c") + 1]!.replace("/var/run/gem/browser-supervisor.json", configPath);
       return { code: 0, stdout: execFileSync("python3", ["-c", script, ...args.slice(args.indexOf("-c") + 2)], { encoding: "utf8" }), stderr: "" };
@@ -74,6 +74,7 @@ it("points the browser at a newer build with its libraries, merges the TLS featu
     expect(browser().binary).toBe(build.binary);
     expect(browser().env).toEqual({ TZ: "America/Los_Angeles", LD_LIBRARY_PATH: build.libraryPath });
     expect(browser().args.filter((a) => a.startsWith("--enable-features="))).toEqual(["--enable-features=Foo,AddTLSServerHandshakePadding"]);
+    expect(browser().args.filter((a) => a.startsWith("--disable-features="))).toEqual(["--disable-features=Translate,BackForwardCache"]);
     await container.alignBrowserIdentity("America/Los_Angeles");
     expect(browser().binary).toBe("/usr/local/bin/browser");
     expect(browser().env).toEqual({ TZ: "America/Los_Angeles" });
@@ -93,7 +94,7 @@ it("recognizes a native Chromium behind its root-owned launcher without restarti
     fs.writeFileSync(binary, "native binary");
     const wrapper = `#!/bin/sh\nexport LD_LIBRARY_PATH=/opt/native/lib\nexec ${binary} "$@"\n`;
     fs.writeFileSync(launcher, wrapper, { mode: 0o755 });
-    const args = ["--time-zone-for-testing=America/Los_Angeles", "--enable-features=AddTLSServerHandshakePadding", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"];
+    const args = ["--time-zone-for-testing=America/Los_Angeles", "--enable-features=AddTLSServerHandshakePadding", "--disable-features=BackForwardCache", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"];
     const writeProcess = (executable: string) => fs.writeFileSync(path.join(proc, "456"), [executable, `--user-data-dir=${profile}`, ...args].join("\0") + "\0");
     fs.writeFileSync(configPath, JSON.stringify({ browser: { binary: launcher, user_data_dir: profile, args, env: { TZ: "America/Los_Angeles" } } }));
     let rootOwned = true;
@@ -115,6 +116,11 @@ it("recognizes a native Chromium behind its root-owned launcher without restarti
     expect(fs.existsSync(backup)).toBe(false);
     // Repeated control-plane starts keep the same browser and profile.
     expect(await container.alignBrowserIdentity("America/Los_Angeles", { binary: launcher, libraryPath: "" }, backup)).toBe(false);
+    // A browser started while the back/forward cache was still on is restarted without it, the profile kept.
+    fs.writeFileSync(path.join(proc, "456"), [binary, `--user-data-dir=${profile}`, ...args.filter((a) => !a.startsWith("--disable-features="))].join("\0") + "\0");
+    expect(await container.alignBrowserIdentity("America/Los_Angeles", { binary: launcher, libraryPath: "" }, backup)).toBe(true);
+    expect(signals).toEqual(["SIGNAL 456 15"]);
+    expect(fs.existsSync(backup)).toBe(false);
     writeProcess(path.join(dir, "old", "chromium"));
     expect(await container.alignBrowserIdentity("America/Los_Angeles", { binary: launcher, libraryPath: "" }, backup)).toBe(true);
     expect(signals).toEqual(["SIGNAL 456 15"]);
@@ -137,7 +143,7 @@ it("clears a browser profile lock left by a recreated container, and keeps this 
     const profile = path.join(dir, "browser");
     fs.mkdirSync(profile);
     const configPath = path.join(dir, "browser-supervisor.json");
-    fs.writeFileSync(configPath, JSON.stringify({ browser: { user_data_dir: profile, args: ["--time-zone-for-testing=America/Los_Angeles", "--enable-features=AddTLSServerHandshakePadding", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"], env: { TZ: "America/Los_Angeles" }, binary: "/usr/local/bin/browser" } }));
+    fs.writeFileSync(configPath, JSON.stringify({ browser: { user_data_dir: profile, args: ["--time-zone-for-testing=America/Los_Angeles", "--enable-features=AddTLSServerHandshakePadding", "--disable-features=BackForwardCache", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"], env: { TZ: "America/Los_Angeles" }, binary: "/usr/local/bin/browser" } }));
     vi.spyOn(container, "execInSandbox").mockImplementation(async (args: string[]) => {
       const script = args[args.indexOf("-c") + 1]!.replace("/var/run/gem/browser-supervisor.json", configPath);
       return { code: 0, stdout: execFileSync("python3", ["-c", script, ...args.slice(args.indexOf("-c") + 2)], { encoding: "utf8" }), stderr: "" };
