@@ -555,6 +555,15 @@ export class TaskService {
         plan.decision={kind:"new",taskId:null};
         this.db.prepare("UPDATE tasks SET merged_into=NULL,status='waiting',plan_json=?,error=NULL WHERE id=?").run(JSON.stringify(plan),row.id);
     }
+    /** An accepted supplement leads the task from now on: its card shows the supplement's title and summary. */
+    private adoptSupplement(parentId: string, plan: TaskPlan) {
+        const parent = this.get(parentId);
+        if (!parent?.plan_json || !plan.title) return;
+        const parentPlan = JSON.parse(parent.plan_json) as TaskPlan;
+        parentPlan.description = plan.description;
+        this.db.prepare("UPDATE tasks SET title=?,plan_json=? WHERE id=?").run(plan.title, JSON.stringify(parentPlan), parent.id);
+        this.agent.renameConversation(parent.conversation_id, plan.title);
+    }
     private async deliverSupplements() {
         if(this.#closed) return;
         if(this.#merging) { this.#mergeAgain=true; return; }
@@ -599,6 +608,7 @@ export class TaskService {
                 this.db.prepare('UPDATE tasks SET plan_json=? WHERE id=?').run(JSON.stringify(parentPlan),parent.id);
                 if(!parent.turn_id) {
                     this.db.prepare("UPDATE tasks SET status='merged',completed_at=? WHERE id=?").run(Date.now(),row.id);
+                    this.adoptSupplement(parent.id, plan);
                     continue;
                 }
                 this.db.prepare("UPDATE tasks SET status='steering' WHERE id=?").run(row.id);
@@ -609,7 +619,10 @@ export class TaskService {
                     if(this.#closed) return;
                     if(result==='browser_unavailable') this.db.prepare("UPDATE tasks SET status='merge_failed',error=? WHERE id=?").run('此补充需要浏览器，但浏览器暂未恢复；原任务仍可继续，请恢复浏览器后重新补充。',row.id);
                     else if(result==='not_active') { this.fallbackSupplement(row); this.schedule(); }
-                    else this.db.prepare('UPDATE tasks SET status=?,completed_at=? WHERE id=?').run(result==='accepted'?'merged':'merging',result==='accepted'?Date.now():null,row.id);
+                    else {
+                        this.db.prepare('UPDATE tasks SET status=?,completed_at=? WHERE id=?').run(result==='accepted'?'merged':'merging',result==='accepted'?Date.now():null,row.id);
+                        if(result==='accepted') this.adoptSupplement(parent.id, plan);
+                    }
                 } catch(err) {
                     if(this.#closed) return;
                     // Only an explicit RPC rejection proves that it was not delivered.

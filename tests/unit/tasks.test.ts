@@ -203,7 +203,7 @@ describe("main inbox delegation", () => {
         expect(codex.steers).toHaveLength(1);expect(codex.steers[0]!.threadId).toBe(codex.startedTurns[0]!.threadId);
         const context=JSON.parse(codex.plans.at(-1)!.split("\n").at(-1)!);expect(context.previous.map((t:{id:string})=>t.id)).toEqual([first.id]);
         expect(JSON.parse(tasks.get(extra.id)!.plan_json!).dependencies).toEqual([]);
-        expect(tasks.view(tasks.get(extra.id)!).relatedTaskTitle).toBe("first");
+        expect(tasks.view(tasks.get(extra.id)!).relatedTaskTitle).toBe("correction");
     });
     it("continues a finished reference without being hijacked by an unrelated running task",async()=>{
         const done=submit("done");await tick();await codex.runTurn(codex.startedTurns[0]!.turnId,{text:"Selected original result"});await tick();
@@ -424,6 +424,7 @@ describe("main inbox delegation", () => {
         expect(codex.steers[0]).toMatchObject({threadId:codex.startedTurns[0]!.threadId,expectedTurnId:codex.startedTurns[0]!.turnId});
         expect(codex.steers[0]!.text).toContain("902 links way");
         expect(tasks.get(extra.id)).toMatchObject({status:"merged",merged_into:parent.id});
+        expect(tasks.view(tasks.get(parent.id)!)).toMatchObject({title:"补充住宿和餐厅",description:JSON.parse(tasks.get(extra.id)!.plan_json!).description});
         expect(tasks.list().tasks.find(t=>t.id===extra.id)?.conversationId).toBe(parent.conversationId);
         await codex.runTurn(codex.startedTurns[0]!.turnId,{text:"包含住宿和餐厅的完整行程"});await tick();
         expect(tasks.get(parent.id)?.result).toContain("餐厅");
@@ -438,6 +439,7 @@ describe("main inbox delegation", () => {
         expect(tasks.get(extra.id)?.status).toBe("merging");
         await codex.runTurn(codex.startedTurns[0]!.turnId);await tick();await tick();
         expect(tasks.get(extra.id)?.status).toBe("merged");
+        expect(tasks.get(parent.id)?.title).toBe("extra");
         expect(codex.startedTurns).toHaveLength(2);
         expect(codex.startedTurns[1]!.text).toContain("with photo");
         expect(codex.startedTurns[1]!.attachments).toHaveLength(1);
@@ -515,15 +517,16 @@ describe("main inbox delegation", () => {
         expect(tasks.get(extra.id)?.merged_into).toBeNull();
         expect(codex.startedTurns[1]!.text).toContain("finished original");
     });
-    it("persists the initial overview without replacing it after a supplement or service reload",async()=>{
+    it("an accepted supplement replaces the card's title and overview, and keeps them across a reload",async()=>{
         const description="我会根据退房时间梳理返程路线，安排途中休息和用餐，整理成一份可照着走的行程。";
         codex.plan=async()=>JSON.stringify({title:"返程安排",description,related:[],dependencies:[],resources:[]});
         const parent=submit("十点退房后返程");await tick();
         expect(tasks.list().tasks.find(t=>t.id===parent.id)?.description).toBe(description);
         codex.plan=async()=>JSON.stringify({title:"补充",description:"新要求的说明",appendTo:parent.id,related:[],dependencies:[],resources:[]});
         submit("路上加一次午餐");await tick();
+        expect(tasks.list().tasks.find(t=>t.id===parent.id)).toMatchObject({title:"补充",description:"新要求的说明"});
         tasks.close();tasks=new TaskService(db,testConfig("/tmp/aio-main-tasks",1),agent,codex);tasks.init();await tick();
-        expect(tasks.list().tasks.find(t=>t.id===parent.id)?.description).toBe(description);
+        expect(tasks.list().tasks.find(t=>t.id===parent.id)).toMatchObject({title:"补充",description:"新要求的说明"});
         expect(codex.plans).toHaveLength(2);
     });
     it("keeps old pending tasks in the live page while paginating every completed task", () => {
@@ -780,7 +783,8 @@ describe("owner dispatch log", () => {
         expect(answer.prompt).toContain("Luna 派单器");
         expect(answer.answer).toContain("酒店要靠近新宿");
         expect(plan.plan).toMatchObject({ decision:{kind:"steer",taskId:trip.id},related: [trip.id] });
-        expect(entry!.candidates.find(c => c.id === trip.id)?.title).toBe("规划东京三天行程");
+        // Titles are read back as they are now: the accepted steer renamed the trip.
+        expect(entry!.candidates.find(c => c.id === trip.id)?.title).toBe("酒店要靠近新宿");
         // A dispatch that cannot produce a plan logs why.
         codex.plan = async () => "这不是 JSON";
         const broken = submit("坏掉的派单"); await tick(); await tick();
