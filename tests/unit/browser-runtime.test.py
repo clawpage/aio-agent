@@ -1141,7 +1141,7 @@ def test_restore_pending_detects_unfinished_and_finished_states() -> None:
 
 
 @test
-def test_restore_pending_is_bound_to_the_process_that_completed_it() -> None:
+def test_a_snapshot_is_restored_once() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         path = os.path.join(tmp, "snapshot.json")
         rt.write_snapshot(path, base_snapshot())
@@ -1150,13 +1150,45 @@ def test_restore_pending_is_bound_to_the_process_that_completed_it() -> None:
             rt.restore_pending(path, browser_pid=555, browser_starttime=9),
             "只保存了快照不等于有待恢复（Chrome 仍原样运行）",
         )
-        # A completion record from browser 555 must not be inherited by a new one.
+        # Once restored, a later browser (restart, crash) keeps its own profile:
+        # re-applying the old snapshot put back cookies sites had since replaced.
         state = {"snapshotSavedAt": base_snapshot()["savedAt"], "tabs": [], "completed": True,
                  "browserPid": 555, "browserStarttime": 9}
         rt.write_restore_state(path, state)
         assert_false(rt.restore_pending(path, 555, 9), "同一进程完成后不再待恢复")
-        assert_true(rt.restore_pending(path, 556, 9), "新 PID 不得沿用旧的完成记录")
-        assert_true(rt.restore_pending(path, 555, 10), "同 PID 但重启过（starttime 变）同样不得沿用")
+        assert_false(rt.restore_pending(path, 556, 9), "恢复过的快照不再给新进程恢复")
+        assert_false(rt.restore_pending(path, 555, 10), "同 PID 重启过同样不再恢复")
+        # A newer snapshot (the next release) is owed again.
+        newer = base_snapshot()
+        newer["savedAt"] = base_snapshot()["savedAt"] + 1
+        rt.write_snapshot(path, newer)
+        assert_true(rt.restore_pending(path, 556, 9), "新的快照仍需恢复")
+
+
+@test
+def test_wake_does_not_reapply_a_restored_snapshot() -> None:
+    calls: list[str] = []
+    saved = (rt.verify_helper, rt.start_supervisor, rt.wait_for_cdp, rt.reconnect_mcp_browser, rt.restore_tabs)
+    rt.verify_helper = lambda *a, **k: {"ok": True}
+    rt.start_supervisor = lambda *a, **k: {"ok": True}
+    rt.wait_for_cdp = lambda *a, **k: True
+    rt.reconnect_mcp_browser = lambda: calls.append("mcp") or {"ok": True}
+    rt.restore_tabs = lambda *a, **k: calls.append("restore") or {"ok": True, "restoredTabs": 1}
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "browser-snapshot.json")
+            rt.write_snapshot(path, base_snapshot())
+            result = rt.wake_browser(path)
+            assert_true(result["ok"] and calls == ["restore"], f"未恢复过的快照应恢复：{result} {calls}")
+            calls.clear()
+            rt.write_restore_state(path, {"snapshotSavedAt": base_snapshot()["savedAt"], "tabs": [],
+                                          "completed": True, "browserPid": 555, "browserStarttime": 9})
+            result = rt.wake_browser(path)
+            assert_true(result["ok"], f"恢复过的快照不应阻止启动：{result}")
+            assert_eq(calls, ["mcp"], "恢复过的快照不得再导入或重开标签")
+            assert_eq(result.get("restoredTabs"), 0, "不恢复任何标签")
+    finally:
+        rt.verify_helper, rt.start_supervisor, rt.wait_for_cdp, rt.reconnect_mcp_browser, rt.restore_tabs = saved
 
 
 @test

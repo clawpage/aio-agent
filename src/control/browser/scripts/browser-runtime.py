@@ -2290,9 +2290,8 @@ def restore_tabs(
             message = "标签已重建，但无法把焦点同步给 AIO 接口，快照已保留以便重试"
         return err(message, restoredTabs=restored, failed=failed, problems=problems)
     # Record completion instead of deleting the record: `status` needs it to tell
-    # "the running browser has applied this snapshot" from "still pending". The
-    # record is bound to the browser process that did the work, so a *different*
-    # (later) browser can never inherit a stale "completed".
+    # "the running browser has applied this snapshot" from "still pending", and it
+    # marks the snapshot used: no later browser process gets it applied again.
     identity = _current_browser_identity()
     state["tabs"] = entries
     # Both browser clients must be ready before the snapshot is marked restored.
@@ -2394,7 +2393,7 @@ def restore_pending(
 ) -> bool:
     """True when a *running* browser still has to be (re)built from the snapshot.
 
-    The completion record is bound to the process that finished the restore. A
+    A completed restore uses the snapshot up: no later browser gets it again. A
     snapshot merely existing on disk is never enough: if nothing was stopped, the
     live browser already owns its tabs and reporting "pending" would rebuild -
     and overwrite - pages the user is looking at right now.
@@ -2407,11 +2406,10 @@ def restore_pending(
     fresh = state is not None and state.get("snapshotSavedAt") == snapshot.get("savedAt")
 
     if fresh and state.get("completed") is True:
-        # Only the exact process that finished the restore may reuse that record.
-        if browser_pid is not None and state.get("browserPid") != browser_pid:
-            return True
-        if browser_starttime is not None and state.get("browserStarttime") != browser_starttime:
-            return True
+        # A snapshot is restored once. A later browser (a restart, a crash) runs
+        # on the profile volume, which already holds everything since; applying
+        # the old snapshot again put back cookies sites had replaced or removed
+        # (signing the user out) and reopened tabs closed long ago.
         return False
 
     if fresh:
@@ -2432,6 +2430,16 @@ def restore_pending(
     if source_start is not None and browser_starttime is not None and source_start != browser_starttime:
         return True
     return False
+
+
+def snapshot_consumed(snapshot_path: str, snapshot: Mapping[str, Any]) -> bool:
+    """True once a restore of this exact snapshot completed (see `restore_pending`)."""
+    state = read_restore_state(snapshot_path)
+    return (
+        state is not None
+        and state.get("snapshotSavedAt") == snapshot.get("savedAt")
+        and state.get("completed") is True
+    )
 
 
 def wake_browser(
@@ -2456,6 +2464,9 @@ def wake_browser(
     never_saved = not os.path.exists(snapshot_path) and not os.path.exists(restore_state_path_for(snapshot_path))
     if snapshot is None and not allow_blank and not never_saved:
         return err(f"没有可恢复的快照，拒绝启动空白浏览器：{problem}", blocked=True)
+    if snapshot is not None and snapshot_consumed(snapshot_path, snapshot):
+        # Restored once already: this browser starts from its own profile.
+        snapshot, problem = None, "快照已恢复过"
 
     helper = verify_helper(helper_pid_file, helper_script)
     if not helper["ok"]:
