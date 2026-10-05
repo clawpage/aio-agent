@@ -860,6 +860,64 @@ async function pruneFinished() {
   return closeKeepingOne(finishedTabs().map((t) => t.page));
 }
 
+// ------------------------------------------------------------- overview
+
+/**
+ * Every page open in the browser, for the person's tab overview: registered tabs
+ * (whose task, or the person's own) and pages no record owns alike. Read from
+ * Chromium's target list, so listing attaches to nothing and wakes no page.
+ */
+async function overview() {
+  const list = await (await fetch(`${CDP}/json/list`, { signal: AbortSignal.timeout(5000) })).json();
+  const byTarget = new Map([...registry.values()].filter((t) => t.targetId && !t.page.isClosed()).map((t) => [t.targetId, t]));
+  const front = frontTab();
+  return list.filter((t) => t.type === 'page' && !String(t.url).startsWith('devtools://')).map((t) => {
+    const tab = byTarget.get(t.id);
+    return {
+      target: t.id, title: t.title || '', url: t.url || '',
+      tab: tab ? tab.id : null, owner: tab ? (tab.key === PERSON ? 'person' : 'task') : null,
+      task: tab && tab.key !== PERSON ? tab.title : null, holder: tab ? tab.holder : null,
+      front: !!front && front.targetId === t.id,
+    };
+  });
+}
+
+/** The page behind a Chromium target id, registered or not. */
+async function pageOfTarget(target) {
+  for (const tab of registry.values()) if (tab.targetId === target && !tab.page.isClosed()) return { page: tab.page, tab };
+  const context = await browserContext();
+  for (const page of context.pages()) if ((await targetIdOf(page).catch(() => null)) === target) return { page, tab: null };
+  return null;
+}
+
+/** A small preview of any page: the viewport at 40% scale. */
+async function thumbnail(page) {
+  const session = await page.context().newCDPSession(page);
+  try {
+    const work = (async () => {
+      const { cssLayoutViewport: v } = await session.send('Page.getLayoutMetrics');
+      return Buffer.from((await session.send('Page.captureScreenshot', { format: 'jpeg', quality: 60, clip: { x: v.pageX, y: v.pageY, width: v.clientWidth, height: v.clientHeight, scale: 0.4 } })).data, 'base64');
+    })();
+    return await Promise.race([work, new Promise((_, reject) => setTimeout(() => reject(new Error('截图超时，页面可能正在加载，请稍后再试')), 15000))]);
+  } finally {
+    await session.detach().catch(() => undefined);
+  }
+}
+
+/**
+ * Show a page on the desktop for the person. A registered tab is pinned like a
+ * watched one; a page no record owns cannot be pinned, so nothing pinned is
+ * raised over it afterwards. Only stacking changes: no holder, no agent's work.
+ */
+async function bringTargetFront(target) {
+  const found = await pageOfTarget(target);
+  if (!found) return { status: 404, body: { error: 'no_page', message: '这个标签页已经关闭' } };
+  if (found.tab) pin(found.tab);
+  else pinned = null;
+  await found.page.bringToFront().catch(() => undefined);
+  return { status: 200, body: { target } };
+}
+
 /** Pages no task or person owns (leftover blank windows, pages from before the tab record). */
 async function strayPages() {
   const context = await browserContext();
@@ -1423,6 +1481,17 @@ const server = http.createServer(async (req, res) => {
       if (key && key !== tab.key) return send(res, 403, { error: 'tab belongs to another task' });
       const data = await capture(tab.page, { quality: 55 });
       return send(res, 200, { mimeType: 'image/jpeg', data: data.toString('base64'), url: safeUrl(tab.page), title: await tab.page.title().catch(() => '') });
+    }
+    // The person's overview of every open page, a preview of one, and bringing one to the front.
+    if (req.method === 'GET' && url.pathname === '/overview') return send(res, 200, { pages: await overview() });
+    if (req.method === 'GET' && url.pathname === '/overview/shot') {
+      const found = await pageOfTarget(String(url.searchParams.get('target') || ''));
+      if (!found) return send(res, 404, { error: 'no such page' });
+      return send(res, 200, { mimeType: 'image/jpeg', data: (await thumbnail(found.page)).toString('base64') });
+    }
+    if (req.method === 'POST' && url.pathname === '/overview/front') {
+      const out = await bringTargetFront(String((await readJson(req)).target || ''));
+      return send(res, out.status, out.body);
     }
     if (req.method === 'POST' && url.pathname === '/finish') {
       const body = await readJson(req);

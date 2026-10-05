@@ -21,6 +21,9 @@ const fakeTabs: TabServerLike = {
   close: async (tab) => (calls.push(`close:${tab}`), { status: 200, body: { closed: tab } }),
   login: async () => ({ status: 409, body: { error: "no_request" } }),
   screenshot: async (key, tab) => (calls.push(`shot:${key}:${tab}`), tab === "t1" ? { mimeType: "image/jpeg", data: Buffer.from("jpeg-bytes").toString("base64"), url: "u", title: "t" } : null),
+  overview: async () => (calls.push("overview"), [{ target: "A1B2C3D4E5F60718", title: "示例", url: "https://example.com/", tab: "t1", owner: "task", task: "查网页", holder: "ai", front: false }]),
+  overviewShot: async (target) => (calls.push(`overview-shot:${target}`), target === "A1B2C3D4E5F60718" ? { mimeType: "image/jpeg", data: Buffer.from("thumb").toString("base64") } : null),
+  front: async (target) => (calls.push(`front:${target}`), target === "A1B2C3D4E5F60718" ? { status: 200, body: { target } } : { status: 404, body: { error: "no_page", message: "这个标签页已经关闭" } }),
 };
 
 beforeAll(async () => {
@@ -134,4 +137,23 @@ it("answers the feed without waiting on a stuck sandbox", async () => {
   } finally {
     fakeTabs.list = list;
   }
+});
+
+it("gives the signed-in person an overview of every open page, a preview of each, and switching to one", async () => {
+  const { cookie, csrf } = await login(h);
+  expect((await h.request("/api/browser/overview")).status).toBe(401);
+  const overview = (await (await h.request("/api/browser/overview", { headers: { cookie } })).json()) as { pages: Array<{ target: string }> };
+  expect(overview.pages).toEqual([expect.objectContaining({ target: "A1B2C3D4E5F60718", owner: "task", task: "查网页" })]);
+  const shot = await h.request("/api/browser/overview/shot?target=A1B2C3D4E5F60718", { headers: { cookie } });
+  expect(shot.status).toBe(200);
+  expect(shot.headers.get("content-type")).toContain("image/jpeg");
+  expect(shot.headers.get("cache-control")).toBe("no-store");
+  expect(await shot.text()).toBe("thumb");
+  expect((await h.request("/api/browser/overview/shot?target=0000000000000000", { headers: { cookie } })).status).toBe(404);
+  // Switching is a write: CSRF-protected.
+  const front = (target: string, headers: Record<string, string>) => h.request("/api/browser/overview/front", { method: "POST", headers: { cookie, "content-type": "application/json", ...headers }, body: JSON.stringify({ target }) });
+  expect((await front("A1B2C3D4E5F60718", {})).status).toBe(403);
+  expect((await front("A1B2C3D4E5F60718", { "x-csrf-token": csrf })).status).toBe(200);
+  expect((await front("0000000000000000", { "x-csrf-token": csrf })).status).toBe(404);
+  expect(calls).toEqual(expect.arrayContaining(["overview", "overview-shot:A1B2C3D4E5F60718", "front:A1B2C3D4E5F60718"]));
 });

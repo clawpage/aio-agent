@@ -827,3 +827,36 @@ it.skipIf(!hasChromium)("signs in with steps the agent wrote, from the vault's v
     site.close();
   }
 });
+
+it.skipIf(!hasChromium)("shows the person every open page, a task's or one nobody owns, with a preview, and brings any one to the front without taking it", async () => {
+  const site = http.createServer((_req, res) => { res.setHeader("content-type", "text/html; charset=utf-8"); res.end("<title>Stray page</title><p>stray</p>"); });
+  await new Promise<void>((r) => site.listen(0, "127.0.0.1", r));
+  const taskTab = tabIdOf(await call("OV", "browser_navigate", { url: page("Overview task", "ov") }))!;
+  // A page no record owns, e.g. one the person opened from the desktop.
+  const stray = (await (await fetch(`${process.env.AIO_TABS_CDP}/json/new?http://127.0.0.1:${(site.address() as net.AddressInfo).port}/stray`, { method: "PUT" })).json()) as { id: string };
+  type Page = { target: string; title: string; url: string; tab: string | null; owner: string | null; task: string | null; holder: string | null; front: boolean };
+  const overview = async () => ((await (await fetch(`${base}/overview`)).json()) as { pages: Page[] }).pages;
+  const front = (target: string) => fetch(`${base}/overview/front`, { method: "POST", body: JSON.stringify({ target }) });
+  await expect.poll(async () => (await overview()).find((p) => p.target === stray.id)?.title).toBe("Stray page");
+  const pages = await overview();
+  const mine = pages.find((p) => p.tab === taskTab)!;
+  expect(mine).toMatchObject({ owner: "task", task: "任务OV", holder: "ai", title: "Overview task" });
+  expect(pages.find((p) => p.target === stray.id)).toMatchObject({ tab: null, owner: null, task: null, holder: null });
+  for (const target of [mine.target, stray.id]) {
+    const shot = (await (await fetch(`${base}/overview/shot?target=${target}`)).json()) as { mimeType: string; data: string };
+    expect(shot.mimeType).toBe("image/jpeg");
+    expect([...Buffer.from(shot.data, "base64").subarray(0, 2)]).toEqual([0xff, 0xd8]);
+  }
+  expect((await fetch(`${base}/overview/shot?target=FFFFFFFFFFFFFFFF`)).status).toBe(404);
+  // A task's tab comes forward and is kept on top, still its agent's to drive.
+  expect((await front(mine.target)).status).toBe(200);
+  expect((await overview()).find((p) => p.tab === taskTab)).toMatchObject({ front: true, holder: "ai" });
+  expect((await call("OV", "browser_get_text", { tab: taskTab })).result?.isError).toBeFalsy();
+  // A page nobody owns comes forward too; nothing pinned is raised over it afterwards.
+  expect((await front(stray.id)).status).toBe(200);
+  expect((await overview()).some((p) => p.front)).toBe(false);
+  expect((await front("0000000000000000")).status).toBe(404);
+  await fetch(`${process.env.AIO_TABS_CDP}/json/close/${stray.id}`);
+  await post("/finish", { key: "OV" });
+  site.close();
+}, 60_000);

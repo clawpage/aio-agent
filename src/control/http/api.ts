@@ -648,6 +648,24 @@ export function createApiRouter(context: AppContext): Router {
     const out = await context.tabs.pointer({ task: PERSON_KEY, tab: personTab(req), action, x: num(req.body?.x), y: num(req.body?.y), dy: num(req.body?.dy) });
     res.status(out.status).json(out.body);
   }));
+  // The person's overview of every page open in their browser: which, a preview of each, and switching to one.
+  router.get("/browser/overview", requireKind("primary"), requireSession, asyncHandler(async (_req, res) => {
+    const pages = context.tabs?.overview ? await context.tabs.overview() : null;
+    if (!pages) { res.status(503).json({ error: "unavailable", message: "浏览器暂不可用，请稍后重试" }); return; }
+    res.setHeader("Cache-Control", "no-store");
+    res.json({ pages });
+  }));
+  router.get("/browser/overview/shot", requireKind("primary"), requireSession, asyncHandler(async (req, res) => {
+    const shot = context.tabs?.overviewShot ? await context.tabs.overviewShot(String(req.query.target ?? "")) : null;
+    if (!shot) { res.status(404).json({ error: "not_found" }); return; }
+    res.setHeader("Cache-Control", "no-store");
+    res.type(shot.mimeType).send(Buffer.from(shot.data, "base64"));
+  }));
+  router.post("/browser/overview/front", requireKind("primary"), requireSession, asyncHandler(async (req, res) => {
+    if (!context.tabs?.front) { res.status(404).json({ error: "not_found" }); return; }
+    const out = await context.tabs.front(String((req.body as { target?: unknown } | undefined)?.target ?? ""));
+    res.status(out.status).json(out.body);
+  }));
   router.post("/browser/person/close", requireKind("primary"), requireSession, asyncHandler(async (req, res) => {
     if (!context.tabs) { res.status(404).json({ error: "not_found" }); return; }
     const out = await context.tabs.close(personTab(req));

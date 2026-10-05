@@ -232,6 +232,20 @@ export interface Schedule {
 }
 
 /** One browser tab a task created, as the tab record keeps it. */
+/** One page open in the workspace browser, as the tab overview shows it. */
+export interface OverviewPage {
+  target: string;
+  title: string;
+  url: string;
+  tab: string | null;
+  /** A task's tab, the person's own, or a page nobody owns (null). */
+  owner: "task" | "person" | null;
+  task: string | null;
+  holder: "ai" | "human" | null;
+  /** The page kept on top of the desktop right now. */
+  front: boolean;
+}
+
 export interface TaskTab {
   id: string;
   title: string;

@@ -9,6 +9,7 @@ import { BrowserStatusBar, fetchBrowserStatus, STATUS_POLL_MS } from "./BrowserS
 import { needsRestore } from "../browserStatusView";
 import { DESKTOP_PATH } from "./TaskConsole";
 import { DesktopFrame } from "./DesktopFrame";
+import { BrowserTabs } from "./BrowserTabs";
 import { AppIcon } from "./AppIcon";
 import { browserApi, UI_KEEP_ALIVE_NOTE, type BrowserLifecycleStateView } from "../api";
 import { baseName, kindLabel, workspaceFileKind, type WorkspaceFileKind } from "../sandboxLink";
@@ -294,6 +295,9 @@ export function Workspace({ open, status, initialPath, onClose, onNotify, browse
 
   /** The browser/desktop panels are the only ones that need a live Chromium. */
   const holdsBrowser = open && tab === "browser" && !minimized;
+  // The overview of every open page belongs to the browser window on screen.
+  const [tabsOpen, setTabsOpen] = useState(false);
+  useEffect(() => { if (!holdsBrowser) setTabsOpen(false); }, [holdsBrowser]);
 
   /**
    * The frame's ticket was spent by its first load, so a frame unmounted while
@@ -456,6 +460,11 @@ export function Workspace({ open, status, initialPath, onClose, onNotify, browse
             新标签页
           </button>
         )}
+        {holdsBrowser && (
+          <button type="button" className="menubar-item" aria-expanded={tabsOpen} onClick={() => setTabsOpen((v) => !v)}>
+            标签页
+          </button>
+        )}
         <span className="menubar-spacer" />
         <time className="menubar-clock" dateTime={clock.iso}>{clock.label}</time>
         <button type="button" className="menubar-item" onClick={onClose} aria-label="关闭工作区" title="关闭工作区">
@@ -495,6 +504,7 @@ export function Workspace({ open, status, initialPath, onClose, onNotify, browse
                   onPinToggle={togglePin}
                 />
               )}
+              <PopupPresence>{holdsBrowser && tabsOpen && <BrowserTabs onClose={() => setTabsOpen(false)} onNotify={onNotify}/>}</PopupPresence>
               {tab === "files" && <FilesTab canConfigure={canConfigure} notify={onNotify} onPreview={setFilePreview} />}
               {tab === "preview" && (
                 <div className="preview">

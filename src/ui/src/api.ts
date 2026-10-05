@@ -184,6 +184,10 @@ export const api = {
     request<{ ok: boolean; settings: AgentSettings }>("/api/settings", { method: "PUT", body }),
 
   /** Open a link in a new tab of the sandbox's real Chromium (validated server-side). */
+  /** Every page open in the workspace browser, a small preview of one, and bringing one to the front. */
+  browserOverview: () => request<{ pages: import("./types").OverviewPage[] }>("/api/browser/overview"),
+  browserOverviewShotUrl: (target: string, at: number) => apiUrl(`/api/browser/overview/shot?target=${encodeURIComponent(target)}&at=${at}`),
+  browserFront: (target: string) => request<{ target: string }>("/api/browser/overview/front", { method: "POST", body: { target } }),
   openBrowserTab: (url: string, signal?: AbortSignal) =>
     request<{ ok: boolean; message: string; data: unknown; tab?: import("./types").TaskTab }>("/api/browser/tabs", { method: "POST", body: { url }, signal }),
   /** Open a workspace HTML page in full in a new tab of the sandbox's Chromium (no inline size cap). */

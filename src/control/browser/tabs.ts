@@ -26,6 +26,8 @@ function taskHeaders(task: BrowserTask): Record<string, string> {
 }
 const SCRIPT_NAME = "tab-server.cjs";
 const KEY = /^[A-Za-z0-9_-]{1,80}$/;
+/** A Chromium target id (32 hex digits today). */
+const TARGET = /^[A-Fa-f0-9]{16,64}$/;
 
 /** One tab as the control plane sees it (the tab server's ownership record). */
 export interface TabRecord {
@@ -43,6 +45,22 @@ export interface TabRecord {
   request: { reason: string; at: number; kind?: "login"; site?: string; steps?: LoginStep[]; url?: string } | null;
   /** What the agent said about its last sign-in on this tab: the steps it used and whether they worked. */
   loginReport?: { site: string; steps: LoginStep[] | null; startUrl: string; source: string; ok: boolean; note: string; at: number } | null;
+}
+
+/** One page open in the browser, as the person's tab overview shows it. */
+export interface OverviewPage {
+  /** Chromium's target id: how the overview names a page, registered or not. */
+  target: string;
+  title: string;
+  url: string;
+  /** The tab record behind the page, if any: a task's tab or the person's own; null for a page nobody owns. */
+  tab: string | null;
+  owner: "task" | "person" | null;
+  /** The owning task's title. */
+  task: string | null;
+  holder: "ai" | "human" | null;
+  /** The page a console keeps on top of the desktop right now. */
+  front: boolean;
 }
 
 /** One sign-in step the agent wrote; `value` may be the placeholder {{username}} or {{password}}. */
@@ -81,6 +99,12 @@ export interface TabServerLike {
   open(url: string): Promise<PersonResult>;
   /** Close a tab the person opened. */
   close(tab: string): Promise<PersonResult>;
+  /** Every page open in the browser, for the person's overview (null when the browser cannot be asked). */
+  overview?(): Promise<OverviewPage[] | null>;
+  /** A small current preview of one page of the overview. */
+  overviewShot?(target: string): Promise<{ mimeType: string; data: string } | null>;
+  /** Bring one page of the overview to the front of the desktop for the person. */
+  front?(target: string): Promise<PersonResult>;
 }
 
 /** An agent asking a person for help waits up to 30 minutes; the MCP clients must wait a bit longer. */
@@ -316,5 +340,32 @@ export class TabServer implements TabServerLike {
   async screenshot(key: string, tab: string): Promise<{ mimeType: string; data: string; url: string; title: string } | null> {
     if (!KEY.test(key) || !/^t\d{1,9}$/.test(tab)) return null;
     return await this.#get(`/screenshot?tab=${tab}&key=${key}`);
+  }
+
+  async overview(): Promise<OverviewPage[] | null> {
+    // The overview may be the first thing that needs the current server version.
+    try { await this.ensure(); } catch { return null; }
+    return (await this.#get<{ pages: OverviewPage[] }>("/overview"))?.pages ?? null;
+  }
+
+  async overviewShot(target: string): Promise<{ mimeType: string; data: string } | null> {
+    if (!TARGET.test(target)) return null;
+    return await this.#get(`/overview/shot?target=${target}`);
+  }
+
+  async front(target: string): Promise<PersonResult> {
+    if (!TARGET.test(target)) return { status: 404, body: { error: "no_page", message: "这个标签页已经关闭" } };
+    const res = await this.#container.execInSandbox(
+      ["curl", "-s", "-m", "20", "-w", "\n%{http_code}", "-X", "POST", "-H", "content-type: application/json", "--data-binary", "@-", `http://127.0.0.1:${TAB_SERVER_PORT}/overview/front`],
+      { timeoutMs: 25_000, stdin: JSON.stringify({ target }) },
+    );
+    const cut = res.stdout.lastIndexOf("\n");
+    const status = Number(res.stdout.slice(cut + 1));
+    if (res.code !== 0 || !status) return { status: 503, body: { error: "unavailable", message: "浏览器暂不可用，请稍后重试" } };
+    try {
+      return { status, body: JSON.parse(res.stdout.slice(0, cut)) as Record<string, unknown> };
+    } catch {
+      return { status: 502, body: { error: "bad_response" } };
+    }
   }
 }
