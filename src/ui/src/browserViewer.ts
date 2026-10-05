@@ -40,6 +40,8 @@ export interface BrowserViewerOptions {
   /** Injected so tests can drive visibility without a DOM. */
   visibilityState?: () => "visible" | "hidden";
   onError?: (message: string) => void;
+  /** Called whenever the lease is gained or lost, so the panel never claims to be watching without one. */
+  onHeldChange?: (held: boolean) => void;
 }
 
 const DEFAULT_HEARTBEAT_MS = 20_000;
@@ -56,6 +58,7 @@ export class BrowserViewerController {
   #heartbeatMs: number;
   #visibility: () => "visible" | "hidden";
   #onError: ((message: string) => void) | undefined;
+  #onHeldChange: ((held: boolean) => void) | undefined;
 
   /**
    * Incarnation counter. Bumped when the panel joins, when it releases, and on a
@@ -66,6 +69,8 @@ export class BrowserViewerController {
    */
   #generation = 0;
   #held = false;
+  /** The last heartbeat failed; retries stay quiet until one succeeds again. */
+  #failing = false;
   /** A heartbeat was attempted since the last release, even if its reply is late. */
   #mayHaveLease = false;
   #timer: ReturnType<typeof setInterval> | null = null;
@@ -77,6 +82,7 @@ export class BrowserViewerController {
     this.#heartbeatMs = opts.heartbeatMs ?? DEFAULT_HEARTBEAT_MS;
     this.#visibility = opts.visibilityState ?? (() => (typeof document === "undefined" ? "visible" : document.visibilityState));
     this.#onError = opts.onError;
+    this.#onHeldChange = opts.onHeldChange;
   }
 
   get generation(): number {
@@ -122,14 +128,15 @@ export class BrowserViewerController {
    */
   async #handleHeartbeat(result: HeartbeatResult, generation: number, mayRetryStale = false): Promise<number> {
     if (result.kind === "ok") {
-      this.#held = true;
+      this.#failing = false;
+      this.#setHeld(true);
       this.#armTimer();
       return this.#generation;
     }
     if (result.kind === "stale") {
       // Another incarnation reused this id (a crashed window was replaced). Move
       // past the tombstone once, then give up honestly.
-      this.#held = false;
+      this.#setHeld(false);
       if (!mayRetryStale) {
         this.#onError?.("无法保护浏览器占用状态，请重新打开面板");
         return 0;
@@ -141,16 +148,22 @@ export class BrowserViewerController {
         return this.#held ? this.#generation : 0;
       }
       if (retried.kind === "ok") {
-        this.#held = true;
+        this.#failing = false;
+        this.#setHeld(true);
         this.#armTimer();
         return this.#generation;
       }
-      this.#held = false;
+      this.#setHeld(false);
       this.#onError?.("无法保护浏览器占用状态，请重新打开面板");
       return 0;
     }
-    this.#held = false;
-    this.#onError?.(result.message ?? "无法连接控制面，浏览器可能被释放");
+    // A failed heartbeat (control restart, network blip, a 503 while waking) must
+    // not drop the lease for good: keep the timer running so the next tick joins
+    // again, and say so once instead of on every retry.
+    this.#setHeld(false);
+    if (!this.#failing) this.#onError?.(result.message ?? "无法连接控制面，浏览器可能被释放");
+    this.#failing = true;
+    if (this.#timer === null) this.#armTimer();
     return 0;
   }
 
@@ -166,7 +179,8 @@ export class BrowserViewerController {
     // incarnation for any heartbeat still travelling.
     const releasedGeneration = this.#generation;
     this.#generation += 1;
-    this.#held = false;
+    this.#setHeld(false);
+    this.#failing = false;
     // The release is always sent, even when no heartbeat has completed yet: the
     // server may already have recorded this incarnation (the first heartbeat can
     // still be in flight when the panel is hidden again), and skipping it would
@@ -202,13 +216,21 @@ export class BrowserViewerController {
     if (this.#heartbeatMs <= 0) return;
     this.#timer = setInterval(() => {
       // Never keep heartbeating for a panel that is no longer on screen.
-      if (this.#disposed || !this.#held) return;
+      if (this.#disposed) return;
       if (this.#visibility() !== "visible") {
         void this.release();
         return;
       }
+      // Held: extend the lease. Lost after a failed heartbeat: join again as a new
+      // incarnation, so one blip never leaves a watched browser unprotected.
       void this.claim();
     }, this.#heartbeatMs);
+  }
+
+  #setHeld(held: boolean): void {
+    if (this.#held === held) return;
+    this.#held = held;
+    this.#onHeldChange?.(held);
   }
 
   #cancelTimer(): void {

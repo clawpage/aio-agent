@@ -1,4 +1,4 @@
-import { describe, expect, it, beforeEach, afterEach } from "vitest";
+import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import { openDb, type Db } from "../../src/control/db.js";
 import { Logger } from "../../src/common/logger.js";
 import { AgentManager, type BrowserGateLike } from "../../src/control/codex/manager.js";
@@ -371,6 +371,49 @@ describe("BrowserViewerController", () => {
     const controller = new BrowserViewerController({ transport: t.transport, heartbeatMs: 0, visibilityState: () => "visible" });
     expect(await controller.claim()).toBe(0);
     expect(controller.held).toBe(false);
+  });
+
+  it("joins again after one failed heartbeat instead of dropping the lease for good", async () => {
+    vi.useFakeTimers();
+    try {
+      const t = transport();
+      const held: boolean[] = [];
+      const errors: string[] = [];
+      const controller = new BrowserViewerController({ transport: t.transport, heartbeatMs: 1000, visibilityState: () => "visible", onHeldChange: (h) => held.push(h), onError: (m) => errors.push(m) });
+      const first = await controller.claim();
+      expect(held).toEqual([true]);
+      t.failOnce();
+      await vi.advanceTimersByTimeAsync(1000);
+      // The panel must stop claiming to watch while the lease is gone.
+      expect(controller.held).toBe(false);
+      expect(held).toEqual([true, false]);
+      expect(errors).toHaveLength(1);
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(controller.held).toBe(true);
+      expect(controller.generation).toBeGreaterThan(first);
+      expect(held).toEqual([true, false, true]);
+      expect(t.heartbeats.at(-1)?.generation).toBe(controller.generation);
+      controller.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps retrying a first join that failed, telling the person only once", async () => {
+    vi.useFakeTimers();
+    try {
+      const t = transport();
+      const errors: string[] = [];
+      const controller = new BrowserViewerController({ transport: t.transport, heartbeatMs: 1000, visibilityState: () => "visible", onError: (m) => errors.push(m) });
+      t.failOnce();
+      expect(await controller.claim()).toBe(0);
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(controller.held).toBe(true);
+      expect(errors).toHaveLength(1);
+      controller.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("dispose releases the lease and never throws without one", async () => {

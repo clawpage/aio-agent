@@ -289,6 +289,8 @@ export function Workspace({ open, status, initialPath, onClose, onNotify, browse
         },
       },
       onError: (message) => onNotify(message, "error"),
+      // A lost or regained lease (a failed heartbeat, the retry that follows) shows up at once.
+      onHeldChange: setWatching,
     });
   }
   const viewer = viewerRef.current;
