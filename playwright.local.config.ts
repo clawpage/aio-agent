@@ -49,6 +49,7 @@ export default defineConfig({
     "**/product-cards.spec.ts",
     "**/choices.spec.ts",
     "**/feed-loading.spec.ts",
+    "**/keyboard-feed.spec.ts",
     "**/image-preview.spec.ts",
     "**/vault.spec.ts",
     "**/register.spec.ts",

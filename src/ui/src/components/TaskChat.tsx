@@ -110,11 +110,20 @@ export function TaskChat({ onDetails, onOpenLink, onOpenFileInBrowser, onExpired
         n.scrollTop = stick.current ? n.scrollHeight : edge.current - n.clientHeight;
         edge.current = n.scrollTop + n.clientHeight;
     };
+    // More than a screen above the latest message: offer the way back.
+    const [away, setAway] = useState(false);
     const onFeedScroll = (n: HTMLDivElement) => {
         // WebKit fires the resize's own scroll event before the observer runs: settle the resize first.
         if (height.current) refit(n);
         stick.current = n.scrollHeight - n.scrollTop - n.clientHeight < 80;
         edge.current = n.scrollTop + n.clientHeight;
+        setAway(n.scrollHeight - n.scrollTop - n.clientHeight > n.clientHeight);
+    };
+    const toLatest = () => {
+        const n = scroll.current;
+        if (!n) return;
+        stick.current = true;
+        n.scrollTo({ top: n.scrollHeight, behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
     };
     useEffect(() => {
         const n = scroll.current;
@@ -322,6 +331,7 @@ export function TaskChat({ onDetails, onOpenLink, onOpenFileInBrowser, onExpired
         {progressAt.get(t.id) && renderProgress(progressAt.get(t.id)!)}
       </div>)}
     </div>
+    <div className="feed-latest-anchor"><button type="button" className={`feed-latest${away ? " show" : ""}`} aria-label="回到最新消息" title="回到最新消息" aria-hidden={!away} tabIndex={away ? 0 : -1} onClick={toLatest}><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 5v14M6 13l6 6 6-6"/></svg></button></div>
     {error && <div className="banner error" role="alert">{error}<button onClick={() => setError(null)}>关闭</button></div>}
     <div className={`composer${draft || attachments.length || reference || uploading ? " has-content" : ""}`}>
       {reference && <div className="task-reference" role="status"><div><span className="muted tiny">引用任务</span><strong title={reference.title}>{reference.title}</strong></div><button type="button" className="ghost" disabled={busy} aria-label="取消引用任务" onClick={() => { setReference(null); input.current?.focus(); }}><ComposerIcon kind="close"/></button></div>}

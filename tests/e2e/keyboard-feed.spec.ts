@@ -44,3 +44,28 @@ test("the main feed stays at its latest message while a phone keyboard opens and
   await keyboard(page, null);
   await expect.poll(async () => Math.abs(await page.locator(".task-feed").evaluate(n => n.scrollTop + n.clientHeight) - before)).toBeLessThanOrEqual(2);
 });
+
+test("a back-to-latest button rises in only while the feed is read more than a screen above the latest message", async ({ page }, info) => {
+  if (info.project.name.startsWith("mobile")) await page.setViewportSize({ width: 390, height: 844 });
+  await mockConsole(page, { conversations: [] });
+  await page.route("**/api/main*", r => r.fulfill({ json: { mode: "tasks", tasks, nextBefore: null } }));
+  await page.goto("/");
+  await expect(page.getByText("第 12 个结果。")).toBeVisible();
+  await expect.poll(() => gap(page)).toBeLessThanOrEqual(2);
+  const button = page.locator(".feed-latest");
+  await expect(button).not.toHaveClass(/show/);
+  await expect(button).toHaveAttribute("aria-hidden", "true");
+  // Slightly above the bottom is still "at the latest message".
+  await page.locator(".task-feed").evaluate(n => { n.scrollTop = n.scrollHeight - n.clientHeight * 1.5; });
+  await expect(button).not.toHaveClass(/show/);
+  await page.locator(".task-feed").evaluate(n => { n.scrollTop = 0; });
+  await expect(button).toHaveClass(/show/);
+  await expect.poll(() => button.evaluate(n => getComputedStyle(n).opacity)).toBe("1");
+  const box = (await button.boundingBox())!, feed = (await page.locator(".task-feed").boundingBox())!;
+  expect(box.x + box.width).toBeGreaterThan(feed.x + feed.width - 80);
+  expect(box.y + box.height).toBeLessThanOrEqual(feed.y + feed.height);
+  await page.screenshot({ path: info.outputPath("feed-latest.png") });
+  await page.getByRole("button", { name: "回到最新消息" }).click();
+  await expect.poll(() => gap(page)).toBeLessThanOrEqual(2);
+  await expect(button).not.toHaveClass(/show/);
+});

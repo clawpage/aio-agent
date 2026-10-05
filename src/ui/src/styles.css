@@ -2702,6 +2702,11 @@ textarea:focus {
 .main-inbox-app .sidebar button.ghost.block:hover { background: var(--bg-raised); color: var(--text); }
 .main-inbox-app .sidebar button.ghost.block.active { background: var(--ai-soft); color: var(--ai); font-weight: 600; }
 .task-feed { gap: 22px; }
+/* Back to the latest message: rises in only while the feed is read more than a screen above it. */
+.feed-latest-anchor { position: relative; height: 0; z-index: 5; }
+.feed-latest { position: absolute; right: 16px; bottom: 12px; display: flex; align-items: center; justify-content: center; width: 44px; height: 44px; min-height: 44px; padding: 0; border-radius: 50%; border: 1px solid var(--border); background: var(--bg-raised); color: var(--text); box-shadow: 0 6px 20px rgb(0 0 0 / .18); opacity: 0; transform: translateY(12px) scale(.85); pointer-events: none; transition: opacity 180ms ease, transform 220ms cubic-bezier(.2, .9, .3, 1.2); }
+.feed-latest.show { opacity: 1; transform: none; pointer-events: auto; }
+@media (prefers-reduced-motion: reduce) { .feed-latest { transition: none; } }
 /* The top of the feed: older tasks load as it comes near. */
 .feed-older { display: flex; justify-content: center; min-height: 24px; }
 .task-entry { flex-shrink: 0; display: flex; flex-direction: column; gap: 10px; }
