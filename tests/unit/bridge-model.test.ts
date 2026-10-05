@@ -8,7 +8,6 @@ import { Logger } from "../../src/common/logger.js";
 import { AgentManager } from "../../src/control/codex/manager.js";
 import { openDb, type Db } from "../../src/control/db.js";
 import { FakeCodex, testConfig } from "../helpers/harness.js";
-import type { HostTokenSource } from "../../src/control/codex/hostTokens.js";
 import type { Config } from "../../src/control/config.js";
 
 const SECRET_VALUE = "sk-test-bridge-secret-value-0001";
@@ -152,11 +151,8 @@ function makeBridgeManager(secretsFile: string): {
   const codex = new FakeCodex();
   const cfg = gatewayConfig(testConfig("/tmp/pa-manager-bridge", 1), secretsFile);
   const bridge = new BridgeModel(cfg, new Logger("error", undefined, false));
-  const hostTokens = {
-    status: async () => ({ ok: true, authMethod: "chatgpt", email: null, planType: null, expiresAt: null, error: null }),
-  } as unknown as HostTokenSource;
   const db = openDb(":memory:");
-  const agent = new AgentManager({ cfg, db, log: new Logger("error", undefined, false), codex, hostTokens, bridge });
+  const agent = new AgentManager({ cfg, db, log: new Logger("error", undefined, false), codex, bridge });
   return { agent, codex, db, bridge };
 }
 
@@ -266,7 +262,6 @@ describe("AgentManager without the bridge", () => {
       db,
       log: new Logger("error", undefined, false),
       codex,
-      hostTokens: { status: async () => ({}) } as unknown as HostTokenSource,
       bridge,
     });
     await agent.init();
@@ -303,10 +298,9 @@ describe("A member assigned GPT", () => {
     const db = openDb(":memory:");
     db.prepare("INSERT INTO owners(id,username,role,password_hash,password_salt,password_params,created_at) VALUES ('user_g','xjy','member','x','x','{}',0)").run();
     const codex = new FakeCodex();
-    const hostTokens = { status: async () => ({ ok: true }) } as unknown as HostTokenSource;
-    const member = new AgentManager({ cfg, db, log, codex, hostTokens, bridge });
+    const member = new AgentManager({ cfg, db, log, codex, bridge });
     await member.init();
-    const off = new AgentManager({ cfg: { ...cfg, hostCodex: { ...cfg.hostCodex, enabled: false } }, db, log, codex: new FakeCodex(), hostTokens, bridge });
+    const off = new AgentManager({ cfg: { ...cfg, hostCodex: { ...cfg.hostCodex, enabled: false } }, db, log, codex: new FakeCodex(), bridge });
     try {
       expect(member.memberSettings()).toEqual({ model: "gpt-6.1-sol", effort: "high" });
       const conv = member.createConversation({ ownerId: "user_g", title: "member" });

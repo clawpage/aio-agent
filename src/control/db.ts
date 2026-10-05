@@ -285,15 +285,6 @@ CREATE TABLE IF NOT EXISTS decision_events (
 );
 CREATE INDEX IF NOT EXISTS idx_decision_events_owner ON decision_events(owner_id, created_at);
 
-CREATE TABLE IF NOT EXISTS agent_state (
-  id INTEGER PRIMARY KEY CHECK (id = 1),
-  active_turn_id TEXT,
-  active_conversation_id TEXT,
-  queue_json TEXT NOT NULL DEFAULT '[]',
-  updated_at INTEGER NOT NULL
-);
-INSERT OR IGNORE INTO agent_state (id, active_turn_id, active_conversation_id, queue_json, updated_at)
-  VALUES (1, NULL, NULL, '[]', 0);
 `;
 
 export function openDb(dbPath: string): Db {
@@ -350,6 +341,8 @@ function migrate(db: Db): void {
   if (!conversationColumns.includes("model_provider")) {
     db.exec("ALTER TABLE conversations ADD COLUMN model_provider TEXT");
   }
+  // A single-slot mirror of the running turn that nothing read; `turns` is the record.
+  db.exec("DROP TABLE IF EXISTS agent_state");
   // Lookups on every Codex notification and every task event; created here,
   // after the columns they cover are guaranteed to exist.
   db.exec(`

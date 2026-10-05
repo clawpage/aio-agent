@@ -608,11 +608,6 @@ export class SandboxCodexSession {
     if (result.turnId !== params.expectedTurnId) throw new Error("Steering acknowledgement did not match the requested turn");
   }
 
-  async readThread(threadId: string): Promise<unknown> {
-    await this.start();
-    return await this.#peer!.request("thread/read", { threadId, includeTurns: true }, 60_000);
-  }
-
   /** Answer a held server request (approval / user input). */
   answer(id: string, result: unknown): boolean {
     const resolve = this.#pendingRequests.get(id);
@@ -620,10 +615,6 @@ export class SandboxCodexSession {
     this.#pendingRequests.delete(id);
     resolve(result);
     return true;
-  }
-
-  hasPending(id: string): boolean {
-    return this.#pendingRequests.has(id);
   }
 
   cancelAllPending(): void {

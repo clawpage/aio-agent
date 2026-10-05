@@ -8,7 +8,6 @@ import type { Config } from "../config.js";
 import type { Logger } from "../../common/logger.js";
 import type { CodexModel, SandboxAccount } from "./sandboxCodex.js";
 import type { DispatchTimingSink } from "./dispatchTiming.js";
-import type { HostTokenSource } from "./hostTokens.js";
 import { BridgeModel, CHATGPT_PROVIDER_ID } from "../bridgeModel.js";
 import { CLAUDE_CODE_PROVIDER_ID, type ClaudeCodeHarness } from "../claudeCode.js";
 import { withTabPolicy, type BrowserTask, type TabServerLike } from "../browser/tabs.js";
@@ -295,7 +294,6 @@ export class AgentManager {
   #cfg: Config;
   #log: Logger;
   #codex: CodexSessionLike;
-  #hostTokens: HostTokenSource;
   #bridge: BridgeModel | null;
   #claudeCode: ClaudeCodeHarness | null;
   /** Tab-scoped browser tools: parallel tasks lock tabs, never the whole browser. */
@@ -337,7 +335,6 @@ export class AgentManager {
     db: Db;
     log: Logger;
     codex: CodexSessionLike;
-    hostTokens: HostTokenSource;
     /** Optional: when present, every managed turn protects the sandbox browser. */
     browser?: BrowserGateLike | null;
     /** Optional bridge model; absent means every turn runs on ChatGPT. */
@@ -354,7 +351,6 @@ export class AgentManager {
     this.#db = deps.db;
     this.#log = deps.log.child("agent");
     this.#codex = deps.codex;
-    this.#hostTokens = deps.hostTokens;
     this.#browser = deps.browser ?? null;
     this.#bridge = deps.bridge ?? null;
     this.#claudeCode = deps.claudeCode ?? null;
@@ -423,9 +419,6 @@ export class AgentManager {
       this.#appendEvent(req.conversation_id, null, "approval.resolved", { requestId: req.id, decision: "expired" });
     }
     this.#db.prepare("UPDATE conversations SET status = 'idle' WHERE status = 'running'").run();
-    this.#db.prepare("UPDATE agent_state SET active_turn_id = NULL, active_conversation_id = NULL, queue_json = '[]', updated_at = ? WHERE id = 1").run(
-      Date.now(),
-    );
     if (stale.length || pending.length) {
       this.#log.warn("reconciled interrupted work after restart", { turns: stale.length, approvals: pending.length });
     }
@@ -881,7 +874,6 @@ export class AgentManager {
       // Reserve the conversation slot synchronously before any await so a later
       // pump pass (or a concurrent submit) cannot start a second turn for it.
       this.#activeTurns.set(turn.conversation_id, ctx);
-      this.#persistActiveState();
       // Protect the sandbox browser for the whole turn. The reservation is
       // synchronous and taken here, before the first await, so an idle timer can
       // never release a Chromium this turn is about to use - even while the turn
@@ -896,7 +888,6 @@ export class AgentManager {
         // strand the conversation slot: undo it synchronously and report the turn.
         const message = err instanceof Error ? err.message : String(err);
         this.#activeTurns.delete(turn.conversation_id);
-        this.#persistActiveState();
         this.#failTurn(turn, message);
         this.#db
           .prepare("UPDATE conversations SET status = 'idle', updated_at = ? WHERE id = ?")
@@ -921,24 +912,10 @@ export class AgentManager {
             : Promise.resolve();
           void finishing.finally(releaseBrowser);
           this.#activeTurns.delete(turn.conversation_id);
-          this.#persistActiveState();
           this.#db.prepare("UPDATE conversations SET status = 'idle', updated_at = ? WHERE id = ?").run(Date.now(), turn.conversation_id);
           this.#pump();
         });
     }
-  }
-
-  /**
-   * Legacy `agent_state` only has room for one active turn, so it mirrors the
-   * first (oldest) running turn while the full set is persisted in `queue_json`.
-   * Restart reconciliation still inspects every `running` turn in `turns`.
-   */
-  #persistActiveState(): void {
-    const active = [...this.#activeTurns.values()];
-    const first = active[0] ?? null;
-    this.#db
-      .prepare("UPDATE agent_state SET active_turn_id = ?, active_conversation_id = ?, queue_json = ?, updated_at = ? WHERE id = 1")
-      .run(first?.turnId ?? null, first?.conversationId ?? null, JSON.stringify(active.map((a) => a.turnId)), Date.now());
   }
 
   async #runTurn(turn: TurnRow, ctx: ActiveTurn): Promise<void> {
@@ -1716,15 +1693,6 @@ export class AgentManager {
     } catch (err) {
       this.#log.debug("model catalog unavailable at init", { error: err instanceof Error ? err.message : String(err) });
     }
-  }
-
-  /** Whether a model catalog has been observed (settings UI disables saving when not). */
-  hasModelCatalog(): boolean {
-    return this.#modelCatalog.length > 0;
-  }
-
-  async hostAuthStatus() {
-    return await this.#hostTokens.status();
   }
 
   shutdown(): void {

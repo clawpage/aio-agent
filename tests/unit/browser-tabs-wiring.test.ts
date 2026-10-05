@@ -3,7 +3,6 @@ import fs from "node:fs";
 import path from "node:path";
 import { createHash } from "node:crypto";
 import { AgentManager } from "../../src/control/codex/manager.js";
-import type { HostTokenSource } from "../../src/control/codex/hostTokens.js";
 import { openDb, type Db } from "../../src/control/db.js";
 import { Logger } from "../../src/common/logger.js";
 import { pruneBeforeSnapshot, TAB_POLICY, tabMcpServers, tabThreadConfig, type BrowserTask } from "../../src/control/browser/tabs.js";
@@ -50,7 +49,7 @@ beforeEach(async () => {
   };
   const browser = { reserveTurn: () => () => void log.push("lease-end"), ready: async () => void log.push("ready") };
   cfg = testConfig("/tmp/pa-tabs-wiring", 1);
-  agent = new AgentManager({ cfg, db, codex, log: new Logger("error", undefined, false), hostTokens: {} as HostTokenSource, browser, tabs });
+  agent = new AgentManager({ cfg, db, codex, log: new Logger("error", undefined, false), browser, tabs });
   await agent.init();
 });
 

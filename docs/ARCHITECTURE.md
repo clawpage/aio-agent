@@ -168,9 +168,8 @@ HTTP、SSE、WebSocket、文件预览、上传、终端与浏览器都走同一�
   同一会话始终只有一个 turn 在跑，其后续输入排队。活动 turn 以会话为键保存在
   `#activeTurns`；通知、delta、审批、停止、完成等待都按 `threadId`/`turnId` 归属到正确的会话，
   无身份可归属的事件（未知线程，或存在多个活动 turn 且无标识）被丢弃或直接拒绝，绝不记到随机会话。
-  重复提交由 `clientMessageId` 幂等去重，同一 ID 携带不同内容会被 409 拒绝。旧的
-  `agent_state.active_turn_id`/`active_conversation_id` 表示第一个活动 turn，重启核对仍扫描所有
-  `running` 轮次。
+  重复提交由 `clientMessageId` 幂等去重，同一 ID 携带不同内容会被 409 拒绝。重启核对扫描
+  `turns` 里所有 `running` 轮次（`turns` 是唯一记录，旧的单槽 `agent_state` 表已删除）。
 - 所有事件（含流式 delta）先落 SQLite 再广播；浏览器断线**不会**中断智能体，重连按事件 id
   分页补齐历史（`?since=`）。delta 在 250 ms 窗口内合并，但任何非 delta 事件落库前会先冲刷
   缓冲区，保证客户端不会先看到完整文本、再收到旧 delta 而重复。

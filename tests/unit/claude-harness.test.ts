@@ -10,7 +10,6 @@ import { ClaudeStreamTranslator, MAX_TOOL_OUTPUT_CHARS, toolItem } from "../../s
 import { HarnessSession } from "../../src/control/codex/harnessSession.js";
 import { JsonRpcResponseError } from "../../src/control/codex/jsonrpc.js";
 import { AgentManager } from "../../src/control/codex/manager.js";
-import type { HostTokenSource } from "../../src/control/codex/hostTokens.js";
 import type { SandboxContainer } from "../../src/control/sandbox/container.js";
 import { openDb, type Db } from "../../src/control/db.js";
 import { UsageLedger } from '../../src/control/usage.js';
@@ -505,8 +504,7 @@ describe("AgentManager with the Claude Code harness", () => {
     codex = new FakeCodex();
     const cfg = enabledConfig();
     db = openDb(":memory:");
-    const hostTokens = { status: async () => ({ ok: true }) } as unknown as HostTokenSource;
-    agent = new AgentManager({ cfg, db, log, codex, hostTokens, claudeCode: new ClaudeCodeHarness(cfg, log) });
+    agent = new AgentManager({ cfg, db, log, codex, claudeCode: new ClaudeCodeHarness(cfg, log) });
     await agent.init();
   });
 
@@ -539,8 +537,7 @@ describe("AgentManager with the Claude Code harness", () => {
     };
     const memberDb = openDb(":memory:");
     memberDb.prepare("INSERT INTO owners(id,username,role,password_hash,password_salt,password_params,created_at) VALUES ('user_m','cr','member','x','x','{}',0)").run();
-    const hostTokens = { status: async () => ({ ok: true }) } as unknown as HostTokenSource;
-    const member = new AgentManager({ cfg, db: memberDb, log, codex, hostTokens, claudeCode: new ClaudeCodeHarness(cfg, log) });
+    const member = new AgentManager({ cfg, db: memberDb, log, codex, claudeCode: new ClaudeCodeHarness(cfg, log) });
     await member.init();
     try {
       expect(member.memberSettings()).toEqual({ model: "claude-sonnet-5-5", effort: "high" });

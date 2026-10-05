@@ -131,7 +131,7 @@ export async function bootstrap(opts: BootstrapOptions = {}): Promise<Bootstrapp
   });
   // The manager protects the browser for the whole of every managed turn, so a
   // lease must exist before this point (a queued turn can start on construction).
-  const agent = new AgentManager({ cfg, db, log, codex, hostTokens, browser, bridge, claudeCode, tabs });
+  const agent = new AgentManager({ cfg, db, log, codex, browser, bridge, claudeCode, tabs });
   const aio = opts.overrides?.aio ?? new AioClient(log, container);
 
   const jev = new Jev(cfg, log);

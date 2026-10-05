@@ -1,7 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { openDb, type Db } from "../../src/control/db.js";
 import { AgentManager } from "../../src/control/codex/manager.js";
-import type { HostTokenSource } from "../../src/control/codex/hostTokens.js";
 import { JsonRpcResponseError, JsonRpcTimeoutError } from "../../src/control/codex/jsonrpc.js";
 import { Logger } from "../../src/common/logger.js";
 import { FakeCodex, testConfig } from "../helpers/harness.js";
@@ -12,8 +11,7 @@ let agent: AgentManager, codex: FakeCodex, db: Db;
 async function start(stopGraceMs = 60) {
   codex = new FakeCodex();
   db = openDb(":memory:");
-  const hostTokens = { status: async () => ({ ok: true, authMethod: "chatgpt", email: null, planType: null, expiresAt: null, error: null }) } as unknown as HostTokenSource;
-  agent = new AgentManager({ cfg: testConfig("/tmp/pa-turn-outcomes", 1), db, log: new Logger("error", undefined, false), codex, hostTokens, stopGraceMs });
+  agent = new AgentManager({ cfg: testConfig("/tmp/pa-turn-outcomes", 1), db, log: new Logger("error", undefined, false), codex, stopGraceMs });
   await agent.init();
 }
 const turn = (id: string) => db.prepare("SELECT status, error FROM turns WHERE client_message_id=?").get(id) as { status: string; error: string | null };

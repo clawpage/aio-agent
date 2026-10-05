@@ -3,7 +3,6 @@ import { openDb, type Db } from "../../src/control/db.js";
 import { Logger } from "../../src/common/logger.js";
 import { AgentManager, type BrowserGateLike } from "../../src/control/codex/manager.js";
 import { FakeCodex, testConfig } from "../helpers/harness.js";
-import type { HostTokenSource } from "../../src/control/codex/hostTokens.js";
 import { shouldProtectBrowser } from "../../src/control/http/proxy.js";
 import { isBrowserBoundPath, isStaticAssetPath } from "../../src/control/browser/service.js";
 import { BrowserViewerController } from "../../src/ui/src/browserViewer.js";
@@ -67,8 +66,7 @@ function makeManager(gate: BrowserGateLike | null, extraEnv: Record<string, stri
   const codex = new FakeCodex();
   const cfg = testConfig("/tmp/pa-browser-integration", 1, extraEnv);
   const db = openDb(":memory:");
-  const hostTokens = { status: async () => ({ ok: true, authMethod: "chatgpt", email: null, planType: null, expiresAt: null, error: null }) } as unknown as HostTokenSource;
-  const agent = new AgentManager({ cfg, db, log: new Logger("error", undefined, false), codex, hostTokens, browser: gate });
+  const agent = new AgentManager({ cfg, db, log: new Logger("error", undefined, false), codex, browser: gate });
   return { agent, codex, db };
 }
 

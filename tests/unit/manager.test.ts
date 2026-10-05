@@ -11,7 +11,6 @@ import {
   type AgentEvent,
 } from "../../src/control/codex/manager.js";
 import { FakeCodex, testConfig } from "../helpers/harness.js";
-import type { HostTokenSource } from "../../src/control/codex/hostTokens.js";
 
 function seedConversation(db: Db, id: string, model: string | null): void {
   const now = Date.now();
@@ -23,8 +22,7 @@ function seedConversation(db: Db, id: string, model: string | null): void {
 function makeManager(extraEnv: Record<string, string> = {}, db: Db = openDb(":memory:")): { agent: AgentManager; codex: FakeCodex; db: Db } {
   const codex = new FakeCodex();
   const cfg = testConfig("/tmp/pa-manager-test", 1, extraEnv);
-  const hostTokens = { status: async () => ({ ok: true, authMethod: "chatgpt", email: null, planType: null, expiresAt: null, error: null }) } as unknown as HostTokenSource;
-  const agent = new AgentManager({ cfg, db, log: new Logger("error", undefined, false), codex, hostTokens });
+  const agent = new AgentManager({ cfg, db, log: new Logger("error", undefined, false), codex });
   return { agent, codex, db };
 }
 
@@ -261,7 +259,6 @@ describe("AgentManager", () => {
       db,
       log: new Logger("error", undefined, false),
       codex: freshCodex,
-      hostTokens: { status: async () => ({}) } as unknown as HostTokenSource,
     });
     await fresh.init();
 
@@ -412,8 +409,7 @@ describe("AgentManager", () => {
       throw new Error("codex not up yet");
     };
     const cfg2 = testConfig("/tmp/pa-manager-test", 1);
-    const hostTokens = { status: async () => ({ ok: true, authMethod: "chatgpt", email: null, planType: null, expiresAt: null, error: null }) } as unknown as HostTokenSource;
-    const agent2 = new AgentManager({ cfg: cfg2, db: db2, log: new Logger("error", undefined, false), codex: codex2, hostTokens });
+    const agent2 = new AgentManager({ cfg: cfg2, db: db2, log: new Logger("error", undefined, false), codex: codex2 });
     await agent2.init();
     // Seed a saved choice directly (the API validated it when it was saved).
     writeAgentSettings(db2, { model: "gpt-6-sol", effort: "high" });
@@ -605,7 +601,6 @@ describe("AgentManager", () => {
       db,
       log: new Logger("error", undefined, false),
       codex: freshCodex,
-      hostTokens: { status: async () => ({}) } as unknown as HostTokenSource,
     });
     await fresh.init();
     const statuses = db.prepare("SELECT id, status FROM turns ORDER BY id").all() as Array<{ id: string; status: string }>;

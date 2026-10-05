@@ -2,7 +2,6 @@ import { DispatchTimeoutError } from "../../src/control/codex/dispatchTiming.js"
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { openDb, type Db } from "../../src/control/db.js";
 import { AgentManager } from "../../src/control/codex/manager.js";
-import type { HostTokenSource } from "../../src/control/codex/hostTokens.js";
 import { TaskService } from "../../src/control/tasks/service.js";
 import { executorQuestion } from "../../src/control/tasks/executorQuestion.js";
 import { JsonRpcResponseError } from "../../src/control/codex/jsonrpc.js";
@@ -51,7 +50,7 @@ beforeEach(async () => {
     db = openDb(":memory:");
     codex = new PlanningCodex();
     const cfg = testConfig("/tmp/aio-main-tasks", 1);
-    agent = new AgentManager({ db, cfg, codex, log: new Logger("error", undefined, false), hostTokens: {} as HostTokenSource });
+    agent = new AgentManager({ db, cfg, codex, log: new Logger("error", undefined, false) });
     await agent.init();
     tasks = new TaskService(db, cfg, agent, codex);
     tasks.init();
@@ -416,7 +415,7 @@ describe("main inbox delegation", () => {
         agent.shutdown();
         const cfg = testConfig("/tmp/aio-main-tasks", 1);
         codex = new PlanningCodex();
-        agent = new AgentManager({ db, cfg, codex, log: new Logger("error", undefined, false), hostTokens: {} as HostTokenSource });
+        agent = new AgentManager({ db, cfg, codex, log: new Logger("error", undefined, false) });
         await agent.init();
         tasks = new TaskService(db, cfg, agent, codex);
         tasks.init();

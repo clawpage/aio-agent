@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { openDb, type Db } from "../../src/control/db.js";
 import { AgentManager } from "../../src/control/codex/manager.js";
-import type { HostTokenSource } from "../../src/control/codex/hostTokens.js";
 import { TaskService } from "../../src/control/tasks/service.js";
 import { Logger } from "../../src/common/logger.js";
 import { taskNotification } from "../../src/control/push.js";
@@ -20,7 +19,7 @@ const fire = () => (tasks as unknown as { runDueSchedules(): void }).runDueSched
 const feed = () => db.prepare("SELECT * FROM schedules WHERE builtin='daily_feed'").get() as { id: string; status: string; run_count: number; next_run_at: number; last_task_id: string | null; resources_json: string };
 const due = () => db.prepare("UPDATE schedules SET next_run_at=? WHERE builtin='daily_feed'").run(Date.now() - 1000);
 async function start() {
-  agent = new AgentManager({ db, cfg, codex, log: new Logger("error", undefined, false), hostTokens: {} as HostTokenSource });
+  agent = new AgentManager({ db, cfg, codex, log: new Logger("error", undefined, false) });
   await agent.init();
   tasks = new TaskService(db, cfg, agent, codex);
   tasks.init();

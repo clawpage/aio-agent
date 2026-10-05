@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { openDb, type Db } from "../../src/control/db.js";
 import { AgentManager } from "../../src/control/codex/manager.js";
-import type { HostTokenSource } from "../../src/control/codex/hostTokens.js";
 import { TaskService } from "../../src/control/tasks/service.js";
 import { Logger } from "../../src/common/logger.js";
 import { FakeCodex, testConfig } from "../helpers/harness.js";
@@ -28,7 +27,7 @@ beforeEach(async () => {
   codex = new PlanningCodex();
   const cfg = testConfig("/tmp/aio-scheduled", 1);
   cfg.browser.timezone = "America/Los_Angeles";
-  agent = new AgentManager({ db, cfg, codex, log: new Logger("error", undefined, false), hostTokens: {} as HostTokenSource });
+  agent = new AgentManager({ db, cfg, codex, log: new Logger("error", undefined, false) });
   await agent.init();
   tasks = new TaskService(db, cfg, agent, codex);
   tasks.init();
