@@ -218,14 +218,19 @@ export async function startSandboxRuntime(ctx: AppContext): Promise<void> {
     try {
       // Sites also reject the image's old Chromium build; a newer one replaces it when configured.
       let build: { binary: string; libraryPath: string } | null = null;
+      let buildFailed = false;
       if (cfg.browser.build) {
         try {
           build = await container.ensureBrowserBuild(cfg.browser.build);
         } catch (err) {
-          log.warn("browser build not installed; keeping the image browser", { error: err instanceof Error ? err.message : String(err) });
+          buildFailed = true;
+          log.warn("browser build not checked; leaving the browser as it is", { error: err instanceof Error ? err.message : String(err) });
         }
       }
-      if (await container.alignBrowserIdentity(cfg.browser.timezone, build)) log.info("sandbox browser identity aligned", { timezone: cfg.browser.timezone, binary: build?.binary ?? "image" });
+      // Without a checked build, aligning would switch the running browser back to the image's
+      // older Chromium, which cannot open a profile the newer build upgraded; the next start retries.
+      if (buildFailed) log.warn("sandbox browser identity not aligned: browser build unavailable");
+      else if (await container.alignBrowserIdentity(cfg.browser.timezone, build)) log.info("sandbox browser identity aligned", { timezone: cfg.browser.timezone, binary: build?.binary ?? "image" });
     } catch (err) {
       log.warn("sandbox browser identity not aligned", { error: err instanceof Error ? err.message : String(err) });
     }
