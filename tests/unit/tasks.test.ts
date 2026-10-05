@@ -1,3 +1,4 @@
+import { DispatchTimeoutError } from "../../src/control/codex/dispatchTiming.js";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { openDb, type Db } from "../../src/control/db.js";
 import { AgentManager } from "../../src/control/codex/manager.js";
@@ -77,6 +78,14 @@ describe("main inbox delegation", () => {
         codex.plan = async () => { throw new Error("任务分配失败：You've hit your usage limit."); };
         const job = submit("额度用完"); await tick();
         expect(tasks.get(job.id)).toMatchObject({ status: "planning_failed", error: "任务分配失败：You've hit your usage limit." });
+    });
+    it("fails planning at once when the dispatcher times out, instead of re-asking it as a format error", async () => {
+        codex.plan = async () => { throw new DispatchTimeoutError(90); };
+        const job = submit("慢"); await tick();
+        expect(tasks.get(job.id)).toMatchObject({ status: "planning_failed" });
+        expect(tasks.get(job.id)?.error).toContain("派单超时");
+        expect(tasks.get(job.id)?.error).not.toContain("JSON");
+        expect(codex.plans).toHaveLength(1);
     });
     it("freezes browser dependency from the dispatched resource plan", async () => {
         const chat=submit("hi"); await tick();

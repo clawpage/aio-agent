@@ -442,6 +442,7 @@ export class TaskService {
             const report: PlanReport = { repairs: [] };
             let plan = parsePlan(raw ?? null, lunaCandidates, row.related_task_id, this.cfg.sandbox.containerWorkspaceDir, report, scheduling);
             // One more chance with the reason, instead of failing the message outright.
+            // (A dispatcher that gave no answer in time throws instead: re-asking would only wait again.)
             if (!plan) {
                 trace.rounds += 1;
                 const prompt = planningPrompt(planningInput, lunaCandidates, row.related_task_id, { correction: report.error ?? "格式不符合要求", timeline: lunaTimeline, jev: relevance, now: describeNow(scheduling.now, scheduling.timezone), timezone: scheduling.timezone, schedules: scheduling.schedules });

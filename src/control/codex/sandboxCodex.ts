@@ -9,7 +9,7 @@ import type { Logger } from "../../common/logger.js";
 import type { SandboxContainer } from "../sandbox/container.js";
 import type { BridgeModel } from "../bridgeModel.js";
 import { JsonRpcPeer, JsonRpcTimeoutError } from "./jsonrpc.js";
-import type { DispatchTimingSink } from "./dispatchTiming.js";
+import { DispatchTimeoutError, type DispatchTimingSink } from "./dispatchTiming.js";
 import type { HostTokenSource } from "./hostTokens.js";
 import type { UsageLedger } from '../usage.js';
 
@@ -299,14 +299,15 @@ export class SandboxCodexSession {
     } finally {
       onTiming?.({ classifierMs: Date.now() - started });
     }
-    const { text, error } = result;
+    const { text, error, timedOut } = result;
     // A reported reason (such as an exhausted usage limit) is shown on the task
     // instead of a generic "try again".
     if (error) throw new Error(`任务分配失败：${error}`);
+    if (timedOut) throw new DispatchTimeoutError(Math.round(this.planTimeoutMs / 1000));
     return text;
   }
 
-  async #auxiliaryText(prompt: string, effort: string | null, timeoutMs: number, developerInstructions?: string, requestedModel?: string, onTiming?: DispatchTimingSink): Promise<{ text: string | null; error: string | null }> {
+  async #auxiliaryText(prompt: string, effort: string | null, timeoutMs: number, developerInstructions?: string, requestedModel?: string, onTiming?: DispatchTimingSink): Promise<{ text: string | null; error: string | null; timedOut?: boolean }> {
     const connectionStarted = Date.now();
     await this.start();
     onTiming?.({ connectionMs: Date.now() - connectionStarted });
@@ -430,7 +431,7 @@ export class SandboxCodexSession {
         await this.#interruptAuxTurn(threadId, startPromise, () => turnId);
       }
     }
-    if (turnStatus !== "completed") return { text: null, error: failure };
+    if (turnStatus !== "completed") return { text: null, error: failure, timedOut };
     return { text: finalText || deltas.join("") || null, error: null };
   }
 

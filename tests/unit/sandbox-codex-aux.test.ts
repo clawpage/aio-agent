@@ -139,7 +139,7 @@ describe("SandboxCodexSession dispatcher thread isolation", () => {
     server.handle('thread/start',()=>({thread:{id:'aux-usage'}}));server.handle('turn/start',()=>({turn:{id:'turn'}}));
     const session=makeSession(server,30,null,new UsageLedger(db));const forwarded:unknown[]=[];session.onNotification((m,p)=>forwarded.push([m,p]));
     try {
-      await session.planTask('classify');
+      await expect(session.planTask('classify')).rejects.toThrow('派单超时');
       server.notify('thread/tokenUsage/updated',{threadId:'aux-usage',tokenUsage:{total:{inputTokens:100,outputTokens:4},last:{inputTokens:100,outputTokens:4}}});
       await wait(20);
       expect(db.prepare('SELECT SUM(input) input,SUM(output) output FROM token_usage').get()).toMatchObject({input:100,output:4});
@@ -155,8 +155,8 @@ describe("SandboxCodexSession dispatcher thread isolation", () => {
     session.onNotification((method, params) => forwarded.push({ method, params }));
 
     try {
-      // The scripted turn never completes, so the dispatcher run times out.
-      expect(await session.planTask("第一轮用户消息")).toBeNull();
+      // The scripted turn never completes, so the dispatcher run times out (reported as such, not as an empty answer).
+      await expect(session.planTask("第一轮用户消息")).rejects.toThrow("派单超时");
 
       // The main conversation is mid-turn (delta for a real thread is forwarded).
       server.notify("item/agentMessage/delta", { threadId: "main_1", turnId: "turn_main", itemId: "i2", delta: "正常增量" });
@@ -195,7 +195,7 @@ describe("SandboxCodexSession dispatcher thread isolation", () => {
     session.onNotification((method) => forwarded.push(method));
 
     try {
-      expect(await session.planTask("第一轮")).toBeNull();
+      await expect(session.planTask("第一轮")).rejects.toThrow("派单超时");
       // The interrupted turn finally reports completion: the tombstone is dropped.
       server.notify("turn/completed", { threadId: "aux_2", turn: { id: "turn_aux_2", status: "interrupted" } });
       await wait(10);

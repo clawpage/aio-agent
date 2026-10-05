@@ -5,7 +5,7 @@ import type { Logger } from "../../common/logger.js";
 import type { SandboxContainer } from "../sandbox/container.js";
 import { CLAUDE_CODE_PROVIDER_ID, CLAUDE_THREAD_PREFIX, type ClaudeCodeHarness } from "../claudeCode.js";
 import type { TurnAttachment } from "./manager.js";
-import type { DispatchTimingSink } from "./dispatchTiming.js";
+import { DispatchTimeoutError, type DispatchTimingSink } from "./dispatchTiming.js";
 import { ClaudeStreamTranslator } from "./claudeTranslator.js";
 import { tabMcpServers, type BrowserTask } from "../browser/tabs.js";
 import { decisionMcpServers } from "../decision.js";
@@ -359,7 +359,7 @@ export class ClaudeCodeSession {
     if (!closed) {
       this.#log.warn("claude code auxiliary run timed out", { timeoutMs });
       void this.#container.killClaudeSession(sessionId).finally(() => child.kill());
-      return null;
+      throw new DispatchTimeoutError(Math.round(timeoutMs / 1000));
     }
     try {
       const result = JSON.parse(stdout) as Json;
