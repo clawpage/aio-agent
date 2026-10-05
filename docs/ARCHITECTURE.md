@@ -214,6 +214,10 @@ helper 内、紧挨着信号发生。
 - **快照边界**：保存标签顺序/URL/选中页/滚动/`sessionStorage`，以及 cookies 和当前标签站点的 localStorage/IndexedDB；完整存储导出失败则不停止。恢复是**重建页面**而非保留 JS 堆，先注入按 origin 限定的
   `sessionStorage` 初始化脚本再导航，在创建标签前让 AIO soft 重连，避免重连后的 CDP 枚举打乱索引；最后核对顺序并激活正确标签。不支持/含未提交输入/
   正在下载的页面会**保守拒绝**回收并给出原因；快照失败**绝不**停止浏览器，恢复失败保留快照不报成功。
+  只有 `stop` 在发信号前标记为“已释放”的快照才欠恢复（之前的旧快照仍按进程身份判断）；欠恢复期间拒绝保存新快照。
+  页面变短到不了原滚动位置、跳到别的 origin（如登录页）只记警告；同一快照连续 3 次恢复都失败的标签放弃并在 `unrestored` 里如实报告，
+  恢复照常完成。`wake`/`restore` 的 `--deadline-s` 是整体时间预算，用尽后不再开始新步骤，返回 `deadline_exceeded`，重试接着做；
+  `stop` 的 `--timeout-s` 是等待守护进程与浏览器退出的总上限。
   归属不明的进程（本沙箱的 Chromium 会把自己的命令行压成一个 token，root 也读不到 `/proc/<pid>/exe`）
   报 `browserAttribution: "unknown"` 且 `browserRunning: null`，**绝不当成“没有浏览器”**去另起一个；
   读不出内容的标签报 `tab_unresponsive` 而不是伪造原因，命令本身失败也一定返回结构化 JSON 而非堆栈。

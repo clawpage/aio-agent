@@ -125,6 +125,17 @@ BLOCKING_PROBLEMS = (
     "active_index_out_of_range",
 )
 
+# A tab that fails the same way this many restores of one snapshot in a row will
+# not come back by retrying; it is then reported as a warning so the restore can
+# finish instead of blocking the browser forever.
+RESTORE_TAB_MAX_ATTEMPTS = 3
+# Below this much wake budget the storage import is not started: the node helper
+# needs its own deadline plus cleanup time to close what it opened.
+STORAGE_IMPORT_MIN_S = 10.0
+# A status poll holds the lock (shared) for a moment; a real transition waits that
+# out instead of failing "locked".
+LOCK_WAIT_S = 2.0
+
 SNAPSHOT_WARNING_CODES = (
     "unsupported_scheme",
     "unreachable",
@@ -328,7 +339,7 @@ def storage_helper_paths(helper_dir: str | None = None) -> tuple[str, str]:
 
 
 def _run_storage_helper(
-    argv: Sequence[str], timeout: float, helper_dir: str | None = None
+    argv: Sequence[str], timeout: float, helper_dir: str | None = None, deadline_ms: int | None = None
 ) -> dict[str, Any]:
     """Invoke the node storage helper and parse its single JSON line.
 
@@ -351,6 +362,9 @@ def _run_storage_helper(
             stderr=subprocess.PIPE,
             timeout=timeout,
             check=False,
+            # A caller with less time than the helper's own deadline hands it a
+            # shorter one, so the helper still closes what it opened in time.
+            env=None if deadline_ms is None else {**os.environ, "BROWSER_STORAGE_DEADLINE_MS": str(deadline_ms)},
         )
     except subprocess.TimeoutExpired as exc:
         raise StorageError("storage_timeout") from exc
@@ -432,6 +446,7 @@ def import_storage_state(
     timeout: float = 45.0,
     helper_dir: str | None = None,
     temp_dir: str | None = None,
+    deadline_ms: int | None = None,
 ) -> dict[str, Any]:
     """Apply a captured storage state to the default context *before* navigating.
 
@@ -451,7 +466,7 @@ def import_storage_state(
         handle.close()
         os.chmod(handle.name, 0o600)
         return _run_storage_helper(
-            ["import", "--endpoint", endpoint, "--in", handle.name], timeout, helper_dir
+            ["import", "--endpoint", endpoint, "--in", handle.name], timeout, helper_dir, deadline_ms
         )
     finally:
         try:
@@ -980,11 +995,18 @@ class FileLock:
         os.makedirs(directory, exist_ok=True)
         fd = os.open(self.path, os.O_RDWR | os.O_CREAT, 0o600)
         mode = fcntl.LOCK_SH if self.shared else fcntl.LOCK_EX
-        try:
-            fcntl.flock(fd, mode | fcntl.LOCK_NB)
-        except OSError as exc:
-            os.close(fd)
-            raise LockBusy(f"另一个浏览器生命周期操作正在进行（{exc}）") from exc
+        # The shared probe never waits; an exclusive holder retries briefly so a
+        # concurrent status poll cannot make a real transition fail "locked".
+        deadline = time.monotonic() + (0.0 if self.shared else LOCK_WAIT_S)
+        while True:
+            try:
+                fcntl.flock(fd, mode | fcntl.LOCK_NB)
+                break
+            except OSError as exc:
+                if time.monotonic() >= deadline:
+                    os.close(fd)
+                    raise LockBusy(f"另一个浏览器生命周期操作正在进行（{exc}）") from exc
+                time.sleep(0.05)
         self._fd = fd
 
     def release(self) -> None:
@@ -1552,6 +1574,19 @@ def capture_snapshot(
         )
 
     browser = verify_browser(browser_pid_file, profile_dir)
+    # While a released snapshot is still owed, the running browser does not hold
+    # the user's tabs yet: saving it would replace them with a blank browser's.
+    # The caller holds the transition lock, so no restore can finish meanwhile.
+    if restore_pending(
+        snapshot_path,
+        int(browser["pid"]) if browser["ok"] else None,
+        int(browser["starttime"]) if browser["ok"] else None,
+    ):
+        return err(
+            "上次释放的标签尚未恢复，拒绝用当前浏览器覆盖快照",
+            blocked=True,
+            reason="restore_pending",
+        )
 
     cdp = Cdp(timeout=timeout)
     try:
@@ -1697,6 +1732,9 @@ def capture_snapshot(
         "skipped": 0,
         "orderVerified": order_verified,
         "storage": storage,
+        # Owed only once `stop` marks it released (see `restore_pending`); older
+        # snapshots without this flag keep the identity rule they were saved under.
+        "releaseTracked": True,
         "source": {
             "browserPid": int(browser["pid"]) if browser["ok"] else None,
             "browserStarttime": int(browser["starttime"]) if browser["ok"] else None,
@@ -1789,6 +1827,12 @@ def stop_browser(
     SIGKILL internally after its grace period; that behaviour belongs to
     /opt/gem/browser-supervisor.py and is not something this helper can promise
     away. Anything still alive after the timeout is reported as a failure.
+
+    `timeout_s` is one total budget for both waits (supervisor exit, then
+    browser exit), so a caller can fit it inside its own exec timeout.
+
+    Just before the signal the snapshot is marked released in its restore record:
+    only a released snapshot is ever owed to a later browser.
     """
     snapshot, problem = read_snapshot(snapshot_path)
     if snapshot is None:
@@ -1856,6 +1900,10 @@ def stop_browser(
         return err("浏览器进程在发送信号前已发生变化，未执行停止", pid=browser_pid)
 
     try:
+        mark_released(snapshot_path, snapshot)
+    except OSError as exc:
+        return err(redact_urls(f"无法记录释放标记，未执行停止：{exc}"), pid=pid)
+    try:
         os.kill(pid, signal.SIGTERM)
     except ProcessLookupError:
         pass
@@ -1869,7 +1917,6 @@ def stop_browser(
     else:
         return err("浏览器守护进程在超时内未退出，请人工确认", pid=pid)
 
-    deadline = time.monotonic() + timeout_s
     while time.monotonic() < deadline:
         if not pid_alive(browser_pid):
             break
@@ -1974,6 +2021,20 @@ def write_restore_state(snapshot_path: str, state: Mapping[str, Any]) -> None:
         raise
 
 
+def mark_released(snapshot_path: str, snapshot: Mapping[str, Any]) -> None:
+    """Record that this snapshot's browser is being released by `stop`.
+
+    Only a released snapshot is owed to a later browser: one that was saved and
+    then kept running (a cancelled sleep, a refused stop) must never be applied
+    to whatever browser starts next after a crash.
+    """
+    state = read_restore_state(snapshot_path)
+    if state is None or state.get("snapshotSavedAt") != snapshot.get("savedAt"):
+        state = {"snapshotSavedAt": snapshot.get("savedAt"), "tabs": []}
+    state["released"] = True
+    write_restore_state(snapshot_path, state)
+
+
 def clear_restore_state(snapshot_path: str) -> None:
     try:
         os.unlink(restore_state_path_for(snapshot_path))
@@ -1982,10 +2043,9 @@ def clear_restore_state(snapshot_path: str) -> None:
 
 
 def _page_target_ids(cdp: Cdp) -> set[str]:
-    try:
-        return {str(t.get("id")) for t in cdp.targets() if t.get("type") == "page" and t.get("id")}
-    except CdpError:
-        return set()
+    # A failed listing raises: read as "no tabs", a retry would open a second copy
+    # of every restored page and close no placeholder.
+    return {str(t.get("id")) for t in cdp.targets() if t.get("type") == "page" and t.get("id")}
 
 
 def _close_startup_pages(cdp: Cdp, startup_ids: set[str], keep_ids: set[str]) -> None:
@@ -2010,11 +2070,17 @@ def _close_startup_pages(cdp: Cdp, startup_ids: set[str], keep_ids: set[str]) ->
             continue
 
 
+def deadline_exceeded(**fields: Any) -> dict[str, Any]:
+    """The wake/restore budget ran out. Progress is kept, so a retry resumes."""
+    return err("浏览器恢复超出时间预算，进度已保存，重试会接着完成", reason="deadline_exceeded", **fields)
+
+
 def restore_tabs(
     snapshot: Mapping[str, Any],
     snapshot_path: str = DEFAULT_SNAPSHOT_PATH,
     timeout: float = 60.0,
     load_timeout: float = 20.0,
+    deadline: float | None = None,
 ) -> dict[str, Any]:
     """Re-open the snapshot's tabs, idempotently. Only restorable URLs are created.
 
@@ -2027,11 +2093,32 @@ def restore_tabs(
     only when the document is still on the recorded origin (a redirect must not
     receive the previous site's tokens), and every step is verified. Any tab that
     could not be fully restored makes the whole restore fail - the snapshot stays
-    on disk so a later retry can finish the job.
+    on disk so a later retry can finish the job - until the same tab has failed
+    RESTORE_TAB_MAX_ATTEMPTS restores of this snapshot: it is then reported in
+    `unrestored` and the restore completes. A page that is shorter after reload
+    or that redirected to another origin is restored with a warning.
+
+    `deadline` (time.monotonic) bounds the whole call: no new step starts after
+    it, every CDP wait is capped to it, and the failure is resumable.
     """
     tabs = snapshot.get("tabs") or []
     saved_at = snapshot.get("savedAt")
-    cdp = Cdp(timeout=timeout)
+
+    def left(cap: float) -> float:
+        return cap if deadline is None else min(cap, deadline - time.monotonic())
+
+    if left(timeout) <= 0:
+        return deadline_exceeded(restoredTabs=0)
+    cdp = Cdp(timeout=left(timeout))
+
+    def out_of_time() -> bool:
+        """True once the budget is spent; otherwise caps the next CDP wait to it."""
+        remaining = left(timeout)
+        if remaining <= 0:
+            return True
+        cdp.timeout = remaining
+        return False
+
     try:
         cdp.connect()
     except CdpError as exc:
@@ -2057,8 +2144,16 @@ def restore_tabs(
         and state.get("storageBrowserStarttime") == identity_start
     )
     if storage_ok and not already_imported:
+        if left(STORAGE_IMPORT_MIN_S) < STORAGE_IMPORT_MIN_S:
+            cdp.close()
+            return deadline_exceeded(restoredTabs=0)
         try:
-            import_storage_state(storage, timeout=timeout)
+            import_storage_state(
+                storage,
+                timeout=left(timeout),
+                # Leave the helper its cleanup window inside our budget.
+                deadline_ms=None if deadline is None else int(min(25.0, left(timeout) - 6.0) * 1000),
+            )
         except StorageError as exc:
             # Fail closed: opening the tabs without their cookies/storage would
             # look like a successful restore while the user is logged out.
@@ -2074,15 +2169,16 @@ def restore_tabs(
         state["storageBrowserStarttime"] = identity_start
         write_restore_state(snapshot_path, state)
 
-    existing_ids = _page_target_ids(cdp)
-    startup_ids = set(existing_ids)
     entries: list[dict[str, Any]] = list(state.get("tabs") or [])
     while len(entries) < len(tabs):
         entries.append(None)
 
     failed: list[dict[str, Any]] = []
     problems: list[str] = []
+    unrestored: list[dict[str, Any]] = []
     try:
+        existing_ids = _page_target_ids(cdp)
+        startup_ids = set(existing_ids)
         # Attach AIO before creating restored tabs, so its page-added events
         # preserve creation order. Reconnecting afterwards enumerates CDP targets
         # in an unspecified order and can silently reverse the tool indices.
@@ -2092,6 +2188,8 @@ def restore_tabs(
                 return err("无法连接 AIO 浏览器接口，快照已保留", restoredTabs=0)
         # 1. Make sure every snapshot tab has a live target (re-using existing ones).
         for index, tab in enumerate(tabs):
+            if out_of_time():
+                break
             url = str(tab.get("url") or "")
             restorable, scheme = classify_url(url)
             if not restorable:
@@ -2135,6 +2233,8 @@ def restore_tabs(
         #    The init script is removed once the document is up so a later, normal
         #    navigation is not stomped by the values we restored here.
         for index, tab in enumerate(tabs):
+            if out_of_time():
+                break
             entry = entries[index] if isinstance(entries[index], dict) else None
             if not entry or not isinstance(entry.get("targetId"), str):
                 continue
@@ -2175,7 +2275,7 @@ def restore_tabs(
                 entry["navigated"] = True
                 state["tabs"] = entries
                 write_restore_state(snapshot_path, state)
-            if not wait_for_ready_state(cdp, session_id, load_timeout):
+            if not wait_for_ready_state(cdp, session_id, left(load_timeout)):
                 failed.append({"index": index, "reason": "load_timeout"})
                 continue
             if isinstance(entry.get("scriptId"), str):
@@ -2199,11 +2299,11 @@ def restore_tabs(
                         failed.append({"index": index, "reason": "storage_failed", "detail": redact_urls(str(exc))})
                         continue
                     if applied == "origin-mismatch":
-                        # The page redirected off-origin. Refusing to write is
-                        # correct; say so instead of silently continuing.
-                        failed.append({"index": index, "reason": "storage_origin_mismatch"})
-                        continue
-                    if applied not in ("ok", "skip-present"):
+                        # The page redirected off-origin (often to a sign-in
+                        # page). Refusing to write is correct, and no retry
+                        # changes where the site sends us: a warning.
+                        problems.append("storage_origin_mismatch")
+                    elif applied not in ("ok", "skip-present"):
                         failed.append({"index": index, "reason": "storage_failed"})
                         continue
                 entry["storageApplied"] = True
@@ -2216,11 +2316,39 @@ def restore_tabs(
                         failed.append({"index": index, "reason": "scroll_failed", "detail": redact_urls(str(exc))})
                         continue
                     if not isinstance(actual, (int, float)) or abs(float(actual) - float(scroll)) > 8:
-                        failed.append({"index": index, "reason": "scroll_unverified"})
-                        continue
+                        # A page shorter after reload (a lazy feed) cannot reach
+                        # the old offset; the page itself is back: a warning.
+                        problems.append("scroll_unverified")
                 entry["scrollApplied"] = True
             state["tabs"] = entries
             write_restore_state(snapshot_path, state)
+
+        if out_of_time():
+            # Failures cut short by the budget say nothing about the tab: they are
+            # not counted toward giving it up.
+            state["tabs"] = entries
+            state["completed"] = False
+            write_restore_state(snapshot_path, state)
+            return deadline_exceeded(restoredTabs=_restored_count(entries), failed=failed)
+
+        # A tab that failed again on its RESTORE_TAB_MAX_ATTEMPTS-th restore of this
+        # snapshot is given up: retrying would block the browser forever.
+        tries = state.get("tabFailures") if isinstance(state.get("tabFailures"), dict) else {}
+        still_failing: list[dict[str, Any]] = []
+        for failure in failed:
+            key = str(failure["index"])
+            tries[key] = int(tries.get(key) or 0) + 1
+            if tries[key] >= RESTORE_TAB_MAX_ATTEMPTS:
+                unrestored.append({"index": failure["index"], "reason": failure["reason"]})
+            else:
+                still_failing.append(failure)
+        state["tabFailures"] = tries
+        failed = still_failing
+        given_up = {item["index"] for item in unrestored}
+        if given_up:
+            problems.append("tab_unrestored")
+        kept = [i for i in range(len(entries)) if i not in given_up]
+        live = [entries[i] for i in kept]
 
         # 3. Move AIO off its startup page before closing placeholders. If its
         # selected Playwright page is closed, AIO reconnects on the next request
@@ -2228,7 +2356,7 @@ def restore_tabs(
         # Prove identities while that page is still alive, then select a restored
         # page so closing the placeholder cannot invalidate the AIO session.
         keep = {str(e["targetId"]) for e in entries if isinstance(e, dict) and isinstance(e.get("targetId"), str)}
-        before_close, _ = aio_restored_indices(cdp, entries, require_order=False)
+        before_close, _ = aio_restored_indices(cdp, live, require_order=False)
         if before_close:
             selected, _ = aio_activate_index(before_close[0], 0, reconnect=False)
             if selected:
@@ -2236,7 +2364,7 @@ def restore_tabs(
 
         # Prove target identity, preserving extra tabs instead of blocking forever
         # on a full-list URL comparison (duplicates/redirects are not identities).
-        restored_indices, index_problem = aio_restored_indices(cdp, entries, require_order=False)
+        restored_indices, index_problem = aio_restored_indices(cdp, live, require_order=False)
         if restored_indices is None:
             problems.append(index_problem)
         elif restored_indices != sorted(restored_indices):
@@ -2249,7 +2377,10 @@ def restore_tabs(
         #    The AIO tool pointer is what later MCP/browser calls use, so the
         #    native focus and the API's active index must be the same page.
         active_index = next((i for i, tab in enumerate(tabs) if tab.get("active")), None)
-        if active_index is not None:
+        if active_index is not None and active_index in given_up:
+            # The focused tab was given up above: there is nothing to focus.
+            problems.append("active_unrestored")
+        elif active_index is not None:
             entry = entries[active_index] if active_index < len(entries) else None
             target_id = entry.get("targetId") if isinstance(entry, dict) else None
             if restored_indices is not None and isinstance(target_id, str) and target_id in _page_target_ids(cdp):
@@ -2257,7 +2388,7 @@ def restore_tabs(
                     cdp.call("Target.activateTarget", {"targetId": target_id})
                 except CdpError:
                     problems.append("active_activate_failed")
-                synced, problem = aio_activate_index(restored_indices[active_index], 0, reconnect=False)
+                synced, problem = aio_activate_index(restored_indices[kept.index(active_index)], 0, reconnect=False)
                 if not synced:
                     problems.append(problem)
             else:
@@ -2273,6 +2404,11 @@ def restore_tabs(
         cdp.close()
 
     restored = _restored_count(entries)
+    if out_of_time():
+        state["tabs"] = entries
+        state["completed"] = False
+        write_restore_state(snapshot_path, state)
+        return deadline_exceeded(restoredTabs=restored, failed=failed)
     # A tab whose focus could not be handed to the AIO API is not a cosmetic
     # problem: later browser tool calls would address a different page than the
     # one the user sees, so the restore is not reported as success.
@@ -2296,7 +2432,7 @@ def restore_tabs(
     state["tabs"] = entries
     # Both browser clients must be ready before the snapshot is marked restored.
     # On failure keep the progress record, so retry reuses tabs and storage.
-    mcp = reconnect_mcp_browser()
+    mcp = reconnect_mcp_browser(deadline=deadline)
     if not mcp["ok"]:
         state["completed"] = False
         write_restore_state(snapshot_path, state)
@@ -2305,10 +2441,10 @@ def restore_tabs(
     state["browserPid"] = identity[0]
     state["browserStarttime"] = identity[1]
     write_restore_state(snapshot_path, state)
-    return ok(restoredTabs=restored, orderVerified=bool(snapshot.get("orderVerified", False)) and "tab_order_unverified" not in problems, problems=problems)
+    return ok(restoredTabs=restored, orderVerified=bool(snapshot.get("orderVerified", False)) and "tab_order_unverified" not in problems, problems=problems, unrestored=unrestored)
 
 
-def reconnect_mcp_browser() -> dict[str, Any]:
+def reconnect_mcp_browser(deadline: float | None = None) -> dict[str, Any]:
     """Discard the image MCP's stale Puppeteer cache after Chromium recovery.
 
     REST soft-restart only resets AIO's Playwright connection. The separate
@@ -2316,12 +2452,16 @@ def reconnect_mcp_browser() -> dict[str, Any]:
     Its streamable HTTP transport is stateless; restart only this named service,
     then exercise a page-bound tool (tools/list would miss this exact failure).
     Never retry user actions or close the newly restored browser/pages.
+    `deadline` (time.monotonic) caps every wait below to the caller's budget.
     """
     import pwd
 
+    def cap(seconds: float) -> float:
+        return seconds if deadline is None else max(0.1, min(seconds, deadline - time.monotonic()))
+
     try:
         check = subprocess.run(["supervisorctl", "pid", "mcp-server-browser"],
-                               capture_output=True, text=True, timeout=5, check=False)
+                               capture_output=True, text=True, timeout=cap(5), check=False)
         pid = int(check.stdout.strip())
         if check.returncode != 0 or pid < 0:
             return err("无法确认浏览器 MCP 服务状态")
@@ -2334,7 +2474,7 @@ def reconnect_mcp_browser() -> dict[str, Any]:
                     or stat is None or not same_process(pid, stat[0])):
                 return err("浏览器 MCP 进程归属不明，未执行重连")
         result = subprocess.run(["supervisorctl", "restart", "mcp-server-browser"],
-                                capture_output=True, text=True, timeout=20, check=False)
+                                capture_output=True, text=True, timeout=cap(20), check=False)
         if result.returncode != 0:
             return err("浏览器 MCP 服务重连失败，快照已保留")
     except (OSError, ValueError, KeyError, subprocess.SubprocessError):
@@ -2342,21 +2482,23 @@ def reconnect_mcp_browser() -> dict[str, Any]:
     # `supervisorctl restart` returns once node is spawned, before it listens on
     # 8100; a probe in that window gets AIO's "Client failed to connect". The
     # probe is a read-only tab list, so retrying it until the deadline is safe.
-    deadline = time.monotonic() + MCP_PROBE_DEADLINE_S
+    probe_deadline = time.monotonic() + MCP_PROBE_DEADLINE_S
+    if deadline is not None:
+        probe_deadline = min(probe_deadline, deadline)
     while True:
-        if _probe_mcp_page_tool():
+        if _probe_mcp_page_tool(timeout=cap(15)):
             return ok()
-        if time.monotonic() >= deadline:
+        if time.monotonic() >= probe_deadline:
             return err("浏览器 MCP 页面连接验证失败，快照已保留")
         time.sleep(MCP_PROBE_INTERVAL_S)
 
 
-def _probe_mcp_page_tool() -> bool:
+def _probe_mcp_page_tool(timeout: float = 15) -> bool:
     """Exercise a page-bound tool through the same AIO MCP entry used by Codex."""
     import http.client
 
     try:
-        conn = http.client.HTTPConnection(AIO_API_HOST, AIO_API_PORT, timeout=15)
+        conn = http.client.HTTPConnection(AIO_API_HOST, AIO_API_PORT, timeout=timeout)
         try:
             conn.request("POST", "/mcp", body=json.dumps({"jsonrpc": "2.0", "id": 1,
                 "method": "tools/call", "params": {"name": "browser_tab_list", "arguments": {}}}),
@@ -2413,13 +2555,26 @@ def restore_pending(
         # (signing the user out) and reopened tabs closed long ago.
         return False
 
+    if fresh and state.get("released") is True:
+        # Released by `stop`: owed to any browser but the very process the
+        # snapshot came from (a stop whose signal did not take it down).
+        return (browser_pid, browser_starttime) != (source_pid, source_start)
+
     if fresh:
         # Applying storage/scroll is not enough: order and AIO focus may still
         # have failed. Only an explicit completed record proves recovery.
         return True
 
-    # No progress record at all. Saving a snapshot does not release the browser, so
-    # "a snapshot exists" must never by itself mean a restore is owed. The one
+    if snapshot.get("releaseTracked") is True:
+        # Never released (the sleep was cancelled, or the stop failed before its
+        # signal): a later browser - a crash, an OOM, a supervisor restart - runs
+        # on its own newer profile and must not get these old cookies and tabs.
+        return False
+
+    # No progress record, and a snapshot saved before release tracking (kept so
+    # members released by an older helper still get their tabs back). Saving a
+    # snapshot does not release the browser, so "a snapshot exists" must never
+    # by itself mean a restore is owed. The one
     # positive signal available is identity: a snapshot recorded for a *different*
     # process than the one running was never applied to it. That covers the case
     # where the upstream supervisor restarted Chromium on its own - the tabs are
@@ -2450,6 +2605,7 @@ def wake_browser(
     profile_dir: str = DEFAULT_PROFILE_DIR,
     helper_script: str = HELPER_SCRIPT,
     allow_blank: bool = False,
+    deadline: float | None = None,
 ) -> dict[str, Any]:
     """Start Chromium (if needed) and restore the last snapshot into it.
 
@@ -2460,6 +2616,9 @@ def wake_browser(
     saved: no snapshot file and no restore record means the browser was never
     released (e.g. it crashed on a fresh volume), so there is no state to lose.
     An unreadable or invalid snapshot still refuses.
+
+    `deadline` (time.monotonic) bounds the whole wake: no new step starts after
+    it, and the failure it returns is resumable by a retry.
     """
     snapshot, problem = read_snapshot(snapshot_path)
     never_saved = not os.path.exists(snapshot_path) and not os.path.exists(restore_state_path_for(snapshot_path))
@@ -2468,7 +2627,16 @@ def wake_browser(
     if snapshot is not None and snapshot_consumed(snapshot_path, snapshot):
         # Restored once already: this browser starts from its own profile.
         snapshot, problem = None, "快照已恢复过"
+    elif (
+        snapshot is not None
+        and snapshot.get("releaseTracked") is True
+        and not restore_pending(snapshot_path, *_current_browser_identity())
+    ):
+        # Never released, or the browser it came from is still the one running.
+        snapshot, problem = None, "快照未被释放过，浏览器沿用自己的 profile"
 
+    if deadline is not None and deadline <= time.monotonic():
+        return deadline_exceeded()
     helper = verify_helper(helper_pid_file, helper_script)
     if not helper["ok"]:
         started = start_supervisor(
@@ -2480,16 +2648,21 @@ def wake_browser(
             return started
         helper = verify_helper(helper_pid_file, helper_script)
 
-    if not wait_for_cdp(timeout_s=max(wait_ms, 1000) / 1000.0):
+    wait_s = max(wait_ms, 1000) / 1000.0
+    if deadline is not None:
+        wait_s = min(wait_s, deadline - time.monotonic())
+        if wait_s <= 0:
+            return deadline_exceeded()
+    if not wait_for_cdp(timeout_s=wait_s):
         return err("浏览器启动后未在超时内暴露 CDP")
 
     if snapshot is None:
-        mcp = reconnect_mcp_browser()
+        mcp = reconnect_mcp_browser(deadline=deadline)
         if not mcp["ok"]:
             return mcp
         return ok(restoredTabs=0, message=f"浏览器已启动，无快照可恢复：{problem}")
 
-    restored = restore_tabs(snapshot, snapshot_path=snapshot_path)
+    restored = restore_tabs(snapshot, snapshot_path=snapshot_path, deadline=deadline)
     if not restored["ok"]:
         return restored
     return ok(
@@ -2630,7 +2803,8 @@ def status(
         owned and restore_pending(snapshot_path, browser_pid, browser_starttime)
     )
     restored_snapshot_at = None
-    if owned and snapshot is not None and not pending:
+    if owned and snapshot is not None and snapshot_consumed(snapshot_path, snapshot):
+        # Only a completed restore applied it; a snapshot merely captured was not.
         restored_snapshot_at = snapshot_at
     running: bool | None
     if owned:
@@ -2674,7 +2848,18 @@ def build_parser() -> argparse.ArgumentParser:
         help="unsubmitted-input policy (block refuses to release)",
     )
     parser.add_argument("--wait-ms", type=int, default=60_000, help="wake wait budget in milliseconds")
-    parser.add_argument("--timeout-s", type=float, default=30.0, help="per-operation timeout in seconds")
+    parser.add_argument(
+        "--timeout-s",
+        type=float,
+        default=30.0,
+        help="stop: one total wait budget; snapshot/restore: per-call CDP timeout (seconds)",
+    )
+    parser.add_argument(
+        "--deadline-s",
+        type=float,
+        default=None,
+        help="wake/restore: total budget in seconds; no new step starts after it (default: none)",
+    )
     parser.add_argument(
         "--allow-blank",
         action="store_true",
@@ -2700,6 +2885,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 def dispatch(args: argparse.Namespace) -> dict[str, Any]:
     """Run one parsed command. Split out so `main` can guarantee JSON output."""
+    # Counted from here, so waiting for the lock spends the same budget.
+    deadline = time.monotonic() + args.deadline_s if args.deadline_s is not None else None
     if args.command in ("status", "check"):
         # Read-only commands take no lock: an observer must never be blocked by,
         # or block, an in-flight release.
@@ -2740,13 +2927,16 @@ def dispatch(args: argparse.Namespace) -> dict[str, Any]:
                         wait_ms=args.wait_ms,
                         profile_dir=args.profile_dir,
                         allow_blank=args.allow_blank,
+                        deadline=deadline,
                     )
                 else:  # restore
                     snapshot, problem = read_snapshot(args.snapshot)
                     if snapshot is None:
                         result = err(f"无法读取快照：{problem}", blocked=True)
                     else:
-                        result = restore_tabs(snapshot, snapshot_path=args.snapshot, timeout=args.timeout_s)
+                        result = restore_tabs(
+                            snapshot, snapshot_path=args.snapshot, timeout=args.timeout_s, deadline=deadline
+                        )
         except LockBusy as exc:
             result = err(str(exc), blocked=True, reason="locked")
     return result

@@ -1172,7 +1172,7 @@ def test_wake_does_not_reapply_a_restored_snapshot() -> None:
     rt.verify_helper = lambda *a, **k: {"ok": True}
     rt.start_supervisor = lambda *a, **k: {"ok": True}
     rt.wait_for_cdp = lambda *a, **k: True
-    rt.reconnect_mcp_browser = lambda: calls.append("mcp") or {"ok": True}
+    rt.reconnect_mcp_browser = lambda *a, **k: calls.append("mcp") or {"ok": True}
     rt.restore_tabs = lambda *a, **k: calls.append("restore") or {"ok": True, "restoredTabs": 1}
     try:
         with tempfile.TemporaryDirectory() as tmp:
@@ -1261,7 +1261,7 @@ def test_wake_starts_blank_only_when_nothing_was_ever_saved() -> None:
     rt.verify_helper = lambda *a, **k: calls.append("verify") or {"ok": True}
     rt.start_supervisor = lambda *a, **k: calls.append("start") or {"ok": True}
     rt.wait_for_cdp = lambda *a, **k: True
-    rt.reconnect_mcp_browser = lambda: {"ok": True}
+    rt.reconnect_mcp_browser = lambda *a, **k: {"ok": True}
     try:
         with tempfile.TemporaryDirectory() as tmp:
             path = os.path.join(tmp, "browser-snapshot.json")
@@ -2134,6 +2134,405 @@ def test_mcp_reconnect_checks_ownership_and_real_page_tool() -> None:
         calls.clear()
         assert_false(rt.reconnect_mcp_browser()["ok"])
         assert_eq(len(calls), 1, "归属不明时不能重启")
+
+
+# --------------------------------------------- restore lifecycle robustness
+
+
+class _RestoreCdp:
+    """A browser for `restore_tabs`: records calls; knobs decide what pages report."""
+
+    def __init__(self, scroll: Any = None, storage: str = "ok", list_failures: int = 0) -> None:
+        self.pages = ["startup"]
+        self.urls = {"startup": "about:blank"}
+        self.calls: list[tuple[str, Any]] = []
+        self.scroll = scroll
+        self.storage = storage
+        self.list_failures = list_failures
+        self.timeout = 60.0
+        self._created = 0
+
+    def connect(self) -> None:
+        pass
+
+    def close(self) -> None:
+        pass
+
+    def targets(self) -> list[dict[str, Any]]:
+        if self.list_failures:
+            self.list_failures -= 1
+            raise rt.CdpError("CDP /json/list -> HTTP 500")
+        return [{"id": t, "type": "page", "url": self.urls[t]} for t in self.pages]
+
+    def attach(self, target: str) -> str:
+        return "sess-" + target
+
+    def call(self, method: str, params: Any = None, session_id: Any = None) -> dict[str, Any]:
+        self.calls.append((method, params))
+        if method == "Target.createTarget":
+            self._created += 1
+            target = f"new{self._created}"
+            self.pages.append(target)
+            self.urls[target] = "about:blank"
+            return {"targetId": target}
+        if method == "Page.addScriptToEvaluateOnNewDocument":
+            return {"identifier": "seed"}
+        if method == "Target.closeTarget":
+            self.pages.remove(params["targetId"])
+        return {}
+
+    def evaluate(self, session: str, expression: str) -> Any:
+        if "scrollTo" in expression:
+            asked = int(expression.split("scrollTo(0, ")[1].split(")")[0])
+            return asked if self.scroll is None else self.scroll
+        if "origin-mismatch" in expression:
+            return self.storage
+        return "complete"
+
+    def created(self) -> int:
+        return sum(1 for method, _ in self.calls if method == "Target.createTarget")
+
+
+def _restore_env(cdp: _RestoreCdp, ready: Callable[..., bool] = lambda *a, **k: True) -> Any:
+    from contextlib import ExitStack
+    from unittest.mock import patch
+
+    stack = ExitStack()
+    for name, value in (
+        ("Cdp", lambda **k: cdp),
+        ("wait_for_ready_state", ready),
+        ("_current_browser_identity", lambda *a, **k: (600, 7)),
+        ("reconnect_mcp_browser", lambda *a, **k: {"ok": True}),
+        ("aio_request", lambda *a, **k: ({}, "")),
+        ("aio_restored_indices", lambda c, entries, require_order=True: (list(range(len(entries))), "")),
+        ("aio_activate_index", lambda *a, **k: (True, "")),
+    ):
+        stack.enter_context(patch.object(rt, name, value))
+    return stack
+
+
+def _tab(url: str, *, scroll: int = 0, active: bool = False) -> dict[str, Any]:
+    return {"url": url, "title": "", "active": active, "scrollY": scroll,
+            "sessionStorage": {"k": "v"}, "origin": rt.origin_of(url)}
+
+
+@test
+def test_restore_treats_a_shorter_page_and_an_off_origin_redirect_as_warnings() -> None:
+    for cdp, code in ((_RestoreCdp(scroll=300), "scroll_unverified"),
+                      (_RestoreCdp(storage="origin-mismatch"), "storage_origin_mismatch")):
+        with tempfile.TemporaryDirectory() as tmp, _restore_env(cdp):
+            path = os.path.join(tmp, "snapshot.json")
+            snapshot = {"savedAt": 5, "tabs": [_tab("https://feed.example/", scroll=5000, active=True)]}
+            result = rt.restore_tabs(snapshot, snapshot_path=path)
+            assert_true(result["ok"], f"{code} 不应让整个恢复失败：{result}")
+            assert_true(code in result["problems"], f"{code} 应作为警告报告：{result}")
+            assert_true(rt.read_restore_state(path)["completed"], f"{code} 后恢复应完成")
+
+
+@test
+def test_restore_gives_up_on_a_tab_after_three_failed_attempts() -> None:
+    cdp = _RestoreCdp()
+    # The second restored tab never finishes loading.
+    ready = lambda _cdp, session, *a, **k: session != "sess-new2"  # noqa: E731
+    with tempfile.TemporaryDirectory() as tmp, _restore_env(cdp, ready):
+        path = os.path.join(tmp, "snapshot.json")
+        snapshot = {"savedAt": 6, "tabs": [_tab("https://a.example/", active=True), _tab("https://b.example/")]}
+        for attempt in (1, 2):
+            result = rt.restore_tabs(snapshot, snapshot_path=path)
+            assert_false(result["ok"], f"第 {attempt} 次仍应失败以便重试：{result}")
+            assert_false(rt.read_restore_state(path)["completed"], "未放弃前不能标记完成")
+        result = rt.restore_tabs(snapshot, snapshot_path=path)
+        assert_true(result["ok"], f"同一快照第 3 次仍失败的标签应降级为警告：{result}")
+        assert_eq(result.get("unrestored"), [{"index": 1, "reason": "load_timeout"}], "如实报告放弃的标签")
+        assert_true("tab_unrestored" in result["problems"], "放弃的标签应作为警告出现")
+        assert_eq(result["restoredTabs"], 1, "放弃的标签不计入已恢复")
+        assert_true(rt.read_restore_state(path)["completed"], "放弃后快照应视为恢复完成")
+        assert_eq(cdp.created(), 2, "重试不得重复创建标签")
+
+
+@test
+def test_restore_does_not_count_a_deadline_as_a_tab_failure() -> None:
+    import time as _time
+
+    cdp = _RestoreCdp()
+
+    def slow(*_a: Any, **_k: Any) -> bool:
+        _time.sleep(0.2)
+        return True
+
+    with tempfile.TemporaryDirectory() as tmp, _restore_env(cdp, slow):
+        path = os.path.join(tmp, "snapshot.json")
+        snapshot = {"savedAt": 7, "tabs": [_tab(f"https://{n}.example/") for n in "abcde"]}
+        started = _time.monotonic()
+        result = rt.restore_tabs(snapshot, snapshot_path=path, deadline=_time.monotonic() + 0.3)
+        assert_true(_time.monotonic() - started < 0.8, "时间预算用尽后不得再开始新步骤")
+        assert_false(result["ok"], "预算用尽必须报失败")
+        assert_eq(result.get("reason"), "deadline_exceeded", "应报告时间预算用尽")
+        state = rt.read_restore_state(path)
+        assert_false(state.get("completed"), "预算用尽不能标记完成")
+        assert_false(state.get("tabFailures"), "预算用尽不计入标签失败次数")
+        result = rt.restore_tabs(snapshot, snapshot_path=path)
+        assert_true(result["ok"], f"重试应接着完成：{result}")
+        assert_eq(cdp.created(), 5, "重试复用已建标签")
+
+
+@test
+def test_restore_fails_instead_of_duplicating_tabs_when_the_target_list_blips() -> None:
+    cdp = _RestoreCdp(list_failures=1)
+    cdp.pages.append("t1")
+    cdp.urls["t1"] = "https://a.example/"
+    with tempfile.TemporaryDirectory() as tmp, _restore_env(cdp):
+        path = os.path.join(tmp, "snapshot.json")
+        rt.write_restore_state(path, {"snapshotSavedAt": 8, "completed": False, "tabs": [
+            {"targetId": "t1", "navigated": True, "storageApplied": True, "scrollApplied": True}]})
+        result = rt.restore_tabs({"savedAt": 8, "tabs": [_tab("https://a.example/")]}, snapshot_path=path)
+        assert_false(result["ok"], "读不到标签列表必须失败")
+        assert_eq(cdp.created(), 0, "读不到标签列表时不得再开一份标签")
+
+
+def _tracked_snapshot() -> dict[str, Any]:
+    snapshot = stoppable_snapshot()
+    snapshot["releaseTracked"] = True
+    return snapshot
+
+
+def _stop_fixture(fake: "FakeProc", tmp: str, snapshot: dict[str, Any]) -> tuple[str, str, str]:
+    path = os.path.join(tmp, "snapshot.json")
+    rt.write_snapshot(path, snapshot)
+    helper_pid = os.path.join(tmp, "h.pid")
+    browser_pid = os.path.join(tmp, "b.pid")
+    with open(helper_pid, "w", encoding="utf-8") as handle:
+        handle.write("4242\n")
+    with open(browser_pid, "w", encoding="utf-8") as handle:
+        handle.write("555\n")
+    fake.add(4242, ["/usr/bin/python3", "/opt/gem/browser-supervisor.py"], uid=0, starttime=1)
+    fake.add(555, ["/opt/browser/chrome", f"--user-data-dir={rt.DEFAULT_PROFILE_DIR}"], uid=0, ppid=4242, starttime=9)
+    return path, helper_pid, browser_pid
+
+
+@test
+def test_only_a_released_snapshot_is_owed() -> None:
+    fake = FakeProc()
+    restore = with_fake_proc(fake)
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            path, helper_pid, browser_pid = _stop_fixture(fake, tmp, _tracked_snapshot())
+            # Saved, then the sleep was cancelled; later Chromium crashed and the
+            # supervisor started a new one. Nothing was released: nothing is owed.
+            assert_false(rt.restore_pending(path, 556, 9), "未释放的快照不得套用到新浏览器")
+            saved_kill = os.kill
+            seen: list[Any] = []
+
+            def kill(pid: int, sig: int) -> None:
+                seen.append(rt.read_restore_state(path))
+                fake.processes.clear()
+
+            os.kill = kill  # type: ignore[assignment]
+            try:
+                result = rt.stop_browser(path, helper_pid_file=helper_pid, browser_pid_file=browser_pid, timeout_s=0.3)
+            finally:
+                os.kill = saved_kill  # type: ignore[assignment]
+            assert_true(result["ok"], f"停止应成功：{result}")
+            marker = seen[0] or {}
+            assert_true(marker.get("released") is True and marker.get("snapshotSavedAt") == 1_700_000_000_000,
+                        f"发信号前必须先记下释放标记：{marker}")
+            assert_true(rt.restore_pending(path, 556, 9), "释放过的快照要恢复到新浏览器")
+            assert_false(rt.restore_pending(path, 555, 9), "停止失败、原浏览器仍在时不构成待恢复")
+            state = rt.read_restore_state(path)
+            state["completed"] = True
+            rt.write_restore_state(path, state)
+            assert_false(rt.restore_pending(path, 556, 9), "恢复完成后不再待恢复")
+    finally:
+        restore()
+
+
+@test
+def test_wake_applies_only_a_released_snapshot() -> None:
+    calls: list[str] = []
+    saved = (rt.verify_helper, rt.start_supervisor, rt.wait_for_cdp, rt.reconnect_mcp_browser, rt.restore_tabs)
+    rt.verify_helper = lambda *a, **k: {"ok": True}
+    rt.start_supervisor = lambda *a, **k: {"ok": True}
+    rt.wait_for_cdp = lambda *a, **k: True
+    rt.reconnect_mcp_browser = lambda *a, **k: calls.append("mcp") or {"ok": True}
+    rt.restore_tabs = lambda *a, **k: calls.append("restore") or {"ok": True, "restoredTabs": 1}
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "browser-snapshot.json")
+            rt.write_snapshot(path, _tracked_snapshot())
+            result = rt.wake_browser(path)
+            assert_true(result["ok"], f"未释放的快照不应阻止启动：{result}")
+            assert_eq(calls, ["mcp"], "未释放的快照不得导入或重开标签")
+            calls.clear()
+            rt.write_restore_state(path, {"snapshotSavedAt": 1_700_000_000_000, "released": True, "tabs": []})
+            assert_true(rt.wake_browser(path)["ok"])
+            assert_eq(calls, ["restore"], "释放过的快照要恢复")
+    finally:
+        rt.verify_helper, rt.start_supervisor, rt.wait_for_cdp, rt.reconnect_mcp_browser, rt.restore_tabs = saved
+
+
+class _CaptureCdp:
+    def __init__(self, **_kw: Any) -> None:
+        self.timeout = 30.0
+
+    def version(self) -> dict[str, Any]:
+        return {"Browser": "Chrome/154"}
+
+    def targets(self) -> list[dict[str, Any]]:
+        return [{"id": "p1", "type": "page", "url": "https://example.com/a", "title": "A"}]
+
+    def connect(self) -> None:
+        pass
+
+    def close(self) -> None:
+        pass
+
+    def attach(self, target: str) -> str:
+        return "sess"
+
+    def call(self, *a: Any, **k: Any) -> dict[str, Any]:
+        return {}
+
+    def evaluate(self, session: str, expression: str) -> Any:
+        if "sessionStorage" in expression:
+            return {}
+        return 0 if "scroll" in expression else False
+
+
+def _capture_env() -> Any:
+    from contextlib import ExitStack
+    from unittest.mock import patch
+
+    stack = ExitStack()
+    for name, value in (
+        ("find_in_flight_downloads", lambda *a, **k: []),
+        ("verify_browser", lambda *a, **k: {"ok": True, "pid": 600, "starttime": 7}),
+        ("Cdp", _CaptureCdp),
+        ("aio_tabs", lambda: ([{"url": "https://example.com/a", "title": "A", "index": 0, "is_active": True}], "")),
+        ("export_storage_state", lambda *a, **k: {"schema": 1, "capturedAt": 1, "state": {"cookies": [], "origins": []},
+                                                  "counts": {}}),
+    ):
+        stack.enter_context(patch.object(rt, name, value))
+    return stack
+
+
+@test
+def test_capture_marks_snapshots_for_release_tracking() -> None:
+    with tempfile.TemporaryDirectory() as tmp, _capture_env():
+        path = os.path.join(tmp, "snapshot.json")
+        result = rt.capture_snapshot(path)
+        assert_true(result["ok"], f"快照应成功：{result}")
+        assert_true(rt.read_snapshot(path)[0].get("releaseTracked") is True, "新快照必须声明按释放标记判断是否欠恢复")
+
+
+@test
+def test_capture_refuses_while_a_restore_is_owed() -> None:
+    with tempfile.TemporaryDirectory() as tmp, _capture_env():
+        path = os.path.join(tmp, "snapshot.json")
+        rt.write_snapshot(path, _tracked_snapshot())
+        rt.write_restore_state(path, {"snapshotSavedAt": 1_700_000_000_000, "released": True, "tabs": []})
+        before = open(path, encoding="utf-8").read()
+        result = rt.capture_snapshot(path)
+        assert_false(result["ok"], "待恢复时不得保存新快照")
+        assert_eq(result.get("reason"), "restore_pending", "应报告待恢复")
+        assert_eq(open(path, encoding="utf-8").read(), before, "原快照必须原样保留")
+
+
+@test
+def test_exclusive_lock_waits_briefly_for_a_status_probe() -> None:
+    import threading
+    import time as _time
+
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "snapshot.json.lock")
+        probe = rt.FileLock(path, shared=True)
+        probe.acquire()
+        threading.Timer(0.3, probe.release).start()
+        lock = rt.FileLock(path)
+        lock.acquire()  # a status poll must not make a real transition fail "locked"
+        lock.release()
+        holder = rt.FileLock(path)
+        holder.acquire()
+        saved = rt.LOCK_WAIT_S
+        rt.LOCK_WAIT_S = 0.2
+        started = _time.monotonic()
+        try:
+            rt.FileLock(path).acquire()
+        except rt.LockBusy:
+            pass
+        else:
+            raise AssertionError("持有中的锁不应被抢到")
+        finally:
+            rt.LOCK_WAIT_S = saved
+            holder.release()
+        assert_true(_time.monotonic() - started < 1.0, "等待有上限")
+
+
+@test
+def test_status_reports_restored_snapshot_only_after_a_completed_restore() -> None:
+    from unittest.mock import patch
+
+    with tempfile.TemporaryDirectory() as tmp, \
+         patch.object(rt, "verify_helper", lambda *a, **k: {"ok": True, "pid": 4242}), \
+         patch.object(rt, "verify_browser", lambda *a, **k: {"ok": True, "pid": 555, "starttime": 9, "attribution": "owned"}), \
+         patch.object(rt, "Cdp", _CaptureCdp):
+        path = os.path.join(tmp, "snapshot.json")
+        rt.write_snapshot(path, _tracked_snapshot())
+        assert_eq(rt.status(snapshot_path=path)["restoredSnapshotAt"], None, "只保存过的快照不是已恢复")
+        rt.write_restore_state(path, {"snapshotSavedAt": 1_700_000_000_000, "released": True, "completed": True, "tabs": []})
+        assert_eq(rt.status(snapshot_path=path)["restoredSnapshotAt"], 1_700_000_000_000, "恢复完成后才报告")
+
+
+@test
+def test_stop_timeout_is_one_total_deadline() -> None:
+    import threading
+    import time as _time
+
+    fake = FakeProc()
+    restore = with_fake_proc(fake)
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            path, helper_pid, browser_pid = _stop_fixture(fake, tmp, stoppable_snapshot())
+            saved_kill = os.kill
+            # The supervisor exits after 0.3 s; Chromium never does.
+            os.kill = lambda pid, sig: threading.Timer(0.3, lambda: fake.processes.pop(4242)).start()  # type: ignore[assignment]
+            started = _time.monotonic()
+            try:
+                result = rt.stop_browser(path, helper_pid_file=helper_pid, browser_pid_file=browser_pid, timeout_s=0.5)
+            finally:
+                os.kill = saved_kill  # type: ignore[assignment]
+            elapsed = _time.monotonic() - started
+            assert_false(result["ok"], "浏览器未退出必须报失败")
+            assert_true(elapsed < 0.7, f"--timeout-s 是两段等待的总上限，实际 {elapsed:.2f}s")
+    finally:
+        restore()
+
+
+@test
+def test_wake_and_restore_take_a_total_deadline() -> None:
+    import time as _time
+
+    args = rt.build_parser().parse_args(["wake"])
+    assert_eq(args.deadline_s, None, "默认不设总预算（行为不变）")
+    assert_eq(rt.build_parser().parse_args(["restore", "--deadline-s", "80"]).deadline_s, 80.0)
+    seen: dict[str, Any] = {}
+    saved = (rt.verify_helper, rt.wait_for_cdp, rt.restore_tabs)
+    rt.verify_helper = lambda *a, **k: {"ok": True}
+    rt.wait_for_cdp = lambda *a, **k: seen.setdefault("wait", k.get("timeout_s")) and True
+    rt.restore_tabs = lambda *a, **k: seen.setdefault("restore", k.get("deadline")) and {"ok": True}
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "browser-snapshot.json")
+            rt.write_snapshot(path, base_snapshot())
+            deadline = _time.monotonic() + 2
+            rt.wake_browser(path, wait_ms=60_000, deadline=deadline)
+            assert_true(seen["wait"] <= 2, f"等待 CDP 不得超出总预算：{seen}")
+            assert_eq(seen["restore"], deadline, "恢复沿用同一个截止时间")
+            seen.clear()
+            result = rt.wake_browser(path, deadline=_time.monotonic() - 1)
+            assert_eq(result.get("reason"), "deadline_exceeded", "预算已用尽时不再开始")
+            assert_false("restore" in seen, "预算已用尽时不再恢复")
+    finally:
+        rt.verify_helper, rt.wait_for_cdp, rt.restore_tabs = saved
 
 
 # Node helper deadline and redaction are behavior-tested in browser-storage.test.ts.
