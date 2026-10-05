@@ -100,6 +100,31 @@ export function TaskChat({ onDetails, onOpenLink, onOpenFileInBrowser, onExpired
     useEffect(() => { void refresh(); const timer = window.setInterval(() => void refresh(), 2500); return () => clearInterval(timer); }, [refresh]);
     useEffect(() => { if (scroll.current && stick.current)
         scroll.current.scrollTop = scroll.current.scrollHeight; }, [tasks]);
+    // A phone keyboard, or the composer growing on focus, resizes the feed without scrolling it: keep the
+    // latest message in view, or, while older ones are being read, the bottom edge of what was on screen.
+    const edge = useRef(0);
+    const height = useRef(0);
+    const refit = (n: HTMLDivElement) => {
+        if (n.clientHeight === height.current) return;
+        height.current = n.clientHeight;
+        n.scrollTop = stick.current ? n.scrollHeight : edge.current - n.clientHeight;
+        edge.current = n.scrollTop + n.clientHeight;
+    };
+    const onFeedScroll = (n: HTMLDivElement) => {
+        // WebKit fires the resize's own scroll event before the observer runs: settle the resize first.
+        if (height.current) refit(n);
+        stick.current = n.scrollHeight - n.scrollTop - n.clientHeight < 80;
+        edge.current = n.scrollTop + n.clientHeight;
+    };
+    useEffect(() => {
+        const n = scroll.current;
+        if (!n || typeof ResizeObserver !== "function") return;
+        height.current = n.clientHeight;
+        edge.current = n.scrollTop + n.clientHeight;
+        const observer = new ResizeObserver(() => refit(n));
+        observer.observe(n);
+        return () => observer.disconnect();
+    }, []);
     // Older tasks load on their own as the top of the feed comes near, and what was on screen stays put.
     const olderTop = useRef<HTMLDivElement>(null);
     const loadingOlder = useRef(false);
@@ -279,7 +304,7 @@ export function TaskChat({ onDetails, onOpenLink, onOpenFileInBrowser, onExpired
     <header className="chat-head"><div className="chat-title"><h2>主会话</h2><span className={`dot ${connected ? "ok" : "warn"}`}/><span className="chat-sub">{active.length || awaiting.length
         ? <>{awaiting.length > 0 && <span className="turn-pill you">{awaiting.length} 件等你补充</span>}{browserAsks.length > 0 && <span className="turn-pill you">{browserAsks.length} 件等你操作浏览器</span>}{active.length - browserAsks.length > 0 && <span className="turn-pill ai">{active.length - browserAsks.length} 件在办</span>}</>
         : connected ? "随时可以交给我" : "正在连接…"}</span></div></header>
-    <div className="chat-scroll task-feed" ref={scroll} onScroll={e => { const n = e.currentTarget; stick.current = n.scrollHeight - n.scrollTop - n.clientHeight < 80; }}>
+    <div className="chat-scroll task-feed" ref={scroll} onScroll={e => onFeedScroll(e.currentTarget)}>
       {nextBefore && <div className="feed-older" ref={olderTop}>{olderState === "failed"
         ? <button className="ghost tiny" onClick={() => void loadOlder()}>更早的任务没加载出来，点此重试</button>
         : <span className="muted tiny">{olderState === "loading" ? "正在加载更早的任务…" : ""}</span>}</div>}

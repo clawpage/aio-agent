@@ -87,6 +87,7 @@ export default defineConfig({
         "**/mobile-chat.spec.ts",
         "**/settings.spec.ts",
         "**/safe-area.spec.ts",
+        "**/keyboard-feed.spec.ts",
         "**/device-links.spec.ts",
         "**/message-preview.spec.ts",
     "**/popup-motion.spec.ts",
