@@ -282,3 +282,8 @@ it("restarts python-server only when its Playwright driver is attached and no sh
   expect(await dropCdpClients({ procs, cdpSockets: [201], supervised: SUPERVISED, sessions: { a: { status: "no_change_timeout" } } })).toEqual([]);
   expect(await dropCdpClients({ procs, cdpSockets: [300], supervised: SUPERVISED, sessions: {} })).toEqual([]);
 });
+
+it("does not count a shell session that ended in another terminal status as busy, the same running set idle.ts uses", async () => {
+  // Only `running` and `no_change_timeout` still run a command; anything else kept python-server's driver attached forever.
+  expect(await dropCdpClients({ procs: [...IMAGE_PROCS, DRIVER], cdpSockets: [201], supervised: SUPERVISED, sessions: { a: { status: "terminated" }, b: { status: "completed" } } })).toEqual(["python-server"]);
+});

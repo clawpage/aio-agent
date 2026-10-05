@@ -473,7 +473,7 @@ tree() {
 attached() { for p in $(tree "$1"); do case "$cdp " in *" $p "*) return 0;; esac; done; return 1; }
 if attached mcp-server-browser; then supervisorctl restart mcp-server-browser >/dev/null 2>&1 && echo mcp-server-browser; fi
 if attached python-server; then
-  busy=$(curl -s -m 5 http://127.0.0.1:8091/v1/shell/sessions | python3 -c 'import json,sys; s=json.load(sys.stdin)["data"]["sessions"].values(); print(sum(1 for v in s if v.get("status") != "completed" or v.get("current_command")))' 2>/dev/null || echo unknown)
+  busy=$(curl -s -m 5 http://127.0.0.1:8091/v1/shell/sessions | python3 -c 'import json,sys; s=json.load(sys.stdin)["data"]["sessions"].values(); print(sum(1 for v in s if v.get("status") in ("running", "no_change_timeout")))' 2>/dev/null || echo unknown)
   clients=$(ss -tnH state established "( sport = :8091 )" | wc -l)
   if [ "$busy" = 0 ] && [ "$clients" = 0 ]; then supervisorctl restart python-server >/dev/null 2>&1 && echo python-server; fi
 fi`;
