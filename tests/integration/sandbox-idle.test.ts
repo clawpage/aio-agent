@@ -89,4 +89,31 @@ describe("whole-container idle stop over HTTP", () => {
     expect(((await status.json()) as { sandbox: { idle: string } }).sandbox.idle).toBe("parked");
     expect(idle.calls).toEqual([]);
   });
+
+  it("starts a stopped container before the browser routes wake the browser in it", async () => {
+    // The tenant router starts a parked container for every /api/browser/* call
+    // except the status poll, so the routes themselves never see it stopped.
+    const { cookie, csrf } = await login(h);
+    const headers = { cookie, "x-csrf-token": csrf, "content-type": "application/json" };
+    const wake = h.ctx.browser.wake.bind(h.ctx.browser);
+    const seen: string[] = [];
+    h.ctx.browser.wake = async () => {
+      seen.push(idle.state);
+      return await wake();
+    };
+    try {
+      for (const [path, body] of [
+        ["/api/browser/wake", {}],
+        ["/api/browser/tabs", { url: "https://example.com/" }],
+      ] as const) {
+        idle.state = "parked";
+        idle.calls = [];
+        await h.request(path, { method: "POST", headers, body: JSON.stringify(body) });
+        expect(idle.calls.slice(0, 2), path).toEqual(["hold", "wake"]);
+      }
+    } finally {
+      h.ctx.browser.wake = wake;
+    }
+    expect(seen).toEqual(["running", "running"]);
+  });
 });
