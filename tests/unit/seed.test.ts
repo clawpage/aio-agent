@@ -1,29 +1,55 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 import { SandboxContainer } from "../../src/control/sandbox/container.js";
-import { CODEX_CONFIG_TOML, DOCUMENT_SKILL_DIR, DOCUMENT_SKILL_MD, SHARE_CLI_PY, SHARE_SKILL_MD, WORKSPACE_AGENTS_MD } from "../../src/control/sandbox/seed.js";
+import { CODEX_CONFIG_TOML, DOCUMENT_SKILL_DIR, DOCUMENT_SKILL_MD, SHARE_CLI_PY, SHARE_SKILL_MD, WORKSPACE_AGENTS_BEGIN, WORKSPACE_AGENTS_END, WORKSPACE_AGENTS_MD, refreshWorkspaceAgents } from "../../src/control/sandbox/seed.js";
 import { Logger } from "../../src/common/logger.js";
 import { testConfig, testNode } from "../helpers/harness.js";
 
 describe("sandbox workspace seed", () => {
-  it("documents the project and scratch layout so artifacts do not land in the root", () => {
+  it("documents the task, project and scratch layout and the browser tool tasks really have", () => {
     for (const expected of [
+      "/home/gem/workspace/tasks/<任务 id>/",
+      ".tmp/",
       "/home/gem/workspace/projects/<name>/",
-      ".scratch/tmp/<topic>/",
-      ".scratch/tests/<topic>/",
-      ".scratch/artifacts/<topic>/",
+      "/home/gem/workspace/.scratch/",
       "README.md",
+      "aio_tabs",
     ]) {
       expect(WORKSPACE_AGENTS_MD, `template must document ${expected}`).toContain(expected);
     }
-    // Screenshot examples must follow the same rule as every other artifact.
+    // Tasks get aio_tabs only; teaching the whole-browser commands makes them
+    // fight over the visible page.
+    expect(WORKSPACE_AGENTS_MD).not.toMatch(/aio browser (navigate|screenshot|click)/);
+    expect(WORKSPACE_AGENTS_MD).not.toContain("aio_browser");
     expect(WORKSPACE_AGENTS_MD).not.toContain("/home/gem/workspace/screenshot.png");
-    expect(WORKSPACE_AGENTS_MD).not.toContain("/home/gem/workspace/desktop.png");
-    // ...and must be copy-pasteable: a concrete topic directory and an explicit
-    // mkdir, never a literal `<topic>` placeholder that a shell would treat as a
-    // redirection.
-    expect(WORKSPACE_AGENTS_MD).toContain("mkdir -p /home/gem/workspace/.scratch/artifacts/example");
-    expect(WORKSPACE_AGENTS_MD).not.toContain("artifacts/<topic>/screenshot.png");
-    expect(WORKSPACE_AGENTS_MD).not.toContain("artifacts/<topic>/desktop.png");
+  });
+
+  it("keeps the managed block current without losing what the person wrote", () => {
+    const fresh = refreshWorkspaceAgents(null);
+    expect(fresh).toBe(WORKSPACE_AGENTS_MD);
+    expect(fresh).toContain("## 我的补充");
+    // Already current: nothing to write.
+    expect(refreshWorkspaceAgents(fresh)).toBe(fresh);
+    // Only the block is replaced; what sits around it stays byte for byte.
+    const mine = "## 我的补充\n\n- 回答尽量简短\n";
+    const stale = `前言\n${WORKSPACE_AGENTS_BEGIN}\n旧说明：用 aio browser screenshot\n${WORKSPACE_AGENTS_END}\n\n${mine}`;
+    const refreshed = refreshWorkspaceAgents(stale);
+    expect(refreshed.startsWith("前言\n")).toBe(true);
+    expect(refreshed.endsWith(mine)).toBe(true);
+    expect(refreshed).not.toContain("旧说明");
+    expect(refreshed).toContain("aio_tabs");
+    // An untouched old template is replaced whole.
+    const pristine = readFileSync(new URL("../fixtures/workspace-agents-v8.md", import.meta.url), "utf8");
+    expect(refreshWorkspaceAgents(pristine)).toBe(WORKSPACE_AGENTS_MD);
+    expect(refreshWorkspaceAgents(`${pristine}- 我加的一行\n`)).toContain("- 我加的一行");
+    // An edited file from before the block existed is kept under it, marked older.
+    const edited = "# 我的沙箱\n\n需要浏览器操作时优先用 aio browser\n- 我住在湾区\n";
+    const merged = refreshWorkspaceAgents(edited);
+    expect(merged.indexOf(WORKSPACE_AGENTS_END)).toBeLessThan(merged.indexOf("- 我住在湾区"));
+    expect(merged).toContain("与上面系统说明冲突的地方");
+    expect(merged).toContain(edited.trimEnd());
+    // ...and the next start leaves it alone apart from the block.
+    expect(refreshWorkspaceAgents(merged)).toBe(merged);
   });
 
   it("enables Codex local memory by default without dropping the MCP registration", () => {
@@ -34,25 +60,33 @@ describe("sandbox workspace seed", () => {
     expect(CODEX_CONFIG_TOML).toContain('url = "http://127.0.0.1:8080/mcp"');
   });
 
-  it("writes AGENTS.md and config.toml only when absent so customisations survive", async () => {
-    const cfg = testConfig("/tmp/pa-seed-test", 1);
-    const container = new SandboxContainer(cfg, new Logger("error", undefined, false), testNode());
-    const isolation = vi.spyOn(container, "enforceCodexIsolation").mockResolvedValue();
-    const calls: Array<{ path: string; content: string; opts: unknown }> = [];
-    container.writeFileInSandbox = (async (filePath: string, content: string, opts?: unknown) => {
-      calls.push({ path: filePath, content, opts });
-    }) as typeof container.writeFileInSandbox;
-
-    await container.seedWorkspace();
-
+  it("refreshes AGENTS.md's managed block and writes config.toml only when absent", async () => {
+    const seed = async (existing: string | null) => {
+      const cfg = testConfig("/tmp/pa-seed-test", 1);
+      const container = new SandboxContainer(cfg, new Logger("error", undefined, false), testNode());
+      const isolation = vi.spyOn(container, "enforceCodexIsolation").mockResolvedValue();
+      const calls: Array<{ path: string; content: string; opts: unknown }> = [];
+      container.writeFileInSandbox = (async (filePath: string, content: string, opts?: unknown) => {
+        calls.push({ path: filePath, content, opts });
+      }) as typeof container.writeFileInSandbox;
+      container.execInSandbox = (async (argv: string[]) =>
+        argv[0] === "cat" && argv[1]!.endsWith("/AGENTS.md")
+          ? existing === null ? { code: 1, stdout: "", stderr: "No such file" } : { code: 0, stdout: existing, stderr: "" }
+          : { code: 0, stdout: "", stderr: "" }) as typeof container.execInSandbox;
+      await container.seedWorkspace();
+      expect(isolation).toHaveBeenCalledOnce();
+      return calls;
+    };
+    const calls = await seed(null);
     const agents = calls.find((c) => c.path.endsWith("/AGENTS.md"));
-    expect(agents?.opts).toMatchObject({ onlyIfAbsent: true });
+    expect(agents?.opts ?? {}).not.toMatchObject({ onlyIfAbsent: true });
     expect(agents?.content).toBe(WORKSPACE_AGENTS_MD);
+    // A file already current is not rewritten.
+    expect((await seed(WORKSPACE_AGENTS_MD)).some((c) => c.path.endsWith("/AGENTS.md"))).toBe(false);
 
     const toml = calls.find((c) => c.path.endsWith("/config.toml"));
     expect(toml?.opts).toMatchObject({ onlyIfAbsent: true });
     expect(toml?.content).toBe(CODEX_CONFIG_TOML);
-    expect(isolation).toHaveBeenCalledOnce();
   });
 
   it("writes the document skill into the controlled skills directory for existing sandboxes too", async () => {

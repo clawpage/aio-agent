@@ -20,7 +20,7 @@ import {
   SHARE_SKILL_DIR,
   SHARE_SKILL_MD,
   SHARE_TOOL_DIR,
-  WORKSPACE_AGENTS_MD,
+  refreshWorkspaceAgents,
 } from "./seed.js";
 
 export type { ContainerState };
@@ -239,12 +239,17 @@ export class SandboxContainer {
   /**
    * Seed the persistent workspace with agent-facing instructions and register the
    * sandbox MCP server so the agent can drive the real browser, not only shells.
-   * AGENTS.md and config.toml are created only when absent. The separate system
-   * MCP isolation policy is enforced on every startup, including old sandboxes.
+   * AGENTS.md keeps its managed block current on every start (the person's own
+   * notes below it are kept); config.toml is created only when absent. The
+   * separate system MCP isolation policy is enforced on every startup.
    */
   async seedWorkspace(): Promise<void> {
     const s = this.#cfg.sandbox;
-    await this.writeFileInSandbox(`${s.containerWorkspaceDir}/AGENTS.md`, WORKSPACE_AGENTS_MD, { onlyIfAbsent: true });
+    const agentsPath = `${s.containerWorkspaceDir}/AGENTS.md`;
+    const current = await this.execInSandbox(["cat", agentsPath], { timeoutMs: 15_000 });
+    const existing = current.code === 0 ? current.stdout : null;
+    const next = refreshWorkspaceAgents(existing);
+    if (next !== existing) await this.writeFileInSandbox(agentsPath, next);
     await this.writeFileInSandbox(`${s.containerCodexHome}/config.toml`, CODEX_CONFIG_TOML, { onlyIfAbsent: true });
     // The document skill is managed, not `onlyIfAbsent`: it must reach existing
     // sandboxes too, and it writes to exactly one skill directory per executor

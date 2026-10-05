@@ -154,7 +154,7 @@ docker exec -u gem personal-agent-sandbox \
 - **重建/换新沙箱后系统包要重装**：venv 在持久卷里会保留，但 apt 系统包（LibreOffice、
   poppler、字体）属于容器层，随容器重建消失，需重新执行上面的 root 层安装，再跑一次就绪检查。
 - 智能体侧的用法说明写在沙箱内 `/home/gem/.codex/skills/aio-documents/SKILL.md` 与
-  `/home/gem/.codex/tools/aio-doc/bin/aio-doc --help`（未加 PATH，用绝对路径）；技能文件由控制面在新沙箱启动时写入（既有沙箱的 AGENTS.md 不会被覆盖）。
+  `/home/gem/.codex/tools/aio-doc/bin/aio-doc --help`（未加 PATH，用绝对路径）；技能文件由控制面在每次沙箱启动时写入；AGENTS.md 只更新带标记的系统管理段，「我的补充」不动。
 - 转换在独立 LibreOffice profile 下运行（禁宏、不自动更新外链、限制时长/页数/并发），
   输出为新文件，不覆盖原件；不做 100% 保真承诺（字体与 LO 复杂特性可能有差异）。
 

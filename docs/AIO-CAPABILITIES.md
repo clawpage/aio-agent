@@ -199,7 +199,6 @@
 ## 与智能体的关系
 
 沙箱内的主智能体（Codex app-server）通过这些接口工作：工作区里播种了
-`/home/gem/workspace/AGENTS.md`，说明 `aio` CLI（`aio browser`、`aio gui`、`aio shell`、
-`aio file`）与已注册的 MCP 服务器 `aio_browser`（`http://127.0.0.1:8080/mcp`，工具名已按
-`tools/list` 实测：`browser_navigate`、`browser_get_text`、`browser_screenshot`、
-`browser_evaluate`、`browser_click` 等）。这些能力全部位于容器内部，宿主机能力没有接入。
+`/home/gem/workspace/AGENTS.md`：带标记的系统管理段每次启动沙箱都更新成最新（任务只用
+`aio_tabs` 操作自己的标签页；`aio gui`、`aio shell`、`aio file`；任务文件放
+`tasks/<任务 id>/`），其下「我的补充」由用户和智能体自己维护、系统不改。这些能力全部位于容器内部，宿主机能力没有接入。
