@@ -241,3 +241,29 @@ test("coming back from the background reopens the frame on a fresh one-time tick
   await expect(frame).toHaveAttribute("src", /ticket=t-2$/);
   expect(issued).toBe(2);
 });
+
+test("one failed heartbeat does not end the watch: the label drops while the lease is gone and the next beat rejoins", async ({ page, isMobile }) => {
+  test.skip(isMobile, "desktop drives the heartbeat timer");
+  await mockConsole(page, { conversations: [makeConversation(CONV_ID, "心跳失败")], sse: { [CONV_ID]: replayOnly() }, browser: {} });
+  let fail = false;
+  const beats: number[] = [];
+  await page.route((url) => url.pathname === "/api/browser/viewer/heartbeat", (route) => {
+    beats.push(route.request().postDataJSON().generation);
+    return fail ? route.fulfill({ status: 503, json: { error: "unavailable", message: "控制面重启中" } }) : route.fallback();
+  });
+  await page.clock.install();
+  await page.goto("/");
+  await page.getByRole("button", { name: "工作区" }).first().click();
+  const bar = page.locator(".browser-status");
+  await expect(bar).toContainText("本窗口观看中", { timeout: 20_000 });
+  // A control-plane restart answers one beat with an error: the panel stops claiming to watch.
+  fail = true;
+  await page.clock.runFor(20_500);
+  await expect(bar).not.toContainText("本窗口观看中");
+  await expect(page.getByText("控制面重启中")).toBeVisible();
+  // It is back: the next tick joins again as a new incarnation, and the label returns.
+  fail = false;
+  await page.clock.runFor(20_000);
+  await expect(bar).toContainText("本窗口观看中");
+  expect(beats.at(-1)).toBeGreaterThan(beats[0]!);
+});
