@@ -1,5 +1,5 @@
 import { PopupPresence } from "./PopupMotion";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api";
 import type { Task, TaskTab } from "../types";
 import { TaskConsole, taskConsoleTarget } from "./TaskConsole";
@@ -7,6 +7,8 @@ import { VaultPrompt } from "./VaultPrompt";
 
 const LIVE = new Set(["running", "stopping", "queued"]);
 const REFRESH_MS = 4000;
+/** The preview costs a sandbox screenshot: retake it only when the page shown changed, or this often. */
+const SHOT_MS = 15_000;
 
 /** The tab worth showing: one waiting for you, then one you hold, then the most recently used. */
 function pickTab(tabs: TaskTab[]): TaskTab | undefined {
@@ -31,6 +33,7 @@ export function TaskBrowser({ task, onReveal }: { task: Task; onReveal: () => vo
   const [tabs, setTabs] = useState<TaskTab[]>([]);
   const [shotAt, setShotAt] = useState(() => Date.now());
   const [shotFailed, setShotFailed] = useState(false);
+  const shot = useRef<{ key: string; at: number } | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [consoleOpen, setConsoleOpen] = useState(false);
@@ -41,11 +44,16 @@ export function TaskBrowser({ task, onReveal }: { task: Task; onReveal: () => vo
   // The feed summary changes the moment the agent asks for you or you take over.
   const signal = `${task.browser?.tabs ?? 0}:${task.browser?.request ?? ""}:${task.browser?.human ?? false}:${task.status}`;
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (force = false) => {
     try {
-      setTabs((await api.taskBrowser(task.id)).tabs);
-      setShotAt(Date.now());
-      setShotFailed(false);
+      const next = (await api.taskBrowser(task.id)).tabs;
+      setTabs(next);
+      const shown = pickTab(next), key = shown ? `${shown.id}\n${shown.url}\n${shown.title}` : "", now = Date.now();
+      if (force || !shot.current || shot.current.key !== key || now - shot.current.at >= SHOT_MS) {
+        shot.current = { key, at: now };
+        setShotAt(now);
+        setShotFailed(false);
+      }
     } catch {
       // A transient failure keeps the last known state rather than flashing it away.
     }
@@ -54,7 +62,7 @@ export function TaskBrowser({ task, onReveal }: { task: Task; onReveal: () => vo
   useEffect(() => {
     // The feed says which tasks have tabs: the rest never ask the sandbox.
     if (!task.browser?.tabs) return;
-    void load();
+    void load(true);
     if (!live) return;
     const timer = window.setInterval(() => {
       if (document.visibilityState === "visible") void load();

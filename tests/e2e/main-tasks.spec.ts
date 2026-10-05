@@ -830,6 +830,33 @@ test("only tasks that used the browser ask for their tabs", async ({ page }) => 
     await page.waitForTimeout(500);
     expect(asked).toEqual(["task-2"]);
 });
+test("a running task's browser card keeps its tabs live but retakes the preview only when the page changed or it has gone stale", async ({ page }) => {
+    // Each preview is a screenshot exec in the (possibly remote) sandbox: one every four seconds per live card was far too many.
+    const row: Task = { ...task(1), title: "查摄影资料", browser: { tabs: 1, request: null, human: false } };
+    const tab = { id: "t1", title: "DuckDuckGo 搜索", url: "https://html.duckduckgo.com/html/?q=exif", lastUsed: 1, finishedAt: null, holder: "ai", request: null };
+    let lists = 0, shots = 0;
+    await page.route("**/api/tasks/task-1/browser", r => { lists += 1; return r.fulfill({ json: { tabs: [tab] } }); });
+    await page.route("**/api/tasks/task-1/browser/screenshot*", r => { shots += 1; return r.fulfill({ contentType: "image/png", body: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==", "base64") }); });
+    await page.clock.install();
+    await setup(page, [row]);
+    const card = page.getByRole("group", { name: "任务浏览器：AI 操作中" });
+    await expect(card.getByRole("img", { name: /页面预览/ })).toBeVisible();
+    await expect.poll(() => shots).toBe(1);
+    const listed = lists;
+    // Two refreshes of an unchanged page: the tabs are read again, no new screenshot.
+    await page.clock.runFor(8_500);
+    await expect.poll(() => lists).toBeGreaterThanOrEqual(listed + 2);
+    await page.waitForTimeout(300);
+    expect(shots).toBe(1);
+    // The agent moved on: the next refresh shows the new page.
+    tab.title = "EXIF 说明"; tab.url = "https://example.org/exif";
+    await page.clock.runFor(4_000);
+    await expect(card).toContainText("EXIF 说明");
+    await expect.poll(() => shots).toBe(2);
+    // Unchanged again, the preview is still retaken at the slower cadence.
+    await page.clock.runFor(16_000);
+    await expect.poll(() => shots).toBe(3);
+});
 test("a stuck first request never holds the page on loading", async ({ page }) => {
     await mockConsole(page, { conversations: [] });
     let calls = 0;

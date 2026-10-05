@@ -3,8 +3,10 @@ import { api } from "../api";
 import type { OverviewPage } from "../types";
 import { PopupSurface } from "./PopupMotion";
 
-/** How often the open overview refreshes its list and previews. */
+/** How often the open overview refreshes its list. */
 const REFRESH_MS = 4000;
+/** A preview costs a sandbox screenshot: retake one only when its page changed, or this often. */
+const SHOT_MS = 15_000;
 
 const hostOf = (url: string) => { try { return new URL(url).host || url; } catch { return url; } };
 
@@ -22,7 +24,8 @@ function ownerLabel(page: OverviewPage): string {
 export function BrowserTabs({ onClose, onNotify }: { onClose: () => void; onNotify: (message: string, tone?: "error") => void }) {
   const [pages, setPages] = useState<OverviewPage[] | null>(null);
   const [failed, setFailed] = useState(false);
-  const [at, setAt] = useState(() => Date.now());
+  // When each page's preview was taken, and of what (its url and title).
+  const [shots, setShots] = useState<Record<string, { key: string; at: number }>>({});
   const [switching, setSwitching] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -30,7 +33,8 @@ export function BrowserTabs({ onClose, onNotify }: { onClose: () => void; onNoti
       const { pages } = await api.browserOverview();
       setPages(pages);
       setFailed(false);
-      setAt(Date.now());
+      const now = Date.now();
+      setShots(old => Object.fromEntries(pages.map(p => { const key = `${p.url}\n${p.title}`, prev = old[p.target]; return [p.target, prev && prev.key === key && now - prev.at < SHOT_MS ? prev : { key, at: now }]; })));
     } catch {
       setFailed(true);
     }
@@ -74,7 +78,7 @@ export function BrowserTabs({ onClose, onNotify }: { onClose: () => void; onNoti
           : <ul className="browser-tabs-grid">
             {pages.map(page => <li key={page.target}>
               <button type="button" className={`browser-tab-card${page.front ? " front" : ""}`} disabled={!!switching} onClick={() => void choose(page)} aria-label={`切换到：${page.title || hostOf(page.url)}`}>
-                <span className="browser-tab-shot"><img src={api.browserOverviewShotUrl(page.target, at)} alt="" loading="lazy" onError={event => { event.currentTarget.style.visibility = "hidden"; }} onLoad={event => { event.currentTarget.style.visibility = ""; }}/>{page.front && <span className="browser-tab-badge">正在显示</span>}{switching === page.target && <span className="browser-tab-badge">切换中…</span>}</span>
+                <span className="browser-tab-shot"><img src={api.browserOverviewShotUrl(page.target, shots[page.target]?.at ?? 0)} alt="" loading="lazy" onError={event => { event.currentTarget.style.visibility = "hidden"; }} onLoad={event => { event.currentTarget.style.visibility = ""; }}/>{page.front && <span className="browser-tab-badge">正在显示</span>}{switching === page.target && <span className="browser-tab-badge">切换中…</span>}</span>
                 <span className="browser-tab-title">{page.title || hostOf(page.url) || "空白页"}</span>
                 <span className="browser-tab-meta"><span className="browser-tab-host">{hostOf(page.url)}</span><span className={`browser-tab-owner ${page.owner ?? "none"}${page.holder === "human" ? " human" : ""}`}>{ownerLabel(page)}</span></span>
               </button>

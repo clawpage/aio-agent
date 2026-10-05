@@ -76,3 +76,32 @@ test("a tab overview that cannot be read says so and a closed page reports back"
   await expect(page.getByText("这个标签页已经关闭")).toBeVisible();
   await expect(panel).toBeVisible();
 });
+
+test("an open overview keeps its list live but retakes a preview only when that page changed or it has gone stale", async ({ page }) => {
+  // Every preview is one screenshot exec in the (possibly remote) sandbox: four-second refreshes of every page were far too many.
+  const live = pages.map(p => ({ ...p }));
+  let lists = 0;
+  const shots: string[] = [];
+  await page.clock.install();
+  await page.route("**/api/browser/overview", r => { lists += 1; return r.fulfill({ json: { pages: live } }); });
+  await page.route("**/api/browser/overview/shot*", r => { shots.push(new URL(r.request().url()).searchParams.get("target")!); return r.fulfill({ contentType: "image/png", body: picture }); });
+  await openBrowser(page);
+  await page.getByRole("button", { name: "标签页", exact: true }).click();
+  const panel = page.getByRole("dialog", { name: "浏览器标签页" });
+  await expect(panel.locator(".browser-tab-card")).toHaveCount(3);
+  await expect.poll(() => shots.length).toBe(3);
+  const listed = lists;
+  // Two list refreshes with nothing changed: the list is read again, no preview is retaken.
+  await page.clock.runFor(8_500);
+  await expect.poll(() => lists).toBeGreaterThanOrEqual(listed + 2);
+  await page.waitForTimeout(300);
+  expect(shots).toHaveLength(3);
+  // A page that navigated gets a new preview on the next refresh; the others keep theirs.
+  live[1]!.title = "订单详情";
+  await page.clock.runFor(4_000);
+  await expect(panel).toContainText("订单详情");
+  await expect.poll(() => shots.slice(3)).toEqual(["BBBB1111BBBB1111"]);
+  // Past the slower cadence every preview is retaken once.
+  await page.clock.runFor(4_000);
+  await expect.poll(() => [...shots.slice(4)].sort()).toEqual(["AAAA0000AAAA0000", "CCCC2222CCCC2222"]);
+});
