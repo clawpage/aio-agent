@@ -43,7 +43,10 @@ it("runs gadget messages in one executor session at medium effort, briefly, with
     expect(turn.effort).toBe("medium");
     expect(turn.text).toContain("语音配件");
     expect(turn.text).toContain("纯文本口语");
-    expect(turn.text).toContain("比较三款婴儿推车");
+    // Other tasks are looked up with task_list / task_get, not pasted into every turn.
+    expect(turn.text).toContain("task_list");
+    expect(turn.text).not.toContain("比较三款婴儿推车");
+    expect(turn.text.length).toBeLessThan(1200);
     expect(turn.text).not.toContain("```products");
     expect(planned).toBe(before);   // no dispatcher
 

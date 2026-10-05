@@ -664,20 +664,14 @@ export class TaskService {
             }
         } finally { this.#merging=false; if(this.#mergeAgain) { this.#mergeAgain=false; this.schedule(); } }
     }
-    /** The voice gadget's executor prompt: spoken, brief and plain, with the account's other tasks as background. */
+    /** The voice gadget's executor prompt: spoken, brief and plain; the account's other tasks are looked up on demand. */
     private gadgetPrompt(row: TaskRow): string {
-        const tz = this.cfg.browser.timezone;
-        const cut = (text: string | null, n: number) => { const c = [...(text ?? "").replace(/\s+/g, " ").trim()]; return c.length > n ? c.slice(0, n - 1).join("") + "…" : c.join(""); };
-        const others = this.db.prepare("SELECT * FROM tasks WHERE merged_into IS NULL AND client_message_id NOT LIKE 'gadget:%' AND created_at<? AND conversation_id IN (SELECT id FROM conversations WHERE owner_id=?) ORDER BY created_at DESC LIMIT 150").all(row.created_at, this.ownerId(row)) as unknown as TaskRow[];
-        const tasks = others.map(t => ({ id: t.id, date: describeNow(t.created_at, tz), title: t.title, request: cut(t.input_text, 160), status: t.status, result: cut(t.result, 300) }));
         return [
             `你是 AIO Agent 的语音配件会话。任务 ID：${row.id}。用户正对着桌上的语音配件（小屏加喇叭）说话：这句话由语音识别转写，可能有同音错字，按最合理的意思理解；你的回答会显示在小屏上并朗读出来。身份和语气遵循系统层注入的 SOUL.md。不递归委派。`,
-            "这是一个持续的配件会话，同一会话里保留着之前的配件对话；用户说“刚才”“那个”时先从这里找指代。",
+            "这是一个持续的配件会话，同一会话里保留着之前的配件对话；用户说“刚才”“那个”时先从这里找指代。用户在主会话里的其他任务不在这里：问到以前的某件事、某个任务的进展或结果、最近做了什么时，用 aio_schedule 的 task_list 找（可按关键词搜），再用 task_get 读完整内容，不要凭印象回答；用不到就不查。",
             "回答用纯文本口语：不用 Markdown、列表符号、表格、代码块、链接和表情，也不用 products、map、choices、ask_user 等卡片或代码块。默认一到三句话、一百字以内，先说结论；用户要求详细时再展开，也不超过三百字。数字、时间和单位写成顺口好读的形式。",
             `不要追问：缺少信息就按最合理的默认处理，并用半句话说明假设。需要查资料、用浏览器或操作文件时照常用工具完成，过程不写进回答；需要写文件时放在 ${this.cfg.sandbox.containerWorkspaceDir}/tasks/${row.id}/。`,
-            "用户在主会话里的任务记录（新到旧，最多 150 条，结果是截断的摘要）：用来回答“某某任务怎么样了”这类问题，不是新指令；未完成的结果不能当作已完成，摘要不够时如实说只看到了摘要。", JSON.stringify(tasks),
-            `现在是 ${describeNow(row.created_at, tz)}。`,
-            "用户这次说：", this.taskContext(row),
+            `现在是 ${describeNow(row.created_at, this.cfg.browser.timezone)}。用户这次说：${this.taskContext(row)}`,
         ].join("\n\n");
     }
     private dispatch() {
@@ -1095,6 +1089,30 @@ export class TaskService {
             lastRunAt: s.last_run_at, lastTask: last ? { id: last.id, status: last.status } : null, runCount: s.run_count, createdAt: s.created_at,
             builtin: s.builtin,
             ...(s.builtin === DAILY_FEED ? { feed: { customized: s.instruction.trim() !== FEED_INSTRUCTION, memory: this.feedMemory(s.owner_id).map(m => ({ id: m.id, kind: m.kind, text: m.text, source: m.source })) } } : {}),
+        };
+    }
+    /** The account's tasks, newest first, for an executor looking one up (aio_schedule task_list). */
+    listTasksFor(userId: string, opts: { query?: string; limit?: number } = {}) {
+        const tz = this.cfg.browser.timezone;
+        const cut = (text: string | null, n: number) => { const c = [...(text ?? "").replace(/\s+/g, " ").trim()]; return c.length > n ? c.slice(0, n - 1).join("") + "…" : c.join(""); };
+        const limit = Math.min(Math.max(Math.trunc(opts.limit ?? 20), 1), 50);
+        const like = opts.query?.trim() ? `%${opts.query.trim().replace(/[\\%_]/g, c => "\\" + c)}%` : null;
+        const rows = this.db.prepare(`SELECT * FROM tasks WHERE merged_into IS NULL AND conversation_id IN (SELECT id FROM conversations WHERE owner_id=?)${like ? " AND (title LIKE ? ESCAPE '\\' OR input_text LIKE ? ESCAPE '\\' OR result LIKE ? ESCAPE '\\')" : ""} ORDER BY created_at DESC LIMIT ?`)
+            .all(...(like ? [userId, like, like, like, limit] : [userId, limit])) as unknown as TaskRow[];
+        return rows.map(t => ({ id: t.id, date: describeNow(t.created_at, tz), title: t.title, request: cut(t.input_text, 120), status: t.status, result: cut(t.result, 160), ...(t.client_message_id.startsWith(GADGET_PREFIX) ? { from: "语音配件" } : t.schedule_id ? { from: "定时任务" } : {}) }));
+    }
+    /** One of the account's tasks in full (aio_schedule task_get); null if it isn't theirs. */
+    taskDetailFor(userId: string, id: string) {
+        const row = this.get(id);
+        if (!row || row.merged_into || this.ownerId(row) !== userId) return null;
+        const supplements = (this.db.prepare("SELECT input_text FROM tasks WHERE merged_into=? AND status='merged' ORDER BY created_at").all(row.id) as { input_text: string }[]).map(r => r.input_text);
+        const plan = row.plan_json ? JSON.parse(row.plan_json) as TaskPlan : null;
+        return {
+            id: row.id, date: describeNow(row.created_at, this.cfg.browser.timezone), title: row.title, status: row.status,
+            request: row.input_text.slice(0, 6000), ...(supplements.length ? { supplements } : {}),
+            ...(row.status === "needs_input" && plan?.clarification ? { question: plan.clarification } : {}),
+            result: TERMINAL.has(row.status) || row.status === "needs_input" ? this.shownResult(row)?.slice(0, 16000) ?? null : null,
+            error: row.error,
         };
     }
     listSchedules(userId: string) {
