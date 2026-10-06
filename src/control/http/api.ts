@@ -629,9 +629,13 @@ export function createApiRouter(context: AppContext): Router {
   }));
   // Firmware updates over Wi-Fi: what is offered, then the image itself.
   router.get("/gadget/firmware", requireKind("primary"), (req, res) => {
-    if (!gadgetCaller(req, res)) return;
+    const caller = gadgetCaller(req, res);
+    if (!caller) return;
     res.setHeader("Cache-Control", "no-store");
     const firmware = readFirmware(cfg.gadgetFirmwareDir);
+    // The gadget says what it runs (`?running=<app ELF SHA-256>`): with no cable, the log is where to see it.
+    const running = typeof req.query.running === "string" && /^[a-f0-9]{64}$/.test(req.query.running) ? req.query.running : null;
+    log.info("gadget firmware check", { account: caller.username, running: running?.slice(0, 12) ?? null, offered: firmware?.elfSha256.slice(0, 12) ?? null });
     if (!firmware) { res.status(404).json({ error: "no_firmware" }); return; }
     const { file: _file, ...info } = firmware;
     res.json(info);

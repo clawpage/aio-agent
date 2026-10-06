@@ -145,6 +145,9 @@ it("offers the published firmware to the gadget token: what it is, then the imag
     expect(info).toEqual({ version: "999.0.1", project: "muse-gadget", builtAt: "Oct  6 2026 00:20:00", elfSha256: "ab".repeat(32), size: 4096 });
     expect((await h.request("/api/gadget/firmware", { headers: { authorization: "Bearer wrong" } })).status).toBe(401);
     expect(await (await h.request("/api/gadget/firmware", { headers: auth })).json()).toEqual(info);
+    // The gadget says what it runs; a malformed value is ignored, never refused.
+    expect(await (await h.request(`/api/gadget/firmware?running=${"cd".repeat(32)}`, { headers: auth })).json()).toEqual(info);
+    expect((await h.request("/api/gadget/firmware?running=nonsense", { headers: auth })).status).toBe(200);
     // The bytes themselves, over the primary host as the gadget reaches it.
     const bin = await fetch(`http://localhost:${h.primaryPort}/api/gadget/firmware.bin`, { headers: { authorization: `Bearer ${TOKEN}` } });
     expect(bin.status).toBe(200);
