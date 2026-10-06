@@ -347,6 +347,15 @@ export class TaskService {
         this.schedule();
         return this.get(id)!;
     }
+    /** The account's gadget exchanges, newest first, older than `before` (for the owner's read-only view). */
+    gadgetHistory(userId: string, before: number | null, limit: number) {
+        const rows = this.db.prepare("SELECT * FROM tasks WHERE client_message_id LIKE 'gadget:%' AND (? IS NULL OR created_at < ?) AND conversation_id IN (SELECT id FROM conversations WHERE owner_id=?) ORDER BY created_at DESC LIMIT ?")
+            .all(before, before, userId, limit + 1) as unknown as TaskRow[];
+        return {
+            messages: rows.slice(0, limit).map(row => ({ ...this.gadgetReply(row.id, userId)!, text: row.input_text, createdAt: row.created_at, completedAt: row.completed_at })),
+            more: rows.length > limit,
+        };
+    }
     /** What the gadget polls: whether its message is answered, and the answer. */
     gadgetReply(id: string, userId: string) {
         const row = this.get(id);

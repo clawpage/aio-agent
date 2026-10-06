@@ -59,3 +59,29 @@ it("carries an assigned effort into the member's runtime, and only one a member 
     expect(memberConfig(h.ctx.cfg, "user_e", 18099, MEMBER_MODEL).memberEffort).toBeUndefined();
     expect(() => memberConfig(h.ctx.cfg, "user_e", 18099, MEMBER_MODEL, "xhigh")).toThrow("Unsupported member effort");
 });
+
+it("shows the owner, and only the owner, the gadget account's conversation", async () => {
+    fs.writeFileSync(h.ctx.cfg.gadgetTokenPath, `AIO_GADGET_TOKEN=${TOKEN}\nAIO_GADGET_USER=betaw\n`, { mode: 0o600 });
+    const { cookie } = await login(h);
+    type History = { account: string | null; messages: Array<{ id: string; text: string; reply: string | null; done: boolean }>; more: boolean };
+    const read = async (query = "") => (await (await h.request(`/api/gadget/history${query}`, { headers: { cookie } })).json()) as History;
+    const all = await read();
+    expect(all.account).toBe("betaw");
+    // Newest first: the follow-up, then the answered first message.
+    expect(all.messages.map(m => m.text)).toEqual(["刚才说的是几点", "记一下：明天上午十点带 Roy 打疫苗"]);
+    expect(all.messages[1]).toMatchObject({ done: true, reply: "好的，记下了。" });
+    expect(all.more).toBe(false);
+    const page = await read("?limit=1");
+    expect(page).toMatchObject({ more: true, messages: [{ text: "刚才说的是几点" }] });
+    const older = await read(`?limit=1&before=${(page.messages[0] as unknown as { createdAt: number }).createdAt}`);
+    expect(older.messages.map(m => m.text)).toEqual(["记一下：明天上午十点带 Roy 打疫苗"]);
+    expect((await read("?limit=0")).messages).toEqual([]);
+
+    // A member gets nothing; without a session, neither does anyone else.
+    const m = h.ctx.sessions.create(userId, "primary");
+    expect((await h.request("/api/gadget/history", { headers: { cookie: `pa_session=${m.token}; pa_csrf=${m.csrfToken}` } })).status).toBe(403);
+    expect((await h.request("/api/gadget/history")).status).toBe(401);
+    // A gadget speaking for the owner has no separate account to show.
+    fs.writeFileSync(h.ctx.cfg.gadgetTokenPath, `AIO_GADGET_TOKEN=${TOKEN}\n`, { mode: 0o600 });
+    expect(await read()).toEqual({ account: null, messages: [], more: false });
+});

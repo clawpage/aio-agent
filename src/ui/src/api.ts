@@ -109,7 +109,11 @@ export type PointerInput = { action: "click"; x: number; y: number } | { action:
 /** `current`: the tab the page's key is on now (a link may have opened a new window). */
 export type PointerResult = { title: string; url: string; editable?: boolean; current?: string };
 
+/** One message the voice gadget sent, with its answer once there is one. */
+export interface GadgetMessage { id: string; text: string; status: string; done: boolean; reply: string | null; error: string | null; createdAt: number; completedAt: number | null }
+
 export const api = {
+  gadgetHistory: (opts: { before?: number; limit?: number } = {}, signal?: AbortSignal) => request<{ account: string | null; messages: GadgetMessage[]; more: boolean }>(`/api/gadget/history?limit=${opts.limit ?? 50}${opts.before ? `&before=${opts.before}` : ''}`, { signal, cache: 'no-store' }),
   usage: (days: number, signal?: AbortSignal) => request<import('../../common/usage').UsageReport>(`/api/usage?days=${days}`, { signal, cache: 'no-store' }),
   soul: () => request<{content:string;revision:string;defaultContent:string;maxBytes:number}>('/api/settings/soul'),
   recallStats: (days: number) => request<{ stats: import('./types').RecallStats }>(`/api/settings/recall?days=${days}`),

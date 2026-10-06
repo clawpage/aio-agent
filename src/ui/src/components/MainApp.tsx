@@ -14,6 +14,7 @@ import { Chat } from "./Chat";
 import { Login } from "./Login";
 import { Settings } from "./Settings";
 import { UsageDashboard } from './UsageDashboard';
+import { accountLabel, GadgetHistory } from './GadgetHistory';
 import { useDebugMode } from "../debugMode";
 import { Workspace } from "./Workspace";
 import { TaskChat } from "./TaskChat";
@@ -71,6 +72,14 @@ export function MainApp() {
     /** The address names another account than the one signed in. */
     const [foreign, setForeign] = useState<string | null>(null);
     const [auth, setAuth] = useState<boolean | null>(null);
+    /** The member account the voice gadget speaks for, shown to the owner as its own entry. */
+    const [gadgetAccount, setGadgetAccount] = useState<string | null>(null);
+    useEffect(() => {
+        if (!auth || role !== "owner") { setGadgetAccount(null); return; }
+        const controller = new AbortController();
+        api.gadgetHistory({ limit: 0 }, controller.signal).then(r => setGadgetAccount(r.account), () => undefined);
+        return () => controller.abort();
+    }, [auth, role]);
     const [status, setStatus] = useState<StatusResponse | null>(null);
     const [view, setView] = useState<AppRoute["view"]>("main");
     const [taskFeed,setTaskFeed]=useState<TaskFeed>({tasks:[],nextBefore:null,connected:false});
@@ -288,6 +297,7 @@ export function MainApp() {
       <button className={`ghost block ${view === "tasks" && !workspace ? "active" : ""}`} aria-current={view === "tasks" && !workspace ? "page" : undefined} onClick={() => navigate({ view: "tasks" })}>任务列表</button>
       <button className={`ghost block ${view === "schedules" && !workspace ? "active" : ""}`} aria-current={view === "schedules" && !workspace ? "page" : undefined} onClick={() => navigate({ view: "schedules" })}>定时任务</button>
       <button className={`ghost block ${view === "vault" && !workspace ? "active" : ""}`} aria-current={view === "vault" && !workspace ? "page" : undefined} onClick={() => navigate({ view: "vault" })}>密码器</button>
+      {role === 'owner' && gadgetAccount && <button className={`ghost block ${view === 'gadget' && !workspace ? 'active' : ''}`} aria-current={view === "gadget" && !workspace ? "page" : undefined} onClick={() => navigate({ view: "gadget" })}>{accountLabel(gadgetAccount)}</button>}
       {role === 'owner' && <button className={`ghost block ${view === 'usage' && !workspace ? 'active' : ''}`} aria-current={view === "usage" && !workspace ? "page" : undefined} onClick={() => navigate({ view: "usage" })}>用量看板</button>}
       <button className={`ghost block ${workspace ? "active" : ""}`} aria-current={workspace ? "page" : undefined} onClick={() => { closeMenu(); openWorkspace(); }}>工作区</button>
       <div className="sidebar-foot"><span className="muted tiny">{!status || startFailed ? "正在连接智能体" : "智能体在线"}</span><PushToggle/><button className="ghost block" onClick={() => setTheme(t => t === "dark" ? "light" : "dark")}>{theme === "dark" ? "浅色模式" : "深色模式"}</button>{role === "owner" && <button className={`ghost block ${view === "settings" && !workspace ? "active" : ""}`} aria-current={view === "settings" && !workspace ? "page" : undefined} onClick={() => navigate({ view: "settings" })}>配置</button>}<button className="ghost block" onClick={() => void logout()}>退出登录</button></div>
@@ -303,6 +313,7 @@ export function MainApp() {
       <div className="view-slot" hidden={view !== 'vault'}><VaultList active={view === 'vault'} onExpired={expired}/></div>
       {role === "owner" && view === "settings" && <Settings onBack={() => go({ view: "main" })}/>}
       {role === 'owner' && view === 'usage' && <UsageDashboard onExpired={expired}/>}
+      {role === 'owner' && view === 'gadget' && <GadgetHistory active={!workspace} onExpired={expired}/>}
       {view === "detail" && detail && <div className="task-detail"><div className="task-detail-bar"><button className="ghost" onClick={() => { if ((history.state as { aio?: boolean; from?: DetailFrom } | null)?.from) history.back(); else go({ view: detailReturn }); }}>← 返回{detailReturn === 'tasks' ? '任务列表' : detailReturn === 'schedules' ? '定时任务' : '主会话'}</button><span className="muted tiny">{taskStatusLabels[(taskFeed.tasks.find(t=>t.id===detailTask?.id)??detailTask)?.status??'']??'过程详情'}</span></div><Chat key={detail.id} readOnly conversation={detail} status={status} onConversationChanged={() => { }} onStatusChanged={() => void refreshStatus()} onOpenWorkspace={openWorkspace} onOpenBrowserLink={u => void openLink(u)} onOpenBrowserFile={p => void openFileInBrowser(p)}/></div>}
     </main>
     <PopupPresence>{opening && <PopupSurface className="task-console-overlay opening-overlay" role="presentation">

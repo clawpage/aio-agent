@@ -218,7 +218,7 @@ export function createApiRouter(context: AppContext): Router {
     if (!user) { res.status(401).json({ error: "unauthenticated" }); return; }
     const restricted = user.role !== "owner";
     const pathname = req.path.toLowerCase().replace(/\/+$/, "");
-    const ownerPaths = ["/usage", "/settings", "/models", "/capabilities", "/sandbox/context", "/documents/provision"];
+    const ownerPaths = ["/usage", "/settings", "/models", "/capabilities", "/sandbox/context", "/documents/provision", "/gadget/history"];
     if (restricted && ownerPaths.some(p => pathname === p || pathname.startsWith(p + "/"))) {
       res.status(403).json({ error: "forbidden", message: "此操作仅限所有者" }); return;
     }
@@ -564,15 +564,19 @@ export function createApiRouter(context: AppContext): Router {
   // from cfg.gadgetTokenPath instead of a login; no cookies, so no CSRF to check.
   // `AIO_GADGET_USER=<username>` in the same file names that account (its own
   // runtime, tasks and sandbox); without it the gadget speaks for the owner.
+  /** The account the gadget speaks for: the one AIO_GADGET_USER names, else the owner. */
+  const gadgetUser = (): { id: string; username: string; role: string } | undefined => {
+    const named = readSecretFile(cfg.gadgetTokenPath, "AIO_GADGET_USER");
+    if (named.ok) return db.prepare("SELECT id,username,role FROM owners WHERE username=?").get(named.value) as { id: string; username: string; role: string } | undefined;
+    const owner = getUser(db, cfg.runtimeUserId ?? "owner_1");
+    return owner?.role === "owner" ? owner : undefined;
+  };
   const gadgetAccount = async (req: Request, res: Response): Promise<{ userId: string; tasks: AppContext["tasks"] } | null> => {
     const secret = readSecretFile(cfg.gadgetTokenPath, "AIO_GADGET_TOKEN");
     const given = /^Bearer\s+(\S+)$/i.exec(req.get("authorization") ?? "")?.[1];
     const digest = (s: string) => createHash("sha256").update(s).digest();
-    const named = readSecretFile(cfg.gadgetTokenPath, "AIO_GADGET_USER");
-    const user = named.ok
-      ? db.prepare("SELECT id,role FROM owners WHERE username=?").get(named.value) as { id: string; role: string } | undefined
-      : getUser(db, cfg.runtimeUserId ?? "owner_1");
-    if (!secret.ok || !given || !timingSafeEqual(digest(secret.value), digest(given)) || !user || (!named.ok && user.role !== "owner")) {
+    const user = gadgetUser();
+    if (!secret.ok || !given || !timingSafeEqual(digest(secret.value), digest(given)) || !user) {
       res.status(401).json({ error: "unauthenticated" });
       return null;
     }
@@ -585,6 +589,22 @@ export function createApiRouter(context: AppContext): Router {
       return null;
     }
   };
+  // The owner reads the gadget account's conversation here (owner-only, read-only).
+  // `account` is null unless the gadget speaks for a member: the owner's own
+  // gadget messages are already in the owner's main session.
+  router.get("/gadget/history", requireKind("primary"), requireSession, asyncHandler(async (req, res) => {
+    res.setHeader("Cache-Control", "no-store");
+    const user = gadgetUser();
+    const limit = Math.min(Math.max(Number(req.query.limit ?? 50) || 0, 0), 200);
+    const before = typeof req.query.before === "string" && /^\d+$/.test(req.query.before) ? Number(req.query.before) : null;
+    if (!user || user.role === "owner" || !context.runtimeForUser) { res.json({ account: null, messages: [], more: false }); return; }
+    try {
+      const runtime = await context.runtimeForUser(user.id);
+      res.json({ account: user.username, ...runtime.tasks.gadgetHistory(user.id, before, limit) });
+    } catch {
+      res.status(503).json({ error: "runtime_unavailable", message: `${user.username} 的环境暂不可用，请稍后重试` });
+    }
+  }));
   router.post("/gadget/messages", requireKind("primary"), asyncHandler(async (req, res) => {
     const account = await gadgetAccount(req, res);
     if (!account) return;

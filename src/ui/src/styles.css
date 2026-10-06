@@ -3514,6 +3514,22 @@ button.map-card-switch { flex: 0 0 auto; padding: 4px 10px; }
 .schedule-feed-memory { margin: 6px 0 2px; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--text); }
 .schedule-feed-memory li[data-kind="avoid"] .schedule-feed-label { color: var(--text-dim); background: var(--bg-raised); }
 
+/* Owner's read-only view of the voice gadget account's conversation. */
+.gadget-history { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.gadget-header { padding: 28px 28px 12px; border-bottom: 1px solid var(--border); }
+.gadget-header h1 { margin: 0; }
+.gadget-header p { margin: 8px 0 0; }
+.gadget-history > .banner { margin: 12px 28px 0; }
+.gadget-log { flex: 1; min-height: 0; overflow-y: auto; padding: 16px 28px 28px; display: flex; flex-direction: column; gap: 12px; }
+.gadget-exchange { display: flex; flex-direction: column; gap: 8px; }
+.gadget-older { align-self: center; }
+.gadget-failed { color: var(--error); }
+@media (max-width: 720px) {
+  .gadget-header { padding: 60px 14px 12px; }
+  .gadget-history > .banner { margin: 12px 14px 0; }
+  .gadget-log { padding: 12px 14px 24px; }
+}
+
 /* Owner usage dashboard: calendar-day trends, shared brand tokens. */
 .usage-dashboard { flex: 1; min-height: 0; overflow-y: auto; padding: 28px; display: flex; flex-direction: column; gap: 18px; }
 .usage-header { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
