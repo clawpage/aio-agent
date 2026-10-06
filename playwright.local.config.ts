@@ -36,6 +36,7 @@ export default defineConfig({
     "**/message-preview.spec.ts",
     "**/popup-motion.spec.ts",
     "**/floating-composer.spec.ts",
+    "**/desktop-composer.spec.ts",
     "**/working.spec.ts",
     "**/main-tasks.spec.ts",
     "**/terminal-sessions.spec.ts",
