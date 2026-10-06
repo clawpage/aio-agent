@@ -103,6 +103,15 @@ export function holdImage(src: ImageSource): { promise: Promise<string>; release
   };
 }
 
+/** A picture this device already has (one just uploaded): shown from it, not fetched back. */
+export function primeImage(src: ImageSource, blob: Blob): void {
+  const known = entries.get(src);
+  if (known && !known.failed) return;
+  const url = URL.createObjectURL(blob);
+  entries.set(src, { promise: Promise.resolve(url), url, failed: false, refs: 0, used: ++clock });
+  evict();
+}
+
 /** Forget that a picture failed, so an explicit retry fetches it again now. */
 export function retryImage(src: ImageSource): void {
   if (entries.get(src)?.failed) entries.delete(src);

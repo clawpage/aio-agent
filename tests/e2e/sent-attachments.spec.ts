@@ -113,3 +113,54 @@ test("pictures are kept on the device: a restart asks only whether a workspace p
   await page.getByRole("button", { name: "退出登录" }).click();
   await expect.poll(keptCount).toBe(0);
 });
+
+test("the composer shows what is about to be sent as thumbnails, and a sent picture appears without fetching it back", async ({ page }, info) => {
+  await mockConsole(page, { conversations: [] });
+  const PNG = Buffer.from("89504e470d0a1a0a0000000d49484452000000020000000108020000007b40e8dd0000000f49444154789c63f8cfc0c0b0200000079101f0e7755c1d0000000049454e44ae426082", "hex");
+  let release!: () => void;
+  const gate = new Promise<void>((r) => { release = r; });
+  await page.route("**/api/sandbox/upload*", async (r) => {
+    await gate;
+    const name = JSON.parse(r.request().postData() ?? "{}").name as string;
+    const image = name.endsWith(".png");
+    return r.fulfill({ json: { path: `/home/gem/workspace/uploads/${name}`, name, kind: image ? "image" : "file", size: image ? 160_000 : 48_000 } });
+  });
+  const fetched: string[] = [];
+  await page.route("**/api/documents/image*", (r) => { fetched.push(r.request().url()); return r.fulfill({ contentType: "image/png", body: PNG }); });
+  let tasks: unknown[] = [];
+  await page.route("**/api/main*", (r) => r.fulfill({ json: { mode: "tasks", version: `v${tasks.length}`, tasks, nextBefore: null } }));
+  await page.route("**/api/tasks", async (r) => {
+    const body = JSON.parse(r.request().postData()!);
+    const task = { ...base, id: "t-new", title: "看看", text: body.text, conversationId: "c-new", attachments: body.attachments, status: "planning", result: null, createdAt: Date.now(), completedAt: null };
+    tasks = [task];
+    return r.fulfill({ json: { task, duplicate: false } });
+  });
+  await page.goto("/");
+  await page.getByTestId("attachment-input").setInputFiles([
+    { name: "截图.png", mimeType: "image/png", buffer: PNG },
+    { name: "行程单.pdf", mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.4\n") },
+  ]);
+  const tray = page.locator(".composer .composer-tray");
+  // While uploading: the picture already shows (from the device), dimmed with a spinner.
+  await expect(tray.getByLabel("正在上传 截图.png").locator("img")).toBeVisible();
+  release();
+  const picture = tray.locator(".chip", { hasText: "截图.png" });
+  await expect(picture.locator("img")).toBeVisible();
+  await expect.poll(() => picture.locator("img").evaluate((el) => (el as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);
+  await expect(tray.locator(".chip", { hasText: "行程单.pdf" })).toContainText("PDF");
+  await expect(tray.locator(".uploading")).toHaveCount(0);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
+  await page.getByRole("textbox", { name: "消息" }).fill("看看这张截图和行程单");
+  await page.screenshot({ path: info.outputPath("composer-tray.png") });
+
+  // Removing one leaves the other.
+  await tray.locator(".chip", { hasText: "行程单.pdf" }).getByRole("button", { name: "移除附件" }).click();
+  await expect(tray.locator(".chip")).toHaveCount(1);
+
+  await page.getByRole("button", { name: "发送" }).click();
+  await expect(tray).toHaveCount(0);
+  const sent = page.locator('.msg.user [data-testid="file-card-thumb"]');
+  await expect.poll(() => sent.evaluate((el) => (el as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);
+  expect(fetched).toEqual([]);
+  await page.screenshot({ path: info.outputPath("sent-after-tray.png") });
+});

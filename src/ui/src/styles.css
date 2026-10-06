@@ -2545,7 +2545,7 @@ textarea:focus {
 
 /* What the person sent: pictures as pictures (one keeps its own shape, several form a tight
    grid), other files as quiet cards under them. */
-.file-cards.sent { flex-direction: column; align-items: flex-end; gap: 6px; }
+.file-cards.sent { flex-direction: column; align-items: flex-start; gap: 6px; }
 .file-cards.sent:first-child { margin-top: 2px; }
 .sent-media {
   display: grid;
@@ -2647,6 +2647,104 @@ textarea:focus {
 @media (prefers-reduced-motion: reduce) {
   .file-card.file-card-media, .file-card-media img { animation: none; }
 }
+
+/* The composer's tray: what is about to be sent, as thumbnails (pictures drawn from the
+   picked file), small file cards, and dimmed tiles with a spinner while they upload. */
+.composer .composer-tray {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 8px;
+  margin: 4px 6px 8px;
+  padding: 4px 2px 2px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.composer .composer-tray::-webkit-scrollbar { display: none; }
+.composer .composer-tray .tray-item {
+  position: relative;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 64px;
+  max-width: 220px;
+  padding: 0;
+  border: 0;
+  border-radius: 14px;
+  background: var(--bg-raised);
+  box-shadow: 0 0 0 0.5px var(--border), 0 4px 12px rgba(20, 14, 50, 0.08);
+  font-size: 13px;
+  overflow: hidden;
+  animation: tray-in var(--dur) var(--ease) both;
+}
+.composer .composer-tray .tray-item.is-image { width: 64px; }
+.composer .composer-tray .tray-item.is-file { padding: 0 32px 0 10px; }
+.tray-item img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.tray-item.is-image::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: inset 0 0 0 0.5px rgba(255, 255, 255, 0.14);
+  pointer-events: none;
+}
+.tray-hidden-name { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.tray-badge {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  background: var(--accent);
+  color: var(--on-accent);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+.tray-meta { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.tray-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 130px; font-weight: 600; }
+.tray-size { font-size: 11px; color: var(--text-dim); }
+.composer .composer-tray .tray-remove {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  min-width: 22px;
+  min-height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  color: #fff;
+  background: rgba(16, 14, 24, 0.5);
+  -webkit-backdrop-filter: blur(10px) saturate(1.4);
+  backdrop-filter: blur(10px) saturate(1.4);
+  box-shadow: 0 0 0 0.5px rgba(255, 255, 255, 0.2);
+}
+/* A larger touch target than the 22px it shows. */
+.composer .composer-tray .tray-remove::before { content: ""; position: absolute; inset: -8px; }
+.composer .composer-tray .tray-remove .composer-icon { width: 12px; height: 12px; }
+.composer .composer-tray .tray-item.is-file .tray-remove { top: 50%; transform: translateY(-50%); color: var(--text-dim); background: color-mix(in srgb, var(--text) 8%, transparent); box-shadow: none; }
+.tray-item.uploading img, .tray-item.uploading .tray-badge { opacity: 0.45; filter: saturate(0.6); }
+.tray-spinner {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 20px;
+  height: 20px;
+  margin: -10px 0 0 -10px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  border-top-color: #fff;
+  animation: tray-spin 0.8s linear infinite;
+}
+.tray-item.is-file .tray-spinner { left: auto; right: 10px; margin-left: 0; border-color: color-mix(in srgb, var(--text) 18%, transparent); border-top-color: var(--accent); }
+@keyframes tray-in { from { opacity: 0; transform: scale(0.92); } }
+@keyframes tray-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .composer .composer-tray .tray-item { animation: none; } .tray-spinner { animation-duration: 2.4s; } }
 
 /* -------------------------------------------------- merged files + docs tools ---- */
 

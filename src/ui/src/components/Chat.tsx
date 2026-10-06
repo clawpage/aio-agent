@@ -20,6 +20,7 @@ import {
 import { Markdown } from "./Markdown";
 import { FilePreview } from "./FilePreview";
 import { FileCard } from "./FileCard";
+import { ComposerAttachments, useUploadTray } from "./ComposerAttachments";
 import { ShareCard } from "./ShareCard";
 import { extractShareLinks } from "../shareLinks";
 import { VideoEmbed } from "./VideoEmbed";
@@ -74,6 +75,7 @@ export function Chat({
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [busy, setBusy] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const tray = useUploadTray();
   const [error, setError] = useState<string | null>(null);
   const draftRef = useRef<HTMLTextAreaElement | null>(null);
   const [previewPath, setPreviewPath] = useState<string | null>(null);
@@ -208,6 +210,7 @@ export function Chat({
       // Only clear the composer once the server has accepted the turn.
       setDraft("");
       setAttachments([]);
+      tray.clear();
       pendingRef.current = null;
       onChangedRef.current();
       onStatusRef.current();
@@ -267,17 +270,19 @@ export function Chat({
     // partial failure never discards attachments that already made it.
     const uploaded: Attachment[] = [];
     const failures: string[] = [];
-    for (const file of picked) {
+    for (const item of tray.begin(picked)) {
       try {
-        uploaded.push(await api.upload(file));
+        const stored = await api.upload(item.file);
+        uploaded.push(stored);
+        // Each upload joins the tray as it lands, in place of its in-progress tile.
+        setAttachments((prev) => [...prev, stored]);
+        tray.settle(item, stored);
       } catch (err) {
-        failures.push(`${file.name}：${err instanceof Error ? err.message : String(err)}`);
+        tray.settle(item, null);
+        failures.push(`${item.name}：${err instanceof Error ? err.message : String(err)}`);
       }
     }
-    if (uploaded.length) {
-      setAttachments((prev) => [...prev, ...uploaded]);
-      pendingRef.current = null;
-    }
+    if (uploaded.length) pendingRef.current = null;
     if (failures.length) {
       setError(`部分附件上传失败：${failures.join("；")}${uploaded.length ? "（已上传的附件已保留）" : ""}`);
     }
@@ -365,18 +370,7 @@ export function Chat({
       )}
 
       {!readOnly && <div className={`composer${draft || attachments.length || uploading ? " has-content" : ""}`}>
-        {attachments.length > 0 && (
-          <div className="chips">
-            {attachments.map((a) => (
-              <span className="chip" key={a.path}>
-                {a.kind === "image" ? "🖼" : "📄"} {a.name}
-                <button type="button" onClick={() => setAttachments((prev) => prev.filter((x) => x.path !== a.path))} aria-label="移除附件">
-                  <ComposerIcon kind="close"/>
-                </button>
-              </span>
-            ))}
-          </div>
-        )}
+        <ComposerAttachments items={attachments} pending={tray.pending} previews={tray.previews} onRemove={(path) => { setAttachments((prev) => prev.filter((x) => x.path !== path)); tray.drop(path); }} />
         <textarea
           ref={draftRef}
           aria-label="消息"

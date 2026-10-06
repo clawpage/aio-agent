@@ -11,6 +11,7 @@ import { ChoiceList } from "./ChoiceList";
 import { FilePreview } from "./FilePreview";
 import { TaskBrowser } from "./TaskBrowser";
 import { MessagePreview } from "./MessagePreview";
+import { ComposerAttachments, useUploadTray } from "./ComposerAttachments";
 import type {TaskFeed} from '../taskStatus';
 const terminal = new Set(["completed", "failed", "interrupted", "unknown"]);
 /** What the dispatcher does with every message; shown in turn while it decides, not as live progress. */
@@ -59,6 +60,7 @@ export function TaskChat({ onDetails, onOpenLink, onOpenFileInBrowser, onExpired
     const [attachments, setAttachments] = useState<Attachment[]>([]);
     const [busy, setBusy] = useState(false);
     const [uploading, setUploading] = useState(false);
+    const tray = useUploadTray();
     const [error, setError] = useState<string | null>(null);
     const [preview, setPreview] = useState<string | null>(null);
     const [connected, setConnected] = useState(false);
@@ -219,6 +221,7 @@ export function TaskChat({ onDetails, onOpenLink, onOpenFileInBrowser, onExpired
             setDraft("");
             setReference(null);
             setAttachments([]);
+            tray.clear();
             pending.current = null;
             void refresh();
             input.current?.focus();
@@ -259,13 +262,15 @@ export function TaskChat({ onDetails, onOpenLink, onOpenFileInBrowser, onExpired
         setUploading(true);
         setError(null);
         const errors: string[] = [];
-        for (const file of [...files].slice(0, Math.max(0, 6 - attachments.length))) {
+        for (const item of tray.begin([...files].slice(0, Math.max(0, 6 - attachments.length)))) {
             try {
-                const a = await api.upload(file);
+                const a = await api.upload(item.file);
                 setAttachments(old => [...old, a]);
+                tray.settle(item, a);
             }
             catch (err) {
-                errors.push(`${file.name}：${err instanceof Error ? err.message : "上传失败"}`);
+                tray.settle(item, null);
+                errors.push(`${item.name}：${err instanceof Error ? err.message : "上传失败"}`);
             }
         }
         if (errors.length)
@@ -380,7 +385,7 @@ export function TaskChat({ onDetails, onOpenLink, onOpenFileInBrowser, onExpired
     {error && <div className="banner error" role="alert">{error}<button onClick={() => setError(null)}>关闭</button></div>}
     <div className={`composer${draft || attachments.length || reference || uploading ? " has-content" : ""}`}>
       {reference && <div className="task-reference" role="status"><div><span className="muted tiny">引用任务</span><strong title={reference.title}>{reference.title}</strong></div><button type="button" className="ghost" disabled={busy} aria-label="取消引用任务" onClick={() => { setReference(null); input.current?.focus(); }}><ComposerIcon kind="close"/></button></div>}
-      {!!attachments.length && <div className="chips">{attachments.map(a => <span className="chip" key={a.path}>{a.name}<button aria-label="移除附件" disabled={busy} onClick={() => setAttachments(old => old.filter(x => x.path !== a.path))}><ComposerIcon kind="close"/></button></span>)}</div>}
+      <ComposerAttachments items={attachments} pending={tray.pending} previews={tray.previews} disabled={busy} onRemove={path => { setAttachments(old => old.filter(x => x.path !== path)); tray.drop(path); }}/>
       <textarea ref={input} rows={2} value={draft} aria-label="消息" placeholder={reference ? "继续补充这个任务…" : "交给我一个任务…"} disabled={busy} onChange={e => setDraft(e.target.value)} onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
         e.preventDefault();
         void send();

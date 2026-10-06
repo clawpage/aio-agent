@@ -242,7 +242,8 @@ test.describe("attachment upload", () => {
 
       const chip = page.locator(".composer .chip", { hasText: "pa-e2e-pixel.png" });
       await expect(chip).toBeVisible({ timeout: 20_000 });
-      await expect(chip).toContainText("🖼");
+      // A picture shows as its own thumbnail, drawn from the picked file.
+      await expect(chip.locator("img")).toBeVisible();
     } finally {
       await cleanup(page, uploaded, created);
     }
