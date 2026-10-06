@@ -401,6 +401,26 @@ describe("DocumentService image", () => {
     }
   });
 
+  it("answers an unchanged picture by its version alone, without reading the bytes", async () => {
+    const handler = { mtime: "2026-10-06 09:00:00.000000001 -0700" };
+    const { svc } = service((argv) => baseHandler({ realPath: `${ROOT}/a.png`, size: String(PNG.length), mtime: handler.mtime })(argv));
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response(new Uint8Array(PNG), { status: 200 }));
+    try {
+      const first = await svc.image(`${ROOT}/a.png`, undefined);
+      if ("notModified" in first) throw new Error("expected bytes");
+      expect(first.etag).toMatch(/^"[0-9a-f]{32}"$/);
+      const reads = fetchSpy.mock.calls.length;
+      expect(await svc.image(`${ROOT}/a.png`, first.etag)).toEqual({ notModified: true, etag: first.etag });
+      expect(fetchSpy.mock.calls.length).toBe(reads);
+      // The file is written again: a new version and the bytes.
+      handler.mtime = "2026-10-06 09:05:00.000000001 -0700";
+      const again = await svc.image(`${ROOT}/a.png`, first.etag);
+      expect("bytes" in again && again.etag !== first.etag).toBe(true);
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+
   it("refuses a non-image kind and a file that is not really an image", async () => {
     const notImage = service(baseHandler({ realPath: `${ROOT}/a.txt` }));
     await expect(notImage.svc.image(`${ROOT}/a.txt`)).rejects.toMatchObject({ code: "unsupported" });

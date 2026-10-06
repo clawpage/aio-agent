@@ -1,4 +1,5 @@
 import { api, API_CREDENTIALS } from "./api";
+import { readImage, saveImage, touchImage } from "./imageStore";
 
 /**
  * Pictures shown from messages, shared across everywhere the same picture
@@ -6,6 +7,11 @@ import { api, API_CREDENTIALS } from "./api";
  * object URL instead of fetching the bytes again. A picture is a workspace path
  * ("/home/...", read through the document endpoint) or an https URL (fetched by
  * the account's sandbox). Only an image response is ever cached.
+ *
+ * Behind the in-memory cache is a copy kept on the device (imageStore): a web
+ * picture is shown from it for a week without asking; a workspace picture asks
+ * only whether the file changed (304, no bytes) and is shown from the copy if not.
+ * Offline or with the server briefly failing, the kept copy is shown.
  */
 export type ImageSource = string;
 
@@ -25,12 +31,28 @@ const RETRY_MS = 30_000;
 const entries = new Map<ImageSource, Entry>();
 let clock = 0;
 
+/** A kept web picture is shown without asking for this long. */
+const WEB_KEEP_MS = 7 * 24 * 3600_000;
+
 function fetchImage(src: ImageSource): Promise<string> {
   return (async () => {
-    const res = await fetch(src.startsWith("/") ? api.documentImageUrl(src) : api.webImageUrl(src), { credentials: API_CREDENTIALS });
+    const web = !src.startsWith("/");
+    const kept = await readImage(src);
+    const fromKept = () => { void touchImage(kept!.meta); return kept!.url(); };
+    if (kept && web && Date.now() - kept.meta.savedAt < WEB_KEEP_MS) return fromKept();
+    let res: Response;
+    try {
+      const url = web ? api.webImageUrl(src) : `${api.documentImageUrl(src)}${kept?.meta.etag ? `&known=${encodeURIComponent(kept.meta.etag)}` : ""}`;
+      res = await fetch(url, { credentials: API_CREDENTIALS });
+    } catch (err) {
+      if (kept) return fromKept();
+      throw err;
+    }
+    if (kept && (res.status === 304 || res.status >= 500)) return fromKept();
     if (!res.ok || !(res.headers.get("content-type") ?? "").startsWith("image/")) throw new Error("unavailable");
     const blob = await res.blob();
     if (!blob.size) throw new Error("empty");
+    void saveImage(src, blob, web ? null : res.headers.get("etag"));
     return URL.createObjectURL(blob);
   })();
 }

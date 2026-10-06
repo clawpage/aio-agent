@@ -1276,6 +1276,24 @@ describe("document endpoints", () => {
       expect(await gone.json()).toMatchObject({ error: "fetch_failed" });
     } finally { web.mockRestore(); }
   });
+  it("answers a workspace picture the console already keeps with 304 and its version", async () => {
+    const { cookie } = await login(h);
+    const image = vi.spyOn(h.ctx.documents, "image").mockImplementation(async (_path: string, known?: string) =>
+      known === '"v1"' ? { notModified: true as const, etag: '"v1"' } : { bytes: Buffer.from("png-bytes"), contentType: "image/png", etag: '"v1"' });
+    try {
+      const fresh = await h.request("/api/documents/image?path=/home/gem/workspace/a.png", { headers: { cookie } });
+      expect(fresh.status).toBe(200);
+      expect(fresh.headers.get("etag")).toBe('"v1"');
+      expect(await fresh.text()).toBe("png-bytes");
+      const same = await h.request(`/api/documents/image?path=/home/gem/workspace/a.png&known=${encodeURIComponent('"v1"')}`, { headers: { cookie } });
+      expect(same.status).toBe(304);
+      expect(same.headers.get("etag")).toBe('"v1"');
+      expect(image).toHaveBeenLastCalledWith("/home/gem/workspace/a.png", '"v1"');
+    } finally {
+      image.mockRestore();
+    }
+  });
+
   it("serves a workspace SVG only as an image under a scriptless sandbox CSP", async () => {
     const { cookie } = await login(h);
     const image = vi.spyOn(h.ctx.documents, "image").mockResolvedValue({ bytes: Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>'), contentType: "image/svg+xml" });

@@ -1667,13 +1667,21 @@ export function createApiRouter(context: AppContext): Router {
     requireSession,
     documentHandler(async (req, res) => {
       const target = checkedDocumentPath(String(req.query.path ?? ""));
-      const image = await context.documents.image(target);
+      // `known`: the version of a copy the console already keeps; unchanged answers 304, no bytes.
+      const known = typeof req.query.known === "string" ? req.query.known : undefined;
+      const image = await context.documents.image(target, known);
+      res.setHeader("Cache-Control", "no-store");
+      if ("notModified" in image) {
+        res.setHeader("ETag", image.etag);
+        res.status(304).end();
+        return;
+      }
+      if (image.etag) res.setHeader("ETag", image.etag);
       res.setHeader("Content-Type", image.contentType);
       res.setHeader("X-Content-Type-Options", "nosniff");
       // An SVG opened on its own (not through an <img>) still runs no script and
       // loads nothing: an opaque, scriptless origin.
       res.setHeader("Content-Security-Policy", "default-src 'none'; img-src data:; style-src 'unsafe-inline'; font-src data:; sandbox");
-      res.setHeader("Cache-Control", "no-store");
       res.setHeader("Content-Disposition", "inline");
       res.end(image.bytes);
     }),

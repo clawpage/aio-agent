@@ -1003,7 +1003,9 @@ print("venv" if venv_python else "novenv")
    * number, and only then is a typed inline response returned. Nothing here can
    * serve a non-image or a host file.
    */
-  async image(validatedPath: string): Promise<{ bytes: Buffer; contentType: string }> {
+  async image(validatedPath: string): Promise<{ bytes: Buffer; contentType: string; etag?: string }>;
+  async image(validatedPath: string, known: string | undefined): Promise<{ bytes: Buffer; contentType: string; etag?: string } | { notModified: true; etag: string }>;
+  async image(validatedPath: string, known?: string): Promise<{ bytes: Buffer; contentType: string; etag?: string } | { notModified: true; etag: string }> {
     const kind = documentKind(validatedPath);
     if (kind !== "image") {
       throw new DocumentError("unsupported", "该文件不是可内联显示的图片", 415);
@@ -1015,13 +1017,17 @@ print("venv" if venv_python else "novenv")
     if (stat.size > MAX_IMAGE_BYTES) {
       throw new DocumentError("too_large", `图片超过 ${formatBytes(MAX_IMAGE_BYTES)}，请下载后查看`, 413);
     }
+    // The version a console keeps a copy under: the same file, size and mtime answer
+    // "unchanged" without the bytes ever leaving the sandbox.
+    const etag = `"${createHash("sha256").update(`${stat.realPath}\0${stat.size}\0${stat.mtimeToken}`).digest("hex").slice(0, 32)}"`;
+    if (known && known === etag) return { notModified: true, etag };
     const bytes = await this.#fetchSandboxFile(stat.realPath);
     // An .svg must really be an SVG; a raster extension must hold raster bytes.
     const contentType = extensionOf(validatedPath) === "svg" ? (looksLikeSvg(bytes.toString("utf8")) ? "image/svg+xml" : null) : sniffImage(bytes);
     if (!contentType) {
       throw new DocumentError("unsupported", "文件内容不是可识别的图片格式", 415);
     }
-    return { bytes, contentType };
+    return { bytes, contentType, etag };
   }
 
   /**

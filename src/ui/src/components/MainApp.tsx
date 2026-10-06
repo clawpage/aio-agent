@@ -1,6 +1,7 @@
 import { useKeyboardViewport } from "../useKeyboardViewport";
 import { PopupPresence, PopupSurface } from "./PopupMotion";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { forgetImages, setImageAccount } from "../imageStore";
 import { api, ApiError } from "../api";
 import type { Conversation, StatusResponse, Task, TaskTab } from "../types";
 import { personConsoleTarget, TaskConsole } from "./TaskConsole";
@@ -69,6 +70,7 @@ export function MainApp() {
     const [role, setRole] = useState<"owner" | "member">("member");
     const [debug] = useDebugMode();
     const [username, setUsername] = useState<string | null>(null);
+    useEffect(() => setImageAccount(username), [username]);
     /** The address names another account than the one signed in. */
     const [foreign, setForeign] = useState<string | null>(null);
     const [auth, setAuth] = useState<boolean | null>(null);
@@ -259,6 +261,8 @@ export function MainApp() {
     // Signing out leaves the account's address; switching to another account keeps its address to name it on the form.
     const logout = async (keepAddress = false) => { try {
         await api.logout();
+        // Pictures this account kept on the device leave with it.
+        void forgetImages(username);
         if (!keepAddress) history.replaceState(null, "", "/login");
         detailRequest.current++;
         setAuth(false);

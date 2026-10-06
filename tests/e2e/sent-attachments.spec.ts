@@ -53,3 +53,63 @@ test("pictures the person sent show as pictures, files as cards under them", asy
   await single.getByRole("button", { name: "预览 IMG_1378.png" }).click();
   await expect(page.getByRole("dialog")).toBeVisible();
 });
+
+test("pictures are kept on the device: a restart asks only whether a workspace picture changed", async ({ page }, info) => {
+  // Playwright's WebKit cannot fulfill a 304; there an unanswered check stands in (the kept copy is shown either way).
+  const no304 = info.project.name === "mobile-webkit";
+  await mockConsole(page, { conversations: [] });
+  const PATH = "/home/gem/workspace/uploads/a.jpg", WEB = "https://m.media-amazon.com/images/I/saros.jpg";
+  const asked: Array<{ known: string | null }> = [];
+  let webAsked = 0, version = '"v1"';
+  await page.route("**/api/documents/image*", (r) => {
+    const known = new URL(r.request().url()).searchParams.get("known");
+    asked.push({ known });
+    if (known === version) return no304 ? r.abort("failed") : r.fulfill({ status: 304, headers: { etag: version } });
+    return r.fulfill({ contentType: "image/svg+xml", headers: { etag: version }, body: pictures[PATH] });
+  });
+  await page.route("**/api/documents/web-image*", (r) => { webAsked++; return r.fulfill({ contentType: "image/svg+xml", body: pictures[PATH] }); });
+  const products = [{ name: "Roborock Saros 10R", image: WEB, price: "$899", store: "Amazon" }];
+  const tasks = [{ ...base, id: "t1", title: "看图", text: "看看这张", conversationId: "c1", attachments: [att(PATH)], result: `比价：\n\n\`\`\`products\n${JSON.stringify(products)}\n\`\`\``, createdAt: Date.now() - 60_000, completedAt: Date.now() - 30_000 }];
+  await page.route("**/api/main*", (r) => r.fulfill({ json: { mode: "tasks", version: "v1", tasks, nextBefore: null } }));
+  const thumb = page.locator('.msg.user [data-testid="file-card-thumb"]');
+  const drawn = () => thumb.evaluate((el) => (el as HTMLImageElement).naturalWidth);
+
+  await page.goto("/");
+  await expect.poll(drawn, { timeout: 60_000 }).toBeGreaterThan(0);
+  await expect.poll(() => webAsked).toBe(1);
+  expect(asked).toEqual([{ known: null }]);
+
+  // A restart: the workspace picture is only checked (304, no bytes), the web picture not asked at all.
+  await page.reload();
+  await expect.poll(drawn, { timeout: 60_000 }).toBeGreaterThan(0);
+  expect(asked).toEqual([{ known: null }, { known: '"v1"' }]);
+  await page.waitForTimeout(500);
+  expect(webAsked).toBe(1);
+
+  // The file was written again: the new bytes are downloaded and kept.
+  version = '"v2"';
+  await page.reload();
+  await expect.poll(drawn, { timeout: 60_000 }).toBeGreaterThan(0);
+  expect(asked.at(-1)).toEqual({ known: '"v1"' });
+  await page.reload();
+  await expect.poll(drawn, { timeout: 60_000 }).toBeGreaterThan(0);
+  expect(asked.at(-1)).toEqual({ known: '"v2"' });
+
+  const keptCount = () => page.evaluate(() => new Promise<number>((resolve) => {
+    const req = indexedDB.open("aio-images");
+    req.onsuccess = () => { const c = req.result.transaction("meta").objectStore("meta").count(); c.onsuccess = () => { resolve(c.result); req.result.close(); }; };
+  }));
+  expect(await keptCount()).toBe(2);
+
+  // Offline: the kept copy is still shown.
+  await page.unroute("**/api/documents/image*");
+  await page.route("**/api/documents/image*", (r) => r.abort("internetdisconnected"));
+  await page.reload();
+  await expect.poll(drawn, { timeout: 60_000 }).toBeGreaterThan(0);
+
+  // Signing out takes the account's pictures off the device.
+  await page.route("**/api/auth/logout", (r) => r.fulfill({ json: { ok: true } }));
+  if (info.project.name !== "desktop") await page.getByRole("button", { name: /菜单|导航/ }).first().click();
+  await page.getByRole("button", { name: "退出登录" }).click();
+  await expect.poll(keptCount).toBe(0);
+});
