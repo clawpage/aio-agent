@@ -585,6 +585,38 @@ describe("AgentManager with the Claude Code harness", () => {
     await tick();
   });
 
+  it("starts a follow-up on another ChatGPT model in a fresh thread with the earlier exchange", async () => {
+    // Resuming a thread last run on gpt-6-sol with gpt-6.1-sol was refused by ChatGPT ("not enabled in rustponsesapi").
+    const models = await agent.listModels();
+    agent.saveAgentSettings({ model: "gpt-6-sol", effort: "high" }, models);
+    const conv = agent.createConversation({ title: "model switch" });
+    agent.submitTurn({ conversationId: conv.id, text: "周三南瓜农场免费吗", clientMessageId: "s1" });
+    await tick();
+    const first = codex.startedTurns[0]!;
+    codex.emitNotification("item/completed", { threadId: first.threadId, turnId: first.turnId, item: { type: "agentMessage", id: "a1", text: "周三免费入场。" } });
+    codex.completeTurn(first.turnId);
+    await tick();
+
+    agent.saveAgentSettings({ model: "gpt-5.5", effort: "high" }, models);
+    agent.submitTurn({ conversationId: conv.id, text: "带孩子去合适吗", clientMessageId: "s2" });
+    await tick();
+    const second = codex.startedTurns[1]!;
+    expect(codex.startedThreads).toHaveLength(2);
+    expect(second.threadId).not.toBe(first.threadId);
+    expect(second.model).toBe("gpt-5.5");
+    expect(second.text).toContain("用户：周三南瓜农场免费吗\n助理：周三免费入场。");
+    expect(second.text.endsWith("[当前消息]\n带孩子去合适吗")).toBe(true);
+    codex.completeTurn(second.turnId);
+    await tick();
+
+    // The same model again resumes that thread with the plain message.
+    agent.submitTurn({ conversationId: conv.id, text: "几点开门", clientMessageId: "s3" });
+    await tick();
+    expect(codex.startedTurns[2]).toMatchObject({ threadId: second.threadId, text: "几点开门" });
+    codex.completeTurn(codex.startedTurns[2]!.turnId);
+    await tick();
+  });
+
   it("carries a task's own request, not its executor prompt, and cuts long history short instead of dropping it", async () => {
     const conv = agent.createConversation({ title: "task session" });
     const ask = async (text: string, id: string, answer: string) => {

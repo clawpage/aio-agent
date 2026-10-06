@@ -989,9 +989,17 @@ export class AgentManager {
     // conversation that started on the other one. A Codex thread and a Claude
     // Code session cannot be forked into each other, so the turn starts a fresh
     // session that carries the earlier requests and answers as background.
-    const switchesHarness =
+    const crossesHarness =
       Boolean(conversation.codex_thread_id) && (desiredProvider === CLAUDE_CODE_PROVIDER_ID) !== (currentProvider === CLAUDE_CODE_PROVIDER_ID);
-    const inputText = switchesHarness ? this.#withPriorContext(conversation.id, turn.id, turn.input_text) : turn.input_text;
+    // A thread whose last turn ran another model on the same provider also starts
+    // fresh. Resuming carries that model's encrypted reasoning into the request,
+    // and ChatGPT refused one such follow-up outright ("model 'gpt-6.1-sol' is not
+    // enabled in rustponsesapi") for a thread last run on gpt-6-sol.
+    const lastModel = conversation.codex_thread_id && desiredProvider === currentProvider
+      ? (this.#db.prepare("SELECT model FROM turns WHERE conversation_id = ? AND id <> ? AND codex_turn_id IS NOT NULL ORDER BY created_at DESC LIMIT 1").get(conversation.id, turn.id) as { model: string | null } | undefined)?.model ?? null
+      : null;
+    const startsFresh = crossesHarness || (lastModel !== null && lastModel !== model);
+    const inputText = startsFresh ? this.#withPriorContext(conversation.id, turn.id, turn.input_text) : turn.input_text;
     const soul = readSoul(this.#cfg).content;
     const withTabs = this.#tabs ? withTabPolicy(soul) : soul;
     const policies = [EXPERIENCE_POLICY, this.#cfg.decision ? DECISION_POLICY : "", this.#cfg.schedule ? SCHEDULE_POLICY : "", this.#cfg.image ? IMAGE_POLICY : "", this.#cfg.kb ? KB_POLICY : ""].filter(Boolean);
@@ -1003,7 +1011,7 @@ export class AgentManager {
       // Not required, but the agent may still browse: keep the tools reachable.
       await this.#tabs.ensure().catch((err) => this.#log.debug("tab server unavailable", { error: String(err) }));
     }
-    let threadId = switchesHarness ? null : conversation.codex_thread_id;
+    let threadId = startsFresh ? null : conversation.codex_thread_id;
     if (!threadId) {
       const started = await this.#codex.startThread({
         developerInstructions,
@@ -1023,7 +1031,7 @@ export class AgentManager {
         model: started.model,
         cwd: started.cwd,
         modelProvider: desiredProvider,
-        ...(switchesHarness ? { switchedFrom: conversation.codex_thread_id } : {}),
+        ...(startsFresh ? { switchedFrom: conversation.codex_thread_id } : {}),
       });
     } else if (desiredProvider !== currentProvider) {
       // Codex only honours `modelProvider` when a thread is created, so an
