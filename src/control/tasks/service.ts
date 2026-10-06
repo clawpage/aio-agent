@@ -317,7 +317,8 @@ export class TaskService {
     }
     /**
      * A message from the voice gadget (the desk device): no dispatcher, straight to
-     * the account's one gadget session at medium effort, answered briefly in plain text.
+     * the account's one gadget session (the owner's at medium effort, a member's at
+     * its assigned model and effort), answered briefly in plain text.
      */
     submitGadget(input: { userId: string; text: string; clientMessageId: string }) {
         const text = input.text.trim();
@@ -329,7 +330,7 @@ export class TaskService {
             if (this.ownerId(existing) !== input.userId || existing.input_text !== text) throw new TurnConflictError("消息 ID 已对应另一项任务");
             return existing;
         }
-        const frozen = this.agent.resolveSubmitSettings({ conversationId: "main", text, clientMessageId, effort: "medium" });
+        const frozen = isMember(this.db, input.userId) ? this.agent.memberSettings() : this.agent.resolveSubmitSettings({ conversationId: "main", text, clientMessageId, effort: "medium" });
         const previous = this.db.prepare("SELECT * FROM tasks WHERE client_message_id LIKE 'gadget:%' AND conversation_id IN (SELECT id FROM conversations WHERE owner_id=?) ORDER BY created_at DESC LIMIT 1").get(input.userId) as unknown as TaskRow | undefined;
         const id = randomId("task");
         const title = [...text].slice(0, 40).join("");
@@ -835,6 +836,8 @@ export class TaskService {
         if (["turn.finished", "turn.failed", "turn.cancelled", "turn.reconciled"].includes(event.type)) {
             this.syncTurn(this.get(row.id)!);
             this.schedule();
+            // The gadget session lives on across messages: compact it once it is quiet and nearly full.
+            if (row.client_message_id.startsWith(GADGET_PREFIX)) this.agent.compactWhenIdle(event.conversationId);
         }
     };
     private syncTurn(row: TaskRow) {

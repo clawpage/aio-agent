@@ -66,6 +66,8 @@ export interface CodexSessionLike {
   }): Promise<string>;
   interrupt(threadId: string, turnId: string): Promise<void>;
   steerTurn?(params: {threadId:string;expectedTurnId:string;text:string;attachments?:TurnAttachment[]}): Promise<void>;
+  /** Compact a thread's context in place; resolves with the compaction turn's final status. */
+  compactThread?(threadId: string): Promise<string>;
   /** One throwaway, tool-free run used only for automatic conversation titles. */
   planTask?(prompt: string, developerInstructions?: string, model?: string, onTiming?: DispatchTimingSink): Promise<string | null>;
   answer(id: string, result: unknown): boolean;
@@ -167,6 +169,13 @@ const APPROVAL_TIMEOUT_MS = 15 * 60_000;
  * much longer (for a person to sign in, say), so there is no overall timeout.
  */
 const STOP_GRACE_MS = 2 * 60_000;
+/**
+ * A long-lived session (the voice gadget's) is compacted in the background once it
+ * has been quiet this long after a turn that left its context at least this full,
+ * so the next message neither waits for Codex's own compaction nor runs near the limit.
+ */
+const COMPACT_CONTEXT_RATIO = 0.8;
+const COMPACT_IDLE_MS = 3 * 60_000;
 
 /**
  * The model every conversation defaulted to before this deployment. Conversations
@@ -267,6 +276,8 @@ export interface AgentStatus {
   /** Maximum number of concurrently executing main turns. */
   capacity: number;
   queuedTurns: number;
+  /** Sessions being compacted in the background (compactWhenIdle). */
+  compacting: number;
   lastError: string | null;
 }
 
@@ -315,6 +326,12 @@ export class AgentManager {
   #turnErrors = new Map<string, string>();
   #lastError: string | null = null;
   #approvalTimers = new Map<string, NodeJS.Timeout>();
+  /** Conversation -> share of the model's context window its last turn left in use. */
+  #contextUse = new Map<string, number>();
+  #compactTimers = new Map<string, NodeJS.Timeout>();
+  /** Conversations whose thread is being compacted; their queued turns wait. */
+  #compacting = new Set<string>();
+  #compactIdleMs: number;
   /**
    * Last observed model catalog. Kept so a synchronous submit can validate and
    * resolve the unified owner settings without an extra round trip to Codex.
@@ -348,8 +365,11 @@ export class AgentManager {
     tabs?: TabServerLike | null;
     /** How long a stopped turn may take to report back (tests shorten it). */
     stopGraceMs?: number;
+    /** How long a session stays quiet before compactWhenIdle compacts it (tests shorten it). */
+    compactIdleMs?: number;
   }) {
     this.#stopGraceMs = deps.stopGraceMs ?? STOP_GRACE_MS;
+    this.#compactIdleMs = deps.compactIdleMs ?? COMPACT_IDLE_MS;
     this.#cfg = deps.cfg;
     this.#db = deps.db;
     this.#log = deps.log.child("agent");
@@ -756,7 +776,7 @@ export class AgentManager {
     const available = (this.#claudeCode?.owns(model) || (this.#bridge?.providerForModel(model) ?? "openai") !== "openai")
       && (model !== MEMBER_GPT_MODEL || this.#cfg.hostCodex.enabled);
     if (!available) throw new Error("服务暂时不可用，请稍后重试");
-    return { model, effort: MEMBER_EFFORT };
+    return { model, effort: this.#cfg.memberEffort ?? MEMBER_EFFORT };
   }
 
   resolveSubmitSettings(input: SubmitTurnInput): { model: string; effort: string | null } {
@@ -856,7 +876,7 @@ export class AgentManager {
       .prepare("SELECT * FROM turns WHERE status = 'queued' ORDER BY created_at ASC, rowid ASC")
       .all() as unknown as TurnRow[];
     for (const turn of rows) {
-      if (this.#activeTurns.has(turn.conversation_id)) continue;
+      if (this.#activeTurns.has(turn.conversation_id) || this.#compacting.has(turn.conversation_id)) continue;
       return turn;
     }
     return null;
@@ -1000,13 +1020,7 @@ export class AgentManager {
       : null;
     const startsFresh = crossesHarness || (lastModel !== null && lastModel !== model);
     const inputText = startsFresh ? this.#withPriorContext(conversation.id, turn.id, turn.input_text) : turn.input_text;
-    const soul = readSoul(this.#cfg).content;
-    const withTabs = this.#tabs ? withTabPolicy(soul) : soul;
-    const policies = [EXPERIENCE_POLICY, this.#cfg.decision ? DECISION_POLICY : "", this.#cfg.schedule ? SCHEDULE_POLICY : "", this.#cfg.image ? IMAGE_POLICY : "", this.#cfg.kb ? KB_POLICY : ""].filter(Boolean);
-    const developerInstructions = policies.length ? [withTabs.trimEnd(), ...policies].join("\n\n").trim() : withTabs;
-    // Every execution thread gets tab tools under its conversation's identity,
-    // which stays the same across its turns, resumes and forks.
-    const browserTask = this.#tabs ? { key: conversation.id, title: conversation.title } : undefined;
+    const { developerInstructions, browserTask } = this.#threadSettings(conversation);
     if (this.#tabs && turn.browser_required === 0) {
       // Not required, but the agent may still browse: keep the tools reachable.
       await this.#tabs.ensure().catch((err) => this.#log.debug("tab server unavailable", { error: String(err) }));
@@ -1134,6 +1148,60 @@ export class AgentManager {
       });
     } else {
       this.#failTurn(turn, reason ? `执行失败：${reason}` : `Codex 轮次结束状态：${status}`);
+    }
+  }
+
+  /** The instructions and tab identity every execution thread runs with. */
+  #threadSettings(conversation: ConversationRow): { developerInstructions: string; browserTask: BrowserTask | undefined } {
+    const soul = readSoul(this.#cfg).content;
+    const withTabs = this.#tabs ? withTabPolicy(soul) : soul;
+    const policies = [EXPERIENCE_POLICY, this.#cfg.decision ? DECISION_POLICY : "", this.#cfg.schedule ? SCHEDULE_POLICY : "", this.#cfg.image ? IMAGE_POLICY : "", this.#cfg.kb ? KB_POLICY : ""].filter(Boolean);
+    const developerInstructions = policies.length ? [withTabs.trimEnd(), ...policies].join("\n\n").trim() : withTabs;
+    // Every execution thread gets tab tools under its conversation's identity,
+    // which stays the same across its turns, resumes and forks.
+    const browserTask = this.#tabs ? { key: conversation.id, title: conversation.title } : undefined;
+    return { developerInstructions, browserTask };
+  }
+
+  /**
+   * After a turn of a long-lived session finishes: once the session has stayed
+   * quiet for COMPACT_IDLE_MS and that turn left its context at least
+   * COMPACT_CONTEXT_RATIO full, compact its thread in the background. Every call
+   * restarts the wait. A sandbox that has gone to sleep is not woken for this.
+   */
+  compactWhenIdle(conversationId: string): void {
+    clearTimeout(this.#compactTimers.get(conversationId));
+    const armedAt = Date.now();
+    const timer = setTimeout(() => void this.#compactIfIdle(conversationId, armedAt), this.#compactIdleMs);
+    timer.unref?.();
+    this.#compactTimers.set(conversationId, timer);
+  }
+
+  async #compactIfIdle(conversationId: string, armedAt: number): Promise<void> {
+    this.#compactTimers.delete(conversationId);
+    const conversation = this.getConversation(conversationId);
+    const threadId = conversation?.codex_thread_id;
+    const used = this.#contextUse.get(conversationId) ?? 0;
+    if (!conversation || !threadId || used < COMPACT_CONTEXT_RATIO || conversation.model_provider === CLAUDE_CODE_PROVIDER_ID) return;
+    if (!this.#codex.compactThread || !this.#codex.ready || this.#activeTurns.has(conversationId) || this.#compacting.has(conversationId)) return;
+    // Quiet since the wait began: nothing waiting or running, and nothing sent meanwhile.
+    const busy = this.#db
+      .prepare("SELECT 1 FROM turns WHERE conversation_id = ? AND (status IN ('queued','running') OR created_at >= ?) LIMIT 1")
+      .get(conversationId, armedAt);
+    if (busy) return;
+    // Held like a running turn: a message that arrives now queues behind the compaction.
+    this.#compacting.add(conversationId);
+    try {
+      const { developerInstructions, browserTask } = this.#threadSettings(conversation);
+      await this.#codex.resumeThread(threadId, developerInstructions, browserTask);
+      const status = await this.#codex.compactThread(threadId);
+      if (status === "completed") this.#contextUse.delete(conversationId);
+      this.#log.info("idle session compacted", { conversationId, contextUsedPercent: Math.round(used * 100), status });
+    } catch (err) {
+      this.#log.warn("idle session compaction failed", { conversationId, error: err instanceof Error ? err.message : String(err) });
+    } finally {
+      this.#compacting.delete(conversationId);
+      this.#pump();
     }
   }
 
@@ -1551,6 +1619,11 @@ export class AgentManager {
 
     const route = this.#routeContext(p);
     if (!route) return;
+    if (method === "thread/tokenUsage/updated") {
+      const usage = p.tokenUsage as { last?: { totalTokens?: unknown }; modelContextWindow?: unknown } | undefined;
+      const used = usage?.last?.totalTokens, window = usage?.modelContextWindow;
+      if (typeof used === "number" && typeof window === "number" && window > 0) this.#contextUse.set(route.conversationId, used / window);
+    }
     // Flush buffered deltas first: they arrived before this event, so they must get
     // lower sequence ids. Otherwise a client that applied the completed item first
     // would append stale deltas afterwards and duplicate the text.
@@ -1653,6 +1726,7 @@ export class AgentManager {
       })),
       capacity: this.#capacity,
       queuedTurns: queued,
+      compacting: this.#compacting.size,
       lastError: this.#codex.lastError ?? this.#lastError,
     };
   }
@@ -1718,6 +1792,8 @@ export class AgentManager {
 
   shutdown(): void {
     this.#flushDeltas();
+    for (const timer of this.#compactTimers.values()) clearTimeout(timer);
+    this.#compactTimers.clear();
     for (const timer of this.#approvalTimers.values()) clearTimeout(timer);
     this.#approvalTimers.clear();
     this.#codex.close();

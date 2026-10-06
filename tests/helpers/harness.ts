@@ -443,6 +443,16 @@ export class FakeCodex implements CodexSessionLike {
     this.interrupted.push({ threadId, turnId });
   }
 
+  compacted: string[] = [];
+  /** When set, `compactThread` waits for it before reporting the compaction done. */
+  compactGate: Promise<void> | null = null;
+
+  async compactThread(threadId: string): Promise<string> {
+    this.compacted.push(threadId);
+    if (this.compactGate) await this.compactGate;
+    return "completed";
+  }
+
   answer(id: string, result: unknown): boolean {
     this.answers.push({ id, result });
     return true;

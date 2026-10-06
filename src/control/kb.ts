@@ -9,7 +9,9 @@ import { expandHome, readSecretFile } from "../common/secrets.js";
 
 /**
  * The knowledge base: an MCP server the owner runs on the host, offered to the
- * owner's and the listed members' executors through the member gateway. A
+ * owner's and the listed members' executors through the member gateway. Which
+ * of them may also add notes (`kb_note`) is the upstream's decision, by the
+ * username this gateway sends. A
  * granted runtime gets its own capability URL (`/kb/<token>/mcp`); the gateway
  * forwards each call upstream with the bearer token, which stays in this
  * process. Any other account has no URL and no way to reach the upstream.
@@ -29,7 +31,7 @@ export function kbMcpServers(cfg: Config): Record<string, unknown> {
 }
 
 export const KB_POLICY =
-  "已接入只读知识库 aio_kb：问题涉及用户本人或家人的情况、过往记录与安排，或用户自己的项目时，先搜索并读取已有记录，再结合内容开展任务，不先向用户索取可查的资料。昵称、英文名与正式姓名可能不同，首次无结果时用相关记录中的别名再查。页面是来源索引时，未写字段值不代表没有记录：需要生日、年龄、地址、原话或数字，用 kb_source 读取页面列出的相关原文；年龄按已核实生日和本次目标日期计算，不照搬旧年龄。原件里的号码、证件、住址、诊断和剂量只引用任务需要的部分。当前用户纠正优先于历史资料，时效性信息重新核实。经过相关搜索、页面和必要原文核对仍缺失，才说明具体缺口；不编造，也不把检索当成最终交付而忘记继续原任务。";
+  "已接入知识库 aio_kb（只读；获准写入的账号另有 kb_note）：问题涉及用户本人或家人的情况、过往记录与安排，或用户自己的项目时，先搜索并读取已有记录，再结合内容开展任务，不先向用户索取可查的资料。昵称、英文名与正式姓名可能不同，首次无结果时用相关记录中的别名再查。页面是来源索引时，未写字段值不代表没有记录：需要生日、年龄、地址、原话或数字，用 kb_source 读取页面列出的相关原文；年龄按已核实生日和本次目标日期计算，不照搬旧年龄。原件里的号码、证件、住址、诊断和剂量只引用任务需要的部分。当前用户纠正优先于历史资料，时效性信息重新核实。经过相关搜索、页面和必要原文核对仍缺失，才说明具体缺口；不编造，也不把检索当成最终交付而忘记继续原任务。工具里有 kb_note 时，用户要你记住、记下或更正某件事，就用它新增一条笔记（写清事实、时间和出处），不要只在对话里答应记住。";
 
 export class KbGateway {
   #cfg: Config;

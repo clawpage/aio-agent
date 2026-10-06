@@ -82,7 +82,7 @@ curl -s http://127.0.0.1:4891/healthz   # 界面层（控制层提供它需要�
 ## 账号与权限
 
 - owner 保留模型、推理强度和 SOUL 配置。member 的主会话和任务列表只显示本账号内容，不能通过任务 ID 读取、引用或停止他人的任务。
-- member 的派单和执行均由服务端固定为管理员分配的模型 / `high`：默认 `gpt-6.1-sol`（Codex，经成员模型网关使用控制面的 ChatGPT 登录），也可分配 `claude-sonnet-5-5`（Claude Code）。忽略客户端模型参数，分配的模型不可用时拒绝执行，不换用别的模型。会话标题由派单器按任务给出。
+- member 的派单和执行均由服务端固定为管理员分配的模型 / 推理强度（默认 `high`，可分配 `low`、`medium`）：默认 `gpt-6.1-sol`（Codex，经成员模型网关使用控制面的 ChatGPT 登录），也可分配 `claude-sonnet-5-5`（Claude Code）。忽略客户端模型参数，分配的模型不可用时拒绝执行，不换用别的模型。会话标题由派单器按任务给出。
 - member 不展示配置入口、模型与推理参数、SOUL 原文；配置/模型/能力清单接口拒绝访问，JSON 与 SSE 隐去模型配置元数据。正常回答内容不会被关键词过滤。
 - **账号独立环境**：member 的容器、workspace、Codex 记忆/历史、浏览器 profile、终端、任务数据库、SOUL 和文档缓存独立。owner 沿用原容器与数据卷；新成员不复制 owner 的文件或历史。
 - 成员环境默认限制为 2 GiB 内存、2 CPU、1024 个进程，阻止连接内网、宿主服务和其他沙盒；公网仍可访问。网络规则由独立只读守卫容器应用，成员无 NET_ADMIN / NET_RAW 权限。
@@ -91,7 +91,7 @@ curl -s http://127.0.0.1:4891/healthz   # 界面层（控制层提供它需要�
 - 账号配置和登录鉴权由宿主控制面统一管理；容器共享宿主内核，因此这不是抵抗内核漏洞的虚拟机隔离。
 - 创建账号（先构建；使用与服务相同的环境变量/数据目录）：`node --env-file=var/runtime.env bin/create-user.mjs <username>`。Quickstart 使用 `.env`。随机密码写入 `var/user-secrets/<username>.txt`（0600），命令不打印密码、不覆盖已有账号。
 - **邀请码注册**：登录页（或直接打开 `/register`）可切换到注册，填账号（2–40 位小写字母、数字、`-`、`_`）、密码（至少 12 位）和邀请码。邀请码由 owner 在配置页「邀请码」里生成，格式 `XXXX-XXXX-XXXX`，只能用一次：注册成功即作废，未使用的可以手动作废；领用与建号在同一个事务里，两人同时用同一个码只会建成一个账号。注册出来的是普通 member（默认模型同上），注册后直接登录。猜错邀请码与输错密码共用同一套按 IP 的失败锁定。注册页提示去哪里申请邀请码：设置 `PA_INVITE_EMAIL` 后显示该邮箱，否则提示向管理员索取。
-- 分配成员模型：`node --env-file=var/runtime.env bin/set-user-model.mjs <username> <gpt-6.1-sol|claude-sonnet-5-5>`（compose 模式：`docker compose -p aio exec control node bin/set-user-model.mjs ...`），重启服务后生效。分配 Claude 需要 owner 已配置 Claude Code 凭据，用量计入 owner 的 Claude 账号；分配 `gpt-6.1-sol` 需要控制面已用 `codex-login` 登录 ChatGPT（`AIO_HOST_CODEX=on`），用量计入该 ChatGPT 账号。
+- 分配成员模型：`node --env-file=var/runtime.env bin/set-user-model.mjs <username> <gpt-6.1-sol|claude-sonnet-5-5> [low|medium|high]`（compose 模式：`docker compose -p aio exec control node bin/set-user-model.mjs ...`），重启服务后生效；第三个参数是执行推理强度，省略时不改（未分配过即 `high`），网关最多放行到 `high`。分配 Claude 需要 owner 已配置 Claude Code 凭据，用量计入 owner 的 Claude 账号；分配 `gpt-6.1-sol` 需要控制面已用 `codex-login` 登录 ChatGPT（`AIO_HOST_CODEX=on`），用量计入该 ChatGPT 账号。
 
 ## 用量看板
 
@@ -188,14 +188,16 @@ owner 侧栏的「用量看板」按账号显示每天的 token 趋势、输入/
   - **从反馈里学**：推送运行时能看到之后用户的新任务，以及用户直接回复那次推送说的话（引用推送的任务）；看出明确反应（有用、要更多、别再推，或某话题一直没人理）时自己用 `feed_update`（`source: "feed"`）记下或删掉旧条目，每次最多改 3 条。用户在对话里给推送的反馈也由执行会话记下。「定时任务」页在推送卡片上显示「你的要求」和记住的每一条（推送学到的会标出来）。
 - **管理**：侧栏「定时任务」页可以修改（名称、要做的事、规则，包括一天多个时间和几个不规律的日期）、暂停、恢复、立即运行一次、删除（`PATCH /api/schedules/:id` 与 `POST /api/schedules/:id/:action`）；也可以在主会话里说「暂停天气提醒」「天气提醒改成早晚各一次」「取消价格监控」，派单器据已有定时任务的列表（含每个的 `instruction`）给出 `scheduleAction`，修改时为 `{action:"update"}` 并附改后完整的 `schedule`。改了规则后 `maxRuns` 从当时重新计数；已结束的定时任务改出新的运行时间会重新开始（受进行中上限约束），暂停的仍保持暂停。内置每日推送只能用推送设置（`feed_update`）改。删除不影响已有的运行结果。
 
-## 语音配件（可选，仅 owner）
+## 语音配件（可选，一个配件对应一个账号）
 
-桌面语音配件（例如刷了 Muse Gadget 固件的 M5Stack CoreS3）可以把按住说话的内容发进 owner 的账户：配件自己负责语音转写和朗读，只把文字发过来、取回文字答复。
+桌面语音配件（例如刷了 Muse Gadget 固件的 M5Stack CoreS3）可以把按住说话的内容发进一个账号：配件自己负责语音转写和朗读，只把文字发过来、取回文字答复。
 
 - **开启**：在控制面数据目录建 `gadget-token.env`（compose 部署在控制面数据卷的 `/data/gadget-token.env`，可用 `PA_GADGET_TOKEN_PATH` 改位置），内容一行 `AIO_GADGET_TOKEN=<长随机串>`，权限 600。文件不存在时接口一律 401；令牌每次请求都重新读取，换令牌不用重启。
+- **配件说话算谁的**：同一文件里再写一行 `AIO_GADGET_USER=<用户名>`，配件就在这个账号里执行（它自己的运行环境、任务、沙箱、模型与知识库授权），owner 的主会话里看不到；名字对不上任何账号时一律 401。不写这一行时配件代表 owner。现有部署给配件建了专用成员账号 `betaw`（`gpt-6.1-sol` / `low`，知识库可读写），不再借用 owner。
 - **接口**：`POST /api/gadget/messages`，`Authorization: Bearer <令牌>`，JSON `{text, clientMessageId}`，返回 202 `{id, status, done, reply, error}`；之后轮询 `GET /api/gadget/messages/<id>`，`done` 为 true 时 `reply` 就是答复。同一个 `clientMessageId` 重发得到同一个任务。不用 cookie，所以不检查 CSRF；只能查配件自己发的任务。
-- **怎么执行**：不经派单器，直接建一个已派好的任务，推理强度固定 medium（模型用 owner 当前的模型）。所有配件消息共用一个执行会话，上下文连续，可以追问。执行会话被告知回答会被朗读：纯文本口语、默认一到三句话、不用 Markdown 和各种卡片、不追问。主会话的其他任务不放进每轮提示（共用会话会越积越长、很快被压缩），问到“某某任务怎么样了”时由执行会话用 `aio_schedule` 的 `task_list`（可按关键词搜）和 `task_get`（完整请求和结果）自己去查。
-- **在主会话里**：每条配件消息都是主会话里的一个任务（描述为「来自语音配件」），完成时不发手机通知。
+- **怎么执行**：不经派单器，直接建一个已派好的任务：代表 owner 时推理强度固定 medium（模型用 owner 当前的模型），代表成员时用管理员给该成员分配的模型和推理强度。所有配件消息共用一个执行会话，上下文连续，可以追问。
+- **后台压缩**：这个共用会话某一轮结束后上下文已用到模型窗口的 80% 以上，且之后静默满 3 分钟（没有新消息、没有在跑的轮次），控制面就在后台对它执行一次 Codex 压缩（`thread/compact/start`），下一条消息不用等压缩、也不会贴着上限跑。压缩过程不进会话记录、不发通知，用量照常计入看板；压缩期间到达的消息排在压缩之后执行。沙箱已休眠时不为压缩唤醒，Claude Code 会话不压缩。执行会话被告知回答会被朗读：纯文本口语、默认一到三句话、不用 Markdown 和各种卡片、不追问。主会话的其他任务不放进每轮提示（共用会话会越积越长、很快被压缩），问到“某某任务怎么样了”时由执行会话用 `aio_schedule` 的 `task_list`（可按关键词搜）和 `task_get`（完整请求和结果）自己去查。
+- **在主会话里**：每条配件消息都是该账号主会话里的一个任务（描述为「来自语音配件」），完成时不发手机通知。
 
 ## 出图（aio_image）
 
@@ -281,6 +283,9 @@ owner 可以把宿主机上的一个知识库 MCP 服务（streamable HTTP）接
   网关不缓存、不落库任何知识库内容。现有部署的上游（aio-kb 的 `kb-mcp`）除整理过的页面外，还用 `kb_source`
   提供页面所引用原件的文字（owner 决定 owner 与 `cr` 都可读，口径见 workspace `docs/aio-kb-contract.md`）；
   执行会话的提示里要求只在需要时读原文，个人信息只引用回答需要的部分。
+- **写入**：哪些账号能写由上游决定（按网关附上的 `X-Aio-User`）。现有部署的 `kb-mcp` 只给 `KB_MCP_WRITERS`（现为 `betaw`）
+  多列一个 `kb_note`：每次只在 workspace `raw/aio-notes/<用户名>/` 新建一条笔记文件，不改不删已有内容，之后经 aio-kb
+  的整理流程编进主题页（所以刚记下的内容暂时搜不到）。获准写入的账号同样要在 `PA_KB_MCP_MEMBERS` 里才拿得到 `aio_kb`。
 
 ## 分享网页（公开）
 

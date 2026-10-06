@@ -418,3 +418,45 @@ describe("SandboxCodexSession without a host Codex login (PA_HOST_CODEX=off)", (
     }
   });
 });
+
+describe("SandboxCodexSession thread compaction", () => {
+  it("compacts a thread, keeps its compaction turn out of the conversation and counts its usage", async () => {
+    const db = openDb(":memory:"), server = new FakeAppServer();
+    server.handle("thread/compact/start", (p) => {
+      // The real app-server answers at once and runs the compaction as a turn of its own.
+      setTimeout(() => {
+        server.notify("turn/started", { threadId: p.threadId, turn: { id: "compact-turn", status: "inProgress" } });
+        server.notify("item/started", { threadId: p.threadId, turnId: "compact-turn", item: { type: "contextCompaction", id: "c1" } });
+        server.notify("thread/tokenUsage/updated", { threadId: p.threadId, turnId: "compact-turn", tokenUsage: { total: { inputTokens: 900, outputTokens: 50 }, last: { inputTokens: 900, outputTokens: 50 } } });
+        server.notify("turn/completed", { threadId: p.threadId, turn: { id: "compact-turn", status: "completed" } });
+      }, 5);
+      return {};
+    });
+    const session = makeSession(server, 30, null, new UsageLedger(db));
+    const forwarded: unknown[] = [];
+    session.onNotification((m, p) => forwarded.push([m, p]));
+    try {
+      expect(await session.compactThread("thread-1")).toBe("completed");
+      expect(server.inbound.find((m) => m.method === "thread/compact/start")?.params).toEqual({ threadId: "thread-1" });
+      expect(forwarded).toEqual([]);
+      expect(db.prepare("SELECT SUM(input) input,SUM(output) output FROM token_usage").get()).toMatchObject({ input: 900, output: 50 });
+      // Afterwards the thread's own events reach the conversation again.
+      server.notify("item/started", { threadId: "thread-1", turnId: "next", item: { type: "agentMessage", id: "a" } });
+      await wait(20);
+      expect(forwarded).toHaveLength(1);
+    } finally { session.close(); db.close(); }
+  });
+
+  it("interrupts a compaction that outlives its budget", async () => {
+    const server = new FakeAppServer();
+    server.handle("thread/compact/start", (p) => {
+      setTimeout(() => server.notify("turn/started", { threadId: p.threadId, turn: { id: "slow", status: "inProgress" } }), 5);
+      return {};
+    });
+    const session = makeSession(server);
+    try {
+      expect(await session.compactThread("thread-1", 50)).toBe("timeout");
+      expect(server.inbound.find((m) => m.method === "turn/interrupt")?.params).toEqual({ threadId: "thread-1", turnId: "slow" });
+    } finally { session.close(); }
+  });
+});

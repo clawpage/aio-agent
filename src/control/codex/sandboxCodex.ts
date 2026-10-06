@@ -593,6 +593,41 @@ export class SandboxCodexSession {
     return res.turn.id;
   }
 
+  /**
+   * Compact a loaded thread's context in place (`thread/compact/start`) and wait
+   * for the compaction turn to end. Its notifications are kept out of the
+   * conversation's stream (only token usage is still counted), as for the
+   * auxiliary threads. One that outlives the budget is interrupted.
+   */
+  async compactThread(threadId: string, timeoutMs = 10 * 60_000): Promise<string> {
+    await this.start();
+    const peer = this.#peer!;
+    let turnId: string | null = null;
+    let finish!: (status: string) => void;
+    const done = new Promise<string>((resolve) => { finish = resolve; });
+    const onClosed = () => finish("closed");
+    this.#threadSubscribers.set(threadId, new Set([(method, params) => {
+      const turn = (params as { turn?: { id?: unknown; status?: unknown } } | undefined)?.turn;
+      if (method === "turn/started" && typeof turn?.id === "string") turnId = turn.id;
+      if (method === "turn/completed") finish(typeof turn?.status === "string" ? turn.status : "unknown");
+    }]));
+    peer.once("closed", onClosed);
+    const timer = setTimeout(() => finish("timeout"), timeoutMs);
+    timer.unref?.();
+    try {
+      await peer.request("thread/compact/start", { threadId }, 30_000);
+      const status = await done;
+      if (status === "timeout" && turnId && peer.alive) {
+        await peer.request("turn/interrupt", { threadId, turnId }, 5_000).catch(() => undefined);
+      }
+      return status;
+    } finally {
+      clearTimeout(timer);
+      peer.off("closed", onClosed);
+      this.#threadSubscribers.delete(threadId);
+    }
+  }
+
   async interrupt(threadId: string, turnId: string): Promise<void> {
     if (!this.#peer?.alive) return;
     await this.#peer.request("turn/interrupt", { threadId, turnId }, 30_000);

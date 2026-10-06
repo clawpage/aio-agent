@@ -560,35 +560,47 @@ export function createApiRouter(context: AppContext): Router {
     }
   }));
   // ---------------------------------------------------------------- gadget
-  // The voice gadget (the desk device) speaks for the owner with a bearer token
+  // The voice gadget (the desk device) speaks for one account with a bearer token
   // from cfg.gadgetTokenPath instead of a login; no cookies, so no CSRF to check.
-  const gadgetOwner = (req: Request, res: Response): string | null => {
+  // `AIO_GADGET_USER=<username>` in the same file names that account (its own
+  // runtime, tasks and sandbox); without it the gadget speaks for the owner.
+  const gadgetAccount = async (req: Request, res: Response): Promise<{ userId: string; tasks: AppContext["tasks"] } | null> => {
     const secret = readSecretFile(cfg.gadgetTokenPath, "AIO_GADGET_TOKEN");
     const given = /^Bearer\s+(\S+)$/i.exec(req.get("authorization") ?? "")?.[1];
     const digest = (s: string) => createHash("sha256").update(s).digest();
-    const ownerId = cfg.runtimeUserId ?? "owner_1";
-    if (!secret.ok || !given || !timingSafeEqual(digest(secret.value), digest(given)) || getUser(db, ownerId)?.role !== "owner") {
+    const named = readSecretFile(cfg.gadgetTokenPath, "AIO_GADGET_USER");
+    const user = named.ok
+      ? db.prepare("SELECT id,role FROM owners WHERE username=?").get(named.value) as { id: string; role: string } | undefined
+      : getUser(db, cfg.runtimeUserId ?? "owner_1");
+    if (!secret.ok || !given || !timingSafeEqual(digest(secret.value), digest(given)) || !user || (!named.ok && user.role !== "owner")) {
       res.status(401).json({ error: "unauthenticated" });
       return null;
     }
-    return ownerId;
+    if (user.role === "owner") return { userId: user.id, tasks: context.tasks };
+    try {
+      if (!context.runtimeForUser) throw new Error("no member runtimes");
+      return { userId: user.id, tasks: (await context.runtimeForUser(user.id)).tasks };
+    } catch {
+      res.status(503).json({ error: "runtime_unavailable", message: "独立环境暂不可用，请稍后重试" });
+      return null;
+    }
   };
   router.post("/gadget/messages", requireKind("primary"), asyncHandler(async (req, res) => {
-    const ownerId = gadgetOwner(req, res);
-    if (!ownerId) return;
+    const account = await gadgetAccount(req, res);
+    if (!account) return;
     try {
       const b = req.body ?? {};
       if (typeof b.text !== "string" || typeof b.clientMessageId !== "string") throw new Error("消息格式不正确");
-      const row = context.tasks.submitGadget({ userId: ownerId, text: b.text, clientMessageId: b.clientMessageId });
-      res.status(202).json(context.tasks.gadgetReply(row.id, ownerId));
+      const row = account.tasks.submitGadget({ userId: account.userId, text: b.text, clientMessageId: b.clientMessageId });
+      res.status(202).json(account.tasks.gadgetReply(row.id, account.userId));
     } catch (err) {
       res.status(err instanceof TurnConflictError ? 409 : 400).json({ error: "gadget_submit_failed", message: err instanceof Error ? err.message : "提交失败" });
     }
   }));
   router.get("/gadget/messages/:id", requireKind("primary"), asyncHandler(async (req, res) => {
-    const ownerId = gadgetOwner(req, res);
-    if (!ownerId) return;
-    const reply = context.tasks.gadgetReply(param(req, "id"), ownerId);
+    const account = await gadgetAccount(req, res);
+    if (!account) return;
+    const reply = account.tasks.gadgetReply(param(req, "id"), account.userId);
     res.setHeader("Cache-Control", "no-store");
     if (!reply) { res.status(404).json({ error: "not_found" }); return; }
     res.json(reply);

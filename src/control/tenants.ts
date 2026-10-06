@@ -7,15 +7,16 @@ import {startTaskNotifications} from './push.js';
 import {startVaultAutofill} from './vault.js';
 import type {MemberModelGateway} from './memberModelGateway.js';
 import {getUser} from './auth/owner.js';
-import {MEMBER_GPT_MODEL,MEMBER_MODEL,MEMBER_MODELS} from './auth/policy.js';
+import {MEMBER_EFFORTS,MEMBER_GPT_MODEL,MEMBER_MODEL,MEMBER_MODELS} from './auth/policy.js';
 import type {SandboxNodes} from './sandbox/nodes.js';
 
 /** A stable opaque namespace: no user-controlled paths, names, ports or upstreams. */
-export function memberConfig(base: Config, userId: string, port: number, model: string = MEMBER_MODEL): Config {
+export function memberConfig(base: Config, userId: string, port: number, model: string = MEMBER_MODEL, effort?: string): Config {
   if(!MEMBER_MODELS.includes(model))throw new Error('Unsupported member model');
+  if(effort!==undefined&&!MEMBER_EFFORTS.includes(effort))throw new Error('Unsupported member effort');
   const suffix=userNamespace(userId);
   const dataDir=path.join(base.dataDir,'users',suffix);
-  return {...workspaceConfig(base), runtimeUserId:userId, memberRuntime:true, memberModel:model, dataDir,
+  return {...workspaceConfig(base), runtimeUserId:userId, memberRuntime:true, memberModel:model, memberEffort:effort, dataDir,
     dbPath:path.join(dataDir,'agent.sqlite'),logDir:path.join(dataDir,'logs'),
     ownerPassword:'',ownerPasswordReset:false,ownerSecretPath:path.join(dataDir,'unused-secret'),
     agent:{...base.agent,defaultModel:model},
@@ -66,8 +67,10 @@ export class UserRuntimes {
     }
     // The administrator's assignment (`member_model:<id>`); members cannot change it.
     const assigned=this.root.db.prepare('SELECT value FROM meta WHERE key=?').get(`member_model:${user.id}`) as {value:string}|undefined;
+    const effort=this.root.db.prepare('SELECT value FROM meta WHERE key=?').get(`member_effort:${user.id}`) as {value:string}|undefined;
     // An assignment no longer offered (DeepSeek, before it was removed) falls back to the default.
-    const config=memberConfig(this.root.cfg,user.id,port,assigned&&MEMBER_MODELS.includes(assigned.value)?assigned.value:MEMBER_MODEL);
+    const config=memberConfig(this.root.cfg,user.id,port,assigned&&MEMBER_MODELS.includes(assigned.value)?assigned.value:MEMBER_MODEL,
+      effort&&MEMBER_EFFORTS.includes(effort.value)?effort.value:undefined);
     if(config.sandbox.autostart&&!this.gateway)throw new Error("Member gateway unavailable");
     this.gateway?.provision(config);
     // A member keeps the node its sandbox was created on; a new one goes where there is room.

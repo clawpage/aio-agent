@@ -9,7 +9,10 @@ export const MEMBER_CLAUDE_MODEL = "claude-sonnet-5-5";
 export const MEMBER_MODEL = MEMBER_GPT_MODEL;
 /** The models an administrator may assign to a member (`bin/set-user-model.mjs`). */
 export const MEMBER_MODELS: readonly string[] = [MEMBER_GPT_MODEL, MEMBER_CLAUDE_MODEL];
+/** What a member's executor runs at unless the administrator assigned another effort. */
 export const MEMBER_EFFORT = "high";
+/** The efforts an administrator may assign to a member (`bin/set-user-model.mjs`); never above high. */
+export const MEMBER_EFFORTS: readonly string[] = ["low", "medium", "high"];
 export function isMember(db: Db, userId: string): boolean {
   return getUser(db, userId)?.role === "member";
 }

@@ -77,6 +77,10 @@ export class HarnessSession implements CodexSessionLike {
   interrupt(threadId: string, turnId: string) {
     return isClaudeThread(threadId) ? this.#claude.interrupt(threadId, turnId) : this.#codex.interrupt(threadId, turnId);
   }
+  compactThread(threadId: string) {
+    if (isClaudeThread(threadId) || !this.#codex.compactThread) return Promise.reject(new Error("该会话不支持压缩"));
+    return this.#codex.compactThread(threadId);
+  }
   steerTurn(params: { threadId: string; expectedTurnId: string; text: string; attachments?: TurnAttachment[] }) {
     if (isClaudeThread(params.threadId)) return this.#claude.steerTurn(params);
     if (!this.#codex.steerTurn) return Promise.reject(new Error("当前执行器不支持运行中补充"));

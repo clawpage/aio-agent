@@ -153,7 +153,7 @@ export class SandboxIdle {
     if (this.#connections > 0) return "connections";
     if (this.#now() - this.#foregroundAt < this.#foregroundTtlMs) return "foreground";
     const agent = await ctx.agent.status();
-    if (agent.activeTurns.length > 0 || agent.queuedTurns > 0) return "turns";
+    if (agent.activeTurns.length > 0 || agent.queuedTurns > 0 || agent.compacting > 0) return "turns";
     if (ctx.agent.listPendingRequests().length > 0) return "approvals";
     if (ctx.db.prepare(`SELECT 1 FROM tasks WHERE status IN (${ACTIVE_TASKS}) LIMIT 1`).get()) return "tasks";
     if (ctx.cfg.browser.enabled) {
