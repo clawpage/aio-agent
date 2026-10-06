@@ -597,6 +597,12 @@ export function createApiRouter(context: AppContext): Router {
     try { await context.tasks.stop(param(req, "id")); res.json({ ok: true }); }
     catch (err) { res.status(409).json({ error: "stop_failed", message: err instanceof Error ? err.message : "停止失败" }); }
   }));
+  router.post("/tasks/:id/archive", requireKind("primary"), requireSession, (req, res) => {
+    const id = param(req, "id");
+    if (!context.tasks.belongsTo(id, ctxOf(req).session!.ownerId)) { res.status(404).json({ error: "not_found" }); return; }
+    try { context.tasks.archive(id); res.json({ ok: true }); }
+    catch (err) { res.status(409).json({ error: "archive_refused", message: err instanceof Error ? err.message : "归档失败" }); }
+  });
   router.post("/tasks/:id/retry-planning", requireKind("primary"), requireSession, asyncHandler(async (req, res) => {
     try { context.tasks.retryPlanning(param(req, "id")); res.json({ ok: true }); }
     catch (err) { res.status(409).json({ error: "retry_refused", message: err instanceof Error ? err.message : "无法重试" }); }

@@ -2957,6 +2957,9 @@ textarea:focus {
 .task-status-badge.error { color:var(--error); background:color-mix(in srgb,var(--error) 10%,transparent); }
 .task-list-summary { color:var(--text-dim); font-size:13px; line-height:1.6; margin:10px 0; display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; overflow:hidden; overflow-wrap:anywhere; }
 .task-list-meta { display:flex; gap:12px; align-items:center; font-size:11px; color:var(--text-dim); }
+/* Stop (or set aside) a task from the list: over the row's bottom right, beside the chevron, outside the row's own button. */
+.task-list-row { position:relative; }
+.task-list-end-action { position:absolute; right:36px; bottom:9px; display:flex; gap:6px; padding-left:6px; background:var(--bg-soft); }
 .task-list-tools { max-width:1000px; margin:0 auto 8px; display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
 .task-filters { display:flex; gap:6px; flex-wrap:wrap; }
 .task-filter { display:inline-flex; align-items:center; gap:6px; border:1px solid var(--border); background:var(--bg); color:var(--text-dim); border-radius:999px; padding:5px 12px; font-size:12px; white-space:nowrap; }

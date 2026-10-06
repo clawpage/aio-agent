@@ -335,6 +335,16 @@ describe("main inbox delegation", () => {
         expect(tasks.view(tasks.get(extra.id)!).waitReason?.label).toBe("等待文件操作");
         codex.completeTurn(codex.startedTurns[0]!.turnId);await tick();expect(codex.steers).toHaveLength(1);expect(tasks.get(extra.id)?.status).toBe("merged");
     });
+    it("archives a task whose result was never confirmed, and nothing else", async () => {
+        const job = submit("archive me"); await tick();
+        expect(() => tasks.archive(job.id)).toThrow("只有结果待核对的任务可以归档");
+        db.prepare("UPDATE tasks SET status='unknown',error='连接中断，结果待核对' WHERE id=?").run(job.id);
+        tasks.archive(job.id);
+        expect(tasks.get(job.id)).toMatchObject({ status: "interrupted", error: "连接中断，结果待核对\n结果没有核对，已由你归档。" });
+        expect(tasks.get(job.id)!.completed_at).toBeGreaterThan(0);
+        expect(() => tasks.archive(job.id)).toThrow("只有结果待核对");
+        expect(() => tasks.archive("task_missing")).toThrow("任务不存在");
+    });
     it("stops only the selected child and accepts further work", async () => {
         const a = submit("a"), b = submit("b");
         await tick();

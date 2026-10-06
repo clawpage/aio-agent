@@ -7,6 +7,9 @@ import {groupTasks,taskFilters,taskTime} from '../taskGroups';
 import {MessageTime,TaskDuration,useDisplayClock} from './MessageTime';
 
 const PAGE=30;
+/** Work still going (or waiting for the person) can be stopped; a result never confirmed can be set aside. */
+const STOPPABLE=new Set(['needs_input','blocked','planning','waiting','queued','running','merging']);
+const endAction=(t:Task):'stop'|'archive'|null=>t.mergedInto?null:STOPPABLE.has(t.status)?'stop':t.status==='unknown'?'archive':null;
 
 /**
  * The server counts, filters, searches and orders; this keeps the pages it has
@@ -85,6 +88,19 @@ export function TaskList({feed,active,onDetails,onExpired}:{feed:TaskFeed;active
   const groups=useMemo(()=>groupTasks(shown,filter,now),[shown,filter,now]);
   const narrowed=filter!=='all'||query!=='';
   const clear=()=>{setFilter('all');setTyped('');setQuery('');};
+  const [confirming,setConfirming]=useState<string|null>(null);
+  const [ending,setEnding]=useState<string|null>(null);
+  const end=async(t:Task,action:'stop'|'archive')=>{
+    setEnding(t.id);setError(null);
+    try{
+      await (action==='stop'?api.stopTask(t.id):api.archiveTask(t.id));
+      setConfirming(null);
+      await fetchPage('refresh',{cursor:null,shown:state.current.shown});
+    }catch(err){
+      if(err instanceof ApiError&&err.status===401)onExpired();
+      setError(err instanceof Error?err.message:(action==='stop'?'停止失败':'归档失败'));
+    }finally{setEnding(null);}
+  };
 
   return <section className="task-list-page" aria-label="任务列表">
     <header className="chat-head"><div className="chat-title"><h2>任务列表</h2><span className="task-list-sub muted tiny">{feed.connected?`${counts?`${counts.all} 项任务 · `:''}状态实时更新`:'正在重新连接…'}</span></div></header>
@@ -100,13 +116,16 @@ export function TaskList({feed,active,onDetails,onExpired}:{feed:TaskFeed;active
       {counts&&narrowed&&!rows.length&&!loading&&<div className="empty"><h3>没有符合条件的任务</h3><p>换个条件试试。</p><button type="button" className="ghost" onClick={clear}>清除筛选</button></div>}
       {groups.map(g=><section key={g.key} className="task-group" data-group={g.key} aria-label={g.label}>
         <h3 className="task-group-head">{g.label}{(g.key==='attention'||g.key==='working')&&counts&&<span className="task-group-count">{counts[g.key]}</span>}</h3>
-        <ul className="task-list">{g.tasks.map(t=><li key={t.id} data-task-id={t.id}>
+        <ul className="task-list">{g.tasks.map(t=>{const action=endAction(t);const word=action==='stop'?'停止':'归档';return <li key={t.id} data-task-id={t.id} className={action?'task-list-row ends':'task-list-row'}>
           <button className="task-list-item" onClick={()=>onDetails(t)} aria-label={`打开任务：${t.title}`}>
             <div className="task-list-top"><strong>{t.title}</strong><span className={`task-status-badge ${taskStatusTone(t)}`}>{t.waitReason?.label??taskStatusLabels[t.status]??t.status}</span></div>
             <p className="task-list-summary">{t.clarification||t.description||t.text}</p>
             <div className="task-list-meta"><MessageTime at={taskTime(t)} now={now}/><TaskDuration task={t} now={now}/>{t.schedule&&<span className="task-tag" title={`定时任务：${t.schedule.title}`}>定时</span>}<span className="spacer"/><span aria-hidden="true">›</span></div>
           </button>
-        </li>)}</ul>
+          {action&&<div className="task-list-end-action">{confirming===t.id
+            ?<><button type="button" className="ghost tiny" disabled={ending===t.id} onClick={()=>setConfirming(null)}>取消</button><button type="button" className="danger tiny" disabled={ending===t.id} onClick={()=>void end(t,action)}>{ending===t.id?`正在${word}…`:`确认${word}`}</button></>
+            :<button type="button" className="ghost tiny" aria-label={`${word}任务：${t.title}`} title={action==='stop'?'停止这个任务，不再继续':'结果不再核对，移到已停止'} onClick={()=>setConfirming(t.id)}>{word}</button>}</div>}
+        </li>;})}</ul>
       </section>)}
       {error&&<p className="error" role="alert">{error}{loading===null&&<> <button type="button" className="ghost" onClick={()=>void fetchPage(rows.length?'more':'reset',{cursor:next,shown:rows.length})}>重试</button></>}</p>}
       <div ref={sentinel} className="task-list-end" aria-live="polite">{loading?<span className="muted tiny">加载中…</span>:rows.length>0&&!next?<span className="muted tiny">没有更多了</span>:null}</div>

@@ -169,3 +169,16 @@ it("gives one of the account's tasks by id, for a console address that names it"
   expect(((await res.json()) as { task: { id: string; text: string } }).task).toMatchObject({ id: task.id, text: "按地址打开的任务" });
   expect((await h.request("/api/tasks/task_unknown", { headers: { cookie } })).status).toBe(404);
 });
+
+it("archives one of the account's unconfirmed tasks, and refuses anything else", async () => {
+  const { cookie, csrf } = await login(h);
+  const headers = { cookie, "x-csrf-token": csrf, "content-type": "application/json" };
+  const task = ((await (await h.request("/api/tasks", { method: "POST", headers, body: JSON.stringify({ text: "待核对的任务", clientMessageId: "archive-api" }) })).json()) as { task: { id: string } }).task;
+  const archive = (id: string, extra: Record<string, string> = headers) => h.request(`/api/tasks/${id}/archive`, { method: "POST", headers: extra, body: "{}" });
+  expect((await archive(task.id, { cookie, "content-type": "application/json" })).status).toBe(403);
+  expect((await archive(task.id)).status).toBe(409);
+  h.ctx.db.prepare("UPDATE tasks SET status='unknown' WHERE id=?").run(task.id);
+  expect((await archive(task.id)).status).toBe(200);
+  expect(h.ctx.tasks.get(task.id)?.status).toBe("interrupted");
+  expect((await archive("task_unknown")).status).toBe(404);
+});

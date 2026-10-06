@@ -374,6 +374,19 @@ export class TaskService {
         }
         this.schedule();
     }
+    /**
+     * The person sets aside a task whose result was never confirmed (`unknown`): it moves to
+     * the stopped ones, saying so. Nothing is replayed; only a task left unconfirmed can be archived.
+     */
+    archive(id: string) {
+        const row = this.get(id);
+        if (!row || row.merged_into)
+            throw new Error("任务不存在");
+        if (row.status !== "unknown")
+            throw new Error("只有结果待核对的任务可以归档；进行中的任务请停止");
+        const note = "结果没有核对，已由你归档。";
+        this.db.prepare("UPDATE tasks SET status='interrupted',error=?,completed_at=COALESCE(completed_at,?) WHERE id=? AND status='unknown'").run(row.error ? `${row.error}\n${note}` : note, Date.now(), id);
+    }
     retryPlanning(id: string) {
         const row = this.get(id);
         if (!row || row.status !== "planning_failed" || row.turn_id)
