@@ -285,6 +285,7 @@ export class SandboxCodexSession {
     const effort = (!model && this.#cfg.agent.titleModel === "gpt-6-luna") || model === MEMBER_GPT_MODEL ? "low" : "high";
     onTiming?.({ model: model ?? this.#cfg.agent.titleModel, effort, attempts: 1 });
     let result;
+    let attempts = 1;
     try {
       try {
         result = await this.#auxiliaryText(prompt, effort, this.planTimeoutMs, developerInstructions, model, onTiming);
@@ -293,8 +294,17 @@ export class SandboxCodexSession {
         // replay turn/start or task execution after unknown delivery.
         if (!(err instanceof JsonRpcTimeoutError) || err.method !== "thread/start") throw err;
         this.#log.warn("dispatcher thread creation timed out; retrying once");
-        onTiming?.({ attempts: 2 });
+        onTiming?.({ attempts: ++attempts });
         result = await this.#auxiliaryText(prompt, effort, this.planTimeoutMs, developerInstructions, model, onTiming);
+      }
+      // A model at capacity refuses the turn outright, and dispatch is read-only,
+      // so answer once more: an owner on another model of their own login, a
+      // member on their one assigned model (the gateway serves no other).
+      if (result.error && /at capacity/i.test(result.error)) {
+        const ownModel = !model && this.#cfg.agent.titleModel !== MEMBER_GPT_MODEL ? MEMBER_GPT_MODEL : undefined;
+        this.#log.warn("dispatcher model at capacity; retrying once", { model: model ?? this.#cfg.agent.titleModel, retryModel: ownModel ?? model ?? this.#cfg.agent.titleModel });
+        onTiming?.({ attempts: ++attempts, ...(ownModel ? { model: ownModel, effort: "low" } : {}) });
+        result = await this.#auxiliaryText(prompt, ownModel ? "low" : effort, this.planTimeoutMs, developerInstructions, model, onTiming, ownModel);
       }
     } finally {
       onTiming?.({ classifierMs: Date.now() - started });
@@ -307,13 +317,14 @@ export class SandboxCodexSession {
     return text;
   }
 
-  async #auxiliaryText(prompt: string, effort: string | null, timeoutMs: number, developerInstructions?: string, requestedModel?: string, onTiming?: DispatchTimingSink): Promise<{ text: string | null; error: string | null; timedOut?: boolean }> {
+  /** `ownModel` picks another model on the owner's own login; `requestedModel` goes through the gateway. */
+  async #auxiliaryText(prompt: string, effort: string | null, timeoutMs: number, developerInstructions?: string, requestedModel?: string, onTiming?: DispatchTimingSink, ownModel?: string): Promise<{ text: string | null; error: string | null; timedOut?: boolean }> {
     const connectionStarted = Date.now();
     await this.start();
     onTiming?.({ connectionMs: Date.now() - connectionStarted });
     const peer = this.#peer;
     if (!peer?.alive) return { text: null, error: null };
-    const model = requestedModel ?? this.#cfg.agent.titleModel;
+    const model = requestedModel ?? ownModel ?? this.#cfg.agent.titleModel;
     if (requestedModel && (this.#bridge?.providerForModel(model) ?? "openai") === "openai") throw new Error("服务暂时不可用，请稍后重试");
     const modelProvider = requestedModel ? this.#bridge!.providerForModel(model) : undefined;
     const threadStarted = Date.now();

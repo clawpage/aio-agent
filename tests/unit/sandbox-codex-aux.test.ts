@@ -361,6 +361,34 @@ it('shows the reason a planning turn failed',async()=>{
  } finally {session.close();}
 });
 
+it('answers once more on another model when the dispatcher model is at capacity',async()=>{
+ const server=new FakeAppServer();let n=0;
+ const busy='Selected model is at capacity. Please try a different model.';
+ server.handle('thread/start',()=>({thread:{id:`cap-${++n}`}}));
+ server.handle('turn/start',p=>{const id=p.threadId as string;setTimeout(()=>server.notify('turn/completed',{threadId:id,turn:{id:'t',...(id==='cap-1'?{status:'failed',error:{message:busy}}:{status:'completed',items:[{type:'agentMessage',text:'{}'}]})}}),5);return {turn:{id:'t'}};});
+ const session=makeSession(server,200);
+ try {
+  expect(await session.planTask('request','soul')).toBe('{}');
+  expect(server.inbound.filter(r=>r.method==='turn/start').map(r=>[r.params?.model,r.params?.effort])).toEqual([['gpt-6-luna','low'],['gpt-6.1-sol','low']]);
+  // The owner's retry stays on its own login, never the member gateway.
+  expect(server.inbound.filter(r=>r.method==='thread/start').every(r=>r.params?.modelProvider===undefined)).toBe(true);
+ } finally {session.close();}
+});
+
+it('retries a member at capacity once on the assigned model, then shows the reason',async()=>{
+ const server=new FakeAppServer();let n=0;
+ const busy='Selected model is at capacity. Please try a different model.';
+ server.handle('thread/start',()=>({thread:{id:`mcap-${++n}`}}));
+ server.handle('turn/start',p=>{setTimeout(()=>server.notify('turn/completed',{threadId:p.threadId,turn:{id:'t',status:'failed',error:{message:busy}}}),5);return {turn:{id:'t'}};});
+ const bridge={providerForModel:()=> 'aio_gateway',providerConfigArgs:()=>[],providerEnv:()=>({})} as unknown as BridgeModel;
+ const session=makeSession(server,200,bridge);
+ try {
+  await expect(session.planTask('request','soul','gpt-6.1-sol')).rejects.toThrow(`任务分配失败：${busy}`);
+  expect(server.inbound.filter(r=>r.method==='turn/start').map(r=>r.params?.model)).toEqual(['gpt-6.1-sol','gpt-6.1-sol']);
+  expect(server.inbound.filter(r=>r.method==='thread/start').map(r=>r.params?.modelProvider)).toEqual(['aio_gateway','aio_gateway']);
+ } finally {session.close();}
+});
+
 it('adds the knowledge base to a task thread only when this runtime was granted it',async()=>{
  const server=new FakeAppServer();
  server.handle('thread/start',()=>({thread:{id:'kb-thread'},model:'gpt-6-sol',cwd:'/workspace'}));
