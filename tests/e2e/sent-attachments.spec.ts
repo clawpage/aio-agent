@@ -4,7 +4,7 @@ import { mockConsole } from "./mock-api";
 /** A picture of the given shape, drawn as SVG so the test carries no binary fixtures. */
 const picture = (w: number, h: number, a: string, b: string) => `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}"><defs><linearGradient id="g" x2="1" y2="1"><stop offset="0" stop-color="${a}"/><stop offset="1" stop-color="${b}"/></linearGradient></defs><rect width="${w}" height="${h}" fill="url(#g)"/><circle cx="${w * 0.7}" cy="${h * 0.35}" r="${Math.min(w, h) * 0.16}" fill="#fff8"/></svg>`;
 const pictures: Record<string, string> = {
-  "/home/gem/workspace/uploads/IMG_1378.png": picture(1170, 1560, "#3a3f8f", "#d98a5b"),
+  "/home/gem/workspace/uploads/IMG_1378.png": picture(1170, 2532, "#3a3f8f", "#d98a5b"),
   "/home/gem/workspace/uploads/a.jpg": picture(1600, 1200, "#1f6f5c", "#9fd8b0"),
   "/home/gem/workspace/uploads/b.jpg": picture(1200, 1200, "#6b4fe0", "#f0b2d0"),
   "/home/gem/workspace/uploads/c.jpg": picture(900, 1200, "#a15f00", "#ffd38a"),
@@ -31,7 +31,10 @@ test("pictures the person sent show as pictures, files as cards under them", asy
   await single.scrollIntoViewIfNeeded();
   await expect(single.getByTestId("file-card-thumb")).toBeVisible({ timeout: 60_000 });
   // The picture keeps its own (portrait) shape and no file name or "点击预览" line.
-  await expect.poll(async () => { const b = (await single.boundingBox())!; return b.height / b.width; }).toBeCloseTo(1560 / 1170, 1);
+  // A tall screenshot is shown narrower and cut at 3:4, not as a long strip.
+  await expect.poll(async () => { const b = (await single.boundingBox())!; return b.height / b.width; }).toBeCloseTo(4 / 3, 1);
+  expect((await single.boundingBox())!.height).toBeLessThanOrEqual(280);
+  await page.screenshot({ path: info.outputPath("sent-tall.png") });
   await expect(first).not.toContainText("点击预览");
   await expect(single.getByRole("link", { name: "下载 IMG_1378.png" })).toHaveAttribute("download", "IMG_1378.png");
 

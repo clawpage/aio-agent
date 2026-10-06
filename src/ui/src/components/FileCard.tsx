@@ -83,7 +83,9 @@ export const FileCard = memo(function FileCard({ path, name, title, kind, onOpen
     const ready = showThumb && thumbUrl;
     return (
       <div ref={cardRef} className={`file-card file-card-media${ready ? " ready" : ""}`} data-testid="file-card" data-kind="image" data-path={path} title={path}
-        style={ratio ? { ["--media-ratio" as string]: String(Math.min(Math.max(ratio, 0.66), 1.6)) } : undefined}>
+        data-shape={ratio && ratio < 0.95 ? "tall" : undefined}
+        // A tall picture (a phone screenshot) is shown narrower and cut at 3:4, as chat apps do; open it to see all of it.
+        style={ratio ? { ["--media-ratio" as string]: String(Math.min(Math.max(ratio, 0.75), 1.6)) } : undefined}>
         <button type="button" className="file-card-open" onClick={() => onOpen(path)} aria-label={`预览 ${title || name}`}>
           {ready ? (
             <img src={thumbUrl} alt="" decoding="async" data-testid="file-card-thumb"

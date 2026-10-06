@@ -2557,6 +2557,7 @@ textarea:focus {
   overflow: hidden;
 }
 .sent-media[data-count="1"] { grid-template-columns: 1fr; }
+.sent-media[data-count="1"]:has(> [data-shape="tall"]) { width: 200px; }
 .sent-media[data-count="3"] > :first-child { grid-column: span 2; aspect-ratio: 2 / 1; }
 .file-card.file-card-media {
   position: relative;
