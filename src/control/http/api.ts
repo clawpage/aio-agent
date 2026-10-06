@@ -655,10 +655,18 @@ export function createApiRouter(context: AppContext): Router {
       res.status(err instanceof TurnConflictError ? 409 : 400).json({ error: "gadget_submit_failed", message: err instanceof Error ? err.message : "提交失败" });
     }
   }));
+  // `?wait=N` (at most 25 s) holds the answer back until the message is done or N
+  // seconds pass, so the gadget hears of the answer at once without polling fast.
   router.get("/gadget/messages/:id", requireKind("primary"), asyncHandler(async (req, res) => {
     const account = await gadgetAccount(req, res);
     if (!account) return;
-    const reply = account.tasks.gadgetReply(param(req, "id"), account.userId);
+    const read = () => account.tasks.gadgetReply(param(req, "id"), account.userId);
+    let reply = read();
+    const until = Date.now() + Math.min(Math.max(Number(req.query.wait) || 0, 0), 25) * 1000;
+    while (reply && !reply.done && Date.now() < until && !res.writableEnded && !req.socket.destroyed) {
+      await new Promise(resolve => setTimeout(resolve, 200));
+      reply = read();
+    }
     res.setHeader("Cache-Control", "no-store");
     if (!reply) { res.status(404).json({ error: "not_found" }); return; }
     res.json(reply);

@@ -194,7 +194,7 @@ owner 侧栏的「用量看板」按账号显示每天的 token 趋势、输入/
 
 - **开启**：在控制面数据目录建 `gadget-token.env`（compose 部署在控制面数据卷的 `/data/gadget-token.env`，可用 `PA_GADGET_TOKEN_PATH` 改位置），内容一行 `AIO_GADGET_TOKEN=<长随机串>`，权限 600。文件不存在时接口一律 401；令牌每次请求都重新读取，换令牌不用重启。
 - **配件说话算谁的**：同一文件里再写一行 `AIO_GADGET_USER=<用户名>`，配件就在这个账号里执行（它自己的运行环境、任务、沙箱、模型与知识库授权），owner 的主会话里看不到；名字对不上任何账号时一律 401。不写这一行时配件代表 owner。现有部署给配件建了专用成员账号 `betaw`（`gpt-6.1-sol` / `low`，知识库可读写），不再借用 owner。
-- **接口**：`POST /api/gadget/messages`，`Authorization: Bearer <令牌>`，JSON `{text, clientMessageId}`，返回 202 `{id, status, done, reply, error}`；之后轮询 `GET /api/gadget/messages/<id>`，`done` 为 true 时 `reply` 就是答复。同一个 `clientMessageId` 重发得到同一个任务。不用 cookie，所以不检查 CSRF；只能查配件自己发的任务。
+- **接口**：`POST /api/gadget/messages`，`Authorization: Bearer <令牌>`，JSON `{text, clientMessageId}`，返回 202 `{id, status, done, reply, error}`；之后轮询 `GET /api/gadget/messages/<id>`，`done` 为 true 时 `reply` 就是答复；带 `?wait=N`（最多 25 秒）时服务端会把这次轮询挂住，答完立刻返回，否则 N 秒后照常返回，配件不用频繁轮询。同一个 `clientMessageId` 重发得到同一个任务。不用 cookie，所以不检查 CSRF；只能查配件自己发的任务。
 - **怎么执行**：不经派单器，直接建一个已派好的任务：代表 owner 时推理强度固定 medium（模型用 owner 当前的模型），代表成员时用管理员给该成员分配的模型和推理强度。所有配件消息共用一个执行会话，上下文连续，可以追问。
 - **后台压缩**：这个共用会话某一轮结束后上下文已用到模型窗口的 80% 以上，且之后静默满 3 分钟（没有新消息、没有在跑的轮次），控制面就在后台对它执行一次 Codex 压缩（`thread/compact/start`），下一条消息不用等压缩、也不会贴着上限跑。压缩过程不进会话记录、不发通知，用量照常计入看板；压缩期间到达的消息排在压缩之后执行。沙箱已休眠时不为压缩唤醒，Claude Code 会话不压缩。执行会话被告知回答会被朗读：纯文本口语、默认一到三句话、不用 Markdown 和各种卡片、不追问。主会话的其他任务不放进每轮提示（共用会话会越积越长、很快被压缩），问到“某某任务怎么样了”时由执行会话用 `aio_schedule` 的 `task_list`（可按关键词搜）和 `task_get`（完整请求和结果）自己去查。
 - **在主会话里**：每条配件消息都是该账号主会话里的一个任务（描述为「来自语音配件」），完成时不发手机通知。

@@ -65,3 +65,23 @@ it("runs gadget messages in one executor session at medium effort, briefly, with
     const otherId = ((await other.json()) as { task: { id: string } }).task.id;
     expect((await h.request(`/api/gadget/messages/${otherId}`, { headers: auth() })).status).toBe(404);
 });
+
+it("holds a poll with ?wait until the answer is in, and answers at once when it already is", async () => {
+    // The previous case left its last message running in the same session: finish it first.
+    await h.codex.runTurn(h.codex.startedTurns.at(-1)!.turnId, { text: "第二款更轻。" });
+    const before = h.codex.startedTurns.length;
+    const sent = await send("等一下再说", "g-wait");
+    expect(sent.status).toBe(202);
+    const id = ((await sent.json()) as { id: string }).id;
+    await vi.waitFor(() => expect(h.codex.startedTurns.length).toBe(before + 1));
+    const turn = h.codex.startedTurns.at(-1)!;
+    const started = Date.now();
+    const held = h.request(`/api/gadget/messages/${id}?wait=20`, { headers: auth() });
+    setTimeout(() => void h.codex.runTurn(turn.turnId, { text: "好的。" }), 600);
+    expect(await (await held).json()).toMatchObject({ done: true, reply: "好的。" });
+    expect(Date.now() - started).toBeGreaterThanOrEqual(500);
+    expect(Date.now() - started).toBeLessThan(5000);
+    const again = Date.now();
+    expect(await (await h.request(`/api/gadget/messages/${id}?wait=20`, { headers: auth() })).json()).toMatchObject({ done: true });
+    expect(Date.now() - again).toBeLessThan(1000);
+});
