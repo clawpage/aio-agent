@@ -279,10 +279,10 @@ export class SandboxCodexSession {
   /** Read-only main-agent planning; receives bounded metadata, never executes a task. */
   async planTask(prompt: string, developerInstructions?: string, model?: string, onTiming?: DispatchTimingSink): Promise<string | null> {
     const started = Date.now();
-    // Dispatch is one short JSON answer: low effort on Luna and on a member's GPT
-    // (the member gateway lets a request ask for less than high, never more).
-    // Other dispatch models keep high.
-    const effort = (!model && this.#cfg.agent.titleModel === "gpt-6-luna") || model === MEMBER_GPT_MODEL ? "low" : "high";
+    // Dispatch is one short JSON answer: low effort on GPT-6.1 Sol (the owner's
+    // default and every GPT member's; the member gateway lets a request ask for
+    // less than high, never more) and on Luna. Other dispatch models keep high.
+    const effort = (model ?? this.#cfg.agent.titleModel) === MEMBER_GPT_MODEL || (!model && this.#cfg.agent.titleModel === "gpt-6-luna") ? "low" : "high";
     onTiming?.({ model: model ?? this.#cfg.agent.titleModel, effort, attempts: 1 });
     let result;
     let attempts = 1;
@@ -298,10 +298,11 @@ export class SandboxCodexSession {
         result = await this.#auxiliaryText(prompt, effort, this.planTimeoutMs, developerInstructions, model, onTiming);
       }
       // A model at capacity refuses the turn outright, and dispatch is read-only,
-      // so answer once more: an owner on another model of their own login, a
-      // member on their one assigned model (the gateway serves no other).
+      // so answer once more: an owner on another model of their own login (Sol and
+      // Luna stand in for each other), a member on their one assigned model (the
+      // gateway serves no other).
       if (result.error && /at capacity/i.test(result.error)) {
-        const ownModel = !model && this.#cfg.agent.titleModel !== MEMBER_GPT_MODEL ? MEMBER_GPT_MODEL : undefined;
+        const ownModel = model ? undefined : this.#cfg.agent.titleModel === MEMBER_GPT_MODEL ? "gpt-6-luna" : MEMBER_GPT_MODEL;
         this.#log.warn("dispatcher model at capacity; retrying once", { model: model ?? this.#cfg.agent.titleModel, retryModel: ownModel ?? model ?? this.#cfg.agent.titleModel });
         onTiming?.({ attempts: ++attempts, ...(ownModel ? { model: ownModel, effort: "low" } : {}) });
         result = await this.#auxiliaryText(prompt, ownModel ? "low" : effort, this.planTimeoutMs, developerInstructions, model, onTiming, ownModel);

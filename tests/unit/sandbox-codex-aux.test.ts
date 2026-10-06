@@ -327,8 +327,8 @@ it('records the actual dispatcher model and stage timings from notifications',as
  const session=makeSession(server,200), timing:Record<string,string|number>={};
  try {
   expect(await session.planTask('classify',undefined,undefined,part=>Object.assign(timing,part))).toBe('{}');
-  expect(timing).toMatchObject({model:'gpt-6-luna',effort:'low',attempts:1});
-  expect(server.inbound.find(r=>r.method==='turn/start')?.params).toMatchObject({model:'gpt-6-luna',effort:'low'});
+  expect(timing).toMatchObject({model:'gpt-6.1-sol',effort:'low',attempts:1});
+  expect(server.inbound.find(r=>r.method==='turn/start')?.params).toMatchObject({model:'gpt-6.1-sol',effort:'low'});
   for(const key of ['connectionMs','threadStartMs','turnStartMs','firstTextMs','finishMs','classifierMs']) expect(timing[key]).toEqual(expect.any(Number));
   expect(timing.classifierMs).toBeGreaterThanOrEqual(timing.firstTextMs as number);
  }finally{session.close();}
@@ -343,7 +343,7 @@ it('runs member planning through the fixed provider at low effort and refuses an
  try {
   expect(await session.planTask('request','soul','gpt-6.1-sol')).toBe('{}');
   expect(server.inbound.find(r=>r.method==='thread/start')?.params).toMatchObject({model:'gpt-6.1-sol',modelProvider:'aio_gateway',ephemeral:true});
-  // Dispatch is one short JSON answer: a GPT member's dispatcher runs at low, like the owner's Luna.
+  // Dispatch is one short JSON answer: a GPT member's dispatcher runs at low, like the owner's.
   expect(server.inbound.find(r=>r.method==='turn/start')?.params).toMatchObject({model:'gpt-6.1-sol',effort:'low'});
  } finally {session.close();}
  const unavailable=makeSession(new FakeAppServer(),200);
@@ -369,7 +369,7 @@ it('answers once more on another model when the dispatcher model is at capacity'
  const session=makeSession(server,200);
  try {
   expect(await session.planTask('request','soul')).toBe('{}');
-  expect(server.inbound.filter(r=>r.method==='turn/start').map(r=>[r.params?.model,r.params?.effort])).toEqual([['gpt-6-luna','low'],['gpt-6.1-sol','low']]);
+  expect(server.inbound.filter(r=>r.method==='turn/start').map(r=>[r.params?.model,r.params?.effort])).toEqual([['gpt-6.1-sol','low'],['gpt-6-luna','low']]);
   // The owner's retry stays on its own login, never the member gateway.
   expect(server.inbound.filter(r=>r.method==='thread/start').every(r=>r.params?.modelProvider===undefined)).toBe(true);
  } finally {session.close();}
