@@ -24,7 +24,7 @@ export function RecallSettings() {
     ? [
         ["派单次数", `${stats.dispatches} 次${stats.failed || stats.repaired ? `（${[stats.failed ? `失败 ${stats.failed}` : "", stats.repaired ? `自动修正 ${stats.repaired}` : ""].filter(Boolean).join(" · ")}）` : ""}`],
         ["带历史召回的派单", `${stats.withRecall} 次 · 平均每次 ${stats.avgRecalled} 条`],
-        ["数据库历史检索", `${pct(stats.searchRate)} · Luna 平均 ${stats.avgRounds} 轮`],
+        ["数据库历史检索", `${pct(stats.searchRate)} · 派单器平均 ${stats.avgRounds} 轮`],
         ["选中的关联任务", `${stats.chosen} 个，其中召回找到 ${stats.chosenFromRecall}`],
         ["手动引用的老任务", stats.labelled ? `${stats.labelled} 次 · 检索能排进前 ${stats.cap} 名 ${pct(stats.recallAtCap)} · MRR ${stats.mrr ?? "—"}` : "暂无"],
         ["每次召回上限", `${stats.cap} 条`],

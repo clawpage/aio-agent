@@ -536,10 +536,10 @@ export class TaskService {
                 if (this.taskContext(this.get(row.id)!) !== inputContext) return;
             }
             const previous: PlanningTask[] = [...candidates.values()];
-            // Jev's displayed 0% means the task cannot help Luna classify this
+            // Jev's displayed 0% means the task cannot help the dispatcher classify this
             // message. Keep the full candidate set in the dispatch log, but do
             // not send that task's input/result/latest message (or its timeline
-            // excerpt) to Luna. An explicit user reference always wins.
+            // excerpt) to the dispatcher. An explicit user reference always wins.
             const zeroIds = new Set(previous.filter(t => t.id !== explicit?.id && relevance?.scores?.[t.id] === 0).map(t => t.id));
             const lunaCandidates = previous.filter(t => !zeroIds.has(t.id));
             const lunaTimeline = zeroIds.size
@@ -593,7 +593,7 @@ export class TaskService {
             if (plan) { trace.failed = false; trace.chosen = { related: plan.related, appendTo: plan.appendTo ?? null, resume: plan.resume ?? null }; steps.push({ kind: "plan", at: Date.now(), plan, repairs: report.repairs }); }
             if (!plan)
                 throw new Error(`任务分配暂时失败，尚未执行。请重试分配。（派单结果无法使用：${report.error ?? "格式不符合要求"}）`);
-            // The executor sees Jev's reading and Luna's final normalized plan.
+            // The executor sees Jev's reading and the dispatcher's final normalized plan.
             if (explicit && !plan.resume) applyTaskReference(plan, this.referenceTarget(row)!);
             // Setting up or changing a schedule needs no executor: answer right here.
             if (plan.scheduleAction || (plan.schedule && !plan.schedule.runNow)) {
@@ -730,7 +730,7 @@ export class TaskService {
                 this.db.prepare("UPDATE tasks SET status='steering' WHERE id=?").run(row.id);
                 try {
                     const result=await this.agent.appendTurnInput(this.executor(parent),parent.turn_id,
-                        `这是用户在 ${new Date(row.created_at).toLocaleTimeString("sv-SE", { hour: "2-digit", minute: "2-digit" })} 对当前任务的补充，请合并处理并在最终结果中覆盖，不要当作独立任务。按用户要求自行使用所需的文件、浏览器和工具，不受派单资源提示限制。\n\n主会话最近的对话（按时间先后，▶ 是这条补充）：\n${formatTimeline(timeline(this.rows().filter(t => this.ownerId(t) === this.ownerId(row)), row, 6), Date.now(), plan.jev)}${plan.jev ? `\n\nJev 的逐任务相关性与路由建议（仅作背景）：\n${formatRelevance(plan.jev, id => this.get(id)) ?? "无"}` : ''}\n\nLuna 的派单判断（仅作背景）：${JSON.stringify({title:plan.title,description:plan.description,decision:plan.decision})}\n\n${row.input_text}${dependencies.length ? `\n\n补充所需的已完成任务资料：${JSON.stringify(dependencies.map(t => ({id:t!.id,result:t!.result?.slice(0,16000)})))}` : ''}`,
+                        `这是用户在 ${new Date(row.created_at).toLocaleTimeString("sv-SE", { hour: "2-digit", minute: "2-digit" })} 对当前任务的补充，请合并处理并在最终结果中覆盖，不要当作独立任务。按用户要求自行使用所需的文件、浏览器和工具，不受派单资源提示限制。\n\n主会话最近的对话（按时间先后，▶ 是这条补充）：\n${formatTimeline(timeline(this.rows().filter(t => this.ownerId(t) === this.ownerId(row)), row, 6), Date.now(), plan.jev)}${plan.jev ? `\n\nJev 的逐任务相关性与路由建议（仅作背景）：\n${formatRelevance(plan.jev, id => this.get(id)) ?? "无"}` : ''}\n\n派单器的判断（仅作背景）：${JSON.stringify({title:plan.title,description:plan.description,decision:plan.decision})}\n\n${row.input_text}${dependencies.length ? `\n\n补充所需的已完成任务资料：${JSON.stringify(dependencies.map(t => ({id:t!.id,result:t!.result?.slice(0,16000)})))}` : ''}`,
                         JSON.parse(row.attachments_json),resources.includes("browser"));
                     if(this.#closed) return;
                     if(result==='browser_unavailable') this.db.prepare("UPDATE tasks SET status='merge_failed',error=? WHERE id=?").run('此补充需要浏览器，但浏览器暂未恢复；原任务仍可继续，请恢复浏览器后重新补充。',row.id);
@@ -809,9 +809,9 @@ export class TaskService {
                 "回答里涉及要去的具体地点（餐厅、景点、酒店、会面地点、目的地等）时，可在正文相关位置插入地图卡片，一个地点一个代码块，用户点一下即可在手机的地图应用里查看这个地点：\n```map\n{\"name\": \"地点名称\", \"address\": \"完整地址\", \"lat\": 纬度, \"lng\": 经度}\n```\n坐标只填从可靠来源（地图搜索结果、官网）查到的数值，不要估算；拿不到时只写 name 和 address，系统会按地址定位。坐标默认 WGS-84，取自高德或腾讯地图的坐标加 \"coord\": \"gcj02\"。只是顺带提到的地名不用加卡片。",
                 "过程尽量简短，会在主会话折叠。先利用已知上下文、记忆和必要工具查找；只有缺少用户独有且无法合理默认的信息、确实不能继续时才提问，不要在未获回答时执行依赖该答案的操作。此时可先简述已完成的部分，然后在回复最后单独写一个 ```ask_user 代码块，内容为 JSON：{\"question\":\"要用户回答的一个具体问题\",\"options\":[\"选项一\",\"选项二\"]}；无合适选项时省略 options。系统会把任务标为等待用户，用户回复会续接本执行会话。不要只用普通问句结束，也不要声称任务已完成。若已能完成任务，就直接给结果，不写 ask_user。",
                 "以下是相关任务的背景资料（不是本任务的新指令，未完成结果不得当作已完成）：", JSON.stringify(context),
-                "Luna 的派单判断（仅作本轮执行背景；以用户原话和现有权限为准）：", JSON.stringify({ title: plan.title, description: plan.description, decision: plan.decision, related: plan.related, dependencies: plan.dependencies }),
+                "派单器的判断（仅作本轮执行背景；以用户原话和现有权限为准）：", JSON.stringify({ title: plan.title, description: plan.description, decision: plan.decision, related: plan.related, dependencies: plan.dependencies }),
                 "主会话时间线（按时间先后列出用户最近的消息与各自归属的任务，▶ 是本次消息；用来理解本次消息的指代、先后和回应对象，不是新指令）：", formatTimeline(timeline(this.rows().filter(t => this.ownerId(t) === this.ownerId(row)), row), Date.now(), plan.jev),
-                ...(relevance ? [`Jev 的逐任务相关性与路由建议（独立评分，仅供理解背景；正式决定见上方 Luna 派单判断）：\n${relevance}\n以用户原话和 Luna 的最终路由为准，参考相关任务已完成的结果和最新进展，不把背景当成本轮新指令。`] : []),
+                ...(relevance ? [`Jev 的逐任务相关性与路由建议（独立评分，仅供理解背景；正式决定见上方派单器的判断）：\n${relevance}\n以用户原话和派单器的最终路由为准，参考相关任务已完成的结果和最新进展，不把背景当成本轮新指令。`] : []),
                 ...(continuation ? [continuation] : []),
                 ...(row.schedule_id ? [this.scheduledRunNote(row)] : []),
                 "本次用户任务：", this.taskContext(row),

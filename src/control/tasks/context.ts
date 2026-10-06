@@ -105,9 +105,9 @@ export interface JevRelevance {
   ranked: Array<{ id: string; p: number }>;
   /** Independent probability that each recalled task is relevant to this message. */
   scores?: Record<string, number>;
-  /** Jev's advice; Luna still makes the final routing decision. */
+  /** Jev's advice; the dispatcher still makes the final routing decision. */
   suggestion?: { kind: "new" | "steer" | "resume"; taskId: string | null; probability: number };
-  /** Full model answers supplied to Luna and the executor for auditability. */
+  /** Full model answers supplied to the dispatcher and the executor for auditability. */
   answers?: Record<string, JevAnswer>;
 }
 
@@ -118,7 +118,7 @@ export interface JevRelevance {
 export function formatRelevance(relevance: JevRelevance, get: (id: string) => ContextTask | null | undefined, now = Date.now()): string | null {
   const suggestion = relevance.suggestion;
   const lines = [
-    ...(suggestion ? [`- Jev 建议：${suggestion.kind === "new" ? "新任务" : `${suggestion.kind === "steer" ? "追加" : "续接"}任务 ${suggestion.taskId}`}（${percent(suggestion.probability)}，${relevance.confident ? "高置信" : "不确定"}）；最终由 Luna 决定。`] : []),
+    ...(suggestion ? [`- Jev 建议：${suggestion.kind === "new" ? "新任务" : `${suggestion.kind === "steer" ? "追加" : "续接"}任务 ${suggestion.taskId}`}（${percent(suggestion.probability)}，${relevance.confident ? "高置信" : "不确定"}）；最终由派单器决定。`] : []),
     ...relevance.ranked.flatMap(({ id, p }) => {
     const mark = id === relevance.choice ? `，Jev 首选${relevance.confident ? "（高置信）" : ""}` : "";
     if (id === NEW_TASK) return [`- 独立的新请求：${percent(p)}${mark}`];
@@ -187,7 +187,7 @@ export function routingQuestion(message: string, candidates: Array<ContextTask &
       route: {
         criteria,
         instructions: {
-          goal: "建议本消息按独立新任务处理，还是继续某个存量业务。steer 表示追加到仍在执行的任务；resume 表示开启同一执行会话的新轮次。只给建议，由 Luna 最终决定。",
+          goal: "建议本消息按独立新任务处理，还是继续某个存量业务。steer 表示追加到仍在执行的任务；resume 表示开启同一执行会话的新轮次。只给建议，由派单器最终决定。",
           rules: [
             "按主会话时间线的先后理解：越接近本消息的对话越可能是它的对象。",
             "简短的确认或回复（如“已授权”“可以”“好的”“就这个”“第二个”“改成周六”）回应的是时间上最近一次向用户提问或请求确认的任务。",

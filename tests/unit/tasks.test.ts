@@ -764,7 +764,7 @@ describe("main-session order, Jev's second opinion and resuming a finished sessi
         const line = turn.text.split("\n").find(l => l.includes("用户：「帮我在 eBay 买那台 Pixel」"))!;
         expect(line).toContain("〔Jev：相关性 80%〕");
         expect(turn.text).toContain("Jev 的逐任务相关性与路由建议");
-        expect(turn.text).toContain('Luna 的派单判断');
+        expect(turn.text).toContain('派单器的判断');
         expect(turn.text).not.toContain('"probabilities"');
         expect(turn.text).toContain(`- 任务 ${order.id}「帮我在 eBay 买那台 Pixel」（completed，`);
         expect(turn.text).toMatch(/：80%，Jev 首选（高置信）；助理最后问：「需要你授权我用已保存的卡付款吗？」/);
@@ -814,7 +814,7 @@ describe("owner dispatch log", () => {
         expect(decided.result).toMatchObject({ choice: trip.id, confident: true, latencyMs: 4, scores:{[trip.id]:0.8},suggestion:{kind:"steer",taskId:trip.id} });
         expect(timing.timing).toMatchObject({ model: "fake-luna", effort: "high", connectionMs: 2 });
         expect(answer).toMatchObject({ round: 1 });
-        expect(answer.prompt).toContain("Luna 派单器");
+        expect(answer.prompt).toContain("AIO Agent 的派单器");
         expect(answer.answer).toContain("酒店要靠近新宿");
         expect(plan.plan).toMatchObject({ decision:{kind:"steer",taskId:trip.id},related: [trip.id] });
         // Titles are read back as they are now: the accepted steer renamed the trip.

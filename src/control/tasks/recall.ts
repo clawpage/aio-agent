@@ -173,7 +173,7 @@ export interface RecallStats {
   /** Dispatches where recall brought at least one task beyond the recent window. */
   withRecall: number;
   avgRecalled: number;
-  /** Dispatches that ran database recall, and the average Luna answer rounds. */
+  /** Dispatches that ran database recall, and the average dispatcher answer rounds. */
   searchRate: number;
   avgRounds: number;
   /** Chosen related/append targets, and how many of them only recall had surfaced. */

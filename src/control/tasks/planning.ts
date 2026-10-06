@@ -25,7 +25,7 @@ export interface PlanningSchedule {
 export interface TaskPlan {
     title: string;
     description?: string;
-    /** Luna's final decision; operational fields below are derived from it. */
+    /** The dispatcher's final decision; operational fields below are derived from it. */
     decision?: { kind: "new" | "steer" | "resume"; taskId: string | null };
     clarification?: string | null;
     /** Answers the person can tap instead of typing, when the question is a pick among a few. */
@@ -77,7 +77,7 @@ export function planningPrompt(text: string, previous: PlanningTask[], explicit:
     // Newest first, numbered: a same-day date alone cannot tell the dispatcher which task the user just talked about.
     const ordered = [...previous].sort((a, b) => (b.created_at ?? -Infinity) - (a.created_at ?? -Infinity));
     return [
-        "你是 AIO Agent 的 Luna 派单器。数据库已按时序和倒排文档召回任务，Jev 已逐项评分并建议接续方式。只做最终派单，不执行任务、调用工具或再次搜索。",
+        "你是 AIO Agent 的派单器。数据库已按时序和倒排文档召回任务，Jev 已逐项评分并建议接续方式。只做最终派单，不执行任务、调用工具或再次搜索。",
         "只返回一个 JSON：{title:string,description:string,decision:{kind:\"new\"|\"steer\"|\"resume\",taskId:string|null},related:string[],dependencies:string[]}。核心是给本次工作起准确的标题（不超过40字）、写给用户看的任务简述（不超过100字），并正式决定新任务、追加进行中的任务，还是续接已结束执行会话。decision=steer/resume 时必须填写候选 taskId；new 时 taskId=null。执行者自行选择需要的浏览器、文件和工具；你不分配或限制资源。缺少资料也要启动执行任务，是否追问由执行者判断。不要输出 resources、clarification 或 options。",
         "主会话时序最重要：mainSessionTimeline 按时间先后列出用户最近的消息、各自归属的任务和助理最后向用户问的问题，最后一条（▶）就是本消息。理解指代、简短回复和确认时，先看它紧挨着的前文。",
         "decision.kind=steer：本消息补充仍在执行的任务；decision.kind=resume：回答已结束任务的问题，或接着做同一页面、流程、交付物。两者都把 taskId 放入 related。只借鉴旧结果来开始新事，选 new 并用 related 引背景。",
@@ -215,7 +215,7 @@ export function parsePlan(raw: string | null, previous: PlanningTask[], explicit
         appendTo = null; resume = null;
     }
     // Legacy plans may still carry resource hints for queueing/prewarming.
-    // Luna no longer declares them and they never grant or deny executor access.
+    // The dispatcher no longer declares them and they never grant or deny executor access.
     const rawResources = Array.isArray(p.resources) ? p.resources.slice(0, 24) : [];
     const resources = rawResources.map(r => normalizeResource(r, workspaceRoot)).filter((r): r is string => r !== null);
     if (Array.isArray(p.resources) && resources.length !== p.resources.length) report.repairs.push("已忽略无效或过多的旧资源提示");
