@@ -11,7 +11,7 @@ import {MEMBER_EFFORTS,MEMBER_GPT_MODEL,MEMBER_MODEL,MEMBER_MODELS} from './auth
 import type {SandboxNodes} from './sandbox/nodes.js';
 
 /** A stable opaque namespace: no user-controlled paths, names, ports or upstreams. */
-export function memberConfig(base: Config, userId: string, port: number, model: string = MEMBER_MODEL, effort?: string): Config {
+export function memberConfig(base: Config, userId: string, port: number, model: string = MEMBER_MODEL, effort?: string, resident = false): Config {
   if(!MEMBER_MODELS.includes(model))throw new Error('Unsupported member model');
   if(effort!==undefined&&!MEMBER_EFFORTS.includes(effort))throw new Error('Unsupported member effort');
   const suffix=userNamespace(userId);
@@ -20,8 +20,9 @@ export function memberConfig(base: Config, userId: string, port: number, model: 
     dbPath:path.join(dataDir,'agent.sqlite'),logDir:path.join(dataDir,'logs'),
     ownerPassword:'',ownerPasswordReset:false,ownerSecretPath:path.join(dataDir,'unused-secret'),
     agent:{...base.agent,defaultModel:model},
-    browser:{...base.browser,readyGateway:undefined,releaseWhenIdle:base.browser.memberReleaseWhenIdle},
-    sandbox:{...base.sandbox,releaseWhenIdle:base.sandbox.memberReleaseWhenIdle,hostPort:port,containerName:`aio-user-${suffix}`,
+    // A resident member (PA_RESIDENT_MEMBERS) keeps its container and browser running, as the owner does.
+    browser:{...base.browser,readyGateway:undefined,releaseWhenIdle:!resident&&base.browser.memberReleaseWhenIdle},
+    sandbox:{...base.sandbox,releaseWhenIdle:!resident&&base.sandbox.memberReleaseWhenIdle,hostPort:port,containerName:`aio-user-${suffix}`,
       networkName:`aio-user-${suffix}`,workspaceVolume:`aio-user-${suffix}-workspace`,
       // Owner PA_SANDBOX_EXTRA_ENV is never inherited; only the fixed flag Chromium needs
       // on Docker Desktop (no user namespaces for its zygote), or the browser crash-loops.
@@ -70,7 +71,7 @@ export class UserRuntimes {
     const effort=this.root.db.prepare('SELECT value FROM meta WHERE key=?').get(`member_effort:${user.id}`) as {value:string}|undefined;
     // An assignment no longer offered (DeepSeek, before it was removed) falls back to the default.
     const config=memberConfig(this.root.cfg,user.id,port,assigned&&MEMBER_MODELS.includes(assigned.value)?assigned.value:MEMBER_MODEL,
-      effort&&MEMBER_EFFORTS.includes(effort.value)?effort.value:undefined);
+      effort&&MEMBER_EFFORTS.includes(effort.value)?effort.value:undefined,this.root.cfg.sandbox.residentMembers.includes(user.username));
     if(config.sandbox.autostart&&!this.gateway)throw new Error("Member gateway unavailable");
     this.gateway?.provision(config);
     // A member keeps the node its sandbox was created on; a new one goes where there is room.

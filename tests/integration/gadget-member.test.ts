@@ -85,3 +85,11 @@ it("shows the owner, and only the owner, the gadget account's conversation", asy
     fs.writeFileSync(h.ctx.cfg.gadgetTokenPath, `AIO_GADGET_TOKEN=${TOKEN}\n`, { mode: 0o600 });
     expect(await read()).toEqual({ account: null, messages: [], more: false });
 });
+
+it("keeps a resident member's sandbox and browser running, and only that member's", async () => {
+    const { memberConfig } = await import("../../src/control/tenants.js");
+    const base = { ...h.ctx.cfg, sandbox: { ...h.ctx.cfg.sandbox, memberReleaseWhenIdle: true }, browser: { ...h.ctx.cfg.browser, memberReleaseWhenIdle: true } };
+    const resident = memberConfig(base, "user_r", 18098, MEMBER_MODEL, "low", true), other = memberConfig(base, "user_o", 18097);
+    expect([resident.sandbox.releaseWhenIdle, resident.browser.releaseWhenIdle]).toEqual([false, false]);
+    expect([other.sandbox.releaseWhenIdle, other.browser.releaseWhenIdle]).toEqual([true, true]);
+});

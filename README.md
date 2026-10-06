@@ -371,7 +371,7 @@ owner 可以把宿主机上的一个知识库 MCP 服务（streamable HTTP）接
 
 ## 整个容器空闲休眠（成员默认开启）
 
-浏览器之外，成员的**整个沙箱容器**在没人用时也会停掉（`PA_MEMBER_SANDBOX_RELEASE_IDLE=1`；owner 默认常驻，`PA_SANDBOX_RELEASE_IDLE=0`），下次用到时再启动。
+浏览器之外，成员的**整个沙箱容器**在没人用时也会停掉（`PA_MEMBER_SANDBOX_RELEASE_IDLE=1`；owner 默认常驻，`PA_SANDBOX_RELEASE_IDLE=0`），下次用到时再启动。`PA_RESIDENT_MEMBERS` 列出的成员（逗号分隔的用户名）例外：容器和浏览器都像 owner 一样常驻，服务启动时就拉起，适合要求随问随答的账号（现有部署的语音配件账号 `betaw`）。
 
 - **两个信号都静默满 5 分钟才停**（`PA_SANDBOX_IDLE_SECONDS`，下限 60 秒）：
   - 沙箱在用：执行中/排队的轮次、派单中或待执行的任务、待批准请求、浏览器租约、进行中的工作区代理请求、在工作区标签页里打字；
@@ -508,6 +508,7 @@ npm run build && npx playwright test --config playwright.local.config.ts
 | `PA_DAILY_FEED` | `1` | 给每个账号内置每日 08:00 的推送（前一天有消息才运行）；设 `0` 不再创建 |
 | `PA_SANDBOX_RELEASE_IDLE` | `0` | 是否在空闲时停掉 owner 的整个沙箱容器；默认 `0` 常驻 |
 | `PA_MEMBER_SANDBOX_RELEASE_IDLE` | `1` | 是否在空闲时停掉成员的整个沙箱容器；下次使用时再启动 |
+| `PA_RESIDENT_MEMBERS` | 空 | 沙箱容器和浏览器都不空闲释放、随服务启动的成员用户名，逗号分隔 |
 | `PA_SANDBOX_IDLE_SECONDS` | `300` | 沙箱不在用且控制台不在前台，持续多久后停容器（下限 60 秒） |
 | `PA_BROWSER_VIEWER_TTL_SECONDS` | `60` | 观看心跳租约有效期（下限 10 秒）；到期即释放 |
 | `PA_BROWSER_DIRTY_INPUT_POLICY` | `block` | 页面有未提交输入时 `block`（保守拒绝释放）/`warn` |

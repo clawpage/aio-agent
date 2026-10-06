@@ -95,6 +95,8 @@ export function loadConfig(): {
     releaseWhenIdle: boolean;
     /** The same for member runtimes, on by default. */
     memberReleaseWhenIdle: boolean;
+    /** Members whose sandbox and browser stay running like the owner's (`PA_RESIDENT_MEMBERS`), e.g. the voice gadget's account. */
+    residentMembers: string[];
     idleMs: number;
   };
   documents: {
@@ -366,6 +368,7 @@ export function loadConfig(): {
       codexBin: sandboxCodexBin,
       releaseWhenIdle: envStr("PA_SANDBOX_RELEASE_IDLE", "0") === "1",
       memberReleaseWhenIdle: envStr("PA_MEMBER_SANDBOX_RELEASE_IDLE", "1") === "1",
+      residentMembers: parseList(envStr("PA_RESIDENT_MEMBERS", "")),
       idleMs: Math.max(60_000, envInt("PA_SANDBOX_IDLE_SECONDS", 300) * 1000),
     },
     documents: {
