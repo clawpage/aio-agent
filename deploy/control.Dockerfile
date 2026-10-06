@@ -25,7 +25,7 @@ COPY package.json package-lock.json ./
 RUN npm ci --omit=dev --no-audit --no-fund && npm cache clean --force
 COPY --from=build /app/dist/control ./dist/control
 COPY --from=build /app/dist/common ./dist/common
-COPY bin/create-user.mjs bin/set-user-model.mjs ./bin/
+COPY bin/create-user.mjs bin/set-user-model.mjs bin/publish-gadget-firmware.mjs ./bin/
 RUN mkdir -p /data && chown node:node /data
 ARG AIO_VERSION=dev
 ARG AIO_API=
