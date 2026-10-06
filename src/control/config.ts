@@ -51,6 +51,8 @@ export function loadConfig(): {
   gadgetTokenPath: string;
   /** Where the gadget's usage page reads its JSON (GET /api/gadget/usage), e.g. Usage HUD on the host; empty: off. */
   gadgetUsageUrl: string;
+  /** The firmware the gadget updates itself to over Wi-Fi (bin/publish-gadget-firmware.mjs puts it here). */
+  gadgetFirmwareDir: string;
   logDir: string;
   primaryHost: string;
   legacyPrimaryHost?: string;
@@ -326,6 +328,7 @@ export function loadConfig(): {
     ownerSecretPath: envStr("PA_OWNER_SECRET_PATH", path.join(dataDir, "owner-secret.txt")),
     gadgetTokenPath: envStr("PA_GADGET_TOKEN_PATH", path.join(dataDir, "gadget-token.env")),
     gadgetUsageUrl: envStr("PA_GADGET_USAGE_URL", ""),
+    gadgetFirmwareDir: envStr("PA_GADGET_FIRMWARE_DIR", path.join(dataDir, "gadget-firmware")),
     logDir: path.join(dataDir, "logs"),
     primaryHost,
     legacyPrimaryHost: envStr("PA_LEGACY_PRIMARY_HOST", "").toLowerCase() || undefined,

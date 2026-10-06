@@ -15,6 +15,8 @@ import { TASK_FILTERS, type TaskFilter } from "../../common/taskList.js";
 import { TaskCursorError } from "../tasks/service.js";
 import { appVersion } from "../../common/build.js";
 import { readSecretFile } from "../../common/secrets.js";
+import fs from "node:fs";
+import { readFirmware } from "../gadgetFirmware.js";
 import type { AppContext } from "../context.js";
 import {
   InvalidConversationTitleError,
@@ -625,6 +627,22 @@ export function createApiRouter(context: AppContext): Router {
       res.status(502).json({ error: "usage_unavailable", message: "用量数据暂时拿不到" });
     }
   }));
+  // Firmware updates over Wi-Fi: what is offered, then the image itself.
+  router.get("/gadget/firmware", requireKind("primary"), (req, res) => {
+    if (!gadgetCaller(req, res)) return;
+    res.setHeader("Cache-Control", "no-store");
+    const firmware = readFirmware(cfg.gadgetFirmwareDir);
+    if (!firmware) { res.status(404).json({ error: "no_firmware" }); return; }
+    const { file: _file, ...info } = firmware;
+    res.json(info);
+  });
+  router.get("/gadget/firmware.bin", requireKind("primary"), (req, res) => {
+    if (!gadgetCaller(req, res)) return;
+    const firmware = readFirmware(cfg.gadgetFirmwareDir);
+    if (!firmware) { res.status(404).json({ error: "no_firmware" }); return; }
+    res.writeHead(200, { "Content-Type": "application/octet-stream", "Content-Length": String(firmware.size), "Cache-Control": "no-store" });
+    fs.createReadStream(firmware.file).on("error", () => res.destroy()).pipe(res);
+  });
   router.post("/gadget/messages", requireKind("primary"), asyncHandler(async (req, res) => {
     const account = await gadgetAccount(req, res);
     if (!account) return;

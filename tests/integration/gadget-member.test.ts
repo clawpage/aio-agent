@@ -123,3 +123,39 @@ it("passes the usage page's JSON through to the gadget token only, and says so w
         await new Promise<void>(r => upstream.close(() => r()));
     }
 });
+
+it("offers the published firmware to the gadget token: what it is, then the image", async () => {
+    const { describeFirmware, publishFirmware } = await import("../../src/control/gadgetFirmware.js");
+    // A minimal ESP-IDF app image: header magic, then esp_app_desc_t at 32.
+    const image = Buffer.alloc(4096, 0x5a);
+    image.fill(0, 0, 512);
+    image[0] = 0xe9;
+    image.writeUInt32LE(0xabcd5432, 32);
+    image.write("999.0.1", 32 + 16);
+    image.write("muse-gadget", 32 + 48);
+    image.write("00:20:00", 32 + 80);
+    image.write("Oct  6 2026", 32 + 96);
+    Buffer.alloc(32, 0xab).copy(image, 32 + 144);
+    const source = path.join(dir, "fw.bin");
+    fs.writeFileSync(source, image);
+    fs.writeFileSync(h.ctx.cfg.gadgetTokenPath, `AIO_GADGET_TOKEN=${TOKEN}\nAIO_GADGET_USER=betaw\n`, { mode: 0o600 });
+
+    expect((await h.request("/api/gadget/firmware", { headers: auth })).status).toBe(404);
+    const info = publishFirmware(h.ctx.cfg.gadgetFirmwareDir, source);
+    expect(info).toEqual({ version: "999.0.1", project: "muse-gadget", builtAt: "Oct  6 2026 00:20:00", elfSha256: "ab".repeat(32), size: 4096 });
+    expect((await h.request("/api/gadget/firmware", { headers: { authorization: "Bearer wrong" } })).status).toBe(401);
+    expect(await (await h.request("/api/gadget/firmware", { headers: auth })).json()).toEqual(info);
+    // The bytes themselves, over the primary host as the gadget reaches it.
+    const bin = await fetch(`http://localhost:${h.primaryPort}/api/gadget/firmware.bin`, { headers: { authorization: `Bearer ${TOKEN}` } });
+    expect(bin.status).toBe(200);
+    expect(bin.headers.get("content-type")).toBe("application/octet-stream");
+    expect(bin.headers.get("content-length")).toBe("4096");
+    expect(Buffer.from(await bin.arrayBuffer()).equals(image)).toBe(true);
+    expect((await h.request("/api/gadget/firmware.bin", { headers: { authorization: "Bearer wrong" } })).status).toBe(401);
+
+    // Anything that is not an app image is refused before it replaces the offered one.
+    fs.writeFileSync(source, Buffer.from("not firmware"));
+    expect(() => publishFirmware(h.ctx.cfg.gadgetFirmwareDir, source)).toThrow("不是 ESP-IDF 应用镜像");
+    expect(describeFirmware(Buffer.alloc(600), 600)).toBeNull();
+    expect(((await (await h.request("/api/gadget/firmware", { headers: auth })).json()) as { version: string }).version).toBe("999.0.1");
+});
