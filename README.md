@@ -198,6 +198,8 @@ owner 侧栏的「用量看板」按账号显示每天的 token 趋势、输入/
 - **怎么执行**：不经派单器，直接建一个已派好的任务：代表 owner 时推理强度固定 medium（模型用 owner 当前的模型），代表成员时用管理员给该成员分配的模型和推理强度。所有配件消息共用一个执行会话，上下文连续，可以追问。
 - **后台压缩**：这个共用会话某一轮结束后上下文已用到模型窗口的 80% 以上，且之后静默满 3 分钟（没有新消息、没有在跑的轮次），控制面就在后台对它执行一次 Codex 压缩（`thread/compact/start`），下一条消息不用等压缩、也不会贴着上限跑。压缩过程不进会话记录、不发通知，用量照常计入看板；压缩期间到达的消息排在压缩之后执行。沙箱已休眠时不为压缩唤醒，Claude Code 会话不压缩。执行会话被告知回答会被朗读：纯文本口语、默认一到三句话、不用 Markdown 和各种卡片、不追问。主会话的其他任务不放进每轮提示（共用会话会越积越长、很快被压缩），问到“某某任务怎么样了”时由执行会话用 `aio_schedule` 的 `task_list`（可按关键词搜）和 `task_get`（完整请求和结果）自己去查。
 - **在主会话里**：每条配件消息都是该账号主会话里的一个任务（描述为「来自语音配件」），完成时不发手机通知。
+- **配件的用量页**：`GET /api/gadget/usage`（同一个配件令牌）把 `PA_GADGET_USAGE_URL` 指向的 JSON 原样转给配件，5 秒超时、超过 64 KB 或不是 JSON 都回 502；没配置时 404。现有部署指向本机 Usage HUD 只在回环上提供的快照（`http://host.docker.internal:4796/gadget.json`：Codex / Claude 各窗口用量与 old-mb 的温度、风扇、功耗），M5Stack 上的「用量」页每分钟取一次。
+- **配件的用量页**：`GET /api/gadget/usage`（同一个配件令牌）把 `PA_GADGET_USAGE_URL` 指向的 JSON 原样转给配件，5 秒超时、超过 64 KB 或不是 JSON 都回 502；没配置时 404。现有部署指向本机 Usage HUD 只在回环上提供的快照（`http://host.docker.internal:4796/gadget.json`：Codex / Claude 各窗口用量与 old-mb 的温度、风扇、功耗），M5Stack 上的「用量」页每分钟取一次。
 - **owner 查看**：配件绑定成员账号时，owner 侧栏多一个以该账号命名的入口（如「Betaw」，地址 `/u/owner/gadget`），按时间显示配件的每句话和答复（只读，每 5 秒刷新，可加载更早的记录）；数据来自 owner 专用的 `GET /api/gadget/history?limit=&before=`，成员访问得到 403。
 
 ## 出图（aio_image）
@@ -508,6 +510,8 @@ npm run build && npx playwright test --config playwright.local.config.ts
 | `PA_DAILY_FEED` | `1` | 给每个账号内置每日 08:00 的推送（前一天有消息才运行）；设 `0` 不再创建 |
 | `PA_SANDBOX_RELEASE_IDLE` | `0` | 是否在空闲时停掉 owner 的整个沙箱容器；默认 `0` 常驻 |
 | `PA_MEMBER_SANDBOX_RELEASE_IDLE` | `1` | 是否在空闲时停掉成员的整个沙箱容器；下次使用时再启动 |
+| `PA_GADGET_USAGE_URL` | 空 | 配件「用量」页的数据地址（`GET /api/gadget/usage` 原样转发的 JSON）；为空则该接口 404 |
+| `PA_GADGET_USAGE_URL` | 空 | 配件「用量」页的数据地址（`GET /api/gadget/usage` 原样转发的 JSON）；为空则该接口 404 |
 | `PA_RESIDENT_MEMBERS` | 空 | 沙箱容器和浏览器都不空闲释放、随服务启动的成员用户名，逗号分隔 |
 | `PA_SANDBOX_IDLE_SECONDS` | `300` | 沙箱不在用且控制台不在前台，持续多久后停容器（下限 60 秒） |
 | `PA_BROWSER_VIEWER_TTL_SECONDS` | `60` | 观看心跳租约有效期（下限 10 秒）；到期即释放 |

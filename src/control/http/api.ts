@@ -571,7 +571,8 @@ export function createApiRouter(context: AppContext): Router {
     const owner = getUser(db, cfg.runtimeUserId ?? "owner_1");
     return owner?.role === "owner" ? owner : undefined;
   };
-  const gadgetAccount = async (req: Request, res: Response): Promise<{ userId: string; tasks: AppContext["tasks"] } | null> => {
+  /** The account the request's gadget token speaks for, or null after answering 401. */
+  const gadgetCaller = (req: Request, res: Response): { id: string; username: string; role: string } | null => {
     const secret = readSecretFile(cfg.gadgetTokenPath, "AIO_GADGET_TOKEN");
     const given = /^Bearer\s+(\S+)$/i.exec(req.get("authorization") ?? "")?.[1];
     const digest = (s: string) => createHash("sha256").update(s).digest();
@@ -580,6 +581,11 @@ export function createApiRouter(context: AppContext): Router {
       res.status(401).json({ error: "unauthenticated" });
       return null;
     }
+    return user;
+  };
+  const gadgetAccount = async (req: Request, res: Response): Promise<{ userId: string; tasks: AppContext["tasks"] } | null> => {
+    const user = gadgetCaller(req, res);
+    if (!user) return null;
     if (user.role === "owner") return { userId: user.id, tasks: context.tasks };
     try {
       if (!context.runtimeForUser) throw new Error("no member runtimes");
@@ -603,6 +609,20 @@ export function createApiRouter(context: AppContext): Router {
       res.json({ account: user.username, ...runtime.tasks.gadgetHistory(user.id, before, limit) });
     } catch {
       res.status(503).json({ error: "runtime_unavailable", message: `${user.username} 的环境暂不可用，请稍后重试` });
+    }
+  }));
+  // The gadget's usage page: the JSON at cfg.gadgetUsageUrl (Usage HUD's snapshot on the host), passed through as is.
+  router.get("/gadget/usage", requireKind("primary"), asyncHandler(async (req, res) => {
+    if (!gadgetCaller(req, res)) return;
+    res.setHeader("Cache-Control", "no-store");
+    if (!cfg.gadgetUsageUrl) { res.status(404).json({ error: "not_configured" }); return; }
+    try {
+      const upstream = await fetch(cfg.gadgetUsageUrl, { signal: AbortSignal.timeout(5_000) });
+      const text = await upstream.text();
+      if (!upstream.ok || text.length > 64 * 1024) throw new Error(`upstream ${upstream.status}`);
+      res.json(JSON.parse(text));
+    } catch {
+      res.status(502).json({ error: "usage_unavailable", message: "用量数据暂时拿不到" });
     }
   }));
   router.post("/gadget/messages", requireKind("primary"), asyncHandler(async (req, res) => {

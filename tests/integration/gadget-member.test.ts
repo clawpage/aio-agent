@@ -93,3 +93,33 @@ it("keeps a resident member's sandbox and browser running, and only that member'
     expect([resident.sandbox.releaseWhenIdle, resident.browser.releaseWhenIdle]).toEqual([false, false]);
     expect([other.sandbox.releaseWhenIdle, other.browser.releaseWhenIdle]).toEqual([true, true]);
 });
+
+it("passes the usage page's JSON through to the gadget token only, and says so when it cannot", async () => {
+    const http = await import("node:http");
+    let body = JSON.stringify({ version: 1, providers: [{ id: "codex", windows: [{ percent: 59 }] }] });
+    const upstream = http.createServer((req, res) => {
+        if (req.url !== "/gadget.json") { res.writeHead(404).end(); return; }
+        res.writeHead(200, { "content-type": "application/json" }).end(body);
+    });
+    await new Promise<void>(r => upstream.listen(0, "127.0.0.1", r));
+    const port = (upstream.address() as { port: number }).port;
+    try {
+        fs.writeFileSync(h.ctx.cfg.gadgetTokenPath, `AIO_GADGET_TOKEN=${TOKEN}\nAIO_GADGET_USER=betaw\n`, { mode: 0o600 });
+        const get = (headers: Record<string, string> = auth) => h.request("/api/gadget/usage", { headers });
+        h.ctx.cfg.gadgetUsageUrl = "";
+        expect((await get()).status).toBe(404);
+        h.ctx.cfg.gadgetUsageUrl = `http://127.0.0.1:${port}/gadget.json`;
+        expect((await get({ authorization: "Bearer wrong" })).status).toBe(401);
+        const ok = await get();
+        expect(ok.status).toBe(200);
+        expect(ok.headers.get("cache-control")).toBe("no-store");
+        expect(await ok.json()).toEqual(JSON.parse(body));
+        body = "not json";
+        expect((await get()).status).toBe(502);
+        h.ctx.cfg.gadgetUsageUrl = `http://127.0.0.1:${port}/missing`;
+        expect((await get()).status).toBe(502);
+    } finally {
+        h.ctx.cfg.gadgetUsageUrl = "";
+        await new Promise<void>(r => upstream.close(() => r()));
+    }
+});

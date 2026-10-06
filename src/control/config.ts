@@ -49,6 +49,8 @@ export function loadConfig(): {
   ownerSecretPath: string;
   /** `AIO_GADGET_TOKEN=` for the voice gadget's bearer token (POST /api/gadget/messages); absent: gadget off. */
   gadgetTokenPath: string;
+  /** Where the gadget's usage page reads its JSON (GET /api/gadget/usage), e.g. Usage HUD on the host; empty: off. */
+  gadgetUsageUrl: string;
   logDir: string;
   primaryHost: string;
   legacyPrimaryHost?: string;
@@ -323,6 +325,7 @@ export function loadConfig(): {
     dbPath: envStr("PA_DB_PATH", path.join(dataDir, "personal-agent.sqlite")),
     ownerSecretPath: envStr("PA_OWNER_SECRET_PATH", path.join(dataDir, "owner-secret.txt")),
     gadgetTokenPath: envStr("PA_GADGET_TOKEN_PATH", path.join(dataDir, "gadget-token.env")),
+    gadgetUsageUrl: envStr("PA_GADGET_USAGE_URL", ""),
     logDir: path.join(dataDir, "logs"),
     primaryHost,
     legacyPrimaryHost: envStr("PA_LEGACY_PRIMARY_HOST", "").toLowerCase() || undefined,
