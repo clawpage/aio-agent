@@ -47,9 +47,13 @@ test("a products block is drawn as cards: picture, price, store, reasons and a l
   await expect.poll(() => cards.nth(1).locator(".product-media img").evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth)).toBe(2);
   expect(local).toContain("/home/gem/workspace/tasks/task-1/ultra2.jpg");
   expect(web).toContain("https://m.media-amazon.com/images/I/saros.jpg");
-  // A picture that cannot be fetched leaves a quiet placeholder, never a broken image.
-  await expect(cards.nth(2).locator(".product-placeholder")).toBeVisible();
-  await expect(cards.nth(2).locator("img")).toHaveCount(0);
+  // A picture that cannot be fetched leaves no stand-in: the card is laid out as text, price on the right.
+  await expect(cards.nth(2)).toHaveClass(/text-only/);
+  await expect(cards.nth(2).locator(".product-media, img")).toHaveCount(0);
+  const name = (await cards.nth(2).locator(".product-name").boundingBox())!, price = (await cards.nth(2).locator(".product-price strong").boundingBox())!;
+  expect(price.x).toBeGreaterThan(name.x + name.width - 1);
+  expect(Math.abs(price.y - name.y)).toBeLessThan(12);
+  await expect(first).not.toHaveClass(/text-only/);
   // The text around the block stays where it was.
   const bubble = page.locator(".bubble").filter({ has: first });
   await expect(bubble).toContainText("我最推荐 Ultra 2");
@@ -80,4 +84,26 @@ test("a web picture in a message loads through the sandbox, never from its host"
   expect(web).toEqual(["https://m.media-amazon.com/images/I/saros.jpg"]);
   expect(outside).toEqual([]);
   await expect(page.locator('.markdown img[data-web-image^="http://"]')).toHaveCount(0);
+});
+
+test("products without pictures are text cards from the start, and no picture is fetched", async ({ page }, info) => {
+  const items = [
+    { name: "Target Up&Up 24 瓶装纯净水", price: "$3.99", was: "$4.49", store: "Target", rating: "4.7（2,031 条）", badge: "最便宜", points: ["每瓶约 $0.17", "可当天店内自提"], url: "https://www.target.com/p/water" },
+    { name: "Kirkland 40 瓶装纯净水", price: "$4.99", store: "Costco", note: "会员价，需 Costco 会员" },
+  ];
+  const { local, web } = await setup(page, `\`\`\`products\n${JSON.stringify(items)}\n\`\`\``);
+  const cards = page.getByRole("listitem").filter({ has: page.locator(".product-body") });
+  await expect(cards).toHaveCount(2, { timeout: 60_000 });
+  for (const card of await cards.all()) {
+    await expect(card).toHaveClass(/text-only/);
+    await expect(card.locator(".product-media, .product-loading, img")).toHaveCount(0);
+  }
+  await expect(cards.first().locator(".product-badge")).toHaveText("最便宜");
+  await expect(cards.first().locator(".product-price s")).toHaveText("$4.49");
+  await expect(cards.first().locator(".product-link")).toHaveText("去看看");
+  await expect(cards.nth(1)).toContainText("会员价，需 Costco 会员");
+  expect(local).toEqual([]);
+  expect(web).toEqual([]);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
+  await page.locator(".product-cards").screenshot({ path: info.outputPath("text-cards.png") });
 });

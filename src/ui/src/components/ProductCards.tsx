@@ -51,21 +51,14 @@ function ProductCard({ item, onOpenLink, onOpenFile }: { item: Product; onOpenLi
   const card = useRef<HTMLElement>(null);
   const picture = useMessageImage(useNearViewport(card) ? item.image : null);
   const local = item.image?.startsWith("/") ? item.image : null;
-  const media = picture.url
-    ? <img src={picture.url} alt={item.name} loading="lazy" />
-    : (
-      <span className={`product-placeholder${item.image && !picture.failed ? " loading" : ""}`} aria-hidden="true">
-        <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M5 8h14l-1.2 11.1a2 2 0 0 1-2 1.9H8.2a2 2 0 0 1-2-1.9L5 8Z" />
-          <path d="M9 10V6.5a3 3 0 0 1 6 0V10" />
-        </svg>
-      </span>
-    );
+  // No picture, or one that could not be fetched: the card is laid out as text alone, never a stand-in image.
+  const pictured = !!item.image && !picture.failed;
+  const media = picture.url ? <img src={picture.url} alt={item.name} loading="lazy" /> : <span className="product-loading" aria-hidden="true" />;
   return (
-    <article ref={card} className="product-card" role="listitem" aria-label={item.name}>
-      {local && onOpenFile && picture.url
+    <article ref={card} className={`product-card${pictured ? "" : " text-only"}`} role="listitem" aria-label={item.name}>
+      {pictured && (local && onOpenFile && picture.url
         ? <button type="button" className="product-media" onClick={() => onOpenFile(local)} aria-label={`查看 ${item.name} 的大图`}>{media}</button>
-        : <div className="product-media">{media}</div>}
+        : <div className="product-media">{media}</div>)}
       <div className="product-body">
         <div className="product-title">
           {item.badge && <span className="product-badge">{item.badge}</span>}
@@ -93,7 +86,7 @@ function ProductCard({ item, onOpenLink, onOpenFile }: { item: Product; onOpenLi
   );
 }
 
-/** A ```products block: one card per item, a picture beside what matters for choosing. */
+/** A ```products block: one card per item, its picture (when there is one) beside what matters for choosing. */
 export function ProductCards({ items, onOpenLink, onOpenFile }: { items: Product[]; onOpenLink?: (url: string) => void; onOpenFile?: (path: string) => void }) {
   return (
     <div className="product-cards" role="list" aria-label="商品">
