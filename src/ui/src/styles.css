@@ -797,10 +797,14 @@ textarea:focus {
 .chat-scroll {
   flex: 1;
   overflow-y: auto;
-  padding: 16px;
+  padding: 16px 16px 40px;
   display: flex;
   flex-direction: column;
   gap: 12px;
+  /* Messages dissolve into the page as they pass behind the composer instead of
+     stopping at a hard edge; the bottom padding keeps the latest one clear of it. */
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 44px), transparent);
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 44px), transparent);
 }
 
 .msg {
