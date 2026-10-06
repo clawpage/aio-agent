@@ -44,6 +44,8 @@ export interface TaskPlan {
     scheduleAction?: { id: string; action: ScheduleActionName | "update" } | null;
     /** Jev's reading of which earlier task this message continues, passed on to the executor. */
     jev?: JevRelevance | null;
+    /** Related tasks this task's turn gave the executor in full, by a fingerprint of what it was given. */
+    injectedContext?: Record<string, string>;
 }
 export interface PlanningTask {
     id: string;

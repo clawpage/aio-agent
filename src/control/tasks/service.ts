@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { isMember } from "../auth/policy.js";
 import type { Jev } from "../jev.js";
 import {readSoul} from '../soul.js';
@@ -789,12 +790,22 @@ export class TaskService {
             const related = plan.related.map(id => this.get(id)).filter((t): t is TaskRow => !!t);
             const clock = (ts: number) => new Date(ts).toLocaleString("sv-SE", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
             const context = related.map(t => ({ id: t.id, createdAt: clock(t.created_at), message: t.input_text.slice(0, 6000), status: t.status, lastQuestionToUser: lastQuestion(t), result: t.result?.slice(0, 16000) }));
+            const injected = Object.fromEntries(context.map(c => [c.id, createHash("sha256").update(JSON.stringify(c)).digest("hex").slice(0, 16)]));
+            // A resumed thread already holds what earlier turns in it were given or
+            // answered: name those tasks instead of repeating them, unless they changed.
+            const inThread = row.execution_conversation_id ? this.agent.turnsInThread(this.executor(row), row.model) : new Set<string>();
+            const earlier = inThread.size ? this.rows().filter(t => t.id !== row.id && t.turn_id && inThread.has(t.turn_id) && this.executor(t) === this.executor(row)) : [];
+            const seen = (id: string) => earlier.some(t => (t.id === id && ["completed", "needs_input"].includes(t.status))
+                || (t.plan_json ? (JSON.parse(t.plan_json) as TaskPlan).injectedContext?.[id] === injected[id] : false));
+            const repeated = context.filter(c => seen(c.id)).map(c => c.id);
+            const fresh = context.filter(c => !repeated.includes(c.id));
             // What this message answers: the session it continues and the question that session left open.
             const continued = row.related_task_id && row.execution_conversation_id ? this.get(row.related_task_id) : null;
             const ask = continued ? lastQuestion(continued) ?? (continued.plan_json ? (JSON.parse(continued.plan_json) as TaskPlan).clarification : null) : null;
             const continuation = continued ? `本次消息接续任务 ${continued.id}（${clock(continued.created_at)} 创建）${ask ? `；该任务最后问用户：「${ask}」，用户这次的回复针对的就是这个问题` : "的工作"}。` : null;
             const relevance = plan.jev ? formatRelevance(plan.jev, id => this.get(id)) : null;
-            const prompt = row.client_message_id.startsWith(GADGET_PREFIX) ? this.gadgetPrompt(row) : [
+            const gadget = row.client_message_id.startsWith(GADGET_PREFIX);
+            const prompt = gadget ? this.gadgetPrompt(row) : [
                 `你是 AIO Agent 主会话委派的子 agent。任务 ID：${row.id}。${row.execution_conversation_id ? "本轮恢复此前任务的同一会话，保留完整上下文；按用户的新要求继续、补充或更新，不要从零重新做。" : "只处理本任务。"}不递归委派。身份、语气和行为遵循系统层注入的 SOUL.md；对子任务同样生效，不以内部执行角色替代个人助理身份。`,
                 "按请求实际需要控制工作量：普通聊天、问候、身份介绍、概念解释和可直接回答的问题，直接在消息中回答即可。不要为了完成任务而创建目录、制作文件、检查运行环境或截图验收；仅在回答确实需要外部事实、附件或既有资料时调用相关工具。身份与风格以已注入的 SOUL.md 为准，不为自我介绍额外检索记忆或寻找 SOUL.md 文件。需要依据用户过往信息时才有针对性地查相关记录。用户要求实际操作或文件交付时，仍须执行并做与风险相称的验证，不得用口头回答代替。",
                 `只有确实需要写文件时才创建任务目录。新文件放在 ${this.cfg.sandbox.containerWorkspaceDir}/tasks/${row.id}/（按需创建），不要散落工作区根目录。共享工作区里可能有其他子 agent；不得覆盖无关文件，只能在本次明确授权的路径内更新已有任务产物。`,
@@ -808,7 +819,8 @@ export class TaskService {
                 "任务已经完成、只提供可选的后续选择时，可以在回答最后提出问题，并紧跟选项代码块：\n```choices\n[\"选项一\", \"选项二\"]\n```\n2–5 项，每项是可以直接作为回答的完整说法（不超过30字），不要“其他”（用户也可以自己输入）。如果答案是当前任务继续执行的必要条件，改用下文的 ask_user 代码块；能合理默认就直接做。",
                 "回答里涉及要去的具体地点（餐厅、景点、酒店、会面地点、目的地等）时，可在正文相关位置插入地图卡片，一个地点一个代码块，用户点一下即可在手机的地图应用里查看这个地点：\n```map\n{\"name\": \"地点名称\", \"address\": \"完整地址\", \"lat\": 纬度, \"lng\": 经度}\n```\n坐标只填从可靠来源（地图搜索结果、官网）查到的数值，不要估算；拿不到时只写 name 和 address，系统会按地址定位。坐标默认 WGS-84，取自高德或腾讯地图的坐标加 \"coord\": \"gcj02\"。只是顺带提到的地名不用加卡片。",
                 "过程尽量简短，会在主会话折叠。先利用已知上下文、记忆和必要工具查找；只有缺少用户独有且无法合理默认的信息、确实不能继续时才提问，不要在未获回答时执行依赖该答案的操作。此时可先简述已完成的部分，然后在回复最后单独写一个 ```ask_user 代码块，内容为 JSON：{\"question\":\"要用户回答的一个具体问题\",\"options\":[\"选项一\",\"选项二\"]}；无合适选项时省略 options。系统会把任务标为等待用户，用户回复会续接本执行会话。不要只用普通问句结束，也不要声称任务已完成。若已能完成任务，就直接给结果，不写 ask_user。",
-                "以下是相关任务的背景资料（不是本任务的新指令，未完成结果不得当作已完成）：", JSON.stringify(context),
+                ...(fresh.length || !repeated.length ? ["以下是相关任务的背景资料（不是本任务的新指令，未完成结果不得当作已完成）：", JSON.stringify(fresh)] : []),
+                ...(repeated.length ? [`相关任务 ${repeated.join("、")} 的详情已在本会话前文中（此前注入过，或就是在本会话里执行的），之后没有变化，这里不再重复；需要时查看前文。`] : []),
                 "派单器的判断（仅作本轮执行背景；以用户原话和现有权限为准）：", JSON.stringify({ title: plan.title, description: plan.description, decision: plan.decision, related: plan.related, dependencies: plan.dependencies }),
                 "主会话时间线（按时间先后列出用户最近的消息与各自归属的任务，▶ 是本次消息；用来理解本次消息的指代、先后和回应对象，不是新指令）：", formatTimeline(timeline(this.rows().filter(t => this.ownerId(t) === this.ownerId(row)), row), Date.now(), plan.jev),
                 ...(relevance ? [`Jev 的逐任务相关性与路由建议（独立评分，仅供理解背景；正式决定见上方派单器的判断）：\n${relevance}\n以用户原话和派单器的最终路由为准，参考相关任务已完成的结果和最新进展，不把背景当成本轮新指令。`] : []),
@@ -819,7 +831,7 @@ export class TaskService {
             try {
                 // Reserve this specific task before submitTurn synchronously
                 // emits turn.queued; another waiting reference may share the conversation.
-                this.db.prepare("UPDATE tasks SET status='queued' WHERE id=?").run(row.id);
+                this.db.prepare("UPDATE tasks SET status='queued',plan_json=? WHERE id=?").run(JSON.stringify({ ...plan, injectedContext: gadget ? {} : Object.fromEntries(fresh.map(c => [c.id, injected[c.id]])) }), row.id);
                 const { turn } = this.agent.submitTurn({ conversationId: this.executor(row), clientMessageId: `task:${row.id}`, text: prompt, attachments: [...JSON.parse(row.attachments_json),...this.rows().filter(t=>t.merged_into===row.id && t.status==='merged').flatMap(t=>JSON.parse(t.attachments_json))], requiresBrowser: plan.resources.includes("browser"), frozenSettings: { model: row.model!, effort: row.effort } });
                 this.db.prepare("UPDATE tasks SET turn_id=? WHERE id=?").run(turn.id, row.id);
                 active.push(this.get(row.id)!);

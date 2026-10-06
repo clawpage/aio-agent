@@ -231,7 +231,9 @@ describe("main inbox delegation", () => {
         codex.plan=async()=>JSON.stringify({title:"update",appendTo:other.id,related:[other.id],dependencies:[other.id],resources:[]});
         const update=submit("update the result",done.id);await tick();
         expect(tasks.get(update.id)?.merged_into).toBeNull();expect(tasks.get(update.id)?.status).toBe("running");expect(codex.steers).toHaveLength(0);
-        expect(codex.startedTurns.at(-1)!.text).toContain("Selected original result");
+        // The resumed thread already holds the original exchange: it is named, not repeated.
+        expect(codex.startedTurns.at(-1)!.text).not.toContain("Selected original result");
+        expect(codex.startedTurns.at(-1)!.text).toContain(`相关任务 ${done.id} 的详情已在本会话前文中`);
         expect(JSON.parse(tasks.get(update.id)!.plan_json!).related).toEqual([done.id]);
         expect(codex.resumedThreads).toEqual([codex.startedTurns[0]!.threadId]);
         expect(codex.startedTurns.at(-1)!.threadId).toBe(codex.startedTurns[0]!.threadId);
@@ -277,7 +279,40 @@ describe("main inbox delegation", () => {
         await codex.runTurn(codex.startedTurns[0]!.turnId,{text:"Fresh final result"});
         resolve(JSON.stringify({title:"detail",appendTo:null,related:[],dependencies:[],resources:[]}));await tick();await tick();
         expect(tasks.get(update.id)?.status).toBe("running");expect(tasks.get(update.id)?.merged_into).toBeNull();expect(codex.steers).toHaveLength(0);
-        expect(codex.startedTurns.at(-1)!.text).toContain("Fresh final result");
+        expect(codex.startedTurns.at(-1)!.text).toContain(`相关任务 ${first.id} 的详情已在本会话前文中`);
+    });
+    it("names related tasks a resumed thread already holds, and gives them in full again once that is no longer so",async()=>{
+        writeAgentSettings(db,{model:"gpt-6-sol",effort:null});
+        const done=submit("done");await tick();await codex.runTurn(codex.startedTurns[0]!.turnId,{text:"Original result"});await tick();
+        const other=submit("other");await tick();await codex.runTurn(codex.startedTurns.at(-1)!.turnId,{text:"Other result"});await tick();
+        // Each follow-up resumes the latest task of the chain, keeping both earlier tasks as background.
+        let latest=done.id;
+        codex.plan=async()=>JSON.stringify({title:"follow-up",decision:{kind:"resume",taskId:latest},related:[done.id,other.id],dependencies:[],resources:[]});
+        const followUp=async(text:string)=>{const t=submit(text);await tick();const sent=codex.startedTurns.at(-1)!;await codex.runTurn(sent.turnId,{text:`${text} 完成`});await tick();latest=t.id;return {task:tasks.get(t.id)!,sent};};
+        // The other task ran in another thread: given in full; the original ran in this one: named.
+        const first=await followUp("first follow-up");
+        expect(first.sent.threadId).toBe(codex.startedTurns[0]!.threadId);
+        expect(first.sent.text).toContain("Other result");expect(first.sent.text).not.toContain("Original result");
+        // Given once in this thread and unchanged: named, not repeated.
+        const second=await followUp("second follow-up");
+        expect(second.sent.text).not.toContain("Other result");
+        expect(second.sent.text.match(/相关任务 (\S+) 的详情已在本会话前文中/)?.[1].split("、")).toEqual(expect.arrayContaining([done.id,other.id]));
+        // A changed result is given again.
+        db.prepare("UPDATE tasks SET result=? WHERE id=?").run("Other result, revised",other.id);
+        const third=await followUp("third follow-up");
+        expect(third.sent.text).toContain("Other result, revised");
+        // After the thread compacted, its earlier messages may be gone: everything is given in full.
+        db.prepare("INSERT INTO events(conversation_id,turn_id,type,payload,created_at) VALUES(?,?,?,?,?)")
+            .run(third.task.execution_conversation_id,third.task.turn_id,"item/completed",JSON.stringify({item:{type:"contextCompaction",id:"c1"}}),Date.now());
+        const fourth=await followUp("fourth follow-up");
+        expect(fourth.sent.text).toContain("Original result");expect(fourth.sent.text).toContain("Other result, revised");
+        expect(fourth.sent.text).not.toContain("的详情已在本会话前文中");
+        // A follow-up on another model starts a fresh thread carrying only requests and answers: everything in full.
+        writeAgentSettings(db,{model:"gpt-5.5",effort:null});
+        const fifth=await followUp("fifth follow-up");
+        expect(fifth.sent.threadId).not.toBe(codex.startedTurns[0]!.threadId);
+        expect(fifth.sent.text).toContain("Original result");expect(fifth.sent.text).toContain("Other result, revised");
+        expect(fifth.sent.text).not.toContain("的详情已在本会话前文中");
     });
     it("waits for a referenced task to stop, then proceeds even when it was interrupted",async()=>{
         const first=submit("first");await tick();db.prepare("UPDATE tasks SET status='stopping' WHERE id=?").run(first.id);

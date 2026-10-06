@@ -1000,26 +1000,7 @@ export class AgentManager {
     const policy = isMember(this.#db, conversation.owner_id) ? this.memberSettings() : null;
     const model = policy?.model ?? turn.model ?? conversation.model ?? this.#cfg.agent.defaultModel;
     if (policy) turn.effort = policy.effort;
-    // The provider is decided by the model that will actually run: a Claude Code
-    // model runs on that harness, a bridge model on its provider. A ChatGPT turn
-    // never sends `modelProvider`, so that path stays byte-identical to before.
-    const desiredProvider = this.#claudeCode?.owns(model) ? CLAUDE_CODE_PROVIDER_ID : (this.#bridge?.providerForModel(model) ?? CHATGPT_PROVIDER_ID);
-    // A conversation with no recorded provider was created on ChatGPT.
-    const currentProvider = conversation.model_provider ?? CHATGPT_PROVIDER_ID;
-    // The selected harness runs every new turn, including a follow-up on a
-    // conversation that started on the other one. A Codex thread and a Claude
-    // Code session cannot be forked into each other, so the turn starts a fresh
-    // session that carries the earlier requests and answers as background.
-    const crossesHarness =
-      Boolean(conversation.codex_thread_id) && (desiredProvider === CLAUDE_CODE_PROVIDER_ID) !== (currentProvider === CLAUDE_CODE_PROVIDER_ID);
-    // A thread whose last turn ran another model on the same provider also starts
-    // fresh. Resuming carries that model's encrypted reasoning into the request,
-    // and ChatGPT refused one such follow-up outright ("model 'gpt-6.1-sol' is not
-    // enabled in rustponsesapi") for a thread last run on gpt-6-sol.
-    const lastModel = conversation.codex_thread_id && desiredProvider === currentProvider
-      ? (this.#db.prepare("SELECT model FROM turns WHERE conversation_id = ? AND id <> ? AND codex_turn_id IS NOT NULL ORDER BY created_at DESC LIMIT 1").get(conversation.id, turn.id) as { model: string | null } | undefined)?.model ?? null
-      : null;
-    const startsFresh = crossesHarness || (lastModel !== null && lastModel !== model);
+    const { desiredProvider, currentProvider, startsFresh } = this.#threadPlan(conversation, model, turn.id);
     const inputText = startsFresh ? this.#withPriorContext(conversation.id, turn.id, turn.input_text) : turn.input_text;
     const { developerInstructions, browserTask } = this.#threadSettings(conversation);
     if (this.#tabs && turn.browser_required === 0) {
@@ -1196,7 +1177,11 @@ export class AgentManager {
       const { developerInstructions, browserTask } = this.#threadSettings(conversation);
       await this.#codex.resumeThread(threadId, developerInstructions, browserTask);
       const status = await this.#codex.compactThread(threadId);
-      if (status === "completed") this.#contextUse.delete(conversationId);
+      if (status === "completed") {
+        this.#contextUse.delete(conversationId);
+        // Its own events stay out of the conversation; this marks that earlier messages may now be summarized.
+        this.#appendEvent(conversationId, null, "thread.compacted", { threadId });
+      }
       this.#log.info("idle session compacted", { conversationId, contextUsedPercent: Math.round(used * 100), status });
     } catch (err) {
       this.#log.warn("idle session compaction failed", { conversationId, error: err instanceof Error ? err.message : String(err) });
@@ -1212,6 +1197,64 @@ export class AgentManager {
    * A task's turn carries the whole executor prompt; the person's request is
    * the task's own text. The oldest exchange that does not fit is cut short.
    */
+  /** Which provider the next turn on `model` runs on, and whether it starts a fresh thread. */
+  #threadPlan(conversation: ConversationRow, model: string, turnId: string | null) {
+    // The provider is decided by the model that will actually run: a Claude Code
+    // model runs on that harness, a bridge model on its provider. A ChatGPT turn
+    // never sends `modelProvider`, so that path stays byte-identical to before.
+    const desiredProvider = this.#claudeCode?.owns(model) ? CLAUDE_CODE_PROVIDER_ID : (this.#bridge?.providerForModel(model) ?? CHATGPT_PROVIDER_ID);
+    // A conversation with no recorded provider was created on ChatGPT.
+    const currentProvider = conversation.model_provider ?? CHATGPT_PROVIDER_ID;
+    // The selected harness runs every new turn, including a follow-up on a
+    // conversation that started on the other one. A Codex thread and a Claude
+    // Code session cannot be forked into each other, so the turn starts a fresh
+    // session that carries the earlier requests and answers as background.
+    const crossesHarness =
+      Boolean(conversation.codex_thread_id) && (desiredProvider === CLAUDE_CODE_PROVIDER_ID) !== (currentProvider === CLAUDE_CODE_PROVIDER_ID);
+    // A thread whose last turn ran another model on the same provider also starts
+    // fresh. Resuming carries that model's encrypted reasoning into the request,
+    // and ChatGPT refused one such follow-up outright ("model 'gpt-6.1-sol' is not
+    // enabled in rustponsesapi") for a thread last run on gpt-6-sol.
+    const lastModel = conversation.codex_thread_id && desiredProvider === currentProvider
+      ? (this.#db.prepare("SELECT model FROM turns WHERE conversation_id = ? AND id <> ? AND codex_turn_id IS NOT NULL ORDER BY created_at DESC LIMIT 1").get(conversation.id, turnId ?? "") as { model: string | null } | undefined)?.model ?? null
+      : null;
+    return { desiredProvider, currentProvider, startsFresh: crossesHarness || (lastModel !== null && lastModel !== model) };
+  }
+
+  /**
+   * Turns whose full input a new turn on `frozenModel` will still have in its
+   * thread: those since the thread started or last compacted, mid-turn or while
+   * idle (a fork keeps the history). Empty when that turn would start a fresh
+   * thread, which carries only the earlier requests and answers, and on Claude
+   * Code, whose compactions are not recorded here.
+   */
+  turnsInThread(conversationId: string, frozenModel: string | null): Set<string> {
+    const conversation = this.getConversation(conversationId);
+    if (!conversation?.codex_thread_id) return new Set();
+    const policy = isMember(this.#db, conversation.owner_id) ? this.memberSettings() : null;
+    const model = policy?.model ?? frozenModel ?? conversation.model ?? this.#cfg.agent.defaultModel;
+    const { desiredProvider, startsFresh } = this.#threadPlan(conversation, model, null);
+    if (startsFresh || desiredProvider === CLAUDE_CODE_PROVIDER_ID) return new Set();
+    const boundary = this.#db
+      .prepare(
+        `SELECT id, turn_id, type FROM events WHERE conversation_id = ?
+         AND ((type = 'thread.started' AND payload NOT LIKE '%"forkedFrom"%') OR type = 'thread.compacted' OR (type = 'item/completed' AND payload LIKE '%"type":"contextCompaction"%'))
+         ORDER BY id DESC LIMIT 1`,
+      )
+      .get(conversationId) as { id: number; turn_id: string | null; type: string } | undefined;
+    if (!boundary) return new Set();
+    const turns = new Set(
+      (this.#db.prepare("SELECT turn_id FROM events WHERE conversation_id = ? AND type = 'turn.started' AND id > ?").all(conversationId, boundary.id) as Array<{ turn_id: string | null }>)
+        .map((r) => r.turn_id)
+        .filter((id): id is string => !!id),
+    );
+    // A thread starts inside its first turn, whose input is the thread's first message.
+    if (boundary.type === "thread.started" && boundary.turn_id) turns.add(boundary.turn_id);
+    // Only a turn Codex accepted ever put its input into the thread.
+    const accepted = this.#db.prepare("SELECT 1 FROM turns WHERE id = ? AND codex_turn_id IS NOT NULL");
+    return new Set([...turns].filter((id) => accepted.get(id)));
+  }
+
   #withPriorContext(conversationId: string, currentTurnId: string, text: string): string {
     const turns = this.#db
       .prepare(

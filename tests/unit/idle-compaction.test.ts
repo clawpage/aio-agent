@@ -83,3 +83,12 @@ it("holds a message sent during the compaction until the compaction is done", as
   await vi.waitFor(() => expect(codex.startedTurns).toHaveLength(2));
   expect((await agent.status()).compacting).toBe(0);
 });
+
+it("an idle compaction ends what the thread is known to still hold in full", async () => {
+  const conv = agent.createConversation({ title: "配件" });
+  const threadId = await turn(conv.id, 1, 0.85);
+  const first = (db.prepare("SELECT id FROM turns WHERE conversation_id = ?").get(conv.id) as { id: string }).id;
+  expect([...agent.turnsInThread(conv.id, null)]).toEqual([first]);
+  await vi.waitFor(() => expect(codex.compacted).toEqual([threadId]));
+  expect([...agent.turnsInThread(conv.id, null)]).toEqual([]);
+});
