@@ -110,8 +110,12 @@ export function TaskChat({ onDetails, onOpenLink, onOpenFileInBrowser, onExpired
     // latest message in view, or, while older ones are being read, the bottom edge of what was on screen.
     const edge = useRef(0);
     const height = useRef(0);
+    // Another view hides the feed (zero height, scroll reset): keep where it was, and put it back on return.
+    const hidden = useRef(false);
     const refit = (n: HTMLDivElement) => {
-        if (n.clientHeight === height.current) return;
+        if (!n.clientHeight) { hidden.current = true; return; }
+        if (n.clientHeight === height.current && !hidden.current) return;
+        hidden.current = false;
         height.current = n.clientHeight;
         n.scrollTop = stick.current ? n.scrollHeight : edge.current - n.clientHeight;
         edge.current = n.scrollTop + n.clientHeight;
@@ -120,7 +124,8 @@ export function TaskChat({ onDetails, onOpenLink, onOpenFileInBrowser, onExpired
     const [away, setAway] = useState(false);
     const onFeedScroll = (n: HTMLDivElement) => {
         // WebKit fires the resize's own scroll event before the observer runs: settle the resize first.
-        if (height.current) refit(n);
+        if (!n.clientHeight) return;
+        if (height.current || hidden.current) refit(n);
         stick.current = n.scrollHeight - n.scrollTop - n.clientHeight < 80;
         edge.current = n.scrollTop + n.clientHeight;
         setAway(n.scrollHeight - n.scrollTop - n.clientHeight > n.clientHeight);

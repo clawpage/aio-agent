@@ -93,3 +93,50 @@ test("a product card's picture far up the feed is fetched only when it comes nea
   await expect(card.locator(".product-media img")).toBeVisible();
   await expect.poll(() => drawing.evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth > 0)).toBe(true);
 });
+
+test("coming back to the main feed from another view keeps it at the latest message", async ({ page }) => {
+  const recent = Array.from({ length: 8 }, (_, k) => task(11 + k));
+  const { olderAsked } = await setup(page, {
+    first: () => ({ version: "v1", tasks: recent, nextBefore: recent[0]!.createdAt }),
+    older: () => ({ tasks: Array.from({ length: 10 }, (_, k) => task(1 + k)), nextBefore: null }),
+  });
+  await page.route("**/api/tasks*", (r) => r.fulfill({ json: { tasks: [], nextBefore: null } }));
+  const feed = page.locator(".task-feed");
+  await expect(page.locator('.task-entry[data-task-id="task-18"]')).toBeAttached({ timeout: 60_000 });
+  const gap = () => feed.evaluate((n) => n.scrollHeight - n.scrollTop - n.clientHeight);
+  await expect.poll(gap).toBeLessThan(80);
+  for (let round = 0; round < 3; round++) {
+    await page.evaluate(() => { history.pushState(null, "", location.pathname.replace(/\/?$/, "/tasks")); dispatchEvent(new PopStateEvent("popstate")); });
+    await expect(feed).toBeHidden();
+    await page.waitForTimeout(300);
+    await page.evaluate(() => history.back());
+    await expect(feed).toBeVisible();
+    await page.waitForTimeout(600);
+    expect(await gap()).toBeLessThan(80);
+  }
+  expect(olderAsked).toEqual([]);
+  await expect(page.locator(".feed-older .muted")).not.toHaveText("正在加载更早的任务…");
+});
+
+test("coming back to the main feed after reading a little way up keeps the same place", async ({ page }) => {
+  const recent = Array.from({ length: 8 }, (_, k) => task(11 + k));
+  const { olderAsked } = await setup(page, {
+    first: () => ({ version: "v1", tasks: recent, nextBefore: recent[0]!.createdAt }),
+    older: () => ({ tasks: Array.from({ length: 10 }, (_, k) => task(1 + k)), nextBefore: null }),
+  });
+  await page.route("**/api/tasks*", (r) => r.fulfill({ json: { tasks: [], nextBefore: null } }));
+  const feed = page.locator(".task-feed");
+  await expect(page.locator('.task-entry[data-task-id="task-18"]')).toBeAttached({ timeout: 60_000 });
+  await expect.poll(() => feed.evaluate((n) => n.scrollHeight - n.scrollTop - n.clientHeight)).toBeLessThan(80);
+  await feed.evaluate((n) => { n.scrollTop -= 300; });
+  await page.waitForTimeout(200);
+  const before = await feed.evaluate((n) => n.scrollTop);
+  await page.evaluate(() => { history.pushState(null, "", location.pathname.replace(/\/?$/, "/tasks")); dispatchEvent(new PopStateEvent("popstate")); });
+  await expect(feed).toBeHidden();
+  await page.waitForTimeout(300);
+  await page.evaluate(() => history.back());
+  await expect(feed).toBeVisible();
+  await page.waitForTimeout(600);
+  expect(Math.abs(await feed.evaluate((n) => n.scrollTop) - before)).toBeLessThan(5);
+  expect(olderAsked).toEqual([]);
+});
