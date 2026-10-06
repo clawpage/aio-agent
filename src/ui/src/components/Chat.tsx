@@ -488,9 +488,16 @@ export function AttachmentCards({
 }) {
   const refs = useMemo(() => attachmentRefs(attachments), [attachments]);
   if (refs.length === 0) return null;
+  // What the person sent reads like a chat app: pictures as pictures, other files as cards below them.
+  const images = refs.filter((ref) => ref.kind === "image"), files = refs.filter((ref) => ref.kind !== "image");
   return (
-    <div className="file-cards" data-testid="message-attachment-cards">
-      {refs.map((ref) => (
+    <div className="file-cards sent" data-testid="message-attachment-cards">
+      {images.length > 0 && (
+        <div className="sent-media" data-count={Math.min(images.length, 4)}>
+          {images.map((ref) => <FileCard key={ref.path} path={ref.path} name={ref.name} title={ref.title} kind={ref.kind} onOpen={onOpen} media />)}
+        </div>
+      )}
+      {files.map((ref) => (
         <FileCard key={ref.path} path={ref.path} name={ref.name} title={ref.title} kind={ref.kind} onOpen={onOpen} />
       ))}
     </div>

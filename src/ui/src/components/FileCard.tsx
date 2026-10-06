@@ -27,9 +27,11 @@ export interface FileCardProps {
   title?: string;
   kind: WorkspaceFileKind;
   onOpen: (path: string) => void;
+  /** A picture the person sent: shown as the picture itself, not a file row. */
+  media?: boolean;
 }
 
-export const FileCard = memo(function FileCard({ path, name, title, kind, onOpen }: FileCardProps) {
+export const FileCard = memo(function FileCard({ path, name, title, kind, onOpen, media = false }: FileCardProps) {
   const [thumbUrl, setThumbUrl] = useState<string | null>(() => (kind === "image" ? cachedImage(path) : null));
   const [thumbFailed, setThumbFailed] = useState(false);
   const [audioFailed, setAudioFailed] = useState(false);
@@ -38,6 +40,8 @@ export const FileCard = memo(function FileCard({ path, name, title, kind, onOpen
   const markdown = isMarkdownPath(path);
   const showThumb = image && !thumbFailed;
   const cardRef = useRef<HTMLDivElement | null>(null);
+  /** The picture's own shape (width / height), once it has loaded. */
+  const [ratio, setRatio] = useState<number | null>(null);
 
   useEffect(() => {
     if (!image) return;
@@ -74,6 +78,27 @@ export const FileCard = memo(function FileCard({ path, name, title, kind, onOpen
       release?.();
     };
   }, [image, path]);
+
+  if (media && image) {
+    const ready = showThumb && thumbUrl;
+    return (
+      <div ref={cardRef} className={`file-card file-card-media${ready ? " ready" : ""}`} data-testid="file-card" data-kind="image" data-path={path} title={path}
+        style={ratio ? { ["--media-ratio" as string]: String(Math.min(Math.max(ratio, 0.66), 1.6)) } : undefined}>
+        <button type="button" className="file-card-open" onClick={() => onOpen(path)} aria-label={`预览 ${title || name}`}>
+          {ready ? (
+            <img src={thumbUrl} alt="" decoding="async" data-testid="file-card-thumb"
+              onLoad={(e) => { const img = e.currentTarget; if (img.naturalWidth && img.naturalHeight) setRatio(img.naturalWidth / img.naturalHeight); }}
+              onError={() => setThumbFailed(true)} />
+          ) : (
+            <span className="file-card-media-empty">{thumbFailed ? "图片暂时显示不了，点开查看" : ""}</span>
+          )}
+        </button>
+        <a className="file-card-media-download" href={api.downloadUrl(path)} download={name} data-testid="file-card-download" aria-label={`下载 ${name}`} title="下载">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11m0 0-4.5-4.5M12 15l4.5-4.5M5 19.5h14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+        </a>
+      </div>
+    );
+  }
 
   return (
     <div ref={cardRef} className="file-card" data-testid="file-card" data-kind={html ? "html" : markdown ? "markdown" : kind} data-path={path} title={path}>
