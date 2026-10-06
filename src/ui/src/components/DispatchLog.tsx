@@ -12,6 +12,8 @@ const SOURCES: Record<string, string> = {
 const clock = (ts: number) => new Date(ts).toLocaleString("sv-SE", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit" });
 const pct = (p: number) => `${Math.round(p * 100)}%`;
 
+const ms = (v: number) => (v >= 1000 ? `${(v / 1000).toFixed(1)} s` : `${v} ms`);
+
 function decision(entry: DispatchLogEntry, name: (id: string) => string): string {
   if (entry.failed) return `失败：${entry.failReason ?? "未知原因"}`;
   if (entry.chosen.appendTo) return `追加到「${name(entry.chosen.appendTo)}」`;
@@ -19,40 +21,75 @@ function decision(entry: DispatchLogEntry, name: (id: string) => string): string
   return "作为新任务";
 }
 
-function Step({ step, name }: { step: DispatchStep; name: (id: string) => string }) {
+/** The model(s) the dispatcher actually ran on, from its own timing records. */
+function models(entry: DispatchLogEntry): string[] {
+  const seen = new Set<string>();
+  for (const step of entry.steps) if (step.kind === "timing" && step.timing.model) seen.add(`${step.timing.model}${step.timing.effort ? ` · ${step.timing.effort}` : ""}`);
+  return [...seen];
+}
+
+/** Labelled horizontal bars; `share` is 0–1 of the track. */
+function Bars({ rows, label }: { rows: Array<{ key: string; name: string; share: number; value: string }>; label: string }) {
+  return (
+    <ul className="dispatch-log-bars" aria-label={label}>
+      {rows.map((row) => (
+        <li key={row.key}>
+          <span className="dispatch-log-bar-name">{row.name}</span>
+          <span className="dispatch-log-bar-track"><span style={{ width: `${Math.max(0, Math.min(1, row.share)) * 100}%` }} /></span>
+          <span className="dispatch-log-bar-value">{row.value}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function StepHead({ title, offset, children }: { title: string; offset: number; children?: React.ReactNode }) {
+  return <h4>{title}{children} <span className="muted tiny">+{(offset / 1000).toFixed(1)} s</span></h4>;
+}
+
+function Step({ step, name, start }: { step: DispatchStep; name: (id: string) => string; start: number }) {
+  const offset = step.at - start;
   switch (step.kind) {
     case "context":
       return (
         <li>
-          <h4>主会话时间线 <span className="muted tiny">候选 {step.candidates} 个 · {clock(step.at)}</span></h4>
+          <StepHead title={`主会话时间线 · 候选 ${step.candidates} 个`} offset={offset} />
           <pre>{step.timeline}</pre>
         </li>
       );
-    case "jev":
+    case "jev": {
+      const r = step.result;
       return (
         <li>
-          <h4>Jev 相关性与接续建议 <span className="muted tiny">{clock(step.at)}</span></h4>
-          {step.result?.suggestion ? (
-            <p>建议 <strong>{step.result.suggestion.kind === "new" ? "新任务" : `${step.result.suggestion.kind === "steer" ? "追加" : "续接"}「${name(step.result.suggestion.taskId!)}」`}</strong>（{pct(step.result.suggestion.probability)}，{step.result.confident ? "高置信" : "不确定"}，{step.result.latencyMs} ms）；由 Luna 最终决定。</p>
-          ) : step.result ? (
+          <StepHead title="Jev 相关性与接续建议" offset={offset} />
+          {r?.suggestion ? (
+            <p>建议 <strong>{r.suggestion.kind === "new" ? "新任务" : `${r.suggestion.kind === "steer" ? "追加" : "续接"}「${name(r.suggestion.taskId!)}」`}</strong>（{pct(r.suggestion.probability)}，{r.confident ? "高置信" : "不确定"}，{r.latencyMs} ms）；由派单器最终决定。</p>
+          ) : r ? (
             <p>
-              选择 <strong>{step.result.choice === "NEW" ? "新任务" : `「${name(step.result.choice)}」`}</strong>（{pct(step.result.probabilities[step.result.choice] ?? 0)}，
-              {step.result.confident ? "有把握，作为强提示" : "不确定，只作参考"}，{step.result.latencyMs} ms）
+              选择 <strong>{r.choice === "NEW" ? "新任务" : `「${name(r.choice)}」`}</strong>（{pct(r.probabilities[r.choice] ?? 0)}，
+              {r.confident ? "有把握，作为强提示" : "不确定，只作参考"}，{r.latencyMs} ms）
             </p>
           ) : <p className="error">不可用：{step.error}</p>}
-          {step.result?.scores && <ul className="dispatch-log-probs">{Object.entries(step.result.scores).sort((a,b)=>b[1]-a[1]).map(([id,p])=><li key={id}>{name(id)} · 相关性 {pct(p)}</li>)}</ul>}
-          {step.result && (
-            <ul className="dispatch-log-probs">
-              {Object.entries(step.result.probabilities).sort((a, b) => b[1] - a[1]).map(([id, p]) => <li key={id}>{pct(p)} · {id === "NEW" ? "新任务" : name(id)}</li>)}
-            </ul>
+          {r?.scores && Object.keys(r.scores).length > 0 && (
+            <>
+              <p className="muted tiny">逐任务相关性</p>
+              <Bars label="逐任务相关性" rows={Object.entries(r.scores).sort((a, b) => b[1] - a[1]).map(([id, p]) => ({ key: id, name: name(id), share: p, value: pct(p) }))} />
+            </>
+          )}
+          {r && (
+            <>
+              <p className="muted tiny">路由概率</p>
+              <Bars label="路由概率" rows={Object.entries(r.probabilities).sort((a, b) => b[1] - a[1]).map(([id, p]) => ({ key: id, name: id === "NEW" ? "新任务" : name(id), share: p, value: pct(p) }))} />
+            </>
           )}
           <details><summary>给 Jev 的候选说明</summary><pre>{Object.entries(step.criteria).map(([id, text]) => `${id}\n  ${text}`).join("\n")}</pre></details>
         </li>
       );
+    }
     case "ask":
       return (
         <li>
-          <h4>派单器第 {step.round} 轮 <span className="muted tiny">{clock(step.at)}</span></h4>
+          <StepHead title={`派单器第 ${step.round} 轮回答`} offset={offset} />
           {step.correction && <p className="error tiny">上一轮回答无法使用，带着原因重问：{step.correction}</p>}
           <pre>{step.answer ?? "（没有回答）"}</pre>
           <details><summary>完整提示词（{step.prompt.length.toLocaleString()} 字）</summary><pre>{step.prompt}</pre></details>
@@ -60,33 +97,40 @@ function Step({ step, name }: { step: DispatchStep; name: (id: string) => string
       );
     case "timing": {
       const t = step.timing;
-      const stages = [
+      const stages = ([
         ["排队", t.queueMs], ["准备候选", t.contextMs], ["Jev 判断", t.jevMs],
         ["沙箱就绪", t.sandboxMs], ["模型连接", t.connectionMs],
         ["创建会话", t.threadStartMs], ["提交请求", t.turnStartMs],
         ["提交至首字", t.firstTextMs], ["首字至完成", t.finishMs],
-        ["模型调用", t.classifierMs], ["本轮总计", t.totalMs],
-      ] as const;
+      ] as Array<[string, number | undefined]>).filter((s): s is [string, number] => s[1] !== undefined);
+      const whole = Math.max(t.totalMs ?? 0, ...stages.map(([, v]) => v), 1);
       return (
         <li>
-          <h4>派单耗时 · 第 {step.round} 轮 <span className="muted tiny">{clock(step.at)}</span></h4>
-          <p>{t.model ?? "模型未返回"}{t.effort ? ` · ${t.effort}` : ""}{t.attempts && t.attempts > 1 ? ` · 建会话尝试 ${t.attempts} 次` : ""}</p>
-          <p className="muted tiny">{stages.filter(([, ms]) => ms !== undefined).map(([label, ms]) => `${label} ${ms} ms`).join(" · ")}</p>
+          <StepHead title={`派单耗时 · 第 ${step.round} 轮`} offset={offset}>
+            {" "}<span className="dispatch-log-chip">{t.model ?? "模型未返回"}{t.effort ? ` · ${t.effort}` : ""}</span>
+          </StepHead>
+          {t.attempts && t.attempts > 1 ? <p className="tiny">尝试 {t.attempts} 次（建会话超时或模型满载后重试）</p> : null}
+          <Bars label="各阶段耗时" rows={stages.map(([label, v]) => ({ key: label, name: label, share: v / whole, value: ms(v) }))} />
+          <p className="muted tiny">{[t.classifierMs !== undefined ? `模型调用 ${ms(t.classifierMs)}` : null, t.totalMs !== undefined ? `本轮总计 ${ms(t.totalMs)}` : null].filter(Boolean).join(" · ")}</p>
         </li>
       );
     }
-    case "plan":
+    case "plan": {
+      const plan = step.plan as { title?: unknown; description?: unknown };
       return (
         <li>
-          <h4>最终计划 <span className="muted tiny">{clock(step.at)}</span></h4>
+          <StepHead title="最终计划" offset={offset} />
+          {typeof plan.title === "string" && <p><strong>{plan.title}</strong></p>}
+          {typeof plan.description === "string" && <p className="tiny">{plan.description}</p>}
           {step.repairs.length > 0 && <p className="tiny">自动修正：{step.repairs.join("；")}</p>}
-          <pre>{JSON.stringify(step.plan, null, 2)}</pre>
+          <details><summary>计划 JSON</summary><pre>{JSON.stringify(step.plan, null, 2)}</pre></details>
         </li>
       );
+    }
     case "failed":
       return (
         <li>
-          <h4>派单失败 <span className="muted tiny">{clock(step.at)}</span></h4>
+          <StepHead title="派单失败" offset={offset} />
           <p className="error">{step.reason}</p>
         </li>
       );
@@ -126,8 +170,14 @@ export function DispatchLog({ taskId, onClose }: { taskId: string; onClose: () =
             const name = (id: string) => titles.get(id) ?? id;
             return (
               <section key={entry.at + ":" + i} className="dispatch-log-entry" data-testid="dispatch-log-entry">
-                <h3>{log.entries.length > 1 ? `第 ${log.entries.length - i} 次派单 · ` : ""}{decision(entry, name)}</h3>
-                <p className="muted tiny">{clock(entry.at)} · 耗时 {(entry.latencyMs / 1000).toFixed(1)} 秒 · 派单器 {entry.rounds} 轮 · 提示词共 {entry.promptChars.toLocaleString()} 字</p>
+                <h3 className={entry.failed ? "error" : undefined}>{log.entries.length > 1 ? `第 ${log.entries.length - i} 次派单 · ` : ""}{decision(entry, name)}</h3>
+                <div className="dispatch-log-chips">
+                  {models(entry).map((m) => <span key={m} className="dispatch-log-chip">{m}</span>)}
+                  <span className="dispatch-log-chip">耗时 {(entry.latencyMs / 1000).toFixed(1)} 秒</span>
+                  <span className="dispatch-log-chip">派单器 {entry.rounds} 轮</span>
+                  <span className="dispatch-log-chip">提示词 {entry.promptChars.toLocaleString()} 字</span>
+                  <span className="muted tiny">{clock(entry.at)}</span>
+                </div>
                 {entry.chosen.related.length > 0 && <p>关联背景：{entry.chosen.related.map((id) => `「${name(id)}」`).join("、")}</p>}
                 {entry.repairs.length > 0 && <p className="tiny">自动修正：{entry.repairs.join("；")}</p>}
                 <details>
@@ -140,7 +190,7 @@ export function DispatchLog({ taskId, onClose }: { taskId: string; onClose: () =
                     ))}
                   </ul>
                 </details>
-                {entry.steps.length > 0 ? <ol className="dispatch-log-steps">{entry.steps.map((step, j) => <Step key={j} step={step} name={name} />)}</ol> : <p className="muted tiny">这次派单早于逐步日志，只有上面的汇总。</p>}
+                {entry.steps.length > 0 ? <ol className="dispatch-log-steps">{entry.steps.map((step, j) => <Step key={j} step={step} name={name} start={entry.steps[0].at} />)}</ol> : <p className="muted tiny">这次派单早于逐步日志，只有上面的汇总。</p>}
               </section>
             );
           })}

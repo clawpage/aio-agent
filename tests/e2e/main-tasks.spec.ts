@@ -912,13 +912,13 @@ test("owner debug mode shows each message's dispatch log step by step", async ({
     const reply = { ...task(2, "completed"), title: "美食推荐", text: "要", relatedTaskId: "task-1", result: "推荐如下", completedAt: Date.now() };
     await page.route("**/api/settings/dispatch-log/task-2", r => r.fulfill({ json: { task: { id: "task-2", title: "美食推荐", text: "要", status: "completed" }, entries: [{
         at: Date.now(), latencyMs: 2400, rounds: 1, promptChars: 5200, failed: false, failReason: null, repairs: [],
-        candidates: [{ id: "task-1", source: "recent", title: "规划行程" }],
+        candidates: [{ id: "task-1", source: "recent", title: "规划行程" }, { id: "task-3", source: "recall", rank: 2, score: 3.1, title: "预订东京酒店，比较新宿和银座两个区域的价格与交通" }],
         searches: [], chosen: { related: ["task-1"], appendTo: null, resume: "task-1" }, jev: { choice: "task-1", probability: 0.99, confident: true, latencyMs: 140 },
         steps: [
             { kind: "context", at: Date.now(), timeline: "  [14:00] 用户：「规划东京三天」 → 任务 task-1「规划行程」（completed）；助理最后问：「要再加美食推荐吗？」\n▶ [14:05] 用户：「要」  ← 本次消息", candidates: 1 },
-            { kind: "jev", at: Date.now(), criteria: { "resume:task-1": "第1近（14:00）「规划行程」", NEW: "独立新请求" }, result: { choice: "task-1", probabilities: { "task-1": 0.99, NEW: 0.01 }, scores:{"task-1":0.94}, suggestion:{kind:"resume",taskId:"task-1",probability:0.99}, confident: true, latencyMs: 140 } },
-            { kind: "timing", at: Date.now(), round: 1, timing: { model: "gpt-6-luna", effort: "low", sandboxMs: 1, connectionMs: 0, threadStartMs: 60, turnStartMs: 35, firstTextMs: 900, finishMs: 120, classifierMs: 1115, totalMs: 1116 } },
-            { kind: "ask", at: Date.now(), round: 1, prompt: "你是 AIO Agent 的 Luna 派单器……", answer: "{\"title\":\"美食推荐\",\"decision\":{\"kind\":\"resume\",\"taskId\":\"task-1\"}}" },
+            { kind: "jev", at: Date.now(), criteria: { "resume:task-1": "第1近（14:00）「规划行程」", NEW: "独立新请求" }, result: { choice: "task-1", probabilities: { "task-1": 0.99, NEW: 0.01 }, scores:{"task-1":0.94,"task-3":0.12}, suggestion:{kind:"resume",taskId:"task-1",probability:0.99}, confident: true, latencyMs: 140 } },
+            { kind: "timing", at: Date.now(), round: 1, timing: { model: "gpt-6.1-sol", effort: "low", attempts: 2, queueMs: 30, contextMs: 80, jevMs: 140, sandboxMs: 1, connectionMs: 0, threadStartMs: 60, turnStartMs: 35, firstTextMs: 900, finishMs: 1820, classifierMs: 2815, totalMs: 2816 } },
+            { kind: "ask", at: Date.now(), round: 1, prompt: "你是 AIO Agent 的派单器……", answer: "{\"title\":\"美食推荐\",\"decision\":{\"kind\":\"resume\",\"taskId\":\"task-1\"}}" },
             { kind: "plan", at: Date.now(), plan: { title: "美食推荐", description:"补充东京美食推荐",decision:{kind:"resume",taskId:"task-1"}, resume: "task-1", related: ["task-1"] }, repairs: [] },
         ],
     }] } }));
@@ -931,15 +931,25 @@ test("owner debug mode shows each message's dispatch log step by step", async ({
     await press(info, page.getByRole("button", { name: "派单日志：美食推荐" }));
     const dialog = page.getByRole("dialog", { name: "派单日志" });
     await expect(dialog).toContainText("续接「规划行程」的原执行会话");
+    await page.screenshot({ path: info.outputPath("dispatch-log-top.png") });
     await expect(dialog).toContainText("助理最后问：「要再加美食推荐吗？」");
     await expect(dialog).toContainText("建议 续接「规划行程」（99%，高置信，140 ms）");
-    await expect(dialog).toContainText("规划行程 · 相关性 94%");
+    await expect(dialog).toContainText("由派单器最终决定");
+    const relevance = dialog.getByRole("list", { name: "逐任务相关性" }).getByRole("listitem");
+    await expect(relevance.first()).toContainText("规划行程");
+    await expect(relevance.first()).toContainText("94%");
     await expect(dialog).toContainText("派单器第 1 轮");
-    await expect(dialog).toContainText("gpt-6-luna · high");
-    await expect(dialog).toContainText("提交至首字 900 ms");
+    // The model the dispatcher ran on is in the entry summary, not only in the timing step.
+    await expect(dialog.locator(".dispatch-log-chips")).toContainText("gpt-6.1-sol · low");
+    await expect(dialog).toContainText("尝试 2 次");
+    const stages = dialog.getByRole("list", { name: "各阶段耗时" }).getByRole("listitem");
+    await expect(stages.filter({ hasText: "提交至首字" })).toContainText("900 ms");
+    await expect(stages.filter({ hasText: "首字至完成" })).toContainText("1.8 s");
+    await expect(dialog).toContainText("补充东京美食推荐");
+    await dialog.getByText("计划 JSON").click();
     await expect(dialog).toContainText("\"resume\": \"task-1\"");
     await dialog.getByText(/完整提示词/).click();
-    await expect(dialog).toContainText("你是 AIO Agent 的 Luna 派单器");
+    await expect(dialog).toContainText("你是 AIO Agent 的派单器");
     expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1);
     await page.screenshot({ path: info.outputPath("dispatch-log.png") });
     await page.keyboard.press("Escape");
