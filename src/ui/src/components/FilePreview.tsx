@@ -1,7 +1,8 @@
 import { createPortal } from "react-dom";
 import { PopupSurface } from "./PopupMotion";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { api, API_CREDENTIALS, ApiError } from "../api";
+import { api, ApiError } from "../api";
+import { cachedImage, holdImage, retryImage } from "../imageCache";
 import { isSandboxLink } from "../sandboxLink";
 import { openDeviceBrowser } from "../deviceBrowser";
 import {
@@ -27,23 +28,6 @@ import { extractFileRefs } from "../fileRefs";
  * Plain text is escaped and all text previews are capped. Downloads remain
  * attachment-only and preserve the original bytes.
  */
-
-const IMAGE_MIME: Record<string, string> = {
-  png: "image/png",
-  jpg: "image/jpeg",
-  jpeg: "image/jpeg",
-  webp: "image/webp",
-  gif: "image/gif",
-  avif: "image/avif",
-  bmp: "image/bmp",
-};
-
-function imageMime(path: string): string {
-  const name = baseName(path).toLowerCase();
-  const dot = name.lastIndexOf(".");
-  const ext = dot > 0 ? name.slice(dot + 1) : "";
-  return IMAGE_MIME[ext] ?? "application/octet-stream";
-}
 
 interface Props {
   path: string;
@@ -106,7 +90,7 @@ export function FilePreview({ path: initialPath, onClose, onOpenLink, onOpenInBr
   // previous file can never overwrite the dialog that replaced it.
   useEffect(() => {
     const controller = new AbortController();
-    let objectUrl: string | null = null;
+    let release: (() => void) | null = null;
     setPhase("loading");
     setSourceView(false);
     setError(null);
@@ -134,20 +118,22 @@ export function FilePreview({ path: initialPath, onClose, onOpenLink, onOpenInBr
           return;
         }
         if (kind === "image") {
-          // The inline image endpoint (not the download endpoint): it returns a
-          // real image content type after sniffing the bytes.
-          const res = await fetch(api.documentImageUrl(path), { credentials: API_CREDENTIALS, signal: controller.signal });
-          if (!res.ok) throw new Error("无法加载文件（可能已被移动或删除）");
-          const blob = await res.blob();
-          if (controller.signal.aborted) return;
-          if (blob.size === 0) throw new Error("文件是空的（0 字节）");
-          // Trust the response's own type (the server sniffed the bytes); fall
-          // back to the extension only if it came back untyped.
-          const type = blob.type && blob.type !== "application/octet-stream" ? blob.type : imageMime(path);
-          const typed = new Blob([blob], { type });
-          objectUrl = URL.createObjectURL(typed);
-          setImageUrl(objectUrl);
-          setPhase("ready");
+          // Shared through the image cache: a picture already shown in a message
+          // opens at once instead of being fetched again. Only an image response
+          // (the server sniffs the bytes) is ever used.
+          if (attempt > 0) retryImage(path);
+          const held = holdImage(path);
+          release = held.release;
+          const cached = cachedImage(path);
+          if (cached) { setImageUrl(cached); setPhase("ready"); return; }
+          try {
+            const url = await held.promise;
+            if (controller.signal.aborted) return;
+            setImageUrl(url);
+            setPhase("ready");
+          } catch (err) {
+            throw new Error(err instanceof Error && err.message === "empty" ? "文件是空的（0 字节）" : "无法加载文件（可能已被移动或删除）");
+          }
           return;
         }
         if (kind === "text") {
@@ -188,7 +174,7 @@ export function FilePreview({ path: initialPath, onClose, onOpenLink, onOpenInBr
 
     return () => {
       controller.abort();
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      release?.();
     };
   }, [kind, path, html, attempt]);
 

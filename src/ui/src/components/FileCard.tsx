@@ -1,5 +1,6 @@
 import { memo, useEffect, useRef, useState } from "react";
-import { api, API_CREDENTIALS } from "../api";
+import { api } from "../api";
+import { cachedImage, holdImage } from "../imageCache";
 import { isMarkdownPath, isHtmlPath, kindBadge, kindLabel, type WorkspaceFileKind } from "../sandboxLink";
 
 /**
@@ -29,7 +30,7 @@ export interface FileCardProps {
 }
 
 export const FileCard = memo(function FileCard({ path, name, title, kind, onOpen }: FileCardProps) {
-  const [thumbUrl, setThumbUrl] = useState<string | null>(null);
+  const [thumbUrl, setThumbUrl] = useState<string | null>(() => (kind === "image" ? cachedImage(path) : null));
   const [thumbFailed, setThumbFailed] = useState(false);
   const [audioFailed, setAudioFailed] = useState(false);
   const image = kind === "image";
@@ -40,60 +41,37 @@ export const FileCard = memo(function FileCard({ path, name, title, kind, onOpen
 
   useEffect(() => {
     if (!image) return;
-    let revoked = false;
-    let objectUrl: string | null = null;
-    const controller = new AbortController();
+    let live = true;
+    let release: (() => void) | null = null;
+    // Fetched once and shared through the image cache: the same picture in a
+    // message or the preview is not loaded again. Only an image response is used.
     const load = (): void => {
-      void (async () => {
-        try {
-          const res = await fetch(api.documentImageUrl(path), {
-            credentials: API_CREDENTIALS,
-            signal: controller.signal,
-          });
-          if (!res.ok) throw new Error("thumbnail unavailable");
-          // A 200 alone does not mean "image": the server sniffs the bytes and
-          // answers a non-image with an error status, but a proxy or a future
-          // change could still hand back HTML. Require an image type before it
-          // reaches the <img>.
-          const type = res.headers.get("content-type") ?? "";
-          if (!type.startsWith("image/")) throw new Error("not an image response");
-          const blob = await res.blob();
-          if (blob.size === 0) throw new Error("empty thumbnail");
-          if (revoked) return;
-          objectUrl = URL.createObjectURL(blob);
-          setThumbUrl(objectUrl);
-        } catch (err) {
-          if (revoked || (err instanceof DOMException && err.name === "AbortError")) return;
-          setThumbFailed(true);
-        }
-      })();
+      if (release) return;
+      const held = holdImage(path);
+      release = held.release;
+      held.promise.then((url) => { if (live) setThumbUrl(url); }, () => { if (live) setThumbFailed(true); });
     };
 
-    // Only start loading when the card is actually visible.
+    // Only start loading when the card is actually visible (at once if it is already cached).
     let observer: IntersectionObserver | null = null;
-    if (typeof IntersectionObserver === "function") {
-      const target = cardRef.current;
-      if (target) {
-        observer = new IntersectionObserver((entries) => {
-          if (entries.some((entry) => entry.isIntersecting)) {
-            observer?.disconnect();
-            observer = null;
-            load();
-          }
-        });
-        observer.observe(target);
-      } else {
-        load();
-      }
+    const target = cardRef.current;
+    if (typeof IntersectionObserver === "function" && target && !cachedImage(path)) {
+      observer = new IntersectionObserver((entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          observer?.disconnect();
+          observer = null;
+          load();
+        }
+      });
+      observer.observe(target);
     } else {
       load();
     }
 
     return () => {
-      revoked = true;
-      controller.abort();
+      live = false;
       observer?.disconnect();
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      release?.();
     };
   }, [image, path]);
 

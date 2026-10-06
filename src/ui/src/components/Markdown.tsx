@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, type KeyboardEvent, type MouseEvent } from "react";
 import { marked } from "marked";
 import DOMPurify from "dompurify";
-import { api, API_CREDENTIALS } from "../api";
+import { api } from "../api";
+import { cachedImage, holdImage } from "../imageCache";
 import { isWebLink, isSandboxLink, isWorkspaceFilePath, workspaceFileKind, workspaceFilePathFromHref } from "../sandboxLink";
 import { openNativeBrowser } from "../deviceBrowser";
 import { embedMediaLinks } from "../fileRefs";
@@ -158,8 +159,8 @@ function MarkdownBlock({
   useEffect(() => {
     const container = root.current;
     if (!container) return;
-    const urls: string[] = [];
-    const controller = new AbortController();
+    const releases: Array<() => void> = [];
+    let live = true;
     const fail = (img: HTMLImageElement) => {
       const note = window.document.createElement("span");
       note.className = "inline-media-failed muted tiny";
@@ -185,20 +186,10 @@ function MarkdownBlock({
       const web = img.getAttribute("data-web-image");
       const path = img.getAttribute("data-sandbox-image") ?? "";
       if (web !== null ? !/^https:\/\//i.test(web) : !isWorkspaceFilePath(path) || workspaceFileKind(path) !== "image") return fail(img);
-      void (async () => {
-        try {
-          const res = await fetch(web !== null ? api.webImageUrl(web) : api.documentImageUrl(path), { credentials: API_CREDENTIALS, signal: controller.signal });
-          // Only an image response may reach the <img>, whatever answered.
-          if (!res.ok || !(res.headers.get("content-type") ?? "").startsWith("image/")) throw new Error("unavailable");
-          const blob = await res.blob();
-          if (!blob.size) throw new Error("empty");
-          const url = URL.createObjectURL(blob);
-          urls.push(url);
-          img.src = url;
-        } catch (err) {
-          if (!(err instanceof DOMException && err.name === "AbortError")) fail(img);
-        }
-      })();
+      // Fetched once and shared: the same picture elsewhere (a task panel, the preview) reuses it.
+      const held = holdImage(web ?? path);
+      releases.push(held.release);
+      held.promise.then((url) => { if (live) img.src = url; }, () => { if (live) fail(img); });
     };
     const media = [...container.querySelectorAll("img[data-sandbox-image], img[data-web-image], video[data-sandbox-video], audio[data-sandbox-audio]")];
     let observer: IntersectionObserver | null = null;
@@ -206,9 +197,10 @@ function MarkdownBlock({
       observer = new IntersectionObserver((entries) => {
         for (const entry of entries) if (entry.isIntersecting) { observer!.unobserve(entry.target); load(entry.target); }
       }, { rootMargin: "200px" });
-      media.forEach((el) => observer!.observe(el));
+      // A picture already fetched is drawn at once, without waiting to come into view.
+      media.forEach((el) => { if (el instanceof HTMLImageElement && cachedImage(el.getAttribute("data-web-image") ?? el.getAttribute("data-sandbox-image"))) load(el); else observer!.observe(el); });
     } else media.forEach(load);
-    return () => { observer?.disconnect(); controller.abort(); urls.forEach((url) => URL.revokeObjectURL(url)); };
+    return () => { live = false; observer?.disconnect(); releases.forEach((release) => release()); };
   }, [html]);
 
   const onClick = useCallback(

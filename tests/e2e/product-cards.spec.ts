@@ -47,20 +47,32 @@ test("a products block is drawn as cards: picture, price, store, reasons and a l
   await expect.poll(() => cards.nth(1).locator(".product-media img").evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth)).toBe(2);
   expect(local).toContain("/home/gem/workspace/tasks/task-1/ultra2.jpg");
   expect(web).toContain("https://m.media-amazon.com/images/I/saros.jpg");
-  // A picture that cannot be fetched leaves no stand-in: the card is laid out as text, price on the right.
+  // A picture that cannot be fetched leaves no stand-in: the card is laid out as text alone
+  // (a card off to the side of the row fetches its picture once it is scrolled into view).
+  await cards.nth(2).evaluate(n => n.scrollIntoView({ inline: "nearest", block: "nearest" }));
   await expect(cards.nth(2)).toHaveClass(/text-only/);
   await expect(cards.nth(2).locator(".product-media, img")).toHaveCount(0);
-  const name = (await cards.nth(2).locator(".product-name").boundingBox())!, price = (await cards.nth(2).locator(".product-price strong").boundingBox())!;
-  expect(price.x).toBeGreaterThan(name.x + name.width - 1);
-  expect(Math.abs(price.y - name.y)).toBeLessThan(12);
   await expect(first).not.toHaveClass(/text-only/);
+  // Several cards make one row that scrolls sideways, pictures on top, the page itself never wider than the screen.
+  const tops = await cards.evaluateAll(nodes => nodes.map(n => Math.round(n.getBoundingClientRect().top)));
+  expect(new Set(tops).size).toBe(1);
+  const picture = (await first.locator(".product-media").boundingBox())!, title = (await first.locator(".product-name").boundingBox())!;
+  expect(title.y).toBeGreaterThan(picture.y + picture.height - 1);
+  const track = page.locator(".product-track");
+  const sizes = await track.evaluate(n => ({ scroll: n.scrollWidth, client: n.clientWidth, snap: getComputedStyle(n).scrollSnapType }));
+  expect(sizes.snap).toContain("x");
+  if (info.project.name !== "desktop") {
+    expect(sizes.scroll).toBeGreaterThan(sizes.client);
+    await track.evaluate(n => { n.scrollLeft = 0; });
+  }
   // The text around the block stays where it was.
   const bubble = page.locator(".bubble").filter({ has: first });
   await expect(bubble).toContainText("我最推荐 Ultra 2");
   await expect(bubble).toContainText("硬地板多选 Curv 2 Flow");
   expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
   const box = (await first.boundingBox())!;
-  expect(box.width).toBeGreaterThan(260);
+  expect(box.width).toBeGreaterThanOrEqual(200);
+  expect(box.width).toBeLessThanOrEqual(240);
   await first.scrollIntoViewIfNeeded();
   await page.waitForTimeout(400);
   await page.screenshot({ path: info.outputPath("product-cards.png") });
@@ -106,4 +118,40 @@ test("products without pictures are text cards from the start, and no picture is
   expect(web).toEqual([]);
   expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
   await page.locator(".product-cards").screenshot({ path: info.outputPath("text-cards.png") });
+});
+
+test("with a mouse, arrows page through a row of products that overflows", async ({ page }, info) => {
+  test.skip(info.project.name !== "desktop");
+  const many = Array.from({ length: 6 }, (_, i) => ({ name: `商品 ${i + 1}`, price: `$${10 + i}`, store: "Target" }));
+  await setup(page, `\`\`\`products\n${JSON.stringify(many)}\n\`\`\``);
+  const track = page.locator(".product-track");
+  await expect(page.getByRole("listitem").filter({ has: page.locator(".product-body") })).toHaveCount(6, { timeout: 60_000 });
+  const prev = page.getByRole("button", { name: "上一组商品" }), next = page.getByRole("button", { name: "下一组商品" });
+  await expect(prev).toHaveCount(0);
+  await expect(next).toBeVisible();
+  await next.click();
+  await expect.poll(() => track.evaluate(n => n.scrollLeft)).toBeGreaterThan(100);
+  await expect(prev).toBeVisible();
+  await track.evaluate(n => { n.scrollLeft = n.scrollWidth; });
+  await expect(next).toHaveCount(0);
+  await prev.click();
+  await expect.poll(() => track.evaluate(n => n.scrollLeft + n.clientWidth < n.scrollWidth - 1)).toBe(true);
+  await page.locator(".product-cards").screenshot({ path: info.outputPath("row-arrows.png") });
+});
+
+test("a picture already shown is reused by the preview and a second showing, never fetched again", async ({ page }) => {
+  const { local } = await setup(page, `\`\`\`products\n${JSON.stringify([PRODUCTS[0]])}\n\`\`\`\n\n原图：![Ultra 2](/home/gem/workspace/tasks/task-1/ultra2.jpg)`);
+  const card = page.getByRole("listitem").filter({ has: page.locator(".product-body") });
+  await expect.poll(() => card.locator(".product-media img").evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth), { timeout: 60_000 }).toBe(2);
+  const inline = page.locator('.markdown img[data-sandbox-image="/home/gem/workspace/tasks/task-1/ultra2.jpg"]');
+  await inline.scrollIntoViewIfNeeded();
+  await expect.poll(() => inline.evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth)).toBe(2);
+  await card.getByRole("button", { name: /查看 .* 的大图/ }).click();
+  const big = page.getByTestId("file-preview-image");
+  await expect.poll(() => big.evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth)).toBe(2);
+  await page.keyboard.press("Escape");
+  await expect(big).toHaveCount(0);
+  await card.getByRole("button", { name: /查看 .* 的大图/ }).click();
+  await expect.poll(() => big.evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth)).toBe(2);
+  expect(local).toEqual(["/home/gem/workspace/tasks/task-1/ultra2.jpg"]);
 });

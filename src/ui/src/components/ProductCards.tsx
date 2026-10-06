@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
-import { api, API_CREDENTIALS } from "../api";
+import { cachedImage, holdImage } from "../imageCache";
 import { isSandboxLink } from "../sandboxLink";
 import { openNativeBrowser } from "../deviceBrowser";
 import type { Product } from "../productBlocks";
@@ -7,30 +7,20 @@ import type { Product } from "../productBlocks";
 /**
  * A picture a message shows: a workspace image through the authenticated document
  * endpoint, a web image through the account's sandbox (the console's CSP admits
- * no third-party image). Only an image response becomes the blob the <img> shows.
+ * no third-party image). Fetched once and shared through the image cache, so the
+ * same picture in the feed, a task panel or the preview is not loaded again.
  */
 export function useMessageImage(src: string | null): { url: string | null; failed: boolean } {
-  const [state, setState] = useState<{ url: string | null; failed: boolean }>({ url: null, failed: false });
+  const [state, setState] = useState<{ src: string | null; url: string | null; failed: boolean }>(() => ({ src, url: cachedImage(src), failed: false }));
   useEffect(() => {
-    setState({ url: null, failed: false });
     if (!src) return;
-    const controller = new AbortController();
-    let url: string | null = null;
-    void (async () => {
-      try {
-        const res = await fetch(src.startsWith("/") ? api.documentImageUrl(src) : api.webImageUrl(src), { credentials: API_CREDENTIALS, signal: controller.signal });
-        if (!res.ok || !(res.headers.get("content-type") ?? "").startsWith("image/")) throw new Error("unavailable");
-        const blob = await res.blob();
-        if (!blob.size) throw new Error("empty");
-        url = URL.createObjectURL(blob);
-        setState({ url, failed: false });
-      } catch (err) {
-        if (!(err instanceof DOMException && err.name === "AbortError")) setState({ url: null, failed: true });
-      }
-    })();
-    return () => { controller.abort(); if (url) URL.revokeObjectURL(url); };
+    let live = true;
+    const held = holdImage(src);
+    held.promise.then((url) => { if (live) setState({ src, url, failed: false }); }, () => { if (live) setState({ src, url: null, failed: true }); });
+    return () => { live = false; held.release(); };
   }, [src]);
-  return state;
+  // A different picture than the state holds: whatever the cache has for it, never the old one.
+  return state.src === src ? { url: state.url, failed: state.failed } : { url: cachedImage(src), failed: false };
 }
 
 /** Whether an element has come near the viewport; it stays true once it has. */
@@ -86,11 +76,33 @@ function ProductCard({ item, onOpenLink, onOpenFile }: { item: Product; onOpenLi
   );
 }
 
-/** A ```products block: one card per item, its picture (when there is one) beside what matters for choosing. */
+/**
+ * A ```products block: one card per item, its picture (when there is one) with what
+ * matters for choosing. Several cards sit in one row that scrolls sideways; with a
+ * mouse, arrows at the ends page through it.
+ */
 export function ProductCards({ items, onOpenLink, onOpenFile }: { items: Product[]; onOpenLink?: (url: string) => void; onOpenFile?: (path: string) => void }) {
+  const row = useRef<HTMLDivElement>(null);
+  const [ends, setEnds] = useState({ start: true, end: true });
+  const several = items.length > 1;
+  useEffect(() => {
+    const el = row.current;
+    if (!el || !several) return;
+    const measure = () => setEnds({ start: el.scrollLeft <= 1, end: el.scrollLeft + el.clientWidth >= el.scrollWidth - 1 });
+    measure();
+    el.addEventListener("scroll", measure, { passive: true });
+    const observer = typeof ResizeObserver === "function" ? new ResizeObserver(measure) : null;
+    observer?.observe(el);
+    return () => { el.removeEventListener("scroll", measure); observer?.disconnect(); };
+  }, [several, items.length]);
+  const page = (direction: 1 | -1) => { const el = row.current; if (el) el.scrollBy({ left: direction * el.clientWidth * 0.8, behavior: "smooth" }); };
   return (
-    <div className="product-cards" role="list" aria-label="商品">
-      {items.map((item, i) => <ProductCard key={i} item={item} onOpenLink={onOpenLink} onOpenFile={onOpenFile} />)}
+    <div className={`product-cards${several ? " product-row" : ""}`}>
+      <div ref={row} className="product-track" role="list" aria-label="商品">
+        {items.map((item, i) => <ProductCard key={i} item={item} onOpenLink={onOpenLink} onOpenFile={onOpenFile} />)}
+      </div>
+      {several && !ends.start && <button type="button" className="product-page prev" aria-label="上一组商品" onClick={() => page(-1)}><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg></button>}
+      {several && !ends.end && <button type="button" className="product-page next" aria-label="下一组商品" onClick={() => page(1)}><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></button>}
     </div>
   );
 }

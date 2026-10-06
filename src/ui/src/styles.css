@@ -3160,12 +3160,30 @@ textarea:focus {
 
 /* --------------------------------------------------------- product cards */
 /* A ```products block: each item's picture beside its price, store and reasons, one card each. */
-.product-cards {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr));
-  gap: 10px;
-  margin: 10px 0;
+.product-cards { position: relative; margin: 10px 0; }
+.product-track { display: grid; grid-template-columns: minmax(0, min(100%, 520px)); }
+/* Several products: one row that scrolls sideways, each card upright (picture on top), the next one peeking in. */
+.product-row .product-track {
+  display: flex; gap: 10px; overflow-x: auto; overscroll-behavior-x: contain;
+  scroll-snap-type: x mandatory; scroll-padding-inline: 2px; padding: 2px 2px 8px;
+  scrollbar-width: thin;
 }
+.product-row .product-card { flex: 0 0 clamp(200px, 70%, 236px); flex-direction: column; gap: 8px; scroll-snap-align: start; }
+.product-row .product-media { width: 100%; height: 150px; }
+.product-row .product-link { margin-top: auto; }
+.product-row .product-body { gap: 4px; }
+.product-row .product-name { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.product-row .product-card.text-only .product-body { display: flex; }
+.product-row .product-card.text-only .product-price { flex-direction: row; align-items: baseline; gap: 8px; text-align: left; }
+.product-row .product-card.text-only .product-link { align-self: flex-start; }
+.product-page {
+  position: absolute; top: calc(50% - 22px); display: none; align-items: center; justify-content: center;
+  width: 36px; height: 36px; min-height: 36px; padding: 0; border-radius: 50%;
+  border: 1px solid var(--border); background: var(--bg-raised); color: var(--text); box-shadow: 0 4px 14px rgb(0 0 0 / .16);
+}
+.product-page.prev { left: -6px; }
+.product-page.next { right: -6px; }
+@media (hover: hover) and (pointer: fine) { .product-page { display: flex; } }
 .product-card {
   display: flex;
   gap: 12px;
