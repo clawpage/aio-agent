@@ -273,6 +273,20 @@ export function loadConfig(): {
   /** The knowledge-base tools reachable from this runtime's sandbox; set by the knowledge-base gateway. */
   kb?: { url: string };
   /**
+   * Home Assistant's MCP Server (Assist API) on the home network. The control
+   * plane holds its long-lived token; only the listed accounts reach it, through
+   * the gateway. Without a URL the feature is absent.
+   */
+  haMcp: {
+    upstreamUrl: string;
+    /** Private host file holding HA_MCP_TOKEN (the environment wins). */
+    secretsFile: string;
+    /** Usernames granted Home Assistant (the owner only if listed). */
+    accounts: string[];
+  };
+  /** This runtime's Home Assistant URL on the member gateway, when granted (HaGateway). */
+  ha?: { url: string };
+  /**
    * The sandbox nodes (sandboxd) this control plane drives, in order; the first
    * is where existing accounts live. Each node's token is read from `tokensFile`
    * under the node's name, else under AIO_SANDBOX_NODE_TOKEN.
@@ -485,6 +499,11 @@ export function loadConfig(): {
       upstreamUrl: envStr("PA_KB_MCP_URL", ""),
       secretsFile: envStr("PA_KB_MCP_SECRETS_FILE", path.join(os.homedir(), ".config", "aio-agent", "kb-mcp.env")),
       members: parseList(envStr("PA_KB_MCP_MEMBERS", "")),
+    },
+    haMcp: {
+      upstreamUrl: envStr("PA_HA_MCP_URL", ""),
+      secretsFile: envStr("PA_HA_MCP_SECRETS_FILE", path.join(os.homedir(), ".config", "aio-agent", "ha-mcp.env")),
+      accounts: parseList(envStr("PA_HA_MCP_ACCOUNTS", "")),
     },
     sandboxNodes: {
       nodes: parseList(envStr("PA_SANDBOX_NODES", "local=http://127.0.0.1:4894")).map((entry) => {

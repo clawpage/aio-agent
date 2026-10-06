@@ -26,6 +26,7 @@ services:
       PA_CLAUDE_CODE_SECRETS_FILE: /run/secrets/claude-code
       PA_JEV_SECRETS_FILE: /run/secrets/jev
       PA_KB_MCP_SECRETS_FILE: /run/secrets/kb-mcp
+      PA_HA_MCP_SECRETS_FILE: /run/secrets/ha-mcp
     volumes:
       - control-data:/data
     ports:
@@ -35,7 +36,7 @@ services:
     extra_hosts:
       - host.docker.internal:host-gateway
     # Nodes can be remote; the control layer checks their protocol and readiness itself.
-    secrets: [sandbox-node, claude-code, jev, kb-mcp]
+    secrets: [sandbox-node, claude-code, jev, kb-mcp, ha-mcp]
     networks: [aio]
 networks:
   aio:
@@ -53,3 +54,5 @@ secrets:
     file: ${AIO_SECRET_JEV:-/dev/null}
   kb-mcp:
     file: ${AIO_SECRET_KB_MCP:-/dev/null}
+  ha-mcp:
+    file: ${AIO_SECRET_HA_MCP:-/dev/null}

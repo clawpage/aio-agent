@@ -31,6 +31,8 @@ export function memberConfig(base: Config, userId: string, port: number, model: 
     bridge:{...base.bridge,models:model===MEMBER_GPT_MODEL?[model]:[]},
     // The owner's knowledge-base address is never inherited; the gateway grants a listed member its own.
     kb:undefined,
+    // Nor its Home Assistant address: the gateway grants a listed account its own.
+    ha:undefined,
     // Nor the owner's schedule tool: the gateway gives every member one that reaches only its own schedules.
     schedule:undefined,
     // Nor its image tool: each account's saves only into its own workspace.

@@ -10,6 +10,7 @@ import {MEMBER_CLAUDE_MODEL,MEMBER_EFFORT,MEMBER_EFFORTS,MEMBER_GPT_MODEL} from 
 import type {ShareStore} from './share.js';
 import type {DecisionGateway} from './decision.js';
 import type {KbGateway} from './kb.js';
+import type {HaGateway} from './ha.js';
 import type {ScheduleGateway} from './scheduleTool.js';
 import type {BrowserGateway} from './browser/gateway.js';
 import type {HostTokenSource} from './codex/hostTokens.js';
@@ -31,7 +32,7 @@ export class MemberModelGateway {
   private claudeModels=new Map<string,string>();
   private gptUsers=new Set<string>();
   private server:http.Server|null=null;
-  constructor(private cfg:Config,private log:Logger,private share?:ShareStore,private decision?:DecisionGateway,private kb?:KbGateway,private schedule?:ScheduleGateway,private hostTokens?:Pick<HostTokenSource,'getTokens'|'invalidate'>,private image?:ImageGateway,private browser?:BrowserGateway){}
+  constructor(private cfg:Config,private log:Logger,private share?:ShareStore,private decision?:DecisionGateway,private kb?:KbGateway,private schedule?:ScheduleGateway,private hostTokens?:Pick<HostTokenSource,'getTokens'|'invalidate'>,private image?:ImageGateway,private browser?:BrowserGateway,private ha?:HaGateway){}
   provision(cfg:Config):void {
     fs.mkdirSync(cfg.dataDir,{recursive:true,mode:0o700});
     const file=path.join(cfg.dataDir,'model-token');
@@ -45,6 +46,7 @@ export class MemberModelGateway {
     this.share?.provision(cfg);
     this.decision?.provision(cfg);
     this.kb?.provision(cfg);
+    this.ha?.provision(cfg);
     this.schedule?.provision(cfg);
     this.image?.provision(cfg);
     this.browser?.provision(cfg);
@@ -63,6 +65,7 @@ export class MemberModelGateway {
       if(this.share&&(req.url??'').startsWith('/share/')){await this.share.handleApi(req,res);return;}
       if(this.decision&&(req.url??'').startsWith('/decision/')){await this.decision.handle(req,res);return;}
       if(this.kb&&(req.url??'').startsWith('/kb/')){await this.kb.handle(req,res);return;}
+      if(this.ha?.owns(req.url)){await this.ha.handle(req,res);return;}
       if(this.schedule&&(req.url??'').startsWith('/schedule/')){await this.schedule.handle(req,res);return;}
       if(this.image&&(req.url??'').startsWith('/image/')){await this.image.handle(req,res);return;}
       if(this.browser&&(req.url??'').startsWith('/browser/')){await this.browser.handle(req,res);return;}

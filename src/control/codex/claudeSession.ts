@@ -10,6 +10,7 @@ import { ClaudeStreamTranslator } from "./claudeTranslator.js";
 import { tabMcpServers, type BrowserTask } from "../browser/tabs.js";
 import { decisionMcpServers } from "../decision.js";
 import { kbMcpServers } from "../kb.js";
+import { haMcpServers } from "../ha.js";
 import { scheduleMcpServers } from "../scheduleTool.js";
 import { imageMcpServers } from "../imageTool.js";
 import { JsonRpcResponseError } from "./jsonrpc.js";
@@ -24,7 +25,7 @@ function notDelivered(): Error {
  * otherwise the legacy single-page endpoint the sandbox Codex is limited to.
  */
 function mcpConfig(browserTask: BrowserTask | undefined, cfg: Config): string {
-  return JSON.stringify({ mcpServers: browserTask ? { ...tabMcpServers(browserTask), ...decisionMcpServers(cfg), ...scheduleMcpServers(cfg), ...imageMcpServers(cfg), ...kbMcpServers(cfg) } : { aio_browser: { type: "http", url: "http://127.0.0.1:8080/mcp" } } });
+  return JSON.stringify({ mcpServers: browserTask ? { ...tabMcpServers(browserTask), ...decisionMcpServers(cfg), ...scheduleMcpServers(cfg), ...imageMcpServers(cfg), ...kbMcpServers(cfg), ...haMcpServers(cfg) } : { aio_browser: { type: "http", url: "http://127.0.0.1:8080/mcp" } } });
 }
 
 /**

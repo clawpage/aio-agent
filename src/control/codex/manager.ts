@@ -13,6 +13,7 @@ import { CLAUDE_CODE_PROVIDER_ID, type ClaudeCodeHarness } from "../claudeCode.j
 import { withTabPolicy, type BrowserTask, type TabServerLike } from "../browser/tabs.js";
 import { DECISION_POLICY } from "../decision.js";
 import { KB_POLICY } from "../kb.js";
+import { HA_POLICY } from "../ha.js";
 import { EXPERIENCE_POLICY } from "./experience.js";
 import { SCHEDULE_POLICY } from "../scheduleTool.js";
 import { IMAGE_POLICY } from "../imageTool.js";
@@ -1155,7 +1156,7 @@ export class AgentManager {
   #threadSettings(conversation: ConversationRow): { developerInstructions: string; browserTask: BrowserTask | undefined } {
     const soul = readSoul(this.#cfg).content;
     const withTabs = this.#tabs ? withTabPolicy(soul) : soul;
-    const policies = [EXPERIENCE_POLICY, this.#cfg.decision ? DECISION_POLICY : "", this.#cfg.schedule ? SCHEDULE_POLICY : "", this.#cfg.image ? IMAGE_POLICY : "", this.#cfg.kb ? KB_POLICY : ""].filter(Boolean);
+    const policies = [EXPERIENCE_POLICY, this.#cfg.decision ? DECISION_POLICY : "", this.#cfg.schedule ? SCHEDULE_POLICY : "", this.#cfg.image ? IMAGE_POLICY : "", this.#cfg.kb ? KB_POLICY : "", this.#cfg.ha ? HA_POLICY : ""].filter(Boolean);
     const developerInstructions = policies.length ? [withTabs.trimEnd(), ...policies].join("\n\n").trim() : withTabs;
     // Every execution thread gets tab tools under its conversation's identity,
     // which stays the same across its turns, resumes and forks.

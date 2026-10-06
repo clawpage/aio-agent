@@ -291,6 +291,19 @@ owner 可以把宿主机上的一个知识库 MCP 服务（streamable HTTP）接
   多列一个 `kb_note`：每次只在 workspace `raw/aio-notes/<用户名>/` 新建一条笔记文件，不改不删已有内容，之后经 aio-kb
   的整理流程编进主题页（所以刚记下的内容暂时搜不到）。获准写入的账号同样要在 `PA_KB_MCP_MEMBERS` 里才拿得到 `aio_kb`。
 
+## Home Assistant（可选，按账号授权）
+
+owner 可以把家里 Home Assistant 的官方 MCP Server 集成（Assist API）接给指定账号的执行会话。设置 `PA_HA_MCP_URL`（如 `http://<HA 地址>:8124/api/mcp`）后：
+
+- **谁能用**：只有 `PA_HA_MCP_ACCOUNTS` 列出的用户名（owner 也要列进去才有）。现有部署只给语音配件账号 `betaw`。
+- **怎么接**：和知识库同一套成员网关转发（`McpGateway`）：获准账号的执行会话注册 MCP 服务 `aio_ha`，地址是网关上的
+  `/ha/<该运行时的令牌>/mcp`，网关附上 HA 的长期访问令牌转给上游。令牌从 `PA_HA_MCP_SECRETS_FILE`（`HA_MCP_TOKEN=`，权限 600/400；
+  compose 部署用 `AIO_SECRET_HA_MCP` 挂进控制面）读取，只留在控制面进程里；Codex 的受管策略只为获准的运行时放行这一条地址。
+- **能做什么由 HA 决定**：MCP Server 集成只提供「暴露给 Assist」的实体（HA → 设置 → 语音助手 → 暴露），工具是 HA 的意图
+  （`HassTurnOn` / `HassTurnOff` / `HassLightSet` / `HassClimateSetTemperature` / 媒体 / 扫地机 / 购物清单 / `GetLiveContext` 读状态等）。
+  要收窄或放宽 betaw 能碰的设备，就在 HA 里改暴露名单；收回整个授权：把账号移出 `PA_HA_MCP_ACCOUNTS` 重启，或在 HA 里删掉这枚长期令牌。
+- 执行会话的提示要求只操作用户这次要求的设备、操作后读一次状态确认。
+
 ## 分享网页（公开）
 
 沙箱内置 `aio-share` skill（Codex 与 Claude Code 都能用）：智能体把页面目录
@@ -499,6 +512,9 @@ npm run build && npx playwright test --config playwright.local.config.ts
 | `PA_KB_MCP_URL` | 空 | 宿主机上知识库 MCP 服务的地址（如 `http://127.0.0.1:4797/mcp`）；为空则不提供知识库 |
 | `PA_KB_MCP_SECRETS_FILE` | `~/.config/aio-agent/kb-mcp.env` | `KB_MCP_TOKEN` 的私有文件（环境变量优先；权限宽于 600/400 拒绝）；取不到则不提供知识库 |
 | `PA_KB_MCP_MEMBERS` | 空 | 获准使用知识库的成员用户名，逗号分隔；owner 始终可用 |
+| `PA_HA_MCP_URL` | 空 | Home Assistant MCP Server 的地址（如 `http://<HA>:8124/api/mcp`）；为空则不提供 |
+| `PA_HA_MCP_SECRETS_FILE` | `~/.config/aio-agent/ha-mcp.env` | `HA_MCP_TOKEN`（HA 长期访问令牌）的私有文件（环境变量优先；权限宽于 600/400 拒绝） |
+| `PA_HA_MCP_ACCOUNTS` | 空 | 获准操作 Home Assistant 的用户名，逗号分隔（owner 也要列出才有） |
 | `PA_ANTHROPIC_API_BASE_URL` | `https://api.anthropic.com` | 成员模型网关转发 Claude 请求的上游 |
 | `PA_CHATGPT_CODEX_URL` | `https://chatgpt.com/backend-api/codex` | 成员模型网关转发 `gpt-6.1-sol` 成员请求的上游（Codex 的 ChatGPT 后端） |
 | `PA_SANDBOX_PORT` | `18081` | 沙箱发布到 loopback 的端口 |
