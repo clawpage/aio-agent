@@ -310,10 +310,12 @@ export function TaskChat({ onDetails, onOpenLink, onOpenFileInBrowser, onExpired
             const next = new Set(old);
             for (const e of entries) {
                 const id = (e.target as HTMLElement).dataset.progressFor!;
-                if (e.isIntersecting) next.add(id); else next.delete(id);
+                // Most of the card, or (a card taller than the feed, such as one with a long draft) most of the feed.
+                const seen = e.isIntersecting && (e.intersectionRatio >= 0.6 || (!!e.rootBounds && e.intersectionRect.height >= e.rootBounds.height * 0.6));
+                if (seen) next.add(id); else next.delete(id);
             }
             return next;
-        }), { root, threshold: 0.6 });
+        }), { root, threshold: [0, 0.2, 0.4, 0.6, 0.8, 1] });
         for (const id of needsKey.split(",")) {
             const card = root.querySelector(`[data-progress-for="${CSS.escape(id)}"]`);
             if (card) observer.observe(card);
@@ -345,6 +347,8 @@ export function TaskChat({ onDetails, onOpenLink, onOpenFileInBrowser, onExpired
           })()}
           {t.status === "planning" && <DispatchHint/>}
           {t.waitReason && <p className="task-intro task-wait-reason">{t.waitReason.message}</p>}
+          {/* What the executor wrote before its question (a draft to review, what it found so far): the question is about it. */}
+          {t.status === "needs_input" && t.result && <div className="task-question-context"><MessagePreview title={t.title}><Markdown source={t.result} onOpenLink={onOpenLink} onOpenFile={setPreview}/><MessageFileCards text={t.result} onOpen={setPreview} onOpenLink={onOpenLink}/></MessagePreview></div>}
           {t.status === "needs_input" && t.clarification && <div className="task-question" role="status" aria-label="需要你补充">
             <div className="task-question-heading"><span aria-hidden="true">?</span><strong>需要你补充</strong></div>
             <p>{t.clarification}</p>

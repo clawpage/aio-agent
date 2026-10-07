@@ -49,3 +49,30 @@ test("no bubble when nothing waits for you, or the waiting card is already on sc
   await expect(page.locator('[data-progress-for="ask-1"]')).toBeInViewport({ timeout: 10_000 });
   await expect(page.getByRole("group", { name: "等你处理的任务" })).toHaveCount(0);
 });
+
+test("a waiting task shows what it wrote before its question, such as the draft to review", async ({ page }, info) => {
+  const review = { ...asking, id: "review-1", title: "撰写即刻帖子供审核", text: "先发帖子给我review", conversationId: "c-review", result: "我选“AI 的记忆应该能查账”这个观点。\n\n---\n\n最近看到有人让几个 AI 共用一套记忆。\n\n**记得多是能力，记得有据才值得信任。**\n\n---\n\n以上是待审稿，尚未发布。", clarification: "这版即刻帖子是否通过？", options: ["通过，按这版发布", "写得更口语一点"] };
+  await open(page, [asking, ...done, review]);
+  const card = page.locator('[data-progress-for="review-1"]');
+  const draft = card.locator(".task-question-context");
+  await expect(draft).toContainText("最近看到有人让几个 AI 共用一套记忆");
+  await expect(draft.locator("strong")).toHaveText("记得多是能力，记得有据才值得信任。");
+  // The draft comes first, then the question about it.
+  const question = card.locator(".task-question");
+  await expect(question).toContainText("这版即刻帖子是否通过？");
+  expect((await draft.boundingBox())!.y).toBeLessThan((await question.boundingBox())!.y);
+  // A task that left no text before its question shows only the question.
+  await expect(page.locator('[data-progress-for="ask-1"] .task-question-context')).toHaveCount(0);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
+  await card.scrollIntoViewIfNeeded();
+  await page.screenshot({ path: info.outputPath("needs-you-draft.png") });
+});
+
+test("a waiting card taller than the feed, with a long draft, counts as seen once it fills the view", async ({ page }) => {
+  const long = { ...asking, id: "long-1", title: "长稿待审", conversationId: "c-long", result: Array.from({ length: 40 }, (_, i) => `第 ${i + 1} 段草稿内容，用来把卡片撑得比屏幕还高。`).join("\n\n"), clarification: "这版可以吗？" };
+  await open(page, [long, ...done]);
+  const bubbles = page.getByRole("group", { name: "等你处理的任务" }).getByRole("button");
+  await expect(bubbles).toHaveCount(1);
+  await bubbles.first().click();
+  await expect(bubbles).toHaveCount(0);
+});

@@ -3149,6 +3149,8 @@ textarea:focus {
 .task-question-heading > span { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; border: 1.5px solid currentColor; border-radius: 50%; font-weight: 700; }
 .task-question > p { margin: 10px 0; font-size: 15px; line-height: 1.65; white-space: pre-wrap; overflow-wrap: anywhere; }
 .task-question-hint { display: block; font-size: 12px; color: var(--text-dim); }
+/* The text a waiting task left before its question, e.g. the draft the question asks about. */
+.task-question-context { margin: 8px 4px 10px; color: var(--text); }
 
 .task-list-page, .schedule-page { display:flex; flex-direction:column; height:100%; min-height:0; }
 .task-list-scroll { overflow:auto; padding:20px; flex:1; }
