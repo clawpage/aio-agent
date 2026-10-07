@@ -46,6 +46,8 @@ export interface TaskPlan {
     jev?: JevRelevance | null;
     /** Related tasks this task's turn gave the executor in full, by a fingerprint of what it was given. */
     injectedContext?: Record<string, string>;
+    /** The executor rules version this task's turn gave its thread in full. */
+    rulesVersion?: string;
 }
 export interface PlanningTask {
     id: string;

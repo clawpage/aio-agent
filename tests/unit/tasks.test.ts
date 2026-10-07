@@ -270,7 +270,10 @@ describe("main inbox delegation", () => {
         expect(tasks.view(tasks.get(third.id)!).conversationId).toBe(original.conversationId);
         const plan=JSON.parse(tasks.get(third.id)!.plan_json!);
         expect(plan.ownedResources).toBeUndefined();
-        expect(codex.startedTurns.at(-1)!.text).toContain("按用户任务实际需要使用文件、浏览器和其他工具");
+        // The thread already holds the executor rules: they are named by version, not repeated.
+        expect(codex.startedTurns.at(-1)!.text).not.toContain("按用户任务实际需要使用文件、浏览器和其他工具");
+        expect(codex.startedTurns.at(-1)!.text).toMatch(/执行约束（版本 [0-9a-f]{8}）已在本会话前文给出/);
+        expect(codex.startedTurns.at(-1)!.text).toContain(`/tasks/${third.id}/`);
         expect(tasks.get(second.id)?.result).toBe('Second');expect(tasks.get(original.id)?.result).toBe('Original');
     });
     it("turns an explicit reference into a followup if its task completes during planning",async()=>{
@@ -280,6 +283,31 @@ describe("main inbox delegation", () => {
         resolve(JSON.stringify({title:"detail",appendTo:null,related:[],dependencies:[],resources:[]}));await tick();await tick();
         expect(tasks.get(update.id)?.status).toBe("running");expect(tasks.get(update.id)?.merged_into).toBeNull();expect(codex.steers).toHaveLength(0);
         expect(codex.startedTurns.at(-1)!.text).toContain(`相关任务 ${first.id} 的详情已在本会话前文中`);
+    });
+    it("gives the executor rules to a thread once per version, and in full again after a change or compaction",async()=>{
+        const RULE="按用户任务实际需要使用文件、浏览器和其他工具";
+        let latest="";
+        const run=async(text:string)=>{const t=submit(text,latest||undefined);await tick();const sent=codex.startedTurns.at(-1)!;await codex.runTurn(sent.turnId,{text:`${text} 完成`});await tick();latest=t.id;return {task:tasks.get(t.id)!,sent};};
+        const first=await run("first");
+        expect(first.sent.text).toContain(RULE);
+        const version=first.sent.text.match(/执行约束（版本 ([0-9a-f]{8})；/)?.[1];
+        expect(version).toBeTruthy();expect(JSON.parse(first.task.plan_json!).rulesVersion).toBe(version);
+        // Resumed on the same thread: named by version only.
+        const second=await run("second");
+        expect(second.sent.threadId).toBe(first.sent.threadId);
+        expect(second.sent.text).not.toContain(RULE);expect(second.sent.text).toContain(`执行约束（版本 ${version}）已在本会话前文给出`);
+        expect(JSON.parse(second.task.plan_json!).rulesVersion).toBeUndefined();
+        // The thread holds an older version of the rules: given in full again.
+        db.prepare("UPDATE tasks SET plan_json=json_set(plan_json,'$.rulesVersion','00000000') WHERE id=?").run(first.task.id);
+        const third=await run("third");
+        expect(third.sent.text).toContain(RULE);
+        // After the thread compacted, the rules may be gone: given in full again.
+        db.prepare("INSERT INTO events(conversation_id,turn_id,type,payload,created_at) VALUES(?,?,?,?,?)")
+            .run(third.task.execution_conversation_id,third.task.turn_id,"item/completed",JSON.stringify({item:{type:"contextCompaction",id:"c1"}}),Date.now());
+        const fourth=await run("fourth");
+        expect(fourth.sent.threadId).toBe(first.sent.threadId);
+        expect(fourth.sent.text).toContain(RULE);
+        expect((await run("fifth")).sent.text).not.toContain(RULE);
     });
     it("names related tasks a resumed thread already holds, and gives them in full again once that is no longer so",async()=>{
         writeAgentSettings(db,{model:"gpt-6-sol",effort:null});

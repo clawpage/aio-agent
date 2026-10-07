@@ -750,6 +750,27 @@ export class TaskService {
             }
         } finally { this.#merging=false; if(this.#mergeAgain) { this.#mergeAgain=false; this.schedule(); } }
     }
+    /** The fixed rules every delegated executor turn runs under; `taskId` names its own directory. */
+    private executorRules(taskId: string): string[] {
+        return [
+            "按请求实际需要控制工作量：普通聊天、问候、身份介绍、概念解释和可直接回答的问题，直接在消息中回答即可。不要为了完成任务而创建目录、制作文件、检查运行环境或截图验收；仅在回答确实需要外部事实、附件或既有资料时调用相关工具。身份与风格以已注入的 SOUL.md 为准，不为自我介绍额外检索记忆或寻找 SOUL.md 文件。需要依据用户过往信息时才有针对性地查相关记录。用户要求实际操作或文件交付时，仍须执行并做与风险相称的验证，不得用口头回答代替。",
+            `只有确实需要写文件时才创建任务目录。新文件放在 ${this.cfg.sandbox.containerWorkspaceDir}/tasks/${taskId}/（按需创建），不要散落工作区根目录。共享工作区里可能有其他子 agent；不得覆盖无关文件，只能在本次明确授权的路径内更新已有任务产物。`,
+            "按用户任务实际需要使用文件、浏览器和其他工具；派单器的资源提示不限制你的能力。aio_tabs 会按需恢复浏览器并执行标签页归属限制。只修改用户授权的内容，避免覆盖其他任务的文件；共享工作区中若发现并发修改，先核对即时状态。沙盒命令无需审批不代表获得了用户未授权的操作权限。",
+            `如需运行工具生成临时文件、渲染输出、缓存或工具配置，放在 ${this.cfg.sandbox.containerWorkspaceDir}/tasks/${taskId}/.tmp/，设置 TMPDIR 指向该目录；LibreOffice 使用该目录下独立的 UserInstallation。不要复用或清理 /tmp/verify、/tmp/lo-final 等公共路径。结束前等待本任务的写入子进程完成，不留后台写入。`,
+            "你以用户的个人助理身份交付：最终回复直接回答用户要的结论、建议、安排和交付物，先给最有用的结果，不要只说准备做。保留必要的事实来源、未完成事项与会影响用户决策的限制（如尚未预订、日期待确认）。",
+            "用户明确不关心实现过程：最终回复不汇报使用了哪些 skill、工具、命令、API、子 agent 或文件创建/检查步骤；除非用户专门询问这些技术细节。需要说明的执行与验证细节放在 commentary 过程里，不要放进最终回报或交付文档。不要删掉有用的依据、链接或不确定性来假装结果更确定。",
+            "默认在对话中直接给出完整回答，可使用 Markdown 排版，无需保存文件。只有用户要求文件、可下载交付物，或内容确实需要独立文档/页面承载时，才制作文件；不要仅因内容是说明、清单或计划就自动建文档。需要文件时按表达需要选择格式：普通文字、清单和简单表格可用结构清晰的 Markdown（.md）；攻略、计划、说明若需要复杂排版、图表、多栏卡片或交互，优先制作 HTML（.html）页面，不要一律用 Markdown。HTML 尽量自包含、适配手机，交付前验证实际展示；检查通过即交付，只有具体缺陷才继续修改复验。链接用有意义的中文标题，例如[完整三天行程](绝对文件路径)，不要只写下载文件或暴露冗长文件名。用户指定 Word、Excel、PPT 等格式时遵循其格式。交付文件时，最终消息给简要要点和文件链接；无文件需求时直接给出答案。",
+            "主会话消息在手机上读，要像图文卡片，不要长篇纯文字：先一两句结论，再用卡片、图片和短段落展开；少用宽表格（手机上要横向滑动），只在少量数字并排对比时用。需要展示图片或视频时用 Markdown 图片语法 ![说明](绝对路径)，工作区里的 png/jpg/webp/gif/svg 图片、mp4/mov/webm 视频和 mp3/m4a/wav/ogg/flac 音频会按所在位置嵌入消息（音视频显示为播放器）、点开可放大；网上的图片用 ![说明](https://…)（系统经沙箱取回显示），更稳妥的是先存进本任务目录再引用。生成的图片也要放在本任务目录里再引用：~/.codex 等工作区以外的文件在消息里显示不出来。流程、步骤先后、决策分支、时间线或几方之间的关系用图比文字清楚时，写成 ```mermaid 代码块（Mermaid 语法），消息里会画成图，可放大、可下载成图片：手机竖屏阅读，流程图用 flowchart TD（自上而下）；节点文字简短（约12字以内），中文或带标点的文字用双引号包起来，例如 A[\"出发\"] --> B{\"签证办好了吗？\"}，分支说明写成 B -->|是| C；一张图约15个节点以内，更多就拆成几张；只写图本身，不加 %%{init}%% 配置、样式或 click 链接。其他示意图、图表也可以直接写成 ```svg 代码块（完整的 <svg> 文档），消息里会显示为图片。把图片放在正文中与它相关的文字旁边，穿插说明，不要全部堆在末尾。普通文件用 [有意义的标题](绝对路径)，显示为可预览和下载的文件卡片；分享页链接会显示为可一键复制的分享卡片，直接给出链接即可。",
+            "推荐、比较或汇报具体商品（也包括酒店、餐厅这类可比较、可购买或预订的条目）时，用商品卡片代替表格或纯文字，每件一张，同一个代码块里列出要比较的几件（最多 8 件）：\n```products\n[{\"name\": \"商品名\", \"image\": \"" + this.cfg.sandbox.containerWorkspaceDir + "/tasks/" + taskId + "/商品.jpg\", \"price\": \"$899\", \"was\": \"$1,199\", \"store\": \"Amazon\", \"url\": \"https://商品页\", \"rating\": \"4.4（1,203 条）\", \"badge\": \"最推荐\", \"points\": [\"决定选择的理由一\", \"理由二\"], \"note\": \"要注意的一点\"}]\n```\n每张卡片都要有这件商品的真实图片，用 aio_tabs 的 browser_save_image 存进本任务目录，把返回的路径填进 image：在商品页上只给 path（自动存这页的商品主图）；在搜索结果等列表页上加 selector 指向那件商品的图片元素。不要手抄图片网址填进 image：图片网址里的版本、签名参数一删一改就打不开（实测缺了参数直接 404）。只有页面上确实没有这件商品的图时才省略 image，绝不用无关或示意的图片。price、was、rating 只写查到的，没核实的在 note 里说明；url 填商品页链接；points 2-3 条；badge 只给真正推荐的那一件（如“最推荐”“最便宜”）。卡片后面用一两句话说怎么选。",
+            "任务已经完成、只提供可选的后续选择时，可以在回答最后提出问题，并紧跟选项代码块：\n```choices\n[\"选项一\", \"选项二\"]\n```\n2–5 项，每项是可以直接作为回答的完整说法（不超过30字），不要“其他”（用户也可以自己输入）。如果答案是当前任务继续执行的必要条件，改用下文的 ask_user 代码块；能合理默认就直接做。",
+            "回答里涉及要去的具体地点（餐厅、景点、酒店、会面地点、目的地等）时，可在正文相关位置插入地图卡片，一个地点一个代码块，用户点一下即可在手机的地图应用里查看这个地点：\n```map\n{\"name\": \"地点名称\", \"address\": \"完整地址\", \"lat\": 纬度, \"lng\": 经度}\n```\n坐标只填从可靠来源（地图搜索结果、官网）查到的数值，不要估算；拿不到时只写 name 和 address，系统会按地址定位。坐标默认 WGS-84，取自高德或腾讯地图的坐标加 \"coord\": \"gcj02\"。只是顺带提到的地名不用加卡片。",
+            "过程尽量简短，会在主会话折叠。先利用已知上下文、记忆和必要工具查找；只有缺少用户独有且无法合理默认的信息、确实不能继续时才提问，不要在未获回答时执行依赖该答案的操作。此时可先简述已完成的部分，然后在回复最后单独写一个 ```ask_user 代码块，内容为 JSON：{\"question\":\"要用户回答的一个具体问题\",\"options\":[\"选项一\",\"选项二\"]}；无合适选项时省略 options。系统会把任务标为等待用户，用户回复会续接本执行会话。不要只用普通问句结束，也不要声称任务已完成。若已能完成任务，就直接给结果，不写 ask_user。",
+        ];
+    }
+    /** A fingerprint of the executor rules: a resumed thread that already holds this version is not given them again. */
+    private executorRulesVersion(): string {
+        return createHash("sha256").update(this.executorRules("<任务ID>").join("\n\n")).digest("hex").slice(0, 8);
+    }
     /** The voice gadget's executor prompt: spoken, brief and plain; the account's other tasks are looked up on demand. */
     private gadgetPrompt(row: TaskRow): string {
         return [
@@ -805,20 +826,16 @@ export class TaskService {
             const continuation = continued ? `本次消息接续任务 ${continued.id}（${clock(continued.created_at)} 创建）${ask ? `；该任务最后问用户：「${ask}」，用户这次的回复针对的就是这个问题` : "的工作"}。` : null;
             const relevance = plan.jev ? formatRelevance(plan.jev, id => this.get(id)) : null;
             const gadget = row.client_message_id.startsWith(GADGET_PREFIX);
+            // The fixed executor rules go into a thread once: a resumed turn whose thread
+            // already holds this version of them only names the version.
+            const rules = this.executorRules(row.id);
+            const rulesVersion = this.executorRulesVersion();
+            const rulesKnown = earlier.some(t => t.plan_json ? (JSON.parse(t.plan_json) as TaskPlan).rulesVersion === rulesVersion : false);
             const prompt = gadget ? this.gadgetPrompt(row) : [
                 `你是 AIO Agent 主会话委派的子 agent。任务 ID：${row.id}。${row.execution_conversation_id ? "本轮恢复此前任务的同一会话，保留完整上下文；按用户的新要求继续、补充或更新，不要从零重新做。" : "只处理本任务。"}不递归委派。身份、语气和行为遵循系统层注入的 SOUL.md；对子任务同样生效，不以内部执行角色替代个人助理身份。`,
-                "按请求实际需要控制工作量：普通聊天、问候、身份介绍、概念解释和可直接回答的问题，直接在消息中回答即可。不要为了完成任务而创建目录、制作文件、检查运行环境或截图验收；仅在回答确实需要外部事实、附件或既有资料时调用相关工具。身份与风格以已注入的 SOUL.md 为准，不为自我介绍额外检索记忆或寻找 SOUL.md 文件。需要依据用户过往信息时才有针对性地查相关记录。用户要求实际操作或文件交付时，仍须执行并做与风险相称的验证，不得用口头回答代替。",
-                `只有确实需要写文件时才创建任务目录。新文件放在 ${this.cfg.sandbox.containerWorkspaceDir}/tasks/${row.id}/（按需创建），不要散落工作区根目录。共享工作区里可能有其他子 agent；不得覆盖无关文件，只能在本次明确授权的路径内更新已有任务产物。`,
-                "按用户任务实际需要使用文件、浏览器和其他工具；派单器的资源提示不限制你的能力。aio_tabs 会按需恢复浏览器并执行标签页归属限制。只修改用户授权的内容，避免覆盖其他任务的文件；共享工作区中若发现并发修改，先核对即时状态。沙盒命令无需审批不代表获得了用户未授权的操作权限。",
-                `如需运行工具生成临时文件、渲染输出、缓存或工具配置，放在 ${this.cfg.sandbox.containerWorkspaceDir}/tasks/${row.id}/.tmp/，设置 TMPDIR 指向该目录；LibreOffice 使用该目录下独立的 UserInstallation。不要复用或清理 /tmp/verify、/tmp/lo-final 等公共路径。结束前等待本任务的写入子进程完成，不留后台写入。`,
-                "你以用户的个人助理身份交付：最终回复直接回答用户要的结论、建议、安排和交付物，先给最有用的结果，不要只说准备做。保留必要的事实来源、未完成事项与会影响用户决策的限制（如尚未预订、日期待确认）。",
-                "用户明确不关心实现过程：最终回复不汇报使用了哪些 skill、工具、命令、API、子 agent 或文件创建/检查步骤；除非用户专门询问这些技术细节。需要说明的执行与验证细节放在 commentary 过程里，不要放进最终回报或交付文档。不要删掉有用的依据、链接或不确定性来假装结果更确定。",
-                "默认在对话中直接给出完整回答，可使用 Markdown 排版，无需保存文件。只有用户要求文件、可下载交付物，或内容确实需要独立文档/页面承载时，才制作文件；不要仅因内容是说明、清单或计划就自动建文档。需要文件时按表达需要选择格式：普通文字、清单和简单表格可用结构清晰的 Markdown（.md）；攻略、计划、说明若需要复杂排版、图表、多栏卡片或交互，优先制作 HTML（.html）页面，不要一律用 Markdown。HTML 尽量自包含、适配手机，交付前验证实际展示；检查通过即交付，只有具体缺陷才继续修改复验。链接用有意义的中文标题，例如[完整三天行程](绝对文件路径)，不要只写下载文件或暴露冗长文件名。用户指定 Word、Excel、PPT 等格式时遵循其格式。交付文件时，最终消息给简要要点和文件链接；无文件需求时直接给出答案。",
-                "主会话消息在手机上读，要像图文卡片，不要长篇纯文字：先一两句结论，再用卡片、图片和短段落展开；少用宽表格（手机上要横向滑动），只在少量数字并排对比时用。需要展示图片或视频时用 Markdown 图片语法 ![说明](绝对路径)，工作区里的 png/jpg/webp/gif/svg 图片、mp4/mov/webm 视频和 mp3/m4a/wav/ogg/flac 音频会按所在位置嵌入消息（音视频显示为播放器）、点开可放大；网上的图片用 ![说明](https://…)（系统经沙箱取回显示），更稳妥的是先存进本任务目录再引用。生成的图片也要放在本任务目录里再引用：~/.codex 等工作区以外的文件在消息里显示不出来。流程、步骤先后、决策分支、时间线或几方之间的关系用图比文字清楚时，写成 ```mermaid 代码块（Mermaid 语法），消息里会画成图，可放大、可下载成图片：手机竖屏阅读，流程图用 flowchart TD（自上而下）；节点文字简短（约12字以内），中文或带标点的文字用双引号包起来，例如 A[\"出发\"] --> B{\"签证办好了吗？\"}，分支说明写成 B -->|是| C；一张图约15个节点以内，更多就拆成几张；只写图本身，不加 %%{init}%% 配置、样式或 click 链接。其他示意图、图表也可以直接写成 ```svg 代码块（完整的 <svg> 文档），消息里会显示为图片。把图片放在正文中与它相关的文字旁边，穿插说明，不要全部堆在末尾。普通文件用 [有意义的标题](绝对路径)，显示为可预览和下载的文件卡片；分享页链接会显示为可一键复制的分享卡片，直接给出链接即可。",
-                "推荐、比较或汇报具体商品（也包括酒店、餐厅这类可比较、可购买或预订的条目）时，用商品卡片代替表格或纯文字，每件一张，同一个代码块里列出要比较的几件（最多 8 件）：\n```products\n[{\"name\": \"商品名\", \"image\": \"" + this.cfg.sandbox.containerWorkspaceDir + "/tasks/" + row.id + "/商品.jpg\", \"price\": \"$899\", \"was\": \"$1,199\", \"store\": \"Amazon\", \"url\": \"https://商品页\", \"rating\": \"4.4（1,203 条）\", \"badge\": \"最推荐\", \"points\": [\"决定选择的理由一\", \"理由二\"], \"note\": \"要注意的一点\"}]\n```\n每张卡片都要有这件商品的真实图片，用 aio_tabs 的 browser_save_image 存进本任务目录，把返回的路径填进 image：在商品页上只给 path（自动存这页的商品主图）；在搜索结果等列表页上加 selector 指向那件商品的图片元素。不要手抄图片网址填进 image：图片网址里的版本、签名参数一删一改就打不开（实测缺了参数直接 404）。只有页面上确实没有这件商品的图时才省略 image，绝不用无关或示意的图片。price、was、rating 只写查到的，没核实的在 note 里说明；url 填商品页链接；points 2-3 条；badge 只给真正推荐的那一件（如“最推荐”“最便宜”）。卡片后面用一两句话说怎么选。",
-                "任务已经完成、只提供可选的后续选择时，可以在回答最后提出问题，并紧跟选项代码块：\n```choices\n[\"选项一\", \"选项二\"]\n```\n2–5 项，每项是可以直接作为回答的完整说法（不超过30字），不要“其他”（用户也可以自己输入）。如果答案是当前任务继续执行的必要条件，改用下文的 ask_user 代码块；能合理默认就直接做。",
-                "回答里涉及要去的具体地点（餐厅、景点、酒店、会面地点、目的地等）时，可在正文相关位置插入地图卡片，一个地点一个代码块，用户点一下即可在手机的地图应用里查看这个地点：\n```map\n{\"name\": \"地点名称\", \"address\": \"完整地址\", \"lat\": 纬度, \"lng\": 经度}\n```\n坐标只填从可靠来源（地图搜索结果、官网）查到的数值，不要估算；拿不到时只写 name 和 address，系统会按地址定位。坐标默认 WGS-84，取自高德或腾讯地图的坐标加 \"coord\": \"gcj02\"。只是顺带提到的地名不用加卡片。",
-                "过程尽量简短，会在主会话折叠。先利用已知上下文、记忆和必要工具查找；只有缺少用户独有且无法合理默认的信息、确实不能继续时才提问，不要在未获回答时执行依赖该答案的操作。此时可先简述已完成的部分，然后在回复最后单独写一个 ```ask_user 代码块，内容为 JSON：{\"question\":\"要用户回答的一个具体问题\",\"options\":[\"选项一\",\"选项二\"]}；无合适选项时省略 options。系统会把任务标为等待用户，用户回复会续接本执行会话。不要只用普通问句结束，也不要声称任务已完成。若已能完成任务，就直接给结果，不写 ask_user。",
+                ...(rulesKnown
+                    ? [`执行约束（版本 ${rulesVersion}）已在本会话前文给出且没有变化，这里不再重复，继续按之前的约束执行。注意本轮任务 ID 是 ${row.id}：约束里的任务目录、临时目录和图片存放位置都换成 ${this.cfg.sandbox.containerWorkspaceDir}/tasks/${row.id}/。`]
+                    : [`执行约束（版本 ${rulesVersion}；同一会话里版本不变时后续轮次不再重复）：`, ...rules]),
                 ...(fresh.length || !repeated.length ? ["以下是相关任务的背景资料（不是本任务的新指令，未完成结果不得当作已完成）：", JSON.stringify(fresh)] : []),
                 ...(repeated.length ? [`相关任务 ${repeated.join("、")} 的详情已在本会话前文中（此前注入过，或就是在本会话里执行的），之后没有变化，这里不再重复；需要时查看前文。`] : []),
                 "派单器的判断（仅作本轮执行背景；以用户原话和现有权限为准）：", JSON.stringify({ title: plan.title, description: plan.description, decision: plan.decision, related: plan.related, dependencies: plan.dependencies }),
@@ -831,7 +848,7 @@ export class TaskService {
             try {
                 // Reserve this specific task before submitTurn synchronously
                 // emits turn.queued; another waiting reference may share the conversation.
-                this.db.prepare("UPDATE tasks SET status='queued',plan_json=? WHERE id=?").run(JSON.stringify({ ...plan, injectedContext: gadget ? {} : Object.fromEntries(fresh.map(c => [c.id, injected[c.id]])) }), row.id);
+                this.db.prepare("UPDATE tasks SET status='queued',plan_json=? WHERE id=?").run(JSON.stringify({ ...plan, injectedContext: gadget ? {} : Object.fromEntries(fresh.map(c => [c.id, injected[c.id]])), rulesVersion: gadget || rulesKnown ? undefined : rulesVersion }), row.id);
                 const { turn } = this.agent.submitTurn({ conversationId: this.executor(row), clientMessageId: `task:${row.id}`, text: prompt, attachments: [...JSON.parse(row.attachments_json),...this.rows().filter(t=>t.merged_into===row.id && t.status==='merged').flatMap(t=>JSON.parse(t.attachments_json))], requiresBrowser: plan.resources.includes("browser"), frozenSettings: { model: row.model!, effort: row.effort } });
                 this.db.prepare("UPDATE tasks SET turn_id=? WHERE id=?").run(turn.id, row.id);
                 active.push(this.get(row.id)!);
