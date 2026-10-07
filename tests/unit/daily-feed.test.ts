@@ -141,6 +141,30 @@ describe("what the daily feed keeps in mind", () => {
     expect(section(brief(), "记住的内容 memory：")).toEqual({ care: [], avoid: [], note: [] });
   });
 
+  it("reads a week of the person's tasks, the newest in detail and older ones by title, and asks it to check what they are shopping for", async () => {
+    tasks.submit({ text: "seed", clientMessageId: "seed" });
+    await tick();
+    codex.completeTurn(codex.startedTurns[0]!.turnId);
+    await tick();
+    const day = 86_400_000, now = Date.now();
+    const insert = db.prepare("INSERT INTO tasks (id,client_message_id,conversation_id,title,input_text,attachments_json,created_at,status) VALUES (?,?,?,?,?,'[]',?,'completed')");
+    const copy = (id: string, title: string, input: string, at: number) => insert.run(id, id, agent.createConversation({ ownerId: "owner_1", title }).id, title, input, at);
+    copy("task_old", "八天前的事", "八天前的请求", now - 8 * day);
+    copy("task_ring", "复查卡地亚项链折扣", "卡地亚项链的请求", now - 3 * day);
+    copy("task_ring2", "复查卡地亚项链折扣", "卡地亚项链的请求", now - 3 * day + 1000);
+    for (let i = 0; i < 70; i++) copy(`task_n${i}`, `今天的第 ${i} 件`, `今天的请求 ${i}`, now - day + i * 1000);
+    tasks.runScheduleNow(feed().id, "owner_1");
+    await tick();
+    const records = section(brief(), "用户最近 7 天的任务记录（新到旧；最新 60 条带请求和结果摘要，更早的只列日期和标题，同名只列最近一次）：") as Array<{ title: string; request?: string }>;
+    expect(records.filter((t) => t.request)).toHaveLength(60);
+    // Older than the newest 60 yet within the week: there by title, once.
+    expect(records.filter((t) => t.title === "复查卡地亚项链折扣")).toEqual([{ date: expect.any(String), title: "复查卡地亚项链折扣" }]);
+    expect(records.some((t) => t.title === "八天前的事")).toBe(false);
+    expect(brief()).toContain("3-8 件事");
+    expect(brief()).toContain("邮箱和订单物流只是其中一项");
+    expect(brief()).toContain("不受上文“按请求实际需要控制工作量”“过程尽量简短”的限制");
+  });
+
   it("takes the person's instruction, time and memory, and the next run follows them", async () => {
     const said = tasks.updateFeed("owner_1", {
       instruction: "每天看一下 Gmail 有没有要交的账单，少说新闻", at: "07:30",

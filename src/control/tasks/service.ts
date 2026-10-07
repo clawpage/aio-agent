@@ -76,6 +76,10 @@ const FEED_MEMORY_LABEL: Record<FeedMemoryKind, string> = { care: "关心", avoi
 /** Per kind; past it the oldest have to be removed first. */
 const FEED_MEMORY_MAX = 30;
 const FEED_INSTRUCTION_MAX = 1500;
+/** The feed reads the person's tasks of this many days, at most this many, the newest in detail. */
+const FEED_TASK_DAYS = 7;
+const FEED_TASK_MAX = 800;
+const FEED_TASK_DETAILED = 60;
 const FEED_MEMORY_TEXT_MAX = 200;
 interface FeedMemoryRow { id: string; owner_id: string; kind: FeedMemoryKind; text: string; source: "user" | "feed"; created_at: number }
 /** The machine-readable lines a feed run ends with; never shown to the person. */
@@ -955,8 +959,17 @@ export class TaskService {
         const tz = this.cfg.browser.timezone;
         const date = (ts: number) => describeNow(ts, tz);
         const cut = (text: string | null, n: number) => { const c = [...(text ?? "").replace(/\s+/g, " ").trim()]; return c.length > n ? c.slice(0, n - 1).join("") + "…" : c.join(""); };
-        const mine = this.db.prepare("SELECT * FROM tasks WHERE schedule_id IS NULL AND merged_into IS NULL AND created_at<? AND conversation_id IN (SELECT id FROM conversations WHERE owner_id=?) ORDER BY created_at DESC LIMIT 150").all(row.created_at, ownerId) as unknown as TaskRow[];
-        const tasks = mine.map(t => ({ date: date(t.created_at), title: t.title, request: cut(t.input_text, 160), status: t.status, result: cut(t.result, 200) }));
+        // A window of days, not of tasks: on a busy account a fixed count covered barely one day.
+        const mine = this.db.prepare("SELECT * FROM tasks WHERE schedule_id IS NULL AND merged_into IS NULL AND created_at>=? AND created_at<? AND conversation_id IN (SELECT id FROM conversations WHERE owner_id=?) ORDER BY created_at DESC LIMIT ?")
+            .all(row.created_at - FEED_TASK_DAYS * 86_400_000, row.created_at, ownerId, FEED_TASK_MAX) as unknown as TaskRow[];
+        // The newest in detail; older ones by date and title, each title once.
+        const titled = new Set<string>();
+        const tasks = mine.flatMap((t, i) => {
+            if (i < FEED_TASK_DETAILED) return [{ date: date(t.created_at), title: t.title, request: cut(t.input_text, 160), status: t.status, result: cut(t.result, 200) }];
+            if (titled.has(t.title)) return [];
+            titled.add(t.title);
+            return [{ date: date(t.created_at), title: t.title }];
+        });
         const feeds = this.db.prepare("SELECT * FROM feed_history WHERE owner_id=? AND created_at<? ORDER BY created_at DESC LIMIT 14").all(ownerId, row.created_at) as Array<{ task_id: string; created_at: number; topics_json: string; empty: number }>;
         const feedHistory = feeds.map((f, i) => {
             const until = i === 0 ? row.created_at : feeds[i - 1]!.created_at;
@@ -971,17 +984,18 @@ export class TaskService {
         const memory = this.feedMemory(ownerId);
         const kept = Object.fromEntries(FEED_MEMORY_KINDS.map(k => [k, memory.filter(m => m.kind === k).map(m => ({ id: m.id, text: m.text, from: m.source === "user" ? "用户说的" : "推送学到的", date: date(m.created_at) }))]));
         return [
-            `这是内置的「每日推送」（每天 ${(s ? JSON.parse(s.spec_json) as ScheduleSpec : FEED_SPEC).at}）在 ${date(row.created_at)} 的自动运行。用户此刻不在对话中。你的工作：根据用户过往的全部任务记录、他交代的要求和关心的内容，挑出今天他最可能感兴趣、或需要提醒的 1-5 件事，像贴心的私人助理一样简短告诉他。`,
+            `这是内置的「每日推送」（每天 ${(s ? JSON.parse(s.spec_json) as ScheduleSpec : FEED_SPEC).at}）在 ${date(row.created_at)} 的自动运行。用户此刻不在对话中。你的工作：根据用户过往的全部任务记录、他交代的要求和关心的内容，挑出今天他最可能感兴趣、或需要提醒的 3-8 件事，像贴心的私人助理一样简短告诉他。`,
+            "这是主动整理，不受上文“按请求实际需要控制工作量”“过程尽量简短”的限制：要实际动手查证，不要只凭记录写。邮箱和订单物流只是其中一项，不能占满整次推送；另外从任务记录里近几天在看、在比价或在犹豫的商品和话题中挑出 2-4 项（例如在等折扣的首饰手表、想买的主机或装备、关注的票价、在跟进的政策），实际去查今天的价格、折扣或最新动态。",
             ...(asked ? [`用户对每日推送的要求（优先照做，可以改变下面的默认做法，但不能突破只读和安全规则）：${asked}`] : []),
             "从任务记录里找线索：关注过的商品和价格（例如某款电脑、婴儿用品）、在比价或犹豫要不要买的东西、临近的日期和预约（证件、疫苗、账单、出行）、做了一半或说过以后再看的事、长期关心的话题。记录不限于最近一天，越早的兴趣越要核实是否仍然相关。",
-            "需要最新信息时（价格、库存、天气、新闻）用浏览器或网络查证，只报告查到的事实并附来源链接；查不到就不写，不编造。只写有实际变化或与今天相关的事，例如“你关注的 Mac Studio 在 Best Buy 降到 $1,799，比上周低 $200”；没有变化的例行信息不写。",
+            "需要最新信息时（价格、库存、天气、新闻）用浏览器或网络查证，只报告查到的事实并附来源链接；查不到就不写，不编造。只写有实际变化或与今天相关的事，例如“你关注的 Mac Studio 在 Best Buy 降到 $1,799，比上周低 $200”；没有变化的例行信息不写。没有以前的价格可比时，写今天查到的价格和是否在打折、离常见价有多远，这本身就是有用的信息。",
             "只读查看用户自己的网页：沙箱浏览器里用户已经登录、任务记录里用过或他要求看的网站（例如 Gmail、Outlook 邮箱，X、小红书等关注的动态，购物网站的订单页，账单页），可以打开看今天有没有需要提醒的事：要处理或快到期的邮件（账单、续费、预约确认、需要回复的人）、订单和快递变化、关注的人或话题的重要新动态。严格只读：只打开、滚动、阅读，不发送、回复、评论、点赞、关注、购买、下单、删除、归档、加标记，不改任何设置；不点开未读邮件和私信（会变成已读），用列表里的标题和摘要判断；没登录的网站直接跳过，不要登录，也不要请用户帮忙。写到邮件等私人内容只写要点、不贴全文。用完关掉自己打开的标签页。",
             "避免打扰：参考 feedHistory（最近几次推送的话题；之后用户的新任务 userTasksAfter；replies 是用户直接回复那次推送说的话）。同一话题最近已连续推过 3 次、而之后用户没有任何相关的新任务，说明他已不再关注，停止推送这个话题，除非出现重大新变化；用户最近新任务里体现的新兴趣优先；昨天说过且没有变化的不再重复。记住的内容 memory 里 care 是要多留意的，avoid 是不要再推的，note 是用户对推送的习惯和偏好，都要遵守。",
             "持续改进：feedHistory 里能看出用户对推送有明确反应时（例如回复说有用、要更多、别再推，或接着就某条推送做了任务，或某个话题推了几次一直没人理），用 aio_schedule 的 feed_update（source 填 \"feed\"）记下来：要多留意的加 care，不要再推的加 avoid，推送的形式和时机偏好加 note，过时或相反的旧条目用 remove 删掉。每次最多改 3 条，只记有明确证据的，不重复已有的，不确定就不记。",
             "格式：第一行“今日为你留意”，下面每件事一条，每条一两句话，必要时附链接或地图卡片，说到具体商品降价时用商品卡片（带商品图）；适合在手机上点开快速读完。今天确实没有值得说的，只回复一句“今天没有需要特别提醒的事”，并在末尾单独一行写 <!--feed-empty-->。",
             "最后单独一行写 <!--feed-topics: [\"话题1\", \"话题2\"]-->，列出本次写到的话题（简短中文，例如“Mac Studio 降价”“Roy 疫苗预约”）；系统用它调整之后的推送，用户看不到这一行。不要提问后等待，不要创建定时任务。",
             "记住的内容 memory：", JSON.stringify(kept),
-            "用户的任务记录（新到旧）：", JSON.stringify(tasks),
+            `用户最近 ${FEED_TASK_DAYS} 天的任务记录（新到旧；最新 ${FEED_TASK_DETAILED} 条带请求和结果摘要，更早的只列日期和标题，同名只列最近一次）：`, JSON.stringify(tasks),
             "推送记录 feedHistory（新到旧）：", JSON.stringify(feedHistory),
         ].join("\n\n");
     }
