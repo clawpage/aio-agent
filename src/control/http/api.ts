@@ -660,7 +660,13 @@ export function createApiRouter(context: AppContext): Router {
     const firmware = readFirmware(cfg.gadgetFirmwareDir);
     // The gadget says what it runs (`?running=<app ELF SHA-256>`): with no cable, the log is where to see it.
     const running = typeof req.query.running === "string" && /^[a-f0-9]{64}$/.test(req.query.running) ? req.query.running : null;
-    log.info("gadget firmware check", { account: caller.username, running: running?.slice(0, 12) ?? null, offered: firmware?.elfSha256.slice(0, 12) ?? null });
+    // And its battery meter (percent, mV, seconds since unplugged, where it started, per mille of that with the screen off).
+    const int = (name: string) => (typeof req.query[name] === "string" && /^-?\d{1,9}$/.test(req.query[name] as string) ? Number(req.query[name]) : undefined);
+    const battery = int("pct") === undefined ? null : {
+      pct: int("pct"), mv: int("mv"), onBattery: int("on_battery") === 1, secs: int("secs"),
+      fromPct: int("from_pct"), fromMv: int("from_mv"), screenOffPm: int("screen_off_pm"),
+    };
+    log.info("gadget firmware check", { account: caller.username, running: running?.slice(0, 12) ?? null, offered: firmware?.elfSha256.slice(0, 12) ?? null, battery });
     if (!firmware) { res.status(404).json({ error: "no_firmware" }); return; }
     const { file: _file, ...info } = firmware;
     res.json(info);
