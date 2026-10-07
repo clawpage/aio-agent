@@ -976,15 +976,21 @@ textarea:focus {
   background: none;
   padding: 0;
 }
+/* A table keeps readable columns and scrolls sideways when they do not fit, instead of
+   squeezing every cell down to a character per line. */
 .markdown table {
   border-collapse: collapse;
   display: block;
+  max-width: 100%;
   overflow-x: auto;
+  overflow-wrap: normal;
+  -webkit-overflow-scrolling: touch;
 }
 .markdown th,
 .markdown td {
   border: 1px solid var(--border);
   padding: 4px 8px;
+  min-width: 6.5em;
 }
 .markdown a {
   color: var(--accent);
