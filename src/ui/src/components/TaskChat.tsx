@@ -66,6 +66,8 @@ export function TaskChat({ onDetails, onOpenLink, onOpenFileInBrowser, onExpired
     const [error, setError] = useState<string | null>(null);
     const [preview, setPreview] = useState<string | null>(null);
     const [connected, setConnected] = useState(false);
+    /** "loading" until the feed first arrives (skeletons instead of the empty state), then "entering" while it rises in. */
+    const [arrival, setArrival] = useState<"loading" | "entering" | "settled">("loading");
     useEffect(()=>{onFeed?.({tasks,nextBefore,connected});},[tasks,nextBefore,connected,onFeed]);
     const scroll = useRef<HTMLDivElement>(null);
     const stick = useRef(true);
@@ -97,6 +99,8 @@ export function TaskChat({ onDetails, onOpenLink, onOpenFileInBrowser, onExpired
             if (!pageLoaded.current) {
                 setNextBefore(data.nextBefore);
                 pageLoaded.current = true;
+                setArrival("entering");
+                window.setTimeout(() => setArrival("settled"), 900);
             }
         }
         catch (err) {
@@ -373,11 +377,12 @@ export function TaskChat({ onDetails, onOpenLink, onOpenFileInBrowser, onExpired
             { key: "ai", tone: "ai", label: `${active.length - browserAsks.length} 件在办`, tasks: active.filter(t => !browserAsks.includes(t)), state: t => labels[t.status] ?? t.status },
           ]}/>
         : connected ? "随时可以交给我" : "正在连接…"}</span></div></header>
-    <div className={`chat-scroll task-feed${bubbles ? " has-needs-you" : ""}`} ref={scroll} onScroll={e => onFeedScroll(e.currentTarget)}>
+    <div className={`chat-scroll task-feed${bubbles ? " has-needs-you" : ""}${arrival === "entering" ? " entering" : ""}`} ref={scroll} onScroll={e => onFeedScroll(e.currentTarget)} aria-busy={arrival === "loading" || undefined}>
+      {arrival === "loading" && <div className="feed-skeleton" aria-hidden="true"><i className="sk-user"/><i className="sk-reply"><b/><b/><b/></i><i className="sk-user short"/><i className="sk-reply"><b/><b/></i></div>}
       {nextBefore && <div className="feed-older" ref={olderTop}>{olderState === "failed"
         ? <button className="ghost tiny" onClick={() => void loadOlder()}>更早的任务没加载出来，点此重试</button>
         : <span className="muted tiny">{olderState === "loading" ? "正在加载更早的任务…" : ""}</span>}</div>}
-      {!tasks.length && <div className="empty"><h3>把事情交给我</h3><p>可以接着发不同任务。过程会收拢，完成后在这里回报。</p></div>}
+      {!tasks.length && arrival !== "loading" && <div className="empty"><h3>把事情交给我</h3><p>可以接着发不同任务。过程会收拢，完成后在这里回报。</p></div>}
       {feed.map(({ task: t, report }) => report ? <article className={`msg assistant task-report ${t.status}`} key={`${t.id}:report`} data-task-id={t.id}>
         <div className="task-report-heading"><span>{t.title}</span>{t.schedule && <span className="schedule-badge">定时 · {t.schedule.rule}</span>}<span className="muted tiny">{labels[t.status]}</span></div>
         <MessagePreview title={t.title}><Markdown source={t.result || (t.status === "completed" ? "任务已结束，但没有返回文字结果，请打开详情核对。" : t.error || labels[t.status] || t.status)} onOpenLink={onOpenLink} onOpenFile={setPreview} choices={{ onChoose: option => void choose(t, option), chosen: choosing[`${t.id}:${t.revision}`] ?? replyTo(t)?.text ?? null }}/>{t.result && <MessageFileCards text={t.result} onOpen={setPreview} onOpenLink={onOpenLink}/>}{t.error && t.result && <p className="error">{t.error}</p>}</MessagePreview>

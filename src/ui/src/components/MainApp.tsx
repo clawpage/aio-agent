@@ -276,7 +276,7 @@ export function MainApp() {
         notify(err instanceof Error ? err.message : String(err));
     } };
     if (auth === null)
-        return <div className="boot">加载中…</div>;
+        return <div className="boot boot-loading" role="status"><BrandMark size={44}/><span className="boot-label">加载中…</span></div>;
     if (!auth)
         return <Login notice={notice} onSuccess={check} username={pathUser() ?? undefined}/>;
     if (foreign && username)

@@ -809,7 +809,8 @@ textarea:focus {
 
 .msg {
   display: flex;
-  animation: msg-in var(--dur) var(--ease) both;
+  animation: msg-in 320ms var(--ease) both;
+  transform-origin: left bottom;
 }
 .msg.user {
   justify-content: flex-end;
@@ -895,15 +896,52 @@ textarea:focus {
   }
 }
 
+/* A new message rises a little and settles from the side it belongs to. */
 @keyframes msg-in {
   from {
     opacity: 0;
-    transform: translateY(4px);
+    transform: translateY(8px) scale(0.985);
   }
   to {
     opacity: 1;
     transform: none;
   }
+}
+.msg.user { transform-origin: right bottom; }
+
+/* The first arrival: the last few messages (what is on screen) rise in one after another;
+   their own entrance is folded into it. */
+.task-feed.entering > :is(.task-entry, .task-report) { animation: msg-in 420ms var(--ease) both; }
+.task-feed.entering .msg { animation: none; }
+.task-feed.entering > :nth-last-child(1) { animation-delay: 300ms; }
+.task-feed.entering > :nth-last-child(2) { animation-delay: 250ms; }
+.task-feed.entering > :nth-last-child(3) { animation-delay: 200ms; }
+.task-feed.entering > :nth-last-child(4) { animation-delay: 150ms; }
+.task-feed.entering > :nth-last-child(5) { animation-delay: 100ms; }
+.task-feed.entering > :nth-last-child(6) { animation-delay: 50ms; }
+
+/* Before the feed first arrives: the shape of a conversation, softly shimmering, not an empty page. */
+.feed-skeleton { display: flex; flex-direction: column; gap: 18px; margin-top: auto; padding-bottom: 8px; animation: skeleton-in 300ms ease-out 120ms both; }
+.feed-skeleton i, .feed-skeleton b {
+  display: block;
+  background: linear-gradient(100deg, color-mix(in srgb, var(--text) 6%, transparent) 30%, color-mix(in srgb, var(--text) 11%, transparent) 50%, color-mix(in srgb, var(--text) 6%, transparent) 70%) 0 0 / 300% 100%;
+  animation: media-wait 1.6s linear infinite;
+}
+.feed-skeleton .sk-user { align-self: flex-end; width: min(240px, 58%); height: 44px; border-radius: 18px 18px 6px 18px; }
+.feed-skeleton .sk-user.short { width: min(150px, 40%); }
+.feed-skeleton .sk-reply { display: flex; flex-direction: column; gap: 10px; width: min(560px, 86%); padding: 16px; border-radius: var(--radius-card); background: none; border: 1px solid var(--border); animation: none; }
+.feed-skeleton .sk-reply b { height: 12px; border-radius: 6px; }
+.feed-skeleton .sk-reply b:nth-child(2) { width: 88%; }
+.feed-skeleton .sk-reply b:nth-child(3) { width: 62%; }
+@keyframes skeleton-in { from { opacity: 0; } }
+
+/* The app's loading screen: the same mark, in the same place, as the page before the script arrived. */
+.boot-loading { position: fixed; inset: 0; background: var(--bg); }
+.boot-loading .brand-mark { animation: boot-breathe 1.8s ease-in-out infinite; }
+.boot-label { position: absolute; top: calc(50% + 34px); left: 0; right: 0; text-align: center; font-size: 12px; color: var(--text-dim); animation: skeleton-in 300ms ease-out 1.2s both; }
+@keyframes boot-breathe { 50% { opacity: .72; transform: scale(.96); } }
+@media (prefers-reduced-motion: reduce) {
+  .task-feed.entering > :is(.task-entry, .task-report), .feed-skeleton, .feed-skeleton i, .feed-skeleton b, .boot-loading .brand-mark, .boot-label { animation: none; }
 }
 
 @keyframes menu-in {

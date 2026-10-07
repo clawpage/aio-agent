@@ -12,9 +12,20 @@
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <link rel="manifest" href="/manifest.webmanifest" />
     <title>一站</title>
+    <!-- The page before the app's script and styles arrive: the theme's background and the
+         mark, breathing, where the app's own loading screen shows it next (no white flash). -->
+    <style>
+      html, body { margin: 0; background: #15131c; }
+      @media (prefers-color-scheme: light) { html, body { background: #f6f5f9; } }
+      .boot-splash { position: fixed; inset: 0; display: grid; place-items: center; }
+      .boot-splash svg { animation: boot-in .4s ease-out .15s both, boot-breathe 1.8s ease-in-out .55s infinite; }
+      @keyframes boot-in { from { opacity: 0; transform: scale(.94); } }
+      @keyframes boot-breathe { 50% { opacity: .72; transform: scale(.96); } }
+      @media (prefers-reduced-motion: reduce) { .boot-splash svg { animation: none; } }
+    </style>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root"><div class="boot-splash" aria-label="加载中"><svg width="44" height="44" viewBox="0 0 40 40" aria-hidden="true"><rect width="40" height="40" rx="11" fill="#5a4fe0"/><path d="M7 20H20" stroke="#fff" stroke-width="3.6" stroke-linecap="round"/><path d="M20 20h13" stroke="#fff" stroke-opacity=".45" stroke-width="3.6" stroke-linecap="round"/><circle cx="20" cy="20" r="6.8" fill="#5a4fe0" stroke="#fff" stroke-width="3"/><circle cx="20" cy="20" r="3.2" fill="#ffb547"/></svg></div></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
