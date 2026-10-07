@@ -207,6 +207,13 @@ export const api = {
   openBrowserFile: (path: string, signal?: AbortSignal) =>
     request<{ ok: boolean; tab: import("./types").TaskTab }>("/api/browser/files", { method: "POST", body: { path }, signal }),
   capabilities: () => request<CapabilitiesResponse>("/api/capabilities"),
+  /** Voice input: whether a speech recognizer is configured, and what a WAV recording says. */
+  asr: () => request<{ enabled: boolean }>("/api/asr"),
+  transcribe: (wav: Uint8Array) => {
+    let binary = "";
+    for (let i = 0; i < wav.length; i += 0x8000) binary += String.fromCharCode(...wav.subarray(i, i + 0x8000));
+    return request<{ text: string }>("/api/asr", { method: "POST", body: { audioBase64: btoa(binary) } });
+  },
   sandboxContext: () => request<{ context: string | null }>("/api/sandbox/context"),
 
   ticket: (next = "/") => request<{ ticket: string; origin: string; url: string; expiresAt: number }>("/api/workspace/ticket", { method: "POST", body: { next } }),

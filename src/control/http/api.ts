@@ -463,6 +463,30 @@ export function createApiRouter(context: AppContext): Router {
     }),
   );
 
+  /**
+   * Voice input: the composer's recording (16-bit mono WAV, base64) goes to the
+   * speech server at cfg.asrUrl (the one the voice gadget uses); only the text comes back.
+   */
+  router.get("/asr", requireKind("primary"), requireSession, (_req, res) => {
+    res.json({ enabled: Boolean(cfg.asrUrl) });
+  });
+  router.post("/asr", requireKind("primary"), requireSession, asyncHandler(async (req, res) => {
+    if (!cfg.asrUrl) { res.status(404).json({ error: "not_configured", message: "没有配置语音识别" }); return; }
+    const audio = Buffer.from(typeof req.body?.audioBase64 === "string" ? req.body.audioBase64 : "", "base64");
+    if (audio.byteLength < 44 || audio.toString("ascii", 0, 4) !== "RIFF") { res.status(400).json({ error: "bad_audio", message: "录音格式不对" }); return; }
+    // The speech server takes about a minute of 16 kHz audio.
+    if (audio.byteLength > 2 * 1024 * 1024) { res.status(413).json({ error: "too_long", message: "录音太长，每段请在一分钟内" }); return; }
+    try {
+      const upstream = await fetch(cfg.asrUrl, { method: "POST", headers: { "content-type": "audio/wav" }, body: new Uint8Array(audio), signal: AbortSignal.timeout(30_000) });
+      if (!upstream.ok) throw new Error(`upstream ${upstream.status}`);
+      const json = (await upstream.json()) as { text?: unknown };
+      res.json({ text: typeof json.text === "string" ? json.text.trim() : "" });
+    } catch (err) {
+      log.warn("asr failed", { error: err instanceof Error ? err.message : String(err) });
+      res.status(502).json({ error: "asr_unavailable", message: "语音识别暂时不可用，请稍后再试" });
+    }
+  }));
+
   /** Phone notifications (Web Push): the key to subscribe with, and this account's devices. */
   router.get("/push", requireKind("primary"), requireSession, asyncHandler(async (req, res) => {
     res.setHeader("Cache-Control", "no-store");

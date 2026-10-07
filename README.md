@@ -188,6 +188,14 @@ owner 侧栏的「用量看板」按账号显示每天的 token 趋势、输入/
   - **从反馈里学**：推送运行时能看到之后用户的新任务，以及用户直接回复那次推送说的话（引用推送的任务）；看出明确反应（有用、要更多、别再推，或某话题一直没人理）时自己用 `feed_update`（`source: "feed"`）记下或删掉旧条目，每次最多改 3 条。用户在对话里给推送的反馈也由执行会话记下。「定时任务」页在推送卡片上显示「你的要求」和记住的每一条（推送学到的会标出来）。
 - **管理**：侧栏「定时任务」页可以修改（名称、要做的事、规则，包括一天多个时间和几个不规律的日期）、暂停、恢复、立即运行一次、删除（`PATCH /api/schedules/:id` 与 `POST /api/schedules/:id/:action`）；也可以在主会话里说「暂停天气提醒」「天气提醒改成早晚各一次」「取消价格监控」，派单器据已有定时任务的列表（含每个的 `instruction`）给出 `scheduleAction`，修改时为 `{action:"update"}` 并附改后完整的 `schedule`。改了规则后 `maxRuns` 从当时重新计数；已结束的定时任务改出新的运行时间会重新开始（受进行中上限约束），暂停的仍保持暂停。内置每日推送只能用推送设置（`feed_update`）改。删除不影响已有的运行结果。
 
+## 语音输入（可选）
+
+主会话输入区的麦克风按钮：点一下开始说，再点一下停止（最长一分钟，到时自动停），识别出的文字追加到草稿里，看过、改过再发送，不会自动发出。所有账号都能用。
+
+- **开启**：`PA_ASR_URL` 指向一个语音识别服务（`POST` 一段 16 位单声道 WAV，回 JSON `{text}`），例如 muse-gadget-sdk 的 `tts-server`（SenseVoice，中英文，音频不出本机）。现有部署复用语音配件 betaw 用的那一台（old-mb 上的 `http://192.168.1.118:4910/asr`）。不配置时 `GET /api/asr` 回 `{enabled:false}`，按钮不出现。
+- **链路**：浏览器直接取麦克风原始采样（不用 MediaRecorder，各浏览器格式不一），降到 16 kHz 编成 WAV，经已登录会话的 `POST /api/asr`（JSON `{audioBase64}`，带 CSRF）交给控制面，控制面转给识别服务，只把文字返回；录音不落盘、不进沙箱。超过 2 MB（约一分钟）回 413，不是 WAV 回 400，识别服务出错或 30 秒没答回 502。
+- **权限**：浏览器第一次会问麦克风权限；拒绝后按钮给出中文提示。移动端外壳（`src/ui/tauri/`）还没有声明麦克风权限，需要在原生工程里补上再重新打包才能用。
+
 ## 语音配件（可选，一个配件对应一个账号）
 
 桌面语音配件（例如刷了 Muse Gadget 固件的 M5Stack CoreS3）可以把按住说话的内容发进一个账号：配件自己负责语音转写和朗读，只把文字发过来、取回文字答复。
@@ -531,6 +539,7 @@ npm run build && npx playwright test --config playwright.local.config.ts
 | `PA_GADGET_USAGE_URL` | 空 | 配件「用量」页的数据地址（`GET /api/gadget/usage` 原样转发的 JSON）；为空则该接口 404 |
 | `PA_GADGET_USAGE_URL` | 空 | 配件「用量」页的数据地址（`GET /api/gadget/usage` 原样转发的 JSON）；为空则该接口 404 |
 | `PA_GADGET_FIRMWARE_DIR` | 数据目录下 `gadget-firmware` | 配件无线升级的固件所在目录（`bin/publish-gadget-firmware.mjs` 写入） |
+| `PA_ASR_URL` | 空 | 输入区语音输入用的语音识别服务（`POST /api/asr` 把录音 WAV 转给它）；为空则不显示麦克风按钮 |
 | `PA_RESIDENT_MEMBERS` | 空 | 沙箱容器和浏览器都不空闲释放、随服务启动的成员用户名，逗号分隔 |
 | `PA_SANDBOX_IDLE_SECONDS` | `300` | 沙箱不在用且控制台不在前台，持续多久后停容器（下限 60 秒） |
 | `PA_BROWSER_VIEWER_TTL_SECONDS` | `60` | 观看心跳租约有效期（下限 10 秒）；到期即释放 |
@@ -566,7 +575,7 @@ npm run build && npx playwright test --config playwright.local.config.ts
 ## 已知限制
 
 - 模型与思考强度已从对话输入区移入统一的“配置”页（桌面侧栏与手机底导航都有入口），
-  输入区只保留附件、发送与停止。配置保存在 owner `meta`（`owner.agent_settings`），
+  输入区只保留附件、语音（配置了 `PA_ASR_URL` 时）、发送与停止。配置保存在 owner `meta`（`owner.agent_settings`），
   刷新与跨设备一致，且在每个 turn 提交时冻结，不影响正在执行的任务或历史。移动端布局测试
   包含 Chromium 与 WebKit 的 390/360 宽度、短视口、附件、发送和停止；配置页另测保存、
   刷新持久化、失败反馈与暗亮无溢出。WebKit 自动化不等同于 iPhone 真机软键盘与 Safari

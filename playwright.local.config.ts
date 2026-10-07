@@ -56,6 +56,7 @@ export default defineConfig({
     "**/browser-tabs.spec.ts",
     "**/routing.spec.ts",
     "**/needs-you.spec.ts",
+    "**/voice-input.spec.ts",
     "**/task-list-end.spec.ts",
     "**/image-preview.spec.ts",
     "**/vault.spec.ts",

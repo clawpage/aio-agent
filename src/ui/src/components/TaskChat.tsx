@@ -13,6 +13,7 @@ import { TaskBrowser } from "./TaskBrowser";
 import { MessagePreview } from "./MessagePreview";
 import { ComposerAttachments, useUploadTray } from "./ComposerAttachments";
 import { TurnPills } from "./TurnPills";
+import { VoiceButton } from "./VoiceInput";
 import type {TaskFeed} from '../taskStatus';
 const terminal = new Set(["completed", "failed", "interrupted", "unknown"]);
 /** What the dispatcher does with every message; shown in turn while it decides, not as live progress. */
@@ -399,7 +400,7 @@ export function TaskChat({ onDetails, onOpenLink, onOpenFileInBrowser, onExpired
         e.preventDefault();
         void send();
     } }}/>
-      <div className="composer-row"><label className={`file-button ${busy || uploading ? "disabled" : ""}`}><ComposerIcon kind={uploading ? "busy" : "attach"}/><span className="composer-button-label">{uploading ? "上传中…" : "附件"}</span><input type="file" multiple className="file-input" aria-label="添加附件" data-testid="attachment-input" disabled={busy || uploading} onChange={e => { void pick(e.target.files); e.target.value = ""; }}/></label><span className="spacer"/><button className="primary" disabled={busy || uploading || (!draft.trim() && !attachments.length)} onClick={() => void send()} aria-label={busy ? "提交中…" : "发送"} title="发送"><ComposerIcon kind={busy ? "busy" : "send"}/><span className="composer-button-label">{busy ? "提交中…" : "发送"}</span></button></div>
+      <div className="composer-row"><label className={`file-button ${busy || uploading ? "disabled" : ""}`}><ComposerIcon kind={uploading ? "busy" : "attach"}/><span className="composer-button-label">{uploading ? "上传中…" : "附件"}</span><input type="file" multiple className="file-input" aria-label="添加附件" data-testid="attachment-input" disabled={busy || uploading} onChange={e => { void pick(e.target.files); e.target.value = ""; }}/></label><VoiceButton disabled={busy} onError={setError} onText={heard => { setDraft(old => old + (/[A-Za-z0-9]$/.test(old) && /^[A-Za-z0-9]/.test(heard) ? " " : "") + heard); input.current?.focus(); }}/><span className="spacer"/><button className="primary" disabled={busy || uploading || (!draft.trim() && !attachments.length)} onClick={() => void send()} aria-label={busy ? "提交中…" : "发送"} title="发送"><ComposerIcon kind={busy ? "busy" : "send"}/><span className="composer-button-label">{busy ? "提交中…" : "发送"}</span></button></div>
     </div>
     <PopupPresence>{preview && <FilePreview path={preview} onClose={() => setPreview(null)} onOpenLink={onOpenLink} onOpenInBrowser={onOpenFileInBrowser}/>}</PopupPresence>
     <PopupPresence>{debug && dispatchLogFor && <DispatchLog taskId={dispatchLogFor} onClose={() => setDispatchLogFor(null)}/>}</PopupPresence>

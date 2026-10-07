@@ -3992,3 +3992,21 @@ button.map-card-switch { flex: 0 0 auto; padding: 4px 10px; }
   .chat.running .composer::before { inset: -1px; height: auto; border-radius: inherit; z-index: -1; }
 }
 @media (prefers-reduced-motion: reduce) { .composer { transition: none; } .composer-icon.spinning { animation: none; } }
+/* Voice input: amber while it listens (your turn to talk), in the attachment button's quiet style otherwise. */
+.composer-row > .voice-button.recording {
+  color: var(--you); background: var(--you-soft); border-color: color-mix(in srgb, var(--you) 45%, transparent);
+  animation: voice-listening 1.6s ease-in-out infinite;
+}
+.voice-button .composer-button-label { font-variant-numeric: tabular-nums; }
+@keyframes voice-listening { 0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--you) 45%, transparent); } 50% { box-shadow: 0 0 0 6px transparent; } }
+@media (min-width: 901px) {
+  .composer-row > .voice-button:not(.recording) { border-color: transparent; background: transparent; color: var(--text-dim); }
+  .composer-row > .voice-button:not(.recording):hover { color: var(--text); }
+}
+@media (max-width: 900px) {
+  /* Beside the send button; the idle one-line field leaves room for both. */
+  .composer-row > .voice-button { right: 44px; }
+  .composer-row > .voice-button:not(.recording) { border-color: transparent; background: transparent; }
+  .composer:has(.voice-button) textarea { padding-right: 92px; }
+}
+@media (prefers-reduced-motion: reduce) { .composer-row > .voice-button.recording { animation: none; } }

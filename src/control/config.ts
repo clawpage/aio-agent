@@ -53,6 +53,8 @@ export function loadConfig(): {
   gadgetUsageUrl: string;
   /** The firmware the gadget updates itself to over Wi-Fi (bin/publish-gadget-firmware.mjs puts it here). */
   gadgetFirmwareDir: string;
+  /** Speech recognizer for the composer's voice input (POST /api/asr relays a WAV here); empty: off. */
+  asrUrl: string;
   logDir: string;
   primaryHost: string;
   legacyPrimaryHost?: string;
@@ -343,6 +345,7 @@ export function loadConfig(): {
     gadgetTokenPath: envStr("PA_GADGET_TOKEN_PATH", path.join(dataDir, "gadget-token.env")),
     gadgetUsageUrl: envStr("PA_GADGET_USAGE_URL", ""),
     gadgetFirmwareDir: envStr("PA_GADGET_FIRMWARE_DIR", path.join(dataDir, "gadget-firmware")),
+    asrUrl: envStr("PA_ASR_URL", ""),
     logDir: path.join(dataDir, "logs"),
     primaryHost,
     legacyPrimaryHost: envStr("PA_LEGACY_PRIMARY_HOST", "").toLowerCase() || undefined,
