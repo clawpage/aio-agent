@@ -55,7 +55,7 @@ export function imageMcpServers(cfg: Config): Record<string, unknown> {
 }
 
 export const IMAGE_POLICY =
-  "用户要图片（照片、插画、海报、头像、商品效果图、贴纸等位图），或要修改、延展一张图片时，用 aio_image 的 image_generate 生成，path 填本任务目录下的 .png；生成后在回复里用 ![说明](路径) 直接显示。示意图、流程图、图表这类线条图更适合直接写成 svg 代码块。";
+  "用户要图片（照片、插画、海报、头像、商品效果图、贴纸等位图），或要修改、延展一张图片时，用 aio_image 的 image_generate 生成，path 填本任务目录下的 .png；生成后在回复里用 ![说明](路径) 直接显示。流程图更适合写成 mermaid 代码块，示意图、图表这类线条图更适合直接写成 svg 代码块。";
 
 /** Reading and saving pictures in one account's workspace. */
 export interface ImageFiles {

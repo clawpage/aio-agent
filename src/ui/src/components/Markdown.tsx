@@ -8,11 +8,13 @@ import { openNativeBrowser } from "../deviceBrowser";
 import { embedMediaLinks } from "../fileRefs";
 import { splitMapBlocks, type MessagePart } from "../mapBlocks";
 import { splitSvgBlocks, type SvgPart } from "../svgBlocks";
+import { splitMermaidBlocks, type MermaidPart } from "../mermaidBlocks";
 import { splitChoiceBlocks, type ChoicePart } from "../choices";
 import { splitProductBlocks, type ProductPart } from "../productBlocks";
 import { cjkStrong } from "../markdownStrong";
 import { MapCard } from "./MapCard";
 import { SvgCard } from "./SvgCard";
+import { MermaidCard } from "./MermaidCard";
 import { ChoiceList } from "./ChoiceList";
 import { ProductCards } from "./ProductCards";
 
@@ -102,15 +104,16 @@ type MarkdownProps = {
 
 /**
  * A message: Markdown, with ```map blocks drawn as map cards, ```svg blocks as
- * pictures, ```products blocks as product cards and ```choices blocks as answers
+ * pictures, ```mermaid blocks as diagrams, ```products blocks as product cards and ```choices blocks as answers
  * to tap, where they stand.
  */
 export function Markdown(props: MarkdownProps) {
   const parts = useMemo(
     () => splitMapBlocks(props.source ?? "")
       .flatMap<MessagePart | SvgPart>((part) => (part.kind === "text" ? splitSvgBlocks(part.text) : [part]))
-      .flatMap<MessagePart | SvgPart | ChoicePart>((part) => (part.kind === "text" ? splitChoiceBlocks(part.text) : [part]))
-      .flatMap<MessagePart | SvgPart | ChoicePart | ProductPart>((part) => (part.kind === "text" ? splitProductBlocks(part.text) : [part])),
+      .flatMap<MessagePart | SvgPart | MermaidPart>((part) => (part.kind === "text" ? splitMermaidBlocks(part.text) : [part]))
+      .flatMap<MessagePart | SvgPart | MermaidPart | ChoicePart>((part) => (part.kind === "text" ? splitChoiceBlocks(part.text) : [part]))
+      .flatMap<MessagePart | SvgPart | MermaidPart | ChoicePart | ProductPart>((part) => (part.kind === "text" ? splitProductBlocks(part.text) : [part])),
     [props.source],
   );
   if (parts.length === 1 && parts[0]!.kind === "text") return <MarkdownBlock {...props} source={parts[0]!.text} />;
@@ -120,6 +123,8 @@ export function Markdown(props: MarkdownProps) {
         ? <MapCard key={i} place={part.place} />
         : part.kind === "svg"
           ? <SvgCard key={i} code={part.code} />
+          : part.kind === "mermaid"
+            ? <MermaidCard key={i} code={part.code} />
           : part.kind === "products"
             ? <ProductCards key={i} items={part.items} onOpenLink={props.onOpenLink} onOpenFile={props.onOpenFile} />
           : part.kind === "choices"

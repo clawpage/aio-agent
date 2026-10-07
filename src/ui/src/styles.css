@@ -3566,6 +3566,8 @@ button.product-media { cursor: zoom-in; }
   overflow: auto;
   font-size: 12px;
 }
+/* A ```mermaid diagram while Mermaid loads and draws it (then it is an ordinary svg card). */
+.mermaid-pending { padding: 16px 12px; }
 .svg-actions {
   display: flex;
   justify-content: flex-end;

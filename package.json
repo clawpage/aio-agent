@@ -31,6 +31,7 @@
     "dompurify": "3.4.15",
     "express": "5.2.1",
     "marked": "18.0.14",
+    "mermaid": "11.17.2",
     "react": "19.3.0",
     "react-dom": "19.3.0",
     "ws": "8.21.3",
