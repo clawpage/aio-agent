@@ -3033,6 +3033,41 @@ textarea:focus {
 .turn-pill { display: inline-block; margin-right: 6px; padding: 1px 9px; border-radius: 999px; font-size: 12px; font-weight: 600; line-height: 1.6; white-space: nowrap; }
 .turn-pill.you { background: var(--you-soft); color: var(--you); }
 .turn-pill.ai { background: var(--ai-soft); color: var(--ai); }
+/* The pills lead to the work: a tap scrolls to the task, or (several) opens a small list to pick from. */
+button.turn-pill { display: inline-flex; align-items: center; gap: 2px; min-height: 0; border: 0; font-family: inherit; cursor: pointer; transition: filter var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease); }
+button.turn-pill:hover { filter: brightness(0.97); box-shadow: 0 0 0 1px color-mix(in srgb, currentColor 22%, transparent); }
+button.turn-pill:focus-visible { outline: 2px solid currentColor; outline-offset: 1px; }
+.turn-pill-chevron { width: 12px; height: 12px; margin-right: -3px; transition: transform var(--dur) var(--ease); }
+.turn-pill.open .turn-pill-chevron { transform: rotate(180deg); }
+.task-chat .chat-head { position: relative; z-index: 6; }
+.turn-menu {
+  position: absolute; z-index: 20; display: flex; flex-direction: column; gap: 2px;
+  max-height: min(52vh, 360px); overflow-y: auto; padding: 6px;
+  border: 1px solid var(--border); border-radius: 16px;
+  /* Solid: WebKit lets the feed show through a translucent, blurred menu here. */
+  background: var(--bg-raised);
+  box-shadow: 0 14px 40px rgb(20 14 50 / .16), 0 2px 8px rgb(20 14 50 / .06);
+  opacity: 0; transform: translateY(-6px) scale(.98); transform-origin: top left; visibility: hidden; pointer-events: none;
+  transition: opacity 160ms var(--ease), transform 200ms var(--ease), visibility 0s linear 200ms;
+}
+.turn-menu.open { opacity: 1; transform: none; visibility: visible; pointer-events: auto; transition: opacity 160ms var(--ease), transform 220ms var(--ease), visibility 0s; }
+.turn-menu-item {
+  display: flex; align-items: center; gap: 10px; width: 100%; min-height: 44px; padding: 8px 12px 8px 10px;
+  border: 0; border-radius: 11px; background: transparent; color: var(--text); text-align: left; font-size: 14px; cursor: pointer;
+}
+.turn-menu-item:hover, .turn-menu-item:focus-visible { background: color-mix(in srgb, var(--text) 6%, transparent); outline: none; }
+.turn-menu-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--ai); }
+.turn-menu-item.you .turn-menu-dot { background: var(--you); }
+.turn-menu-item.ai .turn-menu-dot { animation: breathe 1.9s ease-in-out infinite; }
+.turn-menu-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.turn-menu-state { flex: none; font-size: 12px; color: var(--text-dim); }
+/* A card reached from the header glows once in its own colour: indigo while the AI works on it. */
+.task-progress.turn-ai.attention { animation-name: working-flash; }
+@keyframes working-flash { 0%, 60% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--ai) 55%, transparent); } 100% { box-shadow: 0 0 0 0 transparent; } }
+@media (prefers-reduced-motion: reduce) {
+  .turn-menu, .turn-menu.open, .turn-pill-chevron { transition: none; }
+  .turn-menu-item.ai .turn-menu-dot { animation: none; }
+}
 @media (prefers-reduced-motion: reduce) {
   .task-progress.turn-you .task-progress-label { animation: none; }
   .task-progress.active.turn-ai .dot { animation: none; }

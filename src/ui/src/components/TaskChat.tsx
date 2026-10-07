@@ -12,6 +12,7 @@ import { FilePreview } from "./FilePreview";
 import { TaskBrowser } from "./TaskBrowser";
 import { MessagePreview } from "./MessagePreview";
 import { ComposerAttachments, useUploadTray } from "./ComposerAttachments";
+import { TurnPills } from "./TurnPills";
 import type {TaskFeed} from '../taskStatus';
 const terminal = new Set(["completed", "failed", "interrupted", "unknown"]);
 /** What the dispatcher does with every message; shown in turn while it decides, not as live progress. */
@@ -365,7 +366,11 @@ export function TaskChat({ onDetails, onOpenLink, onOpenFileInBrowser, onExpired
         .sort((a, b) => a.at - b.at || Number(a.report) - Number(b.report) || a.task.id.localeCompare(b.task.id));
     return <section className="chat task-chat">
     <header className="chat-head"><div className="chat-title"><h2>主会话</h2><span className={`dot ${connected ? "ok" : "warn"}`}/><span className="chat-sub">{active.length || awaiting.length
-        ? <>{awaiting.length > 0 && <span className="turn-pill you">{awaiting.length} 件等你补充</span>}{browserAsks.length > 0 && <span className="turn-pill you">{browserAsks.length} 件等你操作浏览器</span>}{active.length - browserAsks.length > 0 && <span className="turn-pill ai">{active.length - browserAsks.length} 件在办</span>}</>
+        ? <TurnPills onJump={showWaiting} groups={[
+            { key: "input", tone: "you", label: `${awaiting.length} 件等你补充`, tasks: awaiting, state: waitingLabel },
+            { key: "browser", tone: "you", label: `${browserAsks.length} 件等你操作浏览器`, tasks: browserAsks, state: waitingLabel },
+            { key: "ai", tone: "ai", label: `${active.length - browserAsks.length} 件在办`, tasks: active.filter(t => !browserAsks.includes(t)), state: t => labels[t.status] ?? t.status },
+          ]}/>
         : connected ? "随时可以交给我" : "正在连接…"}</span></div></header>
     <div className={`chat-scroll task-feed${bubbles ? " has-needs-you" : ""}`} ref={scroll} onScroll={e => onFeedScroll(e.currentTarget)}>
       {nextBefore && <div className="feed-older" ref={olderTop}>{olderState === "failed"
