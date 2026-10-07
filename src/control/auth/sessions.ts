@@ -18,16 +18,12 @@ export const COOKIE_NAMES: Record<SessionKind, { session: string; csrf: string }
   workspace: { session: "pa_ws_session", csrf: "pa_ws_csrf" },
 };
 
-const ROTATION_GRACE_MS = 90_000;
-
 interface SessionRow {
   id: string;
   owner_id: string;
   kind: string;
   token_hash: string;
   csrf_hash: string;
-  prev_token_hash: string | null;
-  prev_valid_until: number | null;
   created_at: number;
   last_seen_at: number;
   expires_at: number;
@@ -87,8 +83,8 @@ export class SessionStore {
     const now = Date.now();
     const tokenHash = sha256Hex(token);
     const row = this.#db
-      .prepare("SELECT * FROM sessions WHERE kind = ? AND (token_hash = ? OR (prev_token_hash = ? AND prev_valid_until > ?))")
-      .get(kind, tokenHash, tokenHash, now) as SessionRow | undefined;
+      .prepare("SELECT * FROM sessions WHERE kind = ? AND token_hash = ?")
+      .get(kind, tokenHash) as SessionRow | undefined;
     if (!row) return null;
     if (row.revoked_at !== null) return null;
     if (row.expires_at <= now) return null;
@@ -120,27 +116,21 @@ export class SessionStore {
   }
 
   /**
-   * Rotate the raw session token, keeping the previous one valid briefly.
-   * Rotation always extends the expiry, so a client that renews more often than
-   * the idle-renew interval never drifts past its original deadline. Expired or
-   * revoked sessions cannot be rotated.
+   * Heartbeat: keep a live session alive for a full TTL from now, without
+   * changing its token. Renewal used to rotate the token, and a phone resuming
+   * from the background fires several renewals at once: the racing rotations, or
+   * one whose new cookie was lost with a response cut off by suspension, logged
+   * the person out. Expired or revoked sessions are refused.
    */
-  rotate(session: Session, now = Date.now()): { token: string; expiresAt: number } | null {
-    const row = this.#db.prepare("SELECT token_hash, revoked_at, expires_at FROM sessions WHERE id = ?").get(session.id) as
-      | { token_hash: string; revoked_at: number | null; expires_at: number }
-      | undefined;
-    if (!row || row.revoked_at !== null || row.expires_at <= now) return null;
-    const token = generateSecret(32);
+  heartbeat(session: Session, now = Date.now()): { expiresAt: number } | null {
     const expiresAt = now + this.#ttlMs;
-    this.#db
-      .prepare(
-        `UPDATE sessions SET prev_token_hash = ?, prev_valid_until = ?, token_hash = ?, last_seen_at = ?, expires_at = ?
-         WHERE id = ? AND revoked_at IS NULL AND expires_at > ?`,
-      )
-      .run(row.token_hash, now + ROTATION_GRACE_MS, sha256Hex(token), now, expiresAt, session.id, now);
+    const res = this.#db
+      .prepare("UPDATE sessions SET last_seen_at = ?, expires_at = ? WHERE id = ? AND revoked_at IS NULL AND expires_at > ?")
+      .run(now, expiresAt, session.id, now);
+    if (res.changes === 0) return null;
     session.lastSeenAt = now;
     session.expiresAt = expiresAt;
-    return { token, expiresAt };
+    return { expiresAt };
   }
 
   revoke(sessionId: string, reason = "logout"): void {

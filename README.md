@@ -469,7 +469,7 @@ npm run build && npx playwright test --config playwright.local.config.ts
 
 | 层 | 覆盖 |
 | --- | --- |
-| `npm test` | 未登录绕过、会话过期/轮换/吊销与已建立连接被关闭、Host/Origin/CSRF 校验、重定向安全、代理 HTTP 与 WebSocket（对假沙箱）、事件回放与 delta 顺序、重复提交与跨会话冲突、停止语义、未知结果不重放、shell 支撑的文件操作只报真实结果、派单临时线程的隔离（超时后迟到事件不混入用户会话）、会话生命周期（空标题复用、重命名/恢复默认标题冲突 409、无删除接口）、沙箱浏览器标签 URL 校验、**浏览器生命周期**（状态机竞态/多观看者 TTL/任务租约单飞/快照失败不停止/恢复 single-flight/归属未知 fail-closed/状态轮询不唤醒、浏览器 API 鉴权+CSRF+注销清理、代理只保护 browser/CDP/VNC 且拒绝时释放租约） |
+| `npm test` | 未登录绕过、会话过期/心跳续期/吊销与已建立连接被关闭、Host/Origin/CSRF 校验、重定向安全、代理 HTTP 与 WebSocket（对假沙箱）、事件回放与 delta 顺序、重复提交与跨会话冲突、停止语义、未知结果不重放、shell 支撑的文件操作只报真实结果、派单临时线程的隔离（超时后迟到事件不混入用户会话）、会话生命周期（空标题复用、重命名/恢复默认标题冲突 409、无删除接口）、沙箱浏览器标签 URL 校验、**浏览器生命周期**（状态机竞态/多观看者 TTL/任务租约单飞/快照失败不停止/恢复 single-flight/归属未知 fail-closed/状态轮询不唤醒、浏览器 API 鉴权+CSRF+注销清理、代理只保护 browser/CDP/VNC 且拒绝时释放租约） |
 | `python3 tests/unit/browser-runtime.test.py`（`npm test` 会接着 vitest 一起跑） | 容器内受管 helper 的纯函数与安全边界：真实 flattened cmdline 归属、`unknown` 不等于 `absent`、快照 schema/原子 0600、精确 PID/starttime 校验后才停、按 origin 限定且在导航前注入 `sessionStorage`、AIO soft 重连与激活 index、错误脱敏 |
 | `npm run smoke` | 真实 HTTPS 登录与 cookie 属性、模型列表、一次性票据（重放与开放重定向）、伴随站会话与跨源续期、经鉴权的 shell 调用、上传与列目录、跨源写入拒绝、原生界面可达、未登录时各表面一律 401、**真实 WebSocket 升级**（已登录 101 / 未登录 401） |
 | `npx playwright test` | 登录界面（错误密码与正确密码）、对话页输入区不含任何模型/思考控件、统一配置页默认选中 GPT-6-Sol（桌面侧栏与手机底导航入口）、打开工作区后立刻切标签的竞态、连续切换最终落在最后点击的标签、真实文件列表与 code-server 可达、无横向溢出 |

@@ -33,38 +33,34 @@ describe("SessionStore renewal and revocation", () => {
     vi.useRealTimers();
   });
 
-  it("keeps a session alive when the client rotates more often than the idle-renew interval", () => {
+  it("keeps a session alive on the same token when the client heartbeats more often than the idle-renew interval", () => {
     const { session, token } = sessions.create("owner_1", "primary");
-    let current = token;
 
-    // Rotate every 5 minutes for 4 hours: well past the original 1 hour TTL.
+    // A heartbeat every 5 minutes for 4 hours: well past the original 1 hour TTL.
     for (let i = 0; i < 48; i++) {
       vi.advanceTimersByTime(5 * 60_000);
-      const rotated = sessions.rotate(sessions.resolve("primary", current)!);
-      expect(rotated).not.toBeNull();
-      current = rotated!.token;
-      expect(sessions.resolve("primary", current)).not.toBeNull();
+      expect(sessions.heartbeat(sessions.resolve("primary", token)!)).toEqual({ expiresAt: Date.now() + TTL });
       expect(sessions.isLive(session.id)).toBe(true);
     }
-    // The session expiry must have moved forward with the rotations.
+    // The session expiry must have moved forward with the heartbeats.
     const row = db.prepare("SELECT expires_at FROM sessions WHERE id = ?").get(session.id) as { expires_at: number };
     expect(row.expires_at).toBeGreaterThan(Date.now() + TTL - 60_000);
   });
 
-  it("refuses to rotate an expired session and reports it as not live", () => {
+  it("refuses a heartbeat for an expired session and reports it as not live", () => {
     const { session, token } = sessions.create("owner_1", "primary");
     vi.advanceTimersByTime(TTL + 1000);
     expect(sessions.resolve("primary", token)).toBeNull();
     expect(sessions.isLive(session.id)).toBe(false);
-    expect(sessions.rotate(session)).toBeNull();
+    expect(sessions.heartbeat(session)).toBeNull();
   });
 
-  it("refuses to rotate or resolve a revoked session", () => {
+  it("refuses a heartbeat for, or resolving, a revoked session", () => {
     const { session, token } = sessions.create("owner_1", "primary");
     sessions.revoke(session.id, "logout");
     expect(sessions.resolve("primary", token)).toBeNull();
     expect(sessions.isLive(session.id)).toBe(false);
-    expect(sessions.rotate(session)).toBeNull();
+    expect(sessions.heartbeat(session)).toBeNull();
   });
 
   it("emits a revocation event so open sockets can be closed", () => {
@@ -75,14 +71,15 @@ describe("SessionStore renewal and revocation", () => {
     expect(seen).toEqual([session.id]);
   });
 
-  it("accepts the previous token only inside the rotation grace window", () => {
+  it("survives heartbeats that race each other, as a phone resuming sends them", () => {
     const { token } = sessions.create("owner_1", "primary");
-    const session = sessions.resolve("primary", token)!;
-    const rotated = sessions.rotate(session)!;
-    expect(sessions.resolve("primary", token)).not.toBeNull(); // grace
-    vi.advanceTimersByTime(91_000);
-    expect(sessions.resolve("primary", token)).toBeNull();
-    expect(sessions.resolve("primary", rotated.token)).not.toBeNull();
+    vi.advanceTimersByTime(10 * 60_000);
+    const a = sessions.resolve("primary", token)!, b = sessions.resolve("primary", token)!;
+    expect(sessions.heartbeat(a)).not.toBeNull();
+    expect(sessions.heartbeat(b)).not.toBeNull();
+    // Long after any grace window, the one token still works.
+    vi.advanceTimersByTime(30 * 60_000);
+    expect(sessions.resolve("primary", token)).not.toBeNull();
   });
 
   it("revokes workspace sessions linked to a primary session", () => {

@@ -72,7 +72,7 @@ describe("authentication", () => {
 });
 
 describe("session lifecycle", () => {
-  it("logs in with an HttpOnly cookie and refreshes by rotation", async () => {
+  it("logs in with an HttpOnly cookie and renews by heartbeat, keeping the token", async () => {
     const { cookie, csrf } = await login(h);
     expect(cookie).toContain("pa_session=");
 
@@ -82,16 +82,22 @@ describe("session lifecycle", () => {
     expect(session.authenticated).toBe(true);
     expect(session.username).toBe("owner");
 
-    const refresh = await h.request("/api/auth/refresh", {
+    // A phone resuming sends two heartbeats at once; both succeed and neither logs it out.
+    const renew = () => h.request("/api/auth/refresh", {
       method: "POST",
       headers: { cookie, "x-csrf-token": csrf, "content-type": "application/json" },
       body: "{}",
     });
-    expect(refresh.status).toBe(200);
-    const rotated = refresh.headers.getSetCookie().find((c) => c.startsWith("pa_session="))!.split(";")[0]!;
-    // Previous token is still valid inside the rotation grace window.
+    const [first, second] = await Promise.all([renew(), renew()]);
+    for (const refresh of [first, second]) {
+      expect(refresh.status).toBe(200);
+      const set = refresh.headers.getSetCookie();
+      // The same session token and CSRF value, each with a fresh full lifetime.
+      expect(set.find((c) => c.startsWith("pa_session="))!.split(";")[0]).toBe(cookie.split("; ").find((c) => c.startsWith("pa_session=")));
+      expect(set.find((c) => c.startsWith("pa_session="))).toMatch(/Max-Age=\d{6,}/);
+      expect(set.find((c) => c.startsWith("pa_csrf="))).toContain(`pa_csrf=${csrf}`);
+    }
     expect((await h.request("/api/auth/session", { headers: { cookie } })).status).toBe(200);
-    expect((await h.request("/api/auth/session", { headers: { cookie: rotated } })).status).toBe(200);
   });
 
   it("requires CSRF on the control plane and rejects a foreign origin", async () => {
@@ -930,8 +936,9 @@ describe("companion session renewal across origins", () => {
       body: "{}",
     });
     expect(renew.status).toBe(200);
-    const rotated = renew.headers.getSetCookie().find((c) => c.startsWith("pa_ws_session="))!.split(";")[0]!;
-    expect((await h.request("/api/workspace/session", { host: "workspace", headers: { cookie: rotated } })).status).toBe(200);
+    const renewed = renew.headers.getSetCookie().find((c) => c.startsWith("pa_ws_session="))!.split(";")[0]!;
+    expect(boot.cookie).toContain(renewed);
+    expect((await h.request("/api/workspace/session", { host: "workspace", headers: { cookie: boot.cookie } })).status).toBe(200);
   });
 
   it("refuses a foreign origin on the renewal endpoint", async () => {

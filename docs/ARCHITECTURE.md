@@ -101,9 +101,10 @@ planning_failed 可安全重试分类；blocked 提示前置结果需要核对�
 - 密码用 scrypt（N=16384）加盐存储；比对用 `timingSafeEqual`，未知用户也走一次等价开销。
 - 会话是随机 32 字节不透明 token，DB 只存 SHA-256，cookie 为 `HttpOnly` + `SameSite=Lax`；
   公网（HTTPS）强制 `Secure`，只有 loopback 明文调试时才省略 `Secure`。
-- 续期：会话空闲即滑动续期；客户端每 15 分钟调用 `/api/auth/refresh` 主动轮换 token，
-  轮换会**同时延长过期时间**（否则高频续期反而会提前失效），旧 token 有 90 秒宽限期以免
-  并发标签页互相踢掉。伴随站会话有独立的 `/api/workspace/refresh`，只对主站来源开放跨源调用。
+- 续期：会话空闲即滑动续期；控制台打开期间每 15 分钟、以及回到前台时（距上次超过 5 分钟）调用 `/api/auth/refresh` 心跳，
+  把会话和两个 cookie 都延长一个完整 TTL（默认 30 天），**不更换 token**，客户端同一时间只发一个心跳。
+  早先心跳会轮换 token：手机从后台回来时定时器和可见性事件同时续期，两次轮换互相覆盖、或新 cookie 随被挂起的响应丢失，
+  用户就被登出，所以改为只续期。伴随站会话有独立的 `/api/workspace/refresh`（同样只续期），只对主站来源开放跨源调用。
 - 注销立即吊销会话，并通过事件关闭该会话已建立的 SSE 与 WebSocket。
 - 登录失败按 IP 计数，默认 5 次/15 分钟窗口 → 15 分钟锁定。IP 取自 socket；
   只有显式开启 `PA_TRUST_CF_CONNECTING_IP=1`（专用 tunnel 后）才采信 `CF-Connecting-IP`，

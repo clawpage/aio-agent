@@ -119,19 +119,27 @@ function LegacyApp() {
   }, [session.authenticated, refreshConversations, refreshStatus]);
 
   /**
-   * Automatic login renewal. The session cookie is rotated while the tab is open
-   * so long-lived sessions survive without asking the user to log in again.
+   * Login heartbeat. While the console is open (and whenever it comes back to the
+   * foreground) the session and its cookies are extended a full lifetime, so
+   * people stay signed in. One heartbeat at a time: a phone resuming fires the
+   * overdue timer and the visibility change together.
    */
-  const renew = useCallback(async () => {
-    try {
-      await api.refresh();
-      lastRefresh.current = Date.now();
-    } catch (err) {
-      if (err instanceof ApiError && err.status === 401) {
-        setSession((prev) => ({ ...prev, authenticated: false }));
-        setNotice("登录已过期，请重新登录。");
+  const renewing = useRef<Promise<void> | null>(null);
+  const renew = useCallback(() => {
+    renewing.current ??= (async () => {
+      try {
+        await api.refresh();
+        lastRefresh.current = Date.now();
+      } catch (err) {
+        if (err instanceof ApiError && err.status === 401) {
+          setSession((prev) => ({ ...prev, authenticated: false }));
+          setNotice("登录已过期，请重新登录。");
+        }
+      } finally {
+        renewing.current = null;
       }
-    }
+    })();
+    return renewing.current;
   }, []);
 
   useEffect(() => {

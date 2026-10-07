@@ -362,19 +362,16 @@ export function createApiRouter(context: AppContext): Router {
     requireKind("primary"),
     requireSession,
     asyncHandler(async (req, res, ctx) => {
-      const rotated = sessions.rotate(ctx.session!);
-      if (!rotated) {
+      // A heartbeat: the session and both cookies live another full TTL; the token stays the same.
+      const renewed = sessions.heartbeat(ctx.session!);
+      if (!renewed) {
         res.setHeader("Set-Cookie", clearSessionCookies("primary", ctx.secure));
         res.status(401).json({ error: "session_expired", message: "会话已过期，请重新登录" });
         return;
       }
       const csrf = ctx.cookies[COOKIE_NAMES.primary.csrf] ?? "";
-      res.setHeader("Set-Cookie", [
-        ...sessionCookies("primary", rotated.token, csrf, { secure: ctx.secure, ttlMs: cfg.sessionTtlMs }).slice(0, 1),
-        // keep the existing CSRF cookie value
-        `${COOKIE_NAMES.primary.csrf}=${encodeURIComponent(csrf)}; Path=/; SameSite=Lax; Max-Age=${Math.floor(cfg.sessionTtlMs / 1000)}${ctx.secure ? "; Secure" : ""}`,
-      ]);
-      res.json({ ok: true, expiresAt: rotated.expiresAt });
+      res.setHeader("Set-Cookie", sessionCookies("primary", ctx.cookies[COOKIE_NAMES.primary.session]!, csrf, { secure: ctx.secure, ttlMs: cfg.sessionTtlMs }));
+      res.json({ ok: true, expiresAt: renewed.expiresAt });
     }),
   );
 
@@ -2102,18 +2099,15 @@ export function createApiRouter(context: AppContext): Router {
         res.status(403).json({ error: "origin_denied", message: "来源站点不被允许" });
         return;
       }
-      const rotated = sessions.rotate(ctx.session!);
-      if (!rotated) {
+      const renewed = sessions.heartbeat(ctx.session!);
+      if (!renewed) {
         res.setHeader("Set-Cookie", clearSessionCookies("workspace", ctx.secure));
         res.status(401).json({ error: "session_expired", message: "工作区会话已过期" });
         return;
       }
       const csrf = ctx.cookies[COOKIE_NAMES.workspace.csrf] ?? "";
-      res.setHeader("Set-Cookie", [
-        ...sessionCookies("workspace", rotated.token, csrf, { secure: ctx.secure, ttlMs: cfg.sessionTtlMs }).slice(0, 1),
-        `${COOKIE_NAMES.workspace.csrf}=${encodeURIComponent(csrf)}; Path=/; SameSite=Lax; Max-Age=${Math.floor(cfg.sessionTtlMs / 1000)}${ctx.secure ? "; Secure" : ""}`,
-      ]);
-      res.json({ ok: true, expiresAt: rotated.expiresAt });
+      res.setHeader("Set-Cookie", sessionCookies("workspace", ctx.cookies[COOKIE_NAMES.workspace.session]!, csrf, { secure: ctx.secure, ttlMs: cfg.sessionTtlMs }));
+      res.json({ ok: true, expiresAt: renewed.expiresAt });
     }),
   );
 
