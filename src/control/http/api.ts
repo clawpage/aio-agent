@@ -665,6 +665,9 @@ export function createApiRouter(context: AppContext): Router {
     const battery = int("pct") === undefined ? null : {
       pct: int("pct"), mv: int("mv"), onBattery: int("on_battery") === 1, secs: int("secs"),
       fromPct: int("from_pct"), fromMv: int("from_mv"), screenOffPm: int("screen_off_pm"),
+      // Where the time went: resting, really in light sleep, a core at full speed, and the power locks held longest.
+      restingPm: int("resting_pm"), sleptPm: int("slept_pm"), sleeps: int("sleeps"), busyPm: int("busy_pm"),
+      awake: typeof req.query.awake === "string" ? req.query.awake.replace(/[^\w .,%-]/g, "").slice(0, 64) : undefined,
     };
     log.info("gadget firmware check", { account: caller.username, running: running?.slice(0, 12) ?? null, offered: firmware?.elfSha256.slice(0, 12) ?? null, battery });
     if (!firmware) { res.status(404).json({ error: "no_firmware" }); return; }
