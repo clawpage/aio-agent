@@ -3243,6 +3243,11 @@ button.turn-pill:focus-visible { outline: 2px solid currentColor; outline-offset
 .task-browser-shot { display: block; width: 100%; margin: 8px 0 0; padding: 0; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; background: var(--bg); cursor: pointer; }
 .task-browser-shot img { display: block; width: 100%; max-height: 220px; object-fit: cover; object-position: top; }
 .task-browser .task-actions { margin-top: 8px; }
+/* On a wide screen the card stays page-shaped, not a strip across the feed: the picture shows the page, not its top edge. */
+@media (min-width: 901px) {
+  .task-browser, .task-report > .task-browser { align-self: flex-start; width: 100%; max-width: 520px; }
+  .task-browser-shot img { max-height: 420px; }
+}
 /* Its tab was closed: the page it last showed, kept as a snapshot that opens it again. */
 .task-browser-state.closed { background: transparent; color: var(--text-dim); border: 1px solid var(--border); }
 .task-browser.closed .task-browser-shot { position: relative; }
