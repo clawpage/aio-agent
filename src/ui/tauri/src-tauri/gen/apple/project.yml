@@ -45,6 +45,7 @@ targets:
       path: aio-agent-tauri_iOS/Info.plist
       properties:
         CFBundleDisplayName: 一站
+        NSMicrophoneUsageDescription: 语音输入时录下你说的话，转成文字放进输入框。
         LSRequiresIPhoneOS: true
         UILaunchStoryboardName: LaunchScreen
         UIRequiredDeviceCapabilities: [arm64, metal]

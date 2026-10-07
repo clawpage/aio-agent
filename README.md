@@ -194,7 +194,7 @@ owner 侧栏的「用量看板」按账号显示每天的 token 趋势、输入/
 
 - **开启**：`PA_ASR_URL` 指向一个语音识别服务（`POST` 一段 16 位单声道 WAV，回 JSON `{text}`），例如 muse-gadget-sdk 的 `tts-server`（SenseVoice，中英文，音频不出本机）。现有部署复用语音配件 betaw 用的那一台（old-mb 上的 `http://192.168.1.118:4910/asr`）。不配置时 `GET /api/asr` 回 `{enabled:false}`，按钮不出现。
 - **链路**：浏览器直接取麦克风原始采样（不用 MediaRecorder，各浏览器格式不一），降到 16 kHz 编成 WAV，经已登录会话的 `POST /api/asr`（JSON `{audioBase64}`，带 CSRF）交给控制面，控制面转给识别服务，只把文字返回；录音不落盘、不进沙箱。超过 2 MB（约一分钟）回 413，不是 WAV 回 400，识别服务出错或 30 秒没答回 502。
-- **权限**：浏览器第一次会问麦克风权限；拒绝后按钮给出中文提示。移动端外壳（`src/ui/tauri/`）还没有声明麦克风权限，需要在原生工程里补上再重新打包才能用。
+- **权限**：浏览器第一次会问麦克风权限；拒绝后按钮给出中文提示。移动端 App（`src/ui/tauri/`）声明了麦克风权限（iOS `NSMicrophoneUsageDescription`，Android `RECORD_AUDIO`），第一次点麦克风时由系统询问；旧版 App 要更新后才能用。
 
 ## 语音配件（可选，一个配件对应一个账号）
 

@@ -37,6 +37,11 @@ page cannot load.
   insets into the shared tokens (headless browsers report zero), use real page
   interactions, and cover portrait, landscape, short viewports and keyboard
   resizing in Chromium/WebKit. They do not replace native-device acceptance.
+- Microphone (the composer's voice input, `getUserMedia` in the web view): iOS declares
+  `NSMicrophoneUsageDescription` (`gen/apple/project.yml` and the generated `Info.plist`);
+  wry grants the page's capture request and the system asks once. Android declares
+  `RECORD_AUDIO` and `MODIFY_AUDIO_SETTINGS` (`AndroidManifest.xml`); wry's chrome client
+  asks for the runtime permission when the page first records.
 - Android: edge to edge, the window is no longer resized for the keyboard, so the
   activity gives the keyboard's height back as bottom padding
   (`gen/android/.../MainActivity.kt`).
@@ -86,6 +91,15 @@ xcrun devicectl device install app --device <identifier> src-tauri/gen/apple/bui
 The team is a personal (free) team, so the profile expires after 7 days and the app then stops
 opening until it is rebuilt and installed again. The first time, the phone has to trust the developer
 in Settings → General → VPN & Device Management.
+
+## Verified (2026-10-06)
+
+Voice input. Android 15 emulator: the system "record audio" prompt, recording, and
+real Chinese speech (fed through the page's microphone stream over WebView DevTools)
+transcribed into the draft. iPhone 16 Pro simulator (iOS 18.2, microphone granted with
+`simctl privacy`): recording in WKWebView reached the speech server (the Mac has no
+input device, so only silence). Installed on Tech Z; speaking into a real phone was
+not checked here.
 
 ## Verified (2026-10-04)
 
