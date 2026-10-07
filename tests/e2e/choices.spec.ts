@@ -62,3 +62,18 @@ test("a finished reply that ends with answers: tap one, and once answered they c
   await expect(again.nth(2)).toHaveAttribute("aria-pressed", "true", { timeout: 60_000 });
   await expect(again.nth(0)).toBeDisabled();
 });
+
+test("an answer picked in the full message closes it and is sent", async ({ page }) => {
+  const long = Array.from({ length: 60 }, (_, i) => `第 ${i + 1} 段比价说明。`).join("\n\n");
+  const result = `${long}\n\n你要哪种规格？\n\n\`\`\`choices\n["32 盎司 6 瓶装", "2 盎司 48 瓶装"]\n\`\`\``;
+  const { bodies } = await setup(page, [base("long", { status: "completed", result, completedAt: 2000 })]);
+  const report = page.locator(".task-report").filter({ hasText: "第 1 段比价说明" });
+  await report.getByRole("button", { name: /^点击看更多/ }).click();
+  const dialog = page.getByRole("dialog", { name: /^完整消息/ });
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole("group", { name: "可选回答" }).getByRole("button", { name: "2 盎司 48 瓶装" }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect.poll(() => bodies.length).toBe(1);
+  expect(bodies[0]).toMatchObject({ text: "2 盎司 48 瓶装", relatedTaskId: "long" });
+  await expect(report.getByRole("group", { name: "可选回答" }).getByRole("button", { name: "2 盎司 48 瓶装" })).toHaveAttribute("aria-pressed", "true");
+});

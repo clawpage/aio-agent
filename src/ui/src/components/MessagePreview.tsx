@@ -69,6 +69,8 @@ export function MessagePreview({ children, title, user = false }: { children: Re
     </div>
     <PopupPresence onExited={() => setReading(false)}>{open && createPortal(<PopupSurface className="full-message-backdrop" onClick={event => { if (event.target === event.currentTarget) dismiss(); }}><div className="full-message" role="dialog" aria-modal="true" aria-label={`完整消息：${title}`} onKeyDown={keys} onClick={event => {
       if (!event.currentTarget.contains(event.target as Node)) return;
+      // An answer picked here is sent: the reading page has done its job, back to the feed.
+      if ((event.target as HTMLElement).closest(".choice-list button.choice:not(:disabled)")) { dismiss(); return; }
       const link = (event.target as HTMLElement).closest("a[href], [data-browser-link]");
       const url = link?.getAttribute("href") ?? link?.getAttribute("data-browser-link") ?? "";
       // The sandbox may open its workspace fallback underneath the reading page.
