@@ -144,7 +144,8 @@ describe("main inbox delegation", () => {
         expect(codex.startedTurns[0]?.text).toContain("```ask_user");
         await codex.runTurn(codex.startedTurns[0]!.turnId,{text:'已查到天气源。\n```ask_user\n{"question":"查哪个城市？","options":["圣何塞","旧金山"]}\n```'});await tick();
         const pending=tasks.view(tasks.get(first.id)!);
-        expect(pending).toMatchObject({status:"needs_input",result:null,clarification:"查哪个城市？",options:["圣何塞","旧金山"]});
+        // What it wrote before the question reaches the waiting card along with the question.
+        expect(pending).toMatchObject({status:"needs_input",result:"已查到天气源。",clarification:"查哪个城市？",options:["圣何塞","旧金山"]});
         expect(tasks.list().tasks.some(t=>t.id===first.id && t.status==="needs_input")).toBe(true);
         const second=submit("圣何塞",first.id);await tick();
         expect(tasks.get(first.id)?.status).toBe("completed");

@@ -51,3 +51,30 @@ export function splitChoiceBlocks(source: string): ChoicePart[] {
   if (last < source.length) parts.push({ kind: "text", text: source.slice(last) });
   return parts.filter((p) => p.kind === "choices" || p.text.trim() !== "");
 }
+
+/**
+ * The question an executor ends on when it cannot go on without the person
+ * (```ask_user with {"question": "...", "options": [...]}). The task card asks it;
+ * in the conversation it reads as the question it is, not as raw JSON.
+ */
+export type AskPart = { kind: "text"; text: string } | { kind: "ask"; question: string; options: string[] | null };
+
+const ASK_FENCE = /^```ask_user[ \t]*\r?\n([\s\S]*?)\r?\n```[ \t]*$/gm;
+
+export function splitAskBlocks(source: string): AskPart[] {
+  const parts: AskPart[] = [];
+  let last = 0;
+  for (const match of source.matchAll(ASK_FENCE)) {
+    let value: { question?: unknown; options?: unknown };
+    try { value = JSON.parse(match[1]!) as typeof value; } catch { continue; }
+    const question = typeof value.question === "string" ? value.question.trim() : "";
+    if (!question) continue;
+    const options = Array.isArray(value.options) ? parseChoices(JSON.stringify(value.options)) : null;
+    if (match.index! > last) parts.push({ kind: "text", text: source.slice(last, match.index) });
+    parts.push({ kind: "ask", question, options });
+    last = match.index! + match[0].length;
+  }
+  if (parts.length === 0) return [{ kind: "text", text: source }];
+  if (last < source.length) parts.push({ kind: "text", text: source.slice(last) });
+  return parts.filter((p) => p.kind === "ask" || p.text.trim() !== "");
+}

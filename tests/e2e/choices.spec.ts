@@ -77,3 +77,14 @@ test("an answer picked in the full message closes it and is sent", async ({ page
   expect(bodies[0]).toMatchObject({ text: "2 盎司 48 瓶装", relatedTaskId: "long" });
   await expect(report.getByRole("group", { name: "可选回答" }).getByRole("button", { name: "2 盎司 48 瓶装" })).toHaveAttribute("aria-pressed", "true");
 });
+
+test("an executor's ask_user block reads as its question, not as raw JSON", async ({ page }) => {
+  const result = '先别急着责怪自己。今天先做三件小事。\n\n```ask_user\n{"question":"这份低落持续多久了？","options":["一两天","两周以上"]}\n```';
+  await setup(page, [base("asked", { status: "completed", result, completedAt: 2000 })]);
+  const report = page.locator(".task-report").filter({ hasText: "先别急着责怪自己" });
+  const ask = report.getByRole("note", { name: "向你提问" });
+  await expect(ask).toContainText("这份低落持续多久了？", { timeout: 60_000 });
+  await expect(ask.getByRole("button", { name: "两周以上" })).toBeDisabled();
+  await expect(report).not.toContainText('"question"');
+  await expect(report).not.toContainText("ask_user");
+});

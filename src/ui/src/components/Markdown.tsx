@@ -9,7 +9,7 @@ import { embedMediaLinks } from "../fileRefs";
 import { splitMapBlocks, type MessagePart } from "../mapBlocks";
 import { splitSvgBlocks, type SvgPart } from "../svgBlocks";
 import { splitMermaidBlocks, type MermaidPart } from "../mermaidBlocks";
-import { splitChoiceBlocks, type ChoicePart } from "../choices";
+import { splitAskBlocks, splitChoiceBlocks, type AskPart, type ChoicePart } from "../choices";
 import { splitProductBlocks, type ProductPart } from "../productBlocks";
 import { cjkStrong } from "../markdownStrong";
 import { MapCard } from "./MapCard";
@@ -113,7 +113,8 @@ export function Markdown(props: MarkdownProps) {
       .flatMap<MessagePart | SvgPart>((part) => (part.kind === "text" ? splitSvgBlocks(part.text) : [part]))
       .flatMap<MessagePart | SvgPart | MermaidPart>((part) => (part.kind === "text" ? splitMermaidBlocks(part.text) : [part]))
       .flatMap<MessagePart | SvgPart | MermaidPart | ChoicePart>((part) => (part.kind === "text" ? splitChoiceBlocks(part.text) : [part]))
-      .flatMap<MessagePart | SvgPart | MermaidPart | ChoicePart | ProductPart>((part) => (part.kind === "text" ? splitProductBlocks(part.text) : [part])),
+      .flatMap<MessagePart | SvgPart | MermaidPart | ChoicePart | ProductPart>((part) => (part.kind === "text" ? splitProductBlocks(part.text) : [part]))
+      .flatMap<MessagePart | SvgPart | MermaidPart | ChoicePart | ProductPart | AskPart>((part) => (part.kind === "text" ? splitAskBlocks(part.text) : [part])),
     [props.source],
   );
   if (parts.length === 1 && parts[0]!.kind === "text") return <MarkdownBlock {...props} source={parts[0]!.text} />;
@@ -129,6 +130,12 @@ export function Markdown(props: MarkdownProps) {
             ? <ProductCards key={i} items={part.items} onOpenLink={props.onOpenLink} onOpenFile={props.onOpenFile} />
           : part.kind === "choices"
             ? <ChoiceList key={i} options={part.options} chosen={props.choices?.chosen ?? null} disabled={props.choices?.disabled} onChoose={props.choices?.onChoose} />
+          : part.kind === "ask"
+            ? <div key={i} className="task-question ask-block" role="note" aria-label="向你提问">
+                <div className="task-question-heading"><span aria-hidden="true">?</span><strong>向你提问</strong></div>
+                <p>{part.question}</p>
+                {part.options && <ChoiceList options={part.options} disabled />}
+              </div>
             : <MarkdownBlock key={i} {...props} source={part.text} />)}
     </>
   );
