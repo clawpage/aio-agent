@@ -182,3 +182,41 @@ it("archives one of the account's unconfirmed tasks, and refuses anything else",
   expect(h.ctx.tasks.get(task.id)?.status).toBe("interrupted");
   expect((await archive("task_unknown")).status).toBe(404);
 });
+
+it("keeps the page a task's closed tab last showed: on its card, as a picture, and opened again only at that address", async () => {
+  const { cookie, csrf } = await login(h);
+  const headers = { cookie, "x-csrf-token": csrf, "content-type": "application/json" };
+  const task = ((await (await h.request("/api/tasks", { method: "POST", headers, body: JSON.stringify({ text: "去结账", clientMessageId: "tab-last" }) })).json()) as { task: { id: string; conversationId: string } }).task;
+  const key = h.ctx.tasks.browserKey(task.id)!;
+  const last = { url: "https://www.amazon.com/checkout/p/p-123/spc", title: "Amazon Checkout", at: 5, shot: true };
+  const reopened: string[] = [];
+  h.ctx.tabs = {
+    ...fakeTabs,
+    list: async () => [],
+    lastPage: (k: string) => (k === key ? last : null),
+    lastShot: (k: string) => (k === key ? Buffer.from("last-jpeg") : null),
+    reopen: async (k: string, url: string, title: string) => (reopened.push(`${k}|${url}|${title}`), { status: 200, body: { tab: { ...record(k, "human"), id: "t4", url } } }),
+  };
+  try {
+    const feed = (await (await h.request("/api/main", { headers: { cookie } })).json()) as { tasks: Array<{ id: string; browser?: unknown }> };
+    expect(feed.tasks.find((t) => t.id === task.id)?.browser).toEqual({ tabs: 0, request: null, human: false, last });
+
+    const shot = await h.request(`/api/tasks/${task.id}/browser/last-shot`, { headers: { cookie } });
+    expect(shot.status).toBe(200);
+    expect(shot.headers.get("content-type")).toContain("image/jpeg");
+    expect(await shot.text()).toBe("last-jpeg");
+
+    // A write (CSRF), and the address is the kept one whatever the request says.
+    expect((await h.request(`/api/tasks/${task.id}/browser/reopen`, { method: "POST", headers: { cookie, "content-type": "application/json" }, body: "{}" })).status).toBe(403);
+    const out = await h.request(`/api/tasks/${task.id}/browser/reopen`, { method: "POST", headers, body: JSON.stringify({ url: "https://evil.example/" }) });
+    expect(out.status).toBe(200);
+    expect(((await out.json()) as { tab: TabRecord }).tab).toMatchObject({ id: "t4", holder: "human" });
+    expect(reopened).toEqual([`${key}|${last.url}|${last.title}`]);
+
+    // Another account's task, or one with nothing kept, has nothing to open.
+    expect((await h.request(`/api/tasks/task_unknown/browser/reopen`, { method: "POST", headers, body: "{}" })).status).toBe(404);
+    expect((await h.request(`/api/tasks/task_unknown/browser/last-shot`, { headers: { cookie } })).status).toBe(404);
+  } finally {
+    h.ctx.tabs = fakeTabs;
+  }
+});

@@ -6,6 +6,7 @@ import type { Logger } from "../../common/logger.js";
 import type { SandboxContainer } from "../sandbox/container.js";
 import { redact, type BrowserRuntime } from "./runtime.js";
 import type { BrowserRuntimeLike } from "./lifecycle.js";
+import { LastPages, type LastPage } from "./lastPages.js";
 
 /** Loopback MCP endpoint of the tab server inside every sandbox. */
 export const TAB_SERVER_PORT = 8190;
@@ -105,6 +106,17 @@ export interface TabServerLike {
   overviewShot?(target: string): Promise<{ mimeType: string; data: string } | null>;
   /** Bring one page of the overview to the front of the desktop for the person. */
   front?(target: string): Promise<PersonResult>;
+  /** The page a task's browser last showed, kept after its tab is closed. */
+  lastPage?(key: string): LastPage | null;
+  /** The picture of that page, if one was kept. */
+  lastShot?(key: string): Buffer | null;
+  /** Open that page again as a new tab of the task, held by the person. */
+  reopen?(key: string, url: string, title: string): Promise<PersonResult>;
+}
+
+/** The tab a task's card shows: one waiting for the person, then one they hold, then the most recently used. */
+export function shownTab(tabs: TabRecord[]): TabRecord | undefined {
+  return tabs.find((t) => t.request && t.holder === "ai") ?? tabs.find((t) => t.holder === "human") ?? [...tabs].sort((a, b) => b.lastUsed - a.lastUsed)[0];
 }
 
 /** An agent asking a person for help waits up to 30 minutes; the MCP clients must wait a bit longer. */
@@ -171,12 +183,14 @@ export class TabServer implements TabServerLike {
   #container: SandboxContainer;
   #runtime: BrowserRuntime;
   #ensuring: Promise<void> | null = null;
+  #pages: LastPages;
 
   constructor(cfg: Config, log: Logger, container: SandboxContainer, runtime: BrowserRuntime) {
     this.#cfg = cfg;
     this.#log = log.child("browser-tabs");
     this.#container = container;
     this.#runtime = runtime;
+    this.#pages = new LastPages(cfg.dataDir);
   }
 
   #script(): { body: string; version: string } {
@@ -257,7 +271,11 @@ export class TabServer implements TabServerLike {
   }
 
   async finish(key: string): Promise<void> {
-    if (KEY.test(key)) await this.#post("/finish", { key });
+    if (!KEY.test(key)) return;
+    // The page it ends on is kept: the tab itself is closed a few minutes after the task finishes.
+    const tab = shownTab(await this.list(key).catch(() => []));
+    if (tab) await this.screenshot(key, tab.id).catch(() => null);
+    await this.#post("/finish", { key });
   }
 
   async prune(): Promise<void> {
@@ -320,7 +338,7 @@ export class TabServer implements TabServerLike {
     return this.#person("/login", { key, tab, ...account } as unknown as PersonTarget & object, LOGIN_TIMEOUT_SEC);
   }
 
-  async #person(route: "/input" | "/pointer" | "/open" | "/close" | "/login", body: PersonTarget & object, seconds = 20): Promise<PersonResult> {
+  async #person(route: "/input" | "/pointer" | "/open" | "/close" | "/login" | "/reopen", body: PersonTarget & object, seconds = 20): Promise<PersonResult> {
     if ((body.task !== undefined && !KEY.test(body.task)) || (body.tab !== undefined && !/^t\d{1,9}$/.test(body.tab))) {
       return { status: 404, body: { error: "no_tab", message: "这个标签页已经关闭或不属于该任务" } };
     }
@@ -346,7 +364,22 @@ export class TabServer implements TabServerLike {
 
   async screenshot(key: string, tab: string): Promise<{ mimeType: string; data: string; url: string; title: string } | null> {
     if (!KEY.test(key) || !/^t\d{1,9}$/.test(tab)) return null;
-    return await this.#get(`/screenshot?tab=${tab}&key=${key}`);
+    const shot = await this.#get<{ mimeType: string; data: string; url: string; title: string }>(`/screenshot?tab=${tab}&key=${key}`);
+    if (shot) this.#pages.save(key, shot, Buffer.from(shot.data, "base64"));
+    return shot;
+  }
+
+  lastPage(key: string): LastPage | null {
+    return this.#pages.get(key);
+  }
+
+  lastShot(key: string): Buffer | null {
+    return this.#pages.shot(key);
+  }
+
+  async reopen(key: string, url: string, title: string): Promise<PersonResult> {
+    if (!KEY.test(key) || !/^https?:\/\//i.test(url)) return { status: 400, body: { error: "bad_request" } };
+    return this.#person("/reopen", { key, url, title } as unknown as PersonTarget & object, 40);
   }
 
   async overview(): Promise<OverviewPage[] | null> {

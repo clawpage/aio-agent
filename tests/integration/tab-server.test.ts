@@ -1152,3 +1152,24 @@ it.skipIf(!hasChromium)("past the deadline closes the hung tab the tool used, ne
     await expect.poll(async () => (await records("BT")).map((t) => t.id)).not.toContain(busy);
   }
 }, 30_000);
+
+it.skipIf(!hasChromium)("reopens the page a finished task left as a new tab of that task, held by the person", async () => {
+  const site = http.createServer((req, res) => { res.setHeader("content-type", "text/html; charset=utf-8"); res.end(`<title>Checkout ${req.url}</title><p>checkout</p>`); });
+  await new Promise<void>((r) => site.listen(0, "127.0.0.1", r));
+  const url = `http://127.0.0.1:${(site.address() as net.AddressInfo).port}/spc`;
+  const reopen = (body: unknown) => fetch(`${base}/reopen`, { method: "POST", body: JSON.stringify(body) });
+  for (const bad of [{ key: "RO", url: "file:///etc/passwd" }, { key: "RO", url: "javascript:alert(1)" }, { key: "person", url }, { url }]) {
+    expect((await reopen(bad)).status, JSON.stringify(bad)).toBe(400);
+  }
+  const res = await reopen({ key: "RO", url, title: "旧标题" });
+  expect(res.status).toBe(200);
+  const { tab } = (await res.json()) as { tab: TabRecord };
+  expect(tab).toMatchObject({ key: "RO", holder: "human", url, title: "Checkout /spc" });
+  // A finished task's page: handed back, it is cleared like the task's other finished tabs.
+  expect(tab.finishedAt).toEqual(expect.any(Number));
+  // The task's agent (a follow-up) is shut out until the person hands it back.
+  expect(text(await call("RO", "browser_get_text", { tab: tab.id }))).toContain("用户正在操作");
+  expect((await control(tab.id, "release", "RO")).status).toBe(200);
+  expect((await records("RO")).find((t) => t.id === tab.id)).toMatchObject({ holder: "ai" });
+  site.close();
+});

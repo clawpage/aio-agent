@@ -206,7 +206,8 @@ export interface Task {
   startedAt?: number | null;
   completedAt: number | null;
   /** Present when the task has browser tabs: its agent's tabs, a request for you, or you in control. */
-  browser?: { tabs: number; request: string | null; human: boolean };
+  /** `last`: the page its browser last showed, kept once the tab was closed (it can be opened again). */
+  browser?: { tabs: number; request: string | null; human: boolean; last?: { url: string; title: string; at: number; shot: boolean } };
   /** Set on a run a schedule started (nobody typed it then). */
   schedule?: { id: string; title: string; rule: string; builtin?: string } | null;
 }

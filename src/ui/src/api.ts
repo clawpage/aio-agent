@@ -146,6 +146,8 @@ export const api = {
   vaultDelete: (id: string) => request<{ ok: boolean }>(`/api/vault/${encodeURIComponent(id)}`, { method: "DELETE" }),
   vaultForgetScript: (site: string) => request<{ ok: boolean }>(`/api/vault/scripts/${encodeURIComponent(site)}`, { method: "DELETE" }),
   vaultReveal: (id: string) => request<{ password: string }>(`/api/vault/${encodeURIComponent(id)}/reveal`, { method: "POST", body: {} }),
+  taskBrowserLastShotUrl: (id: string, at: number) => apiUrl(`/api/tasks/${encodeURIComponent(id)}/browser/last-shot?at=${at}`),
+  taskBrowserReopen: (id: string) => request<{ tab: import("./types").TaskTab }>(`/api/tasks/${encodeURIComponent(id)}/browser/reopen`, { method: "POST", body: {} }),
   taskBrowserScreenshotUrl: (id: string, tab: string, at: number) => apiUrl(`/api/tasks/${encodeURIComponent(id)}/browser/screenshot?tab=${encodeURIComponent(tab)}&at=${at}`),
   session: (signal?: AbortSignal) => request<{ authenticated: boolean; role?: "owner" | "member"; username: string | null; expiresAt?: number; secure?: boolean; inviteEmail?: string | null }>("/api/auth/session", {signal,cache:"no-store"}),
   login: (password: string, username = "owner") => request<{ ok: boolean; username: string; expiresAt: number }>("/api/auth/login", { method: "POST", body: { password, username } }),

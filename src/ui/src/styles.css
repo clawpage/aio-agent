@@ -3206,6 +3206,15 @@ textarea:focus {
 .task-browser-shot { display: block; width: 100%; margin: 8px 0 0; padding: 0; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; background: var(--bg); cursor: pointer; }
 .task-browser-shot img { display: block; width: 100%; max-height: 220px; object-fit: cover; object-position: top; }
 .task-browser .task-actions { margin-top: 8px; }
+/* Its tab was closed: the page it last showed, kept as a snapshot that opens it again. */
+.task-browser-state.closed { background: transparent; color: var(--text-dim); border: 1px solid var(--border); }
+.task-browser.closed .task-browser-shot { position: relative; }
+.task-browser.closed .task-browser-shot img { filter: saturate(0.85); }
+.task-browser-shot-badge {
+  position: absolute; left: 8px; top: 8px; padding: 3px 8px; border-radius: 999px;
+  font-size: 11px; font-weight: 600; color: #fff; background: rgba(16, 14, 24, 0.5);
+  -webkit-backdrop-filter: blur(10px) saturate(1.4); backdrop-filter: blur(10px) saturate(1.4);
+}
 /* The hand-over is the one action on the card: keep it a real, readable primary button. */
 .task-browser .task-actions button.primary, .task-console-head button.primary { padding: 6px 12px; background: var(--you); border-color: var(--you); color: var(--on-you); font-weight: 700; }
 .task-console.watching .task-console-head { background: var(--ai-soft); border-bottom-color: color-mix(in srgb, var(--ai) 35%, var(--border)); }

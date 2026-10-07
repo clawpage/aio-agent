@@ -803,6 +803,28 @@ async function personOpen(body) {
   return { status: 200, body: { tab: snapshotRecords().find((r) => r.id === tab.id) } };
 }
 
+/**
+ * The person reopens the page a finished task left behind (its tab was closed since):
+ * a new tab of that task, at that address, theirs to operate until they hand it back.
+ */
+async function reopenTab(body) {
+  const key = String(body.key || ''), url = String(body.url || '');
+  if (!key || key === PERSON || !/^https?:\/\//i.test(url)) return { status: 400, body: { error: 'bad_request' } };
+  let tab;
+  try {
+    tab = await newTab(key, String(body.title || '').slice(0, 200) || '重新打开的页面');
+  } catch (err) {
+    return { status: 503, body: { error: 'unavailable', message: String(err && err.message || err) } };
+  }
+  // A finished task's page: kept while the person holds it, cleared like its others once handed back.
+  tab.finishedAt = Date.now();
+  await takeControl(tab);
+  await tab.page.goto(url, { waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => undefined);
+  tab.title = (await tab.page.title().catch(() => '')) || tab.title;
+  save();
+  return { status: 200, body: { tab: snapshotRecords().find((r) => r.id === tab.id) } };
+}
+
 /** A person closes a tab they opened; task tabs are never closed from here. */
 async function personClose(body) {
   const tab = registry.get(String(body.tab || ''));
@@ -1589,6 +1611,10 @@ const server = http.createServer(async (req, res) => {
     }
     if (req.method === 'POST' && url.pathname === '/open') {
       const out = await personOpen(await readJson(req));
+      return send(res, out.status, out.body);
+    }
+    if (req.method === 'POST' && url.pathname === '/reopen') {
+      const out = await reopenTab(await readJson(req));
       return send(res, out.status, out.body);
     }
     if (req.method === 'POST' && url.pathname === '/close') {

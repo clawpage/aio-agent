@@ -70,8 +70,58 @@ export function TaskBrowser({ task, onReveal }: { task: Task; onReveal: () => vo
     return () => window.clearInterval(timer);
   }, [load, live, signal]);
 
+  // The tab was closed (the sandbox clears a finished task's tabs after a while): forget it,
+  // unless the person just opened the page again and the feed has not caught up yet.
+  const reopenedAt = useRef(0);
+  const tabCount = task.browser?.tabs ?? 0;
+  useEffect(() => { if (!tabCount && Date.now() - reopenedAt.current > 15_000) setTabs([]); }, [tabCount]);
+
+  const reopen = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const { tab: opened } = await api.taskBrowserReopen(task.id);
+      reopenedAt.current = Date.now();
+      setTabs([opened]);
+      shot.current = { key: `${opened.id}\n${opened.url}\n${opened.title}`, at: Date.now() };
+      setShotAt(Date.now());
+      setShotFailed(false);
+      setConsoleOpen(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const tab = pickTab(tabs);
-  if (!task.browser?.tabs || !tab) return null;
+  const last = task.browser?.last;
+  if (!tab && last) {
+    const name = last.title || host(last.url);
+    return (
+      <div className="task-browser closed" role="group" aria-label="任务浏览器：页面已关闭">
+        <div className="task-browser-head">
+          <span className="task-browser-state closed">页面已关闭</span>
+          <span className="task-browser-site" title={last.url}>
+            {name}
+            <span className="muted"> · {host(last.url)}</span>
+          </span>
+        </div>
+        <p className="task-browser-hint">这个页面已在后台关闭，可以重新打开，从这里接着操作。</p>
+        {last.shot && (
+          <button type="button" className="task-browser-shot" onClick={() => void reopen()} disabled={busy} aria-label="重新打开这个页面">
+            <img src={api.taskBrowserLastShotUrl(task.id, last.at)} alt={`${name} 的上次页面快照`} loading="lazy" />
+            <span className="task-browser-shot-badge">上次的页面</span>
+          </button>
+        )}
+        {error && <p className="error tiny">{error}</p>}
+        <div className="task-actions">
+          <button type="button" className="primary tiny" disabled={busy} onClick={() => void reopen()}>{busy ? "正在打开…" : "重新打开页面"}</button>
+        </div>
+      </div>
+    );
+  }
+  if (!tab) return null;
 
   const control = async (action: "take" | "release") => {
     setBusy(true);

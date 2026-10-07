@@ -508,7 +508,11 @@ export function createApiRouter(context: AppContext): Router {
     const asking = [...byKey].filter(([, own]) => own.some((t) => t.request && t.holder === "ai")).map(([key]) => key);
     const decorate = <T extends { mergedInto?: string | null; conversationId: string }>(task: T) => {
       const own = task.mergedInto ? undefined : byKey.get(task.conversationId);
-      if (!own?.length) return task;
+      if (!own?.length) {
+        // Its tab is closed now: the page it last showed stays on the card, to be opened again.
+        const last = task.mergedInto ? null : context.tabs?.lastPage?.(task.conversationId);
+        return last ? { ...task, browser: { tabs: 0, request: null, human: false, last } } : task;
+      }
       const requested = own.find((t) => t.request && t.holder === "ai");
       return { ...task, browser: { tabs: own.length, request: requested?.request?.reason ?? null, human: own.some((t) => t.holder === "human") } };
     };
@@ -740,6 +744,22 @@ export function createApiRouter(context: AppContext): Router {
     if (!shot) { res.status(404).json({ error: "not_found" }); return; }
     res.setHeader("Cache-Control", "no-store");
     res.type(shot.mimeType).send(Buffer.from(shot.data, "base64"));
+  }));
+  // The page a task's browser last showed, after its tab was closed: its picture, and opening it again.
+  router.get("/tasks/:id/browser/last-shot", requireKind("primary"), requireSession, (req, res) => {
+    const key = taskBrowserKey(req);
+    const shot = key ? context.tabs?.lastShot?.(key) : null;
+    if (!shot) { res.status(404).json({ error: "not_found" }); return; }
+    res.setHeader("Cache-Control", "private, max-age=60");
+    res.type("image/jpeg").send(shot);
+  });
+  router.post("/tasks/:id/browser/reopen", requireKind("primary"), requireSession, asyncHandler(async (req, res) => {
+    const key = taskBrowserKey(req);
+    const last = key ? context.tabs?.lastPage?.(key) : null;
+    if (!key || !last || !context.tabs?.reopen) { res.status(404).json({ error: "not_found", message: "这个任务没有可以重新打开的页面" }); return; }
+    // Only the page the task itself was on: the address is never taken from the request.
+    const out = await context.tabs.reopen(key, last.url, last.title);
+    res.status(out.status).json(out.body);
   }));
   // A phone cannot raise its keyboard inside the remote browser view, so its native
   // input bar types into the tab the person took over through here.
