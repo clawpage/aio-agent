@@ -167,3 +167,19 @@ it('gives the owner a /u/owner workspace too, and keeps root links working',asyn
   expect(root.sandbox.requests.filter(r=>r.url.startsWith('/set-cookie')).map(r=>r.url)).toEqual(['/set-cookie?p=1','/set-cookie?p=2']);
  }finally{await root.shutdown();}
 });
+
+it('gives each member its own daily-feed minutes after the owner, kept across restarts',async()=>{
+  const h=await startHarness();
+  try{
+    const a=await createMember(h.ctx.db,'feed-slot-a','member-secret-123'),b=await createMember(h.ctx.db,'feed-slot-b','member-secret-123');
+    const seen:Record<string,string|undefined>={};
+    const make=()=>new UserRuntimes(h.ctx,async opts=>{seen[opts!.identity!.id]=opts?.config?.agent.dailyFeedAt;return {ctx:h.ctx,db:h.ctx.db,shutdown:async()=>{}};});
+    let registry=make();
+    await registry.resolve(a.id);await registry.resolve(b.id);await registry.shutdown();
+    expect([seen[a.id],seen[b.id]]).toEqual(['08:04','08:08']);
+    // A restart (or the order accounts are first used in) does not move anyone's feed.
+    registry=make();await registry.resolve(b.id);await registry.resolve(a.id);await registry.shutdown();
+    expect([seen[a.id],seen[b.id]]).toEqual(['08:04','08:08']);
+    expect(h.ctx.cfg.agent.dailyFeedAt).toBeUndefined();
+  }finally{await h.shutdown();}
+});

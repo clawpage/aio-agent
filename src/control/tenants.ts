@@ -9,6 +9,7 @@ import type {MemberModelGateway} from './memberModelGateway.js';
 import {getUser} from './auth/owner.js';
 import {MEMBER_EFFORTS,MEMBER_GPT_MODEL,MEMBER_MODEL,MEMBER_MODELS} from './auth/policy.js';
 import type {SandboxNodes} from './sandbox/nodes.js';
+import {feedTimeFor} from './tasks/service.js';
 
 /** A stable opaque namespace: no user-controlled paths, names, ports or upstreams. */
 export function memberConfig(base: Config, userId: string, port: number, model: string = MEMBER_MODEL, effort?: string, resident = false): Config {
@@ -74,6 +75,16 @@ export class UserRuntimes {
     // An assignment no longer offered (DeepSeek, before it was removed) falls back to the default.
     const config=memberConfig(this.root.cfg,user.id,port,assigned&&MEMBER_MODELS.includes(assigned.value)?assigned.value:MEMBER_MODEL,
       effort&&MEMBER_EFFORTS.includes(effort.value)?effort.value:undefined,this.root.cfg.sandbox.residentMembers.includes(user.username));
+    // The daily feed's slot (`feed_slot:<id>`, kept like the port): a few minutes apart per account,
+    // so the members' sandboxes do not all wake on the node at the owner's 08:00.
+    const slotKey=`feed_slot:${user.id}`;
+    let slot=Number((this.root.db.prepare('SELECT value FROM meta WHERE key=?').get(slotKey) as {value:string}|undefined)?.value??0);
+    if(!slot){
+      const taken=new Set((this.root.db.prepare("SELECT value FROM meta WHERE key LIKE 'feed_slot:%'").all() as {value:string}[]).map(x=>Number(x.value)));
+      slot=1;while(taken.has(slot))slot++;
+      this.root.db.prepare('INSERT INTO meta(key,value) VALUES(?,?)').run(slotKey,String(slot));
+    }
+    config.agent={...config.agent,dailyFeedAt:feedTimeFor(slot)};
     if(config.sandbox.autostart&&!this.gateway)throw new Error("Member gateway unavailable");
     this.gateway?.provision(config);
     // A member keeps the node its sandbox was created on; a new one goes where there is room.

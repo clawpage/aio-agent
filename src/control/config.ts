@@ -137,6 +137,11 @@ export function loadConfig(): {
     reasoningSummary: "none" | "auto" | "concise" | "detailed";
     /** Give every account the built-in daily feed schedule (08:00, only after a day with messages). */
     dailyFeed: boolean;
+    /**
+     * This account's feed time ("HH:MM") instead of 08:00: each member gets its own few minutes
+     * after the owner's, so the accounts do not all wake their sandboxes on one node at once.
+     */
+    dailyFeedAt?: string;
   };
   hostCodex: {
     /**

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { openDb, type Db } from "../../src/control/db.js";
 import { AgentManager } from "../../src/control/codex/manager.js";
-import { TaskService } from "../../src/control/tasks/service.js";
+import { feedTimeFor, TaskService } from "../../src/control/tasks/service.js";
 import { Logger } from "../../src/common/logger.js";
 import { taskNotification } from "../../src/control/push.js";
 import { FakeCodex, testConfig } from "../helpers/harness.js";
@@ -117,6 +117,35 @@ describe("the built-in daily feed", () => {
     const { message, schedule } = tasks.changeSchedule(feed().id, "owner_1", "cancel");
     expect(message).toContain("内置的定时任务，已为你关闭");
     expect(schedule).toMatchObject({ status: "paused", builtin: "daily_feed" });
+  });
+
+  it("runs at the account's own minutes, so accounts do not all start at 08:00", async () => {
+    expect([0, 1, 2, 15].map(feedTimeFor)).toEqual(["08:00", "08:04", "08:08", "09:00"]);
+    tasks.close(); agent.shutdown();
+    db.prepare("DELETE FROM schedules").run();
+    cfg.agent.dailyFeedAt = "08:08";
+    try {
+      await start();
+      expect(tasks.listSchedules("owner_1")).toMatchObject([{ rule: "每天 08:08", builtin: "daily_feed" }]);
+      expect(new Date(feed().next_run_at).getUTCMinutes()).toBe(8);
+    } finally { delete cfg.agent.dailyFeedAt; }
+  });
+
+  it("moves a feed still on 08:00 to the account's minutes, same day; a time the person chose stays", async () => {
+    const before = feed().next_run_at;
+    tasks.close(); agent.shutdown();
+    cfg.agent.dailyFeedAt = "08:12";
+    try {
+      await start();
+      expect(tasks.listSchedules("owner_1")).toMatchObject([{ rule: "每天 08:12" }]);
+      // Not recomputed from now: a feed already run today is not run again later today.
+      expect(feed().next_run_at - before).toBe(12 * 60_000);
+      tasks.close(); agent.shutdown();
+      db.prepare("UPDATE schedules SET spec_json=? WHERE builtin='daily_feed'").run(JSON.stringify({ kind: "daily", at: "07:30" }));
+      cfg.agent.dailyFeedAt = "08:04";
+      await start();
+      expect(tasks.listSchedules("owner_1")).toMatchObject([{ rule: "每天 07:30" }]);
+    } finally { delete cfg.agent.dailyFeedAt; }
   });
 
   it("can be switched off for the whole deployment", async () => {

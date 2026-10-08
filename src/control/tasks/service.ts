@@ -66,7 +66,16 @@ interface ScheduleRow {
 }
 /** The built-in daily feed: a schedule every account gets. */
 const DAILY_FEED = "daily_feed";
-const FEED_SPEC: ScheduleSpec = { kind: "daily", at: "08:00" };
+const FEED_AT = "08:00";
+const FEED_SPEC: ScheduleSpec = { kind: "daily", at: FEED_AT };
+/** Minutes between accounts' feeds: member n runs n of these after the owner's 08:00. */
+const FEED_STAGGER_MINUTES = 4;
+/** The feed time of an account's slot (0 is the owner's 08:00). */
+export function feedTimeFor(slot: number): string {
+    const minutes = 8 * 60 + slot * FEED_STAGGER_MINUTES;
+    return `${String(Math.floor(minutes / 60) % 24).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
+}
+const clockMinutes = (at: string) => { const [h, m] = at.split(":").map(Number); return h! * 60 + m!; };
 /** The feed's own instruction until the person words it themselves. */
 const FEED_INSTRUCTION = "根据你过往的任务，整理今天你可能感兴趣的内容和需要的提醒";
 /** What the feed keeps in mind: what the person cares about, what to stop pushing, what their reactions taught it. */
@@ -932,11 +941,23 @@ export class TaskService {
         if (!this.cfg.agent.dailyFeed) return;
         const ownerId = this.cfg.runtimeUserId ?? "owner_1";
         if (!this.db.prepare("SELECT 1 FROM owners WHERE id=?").get(ownerId)) return;
-        if (this.db.prepare("SELECT 1 FROM schedules WHERE owner_id=? AND builtin=?").get(ownerId, DAILY_FEED)) return;
+        const at = this.cfg.agent.dailyFeedAt ?? FEED_AT;
+        const existing = this.db.prepare("SELECT id,spec_json,next_run_at FROM schedules WHERE owner_id=? AND builtin=?").get(ownerId, DAILY_FEED) as { id: string; spec_json: string; next_run_at: number | null } | undefined;
+        if (existing) {
+            // A feed still on the shared 08:00 moves to the account's own minutes; a time the person chose stays.
+            // The next run keeps its day and moves by the same minutes, so a run already made today is not repeated.
+            const spec = JSON.parse(existing.spec_json) as ScheduleSpec;
+            if (spec.kind !== "daily" || spec.at !== FEED_AT || at === FEED_AT) return;
+            const shift = (clockMinutes(at) - clockMinutes(FEED_AT)) * 60_000;
+            this.db.prepare("UPDATE schedules SET spec_json=?,next_run_at=?,updated_at=? WHERE id=?")
+                .run(JSON.stringify({ ...spec, at }), existing.next_run_at === null ? null : existing.next_run_at + shift, Date.now(), existing.id);
+            return;
+        }
+        const spec: ScheduleSpec = { ...FEED_SPEC, at };
         const tz = this.cfg.browser.timezone;
         const now = Date.now();
         this.db.prepare("INSERT INTO schedules (id,owner_id,title,instruction,spec_json,timezone,resources_json,status,next_run_at,created_at,updated_at,builtin) VALUES (?,?,?,?,?,?,?,'active',?,?,?,?)")
-            .run(randomId("sched"), ownerId, "每日推送", FEED_INSTRUCTION, JSON.stringify(FEED_SPEC), tz, JSON.stringify(["browser"]), nextRun(FEED_SPEC, now, tz), now, now, DAILY_FEED);
+            .run(randomId("sched"), ownerId, "每日推送", FEED_INSTRUCTION, JSON.stringify(spec), tz, JSON.stringify(["browser"]), nextRun(spec, now, tz), now, now, DAILY_FEED);
     }
     /** Did the person send anything (not a scheduled run) since `since`? */
     private spokeSince(ownerId: string, since: number): boolean {
