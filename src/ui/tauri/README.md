@@ -42,6 +42,10 @@ page cannot load.
   wry grants the page's capture request and the system asks once. Android declares
   `RECORD_AUDIO` and `MODIFY_AUDIO_SETTINGS` (`AndroidManifest.xml`); wry's chrome client
   asks for the runtime permission when the page first records.
+- Camera (the attachment picker's "Take Photo/Video"): iOS declares `NSCameraUsageDescription`
+  (`gen/apple/project.yml` and the generated `Info.plist`). Without it iOS kills the app the
+  moment the camera opens (TCC: "attempted to access privacy-sensitive data without a usage
+  description"); the crash log on the phone names the missing key.
 - Android: edge to edge, the window is no longer resized for the keyboard, so the
   activity gives the keyboard's height back as bottom padding
   (`gen/android/.../MainActivity.kt`).
