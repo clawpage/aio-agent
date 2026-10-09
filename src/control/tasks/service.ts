@@ -192,6 +192,8 @@ export class TaskService {
         const parent = row.merged_into ? this.get(row.merged_into) : null;
         return {
             id: row.id, revision: row.revision, title: row.title, text: row.input_text, conversationId: this.executor(parent ?? row), mergedInto: row.merged_into, mergedTitle: parent?.title ?? null,
+            // The id the console sent it under: a message shown before the server answered is matched by it.
+            clientMessageId: row.client_message_id,
             // A task waiting for the person carries what its executor wrote before the question (the draft it asks about).
             status: row.status, result: TERMINAL.has(row.status) || row.status === "needs_input" ? this.shownResult(row) : null, error: row.error,
             attachments: JSON.parse(row.attachments_json) as TurnAttachment[], relatedTaskId: row.related_task_id,

@@ -35,7 +35,8 @@ async function setup(page: Page, rows: Task[] = [], nextBefore:number|null = nul
 }
 /** A real touch tap on touch devices: a mouse click would hide tap-only failures (WebKit drops the click of a prevented press). */
 const press = (info: TestInfo, target: Locator, position?: { x: number; y: number }) => (info.project.use.hasTouch ? target.tap({ position }) : target.click({ position }));
-const send = async (page: Page, text: string) => { await page.getByRole("textbox", { name: "消息", exact: true }).fill(text); await page.getByRole("button", { name: "发送", exact: true }).click(); await expect(page.getByRole("textbox", { name: "消息", exact: true })).toHaveValue(""); };
+// Sent once the server's task has taken the place of the message shown at once.
+const send = async (page: Page, text: string) => { await page.getByRole("textbox", { name: "消息", exact: true }).fill(text); await page.getByRole("button", { name: "发送", exact: true }).click(); await expect(page.getByRole("textbox", { name: "消息", exact: true })).toHaveValue(""); await expect(page.locator(".task-entry.outgoing")).toHaveCount(0); };
 test("a YouTube or Bilibili link in a result plays in place on a computer, and opens in the browser or app on a phone", async ({ page }, info) => {
     const players: string[] = [];
     for (const host of ["https://www.youtube-nocookie.com/**", "https://player.bilibili.com/**"]) {
@@ -247,10 +248,15 @@ test("failed submit preserves payload and idempotency key, details stay folded a
         await r.fallback(); });
     await page.getByRole("textbox", { name: "消息", exact: true }).fill("重试消息");
     await page.getByRole("button", { name: "发送", exact: true }).click();
-    await expect(page.getByRole("alert")).toContainText("内容已保留");
-    await expect(page.getByRole("textbox", { name: "消息", exact: true })).toHaveValue("重试消息");
-    await page.getByRole("button", { name: "发送", exact: true }).click();
+    // On screen at once, the composer free; a failure is marked on the message, which keeps everything.
+    await expect(page.getByRole("textbox", { name: "消息", exact: true })).toHaveValue("");
+    const outgoing = page.locator(".task-entry.outgoing");
+    await expect(outgoing).toContainText("重试消息");
+    await expect(outgoing.getByRole("alert")).toContainText("暂时失败");
+    await expect(outgoing).toContainText("未发送");
+    await outgoing.getByRole("button", { name: "重试" }).click();
     await expect(page.locator(".task-entry")).toHaveCount(2);
+    await expect(page.locator(".task-entry.outgoing")).toHaveCount(0);
     expect(keys).toHaveLength(2);
     expect(keys[0]).toBe(keys[1]);
     for (const width of info.project.name.startsWith("mobile") ? [390, 360] : [1440]) {
@@ -460,16 +466,21 @@ test("manual task reference persists with the draft, is cancellable, and binds t
  const widths=info.project.name.startsWith('mobile')?[390,360]:[1440];
  for(const width of widths){await page.setViewportSize({width,height:844});expect(await page.evaluate(()=>document.documentElement.scrollWidth-document.documentElement.clientWidth)).toBeLessThanOrEqual(1);}
  await page.getByRole('button',{name:'发送',exact:true}).click();await expect(page.locator('.task-reference')).toHaveCount(0);
- expect(bodies[0]?.relatedTaskId).toBe('task-2');await expect(page.locator('.msg.user small')).toContainText('任务 2');
+ await expect(page.locator('.task-entry.outgoing')).toHaveCount(0);await expect.poll(()=>bodies[0]?.relatedTaskId).toBe('task-2');await expect(page.locator('.msg.user small')).toContainText('任务 2');
  await page.getByRole('button',{name:'引用任务：任务 1',exact:true}).click();await page.getByRole('button',{name:'取消引用任务'}).click();await send(page,'无引用的新任务');expect(bodies[1]?.relatedTaskId).toBeNull();
 });
 test("failed reference submission preserves target and retry id, changing target creates a new id",async({page})=>{
  await setup(page,[task(1),task(2)]);const bodies:any[]=[];
  await page.route('**/api/tasks',async route=>{bodies.push(route.request().postDataJSON());await route.fulfill({status:503,json:{message:'重试'}});});
  await page.getByRole('textbox',{name:'消息',exact:true}).fill('同样的补充');await page.getByRole('button',{name:'引用任务：任务 1',exact:true}).click();
- for(let i=0;i<2;i++){await page.getByRole('button',{name:'发送',exact:true}).click();await expect(page.getByRole('button',{name:'发送',exact:true})).toBeEnabled();await expect(page.locator('.task-reference')).toContainText('任务 1');}
- expect(bodies[0].clientMessageId).toBe(bodies[1].clientMessageId);
- await page.getByRole('button',{name:'引用任务：任务 2',exact:true}).click();await page.getByRole('button',{name:'发送',exact:true}).click();await expect(page.getByRole('button',{name:'发送',exact:true})).toBeEnabled();
+ await page.getByRole('button',{name:'发送',exact:true}).click();
+ // Sent at once with its reference; a failed one keeps its target and id for the retry.
+ const outgoing=page.locator('.task-entry.outgoing');await expect(outgoing).toContainText('引用：任务 1');await expect(outgoing.getByRole('alert')).toBeVisible();
+ await outgoing.getByRole('button',{name:'重试'}).click();await expect.poll(()=>bodies.length).toBe(2);await expect(outgoing.getByRole('alert')).toBeVisible();
+ expect(bodies[0].clientMessageId).toBe(bodies[1].clientMessageId);expect(bodies[1].relatedTaskId).toBe('task-1');
+ // Back into the composer to change it: another target is another message.
+ await outgoing.getByRole('button',{name:'改一改'}).click();await expect(page.getByRole('textbox',{name:'消息',exact:true})).toHaveValue('同样的补充');await expect(page.locator('.task-reference')).toContainText('任务 1');
+ await page.getByRole('button',{name:'引用任务：任务 2',exact:true}).click();await page.getByRole('button',{name:'发送',exact:true}).click();await expect.poll(()=>bodies.length).toBe(3);
  expect(bodies[2].relatedTaskId).toBe('task-2');expect(bodies[2].clientMessageId).not.toBe(bodies[1].clientMessageId);
 });
 test("the execution page shows the task the person asked, with the dispatcher's full brief on request", async ({ page }, info) => {

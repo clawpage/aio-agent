@@ -90,6 +90,8 @@ test("an SVG with only a viewBox fills the message width at its own proportions;
   await expect(cards).toHaveCount(2, { timeout: 60_000 });
   const wide = cards.first().locator("img.svg-image");
   await expect(wide).toBeVisible();
+  // Measured once the first arrival has risen in (it scales the messages slightly on the way).
+  await expect(page.locator(".task-feed.entering")).toHaveCount(0);
   const bubble = page.locator(".bubble").filter({ has: cards.first() });
   const text = await bubble.locator(".markdown").first().boundingBox();
   const box = (await wide.boundingBox())!;

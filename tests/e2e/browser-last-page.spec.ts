@@ -71,3 +71,20 @@ test("a finished task whose tab was closed keeps a snapshot of its page, and one
   await page.getByRole("dialog", { name: "操作任务页面" }).getByRole("button", { name: "关闭操作面板" }).click();
   await expect(page.getByRole("group", { name: "任务浏览器：你正在操作" })).toBeVisible();
 });
+
+test("tasks continuing one session share its browser: only the latest shows it", async ({ page }) => {
+  const base = { revision: 1, error: null, attachments: [], relatedTaskId: null, dependencies: [], approvals: 0, conversationId: "child-shared", status: "completed" };
+  const rows = [
+    { ...base, id: "first", title: "查耳机价格", text: "查一下耳机", result: "查到了。", createdAt: 1000, completedAt: 1500, browser: { tabs: 0, request: null, human: false, last } },
+    { ...base, id: "second", title: "继续比较耳机", text: "再比较一下", result: "比较好了。", relatedTaskId: "first", createdAt: 2000, completedAt: 2500, browser: { tabs: 0, request: null, human: false, last } },
+  ];
+  await mockConsole(page, { conversations: [] });
+  await page.route("**/api/main*", (r) => r.fulfill({ json: { mode: "tasks", tasks: rows, nextBefore: null } }));
+  await page.route("**/api/tasks/*/browser/last-shot*", (r) => r.fulfill({ contentType: "image/png", body: page1280() }));
+  await page.goto("/");
+  await expect(page.locator(".task-report")).toHaveCount(2, { timeout: 60_000 });
+  const cards = page.getByRole("group", { name: "任务浏览器：页面已关闭" });
+  await expect(cards).toHaveCount(1);
+  await expect(page.locator('.task-report[data-task-id="second"]').getByRole("group", { name: "任务浏览器：页面已关闭" })).toBeVisible();
+  await expect(page.locator('.task-report[data-task-id="first"] .task-browser')).toHaveCount(0);
+});

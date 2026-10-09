@@ -21,7 +21,13 @@ let counter = 0;
  * also handed to the image cache, so the sent message shows it at once.
  */
 export function useUploadTray() {
-  const [pending, setPending] = useState<PendingUpload[]>([]);
+  const [pending, setPendingState] = useState<PendingUpload[]>([]);
+  // The same list, read synchronously when a message takes the uploads with it.
+  const pendingNow = useRef<PendingUpload[]>([]);
+  const setPending = (next: (old: PendingUpload[]) => PendingUpload[]) => {
+    pendingNow.current = next(pendingNow.current);
+    setPendingState(pendingNow.current);
+  };
   const [previews, setPreviews] = useState<Record<string, string>>({});
   const owned = useRef(new Set<string>());
   useEffect(() => () => { owned.current.forEach((url) => URL.revokeObjectURL(url)); owned.current.clear(); }, []);
@@ -41,14 +47,24 @@ export function useUploadTray() {
     return queued;
   }, []);
 
-  /** An upload finished (with what was stored) or failed (null). */
+  /** An upload finished (with what was stored) or failed (null). One handed to a sent message is its business now. */
   const settle = useCallback((item: PendingUpload, stored: Attachment | null) => {
+    if (stored?.kind === "image") primeImage(stored.path, item.file);
     setPending((old) => old.filter((p) => p.id !== item.id));
-    if (!item.preview) return;
-    if (stored?.kind === "image") {
-      primeImage(stored.path, item.file);
-      setPreviews((old) => ({ ...old, [stored.path]: item.preview! }));
-    } else release(item.preview);
+    if (!item.preview || !owned.current.has(item.preview)) return;
+    if (stored?.kind === "image") setPreviews((old) => ({ ...old, [stored.path]: item.preview! }));
+    else release(item.preview);
+  }, []);
+
+  /**
+   * Uploads still under way go with a message sent before they finish: they leave the tray, and
+   * their previews now belong to the caller (revoke them with releasePreviews once done).
+   */
+  const handOff = useCallback((): PendingUpload[] => {
+    const taken = pendingNow.current;
+    setPending(() => []);
+    for (const item of taken) if (item.preview) owned.current.delete(item.preview);
+    return taken;
   }, []);
 
   const drop = useCallback((path: string) => {
@@ -68,7 +84,12 @@ export function useUploadTray() {
     });
   }, []);
 
-  return { pending, previews, begin, settle, drop, clear };
+  return { pending, previews, begin, settle, drop, clear, handOff };
+}
+
+/** Revoke the previews of uploads handed off with a message, once that message no longer shows them. */
+export function releasePreviews(items: PendingUpload[]): void {
+  for (const item of items) if (item.preview) URL.revokeObjectURL(item.preview);
 }
 
 function badge(name: string): string {

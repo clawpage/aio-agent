@@ -11,7 +11,7 @@ import { ChoiceList } from "./ChoiceList";
 import { FilePreview } from "./FilePreview";
 import { TaskBrowser } from "./TaskBrowser";
 import { MessagePreview } from "./MessagePreview";
-import { ComposerAttachments, useUploadTray } from "./ComposerAttachments";
+import { ComposerAttachments, releasePreviews, useUploadTray, type PendingUpload } from "./ComposerAttachments";
 import { TurnPills } from "./TurnPills";
 import { FormCard } from "./FormCard";
 import { VoiceButton } from "./VoiceInput";
@@ -41,6 +41,17 @@ function waitingLabel(t: Task): string {
     return t.status === "blocked" ? "需要补充" : "等你补充";
 }
 const labels: Record<string, string> = { planning: "正在分配", needs_input: "等待你补充", planning_failed: "分配失败", waiting: "等待依赖或资源", queued: "排队中", running: "在办", stopping: "正在停止…", completed: "已完成", failed: "执行失败", interrupted: "已停止", unknown: "结果待核对", blocked: "需要补充" };
+/** A message shown the moment it is sent, until the server's task takes its place. */
+interface Outgoing {
+    id: string;
+    text: string;
+    reference: { id: string; title: string } | null;
+    attachments: Attachment[];
+    /** Files still uploading when it was sent; their previews show meanwhile. */
+    uploads: PendingUpload[];
+    state: "sending" | "failed";
+    error?: string;
+}
 export function TaskChat({ onDetails, onOpenLink, onOpenFileInBrowser, onExpired, onFeed, onRevealBrowser, debug = false }: {
     /** Owner debug mode: each message offers its dispatch log. */
     debug?: boolean;
@@ -61,9 +72,8 @@ export function TaskChat({ onDetails, onOpenLink, onOpenFileInBrowser, onExpired
     const [choosing, setChoosing] = useState<Record<string, string>>({});
     const [draft, setDraft] = useState("");
     const [attachments, setAttachments] = useState<Attachment[]>([]);
-    const [busy, setBusy] = useState(false);
-    const [uploading, setUploading] = useState(false);
     const tray = useUploadTray();
+    const uploading = tray.pending.length > 0;
     const [error, setError] = useState<string | null>(null);
     const [preview, setPreview] = useState<string | null>(null);
     const [connected, setConnected] = useState(false);
@@ -75,10 +85,6 @@ export function TaskChat({ onDetails, onOpenLink, onOpenFileInBrowser, onExpired
     const input = useRef<HTMLTextAreaElement>(null);
     useComposerHeight(input, draft);
     const pageLoaded = useRef(false);
-    const pending = useRef<{
-        signature: string;
-        id: string;
-    } | null>(null);
     const callbacks = useRef({ onExpired });
     callbacks.current = { onExpired };
     const merge = useCallback((fresh: Task[]) => setTasks(old => {
@@ -211,34 +217,85 @@ export function TaskChat({ onDetails, onOpenLink, onOpenFileInBrowser, onExpired
         setReference({ id: task.mergedInto ?? task.id, title: task.mergedTitle ?? task.title });
         input.current?.focus();
     };
-    const send = async () => {
-        if (busy || uploading || (!draft.trim() && !attachments.length))
+    /**
+     * Sent messages show at once, before the server has them: each waits for its own uploads
+     * (attachments still uploading go with it), then is submitted in the order it was sent.
+     * Its id is the idempotency key, so a retry never makes a second task. The task that
+     * arrives takes its place without rising in again.
+     */
+    const [outbox, setOutbox] = useState<Outgoing[]>([]);
+    const outboxNow = useRef<Outgoing[]>([]);
+    const setOutboxNow = (next: (old: Outgoing[]) => Outgoing[]) => { outboxNow.current = next(outboxNow.current); setOutbox(outboxNow.current); };
+    const sending = useRef<Promise<unknown>>(Promise.resolve());
+    const adopted = useRef(new Set<string>());
+    /** Uploads by tray item: a message sent before they finish waits for them. */
+    const uploads = useRef(new Map<string, Promise<Attachment | null>>());
+    const handed = useRef(new Set<string>());
+    useEffect(() => () => { for (const o of outboxNow.current) releasePreviews(o.uploads); }, []);
+    const deliver = async (id: string) => {
+        const o = outboxNow.current.find(x => x.id === id);
+        if (!o) return;
+        const results = await Promise.all(o.uploads.map(u => (uploads.current.get(u.id) ?? Promise.resolve(null))
+            .then(a => a ?? api.upload(u.file).then(r => { uploads.current.set(u.id, Promise.resolve(r)); return r; }, () => null))));
+        const failed = o.uploads.filter((_, i) => !results[i]);
+        if (failed.length) {
+            setOutboxNow(old => old.map(x => x.id === id ? { ...x, state: "failed", error: `${failed.map(f => f.name).join("、")} 没传上去` } : x));
             return;
-        const text = draft.trim();
-        const relatedTaskId = reference?.id ?? null;
-        const signature = JSON.stringify({ text, attachments, relatedTaskId });
-        const id = pending.current?.signature === signature ? pending.current.id : crypto.randomUUID();
-        pending.current = { signature, id };
-        setBusy(true);
-        setError(null);
+        }
         try {
-            const { task } = await api.submitTask({ text, attachments, relatedTaskId, clientMessageId: id });
+            const { task } = await api.submitTask({ text: o.text, attachments: [...o.attachments, ...results as Attachment[]], relatedTaskId: o.reference?.id ?? null, clientMessageId: id });
+            adopted.current.add(task.id);
             stick.current = true;
             merge([task]);
-            setDraft("");
-            setReference(null);
-            setAttachments([]);
-            tray.clear();
-            pending.current = null;
+            setOutboxNow(old => old.filter(x => x.id !== id));
+            releasePreviews(o.uploads);
+            for (const u of o.uploads) uploads.current.delete(u.id);
             void refresh();
-            input.current?.focus();
         }
         catch (err) {
-            setError(`${err instanceof Error ? err.message : String(err)}（内容已保留，可重试）`);
+            if ((err as { status?: number }).status === 401) callbacks.current.onExpired();
+            setOutboxNow(old => old.map(x => x.id === id ? { ...x, state: "failed", error: err instanceof Error ? err.message : String(err) } : x));
         }
-        finally {
-            setBusy(false);
-        }
+    };
+    const queue = (id: string) => { sending.current = sending.current.then(() => deliver(id)); };
+    // A message just sent is the latest one: keep it in view.
+    useEffect(() => { if (scroll.current && stick.current) scroll.current.scrollTop = scroll.current.scrollHeight; }, [outbox]);
+    // The poll can bring a sent message's task before its own answer does: it takes the place just the same.
+    for (const t of tasks) if (t.clientMessageId && outbox.some(o => o.id === t.clientMessageId)) adopted.current.add(t.id);
+    const send = () => {
+        const text = draft.trim();
+        if (!text && !attachments.length && !tray.pending.length) return;
+        const taken = tray.handOff();
+        for (const u of taken) handed.current.add(u.id);
+        const message: Outgoing = { id: crypto.randomUUID(), text, reference, attachments, uploads: taken, state: "sending" };
+        setOutboxNow(old => [...old, message]);
+        setDraft("");
+        setReference(null);
+        setAttachments([]);
+        tray.clear();
+        setError(null);
+        stick.current = true;
+        queue(message.id);
+        // A computer keeps typing; a phone puts its keyboard away, as before (an open composer that
+        // collapses on the next tap would move the feed under the finger).
+        if (matchMedia("(pointer: fine)").matches) input.current?.focus();
+    };
+    const retry = (id: string) => {
+        setOutboxNow(old => old.map(x => x.id === id ? { ...x, state: "sending", error: undefined } : x));
+        queue(id);
+    };
+    /** Back into the composer to change it: its text, reference and what was uploaded. */
+    const edit = (id: string) => {
+        const o = outboxNow.current.find(x => x.id === id);
+        if (!o) return;
+        setOutboxNow(old => old.filter(x => x.id !== id));
+        void Promise.all(o.uploads.map(u => uploads.current.get(u.id) ?? Promise.resolve(null))).then(done => {
+            setAttachments(old => [...old, ...o.attachments, ...done.filter((a): a is Attachment => !!a)]);
+            releasePreviews(o.uploads);
+        });
+        setDraft(old => (old ? `${o.text}\n${old}` : o.text));
+        if (o.reference) setReference(o.reference);
+        input.current?.focus();
     };
     /**
      * A tapped answer: sent as the reply to that task, without touching the draft.
@@ -263,26 +320,26 @@ export function TaskChat({ onDetails, onOpenLink, onOpenFileInBrowser, onExpired
     };
     /** The reply a finished task got after it asked, if any: its answers are then closed. */
     const replyTo = (t: Task) => tasks.find(x => x.id !== t.id && (x.relatedTaskId === t.id || x.mergedInto === t.id) && x.createdAt >= (t.completedAt ?? t.createdAt));
-    const pick = async (files: FileList | null) => {
+    /** Uploads one after another; a file still uploading when its message is sent goes with that message. */
+    const uploadChain = useRef<Promise<unknown>>(Promise.resolve());
+    const pick = (files: FileList | null) => {
         if (!files)
             return;
-        setUploading(true);
         setError(null);
-        const errors: string[] = [];
-        for (const item of tray.begin([...files].slice(0, Math.max(0, 6 - attachments.length)))) {
-            try {
-                const a = await api.upload(item.file);
-                setAttachments(old => [...old, a]);
+        for (const item of tray.begin([...files].slice(0, Math.max(0, 6 - attachments.length - tray.pending.length)))) {
+            // One left in the composer is an ordinary attachment from here on; only one a message took is waited for.
+            const done = uploadChain.current.then(() => api.upload(item.file)).then(a => {
+                if (!handed.current.has(item.id)) { setAttachments(old => [...old, a]); uploads.current.delete(item.id); }
                 tray.settle(item, a);
-            }
-            catch (err) {
+                return a as Attachment | null;
+            }, err => {
                 tray.settle(item, null);
-                errors.push(`${item.name}：${err instanceof Error ? err.message : "上传失败"}`);
-            }
+                if (!handed.current.has(item.id)) { setError(`${item.name}：${err instanceof Error ? err.message : "上传失败"}`); uploads.current.delete(item.id); }
+                return null;
+            });
+            uploadChain.current = done;
+            uploads.current.set(item.id, done);
         }
-        if (errors.length)
-            setError(errors.join("；"));
-        setUploading(false);
     };
     const act = async (operation: () => Promise<unknown>) => {
         try {
@@ -306,6 +363,14 @@ export function TaskChat({ onDetails, onOpenLink, onOpenFileInBrowser, onExpired
             .reduce((latest, t) => t.createdAt >= latest.createdAt ? t : latest, task);
         progressAt.set(anchor.id, task);
     }
+    // Tasks that continue one execution session share its browser: only the latest of them shows it.
+    const browserShownBy = new Map<string, string>();
+    for (const t of tasks) {
+        if (t.mergedInto) continue;
+        const shown = tasks.find(x => x.id === browserShownBy.get(t.conversationId));
+        if (!shown || t.createdAt >= shown.createdAt) browserShownBy.set(t.conversationId, t.id);
+    }
+    const ownsBrowser = (t: Task) => browserShownBy.get(t.conversationId) === t.id;
     // Tasks waiting for the person whose card is not on screen: a bubble above the composer leads to each.
     const needsYou = tasks.filter(t => !t.mergedInto && !terminal.has(t.status) && turnOf(t) === "you");
     const needsKey = needsYou.map(t => t.id).join(",");
@@ -364,10 +429,10 @@ export function TaskChat({ onDetails, onOpenLink, onOpenFileInBrowser, onExpired
             <span className="task-question-hint">{t.form ? "填好后提交，或直接在下方输入" : t.options?.length ? "点选一个，或直接在下方输入" : "直接在下方输入回复即可"}</span>
           </div>}
           {t.description && ["running", "stopping"].includes(t.status) && <p className="task-intro">{t.description}</p>}
-          <TaskBrowser task={t} onReveal={onRevealBrowser}/>
+          {ownsBrowser(t) && <TaskBrowser task={t} onReveal={onRevealBrowser}/>}
           <TaskDuration task={t} now={now}/>
           {t.error && <p className="tiny">{t.error}</p>}
-          <div className="task-actions"><button className="ghost tiny" disabled={busy} onClick={() => quoteTask(t)} aria-label={`引用任务：${t.title}`}>引用任务</button>{t.status === "planning_failed" ? <button className="ghost tiny" onClick={() => void act(() => api.retryTaskPlanning(t.id))}>重试分配</button> : t.status === "blocked" ? null : <button className="ghost tiny" disabled={t.status === "stopping"} onClick={() => void act(() => api.stopTask(t.id))}>停止该任务</button>}</div>
+          <div className="task-actions"><button className="ghost tiny" onClick={() => quoteTask(t)} aria-label={`引用任务：${t.title}`}>引用任务</button>{t.status === "planning_failed" ? <button className="ghost tiny" onClick={() => void act(() => api.retryTaskPlanning(t.id))}>重试分配</button> : t.status === "blocked" ? null : <button className="ghost tiny" disabled={t.status === "stopping"} onClick={() => void act(() => api.stopTask(t.id))}>停止该任务</button>}</div>
         </div>;
     const feed = tasks.flatMap(t => [{ task: t, report: false, at: t.createdAt }, ...(!t.mergedInto && terminal.has(t.status) ? [{ task: t, report: true, at: t.completedAt ?? t.createdAt }] : [])])
         .sort((a, b) => a.at - b.at || Number(a.report) - Number(b.report) || a.task.id.localeCompare(b.task.id));
@@ -384,30 +449,44 @@ export function TaskChat({ onDetails, onOpenLink, onOpenFileInBrowser, onExpired
       {nextBefore && <div className="feed-older" ref={olderTop}>{olderState === "failed"
         ? <button className="ghost tiny" onClick={() => void loadOlder()}>更早的任务没加载出来，点此重试</button>
         : <span className="muted tiny">{olderState === "loading" ? "正在加载更早的任务…" : ""}</span>}</div>}
-      {!tasks.length && arrival !== "loading" && <div className="empty"><h3>把事情交给我</h3><p>可以接着发不同任务。过程会收拢，完成后在这里回报。</p></div>}
+      {!tasks.length && !outbox.length && arrival !== "loading" && <div className="empty"><h3>把事情交给我</h3><p>可以接着发不同任务。过程会收拢，完成后在这里回报。</p></div>}
       {feed.map(({ task: t, report }) => report ? <article className={`msg assistant task-report ${t.status}`} key={`${t.id}:report`} data-task-id={t.id}>
         <div className="task-report-heading"><span>{t.title}</span>{t.schedule && <span className="schedule-badge">定时 · {t.schedule.rule}</span>}<span className="muted tiny">{labels[t.status]}</span></div>
         <MessagePreview title={t.title}><Markdown source={t.result || (t.status === "completed" ? "任务已结束，但没有返回文字结果，请打开详情核对。" : t.error || labels[t.status] || t.status)} onOpenLink={onOpenLink} onOpenFile={setPreview} choices={{ onChoose: option => void choose(t, option), chosen: choosing[`${t.id}:${t.revision}`] ?? replyTo(t)?.text ?? null }}/>{t.result && <MessageFileCards text={t.result} onOpen={setPreview} onOpenLink={onOpenLink}/>}{t.error && t.result && <p className="error">{t.error}</p>}</MessagePreview>
-        <TaskBrowser task={t} onReveal={onRevealBrowser}/>
+        {ownsBrowser(t) && <TaskBrowser task={t} onReveal={onRevealBrowser}/>}
         <div className="message-meta"><MessageTime at={t.completedAt} now={now}/><TaskDuration task={t} now={now}/></div>
-        <div className="task-actions"><button className="ghost tiny" disabled={busy} onClick={() => quoteTask(t)} aria-label={`引用任务：${t.title}`}>引用任务</button><button className="ghost tiny" onClick={() => onDetails(t)}>查看过程</button></div>
-      </article> : <div className="task-entry" key={t.id} data-task-id={t.id}>
+        <div className="task-actions"><button className="ghost tiny" onClick={() => quoteTask(t)} aria-label={`引用任务：${t.title}`}>引用任务</button><button className="ghost tiny" onClick={() => onDetails(t)}>查看过程</button></div>
+      </article> : <div className={`task-entry${adopted.current.has(t.id) ? " adopted" : ""}`} key={t.id} data-task-id={t.id}>
         {t.schedule ? <div className="schedule-run-note" role="note">定时任务「{t.schedule.title}」自动运行 · {t.schedule.rule} · <MessageTime at={t.createdAt} now={now}/></div> : <article className="msg user"><MessagePreview title="用户消息" user>{t.relatedTaskId && <small className="muted">引用：{t.relatedTaskTitle ?? tasks.find(task => task.id === t.relatedTaskId)?.title ?? "此前任务"}</small>}<p>{t.text}</p>{t.attachments.length > 0 && <AttachmentCards attachments={t.attachments} onOpen={setPreview}/>}<div className="message-meta"><MessageTime at={t.createdAt} now={now}/></div></MessagePreview></article>}
         {t.mergedInto && <div className="task-supplement"><button className="ghost tiny" onClick={() => onDetails(t)}>{t.status === "merged" ? "已补充到" : t.status === "merging" || t.status === "steering" ? "正在补充到" : t.status === "interrupted" ? "已取消补充" : "补充需要核对"}：{t.mergedTitle}</button>{t.waitReason && <p className="tiny">{t.waitReason.message}</p>}{t.error && <p className="tiny error">{t.error}</p>}</div>}
         {debug && <div className="task-actions debug-actions"><button className="ghost tiny" onClick={() => setDispatchLogFor(t.id)} aria-label={`派单日志：${t.title}`}>派单日志</button></div>}
         {progressAt.get(t.id) && renderProgress(progressAt.get(t.id)!)}
       </div>)}
+      {outbox.filter(o => !tasks.some(t => t.clientMessageId === o.id)).map(o => <div className="task-entry outgoing" key={o.id} data-outgoing={o.state}>
+        <article className="msg user"><MessagePreview title="用户消息" user>
+          {o.reference && <small className="muted">引用：{o.reference.title}</small>}
+          {o.text && <p>{o.text}</p>}
+          {o.attachments.length > 0 && <AttachmentCards attachments={o.attachments} onOpen={setPreview}/>}
+          {o.uploads.length > 0 && <div className="outgoing-uploads" aria-label="附件上传中">{o.uploads.map(u => u.preview
+            ? <span className="outgoing-upload image" key={u.id}><img src={u.preview} alt=""/>{o.state === "sending" && <span className="tray-spinner" aria-hidden="true"/>}</span>
+            : <span className="outgoing-upload file" key={u.id}>{u.name}{o.state === "sending" && <span className="tray-spinner" aria-hidden="true"/>}</span>)}</div>}
+          <div className="message-meta">{o.state === "sending" ? <span className="outgoing-state">发送中…</span> : <span className="outgoing-state failed">未发送</span>}</div>
+        </MessagePreview></article>
+        {o.state === "failed"
+          ? <div className="outgoing-failed" role="alert"><span>{o.error ?? "发送失败"}</span><button type="button" className="ghost tiny" onClick={() => retry(o.id)}>重试</button><button type="button" className="ghost tiny" onClick={() => edit(o.id)}>改一改</button></div>
+          : <div className="task-progress turn-ai active planning"><div className="task-summary"><span className="dispatch-glyph" aria-hidden="true"><i/><i/><i/></span><span className="task-progress-label">{labels.planning}</span></div><DispatchHint/></div>}
+      </div>)}
     </div>
     <div className="feed-latest-anchor">{waiting.length > 0 && <div className="needs-you" role="group" aria-label="等你处理的任务">{waiting.map(t => <button type="button" key={t.id} className="needs-you-bubble" onClick={() => showWaiting(t.id)} aria-label={`${waitingLabel(t)}：${t.title}，点击查看`}><span className="needs-you-dot" aria-hidden="true"/><span className="needs-you-kind">{waitingLabel(t)}</span><span className="needs-you-title">{t.title}</span></button>)}</div>}<button type="button" className={`feed-latest${away ? " show" : ""}`} aria-label="回到最新消息" title="回到最新消息" aria-hidden={!away} tabIndex={away ? 0 : -1} onClick={toLatest}><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 5v14M6 13l6 6 6-6"/></svg></button></div>
     {error && <div className="banner error" role="alert">{error}<button onClick={() => setError(null)}>关闭</button></div>}
     <div className={`composer${draft || attachments.length || reference || uploading ? " has-content" : ""}`}>
-      {reference && <div className="task-reference" role="status"><div><span className="muted tiny">引用任务</span><strong title={reference.title}>{reference.title}</strong></div><button type="button" className="ghost" disabled={busy} aria-label="取消引用任务" onClick={() => { setReference(null); input.current?.focus(); }}><ComposerIcon kind="close"/></button></div>}
-      <ComposerAttachments items={attachments} pending={tray.pending} previews={tray.previews} disabled={busy} onRemove={path => { setAttachments(old => old.filter(x => x.path !== path)); tray.drop(path); }}/>
-      <textarea ref={input} rows={2} value={draft} aria-label="消息" placeholder={reference ? "继续补充这个任务…" : "交给我一个任务…"} disabled={busy} onChange={e => setDraft(e.target.value)} onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+      {reference && <div className="task-reference" role="status"><div><span className="muted tiny">引用任务</span><strong title={reference.title}>{reference.title}</strong></div><button type="button" className="ghost" aria-label="取消引用任务" onClick={() => { setReference(null); input.current?.focus(); }}><ComposerIcon kind="close"/></button></div>}
+      <ComposerAttachments items={attachments} pending={tray.pending} previews={tray.previews} onRemove={path => { setAttachments(old => old.filter(x => x.path !== path)); tray.drop(path); }}/>
+      <textarea ref={input} rows={2} value={draft} aria-label="消息" placeholder={reference ? "继续补充这个任务…" : "交给我一个任务…"} onChange={e => setDraft(e.target.value)} onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
         e.preventDefault();
-        void send();
+        send();
     } }}/>
-      <div className="composer-row"><label className={`file-button ${busy || uploading ? "disabled" : ""}`}><ComposerIcon kind={uploading ? "busy" : "attach"}/><span className="composer-button-label">{uploading ? "上传中…" : "附件"}</span><input type="file" multiple className="file-input" aria-label="添加附件" data-testid="attachment-input" disabled={busy || uploading} onChange={e => { void pick(e.target.files); e.target.value = ""; }}/></label><VoiceButton disabled={busy} onError={setError} onText={heard => { setDraft(old => old + (/[A-Za-z0-9]$/.test(old) && /^[A-Za-z0-9]/.test(heard) ? " " : "") + heard); input.current?.focus(); }}/><span className="spacer"/><button className="primary" disabled={busy || uploading || (!draft.trim() && !attachments.length)} onClick={() => void send()} aria-label={busy ? "提交中…" : "发送"} title="发送"><ComposerIcon kind={busy ? "busy" : "send"}/><span className="composer-button-label">{busy ? "提交中…" : "发送"}</span></button></div>
+      <div className="composer-row"><label className="file-button"><ComposerIcon kind={uploading ? "busy" : "attach"}/><span className="composer-button-label">{uploading ? "上传中…" : "附件"}</span><input type="file" multiple className="file-input" aria-label="添加附件" data-testid="attachment-input" onChange={e => { pick(e.target.files); e.target.value = ""; }}/></label><VoiceButton disabled={false} onError={setError} onText={heard => { setDraft(old => old + (/[A-Za-z0-9]$/.test(old) && /^[A-Za-z0-9]/.test(heard) ? " " : "") + heard); input.current?.focus(); }}/><span className="spacer"/><button className="primary" disabled={!draft.trim() && !attachments.length && !uploading} onClick={send} aria-label="发送" title="发送"><ComposerIcon kind="send"/><span className="composer-button-label">发送</span></button></div>
     </div>
     <PopupPresence>{preview && <FilePreview path={preview} onClose={() => setPreview(null)} onOpenLink={onOpenLink} onOpenInBrowser={onOpenFileInBrowser}/>}</PopupPresence>
     <PopupPresence>{debug && dispatchLogFor && <DispatchLog taskId={dispatchLogFor} onClose={() => setDispatchLogFor(null)}/>}</PopupPresence>
