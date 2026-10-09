@@ -30,10 +30,21 @@ test("long main messages cap at 80%, open in a nine-tenths sheet and retain devi
   await expect(dialog).toBeVisible();
   await expect.poll(() => dialog.evaluate(n => n.getAnimations().length)).toBe(0);
   const sheet = (await dialog.boundingBox())!;
-  const bottomInset = info.project.name.startsWith("mobile") ? 34 : 0;
-  expect(Math.abs(sheet.height - (cap / .8 * .9 + bottomInset))).toBeLessThan(1);
-  expect(sheet.y).toBeGreaterThan(page.viewportSize()!.height * .09);
-  expect(Math.abs(sheet.y + sheet.height - page.viewportSize()!.height)).toBeLessThan(1);
+  const view = page.viewportSize()!;
+  if (info.project.name.startsWith("mobile")) {
+    // A phone reads it in a nine-tenths bottom sheet.
+    expect(Math.abs(sheet.height - (cap / .8 * .9 + 34))).toBeLessThan(1);
+    expect(sheet.y).toBeGreaterThan(view.height * .09);
+    expect(Math.abs(sheet.y + sheet.height - view.height)).toBeLessThan(1);
+  } else {
+    // A wide screen reads it in a centred window with a readable measure, clear of every edge.
+    expect(sheet.width).toBeLessThanOrEqual(880);
+    expect(Math.abs(sheet.x + sheet.width / 2 - view.width / 2)).toBeLessThan(2);
+    expect(Math.abs(sheet.y + sheet.height / 2 - view.height / 2)).toBeLessThan(2);
+    expect(sheet.y).toBeGreaterThanOrEqual(39);
+    expect((await dialog.locator(".full-message-content").boundingBox())!.width).toBeLessThanOrEqual(720);
+    await expect(dialog.locator(".full-message-grabber")).toBeHidden();
+  }
   await expect(dialog.getByRole("button", { name: "关闭消息" })).toBeFocused();
   const body = dialog.locator(".full-message-body");
   await expect(dialog.locator(".bubble")).toHaveCount(0);

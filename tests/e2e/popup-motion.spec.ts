@@ -81,9 +81,16 @@ test("sheets slide vertically while mobile task navigation slides horizontally",
   await audit(page, ".dispatch-log");
   await page.getByRole("button", { name: "派单日志：动画验证" }).click(); await entered(page, ".dispatch-log");
   await page.locator(".dispatch-log").getByRole("button", { name: "关闭", exact: true }).click(); await exited(page, ".dispatch-log");
-  await audit(page, ".full-message");
+  // The full message is a bottom sheet on a phone and a centred window on a wide screen (it fades and scales in).
+  const sheetSlides = info.project.name.startsWith("mobile");
+  const centred = async (name: string) => {
+    await expect.poll(() => page.locator(".full-message").evaluate((n, name) => (n.getAnimations() as CSSAnimation[]).some(a => a.animationName === name), name)).toBe(true);
+    await expect.poll(() => page.locator(".full-message").evaluate(n => n.getAnimations().length).catch(() => 0)).toBe(0);
+  };
+  if (sheetSlides) await audit(page, ".full-message");
   const more = page.getByRole("button", { name: "点击看更多：动画验证", exact: true });
-  await more.click(); await entered(page, ".full-message");
+  await more.click();
+  if (sheetSlides) await entered(page, ".full-message"); else await centred("dialog-in");
   const sheet = page.locator(".full-message");
   for (const [selector, open, close] of [
     [".file-preview", () => sheet.getByRole("button", { name: "预览 文件", exact: true }).click(), () => page.getByRole("button", { name: "关闭预览" }).click()],
@@ -94,8 +101,9 @@ test("sheets slide vertically while mobile task navigation slides horizontally",
     await close(); await exited(page, selector);
     await expect(sheet).toHaveCount(1);
   }
-  await audit(page, ".full-message");
-  await sheet.getByRole("button", { name: "关闭消息" }).click(); await exited(page, ".full-message");
+  if (sheetSlides) await audit(page, ".full-message");
+  await sheet.getByRole("button", { name: "关闭消息" }).click();
+  if (sheetSlides) await exited(page, ".full-message"); else await expect(sheet).toHaveCount(0);
   await expect(more).toBeFocused();
   // A delayed request keeps the loading card alive for its entry and exit.
   await audit(page, ".opening-card");
