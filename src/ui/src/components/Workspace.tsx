@@ -4,6 +4,7 @@ import { api, ApiError } from "../api";
 import type { CapabilitiesResponse, DocumentReadiness, FileEntry, StatusResponse } from "../types";
 import { FilePreview } from "./FilePreview";
 import { TerminalSessions } from "./TerminalSessions";
+import { PhoneScreen } from "./PhoneScreen";
 import { BrowserViewerController } from "../browserViewer";
 import { BrowserStatusBar, fetchBrowserStatus, STATUS_POLL_MS } from "./BrowserStatusBar";
 import { needsRestore } from "../browserStatusView";
@@ -24,7 +25,7 @@ interface Props {
   browserNonce?: number;
 }
 
-type TabId = "browser" | "terminal" | "files" | "editor" | "notebook" | "preview" | "api";
+type TabId = "browser" | "terminal" | "files" | "editor" | "notebook" | "preview" | "phone" | "api";
 
 const TABS: Array<{ id: TabId; label: string; path?: string; kind: "frame" | "native" }> = [
   // The browser is shown on the sandbox desktop (noVNC): its own keyboard, gestures and windows.
@@ -34,11 +35,15 @@ const TABS: Array<{ id: TabId; label: string; path?: string; kind: "frame" | "na
   { id: "editor", label: "编辑器", path: "/code-server/", kind: "frame" },
   { id: "notebook", label: "笔记本", path: "/jupyter/lab", kind: "frame" },
   { id: "preview", label: "预览", kind: "native" },
+  // The owner's own Android phone (USB on the host), shown only when the host offers it.
+  { id: "phone", label: "手机", kind: "native" },
   { id: "api", label: "接口与 MCP", kind: "native" },
 ];
 
 export function Workspace({ open, status, initialPath, onClose, onNotify, browserNonce, canConfigure = true }: Props) {
   const [terminalId, setTerminalId] = useState<string | null>(null);
+  /** The owner's phone is offered by the host (the tab exists only then). */
+  const [phoneAvailable, setPhoneAvailable] = useState(false);
   const [tab, setTab] = useState<TabId>("browser");
   const [frameSrc, setFrameSrc] = useState<string | null>(null);
   const [frameKey, setFrameKey] = useState(0);
@@ -225,6 +230,14 @@ export function Workspace({ open, status, initialPath, onClose, onNotify, browse
       document.removeEventListener("visibilitychange", onVisible);
     };
   }, [open, origin, renewCompanionSession, sessionReady]);
+
+  // Whether the host offers the owner's phone; asked each time the workspace opens.
+  useEffect(() => {
+    if (!open || !canConfigure) return;
+    let cancelled = false;
+    api.phone().then((res) => { if (!cancelled) setPhoneAvailable(res.available); }, () => undefined);
+    return () => { cancelled = true; };
+  }, [open, canConfigure]);
 
   // The load event is authoritative; the timer only covers a frame that never fires it.
   useEffect(() => {
@@ -450,7 +463,7 @@ export function Workspace({ open, status, initialPath, onClose, onNotify, browse
   }, [keepAlivePin, onNotify]);
 
   const currentDef = TABS.find((t) => t.id === tab);
-  const apps = TABS.filter((t) => canConfigure || t.id !== "api");
+  const apps = TABS.filter((t) => (canConfigure || t.id !== "api") && (t.id !== "phone" || (canConfigure && phoneAvailable)));
   const externalPath = tab === "terminal" ? (terminalId ? `/terminal?session_id=${encodeURIComponent(terminalId)}` : undefined) : currentDef?.path;
 
   return (
@@ -544,6 +557,7 @@ export function Workspace({ open, status, initialPath, onClose, onNotify, browse
                 </div>
               )}
               {canConfigure && tab === "api" && <ApiTab notify={onNotify} />}
+              {canConfigure && phoneAvailable && tab === "phone" && <PhoneScreen active={docVisible} onNotify={onNotify} />}
               {TABS.find((t) => t.id === tab)?.kind === "frame" && (
                 <>
                   {holdsBrowser && (suspended || restoringBrowser) ? (

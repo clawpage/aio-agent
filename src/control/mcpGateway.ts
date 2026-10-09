@@ -53,6 +53,11 @@ export class McpGateway {
     return (this.#secret = file.ok ? file.value : null);
   }
 
+  /** The upstream bearer token, for a subclass that reaches the same upstream another way. */
+  protected upstreamToken(): string | null {
+    return this.#token();
+  }
+
   get enabled(): boolean {
     return Boolean(this.#opts.upstreamUrl) && this.#token() !== null;
   }

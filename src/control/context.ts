@@ -18,6 +18,7 @@ import type { BrowserRuntimeLike } from "./browser/lifecycle.js";
 import type { TaskService } from "./tasks/service.js";
 import type { SandboxIdle } from "./sandbox/idle.js";
 import type { PushService } from "./push.js";
+import type { PhoneGateway } from "./phone.js";
 import type { Vault } from "./vault.js";
 
 export interface AppContext {
@@ -29,6 +30,8 @@ export interface AppContext {
   tasks: TaskService;
   /** Phone notifications (Web Push), shared by every account; absent in tests. */
   push?: PushService;
+  /** The owner's phone (bin/phone-bridge.mjs), root context only; absent when not configured or in tests. */
+  phone?: PhoneGateway;
   /** The account's password vault; absent in runtimes built by hand in tests. */
   vault?: Vault;
   /** Whole-container idle stop/start; absent when the runtime keeps its container up. */

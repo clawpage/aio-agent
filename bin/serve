@@ -14,6 +14,7 @@
  *            the control plane on :4892 and the UI edge on :4891
  *
  * Either way the tunnel sends the console host to :4891 and the workspace host to :4892.
+ * PA_PHONE_BRIDGE=1 also runs bin/phone-bridge.mjs (the owner's Android phone over USB).
  * Optional runtime overrides: var/runtime.env (KEY=VALUE per line).
  */
 import { spawn } from "node:child_process";
@@ -171,6 +172,12 @@ if (mode === "compose") {
     AIO_CONTROL_URL: `http://127.0.0.1:${baseEnv.PA_PORT}`,
     AIO_WORKSPACE_ORIGIN: `https://${baseEnv.PA_WORKSPACE_HOST ?? "agent-workspace.clawpage.ai"}`,
   }, { required: true });
+}
+
+// The owner's phone on this machine's USB (PA_PHONE_BRIDGE=1): a host process in either mode,
+// since containers cannot reach USB; the control plane reaches it on loopback.
+if (baseEnv.PA_PHONE_BRIDGE === "1") {
+  startChild("personal-agent-phone", process.execPath, [path.join(ROOT, "bin", "phone-bridge.mjs")], baseEnv, { required: false });
 }
 
 if (fs.existsSync(TUNNEL_CONFIG)) {

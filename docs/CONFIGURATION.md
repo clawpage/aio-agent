@@ -113,6 +113,13 @@
 | `PA_HA_MCP_ACCOUNTS` | 空 | 获准操作 Home Assistant 的用户名（owner 也需列出） |
 | `PA_PRINTER_URI` | 空 | 网络打印机的 `ipp://` 或 `ipps://` 地址；为空则不提供打印 |
 | `PA_PRINTER_ACCOUNTS` | 空 | 获准使用打印机的用户名（owner 也需列出） |
+| `PA_PHONE_BRIDGE_URL` | 空 | owner 手机桥接（`bin/phone-bridge.mjs`）地址，如 `http://127.0.0.1:4903`（compose 用 `http://host.docker.internal:4903`）；为空则不提供 |
+| `PA_PHONE_BRIDGE_SECRETS_FILE` | `~/.config/aio-agent/phone-bridge.env` | `PHONE_BRIDGE_TOKEN`（环境变量优先）；控制面与桥接共用 |
+| `PA_PHONE_BRIDGE` | 空 | `var/runtime.env` 中设为 `1` 时 `bin/serve` 同时运行手机桥接（宿主进程） |
+| `PA_PHONE_BRIDGE_PORT` / `PA_PHONE_BRIDGE_BIND` | `4903` / `127.0.0.1` | 桥接监听地址 |
+| `PA_PHONE_SERIAL` | 空 | 指定 adb 设备序列号；为空时用唯一已连接的设备 |
+| `PA_ADB` | 自动 | adb 路径；默认按 `ANDROID_HOME`、`~/Library/Android/sdk/platform-tools` 查找 |
+| `PA_PHONE_DIR` | `var/phone` | 桥接的 mobile-mcp 与 scrcpy server 安装目录 |
 | `PA_GADGET_TOKEN_PATH` | `<数据目录>/gadget-token.env` | 语音配件令牌与绑定账号 |
 | `PA_GADGET_USAGE_URL` | 空 | 配件「用量」页数据地址；为空则接口返回 404 |
 | `PA_GADGET_FIRMWARE_DIR` | `<数据目录>/gadget-firmware` | 配件无线升级固件目录 |

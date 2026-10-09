@@ -43,6 +43,13 @@ const GLYPHS: Record<string, ReactNode> = {
       <circle cx="20" cy="22.3" r="2.4" fill="#fff" />
     </>
   ),
+  // A phone with a home bar.
+  phone: (
+    <>
+      <rect x="14" y="9.5" width="12" height="21" rx="2.6" fill="none" stroke="#fff" strokeWidth="2.2" />
+      <path d="M18 26.5h4" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" />
+    </>
+  ),
   // A plug: endpoints and MCP.
   api: (
     <>

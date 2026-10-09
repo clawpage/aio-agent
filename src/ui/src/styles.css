@@ -1649,6 +1649,7 @@ textarea:focus {
 .app-icon[data-app="notebook"] .app-icon-tile { fill: color-mix(in srgb, var(--you) 85%, var(--error)); }
 .app-icon[data-app="preview"] .app-icon-tile { fill: var(--done); }
 .app-icon[data-app="api"] .app-icon-tile { fill: color-mix(in srgb, var(--error) 70%, var(--ai)); }
+.app-icon[data-app="phone"] .app-icon-tile { fill: color-mix(in srgb, var(--done) 70%, var(--tile-dark)); }
 
 /* Full screen: the window takes the whole screen, as a macOS full-screen app. */
 .workspace.desktop.fullscreen .menubar,
@@ -4131,3 +4132,16 @@ button.map-card-switch { flex: 0 0 auto; padding: 4px 10px; }
   .composer:has(.voice-button) textarea { padding-right: 92px; }
 }
 @media (prefers-reduced-motion: reduce) { .composer-row > .voice-button.recording { animation: none; } }
+
+/* The owner's phone, live (PhoneScreen): the screen fills the window height, keys and text below. */
+.phone { display: flex; flex-direction: column; gap: 8px; height: 100%; min-height: 0; padding: 8px; box-sizing: border-box; }
+.phone-bar { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-dim); }
+.phone-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--border); flex: none; }
+.phone-dot.live { background: var(--done); }
+.phone-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.phone-stage { position: relative; flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; }
+.phone-canvas { max-width: 100%; max-height: 100%; width: auto; height: auto; border-radius: 14px; background: var(--tile-dark); touch-action: none; cursor: pointer; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+.phone-keys { display: flex; justify-content: center; gap: 6px; flex-wrap: wrap; }
+.phone-keys button { min-width: 44px; min-height: 36px; }
+.phone-text { gap: 6px; }
+.phone-text input { flex: 1; min-width: 0; }

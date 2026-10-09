@@ -6,6 +6,7 @@ import {Jev} from "./jev.js";
 import {DecisionGateway} from "./decision.js";
 import {KbGateway} from "./kb.js";
 import {HaGateway} from "./ha.js";
+import {PhoneGateway} from "./phone.js";
 import {ScheduleGateway} from "./scheduleTool.js";
 import { ImageGateway, sandboxImageFiles } from "./imageTool.js";
 import { PrinterGateway, sandboxPrintFiles } from "./printer/gateway.js";
@@ -407,6 +408,10 @@ async function main(): Promise<void> {
     workspace:ctx.cfg.sandbox.containerWorkspaceDir,usernameOf:id=>account("SELECT username AS v FROM owners WHERE id=?",id),
     filesFor:async id=>sandboxPrintFiles(id===ctx.cfg.runtimeUserId?ctx:await ctx.runtimeForUser!(id))});
   printer.provision(ctx.cfg);
+  // The owner's phone: provisioned for the owner runtime only, never for a member.
+  const phone=new PhoneGateway({cfg:ctx.cfg,log:ctx.log,port:ctx.cfg.memberModelPort??4902,usernameOf:id=>account("SELECT username AS v FROM owners WHERE id=?",id)});
+  phone.provision(ctx.cfg);
+  ctx.phone=phone;
   // Each account's schedules live in its own runtime: the owner's here, a member's in its runtime.
   const schedule=new ScheduleGateway({port:ctx.cfg.memberModelPort??4902,log:ctx.log,
     tasksFor:async id=>id===ctx.cfg.runtimeUserId?ctx.tasks:(await ctx.runtimeForUser!(id)).tasks});
@@ -423,7 +428,7 @@ async function main(): Promise<void> {
       await runtime.browser.withCall("call",()=>undefined);
     }});
   browserGateway.provision(ctx.cfg);
-  const modelGateway=new MemberModelGateway(ctx.cfg,ctx.log,ctx.share,decision,kb,schedule,ctx.hostTokens,image,browserGateway,ha,printer);
+  const modelGateway=new MemberModelGateway(ctx.cfg,ctx.log,ctx.share,decision,kb,schedule,ctx.hostTokens,image,browserGateway,ha,printer,phone);
   await modelGateway.start();
   // Phone notifications: one key pair and one subscription store for every account.
   ctx.push=new PushService({db:ctx.db,log:ctx.log,keyFile:path.join(ctx.cfg.dataDir,"vapid.json"),subject:`https://${ctx.cfg.primaryHost}`});
@@ -433,7 +438,7 @@ async function main(): Promise<void> {
   ctx.runtimeForUser=id=>users.resolve(id);
   const app = createApp(ctx);
   const server = http.createServer(app);
-  server.on("upgrade", (req, socket, head) => handleUpgrade(ctx, req, socket, head));
+  server.on("upgrade", (req, socket, head) => phone.ownsUpgrade(req) ? phone.handleUpgrade(ctx, req, socket, head) : handleUpgrade(ctx, req, socket, head));
 
   await new Promise<void>((resolve) => {
     server.listen(ctx.cfg.port, ctx.cfg.bind, () => resolve());

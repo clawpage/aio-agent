@@ -220,7 +220,7 @@ export function createApiRouter(context: AppContext): Router {
     if (!user) { res.status(401).json({ error: "unauthenticated" }); return; }
     const restricted = user.role !== "owner";
     const pathname = req.path.toLowerCase().replace(/\/+$/, "");
-    const ownerPaths = ["/usage", "/settings", "/models", "/capabilities", "/sandbox/context", "/documents/provision", "/gadget/history"];
+    const ownerPaths = ["/usage", "/settings", "/models", "/capabilities", "/sandbox/context", "/documents/provision", "/gadget/history", "/phone"];
     if (restricted && ownerPaths.some(p => pathname === p || pathname.startsWith(p + "/"))) {
       res.status(403).json({ error: "forbidden", message: "此操作仅限所有者" }); return;
     }
@@ -1327,6 +1327,20 @@ export function createApiRouter(context: AppContext): Router {
       }
       audit(db, "agent_settings_updated", JSON.stringify(result.settings), ctxOf(req).ip);
       res.json({ ok: true, settings: result.settings });
+    }),
+  );
+
+  // ----------------------------------------------------------- phone
+
+  // The owner's phone: whether it is offered and connected (the screen itself is a WebSocket, PhoneGateway).
+  router.get(
+    "/phone",
+    requireKind("primary"),
+    requireSession,
+    asyncHandler(async (_req, res) => {
+      if (!context.phone?.enabled) { res.json({ available: false, device: null }); return; }
+      const status = await context.phone.status();
+      res.json({ available: true, reachable: status !== null, device: status?.device ?? null });
     }),
   );
 
