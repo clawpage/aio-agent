@@ -137,12 +137,19 @@ async function phoneSerial() {
   return ready[0]?.[0] ?? null;
 }
 
+/** The name the phone shows for itself (Settings → About), e.g. "Galaxy Z Flip6"; empty if unset. */
+async function deviceName(serial) {
+  const { stdout } = await run(ADB, ["-s", serial, "shell", "settings", "get", "global", "device_name"], { timeout: 10_000 }).catch(() => ({ stdout: "" }));
+  const name = stdout.trim();
+  return name === "null" ? "" : name;
+}
+
 async function phoneInfo() {
   const serial = await phoneSerial();
   if (!serial) return null;
   const prop = async (name) => (await run(ADB, ["-s", serial, "shell", "getprop", name], { timeout: 10_000 })).stdout.trim();
-  const [model, marketName, release] = await Promise.all([prop("ro.product.model"), prop("ro.product.vendor.marketname").catch(() => ""), prop("ro.build.version.release")]);
-  return { serial, model, name: marketName || model, android: release };
+  const [model, name, release] = await Promise.all([prop("ro.product.model"), deviceName(serial), prop("ro.build.version.release")]);
+  return { serial, model, name: name || model, android: release };
 }
 
 // ------------------------------------------------------------------ mobile-mcp
@@ -365,7 +372,8 @@ class Screen {
       const control = await connectOnce(port);
       control.on("data", () => undefined); // device messages (clipboard acks) are not used
       control.on("error", () => undefined);
-      this.name = (await read(64)).toString("utf8").replace(/\0.*$/s, "");
+      const model = (await read(64)).toString("utf8").replace(/\0.*$/s, "");
+      this.name = (await deviceName(serial)) || model;
       const codec = (await read(4)).readUInt32BE(0);
       if (codec !== 0x68323634) throw new Error(`unexpected video codec ${codec.toString(16)}`);
       this.session = { serial, proc, video, control, port };
