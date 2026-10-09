@@ -13,7 +13,24 @@ function mermaid(): Promise<Mermaid> {
       securityLevel: "strict",
       // A syntax error is ours to show (the source); Mermaid must not add its own error picture to the page.
       suppressErrorRendering: true,
-      theme: "neutral",
+      // Drawn for a phone: the console's indigo for steps, its amber for decisions, tight spacing and
+      // rounded boxes, so a flow reads at a glance instead of as a tall grey strip. The picture keeps
+      // a white page in both themes (see .svg-image), so these are fixed light colours.
+      theme: "base",
+      themeVariables: {
+        fontSize: "14px",
+        primaryColor: "#f1efff", primaryBorderColor: "#b4acf3", primaryTextColor: "#1d1b26",
+        lineColor: "#a29db3", textColor: "#1d1b26", edgeLabelBackground: "#ffffff",
+        clusterBkg: "#f8f7fc", clusterBorder: "#e5e2ee", titleColor: "#1d1b26",
+      },
+      themeCSS: [
+        ".node rect { rx: 10px; ry: 10px; }",
+        ".node polygon { fill: #fff4e2; stroke: #e7bd7a; }",
+        ".node .label, .nodeLabel { font-weight: 500; }",
+        ".edgeLabel, .edgeLabel text { font-size: 12px; fill: #6b6878; }",
+        ".cluster-label text { font-size: 12px; fill: #6b6878; }",
+      ].join(" "),
+      flowchart: { nodeSpacing: 22, rankSpacing: 30, padding: 10, diagramPadding: 6, curve: "basis" },
       // Plain SVG text, no <foreignObject>: the result is shown as an image and saved as a PNG.
       htmlLabels: false,
       fontFamily: "-apple-system, BlinkMacSystemFont, \"PingFang SC\", \"Noto Sans CJK SC\", \"Microsoft YaHei\", sans-serif",

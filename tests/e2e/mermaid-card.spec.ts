@@ -73,3 +73,20 @@ test("a ```mermaid block that cannot be drawn shows its source; a good one next 
   // Mermaid's own error picture is never added to the page.
   await expect(page.getByText("Syntax error in text")).toHaveCount(0);
 });
+
+test("a flow drawn the way the executor is told (hexagon decisions, a short chain across) stays compact on a phone", async ({ page }, info) => {
+  const decision = FLOW.replace('B{"护照有效期够 6 个月吗？"}', 'B{{"护照够半年？"}}');
+  const chain = 'flowchart LR\n  A(["你提需求"]) --> B["AIO 调用桥接"] --> C(["Mac 执行"])';
+  await setup(page, `签证流程：\n\n\`\`\`mermaid\n${decision}\n\`\`\`\n\n接入方式：\n\n\`\`\`mermaid\n${chain}\n\`\`\``);
+  const pictures = page.locator(".task-report .svg-image");
+  await expect(pictures).toHaveCount(2, { timeout: 60_000 });
+  const size = (i: number) => pictures.nth(i).evaluate((n) => ({ w: (n as HTMLImageElement).naturalWidth, h: (n as HTMLImageElement).naturalHeight }));
+  await expect.poll(async () => (await size(1)).w).toBeGreaterThan(0);
+  const [flow, across] = [await size(0), await size(1)];
+  // Six steps with a branch: no taller than about two phone screens' worth of the old diamond.
+  expect(flow.h).toBeLessThan(420);
+  // Three steps in a row: wider than tall, one line.
+  expect(across.w).toBeGreaterThan(across.h * 2);
+  await pictures.nth(0).scrollIntoViewIfNeeded();
+  await page.screenshot({ path: info.outputPath("mermaid-compact.png") });
+});
