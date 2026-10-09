@@ -5,7 +5,7 @@
 ## 项目定位
 
 **AIO Agent**：owner 管理、self-hosted 的智能体控制台 + 每账号独立 AIO 沙箱 + 主 Codex 智能体，
-中文 UI。owner 可在配置页把执行器切换为 Claude Code（可选，需凭据；派单、执行、标题一并切换）。用户只操作一个主会话，独立请求委派到子任务，相关补充追加到原任务；不展示旧会话历史入口。支持 owner/member 账号分级；任务与对话按账号归属隔离，普通用户固定为管理员分配的模型与推理强度（默认 GPT-6.1 Sol high，可分配 Claude Sonnet 5.5；控制面的 ChatGPT 登录与 owner 的 Claude 凭据都只在宿主侧由成员模型网关附加），配置与模型信息仅 owner 可见。每个 member 使用独立容器、文件卷、Codex 数据卷、浏览器卷、运行数据库和工作区路径（`/u/<用户名>`，兼容旧的 `/u/<账号散列>`，不新增域名；主控制台地址同样是 `/u/<用户名>`）；注册只能凭 owner 在配置页生成的一次性邀请码（只建 member），不对外提供公共 demo；未登录一律 401，唯一例外是工作区来源上由 `aio-share` skill 发布的公开分享页 `/u/<用户名>/share/<页面名>/`（宿主快照、CSP sandbox 隔离，见 README「分享网页」）。
+中文 UI。owner 可在配置页把执行器切换为 Claude Code（可选，需凭据；派单、执行、标题一并切换）。用户只操作一个主会话，独立请求委派到子任务，相关补充追加到原任务；不展示旧会话历史入口。支持 owner/member 账号分级；任务与对话按账号归属隔离，普通用户固定为管理员分配的模型与推理强度（默认 GPT-6.1 Sol high，可分配 Claude Sonnet 5.5；控制面的 ChatGPT 登录与 owner 的 Claude 凭据都只在宿主侧由成员模型网关附加），配置与模型信息仅 owner 可见。每个 member 使用独立容器、文件卷、Codex 数据卷、浏览器卷、运行数据库和工作区路径（`/u/<用户名>`，兼容旧的 `/u/<账号散列>`，不新增域名；主控制台地址同样是 `/u/<用户名>`）；注册只能凭 owner 在配置页生成的一次性邀请码（只建 member），不对外提供公共 demo；未登录一律 401，唯一例外是工作区来源上由 `aio-share` skill 发布的公开分享页 `/u/<用户名>/share/<页面名>/`（宿主快照、CSP sandbox 隔离，见 `docs/FEATURES.md`「分享网页」）。
 公网入口（`PA_PRIMARY_HOST` / `PA_WORKSPACE_HOST`）由使用者自行填写，见 `.env.example` 的
 `agent.example.com` / `workspace.example.com` 占位。
 
@@ -33,7 +33,7 @@ cookie 名 `pa_*` 与 `PA_*` 前缀**保持不变**——它们承载既有容�
 | `bin/serve` | 生产守护：按 `PA_DEPLOY` 以三个宿主进程（host）或 Docker Compose（compose）运行三层，外加专用 tunnel，转发信号 |
 | `bin/dns-agent.py` | 现有部署专用的 DNS 辅助脚本：依赖仓库外的 `tools/linode-local/dns.py`，**不是 quickstart 入口**，公开使用者通常不需要 |
 | `var/` | 运行时数据（DB、日志、owner 凭据、tunnel 凭据），全部 git 忽略；compose 部署时控制面数据在命名卷里 |
-| `docs/` | 运行手册、架构、能力清单 |
+| `docs/` | 功能说明、配置参考、架构、运行手册、开发与测试、能力清单 |
 
 ## 必须遵守
 
@@ -46,11 +46,11 @@ cookie 名 `pa_*` 与 `PA_*` 前缀**保持不变**——它们承载既有容�
    只有沙箱层的 sandboxd 可以持有 Docker 访问（compose 部署时挂载 `docker.sock`）：它不运行任何用户代码，
    每个请求都要节点令牌，沙箱访问不到它，且只以固定参数调用 Docker、不接受调用方给的 Docker 参数、
    宿主路径或挂载，不提供任意宿主机 shell 通道。控制面不持有 Docker 访问。owner 配置的知识库 MCP
-   （README“知识库”）与 Home Assistant MCP（README“Home Assistant”）只经成员网关按账号转发，令牌不进沙箱；不要为它们另开直连端口，也不要把授权名单
+   （`docs/FEATURES.md`“知识库”）与 Home Assistant MCP（`docs/FEATURES.md`“Home Assistant”）只经成员网关按账号转发，令牌不进沙箱；不要为它们另开直连端口，也不要把授权名单
    之外的账号接进去。
 4. **两个来源**：主站与伴随站必须保持不同来源；不要把 AIO 生成内容放到主站上，也不要为了
    本地调试放宽 cookie 安全属性（localhost 明文是唯一例外）。
-5. **DNS**：只允许维护 `agent.clawpage.ai` 与 `agent-workspace.clawpage.ai` 两条记录；不得运行
+5. **DNS**：只允许用 `bin/dns-agent.py` 维护 `agent.clawpage.ai` 与 `agent-workspace.clawpage.ai` 两条记录；不得运行
    `tools/linode-local/dns.py` 的 plan/apply/rollback（那是另一条迁移线）。
 6. **停止语义要诚实**：排队/执行中/启动中的停止分别处理，不得谎报已停止；连接中断导致的
    未知结果标记 `unknown` 并提示先核对，不自动重放有副作用的操作。
@@ -82,5 +82,5 @@ docker exec -u root personal-agent-sandbox supervisorctl start code-server   # �
 - 沙箱相关改动要在真容器上验证（健康接口会检查 terminal / code-server / Jupyter 三个表面）。
 - 重启只针对本服务（现有部署）：`tools/start.sh restart personal-agent`，不要重载全局 supervisor，
   也不要重启其他项目或共享容器。
-- DNS：`bin/dns-agent.py` 只允许维护现有部署的两个精确 CNAME；不得运行
-  `tools/linode-local/dns.py` 的 plan/apply/rollback（那是另一条迁移线）。
+- 文档分工：README 只做项目简介；功能行为写 `docs/FEATURES.md`，新增环境变量写 `docs/CONFIGURATION.md`，
+  运维步骤写 `docs/RUNBOOK.md`。

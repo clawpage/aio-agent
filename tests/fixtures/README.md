@@ -13,5 +13,5 @@ ffmpeg -f lavfi -i color=c=blue:s=160x90:d=3 -c:v libx264 -pix_fmt yuv420p -movf
 
 `novnc-ui-1.4.0.js` and `novnc-rfb-1.4.0.js` are `app/ui.js` and `core/rfb.js` from noVNC v1.4.0
 (MPL 2.0, © The noVNC Authors), byte-identical to `/opt/novnc/…` in the pinned sandbox image.
-`tests/unit/novnc-patch.test.ts` checks the phone patches (`src/control/docker/novncPatch.ts`) against
+`tests/unit/novnc-patch.test.ts` checks the phone patches (`src/control/sandbox/novncPatch.ts`) against
 them. Source: https://raw.githubusercontent.com/novnc/noVNC/v1.4.0/ (`app/ui.js`, `core/rfb.js`)

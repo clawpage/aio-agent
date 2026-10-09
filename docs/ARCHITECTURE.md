@@ -47,7 +47,8 @@
 镜像 label 带着这些数字，`deploy/aio.mjs` 在 `compose up` 前拒绝不兼容组合；运行时控制面拒绝协议不符的节点
 （`/healthz` 的 `compatible`），界面 edge 只在控制面提供所需 API 时健康，网页在版本不符时提示。
 
-控制面容器里没有 Codex 安装（`PA_HOST_CODEX=off`）：不向沙箱下发 ChatGPT token，只提供 Claude Code 与桥模型。
+compose 部署的控制面默认 `PA_HOST_CODEX=off`：不向沙箱下发 ChatGPT token，owner 只能使用 Claude Code。执行
+`deploy/aio.mjs codex-login` 并设 `AIO_HOST_CODEX=on` 后，控制面使用数据卷内自己的 Codex 登录（见 [部署](../deploy/README.md)）。
 
 ## 同源策略：两个站点
 
@@ -61,7 +62,7 @@
 | 未知 Host | 404 | 404 |
 
 把 AIO 生成的内容（用户代码、笔记本输出、浏览器页面）放在**另一个来源**上，是为了让主控制台
-永远不会与用户代码同源执行。本地开发用 `localhost:4891` 当作主站、`127.0.0.1:4891` 当作伴随站，
+永远不会与用户代码同源执行。本地开发用 `localhost:4891`（界面层）当作主站、`127.0.0.1:4892`（控制层）当作伴随站，
 两者仍然是不同来源，因此跨站规则与线上一致。
 
 ## 主会话任务调度
@@ -114,7 +115,7 @@ planning_failed 可安全重试分类；blocked 提示前置结果需要核对�
 
 数据库保留兼容表名 `owners`，增加 `role=owner|member`；原 `owner_1` 迁移为 owner，密码与已有 session 不变。
 任务经 conversation.owner_id 绑定账号；列表、详情、事件回放/实时流、审批、引用、停止与派单历史均核对归属。
-owner 维护自己的模型与 SOUL，各 member 从默认 SOUL 开始独立保存；member 派单和执行固定为管理员分配的模型 / high（默认 GPT-6.1 Sol，可分配 Claude Sonnet 5.5），服务端拒绝覆盖，该模型不可用时失败，不换用别的模型。
+owner 维护自己的模型与 SOUL，各 member 从默认 SOUL 开始独立保存；member 派单和执行固定为管理员分配的模型与推理强度（默认 GPT-6.1 Sol / high，可分配 Claude Sonnet 5.5），服务端拒绝覆盖，该模型不可用时失败，不换用别的模型。
 member 不显示配置/模型/提示原文。这里的隐藏指产品配置及结构化元数据，不对正常回答文字做删词处理。
 
 `UserRuntimes` 按服务器查证的账号身份选择完整运行环境，禁止客户端指定容器、端口、目录或上游。
@@ -141,12 +142,12 @@ HTTP、SSE、WebSocket、文件预览、上传、终端与浏览器都走同一�
   WebSocket 流转给控制面），通过 stdio JSON-RPC 驱动。
   二进制取自持久卷（`/home/gem/.codex/tools/codex-<版本>/node_modules/.bin/codex`），
   不使用镜像 `PATH` 上的旧版本；接管容器时核实版本并自动补齐（失败则明确报错，不静默回退）。
-- 每个轮次提交时冻结模型设置：owner 使用统一配置，否则用 `PA_DEFAULT_MODEL`（默认 `gpt-6-sol`）；member 强制管理员分配的模型 / high，提交与执行时均检查，不采用客户端覆盖。升级时有一次受 `meta` 键
+- 每个轮次提交时冻结模型设置：owner 使用统一配置，否则用 `PA_DEFAULT_MODEL`（默认 `gpt-6-sol`）；member 强制管理员分配的模型与推理强度，提交与执行时均检查，不采用客户端覆盖。升级时有一次受 `meta` 键
   （`model_default_migration_v1`）保护的一次性迁移：仍带旧默认值 `gpt-5.5` 的会话改为新默认，
   只改 `model` 列、不动历史；之后用户手动选择（包括 5.5）永久保留。
 - **派单器的临时线程**（Codex 执行器时，独立于主对话）：主会话派单在沙箱内启动一个临时线程
   （`thread/start {ephemeral:true, sandbox:"read-only", approvalPolicy:"never", model: PA_TITLE_MODEL}`，
-  Luna effort low、其他模型 high，90 秒）。只有临时线程被 `threadSubscriber` 接管，其通知、审批、delta 不会进入用户会话
+  `gpt-6.1-sol` 与 `gpt-6-luna` 用 low、其他模型 high，90 秒）。只有临时线程被 `threadSubscriber` 接管，其通知、审批、delta 不会进入用户会话
   （`#conversationForThread` 对未知线程不回退到活动会话）。只有 `turn/completed` 状态为 `completed`
   才采用结果；超时返回 `null` 并 best-effort `turn/interrupt`，同时把该线程标记为 tombstone：直到
   真正收到 `turn/completed` 或会话关闭前，它的所有通知继续丢弃，避免迟到的 delta 被 `#bufferDelta`
@@ -227,6 +228,8 @@ helper 内、紧挨着信号发生。
 
 ## 统一登录与 token 边界
 
+以下描述宿主进程部署（控制面使用宿主机的 Codex 登录）；compose 部署中“宿主机”即控制面容器及其数据卷内的登录。
+
 - 宿主机保持原有 `codex login`（使用本人已有订阅额度），不在容器里重复登录。
 - 需要 token 时，控制面在本机启动宿主机 `codex app-server`，只调用官方方法
   `account/read {refreshToken:true}`（由宿主机 Codex 自己完成受管刷新）与
@@ -271,5 +274,5 @@ SQLite（`var/personal-agent.sqlite`，WAL）保存 owner、会话、对话、�
 配色表达“现在该谁动”：靛紫是 AI 在办（也是品牌主色），琥珀是轮到你（全站唯一醒目的颜色），松绿是办完，朱红是出错；
 中性色带一点靛紫。令牌集中在 `src/ui/src/styles.css` 顶部（`--ai` / `--you` / `--done` / `--error` 及 `-soft` 浅底、
 `--on-accent` / `--on-you` 按钮文字色），深色为默认，浅色随系统或侧栏切换。任务卡左侧 4px 色条（`turn-ai` / `turn-you` /
-`turn-err`；结果卡按完成或失败）、顶部计数胶囊、浏览器卡片和操作面板都只用这四种语义色。标志是一道弧线交出琥珀色圆点
+`turn-err`；结果卡按完成或失败）、顶部计数胶囊、浏览器卡片和操作面板都只用这四种语义色。标志是线路图上的一站：一条线穿过一个站点，琥珀色站心表示轮到你
 （`src/ui/src/components/Brand.tsx`、`src/ui/public/favicon.svg` 与主屏图标）。
