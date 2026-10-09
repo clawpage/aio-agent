@@ -1,3 +1,5 @@
+import { parseForm, type FormSpec } from "../../common/form";
+
 /**
  * Tappable answers in a message. An executor that needs the person to pick one
  * of a few answers ends its reply with the question and a block:
@@ -57,7 +59,7 @@ export function splitChoiceBlocks(source: string): ChoicePart[] {
  * (```ask_user with {"question": "...", "options": [...]}). The task card asks it;
  * in the conversation it reads as the question it is, not as raw JSON.
  */
-export type AskPart = { kind: "text"; text: string } | { kind: "ask"; question: string; options: string[] | null };
+export type AskPart = { kind: "text"; text: string } | { kind: "ask"; question: string; options: string[] | null; form: FormSpec | null };
 
 const ASK_FENCE = /^```ask_user[ \t]*\r?\n([\s\S]*?)\r?\n```[ \t]*$/gm;
 
@@ -65,16 +67,38 @@ export function splitAskBlocks(source: string): AskPart[] {
   const parts: AskPart[] = [];
   let last = 0;
   for (const match of source.matchAll(ASK_FENCE)) {
-    let value: { question?: unknown; options?: unknown };
+    let value: { question?: unknown; options?: unknown; fields?: unknown; title?: unknown; submit?: unknown };
     try { value = JSON.parse(match[1]!) as typeof value; } catch { continue; }
     const question = typeof value.question === "string" ? value.question.trim() : "";
     if (!question) continue;
     const options = Array.isArray(value.options) ? parseChoices(JSON.stringify(value.options)) : null;
     if (match.index! > last) parts.push({ kind: "text", text: source.slice(last, match.index) });
-    parts.push({ kind: "ask", question, options });
+    const form = value.fields !== undefined ? parseForm({ title: value.title, fields: value.fields, submit: value.submit }) : null;
+    parts.push({ kind: "ask", question, options: form ? null : options, form });
     last = match.index! + match[0].length;
   }
   if (parts.length === 0) return [{ kind: "text", text: source }];
   if (last < source.length) parts.push({ kind: "text", text: source.slice(last) });
   return parts.filter((p) => p.kind === "ask" || p.text.trim() !== "");
+}
+
+/** A ```form block: fields the person fills in and sends as one reply (see common/form). */
+export type FormPart = { kind: "text"; text: string } | { kind: "form"; spec: FormSpec };
+
+const FORM_FENCE = /^```form[ \t]*\r?\n([\s\S]*?)\r?\n```[ \t]*$/gm;
+
+export function splitFormBlocks(source: string): FormPart[] {
+  const parts: FormPart[] = [];
+  let last = 0;
+  for (const match of source.matchAll(FORM_FENCE)) {
+    let spec: FormSpec | null = null;
+    try { spec = parseForm(JSON.parse(match[1]!)); } catch { spec = null; }
+    if (!spec) continue;
+    if (match.index! > last) parts.push({ kind: "text", text: source.slice(last, match.index) });
+    parts.push({ kind: "form", spec });
+    last = match.index! + match[0].length;
+  }
+  if (parts.length === 0) return [{ kind: "text", text: source }];
+  if (last < source.length) parts.push({ kind: "text", text: source.slice(last) });
+  return parts.filter((p) => p.kind === "form" || p.text.trim() !== "");
 }

@@ -186,6 +186,8 @@ export interface Task {
   clarification?: string | null;
   /** Answers to tap for a pending question. */
   options?: string[] | null;
+  /** A form to fill in instead (several answers at once), sent back as one reply. */
+  form?: import("../../common/form").FormSpec | null;
   description?: string | null;
   mergedInto?: string | null;
   mergedTitle?: string | null;

@@ -38,7 +38,7 @@ const submit = (text: string, relatedTaskId?: string) => tasks.submit({ text, cl
 describe("executor question protocol", () => {
     it("accepts an explicit blocking question and keeps preceding progress", () => {
         expect(executorQuestion('已查记录。\n```ask_user\n{"question":"查哪个城市？","options":["圣何塞","旧金山"]}\n```'))
-            .toEqual({question:"查哪个城市？",options:["圣何塞","旧金山"],result:"已查记录。"});
+            .toEqual({question:"查哪个城市？",options:["圣何塞","旧金山"],form:null,result:"已查记录。"});
     });
     it("recognizes the legacy missing-city request but not an optional follow-up", () => {
         expect(executorQuestion("你想看哪个城市的天气？发城市名或邮编就行，我查今天的气温、降雨和出门穿什么。")?.question).toContain("哪个城市");
@@ -156,6 +156,18 @@ describe("main inbox delegation", () => {
         await codex.runTurn(codex.startedTurns.at(-1)!.turnId,{text:"圣何塞今天 22°C。"});await tick();
         expect(tasks.get(second.id)?.result).toBe("圣何塞今天 22°C。");
         expect(tasks.view(tasks.get(first.id)!).clarification).toBeNull();
+    });
+    it("holds a question with fields as a form, and its answers resume the thread as one reply", async () => {
+        const first=submit("帮我订周末的餐厅");await tick();
+        await codex.runTurn(codex.startedTurns[0]!.turnId,{text:'找到三家。\n```ask_user\n{"question":"请补充订位信息","fields":[{"name":"date","label":"日期","type":"date","required":true},{"name":"people","label":"人数","type":"number"}],"submit":"去订"}\n```'});await tick();
+        const pending=tasks.view(tasks.get(first.id)!);
+        expect(pending).toMatchObject({status:"needs_input",result:"找到三家。",clarification:"请补充订位信息",options:null});
+        expect(pending.form).toMatchObject({submit:"去订",fields:[{label:"日期",type:"date",required:true},{label:"人数",type:"number"}]});
+        submit("日期：2026-10-11\n人数：4",first.id);await tick();
+        expect(tasks.get(first.id)?.status).toBe("completed");
+        expect(codex.startedTurns.at(-1)?.threadId).toBe(codex.startedTurns[0]?.threadId);
+        expect(codex.startedTurns.at(-1)?.text).toContain("日期：2026-10-11");
+        expect(tasks.view(tasks.get(first.id)!).form).toBeNull();
     });
     it("can stop an executor task awaiting a user answer without interrupting its finished turn", async () => {
         const first=submit("查天气");await tick();

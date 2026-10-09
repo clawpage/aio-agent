@@ -13,6 +13,7 @@ import { TaskBrowser } from "./TaskBrowser";
 import { MessagePreview } from "./MessagePreview";
 import { ComposerAttachments, useUploadTray } from "./ComposerAttachments";
 import { TurnPills } from "./TurnPills";
+import { FormCard } from "./FormCard";
 import { VoiceButton } from "./VoiceInput";
 import type {TaskFeed} from '../taskStatus';
 const terminal = new Set(["completed", "failed", "interrupted", "unknown"]);
@@ -358,8 +359,9 @@ export function TaskChat({ onDetails, onOpenLink, onOpenFileInBrowser, onExpired
           {t.status === "needs_input" && t.clarification && <div className="task-question" role="status" aria-label="需要你补充">
             <div className="task-question-heading"><span aria-hidden="true">?</span><strong>需要你补充</strong></div>
             <p>{t.clarification}</p>
-            {t.options?.length ? <ChoiceList options={t.options} chosen={choosing[`${t.id}:${t.revision}`] ?? null} onChoose={option => void choose(t, option)}/> : null}
-            <span className="task-question-hint">{t.options?.length ? "点选一个，或直接在下方输入" : "直接在下方输入回复即可"}</span>
+            {t.form ? <FormCard spec={t.form} embedded sent={choosing[`${t.id}:${t.revision}`] ?? null} onSubmit={text => void choose(t, text)}/>
+              : t.options?.length ? <ChoiceList options={t.options} chosen={choosing[`${t.id}:${t.revision}`] ?? null} onChoose={option => void choose(t, option)}/> : null}
+            <span className="task-question-hint">{t.form ? "填好后提交，或直接在下方输入" : t.options?.length ? "点选一个，或直接在下方输入" : "直接在下方输入回复即可"}</span>
           </div>}
           {t.description && ["running", "stopping"].includes(t.status) && <p className="task-intro">{t.description}</p>}
           <TaskBrowser task={t} onReveal={onRevealBrowser}/>

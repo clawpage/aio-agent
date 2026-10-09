@@ -9,7 +9,8 @@ import { embedMediaLinks } from "../fileRefs";
 import { splitMapBlocks, type MessagePart } from "../mapBlocks";
 import { splitSvgBlocks, type SvgPart } from "../svgBlocks";
 import { splitMermaidBlocks, type MermaidPart } from "../mermaidBlocks";
-import { splitAskBlocks, splitChoiceBlocks, type AskPart, type ChoicePart } from "../choices";
+import { splitAskBlocks, splitChoiceBlocks, splitFormBlocks, type AskPart, type ChoicePart, type FormPart } from "../choices";
+import { FormCard } from "./FormCard";
 import { splitProductBlocks, type ProductPart } from "../productBlocks";
 import { cjkStrong } from "../markdownStrong";
 import { MapCard } from "./MapCard";
@@ -104,8 +105,8 @@ type MarkdownProps = {
 
 /**
  * A message: Markdown, with ```map blocks drawn as map cards, ```svg blocks as
- * pictures, ```mermaid blocks as diagrams, ```products blocks as product cards and ```choices blocks as answers
- * to tap, where they stand.
+ * pictures, ```mermaid blocks as diagrams, ```products blocks as product cards, ```choices blocks as answers
+ * to tap and ```form blocks as forms to fill in, where they stand.
  */
 export function Markdown(props: MarkdownProps) {
   const parts = useMemo(
@@ -114,7 +115,8 @@ export function Markdown(props: MarkdownProps) {
       .flatMap<MessagePart | SvgPart | MermaidPart>((part) => (part.kind === "text" ? splitMermaidBlocks(part.text) : [part]))
       .flatMap<MessagePart | SvgPart | MermaidPart | ChoicePart>((part) => (part.kind === "text" ? splitChoiceBlocks(part.text) : [part]))
       .flatMap<MessagePart | SvgPart | MermaidPart | ChoicePart | ProductPart>((part) => (part.kind === "text" ? splitProductBlocks(part.text) : [part]))
-      .flatMap<MessagePart | SvgPart | MermaidPart | ChoicePart | ProductPart | AskPart>((part) => (part.kind === "text" ? splitAskBlocks(part.text) : [part])),
+      .flatMap<MessagePart | SvgPart | MermaidPart | ChoicePart | ProductPart | AskPart>((part) => (part.kind === "text" ? splitAskBlocks(part.text) : [part]))
+      .flatMap<MessagePart | SvgPart | MermaidPart | ChoicePart | ProductPart | AskPart | FormPart>((part) => (part.kind === "text" ? splitFormBlocks(part.text) : [part])),
     [props.source],
   );
   if (parts.length === 1 && parts[0]!.kind === "text") return <MarkdownBlock {...props} source={parts[0]!.text} />;
@@ -135,7 +137,11 @@ export function Markdown(props: MarkdownProps) {
                 <div className="task-question-heading"><span aria-hidden="true">?</span><strong>向你提问</strong></div>
                 <p>{part.question}</p>
                 {part.options && <ChoiceList options={part.options} disabled />}
+                {part.form && <FormCard spec={part.form} embedded />}
               </div>
+          : part.kind === "form"
+            // Sent like a tapped answer: the reply to this message is what closes it.
+            ? <FormCard key={i} spec={part.spec} sent={props.choices?.chosen ?? null} disabled={props.choices?.disabled} onSubmit={props.choices?.onChoose} />
             : <MarkdownBlock key={i} {...props} source={part.text} />)}
     </>
   );

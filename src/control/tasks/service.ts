@@ -200,6 +200,7 @@ export class TaskService {
             waitReason: this.waitReason(row),
             clarification: row.status === "needs_input" ? plan?.clarification ?? null : null,
             options: row.status === "needs_input" ? plan?.options ?? null : null,
+            form: row.status === "needs_input" ? plan?.form ?? null : null,
             dependencies: plan?.dependencies ?? [], createdAt: row.created_at, startedAt: turn?.started_at ?? null, completedAt: row.completed_at,
             schedule: row.schedule_id ? this.scheduleLabel(row.schedule_id) ?? { id: row.schedule_id, title: row.title, rule: "定时任务已删除" } : null,
             approvals: TERMINAL.has(row.status) ? 0 : this.agent.listPendingRequests(this.executor(row)).length,
@@ -776,9 +777,9 @@ export class TaskService {
             "默认在对话中直接给出完整回答，可使用 Markdown 排版，无需保存文件。只有用户要求文件、可下载交付物，或内容确实需要独立文档/页面承载时，才制作文件；不要仅因内容是说明、清单或计划就自动建文档。需要文件时按表达需要选择格式：普通文字、清单和简单表格可用结构清晰的 Markdown（.md）；攻略、计划、说明若需要复杂排版、图表、多栏卡片或交互，优先制作 HTML（.html）页面，不要一律用 Markdown。HTML 尽量自包含、适配手机，交付前验证实际展示；检查通过即交付，只有具体缺陷才继续修改复验。链接用有意义的中文标题，例如[完整三天行程](绝对文件路径)，不要只写下载文件或暴露冗长文件名。用户指定 Word、Excel、PPT 等格式时遵循其格式。交付文件时，最终消息给简要要点和文件链接；无文件需求时直接给出答案。",
             "主会话消息在手机上读，要像图文卡片，不要长篇纯文字：先一两句结论，再用卡片、图片和短段落展开；少用宽表格（手机上要横向滑动），只在少量数字并排对比时用。需要展示图片或视频时用 Markdown 图片语法 ![说明](绝对路径)，工作区里的 png/jpg/webp/gif/svg 图片、mp4/mov/webm 视频和 mp3/m4a/wav/ogg/flac 音频会按所在位置嵌入消息（音视频显示为播放器）、点开可放大；网上的图片用 ![说明](https://…)（系统经沙箱取回显示），更稳妥的是先存进本任务目录再引用。生成的图片也要放在本任务目录里再引用：~/.codex 等工作区以外的文件在消息里显示不出来。流程、步骤先后、决策分支、时间线或几方之间的关系用图比文字清楚时，写成 ```mermaid 代码块（Mermaid 语法），消息里会画成图，可放大、可下载成图片：手机竖屏阅读，流程图用 flowchart TD（自上而下）；节点文字简短（约12字以内），中文或带标点的文字用双引号包起来，例如 A[\"出发\"] --> B{\"签证办好了吗？\"}，分支说明写成 B -->|是| C；一张图约15个节点以内，更多就拆成几张；只写图本身，不加 %%{init}%% 配置、样式或 click 链接。其他示意图、图表也可以直接写成 ```svg 代码块（完整的 <svg> 文档），消息里会显示为图片。把图片放在正文中与它相关的文字旁边，穿插说明，不要全部堆在末尾。普通文件用 [有意义的标题](绝对路径)，显示为可预览和下载的文件卡片；分享页链接会显示为可一键复制的分享卡片，直接给出链接即可。",
             "推荐、比较或汇报具体商品（也包括酒店、餐厅这类可比较、可购买或预订的条目）时，用商品卡片代替表格或纯文字，每件一张，同一个代码块里列出要比较的几件（最多 8 件）：\n```products\n[{\"name\": \"商品名\", \"image\": \"" + this.cfg.sandbox.containerWorkspaceDir + "/tasks/" + taskId + "/商品.jpg\", \"price\": \"$899\", \"was\": \"$1,199\", \"store\": \"Amazon\", \"url\": \"https://商品页\", \"rating\": \"4.4（1,203 条）\", \"badge\": \"最推荐\", \"points\": [\"决定选择的理由一\", \"理由二\"], \"note\": \"要注意的一点\"}]\n```\n每张卡片都要有这件商品的真实图片，用 aio_tabs 的 browser_save_image 存进本任务目录，把返回的路径填进 image：在商品页上只给 path（自动存这页的商品主图）；在搜索结果等列表页上加 selector 指向那件商品的图片元素。不要手抄图片网址填进 image：图片网址里的版本、签名参数一删一改就打不开（实测缺了参数直接 404）。只有页面上确实没有这件商品的图时才省略 image，绝不用无关或示意的图片。price、was、rating 只写查到的，没核实的在 note 里说明；url 填商品页链接；points 2-3 条；badge 只给真正推荐的那一件（如“最推荐”“最便宜”）。卡片后面用一两句话说怎么选。",
-            "任务已经完成、只提供可选的后续选择时，可以在回答最后提出问题，并紧跟选项代码块：\n```choices\n[\"选项一\", \"选项二\"]\n```\n2–5 项，每项是可以直接作为回答的完整说法（不超过30字），不要“其他”（用户也可以自己输入）。如果答案是当前任务继续执行的必要条件，改用下文的 ask_user 代码块；能合理默认就直接做。",
+            "任务已经完成、只提供可选的后续选择时，可以在回答最后提出问题，并紧跟选项代码块：\n```choices\n[\"选项一\", \"选项二\"]\n```\n2–5 项，每项是可以直接作为回答的完整说法（不超过30字），不要“其他”（用户也可以自己输入）。可选的后续需要用户一次填几项信息（日期、人数、地点、偏好等）时，改用表单代码块：\n```form\n{\"title\": \"表单标题\", \"fields\": [{\"name\": \"date\", \"label\": \"日期\", \"type\": \"date\", \"required\": true}, {\"name\": \"people\", \"label\": \"人数\", \"type\": \"number\", \"min\": 1, \"default\": 2}, {\"name\": \"area\", \"label\": \"区域\", \"type\": \"select\", \"options\": [\"选项一\", \"选项二\"]}], \"submit\": \"提交\"}\n```\ntype 可选 text、textarea、number、date、time、select、radio（单选）、checkbox（多选）；select/radio/checkbox 带 2–10 个 options；最多 8 个字段，label 不超过30字，只问一件事时不要用表单。用户提交后答案作为回复续接本任务。如果答案是当前任务继续执行的必要条件，改用下文的 ask_user 代码块；能合理默认就直接做。",
             "回答里涉及要去的具体地点（餐厅、景点、酒店、会面地点、目的地等）时，可在正文相关位置插入地图卡片，一个地点一个代码块，用户点一下即可在手机的地图应用里查看这个地点：\n```map\n{\"name\": \"地点名称\", \"address\": \"完整地址\", \"lat\": 纬度, \"lng\": 经度}\n```\n坐标只填从可靠来源（地图搜索结果、官网）查到的数值，不要估算；拿不到时只写 name 和 address，系统会按地址定位。坐标默认 WGS-84，取自高德或腾讯地图的坐标加 \"coord\": \"gcj02\"。只是顺带提到的地名不用加卡片。",
-            "过程尽量简短，会在主会话折叠。先利用已知上下文、记忆和必要工具查找；只有缺少用户独有且无法合理默认的信息、确实不能继续时才提问，不要在未获回答时执行依赖该答案的操作。此时可先简述已完成的部分，然后在回复最后单独写一个 ```ask_user 代码块，内容为 JSON：{\"question\":\"要用户回答的一个具体问题\",\"options\":[\"选项一\",\"选项二\"]}；无合适选项时省略 options。系统会把任务标为等待用户，用户回复会续接本执行会话。不要只用普通问句结束，也不要声称任务已完成。若已能完成任务，就直接给结果，不写 ask_user。",
+            "过程尽量简短，会在主会话折叠。先利用已知上下文、记忆和必要工具查找；只有缺少用户独有且无法合理默认的信息、确实不能继续时才提问，不要在未获回答时执行依赖该答案的操作。此时可先简述已完成的部分，然后在回复最后单独写一个 ```ask_user 代码块，内容为 JSON：{\"question\":\"要用户回答的一个具体问题\",\"options\":[\"选项一\",\"选项二\"]}；无合适选项时省略 options；需要用户一次补充几项信息时，改用 fields（格式同上文 form 代码块的 fields，可带 submit），question 写一句说明，主会话会显示成表单。系统会把任务标为等待用户，用户回复会续接本执行会话。不要只用普通问句结束，也不要声称任务已完成。若已能完成任务，就直接给结果，不写 ask_user。",
         ];
     }
     /** A fingerprint of the executor rules: a resumed thread that already holds this version is not given them again. */
@@ -790,7 +791,7 @@ export class TaskService {
         return [
             `你是 AIO Agent 的语音配件会话。任务 ID：${row.id}。用户正对着桌上的语音配件（小屏加喇叭）说话：这句话由语音识别转写，可能有同音错字，按最合理的意思理解；你的回答会显示在小屏上并朗读出来。身份和语气遵循系统层注入的 SOUL.md。不递归委派。`,
             "这是一个持续的配件会话，同一会话里保留着之前的配件对话；用户说“刚才”“那个”时先从这里找指代。用户在主会话里的其他任务不在这里：问到以前的某件事、某个任务的进展或结果、最近做了什么时，用 aio_schedule 的 task_list 找（可按关键词搜），再用 task_get 读完整内容，不要凭印象回答；用不到就不查。",
-            "回答用纯文本口语：不用 Markdown、列表符号、表格、代码块、链接和表情，也不用 products、map、choices、ask_user 等卡片或代码块。默认一到三句话、一百字以内，先说结论；用户要求详细时再展开，也不超过三百字。数字、时间和单位写成顺口好读的形式。",
+            "回答用纯文本口语：不用 Markdown、列表符号、表格、代码块、链接和表情，也不用 products、map、choices、form、ask_user 等卡片或代码块。默认一到三句话、一百字以内，先说结论；用户要求详细时再展开，也不超过三百字。数字、时间和单位写成顺口好读的形式。",
             `不要追问：缺少信息就按最合理的默认处理，并用半句话说明假设。需要查资料、用浏览器或操作文件时照常用工具完成，过程不写进回答；需要写文件时放在 ${this.cfg.sandbox.containerWorkspaceDir}/tasks/${row.id}/。`,
             `现在是 ${describeNow(row.created_at, this.cfg.browser.timezone)}。用户这次说：${this.taskContext(row)}`,
         ].join("\n\n");
@@ -910,7 +911,7 @@ export class TaskService {
         const last = items.filter(i => i.phase === "final_answer").at(-1) ?? items.at(-1);
         const question = turn.status === "completed" && !row.schedule_id && last?.text ? executorQuestion(last.text) : null;
         const plan = question && row.plan_json ? JSON.parse(row.plan_json) as TaskPlan : null;
-        if (plan && question) { plan.clarification = question.question; plan.options = question.options ?? undefined; }
+        if (plan && question) { plan.clarification = question.question; plan.options = question.options ?? undefined; plan.form = question.form ?? undefined; }
         const status = question ? "needs_input" : turn.status;
         this.db.prepare("UPDATE tasks SET status=?,result=?,error=?,completed_at=?,plan_json=COALESCE(?,plan_json) WHERE id=?")
             .run(status, question ? question.result : last?.text ?? null, turn.error, turn.completed_at, plan ? JSON.stringify(plan) : null, row.id);

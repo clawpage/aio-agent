@@ -2,6 +2,7 @@ import { normalizeResource } from "./resources.js";
 export { resourcesConflict } from "./resources.js";
 import { validateSchedule, type ScheduleSpec } from "./schedules.js";
 import type { JevRelevance } from "./context.js";
+import type { FormSpec } from "../../common/form.js";
 
 /** A schedule the dispatcher asked for, already validated (see schedules.ts). */
 export interface PlannedSchedule {
@@ -30,6 +31,8 @@ export interface TaskPlan {
     clarification?: string | null;
     /** Answers the person can tap instead of typing, when the question is a pick among a few. */
     options?: string[] | null;
+    /** A form the person fills in instead (several answers at once); its answers come back as one message. */
+    form?: FormSpec | null;
     /** A later task took the user's answer and resumed this executor thread. */
     answeredBy?: string;
     related: string[];

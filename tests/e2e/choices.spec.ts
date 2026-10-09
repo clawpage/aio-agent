@@ -88,3 +88,51 @@ test("an executor's ask_user block reads as its question, not as raw JSON", asyn
   await expect(report).not.toContainText('"question"');
   await expect(report).not.toContainText("ask_user");
 });
+
+const FORM = { title: "订位信息", fields: [
+  { name: "date", label: "日期", type: "date", required: true },
+  { name: "people", label: "人数", type: "number", min: 1, default: 2 },
+  { name: "area", label: "区域", type: "select", options: ["圣何塞", "旧金山"] },
+  { name: "taste", label: "口味", type: "checkbox", options: ["川菜", "粤菜", "湘菜"] },
+  { name: "note", label: "备注", type: "textarea", placeholder: "忌口等" },
+], submit: "去订" };
+
+test("a form in a reply: fill it in, required fields first, and it goes back to that task as one reply", async ({ page }, info) => {
+  const result = `找到三家可订的餐厅。\n\n\`\`\`form\n${JSON.stringify(FORM)}\n\`\`\``;
+  const { bodies } = await setup(page, [base("found", { status: "completed", result, completedAt: 2000 })]);
+  const form = page.locator(".task-report").getByRole("form", { name: "订位信息" });
+  await expect(form).toBeVisible({ timeout: 60_000 });
+  await expect(page.locator(".task-report")).not.toContainText("```");
+  // Nothing is sent while a required field is empty.
+  await form.getByRole("button", { name: "去订" }).click();
+  await expect(form.getByRole("alert")).toContainText("还需要填写：日期");
+  expect(bodies).toEqual([]);
+  await form.getByLabel("日期").fill("2026-10-11");
+  await form.getByLabel("人数").fill("4");
+  await form.getByLabel("区域").selectOption("旧金山");
+  await form.getByRole("checkbox", { name: "川菜" }).click();
+  await form.getByRole("checkbox", { name: "湘菜" }).click();
+  await form.getByLabel("备注").fill("不吃香菜");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
+  await page.screenshot({ path: info.outputPath("form-filled.png") });
+  await form.getByRole("button", { name: "去订" }).click();
+  await expect.poll(() => bodies.length).toBe(1);
+  expect(bodies[0]).toMatchObject({ relatedTaskId: "found", text: "日期：2026-10-11\n人数：4\n区域：旧金山\n口味：川菜、湘菜\n备注：不吃香菜" });
+  // Sent: the form closes and shows what went.
+  const sent = page.locator(".task-report").getByRole("group", { name: "订位信息（已提交）" });
+  await expect(sent).toContainText("旧金山");
+  await expect(sent).toContainText("已提交");
+});
+
+test("a waiting task that asks with fields shows a form on its card", async ({ page }, info) => {
+  const { bodies } = await setup(page, [base("waits", { status: "needs_input", result: "找到三家。", clarification: "请补充订位信息", form: { title: null, fields: [{ name: "date", label: "日期", type: "date", required: true }, { name: "people", label: "人数", type: "number", required: false }], submit: "提交" } })]);
+  const question = page.locator(".task-question");
+  await expect(question).toContainText("请补充订位信息", { timeout: 60_000 });
+  await expect(question).toContainText("填好后提交");
+  await question.getByLabel("日期").fill("2026-10-11");
+  await page.screenshot({ path: info.outputPath("form-waiting.png") });
+  await question.getByRole("button", { name: "提交" }).click();
+  await expect.poll(() => bodies.length).toBe(1);
+  expect(bodies[0]).toMatchObject({ relatedTaskId: "waits", text: "日期：2026-10-11" });
+  await expect(question.getByRole("group", { name: /已提交/ })).toContainText("2026-10-11");
+});
