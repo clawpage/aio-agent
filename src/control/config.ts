@@ -294,6 +294,18 @@ export function loadConfig(): {
   /** This runtime's Home Assistant URL on the member gateway, when granted (HaGateway). */
   ha?: { url: string };
   /**
+   * A network printer (IPP Everywhere) on the home network. Only the listed
+   * accounts reach it, through the gateway. Without a URI the feature is absent.
+   */
+  printing: {
+    /** ipp:// or ipps:// printer URI. */
+    printerUri: string;
+    /** Usernames granted the printer (the owner only if listed). */
+    accounts: string[];
+  };
+  /** This runtime's printer URL on the member gateway, when granted (PrinterGateway). */
+  printer?: { url: string };
+  /**
    * The sandbox nodes (sandboxd) this control plane drives, in order; the first
    * is where existing accounts live. Each node's token is read from `tokensFile`
    * under the node's name, else under AIO_SANDBOX_NODE_TOKEN.
@@ -512,6 +524,10 @@ export function loadConfig(): {
       upstreamUrl: envStr("PA_HA_MCP_URL", ""),
       secretsFile: envStr("PA_HA_MCP_SECRETS_FILE", path.join(os.homedir(), ".config", "aio-agent", "ha-mcp.env")),
       accounts: parseList(envStr("PA_HA_MCP_ACCOUNTS", "")),
+    },
+    printing: {
+      printerUri: envStr("PA_PRINTER_URI", ""),
+      accounts: parseList(envStr("PA_PRINTER_ACCOUNTS", "")),
     },
     sandboxNodes: {
       nodes: parseList(envStr("PA_SANDBOX_NODES", "local=http://127.0.0.1:4894")).map((entry) => {

@@ -249,8 +249,8 @@ url = "http://127.0.0.1:8190/mcp"
  * The policy for one runtime: the sandbox's own servers, plus the gateway tools this
  * account was given (Codex disables a thread's MCP server whose exact URL is not listed).
  */
-export function codexRequirementsToml(cfg: { decision?: { url: string }; schedule?: { url: string }; image?: { url: string }; kb?: { url: string }; ha?: { url: string } }): string {
-  const gateway = ([["aio_decision", cfg.decision], ["aio_schedule", cfg.schedule], ["aio_image", cfg.image], ["aio_kb", cfg.kb], ["aio_ha", cfg.ha]] as const)
+export function codexRequirementsToml(cfg: { decision?: { url: string }; schedule?: { url: string }; image?: { url: string }; kb?: { url: string }; ha?: { url: string }; printer?: { url: string } }): string {
+  const gateway = ([["aio_decision", cfg.decision], ["aio_schedule", cfg.schedule], ["aio_image", cfg.image], ["aio_kb", cfg.kb], ["aio_ha", cfg.ha], ["aio_printer", cfg.printer]] as const)
     .filter(([, server]) => server)
     .map(([name, server]) => `\n[mcp_servers.${name}.identity]\nurl = ${JSON.stringify(server!.url)}\n`);
   return CODEX_REQUIREMENTS_TOML + gateway.join("");

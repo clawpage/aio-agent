@@ -46,7 +46,7 @@ cookie 名 `pa_*` 与 `PA_*` 前缀**保持不变**——它们承载既有容�
    只有沙箱层的 sandboxd 可以持有 Docker 访问（compose 部署时挂载 `docker.sock`）：它不运行任何用户代码，
    每个请求都要节点令牌，沙箱访问不到它，且只以固定参数调用 Docker、不接受调用方给的 Docker 参数、
    宿主路径或挂载，不提供任意宿主机 shell 通道。控制面不持有 Docker 访问。owner 配置的知识库 MCP
-   （`docs/FEATURES.md`“知识库”）与 Home Assistant MCP（`docs/FEATURES.md`“Home Assistant”）只经成员网关按账号转发，令牌不进沙箱；不要为它们另开直连端口，也不要把授权名单
+   （`docs/FEATURES.md`“知识库”）、Home Assistant MCP（`docs/FEATURES.md`“Home Assistant”）与打印机（`docs/FEATURES.md`“打印机”）只经成员网关按账号转发，令牌不进沙箱；不要为它们另开直连端口，也不要把授权名单
    之外的账号接进去。
 4. **两个来源**：主站与伴随站必须保持不同来源；不要把 AIO 生成内容放到主站上，也不要为了
    本地调试放宽 cookie 安全属性（localhost 明文是唯一例外）。

@@ -8,6 +8,7 @@ import {KbGateway} from "./kb.js";
 import {HaGateway} from "./ha.js";
 import {ScheduleGateway} from "./scheduleTool.js";
 import { ImageGateway, sandboxImageFiles } from "./imageTool.js";
+import { PrinterGateway, sandboxPrintFiles } from "./printer/gateway.js";
 import {UserRuntimes} from "./tenants.js";
 import { loadConfig, ensureDataDirs, type Config } from "./config.js";
 import { Logger } from "../common/logger.js";
@@ -402,6 +403,10 @@ async function main(): Promise<void> {
   kb.provision(ctx.cfg);
   const ha=new HaGateway({cfg:ctx.cfg,log:ctx.log,port:ctx.cfg.memberModelPort??4902,usernameOf:id=>account("SELECT username AS v FROM owners WHERE id=?",id)});
   ha.provision(ctx.cfg);
+  const printer=new PrinterGateway({port:ctx.cfg.memberModelPort??4902,log:ctx.log,printerUri:ctx.cfg.printing.printerUri,accounts:ctx.cfg.printing.accounts,
+    workspace:ctx.cfg.sandbox.containerWorkspaceDir,usernameOf:id=>account("SELECT username AS v FROM owners WHERE id=?",id),
+    filesFor:async id=>sandboxPrintFiles(id===ctx.cfg.runtimeUserId?ctx:await ctx.runtimeForUser!(id))});
+  printer.provision(ctx.cfg);
   // Each account's schedules live in its own runtime: the owner's here, a member's in its runtime.
   const schedule=new ScheduleGateway({port:ctx.cfg.memberModelPort??4902,log:ctx.log,
     tasksFor:async id=>id===ctx.cfg.runtimeUserId?ctx.tasks:(await ctx.runtimeForUser!(id)).tasks});
@@ -418,7 +423,7 @@ async function main(): Promise<void> {
       await runtime.browser.withCall("call",()=>undefined);
     }});
   browserGateway.provision(ctx.cfg);
-  const modelGateway=new MemberModelGateway(ctx.cfg,ctx.log,ctx.share,decision,kb,schedule,ctx.hostTokens,image,browserGateway,ha);
+  const modelGateway=new MemberModelGateway(ctx.cfg,ctx.log,ctx.share,decision,kb,schedule,ctx.hostTokens,image,browserGateway,ha,printer);
   await modelGateway.start();
   // Phone notifications: one key pair and one subscription store for every account.
   ctx.push=new PushService({db:ctx.db,log:ctx.log,keyFile:path.join(ctx.cfg.dataDir,"vapid.json"),subject:`https://${ctx.cfg.primaryHost}`});

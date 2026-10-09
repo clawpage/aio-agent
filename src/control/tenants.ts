@@ -34,6 +34,8 @@ export function memberConfig(base: Config, userId: string, port: number, model: 
     kb:undefined,
     // Nor its Home Assistant address: the gateway grants a listed account its own.
     ha:undefined,
+    // Nor its printer address: the gateway grants a listed account its own.
+    printer:undefined,
     // Nor the owner's schedule tool: the gateway gives every member one that reaches only its own schedules.
     schedule:undefined,
     // Nor its image tool: each account's saves only into its own workspace.

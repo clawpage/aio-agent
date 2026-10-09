@@ -111,6 +111,8 @@
 | `PA_HA_MCP_URL` | 空 | Home Assistant MCP Server 地址；为空则不提供 |
 | `PA_HA_MCP_SECRETS_FILE` | `~/.config/aio-agent/ha-mcp.env` | `HA_MCP_TOKEN`（HA 长期访问令牌，环境变量优先） |
 | `PA_HA_MCP_ACCOUNTS` | 空 | 获准操作 Home Assistant 的用户名（owner 也需列出） |
+| `PA_PRINTER_URI` | 空 | 网络打印机的 `ipp://` 或 `ipps://` 地址；为空则不提供打印 |
+| `PA_PRINTER_ACCOUNTS` | 空 | 获准使用打印机的用户名（owner 也需列出） |
 | `PA_GADGET_TOKEN_PATH` | `<数据目录>/gadget-token.env` | 语音配件令牌与绑定账号 |
 | `PA_GADGET_USAGE_URL` | 空 | 配件「用量」页数据地址；为空则接口返回 404 |
 | `PA_GADGET_FIRMWARE_DIR` | `<数据目录>/gadget-firmware` | 配件无线升级固件目录 |

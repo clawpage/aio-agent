@@ -456,6 +456,18 @@ Jev（TypeSafe System One）根据状态和选项返回选择、各选项概率�
   收窄设备范围在 HA 中修改暴露名单；收回授权可移出 `PA_HA_MCP_ACCOUNTS` 并重启，或在 HA 中删除令牌。
 - 执行会话只操作用户本次要求的设备，操作后读一次状态确认。
 
+### 打印机
+
+设置 `PA_PRINTER_URI`（家里网络打印机的 IPP 地址，如 `ipps://192.168.1.123/ipp/print`；支持 IPP Everywhere / PWG raster 的打印机）后：
+
+- **授权**：只有 `PA_PRINTER_ACCOUNTS` 列出的用户名可用（owner 也需列出）。现有部署只授权 `owner`。
+- **接入**：获准账号注册 `aio_printer`（成员网关 `/printer/<运行时令牌>/mcp`），工具为 `printer_status`（状态、缺纸卡纸、墨量、纸张）
+  与 `print_file`（工作区里的 PDF 或图片；可选页码、份数 1–20、单双面、黑白）。其他格式由执行会话先在沙箱里转成 PDF。
+- **流程**：该账号自己的沙箱用 `pdftoppm` 把文件渲染成 300 dpi 的 PWG raster（`src/control/printer/scripts/pwg-raster.py`，需沙箱里的 numpy 与 Pillow），
+  控制面取回后以 IPP Print-Job 发给打印机；纸张按打印机当前装的纸。一次最多 50 页，同一时间只发一个作业。沙箱本身不接触打印机。
+- **诚实**：打印机已停止（缺纸、卡纸等）时拒绝并说明原因；发送途中连接中断时报告“不确定是否已收到”，不自动重发。
+  `ipps://` 不校验打印机的自签名证书，打印机由配置的地址确定，地址应在路由器上固定（DHCP 保留）。
+
 ### 分享网页
 
 沙箱内置 `aio-share` skill：智能体把页面目录（`/home/gem/workspace/share/<页面名>/`，入口 `index.html`）用

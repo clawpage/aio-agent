@@ -15,6 +15,7 @@ import type {ScheduleGateway} from './scheduleTool.js';
 import type {BrowserGateway} from './browser/gateway.js';
 import type {HostTokenSource} from './codex/hostTokens.js';
 import type {ImageGateway} from './imageTool.js';
+import type {PrinterGateway} from './printer/gateway.js';
 
 /** The CLI's subscription credential needs this beta on the Messages API. */
 const OAUTH_BETA='oauth-2025-04-20';
@@ -32,7 +33,7 @@ export class MemberModelGateway {
   private claudeModels=new Map<string,string>();
   private gptUsers=new Set<string>();
   private server:http.Server|null=null;
-  constructor(private cfg:Config,private log:Logger,private share?:ShareStore,private decision?:DecisionGateway,private kb?:KbGateway,private schedule?:ScheduleGateway,private hostTokens?:Pick<HostTokenSource,'getTokens'|'invalidate'>,private image?:ImageGateway,private browser?:BrowserGateway,private ha?:HaGateway){}
+  constructor(private cfg:Config,private log:Logger,private share?:ShareStore,private decision?:DecisionGateway,private kb?:KbGateway,private schedule?:ScheduleGateway,private hostTokens?:Pick<HostTokenSource,'getTokens'|'invalidate'>,private image?:ImageGateway,private browser?:BrowserGateway,private ha?:HaGateway,private printer?:PrinterGateway){}
   provision(cfg:Config):void {
     fs.mkdirSync(cfg.dataDir,{recursive:true,mode:0o700});
     const file=path.join(cfg.dataDir,'model-token');
@@ -47,6 +48,7 @@ export class MemberModelGateway {
     this.decision?.provision(cfg);
     this.kb?.provision(cfg);
     this.ha?.provision(cfg);
+    this.printer?.provision(cfg);
     this.schedule?.provision(cfg);
     this.image?.provision(cfg);
     this.browser?.provision(cfg);
@@ -66,6 +68,7 @@ export class MemberModelGateway {
       if(this.decision&&(req.url??'').startsWith('/decision/')){await this.decision.handle(req,res);return;}
       if(this.kb&&(req.url??'').startsWith('/kb/')){await this.kb.handle(req,res);return;}
       if(this.ha?.owns(req.url)){await this.ha.handle(req,res);return;}
+      if(this.printer&&(req.url??'').startsWith('/printer/')){await this.printer.handle(req,res);return;}
       if(this.schedule&&(req.url??'').startsWith('/schedule/')){await this.schedule.handle(req,res);return;}
       if(this.image&&(req.url??'').startsWith('/image/')){await this.image.handle(req,res);return;}
       if(this.browser&&(req.url??'').startsWith('/browser/')){await this.browser.handle(req,res);return;}

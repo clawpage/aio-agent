@@ -1,4 +1,4 @@
-// The document and browser tools are shell/python assets, not TypeScript, so
+// The document, browser and printer tools are shell/python assets, not TypeScript, so
 // `tsc` does not emit them. Copy them next to the compiled service so
 // `dist/control` is a complete, runnable artifact (each service reads its assets
 // relative to its own directory).
@@ -13,6 +13,7 @@ const root = path.resolve(import.meta.dirname, "..");
 const assetTrees = [
   ["src/control/documents/scripts", "dist/control/documents/scripts"],
   ["src/control/browser/scripts", "dist/control/browser/scripts"],
+  ["src/control/printer/scripts", "dist/control/printer/scripts"],
 ];
 
 for (const [from, to] of assetTrees) {
