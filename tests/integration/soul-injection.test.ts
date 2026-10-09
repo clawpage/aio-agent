@@ -17,8 +17,8 @@ it('reads current SOUL for planning, new execution and resume without rewriting 
   expect(start).toHaveBeenCalledWith(expect.objectContaining({developerInstructions:`${firstSoul}\n\n${EXPERIENCE_POLICY}`}));
   expect(h.codex.startedTurns[0]!.text).not.toContain(firstSoul);
   const prompt=h.codex.startedTurns[0]!.text;
-  expect(prompt).toContain('默认在对话中直接给出完整回答');
-  expect(prompt).toContain('只有确实需要写文件时才创建任务目录');
+  expect(prompt).toContain('默认直接在消息里回答，不建文件');
+  expect(prompt).toContain('只在确实要写文件时创建任务目录');
   expect(prompt).toContain('身份与风格以已注入的 SOUL.md 为准');
   expect(prompt).not.toContain('完整内容放在文档');
   const nextSoul='# SOUL.md\n轻松一点，偶尔幽默，认真办事。';

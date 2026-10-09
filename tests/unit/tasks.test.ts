@@ -92,8 +92,11 @@ describe("main inbox delegation", () => {
         expect(db.prepare("SELECT browser_required FROM turns WHERE id=?").get(first.turn_id)?.browser_required).toBe(0);
         const prompt = codex.startedTurns[0]!.text;
         expect(prompt).not.toContain("没有 browser 不操作");
-        expect(prompt).toContain("按用户任务实际需要使用文件、浏览器和其他工具");
+        expect(prompt).toContain("按任务需要使用文件、浏览器和其他工具");
         expect(prompt).not.toContain("本次文件与共享环境资源范围");
+        // The person's time, not the sandbox's UTC clock.
+        expect(prompt).toContain("沙箱系统时钟是 UTC");
+        expect(prompt).toMatch(/用户的当前时间：\d{4}-\d{2}-\d{2} 周. \d{2}:\d{2}（/);
         codex.plan=async()=>JSON.stringify({title:"网页",related:[],dependencies:[],resources:["browser"]});
         const web=submit("打开网页"); await tick();
         expect(db.prepare("SELECT browser_required FROM turns WHERE id=?").get(tasks.get(web.id)!.turn_id)?.browser_required).toBe(1);
@@ -284,7 +287,7 @@ describe("main inbox delegation", () => {
         const plan=JSON.parse(tasks.get(third.id)!.plan_json!);
         expect(plan.ownedResources).toBeUndefined();
         // The thread already holds the executor rules: they are named by version, not repeated.
-        expect(codex.startedTurns.at(-1)!.text).not.toContain("按用户任务实际需要使用文件、浏览器和其他工具");
+        expect(codex.startedTurns.at(-1)!.text).not.toContain("按任务需要使用文件、浏览器和其他工具");
         expect(codex.startedTurns.at(-1)!.text).toMatch(/执行约束（版本 [0-9a-f]{8}）已在本会话前文给出/);
         expect(codex.startedTurns.at(-1)!.text).toContain(`/tasks/${third.id}/`);
         expect(tasks.get(second.id)?.result).toBe('Second');expect(tasks.get(original.id)?.result).toBe('Original');
@@ -298,7 +301,7 @@ describe("main inbox delegation", () => {
         expect(codex.startedTurns.at(-1)!.text).toContain(`相关任务 ${first.id} 的详情已在本会话前文中`);
     });
     it("gives the executor rules to a thread once per version, and in full again after a change or compaction",async()=>{
-        const RULE="按用户任务实际需要使用文件、浏览器和其他工具";
+        const RULE="按任务需要使用文件、浏览器和其他工具";
         let latest="";
         const run=async(text:string)=>{const t=submit(text,latest||undefined);await tick();const sent=codex.startedTurns.at(-1)!;await codex.runTurn(sent.turnId,{text:`${text} 完成`});await tick();latest=t.id;return {task:tasks.get(t.id)!,sent};};
         const first=await run("first");
