@@ -1,3 +1,4 @@
+import { InlineLoading } from "./Brand";
 import { createPortal } from "react-dom";
 import { PopupSurface } from "./PopupMotion";
 import { useEffect, useState } from "react";
@@ -161,7 +162,7 @@ export function DispatchLog({ taskId, onClose }: { taskId: string; onClose: () =
         </header>
         <div className="dispatch-log-body">
           {error && <p className="error" role="alert">{error}</p>}
-          {!log && !error && <p className="muted">{i18n.dispatch.loading}</p>}
+          {!log && !error && <p><InlineLoading label={i18n.dispatch.loading}/></p>}
           {log && <p className="dispatch-log-message"><span className="muted tiny">{i18n.dispatch.userMessage}</span><br />{log.task.text}</p>}
           {log && !log.entries.length && <p className="muted">{i18n.dispatch.noEntries}</p>}
           {log?.entries.map((entry, i) => {

@@ -19,7 +19,7 @@ test("opening the console: the mark while it loads, the shape of a conversation,
   // Before the session answers: the loading screen shows the mark, and the page is not white.
   const boot = page.getByRole("status").filter({ hasText: "加载中…" });
   await expect(boot).toBeVisible();
-  await expect(boot.locator(".brand-mark")).toBeVisible();
+  await expect(boot.locator(".loading-mark")).toBeVisible();
   const bg = await page.evaluate(() => getComputedStyle(document.querySelector(".boot-loading")!).backgroundColor);
   expect(bg).not.toBe("rgb(255, 255, 255)");
   await page.screenshot({ path: info.outputPath("boot.png") });

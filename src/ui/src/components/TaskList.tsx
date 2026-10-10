@@ -1,3 +1,4 @@
+import { InlineLoading } from "./Brand";
 import {useCallback,useEffect,useMemo,useRef,useState} from 'react';
 import {api,ApiError} from '../api';
 import type {Task} from '../types';
@@ -129,7 +130,7 @@ export function TaskList({feed,active,onDetails,onExpired}:{feed:TaskFeed;active
         </li>;})}</ul>
       </section>)}
       {error&&<p className="error" role="alert">{error}{loading===null&&<> <button type="button" className="ghost" onClick={()=>void fetchPage(rows.length?'more':'reset',{cursor:next,shown:rows.length})}>{t.tasks.list.retry}</button></>}</p>}
-      <div ref={sentinel} className="task-list-end" aria-live="polite">{loading?<span className="muted tiny">{t.tasks.list.loading}</span>:rows.length>0&&!next?<span className="muted tiny">{t.tasks.list.noMore}</span>:null}</div>
+      <div ref={sentinel} className="task-list-end" aria-live="polite">{loading?<span className="muted tiny"><InlineLoading label={t.tasks.list.loading}/></span>:rows.length>0&&!next?<span className="muted tiny">{t.tasks.list.noMore}</span>:null}</div>
     </div>
   </section>;
 }

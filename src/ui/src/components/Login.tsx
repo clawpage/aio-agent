@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { api, ApiError } from "../api";
-import { BrandMark } from "./Brand";
+import { BrandMark, PageLoading } from "./Brand";
 import { t } from "../i18n";
 
 type Mode = "login" | "register";
@@ -96,7 +96,7 @@ export function Login({ onSuccess, notice, username: named }: { onSuccess: () =>
     }
   };
 
-  if (checking) return <div className="boot" role="status">{t.auth.restoring}</div>;
+  if (checking) return <PageLoading label={t.auth.restoring}/>;
 
   return (
     <div className="login">

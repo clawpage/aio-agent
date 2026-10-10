@@ -1,3 +1,4 @@
+import { InlineLoading, LoadingMark } from "./Brand";
 import { ComposerIcon, useComposerHeight } from "./ComposerControls";
 import { PopupPresence } from "./PopupMotion";
 import { MessageTime, TaskDuration, useDisplayClock } from "./MessageTime";
@@ -452,7 +453,7 @@ export function TaskChat({ onDetails, onOpenLink, onOpenFileInBrowser, onExpired
       {arrival === "loading" && <div className="feed-skeleton" aria-hidden="true"><i className="sk-user"/><i className="sk-reply"><b/><b/><b/></i><i className="sk-user short"/><i className="sk-reply"><b/><b/></i></div>}
       {nextBefore && <div className="feed-older" ref={olderTop}>{olderState === "failed"
         ? <button className="ghost tiny" onClick={() => void loadOlder()}>{i18n.feed.older.retry}</button>
-        : <span className="muted tiny">{olderState === "loading" ? i18n.feed.older.loading : ""}</span>}</div>}
+        : <span className="muted tiny">{olderState === "loading" && <InlineLoading label={i18n.feed.older.loading}/>}</span>}</div>}
       {!tasks.length && !outbox.length && arrival !== "loading" && <div className="empty"><h3>{i18n.feed.empty.title}</h3><p>{i18n.feed.empty.body}</p></div>}
       {feed.map(({ task: t, report }) => report ? <article className={`msg assistant task-report ${t.status}`} key={`${t.id}:report`} data-task-id={t.id}>
         <div className="task-report-heading"><span>{t.title}</span>{t.schedule && <span className="schedule-badge">{i18n.feed.report.schedule(t.schedule.rule)}</span>}<span className="muted tiny">{labels[t.status]}</span></div>
@@ -472,8 +473,8 @@ export function TaskChat({ onDetails, onOpenLink, onOpenFileInBrowser, onExpired
           {o.text && <p>{o.text}</p>}
           {o.attachments.length > 0 && <AttachmentCards attachments={o.attachments} onOpen={setPreview}/>}
           {o.uploads.length > 0 && <div className="outgoing-uploads" aria-label={i18n.feed.outgoing.uploading}>{o.uploads.map(u => u.preview
-            ? <span className="outgoing-upload image" key={u.id}><img src={u.preview} alt=""/>{o.state === "sending" && <span className="tray-spinner" aria-hidden="true"/>}</span>
-            : <span className="outgoing-upload file" key={u.id}>{u.name}{o.state === "sending" && <span className="tray-spinner" aria-hidden="true"/>}</span>)}</div>}
+            ? <span className="outgoing-upload image" key={u.id}><img src={u.preview} alt=""/>{o.state === "sending" && <span className="tray-spinner" aria-hidden="true"><LoadingMark size={20}/></span>}</span>
+            : <span className="outgoing-upload file" key={u.id}>{u.name}{o.state === "sending" && <span className="tray-spinner" aria-hidden="true"><LoadingMark size={20}/></span>}</span>)}</div>}
           <div className="message-meta">{o.state === "sending" ? <span className="outgoing-state">{i18n.feed.outgoing.sending}</span> : <span className="outgoing-state failed">{i18n.feed.outgoing.unsent}</span>}</div>
         </MessagePreview></article>
         {o.state === "failed"

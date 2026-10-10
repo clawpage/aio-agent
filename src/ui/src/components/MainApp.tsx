@@ -10,7 +10,7 @@ import { namesPage, OWNER_VIEWS, parseRoute, routePath, type AppRoute } from "..
 
 /** Where a task's process was opened from: its back button returns there. */
 type DetailFrom = "main" | "tasks" | "schedules";
-import { BrandMark } from "./Brand";
+import { BrandMark, LoadingMark, PageLoading } from "./Brand";
 import { NavIcon } from "./NavIcon";
 import { Chat } from "./Chat";
 import { Login } from "./Login";
@@ -278,7 +278,7 @@ export function MainApp() {
         notify(err instanceof Error ? err.message : String(err));
     } };
     if (auth === null)
-        return <div className="boot boot-loading" role="status"><BrandMark size={44}/><span className="boot-label">{t.common.loading}</span></div>;
+        return <PageLoading label={t.common.loading}/>;
     if (!auth)
         return <Login notice={notice} onSuccess={check} username={pathUser() ?? undefined}/>;
     if (foreign && username)
@@ -324,7 +324,7 @@ export function MainApp() {
     </main>
     <PopupPresence>{opening && <PopupSurface className="task-console-overlay opening-overlay" role="presentation">
       <div className="opening-card" role="status" aria-live="polite">
-        <span className="opening-spinner" aria-hidden="true"/>
+        <LoadingMark size={24}/>
         <div className="opening-text">
           <strong>{opening.title}</strong>
           <span className="opening-detail">{opening.detail}</span>

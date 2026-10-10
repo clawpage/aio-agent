@@ -1,3 +1,4 @@
+import { InlineLoading } from "./Brand";
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../api";
 import { t } from "../i18n";
@@ -73,7 +74,7 @@ export function BrowserTabs({ onClose, onNotify }: { onClose: () => void; onNoti
         <button type="button" className="ghost" onClick={onClose} aria-label={t.browser.tabs.close}>✕</button>
       </header>
       {pages === null
-        ? <p className="browser-tabs-empty muted">{failed ? t.browser.tabs.failed : t.browser.tabs.loading}</p>
+        ? <p className="browser-tabs-empty muted">{failed ? t.browser.tabs.failed : <InlineLoading label={t.browser.tabs.loading}/>}</p>
         : !pages.length
           ? <p className="browser-tabs-empty muted">{t.browser.tabs.empty}</p>
           : <ul className="browser-tabs-grid">

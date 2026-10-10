@@ -11,7 +11,7 @@ import { Chat } from "./components/Chat";
 import { Login } from "./components/Login";
 import { Settings } from "./components/Settings";
 import { Workspace } from "./components/Workspace";
-import { BrandMark } from "./components/Brand";
+import { BrandMark, PageLoading } from "./components/Brand";
 import { t } from "./i18n";
 
 type SessionState = { checked: boolean; authenticated: boolean; username: string | null };
@@ -280,7 +280,7 @@ function LegacyApp() {
   }, []);
 
   if (!session.checked) {
-    return <div className="boot">{t.common.loading}</div>;
+    return <PageLoading label={t.common.loading} />;
   }
 
   if (!session.authenticated) {
@@ -722,6 +722,6 @@ export function App() {
   useEffect(() => { void versionMismatch().then(setMismatch); }, []);
   return <>
     {mismatch && <div className="banner error version-banner" role="alert">{mismatch}</div>}
-    {mode === "loading" ? <div className="boot">{t.common.loading}</div> : mode === "legacy" ? <LegacyApp /> : <MainApp />}
+    {mode === "loading" ? <PageLoading label={t.common.loading} /> : mode === "legacy" ? <LegacyApp /> : <MainApp />}
   </>;
 }

@@ -1,3 +1,4 @@
+import { InlineLoading } from "./Brand";
 import { PopupPresence, PopupSurface } from "./PopupMotion";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, ApiError } from "../api";
@@ -993,7 +994,7 @@ function FilesTab({
       </div>
 
       <ul className="file-list">
-        {loading && <li className="muted">{t.workspace.files.loading}</li>}
+        {loading && <li><InlineLoading label={t.workspace.files.loading}/></li>}
         {!loading && entries.length === 0 && <li className="muted">{t.workspace.files.empty}</li>}
         {entries.map((entry) => {
           const kind = entry.is_directory ? null : workspaceFileKind(entry.path);
@@ -1277,7 +1278,7 @@ function ApiTab({ notify }: { notify: (message: string, level?: "info" | "error"
   return (
     <div className="caps">
       <div className="cap-groups">
-        {capsLoading && !caps && <p className="muted">{t.workspace.api.loading}</p>}
+        {capsLoading && !caps && <p><InlineLoading label={t.workspace.api.loading}/></p>}
         {caps?.inventory.groups.map((group) => (
           <details key={group.id} open={group.id === "browser"}>
             <summary>

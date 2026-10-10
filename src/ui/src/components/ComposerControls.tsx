@@ -1,12 +1,14 @@
 import { useLayoutEffect, type RefObject } from "react";
+import { LoadingMark } from "./Brand";
 
 export function ComposerIcon({ kind }: { kind: "attach" | "send" | "stop" | "close" | "busy" }) {
-  return <svg className={`composer-icon${kind === "busy" ? " spinning" : ""}`} width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+  // Busy is the console's one loading animation, at the icon's size.
+  if (kind === "busy") return <LoadingMark size={20} />;
+  return <svg className="composer-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
     {kind === "attach" ? <path d="M12 5v14M5 12h14" />
       : kind === "send" ? <path d="m6 10 6-6 6 6M12 4v16" />
       : kind === "stop" ? <rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor" stroke="none" />
-      : kind === "close" ? <path d="m7 7 10 10M17 7 7 17" />
-      : <path d="M20 12a8 8 0 1 1-8-8" />}
+      : <path d="m7 7 10 10M17 7 7 17" />}
   </svg>;
 }
 

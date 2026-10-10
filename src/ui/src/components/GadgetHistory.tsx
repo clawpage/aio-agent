@@ -1,3 +1,4 @@
+import { InlineLoading } from "./Brand";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { api, ApiError, type GadgetMessage } from '../api';
 import { MessageTime, useDisplayClock } from './MessageTime';
@@ -81,7 +82,7 @@ export function GadgetHistory({ active, onExpired }: { active: boolean; onExpire
     <header className="chat-head"><div className="chat-title"><h2 id="gadget-title">{title}</h2><span className="task-list-sub muted tiny">{t.gadget.subtitle}</span></div></header>
     {error && <p className="banner error" role="alert">{error}</p>}
     <div className="gadget-log" ref={scroller} onScroll={onScroll} role="log" aria-label={t.gadget.logLabel(title)}>
-      {account === undefined && !error ? <p className="muted" role="status">{t.gadget.loading}</p>
+      {account === undefined && !error ? <p><InlineLoading label={t.gadget.loading}/></p>
         : account === null ? <p className="muted">{t.gadget.unbound}</p>
         : messages.length === 0 ? <p className="muted">{t.gadget.empty}</p>
         : <>

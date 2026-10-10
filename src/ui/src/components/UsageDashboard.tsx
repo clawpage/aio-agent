@@ -1,3 +1,4 @@
+import { InlineLoading } from "./Brand";
 import { useEffect, useState } from 'react';
 import { api, ApiError } from '../api';
 import type { UsageReport } from '../../../common/usage';
@@ -36,7 +37,7 @@ export function UsageDashboard({ onExpired }: { onExpired: () => void }) {
     <div className="usage-body">
     <div className="usage-filters"><label>{t.usage.range}<select value={days} onChange={e => setDays(Number(e.target.value))}><option value={7}>{t.usage.lastDays(7)}</option><option value={30}>{t.usage.lastDays(30)}</option><option value={90}>{t.usage.lastDays(90)}</option></select></label><label>{t.usage.user}<select value={account} onChange={e => setAccount(e.target.value)}><option value="all">{t.usage.allUsers}</option>{report?.accounts.map(a => <option key={a.id} value={a.id}>{a.username}</option>)}</select></label></div>
     {error && <p className="banner error" role="alert">{t.usage.stale(error)}</p>}
-    {!current ? <p role="status">{t.usage.loading}</p> : <>
+    {!current ? <p><InlineLoading label={t.usage.loading}/></p> : <>
       <p className="muted tiny">{t.usage.meta(current.timezone, new Date(current.generatedAt).toLocaleTimeString(locale))}</p>
       {selected.some(a => !a.available) && <p className="banner error" role="alert">{t.usage.unavailable(selected.filter(a => !a.available).map(a => a.username))}</p>}
       <div className="usage-metrics">{(['total','input','output'] as const).map(key => <article key={key}><span className="muted">{t.usage.metrics[key]}</span><strong>{fmt(sum(key))}</strong>{key === 'input' && <span className="muted tiny">{t.usage.cacheBreakdown(fmt(sum('cached')), fmt(sum('cacheWrite')))}</span>}</article>)}</div>

@@ -1,3 +1,4 @@
+import { InlineLoading } from "./Brand";
 import { createPortal } from "react-dom";
 import { PopupSurface } from "./PopupMotion";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -231,8 +232,8 @@ export function FilePreview({ path: initialPath, onClose, onOpenLink, onOpenInBr
         </div>}
         <div className={`file-preview-body ${html && !sourceView && !textTruncated ? "file-preview-html-body" : ""}`}>
           {phase === "loading" && (
-            <p className="muted" role="status">
-              {raster ? t.files.preview.converting : t.files.preview.loading}
+            <p>
+              <InlineLoading label={raster ? t.files.preview.converting : t.files.preview.loading} />
             </p>
           )}
 

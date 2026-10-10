@@ -919,8 +919,8 @@ textarea:focus {
 .outgoing-upload.image { width: 96px; height: 96px; background: color-mix(in srgb, var(--text) 6%, transparent); }
 .outgoing-upload.image img { width: 100%; height: 100%; object-fit: cover; }
 .outgoing-upload.file { padding: 8px 34px 8px 12px; font-size: 13px; background: color-mix(in srgb, var(--bg-soft) 78%, transparent); }
-.outgoing-upload .tray-spinner { border-color: var(--media-track); border-top-color: var(--on-media); box-shadow: 0 0 0 2px var(--media-ring); }
-.outgoing-upload.file .tray-spinner { left: auto; right: 10px; border-color: color-mix(in srgb, var(--text) 18%, transparent); border-top-color: var(--accent); box-shadow: none; }
+.outgoing-upload .tray-spinner { border-radius: 6px; box-shadow: 0 0 0 2px var(--media-ring); }
+.outgoing-upload.file .tray-spinner { left: auto; right: 10px; box-shadow: none; }
 .outgoing-state { font-size: 12px; color: var(--text-dim); animation: skeleton-in 300ms ease-out 600ms both; }
 .outgoing-state.failed { color: var(--error); animation: none; }
 .outgoing-failed { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; margin-top: 6px; font-size: 13px; color: var(--error); }
@@ -954,12 +954,52 @@ textarea:focus {
 
 /* The app's loading screen: the same mark, in the same place, as the page before the script arrived. */
 .boot-loading { position: fixed; inset: 0; background: var(--bg); }
-.boot-loading .brand-mark { animation: boot-breathe 1.8s ease-in-out infinite; }
-.boot-label { position: absolute; top: calc(50% + 34px); left: 0; right: 0; text-align: center; font-size: 12px; color: var(--text-dim); animation: skeleton-in 300ms ease-out 1.2s both; }
-@keyframes boot-breathe { 50% { opacity: .72; transform: scale(.96); } }
+.boot-label { position: absolute; top: calc(50% + 40px); left: 0; right: 0; text-align: center; font-size: 12px; color: var(--text-dim); animation: skeleton-in 300ms ease-out 1.2s both; }
 @media (prefers-reduced-motion: reduce) {
-  .task-feed.entering > :is(.task-entry, .task-report), .feed-skeleton, .feed-skeleton i, .feed-skeleton b, .boot-loading .brand-mark, .boot-label { animation: none; }
+  .task-feed.entering > :is(.task-entry, .task-report), .feed-skeleton, .feed-skeleton i, .feed-skeleton b, .boot-label { animation: none; }
 }
+
+/*
+ * The loading mark (Brand.tsx LoadingMark, and index.html before the script): the
+ * mark drawn with ruler and compass, one 3.2 s construction on repeat. At rest it
+ * is the finished mark, which is all a reduced-motion setting shows. The ruler and
+ * compass are construction tools: shown only while drawing, and only when large.
+ */
+.loading-mark { display: block; flex: none; overflow: visible; }
+.loading-mark .lm-tile { fill: var(--brand-tile); }
+.loading-mark .lm-line { fill: none; stroke: var(--brand-line); stroke-width: 3.6; stroke-linecap: round; }
+.loading-mark .lm-ahead { opacity: .45; }
+.loading-mark .lm-station { fill: var(--brand-tile); stroke: var(--brand-line); stroke-width: 3; }
+.loading-mark .lm-stop { fill: var(--brand-stop); transform-box: fill-box; transform-origin: center; }
+.loading-mark .lm-ruler { fill: var(--brand-line); opacity: 0; }
+.loading-mark .lm-compass { fill: var(--brand-line); stroke: var(--brand-line); stroke-width: 1.2; stroke-linecap: round; opacity: 0; transform-origin: 20px 20px; }
+.loading-mark.small :is(.lm-ruler, .lm-compass) { display: none; }
+@media (prefers-reduced-motion: no-preference) {
+  .loading-mark :is(.lm-draw, .lm-ruler, .lm-travelled, .lm-ahead, .lm-station, .lm-stop, .lm-compass) {
+    animation: 3.2s var(--loading-phase, 0ms) infinite both;
+  }
+  /* Drawing is a dash (pathLength 1) sliding in; the finished ring goes back to a plain stroke, so its two ends leave no seam. */
+  .loading-mark :is(.lm-line, .lm-station) { stroke-dasharray: 1 2; }
+  .loading-mark .lm-draw { animation-name: lm-draw; }
+  .loading-mark .lm-ruler { animation-name: lm-ruler; }
+  .loading-mark .lm-travelled { animation-name: lm-travelled; }
+  .loading-mark .lm-ahead { animation-name: lm-ahead; }
+  .loading-mark .lm-station { animation-name: lm-station; }
+  .loading-mark .lm-stop { animation-name: lm-stop; }
+  .loading-mark .lm-compass { animation-name: lm-compass; }
+}
+/* 0–30%: the ruler lays the line; 28–58%: the compass turns once about the station;
+   62–72%: the centre lights; 70–78%: the stretch ahead fades; then a rest, and again. */
+@keyframes lm-ruler { 0% { opacity: 0; } 4%, 26% { opacity: .3; } 32%, 100% { opacity: 0; } }
+@keyframes lm-travelled { 0%, 5% { stroke-dashoffset: 1; } 16%, 100% { stroke-dashoffset: 0; } }
+@keyframes lm-ahead { 0%, 16% { stroke-dashoffset: 1; opacity: 1; } 27%, 70% { stroke-dashoffset: 0; opacity: 1; } 78%, 100% { stroke-dashoffset: 0; opacity: .45; } }
+@keyframes lm-compass { 0%, 24% { opacity: 0; transform: rotate(0deg); } 28% { opacity: .85; transform: rotate(0deg); animation-timing-function: ease-in-out; } 58% { opacity: .85; transform: rotate(360deg); } 64%, 100% { opacity: 0; transform: rotate(360deg); } }
+@keyframes lm-station { 0%, 28% { stroke-dashoffset: 1; stroke-dasharray: 1 2; fill-opacity: 0; animation-timing-function: ease-in-out; } 58% { stroke-dashoffset: 0; stroke-dasharray: 1 2; fill-opacity: 0; } 58.1%, 100% { stroke-dashoffset: 0; stroke-dasharray: none; } 62%, 100% { fill-opacity: 1; } }
+@keyframes lm-stop { 0%, 62% { transform: scale(0); } 68% { transform: scale(1.25); } 72%, 100% { transform: scale(1); } }
+@keyframes lm-draw { 0%, 90% { opacity: 1; } 97%, 100% { opacity: 0; } }
+
+/* Loading inside a page or panel: the small mark and what it is waiting for, on one line. */
+.inline-loading { display: inline-flex; align-items: center; gap: 8px; color: var(--text-dim); }
 
 @keyframes menu-in {
   from {
@@ -2801,15 +2841,10 @@ textarea:focus {
   width: 20px;
   height: 20px;
   margin: -10px 0 0 -10px;
-  border-radius: 50%;
-  border: 2px solid var(--media-track);
-  border-top-color: var(--on-media);
-  animation: tray-spin 0.8s linear infinite;
 }
-.tray-item.is-file .tray-spinner { left: auto; right: 10px; margin-left: 0; border-color: color-mix(in srgb, var(--text) 18%, transparent); border-top-color: var(--accent); }
+.tray-item.is-file .tray-spinner { left: auto; right: 10px; margin-left: 0; }
 @keyframes tray-in { from { opacity: 0; transform: scale(0.92); } }
-@keyframes tray-spin { to { transform: rotate(360deg); } }
-@media (prefers-reduced-motion: reduce) { .composer .composer-tray .tray-item { animation: none; } .tray-spinner { animation-duration: 2.4s; } }
+@media (prefers-reduced-motion: reduce) { .composer .composer-tray .tray-item { animation: none; } }
 
 /* -------------------------------------------------- merged files + docs tools ---- */
 
@@ -3425,14 +3460,11 @@ button.turn-pill:focus-visible { outline: 2px solid currentColor; outline-offset
 /* Opening a link or page in the sandbox browser: what it is, that it is loading, and a way out. */
 .opening-overlay { background: var(--scrim-tint); animation: fade-in var(--dur) var(--ease); }
 .opening-card { display: flex; align-items: center; gap: 14px; width: min(420px, calc(100vw - 32px)); padding: 14px 14px 14px 18px; border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--bg-raised); box-shadow: var(--shadow); animation: modal-in var(--dur) var(--ease); }
-.opening-spinner { flex: none; width: 22px; height: 22px; border: 2.5px solid var(--ai-soft); border-top-color: var(--ai); border-radius: 50%; animation: opening-spin 0.8s linear infinite; }
 .opening-text { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; line-height: 1.4; }
 .opening-text strong { font-size: 15px; }
 .opening-detail { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
 .opening-hint { font-size: 12px; color: var(--text-dim); }
 .opening-card button { flex: none; }
-@keyframes opening-spin { to { transform: rotate(360deg); } }
-@media (prefers-reduced-motion: reduce) { .opening-spinner { animation-duration: 2.4s; } }
 @media (max-width: 720px) {
   .task-console-overlay { padding: var(--safe-top) var(--safe-right) var(--safe-bottom) var(--safe-left); }
   .task-console { width: 100%; height: 100%; max-height: none; border: 0; border-radius: 0; }
@@ -4077,7 +4109,6 @@ button.map-card-switch { flex: 0 0 auto; padding: 4px 10px; }
 
 .composer-icon { display: block; flex: none; }
 .composer-row > button, .composer-row > .file-button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
-.composer-icon.spinning { animation: opening-spin .8s linear infinite; }
 @media (min-width: 901px) {
   /* The conversation reads in the same centred column as the input card below it. */
   .task-feed, .task-detail .chat-scroll { padding-inline: max(24px, calc((100% - 860px) / 2)); }
@@ -4133,7 +4164,7 @@ button.map-card-switch { flex: 0 0 auto; padding: 4px 10px; }
   .composer .queue-hint { margin: 4px 6px; }
   .chat.running .composer::before { inset: -1px; height: auto; border-radius: inherit; z-index: -1; }
 }
-@media (prefers-reduced-motion: reduce) { .composer { transition: none; } .composer-icon.spinning { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .composer { transition: none; } }
 /* Voice input: amber while it listens (your turn to talk), in the attachment button's quiet style otherwise. */
 .composer-row > .voice-button.recording {
   color: var(--you); background: var(--you-soft); border-color: color-mix(in srgb, var(--you) 45%, transparent);

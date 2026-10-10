@@ -1,3 +1,4 @@
+import { InlineLoading } from "./Brand";
 import {SoulSettings} from './SoulSettings';
 import { RecallSettings } from './RecallSettings';
 import { DebugSettings } from './DebugSettings';
@@ -162,7 +163,7 @@ export function Settings({ onBack, onSaved }: Props) {
 
         <section className="settings-card" aria-label={t.settings.run.title}>
           <div className="settings-section-head"><h3>{t.settings.run.title}</h3><p>{harnessChoice ? t.settings.run.introWithHarness : t.settings.run.introModelOnly}{t.settings.run.introSuffix}</p></div>
-        {loading && <p className="muted">{t.settings.run.loading}</p>}
+        {loading && <p><InlineLoading label={t.settings.run.loading}/></p>}
 
         {!loading && loadError && (
           <div className="banner error" role="alert">

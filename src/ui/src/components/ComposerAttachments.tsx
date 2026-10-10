@@ -1,3 +1,4 @@
+import { LoadingMark } from "./Brand";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Attachment } from "../types";
 import { primeImage } from "../imageCache";
@@ -136,7 +137,7 @@ export function ComposerAttachments({ items, pending, previews, disabled, onRemo
               <span className="tray-meta"><span className="tray-name">{p.name}</span><span className="tray-size">{t.app.attachments.uploading}</span></span>
             </>
           )}
-          <span className="tray-spinner" aria-hidden="true" />
+          <span className="tray-spinner" aria-hidden="true"><LoadingMark size={20} /></span>
         </span>
       ))}
     </div>
