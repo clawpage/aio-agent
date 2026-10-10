@@ -31,7 +31,8 @@ export function UsageDashboard({ onExpired }: { onExpired: () => void }) {
   const x = (i: number) => 100 + i * 760 / Math.max(1, days - 1);
   const y = (n: number) => 230 - n / peak * 190;
   return <section className="usage-dashboard" aria-labelledby="usage-title">
-    <header className="usage-header"><div><h1 id="usage-title">用量看板</h1><p className="muted">按账号查看每天的 token 消耗</p></div><button className="ghost" onClick={() => setRefresh(v => v + 1)}>刷新用量</button></header>
+    <header className="chat-head"><div className="chat-title"><h2 id="usage-title">用量看板</h2><span className="task-list-sub muted tiny">按账号查看每天的 token 消耗</span></div><div className="chat-head-actions"><button className="ghost" onClick={() => setRefresh(v => v + 1)}>刷新用量</button></div></header>
+    <div className="usage-body">
     <div className="usage-filters"><label>时间范围<select value={days} onChange={e => setDays(Number(e.target.value))}><option value={7}>最近 7 天</option><option value={30}>最近 30 天</option><option value={90}>最近 90 天</option></select></label><label>用户<select value={account} onChange={e => setAccount(e.target.value)}><option value="all">所有用户</option>{report?.accounts.map(a => <option key={a.id} value={a.id}>{a.username}</option>)}</select></label></div>
     {error && <p className="banner error" role="alert">{error} · 数据可能尚未更新</p>}
     {!current ? <p role="status">正在读取用量…</p> : <>
@@ -52,5 +53,6 @@ export function UsageDashboard({ onExpired }: { onExpired: () => void }) {
       <p className="usage-note muted tiny">历史仅回填已保存的 Codex 事件；旧 Claude、旧派单及未上报用量无法补齐。中断时未收到报告的消耗可能缺失，跨日调用按收到用量报告的日期记账。</p>
       <ul className="usage-coverage muted tiny">{selected.map(a => <li key={a.id}>{a.username}：实时采集{a.collectionStartedAt ? `自 ${new Date(a.collectionStartedAt).toLocaleString('zh-CN', {timeZone:current.timezone})}` : '待账号执行器启动'}；{a.firstRecordAt ? `最早记录 ${new Date(a.firstRecordAt).toLocaleDateString('zh-CN', {timeZone:current.timezone})}` : '暂无记录'}</li>)}</ul>
     </>}
+    </div>
   </section>;
 }

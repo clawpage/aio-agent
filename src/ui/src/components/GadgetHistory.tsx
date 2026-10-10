@@ -78,7 +78,7 @@ export function GadgetHistory({ active, onExpired }: { active: boolean; onExpire
 
   const title = account ? accountLabel(account) : '语音配件';
   return <section className="gadget-history" aria-labelledby="gadget-title">
-    <header className="gadget-header"><h1 id="gadget-title">{title}</h1><p className="muted">语音配件的对话记录 · 只读</p></header>
+    <header className="chat-head"><div className="chat-title"><h2 id="gadget-title">{title}</h2><span className="task-list-sub muted tiny">语音配件的对话记录 · 只读</span></div></header>
     {error && <p className="banner error" role="alert">{error}</p>}
     <div className="gadget-log" ref={scroller} onScroll={onScroll} role="log" aria-label={`${title} 的对话`}>
       {account === undefined && !error ? <p className="muted" role="status">正在读取对话…</p>

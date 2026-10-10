@@ -11,6 +11,7 @@ import { namesPage, OWNER_VIEWS, parseRoute, routePath, type AppRoute } from "..
 /** Where a task's process was opened from: its back button returns there. */
 type DetailFrom = "main" | "tasks" | "schedules";
 import { BrandMark } from "./Brand";
+import { NavIcon } from "./NavIcon";
 import { Chat } from "./Chat";
 import { Login } from "./Login";
 import { Settings } from "./Settings";
@@ -297,14 +298,14 @@ export function MainApp() {
     {mobile && <PopupSurface className="mobile-menu-backdrop" onClick={closeMenu} aria-hidden="true"/>}
     <PopupSurface as="aside" ref={sidebar} id="main-navigation" className={`sidebar ${menuOpen ? "show-mobile" : ""}`} role={mobile && menuOpen ? "dialog" : undefined} aria-modal={mobile && menuOpen ? true : undefined} aria-label="导航" aria-hidden={mobile && !menuOpen ? true : undefined} inert={mobile && !menuOpen}>
       <button className="mobile-menu-close ghost" aria-label="关闭导航" onClick={closeMenu}><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden><path d="M6 6l12 12M18 6L6 18"/></svg></button><div className="brand"><BrandMark/><div><strong>一站</strong><span className="muted tiny">什么事情都在这里一站解决吧</span></div></div>
-      <button className={`ghost block ${view === "main" && !workspace ? "active" : ""}`} aria-current={view === "main" && !workspace ? "page" : undefined} onClick={() => navigate({ view: "main" })}>主会话</button>
-      <button className={`ghost block ${view === "tasks" && !workspace ? "active" : ""}`} aria-current={view === "tasks" && !workspace ? "page" : undefined} onClick={() => navigate({ view: "tasks" })}>任务列表</button>
-      <button className={`ghost block ${view === "schedules" && !workspace ? "active" : ""}`} aria-current={view === "schedules" && !workspace ? "page" : undefined} onClick={() => navigate({ view: "schedules" })}>定时任务</button>
-      <button className={`ghost block ${view === "vault" && !workspace ? "active" : ""}`} aria-current={view === "vault" && !workspace ? "page" : undefined} onClick={() => navigate({ view: "vault" })}>密码器</button>
-      {role === 'owner' && gadgetAccount && <button className={`ghost block ${view === 'gadget' && !workspace ? 'active' : ''}`} aria-current={view === "gadget" && !workspace ? "page" : undefined} onClick={() => navigate({ view: "gadget" })}>{accountLabel(gadgetAccount)}</button>}
-      {role === 'owner' && <button className={`ghost block ${view === 'usage' && !workspace ? 'active' : ''}`} aria-current={view === "usage" && !workspace ? "page" : undefined} onClick={() => navigate({ view: "usage" })}>用量看板</button>}
-      <button className={`ghost block ${workspace ? "active" : ""}`} aria-current={workspace ? "page" : undefined} onClick={() => { closeMenu(); openWorkspace(); }}>工作区</button>
-      <div className="sidebar-foot"><span className="muted tiny">{!status || startFailed ? "正在连接智能体" : "智能体在线"}</span><PushToggle/><button className="ghost block" onClick={() => setTheme(t => t === "dark" ? "light" : "dark")}>{theme === "dark" ? "浅色模式" : "深色模式"}</button>{role === "owner" && <button className={`ghost block ${view === "settings" && !workspace ? "active" : ""}`} aria-current={view === "settings" && !workspace ? "page" : undefined} onClick={() => navigate({ view: "settings" })}>配置</button>}<button className="ghost block" onClick={() => void logout()}>退出登录</button></div>
+      <button className={`ghost block ${view === "main" && !workspace ? "active" : ""}`} aria-current={view === "main" && !workspace ? "page" : undefined} onClick={() => navigate({ view: "main" })}><NavIcon name="chat"/>主会话</button>
+      <button className={`ghost block ${view === "tasks" && !workspace ? "active" : ""}`} aria-current={view === "tasks" && !workspace ? "page" : undefined} onClick={() => navigate({ view: "tasks" })}><NavIcon name="tasks"/>任务列表</button>
+      <button className={`ghost block ${view === "schedules" && !workspace ? "active" : ""}`} aria-current={view === "schedules" && !workspace ? "page" : undefined} onClick={() => navigate({ view: "schedules" })}><NavIcon name="schedule"/>定时任务</button>
+      <button className={`ghost block ${view === "vault" && !workspace ? "active" : ""}`} aria-current={view === "vault" && !workspace ? "page" : undefined} onClick={() => navigate({ view: "vault" })}><NavIcon name="vault"/>密码器</button>
+      {role === 'owner' && gadgetAccount && <button className={`ghost block ${view === 'gadget' && !workspace ? 'active' : ''}`} aria-current={view === "gadget" && !workspace ? "page" : undefined} onClick={() => navigate({ view: "gadget" })}><NavIcon name="gadget"/>{accountLabel(gadgetAccount)}</button>}
+      {role === 'owner' && <button className={`ghost block ${view === 'usage' && !workspace ? 'active' : ''}`} aria-current={view === "usage" && !workspace ? "page" : undefined} onClick={() => navigate({ view: "usage" })}><NavIcon name="usage"/>用量看板</button>}
+      <button className={`ghost block ${workspace ? "active" : ""}`} aria-current={workspace ? "page" : undefined} onClick={() => { closeMenu(); openWorkspace(); }}><NavIcon name="workspace"/>工作区</button>
+      <div className="sidebar-foot"><span className="sidebar-status muted tiny"><span className={`dot ${!status || startFailed ? "warn" : "ok"}`}/>{!status || startFailed ? "正在连接智能体" : "智能体在线"}</span><PushToggle/><button className="ghost block" onClick={() => setTheme(t => t === "dark" ? "light" : "dark")}><NavIcon name={theme === "dark" ? "sun" : "moon"}/>{theme === "dark" ? "浅色模式" : "深色模式"}</button>{role === "owner" && <button className={`ghost block ${view === "settings" && !workspace ? "active" : ""}`} aria-current={view === "settings" && !workspace ? "page" : undefined} onClick={() => navigate({ view: "settings" })}><NavIcon name="settings"/>配置</button>}<button className="ghost block" onClick={() => void logout()}><NavIcon name="logout"/>退出登录</button></div>
     </PopupSurface>
     </>}
     </PopupPresence>
