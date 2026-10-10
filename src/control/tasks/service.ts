@@ -199,6 +199,8 @@ export class TaskService {
             attachments: JSON.parse(row.attachments_json) as TurnAttachment[], relatedTaskId: row.related_task_id,
             relatedTaskTitle: row.related_task_id ? this.get(row.related_task_id)?.title ?? null : null,
             description: plan?.description ?? null,
+            // What its executor has said so far in this run: the card shows it while the task works.
+            messages: ["running", "stopping"].includes(row.status) && row.turn_id ? this.interimMessages(row.turn_id) : [],
             waitReason: this.waitReason(row),
             clarification: row.status === "needs_input" ? plan?.clarification ?? null : null,
             options: row.status === "needs_input" ? plan?.options ?? null : null,
@@ -686,6 +688,18 @@ export class TaskService {
         const question = row.plan_json ? (JSON.parse(row.plan_json) as TaskPlan).clarification : null;
         return [row.input_text, ...(question ? [`本任务此前的问题：${question}`] : []),...supplements.map(r=>`用户补充：${r.input_text}`)].join("\n\n");
     }
+    /** The text messages an executor wrote during a turn, before its final answer (the last few). */
+    private interimMessages(turnId: string): string[] {
+        const events = this.db.prepare("SELECT payload FROM events WHERE turn_id=? AND type='item/completed' AND payload LIKE '%\"agentMessage\"%' ORDER BY id DESC LIMIT 3").all(turnId) as Array<{payload:string}>;
+        const texts: string[] = [];
+        for (const event of events) {
+            try {
+                const item = JSON.parse(event.payload).item as {type?:string;text?:string;phase?:string};
+                if (item.type === "agentMessage" && item.phase !== "final_answer" && typeof item.text === "string" && item.text.trim()) texts.unshift(item.text.trim().slice(0, 1000));
+            } catch { /* a malformed historical event is skipped */ }
+        }
+        return texts;
+    }
     private latestAgentMessage(turnId: string): string | null {
         const events = this.db.prepare("SELECT payload FROM events WHERE turn_id=? AND type='item/completed' ORDER BY id DESC LIMIT 20").all(turnId) as Array<{payload:string}>;
         for (const event of events) {
@@ -702,13 +716,12 @@ export class TaskService {
         plan.decision={kind:"new",taskId:null};
         this.db.prepare("UPDATE tasks SET merged_into=NULL,status='waiting',plan_json=?,error=NULL WHERE id=?").run(JSON.stringify(plan),row.id);
     }
-    /** An accepted supplement leads the task from now on: its card shows the supplement's title and summary. */
+    /** An accepted supplement leads the task from now on: its card shows the supplement's title. */
     private adoptSupplement(parentId: string, plan: TaskPlan) {
         const parent = this.get(parentId);
         if (!parent?.plan_json || !plan.title) return;
         const parentPlan = JSON.parse(parent.plan_json) as TaskPlan;
-        parentPlan.description = plan.description;
-        this.db.prepare("UPDATE tasks SET title=?,plan_json=? WHERE id=?").run(plan.title, JSON.stringify(parentPlan), parent.id);
+        this.db.prepare("UPDATE tasks SET title=? WHERE id=?").run(plan.title, parent.id);
         this.agent.renameConversation(parent.conversation_id, plan.title);
     }
     private async deliverSupplements() {

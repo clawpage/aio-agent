@@ -191,6 +191,8 @@ export interface Task {
   /** A form to fill in instead (several answers at once), sent back as one reply. */
   form?: import("../../common/form").FormSpec | null;
   description?: string | null;
+  /** What its executor has said so far in the current run (shown on the card while it works). */
+  messages?: string[];
   mergedInto?: string | null;
   mergedTitle?: string | null;
   revision: number;

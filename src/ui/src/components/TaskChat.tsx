@@ -429,7 +429,7 @@ export function TaskChat({ onDetails, onOpenLink, onOpenFileInBrowser, onExpired
               : t.options?.length ? <ChoiceList options={t.options} chosen={choosing[`${t.id}:${t.revision}`] ?? null} onChoose={option => void choose(t, option)}/> : null}
             <span className="task-question-hint">{t.form ? "填好后提交，或直接在下方输入" : t.options?.length ? "点选一个，或直接在下方输入" : "直接在下方输入回复即可"}</span>
           </div>}
-          {t.description && ["running", "stopping"].includes(t.status) && <p className="task-intro">{t.description}</p>}
+          {!!t.messages?.length && ["running", "stopping"].includes(t.status) && <div className="task-intro task-messages">{t.messages.map((m, i) => <Markdown key={i} source={m} onOpenLink={onOpenLink} onOpenFile={setPreview}/>)}</div>}
           {ownsBrowser(t) && <TaskBrowser task={t} onReveal={onRevealBrowser}/>}
           {t.phone && !t.mergedInto && ["needs_input", "queued", "running", "stopping"].includes(t.status) && <TaskPhone task={t} onDone={() => void choose(t, "我已在手机上操作完成，请继续。")}/>}
           <TaskDuration task={t} now={now}/>

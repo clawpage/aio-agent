@@ -3209,6 +3209,9 @@ button.turn-pill:focus-visible { outline: 2px solid currentColor; outline-offset
 }
 
 .task-intro { margin: 8px 4px 10px; font-size: 14px; line-height: 1.65; color: var(--text-dim); overflow-wrap: anywhere; }
+.task-messages > * { margin: 0; }
+.task-messages > * + * { margin-top: 6px; }
+.task-messages p { margin: 0; }
 
 .task-question { margin: 8px 0 12px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 14px; }
 .task-question p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.65; }

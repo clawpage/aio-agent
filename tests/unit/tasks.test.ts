@@ -533,7 +533,7 @@ describe("main inbox delegation", () => {
         expect(codex.steers[0]).toMatchObject({threadId:codex.startedTurns[0]!.threadId,expectedTurnId:codex.startedTurns[0]!.turnId});
         expect(codex.steers[0]!.text).toContain("902 links way");
         expect(tasks.get(extra.id)).toMatchObject({status:"merged",merged_into:parent.id});
-        expect(tasks.view(tasks.get(parent.id)!)).toMatchObject({title:"补充住宿和餐厅",description:JSON.parse(tasks.get(extra.id)!.plan_json!).description});
+        expect(tasks.view(tasks.get(parent.id)!)).toMatchObject({title:"补充住宿和餐厅"});
         expect(tasks.list().tasks.find(t=>t.id===extra.id)?.conversationId).toBe(parent.conversationId);
         await codex.runTurn(codex.startedTurns[0]!.turnId,{text:"包含住宿和餐厅的完整行程"});await tick();
         expect(tasks.get(parent.id)?.result).toContain("餐厅");
@@ -626,17 +626,32 @@ describe("main inbox delegation", () => {
         expect(tasks.get(extra.id)?.merged_into).toBeNull();
         expect(codex.startedTurns[1]!.text).toContain("finished original");
     });
-    it("an accepted supplement replaces the card's title and overview, and keeps them across a reload",async()=>{
-        const description="我会根据退房时间梳理返程路线，安排途中休息和用餐，整理成一份可照着走的行程。";
-        codex.plan=async()=>JSON.stringify({title:"返程安排",description,related:[],dependencies:[],resources:[]});
+    it("an accepted supplement replaces the card's title, and keeps it across a reload",async()=>{
+        codex.plan=async()=>JSON.stringify({title:"返程安排",related:[],dependencies:[],resources:[]});
         const parent=submit("十点退房后返程");await tick();
-        expect(tasks.list().tasks.find(t=>t.id===parent.id)?.description).toBe(description);
-        codex.plan=async()=>JSON.stringify({title:"补充",description:"新要求的说明",appendTo:parent.id,related:[],dependencies:[],resources:[]});
+        codex.plan=async()=>JSON.stringify({title:"补充",appendTo:parent.id,related:[],dependencies:[],resources:[]});
         submit("路上加一次午餐");await tick();
-        expect(tasks.list().tasks.find(t=>t.id===parent.id)).toMatchObject({title:"补充",description:"新要求的说明"});
+        expect(tasks.list().tasks.find(t=>t.id===parent.id)?.title).toBe("补充");
         tasks.close();tasks=new TaskService(db,testConfig("/tmp/aio-main-tasks",1),agent,codex);tasks.init();await tick();
-        expect(tasks.list().tasks.find(t=>t.id===parent.id)).toMatchObject({title:"补充",description:"新要求的说明"});
+        expect(tasks.list().tasks.find(t=>t.id===parent.id)?.title).toBe("补充");
         expect(codex.plans).toHaveLength(2);
+    });
+    it("shows what the executor has said so far in this run on a working task's card, never its final answer",async()=>{
+        const job=submit("查一下天气");await tick();
+        const row=tasks.get(job.id)!;
+        expect(row.status).toBe("running");
+        expect(tasks.view(row).messages).toEqual([]);
+        const say=(turnId:string,item:Record<string,unknown>)=>db.prepare("INSERT INTO events(conversation_id,turn_id,type,payload,created_at) VALUES(?,?,?,?,?)")
+            .run(row.execution_conversation_id??row.conversation_id,turnId,"item/completed",JSON.stringify({item}),Date.now());
+        say("an-earlier-turn",{type:"agentMessage",id:"m0",text:"上一轮说的话",phase:"commentary"});
+        say(row.turn_id!,{type:"agentMessage",id:"m1",text:"我先看一下今天的预报。",phase:"commentary"});
+        say(row.turn_id!,{type:"commandExecution",id:"c1",command:"curl wttr.in"});
+        say(row.turn_id!,{type:"agentMessage",id:"m2",text:"  再对比一下明天的。 "});
+        expect(tasks.view(tasks.get(job.id)!).messages).toEqual(["我先看一下今天的预报。","再对比一下明天的。"]);
+        say(row.turn_id!,{type:"agentMessage",id:"m3",text:"今天晴。",phase:"final_answer"});
+        expect(tasks.view(tasks.get(job.id)!).messages).toEqual(["我先看一下今天的预报。","再对比一下明天的。"]);
+        db.prepare("UPDATE tasks SET status='completed' WHERE id=?").run(job.id);
+        expect(tasks.view(tasks.get(job.id)!).messages).toEqual([]);
     });
     it("keeps old pending tasks in the live page while paginating every completed task", () => {
         tasks.close();
@@ -713,13 +728,10 @@ it("repairs what does not change what may run, and says why an answer is unusabl
     }
 });
 
-it("bounds an overview to 100 Unicode characters and supports older planner payloads",()=>{
+it("no longer asks the dispatcher for an overview, and ignores one an older planner still writes",()=>{
     const base={title:"计划",related:[],dependencies:[],resources:[]};
-    const plan=parsePlan(JSON.stringify({...base,description:"路😀".repeat(80)}),[],null)!;
-    expect([...plan.description!]).toHaveLength(100);
-    expect(plan.description?.endsWith("…")).toBe(true);
-    expect(parsePlan(JSON.stringify(base),[],null)?.description).toContain("计划");
-    expect(parsePlan(JSON.stringify({...base,description:42}),[],null)?.description).toContain("计划");
+    expect(parsePlan(JSON.stringify({...base,description:"我会先……"}),[],null)?.description).toBeUndefined();
+    expect(parsePlan(JSON.stringify(base),[],null)?.description).toBeUndefined();
 });
 
 it("keeps 2–5 short distinct answers with a question, and none without one",()=>{
