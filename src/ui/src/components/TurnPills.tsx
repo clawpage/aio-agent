@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import type { Task } from "../types";
+import { t } from "../i18n";
 
 export interface PillGroup {
   key: string;
@@ -65,7 +66,7 @@ export function TurnPills({ groups, onJump }: { groups: PillGroup[]; onJump: (ta
         <button key={g.key} type="button" ref={(n) => { if (n) pills.current.set(g.key, n); else pills.current.delete(g.key); }}
           className={`turn-pill ${g.tone}${open === g.key && many ? " open" : ""}`}
           aria-haspopup={many ? "menu" : undefined} aria-expanded={many ? open === g.key : undefined}
-          title={many ? "选择要查看的任务" : "查看这个任务"} onClick={() => pick(g)}>
+          title={many ? t.feed.pills.pickTask : t.feed.pills.viewTask} onClick={() => pick(g)}>
           {g.label}
           {many && <svg className="turn-pill-chevron" viewBox="0 0 12 12" aria-hidden="true"><path d="M3 4.5 6 7.5 9 4.5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/></svg>}
         </button>

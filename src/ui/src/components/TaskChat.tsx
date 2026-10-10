@@ -17,9 +17,10 @@ import { TurnPills } from "./TurnPills";
 import { FormCard } from "./FormCard";
 import { VoiceButton } from "./VoiceInput";
 import type {TaskFeed} from '../taskStatus';
+import { t as i18n } from "../i18n";
 const terminal = new Set(["completed", "failed", "interrupted", "unknown"]);
 /** What the dispatcher does with every message; shown in turn while it decides, not as live progress. */
-const DISPATCH_HINTS = ["理解你的需求", "对照进行中和历史任务", "决定新开任务还是补充到已有任务"];
+const DISPATCH_HINTS = i18n.feed.dispatchHints;
 const HINT_MS = 1800;
 function DispatchHint() {
     const [i, setI] = useState(0);
@@ -37,11 +38,11 @@ function turnOf(t: Task): "you" | "ai" | "err" {
 }
 /** What a task waiting for the person wants, in a word or two. */
 function waitingLabel(t: Task): string {
-    if (t.approvals) return "等你确认";
-    if (t.browser?.request) return "等你操作浏览器";
-    return t.status === "blocked" ? "需要补充" : "等你补充";
+    if (t.approvals) return i18n.feed.waiting.approvals;
+    if (t.browser?.request) return i18n.feed.waiting.browser;
+    return t.status === "blocked" ? i18n.feed.waiting.blocked : i18n.feed.waiting.input;
 }
-const labels: Record<string, string> = { planning: "正在分配", needs_input: "等待你补充", planning_failed: "分配失败", waiting: "等待依赖或资源", queued: "排队中", running: "在办", stopping: "正在停止…", completed: "已完成", failed: "执行失败", interrupted: "已停止", unknown: "结果待核对", blocked: "需要补充" };
+const labels: Record<string, string> = i18n.feed.status;
 /** A message shown the moment it is sent, until the server's task takes its place. */
 interface Outgoing {
     id: string;
@@ -240,7 +241,7 @@ export function TaskChat({ onDetails, onOpenLink, onOpenFileInBrowser, onExpired
             .then(a => a ?? api.upload(u.file).then(r => { uploads.current.set(u.id, Promise.resolve(r)); return r; }, () => null))));
         const failed = o.uploads.filter((_, i) => !results[i]);
         if (failed.length) {
-            setOutboxNow(old => old.map(x => x.id === id ? { ...x, state: "failed", error: `${failed.map(f => f.name).join("、")} 没传上去` } : x));
+            setOutboxNow(old => old.map(x => x.id === id ? { ...x, state: "failed", error: i18n.feed.errors.notUploaded(failed.map(f => f.name).join(i18n.chat.listSeparator)) } : x));
             return;
         }
         try {
@@ -316,7 +317,7 @@ export function TaskChat({ onDetails, onOpenLink, onOpenFileInBrowser, onExpired
         }
         catch (err) {
             setChoosing(old => { const next = { ...old }; delete next[key]; return next; });
-            setError(`${err instanceof Error ? err.message : String(err)}（可以再点一次）`);
+            setError(i18n.feed.errors.retry(err instanceof Error ? err.message : String(err)));
         }
     };
     /** The reply a finished task got after it asked, if any: its answers are then closed. */
@@ -335,7 +336,7 @@ export function TaskChat({ onDetails, onOpenLink, onOpenFileInBrowser, onExpired
                 return a as Attachment | null;
             }, err => {
                 tray.settle(item, null);
-                if (!handed.current.has(item.id)) { setError(`${item.name}：${err instanceof Error ? err.message : "上传失败"}`); uploads.current.delete(item.id); }
+                if (!handed.current.has(item.id)) { setError(i18n.feed.errors.upload(item.name, err instanceof Error ? err.message : i18n.feed.errors.uploadFailed)); uploads.current.delete(item.id); }
                 return null;
             });
             uploadChain.current = done;
@@ -412,83 +413,83 @@ export function TaskChat({ onDetails, onOpenLink, onOpenFileInBrowser, onExpired
           {(() => {
             const summary = <>{t.status === "planning"
               ? <span className="dispatch-glyph" aria-hidden="true"><i/><i/><i/></span>
-              : <span className={`dot ${t.approvals || t.browser?.request ? "warn" : ""}`}/>}<span className="task-progress-label" key={t.status}>{t.approvals ? "需要你确认" : t.browser?.request && t.status === "running" ? "需要你操作浏览器" : t.waitReason?.label ?? labels[t.status] ?? t.status}</span><span className="task-progress-title">{t.title}</span></>;
+              : <span className={`dot ${t.approvals || t.browser?.request ? "warn" : ""}`}/>}<span className="task-progress-label" key={t.status}>{t.approvals ? i18n.feed.progress.needsConfirm : t.browser?.request && t.status === "running" ? i18n.feed.progress.needsBrowser : t.waitReason?.label ?? labels[t.status] ?? t.status}</span><span className="task-progress-title">{t.title}</span></>;
             // Still being dispatched (or dispatch failed): nothing has run yet, so there are no details to open.
             return t.status === "planning" || t.status === "planning_failed"
               ? <div className="task-summary">{summary}</div>
-              : <button className="task-summary" onClick={() => onDetails(t)} aria-label={`展开任务：${t.title}`}>{summary}<span aria-hidden>›</span></button>;
+              : <button className="task-summary" onClick={() => onDetails(t)} aria-label={i18n.feed.progress.expand(t.title)}>{summary}<span aria-hidden>›</span></button>;
           })()}
           {t.status === "planning" && <DispatchHint/>}
           {t.waitReason && <p className="task-intro task-wait-reason">{t.waitReason.message}</p>}
           {/* What the executor wrote before its question (a draft to review, what it found so far): the question is about it. */}
           {t.status === "needs_input" && t.result && <div className="task-question-context"><MessagePreview title={t.title}><Markdown source={t.result} onOpenLink={onOpenLink} onOpenFile={setPreview}/><MessageFileCards text={t.result} onOpen={setPreview} onOpenLink={onOpenLink}/></MessagePreview></div>}
-          {t.status === "needs_input" && t.clarification && <div className="task-question" role="status" aria-label="需要你补充">
-            <div className="task-question-heading"><span aria-hidden="true">?</span><strong>需要你补充</strong></div>
+          {t.status === "needs_input" && t.clarification && <div className="task-question" role="status" aria-label={i18n.feed.question.label}>
+            <div className="task-question-heading"><span aria-hidden="true">?</span><strong>{i18n.feed.question.label}</strong></div>
             <p>{t.clarification}</p>
             {t.form ? <FormCard spec={t.form} embedded sent={choosing[`${t.id}:${t.revision}`] ?? null} onSubmit={text => void choose(t, text)}/>
               : t.options?.length ? <ChoiceList options={t.options} chosen={choosing[`${t.id}:${t.revision}`] ?? null} onChoose={option => void choose(t, option)}/> : null}
-            <span className="task-question-hint">{t.form ? "填好后提交，或直接在下方输入" : t.options?.length ? "点选一个，或直接在下方输入" : "直接在下方输入回复即可"}</span>
+            <span className="task-question-hint">{t.form ? i18n.feed.question.hintForm : t.options?.length ? i18n.feed.question.hintOptions : i18n.feed.question.hintText}</span>
           </div>}
           {!!t.messages?.length && ["running", "stopping"].includes(t.status) && <div className="task-intro task-messages">{t.messages.map((m, i) => <Markdown key={i} source={m} onOpenLink={onOpenLink} onOpenFile={setPreview}/>)}</div>}
           {ownsBrowser(t) && <TaskBrowser task={t} onReveal={onRevealBrowser}/>}
-          {t.phone && !t.mergedInto && ["needs_input", "queued", "running", "stopping"].includes(t.status) && <TaskPhone task={t} onDone={() => void choose(t, "我已在手机上操作完成，请继续。")}/>}
+          {t.phone && !t.mergedInto && ["needs_input", "queued", "running", "stopping"].includes(t.status) && <TaskPhone task={t} onDone={() => void choose(t, i18n.feed.phoneDone)}/>}
           <TaskDuration task={t} now={now}/>
           {t.error && <p className="tiny">{t.error}</p>}
-          <div className="task-actions"><button className="ghost tiny" onClick={() => quoteTask(t)} aria-label={`引用任务：${t.title}`}>引用任务</button>{t.status === "planning_failed" ? <button className="ghost tiny" onClick={() => void act(() => api.retryTaskPlanning(t.id))}>重试分配</button> : t.status === "blocked" ? null : <button className="ghost tiny" disabled={t.status === "stopping"} onClick={() => void act(() => api.stopTask(t.id))}>停止该任务</button>}</div>
+          <div className="task-actions"><button className="ghost tiny" onClick={() => quoteTask(t)} aria-label={i18n.feed.actions.quoteLabel(t.title)}>{i18n.feed.actions.quote}</button>{t.status === "planning_failed" ? <button className="ghost tiny" onClick={() => void act(() => api.retryTaskPlanning(t.id))}>{i18n.feed.actions.retryPlanning}</button> : t.status === "blocked" ? null : <button className="ghost tiny" disabled={t.status === "stopping"} onClick={() => void act(() => api.stopTask(t.id))}>{i18n.feed.actions.stop}</button>}</div>
         </div>;
     const feed = tasks.flatMap(t => [{ task: t, report: false, at: t.createdAt }, ...(!t.mergedInto && terminal.has(t.status) ? [{ task: t, report: true, at: t.completedAt ?? t.createdAt }] : [])])
         .sort((a, b) => a.at - b.at || Number(a.report) - Number(b.report) || a.task.id.localeCompare(b.task.id));
     return <section className="chat task-chat">
-    <header className="chat-head"><div className="chat-title"><h2>主会话</h2><span className={`dot ${connected ? "ok" : "warn"}`}/><span className="chat-sub">{active.length || awaiting.length
+    <header className="chat-head"><div className="chat-title"><h2>{i18n.feed.head.title}</h2><span className={`dot ${connected ? "ok" : "warn"}`}/><span className="chat-sub">{active.length || awaiting.length
         ? <TurnPills onJump={showWaiting} groups={[
-            { key: "input", tone: "you", label: `${awaiting.length} 件等你补充`, tasks: awaiting, state: waitingLabel },
-            { key: "browser", tone: "you", label: `${browserAsks.length} 件等你操作浏览器`, tasks: browserAsks, state: waitingLabel },
-            { key: "ai", tone: "ai", label: `${active.length - browserAsks.length} 件在办`, tasks: active.filter(t => !browserAsks.includes(t)), state: t => labels[t.status] ?? t.status },
+            { key: "input", tone: "you", label: i18n.feed.head.awaitingInput(awaiting.length), tasks: awaiting, state: waitingLabel },
+            { key: "browser", tone: "you", label: i18n.feed.head.awaitingBrowser(browserAsks.length), tasks: browserAsks, state: waitingLabel },
+            { key: "ai", tone: "ai", label: i18n.feed.head.active(active.length - browserAsks.length), tasks: active.filter(t => !browserAsks.includes(t)), state: t => labels[t.status] ?? t.status },
           ]}/>
-        : connected ? "随时可以交给我" : "正在连接…"}</span></div></header>
+        : connected ? i18n.feed.head.idle : i18n.feed.head.connecting}</span></div></header>
     <div className={`chat-scroll task-feed${bubbles ? " has-needs-you" : ""}${arrival === "entering" ? " entering" : ""}`} ref={scroll} onScroll={e => onFeedScroll(e.currentTarget)} aria-busy={arrival === "loading" || undefined}>
       {arrival === "loading" && <div className="feed-skeleton" aria-hidden="true"><i className="sk-user"/><i className="sk-reply"><b/><b/><b/></i><i className="sk-user short"/><i className="sk-reply"><b/><b/></i></div>}
       {nextBefore && <div className="feed-older" ref={olderTop}>{olderState === "failed"
-        ? <button className="ghost tiny" onClick={() => void loadOlder()}>更早的任务没加载出来，点此重试</button>
-        : <span className="muted tiny">{olderState === "loading" ? "正在加载更早的任务…" : ""}</span>}</div>}
-      {!tasks.length && !outbox.length && arrival !== "loading" && <div className="empty"><h3>把事情交给我</h3><p>可以接着发不同任务。过程会收拢，完成后在这里回报。</p></div>}
+        ? <button className="ghost tiny" onClick={() => void loadOlder()}>{i18n.feed.older.retry}</button>
+        : <span className="muted tiny">{olderState === "loading" ? i18n.feed.older.loading : ""}</span>}</div>}
+      {!tasks.length && !outbox.length && arrival !== "loading" && <div className="empty"><h3>{i18n.feed.empty.title}</h3><p>{i18n.feed.empty.body}</p></div>}
       {feed.map(({ task: t, report }) => report ? <article className={`msg assistant task-report ${t.status}`} key={`${t.id}:report`} data-task-id={t.id}>
-        <div className="task-report-heading"><span>{t.title}</span>{t.schedule && <span className="schedule-badge">定时 · {t.schedule.rule}</span>}<span className="muted tiny">{labels[t.status]}</span></div>
-        <MessagePreview title={t.title}><Markdown source={t.result || (t.status === "completed" ? "任务已结束，但没有返回文字结果，请打开详情核对。" : t.error || labels[t.status] || t.status)} onOpenLink={onOpenLink} onOpenFile={setPreview} choices={{ onChoose: option => void choose(t, option), chosen: choosing[`${t.id}:${t.revision}`] ?? replyTo(t)?.text ?? null }}/>{t.result && <MessageFileCards text={t.result} onOpen={setPreview} onOpenLink={onOpenLink}/>}{t.error && t.result && <p className="error">{t.error}</p>}</MessagePreview>
+        <div className="task-report-heading"><span>{t.title}</span>{t.schedule && <span className="schedule-badge">{i18n.feed.report.schedule(t.schedule.rule)}</span>}<span className="muted tiny">{labels[t.status]}</span></div>
+        <MessagePreview title={t.title}><Markdown source={t.result || (t.status === "completed" ? i18n.feed.report.noResult : t.error || labels[t.status] || t.status)} onOpenLink={onOpenLink} onOpenFile={setPreview} choices={{ onChoose: option => void choose(t, option), chosen: choosing[`${t.id}:${t.revision}`] ?? replyTo(t)?.text ?? null }}/>{t.result && <MessageFileCards text={t.result} onOpen={setPreview} onOpenLink={onOpenLink}/>}{t.error && t.result && <p className="error">{t.error}</p>}</MessagePreview>
         {ownsBrowser(t) && <TaskBrowser task={t} onReveal={onRevealBrowser}/>}
         <div className="message-meta"><MessageTime at={t.completedAt} now={now}/><TaskDuration task={t} now={now}/></div>
-        <div className="task-actions"><button className="ghost tiny" onClick={() => quoteTask(t)} aria-label={`引用任务：${t.title}`}>引用任务</button><button className="ghost tiny" onClick={() => onDetails(t)}>查看过程</button></div>
+        <div className="task-actions"><button className="ghost tiny" onClick={() => quoteTask(t)} aria-label={i18n.feed.actions.quoteLabel(t.title)}>{i18n.feed.actions.quote}</button><button className="ghost tiny" onClick={() => onDetails(t)}>{i18n.feed.actions.details}</button></div>
       </article> : <div className={`task-entry${adopted.current.has(t.id) ? " adopted" : ""}`} key={t.id} data-task-id={t.id}>
-        {t.schedule ? <div className="schedule-run-note" role="note">定时任务「{t.schedule.title}」自动运行 · {t.schedule.rule} · <MessageTime at={t.createdAt} now={now}/></div> : <article className="msg user"><MessagePreview title="用户消息" user>{t.relatedTaskId && <small className="muted">引用：{t.relatedTaskTitle ?? tasks.find(task => task.id === t.relatedTaskId)?.title ?? "此前任务"}</small>}<p>{t.text}</p>{t.attachments.length > 0 && <AttachmentCards attachments={t.attachments} onOpen={setPreview}/>}<div className="message-meta"><MessageTime at={t.createdAt} now={now}/></div></MessagePreview></article>}
-        {t.mergedInto && <div className="task-supplement"><button className="ghost tiny" onClick={() => onDetails(t)}>{t.status === "merged" ? "已补充到" : t.status === "merging" || t.status === "steering" ? "正在补充到" : t.status === "interrupted" ? "已取消补充" : "补充需要核对"}：{t.mergedTitle}</button>{t.waitReason && <p className="tiny">{t.waitReason.message}</p>}{t.error && <p className="tiny error">{t.error}</p>}</div>}
-        {debug && <div className="task-actions debug-actions"><button className="ghost tiny" onClick={() => setDispatchLogFor(t.id)} aria-label={`派单日志：${t.title}`}>派单日志</button></div>}
+        {t.schedule ? <div className="schedule-run-note" role="note">{i18n.feed.scheduleRun(t.schedule.title, t.schedule.rule)}<MessageTime at={t.createdAt} now={now}/></div> : <article className="msg user"><MessagePreview title={i18n.feed.userMessage} user>{t.relatedTaskId && <small className="muted">{i18n.feed.quoted(t.relatedTaskTitle ?? tasks.find(task => task.id === t.relatedTaskId)?.title ?? i18n.feed.earlierTask)}</small>}<p>{t.text}</p>{t.attachments.length > 0 && <AttachmentCards attachments={t.attachments} onOpen={setPreview}/>}<div className="message-meta"><MessageTime at={t.createdAt} now={now}/></div></MessagePreview></article>}
+        {t.mergedInto && <div className="task-supplement"><button className="ghost tiny" onClick={() => onDetails(t)}>{(t.status === "merged" ? i18n.feed.supplement.merged : t.status === "merging" || t.status === "steering" ? i18n.feed.supplement.merging : t.status === "interrupted" ? i18n.feed.supplement.cancelled : i18n.feed.supplement.check)(t.mergedTitle ?? "")}</button>{t.waitReason && <p className="tiny">{t.waitReason.message}</p>}{t.error && <p className="tiny error">{t.error}</p>}</div>}
+        {debug && <div className="task-actions debug-actions"><button className="ghost tiny" onClick={() => setDispatchLogFor(t.id)} aria-label={i18n.feed.actions.dispatchLogLabel(t.title)}>{i18n.feed.actions.dispatchLog}</button></div>}
         {progressAt.get(t.id) && renderProgress(progressAt.get(t.id)!)}
       </div>)}
       {outbox.filter(o => !tasks.some(t => t.clientMessageId === o.id)).map(o => <div className="task-entry outgoing" key={o.id} data-outgoing={o.state}>
-        <article className="msg user"><MessagePreview title="用户消息" user>
-          {o.reference && <small className="muted">引用：{o.reference.title}</small>}
+        <article className="msg user"><MessagePreview title={i18n.feed.userMessage} user>
+          {o.reference && <small className="muted">{i18n.feed.quoted(o.reference.title)}</small>}
           {o.text && <p>{o.text}</p>}
           {o.attachments.length > 0 && <AttachmentCards attachments={o.attachments} onOpen={setPreview}/>}
-          {o.uploads.length > 0 && <div className="outgoing-uploads" aria-label="附件上传中">{o.uploads.map(u => u.preview
+          {o.uploads.length > 0 && <div className="outgoing-uploads" aria-label={i18n.feed.outgoing.uploading}>{o.uploads.map(u => u.preview
             ? <span className="outgoing-upload image" key={u.id}><img src={u.preview} alt=""/>{o.state === "sending" && <span className="tray-spinner" aria-hidden="true"/>}</span>
             : <span className="outgoing-upload file" key={u.id}>{u.name}{o.state === "sending" && <span className="tray-spinner" aria-hidden="true"/>}</span>)}</div>}
-          <div className="message-meta">{o.state === "sending" ? <span className="outgoing-state">发送中…</span> : <span className="outgoing-state failed">未发送</span>}</div>
+          <div className="message-meta">{o.state === "sending" ? <span className="outgoing-state">{i18n.feed.outgoing.sending}</span> : <span className="outgoing-state failed">{i18n.feed.outgoing.unsent}</span>}</div>
         </MessagePreview></article>
         {o.state === "failed"
-          ? <div className="outgoing-failed" role="alert"><span>{o.error ?? "发送失败"}</span><button type="button" className="ghost tiny" onClick={() => retry(o.id)}>重试</button><button type="button" className="ghost tiny" onClick={() => edit(o.id)}>改一改</button></div>
+          ? <div className="outgoing-failed" role="alert"><span>{o.error ?? i18n.feed.outgoing.failed}</span><button type="button" className="ghost tiny" onClick={() => retry(o.id)}>{i18n.feed.outgoing.retry}</button><button type="button" className="ghost tiny" onClick={() => edit(o.id)}>{i18n.feed.outgoing.edit}</button></div>
           : <div className="task-progress turn-ai active planning"><div className="task-summary"><span className="dispatch-glyph" aria-hidden="true"><i/><i/><i/></span><span className="task-progress-label">{labels.planning}</span></div><DispatchHint/></div>}
       </div>)}
     </div>
-    <div className="feed-latest-anchor">{waiting.length > 0 && <div className="needs-you" role="group" aria-label="等你处理的任务">{waiting.map(t => <button type="button" key={t.id} className="needs-you-bubble" onClick={() => showWaiting(t.id)} aria-label={`${waitingLabel(t)}：${t.title}，点击查看`}><span className="needs-you-dot" aria-hidden="true"/><span className="needs-you-kind">{waitingLabel(t)}</span><span className="needs-you-title">{t.title}</span></button>)}</div>}<button type="button" className={`feed-latest${away ? " show" : ""}`} aria-label="回到最新消息" title="回到最新消息" aria-hidden={!away} tabIndex={away ? 0 : -1} onClick={toLatest}><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 5v14M6 13l6 6 6-6"/></svg></button></div>
-    {error && <div className="banner error" role="alert">{error}<button onClick={() => setError(null)}>关闭</button></div>}
+    <div className="feed-latest-anchor">{waiting.length > 0 && <div className="needs-you" role="group" aria-label={i18n.feed.needsYou.label}>{waiting.map(t => <button type="button" key={t.id} className="needs-you-bubble" onClick={() => showWaiting(t.id)} aria-label={i18n.feed.needsYou.bubble(waitingLabel(t), t.title)}><span className="needs-you-dot" aria-hidden="true"/><span className="needs-you-kind">{waitingLabel(t)}</span><span className="needs-you-title">{t.title}</span></button>)}</div>}<button type="button" className={`feed-latest${away ? " show" : ""}`} aria-label={i18n.feed.toLatest} title={i18n.feed.toLatest} aria-hidden={!away} tabIndex={away ? 0 : -1} onClick={toLatest}><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 5v14M6 13l6 6 6-6"/></svg></button></div>
+    {error && <div className="banner error" role="alert">{error}<button onClick={() => setError(null)}>{i18n.chat.close}</button></div>}
     <div className={`composer${draft || attachments.length || reference || uploading ? " has-content" : ""}`}>
-      {reference && <div className="task-reference" role="status"><div><span className="muted tiny">引用任务</span><strong title={reference.title}>{reference.title}</strong></div><button type="button" className="ghost" aria-label="取消引用任务" onClick={() => { setReference(null); input.current?.focus(); }}><ComposerIcon kind="close"/></button></div>}
+      {reference && <div className="task-reference" role="status"><div><span className="muted tiny">{i18n.feed.reference.label}</span><strong title={reference.title}>{reference.title}</strong></div><button type="button" className="ghost" aria-label={i18n.feed.reference.cancel} onClick={() => { setReference(null); input.current?.focus(); }}><ComposerIcon kind="close"/></button></div>}
       <ComposerAttachments items={attachments} pending={tray.pending} previews={tray.previews} onRemove={path => { setAttachments(old => old.filter(x => x.path !== path)); tray.drop(path); }}/>
-      <textarea ref={input} rows={2} value={draft} aria-label="消息" placeholder={reference ? "继续补充这个任务…" : "交给我一个任务…"} onChange={e => setDraft(e.target.value)} onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+      <textarea ref={input} rows={2} value={draft} aria-label={i18n.chat.composer.message} placeholder={reference ? i18n.feed.composer.placeholderReference : i18n.feed.composer.placeholder} onChange={e => setDraft(e.target.value)} onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
         e.preventDefault();
         send();
     } }}/>
-      <div className="composer-row"><label className="file-button"><ComposerIcon kind={uploading ? "busy" : "attach"}/><span className="composer-button-label">{uploading ? "上传中…" : "附件"}</span><input type="file" multiple className="file-input" aria-label="添加附件" data-testid="attachment-input" onChange={e => { pick(e.target.files); e.target.value = ""; }}/></label><VoiceButton disabled={false} onError={setError} onText={heard => { setDraft(old => old + (/[A-Za-z0-9]$/.test(old) && /^[A-Za-z0-9]/.test(heard) ? " " : "") + heard); input.current?.focus(); }}/><span className="spacer"/><button className="primary" disabled={!draft.trim() && !attachments.length && !uploading} onClick={send} aria-label="发送" title="发送"><ComposerIcon kind="send"/><span className="composer-button-label">发送</span></button></div>
+      <div className="composer-row"><label className="file-button"><ComposerIcon kind={uploading ? "busy" : "attach"}/><span className="composer-button-label">{uploading ? i18n.chat.composer.uploading : i18n.chat.composer.attach}</span><input type="file" multiple className="file-input" aria-label={i18n.chat.composer.addAttachment} data-testid="attachment-input" onChange={e => { pick(e.target.files); e.target.value = ""; }}/></label><VoiceButton disabled={false} onError={setError} onText={heard => { setDraft(old => old + (/[A-Za-z0-9]$/.test(old) && /^[A-Za-z0-9]/.test(heard) ? " " : "") + heard); input.current?.focus(); }}/><span className="spacer"/><button className="primary" disabled={!draft.trim() && !attachments.length && !uploading} onClick={send} aria-label={i18n.chat.composer.send} title={i18n.chat.composer.send}><ComposerIcon kind="send"/><span className="composer-button-label">{i18n.chat.composer.send}</span></button></div>
     </div>
     <PopupPresence>{preview && <FilePreview path={preview} onClose={() => setPreview(null)} onOpenLink={onOpenLink} onOpenInBrowser={onOpenFileInBrowser}/>}</PopupPresence>
     <PopupPresence>{debug && dispatchLogFor && <DispatchLog taskId={dispatchLogFor} onClose={() => setDispatchLogFor(null)}/>}</PopupPresence>

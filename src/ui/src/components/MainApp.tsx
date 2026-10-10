@@ -27,6 +27,7 @@ import { PushToggle } from "./PushToggle";
 import {taskStatusLabels,type TaskFeed} from '../taskStatus';
 import { isSandboxLink } from "../sandboxLink";
 import { openDeviceBrowser } from "../deviceBrowser";
+import { locale, setLocale, t } from "../i18n";
 /** One owner-facing inbox; executor conversations are implementation details. */
 /** The site a link goes to, named on the opening card. */
 function hostOf(url: string): string {
@@ -116,7 +117,7 @@ export function MainApp() {
     }
     catch (err) {
         if (request !== detailRequest.current) return false;
-        setNotice(known ? (err instanceof Error ? err.message : String(err)) : "没有找到这个任务，可能已经删除了。");
+        setNotice(known ? (err instanceof Error ? err.message : String(err)) : t.app.detail.taskNotFound);
         return false;
     } }, []);
     /** Show what a route names, without touching the address (it already says so, or the caller sets it). */
@@ -146,7 +147,7 @@ export function MainApp() {
         window.addEventListener("popstate", back);
         return () => window.removeEventListener("popstate", back);
     }, [auth, username, role, applyRoute]);
-    const expired = useCallback(() => { setAuth(false); setMenuOpen(false); setNotice("登录已过期，请重新登录。"); }, []);
+    const expired = useCallback(() => { setAuth(false); setMenuOpen(false); setNotice(t.auth.sessionExpired); }, []);
     const check = useCallback(async () => { try {
         // A stuck request falls back to the login screen, which keeps checking and restores the session.
         const session = await api.session(AbortSignal.timeout(10000));
@@ -233,7 +234,7 @@ export function MainApp() {
             else revealBrowser();
         }
         catch (err) {
-            if (timedOut) notify("打开超时：沙箱浏览器暂时没有响应，请稍后重试。");
+            if (timedOut) notify(t.app.opening.timeout);
             else if (!controller.signal.aborted) notify(err instanceof Error ? err.message : String(err));
         }
         finally {
@@ -244,9 +245,9 @@ export function MainApp() {
     }, [notify, revealBrowser]);
     const openLink = useCallback((url: string) => {
         if (!isSandboxLink(url)) { openDeviceBrowser(url); return; }
-        return openTab("正在打开链接", hostOf(url), signal => api.openBrowserTab(url, signal));
+        return openTab(t.app.opening.link, hostOf(url), signal => api.openBrowserTab(url, signal));
     }, [openTab]);
-    const openFileInBrowser = useCallback((path: string) => openTab("正在打开页面", path.split("/").pop() || path, signal => api.openBrowserFile(path, signal)), [openTab]);
+    const openFileInBrowser = useCallback((path: string) => openTab(t.app.opening.page, path.split("/").pop() || path, signal => api.openBrowserFile(path, signal)), [openTab]);
     const closeLink = useCallback((visited: string[]) => {
         setLinkTab(null);
         for (const id of visited) void api.personBrowserClose(id).catch(() => undefined);
@@ -277,41 +278,41 @@ export function MainApp() {
         notify(err instanceof Error ? err.message : String(err));
     } };
     if (auth === null)
-        return <div className="boot boot-loading" role="status"><BrandMark size={44}/><span className="boot-label">加载中…</span></div>;
+        return <div className="boot boot-loading" role="status"><BrandMark size={44}/><span className="boot-label">{t.common.loading}</span></div>;
     if (!auth)
         return <Login notice={notice} onSuccess={check} username={pathUser() ?? undefined}/>;
     if (foreign && username)
         return <div className="boot foreign-account" role="alert">
-          <h2>这是 {foreign} 的页面</h2>
-          <p>当前登录的是 {username}。同一浏览器一次只能登录一个账号。</p>
+          <h2>{t.auth.foreign.title(foreign)}</h2>
+          <p>{t.auth.foreign.body(username)}</p>
           <div className="foreign-account-actions">
-            <button className="primary" onClick={() => void logout(true)}>退出并登录 {foreign}</button>
-            <button className="ghost" onClick={() => { history.replaceState(null, "", homePath(username)); setForeign(null); applyRoute({ view: "main" }, { owner: role === "owner", username }); }}>回到我的页面</button>
+            <button className="primary" onClick={() => void logout(true)}>{t.auth.foreign.switchTo(foreign)}</button>
+            <button className="ghost" onClick={() => { history.replaceState(null, "", homePath(username)); setForeign(null); applyRoute({ view: "main" }, { owner: role === "owner", username }); }}>{t.auth.foreign.backHome}</button>
           </div>
         </div>;
     // An environment that is starting or waking says nothing: the wait is part of the first request. Only a start that failed is reported.
     const startFailed = status && !status.agent.sessionReady && !status.sandbox.idle ? status.sandbox.setupError ?? null : null;
     return <div className="app main-inbox-app">
-    <button className="mobile-menu-button ghost" ref={menuButton} aria-label="打开导航" aria-expanded={menuOpen} aria-controls="main-navigation" onClick={() => setMenuOpen(true)}><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
+    <button className="mobile-menu-button ghost" ref={menuButton} aria-label={t.nav.open} aria-expanded={menuOpen} aria-controls="main-navigation" onClick={() => setMenuOpen(true)}><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
     <PopupPresence animate={mobile} onExited={() => menuButton.current?.focus()}>
     {(!mobile || menuOpen) && <>
     {mobile && <PopupSurface className="mobile-menu-backdrop" onClick={closeMenu} aria-hidden="true"/>}
-    <PopupSurface as="aside" ref={sidebar} id="main-navigation" className={`sidebar ${menuOpen ? "show-mobile" : ""}`} role={mobile && menuOpen ? "dialog" : undefined} aria-modal={mobile && menuOpen ? true : undefined} aria-label="导航" aria-hidden={mobile && !menuOpen ? true : undefined} inert={mobile && !menuOpen}>
-      <button className="mobile-menu-close ghost" aria-label="关闭导航" onClick={closeMenu}><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden><path d="M6 6l12 12M18 6L6 18"/></svg></button><div className="brand"><BrandMark/><div><strong>一站</strong><span className="muted tiny">什么事情都在这里一站解决吧</span></div></div>
-      <button className={`ghost block ${view === "main" && !workspace ? "active" : ""}`} aria-current={view === "main" && !workspace ? "page" : undefined} onClick={() => navigate({ view: "main" })}><NavIcon name="chat"/>主会话</button>
-      <button className={`ghost block ${view === "tasks" && !workspace ? "active" : ""}`} aria-current={view === "tasks" && !workspace ? "page" : undefined} onClick={() => navigate({ view: "tasks" })}><NavIcon name="tasks"/>任务列表</button>
-      <button className={`ghost block ${view === "schedules" && !workspace ? "active" : ""}`} aria-current={view === "schedules" && !workspace ? "page" : undefined} onClick={() => navigate({ view: "schedules" })}><NavIcon name="schedule"/>定时任务</button>
-      <button className={`ghost block ${view === "vault" && !workspace ? "active" : ""}`} aria-current={view === "vault" && !workspace ? "page" : undefined} onClick={() => navigate({ view: "vault" })}><NavIcon name="vault"/>密码器</button>
+    <PopupSurface as="aside" ref={sidebar} id="main-navigation" className={`sidebar ${menuOpen ? "show-mobile" : ""}`} role={mobile && menuOpen ? "dialog" : undefined} aria-modal={mobile && menuOpen ? true : undefined} aria-label={t.nav.label} aria-hidden={mobile && !menuOpen ? true : undefined} inert={mobile && !menuOpen}>
+      <button className="mobile-menu-close ghost" aria-label={t.nav.close} onClick={closeMenu}><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden><path d="M6 6l12 12M18 6L6 18"/></svg></button><div className="brand"><BrandMark/><div><strong>{t.app.brand.name}</strong><span className="muted tiny">{t.app.brand.tagline}</span></div></div>
+      <button className={`ghost block ${view === "main" && !workspace ? "active" : ""}`} aria-current={view === "main" && !workspace ? "page" : undefined} onClick={() => navigate({ view: "main" })}><NavIcon name="chat"/>{t.nav.main}</button>
+      <button className={`ghost block ${view === "tasks" && !workspace ? "active" : ""}`} aria-current={view === "tasks" && !workspace ? "page" : undefined} onClick={() => navigate({ view: "tasks" })}><NavIcon name="tasks"/>{t.nav.tasks}</button>
+      <button className={`ghost block ${view === "schedules" && !workspace ? "active" : ""}`} aria-current={view === "schedules" && !workspace ? "page" : undefined} onClick={() => navigate({ view: "schedules" })}><NavIcon name="schedule"/>{t.nav.schedules}</button>
+      <button className={`ghost block ${view === "vault" && !workspace ? "active" : ""}`} aria-current={view === "vault" && !workspace ? "page" : undefined} onClick={() => navigate({ view: "vault" })}><NavIcon name="vault"/>{t.nav.vault}</button>
       {role === 'owner' && gadgetAccount && <button className={`ghost block ${view === 'gadget' && !workspace ? 'active' : ''}`} aria-current={view === "gadget" && !workspace ? "page" : undefined} onClick={() => navigate({ view: "gadget" })}><NavIcon name="gadget"/>{accountLabel(gadgetAccount)}</button>}
-      {role === 'owner' && <button className={`ghost block ${view === 'usage' && !workspace ? 'active' : ''}`} aria-current={view === "usage" && !workspace ? "page" : undefined} onClick={() => navigate({ view: "usage" })}><NavIcon name="usage"/>用量看板</button>}
-      <button className={`ghost block ${workspace ? "active" : ""}`} aria-current={workspace ? "page" : undefined} onClick={() => { closeMenu(); openWorkspace(); }}><NavIcon name="workspace"/>工作区</button>
-      <div className="sidebar-foot"><span className="sidebar-status muted tiny"><span className={`dot ${!status || startFailed ? "warn" : "ok"}`}/>{!status || startFailed ? "正在连接智能体" : "智能体在线"}</span><PushToggle/><button className="ghost block" onClick={() => setTheme(t => t === "dark" ? "light" : "dark")}><NavIcon name={theme === "dark" ? "sun" : "moon"}/>{theme === "dark" ? "浅色模式" : "深色模式"}</button>{role === "owner" && <button className={`ghost block ${view === "settings" && !workspace ? "active" : ""}`} aria-current={view === "settings" && !workspace ? "page" : undefined} onClick={() => navigate({ view: "settings" })}><NavIcon name="settings"/>配置</button>}<button className="ghost block" onClick={() => void logout()}><NavIcon name="logout"/>退出登录</button></div>
+      {role === 'owner' && <button className={`ghost block ${view === 'usage' && !workspace ? 'active' : ''}`} aria-current={view === "usage" && !workspace ? "page" : undefined} onClick={() => navigate({ view: "usage" })}><NavIcon name="usage"/>{t.nav.usage}</button>}
+      <button className={`ghost block ${workspace ? "active" : ""}`} aria-current={workspace ? "page" : undefined} onClick={() => { closeMenu(); openWorkspace(); }}><NavIcon name="workspace"/>{t.nav.workspace}</button>
+      <div className="sidebar-foot"><span className="sidebar-status muted tiny"><span className={`dot ${!status || startFailed ? "warn" : "ok"}`}/>{!status || startFailed ? t.nav.agentConnecting : t.nav.agentOnline}</span><PushToggle/><button className="ghost block" onClick={() => setTheme(t => t === "dark" ? "light" : "dark")}><NavIcon name={theme === "dark" ? "sun" : "moon"}/>{theme === "dark" ? t.nav.lightMode : t.nav.darkMode}</button><button className="ghost block" lang={locale === "en" ? "zh-CN" : "en"} onClick={() => setLocale(locale === "en" ? "zh-CN" : "en")}><NavIcon name="language"/>{t.nav.otherLanguage}</button>{role === "owner" && <button className={`ghost block ${view === "settings" && !workspace ? "active" : ""}`} aria-current={view === "settings" && !workspace ? "page" : undefined} onClick={() => navigate({ view: "settings" })}><NavIcon name="settings"/>{t.nav.settings}</button>}<button className="ghost block" onClick={() => void logout()}><NavIcon name="logout"/>{t.nav.logout}</button></div>
     </PopupSurface>
     </>}
     </PopupPresence>
     <main className="main" inert={mobile && menuOpen}>
-      {notice && <div className="banner" role="alert">{notice}<button onClick={() => setNotice(null)}>关闭</button></div>}
-      {startFailed && <div className="banner error">智能体暂未就绪：{startFailed}。消息仍会保留。</div>}
+      {notice && <div className="banner" role="alert">{notice}<button onClick={() => setNotice(null)}>{t.common.close}</button></div>}
+      {startFailed && <div className="banner error">{t.app.agentNotReady(startFailed)}</div>}
       <div className="view-slot" hidden={view !== "main"}><TaskChat debug={role === "owner" && debug} onFeed={setTaskFeed} onDetails={t => void details(t)} onOpenLink={u => void openLink(u)} onOpenFileInBrowser={p => void openFileInBrowser(p)} onExpired={expired} onRevealBrowser={revealBrowser}/></div>
       <div className="view-slot" hidden={view !== 'tasks'}><TaskList feed={taskFeed} active={view === 'tasks'} onDetails={t=>void details(t,'tasks')} onExpired={expired}/></div>
       <div className="view-slot" hidden={view !== 'schedules'}><ScheduleList active={view === 'schedules'} onExpired={expired} onOpenTask={id => void details(id, 'schedules')}/></div>
@@ -319,7 +320,7 @@ export function MainApp() {
       {role === "owner" && view === "settings" && <Settings onBack={() => go({ view: "main" })}/>}
       {role === 'owner' && view === 'usage' && <UsageDashboard onExpired={expired}/>}
       {role === 'owner' && view === 'gadget' && <GadgetHistory active={!workspace} onExpired={expired}/>}
-      {view === "detail" && detail && <div className="task-detail"><div className="task-detail-bar"><button className="ghost" onClick={() => { if ((history.state as { aio?: boolean; from?: DetailFrom } | null)?.from) history.back(); else go({ view: detailReturn }); }}>← 返回{detailReturn === 'tasks' ? '任务列表' : detailReturn === 'schedules' ? '定时任务' : '主会话'}</button><span className="muted tiny">{taskStatusLabels[(taskFeed.tasks.find(t=>t.id===detailTask?.id)??detailTask)?.status??'']??'过程详情'}</span></div><Chat key={detail.id} readOnly conversation={detail} status={status} onConversationChanged={() => { }} onStatusChanged={() => void refreshStatus()} onOpenWorkspace={openWorkspace} onOpenBrowserLink={u => void openLink(u)} onOpenBrowserFile={p => void openFileInBrowser(p)}/></div>}
+      {view === "detail" && detail && <div className="task-detail"><div className="task-detail-bar"><button className="ghost" onClick={() => { if ((history.state as { aio?: boolean; from?: DetailFrom } | null)?.from) history.back(); else go({ view: detailReturn }); }}>{detailReturn === 'tasks' ? t.nav.backTo.tasks : detailReturn === 'schedules' ? t.nav.backTo.schedules : t.nav.backTo.main}</button><span className="muted tiny">{taskStatusLabels[(taskFeed.tasks.find(t=>t.id===detailTask?.id)??detailTask)?.status??'']??t.app.detail.fallbackStatus}</span></div><Chat key={detail.id} readOnly conversation={detail} status={status} onConversationChanged={() => { }} onStatusChanged={() => void refreshStatus()} onOpenWorkspace={openWorkspace} onOpenBrowserLink={u => void openLink(u)} onOpenBrowserFile={p => void openFileInBrowser(p)}/></div>}
     </main>
     <PopupPresence>{opening && <PopupSurface className="task-console-overlay opening-overlay" role="presentation">
       <div className="opening-card" role="status" aria-live="polite">
@@ -327,12 +328,12 @@ export function MainApp() {
         <div className="opening-text">
           <strong>{opening.title}</strong>
           <span className="opening-detail">{opening.detail}</span>
-          <span className="opening-hint">{opening.slow ? "比平时慢：浏览器可能正在唤醒，通常半分钟内好" : "在沙箱浏览器里加载"}</span>
+          <span className="opening-hint">{opening.slow ? t.app.opening.slow : t.app.opening.loading}</span>
         </div>
-        <button type="button" className="ghost" onClick={() => opening.controller.abort()}>取消</button>
+        <button type="button" className="ghost" onClick={() => opening.controller.abort()}>{t.common.cancel}</button>
       </div>
     </PopupSurface>}</PopupPresence>
-    <PopupPresence>{linkTab && <TaskConsole key={linkTab.id} target={personConsoleTarget} tab={linkTab} label="操作网页" closeLabel="关闭页面" onClose={closeLink} onReveal={() => { setLinkTab(null); revealBrowser(); }}/>}</PopupPresence>
+    <PopupPresence>{linkTab && <TaskConsole key={linkTab.id} target={personConsoleTarget} tab={linkTab} label={t.app.opening.consoleLabel} closeLabel={t.app.opening.closePage} onClose={closeLink} onReveal={() => { setLinkTab(null); revealBrowser(); }}/>}</PopupPresence>
     <Workspace canConfigure={role === "owner"} open={workspace} status={status} initialPath={workspacePath} browserNonce={browserNonce} onClose={closeWorkspace} onNotify={notify}/>
   </div>;
 }

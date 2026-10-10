@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../api";
 import type { Invite } from "../types";
+import { t } from "../i18n";
 
 const day = (ms: number) => new Date(ms).toLocaleDateString();
 
 function stateOf(i: Invite): string {
-  if (i.usedAt !== null) return `已被 ${i.usedBy ?? "已删除账号"} 使用 · ${day(i.usedAt)}`;
-  if (i.revokedAt !== null) return `已作废 · ${day(i.revokedAt)}`;
-  return `未使用 · ${day(i.createdAt)} 生成`;
+  if (i.usedAt !== null) return t.settings.invite.usedBy(i.usedBy ?? t.settings.invite.deletedAccount, day(i.usedAt));
+  if (i.revokedAt !== null) return t.settings.invite.revoked(day(i.revokedAt));
+  return t.settings.invite.unused(day(i.createdAt));
 }
 
 /** One-time register codes: generate one per request mailed in, send it back, and see who used which. */
@@ -20,13 +21,13 @@ export function InviteSettings() {
 
   const load = useCallback(async () => {
     try { setInvites((await api.invites()).invites); }
-    catch (err) { setError(err instanceof Error ? err.message : "读取失败"); }
+    catch (err) { setError(err instanceof Error ? err.message : t.settings.invite.loadFailed); }
   }, []);
   useEffect(() => { void load(); }, [load]);
 
   const copy = async (code: string) => {
     try { await navigator.clipboard.writeText(code); setCopied(code); }
-    catch { setError("复制失败，请手动选中邀请码"); }
+    catch { setError(t.settings.invite.copyFailed); }
   };
 
   const create = async () => {
@@ -37,7 +38,7 @@ export function InviteSettings() {
       setNote("");
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "生成失败");
+      setError(err instanceof Error ? err.message : t.settings.invite.createFailed);
     } finally {
       setBusy(false);
     }
@@ -46,21 +47,21 @@ export function InviteSettings() {
   const revoke = async (code: string) => {
     setError(null);
     try { await api.revokeInvite(code); await load(); }
-    catch (err) { setError(err instanceof Error ? err.message : "作废失败"); }
+    catch (err) { setError(err instanceof Error ? err.message : t.settings.invite.revokeFailed); }
   };
 
   return (
-    <section className="settings-card invite-settings" aria-label="邀请码">
+    <section className="settings-card invite-settings" aria-label={t.settings.invite.title}>
       <div className="settings-section-head">
-        <h3>邀请码</h3>
-        <p>别人在登录页用邀请码注册普通账号，每个邀请码只能注册一个。备注可以写申请人的邮箱，方便对上是谁用的。</p>
+        <h3>{t.settings.invite.title}</h3>
+        <p>{t.settings.invite.intro}</p>
       </div>
       <form className="invite-new" onSubmit={(e) => { e.preventDefault(); void create(); }}>
-        <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="备注（可选），例如申请人邮箱" maxLength={200} aria-label="备注" />
-        <button type="submit" className="primary" disabled={busy}>{busy ? "生成中…" : "生成邀请码"}</button>
+        <input value={note} onChange={(e) => setNote(e.target.value)} placeholder={t.settings.invite.notePlaceholder} maxLength={200} aria-label={t.settings.invite.noteLabel} />
+        <button type="submit" className="primary" disabled={busy}>{busy ? t.settings.invite.creating : t.settings.invite.create}</button>
       </form>
       {error && <p className="banner error" role="alert">{error}</p>}
-      {invites && invites.length === 0 && <p className="muted tiny">还没有生成过邀请码。</p>}
+      {invites && invites.length === 0 && <p className="muted tiny">{t.settings.invite.empty}</p>}
       {invites && invites.length > 0 && (
         <ul className="invite-list">
           {invites.map((i) => {
@@ -73,8 +74,8 @@ export function InviteSettings() {
                 </div>
                 {open && (
                   <div className="invite-actions">
-                    <button type="button" className="ghost" onClick={() => void copy(i.code)}>{copied === i.code ? "已复制" : "复制"}</button>
-                    <button type="button" className="link danger-text" onClick={() => void revoke(i.code)}>作废</button>
+                    <button type="button" className="ghost" onClick={() => void copy(i.code)}>{copied === i.code ? t.settings.invite.copied : t.settings.invite.copy}</button>
+                    <button type="button" className="link danger-text" onClick={() => void revoke(i.code)}>{t.settings.invite.revoke}</button>
                   </div>
                 )}
               </li>

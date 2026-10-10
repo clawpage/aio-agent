@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { apiUrl } from "../api";
+import { t } from "../i18n";
 
 /**
  * The owner's phone, live: the H.264 stream from bin/phone-bridge.mjs decoded
@@ -16,12 +17,12 @@ interface Props {
 type State = "connecting" | "live" | "closed" | "unsupported";
 
 const KEYS: Array<{ k: string; label: string; title: string }> = [
-  { k: "back", label: "◁", title: "返回" },
-  { k: "home", label: "○", title: "主屏幕" },
-  { k: "recents", label: "▢", title: "最近应用" },
-  { k: "voldown", label: "音量−", title: "音量减" },
-  { k: "volup", label: "音量+", title: "音量加" },
-  { k: "power", label: "电源", title: "锁屏 / 点亮屏幕" },
+  { k: "back", label: "◁", title: t.phone.keys.back },
+  { k: "home", label: "○", title: t.phone.keys.home },
+  { k: "recents", label: "▢", title: t.phone.keys.recents },
+  { k: "voldown", label: t.phone.keys.volDownLabel, title: t.phone.keys.volDown },
+  { k: "volup", label: t.phone.keys.volUpLabel, title: t.phone.keys.volUp },
+  { k: "power", label: t.phone.keys.powerLabel, title: t.phone.keys.power },
 ];
 
 /** `avc1.PPCCLL` from the first SPS in an Annex B config packet. */
@@ -104,7 +105,7 @@ export function PhoneScreen({ active, onNotify }: Props) {
           canvasRef.current.width = msg.width!;
           canvasRef.current.height = msg.height!;
           setState("live");
-        } else if (msg.type === "error") setError(msg.message ?? "手机不可用");
+        } else if (msg.type === "error") setError(msg.message ?? t.phone.screen.unavailable);
         return;
       }
       const buf = new Uint8Array(event.data as ArrayBuffer);
@@ -173,17 +174,17 @@ export function PhoneScreen({ active, onNotify }: Props) {
     if (!text.trim()) return;
     send({ t: "text", s: text });
     setText("");
-    onNotify?.("已粘贴到手机当前的输入框");
+    onNotify?.(t.phone.screen.pasted);
   };
 
   if (state === "unsupported") {
-    return <div className="phone"><p className="muted">这个浏览器不能解码实时画面（需要 WebCodecs，Safari 16.4+ 或 Chrome）。</p></div>;
+    return <div className="phone"><p className="muted">{t.phone.screen.noDecoder}</p></div>;
   }
   return (
     <div className="phone">
       <div className="phone-bar">
         <span className={`phone-dot ${state === "live" ? "live" : ""}`} aria-hidden="true" />
-        <span className="phone-name">{state === "live" ? device || "手机" : state === "closed" ? "连接已断开，正在重连…" : "正在连接手机…"}</span>
+        <span className="phone-name">{state === "live" ? device || t.phone.screen.fallbackName : state === "closed" ? t.phone.screen.reconnecting : t.phone.screen.connecting}</span>
       </div>
       <div className="phone-stage">
         <canvas
@@ -191,7 +192,7 @@ export function PhoneScreen({ active, onNotify }: Props) {
           className="phone-canvas"
           width={360}
           height={800}
-          aria-label="手机屏幕"
+          aria-label={t.phone.screen.screen}
           onPointerDown={touch("down")}
           onPointerMove={touch("move")}
           onPointerUp={touch("up")}
@@ -200,7 +201,7 @@ export function PhoneScreen({ active, onNotify }: Props) {
         />
         {error && <div className="frame-hint error">{error}</div>}
       </div>
-      <div className="phone-keys" role="toolbar" aria-label="手机按键">
+      <div className="phone-keys" role="toolbar" aria-label={t.phone.screen.keysToolbar}>
         {KEYS.map((key) => (
           <button key={key.k} type="button" className="ghost" title={key.title} aria-label={key.title} onClick={() => send({ t: "key", k: key.k })}>
             {key.label}
@@ -208,8 +209,8 @@ export function PhoneScreen({ active, onNotify }: Props) {
         ))}
       </div>
       <form className="phone-text row" onSubmit={(e) => { e.preventDefault(); sendText(); }}>
-        <input value={text} onChange={(e) => setText(e.target.value)} placeholder="输入文字，发送到手机当前的输入框" aria-label="发送到手机的文字" />
-        <button type="submit" className="primary" disabled={!text.trim() || state !== "live"}>发送</button>
+        <input value={text} onChange={(e) => setText(e.target.value)} placeholder={t.phone.screen.textPlaceholder} aria-label={t.phone.screen.textLabel} />
+        <button type="submit" className="primary" disabled={!text.trim() || state !== "live"}>{t.phone.screen.send}</button>
       </form>
     </div>
   );

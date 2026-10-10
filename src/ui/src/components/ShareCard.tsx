@@ -2,6 +2,7 @@ import { memo, useEffect, useState } from "react";
 import type { ShareLink } from "../shareLinks";
 import { openNativeBrowser } from "../deviceBrowser";
 import { isSandboxLink } from "../sandboxLink";
+import { t } from "../i18n";
 
 async function copyText(text: string): Promise<boolean> {
   try {
@@ -38,21 +39,21 @@ export const ShareCard = memo(function ShareCard({ link, onOpenLink }: { link: S
   return (
     <div className="share-card" data-testid="share-card">
       <div className="share-card-head">
-        <span className="share-card-badge" aria-hidden="true">分享页</span>
+        <span className="share-card-badge" aria-hidden="true">{t.cards.share.badge}</span>
         <span className="share-card-title">{link.title}</span>
       </div>
       <code className="share-card-url" data-testid="share-card-url">{link.url}</code>
       <div className="share-card-actions">
         <button type="button" className="primary tiny" onClick={() => void copyText(link.url).then((ok) => setCopied(ok ? "ok" : "failed"))}>
-          {copied === "ok" ? "已复制" : copied === "failed" ? "复制失败，请长按链接" : "复制链接"}
+          {copied === "ok" ? t.cards.share.copied : copied === "failed" ? t.cards.share.copyFailed : t.cards.share.copy}
         </button>
         {canShare && (
           <button type="button" className="ghost tiny" onClick={() => void navigator.share({ title: link.title, url: link.url }).catch(() => undefined)}>
-            分享
+            {t.cards.share.share}
           </button>
         )}
         <a className="ghost tiny share-card-open" href={link.url} target="_blank" rel="noopener noreferrer" onClick={event => { if (isSandboxLink(link.url)) { event.preventDefault(); onOpenLink?.(link.url); }
-          else if (openNativeBrowser(link.url)) event.preventDefault(); }}>打开</a>
+          else if (openNativeBrowser(link.url)) event.preventDefault(); }}>{t.cards.share.open}</a>
       </div>
     </div>
   );

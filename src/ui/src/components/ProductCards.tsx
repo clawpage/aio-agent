@@ -3,6 +3,7 @@ import { cachedImage, holdImage } from "../imageCache";
 import { isSandboxLink } from "../sandboxLink";
 import { openNativeBrowser } from "../deviceBrowser";
 import type { Product } from "../productBlocks";
+import { t } from "../i18n";
 
 /**
  * A picture a message shows: a workspace image through the authenticated document
@@ -47,7 +48,7 @@ function ProductCard({ item, onOpenLink, onOpenFile }: { item: Product; onOpenLi
   return (
     <article ref={card} className={`product-card${pictured ? "" : " text-only"}`} role="listitem" aria-label={item.name}>
       {pictured && (local && onOpenFile && picture.url
-        ? <button type="button" className="product-media" onClick={() => onOpenFile(local)} aria-label={`查看 ${item.name} 的大图`}>{media}</button>
+        ? <button type="button" className="product-media" onClick={() => onOpenFile(local)} aria-label={t.cards.products.viewImage(item.name)}>{media}</button>
         : <div className="product-media">{media}</div>)}
       <div className="product-body">
         <div className="product-title">
@@ -57,7 +58,7 @@ function ProductCard({ item, onOpenLink, onOpenFile }: { item: Product; onOpenLi
         {(item.price || item.was) && (
           <div className="product-price">
             {item.price && <strong>{item.price}</strong>}
-            {item.was && <s aria-label={`原价 ${item.was}`}>{item.was}</s>}
+            {item.was && <s aria-label={t.cards.products.was(item.was)}>{item.was}</s>}
           </div>
         )}
         {(item.store || item.rating) && (
@@ -69,8 +70,8 @@ function ProductCard({ item, onOpenLink, onOpenFile }: { item: Product; onOpenLi
         {item.points.length > 0 && <ul className="product-points">{item.points.map((p, i) => <li key={i}>{p}</li>)}</ul>}
         {item.note && <p className="product-note">{item.note}</p>}
         {item.url && (onOpenLink && isSandboxLink(item.url)
-          ? <button type="button" className="product-link" data-browser-link={item.url} onClick={() => onOpenLink(item.url!)}>去看看</button>
-          : <a className="product-link" href={item.url} target="_blank" rel="noopener noreferrer" onClick={event => { if (openNativeBrowser(item.url!)) event.preventDefault(); }}>去看看</a>)}
+          ? <button type="button" className="product-link" data-browser-link={item.url} onClick={() => onOpenLink(item.url!)}>{t.cards.products.visit}</button>
+          : <a className="product-link" href={item.url} target="_blank" rel="noopener noreferrer" onClick={event => { if (openNativeBrowser(item.url!)) event.preventDefault(); }}>{t.cards.products.visit}</a>)}
       </div>
     </article>
   );
@@ -98,11 +99,11 @@ export function ProductCards({ items, onOpenLink, onOpenFile }: { items: Product
   const page = (direction: 1 | -1) => { const el = row.current; if (el) el.scrollBy({ left: direction * el.clientWidth * 0.8, behavior: "smooth" }); };
   return (
     <div className={`product-cards${several ? " product-row" : ""}`}>
-      <div ref={row} className="product-track" role="list" aria-label="商品">
+      <div ref={row} className="product-track" role="list" aria-label={t.cards.products.list}>
         {items.map((item, i) => <ProductCard key={i} item={item} onOpenLink={onOpenLink} onOpenFile={onOpenFile} />)}
       </div>
-      {several && !ends.start && <button type="button" className="product-page prev" aria-label="上一组商品" onClick={() => page(-1)}><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg></button>}
-      {several && !ends.end && <button type="button" className="product-page next" aria-label="下一组商品" onClick={() => page(1)}><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></button>}
+      {several && !ends.start && <button type="button" className="product-page prev" aria-label={t.cards.products.prev} onClick={() => page(-1)}><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg></button>}
+      {several && !ends.end && <button type="button" className="product-page next" aria-label={t.cards.products.next} onClick={() => page(1)}><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></button>}
     </div>
   );
 }

@@ -10,6 +10,8 @@
  * that does not parse stays an ordinary code block.
  */
 
+import { t } from "./i18n";
+
 export interface MapPlace {
   name: string;
   address: string | null;
@@ -51,7 +53,7 @@ export function parsePlace(raw: string): MapPlace | null {
   if (lat !== null && lng !== null && String(data.coord ?? "").toLowerCase() === "gcj02") [lat, lng] = gcj02ToWgs84(lat, lng);
   if (lat === null && !address && !name) return null;
   const zoom = num(data.zoom);
-  return { name: name ?? address ?? "位置", address, lat, lng, zoom: zoom === null ? 15 : Math.min(18, Math.max(3, Math.round(zoom))) };
+  return { name: name ?? address ?? t.cards.map.defaultName, address, lat, lng, zoom: zoom === null ? 15 : Math.min(18, Math.max(3, Math.round(zoom))) };
 }
 
 /** Split a message into text and map cards, in order. */
@@ -168,25 +170,25 @@ export function mapLinks(place: MapPlace, platform: Platform): MapLink[] {
   if (place.lat !== null && place.lng !== null) {
     const { lat, lng } = place;
     const [gLat, gLng] = wgs84ToGcj02(lat, lng);
-    if (platform === "android") links.push({ id: "system", label: "选择已安装的地图应用", href: `geo:${lat},${lng}?q=${lat},${lng}(${e(name)})` });
-    if (platform !== "android") links.push({ id: "apple", label: "苹果地图", href: `https://maps.apple.com/?ll=${lat},${lng}&q=${e(name)}` });
-    links.push({ id: "amap", label: "高德地图", href: `https://uri.amap.com/marker?position=${gLng},${gLat}&name=${e(name)}&coordinate=gaode&callnative=1&src=yizhan` });
+    if (platform === "android") links.push({ id: "system", label: t.cards.map.apps.system, href: `geo:${lat},${lng}?q=${lat},${lng}(${e(name)})` });
+    if (platform !== "android") links.push({ id: "apple", label: t.cards.map.apps.apple, href: `https://maps.apple.com/?ll=${lat},${lng}&q=${e(name)}` });
+    links.push({ id: "amap", label: t.cards.map.apps.amap, href: `https://uri.amap.com/marker?position=${gLng},${gLat}&name=${e(name)}&coordinate=gaode&callnative=1&src=yizhan` });
     links.push({
       id: "baidu",
-      label: "百度地图",
+      label: t.cards.map.apps.baidu,
       href: platform === "other"
         ? `https://api.map.baidu.com/marker?location=${gLat},${gLng}&title=${e(name)}&content=${e(query)}&coord_type=gcj02&output=html&src=yizhan`
         : `baidumap://map/marker?location=${gLat},${gLng}&title=${e(name)}&content=${e(query)}&coord_type=gcj02&src=yizhan`,
     });
-    links.push({ id: "google", label: "Google 地图", href: `https://www.google.com/maps/search/?api=1&query=${lat},${lng}` });
+    links.push({ id: "google", label: t.cards.map.apps.google, href: `https://www.google.com/maps/search/?api=1&query=${lat},${lng}` });
     links.push({ id: "waze", label: "Waze", href: `https://waze.com/ul?ll=${lat},${lng}` });
   } else {
     // Not located: every app can still search the address itself.
-    if (platform === "android") links.push({ id: "system", label: "选择已安装的地图应用", href: `geo:0,0?q=${e(query)}` });
-    if (platform !== "android") links.push({ id: "apple", label: "苹果地图", href: `https://maps.apple.com/?q=${e(query)}` });
-    links.push({ id: "amap", label: "高德地图", href: `https://uri.amap.com/search?keyword=${e(query)}&callnative=1&src=yizhan` });
-    links.push({ id: "baidu", label: "百度地图", href: `https://api.map.baidu.com/geocoder?address=${e(query)}&output=html&src=yizhan` });
-    links.push({ id: "google", label: "Google 地图", href: `https://www.google.com/maps/search/?api=1&query=${e(query)}` });
+    if (platform === "android") links.push({ id: "system", label: t.cards.map.apps.system, href: `geo:0,0?q=${e(query)}` });
+    if (platform !== "android") links.push({ id: "apple", label: t.cards.map.apps.apple, href: `https://maps.apple.com/?q=${e(query)}` });
+    links.push({ id: "amap", label: t.cards.map.apps.amap, href: `https://uri.amap.com/search?keyword=${e(query)}&callnative=1&src=yizhan` });
+    links.push({ id: "baidu", label: t.cards.map.apps.baidu, href: `https://api.map.baidu.com/geocoder?address=${e(query)}&output=html&src=yizhan` });
+    links.push({ id: "google", label: t.cards.map.apps.google, href: `https://www.google.com/maps/search/?api=1&query=${e(query)}` });
     links.push({ id: "waze", label: "Waze", href: `https://waze.com/ul?q=${e(query)}` });
   }
   return links;

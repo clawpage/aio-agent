@@ -1,4 +1,5 @@
 import type { AgentEvent } from "./types";
+import { t } from "./i18n";
 
 /** Lifecycle of one turn's collapsed "Working" group. */
 export type WorkingStatus = "queued" | "running" | "stopping" | "done" | "error" | "stopped" | "unknown";
@@ -136,19 +137,19 @@ const STATUS_RANK: Record<WorkingStatus, number> = {
 export function workingLabel(status: WorkingStatus): string {
   switch (status) {
     case "queued":
-      return "已排队等待";
+      return t.chat.timeline.status.queued;
     case "running":
-      return "处理中…";
+      return t.chat.timeline.status.running;
     case "stopping":
-      return "正在停止…";
+      return t.chat.timeline.status.stopping;
     case "done":
-      return "已完成";
+      return t.chat.timeline.status.done;
     case "error":
-      return "执行出错";
+      return t.chat.timeline.status.error;
     case "stopped":
-      return "已停止";
+      return t.chat.timeline.status.stopped;
     case "unknown":
-      return "结果未知";
+      return t.chat.timeline.status.unknown;
   }
 }
 
@@ -196,15 +197,15 @@ export function segmentLabel(group: WorkingBlock, toolCount?: number): string {
   const live = !group.closed && (group.status === "running" || group.status === "stopping" || group.status === "queued");
   if (live) return workingLabel(group.status);
   // History: describe what the segment recorded, never "处理中…".
-  const done = count > 0 ? `执行了 ${count} 项操作` : reasoningCount > 0 ? "思考摘要" : "";
+  const done = count > 0 ? t.chat.timeline.actions(count) : reasoningCount > 0 ? t.chat.timeline.reasoningSummary : "";
   if (!done) return workingLabel(group.status);
   // The turn's own terminal outcome wins over the generic failure note, so a
   // stop or an unknown result is never relabelled as an error.
-  if (group.status === "stopped") return `${done} · 已停止`;
-  if (group.status === "unknown") return `${done} · 结果未知`;
+  if (group.status === "stopped") return `${done} · ${t.chat.timeline.status.stopped}`;
+  if (group.status === "unknown") return `${done} · ${t.chat.timeline.status.unknown}`;
   // A real tool failure is never swallowed by neutral history wording — not even
   // while the enclosing turn is still running.
-  if (group.status === "error" || group.hasToolError) return `${done} · 出错`;
+  if (group.status === "error" || group.hasToolError) return `${done} · ${t.chat.timeline.errored}`;
   // Still-running turn whose older segment already closed: the segment itself is
   // a finished record, so it keeps its neutral historical wording.
   return done;
@@ -386,31 +387,16 @@ const TOOL_OUTPUT_DELTA_KINDS = new Set([
   "item/mcpToolCall/progress",
 ]);
 
-const TOOL_TITLES: Record<string, string> = {
-  commandExecution: "执行命令",
-  fileChange: "修改文件",
-  mcpToolCall: "MCP 工具",
-  webSearch: "联网检索",
-  plan: "计划",
-  reasoning: "思考",
-  // Claude Code tools without a Codex counterpart keep their own item type.
-  Read: "读取文件",
-  Grep: "搜索内容",
-  Glob: "查找文件",
-  WebFetch: "读取网页",
-  Task: "子任务",
-  Agent: "子任务",
-  TodoWrite: "待办清单",
-};
+const TOOL_TITLES: Record<string, string> = t.chat.timeline.tools;
 
 function toolDetail(toolType: string, item: Record<string, unknown>): string {
   switch (toolType) {
     case "commandExecution":
-      return [text(item.command), item.cwd ? `（cwd: ${text(item.cwd)}）` : ""].join("");
+      return [text(item.command), item.cwd ? t.chat.timeline.cwd(text(item.cwd)) : ""].join("");
     case "fileChange":
       return Array.isArray(item.changes)
-        ? (item.changes as Array<Record<string, unknown>>).map((c) => text(c.path) || text(c.kind)).join("、")
-        : "文件变更";
+        ? (item.changes as Array<Record<string, unknown>>).map((c) => text(c.path) || text(c.kind)).join(t.chat.listSeparator)
+        : t.chat.timeline.fileChanges;
     case "mcpToolCall":
       return `${text(item.server) || "mcp"} · ${text(item.tool) || ""}`;
     default:
@@ -902,7 +888,7 @@ export function applyEvent(state: TimelineState, event: AgentEvent): void {
       if (turnId) setTurnStatus(state, turnId, mapped);
       const level = status === "completed" ? "info" : status === "unknown" ? "error" : "warn";
       const label =
-        status === "completed" ? "本轮完成" : status === "interrupted" ? "已停止" : status === "unknown" ? "结果未知" : `结束：${status}`;
+        status === "completed" ? t.chat.timeline.notices.turnCompleted : status === "interrupted" ? t.chat.timeline.notices.stopped : status === "unknown" ? t.chat.timeline.notices.unknown : t.chat.timeline.notices.finished(status);
       pushNotice(state, turnId || resolveTurnId(state, event), {
         kind: "status",
         id: `finish:${String(p.turnId ?? event.id)}`,
@@ -917,7 +903,7 @@ export function applyEvent(state: TimelineState, event: AgentEvent): void {
       pushNotice(state, turnId || resolveTurnId(state, event), {
         kind: "status",
         id: `fail:${String(p.turnId ?? event.id)}`,
-        text: `执行失败：${text(p.message)}`,
+        text: t.chat.timeline.notices.failed(text(p.message)),
         level: "error",
       });
       return;
@@ -928,7 +914,7 @@ export function applyEvent(state: TimelineState, event: AgentEvent): void {
       pushNotice(state, turnId || resolveTurnId(state, event), {
         kind: "status",
         id: `cancel:${String(p.turnId ?? event.id)}`,
-        text: "已取消排队中的轮次",
+        text: t.chat.timeline.notices.cancelled,
         level: "warn",
       });
       return;
@@ -939,7 +925,7 @@ export function applyEvent(state: TimelineState, event: AgentEvent): void {
       pushNotice(state, turnId || resolveTurnId(state, event), {
         kind: "status",
         id: `reconciled:${String(p.turnId ?? event.id)}`,
-        text: text(p.message) || "服务重启后状态已核对",
+        text: text(p.message) || t.chat.timeline.notices.reconciled,
         level: text(p.status) === "unknown" ? "error" : "warn",
       });
       return;
@@ -951,21 +937,21 @@ export function applyEvent(state: TimelineState, event: AgentEvent): void {
       pushNotice(state, turnId || resolveTurnId(state, event), {
         kind: "status",
         id: `stop:${event.id}`,
-        text: "已请求停止…",
+        text: t.chat.timeline.notices.stopRequested,
         level: "warn",
       });
       return;
     }
     case "thread.started": {
       const turnId = resolveTurnId(state, event);
-      pushNotice(state, turnId, { kind: "status", id: `thread:${String(p.threadId ?? event.id)}`, text: p.model ? `已创建会话线程（模型 ${text(p.model)}）` : "已开始处理任务", level: "info" });
+      pushNotice(state, turnId, { kind: "status", id: `thread:${String(p.threadId ?? event.id)}`, text: p.model ? t.chat.timeline.notices.threadStarted(text(p.model)) : t.chat.timeline.notices.started, level: "info" });
       return;
     }
     case "error":
       pushNotice(state, resolveTurnId(state, event), {
         kind: "status",
         id: `err:${event.id}`,
-        text: `错误：${text(p.message) || JSON.stringify(p).slice(0, 300)}`,
+        text: t.chat.timeline.notices.error(text(p.message) || JSON.stringify(p).slice(0, 300)),
         level: "error",
       });
       return;
@@ -975,7 +961,7 @@ export function applyEvent(state: TimelineState, event: AgentEvent): void {
       pushNotice(state, resolveTurnId(state, event), {
         kind: "status",
         id: `warn:${event.id}`,
-        text: `提示：${text(p.message) || JSON.stringify(p).slice(0, 200)}`,
+        text: t.chat.timeline.notices.warning(text(p.message) || JSON.stringify(p).slice(0, 200)),
         level: "warn",
       });
       return;

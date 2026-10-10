@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { api, ApiError } from "../api";
 import { BrandMark } from "./Brand";
+import { locale, setLocale, t } from "../i18n";
 
 type Mode = "login" | "register";
 
@@ -75,7 +76,7 @@ export function Login({ onSuccess, notice, username: named }: { onSuccess: () =>
 
   const submit = async () => {
     if (!password || submitting.current) return;
-    if (register && password !== confirm) { setError("两次输入的密码不一样"); return; }
+    if (register && password !== confirm) { setError(t.auth.passwordMismatch); return; }
     submitting.current = true;
     request.current?.abort();
     setBusy(true);
@@ -95,7 +96,7 @@ export function Login({ onSuccess, notice, username: named }: { onSuccess: () =>
     }
   };
 
-  if (checking) return <div className="boot" role="status">正在恢复登录…</div>;
+  if (checking) return <div className="boot" role="status">{t.auth.restoring}</div>;
 
   return (
     <div className="login">
@@ -106,10 +107,10 @@ export function Login({ onSuccess, notice, username: named }: { onSuccess: () =>
           void submit();
         }}
       >
-        <h1 className="login-brand"><BrandMark size={40}/>一站</h1>
-        <p className="muted">{register ? "什么事情都在这里一站解决吧。用邀请码注册一个账号。" : "什么事情都在这里一站解决吧。用你的账号登录。"}</p>
+        <h1 className="login-brand"><BrandMark size={40}/>{t.auth.brand}</h1>
+        <p className="muted">{register ? t.auth.intro.register : t.auth.intro.login}</p>
         <label className="field">
-          <span>账号</span>
+          <span>{t.auth.fields.username}</span>
           {/* Account names are matched exactly: a phone must not capitalize or "correct" them. */}
           <input
             value={username}
@@ -119,28 +120,28 @@ export function Login({ onSuccess, notice, username: named }: { onSuccess: () =>
             autoCorrect="off"
             spellCheck={false}
             autoFocus={!named}
-            placeholder={register ? "2–40 位小写字母、数字、- 或 _" : undefined}
+            placeholder={register ? t.auth.fields.usernameHint : undefined}
           />
         </label>
         <label className="field">
-          <span>密码</span>
+          <span>{t.auth.fields.password}</span>
           <input
             type="password"
             value={password}
             autoFocus={Boolean(named)}
             autoComplete={register ? "new-password" : "current-password"}
             onChange={(e) => setPassword(e.target.value)}
-            placeholder={register ? "至少 12 个字符" : "请输入访问密码"}
+            placeholder={register ? t.auth.fields.newPasswordHint : t.auth.fields.passwordHint}
           />
         </label>
         {register && (
           <>
             <label className="field">
-              <span>确认密码</span>
-              <input type="password" value={confirm} autoComplete="new-password" onChange={(e) => setConfirm(e.target.value)} placeholder="再输入一次密码" />
+              <span>{t.auth.fields.confirm}</span>
+              <input type="password" value={confirm} autoComplete="new-password" onChange={(e) => setConfirm(e.target.value)} placeholder={t.auth.fields.confirmHint} />
             </label>
             <label className="field">
-              <span>邀请码</span>
+              <span>{t.auth.fields.inviteCode}</span>
               <input
                 value={inviteCode}
                 onChange={(e) => setInviteCode(e.target.value.toUpperCase())}
@@ -153,24 +154,26 @@ export function Login({ onSuccess, notice, username: named }: { onSuccess: () =>
             </label>
             <p className="muted tiny login-invite">
               {inviteEmail
-                ? <>还没有邀请码？发邮件到 <a href={`mailto:${inviteEmail}?subject=${encodeURIComponent("申请一站邀请码")}`}>{inviteEmail}</a> 申请。每个邀请码只能注册一个账号。</>
-                : "邀请码向管理员索取，每个邀请码只能注册一个账号。"}
+                ? <>{t.auth.invite.askBefore}<a href={`mailto:${inviteEmail}?subject=${encodeURIComponent(t.auth.invite.mailSubject)}`}>{inviteEmail}</a>{t.auth.invite.askAfter}</>
+                : t.auth.invite.askAdmin}
             </p>
           </>
         )}
-        {sessionError && <div className="banner warn" role="status">暂时无法验证登录状态，网络恢复后会自动重试。</div>}
+        {sessionError && <div className="banner warn" role="status">{t.auth.sessionUnverified}</div>}
         {notice && <div className="banner warn">{notice}</div>}
         {error && <div className="banner error">{error}</div>}
         <button type="submit" className="primary block" disabled={busy || !password || !username.trim() || (register && (!confirm || !inviteCode.trim()))}>
-          {register ? (busy ? "注册中…" : "注册并登录") : (busy ? "登录中…" : "登录")}
+          {register ? (busy ? t.auth.submit.registering : t.auth.submit.register) : (busy ? t.auth.submit.loggingIn : t.auth.submit.login)}
         </button>
         {!named && (
           <p className="muted tiny login-switch">
-            {register ? "已有账号？" : "还没有账号？"}
-            <button type="button" className="link" onClick={() => switchMode(register ? "login" : "register")}>{register ? "去登录" : "用邀请码注册"}</button>
+            {register ? t.auth.switch.haveAccount : t.auth.switch.noAccount}
+            <button type="button" className="link" onClick={() => switchMode(register ? "login" : "register")}>{register ? t.auth.switch.toLogin : t.auth.switch.toRegister}</button>
           </p>
         )}
-
+        <p className="muted tiny login-switch">
+          <button type="button" className="link" lang={locale === "en" ? "zh-CN" : "en"} onClick={() => setLocale(locale === "en" ? "zh-CN" : "en")}>{t.nav.otherLanguage}</button>
+        </p>
       </form>
     </div>
   );

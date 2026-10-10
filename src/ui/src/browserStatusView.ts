@@ -7,6 +7,7 @@
  */
 
 import type { BrowserLifecycleStateView } from "./api";
+import { t } from "./i18n";
 
 export type StatusTone = "off" | "ok" | "busy" | "warn" | "error";
 
@@ -54,19 +55,19 @@ export function isRestoring(status: BrowserLifecycleStateView | null): boolean {
 
 /** Chinese occupancy summary; never empty, never a raw counter dump. */
 export function describeOccupancy(status: BrowserLifecycleStateView | null): string {
-  if (!status) return "正在读取浏览器状态…";
-  if (!status.enabled) return "浏览器自动释放已关闭，将一直保持运行";
+  if (!status) return t.browser.occupancy.loading;
+  if (!status.enabled) return t.browser.occupancy.disabled;
   const parts: string[] = [];
-  if (status.leases.turns > 0) parts.push(`任务 ${status.leases.turns}`);
-  if (status.leases.viewers > 0) parts.push(`观看 ${status.leases.viewers}`);
-  if (status.leases.calls > 0) parts.push(`进行中的浏览器请求 ${status.leases.calls}`);
+  if (status.leases.turns > 0) parts.push(t.browser.occupancy.turns(status.leases.turns));
+  if (status.leases.viewers > 0) parts.push(t.browser.occupancy.viewers(status.leases.viewers));
+  if (status.leases.calls > 0) parts.push(t.browser.occupancy.calls(status.leases.calls));
   const pins = status.leases.pins > 0 ? status.leases.pins : status.holds;
-  if (pins > 0) parts.push(`手动保留 ${pins}`);
+  if (pins > 0) parts.push(t.browser.occupancy.pins(pins));
   if (parts.length === 0) {
-    if (status.restorePending) return "没有占用，但快照尚未恢复";
-    return status.resident ? "常驻，登录状态一直保留" : "当前没有占用";
+    if (status.restorePending) return t.browser.occupancy.restorePending;
+    return status.resident ? t.browser.occupancy.resident : t.browser.occupancy.idle;
   }
-  return `占用原因：${parts.join("、")}`;
+  return t.browser.occupancy.reasons(parts);
 }
 
 /** Short "m:ss" text for the idle countdown, or null when not counting down. */
@@ -74,7 +75,7 @@ export function idleCountdownText(status: BrowserLifecycleStateView | null): str
   if (!status || !status.enabled) return null;
   const remaining = status.idleRemainingMs;
   if (remaining === null || remaining === undefined) return null;
-  if (remaining <= 0) return "即将释放";
+  if (remaining <= 0) return t.browser.occupancy.releasing;
   const totalSeconds = Math.ceil(remaining / 1000);
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
@@ -90,16 +91,16 @@ export function refusalReason(status: BrowserLifecycleStateView | null): string 
     case "snapshot_incomplete":
       if (status.lastError) return status.lastError;
       return count > 0
-        ? `有 ${count} 个页面无法安全保存（可能未提交的输入或下载中），已保留浏览器未释放`
-        : "快照不完整，已保留浏览器未释放";
+        ? t.browser.refusal.blockedPages(count)
+        : t.browser.refusal.incomplete;
     case "snapshot_failed":
-      return "保存浏览器状态失败，已保留浏览器未释放";
+      return t.browser.refusal.snapshotFailed;
     case "stop_failed":
-      return "停止浏览器失败，浏览器仍在运行，可稍后重试";
+      return t.browser.refusal.stopFailed;
     case "stop_unattributed":
-      return "无法确认浏览器进程归属，为避免影响其它进程已放弃释放";
+      return t.browser.refusal.unattributed;
     case "wake_failed":
-      return "浏览器恢复失败，快照已保留，可重试";
+      return t.browser.refusal.wakeFailed;
     default:
       return status.lastError;
   }

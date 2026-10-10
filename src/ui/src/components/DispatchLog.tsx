@@ -2,12 +2,11 @@ import { createPortal } from "react-dom";
 import { PopupSurface } from "./PopupMotion";
 import { useEffect, useState } from "react";
 import { api } from "../api";
+import { t as i18n } from "../i18n";
 import type { DispatchLog as Log, DispatchLogEntry, DispatchStep } from "../types";
 
 // "today" and "search" only appear in dispatch logs recorded before those sources were removed.
-const SOURCES: Record<string, string> = {
-  active: "进行中", recent: "最近", today: "今天", recall: "召回", context: "上下文召回", search: "搜索", explicit: "手动引用",
-};
+const SOURCES: Record<string, string> = i18n.dispatch.sources;
 
 const clock = (ts: number) => new Date(ts).toLocaleString("sv-SE", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit" });
 const pct = (p: number) => `${Math.round(p * 100)}%`;
@@ -15,10 +14,10 @@ const pct = (p: number) => `${Math.round(p * 100)}%`;
 const ms = (v: number) => (v >= 1000 ? `${(v / 1000).toFixed(1)} s` : `${v} ms`);
 
 function decision(entry: DispatchLogEntry, name: (id: string) => string): string {
-  if (entry.failed) return `失败：${entry.failReason ?? "未知原因"}`;
-  if (entry.chosen.appendTo) return `追加到「${name(entry.chosen.appendTo)}」`;
-  if (entry.chosen.resume) return `续接「${name(entry.chosen.resume)}」的原执行会话`;
-  return "作为新任务";
+  if (entry.failed) return i18n.dispatch.decision.failed(entry.failReason ?? i18n.dispatch.decision.unknownReason);
+  if (entry.chosen.appendTo) return i18n.dispatch.decision.appendTo(name(entry.chosen.appendTo));
+  if (entry.chosen.resume) return i18n.dispatch.decision.resume(name(entry.chosen.resume));
+  return i18n.dispatch.decision.newTask;
 }
 
 /** The model(s) the dispatcher actually ran on, from its own timing records. */
@@ -53,7 +52,7 @@ function Step({ step, name, start }: { step: DispatchStep; name: (id: string) =>
     case "context":
       return (
         <li>
-          <StepHead title={`主会话时间线 · 候选 ${step.candidates} 个`} offset={offset} />
+          <StepHead title={i18n.dispatch.steps.context(step.candidates)} offset={offset} />
           <pre>{step.timeline}</pre>
         </li>
       );
@@ -61,57 +60,57 @@ function Step({ step, name, start }: { step: DispatchStep; name: (id: string) =>
       const r = step.result;
       return (
         <li>
-          <StepHead title="Jev 相关性与接续建议" offset={offset} />
+          <StepHead title={i18n.dispatch.steps.jev} offset={offset} />
           {r?.suggestion ? (
-            <p>建议 <strong>{r.suggestion.kind === "new" ? "新任务" : `${r.suggestion.kind === "steer" ? "追加" : "续接"}「${name(r.suggestion.taskId!)}」`}</strong>（{pct(r.suggestion.probability)}，{r.confident ? "高置信" : "不确定"}，{r.latencyMs} ms）；由派单器最终决定。</p>
+            <p>{i18n.dispatch.steps.suggest}<strong>{r.suggestion.kind === "new" ? i18n.dispatch.steps.newTask : r.suggestion.kind === "steer" ? i18n.dispatch.steps.suggestAppend(name(r.suggestion.taskId!)) : i18n.dispatch.steps.suggestResume(name(r.suggestion.taskId!))}</strong>{i18n.dispatch.steps.suggestTail(pct(r.suggestion.probability), r.confident ? i18n.dispatch.steps.highConfidence : i18n.dispatch.steps.uncertain, r.latencyMs)}</p>
           ) : r ? (
             <p>
-              选择 <strong>{r.choice === "NEW" ? "新任务" : `「${name(r.choice)}」`}</strong>（{pct(r.probabilities[r.choice] ?? 0)}，
-              {r.confident ? "有把握，作为强提示" : "不确定，只作参考"}，{r.latencyMs} ms）
+              {i18n.dispatch.steps.choose}<strong>{r.choice === "NEW" ? i18n.dispatch.steps.newTask : i18n.dispatch.steps.quoted(name(r.choice))}</strong>
+              {i18n.dispatch.steps.chooseTail(pct(r.probabilities[r.choice] ?? 0), r.confident ? i18n.dispatch.steps.confidentHint : i18n.dispatch.steps.uncertainHint, r.latencyMs)}
             </p>
-          ) : <p className="error">不可用：{step.error}</p>}
+          ) : <p className="error">{i18n.dispatch.steps.unavailable(step.error ?? "")}</p>}
           {r?.scores && Object.keys(r.scores).length > 0 && (
             <>
-              <p className="muted tiny">逐任务相关性</p>
-              <Bars label="逐任务相关性" rows={Object.entries(r.scores).sort((a, b) => b[1] - a[1]).map(([id, p]) => ({ key: id, name: name(id), share: p, value: pct(p) }))} />
+              <p className="muted tiny">{i18n.dispatch.steps.perTask}</p>
+              <Bars label={i18n.dispatch.steps.perTask} rows={Object.entries(r.scores).sort((a, b) => b[1] - a[1]).map(([id, p]) => ({ key: id, name: name(id), share: p, value: pct(p) }))} />
             </>
           )}
           {r && (
             <>
-              <p className="muted tiny">路由概率</p>
-              <Bars label="路由概率" rows={Object.entries(r.probabilities).sort((a, b) => b[1] - a[1]).map(([id, p]) => ({ key: id, name: id === "NEW" ? "新任务" : name(id), share: p, value: pct(p) }))} />
+              <p className="muted tiny">{i18n.dispatch.steps.routing}</p>
+              <Bars label={i18n.dispatch.steps.routing} rows={Object.entries(r.probabilities).sort((a, b) => b[1] - a[1]).map(([id, p]) => ({ key: id, name: id === "NEW" ? i18n.dispatch.steps.newTask : name(id), share: p, value: pct(p) }))} />
             </>
           )}
-          <details><summary>给 Jev 的候选说明</summary><pre>{Object.entries(step.criteria).map(([id, text]) => `${id}\n  ${text}`).join("\n")}</pre></details>
+          <details><summary>{i18n.dispatch.steps.criteria}</summary><pre>{Object.entries(step.criteria).map(([id, text]) => `${id}\n  ${text}`).join("\n")}</pre></details>
         </li>
       );
     }
     case "ask":
       return (
         <li>
-          <StepHead title={`派单器第 ${step.round} 轮回答`} offset={offset} />
-          {step.correction && <p className="error tiny">上一轮回答无法使用，带着原因重问：{step.correction}</p>}
-          <pre>{step.answer ?? "（没有回答）"}</pre>
-          <details><summary>完整提示词（{step.prompt.length.toLocaleString()} 字）</summary><pre>{step.prompt}</pre></details>
+          <StepHead title={i18n.dispatch.steps.ask(step.round)} offset={offset} />
+          {step.correction && <p className="error tiny">{i18n.dispatch.steps.correction(step.correction)}</p>}
+          <pre>{step.answer ?? i18n.dispatch.steps.noAnswer}</pre>
+          <details><summary>{i18n.dispatch.steps.fullPrompt(step.prompt.length.toLocaleString())}</summary><pre>{step.prompt}</pre></details>
         </li>
       );
     case "timing": {
       const t = step.timing;
       const stages = ([
-        ["排队", t.queueMs], ["准备候选", t.contextMs], ["Jev 判断", t.jevMs],
-        ["沙箱就绪", t.sandboxMs], ["模型连接", t.connectionMs],
-        ["创建会话", t.threadStartMs], ["提交请求", t.turnStartMs],
-        ["提交至首字", t.firstTextMs], ["首字至完成", t.finishMs],
+        [i18n.dispatch.stages.queue, t.queueMs], [i18n.dispatch.stages.context, t.contextMs], [i18n.dispatch.stages.jev, t.jevMs],
+        [i18n.dispatch.stages.sandbox, t.sandboxMs], [i18n.dispatch.stages.connection, t.connectionMs],
+        [i18n.dispatch.stages.threadStart, t.threadStartMs], [i18n.dispatch.stages.turnStart, t.turnStartMs],
+        [i18n.dispatch.stages.firstText, t.firstTextMs], [i18n.dispatch.stages.finish, t.finishMs],
       ] as Array<[string, number | undefined]>).filter((s): s is [string, number] => s[1] !== undefined);
       const whole = Math.max(t.totalMs ?? 0, ...stages.map(([, v]) => v), 1);
       return (
         <li>
-          <StepHead title={`派单耗时 · 第 ${step.round} 轮`} offset={offset}>
-            {" "}<span className="dispatch-log-chip">{t.model ?? "模型未返回"}{t.effort ? ` · ${t.effort}` : ""}</span>
+          <StepHead title={i18n.dispatch.steps.timing(step.round)} offset={offset}>
+            {" "}<span className="dispatch-log-chip">{t.model ?? i18n.dispatch.steps.noModel}{t.effort ? ` · ${t.effort}` : ""}</span>
           </StepHead>
-          {t.attempts && t.attempts > 1 ? <p className="tiny">尝试 {t.attempts} 次（建会话超时或模型满载后重试）</p> : null}
-          <Bars label="各阶段耗时" rows={stages.map(([label, v]) => ({ key: label, name: label, share: v / whole, value: ms(v) }))} />
-          <p className="muted tiny">{[t.classifierMs !== undefined ? `模型调用 ${ms(t.classifierMs)}` : null, t.totalMs !== undefined ? `本轮总计 ${ms(t.totalMs)}` : null].filter(Boolean).join(" · ")}</p>
+          {t.attempts && t.attempts > 1 ? <p className="tiny">{i18n.dispatch.steps.attempts(t.attempts)}</p> : null}
+          <Bars label={i18n.dispatch.steps.stagesLabel} rows={stages.map(([label, v]) => ({ key: label, name: label, share: v / whole, value: ms(v) }))} />
+          <p className="muted tiny">{[t.classifierMs !== undefined ? i18n.dispatch.steps.modelCall(ms(t.classifierMs)) : null, t.totalMs !== undefined ? i18n.dispatch.steps.roundTotal(ms(t.totalMs)) : null].filter(Boolean).join(" · ")}</p>
         </li>
       );
     }
@@ -119,18 +118,18 @@ function Step({ step, name, start }: { step: DispatchStep; name: (id: string) =>
       const plan = step.plan as { title?: unknown; description?: unknown };
       return (
         <li>
-          <StepHead title="最终计划" offset={offset} />
+          <StepHead title={i18n.dispatch.steps.plan} offset={offset} />
           {typeof plan.title === "string" && <p><strong>{plan.title}</strong></p>}
           {typeof plan.description === "string" && <p className="tiny">{plan.description}</p>}
-          {step.repairs.length > 0 && <p className="tiny">自动修正：{step.repairs.join("；")}</p>}
-          <details><summary>计划 JSON</summary><pre>{JSON.stringify(step.plan, null, 2)}</pre></details>
+          {step.repairs.length > 0 && <p className="tiny">{i18n.dispatch.entry.repairs(step.repairs)}</p>}
+          <details><summary>{i18n.dispatch.steps.planJson}</summary><pre>{JSON.stringify(step.plan, null, 2)}</pre></details>
         </li>
       );
     }
     case "failed":
       return (
         <li>
-          <StepHead title="派单失败" offset={offset} />
+          <StepHead title={i18n.dispatch.steps.failed} offset={offset} />
           <p className="error">{step.reason}</p>
         </li>
       );
@@ -143,7 +142,7 @@ export function DispatchLog({ taskId, onClose }: { taskId: string; onClose: () =
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     let cancelled = false;
-    api.dispatchLog(taskId).then((l) => { if (!cancelled) setLog(l); }, (err) => { if (!cancelled) setError(err instanceof Error ? err.message : "读取失败"); });
+    api.dispatchLog(taskId).then((l) => { if (!cancelled) setLog(l); }, (err) => { if (!cancelled) setError(err instanceof Error ? err.message : i18n.dispatch.loadFailed); });
     return () => { cancelled = true; };
   }, [taskId]);
   useEffect(() => {
@@ -154,43 +153,43 @@ export function DispatchLog({ taskId, onClose }: { taskId: string; onClose: () =
 
   return createPortal(
     <PopupSurface className="file-preview-overlay" role="presentation" onClick={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-      <div className="file-preview dispatch-log" role="dialog" aria-modal="true" aria-label="派单日志">
+      <div className="file-preview dispatch-log" role="dialog" aria-modal="true" aria-label={i18n.dispatch.title}>
         <header className="file-preview-head">
-          <span className="file-preview-name">派单日志{log ? ` · ${log.task.title}` : ""}</span>
+          <span className="file-preview-name">{i18n.dispatch.title}{log ? ` · ${log.task.title}` : ""}</span>
           <span className="spacer" />
-          <button className="ghost" onClick={onClose}>关闭</button>
+          <button className="ghost" onClick={onClose}>{i18n.dispatch.close}</button>
         </header>
         <div className="dispatch-log-body">
           {error && <p className="error" role="alert">{error}</p>}
-          {!log && !error && <p className="muted">正在读取…</p>}
-          {log && <p className="dispatch-log-message"><span className="muted tiny">用户消息</span><br />{log.task.text}</p>}
-          {log && !log.entries.length && <p className="muted">这条消息没有派单记录（派单日志从调试功能上线后开始记录，也可能是手动引用直接追加的补充）。</p>}
+          {!log && !error && <p className="muted">{i18n.dispatch.loading}</p>}
+          {log && <p className="dispatch-log-message"><span className="muted tiny">{i18n.dispatch.userMessage}</span><br />{log.task.text}</p>}
+          {log && !log.entries.length && <p className="muted">{i18n.dispatch.noEntries}</p>}
           {log?.entries.map((entry, i) => {
             const titles = new Map(entry.candidates.map((c) => [c.id, c.title ?? c.id]));
             const name = (id: string) => titles.get(id) ?? id;
             return (
               <section key={entry.at + ":" + i} className="dispatch-log-entry" data-testid="dispatch-log-entry">
-                <h3 className={entry.failed ? "error" : undefined}>{log.entries.length > 1 ? `第 ${log.entries.length - i} 次派单 · ` : ""}{decision(entry, name)}</h3>
+                <h3 className={entry.failed ? "error" : undefined}>{log.entries.length > 1 ? i18n.dispatch.entry.index(log.entries.length - i) : ""}{decision(entry, name)}</h3>
                 <div className="dispatch-log-chips">
                   {models(entry).map((m) => <span key={m} className="dispatch-log-chip">{m}</span>)}
-                  <span className="dispatch-log-chip">耗时 {(entry.latencyMs / 1000).toFixed(1)} 秒</span>
-                  <span className="dispatch-log-chip">派单器 {entry.rounds} 轮</span>
-                  <span className="dispatch-log-chip">提示词 {entry.promptChars.toLocaleString()} 字</span>
+                  <span className="dispatch-log-chip">{i18n.dispatch.entry.latency((entry.latencyMs / 1000).toFixed(1))}</span>
+                  <span className="dispatch-log-chip">{i18n.dispatch.entry.rounds(entry.rounds)}</span>
+                  <span className="dispatch-log-chip">{i18n.dispatch.entry.promptChars(entry.promptChars.toLocaleString())}</span>
                   <span className="muted tiny">{clock(entry.at)}</span>
                 </div>
-                {entry.chosen.related.length > 0 && <p>关联背景：{entry.chosen.related.map((id) => `「${name(id)}」`).join("、")}</p>}
-                {entry.repairs.length > 0 && <p className="tiny">自动修正：{entry.repairs.join("；")}</p>}
+                {entry.chosen.related.length > 0 && <p>{i18n.dispatch.entry.related(entry.chosen.related.map(name))}</p>}
+                {entry.repairs.length > 0 && <p className="tiny">{i18n.dispatch.entry.repairs(entry.repairs)}</p>}
                 <details>
-                  <summary>候选任务（{entry.candidates.length} 个）</summary>
+                  <summary>{i18n.dispatch.entry.candidates(entry.candidates.length)}</summary>
                   <ul className="dispatch-log-candidates">
                     {entry.candidates.map((c) => (
                       <li key={c.id}>
-                        <span>{c.title ?? "（已删除）"}</span> <span className="muted tiny">{SOURCES[c.source] ?? c.source}{c.rank ? ` · 第 ${c.rank} 名 · ${c.score}` : ""} · {c.id}</span>
+                        <span>{c.title ?? i18n.dispatch.entry.deleted}</span> <span className="muted tiny">{SOURCES[c.source] ?? c.source}{c.rank ? i18n.dispatch.entry.rank(c.rank, c.score) : ""} · {c.id}</span>
                       </li>
                     ))}
                   </ul>
                 </details>
-                {entry.steps.length > 0 ? <ol className="dispatch-log-steps">{entry.steps.map((step, j) => <Step key={j} step={step} name={name} start={entry.steps[0].at} />)}</ol> : <p className="muted tiny">这次派单早于逐步日志，只有上面的汇总。</p>}
+                {entry.steps.length > 0 ? <ol className="dispatch-log-steps">{entry.steps.map((step, j) => <Step key={j} step={step} name={name} start={entry.steps[0].at} />)}</ol> : <p className="muted tiny">{i18n.dispatch.entry.noSteps}</p>}
               </section>
             );
           })}

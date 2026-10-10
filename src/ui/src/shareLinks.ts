@@ -1,4 +1,5 @@
 import { marked, type Token, type Tokens } from "marked";
+import { t } from "./i18n";
 
 /**
  * Public share pages (`/u/<user>/share/<name>/`, or the short `share?<name>`) a
@@ -35,7 +36,7 @@ export function extractShareLinks(markdown: string): ShareLink[] {
     if (!isShareUrl(href) || seen.has(href)) return;
     seen.add(href);
     const label = text.replace(/[*_`]/g, "").trim();
-    links.push({ url: href, title: label && label !== href ? label : "分享页面" });
+    links.push({ url: href, title: label && label !== href ? label : t.cards.share.defaultTitle });
   });
   return links;
 }

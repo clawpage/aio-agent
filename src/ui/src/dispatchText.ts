@@ -7,8 +7,8 @@
  * Display only: it reads the shape the control plane writes (the dispatch
  * prompt in src/control/tasks/service.ts), and anything else is shown in full.
  */
-const DISPATCH_HEAD = "你是 AIO Agent 主会话委派的子 agent";
-const TASK_MARKER = "\n\n本次用户任务：\n\n";
+const DISPATCH_HEAD = "你是 AIO Agent 主会话委派的子 agent"; // i18n-exempt: matches the control plane's dispatch prompt
+const TASK_MARKER = "\n\n本次用户任务：\n\n"; // i18n-exempt: matches the control plane's dispatch prompt
 
 export function dispatchedTask(message: string): string | null {
   if (!message.startsWith(DISPATCH_HEAD)) return null;

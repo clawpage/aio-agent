@@ -1,0 +1,107 @@
+export const feed = {
+  /** Shown in turn while the dispatcher decides where a message goes. */
+  dispatchHints: ["理解你的需求", "对照进行中和历史任务", "决定新开任务还是补充到已有任务"],
+  waiting: {
+    approvals: "等你确认",
+    browser: "等你操作浏览器",
+    blocked: "需要补充",
+    input: "等你补充",
+  },
+  status: {
+    planning: "正在分配",
+    needs_input: "等待你补充",
+    planning_failed: "分配失败",
+    waiting: "等待依赖或资源",
+    queued: "排队中",
+    running: "在办",
+    stopping: "正在停止…",
+    completed: "已完成",
+    failed: "执行失败",
+    interrupted: "已停止",
+    unknown: "结果待核对",
+    blocked: "需要补充",
+  } as Record<string, string>,
+  errors: {
+    notUploaded: (names: string) => `${names} 没传上去`,
+    retry: (message: string) => `${message}（可以再点一次）`,
+    upload: (name: string, message: string) => `${name}：${message}`,
+    uploadFailed: "上传失败",
+  },
+  progress: {
+    needsConfirm: "需要你确认",
+    needsBrowser: "需要你操作浏览器",
+    expand: (title: string) => `展开任务：${title}`,
+  },
+  question: {
+    label: "需要你补充",
+    hintForm: "填好后提交，或直接在下方输入",
+    hintOptions: "点选一个，或直接在下方输入",
+    hintText: "直接在下方输入回复即可",
+  },
+  /** Sent as the person's reply once they finished on the phone. */
+  phoneDone: "我已在手机上操作完成，请继续。",
+  actions: {
+    quote: "引用任务",
+    quoteLabel: (title: string) => `引用任务：${title}`,
+    retryPlanning: "重试分配",
+    stop: "停止该任务",
+    details: "查看过程",
+    dispatchLog: "派单日志",
+    dispatchLogLabel: (title: string) => `派单日志：${title}`,
+  },
+  head: {
+    title: "主会话",
+    awaitingInput: (n: number) => `${n} 件等你补充`,
+    awaitingBrowser: (n: number) => `${n} 件等你操作浏览器`,
+    active: (n: number) => `${n} 件在办`,
+    idle: "随时可以交给我",
+    connecting: "正在连接…",
+  },
+  older: {
+    retry: "更早的任务没加载出来，点此重试",
+    loading: "正在加载更早的任务…",
+  },
+  empty: {
+    title: "把事情交给我",
+    body: "可以接着发不同任务。过程会收拢，完成后在这里回报。",
+  },
+  report: {
+    schedule: (rule: string) => `定时 · ${rule}`,
+    noResult: "任务已结束，但没有返回文字结果，请打开详情核对。",
+  },
+  scheduleRun: (title: string, rule: string) => `定时任务「${title}」自动运行 · ${rule} · `,
+  userMessage: "用户消息",
+  quoted: (title: string) => `引用：${title}`,
+  earlierTask: "此前任务",
+  supplement: {
+    merged: (title: string) => `已补充到：${title}`,
+    merging: (title: string) => `正在补充到：${title}`,
+    cancelled: (title: string) => `已取消补充：${title}`,
+    check: (title: string) => `补充需要核对：${title}`,
+  },
+  outgoing: {
+    uploading: "附件上传中",
+    sending: "发送中…",
+    unsent: "未发送",
+    failed: "发送失败",
+    retry: "重试",
+    edit: "改一改",
+  },
+  needsYou: {
+    label: "等你处理的任务",
+    bubble: (kind: string, title: string) => `${kind}：${title}，点击查看`,
+  },
+  toLatest: "回到最新消息",
+  reference: {
+    label: "引用任务",
+    cancel: "取消引用任务",
+  },
+  composer: {
+    placeholder: "交给我一个任务…",
+    placeholderReference: "继续补充这个任务…",
+  },
+  pills: {
+    pickTask: "选择要查看的任务",
+    viewTask: "查看这个任务",
+  },
+};

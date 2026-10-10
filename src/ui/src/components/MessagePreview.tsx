@@ -2,6 +2,7 @@ import { PopupPresence, PopupSurface } from "./PopupMotion";
 import { useLayoutEffect, useRef, useState, type ReactNode, type KeyboardEvent } from "react";
 import { createPortal } from "react-dom";
 import { isSandboxLink } from "../sandboxLink";
+import { t } from "../i18n";
 
 /** Keep long main-inbox messages compact, with the complete interactive message at hand. */
 export function MessagePreview({ children, title, user = false }: { children: ReactNode; title: string; user?: boolean }) {
@@ -65,9 +66,9 @@ export function MessagePreview({ children, title, user = false }: { children: Re
       if (!event.defaultPrevented && clipped && !window.getSelection()?.toString() && !(event.target as HTMLElement).closest("a, button, input, textarea, select, video, audio")) show();
     }}>
       <div ref={content} className="message-preview-content">{children}</div>
-      {clipped && <button ref={more} type="button" className="message-more" onClick={show} aria-label={`点击看更多：${title}`}>点击看更多</button>}
+      {clipped && <button ref={more} type="button" className="message-more" onClick={show} aria-label={t.chat.preview.moreLabel(title)}>{t.chat.preview.more}</button>}
     </div>
-    <PopupPresence onExited={() => setReading(false)}>{open && createPortal(<PopupSurface className="full-message-backdrop" onClick={event => { if (event.target === event.currentTarget) dismiss(); }}><div className="full-message" role="dialog" aria-modal="true" aria-label={`完整消息：${title}`} onKeyDown={keys} onClick={event => {
+    <PopupPresence onExited={() => setReading(false)}>{open && createPortal(<PopupSurface className="full-message-backdrop" onClick={event => { if (event.target === event.currentTarget) dismiss(); }}><div className="full-message" role="dialog" aria-modal="true" aria-label={t.chat.preview.fullLabel(title)} onKeyDown={keys} onClick={event => {
       if (!event.currentTarget.contains(event.target as Node)) return;
       // An answer picked here is sent: the reading page has done its job, back to the feed.
       if ((event.target as HTMLElement).closest(".choice-list button.choice:not(:disabled)")) { dismiss(); return; }
@@ -77,7 +78,7 @@ export function MessagePreview({ children, title, user = false }: { children: Re
       if (isSandboxLink(url)) dismiss();
     }}>
       <div className="full-message-grabber" aria-hidden="true" />
-      <header className="full-message-head"><strong>{title}</strong><button ref={close} type="button" className="ghost full-message-close" onClick={dismiss} aria-label="关闭消息" title="关闭（Esc）"><span className="full-message-close-label">关闭</span><svg className="full-message-close-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button></header>
+      <header className="full-message-head"><strong>{title}</strong><button ref={close} type="button" className="ghost full-message-close" onClick={dismiss} aria-label={t.chat.preview.closeLabel} title={t.chat.preview.closeTitle}><span className="full-message-close-label">{t.chat.preview.close}</span><svg className="full-message-close-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button></header>
       <div className={`full-message-body${user ? " user" : ""}`}><article className="full-message-content">{children}</article></div>
     </div></PopupSurface>, document.body)}</PopupPresence>
   </>;

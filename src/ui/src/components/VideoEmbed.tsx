@@ -1,8 +1,9 @@
 import { openNativeBrowser } from "../deviceBrowser";
 import { memo } from "react";
 import { opensVideosOutside, type VideoLink } from "../videoLinks";
+import { t } from "../i18n";
 
-const PROVIDER = { youtube: "YouTube", bilibili: "B 站" } as const;
+const PROVIDER = { youtube: "YouTube", bilibili: t.cards.video.bilibili } as const;
 
 /**
  * A YouTube or Bilibili video a message links to. On a computer it plays in place:
@@ -16,11 +17,11 @@ export const VideoEmbed = memo(function VideoEmbed({ video }: { video: VideoLink
   const label = PROVIDER[video.provider];
   if (opensVideosOutside(navigator.userAgent)) {
     return (
-      <a className="video-link" data-provider={video.provider} href={video.page} onClick={event => { if (openNativeBrowser(video.page)) event.preventDefault(); }} target="_blank" rel="noopener noreferrer" aria-label={`在${label}打开${video.title ? `：${video.title}` : "视频"}`}>
+      <a className="video-link" data-provider={video.provider} href={video.page} onClick={event => { if (openNativeBrowser(video.page)) event.preventDefault(); }} target="_blank" rel="noopener noreferrer" aria-label={t.cards.video.open(label, video.title)}>
         <span className="video-link-play" aria-hidden="true">▶</span>
         <span className="video-link-text">
-          <span className="video-link-title">{video.title ?? `${label} 视频`}</span>
-          <span className="video-link-hint">在 {label} 打开</span>
+          <span className="video-link-title">{video.title ?? t.cards.video.fallbackTitle(label)}</span>
+          <span className="video-link-hint">{t.cards.video.openHint(label)}</span>
         </span>
       </a>
     );
@@ -30,7 +31,7 @@ export const VideoEmbed = memo(function VideoEmbed({ video }: { video: VideoLink
       <div className="video-embed-frame">
         <iframe
           src={video.embed}
-          title={`${label} 视频${video.title ? `：${video.title}` : ""}`}
+          title={t.cards.video.frame(label, video.title)}
           loading="lazy"
           allow="encrypted-media; picture-in-picture; fullscreen; autoplay"
           allowFullScreen

@@ -5,6 +5,7 @@ import { api } from "../api";
 import { cachedImage, holdImage } from "../imageCache";
 import { isWebLink, isSandboxLink, isWorkspaceFilePath, workspaceFileKind, workspaceFilePathFromHref } from "../sandboxLink";
 import { openNativeBrowser } from "../deviceBrowser";
+import { t } from "../i18n";
 import { embedMediaLinks } from "../fileRefs";
 import { splitMapBlocks, type MessagePart } from "../mapBlocks";
 import { splitSvgBlocks, type SvgPart } from "../svgBlocks";
@@ -133,8 +134,8 @@ export function Markdown(props: MarkdownProps) {
           : part.kind === "choices"
             ? <ChoiceList key={i} options={part.options} chosen={props.choices?.chosen ?? null} disabled={props.choices?.disabled} onChoose={props.choices?.onChoose} />
           : part.kind === "ask"
-            ? <div key={i} className="task-question ask-block" role="note" aria-label="向你提问">
-                <div className="task-question-heading"><span aria-hidden="true">?</span><strong>向你提问</strong></div>
+            ? <div key={i} className="task-question ask-block" role="note" aria-label={t.cards.markdown.ask}>
+                <div className="task-question-heading"><span aria-hidden="true">?</span><strong>{t.cards.markdown.ask}</strong></div>
                 <p>{part.question}</p>
                 {part.options && <ChoiceList options={part.options} disabled />}
                 {part.form && <FormCard spec={part.form} embedded />}
@@ -182,7 +183,7 @@ function MarkdownBlock({
     const fail = (img: HTMLImageElement) => {
       const note = window.document.createElement("span");
       note.className = "inline-media-failed muted tiny";
-      note.textContent = `图片暂时无法显示：${img.alt || img.getAttribute("data-sandbox-image")?.split("/").pop() || img.getAttribute("data-web-image") || ""}`;
+      note.textContent = t.cards.markdown.imageFailed(img.alt || img.getAttribute("data-sandbox-image")?.split("/").pop() || img.getAttribute("data-web-image") || "");
       img.replaceWith(note);
     };
     const load = (el: Element) => {
@@ -194,7 +195,7 @@ function MarkdownBlock({
         el.addEventListener("error", () => {
           const note = window.document.createElement("span");
           note.className = "inline-media-failed muted tiny";
-          note.textContent = "暂时放不了（文件可能已移动，或这个浏览器不支持这种格式）：点上面的标题打开预览或下载。";
+          note.textContent = t.cards.markdown.mediaFailed;
           el.replaceWith(note);
         }, { once: true });
         el.src = api.documentMediaUrl(path);

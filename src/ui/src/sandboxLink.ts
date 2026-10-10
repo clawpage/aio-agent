@@ -17,6 +17,8 @@
  * endpoint re-validates every path server-side.
  */
 
+import { t } from "./i18n";
+
 /** Fixed workspace root inside the AIO sandbox (matches `sandbox.containerWorkspaceDir`). */
 export const SANDBOX_WORKSPACE_ROOT = "/home/gem/workspace";
 
@@ -127,23 +129,23 @@ export function workspaceFileKind(path: string): WorkspaceFileKind {
 export function kindLabel(kind: WorkspaceFileKind): string {
   switch (kind) {
     case "video":
-      return "视频";
+      return t.workspace.kinds.video;
     case "audio":
-      return "音频";
+      return t.workspace.kinds.audio;
     case "image":
-      return "图片";
+      return t.workspace.kinds.image;
     case "pdf":
-      return "PDF";
+      return t.workspace.kinds.pdf;
     case "word":
-      return "Word 文档";
+      return t.workspace.kinds.word;
     case "excel":
-      return "Excel 表格";
+      return t.workspace.kinds.excel;
     case "ppt":
-      return "PowerPoint 演示";
+      return t.workspace.kinds.ppt;
     case "text":
-      return "文本";
+      return t.workspace.kinds.text;
     default:
-      return "文件";
+      return t.workspace.kinds.file;
   }
 }
 

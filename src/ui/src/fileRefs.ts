@@ -57,7 +57,7 @@ export function extractFileRefs(markdown: string): FileRef[] {
     seen.add(path);
     const title = label.replace(/[*_`]/g, "").trim();
     refs.push({ path, name: nameOf(path), kind: workspaceFileKind(path), image,
-      ...(!image && title && title !== nameOf(path) && !/^(?:下载|下载文件|下载图片|点击下载|查看|打开|download)$/i.test(title) ? { title } : {}),
+      ...(!image && title && title !== nameOf(path) && !/^(?:下载|下载文件|下载图片|点击下载|查看|打开|download)$/i.test(title) ? { title } : {}), // i18n-exempt: matches generic link text written by the agent
     });
   };
 

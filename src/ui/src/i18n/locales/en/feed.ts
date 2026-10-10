@@ -1,0 +1,107 @@
+import type { feed as zh } from "../zh/feed";
+
+export const feed: typeof zh = {
+  dispatchHints: ["Understanding your request", "Checking active and past tasks", "Deciding: a new task or an addition to an existing one"],
+  waiting: {
+    approvals: "Needs your OK",
+    browser: "Needs you in the browser",
+    blocked: "Needs more info",
+    input: "Needs your input",
+  },
+  status: {
+    planning: "Assigning",
+    needs_input: "Waiting for your input",
+    planning_failed: "Assignment failed",
+    waiting: "Waiting on dependencies or resources",
+    queued: "Queued",
+    running: "In progress",
+    stopping: "Stopping…",
+    completed: "Done",
+    failed: "Failed",
+    interrupted: "Stopped",
+    unknown: "Result needs checking",
+    blocked: "Needs more info",
+  },
+  errors: {
+    notUploaded: (names: string) => `${names} didn't upload`,
+    retry: (message: string) => `${message} (you can try again)`,
+    upload: (name: string, message: string) => `${name}: ${message}`,
+    uploadFailed: "Upload failed",
+  },
+  progress: {
+    needsConfirm: "Needs your OK",
+    needsBrowser: "Needs you in the browser",
+    expand: (title: string) => `Expand task: ${title}`,
+  },
+  question: {
+    label: "Needs your input",
+    hintForm: "Fill it in and submit, or just type below",
+    hintOptions: "Tap one, or just type below",
+    hintText: "Just type your reply below",
+  },
+  phoneDone: "I've finished on the phone. Please continue.",
+  actions: {
+    quote: "Quote task",
+    quoteLabel: (title: string) => `Quote task: ${title}`,
+    retryPlanning: "Retry assignment",
+    stop: "Stop task",
+    details: "View steps",
+    dispatchLog: "Dispatch log",
+    dispatchLogLabel: (title: string) => `Dispatch log: ${title}`,
+  },
+  head: {
+    title: "Main chat",
+    awaitingInput: (n: number) => `${n} need${n === 1 ? "s" : ""} your input`,
+    awaitingBrowser: (n: number) => `${n} need${n === 1 ? "s" : ""} you in the browser`,
+    active: (n: number) => `${n} in progress`,
+    idle: "Ready when you are",
+    connecting: "Connecting…",
+  },
+  older: {
+    retry: "Couldn't load earlier tasks. Tap to retry",
+    loading: "Loading earlier tasks…",
+  },
+  empty: {
+    title: "Hand things off to me",
+    body: "Send as many different tasks as you like. The steps stay tucked away, and results are reported here when done.",
+  },
+  report: {
+    schedule: (rule: string) => `Scheduled · ${rule}`,
+    noResult: "The task finished without a text result. Open the details to check.",
+  },
+  scheduleRun: (title: string, rule: string) => `Scheduled task "${title}" ran automatically · ${rule} · `,
+  userMessage: "Your message",
+  quoted: (title: string) => `Quoting: ${title}`,
+  earlierTask: "an earlier task",
+  supplement: {
+    merged: (title: string) => `Added to: ${title}`,
+    merging: (title: string) => `Adding to: ${title}`,
+    cancelled: (title: string) => `Addition cancelled: ${title}`,
+    check: (title: string) => `Addition needs checking: ${title}`,
+  },
+  outgoing: {
+    uploading: "Uploading attachments",
+    sending: "Sending…",
+    unsent: "Not sent",
+    failed: "Couldn't send",
+    retry: "Retry",
+    edit: "Edit",
+  },
+  needsYou: {
+    label: "Tasks waiting on you",
+    bubble: (kind: string, title: string) => `${kind}: ${title}. Tap to view`,
+  },
+  toLatest: "Jump to latest",
+  reference: {
+    label: "Quoting task",
+    cancel: "Remove quoted task",
+  },
+  composer: {
+    placeholder: "Give me a task…",
+    placeholderReference: "Add to this task…",
+  },
+  pills: {
+    pickTask: "Choose a task to view",
+    viewTask: "View this task",
+  },
+};

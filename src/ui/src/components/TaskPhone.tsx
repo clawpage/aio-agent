@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { PopupPresence, PopupSurface } from "./PopupMotion";
 import { api } from "../api";
+import { t } from "../i18n";
 import type { Task } from "../types";
 import { PhoneScreen } from "./PhoneScreen";
 
@@ -39,34 +40,34 @@ export function TaskPhone({ task, onDone }: { task: Task; onDone: () => void }) 
   }, [open, close]);
 
   const done = () => { setOpen(false); onDone(); };
-  const label = waiting ? "需要你在手机上操作" : "AI 正在操作手机";
+  const label = waiting ? t.phone.task.waiting : t.phone.task.working;
 
   return (
-    <div className={`task-browser task-phone ${waiting ? "request" : "ai"}`} role="group" aria-label={`任务手机：${label}`}>
+    <div className={`task-browser task-phone ${waiting ? "request" : "ai"}`} role="group" aria-label={t.phone.task.group(label)}>
       <div className="task-browser-head">
         <span className={`task-browser-state ${waiting ? "request" : "ai"}`}>{label}</span>
-        <span className="task-browser-site">手机</span>
+        <span className="task-browser-site">{t.phone.task.site}</span>
       </div>
-      {waiting && <p className="task-browser-hint">点画面打开手机直接操作，完成后点“完成，继续”。</p>}
+      {waiting && <p className="task-browser-hint">{t.phone.task.waitingHint}</p>}
       {shotFailed
-        ? <p className="task-browser-hint">手机未连接，请检查 USB 连接。</p>
+        ? <p className="task-browser-hint">{t.phone.task.disconnected}</p>
         : (
-          <button type="button" className="task-browser-shot task-phone-shot" onClick={() => setOpen(true)} aria-label="打开手机操作">
-            <img src={api.phoneScreenshotUrl(shotAt)} alt="手机屏幕" onLoad={() => setShotFailed(false)} onError={() => setShotFailed(true)} />
+          <button type="button" className="task-browser-shot task-phone-shot" onClick={() => setOpen(true)} aria-label={t.phone.task.openLabel}>
+            <img src={api.phoneScreenshotUrl(shotAt)} alt={t.phone.task.shotAlt} onLoad={() => setShotFailed(false)} onError={() => setShotFailed(true)} />
           </button>
         )}
       <div className="task-actions">
-        <button type="button" className={waiting ? "primary tiny" : "ghost tiny"} onClick={() => setOpen(true)}>{waiting ? "去手机操作" : "查看手机"}</button>
-        {waiting && <button type="button" className="ghost tiny" onClick={done}>完成，继续</button>}
+        <button type="button" className={waiting ? "primary tiny" : "ghost tiny"} onClick={() => setOpen(true)}>{waiting ? t.phone.task.goOperate : t.phone.task.view}</button>
+        {waiting && <button type="button" className="ghost tiny" onClick={done}>{t.phone.task.done}</button>}
       </div>
       {/* On the body: a card inside the feed sits under transformed ancestors, which would trap a fixed overlay. */}
       <PopupPresence>{open && createPortal(
         <PopupSurface ref={overlay} className="task-console-overlay" role="presentation" onClick={(e) => { if (e.target === e.currentTarget) close(); }}>
-          <div className="task-console task-phone-console" role="dialog" aria-modal="true" aria-label="操作手机">
+          <div className="task-console task-phone-console" role="dialog" aria-modal="true" aria-label={t.phone.task.dialog}>
             <header className="task-console-head">
-              <span className="task-console-title">{waiting ? "在手机上完成这一步" : "手机"}</span>
-              {waiting && <button type="button" className="primary tiny" onClick={done}>完成，继续</button>}
-              <button type="button" className="ghost tiny" onClick={close}>关闭</button>
+              <span className="task-console-title">{waiting ? t.phone.task.finishTitle : t.phone.task.title}</span>
+              {waiting && <button type="button" className="primary tiny" onClick={done}>{t.phone.task.done}</button>}
+              <button type="button" className="ghost tiny" onClick={close}>{t.phone.task.close}</button>
             </header>
             <PhoneScreen active />
           </div>

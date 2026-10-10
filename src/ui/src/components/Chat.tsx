@@ -29,6 +29,7 @@ import { extractFileRefs, attachmentRefs, embedMediaLinks } from "../fileRefs";
 import { dispatchedTask } from "../dispatchText";
 import { isPreviewableKind, isSandboxLink, workspaceFileKind } from "../sandboxLink";
 import { openNativeBrowser } from "../deviceBrowser";
+import { t } from "../i18n";
 
 interface Props {
   readOnly?: boolean;
@@ -43,15 +44,7 @@ interface Props {
   onOpenBrowserFile?: (path: string) => void;
 }
 
-const APPROVAL_LABELS: Record<string, string> = {
-  "item/commandExecution/requestApproval": "请求执行命令",
-  "item/fileChange/requestApproval": "请求修改文件",
-  "item/permissions/requestApproval": "请求额外权限",
-  "item/tool/requestUserInput": "需要你补充信息",
-  "mcpServer/elicitation/request": "MCP 需要你的输入",
-  applyPatchApproval: "请求应用补丁",
-  execCommandApproval: "请求执行命令",
-};
+const APPROVAL_LABELS: Record<string, string> = t.chat.approval.labels;
 
 function newMessageId(): string {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) return crypto.randomUUID();
@@ -143,7 +136,7 @@ export function Chat({
           }
         },
         onRevoked: () => {
-          setError("会话已失效，请重新登录");
+          setError(t.chat.errors.sessionExpired);
           close?.();
         },
       });
@@ -220,7 +213,7 @@ export function Chat({
       setTimeline((prev) => removeBlock(prev, `user:pending:${clientMessageId}`));
       setDraft(text);
       setAttachments(attachments);
-      setError(`${err instanceof Error ? err.message : String(err)}（内容已保留，可直接重试）`);
+      setError(t.chat.errors.sendFailed(err instanceof Error ? err.message : String(err)));
     } finally {
       setBusy(false);
     }
@@ -279,12 +272,12 @@ export function Chat({
         tray.settle(item, stored);
       } catch (err) {
         tray.settle(item, null);
-        failures.push(`${item.name}：${err instanceof Error ? err.message : String(err)}`);
+        failures.push(t.chat.errors.uploadItem(item.name, err instanceof Error ? err.message : String(err)));
       }
     }
     if (uploaded.length) pendingRef.current = null;
     if (failures.length) {
-      setError(`部分附件上传失败：${failures.join("；")}${uploaded.length ? "（已上传的附件已保留）" : ""}`);
+      setError(t.chat.errors.uploadFailed(failures, uploaded.length > 0));
     }
     setUploading(false);
   }, []);
@@ -299,13 +292,13 @@ export function Chat({
           <h2 title={conversation.title}>{conversation.title}</h2>
           <span className={`dot ${connected ? "ok" : "warn"}`} aria-hidden />
           <span className="chat-sub">
-            {running ? "智能体工作中…" : connected ? "已连接" : "重连中…"}
+            {running ? t.chat.head.working : connected ? t.chat.head.connected : t.chat.head.reconnecting}
           </span>
         </div>
         <div className="chat-head-actions">
-          {pendingApprovals > 0 && <span className="pill warn">{pendingApprovals} 项待处理</span>}
+          {pendingApprovals > 0 && <span className="pill warn">{t.chat.head.pendingApprovals(pendingApprovals)}</span>}
           {!readOnly && <button type="button" className="ghost" onClick={() => onOpenWorkspace()}>
-            工作区
+            {t.chat.head.workspace}
           </button>}
         </div>
       </header>
@@ -320,19 +313,19 @@ export function Chat({
       >
         {blocks.length === 0 && (
           <div className="empty">
-            <h3>开始新的对话</h3>
+            <h3>{t.chat.empty.title}</h3>
             <p>
-              这是一个常驻的 Codex 智能体，运行在你自己的 AIO 沙箱里。它可以读写沙箱文件、运行命令、操作真实浏览器并查看桌面。
+              {t.chat.empty.body}
             </p>
             <div className="hints">
-              <button type="button" onClick={() => setDraft("打开 https://example.com，告诉我页面标题并截图保存到工作区。")}>
-                浏览器实测
+              <button type="button" onClick={() => setDraft(t.chat.empty.hints.browser.prompt)}>
+                {t.chat.empty.hints.browser.label}
               </button>
-              <button type="button" onClick={() => setDraft("在当前工作区创建一个 hello.py，运行并输出结果。")}>
-                写代码并运行
+              <button type="button" onClick={() => setDraft(t.chat.empty.hints.code.prompt)}>
+                {t.chat.empty.hints.code.label}
               </button>
-              <button type="button" onClick={() => setDraft("列出 /home/gem/workspace 下的文件并总结。")}>
-                查看工作区文件
+              <button type="button" onClick={() => setDraft(t.chat.empty.hints.files.prompt)}>
+                {t.chat.empty.hints.files.label}
               </button>
             </div>
           </div>
@@ -364,7 +357,7 @@ export function Chat({
         <div className="banner error" role="alert">
           {error}
           <button type="button" onClick={() => setError(null)}>
-            关闭
+            {t.chat.close}
           </button>
         </div>
       )}
@@ -373,9 +366,9 @@ export function Chat({
         <ComposerAttachments items={attachments} pending={tray.pending} previews={tray.previews} onRemove={(path) => { setAttachments((prev) => prev.filter((x) => x.path !== path)); tray.drop(path); }} />
         <textarea
           ref={draftRef}
-          aria-label="消息"
+          aria-label={t.chat.composer.message}
           value={draft}
-          placeholder="想做些什么？"
+          placeholder={t.chat.composer.placeholder}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
@@ -393,12 +386,12 @@ export function Chat({
               can never race the composer being cleared on send. */}
           <label className={`file-button ${uploading || busy ? "disabled" : ""}`} aria-disabled={uploading || busy}>
             <ComposerIcon kind={uploading ? "busy" : "attach"}/>
-            <span className="composer-button-label">{uploading ? "上传中…" : "附件"}</span>
+            <span className="composer-button-label">{uploading ? t.chat.composer.uploading : t.chat.composer.attach}</span>
             <input
               type="file"
               multiple
               className="file-input"
-              aria-label="添加附件"
+              aria-label={t.chat.composer.addAttachment}
               data-testid="attachment-input"
               disabled={uploading || busy}
               onChange={(e) => {
@@ -409,23 +402,23 @@ export function Chat({
           </label>
           <span className="spacer" />
           {running && activeHere ? (
-            <button type="button" className="danger" onClick={() => void stop()} aria-label="停止" title="停止">
-              <ComposerIcon kind="stop"/><span className="composer-button-label">停止</span>
+            <button type="button" className="danger" onClick={() => void stop()} aria-label={t.chat.composer.stop} title={t.chat.composer.stop}>
+              <ComposerIcon kind="stop"/><span className="composer-button-label">{t.chat.composer.stop}</span>
             </button>
           ) : (
             <button
               type="button"
               className="primary"
-              aria-label={willQueue ? "排队发送" : "发送"}
-              title={willQueue ? "排队发送" : "发送"}
+              aria-label={willQueue ? t.chat.composer.queueSend : t.chat.composer.send}
+              title={willQueue ? t.chat.composer.queueSend : t.chat.composer.send}
               onClick={() => void send()}
               disabled={busy || uploading || (!draft.trim() && attachments.length === 0)}
             >
-              <ComposerIcon kind={busy ? "busy" : "send"}/><span className="composer-button-label">{willQueue ? "排队发送" : "发送"}</span>
+              <ComposerIcon kind={busy ? "busy" : "send"}/><span className="composer-button-label">{willQueue ? t.chat.composer.queueSend : t.chat.composer.send}</span>
             </button>
           )}
         </div>
-        {willQueue && <div className="queue-hint">沙箱正在执行其他会话（最多 {capacity} 个并发），本条消息会排队等待。</div>}
+        {willQueue && <div className="queue-hint">{t.chat.composer.queueHint(capacity)}</div>}
       </div>
 
       }
@@ -508,10 +501,10 @@ function UserText({ text }: { text: string }) {
   if (!task) return <div className="plain">{text}</div>;
   return (
     <div className="dispatch-text">
-      <span className="dispatch-label">本次任务</span>
+      <span className="dispatch-label">{t.chat.userText.label}</span>
       <div className="plain">{full ? text : task}</div>
       <button type="button" className="link tiny dispatch-toggle" aria-expanded={full} onClick={() => setFull((v) => !v)}>
-        {full ? "收起，只看本次任务" : `展开派发全文（${text.length} 字）`}
+        {full ? t.chat.userText.collapse : t.chat.userText.expand(text.length)}
       </button>
     </div>
   );
@@ -573,7 +566,7 @@ function BlockView({
   if (block.kind === "reasoning") {
     return (
       <details className="reasoning">
-        <summary>摘要{block.streaming ? "（进行中）" : ""}</summary>
+        <summary>{t.chat.reasoning.summary}{block.streaming ? t.chat.reasoning.inProgress : ""}</summary>
         <pre>{block.text}</pre>
       </details>
     );
@@ -601,9 +594,9 @@ function BlockView({
   return (
     <div className={`status-line ${status.level}`}>
       {status.text}
-      {status.text.includes("浏览器") && (
+      {status.text.includes("浏览器") && ( // i18n-exempt: matches notice text from the server/executor
         <button type="button" className="link" onClick={() => onOpenWorkspace()}>
-          打开工作区
+          {t.chat.openWorkspace}
         </button>
       )}
     </div>
@@ -625,7 +618,7 @@ function ToolCard({ block, inProgress }: { block: Extract<Block, { kind: "tool" 
         <span className="tool-title">{block.title}</span>
         {block.detail && <span className="tool-detail">{block.detail}</span>}
       </summary>
-      {block.output ? <pre>{block.output}</pre> : <pre className="muted">（暂无输出）</pre>}
+      {block.output ? <pre>{block.output}</pre> : <pre className="muted">{t.chat.tool.noOutput}</pre>}
     </details>
   );
 }
@@ -654,12 +647,12 @@ function WorkingGroup({
   const tone = segmentStatusTone(block);
   const emptyHint =
     block.status === "running"
-      ? "正在处理…"
+      ? t.chat.working.running
       : block.status === "stopping"
-        ? "正在停止…"
+        ? t.chat.working.stopping
         : block.status === "queued"
-          ? "已排队等待"
-          : "本轮没有工具调用或摘要";
+          ? t.chat.working.queued
+          : t.chat.working.nothing;
   // The label already counts the tools ("执行了 3 项操作"), and a summary-only
   // history row already says "思考摘要". So the meta only adds what the label
   // leaves out: the summary count beside a tool count, or the live row's own
@@ -667,9 +660,9 @@ function WorkingGroup({
   // says everything there is to say — never a duplicated count.
   const meta =
     toolCount > 0 && reasoningCount > 0
-      ? `${reasoningCount} 条摘要`
+      ? t.chat.working.summaryCount(reasoningCount)
       : active && block.children.length === 0
-        ? "工具与摘要"
+        ? t.chat.working.toolsAndSummaries
         : "";
   // History rows read as neutral marks, not the amber in-progress dot; a real
   // error still flags loudly.
@@ -704,7 +697,7 @@ function WorkingGroup({
               <ToolCard key={child.id} block={child} inProgress={inProgress} />
             ) : (
               <details className="reasoning" key={child.id}>
-                <summary>摘要{inProgress ? "（进行中）" : ""}</summary>
+                <summary>{t.chat.reasoning.summary}{inProgress ? t.chat.reasoning.inProgress : ""}</summary>
                 <pre>{child.text}</pre>
               </details>
             );
@@ -740,7 +733,7 @@ function ApprovalCard({
 }) {
   const params = block.payload as Record<string, unknown>;
   const resolved = block.status === "resolved";
-  const decisionLabel = block.decision === "expired" ? "已超时/已失效" : `已处理：${block.decision}`;
+  const decisionLabel = block.decision === "expired" ? t.chat.approval.expired : t.chat.approval.handled(String(block.decision));
 
   // ---- request_user_input: render the questions and send an answers map ----
   const questions = Array.isArray(params.questions) ? (params.questions as Question[]) : [];
@@ -820,7 +813,7 @@ function ApprovalCard({
               {(question.isOther || !question.options || question.options.length === 0) && (
                 <input
                   type={question.isSecret ? "password" : "text"}
-                  placeholder="手动输入…"
+                  placeholder={t.chat.approval.manualInput}
                   value={freeText[question.id] ?? ""}
                   onChange={(e) => setFreeText({ ...freeText, [question.id]: e.target.value })}
                 />
@@ -829,10 +822,10 @@ function ApprovalCard({
           ))}
           <div className="approval-actions">
             <button type="button" className="primary" onClick={submitAnswers}>
-              提交
+              {t.chat.approval.submit}
             </button>
             <button type="button" className="danger" onClick={() => onRespond(block.requestId, "cancel")}>
-              取消
+              {t.chat.approval.cancel}
             </button>
           </div>
         </div>
@@ -849,7 +842,7 @@ function ApprovalCard({
                 <label key={key} className="field">
                   <span>{label}</span>
                   <select value={String(value ?? "")} onChange={(e) => setForm({ ...form, [key]: e.target.value })}>
-                    <option value="">请选择</option>
+                    <option value="">{t.chat.approval.choose}</option>
                     {prop.enum.map((option) => (
                       <option key={option} value={option}>
                         {option}
@@ -887,10 +880,10 @@ function ApprovalCard({
           })}
           <div className="approval-actions">
             <button type="button" className="primary" onClick={() => onRespond(block.requestId, "accept", { content: form })}>
-              提交
+              {t.chat.approval.submit}
             </button>
             <button type="button" className="ghost" onClick={() => onRespond(block.requestId, "decline")}>
-              拒绝
+              {t.chat.approval.decline}
             </button>
           </div>
         </div>
@@ -902,30 +895,30 @@ function ApprovalCard({
             if (isSandboxLink(elicitationUrl)) { event.preventDefault(); onOpenLink(elicitationUrl); }
             else if (openNativeBrowser(elicitationUrl)) event.preventDefault();
           }}>
-            打开授权页面
+            {t.chat.approval.openAuthPage}
           </a>
           <button type="button" className="primary" onClick={() => onRespond(block.requestId, "accept")}>
-            我已完成授权
+            {t.chat.approval.authDone}
           </button>
           <button type="button" className="ghost" onClick={() => onRespond(block.requestId, "decline")}>
-            拒绝
+            {t.chat.approval.decline}
           </button>
         </div>
       )}
 
       {!resolved && permissions && questions.length === 0 && !elicitationSchema && !elicitationUrl && (
         <div className="question-list">
-          <p className="muted">智能体请求以下额外权限：</p>
+          <p className="muted">{t.chat.approval.permissionsIntro}</p>
           <pre>{JSON.stringify(permissions, null, 2)}</pre>
           <div className="approval-actions">
             <button type="button" className="primary" onClick={() => onRespond(block.requestId, "accept", { permissions })}>
-              允许本轮
+              {t.chat.approval.allowTurn}
             </button>
             <button type="button" className="ghost" onClick={() => onRespond(block.requestId, "acceptForSession", { permissions })}>
-              本次会话都允许
+              {t.chat.approval.allowSession}
             </button>
             <button type="button" className="ghost" onClick={() => onRespond(block.requestId, "decline")}>
-              拒绝
+              {t.chat.approval.decline}
             </button>
           </div>
         </div>
@@ -934,16 +927,16 @@ function ApprovalCard({
       {!resolved && questions.length === 0 && !elicitationSchema && !elicitationUrl && !permissions && (
         <div className="approval-actions">
           <button type="button" className="primary" onClick={() => onRespond(block.requestId, "accept")}>
-            允许
+            {t.chat.approval.allow}
           </button>
           <button type="button" className="ghost" onClick={() => onRespond(block.requestId, "acceptForSession")}>
-            本次会话都允许
+            {t.chat.approval.allowSession}
           </button>
           <button type="button" className="ghost" onClick={() => onRespond(block.requestId, "decline")}>
-            拒绝
+            {t.chat.approval.decline}
           </button>
           <button type="button" className="danger" onClick={() => onRespond(block.requestId, "cancel")}>
-            中止本轮
+            {t.chat.approval.abortTurn}
           </button>
         </div>
       )}

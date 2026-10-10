@@ -1,3 +1,5 @@
+import { t } from "../i18n";
+
 /**
  * A question's answers as a list to tap. The one already sent is checked and the
  * list is then closed; without `onChoose` it only shows the answers.
@@ -10,7 +12,7 @@ export function ChoiceList({ options, chosen = null, disabled = false, onChoose 
 }) {
   const closed = disabled || chosen !== null || !onChoose;
   return (
-    <div className="choice-list" role="group" aria-label="可选回答">
+    <div className="choice-list" role="group" aria-label={t.chat.choices.label}>
       {options.map((option) => {
         const picked = option === chosen;
         return (

@@ -1,0 +1,134 @@
+/*
+ * 一站 color theme: every color the console uses, and nothing else. To restyle
+ * the app, change the values here; components and styles.css only refer to
+ * these names (a unit test keeps literal colors out of them).
+ *
+ * The colors say whose turn it is. Indigo is the AI working (and the brand),
+ * amber is the person's turn (the one loud color on any screen), green is done,
+ * red is an error. Neutrals carry a faint indigo tint.
+ * Dark is the default; light follows the system or the sidebar switch.
+ */
+:root {
+  /* Surfaces and text */
+  --bg: #131219;
+  --bg-soft: #1a1823;
+  --bg-raised: #221f2d;
+  --border: #2d2939;
+  --text: #ecebf3;
+  --text-dim: #9d98ae;
+  /* A quiet wash for hover rows and the strongest hairline, both derived from text. */
+  --hover: color-mix(in srgb, var(--text) 6%, transparent);
+  --border-strong: color-mix(in srgb, var(--text) 16%, var(--border));
+
+  /* Whose turn it is */
+  --ai: #8f86ff;
+  --ai-soft: #2a2550;
+  --you: #ffb547;
+  --you-soft: #3a2c16;
+  --done: #4cc38a;
+  --done-soft: #173126;
+  --error: #ff7369;
+  --accent: var(--ai);
+  --accent-soft: var(--ai-soft);
+  --ok: var(--done);
+  --warn: var(--you);
+
+  /* Text on a filled indigo, amber or red control */
+  --on-accent: #15131c;
+  --on-you: #1b1200;
+  --on-error: #ffffff;
+
+  /* The brand mark: its tile, the line through it and the amber stop */
+  --brand-tile: #5a4fe0;
+  --brand-line: #ffffff;
+  --brand-stop: #ffb547;
+
+  /* Sandbox desktop */
+  --tile-dark: #24222d;
+  --app-glyph: #ffffff;
+  /* Window traffic lights: the same in both themes, as on macOS. */
+  --light-close: #ff5f57;
+  --light-minimize: #febc2e;
+  --light-zoom: #28c840;
+  --terminal-bg: #1e1e1e;
+  --terminal-text: #eeeeee;
+
+  /* Pages and media that bring their own colors */
+  --paper: #ffffff;
+  --media-bg: #000000;
+  --viewer-bg: rgb(10 8 20);
+  /* Controls and labels drawn over a picture or a live screen */
+  --on-media: #ffffff;
+  --media-text: #f2f0f8;
+  --media-text-dim: rgb(255 255 255 / 0.6);
+  --media-caption: #cfcbe0;
+  --media-chip: rgb(16 14 24 / 0.5);
+  --media-chip-strong: rgb(16 14 24 / 0.62);
+  --media-control: rgb(255 255 255 / 0.1);
+  --media-control-border: rgb(255 255 255 / 0.22);
+  --media-hairline: rgb(255 255 255 / 0.18);
+  --media-inset: rgb(255 255 255 / 0.12);
+  --media-track: rgb(255 255 255 / 0.4);
+  --media-ring: rgb(16 14 24 / 0.25);
+
+  /* Scrims behind dialogs, sheets and drawers */
+  --scrim: rgb(0 0 0 / 0.45);
+  --scrim-strong: rgb(0 0 0 / 0.6);
+  --scrim-tint: rgb(12 10 24 / 0.38);
+
+  /* Shadows */
+  --shadow-ink: #000000;
+  --shadow: 0 12px 32px rgb(8 6 20 / 0.45);
+  --shadow-card: 0 1px 2px rgb(8 6 20 / 0.28);
+  --shadow-thumb: 0 4px 12px rgb(20 14 50 / 0.08);
+  --shadow-chip: 0 3px 10px rgb(0 0 0 / 0.18);
+  --shadow-float: 0 6px 20px rgb(0 0 0 / 0.18);
+  --shadow-pop: 0 4px 14px rgb(0 0 0 / 0.16);
+  --shadow-menu: 0 14px 40px rgb(20 14 50 / 0.16), 0 2px 8px rgb(20 14 50 / 0.06);
+  --shadow-dialog: 0 12px 40px rgb(0 0 0 / 0.3);
+  --shadow-sheet: 0 24px 64px rgb(14 10 40 / 0.22), 0 4px 14px rgb(14 10 40 / 0.08);
+  --shadow-drawer: 0 0 30px rgb(0 0 0 / 0.45);
+  --shadow-composer: 0 10px 32px rgb(0 0 0 / 0.1), 0 2px 6px rgb(0 0 0 / 0.05);
+  --shadow-composer-lift: 0 12px 36px rgb(0 0 0 / 0.14);
+
+  /* Charts: series colors in order */
+  --chart-1: var(--ai);
+  --chart-2: var(--done);
+  --chart-3: var(--you);
+  --chart-4: var(--error);
+
+  /* Diagrams (Mermaid) are drawn on paper in both themes */
+  --diagram-node: #f1efff;
+  --diagram-node-border: #b4acf3;
+  --diagram-decision: #fff4e2;
+  --diagram-decision-border: #e7bd7a;
+  --diagram-text: #1d1b26;
+  --diagram-text-dim: #6b6878;
+  --diagram-line: #a29db3;
+  --diagram-cluster: #f8f7fc;
+  --diagram-cluster-border: #e5e2ee;
+
+  color-scheme: dark;
+}
+
+:root[data-theme="light"] {
+  --bg: #f5f4f8;
+  --bg-soft: #ffffff;
+  --bg-raised: #fafafd;
+  --border: #e6e3ee;
+  --text: #1d1b26;
+  --text-dim: #6b6878;
+  --ai: #5a4fe0;
+  --ai-soft: #eeecff;
+  --you: #a15f00;
+  --you-soft: #fff3df;
+  --done: #1f8a5b;
+  --done-soft: #e6f5ee;
+  --error: #cc3b33;
+  --on-accent: #ffffff;
+  --on-you: #ffffff;
+  --media-inset: rgb(20 16 40 / 0.1);
+  --shadow: 0 12px 32px rgb(40 30 80 / 0.14);
+  --shadow-card: 0 1px 2px rgb(40 30 80 / 0.05);
+  color-scheme: light;
+}

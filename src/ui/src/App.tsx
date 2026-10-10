@@ -12,6 +12,7 @@ import { Login } from "./components/Login";
 import { Settings } from "./components/Settings";
 import { Workspace } from "./components/Workspace";
 import { BrandMark } from "./components/Brand";
+import { t } from "./i18n";
 
 type SessionState = { checked: boolean; authenticated: boolean; username: string | null };
 
@@ -69,7 +70,7 @@ function LegacyApp() {
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) {
         setSession((prev) => ({ ...prev, authenticated: false }));
-        setNotice("登录已过期，请重新登录。");
+        setNotice(t.auth.sessionExpired);
       }
     }
   }, []);
@@ -133,7 +134,7 @@ function LegacyApp() {
       } catch (err) {
         if (err instanceof ApiError && err.status === 401) {
           setSession((prev) => ({ ...prev, authenticated: false }));
-          setNotice("登录已过期，请重新登录。");
+          setNotice(t.auth.sessionExpired);
         }
       } finally {
         renewing.current = null;
@@ -279,7 +280,7 @@ function LegacyApp() {
   }, []);
 
   if (!session.checked) {
-    return <div className="boot">加载中…</div>;
+    return <div className="boot">{t.common.loading}</div>;
   }
 
   if (!session.authenticated) {
@@ -298,17 +299,17 @@ function LegacyApp() {
         <div className="brand">
           <BrandMark />
           <div>
-            <strong>一站</strong>
-            <span className="muted tiny">Codex + AIO 沙箱</span>
+            <strong>{t.app.brand.name}</strong>
+            <span className="muted tiny">{t.app.brand.legacyTagline}</span>
           </div>
         </div>
         <button type="button" className="primary block" onClick={() => void createConversation()}>
-          ＋ 新建会话
+          {t.app.legacy.newConversation}
         </button>
         <button type="button" className="ghost block" onClick={() => void toggleArchived()}>
-          {showArchived ? "← 返回活跃会话" : `查看已归档${archived.length ? `（${archived.length}）` : ""}`}
+          {showArchived ? t.app.legacy.backToActive : t.app.legacy.viewArchived(archived.length)}
         </button>
-        <nav className="conv-list" aria-label={showArchived ? "已归档会话" : "会话列表"}>
+        <nav className="conv-list" aria-label={showArchived ? t.app.legacy.archivedList : t.app.legacy.list}>
           {listed.map((c) => (
             <ConversationRow
               key={c.id}
@@ -322,27 +323,27 @@ function LegacyApp() {
             />
           ))}
           {listed.length === 0 && (
-            <p className="muted tiny">{showArchived ? "没有已归档的会话。" : "还没有会话，点击上面的按钮开始。"}</p>
+            <p className="muted tiny">{showArchived ? t.app.legacy.noArchived : t.app.legacy.noConversations}</p>
           )}
         </nav>
         <div className="sidebar-foot">
           <div className={`status-chip ${status?.agent.sessionReady ? "ok" : "warn"}`}>
             <span className="dot" aria-hidden />
-            {status?.agent.sessionReady ? "智能体在线" : "智能体未就绪"}
+            {status?.agent.sessionReady ? t.nav.agentOnline : t.app.legacy.agentNotReady}
           </div>
           {status?.agent.account?.email && <span className="muted tiny">{status.agent.account.email}</span>}
           <button type="button" className="ghost block" onClick={() => setTheme(theme === "dark" ? "light" : "dark")}>
-            {theme === "dark" ? "浅色模式" : "深色模式"}
+            {theme === "dark" ? t.nav.lightMode : t.nav.darkMode}
           </button>
           <button
             type="button"
             className={`ghost block ${view === "settings" ? "active" : ""}`}
             onClick={openSettings}
           >
-            配置
+            {t.nav.settings}
           </button>
           <button type="button" className="ghost block" onClick={() => void logout()}>
-            退出登录
+            {t.nav.logout}
           </button>
         </div>
       </aside>
@@ -350,9 +351,9 @@ function LegacyApp() {
       <main className="main">
         {(hostAuthBad || sandboxBad || agentBad) && (
           <div className="banner error">
-            {hostAuthBad && `宿主机 Codex 登录异常：${status?.hostAuth.error ?? "未知原因"}。请在 Mac 上重新运行 codex login。`}
-            {!hostAuthBad && sandboxBad && "沙箱容器未就绪，正在尝试恢复；工作区功能可能暂不可用。"}
-            {!hostAuthBad && !sandboxBad && agentBad && `智能体会话未就绪：${status?.agent.lastError ?? "正在启动"}`}
+            {hostAuthBad && t.app.legacy.hostAuthError(status?.hostAuth.error ?? null)}
+            {!hostAuthBad && sandboxBad && t.app.legacy.sandboxNotReady}
+            {!hostAuthBad && !sandboxBad && agentBad && t.app.legacy.sessionNotReady(status?.agent.lastError ?? null)}
           </div>
         )}
         {/*
@@ -375,14 +376,14 @@ function LegacyApp() {
             />
           ) : (
             <div className="empty">
-              <h3>{showArchived ? "已归档会话" : "还没有会话"}</h3>
+              <h3>{showArchived ? t.app.legacy.archivedList : t.app.legacy.emptyTitle}</h3>
               <p>
                 {showArchived
-                  ? "在这里恢复到活跃列表。归档只影响侧栏显示，不会清除沙箱文件或远端 Codex 数据。"
-                  : "创建一个会话，开始使用你的常驻智能体。"}
+                  ? t.app.legacy.archivedHint
+                  : t.app.legacy.emptyHint}
               </p>
               <button type="button" className="primary" onClick={() => void createConversation()}>
-                新建会话
+                {t.app.legacy.newConversationShort}
               </button>
             </div>
           )}
@@ -411,10 +412,10 @@ function LegacyApp() {
             setMobilePane(mobilePane === "list" ? "chat" : "list");
           }}
         >
-          会话
+          {t.app.legacy.bottomNav.conversations}
         </button>
         <button type="button" onClick={() => void createConversation()}>
-          新建
+          {t.app.legacy.bottomNav.new}
         </button>
         <button
           type="button"
@@ -424,13 +425,13 @@ function LegacyApp() {
             setWorkspaceOpen(true);
           }}
         >
-          工作区
+          {t.nav.workspace}
         </button>
         <button type="button" className={view === "settings" ? "active" : ""} onClick={openSettings}>
-          配置
+          {t.nav.settings}
         </button>
         <button type="button" onClick={() => void logout()}>
-          退出
+          {t.app.legacy.bottomNav.logout}
         </button>
       </nav>
 
@@ -441,7 +442,7 @@ function LegacyApp() {
           onSave={async (title) => {
             await renameConversation(renameTarget, title);
             setRenameTarget(null);
-            notify("已重命名");
+            notify(t.app.legacy.renamed);
           }}
         />
       )}</PopupPresence>
@@ -556,7 +557,7 @@ function ConversationRow({
         disabled={pendingAction !== null}
         aria-haspopup="menu"
         aria-expanded={open}
-        aria-label={`${title} 的操作`}
+        aria-label={t.app.legacy.actions(title)}
         onClick={() => (open ? close() : openMenu())}
       >
         ⋯
@@ -568,7 +569,7 @@ function ConversationRow({
             ref={menuRef}
             className="conv-menu"
             role="menu"
-            aria-label={`${title} 的操作`}
+            aria-label={t.app.legacy.actions(title)}
             style={{ top: pos.top, left: pos.left }}
           >
             <button
@@ -581,7 +582,7 @@ function ConversationRow({
                 onRename(conversation);
               }}
             >
-              重命名
+              {t.app.legacy.rename}
             </button>
             {archived ? (
               <button
@@ -593,7 +594,7 @@ function ConversationRow({
                   close();
                 }}
               >
-                恢复
+                {t.app.legacy.restore}
               </button>
             ) : (
               <button
@@ -605,7 +606,7 @@ function ConversationRow({
                   close();
                 }}
               >
-                归档
+                {t.app.legacy.archive}
               </button>
             )}
           </PopupSurface>,
@@ -650,11 +651,11 @@ function RenameDialog({
   const submit = useCallback(async () => {
     const title = value.trim();
     if (!title) {
-      setError("标题不能为空");
+      setError(t.app.legacy.titleEmpty);
       return;
     }
     if (title.length > TITLE_MAX_CHARS) {
-      setError(`标题最长 ${TITLE_MAX_CHARS} 个字符`);
+      setError(t.app.legacy.titleTooLong(TITLE_MAX_CHARS));
       return;
     }
     setSaving(true);
@@ -675,10 +676,10 @@ function RenameDialog({
         if (event.target === event.currentTarget) onCancel();
       }}
     >
-      <div className="modal" role="dialog" aria-modal="true" aria-label="重命名会话">
-        <h3>重命名会话</h3>
+      <div className="modal" role="dialog" aria-modal="true" aria-label={t.app.legacy.renameDialog}>
+        <h3>{t.app.legacy.renameDialog}</h3>
         <label className="field rename-field">
-          <span>会话标题</span>
+          <span>{t.app.legacy.titleField}</span>
           <input
             ref={inputRef}
             value={value}
@@ -700,10 +701,10 @@ function RenameDialog({
         )}
         <div className="modal-actions">
           <button type="button" className="ghost" onClick={onCancel} disabled={saving}>
-            取消
+            {t.common.cancel}
           </button>
           <button type="button" className="primary" onClick={() => void submit()} disabled={saving}>
-            {saving ? "保存中…" : "保存"}
+            {saving ? t.common.saving : t.common.save}
           </button>
         </div>
       </div>
@@ -721,6 +722,6 @@ export function App() {
   useEffect(() => { void versionMismatch().then(setMismatch); }, []);
   return <>
     {mismatch && <div className="banner error version-banner" role="alert">{mismatch}</div>}
-    {mode === "loading" ? <div className="boot">加载中…</div> : mode === "legacy" ? <LegacyApp /> : <MainApp />}
+    {mode === "loading" ? <div className="boot">{t.common.loading}</div> : mode === "legacy" ? <LegacyApp /> : <MainApp />}
   </>;
 }

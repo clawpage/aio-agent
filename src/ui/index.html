@@ -4,8 +4,8 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="color-scheme" content="dark light" />
-    <meta name="theme-color" content="#15131c" media="(prefers-color-scheme: dark)" />
-    <meta name="theme-color" content="#f6f5f9" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#131219" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#f5f4f8" media="(prefers-color-scheme: light)" />
     <meta name="format-detection" content="telephone=no" />
     <meta name="apple-mobile-web-app-title" content="一站" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
@@ -13,10 +13,12 @@
     <link rel="manifest" href="/manifest.webmanifest" />
     <title>一站</title>
     <!-- The page before the app's script and styles arrive: the theme's background and the
-         mark, breathing, where the app's own loading screen shows it next (no white flash). -->
+         mark, breathing, where the app's own loading screen shows it next (no white flash).
+         These colors are copies of --bg, --brand-tile, --brand-line and --brand-stop in
+         src/theme.css (and manifest.webmanifest); change them together. -->
     <style>
-      html, body { margin: 0; background: #15131c; }
-      @media (prefers-color-scheme: light) { html, body { background: #f6f5f9; } }
+      html, body { margin: 0; background: #131219; }
+      @media (prefers-color-scheme: light) { html, body { background: #f5f4f8; } }
       .boot-splash { position: fixed; inset: 0; display: grid; place-items: center; }
       .boot-splash svg { animation: boot-in .4s ease-out .15s both, boot-breathe 1.8s ease-in-out .55s infinite; }
       @keyframes boot-in { from { opacity: 0; transform: scale(.94); } }

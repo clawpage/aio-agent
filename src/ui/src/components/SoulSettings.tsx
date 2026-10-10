@@ -1,5 +1,6 @@
 import {useCallback,useEffect,useState} from 'react';
 import {api} from '../api';
+import {t} from '../i18n';
 
 export function SoulSettings() {
   const [content,setContent]=useState('');
@@ -10,7 +11,7 @@ export function SoulSettings() {
   const load=useCallback(async()=>{
     setBusy(true);setError(null);setSaved(false);
     try{const value=await api.soul();setLoaded(value);setContent(value.content);}
-    catch(err){setError(err instanceof Error?err.message:'读取失败');}
+    catch(err){setError(err instanceof Error?err.message:t.settings.soul.loadFailed);}
     finally{setBusy(false);}
   },[]);
   useEffect(()=>{void load();},[load]);
@@ -18,20 +19,20 @@ export function SoulSettings() {
   const save=async()=>{
     if(!loaded)return;setBusy(true);setError(null);setSaved(false);
     try{const result=await api.saveSoul({content,revision:loaded.revision});setLoaded({...loaded,...result});setSaved(true);}
-    catch(err){setError(err instanceof Error?err.message:'保存失败');}
+    catch(err){setError(err instanceof Error?err.message:t.settings.soul.saveFailed);}
     finally{setBusy(false);}
   };
-  return <section className="settings-card soul-settings" aria-label="助理设定">
-    <div className="settings-section-head"><h3>助理设定 <span className="settings-file-label">SOUL.md</span></h3><p>定义助理的身份、语气和做事方式。保存后作为系统指令，用于下一次任务规划、启动或继续任务。</p></div>
-    <label className="field"><span>SOUL.md 内容</span><textarea aria-label="SOUL.md 内容" value={content} onChange={e=>{setContent(e.target.value);setSaved(false);}} disabled={busy||!loaded} spellCheck={false}/></label>
-    <div className="muted tiny">{bytes.toLocaleString()} / 65,536 字节 · 可留空以清除自定义设定</div>
-    {error&&<p className="banner error" role="alert">{error} 重新加载会替换当前草稿，请先复制保留。</p>}
-    {saved&&<p className="banner ok soul-saved" role="status">SOUL.md 已保存，下次任务开始时生效。</p>}
+  return <section className="settings-card soul-settings" aria-label={t.settings.soul.title}>
+    <div className="settings-section-head"><h3>{t.settings.soul.title} <span className="settings-file-label">SOUL.md</span></h3><p>{t.settings.soul.intro}</p></div>
+    <label className="field"><span>{t.settings.soul.contentLabel}</span><textarea aria-label={t.settings.soul.contentLabel} value={content} onChange={e=>{setContent(e.target.value);setSaved(false);}} disabled={busy||!loaded} spellCheck={false}/></label>
+    <div className="muted tiny">{t.settings.soul.size(bytes.toLocaleString())}</div>
+    {error&&<p className="banner error" role="alert">{error} {t.settings.soul.reloadWarning}</p>}
+    {saved&&<p className="banner ok soul-saved" role="status">{t.settings.soul.saved}</p>}
     <div className="settings-actions soul-actions">
-      <button className="ghost" aria-label="重新加载 SOUL.md" disabled={busy} onClick={()=>void load()}>重新加载</button>
-      <button className="ghost" disabled={busy||!loaded} onClick={()=>{setContent(loaded!.defaultContent);setSaved(false);}}>填入默认设定</button>
+      <button className="ghost" aria-label={t.settings.soul.reloadLabel} disabled={busy} onClick={()=>void load()}>{t.settings.soul.reload}</button>
+      <button className="ghost" disabled={busy||!loaded} onClick={()=>{setContent(loaded!.defaultContent);setSaved(false);}}>{t.settings.soul.fillDefault}</button>
       <span className="spacer"/>
-      <button className="primary" disabled={busy||!loaded||bytes>(loaded?.maxBytes??65536)||content===loaded.content} onClick={()=>void save()}>{busy?'处理中…':'保存 SOUL.md'}</button>
+      <button className="primary" disabled={busy||!loaded||bytes>(loaded?.maxBytes??65536)||content===loaded.content} onClick={()=>void save()}>{busy?t.settings.soul.busy:t.settings.soul.save}</button>
     </div>
   </section>;
 }

@@ -5,7 +5,7 @@
 ## 项目定位
 
 **AIO Agent**：owner 管理、self-hosted 的智能体控制台 + 每账号独立 AIO 沙箱 + 主 Codex 智能体，
-中文 UI。owner 可在配置页把执行器切换为 Claude Code（可选，需凭据；派单、执行、标题一并切换）。用户只操作一个主会话，独立请求委派到子任务，相关补充追加到原任务；不展示旧会话历史入口。支持 owner/member 账号分级；任务与对话按账号归属隔离，普通用户固定为管理员分配的模型与推理强度（默认 GPT-6.1 Sol high，可分配 Claude Sonnet 5.5；控制面的 ChatGPT 登录与 owner 的 Claude 凭据都只在宿主侧由成员模型网关附加），配置与模型信息仅 owner 可见。每个 member 使用独立容器、文件卷、Codex 数据卷、浏览器卷、运行数据库和工作区路径（`/u/<用户名>`，兼容旧的 `/u/<账号散列>`，不新增域名；主控制台地址同样是 `/u/<用户名>`）；注册只能凭 owner 在配置页生成的一次性邀请码（只建 member），不对外提供公共 demo；未登录一律 401，唯一例外是工作区来源上由 `aio-share` skill 发布的公开分享页 `/u/<用户名>/share/<页面名>/`（宿主快照、CSP sandbox 隔离，见 `docs/FEATURES.md`「分享网页」）。
+中文界面（可切换英文）。owner 可在配置页把执行器切换为 Claude Code（可选，需凭据；派单、执行、标题一并切换）。用户只操作一个主会话，独立请求委派到子任务，相关补充追加到原任务；不展示旧会话历史入口。支持 owner/member 账号分级；任务与对话按账号归属隔离，普通用户固定为管理员分配的模型与推理强度（默认 GPT-6.1 Sol high，可分配 Claude Sonnet 5.5；控制面的 ChatGPT 登录与 owner 的 Claude 凭据都只在宿主侧由成员模型网关附加），配置与模型信息仅 owner 可见。每个 member 使用独立容器、文件卷、Codex 数据卷、浏览器卷、运行数据库和工作区路径（`/u/<用户名>`，兼容旧的 `/u/<账号散列>`，不新增域名；主控制台地址同样是 `/u/<用户名>`）；注册只能凭 owner 在配置页生成的一次性邀请码（只建 member），不对外提供公共 demo；未登录一律 401，唯一例外是工作区来源上由 `aio-share` skill 发布的公开分享页 `/u/<用户名>/share/<页面名>/`（宿主快照、CSP sandbox 隔离，见 `docs/FEATURES.md`「分享网页」）。
 公网入口（`PA_PRIMARY_HOST` / `PA_WORKSPACE_HOST`）由使用者自行填写，见 `.env.example` 的
 `agent.example.com` / `workspace.example.com` 占位。
 
@@ -13,7 +13,7 @@
 `personal-agent-workspace` / `-codex` / `-browser`、SQLite 文件名 `personal-agent.sqlite`、
 cookie 名 `pa_*` 与 `PA_*` 前缀**保持不变**——它们承载既有容器、卷、数据库与登录状态，改名会
 丢数据或中断服务。health `service` 字段与 Codex `clientInfo.name` 的旧值仅为兼容已有集成保留，
-不是品牌。品牌层为 **一站**（英文 AIO Agent）：页面标题、侧栏、登录页与图标用“一站”，包名与文档仍称 AIO Agent。标志是线路图上的一站：一条线（一）穿过一个站点（站），走过的一段实、前方的一段淡，琥珀色站心表示轮到你；`src/ui/src/components/Brand.tsx` 与 `src/ui/public/` 下的 favicon、PNG 图标、manifest，以及移动端图标源 `src/ui/tauri/icon/`（改后按该目录 README 重新生成）必须同步修改。配色语义：靛紫 = AI 在办（也是品牌主色），琥珀 = 轮到你（全站唯一醒目色），松绿 = 办完，朱红 = 出错；令牌定义在 `src/ui/src/styles.css` 顶部，新界面只用这些令牌，不写死颜色。
+不是品牌。品牌层为 **一站**（英文 AIO Agent）：页面标题、侧栏、登录页与图标用“一站”，包名与文档仍称 AIO Agent。标志是线路图上的一站：一条线（一）穿过一个站点（站），走过的一段实、前方的一段淡，琥珀色站心表示轮到你；`src/ui/src/components/Brand.tsx` 与 `src/ui/public/` 下的 favicon、PNG 图标、manifest，以及移动端图标源 `src/ui/tauri/icon/`（改后按该目录 README 重新生成）必须同步修改。配色语义：靛紫 = AI 在办（也是品牌主色），琥珀 = 轮到你（全站唯一醒目色），松绿 = 办完，朱红 = 出错；所有颜色只定义在 `src/ui/src/theme.css`（深浅两套），`styles.css` 与组件只引用令牌名，不写死颜色（画布、Mermaid 等必须拿到具体色值的地方用 `themeColor()`）。界面文案只放 `src/ui/src/i18n/locales/<语言>/<区域>.ts`：中文为默认与基准形状，英文必须同形（类型检查保证），组件通过 `t.<区域>.<键>` 取用、带参数的文案写成函数；解析服务器或执行器输出的中文留在代码里并加 `// i18n-exempt: <原因>`。`tests/unit/ui-literals.test.ts` 守护这三条。
 
 ## 目录与职责
 

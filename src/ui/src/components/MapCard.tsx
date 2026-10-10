@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { mapLinks, platformOf, tilesFor, type MapPlace } from "../mapBlocks";
 import { apiUrl, API_CREDENTIALS } from "../api";
+import { t } from "../i18n";
 
 /** Tiles around a point, drawn from the console's own tile proxy; no map library. */
 function MapView({ place, zoom, height }: { place: MapPlace; zoom: number; height: number }) {
@@ -74,35 +75,35 @@ function MapSheet({ place, current, onClose }: { place: MapPlace; current: strin
   const links = mapLinks(place, platformOf(navigator.userAgent));
   return createPortal(
     <PopupSurface className="map-sheet-backdrop" onClick={onClose}>
-      <div className="map-sheet" role="dialog" aria-modal="true" aria-label={`在地图中查看 ${place.name}`} onClick={(e) => e.stopPropagation()}>
+      <div className="map-sheet" role="dialog" aria-modal="true" aria-label={t.cards.map.sheet(place.name)} onClick={(e) => e.stopPropagation()}>
         <header className="map-sheet-head">
           <div>
             <h3>{place.name}</h3>
             {place.address && <p className="muted tiny">{place.address}</p>}
           </div>
-          <button ref={close} type="button" className="ghost" onClick={onClose} aria-label="关闭地图">✕</button>
+          <button ref={close} type="button" className="ghost" onClick={onClose} aria-label={t.cards.map.close}>✕</button>
         </header>
         {located && (
           <div className="map-sheet-map">
             <MapView place={place} zoom={zoom} height={260} />
             <div className="map-zoom">
-              <button type="button" aria-label="放大" disabled={zoom >= 18} onClick={() => setZoom((z) => Math.min(18, z + 1))}>＋</button>
-              <button type="button" aria-label="缩小" disabled={zoom <= 3} onClick={() => setZoom((z) => Math.max(3, z - 1))}>－</button>
+              <button type="button" aria-label={t.cards.map.zoomIn} disabled={zoom >= 18} onClick={() => setZoom((z) => Math.min(18, z + 1))}>＋</button>
+              <button type="button" aria-label={t.cards.map.zoomOut} disabled={zoom <= 3} onClick={() => setZoom((z) => Math.max(3, z - 1))}>－</button>
             </div>
           </div>
         )}
-        <p className="map-sheet-label">用哪个地图应用查看</p>
+        <p className="map-sheet-label">{t.cards.map.chooseApp}</p>
         <ul className="map-nav-list">
           {links.map((link) => (
             <li key={link.id}>
               <a {...linkProps(link.href)} data-nav={link.id} onClick={event => { if (openNativeBrowser(link.href)) event.preventDefault(); saveApp(link.id); onClose(); }}>
                 <span>{link.label}</span>
-                <span aria-hidden="true">{link.id === current ? "当前 ›" : "›"}</span>
+                <span aria-hidden="true">{link.id === current ? t.cards.map.current : "›"}</span>
               </a>
             </li>
           ))}
         </ul>
-        <p className="muted tiny map-sheet-note">选过的应用会记在这台设备上，之后点地点直接用它打开。网页看不到手机装了哪些应用，未安装的会打开网页版或没有反应。</p>
+        <p className="muted tiny map-sheet-note">{t.cards.map.note}</p>
       </div>
     </PopupSurface>,
     document.body,
@@ -142,9 +143,9 @@ export function MapCard({ place: given }: { place: MapPlace }) {
   const platform = platformOf(navigator.userAgent);
   const links = mapLinks(place, platform);
   const app = links.find((l) => l.id === (saved ?? (platform === "android" ? "system" : null))) ?? null;
-  const pill = app ? (app.id === "system" ? "打开地图" : app.label) : "查看地图";
+  const pill = app ? (app.id === "system" ? t.cards.map.openMap : app.label) : t.cards.map.viewMap;
   const map = located ? <MapView place={place} zoom={place.zoom} height={150} />
-    : locating ? <div className="map-view map-view-empty" style={{ height: 150 }}><span className="muted tiny">正在定位…</span></div>
+    : locating ? <div className="map-view map-view-empty" style={{ height: 150 }}><span className="muted tiny">{t.cards.map.locating}</span></div>
     : null;
   const text = (
     <>
@@ -162,12 +163,12 @@ export function MapCard({ place: given }: { place: MapPlace }) {
           <>
             {map && <a {...linkProps(app.href)} className="map-card-map" onClick={event => { if (openNativeBrowser(app.href)) event.preventDefault(); }} tabIndex={-1} aria-hidden="true">{map}</a>}
             <div className="map-card-info">
-              <a {...linkProps(app.href)} ref={(el) => { focusBack.current = el; }} className="map-card-open" onClick={event => { if (openNativeBrowser(app.href)) event.preventDefault(); }} aria-label={`在${app.id === "system" ? "地图应用" : app.label}中查看：${place.name}`}>{text}</a>
-              <button type="button" className="map-card-switch ghost tiny" onClick={() => setOpen(true)} aria-label="换个地图应用">换</button>
+              <a {...linkProps(app.href)} ref={(el) => { focusBack.current = el; }} className="map-card-open" onClick={event => { if (openNativeBrowser(app.href)) event.preventDefault(); }} aria-label={t.cards.map.openIn(app.id === "system" ? t.cards.map.systemApp : app.label, place.name)}>{text}</a>
+              <button type="button" className="map-card-switch ghost tiny" onClick={() => setOpen(true)} aria-label={t.cards.map.switchApp}>{t.cards.map.switch}</button>
             </div>
           </>
         ) : (
-          <button ref={(el) => { focusBack.current = el; }} type="button" className="map-card-main" onClick={() => setOpen(true)} aria-label={`地图：${place.name}，点开选择地图应用`}>
+          <button ref={(el) => { focusBack.current = el; }} type="button" className="map-card-main" onClick={() => setOpen(true)} aria-label={t.cards.map.main(place.name)}>
             {map}
             <span className="map-card-info">{text}</span>
           </button>

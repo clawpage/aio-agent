@@ -1,0 +1,43 @@
+import type { usage as zh } from "../zh/usage";
+
+export const usage: typeof zh = {
+  title: "Usage",
+  subtitle: "Daily token usage by account",
+  refresh: "Refresh",
+  readFailed: "Couldn't load usage",
+  range: "Time range",
+  lastDays: (n: number) => `Last ${n} days`,
+  user: "User",
+  allUsers: "All users",
+  stale: (error: string) => `${error} · Data may be out of date`,
+  loading: "Loading usage…",
+  meta: (timezone: string, updated: string) => `Time zone: ${timezone} · Updated ${updated} · Refreshes every 30 seconds`,
+  unavailable: (names: string[]) => `Data for ${names.join(", ")} can't be read right now and isn't included in the totals.`,
+  metrics: {
+    total: "Tokens recorded",
+    input: "Input tokens",
+    output: "Output tokens",
+  },
+  cacheBreakdown: (read: string, written: string) => `Cache reads ${read} · writes ${written}`,
+  trend: "Daily trend",
+  noUsage: "No usage recorded in this period.",
+  chartLabel: "Daily token usage per user",
+  summary: "By user",
+  columns: {
+    user: "User",
+    date: "Date",
+    total: "Total tokens",
+    input: "Input",
+    output: "Output",
+  },
+  roles: {
+    owner: "Owner",
+    member: "Member",
+  },
+  notAvailable: "Unavailable",
+  daily: (who: string) => `Daily breakdown · ${who}`,
+  allUsersTotal: "All users combined",
+  note: "Total = input + output; cached tokens are counted in input. Covers AIO Agent's Codex / Claude runs and dispatch calls. Excludes external clients, image generation and Jev calls, and doesn't reflect subscription limits or billing.",
+  historyNote: "History is backfilled only from saved Codex events; older Claude and dispatch usage, and anything never reported, can't be recovered. Usage that wasn't reported before an interruption may be missing; calls spanning midnight count on the day their usage report arrived.",
+  coverage: (name: string, since: string | null, first: string | null) => `${name}: ${since ? `live tracking since ${since}` : "live tracking starts when the account's executor starts"}; ${first ? `earliest record ${first}` : "no records yet"}`,
+};

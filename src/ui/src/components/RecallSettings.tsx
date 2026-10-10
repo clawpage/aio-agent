@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
 import type { RecallStats } from "../types";
+import { t } from "../i18n";
 
 const pct = (v: number | null) => (v === null ? "—" : `${Math.round(v * 100)}%`);
 
@@ -15,32 +16,32 @@ export function RecallSettings() {
     setError(null);
     api.recallStats(days).then(
       (r) => { if (!cancelled) setStats(r.stats); },
-      (err) => { if (!cancelled) setError(err instanceof Error ? err.message : "读取失败"); },
+      (err) => { if (!cancelled) setError(err instanceof Error ? err.message : t.settings.recall.loadFailed); },
     );
     return () => { cancelled = true; };
   }, [days]);
 
   const rows: Array<[string, string]> = stats
     ? [
-        ["派单次数", `${stats.dispatches} 次${stats.failed || stats.repaired ? `（${[stats.failed ? `失败 ${stats.failed}` : "", stats.repaired ? `自动修正 ${stats.repaired}` : ""].filter(Boolean).join(" · ")}）` : ""}`],
-        ["带历史召回的派单", `${stats.withRecall} 次 · 平均每次 ${stats.avgRecalled} 条`],
-        ["数据库历史检索", `${pct(stats.searchRate)} · 派单器平均 ${stats.avgRounds} 轮`],
-        ["选中的关联任务", `${stats.chosen} 个，其中召回找到 ${stats.chosenFromRecall}`],
-        ["手动引用的老任务", stats.labelled ? `${stats.labelled} 次 · 检索能排进前 ${stats.cap} 名 ${pct(stats.recallAtCap)} · MRR ${stats.mrr ?? "—"}` : "暂无"],
-        ["每次召回上限", `${stats.cap} 条`],
-        ["平均派单耗时", `${(stats.avgLatencyMs / 1000).toFixed(1)} 秒 · 提示词 P90 ${stats.p90PromptChars.toLocaleString()} 字`],
+        [t.settings.recall.dispatches, `${t.settings.recall.dispatchCount(stats.dispatches)}${stats.failed || stats.repaired ? t.settings.recall.breakdown([stats.failed ? t.settings.recall.failed(stats.failed) : "", stats.repaired ? t.settings.recall.repaired(stats.repaired) : ""].filter(Boolean).join(" · ")) : ""}`],
+        [t.settings.recall.withRecall, t.settings.recall.withRecallValue(stats.withRecall, stats.avgRecalled)],
+        [t.settings.recall.search, t.settings.recall.searchValue(pct(stats.searchRate), stats.avgRounds)],
+        [t.settings.recall.chosen, t.settings.recall.chosenValue(stats.chosen, stats.chosenFromRecall)],
+        [t.settings.recall.labelled, stats.labelled ? t.settings.recall.labelledValue(stats.labelled, stats.cap, pct(stats.recallAtCap), String(stats.mrr ?? "—")) : t.settings.recall.none],
+        [t.settings.recall.cap, t.settings.recall.capValue(stats.cap)],
+        [t.settings.recall.latency, t.settings.recall.latencyValue((stats.avgLatencyMs / 1000).toFixed(1), stats.p90PromptChars.toLocaleString())],
       ]
     : [];
 
   return (
-    <section className="settings-card recall-settings" aria-label="历史召回">
+    <section className="settings-card recall-settings" aria-label={t.settings.recall.title}>
       <div className="settings-section-head">
-        <h3>历史召回</h3>
-        <p>派单时自动从全部历史任务里召回相关的几条，必要时派单器再按关键词搜索。手动引用的老任务会用来衡量召回是否找得到。</p>
+        <h3>{t.settings.recall.title}</h3>
+        <p>{t.settings.recall.intro}</p>
       </div>
-      <div className="recall-range" role="group" aria-label="统计范围">
+      <div className="recall-range" role="group" aria-label={t.settings.recall.range}>
         {[7, 30].map((d) => (
-          <button key={d} type="button" className="ghost" aria-pressed={days === d} onClick={() => setDays(d)}>近 {d} 天</button>
+          <button key={d} type="button" className="ghost" aria-pressed={days === d} onClick={() => setDays(d)}>{t.settings.recall.lastDays(d)}</button>
         ))}
       </div>
       {error && <p className="banner error" role="alert">{error}</p>}

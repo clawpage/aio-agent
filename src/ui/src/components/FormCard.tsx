@@ -1,5 +1,6 @@
 import { useId, useMemo, useState } from "react";
 import { formAnswerText, missingFields, type FormField, type FormSpec } from "../../../common/form";
+import { t } from "../i18n";
 
 type Values = Record<string, string | string[]>;
 
@@ -32,15 +33,15 @@ export function FormCard({ spec, onSubmit, sent = null, disabled = false, embedd
 
   if (sent !== null) {
     return (
-      <div className={`form-card sent${embedded ? " embedded" : ""}`} role="group" aria-label={`${spec.title ?? "表单"}（已提交）`}>
+      <div className={`form-card sent${embedded ? " embedded" : ""}`} role="group" aria-label={t.chat.form.submittedLabel(spec.title ?? t.chat.form.fallbackTitle)}>
         {spec.title && !embedded && <div className="form-card-title">{spec.title}</div>}
         <dl className="form-card-summary">
           {sent.split("\n").filter(Boolean).map((line, i) => {
-            const at = line.indexOf("：");
+            const at = line.indexOf("："); // i18n-exempt: parses the "label：value" lines formAnswerText sends
             return at > 0 ? <div key={i}><dt>{line.slice(0, at)}</dt><dd>{line.slice(at + 1)}</dd></div> : <div key={i}><dd>{line}</dd></div>;
           })}
         </dl>
-        <span className="form-card-done">✓ 已提交</span>
+        <span className="form-card-done">{t.chat.form.submitted}</span>
       </div>
     );
   }
@@ -76,7 +77,7 @@ export function FormCard({ spec, onSubmit, sent = null, disabled = false, embedd
           ? <textarea {...common} rows={3} value={value as string} onChange={(e) => set(f.name, e.target.value)} />
           : f.type === "select"
             ? <select {...common} value={value as string} onChange={(e) => set(f.name, e.target.value)}>
-                <option value="">请选择</option>
+                <option value="">{t.chat.form.choose}</option>
                 {f.options!.map((o) => <option key={o} value={o}>{o}</option>)}
               </select>
             : <input {...common} type={f.type} inputMode={f.type === "number" ? "decimal" : undefined} min={f.min} max={f.max}
@@ -86,7 +87,7 @@ export function FormCard({ spec, onSubmit, sent = null, disabled = false, embedd
   };
 
   return (
-    <form className={`form-card${embedded ? " embedded" : ""}`} aria-label={spec.title ?? "表单"} noValidate
+    <form className={`form-card${embedded ? " embedded" : ""}`} aria-label={spec.title ?? t.chat.form.fallbackTitle} noValidate
       onSubmit={(e) => {
         e.preventDefault();
         setTried(true);
@@ -96,7 +97,7 @@ export function FormCard({ spec, onSubmit, sent = null, disabled = false, embedd
       }}>
       {spec.title && !embedded && <div className="form-card-title">{spec.title}</div>}
       {spec.fields.map(field)}
-      {tried && missing.length > 0 && <p className="form-card-error" role="alert">还需要填写：{missing.join("、")}</p>}
+      {tried && missing.length > 0 && <p className="form-card-error" role="alert">{t.chat.form.missing(missing)}</p>}
       {onSubmit && <button type="submit" className="primary form-card-submit" disabled={closed}>{spec.submit}</button>}
     </form>
   );

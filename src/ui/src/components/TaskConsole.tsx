@@ -2,6 +2,7 @@ import { PopupSurface } from "./PopupMotion";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { api, ApiError, browserApi } from "../api";
+import { t } from "../i18n";
 import { BrowserViewerController } from "../browserViewer";
 import { DesktopFrame, usePhoneDesktop } from "./DesktopFrame";
 
@@ -33,7 +34,7 @@ export const personConsoleTarget: ConsoleTarget = {
  * the same desktop view-only while the agent keeps working: nothing a tap does
  * reaches the page until the person takes over (the primary action).
  */
-export function TaskConsole({ target, tab, label, primary, watching = false, closeLabel = "关闭", onClose, onReveal }: {
+export function TaskConsole({ target, tab, label, primary, watching = false, closeLabel = t.browser.console.close, onClose, onReveal }: {
   target: ConsoleTarget;
   watching?: boolean;
   tab: { id: string; title: string; url: string };
@@ -133,17 +134,17 @@ export function TaskConsole({ target, tab, label, primary, watching = false, clo
         <header className="task-console-head">
           <span className="task-console-title" title={tab.url}>{tab.title || tab.url}</span>
           {primary && <button type="button" className="primary" disabled={primary.busy} onClick={primary.onClick}>{primary.label}</button>}
-          <button type="button" className="ghost" onClick={close} aria-label="关闭操作面板">{closeLabel}</button>
+          <button type="button" className="ghost" onClick={close} aria-label={t.browser.console.closePanel}>{closeLabel}</button>
         </header>
         <div className="task-console-screen">
-          {src ? <DesktopFrame src={src} title="沙箱桌面" interactive={!watching} /> : <p className="muted tiny">正在打开桌面…</p>}
+          {src ? <DesktopFrame src={src} title={t.browser.console.desktopTitle} interactive={!watching} /> : <p className="muted tiny">{t.browser.console.opening}</p>}
         </div>
         {notice && <p className="task-console-notice" role="alert">{notice}</p>}
-        <div className="task-console-tools" role="group" aria-label="页面操作">
-          <span className="muted tiny task-console-hint">{watching ? "AI 正在操作，你只能看；点“人工接管”后 AI 会暂停" : phone ? "键盘在画面下方" : "点一下页面即可用键盘输入"}</span>
+        <div className="task-console-tools" role="group" aria-label={t.browser.console.tools}>
+          <span className="muted tiny task-console-hint">{watching ? t.browser.console.watchingHint : phone ? t.browser.console.phoneHint : t.browser.console.hint}</span>
           <span className="spacer" />
-          <button type="button" className="ghost tiny" onClick={() => void focus()}>切回这个页面</button>
-          <button type="button" className="ghost tiny" onClick={onReveal}>在工作区打开</button>
+          <button type="button" className="ghost tiny" onClick={() => void focus()}>{t.browser.console.focus}</button>
+          <button type="button" className="ghost tiny" onClick={onReveal}>{t.browser.console.reveal}</button>
         </div>
       </div>
     </PopupSurface>,

@@ -14,6 +14,7 @@ import { BrowserTabs } from "./BrowserTabs";
 import { AppIcon } from "./AppIcon";
 import { browserApi, UI_KEEP_ALIVE_NOTE, type BrowserLifecycleStateView } from "../api";
 import { baseName, kindLabel, workspaceFileKind, type WorkspaceFileKind } from "../sandboxLink";
+import { locale, t } from "../i18n";
 interface Props {
   canConfigure?: boolean;
   open: boolean;
@@ -29,15 +30,15 @@ type TabId = "browser" | "terminal" | "files" | "editor" | "notebook" | "preview
 
 const TABS: Array<{ id: TabId; label: string; path?: string; kind: "frame" | "native" }> = [
   // The browser is shown on the sandbox desktop (noVNC): its own keyboard, gestures and windows.
-  { id: "browser", label: "浏览器", path: DESKTOP_PATH, kind: "frame" },
-  { id: "terminal", label: "终端", path: "/terminal", kind: "native" },
-  { id: "files", label: "文件", kind: "native" },
-  { id: "editor", label: "编辑器", path: "/code-server/", kind: "frame" },
-  { id: "notebook", label: "笔记本", path: "/jupyter/lab", kind: "frame" },
-  { id: "preview", label: "预览", kind: "native" },
+  { id: "browser", label: t.workspace.apps.browser, path: DESKTOP_PATH, kind: "frame" },
+  { id: "terminal", label: t.workspace.apps.terminal, path: "/terminal", kind: "native" },
+  { id: "files", label: t.workspace.apps.files, kind: "native" },
+  { id: "editor", label: t.workspace.apps.editor, path: "/code-server/", kind: "frame" },
+  { id: "notebook", label: t.workspace.apps.notebook, path: "/jupyter/lab", kind: "frame" },
+  { id: "preview", label: t.workspace.apps.preview, kind: "native" },
   // The owner's own Android phone (USB on the host), shown only when the host offers it.
-  { id: "phone", label: "手机", kind: "native" },
-  { id: "api", label: "接口与 MCP", kind: "native" },
+  { id: "phone", label: t.workspace.apps.phone, kind: "native" },
+  { id: "api", label: t.workspace.apps.api, kind: "native" },
 ];
 
 export function Workspace({ open, status, initialPath, onClose, onNotify, browserNonce, canConfigure = true }: Props) {
@@ -120,7 +121,7 @@ export function Workspace({ open, status, initialPath, onClose, onNotify, browse
         if (generation !== navGenRef.current) return;
         setFrameStatus("timeout");
         setFrameError(err instanceof Error ? err.message : String(err));
-        onNotify(`工作区会话获取失败：${err instanceof Error ? err.message : String(err)}`, "error");
+        onNotify(t.workspace.sessionFailed(err instanceof Error ? err.message : String(err)), "error");
       }
     },
     [onNotify],
@@ -455,7 +456,7 @@ export function Workspace({ open, status, initialPath, onClose, onNotify, browse
         // status, so a double click in two windows cannot stack two pins.
         const res = keepAlivePin ? await browserApi.unpinUi() : await browserApi.pinUi();
         setBrowserStatus(res.status);
-        onNotify(keepAlivePin ? "已取消保留浏览器" : "已保留浏览器，空闲时不会自动释放");
+        onNotify(keepAlivePin ? t.workspace.pin.unpinned : t.workspace.pin.pinned);
       } catch (err) {
         onNotify(err instanceof Error ? err.message : String(err), "error");
       }
@@ -469,20 +470,20 @@ export function Workspace({ open, status, initialPath, onClose, onNotify, browse
   return (
     <PopupPresence>{open && <PopupSurface as="section" className={`workspace desktop ${fullscreen ? "fullscreen" : ""}`}>
       <header className="ws-head menubar">
-        <span className="menubar-app">{minimized ? "桌面" : currentDef?.label}</span>
+        <span className="menubar-app">{minimized ? t.workspace.menubar.desktop : currentDef?.label}</span>
         {!minimized && externalPath && (
           <button type="button" className="menubar-item" onClick={() => void openExternal(externalPath)}>
-            新标签页
+            {t.workspace.menubar.newTab}
           </button>
         )}
         {holdsBrowser && (
           <button type="button" className="menubar-item" aria-expanded={tabsOpen} onClick={() => setTabsOpen((v) => !v)}>
-            标签页
+            {t.workspace.menubar.tabs}
           </button>
         )}
         <span className="menubar-spacer" />
         <time className="menubar-clock" dateTime={clock.iso}>{clock.label}</time>
-        <button type="button" className="menubar-item" onClick={onClose} aria-label="关闭工作区" title="关闭工作区">
+        <button type="button" className="menubar-item" onClick={onClose} aria-label={t.workspace.menubar.close} title={t.workspace.menubar.close}>
           ✕
         </button>
       </header>
@@ -501,9 +502,9 @@ export function Workspace({ open, status, initialPath, onClose, onNotify, browse
           <div className="window" role="tabpanel" aria-label={currentDef?.label}>
             <div className="window-titlebar">
               <div className="traffic-lights">
-                <button type="button" className="light close" aria-label="关闭窗口" title="关闭窗口" onClick={() => { setMinimized(true); setFullscreen(false); }} />
-                <button type="button" className="light minimize" aria-label="最小化" title="最小化" onClick={() => { setMinimized(true); setFullscreen(false); }} />
-                <button type="button" className="light zoom" aria-label={fullscreen ? "退出全屏" : "全屏"} title={fullscreen ? "退出全屏" : "全屏"} onClick={() => setFullscreen((v) => !v)} />
+                <button type="button" className="light close" aria-label={t.workspace.window.close} title={t.workspace.window.close} onClick={() => { setMinimized(true); setFullscreen(false); }} />
+                <button type="button" className="light minimize" aria-label={t.workspace.window.minimize} title={t.workspace.window.minimize} onClick={() => { setMinimized(true); setFullscreen(false); }} />
+                <button type="button" className="light zoom" aria-label={fullscreen ? t.workspace.window.exitFullscreen : t.workspace.window.fullscreen} title={fullscreen ? t.workspace.window.exitFullscreen : t.workspace.window.fullscreen} onClick={() => setFullscreen((v) => !v)} />
               </div>
               <span className="window-title">{currentDef?.label}</span>
             </div>
@@ -527,32 +528,32 @@ export function Workspace({ open, status, initialPath, onClose, onNotify, browse
                     <input
                       value={previewPath}
                       onChange={(e) => setPreviewPath(e.target.value)}
-                      placeholder="路径（/jupyter/lab）或端口（3000）"
+                      placeholder={t.workspace.preview.placeholder}
                     />
                     <button
                       type="button"
                       className="primary"
                       onClick={() => void openPreview(previewPath)}
                     >
-                      打开
+                      {t.workspace.preview.open}
                     </button>
                     <button type="button" className="ghost" onClick={() => void openExternal(normalizePreviewTarget(previewPath))}>
-                      新标签页
+                      {t.workspace.preview.newTab}
                     </button>
                   </div>
                   <p className="muted tiny">
-                    端口会通过沙箱的代理入口打开（例如 3000 → <code>/proxy/3000/</code>），用于访问你在沙箱里启动的服务。
+                    {t.workspace.preview.proxyBefore}<code>/proxy/3000/</code>{t.workspace.preview.proxyAfter}
                   </p>
                   {previewSrc ? (
                     <iframe
                       key={previewSrc}
                       src={previewSrc}
-                      title="预览"
+                      title={t.workspace.preview.frameTitle}
                       sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-downloads"
                       onLoad={() => setSessionReady(true)}
                     />
                   ) : (
-                    <p className="muted">输入沙箱内的路径（例如 /jupyter/lab 或你自己生成的 HTML 文件）。</p>
+                    <p className="muted">{t.workspace.preview.empty}</p>
                   )}
                 </div>
               )}
@@ -563,10 +564,10 @@ export function Workspace({ open, status, initialPath, onClose, onNotify, browse
                   {holdsBrowser && (suspended || restoringBrowser) ? (
                     <div className="frame-hint">
                       <p>
-                        {restoringBrowser ? "正在按快照恢复浏览器…" : browserStatus?.lastErrorCode === "wake_failed" ? "浏览器恢复尚未完成，现有标签和快照已保留" : "浏览器已释放以节省内存"}
-                        {browserStatus?.restorePending ? "，上一次快照仍在等待恢复。" : "。"}
+                        {restoringBrowser ? t.workspace.released.restoring : browserStatus?.lastErrorCode === "wake_failed" ? t.workspace.released.wakeFailed : t.workspace.released.released}
+                        {browserStatus?.restorePending ? t.workspace.released.restorePending : t.workspace.released.end}
                       </p>
-                      <p className="muted tiny">恢复后会按保存的标签、滚动位置与站点会话重建页面；正在进行的下载和未提交的表单不会被恢复。</p>
+                      <p className="muted tiny">{t.workspace.released.restoreNote}</p>
                       <button
                         type="button"
                         className="primary"
@@ -575,16 +576,16 @@ export function Workspace({ open, status, initialPath, onClose, onNotify, browse
                           void wakeBrowser().catch((err) => onNotify(err instanceof Error ? err.message : String(err), "error"))
                         }
                       >
-                        {restoringBrowser ? "正在恢复…" : "重试恢复浏览器"}
+                        {restoringBrowser ? t.workspace.released.retrying : t.workspace.released.retry}
                       </button>
                     </div>
                   ) : !docVisible ? (
-                    <p className="muted">窗口在后台，已暂停该面板并释放浏览器占用。</p>
+                    <p className="muted">{t.workspace.window.background}</p>
                   ) : frameSrc && tab === "browser" ? (
                     <DesktopFrame
                       key={frameKey}
                       src={frameSrc}
-                      title={currentDef?.label ?? "沙箱"}
+                      title={currentDef?.label ?? t.workspace.window.fallbackTitle}
                       onLoad={() => {
                         setFrameStatus("loaded");
                         setSessionReady(true);
@@ -594,7 +595,7 @@ export function Workspace({ open, status, initialPath, onClose, onNotify, browse
                     <iframe
                       key={frameKey}
                       src={frameSrc}
-                      title={currentDef?.label ?? "沙箱"}
+                      title={currentDef?.label ?? t.workspace.window.fallbackTitle}
                       allow="clipboard-read; clipboard-write; fullscreen"
                       onLoad={() => {
                         setFrameStatus("loaded");
@@ -602,17 +603,17 @@ export function Workspace({ open, status, initialPath, onClose, onNotify, browse
                       }}
                     />
                   ) : (
-                    <p className="muted">正在建立工作区会话…</p>
+                    <p className="muted">{t.workspace.window.connecting}</p>
                   )}
                   {frameError && <div className="frame-hint error">{frameError}</div>}
                   {frameStatus === "timeout" && (
                     <div className="frame-hint">
-                      页面加载超时。
+                      {t.workspace.window.loadTimeout}
                       <button type="button" className="link" onClick={() => currentDef?.path && void openExternal(currentDef.path)}>
-                        在新标签页打开
+                        {t.workspace.window.openInNewTab}
                       </button>
                       <button type="button" className="link" onClick={() => void navigateTo(tab)}>
-                        重试
+                        {t.workspace.window.retry}
                       </button>
                     </div>
                   )}
@@ -623,7 +624,7 @@ export function Workspace({ open, status, initialPath, onClose, onNotify, browse
         )}
       </div>
 
-      <nav className="dock" role="tablist" aria-label="应用">
+      <nav className="dock" role="tablist" aria-label={t.workspace.apps.dock}>
         {apps.map((t) => (
           <button
             key={t.id}
@@ -658,7 +659,7 @@ function useClock(): { label: string; iso: string } {
     const timer = window.setInterval(() => setNow(new Date()), 15_000);
     return () => window.clearInterval(timer);
   }, []);
-  const label = `${new Intl.DateTimeFormat("zh-CN", { weekday: "short" }).format(now)} ${now.toTimeString().slice(0, 5)}`;
+  const label = `${new Intl.DateTimeFormat(locale, { weekday: "short" }).format(now)} ${now.toTimeString().slice(0, 5)}`;
   return { label, iso: now.toISOString() };
 }
 
@@ -693,21 +694,21 @@ function optionsForKind(kind: WorkspaceFileKind | null): Array<{ value: string; 
       return [
         { value: "pdf", label: "PDF" },
         { value: "docx", label: "Word (.docx)" },
-        { value: "txt", label: "纯文本" },
-        { value: "odt", label: "OpenDocument 文本 (.odt)" },
+        { value: "txt", label: t.workspace.convert.formats.txt },
+        { value: "odt", label: t.workspace.convert.formats.odt },
       ];
     case "excel":
       return [
         { value: "pdf", label: "PDF" },
         { value: "xlsx", label: "Excel (.xlsx)" },
         { value: "csv", label: "CSV" },
-        { value: "ods", label: "OpenDocument 表格 (.ods)" },
+        { value: "ods", label: t.workspace.convert.formats.ods },
       ];
     case "ppt":
       return [
         { value: "pdf", label: "PDF" },
         { value: "pptx", label: "PowerPoint (.pptx)" },
-        { value: "odp", label: "OpenDocument 演示 (.odp)" },
+        { value: "odp", label: t.workspace.convert.formats.odp },
       ];
     case "pdf":
       // No verified LibreOffice target for PDF input in this sandbox.
@@ -881,7 +882,7 @@ function FilesTab({
       // command; the console never builds a shell string.
       const result = await api.convertDocument(source, format);
       setOutput(result);
-      notify(`已生成 ${result.path}（原文件未被修改）`);
+      notify(t.workspace.convert.done(result.path));
       if (navGenRef.current === generation) void load(path);
     } catch (err) {
       notify(err instanceof Error ? err.message : String(err), "error");
@@ -893,31 +894,31 @@ function FilesTab({
   // One line per user-facing capability, with the underlying library/command in
   // a collapsed detail: the operator sees readiness, not an implementation list.
   const capabilityRows = [
-    { label: "Word（.doc/.docx）", ok: readiness?.tools.soffice === true && readiness?.python.docx === true, detail: "LibreOffice + python-docx" },
-    { label: "Excel（.xls/.xlsx）", ok: readiness?.tools.soffice === true && readiness?.python.openpyxl === true, detail: "LibreOffice + openpyxl" },
-    { label: "PowerPoint（.ppt/.pptx）", ok: readiness?.tools.soffice === true && readiness?.python.pptx === true, detail: "LibreOffice + python-pptx" },
-    { label: "PDF 预览", ok: readiness?.tools.pdftoppm === true, detail: "poppler（pdftoppm / pdfinfo）" },
-    { label: "中文字体", ok: readiness?.tools.cjkFont === true, detail: "fonts-noto-cjk" },
+    { label: t.workspace.docs.rows.word, ok: readiness?.tools.soffice === true && readiness?.python.docx === true, detail: "LibreOffice + python-docx" },
+    { label: t.workspace.docs.rows.excel, ok: readiness?.tools.soffice === true && readiness?.python.openpyxl === true, detail: "LibreOffice + openpyxl" },
+    { label: t.workspace.docs.rows.ppt, ok: readiness?.tools.soffice === true && readiness?.python.pptx === true, detail: "LibreOffice + python-pptx" },
+    { label: t.workspace.docs.rows.pdf, ok: readiness?.tools.pdftoppm === true, detail: "poppler (pdftoppm / pdfinfo)" },
+    { label: t.workspace.docs.rows.cjkFont, ok: readiness?.tools.cjkFont === true, detail: "fonts-noto-cjk" },
   ];
 
   return (
     <div className="files">
       <div className="row">
         <button type="button" className="ghost" onClick={() => navigate(parent)} disabled={path === "/"}>
-          上一级
+          {t.workspace.files.up}
         </button>
         <input
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && navigate(draft)}
-          aria-label="当前目录"
+          aria-label={t.workspace.files.currentDir}
         />
         <button type="button" className="ghost" onClick={refresh}>
-          刷新
+          {t.workspace.files.refresh}
         </button>
       </div>
       <div className="row">
-        <input placeholder="新建文件/目录名" value={newName} onChange={(e) => setNewName(e.target.value)} />
+        <input placeholder={t.workspace.files.newNamePlaceholder} value={newName} onChange={(e) => setNewName(e.target.value)} />
         <button
           type="button"
           className="ghost"
@@ -939,7 +940,7 @@ function FilesTab({
             })();
           }}
         >
-          新建文件
+          {t.workspace.files.newFile}
         </button>
         <button
           type="button"
@@ -960,16 +961,16 @@ function FilesTab({
             })();
           }}
         >
-          新建目录
+          {t.workspace.files.newDir}
         </button>
         {/* Same robust pattern as the chat composer: a real label opens the
             native picker instead of a programmatic click on a hidden input. */}
         <label className="file-button">
-          上传
+          {t.workspace.files.upload}
           <input
             type="file"
             className="file-input"
-            aria-label="上传文件"
+            aria-label={t.workspace.files.uploadInput}
             data-testid="workspace-upload-input"
             onChange={(e) => {
               const file = e.target.files?.[0];
@@ -980,7 +981,7 @@ function FilesTab({
               void (async () => {
                 try {
                   const uploaded = await api.upload(file, dir);
-                  notify(`已上传到 ${dir} → ${uploaded.path}`);
+                  notify(t.workspace.files.uploaded(dir, uploaded.path));
                   reloadIfUnchanged(generation, dir);
                 } catch (err) {
                   notify(err instanceof Error ? err.message : String(err), "error");
@@ -992,8 +993,8 @@ function FilesTab({
       </div>
 
       <ul className="file-list">
-        {loading && <li className="muted">加载中…</li>}
-        {!loading && entries.length === 0 && <li className="muted">空目录</li>}
+        {loading && <li className="muted">{t.workspace.files.loading}</li>}
+        {!loading && entries.length === 0 && <li className="muted">{t.workspace.files.empty}</li>}
         {entries.map((entry) => {
           const kind = entry.is_directory ? null : workspaceFileKind(entry.path);
           const canConvert = entry.is_directory ? [] : convertTargetsFor(entry.path);
@@ -1029,7 +1030,7 @@ function FilesTab({
                 {!entry.is_directory && (
                   <>
                     <button type="button" className="link" onClick={() => onPreview(entry.path)}>
-                      预览
+                      {t.workspace.files.preview}
                     </button>
                     {kind === "text" && (
                       <button
@@ -1050,14 +1051,14 @@ function FilesTab({
                           })();
                         }}
                       >
-                        编辑
+                        {t.workspace.files.edit}
                       </button>
                     )}
                     {canConvert.length > 0 && (
                       <button
                         type="button"
                         className="link"
-                        aria-label={`转换 ${entry.name}`}
+                        aria-label={t.workspace.files.convertItem(entry.name)}
                         disabled={converting}
                         onClick={() => {
                           setOutput(null);
@@ -1069,11 +1070,11 @@ function FilesTab({
                           setConvertPath(entry.path);
                         }}
                       >
-                        转换
+                        {t.workspace.files.convert}
                       </button>
                     )}
                     <a className="link" href={api.downloadUrl(entry.path)} download>
-                      下载
+                      {t.workspace.files.download}
                     </a>
                   </>
                 )}
@@ -1081,8 +1082,8 @@ function FilesTab({
                   type="button"
                   className="link danger-text"
                   onClick={() => {
-                    const label = entry.is_directory ? "目录及其全部内容" : "文件";
-                    if (!window.confirm(`确定删除${label}？\n${entry.path}`)) return;
+                    const label = entry.is_directory ? t.workspace.files.deleteDir : t.workspace.files.deleteFile;
+                    if (!window.confirm(t.workspace.files.confirmDelete(label, entry.path))) return;
                     const dir = path;
                     const generation = navGenRef.current;
                     void (async () => {
@@ -1099,7 +1100,7 @@ function FilesTab({
                     })();
                   }}
                 >
-                  删除
+                  {t.workspace.files.delete}
                 </button>
               </div>
             </li>
@@ -1116,10 +1117,10 @@ function FilesTab({
         >
           <div className="row">
             <strong className="docs-convert-name" title={convertPath}>
-              转换 {baseName(convertPath)}
+              {t.workspace.convert.title(baseName(convertPath))}
             </strong>
             <label className="field">
-              <span>转换为</span>
+              <span>{t.workspace.convert.to}</span>
               <select value={format} onChange={(e) => setFormat(e.target.value)} disabled={converting}>
                 {convertTargets.map((option) => (
                   <option key={option.value} value={option.value}>
@@ -1129,7 +1130,7 @@ function FilesTab({
               </select>
             </label>
             <button type="button" className="primary" onClick={() => void convert()} disabled={converting || !ready}>
-              {converting ? "转换中…" : "执行转换"}
+              {converting ? t.workspace.convert.converting : t.workspace.convert.run}
             </button>
             <button
               type="button"
@@ -1140,27 +1141,27 @@ function FilesTab({
               }}
               disabled={converting}
             >
-              取消
+              {t.workspace.convert.cancel}
             </button>
           </div>
-          {convertKind && <p className="muted tiny">当前文件类型：{kindLabel(convertKind)}</p>}
+          {convertKind && <p className="muted tiny">{t.workspace.convert.currentKind(kindLabel(convertKind))}</p>}
           {canConfigure && !ready && (
             <p className="muted tiny">
               {readiness?.enabled === false
-                ? "文档处理已被配置关闭；文件浏览、上传与下载不受影响。"
+                ? t.workspace.convert.disabled
                 : authoringReady
-                  ? "创建/修改已就绪；预览 PDF/图片仍可用。"
-                  : "转换需要文档处理就绪；预览 PDF/图片仍可用。"}
+                  ? t.workspace.convert.authoringReady
+                  : t.workspace.convert.notReady}
             </p>
           )}
           {output && (
             <p className="banner" role="status">
-              已生成 <code>{output.path}</code>
+              {t.workspace.convert.generated}<code>{output.path}</code>
               <button type="button" className="link" onClick={() => onPreview(output.path)}>
-                预览
+                {t.workspace.files.preview}
               </button>
               <a className="link" href={api.downloadUrl(output.path)} download>
-                下载
+                {t.workspace.files.download}
               </a>
             </p>
           )}
@@ -1181,7 +1182,7 @@ function FilesTab({
                 void (async () => {
                   try {
                     await api.writeFile(editing.path, editing.content);
-                    notify("已保存");
+                    notify(t.workspace.files.saved);
                     setEditing(null);
                     reloadIfUnchanged(generation, dir);
                   } catch (err) {
@@ -1190,10 +1191,10 @@ function FilesTab({
                 })();
               }}
             >
-              保存
+              {t.workspace.files.save}
             </button>
             <button type="button" className="ghost" onClick={() => setEditing(null)}>
-              关闭
+              {t.workspace.files.close}
             </button>
           </div>
           <textarea value={editing.content} onChange={(e) => setEditing({ ...editing, content: e.target.value })} spellCheck={false} />
@@ -1204,20 +1205,20 @@ function FilesTab({
           missing toolchain only disables conversion. */}
       <details className="docs-processing" data-testid="docs-processing">
         <summary>
-          文档处理 ·{" "}
+          {t.workspace.docs.title}{" "}
           <span className={`docs-badge ${ready ? "ok" : previewReady ? "warn" : "error"}`} data-testid="docs-readiness-badge">
-            {checking ? "检查中…" : ready ? "全部就绪" : previewReady ? "仅预览可用" : "尚未就绪"}
+            {checking ? t.workspace.docs.checking : ready ? t.workspace.docs.allReady : previewReady ? t.workspace.docs.previewOnly : t.workspace.docs.notReady}
           </span>
         </summary>
         <div className="row">
-          <span className="muted tiny">沙箱内创建 / 修改 / 转换 Word、Excel、PPT 与 PDF。</span>
+          <span className="muted tiny">{t.workspace.docs.summary}</span>
           <span className="spacer" />
           <button type="button" className="ghost" onClick={() => void check(true)} disabled={checking}>
-            重新检查
+            {t.workspace.docs.recheck}
           </button>
           {canConfigure && !ready && (
             <button type="button" className="primary" onClick={() => void install()} disabled={installing || !readiness?.enabled}>
-              {installing ? "安装中…" : "安装/修复"}
+              {installing ? t.workspace.docs.installing : t.workspace.docs.install}
             </button>
           )}
         </div>
@@ -1232,7 +1233,7 @@ function FilesTab({
               <li key={row.label}>
                 <span aria-hidden="true">{row.ok ? "✅" : "⬜"}</span> {row.label}
                 <details className="docs-detail">
-                  <summary>实现</summary>
+                  <summary>{t.workspace.docs.implementation}</summary>
                   <code>{row.detail}</code>
                 </details>
               </li>
@@ -1240,8 +1241,7 @@ function FilesTab({
           </ul>
         )}
         <p className="muted tiny">
-          转换在沙箱中进行，不依赖宿主机 Office，也不覆盖原文件。字体与复杂排版可能与本机 Office 存在差异，
-          不承诺 100% 保真。也可以直接在对话里让智能体做（例如「把这个 Word 转成 PDF」）。
+          {t.workspace.docs.note}
         </p>
       </details>
     </div>
@@ -1277,12 +1277,12 @@ function ApiTab({ notify }: { notify: (message: string, level?: "info" | "error"
   return (
     <div className="caps">
       <div className="cap-groups">
-        {capsLoading && !caps && <p className="muted">正在读取沙箱能力清单…</p>}
+        {capsLoading && !caps && <p className="muted">{t.workspace.api.loading}</p>}
         {caps?.inventory.groups.map((group) => (
           <details key={group.id} open={group.id === "browser"}>
             <summary>
               {group.title}
-              <span className="muted"> · {group.endpoints.length} 个接口</span>
+              <span className="muted">{t.workspace.api.endpointCount(group.endpoints.length)}</span>
             </summary>
             <p className="muted">{group.description}</p>
             {group.surfaces.length > 0 && (
@@ -1325,7 +1325,7 @@ function ApiTab({ notify }: { notify: (message: string, level?: "info" | "error"
       </div>
 
       <div className="explorer">
-        <h4>接口调用</h4>
+        <h4>{t.workspace.api.call}</h4>
         <div className="row">
           <select value={method} onChange={(e) => setMethod(e.target.value)}>
             {["GET", "POST", "PUT", "PATCH", "DELETE"].map((m) => (
@@ -1353,33 +1353,33 @@ function ApiTab({ notify }: { notify: (message: string, level?: "info" | "error"
               })();
             }}
           >
-            发送
+            {t.workspace.api.send}
           </button>
         </div>
-        <textarea value={body} onChange={(e) => setBody(e.target.value)} placeholder='请求体（JSON，可留空）：{"url":"https://example.com"}' spellCheck={false} />
+        <textarea value={body} onChange={(e) => setBody(e.target.value)} placeholder={t.workspace.api.bodyPlaceholder} spellCheck={false} />
         {result !== null && <pre className="result">{result}</pre>}
 
-        <h4>MCP 服务器</h4>
+        <h4>{t.workspace.api.mcpServers}</h4>
         <p className="muted">
           {capsLoading && !caps
-            ? "正在读取…"
+            ? t.workspace.api.reading
             : caps?.mcpServers.length
-              ? caps.mcpServers.join("、")
+              ? caps.mcpServers.join(t.workspace.api.listSeparator)
               : caps
-                ? "沙箱未报告 MCP 服务器"
-                : "读取失败"}
+                ? t.workspace.api.noMcp
+                : t.workspace.api.readFailed}
         </p>
-        <h4>技能</h4>
+        <h4>{t.workspace.api.skills}</h4>
         <p className="muted">
           {capsLoading && !caps
-            ? "正在读取…"
+            ? t.workspace.api.reading
             : caps?.skills.length
-              ? caps.skills.map((s) => s.name).join("、")
+              ? caps.skills.map((s) => s.name).join(t.workspace.api.listSeparator)
               : caps
-                ? "沙箱未注册额外技能"
-                : "读取失败"}
+                ? t.workspace.api.noSkills
+                : t.workspace.api.readFailed}
         </p>
-        {caps?.inventory.sandboxVersion && <p className="muted">沙箱版本：{caps.inventory.sandboxVersion}</p>}
+        {caps?.inventory.sandboxVersion && <p className="muted">{t.workspace.api.sandboxVersion(caps.inventory.sandboxVersion)}</p>}
       </div>
     </div>
   );

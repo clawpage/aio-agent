@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, ApiError } from "../api";
 import type { VaultEntry, VaultScript } from "../types";
+import { locale, t } from "../i18n";
 
 interface Draft { id: string | null; site: string; method: "password" | "google"; username: string; password: string; wasGoogle: boolean }
 
@@ -24,7 +25,7 @@ export function VaultList({ active, onExpired }: { active: boolean; onExpired: (
   }, [onExpired]);
   const load = useCallback(async () => {
     try { const r = await api.vault(); setItems(r.entries); setScripts(r.scripts ?? []); setError(null); }
-    catch (err) { fail(err, "读取失败"); }
+    catch (err) { fail(err, t.vault.list.loadFailed); }
   }, [fail]);
   useEffect(() => {
     if (active) void load();
@@ -40,7 +41,7 @@ export function VaultList({ active, onExpired }: { active: boolean; onExpired: (
   const toggle = async (e: VaultEntry) => {
     if (shown[e.id] !== undefined) { setShown(({ [e.id]: _gone, ...rest }) => rest); return; }
     try { const { password } = await api.vaultReveal(e.id); setShown((s) => ({ ...s, [e.id]: password })); setError(null); }
-    catch (err) { fail(err, "读取失败"); }
+    catch (err) { fail(err, t.vault.list.loadFailed); }
   };
   const submit = async () => {
     if (!draft) return;
@@ -52,57 +53,57 @@ export function VaultList({ active, onExpired }: { active: boolean; onExpired: (
       setDraft(null);
       setShown({});
       await load();
-    } catch (err) { fail(err, "保存失败"); }
+    } catch (err) { fail(err, t.vault.list.saveFailed); }
     finally { setBusy(false); }
   };
   const forget = async (site: string) => {
     try { await api.vaultForgetScript(site); await load(); }
-    catch (err) { fail(err, "清除失败"); }
+    catch (err) { fail(err, t.vault.list.clearFailed); }
   };
   /** The kept steps for an entry's site (its own host, or a parent domain), as the server matches them. */
   const scriptFor = (site: string) => scripts.filter((s) => site === s.site || site.endsWith(`.${s.site}`) || s.site.endsWith(`.${site}`)).sort((a, b) => b.site.length - a.site.length)[0];
   const remove = async (id: string) => {
     setBusy(true);
     try { await api.vaultDelete(id); setConfirm(null); await load(); }
-    catch (err) { fail(err, "删除失败"); }
+    catch (err) { fail(err, t.vault.list.deleteFailed); }
     finally { setBusy(false); }
   };
 
-  return <section className="schedule-page vault-page" aria-label="密码器">
-    <header className="chat-head"><div className="chat-title"><h2>密码器</h2><span className="task-list-sub muted tiny">{items ? `${items.length} 个账号` : "正在读取…"}</span></div></header>
+  return <section className="schedule-page vault-page" aria-label={t.vault.list.title}>
+    <header className="chat-head"><div className="chat-title"><h2>{t.vault.list.title}</h2><span className="task-list-sub muted tiny">{items ? t.vault.list.count(items.length) : t.vault.list.loading}</span></div></header>
     <div className="task-list-scroll">
-      <p className="schedule-hint muted tiny">AI 遇到登录页时会用这里保存的账号登录：密码由系统直接填进对应网站的页面，AI 看不到；记成「Google 登录」的网站不存密码，AI 会点网站的 Google 登录按钮，用浏览器里已登录的 Google 账号。没保存过的网站会在任务卡片上请你填一次，也可以跳过、自己在浏览器里输入。一个账号只会填进它保存时的网站及其子域名。</p>
+      <p className="schedule-hint muted tiny">{t.vault.list.hint}</p>
       {error && <p className="banner error" role="alert">{error}</p>}
-      {!draft && <div className="schedule-actions vault-add"><button type="button" className="ghost tiny" onClick={() => setDraft({ id: null, site: "", method: "password", username: "", password: "", wasGoogle: false })}>添加账号</button></div>}
-      {draft && <form className="vault-form vault-edit" aria-label={draft.id ? "修改账号" : "添加账号"} onSubmit={(e) => { e.preventDefault(); void submit(); }}>
-        <label className="field"><span>网站</span><input value={draft.site} onChange={(e) => setDraft({ ...draft, site: e.target.value })} autoCapitalize="none" spellCheck={false} placeholder="例如 github.com" /></label>
-        <label className="field"><span>登录方式</span><select value={draft.method} onChange={(e) => setDraft({ ...draft, method: e.target.value as Draft["method"] })}><option value="password">账号密码</option><option value="google">用 Google 登录</option></select></label>
-        <label className="field"><span>{draft.method === "google" ? "Google 账号（可不填）" : "账号"}</span><input value={draft.username} onChange={(e) => setDraft({ ...draft, username: e.target.value })} autoComplete="off" autoCapitalize="none" spellCheck={false} placeholder={draft.method === "google" ? "例如 max@gmail.com，不填就用浏览器里登录的" : "用户名 / 邮箱 / 手机号"} /></label>
-        {draft.method === "password" && <label className="field"><span>密码</span><input type="password" value={draft.password} onChange={(e) => setDraft({ ...draft, password: e.target.value })} autoComplete="new-password" placeholder={draft.id && !draft.wasGoogle ? "不改就留空" : ""} /></label>}
+      {!draft && <div className="schedule-actions vault-add"><button type="button" className="ghost tiny" onClick={() => setDraft({ id: null, site: "", method: "password", username: "", password: "", wasGoogle: false })}>{t.vault.list.add}</button></div>}
+      {draft && <form className="vault-form vault-edit" aria-label={draft.id ? t.vault.list.edit : t.vault.list.add} onSubmit={(e) => { e.preventDefault(); void submit(); }}>
+        <label className="field"><span>{t.vault.form.site}</span><input value={draft.site} onChange={(e) => setDraft({ ...draft, site: e.target.value })} autoCapitalize="none" spellCheck={false} placeholder={t.vault.form.sitePlaceholder} /></label>
+        <label className="field"><span>{t.vault.form.method}</span><select value={draft.method} onChange={(e) => setDraft({ ...draft, method: e.target.value as Draft["method"] })}><option value="password">{t.vault.form.methodPassword}</option><option value="google">{t.vault.form.methodGoogle}</option></select></label>
+        <label className="field"><span>{draft.method === "google" ? t.vault.form.googleAccount : t.vault.form.account}</span><input value={draft.username} onChange={(e) => setDraft({ ...draft, username: e.target.value })} autoComplete="off" autoCapitalize="none" spellCheck={false} placeholder={draft.method === "google" ? t.vault.form.googlePlaceholder : t.vault.form.accountPlaceholder} /></label>
+        {draft.method === "password" && <label className="field"><span>{t.vault.form.password}</span><input type="password" value={draft.password} onChange={(e) => setDraft({ ...draft, password: e.target.value })} autoComplete="new-password" placeholder={draft.id && !draft.wasGoogle ? t.vault.form.keepPassword : ""} /></label>}
         <div className="schedule-actions">
-          <button type="submit" className="primary tiny" disabled={busy || !draft.site.trim() || (draft.method === "password" && (!draft.id || draft.wasGoogle) && !draft.password)}>保存</button>
-          <button type="button" className="ghost tiny" onClick={() => setDraft(null)}>取消</button>
+          <button type="submit" className="primary tiny" disabled={busy || !draft.site.trim() || (draft.method === "password" && (!draft.id || draft.wasGoogle) && !draft.password)}>{t.vault.form.save}</button>
+          <button type="button" className="ghost tiny" onClick={() => setDraft(null)}>{t.vault.form.cancel}</button>
         </div>
       </form>}
-      {items && !items.length && !draft && <div className="empty"><h3>还没有保存账号</h3><p>在这里添加，或等 AI 遇到登录页时在任务卡片上填写。</p></div>}
+      {items && !items.length && !draft && <div className="empty"><h3>{t.vault.list.emptyTitle}</h3><p>{t.vault.list.emptyBody}</p></div>}
       <ul className="task-list">{(items ?? []).map((e) => <li key={e.id} data-vault-id={e.id}>
         <div className="task-list-item schedule-item">
-          <div className="task-list-top"><strong>{e.site}</strong><span className="muted tiny">{e.lastUsedAt ? `上次使用 ${new Date(e.lastUsedAt).toLocaleDateString("zh-CN")}` : "还没用过"}</span></div>
+          <div className="task-list-top"><strong>{e.site}</strong><span className="muted tiny">{e.lastUsedAt ? t.vault.list.lastUsed(new Date(e.lastUsedAt).toLocaleDateString(locale)) : t.vault.list.neverUsed}</span></div>
           {e.method === "google"
-            ? <p className="vault-row"><span className="muted tiny">方式</span><span className="vault-value vault-google">用 Google 登录{e.username ? `（${e.username}）` : "（浏览器里已登录的账号）"}</span></p>
+            ? <p className="vault-row"><span className="muted tiny">{t.vault.list.method}</span><span className="vault-value vault-google">{t.vault.form.methodGoogle}{e.username ? t.vault.list.googleWith(e.username) : t.vault.list.googleBrowserAccount}</span></p>
             : <>
-              <p className="vault-row"><span className="muted tiny">账号</span><span className="vault-value">{e.username || "（未填）"}</span></p>
-              <p className="vault-row"><span className="muted tiny">密码</span><span className="vault-value" data-testid="vault-password">{shown[e.id] ?? "••••••••"}</span></p>
-              {(() => { const s = scriptFor(e.site); return <p className="vault-row" data-testid="vault-script"><span className="muted tiny">步骤</span><span className="vault-script">{s
-                ? <>AI 写的登录步骤已记住（{s.steps} 步，成功 {s.successes} 次{s.failures ? `，之后失败 ${s.failures} 次${s.lastNote ? `：${s.lastNote}` : ""}` : ""}）<button type="button" className="link tiny" onClick={() => void forget(s.site)}>清除</button></>
-                : <span className="muted">还没有：AI 第一次登录成功后记下</span>}</span></p>; })()}
+              <p className="vault-row"><span className="muted tiny">{t.vault.form.account}</span><span className="vault-value">{e.username || t.vault.list.notFilled}</span></p>
+              <p className="vault-row"><span className="muted tiny">{t.vault.form.password}</span><span className="vault-value" data-testid="vault-password">{shown[e.id] ?? "••••••••"}</span></p>
+              {(() => { const s = scriptFor(e.site); return <p className="vault-row" data-testid="vault-script"><span className="muted tiny">{t.vault.list.steps}</span><span className="vault-script">{s
+                ? <>{t.vault.list.scriptKept(s.steps, s.successes, s.failures, s.lastNote)}<button type="button" className="link tiny" onClick={() => void forget(s.site)}>{t.vault.list.clear}</button></>
+                : <span className="muted">{t.vault.list.noScript}</span>}</span></p>; })()}
             </>}
           {confirm === e.id
-            ? <div className="schedule-actions" role="alert"><span className="tiny">删除后 AI 不能再用它登录。</span><button className="ghost tiny" onClick={() => setConfirm(null)}>取消</button><button className="danger tiny" disabled={busy} onClick={() => void remove(e.id)}>确认删除</button></div>
+            ? <div className="schedule-actions" role="alert"><span className="tiny">{t.vault.list.deleteWarning}</span><button className="ghost tiny" onClick={() => setConfirm(null)}>{t.vault.form.cancel}</button><button className="danger tiny" disabled={busy} onClick={() => void remove(e.id)}>{t.vault.list.confirmDelete}</button></div>
             : <div className="schedule-actions">
-              {e.method === "password" && <button className="ghost tiny" onClick={() => void toggle(e)}>{shown[e.id] !== undefined ? "隐藏密码" : "显示密码"}</button>}
-              <button className="ghost tiny" onClick={() => setDraft({ id: e.id, site: e.site, method: e.method, username: e.username, password: "", wasGoogle: e.method === "google" })}>修改</button>
-              <button className="ghost tiny" onClick={() => setConfirm(e.id)}>删除</button>
+              {e.method === "password" && <button className="ghost tiny" onClick={() => void toggle(e)}>{shown[e.id] !== undefined ? t.vault.list.hidePassword : t.vault.list.showPassword}</button>}
+              <button className="ghost tiny" onClick={() => setDraft({ id: e.id, site: e.site, method: e.method, username: e.username, password: "", wasGoogle: e.method === "google" })}>{t.vault.list.modify}</button>
+              <button className="ghost tiny" onClick={() => setConfirm(e.id)}>{t.vault.list.delete}</button>
             </div>}
         </div>
       </li>)}</ul>

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { t } from "../i18n";
 
 /** The sandbox desktop's own size (Xvnc -geometry 1280x1024 in the image): noVNC draws it at this aspect. */
 const DESKTOP_ASPECT = 1024 / 1280;
@@ -117,9 +118,9 @@ export function DesktopFrame({ src, title, onLoad, interactive = true }: { src: 
     try {
       const text = await navigator.clipboard.readText();
       if (text) post({ type: "paste", text });
-      setNote(text ? null : "剪贴板是空的");
+      setNote(text ? null : t.browser.desktop.clipboardEmpty);
     } catch {
-      setNote("浏览器没有允许读取剪贴板");
+      setNote(t.browser.desktop.clipboardDenied);
     }
   };
 
@@ -148,19 +149,19 @@ export function DesktopFrame({ src, title, onLoad, interactive = true }: { src: 
         style={zoomed ? { width, height, marginTop: above, marginLeft: left } : undefined}
       />
       {zoomed && (
-        <div className="desktop-bar" style={{ width: size.width, marginTop: size.height - height - BAR_HEIGHT - above }} role="toolbar" aria-label="桌面操作">
+        <div className="desktop-bar" style={{ width: size.width, marginTop: size.height - height - BAR_HEIGHT - above }} role="toolbar" aria-label={t.browser.desktop.toolbar}>
           {interactive && <>
-            <button type="button" className={typing ? "active" : ""} onClick={openKeyboard} aria-pressed={typing}>键盘</button>
-            <button type="button" onClick={() => void paste()}>粘贴</button>
-            <button type="button" onClick={() => post({ type: "key", key: "Enter" })}>回车</button>
+            <button type="button" className={typing ? "active" : ""} onClick={openKeyboard} aria-pressed={typing}>{t.browser.desktop.keyboard}</button>
+            <button type="button" onClick={() => void paste()}>{t.browser.desktop.paste}</button>
+            <button type="button" onClick={() => post({ type: "key", key: "Enter" })}>{t.browser.desktop.enter}</button>
             <button type="button" onClick={() => post({ type: "key", key: "Tab" })}>Tab</button>
             <button type="button" onClick={() => post({ type: "key", key: "Escape" })}>Esc</button>
           </>}
-          <span className="desktop-bar-hint">{note ?? "双指缩放 · 左右滑动"}</span>
+          <span className="desktop-bar-hint">{note ?? t.browser.desktop.hint}</span>
           <textarea
             ref={input}
             className="desktop-bar-input"
-            aria-label="输入到桌面"
+            aria-label={t.browser.desktop.input}
             autoCapitalize="off"
             autoComplete="off"
             autoCorrect="off"

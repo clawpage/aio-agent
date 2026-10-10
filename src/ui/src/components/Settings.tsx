@@ -5,16 +5,10 @@ import { InviteSettings } from './InviteSettings';
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "../api";
 import type { AgentSettings, SettingsModel } from "../types";
+import { t } from "../i18n";
 
 /** Human labels for the reasoning-effort values the model catalog reports. */
-const EFFORT_LABELS: Record<string, string> = {
-  minimal: "最低",
-  low: "低",
-  medium: "中",
-  high: "高",
-  xhigh: "极高",
-  max: "最高",
-};
+const EFFORT_LABELS: Record<string, string> = t.settings.run.efforts;
 
 function effortLabel(value: string): string {
   return EFFORT_LABELS[value] ?? value;
@@ -115,7 +109,7 @@ export function Settings({ onBack, onSaved }: Props) {
     try {
       const result = await api.saveSettings({ model, effort: effort || null });
       onSaved?.(result.settings);
-      setSaved("已保存，之后的每条消息都会使用这个配置。");
+      setSaved(t.settings.run.saved);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -149,53 +143,53 @@ export function Settings({ onBack, onSaved }: Props) {
   const locked = loading || saving;
 
   return (
-    <section className="settings" aria-label="配置">
+    <section className="settings" aria-label={t.settings.page.title}>
       <header className="settings-head">
-        <h2>配置</h2>
+        <h2>{t.settings.page.title}</h2>
         <span className="spacer" />
         <button type="button" className="ghost" onClick={onBack} disabled={saving}>
-          ← 返回会话
+          {t.settings.page.back}
         </button>
       </header>
 
       <div className="settings-body">
         <p className="muted settings-intro">
-          设置你的助理与运行偏好，保存后在所有设备间保持一致。
+          {t.settings.page.intro}
         </p>
 
         <SoulSettings />
 
-        <section className="settings-card" aria-label="运行偏好">
-          <div className="settings-section-head"><h3>运行偏好</h3><p>{harnessChoice ? "选择执行器、模型与思考强度。" : "选择处理任务的模型与思考强度。"}保存后用于新消息，不影响正在执行的任务。</p></div>
-        {loading && <p className="muted">正在加载…</p>}
+        <section className="settings-card" aria-label={t.settings.run.title}>
+          <div className="settings-section-head"><h3>{t.settings.run.title}</h3><p>{harnessChoice ? t.settings.run.introWithHarness : t.settings.run.introModelOnly}{t.settings.run.introSuffix}</p></div>
+        {loading && <p className="muted">{t.settings.run.loading}</p>}
 
         {!loading && loadError && (
           <div className="banner error" role="alert">
-            加载配置失败：{loadError}
+            {t.settings.run.loadFailed(loadError)}
             <button type="button" onClick={() => void load()}>
-              重试
+              {t.settings.run.retry}
             </button>
           </div>
         )}
 
         {!loading && !loadError && !catalogKnown && (
           <div className="banner warn" role="status">
-            暂时无法获取模型列表，配置保存已停用。请稍后重试。
+            {t.settings.run.catalogUnavailable}
           </div>
         )}
 
         {!loading && !loadError && savedModelUnusable && (
           <div className="banner warn" role="alert">
-            已保存的模型当前不可用，请选择一个有效模型后再保存。
+            {t.settings.run.savedModelUnusable}
           </div>
         )}
 
         <div className="settings-fields">
           {harnessChoice && (
             <label className="field">
-              <span>执行器</span>
+              <span>{t.settings.run.harness}</span>
               <select
-                aria-label="执行器"
+                aria-label={t.settings.run.harness}
                 value={harness}
                 onChange={(e) => pickHarness(e.target.value as Harness)}
                 disabled={locked || !catalogKnown}
@@ -208,16 +202,16 @@ export function Settings({ onBack, onSaved }: Props) {
               </select>
               <span className="muted tiny">
                 {harness === "claude-code"
-                  ? "主会话派单和任务执行都由 Claude Code 完成；之前在 Codex 上的任务续接时会带上原有记录。"
-                  : "主会话派单和任务执行都由 Codex 完成。"}
+                  ? t.settings.run.harnessClaudeHint
+                  : t.settings.run.harnessCodexHint}
               </span>
             </label>
           )}
 
           <label className="field">
-            <span>模型</span>
+            <span>{t.settings.run.model}</span>
             <select
-              aria-label="模型"
+              aria-label={t.settings.run.model}
               value={model}
               onChange={(e) => pickModel(e.target.value)}
               disabled={locked || !catalogKnown}
@@ -225,28 +219,28 @@ export function Settings({ onBack, onSaved }: Props) {
               {/* A stored model the catalog no longer lists stays visible (and
                   explicitly unavailable) instead of the select pretending the
                   first catalog entry is the current choice. */}
-              {savedModelUnusable && <option value={model}>{model}（当前不可用）</option>}
+              {savedModelUnusable && <option value={model}>{t.settings.run.modelUnavailable(model)}</option>}
               {harnessModels.map((m) => (
                 <option key={m.id} value={m.id}>
                   {m.displayName || m.id}
-                  {m.id === defaultModel ? "（默认）" : ""}
+                  {m.id === defaultModel ? t.settings.run.modelDefault : ""}
                 </option>
               ))}
               {!catalogKnown && model && <option value={model}>{model}</option>}
             </select>
-            <span className="muted tiny">所有新消息都会使用这个模型。</span>
+            <span className="muted tiny">{t.settings.run.modelHint}</span>
           </label>
 
           {textOnlyHint && (
             <p className="muted tiny" role="note">
-              该模型只支持文本输入；带图片的附件会被拒绝，需要图片能力请换回 ChatGPT 模型。
+              {t.settings.run.textOnlyHint}
             </p>
           )}
 
           <label className="field">
-            <span>思考强度</span>
+            <span>{t.settings.run.effort}</span>
             <select
-              aria-label="思考强度"
+              aria-label={t.settings.run.effort}
               value={effort}
               onChange={(e) => {
                 setSaved(null);
@@ -254,7 +248,7 @@ export function Settings({ onBack, onSaved }: Props) {
               }}
               disabled={locked || effortDisabled}
             >
-              <option value="">按模型默认</option>
+              <option value="">{t.settings.run.effortModelDefault}</option>
               {efforts.map((value) => (
                 <option key={value} value={value}>
                   {effortLabel(value)}
@@ -263,8 +257,8 @@ export function Settings({ onBack, onSaved }: Props) {
             </select>
             <span className="muted tiny">
               {currentModel?.defaultReasoningEffort
-                ? `留空时使用该模型的默认强度（${effortLabel(currentModel.defaultReasoningEffort)}）。`
-                : "留空时使用该模型的默认强度。"}
+                ? t.settings.run.effortHintWithDefault(effortLabel(currentModel.defaultReasoningEffort))
+                : t.settings.run.effortHint}
             </span>
           </label>
         </div>
@@ -282,11 +276,11 @@ export function Settings({ onBack, onSaved }: Props) {
 
         <div className="settings-actions">
           <button type="button" className="ghost" onClick={restoreDefaults} disabled={locked || isDefaultChoice}>
-            恢复默认
+            {t.settings.run.restoreDefaults}
           </button>
           <span className="spacer" />
           <button type="button" className="primary" onClick={() => void save()} disabled={!canSave}>
-            {saving ? "保存中…" : "保存"}
+            {saving ? t.settings.run.saving : t.settings.run.save}
           </button>
         </div>
 

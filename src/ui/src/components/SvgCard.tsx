@@ -1,6 +1,8 @@
 import { PopupPresence, PopupSurface } from "./PopupMotion";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { t } from "../i18n";
+import { themeColor } from "../themeColor";
 
 /**
  * An SVG with no absolute width (only a viewBox, or a percentage) has no size of
@@ -42,7 +44,7 @@ function heldSize(code: string): { width: number; height: number } | null {
 /** A file name from the drawing's <title>, or a plain one. */
 function fileStem(code: string): string {
   const title = /<title[^>]*>([^<]{1,80})<\/title>/i.exec(code)?.[1]?.trim();
-  return (title || "图片").replace(/[\\/:*?"<>|\s]+/g, "_").slice(0, 60);
+  return (title || t.cards.svg.defaultFileName).replace(/[\\/:*?"<>|\s]+/g, "_").slice(0, 60);
 }
 
 /**
@@ -71,7 +73,7 @@ async function pngOf(code: string): Promise<{ blob: Blob; ext: "png" | "svg" }> 
     canvas.height = h;
     const ctx = canvas.getContext("2d");
     if (ctx) {
-      ctx.fillStyle = "#fff";
+      ctx.fillStyle = themeColor("--paper");
       ctx.fillRect(0, 0, w, h);
       ctx.drawImage(img, 0, 0, w, h);
       const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"));
@@ -118,15 +120,15 @@ function SvgViewer({ url, code, onClose }: { url: string; code: string; onClose:
   }, [onClose]);
   const ratio = width / height;
   return createPortal(
-    <PopupSurface className="image-viewer" role="dialog" aria-modal="true" aria-label="查看大图">
+    <PopupSurface className="image-viewer" role="dialog" aria-modal="true" aria-label={t.cards.svg.viewer}>
       <div className="image-viewer-bar">
-        <span className="image-viewer-hint">{zoom ? "拖动查看，点图缩回" : "点图放大"}</span>
-        <button type="button" className="ghost" onClick={() => void download(code)}>下载</button>
-        <button type="button" className="ghost" onClick={onClose} ref={close}>关闭</button>
+        <span className="image-viewer-hint">{zoom ? t.cards.svg.hintZoomed : t.cards.svg.hint}</span>
+        <button type="button" className="ghost" onClick={() => void download(code)}>{t.cards.svg.download}</button>
+        <button type="button" className="ghost" onClick={onClose} ref={close}>{t.cards.svg.close}</button>
       </div>
       <div ref={stage} className={`image-viewer-stage${zoom ? " zoomed" : ""}`} onClick={(event) => { if (event.target === event.currentTarget) onClose(); }}>
         <div className="image-viewer-page" style={{ aspectRatio: `${width} / ${height}`, width: zoom ? `max(200%, ${Math.round(width)}px)` : `min(100%, calc((100dvh - 72px) * ${ratio}))` }}>
-          <img src={url} alt="大图" onClick={() => setZoom((z) => !z)} />
+          <img src={url} alt={t.cards.svg.largeAlt} onClick={() => setZoom((z) => !z)} />
         </div>
       </div>
     </PopupSurface>,
@@ -157,16 +159,16 @@ export function SvgCard({ code }: { code: string }) {
         <pre className="svg-source"><code>{code}</code></pre>
       ) : (
         url && (
-          <button type="button" className="svg-open" onClick={() => setViewing(true)} aria-label="查看大图">
-            <img className="svg-image" src={url} alt="SVG 图" {...(size ? { width: Math.round(size.width), height: Math.round(size.height) } : {})} loading="lazy" decoding="async" onError={() => setBroken(true)} />
+          <button type="button" className="svg-open" onClick={() => setViewing(true)} aria-label={t.cards.svg.viewer}>
+            <img className="svg-image" src={url} alt={t.cards.svg.alt} {...(size ? { width: Math.round(size.width), height: Math.round(size.height) } : {})} loading="lazy" decoding="async" onError={() => setBroken(true)} />
           </button>
         )
       )}
       <figcaption className="svg-actions">
-        {broken ? <span className="muted tiny">这段 SVG 无法显示为图片，下面是源码</span> : (
+        {broken ? <span className="muted tiny">{t.cards.svg.broken}</span> : (
           <>
-            <button type="button" className="ghost tiny" onClick={() => setViewing(true)}>看大图</button>
-            <button type="button" className="ghost tiny" onClick={() => void download(code)}>下载</button>
+            <button type="button" className="ghost tiny" onClick={() => setViewing(true)}>{t.cards.svg.viewLarge}</button>
+            <button type="button" className="ghost tiny" onClick={() => void download(code)}>{t.cards.svg.download}</button>
           </>
         )}
       </figcaption>

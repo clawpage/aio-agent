@@ -1,6 +1,7 @@
 import { PopupPresence } from "./PopupMotion";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api";
+import { t } from "../i18n";
 import type { Task, TaskTab } from "../types";
 import { TaskConsole, taskConsoleTarget } from "./TaskConsole";
 import { VaultPrompt } from "./VaultPrompt";
@@ -99,24 +100,24 @@ export function TaskBrowser({ task, onReveal }: { task: Task; onReveal: () => vo
   if (!tab && last) {
     const name = last.title || host(last.url);
     return (
-      <div className="task-browser closed" role="group" aria-label="任务浏览器：页面已关闭">
+      <div className="task-browser closed" role="group" aria-label={t.browser.task.closedGroup}>
         <div className="task-browser-head">
-          <span className="task-browser-state closed">页面已关闭</span>
+          <span className="task-browser-state closed">{t.browser.task.closed}</span>
           <span className="task-browser-site" title={last.url}>
             {name}
             <span className="muted"> · {host(last.url)}</span>
           </span>
         </div>
-        <p className="task-browser-hint">这个页面已在后台关闭，可以重新打开，从这里接着操作。</p>
+        <p className="task-browser-hint">{t.browser.task.closedHint}</p>
         {last.shot && (
-          <button type="button" className="task-browser-shot" onClick={() => void reopen()} disabled={busy} aria-label="重新打开这个页面">
-            <img src={api.taskBrowserLastShotUrl(task.id, last.at)} alt={`${name} 的上次页面快照`} loading="lazy" />
-            <span className="task-browser-shot-badge">上次的页面</span>
+          <button type="button" className="task-browser-shot" onClick={() => void reopen()} disabled={busy} aria-label={t.browser.task.reopenLabel}>
+            <img src={api.taskBrowserLastShotUrl(task.id, last.at)} alt={t.browser.task.lastShotAlt(name)} loading="lazy" />
+            <span className="task-browser-shot-badge">{t.browser.task.lastShot}</span>
           </button>
         )}
         {error && <p className="error tiny">{error}</p>}
         <div className="task-actions">
-          <button type="button" className="primary tiny" disabled={busy} onClick={() => void reopen()}>{busy ? "正在打开…" : "重新打开页面"}</button>
+          <button type="button" className="primary tiny" disabled={busy} onClick={() => void reopen()}>{busy ? t.browser.task.opening : t.browser.task.reopen}</button>
         </div>
       </div>
     );
@@ -143,45 +144,45 @@ export function TaskBrowser({ task, onReveal }: { task: Task; onReveal: () => vo
   // A sign-in the password vault can answer; everything else is for the person in the browser.
   const signIn = waiting && tab.request!.kind === "login";
   const state = waiting ? "request" : human ? "human" : live ? "ai" : "done";
-  const label = signIn ? "需要登录" : { request: "需要你操作", human: "你正在操作", ai: "AI 操作中", done: "已结束" }[state];
+  const label = signIn ? t.browser.task.signIn : t.browser.task.states[state];
 
   return (
-    <div className={`task-browser ${state}`} role="group" aria-label={`任务浏览器：${label}`}>
+    <div className={`task-browser ${state}`} role="group" aria-label={t.browser.task.group(label)}>
       <div className="task-browser-head">
         <span className={`task-browser-state ${state}`}>{label}</span>
         <span className="task-browser-site" title={tab.url}>
           {tab.title || host(tab.url)}
           <span className="muted"> · {host(tab.url)}</span>
         </span>
-        {tabs.length > 1 && <span className="muted tiny">共 {tabs.length} 个标签页</span>}
+        {tabs.length > 1 && <span className="muted tiny">{t.browser.task.tabCount(tabs.length)}</span>}
       </div>
       {waiting && !signIn && <p className="task-browser-reason">{tab.request!.reason}</p>}
       {signIn && <VaultPrompt taskId={task.id} tab={tab} busy={busy} onDone={() => void load()} onManual={() => void control("take")} />}
-      {human && <p className="task-browser-hint">{live ? "AI 已暂停操作这个页面。完成后点“交还给 AI”，它会从当前页面继续。" : "任务已结束，你可以查看或继续操作这个页面。"}</p>}
+      {human && <p className="task-browser-hint">{live ? t.browser.task.pausedHint : t.browser.task.endedHint}</p>}
       {!shotFailed && (
-        <button type="button" className="task-browser-shot" onClick={() => (human ? setConsoleOpen(true) : setWatching(true))} disabled={busy} aria-label={human ? "操作这个页面" : "查看这个页面"}>
-          <img src={api.taskBrowserScreenshotUrl(task.id, tab.id, shotAt)} alt={`${tab.title || host(tab.url)} 的页面预览`} loading="lazy" onError={() => setShotFailed(true)} />
+        <button type="button" className="task-browser-shot" onClick={() => (human ? setConsoleOpen(true) : setWatching(true))} disabled={busy} aria-label={human ? t.browser.task.operateLabel : t.browser.task.viewLabel}>
+          <img src={api.taskBrowserScreenshotUrl(task.id, tab.id, shotAt)} alt={t.browser.task.shotAlt(tab.title || host(tab.url))} loading="lazy" onError={() => setShotFailed(true)} />
         </button>
       )}
       {error && <p className="error tiny">{error}</p>}
       <div className="task-actions">
-        {waiting && !signIn && <button type="button" className="primary tiny" disabled={busy} onClick={() => void control("take")}>去浏览器操作</button>}
+        {waiting && !signIn && <button type="button" className="primary tiny" disabled={busy} onClick={() => void control("take")}>{t.browser.task.takeOver}</button>}
         {human && <>
-          <button type="button" className="primary tiny" disabled={busy} onClick={() => void control("release")}>{live ? "完成，交还给 AI" : "结束查看"}</button>
-          <button type="button" className="ghost tiny" onClick={() => setConsoleOpen(true)}>操作页面</button>
+          <button type="button" className="primary tiny" disabled={busy} onClick={() => void control("release")}>{live ? t.browser.task.handBack : t.browser.task.endViewing}</button>
+          <button type="button" className="ghost tiny" onClick={() => setConsoleOpen(true)}>{t.browser.task.operate}</button>
         </>}
-        {state === "ai" && <button type="button" className="ghost tiny" disabled={busy} onClick={() => void control("take")}>接管</button>}
-        {state === "done" && <button type="button" className="ghost tiny" disabled={busy} onClick={() => setWatching(true)}>在浏览器中查看</button>}
+        {state === "ai" && <button type="button" className="ghost tiny" disabled={busy} onClick={() => void control("take")}>{t.browser.task.take}</button>}
+        {state === "done" && <button type="button" className="ghost tiny" disabled={busy} onClick={() => setWatching(true)}>{t.browser.task.viewInBrowser}</button>}
       </div>
       <PopupPresence>{((human && consoleOpen) || (!human && watching)) && (
         <TaskConsole
           target={consoleTarget}
           tab={tab}
           watching={!human}
-          label={human ? "操作任务页面" : "查看任务页面"}
+          label={human ? t.browser.task.consoleOperate : t.browser.task.consoleView}
           primary={human
-            ? { label: live ? "完成，交还给 AI" : "结束查看", busy, onClick: () => void control("release") }
-            : { label: live ? "人工接管" : "操作这个页面", busy, onClick: () => void control("take") }}
+            ? { label: live ? t.browser.task.handBack : t.browser.task.endViewing, busy, onClick: () => void control("release") }
+            : { label: live ? t.browser.task.manualTakeover : t.browser.task.operateThis, busy, onClick: () => void control("take") }}
           onClose={() => { setConsoleOpen(false); setWatching(false); }}
           onReveal={() => { setConsoleOpen(false); setWatching(false); onReveal(); }}
         />

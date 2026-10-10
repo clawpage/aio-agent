@@ -5,6 +5,7 @@ import { api, ApiError } from "../api";
 import { cachedImage, holdImage, retryImage } from "../imageCache";
 import { isSandboxLink } from "../sandboxLink";
 import { openDeviceBrowser } from "../deviceBrowser";
+import { t } from "../i18n";
 import {
   baseName,
   isMarkdownPath,
@@ -132,7 +133,7 @@ export function FilePreview({ path: initialPath, onClose, onOpenLink, onOpenInBr
             setImageUrl(url);
             setPhase("ready");
           } catch (err) {
-            throw new Error(err instanceof Error && err.message === "empty" ? "文件是空的（0 字节）" : "无法加载文件（可能已被移动或删除）");
+            throw new Error(err instanceof Error && err.message === "empty" ? t.files.preview.emptyFile : t.files.preview.loadFailed);
           }
           return;
         }
@@ -189,10 +190,10 @@ export function FilePreview({ path: initialPath, onClose, onOpenLink, onOpenInBr
   };
   const openInBrowser = async () => {
     if (onOpenInBrowser) { onOpenInBrowser(path); onClose(); return; }
-    setBrowserNote("正在沙箱浏览器中打开…");
+    setBrowserNote(t.files.preview.openingInBrowser);
     try {
       await api.openBrowserFile(path);
-      setBrowserNote("已在沙箱浏览器的新标签页中打开，可到工作区「浏览器」里查看。");
+      setBrowserNote(t.files.preview.openedInBrowser);
     }
     catch (err) { setBrowserNote(err instanceof Error ? err.message : String(err)); }
   };
@@ -211,27 +212,27 @@ export function FilePreview({ path: initialPath, onClose, onOpenLink, onOpenInBr
         if (event.target === event.currentTarget) onClose();
       }}
     >
-      <div className={`file-preview ${markdown || html ? "file-preview-document" : ""}`} role="dialog" aria-modal="true" aria-label={`预览 ${name}`}>
+      <div className={`file-preview ${markdown || html ? "file-preview-document" : ""}`} role="dialog" aria-modal="true" aria-label={t.files.preview.dialog(name)}>
         <header className="file-preview-head">
-          {history.length > 0 && <button className="ghost" aria-label="返回上个文件" onClick={() => { setPath(history.at(-1)!); setHistory(old => old.slice(0,-1)); }}>←</button>}
+          {history.length > 0 && <button className="ghost" aria-label={t.files.preview.back} onClick={() => { setPath(history.at(-1)!); setHistory(old => old.slice(0,-1)); }}>←</button>}
           <span className="file-preview-name" title={path}>
             {name}
           </span>
-          <span className="muted tiny">{html ? "HTML 页面" : markdown ? "Markdown" : kindLabel(kind)}</span>
+          <span className="muted tiny">{html ? t.files.preview.htmlPage : markdown ? t.files.preview.markdown : kindLabel(kind)}</span>
           <span className="spacer" />
-          <button type="button" className="ghost" onClick={onClose} ref={closeRef} aria-label="关闭预览">
-            关闭
+          <button type="button" className="ghost" onClick={onClose} ref={closeRef} aria-label={t.files.preview.closeLabel}>
+            {t.files.preview.close}
           </button>
         </header>
 
-        {phase === "ready" && (markdown || html) && <div className="file-preview-toolbar" role="group" aria-label="文档显示方式">
-          <button className="ghost" aria-pressed={!sourceView} onClick={() => { if (html && sourceView) retry(); else setSourceView(false); }}>{html ? "页面" : "阅读"}</button>
-          <button className="ghost" aria-pressed={sourceView} onClick={() => setSourceView(true)}>{html ? "源码" : "原文"}</button>
+        {phase === "ready" && (markdown || html) && <div className="file-preview-toolbar" role="group" aria-label={t.files.preview.viewMode}>
+          <button className="ghost" aria-pressed={!sourceView} onClick={() => { if (html && sourceView) retry(); else setSourceView(false); }}>{html ? t.files.preview.page : t.files.preview.read}</button>
+          <button className="ghost" aria-pressed={sourceView} onClick={() => setSourceView(true)}>{html ? t.files.preview.source : t.files.preview.raw}</button>
         </div>}
         <div className={`file-preview-body ${html && !sourceView && !textTruncated ? "file-preview-html-body" : ""}`}>
           {phase === "loading" && (
             <p className="muted" role="status">
-              {raster ? "正在沙箱中转换并生成预览…" : "正在加载…"}
+              {raster ? t.files.preview.converting : t.files.preview.loading}
             </p>
           )}
 
@@ -239,43 +240,43 @@ export function FilePreview({ path: initialPath, onClose, onOpenLink, onOpenInBr
             <div className="banner error" role="alert">
               <span>{error}</span>
               <button type="button" onClick={retry}>
-                重试
+                {t.files.preview.retry}
               </button>
             </div>
           )}
 
           {phase === "unsupported" && (
             <div className="file-preview-note" role="status">
-              <p>该格式暂不支持在线预览。</p>
-              <p className="muted tiny">你可以直接下载原文件，或在工作区「文件」页对它有转换入口时把它转换成可预览的格式。</p>
+              <p>{t.files.preview.unsupported}</p>
+              <p className="muted tiny">{t.files.preview.unsupportedHint}</p>
             </div>
           )}
 
           {phase === "browser" && (
             <div className="file-preview-note" role="status" data-testid="file-preview-browser-note">
-              <p>页面较大，超过内联预览上限，改用沙箱浏览器完整打开。</p>
+              <p>{t.files.preview.tooLarge}</p>
               {browserNote && <p className="muted tiny">{browserNote}</p>}
             </div>
           )}
 
           {phase === "ready" && kind === "image" && imageUrl && (
             <img src={imageUrl} alt={name} data-testid="file-preview-image" onError={() => {
-              setError("图片无法解码，可能已损坏或不是真正的图片格式");
+              setError(t.files.preview.imageDecodeFailed);
               setPhase("error");
             }} />
           )}
 
           {phase === "ready" && kind === "video" && (
             <video key={`${path}#${attempt}`} className="file-preview-video" data-testid="file-preview-video"
-              aria-label={`播放 ${name}`} src={api.documentMediaUrl(path)} controls playsInline preload="metadata"
-              onError={() => { setError("视频无法播放：文件可能已移动、损坏，或编码不受浏览器支持。可以重试或下载原文件查看。"); setPhase("error"); }} />
+              aria-label={t.files.preview.play(name)} src={api.documentMediaUrl(path)} controls playsInline preload="metadata"
+              onError={() => { setError(t.files.preview.videoFailed); setPhase("error"); }} />
           )}
 
           {phase === "ready" && kind === "audio" && (
             <div className="file-preview-audio">
               <span className="file-preview-audio-name">{name}</span>
-              <audio key={`${path}#${attempt}`} data-testid="file-preview-audio" aria-label={`播放 ${name}`} src={api.documentMediaUrl(path)} controls preload="metadata"
-                onError={() => { setError("音频无法播放：文件可能已移动、损坏，或格式不受这个浏览器支持。可以重试或下载原文件。"); setPhase("error"); }} />
+              <audio key={`${path}#${attempt}`} data-testid="file-preview-audio" aria-label={t.files.preview.play(name)} src={api.documentMediaUrl(path)} controls preload="metadata"
+                onError={() => { setError(t.files.preview.audioFailed); setPhase("error"); }} />
             </div>
           )}
 
@@ -283,10 +284,10 @@ export function FilePreview({ path: initialPath, onClose, onOpenLink, onOpenInBr
             <div className={`file-preview-text ${html && !sourceView && !textTruncated ? "file-preview-html" : ""}`}>
               {textTruncated && (
                 <p className="banner warn" role="status">
-                  文件较大，仅显示开头部分；完整内容请下载查看。
+                  {t.files.preview.textTruncated}
                 </p>
               )}
-              {html && !sourceView && !textTruncated && htmlUrl ? <iframe title={`HTML 页面：${name}`} data-testid="file-preview-html" sandbox="allow-scripts" referrerPolicy="no-referrer" src={htmlUrl} /> : markdown && !sourceView ? <article className="document-reading" data-testid="file-preview-markdown">
+              {html && !sourceView && !textTruncated && htmlUrl ? <iframe title={t.files.preview.htmlFrame(name)} data-testid="file-preview-html" sandbox="allow-scripts" referrerPolicy="no-referrer" src={htmlUrl} /> : markdown && !sourceView ? <article className="document-reading" data-testid="file-preview-markdown">
                 <Markdown source={text} document onOpenLink={url => void openLink(url)} onOpenFile={openFile}/>
                 {refs.length > 0 && <div className="file-cards">{refs.map(ref => <FileCard key={ref.path} {...ref} onOpen={openFile}/>)}</div>}
               </article> : <pre data-testid="file-preview-text">{text}</pre>}
@@ -297,16 +298,16 @@ export function FilePreview({ path: initialPath, onClose, onOpenLink, onOpenInBr
             <div className="file-preview-pages">
               {pageFailed ? (
                 <div className="banner error" role="alert">
-                  <span>这一页无法显示（转换可能部分失败）。</span>
+                  <span>{t.files.preview.pageFailed}</span>
                   <button type="button" onClick={() => setPageFailed(false)}>
-                    重试
+                    {t.files.preview.retry}
                   </button>
                 </div>
               ) : (
                 <img
                   key={`${path}#${page}#${attempt}`}
                   src={api.documentPageUrl(path, page)}
-                  alt={`${name} 第 ${page} 页`}
+                  alt={t.files.preview.pageAlt(name, page)}
                   data-testid="file-preview-page"
                   onError={() => setPageFailed(true)}
                 />
@@ -317,13 +318,13 @@ export function FilePreview({ path: initialPath, onClose, onOpenLink, onOpenInBr
 
         <footer className="file-preview-foot">
           {raster && pageCount > 0 && (
-            <div className="file-preview-pager" role="group" aria-label="翻页">
+            <div className="file-preview-pager" role="group" aria-label={t.files.preview.pager}>
               <button type="button" className="ghost" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page <= 1}>
-                上一页
+                {t.files.preview.prevPage}
               </button>
               <span className="muted tiny" data-testid="file-preview-pageno">
                 {page} / {pageCount}
-                {truncated ? `（共 ${totalPages} 页，仅预览前 ${pageCount} 页）` : ""}
+                {truncated ? t.files.preview.pagesTruncated(totalPages, pageCount) : ""}
               </span>
               <button
                 type="button"
@@ -331,25 +332,25 @@ export function FilePreview({ path: initialPath, onClose, onOpenLink, onOpenInBr
                 onClick={() => setPage((p) => Math.min(pageCount, p + 1))}
                 disabled={page >= pageCount}
               >
-                下一页
+                {t.files.preview.nextPage}
               </button>
             </div>
           )}
-          {truncated && pageCount > 0 && <span className="muted tiny">预览已截断</span>}
+          {truncated && pageCount > 0 && <span className="muted tiny">{t.files.preview.truncated}</span>}
           <span className="spacer" />
           {onConvert && (kind === "word" || kind === "excel" || kind === "ppt") && (
             <button type="button" className="ghost" onClick={() => onConvert(path, "pdf")}>
-              转换为 PDF
+              {t.files.preview.toPdf}
             </button>
           )}
           {actions}
           {html && (phase === "ready" || phase === "browser") && (
             <button type="button" className="ghost" onClick={() => void openInBrowser()} data-testid="file-preview-open-browser">
-              在浏览器打开
+              {t.files.preview.openInBrowser}
             </button>
           )}
           <a className="primary" href={api.downloadUrl(path)} download={name} data-testid="file-preview-download">
-            下载
+            {t.files.preview.download}
           </a>
         </footer>
       </div>

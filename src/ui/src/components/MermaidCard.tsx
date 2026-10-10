@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import { SvgCard } from "./SvgCard";
+import { t } from "../i18n";
+import { themeColor } from "../themeColor";
 
 type Mermaid = typeof import("mermaid").default;
 
@@ -15,20 +17,20 @@ function mermaid(): Promise<Mermaid> {
       suppressErrorRendering: true,
       // Drawn for a phone: the console's indigo for steps, its amber for decisions, tight spacing and
       // rounded boxes, so a flow reads at a glance instead of as a tall grey strip. The picture keeps
-      // a white page in both themes (see .svg-image), so these are fixed light colours.
+      // a white page in both themes (see .svg-image), so its colours are the theme's fixed --diagram-* set.
       theme: "base",
       themeVariables: {
         fontSize: "14px",
-        primaryColor: "#f1efff", primaryBorderColor: "#b4acf3", primaryTextColor: "#1d1b26",
-        lineColor: "#a29db3", textColor: "#1d1b26", edgeLabelBackground: "#ffffff",
-        clusterBkg: "#f8f7fc", clusterBorder: "#e5e2ee", titleColor: "#1d1b26",
+        primaryColor: themeColor("--diagram-node"), primaryBorderColor: themeColor("--diagram-node-border"), primaryTextColor: themeColor("--diagram-text"),
+        lineColor: themeColor("--diagram-line"), textColor: themeColor("--diagram-text"), edgeLabelBackground: themeColor("--paper"),
+        clusterBkg: themeColor("--diagram-cluster"), clusterBorder: themeColor("--diagram-cluster-border"), titleColor: themeColor("--diagram-text"),
       },
       themeCSS: [
         ".node rect { rx: 10px; ry: 10px; }",
-        ".node polygon { fill: #fff4e2; stroke: #e7bd7a; }",
+        `.node polygon { fill: ${themeColor("--diagram-decision")}; stroke: ${themeColor("--diagram-decision-border")}; }`,
         ".node .label, .nodeLabel { font-weight: 500; }",
-        ".edgeLabel, .edgeLabel text { font-size: 12px; fill: #6b6878; }",
-        ".cluster-label text { font-size: 12px; fill: #6b6878; }",
+        `.edgeLabel, .edgeLabel text { font-size: 12px; fill: ${themeColor("--diagram-text-dim")}; }`,
+        `.cluster-label text { font-size: 12px; fill: ${themeColor("--diagram-text-dim")}; }`,
       ].join(" "),
       flowchart: { nodeSpacing: 22, rankSpacing: 30, padding: 10, diagramPadding: 6, curve: "basis" },
       // Plain SVG text, no <foreignObject>: the result is shown as an image and saved as a PNG.
@@ -82,8 +84,8 @@ export function MermaidCard({ code }: { code: string }) {
   if (state && "svg" in state) return <SvgCard code={state.svg} />;
   return (
     <figure className="svg-card mermaid-card">
-      {state ? <pre className="svg-source"><code>{code}</code></pre> : <div className="mermaid-pending muted tiny">正在绘制流程图…</div>}
-      {state && <figcaption className="svg-actions"><span className="muted tiny">这段流程图无法绘制，上面是源码</span></figcaption>}
+      {state ? <pre className="svg-source"><code>{code}</code></pre> : <div className="mermaid-pending muted tiny">{t.cards.mermaid.drawing}</div>}
+      {state && <figcaption className="svg-actions"><span className="muted tiny">{t.cards.mermaid.failed}</span></figcaption>}
     </figure>
   );
 }

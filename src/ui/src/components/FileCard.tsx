@@ -2,6 +2,7 @@ import { memo, useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import { cachedImage, holdImage } from "../imageCache";
 import { isMarkdownPath, isHtmlPath, kindBadge, kindLabel, type WorkspaceFileKind } from "../sandboxLink";
+import { t } from "../i18n";
 
 /**
  * One workspace file shown as a card in the conversation.
@@ -86,16 +87,16 @@ export const FileCard = memo(function FileCard({ path, name, title, kind, onOpen
         data-shape={ratio && ratio < 0.95 ? "tall" : undefined}
         // A tall picture (a phone screenshot) is shown narrower and cut at 3:4, as chat apps do; open it to see all of it.
         style={ratio ? { ["--media-ratio" as string]: String(Math.min(Math.max(ratio, 0.75), 1.6)) } : undefined}>
-        <button type="button" className="file-card-open" onClick={() => onOpen(path)} aria-label={`预览 ${title || name}`}>
+        <button type="button" className="file-card-open" onClick={() => onOpen(path)} aria-label={t.files.card.preview(title || name)}>
           {ready ? (
             <img src={thumbUrl} alt="" decoding="async" data-testid="file-card-thumb"
               onLoad={(e) => { const img = e.currentTarget; if (img.naturalWidth && img.naturalHeight) setRatio(img.naturalWidth / img.naturalHeight); }}
               onError={() => setThumbFailed(true)} />
           ) : (
-            <span className="file-card-media-empty">{thumbFailed ? "图片暂时显示不了，点开查看" : ""}</span>
+            <span className="file-card-media-empty">{thumbFailed ? t.files.card.imageUnavailable : ""}</span>
           )}
         </button>
-        <a className="file-card-media-download" href={api.downloadUrl(path)} download={name} data-testid="file-card-download" aria-label={`下载 ${name}`} title="下载">
+        <a className="file-card-media-download" href={api.downloadUrl(path)} download={name} data-testid="file-card-download" aria-label={t.files.card.downloadName(name)} title={t.files.card.download}>
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11m0 0-4.5-4.5M12 15l4.5-4.5M5 19.5h14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
         </a>
       </div>
@@ -104,7 +105,7 @@ export const FileCard = memo(function FileCard({ path, name, title, kind, onOpen
 
   return (
     <div ref={cardRef} className="file-card" data-testid="file-card" data-kind={html ? "html" : markdown ? "markdown" : kind} data-path={path} title={path}>
-      <button type="button" className="file-card-open" onClick={() => onOpen(path)} aria-label={`预览 ${title || name}`}>
+      <button type="button" className="file-card-open" onClick={() => onOpen(path)} aria-label={t.files.card.preview(title || name)}>
         <span className="file-card-thumb" aria-hidden="true">
           {showThumb && thumbUrl ? (
             <img
@@ -124,20 +125,20 @@ export const FileCard = memo(function FileCard({ path, name, title, kind, onOpen
           <span className="file-card-name">{title || name}</span>
           {title && <span className="file-card-filename muted tiny">{name}</span>}
           <span className="muted tiny">
-            {html ? "HTML 页面" : markdown ? "Markdown 文档" : kindLabel(kind)}{kind === "video" ? " · 点击播放" : kind === "audio" ? " · 可直接播放" : kind !== "unsupported" ? " · 点击预览" : " · 可下载"}
-            {image && thumbFailed ? "（缩略图不可用，点开查看）" : ""}
+            {html ? t.files.card.htmlPage : markdown ? t.files.card.markdownDoc : kindLabel(kind)}{kind === "video" ? t.files.card.hintPlay : kind === "audio" ? t.files.card.hintPlayable : kind !== "unsupported" ? t.files.card.hintPreview : t.files.card.hintDownload}
+            {image && thumbFailed ? t.files.card.thumbUnavailable : ""}
           </span>
         </span>
       </button>
       <a className="file-card-download" href={api.downloadUrl(path)} download={name} data-testid="file-card-download">
-        下载
+        {t.files.card.download}
       </a>
       {/* Nothing loads until play is pressed (preload none), so a long history stays light. */}
       {kind === "audio" && (
-        <audio className="file-card-audio" data-testid="file-card-audio" src={api.documentMediaUrl(path)} controls preload="none" aria-label={`播放 ${title || name}`}
+        <audio className="file-card-audio" data-testid="file-card-audio" src={api.documentMediaUrl(path)} controls preload="none" aria-label={t.files.card.play(title || name)}
           onError={(e) => { if ((e.currentTarget as HTMLAudioElement).error) setAudioFailed(true); }} />
       )}
-      {kind === "audio" && audioFailed && <p className="file-card-note muted tiny" role="status">这个音频在当前浏览器放不了，可以下载后播放。</p>}
+      {kind === "audio" && audioFailed && <p className="file-card-note muted tiny" role="status">{t.files.card.audioFailed}</p>}
     </div>
   );
 });

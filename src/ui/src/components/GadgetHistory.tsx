@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { api, ApiError, type GadgetMessage } from '../api';
 import { MessageTime, useDisplayClock } from './MessageTime';
+import { t } from '../i18n';
 
 /** The account name as a title: `betaw` → `Betaw`. */
 export const accountLabel = (account: string) => account.charAt(0).toUpperCase() + account.slice(1);
 
 const PAGE = 50;
-const FAILED: Record<string, string> = { failed: '回答失败', unknown: '结果未知', interrupted: '已停止' };
 
 /** The owner's read-only view of what the voice gadget's account said and was told. */
 export function GadgetHistory({ active, onExpired }: { active: boolean; onExpired: () => void }) {
@@ -22,7 +22,7 @@ export function GadgetHistory({ active, onExpired }: { active: boolean; onExpire
 
   const fail = useCallback((err: unknown) => {
     if (err instanceof ApiError && err.status === 401) onExpired();
-    else setError(err instanceof Error ? err.message : '对话记录读取失败');
+    else setError(err instanceof Error ? err.message : t.gadget.readFailed);
   }, [onExpired]);
 
   // The newest page, merged into what is shown; polled while the page is in view.
@@ -76,22 +76,22 @@ export function GadgetHistory({ active, onExpired }: { active: boolean; onExpire
     if (el) stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
   };
 
-  const title = account ? accountLabel(account) : '语音配件';
+  const title = account ? accountLabel(account) : t.gadget.fallbackTitle;
   return <section className="gadget-history" aria-labelledby="gadget-title">
-    <header className="chat-head"><div className="chat-title"><h2 id="gadget-title">{title}</h2><span className="task-list-sub muted tiny">语音配件的对话记录 · 只读</span></div></header>
+    <header className="chat-head"><div className="chat-title"><h2 id="gadget-title">{title}</h2><span className="task-list-sub muted tiny">{t.gadget.subtitle}</span></div></header>
     {error && <p className="banner error" role="alert">{error}</p>}
-    <div className="gadget-log" ref={scroller} onScroll={onScroll} role="log" aria-label={`${title} 的对话`}>
-      {account === undefined && !error ? <p className="muted" role="status">正在读取对话…</p>
-        : account === null ? <p className="muted">语音配件没有绑定独立账号，它的消息在主会话里。</p>
-        : messages.length === 0 ? <p className="muted">还没有对话。</p>
+    <div className="gadget-log" ref={scroller} onScroll={onScroll} role="log" aria-label={t.gadget.logLabel(title)}>
+      {account === undefined && !error ? <p className="muted" role="status">{t.gadget.loading}</p>
+        : account === null ? <p className="muted">{t.gadget.unbound}</p>
+        : messages.length === 0 ? <p className="muted">{t.gadget.empty}</p>
         : <>
-          {more && <button className="ghost gadget-older" disabled={loadingOlder} onClick={() => void older()}>{loadingOlder ? '正在加载…' : '加载更早的对话'}</button>}
+          {more && <button className="ghost gadget-older" disabled={loadingOlder} onClick={() => void older()}>{loadingOlder ? t.gadget.loadingOlder : t.gadget.loadOlder}</button>}
           {messages.map(m => <div key={m.id} className="gadget-exchange">
             <article className="msg user"><div className="bubble"><div className="plain">{m.text}</div><div className="message-meta"><MessageTime at={m.createdAt} now={now}/></div></div></article>
             <article className="msg assistant"><div className="bubble">
               {m.done && m.reply ? <div className="plain">{m.reply}</div>
-                : m.done ? <div className="plain gadget-failed">{FAILED[m.status] ?? '没有回答'}{m.error ? `：${m.error}` : ''}</div>
-                : <div className="muted">正在回答…</div>}
+                : m.done ? <div className="plain gadget-failed">{t.gadget.failed[m.status] ?? t.gadget.noReply}{m.error ? t.gadget.errorDetail(m.error) : ''}</div>
+                : <div className="muted">{t.gadget.answering}</div>}
               {m.done && <div className="message-meta"><MessageTime at={m.completedAt ?? m.createdAt} now={now}/></div>}
             </div></article>
           </div>)}

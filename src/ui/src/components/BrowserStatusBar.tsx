@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { browserApi, type BrowserLifecycleStateView } from "../api";
+import { t } from "../i18n";
 import {
   describeOccupancy,
   idleCountdownText,
@@ -50,7 +51,7 @@ export function BrowserStatusBar({ status, watching, onWake, onNotify, pinned, o
     setRetrying(true);
     try {
       await onWake();
-      onNotify("浏览器已恢复");
+      onNotify(t.browser.status.restored);
     } catch (err) {
       onNotify(err instanceof Error ? err.message : String(err), "error");
     } finally {
@@ -60,26 +61,26 @@ export function BrowserStatusBar({ status, watching, onWake, onNotify, pinned, o
 
   return (
     <div className={`browser-status ${tone}`} role="status" aria-live="polite">
-      <span className="bs-state">{status?.stateLabel ?? "浏览器状态"}</span>
+      <span className="bs-state">{status?.stateLabel ?? t.browser.status.fallback}</span>
       <span className="bs-occupancy">{describeOccupancy(status)}</span>
-      {watching && <span className="bs-watching">本窗口观看中</span>}
-      {countdown !== null && tone === "warn" && <span className="bs-countdown">剩余 {countdown}</span>}
+      {watching && <span className="bs-watching">{t.browser.status.watching}</span>}
+      {countdown !== null && tone === "warn" && <span className="bs-countdown">{t.browser.status.countdown(countdown)}</span>}
       {status?.enabled && status.browserRunning === null && (
-        <span className="bs-unknown" title="无法确认浏览器进程归属，已按保守策略处理">
-          进程归属未知
+        <span className="bs-unknown" title={t.browser.status.unknownTitle}>
+          {t.browser.status.unknown}
         </span>
       )}
       {refusal && <span className="bs-refusal">{refusal}</span>}
       {needsRestore(status) && !restoring && (
         <button type="button" className="link" onClick={() => void retry()}>
-          重试恢复
+          {t.browser.status.retry}
         </button>
       )}
-      {restoring && <span className="bs-restoring">正在恢复…</span>}
+      {restoring && <span className="bs-restoring">{t.browser.status.restoring}</span>}
       {/* A resident browser is never released, so there is nothing to keep. */}
       {!status?.resident && (
         <button type="button" className="link bs-pin" onClick={onPinToggle}>
-          {pinned ? "取消保留" : "保留浏览器"}
+          {pinned ? t.browser.status.unpin : t.browser.status.pin}
         </button>
       )}
     </div>

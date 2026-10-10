@@ -15,6 +15,8 @@
  *    generation), so closing one window never disturbs another.
  */
 
+import { t } from "./i18n";
+
 export type HeartbeatResult =
   | { kind: "ok"; generation: number }
   | { kind: "stale" }
@@ -138,7 +140,7 @@ export class BrowserViewerController {
       // past the tombstone once, then give up honestly.
       this.#setHeld(false);
       if (!mayRetryStale) {
-        this.#onError?.("无法保护浏览器占用状态，请重新打开面板");
+        this.#onError?.(t.browser.viewer.leaseLost);
         return 0;
       }
       const retryGeneration = generation + 1;
@@ -154,14 +156,14 @@ export class BrowserViewerController {
         return this.#generation;
       }
       this.#setHeld(false);
-      this.#onError?.("无法保护浏览器占用状态，请重新打开面板");
+      this.#onError?.(t.browser.viewer.leaseLost);
       return 0;
     }
     // A failed heartbeat (control restart, network blip, a 503 while waking) must
     // not drop the lease for good: keep the timer running so the next tick joins
     // again, and say so once instead of on every retry.
     this.#setHeld(false);
-    if (!this.#failing) this.#onError?.(result.message ?? "无法连接控制面，浏览器可能被释放");
+    if (!this.#failing) this.#onError?.(result.message ?? t.browser.viewer.unreachable);
     this.#failing = true;
     if (this.#timer === null) this.#armTimer();
     return 0;

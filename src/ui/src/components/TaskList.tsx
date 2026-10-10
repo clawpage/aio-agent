@@ -5,11 +5,12 @@ import type {TaskCounts,TaskFilter} from '../../../common/taskList';
 import {taskStatusLabels,taskStatusTone,type TaskFeed} from '../taskStatus';
 import {groupTasks,taskFilters,taskTime} from '../taskGroups';
 import {MessageTime,TaskDuration,useDisplayClock} from './MessageTime';
+import {t} from '../i18n';
 
 const PAGE=30;
 /** Work still going (or waiting for the person) can be stopped; a result never confirmed can be set aside. */
 const STOPPABLE=new Set(['needs_input','blocked','planning','waiting','queued','running','merging']);
-const endAction=(t:Task):'stop'|'archive'|null=>t.mergedInto?null:STOPPABLE.has(t.status)?'stop':t.status==='unknown'?'archive':null;
+const endAction=(task:Task):'stop'|'archive'|null=>task.mergedInto?null:STOPPABLE.has(task.status)?'stop':task.status==='unknown'?'archive':null;
 
 /**
  * The server counts, filters, searches and orders; this keeps the pages it has
@@ -48,7 +49,7 @@ export function TaskList({feed,active,onDetails,onExpired}:{feed:TaskFeed;active
     }catch(err){
       if(ticket!==seq.current)return;
       if(err instanceof ApiError&&err.status===401)onExpired();
-      setError(err instanceof Error?err.message:'读取失败');
+      setError(err instanceof Error?err.message:t.tasks.list.loadFailed);
     }finally{if(ticket===seq.current)setLoading(null);}
   },[filter,query,onExpired]);
 
@@ -90,45 +91,45 @@ export function TaskList({feed,active,onDetails,onExpired}:{feed:TaskFeed;active
   const clear=()=>{setFilter('all');setTyped('');setQuery('');};
   const [confirming,setConfirming]=useState<string|null>(null);
   const [ending,setEnding]=useState<string|null>(null);
-  const end=async(t:Task,action:'stop'|'archive')=>{
-    setEnding(t.id);setError(null);
+  const end=async(task:Task,action:'stop'|'archive')=>{
+    setEnding(task.id);setError(null);
     try{
-      await (action==='stop'?api.stopTask(t.id):api.archiveTask(t.id));
+      await (action==='stop'?api.stopTask(task.id):api.archiveTask(task.id));
       setConfirming(null);
       await fetchPage('refresh',{cursor:null,shown:state.current.shown});
     }catch(err){
       if(err instanceof ApiError&&err.status===401)onExpired();
-      setError(err instanceof Error?err.message:(action==='stop'?'停止失败':'归档失败'));
+      setError(err instanceof Error?err.message:(action==='stop'?t.tasks.end.stopFailed:t.tasks.end.archiveFailed));
     }finally{setEnding(null);}
   };
 
-  return <section className="task-list-page" aria-label="任务列表">
-    <header className="chat-head"><div className="chat-title"><h2>任务列表</h2><span className="task-list-sub muted tiny">{feed.connected?`${counts?`${counts.all} 项任务 · `:''}状态实时更新`:'正在重新连接…'}</span></div></header>
+  return <section className="task-list-page" aria-label={t.tasks.list.title}>
+    <header className="chat-head"><div className="chat-title"><h2>{t.tasks.list.title}</h2><span className="task-list-sub muted tiny">{feed.connected?`${counts?t.tasks.list.count(counts.all):''}${t.tasks.list.live}`:t.tasks.list.reconnecting}</span></div></header>
     <div className="task-list-scroll" ref={scroller}>
-      {!feed.connected&&<p className="banner warn" role="status">连接恢复后自动更新任务状态。</p>}
-      {counts&&counts.all===0&&!query&&<div className="empty"><h3>还没有任务</h3><p>在主会话交代事情后，就会显示在这里。</p></div>}
+      {!feed.connected&&<p className="banner warn" role="status">{t.tasks.list.reconnectBanner}</p>}
+      {counts&&counts.all===0&&!query&&<div className="empty"><h3>{t.tasks.list.emptyTitle}</h3><p>{t.tasks.list.emptyBody}</p></div>}
       {counts&&(counts.all>0||query)&&<div className="task-list-tools">
-        <div className="task-filters" role="group" aria-label="按状态筛选">{taskFilters.map(f=><button key={f.id} type="button" className={`task-filter ${f.id}`} aria-pressed={filter===f.id} onClick={()=>setFilter(f.id)}>
+        <div className="task-filters" role="group" aria-label={t.tasks.list.filterGroup}>{taskFilters.map(f=><button key={f.id} type="button" className={`task-filter ${f.id}`} aria-pressed={filter===f.id} onClick={()=>setFilter(f.id)}>
           {f.label}<span className={`task-filter-count${f.id==='attention'&&counts.attention?' due':''}`}>{counts[f.id]}</span>
         </button>)}</div>
-        <input type="search" className="task-search" placeholder="搜索任务" aria-label="搜索任务" value={typed} onChange={e=>setTyped(e.target.value)}/>
+        <input type="search" className="task-search" placeholder={t.tasks.list.search} aria-label={t.tasks.list.search} value={typed} onChange={e=>setTyped(e.target.value)}/>
       </div>}
-      {counts&&narrowed&&!rows.length&&!loading&&<div className="empty"><h3>没有符合条件的任务</h3><p>换个条件试试。</p><button type="button" className="ghost" onClick={clear}>清除筛选</button></div>}
+      {counts&&narrowed&&!rows.length&&!loading&&<div className="empty"><h3>{t.tasks.list.noMatchTitle}</h3><p>{t.tasks.list.noMatchBody}</p><button type="button" className="ghost" onClick={clear}>{t.tasks.list.clearFilters}</button></div>}
       {groups.map(g=><section key={g.key} className="task-group" data-group={g.key} aria-label={g.label}>
         <h3 className="task-group-head">{g.label}{(g.key==='attention'||g.key==='working')&&counts&&<span className="task-group-count">{counts[g.key]}</span>}</h3>
-        <ul className="task-list">{g.tasks.map(t=>{const action=endAction(t);const word=action==='stop'?'停止':'归档';return <li key={t.id} data-task-id={t.id} className={action?'task-list-row ends':'task-list-row'}>
-          <button className="task-list-item" onClick={()=>onDetails(t)} aria-label={`打开任务：${t.title}`}>
-            <div className="task-list-top"><strong>{t.title}</strong><span className={`task-status-badge ${taskStatusTone(t)}`}>{t.waitReason?.label??taskStatusLabels[t.status]??t.status}</span></div>
-            <p className="task-list-summary">{t.clarification||t.description||t.text}</p>
-            <div className="task-list-meta"><MessageTime at={taskTime(t)} now={now}/><TaskDuration task={t} now={now}/>{t.schedule&&<span className="task-tag" title={`定时任务：${t.schedule.title}`}>定时</span>}<span className="spacer"/><span aria-hidden="true">›</span></div>
+        <ul className="task-list">{g.tasks.map(task=>{const action=endAction(task);const stop=action==='stop';return <li key={task.id} data-task-id={task.id} className={action?'task-list-row ends':'task-list-row'}>
+          <button className="task-list-item" onClick={()=>onDetails(task)} aria-label={t.tasks.list.open(task.title)}>
+            <div className="task-list-top"><strong>{task.title}</strong><span className={`task-status-badge ${taskStatusTone(task)}`}>{task.waitReason?.label??taskStatusLabels[task.status]??task.status}</span></div>
+            <p className="task-list-summary">{task.clarification||task.description||task.text}</p>
+            <div className="task-list-meta"><MessageTime at={taskTime(task)} now={now}/><TaskDuration task={task} now={now}/>{task.schedule&&<span className="task-tag" title={t.tasks.list.scheduled(task.schedule.title)}>{t.tasks.list.scheduledTag}</span>}<span className="spacer"/><span aria-hidden="true">›</span></div>
           </button>
-          {action&&<div className="task-list-end-action">{confirming===t.id
-            ?<><button type="button" className="ghost tiny" disabled={ending===t.id} onClick={()=>setConfirming(null)}>取消</button><button type="button" className="danger tiny" disabled={ending===t.id} onClick={()=>void end(t,action)}>{ending===t.id?`正在${word}…`:`确认${word}`}</button></>
-            :<button type="button" className="ghost tiny" aria-label={`${word}任务：${t.title}`} title={action==='stop'?'停止这个任务，不再继续':'结果不再核对，移到已停止'} onClick={()=>setConfirming(t.id)}>{word}</button>}</div>}
+          {action&&<div className="task-list-end-action">{confirming===task.id
+            ?<><button type="button" className="ghost tiny" disabled={ending===task.id} onClick={()=>setConfirming(null)}>{t.tasks.end.cancel}</button><button type="button" className="danger tiny" disabled={ending===task.id} onClick={()=>void end(task,action)}>{ending===task.id?(stop?t.tasks.end.stopping:t.tasks.end.archiving):(stop?t.tasks.end.confirmStop:t.tasks.end.confirmArchive)}</button></>
+            :<button type="button" className="ghost tiny" aria-label={stop?t.tasks.end.stopLabel(task.title):t.tasks.end.archiveLabel(task.title)} title={stop?t.tasks.end.stopHint:t.tasks.end.archiveHint} onClick={()=>setConfirming(task.id)}>{stop?t.tasks.end.stop:t.tasks.end.archive}</button>}</div>}
         </li>;})}</ul>
       </section>)}
-      {error&&<p className="error" role="alert">{error}{loading===null&&<> <button type="button" className="ghost" onClick={()=>void fetchPage(rows.length?'more':'reset',{cursor:next,shown:rows.length})}>重试</button></>}</p>}
-      <div ref={sentinel} className="task-list-end" aria-live="polite">{loading?<span className="muted tiny">加载中…</span>:rows.length>0&&!next?<span className="muted tiny">没有更多了</span>:null}</div>
+      {error&&<p className="error" role="alert">{error}{loading===null&&<> <button type="button" className="ghost" onClick={()=>void fetchPage(rows.length?'more':'reset',{cursor:next,shown:rows.length})}>{t.tasks.list.retry}</button></>}</p>}
+      <div ref={sentinel} className="task-list-end" aria-live="polite">{loading?<span className="muted tiny">{t.tasks.list.loading}</span>:rows.length>0&&!next?<span className="muted tiny">{t.tasks.list.noMore}</span>:null}</div>
     </div>
   </section>;
 }

@@ -1,15 +1,16 @@
 import { useState } from "react";
 import type { Schedule, ScheduleSpec } from "../types";
+import { t } from "../i18n";
 
 const KINDS: Array<{ id: ScheduleSpec["kind"]; label: string }> = [
-  { id: "daily", label: "每天" },
-  { id: "weekly", label: "每周" },
-  { id: "monthly", label: "每月" },
-  { id: "once", label: "一次" },
-  { id: "dates", label: "几个日期" },
-  { id: "interval", label: "每隔一段时间" },
+  { id: "daily", label: t.schedules.editor.kinds.daily },
+  { id: "weekly", label: t.schedules.editor.kinds.weekly },
+  { id: "monthly", label: t.schedules.editor.kinds.monthly },
+  { id: "once", label: t.schedules.editor.kinds.once },
+  { id: "dates", label: t.schedules.editor.kinds.dates },
+  { id: "interval", label: t.schedules.editor.kinds.interval },
 ];
-const WEEKDAYS = ["一", "二", "三", "四", "五", "六", "日"];
+const WEEKDAYS = t.schedules.editor.weekdays;
 
 interface Draft {
   title: string;
@@ -39,7 +40,7 @@ function draftOf(s: Schedule): Draft {
   };
 }
 
-const list = (text: string) => text.split(/[\s,，、]+/).map((t) => t.trim()).filter(Boolean);
+const list = (text: string) => text.split(/[\s,，、]+/).map((t) => t.trim()).filter(Boolean); // i18n-exempt: separators accepted in typed times
 
 /** The rule the draft describes; the control plane checks it and says what is wrong. */
 function specOf(d: Draft): ScheduleSpec {
@@ -60,24 +61,24 @@ export function ScheduleEditor({ schedule, busy, onSave, onCancel }: { schedule:
   const [d, setD] = useState<Draft>(() => draftOf(schedule));
   const set = (patch: Partial<Draft>) => setD((old) => ({ ...old, ...patch }));
   const daily = d.kind === "daily" || d.kind === "weekly" || d.kind === "monthly";
-  return <form className="vault-form vault-edit schedule-edit" aria-label={`修改定时任务：${schedule.title}`} onSubmit={(e) => { e.preventDefault(); onSave({ title: d.title, instruction: d.instruction, schedule: specOf(d), needsBrowser: d.needsBrowser }); }}>
-    <label className="field schedule-edit-wide"><span>名称</span><input value={d.title} maxLength={40} onChange={(e) => set({ title: e.target.value })} /></label>
-    <label className="field schedule-edit-wide"><span>每次要做的事</span><textarea rows={3} value={d.instruction} onChange={(e) => set({ instruction: e.target.value })} /></label>
-    <label className="field"><span>运行规则</span><select value={d.kind} onChange={(e) => set({ kind: e.target.value as Draft["kind"] })}>{KINDS.map((k) => <option key={k.id} value={k.id}>{k.label}</option>)}</select></label>
-    {d.kind === "weekly" && <fieldset className="field schedule-weekdays"><legend>周几</legend>{WEEKDAYS.map((w, i) => <label key={w}><input type="checkbox" checked={d.weekdays.includes(i + 1)} onChange={(e) => set({ weekdays: e.target.checked ? [...d.weekdays, i + 1].sort() : d.weekdays.filter((x) => x !== i + 1) })} />{w}</label>)}</fieldset>}
-    {d.kind === "monthly" && <label className="field"><span>每月几号</span><input type="number" min={1} max={31} value={d.monthDay} onChange={(e) => set({ monthDay: e.target.value })} /></label>}
-    {d.kind === "once" && <label className="field"><span>日期</span><input type="date" value={d.date} onChange={(e) => set({ date: e.target.value })} /></label>}
-    {(daily || d.kind === "once") && <label className="field"><span>{daily ? "时间（一天多次用逗号隔开）" : "时间"}</span><input value={d.times} inputMode="numeric" placeholder={daily ? "例如 08:00, 18:00" : "例如 09:00"} onChange={(e) => set({ times: e.target.value })} /></label>}
-    {d.kind === "interval" && <label className="field"><span>每隔几分钟（至少 15）</span><input type="number" min={15} value={d.everyMinutes} onChange={(e) => set({ everyMinutes: e.target.value })} /></label>}
-    {d.kind === "dates" && <label className="field schedule-edit-wide"><span>运行时间（一行一个）</span><textarea rows={4} value={d.dates} placeholder={"2026-10-08 09:00\n2026-10-15 14:30"} onChange={(e) => set({ dates: e.target.value })} /></label>}
+  return <form className="vault-form vault-edit schedule-edit" aria-label={t.schedules.editor.label(schedule.title)} onSubmit={(e) => { e.preventDefault(); onSave({ title: d.title, instruction: d.instruction, schedule: specOf(d), needsBrowser: d.needsBrowser }); }}>
+    <label className="field schedule-edit-wide"><span>{t.schedules.editor.name}</span><input value={d.title} maxLength={40} onChange={(e) => set({ title: e.target.value })} /></label>
+    <label className="field schedule-edit-wide"><span>{t.schedules.editor.instruction}</span><textarea rows={3} value={d.instruction} onChange={(e) => set({ instruction: e.target.value })} /></label>
+    <label className="field"><span>{t.schedules.editor.rule}</span><select value={d.kind} onChange={(e) => set({ kind: e.target.value as Draft["kind"] })}>{KINDS.map((k) => <option key={k.id} value={k.id}>{k.label}</option>)}</select></label>
+    {d.kind === "weekly" && <fieldset className="field schedule-weekdays"><legend>{t.schedules.editor.weekdaysLegend}</legend>{WEEKDAYS.map((w, i) => <label key={w}><input type="checkbox" checked={d.weekdays.includes(i + 1)} onChange={(e) => set({ weekdays: e.target.checked ? [...d.weekdays, i + 1].sort() : d.weekdays.filter((x) => x !== i + 1) })} />{w}</label>)}</fieldset>}
+    {d.kind === "monthly" && <label className="field"><span>{t.schedules.editor.monthDay}</span><input type="number" min={1} max={31} value={d.monthDay} onChange={(e) => set({ monthDay: e.target.value })} /></label>}
+    {d.kind === "once" && <label className="field"><span>{t.schedules.editor.date}</span><input type="date" value={d.date} onChange={(e) => set({ date: e.target.value })} /></label>}
+    {(daily || d.kind === "once") && <label className="field"><span>{daily ? t.schedules.editor.timesMulti : t.schedules.editor.time}</span><input value={d.times} inputMode="numeric" placeholder={daily ? t.schedules.editor.timesMultiPlaceholder : t.schedules.editor.timePlaceholder} onChange={(e) => set({ times: e.target.value })} /></label>}
+    {d.kind === "interval" && <label className="field"><span>{t.schedules.editor.everyMinutes}</span><input type="number" min={15} value={d.everyMinutes} onChange={(e) => set({ everyMinutes: e.target.value })} /></label>}
+    {d.kind === "dates" && <label className="field schedule-edit-wide"><span>{t.schedules.editor.dates}</span><textarea rows={4} value={d.dates} placeholder={"2026-10-08 09:00\n2026-10-15 14:30"} onChange={(e) => set({ dates: e.target.value })} /></label>}
     {d.kind !== "once" && d.kind !== "dates" && <>
-      <label className="field"><span>最多运行几次（可不填）</span><input type="number" min={1} value={d.maxRuns} onChange={(e) => set({ maxRuns: e.target.value })} /></label>
-      <label className="field"><span>到哪天为止（可不填）</span><input type="date" value={d.until} onChange={(e) => set({ until: e.target.value })} /></label>
+      <label className="field"><span>{t.schedules.editor.maxRuns}</span><input type="number" min={1} value={d.maxRuns} onChange={(e) => set({ maxRuns: e.target.value })} /></label>
+      <label className="field"><span>{t.schedules.editor.until}</span><input type="date" value={d.until} onChange={(e) => set({ until: e.target.value })} /></label>
     </>}
-    <label className="vault-save"><input type="checkbox" checked={d.needsBrowser} onChange={(e) => set({ needsBrowser: e.target.checked })} />运行时用浏览器查网页</label>
+    <label className="vault-save"><input type="checkbox" checked={d.needsBrowser} onChange={(e) => set({ needsBrowser: e.target.checked })} />{t.schedules.editor.needsBrowser}</label>
     <div className="schedule-actions">
-      <button type="submit" className="primary tiny" disabled={busy || !d.title.trim() || !d.instruction.trim()}>保存</button>
-      <button type="button" className="ghost tiny" onClick={onCancel}>取消</button>
+      <button type="submit" className="primary tiny" disabled={busy || !d.title.trim() || !d.instruction.trim()}>{t.schedules.editor.save}</button>
+      <button type="button" className="ghost tiny" onClick={onCancel}>{t.schedules.editor.cancel}</button>
     </div>
   </form>;
 }

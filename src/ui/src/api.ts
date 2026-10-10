@@ -12,6 +12,7 @@ import type {
   Turn,
 } from "./types";
 import { API_VERSION, apiCompatible } from "../../common/version";
+import { t } from "./i18n";
 
 /**
  * Where the control plane's API lives. Empty (the default) means this page's own
@@ -31,21 +32,21 @@ export function apiUrl(path: string): string {
 export function friendlyStatusMessage(status: number): string {
   switch (status) {
     case 401:
-      return "登录已失效，请重新登录";
+      return t.app.httpErrors.unauthorized;
     case 403:
-      return "请求被拒绝";
+      return t.app.httpErrors.forbidden;
     case 404:
-      return "接口不存在";
+      return t.app.httpErrors.notFound;
     case 413:
-      return "内容过大";
+      return t.app.httpErrors.tooLarge;
     case 429:
-      return "请求过于频繁，已被限流，请稍后再试";
+      return t.app.httpErrors.rateLimited;
     case 502:
     case 503:
     case 504:
-      return "服务暂时不可用，请稍后重试";
+      return t.app.httpErrors.unavailable;
     default:
-      return `请求失败（HTTP ${status}）`;
+      return t.app.httpErrors.other(status);
   }
 }
 
@@ -224,7 +225,7 @@ export const api = {
   upload: (file: File, dir?: string) =>
     new Promise<Attachment>((resolve, reject) => {
       const reader = new FileReader();
-      reader.onerror = () => reject(new Error("读取文件失败"));
+      reader.onerror = () => reject(new Error(t.app.fileReadFailed));
       reader.onload = () => {
         void (async () => {
           try {
@@ -327,7 +328,7 @@ export interface BrowserLifecycleStateView {
  * countdown actually reach zero while the UI is open.
  */
 /** Fixed note of the panel's own keep-awake pin; mirrors the server constant. */
-export const UI_KEEP_ALIVE_NOTE = "UI 手动保留浏览器";
+export const UI_KEEP_ALIVE_NOTE = "UI 手动保留浏览器"; // i18n-exempt: protocol token matched by the server's pin note
 
 export const browserApi = {
   status: () => request<{ status: BrowserLifecycleStateView }>("/api/browser/status"),
@@ -424,7 +425,7 @@ export async function versionMismatch(): Promise<string | null> {
   try {
     const v = await request<{ api: number; apiMin: number }>("/api/version", { cache: "no-store" });
     if (apiCompatible(API_VERSION, v.api, v.apiMin)) return null;
-    return `界面与服务版本不兼容（界面需要接口 v${API_VERSION}，服务提供 v${v.apiMin}–v${v.api}）。请刷新页面；仍然提示时需要更新${v.api < API_VERSION ? "服务" : "界面"}。`;
+    return t.app.versionMismatch(API_VERSION, v.apiMin, v.api, v.api < API_VERSION ? "server" : "ui");
   } catch {
     // An older control plane has no version endpoint; it is served as before (see App's legacy mode).
     return null;
