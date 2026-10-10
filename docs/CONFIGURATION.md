@@ -118,6 +118,7 @@
 | `PA_PHONE_BRIDGE` | 空 | `var/runtime.env` 中设为 `1` 时 `bin/serve` 同时运行手机桥接（宿主进程） |
 | `PA_PHONE_BRIDGE_PORT` / `PA_PHONE_BRIDGE_BIND` | `4903` / `127.0.0.1` | 桥接监听地址 |
 | `PA_PHONE_SERIAL` | 空 | 指定 adb 设备序列号；为空时用唯一已连接的设备 |
+| `PA_PHONE_SCREEN_OFF` | 空 | `var/runtime.env` 中设为 `1` 时桥接让手机屏幕保持熄灭（截图、mobile-mcp、实时画面照常） |
 | `PA_ADB` | 自动 | adb 路径；默认按 `ANDROID_HOME`、`~/Library/Android/sdk/platform-tools` 查找 |
 | `PA_PHONE_DIR` | `var/phone` | 桥接的 mobile-mcp 与 scrcpy server 安装目录 |
 | `PA_GADGET_TOKEN_PATH` | `<数据目录>/gadget-token.env` | 语音配件令牌与绑定账号 |

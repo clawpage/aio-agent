@@ -12,6 +12,9 @@
  *   GET  /screenshot  the screen now (JPEG where macOS sips can shrink it, else PNG)
  *   WS   /screen  the live screen (scrcpy, H.264) and touch / key input
  *
+ * PA_PHONE_SCREEN_OFF=1 keeps the phone's own screen dark while all of the above
+ * still sees it (see keepDark).
+ *
  *   node bin/phone-bridge.mjs setup [--devicekit]
  *     installs the pinned mobile-mcp and scrcpy server under var/phone and
  *     creates the token file; --devicekit also installs mobile-mcp's helper app
@@ -310,6 +313,82 @@ function connectOnce(port) {
   });
 }
 
+const DARK_JAR = "/data/local/tmp/aio-scrcpy-dark.jar";
+const DARK_IDLE_MS = 120_000;
+
+/**
+ * Switch the phone's panels off while it stays awake (scrcpy's "turn screen off"):
+ * the system keeps drawing, so screenshots, mobile-mcp and the live screen still
+ * see everything. A short control-only scrcpy session sends the one message and
+ * ends without cleanup, so the panels stay off until the phone is next woken
+ * (its own jar: a live-screen session that ends deletes its own).
+ */
+async function darken(serial) {
+  await run(ADB, ["-s", serial, "push", SCRCPY_SERVER, DARK_JAR], { timeout: 30_000 });
+  const scid = (randomBytes(4).readUInt32BE(0) & 0x7fffffff).toString(16).padStart(8, "0");
+  const { stdout } = await run(ADB, ["-s", serial, "forward", "tcp:0", `localabstract:scrcpy_${scid}`], { timeout: 10_000 });
+  const port = Number(stdout.trim());
+  const proc = spawn(ADB, ["-s", serial, "shell", `CLASSPATH=${DARK_JAR}`, "app_process", "/", "com.genymobile.scrcpy.Server", SCRCPY_VERSION,
+    `scid=${scid}`, "log_level=info", "tunnel_forward=true", "video=false", "audio=false", "control=true", "send_device_meta=false",
+    "clipboard_autosync=false", "power_on=false", "cleanup=false"], { stdio: ["ignore", "pipe", "pipe"] });
+  const off = new Promise((resolve) => proc.stdout.on("data", (d) => { if (/display turned off/i.test(d.toString())) resolve(true); }));
+  let control;
+  try {
+    for (let attempt = 0; ; attempt++) {
+      if (proc.exitCode !== null) throw new Error("scrcpy server exited");
+      try {
+        control = await connectOnce(port);
+        await reader(control)(1);
+        break;
+      } catch {
+        control?.destroy();
+        if (attempt > 50) throw new Error("scrcpy server did not start");
+        await new Promise((r) => setTimeout(r, 100));
+      }
+    }
+    control.write(Buffer.from([10, 0])); // SET_DISPLAY_POWER off
+    if (!(await Promise.race([off, new Promise((r) => setTimeout(() => r(false), 5000))]))) throw new Error("display did not turn off");
+  } finally {
+    control?.destroy();
+    proc.kill("SIGTERM");
+    await run(ADB, ["-s", serial, "forward", "--remove", `tcp:${port}`]).catch(() => undefined);
+  }
+}
+
+/**
+ * PA_PHONE_SCREEN_OFF=1: keep the phone's screen dark. It is darkened at start and again
+ * after two quiet minutes once someone has woken it (power button) and used it; a phone
+ * put to sleep is left asleep.
+ */
+function keepDark() {
+  let activity = null;
+  let quietSince = 0;
+  let darkened = null;
+  let busy = false;
+  const tick = async () => {
+    if (busy || shuttingDown) return;
+    busy = true;
+    try {
+      const serial = await phoneSerial();
+      if (!serial) return;
+      const { stdout } = await run(ADB, ["-s", serial, "shell", "dumpsys power | grep -E 'mWakefulness=|mLastUserActivityTime='"], { timeout: 10_000 });
+      const seen = `${serial}:${/mLastUserActivityTime=(\d+)/.exec(stdout)?.[1] ?? ""}`;
+      if (activity !== null && seen !== activity) quietSince = Date.now();
+      activity = seen;
+      if (!/mWakefulness=Awake/.test(stdout) || darkened === activity || Date.now() - quietSince < DARK_IDLE_MS) return;
+      await darken(serial);
+      darkened = activity;
+      log("phone screen darkened", { serial });
+    } catch (err) {
+      log("darkening the phone screen failed", { error: err.message });
+    } finally {
+      busy = false;
+    }
+  };
+  void tick();
+  return setInterval(() => void tick(), 20_000);
+}
+
 /**
  * One scrcpy session shared by every viewer: started for the first viewer and
  * stopped a little after the last one leaves, so an unwatched phone does no
@@ -539,6 +618,7 @@ async function serve() {
   if (!token) { log(`fatal: ${TOKEN_KEY} missing; run node bin/phone-bridge.mjs setup`); process.exit(1); }
   if (!fs.existsSync(MOBILE_MCP_ENTRY)) { log("fatal: mobile-mcp missing; run node bin/phone-bridge.mjs setup"); process.exit(1); }
   await startMobileMcp();
+  const dark = process.env.PA_PHONE_SCREEN_OFF === "1" ? keepDark() : null;
   const screen = new Screen();
   const wss = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024 });
   const server = http.createServer(async (req, res) => {
@@ -583,6 +663,7 @@ async function serve() {
   server.listen(PORT, BIND, () => log("listening", { bind: BIND, port: PORT, adb: ADB }));
   const shutdown = () => {
     shuttingDown = true;
+    clearInterval(dark);
     screen.stop("shutdown");
     mcpChild?.kill("SIGTERM");
     server.close();
