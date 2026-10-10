@@ -10,7 +10,8 @@ import { McpGateway } from "./mcpGateway.js";
  */
 
 export const KB_MCP_KEY = "KB_MCP_TOKEN";
-const TIMEOUT_MS = 30_000;
+// A scanned original is read by text recognition on the knowledge base's host: a dozen pages take ~15 s.
+const TIMEOUT_MS = 90_000;
 
 /** Thread-level MCP wiring for a Codex executor. */
 export function kbThreadServers(cfg: Config): Record<string, unknown> {

@@ -399,7 +399,7 @@ it('adds the knowledge base to a task thread only when this runtime was granted 
   await session.startThread({browserTask:task});
   await session.startThread({});
   const sent=server.inbound.filter(r=>r.method==='thread/start');
-  expect(sent[0]?.params?.config).toEqual({mcp_servers:{...(tabThreadConfig(task) as {mcp_servers:object}).mcp_servers,aio_kb:{url:cfg.kb.url,tool_timeout_sec:40}}});
+  expect(sent[0]?.params?.config).toEqual({mcp_servers:{...(tabThreadConfig(task) as {mcp_servers:object}).mcp_servers,aio_kb:{url:cfg.kb.url,tool_timeout_sec:100}}});
   expect(sent[1]?.params?.config).toBeUndefined();
  }finally{session.close();}
 });
