@@ -460,7 +460,7 @@ Jev（TypeSafe System One）根据状态和选项返回选择、各选项概率�
 
 设置 `PA_PRINTER_URI`（家里网络打印机的 IPP 地址，如 `ipps://192.168.1.123/ipp/print`；支持 IPP Everywhere / PWG raster 的打印机）后：
 
-- **授权**：只有 `PA_PRINTER_ACCOUNTS` 列出的用户名可用（owner 也需列出）。现有部署只授权 `owner`。
+- **授权**：只有 `PA_PRINTER_ACCOUNTS` 列出的用户名可用（owner 也需列出）。现有部署授权 `owner` 与 `cr`。
 - **接入**：获准账号注册 `aio_printer`（成员网关 `/printer/<运行时令牌>/mcp`），工具为 `printer_status`（状态、缺纸卡纸、墨量、纸张）
   与 `print_file`（工作区里的 PDF 或图片；可选页码、份数 1–20、单双面、黑白）。其他格式由执行会话先在沙箱里转成 PDF。
 - **流程**：该账号自己的沙箱用 `pdftoppm` 把文件渲染成 300 dpi 的 PWG raster（`src/control/printer/scripts/pwg-raster.py`，需沙箱里的 numpy 与 Pillow），
