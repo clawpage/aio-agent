@@ -541,6 +541,33 @@ describe("main inbox delegation", () => {
         expect(tasks.get(parent.id)?.result).toContain("餐厅");
         expect(tasks.list().tasks.find(t=>t.id===extra.id)?.result).toBeNull();
     });
+    it("hands a person's held tabs back to the agent when they send the task a supplement or an answer", async()=>{
+        const released:string[]=[];
+        tasks.setHumanTabRelease(async key=>{released.push(key);return 1;});
+        const parent=submit("在 Weee 找之前买过的臭豆腐");await tick();
+        const key=tasks.list().tasks.find(t=>t.id===parent.id)!.conversationId;
+        codex.plan=async()=>JSON.stringify({title:"换账号",appendTo:parent.id,related:[parent.id],dependencies:[],resources:[]});
+        submit("你先退出登录，我来登 RA 的账号");await tick();await tick();
+        expect(released).toEqual([key]);
+        expect(codex.steers[0]!.text).toMatch(/^用户发这条补充时，你请他接管的浏览器标签页（1 个）还在他手里，现已自动交还给你/);
+        // The task then asks, and the answer resumes its session: the tabs are handed back again first.
+        await codex.runTurn(codex.startedTurns[0]!.turnId,{text:"请登录后告诉我"});await tick();
+        released.length=0;
+        codex.plan=async()=>JSON.stringify({title:"继续查",related:[parent.id],dependencies:[],resources:[]});
+        tasks.submit({text:"登好了",clientMessageId:"answer",relatedTaskId:parent.id});await tick();await tick();
+        expect(released).toEqual([key]);
+    });
+    it("drops an earlier answer's question once a supplement in the same turn has answered it",async()=>{
+        const job=submit("找臭豆腐");await tick();
+        const t=codex.startedTurns.at(-1)!;
+        const item=(i:Record<string,unknown>)=>codex.emitNotification("item/completed",{threadId:t.threadId,turnId:t.turnId,item:i});
+        item({id:"u0",type:"userMessage",content:[{type:"text",text:"prompt"}]});
+        item({id:"a1",type:"agentMessage",phase:"final_answer",text:"Kevin 账号里没找到。\n```ask_user\n{\"question\":\"请切换到睿账号\"}\n```"});
+        item({id:"u1",type:"userMessage",content:[{type:"text",text:"已切换"}]});
+        item({id:"a2",type:"agentMessage",phase:"final_answer",text:"在睿账号里找到了：老干妈臭豆腐"});
+        codex.completeTurn(t.turnId);await tick();
+        expect(tasks.get(job.id)).toMatchObject({status:"completed",result:"Kevin 账号里没找到。\n\n---\n\n在睿账号里找到了：老干妈臭豆腐"});
+    });
     it("folds supplements into a not-yet-dispatched task including attachments", async()=>{
         codex.plan=async()=>JSON.stringify({title:"shared",related:[],dependencies:[],resources:["write:/home/gem/workspace/projects/shared"]});
         submit("shared files busy");await tick();const parent=submit("plan trip");await tick();

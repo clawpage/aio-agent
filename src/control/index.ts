@@ -140,6 +140,11 @@ export async function bootstrap(opts: BootstrapOptions = {}): Promise<Bootstrapp
 
   const jev = new Jev(cfg, log);
   const tasks = new TaskService(db, cfg, agent, codex, container, jev);
+  if (tabs) tasks.setHumanTabRelease(async (key) => {
+    const held = (await tabs.list(key)).filter((t) => t.holder === "human");
+    for (const t of held) await tabs.control(key, t.id, "release");
+    return held.length;
+  });
   const ctx: AppContext = {
     jev,
     tasks,

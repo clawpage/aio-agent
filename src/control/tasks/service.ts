@@ -154,6 +154,17 @@ export class TaskService {
     ownerId(row: TaskRow): string { return this.agent.getConversation(row.conversation_id)!.owner_id; }
     belongsTo(id: string, userId: string): boolean { const row = this.get(id); return !!row && this.ownerId(row) === userId; }
     private executor(row: TaskRow): string { return row.execution_conversation_id ?? row.conversation_id; }
+    #releaseHumanTabs: ((key: string) => Promise<number>) | null = null;
+    /** How to hand a task's browser tabs back from the person to its agent (set where the tab server lives). */
+    setHumanTabRelease(release: (key: string) => Promise<number>): void { this.#releaseHumanTabs = release; }
+    /**
+     * A message to a task means the person is back with its agent: tabs they took over
+     * are handed back, or the agent would keep waiting for a hand-back nobody gives.
+     */
+    private async handBackTabs(key: string): Promise<number> {
+        try { return (await this.#releaseHumanTabs?.(key)) ?? 0; }
+        catch { return 0; }
+    }
     /** The identity a task's browser tabs are recorded under: its execution conversation. */
     browserKey(id: string): string | null { const row = this.get(id); return row ? this.executor(row) : null; }
     /** Referencing an old result while its resumed turn runs supplements that turn. */
@@ -752,8 +763,10 @@ export class TaskService {
                 }
                 this.db.prepare("UPDATE tasks SET status='steering' WHERE id=?").run(row.id);
                 try {
+                    const handed=await this.handBackTabs(this.executor(parent));
+                    if(this.#closed) return;
                     const result=await this.agent.appendTurnInput(this.executor(parent),parent.turn_id,
-                        `这是用户在 ${new Date(row.created_at).toLocaleTimeString("sv-SE", { hour: "2-digit", minute: "2-digit" })} 对当前任务的补充。原任务继续完成，不要因为这条补充放弃、中断或改做别的，除非补充明确要求停止或替换原任务；把补充合并进同一件事处理，不要当作独立任务。最终回复要同时包含原任务的结果和对这条补充的处理：原任务的答案如果已经发过，最终回复先简要重述原任务的结论，再回应补充。按用户要求自行使用所需的文件、浏览器和工具，不受派单资源提示限制。\n\n主会话最近的对话（按时间先后，▶ 是这条补充）：\n${formatTimeline(timeline(this.rows().filter(t => this.ownerId(t) === this.ownerId(row)), row, 6), Date.now(), plan.jev)}${plan.jev ? `\n\nJev 的逐任务相关性与路由建议（仅作背景）：\n${formatRelevance(plan.jev, id => this.get(id)) ?? "无"}` : ''}\n\n派单器的判断（仅作背景）：${JSON.stringify({title:plan.title,description:plan.description,decision:plan.decision})}\n\n${row.input_text}${dependencies.length ? `\n\n补充所需的已完成任务资料：${JSON.stringify(dependencies.map(t => ({id:t!.id,result:t!.result?.slice(0,16000)})))}` : ''}`,
+                        `${handed ? `用户发这条补充时，你请他接管的浏览器标签页（${handed} 个）还在他手里，现已自动交还给你，可以直接继续操作；确实还需要他亲手操作时再请求接管。\n\n` : ""}这是用户在 ${new Date(row.created_at).toLocaleTimeString("sv-SE", { hour: "2-digit", minute: "2-digit" })} 对当前任务的补充。原任务继续完成，不要因为这条补充放弃、中断或改做别的，除非补充明确要求停止或替换原任务；把补充合并进同一件事处理，不要当作独立任务。最终回复要同时包含原任务的结果和对这条补充的处理：原任务的答案如果已经发过，最终回复先简要重述原任务的结论，再回应补充。按用户要求自行使用所需的文件、浏览器和工具，不受派单资源提示限制。\n\n主会话最近的对话（按时间先后，▶ 是这条补充）：\n${formatTimeline(timeline(this.rows().filter(t => this.ownerId(t) === this.ownerId(row)), row, 6), Date.now(), plan.jev)}${plan.jev ? `\n\nJev 的逐任务相关性与路由建议（仅作背景）：\n${formatRelevance(plan.jev, id => this.get(id)) ?? "无"}` : ''}\n\n派单器的判断（仅作背景）：${JSON.stringify({title:plan.title,description:plan.description,decision:plan.decision})}\n\n${row.input_text}${dependencies.length ? `\n\n补充所需的已完成任务资料：${JSON.stringify(dependencies.map(t => ({id:t!.id,result:t!.result?.slice(0,16000)})))}` : ''}`,
                         JSON.parse(row.attachments_json),resources.includes("browser"));
                     if(this.#closed) return;
                     if(result==='browser_unavailable') this.db.prepare("UPDATE tasks SET status='merge_failed',error=? WHERE id=?").run('此补充需要浏览器，但浏览器暂未恢复；原任务仍可继续，请恢复浏览器后重新补充。',row.id);
@@ -887,6 +900,8 @@ export class TaskService {
             try {
                 // Reserve this specific task before submitTurn synchronously
                 // emits turn.queued; another waiting reference may share the conversation.
+                // Answering a task whose tabs the person still holds hands them back for this turn.
+                if (row.execution_conversation_id) void this.handBackTabs(this.executor(row));
                 this.db.prepare("UPDATE tasks SET status='queued',plan_json=? WHERE id=?").run(JSON.stringify({ ...plan, injectedContext: gadget ? {} : Object.fromEntries(fresh.map(c => [c.id, injected[c.id]])), rulesVersion: gadget || rulesKnown ? undefined : rulesVersion, agreementsVersion: agreements && !agreementsKnown ? agreements.version : undefined }), row.id);
                 const { turn } = this.agent.submitTurn({ conversationId: this.executor(row), clientMessageId: `task:${row.id}`, text: prompt, attachments: [...JSON.parse(row.attachments_json),...this.rows().filter(t=>t.merged_into===row.id && t.status==='merged').flatMap(t=>JSON.parse(t.attachments_json))], requiresBrowser: plan.resources.includes("browser"), frozenSettings: { model: row.model!, effort: row.effort } });
                 this.db.prepare("UPDATE tasks SET turn_id=? WHERE id=?").run(turn.id, row.id);
@@ -939,10 +954,11 @@ export class TaskService {
         const earlier: string[] = [];
         let prompted = false, segment: string | null = null;
         for (const i of all) {
-            if (i?.type === "userMessage") { if (prompted && segment) earlier.push(segment); prompted = true; segment = null; }
+            // An earlier answer's question was answered by the supplement that followed it: keep the answer, not the question.
+            if (i?.type === "userMessage") { if (prompted && segment) earlier.push(segment.replace(/(?:^|\n)```ask_user\s*\n[\s\S]*?\n```\s*$/, "").trim()); prompted = true; segment = null; }
             else if (i?.type === "agentMessage" && i.phase === "final_answer" && typeof i.text === "string" && i.text.trim()) segment = i.text.trim();
         }
-        const kept = segment ? earlier : [];
+        const kept = segment ? earlier.filter(Boolean) : [];
         const withEarlier = (text: string | null) => kept.length && text ? [...kept, text].join("\n\n---\n\n") : text;
         const question = turn.status === "completed" && !row.schedule_id && last?.text ? executorQuestion(last.text) : null;
         const plan = question && row.plan_json ? JSON.parse(row.plan_json) as TaskPlan : null;
