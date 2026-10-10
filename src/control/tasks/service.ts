@@ -717,14 +717,6 @@ export class TaskService {
         plan.decision={kind:"new",taskId:null};
         this.db.prepare("UPDATE tasks SET merged_into=NULL,status='waiting',plan_json=?,error=NULL WHERE id=?").run(JSON.stringify(plan),row.id);
     }
-    /** An accepted supplement leads the task from now on: its card shows the supplement's title. */
-    private adoptSupplement(parentId: string, plan: TaskPlan) {
-        const parent = this.get(parentId);
-        if (!parent?.plan_json || !plan.title) return;
-        const parentPlan = JSON.parse(parent.plan_json) as TaskPlan;
-        this.db.prepare("UPDATE tasks SET title=? WHERE id=?").run(plan.title, parent.id);
-        this.agent.renameConversation(parent.conversation_id, plan.title);
-    }
     private async deliverSupplements() {
         if(this.#closed) return;
         if(this.#merging) { this.#mergeAgain=true; return; }
@@ -756,20 +748,19 @@ export class TaskService {
                 this.db.prepare('UPDATE tasks SET plan_json=? WHERE id=?').run(JSON.stringify(parentPlan),parent.id);
                 if(!parent.turn_id) {
                     this.db.prepare("UPDATE tasks SET status='merged',completed_at=? WHERE id=?").run(Date.now(),row.id);
-                    this.adoptSupplement(parent.id, plan);
                     continue;
                 }
                 this.db.prepare("UPDATE tasks SET status='steering' WHERE id=?").run(row.id);
                 try {
                     const result=await this.agent.appendTurnInput(this.executor(parent),parent.turn_id,
-                        `这是用户在 ${new Date(row.created_at).toLocaleTimeString("sv-SE", { hour: "2-digit", minute: "2-digit" })} 对当前任务的补充，请合并处理并在最终结果中覆盖，不要当作独立任务。按用户要求自行使用所需的文件、浏览器和工具，不受派单资源提示限制。\n\n主会话最近的对话（按时间先后，▶ 是这条补充）：\n${formatTimeline(timeline(this.rows().filter(t => this.ownerId(t) === this.ownerId(row)), row, 6), Date.now(), plan.jev)}${plan.jev ? `\n\nJev 的逐任务相关性与路由建议（仅作背景）：\n${formatRelevance(plan.jev, id => this.get(id)) ?? "无"}` : ''}\n\n派单器的判断（仅作背景）：${JSON.stringify({title:plan.title,description:plan.description,decision:plan.decision})}\n\n${row.input_text}${dependencies.length ? `\n\n补充所需的已完成任务资料：${JSON.stringify(dependencies.map(t => ({id:t!.id,result:t!.result?.slice(0,16000)})))}` : ''}`,
+                        `这是用户在 ${new Date(row.created_at).toLocaleTimeString("sv-SE", { hour: "2-digit", minute: "2-digit" })} 对当前任务的补充。原任务继续完成，不要因为这条补充放弃、中断或改做别的，除非补充明确要求停止或替换原任务；把补充合并进同一件事处理，不要当作独立任务。最终回复要同时包含原任务的结果和对这条补充的处理：原任务的答案如果已经发过，最终回复先简要重述原任务的结论，再回应补充。按用户要求自行使用所需的文件、浏览器和工具，不受派单资源提示限制。\n\n主会话最近的对话（按时间先后，▶ 是这条补充）：\n${formatTimeline(timeline(this.rows().filter(t => this.ownerId(t) === this.ownerId(row)), row, 6), Date.now(), plan.jev)}${plan.jev ? `\n\nJev 的逐任务相关性与路由建议（仅作背景）：\n${formatRelevance(plan.jev, id => this.get(id)) ?? "无"}` : ''}\n\n派单器的判断（仅作背景）：${JSON.stringify({title:plan.title,description:plan.description,decision:plan.decision})}\n\n${row.input_text}${dependencies.length ? `\n\n补充所需的已完成任务资料：${JSON.stringify(dependencies.map(t => ({id:t!.id,result:t!.result?.slice(0,16000)})))}` : ''}`,
                         JSON.parse(row.attachments_json),resources.includes("browser"));
                     if(this.#closed) return;
                     if(result==='browser_unavailable') this.db.prepare("UPDATE tasks SET status='merge_failed',error=? WHERE id=?").run('此补充需要浏览器，但浏览器暂未恢复；原任务仍可继续，请恢复浏览器后重新补充。',row.id);
                     else if(result==='not_active') { this.fallbackSupplement(row); this.schedule(); }
                     else {
+                        // The task keeps its own title: a supplement adds to it, it does not take it over.
                         this.db.prepare('UPDATE tasks SET status=?,completed_at=? WHERE id=?').run(result==='accepted'?'merged':'merging',result==='accepted'?Date.now():null,row.id);
-                        if(result==='accepted') this.adoptSupplement(parent.id, plan);
                     }
                 } catch(err) {
                     if(this.#closed) return;
@@ -940,14 +931,25 @@ export class TaskService {
         const messages = this.db.prepare("SELECT payload FROM events WHERE turn_id=? AND type='item/completed' ORDER BY id").all(row.turn_id) as {
             payload: string;
         }[];
-        const items = messages.map(m => JSON.parse(m.payload).item).filter(i => i?.type === "agentMessage" && typeof i.text === "string" && i.text.trim());
+        const all = messages.map(m => JSON.parse(m.payload).item);
+        const items = all.filter(i => i?.type === "agentMessage" && typeof i.text === "string" && i.text.trim());
         const last = items.filter(i => i.phase === "final_answer").at(-1) ?? items.at(-1);
+        // A supplement added mid-turn enters it as a user message. The final answer given before
+        // it (usually the original request's) is kept along with the last one, not overwritten.
+        const earlier: string[] = [];
+        let prompted = false, segment: string | null = null;
+        for (const i of all) {
+            if (i?.type === "userMessage") { if (prompted && segment) earlier.push(segment); prompted = true; segment = null; }
+            else if (i?.type === "agentMessage" && i.phase === "final_answer" && typeof i.text === "string" && i.text.trim()) segment = i.text.trim();
+        }
+        const kept = segment ? earlier : [];
+        const withEarlier = (text: string | null) => kept.length && text ? [...kept, text].join("\n\n---\n\n") : text;
         const question = turn.status === "completed" && !row.schedule_id && last?.text ? executorQuestion(last.text) : null;
         const plan = question && row.plan_json ? JSON.parse(row.plan_json) as TaskPlan : null;
         if (plan && question) { plan.clarification = question.question; plan.options = question.options ?? undefined; plan.form = question.form ?? undefined; }
         const status = question ? "needs_input" : turn.status;
         this.db.prepare("UPDATE tasks SET status=?,result=?,error=?,completed_at=?,plan_json=COALESCE(?,plan_json) WHERE id=?")
-            .run(status, question ? question.result : last?.text ?? null, turn.error, turn.completed_at, plan ? JSON.stringify(plan) : null, row.id);
+            .run(status, withEarlier(question ? question.result : last?.text ?? null), turn.error, turn.completed_at, plan ? JSON.stringify(plan) : null, row.id);
         if (status === "completed") this.recordFeed(this.get(row.id)!);
         this.notifyChange(row.id, row.status);
     }
