@@ -80,7 +80,7 @@ function product(raw: unknown): Product | null {
   return {
     name,
     image: image(r.image),
-    subtitle: text(r.subtitle ?? r.store ?? r.shop ?? r.source, 40),
+    subtitle: text(r.subtitle ?? r.store ?? r.shop ?? r.source, 60),
     tags: list(r.tags, 24, 4),
     text: text(r.text ?? r.description ?? r.summary, 200),
     price: text(r.price, 24),
