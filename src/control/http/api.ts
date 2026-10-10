@@ -680,7 +680,9 @@ export function createApiRouter(context: AppContext): Router {
       restingPm: int("resting_pm"), sleptPm: int("slept_pm"), sleeps: int("sleeps"), busyPm: int("busy_pm"),
       awake: typeof req.query.awake === "string" ? req.query.awake.replace(/[^\w .,%-]/g, "").slice(0, 64) : undefined,
     };
-    log.info("gadget firmware check", { account: caller.username, running: running?.slice(0, 12) ?? null, offered: firmware?.elfSha256.slice(0, 12) ?? null, battery });
+    // Free PSRAM now and its low-water mark since boot, in KB: long recordings are the big allocations.
+    const memory = int("psram_kb") === undefined ? null : { psramKb: int("psram_kb"), psramMinKb: int("psram_min_kb") };
+    log.info("gadget firmware check", { account: caller.username, running: running?.slice(0, 12) ?? null, offered: firmware?.elfSha256.slice(0, 12) ?? null, battery, memory });
     if (!firmware) { res.status(404).json({ error: "no_firmware" }); return; }
     const { file: _file, ...info } = firmware;
     res.json(info);
