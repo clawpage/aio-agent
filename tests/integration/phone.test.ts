@@ -21,6 +21,7 @@ async function fakeBridge() {
     let data = "";
     for await (const chunk of req) data += chunk;
     seen.push({ path: req.url ?? "", auth: req.headers.authorization, body: data ? JSON.parse(data) : undefined });
+    if (req.url === "/screenshot") { res.writeHead(200, { "content-type": "image/jpeg" }); res.end(Buffer.from([0xff, 0xd8, 0xff])); return; }
     res.writeHead(200, { "content-type": "application/json" });
     if (req.url === "/status") res.end(JSON.stringify({ device: { serial: "S1", model: "SM-F741U1", name: "Galaxy Z Flip6", android: "16" }, viewers: 0 }));
     else res.end(JSON.stringify({ jsonrpc: "2.0", id: JSON.parse(data).id, result: { tools: [{ name: "mobile_list_available_devices" }] } }));
@@ -90,6 +91,11 @@ it("offers the phone to the owner alone: tools through the gateway, the screen o
     const memberLogin = await h.request("/api/auth/login", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ username: "member", password: "member-password-123" }) });
     const memberCookie = (memberLogin.headers.getSetCookie?.() ?? []).map((c) => c.split(";")[0]).join("; ");
     expect((await h.request("/api/phone", { headers: { cookie: memberCookie } })).status).toBe(403);
+    // The screen picture for a task card: the owner's only.
+    const shot = await h.request("/api/phone/screenshot?at=1", { headers: { cookie: ownerAuth.cookie } });
+    expect(shot.status).toBe(200);
+    expect(shot.headers.get("content-type")).toBe("image/jpeg");
+    expect((await h.request("/api/phone/screenshot?at=1", { headers: { cookie: memberCookie } })).status).toBe(403);
 
     // The screen: only an owner session, on the console's own origin.
     const primary = { Host: `localhost:${h.primaryPort}`, Origin: `http://localhost:${h.primaryPort}` };

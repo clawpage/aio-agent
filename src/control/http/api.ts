@@ -522,12 +522,22 @@ export function createApiRouter(context: AppContext): Router {
   // One read of the tab record shows, per task, whether it has tabs, is waiting for
   // the person in the browser, or is being driven by the person right now.
   // A task feed must not wait on a slow sandbox: past two seconds it shows tasks without browser state.
+  // Execution conversations that called the phone tools: their task cards show the phone.
+  const phoneConversations = new Set<string>();
+  const usedPhone = (conversationId: string): boolean => {
+    if (!context.phone?.enabled) return false;
+    if (phoneConversations.has(conversationId)) return true;
+    const hit = db.prepare(`SELECT 1 FROM events WHERE conversation_id=? AND type='item/started' AND payload LIKE '%"server":"aio_phone"%' LIMIT 1`).get(conversationId);
+    if (hit) phoneConversations.add(conversationId);
+    return Boolean(hit);
+  };
   const browserState = async () => {
     const tabs = context.tabs ? await Promise.race([context.tabs.list().catch(() => []), new Promise<[]>((r) => setTimeout(() => r([]), 2000).unref())]) : [];
     const byKey = new Map<string, typeof tabs>();
     for (const tab of tabs) byKey.set(tab.key, [...(byKey.get(tab.key) ?? []), tab]);
     const asking = [...byKey].filter(([, own]) => own.some((t) => t.request && t.holder === "ai")).map(([key]) => key);
-    const decorate = <T extends { mergedInto?: string | null; conversationId: string }>(task: T) => {
+    const decorate = <T extends { mergedInto?: string | null; conversationId: string }>(found: T) => {
+      const task = !found.mergedInto && usedPhone(found.conversationId) ? { ...found, phone: true } : found;
       const own = task.mergedInto ? undefined : byKey.get(task.conversationId);
       if (!own?.length) {
         // Its tab is closed now: the page it last showed stays on the card, to be opened again.
@@ -1341,6 +1351,18 @@ export function createApiRouter(context: AppContext): Router {
       if (!context.phone?.enabled) { res.json({ available: false, device: null }); return; }
       const status = await context.phone.status();
       res.json({ available: true, reachable: status !== null, device: status?.device ?? null });
+    }),
+  );
+  // The screen now, for a task card that used the phone.
+  router.get(
+    "/phone/screenshot",
+    requireKind("primary"),
+    requireSession,
+    asyncHandler(async (_req, res) => {
+      const shot = await context.phone?.screenshot();
+      if (!shot) { res.status(404).json({ error: "phone_unavailable", message: "手机未连接" }); return; }
+      res.setHeader("Cache-Control", "no-store");
+      res.type(shot.type).send(shot.body);
     }),
   );
 

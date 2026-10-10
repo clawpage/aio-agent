@@ -4145,3 +4145,8 @@ button.map-card-switch { flex: 0 0 auto; padding: 4px 10px; }
 .phone-keys button { min-width: 44px; min-height: 36px; }
 .phone-text { gap: 6px; }
 .phone-text input { flex: 1; min-width: 0; }
+
+/* A task's phone in its card (TaskPhone): a portrait picture, and the live phone in the task console. */
+.task-phone-shot { width: auto; max-width: 100%; }
+.task-phone-shot img { width: auto; max-width: 100%; max-height: 320px; object-fit: contain; }
+.task-phone-console { width: min(520px, 100%); }

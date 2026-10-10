@@ -10,7 +10,7 @@ import { apiUrl } from "../api";
 interface Props {
   /** The console is visible; a hidden one drops the stream and the phone stops encoding. */
   active: boolean;
-  onNotify: (message: string, level?: "info" | "error") => void;
+  onNotify?: (message: string, level?: "info" | "error") => void;
 }
 
 type State = "connecting" | "live" | "closed" | "unsupported";
@@ -173,7 +173,7 @@ export function PhoneScreen({ active, onNotify }: Props) {
     if (!text.trim()) return;
     send({ t: "text", s: text });
     setText("");
-    onNotify("已粘贴到手机当前的输入框");
+    onNotify?.("已粘贴到手机当前的输入框");
   };
 
   if (state === "unsupported") {

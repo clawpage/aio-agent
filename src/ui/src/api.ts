@@ -114,6 +114,7 @@ export interface GadgetMessage { id: string; text: string; status: string; done:
 
 export const api = {
   /** The owner's phone (bin/phone-bridge.mjs): offered at all, and which device is connected. */
+  phoneScreenshotUrl: (at: number) => apiUrl(`/api/phone/screenshot?at=${at}`),
   phone: () => request<{ available: boolean; reachable?: boolean; device: { serial: string; model: string; name: string; android: string } | null }>("/api/phone", { cache: "no-store" }),
   gadgetHistory: (opts: { before?: number; limit?: number } = {}, signal?: AbortSignal) => request<{ account: string | null; messages: GadgetMessage[]; more: boolean }>(`/api/gadget/history?limit=${opts.limit ?? 50}${opts.before ? `&before=${opts.before}` : ''}`, { signal, cache: 'no-store' }),
   usage: (days: number, signal?: AbortSignal) => request<import('../../common/usage').UsageReport>(`/api/usage?days=${days}`, { signal, cache: 'no-store' }),

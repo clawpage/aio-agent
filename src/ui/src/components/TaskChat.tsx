@@ -10,6 +10,7 @@ import { Markdown } from "./Markdown";
 import { ChoiceList } from "./ChoiceList";
 import { FilePreview } from "./FilePreview";
 import { TaskBrowser } from "./TaskBrowser";
+import { TaskPhone } from "./TaskPhone";
 import { MessagePreview } from "./MessagePreview";
 import { ComposerAttachments, releasePreviews, useUploadTray, type PendingUpload } from "./ComposerAttachments";
 import { TurnPills } from "./TurnPills";
@@ -430,6 +431,7 @@ export function TaskChat({ onDetails, onOpenLink, onOpenFileInBrowser, onExpired
           </div>}
           {t.description && ["running", "stopping"].includes(t.status) && <p className="task-intro">{t.description}</p>}
           {ownsBrowser(t) && <TaskBrowser task={t} onReveal={onRevealBrowser}/>}
+          {t.phone && !t.mergedInto && ["needs_input", "queued", "running", "stopping"].includes(t.status) && <TaskPhone task={t} onDone={() => void choose(t, "我已在手机上操作完成，请继续。")}/>}
           <TaskDuration task={t} now={now}/>
           {t.error && <p className="tiny">{t.error}</p>}
           <div className="task-actions"><button className="ghost tiny" onClick={() => quoteTask(t)} aria-label={`引用任务：${t.title}`}>引用任务</button>{t.status === "planning_failed" ? <button className="ghost tiny" onClick={() => void act(() => api.retryTaskPlanning(t.id))}>重试分配</button> : t.status === "blocked" ? null : <button className="ghost tiny" disabled={t.status === "stopping"} onClick={() => void act(() => api.stopTask(t.id))}>停止该任务</button>}</div>

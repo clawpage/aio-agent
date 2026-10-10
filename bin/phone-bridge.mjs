@@ -9,6 +9,7 @@
  *                 the phone itself: nothing that reads or writes files on this
  *                 machine, installs from it, or reaches mobile-mcp's device cloud
  *   GET  /status  the connected phone, if any
+ *   GET  /screenshot  the screen now (JPEG where macOS sips can shrink it, else PNG)
  *   WS   /screen  the live screen (scrcpy, H.264) and touch / key input
  *
  *   node bin/phone-bridge.mjs setup [--devicekit]
@@ -150,6 +151,29 @@ async function phoneInfo() {
   const prop = async (name) => (await run(ADB, ["-s", serial, "shell", "getprop", name], { timeout: 10_000 })).stdout.trim();
   const [model, name, release] = await Promise.all([prop("ro.product.model"), deviceName(serial), prop("ro.build.version.release")]);
   return { serial, model, name: name || model, android: release };
+}
+
+/** The screen now, small enough for a task card: sips (macOS) makes a JPEG, elsewhere the PNG as is. */
+async function screenshot() {
+  const serial = await phoneSerial();
+  if (!serial) return null;
+  // A foldable has two screens: capture the first one that is on (as mobile-mcp does), or screencap warns into the PNG.
+  const { stdout: displays } = await run(ADB, ["-s", serial, "shell", "cmd", "display", "get-displays"], { timeout: 10_000 }).catch(() => ({ stdout: "" }));
+  const on = displays.split("\n").find((l) => l.startsWith("Display id ") && l.includes(", state ON,"));
+  const display = on && /uniqueId "(?:local:)?([^"]+)"/.exec(on)?.[1];
+  const { stdout: raw } = await run(ADB, ["-s", serial, "exec-out", "screencap", "-p", ...(display ? ["-d", display] : [])], { encoding: "buffer", maxBuffer: 64 * 1024 * 1024, timeout: 15_000 });
+  const start = raw.indexOf(Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+  if (start < 0) throw new Error("screencap returned no image");
+  const png = raw.subarray(start);
+  if (!fs.existsSync("/usr/bin/sips")) return { type: "image/png", body: png };
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "aio-phone-"));
+  try {
+    fs.writeFileSync(path.join(dir, "s.png"), png);
+    await run("/usr/bin/sips", ["-s", "format", "jpeg", "-s", "formatOptions", "70", "-Z", "900", path.join(dir, "s.png"), "--out", path.join(dir, "s.jpg")], { timeout: 15_000 });
+    return { type: "image/jpeg", body: fs.readFileSync(path.join(dir, "s.jpg")) };
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 }
 
 // ------------------------------------------------------------------ mobile-mcp
@@ -523,6 +547,12 @@ async function serve() {
       const url = new URL(req.url ?? "/", "http://bridge");
       if (url.pathname === "/status" && req.method === "GET") {
         return sendJson(res, 200, { device: await phoneInfo().catch(() => null), viewers: screen.viewers.size, streaming: Boolean(screen.session) });
+      }
+      if (url.pathname === "/screenshot" && req.method === "GET") {
+        const shot = await screenshot();
+        if (!shot) return sendJson(res, 404, { error: "no phone" });
+        res.writeHead(200, { "content-type": shot.type, "cache-control": "no-store" });
+        return res.end(shot.body);
       }
       if (url.pathname === "/mcp") {
         if (req.method === "DELETE") return sendJson(res, 200, {});

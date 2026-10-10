@@ -32,7 +32,7 @@ export function phoneMcpServers(cfg: Config): Record<string, unknown> {
 }
 
 export const PHONE_POLICY =
-  "已接入用户本人的 Android 手机（aio_phone，USB 连在家里的电脑上，不是云手机）：用户要你在手机上打开 App、点按、输入、查看手机里的内容，或做只有手机 App 能办的事时，用它的工具直接操作，不要让用户自己去点。先用 mobile_list_available_devices 取设备 id；看屏幕优先用 mobile_list_elements_on_screen，元素里没有的再截图；已知的连续步骤用 mobile_batch_commands 一次做完；每完成一步关键操作后读一次屏幕确认结果。用户在控制台工作区的「手机」里能实时看到你的操作。付款、转账、下单、发消息或发帖给别人、删除内容、改账号或安全设置这类有外部影响或难撤销的步骤，先把要做的内容告诉用户并等确认；遇到登录密码、验证码或人脸识别，停下来请用户在手机上自己完成。只做用户这次要求的事，不顺手打开或改动别的 App。";
+  "已接入用户本人的 Android 手机（aio_phone，USB 连在家里的电脑上，不是云手机）：用户要你在手机上打开 App、点按、输入、查看手机里的内容，或做只有手机 App 能办的事时，用它的工具直接操作，不要让用户自己去点。先用 mobile_list_available_devices 取设备 id；看屏幕优先用 mobile_list_elements_on_screen，元素里没有的再截图；已知的连续步骤用 mobile_batch_commands 一次做完；每完成一步关键操作后读一次屏幕确认结果。用户在控制台工作区的「手机」里能实时看到你的操作。付款、转账、下单、发消息或发帖给别人、删除内容、改账号或安全设置这类有外部影响或难撤销的步骤，先把要做的内容告诉用户并等确认。短信验证码：用户要你读取本机收到的验证码时，到短信 App 里读出来填进去，只用于用户这次要你登录或验证的账号；用户没这样说时，停下来问。登录密码、支付密码、指纹或人脸识别由用户本人完成。需要用户在手机上亲手操作时，提问等待并说清要做哪一步：任务卡片会显示手机画面，用户点开就能直接操作，完成后会回复你，你再读一次屏幕确认再继续。只做用户这次要求的事，不顺手打开或改动别的 App。";
 
 export class PhoneGateway extends McpGateway {
   #cfg: Config;
@@ -66,6 +66,21 @@ export class PhoneGateway extends McpGateway {
       if (!res.ok) return null;
       const body = (await res.json()) as { device?: { serial: string; model: string; name: string; android: string } | null };
       return { device: body.device ?? null };
+    } catch {
+      return null;
+    }
+  }
+
+  /** The screen now, for a task card; null when the bridge or the phone is not there. */
+  async screenshot(): Promise<{ type: string; body: Buffer } | null> {
+    if (!this.enabled) return null;
+    try {
+      const res = await fetch(`${this.#cfg.phoneBridge.url}/screenshot`, {
+        headers: { authorization: `Bearer ${this.upstreamToken()}` },
+        signal: AbortSignal.timeout(20_000),
+      });
+      if (!res.ok) return null;
+      return { type: res.headers.get("content-type") ?? "image/png", body: Buffer.from(await res.arrayBuffer()) };
     } catch {
       return null;
     }
