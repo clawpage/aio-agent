@@ -8,6 +8,7 @@ import {KbGateway} from "./kb.js";
 import {HaGateway} from "./ha.js";
 import {PhoneGateway} from "./phone.js";
 import {ScheduleGateway} from "./scheduleTool.js";
+import {HistoryGateway} from "./historyTool.js";
 import { ImageGateway, sandboxImageFiles } from "./imageTool.js";
 import { PrinterGateway, sandboxPrintFiles } from "./printer/gateway.js";
 import {UserRuntimes} from "./tenants.js";
@@ -416,6 +417,10 @@ async function main(): Promise<void> {
   const schedule=new ScheduleGateway({port:ctx.cfg.memberModelPort??4902,log:ctx.log,
     tasksFor:async id=>id===ctx.cfg.runtimeUserId?ctx.tasks:(await ctx.runtimeForUser!(id)).tasks});
   schedule.provision(ctx.cfg);
+  // Likewise each account's past tasks and agreements.
+  const history=new HistoryGateway({port:ctx.cfg.memberModelPort??4902,log:ctx.log,
+    runtimeFor:async id=>id===ctx.cfg.runtimeUserId?ctx:await ctx.runtimeForUser!(id)});
+  history.provision(ctx.cfg);
   // Pictures come from the control plane's own ChatGPT login, so only a deployment with one offers them.
   const image=ctx.cfg.hostCodex.enabled?new ImageGateway({port:ctx.cfg.memberModelPort??4902,log:ctx.log,hostTokens:ctx.hostTokens,
     chatgptUrl:ctx.cfg.hostCodex.chatgptUrl,workspace:ctx.cfg.sandbox.containerWorkspaceDir,
@@ -428,7 +433,7 @@ async function main(): Promise<void> {
       await runtime.browser.withCall("call",()=>undefined);
     }});
   browserGateway.provision(ctx.cfg);
-  const modelGateway=new MemberModelGateway(ctx.cfg,ctx.log,ctx.share,decision,kb,schedule,ctx.hostTokens,image,browserGateway,ha,printer,phone);
+  const modelGateway=new MemberModelGateway(ctx.cfg,ctx.log,ctx.share,decision,kb,schedule,ctx.hostTokens,image,browserGateway,ha,printer,phone,history);
   await modelGateway.start();
   // Phone notifications: one key pair and one subscription store for every account.
   ctx.push=new PushService({db:ctx.db,log:ctx.log,keyFile:path.join(ctx.cfg.dataDir,"vapid.json"),subject:`https://${ctx.cfg.primaryHost}`});

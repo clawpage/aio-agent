@@ -35,7 +35,7 @@ it("gives every account a schedule tool that creates and manages its own schedul
     expect((await init.json()).result).toMatchObject({ serverInfo: { name: "aio_schedule" }, instructions: SCHEDULE_POLICY });
     expect((await rpc(member.schedule!.url, { jsonrpc: "2.0", method: "notifications/initialized" })).status).toBe(202);
     const tools = (await (await rpc(member.schedule!.url, { jsonrpc: "2.0", id: 2, method: "tools/list" })).json()).result.tools as Array<{ name: string; description: string }>;
-    expect(tools.map((t) => t.name)).toEqual(["schedule_create", "schedule_list", "schedule_change", "schedule_update", "task_list", "task_get", "feed_get", "feed_update"]);
+    expect(tools.map((t) => t.name)).toEqual(["schedule_create", "schedule_list", "schedule_change", "schedule_update", "feed_get", "feed_update"]);
     // The description says what the session-bound timers never could.
     expect(tools[0]!.description).toContain("不属于当前对话或会话");
 
@@ -102,46 +102,6 @@ it("gives every account a schedule tool that creates and manages its own schedul
     expect(memberFeed.isError).toBe(true);
     expect(h.ctx.db.prepare("SELECT instruction FROM schedules WHERE owner_id='owner_1' AND builtin='daily_feed'").get()).toEqual({ instruction: "推送时看看 Gmail 有没有账单" });
     expect(new Set(asked)).toEqual(new Set(["user_m", "owner_1"]));
-  } finally {
-    gateway.close();
-    await h.shutdown();
-  }
-});
-
-it("lets an executor look up its own account's tasks on demand, and only those", async () => {
-  const h = await startHarness();
-  Object.assign(h.codex, { planTask: async () => JSON.stringify({ title: "test", related: [], dependencies: [], resources: [] }) });
-  const cfg = { ...h.ctx.cfg, memberModelPort: 0 };
-  const schedule = new ScheduleGateway({ port: 0, log: h.ctx.log, tasksFor: async () => h.ctx.tasks });
-  const gateway = new MemberModelGateway(cfg, h.ctx.log, undefined, undefined, undefined, schedule);
-  await gateway.start();
-  try {
-    const owner = { ...cfg, runtimeUserId: "owner_1", dataDir: path.join(h.dataDir, "owner-runtime") };
-    schedule.provision(owner);
-    const member = memberConfig(owner, "user_m", 18092);
-    gateway.provision(member);
-    const url = (u: string) => u.replace(/^http:\/\/host\.docker\.internal:0/, `http://127.0.0.1:${gateway.port}`);
-    const call = async (u: string, name: string, args: unknown) => (await (await fetch(url(u), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } }) })).json()).result as { content: Array<{ text: string }>; isError?: boolean };
-
-    const long = "推荐 A 款推车。" + "理由很长。".repeat(100);
-    h.ctx.tasks.submit({ userId: "owner_1", text: "比较三款婴儿推车", clientMessageId: "tl-1" });
-    h.ctx.tasks.submit({ userId: "owner_1", text: "查明天天气", clientMessageId: "tl-2" });
-    await vi.waitFor(() => expect(h.codex.startedTurns.length).toBe(2));
-    await h.codex.runTurn(h.codex.startedTurns.find((t) => t.text.includes("比较三款婴儿推车"))!.turnId, { text: long });
-
-    const found = JSON.parse((await call(owner.schedule!.url, "task_list", { query: "推车" })).content[0]!.text) as Array<{ id: string; request: string; status: string; result: string }>;
-    expect(found).toHaveLength(1);
-    expect(found[0]).toMatchObject({ request: "比较三款婴儿推车", status: "completed" });
-    expect([...found[0]!.result].length).toBeLessThanOrEqual(160);   // a summary in the list...
-    const detail = JSON.parse((await call(owner.schedule!.url, "task_get", { id: found[0]!.id })).content[0]!.text) as { request: string; result: string };
-    expect(detail).toMatchObject({ request: "比较三款婴儿推车", result: long });   // ...the whole result on request
-    expect(JSON.parse((await call(owner.schedule!.url, "task_list", {})).content[0]!.text)).toHaveLength(2);
-    // A "%" in the query is a character, not a wildcard.
-    expect((await call(owner.schedule!.url, "task_list", { query: "%" })).content[0]!.text).toBe("没有找到相关任务。");
-
-    // Another account sees none of it.
-    expect((await call(member.schedule!.url, "task_list", {})).content[0]!.text).toBe("没有找到相关任务。");
-    expect((await call(member.schedule!.url, "task_get", { id: found[0]!.id })).isError).toBe(true);
   } finally {
     gateway.close();
     await h.shutdown();

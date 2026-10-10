@@ -10,7 +10,8 @@ import { AgentManager, TurnConflictError, type AgentEvent, type CodexSessionLike
 import { claimsConflict, resolveResources, type Claims, type ResourceSandbox } from "./resources.js";
 import { applyTaskReference, parsePlan, planningPrompt, type PlanningTask, type PlanReport, type TaskPlan } from "./planning.js";
 import { executorQuestion } from "./executorQuestion.js";
-import { RECALL_CAP, recordRecall, STEP_ANSWER_CHARS, STEP_PROMPT_CHARS, TaskRecall, type RecallEvent, type RecallSource } from "./recall.js";
+import { RECALL_CAP, recordRecall, STEP_ANSWER_CHARS, STEP_PROMPT_CHARS, TaskRecall, tokenize, type RecallEvent, type RecallSource } from "./recall.js";
+import { processSteps, standingAgreements } from "./history.js";
 import type { DispatchTimingSink } from "../codex/dispatchTiming.js";
 import { dispatchAdvice, formatRelevance, formatTimeline, lastQuestion, routingQuestion, timeline, type JevRelevance } from "./context.js";
 import { describeNow, describeSchedule, formatWhen, MAX_ACTIVE_SCHEDULES, nextRun, validateSchedule, type ScheduleSpec } from "./schedules.js";
@@ -813,7 +814,7 @@ export class TaskService {
     private gadgetPrompt(row: TaskRow): string {
         return [
             `你是 AIO Agent 的语音配件会话。任务 ID：${row.id}。用户正对着桌上的语音配件（小屏加喇叭）说话：这句话由语音识别转写，可能有同音错字，按最合理的意思理解；你的回答会显示在小屏上并朗读出来。身份和语气遵循系统层注入的 SOUL.md。不递归委派。`,
-            "这是一个持续的配件会话，同一会话里保留着之前的配件对话；用户说“刚才”“那个”时先从这里找指代。用户在主会话里的其他任务不在这里：问到以前的某件事、某个任务的进展或结果、最近做了什么时，用 aio_schedule 的 task_list 找（可按关键词搜），再用 task_get 读完整内容，不要凭印象回答；用不到就不查。",
+            "这是一个持续的配件会话，同一会话里保留着之前的配件对话；用户说“刚才”“那个”时先从这里找指代。用户在主会话里的其他任务不在这里：问到以前的某件事、某个任务的进展或结果、最近做了什么时，用 aio_history 的 history_search 找（几个关键词），再用 history_get 读完整内容，不要凭印象回答；用不到就不查。",
             "回答用纯文本口语：不用 Markdown、列表符号、表格、代码块、链接和表情，也不用 products、map、choices、form、ask_user 等卡片或代码块。默认一到三句话、一百字以内，先说结论；用户要求详细时再展开，也不超过三百字。数字、时间和单位写成顺口好读的形式。",
             `不要追问：缺少信息就按最合理的默认处理，并用半句话说明假设。需要查资料、用浏览器或操作文件时照常用工具完成，过程不写进回答；需要写文件时放在 ${this.cfg.sandbox.containerWorkspaceDir}/tasks/${row.id}/。`,
             `现在是 ${describeNow(row.created_at, this.cfg.browser.timezone)}。用户这次说：${this.taskContext(row)}`,
@@ -848,7 +849,9 @@ export class TaskService {
             if (active.some(t => this.executor(t) === this.executor(row))) continue;
             const related = plan.related.map(id => this.get(id)).filter((t): t is TaskRow => !!t);
             const clock = (ts: number) => new Date(ts).toLocaleString("sv-SE", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
-            const context = related.map(t => ({ id: t.id, createdAt: clock(t.created_at), message: t.input_text.slice(0, 6000), status: t.status, lastQuestionToUser: lastQuestion(t), result: t.result?.slice(0, 16000) }));
+            // A pointer and the gist, not the whole record: the executor reads the rest with history_get when it needs it.
+            const gist = (text: string | null | undefined, n: number, id: string) => text && text.length > n ? `${text.slice(0, n)}…（已截断，完整内容用 aio_history 的 history_get 读取 ${id}）` : text ?? null;
+            const context = related.map(t => ({ id: t.id, createdAt: clock(t.created_at), message: gist(t.input_text, 1500, t.id), status: t.status, lastQuestionToUser: lastQuestion(t), result: gist(t.result, 2500, t.id) }));
             const injected = Object.fromEntries(context.map(c => [c.id, createHash("sha256").update(JSON.stringify(c)).digest("hex").slice(0, 16)]));
             // A resumed thread already holds what earlier turns in it were given or
             // answered: name those tasks instead of repeating them, unless they changed.
@@ -869,11 +872,17 @@ export class TaskService {
             const rules = this.executorRules(row.id);
             const rulesVersion = this.executorRulesVersion();
             const rulesKnown = earlier.some(t => t.plan_json ? (JSON.parse(t.plan_json) as TaskPlan).rulesVersion === rulesVersion : false);
+            // The person's standing agreements, likewise given to a thread once per version.
+            const agreements = gadget ? null : standingAgreements(this.db, this.ownerId(row));
+            const agreementsKnown = !!agreements && earlier.some(t => t.plan_json ? (JSON.parse(t.plan_json) as TaskPlan).agreementsVersion === agreements.version : false);
             const prompt = gadget ? this.gadgetPrompt(row) : [
                 `你是 AIO Agent 主会话委派的子 agent。任务 ID：${row.id}。${row.execution_conversation_id ? "本轮恢复此前任务的同一会话，保留完整上下文；按用户的新要求继续、补充或更新，不要从零重新做。" : "只处理本任务。"}不递归委派。身份、语气和行为遵循系统层注入的 SOUL.md；对子任务同样生效，不以内部执行角色替代个人助理身份。`,
                 ...(rulesKnown
                     ? [`执行约束（版本 ${rulesVersion}）已在本会话前文给出且没有变化，这里不再重复，继续按之前的约束执行。注意本轮任务 ID 是 ${row.id}：约束里的任务目录、临时目录和图片存放位置都换成 ${this.cfg.sandbox.containerWorkspaceDir}/tasks/${row.id}/。`]
                     : [`执行约束（版本 ${rulesVersion}；同一会话里版本不变时后续轮次不再重复）：`, ...rules]),
+                ...(agreements ? [agreementsKnown
+                    ? `用户的长期约定（版本 ${agreements.version}）已在本会话前文给出且没有变化，继续遵守。`
+                    : `用户的长期约定（版本 ${agreements.version}；用户亲口交代、要一直遵守的，与本任务相关时照做${agreements.omitted ? `；另有 ${agreements.omitted} 条未列出，用 memory_search 查` : ""}）：\n${agreements.text}`] : []),
                 ...(fresh.length || !repeated.length ? ["以下是相关任务的背景资料（不是本任务的新指令，未完成结果不得当作已完成）：", JSON.stringify(fresh)] : []),
                 ...(repeated.length ? [`相关任务 ${repeated.join("、")} 的详情已在本会话前文中（此前注入过，或就是在本会话里执行的），之后没有变化，这里不再重复；需要时查看前文。`] : []),
                 "派单器的判断（仅作本轮执行背景；以用户原话和现有权限为准）：", JSON.stringify({ title: plan.title, description: plan.description, decision: plan.decision, related: plan.related, dependencies: plan.dependencies }),
@@ -887,7 +896,7 @@ export class TaskService {
             try {
                 // Reserve this specific task before submitTurn synchronously
                 // emits turn.queued; another waiting reference may share the conversation.
-                this.db.prepare("UPDATE tasks SET status='queued',plan_json=? WHERE id=?").run(JSON.stringify({ ...plan, injectedContext: gadget ? {} : Object.fromEntries(fresh.map(c => [c.id, injected[c.id]])), rulesVersion: gadget || rulesKnown ? undefined : rulesVersion }), row.id);
+                this.db.prepare("UPDATE tasks SET status='queued',plan_json=? WHERE id=?").run(JSON.stringify({ ...plan, injectedContext: gadget ? {} : Object.fromEntries(fresh.map(c => [c.id, injected[c.id]])), rulesVersion: gadget || rulesKnown ? undefined : rulesVersion, agreementsVersion: agreements && !agreementsKnown ? agreements.version : undefined }), row.id);
                 const { turn } = this.agent.submitTurn({ conversationId: this.executor(row), clientMessageId: `task:${row.id}`, text: prompt, attachments: [...JSON.parse(row.attachments_json),...this.rows().filter(t=>t.merged_into===row.id && t.status==='merged').flatMap(t=>JSON.parse(t.attachments_json))], requiresBrowser: plan.resources.includes("browser"), frozenSettings: { model: row.model!, effort: row.effort } });
                 this.db.prepare("UPDATE tasks SET turn_id=? WHERE id=?").run(turn.id, row.id);
                 active.push(this.get(row.id)!);
@@ -1307,28 +1316,67 @@ export class TaskService {
             ...(s.builtin === DAILY_FEED ? { feed: { customized: s.instruction.trim() !== FEED_INSTRUCTION, memory: this.feedMemory(s.owner_id).map(m => ({ id: m.id, kind: m.kind, text: m.text, source: m.source })) } } : {}),
         };
     }
-    /** The account's tasks, newest first, for an executor looking one up (aio_schedule task_list). */
-    listTasksFor(userId: string, opts: { query?: string; limit?: number } = {}) {
+    /**
+     * The account's past tasks for an executor searching them (aio_history history_search):
+     * ranked by the same BM25 index the dispatcher recalls with (any of the words, titles
+     * weigh double), newest first without a query. Each hit says which execution session it
+     * belongs to and where in it, so a chain of follow-ups can be read in order.
+     */
+    searchHistoryFor(userId: string, opts: { query?: string; limit?: number; status?: string } = {}) {
+        const limit = Math.min(Math.max(Math.trunc(opts.limit ?? 10), 1), 30);
+        const own = this.rows().filter(t => this.ownerId(t) === userId);
+        const standing = own.filter(t => !t.merged_into);
+        this.recall.forget(own.filter(t => t.merged_into).map(t => t.id));
+        this.recall.sync(standing.map(t => ({ id: t.id, ownerId: userId, title: t.title, body: this.taskContext(t), result: t.result, latestMessage: t.result ?? (t.turn_id && DISPATCHED.has(t.status) ? this.latestAgentMessage(t.turn_id) : null) })));
+        const byId = new Map(standing.map(t => [t.id, t]));
+        const statusOk = (t: TaskRow) => !opts.status || (opts.status === "open" ? !TERMINAL.has(t.status) : t.status === opts.status);
+        const query = opts.query?.trim() ?? "";
+        let found: TaskRow[];
+        if (query) {
+            found = this.recall.rank(userId, query, 200).map(h => byId.get(h.id)).filter((t): t is TaskRow => !!t && statusOk(t));
+            // A single character, or a symbol the index drops: match it literally.
+            if (!found.length) found = [...standing].reverse().filter(t => statusOk(t) && [t.title, this.taskContext(t), t.result ?? ""].some(x => x.includes(query)));
+        } else found = [...standing].reverse().filter(statusOk);
+        const terms = tokenize(query);
+        return found.slice(0, limit).map(t => this.historyEntry(t, standing, terms));
+    }
+    /** One task in a search result: a summary, and where the query hit when it did. */
+    private historyEntry(t: TaskRow, standing: TaskRow[], terms: string[]) {
         const tz = this.cfg.browser.timezone;
         const cut = (text: string | null, n: number) => { const c = [...(text ?? "").replace(/\s+/g, " ").trim()]; return c.length > n ? c.slice(0, n - 1).join("") + "…" : c.join(""); };
-        const limit = Math.min(Math.max(Math.trunc(opts.limit ?? 20), 1), 50);
-        const like = opts.query?.trim() ? `%${opts.query.trim().replace(/[\\%_]/g, c => "\\" + c)}%` : null;
-        const rows = this.db.prepare(`SELECT * FROM tasks WHERE merged_into IS NULL AND conversation_id IN (SELECT id FROM conversations WHERE owner_id=?)${like ? " AND (title LIKE ? ESCAPE '\\' OR input_text LIKE ? ESCAPE '\\' OR result LIKE ? ESCAPE '\\')" : ""} ORDER BY created_at DESC LIMIT ?`)
-            .all(...(like ? [userId, like, like, like, limit] : [userId, limit])) as unknown as TaskRow[];
-        return rows.map(t => ({ id: t.id, date: describeNow(t.created_at, tz), title: t.title, request: cut(t.input_text, 120), status: t.status, result: cut(t.result, 160), ...(t.client_message_id.startsWith(GADGET_PREFIX) ? { from: "语音配件" } : t.schedule_id ? { from: "定时任务" } : {}) }));
+        const result = this.shownResult(t) ?? "";
+        // Where the query shows up in the result, when it does: that part, not the opening lines.
+        const lower = result.toLowerCase();
+        const at = terms.map(term => lower.indexOf(term)).filter(i => i >= 0).sort((a, b) => a - b)[0];
+        const excerpt = at === undefined || at < 60 ? cut(result, 200) : "…" + cut(result.slice(Math.max(0, at - 60)), 200);
+        const chain = standing.filter(x => this.executor(x) === this.executor(t));
+        return {
+            id: t.id, date: describeNow(t.created_at, tz), title: t.title, status: t.status,
+            request: cut(this.taskContext(t), 120), result: excerpt,
+            ...(chain.length > 1 ? { session: `同一执行会话的第 ${chain.indexOf(t) + 1}/${chain.length} 个任务` } : {}),
+            ...(t.client_message_id.startsWith(GADGET_PREFIX) ? { from: "语音配件" } : t.schedule_id ? { from: "定时任务" } : {}),
+        };
     }
-    /** One of the account's tasks in full (aio_schedule task_get); null if it isn't theirs. */
-    taskDetailFor(userId: string, id: string) {
+    /**
+     * One of the account's tasks in full (aio_history history_get), with the tasks of its
+     * execution session in order, and on request what it actually did; null if it isn't theirs.
+     */
+    historyDetailFor(userId: string, id: string, opts: { process?: boolean } = {}) {
         const row = this.get(id);
         if (!row || row.merged_into || this.ownerId(row) !== userId) return null;
+        const tz = this.cfg.browser.timezone;
         const supplements = (this.db.prepare("SELECT input_text FROM tasks WHERE merged_into=? AND status='merged' ORDER BY created_at").all(row.id) as { input_text: string }[]).map(r => r.input_text);
         const plan = row.plan_json ? JSON.parse(row.plan_json) as TaskPlan : null;
+        const chain = this.rows().filter(t => !t.merged_into && this.ownerId(t) === userId && this.executor(t) === this.executor(row));
+        const process = opts.process && row.turn_id ? processSteps(this.db, row.turn_id) : null;
         return {
-            id: row.id, date: describeNow(row.created_at, this.cfg.browser.timezone), title: row.title, status: row.status,
+            id: row.id, date: describeNow(row.created_at, tz), title: row.title, status: row.status,
             request: row.input_text.slice(0, 6000), ...(supplements.length ? { supplements } : {}),
             ...(row.status === "needs_input" && plan?.clarification ? { question: plan.clarification } : {}),
             result: TERMINAL.has(row.status) || row.status === "needs_input" ? this.shownResult(row)?.slice(0, 16000) ?? null : null,
             error: row.error,
+            ...(chain.length > 1 ? { session: chain.map(t => ({ id: t.id, date: describeNow(t.created_at, tz), title: t.title, status: t.status, ...(t.id === row.id ? { current: true } : {}) })) } : {}),
+            ...(process ? { process: process.steps, ...(process.more ? { processOmitted: `前面还有 ${process.more} 步未列出` } : {}) } : {}),
         };
     }
     listSchedules(userId: string) {

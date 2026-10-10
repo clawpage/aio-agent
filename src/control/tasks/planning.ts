@@ -51,6 +51,8 @@ export interface TaskPlan {
     injectedContext?: Record<string, string>;
     /** The executor rules version this task's turn gave its thread in full. */
     rulesVersion?: string;
+    /** The version of the standing agreements this turn's prompt carried in full (none when it only named them). */
+    agreementsVersion?: string;
 }
 export interface PlanningTask {
     id: string;

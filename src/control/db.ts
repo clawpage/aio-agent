@@ -227,6 +227,20 @@ CREATE TABLE IF NOT EXISTS feed_memory (
 );
 CREATE INDEX IF NOT EXISTS idx_feed_memory_owner ON feed_memory(owner_id, created_at);
 
+-- Standing agreements the person asked the assistant to keep (rules, preferences,
+-- facts, commitments): saved by executors through aio_history, read back into
+-- every execution thread once and searchable on demand.
+CREATE TABLE IF NOT EXISTS agreements (
+  id TEXT PRIMARY KEY,
+  owner_id TEXT NOT NULL,
+  kind TEXT NOT NULL CHECK (kind IN ('rule','preference','commitment','fact')),
+  text TEXT NOT NULL,
+  source_task_id TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_agreements_owner ON agreements(owner_id, updated_at);
+
 -- Web Push subscriptions of each account's browsers (phones added to the home screen).
 CREATE TABLE IF NOT EXISTS push_subscriptions (
   endpoint TEXT PRIMARY KEY,

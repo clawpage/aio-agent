@@ -88,27 +88,6 @@ const TOOLS = [
     },
   },
   {
-    name: "task_list",
-    description:
-      "列出用户在一站主会话里的任务（新到旧）：id、日期、标题、请求和结果的摘要、状态。用户问起以前的某件事、某个任务的进展或结果、最近做过什么时，先用它找（可按关键词搜），再用 task_get 读完整内容；不要凭印象回答。",
-    inputSchema: {
-      type: "object",
-      properties: {
-        query: { type: "string", description: "关键词，匹配标题、请求和结果（可选），例如“推车”“Roy 疫苗”" },
-        limit: { type: "integer", description: "最多几条，默认 20，最多 50" },
-      },
-    },
-  },
-  {
-    name: "task_get",
-    description: "读取一个任务的完整内容：用户的请求和补充、状态、完整结果或还在等用户回答的问题。id 来自 task_list。",
-    inputSchema: {
-      type: "object",
-      properties: { id: { type: "string", description: "task_list 给出的 id" } },
-      required: ["id"],
-    },
-  },
-  {
     name: "feed_get",
     description:
       "查看内置的「每日推送」：推送时间、状态、用户给它的要求（instruction；customized=false 表示还是默认的一句话），以及它记住的内容 memory（care 要多留意的、avoid 不要再推的、note 用户对推送的习惯和偏好，source 是 user 用户说的或 feed 推送自己学到的）。" +
@@ -253,14 +232,6 @@ export class ScheduleGateway {
       if (name === "schedule_list") {
         const list = tasks.listSchedules(userId).map(({ spec: { anchorAt: _anchor, ...schedule }, ...s }) => ({ id: s.id, title: s.title, rule: s.rule, schedule, status: s.status, nextRun: s.nextRunText, instruction: s.instruction, needsBrowser: s.needsBrowser, ...(s.builtin ? { builtin: true, note: "内置的每日推送：完整设置和记忆用 feed_get 查看，用 feed_update 修改" } : {}) }));
         return text(list.length ? list : "还没有定时任务。");
-      }
-      if (name === "task_list") {
-        const list = tasks.listTasksFor(userId, { query: typeof args.query === "string" ? args.query : undefined, limit: typeof args.limit === "number" ? args.limit : undefined });
-        return text(list.length ? list : "没有找到相关任务。");
-      }
-      if (name === "task_get") {
-        const detail = tasks.taskDetailFor(userId, String(args.id ?? ""));
-        return detail ? text(detail) : text("没有这个任务", true);
       }
       if (name === "schedule_update") {
         const changed = tasks.updateScheduleFor(userId, args);
