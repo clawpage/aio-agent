@@ -547,6 +547,21 @@ describe("main inbox delegation", () => {
         expect(tasks.get(parent.id)?.result).toContain("餐厅");
         expect(tasks.list().tasks.find(t=>t.id===extra.id)?.result).toBeNull();
     });
+    it("picks up a session left days ago with a reminder to check what has changed, but not one just used",async()=>{
+        const visit=submit("评估斯巴鲁保养报价");await tick();
+        await codex.runTurn(codex.startedTurns[0]!.turnId,{text:"预估 $268.94"});await tick();
+        db.prepare("UPDATE tasks SET completed_at=? WHERE id=?").run(Date.now()-3*86_400_000,visit.id);
+        codex.plan=async()=>JSON.stringify({title:"列出上次保养",related:[visit.id],dependencies:[],resources:[]});
+        const later=tasks.submit({text:"我上次去斯巴鲁保养费用和项目列一下",clientMessageId:"days-later",relatedTaskId:visit.id}).task;await tick();await tick();
+        const resumed=codex.startedTurns[1]!.text;
+        expect(resumed).toContain("本轮恢复此前任务的同一会话");
+        expect(resumed).toMatch(/这个会话上次做事是 .+（3 天前），这期间情况可能已经变了/);
+        expect(resumed).toContain("知识库、邮件、aio_history 里此后的任务");
+        // Asked again right away, the session is current: no reminder.
+        await codex.runTurn(codex.startedTurns[1]!.turnId,{text:"列好了"});await tick();
+        tasks.submit({text:"用英文再列一遍",clientMessageId:"right-after",relatedTaskId:later.id});await tick();await tick();
+        expect(codex.startedTurns[2]!.text).not.toContain("这个会话上次做事是");
+    });
     it("hands a person's held tabs back to the agent when they send the task a supplement or an answer", async()=>{
         const released:string[]=[];
         tasks.setHumanTabRelease(async key=>{released.push(key);return 1;});

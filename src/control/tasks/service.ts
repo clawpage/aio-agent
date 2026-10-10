@@ -122,6 +122,9 @@ function decodeCursor(cursor: string): [number, number, string] {
 const GADGET_PREFIX = "gadget:";
 const DISPATCHED = new Set(["queued", "running", "stopping"]);
 /** The main inbox owns delegation; manual continuations reuse the same executor thread. */
+/** A session idle this long is picked up with a reminder that what it holds may be out of date. */
+const STALE_SESSION_HOURS = 6;
+
 export class TaskService {
     #closed = false;
     #planning = false;
@@ -879,8 +882,15 @@ export class TaskService {
             // The person's standing agreements, likewise given to a thread once per version.
             const agreements = gadget ? null : standingAgreements(this.db, this.ownerId(row));
             const agreementsKnown = !!agreements && earlier.some(t => t.plan_json ? (JSON.parse(t.plan_json) as TaskPlan).agreementsVersion === agreements.version : false);
+            // A session picked up again after a while: what it holds is where things stood then, not now.
+            const lastAt = row.execution_conversation_id ? Math.max(0, ...this.rows().filter(t => t.id !== row.id && this.executor(t) === this.executor(row)).map(t => t.completed_at ?? t.created_at)) : 0;
+            const idleHours = lastAt ? (Date.now() - lastAt) / 3_600_000 : 0;
+            const staleness = idleHours >= STALE_SESSION_HOURS
+                ? `这个会话上次做事是 ${formatWhen(lastAt, this.cfg.browser.timezone)}（${idleHours < 48 ? `${Math.round(idleHours)} 小时` : `${Math.round(idleHours / 24)} 天`}前），这期间情况可能已经变了，会话里的旧内容是线索，不是答案。用户这次问的如果是现在的情况或事情的结果（实际花了多少、办到哪一步、预约和订单的状态、价格、最新消息），先到现在的来源看一遍有没有新东西——知识库、邮件、aio_history 里此后的任务、相关网页——再回答，并说清依据是什么、是什么时候的；只是回顾当时说过的话就不用重查。`
+                : null;
             const prompt = gadget ? this.gadgetPrompt(row) : [
                 `你是 AIO Agent 主会话委派的子 agent。任务 ID：${row.id}。${row.execution_conversation_id ? "本轮恢复此前任务的同一会话，保留完整上下文；按用户的新要求继续、补充或更新，不要从零重新做。" : "只处理本任务。"}不递归委派。身份、语气和行为遵循系统层注入的 SOUL.md；对子任务同样生效，不以内部执行角色替代个人助理身份。`,
+                ...(staleness ? [staleness] : []),
                 ...(rulesKnown
                     ? [`执行约束（版本 ${rulesVersion}）已在本会话前文给出且没有变化，这里不再重复，继续按之前的约束执行。注意本轮任务 ID 是 ${row.id}：约束里的任务目录、临时目录和图片存放位置都换成 ${this.cfg.sandbox.containerWorkspaceDir}/tasks/${row.id}/。`]
                     : [`执行约束（版本 ${rulesVersion}；同一会话里版本不变时后续轮次不再重复）：`, ...rules]),
