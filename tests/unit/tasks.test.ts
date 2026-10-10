@@ -9,7 +9,7 @@ import { parsePlan, planningPrompt, resourcesConflict } from "../../src/control/
 import { Logger } from "../../src/common/logger.js";
 import { writeAgentSettings } from "../../src/control/settings.js";
 import { FakeCodex, testConfig } from "../helpers/harness.js";
-import { dispatchedTask } from "../../src/ui/src/dispatchText.js";
+import { dispatchedSupplement, dispatchedTask } from "../../src/ui/src/dispatchText.js";
 class PlanningCodex extends FakeCodex {
     plans: string[] = [];
     steers: {threadId:string;expectedTurnId:string;text:string;attachments?:{path:string;kind:"image"|"file";name?:string}[]}[] = [];
@@ -534,6 +534,12 @@ describe("main inbox delegation", () => {
         expect(codex.steers).toHaveLength(1);
         expect(codex.steers[0]).toMatchObject({threadId:codex.startedTurns[0]!.threadId,expectedTurnId:codex.startedTurns[0]!.turnId});
         expect(codex.steers[0]!.text).toContain("902 links way");
+        // The execution page shows what the person added, not the brief around it.
+        expect(dispatchedSupplement(codex.steers[0]!.text)).toBe("我住在902 links way，帮我也找好餐厅推荐");
+        expect(dispatchedTask(codex.steers[0]!.text)).toBeNull();
+        // One written before the marker existed still shows the person's words.
+        expect(dispatchedSupplement('这是用户在 21:07 对当前任务的补充，请合并处理。\n\n主会话最近的对话：\n...\n\n派单器的判断（仅作背景）：{"title":"x"}\n\n予 字都有什么含义？\n\n补充所需的已完成任务资料：[]')).toBe("予 字都有什么含义？");
+        expect(dispatchedSupplement("就是一句普通的话")).toBeNull();
         expect(tasks.get(extra.id)).toMatchObject({status:"merged",merged_into:parent.id});
         expect(tasks.view(tasks.get(parent.id)!)).toMatchObject({title:tripTitle});
         expect(tasks.list().tasks.find(t=>t.id===extra.id)?.conversationId).toBe(parent.conversationId);

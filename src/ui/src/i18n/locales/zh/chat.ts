@@ -38,6 +38,8 @@ export const chat = {
   userText: {
     label: "本次任务",
     collapse: "收起，只看本次任务",
+    supplementLabel: "补充",
+    supplementCollapse: "收起，只看补充",
     expand: (chars: number) => `展开派发全文（${chars} 字）`,
   },
   reasoning: {

@@ -39,6 +39,8 @@ export const chat: typeof zh = {
   userText: {
     label: "This task",
     collapse: "Collapse to the task only",
+    supplementLabel: "Supplement",
+    supplementCollapse: "Collapse to the supplement only",
     expand: (chars: number) => `Show full brief (${chars} chars)`,
   },
   reasoning: {

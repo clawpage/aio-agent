@@ -623,6 +623,14 @@ export function applyEvent(state: TimelineState, event: AgentEvent): void {
       push(state, { kind: "user", createdAt: event.createdAt, id: `user:${turnId}`, text: text(p.text), attachments });
       return;
     }
+    case "turn.input_appended": {
+      // A supplement steered into the running turn: the person's words, in order with the turn's work.
+      const id = `user:append:${event.id}`;
+      if (state.index.has(id)) return;
+      const attachments = Array.isArray(p.attachments) ? (p.attachments as Array<{ path: string }>) : [];
+      push(state, { kind: "user", createdAt: event.createdAt, id, text: text(p.text), attachments });
+      return;
+    }
     case "turn.started": {
       const turnId = event.turnId || text(p.turnId) || String(event.id);
       state.currentTurnId = turnId;

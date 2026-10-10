@@ -26,7 +26,7 @@ import { extractShareLinks } from "../shareLinks";
 import { VideoEmbed } from "./VideoEmbed";
 import { extractVideoLinks } from "../videoLinks";
 import { extractFileRefs, attachmentRefs, embedMediaLinks } from "../fileRefs";
-import { dispatchedTask } from "../dispatchText";
+import { dispatchedSupplement, dispatchedTask } from "../dispatchText";
 import { isPreviewableKind, isSandboxLink, workspaceFileKind } from "../sandboxLink";
 import { openNativeBrowser } from "../deviceBrowser";
 import { t } from "../i18n";
@@ -493,18 +493,21 @@ export function AttachmentCards({
 
 /**
  * A user message. One the main session dispatched to an execution session shows
- * the task the person wrote; the executor's full brief opens on request.
+ * the task the person wrote, and a supplement steered into a running turn shows
+ * what they added; the executor's full brief opens on request.
  */
 function UserText({ text }: { text: string }) {
   const task = useMemo(() => dispatchedTask(text), [text]);
+  const supplement = useMemo(() => (task ? null : dispatchedSupplement(text)), [task, text]);
   const [full, setFull] = useState(false);
-  if (!task) return <div className="plain">{text}</div>;
+  const shown = task ?? supplement;
+  if (!shown) return <div className="plain">{text}</div>;
   return (
     <div className="dispatch-text">
-      <span className="dispatch-label">{t.chat.userText.label}</span>
-      <div className="plain">{full ? text : task}</div>
+      <span className="dispatch-label">{supplement ? t.chat.userText.supplementLabel : t.chat.userText.label}</span>
+      <div className="plain">{full ? text : shown}</div>
       <button type="button" className="link tiny dispatch-toggle" aria-expanded={full} onClick={() => setFull((v) => !v)}>
-        {full ? t.chat.userText.collapse : t.chat.userText.expand(text.length)}
+        {full ? (supplement ? t.chat.userText.supplementCollapse : t.chat.userText.collapse) : t.chat.userText.expand(text.length)}
       </button>
     </div>
   );

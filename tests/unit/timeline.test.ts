@@ -1255,3 +1255,17 @@ describe("blank agentMessage items", () => {
     expectExactIndexes(state);
   });
 });
+
+describe("supplements steered into a running turn", () => {
+  it("shows each one as the person's message, in order with the turn's work, once", () => {
+    const appended = ev("turn.input_appended", { text: "诗里要写到枫叶", attachments: [] }, "t1");
+    const state = feed([
+      ev("turn.queued", { turnId: "t1", clientMessageId: "cm-1", text: "写一首秋天的诗", attachments: [] }, "t1"),
+      ev("turn.started", { turnId: "t1" }, "t1"),
+      appended,
+      appended,
+    ]);
+    const users = state.blocks.filter((b) => b.kind === "user");
+    expect(users.map((b) => (b as { text: string }).text)).toEqual(["写一首秋天的诗", "诗里要写到枫叶"]);
+  });
+});
