@@ -121,6 +121,11 @@
 | `PA_PHONE_SCREEN_OFF` | 空 | `var/runtime.env` 中设为 `1` 时桥接让手机屏幕保持熄灭（截图、mobile-mcp、实时画面照常） |
 | `PA_ADB` | 自动 | adb 路径；默认按 `ANDROID_HOME`、`~/Library/Android/sdk/platform-tools` 查找 |
 | `PA_PHONE_DIR` | `var/phone` | 桥接的 mobile-mcp 与 scrcpy server 安装目录 |
+| `PA_KEYBOARD_BRIDGE_URL` | 空 | 语音键盘的键盘桥（`bin/keyboard-bridge.mjs`）地址，如 `http://127.0.0.1:4904`（compose 用 `http://host.docker.internal:4904`）；为空则不提供 |
+| `PA_KEYBOARD_BRIDGE_SECRETS_FILE` | `~/.config/aio-agent/keyboard-bridge.env` | `KEYBOARD_BRIDGE_TOKEN`；控制面与键盘桥共用 |
+| `PA_KEYBOARD_BRIDGE` | 空 | `var/runtime.env` 中设为 `1` 时 `bin/serve` 同时运行键盘桥（宿主进程） |
+| `PA_KEYBOARD_BRIDGE_PORT` / `PA_KEYBOARD_DIR` | `4904` / `var/keyboard` | 键盘桥监听端口（只听 127.0.0.1）与 AIO Keyboard.app 构建目录 |
+| `PA_DICTATION_MODEL` | `claude-haiku-4-5` | 语音键盘的润色模型（用 owner 的 Claude 凭据） |
 | `PA_GADGET_TOKEN_PATH` | `<数据目录>/gadget-token.env` | 语音配件令牌与绑定账号 |
 | `PA_GADGET_USAGE_URL` | 空 | 配件「用量」页数据地址；为空则接口返回 404 |
 | `PA_GADGET_FIRMWARE_DIR` | `<数据目录>/gadget-firmware` | 配件无线升级固件目录 |

@@ -15,6 +15,7 @@
  *
  * Either way the tunnel sends the console host to :4891 and the workspace host to :4892.
  * PA_PHONE_BRIDGE=1 also runs bin/phone-bridge.mjs (the owner's Android phone over USB).
+ * PA_KEYBOARD_BRIDGE=1 also runs bin/keyboard-bridge.mjs (types the voice gadget's dictation on this Mac).
  * Optional runtime overrides: var/runtime.env (KEY=VALUE per line).
  */
 import { spawn } from "node:child_process";
@@ -178,6 +179,12 @@ if (mode === "compose") {
 // since containers cannot reach USB; the control plane reaches it on loopback.
 if (baseEnv.PA_PHONE_BRIDGE === "1") {
   startChild("personal-agent-phone", process.execPath, [path.join(ROOT, "bin", "phone-bridge.mjs")], baseEnv, { required: false });
+}
+
+// The voice gadget's dictation, typed at the cursor on this Mac (PA_KEYBOARD_BRIDGE=1): a host
+// process in either mode, since only a host app can be allowed to type.
+if (baseEnv.PA_KEYBOARD_BRIDGE === "1") {
+  startChild("personal-agent-keyboard", process.execPath, [path.join(ROOT, "bin", "keyboard-bridge.mjs")], baseEnv, { required: false });
 }
 
 if (fs.existsSync(TUNNEL_CONFIG)) {

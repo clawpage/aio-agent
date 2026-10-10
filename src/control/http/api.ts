@@ -17,6 +17,7 @@ import { appVersion } from "../../common/build.js";
 import { readSecretFile } from "../../common/secrets.js";
 import fs from "node:fs";
 import { readFirmware } from "../gadgetFirmware.js";
+import { Dictation, DictationError, DICTATION_MAX_CHARS } from "../dictation.js";
 import type { AppContext } from "../context.js";
 import {
   InvalidConversationTitleError,
@@ -691,6 +692,26 @@ export function createApiRouter(context: AppContext): Router {
     res.writeHead(200, { "Content-Type": "application/octet-stream", "Content-Length": String(firmware.size), "Cache-Control": "no-store" });
     fs.createReadStream(firmware.file).on("error", () => res.destroy()).pipe(res);
   });
+  // The dictation page: what the gadget heard, polished and typed at the cursor on the host Mac.
+  const dictation = new Dictation(cfg, log);
+  router.post("/gadget/dictation", requireKind("primary"), asyncHandler(async (req, res) => {
+    const caller = gadgetCaller(req, res);
+    if (!caller) return;
+    if (!dictation.enabled) { res.status(404).json({ error: "not_configured" }); return; }
+    const text = typeof req.body?.text === "string" ? req.body.text.trim() : "";
+    if (!text || text.length > DICTATION_MAX_CHARS) { res.status(400).json({ error: "bad_request" }); return; }
+    const out = await dictation.polish(text);
+    try {
+      await dictation.type(out.text);
+    } catch (err) {
+      const code = err instanceof DictationError ? err.code : "bridge_unavailable";
+      log.warn("gadget dictation not typed", { account: caller.username, code });
+      res.status(code === "not_trusted" ? 409 : code === "not_configured" ? 404 : 502).json({ error: code, text: out.text });
+      return;
+    }
+    log.info("gadget dictation typed", { account: caller.username, chars: out.text.length, polished: out.polished });
+    res.json({ text: out.text, polished: out.polished });
+  }));
   router.post("/gadget/messages", requireKind("primary"), asyncHandler(async (req, res) => {
     const account = await gadgetAccount(req, res);
     if (!account) return;

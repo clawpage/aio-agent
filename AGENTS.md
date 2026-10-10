@@ -32,6 +32,7 @@ cookie 名 `pa_*` 与 `PA_*` 前缀**保持不变**——它们承载既有容�
 | `tests/e2e/live-smoke.mjs` | 对已部署实例的真实冒烟（`npm run smoke`） |
 | `bin/serve` | 生产守护：按 `PA_DEPLOY` 以三个宿主进程（host）或 Docker Compose（compose）运行三层，外加专用 tunnel，转发信号 |
 | `bin/phone-bridge.mjs` | 可选宿主进程：USB 上 owner 的 Android 手机（mobile-mcp 工具白名单 + scrcpy 实时画面），只听 loopback、要桥接令牌；`setup` 安装固定版本依赖到 `var/phone` |
+| `bin/keyboard-bridge.mjs` | 可选宿主进程：语音配件的「语音键盘」把润色后的文字粘贴到宿主 Mac 光标处；实际输入由 `bin/keyboard-bridge/main.swift` 编译的后台 App 完成（辅助功能权限只给它），只听 loopback、要桥接令牌，只由 `/api/gadget/dictation` 调用 |
 | `bin/dns-agent.py` | 现有部署专用的 DNS 辅助脚本：依赖仓库外的 `tools/linode-local/dns.py`，**不是 quickstart 入口**，公开使用者通常不需要 |
 | `var/` | 运行时数据（DB、日志、owner 凭据、tunnel 凭据），全部 git 忽略；compose 部署时控制面数据在命名卷里 |
 | `docs/` | 功能说明、配置参考、架构、运行手册、开发与测试、能力清单 |
@@ -49,7 +50,8 @@ cookie 名 `pa_*` 与 `PA_*` 前缀**保持不变**——它们承载既有容�
    宿主路径或挂载，不提供任意宿主机 shell 通道。控制面不持有 Docker 访问。owner 配置的知识库 MCP
    （`docs/FEATURES.md`“知识库”）、Home Assistant MCP（`docs/FEATURES.md`“Home Assistant”）与打印机（`docs/FEATURES.md`“打印机”）只经成员网关按账号转发，令牌不进沙箱；不要为它们另开直连端口，也不要把授权名单
    之外的账号接进去。owner 的手机（`bin/phone-bridge.mjs`，`docs/FEATURES.md`“手机”）固定只给 owner：工具经成员网关，画面只在主站；
-   桥接只放行作用在手机本身的 mobile-mcp 工具，不得放开读写宿主机文件或云手机的工具。
+   桥接只放行作用在手机本身的 mobile-mcp 工具，不得放开读写宿主机文件或云手机的工具。键盘桥（`bin/keyboard-bridge.mjs`）只接受配件令牌下
+   `/api/gadget/dictation` 的输入，不得接进成员网关或任何执行器工具。
 4. **两个来源**：主站与伴随站必须保持不同来源；不要把 AIO 生成内容放到主站上，也不要为了
    本地调试放宽 cookie 安全属性（localhost 明文是唯一例外）。
 5. **DNS**：只允许用 `bin/dns-agent.py` 维护 `agent.clawpage.ai` 与 `agent-workspace.clawpage.ai` 两条记录；不得运行

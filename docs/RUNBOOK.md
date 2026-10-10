@@ -172,6 +172,27 @@ curl -s -H "authorization: Bearer $T" http://127.0.0.1:4903/status    # device �
 再以 owner 登录控制台，打开工作区「手机」应看到实时画面。手机拔掉或换机时 `device` 为 null，执行器的 `mobile_list_available_devices` 返回空；
 重新插上即可，无需重启。停用：删去 `PA_PHONE_BRIDGE_URL` 并重启。
 
+### 语音键盘（配件说话，Mac 光标处输入）
+
+键盘桥是一个后台小 App「AIO Keyboard」（`bin/keyboard-bridge/main.swift`，无 Dock 图标），macOS 的辅助功能权限只授予它。首次或改了 Swift 源码后：
+
+```bash
+cd projects/personal-agent
+node bin/keyboard-bridge.mjs setup     # swiftc 编译到 var/keyboard/AIO Keyboard.app（ad-hoc 签名），生成 ~/.config/aio-agent/keyboard-bridge.env
+```
+
+启用：`var/runtime.env` 加 `PA_KEYBOARD_BRIDGE=1`；`var/deploy/control.env` 加 `PA_KEYBOARD_BRIDGE_URL=http://host.docker.internal:4904`；
+`var/deploy/aio.env` 加 `AIO_SECRET_KEYBOARD_BRIDGE=<上述 env 文件绝对路径>`；然后 `tools/start.sh restart personal-agent`
+（日志 `var/logs/personal-agent-keyboard.log`）。第一次说话时 macOS 弹窗，到「系统设置 › 隐私与安全性 › 辅助功能」打开 AIO Keyboard；
+重新编译会改变签名，需要先把旧条目删掉再授权一次。验收：
+
+```bash
+T=$(sed -n 's/^KEYBOARD_BRIDGE_TOKEN=//p' ~/.config/aio-agent/keyboard-bridge.env)
+curl -s -H "authorization: Bearer $T" http://127.0.0.1:4904/status    # {"trusted":true}
+```
+
+停用：删去 `PA_KEYBOARD_BRIDGE_URL` 并重启（键盘桥退出时会让 App 一起退出）。
+
 ## 4. 账号与凭据
 
 创建受信任普通成员（构建后，使用同一生产环境配置）：

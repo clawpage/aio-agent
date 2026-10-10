@@ -319,6 +319,18 @@ export function loadConfig(): {
   /** The owner runtime's phone tools URL on the member gateway (PhoneGateway). */
   phone?: { url: string };
   /**
+   * The voice gadget's dictation page (src/control/dictation.ts): the keyboard
+   * bridge on the host Mac (bin/keyboard-bridge.mjs) types what the gadget heard,
+   * after `model` polishes it with the owner's Claude credential. Without a URL
+   * the feature is absent.
+   */
+  keyboardBridge: {
+    url: string;
+    /** Private host file holding KEYBOARD_BRIDGE_TOKEN. */
+    secretsFile: string;
+    model: string;
+  };
+  /**
    * The sandbox nodes (sandboxd) this control plane drives, in order; the first
    * is where existing accounts live. Each node's token is read from `tokensFile`
    * under the node's name, else under AIO_SANDBOX_NODE_TOKEN.
@@ -545,6 +557,11 @@ export function loadConfig(): {
     phoneBridge: {
       url: envStr("PA_PHONE_BRIDGE_URL", "").replace(/\/+$/, ""),
       secretsFile: envStr("PA_PHONE_BRIDGE_SECRETS_FILE", path.join(os.homedir(), ".config", "aio-agent", "phone-bridge.env")),
+    },
+    keyboardBridge: {
+      url: envStr("PA_KEYBOARD_BRIDGE_URL", "").replace(/\/+$/, ""),
+      secretsFile: envStr("PA_KEYBOARD_BRIDGE_SECRETS_FILE", path.join(os.homedir(), ".config", "aio-agent", "keyboard-bridge.env")),
+      model: envStr("PA_DICTATION_MODEL", "claude-haiku-4-5"),
     },
     sandboxNodes: {
       nodes: parseList(envStr("PA_SANDBOX_NODES", "local=http://127.0.0.1:4894")).map((entry) => {

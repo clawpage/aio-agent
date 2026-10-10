@@ -28,6 +28,7 @@ services:
       PA_KB_MCP_SECRETS_FILE: /run/secrets/kb-mcp
       PA_HA_MCP_SECRETS_FILE: /run/secrets/ha-mcp
       PA_PHONE_BRIDGE_SECRETS_FILE: /run/secrets/phone-bridge
+      PA_KEYBOARD_BRIDGE_SECRETS_FILE: /run/secrets/keyboard-bridge
     volumes:
       - control-data:/data
     ports:
@@ -37,7 +38,7 @@ services:
     extra_hosts:
       - host.docker.internal:host-gateway
     # Nodes can be remote; the control layer checks their protocol and readiness itself.
-    secrets: [sandbox-node, claude-code, jev, kb-mcp, ha-mcp, phone-bridge]
+    secrets: [sandbox-node, claude-code, jev, kb-mcp, ha-mcp, phone-bridge, keyboard-bridge]
     networks: [aio]
 networks:
   aio:
@@ -59,3 +60,5 @@ secrets:
     file: ${AIO_SECRET_HA_MCP:-/dev/null}
   phone-bridge:
     file: ${AIO_SECRET_PHONE_BRIDGE:-/dev/null}
+  keyboard-bridge:
+    file: ${AIO_SECRET_KEYBOARD_BRIDGE:-/dev/null}

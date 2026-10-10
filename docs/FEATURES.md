@@ -389,6 +389,11 @@
   压缩不进会话记录，期间到达的消息排在其后；沙箱休眠时不为此唤醒，Claude Code 会话不压缩。
 - **用量页**：`GET /api/gadget/usage` 把 `PA_GADGET_USAGE_URL` 的 JSON 原样转给配件（5 秒超时、限 64 KB、非 JSON 返回 502；未配置 404）。
   现有部署指向 Usage HUD 的回环快照 `http://host.docker.internal:4796/gadget.json`，配件「用量」页每分钟拉取一次。
+- **语音键盘**：配件「语音键盘」页点麦克风开始录音、再点一下结束；转写后发 `POST /api/gadget/dictation`（配件令牌，JSON `{text}`，最多 4000 字），
+  控制面用 owner 的 Claude 凭据调 `PA_DICTATION_MODEL`（默认 `claude-haiku-4-5`，10 秒超时）去赘词、改错字、补标点，
+  再交给宿主 Mac 上的键盘桥（`bin/keyboard-bridge.mjs`）粘贴到当前光标处，返回 `{text, polished}`。润色失败时照原文输入（`polished:false`）；
+  Mac 未授予辅助功能 409 `not_trusted`，桥连不上 502，未配置 `PA_KEYBOARD_BRIDGE_URL` 404。键盘桥只经这个接口触达，沙箱与执行器都用不到它；
+  粘贴后剪贴板恢复原样，且标记为临时内容，剪贴板历史工具不记录。
 - **固件无线升级**：`GET /api/gadget/firmware` 返回当前固件信息（版本、构建时间、大小、`elfSha256`），`GET /api/gadget/firmware.bin` 下载镜像；
   未发布时 404。发布：`node bin/publish-gadget-firmware.mjs <文件>`（compose 下先 `docker cp` 进控制面容器），校验后替换到 `PA_GADGET_FIRMWARE_DIR`。
   配件每 10 分钟检查一次，空闲时下载到另一分区并重启，新固件连不上会自动回滚。
