@@ -27,7 +27,7 @@ import { PushToggle } from "./PushToggle";
 import {taskStatusLabels,type TaskFeed} from '../taskStatus';
 import { isSandboxLink } from "../sandboxLink";
 import { openDeviceBrowser } from "../deviceBrowser";
-import { locale, setLocale, t } from "../i18n";
+import { t } from "../i18n";
 /** One owner-facing inbox; executor conversations are implementation details. */
 /** The site a link goes to, named on the opening card. */
 function hostOf(url: string): string {
@@ -306,7 +306,7 @@ export function MainApp() {
       {role === 'owner' && gadgetAccount && <button className={`ghost block ${view === 'gadget' && !workspace ? 'active' : ''}`} aria-current={view === "gadget" && !workspace ? "page" : undefined} onClick={() => navigate({ view: "gadget" })}><NavIcon name="gadget"/>{accountLabel(gadgetAccount)}</button>}
       {role === 'owner' && <button className={`ghost block ${view === 'usage' && !workspace ? 'active' : ''}`} aria-current={view === "usage" && !workspace ? "page" : undefined} onClick={() => navigate({ view: "usage" })}><NavIcon name="usage"/>{t.nav.usage}</button>}
       <button className={`ghost block ${workspace ? "active" : ""}`} aria-current={workspace ? "page" : undefined} onClick={() => { closeMenu(); openWorkspace(); }}><NavIcon name="workspace"/>{t.nav.workspace}</button>
-      <div className="sidebar-foot"><span className="sidebar-status muted tiny"><span className={`dot ${!status || startFailed ? "warn" : "ok"}`}/>{!status || startFailed ? t.nav.agentConnecting : t.nav.agentOnline}</span><PushToggle/><button className="ghost block" onClick={() => setTheme(t => t === "dark" ? "light" : "dark")}><NavIcon name={theme === "dark" ? "sun" : "moon"}/>{theme === "dark" ? t.nav.lightMode : t.nav.darkMode}</button><button className="ghost block" lang={locale === "en" ? "zh-CN" : "en"} onClick={() => setLocale(locale === "en" ? "zh-CN" : "en")}><NavIcon name="language"/>{t.nav.otherLanguage}</button>{role === "owner" && <button className={`ghost block ${view === "settings" && !workspace ? "active" : ""}`} aria-current={view === "settings" && !workspace ? "page" : undefined} onClick={() => navigate({ view: "settings" })}><NavIcon name="settings"/>{t.nav.settings}</button>}<button className="ghost block" onClick={() => void logout()}><NavIcon name="logout"/>{t.nav.logout}</button></div>
+      <div className="sidebar-foot"><span className="sidebar-status muted tiny"><span className={`dot ${!status || startFailed ? "warn" : "ok"}`}/>{!status || startFailed ? t.nav.agentConnecting : t.nav.agentOnline}</span><PushToggle/><button className="ghost block" onClick={() => setTheme(t => t === "dark" ? "light" : "dark")}><NavIcon name={theme === "dark" ? "sun" : "moon"}/>{theme === "dark" ? t.nav.lightMode : t.nav.darkMode}</button>{role === "owner" && <button className={`ghost block ${view === "settings" && !workspace ? "active" : ""}`} aria-current={view === "settings" && !workspace ? "page" : undefined} onClick={() => navigate({ view: "settings" })}><NavIcon name="settings"/>{t.nav.settings}</button>}<button className="ghost block" onClick={() => void logout()}><NavIcon name="logout"/>{t.nav.logout}</button></div>
     </PopupSurface>
     </>}
     </PopupPresence>

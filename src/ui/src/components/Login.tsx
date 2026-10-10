@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { api, ApiError } from "../api";
 import { BrandMark } from "./Brand";
-import { locale, setLocale, t } from "../i18n";
+import { t } from "../i18n";
 
 type Mode = "login" | "register";
 
@@ -171,9 +171,6 @@ export function Login({ onSuccess, notice, username: named }: { onSuccess: () =>
             <button type="button" className="link" onClick={() => switchMode(register ? "login" : "register")}>{register ? t.auth.switch.toLogin : t.auth.switch.toRegister}</button>
           </p>
         )}
-        <p className="muted tiny login-switch">
-          <button type="button" className="link" lang={locale === "en" ? "zh-CN" : "en"} onClick={() => setLocale(locale === "en" ? "zh-CN" : "en")}>{t.nav.otherLanguage}</button>
-        </p>
       </form>
     </div>
   );

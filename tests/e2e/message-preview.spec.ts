@@ -1,7 +1,10 @@
 import { test, expect } from "@playwright/test";
 import { mockConsole } from "./mock-api";
 
-test("long main messages cap at 80%, open in a nine-tenths sheet and retain device/private links and draft", async ({ page }, info) => {
+/** A main-chat message folds past this share of the usable screen height. */
+const FOLD = 1;
+
+test("long main messages cap at one screen, open in a nine-tenths sheet and retain device/private links and draft", async ({ page }, info) => {
   const opened: string[] = [];
   await mockConsole(page, { conversations: [], onBrowserTab: url => opened.push(url) });
   const result = `[公开链接](https://external.example/start)\n\n` + Array.from({ length: 50 }, (_, i) => `第 ${i + 1} 段：完整正文可以一直读到最后。`).join("\n\n") + "\n\n[末尾公开链接](https://external.example/end)\n\n[内网链接](http://192.168.1.8/page)\n\n完整正文结束";
@@ -18,10 +21,10 @@ test("long main messages cap at 80%, open in a nine-tenths sheet and retain devi
   await expect(page.getByRole("button", { name: "点击看更多：用户消息", exact: true })).toHaveCount(1);
   await expect(page.locator('[data-task-id="short-message"] .message-more')).toHaveCount(0);
   const preview = page.locator('.task-report[data-task-id="long-message"] [data-testid="message-preview"]');
-  const cap = await page.evaluate(() => {
+  const cap = await page.evaluate((fold) => {
     const n = document.createElement("div"); n.style.height = "var(--safe-height)"; document.body.append(n);
-    const height = n.getBoundingClientRect().height; n.remove(); return height * .8;
-  });
+    const height = n.getBoundingClientRect().height; n.remove(); return height * fold;
+  }, FOLD);
   const height = (await preview.boundingBox())!.height;
   expect(height).toBeLessThanOrEqual(cap + 1);
   await page.getByRole("textbox", { name: "消息", exact: true }).fill("保留草稿");
@@ -33,7 +36,7 @@ test("long main messages cap at 80%, open in a nine-tenths sheet and retain devi
   const view = page.viewportSize()!;
   if (info.project.name.startsWith("mobile")) {
     // A phone reads it in a nine-tenths bottom sheet.
-    expect(Math.abs(sheet.height - (cap / .8 * .9 + 34))).toBeLessThan(1);
+    expect(Math.abs(sheet.height - (cap / FOLD * .9 + 34))).toBeLessThan(1);
     expect(sheet.y).toBeGreaterThan(view.height * .09);
     expect(Math.abs(sheet.y + sheet.height - view.height)).toBeLessThan(1);
   } else {
@@ -79,7 +82,7 @@ test("long main messages cap at 80%, open in a nine-tenths sheet and retain devi
   await user.getByRole("button", { name: "关闭消息" }).click();
   if (info.project.name.startsWith("mobile")) {
     await page.setViewportSize({ width: 360, height: 640 });
-    await expect.poll(async () => (await preview.boundingBox())!.height).toBeLessThanOrEqual((640 - 96) * .8 + 1);
+    await expect.poll(async () => (await preview.boundingBox())!.height).toBeLessThanOrEqual((640 - 96) * FOLD + 1);
   }
   // A live result shrinking back below the threshold removes the hint.
   text = "更新后短需求"; report = "更新后短回答";

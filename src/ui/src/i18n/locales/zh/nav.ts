@@ -12,8 +12,6 @@ export const nav = {
   logout: "退出登录",
   lightMode: "浅色模式",
   darkMode: "深色模式",
-  /** The other language, named in itself. */
-  otherLanguage: "English",
   agentOnline: "智能体在线",
   agentConnecting: "正在连接智能体",
   backTo: {

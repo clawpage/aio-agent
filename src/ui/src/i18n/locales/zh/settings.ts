@@ -99,4 +99,10 @@ export const settings = {
     copy: "复制",
     revoke: "作废",
   },
+  language: {
+    title: "界面语言",
+    description: "只影响这个浏览器，切换后页面会重新加载。",
+    /** This language, named in itself (the list shows each language in its own words). */
+    name: "中文",
+  },
 };

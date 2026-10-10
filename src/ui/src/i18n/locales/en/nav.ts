@@ -14,7 +14,6 @@ export const nav: typeof zh = {
   logout: "Log out",
   lightMode: "Light mode",
   darkMode: "Dark mode",
-  otherLanguage: "中文",
   agentOnline: "Agent online",
   agentConnecting: "Connecting to agent",
   backTo: {
