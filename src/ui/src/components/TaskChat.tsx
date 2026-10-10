@@ -432,7 +432,8 @@ export function TaskChat({ onDetails, onOpenLink, onOpenFileInBrowser, onExpired
               : t.options?.length ? <ChoiceList options={t.options} chosen={choosing[`${t.id}:${t.revision}`] ?? null} onChoose={option => void choose(t, option)}/> : null}
             <span className="task-question-hint">{t.form ? i18n.feed.question.hintForm : t.options?.length ? i18n.feed.question.hintOptions : i18n.feed.question.hintText}</span>
           </div>}
-          {!!t.messages?.length && ["running", "stopping"].includes(t.status) && <div className="task-intro task-messages">{t.messages.map((m, i) => <Markdown key={i} source={m} onOpenLink={onOpenLink} onOpenFile={setPreview}/>)}</div>}
+          {/* Only what the executor said last: each new word replaces the one before, in place. */}
+          {!!t.messages?.length && ["running", "stopping"].includes(t.status) && <div className="task-intro task-messages"><Markdown key={t.messages.length} source={t.messages.at(-1)!} onOpenLink={onOpenLink} onOpenFile={setPreview}/></div>}
           {ownsBrowser(t) && <><VaultPrompt task={t}/><TaskBrowser task={t} onReveal={onRevealBrowser}/></>}
           {t.phone && !t.mergedInto && ["needs_input", "queued", "running", "stopping"].includes(t.status) && <TaskPhone task={t} onDone={() => void choose(t, i18n.feed.phoneDone)}/>}
           <TaskDuration task={t} now={now}/>

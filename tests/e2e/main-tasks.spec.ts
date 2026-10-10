@@ -311,7 +311,7 @@ test("related supplement joins the original task, with one running indicator and
     await page.screenshot({path:`/Users/mengxiao/workspace/.scratch/artifacts/aio-remove-history/${info.project.name}-supplement.png`,animations:"disabled"});
 });
 
-test("a working task's card shows what its executor has said so far, through polls and reload",async({page},info)=>{
+test("a working task's card shows what its executor said last, replacing the earlier word, through polls and reload",async({page},info)=>{
     const said=["我会检查手机是否支持应用双开，再配置第二个小红书。","手机自带**双开**功能，正在打开设置。"];
     const pending={...task(1,"waiting"),description:"派单器的旧说明不再显示"};
     const {rows}=await setup(page,[pending]);
@@ -319,11 +319,13 @@ test("a working task's card shows what its executor has said so far, through pol
     Object.assign(rows[0]!,{status:"running",revision:2,messages:[said[0]]});
     await expect(page.locator(".task-messages")).toHaveText(said[0]!);
     Object.assign(rows[0]!,{revision:3,messages:said});
-    await expect(page.locator(".task-messages > *")).toHaveCount(2);
     await expect(page.locator(".task-messages strong")).toHaveText("双开");
+    await expect(page.locator(".task-messages > *")).toHaveCount(1);
+    await expect(page.getByText(said[0]!)).toHaveCount(0);
     await expect(page.getByText("派单器的旧说明不再显示")).toHaveCount(0);
     await page.reload();
-    await expect(page.locator(".task-messages > *")).toHaveCount(2);
+    await expect(page.locator(".task-messages > *")).toHaveCount(1);
+    await expect(page.locator(".task-messages strong")).toHaveText("双开");
     if(info.project.name.startsWith("mobile"))await page.setViewportSize({width:360,height:844});
     expect(await page.evaluate(()=>document.documentElement.scrollWidth-document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
     await page.screenshot({path:`/Users/mengxiao/workspace/.scratch/artifacts/aio-task-messages/${info.project.name}.png`,animations:"disabled"});
