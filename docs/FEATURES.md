@@ -468,8 +468,8 @@ Jev（TypeSafe System One）根据状态和选项返回选择、各选项概率�
   网关不缓存、不落库任何内容。给什么内容完全由上游决定，上游应只读并只提供这些账号可见的内容。
 - **超时**：单次调用最多等 90 秒（扫描件要先做文字识别，十几页约 15 秒）。
 - **现有部署**：上游是 aio-kb 的 `kb-mcp`，除整理过的页面外还以 `kb_source` 提供页面引用原件的文字（owner 与 `cr` 可读；扫描版 PDF 和图片由它在宿主上即时识别文字）；
-  执行会话只在需要时读原文，个人信息只引用回答所需部分。`KB_MCP_WRITERS`（现为 `betaw`）额外获得 `kb_note`：只在 workspace
-  `raw/aio-notes/<用户名>/` 新建笔记，经 aio-kb 整理后才可检索。
+  执行会话只在需要时读原文，个人信息只引用回答所需部分。`KB_MCP_WRITERS`（现为 `betaw`、`owner`、`cr`）额外获得 `kb_note`：只在 workspace
+  `raw/aio-notes/<用户名>/` 新建笔记，经 aio-kb 整理后才可检索。用户要求记录、或聊到家庭偏好与 Roy 的事项时，执行器先查重再主动记一条并告知用户。
 
 ### Home Assistant
 
