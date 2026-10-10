@@ -220,3 +220,28 @@ it("keeps the page a task's closed tab last showed: on its card, as a picture, a
     h.ctx.tabs = fakeTabs;
   }
 });
+
+it("hands back the tabs the person holds when the card's own tab has been replaced or closed", async () => {
+  const { cookie, csrf } = await login(h);
+  const headers = { cookie, "x-csrf-token": csrf, "content-type": "application/json" };
+  const task = ((await (await h.request("/api/tasks", { method: "POST", headers, body: JSON.stringify({ text: "查 Target 订单", clientMessageId: "tab-replaced" }) })).json()) as { task: { id: string } }).task;
+  const key = h.ctx.tasks.browserKey(task.id)!;
+  const seen: string[] = [];
+  // The agent opened t5 and closed t3, which the card still shows; the person holds t5.
+  const tab = (id: string, holder: "ai" | "human"): TabRecord => ({ ...record(key, holder), id, request: null });
+  h.ctx.tabs = {
+    ...fakeTabs,
+    list: async () => [tab("t5", "human")],
+    control: async (k, id, action) => (seen.push(`${action}:${k}:${id}`), id === "t5" ? tab("t5", action === "take" ? "human" : "ai") : null),
+  };
+  try {
+    const res = await h.request(`/api/tasks/${task.id}/browser/control`, { method: "POST", headers, body: JSON.stringify({ tab: "t3", action: "release" }) });
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { tab: TabRecord }).tab).toMatchObject({ id: "t5", holder: "ai" });
+    expect(seen).toEqual([`release:${key}:t3`, `release:${key}:t5`]);
+    // Taking over a tab that is gone is still refused: the card reloads and shows what is there.
+    expect((await h.request(`/api/tasks/${task.id}/browser/control`, { method: "POST", headers, body: JSON.stringify({ tab: "t3", action: "take" }) })).status).toBe(404);
+  } finally {
+    h.ctx.tabs = fakeTabs;
+  }
+});

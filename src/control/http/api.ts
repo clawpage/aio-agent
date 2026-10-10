@@ -913,7 +913,14 @@ export function createApiRouter(context: AppContext): Router {
     const action = req.body?.action;
     if (!key || !context.tabs) { res.status(404).json({ error: "not_found" }); return; }
     if (action !== "take" && action !== "release") { res.status(400).json({ error: "bad_action" }); return; }
-    const tab = await context.tabs.control(key, String(req.body?.tab ?? ""), action);
+    let tab = await context.tabs.control(key, String(req.body?.tab ?? ""), action);
+    // The card may still show a tab the agent has since replaced, or memory closed. Handing back
+    // means every tab of this task the person holds, so the agent never waits on one that is gone.
+    if (!tab && action === "release") {
+      const own = await context.tabs.list(key);
+      for (const held of own.filter((t) => t.holder === "human")) tab = (await context.tabs.control(key, held.id, "release")) ?? tab;
+      tab ??= own.find((t) => t.request) ?? own[0] ?? null;
+    }
     if (!tab) { res.status(404).json({ error: "tab_not_found", message: "这个标签页已经关闭或不属于该任务" }); return; }
     res.json({ tab });
   }));

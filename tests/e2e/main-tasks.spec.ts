@@ -558,7 +558,8 @@ test("audio and video in a report play where the report puts them, with cards on
 });
 test("a task that needs you in the browser shows why, hands you its own tab to operate and takes it back", async ({ page }, info) => {
     const row: Task = { ...task(1), title: "订餐厅", browser: { tabs: 1, request: "请登录 OpenTable 账号", human: false } };
-    const tab = { id: "t1", title: "OpenTable 登录", url: "https://www.opentable.com/signin", lastUsed: 1, finishedAt: null, holder: "ai" as "ai" | "human", request: { reason: "请登录 OpenTable 账号", at: 1 } as { reason: string; at: number } | null };
+    // A task tab's record title is its execution session's name, not the page's.
+    const tab = { id: "t1", title: "订餐厅（第一个任务）", url: "https://www.opentable.com/signin", lastUsed: 1, finishedAt: null, holder: "ai" as "ai" | "human", request: { reason: "请登录 OpenTable 账号", at: 1 } as { reason: string; at: number } | null };
     const controls: string[] = [];
     await page.route("**/api/tasks/task-1/browser", r => r.fulfill({ json: { tabs: [tab] } }));
     await page.route("**/api/tasks/task-1/browser/screenshot*", r => r.fulfill({ contentType: "image/png", body: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==", "base64") }));
@@ -589,7 +590,8 @@ test("a task that needs you in the browser shows why, hands you its own tab to o
     await card.getByRole("button", { name: "去浏览器操作", exact: true }).click();
     expect(controls).toEqual(["take"]);
     const panel = page.getByRole("dialog", { name: "操作任务页面" });
-    await expect(panel).toContainText("OpenTable 登录");
+    await expect(panel).toContainText("www.opentable.com/signin");
+    await expect(panel).not.toContainText("订餐厅（第一个任务）");
     await expect(panel.locator('iframe[title="沙箱桌面"]')).toHaveAttribute("src", /vnc\.html/);
     await expect.poll(() => acts).toEqual([{ tab: "t1", action: "focus" }]);
     expect(tickets.at(-1)).toContain("/vnc/vnc.html");
@@ -861,9 +863,11 @@ test("a running task's browser card keeps its tabs live but retakes the preview 
     await page.waitForTimeout(300);
     expect(shots).toBe(1);
     // The agent moved on: the next refresh shows the new page.
-    tab.title = "EXIF 说明"; tab.url = "https://example.org/exif";
+    tab.title = "查照片信息（第一个任务）"; tab.url = "https://example.org/exif";
     await page.clock.runFor(4_000);
-    await expect(card).toContainText("EXIF 说明");
+    // The card names the page by its address, not by the session that opened it.
+    await expect(card).toContainText("example.org/exif");
+    await expect(card).not.toContainText("查照片信息（第一个任务）");
     await expect.poll(() => shots).toBe(2);
     // Unchanged again, the preview is still retaken at the slower cadence.
     await page.clock.runFor(16_000);

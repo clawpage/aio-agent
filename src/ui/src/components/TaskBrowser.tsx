@@ -24,6 +24,20 @@ function host(url: string): string {
 }
 
 /**
+ * Where the tab is: host and path. A tab's record title is its execution session's
+ * name (the session's first task), which on a follow-up task's card reads as some
+ * other task's browser; the page's own address does not.
+ */
+function place(url: string): string {
+  try {
+    const u = new URL(url);
+    return u.pathname === "/" ? u.host : `${u.host}${u.pathname}`;
+  } catch {
+    return url;
+  }
+}
+
+/**
  * A task's browser, inside its card: a live preview of the tab its agent works
  * in, who is driving it, and the hand-over. Taking over shuts the agent out of
  * the task's own tab and opens a panel operating just that tab, until you hand
@@ -134,6 +148,8 @@ export function TaskBrowser({ task, onReveal }: { task: Task; onReveal: () => vo
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
+      // The agent may have replaced the tab shown here (or memory closed it): show what is there now.
+      void load(true);
       setBusy(false);
     }
   };
@@ -150,8 +166,7 @@ export function TaskBrowser({ task, onReveal }: { task: Task; onReveal: () => vo
       <div className="task-browser-head">
         <span className={`task-browser-state ${state}`}>{label}</span>
         <span className="task-browser-site" title={tab.url}>
-          {tab.title || host(tab.url)}
-          <span className="muted"> · {host(tab.url)}</span>
+          {place(tab.url)}
         </span>
         {tabs.length > 1 && <span className="muted tiny">{t.browser.task.tabCount(tabs.length)}</span>}
       </div>
@@ -159,7 +174,7 @@ export function TaskBrowser({ task, onReveal }: { task: Task; onReveal: () => vo
       {human && <p className="task-browser-hint">{live ? t.browser.task.pausedHint : t.browser.task.endedHint}</p>}
       {!shotFailed && (
         <button type="button" className="task-browser-shot" onClick={() => (human ? setConsoleOpen(true) : setWatching(true))} disabled={busy} aria-label={human ? t.browser.task.operateLabel : t.browser.task.viewLabel}>
-          <img src={api.taskBrowserScreenshotUrl(task.id, tab.id, shotAt)} alt={t.browser.task.shotAlt(tab.title || host(tab.url))} loading="lazy" onError={() => setShotFailed(true)} />
+          <img src={api.taskBrowserScreenshotUrl(task.id, tab.id, shotAt)} alt={t.browser.task.shotAlt(place(tab.url))} loading="lazy" onError={() => setShotFailed(true)} />
         </button>
       )}
       {error && <p className="error tiny">{error}</p>}
@@ -175,7 +190,7 @@ export function TaskBrowser({ task, onReveal }: { task: Task; onReveal: () => vo
       <PopupPresence>{((human && consoleOpen) || (!human && watching)) && (
         <TaskConsole
           target={consoleTarget}
-          tab={tab}
+          tab={{ ...tab, title: place(tab.url) }}
           watching={!human}
           label={human ? t.browser.task.consoleOperate : t.browser.task.consoleView}
           primary={human
