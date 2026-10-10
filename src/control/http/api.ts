@@ -702,9 +702,10 @@ export function createApiRouter(context: AppContext): Router {
     if (!dictation.enabled) { res.status(404).json({ error: "not_configured" }); return; }
     const text = typeof req.body?.text === "string" ? req.body.text.trim() : "";
     if (!text || text.length > DICTATION_MAX_CHARS) { res.status(400).json({ error: "bad_request" }); return; }
-    // The gadget's side of the timing: seconds recorded, ms to upload and transcribe them, and its previous send's round trip.
+    // The gadget's side of the timing (seconds recorded, ms to upload and transcribe them, its previous send's round trip) and its free PSRAM.
     const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? Math.round(v * 10) / 10 : undefined);
-    const gadget = { audioS: num(req.body?.audioS), asrMs: num(req.body?.asrMs), prevSendMs: num(req.body?.prevSendMs) };
+    const gadget = { audioS: num(req.body?.audioS), asrMs: num(req.body?.asrMs), prevSendMs: num(req.body?.prevSendMs),
+      psramKb: num(req.body?.psramKb), psramMinKb: num(req.body?.psramMinKb) };
     const started = Date.now();
     const out = await dictation.polish(text);
     const polishMs = Date.now() - started;
