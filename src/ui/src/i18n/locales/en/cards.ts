@@ -39,9 +39,9 @@ export const cards: typeof zh = {
     viewImage: (name: string) => `View larger image of ${name}`,
     was: (price: string) => `Was ${price}`,
     visit: "View",
-    list: "Products",
-    prev: "Previous products",
-    next: "Next products",
+    list: "Cards",
+    prev: "Previous",
+    next: "Next",
   },
   share: {
     defaultTitle: "Shared page",

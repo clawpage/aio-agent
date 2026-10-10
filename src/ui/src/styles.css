@@ -3712,6 +3712,13 @@ button.product-media { cursor: zoom-in; }
 .product-price strong { font-size: 18px; }
 .product-price s { font-size: 13px; color: var(--text-dim); }
 .product-meta { display: flex; gap: 10px; flex-wrap: wrap; font-size: 13px; color: var(--text-dim); }
+.product-tags { display: flex; gap: 4px; flex-wrap: wrap; }
+.product-tags span { padding: 1px 6px; font-size: 12px; line-height: 18px; color: var(--text-dim); background: var(--bg-raised); border: 1px solid var(--border); border-radius: 6px; }
+.product-text { margin: 0; font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
+.product-row .product-text { display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
+/* A photo (a place, an article, an event) fills its frame; product cut-outs stay whole on white. */
+.product-card.photo .product-media { background: var(--bg-raised); }
+.product-card.photo .product-media img { object-fit: cover; }
 .product-points { margin: 2px 0 0; padding-left: 18px; font-size: 13px; line-height: 1.5; }
 .product-note { margin: 0; font-size: 13px; color: var(--text-dim); line-height: 1.5; }
 .product-link {

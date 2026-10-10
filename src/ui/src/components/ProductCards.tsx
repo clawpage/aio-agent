@@ -44,9 +44,11 @@ function ProductCard({ item, onOpenLink, onOpenFile }: { item: Product; onOpenLi
   const local = item.image?.startsWith("/") ? item.image : null;
   // No picture, or one that could not be fetched: the card is laid out as text alone, never a stand-in image.
   const pictured = !!item.image && !picture.failed;
+  // A product photo is a cut-out on white, shown whole; any other picture (a place, an article) fills its frame.
+  const photo = !item.price && !item.was;
   const media = picture.url ? <img src={picture.url} alt={item.name} loading="lazy" /> : <span className="product-loading" aria-hidden="true" />;
   return (
-    <article ref={card} className={`product-card${pictured ? "" : " text-only"}`} role="listitem" aria-label={item.name}>
+    <article ref={card} className={`product-card${pictured ? "" : " text-only"}${photo ? " photo" : ""}`} role="listitem" aria-label={item.name}>
       {pictured && (local && onOpenFile && picture.url
         ? <button type="button" className="product-media" onClick={() => onOpenFile(local)} aria-label={t.cards.products.viewImage(item.name)}>{media}</button>
         : <div className="product-media">{media}</div>)}
@@ -61,25 +63,27 @@ function ProductCard({ item, onOpenLink, onOpenFile }: { item: Product; onOpenLi
             {item.was && <s aria-label={t.cards.products.was(item.was)}>{item.was}</s>}
           </div>
         )}
-        {(item.store || item.rating) && (
+        {(item.subtitle || item.rating) && (
           <div className="product-meta">
-            {item.store && <span>{item.store}</span>}
+            {item.subtitle && <span>{item.subtitle}</span>}
             {item.rating && <span>★ {item.rating}</span>}
           </div>
         )}
+        {item.tags.length > 0 && <div className="product-tags">{item.tags.map((tag, i) => <span key={i}>{tag}</span>)}</div>}
+        {item.text && <p className="product-text">{item.text}</p>}
         {item.points.length > 0 && <ul className="product-points">{item.points.map((p, i) => <li key={i}>{p}</li>)}</ul>}
         {item.note && <p className="product-note">{item.note}</p>}
         {item.url && (onOpenLink && isSandboxLink(item.url)
-          ? <button type="button" className="product-link" data-browser-link={item.url} onClick={() => onOpenLink(item.url!)}>{t.cards.products.visit}</button>
-          : <a className="product-link" href={item.url} target="_blank" rel="noopener noreferrer" onClick={event => { if (openNativeBrowser(item.url!)) event.preventDefault(); }}>{t.cards.products.visit}</a>)}
+          ? <button type="button" className="product-link" data-browser-link={item.url} onClick={() => onOpenLink(item.url!)}>{item.action ?? t.cards.products.visit}</button>
+          : <a className="product-link" href={item.url} target="_blank" rel="noopener noreferrer" onClick={event => { if (openNativeBrowser(item.url!)) event.preventDefault(); }}>{item.action ?? t.cards.products.visit}</a>)}
       </div>
     </article>
   );
 }
 
 /**
- * A ```products block: one card per item, its picture (when there is one) with what
- * matters for choosing. Several cards sit in one row that scrolls sideways; with a
+ * A ```cards (or ```products) block: one card per item, its picture (when there is
+ * one) with what matters about it. Several cards sit in one row that scrolls sideways; with a
  * mouse, arrows at the ends page through it.
  */
 export function ProductCards({ items, onOpenLink, onOpenFile }: { items: Product[]; onOpenLink?: (url: string) => void; onOpenFile?: (path: string) => void }) {

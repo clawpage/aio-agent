@@ -37,9 +37,9 @@ export const cards = {
     viewImage: (name: string) => `查看 ${name} 的大图`,
     was: (price: string) => `原价 ${price}`,
     visit: "去看看",
-    list: "商品",
-    prev: "上一组商品",
-    next: "下一组商品",
+    list: "图文卡片",
+    prev: "上一组",
+    next: "下一组",
   },
   share: {
     defaultTitle: "分享页面",

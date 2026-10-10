@@ -106,7 +106,7 @@ type MarkdownProps = {
 
 /**
  * A message: Markdown, with ```map blocks drawn as map cards, ```svg blocks as
- * pictures, ```mermaid blocks as diagrams, ```products blocks as product cards, ```choices blocks as answers
+ * pictures, ```mermaid blocks as diagrams, ```cards (or ```products) blocks as picture-and-text cards, ```choices blocks as answers
  * to tap and ```form blocks as forms to fill in, where they stand.
  */
 export function Markdown(props: MarkdownProps) {

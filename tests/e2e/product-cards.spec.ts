@@ -126,7 +126,7 @@ test("with a mouse, arrows page through a row of products that overflows", async
   await setup(page, `\`\`\`products\n${JSON.stringify(many)}\n\`\`\``);
   const track = page.locator(".product-track");
   await expect(page.getByRole("listitem").filter({ has: page.locator(".product-body") })).toHaveCount(6, { timeout: 60_000 });
-  const prev = page.getByRole("button", { name: "上一组商品" }), next = page.getByRole("button", { name: "下一组商品" });
+  const prev = page.getByRole("button", { name: "上一组" }), next = page.getByRole("button", { name: "下一组" });
   await expect(prev).toHaveCount(0);
   await expect(next).toBeVisible();
   await next.click();
@@ -154,4 +154,30 @@ test("a picture already shown is reused by the preview and a second showing, nev
   await card.getByRole("button", { name: /查看 .* 的大图/ }).click();
   await expect.poll(() => big.evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth)).toBe(2);
   expect(local).toEqual(["/home/gem/workspace/tasks/task-1/ultra2.jpg"]);
+});
+
+test("a cards block shows places and articles too: subtitle, labels, a line about it, and its own link label", async ({ page }, info) => {
+  const CARDS = [
+    { title: "计算机历史博物馆", image: "/home/gem/workspace/tasks/task-1/chm.jpg", subtitle: "Mountain View · 博物馆", tags: ["周六 10:00–17:00", "免费停车"], text: "从算盘到 AI 的计算机史，带娃逛两小时刚好。", points: ["展区不让推车，带背带"], url: "https://computerhistory.org/", action: "官网" },
+    { title: "AI 芯片的下一步", subtitle: "Stratechery · Ben Thompson", tags: ["15 分钟读完"], text: "为什么推理成本会决定下一轮芯片格局。", url: "https://stratechery.com/2026/ai-chips/", action: "阅读原文" },
+  ];
+  await setup(page, `下午可以去这里，路上读这篇：\n\n\`\`\`cards\n${JSON.stringify(CARDS)}\n\`\`\``);
+  const cards = page.getByRole("listitem").filter({ has: page.locator(".product-body") });
+  await expect(cards).toHaveCount(2, { timeout: 60_000 });
+  const place = cards.first();
+  await expect(place.locator(".product-name")).toHaveText("计算机历史博物馆");
+  await expect(place.locator(".product-meta")).toHaveText("Mountain View · 博物馆");
+  await expect(place.locator(".product-tags span")).toHaveText(["周六 10:00–17:00", "免费停车"]);
+  await expect(place.locator(".product-text")).toHaveText("从算盘到 AI 的计算机史，带娃逛两小时刚好。");
+  await expect(place.locator(".product-link")).toHaveText("官网");
+  await expect(cards.nth(1).locator(".product-link")).toHaveText("阅读原文");
+  // Not a product: no price row, and the photo fills its frame instead of sitting whole on white.
+  await expect(place).toHaveClass(/photo/);
+  await expect(place.locator(".product-price")).toHaveCount(0);
+  await expect.poll(() => place.locator(".product-media img").evaluate((img: HTMLImageElement) => img.complete && getComputedStyle(img).objectFit)).toBe("cover");
+  // A card without a picture is text alone.
+  await expect(cards.nth(1)).toHaveClass(/text-only/);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await place.scrollIntoViewIfNeeded();
+  await page.locator(".product-cards").last().screenshot({ path: info.outputPath("cards.png"), animations: "disabled" });
 });
