@@ -17,11 +17,15 @@ export function useKeyboardViewport() {
             const full = root.clientHeight;
             const scrolled = Math.max(window.scrollY, vv.offsetTop);
             const zoomed = Math.abs(vv.scale - 1) > 0.01;
-            let visible = Math.min(vv.height, full - scrolled);
+            const byScroll = full - scrolled;
+            let visible = Math.min(vv.height, byScroll);
             // Once the page is put back at the top a bar no longer shows as scroll: keep what was measured while typing.
             if (typing() && held !== null) visible = Math.min(visible, held);
             const keyboard = !zoomed && full - visible > 30 && (typing() || full - vv.height > 30);
-            held = keyboard && typing() ? visible : null;
+            // Only a measurement that came from the scroll is held. The visual viewport is read again each time:
+            // the Android app's web view reports a passing size while it shrinks for the keyboard (136px of 508),
+            // and holding that squeezed the page off screen.
+            held = keyboard && typing() ? (byScroll < vv.height ? visible : held) : null;
             if (keyboard) root.style.setProperty("--keyboard-viewport", `${Math.round(visible)}px`);
             else root.style.removeProperty("--keyboard-viewport");
             root.classList.toggle("keyboard-open", keyboard);

@@ -115,3 +115,28 @@ test("the owner generates, copies and revokes invite codes on the config page", 
   await expect(row).toContainText("已作废");
   await expect(row.getByRole("button", { name: "作废" })).toHaveCount(0);
 });
+
+test("the login card stays on screen when the Android app's web view shrinks for the keyboard", async ({ page }, info) => {
+  test.skip(!info.project.name.startsWith("mobile"));
+  await signedOut(page);
+  // A Galaxy Z Flip6 in CSS pixels.
+  await page.setViewportSize({ width: 360, height: 880 });
+  await page.goto("/");
+  const card = page.locator(".login-card");
+  await expect(card).toBeVisible();
+  await page.getByLabel("账号", { exact: true }).focus();
+  // As recorded on the phone: the app's web view shrinks to 508px, reporting a passing 136px on the way.
+  await page.setViewportSize({ width: 360, height: 508 });
+  await page.evaluate(() => {
+    const vv = window.visualViewport!;
+    Object.defineProperty(vv, "height", { configurable: true, value: 136 });
+    vv.dispatchEvent(new Event("resize"));
+    delete (vv as unknown as Record<string, unknown>).height;
+    vv.dispatchEvent(new Event("resize"));
+  });
+  await expect.poll(() => page.locator(".login").evaluate((n) => n.clientHeight)).toBe(508);
+  const top = await card.evaluate((n) => n.getBoundingClientRect().top);
+  expect(top).toBeGreaterThanOrEqual(0);
+  await expect(page.getByLabel("账号", { exact: true })).toBeInViewport();
+  await page.screenshot({ path: info.outputPath("login-keyboard.png") });
+});
