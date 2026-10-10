@@ -3364,23 +3364,23 @@ button.turn-pill:focus-visible { outline: 2px solid currentColor; outline-offset
 @media(max-width:900px) { .soul-settings textarea { font-size:16px; } }
 
 /* A task's browser inside its card: preview, who drives it, and the hand-over. */
-.task-browser { margin: 10px 0 4px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 14px; background: var(--bg-soft); min-width: 0; }
+.task-browser, .vault-card { margin: 10px 0 4px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 14px; background: var(--bg-soft); min-width: 0; }
 /* In a report (a column that sizes children to their content) a long unwrapped title would widen the card past the screen. */
-.task-report > .task-browser { align-self: stretch; box-sizing: border-box; max-width: 100%; }
-.task-browser.request, .task-browser.human { border-color: color-mix(in srgb,var(--you) 50%,var(--border)); background: var(--you-soft); }
-.task-browser-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; min-width: 0; font-size: 13px; }
-.task-browser-state { flex: none; padding: 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; background: var(--accent-soft); color: var(--accent); }
-.task-browser-state.request, .task-browser-state.human { background: color-mix(in srgb,var(--you) 20%,transparent); color: var(--you); }
+.task-report > .task-browser, .task-report > .vault-card { align-self: stretch; box-sizing: border-box; max-width: 100%; }
+.task-browser.request, .task-browser.human, .vault-card { border-color: color-mix(in srgb,var(--you) 50%,var(--border)); background: var(--you-soft); }
+.task-browser-head, .vault-card-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; min-width: 0; font-size: 13px; }
+.task-browser-state, .vault-card-state { flex: none; padding: 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; background: var(--accent-soft); color: var(--accent); }
+.task-browser-state.request, .task-browser-state.human, .vault-card-state { background: color-mix(in srgb,var(--you) 20%,transparent); color: var(--you); }
 .task-browser-state.done { background: transparent; color: var(--text-dim); border: 1px solid var(--border); }
-.task-browser-site { flex: 1 1 160px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.task-browser-reason { margin: 8px 0 0; font-size: 15px; line-height: 1.6; overflow-wrap: anywhere; }
-.task-browser-hint { margin: 8px 0 0; font-size: 12px; color: var(--text-dim); line-height: 1.6; }
+.task-browser-site, .vault-card-site { flex: 1 1 160px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.task-browser-reason, .vault-card-reason { margin: 8px 0 0; font-size: 15px; line-height: 1.6; overflow-wrap: anywhere; }
+.task-browser-hint, .vault-card-hint { margin: 8px 0 0; font-size: 12px; color: var(--text-dim); line-height: 1.6; }
 .task-browser-shot { display: block; width: 100%; margin: 8px 0 0; padding: 0; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; background: var(--bg); cursor: pointer; }
 .task-browser-shot img { display: block; width: 100%; max-height: 220px; object-fit: cover; object-position: top; }
-.task-browser .task-actions { margin-top: 8px; }
+.task-browser .task-actions, .vault-card .task-actions { margin-top: 8px; }
 /* On a wide screen the card stays page-shaped, not a strip across the feed: the picture shows the page, not its top edge. */
 @media (min-width: 901px) {
-  .task-browser, .task-report > .task-browser { align-self: flex-start; width: 100%; max-width: 520px; }
+  .task-browser, .task-report > .task-browser, .vault-card, .task-report > .vault-card { align-self: flex-start; width: 100%; max-width: 520px; }
   .task-browser-shot img { max-height: 420px; }
 }
 /* Its tab was closed: the page it last showed, kept as a snapshot that opens it again. */
@@ -3393,7 +3393,7 @@ button.turn-pill:focus-visible { outline: 2px solid currentColor; outline-offset
   -webkit-backdrop-filter: blur(10px) saturate(1.4); backdrop-filter: blur(10px) saturate(1.4);
 }
 /* The hand-over is the one action on the card: keep it a real, readable primary button. */
-.task-browser .task-actions button.primary, .task-console-head button.primary { padding: 6px 12px; background: var(--you); border-color: var(--you); color: var(--on-you); font-weight: 700; }
+.task-browser .task-actions button.primary, .vault-card .task-actions button.primary, .task-console-head button.primary { padding: 6px 12px; background: var(--you); border-color: var(--you); color: var(--on-you); font-weight: 700; }
 .task-console.watching .task-console-head { background: var(--ai-soft); border-bottom-color: color-mix(in srgb, var(--ai) 35%, var(--border)); }
 
 
@@ -3944,7 +3944,6 @@ button.map-card-switch { flex: 0 0 auto; padding: 4px 10px; }
 .schedule-weekdays label { display: inline-flex; align-items: center; gap: 3px; }
 .schedule-weekdays input { width: auto; margin: 0; }
 /* Password vault: the sign-in prompt on a task card, and the vault page. */
-.vault-prompt { margin-top: 2px; }
 .vault-saved { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
 .vault-saved button.primary { padding: 6px 12px; background: var(--you); border-color: var(--you); }
 .vault-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 8px 12px; margin-top: 10px; }

@@ -35,11 +35,14 @@ async function setup(page: Page, saved: VaultEntry[]) {
 
 const overflow = (page: Page) => page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
 
-test("a sign-in request asks for the account on the card, and only the outcome comes back", async ({ page }, info) => {
+test("a sign-in request asks for the account on the vault's own card, and only the outcome comes back", async ({ page }, info) => {
   const { logins } = await setup(page, []);
-  const card = page.getByRole("group", { name: "任务浏览器：需要登录" });
-  await expect(card.getByTestId("vault-prompt")).toContainText("www.opentable.com");
-  await expect(card.getByRole("button", { name: "去浏览器操作" })).toHaveCount(0);
+  const card = page.getByRole("group", { name: "登录 www.opentable.com" });
+  await expect(card).toContainText("www.opentable.com");
+  // Its own card beside the task's browser, not a part of it; the browser card keeps its hand-over.
+  const browser = page.getByRole("group", { name: "任务浏览器：需要登录" });
+  await expect(browser.getByTestId("vault-prompt")).toHaveCount(0);
+  await expect(browser.getByRole("button", { name: "去浏览器操作" })).toBeVisible();
   await card.getByLabel("账号", { exact: true }).fill("max@example.com");
   await card.getByLabel("密码", { exact: true }).fill("s3cret");
   await expect(card.getByLabel("密码", { exact: true })).toHaveAttribute("type", "password");
@@ -51,12 +54,12 @@ test("a sign-in request asks for the account on the card, and only the outcome c
   await expect(page.getByTestId("vault-prompt")).toHaveCount(0);
 });
 
-test("a saved account signs in with one tap; skipping hands the page over as before", async ({ page }) => {
+test("a saved account signs in with one tap; typing it yourself is the browser card's hand-over", async ({ page }) => {
   const saved: VaultEntry[] = [{ id: "vault_1", site: "opentable.com", method: "password", username: "max@example.com", createdAt: 1, updatedAt: 1, lastUsedAt: null }];
   const { logins, controls } = await setup(page, saved);
-  const card = page.getByRole("group", { name: "任务浏览器：需要登录" });
+  const card = page.getByRole("group", { name: "登录 www.opentable.com" });
   await expect(card.getByRole("button", { name: "用 max@example.com 登录" })).toBeVisible();
-  await card.getByRole("button", { name: "跳过，自己在浏览器里输入" }).click();
+  await page.getByRole("group", { name: "任务浏览器：需要登录" }).getByRole("button", { name: "去浏览器操作" }).click();
   await expect.poll(() => controls).toEqual(["take"]);
   expect(logins).toEqual([]);
 });
@@ -117,7 +120,7 @@ test("the vault page lists accounts, shows a password only when asked, and edits
 
 test("a site that signs in with Google is answered with one tap and saved without a password", async ({ page }) => {
   const { logins } = await setup(page, []);
-  const card = page.getByRole("group", { name: "任务浏览器：需要登录" });
+  const card = page.getByRole("group", { name: "登录 www.opentable.com" });
   await card.getByLabel("账号", { exact: true }).fill("max@gmail.com");
   await card.getByRole("button", { name: "用 Google 登录" }).click();
   await expect.poll(() => logins.length).toBe(1);
@@ -127,7 +130,7 @@ test("a site that signs in with Google is answered with one tap and saved withou
 test("a saved Google sign-in shows as one, on the card and on the vault page, with no password to show", async ({ page }, info) => {
   const google: VaultEntry = { id: "vault_g", site: "notion.so", method: "google", username: "", createdAt: 1, updatedAt: 1, lastUsedAt: null };
   const { logins } = await setup(page, [google]);
-  const card = page.getByRole("group", { name: "任务浏览器：需要登录" });
+  const card = page.getByRole("group", { name: "登录 www.opentable.com" });
   await card.getByRole("button", { name: "用 Google 登录", exact: true }).first().click();
   await expect.poll(() => logins).toEqual([{ tab: "t1", entryId: "vault_g" }]);
 

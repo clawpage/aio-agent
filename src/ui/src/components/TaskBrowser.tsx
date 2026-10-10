@@ -4,7 +4,6 @@ import { api } from "../api";
 import { t } from "../i18n";
 import type { Task, TaskTab } from "../types";
 import { TaskConsole, taskConsoleTarget } from "./TaskConsole";
-import { VaultPrompt } from "./VaultPrompt";
 
 const LIVE = new Set(["running", "stopping", "queued"]);
 const REFRESH_MS = 4000;
@@ -141,7 +140,7 @@ export function TaskBrowser({ task, onReveal }: { task: Task; onReveal: () => vo
 
   const waiting = Boolean(tab.request) && tab.holder === "ai";
   const human = tab.holder === "human";
-  // A sign-in the password vault can answer; everything else is for the person in the browser.
+  // A sign-in is answered on the vault's own card (VaultPrompt); here it is a request like any other.
   const signIn = waiting && tab.request!.kind === "login";
   const state = waiting ? "request" : human ? "human" : live ? "ai" : "done";
   const label = signIn ? t.browser.task.signIn : t.browser.task.states[state];
@@ -157,7 +156,6 @@ export function TaskBrowser({ task, onReveal }: { task: Task; onReveal: () => vo
         {tabs.length > 1 && <span className="muted tiny">{t.browser.task.tabCount(tabs.length)}</span>}
       </div>
       {waiting && !signIn && <p className="task-browser-reason">{tab.request!.reason}</p>}
-      {signIn && <VaultPrompt taskId={task.id} tab={tab} busy={busy} onDone={() => void load()} onManual={() => void control("take")} />}
       {human && <p className="task-browser-hint">{live ? t.browser.task.pausedHint : t.browser.task.endedHint}</p>}
       {!shotFailed && (
         <button type="button" className="task-browser-shot" onClick={() => (human ? setConsoleOpen(true) : setWatching(true))} disabled={busy} aria-label={human ? t.browser.task.operateLabel : t.browser.task.viewLabel}>
@@ -166,7 +164,7 @@ export function TaskBrowser({ task, onReveal }: { task: Task; onReveal: () => vo
       )}
       {error && <p className="error tiny">{error}</p>}
       <div className="task-actions">
-        {waiting && !signIn && <button type="button" className="primary tiny" disabled={busy} onClick={() => void control("take")}>{t.browser.task.takeOver}</button>}
+        {waiting && <button type="button" className={signIn ? "ghost tiny" : "primary tiny"} disabled={busy} onClick={() => void control("take")}>{t.browser.task.takeOver}</button>}
         {human && <>
           <button type="button" className="primary tiny" disabled={busy} onClick={() => void control("release")}>{live ? t.browser.task.handBack : t.browser.task.endViewing}</button>
           <button type="button" className="ghost tiny" onClick={() => setConsoleOpen(true)}>{t.browser.task.operate}</button>

@@ -48,6 +48,8 @@ export const vault: typeof zh = {
     cancel: "Cancel",
   },
   prompt: {
+    title: "Passwords",
+    cardLabel: (site: string) => `Sign in to ${site}`,
     reasonBefore: "Sign-in needed for ",
     reasonAfter: ". Save it once in Passwords: the AI only fills it into the page and never sees the password. If this site uses Google sign-in, just click \"Sign in with Google\"; no password needed.",
     outcome: {
@@ -66,6 +68,5 @@ export const vault: typeof zh = {
     filling: "Filling in…",
     fillAndSignIn: "Fill in and sign in",
     googleHint: "No password: the AI clicks the site's Google sign-in button, choosing the Gmail account if you entered one",
-    manual: "Skip, I'll type it in the browser",
   },
 };

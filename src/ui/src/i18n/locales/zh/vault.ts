@@ -46,6 +46,8 @@ export const vault = {
     cancel: "取消",
   },
   prompt: {
+    title: "密码器",
+    cardLabel: (site: string) => `登录 ${site}`,
     reasonBefore: "需要登录 ",
     reasonAfter: "。在密码器里填一次，AI 只负责把它填进页面，看不到密码；这个网站用 Google 登录的话直接点「用 Google 登录」，不用填密码。",
     outcome: {
@@ -64,6 +66,5 @@ export const vault = {
     filling: "正在填入…",
     fillAndSignIn: "填入并登录",
     googleHint: "不用密码：AI 点网站的 Google 登录按钮，账号栏填了 Gmail 就选那个账号",
-    manual: "跳过，自己在浏览器里输入",
   },
 };

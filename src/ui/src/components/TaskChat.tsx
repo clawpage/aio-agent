@@ -10,6 +10,7 @@ import { Markdown } from "./Markdown";
 import { ChoiceList } from "./ChoiceList";
 import { FilePreview } from "./FilePreview";
 import { TaskBrowser } from "./TaskBrowser";
+import { VaultPrompt } from "./VaultPrompt";
 import { TaskPhone } from "./TaskPhone";
 import { MessagePreview } from "./MessagePreview";
 import { ComposerAttachments, releasePreviews, useUploadTray, type PendingUpload } from "./ComposerAttachments";
@@ -431,7 +432,7 @@ export function TaskChat({ onDetails, onOpenLink, onOpenFileInBrowser, onExpired
             <span className="task-question-hint">{t.form ? i18n.feed.question.hintForm : t.options?.length ? i18n.feed.question.hintOptions : i18n.feed.question.hintText}</span>
           </div>}
           {!!t.messages?.length && ["running", "stopping"].includes(t.status) && <div className="task-intro task-messages">{t.messages.map((m, i) => <Markdown key={i} source={m} onOpenLink={onOpenLink} onOpenFile={setPreview}/>)}</div>}
-          {ownsBrowser(t) && <TaskBrowser task={t} onReveal={onRevealBrowser}/>}
+          {ownsBrowser(t) && <><VaultPrompt task={t}/><TaskBrowser task={t} onReveal={onRevealBrowser}/></>}
           {t.phone && !t.mergedInto && ["needs_input", "queued", "running", "stopping"].includes(t.status) && <TaskPhone task={t} onDone={() => void choose(t, i18n.feed.phoneDone)}/>}
           <TaskDuration task={t} now={now}/>
           {t.error && <p className="tiny">{t.error}</p>}
@@ -456,7 +457,7 @@ export function TaskChat({ onDetails, onOpenLink, onOpenFileInBrowser, onExpired
       {feed.map(({ task: t, report }) => report ? <article className={`msg assistant task-report ${t.status}`} key={`${t.id}:report`} data-task-id={t.id}>
         <div className="task-report-heading"><span>{t.title}</span>{t.schedule && <span className="schedule-badge">{i18n.feed.report.schedule(t.schedule.rule)}</span>}<span className="muted tiny">{labels[t.status]}</span></div>
         <MessagePreview title={t.title}><Markdown source={t.result || (t.status === "completed" ? i18n.feed.report.noResult : t.error || labels[t.status] || t.status)} onOpenLink={onOpenLink} onOpenFile={setPreview} choices={{ onChoose: option => void choose(t, option), chosen: choosing[`${t.id}:${t.revision}`] ?? replyTo(t)?.text ?? null }}/>{t.result && <MessageFileCards text={t.result} onOpen={setPreview} onOpenLink={onOpenLink}/>}{t.error && t.result && <p className="error">{t.error}</p>}</MessagePreview>
-        {ownsBrowser(t) && <TaskBrowser task={t} onReveal={onRevealBrowser}/>}
+        {ownsBrowser(t) && <><VaultPrompt task={t}/><TaskBrowser task={t} onReveal={onRevealBrowser}/></>}
         <div className="message-meta"><MessageTime at={t.completedAt} now={now}/><TaskDuration task={t} now={now}/></div>
         <div className="task-actions"><button className="ghost tiny" onClick={() => quoteTask(t)} aria-label={i18n.feed.actions.quoteLabel(t.title)}>{i18n.feed.actions.quote}</button><button className="ghost tiny" onClick={() => onDetails(t)}>{i18n.feed.actions.details}</button></div>
       </article> : <div className={`task-entry${adopted.current.has(t.id) ? " adopted" : ""}`} key={t.id} data-task-id={t.id}>
