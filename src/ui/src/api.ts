@@ -390,6 +390,8 @@ export function openEventStream(
     "conversation.created",
     "conversation.title_updated",
     "turn.queued",
+    // A supplement steered into the running turn, shown as the person's message.
+    "turn.input_appended",
     "turn.started",
     "turn.codex_started",
     "turn.finished",
