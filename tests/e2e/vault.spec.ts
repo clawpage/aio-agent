@@ -164,3 +164,22 @@ test("the vault page saves a site as Google sign-in, with no password field", as
   await expect(vault).toContainText("用 Google 登录（浏览器里已登录的账号）");
   expect(posted).toEqual([{ site: "figma.com", method: "google", username: "" }]);
 });
+
+test("editing an account far down the list opens its form where it is, on screen", async ({ page }, info) => {
+  const entries: VaultEntry[] = Array.from({ length: 20 }, (_, i) => ({ id: `vault_${i}`, site: `site-${i}.example`, method: "password" as const, username: `user${i}`, createdAt: i, updatedAt: i, lastUsedAt: null }));
+  await mockConsole(page, { conversations: [] });
+  await page.route("**/api/main*", (r) => r.fulfill({ json: { mode: "tasks", tasks: [], nextBefore: null } }));
+  await page.route("**/api/vault**", (r) => r.fulfill({ json: { entries, scripts: [] } }));
+  await page.goto("/");
+  if (info.project.name.startsWith("mobile")) await page.getByRole("button", { name: "打开导航" }).click();
+  await page.locator(".sidebar").getByRole("button", { name: "密码器", exact: true }).click();
+  const vault = page.getByRole("region", { name: "密码器" });
+  const last = vault.locator('[data-vault-id="vault_19"]');
+  await last.getByRole("button", { name: "修改" }).click();
+  const form = last.getByRole("form", { name: "修改账号" });
+  await expect(form.getByLabel("网站")).toHaveValue("site-19.example");
+  await expect(form).toBeInViewport();
+  await expect(vault.getByRole("form")).toHaveCount(1);
+  await form.getByRole("button", { name: "取消" }).click();
+  await expect(last.getByRole("button", { name: "修改" })).toBeVisible();
+});

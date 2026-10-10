@@ -69,25 +69,28 @@ export function VaultList({ active, onExpired }: { active: boolean; onExpired: (
     finally { setBusy(false); }
   };
 
+  // Editing happens where the account is in the list; a new account is added at the top.
+  const form = draft && <form className="vault-form vault-edit" aria-label={draft.id ? t.vault.list.edit : t.vault.list.add} onSubmit={(e) => { e.preventDefault(); void submit(); }}>
+      <label className="field"><span>{t.vault.form.site}</span><input value={draft.site} onChange={(e) => setDraft({ ...draft, site: e.target.value })} autoCapitalize="none" spellCheck={false} placeholder={t.vault.form.sitePlaceholder} /></label>
+      <label className="field"><span>{t.vault.form.method}</span><select value={draft.method} onChange={(e) => setDraft({ ...draft, method: e.target.value as Draft["method"] })}><option value="password">{t.vault.form.methodPassword}</option><option value="google">{t.vault.form.methodGoogle}</option></select></label>
+      <label className="field"><span>{draft.method === "google" ? t.vault.form.googleAccount : t.vault.form.account}</span><input value={draft.username} onChange={(e) => setDraft({ ...draft, username: e.target.value })} autoComplete="off" autoCapitalize="none" spellCheck={false} placeholder={draft.method === "google" ? t.vault.form.googlePlaceholder : t.vault.form.accountPlaceholder} /></label>
+      {draft.method === "password" && <label className="field"><span>{t.vault.form.password}</span><input type="password" value={draft.password} onChange={(e) => setDraft({ ...draft, password: e.target.value })} autoComplete="new-password" placeholder={draft.id && !draft.wasGoogle ? t.vault.form.keepPassword : ""} /></label>}
+      <div className="schedule-actions">
+        <button type="submit" className="primary tiny" disabled={busy || !draft.site.trim() || (draft.method === "password" && (!draft.id || draft.wasGoogle) && !draft.password)}>{t.vault.form.save}</button>
+        <button type="button" className="ghost tiny" onClick={() => setDraft(null)}>{t.vault.form.cancel}</button>
+      </div>
+    </form>;
+
   return <section className="schedule-page vault-page" aria-label={t.vault.list.title}>
     <header className="chat-head"><div className="chat-title"><h2>{t.vault.list.title}</h2><span className="task-list-sub muted tiny">{items ? t.vault.list.count(items.length) : t.vault.list.loading}</span></div></header>
     <div className="task-list-scroll">
       <p className="schedule-hint muted tiny">{t.vault.list.hint}</p>
       {error && <p className="banner error" role="alert">{error}</p>}
       {!draft && <div className="schedule-actions vault-add"><button type="button" className="ghost tiny" onClick={() => setDraft({ id: null, site: "", method: "password", username: "", password: "", wasGoogle: false })}>{t.vault.list.add}</button></div>}
-      {draft && <form className="vault-form vault-edit" aria-label={draft.id ? t.vault.list.edit : t.vault.list.add} onSubmit={(e) => { e.preventDefault(); void submit(); }}>
-        <label className="field"><span>{t.vault.form.site}</span><input value={draft.site} onChange={(e) => setDraft({ ...draft, site: e.target.value })} autoCapitalize="none" spellCheck={false} placeholder={t.vault.form.sitePlaceholder} /></label>
-        <label className="field"><span>{t.vault.form.method}</span><select value={draft.method} onChange={(e) => setDraft({ ...draft, method: e.target.value as Draft["method"] })}><option value="password">{t.vault.form.methodPassword}</option><option value="google">{t.vault.form.methodGoogle}</option></select></label>
-        <label className="field"><span>{draft.method === "google" ? t.vault.form.googleAccount : t.vault.form.account}</span><input value={draft.username} onChange={(e) => setDraft({ ...draft, username: e.target.value })} autoComplete="off" autoCapitalize="none" spellCheck={false} placeholder={draft.method === "google" ? t.vault.form.googlePlaceholder : t.vault.form.accountPlaceholder} /></label>
-        {draft.method === "password" && <label className="field"><span>{t.vault.form.password}</span><input type="password" value={draft.password} onChange={(e) => setDraft({ ...draft, password: e.target.value })} autoComplete="new-password" placeholder={draft.id && !draft.wasGoogle ? t.vault.form.keepPassword : ""} /></label>}
-        <div className="schedule-actions">
-          <button type="submit" className="primary tiny" disabled={busy || !draft.site.trim() || (draft.method === "password" && (!draft.id || draft.wasGoogle) && !draft.password)}>{t.vault.form.save}</button>
-          <button type="button" className="ghost tiny" onClick={() => setDraft(null)}>{t.vault.form.cancel}</button>
-        </div>
-      </form>}
+      {draft && !draft.id && form}
       {items && !items.length && !draft && <div className="empty"><h3>{t.vault.list.emptyTitle}</h3><p>{t.vault.list.emptyBody}</p></div>}
       <ul className="task-list">{(items ?? []).map((e) => <li key={e.id} data-vault-id={e.id}>
-        <div className="task-list-item schedule-item">
+        {draft?.id === e.id ? form : <div className="task-list-item schedule-item">
           <div className="task-list-top"><strong>{e.site}</strong><span className="muted tiny">{e.lastUsedAt ? t.vault.list.lastUsed(new Date(e.lastUsedAt).toLocaleDateString(locale)) : t.vault.list.neverUsed}</span></div>
           {e.method === "google"
             ? <p className="vault-row"><span className="muted tiny">{t.vault.list.method}</span><span className="vault-value vault-google">{t.vault.form.methodGoogle}{e.username ? t.vault.list.googleWith(e.username) : t.vault.list.googleBrowserAccount}</span></p>
@@ -105,7 +108,7 @@ export function VaultList({ active, onExpired }: { active: boolean; onExpired: (
               <button className="ghost tiny" onClick={() => setDraft({ id: e.id, site: e.site, method: e.method, username: e.username, password: "", wasGoogle: e.method === "google" })}>{t.vault.list.modify}</button>
               <button className="ghost tiny" onClick={() => setConfirm(e.id)}>{t.vault.list.delete}</button>
             </div>}
-        </div>
+        </div>}
       </li>)}</ul>
     </div>
   </section>;

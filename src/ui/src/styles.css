@@ -3955,6 +3955,8 @@ button.map-card-switch { flex: 0 0 auto; padding: 4px 10px; }
 .vault-save input[type="checkbox"] { flex: none; width: auto; min-width: 0; margin: 0; padding: 0; }
 .vault-edit { max-width: var(--page-max); margin: 0 auto 14px; padding: 12px; border: 1px solid var(--border); border-radius: 14px; background: var(--bg-soft); }
 .vault-add { max-width: var(--page-max); margin: 0 auto 12px; }
+/* Editing an account: the form takes the account's place in the list. */
+.task-list .vault-edit { margin: 0; }
 .vault-row { display: flex; align-items: baseline; gap: 10px; margin: 6px 0 0; min-width: 0; }
 .vault-row > .muted { flex: none; width: 2.5em; }
 /* English labels (Account, Password) are longer than two Chinese characters. */
