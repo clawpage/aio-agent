@@ -563,17 +563,6 @@ describe("main inbox delegation", () => {
         tasks.submit({text:"登好了",clientMessageId:"answer",relatedTaskId:parent.id});await tick();await tick();
         expect(released).toEqual([key]);
     });
-    it("drops an earlier answer's question once a supplement in the same turn has answered it",async()=>{
-        const job=submit("找臭豆腐");await tick();
-        const t=codex.startedTurns.at(-1)!;
-        const item=(i:Record<string,unknown>)=>codex.emitNotification("item/completed",{threadId:t.threadId,turnId:t.turnId,item:i});
-        item({id:"u0",type:"userMessage",content:[{type:"text",text:"prompt"}]});
-        item({id:"a1",type:"agentMessage",phase:"final_answer",text:"Kevin 账号里没找到。\n```ask_user\n{\"question\":\"请切换到睿账号\"}\n```"});
-        item({id:"u1",type:"userMessage",content:[{type:"text",text:"已切换"}]});
-        item({id:"a2",type:"agentMessage",phase:"final_answer",text:"在睿账号里找到了：老干妈臭豆腐"});
-        codex.completeTurn(t.turnId);await tick();
-        expect(tasks.get(job.id)).toMatchObject({status:"completed",result:"Kevin 账号里没找到。\n\n---\n\n在睿账号里找到了：老干妈臭豆腐"});
-    });
     it("folds supplements into a not-yet-dispatched task including attachments", async()=>{
         codex.plan=async()=>JSON.stringify({title:"shared",related:[],dependencies:[],resources:["write:/home/gem/workspace/projects/shared"]});
         submit("shared files busy");await tick();const parent=submit("plan trip");await tick();
@@ -661,18 +650,17 @@ describe("main inbox delegation", () => {
         expect(tasks.get(extra.id)?.merged_into).toBeNull();
         expect(codex.startedTurns[1]!.text).toContain("finished original");
     });
-    it("keeps the original request's answer when a supplement added mid-turn gets its own final answer",async()=>{
-        const job=submit("给予川写一首诗");await tick();
+    it("records the answer given after a mid-turn correction, not the one it overturned",async()=>{
+        const job=submit("规划明天下午带娃去计算机博物馆");await tick();
         const t=codex.startedTurns.at(-1)!;
         const item=(i:Record<string,unknown>)=>codex.emitNotification("item/completed",{threadId:t.threadId,turnId:t.turnId,item:i});
         item({id:"u0",type:"userMessage",content:[{type:"text",text:"prompt"}]});
-        item({id:"a1",type:"agentMessage",phase:"final_answer",text:"《寄予川》诗一首"});
-        // The supplement enters the turn as a user message, and is answered on its own.
-        item({id:"u1",type:"userMessage",content:[{type:"text",text:"予字什么意思"}]});
-        item({id:"c1",type:"agentMessage",phase:"commentary",text:"我查一下"});
-        item({id:"a2",type:"agentMessage",phase:"final_answer",text:"予：给予、我"});
+        item({id:"a1",type:"agentMessage",phase:"final_answer",text:"周日下午去：14:00 到"});
+        // "不是，就周六" arrives as the executor finishes; it answers again for Saturday.
+        item({id:"u1",type:"userMessage",content:[{type:"text",text:"不是，就周六"}]});
+        item({id:"a2",type:"agentMessage",phase:"final_answer",text:"改成周六下午去：14:00 到"});
         codex.completeTurn(t.turnId);await tick();
-        expect(tasks.get(job.id)).toMatchObject({status:"completed",result:"《寄予川》诗一首\n\n---\n\n予：给予、我"});
+        expect(tasks.get(job.id)).toMatchObject({status:"completed",result:"改成周六下午去：14:00 到"});
     });
     it("records only the last answer of a turn no supplement entered",async()=>{
         const job=submit("查天气");await tick();

@@ -766,7 +766,7 @@ export class TaskService {
                     const handed=await this.handBackTabs(this.executor(parent));
                     if(this.#closed) return;
                     const result=await this.agent.appendTurnInput(this.executor(parent),parent.turn_id,
-                        `${handed ? `用户发这条补充时，你请他接管的浏览器标签页（${handed} 个）还在他手里，现已自动交还给你，可以直接继续操作；确实还需要他亲手操作时再请求接管。\n\n` : ""}这是用户在 ${new Date(row.created_at).toLocaleTimeString("sv-SE", { hour: "2-digit", minute: "2-digit" })} 对当前任务的补充。原任务继续完成，不要因为这条补充放弃、中断或改做别的，除非补充明确要求停止或替换原任务；把补充合并进同一件事处理，不要当作独立任务。最终回复要同时包含原任务的结果和对这条补充的处理：原任务的答案如果已经发过，最终回复先简要重述原任务的结论，再回应补充。按用户要求自行使用所需的文件、浏览器和工具，不受派单资源提示限制。\n\n主会话最近的对话（按时间先后，▶ 是这条补充）：\n${formatTimeline(timeline(this.rows().filter(t => this.ownerId(t) === this.ownerId(row)), row, 6), Date.now(), plan.jev)}${plan.jev ? `\n\nJev 的逐任务相关性与路由建议（仅作背景）：\n${formatRelevance(plan.jev, id => this.get(id)) ?? "无"}` : ''}\n\n派单器的判断（仅作背景）：${JSON.stringify({title:plan.title,description:plan.description,decision:plan.decision})}${dependencies.length ? `\n\n补充所需的已完成任务资料：${JSON.stringify(dependencies.map(t => ({id:t!.id,result:t!.result?.slice(0,16000)})))}` : ''}\n\n本次用户补充：\n\n${row.input_text}`,
+                        `${handed ? `用户发这条补充时，你请他接管的浏览器标签页（${handed} 个）还在他手里，现已自动交还给你，可以直接继续操作；确实还需要他亲手操作时再请求接管。\n\n` : ""}这是用户在 ${new Date(row.created_at).toLocaleTimeString("sv-SE", { hour: "2-digit", minute: "2-digit" })} 对当前任务的补充（同一件事，不是新任务）。先弄清他的意思再接着做：纠正或改了条件（日期、地点、对象、数量等），就按新要求调整，基于旧条件的做法和结论作废；追加了要求或信息，就并进来一起完成；要你停下或改做别的，就照办。已经做好且仍然有效的部分不用重做。最终回复以最新要求为准、给出完整结果：之前发过且仍然有效的内容在最终回复里带上，已被推翻的不要再出现。按用户要求自行使用所需的文件、浏览器和工具，不受派单资源提示限制。\n\n主会话最近的对话（按时间先后，▶ 是这条补充）：\n${formatTimeline(timeline(this.rows().filter(t => this.ownerId(t) === this.ownerId(row)), row, 6), Date.now(), plan.jev)}${plan.jev ? `\n\nJev 的逐任务相关性与路由建议（仅作背景）：\n${formatRelevance(plan.jev, id => this.get(id)) ?? "无"}` : ''}\n\n派单器的判断（仅作背景）：${JSON.stringify({title:plan.title,description:plan.description,decision:plan.decision})}${dependencies.length ? `\n\n补充所需的已完成任务资料：${JSON.stringify(dependencies.map(t => ({id:t!.id,result:t!.result?.slice(0,16000)})))}` : ''}\n\n本次用户补充：\n\n${row.input_text}`,
                         JSON.parse(row.attachments_json),resources.includes("browser"));
                     if(this.#closed) return;
                     if(result==='browser_unavailable') this.db.prepare("UPDATE tasks SET status='merge_failed',error=? WHERE id=?").run('此补充需要浏览器，但浏览器暂未恢复；原任务仍可继续，请恢复浏览器后重新补充。',row.id);
@@ -946,26 +946,16 @@ export class TaskService {
         const messages = this.db.prepare("SELECT payload FROM events WHERE turn_id=? AND type='item/completed' ORDER BY id").all(row.turn_id) as {
             payload: string;
         }[];
-        const all = messages.map(m => JSON.parse(m.payload).item);
-        const items = all.filter(i => i?.type === "agentMessage" && typeof i.text === "string" && i.text.trim());
+        const items = messages.map(m => JSON.parse(m.payload).item).filter(i => i?.type === "agentMessage" && typeof i.text === "string" && i.text.trim());
+        // The last answer stands, also after a supplement mid-turn: the executor carries over
+        // what still holds from an earlier answer and drops what the supplement overturned.
         const last = items.filter(i => i.phase === "final_answer").at(-1) ?? items.at(-1);
-        // A supplement added mid-turn enters it as a user message. The final answer given before
-        // it (usually the original request's) is kept along with the last one, not overwritten.
-        const earlier: string[] = [];
-        let prompted = false, segment: string | null = null;
-        for (const i of all) {
-            // An earlier answer's question was answered by the supplement that followed it: keep the answer, not the question.
-            if (i?.type === "userMessage") { if (prompted && segment) earlier.push(segment.replace(/(?:^|\n)```ask_user\s*\n[\s\S]*?\n```\s*$/, "").trim()); prompted = true; segment = null; }
-            else if (i?.type === "agentMessage" && i.phase === "final_answer" && typeof i.text === "string" && i.text.trim()) segment = i.text.trim();
-        }
-        const kept = segment ? earlier.filter(Boolean) : [];
-        const withEarlier = (text: string | null) => kept.length && text ? [...kept, text].join("\n\n---\n\n") : text;
         const question = turn.status === "completed" && !row.schedule_id && last?.text ? executorQuestion(last.text) : null;
         const plan = question && row.plan_json ? JSON.parse(row.plan_json) as TaskPlan : null;
         if (plan && question) { plan.clarification = question.question; plan.options = question.options ?? undefined; plan.form = question.form ?? undefined; }
         const status = question ? "needs_input" : turn.status;
         this.db.prepare("UPDATE tasks SET status=?,result=?,error=?,completed_at=?,plan_json=COALESCE(?,plan_json) WHERE id=?")
-            .run(status, withEarlier(question ? question.result : last?.text ?? null), turn.error, turn.completed_at, plan ? JSON.stringify(plan) : null, row.id);
+            .run(status, question ? question.result : last?.text ?? null, turn.error, turn.completed_at, plan ? JSON.stringify(plan) : null, row.id);
         if (status === "completed") this.recordFeed(this.get(row.id)!);
         this.notifyChange(row.id, row.status);
     }
