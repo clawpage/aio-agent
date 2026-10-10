@@ -919,8 +919,9 @@ textarea:focus {
 .outgoing-upload.image { width: 96px; height: 96px; background: color-mix(in srgb, var(--text) 6%, transparent); }
 .outgoing-upload.image img { width: 100%; height: 100%; object-fit: cover; }
 .outgoing-upload.file { padding: 8px 34px 8px 12px; font-size: 13px; background: color-mix(in srgb, var(--bg-soft) 78%, transparent); }
-.outgoing-upload .tray-spinner { border-radius: 6px; box-shadow: 0 0 0 2px var(--media-ring); }
-.outgoing-upload.file .tray-spinner { left: auto; right: 10px; box-shadow: none; }
+/* Over a picture the sketch is white, like the other controls drawn over media. */
+:is(.tray-item.is-image, .outgoing-upload.image) .tray-spinner .loading-mark { color: var(--on-media); filter: drop-shadow(0 0 2px var(--media-ring)); }
+.outgoing-upload.file .tray-spinner { left: auto; right: 10px; }
 .outgoing-state { font-size: 12px; color: var(--text-dim); animation: skeleton-in 300ms ease-out 600ms both; }
 .outgoing-state.failed { color: var(--error); animation: none; }
 .outgoing-failed { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; margin-top: 6px; font-size: 13px; color: var(--error); }
@@ -961,42 +962,33 @@ textarea:focus {
 
 /*
  * The loading mark (Brand.tsx LoadingMark, and index.html before the script): the
- * mark drawn with ruler and compass, one 3.2 s construction on repeat. At rest it
- * is the finished mark, which is all a reduced-motion setting shows. The ruler and
- * compass are construction tools: shown only while drawing, and only when large.
+ * mark's outline sketched in one line, one 2.8 s drawing on repeat. The pen traces
+ * the frame, then the line, the station and the line on, and the centre lands last;
+ * a short rest, and it starts over. At rest it is the finished sketch, which is all
+ * a reduced-motion setting shows. One color, the brand's, or the text's in a button.
  */
-.loading-mark { display: block; flex: none; overflow: visible; }
-.loading-mark .lm-tile { fill: var(--brand-tile); }
-.loading-mark .lm-line { fill: none; stroke: var(--brand-line); stroke-width: 3.6; stroke-linecap: round; }
-.loading-mark .lm-ahead { opacity: .45; }
-.loading-mark .lm-station { fill: var(--brand-tile); stroke: var(--brand-line); stroke-width: 3; }
-.loading-mark .lm-stop { fill: var(--brand-stop); transform-box: fill-box; transform-origin: center; }
-.loading-mark .lm-ruler { fill: var(--brand-line); opacity: 0; }
-.loading-mark .lm-compass { fill: var(--brand-line); stroke: var(--brand-line); stroke-width: 1.2; stroke-linecap: round; opacity: 0; transform-origin: 20px 20px; }
-.loading-mark.small :is(.lm-ruler, .lm-compass) { display: none; }
+.loading-mark { display: block; flex: none; color: var(--ai); }
+button .loading-mark { color: inherit; }
+.loading-mark .lm-stroke { fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
+.loading-mark .lm-stop { fill: currentColor; transform-box: fill-box; transform-origin: center; }
 @media (prefers-reduced-motion: no-preference) {
-  .loading-mark :is(.lm-draw, .lm-ruler, .lm-travelled, .lm-ahead, .lm-station, .lm-stop, .lm-compass) {
-    animation: 3.2s var(--loading-phase, 0ms) infinite both;
-  }
-  /* Drawing is a dash (pathLength 1) sliding in; the finished ring goes back to a plain stroke, so its two ends leave no seam. */
-  .loading-mark :is(.lm-line, .lm-station) { stroke-dasharray: 1 2; }
-  .loading-mark .lm-draw { animation-name: lm-draw; }
-  .loading-mark .lm-ruler { animation-name: lm-ruler; }
-  .loading-mark .lm-travelled { animation-name: lm-travelled; }
-  .loading-mark .lm-ahead { animation-name: lm-ahead; }
-  .loading-mark .lm-station { animation-name: lm-station; }
-  .loading-mark .lm-stop { animation-name: lm-stop; }
-  .loading-mark .lm-compass { animation-name: lm-compass; }
+  .loading-mark :is(.lm-draw, .lm-stroke, .lm-stop) { animation: 2.8s var(--loading-phase, 0ms) infinite both linear; }
+  /* Each stroke is a dash (pathLength 1) the pen pulls along it, hidden until the pen gets there. */
+  .loading-mark .lm-stroke { stroke-dasharray: 1 2; }
+  .loading-mark .lm-frame { animation-name: lm-frame; animation-timing-function: cubic-bezier(.4, 0, .7, 1); }
+  .loading-mark .lm-in { animation-name: lm-in; }
+  .loading-mark .lm-ring { animation-name: lm-ring; }
+  .loading-mark .lm-out { animation-name: lm-out; }
+  .loading-mark .lm-stop { animation-name: lm-stop; animation-timing-function: ease-out; }
+  .loading-mark .lm-draw { animation-name: lm-draw; animation-timing-function: ease; }
 }
-/* 0–30%: the ruler lays the line; 28–58%: the compass turns once about the station;
-   62–72%: the centre lights; 70–78%: the stretch ahead fades; then a rest, and again. */
-@keyframes lm-ruler { 0% { opacity: 0; } 4%, 26% { opacity: .3; } 32%, 100% { opacity: 0; } }
-@keyframes lm-travelled { 0%, 5% { stroke-dashoffset: 1; } 16%, 100% { stroke-dashoffset: 0; } }
-@keyframes lm-ahead { 0%, 16% { stroke-dashoffset: 1; opacity: 1; } 27%, 70% { stroke-dashoffset: 0; opacity: 1; } 78%, 100% { stroke-dashoffset: 0; opacity: .45; } }
-@keyframes lm-compass { 0%, 24% { opacity: 0; transform: rotate(0deg); } 28% { opacity: .85; transform: rotate(0deg); animation-timing-function: ease-in-out; } 58% { opacity: .85; transform: rotate(360deg); } 64%, 100% { opacity: 0; transform: rotate(360deg); } }
-@keyframes lm-station { 0%, 28% { stroke-dashoffset: 1; stroke-dasharray: 1 2; fill-opacity: 0; animation-timing-function: ease-in-out; } 58% { stroke-dashoffset: 0; stroke-dasharray: 1 2; fill-opacity: 0; } 58.1%, 100% { stroke-dashoffset: 0; stroke-dasharray: none; } 62%, 100% { fill-opacity: 1; } }
-@keyframes lm-stop { 0%, 62% { transform: scale(0); } 68% { transform: scale(1.25); } 72%, 100% { transform: scale(1); } }
-@keyframes lm-draw { 0%, 90% { opacity: 1; } 97%, 100% { opacity: 0; } }
+/* Pen time: the frame 0–38%, the line in 38–42%, the station 42–62%, the line out 62–66%, the centre 66–76%, rest, fade. */
+@keyframes lm-frame { 0% { stroke-dashoffset: 1; } 38%, 100% { stroke-dashoffset: 0; } }
+@keyframes lm-in { 0%, 38% { stroke-dashoffset: 1; opacity: 0; } 38.01% { opacity: 1; } 42%, 100% { stroke-dashoffset: 0; opacity: 1; } }
+@keyframes lm-ring { 0%, 42% { stroke-dashoffset: 1; opacity: 0; } 42.01% { opacity: 1; } 62%, 100% { stroke-dashoffset: 0; opacity: 1; } }
+@keyframes lm-out { 0%, 62% { stroke-dashoffset: 1; opacity: 0; } 62.01% { opacity: 1; } 66%, 100% { stroke-dashoffset: 0; opacity: 1; } }
+@keyframes lm-stop { 0%, 66% { transform: scale(0); } 72% { transform: scale(1.3); } 76%, 100% { transform: scale(1); } }
+@keyframes lm-draw { 0%, 88% { opacity: 1; } 96%, 100% { opacity: 0; } }
 
 /* Loading inside a page or panel: the small mark and what it is waiting for, on one line. */
 .inline-loading { display: inline-flex; align-items: center; gap: 8px; color: var(--text-dim); }

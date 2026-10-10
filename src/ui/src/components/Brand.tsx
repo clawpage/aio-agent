@@ -18,16 +18,25 @@ export function BrandMark({ size = 28 }: { size?: number }) {
   );
 }
 
-/** One construction, in milliseconds; the same length as the `.loading-mark` animations in styles.css. */
-const LOADING_CYCLE_MS = 3200;
-/** Below this size the ruler and compass are too small to read: only the drawing shows. */
-const TOOLS_MIN_SIZE = 28;
+/** One drawing, in milliseconds; the same length as the `.loading-mark` animations in styles.css. */
+const LOADING_CYCLE_MS = 2800;
 
 /**
- * The console's one loading animation: the mark drawn with ruler and compass,
- * over and over. The ruler lays the line, the compass turns once about the
- * station to draw it, the amber centre lights, and the stretch ahead fades to
- * its faint shade. Every copy on the page runs on the document's clock, so two
+ * The mark's outline in the order one pen draws it: the tile's rounded frame
+ * from its left middle round, the line up to the station, the station's circle
+ * (from where the line meets it), and the line on past it. The centre is the
+ * last touch. Separate strokes, because a dash starts over at every pen lift.
+ */
+const STROKES = [
+  ["lm-frame", "M4 20V13A9 9 0 0 1 13 4H27A9 9 0 0 1 36 13V27A9 9 0 0 1 27 36H13A9 9 0 0 1 4 27Z"],
+  ["lm-in", "M9 20H13.2"],
+  ["lm-ring", "M13.2 20A6.8 6.8 0 1 1 26.8 20A6.8 6.8 0 1 1 13.2 20"],
+  ["lm-out", "M26.8 20H31"],
+] as const;
+
+/**
+ * The console's one loading animation: the mark sketched in a single line,
+ * over and over. Every copy on the page runs on the document's clock, so two
  * loaders (or the page before the script and the app after it) move as one.
  * index.html draws the same figure for the page before the script arrives.
  */
@@ -35,18 +44,10 @@ export function LoadingMark({ size = 44 }: { size?: number }) {
   const phase = typeof performance === "undefined" ? 0 : performance.now() % LOADING_CYCLE_MS;
   const style = { "--loading-phase": `-${Math.round(phase)}ms` } as CSSProperties;
   return (
-    <svg className={`loading-mark${size < TOOLS_MIN_SIZE ? " small" : ""}`} width={size} height={size} viewBox="0 0 40 40" style={style} aria-hidden="true">
-      <rect className="lm-tile" width="40" height="40" rx="11" />
+    <svg className="loading-mark" width={size} height={size} viewBox="0 0 40 40" style={style} aria-hidden="true">
       <g className="lm-draw">
-        <rect className="lm-ruler" x="5" y="22.6" width="30" height="2.6" rx="0.8" />
-        <path className="lm-line lm-travelled" d="M7 20H20" pathLength={1} />
-        <path className="lm-line lm-ahead" d="M20 20h13" pathLength={1} />
-        <circle className="lm-station" cx="20" cy="20" r="6.8" pathLength={1} />
-        <circle className="lm-stop" cx="20" cy="20" r="3.2" />
-        <g className="lm-compass">
-          <path d="M24.2 9.6 20 20M24.2 9.6 26.8 20" />
-          <circle cx="24.2" cy="9.6" r="1.3" />
-        </g>
+        {STROKES.map(([name, d]) => <path key={name} className={`lm-stroke ${name}`} d={d} pathLength={1} />)}
+        <circle className="lm-stop" cx="20" cy="20" r="2.6" />
       </g>
     </svg>
   );
