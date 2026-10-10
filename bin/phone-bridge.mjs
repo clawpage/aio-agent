@@ -590,6 +590,8 @@ async function serve() {
   };
   process.on("SIGTERM", shutdown);
   process.on("SIGINT", shutdown);
+  // However the bridge ends (its port taken, a crash), mobile-mcp goes with it instead of piling up orphaned.
+  process.on("exit", () => mcpChild?.kill("SIGTERM"));
 }
 
 if (process.argv[2] === "setup") {
