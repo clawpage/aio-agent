@@ -27,6 +27,15 @@ test("one task in progress: tapping the pill scrolls to its card", async ({ page
   await expect(page.getByRole("menu")).toBeHidden();
 });
 
+test("a feed update arriving during the jump does not pull the feed back to the latest message", async ({ page }) => {
+  await page.clock.install();
+  await setup(page, [{ title: "比较三款扫地机" }]);
+  await page.getByRole("button", { name: "1 件在办" }).click();
+  // The next poll lands while the smooth scroll is still on its way.
+  await page.clock.runFor(2600);
+  await expect.poll(() => inView(page, "task-1")).toBe(true);
+});
+
 test("several: the pill opens a small list; picking one scrolls to it and closes the list", async ({ page }, info) => {
   await setup(page, [{ title: "比较三款扫地机" }, { title: "订周末的餐厅", status: "queued" }, { title: "查 Amazon 订单", status: "needs_input", clarification: "要哪个地址？" }]);
   await expect(page.getByRole("button", { name: "1 件等你补充" })).toBeVisible();

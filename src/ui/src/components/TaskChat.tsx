@@ -149,11 +149,13 @@ export function TaskChat({ onDetails, onOpenLink, onOpenFileInBrowser, onExpired
     };
     // More than a screen above the latest message: offer the way back.
     const [away, setAway] = useState(false);
+    /** A jump to a card is under way: its first scroll steps are still near the bottom and must not stick the feed there again. */
+    const jumping = useRef(false);
     const onFeedScroll = (n: HTMLDivElement) => {
         // WebKit fires the resize's own scroll event before the observer runs: settle the resize first.
         if (!n.clientHeight) return;
         if (height.current || hidden.current) refit(n);
-        stick.current = n.scrollHeight - n.scrollTop - n.clientHeight < 80;
+        if (!jumping.current) stick.current = n.scrollHeight - n.scrollTop - n.clientHeight < 80;
         edge.current = n.scrollTop + n.clientHeight;
         setAway(n.scrollHeight - n.scrollTop - n.clientHeight > n.clientHeight);
     };
@@ -413,6 +415,12 @@ export function TaskChat({ onDetails, onOpenLink, onOpenFileInBrowser, onExpired
     const showWaiting = (id: string) => {
         const card = scroll.current?.querySelector<HTMLElement>(`[data-progress-for="${CSS.escape(id)}"]`);
         if (!card) return;
+        // Leaving the latest message on purpose: a feed update during the smooth scroll must not pull it back down.
+        stick.current = false;
+        jumping.current = true;
+        const landed = () => { jumping.current = false; };
+        scroll.current!.addEventListener("scrollend", landed, { once: true });
+        window.setTimeout(landed, 1200);
         card.scrollIntoView({ block: "center", behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
         card.classList.remove("attention");
         void card.offsetWidth;
