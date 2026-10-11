@@ -1,6 +1,4 @@
 export const feed = {
-  /** Shown in turn while the dispatcher decides where a message goes. */
-  dispatchHints: ["理解你的需求", "对照进行中和历史任务", "决定新开任务还是补充到已有任务"],
   waiting: {
     approvals: "等你确认",
     browser: "等你操作浏览器",
@@ -8,7 +6,7 @@ export const feed = {
     input: "等你补充",
   },
   status: {
-    planning: "正在分配",
+    planning: "在办",
     needs_input: "等待你补充",
     planning_failed: "分配失败",
     waiting: "等待依赖或资源",

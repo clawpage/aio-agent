@@ -803,26 +803,29 @@ test("an HTML page too large to preview inline opens in full in the person's own
     await expect(panel).toHaveCount(0);
     await expect(page.getByRole("button", { name: "预览 销售报表" })).toBeVisible();
 });
-test("dispatching shows a calm sorting animation and what the dispatcher weighs, and stays still for reduced motion", async ({ page }, info) => {
-    await setup(page, [{ ...task(1, "planning"), title: "帮我订周六晚上的餐厅" }]);
+test("planning and execution share the same in-progress card through a live transition", async ({ page }, info) => {
+    const { rows } = await setup(page, [{ ...task(1, "planning"), title: "帮我订周六晚上的餐厅" }]);
     await page.emulateMedia({ colorScheme: "light", reducedMotion: "no-preference" });
     const card = page.locator('[data-task-id="task-1"] .task-progress');
-    await expect(card.locator(".task-progress-label")).toHaveText("正在分配");
-    // Nothing has run yet: the card does not open empty details.
+    const label = card.locator(".task-progress-label");
+    await expect(label).toHaveText("在办");
+    await expect(card.locator(".dot")).toBeVisible();
+    await expect(card.locator(".dispatch-glyph, .task-dispatch-hint")).toHaveCount(0);
+    // No execution details exist until the task starts.
     await expect(page.getByRole("button", { name: /展开任务/ })).toHaveCount(0);
-    await expect(card.locator(".task-summary")).not.toContainText("›");
-    const glyph = card.locator(".dispatch-glyph i").first();
-    await expect(glyph).toBeVisible();
-    expect(await glyph.evaluate(n => getComputedStyle(n).animationName)).toBe("dispatch-sort");
-    const hint = card.locator(".task-dispatch-hint");
-    await expect(hint).toHaveText("理解你的需求");
-    await expect(hint).toHaveText("对照进行中和历史任务", { timeout: 5000 });
-    await page.screenshot({ path: info.outputPath("dispatching.png") });
-    expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
+    const before = await card.evaluate(n => ({ className: n.className, height: n.getBoundingClientRect().height }));
+    await page.screenshot({ path: info.outputPath("in-progress-planning.png") });
 
-    await page.emulateMedia({ reducedMotion: "reduce" });
-    expect(await glyph.evaluate(n => getComputedStyle(n).animationName)).toBe("none");
-    expect(await hint.locator("span").evaluate(n => getComputedStyle(n).animationName)).toBe("none");
+    Object.assign(rows[0]!, { status: "running", revision: 2 });
+    await expect(page.getByRole("button", { name: /展开任务/ })).toBeVisible();
+    await expect(label).toHaveText("在办");
+    const after = await card.evaluate(n => ({ className: n.className, height: n.getBoundingClientRect().height }));
+    expect(after.className).toBe(before.className);
+    expect(Math.abs(after.height - before.height)).toBeLessThanOrEqual(1);
+    await page.locator('[data-task-id="task-1"]').getByRole("button", { name: "停止该任务" }).click();
+    await expect(card).toHaveCount(0);
+    await expect(page.locator(".task-report")).toContainText("已停止");
+    expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
 });
 test("a finished task's browser card stays inside the screen, however long the page title", async ({ page }, info) => {
     const row: Task = { ...task(1, "completed"), title: "核查 Amazon Baby Registry 额度实际花在哪里", result: "查到了。", completedAt: 2000, browser: { tabs: 1, request: null, human: false } };

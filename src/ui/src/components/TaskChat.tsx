@@ -22,17 +22,6 @@ import { VoiceButton } from "./VoiceInput";
 import type {TaskFeed} from '../taskStatus';
 import { t as i18n } from "../i18n";
 const terminal = new Set(["completed", "failed", "interrupted", "unknown"]);
-/** What the dispatcher does with every message; shown in turn while it decides, not as live progress. */
-const DISPATCH_HINTS = i18n.feed.dispatchHints;
-const HINT_MS = 1800;
-function DispatchHint() {
-    const [i, setI] = useState(0);
-    useEffect(() => {
-        const timer = window.setInterval(() => setI(n => (n + 1) % DISPATCH_HINTS.length), HINT_MS);
-        return () => window.clearInterval(timer);
-    }, []);
-    return <p className="task-dispatch-hint"><span key={i}>{DISPATCH_HINTS[i]}</span></p>;
-}
 /** Whose move it is: the person's (amber), the AI's (indigo), or stuck on an error (red). */
 function turnOf(t: Task): "you" | "ai" | "err" {
     if (t.approvals || t.browser?.request || t.status === "needs_input" || t.status === "blocked") return "you";
@@ -427,17 +416,14 @@ export function TaskChat({ onDetails, onOpenLink, onOpenFileInBrowser, onExpired
         card.classList.add("attention");
         window.setTimeout(() => card.classList.remove("attention"), 1800);
     };
-    const renderProgress = (t: Task) => <div data-progress-for={t.id} className={`task-progress turn-${turnOf(t)} ${t.status === "running" || t.status === "planning" ? "active" : ""} ${t.status === "planning" ? "planning" : ""} ${t.status === "needs_input" ? "needs-input" : ""}`}>
+    const renderProgress = (t: Task) => <div data-progress-for={t.id} className={`task-progress turn-${turnOf(t)} ${t.status === "running" || t.status === "planning" ? "active" : ""} ${t.status === "needs_input" ? "needs-input" : ""}`}>
           {(() => {
-            const summary = <>{t.status === "planning"
-              ? <span className="dispatch-glyph" aria-hidden="true"><i/><i/><i/></span>
-              : <span className={`dot ${t.approvals || t.browser?.request ? "warn" : ""}`}/>}<span className="task-progress-label" key={t.status}>{t.approvals ? i18n.feed.progress.needsConfirm : t.browser?.request && t.status === "running" ? i18n.feed.progress.needsBrowser : t.waitReason?.label ?? labels[t.status] ?? t.status}</span><span className="task-progress-title">{t.title}</span></>;
+            const summary = <><span className={`dot ${t.approvals || t.browser?.request ? "warn" : ""}`}/><span className="task-progress-label">{t.approvals ? i18n.feed.progress.needsConfirm : t.browser?.request && t.status === "running" ? i18n.feed.progress.needsBrowser : t.waitReason?.label ?? labels[t.status] ?? t.status}</span><span className="task-progress-title">{t.title}</span></>;
             // Still being dispatched (or dispatch failed): nothing has run yet, so there are no details to open.
             return t.status === "planning" || t.status === "planning_failed"
               ? <div className="task-summary">{summary}</div>
               : <button className="task-summary" onClick={() => onDetails(t)} aria-label={i18n.feed.progress.expand(t.title)}>{summary}<span aria-hidden>›</span></button>;
           })()}
-          {t.status === "planning" && <DispatchHint/>}
           {t.waitReason && <p className="task-intro task-wait-reason">{t.waitReason.message}</p>}
           {/* What the executor wrote before its question (a draft to review, what it found so far): the question is about it. */}
           {t.status === "needs_input" && t.result && <div className="task-question-context"><MessagePreview title={t.title}><Markdown source={t.result} onOpenLink={onOpenLink} onOpenFile={setPreview}/><MessageFileCards text={t.result} onOpen={setPreview} onOpenLink={onOpenLink}/></MessagePreview></div>}
@@ -497,7 +483,7 @@ export function TaskChat({ onDetails, onOpenLink, onOpenFileInBrowser, onExpired
         </MessagePreview></article>
         {o.state === "failed"
           ? <div className="outgoing-failed" role="alert"><span>{o.error ?? i18n.feed.outgoing.failed}</span><button type="button" className="ghost tiny" onClick={() => retry(o.id)}>{i18n.feed.outgoing.retry}</button><button type="button" className="ghost tiny" onClick={() => edit(o.id)}>{i18n.feed.outgoing.edit}</button></div>
-          : <div className="task-progress turn-ai active planning"><div className="task-summary"><span className="dispatch-glyph" aria-hidden="true"><i/><i/><i/></span><span className="task-progress-label">{labels.planning}</span></div><DispatchHint/></div>}
+          : <div className="task-progress turn-ai active"><div className="task-summary"><span className="dot"/><span className="task-progress-label">{labels.running}</span></div></div>}
       </div>)}
     </div>
     <div className="feed-latest-anchor">{waiting.length > 0 && <div className="needs-you" role="group" aria-label={i18n.feed.needsYou.label}>{waiting.map(t => <button type="button" key={t.id} className="needs-you-bubble" onClick={() => showWaiting(t.id)} aria-label={i18n.feed.needsYou.bubble(waitingLabel(t), t.title)}><span className="needs-you-dot" aria-hidden="true"/><span className="needs-you-kind">{waitingLabel(t)}</span><span className="needs-you-title">{t.title}</span></button>)}</div>}<button type="button" className={`feed-latest${away ? " show" : ""}`} aria-label={i18n.feed.toLatest} title={i18n.feed.toLatest} aria-hidden={!away} tabIndex={away ? 0 : -1} onClick={toLatest}><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 5v14M6 13l6 6 6-6"/></svg></button></div>

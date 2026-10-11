@@ -1,7 +1,6 @@
 import type { feed as zh } from "../zh/feed";
 
 export const feed: typeof zh = {
-  dispatchHints: ["Understanding your request", "Checking active and past tasks", "Deciding: a new task or an addition to an existing one"],
   waiting: {
     approvals: "Needs your OK",
     browser: "Needs you in the browser",
@@ -9,7 +8,7 @@ export const feed: typeof zh = {
     input: "Needs your input",
   },
   status: {
-    planning: "Assigning",
+    planning: "In progress",
     needs_input: "Waiting for your input",
     planning_failed: "Assignment failed",
     waiting: "Waiting on dependencies or resources",

@@ -40,10 +40,10 @@ test("a sent message is on screen at once, the composer free, and its task takes
   const { bodies, answer } = await setup(page);
   await box(page).fill("帮我查明天的天气");
   await page.getByRole("button", { name: "发送", exact: true }).click();
-  // Before the server has answered: the message, the dispatch card, an empty composer.
+  // Before the server has answered: the message, the in-progress card, an empty composer.
   const outgoing = page.locator(".task-entry.outgoing");
   await expect(outgoing).toContainText("帮我查明天的天气", { timeout: 500 });
-  await expect(outgoing.locator(".task-progress")).toContainText("正在分配");
+  await expect(outgoing.locator(".task-progress")).toContainText("在办");
   await expect(box(page)).toHaveValue("");
   await expect(box(page)).toBeEditable();
   await page.screenshot({ path: info.outputPath("sending.png") });
