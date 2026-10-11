@@ -96,6 +96,65 @@ The team is a personal (free) team, so the profile expires after 7 days and the 
 opening until it is rebuilt and installed again. The first time, the phone has to trust the developer
 in Settings → General → VPN & Device Management.
 
+## Android release signing
+
+Google Play requires a signed Android App Bundle (AAB) for a new app. The APK is
+for direct installation; Play App Signing signs the APKs delivered by Google.
+See [Tauri Android signing](https://v2.tauri.app/distribute/sign/android/) and
+[Play App Signing](https://support.google.com/googleplay/android-developer/answer/9842756).
+
+Set `AIO_ANDROID_KEYSTORE_PROPERTIES` to an absolute path to a private properties
+file with `keyAlias`, `password` (the keystore and key password), and `storeFile`
+(absolute keystore path). Keep both files outside the generated project, for
+example under the repository's ignored `var/android-signing/`, with directory
+mode 0700 and file mode 0600. Back up the upload key and properties securely;
+reuse the same key for updates. Do not put credentials in commands, logs or Git.
+Debug builds keep the usual Android debug key. Without this environment variable,
+release builds are unsigned.
+
+From this directory, with the toolchain environment above:
+
+```bash
+export AIO_ANDROID_KEYSTORE_PROPERTIES=/absolute/private/path/keystore.properties
+env -u NODE_ENV npm run -- tauri android build --target aarch64 --apk --aab
+```
+
+This builds arm64 only. Omit `--target aarch64` to build all configured Android
+architectures. Outputs are under `src-tauri/gen/android/app/build/outputs/`:
+`apk/universal/release/app-universal-release.apk` and
+`bundle/universalRelease/app-universal-release.aab`. Verify the APK with
+`apksigner verify --verbose --print-certs`, the AAB with `jarsigner -verify`, and
+native ZIP alignment with `zipalign -c -P 16 -v 4`. The ELF LOAD segments must also
+align to at least 16 KB. Keep the package identifier stable and increase the
+Android version code for subsequent Play uploads.
+
+A release certificate cannot update an installed debug-signed package. Preserve
+the phone's data when validating: use a test copy re-signed with its existing
+debug certificate, and compare every non-signature ZIP entry with the signed
+release APK. This validates release content on the device, but not installation
+of a Google Play-signed APK; final acceptance still requires a Play test track.
+
+## Verified (2026-10-11)
+
+Galaxy Z Flip6 (Android 16), current native shell, version 0.1.0 / Android code
+1000, arm64. Debug build: existing owner login, config header/status-bar separation,
+navigation, workspace browser and terminal. Optimized release content (re-signed
+with the installed debug certificate, all 628 non-signature ZIP entries identical
+to the upload-signed APK): cold start retained login, task list/detail, keyboard
+input and draft cleanup, public URL opened in Chrome Custom Tab and returned,
+system attachment picker opened and cancelled, microphone runtime permission,
+recording and stopping. With no intelligible speech, transcription returned the
+expected retry notice; real spoken transcription was not verified. A controlled
+message requesting only `ANDROID_OK` completed and its reply appeared in the task
+detail. No `DEBUGGABLE` package flag on the release test build.
+
+The upload-signed APK and AAB passed `apksigner` / `jarsigner` verification;
+APK ZIP alignment and every native ELF LOAD segment passed 16 KB alignment
+checks. Type checking, 986 Vitest tests and 93 Python checks passed. Camera,
+download handling, offline fallback, rotation/folding and Play-delivered
+installation remain unverified. Publishing still depends on Play Console account
+eligibility and the store's listing/content/reviewer-access requirements.
+
 ## Verified (2026-10-06)
 
 Voice input. Android 15 emulator: the system "record audio" prompt, recording, and

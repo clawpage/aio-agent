@@ -14,6 +14,13 @@ val tauriProperties = Properties().apply {
     }
 }
 
+// Keep upload keys outside the generated project and source control. Debug builds
+// continue to use Android's debug key; an unset path leaves release builds unsigned.
+val signingPropertiesPath = providers.environmentVariable("AIO_ANDROID_KEYSTORE_PROPERTIES").orNull
+val signingProperties = signingPropertiesPath?.let { path ->
+    Properties().apply { file(path).inputStream().use { load(it) } }
+}
+
 android {
     compileSdk = 37
     namespace = "com.mengxiao.aioagent"
@@ -24,6 +31,16 @@ android {
         targetSdk = 37
         versionCode = tauriProperties.getProperty("tauri.android.versionCode", "1").toInt()
         versionName = tauriProperties.getProperty("tauri.android.versionName", "1.0")
+    }
+    if (signingProperties != null) {
+        signingConfigs {
+            create("release") {
+                keyAlias = signingProperties.getProperty("keyAlias")
+                keyPassword = signingProperties.getProperty("password")
+                storeFile = file(requireNotNull(signingProperties.getProperty("storeFile")))
+                storePassword = signingProperties.getProperty("password")
+            }
+        }
     }
     buildTypes {
         getByName("debug") {
@@ -39,6 +56,9 @@ android {
             }
         }
         getByName("release") {
+            if (signingProperties != null) {
+                signingConfig = signingConfigs.getByName("release")
+            }
             optimization {
                enable = true
             }
