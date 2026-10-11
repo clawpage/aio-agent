@@ -31,6 +31,7 @@ import { UNSAFE_METHODS, guardUnsafe, originAllowed } from "./security.js";
 import { BOOTSTRAP_USERNAME, authenticateUser, getUser } from "../auth/owner.js";
 import { RegisterError, createInvite, listInvites, registerWithInvite, revokeInvite } from "../auth/invites.js";
 import { googleRouter } from "../auth/googleRoutes.js";
+import { createSupportRequest, reviewSupportRequest, supportQueue, SupportError } from '../support.js';
 import { parseHttpUrl } from "../aio/client.js";
 import { COOKIE_NAMES, clearSessionCookies, sessionCookies } from "../auth/sessions.js";
 import { safeRedirectPath } from "../auth/tickets.js";
@@ -249,6 +250,37 @@ export function createApiRouter(context: AppContext): Router {
   });
 
   // ------------------------------------------------------------------ auth
+  // Public requests need a same-site Origin even without a signed-in session.
+  // The bounded IP bucket is transient and does not write contact/IP data to logs.
+  const publicRequests = new Map<string, { since: number; count: number }>();
+  router.post('/support/requests', requireKind('primary'), asyncHandler(async (req, res) => {
+    const ctx = ctxOf(req);
+    if (!ctx.origin || !originAllowed(cfg, ctx.kind, ctx.origin)) { res.status(403).json({error:'origin_denied'}); return; }
+    if (!ctx.session) {
+      const now = Date.now();
+      for (const [key, value] of publicRequests) if (now - value.since > 3600000) publicRequests.delete(key);
+      const bucket = publicRequests.get(ctx.ip) ?? {since: now, count: 0};
+      if (bucket.count >= 4 || publicRequests.size >= 1000 && !publicRequests.has(ctx.ip)) { res.status(429).json({error:'rate_limited',message:'提交过于频繁，请稍后再试'}); return; }
+      bucket.count++; publicRequests.set(ctx.ip, bucket);
+    }
+    try {
+      const userId = ctx.session?.ownerId ?? null;
+      const taskDb = req.body?.kind === 'content' && userId && context.runtimeForUser ? (await context.runtimeForUser(userId)).db : db;
+      if (ctx.session && !sessions.isLive(ctx.session.id)) { res.status(401).json({error:'unauthenticated'}); return; }
+      const id = createSupportRequest(db, userId, req.body ?? {}, Date.now(), taskDb);
+      res.status(201).json({id});
+    } catch (err) {
+      if (!(err instanceof SupportError)) throw err;
+      res.status(err.status).json({error:err.code,message:err.message});
+    }
+  }));
+  router.get('/settings/support', requireKind('primary'), requireSession, (_req, res) => {
+    res.setHeader('Cache-Control','no-store'); res.json({requests:supportQueue(db)});
+  });
+  router.post('/settings/support/:id/review', requireKind('primary'), requireSession, (req, res) => {
+    try { reviewSupportRequest(db, param(req,'id'), req.body?.decision); res.json({ok:true}); }
+    catch (err) { if (!(err instanceof SupportError)) throw err; res.status(err.status).json({error:err.code,message:err.message}); }
+  });
   router.use("/auth/google", googleRouter(context));
   router.get('/usage', requireKind('primary'), requireSession, asyncHandler(async (req, res) => {
     const days = req.query.days === undefined ? 30 : Number(req.query.days);

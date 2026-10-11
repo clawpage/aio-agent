@@ -1,3 +1,4 @@
+import { SupportDialog } from './Support';
 import { BootCover, InlineLoading, LoadingMark } from "./Brand";
 import { createPortal } from "react-dom";
 import { ComposerIcon, useComposerHeight } from "./ComposerControls";
@@ -442,9 +443,11 @@ export function TaskChat({ onDetails, onOpenLink, onOpenFileInBrowser, onExpired
           {t.error && <p className="tiny">{t.error}</p>}
           <div className="task-actions"><button className="ghost tiny" onClick={() => quoteTask(t)} aria-label={i18n.feed.actions.quoteLabel(t.title)}>{i18n.feed.actions.quote}</button>{t.status === "planning_failed" ? <button className="ghost tiny" onClick={() => void act(() => api.retryTaskPlanning(t.id))}>{i18n.feed.actions.retryPlanning}</button> : t.status === "blocked" ? null : <button className="ghost tiny" disabled={t.status === "stopping"} onClick={() => void act(() => api.stopTask(t.id))}>{i18n.feed.actions.stop}</button>}</div>
         </div>;
+    const [reportedTask, setReportedTask] = useState<string | null>(null);
     const feed = tasks.flatMap(t => [{ task: t, report: false, at: t.createdAt }, ...(!t.mergedInto && terminal.has(t.status) ? [{ task: t, report: true, at: t.completedAt ?? t.createdAt }] : [])])
         .sort((a, b) => a.at - b.at || Number(a.report) - Number(b.report) || a.task.id.localeCompare(b.task.id));
     return <section className="chat task-chat">
+    {reportedTask && <SupportDialog taskId={reportedTask} onClose={() => setReportedTask(null)}/>}
     <header className="chat-head"><div className="chat-title"><h2>{i18n.feed.head.title}</h2><span className={`dot ${connected ? "ok" : "warn"}`}/><span className="chat-sub">{active.length || awaiting.length
         ? <TurnPills onJump={showWaiting} groups={[
             { key: "input", tone: "you", label: i18n.feed.head.awaitingInput(awaiting.length), tasks: awaiting, state: waitingLabel },
@@ -462,6 +465,7 @@ export function TaskChat({ onDetails, onOpenLink, onOpenFileInBrowser, onExpired
       {feed.map(({ task: t, report }) => report ? <article className={`msg assistant task-report ${t.status}`} key={`${t.id}:report`} data-task-id={t.id}>
         <div className="task-report-heading"><span>{t.title}</span>{t.schedule && <span className="schedule-badge">{i18n.feed.report.schedule(t.schedule.rule)}</span>}<span className="muted tiny">{labels[t.status]}</span></div>
         <MessagePreview title={t.title}><Markdown source={t.result || (t.status === "completed" ? i18n.feed.report.noResult : t.error || labels[t.status] || t.status)} onOpenLink={onOpenLink} onOpenFile={setPreview} choices={{ onChoose: option => void choose(t, option), chosen: choosing[`${t.id}:${t.revision}`] ?? replyTo(t)?.text ?? null }}/>{t.result && <MessageFileCards text={t.result} onOpen={setPreview} onOpenLink={onOpenLink}/>}{t.error && t.result && <p className="error">{t.error}</p>}</MessagePreview>
+        {t.result && <button className="ghost tiny report-response" onClick={() => setReportedTask(t.id)}>{i18n.support.report}</button>}
         {ownsBrowser(t) && <><VaultPrompt task={t}/><TaskBrowser task={t} onReveal={onRevealBrowser}/></>}
         <div className="message-meta"><MessageTime at={t.completedAt} now={now}/><TaskDuration task={t} now={now}/></div>
         <div className="task-actions"><button className="ghost tiny" onClick={() => quoteTask(t)} aria-label={i18n.feed.actions.quoteLabel(t.title)}>{i18n.feed.actions.quote}</button><button className="ghost tiny" onClick={() => onDetails(t)}>{i18n.feed.actions.details}</button></div>

@@ -1,3 +1,4 @@
+import { SupportSettings } from './Support';
 import { InlineLoading } from "./Brand";
 import {SoulSettings} from './SoulSettings';
 import { RecallSettings } from './RecallSettings';
@@ -289,6 +290,7 @@ export function Settings({ onBack, onSaved }: Props) {
         </section>
 
         <InviteSettings />
+        <SupportSettings/>
         <RecallSettings />
         <LanguageSettings />
         <DebugSettings />

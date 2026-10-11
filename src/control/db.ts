@@ -83,6 +83,24 @@ CREATE TABLE IF NOT EXISTS google_login_flows (
   ticket_hash TEXT UNIQUE
 );
 
+-- Requests are reviewed by the operator, never executed as agent instructions.
+CREATE TABLE IF NOT EXISTS support_requests (
+  id TEXT PRIMARY KEY,
+  owner_id TEXT REFERENCES owners(id) ON DELETE SET NULL,
+  kind TEXT NOT NULL CHECK(kind IN ('content','deletion','privacy')),
+  email TEXT NOT NULL DEFAULT '',
+  username TEXT NOT NULL DEFAULT '',
+  task_id TEXT,
+  title TEXT NOT NULL DEFAULT '',
+  content TEXT NOT NULL DEFAULT '',
+  note TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending',
+  decision TEXT,
+  created_at INTEGER NOT NULL,
+  reviewed_at INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_support_owner ON support_requests(owner_id,created_at);
+
 CREATE TABLE IF NOT EXISTS conversations (
   id TEXT PRIMARY KEY,
   owner_id TEXT NOT NULL,

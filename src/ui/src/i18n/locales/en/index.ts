@@ -1,3 +1,4 @@
+import { support } from './support';
 import type { Messages } from "../zh";
 import { common } from "./common";
 import { app } from "./app";
@@ -20,4 +21,4 @@ import { vault } from "./vault";
 import { files } from "./files";
 import { cards } from "./cards";
 
-export const en: Messages = { common, app, auth, nav, time, voice, usage, gadget, chat, feed, dispatch, workspace, browser, phone, settings, tasks, schedules, vault, files, cards };
+export const en: Messages = { support, common, app, auth, nav, time, voice, usage, gadget, chat, feed, dispatch, workspace, browser, phone, settings, tasks, schedules, vault, files, cards };

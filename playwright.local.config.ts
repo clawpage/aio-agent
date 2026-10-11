@@ -18,6 +18,7 @@ export default defineConfig({
   // backend must run under the default `playwright.config.ts` against a local
   // instance, never here.
   testMatch: [
+    "**/support.spec.ts",
     "**/usage.spec.ts",
     "**/gadget-history.spec.ts",
     "**/browser-auto-open.spec.ts",
@@ -98,6 +99,7 @@ export default defineConfig({
     {
       name: "mobile-webkit",
       testMatch: [
+    "**/support.spec.ts",
         "**/usage.spec.ts",
         "**/gadget-history.spec.ts",
         "**/browser-lifecycle.spec.ts",

@@ -249,6 +249,7 @@ export function Login({ onSuccess, notice, username: named }: { onSuccess: () =>
             <button type="button" className="link" onClick={() => switchMode(register ? "login" : "register")}>{register ? t.auth.switch.toLogin : t.auth.switch.toRegister}</button>
           </p>
         )}
+      <p className="login-policy tiny"><a href="/privacy.html" target="_blank" rel="noreferrer">{t.support.privacy}</a> · <a href="/account-deletion.html" target="_blank" rel="noreferrer">{t.support.account}</a></p>
       </form>
     </div>
   );

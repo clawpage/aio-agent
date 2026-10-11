@@ -114,6 +114,9 @@ export type PointerResult = { title: string; url: string; editable?: boolean; cu
 export interface GadgetMessage { id: string; text: string; status: string; done: boolean; reply: string | null; error: string | null; createdAt: number; completedAt: number | null }
 
 export const api = {
+  supportRequest: (body: {kind: 'content' | 'deletion' | 'privacy'; taskId?: string; note: string}) => request<{id:string}>('/api/support/requests', {method:'POST',body}),
+  supportQueue: () => request<{requests: Array<{id:string;kind:'content'|'deletion'|'privacy';account_username:string|null;account_email:string|null;username:string;email:string;title:string;content:string;note:string;status:string;decision:string|null;created_at:number}>}>('/api/settings/support', {cache:'no-store'}),
+  reviewSupport: (id: string, decision: string) => request<{ok:true}>(`/api/settings/support/${encodeURIComponent(id)}/review`, {method:'POST',body:{decision}}),
   /** The owner's phone (bin/phone-bridge.mjs): offered at all, and which device is connected. */
   phoneScreenshotUrl: (at: number) => apiUrl(`/api/phone/screenshot?at=${at}`),
   phone: () => request<{ available: boolean; reachable?: boolean; device: { serial: string; model: string; name: string; android: string } | null }>("/api/phone", { cache: "no-store" }),
