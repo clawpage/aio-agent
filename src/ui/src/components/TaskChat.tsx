@@ -1,4 +1,5 @@
-import { InlineLoading, LoadingMark } from "./Brand";
+import { BootCover, InlineLoading, LoadingMark } from "./Brand";
+import { createPortal } from "react-dom";
 import { ComposerIcon, useComposerHeight } from "./ComposerControls";
 import { PopupPresence } from "./PopupMotion";
 import { MessageTime, TaskDuration, useDisplayClock } from "./MessageTime";
@@ -81,8 +82,16 @@ export function TaskChat({ onDetails, onOpenLink, onOpenFileInBrowser, onExpired
     const [error, setError] = useState<string | null>(null);
     const [preview, setPreview] = useState<string | null>(null);
     const [connected, setConnected] = useState(false);
-    /** "loading" until the feed first arrives (skeletons instead of the empty state), then "entering" while it rises in. */
-    const [arrival, setArrival] = useState<"loading" | "entering" | "settled">("loading");
+    /** "loading" until the feed first arrives: the loading screen stays over the console, never the empty state. */
+    const [arrival, setArrival] = useState<"loading" | "ready">("loading");
+    /** The loading screen is lifted once the feed is here and its drawing has finished, so the conversation shows at once. */
+    const [covered, setCovered] = useState(true);
+    /** A feed that does not come still gives the console back after a while, loading in place. */
+    const [waited, setWaited] = useState(false);
+    useEffect(() => { const timer = window.setTimeout(() => setWaited(true), 8000); return () => clearTimeout(timer); }, []);
+    /** Messages already there when the cover lifts do not play their entrance; new ones after it do. */
+    const [quiet, setQuiet] = useState(true);
+    useEffect(() => { if (covered) return; const timer = window.setTimeout(() => setQuiet(false), 400); return () => clearTimeout(timer); }, [covered]);
     useEffect(()=>{onFeed?.({tasks,nextBefore,connected});},[tasks,nextBefore,connected,onFeed]);
     const scroll = useRef<HTMLDivElement>(null);
     const stick = useRef(true);
@@ -110,8 +119,7 @@ export function TaskChat({ onDetails, onOpenLink, onOpenFileInBrowser, onExpired
             if (!pageLoaded.current) {
                 setNextBefore(data.nextBefore);
                 pageLoaded.current = true;
-                setArrival("entering");
-                window.setTimeout(() => setArrival("settled"), 900);
+                setArrival("ready");
             }
         }
         catch (err) {
@@ -450,8 +458,9 @@ export function TaskChat({ onDetails, onOpenLink, onOpenFileInBrowser, onExpired
             { key: "ai", tone: "ai", label: i18n.feed.head.active(active.length - browserAsks.length), tasks: active.filter(t => !browserAsks.includes(t)), state: t => labels[t.status] ?? t.status },
           ]}/>
         : connected ? i18n.feed.head.idle : i18n.feed.head.connecting}</span></div></header>
-    <div className={`chat-scroll task-feed${bubbles ? " has-needs-you" : ""}${arrival === "entering" ? " entering" : ""}`} ref={scroll} onScroll={e => onFeedScroll(e.currentTarget)} aria-busy={arrival === "loading" || undefined}>
-      {arrival === "loading" && <div className="feed-skeleton" aria-hidden="true"><i className="sk-user"/><i className="sk-reply"><b/><b/><b/></i><i className="sk-user short"/><i className="sk-reply"><b/><b/></i></div>}
+    <div className={`chat-scroll task-feed${bubbles ? " has-needs-you" : ""}${quiet ? " quiet" : ""}`} ref={scroll} onScroll={e => onFeedScroll(e.currentTarget)} aria-busy={arrival === "loading" || undefined}>
+      {covered && createPortal(<BootCover ready={arrival === "ready" || waited} label={i18n.common.loading} onDone={() => setCovered(false)}/>, document.body)}
+      {arrival === "loading" && !covered && <div className="feed-loading"><InlineLoading label={i18n.common.loading}/></div>}
       {nextBefore && <div className="feed-older" ref={olderTop}>{olderState === "failed"
         ? <button className="ghost tiny" onClick={() => void loadOlder()}>{i18n.feed.older.retry}</button>
         : <span className="muted tiny">{olderState === "loading" && <InlineLoading label={i18n.feed.older.loading}/>}</span>}</div>}

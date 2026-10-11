@@ -926,38 +926,26 @@ textarea:focus {
 .outgoing-state.failed { color: var(--error); animation: none; }
 .outgoing-failed { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; margin-top: 6px; font-size: 13px; color: var(--error); }
 
-/* The first arrival: the last few messages (what is on screen) rise in one after another;
-   their own entrance is folded into it. */
-/* Longhands: the delays below must survive this rule's higher specificity. */
-.task-feed.entering > :is(.task-entry, .task-report):not(.outgoing) { animation-name: msg-in; animation-duration: 420ms; animation-timing-function: var(--ease); animation-fill-mode: both; }
-.task-feed.entering .msg { animation: none; }
-.task-feed.entering > :nth-last-child(1) { animation-delay: 300ms; }
-.task-feed.entering > :nth-last-child(2) { animation-delay: 250ms; }
-.task-feed.entering > :nth-last-child(3) { animation-delay: 200ms; }
-.task-feed.entering > :nth-last-child(4) { animation-delay: 150ms; }
-.task-feed.entering > :nth-last-child(5) { animation-delay: 100ms; }
-.task-feed.entering > :nth-last-child(6) { animation-delay: 50ms; }
-
-/* Before the feed first arrives: the shape of a conversation, softly shimmering, not an empty page. */
-.feed-skeleton { display: flex; flex-direction: column; gap: 18px; margin-top: auto; padding-bottom: 8px; animation: skeleton-in 300ms ease-out 120ms both; }
-.feed-skeleton i, .feed-skeleton b {
-  display: block;
-  background: linear-gradient(100deg, color-mix(in srgb, var(--text) 6%, transparent) 30%, color-mix(in srgb, var(--text) 11%, transparent) 50%, color-mix(in srgb, var(--text) 6%, transparent) 70%) 0 0 / 300% 100%;
-  animation: media-wait 1.6s linear infinite;
-}
-.feed-skeleton .sk-user { align-self: flex-end; width: min(240px, 58%); height: 44px; border-radius: 18px 18px 6px 18px; }
-.feed-skeleton .sk-user.short { width: min(150px, 40%); }
-.feed-skeleton .sk-reply { display: flex; flex-direction: column; gap: 10px; width: min(560px, 86%); padding: 16px; border-radius: var(--radius-card); background: none; border: 1px solid var(--border); animation: none; }
-.feed-skeleton .sk-reply b { height: 12px; border-radius: 6px; }
-.feed-skeleton .sk-reply b:nth-child(2) { width: 88%; }
-.feed-skeleton .sk-reply b:nth-child(3) { width: 62%; }
+/* The first arrival is shown as it is when the loading screen lifts: no message rises in.
+   A zero duration ends each entrance at once, and lengthening it again later does not restart it. */
+.task-feed.quiet .msg { animation-duration: 0s; }
+/* A feed that has not come in time: the console is back, the feed still loading in its place. */
+.feed-loading { display: grid; place-items: center; flex: 1; min-height: 120px; }
 @keyframes skeleton-in { from { opacity: 0; } }
 
 /* The app's loading screen: the same mark, in the same place, as the page before the script arrived. */
 .boot-loading { position: fixed; inset: 0; background: var(--bg); }
 .boot-label { position: absolute; top: calc(50% + 40px); left: 0; right: 0; text-align: center; font-size: 12px; color: var(--text-dim); animation: skeleton-in 300ms ease-out 1.2s both; }
+/* Kept over the console while it opens (BootCover), above every surface of it. */
+.boot-cover { z-index: 1100; }
+/* Unseen; each of its iterations starts as the mark's drawing finishes (76%), which is when the cover may lift. */
+.boot-tick { position: absolute; width: 0; height: 0; overflow: hidden; }
+@media (prefers-reduced-motion: no-preference) {
+  .boot-tick { animation: boot-tick 2.8s var(--tick-phase, 0ms) infinite linear; }
+}
+@keyframes boot-tick { from { opacity: 0; } to { opacity: 0; } }
 @media (prefers-reduced-motion: reduce) {
-  .task-feed.entering > :is(.task-entry, .task-report), .feed-skeleton, .feed-skeleton i, .feed-skeleton b, .boot-label { animation: none; }
+  .boot-label { animation: none; }
 }
 
 /*

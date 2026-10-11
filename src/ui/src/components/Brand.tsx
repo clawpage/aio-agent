@@ -1,4 +1,4 @@
-import type { CSSProperties } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 
 /**
  * 一站's mark: a transit-map station. One line (一) runs through one station (站);
@@ -20,6 +20,9 @@ export function BrandMark({ size = 28 }: { size?: number }) {
 
 /** One drawing, in milliseconds; the same length as the `.loading-mark` animations in styles.css. */
 const LOADING_CYCLE_MS = 2800;
+/** When the centre has landed (76%) and the finished mark rests until it fades (88%): the `lm-stop` and `lm-draw` keyframes. */
+const LOADING_DRAWN_MS = 2128;
+const LOADING_REST_MS = 2464;
 
 /**
  * The mark's outline in the order one pen draws it: the tile's rounded frame
@@ -34,6 +37,11 @@ const STROKES = [
   ["lm-out", "M26.8 20H31"],
 ] as const;
 
+/** Where on the document's clock the drawing is now. */
+function drawingPhase(): number {
+  return typeof performance === "undefined" ? 0 : performance.now() % LOADING_CYCLE_MS;
+}
+
 /**
  * The console's one loading animation: the mark sketched in a single line,
  * over and over. Every copy on the page runs on the document's clock, so two
@@ -41,7 +49,8 @@ const STROKES = [
  * index.html draws the same figure for the page before the script arrives.
  */
 export function LoadingMark({ size = 44 }: { size?: number }) {
-  const phase = typeof performance === "undefined" ? 0 : performance.now() % LOADING_CYCLE_MS;
+  // Read once: a running animation given a new delay on a later render would jump out of step.
+  const [phase] = useState(drawingPhase);
   const style = { "--loading-phase": `-${Math.round(phase)}ms` } as CSSProperties;
   return (
     <svg className="loading-mark" width={size} height={size} viewBox="0 0 40 40" style={style} aria-hidden="true">
@@ -59,6 +68,38 @@ export function PageLoading({ label }: { label: string }) {
     <div className="boot boot-loading" role="status">
       <LoadingMark size={56} />
       <span className="boot-label">{label}</span>
+    </div>
+  );
+}
+
+/**
+ * The loading screen kept over the console while it opens, until `ready`; then
+ * it waits for the drawing on screen to finish and calls `onDone` with the mark
+ * standing whole. The wait follows the mark's own animation (an unseen tick
+ * whose every iteration starts as a drawing finishes), not a timer, so it ends
+ * exactly when the picture does; without motion there is nothing to wait for.
+ */
+export function BootCover({ ready, label, onDone }: { ready: boolean; label: string; onDone: () => void }) {
+  const tick = useRef<HTMLSpanElement>(null);
+  const done = useRef(onDone);
+  done.current = onDone;
+  const [phase] = useState(drawingPhase);
+  const style = { "--tick-phase": `-${Math.round((phase - LOADING_DRAWN_MS + LOADING_CYCLE_MS) % LOADING_CYCLE_MS)}ms` } as CSSProperties;
+  useEffect(() => {
+    const el = tick.current;
+    if (!ready || !el) return;
+    const timing = el.getAnimations?.()[0]?.effect?.getComputedTiming();
+    // No motion, or the finished mark is standing right now.
+    if (!timing || (timing.progress ?? 0) * LOADING_CYCLE_MS < LOADING_REST_MS - LOADING_DRAWN_MS) { done.current(); return; }
+    const lift = () => done.current();
+    el.addEventListener("animationiteration", lift, { once: true });
+    return () => el.removeEventListener("animationiteration", lift);
+  }, [ready]);
+  return (
+    <div className="boot boot-loading boot-cover" role="status">
+      <LoadingMark size={56} />
+      <span className="boot-label">{label}</span>
+      <span ref={tick} className="boot-tick" style={style} aria-hidden="true" />
     </div>
   );
 }

@@ -29,7 +29,7 @@ async function setup(page: Page, opts: { pollFirst?: boolean } = {}) {
     await r.fulfill({ status: 202, json: { task, duplicate: false } });
   });
   await page.goto("/");
-  await expect(page.locator(".feed-skeleton")).toHaveCount(0, { timeout: 60_000 });
+  await expect(page.locator(".boot-cover")).toHaveCount(0, { timeout: 60_000 });
   const release = async (list: Array<() => void>) => { await expect.poll(() => list.length).toBeGreaterThan(0); list.shift()!(); };
   return { rows, bodies, answer: () => release(gates), finishUpload: () => release(uploadGates) };
 }

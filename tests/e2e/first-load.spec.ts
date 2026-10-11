@@ -3,7 +3,7 @@ import { mockConsole } from "./mock-api";
 
 const task = (i: number) => ({ id: `task-${i}`, revision: 1, title: `任务 ${i}`, text: `第 ${i} 件事`, conversationId: `child-${i}`, status: "completed", result: `第 ${i} 件办完了。`, error: null, attachments: [], relatedTaskId: null, dependencies: [], approvals: 0, createdAt: 1000 + i * 1000, completedAt: 1500 + i * 1000 });
 
-test("opening the console: the mark while it loads, the shape of a conversation, then the messages rise in", async ({ page }, info) => {
+test("opening the console: the drawn mark until the feed is here and the drawing has finished, then the conversation as it is", async ({ page }, info) => {
   await mockConsole(page, { conversations: [] });
   let releaseSession!: () => void, releaseFeed!: () => void;
   const session = new Promise<void>((r) => { releaseSession = r; });
@@ -25,23 +25,53 @@ test("opening the console: the mark while it loads, the shape of a conversation,
   await page.screenshot({ path: info.outputPath("boot.png") });
 
   releaseSession();
-  // The feed has not come yet: skeletons, never the empty "把事情交给我" flash.
-  const skeleton = page.locator(".feed-skeleton");
-  await expect(skeleton).toBeVisible();
-  await expect(page.getByText("把事情交给我")).toHaveCount(0);
+  // The console is there under it, but the feed has not come: still the mark, no placeholder, no empty state.
+  const cover = page.locator(".boot-cover");
+  await expect(cover).toBeVisible();
   await expect(page.locator(".task-feed")).toHaveAttribute("aria-busy", "true");
-  await expect.poll(() => skeleton.evaluate((n) => getComputedStyle(n).opacity)).toBe("1");
-  await page.screenshot({ path: info.outputPath("skeleton.png") });
+  await expect(page.locator(".feed-skeleton, .feed-loading")).toHaveCount(0);
+  await expect(page.getByText("把事情交给我")).toHaveCount(0);
+  await expect(cover.locator(".loading-mark")).toBeVisible();
 
+  // Note where in its drawing the mark stands when the cover goes.
+  await page.evaluate(() => {
+    const w = window as unknown as { liftedAt?: number };
+    new MutationObserver((_, observer) => {
+      if (document.querySelector(".boot-cover")) return;
+      w.liftedAt = performance.now() % 2800;
+      observer.disconnect();
+    }).observe(document.body, { childList: true });
+  });
+  // Released early in a drawing, the cover waits for it to finish.
+  await page.waitForFunction(() => performance.now() % 2800 < 1200);
   releaseFeed();
-  await expect(page.locator(".task-feed.entering")).toHaveCount(1);
-  await expect(skeleton).toHaveCount(0);
-  // The latest messages rise one after another, the newest last.
-  const delays = await page.locator(".task-feed.entering > .task-entry").evaluateAll((els) => els.slice(-3).map((e) => parseFloat(getComputedStyle(e).animationDelay)));
-  expect(delays[0]).toBeLessThan(delays[2]!);
-  await expect(page.locator(".task-feed.entering")).toHaveCount(0, { timeout: 3000 });
+  await expect(page.locator(".msg.user", { hasText: "第 6 件事" })).toBeAttached();
+  await page.waitForTimeout(150);
+  await expect(cover).toBeVisible();
+  await expect(cover).toHaveCount(0, { timeout: 4000 });
+  const at = await page.evaluate(() => (window as unknown as { liftedAt?: number }).liftedAt);
+  // The centre has landed (76%) and the whole mark still stands (before 88%).
+  expect(at).toBeGreaterThanOrEqual(2128 - 40);
+  expect(at).toBeLessThan(2464);
+
+  // The conversation is simply there: no message rising in, the latest at the bottom.
+  const opacity = await page.locator(".task-feed .msg").evaluateAll((els) => els.map((e) => getComputedStyle(e).opacity));
+  expect(opacity.every((o) => o === "1")).toBe(true);
   await expect(page.locator(".msg.user", { hasText: "第 6 件事" })).toBeInViewport();
   expect(await page.locator(".task-feed").evaluate((n) => n.scrollHeight - n.scrollTop - n.clientHeight)).toBeLessThan(80);
+  await page.screenshot({ path: info.outputPath("conversation.png") });
+});
+
+test("a feed that does not come gives the console back, with the mark loading in its place", async ({ page }) => {
+  await mockConsole(page, { conversations: [] });
+  let calls = 0;
+  await page.route("**/api/main*", (r) => (++calls === 1 ? r.fulfill({ json: { mode: "tasks", version: "v1", tasks: [], nextBefore: null } }) : new Promise(() => undefined)));
+  await page.goto("/");
+  await expect(page.locator(".boot-cover")).toBeVisible();
+  await expect(page.locator(".boot-cover")).toHaveCount(0, { timeout: 15_000 });
+  await expect(page.locator(".feed-loading .loading-mark")).toBeVisible();
+  await expect(page.getByText("把事情交给我")).toHaveCount(0);
+  await expect(page.getByRole("textbox", { name: "消息", exact: true })).toBeVisible();
 });
 
 test("an account with nothing yet sees the empty state once the feed answers", async ({ page }) => {
@@ -49,5 +79,5 @@ test("an account with nothing yet sees the empty state once the feed answers", a
   await page.route("**/api/main*", (r) => r.fulfill({ json: { mode: "tasks", version: "v0", tasks: [], nextBefore: null } }));
   await page.goto("/");
   await expect(page.getByText("把事情交给我")).toBeVisible();
-  await expect(page.locator(".feed-skeleton")).toHaveCount(0);
+  await expect(page.locator(".boot-cover")).toHaveCount(0);
 });
