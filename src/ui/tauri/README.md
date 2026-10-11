@@ -13,6 +13,15 @@ page cannot load.
 
 ## Native adjustments
 
+- Google authentication opens a system authentication browser and returns to the
+  console with a single-use ticket bound to its initiating HttpOnly cookie.
+  Android handles `aioagent://auth` in `MainActivity.kt`; iOS uses
+  `ASWebAuthenticationSession`. Both dispatch `aio-google-return` only to the
+  console origin. First-time Google users must then submit an invite code before
+  receiving an application session. See [Google login](../../../docs/google-login.md).
+  The application identifier is `ai.clawpage.agent`; artifacts and device tests
+  built with the previous identifier must be replaced before Play submission.
+
 - Public conversation links open with SafariServices on iOS (`DeviceBrowser.swift`)
   or the device browser Custom Tab on Android (`MainActivity.kt`, AndroidX Browser).
   Both request an initial height near 90%; iOS 15 uses the system sheet default.
@@ -73,14 +82,14 @@ env -u NODE_ENV npm install --include=dev
 # iOS simulator
 env -u NODE_ENV npm run -- tauri ios build --debug --target aarch64-sim
 xcrun simctl install booted src-tauri/gen/apple/build/arm64-sim/AIOAgent.app
-xcrun simctl launch booted com.mengxiao.aioagent
+xcrun simctl launch booted ai.clawpage.agent
 
 # Android phone over USB (adb devices shows it as "device")
 export JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home"
 export ANDROID_HOME=$HOME/Library/Android/sdk NDK_HOME=$HOME/Library/Android/sdk/ndk/27.0.12077973
 env -u NODE_ENV npm run -- tauri android build --debug --target aarch64 --apk
 adb install -r src-tauri/gen/android/app/build/outputs/apk/universal/debug/app-universal-debug.apk
-adb shell am start -n com.mengxiao.aioagent/.MainActivity
+adb shell am start -n ai.clawpage.agent/.MainActivity
 ```
 
 A device build for an iPhone signs with the team in `tauri.conf.json`
@@ -135,6 +144,11 @@ release APK. This validates release content on the device, but not installation
 of a Google Play-signed APK; final acceptance still requires a Play test track.
 
 ## Verified (2026-10-11)
+
+This initial acceptance used the previous application identifier. After the
+identifier correction and Google authentication bridge change, the new signed
+`ai.clawpage.agent` package must be separately accepted; the historical checks
+below do not establish real Google sign-in or its App return.
 
 Galaxy Z Flip6 (Android 16), current native shell, version 0.1.0 / Android code
 1000, arm64. Debug build: existing owner login, config header/status-bar separation,

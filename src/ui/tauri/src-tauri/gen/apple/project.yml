@@ -1,6 +1,6 @@
 name: aio-agent-tauri
 options:
-  bundleIdPrefix: com.mengxiao.aioagent
+  bundleIdPrefix: ai.clawpage.agent
   deploymentTarget:
     iOS: 15.0
 fileGroups: [../../src]
@@ -11,7 +11,7 @@ settingGroups:
   app:
     base:
       PRODUCT_NAME: AIOAgent
-      PRODUCT_BUNDLE_IDENTIFIER: com.mengxiao.aioagent
+      PRODUCT_BUNDLE_IDENTIFIER: ai.clawpage.agent
 targetTemplates:
   app:
     type: application

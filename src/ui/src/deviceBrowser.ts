@@ -11,6 +11,16 @@ function nativeBridge(): BrowserBridge | undefined {
   return native.aioDeviceBrowser ?? native.webkit?.messageHandlers?.aioDeviceBrowser;
 }
 
+export function hasNativeBrowser(): boolean { return Boolean(nativeBridge()); }
+
+/** Install the listener before notifying Android, which may hold a cold-start callback. */
+export function listenGoogleReturn(callback: (detail: {ticket?: string; error?: string}) => void): () => void {
+  const listener = (event: Event) => callback((event as CustomEvent<{ticket?: string; error?: string}>).detail ?? {});
+  window.addEventListener("aio-google-return", listener);
+  nativeBridge()?.postMessage("aioagent-auth-ready");
+  return () => window.removeEventListener("aio-google-return", listener);
+}
+
 /** Opens synchronously in the click/tap gesture, so browsers allow the new tab. */
 export function openDeviceBrowser(url: string): void {
   if (!isWebLink(url)) return;

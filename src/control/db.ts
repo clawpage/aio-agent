@@ -61,6 +61,28 @@ CREATE TABLE IF NOT EXISTS login_failures (
   locked_until INTEGER
 );
 
+-- Google subjects are stable identifiers; email never links or promotes an account.
+CREATE TABLE IF NOT EXISTS google_identities (
+  subject TEXT PRIMARY KEY,
+  owner_id TEXT NOT NULL UNIQUE REFERENCES owners(id),
+  email TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);
+-- Short-lived authorization state, not an application session. No Google access/refresh tokens.
+CREATE TABLE IF NOT EXISTS google_login_flows (
+  state_hash TEXT PRIMARY KEY,
+  client_hash TEXT NOT NULL UNIQUE,
+  browser_hash TEXT,
+  verifier TEXT NOT NULL,
+  nonce TEXT NOT NULL,
+  native INTEGER NOT NULL,
+  status TEXT NOT NULL,
+  expires_at INTEGER NOT NULL,
+  subject TEXT,
+  email TEXT,
+  ticket_hash TEXT UNIQUE
+);
+
 CREATE TABLE IF NOT EXISTS conversations (
   id TEXT PRIMARY KEY,
   owner_id TEXT NOT NULL,

@@ -23,10 +23,10 @@ val signingProperties = signingPropertiesPath?.let { path ->
 
 android {
     compileSdk = 37
-    namespace = "com.mengxiao.aioagent"
+    namespace = "ai.clawpage.agent"
     defaultConfig {
         manifestPlaceholders["usesCleartextTraffic"] = "false"
-        applicationId = "com.mengxiao.aioagent"
+        applicationId = "ai.clawpage.agent"
         minSdk = 24
         targetSdk = 37
         versionCode = tauriProperties.getProperty("tauri.android.versionCode", "1").toInt()

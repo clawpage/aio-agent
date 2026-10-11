@@ -30,6 +30,7 @@ import type { HostKind, RequestContext } from "./security.js";
 import { UNSAFE_METHODS, guardUnsafe, originAllowed } from "./security.js";
 import { BOOTSTRAP_USERNAME, authenticateUser, getUser } from "../auth/owner.js";
 import { RegisterError, createInvite, listInvites, registerWithInvite, revokeInvite } from "../auth/invites.js";
+import { googleRouter } from "../auth/googleRoutes.js";
 import { parseHttpUrl } from "../aio/client.js";
 import { COOKIE_NAMES, clearSessionCookies, sessionCookies } from "../auth/sessions.js";
 import { safeRedirectPath } from "../auth/tickets.js";
@@ -248,6 +249,7 @@ export function createApiRouter(context: AppContext): Router {
   });
 
   // ------------------------------------------------------------------ auth
+  router.use("/auth/google", googleRouter(context));
   router.get('/usage', requireKind('primary'), requireSession, asyncHandler(async (req, res) => {
     const days = req.query.days === undefined ? 30 : Number(req.query.days);
     if (![7,30,90].includes(days)) { res.status(400).json({error:'invalid_days',message:'请选择 7、30 或 90 天'}); return; }

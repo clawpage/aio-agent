@@ -20,6 +20,8 @@ export function memberConfig(base: Config, userId: string, port: number, model: 
   return {...workspaceConfig(base), runtimeUserId:userId, memberRuntime:true, memberModel:model, memberEffort:effort, dataDir,
     dbPath:path.join(dataDir,'agent.sqlite'),logDir:path.join(dataDir,'logs'),
     ownerPassword:'',ownerPasswordReset:false,ownerSecretPath:path.join(dataDir,'unused-secret'),
+    // OAuth identity and secrets stay at the central authentication boundary.
+    googleClientId:'',googleClientSecret:'',
     agent:{...base.agent,defaultModel:model},
     // A resident member (PA_RESIDENT_MEMBERS) keeps its container and browser running, as the owner does.
     browser:{...base.browser,readyGateway:undefined,releaseWhenIdle:!resident&&base.browser.memberReleaseWhenIdle},

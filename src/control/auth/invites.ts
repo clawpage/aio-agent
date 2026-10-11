@@ -1,6 +1,6 @@
 import { randomInt } from "node:crypto";
 import type { Db } from "../db.js";
-import { hashPassword, randomId } from "./passwords.js";
+import { hashPassword, randomId, generateSecret } from "./passwords.js";
 import { BOOTSTRAP_USERNAME, type User } from "./owner.js";
 
 /**
@@ -65,7 +65,7 @@ export function revokeInvite(db: Db, code: string): boolean {
  * inserted in one transaction, so two people racing with the same code get
  * exactly one account.
  */
-export async function registerWithInvite(db: Db, input: { username: string; password: string; code: string }): Promise<User> {
+export async function registerWithInvite(db: Db, input: { username: string; password: string; code: string }, google?: { subject: string; email: string; clientHash: string }): Promise<User> {
   const username = input.username.trim();
   const code = normalizeCode(input.code);
   if (!code) throw new RegisterError(400, "invite_required", "请输入邀请码");
@@ -82,13 +82,29 @@ export async function registerWithInvite(db: Db, input: { username: string; pass
     if (invite.used_at !== null) throw new RegisterError(400, "invite_used", "这个邀请码已经用过了");
     if (db.prepare("SELECT 1 FROM owners WHERE lower(username)=?").get(username)) throw new RegisterError(409, "username_taken", "这个账号已经有人用了，换一个吧");
     const now = Date.now();
+    if (google) {
+      const flow = db.prepare("SELECT subject FROM google_login_flows WHERE client_hash=? AND status='ready' AND expires_at>?").get(google.clientHash, now) as {subject: string} | undefined;
+      if (flow?.subject !== google.subject) throw new RegisterError(401, "google_expired", "Google 登录已过期，请重新登录");
+      if (db.prepare("SELECT 1 FROM google_identities WHERE subject=?").get(google.subject)) {
+        throw new RegisterError(409, "google_registered", "这个 Google 账号已注册，请重新用 Google 登录");
+      }
+    }
     db.prepare("INSERT INTO owners (id,username,password_hash,password_salt,password_params,created_at,role) VALUES (?,?,?,?,?,?,'member')")
       .run(id, username, rec.hash, rec.salt, rec.params, now);
     db.prepare("UPDATE invites SET used_at=?,used_by=? WHERE code=?").run(now, id, code);
+    if (google) {
+      db.prepare("INSERT INTO google_identities (subject,owner_id,email,created_at) VALUES (?,?,?,?)").run(google.subject, id, google.email, now);
+      db.prepare("DELETE FROM google_login_flows WHERE client_hash=?").run(google.clientHash);
+    }
     db.exec("COMMIT");
   } catch (err) {
     db.exec("ROLLBACK");
     throw err;
   }
   return { id, username, role: "member" };
+}
+
+/** OAuth-only accounts have an unguessable password, never disclosed or used by a caller. */
+export function registerGoogleWithInvite(db: Db, identity: {subject: string; email: string; clientHash: string}, input: {username: string; code: string}): Promise<User> {
+  return registerWithInvite(db, {...input, password: generateSecret(48)}, identity);
 }

@@ -17,6 +17,16 @@ export const auth = {
     inviteCode: "邀请码",
   },
   passwordMismatch: "两次输入的密码不一样",
+  google: {
+    button: "使用 Google 登录 / 注册",
+    inviteIntro: "Google 登录成功。首次使用需要邀请码，完成后即可进入。",
+    waiting: "请在浏览器中完成 Google 登录，然后返回 App。",
+    failed: "Google 登录未完成或已过期，请重试。",
+    activate: "验证邀请码并进入",
+    activating: "正在验证…",
+    cancel: "换一个登录方式",
+    retry: "重新登录 Google",
+  },
   invite: {
     /** Split around the mailto link. */
     askBefore: "还没有邀请码？发邮件到 ",

@@ -19,6 +19,16 @@ export const auth: typeof zh = {
     inviteCode: "Invite code",
   },
   passwordMismatch: "The passwords don't match",
+  google: {
+    button: "Sign in / sign up with Google",
+    inviteIntro: "Signed in with Google. An invite code is required for your first visit.",
+    waiting: "Finish signing in with Google in your browser, then return to the app.",
+    failed: "Google sign-in wasn't completed or has expired. Please try again.",
+    activate: "Verify invite and continue",
+    activating: "Verifying…",
+    cancel: "Use another sign-in method",
+    retry: "Try Google sign-in again",
+  },
   invite: {
     askBefore: "No invite code yet? Email ",
     askAfter: " to request one. Each code can register one account.",

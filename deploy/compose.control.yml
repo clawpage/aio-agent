@@ -29,6 +29,7 @@ services:
       PA_HA_MCP_SECRETS_FILE: /run/secrets/ha-mcp
       PA_PHONE_BRIDGE_SECRETS_FILE: /run/secrets/phone-bridge
       PA_KEYBOARD_BRIDGE_SECRETS_FILE: /run/secrets/keyboard-bridge
+      PA_GOOGLE_SECRETS_FILE: /run/secrets/google-oauth
     volumes:
       - control-data:/data
     ports:
@@ -38,7 +39,7 @@ services:
     extra_hosts:
       - host.docker.internal:host-gateway
     # Nodes can be remote; the control layer checks their protocol and readiness itself.
-    secrets: [sandbox-node, claude-code, jev, kb-mcp, ha-mcp, phone-bridge, keyboard-bridge]
+    secrets: [sandbox-node, claude-code, jev, kb-mcp, ha-mcp, phone-bridge, keyboard-bridge, google-oauth]
     networks: [aio]
 networks:
   aio:
@@ -62,3 +63,5 @@ secrets:
     file: ${AIO_SECRET_PHONE_BRIDGE:-/dev/null}
   keyboard-bridge:
     file: ${AIO_SECRET_KEYBOARD_BRIDGE:-/dev/null}
+  google-oauth:
+    file: ${AIO_SECRET_GOOGLE_OAUTH:-/dev/null}

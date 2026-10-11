@@ -74,6 +74,8 @@ it('derives disjoint persistent data, volumes and networks, coalesces concurrent
   for(const key of ['dbPath','dataDir','logDir'] as const)expect(a[key]).not.toBe(b[key]);
   for(const key of ['workspaceVolume','codexVolume','browserVolume','networkName','containerName','hostPort'] as const){expect(a.sandbox[key]).not.toBe(b.sandbox[key]);expect(a.sandbox[key]).not.toBe(h.ctx.cfg.sandbox[key]);}
   expect(a.memberRuntime).toBe(true);expect(a.bridge.models).toEqual(['gpt-6.1-sol']);
+  const oauth=memberConfig({...h.ctx.cfg,googleClientId:'owner-client',googleClientSecret:'owner-secret'},u.id,19001);
+  expect(oauth.googleClientId).toBe('');expect(oauth.googleClientSecret).toBe('');
   // Only the fixed Chromium flag reaches a member container, never the owner's extra env.
   expect(memberConfig({...h.ctx.cfg,sandbox:{...h.ctx.cfg.sandbox,extraEnv:['OWNER_ONLY=1']}},u.id,19001).sandbox.extraEnv).toEqual(['BROWSER_NO_SANDBOX=--no-sandbox']);
   expect(a.memberModel).toBe('gpt-6.1-sol');

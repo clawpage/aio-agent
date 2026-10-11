@@ -1,10 +1,12 @@
 import UIKit
 import WebKit
 import SafariServices
+import AuthenticationServices
 
 // This bridge grants one operation to the main console frame, not Tauri IPC.
-private final class DeviceBrowserHandler: NSObject, WKScriptMessageHandler {
+private final class DeviceBrowserHandler: NSObject, WKScriptMessageHandler, ASWebAuthenticationPresentationContextProviding {
     weak var webView: WKWebView?
+    private var authSession: ASWebAuthenticationSession?
     init(_ webView: WKWebView) { self.webView = webView }
 
     func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
@@ -15,6 +17,29 @@ private final class DeviceBrowserHandler: NSObject, WKScriptMessageHandler {
               ["http", "https"].contains(url.scheme?.lowercased() ?? ""), url.host != nil,
               var presenter = webView?.window?.rootViewController else { return }
         while let next = presenter.presentedViewController { presenter = next }
+        if url.scheme == "https", url.host == "agent.clawpage.ai", url.path == "/api/auth/google/authorize" {
+            // AuthenticationServices uses the system's authentication browser and returns
+            // the one-use callback to this app, rather than signing in inside WKWebView.
+            authSession = ASWebAuthenticationSession(url: url, callbackURLScheme: "aioagent") { [weak self] callback, _ in
+                DispatchQueue.main.async {
+                    guard let self, let webView = self.webView,
+                          webView.url?.host == "agent.clawpage.ai", webView.url?.scheme == "https" else { return }
+                    let ticket = callback.flatMap { url -> String? in
+                        guard url.scheme == "aioagent", url.host == "auth", url.path.isEmpty,
+                              let value = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first(where: { $0.name == "ticket" })?.value,
+                              value.range(of: "^[A-Za-z0-9_-]{43}$", options: .regularExpression) != nil else { return nil }
+                        return value
+                    }
+                    let detail = ticket.map { ["ticket": $0] } ?? ["error": "failed"]
+                    guard let data = try? JSONSerialization.data(withJSONObject: detail), let json = String(data: data, encoding: .utf8) else { return }
+                    webView.evaluateJavaScript("window.dispatchEvent(new CustomEvent('aio-google-return',{detail:\(json)}));")
+                    self.authSession = nil
+                }
+            }
+            authSession?.presentationContextProvider = self
+            authSession?.start()
+            return
+        }
         // SafariServices supplies real browser navigation and system safe areas.
         let browser = SFSafariViewController(url: url)
         browser.modalPresentationStyle = .pageSheet
@@ -24,6 +49,9 @@ private final class DeviceBrowserHandler: NSObject, WKScriptMessageHandler {
             sheet.preferredCornerRadius = 20
         }
         presenter.present(browser, animated: true)
+    }
+    func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
+        webView?.window ?? ASPresentationAnchor()
     }
 }
 

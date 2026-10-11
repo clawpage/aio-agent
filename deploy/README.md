@@ -31,6 +31,12 @@ ChatGPT 默认关闭：控制面镜像自带 Codex CLI（与沙箱同版本）�
 挂进来或拷进来——两边共用一个会轮换的 refresh token，先刷新的一方会让另一方掉线。`codex-login status` 查看登录状态。
 其他凭据以只读文件挂载，镜像里不含任何密钥。
 
+Google 登录配置：在 `AIO_CONTROL_ENV_FILE` 指向的文件中设置 `PA_GOOGLE_CLIENT_ID`，
+并在 `aio.env` 设置 `AIO_SECRET_GOOGLE_OAUTH` 指向私有 `0600` env 文件
+（`PA_GOOGLE_CLIENT_SECRET=...`）。Compose 将其只读挂载到 `/run/secrets/google-oauth`。
+不设置 client ID 时不读取空 secret，Google 登录关闭。首次使用仍需要一次性邀请码，详见
+[Google 登录](../docs/google-login.md)。变更后构建 control/ui 镜像，检查 `busy`，仅刷新所需层。
+
 ## 多机
 
 每台机器只跑自己那一层，`AIO_LAYERS` 指定：

@@ -730,6 +730,7 @@ textarea:focus {
 .login-invite { margin: -2px 0 0; line-height: 1.6; }
 .login-invite a { color: var(--accent); }
 .login-switch { margin: 2px 0 0; text-align: center; }
+.login-google-email { margin: 0; overflow-wrap: anywhere; color: var(--text); }
 
 /* ------------------------------------------------------------------ chat */
 

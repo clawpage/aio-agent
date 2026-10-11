@@ -61,6 +61,7 @@ export default defineConfig({
     "**/image-preview.spec.ts",
     "**/vault.spec.ts",
     "**/register.spec.ts",
+    "**/google-login.spec.ts",
     "**/sent-attachments.spec.ts",
     "**/browser-last-page.spec.ts",
     "**/turn-pills.spec.ts",

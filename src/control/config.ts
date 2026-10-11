@@ -1,6 +1,7 @@
 import path from "node:path";
 import os from "node:os";
 import fs from "node:fs";
+import { readSecretFile } from "../common/secrets.js";
 
 export type Config = ReturnType<typeof loadConfig>;
 
@@ -73,6 +74,9 @@ export function loadConfig(): {
   loginLockoutMs: number;
   /** Where the register form tells people to ask for an invite code; empty means "ask the administrator". */
   inviteEmail: string;
+  googleClientId: string;
+  googleClientSecret: string;
+  googleRedirectUri: string;
   ownerPassword: string;
   ownerPasswordReset: boolean;
   sandbox: {
@@ -408,6 +412,16 @@ export function loadConfig(): {
     loginWindowMs: envInt("PA_LOGIN_WINDOW_MINUTES", 15) * 60_000,
     loginLockoutMs: envInt("PA_LOGIN_LOCKOUT_MINUTES", 15) * 60_000,
     inviteEmail: /^[^\s@<>"]+@[^\s@<>"]+\.[^\s@<>"]+$/.test(envStr("PA_INVITE_EMAIL").trim()) ? envStr("PA_INVITE_EMAIL").trim() : "",
+    googleClientId: envStr("PA_GOOGLE_CLIENT_ID").trim(),
+    googleClientSecret: (() => {
+      if (!envStr("PA_GOOGLE_CLIENT_ID").trim()) return "";
+      const file = envStr("PA_GOOGLE_SECRETS_FILE");
+      if (!file) return envStr("PA_GOOGLE_CLIENT_SECRET");
+      const secret = readSecretFile(file, "PA_GOOGLE_CLIENT_SECRET");
+      if (!secret.ok) throw new Error(secret.reason);
+      return secret.value;
+    })(),
+    googleRedirectUri: envStr("PA_GOOGLE_REDIRECT_URI", `https://${primaryHost}/api/auth/google/callback`),
     ownerPassword: envStr("PA_OWNER_PASSWORD", ""),
     // Opt-in operator action: rotate the owner password and rewrite the local secret file.
     ownerPasswordReset: envStr("PA_OWNER_PASSWORD_RESET", "0") === "1",
