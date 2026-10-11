@@ -699,7 +699,8 @@ textarea:focus {
   display: grid;
   place-items: center;
   height: var(--viewport-height);
-  padding: calc(20px + var(--safe-top)) calc(20px + var(--safe-right)) calc(20px + var(--safe-bottom)) calc(20px + var(--safe-left));
+  padding: calc(32px + var(--safe-top)) calc(24px + var(--safe-right)) calc(32px + var(--safe-bottom)) calc(24px + var(--safe-left));
+  background: radial-gradient(ellipse at 50% 0%, color-mix(in srgb, var(--brand-tile) 7%, transparent), transparent 65%), var(--bg);
   /* Short viewports (phone landscape, or a banner pushing the card down) must
      scroll rather than clip the submit button out of reach. */
   overflow-y: auto;
@@ -707,30 +708,54 @@ textarea:focus {
 }
 
 .login-card {
-  max-height: none;
-}
-
-.login-card {
-  width: min(400px, 100%);
+  width: min(420px, 100%);
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  padding: 28px;
+  gap: 18px;
+  padding: 36px;
   background: var(--bg-soft);
   border: 1px solid var(--border);
-  border-radius: var(--radius-card);
-  box-shadow: var(--shadow);
+  border-radius: 24px;
+  box-shadow: var(--shadow-thumb);
+  margin-block: auto;
 }
-
-.login-card h1 {
-  margin: 0;
-  font-size: 22px;
+.login-brand { display: flex; align-items: center; gap: 10px; font-size: 22px; font-weight: 650; letter-spacing: 0.02em; margin-bottom: 8px; }
+.login-heading { margin-bottom: 6px; }
+.login-heading h1 { margin: 0; font-size: 28px; font-weight: 650; line-height: 1.35; letter-spacing: -0.025em; }
+.login-heading p { margin: 10px 0 0; font-size: var(--fs-md); line-height: 1.7; color: var(--text-dim); }
+.login-card .field { gap: 7px; }
+.login-card .field > span { font-size: var(--fs-sm); color: var(--text); font-weight: 500; }
+.login-card input { min-height: 48px; border-radius: 12px; padding: 12px 14px; font-size: 15px; background: var(--bg-raised); }
+.login-card input::placeholder { color: var(--text-dim); font-size: var(--fs-sm); }
+.login-card input[autocapitalize="characters"] { font-family: var(--mono); letter-spacing: 0.08em; }
+.login-card button.primary.block { display: flex; align-items: center; justify-content: center; gap: 10px; min-height: 48px; border-radius: 12px; font-size: var(--fs-md); margin-top: 4px; }
+.login-card button.login-google { display: flex; align-items: center; justify-content: center; gap: 12px; min-height: 48px; border: 1px solid var(--google-border); border-radius: 12px; padding: 12px 16px; background: var(--google-surface); color: var(--google-text); font-size: var(--fs-md); font-weight: 500; transition: box-shadow var(--dur-fast) ease; }
+.login-card button.login-google:hover:not(:disabled) { box-shadow: var(--shadow-thumb); }
+.login-google-mark { flex: none; }
+.login-divider { display: flex; align-items: center; gap: 12px; font-size: 12px; color: var(--text-dim); margin-block: 2px; }
+.login-divider::before, .login-divider::after { content: ""; height: 1px; flex: 1; background: var(--border); }
+.login-identity { display: flex; align-items: center; gap: 12px; border: 1px solid var(--border); border-radius: 14px; padding: 14px; background: var(--bg-raised); }
+.login-identity-check { display: grid; place-items: center; width: 32px; height: 32px; flex: none; border-radius: 50%; background: var(--done-soft); color: var(--done); }
+.login-identity > div { min-width: 0; }
+.login-identity > div > span { font-size: 11px; color: var(--text-dim); }
+.login-google-email { margin: 1px 0 0; overflow-wrap: anywhere; font-size: var(--fs-md); font-weight: 500; color: var(--text); }
+.login-invite { display: flex; align-items: flex-start; gap: 8px; margin: -2px 0 0; line-height: 1.7; }
+.login-invite > svg { flex: none; margin-top: 3px; }
+.login-invite a { color: var(--accent); text-decoration: none; overflow-wrap: anywhere; }
+.login-invite a:hover { text-decoration: underline; }
+.login-switch { margin: 4px 0 0; text-align: center; }
+.login-card > button.link { align-self: center; min-height: 36px; font-size: var(--fs-sm); }
+.login-card .banner { font-size: var(--fs-sm); border-radius: 12px; line-height: 1.6; }
+@media (hover: none) and (pointer: coarse) {
+  .login-card input { font-size: 16px; }
 }
-.login-card h1.login-brand { display: flex; align-items: center; gap: 12px; font-size: 30px; letter-spacing: 0.08em; }
-.login-invite { margin: -2px 0 0; line-height: 1.6; }
-.login-invite a { color: var(--accent); }
-.login-switch { margin: 2px 0 0; text-align: center; }
-.login-google-email { margin: 0; overflow-wrap: anywhere; color: var(--text); }
+@media (max-width: 600px) {
+  .login { align-items: start; background: var(--bg-soft); padding: calc(clamp(48px, 10dvh, 88px) + var(--safe-top)) calc(28px + var(--safe-right)) calc(28px + var(--safe-bottom)) calc(28px + var(--safe-left)); }
+  .login-card { padding: 0; border: 0; border-radius: 0; box-shadow: none; background: transparent; margin-block: 0; }
+  .login-brand { margin-bottom: 16px; }
+  .login-heading h1 { font-size: 29px; }
+  .login-card input { background: var(--bg); }
+}
 
 /* ------------------------------------------------------------------ chat */
 

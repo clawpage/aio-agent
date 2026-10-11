@@ -4,6 +4,11 @@ import { BrandMark, PageLoading } from "./Brand";
 import { t } from "../i18n";
 import { hasNativeBrowser, listenGoogleReturn, openDeviceBrowser } from "../deviceBrowser";
 
+function AuthIcon({name, size}: {name: "check" | "arrow" | "mail"; size: number}) {
+  const paths = {check: "M5 12l4 4L19 6", arrow: "M5 12h14m-6-6 6 6-6 6", mail: "M4 5h16v14H4Z M4 6l8 7 8-7"};
+  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={paths[name]}/></svg>;
+}
+
 type Mode = "login" | "register";
 
 export function Login({ onSuccess, notice, username: named }: { onSuccess: () => void | Promise<void>; notice?: string | null; username?: string }) {
@@ -162,10 +167,24 @@ export function Login({ onSuccess, notice, username: named }: { onSuccess: () =>
           void submit();
         }}
       >
-        <h1 className="login-brand"><BrandMark size={40}/>{t.auth.brand}</h1>
-        <p className="muted">{googleEmail ? t.auth.google.inviteIntro : register ? t.auth.intro.register : t.auth.intro.login}</p>
-        {googleEmail && <p className="login-google-email">{googleEmail}</p>}
-        {!googleEmail && googleEnabled && <button type="button" className="block" disabled={busy} onClick={() => void startGoogle()}>{t.auth.google.button}</button>}
+        <div className="login-brand"><BrandMark size={36}/><span>{t.auth.brand}</span></div>
+        <header className="login-heading">
+          <h1>{googleEmail ? t.auth.heading.invite : register ? t.auth.heading.register : t.auth.heading.login}</h1>
+          <p>{googleEmail ? t.auth.google.inviteIntro : register ? t.auth.intro.register : t.auth.intro.login}</p>
+        </header>
+        {googleEmail && <div className="login-identity"><span className="login-identity-check"><AuthIcon name="check" size={16}/></span><div><span>{t.auth.google.verified}</span><p className="login-google-email">{googleEmail}</p></div></div>}
+        {!googleEmail && googleEnabled && <>
+          <button type="button" className="login-google block" disabled={busy || googleWaiting} onClick={() => void startGoogle()}>
+            <svg className="login-google-mark" viewBox="0 0 48 48" width="20" height="20" aria-hidden="true">
+              <path fill="var(--google-yellow)" d="M43.6 20.5H42V20H24v8h11.3A12 12 0 1 1 32.2 13l5.7-5.7A20 20 0 1 0 44 24c0-1.2-.1-2.4-.4-3.5Z"/>
+              <path fill="var(--google-red)" d="m6.3 14.7 6.6 4.8A12 12 0 0 1 32.2 13l5.7-5.7A20 20 0 0 0 6.3 14.7Z"/>
+              <path fill="var(--google-green)" d="M24 44c5.2 0 10-2 13.5-5.3l-6.2-5.2A12 12 0 0 1 12.7 28l-6.6 5.1A20 20 0 0 0 24 44Z"/>
+              <path fill="var(--google-blue)" d="M43.6 20.5H42V20H24v8h11.3a12 12 0 0 1-4 5.5l6.2 5.2A20 20 0 0 0 44 24c0-1.2-.1-2.4-.4-3.5Z"/>
+            </svg>
+            <span>{t.auth.google.button}</span>
+          </button>
+          <div className="login-divider"><span>{t.auth.passwordAlternative}</span></div>
+        </>}
         {googleWaiting && <p className="banner" role="status">{t.auth.google.waiting}</p>}
         <label className="field">
           <span>{t.auth.fields.username}</span>
@@ -210,18 +229,18 @@ export function Login({ onSuccess, notice, username: named }: { onSuccess: () =>
                 placeholder="XXXX-XXXX-XXXX"
               />
             </label>
-            <p className="muted tiny login-invite">
+            <p className="muted tiny login-invite"><AuthIcon name="mail" size={14}/><span>
               {inviteEmail
                 ? <>{t.auth.invite.askBefore}<a href={`mailto:${inviteEmail}?subject=${encodeURIComponent(t.auth.invite.mailSubject)}`}>{inviteEmail}</a>{t.auth.invite.askAfter}</>
                 : t.auth.invite.askAdmin}
-            </p>
+            </span></p>
           </>
         )}
         {sessionError && <div className="banner warn" role="status">{t.auth.sessionUnverified}</div>}
         {notice && <div className="banner warn">{notice}</div>}
         {error && <div className="banner error">{error}</div>}
         <button type="submit" className="primary block" disabled={busy || !username.trim() || (googleEmail ? !inviteCode.trim() : !password || (register && (!confirm || !inviteCode.trim())))}>
-          {googleEmail ? (busy ? t.auth.google.activating : t.auth.google.activate) : register ? (busy ? t.auth.submit.registering : t.auth.submit.register) : (busy ? t.auth.submit.loggingIn : t.auth.submit.login)}
+          <span>{googleEmail ? (busy ? t.auth.google.activating : t.auth.google.activate) : register ? (busy ? t.auth.submit.registering : t.auth.submit.register) : (busy ? t.auth.submit.loggingIn : t.auth.submit.login)}</span><AuthIcon name="arrow" size={18}/>
         </button>
         {(googleEmail || googleWaiting) && <button type="button" className="link" disabled={busy} onClick={() => void cancelGoogle()}>{t.auth.google.cancel}</button>}
         {!named && !googleEmail && (

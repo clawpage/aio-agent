@@ -4,9 +4,11 @@ export const auth: typeof zh = {
   sessionExpired: "Your session has expired. Please log in again.",
   restoring: "Restoring your session…",
   brand: "AIO Agent",
+  heading: { login: "Make room for what matters", register: "Meet your AIO Agent", invite: "One invite away" },
+  passwordAlternative: "or use your username and password",
   intro: {
-    login: "Everything you need, all in one stop. Log in with your account.",
-    register: "Everything you need, all in one stop. Sign up with an invite code.",
+    login: "Sign in and pick up where you left off with your AI assistant.",
+    register: "Create an account and put your AI assistant to work.",
   },
   fields: {
     username: "Username",
@@ -21,7 +23,8 @@ export const auth: typeof zh = {
   passwordMismatch: "The passwords don't match",
   google: {
     button: "Sign in / sign up with Google",
-    inviteIntro: "Signed in with Google. An invite code is required for your first visit.",
+    inviteIntro: "Enter an invite code to activate your first visit.",
+    verified: "Google account verified",
     waiting: "Finish signing in with Google in your browser, then return to the app.",
     failed: "Google sign-in wasn't completed or has expired. Please try again.",
     activate: "Verify invite and continue",
@@ -30,8 +33,8 @@ export const auth: typeof zh = {
     retry: "Try Google sign-in again",
   },
   invite: {
-    askBefore: "No invite code yet? Email ",
-    askAfter: " to request one. Each code can register one account.",
+    askBefore: "Need an invite? Contact ",
+    askAfter: " to request one.",
     mailSubject: "AIO Agent invite code request",
     askAdmin: "Ask your administrator for an invite code. Each code can register one account.",
   },

@@ -2,9 +2,11 @@ export const auth = {
   sessionExpired: "登录已过期，请重新登录。",
   restoring: "正在恢复登录…",
   brand: "一站",
+  heading: { login: "把事情交给一站", register: "开启你的一站", invite: "只差一个邀请码" },
+  passwordAlternative: "或使用账号密码",
   intro: {
-    login: "什么事情都在这里一站解决吧。用你的账号登录。",
-    register: "什么事情都在这里一站解决吧。用邀请码注册一个账号。",
+    login: "登录后，继续与你的 AI 助理一起工作。",
+    register: "创建账号，让你的 AI 助理开始工作。",
   },
   fields: {
     username: "账号",
@@ -19,7 +21,8 @@ export const auth = {
   passwordMismatch: "两次输入的密码不一样",
   google: {
     button: "使用 Google 登录 / 注册",
-    inviteIntro: "Google 登录成功。首次使用需要邀请码，完成后即可进入。",
+    inviteIntro: "首次使用需要邀请码，验证后即可进入。",
+    verified: "Google 账号已验证",
     waiting: "请在浏览器中完成 Google 登录，然后返回 App。",
     failed: "Google 登录未完成或已过期，请重试。",
     activate: "验证邀请码并进入",
@@ -29,8 +32,8 @@ export const auth = {
   },
   invite: {
     /** Split around the mailto link. */
-    askBefore: "还没有邀请码？发邮件到 ",
-    askAfter: " 申请。每个邀请码只能注册一个账号。",
+    askBefore: "需要邀请码？联系 ",
+    askAfter: " 申请。",
     mailSubject: "申请一站邀请码",
     askAdmin: "邀请码向管理员索取，每个邀请码只能注册一个账号。",
   },
