@@ -131,7 +131,10 @@ test("a saved Google sign-in shows as one, on the card and on the vault page, wi
   const google: VaultEntry = { id: "vault_g", site: "notion.so", method: "google", username: "", createdAt: 1, updatedAt: 1, lastUsedAt: null };
   const { logins } = await setup(page, [google]);
   const card = page.getByRole("group", { name: "登录 www.opentable.com" });
-  await card.getByRole("button", { name: "用 Google 登录", exact: true }).first().click();
+  // The saved sign-in comes first once the vault has answered; until then only the plain Google button is there.
+  const googleButtons = card.getByRole("button", { name: "用 Google 登录", exact: true });
+  await expect(googleButtons).toHaveCount(2);
+  await googleButtons.first().click();
   await expect.poll(() => logins).toEqual([{ tab: "t1", entryId: "vault_g" }]);
 
   if (info.project.name.startsWith("mobile")) await page.getByRole("button", { name: "打开导航" }).click();

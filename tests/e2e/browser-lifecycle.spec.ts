@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { makeConversation, mockConsole } from "./mock-api";
+import { NOVNC_ASSET_VERSION } from "../../src/control/sandbox/novncPatch";
 
 /**
  * Browser lifecycle in the workspace panel.
@@ -210,7 +211,7 @@ test("the workspace browser is the sandbox desktop (noVNC), with no separate des
   await page.getByRole("button", { name: "工作区", exact: true }).first().click();
   await expect(page.getByRole("tab", { name: "浏览器" })).toHaveAttribute("aria-selected", "true");
   await expect(page.locator(".workspace iframe")).toBeVisible();
-  expect(tickets[0]).toBe("/vnc/vnc.html?autoconnect=1&resize=scale&reconnect=1&path=ws&aio=4");
+  expect(tickets[0]).toBe(`/vnc/vnc.html?autoconnect=1&resize=scale&reconnect=1&path=ws&aio=${NOVNC_ASSET_VERSION}`);
   await expect(page.getByRole("tab", { name: "桌面" })).toHaveCount(0);
   await expect(page.getByRole("form", { name: "向网页输入" })).toHaveCount(0);
   expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);

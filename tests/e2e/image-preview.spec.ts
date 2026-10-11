@@ -51,6 +51,8 @@ for (const [label, size] of [["portrait", [1024, 1536]], ["landscape", [1536, 10
       await inline.click();
       const image = page.getByTestId("file-preview-image");
       await expect.poll(() => image.evaluate((el) => (el as HTMLImageElement).naturalWidth)).toBe(size[0]);
+      // Measured where it settles: the preview slides up from below the screen as it opens.
+      await page.locator(".file-preview-overlay").evaluate((el) => Promise.all(el.getAnimations({ subtree: true }).filter((a) => a.effect?.getComputedTiming().iterations !== Infinity).map((a) => a.finished)));
       await expect.poll(async () => { const { img, box } = await fits(page); return img.y >= box.y - 1 && img.y + img.height <= box.y + box.height + 1; }).toBe(true);
       const { img, box, head, scrolls } = await fits(page);
       expect(scrolls).toBe(false);
