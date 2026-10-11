@@ -605,9 +605,10 @@ test("a task that needs you in the browser shows why, hands you its own tab to o
     await press(info, panel.getByRole("button", { name: "切回这个页面", exact: true }));
     await expect.poll(() => acts.length).toBe(2);
     expect(acts[1]).toEqual({ tab: "t1", action: "focus" });
-    // The desktop fills the panel, and the panel fits the screen.
+    // The desktop's frame fills the panel (on a phone the picture sits at its own aspect, the black strip under it
+    // holds the controls), and the panel fits the screen.
     const viewport = page.viewportSize()!;
-    const desktop = (await panel.locator("iframe").boundingBox())!;
+    const desktop = (await panel.locator(".desktop-frame").boundingBox())!;
     expect(desktop.height).toBeGreaterThan(viewport.height * 0.5);
     expect(desktop.y + desktop.height).toBeLessThanOrEqual(viewport.height + 1);
     expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
@@ -660,12 +661,12 @@ test("a link in a reply opens in the person's own tab, operated on the desktop l
     expect(page.context().pages()).toHaveLength(1);
     await expect(panel).toContainText("OpenTable: Nopa");
     await expect(panel.locator('iframe[title="沙箱桌面"]')).toHaveAttribute("src", /vnc\.html/);
-    // On a phone the desktop is 1.6 times the screen's width; a swipe on the black around it pans.
+    // On a phone the desktop is 1.3 times the screen's width (PHONE_ZOOM); a swipe on the black around it pans.
     const frame = panel.locator(".desktop-frame");
     const geometry = await frame.evaluate((el) => ({ box: el.clientWidth, frame: el.querySelector("iframe")!.getBoundingClientRect().width, scroll: el.scrollWidth }));
     if (info.project.name.startsWith("mobile")) {
-        expect(Math.abs(geometry.frame - geometry.box * 1.6)).toBeLessThan(2);
-        expect(geometry.scroll).toBeGreaterThan(geometry.box * 1.5);
+        expect(Math.abs(geometry.frame - geometry.box * 1.3)).toBeLessThan(2);
+        expect(geometry.scroll).toBeGreaterThan(geometry.box * 1.2);
         // It opens on the middle of the desktop, not its left edge.
         expect(Math.abs((await frame.evaluate((el) => el.scrollLeft)) - (geometry.scroll - geometry.box) / 2)).toBeLessThan(2);
         // The desktop's controls sit in the black strip under it, where noVNC's left bar used to be.
@@ -685,7 +686,7 @@ test("a link in a reply opens in the person's own tab, operated on the desktop l
         const picture = panel.locator('iframe[title="沙箱桌面"]');
         await gesture("gesturestart", 100);
         await gesture("gesturemove", 150);
-        await expect.poll(async () => (await picture.boundingBox())!.width).toBeCloseTo(geometry.frame * 1.5, 0);
+        await expect.poll(async () => (await picture.boundingBox())!.width).toBeCloseTo(Math.floor(geometry.box * 1.3 * 1.5), 0);
         await gesture("gestureend", 150);
         await gesture("gesturestart", 100);
         await gesture("gesturemove", 10);
