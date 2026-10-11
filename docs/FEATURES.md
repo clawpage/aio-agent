@@ -475,7 +475,7 @@ Jev（TypeSafe System One）根据状态和选项返回选择、各选项概率�
 
 设置 `PA_HA_MCP_URL`（如 `http://<HA 地址>:8124/api/mcp`，HA 官方 MCP Server 集成）后：
 
-- **授权**：只有 `PA_HA_MCP_ACCOUNTS` 列出的用户名可用（owner 也需列出）。现有部署只授权 `betaw`。
+- **授权**：只有 `PA_HA_MCP_ACCOUNTS` 列出的用户名可用（owner 也需列出）。现有部署授权 `betaw`、`owner`、`cr`。
 - **接入**：获准账号注册 `aio_ha`（成员网关 `/ha/<运行时令牌>/mcp`），网关附加 HA 长期访问令牌（`PA_HA_MCP_SECRETS_FILE` 中的 `HA_MCP_TOKEN`；
   compose 用 `AIO_SECRET_HA_MCP` 挂载）。
 - **能力范围由 HA 决定**：只提供「暴露给 Assist」的实体，工具为 HA 意图（`HassTurnOn`、`HassLightSet`、`GetLiveContext` 等）。
