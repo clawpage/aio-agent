@@ -50,6 +50,9 @@ test("a finished task whose tab was closed keeps a snapshot of its page, and one
   const card = page.getByRole("group", { name: "任务浏览器：页面已关闭" });
   await expect(card).toContainText("Amazon.com Checkout");
   await expect(card).toContainText("www.amazon.com");
+  // A strip until asked: the snapshot opens with a tap on it.
+  await expect(card.getByRole("img")).toHaveCount(0);
+  await card.getByRole("button", { name: /展开页面预览/ }).click();
   await expect(card.getByRole("img", { name: /上次页面快照/ })).toBeVisible();
   await card.scrollIntoViewIfNeeded();
   const picture = card.getByRole("img", { name: /上次页面快照/ });

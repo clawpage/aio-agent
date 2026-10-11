@@ -38,8 +38,8 @@ function place(url: string): string {
 }
 
 /**
- * A task's browser, inside its card: a live preview of the tab its agent works
- * in, who is driving it, and the hand-over. Taking over shuts the agent out of
+ * A task's browser, inside its card: a one-line strip of who is driving the tab
+ * its agent works in and the hand-over; its live preview opens on a tap. Taking over shuts the agent out of
  * the task's own tab and opens a panel operating just that tab, until you hand
  * it back; an agent that asked for you continues right where it waited.
  */
@@ -53,6 +53,8 @@ export function TaskBrowser({ task, onReveal }: { task: Task; onReveal: () => vo
   const [consoleOpen, setConsoleOpen] = useState(false);
   // Watching the agent's page in the big view, before (or without) taking it over.
   const [watching, setWatching] = useState(false);
+  // The strip stays one line in the feed until the person asks for the picture.
+  const [expanded, setExpanded] = useState(false);
   const consoleTarget = useMemo(() => taskConsoleTarget(task.id), [task.id]);
   const live = LIVE.has(task.status);
   // The feed summary changes the moment the agent asks for you or you take over.
@@ -108,6 +110,17 @@ export function TaskBrowser({ task, onReveal }: { task: Task; onReveal: () => vo
     }
   };
 
+  // Opening the preview shows the page as it is now, not the picture of the last refresh.
+  const toggle = () => {
+    if (!expanded) {
+      const now = Date.now();
+      if (shot.current) shot.current.at = now;
+      setShotAt(now);
+      setShotFailed(false);
+    }
+    setExpanded((v) => !v);
+  };
+
   const tab = pickTab(tabs);
   const last = task.browser?.last;
   if (!tab && last) {
@@ -115,23 +128,28 @@ export function TaskBrowser({ task, onReveal }: { task: Task; onReveal: () => vo
     return (
       <div className="task-browser closed" role="group" aria-label={t.browser.task.closedGroup}>
         <div className="task-browser-head">
-          <span className="task-browser-state closed">{t.browser.task.closed}</span>
-          <span className="task-browser-site" title={last.url}>
-            {name}
-            <span className="muted"> · {host(last.url)}</span>
-          </span>
-        </div>
-        <p className="task-browser-hint">{t.browser.task.closedHint}</p>
-        {last.shot && (
-          <button type="button" className="task-browser-shot" onClick={() => void reopen()} disabled={busy} aria-label={t.browser.task.reopenLabel}>
-            <img src={api.taskBrowserLastShotUrl(task.id, last.at)} alt={t.browser.task.lastShotAlt(name)} loading="lazy" />
-            <span className="task-browser-shot-badge">{t.browser.task.lastShot}</span>
+          <button type="button" className="task-browser-toggle" aria-expanded={expanded} aria-label={expanded ? t.browser.task.hidePreview(name) : t.browser.task.showPreview(name)} onClick={toggle}>
+            <span className="task-browser-state closed">{t.browser.task.closed}</span>
+            <span className="task-browser-site" title={last.url}>
+              {name}
+              <span className="muted"> · {host(last.url)}</span>
+            </span>
+            <span className="task-browser-chevron" aria-hidden="true">›</span>
           </button>
-        )}
-        {error && <p className="error tiny">{error}</p>}
-        <div className="task-actions">
-          <button type="button" className="primary tiny" disabled={busy} onClick={() => void reopen()}>{busy ? t.browser.task.opening : t.browser.task.reopen}</button>
+          <div className="task-actions">
+            <button type="button" className="primary tiny" disabled={busy} onClick={() => void reopen()}>{busy ? t.browser.task.opening : t.browser.task.reopen}</button>
+          </div>
         </div>
+        {expanded && <>
+          <p className="task-browser-hint">{t.browser.task.closedHint}</p>
+          {last.shot && (
+            <button type="button" className="task-browser-shot" onClick={() => void reopen()} disabled={busy} aria-label={t.browser.task.reopenLabel}>
+              <img src={api.taskBrowserLastShotUrl(task.id, last.at)} alt={t.browser.task.lastShotAlt(name)} loading="lazy" />
+              <span className="task-browser-shot-badge">{t.browser.task.lastShot}</span>
+            </button>
+          )}
+        </>}
+        {error && <p className="error tiny">{error}</p>}
       </div>
     );
   }
@@ -164,29 +182,34 @@ export function TaskBrowser({ task, onReveal }: { task: Task; onReveal: () => vo
   return (
     <div className={`task-browser ${state}`} role="group" aria-label={t.browser.task.group(label)}>
       <div className="task-browser-head">
-        <span className={`task-browser-state ${state}`}>{label}</span>
-        <span className="task-browser-site" title={tab.url}>
-          {place(tab.url)}
-        </span>
-        {tabs.length > 1 && <span className="muted tiny">{t.browser.task.tabCount(tabs.length)}</span>}
+        <button type="button" className="task-browser-toggle" aria-expanded={expanded} aria-label={expanded ? t.browser.task.hidePreview(place(tab.url)) : t.browser.task.showPreview(place(tab.url))} onClick={toggle}>
+          <span className={`task-browser-state ${state}`}>{label}</span>
+          <span className="task-browser-site" title={tab.url}>
+            {place(tab.url)}
+          </span>
+          {tabs.length > 1 && <span className="muted tiny">{t.browser.task.tabCount(tabs.length)}</span>}
+          <span className="task-browser-chevron" aria-hidden="true">›</span>
+        </button>
+        <div className="task-actions">
+          {waiting && <button type="button" className={signIn ? "ghost tiny" : "primary tiny"} disabled={busy} onClick={() => void control("take")}>{t.browser.task.takeOver}</button>}
+          {human && <>
+            <button type="button" className="primary tiny" disabled={busy} onClick={() => void control("release")}>{live ? t.browser.task.handBack : t.browser.task.endViewing}</button>
+            <button type="button" className="ghost tiny" onClick={() => setConsoleOpen(true)}>{t.browser.task.operate}</button>
+          </>}
+          {state === "ai" && <button type="button" className="ghost tiny" disabled={busy} onClick={() => void control("take")}>{t.browser.task.take}</button>}
+          {state === "done" && <button type="button" className="ghost tiny" disabled={busy} onClick={() => setWatching(true)}>{t.browser.task.viewInBrowser}</button>}
+        </div>
       </div>
       {waiting && !signIn && <p className="task-browser-reason">{tab.request!.reason}</p>}
-      {human && <p className="task-browser-hint">{live ? t.browser.task.pausedHint : t.browser.task.endedHint}</p>}
-      {!shotFailed && (
-        <button type="button" className="task-browser-shot" onClick={() => (human ? setConsoleOpen(true) : setWatching(true))} disabled={busy} aria-label={human ? t.browser.task.operateLabel : t.browser.task.viewLabel}>
-          <img src={api.taskBrowserScreenshotUrl(task.id, tab.id, shotAt)} alt={t.browser.task.shotAlt(place(tab.url))} loading="lazy" onError={() => setShotFailed(true)} />
-        </button>
-      )}
+      {expanded && <>
+        {human && <p className="task-browser-hint">{live ? t.browser.task.pausedHint : t.browser.task.endedHint}</p>}
+        {!shotFailed && (
+          <button type="button" className="task-browser-shot" onClick={() => (human ? setConsoleOpen(true) : setWatching(true))} disabled={busy} aria-label={human ? t.browser.task.operateLabel : t.browser.task.viewLabel}>
+            <img src={api.taskBrowserScreenshotUrl(task.id, tab.id, shotAt)} alt={t.browser.task.shotAlt(place(tab.url))} loading="lazy" onError={() => setShotFailed(true)} />
+          </button>
+        )}
+      </>}
       {error && <p className="error tiny">{error}</p>}
-      <div className="task-actions">
-        {waiting && <button type="button" className={signIn ? "ghost tiny" : "primary tiny"} disabled={busy} onClick={() => void control("take")}>{t.browser.task.takeOver}</button>}
-        {human && <>
-          <button type="button" className="primary tiny" disabled={busy} onClick={() => void control("release")}>{live ? t.browser.task.handBack : t.browser.task.endViewing}</button>
-          <button type="button" className="ghost tiny" onClick={() => setConsoleOpen(true)}>{t.browser.task.operate}</button>
-        </>}
-        {state === "ai" && <button type="button" className="ghost tiny" disabled={busy} onClick={() => void control("take")}>{t.browser.task.take}</button>}
-        {state === "done" && <button type="button" className="ghost tiny" disabled={busy} onClick={() => setWatching(true)}>{t.browser.task.viewInBrowser}</button>}
-      </div>
       <PopupPresence>{((human && consoleOpen) || (!human && watching)) && (
         <TaskConsole
           target={consoleTarget}

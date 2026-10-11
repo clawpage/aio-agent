@@ -579,6 +579,10 @@ test("a task that needs you in the browser shows why, hands you its own tab to o
     await page.route("**/api/workspace/ticket", async r => { tickets.push(r.request().postDataJSON().next); await r.fulfill({ json: { ticket: "t", origin: "http://127.0.0.1:4289", url: "http://127.0.0.1:4289/vnc/vnc.html?ticket=t", expiresAt: Date.now() + 60_000 } }); });
     const card = page.getByRole("group", { name: "任务浏览器：需要你操作" });
     await expect(card).toContainText("请登录 OpenTable 账号");
+    // One strip in the feed, with the hand-over on it; the preview opens on a tap.
+    await expect(card.getByRole("img")).toHaveCount(0);
+    expect((await card.boundingBox())!.height).toBeLessThan(110);
+    await card.getByRole("button", { name: /展开页面预览/ }).click();
     await expect(card.getByRole("img", { name: /页面预览/ })).toBeVisible();
     await expect(page.locator(".chat-sub .turn-pill.you")).toHaveText("1 件等你操作浏览器");
     await expect(page.getByRole("button", { name: "展开任务：订餐厅" })).toContainText("需要你操作浏览器");
@@ -856,6 +860,10 @@ test("a running task's browser card keeps its tabs live but retakes the preview 
     await page.clock.install();
     await setup(page, [row]);
     const card = page.getByRole("group", { name: "任务浏览器：AI 操作中" });
+    // Collapsed, the card reads the tabs but takes no picture.
+    await expect.poll(() => lists).toBeGreaterThanOrEqual(1);
+    expect(shots).toBe(0);
+    await card.getByRole("button", { name: /展开页面预览/ }).click();
     await expect(card.getByRole("img", { name: /页面预览/ })).toBeVisible();
     await expect.poll(() => shots).toBe(1);
     const listed = lists;
@@ -874,6 +882,26 @@ test("a running task's browser card keeps its tabs live but retakes the preview 
     // Unchanged again, the preview is still retaken at the slower cadence.
     await page.clock.runFor(16_000);
     await expect.poll(() => shots).toBe(3);
+});
+test("a task's phone card is one strip until tapped, and only then takes pictures of the screen", async ({ page }, info) => {
+    const row: Task = { ...task(1, "needs_input"), title: "收验证码", clarification: "请在手机上完成验证", phone: true };
+    let shots = 0;
+    await page.route("**/api/phone/screenshot*", r => { shots += 1; return r.fulfill({ contentType: "image/png", body: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==", "base64") }); });
+    await setup(page, [row]);
+    const card = page.getByRole("group", { name: "任务手机：需要你在手机上操作" });
+    await expect(card.getByRole("button", { name: "去手机操作", exact: true })).toBeVisible();
+    await expect(card.getByRole("button", { name: "完成，继续", exact: true })).toBeVisible();
+    await expect(card.getByRole("img")).toHaveCount(0);
+    expect((await card.boundingBox())!.height).toBeLessThan(110);
+    await page.waitForTimeout(300);
+    expect(shots).toBe(0);
+    await card.screenshot({ path: info.outputPath("phone-strip.png") });
+    await press(info, card.getByRole("button", { name: "展开手机画面" }));
+    await expect(card.getByRole("img", { name: "手机屏幕" })).toBeVisible();
+    await expect.poll(() => shots).toBe(1);
+    await press(info, card.getByRole("button", { name: "收起手机画面" }));
+    await expect(card.getByRole("img")).toHaveCount(0);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
 });
 test("a stuck first request never holds the page on loading", async ({ page }) => {
     await mockConsole(page, { conversations: [] });
@@ -905,6 +933,7 @@ test("tapping the preview watches the agent's page first; only taking over pause
     await page.route("**/api/workspace/ticket", async r => { tickets.push(r.request().postDataJSON().next); await r.fulfill({ json: { ticket: "t", origin: "http://127.0.0.1:4289", url: `http://127.0.0.1:4289/vnc/vnc.html?ticket=t${tickets.length}`, expiresAt: Date.now() + 60_000 } }); });
 
     const card = page.getByRole("group", { name: "任务浏览器：AI 操作中" });
+    await press(info, card.getByRole("button", { name: /展开页面预览/ }));
     await press(info, card.getByRole("button", { name: "查看这个页面" }));
     const watch = page.getByRole("dialog", { name: "查看任务页面" });
     await expect(watch).toBeVisible();

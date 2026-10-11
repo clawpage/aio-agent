@@ -41,5 +41,7 @@ export const phone: typeof zh = {
     finishTitle: "Finish this step on the phone",
     title: "Phone",
     close: "Close",
+    showPreview: "Show phone screen",
+    hidePreview: "Hide phone screen",
   },
 };

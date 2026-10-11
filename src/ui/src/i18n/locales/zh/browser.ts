@@ -109,5 +109,7 @@ export const browser = {
     consoleView: "查看任务页面",
     manualTakeover: "人工接管",
     operateThis: "操作这个页面",
+    showPreview: (place: string) => `展开页面预览：${place}`,
+    hidePreview: (place: string) => `收起页面预览：${place}`,
   },
 };

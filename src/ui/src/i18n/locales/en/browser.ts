@@ -111,5 +111,7 @@ export const browser: typeof zh = {
     consoleView: "View task page",
     manualTakeover: "Take over",
     operateThis: "Use this page",
+    showPreview: (place: string) => `Show page preview: ${place}`,
+    hidePreview: (place: string) => `Hide page preview: ${place}`,
   },
 };

@@ -39,5 +39,7 @@ export const phone = {
     finishTitle: "在手机上完成这一步",
     title: "手机",
     close: "关闭",
+    showPreview: "展开手机画面",
+    hidePreview: "收起手机画面",
   },
 };

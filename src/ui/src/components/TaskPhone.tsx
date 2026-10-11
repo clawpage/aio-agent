@@ -10,8 +10,8 @@ const SHOT_MS = 10_000;
 
 /**
  * The owner's phone inside the card of a task that used it, like the task
- * browser: a recent picture of the screen, and a tap opens the live phone to
- * operate. A task waiting for the person (a code to type, a step to confirm)
+ * browser: a one-line strip that opens to a recent picture of the screen, and
+ * the picture opens the live phone to operate. A task waiting for the person (a code to type, a step to confirm)
  * gets "done, continue", which answers it for them.
  */
 export function TaskPhone({ task, onDone }: { task: Task; onDone: () => void }) {
@@ -19,19 +19,22 @@ export function TaskPhone({ task, onDone }: { task: Task; onDone: () => void }) 
   const [shotAt, setShotAt] = useState(() => Date.now());
   const [shotFailed, setShotFailed] = useState(false);
   const [open, setOpen] = useState(false);
+  const [expanded, setExpanded] = useState(false);
   const overlay = useRef<HTMLDivElement>(null);
 
-  // A fresh picture every few seconds while the card is on a visible page and the live view is closed.
+  // A fresh picture every few seconds while the preview is open on a visible page and the live view is closed.
   useEffect(() => {
-    if (open) return;
-    setShotAt(Date.now());
+    if (open || !expanded) return;
     const timer = window.setInterval(() => {
       if (document.visibilityState === "visible") setShotAt(Date.now());
     }, SHOT_MS);
     return () => window.clearInterval(timer);
-  }, [open, task.status]);
+  }, [open, expanded]);
+  useEffect(() => { if (expanded) setShotAt(Date.now()); }, [task.status]);
 
-  const close = useCallback(() => setOpen(false), []);
+  // Back from the live phone, or opening the preview: the picture is taken now, once.
+  const close = useCallback(() => { setOpen(false); setShotAt(Date.now()); }, []);
+  const toggle = () => { if (!expanded) setShotAt(Date.now()); setExpanded((v) => !v); };
   useEffect(() => {
     if (!open) return;
     const escape = (event: KeyboardEvent) => { if (event.key === "Escape") close(); };
@@ -39,27 +42,32 @@ export function TaskPhone({ task, onDone }: { task: Task; onDone: () => void }) 
     return () => window.removeEventListener("keydown", escape);
   }, [open, close]);
 
-  const done = () => { setOpen(false); onDone(); };
+  const done = () => { close(); onDone(); };
   const label = waiting ? t.phone.task.waiting : t.phone.task.working;
 
   return (
     <div className={`task-browser task-phone ${waiting ? "request" : "ai"}`} role="group" aria-label={t.phone.task.group(label)}>
       <div className="task-browser-head">
-        <span className={`task-browser-state ${waiting ? "request" : "ai"}`}>{label}</span>
-        <span className="task-browser-site">{t.phone.task.site}</span>
+        <button type="button" className="task-browser-toggle" aria-expanded={expanded} aria-label={expanded ? t.phone.task.hidePreview : t.phone.task.showPreview} onClick={toggle}>
+          <span className={`task-browser-state ${waiting ? "request" : "ai"}`}>{label}</span>
+          <span className="task-browser-site">{t.phone.task.site}</span>
+          <span className="task-browser-chevron" aria-hidden="true">›</span>
+        </button>
+        <div className="task-actions">
+          <button type="button" className={waiting ? "primary tiny" : "ghost tiny"} onClick={() => setOpen(true)}>{waiting ? t.phone.task.goOperate : t.phone.task.view}</button>
+          {waiting && <button type="button" className="ghost tiny" onClick={done}>{t.phone.task.done}</button>}
+        </div>
       </div>
-      {waiting && <p className="task-browser-hint">{t.phone.task.waitingHint}</p>}
-      {shotFailed
-        ? <p className="task-browser-hint">{t.phone.task.disconnected}</p>
-        : (
-          <button type="button" className="task-browser-shot task-phone-shot" onClick={() => setOpen(true)} aria-label={t.phone.task.openLabel}>
-            <img src={api.phoneScreenshotUrl(shotAt)} alt={t.phone.task.shotAlt} onLoad={() => setShotFailed(false)} onError={() => setShotFailed(true)} />
-          </button>
-        )}
-      <div className="task-actions">
-        <button type="button" className={waiting ? "primary tiny" : "ghost tiny"} onClick={() => setOpen(true)}>{waiting ? t.phone.task.goOperate : t.phone.task.view}</button>
-        {waiting && <button type="button" className="ghost tiny" onClick={done}>{t.phone.task.done}</button>}
-      </div>
+      {expanded && <>
+        {waiting && <p className="task-browser-hint">{t.phone.task.waitingHint}</p>}
+        {shotFailed
+          ? <p className="task-browser-hint">{t.phone.task.disconnected}</p>
+          : (
+            <button type="button" className="task-browser-shot task-phone-shot" onClick={() => setOpen(true)} aria-label={t.phone.task.openLabel}>
+              <img src={api.phoneScreenshotUrl(shotAt)} alt={t.phone.task.shotAlt} onLoad={() => setShotFailed(false)} onError={() => setShotFailed(true)} />
+            </button>
+          )}
+      </>}
       {/* On the body: a card inside the feed sits under transformed ancestors, which would trap a fixed overlay. */}
       <PopupPresence>{open && createPortal(
         <PopupSurface ref={overlay} className="task-console-overlay" role="presentation" onClick={(e) => { if (e.target === e.currentTarget) close(); }}>
