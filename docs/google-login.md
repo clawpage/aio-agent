@@ -20,6 +20,8 @@ Google 邮箱用于展示，不能据此自动关联既有账号或获得 owner 
 
 Android 的 `ai.clawpage.agent` 用 Custom Tab 打开授权入口；iOS 用 AuthenticationServices。原生回调为 `aioagent://auth?ticket=...`。ticket 只能与发起 App WebView 持有的 HttpOnly Cookie 配对消费一次，单独拦截深链不能登录；待邀请码阶段只能读取本人的待注册邮箱。桥接回调仅交给 `https://agent.clawpage.ai` 主页面。临时 state、PKCE verifier 与 nonce 在 10 分钟后失效，下一次登录发起时清理；成功或取消立即删除相应记录。
 
+Android 在打开系统浏览器前及 Activity 暂停时调用 `CookieManager.flush()`，保存发起登录的 HttpOnly Cookie。仅把 Cookie 留在 WebView 内存里会使授权期间进程被结束后的 ticket 兑换失败；不能通过取消 Cookie 绑定来修复。
+
 首次邀请码支持已有的规范化、撤销、一次性消费、用户名校验、IP 错误次数限制。身份关联和邀请码消费在同一个数据库事务内，失败不留下成员账号或已消费的邀请码。
 
 ## 验证入口
@@ -31,3 +33,11 @@ Android 的 `ai.clawpage.agent` 用 Custom Tab 打开授权入口；iOS 用 Auth
 - Android 重新打包后安装到连接的手机，实际验证系统浏览器认证、返回 App、首次邀请码、再次登录。原生桥改动需要新 APK，不能靠 UI 发布替代。
 
 参考：[Google OpenID Connect](https://developers.google.com/identity/openid-connect/openid-connect)、[Google OAuth 政策](https://developers.google.com/identity/protocols/oauth2/policies)。
+
+## 2026-10-11 实际部署与真机验收
+
+Google Cloud 专用项目 `main-voltage-511319-c3` 已创建 Web 登录客户端并启用上述回调。凭据存于私有 `var/google-auth/`；当前 OAuth 仍为测试状态，仅加入开发者本人测试账号，正式开放还需补全品牌/隐私资料并切换发布状态。
+
+已有 compose 的 control 与 ui 两层已刷新并健康，公共双域 smoke 39/39 通过。Google 首次注册、无效邀请码拒绝、有效邀请码一次性消费、普通成员权限、再次登录免邀请码均在连接的 Galaxy Z Flip6（Android 16、正式签名 `ai.clawpage.agent`）实际验证。授权时结束 App 进程，再由真实 Google 回调冷启动 App，能直接进入主会话；随后独立结束/重启 App 仍保留登录。Web UI 的 Google 彩色标志及移动布局已在该手机检查。
+
+这不代表 Play 已发布，亦不代表 iOS 真机 Google 回调或其他 Google 账号已经验收。

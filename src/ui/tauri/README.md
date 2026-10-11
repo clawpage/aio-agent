@@ -143,7 +143,19 @@ debug certificate, and compare every non-signature ZIP entry with the signed
 release APK. This validates release content on the device, but not installation
 of a Google Play-signed APK; final acceptance still requires a Play test track.
 
-## Verified (2026-10-11)
+## Google acceptance (2026-10-11)
+
+The upload-signed `ai.clawpage.agent` arm64 release was installed on the connected
+Galaxy Z Flip6 (Android 16). Real Google authorization in device Chrome returned
+to the App; the first visit rejected an invalid invite, consumed a valid invite
+once and created a member. A repeat Google sign-in needed no invite. The cold
+return test stopped the App process while Chrome was authorizing; after fixing
+Cookie persistence before browser launch, the real callback cold-started the App
+and entered the member inbox. A separate process restart retained the session.
+The deployed sign-in page's Google logo and layout were visually checked on this
+phone. Google Cloud is still in testing mode; Play submission is pending.
+
+## Initial acceptance (2026-10-11)
 
 This initial acceptance used the previous application identifier. After the
 identifier correction and Google authentication bridge change, the new signed

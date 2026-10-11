@@ -5,6 +5,7 @@ import android.content.Intent
 import org.json.JSONObject
 import android.net.Uri
 import android.webkit.WebView
+import android.webkit.CookieManager
 import android.widget.Toast
 import android.view.View
 import androidx.activity.enableEdgeToEdge
@@ -58,6 +59,10 @@ class MainActivity : TauriActivity() {
           val url = Uri.parse(message.data ?: "")
           if ((url.scheme == "https" || url.scheme == "http") && url.host != null) {
             try {
+              // /google/start has just set the initiating HttpOnly cookie. Persist
+              // it before switching apps: Android may kill this process while the
+              // user is authorizing, and the callback must retain that binding.
+              CookieManager.getInstance().flush()
               CustomTabsIntent.Builder()
                 .setShowTitle(true)
                 .setInitialActivityHeightPx((resources.displayMetrics.heightPixels * 0.9).toInt())
@@ -69,6 +74,10 @@ class MainActivity : TauriActivity() {
         }
       }
     }
+  }
+  override fun onPause() {
+    super.onPause()
+    CookieManager.getInstance().flush()
   }
   override fun onCreate(savedInstanceState: Bundle?) {
     enableEdgeToEdge()
