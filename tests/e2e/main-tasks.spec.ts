@@ -839,6 +839,21 @@ test("a finished task's browser card stays inside the screen, however long the p
     expect(await page.locator(".task-feed").evaluate(n => n.scrollWidth - n.clientWidth)).toBeLessThanOrEqual(0);
     await page.screenshot({ path: info.outputPath("report-browser.png") });
 });
+test("a browser strip with several tabs shows just their number and stays one line on a phone", async ({ page }, info) => {
+    await page.setViewportSize({ width: 360, height: 760 });
+    const row: Task = { ...task(1), title: "比价", browser: { tabs: 2, request: null, human: false } };
+    const tab = (id: string, url: string) => ({ id, title: id, url, lastUsed: 1, finishedAt: null, holder: "ai", request: null });
+    await page.route("**/api/tasks/task-1/browser", r => r.fulfill({ json: { tabs: [tab("t1", "https://www.amazon.com/baby-reg/completion-discount/purchase-history"), tab("t2", "https://www.target.com/")] } }));
+    await setup(page, [row]);
+    const card = page.getByRole("group", { name: "任务浏览器：AI 操作中" });
+    const count = card.locator(".task-browser-count");
+    await expect(count).toHaveText("2");
+    await expect(count).toHaveAttribute("title", "共 2 个标签页");
+    const toggle = (await card.locator(".task-browser-toggle").boundingBox())!;
+    expect(toggle.height).toBeLessThanOrEqual(30);
+    expect((await count.boundingBox())!.height).toBeLessThanOrEqual(20);
+    await card.screenshot({ path: info.outputPath("browser-strip-tabs.png") });
+});
 test("only tasks that used the browser ask for their tabs", async ({ page }) => {
     const asked: string[] = [];
     await page.route("**/api/tasks/*/browser", r => { asked.push(new URL(r.request().url()).pathname.split("/")[3]!); return r.fulfill({ json: { tabs: [] } }); });

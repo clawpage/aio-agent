@@ -187,7 +187,7 @@ export function TaskBrowser({ task, onReveal }: { task: Task; onReveal: () => vo
           <span className="task-browser-site" title={tab.url}>
             {place(tab.url)}
           </span>
-          {tabs.length > 1 && <span className="muted tiny">{t.browser.task.tabCount(tabs.length)}</span>}
+          {tabs.length > 1 && <span className="task-browser-count" title={t.browser.task.tabCount(tabs.length)}>{tabs.length}</span>}
           <span className="task-browser-chevron" aria-hidden="true">›</span>
         </button>
         <div className="task-actions">

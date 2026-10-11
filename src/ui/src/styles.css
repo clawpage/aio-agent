@@ -3398,6 +3398,8 @@ button.turn-pill:focus-visible { outline: 2px solid currentColor; outline-offset
 .task-browser-head { flex-wrap: wrap; gap: 4px 8px; }
 .task-browser-toggle { display: flex; align-items: center; gap: 8px; flex: 1 1 160px; min-width: 0; min-height: 28px; margin: 0; padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
 .task-browser-toggle .task-browser-site { flex: 1 1 auto; }
+/* Only the number, like a phone browser's tab button; the full wording is its tooltip. */
+.task-browser-count { flex: none; min-width: 18px; height: 18px; padding: 0 4px; box-sizing: border-box; border: 1.5px solid currentColor; border-radius: 5px; color: var(--text-dim); font-size: 11px; font-weight: 600; line-height: 15px; text-align: center; white-space: nowrap; }
 .task-browser-chevron { flex: none; color: var(--text-dim); font-size: 16px; line-height: 1; transition: transform .15s ease; }
 .task-browser-toggle[aria-expanded="true"] .task-browser-chevron { transform: rotate(90deg); }
 .task-browser .task-browser-head .task-actions { flex: none; margin: 0 0 0 auto; gap: 6px; }
