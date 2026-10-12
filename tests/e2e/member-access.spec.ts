@@ -8,10 +8,13 @@ test('member has a clean inbox and no model or prompt configuration',async({page
  await page.goto('/');await expect(page.getByRole('heading',{name:'主会话',exact:true})).toBeVisible();
  if(info.project.name.startsWith('mobile'))await page.getByRole('button',{name:'打开导航'}).click();
  await expect(page.locator('.sidebar').getByRole('button',{name:'任务列表',exact:true})).toBeVisible();
- await expect(page.getByRole('button',{name:'配置',exact:true})).toHaveCount(0);
+ await page.locator('.sidebar').getByRole('button',{name:'配置',exact:true}).click();
+ await expect(page.getByRole('heading',{name:'界面语言',exact:true})).toBeVisible();
+ await expect(page.locator('.settings-card select option')).toHaveText(['中文','English','Español','繁體中文']);
+ await page.getByRole('button',{name:'← 返回会话',exact:true}).click();
  expect(calls.filter(s=>/^\/api\/(settings|models|capabilities)/.test(s))).toEqual([]);
  await expect(page.locator('body')).not.toContainText(/GPT-6|SOUL.md|推理强度/);
- if(info.project.name.startsWith('mobile')){await page.getByRole('button',{name:'关闭导航'}).click();await page.setViewportSize({width:360,height:844});}
+ if(info.project.name.startsWith('mobile'))await page.setViewportSize({width:360,height:844});
  expect(await page.evaluate(()=>document.documentElement.scrollWidth-innerWidth)).toBeLessThanOrEqual(1);
  await page.screenshot({path:info.outputPath('member.png')});
 });

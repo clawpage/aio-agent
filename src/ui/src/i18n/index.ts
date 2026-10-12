@@ -13,7 +13,7 @@ import { zhTW } from "./locales/zh-TW";
  * The language is chosen once at load: switching stores the choice and
  * reloads, so no component needs to re-render on a language change and plain
  * modules can use `t` too. Simplified Chinese is the default; other languages
- * are selected explicitly on the sign-in page, sidebar or settings page.
+ * are selected explicitly on the settings page.
  */
 export const LOCALES = { "zh-CN": zh, en, es, "zh-TW": zhTW } satisfies Record<string, Messages>;
 export type Locale = keyof typeof LOCALES;

@@ -33,7 +33,7 @@ try {
     await login.goto(`http://127.0.0.1:${port}/login`);
     await expect(login.getByRole('button', { name: data.google, exact: true })).toBeVisible();
     if (!await login.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)) throw new Error(`Login overflows: ${data.ui}`);
-    await login.screenshot({ path: path.join(folder, `aio-agent-${data.store}-login.png`) });
+    await login.screenshot({ path: path.join(folder, `aio-agent-${data.store}-login-v2.png`) });
     const main = await context.newPage();
     await mockConsole(main, { conversations: [] });
     await main.route('**/api/auth/session', route => route.fulfill({ json: { authenticated: true, username: 'demo', role: 'member' } }));

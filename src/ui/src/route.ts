@@ -7,7 +7,7 @@
  *   /vault          password vault
  *   /usage          usage dashboard (owner)
  *   /gadget         the voice gadget account's conversation, read-only (owner)
- *   /settings       configuration (owner)
+ *   /settings       configuration (member: language only)
  *   /workspace      the workspace, over the main session
  * `/login` and `/register` stay outside any account; overlays such as a link's
  * browser console or a file preview do not change the address.
@@ -22,7 +22,7 @@ export interface AppRoute {
 
 const ACCOUNT = /^\/u\/[A-Za-z0-9_-]{2,40}(?=\/|$)/;
 const PAGES: Record<string, AppView> = { tasks: "tasks", schedules: "schedules", vault: "vault", usage: "usage", gadget: "gadget", settings: "settings" };
-export const OWNER_VIEWS: ReadonlySet<AppRoute["view"]> = new Set(["usage", "gadget", "settings"]);
+export const OWNER_VIEWS: ReadonlySet<AppRoute["view"]> = new Set(["usage", "gadget"]);
 
 /** What an address points at; anything unknown is the main session. */
 export function parseRoute(pathname: string): AppRoute {

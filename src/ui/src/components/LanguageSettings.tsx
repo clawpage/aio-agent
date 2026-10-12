@@ -1,13 +1,21 @@
 import { LOCALES, locale, setLocale, t, type Locale } from "../i18n";
 
-/** Available before sign-in and to members, without owner settings access. */
-export function LanguagePicker({ compact = false, disabled = false }: { compact?: boolean; disabled?: boolean }) {
-  return <label className={compact ? "language-picker" : "field"}>
+/** Shared by owner and member configuration pages. */
+export function LanguagePicker() {
+  return <label className="field">
     <span>{t.settings.language.title}</span>
-    <select aria-label={t.settings.language.title} value={locale} disabled={disabled} onChange={event => setLocale(event.target.value as Locale)}>
+    <select aria-label={t.settings.language.title} value={locale} onChange={event => setLocale(event.target.value as Locale)}>
       {Object.entries(LOCALES).map(([id, messages]) => <option key={id} value={id} lang={id}>{messages.settings.language.name}</option>)}
     </select>
   </label>;
+}
+
+/** Local preferences only: this component never requests owner settings. */
+export function MemberSettings({ onBack }: { onBack: () => void }) {
+  return <section className="settings" aria-label={t.settings.page.title}>
+    <header className="settings-head"><h2>{t.settings.page.title}</h2><span className="spacer"/><button type="button" className="ghost" onClick={onBack}>{t.settings.page.back}</button></header>
+    <div className="settings-body"><LanguageSettings/></div>
+  </section>;
 }
 
 /** The console's language (this browser only): each choice is named in its own language. */
