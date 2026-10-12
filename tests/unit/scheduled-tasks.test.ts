@@ -10,7 +10,7 @@ class PlanningCodex extends FakeCodex {
   plan: (data: { message: string; existingSchedules?: Array<{ id: string }> }) => object = (data) => ({ title: data.message, related: [], dependencies: [], resources: [] });
   async planTask(p: string) {
     this.prompts.push(p);
-    return JSON.stringify(this.plan(JSON.parse(p.split("\n").at(-1)!)));
+    return JSON.stringify(this.plan(JSON.parse(p.split("\n").findLast(l => l.startsWith("{"))!)));
   }
 }
 
@@ -54,7 +54,7 @@ describe("creating a schedule from the main session", () => {
     expect(s).toMatchObject({ title: "每日天气提醒", status: "active", run_count: 0, source_task_id: job.id, timezone: "America/Los_Angeles" });
     expect(s!.next_run_at).toBeGreaterThan(Date.now());
     // The dispatcher was told the time and zone to resolve "明早" against.
-    const payload = JSON.parse(codex.prompts[0]!.split("\n").at(-1)!);
+    const payload = JSON.parse(codex.prompts[0]!.split("\n").findLast(l => l.startsWith("{"))!);
     expect(payload.now).toMatch(/^\d{4}-\d{2}-\d{2} 周. \d{2}:\d{2}$/);
     expect(payload.timezone).toBe("America/Los_Angeles");
   });
@@ -108,8 +108,8 @@ describe("running schedules", () => {
     const run = tasks.view(tasks.get(after.last_task_id!)!);
     expect(run).toMatchObject({ title: "每日天气提醒", text: daily.instruction, schedule: { id: s!.id, rule: "每天 08:00" } });
     const turn = codex.startedTurns.at(-1)!;
-    expect(turn.text).toContain("第 1 次自动运行");
-    expect(turn.text).toContain("不要提问后等待");
+    expect(turn.text).toContain("This is run 1 of the scheduled task");
+    expect(turn.text).toContain("do not ask a question and wait");
   });
 
   it("does not stack runs while the previous one is still going, and gives the next run the previous result", async () => {
@@ -123,8 +123,8 @@ describe("running schedules", () => {
     due(id); fire(); await tick();
     const second = schedules()[0]!;
     expect(second.run_count).toBe(2);
-    expect(codex.startedTurns.at(-1)!.text).toContain("第 2 次自动运行");
-    expect(codex.startedTurns.at(-1)!.text).toContain("上一次运行的结果");
+    expect(codex.startedTurns.at(-1)!.text).toContain("This is run 2 of the scheduled task");
+    expect(codex.startedTurns.at(-1)!.text).toContain("the previous run's result");
     expect(JSON.parse((tasks.get(second.last_task_id!)!).plan_json!).related).toEqual([first]);
   });
 
@@ -162,7 +162,7 @@ describe("running schedules", () => {
     expect(after).toMatchObject({ id: before.id, title: "天气提醒（早晚）", status: "active", run_count: 0 });
     expect(JSON.parse(after!.spec_json as string)).toEqual({ kind: "daily", at: "07:30", times: ["07:30", "18:00"] });
     // The dispatcher saw what each existing schedule does, to keep it when only the time changes.
-    expect(JSON.parse(codex.prompts.at(-1)!.split("\n").at(-1)!).existingSchedules[0]).toMatchObject({ id: before.id, instruction: daily.instruction });
+    expect(JSON.parse(codex.prompts.at(-1)!.split("\n").findLast(l => l.startsWith("{"))!).existingSchedules[0]).toMatchObject({ id: before.id, instruction: daily.instruction });
   });
 
   it("refuses a change without the new rule, and does both when one message cancels a schedule and sets up another", async () => {

@@ -41,12 +41,13 @@ it("runs gadget messages in one executor session at medium effort, briefly, with
     await vi.waitFor(() => expect(h.codex.startedTurns.length).toBe(2));
     const turn = h.codex.startedTurns[1]!;
     expect(turn.effort).toBe("medium");
-    expect(turn.text).toContain("语音配件");
-    expect(turn.text).toContain("纯文本口语");
+    expect(turn.text).toContain("voice gadget session");
+    expect(turn.text).toContain("plain spoken text");
     // Other tasks are looked up with history_search / history_get, not pasted into every turn.
     expect(turn.text).toContain("history_search");
     expect(turn.text).not.toContain("比较三款婴儿推车");
-    expect(turn.text.length).toBeLessThan(1200);
+    // English prompt text: about twice the characters of the Chinese it replaced, the same few lines.
+    expect(turn.text.length).toBeLessThan(2600);
     expect(turn.text).not.toContain("```products");
     expect(planned).toBe(before);   // no dispatcher
 

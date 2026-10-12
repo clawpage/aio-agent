@@ -8,7 +8,7 @@ import { testConfig, testNode } from "../helpers/harness.js";
 describe("sandbox workspace seed", () => {
   it("documents the task, project and scratch layout and the browser tool tasks really have", () => {
     for (const expected of [
-      "/home/gem/workspace/tasks/<任务 id>/",
+      "/home/gem/workspace/tasks/<task id>/",
       ".tmp/",
       "/home/gem/workspace/projects/<name>/",
       "/home/gem/workspace/.scratch/",
@@ -46,7 +46,7 @@ describe("sandbox workspace seed", () => {
     const edited = "# 我的沙箱\n\n需要浏览器操作时优先用 aio browser\n- 我住在湾区\n";
     const merged = refreshWorkspaceAgents(edited);
     expect(merged.indexOf(WORKSPACE_AGENTS_END)).toBeLessThan(merged.indexOf("- 我住在湾区"));
-    expect(merged).toContain("与上面系统说明冲突的地方");
+    expect(merged).toContain("where it conflicts with the system notes above");
     expect(merged).toContain(edited.trimEnd());
     // ...and the next start leaves it alone apart from the block.
     expect(refreshWorkspaceAgents(merged)).toBe(merged);
@@ -190,9 +190,9 @@ describe("sandbox workspace seed", () => {
     expect(MAIL_SETUP_PY).toContain("oauth-clients.json");
     expect(MAIL_SETUP_PY).not.toMatch(/apps\.googleusercontent\.com|client-secret\.raw = "/);
     // Sending is allowed only after the user confirms a preview.
-    expect(MAIL_SKILL_MD).toContain("发送前必须确认");
+    expect(MAIL_SKILL_MD).toContain("you must confirm before sending");
     expect(MAIL_SKILL_MD).toContain("--send");
-    expect(MAIL_RO_SH).toContain("不是只读命令，已拒绝");
+    expect(MAIL_RO_SH).toContain("is not a read-only command; refused");
   });
 
   it("does not fail the whole seed when the skill directory cannot be created", async () => {

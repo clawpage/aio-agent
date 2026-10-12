@@ -125,31 +125,31 @@ export class ShareStore {
 
   /** Create or replace a page as a whole; the URL stays the same across updates. */
   publish(userId: string, name: string, input: { title?: unknown; files?: unknown }): SharePage {
-    if (!SHARE_NAME.test(name)) throw new ShareError(400, "页面名只能用小写字母、数字和连字符（最多 63 个字符）");
-    if (!Array.isArray(input.files) || input.files.length === 0) throw new ShareError(400, "没有文件");
-    if (input.files.length > SHARE_LIMITS.files) throw new ShareError(413, `文件数超过上限 ${SHARE_LIMITS.files}`);
+    if (!SHARE_NAME.test(name)) throw new ShareError(400, "The page name can only use lowercase letters, digits, and hyphens (at most 63 characters)");
+    if (!Array.isArray(input.files) || input.files.length === 0) throw new ShareError(400, "No files");
+    if (input.files.length > SHARE_LIMITS.files) throw new ShareError(413, `The number of files exceeds the limit of ${SHARE_LIMITS.files}`);
     const title = typeof input.title === "string" && input.title.trim() ? input.title.trim().slice(0, 200) : name;
     const files: Array<{ segments: string[]; data: Buffer }> = [];
     const seen = new Set<string>();
     let bytes = 0;
     for (const f of input.files as ShareFile[]) {
       const segments = typeof f?.path === "string" ? safeSegments(f.path) : null;
-      if (!segments || typeof f.data !== "string") throw new ShareError(400, `文件路径不合法：${String(f?.path).slice(0, 100)}`);
+      if (!segments || typeof f.data !== "string") throw new ShareError(400, `Invalid file path: ${String(f?.path).slice(0, 100)}`);
       const key = segments.join("/");
-      if (seen.has(key)) throw new ShareError(400, `文件重复：${key}`);
+      if (seen.has(key)) throw new ShareError(400, `Duplicate file: ${key}`);
       seen.add(key);
       const data = Buffer.from(f.data, "base64");
       bytes += data.byteLength;
-      if (bytes > SHARE_LIMITS.bytes) throw new ShareError(413, `页面总大小超过上限 ${SHARE_LIMITS.bytes / 1024 / 1024} MB`);
+      if (bytes > SHARE_LIMITS.bytes) throw new ShareError(413, `The total page size exceeds the limit of ${SHARE_LIMITS.bytes / 1024 / 1024} MB`);
       files.push({ segments, data });
     }
-    if (!seen.has("index.html")) throw new ShareError(400, "页面目录必须包含 index.html");
+    if (!seen.has("index.html")) throw new ShareError(400, "The page folder must contain index.html");
 
     const userDir = this.#userDir(userId);
     fs.mkdirSync(userDir, { recursive: true, mode: 0o700 });
     const target = path.join(userDir, name);
     if (!fs.existsSync(target) && this.list(userId).length >= SHARE_LIMITS.pages) {
-      throw new ShareError(409, `分享页面数已达上限 ${SHARE_LIMITS.pages}，请先删除不用的页面`);
+      throw new ShareError(409, `The number of shared pages has reached the limit of ${SHARE_LIMITS.pages}; delete pages that are no longer used first`);
     }
     // Build beside the target and swap, so a reader never sees a half-written page.
     const staging = path.join(userDir, `.staging-${randomBytes(6).toString("hex")}`);
@@ -198,26 +198,26 @@ export class ShareStore {
     const [, userId, name] = match as unknown as [string, string, string | undefined];
     try {
       if (req.method === "GET" && !name) return reply(200, { pages: this.list(userId) });
-      if (req.method === "DELETE" && name) return this.remove(userId, name) ? reply(204) : reply(404, { error: "页面不存在" });
+      if (req.method === "DELETE" && name) return this.remove(userId, name) ? reply(204) : reply(404, { error: "The page does not exist" });
       if (req.method !== "POST" || !name) return reply(405, { error: "method_not_allowed" });
       const chunks: Buffer[] = [];
       let size = 0;
       // base64 inflates the page by a third; leave room for the JSON around it.
       for await (const chunk of req) {
         size += (chunk as Buffer).length;
-        if (size > SHARE_LIMITS.bytes * 1.5) return reply(413, { error: `页面总大小超过上限 ${SHARE_LIMITS.bytes / 1024 / 1024} MB` });
+        if (size > SHARE_LIMITS.bytes * 1.5) return reply(413, { error: `The total page size exceeds the limit of ${SHARE_LIMITS.bytes / 1024 / 1024} MB` });
         chunks.push(chunk as Buffer);
       }
       let input: { title?: unknown; files?: unknown };
       try {
         input = JSON.parse(Buffer.concat(chunks).toString());
       } catch {
-        return reply(400, { error: "请求不是合法 JSON" });
+        return reply(400, { error: "The request is not valid JSON" });
       }
       reply(200, this.publish(userId, name, input));
     } catch (err) {
       if (err instanceof ShareError) reply(err.status, { error: err.message });
-      else reply(500, { error: "发布失败" });
+      else reply(500, { error: "Publishing failed" });
     }
   }
 

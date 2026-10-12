@@ -11,7 +11,7 @@ import { tokenize } from "./recall.js";
 
 export const AGREEMENT_KINDS = ["rule", "preference", "commitment", "fact"] as const;
 export type AgreementKind = (typeof AGREEMENT_KINDS)[number];
-const KIND_LABEL: Record<AgreementKind, string> = { rule: "规则", preference: "偏好", commitment: "约定", fact: "事实" };
+const KIND_LABEL: Record<AgreementKind, string> = { rule: "rule", preference: "preference", commitment: "commitment", fact: "fact" };
 export const AGREEMENT_TEXT_MAX = 300;
 const AGREEMENTS_MAX = 200;
 /** The standing block every execution thread is given once: this many characters at most. */
@@ -29,14 +29,14 @@ export function listAgreements(db: Db, ownerId: string): Agreement[] {
 /** Save one agreement, or rewrite the one it replaces (a changed mind keeps one entry, not two). */
 export function saveAgreement(db: Db, ownerId: string, input: { kind?: unknown; text?: unknown; replaces?: unknown; taskId?: string | null }): { agreement: Agreement; replaced: boolean } {
   const kind = input.kind as AgreementKind;
-  if (!AGREEMENT_KINDS.includes(kind)) throw new Error(`kind 只能是 ${AGREEMENT_KINDS.join("、")}`);
+  if (!AGREEMENT_KINDS.includes(kind)) throw new Error(`kind must be one of ${AGREEMENT_KINDS.join(", ")}`);
   const text = typeof input.text === "string" ? input.text.replace(/\s+/g, " ").trim() : "";
-  if (!text) throw new Error("text 要写清这条约定的内容");
-  if ([...text].length > AGREEMENT_TEXT_MAX) throw new Error(`text 最多 ${AGREEMENT_TEXT_MAX} 字，只写要长期记住的那一句`);
+  if (!text) throw new Error("text must state what the agreement is");
+  if ([...text].length > AGREEMENT_TEXT_MAX) throw new Error(`text is at most ${AGREEMENT_TEXT_MAX} characters; write only the one sentence to remember long term`);
   const now = Date.now();
   if (typeof input.replaces === "string" && input.replaces) {
     const old = db.prepare("SELECT * FROM agreements WHERE id=? AND owner_id=?").get(input.replaces, ownerId) as AgreementRow | undefined;
-    if (!old) throw new Error(`没有 id 为 ${input.replaces} 的约定`);
+    if (!old) throw new Error(`No agreement with id ${input.replaces}`);
     db.prepare("UPDATE agreements SET kind=?,text=?,source_task_id=COALESCE(?,source_task_id),updated_at=? WHERE id=?").run(kind, text, input.taskId ?? null, now, old.id);
     return { agreement: view({ ...old, kind, text, updated_at: now }), replaced: true };
   }
@@ -46,7 +46,7 @@ export function saveAgreement(db: Db, ownerId: string, input: { kind?: unknown; 
     return { agreement: view({ ...same, kind, updated_at: now }), replaced: false };
   }
   const count = (db.prepare("SELECT count(*) AS n FROM agreements WHERE owner_id=?").get(ownerId) as { n: number }).n;
-  if (count >= AGREEMENTS_MAX) throw new Error(`约定已有 ${AGREEMENTS_MAX} 条：先用 memory_search 找到过时的，用 replaces 改写或 memory_forget 删掉`);
+  if (count >= AGREEMENTS_MAX) throw new Error(`There are already ${AGREEMENTS_MAX} agreements: find outdated ones with memory_search first, then rewrite them with replaces or delete them with memory_forget`);
   const row: AgreementRow = { id: randomId("mem"), owner_id: ownerId, kind, text, source_task_id: input.taskId ?? null, created_at: now, updated_at: now };
   db.prepare("INSERT INTO agreements (id,owner_id,kind,text,source_task_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?)")
     .run(row.id, row.owner_id, row.kind, row.text, row.source_task_id, row.created_at, row.updated_at);
@@ -84,7 +84,7 @@ export function standingAgreements(db: Db, ownerId: string): { text: string; ver
   const lines: string[] = [];
   let used = 0;
   for (const a of all) {
-    const line = `- [${KIND_LABEL[a.kind]}] ${a.text}（${a.id}）`;
+    const line = `- [${KIND_LABEL[a.kind]}] ${a.text} (${a.id})`;
     if (used + line.length > STANDING_CHARS) break;
     lines.push(line);
     used += line.length;
@@ -104,17 +104,17 @@ export function processSteps(db: Db, turnId: string, limit = 40): { steps: strin
     const type = String(item.type ?? "");
     if (type === "mcpToolCall") {
       const error = (item.error as { message?: string } | null)?.message;
-      steps.push(`工具 ${item.server}.${item.tool}(${clip(JSON.stringify(item.arguments ?? {}), 120)})${error ? ` → 出错：${clip(error, 100)}` : ""}`);
+      steps.push(`tool ${item.server}.${item.tool}(${clip(JSON.stringify(item.arguments ?? {}), 120)})${error ? ` → error: ${clip(error, 100)}` : ""}`);
     } else if (type === "commandExecution") {
-      steps.push(`命令 ${clip(String(item.command ?? "").replace(/^\/bin\/(ba)?sh -lc /, ""), 140)}${typeof item.exitCode === "number" && item.exitCode !== 0 ? `（退出码 ${item.exitCode}）` : ""}`);
+      steps.push(`command ${clip(String(item.command ?? "").replace(/^\/bin\/(ba)?sh -lc /, ""), 140)}${typeof item.exitCode === "number" && item.exitCode !== 0 ? ` (exit code ${item.exitCode})` : ""}`);
     } else if (type === "webSearch") {
       const query = item.query || (item.action as { query?: string } | null)?.query;
-      if (query) steps.push(`搜索 ${clip(query, 120)}`);
+      if (query) steps.push(`search ${clip(query, 120)}`);
     } else if (type === "fileChange") {
       const files = Array.isArray(item.changes) ? (item.changes as Array<{ path?: string }>).map((c) => c.path).filter(Boolean).join("、") : "";
-      steps.push(`改文件 ${clip(files, 140)}`);
+      steps.push(`edit files ${clip(files, 140)}`);
     } else if (type === "agentMessage") {
-      steps.push(`说 ${clip(item.text, 200)}`);
+      steps.push(`said ${clip(item.text, 200)}`);
     } else if (type && !["reasoning", "userMessage", "contextCompaction", "imageView"].includes(type)) {
       // Claude Code's own tools (Read, WebFetch, ...): their name and first argument.
       const input = (item.input ?? item.arguments ?? {}) as Record<string, unknown>;

@@ -10,13 +10,15 @@ import { Logger } from "../../src/common/logger.js";
 import { writeAgentSettings } from "../../src/control/settings.js";
 import { FakeCodex, testConfig } from "../helpers/harness.js";
 import { dispatchedSupplement, dispatchedTask } from "../../src/ui/src/dispatchText.js";
+import { answerLanguage, LOCALE_NAMES } from "../../src/control/locale.js";
+import { LOCALES } from "../../src/ui/src/i18n/index.js";
 class PlanningCodex extends FakeCodex {
     plans: string[] = [];
     steers: {threadId:string;expectedTurnId:string;text:string;attachments?:{path:string;kind:"image"|"file";name?:string}[]}[] = [];
     steerHook: (()=>Promise<void>) | null = null;
     async steerTurn(p: {threadId:string;expectedTurnId:string;text:string;attachments?:{path:string;kind:"image"|"file";name?:string}[]}) { this.steers.push(p); await this.steerHook?.(); }
     plan: (p: string) => Promise<string | null> = async (p) => {
-        const data = JSON.parse(p.split("\n").at(-1)!);
+        const data = JSON.parse(p.split("\n").findLast(l => l.startsWith("{"))!);
         return JSON.stringify({ title: data.message, related: [], dependencies: [], resources: [] });
     };
     planModels: (string | undefined)[] = [];
@@ -92,11 +94,11 @@ describe("main inbox delegation", () => {
         expect(db.prepare("SELECT browser_required FROM turns WHERE id=?").get(first.turn_id)?.browser_required).toBe(0);
         const prompt = codex.startedTurns[0]!.text;
         expect(prompt).not.toContain("没有 browser 不操作");
-        expect(prompt).toContain("按任务需要使用文件、浏览器和其他工具");
+        expect(prompt).toContain("Use files, the browser and other tools as the task needs");
         expect(prompt).not.toContain("本次文件与共享环境资源范围");
         // The person's time, not the sandbox's UTC clock.
-        expect(prompt).toContain("沙箱系统时钟是 UTC");
-        expect(prompt).toMatch(/用户的当前时间：\d{4}-\d{2}-\d{2} 周. \d{2}:\d{2}（/);
+        expect(prompt).toContain("the sandbox system clock is UTC");
+        expect(prompt).toMatch(/The user's current time: \d{4}-\d{2}-\d{2} 周. \d{2}:\d{2} \(/);
         codex.plan=async()=>JSON.stringify({title:"网页",related:[],dependencies:[],resources:["browser"]});
         const web=submit("打开网页"); await tick();
         expect(db.prepare("SELECT browser_required FROM turns WHERE id=?").get(tasks.get(web.id)!.turn_id)?.browser_required).toBe(1);
@@ -126,7 +128,7 @@ describe("main inbox delegation", () => {
     it("routes an unreferenced reply to a completed executor question", async () => {
         let firstId="";
         codex.plan=async p=>{
-            const data=JSON.parse(p.split("\n").at(-1)!);
+            const data=JSON.parse(p.split("\n").findLast(l => l.startsWith("{"))!);
             return JSON.stringify({title:"机票",related:firstId?[firstId]:[],dependencies:[],resources:[],
                 resume:data.message==="罗马，11月12日"?firstId:null});
         };
@@ -155,7 +157,7 @@ describe("main inbox delegation", () => {
         expect(tasks.get(second.id)?.status).toBe("running");
         expect(tasks.get(second.id)?.merged_into).toBeNull();
         expect(codex.startedTurns.at(-1)?.threadId).toBe(codex.startedTurns[0]?.threadId);
-        expect(codex.startedTurns.at(-1)?.text).toContain("该任务最后问用户：「查哪个城市？」");
+        expect(codex.startedTurns.at(-1)?.text).toContain('that task last asked the user: "查哪个城市？"');
         await codex.runTurn(codex.startedTurns.at(-1)!.turnId,{text:"圣何塞今天 22°C。"});await tick();
         expect(tasks.get(second.id)?.result).toBe("圣何塞今天 22°C。");
         expect(tasks.view(tasks.get(first.id)!).clarification).toBeNull();
@@ -180,7 +182,7 @@ describe("main inbox delegation", () => {
     });
     it("keeps simultaneous incomplete requests independent while executors decide whether to ask", async () => {
         codex.plan=async p=>{
-            const data=JSON.parse(p.split("\n").at(-1)!);
+            const data=JSON.parse(p.split("\n").findLast(l => l.startsWith("{"))!);
             return JSON.stringify({title:data.message.slice(0,20),related:[],dependencies:[],resources:[],clarification:"请提供任务的目标？"});
         };
         const first=submit("第一个任务"),second=submit("第二个任务");await tick();
@@ -208,7 +210,7 @@ describe("main inbox delegation", () => {
     it("waits for related output, gives it to the successor, and does not block an unrelated task", async () => {
         const first = submit("create document");
         await tick();
-        codex.plan=async p=>{const {message}=JSON.parse(p.split("\n").at(-1)!);return JSON.stringify({title:message,related:message==="revise document"?[first.id]:[],dependencies:message==="revise document"?[first.id]:[],resources:[]});};
+        codex.plan=async p=>{const {message}=JSON.parse(p.split("\n").findLast(l => l.startsWith("{"))!);return JSON.stringify({title:message,related:message==="revise document"?[first.id]:[],dependencies:message==="revise document"?[first.id]:[],resources:[]});};
         const next = submit("revise document");
         const independent = submit("calculate");
         await tick();
@@ -225,7 +227,7 @@ describe("main inbox delegation", () => {
         const runs=[await finish("推送一"),await finish("推送二"),await finish("推送三")];
         for(const r of runs)db.prepare("UPDATE tasks SET schedule_id='sched_feed' WHERE id=?").run(r.id);
         submit("新的问题");await tick();
-        const seen=JSON.parse(codex.plans.at(-1)!.split("\n").at(-1)!).previous.map((t:{id:string})=>t.id);
+        const seen=JSON.parse(codex.plans.at(-1)!.split("\n").findLast(l => l.startsWith("{"))!).previous.map((t:{id:string})=>t.id);
         for(const t of mine)expect(seen).toContain(t.id);
         // Only the newest run; the others no longer crowd out the person's own work.
         expect(seen).toContain(runs[2]!.id);
@@ -251,7 +253,7 @@ describe("main inbox delegation", () => {
         expect(tasks.get(update.id)?.merged_into).toBeNull();expect(tasks.get(update.id)?.status).toBe("running");expect(codex.steers).toHaveLength(0);
         // The resumed thread already holds the original exchange: it is named, not repeated.
         expect(codex.startedTurns.at(-1)!.text).not.toContain("Selected original result");
-        expect(codex.startedTurns.at(-1)!.text).toContain(`相关任务 ${done.id} 的详情已在本会话前文中`);
+        expect(codex.startedTurns.at(-1)!.text).toContain(`The details of related tasks ${done.id} are earlier in this session`);
         expect(JSON.parse(tasks.get(update.id)!.plan_json!).related).toEqual([done.id]);
         expect(codex.resumedThreads).toEqual([codex.startedTurns[0]!.threadId]);
         expect(codex.startedTurns.at(-1)!.threadId).toBe(codex.startedTurns[0]!.threadId);
@@ -289,8 +291,8 @@ describe("main inbox delegation", () => {
         const plan=JSON.parse(tasks.get(third.id)!.plan_json!);
         expect(plan.ownedResources).toBeUndefined();
         // The thread already holds the executor rules: they are named by version, not repeated.
-        expect(codex.startedTurns.at(-1)!.text).not.toContain("按任务需要使用文件、浏览器和其他工具");
-        expect(codex.startedTurns.at(-1)!.text).toMatch(/执行约束（版本 [0-9a-f]{8}）已在本会话前文给出/);
+        expect(codex.startedTurns.at(-1)!.text).not.toContain("Use files, the browser and other tools as the task needs");
+        expect(codex.startedTurns.at(-1)!.text).toMatch(/The execution rules \(version [0-9a-f]{8}\) were given earlier in this session/);
         expect(codex.startedTurns.at(-1)!.text).toContain(`/tasks/${third.id}/`);
         expect(tasks.get(second.id)?.result).toBe('Second');expect(tasks.get(original.id)?.result).toBe('Original');
     });
@@ -305,20 +307,20 @@ describe("main inbox delegation", () => {
         expect(JSON.parse(tasks.get(update.id)!.plan_json!)).toMatchObject({decision:{kind:"resume",taskId:first.id},related:[first.id]});
         expect(codex.startedTurns.at(-1)!.threadId).toBe(codex.startedTurns[0]!.threadId);
         expect(codex.startedTurns.at(-1)!.text).toContain("new detail");
-        expect(codex.startedTurns.at(-1)!.text).toContain(`相关任务 ${first.id} 的详情已在本会话前文中`);
+        expect(codex.startedTurns.at(-1)!.text).toContain(`The details of related tasks ${first.id} are earlier in this session`);
     });
     it("gives the executor rules to a thread once per version, and in full again after a change or compaction",async()=>{
-        const RULE="按任务需要使用文件、浏览器和其他工具";
+        const RULE="Use files, the browser and other tools as the task needs";
         let latest="";
         const run=async(text:string)=>{const t=submit(text,latest||undefined);await tick();const sent=codex.startedTurns.at(-1)!;await codex.runTurn(sent.turnId,{text:`${text} 完成`});await tick();latest=t.id;return {task:tasks.get(t.id)!,sent};};
         const first=await run("first");
         expect(first.sent.text).toContain(RULE);
-        const version=first.sent.text.match(/执行约束（版本 ([0-9a-f]{8})；/)?.[1];
+        const version=first.sent.text.match(/Execution rules \(version ([0-9a-f]{8});/)?.[1];
         expect(version).toBeTruthy();expect(JSON.parse(first.task.plan_json!).rulesVersion).toBe(version);
         // Resumed on the same thread: named by version only.
         const second=await run("second");
         expect(second.sent.threadId).toBe(first.sent.threadId);
-        expect(second.sent.text).not.toContain(RULE);expect(second.sent.text).toContain(`执行约束（版本 ${version}）已在本会话前文给出`);
+        expect(second.sent.text).not.toContain(RULE);expect(second.sent.text).toContain(`The execution rules (version ${version}) were given earlier in this session`);
         expect(JSON.parse(second.task.plan_json!).rulesVersion).toBeUndefined();
         // The thread holds an older version of the rules: given in full again.
         db.prepare("UPDATE tasks SET plan_json=json_set(plan_json,'$.rulesVersion','00000000') WHERE id=?").run(first.task.id);
@@ -347,7 +349,7 @@ describe("main inbox delegation", () => {
         // Given once in this thread and unchanged: named, not repeated.
         const second=await followUp("second follow-up");
         expect(second.sent.text).not.toContain("Other result");
-        expect(second.sent.text.match(/相关任务 (\S+) 的详情已在本会话前文中/)?.[1].split("、")).toEqual(expect.arrayContaining([done.id,other.id]));
+        expect(second.sent.text.match(/The details of related tasks (.+?) are earlier in this session/)?.[1].split(", ")).toEqual(expect.arrayContaining([done.id,other.id]));
         // A changed result is given again.
         db.prepare("UPDATE tasks SET result=? WHERE id=?").run("Other result, revised",other.id);
         const third=await followUp("third follow-up");
@@ -357,13 +359,13 @@ describe("main inbox delegation", () => {
             .run(third.task.execution_conversation_id,third.task.turn_id,"item/completed",JSON.stringify({item:{type:"contextCompaction",id:"c1"}}),Date.now());
         const fourth=await followUp("fourth follow-up");
         expect(fourth.sent.text).toContain("Original result");expect(fourth.sent.text).toContain("Other result, revised");
-        expect(fourth.sent.text).not.toContain("的详情已在本会话前文中");
+        expect(fourth.sent.text).not.toContain("are earlier in this session (given before");
         // A follow-up on another model starts a fresh thread carrying only requests and answers: everything in full.
         writeAgentSettings(db,{model:"gpt-5.5",effort:null});
         const fifth=await followUp("fifth follow-up");
         expect(fifth.sent.threadId).not.toBe(codex.startedTurns[0]!.threadId);
         expect(fifth.sent.text).toContain("Original result");expect(fifth.sent.text).toContain("Other result, revised");
-        expect(fifth.sent.text).not.toContain("的详情已在本会话前文中");
+        expect(fifth.sent.text).not.toContain("are earlier in this session (given before");
     });
     it("waits for a referenced task to stop, then proceeds even when it was interrupted",async()=>{
         const first=submit("first");await tick();db.prepare("UPDATE tasks SET status='stopping' WHERE id=?").run(first.id);
@@ -383,7 +385,7 @@ describe("main inbox delegation", () => {
     });
     it("runs unrelated directory writes and new documents together, queues overlapping writes with a reason", async () => {
         const root="/home/gem/workspace";
-        codex.plan=async p=>{const {message}=JSON.parse(p.split("\n").at(-1)!);return JSON.stringify({title:message,related:[],dependencies:[],resources:message==='document'?[]:[`write:${root}/projects/${message==='overlap'?'a/src':message}`]});};
+        codex.plan=async p=>{const {message}=JSON.parse(p.split("\n").findLast(l => l.startsWith("{"))!);return JSON.stringify({title:message,related:[],dependencies:[],resources:message==='document'?[]:[`write:${root}/projects/${message==='overlap'?'a/src':message}`]});};
         const a=submit("a");await tick();
         const overlap=submit("overlap"), b=submit("b"), doc=submit("document");await tick();await tick();
         expect(tasks.get(a.id)?.status).toBe("running");expect(tasks.get(b.id)?.status).toBe("running");expect(tasks.get(doc.id)?.status).toBe("running");
@@ -474,7 +476,7 @@ describe("main inbox delegation", () => {
         expect(tasks.get(a.id)?.status).toBe("planning_failed");
         expect(tasks.get(a.id)?.error).toContain("缺少 title");
         expect(codex.plans).toHaveLength(2);
-        expect(codex.plans[1]).toContain("你上一次的回答无法使用：缺少 title");
+        expect(codex.plans[1]).toContain("Your previous answer could not be used: 缺少 title");
         expect(codex.startedTurns).toHaveLength(0);
         expect(db.prepare("SELECT failed, fail_reason, rounds FROM recall_events").get()).toMatchObject({ failed: 1, fail_reason: "缺少 title", rounds: 2 });
         codex.plan = async () => '{"title":"ok","related":[],"dependencies":[],"resources":[]}';
@@ -523,6 +525,32 @@ describe("main inbox delegation", () => {
         await tick();
         expect(tasks.get(a.id)?.result).toBe("final report");
     });
+    it("ends every prompt whose output people see with the account's console language", async()=>{
+        // No choice yet: Simplified Chinese.
+        const first=submit("规划带娃三天行程");await tick();
+        expect(codex.plans[0]!.split("\n").at(-1)).toBe(answerLanguage("zh-CN"));
+        expect(codex.startedTurns[0]!.text.endsWith(`\n\n${answerLanguage("zh-CN")}`)).toBe(true);
+        // The person's words still show on their own on the execution page.
+        expect(dispatchedTask(codex.startedTurns[0]!.text)).toBe("规划带娃三天行程");
+        // A message sent from an English console makes English the account's language, for the dispatcher and the supplement alike.
+        codex.plan=async()=>JSON.stringify({title:"extra",decision:{kind:"steer",taskId:first.id},related:[first.id],dependencies:[],resources:[]});
+        tasks.submit({text:"make it four days",clientMessageId:"en-1",locale:"en"});await tick();await tick();
+        expect(tasks.locale()).toBe("en");
+        expect(codex.plans.at(-1)!.split("\n").at(-1)).toBe(answerLanguage("en"));
+        expect(codex.steers[0]!.text.endsWith(`\n\n${answerLanguage("en")}`)).toBe(true);
+        expect(dispatchedSupplement(codex.steers[0]!.text)).toBe("make it four days");
+        // Anything but a console language changes nothing; the settings switch does.
+        tasks.submit({text:"x",clientMessageId:"fr",locale:"fr"});
+        expect(tasks.locale()).toBe("en");
+        tasks.setLocale("es");
+        await codex.runTurn(codex.startedTurns[0]!.turnId,{text:"done"});await tick();
+        codex.plan=async()=>JSON.stringify({title:"新的",related:[],dependencies:[],resources:[]});
+        submit("另一件事");await tick();await tick();
+        expect(codex.startedTurns.at(-1)!.text.endsWith(answerLanguage("es"))).toBe(true);
+    });
+    it("knows the console's languages", () => {
+        expect(Object.keys(LOCALE_NAMES).sort()).toEqual(Object.keys(LOCALES).sort());
+    });
     it("dispatches a message whose task the execution page can show on its own", async()=>{
         submit("规划带娃三天行程\n\n孩子 2 岁");await tick();
         const brief=codex.startedTurns[0]!.text;
@@ -560,13 +588,13 @@ describe("main inbox delegation", () => {
         codex.plan=async()=>JSON.stringify({title:"列出上次保养",related:[visit.id],dependencies:[],resources:[]});
         const later=tasks.submit({text:"我上次去斯巴鲁保养费用和项目列一下",clientMessageId:"days-later",relatedTaskId:visit.id}).task;await tick();await tick();
         const resumed=codex.startedTurns[1]!.text;
-        expect(resumed).toContain("本轮恢复此前任务的同一会话");
-        expect(resumed).toMatch(/这个会话上次做事是 .+（3 天前），这期间情况可能已经变了/);
-        expect(resumed).toContain("知识库、邮件、aio_history 里此后的任务");
+        expect(resumed).toContain("This turn resumes the same session as the earlier task");
+        expect(resumed).toMatch(/This session last did work at .+ \(3 days ago\); things may have changed since/);
+        expect(resumed).toContain("the knowledge base, email, later tasks in aio_history");
         // Asked again right away, the session is current: no reminder.
         await codex.runTurn(codex.startedTurns[1]!.turnId,{text:"列好了"});await tick();
         tasks.submit({text:"用英文再列一遍",clientMessageId:"right-after",relatedTaskId:later.id});await tick();await tick();
-        expect(codex.startedTurns[2]!.text).not.toContain("这个会话上次做事是");
+        expect(codex.startedTurns[2]!.text).not.toContain("This session last did work at");
     });
     it("hands a person's held tabs back to the agent when they send the task a supplement or an answer", async()=>{
         const released:string[]=[];
@@ -576,7 +604,7 @@ describe("main inbox delegation", () => {
         codex.plan=async()=>JSON.stringify({title:"换账号",appendTo:parent.id,related:[parent.id],dependencies:[],resources:[]});
         submit("你先退出登录，我来登 RA 的账号");await tick();await tick();
         expect(released).toEqual([key]);
-        expect(codex.steers[0]!.text).toMatch(/^用户发这条补充时，你请他接管的浏览器标签页（1 个）还在他手里，现已自动交还给你/);
+        expect(codex.steers[0]!.text).toMatch(/^When the user sent this supplement, the browser tabs you had asked them to take over \(1\) were still in their hands; they have now been handed back to you automatically/);
         // The task then asks, and the answer resumes its session: the tabs are handed back again first.
         await codex.runTurn(codex.startedTurns[0]!.turnId,{text:"请登录后告诉我"});await tick();
         released.length=0;
@@ -773,9 +801,9 @@ it("lists the dispatcher's tasks newest first, so a bare follow-up lands on the 
         {id:"root",title:"选好 root 的手机",input_text:"root",status:"completed",result:"ok",created_at:at(15,56),source:"recent"},
     ];
     const prompt=planningPrompt("有实体的 sim 卡槽吗？",previous,null);
-    const listed=JSON.parse(prompt.split("\n").at(-1)!).previous as {id:string;order:number;time:string}[];
+    const listed=JSON.parse(prompt.split("\n").findLast(l => l.startsWith("{"))!).previous as {id:string;order:number;time:string}[];
     expect(listed.map(t=>[t.id,t.order,t.time])).toEqual([["pixel",1,"15:58"],["root",2,"15:56"],["ikko",3,"15:02"]]);
-    expect(prompt).toContain("相邻优先");
+    expect(prompt).toContain("Adjacency first");
 });
 
 it("repairs what does not change what may run, and says why an answer is unusable",()=>{
@@ -826,7 +854,7 @@ it("validates optional clarification and resumes the finished turn that asked a 
 });
 describe("main-session order, Jev's second opinion and resuming a finished session", () => {
     const planWith = (extra: (message: string) => Record<string, unknown>) => async (p: string) => {
-        const data = JSON.parse(p.split("\n").at(-1)!);
+        const data = JSON.parse(p.split("\n").findLast(l => l.startsWith("{"))!);
         return JSON.stringify({ title: data.message.slice(0, 20), related: [], dependencies: [], resources: [], ...extra(data.message) });
     };
     it("lets Luna overrule Jev and passes both outputs to a steered executor", async () => {
@@ -834,13 +862,13 @@ describe("main-session order, Jev's second opinion and resuming a finished sessi
         tasks.close();tasks=new TaskService(db,testConfig("/tmp/aio-main-tasks",1),agent,codex,undefined,jev as never);tasks.init();
         const first=submit("规划东京行程");await tick();
         codex.plan=async p=>{
-            const data=JSON.parse(p.split("\n").at(-1)!);
+            const data=JSON.parse(p.split("\n").findLast(l => l.startsWith("{"))!);
             expect(data.jevJudgment).toMatchObject({suggestion:{kind:"new",taskId:null,probability:0.8}});
             return JSON.stringify({title:"调整东京行程",description:"把酒店改到新宿附近",decision:{kind:"steer",taskId:first.id},related:[first.id],dependencies:[],resources:[]});
         };
         const change=submit("酒店改在新宿");await tick();
         expect(tasks.get(change.id)?.status).toBe("merged");
-        expect(codex.steers[0]?.text).toContain("Jev 建议：新任务");
+        expect(codex.steers[0]?.text).toContain("Jev suggests: a new task");
         // Jev's reading reaches the executor once, readable, not as its raw answers.
         expect(codex.steers[0]?.text).not.toContain('"probabilities"');
         expect(codex.steers[0]?.text).toContain('"decision":{"kind":"steer"');
@@ -855,16 +883,16 @@ describe("main-session order, Jev's second opinion and resuming a finished sessi
         submit("讲个笑话"); await tick();
         const reply = submit("已授权"); await tick(); await tick();
         expect(tasks.get(reply.id)!.related_task_id).toBe(order.id);
-        const turn = codex.startedTurns.find(t => t.text.endsWith("已授权"))!;
+        const turn = codex.startedTurns.find(t => t.text.includes("The user's task this time:\n\n已授权"))!;
         // Same execution session as the order, not a fresh one with a summary.
         expect(turn.threadId).toBe(first.threadId);
-        expect(turn.text).toContain(`本次消息接续任务 ${order.id}`);
-        expect(turn.text).toContain("该任务最后问用户：「需要你授权我用已保存的卡付款吗？」");
+        expect(turn.text).toContain(`This message continues task ${order.id}`);
+        expect(turn.text).toContain('that task last asked the user: "需要你授权我用已保存的卡付款吗？"');
         // The conversation in order: the order, the unrelated joke, then this reply.
-        const lines = turn.text.split("\n").filter(l => /\[\d\d:\d\d\] 用户：/.test(l));
-        expect(lines.map(l => l.match(/用户：「(.*?)」/)![1])).toEqual(["帮我在 eBay 买那台 Pixel", "讲个笑话", "已授权"]);
-        expect(lines[0]).toContain("助理最后问：「需要你授权我用已保存的卡付款吗？」");
-        expect(lines[2]).toMatch(/^▶ .*← 本次消息$/);
+        const lines = turn.text.split("\n").filter(l => /\[\d\d:\d\d\] User: /.test(l));
+        expect(lines.map(l => l.match(/User: "(.*?)"/)![1])).toEqual(["帮我在 eBay 买那台 Pixel", "讲个笑话", "已授权"]);
+        expect(lines[0]).toContain('the assistant last asked: "需要你授权我用已保存的卡付款吗？"');
+        expect(lines[2]).toMatch(/^▶ .*← this message$/);
     });
     it("gives the dispatcher Jev's pick with the timeline, records it, and dispatches without it when Jev fails", async () => {
         const asked: Array<Record<string, any>> = [];
@@ -887,16 +915,16 @@ describe("main-session order, Jev's second opinion and resuming a finished sessi
         expect(Object.keys(q.questions.route.criteria)).toEqual([`steer:${trip.id}`, "NEW"]);
         expect(q.questions.route.criteria[`steer:${trip.id}`]).toContain("规划东京三天行程");
         expect(Object.keys(q.questions[`relevance:${trip.id}`].criteria)).toEqual(["related","unrelated"]);
-        expect(q.state.main_session_timeline).toContain("「规划东京三天行程」");
-        const prompt = JSON.parse(codex.plans.at(-1)!.split("\n").at(-1)!);
+        expect(q.state.main_session_timeline).toContain('"规划东京三天行程"');
+        const prompt = JSON.parse(codex.plans.at(-1)!.split("\n").findLast(l => l.startsWith("{"))!);
         expect(prompt.jevJudgment).toMatchObject({ scores:{[trip.id]:0.8},suggestion:{kind:"steer",taskId:trip.id,probability:0.8} });
-        expect(prompt.mainSessionTimeline).toMatch(/▶ .*「酒店要靠近新宿」/);
+        expect(prompt.mainSessionTimeline).toMatch(/▶ .*"酒店要靠近新宿"/);
         const recorded = db.prepare("SELECT jev_json FROM recall_events ORDER BY id DESC LIMIT 1").get() as { jev_json: string };
         expect(JSON.parse(recorded.jev_json)).toMatchObject({ choice: trip.id, confident: true, latencyMs: 7 });
         fail = true;
         const next = submit("再加一天镰仓"); await tick(); await tick();
         expect(["running", "merged", "waiting", "queued", "merging"]).toContain(tasks.get(next.id)!.status);
-        expect(JSON.parse(codex.plans.at(-1)!.split("\n").at(-1)!).jevJudgment).toBeUndefined();
+        expect(JSON.parse(codex.plans.at(-1)!.split("\n").findLast(l => l.startsWith("{"))!).jevJudgment).toBeUndefined();
         const failed = db.prepare("SELECT jev_json FROM recall_events ORDER BY id DESC LIMIT 1").get() as { jev_json: string };
         expect(JSON.parse(failed.jev_json)).toEqual({ error: "Jev 返回 HTTP 503" });
     });
@@ -918,19 +946,19 @@ describe("main-session order, Jev's second opinion and resuming a finished sessi
         codex.plan = planWith(m => ({ resume: m === "已授权" ? order.id : null }));
         const reply = submit("已授权"); await tick(); await tick();
         expect(JSON.parse(tasks.get(reply.id)!.plan_json!).jev).toMatchObject({ choice: order.id, confident: true, scores:{[order.id]:0.8},suggestion:{kind:"resume",taskId:order.id,probability:0.8} });
-        const turn = codex.startedTurns.find(t => t.text.endsWith("已授权"))!;
-        const line = turn.text.split("\n").find(l => l.includes("用户：「帮我在 eBay 买那台 Pixel」"))!;
-        expect(line).toContain("〔Jev：相关性 80%〕");
-        expect(turn.text).toContain("Jev 的逐任务相关性与路由建议");
-        expect(turn.text).toContain('派单器的判断');
+        const turn = codex.startedTurns.find(t => t.text.includes("The user's task this time:\n\n已授权"))!;
+        const line = turn.text.split("\n").find(l => l.includes('User: "帮我在 eBay 买那台 Pixel"'))!;
+        expect(line).toContain("[Jev: relevance 80%]");
+        expect(turn.text).toContain("Jev's per-task relevance and routing suggestion");
+        expect(turn.text).toContain("The dispatcher's judgment");
         expect(turn.text).not.toContain('"probabilities"');
-        expect(turn.text).toContain(`- 任务 ${order.id}「帮我在 eBay 买那台 Pixel」（completed，`);
-        expect(turn.text).toMatch(/：80%，Jev 首选（高置信）；助理最后问：「需要你授权我用已保存的卡付款吗？」/);
-        expect(turn.text).toContain(`Jev 建议：续接任务 ${order.id}（80%`);
+        expect(turn.text).toContain(`- Task ${order.id} "帮我在 eBay 买那台 Pixel" (completed, `);
+        expect(turn.text).toMatch(/: 80%, Jev\'s first choice \(high confidence\); the assistant last asked: "需要你授权我用已保存的卡付款吗？"/);
+        expect(turn.text).toContain(`Jev suggests: resume task ${order.id} (80%`);
         await codex.runTurn(turn.turnId, { text: "已付款。" }); await tick();
         fail = true;
         submit("讲个笑话"); await tick(); await tick();
-        const joke = codex.startedTurns.find(t => t.text.endsWith("讲个笑话"))!;
+        const joke = codex.startedTurns.find(t => t.text.includes("The user's task this time:\n\n讲个笑话"))!;
         expect(joke.text).not.toContain("Jev");
     });
     it("repairs resume: an active target becomes an append, an unknown one is dropped, and it never doubles an append", () => {
@@ -960,7 +988,7 @@ describe("owner dispatch log", () => {
         tasks.init();
         const trip = submit("规划东京三天行程"); await tick();
         codex.plan = async p => {
-            const data = JSON.parse(p.split("\n").at(-1)!);
+            const data = JSON.parse(p.split("\n").findLast(l => l.startsWith("{"))!);
             return JSON.stringify({ title: data.message, description:"调整酒店到新宿附近",decision:{kind:"steer",taskId:trip.id}, related: [trip.id], dependencies: [], resources: [] });
         };
         const hotel = submit("酒店要靠近新宿"); await tick(); await tick();
@@ -968,11 +996,11 @@ describe("owner dispatch log", () => {
         const [entry] = dispatchLog(db, "owner_1", hotel.id);
         expect(entry!.steps.map(s => s.kind)).toEqual(["context", "jev", "timing", "ask", "plan"]);
         const [context, decided, timing, answer, plan] = entry!.steps as any[];
-        expect(context.timeline).toMatch(/▶ .*「酒店要靠近新宿」/);
+        expect(context.timeline).toMatch(/▶ .*"酒店要靠近新宿"/);
         expect(decided.result).toMatchObject({ choice: trip.id, confident: true, latencyMs: 4, scores:{[trip.id]:0.8},suggestion:{kind:"steer",taskId:trip.id} });
         expect(timing.timing).toMatchObject({ model: "fake-luna", effort: "high", connectionMs: 2 });
         expect(answer).toMatchObject({ round: 1 });
-        expect(answer.prompt).toContain("AIO Agent 的派单器");
+        expect(answer.prompt).toContain("You are AIO Agent's dispatcher");
         expect(answer.answer).toContain("酒店要靠近新宿");
         expect(plan.plan).toMatchObject({ decision:{kind:"steer",taskId:trip.id},related: [trip.id] });
         // Titles are read back as they are now: an accepted steer leaves the trip's own title.

@@ -20,14 +20,14 @@ const MAX_OPTIONS = 20;
 const TOOL = {
   name: "decide",
   description:
-    "让独立的判断模型（Jev）在几个明确的选项中选一个，返回选择、每个选项的概率和置信度。适合需要在已知候选之间取舍的判断：哪个方案、哪个搜索结果、哪个商品/航班最符合用户要求、下一步做什么。不会执行任何操作；把与判断有关的事实写进 context，option 的说明写清楚各自意味着什么。概率接近时说明难以区分，应结合自己的理解或向用户确认，不要把它当成确定结论。",
+    "Have an independent judgment model (Jev) choose one of several clearly defined options; returns the choice, the probability of each option, and the confidence. Suited to judgments that weigh known candidates against each other: which plan, which search result, which product/flight best fits the user's requirements, what to do next. It does not perform any action; put the facts relevant to the judgment in context, and make each option's description say clearly what it means. Close probabilities mean the options are hard to tell apart; combine the result with your own understanding or confirm with the user, and do not treat it as a definite conclusion.",
   inputSchema: {
     type: "object",
     properties: {
-      question: { type: "string", description: "要判断的问题（目标）" },
-      options: { type: "object", additionalProperties: { type: "string" }, description: "候选项：id -> 这个选项意味着什么（2-20 个，id 用字母数字下划线连字符）" },
-      context: { type: "string", description: "与判断有关的事实与背景（可选，最多 8000 字）" },
-      rules: { type: "array", items: { type: "string" }, description: "判断时必须遵守的规则或偏好（可选）" },
+      question: { type: "string", description: "The question to judge (the goal)" },
+      options: { type: "object", additionalProperties: { type: "string" }, description: "Candidates: id -> what this option means (2-20 of them; ids use letters, digits, underscores, and hyphens)" },
+      context: { type: "string", description: "Facts and background relevant to the judgment (optional, at most 8000 characters)" },
+      rules: { type: "array", items: { type: "string" }, description: "Rules or preferences the judgment must follow (optional)" },
     },
     required: ["question", "options"],
   },
@@ -44,7 +44,7 @@ export function decisionMcpServers(cfg: Config): Record<string, unknown> {
 }
 
 export const DECISION_POLICY =
-  "需要在几个明确候选之间取舍、且判断依据已经齐全时，可调用 aio_decision 的 decide 工具获得独立判断（带概率）；它只给建议，不代替你核实事实，也不是用户授权。";
+  "When you need to choose among several clearly defined candidates and the basis for the judgment is already complete, you can call the decide tool from aio_decision to get an independent judgment (with probabilities); it only gives advice, does not replace your own fact-checking, and is not user authorization.";
 
 export class DecisionGateway {
   #db: Db;
@@ -138,9 +138,9 @@ export class DecisionGateway {
     const text = (value: unknown, isError = false) => ({ content: [{ type: "text", text: typeof value === "string" ? value : JSON.stringify(value, null, 2) }], ...(isError ? { isError: true } : {}) });
     const question = typeof args.question === "string" ? args.question.trim().slice(0, 2000) : "";
     const options = args.options && typeof args.options === "object" && !Array.isArray(args.options) ? Object.entries(args.options as Record<string, unknown>) : [];
-    if (!question) return text("question 不能为空", true);
-    if (options.length < 2 || options.length > MAX_OPTIONS) return text(`options 需要 2-${MAX_OPTIONS} 个候选`, true);
-    if (options.some(([id, note]) => !OPTION_ID.test(id) || typeof note !== "string" || !note.trim())) return text("options 的 id 只能用字母、数字、下划线、点、冒号、连字符（最多 40 字），说明不能为空", true);
+    if (!question) return text("question must not be empty", true);
+    if (options.length < 2 || options.length > MAX_OPTIONS) return text(`options needs 2-${MAX_OPTIONS} candidates`, true);
+    if (options.some(([id, note]) => !OPTION_ID.test(id) || typeof note !== "string" || !note.trim())) return text("option ids can only use letters, digits, underscores, dots, colons, and hyphens (at most 40 characters), and descriptions must not be empty", true);
     const criteria = Object.fromEntries(options.map(([id, note]) => [id, String(note).slice(0, 1000)]));
     const rules = Array.isArray(args.rules) ? args.rules.filter((r): r is string => typeof r === "string").map((r) => r.slice(0, 500)).slice(0, 20) : [];
     const context = typeof args.context === "string" ? args.context.slice(0, 8000) : "";
@@ -160,7 +160,7 @@ export class DecisionGateway {
       const error = err instanceof Error ? err.message : String(err);
       record({ ok: false, error });
       this.#log.warn("decision failed", { error });
-      return text(`判断服务暂时不可用：${error}`, true);
+      return text(`The judgment service is temporarily unavailable: ${error}`, true);
     }
   }
 }

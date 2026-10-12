@@ -65,3 +65,13 @@ it("rejects invalid references and out-of-workspace attachments before creating 
         expect(res.status).toBe(400);
     }
 });
+it("keeps the console language per account, from the settings switch and from each message", async () => {
+    const { cookie, csrf } = await login(h);
+    const headers = { cookie, "x-csrf-token": csrf, "content-type": "application/json" };
+    expect(h.ctx.tasks.locale()).toBe("zh-CN");
+    expect((await h.request("/api/account/locale", { method: "PUT", headers, body: JSON.stringify({ locale: "fr" }) })).status).toBe(400);
+    expect((await h.request("/api/account/locale", { method: "PUT", headers, body: JSON.stringify({ locale: "zh-TW" }) })).status).toBe(200);
+    expect(h.ctx.tasks.locale()).toBe("zh-TW");
+    await h.request("/api/tasks", { method: "POST", headers, body: JSON.stringify({ text: "hello", clientMessageId: "locale-en", locale: "en" }) });
+    expect(h.ctx.tasks.locale()).toBe("en");
+});

@@ -28,10 +28,10 @@ describe("main-session context", () => {
     expect(entries[1]).toMatchObject({ taskId: "t1" });
     const text = formatTimeline(entries, now);
     expect(text.split("\n")).toEqual([
-      "  [14:00] 用户：「订机票」 → 任务 t1「t1」（completed）；助理最后问：「要靠窗还是过道？」",
-      "  [14:05] 用户：「靠窗」 → 补充给任务 t1「t1」（completed）；助理最后问：「要靠窗还是过道？」",
-      "  [14:30] 用户：「讲个笑话」 → 任务 t2「t2」（completed）",
-      "▶ [14:40] 用户：「已授权」  ← 本次消息",
+      '  [14:00] User: "订机票" → task t1 "t1" (completed); the assistant last asked: "要靠窗还是过道？"',
+      '  [14:05] User: "靠窗" → supplement to task t1 "t1" (completed); the assistant last asked: "要靠窗还是过道？"',
+      '  [14:30] User: "讲个笑话" → task t2 "t2" (completed)',
+      '▶ [14:40] User: "已授权"  ← this message',
     ]);
     expect(timeline(tasks, tasks[3]!, 2).map(e => e.id)).toEqual(["t2", "t3"]);
   });
@@ -42,11 +42,11 @@ describe("main-session context", () => {
       task("reply", at(8, 30), { input_text: "第二条展开说说" }),
     ];
     expect(formatTimeline(timeline(tasks, tasks[1]!), now).split("\n")).toEqual([
-      "  [08:00] 定时运行：「根据你过往的任务，整理今天你可能感兴趣的内容和需要的提醒」 → 任务 feed「每日推送」（completed）",
-      "▶ [08:30] 用户：「第二条展开说说」  ← 本次消息",
+      '  [08:00] Scheduled run: "根据你过往的任务，整理今天你可能感兴趣的内容和需要的提醒" → task feed "每日推送" (completed)',
+      '▶ [08:30] User: "第二条展开说说"  ← this message',
     ]);
     // The run itself sees its instruction as this run, not as the user's message.
-    expect(formatTimeline(timeline(tasks, tasks[0]!), now)).toBe("▶ [08:00] 定时运行：「根据你过往的任务，整理今天你可能感兴趣的内容和需要的提醒」  ← 本次运行");
+    expect(formatTimeline(timeline(tasks, tasks[0]!), now)).toBe('▶ [08:00] Scheduled run: "根据你过往的任务，整理今天你可能感兴趣的内容和需要的提醒"  ← this run');
   });
   it("keeps Jev's likeliest tasks for the executor and marks them in the timeline and its own lines", () => {
     const now = at(15, 0);
@@ -57,19 +57,19 @@ describe("main-session context", () => {
     ];
     const relevance = { choice: "t1", confident: true, ranked: [{ id: "t1", p: 0.82 }, { id: "NEW", p: 0.15 }] };
     const lines = formatTimeline(timeline(tasks, tasks[2]!), now, relevance).split("\n");
-    expect(lines[0]).toMatch(/任务 t1「买 Pixel」.*〔Jev：相关性 82%〕$/);
+    expect(lines[0]).toMatch(/task t1 "买 Pixel".*\[Jev: relevance 82%\]$/);
     expect(lines[1]).not.toContain("Jev");
-    expect(lines[2]).toMatch(/^▶ .*← 本次消息$/);
+    expect(lines[2]).toMatch(/^▶ .*← this message$/);
     const byId = new Map(tasks.map(t => [t.id, t]));
     expect(formatRelevance(relevance, id => byId.get(id), now)!.split("\n")).toEqual([
-      "- 任务 t1「买 Pixel」（completed，14:00）：82%，Jev 首选（高置信）；助理最后问：「需要你授权我付款吗？」",
-      "- 独立的新请求：15%",
+      '- Task t1 "买 Pixel" (completed, 14:00): 82%, Jev\'s first choice (high confidence); the assistant last asked: "需要你授权我付款吗？"',
+      "- A separate new request: 15%",
     ]);
     // An unsure reading says so; a task that no longer exists is left out.
     const unsure = { choice: "t2", confident: false, ranked: [{ id: "t2", p: 0.45 }, { id: "t1", p: 0.4 }, { id: "NEW", p: 0.15 }] };
     expect(formatRelevance(unsure, id => (id === "t1" ? undefined : byId.get(id)), now)!.split("\n")).toEqual([
-      "- 任务 t2「讲笑话」（completed，14:30）：45%，Jev 首选；结果开头：好的，笑话是……",
-      "- 独立的新请求：15%",
+      '- Task t2 "讲笑话" (completed, 14:30): 45%, Jev\'s first choice; result begins: 好的，笑话是……',
+      "- A separate new request: 15%",
     ]);
     expect(formatRelevance({ choice: "gone", confident: true, ranked: [{ id: "gone", p: 1 }] }, () => undefined, now)).toBeNull();
     // Without a reading the timeline is unchanged.
@@ -80,8 +80,8 @@ describe("main-session context", () => {
     const q = routingQuestion("已授权", tasks, timeline([...tasks, task("t3", at(14, 40), { input_text: "已授权" })], task("t3", at(14, 40))), at(15, 0));
     const criteria = q.questions.route!.criteria;
     expect(Object.keys(criteria)).toEqual(["steer:t2", "resume:t1", "NEW"]);
-    expect(criteria["resume:t1"]).toContain("助理最后问用户：要授权吗？");
-    expect(criteria["steer:t2"]).toMatch(/^第1近（14:30）/);
+    expect(criteria["resume:t1"]).toContain("The assistant last asked the user: 要授权吗？");
+    expect(criteria["steer:t2"]).toMatch(/^1st most recent \(14:30\)/);
     expect(Object.keys(q.questions["relevance:t1"]!.criteria)).toEqual(["related", "unrelated"]);
     expect(q.questions["relevance:t4"]).toBeDefined();
     expect(criteria["resume:t4"]).toBeUndefined();

@@ -16,66 +16,66 @@ import { AGREEMENT_KINDS, AGREEMENT_TEXT_MAX, forgetAgreement, saveAgreement, se
  */
 
 export const HISTORY_POLICY =
-  "已接入一站的历史记录 aio_history：过往任务和长期约定都按需查，不靠事先塞进上下文。" +
-  "用户提到以前、上次、之前那个、我们说好的、还记得吗，或本任务明显接着早先的事（同一个人、物品、项目、网站或 App）时，先用 history_search 搜几个关键词（按相关度排序，可带上人名、物品、地点、App 名），再用 history_get 读最相关的一两个；" +
-  "要知道当时具体怎么做的、卡在哪一步（配置步骤、登录方式、选过的商品），加 process=true 看执行过程。结果里的 session 说明它属于哪个执行会话的第几个任务，history_get 会列出同一会话的前后任务，需要时顺着读。背景资料里相关任务的结果可能截断了，要完整内容也用 history_get。" +
-  "用户明确交代以后要遵守的规则或偏好（“以后…”“每次都…”“别再…”“记住…”）、双方说定的约定、关于用户的重要事实，用 memory_save 记成一句话；改了主意用 replaces 改写原条，不再适用就 memory_forget。一次性的任务细节、临时信息和推测不要记，也不替用户做他没表达过的长期决定。" +
-  "开头给出的「长期约定」只列了一部分，遇到可能相关的话题用 memory_search 再查。查不到就说没找到，不编造过往；历史里的价格、营业时间这类会变的信息，用之前重新核实。";
+  "AIO's history aio_history is connected: look up past tasks and standing agreements as needed instead of relying on them being put into the context in advance. " +
+  "When the user mentions earlier, last time, that one from before, what we agreed, or do you remember, or when this task clearly continues something from earlier (the same person, item, project, website, or app), first search a few keywords with history_search (ranked by relevance; you can include names of people, items, places, or apps), then read the most relevant one or two with history_get. " +
+  "To know exactly how it was done at the time or which step it got stuck on (configuration steps, how it signed in, the products chosen), add process=true to see the execution process. The session field in the results says which task it was in which executor session; history_get lists the tasks before and after it in the same session, so read along them when needed. Results of related tasks in the background material may be truncated; use history_get for the full content as well. " +
+  "When the user explicitly gives a rule or preference to follow from now on (\"以后…\" / \"from now on…\", \"每次都…\" / \"every time…\", \"别再…\" / \"don't … again\", \"记住…\" / \"remember…\"), an agreement both sides settled on, or an important fact about the user, record it as one sentence with memory_save; if they change their mind, rewrite the original entry with replaces, and use memory_forget when it no longer applies. Do not record one-off task details, temporary information, or guesses, and do not make long-term decisions for the user that they have not expressed. " +
+  "The standing agreements given at the start list only some of them; search again with memory_search when a topic might be related. If nothing is found, say you did not find it; do not make up the past. Information in history that changes, such as prices or opening hours, must be verified again before use.";
 
 const TOOLS = [
   {
     name: "history_search",
-    description: "搜索用户在一站做过的任务（包括其他执行会话、语音配件和定时任务的）：按相关度返回 id、日期、标题、请求摘要、结果里命中的片段、状态，以及它在执行会话里的位置。不给 query 时按时间列出最近的任务。",
+    description: "Search the tasks the user has done in AIO (including those from other executor sessions, the voice gadget, and scheduled tasks): returns, ranked by relevance, the id, date, title, request summary, matching snippets from the result, status, and its position in its executor session. Without query, lists the most recent tasks by time.",
     inputSchema: {
       type: "object",
       properties: {
-        query: { type: "string", description: "几个关键词，空格分开，命中任意一个即可，越多越准，例如“小红书 双开 安全文件夹”“Roy 疫苗 预约”" },
-        status: { type: "string", description: "只看某种状态：open（还没结束的）、completed、needs_input、failed（可选）" },
-        limit: { type: "integer", description: "最多几条，默认 10，最多 30" },
+        query: { type: "string", description: "A few keywords separated by spaces; matching any one is enough, and more keywords give more precise results, e.g. \"小红书 双开 安全文件夹\" (\"Xiaohongshu dual app secure folder\"), \"Roy 疫苗 预约\" (\"Roy vaccine appointment\")" },
+        status: { type: "string", description: "Only one status: open (not finished yet), completed, needs_input, failed (optional)" },
+        limit: { type: "integer", description: "Maximum number of results, default 10, at most 30" },
       },
     },
   },
   {
     name: "history_get",
-    description: "读取一个任务的完整内容：用户的请求和补充、状态、完整结果或还在等用户回答的问题，以及同一执行会话里前后的任务。process=true 时另附它实际做过的步骤（调用的工具和参数、运行的命令、搜索、说过的话），用来照着上次的做法做或找出卡在哪里。",
+    description: "Read the full content of a task: the user's request and follow-ups, status, the complete result or the question still waiting for the user's answer, and the tasks before and after it in the same executor session. With process=true, also includes the steps it actually took (tools called and their arguments, commands run, searches, things it said), for following last time's approach or finding where it got stuck.",
     inputSchema: {
       type: "object",
       properties: {
-        id: { type: "string", description: "history_search 给出的任务 id" },
-        process: { type: "boolean", description: "是否附上执行过程（默认 false）" },
+        id: { type: "string", description: "The task id given by history_search" },
+        process: { type: "boolean", description: "Whether to include the execution process (default false)" },
       },
       required: ["id"],
     },
   },
   {
     name: "memory_search",
-    description: "查用户的长期约定：规则（以后怎么做、不要做什么）、偏好、双方说定的约定、关于用户的重要事实。按与关键词的相关度返回；不给 query 时列出全部（新的在前）。",
+    description: "Look up the user's standing agreements: rules (how to do things from now on, what not to do), preferences, agreements both sides settled on, and important facts about the user. Returned by relevance to the keywords; without query, lists all of them (newest first).",
     inputSchema: {
       type: "object",
       properties: {
-        query: { type: "string", description: "关键词，例如“推送”“Roy 饮食”“订酒店”" },
-        limit: { type: "integer", description: "最多几条，默认 20" },
+        query: { type: "string", description: "Keywords, e.g. \"推送\" (\"feed\"), \"Roy 饮食\" (\"Roy diet\"), \"订酒店\" (\"book hotel\")" },
+        limit: { type: "integer", description: "Maximum number of results, default 20" },
       },
     },
   },
   {
     name: "memory_save",
-    description: `记下一条用户要求长期记住的约定，之后每个执行会话都能看到或查到。只记用户明确表达的长期内容，一句话写清（最多 ${AGREEMENT_TEXT_MAX} 字），写成脱离上下文也看得懂的样子，例如“推荐商品时只看 Amazon 和 Costco”“Roy 对鸡蛋过敏”。原有约定变了时用 replaces 改写那一条，不要另记一条相反的。`,
+    description: `Record an agreement the user wants remembered long term; every later executor session can see or look it up. Record only long-term things the user explicitly expressed, written clearly in one sentence (at most ${AGREEMENT_TEXT_MAX} characters) that makes sense out of context, e.g. "推荐商品时只看 Amazon 和 Costco" ("only look at Amazon and Costco when recommending products"), "Roy 对鸡蛋过敏" ("Roy is allergic to eggs"). When an existing agreement changes, rewrite that entry with replaces instead of recording a separate contradictory one.`,
     inputSchema: {
       type: "object",
       properties: {
-        kind: { type: "string", enum: [...AGREEMENT_KINDS], description: "rule 规则（以后怎么做/不要做什么）；preference 偏好；commitment 双方说定的约定或承诺；fact 关于用户的重要事实" },
-        text: { type: "string", description: "约定内容，一句话" },
-        replaces: { type: "string", description: "要改写的那条约定的 id（来自 memory_search 或开头的长期约定，可选）" },
-        task: { type: "string", description: "当前任务 ID，记下出处（可选）" },
+        kind: { type: "string", enum: [...AGREEMENT_KINDS], description: "rule: a rule (how to do things from now on / what not to do); preference: a preference; commitment: an agreement or promise both sides settled on; fact: an important fact about the user" },
+        text: { type: "string", description: "The agreement, in one sentence" },
+        replaces: { type: "string", description: "The id of the agreement to rewrite (from memory_search or the standing agreements at the start; optional)" },
+        task: { type: "string", description: "Current task ID, recorded as the source (optional)" },
       },
       required: ["kind", "text"],
     },
   },
   {
     name: "memory_forget",
-    description: "删除一条不再适用的约定（用户说不用再这样了、已经过时）。",
-    inputSchema: { type: "object", properties: { id: { type: "string", description: "约定 id" } }, required: ["id"] },
+    description: "Delete an agreement that no longer applies (the user says it is no longer needed, or it is outdated).",
+    inputSchema: { type: "object", properties: { id: { type: "string", description: "Agreement id" } }, required: ["id"] },
   },
 ];
 
@@ -180,22 +180,22 @@ export class HistoryGateway {
       const { tasks, db } = await this.#runtimeFor(userId);
       if (name === "history_search") {
         const list = tasks.searchHistoryFor(userId, { query: str(args.query), status: str(args.status), limit: typeof args.limit === "number" ? args.limit : undefined });
-        return text(list.length ? list : "没有找到相关任务。换几个关键词再试，或去掉 status。");
+        return text(list.length ? list : "No matching tasks found. Try other keywords, or drop status.");
       }
       if (name === "history_get") {
         const detail = tasks.historyDetailFor(userId, String(args.id ?? ""), { process: args.process === true });
-        return detail ? text(detail) : text("没有这个任务", true);
+        return detail ? text(detail) : text("No such task", true);
       }
       if (name === "memory_search") {
         const found = searchAgreements(db, userId, str(args.query) ?? "", typeof args.limit === "number" ? Math.min(Math.max(Math.trunc(args.limit), 1), 50) : 20);
-        return text(found.length ? found.map(({ id, kind, text: t, updatedAt }) => ({ id, kind, text: t, updated: new Date(updatedAt).toISOString().slice(0, 10) })) : "没有相关的约定。");
+        return text(found.length ? found.map(({ id, kind, text: t, updatedAt }) => ({ id, kind, text: t, updated: new Date(updatedAt).toISOString().slice(0, 10) })) : "No matching agreements.");
       }
       if (name === "memory_save") {
         const { agreement, replaced } = saveAgreement(db, userId, { kind: args.kind, text: args.text, replaces: args.replaces, taskId: str(args.task) ?? null });
-        return text(`${replaced ? "已改写" : "已记下"}约定（${agreement.id}）：${agreement.text}`);
+        return text(`${replaced ? "Rewrote" : "Recorded"} agreement (${agreement.id}): ${agreement.text}`);
       }
       if (name === "memory_forget") {
-        return forgetAgreement(db, userId, String(args.id ?? "")) ? text("已删除这条约定") : text("没有这条约定", true);
+        return forgetAgreement(db, userId, String(args.id ?? "")) ? text("Deleted this agreement") : text("No such agreement", true);
       }
       return text(`unknown tool ${name}`, true);
     } catch (err) {

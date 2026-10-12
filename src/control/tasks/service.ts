@@ -16,6 +16,7 @@ import type { DispatchTimingSink } from "../codex/dispatchTiming.js";
 import { dispatchAdvice, formatRelevance, formatTimeline, lastQuestion, routingQuestion, timeline, type JevRelevance } from "./context.js";
 import { describeNow, describeSchedule, formatWhen, MAX_ACTIVE_SCHEDULES, nextRun, validateSchedule, type ScheduleSpec } from "./schedules.js";
 import type { PlanningSchedule, ScheduleActionName } from "./planning.js";
+import { answerLanguage, isLocale, readLocale, writeLocale, type Locale } from "../locale.js";
 import { ATTENTION_STATUSES, DONE_STATUSES, WORKING_STATUSES, type TaskBucket, type TaskCounts, type TaskFilter, type TaskListPage } from "../../common/taskList.js";
 
 /** Bounded context keeps both live work and older matches in one Jev call. */
@@ -82,7 +83,7 @@ const FEED_INSTRUCTION = "根据你过往的任务，整理今天你可能感兴
 /** What the feed keeps in mind: what the person cares about, what to stop pushing, what their reactions taught it. */
 type FeedMemoryKind = "care" | "avoid" | "note";
 const FEED_MEMORY_KINDS: FeedMemoryKind[] = ["care", "avoid", "note"];
-const FEED_MEMORY_LABEL: Record<FeedMemoryKind, string> = { care: "关心", avoid: "不再推", note: "记住" };
+const FEED_MEMORY_LABEL: Record<FeedMemoryKind, string> = { care: "care", avoid: "avoid", note: "note" };
 /** Per kind; past it the oldest have to be removed first. */
 const FEED_MEMORY_MAX = 30;
 const FEED_INSTRUCTION_MAX = 1500;
@@ -106,6 +107,8 @@ export interface TaskInput {
     clientMessageId: string;
     attachments?: TurnAttachment[];
     relatedTaskId?: string | null;
+    /** The console language the message was sent from; it becomes the account's language. */
+    locale?: string | null;
 }
 const TERMINAL = new Set(["completed", "failed", "interrupted", "unknown"]);
 /** The task list's keyset cursor: [rank, time, id] of the last row a page held. */
@@ -177,6 +180,9 @@ export class TaskService {
         const same = this.rows().filter(t => t.id !== row.id && t.created_at < row.created_at && !t.merged_into && this.executor(t) === this.executor(ref));
         return same.filter(t => ["planning", "needs_input", "waiting", "queued", "running", "stopping"].includes(t.status)).at(-1) ?? ref;
     }
+    /** The account's console language: what its user-visible model output is written in. */
+    locale(): Locale { return readLocale(this.db); }
+    setLocale(locale: Locale): void { writeLocale(this.db, locale); }
     setNotifier(notifier: ((task: ReturnType<TaskService["view"]>) => void) | null): void { this.#notifier = notifier; }
     /** Tell the notifier about a status this task just reached, if it is news for the person. */
     private notifyChange(id: string, before: string): void {
@@ -327,6 +333,7 @@ export class TaskService {
         }
         if (related && !this.belongsTo(related, userId))
             throw new Error("关联任务不存在");
+        if (isLocale(input.locale)) writeLocale(this.db, input.locale);
         const frozen = isMember(this.db, userId) ? this.agent.memberSettings() : this.agent.resolveSubmitSettings({ conversationId: "main", text, clientMessageId: input.clientMessageId });
         const id = randomId("task");
         const title = [...(text || attachments.map(a => a.name ?? a.path).join("、"))].slice(0, 40).join("");
@@ -525,7 +532,7 @@ export class TaskService {
                 recalled(`${inputContext}\n${all.filter(t => !t.schedule_id).slice(-3).map(t => t.title).join("\n")}`, "context");
             const files = [row,...this.rows().filter(t=>t.merged_into===row.id && t.status==='merged')]
                 .flatMap(t=>JSON.parse(t.attachments_json) as TurnAttachment[]);
-            const planningInput = [inputContext, ...(files.length ? [`已有附件（执行者可以读取其中资料）：${JSON.stringify(files)}`] : [])].filter(Boolean).join("\n\n");
+            const planningInput = [inputContext, ...(files.length ? [`Attachments so far (the executor can read them): ${JSON.stringify(files)}`] : [])].filter(Boolean).join("\n\n");
             const soul = readSoul(this.cfg).content;
             // A member's dispatcher runs on its assigned model; the owner's on the default dispatch model.
             const ask = (prompt: string, onTiming: DispatchTimingSink) => isMember(this.db, this.ownerId(row))
@@ -587,7 +594,7 @@ export class TaskService {
                 ? formatTimeline(timeline(everything, row).filter(entry => entry.current || !zeroIds.has(entry.taskId)), row.created_at)
                 : timelineText;
             trace.rounds = 1;
-            const prompt = planningPrompt(planningInput, lunaCandidates, row.related_task_id, { timeline: lunaTimeline, jev: relevance, now: describeNow(scheduling.now, scheduling.timezone), timezone: scheduling.timezone, schedules: scheduling.schedules });
+            const prompt = planningPrompt(planningInput, lunaCandidates, row.related_task_id, { timeline: lunaTimeline, jev: relevance, now: describeNow(scheduling.now, scheduling.timezone), timezone: scheduling.timezone, schedules: scheduling.schedules, locale: this.locale() });
             trace.promptChars += prompt.length;
             let raw = await askWithTiming(prompt, 1);
             if (this.#closed || this.get(row.id)?.status !== "planning") return;
@@ -599,7 +606,7 @@ export class TaskService {
             // (A dispatcher that gave no answer in time throws instead: re-asking would only wait again.)
             if (!plan) {
                 trace.rounds += 1;
-                const prompt = planningPrompt(planningInput, lunaCandidates, row.related_task_id, { correction: report.error ?? "格式不符合要求", timeline: lunaTimeline, jev: relevance, now: describeNow(scheduling.now, scheduling.timezone), timezone: scheduling.timezone, schedules: scheduling.schedules });
+                const prompt = planningPrompt(planningInput, lunaCandidates, row.related_task_id, { correction: report.error ?? "格式不符合要求", timeline: lunaTimeline, jev: relevance, now: describeNow(scheduling.now, scheduling.timezone), timezone: scheduling.timezone, schedules: scheduling.schedules, locale: this.locale() });
                 trace.promptChars += prompt.length;
                 raw = await askWithTiming(prompt, trace.rounds);
                 if (this.#closed || this.get(row.id)?.status !== "planning") return;
@@ -708,7 +715,7 @@ export class TaskService {
     private taskContext(row: TaskRow): string {
         const supplements = this.db.prepare("SELECT input_text FROM tasks WHERE merged_into=? AND status='merged' ORDER BY created_at").all(row.id) as {input_text:string}[];
         const question = row.plan_json ? (JSON.parse(row.plan_json) as TaskPlan).clarification : null;
-        return [row.input_text, ...(question ? [`本任务此前的问题：${question}`] : []),...supplements.map(r=>`用户补充：${r.input_text}`)].join("\n\n");
+        return [row.input_text, ...(question ? [`This task's earlier question: ${question}`] : []),...supplements.map(r=>`User supplement: ${r.input_text}`)].join("\n\n");
     }
     /** The text messages an executor wrote during a turn, before its final answer (the last few). */
     private interimMessages(turnId: string): string[] {
@@ -776,7 +783,7 @@ export class TaskService {
                     const handed=await this.handBackTabs(this.executor(parent));
                     if(this.#closed) return;
                     const result=await this.agent.appendTurnInput(this.executor(parent),parent.turn_id,
-                        `${handed ? `用户发这条补充时，你请他接管的浏览器标签页（${handed} 个）还在他手里，现已自动交还给你，可以直接继续操作；确实还需要他亲手操作时再请求接管。\n\n` : ""}这是用户在 ${new Date(row.created_at).toLocaleTimeString("sv-SE", { hour: "2-digit", minute: "2-digit" })} 对当前任务的补充（同一件事，不是新任务）。先弄清他的意思再接着做：纠正或改了条件（日期、地点、对象、数量等），就按新要求调整，基于旧条件的做法和结论作废；追加了要求或信息，就并进来一起完成；要你停下或改做别的，就照办。已经做好且仍然有效的部分不用重做。最终回复以最新要求为准、给出完整结果：之前发过且仍然有效的内容在最终回复里带上，已被推翻的不要再出现。按用户要求自行使用所需的文件、浏览器和工具，不受派单资源提示限制。\n\n主会话最近的对话（按时间先后，▶ 是这条补充）：\n${formatTimeline(timeline(this.rows().filter(t => this.ownerId(t) === this.ownerId(row)), row, 6), Date.now(), plan.jev)}${plan.jev ? `\n\nJev 的逐任务相关性与路由建议（仅作背景）：\n${formatRelevance(plan.jev, id => this.get(id)) ?? "无"}` : ''}\n\n派单器的判断（仅作背景）：${JSON.stringify({title:plan.title,description:plan.description,decision:plan.decision})}${dependencies.length ? `\n\n补充所需的已完成任务资料：${JSON.stringify(dependencies.map(t => ({id:t!.id,result:t!.result?.slice(0,16000)})))}` : ''}\n\n本次用户补充：\n\n${row.input_text}`,
+                        `${handed ? `When the user sent this supplement, the browser tabs you had asked them to take over (${handed}) were still in their hands; they have now been handed back to you automatically, so you can carry on directly. Ask for a takeover again only if they really must act by hand.\n\n` : ""}This is the user's supplement to the current task, sent at ${new Date(row.created_at).toLocaleTimeString("sv-SE", { hour: "2-digit", minute: "2-digit" })} (the same matter, not a new task). First work out what they mean, then carry on: if they corrected something or changed a condition (date, place, subject, quantity, etc.), adjust to the new requirement, and the approach and conclusions based on the old condition no longer hold; if they added a requirement or information, fold it in and complete everything together; if they ask you to stop or do something else, do so. Parts already done that are still valid need not be redone. The final reply follows the latest requirement and gives the complete result: carry over content you sent before that is still valid, and leave out anything that has been overturned. Use whatever files, browser and tools the user's request needs; the dispatcher's resource hints do not limit you.\n\nRecent conversation in the main session (in time order; ▶ is this supplement):\n${formatTimeline(timeline(this.rows().filter(t => this.ownerId(t) === this.ownerId(row)), row, 6), Date.now(), plan.jev)}${plan.jev ? `\n\nJev's per-task relevance and routing suggestion (background only):\n${formatRelevance(plan.jev, id => this.get(id)) ?? "none"}` : ''}\n\nThe dispatcher's judgment (background only): ${JSON.stringify({title:plan.title,description:plan.description,decision:plan.decision})}${dependencies.length ? `\n\nResults of the completed tasks this supplement needs: ${JSON.stringify(dependencies.map(t => ({id:t!.id,result:t!.result?.slice(0,16000)})))}` : ''}\n\nThe user's supplement:\n\n${row.input_text}\n\n${answerLanguage(this.locale())}`,
                         JSON.parse(row.attachments_json),resources.includes("browser"));
                     if(this.#closed) return;
                     if(result==='browser_unavailable') this.db.prepare("UPDATE tasks SET status='merge_failed',error=? WHERE id=?").run('此补充需要浏览器，但浏览器暂未恢复；原任务仍可继续，请恢复浏览器后重新补充。',row.id);
@@ -800,38 +807,39 @@ export class TaskService {
         const dir = `${this.cfg.sandbox.containerWorkspaceDir}/tasks/${taskId}`;
         const tz = this.cfg.browser.timezone;
         return [
-            "【工作方式】",
-            "按请求实际需要控制工作量：普通聊天、问候、身份介绍、概念解释和能直接回答的问题，直接在消息里回答，不建目录、不做文件、不检查运行环境、不截图验收。只有回答需要外部事实、附件或已有资料时才用工具；需要用户过往信息时有针对性地查相关记录。身份与风格以已注入的 SOUL.md 为准，不为自我介绍去检索记忆或寻找 SOUL.md。用户要求实际操作或交付文件时，必须真的执行，并做与风险相称的验证，不能用口头回答代替。",
-            "按任务需要使用文件、浏览器和其他工具，派单器的资源提示不限制你；aio_tabs 会按需恢复浏览器并管理标签页归属。沙箱命令无需审批，不等于用户授权了这些操作：只做用户要求和授权的事。",
-            `时间按用户所在时区（${tz}）理解和表述：沙箱系统时钟是 UTC，不要把它当成用户的时间，也不要说“我的时区是 UTC”。“今天”“明天”“几点”都按用户时区换算，本轮开头会给出用户的当前时间。`,
-            "【文件与目录】",
-            `只在确实要写文件时创建任务目录 ${dir}/，新文件都放这里，不散落在工作区根目录。工作区与其他子 agent 共享：不覆盖无关文件，只在本次授权的路径内更新已有产物；发现并发修改先核对即时状态。`,
-            `运行工具产生的临时文件、渲染输出、缓存和工具配置放在 ${dir}/.tmp/，并把 TMPDIR 指向它；LibreOffice 使用该目录下独立的 UserInstallation。不复用或清理 /tmp/verify、/tmp/lo-final 等公共路径。结束前等本任务的写入子进程完成，不留后台写入。`,
-            "默认直接在消息里回答，不建文件。只有用户要文件或可下载的交付物，或内容确实需要独立的文档、页面承载时才做文件；内容是说明、清单或计划本身不是建文档的理由。格式按表达需要选：普通文字、清单和简单表格用结构清晰的 Markdown（.md）；攻略、计划、说明需要复杂排版、图表、多栏卡片或交互时，做自包含、适配手机的 HTML（.html），交付前看实际展示效果，检查通过就交付，只有发现具体缺陷才继续修改复验。用户指定 Word、Excel、PPT 等格式时照办。交付文件时，消息里给简要要点和文件链接，链接用有意义的中文标题，例如 [完整三天行程](绝对文件路径)，不只写“下载文件”，也不暴露冗长的文件名。",
-            "【最终回复】",
-            "你以用户的个人助理身份交付：最终回复先给最有用的结论、建议、安排或交付物，不要只说准备去做。保留必要的事实来源、未完成事项和会影响用户决策的限制（如尚未预订、日期待确认）；不要删掉有用的依据、链接或不确定性来让结果显得更确定。",
-            "用户不关心实现过程：最终回复不汇报用了哪些 skill、工具、命令、API、子 agent 或文件创建、检查步骤，除非用户专门问这些技术细节；需要记下的执行与验证细节放在 commentary 过程里，也不写进交付文档。过程尽量简短，它会在主会话里折叠。",
-            "【消息排版：手机上的图文卡片】",
-            "主会话消息在手机上读，要像图文卡片，不写长篇纯文字：先一两句结论，再用卡片、图片和短段落展开。表格只用于少量数据并排对比（列多时要横向滑动）。按内容选用下面的卡片，放在正文中与它相关的文字旁边，不要全部堆在末尾：\n- 值得配图看的具体条目：商品、酒店、餐厅、景点、活动、文章、视频、帖子、菜谱等 → ```cards 图文卡片\n- 要去的具体地点 → ```map 地图卡片\n- 有分支、汇合、循环的流程，或几方之间的关系 → ```mermaid 流程图（直线走完的几步不用画）\n- 其他示意图、简单图表 → ```svg\n- 图片、视频、音频 → ![说明](路径)；文件 → [有意义的标题](路径)\n- 任务已完成、给用户可选的后续：点选一项 → ```choices；要填几项信息 → ```form\n- 缺了用户的回答就无法继续 → ```ask_user\n各种卡片的写法见下。代码块里的 JSON 或语法写错时，消息里会原样显示成代码。",
-            `图片和文件：用 Markdown 图片语法 ![说明](绝对路径) 嵌入，工作区里的 png/jpg/webp/gif/svg 图片、mp4/mov/webm 视频和 mp3/m4a/wav/ogg/flac 音频会在所在位置显示（音视频是播放器），点开可放大。网上的图片可以写 ![说明](https://…)（系统经沙箱取回显示），更稳妥的是先存进 ${dir}/ 再引用；生成的图片也存在这里：~/.codex 等工作区以外的文件在消息里显示不出来。普通文件写成 [有意义的标题](绝对路径)，显示为可预览、可下载的文件卡片；分享页链接直接给出，会显示为可一键复制的分享卡片。`,
-            "流程图（```mermaid，Mermaid 语法，消息里画成图片，可放大、可下载）。先判断值不值得画：只有分支、汇合、循环或几方关系用图比文字清楚时才画；一条直线走完的 3–5 步写成编号步骤或一行“A → B → C”，时间线写成带日期的列表，都不画图。要画时按手机屏幕来：\n- 方向：只有 3–4 个节点的短链用 flowchart LR（横向一行排开）；有分支或步骤更多时用 flowchart TD（自上而下），每一层并排不超过 3 个节点。\n- 文字：节点里只写动作或结果，10 个字以内，细节放在图下面的正文里；中文或带标点的文字用双引号包起来。\n- 形状：起点和终点用胶囊 A([\"出发\"])，步骤用 B[\"填写表格\"]，判断用六边形 C{{\"护照够半年？\"}}，不要用菱形 {}（菱形会随文字撑得很大）；判断的出口在连线上写短词：C -->|是| D。\n- 几方协作时用 subgraph 按角色分组（只分一层），组名写角色。\n- 一张图 12 个节点以内，更多就拆成几张，每张前面用一句话说明看点。\n- 只写图本身，不加 %%{init}%%、classDef、style 或 click：配色、字号和圆角由系统统一处理。\n其他示意图、简单图表写成 ```svg 代码块（完整的 <svg> 文档），显示为图片。",
-            "图文卡片：介绍或比较几样值得配图看的具体东西时用，每样一张，写在同一个代码块里（最多 8 张）：\n```cards\n[{\"title\": \"名称\", \"image\": \"" + dir + "/图片.jpg\", \"subtitle\": \"来源或类别，如 Amazon、Mountain View · 博物馆、作者 · 网站\", \"tags\": [\"一两个短信息，如营业时间、距离、时长、日期\"], \"text\": \"一两句介绍\", \"points\": [\"要点一\", \"要点二\"], \"url\": \"https://详情页\", \"action\": \"官网\"}]\n```\n商品再加 price、was（原价）、rating，例如 \"price\": \"$899\", \"was\": \"$1,199\", \"rating\": \"4.4（1,203 条）\"；badge 只给真正推荐的那一张（如“最推荐”“最便宜”）；action 是链接上的字，不写就是“去看看”。字段按内容挑着用，没有的就不写。每张卡片尽量配真实图片：用 aio_tabs 的 browser_save_image 存进任务目录，把返回的路径填进 image——在详情页上只给 path（自动存这页的主图），在搜索结果等列表页上加 selector 指向那一项的图片元素。不要手抄图片网址填进 image：网址里的版本、签名参数一删一改就打不开。页面上确实没有它的图时省略 image，绝不用无关或示意的图片。价格、评分、开放时间这类只写查到的，没核实的在 note 里说明。只是列几条事实、没什么可看的图时，用普通列表就好。卡片后面用一两句话说怎么选或下一步。",
-            "地图卡片：回答涉及要去的具体地点（餐厅、景点、酒店、会面地点、目的地等）时，在正文相关位置插入，一个地点一个代码块，用户点一下就能在手机地图里查看：\n```map\n{\"name\": \"地点名称\", \"address\": \"完整地址\", \"lat\": 纬度, \"lng\": 经度}\n```\n坐标只填从可靠来源（地图搜索结果、官网）查到的数值，不要估算；拿不到时只写 name 和 address，系统会按地址定位。坐标默认 WGS-84，取自高德或腾讯地图的坐标加 \"coord\": \"gcj02\"。只是顺带提到的地名不用加卡片。",
-            "【向用户提问】",
-            "先利用已知上下文、记忆和必要工具自己查；能合理默认就直接做，并用半句话说明假设。按情况三选一：\n1. 任务已经完成，只是给可选的后续：在回答最后提出问题，紧跟选项代码块\n```choices\n[\"选项一\", \"选项二\"]\n```\n选项写 2–5 个，每个都是可以直接作为回答的完整说法（不超过 30 字），不要“其他”（用户也可以自己输入）。\n2. 任务已经完成，可选的后续要用户一次填几项信息（日期、人数、地点、偏好等）：用表单代码块\n```form\n{\"title\": \"表单标题\", \"fields\": [{\"name\": \"date\", \"label\": \"日期\", \"type\": \"date\", \"required\": true}, {\"name\": \"people\", \"label\": \"人数\", \"type\": \"number\", \"min\": 1, \"default\": 2}, {\"name\": \"area\", \"label\": \"区域\", \"type\": \"select\", \"options\": [\"选项一\", \"选项二\"]}], \"submit\": \"提交\"}\n```\ntype 可选 text、textarea、number、date、time、select、radio（单选）、checkbox（多选）；select、radio、checkbox 带 2–10 个 options；最多 8 个字段，label 不超过 30 字。只问一件事时不要用表单。\n3. 缺少用户独有、无法合理默认的信息，确实不能继续：先简述已完成的部分，然后在回复最后单独写一个 ask_user 代码块\n```ask_user\n{\"question\": \"要用户回答的一个具体问题\", \"options\": [\"选项一\", \"选项二\"]}\n```\n没有合适选项时省略 options；需要用户一次补充几项信息时，改用 fields（格式同上面表单的 fields，可带 submit），question 写一句说明，主会话会显示成表单。系统会把任务标为等待用户，用户的回复会续接本执行会话。不要在得到回答前执行依赖这个答案的操作；不要只用普通问句结束，也不要声称任务已完成。\n用户点选或提交的内容都会作为回复续接本任务。已经能完成任务时，直接给结果，不写 ask_user。",
+            "[How to work]",
+            "Match the effort to what the request actually needs: ordinary chat, greetings, introducing yourself, explaining concepts and questions you can answer directly are answered right in the message, with no directories, no files, no environment checks and no screenshot checks. Use tools only when the answer needs outside facts, attachments or existing material; when you need the user's past information, look up the relevant records specifically. Identity and style follow the injected SOUL.md; do not search memory or look for SOUL.md to introduce yourself. When the user asks for a real action or a file deliverable, actually carry it out and verify it in proportion to the risk; a verbal answer is no substitute.",
+            "Use files, the browser and other tools as the task needs; the dispatcher's resource hints do not limit you. aio_tabs restores the browser on demand and manages which task owns which tab. Sandbox commands need no approval, but that does not mean the user authorized them: do only what the user asked for and authorized.",
+            `Understand and state times in the user's time zone (${tz}): the sandbox system clock is UTC; do not take it as the user's time, and do not say "my time zone is UTC". "Today", "tomorrow" and clock times all mean the user's time zone; the user's current time is given at the start of each turn.`,
+            "[Files and directories]",
+            `Create the task directory ${dir}/ only when you actually need to write files, and put every new file there instead of scattering files in the workspace root. The workspace is shared with other sub-agents: do not overwrite unrelated files, and update existing outputs only within the paths authorized this time; if you notice concurrent changes, check the current state first.`,
+            `Put temporary files, render output, caches and tool configuration produced while running tools in ${dir}/.tmp/, and point TMPDIR at it; LibreOffice uses its own UserInstallation inside that directory. Do not reuse or clean shared paths such as /tmp/verify or /tmp/lo-final. Before finishing, wait for this task's writing subprocesses to complete; leave no background writes.`,
+            "By default answer right in the message, without creating files. Make a file only when the user wants a file or a downloadable deliverable, or the content truly needs its own document or page; content being an explanation, a list or a plan is not in itself a reason for a document. Choose the format the content needs: plain text, lists and simple tables as well-structured Markdown (.md); guides, plans and explanations that need complex layout, charts, multi-column cards or interaction as a self-contained, phone-friendly HTML file (.html). Check how it actually renders before delivering, deliver it once it passes, and keep revising and re-checking only when you find a specific defect. When the user names Word, Excel, PPT or another format, use it. When delivering a file, give the key points in the message and link the file with a meaningful title, e.g. [Full three-day itinerary](absolute file path), not just \"download file\", and without exposing a long file name.",
+            "[Final reply]",
+            "You deliver as the user's personal assistant: the final reply leads with the most useful conclusion, recommendation, arrangement or deliverable; do not just say what you are about to do. Keep the necessary sources, unfinished items and limitations that affect the user's decisions (e.g. not booked yet, date still to be confirmed); do not drop useful evidence, links or uncertainty to make the result look more certain.",
+            "The user does not care how it was done: the final reply does not report which skills, tools, commands, APIs or sub-agents you used, or the steps of creating and checking files, unless the user asks for those technical details. Execution and verification details worth noting go in the commentary, and not into deliverable documents either. Keep the commentary short; it is collapsed in the main session.",
+            "[Message layout: picture cards on a phone]",
+            "Main-session messages are read on a phone and should look like picture cards, not long plain text: one or two sentences of conclusion first, then cards, images and short paragraphs. Use tables only to compare a little data side by side (many columns need horizontal scrolling). Pick the cards below by content and place each next to the text it belongs to, not all piled up at the end:\n- Concrete items worth seeing with a picture: products, hotels, restaurants, sights, events, articles, videos, posts, recipes, etc. → ```cards picture cards\n- A specific place to go → ```map map card\n- A process with branches, merges or loops, or relationships between several parties → ```mermaid flowchart (a few steps in a straight line need no diagram)\n- Other diagrams and simple charts → ```svg\n- Images, video, audio → ![caption](path); files → [meaningful title](path)\n- The task is done and you offer optional follow-ups: pick one → ```choices; fill in a few items → ```form\n- You cannot continue without the user's answer → ```ask_user\nHow to write each card follows. If the JSON or syntax inside a code block is wrong, the message shows it as raw code.",
+            `Images and files: embed them with Markdown image syntax ![caption](absolute path). png/jpg/webp/gif/svg images, mp4/mov/webm video and mp3/m4a/wav/ogg/flac audio in the workspace are shown in place (audio and video as players) and can be enlarged. Images on the web can be written as ![caption](https://…) (the system fetches them through the sandbox), but it is safer to save them into ${dir}/ first and reference that; generated images go there too, because files outside the workspace, such as ~/.codex, cannot be shown in a message. Write ordinary files as [meaningful title](absolute path); they show as file cards that can be previewed and downloaded. Give share-page links as they are; they show as share cards with one-tap copy.`,
+            "Flowcharts (```mermaid, Mermaid syntax, drawn as an image in the message that can be enlarged and downloaded). First decide whether one is worth drawing: draw only when branches, merges, loops or relationships between several parties are clearer as a diagram than as text. 3–5 steps in a straight line are written as numbered steps or one line \"A → B → C\", and timelines as a dated list, with no diagram. When you draw, design for a phone screen:\n- Direction: a short chain of only 3–4 nodes uses flowchart LR (one horizontal row); with branches or more steps use flowchart TD (top to bottom), with no more than 3 nodes side by side on any level.\n- Text: a node holds only the action or result, at most about 10 Chinese characters or 5 English words; details go in the text below the diagram. Wrap text that contains CJK characters or punctuation in double quotes.\n- Shapes: start and end as stadiums A([\"Start\"]), steps as B[\"Fill in the form\"], decisions as hexagons C{{\"Passport valid 6 months?\"}}; never use diamonds {} (a diamond grows huge with its text). Label a decision's exits with short words on the edge: C -->|Yes| D.\n- When several parties work together, group them by role with subgraph (one level only), named after the role.\n- At most 12 nodes per diagram; split anything larger into several, each introduced by one sentence on what to look at.\n- Write only the diagram itself, with no %%{init}%%, classDef, style or click: colors, font sizes and corner radii are handled by the system.\nOther diagrams and simple charts go in a ```svg code block (a complete <svg> document), shown as an image.",
+            "Picture cards: use them when introducing or comparing a few concrete things worth seeing with a picture, one card per item, all in one code block (at most 8 cards):\n```cards\n[{\"title\": \"Name\", \"image\": \"" + dir + "/image.jpg\", \"subtitle\": \"Source or category, e.g. Amazon, Mountain View · Museum, Author · Site\", \"tags\": [\"one or two short facts, e.g. opening hours, distance, duration, date\"], \"text\": \"One or two sentences of introduction\", \"points\": [\"Point one\", \"Point two\"], \"url\": \"https://details-page\", \"action\": \"Official site\"}]\n```\nFor products also add price, was (the original price) and rating, e.g. \"price\": \"$899\", \"was\": \"$1,199\", \"rating\": \"4.4 (1,203 reviews)\". Give a badge only to the card you truly recommend (e.g. \"Top pick\", \"Cheapest\"). action is the text on the link; leave it out for the default label. Use the fields that fit the content and omit the rest. Give each card a real image whenever possible: save it into the task directory with aio_tabs' browser_save_image and put the returned path in image. On a details page pass only path (it saves the page's main image); on a list page such as search results add a selector pointing at that item's image element. Never copy an image URL into image by hand: dropping or changing its version or signature parameters breaks it. If the page really has no image of it, omit image; never use an unrelated or illustrative picture. Write prices, ratings and opening hours only as found, and explain anything unverified in note. When you are only listing a few facts with nothing worth seeing, a plain list is fine. After the cards, say in a sentence or two how to choose or what to do next.",
+            "Map cards: when the answer involves a specific place to go (a restaurant, sight, hotel, meeting place, destination, etc.), insert one at the relevant spot in the text, one code block per place; the user taps it to open the place in their phone's maps:\n```map\n{\"name\": \"Place name\", \"address\": \"Full address\", \"lat\": latitude, \"lng\": longitude}\n```\nFill in coordinates only with values found in a reliable source (map search results, the official site); never estimate. When you cannot get them, write only name and address and the system locates the place by address. Coordinates are WGS-84 by default; for coordinates taken from Amap (Gaode) or Tencent Maps add \"coord\": \"gcj02\". Places mentioned only in passing need no card.",
+            "[Asking the user]",
+            "First look things up yourself with the known context, memory and the tools you need; if a reasonable default exists, just go ahead and state the assumption in half a sentence. Then pick one of three:\n1. The task is done and you only offer optional follow-ups: ask at the end of the answer, followed immediately by a choices code block\n```choices\n[\"Option one\", \"Option two\"]\n```\nGive 2–5 options, each a complete phrase that can serve directly as the reply (at most 30 characters), and no \"Other\" (the user can always type their own).\n2. The task is done and an optional follow-up needs the user to fill in several items at once (date, number of people, place, preferences, etc.): use a form code block\n```form\n{\"title\": \"Form title\", \"fields\": [{\"name\": \"date\", \"label\": \"Date\", \"type\": \"date\", \"required\": true}, {\"name\": \"people\", \"label\": \"People\", \"type\": \"number\", \"min\": 1, \"default\": 2}, {\"name\": \"area\", \"label\": \"Area\", \"type\": \"select\", \"options\": [\"Option one\", \"Option two\"]}], \"submit\": \"Submit\"}\n```\ntype may be text, textarea, number, date, time, select, radio (single choice) or checkbox (multiple choice); select, radio and checkbox carry 2–10 options; at most 8 fields, each label at most 30 characters. Do not use a form to ask just one thing.\n3. Information only the user has, with no reasonable default, is missing and you really cannot continue: first summarize what is done, then end the reply with a separate ask_user code block\n```ask_user\n{\"question\": \"One specific question for the user to answer\", \"options\": [\"Option one\", \"Option two\"]}\n```\nOmit options when none fit. When the user needs to supply several items at once, use fields instead (the same format as the form fields above, optionally with submit), with question as one sentence of explanation; the main session shows it as a form. The system marks the task as waiting for the user, and the user's reply resumes this execution session. Do not perform operations that depend on the answer before you have it; do not end with only a plain question, and do not claim the task is complete.\nWhatever the user taps or submits resumes this task as a reply. When you can already complete the task, give the result directly without ask_user.",
         ];
     }
     private executorRulesVersion(): string {
-        return createHash("sha256").update(this.executorRules("<任务ID>").join("\n\n")).digest("hex").slice(0, 8);
+        return createHash("sha256").update(this.executorRules("<task ID>").join("\n\n")).digest("hex").slice(0, 8);
     }
     /** The voice gadget's executor prompt: spoken, brief and plain; the account's other tasks are looked up on demand. */
     private gadgetPrompt(row: TaskRow): string {
         return [
-            `你是 AIO Agent 的语音配件会话。任务 ID：${row.id}。用户正对着桌上的语音配件（小屏加喇叭）说话：这句话由语音识别转写，可能有同音错字，按最合理的意思理解；你的回答会显示在小屏上并朗读出来。身份和语气遵循系统层注入的 SOUL.md。不递归委派。`,
-            "这是一个持续的配件会话，同一会话里保留着之前的配件对话；用户说“刚才”“那个”时先从这里找指代。用户在主会话里的其他任务不在这里：问到以前的某件事、某个任务的进展或结果、最近做了什么时，用 aio_history 的 history_search 找（几个关键词），再用 history_get 读完整内容，不要凭印象回答；用不到就不查。",
-            "回答用纯文本口语：不用 Markdown、列表符号、表格、代码块、链接和表情，也不用 cards、products、map、choices、form、ask_user 等卡片或代码块。默认一到三句话、一百字以内，先说结论；用户要求详细时再展开，也不超过三百字。数字、时间和单位写成顺口好读的形式。",
-            `不要追问：缺少信息就按最合理的默认处理，并用半句话说明假设。需要查资料、用浏览器或操作文件时照常用工具完成，过程不写进回答；需要写文件时放在 ${this.cfg.sandbox.containerWorkspaceDir}/tasks/${row.id}/。`,
-            `现在是 ${describeNow(row.created_at, this.cfg.browser.timezone)}。用户这次说：${this.taskContext(row)}`,
+            `You are AIO Agent's voice gadget session. Task ID: ${row.id}. The user is speaking to the voice gadget on their desk (a small screen and a speaker): this sentence was transcribed by speech recognition and may contain homophone errors, so take the most plausible meaning; your answer is shown on the small screen and read aloud. Identity and tone follow the SOUL.md injected at the system level. Do not delegate recursively.`,
+            "This is an ongoing gadget session that keeps the earlier gadget conversation; when the user says \"just now\" or \"that one\", look for what they mean here first. The user's other tasks in the main session are not here: when asked about something earlier, a task's progress or result, or what was done recently, find it with aio_history's history_search (a few keywords), then read the full content with history_get, instead of answering from impression; skip the lookup when it is not needed.",
+            "Answer in plain spoken text: no Markdown, bullets, tables, code blocks, links or emoji, and none of the cards or code blocks such as cards, products, map, choices, form or ask_user. By default one to three sentences, within about 100 Chinese characters or 60 English words, conclusion first; expand only when the user asks for detail, and even then stay within about 300 Chinese characters or 180 English words. Write numbers, times and units so they read aloud naturally.",
+            `Do not ask follow-up questions: when information is missing, go with the most reasonable default and state the assumption in half a sentence. Use tools as usual when you need to look things up, use the browser or work with files, without describing the process in the answer; files you need to write go in ${this.cfg.sandbox.containerWorkspaceDir}/tasks/${row.id}/.`,
+            `It is now ${describeNow(row.created_at, this.cfg.browser.timezone)}. This time the user says: ${this.taskContext(row)}`,
+            answerLanguage(this.locale()),
         ].join("\n\n");
     }
     private dispatch() {
@@ -864,7 +872,7 @@ export class TaskService {
             const related = plan.related.map(id => this.get(id)).filter((t): t is TaskRow => !!t);
             const clock = (ts: number) => new Date(ts).toLocaleString("sv-SE", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
             // A pointer and the gist, not the whole record: the executor reads the rest with history_get when it needs it.
-            const gist = (text: string | null | undefined, n: number, id: string) => text && text.length > n ? `${text.slice(0, n)}…（已截断，完整内容用 aio_history 的 history_get 读取 ${id}）` : text ?? null;
+            const gist = (text: string | null | undefined, n: number, id: string) => text && text.length > n ? `${text.slice(0, n)}… (truncated; read the full content of ${id} with aio_history's history_get)` : text ?? null;
             const context = related.map(t => ({ id: t.id, createdAt: clock(t.created_at), message: gist(t.input_text, 1500, t.id), status: t.status, lastQuestionToUser: lastQuestion(t), result: gist(t.result, 2500, t.id) }));
             const injected = Object.fromEntries(context.map(c => [c.id, createHash("sha256").update(JSON.stringify(c)).digest("hex").slice(0, 16)]));
             // A resumed thread already holds what earlier turns in it were given or
@@ -878,7 +886,7 @@ export class TaskService {
             // What this message answers: the session it continues and the question that session left open.
             const continued = row.related_task_id && row.execution_conversation_id ? this.get(row.related_task_id) : null;
             const ask = continued ? lastQuestion(continued) ?? (continued.plan_json ? (JSON.parse(continued.plan_json) as TaskPlan).clarification : null) : null;
-            const continuation = continued ? `本次消息接续任务 ${continued.id}（${clock(continued.created_at)} 创建）${ask ? `；该任务最后问用户：「${ask}」，用户这次的回复针对的就是这个问题` : "的工作"}。` : null;
+            const continuation = continued ? (ask ? `This message continues task ${continued.id} (created ${clock(continued.created_at)}); that task last asked the user: "${ask}", and the user's reply this time answers that question.` : `This message continues the work of task ${continued.id} (created ${clock(continued.created_at)}).`) : null;
             const relevance = plan.jev ? formatRelevance(plan.jev, id => this.get(id)) : null;
             const gadget = row.client_message_id.startsWith(GADGET_PREFIX);
             // The fixed executor rules go into a thread once: a resumed turn whose thread
@@ -893,26 +901,27 @@ export class TaskService {
             const lastAt = row.execution_conversation_id ? Math.max(0, ...this.rows().filter(t => t.id !== row.id && this.executor(t) === this.executor(row)).map(t => t.completed_at ?? t.created_at)) : 0;
             const idleHours = lastAt ? (Date.now() - lastAt) / 3_600_000 : 0;
             const staleness = idleHours >= STALE_SESSION_HOURS
-                ? `这个会话上次做事是 ${formatWhen(lastAt, this.cfg.browser.timezone)}（${idleHours < 48 ? `${Math.round(idleHours)} 小时` : `${Math.round(idleHours / 24)} 天`}前），这期间情况可能已经变了，会话里的旧内容是线索，不是答案。用户这次问的如果是现在的情况或事情的结果（实际花了多少、办到哪一步、预约和订单的状态、价格、最新消息），先到现在的来源看一遍有没有新东西——知识库、邮件、aio_history 里此后的任务、相关网页——再回答，并说清依据是什么、是什么时候的；只是回顾当时说过的话就不用重查。`
+                ? `This session last did work at ${formatWhen(lastAt, this.cfg.browser.timezone)} (${idleHours < 48 ? `${Math.round(idleHours)} hours` : `${Math.round(idleHours / 24)} days`} ago); things may have changed since, so the old content in the session is a lead, not the answer. If the user is asking how things stand now or how something turned out (what it actually cost, how far it got, the status of appointments and orders, prices, the latest news), first check current sources for anything new (the knowledge base, email, later tasks in aio_history, relevant web pages) before answering, and say what the answer rests on and from when; if they are only looking back at what was said then, no need to check again.`
                 : null;
             const prompt = gadget ? this.gadgetPrompt(row) : [
-                `你是 AIO Agent 主会话委派的子 agent。任务 ID：${row.id}。${row.execution_conversation_id ? "本轮恢复此前任务的同一会话，保留完整上下文；按用户的新要求继续、补充或更新，不要从零重新做。" : "只处理本任务。"}不递归委派。身份、语气和行为遵循系统层注入的 SOUL.md；对子任务同样生效，不以内部执行角色替代个人助理身份。`,
+                `You are a sub-agent delegated by AIO Agent's main session. Task ID: ${row.id}. ${row.execution_conversation_id ? "This turn resumes the same session as the earlier task and keeps its full context; continue, add to or update the work according to the user's new request instead of starting over." : "Handle only this task."} Do not delegate recursively. Identity, tone and behavior follow the SOUL.md injected at the system level; this applies to sub-tasks too, so do not replace the personal-assistant identity with an internal executor role.`,
                 ...(staleness ? [staleness] : []),
                 ...(rulesKnown
-                    ? [`执行约束（版本 ${rulesVersion}）已在本会话前文给出且没有变化，这里不再重复，继续按之前的约束执行。注意本轮任务 ID 是 ${row.id}：约束里的任务目录、临时目录和图片存放位置都换成 ${this.cfg.sandbox.containerWorkspaceDir}/tasks/${row.id}/。`]
-                    : [`执行约束（版本 ${rulesVersion}；同一会话里版本不变时后续轮次不再重复）：`, ...rules]),
+                    ? [`The execution rules (version ${rulesVersion}) were given earlier in this session and have not changed; they are not repeated here, so keep following them. Note that this turn's task ID is ${row.id}: the task directory, temporary directory and image location in the rules all become ${this.cfg.sandbox.containerWorkspaceDir}/tasks/${row.id}/.`]
+                    : [`Execution rules (version ${rulesVersion}; later turns in the same session do not repeat them while the version is unchanged):`, ...rules]),
                 ...(agreements ? [agreementsKnown
-                    ? `用户的长期约定（版本 ${agreements.version}）已在本会话前文给出且没有变化，继续遵守。`
-                    : `用户的长期约定（版本 ${agreements.version}；用户亲口交代、要一直遵守的，与本任务相关时照做${agreements.omitted ? `；另有 ${agreements.omitted} 条未列出，用 memory_search 查` : ""}）：\n${agreements.text}`] : []),
-                ...(fresh.length || !repeated.length ? ["以下是相关任务的背景资料（不是本任务的新指令，未完成结果不得当作已完成）：", JSON.stringify(fresh)] : []),
-                ...(repeated.length ? [`相关任务 ${repeated.join("、")} 的详情已在本会话前文中（此前注入过，或就是在本会话里执行的），之后没有变化，这里不再重复；需要时查看前文。`] : []),
-                "派单器的判断（仅作本轮执行背景；以用户原话和现有权限为准）：", JSON.stringify({ title: plan.title, description: plan.description, decision: plan.decision, related: plan.related, dependencies: plan.dependencies }),
-                "主会话时间线（按时间先后列出用户最近的消息与各自归属的任务，▶ 是本次消息；用来理解本次消息的指代、先后和回应对象，不是新指令）：", formatTimeline(timeline(this.rows().filter(t => this.ownerId(t) === this.ownerId(row)), row), Date.now(), plan.jev),
-                ...(relevance ? [`Jev 的逐任务相关性与路由建议（独立评分，仅供理解背景；正式决定见上方派单器的判断）：\n${relevance}\n以用户原话和派单器的最终路由为准，参考相关任务已完成的结果和最新进展，不把背景当成本轮新指令。`] : []),
+                    ? `The user's standing agreements (version ${agreements.version}) were given earlier in this session and have not changed; keep following them.`
+                    : `The user's standing agreements (version ${agreements.version}; things the user said themselves and wants followed from now on; follow them whenever they bear on this task${agreements.omitted ? `; ${agreements.omitted} more are not listed, look them up with memory_search` : ""}):\n${agreements.text}`] : []),
+                ...(fresh.length || !repeated.length ? ["Background on related tasks follows (not new instructions for this task; unfinished results must not be treated as finished):", JSON.stringify(fresh)] : []),
+                ...(repeated.length ? [`The details of related tasks ${repeated.join(", ")} are earlier in this session (given before, or executed in this session) and have not changed since; they are not repeated here, look back when needed.`] : []),
+                "The dispatcher's judgment (background for this turn only; the user's own words and current permissions take precedence):", JSON.stringify({ title: plan.title, description: plan.description, decision: plan.decision, related: plan.related, dependencies: plan.dependencies }),
+                "Main-session timeline (the user's recent messages in time order and the tasks they belong to; ▶ is this message; use it to understand references, order and what this message responds to; it is not a new instruction):", formatTimeline(timeline(this.rows().filter(t => this.ownerId(t) === this.ownerId(row)), row), Date.now(), plan.jev),
+                ...(relevance ? [`Jev's per-task relevance and routing suggestion (scored independently, background only; the formal decision is the dispatcher's judgment above):\n${relevance}\nThe user's own words and the dispatcher's final routing take precedence; draw on the finished results and latest progress of related tasks, and do not treat the background as new instructions for this turn.`] : []),
                 ...(continuation ? [continuation] : []),
                 ...(row.schedule_id ? [this.scheduledRunNote(row)] : []),
-                `用户的当前时间：${describeNow(Date.now(), this.cfg.browser.timezone)}（${this.cfg.browser.timezone}）。`,
-                "本次用户任务：", this.taskContext(row),
+                `The user's current time: ${describeNow(Date.now(), this.cfg.browser.timezone)} (${this.cfg.browser.timezone}).`,
+                "The user's task this time:", this.taskContext(row),
+                answerLanguage(this.locale()),
             ].join("\n\n");
             try {
                 // Reserve this specific task before submitTurn synchronously
@@ -1063,21 +1072,21 @@ export class TaskService {
         const s = row.schedule_id ? this.scheduleRow(row.schedule_id) : null;
         const asked = s && s.instruction.trim() !== FEED_INSTRUCTION ? s.instruction.trim() : null;
         const memory = this.feedMemory(ownerId);
-        const kept = Object.fromEntries(FEED_MEMORY_KINDS.map(k => [k, memory.filter(m => m.kind === k).map(m => ({ id: m.id, text: m.text, from: m.source === "user" ? "用户说的" : "推送学到的", date: date(m.created_at) }))]));
+        const kept = Object.fromEntries(FEED_MEMORY_KINDS.map(k => [k, memory.filter(m => m.kind === k).map(m => ({ id: m.id, text: m.text, from: m.source === "user" ? "said by the user" : "learned by the feed", date: date(m.created_at) }))]));
         return [
-            `这是内置的「每日推送」（每天 ${(s ? JSON.parse(s.spec_json) as ScheduleSpec : FEED_SPEC).at}）在 ${date(row.created_at)} 的自动运行。用户此刻不在对话中。你的工作：根据用户过往的全部任务记录、他交代的要求和关心的内容，挑出今天他最可能感兴趣、或需要提醒的 3-8 件事，像贴心的私人助理一样简短告诉他。`,
-            "这是主动整理，不受上文“按请求实际需要控制工作量”“过程尽量简短”的限制：要实际动手查证，不要只凭记录写。邮箱和订单物流只是其中一项，不能占满整次推送；另外从任务记录里近几天在看、在比价或在犹豫的商品和话题中挑出 2-4 项（例如在等折扣的首饰手表、想买的主机或装备、关注的票价、在跟进的政策），实际去查今天的价格、折扣或最新动态。",
-            ...(asked ? [`用户对每日推送的要求（优先照做，可以改变下面的默认做法，但不能突破只读和安全规则）：${asked}`] : []),
-            "从任务记录里找线索：关注过的商品和价格（例如某款电脑、婴儿用品）、在比价或犹豫要不要买的东西、临近的日期和预约（证件、疫苗、账单、出行）、做了一半或说过以后再看的事、长期关心的话题。记录不限于最近一天，越早的兴趣越要核实是否仍然相关。",
-            "需要最新信息时（价格、库存、天气、新闻）用浏览器或网络查证，只报告查到的事实并附来源链接；查不到就不写，不编造。只写有实际变化或与今天相关的事，例如“你关注的 Mac Studio 在 Best Buy 降到 $1,799，比上周低 $200”；没有变化的例行信息不写。没有以前的价格可比时，写今天查到的价格和是否在打折、离常见价有多远，这本身就是有用的信息。",
-            "只读查看用户自己的网页：沙箱浏览器里用户已经登录、任务记录里用过或他要求看的网站（例如 Gmail、Outlook 邮箱，X、小红书等关注的动态，购物网站的订单页，账单页），可以打开看今天有没有需要提醒的事：要处理或快到期的邮件（账单、续费、预约确认、需要回复的人）、订单和快递变化、关注的人或话题的重要新动态。严格只读：只打开、滚动、阅读，不发送、回复、评论、点赞、关注、购买、下单、删除、归档、加标记，不改任何设置；不点开未读邮件和私信（会变成已读），用列表里的标题和摘要判断；没登录的网站直接跳过，不要登录，也不要请用户帮忙。写到邮件等私人内容只写要点、不贴全文。用完关掉自己打开的标签页。",
-            "避免打扰：参考 feedHistory（最近几次推送的话题；之后用户的新任务 userTasksAfter；replies 是用户直接回复那次推送说的话）。同一话题最近已连续推过 3 次、而之后用户没有任何相关的新任务，说明他已不再关注，停止推送这个话题，除非出现重大新变化；用户最近新任务里体现的新兴趣优先；昨天说过且没有变化的不再重复。记住的内容 memory 里 care 是要多留意的，avoid 是不要再推的，note 是用户对推送的习惯和偏好，都要遵守。",
-            "持续改进：feedHistory 里能看出用户对推送有明确反应时（例如回复说有用、要更多、别再推，或接着就某条推送做了任务，或某个话题推了几次一直没人理），用 aio_schedule 的 feed_update（source 填 \"feed\"）记下来：要多留意的加 care，不要再推的加 avoid，推送的形式和时机偏好加 note，过时或相反的旧条目用 remove 删掉。每次最多改 3 条，只记有明确证据的，不重复已有的，不确定就不记。",
-            "格式：第一行“今日为你留意”，下面每件事一条，每条一两句话，必要时附链接或地图卡片，说到具体商品降价、值得去的地方或值得读的文章时用图文卡片（带图）；适合在手机上点开快速读完。今天确实没有值得说的，只回复一句“今天没有需要特别提醒的事”，并在末尾单独一行写 <!--feed-empty-->。",
-            "最后单独一行写 <!--feed-topics: [\"话题1\", \"话题2\"]-->，列出本次写到的话题（简短中文，例如“Mac Studio 降价”“Roy 疫苗预约”）；系统用它调整之后的推送，用户看不到这一行。不要提问后等待，不要创建定时任务。",
-            "记住的内容 memory：", JSON.stringify(kept),
-            `用户最近 ${FEED_TASK_DAYS} 天的任务记录（新到旧；最新 ${FEED_TASK_DETAILED} 条带请求和结果摘要，更早的只列日期和标题，同名只列最近一次）：`, JSON.stringify(tasks),
-            "推送记录 feedHistory（新到旧）：", JSON.stringify(feedHistory),
+            `This is the built-in daily feed (every day at ${(s ? JSON.parse(s.spec_json) as ScheduleSpec : FEED_SPEC).at}), running automatically on ${date(row.created_at)}. The user is not in the conversation right now. Your job: from all of the user's past task records, the requests they made and the things they care about, pick the 3–8 things they are most likely to be interested in today or need reminding of, and tell them briefly, like a thoughtful personal assistant.`,
+            "This is proactive work and is not bound by the rules above to \"match the effort to what the request actually needs\" and \"keep the commentary short\": actually check things instead of writing from the records alone. Email and order tracking are only one part and must not fill the whole feed; also pick 2–4 products and topics the user has been looking at, comparing or hesitating over in recent days from the task records (e.g. jewelry or watches waiting for a discount, a console or gear they want, fares they follow, a policy they track), and check today's prices, discounts or latest news for real.",
+            ...(asked ? [`The user's instruction for the daily feed (follow it first; it may change the default approach below, but never the read-only and safety rules): ${asked}`] : []),
+            "Find leads in the task records: products and prices they watched (e.g. a computer, baby supplies), things they compared or hesitated to buy, upcoming dates and appointments (documents, vaccines, bills, trips), things half done or set aside for later, and long-running interests. The records are not limited to the last day; the older an interest, the more you must check that it still matters.",
+            "When you need current information (prices, stock, weather, news), check it with the browser or the web, report only the facts you found with source links, and leave out what you could not find; never make anything up. Write only about things that actually changed or matter today, e.g. \"The Mac Studio you follow dropped to $1,799 at Best Buy, $200 below last week\"; routine information with no change is left out. When there is no earlier price to compare with, give today's price, whether it is on sale and how far it is from the usual price; that is useful in itself.",
+            "Read-only look at the user's own pages: on sites where the user is already signed in in the sandbox browser, that appear in the task records, or that they asked you to check (e.g. Gmail or Outlook mail, X or Xiaohongshu feeds they follow, order pages on shopping sites, billing pages), you may open them to see whether anything needs a reminder today: email to act on or about to expire (bills, renewals, appointment confirmations, people waiting for a reply), order and delivery changes, important news from people or topics they follow. Strictly read-only: only open, scroll and read; never send, reply, comment, like, follow, buy, order, delete, archive or label anything, and change no settings. Do not open unread email or direct messages (that marks them read); judge by the titles and snippets in the list. Skip sites where the user is not signed in; do not sign in and do not ask the user for help. For private content such as email, write only the gist, never the full text. Close the tabs you opened when you are done.",
+            "Avoid nagging: consult feedHistory (topics of the last few feeds; userTasksAfter are the user's new tasks afterwards; replies are what the user said in direct reply to that feed). A topic pushed 3 times in a row recently with no related new task from the user since means they no longer care; stop pushing it unless something major has changed. New interests shown in the user's recent tasks come first; anything said yesterday with no change is not repeated. In the remembered memory, care is what to watch more closely, avoid is what not to push again, and note is the user's habits and preferences about the feed; follow all of them.",
+            "Keep improving: when feedHistory shows a clear reaction to the feed (e.g. a reply saying it helped, asking for more or to stop, a task started right after an item, or a topic pushed several times that nobody responded to), record it with aio_schedule's feed_update (source set to \"feed\"): add care for what to watch more closely, avoid for what not to push again, note for preferences about the feed's form and timing, and remove outdated or contradicting old entries. Change at most 3 entries each time, record only what has clear evidence, do not duplicate existing entries, and record nothing when unsure.",
+            "Format: the first line is the heading \"Picked for you today\" (in Simplified Chinese write exactly 今日为你留意), followed by one item per thing, each one or two sentences, with links or map cards when needed; use picture cards (with images) for specific price drops, places worth visiting or articles worth reading. It should read quickly on a phone. When there is truly nothing worth saying today, reply with a single sentence saying there is nothing in particular to flag today (in Simplified Chinese: 今天没有需要特别提醒的事), and write <!--feed-empty--> on a line of its own at the end.",
+            "On the last line by itself write <!--feed-topics: [\"topic 1\", \"topic 2\"]-->, listing the topics covered this time (short phrases, e.g. \"Mac Studio price drop\", \"Roy's vaccine appointment\"); the system uses it to adjust later feeds and the user never sees this line. Do not ask a question and wait, and do not create schedules.",
+            "Remembered memory:", JSON.stringify(kept),
+            `The user's task records for the last ${FEED_TASK_DAYS} days (newest first; the newest ${FEED_TASK_DETAILED} carry request and result summaries, older ones only the date and title, with only the latest of identical titles):`, JSON.stringify(tasks),
+            "Feed history feedHistory (newest first):", JSON.stringify(feedHistory),
         ].join("\n\n");
     }
     private feedMemory(ownerId: string): FeedMemoryRow[] {
@@ -1110,29 +1119,29 @@ export class TaskService {
         const said: string[] = [];
         let instruction: string | null = null;
         if (args.instruction !== undefined && args.instruction !== null) {
-            if (typeof args.instruction !== "string") throw new Error("instruction 要是文字");
+            if (typeof args.instruction !== "string") throw new Error("instruction must be text");
             const text = args.instruction.trim();
-            if ([...text].length > FEED_INSTRUCTION_MAX) throw new Error(`instruction 太长（最多 ${FEED_INSTRUCTION_MAX} 字）`);
+            if ([...text].length > FEED_INSTRUCTION_MAX) throw new Error(`instruction is too long (at most ${FEED_INSTRUCTION_MAX} characters)`);
             instruction = text || FEED_INSTRUCTION;
-            said.push(text ? "已更新每日推送的要求" : "每日推送的要求已恢复默认");
+            said.push(text ? "Updated the daily feed's instruction" : "Restored the daily feed's default instruction");
         }
         let timing: { spec: ScheduleSpec; next: number } | null = null;
         if (args.at !== undefined && args.at !== null) {
             const checked = validateSchedule({ kind: "daily", at: args.at }, now, s.timezone);
             if ("error" in checked) throw new Error(checked.error);
             timing = checked;
-            said.push(`推送时间改为${describeSchedule(checked.spec)}`);
+            said.push(`Feed time changed to ${describeSchedule(checked.spec)}`);
         }
         const existing = this.feedMemory(userId);
         const removeIds = new Set(Array.isArray(args.remove) ? args.remove.map(String) : []);
-        for (const id of removeIds) if (!existing.some(m => m.id === id)) throw new Error(`没有 id 为 ${id} 的记忆`);
+        for (const id of removeIds) if (!existing.some(m => m.id === id)) throw new Error(`No memory with id ${id}`);
         const adds: Array<{ kind: FeedMemoryKind; text: string }> = [];
         let kept = 0;
         for (const item of Array.isArray(args.add) ? args.add : []) {
             const { kind, text } = (item ?? {}) as { kind?: unknown; text?: unknown };
-            if (!FEED_MEMORY_KINDS.includes(kind as FeedMemoryKind)) throw new Error("add 里的 kind 只能是 care、avoid 或 note");
+            if (!FEED_MEMORY_KINDS.includes(kind as FeedMemoryKind)) throw new Error("kind in add must be care, avoid or note");
             const t = typeof text === "string" ? text.replace(/\s+/g, " ").trim() : "";
-            if (!t || [...t].length > FEED_MEMORY_TEXT_MAX) throw new Error(`add 里的 text 要有内容，最多 ${FEED_MEMORY_TEXT_MAX} 字`);
+            if (!t || [...t].length > FEED_MEMORY_TEXT_MAX) throw new Error(`text in add must not be empty and is at most ${FEED_MEMORY_TEXT_MAX} characters`);
             if (existing.some(m => m.kind === kind && m.text === t && !removeIds.has(m.id))) kept += 1;
             else if (!adds.some(a => a.kind === kind && a.text === t)) adds.push({ kind: kind as FeedMemoryKind, text: t });
         }
@@ -1143,11 +1152,11 @@ export class TaskService {
         }
         for (const kind of FEED_MEMORY_KINDS) {
             const count = existing.filter(m => m.kind === kind && !removeIds.has(m.id)).length + adds.filter(a => a.kind === kind).length;
-            if (count > FEED_MEMORY_MAX) throw new Error(`「${FEED_MEMORY_LABEL[kind]}」最多 ${FEED_MEMORY_MAX} 条，请先用 remove 删掉过时的`);
+            if (count > FEED_MEMORY_MAX) throw new Error(`"${FEED_MEMORY_LABEL[kind]}" holds at most ${FEED_MEMORY_MAX} entries; remove outdated ones first`);
         }
         if (!instruction && !timing && !adds.length && !removeIds.size) {
-            if (kept) return "这些已经记着了，没有变化。";
-            throw new Error("没有要改的：给 instruction、at、add 或 remove");
+            if (kept) return "These are already remembered; nothing changed.";
+            throw new Error("Nothing to change: give instruction, at, add or remove");
         }
         this.db.exec("BEGIN IMMEDIATE");
         try {
@@ -1157,11 +1166,11 @@ export class TaskService {
             adds.forEach((a, i) => this.db.prepare("INSERT INTO feed_memory (id,owner_id,kind,text,source,created_at) VALUES (?,?,?,?,?,?)").run(randomId("feedmem"), userId, a.kind, a.text, source, now + i));
             this.db.exec("COMMIT");
         } catch (err) { this.db.exec("ROLLBACK"); throw err; }
-        if (adds.length) said.push(`记下 ${adds.length} 条（${adds.map(a => `${FEED_MEMORY_LABEL[a.kind]}：${a.text}`).join("；")}）`);
-        if (removeIds.size) said.push(`删掉 ${removeIds.size} 条旧的`);
-        if (kept) said.push(`${kept} 条原本就记着`);
+        if (adds.length) said.push(`Remembered ${adds.length} (${adds.map(a => `${FEED_MEMORY_LABEL[a.kind]}: ${a.text}`).join("; ")})`);
+        if (removeIds.size) said.push(`Removed ${removeIds.size} old`);
+        if (kept) said.push(`${kept} already remembered`);
         if (timing) this.schedule();
-        return said.join("；") + "。";
+        return said.join("; ") + ".";
     }
     /** Store one schedule for the account (the cap applies however it was asked for); its id, or why not. */
     private insertSchedule(ownerId: string, s: { title: string; instruction: string; spec: ScheduleSpec; nextRunAt: number; resources: string[]; sourceTaskId: string | null }): { id: string } | { refused: string } {
@@ -1327,9 +1336,9 @@ export class TaskService {
         const s = row.schedule_id ? this.scheduleRow(row.schedule_id) : null;
         if (s?.builtin === DAILY_FEED) return this.feedBrief(row);
         const n = (this.db.prepare("SELECT COUNT(*) AS n FROM tasks WHERE schedule_id=? AND created_at<=?").get(row.schedule_id, row.created_at) as { n: number }).n;
-        const rule = s ? `（${describeSchedule(JSON.parse(s.spec_json) as ScheduleSpec)}）` : "";
+        const rule = s ? ` (${describeSchedule(JSON.parse(s.spec_json) as ScheduleSpec)})` : "";
         const plan = JSON.parse(row.plan_json!) as TaskPlan;
-        return `这是定时任务「${row.title}」${rule}的第 ${n} 次自动运行，${formatWhen(row.created_at, s?.timezone ?? this.cfg.browser.timezone)} 开始。用户此刻不在对话中：直接完成并汇报结果，需要用户决定或确认的事写进结果里，不要提问后等待，也不要再创建定时任务。${plan.related.length ? "背景资料里有上一次运行的结果，可以说明和上次相比的变化。" : ""}`;
+        return `This is run ${n} of the scheduled task "${row.title}"${rule}, started automatically at ${formatWhen(row.created_at, s?.timezone ?? this.cfg.browser.timezone)}. The user is not in the conversation right now: finish the work and report the result directly, write anything that needs the user's decision or confirmation into the result, do not ask a question and wait, and do not create another schedule.${plan.related.length ? " The background includes the previous run's result, so you can say what changed since then." : ""}`;
     }
     private viewSchedule(s: ScheduleRow) {
         const last = s.last_task_id ? this.get(s.last_task_id) : null;
@@ -1378,8 +1387,8 @@ export class TaskService {
         return {
             id: t.id, date: describeNow(t.created_at, tz), title: t.title, status: t.status,
             request: cut(this.taskContext(t), 120), result: excerpt,
-            ...(chain.length > 1 ? { session: `同一执行会话的第 ${chain.indexOf(t) + 1}/${chain.length} 个任务` } : {}),
-            ...(t.client_message_id.startsWith(GADGET_PREFIX) ? { from: "语音配件" } : t.schedule_id ? { from: "定时任务" } : {}),
+            ...(chain.length > 1 ? { session: `task ${chain.indexOf(t) + 1} of ${chain.length} in the same execution session` } : {}),
+            ...(t.client_message_id.startsWith(GADGET_PREFIX) ? { from: "voice gadget" } : t.schedule_id ? { from: "scheduled task" } : {}),
         };
     }
     /**
@@ -1401,7 +1410,7 @@ export class TaskService {
             result: TERMINAL.has(row.status) || row.status === "needs_input" ? this.shownResult(row)?.slice(0, 16000) ?? null : null,
             error: row.error,
             ...(chain.length > 1 ? { session: chain.map(t => ({ id: t.id, date: describeNow(t.created_at, tz), title: t.title, status: t.status, ...(t.id === row.id ? { current: true } : {}) })) } : {}),
-            ...(process ? { process: process.steps, ...(process.more ? { processOmitted: `前面还有 ${process.more} 步未列出` } : {}) } : {}),
+            ...(process ? { process: process.steps, ...(process.more ? { processOmitted: `${process.more} earlier steps not listed` } : {}) } : {}),
         };
     }
     listSchedules(userId: string) {

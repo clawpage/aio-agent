@@ -417,7 +417,7 @@ describe("ClaudeCodeSession", () => {
   });
 
   it("lists attachments as sandbox paths", () => {
-    expect(withAttachments("看图", [{ path: "/u/a.png", kind: "image", name: "a.png" }])).toBe("看图\n\n附件（沙箱内路径）：\n- /u/a.png（图片）（a.png）");
+    expect(withAttachments("看图", [{ path: "/u/a.png", kind: "image", name: "a.png" }])).toBe("看图\n\nAttachments (paths in the sandbox):\n- /u/a.png (image) (a.png)");
     expect(withAttachments("纯文本")).toBe("纯文本");
   });
 });
@@ -572,8 +572,8 @@ describe("AgentManager with the Claude Code harness", () => {
     expect(second.threadId).not.toBe(first.threadId);
     expect(codex.threadProviders.get(second.threadId)).toBe(CLAUDE_CODE_PROVIDER_ID);
     expect(second.model).toBe("claude-sonnet-5-5");
-    expect(second.text).toContain("用户：规划三天行程\n助理：第一天去海边。");
-    expect(second.text.endsWith("[当前消息]\n第二天改去山里")).toBe(true);
+    expect(second.text).toContain("User: 规划三天行程\nAssistant: 第一天去海边。");
+    expect(second.text.endsWith("[Current message]\n第二天改去山里")).toBe(true);
     codex.completeTurn(second.turnId);
     await tick();
 
@@ -604,8 +604,8 @@ describe("AgentManager with the Claude Code harness", () => {
     expect(codex.startedThreads).toHaveLength(2);
     expect(second.threadId).not.toBe(first.threadId);
     expect(second.model).toBe("gpt-5.5");
-    expect(second.text).toContain("用户：周三南瓜农场免费吗\n助理：周三免费入场。");
-    expect(second.text.endsWith("[当前消息]\n带孩子去合适吗")).toBe(true);
+    expect(second.text).toContain("User: 周三南瓜农场免费吗\nAssistant: 周三免费入场。");
+    expect(second.text.endsWith("[Current message]\n带孩子去合适吗")).toBe(true);
     codex.completeTurn(second.turnId);
     await tick();
 
@@ -637,10 +637,10 @@ describe("AgentManager with the Claude Code harness", () => {
     agent.submitTurn({ conversationId: conv.id, text: "改成新宿", clientMessageId: "p3" });
     await tick();
     const moved = codex.startedTurns.at(-1)!.text;
-    expect(moved).toContain("用户：帮我订东京酒店\n助理：订好了。");
+    expect(moved).toContain("User: 帮我订东京酒店\nAssistant: 订好了。");
     expect(moved).not.toContain("主会话委派的子 agent");
     // The latest exchange is clipped, and the one before it still comes along.
-    expect(moved).toContain("用户：早先的请求\n助理：早先的回答");
+    expect(moved).toContain("User: 早先的请求\nAssistant: 早先的回答");
     expect(moved.length).toBeLessThan(30_000);
     codex.completeTurn(codex.startedTurns.at(-1)!.turnId);
     await tick();

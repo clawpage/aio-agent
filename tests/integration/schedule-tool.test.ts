@@ -37,7 +37,7 @@ it("gives every account a schedule tool that creates and manages its own schedul
     const tools = (await (await rpc(member.schedule!.url, { jsonrpc: "2.0", id: 2, method: "tools/list" })).json()).result.tools as Array<{ name: string; description: string }>;
     expect(tools.map((t) => t.name)).toEqual(["schedule_create", "schedule_list", "schedule_change", "schedule_update", "feed_get", "feed_update"]);
     // The description says what the session-bound timers never could.
-    expect(tools[0]!.description).toContain("不属于当前对话或会话");
+    expect(tools[0]!.description).toContain("not in the current conversation or session");
 
     const call = async (url: string, name: string, args: unknown) => (await (await rpc(url, { jsonrpc: "2.0", id: 3, method: "tools/call", params: { name, arguments: args } })).json()).result as { content: Array<{ text: string }>; isError?: boolean };
     const until = new Date(Date.now() + 20 * 86400_000).toISOString().slice(0, 10);
@@ -92,7 +92,7 @@ it("gives every account a schedule tool that creates and manages its own schedul
     expect((await call(owner.schedule!.url, "schedule_list", {})).content[0]!.text).toContain("feed_get");
     const updated = await call(owner.schedule!.url, "feed_update", { instruction: "推送时看看 Gmail 有没有账单", add: [{ kind: "avoid", text: "加密货币行情" }] });
     expect(updated.isError).toBeUndefined();
-    expect(updated.content[0]!.text).toContain("已更新每日推送的要求");
+    expect(updated.content[0]!.text).toContain("Updated the daily feed's instruction");
     expect(JSON.parse((await call(owner.schedule!.url, "feed_get", {})).content[0]!.text)).toMatchObject({ customized: true, instruction: "推送时看看 Gmail 有没有账单", memory: [{ kind: "avoid", text: "加密货币行情", source: "user" }] });
     expect((await call(owner.schedule!.url, "feed_update", { add: [{ kind: "avoid" }] })).isError).toBe(true);
     const feedId = (h.ctx.db.prepare("SELECT id FROM schedules WHERE owner_id='owner_1' AND builtin='daily_feed'").get() as { id: string }).id;

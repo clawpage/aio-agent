@@ -26,18 +26,18 @@ const TOOLS = [
   {
     name: "image_generate",
     description:
-      "生成一张新图片，或按参考图修改、延展（照片、插画、海报、头像、商品效果图、贴纸等位图），保存到工作区并返回路径。" +
-      "要修改或参照已有图片时把它们的路径放进 reference_paths（工作区里的 png/jpg/webp，最多 5 张）。" +
-      "一次调用出一张图，通常要一两分钟；要几张不同的图就分别调用。",
+      "Generate a new image, or edit or extend one based on reference images (photos, illustrations, posters, avatars, product renderings, stickers, and other raster images), save it to the workspace, and return its path. " +
+      "To edit or reference existing images, put their paths in reference_paths (png/jpg/webp in the workspace, at most 5). " +
+      "Each call makes one image and usually takes a minute or two; call it separately for each different image you need.",
     inputSchema: {
       type: "object",
       properties: {
-        prompt: { type: "string", description: "要画什么：主体、场景、风格、构图、光线、颜色；图里要出现的文字原样写在引号里。修改图片时写清楚改什么、哪些保持不变" },
-        path: { type: "string", description: "保存位置：工作区里的 .png 绝对路径，放在本任务目录下，例如 /home/gem/workspace/tasks/<任务 id>/海报.png；不填就存进 /home/gem/workspace/images/" },
-        reference_paths: { type: "array", items: { type: "string" }, description: "要修改或参照的图片路径（可选）" },
-        transparent_background: { type: "boolean", description: "要透明背景（贴纸、抠图、图标）时为 true" },
-        size: { type: "string", enum: SIZES, description: "画幅：auto 自动；1024x1024 方图；1536x1024 横图；1024x1536 竖图" },
-        quality: { type: "string", enum: QUALITIES, description: "默认 auto" },
+        prompt: { type: "string", description: "What to draw: subject, scene, style, composition, lighting, colors; put any text that should appear in the image verbatim in quotes. When editing an image, say clearly what to change and what to keep the same" },
+        path: { type: "string", description: "Where to save it: an absolute .png path in the workspace, inside this task's folder, e.g. /home/gem/workspace/tasks/<task id>/poster.png; if omitted, it is saved in /home/gem/workspace/images/" },
+        reference_paths: { type: "array", items: { type: "string" }, description: "Paths of images to edit or reference (optional)" },
+        transparent_background: { type: "boolean", description: "true when a transparent background is needed (stickers, cutouts, icons)" },
+        size: { type: "string", enum: SIZES, description: "Canvas: auto chooses automatically; 1024x1024 square; 1536x1024 landscape; 1024x1536 portrait" },
+        quality: { type: "string", enum: QUALITIES, description: "Default auto" },
       },
       required: ["prompt"],
     },
@@ -55,7 +55,7 @@ export function imageMcpServers(cfg: Config): Record<string, unknown> {
 }
 
 export const IMAGE_POLICY =
-  "用户要图片（照片、插画、海报、头像、商品效果图、贴纸等位图），或要修改、延展一张图片时，用 aio_image 的 image_generate 生成，path 填本任务目录下的 .png；生成后在回复里用 ![说明](路径) 直接显示。流程图更适合写成 mermaid 代码块，示意图、图表这类线条图更适合直接写成 svg 代码块。";
+  "When the user wants an image (photos, illustrations, posters, avatars, product renderings, stickers, and other raster images), or wants an image edited or extended, generate it with image_generate from aio_image, with path set to a .png in this task's folder; after it is generated, show it directly in your reply with ![description](path). Flowcharts are better written as a mermaid code block, and line drawings such as diagrams and charts are better written directly as an svg code block.";
 
 /** Reading and saving pictures in one account's workspace. */
 export interface ImageFiles {
@@ -71,13 +71,13 @@ export function sandboxImageFiles(ctx: Pick<AppContext, "documents" | "container
     read: (file) => ctx.documents.image(file),
     async write(file, bytes) {
       const mkdir = await ctx.container.execInSandbox(["mkdir", "-p", "--", path.posix.dirname(file)], { timeoutMs: 30_000 });
-      if (mkdir.code !== 0) throw new Error(`创建目录失败：${mkdir.stderr.trim().slice(0, 200)}`);
+      if (mkdir.code !== 0) throw new Error(`Failed to create the folder: ${mkdir.stderr.trim().slice(0, 200)}`);
       const form = new FormData();
       form.append("file", new Blob([new Uint8Array(bytes)]), path.posix.basename(file));
       form.append("path", file);
       const res = await ctx.container.fetch("/v1/file/upload", { method: "POST", body: form, signal: AbortSignal.timeout(60_000) });
       const json = (await res.json().catch(() => ({}))) as { success?: boolean; message?: string };
-      if (!res.ok || json.success === false) throw new Error(`保存图片失败：${json.message ?? res.status}`);
+      if (!res.ok || json.success === false) throw new Error(`Failed to save the image: ${json.message ?? res.status}`);
     },
   };
 }
@@ -186,19 +186,19 @@ export class ImageGateway {
     const started = Date.now();
     try {
       const prompt = typeof args.prompt === "string" ? args.prompt.trim() : "";
-      if (!prompt) throw new ImageError("缺少 prompt：写清楚要画什么");
+      if (!prompt) throw new ImageError("Missing prompt: say clearly what to draw");
       const target = this.#target(args.path);
       const refs = Array.isArray(args.reference_paths) ? args.reference_paths : [];
-      if (refs.length > MAX_REFERENCES) throw new ImageError(`reference_paths 最多 ${MAX_REFERENCES} 张`);
+      if (refs.length > MAX_REFERENCES) throw new ImageError(`reference_paths allows at most ${MAX_REFERENCES} images`);
       const size = SIZES.includes(String(args.size)) ? String(args.size) : "auto";
       const quality = QUALITIES.includes(String(args.quality)) ? String(args.quality) : "auto";
       const files = await this.#filesFor(userId);
       const images: Array<{ image_url: string }> = [];
       for (const ref of refs) {
         const checked = requireWorkspaceFilePath(String(ref), this.#workspace);
-        if (!checked.ok) throw new ImageError(`参考图 ${String(ref)}：${checked.message}`);
+        if (!checked.ok) throw new ImageError(`Reference image ${String(ref)}: ${checked.message}`);
         const { bytes, contentType } = await files.read(checked.path);
-        if (contentType === "image/svg+xml") throw new ImageError(`参考图 ${checked.path} 是 SVG，请先转成 png`);
+        if (contentType === "image/svg+xml") throw new ImageError(`Reference image ${checked.path} is an SVG; convert it to png first`);
         images.push({ image_url: `data:${contentType};base64,${bytes.toString("base64")}` });
       }
       const picture = await this.#request(images.length ? "edits" : "generations", {
@@ -211,7 +211,7 @@ export class ImageGateway {
       });
       await files.write(target, picture);
       this.#log.info("image generated", { userId, edit: images.length > 0, bytes: picture.length, ms: Date.now() - started });
-      return text(`图片已保存：${target}\n在回复里用 ![说明](${target}) 显示它。`);
+      return text(`Image saved: ${target}\nShow it in your reply with ![description](${target}).`);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       if (!(err instanceof ImageError)) this.#log.warn("image generation failed", { userId, error: message, ms: Date.now() - started });
@@ -226,8 +226,8 @@ export class ImageGateway {
       return `${this.#workspace}/images/${stamp}-${randomUUID().slice(0, 6)}.png`;
     }
     const checked = requireWorkspaceFilePath(String(raw), this.#workspace);
-    if (!checked.ok) throw new ImageError(`path：${checked.message}`);
-    if (!/\.png$/i.test(checked.path)) throw new ImageError("path 要以 .png 结尾（生成的是 PNG 图片）");
+    if (!checked.ok) throw new ImageError(`path: ${checked.message}`);
+    if (!/\.png$/i.test(checked.path)) throw new ImageError("path must end in .png (the generated image is a PNG)");
     return checked.path;
   }
 
@@ -243,14 +243,14 @@ export class ImageGateway {
     if (res.status === 401) this.#hostTokens.invalidate();
     if (!res.ok) {
       const detail = (await res.text().catch(() => "")).replace(/\s+/g, " ").slice(0, 300);
-      if (res.status === 429) throw new Error(`出图额度暂时用完或请求太频繁，请稍后再试（${detail}）`);
-      if (res.status === 400) throw new ImageError(`出图请求被拒绝，可能是内容不符合要求，换个描述再试（${detail}）`);
-      throw new Error(`出图服务返回 ${res.status}（${detail}）`);
+      if (res.status === 429) throw new Error(`The image generation quota is used up for now or requests are too frequent; try again later (${detail})`);
+      if (res.status === 400) throw new ImageError(`The image request was refused, possibly because the content does not meet the requirements; try a different description (${detail})`);
+      throw new Error(`The image service returned ${res.status} (${detail})`);
     }
     const json = (await res.json()) as { data?: Array<{ b64_json?: string }> };
     const picture = Buffer.from(json.data?.[0]?.b64_json ?? "", "base64");
     // Only PNG bytes are saved under a .png name.
-    if (!picture.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) throw new Error("出图服务没有返回 PNG 图片");
+    if (!picture.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) throw new Error("The image service did not return a PNG image");
     return picture;
   }
 }

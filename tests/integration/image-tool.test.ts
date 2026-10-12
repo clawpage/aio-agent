@@ -68,7 +68,7 @@ it("gives every account an image tool that draws with the control plane's own lo
     const poster = "/home/gem/workspace/tasks/task-1/海报.png";
     const made = await call(member.image!.url, { prompt: "一张秋天的海报，写着“周末快乐”", path: poster, size: "1024x1536" });
     expect(made.isError).toBeUndefined();
-    expect(made.content[0]!.text).toContain(`![说明](${poster})`);
+    expect(made.content[0]!.text).toContain(`![description](${poster})`);
     expect(seen[0]).toMatchObject({ url: "/backend-api/codex/images/generations", body: { prompt: "一张秋天的海报，写着“周末快乐”", model: "gpt-image-2", background: "opaque", quality: "auto", size: "1024x1536" } });
     expect(seen[0]!.headers.authorization).toBe("Bearer owner-chatgpt-access");
     expect(seen[0]!.headers["chatgpt-account-id"]).toBe("acct_owner");
@@ -82,7 +82,7 @@ it("gives every account an image tool that draws with the control plane's own lo
 
     // Without a path it goes into the workspace's images folder; the owner's tool writes the owner's files.
     const plain = await call(owner.image!.url, { prompt: "一只猫" });
-    expect(plain.content[0]!.text).toMatch(/图片已保存：\/home\/gem\/workspace\/images\/\d{8}-\d{6}-[0-9a-f]{6}\.png/);
+    expect(plain.content[0]!.text).toMatch(/Image saved: \/home\/gem\/workspace\/images\/\d{8}-\d{6}-[0-9a-f]{6}\.png/);
     expect([...written.get("owner_1")!.keys()]).toHaveLength(1);
 
     // Nothing outside the workspace, nothing but .png, no SVG or missing references.
@@ -90,9 +90,9 @@ it("gives every account an image tool that draws with the control plane's own lo
       [{ prompt: "x", path: "/etc/x.png" }, "只允许访问沙箱工作区内的文件"],
       [{ prompt: "x", path: "/home/gem/workspace/../.codex/x.png" }, "只允许访问沙箱工作区内的文件"],
       [{ prompt: "x", path: "/home/gem/workspace/a.jpg" }, ".png"],
-      [{ prompt: "" }, "缺少 prompt"],
+      [{ prompt: "" }, "Missing prompt"],
       [{ prompt: "x", reference_paths: ["/home/gem/workspace/none.png"] }, "文件不存在"],
-      [{ prompt: "x", reference_paths: Array(6).fill(poster) }, "最多 5 张"],
+      [{ prompt: "x", reference_paths: Array(6).fill(poster) }, "at most 5 images"],
     ] as const) {
       const failed = await call(member.image!.url, args);
       expect(failed.isError).toBe(true);
@@ -105,9 +105,9 @@ it("gives every account an image tool that draws with the control plane's own lo
     expect((await call(member.image!.url, { prompt: "x" })).isError).toBe(true);
     expect(invalidated).toBe(1);
     answer = { status: 429, body: { error: "rate limited" } };
-    expect((await call(member.image!.url, { prompt: "x" })).content[0]!.text).toContain("额度");
+    expect((await call(member.image!.url, { prompt: "x" })).content[0]!.text).toContain("quota");
     answer = { status: 200, body: { created: 1, data: [{ b64_json: Buffer.from("<html>").toString("base64") }] } };
-    expect((await call(member.image!.url, { prompt: "x", path: "/home/gem/workspace/tasks/task-1/bad.png" })).content[0]!.text).toContain("没有返回 PNG");
+    expect((await call(member.image!.url, { prompt: "x", path: "/home/gem/workspace/tasks/task-1/bad.png" })).content[0]!.text).toContain("did not return a PNG");
     expect(written.get("user_m")!.has("/home/gem/workspace/tasks/task-1/bad.png")).toBe(false);
   } finally {
     gateway.close();

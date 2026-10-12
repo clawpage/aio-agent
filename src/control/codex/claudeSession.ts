@@ -70,8 +70,8 @@ function userMessage(text: string): string {
 /** Attachments are sandbox paths; the CLI reads files and images itself. */
 export function withAttachments(text: string, attachments: TurnAttachment[] = []): string {
   if (!attachments.length) return text;
-  const lines = attachments.map((a) => `- ${a.path}${a.kind === "image" ? "（图片）" : ""}${a.name ? `（${a.name}）` : ""}`);
-  return `${text}\n\n附件（沙箱内路径）：\n${lines.join("\n")}`;
+  const lines = attachments.map((a) => `- ${a.path}${a.kind === "image" ? " (image)" : ""}${a.name ? ` (${a.name})` : ""}`);
+  return `${text}\n\nAttachments (paths in the sandbox):\n${lines.join("\n")}`;
 }
 
 function resultMessage(result: Json | null, stderrTail: string): string {

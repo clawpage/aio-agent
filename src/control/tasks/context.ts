@@ -78,6 +78,7 @@ const time = (ts: number, now: number) => {
 };
 
 const percent = (p: number) => `${Math.round(p * 100)}%`;
+const ordinal = (n: number) => `${n}${n % 100 >= 11 && n % 100 <= 13 ? "th" : ["th", "st", "nd", "rd"][n % 10] ?? "th"}`;
 
 /**
  * The timeline as lines an executor can read: when, what the user said, which task, what it last asked,
@@ -88,11 +89,11 @@ export function formatTimeline(entries: TimelineEntry[], now = Date.now(), relev
   return entries
     .map((e) => {
       // A scheduled run's instruction is labelled as such: the user did not type it.
-      const head = `${e.current ? "▶ " : "  "}[${time(e.at, now)}] ${e.scheduled ? "定时运行" : "用户"}：「${e.text}」`;
-      if (e.current) return `${head}  ← 本次${e.scheduled ? "运行" : "消息"}`;
-      const where = e.taskId === e.id ? `任务 ${e.taskId}「${clip(e.title, 30)}」（${e.status}）` : `补充给任务 ${e.taskId}「${clip(e.title, 30)}」（${e.status}）`;
+      const head = `${e.current ? "▶ " : "  "}[${time(e.at, now)}] ${e.scheduled ? "Scheduled run" : "User"}: "${e.text}"`;
+      if (e.current) return `${head}  ← this ${e.scheduled ? "run" : "message"}`;
+      const where = e.taskId === e.id ? `task ${e.taskId} "${clip(e.title, 30)}" (${e.status})` : `supplement to task ${e.taskId} "${clip(e.title, 30)}" (${e.status})`;
       const p = likely.get(e.taskId);
-      return `${head} → ${where}${e.ask ? `；助理最后问：「${e.ask}」` : ""}${p === undefined ? "" : `〔Jev：相关性 ${percent(p)}〕`}`;
+      return `${head} → ${where}${e.ask ? `; the assistant last asked: "${e.ask}"` : ""}${p === undefined ? "" : ` [Jev: relevance ${percent(p)}]`}`;
     })
     .join("\n");
 }
@@ -118,15 +119,15 @@ export interface JevRelevance {
 export function formatRelevance(relevance: JevRelevance, get: (id: string) => ContextTask | null | undefined, now = Date.now()): string | null {
   const suggestion = relevance.suggestion;
   const lines = [
-    ...(suggestion ? [`- Jev 建议：${suggestion.kind === "new" ? "新任务" : `${suggestion.kind === "steer" ? "追加" : "续接"}任务 ${suggestion.taskId}`}（${percent(suggestion.probability)}，${relevance.confident ? "高置信" : "不确定"}）；最终由派单器决定。`] : []),
+    ...(suggestion ? [`- Jev suggests: ${suggestion.kind === "new" ? "a new task" : `${suggestion.kind === "steer" ? "append to" : "resume"} task ${suggestion.taskId}`} (${percent(suggestion.probability)}, ${relevance.confident ? "high confidence" : "uncertain"}); the dispatcher decides.`] : []),
     ...relevance.ranked.flatMap(({ id, p }) => {
-    const mark = id === relevance.choice ? `，Jev 首选${relevance.confident ? "（高置信）" : ""}` : "";
-    if (id === NEW_TASK) return [`- 独立的新请求：${percent(p)}${mark}`];
+    const mark = id === relevance.choice ? `, Jev's first choice${relevance.confident ? " (high confidence)" : ""}` : "";
+    if (id === NEW_TASK) return [`- A separate new request: ${percent(p)}${mark}`];
     const t = get(id);
     if (!t) return [];
     const ask = lastQuestion(t);
-    const left = ask ? `；助理最后问：「${ask}」` : t.result ? `；结果开头：${clip(t.result, 120)}` : "";
-    return [`- 任务 ${t.id}「${clip(t.title, 30)}」（${t.status}，${time(t.created_at, now)}）：${percent(p)}${mark}${left}`];
+    const left = ask ? `; the assistant last asked: "${ask}"` : t.result ? `; result begins: ${clip(t.result, 120)}` : "";
+    return [`- Task ${t.id} "${clip(t.title, 30)}" (${t.status}, ${time(t.created_at, now)}): ${percent(p)}${mark}${left}`];
   }),
   ];
   return lines.length ? lines.join("\n") : null;
@@ -165,21 +166,21 @@ export function routingQuestion(message: string, candidates: Array<ContextTask &
   ordered.forEach((t, i) => {
     const ask = lastQuestion(t);
     const description = [
-      `${t.recalled ? "按内容召回的较早任务" : `第${i + 1}近`}（${time(t.created_at, now)}）「${clip(t.title, 40)}」状态 ${t.status}`,
-      `用户原话：${clip(t.input_text, 200)}`,
-      ask ? `助理最后问用户：${ask}` : "",
-      t.result ? `结果摘要：${clip(t.result, 200)}` : "",
-      t.latestMessage && t.latestMessage !== t.result ? `最新助理消息：${clip(t.latestMessage, 200)}` : "",
-    ].filter(Boolean).join("；");
+      `${t.recalled ? "Earlier task recalled by content" : `${ordinal(i + 1)} most recent`} (${time(t.created_at, now)}) "${clip(t.title, 40)}", status ${t.status}`,
+      `User's words: ${clip(t.input_text, 200)}`,
+      ask ? `The assistant last asked the user: ${ask}` : "",
+      t.result ? `Result summary: ${clip(t.result, 200)}` : "",
+      t.latestMessage && t.latestMessage !== t.result ? `Latest assistant message: ${clip(t.latestMessage, 200)}` : "",
+    ].filter(Boolean).join("; ");
     const mode = ["planning", "waiting", "queued", "running"].includes(t.status) ? "steer"
       : ["completed", "failed", "interrupted", "unknown"].includes(t.status) || (t.status === "needs_input" && !!t.turn_id) ? "resume" : null;
     if (mode) criteria[`${mode}:${t.id}`] = description;
     questions[`relevance:${t.id}`] = {
-      criteria: { related: "这条消息与该任务的用户消息、结果或最新进展直接相关", unrelated: "仅有表面词汇重合，或是独立的新事项" },
-      instructions: { goal: `单独评估本条消息与任务 ${t.id} 的语义相关性，不与其他任务的分数做归一化。`, task: description },
+      criteria: { related: "This message is directly related to the task's user message, result or latest progress", unrelated: "Only superficial word overlap, or a separate new matter" },
+      instructions: { goal: `Assess the semantic relevance of this message to task ${t.id} on its own, without normalizing against other tasks' scores.`, task: description },
     };
   });
-  criteria[NEW_TASK] = "作为新任务处理；可以参考旧任务的背景或结果，但本次有独立目标和交付物";
+  criteria[NEW_TASK] = "Handle as a new task; it may draw on an earlier task's background or results, but this time it has its own goal and deliverable";
   return {
     state: { now: new Date(now).toISOString(), main_session_timeline: formatTimeline(entries, now), message: clip(message, 2000) },
     questions: {
@@ -187,12 +188,12 @@ export function routingQuestion(message: string, candidates: Array<ContextTask &
       route: {
         criteria,
         instructions: {
-          goal: "建议本消息按独立新任务处理，还是继续某个存量业务。steer 表示追加到仍在执行的任务；resume 表示开启同一执行会话的新轮次。只给建议，由派单器最终决定。",
+          goal: "Suggest whether this message should be handled as a separate new task or continue an existing piece of work. steer means appending to a task that is still running; resume means starting a new turn in the same execution session. Only suggest; the dispatcher makes the final decision.",
           rules: [
-            "按主会话时间线的先后理解：越接近本消息的对话越可能是它的对象。",
-            "简短的确认或回复（如“已授权”“可以”“好的”“就这个”“第二个”“改成周六”）回应的是时间上最近一次向用户提问或请求确认的任务。",
-            "消息明确点名了某个任务里的实体（人名、地点、商品、文件、网站）时，以点名的为准，即使它不是最近的（包括按内容召回的较早任务）。",
-            "只是关键词与旧任务重合，或虽借鉴旧结果但要做独立新目标时，选 NEW。",
+            "Read the main-session timeline in order: the closer a conversation is to this message, the more likely it is what the message is about.",
+            "A short confirmation or reply (e.g. \"已授权\" (authorized), \"可以\" (OK), \"好的\" (sure), \"就这个\" (this one), \"第二个\" (the second), \"改成周六\" (make it Saturday)) answers the task that most recently asked the user a question or for confirmation.",
+            "When the message explicitly names an entity from a task (a person, place, product, file or website), the named one wins even if it is not the most recent (including earlier tasks recalled by content).",
+            "When it only shares keywords with an earlier task, or draws on an earlier result for a separate new goal, choose NEW.",
           ],
         },
       },

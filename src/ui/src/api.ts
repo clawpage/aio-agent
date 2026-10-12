@@ -12,7 +12,7 @@ import type {
   Turn,
 } from "./types";
 import { API_VERSION, apiCompatible } from "../../common/version";
-import { t } from "./i18n";
+import { locale, t, type Locale } from "./i18n";
 
 /**
  * Where the control plane's API lives. Empty (the default) means this page's own
@@ -70,7 +70,7 @@ function cookie(name: string): string {
 
 async function request<T>(
   path: string,
-  init: { method?: string; body?: unknown; signal?: AbortSignal; cache?: RequestCache } = {},
+  init: { method?: string; body?: unknown; signal?: AbortSignal; cache?: RequestCache; keepalive?: boolean } = {},
 ): Promise<T> {
   const headers: Record<string, string> = {};
   const csrf = cookie("pa_csrf");
@@ -82,6 +82,7 @@ async function request<T>(
     credentials: API_CREDENTIALS,
     signal: init.signal,
     cache: init.cache,
+    keepalive: init.keepalive,
     body: init.body === undefined ? undefined : JSON.stringify(init.body),
   });
   const text = await res.text();
@@ -132,7 +133,10 @@ export const api = {
   /** The task list: counts by status and one filtered page; `cursor` continues where the last page ended. */
   taskPage: (q: { filter: import("../../common/taskList").TaskFilter; query: string; cursor: string | null; limit: number }, signal?: AbortSignal) =>
     request<import("../../common/taskList").TaskListPage<import("./types").Task>>(`/api/tasks?${new URLSearchParams({ filter: q.filter, limit: String(q.limit), ...(q.query ? { q: q.query } : {}), ...(q.cursor ? { cursor: q.cursor } : {}) })}`, { signal, cache: "no-store" }),
-  submitTask: (body: { text: string; clientMessageId: string; attachments: Attachment[]; relatedTaskId: string | null }) => request<{ task: import("./types").Task; duplicate: boolean }>("/api/tasks", { method: "POST", body }),
+  // The console language travels with each message: the agents write for the person in it.
+  submitTask: (body: { text: string; clientMessageId: string; attachments: Attachment[]; relatedTaskId: string | null }) => request<{ task: import("./types").Task; duplicate: boolean }>("/api/tasks", { method: "POST", body: { ...body, locale } }),
+  // keepalive: the page reloads into the new language right away, and the request outlives it.
+  setAccountLocale: (next: Locale) => request<{ ok: true }>("/api/account/locale", { method: "PUT", body: { locale: next }, keepalive: true }),
   archiveTask: (id: string) => request<{ ok: boolean }>(`/api/tasks/${encodeURIComponent(id)}/archive`, { method: "POST", body: {} }),
   stopTask: (id: string) => request<{ok:boolean}>(`/api/tasks/${encodeURIComponent(id)}/stop`, {method:"POST",body:{}}),
   retryTaskPlanning: (id: string) => request<{ok:boolean}>(`/api/tasks/${encodeURIComponent(id)}/retry-planning`, {method:"POST",body:{}}),

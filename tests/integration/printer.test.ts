@@ -81,17 +81,17 @@ it("offers the home printer to the listed accounts only, rasterizing in the acco
 
     const status = await call("printer_status");
     expect(status.isError).toBeUndefined();
-    expect(status.content[0]!.text).toContain("状态：空闲");
-    expect(status.content[0]!.text).toContain("墨水：Black 99%，Cyan 40%");
-    expect(status.content[0]!.text).toContain("纸张：Letter");
+    expect(status.content[0]!.text).toContain("Status: idle");
+    expect(status.content[0]!.text).toContain("Ink: Black 99%, Cyan 40%");
+    expect(status.content[0]!.text).toContain("Paper: Letter");
 
     // A print: the account's own sandbox makes the pages, the printer gets them with the job's settings.
     const file = "/home/gem/workspace/tasks/t1/报告.pdf";
     seen.length = 0;
     const printed = await call("print_file", { path: file, pages: "1-2, 4", copies: 2, sides: "two-sided-long-edge", color: false });
     expect(printed.isError).toBeUndefined();
-    expect(printed.content[0]!.text).toContain("3 页 × 2 份");
-    expect(printed.content[0]!.text).toContain("作业号 17");
+    expect(printed.content[0]!.text).toContain("3 pages × 2 copies");
+    expect(printed.content[0]!.text).toContain("Job 17");
     expect(asked).toEqual([{ userId: "owner_1", file, opts: { color: false, sides: "two-sided-long-edge", media: "na_letter_8.5x11in", width: 2550, height: 3300, pages: [1, 2, 4] } }]);
     const job = seen.find((s) => s.op === 0x0002)!;
     expect(job.attrs).toMatchObject({
@@ -109,11 +109,11 @@ it("offers the home printer to the listed accounts only, rasterizing in the acco
     asked.length = 0;
     seen.length = 0;
     for (const [args, message] of [
-      [{ path: "/home/gem/workspace/a.docx" }, "转成 PDF"],
-      [{ path: "/etc/passwd.pdf" }, "path："],
-      [{ path: "/home/gem/workspace/a.png", pages: "2" }, "pages 只用于 PDF"],
+      [{ path: "/home/gem/workspace/a.docx" }, "to PDF"],
+      [{ path: "/etc/passwd.pdf" }, "path:"],
+      [{ path: "/home/gem/workspace/a.png", pages: "2" }, "pages applies only to PDFs"],
       [{ path: file, copies: 50 }, "copies"],
-      [{ path: file, pages: "3-1" }, "pages 写法不对"],
+      [{ path: file, pages: "3-1" }, "pages is not written correctly"],
     ] as const) {
       const refused = await call("print_file", args);
       expect(refused.isError).toBe(true);
@@ -126,7 +126,7 @@ it("offers the home printer to the listed accounts only, rasterizing in the acco
     printer = { state: 5, reasons: ["media-empty-error"] };
     const stopped = await call("print_file", { path: file });
     expect(stopped.isError).toBe(true);
-    expect(stopped.content[0]!.text).toContain("缺纸");
+    expect(stopped.content[0]!.text).toContain("out of paper");
     expect(seen.some((s) => s.op === 0x0002)).toBe(false);
 
     // A connection lost while sending: the outcome is unknown and nothing is resent.
@@ -135,7 +135,7 @@ it("offers the home printer to the listed accounts only, rasterizing in the acco
     seen.length = 0;
     const unknown = await call("print_file", { path: file });
     expect(unknown.isError).toBe(true);
-    expect(unknown.content[0]!.text).toContain("不确定打印机是否已收到");
+    expect(unknown.content[0]!.text).toContain("not sure whether the printer received it");
     expect(seen.filter((s) => s.op === 0x0002)).toHaveLength(1);
   } finally {
     gateway.close();

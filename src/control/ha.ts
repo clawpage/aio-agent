@@ -23,7 +23,7 @@ export function haMcpServers(cfg: Config): Record<string, unknown> {
 }
 
 export const HA_POLICY =
-  "已接入家里的 Home Assistant（aio_ha）：用户要开关灯和开关、调空调温度、开电视、让扫地机工作，或问家里各处温湿度、设备状态时，用它的工具直接查或操作，不要让用户自己去 App 里弄。设备名可能是英文或拼音（例如 Living Room、Family room、Main Floor、Upstairs），用户说的中文房间名按最接近的设备理解；拿不准指哪个时先用状态工具看有哪些设备再选。只操作用户这次要求的设备，操作后读一次状态确认结果再回答；摄像头侦测开关、车况这类跟安全有关的，按用户原话办，不顺手改别的。";
+  "The home Home Assistant is connected (aio_ha): when the user wants lights and switches turned on or off, the air conditioner temperature adjusted, the TV turned on, or the robot vacuum started, or asks about temperature and humidity around the house or the state of devices, query or operate them directly with its tools; do not make the user do it in the app themselves. Device names may be in English or pinyin (e.g. Living Room, Family room, Main Floor, Upstairs); map Chinese room names the user says to the closest device; when unsure which one is meant, first use the state tools to see which devices exist, then choose. Operate only the devices the user asked for this time, and read the state once after operating to confirm the result before answering; for safety-related things such as camera detection switches or vehicle status, do exactly what the user said and do not change anything else along the way.";
 
 export class HaGateway extends McpGateway {
   constructor(opts: { cfg: Config; log: Logger; port: number; usernameOf: (userId: string) => string | null }) {

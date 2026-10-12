@@ -40,7 +40,7 @@ def in_workspace(path):
 
 def require_workspace(path):
     if not in_workspace(path):
-        fail("outside_workspace", "只允许读写工作区 %s 内的文件" % WORKSPACE_ROOT)
+        fail("outside_workspace", "Only files inside the workspace %s can be read or written" % WORKSPACE_ROOT)
     return os.path.realpath(path)
 
 
@@ -106,7 +106,7 @@ def lo_convert(src, outdir, target, timeout=180):
         )
         return proc
     except subprocess.TimeoutExpired:
-        fail("timeout", "LibreOffice 转换超时（文件可能过大或过于复杂）")
+        fail("timeout", "LibreOffice conversion timed out (the file may be too large or too complex)")
     finally:
         shutil.rmtree(profile, ignore_errors=True)
 
@@ -217,7 +217,7 @@ def cmd_xlsx_new(args):
     ok(
         path=target,
         bytes=os.path.getsize(target),
-        note="数字写为数值、以 = 开头写为公式；openpyxl 不计算公式，公式请用 xlsx-recalc 生成缓存值后再用 xlsx-read --values 验证",
+        note="Numbers are written as numeric values, and text starting with = as formulas; openpyxl does not calculate formulas, so for formulas run xlsx-recalc to produce cached values, then verify with xlsx-read --values",
     )
 
 
@@ -237,7 +237,7 @@ def cmd_xlsx_set(args):
     ok(
         path=target,
         cell=args.cell,
-        note="数字写为数值、以 = 开头写为公式；openpyxl 不会计算公式，用 xlsx-recalc 让 LibreOffice 重算并写入缓存值",
+        note="Numbers are written as numeric values, and text starting with = as formulas; openpyxl does not calculate formulas, so use xlsx-recalc to have LibreOffice recalculate them and write the cached values",
     )
 
 
@@ -272,17 +272,17 @@ def cmd_xlsx_recalc(args):
     try:
         proc = lo_convert(source, tmpdir, "xlsx")
         if proc.returncode != 0:
-            fail("recalc_failed", (proc.stderr or proc.stdout).strip()[:400] or "LibreOffice 重算失败")
+            fail("recalc_failed", (proc.stderr or proc.stdout).strip()[:400] or "LibreOffice recalculation failed")
 
         stem = os.path.splitext(os.path.basename(source))[0]
         produced = os.path.join(tmpdir, stem + ".xlsx")
         if not os.path.isfile(produced):
             candidates = [n for n in os.listdir(tmpdir) if n.lower().endswith(".xlsx")]
             if not candidates:
-                fail("recalc_failed", "LibreOffice 未生成重算后的文件")
+                fail("recalc_failed", "LibreOffice did not produce the recalculated file")
             produced = os.path.join(tmpdir, candidates[0])
         if os.path.getsize(produced) == 0:
-            fail("recalc_failed", "LibreOffice 生成的重算文件为空")
+            fail("recalc_failed", "The recalculated file LibreOffice produced is empty")
 
         # A converted file that lost its cached values would be a silent no-op;
         # check before publishing it as the result.
@@ -304,7 +304,7 @@ def cmd_xlsx_recalc(args):
         except (ValueError, IndexError):
             cached_count = 0
         if cached_count == 0:
-            fail("recalc_failed", "重算结果没有任何缓存值；文件可能没有公式或已损坏")
+            fail("recalc_failed", "The recalculated result has no cached values at all; the file may have no formulas or may be damaged")
 
         if args.in_place:
             destination = source
@@ -316,7 +316,7 @@ def cmd_xlsx_recalc(args):
 
         if destination != source:
             if os.path.exists(destination) and not args.overwrite:
-                fail("exists", "目标文件已存在：%s（加 --overwrite 覆盖）" % destination)
+                fail("exists", "The target file already exists: %s (add --overwrite to overwrite it)" % destination)
         os.makedirs(os.path.dirname(destination), exist_ok=True)
         shutil.copyfile(produced, destination)
         ok(
@@ -324,7 +324,7 @@ def cmd_xlsx_recalc(args):
             bytes=os.path.getsize(destination),
             cachedCells=cached_count,
             inPlace=bool(args.in_place),
-            note="已由 LibreOffice 重算并写入缓存值；用 xlsx-read --values 可验证",
+            note="Recalculated by LibreOffice with cached values written; verify with xlsx-read --values",
         )
     finally:
         shutil.rmtree(tmpdir, ignore_errors=True)
@@ -382,7 +382,7 @@ def publish_exclusive(source, outdir, stem, extension):
         except FileExistsError:
             continue
         except OSError:
-            fail("write_failed", "无法写入转换结果")
+            fail("write_failed", "Could not write the conversion result")
         try:
             with os.fdopen(descriptor, "wb") as out, open(source, "rb") as inp:
                 shutil.copyfileobj(inp, out)
@@ -391,16 +391,16 @@ def publish_exclusive(source, outdir, stem, extension):
                 os.unlink(destination)
             except OSError:
                 pass
-            fail("write_failed", "无法写入转换结果")
+            fail("write_failed", "Could not write the conversion result")
         return destination
-    fail("exists", "同名文件过多，无法生成唯一输出名")
+    fail("exists", "Too many files with the same name; could not generate a unique output name")
 
 
 def cmd_convert(args):
     source = require_workspace(args.path)
     outdir = require_workspace(args.outdir) if args.outdir else os.path.dirname(source)
     if not os.path.isdir(outdir):
-        fail("not_found", "输出目录不存在：%s" % outdir)
+        fail("not_found", "The output folder does not exist: %s" % outdir)
 
     stem = os.path.splitext(os.path.basename(source))[0]
     # Convert into a throwaway directory first. Writing straight into the user's
@@ -410,21 +410,21 @@ def cmd_convert(args):
     try:
         proc = lo_convert(source, tmpdir, args.to)
         if proc.returncode != 0:
-            fail("convert_failed", (proc.stderr or proc.stdout).strip()[:400] or "LibreOffice 转换失败")
+            fail("convert_failed", (proc.stderr or proc.stdout).strip()[:400] or "LibreOffice conversion failed")
         produced = os.path.join(tmpdir, stem + "." + args.to)
         if not os.path.isfile(produced) or os.path.getsize(produced) == 0:
             names = [n for n in os.listdir(tmpdir) if os.path.isfile(os.path.join(tmpdir, n))]
             if len(names) != 1:
-                fail("convert_failed", "LibreOffice 未生成预期的输出文件")
+                fail("convert_failed", "LibreOffice did not produce the expected output file")
             produced = os.path.join(tmpdir, names[0])
         if os.path.getsize(produced) == 0:
-            fail("convert_failed", "LibreOffice 生成的文件为空")
+            fail("convert_failed", "The file LibreOffice produced is empty")
 
         destination = publish_exclusive(produced, outdir, stem, args.to)
         ok(
             path=destination,
             bytes=os.path.getsize(destination),
-            note="转换结果为新文件，原文件未被修改",
+            note="The conversion result is a new file; the original file was not modified",
         )
     finally:
         shutil.rmtree(tmpdir, ignore_errors=True)
@@ -433,49 +433,49 @@ def cmd_convert(args):
 def cmd_pdf_text(args):
     source = require_workspace(args.path)
     if not shutil.which("pdftotext"):
-        fail("missing_tool", "缺少 poppler-utils（pdftotext）")
+        fail("missing_tool", "poppler-utils (pdftotext) is missing")
     proc = subprocess.run(["pdftotext", source, "-"], capture_output=True, text=True, timeout=120)
     if proc.returncode != 0:
-        fail("pdf_text_failed", (proc.stderr or "").strip()[:400] or "提取 PDF 文本失败")
+        fail("pdf_text_failed", (proc.stderr or "").strip()[:400] or "Failed to extract the PDF text")
     ok(path=source, text=proc.stdout[:200000])
 
 
 def build_parser():
-    parser = argparse.ArgumentParser(prog="aio-doc", description="AIO 沙箱文档工具：创建 / 修改 / 转换 Word、Excel、PPT、PDF")
+    parser = argparse.ArgumentParser(prog="aio-doc", description="AIO sandbox document tool: create / modify / convert Word, Excel, PPT, PDF")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    sub.add_parser("doctor", help="检查文档工具就绪状态").set_defaults(func=cmd_doctor)
+    sub.add_parser("doctor", help="Check whether the document tools are ready").set_defaults(func=cmd_doctor)
 
-    p = sub.add_parser("docx-new", help="新建 Word 文档"); p.add_argument("path"); p.add_argument("--text", default="")
+    p = sub.add_parser("docx-new", help="Create a Word document"); p.add_argument("path"); p.add_argument("--text", default="")
     p.set_defaults(func=cmd_docx_new)
-    p = sub.add_parser("docx-read", help="读取 Word 文本"); p.add_argument("path"); p.set_defaults(func=cmd_docx_read)
-    p = sub.add_parser("docx-append", help="在 Word 文档末尾追加段落"); p.add_argument("path"); p.add_argument("--text", required=True)
+    p = sub.add_parser("docx-read", help="Read the text of a Word document"); p.add_argument("path"); p.set_defaults(func=cmd_docx_read)
+    p = sub.add_parser("docx-append", help="Append a paragraph to the end of a Word document"); p.add_argument("path"); p.add_argument("--text", required=True)
     p.set_defaults(func=cmd_docx_append)
 
-    p = sub.add_parser("xlsx-new", help="新建 Excel（--rows 每行逗号分隔）"); p.add_argument("path"); p.add_argument("--rows", default="")
+    p = sub.add_parser("xlsx-new", help="Create an Excel workbook (--rows: one row per line, comma-separated)"); p.add_argument("path"); p.add_argument("--rows", default="")
     p.set_defaults(func=cmd_xlsx_new)
-    p = sub.add_parser("xlsx-set", help="写入单元格（支持 =SUM(...) 公式）")
+    p = sub.add_parser("xlsx-set", help="Write a cell (supports =SUM(...) formulas)")
     p.add_argument("path"); p.add_argument("cell"); p.add_argument("--value", required=True); p.add_argument("--sheet", default="")
     p.set_defaults(func=cmd_xlsx_set)
-    p = sub.add_parser("xlsx-read", help="读取 Excel"); p.add_argument("path"); p.add_argument("--values", action="store_true", help="读取缓存值而非公式")
+    p = sub.add_parser("xlsx-read", help="Read an Excel workbook"); p.add_argument("path"); p.add_argument("--values", action="store_true", help="Read cached values instead of formulas")
     p.set_defaults(func=cmd_xlsx_read)
-    p = sub.add_parser("xlsx-recalc", help="用 LibreOffice 重算公式并写入缓存值（默认输出到新文件）")
+    p = sub.add_parser("xlsx-recalc", help="Recalculate formulas with LibreOffice and write the cached values (writes to a new file by default)")
     p.add_argument("path")
-    p.add_argument("--out", default="", help="结果文件路径（默认 <原名>.recalc.xlsx，不覆盖原文件）")
-    p.add_argument("--in-place", action="store_true", help="显式覆盖原文件（默认不覆盖）")
-    p.add_argument("--overwrite", action="store_true", help="允许覆盖已存在的 --out 目标")
+    p.add_argument("--out", default="", help="Result file path (default <original name>.recalc.xlsx; does not overwrite the original file)")
+    p.add_argument("--in-place", action="store_true", help="Explicitly overwrite the original file (not overwritten by default)")
+    p.add_argument("--overwrite", action="store_true", help="Allow overwriting an existing --out target")
     p.set_defaults(func=cmd_xlsx_recalc)
 
-    p = sub.add_parser("pptx-new", help="新建 PPT（--titles 每行一页）"); p.add_argument("path"); p.add_argument("--titles", default="")
+    p = sub.add_parser("pptx-new", help="Create a PPT deck (--titles: one slide per line)"); p.add_argument("path"); p.add_argument("--titles", default="")
     p.set_defaults(func=cmd_pptx_new)
-    p = sub.add_parser("pptx-read", help="读取 PPT 文本"); p.add_argument("path"); p.set_defaults(func=cmd_pptx_read)
+    p = sub.add_parser("pptx-read", help="Read the text of a PPT deck"); p.add_argument("path"); p.set_defaults(func=cmd_pptx_read)
 
-    p = sub.add_parser("convert", help="用 LibreOffice 转换格式（如 docx→pdf）")
-    p.add_argument("path"); p.add_argument("--to", required=True, help="目标扩展名，如 pdf/docx/xlsx/pptx/csv")
+    p = sub.add_parser("convert", help="Convert formats with LibreOffice (e.g. docx→pdf)")
+    p.add_argument("path"); p.add_argument("--to", required=True, help="Target extension, e.g. pdf/docx/xlsx/pptx/csv")
     p.add_argument("--outdir", default="")
     p.set_defaults(func=cmd_convert)
 
-    p = sub.add_parser("pdf-text", help="提取 PDF 文本"); p.add_argument("path"); p.set_defaults(func=cmd_pdf_text)
+    p = sub.add_parser("pdf-text", help="Extract the text of a PDF"); p.add_argument("path"); p.set_defaults(func=cmd_pdf_text)
     return parser
 
 

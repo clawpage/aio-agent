@@ -7,21 +7,36 @@
  * Display only: it reads the shape the control plane writes (the dispatch
  * prompt in src/control/tasks/service.ts), and anything else is shown in full.
  */
-const DISPATCH_HEAD = "你是 AIO Agent 主会话委派的子 agent"; // i18n-exempt: matches the control plane's dispatch prompt
-const TASK_MARKER = "\n\n本次用户任务：\n\n"; // i18n-exempt: matches the control plane's dispatch prompt
+// Both the English prompts and the Chinese ones written before them.
+const DISPATCH_HEADS = ["You are a sub-agent delegated by AIO Agent's main session", "你是 AIO Agent 主会话委派的子 agent"]; // i18n-exempt: matches the control plane's dispatch prompt
+const TASK_MARKERS = ["\n\nThe user's task this time:\n\n", "\n\n本次用户任务：\n\n"]; // i18n-exempt: matches the control plane's dispatch prompt
+// The account's language line closes a prompt, after the person's words.
+const LANGUAGE_LINE = "\n\nLanguage: write everything the user will see"; // i18n-exempt: matches the control plane's language line (src/control/locale.ts)
 
 // A supplement steered into a running turn: an optional note that the browser was handed back, then this head.
-const SUPPLEMENT_HEAD = /^(?:用户发这条补充时[^\n]*\n\n)?这是用户在 \d{1,2}:\d{2} 对当前任务的补充/; // i18n-exempt: matches the control plane's steer prompt
-const SUPPLEMENT_MARKER = "\n\n本次用户补充：\n\n"; // i18n-exempt: matches the control plane's steer prompt
+const SUPPLEMENT_HEAD = /^(?:(?:When the user sent this supplement|用户发这条补充时)[^\n]*\n\n)?(?:This is the user's supplement to the current task, sent at \d{1,2}:\d{2}|这是用户在 \d{1,2}:\d{2} 对当前任务的补充)/; // i18n-exempt: matches the control plane's steer prompt
+const SUPPLEMENT_MARKERS = ["\n\nThe user's supplement:\n\n", "\n\n本次用户补充：\n\n"]; // i18n-exempt: matches the control plane's steer prompt
 // Written before the marker existed: the person's words follow the dispatcher's judgment line.
 const LEGACY_JUDGMENT = "\n\n派单器的判断（仅作背景）："; // i18n-exempt: matches the control plane's steer prompt
 const LEGACY_DEPENDENCIES = "\n\n补充所需的已完成任务资料："; // i18n-exempt: matches the control plane's steer prompt
 
+/** The person's words after the last of `markers`, without the language line that may close the prompt. */
+function after(message: string, markers: string[]): string | null {
+  for (const marker of markers) {
+    const at = message.lastIndexOf(marker);
+    if (at <= 0) continue;
+    const rest = message.slice(at + marker.length);
+    const end = rest.lastIndexOf(LANGUAGE_LINE);
+    return (end >= 0 ? rest.slice(0, end) : rest).trim() || null;
+  }
+  return null;
+}
+
 /** What the person added, out of a supplement steered into a running execution turn. */
 export function dispatchedSupplement(message: string): string | null {
   if (!SUPPLEMENT_HEAD.test(message)) return null;
-  const at = message.lastIndexOf(SUPPLEMENT_MARKER);
-  if (at > 0) return message.slice(at + SUPPLEMENT_MARKER.length).trim() || null;
+  const added = after(message, SUPPLEMENT_MARKERS);
+  if (added) return added;
   const judged = message.lastIndexOf(LEGACY_JUDGMENT);
   if (judged < 0) return null;
   const rest = message.slice(judged + LEGACY_JUDGMENT.length);
@@ -33,8 +48,6 @@ export function dispatchedSupplement(message: string): string | null {
 }
 
 export function dispatchedTask(message: string): string | null {
-  if (!message.startsWith(DISPATCH_HEAD)) return null;
-  const at = message.lastIndexOf(TASK_MARKER);
-  const task = at > 0 ? message.slice(at + TASK_MARKER.length).trim() : "";
-  return task || null;
+  if (!DISPATCH_HEADS.some(head => message.startsWith(head))) return null;
+  return after(message, TASK_MARKERS);
 }

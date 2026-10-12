@@ -30,7 +30,7 @@ try:
     import numpy as np
     from PIL import Image, ImageOps
 except ImportError:
-    done(ok=False, message="沙箱缺少 numpy 或 Pillow，无法转换打印文件")
+    done(ok=False, message="The sandbox is missing numpy or Pillow, so the file cannot be converted for printing")
 
 Image.MAX_IMAGE_PIXELS = 300_000_000
 
@@ -39,15 +39,15 @@ def pdf_pages(src, wanted):
     """The PDF pages to print, checked against the document."""
     info = subprocess.run(["pdfinfo", src], capture_output=True, text=True, timeout=60)
     if info.returncode != 0:
-        done(ok=False, message="读不了这个 PDF（可能损坏或加了密码）：" + info.stderr.strip()[:200])
+        done(ok=False, message="Cannot read this PDF (it may be damaged or password-protected): " + info.stderr.strip()[:200])
     total = next((int(line.split(":")[1]) for line in info.stdout.splitlines() if line.startswith("Pages:")), 0)
     pages = wanted or list(range(1, total + 1))
     if not pages:
-        done(ok=False, message="PDF 没有页面")
+        done(ok=False, message="The PDF has no pages")
     if pages[-1] > total:
-        done(ok=False, message=f"PDF 只有 {total} 页")
+        done(ok=False, message=f"The PDF has only {total} pages")
     if len(pages) > MAX_PAGES:
-        done(ok=False, message=f"一次最多打印 {MAX_PAGES} 页，这份有 {len(pages)} 页，用 pages 分批打印")
+        done(ok=False, message=f"At most {MAX_PAGES} pages can be printed at a time; this one has {len(pages)} pages, so print it in batches with pages")
     return pages
 
 
@@ -57,7 +57,7 @@ def rendered(src, pages, gray, tmp):
         args = ["pdftoppm", "-r", str(DPI), "-f", str(n), "-l", str(n), "-singlefile"] + (["-gray"] if gray else []) + [src, stem]
         run = subprocess.run(args, capture_output=True, text=True, timeout=180)
         if run.returncode != 0:
-            done(ok=False, message=f"第 {n} 页渲染失败：" + run.stderr.strip()[:200])
+            done(ok=False, message=f"Failed to render page {n}: " + run.stderr.strip()[:200])
         path = stem + (".pgm" if gray else ".ppm")
         yield Image.open(path), False
         os.unlink(path)
@@ -68,7 +68,7 @@ def picture(src):
         im = Image.open(src)
         im.load()
     except Exception as err:  # noqa: BLE001 - any decoding failure is the same answer
-        done(ok=False, message=f"打不开这张图片：{err}")
+        done(ok=False, message=f"Cannot open this image: {err}")
     im = ImageOps.exif_transpose(im)
     if im.mode in ("RGBA", "LA", "P"):
         im = im.convert("RGBA")

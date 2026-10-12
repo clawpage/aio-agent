@@ -32,42 +32,42 @@ const MEDIA: Record<string, { width: number; height: number; label: string }> = 
 };
 const mediaOf = (name: string) => MEDIA[name];
 
-const STATES: Record<number, string> = { 3: "空闲", 4: "正在打印", 5: "已停止" };
-const JOB_STATES: Record<number, string> = { 3: "排队中", 4: "暂停", 5: "正在打印", 6: "已暂停", 7: "已取消", 8: "已中止", 9: "已打印完" };
+const STATES: Record<number, string> = { 3: "idle", 4: "printing", 5: "stopped" };
+const JOB_STATES: Record<number, string> = { 3: "queued", 4: "held", 5: "printing", 6: "paused", 7: "canceled", 8: "aborted", 9: "finished printing" };
 const REASONS: Record<string, string> = {
-  "media-empty": "缺纸",
-  "media-needed": "需要装纸",
-  "media-jam": "卡纸",
-  "marker-supply-low": "墨水不足",
-  "marker-supply-empty": "墨水用完",
-  "door-open": "盖子开着",
-  "cover-open": "盖子开着",
-  "input-tray-missing": "纸盒没装好",
-  "output-area-full": "出纸口满了",
-  "toner-low": "墨粉不足",
-  offline: "离线",
-  paused: "已暂停",
+  "media-empty": "out of paper",
+  "media-needed": "paper needs loading",
+  "media-jam": "paper jam",
+  "marker-supply-low": "ink low",
+  "marker-supply-empty": "ink empty",
+  "door-open": "cover open",
+  "cover-open": "cover open",
+  "input-tray-missing": "paper tray not inserted properly",
+  "output-area-full": "output tray full",
+  "toner-low": "toner low",
+  offline: "offline",
+  paused: "paused",
 };
 
 const TOOLS = [
   {
     name: "printer_status",
-    description: "看家里打印机现在的状态：是否空闲、缺纸卡纸等问题、各色墨水余量、装着的纸。",
+    description: "Check the current state of the home printer: whether it is idle, problems such as being out of paper or a paper jam, the ink level of each color, and the loaded paper.",
     inputSchema: { type: "object", properties: {} },
   },
   {
     name: "print_file",
     description:
-      "用家里的打印机打印工作区里的一个 PDF 或图片（png/jpg/webp/gif/bmp/tiff）。其他格式先转成 PDF 再打印。" +
-      "PDF 按原尺寸打印（超出纸张时缩小），图片缩放到整页居中。一次最多 50 页。",
+      "Print a PDF or image (png/jpg/webp/gif/bmp/tiff) from the workspace on the home printer. Convert other formats to PDF first, then print. " +
+      "PDFs print at their original size (shrunk if larger than the paper); images are scaled to fill the page, centered. At most 50 pages at a time.",
     inputSchema: {
       type: "object",
       properties: {
-        path: { type: "string", description: "要打印的文件：工作区里的绝对路径，例如 /home/gem/workspace/tasks/<任务 id>/报告.pdf" },
-        pages: { type: "string", description: "只打印 PDF 的这些页，例如 \"1-3,5\"；不填打印全部" },
-        copies: { type: "integer", minimum: 1, maximum: MAX_COPIES, description: "份数，默认 1" },
-        sides: { type: "string", enum: SIDES, description: "单双面：one-sided 单面（默认）；two-sided-long-edge 双面长边翻页（普通竖版文档）；two-sided-short-edge 双面短边翻页" },
-        color: { type: "boolean", description: "false 为黑白打印（省彩色墨水）；默认彩色" },
+        path: { type: "string", description: "The file to print: an absolute path in the workspace, e.g. /home/gem/workspace/tasks/<task id>/report.pdf" },
+        pages: { type: "string", description: "Print only these pages of the PDF, e.g. \"1-3,5\"; omit to print all pages" },
+        copies: { type: "integer", minimum: 1, maximum: MAX_COPIES, description: "Number of copies, default 1" },
+        sides: { type: "string", enum: SIDES, description: "One- or two-sided: one-sided (default); two-sided-long-edge flips on the long edge (ordinary portrait documents); two-sided-short-edge flips on the short edge" },
+        color: { type: "boolean", description: "false prints in black and white (saves color ink); color by default" },
       },
       required: ["path"],
     },
@@ -85,10 +85,10 @@ export function printerMcpServers(cfg: Config): Record<string, unknown> {
 }
 
 export const PRINTER_POLICY =
-  "已接入家里的打印机（aio_printer）：用户要把文件、照片、网页或你做好的文档打印出来时，用 print_file 直接打印，不要让用户自己去打印。" +
-  "它只收工作区里的 PDF 和图片：Word、Excel、PPT、文本等先在沙箱里转成 PDF（如 soffice --headless --convert-to pdf），网页先存成 PDF，再打印转好的文件。" +
-  "只在用户要求打印时才打印；份数、页码、单双面、彩色黑白按用户说的，没说就 1 份、单面、彩色。超过 20 页或多份时先跟用户确认。" +
-  "打印前后可用 printer_status 看状态；缺纸、卡纸、墨水不足时如实告诉用户。工具说结果不确定时不要自动重新打印，先请用户看一下打印机。";
+  "The home printer is connected (aio_printer): when the user wants a file, photo, web page, or a document you made printed, print it directly with print_file; do not make the user print it themselves. " +
+  "It only accepts PDFs and images in the workspace: convert Word, Excel, PPT, text, and so on to PDF in the sandbox first (e.g. soffice --headless --convert-to pdf), save web pages as PDF first, then print the converted file. " +
+  "Print only when the user asks to print; follow what the user said for copies, pages, one- or two-sided, and color or black and white, and if they did not say, use 1 copy, one-sided, color. Confirm with the user first for more than 20 pages or multiple copies. " +
+  "You can check the state with printer_status before and after printing; tell the user truthfully when it is out of paper, has a paper jam, or is low on ink. When the tool says the outcome is uncertain, do not print again automatically; first ask the user to look at the printer.";
 
 /** Turning one account's workspace file into printer pages. */
 export interface PrintFiles {
@@ -104,10 +104,10 @@ export function sandboxPrintFiles(ctx: Pick<AppContext, "documents" | "container
     async rasterize(file, opts) {
       // The real path, so a symlink cannot point the printer at a file outside the workspace.
       const stat = await ctx.documents.stat(file);
-      if (!stat.exists) throw new PrintError(`文件不存在：${file}`);
-      if (!stat.isFile) throw new PrintError(`不是普通文件：${file}`);
-      if (stat.size === 0) throw new PrintError("文件是空的");
-      if (stat.size > MAX_SOURCE_BYTES) throw new PrintError("文件超过 100MB");
+      if (!stat.exists) throw new PrintError(`File does not exist: ${file}`);
+      if (!stat.isFile) throw new PrintError(`Not a regular file: ${file}`);
+      if (stat.size === 0) throw new PrintError("The file is empty");
+      if (stat.size > MAX_SOURCE_BYTES) throw new PrintError("The file is larger than 100MB");
       const out = `/tmp/aio-print-${randomUUID()}.pwg`;
       try {
         const run = await ctx.container.execInSandbox(
@@ -119,11 +119,11 @@ export function sandboxPrintFiles(ctx: Pick<AppContext, "documents" | "container
         try {
           result = JSON.parse(last);
         } catch {
-          throw new Error(`转换打印文件失败：${(run.stderr || run.stdout).trim().slice(-300)}`);
+          throw new Error(`Failed to convert the file for printing: ${(run.stderr || run.stdout).trim().slice(-300)}`);
         }
-        if (!result.ok) throw new PrintError(result.message ?? "转换打印文件失败");
+        if (!result.ok) throw new PrintError(result.message ?? "Failed to convert the file for printing");
         const res = await ctx.container.fetch(`/v1/file/download?path=${encodeURIComponent(out)}`, { signal: AbortSignal.timeout(180_000) });
-        if (!res.ok) throw new Error(`读取转换结果失败（${res.status}）`);
+        if (!res.ok) throw new Error(`Failed to read the conversion result (${res.status})`);
         return { bytes: Buffer.from(await res.arrayBuffer()), pages: result.pages ?? 0 };
       } finally {
         await ctx.container.execInSandbox(["rm", "-f", "--", out], { timeoutMs: 20_000 }).catch(() => undefined);
@@ -141,9 +141,9 @@ export function parsePages(raw: unknown): number[] {
     const m = /^(\d+)(?:[-–~](\d+))?$/.exec(part);
     const from = m ? Number(m[1]) : 0;
     const to = m?.[2] ? Number(m[2]) : from;
-    if (!m || from < 1 || to < from || to > 10_000) throw new PrintError(`pages 写法不对：${text}（例如 "1-3,5"）`);
+    if (!m || from < 1 || to < from || to > 10_000) throw new PrintError(`pages is not written correctly: ${text} (e.g. "1-3,5")`);
     for (let p = from; p <= to; p += 1) pages.add(p);
-    if (pages.size > 50) throw new PrintError("一次最多打印 50 页");
+    if (pages.size > 50) throw new PrintError("At most 50 pages can be printed at a time");
   }
   return [...pages].sort((a, b) => a - b);
 }
@@ -278,9 +278,9 @@ export class PrinterGateway {
     try {
       res = await this.#ipp(OP.getPrinterAttributes, [[TAG.keyword, "requested-attributes", wanted]]);
     } catch (err) {
-      throw new PrintError(`连不上打印机（${err instanceof Error ? err.message : String(err)}）：可能关机了或不在网络上`);
+      throw new PrintError(`Cannot reach the printer (${err instanceof Error ? err.message : String(err)}): it may be turned off or not on the network`);
     }
-    if (res.status >= 0x0100) throw new PrintError(`打印机拒绝了查询（IPP 状态 0x${res.status.toString(16)}）`);
+    if (res.status >= 0x0100) throw new PrintError(`The printer refused the query (IPP status 0x${res.status.toString(16)})`);
     return res.attrs;
   }
 
@@ -289,33 +289,33 @@ export class PrinterGateway {
     const reasons = problems(a);
     const names = (a["marker-names"] ?? []).map(String);
     const levels = a["marker-levels"] ?? [];
-    const ink = names.map((n, i) => `${n.replace(/ ink$/i, "")} ${Number(levels[i]) >= 0 ? `${levels[i]}%` : "未知"}`).join("，");
-    const paper = [...new Set((a["media-ready"] ?? []).map((m) => mediaOf(String(m))?.label ?? String(m)))].join("、");
+    const ink = names.map((n, i) => `${n.replace(/ ink$/i, "")} ${Number(levels[i]) >= 0 ? `${levels[i]}%` : "unknown"}`).join(", ");
+    const paper = [...new Set((a["media-ready"] ?? []).map((m) => mediaOf(String(m))?.label ?? String(m)))].join(", ");
     return [
-      `打印机：${a["printer-make-and-model"]?.[0] ?? "未知型号"}`,
-      `状态：${STATES[Number(a["printer-state"]?.[0])] ?? "未知"}${reasons.length ? `（${reasons.join("、")}）` : ""}`,
-      a["queued-job-count"] ? `排队作业：${a["queued-job-count"][0]}` : "",
-      ink ? `墨水：${ink}` : "",
-      paper ? `纸张：${paper}` : "",
+      `Printer: ${a["printer-make-and-model"]?.[0] ?? "unknown model"}`,
+      `Status: ${STATES[Number(a["printer-state"]?.[0])] ?? "unknown"}${reasons.length ? ` (${reasons.join(", ")})` : ""}`,
+      a["queued-job-count"] ? `Queued jobs: ${a["queued-job-count"][0]}` : "",
+      ink ? `Ink: ${ink}` : "",
+      paper ? `Paper: ${paper}` : "",
     ].filter(Boolean).join("\n");
   }
 
   async #print(account: { userId: string; username: string }, args: Record<string, unknown>): Promise<string> {
     const checked = requireWorkspaceFilePath(String(args.path ?? ""), this.#workspace);
-    if (!checked.ok) throw new PrintError(`path：${checked.message}`);
+    if (!checked.ok) throw new PrintError(`path: ${checked.message}`);
     const file = checked.path;
-    if (!PDF.test(file) && !PICTURE.test(file)) throw new PrintError("只能打印 PDF 或图片；其他格式先在沙箱里转成 PDF 再打印");
+    if (!PDF.test(file) && !PICTURE.test(file)) throw new PrintError("Only PDFs or images can be printed; convert other formats to PDF in the sandbox first, then print");
     const pages = parsePages(args.pages);
-    if (pages.length && !PDF.test(file)) throw new PrintError("pages 只用于 PDF");
+    if (pages.length && !PDF.test(file)) throw new PrintError("pages applies only to PDFs");
     const copies = args.copies === undefined ? 1 : Number(args.copies);
-    if (!Number.isInteger(copies) || copies < 1 || copies > MAX_COPIES) throw new PrintError(`copies 要是 1 到 ${MAX_COPIES} 的整数`);
+    if (!Number.isInteger(copies) || copies < 1 || copies > MAX_COPIES) throw new PrintError(`copies must be an integer from 1 to ${MAX_COPIES}`);
     const sides = (args.sides ?? "one-sided") as Sides;
-    if (!SIDES.includes(sides)) throw new PrintError(`sides 只能是 ${SIDES.join(" / ")}`);
+    if (!SIDES.includes(sides)) throw new PrintError(`sides must be ${SIDES.join(" / ")}`);
     const color = args.color !== false;
 
     const job = this.#queue.then(async () => {
       const a = await this.#printerAttributes();
-      if (Number(a["printer-state"]?.[0]) === 5) throw new PrintError(`打印机已停止，没有打印：${problems(a).join("、") || "原因未知"}`);
+      if (Number(a["printer-state"]?.[0]) === 5) throw new PrintError(`The printer is stopped; nothing was printed: ${problems(a).join(", ") || "reason unknown"}`);
       const loaded = String(a["media-ready"]?.[0] ?? "na_letter_8.5x11in");
       const media = mediaOf(loaded) ? loaded : "na_letter_8.5x11in";
       const { width, height } = mediaOf(media)!;
@@ -334,17 +334,17 @@ export class PrinterGateway {
       } catch (err) {
         // The document may or may not have reached the printer: never resend on our own.
         this.#log.warn("print job outcome unknown", { user: account.username, error: err instanceof Error ? err.message : String(err) });
-        throw new PrintError(`发送途中出错（${err instanceof Error ? err.message : String(err)}），不确定打印机是否已收到。不要自动重发，先请用户看看打印机有没有出纸。`);
+        throw new PrintError(`An error occurred while sending (${err instanceof Error ? err.message : String(err)}); not sure whether the printer received it. Do not resend automatically; first ask the user to check whether the printer printed anything.`);
       }
-      if (res.status >= 0x0100) throw new PrintError(`打印机拒绝了这个作业（IPP 状态 0x${res.status.toString(16)}${res.attrs["status-message"] ? `：${res.attrs["status-message"][0]}` : ""}），没有打印`);
+      if (res.status >= 0x0100) throw new PrintError(`The printer refused this job (IPP status 0x${res.status.toString(16)}${res.attrs["status-message"] ? `: ${res.attrs["status-message"][0]}` : ""}); nothing was printed`);
       const jobId = res.attrs["job-id"]?.[0];
-      const state = JOB_STATES[Number(res.attrs["job-state"]?.[0])] ?? "已接收";
+      const state = JOB_STATES[Number(res.attrs["job-state"]?.[0])] ?? "received";
       this.#log.info("print job sent", { user: account.username, jobId, pages: raster.pages, copies, sides, color, bytes: raster.bytes.length, ms: Date.now() - started });
       const warn = problems(a);
       return [
-        `已发送到打印机：${path.posix.basename(file)}，${raster.pages} 页 × ${copies} 份，${sides === "one-sided" ? "单面" : "双面"}，${color ? "彩色" : "黑白"}，${mediaOf(media)!.label} 纸。`,
-        `作业号 ${jobId ?? "未知"}，状态：${state}。`,
-        warn.length ? `打印机提示：${warn.join("、")}` : "",
+        `Sent to the printer: ${path.posix.basename(file)}, ${raster.pages} pages × ${copies} copies, ${sides === "one-sided" ? "one-sided" : "two-sided"}, ${color ? "color" : "black and white"}, ${mediaOf(media)!.label} paper.`,
+        `Job ${jobId ?? "unknown"}, status: ${state}.`,
+        warn.length ? `Printer notes: ${warn.join(", ")}` : "",
       ].filter(Boolean).join("\n");
     });
     this.#queue = job.catch(() => undefined);

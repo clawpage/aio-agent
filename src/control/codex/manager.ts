@@ -1274,13 +1274,13 @@ export class AgentManager {
         .all(t.id) as Array<{ payload: string }>)
         .map((row) => (JSON.parse(row.payload) as { item?: { type?: string; text?: string } }).item)
         .filter((item) => item?.type === "agentMessage" && item.text?.trim());
-      const entry = `用户：${clip(t.request.trim(), PRIOR_REQUEST_CHARS)}\n助理：${clip(answers.at(-1)?.text?.trim() ?? "（没有最终回复）", PRIOR_ANSWER_CHARS)}`;
+      const entry = `User: ${clip(t.request.trim(), PRIOR_REQUEST_CHARS)}\nAssistant: ${clip(answers.at(-1)?.text?.trim() ?? "(no final reply)", PRIOR_ANSWER_CHARS)}`;
       entries.unshift(entry.length > budget ? `${entry.slice(0, budget)}…` : entry);
       budget -= entry.length;
       if (budget <= 0) break;
     }
     if (!entries.length) return text;
-    return `[背景] 这项任务之前由另一个执行器处理过，以下是此前的对话记录（按时间顺序），供你继续时参考：\n\n${entries.join("\n\n")}\n\n[当前消息]\n${text}`;
+    return `[Background] This task was previously handled by another executor. Below is the earlier conversation (in chronological order), for your reference as you continue:\n\n${entries.join("\n\n")}\n\n[Current message]\n${text}`;
   }
 
   /** True when a stop was requested for this turn before it was dispatched. */

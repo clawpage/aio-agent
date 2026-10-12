@@ -40,6 +40,7 @@ import { dispatchLog, recallStats } from "../tasks/recall.js";
 import { PERSON_KEY } from "../browser/tabs.js";
 import { normalizeSite, vaultLogin, VaultError, type Vault } from "../vault.js";
 import { DocumentError } from "../documents/service.js";
+import { isLocale } from "../locale.js";
 import type { BrowserStatusView } from "../browser/service.js";
 import { documentKind, isRenderableKind, mediaType, requireWorkspaceFilePath } from "../documents/paths.js";
 
@@ -615,6 +616,13 @@ export function createApiRouter(context: AppContext): Router {
       res.status(400).json({ error: "bad_request", message: err.message });
     }
   }));
+  // The console language decides what language the account's agents write for people in.
+  router.put("/account/locale", requireKind("primary"), requireSession, (req, res) => {
+    const locale = req.body?.locale;
+    if (!isLocale(locale)) { res.status(400).json({ error: "bad_request", message: "不支持的语言" }); return; }
+    context.tasks.setLocale(locale);
+    res.json({ ok: true });
+  });
   router.post("/tasks", requireKind("primary"), requireSession, asyncHandler(async (req, res) => {
     try {
       const b = req.body ?? {};
@@ -625,7 +633,7 @@ export function createApiRouter(context: AppContext): Router {
         if (!checked.ok) throw new Error(checked.message);
         return { path: checked.path, kind: a.kind === "image" ? "image" as const : "file" as const, name: typeof a.name === "string" ? a.name : "" };
       }) : [];
-      const result = context.tasks.submit({ userId: ctxOf(req).session!.ownerId, text: b.text, clientMessageId: b.clientMessageId, attachments, relatedTaskId: typeof b.relatedTaskId === "string" ? b.relatedTaskId : null });
+      const result = context.tasks.submit({ userId: ctxOf(req).session!.ownerId, text: b.text, clientMessageId: b.clientMessageId, attachments, relatedTaskId: typeof b.relatedTaskId === "string" ? b.relatedTaskId : null, locale: typeof b.locale === "string" ? b.locale : null });
       res.status(result.duplicate ? 200 : 202).json(result);
     } catch (err) {
       res.status(err instanceof TurnConflictError ? 409 : 400).json({ error: "task_submit_failed", message: err instanceof Error ? err.message : "任务提交失败" });

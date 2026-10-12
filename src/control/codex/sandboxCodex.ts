@@ -584,7 +584,7 @@ export class SandboxCodexSession {
     await this.start();
     const files = (params.attachments ?? []).filter((a) => a.kind === "file");
     const text = files.length
-      ? `${params.text}${params.text ? "\n\n" : ""}附件已上传到沙箱，可直接读取：\n${files.map((f) => `- ${f.path}`).join("\n")}`
+      ? `${params.text}${params.text ? "\n\n" : ""}Attachments have been uploaded to the sandbox and can be read directly:\n${files.map((f) => `- ${f.path}`).join("\n")}`
       : params.text;
     const input: Array<Record<string, unknown>> = [{ type: "text", text }];
     for (const image of (params.attachments ?? []).filter((a) => a.kind === "image")) {
@@ -652,7 +652,7 @@ export class SandboxCodexSession {
   async steerTurn(params: { threadId: string; expectedTurnId: string; text: string; attachments?: Array<{path:string;kind:"image"|"file";name?:string}> }): Promise<void> {
     if (!this.#peer?.alive) throw new Error("Codex connection is unavailable");
     const files = (params.attachments ?? []).filter(a => a.kind === "file");
-    const text = params.text + (files.length ? `\n附件已上传到沙箱：\n${files.map(a => a.path).join("\n")}` : "");
+    const text = params.text + (files.length ? `\nAttachments have been uploaded to the sandbox:\n${files.map(a => a.path).join("\n")}` : "");
     const input: Array<Record<string, unknown>> = [{type:"text",text}];
     for (const a of params.attachments ?? []) if (a.kind === "image") input.push({type:"localImage",path:a.path});
     const result = await this.#peer.request("turn/steer", {threadId:params.threadId,expectedTurnId:params.expectedTurnId,input},30_000) as {turnId:string};

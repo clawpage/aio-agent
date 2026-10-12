@@ -62,7 +62,7 @@ export function encodeRequest(op: number, requestId: number, printerUri: string,
 }
 
 export function decodeResponse(buf: Buffer): IppResponse {
-  if (buf.length < 9) throw new Error("打印机回应不完整");
+  if (buf.length < 9) throw new Error("The printer's response was incomplete");
   const status = buf.readUInt16BE(2);
   const attrs: Record<string, IppValue[]> = {};
   let i = 8;
@@ -102,7 +102,7 @@ export function decodeResponse(buf: Buffer): IppResponse {
 /** The http(s) endpoint for an ipp:// or ipps:// printer URI (port 631 unless given). */
 export function endpointOf(printerUri: string): URL {
   const uri = new URL(printerUri);
-  if (uri.protocol !== "ipp:" && uri.protocol !== "ipps:") throw new Error(`打印机地址要以 ipp:// 或 ipps:// 开头：${printerUri}`);
+  if (uri.protocol !== "ipp:" && uri.protocol !== "ipps:") throw new Error(`The printer address must start with ipp:// or ipps://: ${printerUri}`);
   const url = new URL(`${uri.protocol === "ipps:" ? "https" : "http"}://${uri.host}${uri.pathname}`);
   if (!uri.port) url.port = "631";
   return url;
@@ -128,11 +128,11 @@ export async function ippRequest(printerUri: string, body: Buffer, timeoutMs: nu
       (res) => {
         const chunks: Buffer[] = [];
         res.on("data", (chunk: Buffer) => chunks.push(chunk));
-        res.on("end", () => (res.statusCode === 200 ? resolve(Buffer.concat(chunks)) : reject(new Error(`打印机 HTTP ${res.statusCode}`))));
+        res.on("end", () => (res.statusCode === 200 ? resolve(Buffer.concat(chunks)) : reject(new Error(`Printer HTTP ${res.statusCode}`))));
         res.on("error", reject);
       },
     );
-    req.on("timeout", () => req.destroy(new Error("打印机没有响应（超时）")));
+    req.on("timeout", () => req.destroy(new Error("The printer did not respond (timed out)")));
     req.on("error", reject);
     req.end(body);
   });

@@ -9,7 +9,7 @@ import { FakeCodex, testConfig } from "../helpers/harness.js";
 type Entry = { id: string; title: string; source?: string; date?: string; input_text: string; group:string; result?:string; latestMessage?:string };
 type Data = { message: string; previous: Entry[]; mainSessionTimeline?: string; jevJudgment?: { scores?: Record<string,number> } };
 /** The Luna view is the last JSON line; document recall is already complete. */
-const view = (p: string) => ({ data: JSON.parse(p.split("\n").at(-1)!) as Data });
+const view = (p: string) => ({ data: JSON.parse(p.split("\n").findLast(l => l.startsWith("{"))!) as Data });
 const jevAnswers = (questions: Record<string,{criteria:Record<string,string>}>, preferred="NEW") => {
   const ids=Object.keys(questions.route!.criteria);
   const pick=preferred==="NEW"?"NEW":ids.find(id=>id.endsWith(`:${preferred}`))!;
@@ -83,12 +83,12 @@ it("asks Jev about the tasks recall found for the message, not only the latest o
   await tick();
   expect(asked).toHaveLength(1);
   const criteria = asked[0]!.route!.criteria;
-  expect(criteria[`resume:${ids[20]}`]).toMatch(/^按内容召回的较早任务（.*）「杭州西湖亲子三日游行程」/);
+  expect(criteria[`resume:${ids[20]}`]).toMatch(/^Earlier task recalled by content \(.*\) "杭州西湖亲子三日游行程"/);
   expect(asked[0]![`relevance:${ids[20]}`]).toBeDefined();
   // Recency and inverted-index matches both survive the bounded Jev call.
-  const latest = Object.entries(criteria).filter(([, text]) => /^第\d+近/.test(text));
+  const latest = Object.entries(criteria).filter(([, text]) => /^\d+(st|nd|rd|th) most recent/.test(text));
   expect(latest).toHaveLength(5);
-  expect(latest[0]![1]).toMatch(/^第1近/);
+  expect(latest[0]![1]).toMatch(/^1st most recent/);
   expect(latest.every(([id]) => id.startsWith("resume:task_today"))).toBe(true);
 });
 
@@ -162,7 +162,7 @@ it("finishes inverted-index recall before Luna and only retries malformed output
   job = submit("随便找找");
   await tick();
   expect(codex.prompts).toHaveLength(2);
-  expect(codex.prompts[1]).toContain("你上一次的回答无法使用：缺少 title");
+  expect(codex.prompts[1]).toContain("Your previous answer could not be used: 缺少 title");
   expect(tasks.get(job.id)!.status).toBe("planning_failed");
   expect(events().at(-1)).toMatchObject({ rounds: 2, failed: 1, fail_reason: "缺少 title" });
 });

@@ -22,7 +22,7 @@ it("gives Claude Code the workspace rules and the long-term memory Codex keeps",
     expect(claudeMd.split("\n")[0]).toBe("@/home/gem/workspace/AGENTS.md");
     expect(claudeMd).toContain("\n@/home/gem/.codex/memories/memory_summary.md\n");
     expect(claudeMd).toContain("/home/gem/.codex/memories/MEMORY.md");
-    expect(claudeMd).toContain("不要直接说没有记录");
+    expect(claudeMd).toContain("do not just say there is no record");
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

@@ -7,7 +7,7 @@ import { FakeCodex, testConfig } from "../helpers/harness.js";
 
 class PlanningCodex extends FakeCodex {
   async planTask(p: string) {
-    const message = JSON.parse(p.split("\n").at(-1)!).message as string;
+    const message = JSON.parse(p.split("\n").findLast(l => l.startsWith("{"))!).message as string;
     return JSON.stringify({ title: message, related: [], dependencies: [], resources: [], clarification: message.includes("机票") ? "哪天出发？" : null });
   }
 }

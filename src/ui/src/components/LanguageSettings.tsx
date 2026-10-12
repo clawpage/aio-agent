@@ -1,11 +1,18 @@
 import { AccountPrivacySettings } from "./Support";
+import { api } from "../api";
 import { LOCALES, locale, setLocale, t, type Locale } from "../i18n";
+
+/** The account remembers the choice too (scheduled runs and the voice gadget answer in it); the switch never waits on that. */
+function chooseLocale(next: Locale) {
+  if (next !== locale) void api.setAccountLocale(next).catch(() => undefined);
+  setLocale(next);
+}
 
 /** Shared by owner and member configuration pages. */
 export function LanguagePicker() {
   return <label className="field">
     <span>{t.settings.language.title}</span>
-    <select aria-label={t.settings.language.title} value={locale} onChange={event => setLocale(event.target.value as Locale)}>
+    <select aria-label={t.settings.language.title} value={locale} onChange={event => chooseLocale(event.target.value as Locale)}>
       {Object.entries(LOCALES).map(([id, messages]) => <option key={id} value={id} lang={id}>{messages.settings.language.name}</option>)}
     </select>
   </label>;

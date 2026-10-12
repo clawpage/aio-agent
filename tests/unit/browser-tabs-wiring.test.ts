@@ -83,7 +83,7 @@ it("tells the executor its schedules are the account's, kept outside the convers
   agent.submitTurn({ conversationId: granted.id, text: "hi", clientMessageId: "s2" });
   await tick();
   expect(codex.threadOpts[1]?.developerInstructions).toContain(SCHEDULE_POLICY);
-  expect(SCHEDULE_POLICY).toContain("不要说定时任务只在当前会话有效");
+  expect(SCHEDULE_POLICY).toContain("Do not say that scheduled tasks only last for the current session");
 });
 
 it("tells the executor to draw pictures with the image tool only when this runtime has one", async () => {
@@ -97,7 +97,7 @@ it("tells the executor to draw pictures with the image tool only when this runti
   agent.submitTurn({ conversationId: granted.id, text: "hi", clientMessageId: "i2" });
   await tick();
   expect(codex.threadOpts[1]?.developerInstructions).toContain(IMAGE_POLICY);
-  expect(IMAGE_POLICY).toContain("![说明](路径)");
+  expect(IMAGE_POLICY).toContain("![description](path)");
 });
 
 it("records every execution thread's tabs against its task and marks them finished before the browser hold ends", async () => {

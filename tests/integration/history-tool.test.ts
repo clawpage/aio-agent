@@ -77,22 +77,22 @@ it("finds past tasks by any of several words, best match first, with their sessi
     expect(detail.process).toBeUndefined();
     const withProcess = json<{ process: string[] }>(await call(owner.history!.url, "history_get", { id: found[0]!.id, process: true }));
     expect(withProcess.process).toEqual([
-      '工具 aio_tabs.browser_open({"url":"https://clinic.example/book"}) → 出错：页面要求登录',
-      "说 诊所网站要登录，请你先登录。",
+      'tool aio_tabs.browser_open({"url":"https://clinic.example/book"}) → error: 页面要求登录',
+      "said 诊所网站要登录，请你先登录。",
     ]);
 
     // No query: newest first. A filter by status. A lone symbol is matched literally.
     expect(json<unknown[]>(await call(owner.history!.url, "history_search", {}))).toHaveLength(3);
     expect(json<unknown[]>(await call(owner.history!.url, "history_search", { status: "completed" }))).toHaveLength(3);
-    expect((await call(owner.history!.url, "history_search", { status: "open" })).content[0]!.text).toContain("没有找到相关任务");
-    expect((await call(owner.history!.url, "history_search", { query: "%" })).content[0]!.text).toContain("没有找到相关任务");
+    expect((await call(owner.history!.url, "history_search", { status: "open" })).content[0]!.text).toContain("No matching tasks found");
+    expect((await call(owner.history!.url, "history_search", { query: "%" })).content[0]!.text).toContain("No matching tasks found");
 
     // A follow-up runs in the same execution session: both show where they stand in it.
     h.ctx.tasks.submit({ userId: "owner_1", text: "那第二款推车有现货吗", clientMessageId: "hs-4", relatedTaskId: found[1]!.id });
     await vi.waitFor(() => expect(h.codex.startedTurns.length).toBe(4));
     await h.codex.runTurn(h.codex.startedTurns[3]!.turnId, { text: "第二款有现货" });
     const chain = json<Array<{ request: string; session?: string }>>(await call(owner.history!.url, "history_search", { query: "推车" }));
-    expect(chain.map((c) => c.session)).toEqual(expect.arrayContaining(["同一执行会话的第 1/2 个任务", "同一执行会话的第 2/2 个任务"]));
+    expect(chain.map((c) => c.session)).toEqual(expect.arrayContaining(["task 1 of 2 in the same execution session", "task 2 of 2 in the same execution session"]));
     const first = json<{ session: Array<{ title: string; current?: boolean }> }>(await call(owner.history!.url, "history_get", { id: found[1]!.id }));
     expect(first.session).toHaveLength(2);
     expect(first.session[0]!.current).toBe(true);
@@ -100,7 +100,7 @@ it("finds past tasks by any of several words, best match first, with their sessi
     // Another account sees none of it.
     const member = memberConfig(owner, "user_m", 18092);
     gateway.provision(member);
-    expect((await call(member.history!.url, "history_search", {})).content[0]!.text).toContain("没有找到相关任务");
+    expect((await call(member.history!.url, "history_search", {})).content[0]!.text).toContain("No matching tasks found");
     expect((await call(member.history!.url, "history_get", { id: found[0]!.id })).isError).toBe(true);
   } finally {
     gateway.close();
@@ -112,23 +112,23 @@ it("keeps the person's standing agreements, gives each execution thread them onc
   const { h, gateway, owner, call, json } = await setup();
   try {
     const saved = await call(owner.history!.url, "memory_save", { kind: "rule", text: "推荐商品时只看 Amazon 和 Costco" });
-    expect(saved.content[0]!.text).toMatch(/^已记下约定（mem_/);
+    expect(saved.content[0]!.text).toMatch(/^Recorded agreement \(mem_/);
     await call(owner.history!.url, "memory_save", { kind: "fact", text: "Roy 对鸡蛋过敏" });
     expect((await call(owner.history!.url, "memory_save", { kind: "wish", text: "x" })).isError).toBe(true);
     expect((await call(owner.history!.url, "memory_save", { kind: "rule", text: "长".repeat(301) })).isError).toBe(true);
     const egg = json<Array<{ id: string; text: string }>>(await call(owner.history!.url, "memory_search", { query: "鸡蛋" }));
     expect(egg.map((m) => m.text)).toEqual(["Roy 对鸡蛋过敏"]);
     // A changed mind rewrites the entry instead of adding a contradicting one.
-    expect((await call(owner.history!.url, "memory_save", { kind: "fact", text: "Roy 对鸡蛋已不过敏", replaces: egg[0]!.id })).content[0]!.text).toContain("已改写");
+    expect((await call(owner.history!.url, "memory_save", { kind: "fact", text: "Roy 对鸡蛋已不过敏", replaces: egg[0]!.id })).content[0]!.text).toContain("Rewrote");
     expect(json<unknown[]>(await call(owner.history!.url, "memory_search", {}))).toHaveLength(2);
 
     // A new execution thread starts with them...
     h.ctx.tasks.submit({ userId: "owner_1", text: "推荐一款空气净化器", clientMessageId: "ag-1" });
     await vi.waitFor(() => expect(h.codex.startedTurns.length).toBe(1));
     const firstTurn = h.codex.startedTurns[0]!;
-    expect(firstTurn.text).toContain("用户的长期约定");
-    expect(firstTurn.text).toContain("[规则] 推荐商品时只看 Amazon 和 Costco");
-    expect(firstTurn.text).toContain("[事实] Roy 对鸡蛋已不过敏");
+    expect(firstTurn.text).toContain("The user's standing agreements");
+    expect(firstTurn.text).toContain("[rule] 推荐商品时只看 Amazon 和 Costco");
+    expect(firstTurn.text).toContain("[fact] Roy 对鸡蛋已不过敏");
     expect(firstTurn.text).not.toContain("Roy 对鸡蛋过敏（");
     const result = "推荐 X 型号。" + "详细比较。".repeat(800);
     await h.codex.runTurn(firstTurn.turnId, { text: result });
@@ -137,13 +137,13 @@ it("keeps the person's standing agreements, gives each execution thread them onc
     // ...a follow-up in the same thread only names the unchanged version...
     h.ctx.tasks.submit({ userId: "owner_1", text: "那款的滤芯多少钱", clientMessageId: "ag-2", relatedTaskId: taskId });
     await vi.waitFor(() => expect(h.codex.startedTurns.length).toBe(2));
-    expect(h.codex.startedTurns[1]!.text).toMatch(/用户的长期约定（版本 [0-9a-f]{8}）已在本会话前文给出且没有变化/);
-    expect(h.codex.startedTurns[1]!.text).not.toContain("[规则] 推荐商品时只看 Amazon 和 Costco");
+    expect(h.codex.startedTurns[1]!.text).toMatch(/The user's standing agreements \(version [0-9a-f]{8}\) were given earlier in this session and have not changed/);
+    expect(h.codex.startedTurns[1]!.text).not.toContain("[rule] 推荐商品时只看 Amazon 和 Costco");
     await h.codex.runTurn(h.codex.startedTurns[1]!.turnId, { text: "滤芯 $40" });
 
     // ...and once one is forgotten, the next thread no longer carries it.
     const rule = json<Array<{ id: string }>>(await call(owner.history!.url, "memory_search", { query: "Costco" }))[0]!;
-    expect((await call(owner.history!.url, "memory_forget", { id: rule.id })).content[0]!.text).toBe("已删除这条约定");
+    expect((await call(owner.history!.url, "memory_forget", { id: rule.id })).content[0]!.text).toBe("Deleted this agreement");
     expect((await call(owner.history!.url, "memory_forget", { id: rule.id })).isError).toBe(true);
 
     // A related task is given as a gist with a pointer, not its whole result.
@@ -152,13 +152,13 @@ it("keeps the person's standing agreements, gives each execution thread them onc
     await vi.waitFor(() => expect(h.codex.startedTurns.length).toBe(3));
     const third = h.codex.startedTurns[2]!.text;
     expect(third).not.toContain("推荐商品时只看 Amazon 和 Costco");
-    expect(third).toContain(`已截断，完整内容用 aio_history 的 history_get 读取 ${taskId}`);
+    expect(third).toContain(`truncated; read the full content of ${taskId} with aio_history's history_get`);
     expect(third).not.toContain(result);
 
     // Agreements belong to their account.
     const member = memberConfig(owner, "user_m", 18092);
     gateway.provision(member);
-    expect((await call(member.history!.url, "memory_search", {})).content[0]!.text).toBe("没有相关的约定。");
+    expect((await call(member.history!.url, "memory_search", {})).content[0]!.text).toBe("No matching agreements.");
   } finally {
     gateway.close();
     await h.shutdown();

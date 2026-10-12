@@ -107,7 +107,7 @@ type TabRecord = { id: string; key: string; title: string; finishedAt: number | 
 const records = async (key?: string) => ((await (await fetch(`${base}/tabs${key ? `?key=${key}` : ""}`)).json()) as { tabs: TabRecord[] }).tabs;
 const control = async (tab: string, action: string, key?: string) => fetch(`${base}/control`, { method: "POST", body: JSON.stringify({ tab, action, key }) });
 const page = (title: string, body: string) => `data:text/html,<title>${title}</title><p id="p">${body}</p><input id="q"><a href="data:text/html,<title>Next</title>next">go</a>`;
-const tabIdOf = (r: Rpc) => /标签页 (t\d+)/.exec(text(r))?.[1];
+const tabIdOf = (r: Rpc) => /Tab (t\d+)/.exec(text(r))?.[1];
 
 it.skipIf(!hasChromium)("cold-starts on tool use, leaves metadata asleep and never navigates after recovery fails", async () => {
   const before = readyCalls;
@@ -119,7 +119,7 @@ it.skipIf(!hasChromium)("cold-starts on tool use, leaves metadata asleep and nev
   try {
     const failed = await call("lazy", "browser_navigate", { url: page("lazy", "must not open") });
     expect(failed.result?.isError).toBe(true);
-    expect(text(failed)).toContain("自动恢复失败");
+    expect(text(failed)).toContain("automatic recovery failed");
     expect(await records("lazy")).toEqual([]);
     expect(browser).toBeUndefined();
   } finally { readyStatus = 200; }
@@ -148,14 +148,14 @@ it.skipIf(!hasChromium)("records each tab's creator: it alone may act, others ma
   ]));
 
   // B sees A's tab as read-only, and may read it.
-  expect(text(await call("B", "browser_tab_list"))).toMatch(new RegExp(`\\[${tabA}\\].*任务「任务A」，只读`));
+  expect(text(await call("B", "browser_tab_list"))).toMatch(new RegExp(`\\[${tabA}\\].*task "任务A", read-only`));
   expect(text(await call("B", "browser_get_text", { tab: tabA }))).toContain("alpha body");
   expect((await call("B", "browser_screenshot", { tab: tabA })).result?.content[0]?.type).toBe("image");
   // …but never act on it.
   for (const [tool, args] of [["browser_click", { selector: "text=go" }], ["browser_fill", { selector: "#q", text: "x" }], ["browser_navigate", { url: "about:blank" }], ["browser_evaluate", { script: "1" }], ["browser_tab_close", {}]] as const) {
     const r = await call("B", tool, { ...args, tab: tabA });
     expect(r.result?.isError, tool).toBe(true);
-    expect(text(r)).toContain("其他任务只能只读访问");
+    expect(text(r)).toContain("other tasks have read-only access");
   }
   // The creator still acts on its own tab.
   await call("A", "browser_fill", { selector: "#q", text: "hello" });
@@ -203,7 +203,7 @@ it.skipIf(!hasChromium)("re-claims recorded tabs after the server restarts", asy
   expect(text(await call("A", "browser_get_text"))).toContain("alpha body");
   expect((await records()).map((t) => [t.id, t.key]).sort()).toEqual(beforeRestart.map((t) => [t.id, t.key]).sort());
   const tabF = beforeRestart.find((t) => t.key === "F")!.id;
-  expect(text(await call("A", "browser_click", { selector: "text=go", tab: tabF }))).toContain("其他任务只能只读访问");
+  expect(text(await call("A", "browser_click", { selector: "text=go", tab: tabF }))).toContain("other tasks have read-only access");
 });
 
 it.skipIf(!hasChromium)("hands a tab to a person and back: the agent waits in place, nobody else touches it meanwhile", async () => {
@@ -218,7 +218,7 @@ it.skipIf(!hasChromium)("hands a tab to a person and back: the agent waits in pl
   expect((await records("H"))[0]?.holder).toBe("human");
   // While a person holds it no agent may even read it.
   const blocked = await call("OTHER", "browser_get_text", { tab });
-  expect(text(blocked)).toContain("用户正在操作");
+  expect(text(blocked)).toContain("The user is operating");
   // The control plane can still show the person a preview.
   const shot = (await (await fetch(`${base}/screenshot?tab=${tab}&key=H`)).json()) as { mimeType: string; data: string };
   expect(shot.mimeType).toBe("image/jpeg");
@@ -227,7 +227,7 @@ it.skipIf(!hasChromium)("hands a tab to a person and back: the agent waits in pl
 
   expect((await control(tab, "release", "H")).status).toBe(200);
   const handedBack = await waiting;
-  expect(text(handedBack)).toContain("用户已交还控制权");
+  expect(text(handedBack)).toContain("The user has handed control back");
   expect((await records("H"))[0]).toMatchObject({ holder: "ai", request: null });
   expect(text(await call("OTHER", "browser_get_text", { tab }))).toContain("please sign in");
 });
@@ -236,7 +236,7 @@ it.skipIf(!hasChromium)("stops waiting on timeout, on a stopped caller and on a 
   const tab = tabIdOf(await call("W", "browser_navigate", { url: page("Wait", "wait") }))!;
   const timedOut = await call("W", "browser_request_human", { reason: "等你" });
   expect(timedOut.result?.isError).toBe(true);
-  expect(text(timedOut)).toContain("还没有交还");
+  expect(text(timedOut)).toContain("has not handed back");
   expect((await records("W"))[0]?.request).toBeNull();
 
   const stop = new AbortController();
@@ -250,7 +250,7 @@ it.skipIf(!hasChromium)("stops waiting on timeout, on a stopped caller and on a 
   const finished = call("W", "browser_request_human", { reason: "等你" });
   await new Promise((r) => setTimeout(r, 200));
   await post("/finish", { key: "W" });
-  expect(text(await finished)).toContain("停止等待");
+  expect(text(await finished)).toContain("Stopped waiting");
   expect((await records("W")).find((t) => t.id === tab)?.request).toBeNull();
 });
 
@@ -336,7 +336,7 @@ it.skipIf(!hasChromium)("opens a person's link in their own tab: theirs to opera
   // No agent sees it, reads it or acts on it.
   expect(text(await call("Z", "browser_tab_list"))).not.toContain(origin);
   expect((await call("Z", "browser_get_text", { tab: tab.id })).result?.isError).toBe(true);
-  expect(text(await call("Z", "browser_get_text", { tab: tab.id }))).toContain("用户正在操作");
+  expect(text(await call("Z", "browser_get_text", { tab: tab.id }))).toContain("The user is operating");
 
   // The person types and taps without taking anything over; a window the page opens becomes theirs too.
   const act = async (route: string, body: Record<string, unknown>) => (await (await fetch(`${base}${route}`, { method: "POST", body: JSON.stringify({ task: "person", tab: tab.id, ...body }) })).json()) as { current: string; editable?: boolean };
@@ -368,11 +368,11 @@ it.skipIf(!hasChromium)("never lets a browser tool hang a task, and clears a hun
   // A script that never settles: the call fails with a reason, the tab stays, and the next call is not stuck behind it.
   const pending = await call("Q", "browser_evaluate", { script: "new Promise(() => {})" });
   expect(pending.result?.isError).toBe(true);
-  expect(text(pending)).toContain("超过 4 秒");
+  expect(text(pending)).toContain("within 4 seconds");
   expect(text(await call("Q", "browser_get_text"))).toContain("slow");
   // A renderer spinning forever is hung: its tab is closed so nothing else waits on it.
   const spun = await call("Q", "browser_evaluate", { script: "while (true) {}" });
-  expect(text(spun)).toContain(`标签页 ${tab} 已无响应，已关闭`);
+  expect(text(spun)).toContain(`Tab ${tab} stopped responding and was closed`);
   await new Promise((r) => setTimeout(r, 500));
   expect((await records("Q")).map((t) => t.id)).not.toContain(tab);
 }, 30_000);
@@ -506,7 +506,7 @@ it.skipIf(!hasChromium)("saves a product picture into the workspace, by element 
   await call("S", "browser_navigate", { url: `${origin}/product` });
 
   const card = await call("S", "browser_save_image", { selector: "#card", path: `${ws}/tasks/t1/card.jpg` });
-  expect(text(card)).toContain(`已保存：${ws}/tasks/t1/card.jpg`);
+  expect(text(card)).toContain(`Saved: ${ws}/tasks/t1/card.jpg`);
   expect([...fs.readFileSync(`${ws}/tasks/t1/card.jpg`).subarray(0, 3)]).toEqual([0xff, 0xd8, 0xff]);
   const saved = await call("S", "browser_save_image", { url: "/item.png", path: `${ws}/tasks/t1/item.png` });
   expect(saved.result?.isError).toBeUndefined();
@@ -531,11 +531,11 @@ it.skipIf(!hasChromium)("saves a product picture into the workspace, by element 
 
   // Only a path: the page's declared picture, fetched exactly (no one copies its address).
   await call("S", "browser_navigate", { url: `${origin}/declared` });
-  expect(text(await call("S", "browser_save_image", { path: `${ws}/tasks/t1/declared.png` }))).toContain("已保存");
+  expect(text(await call("S", "browser_save_image", { path: `${ws}/tasks/t1/declared.png` }))).toContain("Saved");
   expect(fs.readFileSync(`${ws}/tasks/t1/declared.png`).equals(png)).toBe(true);
   // No declared picture: the largest one on the page.
   await call("S", "browser_navigate", { url: `${origin}/gallery` });
-  expect(text(await call("S", "browser_save_image", { path: `${ws}/tasks/t1/largest.png` }))).toContain("已保存");
+  expect(text(await call("S", "browser_save_image", { path: `${ws}/tasks/t1/largest.png` }))).toContain("Saved");
   expect(fs.readFileSync(`${ws}/tasks/t1/largest.png`).equals(png)).toBe(true);
   site.close();
 });
@@ -543,7 +543,7 @@ it.skipIf(!hasChromium)("saves a product picture into the workspace, by element 
 it.skipIf(!hasChromium)("bounds concurrent new tabs while allowing reuse and preserving held pages", async () => {
   const attempts = await Promise.all(Array.from({length:5},(_,i)=>call("CAP", "browser_tab_new", {url:page(`cap-${i}`, "saved result")})));
   expect(attempts.filter(r=>!r.result?.isError)).toHaveLength(3);
-  expect(attempts.filter(r=>r.result?.isError).every(r=>text(r).includes("最多同时保留 3"))).toBe(true);
+  expect(attempts.filter(r=>r.result?.isError).every(r=>text(r).includes("at most 3 tabs open at once"))).toBe(true);
   const tabs = await records("CAP");
   expect(tabs).toHaveLength(3);
   const held=tabs[0]!.id, reused=tabs[1]!.id;
@@ -658,7 +658,7 @@ it.skipIf(!hasChromium)("makes another task's idle extra tabs give way when memo
     // The task learns why the tab is gone and how to get it back.
     const gone = await call("SA", "browser_get_text", { tab: spare });
     expect(gone.result?.isError).toBe(true);
-    expect(text(gone)).toContain("已为腾出内存关闭");
+    expect(text(gone)).toContain("was closed to free memory");
     expect(text(gone)).toContain("Spare");
   } finally {
     setMemory(0.1);
@@ -718,7 +718,7 @@ it.skipIf(!hasChromium)("signs in from the vault: the agent only asks, the page 
     expect(received).toEqual([]);
     expect((await login({ key: "V", tab, ...cred })).body.result).toBe("submitted");
     const answered = await waiting;
-    expect(text(answered)).toContain("密码器已填入账号密码并提交");
+    expect(text(answered)).toContain("The password manager filled in the account and password and submitted");
     expect(text(answered)).toContain("Welcome");
     expect(JSON.stringify(answered)).not.toContain(SECRET);
     expect(JSON.stringify(answered)).not.toContain("max@example.com");
@@ -752,7 +752,7 @@ it.skipIf(!hasChromium)("signs in from the vault: the agent only asks, the page 
     const none = ask("V");
     await asked("V");
     expect((await login({ key: "V", tab, ...cred })).body.result).toBe("no_form");
-    expect(text(await none)).toContain("没有找到账号或密码输入框");
+    expect(text(await none)).toContain("no account or password box was found");
     expect(received).toHaveLength(3);
 
     // A site that signs in with Google: nothing is typed, the agent is told which button and account.
@@ -762,8 +762,8 @@ it.skipIf(!hasChromium)("signs in from the vault: the agent only asks, the page 
     expect((await login({ key: "V", tab, site: "example.com", method: "google", username: "max@gmail.com" })).body.error).toBe("site_changed");
     expect((await login({ key: "V", tab, site: "127.0.0.1", method: "google", username: "max@gmail.com" })).body.result).toBe("google");
     const told = text(await google);
-    expect(told).toContain("用 Google 登录");
-    expect(told).toContain("Google 账号 max@gmail.com");
+    expect(told).toContain("Sign in with Google");
+    expect(told).toContain("Google account max@gmail.com");
     expect(received).toHaveLength(3);
     expect((await records("V"))[0]?.request).toBeNull();
 
@@ -774,7 +774,7 @@ it.skipIf(!hasChromium)("signs in from the vault: the agent only asks, the page 
     expect((await control(tab, "take", "V")).status).toBe(200);
     expect((await login({ key: "V", tab, ...cred })).body.error).toBe("no_request");
     expect((await control(tab, "release", "V")).status).toBe(200);
-    expect(text(await manual)).toContain("用户选择自己在浏览器里登录");
+    expect(text(await manual)).toContain("chose to sign in themselves in the browser");
   } finally {
     await post("/finish", { key: "V" });
     site.close();
@@ -808,14 +808,14 @@ it.skipIf(!hasChromium)("signs in with steps the agent wrote, from the vault's v
     const tab = tabIdOf(await call("S", "browser_navigate", { url: origin }))!;
     // Steps are checked before anyone is asked.
     expect(text(await call("S", "browser_login", { steps: [{ action: "click", selector: "#open" }] }))).toContain("{{password}}");
-    expect(text(await call("S", "browser_login", { steps: [{ action: "fill", selector: "#acct", value: "x{{password}}" }] }))).toContain("占位符");
+    expect(text(await call("S", "browser_login", { steps: [{ action: "fill", selector: "#acct", value: "x{{password}}" }] }))).toContain("placeholder");
 
     // The password is only ever typed into a password box: aimed at another box, nothing is typed and the try counts.
     const sneaky = call("S", "browser_login", { steps: [...good.slice(0, 2), { action: "fill", selector: "#note", value: "{{password}}" }] });
     await asked("S");
     expect((await login({ key: "S", tab, ...cred })).result).toBe("failed");
     expect(text(await sneaky)).toContain("不是密码框");
-    expect(text(await sneaky)).toContain("还能再试 2 次");
+    expect(text(await sneaky)).toContain("Attempts left: 2");
 
     // A step that does not match: the agent hears which step and why, never a value.
     const wrong = call("S", "browser_login", { steps: [{ action: "click", selector: "#open" }, { action: "fill", selector: "#secret", value: "{{password}}" }] });
@@ -823,7 +823,7 @@ it.skipIf(!hasChromium)("signs in with steps the agent wrote, from the vault's v
     expect((await login({ key: "S", tab, ...cred })).result).toBe("failed");
     const told = text(await wrong);
     expect(told).toContain("第 2 步（fill #secret）失败");
-    expect(told).toContain("还能再试 1 次");
+    expect(told).toContain("Attempts left: 1");
     expect(told).not.toContain(SECRET);
     expect(received).toEqual([]);
 
@@ -835,7 +835,7 @@ it.skipIf(!hasChromium)("signs in with steps the agent wrote, from the vault's v
     expect(received).toEqual([`acct=max@example.com&secret=${SECRET}&note=`]);
     expect(JSON.stringify(await records("S"))).not.toContain(SECRET);
     // The agent reports what the page shows; the steps it used come with the report, for the vault to keep.
-    expect(text(await call("S", "browser_login_report", { ok: true }))).toContain("已记下");
+    expect(text(await call("S", "browser_login_report", { ok: true }))).toContain("Recorded");
     const report = (await records("S"))[0]!.loginReport as unknown as { ok: boolean; steps: unknown[]; startUrl: string; source: string };
     expect(report).toMatchObject({ ok: true, source: "agent", startUrl: `${origin}/` });
     expect(report.steps).toEqual(good);
@@ -845,7 +845,7 @@ it.skipIf(!hasChromium)("signs in with steps the agent wrote, from the vault's v
     const again = call("S", "browser_login");
     await asked("S");
     expect((await login({ key: "S", tab, ...cred, steps: good, startUrl: `${origin}/` })).result).toBe("submitted");
-    expect(text(await again)).toContain("上次在这个网站成功的步骤");
+    expect(text(await again)).toContain("steps that worked on this site last time");
     expect(received).toHaveLength(2);
 
     // Three failed tries and the agent is told to hand it to the person.
@@ -858,7 +858,7 @@ it.skipIf(!hasChromium)("signs in with steps the agent wrote, from the vault's v
     }
     const refused = text(await call("S", "browser_login", { steps: good }));
     expect(refused).toContain("browser_request_human");
-    expect(refused).toContain("不要再调用 browser_login");
+    expect(refused).toContain("Do not call browser_login again");
   } finally {
     await post("/finish", { key: "S" });
     site.close();
@@ -945,7 +945,7 @@ it.skipIf(!hasChromium)("signs in on a tab one run at a time: a second vault req
     await sleep(300);
     expect((await login(cred)).status).toBe(409);
     expect((await first).body.result).toBe("submitted");
-    expect(text(await waiting)).toContain("按步骤填入账号密码并提交");
+    expect(text(await waiting)).toContain("filled in the account and password using the steps and submitted");
     expect(received).toEqual(["u=max&p=pw-1"]);
   } finally {
     site.close();
@@ -995,7 +995,7 @@ it.skipIf(!hasChromium)("gives the person a window opened from the tab they hold
     // The agent's next call does not land in the payment window…
     const read = await call("PO", "browser_get_text");
     expect(read.result?.isError).toBe(true);
-    expect(text(read)).toContain("用户正在操作");
+    expect(text(read)).toContain("The user is operating");
     // …and the person's phone input goes into it.
     expect((await fetch(`${base}/input`, { method: "POST", body: JSON.stringify({ task: "PO", tab: popup.id, text: "4242" }) })).status).toBe(200);
   } finally {
@@ -1089,7 +1089,7 @@ it.skipIf(!hasChromium)("refuses a task at its tab cap before closing anyone's p
   try {
     setMemory(0.95);
     const refused = await call("CA", "browser_tab_new", { url: plain("CA4") });
-    expect(text(refused)).toContain("最多同时保留 3");
+    expect(text(refused)).toContain("at most 3 tabs open at once");
     expect((await records()).map((t) => t.id)).toContain(spare);
     // 3.2 of 4 GB in use: above the low mark, but the page fits: nobody else's tab gives way.
     setMemory(0.8, 0, 4e9);
@@ -1145,7 +1145,7 @@ it.skipIf(!hasChromium)("past the deadline closes the hung tab the tool used, ne
     void control(busy, "take", "BT").catch(() => undefined);
     await expect.poll(async () => (await records("BT")).find((t) => t.id === busy)?.holder).toBe("human");
     const r = await call("BT", "browser_evaluate", { tab: stuck, script: "while (true) {}" });
-    expect(text(r)).toContain(`标签页 ${stuck} 已无响应，已关闭`);
+    expect(text(r)).toContain(`Tab ${stuck} stopped responding and was closed`);
     expect((await records("BT")).find((t) => t.id === busy)).toMatchObject({ holder: "human" });
   } finally {
     await fetch(`${process.env.AIO_TABS_CDP}/json/close/${targetId}`).catch(() => undefined);
@@ -1168,7 +1168,7 @@ it.skipIf(!hasChromium)("reopens the page a finished task left as a new tab of t
   // A finished task's page: handed back, it is cleared like the task's other finished tabs.
   expect(tab.finishedAt).toEqual(expect.any(Number));
   // The task's agent (a follow-up) is shut out until the person hands it back.
-  expect(text(await call("RO", "browser_get_text", { tab: tab.id }))).toContain("用户正在操作");
+  expect(text(await call("RO", "browser_get_text", { tab: tab.id }))).toContain("The user is operating");
   expect((await control(tab.id, "release", "RO")).status).toBe(200);
   expect((await records("RO")).find((t) => t.id === tab.id)).toMatchObject({ holder: "ai" });
   site.close();

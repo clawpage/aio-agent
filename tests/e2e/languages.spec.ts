@@ -18,6 +18,9 @@ for (const language of languages) test(`${language.id}: sign-in language persist
   await page.route('**/api/auth/google/pending', route => route.fulfill({ json: { enabled: true, pending: pending ? { email: 'demo@example.com' } : null } }));
   await page.route('**/api/auth/google/cancel', route => { pending = false; return route.fulfill({ json: { ok: true } }); });
   await page.route('**/api/main*', route => route.fulfill({ json: { mode: 'tasks', tasks: [], nextBefore: null } }));
+  // The account remembers each switch (its agents answer in it); a failed save still switches.
+  const saved: string[] = [];
+  await page.route('**/api/account/locale', route => { saved.push(route.request().postDataJSON().locale); return route.fulfill(language.id === 'es' ? { status: 500, json: { error: 'down' } } : { json: { ok: true } }); });
   await page.goto('/u/demo/settings');
   const localSettings = page.locator('.settings-card select');
   await expect(localSettings.locator('option')).toHaveText(['中文', 'English', 'Español', '繁體中文']);
@@ -51,5 +54,6 @@ for (const language of languages) test(`${language.id}: sign-in language persist
   await page.goto('/');
   await expect(page.getByRole('heading', { name: language.id === 'en' ? 'Chat principal' : 'Main chat', exact: true })).toBeVisible();
   expect(writes).toContain('/api/auth/google/cancel');
+  expect(saved).toEqual([...(language.id === 'zh-CN' ? [] : [language.id]), language.id === 'en' ? 'es' : 'en']);
   expect(writes.filter(path => path === '/api/settings' || path.includes('/google/register') || path.includes('/auth/logout'))).toEqual([]);
 });

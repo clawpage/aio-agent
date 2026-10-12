@@ -61,15 +61,15 @@ const KEY = /^[A-Za-z0-9_-]{1,80}$/;
 const { chromium } = require(process.env.AIO_TABS_PLAYWRIGHT || '/opt/aio-browser/patchright-core');
 
 const INSTRUCTIONS = [
-  '浏览器请只用 aio_tabs 的工具。每个标签页记录着创建它的任务：只有创建它的任务能操作（打开网址、点击、填写、执行脚本、关闭），其他任务只能只读查看（正文、HTML、页面结构、截图）。',
-  '只读查看其他任务的页面时，先用 browser_tab_list 找到标签页编号（如 t3），再把它作为 tab 参数传给读取类工具。',
-  '逐项查航班、价格等时复用本任务的标签页，保存必要结果后换网址，不为每个日期或候选保留一页。本任务最多同时保留 3 页；浏览器由多个任务共用，内存紧张时只保证每个任务正在用的那一页，其余闲置的页会让给其他任务（关闭后按原网址重新打开即可）。遇到内存紧张，关闭自己已读取完成的页面再继续，不关闭用户接管或其他任务的页面。',
-  '网站要登录时调用 browser_login：先用 browser_snapshot 看清登录框，写出 steps（从当前页面重新加载开始：点开登录入口、把 {{username}} 填进账号框、{{password}} 填进密码框、提交），密码器代入用户保存的值执行，你看不到值；这个网站以前成功过的步骤会自动沿用，可以省略 steps。之后读取页面，用 browser_login_report 报告是否成功；失败时按返回的出错步骤改写 steps 重试，最多 3 次，仍不行就调用 browser_request_human。用户为这个网站记的是 Google 登录时，它会告诉你点 Google 按钮、选哪个账号。不要用 browser_fill 或 browser_type 输入密码，不要读取密码框的内容。',
-  '需要用户本人在浏览器里操作时，调用 browser_request_human 说明原因并等待：验证码、二次验证、扫码登录、支付信息、付款、下单、发送消息、修改账号设置等不可撤销的最后一步，或需要用户判断的页面。不要在对话里索要密码或验证码。',
-  '遇到「按住确认你是真人」（Press & Hold）、滑块、勾选框等人机验证时，不要自己反复点击、拖动或刷新：同一个标签页里的验证会话一旦被判为机器，之后人来按也过不了。先用 browser_tab_new 在新标签页重新打开同一网址，再用 browser_tab_close 关掉旧标签页；新标签页通常直接通过。新标签页仍出现验证，才调用 browser_request_human 请用户在这个新标签页里完成。',
-  '用户交还后先读取页面确认当前状态再继续；结果不确定的操作不要自动重做，先让用户核对。用户正在操作的标签页你不能读取或操作。',
-  '不要使用 `aio browser` 命令行或 /v1/browser 接口：它们操作的是整个浏览器当前可见的页面，会打断其他正在并行的任务。',
-  '选择器使用 Playwright 语法：CSS（#id、.class）、text=登录、role=button[name="搜索"]；不确定时先用 browser_snapshot 查看页面结构。',
+  'Use only the aio_tabs tools for the browser. Each tab records the task that created it: only that task may act on it (open URLs, click, fill, run scripts, close); other tasks may only view it read-only (text, HTML, page structure, screenshots).',
+  'To view another task\'s page read-only, first use browser_tab_list to find its tab ID (such as t3), then pass it as the tab parameter to a reading tool.',
+  'When checking flights, prices and the like one by one, reuse this task\'s tab: save the results you need, then change the URL; do not keep a page for each date or candidate. This task may keep at most 3 pages open at once. The browser is shared by several tasks: when memory is tight, only the page each task is currently using is guaranteed, and its other idle pages are given up to other tasks (once closed, reopen them at their original URL). When memory is tight, close your own pages that you have finished reading before continuing; do not close pages the user has taken over or pages of other tasks.',
+  'When a site requires signing in, call browser_login: first use browser_snapshot to see the sign-in form clearly, then write steps (starting from a fresh reload of the current page: open the sign-in entry, fill {{username}} into the account box and {{password}} into the password box, submit). The password manager substitutes the values the user saved and runs the steps; you never see the values. Steps that worked on this site before are reused automatically, so steps may be omitted. Then read the page and use browser_login_report to report whether it succeeded; on failure, rewrite steps based on the failed step it returns and retry, at most 3 times; if it still fails, call browser_request_human. If the user saved Google sign-in for this site, it tells you to click the Google button and which account to choose. Do not use browser_fill or browser_type to enter a password, and do not read the contents of password boxes.',
+  'When the user must act in the browser themselves, call browser_request_human with the reason and wait: CAPTCHAs, two-factor verification, QR-code sign-in, payment details, paying, placing an order, sending a message, changing account settings and other irreversible final steps, or a page that needs the user\'s judgment. Do not ask for passwords or verification codes in the conversation.',
+  'For human-verification challenges such as "press and hold to confirm you are human" (Press & Hold), sliders or checkboxes, do not keep clicking, dragging or refreshing yourself: once the verification session in a tab has been judged to be a bot, even a person pressing it later cannot pass. First use browser_tab_new to reopen the same URL in a new tab, then use browser_tab_close to close the old tab; the new tab usually passes straight away. Only if the new tab still shows the challenge, call browser_request_human to ask the user to complete it in that new tab.',
+  'After the user hands control back, read the page to confirm its current state before continuing; do not automatically redo an action whose result is uncertain; have the user check it first. You cannot read or act on a tab the user is currently operating.',
+  'Do not use the `aio browser` command line or the /v1/browser API: they act on whichever page is currently visible in the whole browser and would disrupt other tasks running in parallel.',
+  'Selectors use Playwright syntax: CSS (#id, .class), text=Sign in, role=button[name="Search"]; when unsure, use browser_snapshot to inspect the page structure first.',
 ].join('\n');
 
 // ----------------------------------------------------------------- registry
@@ -367,7 +367,7 @@ async function newTab(key, title) {
   // A task at its cap is refused before anyone's pages are closed to make room for a page it cannot open.
   const pending = openingTabs.get(key) || 0;
   if (key !== PERSON && ownTabs(key).length + pending >= MAX_TASK_TABS) {
-    throw new Error(`本任务最多同时保留 ${MAX_TASK_TABS} 个标签页。用 browser_tab_list 查看，复用已有标签页（browser_navigate 传 tab），或关闭自己已读完的页面再新建；不要关闭用户接管的页面。`);
+    throw new Error(`This task may keep at most ${MAX_TASK_TABS} tabs open at once. Check with browser_tab_list and reuse an existing tab (pass tab to browser_navigate), or close your own pages you have finished reading before opening a new one; do not close pages the user has taken over.`);
   }
   openingTabs.set(key, pending + 1);
   const browser = context.browser();
@@ -413,7 +413,7 @@ async function capture(page, { fullPage = false, quality = 70 } = {}) {
           await session.detach().catch(() => undefined);
         }
       })();
-  return Promise.race([work, new Promise((_, reject) => setTimeout(() => reject(new Error('截图超时，页面可能正在加载，请稍后再试')), 15000))]);
+  return Promise.race([work, new Promise((_, reject) => setTimeout(() => reject(new Error('Screenshot timed out; the page may still be loading, try again later')), 15000))]);
 }
 
 function ownTabs(key) {
@@ -448,7 +448,7 @@ async function currentOwn(key, title, create) {
     cursors.set(key, latest.id);
     return latest;
   }
-  if (!create) throw new Error('这个任务还没有打开标签页，请先用 browser_navigate 或 browser_tab_new。');
+  if (!create) throw new Error('This task has not opened a tab yet; use browser_navigate or browser_tab_new first.');
   return newTab(key, title);
 }
 
@@ -463,18 +463,18 @@ async function resolveTab(ctx, tabId, mode, create = false, allowHuman = false) 
     tab = registry.get(String(tabId));
     if (!tab || tab.page.isClosed()) {
       const url = reclaimed.get(String(tabId));
-      if (url) throw new Error(`标签页 ${tabId} 已为腾出内存关闭（当时停在 ${url}）。需要时用 browser_navigate 重新打开这个网址。`);
-      throw new Error(`没有标签页 ${tabId}，请先用 browser_tab_list 查看。`);
+      if (url) throw new Error(`Tab ${tabId} was closed to free memory (it was at ${url}). Reopen this URL with browser_navigate if you need it.`);
+      throw new Error(`There is no tab ${tabId}; check with browser_tab_list first.`);
     }
     if (mode === 'write' && tab.key !== ctx.key) {
-      throw new Error(`标签页 ${tab.id} 由任务「${tab.title}」创建，其他任务只能只读访问（读取正文、HTML、结构或截图）。`);
+      throw new Error(`Tab ${tab.id} was created by task "${tab.title}"; other tasks have read-only access (reading text, HTML, structure or screenshots).`);
     }
   } else {
     tab = await currentOwn(ctx.key, ctx.title, create);
   }
-  if (tab.locked) throw new Error(`密码器正在标签页 ${tab.id} 填写登录信息，稍后再试。`);
+  if (tab.locked) throw new Error(`The password manager is filling in sign-in details on tab ${tab.id}; try again shortly.`);
   if (tab.holder === 'human' && !allowHuman) {
-    throw new Error(`用户正在操作标签页 ${tab.id}，交还前不能读取或操作它。需要等用户完成时，调用 browser_request_human 说明你在等什么。`);
+    throw new Error(`The user is operating tab ${tab.id}; you cannot read or act on it until they hand it back. If you need to wait for the user to finish, call browser_request_human and say what you are waiting for.`);
   }
   tab.lastUsed = Date.now();
   // The call's own record of its tab: a call past its deadline checks this one, not the task's current tab.
@@ -599,34 +599,34 @@ const PLACEHOLDERS = new Set(['{{username}}', '{{password}}']);
 /** The agent's sign-in steps, checked; a string says what is wrong. Placeholders stand for the vault's values. */
 function loginSteps(raw) {
   if (raw === undefined || raw === null) return null;
-  if (!Array.isArray(raw) || !raw.length || raw.length > 15) return 'steps 要是 1–15 步的列表';
+  if (!Array.isArray(raw) || !raw.length || raw.length > 15) return 'steps must be a list of 1–15 steps';
   const steps = [];
   for (const [i, step] of raw.entries()) {
     const n = i + 1;
-    if (!step || typeof step !== 'object' || !STEP_ACTIONS.has(step.action)) return `第 ${n} 步的 action 只能是 click、fill、press、wait、select`;
+    if (!step || typeof step !== 'object' || !STEP_ACTIONS.has(step.action)) return `Step ${n}: action must be one of click, fill, press, wait, select`;
     const out = { action: step.action };
     if (step.selector !== undefined) {
-      if (typeof step.selector !== 'string' || !step.selector.trim() || step.selector.length > 300) return `第 ${n} 步的 selector 不对`;
+      if (typeof step.selector !== 'string' || !step.selector.trim() || step.selector.length > 300) return `Step ${n}: the selector is invalid`;
       out.selector = step.selector;
     }
-    if (['click', 'fill', 'select'].includes(step.action) && !out.selector) return `第 ${n} 步（${step.action}）要写 selector`;
+    if (['click', 'fill', 'select'].includes(step.action) && !out.selector) return `Step ${n} (${step.action}) needs a selector`;
     if (step.action === 'fill' || step.action === 'select') {
-      if (typeof step.value !== 'string' || step.value.length > 200) return `第 ${n} 步要写 value（账号密码用 {{username}}、{{password}}）`;
-      if (/\{\{/.test(step.value) && !PLACEHOLDERS.has(step.value)) return `第 ${n} 步：占位符只能是整格的 {{username}} 或 {{password}}`;
-      if (step.action === 'select' && PLACEHOLDERS.has(step.value)) return `第 ${n} 步：下拉框不能填账号密码`;
+      if (typeof step.value !== 'string' || step.value.length > 200) return `Step ${n} needs a value (use {{username}} and {{password}} for the account and password)`;
+      if (/\{\{/.test(step.value) && !PLACEHOLDERS.has(step.value)) return `Step ${n}: a placeholder must be the whole value, exactly {{username}} or {{password}}`;
+      if (step.action === 'select' && PLACEHOLDERS.has(step.value)) return `Step ${n}: a dropdown cannot be filled with the account or password`;
       out.value = step.value;
     }
     if (step.action === 'press') {
-      if (!STEP_KEYS.has(step.key)) return `第 ${n} 步的 key 只能是 ${[...STEP_KEYS].join('、')}`;
+      if (!STEP_KEYS.has(step.key)) return `Step ${n}: key must be one of ${[...STEP_KEYS].join(', ')}`;
       out.key = step.key;
     }
     if (step.action === 'wait') {
-      if (!out.selector && !(Number(step.ms) > 0)) return `第 ${n} 步（wait）要写 selector 或 ms`;
+      if (!out.selector && !(Number(step.ms) > 0)) return `Step ${n} (wait) needs a selector or ms`;
       if (step.ms !== undefined) out.ms = Math.min(10000, Math.max(0, Number(step.ms) || 0));
     }
     steps.push(out);
   }
-  if (!steps.some((s) => s.value === '{{password}}')) return 'steps 里要有一步把 {{password}} 填进密码框';
+  if (!steps.some((s) => s.value === '{{password}}')) return 'steps must include a step that fills {{password}} into the password box';
   return steps;
 }
 
@@ -1151,20 +1151,20 @@ const makeRoom = (exceptKey) => reclaimMemory('page', { need: MEM_NEED, exceptKe
 
 // -------------------------------------------------------------------- tools
 
-const clip = (text) => (text.length > MAX_TEXT ? `${text.slice(0, MAX_TEXT)}\n…（内容过长，已截断）` : text);
+const clip = (text) => (text.length > MAX_TEXT ? `${text.slice(0, MAX_TEXT)}\n… (content too long, truncated)` : text);
 const textResult = (text) => ({ content: [{ type: 'text', text: clip(String(text)) }] });
 const str = { type: 'string' };
 const num = { type: 'number' };
-const tabArg = { type: 'string', description: '标签页编号（如 t3，见 browser_tab_list）；省略时为本任务当前标签页' };
-const ownTabArg = { type: 'string', description: '本任务创建的标签页编号；省略时为本任务当前标签页' };
+const tabArg = { type: 'string', description: 'Tab ID (such as t3; see browser_tab_list); defaults to this task\'s current tab' };
+const ownTabArg = { type: 'string', description: 'ID of a tab this task created; defaults to this task\'s current tab' };
 
 async function describe(tab) {
-  return `标签页 ${tab.id}：${await tab.page.title().catch(() => '')}\n${safeUrl(tab.page)}`;
+  return `Tab ${tab.id}: ${await tab.page.title().catch(() => '')}\n${safeUrl(tab.page)}`;
 }
 
 const TOOLS = {
   browser_navigate: {
-    mode: 'write', description: '在本任务自己的标签页打开网址（没有标签页时自动新建）。', input: { url: str, tab: ownTabArg }, required: ['url'],
+    mode: 'write', description: 'Open a URL in this task\'s own tab (a tab is created automatically if there is none).', input: { url: str, tab: ownTabArg }, required: ['url'],
     run: async (ctx, a) => {
       const tab = await resolveTab(ctx, a.tab, 'write', true);
       await makeRoom(ctx.key);
@@ -1173,52 +1173,52 @@ const TOOLS = {
     },
   },
   browser_go_back: {
-    mode: 'write', description: '本任务的标签页后退一页。', input: { tab: ownTabArg },
+    mode: 'write', description: 'Go back one page in this task\'s tab.', input: { tab: ownTabArg },
     run: async (ctx, a) => { const tab = await resolveTab(ctx, a.tab, 'write'); await tab.page.goBack({ timeout: 30000 }); return textResult(await describe(tab)); },
   },
   browser_get_text: {
-    mode: 'read', description: '读取标签页的可见正文文字（可只读查看其他任务的标签页）。', input: { tab: tabArg },
+    mode: 'read', description: 'Read the visible body text of a tab (can view other tasks\' tabs read-only).', input: { tab: tabArg },
     run: async (ctx, a) => { const tab = await resolveTab(ctx, a.tab, 'read'); return textResult(`${await describe(tab)}\n\n${await tab.page.innerText('body', { timeout: 30000 })}`); },
   },
   browser_get_html: {
-    mode: 'read', description: '读取标签页（或某个选择器元素）的 HTML（可只读查看其他任务的标签页）。', input: { selector: str, tab: tabArg },
+    mode: 'read', description: 'Read the HTML of a tab (or of the element a selector matches) (can view other tasks\' tabs read-only).', input: { selector: str, tab: tabArg },
     run: async (ctx, a) => {
       const tab = await resolveTab(ctx, a.tab, 'read');
       return textResult(a.selector ? await tab.page.locator(a.selector).first().evaluate((el) => el.outerHTML) : await tab.page.content());
     },
   },
   browser_snapshot: {
-    mode: 'read', description: '标签页的无障碍结构（角色与名称），用于确定选择器（可只读查看其他任务的标签页）。', input: { tab: tabArg },
+    mode: 'read', description: 'The tab\'s accessibility structure (roles and names), used to work out selectors (can view other tasks\' tabs read-only).', input: { tab: tabArg },
     run: async (ctx, a) => { const tab = await resolveTab(ctx, a.tab, 'read'); return textResult(`${await describe(tab)}\n\n${await tab.page.locator('body').ariaSnapshot({ timeout: 30000 })}`); },
   },
   browser_screenshot: {
-    mode: 'read', description: '截取标签页，返回图片并保存为文件；full_page=true 截整页（可只读查看其他任务的标签页）。', input: { full_page: { type: 'boolean' }, tab: tabArg },
+    mode: 'read', description: 'Take a screenshot of a tab, returning the image and saving it as a file; full_page=true captures the whole page (can view other tasks\' tabs read-only).', input: { full_page: { type: 'boolean' }, tab: tabArg },
     run: async (ctx, a) => {
       const tab = await resolveTab(ctx, a.tab, 'read');
       fs.mkdirSync(OUTPUT_DIR, { recursive: true });
       const file = path.join(OUTPUT_DIR, `tab-${tab.id}-${Date.now()}-${crypto.randomBytes(3).toString('hex')}.jpg`);
       const data = await capture(tab.page, { fullPage: Boolean(a.full_page) });
       fs.writeFileSync(file, data);
-      return { content: [{ type: 'image', data: data.toString('base64'), mimeType: 'image/jpeg' }, { type: 'text', text: `${await describe(tab)}\n截图已保存：${file}` }] };
+      return { content: [{ type: 'image', data: data.toString('base64'), mimeType: 'image/jpeg' }, { type: 'text', text: `${await describe(tab)}\nScreenshot saved: ${file}` }] };
     },
   },
   browser_save_image: {
     mode: 'read',
-    description: '把网页上的商品图存进工作区，给回答里的商品卡片和图文混排用。在商品页上只给 path：自动存这一页的商品主图（页面声明的 og:image，没有就取页面上最大的图片）。在搜索结果等列表页上用 selector 指向那件商品的图片元素：元素是图片或含有图片就下载原图，否则截取这个元素。也可以给 url。都以这个标签页的身份（Cookie、Referer）下载，不必也不要手抄图片网址。path 是保存位置：工作区内的绝对路径，以 .jpg/.png/.webp 结尾，放在本任务目录里。返回保存的路径，回答里直接引用它（可只读查看其他任务的标签页）。',
-    input: { path: { type: 'string', description: '保存到的绝对路径，例如 /home/gem/workspace/tasks/<任务目录>/saros-10r.jpg' }, selector: { type: 'string', description: '要截取的元素（Playwright 选择器）' }, url: { type: 'string', description: '要下载的图片地址（可以是相对地址）' }, tab: tabArg },
+    description: 'Save a product picture from a web page into the workspace, for product cards and mixed text-and-image layouts in the answer. On a product page, give only path: the page\'s main product image is saved automatically (the og:image the page declares, otherwise the largest image on the page). On a list page such as search results, use selector to point at that product\'s image element: if the element is an image or contains one, the original image is downloaded; otherwise the element itself is captured. You may also give url. Everything is downloaded as this tab (its cookies and Referer), so there is no need to copy image URLs by hand, and you should not. path is where to save: an absolute path inside the workspace ending in .jpg/.png/.webp, placed in this task\'s directory. Returns the saved path; reference it directly in the answer (can view other tasks\' tabs read-only).',
+    input: { path: { type: 'string', description: 'Absolute path to save to, for example /home/gem/workspace/tasks/<task directory>/saros-10r.jpg' }, selector: { type: 'string', description: 'Element to capture (Playwright selector)' }, url: { type: 'string', description: 'Address of the image to download (may be relative)' }, tab: tabArg },
     required: ['path'],
     run: async (ctx, a) => {
       const tab = await resolveTab(ctx, a.tab, 'read');
       const target = path.posix.normalize(String(a.path || ''));
-      if (!target.startsWith(`${WORKSPACE}/`) || !/\.(jpe?g|png|webp)$/i.test(target)) throw new Error(`path 必须是 ${WORKSPACE} 里以 .jpg、.png 或 .webp 结尾的绝对路径`);
+      if (!target.startsWith(`${WORKSPACE}/`) || !/\.(jpe?g|png|webp)$/i.test(target)) throw new Error(`path must be an absolute path inside ${WORKSPACE} ending in .jpg, .png or .webp`);
       // The picture itself, as the page would load it: its cookies and its referer (stores refuse hotlinks).
       const download = async (address) => {
         const from = new URL(String(address), tab.page.url());
-        if (!/^https?:$/.test(from.protocol)) throw new Error('url 必须是 http(s) 图片地址');
+        if (!/^https?:$/.test(from.protocol)) throw new Error('url must be an http(s) image address');
         const res = await tab.page.context().request.get(from.href, { headers: { referer: tab.page.url() }, timeout: 20000, maxRedirects: 5 });
-        if (!res.ok()) throw new Error(`图片下载失败：HTTP ${res.status()}`);
+        if (!res.ok()) throw new Error(`Image download failed: HTTP ${res.status()}`);
         const type = String(res.headers()['content-type'] || '');
-        if (!type.startsWith('image/') || type.includes('svg')) throw new Error(`这个地址返回的不是位图（${type || '未知类型'}），换主图的地址或改用 selector`);
+        if (!type.startsWith('image/') || type.includes('svg')) throw new Error(`This address did not return a raster image (${type || 'unknown type'}); use the main image's address or use selector instead`);
         return res.body();
       };
       let data;
@@ -1252,60 +1252,60 @@ const TOOLS = {
           }
           return best;
         });
-        if (!source || !/^https?:/i.test(source)) throw new Error('这一页没找到商品主图：用 selector 指向商品图片元素，或给 url');
+        if (!source || !/^https?:/i.test(source)) throw new Error('No main product image was found on this page: use selector to point at the product image element, or give url');
         data = await download(source);
       }
-      if (!data.length || data.length > MAX_SAVED_IMAGE) throw new Error(data.length ? '图片超过 8 MB' : '得到的图片是空的');
+      if (!data.length || data.length > MAX_SAVED_IMAGE) throw new Error(data.length ? 'The image is larger than 8 MB' : 'The image obtained is empty');
       fs.mkdirSync(path.dirname(target), { recursive: true });
       fs.writeFileSync(target, data);
-      return textResult(`已保存：${target}（${Math.max(1, Math.round(data.length / 1024))} KB）`);
+      return textResult(`Saved: ${target} (${Math.max(1, Math.round(data.length / 1024))} KB)`);
     },
   },
   browser_click: {
-    mode: 'write', description: '点击元素（Playwright 选择器），只能操作本任务创建的标签页。', input: { selector: str, tab: ownTabArg }, required: ['selector'],
-    run: async (ctx, a) => { const tab = await resolveTab(ctx, a.tab, 'write'); await tab.page.locator(a.selector).first().click({ timeout: 15000 }); await tab.page.waitForLoadState('domcontentloaded').catch(() => undefined); return textResult(`已点击 ${a.selector}\n${await describe(tab)}`); },
+    mode: 'write', description: 'Click an element (Playwright selector); only acts on tabs this task created.', input: { selector: str, tab: ownTabArg }, required: ['selector'],
+    run: async (ctx, a) => { const tab = await resolveTab(ctx, a.tab, 'write'); await tab.page.locator(a.selector).first().click({ timeout: 15000 }); await tab.page.waitForLoadState('domcontentloaded').catch(() => undefined); return textResult(`Clicked ${a.selector}\n${await describe(tab)}`); },
   },
   browser_fill: {
-    mode: 'write', description: '清空并填写输入框（Playwright 选择器），只能操作本任务创建的标签页。', input: { selector: str, text: str, tab: ownTabArg }, required: ['selector', 'text'],
-    run: async (ctx, a) => { const tab = await resolveTab(ctx, a.tab, 'write'); await tab.page.locator(a.selector).first().fill(a.text, { timeout: 15000 }); return textResult(`已填写 ${a.selector}`); },
+    mode: 'write', description: 'Clear and fill an input box (Playwright selector); only acts on tabs this task created.', input: { selector: str, text: str, tab: ownTabArg }, required: ['selector', 'text'],
+    run: async (ctx, a) => { const tab = await resolveTab(ctx, a.tab, 'write'); await tab.page.locator(a.selector).first().fill(a.text, { timeout: 15000 }); return textResult(`Filled ${a.selector}`); },
   },
   browser_type: {
-    mode: 'write', description: '在本任务标签页的当前焦点处逐字输入文字。', input: { text: str, tab: ownTabArg }, required: ['text'],
-    run: async (ctx, a) => { const tab = await resolveTab(ctx, a.tab, 'write'); await tab.page.keyboard.type(a.text); return textResult('已输入'); },
+    mode: 'write', description: 'Type text character by character at the current focus in this task\'s tab.', input: { text: str, tab: ownTabArg }, required: ['text'],
+    run: async (ctx, a) => { const tab = await resolveTab(ctx, a.tab, 'write'); await tab.page.keyboard.type(a.text); return textResult('Typed'); },
   },
   browser_press_key: {
-    mode: 'write', description: '在本任务的标签页按键，例如 Enter、Tab、ArrowDown、Control+A。', input: { key: str, tab: ownTabArg }, required: ['key'],
-    run: async (ctx, a) => { const tab = await resolveTab(ctx, a.tab, 'write'); await tab.page.keyboard.press(a.key); return textResult(`已按下 ${a.key}`); },
+    mode: 'write', description: 'Press a key in this task\'s tab, for example Enter, Tab, ArrowDown, Control+A.', input: { key: str, tab: ownTabArg }, required: ['key'],
+    run: async (ctx, a) => { const tab = await resolveTab(ctx, a.tab, 'write'); await tab.page.keyboard.press(a.key); return textResult(`Pressed ${a.key}`); },
   },
   browser_select: {
-    mode: 'write', description: '在下拉框中选择值（Playwright 选择器），只能操作本任务创建的标签页。', input: { selector: str, value: str, tab: ownTabArg }, required: ['selector', 'value'],
-    run: async (ctx, a) => { const tab = await resolveTab(ctx, a.tab, 'write'); await tab.page.locator(a.selector).first().selectOption(a.value, { timeout: 15000 }); return textResult(`已选择 ${a.value}`); },
+    mode: 'write', description: 'Select a value in a dropdown (Playwright selector); only acts on tabs this task created.', input: { selector: str, value: str, tab: ownTabArg }, required: ['selector', 'value'],
+    run: async (ctx, a) => { const tab = await resolveTab(ctx, a.tab, 'write'); await tab.page.locator(a.selector).first().selectOption(a.value, { timeout: 15000 }); return textResult(`Selected ${a.value}`); },
   },
   browser_hover: {
-    mode: 'write', description: '鼠标悬停到元素上（Playwright 选择器），只能操作本任务创建的标签页。', input: { selector: str, tab: ownTabArg }, required: ['selector'],
-    run: async (ctx, a) => { const tab = await resolveTab(ctx, a.tab, 'write'); await tab.page.locator(a.selector).first().hover({ timeout: 15000 }); return textResult(`已悬停 ${a.selector}`); },
+    mode: 'write', description: 'Hover the mouse over an element (Playwright selector); only acts on tabs this task created.', input: { selector: str, tab: ownTabArg }, required: ['selector'],
+    run: async (ctx, a) => { const tab = await resolveTab(ctx, a.tab, 'write'); await tab.page.locator(a.selector).first().hover({ timeout: 15000 }); return textResult(`Hovered over ${a.selector}`); },
   },
   browser_scroll: {
-    mode: 'write', description: '上下滚动本任务的标签页，dy 为像素（负数向上），默认向下一屏。', input: { dy: num, tab: ownTabArg },
-    run: async (ctx, a) => { const tab = await resolveTab(ctx, a.tab, 'write'); await tab.page.evaluate((dy) => window.scrollBy(0, dy || window.innerHeight), a.dy || 0); return textResult('已滚动'); },
+    mode: 'write', description: 'Scroll this task\'s tab up or down; dy is in pixels (negative scrolls up); defaults to one screen down.', input: { dy: num, tab: ownTabArg },
+    run: async (ctx, a) => { const tab = await resolveTab(ctx, a.tab, 'write'); await tab.page.evaluate((dy) => window.scrollBy(0, dy || window.innerHeight), a.dy || 0); return textResult('Scrolled'); },
   },
   browser_evaluate: {
-    mode: 'write', description: '在本任务的标签页执行一段 JavaScript 表达式并返回结果（可能改变页面，所以只限本任务创建的标签页）。', input: { script: str, tab: ownTabArg }, required: ['script'],
+    mode: 'write', description: 'Run a JavaScript expression in this task\'s tab and return the result (it may change the page, so only on tabs this task created).', input: { script: str, tab: ownTabArg }, required: ['script'],
     run: async (ctx, a) => { const tab = await resolveTab(ctx, a.tab, 'write'); tab.scripted = true; const value = await tab.page.evaluate(a.script, undefined, undefined, false); return textResult(typeof value === 'string' ? value : JSON.stringify(value, null, 2) ?? String(value)); },
   },
   browser_wait: {
-    mode: 'read', description: '等待：selector 出现，或 text 出现，或固定毫秒 ms（最长 60 秒）。', input: { selector: str, text: str, ms: num, tab: tabArg },
+    mode: 'read', description: 'Wait for selector to appear, or for text to appear, or for a fixed ms milliseconds (at most 60 seconds).', input: { selector: str, text: str, ms: num, tab: tabArg },
     run: async (ctx, a) => {
       const tab = await resolveTab(ctx, a.tab, 'read');
       if (a.selector) await tab.page.locator(a.selector).first().waitFor({ timeout: 60000 });
       else if (a.text) await tab.page.getByText(a.text).first().waitFor({ timeout: 60000 });
       else await tab.page.waitForTimeout(Math.min(60000, Math.max(0, a.ms || 1000)));
-      return textResult('等待完成');
+      return textResult('Wait finished');
     },
   },
   browser_request_human: {
     mode: 'write',
-    description: '请用户本人在浏览器里操作并等待交还（最长 30 分钟）：登录、验证码、二次验证、输入密码或支付信息、付款、下单、发送消息、修改账号设置等，或需要用户判断的页面。reason 用一句话告诉用户要做什么。',
+    description: 'Ask the user to act in the browser themselves and wait for them to hand it back (up to 30 minutes): signing in, CAPTCHAs, two-factor verification, entering a password or payment details, paying, placing an order, sending a message, changing account settings and so on, or a page that needs the user\'s judgment. reason tells the user in one sentence what to do.',
     input: { reason: str, tab: ownTabArg }, required: ['reason'],
     run: async (ctx, a, signal) => {
       const tab = await resolveTab(ctx, a.tab, 'write', false, true);
@@ -1313,22 +1313,22 @@ const TOOLS = {
       save();
       const outcome = await waitForHuman(tab, signal);
       if (outcome === 'released') {
-        return textResult(`用户已交还控制权。${await describe(tab)}\n用户可能已经完成操作或改变了页面，继续前先读取页面确认状态。`);
+        return textResult(`The user has handed control back. ${await describe(tab)}\nThe user may have finished the action or changed the page; read the page to confirm its state before continuing.`);
       }
       if (tab.request) { tab.request = null; save(); }
       if (outcome === 'timeout') {
-        return { content: [{ type: 'text', text: `等了 ${Math.round(HUMAN_WAIT_MS / 60000)} 分钟，用户还没有交还标签页 ${tab.id}。请结束这一轮，告诉用户需要在浏览器里做什么；用户处理后可以引用这个任务继续。` }], isError: true };
+        return { content: [{ type: 'text', text: `Waited ${Math.round(HUMAN_WAIT_MS / 60000)} minutes and the user has not handed back tab ${tab.id}. End this turn and tell the user what they need to do in the browser; once they have done it, they can reference this task to continue.` }], isError: true };
       }
-      return { content: [{ type: 'text', text: `停止等待：${outcome === 'closed' ? '标签页已关闭' : '任务已结束或被停止'}。` }], isError: true };
+      return { content: [{ type: 'text', text: `Stopped waiting: ${outcome === 'closed' ? 'the tab was closed' : 'the task has ended or was stopped'}.` }], isError: true };
     },
   },
   browser_login: {
     mode: 'write',
-    description: '用密码器登录当前网站。先用 browser_snapshot 看清登录框，再写 steps：从当前页面重新加载后开始，依次点开登录入口、把 {{username}} 填进账号框、把 {{password}} 填进密码框（必须是 type=password 的框）、提交。系统把用户保存的账号密码代进占位符执行，你看不到值。用户为这个网站记的是 Google 登录时，会告诉你点 Google 按钮、选哪个账号。没保存过时会请用户填写（最长等 30 分钟）。返回后读取页面，调用 browser_login_report 报告是否登录成功。',
+    description: 'Sign in to the current site with the password manager. First use browser_snapshot to see the sign-in form clearly, then write steps: starting after a fresh reload of the current page, open the sign-in entry, fill {{username}} into the account box, fill {{password}} into the password box (it must be a type=password box), and submit. The system substitutes the account and password the user saved for the placeholders and runs the steps; you never see the values. If the user saved Google sign-in for this site, you are told to click the Google button and which account to choose. If nothing has been saved, the user is asked to fill it in (waiting up to 30 minutes). When it returns, read the page and call browser_login_report to report whether sign-in succeeded.',
     input: {
       steps: {
         type: 'array',
-        description: '登录步骤，最多 15 步。每步 {action: click|fill|press|wait|select, selector?, value?, key?, ms?}；value 写 {{username}} 或 {{password}} 时代入密码器的值。上次在这个网站成功过的步骤会自动沿用，可以省略。',
+        description: 'Sign-in steps, at most 15. Each step is {action: click|fill|press|wait|select, selector?, value?, key?, ms?}; a value of {{username}} or {{password}} is replaced with the password manager\'s value. Steps that worked on this site last time are reused automatically, so this may be omitted.',
         items: { type: 'object', properties: { action: str, selector: str, value: str, key: str, ms: num }, required: ['action'] },
       },
       tab: ownTabArg,
@@ -1336,99 +1336,99 @@ const TOOLS = {
     run: async (ctx, a, signal) => {
       const tab = await resolveTab(ctx, a.tab, 'write', false, true);
       const site = hostOf(safeUrl(tab.page));
-      if (!site) return { content: [{ type: 'text', text: '当前标签页不是网页，先用 browser_navigate 打开要登录的网站。' }], isError: true };
+      if (!site) return { content: [{ type: 'text', text: 'The current tab is not a web page; first use browser_navigate to open the site you want to sign in to.' }], isError: true };
       if ((tab.loginTries || 0) >= MAX_LOGIN_TRIES) {
-        return { content: [{ type: 'text', text: `这个网站已经试了 ${tab.loginTries} 次都没登录上，不要再调用 browser_login：调用 browser_request_human 请用户自己在浏览器里登录，说明卡在哪一步。` }], isError: true };
+        return { content: [{ type: 'text', text: `Signing in to this site has failed ${tab.loginTries} times already. Do not call browser_login again: call browser_request_human to ask the user to sign in themselves in the browser, and say which step it got stuck on.` }], isError: true };
       }
       const steps = loginSteps(a.steps);
-      if (typeof steps === 'string') return { content: [{ type: 'text', text: `steps 不能用：${steps}。改好后再调用。` }], isError: true };
+      if (typeof steps === 'string') return { content: [{ type: 'text', text: `steps cannot be used: ${steps}. Fix them and call again.` }], isError: true };
       tab.request = { kind: 'login', site, reason: `需要登录 ${site}`, at: Date.now(), ...(steps ? { steps, url: safeUrl(tab.page) } : {}) };
       save();
       const outcome = await waitForHuman(tab, signal);
       const left = Math.max(0, MAX_LOGIN_TRIES - (tab.loginTries || 0));
-      const used = outcome && outcome.source === 'kept' ? '（用的是上次在这个网站成功的步骤）' : '';
+      const used = outcome && outcome.source === 'kept' ? ' (using the steps that worked on this site last time)' : '';
       if (outcome && outcome.login === 'submitted') {
-        return textResult(`密码器已${outcome.source === 'guess' ? '' : '按步骤'}填入账号密码并提交${used}。${await describe(tab)}\n读取页面确认是否登录成功，然后调用 browser_login_report 报告结果（成功的步骤会记下来下次用）。页面提示账号或密码错误时报告失败并告诉用户到密码器里核对；还要验证码或二次验证时调用 browser_request_human。`);
+        return textResult(`The password manager filled in the account and password${outcome.source === 'guess' ? '' : ' using the steps'} and submitted${used}. ${await describe(tab)}\nRead the page to confirm whether sign-in succeeded, then call browser_login_report to report the result (steps that succeed are remembered for next time). If the page says the account or password is wrong, report failure and tell the user to check it in the password manager; if a verification code or two-factor verification is still required, call browser_request_human.`);
       }
       if (outcome && outcome.login === 'google') {
-        const which = outcome.account ? `Google 账号 ${outcome.account}` : '浏览器里已登录的 Google 账号';
-        return textResult(`用户为 ${site} 记录的是「用 Google 登录」，用${which}。点页面上「使用 Google 登录」「Continue with Google」「Sign in with Google」之类的按钮（找不到就先点登录入口）；跳到 Google 账号选择页时选${outcome.account ? '这个账号' : '已登录的账号'}，出现授权确认就点继续。不要再调用 browser_login，也不要输入任何密码；Google 要求输入密码、验证码或二次验证时调用 browser_request_human。完成后读取页面确认已经登录。${await describe(tab)}`);
+        const which = outcome.account ? `the Google account ${outcome.account}` : 'the Google account already signed in to the browser';
+        return textResult(`The user saved "Sign in with Google" for ${site}, with ${which}. Click a button on the page such as 「使用 Google 登录」, "Continue with Google" or "Sign in with Google" (if you cannot find one, click the sign-in entry first); when Google's account chooser appears, choose ${outcome.account ? 'this account' : 'the signed-in account'}, and if an authorization confirmation appears, click continue. Do not call browser_login again, and do not enter any password; if Google asks for a password, a verification code or two-factor verification, call browser_request_human. When done, read the page to confirm you are signed in. ${await describe(tab)}`);
       }
       if (outcome && outcome.login === 'username_only') {
-        return textResult(`密码器已填入账号并进入下一步，但没有出现密码输入框。${await describe(tab)}\n读取页面确认状态，写出 steps 后再调用 browser_login。`);
+        return textResult(`The password manager filled in the account and moved to the next step, but no password box appeared. ${await describe(tab)}\nRead the page to confirm its state, write steps, then call browser_login again.`);
       }
       if (outcome && outcome.login) {
-        const why = outcome.error || (outcome.login === 'no_form' ? '页面上没有找到账号或密码输入框' : '没能填进这个页面');
+        const why = outcome.error || (outcome.login === 'no_form' ? 'no account or password box was found on the page' : 'could not fill in this page');
         return { content: [{ type: 'text', text: left > 0
-          ? `登录没有完成${used}：${why}。\n用 browser_snapshot 看清登录框，改写 steps 后再调用 browser_login（steps 从当前页面重新加载开始，要包含点开登录框的步骤）。还能再试 ${left} 次。`
-          : `登录没有完成：${why}。已经试了 ${MAX_LOGIN_TRIES} 次，不要再调用 browser_login：调用 browser_request_human 请用户自己登录，说明卡在哪一步。` }], isError: true };
+          ? `Sign-in did not complete${used}: ${why}.\nUse browser_snapshot to see the sign-in form clearly, rewrite steps, then call browser_login again (steps start from a fresh reload of the current page and must include the step that opens the sign-in form). Attempts left: ${left}.`
+          : `Sign-in did not complete: ${why}. It has been tried ${MAX_LOGIN_TRIES} times already. Do not call browser_login again: call browser_request_human to ask the user to sign in themselves, and say which step it got stuck on.` }], isError: true };
       }
       if (outcome === 'released') {
-        return textResult(`用户选择自己在浏览器里登录，并已交还控制权。${await describe(tab)}\n继续前先读取页面确认状态。`);
+        return textResult(`The user chose to sign in themselves in the browser and has handed control back. ${await describe(tab)}\nRead the page to confirm its state before continuing.`);
       }
       if (tab.request) { tab.request = null; save(); }
       if (outcome === 'timeout') {
-        return { content: [{ type: 'text', text: `等了 ${Math.round(HUMAN_WAIT_MS / 60000)} 分钟，用户还没有处理标签页 ${tab.id} 的登录。请结束这一轮，告诉用户这个网站需要登录；用户处理后可以引用这个任务继续。` }], isError: true };
+        return { content: [{ type: 'text', text: `Waited ${Math.round(HUMAN_WAIT_MS / 60000)} minutes and the user has not handled the sign-in on tab ${tab.id}. End this turn and tell the user this site needs them to sign in; once they have done it, they can reference this task to continue.` }], isError: true };
       }
-      return { content: [{ type: 'text', text: `停止等待：${outcome === 'closed' ? '标签页已关闭' : '任务已结束或被停止'}。` }], isError: true };
+      return { content: [{ type: 'text', text: `Stopped waiting: ${outcome === 'closed' ? 'the tab was closed' : 'the task has ended or was stopped'}.` }], isError: true };
     },
   },
   browser_login_report: {
     mode: 'write',
-    description: 'browser_login 之后读取页面，报告是否真的登录成功：ok=true 时这次的步骤会记下来，下次登录这个网站直接用；ok=false 时 note 写一句卡在哪（例如“提交后提示密码错误”“还停在登录框”）。',
+    description: 'After browser_login, read the page and report whether sign-in really succeeded: with ok=true the steps from this attempt are remembered and used directly the next time you sign in to this site; with ok=false, write one sentence in note about where it got stuck (for example "said the password was wrong after submitting", "still on the sign-in form").',
     input: { ok: { type: 'boolean' }, note: str, tab: ownTabArg }, required: ['ok'],
     run: async (ctx, a) => {
       const tab = await resolveTab(ctx, a.tab, 'write');
-      if (!tab.lastLogin) return { content: [{ type: 'text', text: '这个标签页最近没有用密码器登录过。' }], isError: true };
+      if (!tab.lastLogin) return { content: [{ type: 'text', text: 'This tab has not signed in with the password manager recently.' }], isError: true };
       const ok = a.ok === true;
       tab.loginReport = { ...tab.lastLogin, ok, note: String(a.note || '').slice(0, 300), at: Date.now() };
       if (ok) tab.loginTries = 0;
       else tab.loginTries = (tab.loginTries || 0) + 1;
       tab.lastLogin = null;
       save();
-      if (ok) return textResult('已记下：这个网站下次登录直接用这些步骤。');
+      if (ok) return textResult('Recorded: these steps will be used directly the next time you sign in to this site.');
       const left = Math.max(0, MAX_LOGIN_TRIES - tab.loginTries);
-      return textResult(left > 0 ? `已记下这次失败。改写 steps 后再调用 browser_login，还能再试 ${left} 次；是账号或密码错误的话，告诉用户到密码器里核对，不要重试。` : `已经试了 ${MAX_LOGIN_TRIES} 次，不要再调用 browser_login：调用 browser_request_human 请用户自己登录。`);
+      return textResult(left > 0 ? `Recorded this failure. Rewrite steps, then call browser_login again; attempts left: ${left}. If the account or password is wrong, tell the user to check it in the password manager and do not retry.` : `It has been tried ${MAX_LOGIN_TRIES} times already. Do not call browser_login again: call browser_request_human to ask the user to sign in themselves.`);
     },
   },
   browser_tab_list: {
-    mode: 'read', description: '列出标签页及其创建任务：本任务的可操作，其他任务的只读。', input: {},
+    mode: 'read', description: 'List tabs and the tasks that created them: this task\'s tabs can be acted on, other tasks\' tabs are read-only.', input: {},
     run: async (ctx) => {
       await browserContext();
       const current = cursors.get(ctx.key);
       const rows = await Promise.all([...registry.values()].filter((t) => !t.page.isClosed() && t.key !== PERSON).map(async (t) => {
         const own = t.key === ctx.key;
         // What a person is doing in a tab is theirs: not even its title or address.
-        if (t.holder === 'human') return { own, line: `${t.id === current ? '*' : ' '} [${t.id}] （用户正在操作，内容不可见） — ${own ? '本任务' : `任务「${t.title}」`}，暂不可用` };
-        const who = own ? '本任务，可操作' : `任务「${t.title}」${t.finishedAt ? '（已结束）' : ''}，只读`;
+        if (t.holder === 'human') return { own, line: `${t.id === current ? '*' : ' '} [${t.id}] (the user is operating it; contents hidden) — ${own ? 'this task' : `task "${t.title}"`}, unavailable for now` };
+        const who = own ? 'this task, can act' : `task "${t.title}"${t.finishedAt ? ' (finished)' : ''}, read-only`;
         return { own, line: `${t.id === current ? '*' : ' '} [${t.id}] ${await t.page.title().catch(() => '')} ${safeUrl(t.page)} — ${who}` };
       }));
-      if (!rows.length) return textResult('还没有任务创建的标签页。');
+      if (!rows.length) return textResult('No task has created a tab yet.');
       return textResult(rows.sort((a, b) => Number(b.own) - Number(a.own)).map((r) => r.line).join('\n'));
     },
   },
   browser_tab_new: {
-    mode: 'write', description: '为本任务新开一个标签页并切换过去，可选打开网址。', input: { url: str },
+    mode: 'write', description: 'Open a new tab for this task and switch to it, optionally opening a URL.', input: { url: str },
     run: async (ctx, a) => { const tab = await newTab(ctx.key, ctx.title); ctx.tab = tab; if (a.url) await tab.page.goto(a.url, { waitUntil: 'domcontentloaded', timeout: 60000 }); return textResult(await describe(tab)); },
   },
   browser_tab_select: {
-    mode: 'write', description: '切换到本任务创建的某个标签页。', input: { tab: ownTabArg }, required: ['tab'],
+    mode: 'write', description: 'Switch to a tab this task created.', input: { tab: ownTabArg }, required: ['tab'],
     run: async (ctx, a) => { const tab = await resolveTab(ctx, a.tab, 'write'); cursors.set(ctx.key, tab.id); return textResult(await describe(tab)); },
   },
   browser_tab_close: {
-    mode: 'write', description: '关闭本任务创建的某个标签页（默认当前标签页）。', input: { tab: ownTabArg },
-    run: async (ctx, a) => { const tab = await resolveTab(ctx, a.tab, 'write'); await closeKeepingOne([tab.page]); return textResult(`已关闭 ${tab.id}`); },
+    mode: 'write', description: 'Close a tab this task created (the current tab by default).', input: { tab: ownTabArg },
+    run: async (ctx, a) => { const tab = await resolveTab(ctx, a.tab, 'write'); await closeKeepingOne([tab.page]); return textResult(`Closed ${tab.id}`); },
   },
   browser_tabs_cleanup: {
     mode: 'write',
-    description: '清理浏览器：关闭所有已结束任务的标签页，以及不属于任何任务的页面（如空白页）。用户要求关闭/清理标签页时使用。进行中任务的标签页和用户正在操作的页面不会被关闭；浏览器总会保留一个空白页。',
+    description: 'Clean up the browser: close all tabs of finished tasks, plus pages that belong to no task (such as blank pages). Use it when the user asks to close or clean up tabs. Tabs of tasks in progress and pages the user is operating are not closed; the browser always keeps one blank page.',
     input: {},
     run: async () => {
       const finished = finishedTabs();
       const stray = await strayPages();
       const closed = await closeKeepingOne([...finished.map((t) => t.page), ...stray]);
       const kept = [...registry.values()].filter((t) => !t.page.isClosed() && !finished.includes(t));
-      return textResult(`已关闭 ${closed} 个页面。${kept.length ? `保留 ${kept.length} 个（进行中任务或用户正在操作）：${kept.map((t) => `${t.id}「${t.title}」`).join('、')}` : '没有保留其他任务的页面。'}`);
+      return textResult(`Closed ${closed} page(s). ${kept.length ? `Kept ${kept.length} (tasks in progress or pages the user is operating): ${kept.map((t) => `${t.id} "${t.title}"`).join(', ')}` : 'No other tasks\' pages were kept.'}`);
     },
   },
 };
@@ -1457,7 +1457,7 @@ function serialized(key, fn) {
 function bounded(ctx, run) {
   let timer;
   const late = new Promise((_, reject) => { timer = setTimeout(async () => {
-    let note = '请稍后重试，或换一种做法。';
+    let note = 'Try again later, or take a different approach.';
     const tab = ctx.tab && registry.get(ctx.tab.id) === ctx.tab && ctx.tab.holder !== 'human' ? ctx.tab : null;
     const target = tab && tab.targetId && (await fetch(`${CDP}/json/list`, { signal: AbortSignal.timeout(5000) }).then((r) => r.json()).catch(() => [])).find((t) => t.id === tab.targetId);
     // Probing takes seconds: a person may have taken the tab over meanwhile.
@@ -1465,16 +1465,16 @@ function bounded(ctx, run) {
       await fetch(`${CDP}/json/close/${target.id}`, { signal: AbortSignal.timeout(5000) }).catch(() => undefined);
       // A hung page reports its close late: forget it now so nobody picks it again.
       forget(tab);
-      note = `标签页 ${tab.id} 已无响应，已关闭；需要时用 browser_navigate 重新打开。`;
+      note = `Tab ${tab.id} stopped responding and was closed; reopen it with browser_navigate if you need it.`;
     }
-    reject(new Error(`操作超过 ${Math.round(TOOL_DEADLINE_MS / 1000)} 秒没有完成。${note}`));
+    reject(new Error(`The action did not finish within ${Math.round(TOOL_DEADLINE_MS / 1000)} seconds. ${note}`));
   }, TOOL_DEADLINE_MS); });
   return Promise.race([run, late]).finally(() => clearTimeout(timer));
 }
 
 async function callTool(ctx, name, args, signal) {
   const tool = TOOLS[name];
-  if (!tool) return { content: [{ type: 'text', text: `未知工具：${name}` }], isError: true };
+  if (!tool) return { content: [{ type: 'text', text: `Unknown tool: ${name}` }], isError: true };
   try {
     return await serialized(ctx.key, async () => {
       // The dispatcher's resource prediction is not an access grant. A task can
@@ -1485,7 +1485,7 @@ async function callTool(ctx, name, args, signal) {
           signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(120000)]) : AbortSignal.timeout(120000),
         });
         await ready.body?.cancel();
-        if (!ready.ok) throw new Error('浏览器暂未就绪，自动恢复失败；请稍后重试。不是浏览器授权缺失。');
+        if (!ready.ok) throw new Error('The browser is not ready yet and automatic recovery failed; try again later. This is not a missing browser permission.');
       }
       touchTask(ctx.key, ctx.title);
       // Waiting for a person has its own clock; everything else is bounded, and a
@@ -1497,8 +1497,8 @@ async function callTool(ctx, name, args, signal) {
     });
   } catch (err) {
     const message = err && err.message ? err.message : String(err);
-    const hint = /crashed/i.test(message) ? '\n页面被系统结束（多半是内存不够），已关闭它并腾出闲置页面的内存；用 browser_navigate 重新打开再试一次。' : '';
-    return { content: [{ type: 'text', text: `浏览器操作失败：${message}${hint}` }], isError: true };
+    const hint = /crashed/i.test(message) ? '\nThe page was killed by the system (most likely out of memory); it has been closed and memory from idle pages freed; reopen it with browser_navigate and try again.' : '';
+    return { content: [{ type: 'text', text: `Browser action failed: ${message}${hint}` }], isError: true };
   }
 }
 
