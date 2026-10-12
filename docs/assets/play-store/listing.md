@@ -19,24 +19,15 @@
 
 AI 回复可能有误，仅供一般参考。一站不是医疗设备，不提供诊断、治疗或预防疾病的功能。医疗问题请咨询合格医生，法律和投资问题请咨询相应专业人员。
 
-## English short description
+## 本地化来源与生成
 
-Give tasks to AI, follow progress, review results and continue in one workspace.
-
-## English full description
-
-AIO Agent is your AI workspace. Describe what you need in the main conversation, follow task progress and results, and add further instructions when needed.
-
-• Main conversation: submit tasks, review results and continue related work.
-• Task browser: see the pages used by the AI, take over when needed, then return control.
-• Workspace: access task files, generated documents and reference materials.
-• Voice input: activate the microphone to transcribe speech into a draft you can review before sending.
-• Google sign-in: sign in or register with Google. First-time registration requires an invitation code; existing accounts can sign in directly.
-• Account and content support: report an AI response in the app, or request account and associated-data deletion through Account & privacy.
-
-An invitation code is required for first-time registration. An internet connection is required. Tasks depend on the AIO Agent service and configured AI providers.
-
-AI responses may be inaccurate and provide general information only. AIO Agent is not a medical device and does not diagnose, treat or prevent medical conditions. Consult a qualified doctor for medical advice, and qualified professionals for legal or investment advice.
+- 简体中文默认文案见上文。
+- 英语（美国）`en-US`、西语（拉丁美洲）`es-419`、繁体中文 `zh-TW` 的完整文案分别在对应目录的 `listing.json`；这些文件是各语言商店文案的来源。
+- 每种新增语言都有 `feature.svg` 和真实 UI 演示截图。应用 UI 的英语代码为 `en`，西语为 `es`，繁体为 `zh-TW`；商店区域代码与 UI 代码分别管理。
+- 从项目根执行 `npm run build`，然后 `npx tsx scripts/play-store.mts /absolute/output/directory`，输出 1024×500 宣传图和两张 1080×1920 截图。临时输出应放 workspace `.scratch/artifacts/`。
+- 生成器使用隔离浏览器和虚构任务，不登录真实账号；登录截图不显示语言选择器，语言与账户隐私入口都在配置页。
+- 宣传图和包含 AI 演示回复的主会话截图须通过 Play 的 AI 资源声明添加标签；图库的“管理标签”仅供内部组织，不能替代公开声明。
+- 本地生成、上传保存、提交审核和批准上线是不同状态，以 Play Console 发布概览为准。
 
 ## 素材与配置
 
