@@ -87,9 +87,12 @@ Google OAuth 仍处于 testing audience，仅有现有测试用户。支持邮�
 用户已明确授权使用该地址创建免费 Google 账号，并临时授予 `roles/oauthconfig.editor` 项目权限，完成后撤回；
 此前新建账号的自动审批拒绝已由该授权解除。账号名称 `Clawpage Feedback` 已填写，性别选“不愿透露”；
 用户提供并授权提交生日后，已选择使用现有 `feedback@clawpage.ai` 邮箱，并通过用户提供的邮件验证码完成验证。
-注册目前停在密码设置页，新密码的填写、确认和提交由用户本人完成；注册条款须另行确认，账号尚未创建。
-IAM 授权表单已准备该地址和 OAuth Config Editor 角色，尚未保存。此角色可管理 OAuth 配置和客户端密钥，
-不得扩大到其他项目或整个项目的 Owner/Editor。
+用户亲自完成密码和后续注册，Google 账号页已确认该身份已创建并登录（当前浏览器 `authuser=4`；该索引不可假定跨会话稳定）。
+注册前 IAM 表单缓存仍把邮箱判为无效；刷新后重新添加主体，已成功保存项目级 OAuth Config Editor 角色，原 Owner 保留。
+此角色可管理 OAuth 配置和客户端密钥，不扩大到其他项目或整个项目的 Owner/Editor，配置完成后必须撤回。
+
+新身份首次进入 Google Cloud 的初始化页面要求接受 Google Cloud Platform、适用服务/API及条件适用的入门级项目条款。
+已向用户请求这份独立协议的当次确认，尚未勾选或点击“同意并继续”。公开支持邮箱和 audience 尚未修改，Play 仍有 11 项变更未送审。
 
 取得相应授权并完成注册后，使用该身份登录 Cloud Console、重新检查并选择支持邮箱、保存品牌，完成后撤回临时项目权限。
 再公开 OAuth audience 并验证非测试用户登录/首次邀请，按已有发布授权提交 Play 的 11 项变更，核对实际审核状态；
