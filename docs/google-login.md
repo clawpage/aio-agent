@@ -36,8 +36,11 @@ Android 在打开系统浏览器前及 Activity 暂停时调用 `CookieManager.f
 
 ## 2026-10-11 实际部署与真机验收
 
-Google Cloud 专用项目 `main-voltage-511319-c3` 已创建 Web 登录客户端并启用上述回调。凭据存于私有 `var/google-auth/`；当前 OAuth 仍为测试状态，仅加入开发者本人测试账号，正式开放还需补全品牌/隐私资料并切换发布状态。
+Google Cloud 专用项目 `main-voltage-511319-c3` 已创建 Web 登录客户端并启用上述回调。凭据存于私有 `var/google-auth/`。
+品牌主页、隐私与条款 URL 已保存，支持邮箱为 `feedback@clawpage.ai`；OAuth Audience 已切换为 Production。
+配置支持邮箱时给专用 Google 账号的项目级 OAuth Config Editor 临时权限已撤回，原 Owner 保留。
 
 已有 compose 的 control 与 ui 两层已刷新并健康，公共双域 smoke 39/39 通过。Google 首次注册、无效邀请码拒绝、有效邀请码一次性消费、普通成员权限、再次登录免邀请码均在连接的 Galaxy Z Flip6（Android 16、正式签名 `ai.clawpage.agent`）实际验证。授权时结束 App 进程，再由真实 Google 回调冷启动 App，能直接进入主会话；随后独立结束/重启 App 仍保留登录。Web UI 的 Google 彩色标志及移动布局已在该手机检查。
 
-这不代表 Play 已发布，亦不代表 iOS 真机 Google 回调或其他 Google 账号已经验收。
+新支持账号另已完成真实 Google 授权，服务端核对流程到达原生 `handoff`；桌面测试没有完成深链返回及邀请码 UI，未创建 AIO 成员。
+Play 正式版及资料的 11 项变更已提交，当前正在审核、尚未上线；这不代表 iOS 真机 Google 回调或 Play 分发安装已经验收。
