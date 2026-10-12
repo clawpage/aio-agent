@@ -30,6 +30,12 @@ page cannot load.
   Regression: `tests/e2e/device-links.spec.ts`; native panel acceptance also requires
   installing the new shell. No remote Tauri capability is enabled.
 
+- Policy and account-deletion links on sign-in and account dialogs use the same
+  system browser bridge. This preserves the App WebView, session and unsent form
+  when the user closes the browser. Without the bridge, a `target="_blank"` page
+  can replace the Android WebView and Back exits the App. Regression:
+  `tests/e2e/support.spec.ts`; the shared UI fix needs a UI deploy, not a new shell.
+
 - iOS: the web view covers the whole screen (`contentInsetAdjustmentBehavior = never`,
   `src-tauri/src/lib.rs`); the console reads all four `env(safe-area-inset-*)`
   into `--safe-top/right/bottom/left` in `src/ui/src/styles.css`.
@@ -154,6 +160,14 @@ Cookie persistence before browser launch, the real callback cold-started the App
 and entered the member inbox. A separate process restart retained the session.
 The deployed sign-in page's Google logo and layout were visually checked on this
 phone. Google Cloud is still in testing mode; Play submission is pending.
+
+The shared UI policy-link fix (`59d5e06`) was then deployed and checked on this
+same signed package. A cold restart retained the member session. Privacy and
+account-deletion pages opened in Chrome Custom Tabs; one Android Back returned
+to the original account dialog without leaving the App. No production report
+or deletion request was submitted. Desktop/mobile Chromium and mobile WebKit
+support regressions passed 15/15; these browser tests do not establish iOS
+physical-device acceptance.
 
 ## Initial acceptance (2026-10-11)
 
