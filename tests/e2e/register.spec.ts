@@ -6,13 +6,13 @@ const overflow = (page: Page) => page.evaluate(() => document.documentElement.sc
 const inbox = (page: Page) => page.getByRole("heading", { name: "主会话", exact: true });
 
 /** Signed out until the register call succeeds; then the session belongs to the new account. */
-async function signedOut(page: Page, opts: { inviteEmail?: string | null; fail?: { status: number; error: string; message: string } } = {}) {
+async function signedOut(page: Page, opts: { requiresInvite?: boolean; inviteEmail?: string | null; fail?: { status: number; error: string; message: string } } = {}) {
   await mockConsole(page, { conversations: [] });
   await page.route("**/api/main*", (r) => r.fulfill({ json: { mode: "tasks", tasks: [], nextBefore: null } }));
   let user: string | null = null;
   const registers: Array<Record<string, string>> = [];
   await page.route("**/api/auth/session", (r) =>
-    r.fulfill({ json: user ? { authenticated: true, username: user, role: "member" } : { authenticated: false, username: null, inviteEmail: opts.inviteEmail === undefined ? "invitation@clawpage.ai" : opts.inviteEmail } }),
+    r.fulfill({ json: user ? { authenticated: true, username: user, role: "member" } : { authenticated: false, username: null, registrationRequiresInvite: opts.requiresInvite ?? true, inviteEmail: opts.inviteEmail === undefined ? "invitation@clawpage.ai" : opts.inviteEmail } }),
   );
   await page.route("**/api/auth/register", async (r) => {
     const body = r.request().postDataJSON();
@@ -65,7 +65,7 @@ test("login and register switch in place, and the address follows", async ({ pag
   await signedOut(page, { inviteEmail: null });
   await page.goto("/");
   await expect(page.getByLabel("确认密码", { exact: true })).toHaveCount(0);
-  await page.getByRole("button", { name: "用邀请码注册" }).click();
+  await page.getByRole("button", { name: "注册账号" }).click();
   await expect(page.getByLabel("邀请码", { exact: true })).toBeVisible();
   // Without a configured address the form points at the administrator instead of a dead link.
   await expect(page.getByText("邀请码向管理员索取")).toBeVisible();
@@ -74,6 +74,35 @@ test("login and register switch in place, and the address follows", async ({ pag
   await expect(page.getByRole("button", { name: "登录", exact: true })).toBeVisible();
   await expect(page.getByLabel("邀请码", { exact: true })).toHaveCount(0);
   expect(new URL(page.url()).pathname).toBe("/login");
+});
+
+test("open registration hides the invite and signs in without one", async ({ page }, info) => {
+  const registers = await signedOut(page, { requiresInvite: false });
+  await page.goto("/register");
+  await expect(page.getByText("前 20 个账号无需邀请码注册", { exact: false })).toBeVisible();
+  await expect(page.getByLabel("邀请码", { exact: true })).toHaveCount(0);
+  await page.getByLabel("账号", { exact: true }).fill("open-member");
+  await page.getByLabel("密码", { exact: true }).fill("open-password-123");
+  await page.getByLabel("确认密码", { exact: true }).fill("open-password-123");
+  await page.screenshot({ path: info.outputPath("open-register.png"), fullPage: true });
+  expect(await overflow(page)).toBeLessThanOrEqual(0);
+  await page.getByRole("button", { name: "注册并登录" }).click();
+  await expect(inbox(page)).toBeVisible();
+  expect(registers).toEqual([{ username: "open-member", password: "open-password-123", inviteCode: "" }]);
+});
+
+test("if the last place is taken, the form asks for an invite without losing the draft", async ({ page }) => {
+  await signedOut(page, { requiresInvite: false, fail: { status: 400, error: "invite_required", message: "quota reached" } });
+  await page.goto("/register");
+  await page.getByLabel("账号", { exact: true }).fill("late-member");
+  await page.getByLabel("密码", { exact: true }).fill("open-password-123");
+  await page.getByLabel("确认密码", { exact: true }).fill("open-password-123");
+  await page.getByRole("button", { name: "注册并登录" }).click();
+  await expect(page.getByText("免邀请码注册名额已满，请输入邀请码。", { exact: true })).toBeVisible();
+  await expect(page.getByLabel("邀请码", { exact: true })).toBeVisible();
+  await expect(page.getByLabel("账号", { exact: true })).toHaveValue("late-member");
+  await expect(page.getByLabel("确认密码", { exact: true })).toHaveValue("open-password-123");
+  await expect(page.getByRole("button", { name: "注册并登录" })).toBeDisabled();
 });
 
 test("the owner generates, copies and revokes invite codes on the config page", async ({ page, context }, info) => {

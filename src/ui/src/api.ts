@@ -156,7 +156,7 @@ export const api = {
   taskBrowserLastShotUrl: (id: string, at: number) => apiUrl(`/api/tasks/${encodeURIComponent(id)}/browser/last-shot?at=${at}`),
   taskBrowserReopen: (id: string) => request<{ tab: import("./types").TaskTab }>(`/api/tasks/${encodeURIComponent(id)}/browser/reopen`, { method: "POST", body: {} }),
   taskBrowserScreenshotUrl: (id: string, tab: string, at: number) => apiUrl(`/api/tasks/${encodeURIComponent(id)}/browser/screenshot?tab=${encodeURIComponent(tab)}&at=${at}`),
-  session: (signal?: AbortSignal) => request<{ authenticated: boolean; role?: "owner" | "member"; username: string | null; expiresAt?: number; secure?: boolean; inviteEmail?: string | null }>("/api/auth/session", {signal,cache:"no-store"}),
+  session: (signal?: AbortSignal) => request<{ authenticated: boolean; role?: "owner" | "member"; username: string | null; expiresAt?: number; secure?: boolean; inviteEmail?: string | null; registrationRequiresInvite?: boolean }>("/api/auth/session", {signal,cache:"no-store"}),
   login: (password: string, username = "owner") => request<{ ok: boolean; username: string; expiresAt: number }>("/api/auth/login", { method: "POST", body: { password, username } }),
   register: (account: { username: string; password: string; inviteCode: string }) => request<{ ok: boolean; username: string; expiresAt: number }>("/api/auth/register", { method: "POST", body: account }),
   googlePending: (signal?: AbortSignal) => request<{enabled: boolean; pending: {email: string} | null}>("/api/auth/google/pending", {cache: "no-store", signal}),

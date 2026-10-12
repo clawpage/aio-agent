@@ -43,8 +43,8 @@ it("registers with a one-time invite code, signs the new member in, and burns th
   clearFailures();
 });
 
-it("refuses without a valid code and never creates the account", async () => {
-  for (const inviteCode of ["", "AAAA-BBBB-CCCC"]) {
+it("refuses an invalid supplied code even while registration is open", async () => {
+  for (const inviteCode of ["AAAA-BBBB-CCCC"]) {
     const res = await register({ username: "mallory", password: "mallory-password-123", inviteCode });
     expect(res.status).toBe(400);
   }
@@ -91,4 +91,26 @@ it("locks out an address that keeps guessing codes", async () => {
 it("rejects cross-site registration", async () => {
   const res = await h.request("/api/auth/register", { method: "POST", headers: { ...json, origin: "https://evil.example" }, body: JSON.stringify({ username: "x1", password: "x-password-1234", inviteCode: await issue() }) });
   expect(res.status).toBe(403);
+});
+
+it("registers without an invite while fewer than 20 accounts exist", async () => {
+  expect(await (await h.request("/api/auth/session")).json()).toMatchObject({ registrationRequiresInvite: false });
+  const res = await register({ username: "open-member", password: "open-password-123" });
+  expect(res.status).toBe(200);
+  expect(await res.json()).toMatchObject({ role: "member", username: "open-member" });
+});
+
+it("counts all existing accounts and requires a valid invite at 20", async () => {
+  const count = () => (h.ctx.db.prepare("SELECT COUNT(*) AS n FROM owners").get() as {n: number}).n;
+  while (count() < 20) {
+    const n = count();
+    h.ctx.db.prepare("INSERT INTO owners SELECT ?,?, 'member', password_hash,password_salt,password_params,created_at FROM owners WHERE role='owner'").run(`seed-${n}`, `seed-${n}`);
+  }
+  expect(await (await h.request("/api/auth/session")).json()).toMatchObject({ registrationRequiresInvite: true });
+  const refused = await register({ username: "needs-invite", password: "open-password-123" });
+  expect(await refused.json()).toMatchObject({ error: "invite_required" });
+  expect(refused.status).toBe(400);
+  expect(count()).toBe(20);
+  expect((await register({ username: "needs-invite", password: "open-password-123", inviteCode: await issue() })).status).toBe(200);
+  expect(count()).toBe(21);
 });

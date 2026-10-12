@@ -49,7 +49,7 @@ const activate = (client: string, username: string, inviteCode: string) => h.req
   method: "POST", headers: {...json, cookie: client}, body: JSON.stringify({username, inviteCode}),
 });
 
-it("requires an invite after verified Google sign-in, before any session or sandbox access", async () => {
+it("requires registration after verified Google sign-in, before any session or sandbox access", async () => {
   const flow = await begin();
   const count = h.ctx.db.prepare("SELECT count(*) AS n FROM owners").get();
   const result = await callback(flow, "stable-subject");
@@ -58,7 +58,7 @@ it("requires an invite after verified Google sign-in, before any session or sand
   expect(h.ctx.db.prepare("SELECT count(*) AS n FROM owners").get()).toEqual(count);
   expect((await h.request("/api/status", {headers: {cookie: flow.client}})).status).toBe(401);
   expect(await (await h.request("/api/auth/google/pending", {headers: {cookie: flow.client}})).json()).toEqual({enabled: true, pending: {email: "google@example.com"}});
-  expect((await activate(flow.client, "google-alice", "")).status).toBe(400);
+  expect((await activate(flow.client, "google-alice", "BAD-INVITE")).status).toBe(400);
   const code = createInvite(h.ctx.db).code;
   const registered = await activate(flow.client, "google-alice", code);
   expect(registered.status).toBe(200);
@@ -162,4 +162,33 @@ it("refuses expired, cancelled and cross-site registration flows, and rate limit
   const fresh = await begin(); await callback(fresh);
   await h.request("/api/auth/google/cancel", {method: "POST", headers: {...json, cookie: fresh.client}});
   expect((await activate(fresh.client, "cancelled-google", createInvite(h.ctx.db).code)).status).toBe(401);
+});
+
+it("registers a verified Google identity without an invite while places remain", async () => {
+  const flow = await begin(); await callback(flow);
+  const result = await activate(flow.client, "open-google", "");
+  expect(result.status).toBe(200);
+  expect(await result.json()).toMatchObject({ username: "open-google", role: "member" });
+  expect((await h.request("/api/settings", { headers: { cookie: cookies(result) } })).status).toBe(403);
+});
+
+it("atomically gives one remaining place to only one of a password and Google registration", async () => {
+  const count = () => (h.ctx.db.prepare("SELECT COUNT(*) AS n FROM owners").get() as {n: number}).n;
+  while (count() < 19) {
+    const n = count();
+    h.ctx.db.prepare("INSERT INTO owners SELECT ?,?, 'member', password_hash,password_salt,password_params,created_at FROM owners WHERE role='owner'").run(`seed-${n}`, `seed-${n}`);
+  }
+  const flow = await begin(); await callback(flow);
+  const results = await Promise.all([
+    activate(flow.client, "last-google", ""),
+    h.request("/api/auth/register", { method: "POST", headers: json, body: JSON.stringify({ username: "last-password", password: "open-password-123" }) }),
+  ]);
+  expect(results.map(r => r.status).sort()).toEqual([200, 400]);
+  const refused = results.find(r => r.status === 400)!;
+  expect(await refused.json()).toMatchObject({ error: "invite_required" });
+  expect(count()).toBe(20);
+  const next = await begin(); await callback(next);
+  expect((await activate(next.client, "after-limit", "")).status).toBe(400);
+  expect((await activate(next.client, "after-limit", createInvite(h.ctx.db).code)).status).toBe(200);
+  expect(count()).toBe(21);
 });

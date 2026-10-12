@@ -5,7 +5,7 @@ export const auth: typeof zh = {
   brand: "一站",
   heading: { login: "把事情交給一站", register: "開啟你的一站", invite: "只差一個邀請碼" },
   passwordAlternative: "或使用帳號密碼",
-  intro: {
+  intro: { openRegistration: "前 20 個帳號無需邀請碼註冊；名額滿後需使用邀請碼。",
     login: "登入後，繼續與你的 AI 助理一起工作。",
     register: "建立帳號，讓你的 AI 助理開始工作。",
   },
@@ -20,7 +20,7 @@ export const auth: typeof zh = {
     inviteCode: "邀請碼",
   },
   passwordMismatch: "兩次輸入的密碼不一樣",
-  google: {
+  google: { activateOpen: "註冊並進入",
     button: "使用 Google 登入 / 註冊",
     inviteIntro: "首次使用需要邀請碼，驗證後即可進入。",
     verified: "Google 帳號已驗證",
@@ -31,7 +31,7 @@ export const auth: typeof zh = {
     cancel: "換一個登入方式",
     retry: "重新登入 Google",
   },
-  invite: {
+  invite: { quotaReached: "免邀請碼註冊名額已滿，請輸入邀請碼。",
     /** Split around the mailto link. */
     askBefore: "需要邀請碼？聯絡 ",
     askAfter: " 申請。",
@@ -49,7 +49,7 @@ export const auth: typeof zh = {
     haveAccount: "已有帳號？",
     noAccount: "還沒有帳號？",
     toLogin: "去登入",
-    toRegister: "用邀請碼註冊",
+    toRegister: "註冊帳號",
   },
   foreign: {
     title: (owner: string) => `這是 ${owner} 的頁面`,

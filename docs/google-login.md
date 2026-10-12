@@ -1,6 +1,6 @@
-# Google 登录与首次邀请码
+# Google 登录与首次注册
 
-Google 登录/注册与原有密码登录并存。Google 首次认证只得到 10 分钟有效的待注册身份；用户选定账号并提交有效的一次性邀请码后，才原子地创建 `member`、关联 Google 身份、消费邀请码并签发应用会话。待注册身份不能调用成员 API，也不会创建沙箱。之后同一 Google `sub` 直接登录，不再索要邀请码。
+Google 登录/注册与原有密码登录并存。Google 首次认证只得到 10 分钟有效的待注册身份；用户选定账号后才创建 `member` 并关联 Google 身份、签发应用会话。现有账户总数不足 20 时无需邀请码；达到 20 后须提交有效的一次性邀请码。总数包含 owner、管理员创建的成员和审核账户。人数检查、建号、身份关联及可选的邀请码消费在同一写事务内，并发不能超出免邀请码名额。待注册身份不能调用成员 API，也不会创建沙箱。之后同一 Google `sub` 直接登录，不再索要邀请码。
 
 Google 邮箱用于展示，不能据此自动关联既有账号或获得 owner 权限。既有密码账号不会被自动迁移；目前没有账号合并或 Google 绑定入口。OAuth-only 成员的密码为不公开的随机值，使用 Google 登录。
 
@@ -18,7 +18,7 @@ Google 邮箱用于展示，不能据此自动关联既有账号或获得 owner 
 
 服务端使用 Google 官方 `google-auth-library` 验证 ID token 的签名、issuer、audience，并核对 nonce、授权方及已验证邮箱。授权码采用 PKCE；state 与浏览器 HttpOnly Cookie 绑定，Web 回调还必须匹配发起浏览器。授权码回调在网络请求前一次性认领，不能重放。Google 错误不会直接返回前端或写日志。访问/刷新令牌不落库。
 
-Android 的 `ai.clawpage.agent` 用 Custom Tab 打开授权入口；iOS 用 AuthenticationServices。原生回调为 `aioagent://auth?ticket=...`。ticket 只能与发起 App WebView 持有的 HttpOnly Cookie 配对消费一次，单独拦截深链不能登录；待邀请码阶段只能读取本人的待注册邮箱。桥接回调仅交给 `https://agent.clawpage.ai` 主页面。临时 state、PKCE verifier 与 nonce 在 10 分钟后失效，下一次登录发起时清理；成功或取消立即删除相应记录。
+Android 的 `ai.clawpage.agent` 用 Custom Tab 打开授权入口；iOS 用 AuthenticationServices。原生回调为 `aioagent://auth?ticket=...`。ticket 只能与发起 App WebView 持有的 HttpOnly Cookie 配对消费一次，单独拦截深链不能登录；待注册阶段只能读取本人的待注册邮箱。桥接回调仅交给 `https://agent.clawpage.ai` 主页面。临时 state、PKCE verifier 与 nonce 在 10 分钟后失效，下一次登录发起时清理；成功或取消立即删除相应记录。
 
 Android 在打开系统浏览器前及 Activity 暂停时调用 `CookieManager.flush()`，保存发起登录的 HttpOnly Cookie。仅把 Cookie 留在 WebView 内存里会使授权期间进程被结束后的 ticket 兑换失败；不能通过取消 Cookie 绑定来修复。
 

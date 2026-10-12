@@ -1,13 +1,13 @@
 import {test, expect, type Page} from "@playwright/test";
 import {mockConsole} from "./mock-api";
 
-async function setup(page: Page, pending: boolean) {
+async function setup(page: Page, pending: boolean, requiresInvite = true) {
   await mockConsole(page, {conversations: []});
   await page.route("**/api/main*", r => r.fulfill({json: {mode: "tasks", tasks: [], nextBefore: null}}));
   let authenticated = false;
   let google = pending ? {email: "member@example.com"} : null;
   const registrations: unknown[] = [];
-  await page.route("**/api/auth/session", r => r.fulfill({json: {authenticated, username: authenticated ? "google-member" : null}}));
+  await page.route("**/api/auth/session", r => r.fulfill({json: {authenticated, username: authenticated ? "google-member" : null, registrationRequiresInvite: requiresInvite}}));
   await page.route("**/api/auth/google/pending", r => r.fulfill({json: {enabled: true, pending: google}}));
   await page.route("**/api/auth/google/register", r => {
     registrations.push(r.request().postDataJSON()); authenticated = true;
@@ -74,4 +74,17 @@ test("Google first visit can return to ordinary sign-in without spending an invi
   await page.getByRole("button", {name: "换一个登录方式"}).click();
   await expect(page.getByLabel("密码", {exact: true})).toBeVisible();
   expect(registrations).toEqual([]);
+});
+
+test("Google first visit can register without an invite while places remain", async ({ page }, info) => {
+  const registrations = await setup(page, true, false);
+  await page.goto("/login?google=invite");
+  await expect(page.getByLabel("邀请码", { exact: true })).toHaveCount(0);
+  await expect(page.getByLabel("密码", { exact: true })).toHaveCount(0);
+  await page.getByLabel("账号", { exact: true }).fill("google-member");
+  await page.screenshot({ path: info.outputPath("google-open-register.png"), fullPage: true });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
+  await page.getByRole("button", { name: "注册并进入", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "主会话", exact: true })).toBeVisible();
+  expect(registrations).toEqual([{ username: "google-member", inviteCode: "" }]);
 });

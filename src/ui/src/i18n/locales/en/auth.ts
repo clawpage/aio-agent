@@ -6,7 +6,7 @@ export const auth: typeof zh = {
   brand: "AIO Agent",
   heading: { login: "Make room for what matters", register: "Meet your AIO Agent", invite: "One invite away" },
   passwordAlternative: "or use your username and password",
-  intro: {
+  intro: { openRegistration: "The first 20 accounts can register without an invite. An invite is required once those places are filled.",
     login: "Sign in and pick up where you left off with your AI assistant.",
     register: "Create an account and put your AI assistant to work.",
   },
@@ -21,7 +21,7 @@ export const auth: typeof zh = {
     inviteCode: "Invite code",
   },
   passwordMismatch: "The passwords don't match",
-  google: {
+  google: { activateOpen: "Register and continue",
     button: "Sign in / sign up with Google",
     inviteIntro: "Enter an invite code to activate your first visit.",
     verified: "Google account verified",
@@ -32,7 +32,7 @@ export const auth: typeof zh = {
     cancel: "Use another sign-in method",
     retry: "Try Google sign-in again",
   },
-  invite: {
+  invite: { quotaReached: "The places for registration without an invite are full. Please enter an invite code.",
     askBefore: "Need an invite? Contact ",
     askAfter: " to request one.",
     mailSubject: "AIO Agent invite code request",
@@ -49,7 +49,7 @@ export const auth: typeof zh = {
     haveAccount: "Already have an account? ",
     noAccount: "Don't have an account? ",
     toLogin: "Log in",
-    toRegister: "Sign up with an invite code",
+    toRegister: "Create an account",
   },
   foreign: {
     title: (owner: string) => `This page belongs to ${owner}`,

@@ -158,7 +158,7 @@
   沙箱文件、进程与记忆的隔离不受影响。
 - **创建账号**：`node --env-file=var/runtime.env bin/create-user.mjs <用户名>`（Quickstart 用 `.env`；compose 见部署文档）。
   随机密码写入 `var/user-secrets/<用户名>.txt`（0600），命令不打印密码、不覆盖已有账号。
-- **邀请码注册**：登录页切换到注册（或打开 `/register`），填账号（2–40 位小写字母、数字、`-`、`_`）、密码（至少 12 位）和邀请码。
+- **注册**：登录页切换到注册（或打开 `/register`），填账号（2–40 位小写字母、数字、`-`、`_`）和密码（至少 12 位），也可用 Google 首次认证后选择账号。现有账户总数不足 20 时免邀请码，达到 20 后必须填写邀请码；owner、管理员创建的成员与审核账户均计入总数。人数检查、邀请码领用与建号在同一写事务内，跨密码/Google 的并发注册不能超出免邀请码名额。
   邀请码由 owner 在配置页生成，格式 `XXXX-XXXX-XXXX`，一次有效，可手动作废；领用与建号在同一事务中。注册结果是普通 member。
   猜错邀请码与输错密码共用按 IP 的失败锁定。设置 `PA_INVITE_EMAIL` 后注册页显示申请邮箱。
 - **分配成员模型**：`node --env-file=var/runtime.env bin/set-user-model.mjs <用户名> <gpt-6.1-sol|claude-sonnet-5-5> [low|medium|high]`，

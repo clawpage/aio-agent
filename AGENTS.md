@@ -5,7 +5,7 @@
 ## 项目定位
 
 **AIO Agent**：owner 管理、self-hosted 的智能体控制台 + 每账号独立 AIO 沙箱 + 主 Codex 智能体，
-界面支持简体中文、英文、西班牙文和繁体中文（所有账号的配置页可切换）。owner 可在配置页把执行器切换为 Claude Code（可选，需凭据；派单、执行、标题一并切换）。用户只操作一个主会话，独立请求委派到子任务，相关补充追加到原任务；不展示旧会话历史入口。支持 owner/member 账号分级；任务与对话按账号归属隔离，普通用户固定为管理员分配的模型与推理强度（默认 GPT-6.1 Sol high，可分配 Claude Sonnet 5.5；控制面的 ChatGPT 登录与 owner 的 Claude 凭据都只在宿主侧由成员模型网关附加），管理员配置与模型信息仅 owner 可见。每个 member 使用独立容器、文件卷、Codex 数据卷、浏览器卷、运行数据库和工作区路径（`/u/<用户名>`，兼容旧的 `/u/<账号散列>`，不新增域名；主控制台地址同样是 `/u/<用户名>`）；注册只能凭 owner 在配置页生成的一次性邀请码（只建 member），不对外提供公共 demo；业务 API 未登录返回 401。账号登录/注册入口、公开隐私与删除请求页面，以及同源匿名 `POST /api/support/requests` 为公开入口（仅支持隐私/删除申请、限流、不暴露账号是否存在，见 `docs/play-console.md`）；工作区来源上由 `aio-share` skill 发布的公开分享页 `/u/<用户名>/share/<页面名>/`（宿主快照、CSP sandbox 隔离，见 `docs/FEATURES.md`「分享网页」）。
+界面支持简体中文、英文、西班牙文和繁体中文（所有账号的配置页可切换）。owner 可在配置页把执行器切换为 Claude Code（可选，需凭据；派单、执行、标题一并切换）。用户只操作一个主会话，独立请求委派到子任务，相关补充追加到原任务；不展示旧会话历史入口。支持 owner/member 账号分级；任务与对话按账号归属隔离，普通用户固定为管理员分配的模型与推理强度（默认 GPT-6.1 Sol high，可分配 Claude Sonnet 5.5；控制面的 ChatGPT 登录与 owner 的 Claude 凭据都只在宿主侧由成员模型网关附加），管理员配置与模型信息仅 owner 可见。每个 member 使用独立容器、文件卷、Codex 数据卷、浏览器卷、运行数据库和工作区路径（`/u/<用户名>`，兼容旧的 `/u/<账号散列>`，不新增域名；主控制台地址同样是 `/u/<用户名>`）；现有账户总数不足 20 时可免邀请码注册；达到 20 后须凭 owner 在配置页生成的一次性邀请码（只建 member，owner 与管理员创建的账号都计入总数），不对外提供公共 demo；业务 API 未登录返回 401。账号登录/注册入口、公开隐私与删除请求页面，以及同源匿名 `POST /api/support/requests` 为公开入口（仅支持隐私/删除申请、限流、不暴露账号是否存在，见 `docs/play-console.md`）；工作区来源上由 `aio-share` skill 发布的公开分享页 `/u/<用户名>/share/<页面名>/`（宿主快照、CSP sandbox 隔离，见 `docs/FEATURES.md`「分享网页」）。
 公网入口（`PA_PRIMARY_HOST` / `PA_WORKSPACE_HOST`）由使用者自行填写，见 `.env.example` 的
 `agent.example.com` / `workspace.example.com` 占位。
 

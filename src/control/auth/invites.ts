@@ -4,7 +4,7 @@ import { hashPassword, randomId, generateSecret } from "./passwords.js";
 import { BOOTSTRAP_USERNAME, type User } from "./owner.js";
 
 /**
- * One-time invite codes: the only way to create an account from the login page.
+ * One-time invite codes: required once the deployment has 20 accounts.
  * The owner issues them from the settings page (people ask by mailing the
  * address shown on the register form); a code becomes unusable the moment an
  * account is created with it, or when the owner revokes it.
@@ -25,6 +25,13 @@ export interface Invite {
 /** Self-registered names are lowercase so `/u/<name>` and login never differ only by case. */
 export const REGISTER_USERNAME = /^[a-z0-9_-]{2,40}$/;
 export const MIN_PASSWORD = 12;
+export const OPEN_REGISTRATION_LIMIT = 20;
+
+/** All existing accounts count, including the owner and administrator-created members. */
+export function registrationRequiresInvite(db: Db): boolean {
+  const { count } = db.prepare("SELECT COUNT(*) AS count FROM owners").get() as { count: number };
+  return count >= OPEN_REGISTRATION_LIMIT;
+}
 
 export class RegisterError extends Error {
   constructor(readonly status: number, readonly code: string, message: string) { super(message); }
@@ -61,14 +68,13 @@ export function revokeInvite(db: Db, code: string): boolean {
 }
 
 /**
- * Create a member with an invite code. The code is claimed and the account
- * inserted in one transaction, so two people racing with the same code get
- * exactly one account.
+ * Create a member. Check the open-registration quota, claim any supplied code,
+ * and insert the account in one write transaction. Concurrent registrations
+ * cannot exceed the quota or spend the same code twice.
  */
 export async function registerWithInvite(db: Db, input: { username: string; password: string; code: string }, google?: { subject: string; email: string; clientHash: string }): Promise<User> {
   const username = input.username.trim();
   const code = normalizeCode(input.code);
-  if (!code) throw new RegisterError(400, "invite_required", "请输入邀请码");
   if (!REGISTER_USERNAME.test(username) || username === BOOTSTRAP_USERNAME) {
     throw new RegisterError(400, "invalid_username", "账号只能用 2–40 位小写字母、数字、- 或 _");
   }
@@ -77,9 +83,12 @@ export async function registerWithInvite(db: Db, input: { username: string; pass
   const id = randomId("user");
   db.exec("BEGIN IMMEDIATE");
   try {
-    const invite = db.prepare("SELECT used_at,revoked_at FROM invites WHERE code=?").get(code) as { used_at: number | null; revoked_at: number | null } | undefined;
-    if (!invite || invite.revoked_at !== null) throw new RegisterError(400, "invalid_invite", "邀请码无效");
-    if (invite.used_at !== null) throw new RegisterError(400, "invite_used", "这个邀请码已经用过了");
+    if (!code && registrationRequiresInvite(db)) throw new RegisterError(400, "invite_required", "免邀请码注册名额已满，请输入邀请码");
+    if (code) {
+      const invite = db.prepare("SELECT used_at,revoked_at FROM invites WHERE code=?").get(code) as { used_at: number | null; revoked_at: number | null } | undefined;
+      if (!invite || invite.revoked_at !== null) throw new RegisterError(400, "invalid_invite", "邀请码无效");
+      if (invite.used_at !== null) throw new RegisterError(400, "invite_used", "这个邀请码已经用过了");
+    }
     if (db.prepare("SELECT 1 FROM owners WHERE lower(username)=?").get(username)) throw new RegisterError(409, "username_taken", "这个账号已经有人用了，换一个吧");
     const now = Date.now();
     if (google) {
@@ -91,7 +100,7 @@ export async function registerWithInvite(db: Db, input: { username: string; pass
     }
     db.prepare("INSERT INTO owners (id,username,password_hash,password_salt,password_params,created_at,role) VALUES (?,?,?,?,?,?,'member')")
       .run(id, username, rec.hash, rec.salt, rec.params, now);
-    db.prepare("UPDATE invites SET used_at=?,used_by=? WHERE code=?").run(now, id, code);
+    if (code) db.prepare("UPDATE invites SET used_at=?,used_by=? WHERE code=?").run(now, id, code);
     if (google) {
       db.prepare("INSERT INTO google_identities (subject,owner_id,email,created_at) VALUES (?,?,?,?)").run(google.subject, id, google.email, now);
       db.prepare("DELETE FROM google_login_flows WHERE client_hash=?").run(google.clientHash);

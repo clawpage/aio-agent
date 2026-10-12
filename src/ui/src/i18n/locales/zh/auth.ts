@@ -4,7 +4,7 @@ export const auth = {
   brand: "一站",
   heading: { login: "把事情交给一站", register: "开启你的一站", invite: "只差一个邀请码" },
   passwordAlternative: "或使用账号密码",
-  intro: {
+  intro: { openRegistration: "前 20 个账号无需邀请码注册；名额满后需使用邀请码。",
     login: "登录后，继续与你的 AI 助理一起工作。",
     register: "创建账号，让你的 AI 助理开始工作。",
   },
@@ -19,7 +19,7 @@ export const auth = {
     inviteCode: "邀请码",
   },
   passwordMismatch: "两次输入的密码不一样",
-  google: {
+  google: { activateOpen: "注册并进入",
     button: "使用 Google 登录 / 注册",
     inviteIntro: "首次使用需要邀请码，验证后即可进入。",
     verified: "Google 账号已验证",
@@ -30,7 +30,7 @@ export const auth = {
     cancel: "换一个登录方式",
     retry: "重新登录 Google",
   },
-  invite: {
+  invite: { quotaReached: "免邀请码注册名额已满，请输入邀请码。",
     /** Split around the mailto link. */
     askBefore: "需要邀请码？联系 ",
     askAfter: " 申请。",
@@ -48,7 +48,7 @@ export const auth = {
     haveAccount: "已有账号？",
     noAccount: "还没有账号？",
     toLogin: "去登录",
-    toRegister: "用邀请码注册",
+    toRegister: "注册账号",
   },
   foreign: {
     title: (owner: string) => `这是 ${owner} 的页面`,

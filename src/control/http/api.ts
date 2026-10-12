@@ -29,7 +29,7 @@ import type { AgentEvent } from "../codex/manager.js";
 import type { HostKind, RequestContext } from "./security.js";
 import { UNSAFE_METHODS, guardUnsafe, originAllowed } from "./security.js";
 import { BOOTSTRAP_USERNAME, authenticateUser, getUser } from "../auth/owner.js";
-import { RegisterError, createInvite, listInvites, registerWithInvite, revokeInvite } from "../auth/invites.js";
+import { RegisterError, createInvite, listInvites, registerWithInvite, registrationRequiresInvite, revokeInvite } from "../auth/invites.js";
 import { googleRouter } from "../auth/googleRoutes.js";
 import { createSupportRequest, reviewSupportRequest, supportQueue, SupportError } from '../support.js';
 import { parseHttpUrl } from "../aio/client.js";
@@ -335,7 +335,7 @@ export function createApiRouter(context: AppContext): Router {
     }),
   );
 
-  // Self-registration needs a one-time invite code from the owner (auth/invites.ts).
+  // Self-registration is open for the first 20 accounts, then requires an invite.
   router.post(
     "/auth/register",
     requireKind("primary"),
@@ -415,7 +415,7 @@ export function createApiRouter(context: AppContext): Router {
     asyncHandler(async (req, res, ctx) => {
       const owner = ctx.session ? getUser(db, ctx.session.ownerId) : null;
       if (!ctx.session) {
-        res.json({ authenticated: false, kind: ctx.kind, username: owner?.username ?? null, inviteEmail: cfg.inviteEmail || null });
+        res.json({ authenticated: false, kind: ctx.kind, username: owner?.username ?? null, inviteEmail: cfg.inviteEmail || null, registrationRequiresInvite: registrationRequiresInvite(db) });
         return;
       }
       res.json({

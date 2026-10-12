@@ -19,6 +19,7 @@ export function Login({ onSuccess, notice, username: named }: { onSuccess: () =>
   const [confirm, setConfirm] = useState("");
   const [inviteCode, setInviteCode] = useState("");
   const [inviteEmail, setInviteEmail] = useState<string | null>(null);
+  const [requiresInvite, setRequiresInvite] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [googleEnabled, setGoogleEnabled] = useState(false);
@@ -44,6 +45,7 @@ export function Login({ onSuccess, notice, username: named }: { onSuccess: () =>
         if (!mounted || controller.signal.aborted || submitting.current) return;
         setSessionError(false);
         setInviteEmail(session.inviteEmail ?? null);
+        setRequiresInvite(session.registrationRequiresInvite !== false);
         if (session.authenticated) {
           setChecking(true);
           await onRestored.current();
@@ -148,7 +150,10 @@ export function Login({ onSuccess, notice, username: named }: { onSuccess: () =>
       setConfirm("");
       await onSuccess();
     } catch (err) {
-      if (err instanceof ApiError) setError(err.message);
+      if (err instanceof ApiError && err.code === "invite_required") {
+        setRequiresInvite(true);
+        setError(t.auth.invite.quotaReached);
+      } else if (err instanceof ApiError) setError(err.message);
       else setError(err instanceof Error ? err.message : String(err));
     } finally {
       submitting.current = false;
@@ -169,8 +174,8 @@ export function Login({ onSuccess, notice, username: named }: { onSuccess: () =>
       >
         <div className="login-brand"><BrandMark size={36}/><span>{t.auth.brand}</span></div>
         <header className="login-heading">
-          <h1>{googleEmail ? t.auth.heading.invite : register ? t.auth.heading.register : t.auth.heading.login}</h1>
-          <p>{googleEmail ? t.auth.google.inviteIntro : register ? t.auth.intro.register : t.auth.intro.login}</p>
+          <h1>{googleEmail ? (requiresInvite ? t.auth.heading.invite : t.auth.heading.register) : register ? t.auth.heading.register : t.auth.heading.login}</h1>
+          <p>{(googleEmail || register) && !requiresInvite ? t.auth.intro.openRegistration : googleEmail ? t.auth.google.inviteIntro : register ? t.auth.intro.register : t.auth.intro.login}</p>
         </header>
         {googleEmail && <div className="login-identity"><span className="login-identity-check"><AuthIcon name="check" size={16}/></span><div><span>{t.auth.google.verified}</span><p className="login-google-email">{googleEmail}</p></div></div>}
         {!googleEmail && googleEnabled && <>
@@ -217,7 +222,7 @@ export function Login({ onSuccess, notice, username: named }: { onSuccess: () =>
               <span>{t.auth.fields.confirm}</span>
               <input type="password" value={confirm} autoComplete="new-password" onChange={(e) => setConfirm(e.target.value)} placeholder={t.auth.fields.confirmHint} />
             </label>}
-            <label className="field">
+            {requiresInvite && <><label className="field">
               <span>{t.auth.fields.inviteCode}</span>
               <input
                 value={inviteCode}
@@ -233,14 +238,14 @@ export function Login({ onSuccess, notice, username: named }: { onSuccess: () =>
               {inviteEmail
                 ? <>{t.auth.invite.askBefore}<a href={`mailto:${inviteEmail}?subject=${encodeURIComponent(t.auth.invite.mailSubject)}`}>{inviteEmail}</a>{t.auth.invite.askAfter}</>
                 : t.auth.invite.askAdmin}
-            </span></p>
+            </span></p></>}
           </>
         )}
         {sessionError && <div className="banner warn" role="status">{t.auth.sessionUnverified}</div>}
         {notice && <div className="banner warn">{notice}</div>}
         {error && <div className="banner error">{error}</div>}
-        <button type="submit" className="primary block" disabled={busy || !username.trim() || (googleEmail ? !inviteCode.trim() : !password || (register && (!confirm || !inviteCode.trim())))}>
-          <span>{googleEmail ? (busy ? t.auth.google.activating : t.auth.google.activate) : register ? (busy ? t.auth.submit.registering : t.auth.submit.register) : (busy ? t.auth.submit.loggingIn : t.auth.submit.login)}</span><AuthIcon name="arrow" size={18}/>
+        <button type="submit" className="primary block" disabled={busy || !username.trim() || (googleEmail ? requiresInvite && !inviteCode.trim() : !password || (register && (!confirm || (requiresInvite && !inviteCode.trim()))))}>
+          <span>{googleEmail ? (busy ? t.auth.google.activating : requiresInvite ? t.auth.google.activate : t.auth.google.activateOpen) : register ? (busy ? t.auth.submit.registering : t.auth.submit.register) : (busy ? t.auth.submit.loggingIn : t.auth.submit.login)}</span><AuthIcon name="arrow" size={18}/>
         </button>
         {(googleEmail || googleWaiting) && <button type="button" className="link" disabled={busy} onClick={() => void cancelGoogle()}>{t.auth.google.cancel}</button>}
         {!named && !googleEmail && (
