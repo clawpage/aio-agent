@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { api, ApiError } from "../api";
 import { BrandMark, PageLoading } from "./Brand";
 import { t } from "../i18n";
+import { LanguagePicker } from "./LanguageSettings";
 import { hasNativeBrowser, listenGoogleReturn, openDeviceBrowser, openNativeBrowser } from "../deviceBrowser";
 
 function AuthIcon({name, size}: {name: "check" | "arrow" | "mail"; size: number}) {
@@ -167,7 +168,7 @@ export function Login({ onSuccess, notice, username: named }: { onSuccess: () =>
           void submit();
         }}
       >
-        <div className="login-brand"><BrandMark size={36}/><span>{t.auth.brand}</span></div>
+        <div className="login-top"><div className="login-brand"><BrandMark size={36}/><span>{t.auth.brand}</span></div><LanguagePicker compact disabled={busy || googleWaiting}/></div>
         <header className="login-heading">
           <h1>{googleEmail ? t.auth.heading.invite : register ? t.auth.heading.register : t.auth.heading.login}</h1>
           <p>{googleEmail ? t.auth.google.inviteIntro : register ? t.auth.intro.register : t.auth.intro.login}</p>

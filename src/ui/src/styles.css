@@ -720,6 +720,10 @@ textarea:focus {
   margin-block: auto;
 }
 .login-brand { display: flex; align-items: center; gap: 10px; font-size: 22px; font-weight: 650; letter-spacing: 0.02em; margin-bottom: 8px; }
+.login-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
+.language-picker { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; font-size: var(--fs-sm); }
+.language-picker select { min-width: 0; max-width: 100%; min-height: 40px; font: inherit; }
+.login-top .language-picker > span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
 .login-heading { margin-bottom: 6px; }
 .login-heading h1 { margin: 0; font-size: 28px; font-weight: 650; line-height: 1.35; letter-spacing: -0.025em; }
 .login-heading p { margin: 10px 0 0; font-size: var(--fs-md); line-height: 1.7; color: var(--text-dim); }

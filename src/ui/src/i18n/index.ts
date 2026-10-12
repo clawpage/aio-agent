@@ -1,5 +1,7 @@
 import { zh, type Messages } from "./locales/zh";
 import { en } from "./locales/en";
+import { es } from "./locales/es";
+import { zhTW } from "./locales/zh-TW";
 
 /**
  * Every word the console shows lives in `locales/<language>/`, one file per
@@ -10,9 +12,10 @@ import { en } from "./locales/en";
  *
  * The language is chosen once at load: switching stores the choice and
  * reloads, so no component needs to re-render on a language change and plain
- * modules can use `t` too. Chinese is the default; English only when chosen.
+ * modules can use `t` too. Simplified Chinese is the default; other languages
+ * are selected explicitly on the sign-in page, sidebar or settings page.
  */
-export const LOCALES = { "zh-CN": zh, en } satisfies Record<string, Messages>;
+export const LOCALES = { "zh-CN": zh, en, es, "zh-TW": zhTW } satisfies Record<string, Messages>;
 export type Locale = keyof typeof LOCALES;
 
 const STORAGE_KEY = "aio.locale";

@@ -1,0 +1,60 @@
+import type { auth as zh } from '../zh/auth';
+export const auth: typeof zh = {
+  sessionExpired: "登入已過期，請重新登入。",
+  restoring: "正在恢復登入…",
+  brand: "一站",
+  heading: { login: "把事情交給一站", register: "開啟你的一站", invite: "只差一個邀請碼" },
+  passwordAlternative: "或使用帳號密碼",
+  intro: {
+    login: "登入後，繼續與你的 AI 助理一起工作。",
+    register: "建立帳號，讓你的 AI 助理開始工作。",
+  },
+  fields: {
+    username: "帳號",
+    usernameHint: "2–40 位小寫字母、數字、- 或 _",
+    password: "密碼",
+    passwordHint: "請輸入密碼",
+    newPasswordHint: "至少 12 個字元",
+    confirm: "確認密碼",
+    confirmHint: "再輸入一次密碼",
+    inviteCode: "邀請碼",
+  },
+  passwordMismatch: "兩次輸入的密碼不一樣",
+  google: {
+    button: "使用 Google 登入 / 註冊",
+    inviteIntro: "首次使用需要邀請碼，驗證後即可進入。",
+    verified: "Google 帳號已驗證",
+    waiting: "請在瀏覽器中完成 Google 登入，然後返回 App。",
+    failed: "Google 登入未完成或已過期，請重試。",
+    activate: "驗證邀請碼並進入",
+    activating: "正在驗證…",
+    cancel: "換一個登入方式",
+    retry: "重新登入 Google",
+  },
+  invite: {
+    /** Split around the mailto link. */
+    askBefore: "需要邀請碼？聯絡 ",
+    askAfter: " 申請。",
+    mailSubject: "申請一站邀請碼",
+    askAdmin: "邀請碼向管理員索取，每個邀請碼只能註冊一個帳號。",
+  },
+  sessionUnverified: "暫時無法驗證登入狀態，網路恢復後會自動重試。",
+  submit: {
+    register: "註冊並登入",
+    registering: "註冊中…",
+    login: "登入",
+    loggingIn: "登入中…",
+  },
+  switch: {
+    haveAccount: "已有帳號？",
+    noAccount: "還沒有帳號？",
+    toLogin: "去登入",
+    toRegister: "用邀請碼註冊",
+  },
+  foreign: {
+    title: (owner: string) => `這是 ${owner} 的頁面`,
+    body: (current: string) => `目前登入的是 ${current}。同一瀏覽器一次只能登入一個帳號。`,
+    switchTo: (owner: string) => `退出並登入 ${owner}`,
+    backHome: "回到我的頁面",
+  },
+};

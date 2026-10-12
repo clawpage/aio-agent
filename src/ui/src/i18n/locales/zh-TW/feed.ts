@@ -1,0 +1,106 @@
+import type { feed as zh } from '../zh/feed';
+export const feed: typeof zh = {
+  waiting: {
+    approvals: "等你確認",
+    browser: "等你操作瀏覽器",
+    blocked: "需要補充",
+    input: "等你補充",
+  },
+  status: {
+    planning: "在辦",
+    needs_input: "等待你補充",
+    planning_failed: "分配失敗",
+    waiting: "等待依賴或資源",
+    queued: "排隊中",
+    running: "在辦",
+    stopping: "正在停止…",
+    completed: "已完成",
+    failed: "執行失敗",
+    interrupted: "已停止",
+    unknown: "結果待核對",
+    blocked: "需要補充",
+  } as Record<string, string>,
+  errors: {
+    notUploaded: (names: string) => `${names} 沒傳上去`,
+    retry: (message: string) => `${message}（可以再點一次）`,
+    upload: (name: string, message: string) => `${name}：${message}`,
+    uploadFailed: "上傳失敗",
+  },
+  progress: {
+    needsConfirm: "需要你確認",
+    needsBrowser: "需要你操作瀏覽器",
+    expand: (title: string) => `展開任務：${title}`,
+  },
+  question: {
+    label: "需要你補充",
+    hintForm: "填好後提交，或直接在下方輸入",
+    hintOptions: "點選一個，或直接在下方輸入",
+    hintText: "直接在下方輸入回覆即可",
+  },
+  /** Sent as the person's reply once they finished on the phone. */
+  phoneDone: "我已在手機上操作完成，請繼續。",
+  actions: {
+    quote: "引用任務",
+    quoteLabel: (title: string) => `引用任務：${title}`,
+    retryPlanning: "重試分配",
+    stop: "停止該任務",
+    details: "檢視過程",
+    dispatchLog: "派單日誌",
+    dispatchLogLabel: (title: string) => `派單日誌：${title}`,
+  },
+  head: {
+    title: "主對話",
+    awaitingInput: (n: number) => `${n} 件等你補充`,
+    awaitingBrowser: (n: number) => `${n} 件等你操作瀏覽器`,
+    active: (n: number) => `${n} 件在辦`,
+    idle: "隨時可以交給我",
+    connecting: "正在連線…",
+  },
+  older: {
+    retry: "更早的任務沒載入出來，點此重試",
+    loading: "正在載入更早的任務…",
+  },
+  empty: {
+    title: "把事情交給我",
+    body: "可以接著發不同任務。過程會收攏，完成後在這裡回報。",
+  },
+  report: {
+    schedule: (rule: string) => `定時 · ${rule}`,
+    noResult: "任務已結束，但沒有返回文字結果，請開啟詳情核對。",
+  },
+  scheduleRun: (title: string, rule: string) => `定時任務「${title}」自動執行 · ${rule} · `,
+  userMessage: "使用者訊息",
+  quoted: (title: string) => `引用：${title}`,
+  earlierTask: "此前任務",
+  supplement: {
+    merged: (title: string) => `已補充到：${title}`,
+    merging: (title: string) => `正在補充到：${title}`,
+    cancelled: (title: string) => `已取消補充：${title}`,
+    check: (title: string) => `補充需要核對：${title}`,
+  },
+  outgoing: {
+    uploading: "附件上傳中",
+    sending: "傳送中…",
+    unsent: "未傳送",
+    failed: "傳送失敗",
+    retry: "重試",
+    edit: "改一改",
+  },
+  needsYou: {
+    label: "等你處理的任務",
+    bubble: (kind: string, title: string) => `${kind}：${title}，點選檢視`,
+  },
+  toLatest: "回到最新訊息",
+  reference: {
+    label: "引用任務",
+    cancel: "取消引用任務",
+  },
+  composer: {
+    placeholder: "交給我一個任務…",
+    placeholderReference: "繼續補充這個任務…",
+  },
+  pills: {
+    pickTask: "選擇要檢視的任務",
+    viewTask: "檢視這個任務",
+  },
+};
