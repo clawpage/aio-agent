@@ -7,7 +7,7 @@
  *   /vault          password vault
  *   /usage          usage dashboard (owner)
  *   /gadget         the voice gadget account's conversation, read-only (owner)
- *   /settings       configuration (member: language only)
+ *   /settings       configuration (member: language and account privacy)
  *   /workspace      the workspace, over the main session
  * `/login` and `/register` stay outside any account; overlays such as a link's
  * browser console or a file preview do not change the address.

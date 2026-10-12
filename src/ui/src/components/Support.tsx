@@ -29,6 +29,16 @@ export function SupportDialog({taskId, onClose}: {taskId?: string; onClose: () =
   </dialog>;
 }
 
+/** Account controls shared by member and owner configuration pages. */
+export function AccountPrivacySettings() {
+  const [open, setOpen] = useState(false);
+  return <section className="settings-card" aria-label={t.support.account}>
+    <div className="settings-section-head"><h3>{t.support.account}</h3><p>{t.support.settingsIntro}</p></div>
+    <button type="button" className="ghost" onClick={() => setOpen(true)}>{t.support.account}</button>
+    {open && <SupportDialog onClose={() => setOpen(false)}/>}
+  </section>;
+}
+
 export function SupportSettings() {
   const [requests, setRequests] = useState<Awaited<ReturnType<typeof api.supportQueue>>['requests']>([]);
   const [error, setError] = useState('');

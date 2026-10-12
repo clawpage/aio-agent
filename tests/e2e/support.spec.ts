@@ -10,6 +10,7 @@ test('native account policy links use the system browser and preserve the dialog
   await page.route('**/api/main*',r=>r.fulfill({json:{mode:'tasks',tasks:[],nextBefore:null}}));
   await page.goto('/'); await expect(page.getByRole('heading',{name:'主会话',exact:true})).toBeVisible();
   if(info.project.name.startsWith('mobile'))await page.getByRole('button',{name:'打开导航'}).click();
+  await page.locator('.sidebar').getByRole('button',{name:'配置',exact:true}).click();
   await page.getByRole('button',{name:'账户与隐私',exact:true}).click();
   const dialog=page.getByRole('dialog',{name:'账户与隐私',exact:true}),before=page.url();
   await dialog.getByLabel('说明',{exact:true}).fill('Keep this unsent request.');
@@ -50,13 +51,14 @@ test('members report a specific reply in-app and receive a reference; Escape clo
   await page.screenshot({path:info.outputPath('report-confirmed.png')});
   await page.keyboard.press('Escape'); await expect(dialog).toHaveCount(0);
 });
-test('members can request deletion from the sidebar without leaving the app',async({page},info)=>{
+test('members can request deletion from settings without leaving the app',async({page},info)=>{
   await mockConsole(page,{conversations:[]});
   await page.route('**/api/auth/session',r=>r.fulfill({json:{authenticated:true,username:'member',role:'member'}}));
   await page.route('**/api/main*',r=>r.fulfill({json:{mode:'tasks',tasks:[],nextBefore:null}}));
   let sent: unknown; await page.route('**/api/support/requests',async r=>{sent=r.request().postDataJSON();await r.fulfill({status:201,json:{id:'delete-reference'}});});
   await page.goto('/'); await expect(page.getByRole('heading',{name:'主会话',exact:true})).toBeVisible();
   if(info.project.name.startsWith('mobile')) await page.getByRole('button',{name:'打开导航'}).click();
+  await page.locator('.sidebar').getByRole('button',{name:'配置',exact:true}).click();
   await page.getByRole('button',{name:'账户与隐私',exact:true}).click();
   const dialog=page.getByRole('dialog',{name:'账户与隐私',exact:true}); await expect(dialog).toContainText('不会立即删除数据');
   await expect(dialog.getByRole('link',{name:'隐私政策'})).toHaveAttribute('href','/privacy.html');

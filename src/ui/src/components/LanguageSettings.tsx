@@ -1,3 +1,4 @@
+import { AccountPrivacySettings } from "./Support";
 import { LOCALES, locale, setLocale, t, type Locale } from "../i18n";
 
 /** Shared by owner and member configuration pages. */
@@ -10,11 +11,11 @@ export function LanguagePicker() {
   </label>;
 }
 
-/** Local preferences only: this component never requests owner settings. */
+/** Member account controls: this component never requests owner settings. */
 export function MemberSettings({ onBack }: { onBack: () => void }) {
   return <section className="settings" aria-label={t.settings.page.title}>
     <header className="settings-head"><h2>{t.settings.page.title}</h2><span className="spacer"/><button type="button" className="ghost" onClick={onBack}>{t.settings.page.back}</button></header>
-    <div className="settings-body"><LanguageSettings/></div>
+    <div className="settings-body"><LanguageSettings/><AccountPrivacySettings/></div>
   </section>;
 }
 

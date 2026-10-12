@@ -1,4 +1,5 @@
 export const support = {
+  settingsIntro: 'Read the privacy policy or request deletion of your account and related data.',
   account: 'Account & privacy', privacy: 'Privacy policy', deletion: 'Request account deletion', report: 'Report response',
   limitations: 'AI responses may be inaccurate and provide general information only. AIO Agent is not a medical device and does not diagnose, treat or prevent medical conditions. Consult a qualified doctor for medical advice, and qualified professionals for legal or investment advice.',
   reportTitle: 'Report AI response', reportInfo: 'The administrator will receive this AI response (up to 20,000 characters) and your explanation to investigate and improve content safety. Other conversations are not sent.',

@@ -10,6 +10,7 @@ test('member has a clean inbox and no model or prompt configuration',async({page
  await expect(page.locator('.sidebar').getByRole('button',{name:'任务列表',exact:true})).toBeVisible();
  await page.locator('.sidebar').getByRole('button',{name:'配置',exact:true}).click();
  await expect(page.getByRole('heading',{name:'界面语言',exact:true})).toBeVisible();
+ await expect(page.getByRole('button',{name:'账户与隐私',exact:true})).toBeVisible();
  await expect(page.locator('.settings-card select option')).toHaveText(['中文','English','Español','繁體中文']);
  await page.getByRole('button',{name:'← 返回会话',exact:true}).click();
  expect(calls.filter(s=>/^\/api\/(settings|models|capabilities)/.test(s))).toEqual([]);

@@ -1,4 +1,4 @@
-import { SupportSettings } from './Support';
+import { SupportSettings, AccountPrivacySettings } from './Support';
 import { InlineLoading } from "./Brand";
 import {SoulSettings} from './SoulSettings';
 import { RecallSettings } from './RecallSettings';
@@ -293,6 +293,7 @@ export function Settings({ onBack, onSaved }: Props) {
         <SupportSettings/>
         <RecallSettings />
         <LanguageSettings />
+        <AccountPrivacySettings />
         <DebugSettings />
       </div>
     </section>
