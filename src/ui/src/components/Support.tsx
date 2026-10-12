@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../api';
 import { t } from '../i18n';
+import { openNativeBrowser } from '../deviceBrowser';
 
 export function SupportDialog({taskId, onClose}: {taskId?: string; onClose: () => void}) {
   const dialog = useRef<HTMLDialogElement>(null);
@@ -18,7 +19,7 @@ export function SupportDialog({taskId, onClose}: {taskId?: string; onClose: () =
       <h2 id="support-title">{taskId ? t.support.reportTitle : t.support.account}</h2>
       {id ? <p role="status">{t.support.success}<code>{id}</code></p> : <>
         <p className="muted">{taskId ? t.support.reportInfo : t.support.deletionInfo}</p>
-        {!taskId && <p><a href="/privacy.html" target="_blank" rel="noreferrer">{t.support.privacy}</a> · <a href="/account-deletion.html" target="_blank" rel="noreferrer">{t.support.deletion}</a></p>}
+        {!taskId && <p><a href="/privacy.html" target="_blank" rel="noreferrer" onClick={e => { if (openNativeBrowser(e.currentTarget.href)) e.preventDefault(); }}>{t.support.privacy}</a> · <a href="/account-deletion.html" target="_blank" rel="noreferrer" onClick={e => { if (openNativeBrowser(e.currentTarget.href)) e.preventDefault(); }}>{t.support.deletion}</a></p>}
         {!taskId && <p className="tiny muted">{t.support.limitations}</p>}
         <label className="field"><span>{t.support.note}</span><textarea autoFocus value={note} onChange={e => setNote(e.target.value)} placeholder={t.support.noteHint} maxLength={2000} required rows={4}/></label>
       </>}

@@ -1,5 +1,39 @@
 import {test,expect} from '@playwright/test';
 import {mockConsole} from './mock-api';
+test('native account policy links use the system browser and preserve the dialog',async({page},info)=>{
+  await page.addInitScript(()=>{
+    (window as any).nativePolicyUrls=[];
+    (window as any).aioDeviceBrowser={postMessage:(url:string)=>(window as any).nativePolicyUrls.push(url)};
+  });
+  await mockConsole(page,{conversations:[]});
+  await page.route('**/api/auth/session',r=>r.fulfill({json:{authenticated:true,username:'member',role:'member'}}));
+  await page.route('**/api/main*',r=>r.fulfill({json:{mode:'tasks',tasks:[],nextBefore:null}}));
+  await page.goto('/'); await expect(page.getByRole('heading',{name:'主会话',exact:true})).toBeVisible();
+  if(info.project.name.startsWith('mobile'))await page.getByRole('button',{name:'打开导航'}).click();
+  await page.getByRole('button',{name:'账户与隐私',exact:true}).click();
+  const dialog=page.getByRole('dialog',{name:'账户与隐私',exact:true}),before=page.url();
+  await dialog.getByLabel('说明',{exact:true}).fill('Keep this unsent request.');
+  await dialog.getByRole('link',{name:'隐私政策',exact:true}).click();
+  await dialog.getByRole('link',{name:'申请删除账户',exact:true}).click();
+  expect(await page.evaluate(()=>(window as any).nativePolicyUrls.filter((url:string)=>/^https?:/.test(url)))).toEqual([new URL('/privacy.html',before).href,new URL('/account-deletion.html',before).href]);
+  await expect(page).toHaveURL(before); await expect(dialog.getByRole('textbox',{name:'说明',exact:true})).toHaveValue('Keep this unsent request.');
+  expect(page.context().pages()).toHaveLength(1);
+});
+test('native login policy links use the iOS browser bridge without leaving sign-in',async({page})=>{
+  await page.addInitScript(()=>{
+    (window as any).nativePolicyUrls=[];
+    (window as any).webkit={messageHandlers:{aioDeviceBrowser:{postMessage:(url:string)=>(window as any).nativePolicyUrls.push(url)}}};
+  });
+  await mockConsole(page,{conversations:[]});
+  await page.route('**/api/auth/session',r=>r.fulfill({json:{authenticated:false}}));
+  await page.route('**/api/auth/google/pending',r=>r.fulfill({json:{enabled:true,pending:null}}));
+  await page.goto('/login'); const before=page.url();
+  await page.getByRole('link',{name:'隐私政策',exact:true}).click();
+  await page.getByRole('link',{name:'账户与隐私',exact:true}).click();
+  expect(await page.evaluate(()=>(window as any).nativePolicyUrls.filter((url:string)=>/^https?:/.test(url)))).toEqual([new URL('/privacy.html',before).href,new URL('/account-deletion.html',before).href]);
+  await expect(page).toHaveURL(before); await expect(page.getByRole('button',{name:'使用 Google 登录 / 注册'})).toBeVisible();
+  expect(page.context().pages()).toHaveLength(1);
+});
 test('members report a specific reply in-app and receive a reference; Escape closes the modal',async({page},info)=>{
   await mockConsole(page,{conversations:[]});
   await page.route('**/api/auth/session',r=>r.fulfill({json:{authenticated:true,username:'member',role:'member'}}));

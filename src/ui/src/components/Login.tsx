@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { api, ApiError } from "../api";
 import { BrandMark, PageLoading } from "./Brand";
 import { t } from "../i18n";
-import { hasNativeBrowser, listenGoogleReturn, openDeviceBrowser } from "../deviceBrowser";
+import { hasNativeBrowser, listenGoogleReturn, openDeviceBrowser, openNativeBrowser } from "../deviceBrowser";
 
 function AuthIcon({name, size}: {name: "check" | "arrow" | "mail"; size: number}) {
   const paths = {check: "M5 12l4 4L19 6", arrow: "M5 12h14m-6-6 6 6-6 6", mail: "M4 5h16v14H4Z M4 6l8 7 8-7"};
@@ -249,7 +249,7 @@ export function Login({ onSuccess, notice, username: named }: { onSuccess: () =>
             <button type="button" className="link" onClick={() => switchMode(register ? "login" : "register")}>{register ? t.auth.switch.toLogin : t.auth.switch.toRegister}</button>
           </p>
         )}
-      <p className="login-policy tiny"><a href="/privacy.html" target="_blank" rel="noreferrer">{t.support.privacy}</a> · <a href="/account-deletion.html" target="_blank" rel="noreferrer">{t.support.account}</a></p>
+      <p className="login-policy tiny"><a href="/privacy.html" target="_blank" rel="noreferrer" onClick={e => { if (openNativeBrowser(e.currentTarget.href)) e.preventDefault(); }}>{t.support.privacy}</a> · <a href="/account-deletion.html" target="_blank" rel="noreferrer" onClick={e => { if (openNativeBrowser(e.currentTarget.href)) e.preventDefault(); }}>{t.support.account}</a></p>
       </form>
     </div>
   );
