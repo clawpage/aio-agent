@@ -84,9 +84,11 @@ Google OAuth 仍处于 testing audience，仅有现有测试用户。支持邮�
 没有 `feedback@clawpage.ai`。2026-10-11 用户改为要求由本任务配置；实时检查确认该邮箱经 Cloudflare 已收到当日 Google 验证邮件，
 但 Google 登录页显示“找不到此账号”。现有收信链路无需重配，不改 MX、DNS 或转发目的地。
 
-新建专用 Google 身份的尝试被自动审批拒绝，要求明确授权“使用该地址创建新账号”；注册表单仍为空，未创建身份。
-已请求用户授权免费 Google 账号及临时 `roles/oauthconfig.editor` 项目权限。此角色可管理 OAuth 配置和客户端密钥，
-不得扩大到其他项目或整个项目的 Owner/Editor；浏览器规则要求新密码由用户本人设置，生日等资料不能编造，注册条款须另行确认。
+用户已明确授权使用该地址创建免费 Google 账号，并临时授予 `roles/oauthconfig.editor` 项目权限，完成后撤回；
+此前新建账号的自动审批拒绝已由该授权解除。账号名称 `Clawpage Feedback` 已填写，Google 注册目前在生日页，性别选“不愿透露”，
+生日尚待用户授权从已有记录读取并提交给 Google，或由用户在网页填写。新密码由用户本人设置，注册条款须另行确认；账号尚未创建。
+IAM 授权表单已准备该地址和 OAuth Config Editor 角色，尚未保存。此角色可管理 OAuth 配置和客户端密钥，
+不得扩大到其他项目或整个项目的 Owner/Editor。
 
 取得相应授权并完成注册后，使用该身份登录 Cloud Console、重新检查并选择支持邮箱、保存品牌，完成后撤回临时项目权限。
 再公开 OAuth audience 并验证非测试用户登录/首次邀请，按已有发布授权提交 Play 的 11 项变更，核对实际审核状态；
