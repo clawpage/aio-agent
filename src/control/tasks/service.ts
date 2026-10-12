@@ -504,18 +504,25 @@ export class TaskService {
                 }
             };
             if (explicit) {
-                candidates.clear();
-                if (!candidates.has(explicit.id)) add({...explicit,input_text:this.taskContext(explicit),clarification:explicit.status === "needs_input" && explicit.plan_json ? (JSON.parse(explicit.plan_json) as TaskPlan).clarification ?? null : null}, "explicit");
                 // A task pointed at by hand is the answer search should have found: measure where it ranks.
                 const rank = this.recall.rank(trace.ownerId, inputContext).find(h => h.id === explicit.id)?.rank ?? null;
                 trace.gold = { id: explicit.id, rank, inWindow: windowIds.has(explicit.id) };
-            } else {
-                recalled(inputContext, "recall");
-                // Terse follow-ups can omit the entity; query the inverted index
-                // once more with the adjacent task titles, still before Jev.
-                if (inputContext.trim().length < 30 && candidates.size < MAX_CANDIDATES)
-                    recalled(`${inputContext}\n${all.filter(t => !t.schedule_id).slice(-3).map(t => t.title).join("\n")}`, "context");
+                // A quoted task fixes the route by its own state (a steer while it works, a resume once
+                // it finished), so no dispatcher model runs: the message keeps that task's title.
+                const plan: TaskPlan = { title: explicit.title, related: [], dependencies: [], resources: [], clarification: null };
+                applyTaskReference(plan, this.referenceTarget(row)!);
+                trace.candidates = [{ id: explicit.id, source: "explicit" }];
+                trace.repairs = []; trace.failReason = null; trace.failed = false;
+                measured = true;
+                steps.push({ kind: "plan", at: Date.now(), plan, repairs: [] });
+                await this.admitPlan(row, plan, inputContext);
+                return;
             }
+            recalled(inputContext, "recall");
+            // Terse follow-ups can omit the entity; query the inverted index
+            // once more with the adjacent task titles, still before Jev.
+            if (inputContext.trim().length < 30 && candidates.size < MAX_CANDIDATES)
+                recalled(`${inputContext}\n${all.filter(t => !t.schedule_id).slice(-3).map(t => t.title).join("\n")}`, "context");
             const files = [row,...this.rows().filter(t=>t.merged_into===row.id && t.status==='merged')]
                 .flatMap(t=>JSON.parse(t.attachments_json) as TurnAttachment[]);
             const planningInput = [inputContext, ...(files.length ? [`已有附件（执行者可以读取其中资料）：${JSON.stringify(files)}`] : [])].filter(Boolean).join("\n\n");
@@ -551,8 +558,7 @@ export class TaskService {
             const scheduling = { now: Date.now(), timezone: this.cfg.browser.timezone, schedules: this.planningSchedules(trace.ownerId) };
             steps.push({ kind: "context", at: Date.now(), timeline: timelineText, candidates: candidates.size });
             let relevance: JevRelevance | null = null;
-            // A referenced message's route is fixed: no second opinion is needed.
-            if (!explicit && candidates.size && this.jev?.enabled) {
+            if (candidates.size && this.jev?.enabled) {
                 const pool = [...candidates.values()].map(t => ({ ...byId.get(t.id)!, ...t, recalled: RECALLED.has(t.source) }));
                 const q = routingQuestion(inputContext, pool, timeline(everything, row), row.created_at);
                 const criteria = q.questions.route!.criteria;
@@ -574,8 +580,8 @@ export class TaskService {
             // Jev's displayed 0% means the task cannot help the dispatcher classify this
             // message. Keep the full candidate set in the dispatch log, but do
             // not send that task's input/result/latest message (or its timeline
-            // excerpt) to the dispatcher. An explicit user reference always wins.
-            const zeroIds = new Set(previous.filter(t => t.id !== explicit?.id && relevance?.scores?.[t.id] === 0).map(t => t.id));
+            // excerpt) to the dispatcher.
+            const zeroIds = new Set(previous.filter(t => relevance?.scores?.[t.id] === 0).map(t => t.id));
             const lunaCandidates = previous.filter(t => !zeroIds.has(t.id));
             const lunaTimeline = zeroIds.size
                 ? formatTimeline(timeline(everything, row).filter(entry => entry.current || !zeroIds.has(entry.taskId)), row.created_at)
@@ -628,8 +634,6 @@ export class TaskService {
             if (plan) { trace.failed = false; trace.chosen = { related: plan.related, appendTo: plan.appendTo ?? null, resume: plan.resume ?? null }; steps.push({ kind: "plan", at: Date.now(), plan, repairs: report.repairs }); }
             if (!plan)
                 throw new Error(`任务分配暂时失败，尚未执行。请重试分配。（派单结果无法使用：${report.error ?? "格式不符合要求"}）`);
-            // The executor sees Jev's reading and the dispatcher's final normalized plan.
-            if (explicit && !plan.resume) applyTaskReference(plan, this.referenceTarget(row)!);
             // Setting up or changing a schedule needs no executor: answer right here.
             if (plan.scheduleAction || (plan.schedule && !plan.schedule.runNow)) {
                 if (this.#closed || this.get(row.id)?.status !== "planning") return;
@@ -647,33 +651,7 @@ export class TaskService {
                 this.agent.renameConversation(row.conversation_id, plan.title);
                 return;
             }
-            const root = this.cfg.sandbox.containerWorkspaceDir;
-            // Historical resource hints only coordinate queueing/prewarming;
-            // they are not an authorization boundary for the executor.
-            if (this.resourceSandbox && plan.resources.length)
-                plan.resources = await resolveResources(plan.resources, root, this.resourceSandbox);
-            if (this.#closed || this.get(row.id)?.status !== "planning") return;
-            if (this.taskContext(this.get(row.id)!) !== inputContext) return;
-            if (explicit && !plan.resume) applyTaskReference(plan, this.referenceTarget(row)!);
-            if (plan.appendTo) {
-                this.db.prepare("UPDATE tasks SET title=?,plan_json=?,merged_into=?,status='merging',error=NULL WHERE id=?").run(plan.title,JSON.stringify(plan),plan.appendTo,row.id);
-                return;
-            }
-            const finalContinued = plan.resume ? this.get(plan.resume) : null;
-            if (finalContinued) this.db.prepare("UPDATE tasks SET related_task_id=?,execution_conversation_id=? WHERE id=?").run(finalContinued.id, this.executor(finalContinued), row.id);
-            else if (row.execution_conversation_id) this.db.prepare("UPDATE tasks SET execution_conversation_id=NULL WHERE id=?").run(row.id);
-            // "Do it now, and every day from now on": the schedule, then this run.
-            if (plan.schedule) plan.description = this.createSchedule(row, plan, true);
-            this.db.prepare("UPDATE tasks SET title=?,plan_json=?,status=?,error=NULL WHERE id=?").run(plan.title, JSON.stringify(plan), "waiting", row.id);
-            if (finalContinued?.status === "needs_input" && finalContinued.turn_id) {
-                const answeredPlan = JSON.parse(finalContinued.plan_json!) as TaskPlan;
-                answeredPlan.answeredBy = row.id;
-                const acknowledgement = "已收到补充，结果请看后续任务。";
-                this.db.prepare("UPDATE tasks SET status='completed',result=?,plan_json=? WHERE id=? AND status='needs_input'")
-                    .run([finalContinued.result, acknowledgement].filter(Boolean).join("\n\n"), JSON.stringify(answeredPlan), finalContinued.id);
-            }
-            this.agent.renameConversation(row.conversation_id, plan.title);
-            this.notifyChange(row.id, "planning");
+            await this.admitPlan(row, plan, inputContext);
         }
         catch (err) {
             if (!this.#closed && this.get(row.id)?.status === "planning") {
@@ -697,6 +675,35 @@ export class TaskService {
             }
             this.schedule();
         }
+    }
+    /** Admit a planning task under its plan: a supplement to the task it steers, or a waiting task of its own. */
+    private async admitPlan(row: TaskRow, plan: TaskPlan, inputContext: string) {
+        const root = this.cfg.sandbox.containerWorkspaceDir;
+        // Historical resource hints only coordinate queueing/prewarming;
+        // they are not an authorization boundary for the executor.
+        if (this.resourceSandbox && plan.resources.length)
+            plan.resources = await resolveResources(plan.resources, root, this.resourceSandbox);
+        if (this.#closed || this.get(row.id)?.status !== "planning") return;
+        if (this.taskContext(this.get(row.id)!) !== inputContext) return;
+        if (plan.appendTo) {
+            this.db.prepare("UPDATE tasks SET title=?,plan_json=?,merged_into=?,status='merging',error=NULL WHERE id=?").run(plan.title,JSON.stringify(plan),plan.appendTo,row.id);
+            return;
+        }
+        const finalContinued = plan.resume ? this.get(plan.resume) : null;
+        if (finalContinued) this.db.prepare("UPDATE tasks SET related_task_id=?,execution_conversation_id=? WHERE id=?").run(finalContinued.id, this.executor(finalContinued), row.id);
+        else if (row.execution_conversation_id) this.db.prepare("UPDATE tasks SET execution_conversation_id=NULL WHERE id=?").run(row.id);
+        // "Do it now, and every day from now on": the schedule, then this run.
+        if (plan.schedule) plan.description = this.createSchedule(row, plan, true);
+        this.db.prepare("UPDATE tasks SET title=?,plan_json=?,status=?,error=NULL WHERE id=?").run(plan.title, JSON.stringify(plan), "waiting", row.id);
+        if (finalContinued?.status === "needs_input" && finalContinued.turn_id) {
+            const answeredPlan = JSON.parse(finalContinued.plan_json!) as TaskPlan;
+            answeredPlan.answeredBy = row.id;
+            const acknowledgement = "已收到补充，结果请看后续任务。";
+            this.db.prepare("UPDATE tasks SET status='completed',result=?,plan_json=? WHERE id=? AND status='needs_input'")
+                .run([finalContinued.result, acknowledgement].filter(Boolean).join("\n\n"), JSON.stringify(answeredPlan), finalContinued.id);
+        }
+        this.agent.renameConversation(row.conversation_id, plan.title);
+        this.notifyChange(row.id, "planning");
     }
     private taskContext(row: TaskRow): string {
         const supplements = this.db.prepare("SELECT input_text FROM tasks WHERE merged_into=? AND status='merged' ORDER BY created_at").all(row.id) as {input_text:string}[];

@@ -237,7 +237,8 @@ describe("main inbox delegation", () => {
         const extra=submit("correct the first",first.id);await tick();
         expect(tasks.get(extra.id)?.merged_into).toBe(first.id);expect(tasks.get(extra.id)?.status).toBe("merged");
         expect(codex.steers).toHaveLength(1);expect(codex.steers[0]!.threadId).toBe(codex.startedTurns[0]!.threadId);
-        const context=JSON.parse(codex.plans.at(-1)!.split("\n").at(-1)!);expect(context.previous.map((t:{id:string})=>t.id)).toEqual([first.id]);
+        // The quoted task decides the route: the dispatcher is not asked about this message.
+        expect(codex.plans).toHaveLength(2);
         expect(JSON.parse(tasks.get(extra.id)!.plan_json!).dependencies).toEqual([]);
         // The supplement does not take over the task's title.
         expect(tasks.view(tasks.get(extra.id)!).relatedTaskTitle).toBe("first");
@@ -293,12 +294,17 @@ describe("main inbox delegation", () => {
         expect(codex.startedTurns.at(-1)!.text).toContain(`/tasks/${third.id}/`);
         expect(tasks.get(second.id)?.result).toBe('Second');expect(tasks.get(original.id)?.result).toBe('Original');
     });
-    it("turns an explicit reference into a followup if its task completes during planning",async()=>{
-        const first=submit("first");await tick();let resolve!:(s:string)=>void;
-        codex.plan=()=>new Promise(r=>resolve=r);const update=submit("new detail",first.id);await tick();
-        await codex.runTurn(codex.startedTurns[0]!.turnId,{text:"Fresh final result"});
-        resolve(JSON.stringify({title:"detail",appendTo:null,related:[],dependencies:[],resources:[]}));await tick();await tick();
+    it("resumes a quoted finished task without asking the dispatcher, reusing its title",async()=>{
+        const first=submit("first");await tick();
+        await codex.runTurn(codex.startedTurns[0]!.turnId,{text:"Fresh final result"});await tick();
+        const asked=codex.plans.length;
+        const update=submit("new detail",first.id);await tick();await tick();
+        expect(codex.plans).toHaveLength(asked);
         expect(tasks.get(update.id)?.status).toBe("running");expect(tasks.get(update.id)?.merged_into).toBeNull();expect(codex.steers).toHaveLength(0);
+        expect(tasks.get(update.id)?.title).toBe(tasks.get(first.id)?.title);
+        expect(JSON.parse(tasks.get(update.id)!.plan_json!)).toMatchObject({decision:{kind:"resume",taskId:first.id},related:[first.id]});
+        expect(codex.startedTurns.at(-1)!.threadId).toBe(codex.startedTurns[0]!.threadId);
+        expect(codex.startedTurns.at(-1)!.text).toContain("new detail");
         expect(codex.startedTurns.at(-1)!.text).toContain(`相关任务 ${first.id} 的详情已在本会话前文中`);
     });
     it("gives the executor rules to a thread once per version, and in full again after a change or compaction",async()=>{

@@ -92,7 +92,7 @@ it("asks Jev about the tasks recall found for the message, not only the latest o
   expect(latest.every(([id]) => id.startsWith("resume:task_today"))).toBe(true);
 });
 
-it("omits Jev 0%-related task details from Luna, while keeping explicit references", async () => {
+it("omits Jev 0%-related task details from Luna", async () => {
   const ids = history(2, {
     0: { title: "无关的旧花园计划", input: "花园专属输入标记", result: "花园专属结果标记" },
     1: { title: "相关的行程计划", input: "安排火车行程", result: "行程已整理" },
@@ -117,11 +117,6 @@ it("omits Jev 0%-related task details from Luna, while keeping explicit referenc
   expect(prompt).not.toContain("花园专属结果标记");
   expect(data.mainSessionTimeline).not.toContain("无关的旧花园计划");
   expect(JSON.parse(events().at(-1)!.candidates_json as string)).toEqual(expect.arrayContaining([expect.objectContaining({ id: ids[0] })]));
-
-  submit("继续花园计划", ids[0]);
-  await tick();
-  expect(view(codex.prompts.at(-1)!).data.previous.map(t => t.id)).toEqual([ids[0]]);
-  expect(codex.prompts.at(-1)).toContain("花园专属结果标记");
 });
 
 it("recalls a task hundreds back into the dispatcher's view before it has to ask, with a short excerpt and its date", async () => {
@@ -176,8 +171,8 @@ it("measures where search ranks a task picked by hand, beyond the recent window"
   const ids = history(100, { 3: { title: "奶奶签证材料清单", input: "整理奶奶 B2 签证面签材料", result: "材料清单……" } });
   submit("奶奶签证材料再补一份在职证明", ids[3]);
   await tick();
-  // A hand-picked reference goes straight to that task; the dispatcher sees only it.
-  expect(view(codex.prompts[0]!).data.previous.map((t) => t.id)).toEqual([ids[3]]);
+  // A hand-picked reference goes straight to that task without asking the dispatcher.
+  expect(codex.prompts).toHaveLength(0);
   expect(events()[0]).toMatchObject({ gold_task_id: ids[3], gold_rank: 1, gold_in_window: 0 });
   expect(recallStats(db, "owner_1", 7, 10)).toMatchObject({ labelled: 1, recallAtCap: 1, mrr: 1 });
 });
