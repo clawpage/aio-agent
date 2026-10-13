@@ -66,9 +66,15 @@ page cannot load.
   (`gen/android/.../MainActivity.kt`).
 - Android: the Rust library is linked for 16 KB pages (`src-tauri/build.rs`).
 - macOS: `src-tauri/tauri.macos.conf.json` replaces the phone-sized window with a
-  1280×820 desktop window, so the console shows its wide web layout. Build with
+  1280×820 desktop window, so the console shows its wide web layout. The same
+  narrow bridge (`mac` in `src-tauri/src/lib.rs`) opens links and the Google
+  authorization page in the default browser, because Google stops at the account
+  chooser inside the web view. The browser returns through the `aioagent` URL scheme,
+  and microphone permission text is in `src-tauri/Info.macos.plist`. Build with
   `env -u NODE_ENV npm run -- tauri build --bundles app` and copy
-  `src-tauri/target/release/bundle/macos/AIOAgent.app` to `/Applications`.
+  `src-tauri/target/release/bundle/macos/AIOAgent.app` to `/Applications`. A copy
+  left in `target/` also claims the scheme; unregister it with `lsregister -u <path>`.
+  Verified 2026-10-12: Google sign-in returned to the app and survived a restart.
 - Home-screen name 一站: `gen/apple/project.yml` (`CFBundleDisplayName`, then
   `xcodegen generate`) and `gen/android/app/src/main/res/values/strings.xml`.
 - Icons: the 一站 mark (`src/ui/public/favicon.svg`) full bleed in `icon/app-icon.svg`, plus a

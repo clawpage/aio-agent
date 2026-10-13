@@ -13,6 +13,13 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 tauri = { version = "2", features = [] }
+url = "2"
 
 [target.'cfg(target_os = "ios")'.dependencies]
 objc2 = "0.6"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", features = ["NSString", "NSURL"] }
+objc2-app-kit = { version = "0.3", features = ["NSWorkspace"] }
+objc2-web-kit = { version = "0.3", features = ["WKFrameInfo", "WKScriptMessage", "WKScriptMessageHandler", "WKSecurityOrigin", "WKUserContentController", "WKWebView", "WKWebViewConfiguration", "objc2-app-kit"] }
