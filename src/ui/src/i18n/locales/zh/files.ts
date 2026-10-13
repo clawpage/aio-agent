@@ -53,4 +53,9 @@ export const files = {
     openInBrowser: "在浏览器打开",
     download: "下载",
   },
+  save: {
+    ready: (name: string) => `${name} 已准备好`,
+    save: "保存",
+    failed: (name: string) => `${name} 获取失败，请稍后再试`,
+  },
 };

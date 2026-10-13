@@ -2,6 +2,7 @@ import { InlineLoading } from "./Brand";
 import { PopupPresence, PopupSurface } from "./PopupMotion";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, ApiError } from "../api";
+import { onDownloadClick } from "../saveFile";
 import type { CapabilitiesResponse, DocumentReadiness, FileEntry, StatusResponse } from "../types";
 import { FilePreview } from "./FilePreview";
 import { TerminalSessions } from "./TerminalSessions";
@@ -1074,7 +1075,7 @@ function FilesTab({
                         {t.workspace.files.convert}
                       </button>
                     )}
-                    <a className="link" href={api.downloadUrl(entry.path)} download>
+                    <a className="link" href={api.downloadUrl(entry.path)} download onClick={onDownloadClick}>
                       {t.workspace.files.download}
                     </a>
                   </>
@@ -1161,7 +1162,7 @@ function FilesTab({
               <button type="button" className="link" onClick={() => onPreview(output.path)}>
                 {t.workspace.files.preview}
               </button>
-              <a className="link" href={api.downloadUrl(output.path)} download>
+              <a className="link" href={api.downloadUrl(output.path)} download onClick={onDownloadClick}>
                 {t.workspace.files.download}
               </a>
             </p>

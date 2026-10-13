@@ -3,6 +3,7 @@ import { PopupPresence } from "./PopupMotion";
 import { MessageTime, useDisplayClock } from "./MessageTime";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, openEventStream } from "../api";
+import { saveFile } from "../saveFile";
 import type { AgentEvent, Attachment, Conversation, StatusResponse } from "../types";
 import {
   applyEvent,
@@ -245,9 +246,11 @@ export function Chat({
       setPreviewPath(path);
       return;
     }
+    const name = path.slice(path.lastIndexOf("/") + 1) || "download";
+    if (saveFile(api.downloadUrl(path), name)) return;
     const anchor = document.createElement("a");
     anchor.href = api.downloadUrl(path);
-    anchor.download = path.slice(path.lastIndexOf("/") + 1) || "download";
+    anchor.download = name;
     anchor.rel = "noopener";
     document.body.appendChild(anchor);
     anchor.click();

@@ -692,6 +692,16 @@ textarea:focus {
 .toast.error {
   border-color: var(--error);
 }
+/* Saving from a home-screen app: above an open preview and clear of its footer, its button beside the words. */
+.toast.save-notice {
+  z-index: 1050;
+  bottom: calc(88px + var(--safe-bottom));
+  width: max-content;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.save-notice button { flex: none; white-space: nowrap; }
 
 /* ----------------------------------------------------------------- login */
 

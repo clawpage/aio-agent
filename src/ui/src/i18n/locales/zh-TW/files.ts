@@ -54,4 +54,9 @@ export const files: typeof zh = {
     openInBrowser: "在瀏覽器開啟",
     download: "下載",
   },
+  save: {
+    ready: (name: string) => `${name} 已準備好`,
+    save: "儲存",
+    failed: (name: string) => `${name} 取得失敗，請稍後再試`,
+  },
 };

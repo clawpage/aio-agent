@@ -55,4 +55,9 @@ export const files: typeof zh = {
     openInBrowser: "Open in browser",
     download: "Download",
   },
+  save: {
+    ready: (name: string) => `${name} is ready`,
+    save: "Save",
+    failed: (name: string) => `Couldn't get ${name}. Try again later.`,
+  },
 };

@@ -1,5 +1,6 @@
 import { memo, useEffect, useRef, useState } from "react";
 import { api } from "../api";
+import { onDownloadClick } from "../saveFile";
 import { cachedImage, holdImage } from "../imageCache";
 import { isMarkdownPath, isHtmlPath, kindBadge, kindLabel, type WorkspaceFileKind } from "../sandboxLink";
 import { t } from "../i18n";
@@ -96,7 +97,7 @@ export const FileCard = memo(function FileCard({ path, name, title, kind, onOpen
             <span className="file-card-media-empty">{thumbFailed ? t.files.card.imageUnavailable : ""}</span>
           )}
         </button>
-        <a className="file-card-media-download" href={api.downloadUrl(path)} download={name} data-testid="file-card-download" aria-label={t.files.card.downloadName(name)} title={t.files.card.download}>
+        <a className="file-card-media-download" href={api.downloadUrl(path)} download={name} onClick={onDownloadClick} data-testid="file-card-download" aria-label={t.files.card.downloadName(name)} title={t.files.card.download}>
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11m0 0-4.5-4.5M12 15l4.5-4.5M5 19.5h14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
         </a>
       </div>
@@ -130,7 +131,7 @@ export const FileCard = memo(function FileCard({ path, name, title, kind, onOpen
           </span>
         </span>
       </button>
-      <a className="file-card-download" href={api.downloadUrl(path)} download={name} data-testid="file-card-download">
+      <a className="file-card-download" href={api.downloadUrl(path)} download={name} onClick={onDownloadClick} data-testid="file-card-download">
         {t.files.card.download}
       </a>
       {/* Nothing loads until play is pressed (preload none), so a long history stays light. */}

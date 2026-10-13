@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { PopupSurface } from "./PopupMotion";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, ApiError } from "../api";
+import { onDownloadClick } from "../saveFile";
 import { cachedImage, holdImage, retryImage } from "../imageCache";
 import { isSandboxLink } from "../sandboxLink";
 import { openDeviceBrowser } from "../deviceBrowser";
@@ -350,7 +351,7 @@ export function FilePreview({ path: initialPath, onClose, onOpenLink, onOpenInBr
               {t.files.preview.openInBrowser}
             </button>
           )}
-          <a className="primary" href={api.downloadUrl(path)} download={name} data-testid="file-preview-download">
+          <a className="primary" href={api.downloadUrl(path)} download={name} onClick={onDownloadClick} data-testid="file-preview-download">
             {t.files.preview.download}
           </a>
         </footer>
