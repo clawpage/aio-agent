@@ -101,7 +101,11 @@ export class SandboxContainer {
   async ensureRunning(): Promise<ContainerState> {
     // The node creates or starts the container, waits for it, isolates its network
     // and fixes ownership; the agent runtime inside is provisioned from here.
-    await this.#node.ensure(this.name, { spec: this.spec(), readyTimeoutMs: this.#cfg.sandbox.readyTimeoutMs });
+    const spec = this.spec();
+    await this.#node.ensure(this.name, { spec, readyTimeoutMs: this.#cfg.sandbox.readyTimeoutMs });
+    // Member ports recorded while this (owner) container was stopped or starting.
+    const peers = this.#cfg.protectedMemberPorts ?? [];
+    if (!spec.member && peers.some((p) => !spec.peerPorts?.includes(p))) await this.#node.peerPorts(this.name, peers);
     await this.ensureCodexCli();
     await this.seedWorkspace();
     await this.waitSurfaces();
@@ -112,7 +116,8 @@ export class SandboxContainer {
   protectMemberPorts(ports:number[]):Promise<void>{
     if(ports.some(p=>!Number.isInteger(p)||p<1||p>65535))return Promise.reject(new Error("Invalid peer port"));
     this.#cfg.protectedMemberPorts=[...new Set([...(this.#cfg.protectedMemberPorts??[]),...ports])];
-    return this.#node.peerPorts(this.name,this.#cfg.protectedMemberPorts);
+    // A stopped (idle) container gets the rules when it next starts (ensureRunning).
+    return this.inspect().then(state=>state.running?this.#node.peerPorts(this.name,this.#cfg.protectedMemberPorts!):undefined);
   }
 
   /** Reachability of the sandbox's own web surfaces, probed through the node. */

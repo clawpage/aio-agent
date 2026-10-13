@@ -393,11 +393,35 @@ export function startSandboxIdle(ctx: AppContext, intervalMs = 30_000, parked = 
   return idle;
 }
 
+/**
+ * The owner's agent and tasks start like a member's: a sandbox found stopped (idle
+ * stopping on) stays stopped until first use, so a service start does not wake it.
+ * Returns the parked idle manager in that case.
+ */
+export async function initOwnerRuntime(ctx: AppContext): Promise<SandboxIdle | null> {
+  let asleep = false;
+  if (ctx.cfg.sandbox.autostart && ctx.cfg.sandbox.releaseWhenIdle) {
+    try {
+      const state = await ctx.container.inspect();
+      asleep = state.exists && !state.running;
+    } catch (err) {
+      ctx.log.warn("sandbox state unknown at start", { error: err instanceof Error ? err.message : String(err) });
+    }
+  }
+  // The gate goes in before queued work resumes, or it would run against the stopped container.
+  const idle = asleep ? startSandboxIdle(ctx, undefined, true) : null;
+  await ctx.agent.init({ cold: asleep });
+  ctx.tasks.init();
+  if (asleep) ctx.log.info("sandbox left stopped at start");
+  return idle;
+}
+
 async function main(): Promise<void> {
   const config=loadConfig();
   config.runtimeUserId="owner_1";
   const nodes = new SandboxNodes(config);
-  const { ctx, shutdown } = await bootstrap({config, nodes});
+  const { ctx, shutdown } = await bootstrap({config, nodes, deferAgentInit: true});
+  const parked = await initOwnerRuntime(ctx);
   const account=(sql:string,value:string)=>(ctx.db.prepare(sql).get(value) as {v:string}|undefined)?.v??null;
   ctx.share=new ShareStore({cfg:ctx.cfg,port:ctx.cfg.memberModelPort??4902,
     usernameOf:id=>account("SELECT username AS v FROM owners WHERE id=?",id),
@@ -460,7 +484,7 @@ async function main(): Promise<void> {
   }
   const recovery = startRuntimeRecovery(ctx);
   void recovery.tick();
-  const idle = startSandboxIdle(ctx);
+  const idle = parked ?? startSandboxIdle(ctx);
   // Independent of the health check above, so a new managed skill reaches a
   // sandbox that is already running. Never awaited: chat startup must not wait
   // on the sandbox.

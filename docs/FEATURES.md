@@ -240,7 +240,8 @@
 
 ### 常驻与空闲释放
 
-- **owner 常驻**：owner 浏览器默认一直运行，登录状态（包括会话 cookie）始终留在同一进程。若因升级或崩溃处于已释放状态，
+- **owner 常驻**：owner 浏览器在容器运行期间默认一直运行，登录状态（包括会话 cookie）始终留在同一进程；容器空闲休眠前照常快照，
+  下次启动时恢复（见第 5 节）。若因升级或崩溃处于已释放状态，
   后台巡检自动恢复一次。需要省内存时设 `PA_BROWSER_RELEASE_IDLE=1`。
 - **成员空闲释放**（`PA_MEMBER_BROWSER_RELEASE_IDLE=1`，设 `0` 改为常驻）：常驻 Chromium 约占 500 MB；实测快照加释放约 20 秒、
   释放后容器少约 370 MB，下次冷启动约 17 秒，cookie 全部恢复。智能体只使用这一个浏览器，不另起浏览器或清除站点数据。
@@ -263,8 +264,9 @@
 
 ## 5. 沙箱容器空闲休眠
 
-成员的整个沙箱容器在无人使用时停止（`PA_MEMBER_SANDBOX_RELEASE_IDLE=1`），下次使用时启动；owner 默认常驻
-（`PA_SANDBOX_RELEASE_IDLE=0`）。`PA_RESIDENT_MEMBERS` 列出的成员与 owner 一样常驻并随服务启动（现有部署为语音配件账号 `betaw`）。
+owner 与成员的整个沙箱容器都在无人使用时停止（`PA_SANDBOX_RELEASE_IDLE=1` / `PA_MEMBER_SANDBOX_RELEASE_IDLE=1`，设 `0` 改为常驻），
+下次使用时启动。`PA_RESIDENT_MEMBERS` 列出的成员常驻并随服务启动（现有部署为语音配件账号 `betaw`）。
+owner 容器休眠期间新成员的端口隔离规则先记下，容器下次启动时写入。
 
 - **停止条件**：以下两个信号都静默满 `PA_SANDBOX_IDLE_SECONDS`（默认 300，下限 60）：
   - 沙箱在用：执行中或排队的轮次、派单中或待执行的任务、待批准请求、浏览器租约、进行中的工作区代理请求、在工作区标签页里输入；

@@ -23,7 +23,7 @@ export function memberConfig(base: Config, userId: string, port: number, model: 
     // OAuth identity and secrets stay at the central authentication boundary.
     googleClientId:'',googleClientSecret:'',
     agent:{...base.agent,defaultModel:model},
-    // A resident member (PA_RESIDENT_MEMBERS) keeps its container and browser running, as the owner does.
+    // A resident member (PA_RESIDENT_MEMBERS) keeps its container and browser running.
     browser:{...base.browser,readyGateway:undefined,releaseWhenIdle:!resident&&base.browser.memberReleaseWhenIdle},
     sandbox:{...base.sandbox,releaseWhenIdle:!resident&&base.sandbox.memberReleaseWhenIdle,hostPort:port,containerName:`aio-user-${suffix}`,
       networkName:`aio-user-${suffix}`,workspaceVolume:`aio-user-${suffix}-workspace`,

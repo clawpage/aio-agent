@@ -458,11 +458,14 @@ export function createApiRouter(context: AppContext): Router {
           workspaceOrigin: workspaceOrigin(ctxOf(_req), cfg) });
         return;
       }
-      // Refresh surfaces on demand so the dashboard is not stuck on stale data.
-      try {
-        context.sandboxSurfaces = await container.surfaces();
-      } catch {
-        /* keep the previous snapshot */
+      // Refresh surfaces on demand so the dashboard is not stuck on stale data;
+      // a stopped (idle) container has none, and probing it only waits for timeouts.
+      if (sandboxState.running) {
+        try {
+          context.sandboxSurfaces = await container.surfaces();
+        } catch {
+          /* keep the previous snapshot */
+        }
       }
       res.json({
         agent: agentStatus,

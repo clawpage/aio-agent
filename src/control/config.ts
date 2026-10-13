@@ -100,12 +100,12 @@ export function loadConfig(): {
     codexBin: string;
     /**
      * Stop the whole container once it is unused and the console is not in the
-     * foreground for `idleMs`; it starts again on the next use. Off for the owner.
+     * foreground for `idleMs`; it starts again on the next use. On by default.
      */
     releaseWhenIdle: boolean;
-    /** The same for member runtimes, on by default. */
+    /** The same for member runtimes, also on by default. */
     memberReleaseWhenIdle: boolean;
-    /** Members whose sandbox and browser stay running like the owner's (`PA_RESIDENT_MEMBERS`), e.g. the voice gadget's account. */
+    /** Members whose sandbox and browser never stop for idleness (`PA_RESIDENT_MEMBERS`), e.g. the voice gadget's account. */
     residentMembers: string[];
     idleMs: number;
   };
@@ -447,7 +447,7 @@ export function loadConfig(): {
       codexVersion: sandboxCodexVersion,
       codexPrefix: sandboxCodexPrefix,
       codexBin: sandboxCodexBin,
-      releaseWhenIdle: envStr("PA_SANDBOX_RELEASE_IDLE", "0") === "1",
+      releaseWhenIdle: envStr("PA_SANDBOX_RELEASE_IDLE", "1") === "1",
       memberReleaseWhenIdle: envStr("PA_MEMBER_SANDBOX_RELEASE_IDLE", "1") === "1",
       residentMembers: parseList(envStr("PA_RESIDENT_MEMBERS", "")),
       idleMs: Math.max(60_000, envInt("PA_SANDBOX_IDLE_SECONDS", 300) * 1000),

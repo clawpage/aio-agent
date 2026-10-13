@@ -301,13 +301,13 @@ docker exec -i -u root personal-agent-sandbox python3 - status \
 
 ## 8. 整个容器空闲休眠
 
-成员默认开启（`PA_MEMBER_SANDBOX_RELEASE_IDLE=1`），owner 默认关闭（`PA_SANDBOX_RELEASE_IDLE=0`）。
+owner 与成员默认都开启（`PA_SANDBOX_RELEASE_IDLE=1` / `PA_MEMBER_SANDBOX_RELEASE_IDLE=1`）。
 沙箱不在用、控制台也不在前台，两者都持续 `PA_SANDBOX_IDLE_SECONDS`（默认 300）后：先检查容器里有没有仍在运行的 shell 命令、10 秒平均 CPU（不含 Chromium）是否 ≥ 5%，再给浏览器做快照并释放，最后 `docker stop` 容器。日志里 `sandbox in use` 会写明是哪个信号让容器留着。判定细节见 [功能说明](FEATURES.md#5-沙箱容器空闲休眠)。
 
-- 看状态：`grep -E "sandbox (stopped after idle|waking from idle)|sandbox idle" var/users/*/logs/personal-agent.log`；`docker ps -a --filter name=aio-user-` 里 `Exited` 是休眠，不是故障。
+- 看状态：`grep -E "sandbox (stopped after idle|waking from idle)|sandbox idle" var/logs/personal-agent.log var/users/*/logs/personal-agent.log`；`docker ps -a --filter name=aio-user-` 或 `--filter name=personal-agent-sandbox` 里 `Exited` 是休眠，不是故障。
 - 休眠时巡检会跳过这个容器，不要手动 `docker start`：控制面会以为它还在休眠，就不会把 Codex 会话接回来。要唤醒就打开该成员的控制台，或在工作区页面刷新一下。
 - 已知窗口：成员容器刚启动、还没装好出站隔离规则之前，有几秒不受网络限制（镜像自带的服务在跑，智能体进程还没启动）。休眠后容器启停变频繁，这个窗口出现得也更多。
-- 重启服务不会拉起停着的成员容器：成员的运行时照常建立（定时任务、未完成的任务照旧），容器按休眠接管，等该账号的页面显示或有任务时再启动；日志里是 `sandbox left stopped at start`。重启时正在运行的容器照常接管，没人用的话 5 分钟后停掉；还不存在的容器（新账号）照常创建。
+- 重启服务不会拉起停着的容器（owner 与成员相同）：运行时照常建立（定时任务、未完成的任务照旧），容器按休眠接管，等该账号的页面显示或有任务时再启动；日志里是 `sandbox left stopped at start`。重启时正在运行的容器照常接管，没人用的话 5 分钟后停掉；还不存在的容器（新账号）照常创建。
 
 ## 9. 崩溃恢复验证（唯一可靠方式）
 

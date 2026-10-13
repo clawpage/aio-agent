@@ -78,7 +78,7 @@
 
 | 变量 | 默认 | 说明 |
 | --- | --- | --- |
-| `PA_SANDBOX_RELEASE_IDLE` / `PA_MEMBER_SANDBOX_RELEASE_IDLE` | `0` / `1` | 空闲时是否停止 owner / 成员的整个沙箱容器 |
+| `PA_SANDBOX_RELEASE_IDLE` / `PA_MEMBER_SANDBOX_RELEASE_IDLE` | `1` / `1` | 空闲时是否停止 owner / 成员的整个沙箱容器 |
 | `PA_SANDBOX_IDLE_SECONDS` | `300` | 沙箱不在用且控制台不在前台多久后停容器（下限 60） |
 | `PA_RESIDENT_MEMBERS` | 空 | 容器与浏览器都常驻并随服务启动的成员用户名，逗号分隔 |
 | `PA_BROWSER_LIFECYCLE` | `1` | 浏览器空闲释放总开关 |
