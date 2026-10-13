@@ -1,5 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Clawpage",
   "app": {
     "windows": [
       {
@@ -16,7 +17,11 @@
   },
   "bundle": {
     "macOS": {
-      "infoPlist": "Info.macos.plist"
+      "infoPlist": "Info.macos.plist",
+      "files": {
+        "Resources/en.lproj/InfoPlist.strings": "macos/en.lproj/InfoPlist.strings",
+        "Resources/zh-Hans.lproj/InfoPlist.strings": "macos/zh-Hans.lproj/InfoPlist.strings"
+      }
     }
   }
 }

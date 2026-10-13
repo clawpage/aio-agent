@@ -72,8 +72,10 @@ page cannot load.
   chooser inside the web view. The browser returns through the `aioagent` URL scheme,
   and microphone permission text is in `src-tauri/Info.macos.plist`. Build with
   `env -u NODE_ENV npm run -- tauri build --bundles app` and copy
-  `src-tauri/target/release/bundle/macos/AIOAgent.app` to `/Applications`. A copy
+  `src-tauri/target/release/bundle/macos/Clawpage.app` to `/Applications`. A copy
   left in `target/` also claims the scheme; unregister it with `lsregister -u <path>`.
+  The Mac app is named Clawpage in English and 一站 in Chinese (`productName` in
+  `tauri.macos.conf.json`, `src-tauri/macos/*.lproj/InfoPlist.strings`); the phones keep 一站.
   Verified 2026-10-12: Google sign-in returned to the app and survived a restart.
 - Home-screen name 一站: `gen/apple/project.yml` (`CFBundleDisplayName`, then
   `xcodegen generate`) and `gen/android/app/src/main/res/values/strings.xml`.
