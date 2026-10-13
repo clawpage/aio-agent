@@ -482,6 +482,7 @@ async function main(): Promise<void> {
   for(const user of ctx.db.prepare("SELECT id FROM owners WHERE role='member'").all() as {id:string}[]) {
     void users.resolve(user.id).catch(()=>ctx.log.error("member runtime unavailable",{userId:user.id}));
   }
+  users.prepareSpare();
   const recovery = startRuntimeRecovery(ctx);
   void recovery.tick();
   const idle = parked ?? startSandboxIdle(ctx);

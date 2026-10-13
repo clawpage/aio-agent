@@ -108,6 +108,8 @@ export function loadConfig(): {
     /** Members whose sandbox and browser never stop for idleness (`PA_RESIDENT_MEMBERS`), e.g. the voice gadget's account. */
     residentMembers: string[];
     idleMs: number;
+    /** Keep one member sandbox provisioned ahead of the next registration (`PA_SPARE_SANDBOX`). */
+    spare: boolean;
   };
   documents: {
     /** Master switch for sandbox document conversion (preview rasterisation). */
@@ -451,6 +453,7 @@ export function loadConfig(): {
       memberReleaseWhenIdle: envStr("PA_MEMBER_SANDBOX_RELEASE_IDLE", "1") === "1",
       residentMembers: parseList(envStr("PA_RESIDENT_MEMBERS", "")),
       idleMs: Math.max(60_000, envInt("PA_SANDBOX_IDLE_SECONDS", 300) * 1000),
+      spare: envStr("PA_SPARE_SANDBOX", "1") === "1",
     },
     documents: {
       // Conversion runs entirely inside the sandbox with fixed argv; the control

@@ -1,3 +1,4 @@
+import {rmSync} from 'node:fs';
 import path from 'node:path';
 import {userNamespace,workspaceConfig} from './auth/workspaceHost.js';
 import type {Config} from './config.js';
@@ -7,6 +8,8 @@ import {startTaskNotifications} from './push.js';
 import {startVaultAutofill} from './vault.js';
 import type {MemberModelGateway} from './memberModelGateway.js';
 import {getUser} from './auth/owner.js';
+import {SPARE_ACCOUNT_KEY} from './auth/invites.js';
+import {randomId} from './auth/passwords.js';
 import {MEMBER_EFFORTS,MEMBER_GPT_MODEL,MEMBER_MODEL,MEMBER_MODELS} from './auth/policy.js';
 import type {SandboxNodes} from './sandbox/nodes.js';
 import {feedTimeFor} from './tasks/service.js';
@@ -49,10 +52,15 @@ export function memberConfig(base: Config, userId: string, port: number, model: 
   };
 }
 
+/** The spare runtime's name inside its own database; it has no account and cannot sign in. */
+const SPARE_USERNAME='spare';
+
 /** Fail closed: a missing/failed member runtime can never fall through to owner. */
 export class UserRuntimes {
   private entries=new Map<string,Promise<Bootstrapped>>();
-  private recoveries: Array<{stop():void}>=[];
+  /** Each runtime's background loops, stopped with it. */
+  private recoveries=new Map<string,Array<{stop():void}>>();
+  private spare:{id:string;runtime:Promise<Bootstrapped|null>}|null=null;
   constructor(private root: AppContext, private factory=bootstrap, private gateway?:MemberModelGateway, private nodes?:SandboxNodes) {}
   async resolve(id:string):Promise<AppContext> {
     const user=getUser(this.root.db,id);
@@ -60,13 +68,46 @@ export class UserRuntimes {
     if(user.role==='owner') return this.root;
     let pending=this.entries.get(id);
     if(!pending){
-      pending=this.create(user);
+      pending=this.spare?.id===id?this.adopt(user):this.create(user);
       this.entries.set(id,pending);
       pending.catch(()=>{if(this.entries.get(id)===pending)this.entries.delete(id);});
     }
     return (await pending).ctx;
   }
-  private async create(user:{id:string;username:string;role:string}):Promise<Bootstrapped> {
+  /**
+   * Provision one sandbox ahead of the next registration, under an id no account has yet
+   * (`spare_user_id`): registering takes that id, so the new account's first start finds the
+   * container, the Codex CLI and the browser already in place instead of building them.
+   */
+  prepareSpare():void{
+    if(this.spare||!this.root.cfg.sandbox.autostart||!this.root.cfg.sandbox.spare)return;
+    let id=(this.root.db.prepare('SELECT value FROM meta WHERE key=?').get(SPARE_ACCOUNT_KEY) as {value:string}|undefined)?.value;
+    if(!id){id=randomId('user');this.root.db.prepare('INSERT INTO meta(key,value) VALUES(?,?)').run(SPARE_ACCOUNT_KEY,id);}
+    const runtime=this.create({id,username:SPARE_USERNAME,role:'member'},true).catch(err=>{
+      this.root.log.warn('spare sandbox not prepared',{error:err instanceof Error?err.message:String(err)});return null;});
+    this.spare={id,runtime};
+  }
+  /** A registration took the spare's id: retire the spare runtime, start the account's own on its container, prepare the next spare. */
+  private async adopt(user:{id:string;username:string;role:string}):Promise<Bootstrapped> {
+    const spare=this.spare!;this.spare=null;
+    const runtime=await spare.runtime;
+    this.stopRecoveries(spare.id);
+    await runtime?.shutdown();
+    // The account starts with an empty database of its own; the container and volumes stay.
+    const dbPath=path.join(this.root.cfg.dataDir,'users',userNamespace(spare.id),'agent.sqlite');
+    for(const file of [dbPath,`${dbPath}-wal`,`${dbPath}-shm`])rmSync(file,{force:true});
+    this.root.log.info('spare sandbox taken by a new account');
+    this.prepareSpare();
+    return await this.create(user);
+  }
+  private stopRecoveries(id:string):void{
+    for(const recovery of this.recoveries.get(id)??[])recovery.stop();
+    this.recoveries.delete(id);
+  }
+  private async create(user:{id:string;username:string;role:string},spare=false):Promise<Bootstrapped> {
+    const recoveries:Array<{stop():void}>=[];
+    this.stopRecoveries(user.id);
+    this.recoveries.set(user.id,recoveries);
     // Stored allocation survives account deletion/recreation and service restarts.
     const key=`sandbox_port:${user.id}`;
     const row=this.root.db.prepare('SELECT value FROM meta WHERE key=?').get(key) as {value:string}|undefined;
@@ -92,7 +133,8 @@ export class UserRuntimes {
       slot=1;while(taken.has(slot))slot++;
       this.root.db.prepare('INSERT INTO meta(key,value) VALUES(?,?)').run(slotKey,String(slot));
     }
-    config.agent={...config.agent,dailyFeedAt:feedTimeFor(slot)};
+    // Nobody reads the spare's feed; the account that takes it gets its own.
+    config.agent={...config.agent,dailyFeedAt:feedTimeFor(slot),...(spare?{dailyFeed:false}:{})};
     if(config.sandbox.autostart&&!this.gateway)throw new Error("Member gateway unavailable");
     this.gateway?.provision(config);
     // A member keeps the node its sandbox was created on; a new one goes where there is room.
@@ -122,21 +164,22 @@ export class UserRuntimes {
     // The gate goes in before queued work resumes, or it would run against the stopped container.
     let idle=asleep?startSandboxIdle(runtime.ctx,undefined,true):null;
     await runtime.ctx.agent.init({cold:asleep});runtime.ctx.tasks.init();
-    if(runtime.ctx.push)this.recoveries.push(startTaskNotifications(runtime.ctx,runtime.ctx.push));
-    this.recoveries.push(startVaultAutofill(runtime.ctx));
+    if(runtime.ctx.push)recoveries.push(startTaskNotifications(runtime.ctx,runtime.ctx.push));
+    recoveries.push(startVaultAutofill(runtime.ctx));
     if(runtime.ctx.cfg.sandbox.autostart){
       if(asleep)runtime.ctx.log.info('sandbox left stopped at start');
       else{
         await startSandboxRuntime(runtime.ctx);
         if(runtime.ctx.sandboxSetupError){await runtime.shutdown();throw new Error('用户独立环境启动失败');}
       }
-      const recovery=startRuntimeRecovery(runtime.ctx);this.recoveries.push(recovery);
-      idle??=startSandboxIdle(runtime.ctx);if(idle)this.recoveries.push(idle);
+      const recovery=startRuntimeRecovery(runtime.ctx);recoveries.push(recovery);
+      idle??=startSandboxIdle(runtime.ctx);if(idle)recoveries.push(idle);
     }
     return runtime;
   }
   async shutdown():Promise<void>{
-    for(const recovery of this.recoveries)recovery.stop();
-    await Promise.allSettled([...this.entries.values()].map(async p=>(await p).shutdown()));
+    for(const id of [...this.recoveries.keys()])this.stopRecoveries(id);
+    const spare=this.spare;this.spare=null;
+    await Promise.allSettled([...this.entries.values(),...(spare?[spare.runtime]:[])].map(async p=>(await p)?.shutdown()));
   }
 }

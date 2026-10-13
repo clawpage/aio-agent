@@ -26,6 +26,8 @@ export interface Invite {
 export const REGISTER_USERNAME = /^[a-z0-9_-]{2,40}$/;
 export const MIN_PASSWORD = 12;
 export const OPEN_REGISTRATION_LIMIT = 20;
+/** The id whose sandbox is already provisioned for the next registration (see UserRuntimes.prepareSpare). */
+export const SPARE_ACCOUNT_KEY = "spare_user_id";
 
 /** All existing accounts count, including the owner and administrator-created members. */
 export function registrationRequiresInvite(db: Db): boolean {
@@ -80,7 +82,7 @@ export async function registerWithInvite(db: Db, input: { username: string; pass
   }
   if (input.password.length < MIN_PASSWORD) throw new RegisterError(400, "weak_password", `密码至少需要 ${MIN_PASSWORD} 个字符`);
   const rec = await hashPassword(input.password);
-  const id = randomId("user");
+  let id = randomId("user");
   db.exec("BEGIN IMMEDIATE");
   try {
     if (!code && registrationRequiresInvite(db)) throw new RegisterError(400, "invite_required", "免邀请码注册名额已满，请输入邀请码");
@@ -91,6 +93,10 @@ export async function registerWithInvite(db: Db, input: { username: string; pass
     }
     if (db.prepare("SELECT 1 FROM owners WHERE lower(username)=?").get(username)) throw new RegisterError(409, "username_taken", "这个账号已经有人用了，换一个吧");
     const now = Date.now();
+    // The new account takes the spare sandbox's id, so it starts on a container that already exists.
+    const spare = (db.prepare("SELECT value FROM meta WHERE key=?").get(SPARE_ACCOUNT_KEY) as { value: string } | undefined)?.value;
+    if (spare && !db.prepare("SELECT 1 FROM owners WHERE id=?").get(spare)) id = spare;
+    if (spare) db.prepare("DELETE FROM meta WHERE key=?").run(SPARE_ACCOUNT_KEY);
     if (google) {
       const flow = db.prepare("SELECT subject FROM google_login_flows WHERE client_hash=? AND status='ready' AND expires_at>?").get(google.clientHash, now) as {subject: string} | undefined;
       if (flow?.subject !== google.subject) throw new RegisterError(401, "google_expired", "Google 登录已过期，请重新登录");
