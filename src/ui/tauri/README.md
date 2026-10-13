@@ -65,6 +65,10 @@ page cannot load.
   activity gives the keyboard's height back as bottom padding
   (`gen/android/.../MainActivity.kt`).
 - Android: the Rust library is linked for 16 KB pages (`src-tauri/build.rs`).
+- macOS: `src-tauri/tauri.macos.conf.json` replaces the phone-sized window with a
+  1280×820 desktop window, so the console shows its wide web layout. Build with
+  `env -u NODE_ENV npm run -- tauri build --bundles app` and copy
+  `src-tauri/target/release/bundle/macos/AIOAgent.app` to `/Applications`.
 - Home-screen name 一站: `gen/apple/project.yml` (`CFBundleDisplayName`, then
   `xcodegen generate`) and `gen/android/app/src/main/res/values/strings.xml`.
 - Icons: the 一站 mark (`src/ui/public/favicon.svg`) full bleed in `icon/app-icon.svg`, plus a
