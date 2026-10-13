@@ -64,7 +64,7 @@ fn full_screen_on_ios(webview: tauri::webview::PlatformWebview) {
 mod mac {
     use objc2::{define_class, msg_send, rc::Retained, runtime::{NSObject, ProtocolObject}, MainThreadOnly};
     use objc2_app_kit::NSWorkspace;
-    use objc2_foundation::{NSObjectProtocol, NSString, NSURL};
+    use objc2_foundation::{NSBundle, NSObjectProtocol, NSString, NSURL};
     use objc2_web_kit::{WKScriptMessage, WKScriptMessageHandler, WKUserContentController, WKWebView};
     use std::sync::{atomic::{AtomicBool, Ordering}, Mutex, OnceLock};
     use tauri::{webview::{PageLoadEvent, PageLoadPayload}, AppHandle, Manager, WebviewWindow};
@@ -93,6 +93,11 @@ mod mac {
 
     pub fn install(app: AppHandle, window: &WebviewWindow) -> tauri::Result<()> {
         let _ = APP.set(app);
+        // The window takes the app's name in the system language (Clawpage / 一站, from InfoPlist.strings).
+        if let Some(name) = NSBundle::mainBundle().objectForInfoDictionaryKey(&NSString::from_str("CFBundleDisplayName"))
+            .and_then(|name| name.downcast::<NSString>().ok()) {
+            window.set_title(&name.to_string())?;
+        }
         window.with_webview(|webview| unsafe {
             let wk: &WKWebView = &*(webview.inner() as *const WKWebView);
             let handler: Retained<Handler> = msg_send![Handler::alloc(objc2::MainThreadMarker::new().expect("main thread")), init];
