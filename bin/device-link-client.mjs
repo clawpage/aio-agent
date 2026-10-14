@@ -23,12 +23,20 @@ const MAX_FRAME = 32 * 1024 * 1024;
  * @param {string} opts.local    the bridge on loopback, http://127.0.0.1:<port>
  * @param {string} opts.localToken  the bridge's own token
  * @param {(state: "connecting"|"online"|"offline"|"revoked", detail?: string) => void} opts.onState
+ * @param {number} [opts.silenceMs]  reconnect when the server has not pinged for this long
  */
-export function linkDevice({ url, token, name, local, localToken, onState }) {
+export function linkDevice({ url, token, name, local, localToken, onState, silenceMs = 70_000 }) {
   let ws = null;
   let stopped = false;
   let retry = 1000;
   let timer = null;
+  // The server pings every 25 s. A socket that goes quiet is dead even when no close
+  // ever arrives (the control plane restarted behind the edge and the tunnel); start over.
+  let watchdog = null;
+  const heard = () => {
+    clearTimeout(watchdog);
+    watchdog = setTimeout(() => ws?.terminate(), silenceMs);
+  };
   const channels = new Map();
   const auth = { authorization: `Bearer ${localToken}` };
 
@@ -80,9 +88,12 @@ export function linkDevice({ url, token, name, local, localToken, onState }) {
     ws = new WebSocket(url, { headers: { authorization: `Bearer ${token}`, "x-aio-device-name": encodeURIComponent(name).slice(0, 240) }, maxPayload: MAX_FRAME });
     ws.on("open", () => {
       retry = 1000;
+      heard();
       onState("online");
     });
+    ws.on("ping", heard);
     ws.on("message", (data, binary) => {
+      heard();
       if (binary) {
         if (data.length < 4) return;
         const upstream = channels.get(data.readUInt32BE(0));
@@ -101,6 +112,7 @@ export function linkDevice({ url, token, name, local, localToken, onState }) {
       if (res.statusCode === 401) { stopped = true; onState("revoked"); }
     });
     ws.on("close", (code) => {
+      clearTimeout(watchdog);
       closeChannels();
       if (code === 4001) { stopped = true; onState("revoked"); return; }
       if (stopped) return;
@@ -116,6 +128,7 @@ export function linkDevice({ url, token, name, local, localToken, onState }) {
     close() {
       stopped = true;
       clearTimeout(timer);
+      clearTimeout(watchdog);
       closeChannels();
       ws?.close(1000);
     },

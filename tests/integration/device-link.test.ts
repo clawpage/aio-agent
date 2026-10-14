@@ -167,3 +167,22 @@ it("links a Mac's phone to the account that linked it, over the socket the Mac d
     await h.shutdown();
   }
 });
+
+it("starts over when the server goes quiet without closing the socket", async () => {
+  // A server that accepts and then never pings or speaks: what the client sees when the
+  // control plane restarted behind the edge and no close came through.
+  const wss = new WebSocketServer({ port: 0, host: "127.0.0.1" });
+  let accepted = 0;
+  wss.on("connection", () => { accepted += 1; });
+  await new Promise<void>((resolve) => wss.once("listening", () => resolve()));
+  const states: string[] = [];
+  const client = linkDevice({ url: `ws://127.0.0.1:${(wss.address() as { port: number }).port}`, token: `dl_${"a".repeat(43)}`, name: "Mac",
+    local: "http://127.0.0.1:9", localToken: LOCAL_TOKEN, onState: (s: string) => states.push(s), silenceMs: 200 });
+  try {
+    await expect.poll(() => accepted, { timeout: 8000 }).toBeGreaterThanOrEqual(2);
+    expect(states.slice(0, 4)).toEqual(["connecting", "online", "offline", "connecting"]);
+  } finally {
+    client.close();
+    wss.close();
+  }
+});
