@@ -451,7 +451,8 @@ export function createApiRouter(context: AppContext): Router {
         container.isReady(),
       ]);
       // A container stopped for idleness is asleep, not broken; the console's own heartbeat is waking it.
-      const idle = context.idle && context.idle.state !== "running" ? context.idle.state : null;
+      // A dozing one is up (only its browser is released), so it reports nothing.
+      const idle = context.idle && context.idle.state !== "running" && context.idle.state !== "dozing" ? context.idle.state : null;
       if (isMember(db, ctxOf(_req).session!.ownerId)) {
         res.json({ agent: { sessionReady: agentStatus.sessionReady, lastError: agentStatus.sessionReady ? null : "服务正在连接" },
           // A member learns that the start failed, not why.

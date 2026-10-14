@@ -5,12 +5,23 @@ const ACTIVE_TASKS = "'planning','queued','running','steering','stopping','mergi
 /** Shell commands still running: `no_change_timeout` returned early but did not stop the command. */
 const RUNNING_SHELL = new Set(["running", "no_change_timeout"]);
 
-export type SandboxIdleState = "running" | "parking" | "parked" | "waking";
+export type SandboxIdleState = "running" | "dozing" | "parking" | "parked" | "waking";
+
+/** How often a dozing sandbox looks at the node's free memory. */
+const MEMINFO_EVERY_MS = 60_000;
 
 export interface SandboxIdleOptions {
   ctx: AppContext;
-  /** How long both signals must stay quiet before the container is stopped. */
+  /** How long both signals must stay quiet before the sandbox dozes (browser released, container kept). */
   idleMs: number;
+  /**
+   * How long they must stay quiet before the container itself is stopped. A
+   * dozing sandbox comes back at once; a stopped one needs a cold start (~10 s).
+   * Not above `idleMs`: stop straight away, no doze.
+   */
+  coldMs?: number;
+  /** A dozing sandbox stops early once the node has less free memory than this (bytes); 0 never. */
+  parkBelowFreeBytes?: number;
   /** Brings the container and the Codex session back (startSandboxRuntime). */
   start: (ctx: AppContext) => Promise<void>;
   /** A console heartbeat counts for this long (it is sent every 20 s while visible). */
@@ -38,6 +49,9 @@ export interface SandboxIdleOptions {
 export class SandboxIdle {
   readonly #ctx: AppContext;
   readonly #idleMs: number;
+  readonly #coldMs: number;
+  readonly #parkBelowFreeBytes: number;
+  #memCheckedAt = 0;
   readonly #start: (ctx: AppContext) => Promise<void>;
   readonly #foregroundTtlMs: number;
   readonly #cpuBusyPercent: number;
@@ -56,6 +70,8 @@ export class SandboxIdle {
   constructor(opts: SandboxIdleOptions) {
     this.#ctx = opts.ctx;
     this.#idleMs = opts.idleMs;
+    this.#coldMs = Math.max(opts.idleMs, opts.coldMs ?? opts.idleMs);
+    this.#parkBelowFreeBytes = opts.parkBelowFreeBytes ?? 0;
     this.#start = opts.start;
     this.#foregroundTtlMs = opts.foregroundTtlMs ?? 60_000;
     this.#cpuBusyPercent = opts.cpuBusyPercent ?? 5;
@@ -78,7 +94,7 @@ export class SandboxIdle {
 
   /** True while the container is (being) stopped or started here: the recovery loop must stay out. */
   get managing(): boolean {
-    return this.#state !== "running";
+    return this.#state !== "running" && this.#state !== "dozing";
   }
 
   /** A proxied workspace request or socket: in use for its whole lifetime. */
@@ -122,6 +138,12 @@ export class SandboxIdle {
   async wake(): Promise<void> {
     this.#lastActive = this.#now();
     if (this.#state === "running") return;
+    // A dozing container never stopped: back at once (the browser returns on its own first use).
+    if (this.#state === "dozing") {
+      this.#state = "running";
+      this.#ctx.log.info("sandbox awake from doze");
+      return;
+    }
     if (this.#waking) return this.#waking;
     this.#waking = (async () => {
       // A stop in progress finishes first (or aborts on this very activity). The
@@ -175,16 +197,20 @@ export class SandboxIdle {
 
   /** One decision pass; runs every `intervalMs`, never overlapping. */
   async tick(): Promise<void> {
-    if (this.#ticking || this.#state !== "running") return;
+    if (this.#ticking || (this.#state !== "running" && this.#state !== "dozing")) return;
     this.#ticking = true;
     try {
       const busy = await this.busyReason();
       this.#note(busy);
       if (busy) {
         this.#lastActive = this.#now();
+        if (this.#state === "dozing") this.#state = "running";
         return;
       }
-      if (this.#now() - this.#lastActive < this.#idleMs) return;
+      const quiet = this.#now() - this.#lastActive;
+      if (quiet < this.#idleMs) return;
+      if (this.#state === "running" && this.#coldMs > this.#idleMs) await this.#doze();
+      if (quiet < this.#coldMs && !(await this.#memoryShort())) return;
       const state = await this.#ctx.container.inspect();
       if (!state.running) return;
       // A probe that fails says nothing about idleness: keep the container.
@@ -192,6 +218,7 @@ export class SandboxIdle {
       this.#note(inside);
       if (inside) {
         this.#lastActive = this.#now();
+        if (this.#state === "dozing") this.#state = "running";
         return;
       }
       this.#parking = this.#park().finally(() => {
@@ -209,6 +236,33 @@ export class SandboxIdle {
     if (reason === this.#reason) return;
     this.#reason = reason;
     this.#ctx.log.info(reason ? "sandbox in use" : "sandbox quiet", reason ? { reason } : {});
+  }
+
+  /**
+   * Quiet, but not for long: release the browser (its snapshot keeps the logins)
+   * and keep the container, so the next use needs no cold start. A browser that
+   * cannot be released yet (unsubmitted input) just stays until the stop.
+   */
+  async #doze(): Promise<void> {
+    this.#state = "dozing";
+    this.#ctx.log.info("sandbox dozing", { idleSeconds: Math.round((this.#now() - this.#lastActive) / 1000) });
+    if (!this.#ctx.cfg.browser.enabled) return;
+    const slept = await this.#ctx.browser.sleepNow().catch((err) => ({ verdict: "error", message: err instanceof Error ? err.message : String(err) }));
+    if (slept.verdict !== "asleep") this.#ctx.log.info("sandbox dozing with its browser", { verdict: slept.verdict, message: slept.message });
+  }
+
+  /** A dozing sandbox gives its memory back early when the node runs short (looked at once a minute). */
+  async #memoryShort(): Promise<boolean> {
+    if (this.#state !== "dozing" || this.#parkBelowFreeBytes <= 0) return false;
+    const now = this.#now();
+    if (now - this.#memCheckedAt < MEMINFO_EVERY_MS) return false;
+    this.#memCheckedAt = now;
+    const res = await this.#ctx.container.execInSandbox(["cat", "/proc/meminfo"], { timeoutMs: 10_000 }).catch(() => null);
+    const kb = Number(/^MemAvailable:\s+(\d+) kB$/m.exec(res?.stdout ?? "")?.[1]);
+    if (!Number.isFinite(kb) || kb <= 0) return false;
+    const short = kb * 1024 < this.#parkBelowFreeBytes;
+    if (short) this.#ctx.log.info("node memory short; stopping the dozing sandbox", { freeMb: Math.round(kb / 1024) });
+    return short;
   }
 
   async #park(): Promise<void> {

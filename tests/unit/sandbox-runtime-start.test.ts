@@ -32,7 +32,9 @@ it("checks the document tools on every start, without waiting for them or failin
   } as unknown as AppContext;
   // The install is still running when the start returns, session established.
   await startSandboxRuntime(ctx);
-  expect(order).toEqual(["container", "documents", "session"]);
+  // The session and the browser/document setup overlap; neither waits for the install.
+  expect(order[0]).toBe("container");
+  expect([...order].sort()).toEqual(["container", "documents", "session"]);
   expect(ctx.sandboxSetupError).toBeNull();
   release(new Error("apt-get update failed"));
   await new Promise((r) => setTimeout(r, 5));

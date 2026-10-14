@@ -210,6 +210,56 @@ async function ownerNode(cfg: Config, db: Db, nodes = new SandboxNodes(cfg)): Pr
   return cfg.memberRuntime ? nodes.nodes[0]! : await nodes.assign(db, cfg.runtimeUserId ?? "owner_1", true);
 }
 
+/** Best-effort browser and program setup after every container start; never throws. */
+async function prepareSandboxBrowser(ctx: AppContext): Promise<void> {
+  const { cfg, log, container } = ctx;
+  // The editor and notebook start on first use (ctx.programs); from the next container start on
+  // the image no longer starts them at boot. Best effort: without it they only cost memory.
+  ctx.programs?.reset();
+  try {
+    await ctx.programs?.disableBootStart();
+  } catch (err) {
+    log.warn("sandbox programs keep their boot start", { error: err instanceof Error ? err.message : String(err) });
+  }
+  // Before anything restarts the browser: without it, every browser exit deletes every cookie.
+  try {
+    if (await container.keepBrowserCookies()) log.info("sandbox browser keeps cookies across restarts");
+  } catch (err) {
+    log.warn("sandbox browser cookie policy not written", { error: err instanceof Error ? err.message : String(err) });
+  }
+  // Sites block a browser whose identity does not add up; best effort, never fatal.
+  try {
+    // Sites also reject the image's old Chromium build; a newer one replaces it when configured.
+    let build: { binary: string; libraryPath: string } | null = null;
+    let buildFailed = false;
+    if (cfg.browser.build) {
+      try {
+        build = await container.ensureBrowserBuild(cfg.browser.build);
+      } catch (err) {
+        buildFailed = true;
+        log.warn("browser build not checked; leaving the browser as it is", { error: err instanceof Error ? err.message : String(err) });
+      }
+    }
+    // Without a checked build, aligning would switch the running browser back to the image's
+    // older Chromium, which cannot open a profile the newer build upgraded; the next start retries.
+    if (buildFailed) log.warn("sandbox browser identity not aligned: browser build unavailable");
+    else if (await container.alignBrowserIdentity(cfg.browser.timezone, build)) log.info("sandbox browser identity aligned", { timezone: cfg.browser.timezone, binary: build?.binary ?? "image" });
+  } catch (err) {
+    log.warn("sandbox browser identity not aligned", { error: err instanceof Error ? err.message : String(err) });
+  }
+  // Phone keyboards typed every tap twice through the image's noVNC; best effort, never fatal.
+  try {
+    if (await container.patchNoVnc()) log.info("sandbox noVNC keyboard patched");
+  } catch (err) {
+    log.warn("sandbox noVNC keyboard not patched", { error: err instanceof Error ? err.message : String(err) });
+  }
+  // A tab server from an older version stays attached to every page (an older one
+  // left automation traces sites detect); replace it now rather than at the next task.
+  void ctx.tabs?.ensure().catch((err) => log.warn("browser tab server not refreshed", { error: String(err) }));
+  // Word, Excel and PowerPoint tools belong to every sandbox; install what is missing in the background.
+  void ctx.documents.ensureProvisioned().catch((err) => log.warn("document tools not checked", { error: String(err) }));
+}
+
 /** Bring the sandbox container and Codex session up in the background. */
 export async function startSandboxRuntime(ctx: AppContext): Promise<void> {
   const { cfg, log, container, agent } = ctx;
@@ -223,60 +273,19 @@ export async function startSandboxRuntime(ctx: AppContext): Promise<void> {
     if (!compat.ok) throw new Error(compat.error ?? "沙箱节点不可用");
     const state = await container.ensureRunning();
     log.info("sandbox container ready", { name: state.image, healthy: state.healthy });
-    // The editor and notebook start on first use (ctx.programs); from the next container start on
-    // the image no longer starts them at boot. Best effort: without it they only cost memory.
-    ctx.programs?.reset();
-    try {
-      await ctx.programs?.disableBootStart();
-    } catch (err) {
-      log.warn("sandbox programs keep their boot start", { error: err instanceof Error ? err.message : String(err) });
-    }
-    // Before anything restarts the browser: without it, every browser exit deletes every cookie.
-    try {
-      if (await container.keepBrowserCookies()) log.info("sandbox browser keeps cookies across restarts");
-    } catch (err) {
-      log.warn("sandbox browser cookie policy not written", { error: err instanceof Error ? err.message : String(err) });
-    }
-    // Sites block a browser whose identity does not add up; best effort, never fatal.
-    try {
-      // Sites also reject the image's old Chromium build; a newer one replaces it when configured.
-      let build: { binary: string; libraryPath: string } | null = null;
-      let buildFailed = false;
-      if (cfg.browser.build) {
-        try {
-          build = await container.ensureBrowserBuild(cfg.browser.build);
-        } catch (err) {
-          buildFailed = true;
-          log.warn("browser build not checked; leaving the browser as it is", { error: err instanceof Error ? err.message : String(err) });
-        }
-      }
-      // Without a checked build, aligning would switch the running browser back to the image's
-      // older Chromium, which cannot open a profile the newer build upgraded; the next start retries.
-      if (buildFailed) log.warn("sandbox browser identity not aligned: browser build unavailable");
-      else if (await container.alignBrowserIdentity(cfg.browser.timezone, build)) log.info("sandbox browser identity aligned", { timezone: cfg.browser.timezone, binary: build?.binary ?? "image" });
-    } catch (err) {
-      log.warn("sandbox browser identity not aligned", { error: err instanceof Error ? err.message : String(err) });
-    }
-    // Phone keyboards typed every tap twice through the image's noVNC; best effort, never fatal.
-    try {
-      if (await container.patchNoVnc()) log.info("sandbox noVNC keyboard patched");
-    } catch (err) {
-      log.warn("sandbox noVNC keyboard not patched", { error: err instanceof Error ? err.message : String(err) });
-    }
-    // A tab server from an older version stays attached to every page (an older one
-    // left automation traces sites detect); replace it now rather than at the next task.
-    void ctx.tabs?.ensure().catch((err) => log.warn("browser tab server not refreshed", { error: String(err) }));
-    // Word, Excel and PowerPoint tools belong to every sandbox; install what is missing in the background.
-    void ctx.documents.ensureProvisioned().catch((err) => log.warn("document tools not checked", { error: String(err) }));
   } catch (err) {
     ctx.sandboxSetupError = err instanceof Error ? err.message : String(err);
     log.error("sandbox container failed to start", { error: ctx.sandboxSetupError });
     return;
   }
   try {
-    await agent.ensureSession();
+    // The agent's session and the browser's preparation do not depend on each other; overlapping
+    // them is most of what a cold start can still save (each step is a few container calls).
+    const started = Date.now();
+    const [, sessionError] = await Promise.all([prepareSandboxBrowser(ctx), agent.ensureSession().then(() => null, (err: unknown) => err)]);
+    if (sessionError) throw sessionError;
     ctx.sandboxSetupError = null;
-    log.info("codex session established");
+    log.info("codex session established", { ms: Date.now() - started });
     try {
       ctx.sandboxSurfaces = await container.surfaces();
     } catch (err) {
@@ -366,7 +375,8 @@ export function startRuntimeRecovery(ctx: AppContext, intervalMs = 30_000): Runt
           // A resident browser found released (before an upgrade, or after a crash)
           // is brought back once, restoring its saved logins, and then stays.
           const seen = ctx.browser.status();
-          if (!ctx.cfg.browser.releaseWhenIdle && (seen.state === "asleep" || seen.restorePending)) await ctx.browser.wake();
+          // Not while the sandbox dozes: that release is the point, and the first use brings it back.
+          if (!ctx.cfg.browser.releaseWhenIdle && ctx.idle?.state !== "dozing" && (seen.state === "asleep" || seen.restorePending)) await ctx.browser.wake();
           // Only between tasks and outside a wake/restore, which use those clients themselves:
           // no wake or release starts until the drop is done, and the state is read right before it.
           await ctx.browser.runExclusive(async () => {
@@ -404,7 +414,10 @@ export function startRuntimeRecovery(ctx: AppContext, intervalMs = 30_000): Runt
 /** Whole-container idle stop/start for a runtime configured for it (members by default). */
 export function startSandboxIdle(ctx: AppContext, intervalMs = 30_000, parked = false): SandboxIdle | null {
   if (!ctx.cfg.sandbox.autostart || !ctx.cfg.sandbox.releaseWhenIdle) return null;
-  const idle = new SandboxIdle({ ctx, idleMs: ctx.cfg.sandbox.idleMs, start: startSandboxRuntime, intervalMs, parked });
+  const idle = new SandboxIdle({
+    ctx, idleMs: ctx.cfg.sandbox.idleMs, coldMs: ctx.cfg.sandbox.coldMs, parkBelowFreeBytes: ctx.cfg.sandbox.parkBelowFreeBytes,
+    start: startSandboxRuntime, intervalMs, parked,
+  });
   ctx.idle = idle;
   ctx.agent.setSandboxGate(() => idle.wake());
   return idle;

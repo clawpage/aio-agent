@@ -6,7 +6,7 @@ import type { AppContext } from "../../src/control/context.js";
 
 const IDLE = 300_000;
 
-function setup(parked = false) {
+function setup(parked = false, doze: { coldMs?: number; parkBelowFreeBytes?: number } = {}) {
   const clock = { now: 1_000_000 };
   const world = {
     running: !parked,
@@ -18,6 +18,8 @@ function setup(parked = false) {
     shell: [] as string[],
     cpu: 1 as number | null,
     sleepVerdict: "asleep",
+    /** The node's free memory as the container's /proc/meminfo reports it. */
+    freeKb: 16_000_000,
     restorePending: false,
     calls: [] as string[],
     /** What the browser lifecycle was told about the container. */
@@ -45,6 +47,10 @@ function setup(parked = false) {
     },
     aio: { get: async () => ({ data: { sessions: Object.fromEntries(world.shell.map((status, i) => [`s${i}`, { status }])) } }) },
     container: {
+      execInSandbox: async (argv: string[]) => {
+        world.calls.push(argv.join(" "));
+        return { code: 0, stdout: `MemTotal:       24605808 kB\nMemAvailable:   ${world.freeKb} kB\n`, stderr: "" };
+      },
       inspect: async () => ({ exists: true, running: world.running }),
       isReady: async () => world.running,
       cpuPercent: async () => world.cpu,
@@ -59,6 +65,7 @@ function setup(parked = false) {
   const idle = new SandboxIdle({
     ctx,
     idleMs: IDLE,
+    ...doze,
     parked,
     now: () => clock.now,
     start: async () => {
@@ -250,5 +257,66 @@ describe("whole-container idle stop", () => {
     recovery.stop();
     expect(world.running).toBe(false);
     expect(world.calls).toEqual(["sleep", "stop"]);
+  });
+});
+
+describe("dozing before the stop", () => {
+  const COLD = 30 * 60_000;
+
+  it("releases the browser but keeps the container, and comes back without a start", async () => {
+    const { clock, world, idle } = setup(false, { coldMs: COLD });
+    clock.now += IDLE;
+    await idle.tick();
+    expect(world.calls).toEqual(["sleep"]);
+    expect(idle.state).toBe("dozing");
+    // The recovery loop keeps running on a dozing sandbox.
+    expect(idle.managing).toBe(false);
+    await idle.wake();
+    expect(idle.state).toBe("running");
+    expect(world.calls).toEqual(["sleep"]);
+    expect(world.running).toBe(true);
+  });
+
+  it("stops the container once quiet for the cold period", async () => {
+    const { clock, world, idle } = setup(false, { coldMs: COLD });
+    clock.now += IDLE;
+    await idle.tick();
+    clock.now += COLD - IDLE - 1;
+    await idle.tick();
+    expect(world.running).toBe(true);
+    clock.now += 1;
+    await idle.tick();
+    expect(world.calls.slice(-2)).toEqual(["sleep", "stop"]);
+    expect(idle.state).toBe("parked");
+  });
+
+  it("stops a dozing sandbox early when the node runs short of memory", async () => {
+    const { clock, world, idle } = setup(false, { coldMs: COLD, parkBelowFreeBytes: 4096 * 1024 * 1024 });
+    clock.now += IDLE;
+    await idle.tick();
+    expect(world.running).toBe(true);
+    world.freeKb = 3_000_000;
+    clock.now += 60_000;
+    await idle.tick();
+    expect(world.calls).toContain("cat /proc/meminfo");
+    expect(idle.state).toBe("parked");
+  });
+
+  it("is back to running as soon as anything uses it", async () => {
+    const { clock, world, idle } = setup(false, { coldMs: COLD });
+    clock.now += IDLE;
+    await idle.tick();
+    world.activeTurns = 1;
+    await idle.tick();
+    expect(idle.state).toBe("running");
+    world.activeTurns = 0;
+    // The clocks start over from the use: a new doze first, the stop a full cold period later.
+    clock.now += IDLE;
+    await idle.tick();
+    expect(idle.state).toBe("dozing");
+    expect(world.running).toBe(true);
+    clock.now += COLD - IDLE;
+    await idle.tick();
+    expect(idle.state).toBe("parked");
   });
 });

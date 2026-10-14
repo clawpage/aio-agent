@@ -146,6 +146,10 @@ export function loadConfig(): {
     idleMs: number;
     /** The editor and notebook servers start on first use and stop after this long unused. */
     programIdleMs: number;
+    /** After `idleMs` the sandbox dozes (browser released, container kept); after this long it is stopped. */
+    coldMs: number;
+    /** A dozing sandbox is stopped early when the node has less free memory than this (bytes; 0 never). */
+    parkBelowFreeBytes: number;
     /** Keep one member sandbox provisioned ahead of the next registration (`PA_SPARE_SANDBOX`). */
     spare: boolean;
   };
@@ -507,6 +511,8 @@ export function loadConfig(): {
       residentMembers: parseList(envStr("PA_RESIDENT_MEMBERS", "")),
       idleMs: Math.max(60_000, envInt("PA_SANDBOX_IDLE_SECONDS", 180) * 1000),
       programIdleMs: Math.max(60_000, envInt("PA_SANDBOX_PROGRAM_IDLE_SECONDS", 900) * 1000),
+      coldMs: Math.max(0, envInt("PA_SANDBOX_COLD_SECONDS", 1800) * 1000),
+      parkBelowFreeBytes: Math.max(0, envInt("PA_SANDBOX_PARK_BELOW_FREE_MB", 4096)) * 1024 * 1024,
       spare: envStr("PA_SPARE_SANDBOX", "1") === "1",
     },
     documents: {

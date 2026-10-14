@@ -79,7 +79,9 @@
 | 变量 | 默认 | 说明 |
 | --- | --- | --- |
 | `PA_SANDBOX_RELEASE_IDLE` / `PA_MEMBER_SANDBOX_RELEASE_IDLE` | `1` / `1` | 空闲时是否停止 owner / 成员的整个沙箱容器 |
-| `PA_SANDBOX_IDLE_SECONDS` | `180` | 沙箱不在用且控制台不在前台多久后停容器（下限 60） |
+| `PA_SANDBOX_IDLE_SECONDS` | `180` | 沙箱不在用且控制台不在前台多久后小睡：释放浏览器、保留容器（下限 60） |
+| `PA_SANDBOX_COLD_SECONDS` | `1800` | 静默多久后真正停止容器；不大于上一项则不小睡、直接停止 |
+| `PA_SANDBOX_PARK_BELOW_FREE_MB` | `4096` | 节点可用内存低于此值时，小睡中的沙箱立即停止（`0` 关闭） |
 | `PA_SANDBOX_PROGRAM_IDLE_SECONDS` | `900` | 编辑器（code-server）与笔记本（JupyterLab）多久没人用后停掉，下次打开时再启动（下限 60） |
 | `PA_SPARE_SANDBOX` | `1` | 预先建好一个空白成员沙箱，下一个自助注册的账号直接接手 |
 | `PA_RESIDENT_MEMBERS` | 空 | 容器与浏览器都常驻并随服务启动的成员用户名，逗号分隔 |

@@ -102,13 +102,15 @@ export class SandboxContainer {
     // The node creates or starts the container, waits for it, isolates its network
     // and fixes ownership; the agent runtime inside is provisioned from here.
     const spec = this.spec();
+    const t0 = Date.now();
     await this.#node.ensure(this.name, { spec, readyTimeoutMs: this.#cfg.sandbox.readyTimeoutMs });
+    const tNode = Date.now();
     // Member ports recorded while this (owner) container was stopped or starting.
     const peers = this.#cfg.protectedMemberPorts ?? [];
     if (!spec.member && peers.some((p) => !spec.peerPorts?.includes(p))) await this.#node.peerPorts(this.name, peers);
-    await this.ensureCodexCli();
-    await this.seedWorkspace();
-    await this.waitSurfaces();
+    // Independent of each other: every docker exec costs ~0.1 s on a node, so they overlap.
+    await Promise.all([this.ensureCodexCli(), this.seedWorkspace(), this.waitSurfaces()]);
+    this.#log.info("sandbox container provisioned", { nodeMs: tNode - t0, provisionMs: Date.now() - tNode });
     return await this.inspect();
   }
 
