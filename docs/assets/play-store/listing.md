@@ -24,7 +24,7 @@ AI 回复可能有误，仅供一般参考。一站不是医疗设备，不提�
 - 简体中文默认文案见上文。
 - 英语（美国）`en-US`、西语（拉丁美洲）`es-419`、繁体中文 `zh-TW` 的完整文案分别在对应目录的 `listing.json`；这些文件是各语言商店文案的来源。
 - 每种新增语言都有 `feature.svg` 和真实 UI 演示截图。应用 UI 的英语代码为 `en`，西语为 `es`，繁体为 `zh-TW`；商店区域代码与 UI 代码分别管理。
-- 从项目根执行 `npm run build`，然后 `npx tsx scripts/play-store.mts /absolute/output/directory`，输出 1024×500 宣传图和两张 1080×1920 截图。临时输出应放 workspace `.scratch/artifacts/`。
+- 从项目根执行 `npm run build`，然后 `npx tsx scripts/play-store.mts /absolute/output/directory`，为默认简体中文（`zh-CN`，宣传图用本目录的 `feature.svg`）和三种新增语言各输出 1024×500 宣传图和两张 1080×1920 截图。临时输出应放 workspace `.scratch/artifacts/`。
 - 生成器使用隔离浏览器和虚构任务，不登录真实账号；登录截图不显示语言选择器，语言与账户隐私入口都在配置页。
 - 宣传图和包含 AI 演示回复的主会话截图须通过 Play 的 AI 资源声明添加标签；图库的“管理标签”仅供内部组织，不能替代公开声明。
 - 本地生成、上传保存、提交审核和批准上线是不同状态，以 Play Console 发布概览为准。

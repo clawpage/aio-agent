@@ -16,6 +16,8 @@ const server = spawn(process.execPath, ['tests/e2e/static-server.mjs', String(po
 await new Promise<void>((resolve, reject) => { server.stdout!.once('data', () => resolve()); server.once('error', reject); server.once('exit', code => reject(new Error(`Static server exited: ${code}`))); });
 const browser = await chromium.launch();
 const locales = [
+  // The default listing (zh-CN) keeps its feature graphic at the top of docs/assets/play-store.
+  { ui: 'zh-CN', store: 'zh-CN', feature: 'feature.svg', google: '使用 Google 登录 / 注册', main: '主会话', plan: '本周学习计划', request: '安排本周学习，每天留出 30 分钟。', result: '### 本周学习计划\n\n- 周一、周三：阅读与笔记\n- 周二、周四：练习与复习\n- 周五：回顾本周，准备下周', trip: '整理周末出游清单', ask: '整理一份周末短途出游的准备清单。' },
   { ui: 'en', store: 'en-US', google: 'Sign in / sign up with Google', main: 'Main chat', plan: 'Weekly study plan', request: 'Plan my study week, with 30 minutes a day.', result: '### Weekly study plan\n\n- Mon & Wed: read and take notes\n- Tue & Thu: practice and review\n- Fri: reflect and plan ahead', trip: 'Plan a weekend trip', ask: 'Make a checklist for a short weekend trip.' },
   { ui: 'es', store: 'es-419', google: 'Acceder o registrarse con Google', main: 'Chat principal', plan: 'Plan de estudio semanal', request: 'Organiza mi estudio: 30 minutos al día.', result: '### Plan de estudio semanal\n\n- Lun y mié: lectura y notas\n- Mar y jue: práctica y repaso\n- Vie: revisión de la semana', trip: 'Preparar un viaje', ask: 'Prepara una lista para un viaje de fin de semana.' },
   { ui: 'zh-TW', store: 'zh-TW', google: '使用 Google 登入 / 註冊', main: '主對話', plan: '本週學習計畫', request: '安排本週學習，每天保留 30 分鐘。', result: '### 本週學習計畫\n\n- 週一、週三：閱讀與筆記\n- 週二、週四：練習與複習\n- 週五：回顧本週，準備下週', trip: '整理週末出遊清單', ask: '整理一份週末短途出遊的準備清單。' },
@@ -50,7 +52,7 @@ try {
     await main.screenshot({ path: path.join(folder, `aio-agent-${data.store}-main.png`) });
     await context.close();
     const graphic = await browser.newPage({ viewport: { width: 1024, height: 500 }, deviceScaleFactor: 1 });
-    const svg = await readFile(path.join(root, 'docs/assets/play-store', data.store, 'feature.svg'), 'utf8');
+    const svg = await readFile(path.join(root, 'docs/assets/play-store', 'feature' in data ? data.feature : path.join(data.store, 'feature.svg')), 'utf8');
     await graphic.setContent(`<html><head><style>body{margin:0}</style></head><body>${svg}</body></html>`);
     await graphic.screenshot({ path: path.join(folder, `aio-agent-${data.store}-feature.png`) });
     await graphic.close();
