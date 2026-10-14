@@ -72,6 +72,7 @@ export default defineConfig({
     "**/optimistic-send.spec.ts",
     "**/home-screen-save.spec.ts",
     "**/send-shortcut.spec.ts",
+    "**/mac-phone-link.spec.ts",
   ],
   outputDir: "var/.playwright-local",
   timeout: 60_000,

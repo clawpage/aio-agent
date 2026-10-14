@@ -466,7 +466,7 @@ export function Workspace({ open, status, initialPath, onClose, onNotify, browse
   }, [keepAlivePin, onNotify]);
 
   const currentDef = TABS.find((t) => t.id === tab);
-  const apps = TABS.filter((t) => (canConfigure || t.id !== "api") && (t.id !== "phone" || (canConfigure && phoneAvailable)));
+  const apps = TABS.filter((t) => (canConfigure || t.id !== "api") && (t.id !== "phone" || phoneAvailable));
   const externalPath = tab === "terminal" ? (terminalId ? `/terminal?session_id=${encodeURIComponent(terminalId)}` : undefined) : currentDef?.path;
 
   return (
@@ -560,7 +560,7 @@ export function Workspace({ open, status, initialPath, onClose, onNotify, browse
                 </div>
               )}
               {canConfigure && tab === "api" && <ApiTab notify={onNotify} />}
-              {canConfigure && phoneAvailable && tab === "phone" && <PhoneScreen active={docVisible} onNotify={onNotify} />}
+              {phoneAvailable && tab === "phone" && <PhoneScreen active={docVisible} onNotify={onNotify} />}
               {TABS.find((t) => t.id === tab)?.kind === "frame" && (
                 <>
                   {holdsBrowser && (suspended || restoringBrowser) ? (

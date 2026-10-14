@@ -311,6 +311,15 @@ export interface Invite {
   revokedAt: number | null;
 }
 
+/** A Mac this account linked to hand its phones to the agent (the Mac app dials in with the link's token). */
+export interface DeviceLink {
+  id: string;
+  name: string;
+  createdAt: number;
+  lastSeenAt: number | null;
+  online: boolean;
+}
+
 export interface RecallStats {
   days: number;
   dispatches: number;
