@@ -91,6 +91,12 @@ AAB/APK 与 `SHA256SUMS` 在被忽略的 `var/android-releases/0.1.1-ai.clawpage
 手机上的 0.1.0 由 Play 安装（Google 应用签名），上传签名的包不能覆盖安装，需经 Play 测试轨道或正式发布后再真机验收。
 新的商店截图与宣传图由 `scripts/play-store.mts` 生成（登录页已是邮箱登录与新名字）。
 
+2026-10-14 真机验收（用户授权卸载 Play 安装的 0.1.0 后安装上传签名的 0.1.1）：Galaxy Z Flip6（Android 16，系统语言英语）
+应用信息显示 Clawpage Agent，冷启动加载线上控制台，owner 登录进入主会话，强制停止后冷启动仍保持登录；侧栏、配置、
+「账户与隐私」窗口正常，隐私政策在 Chrome Custom Tab 打开、返回键回到原窗口。该机未设默认浏览器，首次打开链接出现系统
+「打开方式」选择框（系统设置，非本版本改动）。当时线上服务仍是 API v2，邮箱注册与新品牌页面待服务端部署后再验。
+这台手机现装的是上传密钥签名的版本，Play 推送的更新（Google 应用签名）无法覆盖安装，需再卸载一次后从 Play 安装。
+
 ## Google 公开登录与本次送审结果
 
 用户授权新建 `feedback@clawpage.ai` 的免费 Google 账号，账号名称为 `Clawpage Feedback`；密码及后续注册由用户亲自完成。
