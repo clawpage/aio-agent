@@ -468,7 +468,7 @@ async function main(): Promise<void> {
     workspace:ctx.cfg.sandbox.containerWorkspaceDir,usernameOf:id=>account("SELECT username AS v FROM owners WHERE id=?",id),
     filesFor:async id=>sandboxPrintFiles(id===ctx.cfg.runtimeUserId?ctx:await ctx.runtimeForUser!(id))});
   printer.provision(ctx.cfg);
-  // Phones: the owner's on this host's USB, and each account's on the Mac it linked (the app dials in).
+  // Phones: each account's on the Mac it linked (the Mac app dials in).
   const deviceLinks=new DeviceLinks(ctx.db,ctx.cfg,ctx.log);
   ctx.deviceLinks=deviceLinks;
   const phone=new PhoneGateway({cfg:ctx.cfg,log:ctx.log,port:ctx.cfg.memberModelPort??4902,links:deviceLinks,

@@ -33,7 +33,7 @@ export interface AppContext {
   tasks: TaskService;
   /** Phone notifications (Web Push), shared by every account; absent in tests. */
   push?: PushService;
-  /** Phones (bin/phone-bridge.mjs): the owner's on the host, any account's on its linked Mac; shared by every runtime. */
+  /** Phones (bin/phone-bridge.mjs on a Mac an account linked); shared by every runtime. */
   phone?: PhoneGateway;
   /** Home Assistant cameras for camera cards; absent without Home Assistant (the API also checks the account's grant). */
   cameras?: HaCameras;

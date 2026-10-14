@@ -4260,7 +4260,7 @@ button.map-card-switch { flex: 0 0 auto; padding: 4px 10px; }
 }
 @media (prefers-reduced-motion: reduce) { .composer-row > .voice-button.recording { animation: none; } }
 
-/* The owner's phone, live (PhoneScreen): the screen fills the window height, keys and text below. */
+/* The account's phone, live (PhoneScreen): the screen fills the window height, keys and text below. */
 .phone { display: flex; flex-direction: column; gap: 8px; height: 100%; min-height: 0; padding: 8px; box-sizing: border-box; }
 .phone-bar { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-dim); }
 .phone-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--border); flex: none; }
@@ -4272,6 +4272,13 @@ button.map-card-switch { flex: 0 0 auto; padding: 4px 10px; }
 .phone-keys button { min-width: 44px; min-height: 36px; }
 .phone-text { gap: 6px; }
 .phone-text input { flex: 1; min-width: 0; }
+/* The workspace's Phone app: the screen with a way to the Macs, or the Macs alone (MacPhoneLinks). */
+.phone-app { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.phone-app-screen { flex: 1; min-height: 0; }
+.phone-link-bar { display: flex; justify-content: flex-end; padding: 8px 8px 0; }
+.phone-link-panel { height: 100%; overflow-y: auto; box-sizing: border-box; padding: 20px 16px; display: flex; flex-direction: column; gap: 12px; }
+.phone-link-panel > * { width: 100%; max-width: 640px; margin: 0 auto; box-sizing: border-box; }
+.phone-links { display: grid; gap: 12px; }
 
 /* A task's phone in its card (TaskPhone): a portrait picture, and the live phone in the task console. */
 .task-phone-shot { width: auto; max-width: 100%; }

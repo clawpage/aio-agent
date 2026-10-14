@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 /**
- * Phone bridge: the owner's Android phone, plugged into this machine over USB,
- * offered to the control plane on loopback (default 127.0.0.1:4903). Every
- * request needs the bridge token (PHONE_BRIDGE_TOKEN), which only the control
- * plane holds; the control plane in turn offers the phone to the owner alone.
+ * Phone bridge: the Android phone plugged into a Mac over USB, run by the Mac
+ * app (src/ui/tauri, phone_link.rs) for the account that linked that Mac. It
+ * listens on loopback (PA_PHONE_BRIDGE_PORT, any free port by default) and every
+ * request needs the token the app gives it (PHONE_BRIDGE_TOKEN); the control
+ * plane reaches it only through the socket it dials (see below).
  *
  *   POST /mcp     mobile-mcp (Streamable HTTP), limited to the tools that act on
  *                 the phone itself: nothing that reads or writes files on this
@@ -15,16 +16,15 @@
  * PA_PHONE_SCREEN_OFF=1 keeps the phone's own screen dark while all of the above
  * still sees it (see keepDark).
  *
- * In the Mac app (src/ui/tauri) the bridge also dials the control plane with
- * PA_DEVICE_LINK_URL / PA_DEVICE_LINK_TOKEN, so the account that linked this Mac
- * reaches it without any inbound port (bin/device-link-client.mjs).
+ * The bridge dials the control plane with PA_DEVICE_LINK_URL /
+ * PA_DEVICE_LINK_TOKEN, so the account that linked this Mac reaches it without
+ * any inbound port (bin/device-link-client.mjs).
  *
- *   node bin/phone-bridge.mjs setup [--devicekit]
- *     installs the pinned mobile-mcp and scrcpy server under var/phone and
- *     creates the token file; --devicekit also installs mobile-mcp's helper app
- *     on the phone (needed to type Chinese and other non-ASCII text)
  *   node bin/phone-bridge.mjs setup-screen
- *     only the scrcpy server (the Mac app installs mobile-mcp from its lockfile)
+ *     the pinned scrcpy server (the Mac app installs mobile-mcp from its lockfile)
+ *   node bin/phone-bridge.mjs devicekit
+ *     installs mobile-mcp's helper app on the connected phone (needed to type
+ *     Chinese and other non-ASCII text)
  */
 import { spawn, execFile } from "node:child_process";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
@@ -41,12 +41,10 @@ import { linkDevice } from "./device-link-client.mjs";
 const run = promisify(execFile);
 const ROOT = path.resolve(import.meta.dirname, "..");
 const DIR = process.env.PA_PHONE_DIR ?? path.join(ROOT, "var", "phone");
-const PORT = Number(process.env.PA_PHONE_BRIDGE_PORT ?? 4903);
+const PORT = Number(process.env.PA_PHONE_BRIDGE_PORT ?? 0);
 const BIND = process.env.PA_PHONE_BRIDGE_BIND ?? "127.0.0.1";
-const SECRETS_FILE = (process.env.PA_PHONE_BRIDGE_SECRETS_FILE ?? "~/.config/aio-agent/phone-bridge.env").replace(/^~(?=\/|$)/, os.homedir());
 const TOKEN_KEY = "PHONE_BRIDGE_TOKEN";
 
-const MOBILE_MCP_VERSION = "1.0.9";
 const MOBILE_MCP_DIR = path.join(DIR, "mobile-mcp");
 const MOBILE_MCP_ENTRY = path.join(MOBILE_MCP_DIR, "node_modules", "@mobilenext", "mobile-mcp", "lib", "index.js");
 const SCRCPY_VERSION = "4.1";
@@ -94,14 +92,7 @@ function adbPath() {
 const ADB = adbPath();
 
 function readToken() {
-  if (process.env[TOKEN_KEY]?.trim()) return process.env[TOKEN_KEY].trim();
-  try {
-    for (const line of fs.readFileSync(SECRETS_FILE, "utf8").split("\n")) {
-      const m = /^\s*PHONE_BRIDGE_TOKEN\s*=\s*(\S+)\s*$/.exec(line);
-      if (m) return m[1];
-    }
-  } catch { /* missing: reported by the caller */ }
-  return null;
+  return process.env[TOKEN_KEY]?.trim() || null;
 }
 
 async function download(url, file, sha256) {
@@ -121,26 +112,14 @@ async function setupScreen() {
   }
 }
 
-async function setup(args) {
-  fs.mkdirSync(MOBILE_MCP_DIR, { recursive: true });
-  if (!fs.existsSync(path.join(MOBILE_MCP_DIR, "package.json"))) fs.writeFileSync(path.join(MOBILE_MCP_DIR, "package.json"), '{"private":true}\n');
-  console.log(`installing @mobilenext/mobile-mcp@${MOBILE_MCP_VERSION}`);
-  await run("npm", ["install", "--no-audit", "--no-fund", "--save-exact", `@mobilenext/mobile-mcp@${MOBILE_MCP_VERSION}`], { cwd: MOBILE_MCP_DIR });
-  await setupScreen();
-  if (!readToken()) {
-    fs.mkdirSync(path.dirname(SECRETS_FILE), { recursive: true, mode: 0o700 });
-    fs.writeFileSync(SECRETS_FILE, `${TOKEN_KEY}=${randomBytes(32).toString("hex")}\n`, { mode: 0o600, flag: "wx" });
-    console.log(`wrote ${SECRETS_FILE}`);
-  }
-  if (args.includes("--devicekit")) {
-    const apk = path.join(DIR, "devicekit.apk");
-    await download(DEVICEKIT_URL, apk, DEVICEKIT_SHA256);
-    const serial = await phoneSerial();
-    if (!serial) throw new Error("no phone connected (adb devices)");
-    console.log(`installing devicekit on ${serial}`);
-    await run(ADB, ["-s", serial, "install", "-r", apk]);
-  }
-  console.log("done");
+async function installDevicekit() {
+  fs.mkdirSync(DIR, { recursive: true });
+  const apk = path.join(DIR, "devicekit.apk");
+  await download(DEVICEKIT_URL, apk, DEVICEKIT_SHA256);
+  const serial = await phoneSerial();
+  if (!serial) throw new Error("no phone connected (adb devices)");
+  console.log(`installing devicekit on ${serial}`);
+  await run(ADB, ["-s", serial, "install", "-r", apk]);
 }
 
 // ------------------------------------------------------------------ device
@@ -457,7 +436,7 @@ class Screen {
   async start() {
     const serial = await phoneSerial();
     if (!serial) throw new Error("没有连接手机（请用 USB 连接并允许调试）");
-    if (!fs.existsSync(SCRCPY_SERVER)) throw new Error("scrcpy server missing; run node bin/phone-bridge.mjs setup");
+    if (!fs.existsSync(SCRCPY_SERVER)) throw new Error("scrcpy server missing; reinstall the phone runtime (Mac app)");
     await run(ADB, ["-s", serial, "push", SCRCPY_SERVER, DEVICE_JAR], { timeout: 30_000 });
     const scid = (randomBytes(4).readUInt32BE(0) & 0x7fffffff).toString(16).padStart(8, "0");
     const { stdout } = await run(ADB, ["-s", serial, "forward", "tcp:0", `localabstract:scrcpy_${scid}`], { timeout: 10_000 });
@@ -627,8 +606,8 @@ let shuttingDown = false;
 
 async function serve() {
   const token = readToken();
-  if (!token) { log(`fatal: ${TOKEN_KEY} missing; run node bin/phone-bridge.mjs setup`); process.exit(1); }
-  if (!fs.existsSync(MOBILE_MCP_ENTRY)) { log("fatal: mobile-mcp missing; run node bin/phone-bridge.mjs setup"); process.exit(1); }
+  if (!token) { log(`fatal: ${TOKEN_KEY} missing; reinstall the phone runtime (Mac app)`); process.exit(1); }
+  if (!fs.existsSync(MOBILE_MCP_ENTRY)) { log("fatal: mobile-mcp missing; reinstall the phone runtime (Mac app)"); process.exit(1); }
   await startMobileMcp();
   const dark = process.env.PA_PHONE_SCREEN_OFF === "1" ? keepDark() : null;
   const screen = new Screen();
@@ -703,8 +682,8 @@ async function serve() {
   process.on("exit", () => mcpChild?.kill("SIGTERM"));
 }
 
-if (process.argv[2] === "setup") {
-  setup(process.argv.slice(3)).catch((err) => { console.error(err.message); process.exit(1); });
+if (process.argv[2] === "devicekit") {
+  installDevicekit().catch((err) => { console.error(err.message); process.exit(1); });
 } else if (process.argv[2] === "setup-screen") {
   // The Mac app installs mobile-mcp from its own lockfile; only the scrcpy server comes from here.
   setupScreen().catch((err) => { console.error(err.message); process.exit(1); });

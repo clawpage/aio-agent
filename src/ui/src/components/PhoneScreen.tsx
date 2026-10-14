@@ -3,7 +3,7 @@ import { apiUrl } from "../api";
 import { t } from "../i18n";
 
 /**
- * The owner's phone, live: the H.264 stream from bin/phone-bridge.mjs decoded
+ * The account's phone, live: the H.264 stream from bin/phone-bridge.mjs decoded
  * with WebCodecs onto a canvas, and touches, scrolls, keys and text sent back.
  * Coordinates go out as fractions of the screen, so the bridge maps them onto
  * the phone whatever the size or rotation.

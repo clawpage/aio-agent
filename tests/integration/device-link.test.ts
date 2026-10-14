@@ -3,7 +3,8 @@ import http from "node:http";
 import WebSocket, { WebSocketServer } from "ws";
 import { startHarness, login, rawUpgrade } from "../helpers/harness.js";
 import { MemberModelGateway } from "../../src/control/memberModelGateway.js";
-import { PhoneGateway, phoneThreadServers, PHONE_SCREEN_PATH } from "../../src/control/phone.js";
+import { PhoneGateway, phoneMcpServers, phoneThreadServers, PHONE_SCREEN_PATH } from "../../src/control/phone.js";
+import { codexRequirementsToml } from "../../src/control/sandbox/seed.js";
 import { DeviceLinks, DEVICE_LINK_PATH } from "../../src/control/deviceLink.js";
 import { memberConfig } from "../../src/control/tenants.js";
 import { createMember } from "../../src/control/auth/owner.js";
@@ -85,8 +86,17 @@ it("links a Mac's phone to the account that linked it, over the socket the Mac d
     expect(token).toMatch(/^dl_[A-Za-z0-9_-]{43}$/);
     expect(JSON.stringify(h.ctx.db.prepare("SELECT * FROM device_links").all())).not.toContain(token);
     phone.refresh(aliceCfg);
-    expect(aliceCfg.phone!.url).toMatch(/\/phone\/[a-f0-9]{64}\/mcp$/);
-    expect(phoneThreadServers(aliceCfg)).toHaveProperty("aio_phone");
+    expect(aliceCfg.phone!.url).toMatch(/^http:\/\/host\.docker\.internal:0\/phone\/[a-f0-9]{64}\/mcp$/);
+    expect(phoneThreadServers(aliceCfg)).toEqual({ aio_phone: { url: aliceCfg.phone!.url, tool_timeout_sec: expect.any(Number) } });
+    expect(phoneMcpServers(aliceCfg)).toEqual({ aio_phone: { type: "http", url: aliceCfg.phone!.url } });
+    expect(codexRequirementsToml(aliceCfg)).toContain(`[mcp_servers.aio_phone.identity]\nurl = "${aliceCfg.phone!.url}"\n`);
+    // Nobody else's runtime gets one: not Bob's, not the owner's (the host has no phone of its own any more).
+    const bobCfg = memberConfig(cfg, bob.id, 18093);
+    gateway.provision(bobCfg);
+    phone.provision(cfg);
+    expect(bobCfg.phone).toBeUndefined();
+    expect(cfg.phone).toBeUndefined();
+    expect(codexRequirementsToml(bobCfg)).not.toContain("aio_phone");
 
     // Only her token, only on the primary host, opens the socket.
     const primary = { Host: `localhost:${h.primaryPort}`, Upgrade: "websocket" };

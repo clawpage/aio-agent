@@ -9,7 +9,7 @@ import { PhoneScreen } from "./PhoneScreen";
 const SHOT_MS = 10_000;
 
 /**
- * The owner's phone inside the card of a task that used it, like the task
+ * The account's phone inside the card of a task that used it, like the task
  * browser: a one-line strip that opens to a recent picture of the screen, and
  * the picture opens the live phone to operate. A task waiting for the person (a code to type, a step to confirm)
  * gets "done, continue", which answers it for them.

@@ -121,14 +121,7 @@
 | `PA_HA_CAMERAS` | 空 | 摄像头的录像与云台（JSON：`{"camera.<实体>":{"recordings":"<媒体源目录>","events":"<媒体源目录>","ptz":"<集成>"}}`，见 FEATURES「Home Assistant」）；格式不对的条目丢弃 |
 | `PA_PRINTER_URI` | 空 | 网络打印机的 `ipp://` 或 `ipps://` 地址；为空则不提供打印 |
 | `PA_PRINTER_ACCOUNTS` | 空 | 获准使用打印机的用户名（owner 也需列出） |
-| `PA_PHONE_BRIDGE_URL` | 空 | owner 手机桥接（`bin/phone-bridge.mjs`）地址，如 `http://127.0.0.1:4903`（compose 用 `http://host.docker.internal:4903`）；为空则不提供 |
-| `PA_PHONE_BRIDGE_SECRETS_FILE` | `~/.config/aio-agent/phone-bridge.env` | `PHONE_BRIDGE_TOKEN`（环境变量优先）；控制面与桥接共用 |
-| `PA_PHONE_BRIDGE` | 空 | `var/runtime.env` 中设为 `1` 时 `bin/serve` 同时运行手机桥接（宿主进程） |
-| `PA_PHONE_BRIDGE_PORT` / `PA_PHONE_BRIDGE_BIND` | `4903` / `127.0.0.1` | 桥接监听地址 |
-| `PA_PHONE_SERIAL` | 空 | 指定 adb 设备序列号；为空时用唯一已连接的设备 |
-| `PA_PHONE_SCREEN_OFF` | 空 | `var/runtime.env` 中设为 `1` 时桥接让手机屏幕保持熄灭（截图、mobile-mcp、实时画面照常） |
-| `PA_ADB` | 自动 | adb 路径；默认按 `ANDROID_HOME`、`~/Library/Android/sdk/platform-tools` 查找 |
-| `PA_PHONE_DIR` | `var/phone` | 桥接的 mobile-mcp 与 scrcpy server 安装目录 |
+| 手机 | — | 没有控制面配置：手机由 Mac App 运行的桥接提供（`docs/FEATURES.md`“手机”），桥接的环境变量由 App 设置 |
 | `PA_KEYBOARD_BRIDGE_URL` | 空 | 语音键盘的键盘桥（`bin/keyboard-bridge.mjs`）地址，如 `http://127.0.0.1:4904`（compose 用 `http://host.docker.internal:4904`）；为空则不提供 |
 | `PA_KEYBOARD_BRIDGE_SECRETS_FILE` | `~/.config/aio-agent/keyboard-bridge.env` | `KEYBOARD_BRIDGE_TOKEN`；控制面与键盘桥共用 |
 | `PA_KEYBOARD_BRIDGE` | 空 | `var/runtime.env` 中设为 `1` 时 `bin/serve` 同时运行键盘桥（宿主进程） |

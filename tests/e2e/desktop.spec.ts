@@ -24,7 +24,7 @@ test("the workspace is a desktop: a menu bar, one app window, a Dock, and minimi
   const desk = page.locator(".workspace.desktop");
   const dock = page.getByRole("tablist", { name: "应用" });
   await expect(desk.locator(".menubar")).toBeVisible();
-  await expect(dock.getByRole("tab")).toHaveCount(7);
+  await expect(dock.getByRole("tab")).toHaveCount(8);
   await expect(dock.getByRole("tab", { name: "浏览器" })).toHaveAttribute("aria-selected", "true");
   await expect(desk.locator(".menubar-app")).toHaveText("浏览器");
   await expect(desk.locator(".window-title")).toHaveText("浏览器");
@@ -90,7 +90,7 @@ test("the workspace is a desktop: a menu bar, one app window, a Dock, and minimi
   await expect(desk.locator(".window")).toHaveCount(0);
   await expect(desk.locator("iframe")).toHaveCount(0);
   await expect(desk.locator(".menubar-app")).toHaveText("桌面");
-  await expect(desk.locator(".desktop-icon")).toHaveCount(7);
+  await expect(desk.locator(".desktop-icon")).toHaveCount(8);
   await expect(dock.getByRole("tab", { name: "编辑器" })).toHaveAttribute("aria-selected", "false");
   // The app that was open keeps its Dock dot.
   await expect(dock.getByRole("tab", { name: "编辑器" })).toHaveClass(/running/);
@@ -110,7 +110,7 @@ test("the workspace is a desktop: a menu bar, one app window, a Dock, and minimi
 
   // Closing the window also returns to the desktop; closing the workspace removes it.
   await desk.getByRole("button", { name: "关闭窗口" }).click();
-  await expect(desk.locator(".desktop-icon")).toHaveCount(7);
+  await expect(desk.locator(".desktop-icon")).toHaveCount(8);
   await dock.getByRole("tab", { name: "浏览器" }).click();
   await expect(desk.locator(".window iframe")).toBeVisible();
   if (mobile) await page.setViewportSize({ width: 360, height: 844 });

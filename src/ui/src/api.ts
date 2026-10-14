@@ -121,7 +121,7 @@ export const api = {
   supportRequest: (body: {kind: 'content' | 'deletion' | 'privacy'; taskId?: string; note: string}) => request<{id:string}>('/api/support/requests', {method:'POST',body}),
   supportQueue: () => request<{requests: Array<{id:string;kind:'content'|'deletion'|'privacy';account_username:string|null;account_email:string|null;username:string;email:string;title:string;content:string;note:string;status:string;decision:string|null;created_at:number}>}>('/api/settings/support', {cache:'no-store'}),
   reviewSupport: (id: string, decision: string) => request<{ok:true}>(`/api/settings/support/${encodeURIComponent(id)}/review`, {method:'POST',body:{decision}}),
-  /** The owner's phone (bin/phone-bridge.mjs): offered at all, and which device is connected. */
+  /** The account's phone (on a Mac it linked): offered at all, and which device is connected. */
   phoneScreenshotUrl: (at: number) => apiUrl(`/api/phone/screenshot?at=${at}`),
   phone: () => request<{ available: boolean; reachable?: boolean; device: { serial: string; model: string; name: string; android: string } | null }>("/api/phone", { cache: "no-store" }),
   /** Home Assistant cameras for camera cards (only accounts granted Home Assistant; others get 404). */

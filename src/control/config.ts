@@ -361,18 +361,7 @@ export function loadConfig(): {
   };
   /** This runtime's printer URL on the member gateway, when granted (PrinterGateway). */
   printer?: { url: string };
-  /**
-   * The owner's Android phone on this machine's USB (bin/phone-bridge.mjs): its
-   * mobile-mcp tools and live screen. The control plane holds the bridge token;
-   * only the owner reaches the phone (tools through the gateway, the screen on the
-   * console). Without a URL the feature is absent.
-   */
-  phoneBridge: {
-    url: string;
-    /** Private host file holding PHONE_BRIDGE_TOKEN (the environment wins). */
-    secretsFile: string;
-  };
-  /** The owner runtime's phone tools URL on the member gateway (PhoneGateway). */
+  /** This runtime's phone tools URL on the member gateway, when its account linked a Mac (PhoneGateway). */
   phone?: { url: string };
   /**
    * The voice gadget's dictation page (src/control/dictation.ts): the keyboard
@@ -635,10 +624,6 @@ export function loadConfig(): {
     printing: {
       printerUri: envStr("PA_PRINTER_URI", ""),
       accounts: parseList(envStr("PA_PRINTER_ACCOUNTS", "")),
-    },
-    phoneBridge: {
-      url: envStr("PA_PHONE_BRIDGE_URL", "").replace(/\/+$/, ""),
-      secretsFile: envStr("PA_PHONE_BRIDGE_SECRETS_FILE", path.join(os.homedir(), ".config", "aio-agent", "phone-bridge.env")),
     },
     keyboardBridge: {
       url: envStr("PA_KEYBOARD_BRIDGE_URL", "").replace(/\/+$/, ""),

@@ -7,6 +7,7 @@ import type { CapabilitiesResponse, DocumentReadiness, FileEntry, StatusResponse
 import { FilePreview } from "./FilePreview";
 import { TerminalSessions } from "./TerminalSessions";
 import { PhoneScreen } from "./PhoneScreen";
+import { MacPhoneLinks } from "./MacPhoneLinks";
 import { BrowserViewerController } from "../browserViewer";
 import { BrowserStatusBar, fetchBrowserStatus, STATUS_POLL_MS } from "./BrowserStatusBar";
 import { needsRestore } from "../browserStatusView";
@@ -39,15 +40,17 @@ const TABS: Array<{ id: TabId; label: string; path?: string; kind: "frame" | "na
   { id: "editor", label: t.workspace.apps.editor, path: "/code-server/", kind: "frame" },
   { id: "notebook", label: t.workspace.apps.notebook, path: "/jupyter/lab", kind: "frame" },
   { id: "preview", label: t.workspace.apps.preview, kind: "native" },
-  // The owner's own Android phone (USB on the host), shown only when the host offers it.
+  // The account's own Android phone (the host's USB for the owner, or a Mac it linked), and where a Mac is linked.
   { id: "phone", label: t.workspace.apps.phone, kind: "native" },
   { id: "api", label: t.workspace.apps.api, kind: "native" },
 ];
 
 export function Workspace({ open, status, initialPath, onClose, onNotify, browserNonce, canConfigure = true }: Props) {
   const [terminalId, setTerminalId] = useState<string | null>(null);
-  /** The owner's phone is offered by the host (the tab exists only then). */
+  /** The account has a phone to show (the host's for the owner, or a linked Mac's). */
   const [phoneAvailable, setPhoneAvailable] = useState(false);
+  /** The Phone app shows its Macs instead of the screen. */
+  const [managingPhones, setManagingPhones] = useState(false);
   const [tab, setTab] = useState<TabId>("browser");
   const [frameSrc, setFrameSrc] = useState<string | null>(null);
   const [frameKey, setFrameKey] = useState(0);
@@ -235,13 +238,11 @@ export function Workspace({ open, status, initialPath, onClose, onNotify, browse
     };
   }, [open, origin, renewCompanionSession, sessionReady]);
 
-  // Whether the host offers the owner's phone; asked each time the workspace opens.
-  useEffect(() => {
-    if (!open || !canConfigure) return;
-    let cancelled = false;
-    api.phone().then((res) => { if (!cancelled) setPhoneAvailable(res.available); }, () => undefined);
-    return () => { cancelled = true; };
-  }, [open, canConfigure]);
+  // Whether the account has a phone; asked each time the workspace opens, and after a Mac is linked or removed.
+  const refreshPhone = useCallback(() => {
+    api.phone().then((res) => setPhoneAvailable(res.available), () => undefined);
+  }, []);
+  useEffect(() => { if (open) refreshPhone(); }, [open, refreshPhone]);
 
   // The load event is authoritative; the timer only covers a frame that never fires it.
   useEffect(() => {
@@ -475,7 +476,7 @@ export function Workspace({ open, status, initialPath, onClose, onNotify, browse
   }, [keepAlivePin, onNotify]);
 
   const currentDef = TABS.find((t) => t.id === tab);
-  const apps = TABS.filter((t) => (canConfigure || t.id !== "api") && (t.id !== "phone" || phoneAvailable));
+  const apps = TABS.filter((t) => canConfigure || t.id !== "api");
   const externalPath = tab === "terminal" ? (terminalId ? `/terminal?session_id=${encodeURIComponent(terminalId)}` : undefined) : currentDef?.path;
 
   return (
@@ -569,7 +570,19 @@ export function Workspace({ open, status, initialPath, onClose, onNotify, browse
                 </div>
               )}
               {canConfigure && tab === "api" && <ApiTab notify={onNotify} />}
-              {phoneAvailable && tab === "phone" && <PhoneScreen active={docVisible} onNotify={onNotify} />}
+              {tab === "phone" && (phoneAvailable && !managingPhones ? (
+                <div className="phone-app">
+                  <div className="phone-link-bar">
+                    <button type="button" className="ghost tiny" onClick={() => setManagingPhones(true)}>{t.phone.link.manage}</button>
+                  </div>
+                  <div className="phone-app-screen"><PhoneScreen active={docVisible} onNotify={onNotify} /></div>
+                </div>
+              ) : (
+                <div className="phone-link-panel">
+                  {phoneAvailable && <div><button type="button" className="ghost tiny" onClick={() => setManagingPhones(false)}>{t.phone.link.back}</button></div>}
+                  <MacPhoneLinks onChange={refreshPhone} />
+                </div>
+              ))}
               {TABS.find((t) => t.id === tab)?.kind === "frame" && (
                 <>
                   {holdsBrowser && (suspended || restoringBrowser) ? (
