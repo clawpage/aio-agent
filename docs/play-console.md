@@ -97,6 +97,13 @@ AAB/APK 与 `SHA256SUMS` 在被忽略的 `var/android-releases/0.1.1-ai.clawpage
 「打开方式」选择框（系统设置，非本版本改动）。当时线上服务仍是 API v2，邮箱注册与新品牌页面待服务端部署后再验。
 这台手机现装的是上传密钥签名的版本，Play 推送的更新（Google 应用签名）无法覆盖安装，需再卸载一次后从 Play 安装。
 
+2026-10-14 服务端上线：ui `0.1.1-launch-74bcce7`、control `0.1.1-launch-ea9a0b2`（API v3，均自 main 的干净 worktree 构建；
+main 已含此前线上 control 的全部提交，`git cherry` 核对）。上线前 `VACUUM INTO` 备份中央库到卷内
+`/data/backups/pre-launch-20261014/`（含 owner 的 SOUL.md），并在副本上预演迁移：12 个账号全部得到隐藏占位邮箱。
+`busy` 空闲后 `refresh ui control`，两层健康、ready；公网 smoke 39/39；公网注册页在桌面英文、手机中文/西文均为邮箱字段、无横向溢出，
+`auth_view` 埋点入库；真机 App 冷启动加载新界面，「运营统计」显示真实数据，`app_open`/`page_view` 以 `android` 平台入库。
+上线后发现注册转化按账号创建时间统计会超过 100%，`ea9a0b2` 改为同期注册页浏览对比邮箱注册事件，只重部署 control。
+
 ## Google 公开登录与本次送审结果
 
 用户授权新建 `feedback@clawpage.ai` 的免费 Google 账号，账号名称为 `Clawpage Feedback`；密码及后续注册由用户亲自完成。
