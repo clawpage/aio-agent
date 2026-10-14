@@ -7,7 +7,7 @@ import { WebSocketServer } from "ws";
 import { startHarness, login } from "../helpers/harness.js";
 import { MemberModelGateway } from "../../src/control/memberModelGateway.js";
 import { HaGateway } from "../../src/control/ha.js";
-import { HaCameras, eventsOf, formatLocal, parseLocal, piecesOf } from "../../src/control/camera.js";
+import { HaCameras, eventsOf, formatLocal, parseLocal, piecesOf, rebaseFragments, syncPointsOf, videoTrackOf } from "../../src/control/camera.js";
 import { parseCameras } from "../../src/control/config.js";
 import { memberConfig } from "../../src/control/tenants.js";
 
@@ -46,9 +46,13 @@ async function fakeHa() {
     if (url.startsWith("/api/camera_proxy/camera.c201")) return res.writeHead(200, { "content-type": "image/jpeg" }).end("JPEGDATA");
     if (url === "/api/services/tapo_ptz/move" && req.method === "POST") return res.writeHead(200, { "content-type": "application/json" }).end("[]");
     if (url.startsWith("/media/c201/")) {
-      const whole = Buffer.from("0123456789");
-      if (req.headers.range === "bytes=2-5") return res.writeHead(206, { "content-type": "video/mp4", "content-range": "bytes 2-5/10", "content-length": "4" }).end(whole.subarray(2, 6));
-      return res.writeHead(200, { "content-type": "video/mp4", "content-length": "10" }).end(whole);
+      // The first piece carries an index (like cam-record's), the others are plain bytes.
+      const whole = url.endsWith(pieces[0]!) ? indexedPiece().file : Buffer.from("0123456789");
+      const m = /^bytes=(\d*)-(\d*)$/.exec(req.headers.range ?? "");
+      if (!m) return res.writeHead(200, { "content-type": "video/mp4", "content-length": String(whole.length) }).end(whole);
+      const from = m[1] ? Number(m[1]) : Math.max(0, whole.length - Number(m[2]));
+      const to = m[1] && m[2] ? Math.min(Number(m[2]), whole.length - 1) : whole.length - 1;
+      return res.writeHead(206, { "content-type": "video/mp4", "content-range": `bytes ${from}-${to}/${whole.length}` }).end(whole.subarray(from, to + 1));
     }
     res.writeHead(404).end();
   });
@@ -77,13 +81,49 @@ async function fakeHa() {
   };
 }
 
+const box = (type: string, ...parts: Buffer[]) => {
+  const body = Buffer.concat(parts);
+  const head = Buffer.alloc(8);
+  head.writeUInt32BE(8 + body.length);
+  head.write(type, 4, "latin1");
+  return Buffer.concat([head, body]);
+};
+const u32 = (...values: number[]) => Buffer.concat(values.map((v) => { const b = Buffer.alloc(4); b.writeUInt32BE(v); return b; }));
+const u64 = (v: number) => { const b = Buffer.alloc(8); b.writeBigUInt64BE(BigInt(v)); return b; };
+const trak = (id: number, handler: string, timescale: number) =>
+  box("trak", box("tkhd", u32(0, 0, 0, id)), box("mdia", box("mdhd", u32(0, 0, 0, timescale)), box("hdlr", u32(0, 0), Buffer.from(handler))));
+/**
+ * A fragmented MP4 laid out like cam-record's pieces: ftyp + moov (audio track
+ * first), one moof+mdat per 2 seconds whose tfhd holds an absolute base offset,
+ * then mfra (tfra per track) and mfro.
+ */
+function indexedPiece(): { file: Buffer; initEnd: number; moofs: number[] } {
+  const init = Buffer.concat([box("ftyp", Buffer.from("isom")), box("moov", trak(2, "soun", 48000), trak(1, "vide", 90000))]);
+  const moofs: number[] = [];
+  const fragments: Buffer[] = [];
+  let at = init.length;
+  for (let i = 0; i < 4; i += 1) {
+    moofs.push(at);
+    const moofSize = 8 + 8 + 8 + 16; // moof > traf > tfhd(flags, track, base offset)
+    const fragment = Buffer.concat([box("moof", box("traf", box("tfhd", u32(1, 1), u64(at + moofSize)))), box("mdat", Buffer.from(`frame${i}`))]);
+    fragments.push(fragment);
+    at += fragment.length;
+  }
+  const entries = (scale: number) => Buffer.concat(moofs.flatMap((offset, i) => [u64(i * 2 * scale), u64(offset), Buffer.from([1, 1, 1])]));
+  const tfra = (id: number, scale: number) => box("tfra", u32(0x01000000, id, 0, moofs.length), entries(scale));
+  const mfra = box("mfra", tfra(2, 48000), tfra(1, 90000), box("mfro", u32(0, 0)));
+  mfra.writeUInt32BE(mfra.length, mfra.length - 4);
+  return { file: Buffer.concat([init, ...fragments, mfra]), initEnd: init.length, moofs };
+}
+
 const CAMERAS = { "camera.c201": { recordings: "c201", events: "local/c201-events", ptz: "tapo_ptz" } };
 
-function fakeFfmpeg(dir: string): { bin: string; args: () => string } {
+function fakeFfmpeg(dir: string): { bin: string; args: () => string; stdin: () => Buffer } {
   const bin = path.join(dir, "ffmpeg");
   const out = path.join(dir, "ffmpeg-args");
-  fs.writeFileSync(bin, `#!/bin/sh\nprintf '%s\\n' "$@" > '${out}'\nprintf FRAME\n`, { mode: 0o755 });
-  return { bin, args: () => fs.readFileSync(out, "utf8") };
+  const input = path.join(dir, "ffmpeg-stdin");
+  fs.writeFileSync(bin, `#!/bin/sh\nprintf '%s\\n' "$@" > '${out}'\nif [ "$7" = "pipe:0" ]; then cat > '${input}'; fi\nprintf FRAME\n`, { mode: 0o755 });
+  return { bin, args: () => fs.readFileSync(out, "utf8"), stdin: () => fs.readFileSync(input) };
 }
 
 describe("camera helpers", () => {
@@ -97,6 +137,19 @@ describe("camera helpers", () => {
       "camera.bad": { recordings: undefined, events: undefined, ptz: undefined },
     });
     expect(parseCameras("not json")).toEqual({});
+  });
+
+  it("finds the video track, its key frames and moves cut-out fragments", () => {
+    const { file, initEnd, moofs } = indexedPiece();
+    expect(videoTrackOf(file)).toEqual({ trackId: 1, timescale: 90000, initEnd });
+    const mfra = file.subarray(file.lastIndexOf(Buffer.from("mfra")) - 4);
+    expect(syncPointsOf(mfra, 1)).toEqual(moofs.map((offset, i) => ({ time: i * 180000, offset })));
+    expect(syncPointsOf(mfra, 2)[1]).toEqual({ time: 96000, offset: moofs[1] });
+    expect(syncPointsOf(mfra, 3)).toEqual([]);
+    const cut = file.subarray(moofs[2]!, moofs[3]!);
+    const moved = rebaseFragments(cut, moofs[2]! - initEnd);
+    expect(moved.readBigUInt64BE(8 + 8 + 8 + 8)).toBe(BigInt(initEnd + 40));
+    expect(cut.readBigUInt64BE(8 + 8 + 8 + 8)).toBe(BigInt(moofs[2]! + 40));
   });
 
   it("reads recording pieces and events from file names, in local time", () => {
@@ -191,6 +244,16 @@ it("adds the camera tools to aio_ha: pictures, pan/tilt, recordings and frames, 
     expect(args[args.indexOf("-ss") + 1]).toBe("125.00");
     expect(args[args.indexOf("-i") + 1]).toBe(`${ha.base}/media/c201/${ha.pieces[1]}`);
     expect(args[args.indexOf("-headers") + 1]).toBe(`Authorization: Bearer ${TOKEN}\r`);
+    // An indexed piece: only the init segment and the fragments from the key frame before the moment go to ffmpeg.
+    const early = await call("camera_recording_frames", { camera: "camera.c201", at: formatLocal(ha.t0 + 3_000) });
+    expect(early.content[1].type).toBe("image");
+    const piped = ffmpeg.args().split("\n");
+    expect(piped.slice(piped.indexOf("-i"), piped.indexOf("-i") + 4)).toEqual(["-i", "pipe:0", "-ss", "1.00"]);
+    const { file, initEnd, moofs } = indexedPiece();
+    const sent = ffmpeg.stdin();
+    expect(sent.subarray(0, initEnd)).toEqual(file.subarray(0, initEnd));
+    expect(sent.length).toBe(initEnd + moofs[3]! - moofs[1]!);
+    expect(sent.readBigUInt64BE(initEnd + 32)).toBe(BigInt(initEnd + 40));
     const before = await call("camera_recording_frames", { camera: "camera.c201", at: formatLocal(ha.t0 - 3600_000) });
     expect(before.isError).toBe(true);
     expect(before.content[0].text).toContain("Nothing was recorded at");

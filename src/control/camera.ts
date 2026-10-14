@@ -104,6 +104,84 @@ export function eventsOf(files: string[]): CameraEvent[] {
   }).sort((a, b) => a.at - b.at);
 }
 
+/** The boxes directly inside `buf[from, to)`: type and where the payload is. */
+function* boxes(buf: Buffer, from = 0, to = buf.length): Generator<{ type: string; start: number; body: number; end: number }> {
+  let at = from;
+  while (at + 8 <= to) {
+    let size = buf.readUInt32BE(at);
+    let body = at + 8;
+    if (size === 1) {
+      if (at + 16 > to) return;
+      size = Number(buf.readBigUInt64BE(at + 8));
+      body = at + 16;
+    } else if (size === 0) size = to - at;
+    if (size < body - at || at + size > to) return;
+    yield { type: buf.toString("latin1", at + 4, at + 8), start: at, body, end: at + size };
+    at += size;
+  }
+}
+
+const childBox = (buf: Buffer, parent: { body: number; end: number }, type: string) => [...boxes(buf, parent.body, parent.end)].find((b) => b.type === type);
+
+/** A fragmented MP4's video track (id and timescale) and where its init segment (ftyp + moov) ends. */
+export function videoTrackOf(head: Buffer): { trackId: number; timescale: number; initEnd: number } | null {
+  const moov = [...boxes(head)].find((b) => b.type === "moov");
+  if (!moov) return null;
+  for (const trak of boxes(head, moov.body, moov.end)) {
+    if (trak.type !== "trak") continue;
+    const tkhd = childBox(head, trak, "tkhd");
+    const mdia = childBox(head, trak, "mdia");
+    const mdhd = mdia && childBox(head, mdia, "mdhd");
+    const hdlr = mdia && childBox(head, mdia, "hdlr");
+    if (!tkhd || !mdhd || !hdlr || head.toString("latin1", hdlr.body + 8, hdlr.body + 12) !== "vide") continue;
+    const v1 = (b: { body: number }) => head[b.body] === 1;
+    const trackId = head.readUInt32BE(tkhd.body + (v1(tkhd) ? 20 : 12));
+    const timescale = head.readUInt32BE(mdhd.body + (v1(mdhd) ? 20 : 12));
+    return timescale > 0 ? { trackId, timescale, initEnd: moov.end } : null;
+  }
+  return null;
+}
+
+/**
+ * Move fragments cut out of a file to `shift` bytes earlier: ffmpeg's muxer writes
+ * each track fragment's base data offset (tfhd) as an absolute file position.
+ */
+export function rebaseFragments(body: Buffer, shift: number): Buffer {
+  const out = Buffer.from(body);
+  for (const moof of boxes(out)) {
+    if (moof.type !== "moof") continue;
+    for (const traf of boxes(out, moof.body, moof.end)) {
+      const tfhd = traf.type === "traf" ? childBox(out, traf, "tfhd") : undefined;
+      if (!tfhd || !(out.readUInt32BE(tfhd.body) & 0x000001) || tfhd.body + 16 > tfhd.end) continue;
+      out.writeBigUInt64BE(out.readBigUInt64BE(tfhd.body + 8) - BigInt(shift), tfhd.body + 8);
+    }
+  }
+  return out;
+}
+
+/** A track's random access points from an mfra box: (time in the track's timescale, moof offset), by time. */
+export function syncPointsOf(mfra: Buffer, trackId: number): Array<{ time: number; offset: number }> {
+  const root = [...boxes(mfra)].find((b) => b.type === "mfra");
+  if (!root) return [];
+  for (const tfra of boxes(mfra, root.body, root.end)) {
+    if (tfra.type !== "tfra" || mfra.readUInt32BE(tfra.body + 4) !== trackId) continue;
+    const v1 = mfra[tfra.body] === 1;
+    const sizes = mfra.readUInt32BE(tfra.body + 8);
+    const skip = ((sizes >> 4) & 3) + ((sizes >> 2) & 3) + (sizes & 3) + 3;
+    const count = mfra.readUInt32BE(tfra.body + 12);
+    const points: Array<{ time: number; offset: number }> = [];
+    let at = tfra.body + 16;
+    for (let i = 0; i < count && at + (v1 ? 16 : 8) + skip <= tfra.end; i += 1) {
+      const time = v1 ? Number(mfra.readBigUInt64BE(at)) : mfra.readUInt32BE(at);
+      const offset = v1 ? Number(mfra.readBigUInt64BE(at + 8)) : mfra.readUInt32BE(at + 4);
+      points.push({ time, offset });
+      at += (v1 ? 16 : 8) + skip;
+    }
+    return points.sort((a, b) => a.time - b.time);
+  }
+  return [];
+}
+
 const CARD_HINT =
   "To let the user watch, write a camera card in your reply: a fenced block ```camera holding " +
   "{\"camera\": \"<entity>\"} for live video, or {\"camera\": \"<entity>\", \"at\": \"YYYY-MM-DD HH:MM:SS\"} to play the recording from that moment.";
@@ -373,29 +451,77 @@ export class HaCameras {
 
   /**
    * One picture from the recording. The pieces are fragmented MP4 with an index
-   * at the end (mfra), so ffmpeg seeks over HTTP ranges instead of reading the
-   * whole piece; the piece still being written has no index yet and is read up to the moment.
+   * at the end (mfra): only the init segment and the fragment holding the moment
+   * are fetched, by range, and decoded (ffmpeg's own index seek over HTTP is slow
+   * in older builds). The piece still being written has no index yet and is read
+   * over HTTP up to the moment.
    */
   async frame(entity: string, at: number): Promise<Buffer> {
     const { piece, offset } = await this.locate(entity, at);
-    const url = `${this.#base}/media/${this.#cameras[entity]!.recordings}/${encodeURIComponent(piece.file)}`;
-    const args = ["-v", "error", "-nostdin", "-use_mfra_for", "pts", "-headers", `Authorization: ${this.#auth()}\r\n`, "-ss", offset.toFixed(2), "-i", url,
-      "-frames:v", "1", "-vf", "scale='min(960,iw)':-2", "-q:v", "5", "-f", "image2pipe", "-c:v", "mjpeg", "pipe:1"];
-    return await new Promise<Buffer>((resolve, reject) => {
-      const child = spawn(this.#ffmpeg, args, { stdio: ["ignore", "pipe", "pipe"] });
+    const path = `/media/${this.#cameras[entity]!.recordings}/${encodeURIComponent(piece.file)}`;
+    const missing = () => new CameraError(`No picture at ${formatLocal(at)}${piece.end >= Date.now() - 60_000 ? "; the last seconds may not be written yet, use camera_snapshot for now" : ""}`);
+    const output = ["-frames:v", "1", "-vf", "scale='min(960,iw)':-2", "-q:v", "5", "-f", "image2pipe", "-c:v", "mjpeg", "pipe:1"];
+    const indexed = await this.#fragment(path, offset).catch((err) => {
+      if (err instanceof CameraError) throw err;
+      this.#log.warn("recording index unreadable", { entity, file: piece.file, error: err instanceof Error ? err.message : String(err) });
+      return null;
+    });
+    const bytes = indexed
+      ? await this.#ffmpeg_(["-v", "error", "-nostdin", "-f", "mp4", "-i", "pipe:0", "-ss", indexed.skip.toFixed(2), ...output], indexed.data)
+      : await this.#ffmpeg_(["-v", "error", "-nostdin", "-use_mfra_for", "pts", "-headers", `Authorization: ${this.#auth()}\r\n`, "-ss", offset.toFixed(2), "-i", `${this.#base}${path}`, ...output]);
+    if (bytes.ok) return bytes.out;
+    this.#log.warn("recording frame failed", { entity, file: piece.file, offset, error: bytes.error });
+    throw missing();
+  }
+
+  async #range(path: string, range: string): Promise<{ bytes: Buffer; total: number }> {
+    const res = await this.#rest(path, { headers: { range } }, 30_000);
+    if (res.status !== 206) {
+      await res.body?.cancel();
+      if (res.status === 404) throw new CameraError("This recording is gone (newer recordings replace the oldest)");
+      throw new Error(`Home Assistant answered ${res.status} to a range request`);
+    }
+    return { bytes: Buffer.from(await res.arrayBuffer()), total: Number(/\/(\d+)$/.exec(res.headers.get("content-range") ?? "")?.[1] ?? 0) };
+  }
+
+  /** The init segment and the fragments from the last key frame before `seconds`; null for a piece without an index. */
+  async #fragment(path: string, seconds: number): Promise<{ data: Buffer; skip: number } | null> {
+    const tail = await this.#range(path, "bytes=-16");
+    if (tail.bytes.length !== 16 || tail.bytes.toString("latin1", 4, 8) !== "mfro") return null;
+    const mfraSize = tail.bytes.readUInt32BE(12);
+    if (mfraSize < 16 || mfraSize > 4 * 1024 * 1024 || !tail.total) return null;
+    const [head, mfra] = await Promise.all([this.#range(path, "bytes=0-65535"), this.#range(path, `bytes=-${mfraSize}`)]);
+    const track = videoTrackOf(head.bytes);
+    if (!track) return null;
+    const points = syncPointsOf(mfra.bytes, track.trackId);
+    if (!points.length) return null;
+    let i = 0;
+    while (i + 1 < points.length && points[i + 1]!.time / track.timescale <= seconds) i += 1;
+    // Two fragments, so a moment near a fragment's end still has frames after it.
+    const end = points[i + 2]?.offset ?? tail.total - mfraSize;
+    const body = await this.#range(path, `bytes=${points[i]!.offset}-${end - 1}`);
+    const fragments = rebaseFragments(body.bytes, points[i]!.offset - track.initEnd);
+    return { data: Buffer.concat([head.bytes.subarray(0, track.initEnd), fragments]), skip: Math.max(0, seconds - points[i]!.time / track.timescale) };
+  }
+
+  async #ffmpeg_(args: string[], input?: Buffer): Promise<{ ok: true; out: Buffer } | { ok: false; error: string }> {
+    return await new Promise((resolve, reject) => {
+      const child = spawn(this.#ffmpeg, args, { stdio: [input ? "pipe" : "ignore", "pipe", "pipe"] });
       const out: Buffer[] = [];
       let err = "";
       const timer = setTimeout(() => child.kill("SIGKILL"), 45_000);
-      child.stdout.on("data", (c: Buffer) => out.push(c));
-      child.stderr.on("data", (c: Buffer) => { err = (err + c.toString()).slice(-500); });
+      child.stdout!.on("data", (c: Buffer) => out.push(c));
+      child.stderr!.on("data", (c: Buffer) => { err = (err + c.toString()).slice(-500); });
       child.on("error", (e) => { clearTimeout(timer); reject(new CameraError(`Cannot read the recording (${e.message})`)); });
       child.on("close", () => {
         clearTimeout(timer);
         const bytes = Buffer.concat(out);
-        if (bytes.length) return resolve(bytes);
-        this.#log.warn("recording frame failed", { entity, file: piece.file, offset, error: err.trim() });
-        reject(new CameraError(`No picture at ${formatLocal(at)}${piece.end >= Date.now() - 60_000 ? "; the last seconds may not be written yet, use camera_snapshot for now" : ""}`));
+        resolve(bytes.length ? { ok: true, out: bytes } : { ok: false, error: err.trim() });
       });
+      if (input) {
+        child.stdin!.on("error", () => undefined); // ffmpeg stops reading once it has its frame
+        child.stdin!.end(input);
+      }
     });
   }
 

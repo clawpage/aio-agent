@@ -499,7 +499,8 @@ Jev（TypeSafe System One）根据状态和选项返回选择、各选项概率�
   `camera_list`（各摄像头能力与录像范围）、`camera_snapshot`（当前画面，图片回给执行器）、`camera_ptz`（方向点按或预置位，转完回一张画面）、
   `camera_recordings`（连续录像覆盖范围、缺口与侦测事件）、`camera_recording_frames`（从录像某一时刻起取最多 6 张图）。
   录像、事件与云台按摄像头在 `PA_HA_CAMERAS` 声明：连续录像是 HA 媒体源里 `<名>_YYYY-MM-DD_HH-MM-SS.mp4` 的分片（fragmented MP4，
-  控制面的 ffmpeg 借尾部索引按 HTTP Range 跳读，不整段下载；正在写的最后一片没有索引，只能顺序读到该时刻），事件是
+  控制面读分片尾部的索引（mfra），按 Range 只取初始化段和目标所在的两个分片交给 ffmpeg 解码，取一张约 0.1–2 秒；正在写的最后一片
+  还没有索引，由 ffmpeg 经 HTTP 顺序读到该时刻），事件是
   `YYYY-MM-DD_HH-MM-SS_<标签>.mp4`；时间一律按控制面时区（`TZ`）的本地时间。云台调声明的集成的 `move`（x、y）与 `goto_preset`（name）服务。
 - **摄像头卡片**：执行器在回复里写 ```` ```camera ```` 块（`{"camera": "<实体>"}` 为直播，加 `"at": "YYYY-MM-DD HH:MM:SS"` 为从该时刻回放）。
   直播先显示快照，点播放后经 `/api/cameras/hls/<令牌>/…` 转发 HA 的 LL-HLS（Safari/iOS 原生播放，其他浏览器按需加载 hls.js；
