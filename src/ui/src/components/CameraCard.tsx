@@ -24,16 +24,23 @@ function messageOf(err: unknown): string {
 }
 
 /**
- * Plays an HLS address in a video element: natively where the browser can
- * (Safari, iOS, Android), otherwise through hls.js, loaded only when needed.
+ * Plays an HLS address in a video element: natively in Apple's WebKit (Safari,
+ * iOS, the iOS app), otherwise through hls.js, loaded only when needed. Chrome
+ * also answers "maybe" for HLS now, but its built-in player cannot parse Home
+ * Assistant's low-latency playlists (DEMUXER_ERROR_COULD_NOT_PARSE).
  */
 async function attachHls(video: HTMLVideoElement, url: string, onFatal: () => void): Promise<() => void> {
-  if (video.canPlayType("application/vnd.apple.mpegurl")) {
+  const native = Boolean(video.canPlayType("application/vnd.apple.mpegurl"));
+  const playNatively = () => {
     video.src = url;
     return () => { video.removeAttribute("src"); video.load(); };
-  }
+  };
+  if (native && navigator.vendor.startsWith("Apple")) return playNatively();
   const { default: Hls } = await import("hls.js");
-  if (!Hls.isSupported()) throw new Error(t.cards.camera.unsupported);
+  if (!Hls.isSupported()) {
+    if (native) return playNatively();
+    throw new Error(t.cards.camera.unsupported);
+  }
   const hls = new Hls({ enableWorker: false, lowLatencyMode: true, backBufferLength: 30, xhrSetup: (xhr) => { xhr.withCredentials = Boolean(API_BASE); } });
   hls.on(Hls.Events.ERROR, (_e, data) => { if (data.fatal) onFatal(); });
   hls.loadSource(url);
