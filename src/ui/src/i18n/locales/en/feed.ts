@@ -43,6 +43,8 @@ export const feed: typeof zh = {
     quote: "Quote task",
     quoteLabel: (title: string) => `Quote task: ${title}`,
     retryPlanning: "Retry assignment",
+    retry: "Retry",
+    retryLabel: (title: string) => `Retry task: ${title}`,
     stop: "Stop task",
     details: "View steps",
     dispatchLog: "Dispatch log",

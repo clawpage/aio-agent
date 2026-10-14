@@ -43,6 +43,8 @@ export const feed: typeof zh = {
     quote: "引用任務",
     quoteLabel: (title: string) => `引用任務：${title}`,
     retryPlanning: "重試分配",
+    retry: "重試",
+    retryLabel: (title: string) => `重試任務：${title}`,
     stop: "停止該任務",
     details: "檢視過程",
     dispatchLog: "派單日誌",

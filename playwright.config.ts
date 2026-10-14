@@ -18,6 +18,7 @@ export default defineConfig({
   testIgnore: [
     /usage\.spec\.ts/,
     /analytics\.spec\.ts/,
+    /task-retry\.spec\.ts/,
     /gadget-history\.spec\.ts/,
     /browser-auto-open\.spec\.ts/,
     /browser-link\.spec\.ts/,

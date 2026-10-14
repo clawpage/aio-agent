@@ -322,6 +322,27 @@ export function TaskChat({ onDetails, onOpenLink, onOpenFileInBrowser, onExpired
             setError(i18n.feed.errors.retry(err instanceof Error ? err.message : String(err)));
         }
     };
+    /**
+     * Retry a failed task: the same request and attachments again, as a follow-up of the failed
+     * one so it carries on from where it stopped. One tap per task revision makes one task.
+     */
+    const retryTask = async (t: Task) => {
+        const key = `${t.id}:${t.revision}`;
+        if (choosing[key]) return;
+        setChoosing(old => ({ ...old, [key]: t.text }));
+        setError(null);
+        try {
+            const { task } = await api.submitTask({ text: t.text, attachments: t.attachments, relatedTaskId: t.id, clientMessageId: `retry:${key}` });
+            stick.current = true;
+            merge([task]);
+            void refresh();
+        }
+        catch (err) {
+            setChoosing(old => { const next = { ...old }; delete next[key]; return next; });
+            if ((err as { status?: number }).status === 401) callbacks.current.onExpired();
+            setError(i18n.feed.errors.retry(err instanceof Error ? err.message : String(err)));
+        }
+    };
     /** The reply a finished task got after it asked, if any: its answers are then closed. */
     const replyTo = (t: Task) => tasks.find(x => x.id !== t.id && (x.relatedTaskId === t.id || x.mergedInto === t.id) && x.createdAt >= (t.completedAt ?? t.createdAt));
     /** Uploads one after another; a file still uploading when its message is sent goes with that message. */
@@ -465,10 +486,15 @@ export function TaskChat({ onDetails, onOpenLink, onOpenFileInBrowser, onExpired
       {feed.map(({ task: t, report }) => report ? <article className={`msg assistant task-report ${t.status}`} key={`${t.id}:report`} data-task-id={t.id}>
         <div className="task-report-heading"><span>{t.title}</span>{t.schedule && <span className="schedule-badge">{i18n.feed.report.schedule(t.schedule.rule)}</span>}<span className="muted tiny">{labels[t.status]}</span></div>
         <MessagePreview title={t.title}><Markdown source={t.result || (t.status === "completed" ? i18n.feed.report.noResult : t.error || labels[t.status] || t.status)} onOpenLink={onOpenLink} onOpenFile={setPreview} choices={{ onChoose: option => void choose(t, option), chosen: choosing[`${t.id}:${t.revision}`] ?? replyTo(t)?.text ?? null }}/>{t.result && <MessageFileCards text={t.result} onOpen={setPreview} onOpenLink={onOpenLink}/>}{t.error && t.result && <p className="error">{t.error}</p>}</MessagePreview>
-        {t.result && <button className="ghost tiny report-response" onClick={() => setReportedTask(t.id)}>{i18n.support.report}</button>}
         {ownsBrowser(t) && <><VaultPrompt task={t}/><TaskBrowser task={t} onReveal={onRevealBrowser}/></>}
         <div className="message-meta"><MessageTime at={t.completedAt} now={now}/><TaskDuration task={t} now={now}/></div>
-        <div className="task-actions"><button className="ghost tiny" onClick={() => quoteTask(t)} aria-label={i18n.feed.actions.quoteLabel(t.title)}>{i18n.feed.actions.quote}</button><button className="ghost tiny" onClick={() => onDetails(t)}>{i18n.feed.actions.details}</button></div>
+        <div className="task-actions">
+          {/* Until something follows it up: a retry (or any reply) then carries the task on. */}
+          {t.status === "failed" && !replyTo(t) && <button className="ghost tiny task-retry" disabled={!!choosing[`${t.id}:${t.revision}`]} onClick={() => void retryTask(t)} aria-label={i18n.feed.actions.retryLabel(t.title)}>{i18n.feed.actions.retry}</button>}
+          <button className="ghost tiny" onClick={() => quoteTask(t)} aria-label={i18n.feed.actions.quoteLabel(t.title)}>{i18n.feed.actions.quote}</button><button className="ghost tiny" onClick={() => onDetails(t)}>{i18n.feed.actions.details}</button>
+          {/* Reporting stays available but out of the way: a quiet link at the end of the row. */}
+          {t.result && <button className="link tiny report-response" onClick={() => setReportedTask(t.id)}>{i18n.support.report}</button>}
+        </div>
       </article> : <div className={`task-entry${adopted.current.has(t.id) ? " adopted" : ""}`} key={t.id} data-task-id={t.id}>
         {t.schedule ? <div className="schedule-run-note" role="note">{i18n.feed.scheduleRun(t.schedule.title, t.schedule.rule)}<MessageTime at={t.createdAt} now={now}/></div> : <article className="msg user"><MessagePreview title={i18n.feed.userMessage} user>{t.relatedTaskId && <small className="muted">{i18n.feed.quoted(t.relatedTaskTitle ?? tasks.find(task => task.id === t.relatedTaskId)?.title ?? i18n.feed.earlierTask)}</small>}<p>{t.text}</p>{t.attachments.length > 0 && <AttachmentCards attachments={t.attachments} onOpen={setPreview}/>}<div className="message-meta"><MessageTime at={t.createdAt} now={now}/></div></MessagePreview></article>}
         {t.mergedInto && <div className="task-supplement"><button className="ghost tiny" onClick={() => onDetails(t)}>{(t.status === "merged" ? i18n.feed.supplement.merged : t.status === "merging" || t.status === "steering" ? i18n.feed.supplement.merging : t.status === "interrupted" ? i18n.feed.supplement.cancelled : i18n.feed.supplement.check)(t.mergedTitle ?? "")}</button>{t.waitReason && <p className="tiny">{t.waitReason.message}</p>}{t.error && <p className="tiny error">{t.error}</p>}</div>}

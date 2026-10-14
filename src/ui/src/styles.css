@@ -4297,5 +4297,7 @@ button.map-card-switch { flex: 0 0 auto; padding: 4px 10px; }
 .support-request { border-top:1px solid var(--border); padding:20px 0; }
 .support-request pre { max-height:300px; overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; font-size:12px; }
 .support-note { white-space:pre-wrap; overflow-wrap:anywhere; }
-.report-response { margin:8px 0 0; color:var(--text-dim); }
+/* Quiet on purpose: a small dim link after the reply's actions, not a button among them. */
+.task-actions .report-response { padding: 3px 0; border: 0; background: none; color: var(--text-dim); font-size: 12px; text-decoration: none; opacity: .7; }
+.task-actions .report-response:hover, .task-actions .report-response:focus-visible { opacity: 1; text-decoration: underline; }
 .login-policy { text-align:center; margin:18px 0 0; }

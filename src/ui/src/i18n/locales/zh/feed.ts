@@ -42,6 +42,8 @@ export const feed = {
     quote: "引用任务",
     quoteLabel: (title: string) => `引用任务：${title}`,
     retryPlanning: "重试分配",
+    retry: "重试",
+    retryLabel: (title: string) => `重试任务：${title}`,
     stop: "停止该任务",
     details: "查看过程",
     dispatchLog: "派单日志",
