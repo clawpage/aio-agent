@@ -3972,6 +3972,11 @@ button.map-card-switch { flex: 0 0 auto; padding: 4px 10px; }
 .camera-ptz-left { top: 50%; left: 8px; transform: translateY(-50%) rotate(-90deg); }
 .camera-ptz-right { top: 50%; right: 8px; transform: translateY(-50%) rotate(90deg); }
 .camera-note { margin: 0; padding: 8px 12px; color: var(--text-dim); font-size: 12px; }
+@media (max-width: 480px) {
+  .camera-ptz button { width: 32px; height: 32px; }
+  .camera-ptz svg { width: 18px; height: 18px; }
+  .camera-ptz-down { bottom: 44px; }
+}
 .map-card-action {
   flex: 0 0 auto;
   padding: 4px 12px;
