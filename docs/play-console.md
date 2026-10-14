@@ -85,6 +85,12 @@
 自建使用统计（应用活动 › 应用互动，用于分析，不分享、不用于广告，保留不超过 400 天，见 `docs/FEATURES.md`「使用统计」）。
 审核成员是用户名账号，仍可用原用户名登录，无需更换。
 
+已构建 `0.1.1`（versionCode `1001`，arm64，target SDK 37）：Android 启动器名称为 Clawpage Agent（中文系统为一站），
+用同一上传密钥签名（证书 SHA-256 `cb1bdb71…f272`），`apksigner`/`jarsigner`、16 KB ZIP 与 ELF 对齐检查通过；
+AAB/APK 与 `SHA256SUMS` 在被忽略的 `var/android-releases/0.1.1-ai.clawpage.agent-20261014/`。
+手机上的 0.1.0 由 Play 安装（Google 应用签名），上传签名的包不能覆盖安装，需经 Play 测试轨道或正式发布后再真机验收。
+新的商店截图与宣传图由 `scripts/play-store.mts` 生成（登录页已是邮箱登录与新名字）。
+
 ## Google 公开登录与本次送审结果
 
 用户授权新建 `feedback@clawpage.ai` 的免费 Google 账号，账号名称为 `Clawpage Feedback`；密码及后续注册由用户亲自完成。

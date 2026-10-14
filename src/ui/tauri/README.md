@@ -76,7 +76,8 @@ page cannot load.
   left in `target/` also claims the scheme; unregister it with `lsregister -u <path>`.
   The Mac app is named Clawpage in English and 一站 in Chinese (`productName` in
   `tauri.macos.conf.json`, `src-tauri/macos/*.lproj/InfoPlist.strings`); the window title is
-  read from the same localized name at start. The phones keep 一站.
+  read from the same localized name at start. Since 0.1.1 (versionCode 1001) Android shows Clawpage
+  Agent, and 一站 on a Chinese device (`values-zh`); iOS still shows 一站.
   Verified 2026-10-12: Google sign-in returned to the app and survived a restart.
 - macOS phones: settings → "Phones on a Mac" links this Mac's USB Android phones to the
   signed-in account (`src-tauri/src/phone_link.rs`). The console posts JSON strings to the
@@ -89,8 +90,9 @@ page cannot load.
   `device-link.json` beside it (0600), not the Keychain: an ad-hoc signed build would re-prompt for
   Keychain access after every rebuild. When `phone/package.json` changes, regenerate the lock with
   `npm install --package-lock-only` in that directory. iPhone is not supported yet.
-- Home-screen name 一站: `gen/apple/project.yml` (`CFBundleDisplayName`, then
-  `xcodegen generate`) and `gen/android/app/src/main/res/values/strings.xml`.
+- Home-screen name: iOS 一站 in `gen/apple/project.yml` (`CFBundleDisplayName`, then
+  `xcodegen generate`); Android Clawpage Agent in `gen/android/app/src/main/res/values/strings.xml`
+  and 一站 in `values-zh/strings.xml`.
 - Icons: the 一站 mark (`src/ui/public/favicon.svg`) full bleed in `icon/app-icon.svg`, plus a
   glyph-only foreground and a solid background for the Android adaptive icon. Regenerate with
   `npm run -- tauri icon icon/icon.json`, which writes into `gen/` directly; then flatten the

@@ -13,7 +13,7 @@ export const auth: typeof zh = {
   fields: {
     email: "Email",
     emailHint: "name@example.com",
-    signInHint: "Your email (older accounts can use their username)",
+    signInHint: "Email (or your old username)",
     password: "Password",
     passwordHint: "Enter your password",
     newPasswordHint: "At least 12 characters",
