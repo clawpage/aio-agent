@@ -121,3 +121,15 @@ describe("noVNC under the console's toolbar", () => {
     expect(patchNoVncUi(older)).toBe(patched);
   });
 });
+
+describe("noVNC activity report", () => {
+  it("tells the embedding console that someone uses the desktop, throttled", () => {
+    const patched = patchNoVncUi(ui)!;
+    expect(patched).toContain("window.parent.postMessage({ aio: 'desktop', type: 'activity' }, '*');");
+    expect(patched).toContain("if (now - reportedAt < 15000) return;");
+    // A desktop patched before the report existed gets it on the next start.
+    // Cut the block and the blank line the patch put before it.
+    const before = patched.slice(0, patched.indexOf("\n/* aio-agent: the console hears that someone uses the desktop */") - 1) + "\nexport default UI;\n";
+    expect(patchNoVncUi(before)).toBe(patched);
+  });
+});

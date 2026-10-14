@@ -24,6 +24,7 @@ export const workspace = {
     exitFullscreen: "退出全屏",
     fallbackTitle: "沙箱",
     background: "窗口在后台，已暂停该面板并释放浏览器占用。",
+    idle: "一段时间没有操作，已暂停画面并释放浏览器占用；动一下鼠标或点一下即可接回。",
     connecting: "正在建立工作区会话…",
     loadTimeout: "页面加载超时。",
     openInNewTab: "在新标签页打开",

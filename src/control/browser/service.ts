@@ -126,9 +126,11 @@ export class BrowserService {
   #lifecycle: BrowserLifecycle;
   #log: Logger;
   #onEvent: ((event: BrowserServiceEvent) => void) | undefined;
+  #keepAliveMs: number;
 
   constructor(opts: BrowserServiceOptions) {
     this.#log = opts.log;
+    this.#keepAliveMs = opts.cfg.browser.keepAliveMs;
     this.#onEvent = opts.onEvent;
     this.#lifecycle = new BrowserLifecycle({
       runtime: opts.runtime,
@@ -136,6 +138,7 @@ export class BrowserService {
       idleMs: opts.cfg.browser.idleMs,
       releaseWhenIdle: opts.cfg.browser.releaseWhenIdle,
       viewerTtlMs: opts.cfg.browser.viewerTtlMs,
+      dirtyInputGraceMs: opts.cfg.browser.dirtyInputGraceMs,
       clock: opts.clock,
       log: opts.log,
       onEvent: (event) => {
@@ -273,7 +276,8 @@ export class BrowserService {
    * or background-script pin that happens to exist at the same time.
    */
   pinUiKeepAlive(): PinLease {
-    return this.#lifecycle.pinIdentified(UI_KEEP_ALIVE_NOTE);
+    // Bounded like every pin: a switch left on must not hold the sandbox for days.
+    return this.#lifecycle.pinIdentified(UI_KEEP_ALIVE_NOTE, this.#keepAliveMs);
   }
 
   unpinUiKeepAlive(): number {

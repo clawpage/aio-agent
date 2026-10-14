@@ -26,6 +26,7 @@ export const workspace: typeof zh = {
     exitFullscreen: "Exit full screen",
     fallbackTitle: "Sandbox",
     background: "The window is in the background, so this panel is paused and the browser is released.",
+    idle: "Nothing has happened here for a while, so the view is paused and the browser is released. Move the mouse or tap to bring it back.",
     connecting: "Starting a workspace session…",
     loadTimeout: "The page took too long to load.",
     openInNewTab: "Open in a new tab",

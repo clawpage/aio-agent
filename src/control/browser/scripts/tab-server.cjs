@@ -985,6 +985,13 @@ const STRAY_IDLE_MS = Number(process.env.AIO_TABS_STRAY_IDLE_MS || 15 * 60 * 100
 /** A running task's extra tab untouched this long may give way to another task's page. */
 const SPARE_IDLE_MS = Number(process.env.AIO_TABS_SPARE_IDLE_MS || 60 * 1000);
 const MEM_POLL_MS = Number(process.env.AIO_TABS_MEM_POLL_MS || 5000);
+/**
+ * A working set this sandbox should stay under in ordinary use, far below the
+ * hard limit (which is only a ceiling for bursts). Above it the poll closes
+ * finished tasks' tabs and the person's idle ones - never the deeper tiers,
+ * which stay for real pressure. 0 turns it off.
+ */
+const MEM_BUDGET = Number(process.env.AIO_TABS_MEM_BUDGET_MB ?? 1024) * 1024 * 1024;
 
 /** The cgroup's working set (reclaimable page cache left out) and its OOM kills; null without a limit. */
 function memory() {
@@ -1105,8 +1112,11 @@ async function reclaimOnce(reason, need, exceptKey) {
   if (!m) return [];
   // Every look also notes which untracked pages moved on, so their idleness is known when it matters.
   if (connecting) noteStrays(await strayPages().catch(() => []));
-  const goal = Math.min(m.max * MEM_LOW, m.max - need);
-  if (reason === 'poll' ? m.used < m.max * MEM_HIGH : m.used <= goal) return [];
+  // Over the soft budget but nowhere near the limit: only the gentle tiers, down to below the budget.
+  const budget = MEM_BUDGET > 0 && MEM_BUDGET < m.max * MEM_HIGH ? MEM_BUDGET : 0;
+  const overBudget = reason === 'poll' && budget > 0 && m.used >= budget && m.used < m.max * MEM_HIGH;
+  const goal = overBudget ? budget * (MEM_LOW / MEM_HIGH) : Math.min(m.max * MEM_LOW, m.max - need);
+  if (reason === 'poll' ? !overBudget && m.used < m.max * MEM_HIGH : m.used <= goal) return [];
   // Right after a restart nothing is attached yet: connecting re-claims the recorded tabs, so they can be weighed.
   if (!connecting) await browserContext().catch(() => null);
   const deep = reason === 'poll' ? m.used >= m.max * MEM_CRITICAL : reason !== 'page' || m.used + need > m.max;

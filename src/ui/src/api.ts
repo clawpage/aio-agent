@@ -197,7 +197,7 @@ export const api = {
   scheduleAction: (id: string, action: "pause" | "resume" | "cancel" | "run") =>
     request<{ message?: string; schedule: Schedule | null }>(`/api/schedules/${encodeURIComponent(id)}/${action}`, { method: "POST", body: {} }),
   /** The console is on screen: keeps the account's container up, and starts a stopped one. */
-  presence: (endpoint?: string) => request<{ ok: boolean }>("/api/presence", { method: "POST", body: endpoint ? { endpoint } : {} }),
+  presence: (endpoint?: string) => request<{ ok: boolean }>("/api/presence", { method: "POST", body: endpoint ? { attended: true, endpoint } : { attended: true } }),
 
   conversations: (includeArchived = false) =>
     request<{ conversations: Conversation[] }>(`/api/conversations${includeArchived ? "?archived=1" : ""}`),

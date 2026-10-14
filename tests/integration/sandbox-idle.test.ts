@@ -41,12 +41,16 @@ async function workspaceCookie(): Promise<string> {
 }
 
 describe("whole-container idle stop over HTTP", () => {
-  it("records the console in the foreground", async () => {
+  it("records the console in the foreground only when someone is at it", async () => {
     const { cookie, csrf } = await login(h);
+    const beat = (body: string) => h.request("/api/presence", { method: "POST", headers: { cookie, "x-csrf-token": csrf, "content-type": "application/json" }, body });
     idle.calls = [];
-    const res = await h.request("/api/presence", { method: "POST", headers: { cookie, "x-csrf-token": csrf, "content-type": "application/json" }, body: "{}" });
-    expect(res.status).toBe(200);
+    expect((await beat(JSON.stringify({ attended: true }))).status).toBe(200);
     expect(idle.calls).toEqual(["foreground"]);
+    // An older console (no flag) left open on a screen no longer keeps the sandbox.
+    idle.calls = [];
+    expect((await beat("{}")).status).toBe(200);
+    expect(idle.calls).toEqual([]);
   });
 
   it("refuses a background request to a stopped container without waking it", async () => {

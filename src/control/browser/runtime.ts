@@ -267,9 +267,9 @@ p.mkdir(parents=True, exist_ok=True, mode=0o755)
     };
   }
 
-  async snapshot(opts: { timeoutMs?: number } = {}): Promise<SnapshotOutcome> {
+  async snapshot(opts: { timeoutMs?: number; policy?: "block" | "warn" } = {}): Promise<SnapshotOutcome> {
     const res = await this.#run(
-      ["snapshot", ...this.#baseArgs(), "--policy", this.#cfg.browser.dirtyInputPolicy],
+      ["snapshot", ...this.#baseArgs(), "--policy", opts.policy ?? this.#cfg.browser.dirtyInputPolicy],
       opts.timeoutMs ?? this.#cfg.browser.helperTimeoutMs,
     );
     return {

@@ -420,12 +420,16 @@ done
     if (res.code !== 0) throw new Error(`failed to prepare sandbox ownership: ${res.stderr.trim() || res.stdout.trim()}`);
   }
 
-  /** Make sure the in-container supervisord programs we depend on run; only those are touched. */
+  /**
+   * Bring back an in-container supervisord program that failed (code-server dies
+   * at first boot, before the ownership fix). A STOPPED one is left alone: the
+   * control plane starts the editor on first use and stops it when unused.
+   */
   async #ensurePrograms(spec: SandboxSpec, programs = ["code-server"]): Promise<void> {
     for (const program of programs) {
       const res = await this.#docker.run(["exec", "-u", "root", spec.name, "supervisorctl", "status", program], { timeoutMs: 20_000 });
       const line = (res.stdout.trim() || res.stderr.trim()).split("\n")[0] ?? "";
-      if (/FATAL|STOPPED|EXITED|BACKOFF|STARTING/.test(line)) {
+      if (/FATAL|EXITED|BACKOFF/.test(line)) {
         this.#log.warn("starting sandbox program", { program, status: line });
         await this.#docker.run(["exec", "-u", "root", spec.name, "supervisorctl", "start", program], { timeoutMs: 30_000 });
       }

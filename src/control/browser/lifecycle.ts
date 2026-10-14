@@ -144,8 +144,11 @@ export interface WakeOutcome {
 export interface BrowserRuntimeLike {
   /** Read-only probe. Must not start, wake or extend anything. */
   status(opts?: { timeoutMs?: number }): Promise<RuntimeStatus>;
-  /** Capture tabs/scroll/sessionStorage. Must never stop the browser. */
-  snapshot(opts?: { timeoutMs?: number }): Promise<SnapshotOutcome>;
+  /**
+   * Capture tabs/scroll/sessionStorage. Must never stop the browser. `policy`
+   * overrides the configured unsubmitted-input policy for this one capture.
+   */
+  snapshot(opts?: { timeoutMs?: number; policy?: "block" | "warn" }): Promise<SnapshotOutcome>;
   /**
    * Release the browser. Refuses when no usable snapshot exists. The control
    * plane passes the identity it verified before the stop so the runtime can
@@ -242,6 +245,12 @@ export interface BrowserLifecycleOptions {
   viewerTtlMs?: number;
   /** Delay before an automatic retry after a failed sleep/wake. */
   retryDelayMs?: number;
+  /**
+   * How long a release may stay blocked by unsubmitted input with nobody using
+   * the browser. After that the snapshot is taken anyway (the typed text is the
+   * only loss); any new holder starts the wait over.
+   */
+  dirtyInputGraceMs?: number;
   clock?: LifecycleClock;
   log?: LifecycleLogger;
   onEvent?: (event: LifecycleEvent) => void;
@@ -266,6 +275,7 @@ const DEFAULTS = {
   releaseWhenIdle: true,
   viewerTtlMs: 60_000,
   retryDelayMs: 60_000,
+  dirtyInputGraceMs: 30 * 60_000,
   snapshotTimeoutMs: 45_000,
   stopTimeoutMs: 30_000,
   wakeTimeoutMs: 90_000,
@@ -295,6 +305,7 @@ export class BrowserLifecycle {
   #releaseWhenIdle: boolean;
   #viewerTtlMs: number;
   #retryDelayMs: number;
+  #dirtyInputGraceMs: number;
   #snapshotTimeoutMs: number;
   #stopTimeoutMs: number;
   #wakeTimeoutMs: number;
@@ -345,6 +356,8 @@ export class BrowserLifecycle {
   #transitionBusy = false;
   #warnings: SnapshotWarning[] = [];
   #unrestoredTabCount: number | null = null;
+  /** First release blocked by unsubmitted input since the browser was last held. */
+  #dirtySince: number | null = null;
 
   #browserRunning: boolean | null = null;
   #probedAt: number | null = null;
@@ -398,6 +411,7 @@ export class BrowserLifecycle {
     this.#releaseWhenIdle = opts.releaseWhenIdle ?? DEFAULTS.releaseWhenIdle;
     this.#viewerTtlMs = Math.max(0, opts.viewerTtlMs ?? DEFAULTS.viewerTtlMs);
     this.#retryDelayMs = Math.max(0, opts.retryDelayMs ?? DEFAULTS.retryDelayMs);
+    this.#dirtyInputGraceMs = Math.max(0, opts.dirtyInputGraceMs ?? DEFAULTS.dirtyInputGraceMs);
     this.#snapshotTimeoutMs = opts.snapshotTimeoutMs ?? DEFAULTS.snapshotTimeoutMs;
     this.#stopTimeoutMs = opts.stopTimeoutMs ?? DEFAULTS.stopTimeoutMs;
     this.#wakeTimeoutMs = opts.wakeTimeoutMs ?? DEFAULTS.wakeTimeoutMs;
@@ -1299,6 +1313,7 @@ status(): BrowserLifecycleStatus {
   }
 
   #onHolderAdded(): void {
+    this.#dirtySince = null;
     this.#cancelRetry();
     this.#cancelIdle();
     if (this.#state === "idle" || this.#state === "error") {
@@ -1510,7 +1525,18 @@ status(): BrowserLifecycleStatus {
     this.#setState("snapshotting");
     this.#emit("sleep.started", "正在保存浏览器快照");
 
-    const snap = await this.#runtime.snapshot({ timeoutMs: this.#snapshotTimeoutMs });
+    let snap = await this.#runtime.snapshot({ timeoutMs: this.#snapshotTimeoutMs });
+    if (snap.blocked && snap.reason === "dirty_input") {
+      // A page that looks typed-in must not pin the browser forever (a reader's
+      // page box counts too): once nobody has held the browser for the grace
+      // period, release it anyway.
+      const now = this.#clock.now();
+      this.#dirtySince ??= now;
+      if (now - this.#dirtySince >= this.#dirtyInputGraceMs) {
+        this.#log.info?.("releasing despite unsubmitted input", { blockedSeconds: Math.round((now - this.#dirtySince) / 1000) });
+        snap = await this.#runtime.snapshot({ timeoutMs: this.#snapshotTimeoutMs, policy: "warn" });
+      }
+    }
     // `skipped > 0` matters as much as `ok`: the runtime refuses to write a
     // partial snapshot, but a runtime that reported success while dropping pages
     // would silently lose them, so this is checked independently.
@@ -1550,6 +1576,7 @@ status(): BrowserLifecycleStatus {
     this.#unrestoredTabCount = snap.skipped ?? 0;
     this.#snapshotHasStorage = snap.storageCounts != null;
     this.#storageCounts = snap.storageCounts ?? null;
+    this.#dirtySince = null;
     this.#clearError();
 
     // A shutdown mid-snapshot must not start a stop: the cycle no longer owns

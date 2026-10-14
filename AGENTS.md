@@ -84,7 +84,7 @@ docker exec -u root personal-agent-sandbox supervisorctl start code-server   # �
 - 现有部署（本仓库最初的使用者）可选地继续用 workspace 根 `tools/start.sh` 管理；
   host 模式下 `bin/serve` 会在 `dist` 早于 `src` 时拒绝启动，compose 模式下由 `deploy/aio.mjs` 校验镜像，避免用旧构建验收。
 - 修改 UI 后要用真实浏览器验桌面（1440×900）与手机（390×844、360 宽）；`HTTP 200 不等于可用`。
-- 沙箱相关改动要在真容器上验证（健康接口会检查 terminal / code-server / Jupyter 三个表面）。
+- 沙箱相关改动要在真容器上验证（健康接口检查 terminal；code-server / Jupyter 按需启动，打开它们的页面验证）。
 - 重启只针对本服务（现有部署）：`tools/start.sh restart personal-agent`，不要重载全局 supervisor，
   也不要重启其他项目或共享容器。
 - 文档分工：README 只做项目简介；功能行为写 `docs/FEATURES.md`，新增环境变量写 `docs/CONFIGURATION.md`，

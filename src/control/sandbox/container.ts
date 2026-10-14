@@ -144,9 +144,9 @@ export class SandboxContainer {
     return out;
   }
 
-  /** Wait until the core surfaces answer; editor readiness is part of real health. */
+  /** Wait until the terminal answers; the editor and notebook start on first use (programs.ts). */
   async waitSurfaces(timeoutMs = 120_000): Promise<Record<string, boolean>> {
-    const required = ["terminal", "codeServer", "jupyter"];
+    const required = ["terminal"];
     const deadline = Date.now() + timeoutMs;
     let last: Record<string, boolean> = {};
     for (;;) {

@@ -5,10 +5,11 @@ import { api, ApiError, browserApi } from "../api";
 import { t } from "../i18n";
 import { BrowserViewerController } from "../browserViewer";
 import { DesktopFrame, usePhoneDesktop } from "./DesktopFrame";
+import { attention } from "../attention";
 
 /** The sandbox desktop in noVNC: scaled to fit, reconnecting on its own. */
 // `aio=<NOVNC_ASSET_VERSION>`: a new URL, so phones load the patched noVNC instead of a cached copy (see novncPatch).
-export const DESKTOP_PATH = "/vnc/vnc.html?autoconnect=1&resize=scale&reconnect=1&path=ws&aio=5";
+export const DESKTOP_PATH = "/vnc/vnc.html?autoconnect=1&resize=scale&reconnect=1&path=ws&aio=6";
 
 /** How often an open console tells the sandbox its tab is still the one on screen (the sandbox forgets after 45 s). */
 const CONSOLE_PIN_RENEW_MS = 15_000;
@@ -49,6 +50,9 @@ export function TaskConsole({ target, tab, label, primary, watching = false, clo
   const [notice, setNotice] = useState<string | null>(null);
   const overlay = useRef<HTMLDivElement>(null);
   const phone = usePhoneDesktop();
+  // A console nobody touches (a hidden tab, a screen left on) lets the browser go like a closed one.
+  const [attended, setAttended] = useState(() => attention().attended);
+  useEffect(() => attention().subscribe(setAttended), []);
 
   const focus = useCallback(async () => {
     try {
@@ -62,7 +66,7 @@ export function TaskConsole({ target, tab, label, primary, watching = false, clo
   // tab it was last told about above other tasks' new windows for a short while, so renew it.
   useEffect(() => {
     const timer = window.setInterval(() => {
-      if (document.visibilityState === "visible") void target.focus(tab.id).catch(() => undefined);
+      if (attention().attended) void target.focus(tab.id).catch(() => undefined);
     }, CONSOLE_PIN_RENEW_MS);
     return () => window.clearInterval(timer);
   }, [target, tab.id]);
@@ -87,27 +91,30 @@ export function TaskConsole({ target, tab, label, primary, watching = false, clo
       await viewer.claim().then(() => browserApi.wake()).catch(() => undefined);
       if (!cancelled) await focus();
     };
-    const onVisibility = () => (document.visibilityState === "visible" ? void join() : void viewer.release());
-    void join();
-    document.addEventListener("visibilitychange", onVisibility);
+    if (attention().attended) void join();
+    const unsubscribe = attention().subscribe((on) => (on ? void join() : void viewer.release()));
     return () => {
       cancelled = true;
-      document.removeEventListener("visibilitychange", onVisibility);
+      unsubscribe();
       void viewer.release();
       viewer.dispose();
     };
   }, [focus]);
 
   // The desktop on a fresh one-time ticket: view-only while watching, interactive once taken over.
+  // Watching the task work is use without touching anything (the task holds the browser anyway).
+  const away = !attended && !watching;
   useEffect(() => {
     let cancelled = false;
     setSrc(null);
+    // The desktop's socket holds the browser while it is open: no one here, no socket.
+    if (away) return;
     api.ticket(watching ? `${DESKTOP_PATH}&view_only=1` : DESKTOP_PATH).then(
       (ticket) => { if (!cancelled) setSrc(ticket.url); },
       (err) => { if (!cancelled) setNotice(err instanceof Error ? err.message : String(err)); },
     );
     return () => { cancelled = true; };
-  }, [watching]);
+  }, [watching, away]);
 
   // A phone keyboard shrinks only the visual viewport: keep the panel inside it.
   useEffect(() => {

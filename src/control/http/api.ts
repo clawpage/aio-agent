@@ -487,16 +487,19 @@ export function createApiRouter(context: AppContext): Router {
   );
 
   /**
-   * The console is visible on a screen (sent every 20 s while it is). Together
-   * with sandbox use this decides when an idle container is stopped, and a
-   * stopped one starts warming up the moment its owner comes back.
+   * The console is on a screen (sent every 20 s while it is). Only a beat that
+   * says someone touched it lately (`attended`) counts toward keeping the
+   * sandbox: together with sandbox use it decides when an idle container is
+   * stopped, and a stopped one starts warming up the moment its owner comes
+   * back. Older consoles send no flag, so a tab left open for days on one no
+   * longer holds the container.
    */
   router.post(
     "/presence",
     requireKind("primary"),
     requireSession,
     asyncHandler(async (req, res) => {
-      context.idle?.foreground();
+      if (req.body?.attended === true) context.idle?.foreground();
       // The device's own push subscription, when it has one: only that device stays quiet while on screen.
       context.push?.presence(ctxOf(req).session!.ownerId, req.body?.endpoint);
       res.json({ ok: true });
@@ -2488,7 +2491,7 @@ export function createApiRouter(context: AppContext): Router {
       const raw = typeof req.body?.note === "string" ? req.body.note.trim() : "";
       const pin = req.body?.ui === true
         ? context.browser.pinUiKeepAlive()
-        : context.browser.pin((raw || "手动保留").slice(0, 120), ttl);
+        : context.browser.pin((raw || "手动保留").slice(0, 120), Math.min(ttl ?? cfg.browser.keepAliveMs, cfg.browser.keepAliveMs));
       res.json({
         ok: true,
         pin: { id: pin.id, note: pin.note, expiresAt: Number.isFinite(pin.expiresAt) ? pin.expiresAt : null },

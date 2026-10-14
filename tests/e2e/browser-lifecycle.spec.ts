@@ -268,3 +268,36 @@ test("one failed heartbeat does not end the watch: the label drops while the lea
   await expect(bar).toContainText("本窗口观看中");
   expect(beats.at(-1)).toBeGreaterThan(beats[0]!);
 });
+
+test("a console left open but untouched stops its heartbeat and puts the desktop away until someone is back", async ({ page, isMobile }) => {
+  test.skip(isMobile, "the same attention tracker; on a phone the workspace opens from the drawer");
+  await mockConsole(page, { conversations: [makeConversation(CONV_ID, "无人操作")], browser: {} });
+  // The console people use (the task view) is the one that sends the heartbeat.
+  await page.route("**/api/main*", (r) => r.fulfill({ json: { mode: "tasks", tasks: [], nextBefore: null } }));
+  let presence = 0, released = 0, issued = 0;
+  await page.route((url) => url.pathname === "/api/presence", (r) => { presence += 1; return r.fulfill({ json: { ok: true } }); });
+  await page.route((url) => url.pathname === "/api/browser/viewer/release", (r) => { released += 1; return r.fallback(); });
+  await page.route((url) => url.pathname === "/api/workspace/ticket", (r) => {
+    issued += 1;
+    return r.fulfill({ json: { ticket: `t-${issued}`, origin: "http://127.0.0.1:4289", url: `http://127.0.0.1:4289/vnc/vnc.html?ticket=t-${issued}`, expiresAt: Date.now() + 60_000 } });
+  });
+  await page.clock.install();
+  await page.goto("/");
+  await page.getByRole("button", { name: "工作区", exact: true }).first().click();
+  const frame = page.locator(".workspace iframe");
+  await expect(frame).toBeVisible();
+  await expect.poll(() => presence).toBeGreaterThan(0);
+  // Five minutes with the window on screen and nobody touching it.
+  await page.clock.runFor(6 * 60_000);
+  await expect(frame).toHaveCount(0);
+  await expect(page.locator(".workspace")).toContainText("一段时间没有操作");
+  expect(released).toBeGreaterThan(0);
+  const quiet = presence;
+  await page.clock.runFor(2 * 60_000);
+  expect(presence).toBe(quiet);
+  // A touch brings both back at once, the desktop on a fresh ticket.
+  await page.mouse.move(300, 300);
+  await expect.poll(() => presence).toBeGreaterThan(quiet);
+  await expect(frame).toBeVisible();
+  expect(issued).toBeGreaterThan(1);
+});

@@ -17,6 +17,7 @@ import { AppIcon } from "./AppIcon";
 import { browserApi, UI_KEEP_ALIVE_NOTE, type BrowserLifecycleStateView } from "../api";
 import { baseName, kindLabel, workspaceFileKind, type WorkspaceFileKind } from "../sandboxLink";
 import { locale, t } from "../i18n";
+import { attention } from "../attention";
 interface Props {
   canConfigure?: boolean;
   open: boolean;
@@ -311,8 +312,16 @@ export function Workspace({ open, status, initialPath, onClose, onNotify, browse
   }
   const viewer = viewerRef.current;
 
+  /**
+   * Someone is at the console. The desktop's socket holds the browser for as long
+   * as it is open, so a panel nobody touches is put away like a hidden one.
+   */
+  const [present, setPresent] = useState(() => attention().attended);
+  useEffect(() => attention().subscribe(setPresent), []);
+  // Watching a task work in the browser is use even without touching anything; the task holds it anyway.
+  const attended = present || (browserStatus?.leases.turns ?? 0) > 0;
   /** The browser/desktop panels are the only ones that need a live Chromium. */
-  const holdsBrowser = open && tab === "browser" && !minimized;
+  const holdsBrowser = open && tab === "browser" && !minimized && attended;
   // The overview of every open page belongs to the browser window on screen.
   const [tabsOpen, setTabsOpen] = useState(false);
   useEffect(() => { if (!holdsBrowser) setTabsOpen(false); }, [holdsBrowser]);
@@ -322,7 +331,7 @@ export function Workspace({ open, status, initialPath, onClose, onNotify, browse
    * hidden (a backgrounded window, a released browser) must come back on a fresh
    * one, never replay the spent link into "链接已失效".
    */
-  const frameShown = open && !minimized && docVisible && !(holdsBrowser && (suspended || restoringBrowser));
+  const frameShown = open && !minimized && docVisible && (tab !== "browser" || attended) && !(holdsBrowser && (suspended || restoringBrowser));
   const frameShownRef = useRef(frameShown);
   useEffect(() => {
     const wasShown = frameShownRef.current;
@@ -583,6 +592,8 @@ export function Workspace({ open, status, initialPath, onClose, onNotify, browse
                     </div>
                   ) : !docVisible ? (
                     <p className="muted">{t.workspace.window.background}</p>
+                  ) : tab === "browser" && !attended ? (
+                    <p className="muted">{t.workspace.window.idle}</p>
                   ) : frameSrc && tab === "browser" ? (
                     <DesktopFrame
                       key={frameKey}

@@ -22,6 +22,9 @@
  *   to hide its own control bar on the left and sends it keys and text by
  *   postMessage; only the embedding page (window.parent) is listened to, and
  *   only our own origins may frame this page (frame-ancestors).
+ * - Input on the desktop never reaches the console around it, which puts away a
+ *   desktop nobody touches (its socket holds the browser awake). The desktop
+ *   tells the embedding page that someone is using it, at most every 15 s.
  */
 export const NOVNC_UI_PATH = "/opt/novnc/app/ui.js";
 export const NOVNC_HTML_PATH = "/opt/novnc/vnc.html";
@@ -34,7 +37,7 @@ export const NOVNC_RFB_PATH = "/opt/novnc/core/rfb.js";
  * the console opens vnc.html with it too, see DESKTOP_PATH); bump it whenever a
  * patched file changes.
  */
-export const NOVNC_ASSET_VERSION = 5;
+export const NOVNC_ASSET_VERSION = 6;
 
 const KEYBOARD_MARKER = "/* aio-agent: one tap, one key */";
 const KEY_EVENT = `    keyEvent(keysym, code, down) {
@@ -155,12 +158,36 @@ function patchHostPinch(source: string): string | null {
   return source.replace(UI_EXPORT, `\n${HOST_PINCH}${UI_EXPORT}`);
 }
 
+const HOST_ACTIVITY_MARKER = "/* aio-agent: the console hears that someone uses the desktop */";
+const HOST_ACTIVITY = `
+${HOST_ACTIVITY_MARKER}
+if (window.parent !== window) {
+    let reportedAt = 0;
+    const report = () => {
+        const now = Date.now();
+        if (now - reportedAt < 15000) return;
+        reportedAt = now;
+        window.parent.postMessage({ aio: 'desktop', type: 'activity' }, '*');
+    };
+    for (const name of ['pointerdown', 'pointermove', 'keydown', 'wheel', 'touchstart']) {
+        document.addEventListener(name, report, { capture: true, passive: true });
+    }
+}
+`;
+
+function patchHostActivity(source: string): string | null {
+  if (source.includes(HOST_ACTIVITY_MARKER)) return source;
+  if (source.split(UI_EXPORT).length !== 2) return null;
+  return source.replace(UI_EXPORT, `\n${HOST_ACTIVITY}${UI_EXPORT}`);
+}
+
 /** The patched app/ui.js; null when its code is not the version these patches know. */
 export function patchNoVncUi(source: string): string | null {
   const keyboard = patchKeyboard(source);
   const bar = keyboard && patchHostBar(keyboard);
   const pinch = bar && patchHostPinch(bar);
-  return pinch === null ? null : replaceOne(pinch, RFB_IMPORT, `import RFB from "../core/rfb.js?aio=${NOVNC_ASSET_VERSION}";`);
+  const activity = pinch && patchHostActivity(pinch);
+  return activity === null ? null : replaceOne(activity, RFB_IMPORT, `import RFB from "../core/rfb.js?aio=${NOVNC_ASSET_VERSION}";`);
 }
 
 /** The patched vnc.html (loads ui.js under the current version); null when unknown. */

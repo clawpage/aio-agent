@@ -25,6 +25,7 @@ export const workspace: typeof zh = {
     exitFullscreen: "退出全屏",
     fallbackTitle: "沙箱",
     background: "視窗在後臺，已暫停該面板並釋放瀏覽器佔用。",
+    idle: "一段時間沒有操作，已暫停畫面並釋放瀏覽器佔用；動一下滑鼠或點一下即可接回。",
     connecting: "正在建立工作區對話…",
     loadTimeout: "頁面載入超時。",
     openInNewTab: "在新標籤頁開啟",

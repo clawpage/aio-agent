@@ -302,7 +302,7 @@ docker exec -i -u root personal-agent-sandbox python3 - status \
 ## 8. 整个容器空闲休眠
 
 owner 与成员默认都开启（`PA_SANDBOX_RELEASE_IDLE=1` / `PA_MEMBER_SANDBOX_RELEASE_IDLE=1`）。
-沙箱不在用、控制台也不在前台，两者都持续 `PA_SANDBOX_IDLE_SECONDS`（默认 300）后：先检查容器里有没有仍在运行的 shell 命令、10 秒平均 CPU（不含 Chromium）是否 ≥ 5%，再给浏览器做快照并释放，最后 `docker stop` 容器。日志里 `sandbox in use` 会写明是哪个信号让容器留着。判定细节见 [功能说明](FEATURES.md#5-沙箱容器空闲休眠)。
+沙箱不在用、控制台也不在前台（可见且 5 分钟内有人操作才算前台），两者都持续 `PA_SANDBOX_IDLE_SECONDS`（默认 180）后：先检查容器里有没有仍在运行的 shell 命令、10 秒平均 CPU（不含 Chromium）是否 ≥ 5%，再给浏览器做快照并释放，最后 `docker stop` 容器。日志里 `sandbox in use` 会写明是哪个信号让容器留着。判定细节见 [功能说明](FEATURES.md#5-沙箱容器空闲休眠)。
 
 - 看状态：`grep -E "sandbox (stopped after idle|waking from idle)|sandbox idle" var/logs/personal-agent.log var/users/*/logs/personal-agent.log`；`docker ps -a --filter name=aio-user-` 或 `--filter name=personal-agent-sandbox` 里 `Exited` 是休眠，不是故障。
 - 休眠时巡检会跳过这个容器，不要手动 `docker start`：控制面会以为它还在休眠，就不会把 Codex 会话接回来。要唤醒就打开该成员的控制台，或在工作区页面刷新一下。

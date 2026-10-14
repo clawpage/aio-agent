@@ -17,6 +17,7 @@ import type { BrowserRuntimeLike } from "./browser/lifecycle.js";
 
 import type { TaskService } from "./tasks/service.js";
 import type { SandboxIdle } from "./sandbox/idle.js";
+import type { OnDemandPrograms } from "./sandbox/programs.js";
 import type { PushService } from "./push.js";
 import type { PhoneGateway } from "./phone.js";
 import type { HaCameras } from "./camera.js";
@@ -42,6 +43,8 @@ export interface AppContext {
   vault?: Vault;
   /** Whole-container idle stop/start; absent when the runtime keeps its container up. */
   idle?: SandboxIdle;
+  /** Editor and notebook servers started on use; absent in runtimes built by hand in tests. */
+  programs?: OnDemandPrograms;
   cfg: Config;
   db: Db;
   log: Logger;

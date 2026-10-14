@@ -659,6 +659,37 @@ describe("BrowserLifecycle race safety", () => {
     life.shutdown();
   });
 
+  it("releases despite unsubmitted input once nobody held the browser for the grace period", async () => {
+    const runtime = makeRuntime();
+    const policies: (string | undefined)[] = [];
+    runtime.snapshot = async (opts) => {
+      policies.push(opts?.policy);
+      return opts?.policy === "warn"
+        ? { ok: true, savedAt: 9, tabs: 1, skipped: 0, warnings: [], storageCounts: { cookies: 1, origins: 1, localStorageEntries: 0, indexedDbDatabases: 0 } }
+        : { ok: false, blocked: true, reason: "dirty_input", message: "dirty" };
+    };
+    const { life, clock } = makeLifecycle(runtime, { dirtyInputGraceMs: 60_000 });
+    clock.advance(300_000);
+    await settle();
+    expect(runtime.calls.stop).toBe(0);
+    // A holder in between starts the wait over.
+    const lease = life.reserve("turn");
+    await life.ready();
+    lease.release();
+    clock.advance(300_000);
+    await settle();
+    clock.advance(30_000);
+    await settle();
+    expect(policies.includes("warn")).toBe(false);
+    expect(runtime.calls.stop).toBe(0);
+    // Retries keep failing until the grace period has passed, then it is released.
+    clock.advance(40_000);
+    await settle();
+    expect(policies.at(-1)).toBe("warn");
+    expect(runtime.calls.stop).toBe(1);
+    life.shutdown();
+  });
+
   it("never stops when the snapshot fails and reports a secret-free code", async () => {
     const runtime = makeRuntime({
       snapshot: {

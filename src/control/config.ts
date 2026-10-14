@@ -144,6 +144,8 @@ export function loadConfig(): {
     /** Members whose sandbox and browser never stop for idleness (`PA_RESIDENT_MEMBERS`), e.g. the voice gadget's account. */
     residentMembers: string[];
     idleMs: number;
+    /** The editor and notebook servers start on first use and stop after this long unused. */
+    programIdleMs: number;
     /** Keep one member sandbox provisioned ahead of the next registration (`PA_SPARE_SANDBOX`). */
     spare: boolean;
   };
@@ -249,6 +251,10 @@ export function loadConfig(): {
      * `block` refuses the sleep (conservative), `warn` sleeps and reports it.
      */
     dirtyInputPolicy: "block" | "warn";
+    /** Under `block`: how long the refusal holds while nobody uses the browser, then it is released anyway. */
+    dirtyInputGraceMs: number;
+    /** Longest a manual keep-awake pin (the panel's switch or an API caller's) holds the browser. */
+    keepAliveMs: number;
   };
   /**
    * The provider a member's sandbox Codex reaches its model through: the member
@@ -499,7 +505,8 @@ export function loadConfig(): {
       releaseWhenIdle: envStr("PA_SANDBOX_RELEASE_IDLE", "1") === "1",
       memberReleaseWhenIdle: envStr("PA_MEMBER_SANDBOX_RELEASE_IDLE", "1") === "1",
       residentMembers: parseList(envStr("PA_RESIDENT_MEMBERS", "")),
-      idleMs: Math.max(60_000, envInt("PA_SANDBOX_IDLE_SECONDS", 300) * 1000),
+      idleMs: Math.max(60_000, envInt("PA_SANDBOX_IDLE_SECONDS", 180) * 1000),
+      programIdleMs: Math.max(60_000, envInt("PA_SANDBOX_PROGRAM_IDLE_SECONDS", 900) * 1000),
       spare: envStr("PA_SPARE_SANDBOX", "1") === "1",
     },
     documents: {
@@ -565,7 +572,7 @@ export function loadConfig(): {
       // A five minute default keeps a browser that nobody is looking at from
       // holding hundreds of MB of renderer memory; the floor stops a
       // misconfiguration from thrashing the browser on every navigation.
-      idleMs: Math.max(30_000, envInt("PA_BROWSER_IDLE_SECONDS", 300) * 1000),
+      idleMs: Math.max(30_000, envInt("PA_BROWSER_IDLE_SECONDS", 180) * 1000),
       viewerTtlMs: Math.max(10_000, envInt("PA_BROWSER_VIEWER_TTL_SECONDS", 60) * 1000),
       toolDir: envStr("PA_BROWSER_TOOL_DIR", "/opt/aio-browser"),
       snapshotPath: envStr(
@@ -578,6 +585,8 @@ export function loadConfig(): {
       // Default `block`: a browser that holds typed-but-unsubmitted input is
       // never released, so no user-visible work can be lost by accident.
       dirtyInputPolicy: envEnum("PA_BROWSER_DIRTY_INPUT_POLICY", ["block", "warn"] as const, "block"),
+      dirtyInputGraceMs: Math.max(0, envInt("PA_BROWSER_DIRTY_INPUT_GRACE_SECONDS", 1800) * 1000),
+      keepAliveMs: Math.max(60_000, envInt("PA_BROWSER_KEEP_ALIVE_SECONDS", 7200) * 1000),
     },
     // Only member runtimes use it: the member gateway fills it in for each one.
     bridge: {

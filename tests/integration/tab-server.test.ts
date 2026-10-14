@@ -560,6 +560,31 @@ it.skipIf(!hasChromium)("bounds concurrent new tabs while allowing reuse and pre
   }
 });
 
+it.skipIf(!hasChromium)("keeps a sandbox in ordinary use under its soft budget with the gentle tiers only", async () => {
+  const { reclaimMemory } = require(SCRIPT) as { reclaimMemory: (reason: string) => Promise<string[]> };
+  const html = (title: string) => `data:text/html,<title>${title}</title>`;
+  // A 4 GB ceiling: 1.2 GB in use is far from it, but over the 1 GB budget.
+  const max = 4e9;
+  await call("BR", "browser_navigate", { url: html("BudgetRunning") });
+  await call("BF", "browser_navigate", { url: html("BudgetFinished") });
+  await post("/finish", { key: "BF" });
+  await fetch(`${process.env.AIO_TABS_CDP}/json/new?${encodeURIComponent(html("BudgetStray"))}`, { method: "PUT" });
+  await new Promise((r) => setTimeout(r, 600));
+  try {
+    setMemory(0.2, 0, max);
+    expect(await reclaimMemory("poll")).toEqual([]);
+    setMemory(0.3, 0, max);
+    const closed = (await reclaimMemory("poll")).join(" ");
+    expect(closed).toContain("BudgetFinished");
+    // Deeper tiers (pages nobody tracks, a running task's) wait for real pressure.
+    expect(closed).not.toContain("BudgetStray");
+    expect(closed).not.toContain("BudgetRunning");
+  } finally {
+    setMemory(0.1);
+    await post("/finish", { key: "BR" });
+  }
+});
+
 it.skipIf(!hasChromium)("frees memory near the limit, least valuable pages first, never a running task's or a held tab", async () => {
   const { reclaimMemory } = require(SCRIPT) as { reclaimMemory: (reason: string) => Promise<string[]> };
   const html = (title: string, extra = "") => `data:text/html,<title>${title}</title>${extra}`;

@@ -44,6 +44,7 @@ import { createApp, handleUpgrade } from "./http/server.js";
 import { TaskService } from "./tasks/service.js";
 import type { AppContext } from "./context.js";
 import { SandboxIdle } from "./sandbox/idle.js";
+import { OnDemandPrograms } from "./sandbox/programs.js";
 import { startVaultAutofill, Vault } from "./vault.js";
 import { PushService, startTaskNotifications } from "./push.js";
 
@@ -167,6 +168,7 @@ export async function bootstrap(opts: BootstrapOptions = {}): Promise<Bootstrapp
     browser,
     browserRuntime: resolvedBrowserRuntime,
     tabs,
+    programs: new OnDemandPrograms({ container, log, idleMs: cfg.sandbox.programIdleMs }),
     startedAt: Date.now(),
     sandboxSetupError: null,
     sandboxSurfaces: null,
@@ -221,6 +223,14 @@ export async function startSandboxRuntime(ctx: AppContext): Promise<void> {
     if (!compat.ok) throw new Error(compat.error ?? "沙箱节点不可用");
     const state = await container.ensureRunning();
     log.info("sandbox container ready", { name: state.image, healthy: state.healthy });
+    // The editor and notebook start on first use (ctx.programs); from the next container start on
+    // the image no longer starts them at boot. Best effort: without it they only cost memory.
+    ctx.programs?.reset();
+    try {
+      await ctx.programs?.disableBootStart();
+    } catch (err) {
+      log.warn("sandbox programs keep their boot start", { error: err instanceof Error ? err.message : String(err) });
+    }
     // Before anything restarts the browser: without it, every browser exit deletes every cookie.
     try {
       if (await container.keepBrowserCookies()) log.info("sandbox browser keeps cookies across restarts");
@@ -340,6 +350,9 @@ export function startRuntimeRecovery(ctx: AppContext, intervalMs = 30_000): Runt
       if (needsWork || ctx.sandboxSurfaces === null) {
         ctx.log.info("runtime recovery pass", { sandboxReady: ready, running: state.running, codexReady: ctx.codex.ready });
         await startSandboxRuntime(ctx);
+      }
+      if (ready && state.running) {
+        await ctx.programs?.reap().catch((err) => ctx.log.warn("sandbox program stop pass failed", { error: err instanceof Error ? err.message : String(err) }));
       }
       // A released Chromium is not a broken sandbox. `/health` only proves the
       // container's API is alive; when the container is otherwise healthy this

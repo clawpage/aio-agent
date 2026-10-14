@@ -28,6 +28,7 @@ import { PushToggle } from "./PushToggle";
 import {taskStatusLabels,type TaskFeed} from '../taskStatus';
 import { isSandboxLink } from "../sandboxLink";
 import { openDeviceBrowser } from "../deviceBrowser";
+import { attention } from "../attention";
 import { t } from "../i18n";
 /** One owner-facing inbox; executor conversations are implementation details. */
 /** The site a link goes to, named on the opening card. */
@@ -193,19 +194,22 @@ export function MainApp() {
                 expired();
         } };
         const timer = setInterval(() => void renew(), 15 * 60000);
-        // Only while the console is actually on screen: this is the foreground half of idle detection.
-        // It names this device's push subscription (if any), so only this device skips notifications while on screen.
-        const present = () => { if (document.visibilityState === "visible")
+        // Only while someone is actually at the console (on screen and touched lately): this is the
+        // foreground half of idle detection. It names this device's push subscription (if any), so
+        // only this device skips notifications while on screen.
+        const present = () => { if (attention().attended)
             void pushEndpoint().then((endpoint) => api.presence(endpoint)).catch(() => undefined); };
         present();
         const presence = setInterval(present, 20000);
+        // Coming back after a pause starts warming a stopped sandbox at once.
+        const unattend = attention().subscribe((attended) => { if (attended) present(); });
         const visible = () => { if (document.visibilityState === "visible") {
             present();
             void refreshStatus();
             void renew();
         } };
         document.addEventListener("visibilitychange", visible);
-        return () => { clearInterval(poll); clearInterval(timer); clearInterval(presence); document.removeEventListener("visibilitychange", visible); };
+        return () => { clearInterval(poll); clearInterval(timer); clearInterval(presence); unattend(); document.removeEventListener("visibilitychange", visible); };
     }, [auth, expired, refreshStatus]);
     const notify = useCallback((message: string) => setNotice(message), []);
     /** The workspace opens over the page, at its own address; closing it goes back. */

@@ -88,9 +88,9 @@ export function createApp(ctx: AppContext): express.Express {
     void (async () => {
       const [sandbox, hostAuth, node] = await Promise.all([ctx.container.isReady(), ctx.hostTokens.status(), ctx.container.node.check()]);
       const agentStatus = await ctx.agent.status();
-      // Editor/notebook/terminal readiness is part of real health, not just /health.
+      // Terminal readiness is part of real health, not just /health; the editor and notebook start on use.
       const surfaces = ctx.sandboxSurfaces ?? {};
-      const servicesReady = ["terminal", "codeServer", "jupyter"].every((name) => surfaces[name] === true);
+      const servicesReady = surfaces.terminal === true;
       const dependenciesReady = sandbox && hostAuth.ok && servicesReady;
       const agentReady = agentStatus.sessionReady;
       res.status(200).json({
@@ -234,6 +234,9 @@ export function createApp(ctx: AppContext): express.Express {
           const release=runtime.idle.hold();res.on("close",release);
         }
         if(!ctx.sessions.isLive(rec.session!.id)){res.status(401).end();return;}
+        // The editor and notebook servers run only while used: the first request starts them.
+        const program=runtime.programs?.match(req.url);
+        if(program)await runtime.programs!.use(program).catch(err=>runtime.log.warn("sandbox program start failed",{program:program.program,error:err instanceof Error?err.message:String(err)}));
         handleProxyHttp({cfg:runtime.cfg,log:runtime.log,sessions:ctx.sessions,upstream:runtime.container.upstream(),browser:runtime.browser.proxyGate()},rec,req,res);
       } catch {res.status(503).json({error:"runtime_unavailable"});}
     })();
@@ -287,8 +290,11 @@ export function handleUpgrade(ctx: AppContext, req: import("node:http").Incoming
         runtime.idle.touch();
       }
       if(!ctx.sessions.isLive(rec.session!.id)){endSocket(socket,"HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n");return;}
-      const idle=runtime.idle;
-      handleProxyUpgrade({cfg:runtime.cfg,log:runtime.log,sessions:ctx.sessions,upstream:runtime.container.upstream(),browser:runtime.browser.proxyGate(),activity:idle?()=>idle.touch():undefined},rec,req,socket,head);
+      const idle=runtime.idle,programs=runtime.programs,program=programs?.match(req.url??'')??null;
+      if(program)await programs!.use(program).catch(err=>runtime.log.warn("sandbox program start failed",{program:program.program,error:err instanceof Error?err.message:String(err)}));
+      // Socket traffic is use of the sandbox and of the program behind it.
+      const activity=idle||program?()=>{idle?.touch();if(program)programs!.touch(program);}:undefined;
+      handleProxyUpgrade({cfg:runtime.cfg,log:runtime.log,sessions:ctx.sessions,upstream:runtime.container.upstream(),browser:runtime.browser.proxyGate(),activity},rec,req,socket,head);
     } catch {endSocket(socket,"HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\n\r\n");}
   })();
 }
