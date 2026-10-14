@@ -147,11 +147,16 @@ export class SandboxDriver {
     // The image entrypoint creates the sandbox user during startup, so health and
     // the user come before any `docker exec -u <user>`.
     await this.#waitReady(spec, readyTimeoutMs);
-    await this.#waitUserReady(spec);
-    if (spec.member) await this.#isolateNetwork(spec);
-    else if (spec.peerPorts?.length) await this.peerPorts(spec.name, spec.peerPorts);
-    await this.#fixOwnership(spec);
-    await this.#ensurePrograms(spec);
+    // The network rules run from a separate guard container, independent of the user and file
+    // ownership inside; both finish before ensure() returns and the control plane runs anything.
+    await Promise.all([
+      (async () => {
+        await this.#waitUserReady(spec);
+        await this.#fixOwnership(spec);
+        await this.#ensurePrograms(spec);
+      })(),
+      spec.member ? this.#isolateNetwork(spec) : spec.peerPorts?.length ? this.peerPorts(spec.name, spec.peerPorts) : Promise.resolve(),
+    ]);
     this.#managed.set(spec.name, Date.now());
     return await this.inspect(spec.name);
   }
@@ -301,7 +306,8 @@ export class SandboxDriver {
       } catch (err) {
         lastError = String(err);
       }
-      await delay(2000);
+      // A cold boot answers within a few seconds; each poll is one local request.
+      await delay(250);
     }
     throw new Error(`sandbox not ready after ${Math.round(timeoutMs / 1000)}s: ${lastError}`);
   }
@@ -313,7 +319,7 @@ export class SandboxDriver {
       const res = await this.#docker.run(["exec", "-u", spec.containerUser, spec.name, "id", "-u", spec.containerUser], { timeoutMs: 15_000 });
       if (res.code === 0) return;
       last = res.stderr.trim();
-      await delay(1000);
+      await delay(250);
     }
     throw new Error(`sandbox user ${spec.containerUser} not ready after ${Math.round(timeoutMs / 1000)}s: ${last}`);
   }

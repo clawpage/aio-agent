@@ -54,6 +54,11 @@ CDP_HOST = "127.0.0.1"
 CDP_PORT = 9222
 
 HELPER_SCRIPT = "/opt/gem/browser-supervisor.py"
+# A browser released before its container stops stays released at the next boot:
+# the control plane patches the image's gem_init.sh to skip its supervisor while
+# this root-owned file exists (starting Chromium at boot costs ~2 s of a 2-core
+# sandbox's start). Starting the supervisor again removes it.
+BOOT_RELEASED_MARKER = "/opt/aio-browser/boot-released"
 HELPER_PID_FILE = "/var/run/gem/browser-supervisor.pid"
 HELPER_CONFIG_FILE = "/var/run/gem/browser-supervisor.json"
 HELPER_LOG_FILE = "/var/log/gem/browser-supervisor.log"
@@ -1809,6 +1814,7 @@ def stop_browser(
     helper_script: str = HELPER_SCRIPT,
     source_pid: int | None = None,
     source_starttime: int | None = None,
+    boot_marker: str = BOOT_RELEASED_MARKER,
 ) -> dict[str, Any]:
     """Release Chromium, but only for the exact process the snapshot belongs to.
 
@@ -1932,7 +1938,24 @@ def stop_browser(
     # Only remove the pid files that still name the processes we verified.
     remove_pid_file_if_owned(helper_pid_file, pid)
     remove_pid_file_if_owned(browser_pid_file, browser_pid)
+    note_boot_released(boot_marker)
     return ok(savedAt=snapshot.get("savedAt"), tabs=len(snapshot.get("tabs") or []))
+
+
+def note_boot_released(marker: str = BOOT_RELEASED_MARKER) -> None:
+    """Best effort: without the marker the image only starts the browser at boot, as it always did."""
+    try:
+        with open(marker, "w", encoding="utf-8") as handle:
+            handle.write("released\n")
+    except OSError:
+        pass
+
+
+def clear_boot_released(marker: str = BOOT_RELEASED_MARKER) -> None:
+    try:
+        os.unlink(marker)
+    except OSError:
+        pass
 
 
 def start_supervisor(
@@ -1941,6 +1964,7 @@ def start_supervisor(
     helper_pid_file: str = HELPER_PID_FILE,
     helper_log: str = HELPER_LOG_FILE,
     profile_dir: str = DEFAULT_PROFILE_DIR,
+    boot_marker: str = BOOT_RELEASED_MARKER,
 ) -> dict[str, Any]:
     """Relaunch the image's own supervisor exactly as gem_init.sh does.
 
@@ -1954,6 +1978,7 @@ def start_supervisor(
     """
     existing = verify_helper(helper_pid_file, helper_script)
     if existing["ok"]:
+        clear_boot_released(boot_marker)
         return ok(pid=existing["pid"], started=False)
     # An *unverifiable* process for this profile must block a start just like a
     # findable one: "cannot tell" is not "nothing is there" (review item 9).
@@ -1984,6 +2009,7 @@ def start_supervisor(
             start_new_session=True,
         )
     write_pid_file(helper_pid_file, process.pid)
+    clear_boot_released(boot_marker)
     return ok(pid=process.pid, started=True)
 
 

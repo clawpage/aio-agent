@@ -8,6 +8,7 @@ import type { Logger } from "../../common/logger.js";
 import type { ContainerState, ExecRequest, ExecResult, SandboxSpec } from "../../common/protocol.js";
 import type { SandboxNode, SandboxUpstream } from "./node.js";
 import { NOVNC_HTML_PATH, NOVNC_RFB_PATH, NOVNC_UI_PATH, patchNoVncHtml, patchNoVncRfb, patchNoVncUi } from "./novncPatch.js";
+import { GEM_INIT_PATH, patchGemInit } from "./browserBoot.js";
 import {
   CODEX_CONFIG_TOML,
   CODEX_ISOLATION_MARKER,
@@ -259,32 +260,41 @@ export class SandboxContainer {
    */
   async seedWorkspace(): Promise<void> {
     const s = this.#cfg.sandbox;
-    const agentsPath = `${s.containerWorkspaceDir}/AGENTS.md`;
-    const current = await this.execInSandbox(["cat", agentsPath], { timeoutMs: 15_000 });
-    const existing = current.code === 0 ? current.stdout : null;
-    const next = refreshWorkspaceAgents(existing);
-    if (next !== existing) await this.writeFileInSandbox(agentsPath, next);
-    await this.writeFileInSandbox(`${s.containerCodexHome}/config.toml`, CODEX_CONFIG_TOML, { onlyIfAbsent: true });
+    const agents = async () => {
+      const agentsPath = `${s.containerWorkspaceDir}/AGENTS.md`;
+      const current = await this.execInSandbox(["cat", agentsPath], { timeoutMs: 15_000 });
+      const existing = current.code === 0 ? current.stdout : null;
+      const next = refreshWorkspaceAgents(existing);
+      if (next !== existing) await this.writeFileInSandbox(agentsPath, next);
+    };
     // The document skill is managed, not `onlyIfAbsent`: it must reach existing
     // sandboxes too, and it writes to exactly one skill directory per executor
     // (Codex skills and the Claude Code config directory) so no user skill or
     // instruction is ever touched. The directories are created first - `cat >`
     // cannot create a missing parent, so on a fresh sandbox the write would
     // otherwise fail and take the whole startup path down with it.
-    const skillDirs = [`${s.containerCodexHome}/${DOCUMENT_SKILL_DIR}`, `${this.#cfg.claudeCode.configDir}/${DOCUMENT_SKILL_DIR}`];
-    const mkdir = await this.execInSandbox(["mkdir", "-p", ...skillDirs], { timeoutMs: 15_000 });
-    if (mkdir.code !== 0) {
-      // A missing skill must never block the sandbox: the agent can still be
-      // told about the tools through AGENTS.md.
-      this.#log.warn("could not create the sandbox document skill directory", {
-        error: (mkdir.stderr || mkdir.stdout).trim().slice(0, 200),
-      });
-    } else {
-      for (const dir of skillDirs) await this.writeFileInSandbox(`${dir}/SKILL.md`, DOCUMENT_SKILL_MD);
-    }
-    await this.seedShare();
-    await this.seedMail();
-    await this.enforceCodexIsolation();
+    const documentSkill = async () => {
+      const skillDirs = [`${s.containerCodexHome}/${DOCUMENT_SKILL_DIR}`, `${this.#cfg.claudeCode.configDir}/${DOCUMENT_SKILL_DIR}`];
+      const mkdir = await this.execInSandbox(["mkdir", "-p", ...skillDirs], { timeoutMs: 15_000 });
+      if (mkdir.code !== 0) {
+        // A missing skill must never block the sandbox: the agent can still be
+        // told about the tools through AGENTS.md.
+        this.#log.warn("could not create the sandbox document skill directory", {
+          error: (mkdir.stderr || mkdir.stdout).trim().slice(0, 200),
+        });
+      } else {
+        await Promise.all(skillDirs.map((dir) => this.writeFileInSandbox(`${dir}/SKILL.md`, DOCUMENT_SKILL_MD)));
+      }
+    };
+    // Each part writes its own files: run together, a start pays for one round of container calls, not six.
+    await Promise.all([
+      agents(),
+      this.writeFileInSandbox(`${s.containerCodexHome}/config.toml`, CODEX_CONFIG_TOML, { onlyIfAbsent: true }),
+      documentSkill(),
+      this.seedShare(),
+      this.seedMail(),
+      this.enforceCodexIsolation(),
+    ]);
   }
 
   /**
@@ -588,15 +598,20 @@ echo "$dir"`;
     return rfb || ui || page;
   }
 
+  /** From the next container start on, a released browser is not started at boot (browserBoot.ts). */
+  async patchBrowserBoot(): Promise<boolean> {
+    return await this.#patchFile(GEM_INIT_PATH, patchGemInit, 0o755);
+  }
+
   /** Rewrite one root-owned file in the container through `patch`; true when it changed. */
-  async #patchFile(file: string, patch: (source: string) => string | null): Promise<boolean> {
+  async #patchFile(file: string, patch: (source: string) => string | null, mode = 0o644): Promise<boolean> {
     const read = await this.execInSandbox(["cat", file], { user: "root", timeoutMs: 20_000 });
     if (read.code !== 0) throw new Error(`${file} not readable: ${read.stderr.trim()}`);
     const patched = patch(read.stdout);
-    if (patched === null) throw new Error(`${file} is not the version the keyboard patch knows`);
+    if (patched === null) throw new Error(`${file} is not the version the patch knows`);
     if (patched === read.stdout) return false;
     const write = await this.execInSandbox(
-      ["python3", "-c", "import os,sys; p=sys.argv[1]; t=p+'.aio-tmp'; open(t,'wb').write(sys.stdin.buffer.read()); os.chmod(t,0o644); os.replace(t,p)", file],
+      ["python3", "-c", "import os,sys; p=sys.argv[1]; t=p+'.aio-tmp'; open(t,'wb').write(sys.stdin.buffer.read()); os.chmod(t,int(sys.argv[2],8)); os.replace(t,p)", file, mode.toString(8)],
       { user: "root", stdin: patched, timeoutMs: 20_000 },
     );
     if (write.code !== 0) throw new Error(`${file} not patched: ${write.stderr.trim()}`);

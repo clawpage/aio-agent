@@ -1087,6 +1087,47 @@ def test_start_refuses_without_upstream_config() -> None:
         restore()
 
 
+@test
+def test_boot_marker_is_left_by_a_release_and_taken_by_the_next_start() -> None:
+    """A released browser stays released at the next boot until the supervisor is started again."""
+    fake = FakeProc()
+    restore = with_fake_proc(fake)
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            marker = os.path.join(tmp, "boot-released")
+            rt.note_boot_released(marker)
+            assert_true(os.path.exists(marker), "释放后应留下开机不启动浏览器的标记")
+            # A directory that cannot be written is not an error: the image just starts the browser as before.
+            rt.note_boot_released(os.path.join(tmp, "missing", "boot-released"))
+            config = os.path.join(tmp, "browser-supervisor.json")
+            with open(config, "w", encoding="utf-8") as handle:
+                handle.write("{}\n")
+
+            class Started:
+                pid = 4343
+
+            saved_popen = rt.subprocess.Popen
+            saved_listdir = os.listdir
+            rt.subprocess.Popen = lambda *_a, **_k: Started()  # type: ignore[assignment]
+            os.listdir = lambda _path: []  # type: ignore[assignment]
+            try:
+                result = rt.start_supervisor(
+                    helper_script=config,
+                    helper_config=config,
+                    helper_pid_file=os.path.join(tmp, "h.pid"),
+                    helper_log=os.path.join(tmp, "log"),
+                    boot_marker=marker,
+                )
+            finally:
+                rt.subprocess.Popen = saved_popen  # type: ignore[assignment]
+                os.listdir = saved_listdir  # type: ignore[assignment]
+            assert_true(result["ok"] and result["started"], "应启动守护进程")
+            assert_false(os.path.exists(marker), "再次启动后标记应移除，下次开机照常启动浏览器")
+            rt.clear_boot_released(marker)
+    finally:
+        restore()
+
+
 # -------------------------------------------------------- restore idempotency
 
 

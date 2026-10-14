@@ -250,6 +250,12 @@ async function prepareSandboxBrowser(ctx: AppContext): Promise<void> {
   } catch (err) {
     log.warn("sandbox browser identity not aligned", { error: err instanceof Error ? err.message : String(err) });
   }
+  // A browser released before a stop stays released at the next boot (~2 s of a cold start); best effort.
+  try {
+    if (await container.patchBrowserBoot()) log.info("sandbox boot no longer starts a released browser");
+  } catch (err) {
+    log.warn("sandbox boot still starts the browser", { error: err instanceof Error ? err.message : String(err) });
+  }
   // Phone keyboards typed every tap twice through the image's noVNC; best effort, never fatal.
   try {
     if (await container.patchNoVnc()) log.info("sandbox noVNC keyboard patched");
