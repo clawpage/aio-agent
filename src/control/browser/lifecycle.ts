@@ -1429,11 +1429,11 @@ status(): BrowserLifecycleStatus {
       this.#emit("wake.started", intoRunning ? "正在把快照恢复进正在运行的浏览器" : "正在启动并恢复浏览器");
       try {
         const res = await this.#runtime.wake({ timeoutMs: this.#wakeTimeoutMs });
-        const { message } = this.#fail("wake_failed", res.message);
         if (!res.ok) {
           // Reject with the fixed, secret-free text: the caller (and its logs)
           // must never receive a container message that can embed a page URL.
-          throw new Error(message);
+          // (Only here: recorded before the check, every successful wake logged a failure.)
+          throw new Error(this.#fail("wake_failed", res.message).message);
         }
         this.#asleep = false;
         this.#pendingRestore = false;

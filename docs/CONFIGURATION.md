@@ -86,7 +86,7 @@
 | `PA_SPARE_SANDBOX` | `1` | 预先建好一个空白成员沙箱，下一个自助注册的账号直接接手 |
 | `PA_RESIDENT_MEMBERS` | 空 | 容器与浏览器都常驻并随服务启动的成员用户名，逗号分隔 |
 | `PA_BROWSER_LIFECYCLE` | `1` | 浏览器空闲释放总开关 |
-| `PA_BROWSER_RELEASE_IDLE` / `PA_MEMBER_BROWSER_RELEASE_IDLE` | `0` / `1` | 空闲时是否释放 owner / 成员的浏览器 |
+| `PA_BROWSER_RELEASE_IDLE` / `PA_MEMBER_BROWSER_RELEASE_IDLE` | `1` / `1` | 空闲时是否释放 owner / 成员的浏览器（登录靠 profile 与快照保留，见功能说明） |
 | `PA_BROWSER_IDLE_SECONDS` | `180` | 浏览器无占用后释放的时长（下限 30） |
 | `PA_BROWSER_VIEWER_TTL_SECONDS` | `60` | 观看心跳租约有效期（下限 10） |
 | `PA_BROWSER_DIRTY_INPUT_POLICY` | `block` | 页面有未提交输入时 `block`（拒绝释放）或 `warn` |

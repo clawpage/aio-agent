@@ -690,6 +690,19 @@ describe("BrowserLifecycle race safety", () => {
     life.shutdown();
   });
 
+  it("logs a restore failure only when the restore failed", async () => {
+    const runtime = makeRuntime();
+    const { life, clock, logs } = makeLifecycle(runtime);
+    clock.advance(300_000);
+    await settle();
+    expect(life.status().state).toBe("asleep");
+    await life.ready();
+    expect(life.status().state).not.toBe("asleep");
+    expect(life.status().lastErrorCode).toBeNull();
+    expect(logs.filter((l) => l.message === "browser lifecycle failure")).toEqual([]);
+    life.shutdown();
+  });
+
   it("never stops when the snapshot fails and reports a secret-free code", async () => {
     const runtime = makeRuntime({
       snapshot: {

@@ -251,10 +251,14 @@
 
 ### 常驻与空闲释放
 
-- **owner 常驻**：owner 浏览器在容器运行期间默认一直运行，登录状态（包括会话 cookie）始终留在同一进程；容器空闲休眠前照常快照，
-  下次启动时恢复（见第 5 节）。若因升级或崩溃处于已释放状态，
-  后台巡检自动恢复一次。需要省内存时设 `PA_BROWSER_RELEASE_IDLE=1`。
-- **成员空闲释放**（`PA_MEMBER_BROWSER_RELEASE_IDLE=1`，设 `0` 改为常驻）：常驻 Chromium 约占 500 MB；实测快照加释放约 20 秒、
+- **按需运行，登录不丢**：owner 与成员的浏览器都在空闲后释放、下次用到时启动（`PA_BROWSER_RELEASE_IDLE=1` /
+  `PA_MEMBER_BROWSER_RELEASE_IDLE=1`，设 `0` 改为常驻；常驻时后台巡检发现它被释放会自动恢复一次）。登录不靠进程常驻：
+  持久 cookie 留在卷上的 profile（管理策略防止退出时清掉），只在内存里的会话 cookie 与当前站点的 localStorage / IndexedDB
+  随释放前的快照导出，恢复时只补回 profile 缺少的部分、不覆盖更新的登录；快照导不出存储就不释放。2026-10-14 在 owner
+  浏览器实测一次释放与恢复：快照 3875 个 cookie，恢复后 3874 个（1 个期间过期），56 个会话 cookie 全部回来，262 个站点。
+  仍可能要重新登录的只有站点自己按「无访问时长」失效的会话（释放期间没有页面在刷新它），这类站点用工作区的「保留浏览器」（最长
+  `PA_BROWSER_KEEP_ALIVE_SECONDS`）。
+- **成员空闲释放**：常驻 Chromium 约占 500 MB；实测快照加释放约 20 秒、
   释放后容器少约 370 MB，下次冷启动约 17 秒，cookie 全部恢复。智能体只使用这一个浏览器，不另起浏览器或清除站点数据。
 - **何时算在用**：执行中的任务（整轮保护）、可见工作区面板里的观看者（心跳 TTL `PA_BROWSER_VIEWER_TTL_SECONDS`，默认 60 秒）、
   进行中的浏览器 / CDP / VNC 请求与 WebSocket。空闲 `PA_BROWSER_IDLE_SECONDS`（默认 180，下限 30）后释放；总开关 `PA_BROWSER_LIFECYCLE`。

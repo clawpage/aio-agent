@@ -79,8 +79,8 @@ it('derives disjoint persistent data, volumes and networks, coalesces concurrent
   // Only the fixed Chromium flag reaches a member container, never the owner's extra env.
   expect(memberConfig({...h.ctx.cfg,sandbox:{...h.ctx.cfg.sandbox,extraEnv:['OWNER_ONLY=1']}},u.id,19001).sandbox.extraEnv).toEqual(['BROWSER_NO_SANDBOX=--no-sandbox']);
   expect(a.memberModel).toBe('gpt-6.1-sol');
-  // Member browsers are released when idle (the owner's stays resident) unless switched off.
-  expect(h.ctx.cfg.browser.releaseWhenIdle).toBe(false);
+  // Every browser, the owner's included, is released when idle unless switched off.
+  expect(h.ctx.cfg.browser.releaseWhenIdle).toBe(true);
   expect(a.browser.releaseWhenIdle).toBe(true);
   expect(memberConfig({...h.ctx.cfg,browser:{...h.ctx.cfg.browser,memberReleaseWhenIdle:false}},u.id,19001).browser.releaseWhenIdle).toBe(false);
   // Only the administrator's assignment picks another model, and only from the member list.

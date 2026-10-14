@@ -217,8 +217,10 @@ export function loadConfig(): {
     /** Master switch; when off the browser lifecycle is a no-op (always awake). */
     enabled: boolean;
     /**
-     * Whether a browser nobody holds is released at all. Off by default: each
-     * account keeps one resident browser so its logins stay valid.
+     * Whether a browser nobody holds is released at all. On by default: a released
+     * browser comes back from its snapshot (persistent cookies stay in the profile,
+     * session cookies and site storage are carried by the snapshot), so logins
+     * survive; `0` keeps a resident browser.
      */
     releaseWhenIdle: boolean;
     /**
@@ -546,7 +548,7 @@ export function loadConfig(): {
       enabled: envStr("PA_BROWSER_LIFECYCLE", "1") === "1",
       // Releasing an idle browser meant stopping Chromium and carrying logins over
       // in a snapshot; failed restores dropped them. Keep it resident unless asked.
-      releaseWhenIdle: envStr("PA_BROWSER_RELEASE_IDLE", "0") === "1",
+      releaseWhenIdle: envStr("PA_BROWSER_RELEASE_IDLE", "1") === "1",
       memberReleaseWhenIdle: envStr("PA_MEMBER_BROWSER_RELEASE_IDLE", "1") === "1",
       timezone: envStr("PA_BROWSER_TIMEZONE", "America/Los_Angeles"),
       // Chromium 154 for Ubuntu 22.04 arm64 from the xtradeb PPA (a regular build: Cloudflare stalls
