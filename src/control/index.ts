@@ -8,6 +8,7 @@ import {KbGateway} from "./kb.js";
 import {HaGateway} from "./ha.js";
 import { HaCameras } from "./camera.js";
 import {PhoneGateway} from "./phone.js";
+import {DeviceLinks} from "./deviceLink.js";
 import {ScheduleGateway} from "./scheduleTool.js";
 import {HistoryGateway} from "./historyTool.js";
 import { ImageGateway, sandboxImageFiles } from "./imageTool.js";
@@ -441,10 +442,16 @@ async function main(): Promise<void> {
     workspace:ctx.cfg.sandbox.containerWorkspaceDir,usernameOf:id=>account("SELECT username AS v FROM owners WHERE id=?",id),
     filesFor:async id=>sandboxPrintFiles(id===ctx.cfg.runtimeUserId?ctx:await ctx.runtimeForUser!(id))});
   printer.provision(ctx.cfg);
-  // The owner's phone: provisioned for the owner runtime only, never for a member.
-  const phone=new PhoneGateway({cfg:ctx.cfg,log:ctx.log,port:ctx.cfg.memberModelPort??4902,usernameOf:id=>account("SELECT username AS v FROM owners WHERE id=?",id)});
+  // Phones: the owner's on this host's USB, and each account's on the Mac it linked (the app dials in).
+  const deviceLinks=new DeviceLinks(ctx.db,ctx.cfg,ctx.log);
+  ctx.deviceLinks=deviceLinks;
+  const phone=new PhoneGateway({cfg:ctx.cfg,log:ctx.log,port:ctx.cfg.memberModelPort??4902,links:deviceLinks,
+    usernameOf:id=>account("SELECT username AS v FROM owners WHERE id=?",id),userIdOf:name=>account("SELECT id AS v FROM owners WHERE username=?",name)});
   phone.provision(ctx.cfg);
   ctx.phone=phone;
+  // A first link gives the account's runtime the phone tools; removing the last one takes them away.
+  deviceLinks.onAccountChange=id=>void (id===ctx.cfg.runtimeUserId?Promise.resolve(ctx):ctx.runtimeForUser!(id)).then(rt=>phone.refresh(rt.cfg),
+    err=>ctx.log.warn("phone tools not refreshed",{error:err instanceof Error?err.message:String(err)}));
   // Each account's schedules live in its own runtime: the owner's here, a member's in its runtime.
   const schedule=new ScheduleGateway({port:ctx.cfg.memberModelPort??4902,log:ctx.log,
     tasksFor:async id=>id===ctx.cfg.runtimeUserId?ctx.tasks:(await ctx.runtimeForUser!(id)).tasks});
@@ -475,7 +482,8 @@ async function main(): Promise<void> {
   ctx.runtimeForUser=id=>users.resolve(id);
   const app = createApp(ctx);
   const server = http.createServer(app);
-  server.on("upgrade", (req, socket, head) => phone.ownsUpgrade(req) ? phone.handleUpgrade(ctx, req, socket, head) : handleUpgrade(ctx, req, socket, head));
+  server.on("upgrade", (req, socket, head) => deviceLinks.ownsUpgrade(req) ? deviceLinks.handleUpgrade(req, socket, head)
+    : phone.ownsUpgrade(req) ? phone.handleUpgrade(ctx, req, socket, head) : handleUpgrade(ctx, req, socket, head));
 
   await new Promise<void>((resolve) => {
     server.listen(ctx.cfg.port, ctx.cfg.bind, () => resolve());
@@ -505,6 +513,7 @@ async function main(): Promise<void> {
     ownerVault.stop();
     server.close();
     modelGateway.close();
+    deviceLinks.close();
     await users.shutdown();
     await shutdown();
     setTimeout(() => process.exit(0), 200).unref?.();

@@ -20,6 +20,7 @@ import type { SandboxIdle } from "./sandbox/idle.js";
 import type { PushService } from "./push.js";
 import type { PhoneGateway } from "./phone.js";
 import type { HaCameras } from "./camera.js";
+import type { DeviceLinks } from "./deviceLink.js";
 import type { Vault } from "./vault.js";
 
 export interface AppContext {
@@ -31,10 +32,12 @@ export interface AppContext {
   tasks: TaskService;
   /** Phone notifications (Web Push), shared by every account; absent in tests. */
   push?: PushService;
-  /** The owner's phone (bin/phone-bridge.mjs), root context only; absent when not configured or in tests. */
+  /** Phones (bin/phone-bridge.mjs): the owner's on the host, any account's on its linked Mac; shared by every runtime. */
   phone?: PhoneGateway;
   /** Home Assistant cameras for camera cards; absent without Home Assistant (the API also checks the account's grant). */
   cameras?: HaCameras;
+  /** The Macs accounts linked to offer their phones; shared by every runtime. */
+  deviceLinks?: DeviceLinks;
   /** The account's password vault; absent in runtimes built by hand in tests. */
   vault?: Vault;
   /** Whole-container idle stop/start; absent when the runtime keeps its container up. */

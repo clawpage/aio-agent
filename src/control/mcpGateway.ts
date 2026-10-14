@@ -32,6 +32,14 @@ export interface McpGatewayOptions {
   timeoutMs: number;
 }
 
+/** One authorized call, already read: the account and what goes upstream. */
+export interface McpCall {
+  username: string;
+  body: Buffer<ArrayBuffer>;
+  /** mcp-session-id / mcp-protocol-version, when the client sent them. */
+  headers: Record<string, string>;
+}
+
 export class McpGateway {
   #opts: McpGatewayOptions;
   #log: Logger;
@@ -101,6 +109,14 @@ export class McpGateway {
     this.#opts.assign(cfg, `http://host.docker.internal:${this.#opts.port}/${this.#opts.name}/${token}/mcp`);
   }
 
+  /**
+   * A subclass may answer an authorized call itself (another upstream for this
+   * account) and return true; otherwise it goes to `upstreamUrl`.
+   */
+  protected async forward(_call: McpCall, _res: http.ServerResponse): Promise<boolean> {
+    return false;
+  }
+
   /** Whether a gateway request path is this server's. */
   owns(url: string | undefined): boolean {
     return (url ?? "").startsWith(`/${this.#opts.name}/`);
@@ -133,6 +149,8 @@ export class McpGateway {
       }
       const answer = message === undefined ? undefined : await this.local(message, username);
       if (answer !== undefined) return answer === null ? send(202) : send(200, answer);
+      const call: McpCall = { username, body: Buffer.concat(chunks), headers: { ...passed("mcp-session-id"), ...passed("mcp-protocol-version") } };
+      if (await this.forward(call, res)) return;
       const upstream = await fetch(this.#opts.upstreamUrl, {
         method: "POST",
         headers: {
@@ -140,10 +158,9 @@ export class McpGateway {
           accept: "application/json, text/event-stream",
           authorization: `Bearer ${this.#token()}`,
           "x-aio-user": username,
-          ...passed("mcp-session-id"),
-          ...passed("mcp-protocol-version"),
+          ...call.headers,
         },
-        body: Buffer.concat(chunks),
+        body: call.body,
         signal: AbortSignal.timeout(this.#opts.timeoutMs),
       });
       // The upstream's own auth failure is this gateway's misconfiguration, not the caller's.

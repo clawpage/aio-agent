@@ -15,6 +15,10 @@
  * PA_PHONE_SCREEN_OFF=1 keeps the phone's own screen dark while all of the above
  * still sees it (see keepDark).
  *
+ * In the Mac app (src/ui/tauri) the bridge also dials the control plane with
+ * PA_DEVICE_LINK_URL / PA_DEVICE_LINK_TOKEN, so the account that linked this Mac
+ * reaches it without any inbound port (bin/device-link-client.mjs).
+ *
  *   node bin/phone-bridge.mjs setup [--devicekit]
  *     installs the pinned mobile-mcp and scrcpy server under var/phone and
  *     creates the token file; --devicekit also installs mobile-mcp's helper app
@@ -30,6 +34,7 @@ import path from "node:path";
 import process from "node:process";
 import { promisify } from "node:util";
 import { WebSocketServer } from "ws";
+import { linkDevice } from "./device-link-client.mjs";
 
 const run = promisify(execFile);
 const ROOT = path.resolve(import.meta.dirname, "..");
@@ -660,9 +665,25 @@ async function serve() {
     }
     wss.handleUpgrade(req, socket, head, (ws) => void screen.join(ws));
   });
-  server.listen(PORT, BIND, () => log("listening", { bind: BIND, port: PORT, adb: ADB }));
+  let link = null;
+  server.listen(PORT, BIND, () => {
+    const port = server.address().port;
+    log("listening", { bind: BIND, port, adb: ADB });
+    // In the Mac app: dial the control plane, which then reaches this bridge for its account (device-link-client.mjs).
+    if (process.env.PA_DEVICE_LINK_URL && process.env.PA_DEVICE_LINK_TOKEN) {
+      link = linkDevice({
+        url: process.env.PA_DEVICE_LINK_URL,
+        token: process.env.PA_DEVICE_LINK_TOKEN,
+        name: process.env.PA_DEVICE_NAME || os.hostname(),
+        local: `http://127.0.0.1:${port}`,
+        localToken: token,
+        onState: (state) => log("link", { state }),
+      });
+    }
+  });
   const shutdown = () => {
     shuttingDown = true;
+    link?.close();
     clearInterval(dark);
     screen.stop("shutdown");
     mcpChild?.kill("SIGTERM");

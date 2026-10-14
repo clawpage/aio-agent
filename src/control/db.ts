@@ -62,6 +62,16 @@ CREATE TABLE IF NOT EXISTS login_failures (
 );
 
 -- Google subjects are stable identifiers; email never links or promotes an account.
+-- A Mac running the app, linked by its account to offer its USB phones (device tokens are stored hashed).
+CREATE TABLE IF NOT EXISTS device_links (
+  id TEXT PRIMARY KEY,
+  owner_id TEXT NOT NULL REFERENCES owners(id),
+  token_hash TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL DEFAULT '',
+  created_at INTEGER NOT NULL,
+  last_seen_at INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_device_links_owner ON device_links(owner_id);
 CREATE TABLE IF NOT EXISTS google_identities (
   subject TEXT PRIMARY KEY,
   owner_id TEXT NOT NULL UNIQUE REFERENCES owners(id),

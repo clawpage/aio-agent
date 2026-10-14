@@ -39,7 +39,7 @@ async function fakeBridge() {
   return { url: `http://127.0.0.1:${(server.address() as any).port}`, seen, screenInput, close: () => { server.closeAllConnections(); server.close(); } };
 }
 
-it("offers the phone to the owner alone: tools through the gateway, the screen on the console, the bridge token kept on the host", async () => {
+it("offers the host's phone to the owner alone: tools through the gateway, the screen on the console, the bridge token kept on the host", async () => {
   const bridge = await fakeBridge();
   const h = await startHarness();
   const keyFile = path.join(h.dataDir, "phone-bridge.env");
@@ -48,7 +48,8 @@ it("offers the phone to the owner alone: tools through the gateway, the screen o
   delete process.env.PHONE_BRIDGE_TOKEN;
   Object.assign(h.ctx.cfg, { memberModelPort: 0, phoneBridge: { url: bridge.url, secretsFile: keyFile } });
   const cfg = h.ctx.cfg;
-  const phone = new PhoneGateway({ cfg, log: h.ctx.log, port: 0, usernameOf: (id) => USERS[id] ?? null });
+  const phone = new PhoneGateway({ cfg, log: h.ctx.log, port: 0, usernameOf: (id) => USERS[id] ?? null,
+    userIdOf: (name) => Object.keys(USERS).find((id) => USERS[id] === name) ?? null });
   const gateway = new MemberModelGateway(cfg, h.ctx.log, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, phone);
   await gateway.start();
   h.ctx.phone = phone;
@@ -81,7 +82,7 @@ it("offers the phone to the owner alone: tools through the gateway, the screen o
     expect(res.status).toBe(200);
     expect(bridge.seen).toEqual([{ path: "/mcp", auth: "Bearer host-phone-secret", body: call }]);
 
-    // Status: the owner sees the phone, a member is refused.
+    // Status: the owner sees the phone; a member (no Mac of its own linked) has none.
     const ownerAuth = await login(h);
     const status = await h.request("/api/phone", { headers: { cookie: ownerAuth.cookie } });
     expect(status.status).toBe(200);
@@ -90,17 +91,17 @@ it("offers the phone to the owner alone: tools through the gateway, the screen o
     h.ctx.db.prepare("DELETE FROM login_failures").run();
     const memberLogin = await h.request("/api/auth/login", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ username: "member", password: "member-password-123" }) });
     const memberCookie = (memberLogin.headers.getSetCookie?.() ?? []).map((c) => c.split(";")[0]).join("; ");
-    expect((await h.request("/api/phone", { headers: { cookie: memberCookie } })).status).toBe(403);
+    expect(await (await h.request("/api/phone", { headers: { cookie: memberCookie } })).json()).toEqual({ available: false, device: null });
     // The screen picture for a task card: the owner's only.
     const shot = await h.request("/api/phone/screenshot?at=1", { headers: { cookie: ownerAuth.cookie } });
     expect(shot.status).toBe(200);
     expect(shot.headers.get("content-type")).toBe("image/jpeg");
-    expect((await h.request("/api/phone/screenshot?at=1", { headers: { cookie: memberCookie } })).status).toBe(403);
+    expect((await h.request("/api/phone/screenshot?at=1", { headers: { cookie: memberCookie } })).status).toBe(404);
 
     // The screen: only an owner session, on the console's own origin.
     const primary = { Host: `localhost:${h.primaryPort}`, Origin: `http://localhost:${h.primaryPort}` };
     expect((await rawUpgrade(h.primaryPort, PHONE_SCREEN_PATH, primary)).statusLine).toContain("403");
-    expect((await rawUpgrade(h.primaryPort, PHONE_SCREEN_PATH, { ...primary, Cookie: memberCookie })).statusLine).toContain("403");
+    expect((await rawUpgrade(h.primaryPort, PHONE_SCREEN_PATH, { ...primary, Cookie: memberCookie })).statusLine).toContain("404");
     expect((await rawUpgrade(h.primaryPort, PHONE_SCREEN_PATH, { ...primary, Cookie: ownerAuth.cookie, Origin: "https://evil.example" })).statusLine).toContain("403");
     expect((await rawUpgrade(h.primaryPort, PHONE_SCREEN_PATH, { Host: `127.0.0.1:${h.primaryPort}`, Origin: `http://127.0.0.1:${h.primaryPort}`, Cookie: ownerAuth.cookie })).statusLine).toContain("403");
     expect(bridge.seen.filter((s) => s.path === "/screen")).toEqual([]);

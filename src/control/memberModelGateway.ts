@@ -55,6 +55,8 @@ export class MemberModelGateway {
     this.history?.provision(cfg);
     this.image?.provision(cfg);
     this.browser?.provision(cfg);
+    // A member's own phone, on the Mac it linked; never another account's.
+    this.phone?.provision(cfg);
     if(cfg.memberModel===MEMBER_GPT_MODEL)this.gptUsers.add(cfg.runtimeUserId!);else this.gptUsers.delete(cfg.runtimeUserId!);
     if(cfg.memberModel!==MEMBER_CLAUDE_MODEL){this.claudeModels.delete(cfg.runtimeUserId!);return;}
     const claudeSecret=path.join(cfg.dataDir,'claude.env');
@@ -72,7 +74,7 @@ export class MemberModelGateway {
       if(this.kb&&(req.url??'').startsWith('/kb/')){await this.kb.handle(req,res);return;}
       if(this.ha?.owns(req.url)){await this.ha.handle(req,res);return;}
       if(this.printer&&(req.url??'').startsWith('/printer/')){await this.printer.handle(req,res);return;}
-      // Only the owner runtime holds a phone token (index.ts); members are never provisioned one.
+      // A runtime holds a phone token only for its own account's phone (PhoneGateway.available).
       if(this.phone?.owns(req.url)){await this.phone.handle(req,res);return;}
       if(this.schedule&&(req.url??'').startsWith('/schedule/')){await this.schedule.handle(req,res);return;}
       if(this.history&&(req.url??'').startsWith('/history/')){await this.history.handle(req,res);return;}

@@ -225,7 +225,7 @@ export function createApiRouter(context: AppContext): Router {
     if (!user) { res.status(401).json({ error: "unauthenticated" }); return; }
     const restricted = user.role !== "owner";
     const pathname = req.path.toLowerCase().replace(/\/+$/, "");
-    const ownerPaths = ["/usage", "/settings", "/models", "/capabilities", "/sandbox/context", "/documents/provision", "/gadget/history", "/phone"];
+    const ownerPaths = ["/usage", "/settings", "/models", "/capabilities", "/sandbox/context", "/documents/provision", "/gadget/history"];
     if (restricted && ownerPaths.some(p => pathname === p || pathname.startsWith(p + "/"))) {
       res.status(403).json({ error: "forbidden", message: "此操作仅限所有者" }); return;
     }
@@ -1424,14 +1424,16 @@ export function createApiRouter(context: AppContext): Router {
 
   // ----------------------------------------------------------- phone
 
-  // The owner's phone: whether it is offered and connected (the screen itself is a WebSocket, PhoneGateway).
+  // The account's own phone: whether it has one (host USB for the owner, or a linked Mac) and whether it is connected.
+  // The screen itself is a WebSocket (PhoneGateway).
   router.get(
     "/phone",
     requireKind("primary"),
     requireSession,
-    asyncHandler(async (_req, res) => {
-      if (!context.phone?.enabled) { res.json({ available: false, device: null }); return; }
-      const status = await context.phone.status();
+    asyncHandler(async (req, res) => {
+      const userId = ctxOf(req).session!.ownerId;
+      if (!context.phone?.available(userId)) { res.json({ available: false, device: null }); return; }
+      const status = await context.phone.status(userId);
       res.json({ available: true, reachable: status !== null, device: status?.device ?? null });
     }),
   );
@@ -1440,13 +1442,32 @@ export function createApiRouter(context: AppContext): Router {
     "/phone/screenshot",
     requireKind("primary"),
     requireSession,
-    asyncHandler(async (_req, res) => {
-      const shot = await context.phone?.screenshot();
+    asyncHandler(async (req, res) => {
+      const shot = await context.phone?.screenshot(ctxOf(req).session!.ownerId);
       if (!shot) { res.status(404).json({ error: "phone_unavailable", message: "手机未连接" }); return; }
       res.setHeader("Cache-Control", "no-store");
       res.type(shot.type).send(shot.body);
     }),
   );
+
+  // Macs this account linked to offer their phones (the app's bridge dials in with the token, DeviceLinks).
+  // The token is returned once, to the console that asked for it, which hands it to the app.
+  router.get("/device-links", requireKind("primary"), requireSession, (req, res) => {
+    res.json({ links: context.deviceLinks?.list(ctxOf(req).session!.ownerId) ?? [] });
+  });
+  router.post("/device-links", requireKind("primary"), requireSession, (req, res) => {
+    if (!context.deviceLinks) { res.status(404).json({ error: "not_found" }); return; }
+    const name = typeof req.body?.name === "string" ? req.body.name : "";
+    const { link, token } = context.deviceLinks.create(ctxOf(req).session!.ownerId, name);
+    audit(db, "device_link_created", link.id, ctxOf(req).ip);
+    res.setHeader("Cache-Control", "no-store");
+    res.json({ link, token });
+  });
+  router.delete("/device-links/:id", requireKind("primary"), requireSession, (req, res) => {
+    const removed = context.deviceLinks?.revoke(ctxOf(req).session!.ownerId, String(req.params.id)) ?? false;
+    if (removed) audit(db, "device_link_revoked", String(req.params.id), ctxOf(req).ip);
+    res.status(removed ? 200 : 404).json({ ok: removed });
+  });
 
   // ----------------------------------------------------------- capabilities
 
