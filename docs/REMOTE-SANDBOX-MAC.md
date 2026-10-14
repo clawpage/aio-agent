@@ -32,7 +32,7 @@ AIO_HOST_CODEX=on
 `codex-opencode-go` 和 Tailscale Serve 的 :4017 转发、old-mb 的 `ai.aio.bridge-relay` 都已停止。
 `ai.aio.bridge-relay` 只做了 `launchctl disable` 加 `bootout`，plist 保留未删。
 
-old-mb 仓库 `/Users/max/workspace/projects/aio-agent`（检出仍停在 `6b7cff0`）；运行中的 `dist/sandbox`、`dist/common` 2026-10-14 换成在当前机由 `41c610b` 编译后拷入的版本（协议 1），旧版备份在 `var/remote-node/dist-backup-20261013-225049`。只更新 sandboxd 时照此做：当前机干净 worktree 里 `tsc -p tsconfig.server.json`，备份节点 `dist/sandbox` 与 `dist/common`，拷入后 `launchctl kickstart -k gui/501/ai.aio.sandboxd`；sandboxd 只依赖 `ws`，重启不会重启用户容器，但会让成员网关中继和工作区连接断开几秒，先确认没有任务在跑。
+old-mb 仓库 `/Users/max/workspace/projects/aio-agent`（检出仍停在 `6b7cff0`）；运行中的 `dist/sandbox`、`dist/common` 2026-10-14 换成在当前机编译后拷入的版本（协议 1）：先是 `41c610b`，后为 `6a69391` 的 sandboxd 改动（健康检查 0.25 秒一轮、网络隔离并行），备份依次在 `var/remote-node/dist-backup-20261013-225049`、`dist-backup-20261014-013919`。只更新 sandboxd 时照此做：当前机干净 worktree 里 `tsc -p tsconfig.server.json`，备份节点 `dist/sandbox` 与 `dist/common`，拷入后 `launchctl kickstart -k gui/501/ai.aio.sandboxd`；sandboxd 只依赖 `ws`，重启不会重启用户容器，但会让成员网关中继和工作区连接断开几秒，先确认没有任务在跑。
 Node 24.21.0 安装在 `/Users/max/.local`，Docker Desktop 4.93.0 / Engine 29.8.1
 在 `/Applications/Docker.app`。sandboxd 的 `var/remote-node/sandbox.env`：
 
