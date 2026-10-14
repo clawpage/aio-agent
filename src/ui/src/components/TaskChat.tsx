@@ -1,7 +1,7 @@
 import { SupportDialog } from './Support';
 import { BootCover, InlineLoading, LoadingMark } from "./Brand";
 import { createPortal } from "react-dom";
-import { ComposerIcon, useComposerHeight } from "./ComposerControls";
+import { ComposerIcon, SEND_SHORTCUT, isSendShortcut, useComposerHeight } from "./ComposerControls";
 import { PopupPresence } from "./PopupMotion";
 import { MessageTime, TaskDuration, useDisplayClock } from "./MessageTime";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
@@ -495,11 +495,11 @@ export function TaskChat({ onDetails, onOpenLink, onOpenFileInBrowser, onExpired
     <div className={`composer${draft || attachments.length || reference || uploading ? " has-content" : ""}`}>
       {reference && <div className="task-reference" role="status"><div><span className="muted tiny">{i18n.feed.reference.label}</span><strong title={reference.title}>{reference.title}</strong></div><button type="button" className="ghost" aria-label={i18n.feed.reference.cancel} onClick={() => { setReference(null); input.current?.focus(); }}><ComposerIcon kind="close"/></button></div>}
       <ComposerAttachments items={attachments} pending={tray.pending} previews={tray.previews} onRemove={path => { setAttachments(old => old.filter(x => x.path !== path)); tray.drop(path); }}/>
-      <textarea ref={input} rows={2} value={draft} aria-label={i18n.chat.composer.message} placeholder={reference ? i18n.feed.composer.placeholderReference : i18n.feed.composer.placeholder} onChange={e => setDraft(e.target.value)} onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+      <textarea ref={input} rows={2} value={draft} aria-label={i18n.chat.composer.message} placeholder={reference ? i18n.feed.composer.placeholderReference : i18n.feed.composer.placeholder} onChange={e => setDraft(e.target.value)} onKeyDown={e => { if (isSendShortcut(e)) {
         e.preventDefault();
         send();
     } }}/>
-      <div className="composer-row"><label className="file-button"><ComposerIcon kind={uploading ? "busy" : "attach"}/><span className="composer-button-label">{uploading ? i18n.chat.composer.uploading : i18n.chat.composer.attach}</span><input type="file" multiple className="file-input" aria-label={i18n.chat.composer.addAttachment} data-testid="attachment-input" onChange={e => { pick(e.target.files); e.target.value = ""; }}/></label><VoiceButton disabled={false} onError={setError} onText={heard => { setDraft(old => old + (/[A-Za-z0-9]$/.test(old) && /^[A-Za-z0-9]/.test(heard) ? " " : "") + heard); input.current?.focus(); }}/><span className="spacer"/><button className="primary" disabled={!draft.trim() && !attachments.length && !uploading} onClick={send} aria-label={i18n.chat.composer.send} title={i18n.chat.composer.send}><ComposerIcon kind="send"/><span className="composer-button-label">{i18n.chat.composer.send}</span></button></div>
+      <div className="composer-row"><label className="file-button"><ComposerIcon kind={uploading ? "busy" : "attach"}/><span className="composer-button-label">{uploading ? i18n.chat.composer.uploading : i18n.chat.composer.attach}</span><input type="file" multiple className="file-input" aria-label={i18n.chat.composer.addAttachment} data-testid="attachment-input" onChange={e => { pick(e.target.files); e.target.value = ""; }}/></label><VoiceButton disabled={false} onError={setError} onText={heard => { setDraft(old => old + (/[A-Za-z0-9]$/.test(old) && /^[A-Za-z0-9]/.test(heard) ? " " : "") + heard); input.current?.focus(); }}/><span className="spacer"/><button className="primary" disabled={!draft.trim() && !attachments.length && !uploading} onClick={send} aria-label={i18n.chat.composer.send} title={`${i18n.chat.composer.send} (${SEND_SHORTCUT})`}><ComposerIcon kind="send"/><span className="composer-button-label">{i18n.chat.composer.send}</span></button></div>
     </div>
     <PopupPresence>{preview && <FilePreview path={preview} onClose={() => setPreview(null)} onOpenLink={onOpenLink} onOpenInBrowser={onOpenFileInBrowser}/>}</PopupPresence>
     <PopupPresence>{debug && dispatchLogFor && <DispatchLog taskId={dispatchLogFor} onClose={() => setDispatchLogFor(null)}/>}</PopupPresence>

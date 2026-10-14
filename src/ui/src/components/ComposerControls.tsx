@@ -1,4 +1,4 @@
-import { useLayoutEffect, type RefObject } from "react";
+import { useLayoutEffect, type KeyboardEvent, type RefObject } from "react";
 import { LoadingMark } from "./Brand";
 
 export function ComposerIcon({ kind }: { kind: "attach" | "send" | "stop" | "close" | "busy" }) {
@@ -11,6 +11,16 @@ export function ComposerIcon({ kind }: { kind: "attach" | "send" | "stop" | "clo
       : <path d="m7 7 10 10M17 7 7 17" />}
   </svg>;
 }
+
+const MAC = typeof navigator !== "undefined" && /Mac|iPhone|iPad|iPod/.test(navigator.platform || navigator.userAgent);
+
+/** Enter alone adds a line; ⌘Enter (Mac) or Ctrl+Enter (elsewhere) sends. */
+export function isSendShortcut(e: KeyboardEvent) {
+  return e.key === "Enter" && (MAC ? e.metaKey : e.ctrlKey) && !e.nativeEvent.isComposing;
+}
+
+/** The send shortcut as the button's tooltip shows it. */
+export const SEND_SHORTCUT = MAC ? "⌘↵" : "Ctrl+Enter";
 
 /** Grow with the draft, then scroll within the CSS viewport cap. Empty fields
  * leave height to CSS, which switches between idle and keyboard focus sizes. */

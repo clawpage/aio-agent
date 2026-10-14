@@ -1,4 +1,4 @@
-import { ComposerIcon, useComposerHeight } from "./ComposerControls";
+import { ComposerIcon, SEND_SHORTCUT, isSendShortcut, useComposerHeight } from "./ComposerControls";
 import { PopupPresence } from "./PopupMotion";
 import { MessageTime, useDisplayClock } from "./MessageTime";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -374,7 +374,7 @@ export function Chat({
           placeholder={t.chat.composer.placeholder}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+            if (isSendShortcut(e)) {
               e.preventDefault();
               void send();
             }
@@ -413,7 +413,7 @@ export function Chat({
               type="button"
               className="primary"
               aria-label={willQueue ? t.chat.composer.queueSend : t.chat.composer.send}
-              title={willQueue ? t.chat.composer.queueSend : t.chat.composer.send}
+              title={`${willQueue ? t.chat.composer.queueSend : t.chat.composer.send} (${SEND_SHORTCUT})`}
               onClick={() => void send()}
               disabled={busy || uploading || (!draft.trim() && attachments.length === 0)}
             >
