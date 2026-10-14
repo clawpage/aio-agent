@@ -1032,10 +1032,14 @@ export class AgentManager {
         modelProvider: desiredProvider,
         ...(startsFresh ? { switchedFrom: conversation.codex_thread_id } : {}),
       });
-    } else if (desiredProvider !== currentProvider) {
+    } else if (desiredProvider !== currentProvider || this.#failedGatewayServers(conversation.id, threadId).length) {
       // Codex only honours `modelProvider` when a thread is created, so an
       // existing conversation switching providers continues on a fork that keeps
       // the history. Resuming would silently stay on the old provider.
+      // The same goes for a gateway tool server (aio_*) that failed to start on this
+      // thread: Codex starts a thread's MCP servers once and never retries them there,
+      // while a fork starts them again (a phone whose Mac was offline at that moment).
+      const failed = this.#failedGatewayServers(conversation.id, threadId);
       const forked = await this.#codex.forkThread(threadId, {
         developerInstructions,
         ...(browserTask ? { browserTask } : {}),
@@ -1049,12 +1053,16 @@ export class AgentManager {
       this.#db
         .prepare("UPDATE conversations SET codex_thread_id = ?, model_provider = ?, cwd = ? WHERE id = ?")
         .run(threadId, desiredProvider, forked.cwd, conversation.id);
-      this.#log.info("conversation switched provider by forking its thread", {
-        conversationId: conversation.id,
-        from: currentProvider,
-        to: desiredProvider,
-        model,
-      });
+      if (desiredProvider !== currentProvider) {
+        this.#log.info("conversation switched provider by forking its thread", {
+          conversationId: conversation.id,
+          from: currentProvider,
+          to: desiredProvider,
+          model,
+        });
+      } else {
+        this.#log.info("conversation forked its thread to start failed tools again", { conversationId: conversation.id, failed });
+      }
       this.#appendEvent(conversation.id, turn.id, "thread.started", {
         threadId,
         model: forked.model,
@@ -1200,6 +1208,19 @@ export class AgentManager {
    * A task's turn carries the whole executor prompt; the person's request is
    * the task's own text. The oldest exchange that does not fit is cut short.
    */
+  /** Gateway tool servers (aio_*) whose last start on this thread failed: Codex will not start them there again. */
+  #failedGatewayServers(conversationId: string, threadId: string): string[] {
+    const latest = new Map<string, string>();
+    const rows = this.#db.prepare("SELECT payload FROM events WHERE conversation_id = ? AND type = 'mcpServer/startupStatus/updated' ORDER BY id").all(conversationId) as Array<{ payload: string }>;
+    for (const row of rows) {
+      try {
+        const p = JSON.parse(row.payload) as { threadId?: string; name?: string; status?: string };
+        if (p.threadId === threadId && p.name?.startsWith("aio_") && p.status) latest.set(p.name, p.status);
+      } catch { /* not a status we can read */ }
+    }
+    return [...latest].filter(([, status]) => status === "failed").map(([name]) => name);
+  }
+
   /** Which provider the next turn on `model` runs on, and whether it starts a fresh thread. */
   #threadPlan(conversation: ConversationRow, model: string, turnId: string | null) {
     // The provider is decided by the model that will actually run: a Claude Code
