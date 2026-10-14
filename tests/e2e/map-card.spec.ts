@@ -145,3 +145,41 @@ test("a broken map block stays readable as code", async ({ page }) => {
   await expect(page.locator(".bubble pre")).toContainText("坏的", { timeout: 60_000 });
   await expect(page.locator(".map-card")).toHaveCount(0);
 });
+
+test("with Google Maps on, a card is one Google static image with Google's marker, and falls back to tiles if it fails", async ({ page }, info) => {
+  await mockConsole(page, { conversations: [] });
+  await page.route("**/api/main*", (r) => r.fulfill({ json: { mode: "tasks", tasks: [task(located)], nextBefore: null } }));
+  const tiles: string[] = [];
+  await page.route("**/api/map/tiles/**", (r) => { tiles.push(new URL(r.request().url()).pathname); return r.fulfill({ contentType: "image/png", body: TILE }); });
+  await page.route(/\/api\/map$/, (r) => r.fulfill({ json: { provider: "google" } }));
+  const statics: URL[] = [];
+  let fail = false;
+  await page.route("**/api/map/static?*", (r) => {
+    statics.push(new URL(r.request().url()));
+    return fail ? r.fulfill({ status: 502, json: { error: "map_unavailable" } }) : r.fulfill({ contentType: "image/png", body: TILE });
+  });
+  await page.goto("/");
+  const card = page.locator(".map-card").filter({ hasText: "金门大桥" });
+  await expect(card.locator("img.map-static")).toBeVisible({ timeout: 60_000 });
+  await expect.poll(() => card.locator("img.map-static").evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth > 0)).toBe(true);
+  const url = statics[0]!;
+  expect(Object.fromEntries(url.searchParams)).toMatchObject({ lat: "37.819900", lng: "-122.478300", zoom: "15", h: "150", lang: "zh-CN" });
+  expect(Number(url.searchParams.get("w")) % 80).toBe(0);
+  // Google draws the marker and its own attribution; no tiles, no pin of ours.
+  await expect(card.locator(".map-pin")).toHaveCount(0);
+  await expect(card.locator(".map-attribution")).toHaveCount(0);
+  expect(tiles).toEqual([]);
+  await page.screenshot({ path: info.outputPath("map-card-google.png") });
+
+  fail = true;
+  const box = page.getByRole("textbox", { name: "消息", exact: true });
+  await expect(box).toBeVisible();
+  // A new card (the sheet's larger map at another zoom) whose image fails shows tiles instead.
+  if (info.project.name !== "mobile") {
+    await card.getByRole("button", { name: /地图：金门大桥/ }).click();
+    const sheet = page.getByRole("dialog");
+    await expect(sheet.locator(".map-pin")).toBeVisible();
+    await expect.poll(() => tiles.length).toBeGreaterThan(0);
+    expect(tiles.every((t) => /^\/api\/map\/tiles\/16\//.test(t))).toBe(true);
+  }
+});

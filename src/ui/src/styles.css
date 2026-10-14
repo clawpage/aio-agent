@@ -3896,6 +3896,7 @@ button.map-card-switch { flex: 0 0 auto; padding: 4px 10px; }
   pointer-events: none;
 }
 .map-view-empty { display: grid; place-items: center; }
+.map-view img.map-static { position: static; display: block; width: 100%; height: 100%; object-fit: cover; }
 .map-pin {
   position: absolute;
   left: 50%;

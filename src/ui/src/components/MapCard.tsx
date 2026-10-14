@@ -4,12 +4,38 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { mapLinks, platformOf, tilesFor, type MapPlace } from "../mapBlocks";
 import { apiUrl, API_CREDENTIALS } from "../api";
-import { t } from "../i18n";
+import { locale, t } from "../i18n";
 
-/** Tiles around a point, drawn from the console's own tile proxy; no map library. */
+type Provider = "google" | "osm";
+let providerOnce: Promise<Provider> | null = null;
+/** Which map the control plane draws, asked once per page; an older control plane has only tiles. */
+function mapProvider(): Promise<Provider> {
+  providerOnce ??= fetch(apiUrl("/api/map"), { credentials: API_CREDENTIALS })
+    .then(async (res) => (res.ok && ((await res.json()) as { provider?: string }).provider === "google" ? "google" : "osm") as Provider)
+    .catch(() => "osm" as const);
+  return providerOnce;
+}
+function useMapProvider(): Provider | null {
+  const [provider, setProvider] = useState<Provider | null>(null);
+  useEffect(() => {
+    let live = true;
+    void mapProvider().then((p) => { if (live) setProvider(p); });
+    return () => { live = false; };
+  }, []);
+  return provider;
+}
+
+/**
+ * The place on a map, from the console's own map proxy; no map library. With
+ * Google it is one static image with Google's marker (its width rounded up, so
+ * resizing does not ask for a new image at every pixel); otherwise, or if that
+ * image fails, OpenStreetMap tiles around the point with our pin.
+ */
 function MapView({ place, zoom, height }: { place: MapPlace; zoom: number; height: number }) {
   const box = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(0);
+  const provider = useMapProvider();
+  const [googleFailed, setGoogleFailed] = useState(false);
   useEffect(() => {
     const el = box.current;
     if (!el) return;
@@ -19,17 +45,26 @@ function MapView({ place, zoom, height }: { place: MapPlace; zoom: number; heigh
     observer.observe(el);
     return () => observer.disconnect();
   }, []);
-  const tiles = width && place.lat !== null && place.lng !== null ? tilesFor(place.lat, place.lng, zoom, width, height) : [];
+  if (provider === "google" && !googleFailed && place.lat !== null && place.lng !== null) {
+    const w = Math.min(640, Math.max(160, Math.ceil(width / 80) * 80));
+    const query = new URLSearchParams({ lat: place.lat.toFixed(6), lng: place.lng.toFixed(6), zoom: String(zoom), w: String(w), h: String(height), lang: locale });
+    return (
+      <div ref={box} className="map-view" style={{ height }}>
+        {width > 0 && <img className="map-static" loading="lazy" src={apiUrl(`/api/map/static?${query}`)} alt="" draggable={false} onError={() => setGoogleFailed(true)} />}
+      </div>
+    );
+  }
+  const tiles = provider && width && place.lat !== null && place.lng !== null ? tilesFor(place.lat, place.lng, zoom, width, height) : [];
   return (
     <div ref={box} className="map-view" style={{ height }}>
       {tiles.map((t) => (
         <img key={t.key} src={apiUrl(`/api/map/tiles/${t.z}/${t.x}/${t.y}`)} alt="" loading="lazy" draggable={false} style={{ left: t.left, top: t.top }} />
       ))}
-      <svg className="map-pin" width="28" height="38" viewBox="0 0 28 38" aria-hidden="true">
+      {provider && <svg className="map-pin" width="28" height="38" viewBox="0 0 28 38" aria-hidden="true">
         <path d="M14 1C6.8 1 1 6.7 1 13.8 1 23.5 14 37 14 37s13-13.5 13-23.2C27 6.7 21.2 1 14 1Z" />
         <circle cx="14" cy="13.8" r="5" />
-      </svg>
-      <span className="map-attribution">© OpenStreetMap</span>
+      </svg>}
+      {provider && <span className="map-attribution">© OpenStreetMap</span>}
     </div>
   );
 }

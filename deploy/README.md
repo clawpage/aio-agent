@@ -37,6 +37,10 @@ Google 登录配置：在 `AIO_CONTROL_ENV_FILE` 指向的文件中设置 `PA_GO
 不设置 client ID 时不读取空 secret，Google 登录关闭。首次注册在现有账户总数不足 20 时免邀请码，达到 20 后需要一次性邀请码，详见
 [Google 登录](../docs/google-login.md)。变更后构建 control/ui 镜像，检查 `busy`，仅刷新所需层。
 
+Google 地图（可选）：在 `aio.env` 设置 `AIO_SECRET_GOOGLE_MAPS` 指向私有 `0600` env 文件
+（`PA_GOOGLE_MAPS_API_KEY=...`，Google Cloud 中开通 Maps Static API 与 Geocoding API，key 限制为这两项），
+Compose 将其只读挂载到 `/run/secrets/google-maps`；不设置时地图卡片用 OpenStreetMap。
+
 ## 多机
 
 每台机器只跑自己那一层，`AIO_LAYERS` 指定：

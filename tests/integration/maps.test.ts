@@ -26,6 +26,28 @@ describe("map card endpoints", () => {
     } finally { tile.mockRestore(); }
   });
 
+  it("tells the console which map it draws, and serves Google static maps only when configured", async () => {
+    const staticMap = vi.spyOn(maps, "staticMap").mockResolvedValue(Buffer.from([137, 80, 78, 71]));
+    const query = "lat=31.24&lng=121.49&zoom=15&w=480&h=150&lang=en";
+    try {
+      expect((await h.request("/api/map")).status).toBe(401);
+      expect((await h.request(`/api/map/static?${query}`)).status).toBe(401);
+      const { cookie } = await login(h);
+      expect(await (await h.request("/api/map", { headers: { cookie } })).json()).toEqual({ provider: "osm" });
+      expect((await h.request(`/api/map/static?${query}`, { headers: { cookie } })).status).toBe(404);
+      maps.useGoogle("test-key");
+      expect(await (await h.request("/api/map", { headers: { cookie } })).json()).toEqual({ provider: "google" });
+      const res = await h.request(`/api/map/static?${query}`, { headers: { cookie } });
+      expect(res.status).toBe(200);
+      expect(res.headers.get("content-type")).toBe("image/png");
+      expect(res.headers.get("cache-control")).toBe("private, max-age=86400");
+      expect(staticMap).toHaveBeenCalledWith({ lat: 31.24, lng: 121.49, zoom: 15, width: 480, height: 150, lang: "en" });
+      expect((await h.request("/api/map/static?lat=31.24&lng=121.49&zoom=15&w=9999&h=150", { headers: { cookie } })).status).toBe(400);
+      staticMap.mockResolvedValueOnce(null);
+      expect((await h.request(`/api/map/static?${query}`, { headers: { cookie } })).status).toBe(502);
+    } finally { staticMap.mockRestore(); maps.useGoogle(""); }
+  });
+
   it("geocodes an address for a signed-in session", async () => {
     const geocode = vi.spyOn(maps, "geocode").mockResolvedValue({ lat: 37.8199, lng: -122.4783, label: "Golden Gate Bridge" });
     try {

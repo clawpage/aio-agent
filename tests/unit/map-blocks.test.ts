@@ -141,4 +141,51 @@ describe("map tile and geocoding proxy", () => {
     await service.geocode("nowhere");
     expect(fetchImpl).toHaveBeenCalledTimes(3);
   });
+
+  it("with a Google key, draws one static image with Google's marker and never keeps it", async () => {
+    const fetchImpl = vi.fn(async () => png());
+    const service = new MapService(fetchImpl as unknown as typeof fetch, 0);
+    expect(service.provider).toBe("osm");
+    const request = MapService.staticRequest({ lat: "31.2400001", lng: "121.49", zoom: "15", w: "480", h: "150", lang: "en" })!;
+    expect(request).toEqual({ lat: 31.24, lng: 121.49, zoom: 15, width: 480, height: 150, lang: "en" });
+    expect(await service.staticMap(request)).toBeNull();
+    expect(fetchImpl).not.toHaveBeenCalled();
+    service.useGoogle("test-key");
+    expect(service.provider).toBe("google");
+    expect(await service.staticMap(request)).toEqual(Buffer.from([137, 80, 78, 71]));
+    await service.staticMap(request);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect((fetchImpl.mock.calls[0] as unknown as [string])[0]).toBe("https://maps.googleapis.com/maps/api/staticmap?center=31.24,121.49&zoom=15&size=480x150&scale=2&markers=31.24,121.49&language=en&key=test-key");
+    const denied = new MapService((async () => new Response("denied", { status: 403, headers: { "content-type": "text/plain" } })) as unknown as typeof fetch, 0);
+    denied.useGoogle("bad");
+    expect(await denied.staticMap(request)).toBeNull();
+  });
+
+  it("accepts only sane static map requests", () => {
+    const ok = { lat: "31.24", lng: "121.49", zoom: "15", w: "480", h: "150" };
+    expect(MapService.staticRequest(ok)).toMatchObject({ lang: "zh-CN" });
+    expect(MapService.staticRequest({ ...ok, lang: "fr" })).toMatchObject({ lang: "zh-CN" });
+    for (const bad of [{ lat: "91" }, { lng: "abc" }, { zoom: "2" }, { zoom: "15.5" }, { w: "641" }, { h: "10" }, { w: undefined }, { lat: ["1"] }]) {
+      expect(MapService.staticRequest({ ...ok, ...bad })).toBeNull();
+    }
+  });
+
+  it("with a Google key, geocodes through Google, caches places and misses but not outages", async () => {
+    const answers: Record<string, unknown> = {
+      bund: { status: "OK", results: [{ formatted_address: "外滩", geometry: { location: { lat: 31.2402611, lng: 121.490577 } } }] },
+      nowhere: { status: "ZERO_RESULTS", results: [] },
+      denied: { status: "REQUEST_DENIED", error_message: "no" },
+    };
+    const fetchImpl = vi.fn(async (url: string) => new Response(JSON.stringify(answers[new URL(url).searchParams.get("address")!])));
+    const service = new MapService(fetchImpl as unknown as typeof fetch, 0);
+    service.useGoogle("test-key");
+    expect(await service.geocode("bund")).toEqual({ lat: 31.2402611, lng: 121.490577, label: "外滩" });
+    expect(await service.geocode(" Bund")).toEqual({ lat: 31.2402611, lng: 121.490577, label: "外滩" });
+    expect(await service.geocode("nowhere")).toBeNull();
+    await service.geocode("nowhere");
+    await expect(service.geocode("denied")).rejects.toThrow(/REQUEST_DENIED/);
+    await expect(service.geocode("denied")).rejects.toThrow(/REQUEST_DENIED/);
+    expect(fetchImpl).toHaveBeenCalledTimes(4);
+    expect((fetchImpl.mock.calls[0] as unknown as [string])[0]).toMatch(/^https:\/\/maps\.googleapis\.com\/maps\/api\/geocode\/json\?address=bund&language=zh-CN&key=test-key$/);
+  });
 });

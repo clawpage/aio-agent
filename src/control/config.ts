@@ -90,6 +90,8 @@ export function loadConfig(): {
   gadgetFirmwareDir: string;
   /** Speech recognizer for the composer's voice input (POST /api/asr relays a WAV here); empty: off. */
   asrUrl: string;
+  /** Google Maps Platform key (Maps Static + Geocoding) for map cards; empty: OpenStreetMap. */
+  googleMapsKey: string;
   logDir: string;
   primaryHost: string;
   legacyPrimaryHost?: string;
@@ -432,6 +434,15 @@ export function loadConfig(): {
     gadgetUsageUrl: envStr("PA_GADGET_USAGE_URL", ""),
     gadgetFirmwareDir: envStr("PA_GADGET_FIRMWARE_DIR", path.join(dataDir, "gadget-firmware")),
     asrUrl: envStr("PA_ASR_URL", ""),
+    googleMapsKey: (() => {
+      if (envStr("PA_GOOGLE_MAPS_API_KEY").trim()) return envStr("PA_GOOGLE_MAPS_API_KEY").trim();
+      // No file (or compose's /dev/null placeholder) leaves the maps on OpenStreetMap.
+      const file = envStr("PA_GOOGLE_MAPS_SECRETS_FILE");
+      if (!file || !fs.statSync(file, { throwIfNoEntry: false })?.isFile()) return "";
+      const secret = readSecretFile(file, "PA_GOOGLE_MAPS_API_KEY");
+      if (!secret.ok) throw new Error(secret.reason);
+      return secret.value;
+    })(),
     logDir: path.join(dataDir, "logs"),
     primaryHost,
     legacyPrimaryHost: envStr("PA_LEGACY_PRIMARY_HOST", "").toLowerCase() || undefined,

@@ -1977,6 +1977,25 @@ export function createApiRouter(context: AppContext): Router {
     }),
   );
 
+  maps.useGoogle(cfg.googleMapsKey);
+  /** Which map the cards draw: one Google static image, or OpenStreetMap tiles. */
+  router.get("/map", requireKind("primary"), requireSession, (_req, res) => {
+    res.json({ provider: maps.provider });
+  });
+  /** A Google static map for a map card, proxied like the tiles (see MapService). */
+  router.get("/map/static", requireKind("primary"), requireSession,
+    asyncHandler(async (req, res) => {
+      if (maps.provider !== "google") { res.status(404).json({error:"not_configured"}); return; }
+      const request = MapService.staticRequest(req.query);
+      if (!request) { res.status(400).json({error:"bad_map"}); return; }
+      const image = await maps.staticMap(request).catch(() => null);
+      if (!image) { res.status(502).json({error:"map_unavailable"}); return; }
+      res.setHeader("Content-Type", "image/png");
+      res.setHeader("Cache-Control", "private, max-age=86400");
+      res.setHeader("X-Content-Type-Options", "nosniff");
+      res.end(image);
+    }),
+  );
   /** Map tiles for map cards in messages, proxied so the console stays same-origin (see MapService). */
   router.get("/map/tiles/:z/:x/:y", requireKind("primary"), requireSession,
     asyncHandler(async (req, res) => {

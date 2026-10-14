@@ -308,7 +308,7 @@ owner 容器休眠期间新成员的端口隔离规则先记下，容器下次�
 | 图片、音视频 | `![说明](工作区绝对路径)` | 按位置嵌入正文；图片经 `/api/documents/image` 取回并校验类型，点开看大图 |
 | 网上图片 | `![说明](https://…)` | 由该账号沙箱取回（`/api/documents/web-image`，仅 https、6 MB 内、仅位图，缓存一天）；浏览器不直连图片站 |
 | 图文卡片 | ```` ```cards ```` JSON 数组（```` ```products ```` 同义） | 最多 8 张（`title`、`image`、`subtitle`、`tags`、`text`、`points`、`note`、`url`、`action`、`badge`；商品另有 `price`、`was`、`rating`）；手机一行一张、桌面一行两张 |
-| 地图卡片 | ```` ```map ```` JSON | `name`、`address`、`lat`/`lng`（高德 / 腾讯坐标加 `"coord": "gcj02"`）；无坐标时由控制面经 Nominatim 定位 |
+| 地图卡片 | ```` ```map ```` JSON | `name`、`address`、`lat`/`lng`（高德 / 腾讯坐标加 `"coord": "gcj02"`）；无坐标时由控制面定位（配置 Google key 时用 Google Geocoding，否则 Nominatim） |
 | SVG 图 | ```` ```svg ```` 或 `.svg` 文件 | 在 `<img>` 中绘制（不执行脚本、不加载外部资源），可全屏、下载为白底 PNG |
 | 流程图 | ```` ```mermaid ```` | 首次出现时按需加载 Mermaid（strict 安全级别），之后与 SVG 相同 |
 | 选项 | ```` ```choices ```` | 见[追问与选择](#追问与选择) |
@@ -319,7 +319,10 @@ owner 容器休眠期间新成员的端口隔离规则先记下，容器下次�
   其余图片铺满画框。图片用真实图：执行者用 `browser_save_image` 存入任务目录再引用（详情页只给 path 时取 og:image 或最大图片；
   selector 指向图片元素时下载原图；只收 jpg / png / webp、8 MB 内），下载以该标签页身份进行。没有图或取不到时卡片只排文字；解析失败的块显示为代码。
 - **地图卡片**：点卡片在地图应用中查看地点（不直接导航）。Android 用 `geo:` 交给系统选择；iPhone 与电脑首次点击时选择应用
-  （苹果地图、高德、百度、Google 地图、Waze），选择记在本机 `localStorage`，卡片上「换」可重选。瓦片经 `/api/map/tiles/…` 由控制面代取并缓存。
+  （苹果地图、高德、百度、Google 地图、Waze），选择记在本机 `localStorage`，卡片上「换」可重选。地图由控制面代取，浏览器不直连地图服务：
+  配置 `PA_GOOGLE_MAPS_API_KEY` 时是一张 Google 静态地图（`/api/map/static`，标记由 Google 绘制，国内偏移由 Google 处理；
+  控制面不缓存图片，只靠浏览器缓存一天，坐标最多缓存 30 天，符合 Google 条款），取图失败时退回 OpenStreetMap；
+  否则用 OpenStreetMap 瓦片（`/api/map/tiles/…`，控制面缓存）。界面经 `GET /api/map` 得知当前地图来源。
   坐标只用查到的数值，查不到只给地址。
 - **SVG 与流程图**：SVG 最多 100 万字符，Mermaid 最多 2 万字符；画不出时显示源码。`/api/documents/image` 返回 SVG 时附加 `sandbox` CSP，
   服务端核对 `.svg` 内容确为 SVG。无固定宽度的图按消息宽度显示。流程、分支、时间线和关系图建议用 mermaid（竖屏优先 `flowchart TD`），其他示意图用 svg。

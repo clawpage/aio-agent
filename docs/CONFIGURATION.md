@@ -103,6 +103,7 @@
 | --- | --- | --- |
 | `PA_DAILY_FEED` | `1` | 为每个账号内置每日推送 |
 | `PA_ASR_URL` | 空 | 语音输入的识别服务；为空则不显示麦克风按钮 |
+| `PA_GOOGLE_MAPS_SECRETS_FILE` | 空 | `PA_GOOGLE_MAPS_API_KEY`（环境变量优先；Google Maps Platform key，只需开通 Maps Static API 与 Geocoding API，建议限制为这两项）；缺失则地图卡片用 OpenStreetMap |
 | `PA_JEV_SECRETS_FILE` | `~/.config/aio-agent/jev.env` | `TYPESAFE_API_KEY`（环境变量优先）；缺失则不提供 Jev |
 | `PA_JEV_ENDPOINT` / `PA_JEV_MODEL` | `https://api.typesafe.ai/v1/systemone` / `jev-latest` | Jev 接口与模型 |
 | `PA_JEV_TIMEOUT_SECONDS` / `PA_JEV_DISPATCH_TIMEOUT_SECONDS` | `30` / `15` | `decide` 工具与派单评分的等待上限 |
