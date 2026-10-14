@@ -22,4 +22,7 @@ objc2 = "0.6"
 objc2 = "0.6"
 objc2-foundation = { version = "0.3", features = ["NSBundle", "NSString", "NSURL"] }
 objc2-app-kit = { version = "0.3", features = ["NSWorkspace"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+libc = "0.2"
 objc2-web-kit = { version = "0.3", features = ["WKFrameInfo", "WKScriptMessage", "WKScriptMessageHandler", "WKSecurityOrigin", "WKUserContentController", "WKWebView", "WKWebViewConfiguration", "objc2-app-kit"] }

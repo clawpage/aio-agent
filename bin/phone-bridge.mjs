@@ -23,6 +23,8 @@
  *     installs the pinned mobile-mcp and scrcpy server under var/phone and
  *     creates the token file; --devicekit also installs mobile-mcp's helper app
  *     on the phone (needed to type Chinese and other non-ASCII text)
+ *   node bin/phone-bridge.mjs setup-screen
+ *     only the scrcpy server (the Mac app installs mobile-mcp from its lockfile)
  */
 import { spawn, execFile } from "node:child_process";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
@@ -111,15 +113,20 @@ async function download(url, file, sha256) {
   fs.writeFileSync(file, body);
 }
 
+async function setupScreen() {
+  fs.mkdirSync(DIR, { recursive: true });
+  if (!fs.existsSync(SCRCPY_SERVER)) {
+    console.log(`downloading scrcpy server v${SCRCPY_VERSION}`);
+    await download(SCRCPY_URL, SCRCPY_SERVER, SCRCPY_SHA256);
+  }
+}
+
 async function setup(args) {
   fs.mkdirSync(MOBILE_MCP_DIR, { recursive: true });
   if (!fs.existsSync(path.join(MOBILE_MCP_DIR, "package.json"))) fs.writeFileSync(path.join(MOBILE_MCP_DIR, "package.json"), '{"private":true}\n');
   console.log(`installing @mobilenext/mobile-mcp@${MOBILE_MCP_VERSION}`);
   await run("npm", ["install", "--no-audit", "--no-fund", "--save-exact", `@mobilenext/mobile-mcp@${MOBILE_MCP_VERSION}`], { cwd: MOBILE_MCP_DIR });
-  if (!fs.existsSync(SCRCPY_SERVER)) {
-    console.log(`downloading scrcpy server v${SCRCPY_VERSION}`);
-    await download(SCRCPY_URL, SCRCPY_SERVER, SCRCPY_SHA256);
-  }
+  await setupScreen();
   if (!readToken()) {
     fs.mkdirSync(path.dirname(SECRETS_FILE), { recursive: true, mode: 0o700 });
     fs.writeFileSync(SECRETS_FILE, `${TOKEN_KEY}=${randomBytes(32).toString("hex")}\n`, { mode: 0o600, flag: "wx" });
@@ -698,6 +705,9 @@ async function serve() {
 
 if (process.argv[2] === "setup") {
   setup(process.argv.slice(3)).catch((err) => { console.error(err.message); process.exit(1); });
+} else if (process.argv[2] === "setup-screen") {
+  // The Mac app installs mobile-mcp from its own lockfile; only the scrcpy server comes from here.
+  setupScreen().catch((err) => { console.error(err.message); process.exit(1); });
 } else {
   void serve();
 }

@@ -521,18 +521,26 @@ Jev（TypeSafe System One）根据状态和选项返回选择、各选项概率�
 - **诚实**：打印机已停止（缺纸、卡纸等）时拒绝并说明原因；发送途中连接中断时报告“不确定是否已收到”，不自动重发。
   `ipps://` 不校验打印机的自签名证书，打印机由配置的地址确定，地址应在路由器上固定（DHCP 保留）。
 
-### 手机（仅 owner）
+### 手机
 
-owner 的 Android 手机用 USB 接在控制面所在的宿主机上，由 `bin/phone-bridge.mjs`（宿主进程，默认只监听 `127.0.0.1:4903`）提供；
-控制面配置 `PA_PHONE_BRIDGE_URL` 后：
+Android 手机用 USB 接在一台电脑上，由 `bin/phone-bridge.mjs`（只监听 loopback、要桥接令牌）提供。有两种接法，每个账号只用得到自己的：
 
-- **授权**：固定只有 owner。成员的配置不继承 owner 的手机地址，成员网关也不给成员发手机令牌；`/api/phone` 与画面接口对成员返回 403。
+- **控制面宿主上的手机（owner）**：宿主进程默认监听 `127.0.0.1:4903`，控制面配置 `PA_PHONE_BRIDGE_URL` 后只给 owner。
+- **Mac App 上的手机（任何账号）**：在 Mac App 里打开「配置 → Mac 上的手机 → 连接这台 Mac 的手机」。控制面为该账号签发设备令牌
+  （`POST /api/device-links`，只返回一次，库里只存哈希），App 把它存在只有本机用户能读的文件里（`~/Library/Application Support/ai.clawpage.agent/device-link.json`，0600），
+  首次使用时把手机组件装进同一目录（Node.js、mobile-mcp 与 ws 按 App 内锁文件 `npm ci`、scrcpy、adb；都是固定版本并校验 SHA-256，Mac 上已有 adb 就直接用），
+  然后运行桥接。桥接主动连到 `wss://<主站>/api/device-link/connect`（`bin/device-link-client.mjs`），控制面把该账号的工具调用、状态、截图和实时画面经这条连接发给它；
+  这条连接只放行桥接自己的四个入口。App 开着时手机可用；配置页列出该账号连过的 Mac，可随时移除，移除后连接立即断开、App 删掉令牌。
+  一个账号连了多台 Mac 时用最近连上的那台。
+
+- **授权**：每个账号只有自己的手机。owner 用宿主上的（配置了时），否则和成员一样用自己连的 Mac；成员网关只给有手机的账号发手机令牌，
+  连上第一台 Mac 时该账号新开的执行会话获得 `aio_phone`，移除最后一台后失去；`/api/phone` 与画面接口只返回本账号的手机，没有时返回“不可用”。
 - **执行器工具**：owner 运行时注册 `aio_phone`（成员网关 `/phone/<运行时令牌>/mcp`），网关附加桥接令牌（`PHONE_BRIDGE_TOKEN`，
   `PA_PHONE_BRIDGE_SECRETS_FILE`；compose 用 `AIO_SECRET_PHONE_BRIDGE` 挂载）。上游是 mobile-mcp（固定版本，关闭遥测），桥接只放行作用在手机本身的工具：
   列设备与应用、启动/关闭应用、点按/长按/双击/滑动、读屏幕元素、截图（只回给调用方）、按键、打开网址、输入文字、方向、手机剪贴板、批量执行。
   会读写宿主机文件的（存截图到路径、从宿主路径装 APK、录屏、存日志）、卸载应用、改定位以及 mobile-mcp 的云手机工具一律拒绝，批量执行里的步骤同样过滤。
   中文等非 ASCII 输入需要手机上装 mobile-mcp 的 devicekit 辅助应用（`setup --devicekit`）。
-- **实时画面**：工作区「手机」标签页（owner 且宿主提供时才出现）用 WebSocket `/api/phone/screen` 接收 scrcpy 的 H.264 画面，
+- **实时画面**：工作区「手机」标签页（账号有手机时才出现）用 WebSocket `/api/phone/screen` 接收 scrcpy 的 H.264 画面，
   浏览器用 WebCodecs 解码（Safari 16.4+ / Chrome）。可直接点按、拖动、滚轮，下方有返回、主屏幕、最近应用、音量、电源键，
   文字框经手机剪贴板粘贴到当前输入框（支持中文，会覆盖手机剪贴板）。接口只接受主站来源（Origin）上的 owner 会话，会话退出后断开；
   伴随站不提供，以免沙箱生成的页面借工作区 cookie 操作手机。没人看时桥接在 15 秒后停止编码；网络慢时跳到下一个关键帧而不是积压。

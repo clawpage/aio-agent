@@ -25,13 +25,13 @@ cookie 名 `pa_*` 与 `PA_*` 前缀**保持不变**——它们承载既有容�
 | `src/ui/` | 界面层：React + Vite 中文前端（构建产物 `dist/ui`）与 `edge.mjs`（静态文件 + `/api` 原样转发给控制面，默认 :4891） |
 | `src/control/` | 控制层：配置、SQLite、鉴权、任务与智能体、伴随站代理、成员网关；只经沙箱节点触达容器，自身不碰 Docker（默认 :4892） |
 | `src/sandbox/` | 沙箱层：sandboxd，唯一持有 Docker 的进程；按校验过的参数创建/接管沙箱容器，只提供固定操作（检查、启停、容器内执行与流式执行、网页端口代理、网关中继），每个请求都要节点令牌（默认 :4894） |
-| `src/ui/tauri/` | 界面层的 iOS/Android 外壳（Tauri 2）：全屏 web view 打开已部署的控制台，与 web 版共用 `src/ui/src` 同一套界面代码；只放原生适配（安全区、键盘、图标、签名），见该目录 README；不进 Docker 镜像 |
+| `src/ui/tauri/` | 界面层的 iOS/Android/macOS 外壳（Tauri 2）：全屏 web view 打开已部署的控制台，与 web 版共用 `src/ui/src` 同一套界面代码；只放原生适配（安全区、键盘、图标、签名，macOS 另有 Mac 上手机的桥接），见该目录 README；不进 Docker 镜像 |
 | `src/common/` | 三层共享：控制面与沙箱节点的协议（`protocol.ts`）、兼容版本号（`version.ts`）、日志、密钥文件读取 |
 | `deploy/` | 三个镜像的 Dockerfile、分层 compose 文件、`aio.mjs`（构建、上线前按镜像 label 校验兼容、启停、数据卷导入导出），见 `deploy/README.md` |
 | `tests/unit/`、`tests/integration/` | vitest；集成测试自带假沙箱和假节点，不需要 Docker |
 | `tests/e2e/live-smoke.mjs` | 对已部署实例的真实冒烟（`npm run smoke`） |
 | `bin/serve` | 生产守护：按 `PA_DEPLOY` 以三个宿主进程（host）或 Docker Compose（compose）运行三层，外加专用 tunnel，转发信号 |
-| `bin/phone-bridge.mjs` | 可选宿主进程：USB 上 owner 的 Android 手机（mobile-mcp 工具白名单 + scrcpy 实时画面），只听 loopback、要桥接令牌；`setup` 安装固定版本依赖到 `var/phone` |
+| `bin/phone-bridge.mjs` | USB 上的 Android 手机（mobile-mcp 工具白名单 + scrcpy 实时画面），只听 loopback、要桥接令牌：可选宿主进程（owner，`setup` 安装固定版本依赖到 `var/phone`），也随 Mac App 运行并经 `bin/device-link-client.mjs` 主动连回控制面（任何账号） |
 | `bin/keyboard-bridge.mjs` | 可选宿主进程：语音配件的「语音键盘」把润色后的文字粘贴到宿主 Mac 光标处；实际输入由 `bin/keyboard-bridge/main.swift` 编译的后台 App 完成（辅助功能权限只给它），只听 loopback、要桥接令牌，只由 `/api/gadget/dictation` 调用 |
 | `bin/dns-agent.py` | 现有部署专用的 DNS 辅助脚本：依赖仓库外的 `tools/linode-local/dns.py`，**不是 quickstart 入口**，公开使用者通常不需要 |
 | `var/` | 运行时数据（DB、日志、owner 凭据、tunnel 凭据），全部 git 忽略；compose 部署时控制面数据在命名卷里 |
@@ -49,8 +49,9 @@ cookie 名 `pa_*` 与 `PA_*` 前缀**保持不变**——它们承载既有容�
    每个请求都要节点令牌，沙箱访问不到它，且只以固定参数调用 Docker、不接受调用方给的 Docker 参数、
    宿主路径或挂载，不提供任意宿主机 shell 通道。控制面不持有 Docker 访问。owner 配置的知识库 MCP
    （`docs/FEATURES.md`“知识库”）、Home Assistant MCP（`docs/FEATURES.md`“Home Assistant”）与打印机（`docs/FEATURES.md`“打印机”）只经成员网关按账号转发，令牌不进沙箱；不要为它们另开直连端口，也不要把授权名单
-   之外的账号接进去。owner 的手机（`bin/phone-bridge.mjs`，`docs/FEATURES.md`“手机”）固定只给 owner：工具经成员网关，画面只在主站；
-   桥接只放行作用在手机本身的 mobile-mcp 工具，不得放开读写宿主机文件或云手机的工具。键盘桥（`bin/keyboard-bridge.mjs`）只接受配件令牌下
+   之外的账号接进去。手机（`bin/phone-bridge.mjs`，`docs/FEATURES.md`“手机”）每个账号只用自己的：控制面宿主 USB 上的手机只给 owner，
+   Mac App 连接的手机只给连接它的账号（设备令牌只存哈希、可随时移除）；工具经成员网关，画面只在主站；
+   桥接只放行作用在手机本身的 mobile-mcp 工具，不得放开读写宿主机（含用户的 Mac）文件或云手机的工具。键盘桥（`bin/keyboard-bridge.mjs`）只接受配件令牌下
    `/api/gadget/dictation` 的输入，不得接进成员网关或任何执行器工具。
 4. **两个来源**：主站与伴随站必须保持不同来源；不要把 AIO 生成内容放到主站上，也不要为了
    本地调试放宽 cookie 安全属性（localhost 明文是唯一例外）。

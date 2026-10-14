@@ -53,7 +53,8 @@ test("inside the Mac app, linking hands the token to the app and shows the app's
     const sent: unknown[] = [];
     (window as unknown as { __sent: unknown[] }).__sent = sent;
     const emit = (detail: unknown) => window.dispatchEvent(new CustomEvent("aio-device-link", { detail }));
-    (window as unknown as { webkit: unknown }).webkit = { messageHandlers: { aioDeviceLink: { postMessage(message: { type: string; linkId?: string }) {
+    (window as unknown as { webkit: unknown }).webkit = { messageHandlers: { aioDeviceLink: { postMessage(raw: string) {
+      const message = JSON.parse(raw) as { type: string; linkId?: string };
       sent.push(message);
       if (message.type === "status") setTimeout(() => emit({ state: "off", name: "Mengxiao's MacBook Pro" }));
       if (message.type === "link") {

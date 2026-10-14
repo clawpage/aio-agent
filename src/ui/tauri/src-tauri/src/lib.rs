@@ -1,6 +1,9 @@
 /// The app is a window onto the AIO Agent console (https://agent.clawpage.ai):
 /// everything runs on the server, so a console change reaches the app without a
 /// new release. The remote page gets no Tauri IPC (no capability names it).
+#[cfg(target_os = "macos")]
+mod phone_link;
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -31,8 +34,11 @@ pub fn run() {
         .expect("error while running tauri application")
         .run(|_app, _event| {
             #[cfg(target_os = "macos")]
-            if let tauri::RunEvent::Opened { urls } = _event {
-                urls.iter().for_each(|url| mac::google_return(_app, url));
+            match _event {
+                tauri::RunEvent::Opened { urls } => urls.iter().for_each(|url| mac::google_return(_app, url)),
+                // The phone bridge goes with the app.
+                tauri::RunEvent::Exit => mac::shutdown(),
+                _ => {}
             }
         });
 }
@@ -74,6 +80,7 @@ mod mac {
     /// A return that arrived before the console installed its listener (cold start).
     static PENDING: Mutex<Option<String>> = Mutex::new(None);
     static READY: AtomicBool = AtomicBool::new(false);
+    static PHONES: OnceLock<crate::phone_link::PhoneLink> = OnceLock::new();
 
     define_class!(
         #[unsafe(super(NSObject))]
@@ -98,12 +105,20 @@ mod mac {
             .and_then(|name| name.downcast::<NSString>().ok()) {
             window.set_title(&name.to_string())?;
         }
+        let phones = PHONES.get_or_init(|| crate::phone_link::PhoneLink::new(APP.get().unwrap().clone()));
+        phones.resume();
         window.with_webview(|webview| unsafe {
             let wk: &WKWebView = &*(webview.inner() as *const WKWebView);
             let handler: Retained<Handler> = msg_send![Handler::alloc(objc2::MainThreadMarker::new().expect("main thread")), init];
-            wk.configuration().userContentController()
-                .addScriptMessageHandler_name(ProtocolObject::from_ref(&*handler), &NSString::from_str("aioDeviceBrowser"));
+            let content = wk.configuration().userContentController();
+            content.addScriptMessageHandler_name(ProtocolObject::from_ref(&*handler), &NSString::from_str("aioDeviceBrowser"));
+            // Linking this Mac's phones to the signed-in account (phone_link.rs).
+            content.addScriptMessageHandler_name(ProtocolObject::from_ref(&*handler), &NSString::from_str("aioDeviceLink"));
         })
+    }
+
+    pub fn shutdown() {
+        if let Some(phones) = PHONES.get() { phones.stop(); }
     }
 
     pub fn page_load(payload: &PageLoadPayload<'_>) {
@@ -117,6 +132,11 @@ mod mac {
             || !matches!(origin.port(), 0 | 443) { return; }
         let Ok(body) = message.body().downcast::<NSString>() else { return };
         let body = body.to_string();
+        if message.name().to_string() == "aioDeviceLink" {
+            // Off the main thread: stopping a running bridge waits for it to exit.
+            if let Some(phones) = PHONES.get().cloned() { std::thread::spawn(move || phones.message(&body)); }
+            return;
+        }
         if body == "aioagent-auth-ready" {
             READY.store(true, Ordering::SeqCst);
             if let Some(detail) = PENDING.lock().unwrap().take() { dispatch(&detail); }

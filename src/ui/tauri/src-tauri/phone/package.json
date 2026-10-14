@@ -1,0 +1,10 @@
+{
+  "name": "aio-phone-runtime",
+  "private": true,
+  "description": "The Mac app's phone bridge dependencies, installed with npm ci by phone/install.sh",
+  "type": "module",
+  "dependencies": {
+    "@mobilenext/mobile-mcp": "1.0.9",
+    "ws": "8.21.3"
+  }
+}

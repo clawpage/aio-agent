@@ -78,6 +78,17 @@ page cannot load.
   `tauri.macos.conf.json`, `src-tauri/macos/*.lproj/InfoPlist.strings`); the window title is
   read from the same localized name at start. The phones keep 一站.
   Verified 2026-10-12: Google sign-in returned to the app and survived a restart.
+- macOS phones: settings → "Phones on a Mac" links this Mac's USB Android phones to the
+  signed-in account (`src-tauri/src/phone_link.rs`). The console posts JSON strings to the
+  `aioDeviceLink` message handler (`status`, `link` with the device token, `unlink`) and gets
+  `aio-device-link` events back. On first use `phone/install.sh` fills
+  `~/Library/Application Support/ai.clawpage.agent/phone/` (about 300 MB: pinned Node.js,
+  mobile-mcp and ws from `phone/package-lock.json`, scrcpy, and Google's platform-tools unless the
+  Mac already has adb); the bridge (`bin/phone-bridge.mjs`, bundled as a resource) then dials
+  `wss://agent.clawpage.ai/api/device-link/connect` and runs while the app is open. The token is in
+  `device-link.json` beside it (0600), not the Keychain: an ad-hoc signed build would re-prompt for
+  Keychain access after every rebuild. When `phone/package.json` changes, regenerate the lock with
+  `npm install --package-lock-only` in that directory. iPhone is not supported yet.
 - Home-screen name 一站: `gen/apple/project.yml` (`CFBundleDisplayName`, then
   `xcodegen generate`) and `gen/android/app/src/main/res/values/strings.xml`.
 - Icons: the 一站 mark (`src/ui/public/favicon.svg`) full bleed in `icon/app-icon.svg`, plus a
