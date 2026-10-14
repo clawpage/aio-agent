@@ -663,7 +663,11 @@ async function serve() {
         name: process.env.PA_DEVICE_NAME || os.hostname(),
         local: `http://127.0.0.1:${port}`,
         localToken: token,
-        onState: (state) => log("link", { state }),
+        onState: (state) => {
+          log("link", { state });
+          // The link was removed: nothing will reach this bridge again, and the app forgets the token when it ends.
+          if (state === "revoked") shutdown();
+        },
       });
     }
   });

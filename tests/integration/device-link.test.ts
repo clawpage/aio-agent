@@ -263,3 +263,42 @@ it("keeps the executor's phone tools working through a Mac that is offline at fi
     await h.shutdown();
   }
 });
+
+it("retries an answer other than the upgrade, and stops for good only on 401", async () => {
+  // First a 502 (the control plane restarting behind the edge), then the upgrade; another server only ever says 401.
+  const answers = ["HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"];
+  const wss = new WebSocketServer({ noServer: true });
+  const server = http.createServer();
+  let upgrades = 0;
+  server.on("upgrade", (req, socket, head) => {
+    upgrades += 1;
+    const answer = answers.shift();
+    if (answer) { socket.end(answer); return; }
+    wss.handleUpgrade(req, socket, head, () => undefined);
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const gone = http.createServer();
+  let refusals = 0;
+  gone.on("upgrade", (_req, socket) => { refusals += 1; socket.end("HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"); });
+  await new Promise<void>((resolve) => gone.listen(0, "127.0.0.1", resolve));
+  const port = (s: http.Server) => (s.address() as { port: number }).port;
+  const states: string[] = [];
+  const revoked: string[] = [];
+  const a = linkDevice({ url: `ws://127.0.0.1:${port(server)}`, token: `dl_${"a".repeat(43)}`, name: "Mac", local: "http://127.0.0.1:9", localToken: LOCAL_TOKEN, onState: (s: string) => states.push(s) });
+  const b = linkDevice({ url: `ws://127.0.0.1:${port(gone)}`, token: `dl_${"b".repeat(43)}`, name: "Mac", local: "http://127.0.0.1:9", localToken: LOCAL_TOKEN, onState: (s: string) => revoked.push(s) });
+  try {
+    await expect.poll(() => states.at(-1), { timeout: 8000 }).toBe("online");
+    expect(upgrades).toBe(2);
+    expect(states).toEqual(["connecting", "offline", "connecting", "online"]);
+    await expect.poll(() => revoked.at(-1)).toBe("revoked");
+    await new Promise((r) => setTimeout(r, 1500));
+    expect(refusals).toBe(1);
+  } finally {
+    a.close();
+    b.close();
+    server.closeAllConnections();
+    server.close();
+    gone.close();
+    wss.close();
+  }
+});

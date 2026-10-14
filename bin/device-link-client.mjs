@@ -85,7 +85,9 @@ export function linkDevice({ url, token, name, local, localToken, onState, silen
   function connect() {
     if (stopped) return;
     onState("connecting");
-    ws = new WebSocket(url, { headers: { authorization: `Bearer ${token}`, "x-aio-device-name": encodeURIComponent(name).slice(0, 240) }, maxPayload: MAX_FRAME });
+    // A handshake that never finishes counts as a failed one: ws then closes and the retry follows.
+    ws = new WebSocket(url, { headers: { authorization: `Bearer ${token}`, "x-aio-device-name": encodeURIComponent(name).slice(0, 240) }, maxPayload: MAX_FRAME, handshakeTimeout: 20_000 });
+    let refused = false;
     ws.on("open", () => {
       retry = 1000;
       heard();
@@ -107,20 +109,19 @@ export function linkDevice({ url, token, name, local, localToken, onState, silen
       else if (msg.t === "msg" && channels.get(msg.ch)?.readyState === WebSocket.OPEN) channels.get(msg.ch).send(String(msg.data ?? ""));
       else if (msg.t === "close") { channels.get(msg.ch)?.close(); channels.delete(msg.ch); }
     });
-    ws.on("unexpected-response", (_req, res) => {
-      // A token the server no longer knows (the link was removed): stop for good.
-      if (res.statusCode === 401) { stopped = true; onState("revoked"); }
-    });
+    // Any other answer than the upgrade (a 502 while the control plane restarts) is retried;
+    // only a token the server no longer knows (401: the link was removed) stops for good.
+    // No "unexpected-response" listener: with one, ws hands the response over and never closes.
+    ws.on("error", (err) => { if (/Unexpected server response: 401\b/.test(err.message)) refused = true; });
     ws.on("close", (code) => {
       clearTimeout(watchdog);
       closeChannels();
-      if (code === 4001) { stopped = true; onState("revoked"); return; }
+      if (code === 4001 || refused) { stopped = true; onState("revoked"); return; }
       if (stopped) return;
       onState("offline");
       timer = setTimeout(connect, retry);
       retry = Math.min(retry * 2, 60_000);
     });
-    ws.on("error", () => { /* close follows */ });
   }
 
   connect();
