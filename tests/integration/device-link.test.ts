@@ -122,14 +122,15 @@ it("links a Mac's phone to the account that linked it, over the socket the Mac d
     expect(await (await h.request("/api/phone", { headers: { cookie: bob.cookie } })).json()).toEqual({ available: false, device: null });
     expect((await h.request("/api/phone/screenshot?at=1", { headers: { cookie: owner.cookie } })).status).toBe(404);
 
-    // Her executor's MCP calls go down the socket to the bridge, with the bridge's own token added on the Mac.
+    // Her executor's MCP calls go down the socket to the bridge, with the bridge's own token added on the Mac;
+    // the gateway holds its own session with mobile-mcp there.
     const local = (url: string) => url.replace(/^http:\/\/host\.docker\.internal:0/, `http://127.0.0.1:${gateway.port}`);
     const call = { jsonrpc: "2.0", id: 5, method: "tools/list" };
-    const res = await fetch(local(aliceCfg.phone!.url), { method: "POST", headers: { "content-type": "application/json", "mcp-session-id": "sess-1" }, body: JSON.stringify(call) });
+    const res = await fetch(local(aliceCfg.phone!.url), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(call) });
     expect(res.status).toBe(200);
-    expect(res.headers.get("mcp-session-id")).toBe("sess-1");
     expect(await res.json()).toEqual({ jsonrpc: "2.0", id: 5, result: { tools: [{ name: "mobile_list_available_devices" }] } });
-    expect(bridge.seen.filter((s) => s.path === "/mcp")).toEqual([{ method: "POST", path: "/mcp", body: call, session: "sess-1" }]);
+    expect(bridge.seen.filter((s) => s.path === "/mcp").map((s) => [(s.body as { method: string }).method, s.session])).toEqual([
+      ["initialize", undefined], ["notifications/initialized", "sess-1"], ["tools/list", "sess-1"]]);
 
     // Only the bridge's endpoints pass through the Mac.
     const tunnel = links.tunnelFor(alice.id)!;
@@ -184,5 +185,81 @@ it("starts over when the server goes quiet without closing the socket", async ()
   } finally {
     client.close();
     wss.close();
+  }
+});
+
+it("keeps the executor's phone tools working through a Mac that is offline at first and whose bridge restarts", async () => {
+  const h = await startHarness();
+  const cfg = Object.assign(h.ctx.cfg, { memberModelPort: 0, runtimeUserId: "owner_1" });
+  const names = (id: string) => (h.ctx.db.prepare("SELECT username AS v FROM owners WHERE id=?").get(id) as { v: string } | undefined)?.v ?? null;
+  const ids = (name: string) => (h.ctx.db.prepare("SELECT id AS v FROM owners WHERE username=?").get(name) as { v: string } | undefined)?.v ?? null;
+  const links = new DeviceLinks(h.ctx.db, cfg, h.ctx.log);
+  const phone = new PhoneGateway({ cfg, log: h.ctx.log, port: 0, usernameOf: names, userIdOf: ids, links });
+  const gateway = new MemberModelGateway(cfg, h.ctx.log, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, phone);
+  await gateway.start();
+  h.server.removeAllListeners("upgrade");
+  h.server.on("upgrade", (req, socket, head) => links.ownsUpgrade(req) ? links.handleUpgrade(req, socket, head) : handleUpgrade(h.ctx, req, socket, head));
+  // A mobile-mcp that forgets its sessions on demand (as when it restarts on the Mac).
+  const sessions = new Set<string>();
+  let next = 0;
+  const methods: string[] = [];
+  const bridge = http.createServer(async (req, res) => {
+    let data = "";
+    for await (const chunk of req) data += chunk;
+    const msg = JSON.parse(data) as { id?: number; method: string };
+    methods.push(msg.method);
+    if (msg.method === "initialize") {
+      const sid = `s${++next}`;
+      sessions.add(sid);
+      res.writeHead(200, { "content-type": "text/event-stream", "mcp-session-id": sid });
+      res.end(`event: message\ndata: ${JSON.stringify({ jsonrpc: "2.0", id: msg.id, result: { protocolVersion: "2025-03-26" } })}\n\n`);
+      return;
+    }
+    if (!sessions.has(String(req.headers["mcp-session-id"]))) { res.writeHead(404).end(); return; }
+    if (msg.id === undefined) { res.writeHead(202).end(); return; }
+    res.writeHead(200, { "content-type": "text/event-stream" });
+    res.end(`event: message\ndata: ${JSON.stringify({ jsonrpc: "2.0", id: msg.id, result: { content: [{ type: "text", text: "Galaxy Z Flip6" }] } })}\n\n`);
+  });
+  await new Promise<void>((resolve) => bridge.listen(0, "127.0.0.1", resolve));
+  let client: { close(): void } | null = null;
+  try {
+    const { token } = links.create("owner_1", "Mac");
+    phone.provision(cfg);
+    const url = cfg.phone!.url.replace(/^http:\/\/host\.docker\.internal:0/, `http://127.0.0.1:${gateway.port}`);
+    const rpc = async (body: unknown) => {
+      const res = await fetch(url, { method: "POST", headers: { "content-type": "application/json", accept: "application/json, text/event-stream" }, body: JSON.stringify(body) });
+      return { status: res.status, body: res.status === 202 ? null : await res.json() };
+    };
+    const callTool = { jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "mobile_list_available_devices", arguments: {} } };
+
+    // The Mac is offline when the executor's thread starts: the server still starts, with the tools.
+    const init = await rpc({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "codex", version: "1" } } });
+    expect(init.status).toBe(200);
+    expect(init.body).toMatchObject({ id: 1, result: { protocolVersion: "2025-06-18", capabilities: { tools: {} }, serverInfo: { name: "mobile-mcp" } } });
+    expect((await rpc({ jsonrpc: "2.0", method: "notifications/initialized" })).status).toBe(202);
+    const listed = await rpc({ jsonrpc: "2.0", id: 2, method: "tools/list" });
+    expect((listed.body as { result: { tools: Array<{ name: string }> } }).result.tools.map((t) => t.name)).toContain("mobile_list_available_devices");
+    // A call says the Mac is offline, as a tool error the executor reads.
+    const offline = await rpc(callTool);
+    expect(offline.body).toMatchObject({ id: 3, result: { isError: true, content: [{ type: "text", text: expect.stringContaining("not connected") }] } });
+    expect(methods).toEqual([]);
+
+    // The Mac comes online: the same thread's next call works.
+    client = linkDevice({ url: `ws://localhost:${h.primaryPort}${DEVICE_LINK_PATH}`, token, name: "Mac", local: `http://127.0.0.1:${(bridge.address() as { port: number }).port}`, localToken: LOCAL_TOKEN, onState: () => undefined });
+    await expect.poll(() => Boolean(links.tunnelFor("owner_1"))).toBe(true);
+    expect((await rpc(callTool)).body).toEqual({ jsonrpc: "2.0", id: 3, result: { content: [{ type: "text", text: "Galaxy Z Flip6" }] } });
+    expect(methods).toEqual(["initialize", "notifications/initialized", "tools/call"]);
+
+    // mobile-mcp restarts on the Mac and forgets the session: the gateway opens a new one and the call still works.
+    sessions.clear();
+    expect((await rpc({ ...callTool, id: 4 })).body).toEqual({ jsonrpc: "2.0", id: 4, result: { content: [{ type: "text", text: "Galaxy Z Flip6" }] } });
+    expect(methods.slice(3)).toEqual(["tools/call", "initialize", "notifications/initialized", "tools/call"]);
+  } finally {
+    client?.close();
+    links.close();
+    gateway.close();
+    bridge.closeAllConnections();
+    bridge.close();
+    await h.shutdown();
   }
 });

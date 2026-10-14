@@ -10,7 +10,8 @@ import { getUser } from "./auth/owner.js";
 import { resolveRequest } from "./http/security.js";
 import { endSocket } from "./http/proxy.js";
 import { McpGateway, type McpCall } from "./mcpGateway.js";
-import type { DeviceLinks, TunnelChannel } from "./deviceLink.js";
+import type { DeviceLinks, Tunnel, TunnelChannel } from "./deviceLink.js";
+import { PHONE_SERVER, PHONE_TOOLS } from "./phoneTools.js";
 
 /**
  * An account's Android phone: plugged into a Mac that runs the app, which runs
@@ -21,6 +22,7 @@ import type { DeviceLinks, TunnelChannel } from "./deviceLink.js";
  * tokens stay in the control plane.
  */
 const TIMEOUT_MS = 120_000;
+const PHONE_OFFLINE = "The Mac with the user's phone is not connected right now (the app on it is closed, asleep or offline). Ask the user to open the app on that Mac, then try again.";
 export const PHONE_SCREEN_PATH = "/api/phone/screen";
 
 /** Thread-level MCP wiring for a Codex executor. */
@@ -44,12 +46,13 @@ export class PhoneGateway extends McpGateway {
   #links: DeviceLinks;
   #userIdOf: (username: string) => string | null;
   #wss = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024 });
+  #sessions = new WeakMap<Tunnel, Promise<string>>();
 
   constructor(opts: { cfg: Config; log: Logger; port: number; usernameOf: (userId: string) => string | null; userIdOf: (username: string) => string | null; links: DeviceLinks }) {
     super({
       ...opts,
       name: "phone",
-      // No upstream of its own: every call goes down the socket of the account's Mac (forward).
+      // No upstream of its own: every call goes down the socket of the account's Mac (local).
       upstreamUrl: "",
       secretKey: "",
       secretsFile: "",
@@ -79,33 +82,96 @@ export class PhoneGateway extends McpGateway {
     else delete runtime.phone;
   }
 
-  protected override async forward(call: McpCall, res: http.ServerResponse): Promise<boolean> {
-    const userId = this.#userIdOf(call.username) ?? "";
-    const tunnel = this.available(userId) ? this.#links.tunnelFor(userId) : null;
-    if (!tunnel) {
-      res.writeHead(503, { "content-type": "application/json", "cache-control": "no-store" });
-      res.end(JSON.stringify({ error: "phone_offline", message: "The Mac with the phone is not connected: open the app on it" }));
-      return true;
+  /**
+   * The executor's MCP session ends here; the gateway keeps its own session with
+   * mobile-mcp on each Mac. The handshake never depends on the Mac: Codex starts a
+   * thread's MCP servers once and never retries a failed one, so a Mac offline for
+   * a moment must not cost the thread its phone. Only tool calls need the Mac, and
+   * while it is offline they come back as a tool error the executor can read.
+   */
+  protected override async local(message: unknown, username: string): Promise<unknown> {
+    if (Array.isArray(message)) return { jsonrpc: "2.0", id: null, error: { code: -32600, message: "batches are not supported" } };
+    const { method, id, params } = (message ?? {}) as { method?: string; id?: unknown; params?: { protocolVersion?: unknown } };
+    // Notifications (initialized, cancelled) have nothing to answer.
+    if (id === undefined || id === null) return null;
+    if (method === "initialize") {
+      const version = typeof params?.protocolVersion === "string" ? params.protocolVersion : "2025-03-26";
+      return { jsonrpc: "2.0", id, result: { protocolVersion: version, capabilities: { tools: {} }, ...PHONE_SERVER } };
     }
+    if (method === "ping") return { jsonrpc: "2.0", id, result: {} };
+    const userId = this.#userIdOf(username) ?? "";
+    const tunnel = this.available(userId) ? this.#links.tunnelFor(userId) : null;
+    if (method === "tools/list") {
+      if (tunnel) {
+        try {
+          const live = (await this.#rpc(tunnel, message)) as { result?: { tools?: unknown[] } };
+          if (Array.isArray(live?.result?.tools)) return live;
+        } catch (err) {
+          this.#log.warn("phone tool list from the Mac failed", { error: err instanceof Error ? err.message : String(err) });
+        }
+      }
+      return { jsonrpc: "2.0", id, result: { tools: PHONE_TOOLS } };
+    }
+    const failed = (why: string) => method === "tools/call"
+      ? { jsonrpc: "2.0", id, result: { content: [{ type: "text", text: why }], isError: true } }
+      : { jsonrpc: "2.0", id, error: { code: -32000, message: why } };
+    if (!tunnel) return failed(PHONE_OFFLINE);
+    try {
+      return await this.#rpc(tunnel, message);
+    } catch (err) {
+      this.#log.warn("phone call failed", { error: err instanceof Error ? err.message : String(err) });
+      return failed(this.#links.tunnelFor(userId) ? "The phone bridge on the Mac did not answer; try again." : PHONE_OFFLINE);
+    }
+  }
+
+  /** Something that is not JSON never reaches the Mac. */
+  protected override async forward(_call: McpCall, res: http.ServerResponse): Promise<boolean> {
+    res.writeHead(400, { "content-type": "application/json", "cache-control": "no-store" });
+    res.end(JSON.stringify({ jsonrpc: "2.0", id: null, error: { code: -32700, message: "invalid JSON" } }));
+    return true;
+  }
+
+  /** One JSON-RPC request to the Mac's mobile-mcp on this gateway's session, opened again once if it went stale. */
+  async #rpc(tunnel: Tunnel, message: unknown, again = true): Promise<unknown> {
+    const session = await this.#session(tunnel);
     const reply = await tunnel.request("POST", "/mcp", {
-      headers: { "content-type": "application/json", accept: "application/json, text/event-stream", ...call.headers },
-      body: call.body,
+      headers: { "content-type": "application/json", accept: "application/json, text/event-stream", "mcp-session-id": session },
+      body: Buffer.from(JSON.stringify(message)),
       timeoutMs: TIMEOUT_MS,
     });
-    if (reply.status === 401 || reply.status === 403) {
-      this.#log.warn("linked phone bridge rejected the call");
-      res.writeHead(502, { "content-type": "application/json" });
-      res.end(JSON.stringify({ error: "phone unavailable" }));
-      return true;
+    // mobile-mcp restarted on the Mac (its sessions are gone): a new one, and the call once more.
+    if ((reply.status === 400 || reply.status === 404) && again) {
+      this.#sessions.delete(tunnel);
+      return this.#rpc(tunnel, message, false);
     }
-    const session = reply.headers["mcp-session-id"];
-    res.writeHead(reply.status, {
-      "content-type": reply.headers["content-type"] ?? "application/json",
-      "cache-control": "no-store",
-      ...(session ? { "mcp-session-id": session } : {}),
-    });
-    res.end(reply.body);
-    return true;
+    if (reply.status !== 200) throw new Error(`phone bridge answered ${reply.status}`);
+    return rpcAnswer(reply.body.toString("utf8"), (message as { id?: unknown }).id);
+  }
+
+  /** This gateway's mobile-mcp session on a Mac's socket; a new socket gets a new one. */
+  #session(tunnel: Tunnel): Promise<string> {
+    let session = this.#sessions.get(tunnel);
+    if (!session) {
+      session = (async () => {
+        const headers = { "content-type": "application/json", accept: "application/json, text/event-stream" };
+        const init = await tunnel.request("POST", "/mcp", {
+          headers,
+          body: Buffer.from(JSON.stringify({ jsonrpc: "2.0", id: 0, method: "initialize", params: { protocolVersion: "2025-03-26", capabilities: {}, clientInfo: { name: "aio-phone-gateway", version: "1" } } })),
+          timeoutMs: 30_000,
+        });
+        const id = init.headers["mcp-session-id"];
+        if (init.status !== 200 || !id) throw new Error(`phone bridge did not open a session (${init.status})`);
+        await tunnel.request("POST", "/mcp", {
+          headers: { ...headers, "mcp-session-id": id },
+          body: Buffer.from(JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" })),
+          timeoutMs: 30_000,
+        });
+        return id;
+      })();
+      session.catch(() => { if (this.#sessions.get(tunnel) === session) this.#sessions.delete(tunnel); });
+      this.#sessions.set(tunnel, session);
+    }
+    return session;
   }
 
   /** The account's connected phone, as its Mac's bridge sees it; null when the Mac is offline. */
@@ -203,4 +269,16 @@ function channelSocket(ch: TunnelChannel | undefined): ScreenUpstream {
   const gone = new EventEmitter();
   queueMicrotask(() => { gone.emit("error", new Error("the Mac is not connected")); gone.emit("close", 1011); });
   return { send: () => undefined, close: () => undefined, on: (event: string, cb: (...args: any[]) => void) => gone.on(event, cb) } as ScreenUpstream;
+}
+
+/** The JSON-RPC answer to request `id` in a reply that is JSON or a server-sent event stream. */
+function rpcAnswer(text: string, id: unknown): unknown {
+  const candidates = text.trimStart().startsWith("{") ? [text] : text.split("\n").filter((l) => l.startsWith("data:")).map((l) => l.slice(5));
+  for (const candidate of candidates) {
+    try {
+      const msg = JSON.parse(candidate) as { id?: unknown };
+      if (msg && msg.id === id) return msg;
+    } catch { /* not this line */ }
+  }
+  throw new Error("phone bridge reply had no answer");
 }
