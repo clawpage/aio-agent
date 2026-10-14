@@ -146,6 +146,7 @@ export class UserRuntimes {
     runtime.ctx.tickets=this.root.tickets;
     runtime.ctx.limiter=this.root.limiter;
     runtime.ctx.push=this.root.push;
+    runtime.ctx.analytics=this.root.analytics;
     runtime.ctx.phone=this.root.phone;
     runtime.ctx.deviceLinks=this.root.deviceLinks;
     // A container found stopped stays stopped: its account's first use starts it, so a

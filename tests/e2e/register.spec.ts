@@ -18,8 +18,8 @@ async function signedOut(page: Page, opts: { requiresInvite?: boolean; inviteEma
     const body = r.request().postDataJSON();
     registers.push(body);
     if (opts.fail) return r.fulfill({ status: opts.fail.status, json: { error: opts.fail.error, message: opts.fail.message } });
-    user = body.username;
-    return r.fulfill({ json: { ok: true, username: body.username, expiresAt: Date.now() + 1e6 } });
+    user = body.email.split("@")[0];
+    return r.fulfill({ json: { ok: true, username: user, email: body.email, expiresAt: Date.now() + 1e6 } });
   });
   await page.emulateMedia({ colorScheme: "light", reducedMotion: "reduce" });
   return registers;
@@ -31,9 +31,8 @@ test("/register opens the register form; an invite code creates the account and 
   await expect(page.getByRole("button", { name: "注册并登录" })).toBeDisabled();
   const mail = page.getByRole("link", { name: "invitation@clawpage.ai" });
   await expect(mail).toHaveAttribute("href", /^mailto:invitation@clawpage\.ai\?subject=/);
-  await page.getByLabel("账号", { exact: true }).fill("Alice");
-  // Self-registered names are lowercase; the field says so by doing it.
-  await expect(page.getByLabel("账号", { exact: true })).toHaveValue("alice");
+  await expect(page.getByLabel("邮箱", { exact: true })).toHaveAttribute("type", "email");
+  await page.getByLabel("邮箱", { exact: true }).fill("alice@example.com");
   await page.getByLabel("密码", { exact: true }).fill("alice-password-123");
   await page.getByLabel("确认密码", { exact: true }).fill("alice-password-123");
   await page.getByLabel("邀请码", { exact: true }).fill("abcd-efgh-jkmn");
@@ -41,14 +40,14 @@ test("/register opens the register form; an invite code creates the account and 
   expect(await overflow(page)).toBeLessThanOrEqual(0);
   await page.getByRole("button", { name: "注册并登录" }).click();
   await expect(inbox(page)).toBeVisible();
-  expect(registers).toEqual([{ username: "alice", password: "alice-password-123", inviteCode: "ABCD-EFGH-JKMN" }]);
+  expect(registers).toEqual([{ email: "alice@example.com", password: "alice-password-123", inviteCode: "ABCD-EFGH-JKMN" }]);
   await expect.poll(() => new URL(page.url()).pathname).toBe("/u/alice");
 });
 
 test("mismatched passwords never reach the server, and server refusals are shown as written", async ({ page }) => {
   const registers = await signedOut(page, { fail: { status: 400, error: "invite_used", message: "这个邀请码已经用过了" } });
   await page.goto("/register");
-  await page.getByLabel("账号", { exact: true }).fill("bob");
+  await page.getByLabel("邮箱", { exact: true }).fill("bob@example.com");
   await page.getByLabel("密码", { exact: true }).fill("bob-password-123");
   await page.getByLabel("确认密码", { exact: true }).fill("bob-password-124");
   await page.getByLabel("邀请码", { exact: true }).fill("ABCD-EFGH-JKMN");
@@ -81,26 +80,26 @@ test("open registration hides the invite and signs in without one", async ({ pag
   await page.goto("/register");
   await expect(page.getByText("前 20 个账号无需邀请码注册", { exact: false })).toBeVisible();
   await expect(page.getByLabel("邀请码", { exact: true })).toHaveCount(0);
-  await page.getByLabel("账号", { exact: true }).fill("open-member");
+  await page.getByLabel("邮箱", { exact: true }).fill("open-member@example.com");
   await page.getByLabel("密码", { exact: true }).fill("open-password-123");
   await page.getByLabel("确认密码", { exact: true }).fill("open-password-123");
   await page.screenshot({ path: info.outputPath("open-register.png"), fullPage: true });
   expect(await overflow(page)).toBeLessThanOrEqual(0);
   await page.getByRole("button", { name: "注册并登录" }).click();
   await expect(inbox(page)).toBeVisible();
-  expect(registers).toEqual([{ username: "open-member", password: "open-password-123", inviteCode: "" }]);
+  expect(registers).toEqual([{ email: "open-member@example.com", password: "open-password-123", inviteCode: "" }]);
 });
 
 test("if the last place is taken, the form asks for an invite without losing the draft", async ({ page }) => {
   await signedOut(page, { requiresInvite: false, fail: { status: 400, error: "invite_required", message: "quota reached" } });
   await page.goto("/register");
-  await page.getByLabel("账号", { exact: true }).fill("late-member");
+  await page.getByLabel("邮箱", { exact: true }).fill("late-member@example.com");
   await page.getByLabel("密码", { exact: true }).fill("open-password-123");
   await page.getByLabel("确认密码", { exact: true }).fill("open-password-123");
   await page.getByRole("button", { name: "注册并登录" }).click();
   await expect(page.getByText("免邀请码注册名额已满，请输入邀请码。", { exact: true })).toBeVisible();
   await expect(page.getByLabel("邀请码", { exact: true })).toBeVisible();
-  await expect(page.getByLabel("账号", { exact: true })).toHaveValue("late-member");
+  await expect(page.getByLabel("邮箱", { exact: true })).toHaveValue("late-member@example.com");
   await expect(page.getByLabel("确认密码", { exact: true })).toHaveValue("open-password-123");
   await expect(page.getByRole("button", { name: "注册并登录" })).toBeDisabled();
 });
@@ -153,7 +152,7 @@ test("the login card stays on screen when the Android app's web view shrinks for
   await page.goto("/");
   const card = page.locator(".login-card");
   await expect(card).toBeVisible();
-  await page.getByLabel("账号", { exact: true }).focus();
+  await page.getByLabel("邮箱", { exact: true }).focus();
   // As recorded on the phone: the app's web view shrinks to 508px, reporting a passing 136px on the way.
   await page.setViewportSize({ width: 360, height: 508 });
   await page.evaluate(() => {
@@ -166,6 +165,6 @@ test("the login card stays on screen when the Android app's web view shrinks for
   await expect.poll(() => page.locator(".login").evaluate((n) => n.clientHeight)).toBe(508);
   const top = await card.evaluate((n) => n.getBoundingClientRect().top);
   expect(top).toBeGreaterThanOrEqual(0);
-  await expect(page.getByLabel("账号", { exact: true })).toBeInViewport();
+  await expect(page.getByLabel("邮箱", { exact: true })).toBeInViewport();
   await page.screenshot({ path: info.outputPath("login-keyboard.png") });
 });

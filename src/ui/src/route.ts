@@ -6,13 +6,14 @@
  *   /schedules      scheduled tasks
  *   /vault          password vault
  *   /usage          usage dashboard (owner)
+ *   /analytics      product analytics (owner)
  *   /gadget         the voice gadget account's conversation, read-only (owner)
  *   /settings       configuration (member: language and account privacy)
  *   /workspace      the workspace, over the main session
  * `/login` and `/register` stay outside any account; overlays such as a link's
  * browser console or a file preview do not change the address.
  */
-export type AppView = "main" | "tasks" | "schedules" | "vault" | "usage" | "gadget" | "settings";
+export type AppView = "main" | "tasks" | "schedules" | "vault" | "usage" | "analytics" | "gadget" | "settings";
 export interface AppRoute {
   view: AppView | "detail";
   /** The task a detail address shows. */
@@ -21,8 +22,8 @@ export interface AppRoute {
 }
 
 const ACCOUNT = /^\/u\/[A-Za-z0-9_-]{2,40}(?=\/|$)/;
-const PAGES: Record<string, AppView> = { tasks: "tasks", schedules: "schedules", vault: "vault", usage: "usage", gadget: "gadget", settings: "settings" };
-export const OWNER_VIEWS: ReadonlySet<AppRoute["view"]> = new Set(["usage", "gadget"]);
+const PAGES: Record<string, AppView> = { tasks: "tasks", schedules: "schedules", vault: "vault", usage: "usage", analytics: "analytics", gadget: "gadget", settings: "settings" };
+export const OWNER_VIEWS: ReadonlySet<AppRoute["view"]> = new Set(["usage", "analytics", "gadget"]);
 
 /** What an address points at; anything unknown is the main session. */
 export function parseRoute(pathname: string): AppRoute {

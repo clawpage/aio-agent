@@ -1,5 +1,5 @@
 export const support = {
-  settingsIntro: '查看隐私政策，或申请删除账户及关联数据。',
+  settingsIntro: '查看隐私政策，或申请删除账户及关联数据。', signedInAs: (who: string) => `当前账号：${who}`,
   account: '账户与隐私', privacy: '隐私政策', deletion: '申请删除账户', report: '举报回复',
   limitations: 'AI 回复可能有误，仅供一般参考。一站不是医疗设备，不提供诊断、治疗或预防疾病的功能；医疗问题请咨询合格医生，法律和投资问题请咨询相应专业人员。',
   reportTitle: '举报 AI 回复', reportInfo: '提交后，管理员会收到这条 AI 回复（最多 20,000 字）和你的说明，用于核查和改进内容安全。不会发送其他会话。',

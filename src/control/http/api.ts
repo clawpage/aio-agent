@@ -30,6 +30,8 @@ import type { AgentEvent } from "../codex/manager.js";
 import type { HostKind, RequestContext } from "./security.js";
 import { UNSAFE_METHODS, guardUnsafe, originAllowed } from "./security.js";
 import { BOOTSTRAP_USERNAME, authenticateUser, getUser } from "../auth/owner.js";
+import { visibleEmail } from "../auth/email.js";
+import { CLIENT_EVENTS } from "../../common/analytics.js";
 import { RegisterError, createInvite, listInvites, registerWithInvite, registrationRequiresInvite, revokeInvite } from "../auth/invites.js";
 import { googleRouter } from "../auth/googleRoutes.js";
 import { createSupportRequest, reviewSupportRequest, supportQueue, SupportError } from '../support.js';
@@ -179,7 +181,7 @@ export function createApiRouter(context: AppContext): Router {
       res.setHeader("Access-Control-Allow-Origin", origin);
       res.setHeader("Access-Control-Allow-Credentials", "true");
       res.setHeader("Vary", "Origin");
-      res.setHeader("Access-Control-Allow-Headers", "content-type");
+      res.setHeader("Access-Control-Allow-Headers", "content-type, x-client-platform");
       res.setHeader("Access-Control-Allow-Methods", req.path === "/workspace/refresh" ? "POST,OPTIONS" : "GET,OPTIONS");
     }
     if (req.method === "OPTIONS") {
@@ -225,7 +227,7 @@ export function createApiRouter(context: AppContext): Router {
     if (!user) { res.status(401).json({ error: "unauthenticated" }); return; }
     const restricted = user.role !== "owner";
     const pathname = req.path.toLowerCase().replace(/\/+$/, "");
-    const ownerPaths = ["/usage", "/settings", "/models", "/capabilities", "/sandbox/context", "/documents/provision", "/gadget/history"];
+    const ownerPaths = ["/usage", "/analytics/report", "/settings", "/models", "/capabilities", "/sandbox/context", "/documents/provision", "/gadget/history"];
     if (restricted && ownerPaths.some(p => pathname === p || pathname.startsWith(p + "/"))) {
       res.status(403).json({ error: "forbidden", message: "此操作仅限所有者" }); return;
     }
@@ -255,6 +257,9 @@ export function createApiRouter(context: AppContext): Router {
   // Public requests need a same-site Origin even without a signed-in session.
   // The bounded IP bucket is transient and does not write contact/IP data to logs.
   const publicRequests = new Map<string, { since: number; count: number }>();
+  /** Record a product analytics event for the request's account (see src/control/analytics.ts). */
+  const track = (req: Request, name: string, props?: Record<string, unknown>, userId?: string) =>
+    context.analytics?.track(name, { userId: userId ?? ctxOf(req).session?.ownerId ?? null, platform: req.get("x-client-platform"), props });
   router.post('/support/requests', requireKind('primary'), asyncHandler(async (req, res) => {
     const ctx = ctxOf(req);
     if (!ctx.origin || !originAllowed(cfg, ctx.kind, ctx.origin)) { res.status(403).json({error:'origin_denied'}); return; }
@@ -270,6 +275,7 @@ export function createApiRouter(context: AppContext): Router {
       const taskDb = req.body?.kind === 'content' && userId && context.runtimeForUser ? (await context.runtimeForUser(userId)).db : db;
       if (ctx.session && !sessions.isLive(ctx.session.id)) { res.status(401).json({error:'unauthenticated'}); return; }
       const id = createSupportRequest(db, userId, req.body ?? {}, Date.now(), taskDb);
+      track(req, "support_request", { kind: req.body?.kind });
       res.status(201).json({id});
     } catch (err) {
       if (!(err instanceof SupportError)) throw err;
@@ -284,6 +290,29 @@ export function createApiRouter(context: AppContext): Router {
     catch (err) { if (!(err instanceof SupportError)) throw err; res.status(err.status).json({error:err.code,message:err.message}); }
   });
   router.use("/auth/google", googleRouter(context));
+  // Events the console reports (src/common/analytics.ts). Signed out, only the sign-in page's view is
+  // accepted, from this site and at most a few per address per hour; signed in, a few hundred per account.
+  const reported = new Map<string, { since: number; count: number }>();
+  router.post('/analytics', requireKind('primary'), (req, res) => {
+    const ctx = ctxOf(req);
+    const name = req.body?.name;
+    if (!(CLIENT_EVENTS as readonly string[]).includes(name) || (!ctx.session && name !== 'auth_view')) { res.status(400).json({ error: 'bad_event' }); return; }
+    if (!ctx.session && (!ctx.origin || !originAllowed(cfg, ctx.kind, ctx.origin))) { res.status(403).json({ error: 'origin_denied' }); return; }
+    const now = Date.now(), key = ctx.session?.ownerId ?? `ip:${ctx.ip}`, limit = ctx.session ? 300 : 30;
+    for (const [k, v] of reported) if (now - v.since > 3600000) reported.delete(k);
+    const bucket = reported.get(key) ?? { since: now, count: 0 };
+    if (bucket.count >= limit || (reported.size >= 5000 && !reported.has(key))) { res.status(429).json({ error: 'rate_limited' }); return; }
+    bucket.count++; reported.set(key, bucket);
+    track(req, name, req.body?.props);
+    res.status(204).end();
+  });
+  router.get('/analytics/report', requireKind('primary'), requireSession, (req, res) => {
+    const days = req.query.days === undefined ? 30 : Number(req.query.days);
+    if (![7,30,90].includes(days)) { res.status(400).json({error:'invalid_days',message:'请选择 7、30 或 90 天'}); return; }
+    if (!context.analytics) { res.status(404).json({ error: 'not_found' }); return; }
+    res.setHeader('Cache-Control','no-store');
+    res.json(context.analytics.report(cfg, days));
+  });
   router.get('/usage', requireKind('primary'), requireSession, asyncHandler(async (req, res) => {
     const days = req.query.days === undefined ? 30 : Number(req.query.days);
     if (![7,30,90].includes(days)) { res.status(400).json({error:'invalid_days',message:'请选择 7、30 或 90 天'}); return; }
@@ -314,11 +343,14 @@ export function createApiRouter(context: AppContext): Router {
         res.status(400).json({ error: "password_required", message: "请输入密码" });
         return;
       }
-      const username = typeof req.body?.username === "string" ? req.body.username.trim() : BOOTSTRAP_USERNAME;
-      const owner = await authenticateUser(db, username, password);
+      // An account signs in with its email; accounts from before email also with their username.
+      const given = typeof req.body?.email === "string" ? req.body.email : req.body?.username;
+      const identifier = typeof given === "string" && given.trim() ? given.trim() : BOOTSTRAP_USERNAME;
+      const owner = await authenticateUser(db, identifier, password);
       if (!owner) {
         const after = limiter.recordFailure(ctx.ip);
         audit(db, "login_failed", `failures=${after.failures}`, ctx.ip);
+        track(req, "login_failed", { method: "password" });
         res.status(401).json({
           error: "invalid_credentials",
           message: after.locked ? "密码错误次数过多，账号已临时锁定" : "密码错误",
@@ -332,6 +364,7 @@ export function createApiRouter(context: AppContext): Router {
       });
       res.setHeader("Set-Cookie", sessionCookies("primary", token, csrfToken, { secure: ctx.secure, ttlMs: cfg.sessionTtlMs }));
       audit(db, "login_ok", owner.username, ctx.ip);
+      track(req, "login", { method: "password", with: identifier.includes("@") ? "email" : "username" }, owner.id);
       log.info("user logged in", { ip: ctx.ip });
       res.json({ ok: true, username: owner.username, role: owner.role, expiresAt: session.expiresAt });
     }),
@@ -355,7 +388,7 @@ export function createApiRouter(context: AppContext): Router {
       const str = (v: unknown) => (typeof v === "string" ? v : "");
       let user;
       try {
-        user = await registerWithInvite(db, { username: str(req.body?.username), password: str(req.body?.password), code: str(req.body?.inviteCode) });
+        user = await registerWithInvite(db, { email: str(req.body?.email), password: str(req.body?.password), code: str(req.body?.inviteCode) });
       } catch (err) {
         if (!(err instanceof RegisterError)) throw err;
         // Guessing codes counts like guessing passwords.
@@ -370,8 +403,9 @@ export function createApiRouter(context: AppContext): Router {
       const { session, token, csrfToken } = sessions.create(user.id, "primary", { ip: ctx.ip, userAgent: req.get("user-agent") ?? undefined });
       res.setHeader("Set-Cookie", sessionCookies("primary", token, csrfToken, { secure: ctx.secure, ttlMs: cfg.sessionTtlMs }));
       audit(db, "register_ok", user.username, ctx.ip);
+      track(req, "signup", { method: "password", invite: Boolean(str(req.body?.inviteCode).trim()) }, user.id);
       log.info("user registered", { ip: ctx.ip });
-      res.json({ ok: true, username: user.username, role: user.role, expiresAt: session.expiresAt });
+      res.json({ ok: true, username: user.username, email: user.email, role: user.role, expiresAt: session.expiresAt });
     }),
   );
 
@@ -390,6 +424,7 @@ export function createApiRouter(context: AppContext): Router {
       sessions.revokeLinked(session.id, "parent-logout");
       res.setHeader("Set-Cookie", clearSessionCookies("primary", ctx.secure));
       audit(db, "logout", undefined, ctx.ip);
+      track(req, "logout");
       res.json({ ok: true });
     }),
   );
@@ -424,6 +459,8 @@ export function createApiRouter(context: AppContext): Router {
         authenticated: true,
         kind: ctx.kind,
         username: owner?.username ?? null,
+        // The account's email; null for an account that only has the hidden placeholder.
+        email: owner ? visibleEmail(db, owner.id) : null,
         role: owner?.role ?? null,
         expiresAt: ctx.session.expiresAt,
         secure: ctx.secure,
@@ -525,7 +562,9 @@ export function createApiRouter(context: AppContext): Router {
       if (!upstream.ok) throw new Error(`upstream ${upstream.status}`);
       const json = (await upstream.json()) as { text?: unknown };
       res.json({ text: typeof json.text === "string" ? json.text.trim() : "" });
+      track(req, "voice_input", { ok: true, seconds: Math.round((audio.byteLength - 44) / 32000) });
     } catch (err) {
+      track(req, "voice_input", { ok: false });
       log.warn("asr failed", { error: err instanceof Error ? err.message : String(err) });
       res.status(502).json({ error: "asr_unavailable", message: "语音识别暂时不可用，请稍后再试" });
     }
@@ -540,12 +579,14 @@ export function createApiRouter(context: AppContext): Router {
     if (!context.push) { res.status(404).json({ error: "push_unavailable", message: "通知暂不可用" }); return; }
     try {
       context.push.subscribe(ctxOf(req).session!.ownerId, req.body?.subscription ?? {}, req.get("user-agent") ?? "");
+      track(req, "push_subscribe");
       res.json({ ok: true, devices: context.push.count(ctxOf(req).session!.ownerId) });
     } catch (err) { res.status(400).json({ error: "bad_subscription", message: err instanceof Error ? err.message : "订阅无效" }); }
   }));
   router.post("/push/unsubscribe", requireKind("primary"), requireSession, asyncHandler(async (req, res) => {
     const endpoint = typeof req.body?.endpoint === "string" ? req.body.endpoint : "";
     if (context.push && endpoint) context.push.unsubscribe(ctxOf(req).session!.ownerId, endpoint);
+    track(req, "push_unsubscribe");
     res.json({ ok: true });
   }));
   router.post("/push/test", requireKind("primary"), requireSession, asyncHandler(async (req, res) => {
@@ -629,6 +670,7 @@ export function createApiRouter(context: AppContext): Router {
     const locale = req.body?.locale;
     if (!isLocale(locale)) { res.status(400).json({ error: "bad_request", message: "不支持的语言" }); return; }
     context.tasks.setLocale(locale);
+    track(req, "locale_change", { locale });
     res.json({ ok: true });
   });
   router.post("/tasks", requireKind("primary"), requireSession, asyncHandler(async (req, res) => {
@@ -642,6 +684,7 @@ export function createApiRouter(context: AppContext): Router {
         return { path: checked.path, kind: a.kind === "image" ? "image" as const : "file" as const, name: typeof a.name === "string" ? a.name : "" };
       }) : [];
       const result = context.tasks.submit({ userId: ctxOf(req).session!.ownerId, text: b.text, clientMessageId: b.clientMessageId, attachments, relatedTaskId: typeof b.relatedTaskId === "string" ? b.relatedTaskId : null, locale: typeof b.locale === "string" ? b.locale : null });
+      if (!result.duplicate) track(req, "task_submit", { attachments: attachments.length, images: attachments.filter((a: { kind: string }) => a.kind === "image").length, reference: typeof b.relatedTaskId === "string" });
       res.status(result.duplicate ? 200 : 202).json(result);
     } catch (err) {
       res.status(err instanceof TurnConflictError ? 409 : 400).json({ error: "task_submit_failed", message: err instanceof Error ? err.message : "任务提交失败" });
@@ -799,17 +842,17 @@ export function createApiRouter(context: AppContext): Router {
     res.json(reply);
   }));
   router.post("/tasks/:id/stop", requireKind("primary"), requireSession, asyncHandler(async (req, res) => {
-    try { await context.tasks.stop(param(req, "id")); res.json({ ok: true }); }
+    try { await context.tasks.stop(param(req, "id")); track(req, "task_stop"); res.json({ ok: true }); }
     catch (err) { res.status(409).json({ error: "stop_failed", message: err instanceof Error ? err.message : "停止失败" }); }
   }));
   router.post("/tasks/:id/archive", requireKind("primary"), requireSession, (req, res) => {
     const id = param(req, "id");
     if (!context.tasks.belongsTo(id, ctxOf(req).session!.ownerId)) { res.status(404).json({ error: "not_found" }); return; }
-    try { context.tasks.archive(id); res.json({ ok: true }); }
+    try { context.tasks.archive(id); track(req, "task_archive"); res.json({ ok: true }); }
     catch (err) { res.status(409).json({ error: "archive_refused", message: err instanceof Error ? err.message : "归档失败" }); }
   });
   router.post("/tasks/:id/retry-planning", requireKind("primary"), requireSession, asyncHandler(async (req, res) => {
-    try { context.tasks.retryPlanning(param(req, "id")); res.json({ ok: true }); }
+    try { context.tasks.retryPlanning(param(req, "id")); track(req, "task_retry"); res.json({ ok: true }); }
     catch (err) { res.status(409).json({ error: "retry_refused", message: err instanceof Error ? err.message : "无法重试" }); }
   }));
 
@@ -822,16 +865,17 @@ export function createApiRouter(context: AppContext): Router {
   router.patch("/schedules/:id", requireKind("primary"), requireSession, asyncHandler(async (req, res) => {
     const body = (req.body ?? {}) as Record<string, unknown>;
     const changed = context.tasks.updateScheduleFor(ctxOf(req).session!.ownerId, { id: param(req, "id"), title: body.title, instruction: body.instruction, schedule: body.schedule, needsBrowser: body.needsBrowser });
-    if (changed.ok) { res.json({ message: changed.message, schedule: changed.schedule }); return; }
+    if (changed.ok) { track(req, "schedule_edit"); res.json({ message: changed.message, schedule: changed.schedule }); return; }
     res.status(changed.error === "定时任务不存在" ? 404 : 409).json({ error: "schedule_refused", message: changed.error });
   }));
   router.post("/schedules/:id/:action", requireKind("primary"), requireSession, asyncHandler(async (req, res) => {
     const action = param(req, "action");
     const userId = ctxOf(req).session!.ownerId;
     try {
-      if (action === "run") { res.json(context.tasks.runScheduleNow(param(req, "id"), userId)); return; }
+      if (action === "run") { res.json(context.tasks.runScheduleNow(param(req, "id"), userId)); track(req, "schedule_action", { action }); return; }
       if (action !== "pause" && action !== "resume" && action !== "cancel") { res.status(404).json({ error: "not_found" }); return; }
       res.json(context.tasks.changeSchedule(param(req, "id"), userId, action));
+      track(req, "schedule_action", { action });
     } catch (err) {
       const message = err instanceof Error ? err.message : "操作失败";
       res.status(message === "定时任务不存在" ? 404 : 409).json({ error: "schedule_refused", message });
@@ -972,6 +1016,7 @@ export function createApiRouter(context: AppContext): Router {
       tab ??= own.find((t) => t.request) ?? own[0] ?? null;
     }
     if (!tab) { res.status(404).json({ error: "tab_not_found", message: "这个标签页已经关闭或不属于该任务" }); return; }
+    track(req, action === "take" ? "browser_takeover" : "browser_handback");
     res.json({ tab });
   }));
   // The person answers a task's sign-in request from the vault: a saved account, or one typed here
@@ -1016,6 +1061,7 @@ export function createApiRouter(context: AppContext): Router {
     if (!v) return;
     try {
       res.status(201).json({ entry: v.create({ site: req.body?.site, username: req.body?.username, password: req.body?.password, method: req.body?.method }) });
+      track(req, "vault_save", { method: req.body?.method === "google" ? "google" : "password" });
     } catch (err) { vaultFailure(res, err); }
   }));
   router.put("/vault/:id", requireKind("primary"), requireSession, asyncHandler(async (req, res) => {

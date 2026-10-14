@@ -37,7 +37,7 @@ export const usage: typeof zh = {
   notAvailable: "Unavailable",
   daily: (who: string) => `Daily breakdown · ${who}`,
   allUsersTotal: "All users combined",
-  note: "Total = input + output; cached tokens are counted in input. Covers AIO Agent's Codex / Claude runs and dispatch calls. Excludes external clients, image generation and Jev calls, and doesn't reflect subscription limits or billing.",
+  note: "Total = input + output; cached tokens are counted in input. Covers Clawpage Agent's Codex / Claude runs and dispatch calls. Excludes external clients, image generation and Jev calls, and doesn't reflect subscription limits or billing.",
   historyNote: "History is backfilled only from saved Codex events; older Claude and dispatch usage, and anything never reported, can't be recovered. Usage that wasn't reported before an interruption may be missing; calls spanning midnight count on the day their usage report arrived.",
   coverage: (name: string, since: string | null, first: string | null) => `${name}: ${since ? `live tracking since ${since}` : "live tracking starts when the account's executor starts"}; ${first ? `earliest record ${first}` : "no records yet"}`,
 };

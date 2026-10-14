@@ -19,6 +19,7 @@
 - [14. 外部集成](#14-外部集成)
 - [15. Claude Code 执行器](#15-claude-code-执行器)
 - [16. 用量看板](#16-用量看板)
+- [16a. 使用统计（埋点）](#16a-使用统计埋点)
 - [17. 界面与交互](#17-界面与交互)
 
 ## 1. 主会话与任务
@@ -152,14 +153,20 @@
     控制面的 ChatGPT 登录（`codex-login`）在宿主侧附加；控制面未登录时该账号报服务不可用。
 - **账号路径**：主控制台为 `<主域名>/u/<用户名>`，根路径和 `/login` 登录后跳到自己的地址；同一浏览器一次只登录一个账号，
   打开别人的地址只显示「这是 X 的页面」。页面路由（`src/ui/src/route.ts`）：`/tasks`、`/tasks/<任务id>`、`/schedules`、
-  `/vault`、`/usage`、`/gadget` 与 `/settings`（仅 owner）、`/workspace`（叠加在页面上，关闭即后退）。
+  `/vault`、`/usage`、`/analytics`、`/gadget` 与 `/settings`（仅 owner）、`/workspace`（叠加在页面上，关闭即后退）。
 - **工作区路径**：`<工作区域名>/u/<用户名>/...`（owner 为 `/u/owner`，兼容旧的根路径与 `/u/<账号散列>`），无需新增 DNS、TLS 或
   tunnel。前缀与工作区会话账号不一致时 401；不带前缀的子资源（如 `/jupyter/static/...`）按会话账号路由；环境启动失败时拒绝连接，
   绝不退回 owner 沙箱。各账号共用同一工作区来源，因此同一浏览器先后登录不同账号时，工作区页面的浏览器端存储共用，
   沙箱文件、进程与记忆的隔离不受影响。
 - **创建账号**：`node --env-file=var/runtime.env bin/create-user.mjs <用户名>`（Quickstart 用 `.env`；compose 见部署文档）。
   随机密码写入 `var/user-secrets/<用户名>.txt`（0600），命令不打印密码、不覆盖已有账号。
-- **注册**：登录页切换到注册（或打开 `/register`），填账号（2–40 位小写字母、数字、`-`、`_`）和密码（至少 12 位），也可用 Google 首次认证后选择账号。现有账户总数不足 20 时免邀请码，达到 20 后必须填写邀请码；owner、管理员创建的成员与审核账户均计入总数。人数检查、邀请码领用与建号在同一写事务内，跨密码/Google 的并发注册不能超出免邀请码名额。
+- **邮箱账号**：账号以邮箱标识（`owners.email`，小写保存、唯一）。新账号的用户名（即 `/u/<用户名>` 地址和配置里引用的账号名）由邮箱前缀自动生成
+  （小写，非 `a-z0-9_-` 字符换成 `-`；被占用或是保留名 `owner`、`spare` 时追加 4 位随机后缀）。邮箱之前已有的账号、以及 `bin/create-user.mjs`
+  按用户名创建的账号，自动得到隐藏的占位邮箱 `<用户名>@clawpage.ai`（`email_placeholder=1`，数据库迁移与插入触发器补齐）：
+  界面和 `/api/auth/session` 都不显示它（`email: null`），但它占用该邮箱，注册时同样视为已注册。登录框填邮箱（不区分大小写），
+  老账号继续用原用户名登录。配置页「账户与隐私」显示当前账号的邮箱（老账号显示用户名）。注册不发验证邮件。
+- **注册**：登录页切换到注册（或打开 `/register`），填邮箱和密码（至少 12 位）；也可用 Google 首次认证，直接以 Google 邮箱为账号邮箱
+  （该邮箱已被密码账号注册时拒绝，不自动关联）。现有账户总数不足 20 时免邀请码，达到 20 后必须填写邀请码；owner、管理员创建的成员与审核账户均计入总数。人数检查、邀请码领用与建号在同一写事务内，跨密码/Google 的并发注册不能超出免邀请码名额。
   邀请码由 owner 在配置页生成，格式 `XXXX-XXXX-XXXX`，一次有效，可手动作废；领用与建号在同一事务中。注册结果是普通 member。
   猜错邀请码与输错密码共用按 IP 的失败锁定。设置 `PA_INVITE_EMAIL` 后注册页显示申请邮箱。
 - **分配成员模型**：`node --env-file=var/runtime.env bin/set-user-model.mjs <用户名> <gpt-6.1-sol|claude-sonnet-5-5> [low|medium|high]`，
@@ -612,6 +619,23 @@ owner 侧栏「用量看板」按账号显示每日 token 趋势、输入 / 输�
 计数持久保存在各账号控制数据库，覆盖 Codex / Claude 执行、派单与标题调用。缓存读写计入输入，总 token = 输入 + 输出。
 历史只回填已保存的 Codex 用量事件；旧 Claude、旧派单、外部客户端、图片生成与 Jev 不计入，不推算账单或订阅额度。
 口径详见[运行手册](RUNBOOK.md#13-token-用量统计)。
+
+## 16a. 使用统计（埋点）
+
+自建、不接第三方统计。事件写入控制面中央数据库的 `analytics_events`（时间、事件名、账号 ID、平台、最多 8 个短标量属性），
+不记录消息内容、邮箱、IP 或设备标识，启动时删除 400 天前的事件。成员运行时与 owner 共用这张表，上报不会唤醒成员沙箱。
+
+- **平台**：界面每个 API 请求带 `x-client-platform`（`web` / `pwa` / `ios` / `android` / `mac`，由 Mac App 的设备桥、手机 App 的浏览器桥和
+  主屏显示模式判断，`src/ui/src/analytics.ts`），服务端只接受这五个值。
+- **界面上报**（`POST /api/analytics`，`src/common/analytics.ts` 列出）：`app_open`（加载及离开 30 分钟后回到前台）、`page_view`（切换页面）、
+  `auth_view`（登录/注册页曝光，唯一允许未登录上报的事件，需同源 Origin，每 IP 每小时 30 次）。已登录每账号每小时 300 次。
+- **服务端记录**：`signup`、`login`（方式、用邮箱还是用户名）、`login_failed`、`logout`、`task_submit`（附件数、是否引用任务）、`task_stop`、
+  `task_archive`、`task_retry`、`schedule_edit`、`schedule_action`、`push_subscribe`/`push_unsubscribe`、`locale_change`、`vault_save`、
+  `support_request`、`voice_input`（是否成功、时长）、`browser_takeover`/`browser_handback`。新增埋点在 `src/control/http/api.ts` 调 `track()`。
+- **统计页**：owner 侧栏「运营统计」（`/u/<用户名>/analytics`，`GET /api/analytics/report?days=7|30|90`，仅 owner）显示账号总数与新注册、
+  今日 / 7 天 / 30 天活跃账号、任务数与完成率、注册页浏览到注册的转化、每日趋势与明细、各事件次数与账号数、平台分布、任务来源。
+  活跃 = 当天有事件或手动提交任务的账号（定时任务自动执行不算）。任务数字在读报表时从各账号自己的任务表统计（只读打开，含历史，
+  合并进其他任务的补充不单独计）；注册数来自账号创建时间；其余数字从事件开始记录（`meta.analytics_started`）之后才有。
 
 ## 17. 界面与交互
 

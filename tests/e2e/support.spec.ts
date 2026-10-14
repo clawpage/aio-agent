@@ -74,7 +74,7 @@ test('the public support form initiates deletion without app installation or log
   let sent: unknown;await page.route('**/api/support/requests',async r=>{sent=r.request().postDataJSON();await r.fulfill({status:201,json:{id:'external-reference'}});});
   await page.goto('/account-deletion.html');
   await page.getByLabel('联系邮箱').fill('fixture@example.com');
-  await page.getByLabel('一站用户名').fill('fixture-member');
+  await page.getByLabel('注册时使用的邮箱或账号').fill('fixture-member');
   await page.getByLabel('说明').fill('Delete my account and data.');
   await page.getByRole('button',{name:'提交请求'}).click();
   await expect(page.getByRole('status')).toContainText('external-reference');

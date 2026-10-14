@@ -32,8 +32,16 @@ export function SupportDialog({taskId, onClose}: {taskId?: string; onClose: () =
 /** Account controls shared by member and owner configuration pages. */
 export function AccountPrivacySettings() {
   const [open, setOpen] = useState(false);
+  // The account's email; an account from before email has only its name (its placeholder email stays hidden).
+  const [account, setAccount] = useState<string | null>(null);
+  useEffect(() => {
+    const controller = new AbortController();
+    api.session(controller.signal).then(s => setAccount(s.email ?? s.username), () => undefined);
+    return () => controller.abort();
+  }, []);
   return <section className="settings-card" aria-label={t.support.account}>
     <div className="settings-section-head"><h3>{t.support.account}</h3><p>{t.support.settingsIntro}</p></div>
+    {account && <p className="muted tiny">{t.support.signedInAs(account)}</p>}
     <button type="button" className="ghost" onClick={() => setOpen(true)}>{t.support.account}</button>
     {open && <SupportDialog onClose={() => setOpen(false)}/>}
   </section>;

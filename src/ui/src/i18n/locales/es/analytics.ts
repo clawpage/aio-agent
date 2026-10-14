@@ -1,0 +1,37 @@
+import type { analytics as zh } from "../zh/analytics";
+
+export const analytics: typeof zh = {
+  title: "Estadísticas",
+  subtitle: "Registros, actividad, tareas y uso de funciones",
+  refresh: "Actualizar",
+  readFailed: "No se pudieron cargar las estadísticas",
+  loading: "Cargando estadísticas…",
+  meta: (timezone: string, updated: string) => `Zona horaria: ${timezone} · Actualizado ${updated} · Se actualiza cada minuto`,
+  metrics: {
+    accounts: "Cuentas",
+    newInRange: (n: string) => `${n} nuevas en este periodo`,
+    active: "Activas hoy",
+    activeWindows: (week: string, month: string) => `Últimos 7 días ${week} · últimos 30 días ${month}`,
+    tasks: "Tareas del periodo",
+    outcomes: (rate: string, failed: string) => `${rate} completadas · ${failed} fallidas`,
+    conversion: "Conversión de registro",
+    funnel: (views: string, signups: string) => `${views} visitas a la página de registro → ${signups} registros`,
+  },
+  trend: "Tendencia diaria",
+  chartLabel: "Cuentas activas, registros y tareas por día",
+  daily: "Desglose diario",
+  columns: { active: "Activas", signups: "Registros", logins: "Accesos", tasks: "Tareas", completed: "Completadas", failed: "Fallidas" },
+  features: "Uso de funciones",
+  platforms: "Plataformas",
+  noEvents: "No hay eventos registrados en este periodo.",
+  eventColumns: { event: "Evento", count: "Veces", users: "Cuentas", platform: "Plataforma" },
+  events: {
+    app_open: "Abrió la aplicación", page_view: "Páginas vistas", auth_view: "Visitas a acceso / registro", signup: "Registros", login: "Accesos", login_failed: "Accesos fallidos", logout: "Cierres de sesión",
+    task_submit: "Mensajes enviados", task_stop: "Tareas detenidas", task_archive: "Tareas archivadas", task_retry: "Reintentos de asignación", schedule_edit: "Programaciones editadas", schedule_action: "Acciones de programación",
+    push_subscribe: "Notificaciones activadas", push_unsubscribe: "Notificaciones desactivadas", locale_change: "Cambios de idioma", vault_save: "Contraseñas guardadas", support_request: "Soporte y denuncias",
+    voice_input: "Entrada de voz", browser_takeover: "Navegador tomado", browser_handback: "Navegador devuelto",
+  },
+  platformNames: { web: "Web", pwa: "Web en pantalla de inicio", ios: "App de iOS", android: "App de Android", mac: "App de Mac", unknown: "Sin indicar" },
+  sources: (manual: string, schedule: string, gadget: string) => `Origen de las tareas: escritas ${manual} · programadas ${schedule} · accesorio de voz ${gadget}. Las ejecuciones programadas no cuentan como actividad.`,
+  note: (since: string | null) => `Activas = cuentas que abrieron la aplicación, usaron una función o enviaron una tarea ese día. Las tareas salen de los registros de cada cuenta (incluido el historial); los eventos ${since ? `se registran desde ${since}` : "aún no se registran"}, así que los días anteriores solo tienen datos de cuentas y tareas. No se registra el contenido de los mensajes, correos ni identificadores de dispositivo.`,
+};

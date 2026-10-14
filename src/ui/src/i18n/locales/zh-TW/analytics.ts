@@ -1,0 +1,37 @@
+import type { analytics as zh } from "../zh/analytics";
+
+export const analytics: typeof zh = {
+  title: "營運統計",
+  subtitle: "註冊、活躍、任務與功能使用",
+  refresh: "重新整理",
+  readFailed: "統計讀取失敗",
+  loading: "正在讀取統計…",
+  meta: (timezone: string, updated: string) => `統計時區：${timezone} · 更新於 ${updated} · 每分鐘重新整理`,
+  metrics: {
+    accounts: "帳號總數",
+    newInRange: (n: string) => `本期新註冊 ${n}`,
+    active: "今日活躍帳號",
+    activeWindows: (week: string, month: string) => `近 7 天 ${week} · 近 30 天 ${month}`,
+    tasks: "本期任務",
+    outcomes: (rate: string, failed: string) => `完成率 ${rate} · 失敗 ${failed}`,
+    conversion: "註冊轉換",
+    funnel: (views: string, signups: string) => `註冊頁瀏覽 ${views} → 註冊 ${signups}`,
+  },
+  trend: "每日趨勢",
+  chartLabel: "每天的活躍帳號、新註冊與任務數",
+  daily: "每日明細",
+  columns: { active: "活躍帳號", signups: "新註冊", logins: "登入", tasks: "任務", completed: "完成", failed: "失敗" },
+  features: "功能使用",
+  platforms: "平台分布",
+  noEvents: "這個時段還沒有記錄到事件。",
+  eventColumns: { event: "事件", count: "次數", users: "帳號數", platform: "平台" },
+  events: {
+    app_open: "開啟應用", page_view: "瀏覽頁面", auth_view: "登入/註冊頁曝光", signup: "註冊", login: "登入", login_failed: "登入失敗", logout: "登出",
+    task_submit: "送出訊息", task_stop: "停止任務", task_archive: "封存任務", task_retry: "重試派單", schedule_edit: "編輯排程任務", schedule_action: "操作排程任務",
+    push_subscribe: "開啟通知", push_unsubscribe: "關閉通知", locale_change: "切換語言", vault_save: "儲存密碼", support_request: "支援與檢舉",
+    voice_input: "語音輸入", browser_takeover: "接管瀏覽器", browser_handback: "交還瀏覽器",
+  },
+  platformNames: { web: "網頁", pwa: "主畫面網頁應用", ios: "iOS App", android: "Android App", mac: "Mac App", unknown: "未標明" },
+  sources: (manual: string, schedule: string, gadget: string) => `任務來源：手動 ${manual} · 排程 ${schedule} · 語音配件 ${gadget}。排程自動執行不計入活躍。`,
+  note: (since: string | null) => `活躍 = 當天開啟應用、使用功能或手動送出任務的帳號。任務資料來自各帳號的任務紀錄（含歷史）；事件${since ? `自 ${since} 起記錄` : "尚未開始記錄"}，之前的日期只有帳號與任務資料。不記錄訊息內容、電子郵件或裝置識別碼。`,
+};

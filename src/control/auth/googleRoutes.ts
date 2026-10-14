@@ -44,6 +44,7 @@ export function googleRouter(context: AppContext): Router {
     db.prepare("DELETE FROM google_login_flows WHERE state_hash=?").run(row.state_hash);
     limiter.recordSuccess(ctx.ip);
     audit(db, "google_login_ok", user.username, ctx.ip);
+    context.analytics?.track("login", {userId: user.id, platform: req.get("x-client-platform"), props: {method: "google", native: Boolean(row.native)}});
     if (redirect) res.redirect(303, "/login");
     else res.json({authenticated: true, username: user.username, role: user.role});
   };
@@ -95,14 +96,15 @@ export function googleRouter(context: AppContext): Router {
     const str = (v: unknown) => typeof v === "string" ? v : "";
     try {
       const user = await registerGoogleWithInvite(db, {subject: row.subject, email: row.email, clientHash: row.client_hash},
-        {username: str(req.body?.username), code: str(req.body?.inviteCode)});
+        {code: str(req.body?.inviteCode)});
       const ctx = req.paCtx!;
       const auth = sessions.create(user.id, "primary", {ip: ctx.ip, userAgent: req.get("user-agent")});
       res.setHeader("Set-Cookie", [...sessionCookies("primary", auth.token, auth.csrfToken, {secure: ctx.secure, ttlMs: cfg.sessionTtlMs}),
         cookie(GOOGLE_CLIENT_COOKIE, "", ctx.secure)]);
       limiter.recordSuccess(ctx.ip);
       audit(db, "google_register_ok", user.username, ctx.ip);
-      res.json({ok: true, username: user.username, role: user.role});
+      context.analytics?.track("signup", {userId: user.id, platform: req.get("x-client-platform"), props: {method: "google", invite: Boolean(str(req.body?.inviteCode).trim())}});
+      res.json({ok: true, username: user.username, email: user.email, role: user.role});
     } catch (err) {
       if (!(err instanceof RegisterError)) throw err;
       if (err.code === "invalid_invite" || err.code === "invite_used") limiter.recordFailure(req.paCtx!.ip);

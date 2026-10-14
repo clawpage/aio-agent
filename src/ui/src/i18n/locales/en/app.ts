@@ -2,7 +2,7 @@ import type { app as zh } from "../zh/app";
 
 export const app: typeof zh = {
   brand: {
-    name: "AIO Agent",
+    name: "Clawpage Agent",
     tagline: "Everything you need, all in one stop",
     legacyTagline: "Codex + AIO sandbox",
   },
@@ -61,7 +61,7 @@ export const app: typeof zh = {
   push: {
     label: "Phone notifications",
     install: "Add this app to your home screen to turn on phone notifications here",
-    denied: "Notifications are blocked. Allow AIO Agent to send notifications in your system settings",
+    denied: "Notifications are blocked. Allow Clawpage Agent to send notifications in your system settings",
     enable: "Turn on phone notifications",
     on: "Phone notifications on",
     unavailable: "Notifications aren't available right now",

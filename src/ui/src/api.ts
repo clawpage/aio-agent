@@ -13,6 +13,7 @@ import type {
 } from "./types";
 import { API_VERSION, apiCompatible } from "../../common/version";
 import { locale, t, type Locale } from "./i18n";
+import { clientPlatform, setAnalyticsSender } from "./analytics";
 
 /**
  * Where the control plane's API lives. Empty (the default) means this page's own
@@ -76,6 +77,7 @@ async function request<T>(
   const csrf = cookie("pa_csrf");
   if (init.body !== undefined) headers["content-type"] = "application/json";
   if (csrf) headers["x-csrf-token"] = csrf;
+  headers["x-client-platform"] = clientPlatform();
   const res = await fetch(apiUrl(path), {
     method: init.method ?? "GET",
     headers,
@@ -132,6 +134,7 @@ export const api = {
   cameraSnapshotUrl: (entity: string, at: number) => apiUrl(`/api/cameras/${encodeURIComponent(entity)}/snapshot?t=${at}`),
   cameraFrameUrl: (entity: string, at: string | number) => apiUrl(`/api/cameras/${encodeURIComponent(entity)}/frame?at=${encodeURIComponent(String(at))}`),
   gadgetHistory: (opts: { before?: number; limit?: number } = {}, signal?: AbortSignal) => request<{ account: string | null; messages: GadgetMessage[]; more: boolean }>(`/api/gadget/history?limit=${opts.limit ?? 50}${opts.before ? `&before=${opts.before}` : ''}`, { signal, cache: 'no-store' }),
+  analytics: (days: number, signal?: AbortSignal) => request<import('../../common/analytics').AnalyticsReport>(`/api/analytics/report?days=${days}`, { signal, cache: 'no-store' }),
   usage: (days: number, signal?: AbortSignal) => request<import('../../common/usage').UsageReport>(`/api/usage?days=${days}`, { signal, cache: 'no-store' }),
   soul: () => request<{content:string;revision:string;defaultContent:string;maxBytes:number}>('/api/settings/soul'),
   recallStats: (days: number) => request<{ stats: import('./types').RecallStats }>(`/api/settings/recall?days=${days}`),
@@ -170,13 +173,14 @@ export const api = {
   taskBrowserLastShotUrl: (id: string, at: number) => apiUrl(`/api/tasks/${encodeURIComponent(id)}/browser/last-shot?at=${at}`),
   taskBrowserReopen: (id: string) => request<{ tab: import("./types").TaskTab }>(`/api/tasks/${encodeURIComponent(id)}/browser/reopen`, { method: "POST", body: {} }),
   taskBrowserScreenshotUrl: (id: string, tab: string, at: number) => apiUrl(`/api/tasks/${encodeURIComponent(id)}/browser/screenshot?tab=${encodeURIComponent(tab)}&at=${at}`),
-  session: (signal?: AbortSignal) => request<{ authenticated: boolean; role?: "owner" | "member"; username: string | null; expiresAt?: number; secure?: boolean; inviteEmail?: string | null; registrationRequiresInvite?: boolean }>("/api/auth/session", {signal,cache:"no-store"}),
-  login: (password: string, username = "owner") => request<{ ok: boolean; username: string; expiresAt: number }>("/api/auth/login", { method: "POST", body: { password, username } }),
-  register: (account: { username: string; password: string; inviteCode: string }) => request<{ ok: boolean; username: string; expiresAt: number }>("/api/auth/register", { method: "POST", body: account }),
+  session: (signal?: AbortSignal) => request<{ authenticated: boolean; role?: "owner" | "member"; username: string | null; email?: string | null; expiresAt?: number; secure?: boolean; inviteEmail?: string | null; registrationRequiresInvite?: boolean }>("/api/auth/session", {signal,cache:"no-store"}),
+  /** `email` is the account's email, or the username of an account from before email. */
+  login: (password: string, email = "owner") => request<{ ok: boolean; username: string; expiresAt: number }>("/api/auth/login", { method: "POST", body: { password, email } }),
+  register: (account: { email: string; password: string; inviteCode: string }) => request<{ ok: boolean; username: string; expiresAt: number }>("/api/auth/register", { method: "POST", body: account }),
   googlePending: (signal?: AbortSignal) => request<{enabled: boolean; pending: {email: string} | null}>("/api/auth/google/pending", {cache: "no-store", signal}),
   googleStart: (native: boolean) => request<{url: string}>("/api/auth/google/start", {method: "POST", body: {native}}),
   googleRedeem: (ticket: string) => request<{authenticated: boolean; pending?: {email: string}}>("/api/auth/google/redeem", {method: "POST", body: {ticket}}),
-  googleRegister: (account: {username: string; inviteCode: string}) => request<{ok: boolean}>("/api/auth/google/register", {method: "POST", body: account}),
+  googleRegister: (account: {inviteCode: string}) => request<{ok: boolean}>("/api/auth/google/register", {method: "POST", body: account}),
   googleCancel: () => request<{ok: boolean}>("/api/auth/google/cancel", {method: "POST"}),
   deviceLinks: () => request<{ links: import("./types").DeviceLink[] }>("/api/device-links", { cache: "no-store" }),
   createDeviceLink: (name: string) => request<{ link: import("./types").DeviceLink; token: string }>("/api/device-links", { method: "POST", body: { name } }),
@@ -458,3 +462,5 @@ export async function versionMismatch(): Promise<string | null> {
     return null;
   }
 }
+
+setAnalyticsSender((name, props) => request("/api/analytics", { method: "POST", body: { name, props }, keepalive: true }));

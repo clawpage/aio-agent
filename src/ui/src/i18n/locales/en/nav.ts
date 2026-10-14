@@ -9,6 +9,7 @@ export const nav: typeof zh = {
   schedules: "Scheduled tasks",
   vault: "Passwords",
   usage: "Usage",
+  analytics: "Analytics",
   workspace: "Workspace",
   settings: "Settings",
   logout: "Log out",

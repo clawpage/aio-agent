@@ -42,7 +42,7 @@ it('keeps one sandbox provisioned for the next registration, which takes it over
   // The spare runtime's database is replaced by the account's own.
   const dbPath=path.join(h.ctx.cfg.dataDir,'users',userNamespace(first),'agent.sqlite');
   mkdirSync(path.dirname(dbPath),{recursive:true});writeFileSync(dbPath,'spare');
-  const user=await registerWithInvite(h.ctx.db,{username:'newcomer',password:'newcomer-secret-123',code:''});
+  const user=await registerWithInvite(h.ctx.db,{email:'newcomer@example.com',password:'newcomer-secret-123',code:''});
   expect(user.id).toBe(first);
   await registry.resolve(user.id);
   expect(made[0]!.shut).toBe(true);
@@ -58,7 +58,7 @@ it('keeps one sandbox provisioned for the next registration, which takes it over
   expect(made.find(m=>m.identity.id===next)?.identity.username).toBe('spare');
 
   // A failed registration leaves the spare where it was.
-  await expect(registerWithInvite(h.ctx.db,{username:'newcomer',password:'newcomer-secret-123',code:''})).rejects.toThrow();
+  await expect(registerWithInvite(h.ctx.db,{email:'newcomer@example.com',password:'newcomer-secret-123',code:''})).rejects.toThrow();
   expect(spareId(h.ctx)).toBe(next);
   await registry.shutdown();
   expect(made.every(m=>m.shut)).toBe(true);
@@ -74,7 +74,7 @@ it('has no spare without managed sandboxes or when switched off',async()=>{
   h.ctx.cfg.sandbox.autostart=true;h.ctx.cfg.sandbox.spare=false;
   registry.prepareSpare();
   expect(spareId(h.ctx)).toBeUndefined();
-  const user=await registerWithInvite(h.ctx.db,{username:'plain',password:'plain-secret-1234',code:''});
+  const user=await registerWithInvite(h.ctx.db,{email:'plain@example.com',password:'plain-secret-1234',code:''});
   expect(user.id).toMatch(/^user_/);
  }finally{h.ctx.cfg.sandbox.autostart=false;h.ctx.cfg.sandbox.spare=true;await h.shutdown();}
 });

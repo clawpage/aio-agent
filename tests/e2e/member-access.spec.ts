@@ -25,9 +25,9 @@ test('login accepts the supplied account name',async({page})=>{
  await page.route('**/api/auth/session',r=>r.fulfill({json:{authenticated,username:authenticated?'yzmy':null,role:authenticated?'member':null}}));
  await page.route('**/api/main*',r=>r.fulfill({json:{mode:'tasks',tasks:[],nextBefore:null}}));
  await page.route('**/api/auth/login',async r=>{body=r.request().postDataJSON();authenticated=true;await r.fulfill({json:{ok:true,username:'yzmy',role:'member'}});});
- await page.goto('/login');await expect(page.getByLabel('账号',{exact:true})).toHaveValue('');await expect(page.getByLabel('账号',{exact:true})).toBeFocused();
- const account=page.getByLabel('账号',{exact:true});await expect(account).toHaveAttribute('autocapitalize','none');await expect(account).toHaveAttribute('autocorrect','off');await expect(account).toHaveAttribute('spellcheck','false');await page.getByLabel('账号',{exact:true}).fill('yzmy');await page.getByLabel('密码',{exact:true}).fill('test-password');await page.getByRole('button',{name:'登录',exact:true}).click();
- await expect(page.getByRole('heading',{name:'主会话',exact:true})).toBeVisible();expect(body).toEqual({username:'yzmy',password:'test-password'});expect(new URL(page.url()).pathname).toBe('/u/yzmy');
+ await page.goto('/login');await expect(page.getByLabel('邮箱',{exact:true})).toHaveValue('');await expect(page.getByLabel('邮箱',{exact:true})).toBeFocused();
+ const account=page.getByLabel('邮箱',{exact:true});await expect(account).toHaveAttribute('autocapitalize','none');await expect(account).toHaveAttribute('autocorrect','off');await expect(account).toHaveAttribute('spellcheck','false');await page.getByLabel('邮箱',{exact:true}).fill('yzmy');await page.getByLabel('密码',{exact:true}).fill('test-password');await page.getByRole('button',{name:'登录',exact:true}).click();
+ await expect(page.getByRole('heading',{name:'主会话',exact:true})).toBeVisible();expect(body).toEqual({email:'yzmy',password:'test-password'});expect(new URL(page.url()).pathname).toBe('/u/yzmy');
 });
 test('each account has its own address; another account\'s address says whose it is',async({page},info)=>{
  let authenticated=true;
@@ -50,7 +50,7 @@ test('each account has its own address; another account\'s address says whose it
  await expect(main).toBeVisible();expect(new URL(page.url()).pathname).toBe('/u/owner');
  // Switching: sign out there, and the login form is ready for the account the address names.
  await page.goto('/u/yzmy');await page.getByRole('button',{name:'退出并登录 yzmy'}).click();
- await expect(page.getByLabel('账号',{exact:true})).toHaveValue('yzmy');expect(new URL(page.url()).pathname).toBe('/u/yzmy');
+ await expect(page.getByLabel('邮箱',{exact:true})).toHaveValue('yzmy');expect(new URL(page.url()).pathname).toBe('/u/yzmy');
 });
 // On a phone the sidebar is a drawer, drawn only while open.
 const sidebarFoot=async(page:Page,mobile:boolean)=>{if(mobile)await page.getByRole('button',{name:'打开导航'}).click();return page.locator('.sidebar-foot');};

@@ -1,7 +1,8 @@
 import { randomInt } from "node:crypto";
 import type { Db } from "../db.js";
 import { hashPassword, randomId, generateSecret } from "./passwords.js";
-import { BOOTSTRAP_USERNAME, type User } from "./owner.js";
+import type { User } from "./owner.js";
+import { emailTaken, normalizeEmail, usernameFromEmail } from "./email.js";
 
 /**
  * One-time invite codes: required once the deployment has 20 accounts.
@@ -22,8 +23,6 @@ export interface Invite {
   revokedAt: number | null;
 }
 
-/** Self-registered names are lowercase so `/u/<name>` and login never differ only by case. */
-export const REGISTER_USERNAME = /^[a-z0-9_-]{2,40}$/;
 export const MIN_PASSWORD = 12;
 export const OPEN_REGISTRATION_LIMIT = 20;
 /** The id whose sandbox is already provisioned for the next registration (see UserRuntimes.prepareSpare). */
@@ -72,17 +71,17 @@ export function revokeInvite(db: Db, code: string): boolean {
 /**
  * Create a member. Check the open-registration quota, claim any supplied code,
  * and insert the account in one write transaction. Concurrent registrations
- * cannot exceed the quota or spend the same code twice.
+ * cannot exceed the quota or spend the same code twice. A Google registration
+ * takes the verified Google email as the account's email.
  */
-export async function registerWithInvite(db: Db, input: { username: string; password: string; code: string }, google?: { subject: string; email: string; clientHash: string }): Promise<User> {
-  const username = input.username.trim();
+export async function registerWithInvite(db: Db, input: { email: string; password: string; code: string }, google?: { subject: string; email: string; clientHash: string }): Promise<User & { email: string }> {
+  const email = normalizeEmail(input.email);
   const code = normalizeCode(input.code);
-  if (!REGISTER_USERNAME.test(username) || username === BOOTSTRAP_USERNAME) {
-    throw new RegisterError(400, "invalid_username", "账号只能用 2–40 位小写字母、数字、- 或 _");
-  }
+  if (!email) throw new RegisterError(400, "invalid_email", "请输入有效的邮箱");
   if (input.password.length < MIN_PASSWORD) throw new RegisterError(400, "weak_password", `密码至少需要 ${MIN_PASSWORD} 个字符`);
   const rec = await hashPassword(input.password);
   let id = randomId("user");
+  let username = "";
   db.exec("BEGIN IMMEDIATE");
   try {
     if (!code && registrationRequiresInvite(db)) throw new RegisterError(400, "invite_required", "免邀请码注册名额已满，请输入邀请码");
@@ -91,7 +90,11 @@ export async function registerWithInvite(db: Db, input: { username: string; pass
       if (!invite || invite.revoked_at !== null) throw new RegisterError(400, "invalid_invite", "邀请码无效");
       if (invite.used_at !== null) throw new RegisterError(400, "invite_used", "这个邀请码已经用过了");
     }
-    if (db.prepare("SELECT 1 FROM owners WHERE lower(username)=?").get(username)) throw new RegisterError(409, "username_taken", "这个账号已经有人用了，换一个吧");
+    if (emailTaken(db, email)) {
+      throw google ? new RegisterError(409, "email_taken", "这个邮箱已经注册过，请用邮箱和密码登录")
+        : new RegisterError(409, "email_taken", "这个邮箱已经注册过，请直接登录");
+    }
+    username = usernameFromEmail(db, email);
     const now = Date.now();
     // The new account takes the spare sandbox's id, so it starts on a container that already exists.
     const spare = (db.prepare("SELECT value FROM meta WHERE key=?").get(SPARE_ACCOUNT_KEY) as { value: string } | undefined)?.value;
@@ -104,8 +107,8 @@ export async function registerWithInvite(db: Db, input: { username: string; pass
         throw new RegisterError(409, "google_registered", "这个 Google 账号已注册，请重新用 Google 登录");
       }
     }
-    db.prepare("INSERT INTO owners (id,username,password_hash,password_salt,password_params,created_at,role) VALUES (?,?,?,?,?,?,'member')")
-      .run(id, username, rec.hash, rec.salt, rec.params, now);
+    db.prepare("INSERT INTO owners (id,username,email,password_hash,password_salt,password_params,created_at,role) VALUES (?,?,?,?,?,?,?,'member')")
+      .run(id, username, email, rec.hash, rec.salt, rec.params, now);
     if (code) db.prepare("UPDATE invites SET used_at=?,used_by=? WHERE code=?").run(now, id, code);
     if (google) {
       db.prepare("INSERT INTO google_identities (subject,owner_id,email,created_at) VALUES (?,?,?,?)").run(google.subject, id, google.email, now);
@@ -116,10 +119,10 @@ export async function registerWithInvite(db: Db, input: { username: string; pass
     db.exec("ROLLBACK");
     throw err;
   }
-  return { id, username, role: "member" };
+  return { id, username, email, role: "member" };
 }
 
 /** OAuth-only accounts have an unguessable password, never disclosed or used by a caller. */
-export function registerGoogleWithInvite(db: Db, identity: {subject: string; email: string; clientHash: string}, input: {username: string; code: string}): Promise<User> {
-  return registerWithInvite(db, {...input, password: generateSecret(48)}, identity);
+export function registerGoogleWithInvite(db: Db, identity: {subject: string; email: string; clientHash: string}, input: {code: string}): Promise<User & { email: string }> {
+  return registerWithInvite(db, {email: identity.email, password: generateSecret(48), code: input.code}, identity);
 }

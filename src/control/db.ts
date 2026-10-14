@@ -6,6 +6,9 @@ export type Db = DatabaseSync;
 
 export const SCHEMA_VERSION = 1;
 
+/** The domain of the hidden placeholder email given to accounts that have no email of their own. */
+export const PLACEHOLDER_EMAIL_DOMAIN = "clawpage.ai";
+
 const SCHEMA = `
 PRAGMA journal_mode = WAL;
 PRAGMA foreign_keys = ON;
@@ -378,6 +381,17 @@ function migrate(db: Db): void {
     db.exec("ALTER TABLE owners ADD COLUMN role TEXT NOT NULL DEFAULT 'member' CHECK (role IN ('owner','member'))");
     db.exec("UPDATE owners SET role='owner' WHERE id='owner_1'");
   }
+  // Accounts are identified by email. Accounts from before email (and those an administrator
+  // creates by name) get `<username>@clawpage.ai`, flagged as a placeholder the person never sees;
+  // the trigger fills it in for every insert that names no email, so no insert site can forget it.
+  // The placeholder keeps the username's case: usernames are unique, so placeholders never collide.
+  if (!users.some(c => c.name === "email")) db.exec("ALTER TABLE owners ADD COLUMN email TEXT");
+  if (!users.some(c => c.name === "email_placeholder")) db.exec("ALTER TABLE owners ADD COLUMN email_placeholder INTEGER NOT NULL DEFAULT 0");
+  db.exec(`UPDATE owners SET email=username||'@${PLACEHOLDER_EMAIL_DOMAIN}',email_placeholder=1 WHERE email IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_owners_email ON owners(email);
+CREATE TRIGGER IF NOT EXISTS owners_placeholder_email AFTER INSERT ON owners WHEN NEW.email IS NULL BEGIN
+  UPDATE owners SET email=NEW.username||'@${PLACEHOLDER_EMAIL_DOMAIN}',email_placeholder=1 WHERE id=NEW.id;
+END;`);
   const taskColumns = db.prepare("PRAGMA table_info(tasks)").all() as Array<{ name: string }>;
   if (!taskColumns.some(c => c.name === "execution_conversation_id")) db.exec("ALTER TABLE tasks ADD COLUMN execution_conversation_id TEXT REFERENCES conversations(id)");
   if (!taskColumns.some(c => c.name === "merged_into")) db.exec("ALTER TABLE tasks ADD COLUMN merged_into TEXT REFERENCES tasks(id)");

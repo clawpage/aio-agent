@@ -1,4 +1,5 @@
 import http from "node:http";
+import { Analytics } from "./analytics.js";
 import path from "node:path";
 import {MemberModelGateway} from "./memberModelGateway.js";
 import {ShareStore} from "./share.js";
@@ -152,6 +153,8 @@ export async function bootstrap(opts: BootstrapOptions = {}): Promise<Bootstrapp
   const ctx: AppContext = {
     jev,
     tasks,
+    // Member runtimes record into the central database instead (UserRuntimes hands them the root's).
+    ...(opts.skipOwner ? {} : { analytics: new Analytics(db, log) }),
     vault: new Vault(db, cfg.dataDir, cfg.runtimeUserId ?? "owner_1"),
     cfg,
     db,

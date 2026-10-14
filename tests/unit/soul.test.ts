@@ -18,4 +18,15 @@ describe('SOUL.md persistence',()=>{
   expect(()=>writeSoul(cfg,'\0',saved.revision)).toThrow('有效文本');
   expect(writeSoul(cfg,'',saved.revision).content).toBe('');expect(readSoul(cfg).content).toBe('');
  });
+ it('moves an unedited earlier default to the current one and leaves an edited one alone',()=>{
+  const cfg={dataDir:fs.mkdtempSync(path.join(os.tmpdir(),'aio-soul-'))};dirs.push(cfg.dataDir);
+  const file=path.join(cfg.dataDir,'SOUL.md');
+  const old=DEFAULT_SOUL.replace('你是一站（英文名 Clawpage Agent），','你是 AIO Agent，');
+  expect(old).not.toBe(DEFAULT_SOUL);
+  fs.writeFileSync(file,old,{mode:0o600});
+  expect(readSoul(cfg).content).toBe(DEFAULT_SOUL);expect(fs.readFileSync(file,'utf8')).toBe(DEFAULT_SOUL);
+  expect(fs.statSync(file).mode&0o777).toBe(0o600);
+  fs.writeFileSync(file,old+'\n我的补充\n');
+  expect(readSoul(cfg).content).toBe(old+'\n我的补充\n');
+ });
 });

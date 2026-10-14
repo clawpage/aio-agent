@@ -4126,6 +4126,8 @@ button.map-card-switch { flex: 0 0 auto; padding: 4px 10px; }
 .usage-metrics { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 12px; }
 .usage-metrics article, .usage-chart, .usage-table-wrap { padding: 18px 20px; border: 1px solid var(--border); background: var(--bg-soft); border-radius: var(--radius-card); box-shadow: var(--shadow-card); }
 .usage-metrics article { display: flex; flex-direction: column; gap: 8px; }
+.analytics-metrics { grid-template-columns: repeat(4,minmax(0,1fr)); }
+@media (max-width: 1100px) { .analytics-metrics { grid-template-columns: repeat(2,minmax(0,1fr)); } }
 .usage-metrics article > span:first-child { font-size: var(--fs-sm); }
 .usage-metrics strong { font-size: clamp(20px,2.2vw,28px); font-weight: 600; letter-spacing: -0.01em; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .usage-chart svg { width: 100%; height: auto; display: block; margin-top: 12px; }
@@ -4144,7 +4146,7 @@ button.map-card-switch { flex: 0 0 auto; padding: 4px 10px; }
 .usage-coverage { margin: 0; padding-left: 18px; line-height: 1.8; }
 @media (max-width: 720px) {
   .usage-body { padding: 14px 14px 24px; gap: 14px; }
-  .usage-metrics { grid-template-columns: 1fr; }
+  .usage-metrics, .analytics-metrics { grid-template-columns: 1fr; }
   .usage-metrics article { padding: 14px; }
   .usage-chart, .usage-table-wrap { padding: 12px; }
   .usage-chart text { font-size: 30px; }

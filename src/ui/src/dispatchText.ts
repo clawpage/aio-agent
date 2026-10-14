@@ -7,8 +7,8 @@
  * Display only: it reads the shape the control plane writes (the dispatch
  * prompt in src/control/tasks/service.ts), and anything else is shown in full.
  */
-// Both the English prompts and the Chinese ones written before them.
-const DISPATCH_HEADS = ["You are a sub-agent delegated by AIO Agent's main session", "你是 AIO Agent 主会话委派的子 agent"]; // i18n-exempt: matches the control plane's dispatch prompt
+// The English prompts (under the Clawpage Agent name, and the AIO Agent one before it) and the Chinese ones written before them.
+const DISPATCH_HEADS = ["You are a sub-agent delegated by Clawpage Agent's main session", "You are a sub-agent delegated by AIO Agent's main session", "你是 AIO Agent 主会话委派的子 agent"]; // i18n-exempt: matches the control plane's dispatch prompt
 const TASK_MARKERS = ["\n\nThe user's task this time:\n\n", "\n\n本次用户任务：\n\n"]; // i18n-exempt: matches the control plane's dispatch prompt
 // The account's language line closes a prompt, after the person's words.
 const LANGUAGE_LINE = "\n\nLanguage: write everything the user will see"; // i18n-exempt: matches the control plane's language line (src/control/locale.ts)

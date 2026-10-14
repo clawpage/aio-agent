@@ -1000,7 +1000,7 @@ describe("owner dispatch log", () => {
         expect(decided.result).toMatchObject({ choice: trip.id, confident: true, latencyMs: 4, scores:{[trip.id]:0.8},suggestion:{kind:"steer",taskId:trip.id} });
         expect(timing.timing).toMatchObject({ model: "fake-luna", effort: "high", connectionMs: 2 });
         expect(answer).toMatchObject({ round: 1 });
-        expect(answer.prompt).toContain("You are AIO Agent's dispatcher");
+        expect(answer.prompt).toContain("You are Clawpage Agent's dispatcher");
         expect(answer.answer).toContain("酒店要靠近新宿");
         expect(plan.plan).toMatchObject({ decision:{kind:"steer",taskId:trip.id},related: [trip.id] });
         // Titles are read back as they are now: an accepted steer leaves the trip's own title.

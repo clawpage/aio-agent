@@ -17,6 +17,7 @@ import { Login } from "./Login";
 import { Settings } from "./Settings";
 import { MemberSettings } from "./LanguageSettings";
 import { UsageDashboard } from './UsageDashboard';
+import { AnalyticsDashboard } from './AnalyticsDashboard';
 import { accountLabel, GadgetHistory } from './GadgetHistory';
 import { useDebugMode } from "../debugMode";
 import { Workspace } from "./Workspace";
@@ -29,7 +30,8 @@ import {taskStatusLabels,type TaskFeed} from '../taskStatus';
 import { isSandboxLink } from "../sandboxLink";
 import { openDeviceBrowser } from "../deviceBrowser";
 import { attention } from "../attention";
-import { t } from "../i18n";
+import { locale, t } from "../i18n";
+import { track, trackOpen } from "../analytics";
 /** One owner-facing inbox; executor conversations are implementation details. */
 /** The site a link goes to, named on the opening card. */
 function hostOf(url: string): string {
@@ -94,6 +96,15 @@ export function MainApp() {
     const [detail, setDetail] = useState<Conversation | null>(null);
     const detailRequest = useRef(0);
     const [workspace, setWorkspace] = useState(false);
+    // Opening the console (again after half an hour away) and each page shown, once signed in.
+    useEffect(() => {
+        if (!auth) return;
+        trackOpen(locale);
+        const back = () => { if (document.visibilityState === "visible") trackOpen(locale); };
+        document.addEventListener("visibilitychange", back);
+        return () => document.removeEventListener("visibilitychange", back);
+    }, [auth]);
+    useEffect(() => { if (auth) track("page_view", { view: workspace ? "workspace" : view }); }, [auth, view, workspace]);
     const [workspacePath, setWorkspacePath] = useState<string | undefined>();
     const [browserNonce, setBrowserNonce] = useState(0);
     const [notice, setNotice] = useState<string | null>(null);
@@ -310,6 +321,7 @@ export function MainApp() {
       <button className={`ghost block ${view === "vault" && !workspace ? "active" : ""}`} aria-current={view === "vault" && !workspace ? "page" : undefined} onClick={() => navigate({ view: "vault" })}><NavIcon name="vault"/>{t.nav.vault}</button>
       {role === 'owner' && gadgetAccount && <button className={`ghost block ${view === 'gadget' && !workspace ? 'active' : ''}`} aria-current={view === "gadget" && !workspace ? "page" : undefined} onClick={() => navigate({ view: "gadget" })}><NavIcon name="gadget"/>{accountLabel(gadgetAccount)}</button>}
       {role === 'owner' && <button className={`ghost block ${view === 'usage' && !workspace ? 'active' : ''}`} aria-current={view === "usage" && !workspace ? "page" : undefined} onClick={() => navigate({ view: "usage" })}><NavIcon name="usage"/>{t.nav.usage}</button>}
+      {role === 'owner' && <button className={`ghost block ${view === 'analytics' && !workspace ? 'active' : ''}`} aria-current={view === "analytics" && !workspace ? "page" : undefined} onClick={() => navigate({ view: "analytics" })}><NavIcon name="analytics"/>{t.nav.analytics}</button>}
       <button className={`ghost block ${workspace ? "active" : ""}`} aria-current={workspace ? "page" : undefined} onClick={() => { closeMenu(); openWorkspace(); }}><NavIcon name="workspace"/>{t.nav.workspace}</button>
       <div className="sidebar-foot"><span className="sidebar-status muted tiny"><span className={`dot ${!status || startFailed ? "warn" : "ok"}`}/>{!status || startFailed ? t.nav.agentConnecting : t.nav.agentOnline}</span><PushToggle/><button className="ghost block" onClick={() => setTheme(t => t === "dark" ? "light" : "dark")}><NavIcon name={theme === "dark" ? "sun" : "moon"}/>{theme === "dark" ? t.nav.lightMode : t.nav.darkMode}</button>{<button className={`ghost block ${view === "settings" && !workspace ? "active" : ""}`} aria-current={view === "settings" && !workspace ? "page" : undefined} onClick={() => navigate({ view: "settings" })}><NavIcon name="settings"/>{t.nav.settings}</button>}<button className="ghost block" onClick={() => void logout()}><NavIcon name="logout"/>{t.nav.logout}</button></div>
     </PopupSurface>
@@ -324,6 +336,7 @@ export function MainApp() {
       <div className="view-slot" hidden={view !== 'vault'}><VaultList active={view === 'vault'} onExpired={expired}/></div>
       {view === "settings" && (role === "owner" ? <Settings onBack={() => go({ view: "main" })}/> : <MemberSettings onBack={() => go({ view: "main" })}/>)}
       {role === 'owner' && view === 'usage' && <UsageDashboard onExpired={expired}/>}
+      {role === 'owner' && view === 'analytics' && <AnalyticsDashboard onExpired={expired}/>}
       {role === 'owner' && view === 'gadget' && <GadgetHistory active={!workspace} onExpired={expired}/>}
       {view === "detail" && detail && <div className="task-detail"><div className="task-detail-bar"><button className="ghost" onClick={() => { if ((history.state as { aio?: boolean; from?: DetailFrom } | null)?.from) history.back(); else go({ view: detailReturn }); }}>{detailReturn === 'tasks' ? t.nav.backTo.tasks : detailReturn === 'schedules' ? t.nav.backTo.schedules : t.nav.backTo.main}</button><span className="muted tiny">{taskStatusLabels[(taskFeed.tasks.find(t=>t.id===detailTask?.id)??detailTask)?.status??'']??t.app.detail.fallbackStatus}</span></div><Chat key={detail.id} readOnly conversation={detail} status={status} onConversationChanged={() => { }} onStatusChanged={() => void refreshStatus()} onOpenWorkspace={openWorkspace} onOpenBrowserLink={u => void openLink(u)} onOpenBrowserFile={p => void openFileInBrowser(p)}/></div>}
     </main>

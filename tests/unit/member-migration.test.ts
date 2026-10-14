@@ -16,7 +16,10 @@ it('migrates an existing owner without changing password or live sessions and ne
  try {
   const sessions=new SessionStore(db,3600000,60000);const live=sessions.create('owner_1','primary');
   expect(getUser(db,'owner_1')?.role).toBe('owner');
+  // An account from before email gets a hidden placeholder; one created by name later too.
+  expect(db.prepare('SELECT email,email_placeholder FROM owners WHERE id=?').get('owner_1')).toEqual({email:'owner@clawpage.ai',email_placeholder:1});
   const user=await createMember(db,'yzmy','member-password-123');
+  expect(db.prepare('SELECT email,email_placeholder FROM owners WHERE id=?').get(user.id)).toEqual({email:'yzmy@clawpage.ai',email_placeholder:1});
   await ensureOwner(db,{password:'replacement-not-used',secretPath:path.join(dir,'owner.txt'),log:new Logger('error',undefined,false)});
   expect(await authenticateUser(db,'owner','existing-owner-password')).toMatchObject({role:'owner'});
   expect(await authenticateUser(db,'yzmy','member-password-123')).toMatchObject({id:user.id,role:'member'});

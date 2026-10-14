@@ -3,6 +3,7 @@ import { api, ApiError } from "../api";
 import { BrandMark, PageLoading } from "./Brand";
 import { t } from "../i18n";
 import { hasNativeBrowser, listenGoogleReturn, openDeviceBrowser, openNativeBrowser } from "../deviceBrowser";
+import { track } from "../analytics";
 
 function AuthIcon({name, size}: {name: "check" | "arrow" | "mail"; size: number}) {
   const paths = {check: "M5 12l4 4L19 6", arrow: "M5 12h14m-6-6 6 6-6 6", mail: "M4 5h16v14H4Z M4 6l8 7 8-7"};
@@ -14,7 +15,8 @@ type Mode = "login" | "register";
 export function Login({ onSuccess, notice, username: named }: { onSuccess: () => void | Promise<void>; notice?: string | null; username?: string }) {
   // `/register` (linked from the clawpage.ai home page) opens straight on the register form.
   const [mode, setMode] = useState<Mode>(() => (!named && location.pathname === "/register" ? "register" : "login"));
-  const [username, setUsername] = useState(named ?? "");
+  // The account's email; an account from before email may also sign in with its username.
+  const [account, setAccount] = useState(named ?? "");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [inviteCode, setInviteCode] = useState("");
@@ -127,6 +129,7 @@ export function Login({ onSuccess, notice, username: named }: { onSuccess: () =>
   };
 
   const register = mode === "register";
+  useEffect(() => { if (!checking && !googleEmail) track("auth_view", { mode }); }, [mode, checking, googleEmail]);
   const switchMode = (next: Mode) => {
     setMode(next);
     setError(null);
@@ -143,9 +146,9 @@ export function Login({ onSuccess, notice, username: named }: { onSuccess: () =>
     setBusy(true);
     setError(null);
     try {
-      if (googleEmail) await api.googleRegister({username: username.trim(), inviteCode: inviteCode.trim()});
-      else if (register) await api.register({ username: username.trim(), password, inviteCode: inviteCode.trim() });
-      else await api.login(password, username);
+      if (googleEmail) await api.googleRegister({inviteCode: inviteCode.trim()});
+      else if (register) await api.register({ email: account.trim(), password, inviteCode: inviteCode.trim() });
+      else await api.login(password, account.trim());
       setPassword("");
       setConfirm("");
       await onSuccess();
@@ -191,20 +194,23 @@ export function Login({ onSuccess, notice, username: named }: { onSuccess: () =>
           <div className="login-divider"><span>{t.auth.passwordAlternative}</span></div>
         </>}
         {googleWaiting && <p className="banner" role="status">{t.auth.google.waiting}</p>}
-        <label className="field">
-          <span>{t.auth.fields.username}</span>
-          {/* Account names are matched exactly: a phone must not capitalize or "correct" them. */}
+        {/* A Google registration takes the verified Google email shown above. */}
+        {!googleEmail && <label className="field">
+          <span>{t.auth.fields.email}</span>
+          {/* Old account names are matched exactly: a phone must not capitalize or "correct" them. */}
           <input
-            value={username}
-            onChange={e => setUsername(register || googleEmail ? e.target.value.toLowerCase() : e.target.value)}
-            autoComplete="username"
+            type={register ? "email" : "text"}
+            inputMode="email"
+            value={account}
+            onChange={e => setAccount(e.target.value)}
+            autoComplete={register ? "email" : "username"}
             autoCapitalize="none"
             autoCorrect="off"
             spellCheck={false}
             autoFocus={!named}
-            placeholder={register || googleEmail ? t.auth.fields.usernameHint : undefined}
+            placeholder={register ? t.auth.fields.emailHint : t.auth.fields.signInHint}
           />
-        </label>
+        </label>}
         {!googleEmail && <label className="field">
           <span>{t.auth.fields.password}</span>
           <input
@@ -244,7 +250,7 @@ export function Login({ onSuccess, notice, username: named }: { onSuccess: () =>
         {sessionError && <div className="banner warn" role="status">{t.auth.sessionUnverified}</div>}
         {notice && <div className="banner warn">{notice}</div>}
         {error && <div className="banner error">{error}</div>}
-        <button type="submit" className="primary block" disabled={busy || !username.trim() || (googleEmail ? requiresInvite && !inviteCode.trim() : !password || (register && (!confirm || (requiresInvite && !inviteCode.trim()))))}>
+        <button type="submit" className="primary block" disabled={busy || (googleEmail ? requiresInvite && !inviteCode.trim() : !account.trim() || !password || (register && (!confirm || (requiresInvite && !inviteCode.trim()))))}>
           <span>{googleEmail ? (busy ? t.auth.google.activating : requiresInvite ? t.auth.google.activate : t.auth.google.activateOpen) : register ? (busy ? t.auth.submit.registering : t.auth.submit.register) : (busy ? t.auth.submit.loggingIn : t.auth.submit.login)}</span><AuthIcon name="arrow" size={18}/>
         </button>
         {(googleEmail || googleWaiting) && <button type="button" className="link" disabled={busy} onClick={() => void cancelGoogle()}>{t.auth.google.cancel}</button>}

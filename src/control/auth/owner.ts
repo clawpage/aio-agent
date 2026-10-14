@@ -111,8 +111,10 @@ export async function createMember(db: Db, username: string, password: string): 
     .run(id,username,rec.hash,rec.salt,rec.params,Date.now());
   return { id, username, role: "member" };
 }
-export async function authenticateUser(db: Db, username: string, password: string): Promise<User | null> {
-  const row = db.prepare("SELECT * FROM owners WHERE username=?").get(username) as
+/** Sign in with the account's email (any case), or with its username as accounts from before email do. */
+export async function authenticateUser(db: Db, identifier: string, password: string): Promise<User | null> {
+  const row = db.prepare(identifier.includes("@") ? "SELECT * FROM owners WHERE lower(email)=?" : "SELECT * FROM owners WHERE username=?")
+    .get(identifier.includes("@") ? identifier.toLowerCase() : identifier) as
     (User & { password_hash: string; password_salt: string; password_params: string }) | undefined;
   if (!row) { await dummyVerify(password); return null; }
   const ok = await verifyPassword(password, { hash: row.password_hash, salt: row.password_salt, params: row.password_params });

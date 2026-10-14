@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, beforeEach, expect, it, vi } from "vitest";
 import { OAuth2Client, LoginTicket } from "google-auth-library";
 import { startHarness, type TestHarness } from "../helpers/harness.js";
-import { createInvite } from "../../src/control/auth/invites.js";
+import { createInvite, registerWithInvite } from "../../src/control/auth/invites.js";
 import { GOOGLE_TTL } from "../../src/control/auth/google.js";
 
 let h: TestHarness;
@@ -22,7 +22,7 @@ beforeAll(async () => {
   });
   vi.spyOn(OAuth2Client.prototype, "verifyIdToken").mockImplementation(async options => {
     expect(options.audience).toBe("fixture.apps.googleusercontent.com");
-    return new LoginTicket("", {sub: options.idToken, email: "google@example.com", email_verified: options.idToken !== "unverified",
+    return new LoginTicket("", {sub: options.idToken, email: `${options.idToken}@example.com`, email_verified: options.idToken !== "unverified",
       nonce: options.idToken === "bad-nonce" ? "other" : nonces.get(options.idToken)} as any);
   });
 });
@@ -45,8 +45,9 @@ async function begin(native = false) {
 }
 const callback = (flow: Awaited<ReturnType<typeof begin>>, sub = `sub-${++subject}`, native = false) =>
   h.request(`/api/auth/google/callback?state=${flow.state}&code=${sub}`, {headers: {cookie: native ? flow.browser : `${flow.client}; ${flow.browser}`}});
-const activate = (client: string, username: string, inviteCode: string) => h.request("/api/auth/google/register", {
-  method: "POST", headers: {...json, cookie: client}, body: JSON.stringify({username, inviteCode}),
+// A Google registration takes the Google email; the mock gives each subject `<subject>@example.com`.
+const activate = (client: string, inviteCode: string) => h.request("/api/auth/google/register", {
+  method: "POST", headers: {...json, cookie: client}, body: JSON.stringify({inviteCode}),
 });
 
 it("requires registration after verified Google sign-in, before any session or sandbox access", async () => {
@@ -57,30 +58,34 @@ it("requires registration after verified Google sign-in, before any session or s
   expect(cookies(result)).not.toContain("pa_session=");
   expect(h.ctx.db.prepare("SELECT count(*) AS n FROM owners").get()).toEqual(count);
   expect((await h.request("/api/status", {headers: {cookie: flow.client}})).status).toBe(401);
-  expect(await (await h.request("/api/auth/google/pending", {headers: {cookie: flow.client}})).json()).toEqual({enabled: true, pending: {email: "google@example.com"}});
-  expect((await activate(flow.client, "google-alice", "BAD-INVITE")).status).toBe(400);
+  expect(await (await h.request("/api/auth/google/pending", {headers: {cookie: flow.client}})).json()).toEqual({enabled: true, pending: {email: "stable-subject@example.com"}});
+  expect((await activate(flow.client, "BAD-INVITE")).status).toBe(400);
   const code = createInvite(h.ctx.db).code;
-  const registered = await activate(flow.client, "google-alice", code);
+  const registered = await activate(flow.client, code);
   expect(registered.status).toBe(200);
-  expect(await registered.json()).toMatchObject({role: "member", username: "google-alice"});
+  expect(await registered.json()).toMatchObject({role: "member", username: "stable-subject", email: "stable-subject@example.com"});
   const cookie = cookies(registered);
-  expect(await (await h.request("/api/auth/session", {headers: {cookie}})).json()).toMatchObject({authenticated: true, role: "member"});
+  expect(await (await h.request("/api/auth/session", {headers: {cookie}})).json()).toMatchObject({authenticated: true, role: "member", email: "stable-subject@example.com"});
   expect((await h.request("/api/settings/invites", {headers: {cookie}})).status).toBe(403);
-  expect((await activate(flow.client, "other-name", code)).status).toBe(401);
+  expect((await activate(flow.client, code)).status).toBe(401);
 });
 
 it("returns an existing Google subject directly to its member account without another invite", async () => {
   const flow = await begin();
   const result = await callback(flow, "stable-subject");
   expect(result.headers.get("location")).toBe("/login");
-  expect(await (await h.request("/api/auth/session", {headers: {cookie: cookies(result)}})).json()).toMatchObject({username: "google-alice", role: "member"});
+  expect(await (await h.request("/api/auth/session", {headers: {cookie: cookies(result)}})).json()).toMatchObject({username: "stable-subject", role: "member"});
 });
 
-it("never treats a matching email or username as an existing account link", async () => {
+it("never treats a matching email as an existing account link", async () => {
+  const existing = await registerWithInvite(h.ctx.db, {email: "Linked@Example.com", password: "linked-password-123", code: ""});
   const flow = await begin();
-  await callback(flow);
+  await callback(flow, "linked");
   const code = createInvite(h.ctx.db).code;
-  expect((await activate(flow.client, "owner", code)).status).toBe(400);
+  const refused = await activate(flow.client, code);
+  expect(refused.status).toBe(409);
+  expect(await refused.json()).toMatchObject({error: "email_taken"});
+  expect(h.ctx.db.prepare("SELECT 1 FROM google_identities WHERE owner_id=?").get(existing.id)).toBeUndefined();
   expect(h.ctx.db.prepare("SELECT 1 FROM google_identities WHERE owner_id='owner_1'").get()).toBeUndefined();
   expect(h.ctx.db.prepare("SELECT used_at FROM invites WHERE code=?").get(code)).toEqual({used_at: null});
 });
@@ -115,16 +120,16 @@ it("returns native authentication only through a one-use handoff bound to the in
   const redeem = (cookie: string) => h.request("/api/auth/google/redeem", {method: "POST", headers: {...json, cookie}, body: JSON.stringify({ticket})});
   expect((await redeem(flow.browser)).status).toBe(401);
   expect(await (await h.request("/api/auth/google/pending", {headers: {cookie: flow.client}})).json()).toMatchObject({pending: null});
-  expect(await (await redeem(flow.client)).json()).toMatchObject({authenticated: false, pending: {email: "google@example.com"}});
+  expect(await (await redeem(flow.client)).json()).toMatchObject({authenticated: false, pending: {email: `native-${subject}@example.com`}});
   expect((await redeem(flow.client)).status).toBe(401);
-  expect((await activate(flow.client, "native-member", createInvite(h.ctx.db).code)).status).toBe(200);
+  expect((await activate(flow.client, createInvite(h.ctx.db).code)).status).toBe(200);
 });
 
 it("atomically spends an invite only once across Google accounts", async () => {
   const a = await begin(); await callback(a);
   const b = await begin(); await callback(b);
   const code = createInvite(h.ctx.db).code;
-  const results = await Promise.all([activate(a.client, "google-race-a", code), activate(b.client, "google-race-b", code)]);
+  const results = await Promise.all([activate(a.client, code), activate(b.client, code)]);
   expect(results.map(r => r.status).sort()).toEqual([200, 400]);
 });
 
@@ -132,7 +137,7 @@ it("cannot create two member accounts for the same Google subject racing with di
   const a = await begin(); await callback(a, "same-racing-subject");
   const b = await begin(); await callback(b, "same-racing-subject");
   const codes = [createInvite(h.ctx.db).code, createInvite(h.ctx.db).code];
-  const results = await Promise.all([activate(a.client, "same-google-a", codes[0]), activate(b.client, "same-google-b", codes[1])]);
+  const results = await Promise.all([activate(a.client, codes[0]), activate(b.client, codes[1])]);
   expect(results.map(r => r.status).sort()).toEqual([200, 409]);
   expect(h.ctx.db.prepare("SELECT count(*) AS n FROM invites WHERE code IN (?,?) AND used_at IS NOT NULL").get(...codes)).toEqual({n: 1});
 });
@@ -154,21 +159,21 @@ it("cancelling while Google exchanges a code prevents late completion from creat
 it("refuses expired, cancelled and cross-site registration flows, and rate limits invite guesses", async () => {
   const flow = await begin(); await callback(flow);
   expect((await h.request("/api/auth/google/register", {method: "POST", headers: {...json, cookie: flow.client, origin: "https://evil.example"}, body: "{}"})).status).toBe(403);
-  for (let i = 0; i < h.ctx.cfg.loginMaxFailures; i++) await activate(flow.client, "google-guesser", "BAD-INVITE");
-  expect((await activate(flow.client, "google-guesser", createInvite(h.ctx.db).code)).status).toBe(429);
+  for (let i = 0; i < h.ctx.cfg.loginMaxFailures; i++) await activate(flow.client, "BAD-INVITE");
+  expect((await activate(flow.client, createInvite(h.ctx.db).code)).status).toBe(429);
   h.ctx.db.prepare("DELETE FROM login_failures").run();
   h.ctx.db.prepare("UPDATE google_login_flows SET expires_at=expires_at-?").run(GOOGLE_TTL + 1);
-  expect((await activate(flow.client, "expired-google", createInvite(h.ctx.db).code)).status).toBe(401);
+  expect((await activate(flow.client, createInvite(h.ctx.db).code)).status).toBe(401);
   const fresh = await begin(); await callback(fresh);
   await h.request("/api/auth/google/cancel", {method: "POST", headers: {...json, cookie: fresh.client}});
-  expect((await activate(fresh.client, "cancelled-google", createInvite(h.ctx.db).code)).status).toBe(401);
+  expect((await activate(fresh.client, createInvite(h.ctx.db).code)).status).toBe(401);
 });
 
 it("registers a verified Google identity without an invite while places remain", async () => {
   const flow = await begin(); await callback(flow);
-  const result = await activate(flow.client, "open-google", "");
+  const result = await activate(flow.client, "");
   expect(result.status).toBe(200);
-  expect(await result.json()).toMatchObject({ username: "open-google", role: "member" });
+  expect(await result.json()).toMatchObject({ username: `sub-${subject}`, email: `sub-${subject}@example.com`, role: "member" });
   expect((await h.request("/api/settings", { headers: { cookie: cookies(result) } })).status).toBe(403);
 });
 
@@ -176,19 +181,19 @@ it("atomically gives one remaining place to only one of a password and Google re
   const count = () => (h.ctx.db.prepare("SELECT COUNT(*) AS n FROM owners").get() as {n: number}).n;
   while (count() < 19) {
     const n = count();
-    h.ctx.db.prepare("INSERT INTO owners SELECT ?,?, 'member', password_hash,password_salt,password_params,created_at FROM owners WHERE role='owner'").run(`seed-${n}`, `seed-${n}`);
+    h.ctx.db.prepare("INSERT INTO owners (id,username,role,password_hash,password_salt,password_params,created_at) SELECT ?,?, 'member', password_hash,password_salt,password_params,created_at FROM owners WHERE role='owner'").run(`seed-${n}`, `seed-${n}`);
   }
   const flow = await begin(); await callback(flow);
   const results = await Promise.all([
-    activate(flow.client, "last-google", ""),
-    h.request("/api/auth/register", { method: "POST", headers: json, body: JSON.stringify({ username: "last-password", password: "open-password-123" }) }),
+    activate(flow.client, ""),
+    h.request("/api/auth/register", { method: "POST", headers: json, body: JSON.stringify({ email: "last-password@example.com", password: "open-password-123" }) }),
   ]);
   expect(results.map(r => r.status).sort()).toEqual([200, 400]);
   const refused = results.find(r => r.status === 400)!;
   expect(await refused.json()).toMatchObject({ error: "invite_required" });
   expect(count()).toBe(20);
   const next = await begin(); await callback(next);
-  expect((await activate(next.client, "after-limit", "")).status).toBe(400);
-  expect((await activate(next.client, "after-limit", createInvite(h.ctx.db).code)).status).toBe(200);
+  expect((await activate(next.client, "")).status).toBe(400);
+  expect((await activate(next.client, createInvite(h.ctx.db).code)).status).toBe(200);
   expect(count()).toBe(21);
 });

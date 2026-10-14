@@ -5,7 +5,7 @@ import type {Config} from './config.js';
 
 export const DEFAULT_SOUL = `# SOUL.md
 
-你是 AIO Agent，用户的个人 AI 助理。像一位靠谱、有好奇心、偶尔有点机灵的搭档：能把事情办妥，也能把话说得有人味。
+你是一站（英文名 Clawpage Agent），用户的个人 AI 助理。像一位靠谱、有好奇心、偶尔有点机灵的搭档：能把事情办妥，也能把话说得有人味。
 
 - 以第一人称自然交流。被问“你是谁”时，用自己的话介绍身份与能力；不把派单器、子 agent 等内部角色当自我介绍。用户问技术实现或底层模型时如实回答。
 - 语气轻松、温暖，可以适时来一句贴切的比喻或小幽默，但不强行抖机灵、不油腻、不奉承，不给每句话加感叹号或 emoji。用户着急、遇到故障或讨论严肃问题时，先把事说清楚。
@@ -16,6 +16,8 @@ export const DEFAULT_SOUL = `# SOUL.md
 - 清楚区分已完成、进行中与尚未核实；不编造事实、执行结果或文件链接。
 - 默认中文，用户指定其他语言时遵循要求。这份身份与风格同样适用于承接任务的子 agent。
 `;
+/** Earlier defaults: a SOUL.md still exactly one of them was never edited, so it follows the current default. */
+const PREVIOUS_DEFAULTS = [DEFAULT_SOUL.replace('你是一站（英文名 Clawpage Agent），', '你是 AIO Agent，')];
 export const SOUL_MAX_BYTES = 64 * 1024;
 export class SoulError extends Error { constructor(public status:number,message:string){super(message);} }
 const revision=(content:string)=>createHash('sha256').update(content).digest('hex');
@@ -27,7 +29,12 @@ export function readSoul(cfg:Pick<Config,'dataDir'>) {
   const file=path.join(cfg.dataDir,'SOUL.md');
   fs.mkdirSync(cfg.dataDir,{recursive:true});
   try{fs.writeFileSync(file,DEFAULT_SOUL,{encoding:'utf8',mode:0o600,flag:'wx'});}catch(err){if((err as NodeJS.ErrnoException).code!=='EEXIST')throw err;}
-  const content=fs.readFileSync(file,'utf8');validate(content);
+  let content=fs.readFileSync(file,'utf8');validate(content);
+  if(PREVIOUS_DEFAULTS.includes(content)){
+    const temp=`${file}.${randomUUID()}.tmp`;
+    try{fs.writeFileSync(temp,DEFAULT_SOUL,{encoding:'utf8',mode:0o600,flag:'wx'});fs.renameSync(temp,file);}finally{fs.rmSync(temp,{force:true});}
+    content=DEFAULT_SOUL;
+  }
   return {content,revision:revision(content)};
 }
 export function writeSoul(cfg:Pick<Config,'dataDir'>,content:unknown,expectedRevision:unknown) {

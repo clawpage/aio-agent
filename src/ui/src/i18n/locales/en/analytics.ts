@@ -1,0 +1,37 @@
+import type { analytics as zh } from "../zh/analytics";
+
+export const analytics: typeof zh = {
+  title: "Analytics",
+  subtitle: "Sign-ups, activity, tasks and feature use",
+  refresh: "Refresh",
+  readFailed: "Couldn't load analytics",
+  loading: "Loading analytics…",
+  meta: (timezone: string, updated: string) => `Time zone: ${timezone} · Updated ${updated} · Refreshes every minute`,
+  metrics: {
+    accounts: "Accounts",
+    newInRange: (n: string) => `${n} new in this period`,
+    active: "Active today",
+    activeWindows: (week: string, month: string) => `Last 7 days ${week} · last 30 days ${month}`,
+    tasks: "Tasks in this period",
+    outcomes: (rate: string, failed: string) => `${rate} completed · ${failed} failed`,
+    conversion: "Sign-up conversion",
+    funnel: (views: string, signups: string) => `${views} sign-up page views → ${signups} sign-ups`,
+  },
+  trend: "Daily trend",
+  chartLabel: "Active accounts, sign-ups and tasks per day",
+  daily: "Daily breakdown",
+  columns: { active: "Active", signups: "Sign-ups", logins: "Sign-ins", tasks: "Tasks", completed: "Completed", failed: "Failed" },
+  features: "Feature use",
+  platforms: "Platforms",
+  noEvents: "No events recorded in this period.",
+  eventColumns: { event: "Event", count: "Count", users: "Accounts", platform: "Platform" },
+  events: {
+    app_open: "Opened the app", page_view: "Page views", auth_view: "Sign-in / sign-up page views", signup: "Sign-ups", login: "Sign-ins", login_failed: "Failed sign-ins", logout: "Sign-outs",
+    task_submit: "Messages sent", task_stop: "Tasks stopped", task_archive: "Tasks archived", task_retry: "Dispatch retries", schedule_edit: "Schedules edited", schedule_action: "Schedule actions",
+    push_subscribe: "Notifications on", push_unsubscribe: "Notifications off", locale_change: "Language changes", vault_save: "Passwords saved", support_request: "Support and reports",
+    voice_input: "Voice input", browser_takeover: "Browser taken over", browser_handback: "Browser handed back",
+  },
+  platformNames: { web: "Web", pwa: "Home-screen web app", ios: "iOS app", android: "Android app", mac: "Mac app", unknown: "Not stated" },
+  sources: (manual: string, schedule: string, gadget: string) => `Task sources: typed ${manual} · scheduled ${schedule} · voice gadget ${gadget}. Scheduled runs don't count as activity.`,
+  note: (since: string | null) => `Active = accounts that opened the app, used a feature or sent a task that day. Task figures come from each account's task records (history included); events ${since ? `have been recorded since ${since}` : "are not recorded yet"}, so earlier days only have account and task figures. No message content, emails or device identifiers are recorded.`,
+};

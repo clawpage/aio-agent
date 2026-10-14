@@ -9,10 +9,10 @@
  * when the newer side still understands the older one.
  */
 
-/** The control plane's HTTP API version the UI is written against. */
-export const API_VERSION = 2;
-/** The oldest UI API version this control plane still serves. */
-export const API_MIN = 1;
+/** The control plane's HTTP API version the UI is written against (3: accounts register with an email). */
+export const API_VERSION = 3;
+/** The oldest UI API version this control plane still serves (a v2 UI registers with a username, which v3 refuses). */
+export const API_MIN = 3;
 
 /** The control-plane-to-sandboxd protocol a sandbox node speaks. */
 export const SANDBOX_PROTOCOL = 1;

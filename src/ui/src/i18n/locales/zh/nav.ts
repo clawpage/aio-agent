@@ -7,6 +7,7 @@ export const nav = {
   schedules: "定时任务",
   vault: "密码器",
   usage: "用量看板",
+  analytics: "运营统计",
   workspace: "工作区",
   settings: "配置",
   logout: "退出登录",

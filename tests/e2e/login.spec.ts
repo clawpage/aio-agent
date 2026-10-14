@@ -31,8 +31,8 @@ test.describe("login", () => {
     await page.goto("/");
     await expect(page.getByRole("heading", { name: "一站" })).toBeVisible();
 
-    await expect(page.getByLabel("账号", { exact: true })).toHaveValue("");
-    await page.getByLabel("账号", { exact: true }).fill("owner");
+    await expect(page.getByLabel("邮箱", { exact: true })).toHaveValue("");
+    await page.getByLabel("邮箱", { exact: true }).fill("owner");
     await page.getByLabel("密码").fill(`wrong-${Date.now()}`);
     await page.getByRole("button", { name: "登录" }).click();
     await expect(page.locator(".banner.error"), `wrong-password attempt made no request: ${calls.join(", ")}`).toBeVisible({

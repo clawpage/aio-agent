@@ -23,6 +23,7 @@ import type { PhoneGateway } from "./phone.js";
 import type { HaCameras } from "./camera.js";
 import type { DeviceLinks } from "./deviceLink.js";
 import type { Vault } from "./vault.js";
+import type { Analytics } from "./analytics.js";
 
 export interface AppContext {
   runtimeForUser?: (userId: string) => Promise<AppContext>;
@@ -31,6 +32,8 @@ export interface AppContext {
   /** Jev structured decisions (host-side key; absent without one). */
   jev?: Jev;
   tasks: TaskService;
+  /** Product analytics in the central database, shared by every runtime; absent in runtimes built by hand in tests. */
+  analytics?: Analytics;
   /** Phone notifications (Web Push), shared by every account; absent in tests. */
   push?: PushService;
   /** Phones (bin/phone-bridge.mjs on a Mac an account linked); shared by every runtime. */

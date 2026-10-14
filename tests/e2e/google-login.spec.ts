@@ -17,21 +17,20 @@ async function setup(page: Page, pending: boolean, requiresInvite = true) {
   return registrations;
 }
 
-test("Google first visit asks for username and invite, without a password, then enters the member inbox", async ({page}, info) => {
+test("Google first visit asks only for the invite, taking the Google email, then enters the member inbox", async ({page}, info) => {
   const registrations = await setup(page, true);
   await page.goto("/login?google=invite");
   await expect(page.getByText("member@example.com")).toBeVisible();
   await expect(page.getByLabel("密码", {exact: true})).toHaveCount(0);
   const enter = page.getByRole("button", {name: "验证邀请码并进入"});
   await expect(enter).toBeDisabled();
-  await page.getByLabel("账号", {exact: true}).fill("Google-Member");
-  await expect(enter).toBeDisabled();
+  await expect(page.getByLabel("邮箱", {exact: true})).toHaveCount(0);
   await page.getByLabel("邀请码", {exact: true}).fill("abcd-efgh-jkmn");
   await page.screenshot({path: info.outputPath("google-invite.png"), fullPage: true});
   expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
   await enter.click();
   await expect(page.getByRole("heading", {name: "主会话", exact: true})).toBeVisible();
-  expect(registrations).toEqual([{username: "google-member", inviteCode: "ABCD-EFGH-JKMN"}]);
+  expect(registrations).toEqual([{inviteCode: "ABCD-EFGH-JKMN"}]);
 });
 
 test("Google login opens the provider and reports a cancelled authorization", async ({page}) => {
@@ -81,10 +80,10 @@ test("Google first visit can register without an invite while places remain", as
   await page.goto("/login?google=invite");
   await expect(page.getByLabel("邀请码", { exact: true })).toHaveCount(0);
   await expect(page.getByLabel("密码", { exact: true })).toHaveCount(0);
-  await page.getByLabel("账号", { exact: true }).fill("google-member");
+  await expect(page.getByLabel("邮箱", { exact: true })).toHaveCount(0);
   await page.screenshot({ path: info.outputPath("google-open-register.png"), fullPage: true });
   expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
   await page.getByRole("button", { name: "注册并进入", exact: true }).click();
   await expect(page.getByRole("heading", { name: "主会话", exact: true })).toBeVisible();
-  expect(registrations).toEqual([{ username: "google-member", inviteCode: "" }]);
+  expect(registrations).toEqual([{ inviteCode: "" }]);
 });

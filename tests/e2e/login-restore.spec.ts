@@ -41,14 +41,14 @@ test('revoked cookies do not bypass login and signing out stays signed out',asyn
  await page.route('**/api/auth/session',r=>{reads++;return r.fulfill({json:{authenticated:valid,username:'owner'}});});
  await page.route('**/api/auth/login',r=>{valid=true;return r.fulfill({json:{ok:true}});});
  await page.route('**/api/auth/logout',r=>{valid=false;return r.fulfill({json:{ok:true}});});
- await page.goto('/');await expect(password(page)).toBeVisible();await page.getByLabel('账号',{exact:true}).fill('owner');await password(page).fill('typed password');
+ await page.goto('/');await expect(password(page)).toBeVisible();await page.getByLabel('邮箱',{exact:true}).fill('owner');await password(page).fill('typed password');
  const before=reads;await page.evaluate(()=>window.dispatchEvent(new Event('focus')));await expect.poll(()=>reads).toBeGreaterThan(before);await expect(password(page)).toHaveValue('typed password');await expect(inbox(page)).toHaveCount(0);
  await page.getByRole('button',{name:'登录',exact:true}).click();await expect(inbox(page)).toBeVisible();
  if(info.project.name.startsWith('mobile'))await page.getByRole('button',{name:'打开导航'}).click();
  await expect.poll(()=>new URL(page.url()).pathname).toBe('/u/owner');
  await page.locator('.sidebar').getByRole('button',{name:'退出登录',exact:true}).click();await expect(password(page)).toBeVisible();await expect(inbox(page)).toHaveCount(0);
  // Signing out leaves the account's address, so the next person starts from a blank form.
- expect(new URL(page.url()).pathname).toBe('/login');await expect(page.getByLabel('账号',{exact:true})).toHaveValue('');
+ expect(new URL(page.url()).pathname).toBe('/login');await expect(page.getByLabel('邮箱',{exact:true})).toHaveValue('');
 });
 
 test('visible login page retries periodically when another tab logs in without a focus event',async({page})=>{
@@ -63,5 +63,5 @@ test('fields on a touch screen are 16px, so iPhone Safari never zooms the page i
  await page.goto('/');await expect(password(page)).toBeVisible();
  // Safari zooms into a focused field whose text is under 16px; a mouse-driven desktop keeps the page's 15px.
  const expected=info.project.name.startsWith('mobile')?'16px':'15px';
- for(const field of [page.getByLabel('账号',{exact:true}),password(page)])expect(await field.evaluate(el=>getComputedStyle(el).fontSize)).toBe(expected);
+ for(const field of [page.getByLabel('邮箱',{exact:true}),password(page)])expect(await field.evaluate(el=>getComputedStyle(el).fontSize)).toBe(expected);
 });

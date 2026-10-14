@@ -1,8 +1,8 @@
-# 一站 · AIO Agent
+# 一站 · Clawpage Agent
 
 > Canonical repository: <https://github.com/clawpage/aio-agent>
 
-AIO Agent 是一个自托管的个人智能体控制台。每个账号拥有独立的
+Clawpage Agent（项目名 AIO Agent）是一个自托管的个人智能体控制台。每个账号拥有独立的
 [AIO Sandbox](https://github.com/agent-infra/sandbox) 容器与常驻的 Codex 智能体：你在一个主会话里提出请求，
 智能体在沙箱中使用终端、文件、浏览器、编辑器与笔记本完成任务，并把结果回报到对话中。桌面与手机功能对等。
 
@@ -92,7 +92,7 @@ curl -s http://127.0.0.1:4891/healthz   # 界面层
 
 ## 账号
 
-- 一个 owner 负责配置；member 由管理员用 `bin/create-user.mjs` 创建，或自行注册：现有账户总数（含 owner）不足 20 时无需邀请码，达到 20 后需使用 owner 生成的一次性邀请码。
+- 一个 owner 负责配置；member 由管理员用 `bin/create-user.mjs` 创建，或用邮箱（或 Google）自行注册：现有账户总数（含 owner）不足 20 时无需邀请码，达到 20 后需使用 owner 生成的一次性邀请码。
 - 每个账号的任务、对话、沙箱、浏览器与数据库相互隔离；member 固定使用管理员分配的模型（`bin/set-user-model.mjs`），看不到配置与模型信息。
 - 地址按账号区分：控制台 `/u/<用户名>`，工作区 `<工作区域名>/u/<用户名>/`。
 

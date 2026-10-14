@@ -10,7 +10,7 @@ import { userNamespace } from '../../src/control/auth/workspaceHost.js';
 const stores: Db[] = [], dirs: string[] = [];
 const db = (file = ':memory:') => { const value = openDb(file); stores.push(value); return value; };
 afterEach(() => { for (const store of stores.splice(0)) store.close(); for (const dir of dirs.splice(0)) fs.rmSync(dir,{recursive:true,force:true}); });
-const user = (db: Db, id = 'owner_1', username = 'owner', role = 'owner') => db.prepare("INSERT INTO owners VALUES (?,?,?,'hash','salt','{}',0)").run(id,username,role);
+const user = (db: Db, id = 'owner_1', username = 'owner', role = 'owner') => db.prepare("INSERT INTO owners (id,username,role,password_hash,password_salt,password_params,created_at) VALUES (?,?,?,'hash','salt','{}',0)").run(id,username,role);
 const snapshot = (threadId: string, input: number, output: number, lastInput = input, cached = 0) => ({threadId,tokenUsage:{total:{inputTokens:input,outputTokens:output,cachedInputTokens:cached},last:{inputTokens:lastInput,outputTokens:output,cachedInputTokens:0}}});
 const sum = (db: Db) => db.prepare('SELECT SUM(input) input,SUM(output) output,SUM(cached) cached,SUM(cache_write) cacheWrite FROM token_usage').get();
 

@@ -13,7 +13,7 @@ import { createHash } from "node:crypto";
 export const WORKSPACE_AGENTS_BEGIN = "<!-- AIO-MANAGED:BEGIN 本段由 AIO Agent 管理，每次启动沙箱都会更新；你自己的约定写在下面「我的补充」里 -->";
 export const WORKSPACE_AGENTS_END = "<!-- AIO-MANAGED:END -->";
 
-const WORKSPACE_AGENTS_MANAGED = `# Sandbox workspace notes (maintained automatically by AIO Agent)
+const WORKSPACE_AGENTS_MANAGED = `# Sandbox workspace notes (maintained automatically by Clawpage Agent)
 
 You are running inside an isolated AIO Sandbox container. The persistent workspace is \`/home/gem/workspace\` (the current directory).
 The host machine's (Mac's) capabilities are not connected to this sandbox: you have no access to host files, secrets or apps, and you do not need them.

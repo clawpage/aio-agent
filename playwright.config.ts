@@ -17,6 +17,7 @@ export default defineConfig({
   // writes visual-QA screenshots to the workspace.
   testIgnore: [
     /usage\.spec\.ts/,
+    /analytics\.spec\.ts/,
     /gadget-history\.spec\.ts/,
     /browser-auto-open\.spec\.ts/,
     /browser-link\.spec\.ts/,

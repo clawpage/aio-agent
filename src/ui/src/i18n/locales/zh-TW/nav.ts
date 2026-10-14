@@ -8,6 +8,7 @@ export const nav: typeof zh = {
   schedules: "定時任務",
   vault: "密碼器",
   usage: "用量看板",
+  analytics: "營運統計",
   workspace: "工作區",
   settings: "設定",
   logout: "退出登入",

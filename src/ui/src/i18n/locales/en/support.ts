@@ -1,7 +1,7 @@
 export const support = {
-  settingsIntro: 'Read the privacy policy or request deletion of your account and related data.',
+  settingsIntro: 'Read the privacy policy or request deletion of your account and related data.', signedInAs: (who: string) => `Signed in as ${who}`,
   account: 'Account & privacy', privacy: 'Privacy policy', deletion: 'Request account deletion', report: 'Report response',
-  limitations: 'AI responses may be inaccurate and provide general information only. AIO Agent is not a medical device and does not diagnose, treat or prevent medical conditions. Consult a qualified doctor for medical advice, and qualified professionals for legal or investment advice.',
+  limitations: 'AI responses may be inaccurate and provide general information only. Clawpage Agent is not a medical device and does not diagnose, treat or prevent medical conditions. Consult a qualified doctor for medical advice, and qualified professionals for legal or investment advice.',
   reportTitle: 'Report AI response', reportInfo: 'The administrator will receive this AI response (up to 20,000 characters) and your explanation to investigate and improve content safety. Other conversations are not sent.',
   deletionInfo: 'The administrator will verify your identity before deleting your account, conversations and tasks, workspace and saved credentials. Submitting this request does not immediately delete data.',
   note: 'Explanation', noteHint: 'Describe the issue. Do not include passwords or other secrets.', send: 'Submit', sending: 'Submitting…',

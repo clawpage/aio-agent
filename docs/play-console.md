@@ -2,7 +2,7 @@
 
 ## 当前发布对象
 
-- 应用：一站 · AIO Agent；包名 `ai.clawpage.agent`。
+- 应用：一站 · Clawpage Agent（2026-10-13 起英文名由 AIO Agent 改为 Clawpage Agent，Play 商店文案需在 Console 中同步）；包名 `ai.clawpage.agent`。
 - Play Console 应用 ID：`4973055059701596247`；开发者 KevinDSoon。
 - 2026-10-11 已创建应用并上传 `0.1.0`，versionCode `1000`，arm64-v8a，target SDK 37。
 - 正式版轨道 ID `4698396032958379783`，release `1`；2026-10-11 20:16 PDT 核对发布概览，11 项变更已提交，状态“正在审核中的更改”，尚未获批上线。
@@ -77,6 +77,13 @@
   声明保存不等于 Google 已接受其准确性或批准应用。
 - 正式版检查无错误；仅有可选的 native debug symbols 警告，ReTrace 映射已关联。版本说明及正式版已保存。
   自管式发布模式关闭，审核通过会自动发布；已确认提交 11 项变更，发布概览显示正在审核。
+
+## 2026-10-13 待在 Play Console 同步
+
+仓库内的商店素材（`docs/assets/play-store/`）已把英文名改为 Clawpage Agent，Console 里的商店详情需由用户手动更新后重新送审。
+同时新增了两类数据处理，Data safety 声明需核对是否已覆盖：注册邮箱（个人信息 › 电子邮件地址，用于账号管理）；
+自建使用统计（应用活动 › 应用互动，用于分析，不分享、不用于广告，保留不超过 400 天，见 `docs/FEATURES.md`「使用统计」）。
+审核成员是用户名账号，仍可用原用户名登录，无需更换。
 
 ## Google 公开登录与本次送审结果
 

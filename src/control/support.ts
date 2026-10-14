@@ -12,8 +12,8 @@ export function createSupportRequest(db: Db, userId: string | null, input: Recor
   if (!note || note.length > 2000) throw new SupportError(400, 'bad_request', '请填写说明（最多 2000 字）');
   const email = typeof input.email === 'string' ? input.email.trim() : '';
   const username = typeof input.username === 'string' ? input.username.trim() : '';
-  if ((!userId || email) && (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 254) || username.length > 40)
-    throw new SupportError(400, 'bad_request', '请填写可联系的邮箱和有效的用户名');
+  if ((!userId || email) && (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 254) || username.length > 254)
+    throw new SupportError(400, 'bad_request', '请填写可联系的邮箱和有效的账号');
   let title = '', content = '', taskId: string | null = null;
   if (kind === 'content') {
     if (!userId) throw new SupportError(401, 'unauthenticated', '请先登录');
@@ -31,7 +31,7 @@ export function createSupportRequest(db: Db, userId: string | null, input: Recor
   return id;
 }
 export function supportQueue(db: Db) {
-  return db.prepare(`SELECT s.*,o.username AS account_username,g.email AS account_email FROM support_requests s LEFT JOIN owners o ON o.id=s.owner_id LEFT JOIN google_identities g ON g.owner_id=s.owner_id ORDER BY (s.status='pending') DESC,CASE WHEN s.status='pending' THEN s.created_at END ASC,s.created_at DESC LIMIT 200`).all();
+  return db.prepare(`SELECT s.*,o.username AS account_username,COALESCE(CASE WHEN o.email_placeholder=0 THEN o.email END,g.email) AS account_email FROM support_requests s LEFT JOIN owners o ON o.id=s.owner_id LEFT JOIN google_identities g ON g.owner_id=s.owner_id ORDER BY (s.status='pending') DESC,CASE WHEN s.status='pending' THEN s.created_at END ASC,s.created_at DESC LIMIT 200`).all();
 }
 export function reviewSupportRequest(db: Db, id: string, decision: unknown, now = Date.now()): void {
   if (typeof decision !== 'string' || !decision.trim() || decision.length > 2000) throw new SupportError(400, 'bad_request', '请记录核实情况和处理结果');
