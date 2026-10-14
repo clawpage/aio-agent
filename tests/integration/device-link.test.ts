@@ -302,3 +302,45 @@ it("retries an answer other than the upgrade, and stops for good only on 401", a
     wss.close();
   }
 });
+
+it("works with a mobile-mcp that keeps no sessions (the real one)", async () => {
+  const h = await startHarness();
+  const cfg = Object.assign(h.ctx.cfg, { memberModelPort: 0, runtimeUserId: "owner_1" });
+  const names = (id: string) => (h.ctx.db.prepare("SELECT username AS v FROM owners WHERE id=?").get(id) as { v: string } | undefined)?.v ?? null;
+  const ids = (name: string) => (h.ctx.db.prepare("SELECT id AS v FROM owners WHERE username=?").get(name) as { v: string } | undefined)?.v ?? null;
+  const links = new DeviceLinks(h.ctx.db, cfg, h.ctx.log);
+  const phone = new PhoneGateway({ cfg, log: h.ctx.log, port: 0, usernameOf: names, userIdOf: ids, links });
+  const gateway = new MemberModelGateway(cfg, h.ctx.log, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, phone);
+  await gateway.start();
+  h.server.removeAllListeners("upgrade");
+  h.server.on("upgrade", (req, socket, head) => links.ownsUpgrade(req) ? links.handleUpgrade(req, socket, head) : handleUpgrade(h.ctx, req, socket, head));
+  const sent: Array<string | undefined> = [];
+  const bridge = http.createServer(async (req, res) => {
+    let data = "";
+    for await (const chunk of req) data += chunk;
+    const msg = JSON.parse(data) as { id?: number; method: string };
+    sent.push(req.headers["mcp-session-id"] as string | undefined);
+    if (msg.id === undefined) { res.writeHead(202).end(); return; }
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify({ jsonrpc: "2.0", id: msg.id, result: msg.method === "initialize" ? { protocolVersion: "2025-03-26" } : { content: [{ type: "text", text: "Galaxy Z Flip6" }] } }));
+  });
+  await new Promise<void>((resolve) => bridge.listen(0, "127.0.0.1", resolve));
+  let client: { close(): void } | null = null;
+  try {
+    const { token } = links.create("owner_1", "Mac");
+    phone.provision(cfg);
+    client = linkDevice({ url: `ws://localhost:${h.primaryPort}${DEVICE_LINK_PATH}`, token, name: "Mac", local: `http://127.0.0.1:${(bridge.address() as { port: number }).port}`, localToken: LOCAL_TOKEN, onState: () => undefined });
+    await expect.poll(() => Boolean(links.tunnelFor("owner_1"))).toBe(true);
+    const url = cfg.phone!.url.replace(/^http:\/\/host\.docker\.internal:0/, `http://127.0.0.1:${gateway.port}`);
+    const res = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 7, method: "tools/call", params: { name: "mobile_list_available_devices", arguments: {} } }) });
+    expect(await res.json()).toEqual({ jsonrpc: "2.0", id: 7, result: { content: [{ type: "text", text: "Galaxy Z Flip6" }] } });
+    expect(sent).toEqual([undefined, undefined, undefined]);
+  } finally {
+    client?.close();
+    links.close();
+    gateway.close();
+    bridge.closeAllConnections();
+    bridge.close();
+    await h.shutdown();
+  }
+});

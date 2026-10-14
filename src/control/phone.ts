@@ -135,7 +135,7 @@ export class PhoneGateway extends McpGateway {
   async #rpc(tunnel: Tunnel, message: unknown, again = true): Promise<unknown> {
     const session = await this.#session(tunnel);
     const reply = await tunnel.request("POST", "/mcp", {
-      headers: { "content-type": "application/json", accept: "application/json, text/event-stream", "mcp-session-id": session },
+      headers: { "content-type": "application/json", accept: "application/json, text/event-stream", ...(session ? { "mcp-session-id": session } : {}) },
       body: Buffer.from(JSON.stringify(message)),
       timeoutMs: TIMEOUT_MS,
     });
@@ -148,7 +148,7 @@ export class PhoneGateway extends McpGateway {
     return rpcAnswer(reply.body.toString("utf8"), (message as { id?: unknown }).id);
   }
 
-  /** This gateway's mobile-mcp session on a Mac's socket; a new socket gets a new one. */
+  /** This gateway's mobile-mcp session on a Mac's socket ("" when mobile-mcp runs without sessions); a new socket gets a new one. */
   #session(tunnel: Tunnel): Promise<string> {
     let session = this.#sessions.get(tunnel);
     if (!session) {
@@ -159,10 +159,11 @@ export class PhoneGateway extends McpGateway {
           body: Buffer.from(JSON.stringify({ jsonrpc: "2.0", id: 0, method: "initialize", params: { protocolVersion: "2025-03-26", capabilities: {}, clientInfo: { name: "aio-phone-gateway", version: "1" } } })),
           timeoutMs: 30_000,
         });
-        const id = init.headers["mcp-session-id"];
-        if (init.status !== 200 || !id) throw new Error(`phone bridge did not open a session (${init.status})`);
+        if (init.status !== 200) throw new Error(`phone bridge did not open a session (${init.status})`);
+        // mobile-mcp's HTTP server is stateless: no session id, and none is sent afterwards.
+        const id = init.headers["mcp-session-id"] ?? "";
         await tunnel.request("POST", "/mcp", {
-          headers: { ...headers, "mcp-session-id": id },
+          headers: { ...headers, ...(id ? { "mcp-session-id": id } : {}) },
           body: Buffer.from(JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" })),
           timeoutMs: 30_000,
         });
