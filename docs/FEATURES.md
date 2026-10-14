@@ -641,7 +641,7 @@ owner 侧栏「用量看板」按账号显示每日 token 趋势、输入 / 输�
   `task_archive`、`task_retry`、`schedule_edit`、`schedule_action`、`push_subscribe`/`push_unsubscribe`、`locale_change`、`vault_save`、
   `support_request`、`voice_input`（是否成功、时长）、`browser_takeover`/`browser_handback`。新增埋点在 `src/control/http/api.ts` 调 `track()`。
 - **统计页**：owner 侧栏「运营统计」（`/u/<用户名>/analytics`，`GET /api/analytics/report?days=7|30|90`，仅 owner）显示账号总数与新注册、
-  今日 / 7 天 / 30 天活跃账号、任务数与完成率、注册页浏览到注册的转化、每日趋势与明细、各事件次数与账号数、平台分布、任务来源。
+  今日 / 7 天 / 30 天活跃账号、任务数与完成率、注册转化（同期注册页浏览与经注册页完成的邮箱注册事件，不含 Google 注册与历史账号）、每日趋势与明细、各事件次数与账号数、平台分布、任务来源。
   活跃 = 当天有事件或手动提交任务的账号（定时任务自动执行不算）。任务数字在读报表时从各账号自己的任务表统计（只读打开，含历史，
   合并进其他任务的补充不单独计）；注册数来自账号创建时间；其余数字从事件开始记录（`meta.analytics_started`）之后才有。
 

@@ -41,7 +41,7 @@ export type AnalyticsReport = {
   /** Every recorded event in the range, most frequent first. */
   events: Array<{ name: string; count: number; users: number }>;
   platforms: Array<{ platform: string; users: number; events: number }>;
-  /** Register-form views (anonymous) against completed registrations, in the range. */
+  /** Register-form views (anonymous) against password sign-ups from that form, both from events in the range. */
   funnel: { registerViews: number; loginViews: number; signups: number };
   /** When event recording started; days before it only have task and account figures. */
   collectionStartedAt: number | null;

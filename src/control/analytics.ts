@@ -87,7 +87,9 @@ export class Analytics {
 
     const events = new Map<string, { count: number; users: Set<string> }>();
     const platforms = new Map<string, { users: Set<string>; events: number }>();
-    let registerViews = 0, loginViews = 0;
+    // The funnel compares like with like: register-page views and the password sign-ups made from that page,
+    // both recorded as events (account creation dates reach back before views were recorded).
+    let registerViews = 0, loginViews = 0, formSignups = 0;
     for (const row of this.db.prepare("SELECT ts,name,user_id,platform,props FROM analytics_events WHERE ts>=? AND ts<=?").iterate(since, now) as Iterable<{ ts: number; name: string; user_id: string | null; platform: string | null; props: string | null }>) {
       const date = dateAt(row.ts);
       mark(date, row.user_id);
@@ -97,6 +99,7 @@ export class Analytics {
       const p = platforms.get(row.platform ?? "unknown") ?? { users: new Set<string>(), events: 0 };
       p.events++; if (row.user_id) p.users.add(row.user_id); platforms.set(row.platform ?? "unknown", p);
       if (row.name === "login") daily.get(date)!.logins++;
+      if (row.name === "signup" && row.props && (JSON.parse(row.props) as EventProps).method === "password") formSignups++;
       if (row.name === "auth_view") {
         const mode = row.props ? (JSON.parse(row.props) as EventProps).mode : null;
         if (mode === "register") registerViews++; else if (mode === "login") loginViews++;
@@ -137,7 +140,7 @@ export class Analytics {
       daily: [...daily.values()],
       events: [...events].map(([name, e]) => ({ name, count: e.count, users: e.users.size })).sort((a, b) => b.count - a.count || a.name.localeCompare(b.name)),
       platforms: [...platforms].map(([platform, p]) => ({ platform, users: p.users.size, events: p.events })).sort((a, b) => b.events - a.events),
-      funnel: { registerViews, loginViews, signups: totals.signups },
+      funnel: { registerViews, loginViews, signups: formSignups },
       collectionStartedAt: started ? Number(started.value) : null,
     };
   }

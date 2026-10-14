@@ -50,6 +50,8 @@ it('reports accounts, activity, tasks from every account store, events and platf
   analytics.track('auth_view', { platform: 'web', props: { mode: 'register' } }, now - day);
   analytics.track('auth_view', { platform: 'web', props: { mode: 'login' } }, now);
   analytics.track('page_view', { userId: 'owner_1', platform: 'mac', props: { view: 'usage' } }, now - 20 * day);
+  analytics.track('signup', { userId: 'user_b', platform: 'web', props: { method: 'password', invite: false } }, now - day);
+  analytics.track('signup', { userId: 'user_a', platform: 'web', props: { method: 'google', invite: false } }, now - 2 * day);
 
   const report = analytics.report(cfg, 7, now);
   expect(report.dates).toHaveLength(7); expect(report.dates.at(-1)).toBe('2026-10-13');
@@ -61,7 +63,8 @@ it('reports accounts, activity, tasks from every account store, events and platf
   expect(report.totals.active30).toBe(3);
   expect(report.daily.at(-1)).toMatchObject({ date: '2026-10-13', active: 2, signups: 0, logins: 1, tasks: 2, completed: 1, failed: 1 });
   expect(report.daily.at(-2)).toMatchObject({ signups: 1, tasks: 1, completed: 1 });
-  expect(report.funnel).toEqual({ registerViews: 2, loginViews: 1, signups: 2 });
+  // Only the password sign-up from the register form counts against its views, not account dates or Google.
+  expect(report.funnel).toEqual({ registerViews: 2, loginViews: 1, signups: 1 });
   expect(report.events.find(e => e.name === 'auth_view')).toEqual({ name: 'auth_view', count: 3, users: 0 });
   expect(report.platforms.find(p => p.platform === 'ios')).toEqual({ platform: 'ios', users: 1, events: 2 });
   expect(report.collectionStartedAt).toBe(now - 10 * day);
