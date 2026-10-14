@@ -18,8 +18,9 @@ ENV NODE_ENV=production
 # `deploy/aio.mjs codex-login`) and refreshes it; sandboxes only get short-lived tokens.
 # Same version as the sandboxes' Codex (PA_SANDBOX_CODEX_VERSION in src/control/config.ts).
 # It verifies TLS against the system store, which the slim image lacks (Node carries its own).
+# ffmpeg reads pictures out of Home Assistant camera recordings (src/control/camera.ts).
 ARG CODEX_VERSION=0.160.0
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/* \
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates ffmpeg && rm -rf /var/lib/apt/lists/* \
   && npm install -g --no-audit --no-fund @openai/codex@${CODEX_VERSION} && npm cache clean --force
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev --no-audit --no-fund && npm cache clean --force

@@ -492,6 +492,18 @@ Jev（TypeSafe System One）根据状态和选项返回选择、各选项概率�
 - **能力范围由 HA 决定**：只提供「暴露给 Assist」的实体，工具为 HA 意图（`HassTurnOn`、`HassLightSet`、`GetLiveContext` 等）。
   收窄设备范围在 HA 中修改暴露名单；收回授权可移出 `PA_HA_MCP_ACCOUNTS` 并重启，或在 HA 中删除令牌。
 - 执行会话只操作用户本次要求的设备，操作后读一次状态确认。
+- **摄像头**（`src/control/camera.ts`，同一 `aio_ha` 上追加的工具，不经 HA 的 MCP Server，直接用同一令牌调 HA 的 REST / WebSocket / 媒体接口）：
+  `camera_list`（各摄像头能力与录像范围）、`camera_snapshot`（当前画面，图片回给执行器）、`camera_ptz`（方向点按或预置位，转完回一张画面）、
+  `camera_recordings`（连续录像覆盖范围、缺口与侦测事件）、`camera_recording_frames`（从录像某一时刻起取最多 6 张图）。
+  录像、事件与云台按摄像头在 `PA_HA_CAMERAS` 声明：连续录像是 HA 媒体源里 `<名>_YYYY-MM-DD_HH-MM-SS.mp4` 的分片（fragmented MP4，
+  控制面的 ffmpeg 借尾部索引按 HTTP Range 跳读，不整段下载；正在写的最后一片没有索引，只能顺序读到该时刻），事件是
+  `YYYY-MM-DD_HH-MM-SS_<标签>.mp4`；时间一律按控制面时区（`TZ`）的本地时间。云台调声明的集成的 `move`（x、y）与 `goto_preset`（name）服务。
+- **摄像头卡片**：执行器在回复里写 ```` ```camera ```` 块（`{"camera": "<实体>"}` 为直播，加 `"at": "YYYY-MM-DD HH:MM:SS"` 为从该时刻回放）。
+  直播先显示快照，点播放后经 `/api/cameras/hls/<令牌>/…` 转发 HA 的 LL-HLS（Safari/iOS 原生播放，其他浏览器按需加载 hls.js；
+  只转发本进程发出的流令牌与 HLS 文件名）；声明了云台的摄像头在画面边缘有四个方向键。HA 只能给 WebRTC 的摄像头（Ring）在卡片里是每 10 秒刷新的快照。
+  回放按 Range 转发录像分片，播完自动接下一片，标题显示画面对应的本地时间；卡片可在回放与直播间切换。
+  卡片接口只对 `PA_HA_MCP_ACCOUNTS` 里的账号开放，其他账号看到「没有开通摄像头」。现有部署：C201（`camera.c201_go2rtc`，录像 `c201`、事件
+  `local/c201-events`、云台 `tapo_ptz`）与三台 Ring（只有快照）。
 
 ### 打印机
 

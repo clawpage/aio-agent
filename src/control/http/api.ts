@@ -10,6 +10,7 @@ import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { exitTerminal, TERMINAL_ID, TerminalRegistry } from "../terminals.js";
 import { maps, MapService } from "../maps.js";
+import { CameraError, parseLocal, type HaCameras } from "../camera.js";
 import { API_MIN, API_VERSION } from "../../common/version.js";
 import { TASK_FILTERS, type TaskFilter } from "../../common/taskList.js";
 import { TaskCursorError } from "../tasks/service.js";
@@ -2000,6 +2001,104 @@ export function createApiRouter(context: AppContext): Router {
       } catch {
         res.status(502).json({error:"geocode_unavailable",message:"暂时无法定位这个地址"});
       }
+    }),
+  );
+
+  // ----------------------------------------------------------- cameras
+  // Camera cards in messages (HaCameras): live video, pan/tilt and recordings,
+  // proxied same-origin and only for the accounts granted Home Assistant.
+  const camerasFor = (req: Request, res: Response): HaCameras | null => {
+    const ctx = ctxOf(req);
+    const user = ctx.session ? getUser(db, ctx.session.ownerId) : null;
+    if (!context.cameras || !user || !cfg.haMcp.accounts.includes(user.username)) {
+      res.status(404).json({ error: "camera_unavailable", message: "这个账号没有开通摄像头" });
+      return null;
+    }
+    return context.cameras;
+  };
+  const cameraEntity = (req: Request, res: Response): string | null => {
+    const entity = param(req, "entity");
+    if (/^camera\.[a-z0-9_]+$/.test(entity)) return entity;
+    res.status(400).json({ error: "bad_camera" });
+    return null;
+  };
+  const cameraHandler = (fn: (req: Request, res: Response, cameras: HaCameras, entity: string) => Promise<void>) =>
+    asyncHandler(async (req, res) => {
+      const cameras = camerasFor(req, res);
+      const entity = cameras && (req.params.token ? "" : cameraEntity(req, res));
+      if (!cameras || entity === null) return;
+      try {
+        await fn(req, res, cameras, entity);
+      } catch (err) {
+        if (!(err instanceof CameraError)) throw err;
+        if (res.headersSent) { res.destroy(); return; }
+        const notFound = err.message === "not_found";
+        res.status(notFound ? 404 : 502).json({ error: notFound ? "not_found" : "camera_error", message: notFound ? "录像已不在了" : err.message });
+      }
+    });
+  const cameraTime = (raw: unknown): number | null => (typeof raw === "string" && /^\d{12,14}$/.test(raw) ? Number(raw) : parseLocal(raw));
+  router.get("/cameras/hls/:token/*file", requireKind("primary"), requireSession,
+    cameraHandler(async (req, res, cameras) => {
+      const file = (req.params as { file?: string[] }).file ?? [];
+      await cameras.proxyHls(param(req, "token"), file.join("/"), req.url.split("?")[1] ?? "", res);
+    }),
+  );
+  router.get("/cameras/:entity", requireKind("primary"), requireSession,
+    cameraHandler(async (_req, res, cameras, entity) => {
+      res.setHeader("Cache-Control", "no-store");
+      res.json({ camera: await cameras.camera(entity), timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone });
+    }),
+  );
+  router.get("/cameras/:entity/snapshot", requireKind("primary"), requireSession,
+    cameraHandler(async (_req, res, cameras, entity) => {
+      const shot = await cameras.snapshot(entity, 1280);
+      res.setHeader("Content-Type", shot.contentType);
+      res.setHeader("Cache-Control", "no-store");
+      res.setHeader("X-Content-Type-Options", "nosniff");
+      res.end(shot.bytes);
+    }),
+  );
+  router.get("/cameras/:entity/live", requireKind("primary"), requireSession,
+    cameraHandler(async (_req, res, cameras, entity) => {
+      const token = await cameras.liveToken(entity);
+      res.setHeader("Cache-Control", "no-store");
+      res.json({ url: `/api/cameras/hls/${token}/master_playlist.m3u8` });
+    }),
+  );
+  router.post("/cameras/:entity/ptz", requireKind("primary"), requireSession,
+    cameraHandler(async (req, res, cameras, entity) => {
+      const body = (req.body ?? {}) as { direction?: unknown; steps?: unknown; preset?: unknown };
+      res.json({ ok: true, done: await cameras.ptz(entity, { direction: body.direction, steps: body.steps, preset: body.preset }) });
+    }),
+  );
+  router.get("/cameras/:entity/playback", requireKind("primary"), requireSession,
+    cameraHandler(async (req, res, cameras, entity) => {
+      const at = cameraTime(req.query.at);
+      if (at === null) { res.status(400).json({ error: "bad_time", message: "时间格式不对" }); return; }
+      const { piece, offset, next } = await cameras.locate(entity, at);
+      res.setHeader("Cache-Control", "no-store");
+      res.json({
+        url: `/api/cameras/${entity}/recordings/${encodeURIComponent(piece.file)}`,
+        offset, start: piece.start, end: piece.end,
+        // The next piece plays on when it follows straight after this one.
+        next: next && next.start - piece.end < 60_000 ? next.start : null,
+      });
+    }),
+  );
+  router.get("/cameras/:entity/frame", requireKind("primary"), requireSession,
+    cameraHandler(async (req, res, cameras, entity) => {
+      const at = cameraTime(req.query.at);
+      if (at === null) { res.status(400).json({ error: "bad_time" }); return; }
+      const bytes = await cameras.frame(entity, at);
+      res.setHeader("Content-Type", "image/jpeg");
+      res.setHeader("Cache-Control", "private, max-age=86400");
+      res.setHeader("X-Content-Type-Options", "nosniff");
+      res.end(bytes);
+    }),
+  );
+  router.get("/cameras/:entity/recordings/:file", requireKind("primary"), requireSession,
+    cameraHandler(async (req, res, cameras, entity) => {
+      await cameras.proxyPiece(entity, param(req, "file"), req.get("range") ?? undefined, res);
     }),
   );
 

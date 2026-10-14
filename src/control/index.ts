@@ -6,6 +6,7 @@ import {Jev} from "./jev.js";
 import {DecisionGateway} from "./decision.js";
 import {KbGateway} from "./kb.js";
 import {HaGateway} from "./ha.js";
+import { HaCameras } from "./camera.js";
 import {PhoneGateway} from "./phone.js";
 import {ScheduleGateway} from "./scheduleTool.js";
 import {HistoryGateway} from "./historyTool.js";
@@ -69,6 +70,7 @@ export interface BootstrapOptions {
     aio?: AioClient;
     documents?: DocumentService;
     browserRuntime?: BrowserRuntimeLike;
+    cameras?: HaCameras;
   };
 }
 
@@ -167,6 +169,7 @@ export async function bootstrap(opts: BootstrapOptions = {}): Promise<Bootstrapp
     startedAt: Date.now(),
     sandboxSetupError: null,
     sandboxSurfaces: null,
+    cameras: opts.overrides?.cameras ?? HaCameras.from(cfg, log) ?? undefined,
   };
 
   if(!opts.deferAgentInit){await agent.init();tasks.init();}
@@ -432,7 +435,7 @@ async function main(): Promise<void> {
   decision.provision(ctx.cfg);
   const kb=new KbGateway({cfg:ctx.cfg,log:ctx.log,port:ctx.cfg.memberModelPort??4902,usernameOf:id=>account("SELECT username AS v FROM owners WHERE id=?",id)});
   kb.provision(ctx.cfg);
-  const ha=new HaGateway({cfg:ctx.cfg,log:ctx.log,port:ctx.cfg.memberModelPort??4902,usernameOf:id=>account("SELECT username AS v FROM owners WHERE id=?",id)});
+  const ha=new HaGateway({cfg:ctx.cfg,log:ctx.log,port:ctx.cfg.memberModelPort??4902,usernameOf:id=>account("SELECT username AS v FROM owners WHERE id=?",id),cameras:ctx.cameras});
   ha.provision(ctx.cfg);
   const printer=new PrinterGateway({port:ctx.cfg.memberModelPort??4902,log:ctx.log,printerUri:ctx.cfg.printing.printerUri,accounts:ctx.cfg.printing.accounts,
     workspace:ctx.cfg.sandbox.containerWorkspaceDir,usernameOf:id=>account("SELECT username AS v FROM owners WHERE id=?",id),

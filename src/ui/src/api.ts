@@ -107,6 +107,9 @@ async function request<T>(
   return (parsed ?? {}) as T;
 }
 
+/** A camera as the card needs it (HaCameras' CameraInfo). */
+export interface CameraInfo { entity: string; name: string; state: string; live: boolean; ptz: boolean; recordings: boolean; events: boolean }
+
 export type PointerInput = { action: "click"; x: number; y: number } | { action: "scroll"; dy: number } | { action: "back" } | { action: "focus" };
 /** `current`: the tab the page's key is on now (a link may have opened a new window). */
 export type PointerResult = { title: string; url: string; editable?: boolean; current?: string };
@@ -121,6 +124,13 @@ export const api = {
   /** The owner's phone (bin/phone-bridge.mjs): offered at all, and which device is connected. */
   phoneScreenshotUrl: (at: number) => apiUrl(`/api/phone/screenshot?at=${at}`),
   phone: () => request<{ available: boolean; reachable?: boolean; device: { serial: string; model: string; name: string; android: string } | null }>("/api/phone", { cache: "no-store" }),
+  /** Home Assistant cameras for camera cards (only accounts granted Home Assistant; others get 404). */
+  camera: (entity: string, signal?: AbortSignal) => request<{ camera: CameraInfo; timeZone: string }>(`/api/cameras/${encodeURIComponent(entity)}`, { signal, cache: "no-store" }),
+  cameraLive: (entity: string) => request<{ url: string }>(`/api/cameras/${encodeURIComponent(entity)}/live`, { cache: "no-store" }),
+  cameraPlayback: (entity: string, at: string | number) => request<{ url: string; offset: number; start: number; end: number; next: number | null }>(`/api/cameras/${encodeURIComponent(entity)}/playback?at=${encodeURIComponent(String(at))}`, { cache: "no-store" }),
+  cameraPtz: (entity: string, body: { direction: "left" | "right" | "up" | "down" }) => request<{ ok: true; done: string }>(`/api/cameras/${encodeURIComponent(entity)}/ptz`, { method: "POST", body }),
+  cameraSnapshotUrl: (entity: string, at: number) => apiUrl(`/api/cameras/${encodeURIComponent(entity)}/snapshot?t=${at}`),
+  cameraFrameUrl: (entity: string, at: string | number) => apiUrl(`/api/cameras/${encodeURIComponent(entity)}/frame?at=${encodeURIComponent(String(at))}`),
   gadgetHistory: (opts: { before?: number; limit?: number } = {}, signal?: AbortSignal) => request<{ account: string | null; messages: GadgetMessage[]; more: boolean }>(`/api/gadget/history?limit=${opts.limit ?? 50}${opts.before ? `&before=${opts.before}` : ''}`, { signal, cache: 'no-store' }),
   usage: (days: number, signal?: AbortSignal) => request<import('../../common/usage').UsageReport>(`/api/usage?days=${days}`, { signal, cache: 'no-store' }),
   soul: () => request<{content:string;revision:string;defaultContent:string;maxBytes:number}>('/api/settings/soul'),

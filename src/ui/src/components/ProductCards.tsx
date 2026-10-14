@@ -25,7 +25,7 @@ export function useMessageImage(src: string | null): { url: string | null; faile
 }
 
 /** Whether an element has come near the viewport; it stays true once it has. */
-function useNearViewport(ref: RefObject<Element | null>): boolean {
+export function useNearViewport(ref: RefObject<Element | null>): boolean {
   const [near, setNear] = useState(typeof IntersectionObserver !== "function");
   useEffect(() => {
     const el = ref.current;

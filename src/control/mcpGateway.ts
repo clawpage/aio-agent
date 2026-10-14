@@ -58,6 +58,27 @@ export class McpGateway {
     return this.#token();
   }
 
+  /** A JSON-RPC message the subclass answers itself (its own tools); undefined forwards it upstream. */
+  protected async local(_message: unknown, _username: string): Promise<unknown> {
+    return undefined;
+  }
+
+  /** One JSON-RPC request to the upstream, for a subclass that adds to its answer (an upstream that replies in JSON). */
+  protected async rpcUpstream(message: unknown, username: string): Promise<unknown> {
+    const res = await fetch(this.#opts.upstreamUrl, {
+      method: "POST",
+      headers: { "content-type": "application/json", accept: "application/json, text/event-stream", authorization: `Bearer ${this.#token()}`, "x-aio-user": username },
+      body: JSON.stringify(message),
+      signal: AbortSignal.timeout(this.#opts.timeoutMs),
+    });
+    if (!res.ok) {
+      await res.body?.cancel();
+      if (res.status === 401 || res.status === 403) this.#log.warn(`${this.#opts.name} MCP rejected the gateway token`);
+      throw new Error(`${this.#opts.name} unavailable (${res.status})`);
+    }
+    return await res.json();
+  }
+
   get enabled(): boolean {
     return Boolean(this.#opts.upstreamUrl) && this.#token() !== null;
   }
@@ -104,6 +125,14 @@ export class McpGateway {
         if (size > 1024 * 1024) return send(413, { error: "too large" });
         chunks.push(chunk as Buffer);
       }
+      let message: unknown;
+      try {
+        message = JSON.parse(Buffer.concat(chunks).toString());
+      } catch {
+        message = undefined; // not JSON: the upstream answers it
+      }
+      const answer = message === undefined ? undefined : await this.local(message, username);
+      if (answer !== undefined) return answer === null ? send(202) : send(200, answer);
       const upstream = await fetch(this.#opts.upstreamUrl, {
         method: "POST",
         headers: {

@@ -1,13 +1,15 @@
 import type { Config } from "./config.js";
 import type { Logger } from "../common/logger.js";
 import { McpGateway } from "./mcpGateway.js";
+import { CAMERA_POLICY, CAMERA_TOOLS, CAMERA_TOOL_NAMES, type HaCameras } from "./camera.js";
 
 /**
  * Home Assistant: its built-in MCP Server integration (the Assist API: the
  * entities exposed to Assist, their state and the intents that turn them on,
  * off or set them), offered to the accounts the owner lists through the
- * member gateway (McpGateway, at `/ha/<token>/mcp`). The long-lived access
- * token stays in the control plane.
+ * member gateway (McpGateway, at `/ha/<token>/mcp`), with the camera tools
+ * (HaCameras) added to the same server. The long-lived access token stays in
+ * the control plane.
  */
 export const HA_MCP_KEY = "HA_MCP_TOKEN";
 const TIMEOUT_MS = 30_000;
@@ -23,10 +25,12 @@ export function haMcpServers(cfg: Config): Record<string, unknown> {
 }
 
 export const HA_POLICY =
-  "The home Home Assistant is connected (aio_ha): when the user wants lights and switches turned on or off, the air conditioner temperature adjusted, the TV turned on, or the robot vacuum started, or asks about temperature and humidity around the house or the state of devices, query or operate them directly with its tools; do not make the user do it in the app themselves. Device names may be in English or pinyin (e.g. Living Room, Family room, Main Floor, Upstairs); map Chinese room names the user says to the closest device; when unsure which one is meant, first use the state tools to see which devices exist, then choose. Operate only the devices the user asked for this time, and read the state once after operating to confirm the result before answering; for safety-related things such as camera detection switches or vehicle status, do exactly what the user said and do not change anything else along the way.";
+  "The home Home Assistant is connected (aio_ha): when the user wants lights and switches turned on or off, the air conditioner temperature adjusted, the TV turned on, or the robot vacuum started, or asks about temperature and humidity around the house or the state of devices, query or operate them directly with its tools; do not make the user do it in the app themselves. Device names may be in English or pinyin (e.g. Living Room, Family room, Main Floor, Upstairs); map Chinese room names the user says to the closest device; when unsure which one is meant, first use the state tools to see which devices exist, then choose. Operate only the devices the user asked for this time, and read the state once after operating to confirm the result before answering; for safety-related things such as camera detection switches or vehicle status, do exactly what the user said and do not change anything else along the way. " + CAMERA_POLICY;
 
 export class HaGateway extends McpGateway {
-  constructor(opts: { cfg: Config; log: Logger; port: number; usernameOf: (userId: string) => string | null }) {
+  #cameras: HaCameras | null;
+
+  constructor(opts: { cfg: Config; log: Logger; port: number; usernameOf: (userId: string) => string | null; cameras?: HaCameras | null }) {
     super({
       ...opts,
       name: "ha",
@@ -38,5 +42,23 @@ export class HaGateway extends McpGateway {
       assign: (runtime, url) => { runtime.ha = { url }; },
       timeoutMs: TIMEOUT_MS,
     });
+    this.#cameras = opts.cameras ?? null;
+  }
+
+  /** HA's tools plus the camera tools; camera calls never reach HA's MCP server. */
+  protected override async local(message: unknown, username: string): Promise<unknown> {
+    const cameras = this.#cameras;
+    const { method, id, params } = (message ?? {}) as { method?: string; id?: unknown; params?: { name?: unknown; arguments?: unknown } };
+    if (!cameras || id === undefined || id === null) return undefined;
+    if (method === "tools/list") {
+      const upstream = (await this.rpcUpstream(message, username)) as { result?: { tools?: unknown[] } };
+      if (!Array.isArray(upstream?.result?.tools)) return upstream;
+      return { ...upstream, result: { ...upstream.result, tools: [...upstream.result.tools, ...CAMERA_TOOLS] } };
+    }
+    if (method === "tools/call" && typeof params?.name === "string" && CAMERA_TOOL_NAMES.has(params.name)) {
+      const args = params.arguments && typeof params.arguments === "object" ? (params.arguments as Record<string, unknown>) : {};
+      return { jsonrpc: "2.0", id, result: await cameras.tool(params.name, args) };
+    }
+    return undefined;
   }
 }

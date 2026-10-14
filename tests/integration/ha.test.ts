@@ -27,7 +27,7 @@ it("offers Home Assistant to the listed accounts only, the owner included only i
   const saved = process.env.HA_MCP_TOKEN;
   delete process.env.HA_MCP_TOKEN;
   const upstreamUrl = `http://127.0.0.1:${(upstream.address() as any).port}/api/mcp`;
-  const cfg = { ...h.ctx.cfg, memberModelPort: 0, haMcp: { upstreamUrl, secretsFile: keyFile, accounts: ["betaw"] } };
+  const cfg = { ...h.ctx.cfg, memberModelPort: 0, haMcp: { upstreamUrl, secretsFile: keyFile, accounts: ["betaw"], cameras: {} } };
   const ha = new HaGateway({ cfg, log: h.ctx.log, port: 0, usernameOf: (id) => USERS[id] ?? null });
   const gateway = new MemberModelGateway(cfg, h.ctx.log, undefined, undefined, undefined, undefined, undefined, undefined, undefined, ha);
   await gateway.start();

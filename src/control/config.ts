@@ -24,6 +24,40 @@ function envEnum<T extends string>(name: string, allowed: readonly T[], fallback
 
 export const PROJECT_ROOT = path.resolve(import.meta.dirname, "..", "..");
 
+/** What the console knows about one Home Assistant camera beyond HA itself (PA_HA_CAMERAS). */
+export interface HaCameraSpec {
+  /** Media source folder of its continuous recording (`<name>_YYYY-MM-DD_HH-MM-SS.mp4` pieces), e.g. `c201`. */
+  recordings?: string;
+  /** Media source folder of its event clips (`YYYY-MM-DD_HH-MM-SS_<label>.mp4`), e.g. `local/c201-events`. */
+  events?: string;
+  /** Integration whose `move` (x, y) and `goto_preset` (name) services turn it, e.g. `tapo_ptz`. */
+  ptz?: string;
+}
+
+/**
+ * Parse PA_HA_CAMERAS: a JSON object from camera entity to HaCameraSpec, e.g.
+ * `{"camera.c201_go2rtc":{"recordings":"c201","events":"local/c201-events","ptz":"tapo_ptz"}}`.
+ * Malformed entries are dropped: a typo must not open other paths of HA's media.
+ */
+export function parseCameras(raw: string): Record<string, HaCameraSpec> {
+  let data: unknown;
+  try {
+    data = raw.trim() ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+  if (!data || typeof data !== "object" || Array.isArray(data)) return {};
+  const folder = (v: unknown) => (typeof v === "string" && /^[\w-]+(?:\/[\w-]+)*$/.test(v) ? v : undefined);
+  const out: Record<string, HaCameraSpec> = {};
+  for (const [entity, value] of Object.entries(data as Record<string, unknown>)) {
+    if (!/^camera\.[a-z0-9_]+$/.test(entity) || !value || typeof value !== "object") continue;
+    const v = value as Record<string, unknown>;
+    const ptz = typeof v.ptz === "string" && /^[a-z0-9_]+$/.test(v.ptz) ? v.ptz : undefined;
+    out[entity] = { recordings: folder(v.recordings), events: folder(v.events), ptz };
+  }
+  return out;
+}
+
 /** Parse an `a,b,c` list, trimming and dropping empties. */
 export function parseList(v: string): string[] {
   return v
@@ -298,6 +332,8 @@ export function loadConfig(): {
     secretsFile: string;
     /** Usernames granted Home Assistant (the owner only if listed). */
     accounts: string[];
+    /** Recordings and pan/tilt of particular cameras (HaCameras). */
+    cameras: Record<string, HaCameraSpec>;
   };
   /** This runtime's Home Assistant URL on the member gateway, when granted (HaGateway). */
   ha?: { url: string };
@@ -568,6 +604,7 @@ export function loadConfig(): {
       upstreamUrl: envStr("PA_HA_MCP_URL", ""),
       secretsFile: envStr("PA_HA_MCP_SECRETS_FILE", path.join(os.homedir(), ".config", "aio-agent", "ha-mcp.env")),
       accounts: parseList(envStr("PA_HA_MCP_ACCOUNTS", "")),
+      cameras: parseCameras(envStr("PA_HA_CAMERAS", "")),
     },
     printing: {
       printerUri: envStr("PA_PRINTER_URI", ""),

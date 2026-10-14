@@ -112,6 +112,7 @@
 | `PA_HA_MCP_URL` | 空 | Home Assistant MCP Server 地址；为空则不提供 |
 | `PA_HA_MCP_SECRETS_FILE` | `~/.config/aio-agent/ha-mcp.env` | `HA_MCP_TOKEN`（HA 长期访问令牌，环境变量优先） |
 | `PA_HA_MCP_ACCOUNTS` | 空 | 获准操作 Home Assistant 的用户名（owner 也需列出） |
+| `PA_HA_CAMERAS` | 空 | 摄像头的录像与云台（JSON：`{"camera.<实体>":{"recordings":"<媒体源目录>","events":"<媒体源目录>","ptz":"<集成>"}}`，见 FEATURES「Home Assistant」）；格式不对的条目丢弃 |
 | `PA_PRINTER_URI` | 空 | 网络打印机的 `ipp://` 或 `ipps://` 地址；为空则不提供打印 |
 | `PA_PRINTER_ACCOUNTS` | 空 | 获准使用打印机的用户名（owner 也需列出） |
 | `PA_PHONE_BRIDGE_URL` | 空 | owner 手机桥接（`bin/phone-bridge.mjs`）地址，如 `http://127.0.0.1:4903`（compose 用 `http://host.docker.internal:4903`）；为空则不提供 |
