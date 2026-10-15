@@ -57,6 +57,11 @@ page cannot load.
   wry grants the page's capture request and the system asks once. Android declares
   `RECORD_AUDIO` and `MODIFY_AUDIO_SETTINGS` (`AndroidManifest.xml`); wry's chrome client
   asks for the runtime permission when the page first records.
+- Saving files (the console's 下载): WKWebView ignores download links, so the console hands the file to the
+  web share sheet instead. Its "Save Image" writes to Photos, which needs `NSPhotoLibraryAddUsageDescription`
+  (`gen/apple/project.yml` and the generated `Info.plist`) or iOS kills the app on that tap. The shell registers
+  an `aioSaveFiles` message handler as a marker (`DeviceBrowser.swift`); the console uses the share sheet only
+  when it sees the marker, so an older shell keeps the plain link. Regression: `tests/e2e/home-screen-save.spec.ts`.
 - Camera (the attachment picker's "Take Photo/Video"): iOS declares `NSCameraUsageDescription`
   (`gen/apple/project.yml` and the generated `Info.plist`). Without it iOS kills the app the
   moment the camera opens (TCC: "attempted to access privacy-sensitive data without a usage

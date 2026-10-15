@@ -8,9 +8,15 @@ import { t } from "./i18n";
  * no swipe to leave it. So there the file goes to the share sheet instead, whose
  * "Save Image" / "Save to Files" leave the app where it was. Everywhere else the
  * browser's own download runs unchanged.
+ *
+ * The iOS app (src/ui/tauri) is the same case: its web view ignores a download
+ * link outright. Only a shell that declares the Photos permission behind "Save
+ * Image" says so (the `aioSaveFiles` marker); an older one would be closed by iOS
+ * on that tap, so it keeps the plain link.
  */
 export function savesBySharing(): boolean {
-  return (navigator as Navigator & { standalone?: boolean }).standalone === true && typeof navigator.canShare === "function";
+  const shell = (window as Window & { webkit?: { messageHandlers?: { aioSaveFiles?: unknown } } }).webkit?.messageHandlers?.aioSaveFiles;
+  return ((navigator as Navigator & { standalone?: boolean }).standalone === true || Boolean(shell)) && typeof navigator.canShare === "function";
 }
 
 /** The download endpoint sends octet-stream; the share sheet offers "Save Image" only for an image type. */

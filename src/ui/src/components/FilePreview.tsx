@@ -4,6 +4,7 @@ import { PopupSurface } from "./PopupMotion";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, ApiError } from "../api";
 import { onDownloadClick } from "../saveFile";
+import { ZoomableImage } from "./ZoomableImage";
 import { cachedImage, holdImage, retryImage } from "../imageCache";
 import { isSandboxLink } from "../sandboxLink";
 import { openDeviceBrowser } from "../deviceBrowser";
@@ -262,7 +263,7 @@ export function FilePreview({ path: initialPath, onClose, onOpenLink, onOpenInBr
           )}
 
           {phase === "ready" && kind === "image" && imageUrl && (
-            <img src={imageUrl} alt={name} data-testid="file-preview-image" onError={() => {
+            <ZoomableImage src={imageUrl} alt={name} testId="file-preview-image" onError={() => {
               setError(t.files.preview.imageDecodeFailed);
               setPhase("error");
             }} />

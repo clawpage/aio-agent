@@ -55,10 +55,18 @@ private final class DeviceBrowserHandler: NSObject, WKScriptMessageHandler, ASWe
     }
 }
 
+// A marker, not an operation: the console sees it and saves files through the share sheet,
+// because this shell declares the Photos permission behind its "Save Image" (Info.plist).
+// WKWebView ignores download links, and an older shell would be closed by iOS on that tap.
+private final class SaveFilesMarker: NSObject, WKScriptMessageHandler {
+    func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {}
+}
+
 @objc(AIODeviceBrowser)
 final class DeviceBrowser: NSObject {
     @objc(installDeviceBrowser:)
     static func install(_ webView: WKWebView) {
         webView.configuration.userContentController.add(DeviceBrowserHandler(webView), name: "aioDeviceBrowser")
+        webView.configuration.userContentController.add(SaveFilesMarker(), name: "aioSaveFiles")
     }
 }

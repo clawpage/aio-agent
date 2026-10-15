@@ -10,13 +10,20 @@ import { mockConsole } from "./mock-api";
 const PATH = "/home/gem/workspace/tasks/task-1/人物画像.png";
 const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==", "base64");
 
-async function setup(page: Page, opts: { standalone: boolean; refuseFirst?: boolean }) {
-  if (opts.standalone) {
-    await page.addInitScript((refuseFirst) => {
+/** standalone: a home-screen web app; app / old-app: the iOS app shell with and without the save marker. */
+async function setup(page: Page, opts: { standalone?: boolean; shell?: "app" | "old-app"; refuseFirst?: boolean }) {
+  if (opts.shell) {
+    await page.addInitScript((marker) => {
+      const handler = { postMessage: () => undefined };
+      Object.assign(window, { webkit: { messageHandlers: marker ? { aioDeviceBrowser: handler, aioSaveFiles: handler } : { aioDeviceBrowser: handler } } });
+    }, opts.shell === "app");
+  }
+  if (opts.standalone || opts.shell) {
+    await page.addInitScript(({ refuseFirst, standalone }) => {
       const shared: { name: string; type: string; size: number }[] = [];
       let calls = 0;
       Object.assign(window, { __shared: shared });
-      Object.defineProperty(navigator, "standalone", { get: () => true });
+      if (standalone) Object.defineProperty(navigator, "standalone", { get: () => true });
       Object.defineProperty(navigator, "canShare", { value: () => true });
       Object.defineProperty(navigator, "share", {
         value: async (data: { files: File[] }) => {
@@ -26,7 +33,7 @@ async function setup(page: Page, opts: { standalone: boolean; refuseFirst?: bool
           for (const f of data.files) shared.push({ name: f.name, type: f.type, size: f.size });
         },
       });
-    }, opts.refuseFirst ?? false);
+    }, { refuseFirst: opts.refuseFirst ?? false, standalone: opts.standalone ?? false });
   }
   await mockConsole(page, { conversations: [] });
   const task = { id: "task-1", revision: 1, title: "画人物画像", text: "画一张我的人物画像", conversationId: "child-1", status: "completed", result: `画好了：\n\n![我眼中的你](${PATH})`, error: null, attachments: [], relatedTaskId: null, dependencies: [], approvals: 0, createdAt: 1000, completedAt: Date.now() };
@@ -70,4 +77,21 @@ test("in a browser tab 下载 is still a real download", async ({ page }) => {
   const download = page.waitForEvent("download");
   await page.getByTestId("file-preview-download").click();
   expect((await download).suggestedFilename()).toBe("人物画像.png");
+});
+
+test("in the iOS app 下载 opens the share sheet too, since its web view ignores download links", async ({ page }) => {
+  await setup(page, { shell: "app" });
+  let downloaded = false;
+  page.on("download", () => { downloaded = true; });
+  await page.getByTestId("file-preview-download").click();
+  await expect.poll(() => shared(page)).toEqual([{ name: "人物画像.png", type: "image/png", size: PNG.length }]);
+  expect(downloaded).toBe(false);
+});
+
+test("an older iOS app without the Photos permission keeps the plain link (its Save Image tap would close it)", async ({ page }) => {
+  await setup(page, { shell: "old-app" });
+  const download = page.waitForEvent("download");
+  await page.getByTestId("file-preview-download").click();
+  expect((await download).suggestedFilename()).toBe("人物画像.png");
+  expect(await shared(page)).toEqual([]);
 });

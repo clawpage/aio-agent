@@ -21,6 +21,7 @@ export default defineConfig({
     "**/languages.spec.ts",
     "**/support.spec.ts",
     "**/support-card.spec.ts",
+    "**/image-zoom.spec.ts",
     "**/task-retry.spec.ts",
     "**/usage.spec.ts",
     "**/analytics.spec.ts",
@@ -111,6 +112,7 @@ export default defineConfig({
       testMatch: [
     "**/languages.spec.ts",
     "**/support.spec.ts",
+        "**/image-zoom.spec.ts",
         "**/usage.spec.ts",
         "**/analytics.spec.ts",
         "**/gadget-history.spec.ts",

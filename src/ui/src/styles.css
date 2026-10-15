@@ -2316,6 +2316,18 @@ button .loading-mark { color: inherit; }
   border-radius: 8px;
 }
 
+/* Zooming a picture (ZoomableImage): its own gestures, never the page's; zoomed, it is clipped to the preview. */
+.zoomable-image {
+  touch-action: none;
+  transform-origin: 0 0;
+  cursor: zoom-in;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+.zoomable-image.zoomed { cursor: grab; border-radius: 0; }
+.file-preview-body:has(> .zoomable-image.zoomed) { overflow: hidden; }
+
 /* A picture fits whole: the dialog takes the screen's height, so the picture's
    max-height has a height to resolve against (a max-height alone gives none,
    and a portrait overflowed with its top cut off). */

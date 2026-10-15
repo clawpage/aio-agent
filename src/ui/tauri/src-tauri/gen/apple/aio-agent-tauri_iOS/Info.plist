@@ -24,6 +24,8 @@
 	<string>语音输入时录下你说的话，转成文字放进输入框。</string>
 	<key>NSCameraUsageDescription</key>
 	<string>拍照或录像作为附件发给一站。</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>下载图片时存入你的相册。</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>UILaunchStoryboardName</key>
