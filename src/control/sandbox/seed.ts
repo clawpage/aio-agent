@@ -580,6 +580,7 @@ description: Make images whose content is mainly text or layout (tables, schedul
 - image_generate is only for the drawn parts (illustrations, icons, photos, stickers). Generate each one once as its own PNG
   (transparent background when it sits on a colored card) in the page's \`assets/\` folder and place it with \`<img>\`.
   Reuse those files when the page changes; generate an asset again only when the drawing itself has to change.
+  Simple icons (foods, objects, weather) can be emoji instead: Noto Color Emoji is installed and renders crisply.
 - Never paint text onto a PNG with Pillow or similar. Change the HTML and render again.
 
 ## Files
