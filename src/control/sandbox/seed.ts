@@ -435,6 +435,185 @@ Send the user the \`url\` as a link with a short, meaningful title, and tell the
 `;
 
 /**
+ * Text and layout images (tables, plans, schedules): built as HTML and rendered
+ * to PNG with the sandbox's headless Chromium, so editing one never degrades it.
+ * image_generate redraws every pixel, and a meal plan edited that way a dozen
+ * times came out blurred with garbled characters. Managed like the share skill;
+ * the renderer has no dependencies beyond the browser already in the sandbox.
+ */
+export const GRAPHIC_TOOL_DIR = "tools/aio-graphic";
+export const GRAPHIC_SKILL_DIR = "skills/aio-graphic";
+export const GRAPHIC_RENDER_PY = String.raw`#!/usr/bin/env python3
+"""aio-render: render a local HTML page to a PNG with the sandbox's headless Chromium (managed by AIO Agent)."""
+import argparse, base64, fcntl, json, os, shutil, subprocess, sys, tempfile, time
+
+BROWSER = "/usr/local/bin/chromium"
+
+
+class Page:
+    """Chrome DevTools over --remote-debugging-pipe: fd 3 carries commands in, fd 4 carries replies out."""
+
+    def __init__(self, width, scale):
+        self.profile = tempfile.mkdtemp(prefix="aio-render-")
+        to_chrome_r, self.to_chrome = os.pipe()
+        self.from_chrome, from_chrome_w = os.pipe()
+        # Move the child's ends above 4 so placing them at fds 3 and 4 cannot overwrite one another.
+        high = [fcntl.fcntl(fd, fcntl.F_DUPFD, 10) for fd in (to_chrome_r, from_chrome_w)]
+        os.close(to_chrome_r)
+        os.close(from_chrome_w)
+        to_chrome_r, from_chrome_w = high
+        # The child sees our pipe ends as fds 3 and 4 (pass_fds keeps those two open after this runs).
+        def wire():
+            os.dup2(to_chrome_r, 3)
+            os.dup2(from_chrome_w, 4)
+        # The sandbox container is the isolation boundary; Chromium's own sandbox cannot start inside it.
+        args = [BROWSER, "--headless=new", "--no-sandbox", "--remote-debugging-pipe", f"--user-data-dir={self.profile}",
+                "--no-first-run", "--no-default-browser-check", "--disable-gpu", "--hide-scrollbars", "--mute-audio",
+                "--disable-extensions", "--allow-file-access-from-files", "about:blank"]
+        self.proc = subprocess.Popen(args, pass_fds=(3, 4), preexec_fn=wire,
+                                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        os.close(to_chrome_r)
+        os.close(from_chrome_w)
+        self.buf = b""
+        self.next_id = 0
+        self.width, self.scale = width, scale
+        try:
+            targets = self.call("Target.getTargets")["targetInfos"]
+            target = next(t["targetId"] for t in targets if t["type"] == "page")
+            self.session = self.call("Target.attachToTarget", {"targetId": target, "flatten": True})["sessionId"]
+            self.call("Page.enable", session=True)
+            self.metrics(1000)
+        except BaseException:
+            self.close()
+            raise
+
+    def call(self, method, params=None, session=False, timeout=60):
+        self.next_id += 1
+        msg = {"id": self.next_id, "method": method, "params": params or {}}
+        if session:
+            msg["sessionId"] = self.session
+        os.write(self.to_chrome, json.dumps(msg).encode() + b"\0")
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            while b"\0" in self.buf:
+                raw, self.buf = self.buf.split(b"\0", 1)
+                reply = json.loads(raw)
+                if reply.get("id") == self.next_id:
+                    if "error" in reply:
+                        raise RuntimeError(f"{method}: {reply['error'].get('message')}")
+                    return reply.get("result", {})
+            chunk = os.read(self.from_chrome, 1 << 20)
+            if not chunk:
+                raise RuntimeError("the browser exited")
+            self.buf += chunk
+        raise RuntimeError(f"{method}: timed out")
+
+    def metrics(self, height):
+        self.call("Emulation.setDeviceMetricsOverride",
+                  {"width": self.width, "height": height, "deviceScaleFactor": self.scale, "mobile": False}, session=True)
+
+    def evaluate(self, expression):
+        r = self.call("Runtime.evaluate", {"expression": expression, "awaitPromise": True, "returnByValue": True}, session=True)
+        if "exceptionDetails" in r:
+            raise RuntimeError(r["exceptionDetails"].get("text", "script error"))
+        return r["result"].get("value")
+
+    def close(self):
+        try:
+            self.proc.terminate()
+            self.proc.wait(timeout=10)
+        except Exception:
+            self.proc.kill()
+        shutil.rmtree(self.profile, ignore_errors=True)
+
+
+def main():
+    parser = argparse.ArgumentParser(prog="aio-render", description="Render a local HTML file to a PNG (full page height by default).")
+    parser.add_argument("html", help="absolute path of the .html file in the workspace")
+    parser.add_argument("png", help="absolute path of the .png to write")
+    parser.add_argument("--width", type=int, default=1080, help="page width in CSS pixels (default 1080)")
+    parser.add_argument("--height", type=int, help="fixed height in CSS pixels; default is the full page height")
+    parser.add_argument("--scale", type=float, default=2, help="device pixel ratio (default 2, i.e. a 2160 px wide PNG)")
+    a = parser.parse_args()
+    html = os.path.abspath(a.html)
+    if not os.path.isfile(html):
+        sys.exit(json.dumps({"error": f"not found: {html}"}, ensure_ascii=False))
+    try:
+        page = Page(a.width, a.scale)
+    except Exception as err:
+        sys.exit(json.dumps({"error": f"could not start the browser: {err}"}, ensure_ascii=False))
+    try:
+        page.call("Page.navigate", {"url": "file://" + html}, session=True)
+        # Wait for the document, its web fonts and its images.
+        page.evaluate("""new Promise(r => {const go = () => document.fonts.ready.then(() => Promise.all([...document.images].map(i => i.complete ? 0 : new Promise(d => {i.onload = i.onerror = d;})))).then(() => setTimeout(r, 200)); document.readyState === 'complete' ? go() : addEventListener('load', go);})""")
+        height = a.height or int(page.evaluate("Math.ceil(Math.max(document.documentElement.scrollHeight, document.body ? document.body.scrollHeight : 0))"))
+        page.metrics(height)
+        page.evaluate("new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))")
+        shot = page.call("Page.captureScreenshot", {"format": "png", "captureBeyondViewport": False,
+                                                    "clip": {"x": 0, "y": 0, "width": a.width, "height": height, "scale": 1}}, session=True)
+        os.makedirs(os.path.dirname(os.path.abspath(a.png)), exist_ok=True)
+        with open(a.png, "wb") as f:
+            f.write(base64.b64decode(shot["data"]))
+        print(json.dumps({"png": os.path.abspath(a.png), "width": round(a.width * a.scale), "height": round(height * a.scale)}))
+    except Exception as err:
+        sys.exit(json.dumps({"error": str(err)}, ensure_ascii=False))
+    finally:
+        page.close()
+
+
+if __name__ == "__main__":
+    main()
+`;
+
+export const GRAPHIC_SKILL_MD = `---
+name: aio-graphic
+description: Make images whose content is mainly text or layout (tables, schedules, meal or study plans, checklists, timetables, menus, infographics, certificates, text-heavy posters) by writing an HTML page and rendering it to a PNG. Use whenever such an image is created or changed, including a one-word edit.
+---
+
+# Text and layout images: HTML, rendered to PNG
+
+## Rules
+
+- An image whose value is its text or layout is built as an HTML page and rendered with \`aio-render\`.
+  **Never draw it with image_generate, and never use image_generate to change its text**: the image model redraws every pixel,
+  so each edit blurs the picture and garbles characters, and the damage piles up edit after edit.
+- image_generate is only for the drawn parts (illustrations, icons, photos, stickers). Generate each one once as its own PNG
+  (transparent background when it sits on a colored card) in the page's \`assets/\` folder and place it with \`<img>\`.
+  Reuse those files when the page changes; generate an asset again only when the drawing itself has to change.
+- Never paint text onto a PNG with Pillow or similar. Change the HTML and render again.
+
+## Files
+
+- Keep the page next to its image: \`/home/gem/workspace/tasks/<task id>/<name>.html\`, its \`assets/\`, and the rendered \`<name>.png\`.
+- To change an image made earlier, look for its \`.html\` in the folder of that PNG. Copy the page and its \`assets/\` into this task's folder, edit, and render a new PNG.
+- If the earlier image has no HTML (it was drawn with image_generate), rebuild it once as HTML: read every line of text from the image carefully
+  (zoom in on small text), keep the same structure and colors, and generate fresh illustration assets. Do not embed the old flattened image or crop pieces out of it.
+
+## Building the page
+
+- Fixed width: \`<body style="margin:0; width:1080px">\` and render at the default \`--width 1080\`. The height follows the content.
+- Readable on a phone: body text at least 26px at this width, titles larger; leave padding at the edges.
+- Fonts are installed locally: \`font-family: "Noto Sans CJK SC", "Noto Sans", sans-serif\` (use "Noto Sans CJK TC" for Traditional Chinese). Do not load web fonts.
+- One self-contained file: CSS in a \`<style>\` block, images by relative path. Scripts and network resources are not needed.
+
+## Rendering
+
+The command is not on PATH; use the absolute path:
+
+\`\`\`bash
+python3 /home/gem/.codex/tools/aio-graphic/aio-render.py /home/gem/workspace/tasks/<task id>/<name>.html /home/gem/workspace/tasks/<task id>/<name>.png
+\`\`\`
+
+- Renders the whole page at 2x (a 2160 px wide PNG) and prints JSON with \`png\`, \`width\` and \`height\`; on failure it prints \`error\`, which you report truthfully.
+- Options: \`--width\` (CSS px, default 1080), \`--height\` (fixed height instead of the full page), \`--scale\` (default 2).
+
+## Checking and delivery
+
+Look at the PNG once (view_image) before delivering, and fix the HTML if anything overflows, wraps badly or is cut off.
+Show it in your reply with ![description](path to the png). The HTML stays in the folder for the next change; do not mention it unless the user asks.
+`;
+
+/**
  * Mail: the Himalaya CLI plus Ortie for OAuth tokens, both static musl builds
  * pinned by version and per-architecture sha256. They live in the Codex volume
  * so a recreated container keeps them, and are linked into /usr/local/bin so

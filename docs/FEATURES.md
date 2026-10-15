@@ -477,6 +477,10 @@ owner 容器休眠期间新成员的端口隔离规则先记下，容器下次�
 - **实现**：控制面用自己的 ChatGPT 登录调用出图接口（`gpt-image-2`，`/images/generations` 或 `/images/edits`），把 PNG 写进该账号工作区。
   登录只在宿主侧使用。成员的 Codex 走成员网关、没有内置 imagegen，因此用此工具代替。
 - 仅在控制面有 ChatGPT 登录时提供（`PA_HOST_CODEX=on`），使用 owner 的 ChatGPT 套餐额度，所有账号共用，不设调用限额。
+- **以文字和排版为主的图**（表格、日程、辅食/学习计划、清单、菜单、信息图）不用 `image_generate` 画或改：出图模型每次都重画所有像素，
+  反复改字会越改越糊、字越改越错。执行器按沙箱 skill `aio-graphic` 写 HTML 页面（`tasks/<任务>/<名字>.html` + `assets/`），
+  用 `~/.codex/tools/aio-graphic/aio-render.py` 以沙箱内无头 Chromium 渲染成 2 倍 PNG；改图就改 HTML 再渲染。
+  `image_generate` 只画其中的插画素材，每张生成一次后重复使用。skill 与渲染脚本随沙箱启动写入（同分享 skill）。
 
 ## 13. 手机通知（Web Push）
 

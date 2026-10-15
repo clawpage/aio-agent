@@ -28,6 +28,10 @@ import {
   SHARE_SKILL_DIR,
   SHARE_SKILL_MD,
   SHARE_TOOL_DIR,
+  GRAPHIC_RENDER_PY,
+  GRAPHIC_SKILL_DIR,
+  GRAPHIC_SKILL_MD,
+  GRAPHIC_TOOL_DIR,
   refreshWorkspaceAgents,
 } from "./seed.js";
 
@@ -286,12 +290,13 @@ export class SandboxContainer {
         await Promise.all(skillDirs.map((dir) => this.writeFileInSandbox(`${dir}/SKILL.md`, DOCUMENT_SKILL_MD)));
       }
     };
-    // Each part writes its own files: run together, a start pays for one round of container calls, not six.
+    // Each part writes its own files: run together, a start pays for one round of container calls, not seven.
     await Promise.all([
       agents(),
       this.writeFileInSandbox(`${s.containerCodexHome}/config.toml`, CODEX_CONFIG_TOML, { onlyIfAbsent: true }),
       documentSkill(),
       this.seedShare(),
+      this.seedGraphic(),
       this.seedMail(),
       this.enforceCodexIsolation(),
     ]);
@@ -346,6 +351,24 @@ export class SandboxContainer {
       for (const dir of skillDirs) await this.writeFileInSandbox(`${dir}/SKILL.md`, SHARE_SKILL_MD);
     } catch (err) {
       this.#log.warn("could not seed the sandbox share skill", { error: String(err).slice(0, 200) });
+    }
+  }
+
+  /**
+   * The HTML-to-PNG skill for both executors plus its renderer. Like the share
+   * skill, a failure is logged and never blocks the sandbox.
+   */
+  async seedGraphic(): Promise<void> {
+    const s = this.#cfg.sandbox;
+    const toolDir = `${s.containerCodexHome}/${GRAPHIC_TOOL_DIR}`;
+    const skillDirs = [`${s.containerCodexHome}/${GRAPHIC_SKILL_DIR}`, `${this.#cfg.claudeCode.configDir}/${GRAPHIC_SKILL_DIR}`];
+    try {
+      const mkdir = await this.execInSandbox(["mkdir", "-p", toolDir, ...skillDirs], { timeoutMs: 15_000 });
+      if (mkdir.code !== 0) throw new Error((mkdir.stderr || mkdir.stdout).trim().slice(0, 200));
+      await this.writeFileInSandbox(`${toolDir}/aio-render.py`, GRAPHIC_RENDER_PY);
+      for (const dir of skillDirs) await this.writeFileInSandbox(`${dir}/SKILL.md`, GRAPHIC_SKILL_MD);
+    } catch (err) {
+      this.#log.warn("could not seed the sandbox graphic skill", { error: String(err).slice(0, 200) });
     }
   }
 

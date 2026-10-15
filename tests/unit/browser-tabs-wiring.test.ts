@@ -98,6 +98,7 @@ it("tells the executor to draw pictures with the image tool only when this runti
   await tick();
   expect(codex.threadOpts[1]?.developerInstructions).toContain(IMAGE_POLICY);
   expect(IMAGE_POLICY).toContain("![description](path)");
+  expect(IMAGE_POLICY).toContain("aio-graphic skill");
 });
 
 it("records every execution thread's tabs against its task and marks them finished before the browser hold ends", async () => {

@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 import { SandboxContainer } from "../../src/control/sandbox/container.js";
-import { CODEX_CONFIG_TOML, DOCUMENT_SKILL_DIR, DOCUMENT_SKILL_MD, MAIL_BINARIES, MAIL_INSTALL_SH, MAIL_RO_SH, MAIL_SETUP_PY, MAIL_SKILL_MD, SHARE_CLI_PY, SHARE_SKILL_MD, WORKSPACE_AGENTS_BEGIN, WORKSPACE_AGENTS_END, WORKSPACE_AGENTS_MD, refreshWorkspaceAgents } from "../../src/control/sandbox/seed.js";
+import { CODEX_CONFIG_TOML, DOCUMENT_SKILL_DIR, DOCUMENT_SKILL_MD, GRAPHIC_RENDER_PY, GRAPHIC_SKILL_MD, MAIL_BINARIES, MAIL_INSTALL_SH, MAIL_RO_SH, MAIL_SETUP_PY, MAIL_SKILL_MD, SHARE_CLI_PY, SHARE_SKILL_MD, WORKSPACE_AGENTS_BEGIN, WORKSPACE_AGENTS_END, WORKSPACE_AGENTS_MD, refreshWorkspaceAgents } from "../../src/control/sandbox/seed.js";
 import { Logger } from "../../src/common/logger.js";
 import { testConfig, testNode } from "../helpers/harness.js";
 
@@ -150,6 +150,29 @@ describe("sandbox workspace seed", () => {
     const config = calls.find((c) => c.path.endsWith("/tools/aio-share/config.json"));
     expect(JSON.parse(config!.content)).toEqual(share);
     expect(execCalls).toContainEqual(["chmod", "600", config!.path]);
+  });
+
+  it("gives both executors the HTML-to-PNG skill and its renderer on every sandbox", async () => {
+    const cfg = testConfig("/tmp/pa-graphic-seed-test", 1);
+    const container = new SandboxContainer(cfg, new Logger("error", undefined, false), testNode());
+    vi.spyOn(container, "enforceCodexIsolation").mockResolvedValue();
+    const calls: Array<{ path: string; content: string }> = [];
+    container.writeFileInSandbox = (async (filePath: string, content: string) => {
+      calls.push({ path: filePath, content });
+    }) as typeof container.writeFileInSandbox;
+    container.execInSandbox = (async () => ({ code: 0, stdout: "", stderr: "" })) as typeof container.execInSandbox;
+    await container.seedWorkspace();
+    const skills = calls.filter((c) => c.path.endsWith("/skills/aio-graphic/SKILL.md"));
+    expect(skills.map((c) => c.path).sort()).toEqual([
+      `${cfg.claudeCode.configDir}/skills/aio-graphic/SKILL.md`,
+      `${cfg.sandbox.containerCodexHome}/skills/aio-graphic/SKILL.md`,
+    ].sort());
+    for (const s of skills) expect(s.content).toBe(GRAPHIC_SKILL_MD);
+    expect(calls.find((c) => c.path === `${cfg.sandbox.containerCodexHome}/tools/aio-graphic/aio-render.py`)?.content).toBe(GRAPHIC_RENDER_PY);
+    // The skill names the renderer at the path it is written to, and keeps text edits away from image_generate.
+    expect(GRAPHIC_SKILL_MD).toContain("python3 /home/gem/.codex/tools/aio-graphic/aio-render.py");
+    expect(GRAPHIC_SKILL_MD).toMatch(/^---\nname: aio-graphic\ndescription: /);
+    expect(GRAPHIC_SKILL_MD).toContain("never use image_generate to change its text");
   });
 
   it("gives every sandbox the mail skill, its scripts and the pinned himalaya/ortie on PATH", async () => {
