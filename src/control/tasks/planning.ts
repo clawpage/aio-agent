@@ -81,7 +81,7 @@ export function applyTaskReference(plan: TaskPlan, target: PlanningTask): void {
     plan.resume = plan.appendTo ? null : canResume(target) ? target.id : null;
     plan.decision = { kind: plan.appendTo ? "steer" : plan.resume ? "resume" : "new", taskId: plan.appendTo ?? plan.resume };
 }
-export function planningPrompt(text: string, previous: PlanningTask[], explicit: string | null, context: { timeline?: string; jev?: JevRelevance | null; now?: string; timezone?: string; schedules?: PlanningSchedule[]; /** Why the previous answer could not be used, when asking again. */ correction?: string; /** The account's console language: the title and other user-visible fields are written in it. */ locale?: Locale } = {}): string {
+export function planningPrompt(text: string, previous: PlanningTask[], explicit: string | null, context: { timeline?: string; jev?: JevRelevance | null; now?: string; timezone?: string; schedules?: PlanningSchedule[]; /** Why the previous answer could not be used, when asking again. */ correction?: string; /** The account's console language: the title and other user-visible fields follow the message's own language, and this one only when it has none. */ locale?: Locale } = {}): string {
     const day = (ts?: number) => (ts ? new Date(ts).toLocaleDateString("sv-SE") : undefined);
     const clock = (ts: number) => new Date(ts).toLocaleTimeString("sv-SE", { hour: "2-digit", minute: "2-digit" });
     // Newest first, numbered: a same-day date alone cannot tell the dispatcher which task the user just talked about.
@@ -113,7 +113,7 @@ export function planningPrompt(text: string, previous: PlanningTask[], explicit:
             const short = RECALLED.has(t.source ?? "");
             return { id: t.id, order: i + 1, title: t.title, status: t.status, group: ["planning", "needs_input", "waiting", "queued", "running", "stopping", "blocked"].includes(t.status) ? "active" : "finished", ...(t.source ? { source: t.source } : {}), ...(t.created_at ? { date: day(t.created_at), time: clock(t.created_at) } : {}), clarification: t.clarification ?? null, input_text: t.input_text.slice(0, short ? 600 : 1800), result: t.result?.slice(0, short ? 1000 : 4000), latestMessage: t.latestMessage?.slice(0, short ? 500 : 1000) ?? null };
         }) }),
-        ...(context.locale ? [answerLanguage(context.locale)] : []),
+        ...(context.locale ? [answerLanguage(context.locale, true)] : []),
     ].join("\n");
 }
 /** What parsing a plan did: small defects it repaired, or why it could not use the answer. */

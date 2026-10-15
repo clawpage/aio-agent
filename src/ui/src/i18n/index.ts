@@ -12,8 +12,9 @@ import { zhTW } from "./locales/zh-TW";
  *
  * The language is chosen once at load: switching stores the choice and
  * reloads, so no component needs to re-render on a language change and plain
- * modules can use `t` too. Simplified Chinese is the default; other languages
- * are selected explicitly on the settings page.
+ * modules can use `t` too. Until a language is chosen on the settings page the
+ * console follows the browser's (or the phone's) languages: the first one it
+ * speaks, English when it speaks none of them.
  */
 export const LOCALES = { "zh-CN": zh, en, es, "zh-TW": zhTW } satisfies Record<string, Messages>;
 export type Locale = keyof typeof LOCALES;
@@ -25,18 +26,36 @@ function isLocale(value: unknown): value is Locale {
   return typeof value === "string" && Object.hasOwn(LOCALES, value);
 }
 
-function storedLocale(): Locale {
+/** The console language closest to a BCP 47 tag such as "es-ES" or "zh-Hant-HK", if any. */
+export function matchLocale(tag: string): Locale | null {
+  const lower = tag.toLowerCase();
+  if (lower === "zh" || lower.startsWith("zh-")) return /^zh-(hant|tw|hk|mo)\b/.test(lower) ? "zh-TW" : "zh-CN";
+  if (lower === "en" || lower.startsWith("en-")) return "en";
+  if (lower === "es" || lower.startsWith("es-")) return "es";
+  return null;
+}
+
+/** The first of the system's preferred languages the console speaks; English when it speaks none. */
+export function systemLocale(tags: readonly string[]): Locale {
+  for (const tag of tags) {
+    const match = matchLocale(tag);
+    if (match) return match;
+  }
+  return "en";
+}
+
+function initialLocale(): Locale {
   // Outside a browser (unit tests) there is no stored choice.
   if (typeof document === "undefined") return DEFAULT_LOCALE;
   try {
     const value = globalThis.localStorage?.getItem(STORAGE_KEY);
-    return isLocale(value) ? value : DEFAULT_LOCALE;
-  } catch {
-    return DEFAULT_LOCALE;
-  }
+    if (isLocale(value)) return value;
+  } catch { /* private mode: no stored choice */ }
+  const nav = globalThis.navigator;
+  return systemLocale(nav?.languages?.length ? nav.languages : nav?.language ? [nav.language] : []);
 }
 
-export const locale: Locale = storedLocale();
+export const locale: Locale = initialLocale();
 
 /** The messages of the current language. */
 export const t: Messages = LOCALES[locale];

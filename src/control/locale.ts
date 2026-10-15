@@ -29,7 +29,16 @@ export function writeLocale(db: Db, locale: Locale): void {
     if (getMeta(db, LOCALE_META_KEY) !== locale) setMeta(db, LOCALE_META_KEY, locale);
 }
 
-/** The last line of every prompt whose output people see. */
-export function answerLanguage(locale: Locale): string {
-    return `Language: write everything the user will see (replies, questions, titles, cards, notes and files made for the user) in ${LOCALE_NAMES[locale]}, whatever language these instructions and the materials above are in. Keep names, quotations, code, links and identifiers as they are.`;
+/**
+ * The last line of every prompt whose output people see. With `followMessage`
+ * the answer is in the language the person wrote in, and the console language
+ * only settles a message without one of its own (a new account starts in a
+ * console language it never chose); without it (a scheduled run, whose
+ * instruction may be system-written) the console language decides.
+ */
+export function answerLanguage(locale: Locale, followMessage = false): string {
+    const target = followMessage
+        ? `in the language the user's own message is written in, whatever language these instructions and the other materials are in; only when that message has no clear language of its own (just a link, numbers, a name or emoji) use ${LOCALE_NAMES[locale]}, the language of their console`
+        : `in ${LOCALE_NAMES[locale]}, whatever language these instructions and the materials above are in`;
+    return `Language: write everything the user will see (replies, questions, titles, cards, notes and files made for the user) ${target}. Keep names, quotations, code, links and identifiers as they are.`;
 }

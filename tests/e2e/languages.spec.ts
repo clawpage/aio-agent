@@ -57,3 +57,24 @@ for (const language of languages) test(`${language.id}: sign-in language persist
   expect(saved).toEqual([...(language.id === 'zh-CN' ? [] : [language.id]), language.id === 'en' ? 'es' : 'en']);
   expect(writes.filter(path => path === '/api/settings' || path.includes('/google/register') || path.includes('/auth/logout'))).toEqual([]);
 });
+
+// Before any choice the console speaks the system's language (an Android phone's, in the app), English when it has none of ours.
+for (const system of [
+  { locale: 'es-ES', lang: 'es', google: 'Acceder o registrarse con Google' },
+  { locale: 'de-DE', lang: 'en', google: 'Sign in / sign up with Google' },
+  { locale: 'zh-HK', lang: 'zh-TW', google: '使用 Google 登入 / 註冊' },
+]) test.describe(`system language ${system.locale}`, () => {
+  test.use({ locale: system.locale });
+  test(`opens in ${system.lang} until a language is chosen`, async ({ page }) => {
+    await mockConsole(page, { conversations: [] });
+    await page.route('**/api/auth/session', route => route.fulfill({ json: { authenticated: false, username: null } }));
+    await page.route('**/api/auth/google/pending', route => route.fulfill({ json: { enabled: true, pending: null } }));
+    await page.goto('/login');
+    await expect(page.locator('html')).toHaveAttribute('lang', system.lang);
+    await expect(page.getByRole('button', { name: system.google, exact: true })).toBeVisible();
+    // A choice made on the settings page wins over the system language.
+    await page.evaluate(() => localStorage.setItem('aio.locale', 'zh-CN'));
+    await page.reload();
+    await expect(page.locator('html')).toHaveAttribute('lang', 'zh-CN');
+  });
+});

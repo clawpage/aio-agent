@@ -42,6 +42,8 @@ export default defineConfig({
   reporter: [["list"]],
   use: {
     baseURL,
+    // The specs are written against the Chinese console, which a browser asking for Chinese gets.
+    locale: "zh-CN",
     ignoreHTTPSErrors: false,
     trace: "retain-on-failure",
     screenshot: "only-on-failure",

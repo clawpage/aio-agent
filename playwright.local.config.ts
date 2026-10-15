@@ -85,6 +85,8 @@ export default defineConfig({
   reporter: [["list"]],
   use: {
     baseURL: `http://127.0.0.1:${PORT}`,
+    // The specs are written against the Chinese console, which a browser asking for Chinese gets.
+    locale: "zh-CN",
     storageState: { cookies: [], origins: [] },
   },
   webServer: {

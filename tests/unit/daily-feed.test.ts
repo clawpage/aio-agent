@@ -5,6 +5,7 @@ import { feedTimeFor, TaskService } from "../../src/control/tasks/service.js";
 import { Logger } from "../../src/common/logger.js";
 import { taskNotification } from "../../src/control/push.js";
 import { FakeCodex, testConfig } from "../helpers/harness.js";
+import { answerLanguage } from "../../src/control/locale.js";
 
 class PlanningCodex extends FakeCodex {
   async planTask(p: string) {
@@ -70,6 +71,13 @@ describe("the built-in daily feed", () => {
     expect(prompt).toContain("帮我看看 Mac Studio 现在多少钱"); // the person's earlier tasks
     expect(prompt).toContain("pushed 3 times in a row");
     expect(prompt).toContain("<!--feed-topics:");
+  });
+
+  it("writes a run in the console language: its instruction is system-written, not the person's words", async () => {
+    tasks.setLocale("es");
+    tasks.runScheduleNow(feed().id, "owner_1");
+    await tick();
+    expect(codex.startedTurns.at(-1)!.text.endsWith(`\n\n${answerLanguage("es")}`)).toBe(true);
   });
 
   it("counts only what the person sent, not its own runs, and a manual run skips the check", async () => {
