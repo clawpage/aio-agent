@@ -20,7 +20,12 @@ for (const language of languages) test(`${language.id}: sign-in language persist
   await page.route('**/api/main*', route => route.fulfill({ json: { mode: 'tasks', tasks: [], nextBefore: null } }));
   // The account remembers each switch (its agents answer in it); a failed save still switches.
   const saved: string[] = [];
-  await page.route('**/api/account/locale', route => { saved.push(route.request().postDataJSON().locale); return route.fulfill(language.id === 'es' ? { status: 500, json: { error: 'down' } } : { json: { ok: true } }); });
+  const synced: string[] = [];
+  await page.route('**/api/account/locale', route => {
+    const body = route.request().postDataJSON();
+    (body.sync ? synced : saved).push(body.locale);
+    return route.fulfill(language.id === 'es' ? { status: 500, json: { error: 'down' } } : { json: { ok: true } });
+  });
   await page.goto('/u/demo/settings');
   const localSettings = page.locator('.settings-card select');
   await expect(localSettings.locator('option')).toHaveText(['中文', 'English', 'Español', '繁體中文']);
@@ -55,6 +60,8 @@ for (const language of languages) test(`${language.id}: sign-in language persist
   await expect(page.getByRole('heading', { name: language.id === 'en' ? 'Chat principal' : 'Main chat', exact: true })).toBeVisible();
   expect(writes).toContain('/api/auth/google/cancel');
   expect(saved).toEqual([...(language.id === 'zh-CN' ? [] : [language.id]), language.id === 'en' ? 'es' : 'en']);
+  // Only the first, unchosen console (the browser asks for Chinese) reported its language; a choice ends that.
+  expect(synced).toEqual(['zh-CN']);
   expect(writes.filter(path => path === '/api/settings' || path.includes('/google/register') || path.includes('/auth/logout'))).toEqual([]);
 });
 
@@ -67,8 +74,16 @@ for (const system of [
   test.use({ locale: system.locale });
   test(`opens in ${system.lang} until a language is chosen`, async ({ page }) => {
     await mockConsole(page, { conversations: [] });
-    await page.route('**/api/auth/session', route => route.fulfill({ json: { authenticated: false, username: null } }));
+    let authenticated = true;
+    const synced: unknown[] = [];
+    await page.route('**/api/account/locale', route => { synced.push(route.request().postDataJSON()); return route.fulfill({ json: { ok: true, applied: true } }); });
+    await page.route('**/api/auth/session', route => route.fulfill({ json: { authenticated, username: authenticated ? 'demo' : null, role: 'member' } }));
     await page.route('**/api/auth/google/pending', route => route.fulfill({ json: { enabled: true, pending: null } }));
+    await page.route('**/api/main*', route => route.fulfill({ json: { mode: 'tasks', tasks: [], nextBefore: null } }));
+    // Signed in, the console tells the account the language it opened in.
+    await page.goto('/');
+    await expect.poll(() => synced).toEqual([{ locale: system.lang, sync: true }]);
+    authenticated = false;
     await page.goto('/login');
     await expect(page.locator('html')).toHaveAttribute('lang', system.lang);
     await expect(page.getByRole('button', { name: system.google, exact: true })).toBeVisible();
@@ -76,5 +91,11 @@ for (const system of [
     await page.evaluate(() => localStorage.setItem('aio.locale', 'zh-CN'));
     await page.reload();
     await expect(page.locator('html')).toHaveAttribute('lang', 'zh-CN');
+    // A chosen console never reports again.
+    authenticated = true;
+    await page.goto('/');
+    await expect(page.locator('html')).toHaveAttribute('lang', 'zh-CN');
+    await page.waitForLoadState('networkidle');
+    expect(synced).toHaveLength(1);
   });
 });

@@ -30,7 +30,7 @@ import {taskStatusLabels,type TaskFeed} from '../taskStatus';
 import { isSandboxLink } from "../sandboxLink";
 import { openDeviceBrowser } from "../deviceBrowser";
 import { attention } from "../attention";
-import { locale, t } from "../i18n";
+import { locale, localeChosen, localeSynced, markLocaleSynced, t } from "../i18n";
 import { track, trackOpen } from "../analytics";
 /** One owner-facing inbox; executor conversations are implementation details. */
 /** The site a link goes to, named on the opening card. */
@@ -103,6 +103,12 @@ export function MainApp() {
         const back = () => { if (document.visibilityState === "visible") trackOpen(locale); };
         document.addEventListener("visibilitychange", back);
         return () => document.removeEventListener("visibilitychange", back);
+    }, [auth]);
+    // A console in its system language tells the account once, so its agents' scheduled runs speak it too;
+    // the control plane ignores this after the first time and after any choice on the settings page.
+    useEffect(() => {
+        if (!auth || localeChosen || localeSynced()) return;
+        api.syncAccountLocale(locale).then(markLocaleSynced, () => undefined);
     }, [auth]);
     useEffect(() => { if (auth) track("page_view", { view: workspace ? "workspace" : view }); }, [auth, view, workspace]);
     const [workspacePath, setWorkspacePath] = useState<string | undefined>();

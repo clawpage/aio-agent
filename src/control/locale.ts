@@ -25,8 +25,26 @@ export function readLocale(db: Db): Locale {
     return isLocale(value) ? value : DEFAULT_LOCALE;
 }
 
-export function writeLocale(db: Db, locale: Locale): void {
+/** Set once the person picks a language on the settings page; nothing automatic overrides it after that. */
+const MANUAL_META_KEY = "account.locale.manual";
+/** Set once a console has reported its system language on opening; that happens only once per account. */
+const SYNCED_META_KEY = "account.locale.synced";
+
+/**
+ * How a language reaches the account: `manual` is a choice on the settings page
+ * and always applies; `message` is the console a message was sent from, and
+ * `open` the language a console opened in (once per account); both only apply
+ * while the person has not chosen one. Returns whether this write applied.
+ */
+export function writeLocale(db: Db, locale: Locale, source: "manual" | "message" | "open"): boolean {
+    if (source === "manual") setMeta(db, MANUAL_META_KEY, "1");
+    else if (getMeta(db, MANUAL_META_KEY)) return false;
+    if (source === "open") {
+        if (getMeta(db, SYNCED_META_KEY)) return false;
+        setMeta(db, SYNCED_META_KEY, "1");
+    }
     if (getMeta(db, LOCALE_META_KEY) !== locale) setMeta(db, LOCALE_META_KEY, locale);
+    return true;
 }
 
 /**

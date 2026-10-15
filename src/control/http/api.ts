@@ -669,6 +669,8 @@ export function createApiRouter(context: AppContext): Router {
   router.put("/account/locale", requireKind("primary"), requireSession, (req, res) => {
     const locale = req.body?.locale;
     if (!isLocale(locale)) { res.status(400).json({ error: "bad_request", message: "不支持的语言" }); return; }
+    // A console reporting the language it opened in is not a person switching languages.
+    if (req.body?.sync === true) { res.json({ ok: true, applied: context.tasks.syncLocale(locale) }); return; }
     context.tasks.setLocale(locale);
     track(req, "locale_change", { locale });
     res.json({ ok: true });

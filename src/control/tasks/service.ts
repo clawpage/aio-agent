@@ -182,7 +182,10 @@ export class TaskService {
     }
     /** The account's console language: what its user-visible model output is written in. */
     locale(): Locale { return readLocale(this.db); }
-    setLocale(locale: Locale): void { writeLocale(this.db, locale); }
+    /** A choice on the settings page. */
+    setLocale(locale: Locale): void { writeLocale(this.db, locale, "manual"); }
+    /** The language a console opened in: taken once per account, and never over a choice. */
+    syncLocale(locale: Locale): boolean { return writeLocale(this.db, locale, "open"); }
     setNotifier(notifier: ((task: ReturnType<TaskService["view"]>) => void) | null): void { this.#notifier = notifier; }
     /** Tell the notifier about a status this task just reached, if it is news for the person. */
     private notifyChange(id: string, before: string): void {
@@ -333,7 +336,7 @@ export class TaskService {
         }
         if (related && !this.belongsTo(related, userId))
             throw new Error("关联任务不存在");
-        if (isLocale(input.locale)) writeLocale(this.db, input.locale);
+        if (isLocale(input.locale)) writeLocale(this.db, input.locale, "message");
         const frozen = isMember(this.db, userId) ? this.agent.memberSettings() : this.agent.resolveSubmitSettings({ conversationId: "main", text, clientMessageId: input.clientMessageId });
         const id = randomId("task");
         const title = [...(text || attachments.map(a => a.name ?? a.path).join("、"))].slice(0, 40).join("");

@@ -44,21 +44,33 @@ export function systemLocale(tags: readonly string[]): Locale {
   return "en";
 }
 
-function initialLocale(): Locale {
+function initialLocale(): { locale: Locale; chosen: boolean } {
   // Outside a browser (unit tests) there is no stored choice.
-  if (typeof document === "undefined") return DEFAULT_LOCALE;
+  if (typeof document === "undefined") return { locale: DEFAULT_LOCALE, chosen: false };
   try {
     const value = globalThis.localStorage?.getItem(STORAGE_KEY);
-    if (isLocale(value)) return value;
+    if (isLocale(value)) return { locale: value, chosen: true };
   } catch { /* private mode: no stored choice */ }
   const nav = globalThis.navigator;
-  return systemLocale(nav?.languages?.length ? nav.languages : nav?.language ? [nav.language] : []);
+  return { locale: systemLocale(nav?.languages?.length ? nav.languages : nav?.language ? [nav.language] : []), chosen: false };
 }
 
-export const locale: Locale = initialLocale();
+const initial = initialLocale();
+export const locale: Locale = initial.locale;
+/** Whether this console's language was picked on the settings page rather than taken from the system. */
+export const localeChosen: boolean = initial.chosen;
 
 /** The messages of the current language. */
 export const t: Messages = LOCALES[locale];
+
+const SYNCED_KEY = "aio.locale.synced";
+/** Whether this console has already told the account its language (it does so once). */
+export function localeSynced(): boolean {
+  try { return globalThis.localStorage?.getItem(SYNCED_KEY) === "1"; } catch { return false; }
+}
+export function markLocaleSynced(): void {
+  try { localStorage.setItem(SYNCED_KEY, "1"); } catch { /* private mode: the control plane still takes it only once */ }
+}
 
 /** Store a language and reload into it. */
 export function setLocale(next: Locale): void {

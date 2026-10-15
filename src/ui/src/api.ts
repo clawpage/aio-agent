@@ -150,6 +150,8 @@ export const api = {
   submitTask: (body: { text: string; clientMessageId: string; attachments: Attachment[]; relatedTaskId: string | null }) => request<{ task: import("./types").Task; duplicate: boolean }>("/api/tasks", { method: "POST", body: { ...body, locale } }),
   // keepalive: the page reloads into the new language right away, and the request outlives it.
   setAccountLocale: (next: Locale) => request<{ ok: true }>("/api/account/locale", { method: "PUT", body: { locale: next }, keepalive: true }),
+  /** The language this console opened in; the account takes it once, and never over a choice made in settings. */
+  syncAccountLocale: (current: Locale) => request<{ ok: true; applied: boolean }>("/api/account/locale", { method: "PUT", body: { locale: current, sync: true } }),
   archiveTask: (id: string) => request<{ ok: boolean }>(`/api/tasks/${encodeURIComponent(id)}/archive`, { method: "POST", body: {} }),
   stopTask: (id: string) => request<{ok:boolean}>(`/api/tasks/${encodeURIComponent(id)}/stop`, {method:"POST",body:{}}),
   retryTaskPlanning: (id: string) => request<{ok:boolean}>(`/api/tasks/${encodeURIComponent(id)}/retry-planning`, {method:"POST",body:{}}),

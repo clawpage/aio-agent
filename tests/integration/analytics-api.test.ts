@@ -47,6 +47,10 @@ it('records feature use in a member runtime into the central database', async ()
   h.ctx.runtimeForUser = vi.fn(async () => h.ctx);
   expect((await h.request('/api/account/locale', { method: 'PUT', headers: member, body: JSON.stringify({ locale: 'en' }) })).status).toBe(200);
   expect(events('locale_change').at(-1)).toEqual({ user_id: id, platform: null, props: JSON.stringify({ locale: 'en' }) });
+  // A console reporting the language it opened in is not a switch.
+  const switches = events('locale_change').length;
+  expect((await h.request('/api/account/locale', { method: 'PUT', headers: member, body: JSON.stringify({ locale: 'es', sync: true }) })).status).toBe(200);
+  expect(events('locale_change')).toHaveLength(switches);
   const before = (h.ctx.runtimeForUser as ReturnType<typeof vi.fn>).mock.calls.length;
   // Reporting an event never starts or wakes the account's runtime.
   expect((await h.request('/api/analytics', { method: 'POST', headers: member, body: JSON.stringify({ name: 'app_open' }) })).status).toBe(204);

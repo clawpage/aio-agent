@@ -65,13 +65,25 @@ it("rejects invalid references and out-of-workspace attachments before creating 
         expect(res.status).toBe(400);
     }
 });
-it("keeps the console language per account, from the settings switch and from each message", async () => {
+it("keeps the console language per account: messages and one opening follow the console until a choice in settings", async () => {
     const { cookie, csrf } = await login(h);
     const headers = { cookie, "x-csrf-token": csrf, "content-type": "application/json" };
+    const put = (body: object) => h.request("/api/account/locale", { method: "PUT", headers, body: JSON.stringify(body) });
     expect(h.ctx.tasks.locale()).toBe("zh-CN");
-    expect((await h.request("/api/account/locale", { method: "PUT", headers, body: JSON.stringify({ locale: "fr" }) })).status).toBe(400);
-    expect((await h.request("/api/account/locale", { method: "PUT", headers, body: JSON.stringify({ locale: "zh-TW" }) })).status).toBe(200);
-    expect(h.ctx.tasks.locale()).toBe("zh-TW");
     await h.request("/api/tasks", { method: "POST", headers, body: JSON.stringify({ text: "hello", clientMessageId: "locale-en", locale: "en" }) });
+    expect(h.ctx.tasks.locale()).toBe("en");
+    // A console opening in its system language is taken once per account.
+    expect(await (await put({ locale: "es", sync: true })).json()).toEqual({ ok: true, applied: true });
+    expect(h.ctx.tasks.locale()).toBe("es");
+    expect(await (await put({ locale: "zh-TW", sync: true })).json()).toEqual({ ok: true, applied: false });
+    expect(h.ctx.tasks.locale()).toBe("es");
+    expect((await put({ locale: "fr" })).status).toBe(400);
+    expect((await put({ locale: "fr", sync: true })).status).toBe(400);
+    // A choice in settings always applies, and nothing automatic overrides it afterwards.
+    expect((await put({ locale: "zh-TW" })).status).toBe(200);
+    expect(h.ctx.tasks.locale()).toBe("zh-TW");
+    await h.request("/api/tasks", { method: "POST", headers, body: JSON.stringify({ text: "hello again", clientMessageId: "locale-en-2", locale: "en" }) });
+    expect(h.ctx.tasks.locale()).toBe("zh-TW");
+    expect((await put({ locale: "en" })).status).toBe(200);
     expect(h.ctx.tasks.locale()).toBe("en");
 });
