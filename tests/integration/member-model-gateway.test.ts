@@ -94,6 +94,19 @@ it('sends only a GPT-assigned member to ChatGPT on its model, adding the control
   expect(seen.at(-1).body.reasoning).toEqual({effort:'low'});
   await post('user_alpha',token(a),{reasoning:{effort:'xhigh'},input:'route'});
   expect(seen.at(-1).body.reasoning).toEqual({effort:'high'});
+  // Images tools returned in earlier turns are dropped (the whole history is resent every time);
+  // the current turn's and the user's own images stay.
+  const img=(n:number)=>({type:'input_image',image_url:`data:image/png;base64,${'A'.repeat(n)}`,detail:'high'});
+  const upload={type:'message',role:'user',content:[{type:'input_text',text:'like this'},img(8)]};
+  const earlier={type:'custom_tool_call_output',call_id:'c1',output:[{type:'input_text',text:'Script completed'},img(40*1024*1024)]};
+  const earlierFn={type:'function_call_output',call_id:'c2',output:[img(8)]};
+  const current={type:'custom_tool_call_output',call_id:'c3',output:[img(8)]};
+  expect((await post('user_alpha',token(a),{input:[upload,earlier,earlierFn,{type:'message',role:'user',content:[{type:'input_text',text:'again'}]},current]})).status).toBe(200);
+  const sent=seen.at(-1).body.input;
+  expect(sent[0]).toEqual(upload);
+  expect(sent[1].output[0]).toEqual({type:'input_text',text:'Script completed'});
+  for(const item of [sent[1],sent[2]])expect(item.output.at(-1)).toMatchObject({type:'input_text',text:expect.stringContaining('earlier turn was removed')});
+  expect(sent[4]).toEqual(current);
   // A rejected token is dropped so the next request fetches a fresh one.
   expect((await post('user_alpha',token(a),{input:'expired'})).status).toBe(401);expect(invalidated).toBe(1);
   // A Claude member has no Responses route even with its own valid token.

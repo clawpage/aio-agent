@@ -154,6 +154,8 @@
   - Claude 成员：仅 `/v1/messages` 与 `/v1/messages/count_tokens`，模型强制改为分配值，owner 的 Claude Code 凭据在宿主侧附加；
   - GPT 成员：无状态 Responses 路由，发往 `PA_CHATGPT_CODEX_URL`，模型固定、`store:false`、去掉 `service_tier`、禁用历史响应查询，
     控制面的 ChatGPT 登录（`codex-login`）在宿主侧附加；控制面未登录时该账号报服务不可用。
+    Codex 每次请求都重发整个会话历史，工具在之前回合返回的图片（如 `view_image` 看过的截图）转发前换成一句说明，
+    只保留当前回合的图片和用户自己上传的图片；否则反复改图的会话会越积越大，超过请求上限（128 MB）后整个会话无法再执行。
 - **账号路径**：主控制台为 `<主域名>/u/<用户名>`，根路径和 `/login` 登录后跳到自己的地址；同一浏览器一次只登录一个账号，
   打开别人的地址只显示「这是 X 的页面」。页面路由（`src/ui/src/route.ts`）：`/tasks`、`/tasks/<任务id>`、`/schedules`、
   `/vault`、`/usage`、`/analytics`、`/gadget` 与 `/settings`（仅 owner）、`/workspace`（叠加在页面上，关闭即后退）。

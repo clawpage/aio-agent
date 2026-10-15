@@ -23,6 +23,26 @@ import type {PrinterGateway} from './printer/gateway.js';
 const OAUTH_BETA='oauth-2025-04-20';
 /** Request metadata the member's Codex sends that ChatGPT may read; never its gateway token. */
 const CODEX_HEADERS=/^(accept|user-agent|originator|version|session-id|thread-id|x-client-request-id|x-codex-[a-z0-9-]+|x-openai-internal-codex-[a-z0-9-]+)$/;
+/** Read limit for one request; images from earlier turns are dropped before it is forwarded. */
+const MAX_REQUEST_BYTES=128*1024*1024;
+const IMAGE_DROPPED={type:'input_text',text:'[An image a tool returned in an earlier turn was removed to keep the request small; view it again if it is still needed.]'};
+
+/**
+ * Codex resends a thread's whole history on every request, including each image a tool returned.
+ * One member's thread of picture edits viewed a 2.5 MB screenshot per edit until every request
+ * passed the size limit and the thread could not run at all. Tool images before the latest user
+ * message are replaced by a note; the current turn keeps its own, and user uploads are kept.
+ */
+export function dropEarlierToolImages(input:unknown):void{
+  if(!Array.isArray(input))return;
+  const items=input as Array<{type?:unknown;role?:unknown;output?:unknown}|null>;
+  let lastUser=-1;
+  items.forEach((item,i)=>{if(item?.type==='message'&&item.role==='user')lastUser=i;});
+  for(const item of items.slice(0,Math.max(lastUser,0))){
+    if(typeof item?.type!=='string'||!item.type.endsWith('_call_output')||!Array.isArray(item.output))continue;
+    item.output=item.output.map(part=>(part as {type?:unknown}|null)?.type==='input_image'?IMAGE_DROPPED:part);
+  }
+}
 
 /**
  * Member capabilities authorize stateless inference on the member's one assigned model only:
@@ -89,7 +109,7 @@ export class MemberModelGateway {
       const abort=new AbortController();res.on('close',()=>abort.abort());
       try{
         const chunks:Buffer[]=[];let size=0;
-        for await(const chunk of req){size+=chunk.length;if(size>32*1024*1024){res.writeHead(413).end();return;}chunks.push(chunk);}
+        for await(const chunk of req){size+=chunk.length;if(size>MAX_REQUEST_BYTES){this.log.warn('member model request too large',{userId,bytes:size});res.writeHead(413).end();return;}chunks.push(chunk);}
         const input=JSON.parse(Buffer.concat(chunks).toString()) as Record<string,unknown>;
         if(messages){
           const state=claude.status();if(!state.enabled||!state.secret)throw new Error('Provider unavailable');
@@ -116,6 +136,7 @@ export class MemberModelGateway {
           // Anything else (xhigh and up, or none) runs at high.
           const effort=typeof asked==='string'&&MEMBER_EFFORTS.includes(asked)?asked:MEMBER_EFFORT;
           input.model=MEMBER_GPT_MODEL;input.reasoning={...reasoning,effort};input.store=false;delete input.service_tier;
+          dropEarlierToolImages(input.input);
           const headers:Record<string,string>={'content-type':'application/json',authorization:`Bearer ${tokens.accessToken}`,'chatgpt-account-id':tokens.chatgptAccountId};
           for(const [name,value] of Object.entries(req.headers))if(typeof value==='string'&&CODEX_HEADERS.test(name))headers[name]=value;
           const upstream=await fetch(this.cfg.hostCodex.chatgptUrl.replace(/\/$/,'')+'/responses',{method:'POST',headers,body:JSON.stringify(input),signal:abort.signal});
@@ -126,7 +147,10 @@ export class MemberModelGateway {
           return;
         }
         res.writeHead(403).end();
-      }catch{if(!res.headersSent)res.writeHead(502);res.end();}
+      }catch(err){
+        if(!abort.signal.aborted)this.log.warn('member model request failed',{userId,error:err instanceof Error?err.message:String(err)});
+        if(!res.headersSent)res.writeHead(502);res.end();
+      }
     });
     await new Promise<void>((resolve,reject)=>{this.server!.once('error',reject);this.server!.listen(this.cfg.memberModelPort??4902,'0.0.0.0',resolve);});
   }
