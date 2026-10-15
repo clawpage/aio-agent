@@ -42,9 +42,9 @@ const recording = Buffer.from(wav(new Float32Array(1600).fill(0.25), 16_000));
 it("says whether voice input is on, only to a logged-in console", async () => {
   expect((await h.request("/api/asr")).status).toBe(401);
   const { cookie } = await login(h);
-  expect(await (await h.request("/api/asr", { headers: { cookie } })).json()).toEqual({ enabled: true });
+  expect(await (await h.request("/api/asr", { headers: { cookie } })).json()).toEqual({ enabled: true, locales: ["zh-CN", "zh-TW", "en"] });
   const other = await login(off);
-  expect(await (await off.request("/api/asr", { headers: { cookie: other.cookie } })).json()).toEqual({ enabled: false });
+  expect(await (await off.request("/api/asr", { headers: { cookie: other.cookie } })).json()).toEqual({ enabled: false, locales: ["zh-CN", "zh-TW", "en"] });
   expect((await post(off, { audioBase64: recording.toString("base64") })).status).toBe(404);
 });
 

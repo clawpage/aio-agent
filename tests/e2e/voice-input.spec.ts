@@ -4,12 +4,12 @@ import { mockConsole } from "./mock-api";
 // Chromium's fake microphone (a tone) stands in for a voice; the speech server is mocked.
 test.use({ launchOptions: { args: ["--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream"] } });
 
-async function open(page: Page, opts: { enabled?: boolean; heard?: string } = {}) {
+async function open(page: Page, opts: { enabled?: boolean; heard?: string; locales?: string[] | null } = {}) {
   const posted: Buffer[] = [];
   await mockConsole(page, { conversations: [] });
   await page.route("**/api/main*", r => r.fulfill({ json: { mode: "tasks", tasks: [], nextBefore: null } }));
   await page.route(url => url.pathname === "/api/asr", async r => {
-    if (r.request().method() === "GET") return r.fulfill({ json: { enabled: opts.enabled ?? true } });
+    if (r.request().method() === "GET") return r.fulfill({ json: { enabled: opts.enabled ?? true, ...(opts.locales === null ? {} : { locales: opts.locales ?? ["zh-CN", "zh-TW", "en"] }) } });
     posted.push(Buffer.from((r.request().postDataJSON() as { audioBase64: string }).audioBase64, "base64"));
     await r.fulfill({ json: { text: opts.heard ?? "打开走廊灯。" } });
   });
@@ -66,6 +66,21 @@ test("has no microphone when no speech recognizer is configured", async ({ page 
   await open(page, { enabled: false });
   await expect(page.locator(".composer .file-button")).toBeVisible();
   await expect(page.getByRole("button", { name: "语音输入" })).toHaveCount(0);
+});
+
+test("an older control plane that lists no languages still offers the microphone", async ({ page }) => {
+  await open(page, { locales: null });
+  await expect(page.getByRole("button", { name: "语音输入" })).toBeVisible();
+});
+
+test.describe("in a language the speech server does not hear", () => {
+  test.use({ locale: "es-ES" });
+  test("has no microphone", async ({ page }) => {
+    await open(page);
+    await expect(page.locator("html")).toHaveAttribute("lang", "es");
+    await expect(page.locator(".composer .file-button")).toBeVisible();
+    await expect(page.getByTestId("voice-button")).toHaveCount(0);
+  });
 });
 
 test("on a phone the microphone sits beside send without covering the text", async ({ page }, info) => {

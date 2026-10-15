@@ -43,9 +43,12 @@ import { dispatchLog, recallStats } from "../tasks/recall.js";
 import { PERSON_KEY } from "../browser/tabs.js";
 import { normalizeSite, vaultLogin, VaultError, type Vault } from "../vault.js";
 import { DocumentError } from "../documents/service.js";
-import { isLocale } from "../locale.js";
+import { isLocale, type Locale } from "../locale.js";
 import type { BrowserStatusView } from "../browser/service.js";
 import { documentKind, isRenderableKind, mediaType, requireWorkspaceFilePath } from "../documents/paths.js";
+
+/** The console languages the speech server understands. */
+const ASR_LOCALES: Locale[] = ["zh-CN", "zh-TW", "en"];
 
 declare global {
   // eslint-disable-next-line @typescript-eslint/no-namespace
@@ -547,11 +550,13 @@ export function createApiRouter(context: AppContext): Router {
   /**
    * Voice input: the composer's recording (16-bit mono WAV, base64) goes to the
    * speech server at cfg.asrUrl (the one the voice gadget uses); only the text comes back,
-   * polished by the same model as the gadget's dictation.
+   * polished by the same model as the gadget's dictation. The speech server
+   * (SenseVoice) hears Mandarin, Cantonese and English but not Spanish, so the
+   * console offers the microphone only in the languages listed here.
    */
   const dictation = new Dictation(cfg, log);
   router.get("/asr", requireKind("primary"), requireSession, (_req, res) => {
-    res.json({ enabled: Boolean(cfg.asrUrl) });
+    res.json({ enabled: Boolean(cfg.asrUrl), locales: ASR_LOCALES });
   });
   router.post("/asr", requireKind("primary"), requireSession, asyncHandler(async (req, res) => {
     if (!cfg.asrUrl) { res.status(404).json({ error: "not_configured", message: "没有配置语音识别" }); return; }

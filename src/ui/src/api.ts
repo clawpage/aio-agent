@@ -243,7 +243,7 @@ export const api = {
     request<{ ok: boolean; tab: import("./types").TaskTab }>("/api/browser/files", { method: "POST", body: { path }, signal }),
   capabilities: () => request<CapabilitiesResponse>("/api/capabilities"),
   /** Voice input: whether a speech recognizer is configured, and what a WAV recording says. */
-  asr: () => request<{ enabled: boolean }>("/api/asr"),
+  asr: () => request<{ enabled: boolean; locales?: string[] }>("/api/asr"),
   transcribe: (wav: Uint8Array) => {
     let binary = "";
     for (let i = 0; i < wav.length; i += 0x8000) binary += String.fromCharCode(...wav.subarray(i, i + 0x8000));

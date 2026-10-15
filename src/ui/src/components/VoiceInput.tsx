@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import { MAX_SECONDS, startRecording, voiceSupported, type Recording } from "../voice";
 import { ComposerIcon } from "./ComposerControls";
-import { t } from "../i18n";
+import { locale, t } from "../i18n";
 
 /** Why the microphone would not open, in words the user can act on. */
 function micError(err: unknown): string {
@@ -16,7 +16,8 @@ function micError(err: unknown): string {
 /**
  * The composer's microphone: tap to talk, tap again to stop (a minute at most).
  * What was said is added to the draft for a look before sending. Hidden when
- * the browser cannot record or no speech recognizer is configured.
+ * the browser cannot record, no speech recognizer is configured, or it does not
+ * hear the console's language.
  */
 export function VoiceButton({ disabled, onText, onError }: { disabled: boolean; onText: (text: string) => void; onError: (message: string | null) => void }) {
   const [enabled, setEnabled] = useState(false);
@@ -29,7 +30,8 @@ export function VoiceButton({ disabled, onText, onError }: { disabled: boolean; 
   useEffect(() => {
     if (!voiceSupported()) return;
     let live = true;
-    api.asr().then(r => { if (live) setEnabled(r.enabled); }).catch(() => { /* an older control plane: no voice input */ });
+    // Only in a language the speech server hears; an older control plane lists none and allows any.
+    api.asr().then(r => { if (live) setEnabled(r.enabled && (!r.locales || r.locales.includes(locale))); }).catch(() => { /* an older control plane: no voice input */ });
     return () => { live = false; recording.current?.cancel(); recording.current = null; };
   }, []);
 
