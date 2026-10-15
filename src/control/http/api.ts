@@ -546,8 +546,10 @@ export function createApiRouter(context: AppContext): Router {
 
   /**
    * Voice input: the composer's recording (16-bit mono WAV, base64) goes to the
-   * speech server at cfg.asrUrl (the one the voice gadget uses); only the text comes back.
+   * speech server at cfg.asrUrl (the one the voice gadget uses); only the text comes back,
+   * polished by the same model as the gadget's dictation.
    */
+  const dictation = new Dictation(cfg, log);
   router.get("/asr", requireKind("primary"), requireSession, (_req, res) => {
     res.json({ enabled: Boolean(cfg.asrUrl) });
   });
@@ -561,7 +563,9 @@ export function createApiRouter(context: AppContext): Router {
       const upstream = await fetch(cfg.asrUrl, { method: "POST", headers: { "content-type": "audio/wav" }, body: new Uint8Array(audio), signal: AbortSignal.timeout(30_000) });
       if (!upstream.ok) throw new Error(`upstream ${upstream.status}`);
       const json = (await upstream.json()) as { text?: unknown };
-      res.json({ text: typeof json.text === "string" ? json.text.trim() : "" });
+      const heard = typeof json.text === "string" ? json.text.trim() : "";
+      const out = heard ? await dictation.polish(heard) : { text: "", polished: false };
+      res.json(out);
       track(req, "voice_input", { ok: true, seconds: Math.round((audio.byteLength - 44) / 32000) });
     } catch (err) {
       track(req, "voice_input", { ok: false });
@@ -790,7 +794,6 @@ export function createApiRouter(context: AppContext): Router {
     fs.createReadStream(firmware.file).on("error", () => res.destroy()).pipe(res);
   });
   // The dictation page: what the gadget heard, polished and typed at the cursor on the host Mac.
-  const dictation = new Dictation(cfg, log);
   router.post("/gadget/dictation", requireKind("primary"), asyncHandler(async (req, res) => {
     const caller = gadgetCaller(req, res);
     if (!caller) return;

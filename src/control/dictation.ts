@@ -26,10 +26,11 @@ export class DictationError extends Error {
 }
 
 /**
- * The voice gadget's dictation page: a transcript is polished by a small Claude
- * model (the owner's Claude credential) and typed at the cursor on the host Mac
- * by the keyboard bridge (bin/keyboard-bridge.mjs). Nothing here is reachable
- * from a sandbox: only the gadget's token leads to it.
+ * Every transcript is polished here by a Claude model (the owner's Claude
+ * credential): the composer's voice input (/api/asr) and the voice gadget's
+ * dictation page, whose text is then typed at the cursor on the host Mac by the
+ * keyboard bridge (bin/keyboard-bridge.mjs). Nothing here is reachable from a
+ * sandbox, and only the gadget's token leads to the keyboard bridge.
  */
 export class Dictation {
   #cfg: Config;
@@ -61,7 +62,7 @@ export class Dictation {
           ...(oauth ? { authorization: `Bearer ${state.secret}`, "anthropic-beta": OAUTH_BETA } : { "x-api-key": state.secret }),
         },
         body: JSON.stringify({
-          model: this.#cfg.keyboardBridge.model,
+          model: this.#cfg.polishModel,
           max_tokens: 2048,
           system: [
             // A subscription credential only serves requests that introduce themselves as Claude Code.

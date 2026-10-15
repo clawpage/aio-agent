@@ -90,6 +90,8 @@ export function loadConfig(): {
   gadgetFirmwareDir: string;
   /** Speech recognizer for the composer's voice input (POST /api/asr relays a WAV here); empty: off. */
   asrUrl: string;
+  /** The Claude model (owner's credential) that polishes every transcript: the composer's voice input and the gadget's dictation (src/control/dictation.ts). */
+  polishModel: string;
   /** Google Maps Platform key (Maps Static + Geocoding) for map cards; empty: OpenStreetMap. */
   googleMapsKey: string;
   logDir: string;
@@ -368,14 +370,13 @@ export function loadConfig(): {
   /**
    * The voice gadget's dictation page (src/control/dictation.ts): the keyboard
    * bridge on the host Mac (bin/keyboard-bridge.mjs) types what the gadget heard,
-   * after `model` polishes it with the owner's Claude credential. Without a URL
+   * after `polishModel` polishes it with the owner's Claude credential. Without a URL
    * the feature is absent.
    */
   keyboardBridge: {
     url: string;
     /** Private host file holding KEYBOARD_BRIDGE_TOKEN. */
     secretsFile: string;
-    model: string;
   };
   /**
    * The sandbox nodes (sandboxd) this control plane drives, in order; the first
@@ -435,6 +436,7 @@ export function loadConfig(): {
     gadgetUsageUrl: envStr("PA_GADGET_USAGE_URL", ""),
     gadgetFirmwareDir: envStr("PA_GADGET_FIRMWARE_DIR", path.join(dataDir, "gadget-firmware")),
     asrUrl: envStr("PA_ASR_URL", ""),
+    polishModel: envStr("PA_DICTATION_MODEL", "claude-sonnet-5-5"),
     googleMapsKey: (() => {
       if (envStr("PA_GOOGLE_MAPS_API_KEY").trim()) return envStr("PA_GOOGLE_MAPS_API_KEY").trim();
       // No file (or compose's /dev/null placeholder) leaves the maps on OpenStreetMap.
@@ -630,7 +632,6 @@ export function loadConfig(): {
     keyboardBridge: {
       url: envStr("PA_KEYBOARD_BRIDGE_URL", "").replace(/\/+$/, ""),
       secretsFile: envStr("PA_KEYBOARD_BRIDGE_SECRETS_FILE", path.join(os.homedir(), ".config", "aio-agent", "keyboard-bridge.env")),
-      model: envStr("PA_DICTATION_MODEL", "claude-haiku-4-5"),
     },
     sandboxNodes: {
       nodes: parseList(envStr("PA_SANDBOX_NODES", "local=http://127.0.0.1:4894")).map((entry) => {

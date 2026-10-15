@@ -1,4 +1,7 @@
+import fs from "node:fs";
 import http from "node:http";
+import os from "node:os";
+import path from "node:path";
 import type { AddressInfo } from "node:net";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { login, startHarness, type TestHarness } from "../helpers/harness.js";
@@ -50,7 +53,8 @@ it("relays the WAV to the speech server and returns only the text", async () => 
   answer = { status: 200, text: " 打开走廊灯。 " };
   const res = await post(h, { audioBase64: recording.toString("base64") });
   expect(res.status).toBe(200);
-  expect(await res.json()).toEqual({ text: "打开走廊灯。" });
+  // Without the owner's Claude credential the text comes back as heard.
+  expect(await res.json()).toEqual({ text: "打开走廊灯。", polished: false });
   expect(received).toHaveLength(1);
   expect(received[0]!.type).toBe("audio/wav");
   expect(received[0]!.body.equals(recording)).toBe(true);
@@ -75,4 +79,45 @@ it("refuses what is not a WAV or is too long, and says when the speech server fa
   const failed = await post(h, { audioBase64: recording.toString("base64") });
   expect(failed.status).toBe(502);
   expect(((await failed.json()) as { message: string }).message).toContain("语音识别暂时不可用");
+});
+
+it("polishes what was heard with the dictation model, and falls back to it as heard", async () => {
+  const requests: any[] = [];
+  let fail = false;
+  const model = http.createServer((req, res) => {
+    const parts: Buffer[] = [];
+    req.on("data", c => parts.push(c));
+    req.on("end", () => {
+      requests.push(JSON.parse(Buffer.concat(parts).toString()));
+      if (fail) { res.writeHead(529).end(); return; }
+      res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ content: [{ type: "text", text: "打开走廊的灯。" }] }));
+    });
+  });
+  await new Promise<void>(resolve => model.listen(0, "127.0.0.1", resolve));
+  const claudeFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "asr-")), "claude.env");
+  fs.writeFileSync(claudeFile, "CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat-test\n", { mode: 0o600 });
+  const asrUrl = h.ctx.cfg.asrUrl;
+  const polishing = await startHarness({}, { configure: cfg => {
+    cfg.asrUrl = asrUrl;
+    cfg.polishModel = "claude-sonnet-5-5";
+    Object.assign(cfg.claudeCode, { enabled: "on", secretsFile: claudeFile, apiBaseUrl: `http://127.0.0.1:${(model.address() as AddressInfo).port}` });
+  } });
+  try {
+    answer = { status: 200, text: "嗯打开那个走廊灯" };
+    expect(await (await post(polishing, { audioBase64: recording.toString("base64") })).json()).toEqual({ text: "打开走廊的灯。", polished: true });
+    expect(requests.at(-1).model).toBe("claude-sonnet-5-5");
+    expect(requests.at(-1).messages[0].content).toContain("嗯打开那个走廊灯");
+
+    // Nothing heard: nothing to polish.
+    answer = { status: 200, text: "" };
+    expect(await (await post(polishing, { audioBase64: recording.toString("base64") })).json()).toEqual({ text: "", polished: false });
+    expect(requests).toHaveLength(1);
+
+    fail = true;
+    answer = { status: 200, text: "你好世界" };
+    expect(await (await post(polishing, { audioBase64: recording.toString("base64") })).json()).toEqual({ text: "你好世界", polished: false });
+  } finally {
+    await polishing.shutdown();
+    model.close();
+  }
 });
