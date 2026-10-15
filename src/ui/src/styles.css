@@ -4081,7 +4081,7 @@ button.map-card-switch { flex: 0 0 auto; padding: 4px 10px; }
   background: var(--accent-soft);
   white-space: nowrap;
 }
-/* A run a schedule started: nobody typed it, so it is not shown as your message. */
+/* A run a schedule started, or a support card: nobody typed it, so it is not shown as your message. */
 .schedule-run-note {
   align-self: center;
   margin: 6px auto;

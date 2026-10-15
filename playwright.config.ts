@@ -19,6 +19,7 @@ export default defineConfig({
     /usage\.spec\.ts/,
     /analytics\.spec\.ts/,
     /task-retry\.spec\.ts/,
+    /support-card\.spec\.ts/,
     /gadget-history\.spec\.ts/,
     /browser-auto-open\.spec\.ts/,
     /browser-link\.spec\.ts/,

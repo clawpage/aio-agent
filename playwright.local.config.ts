@@ -20,6 +20,7 @@ export default defineConfig({
   testMatch: [
     "**/languages.spec.ts",
     "**/support.spec.ts",
+    "**/support-card.spec.ts",
     "**/task-retry.spec.ts",
     "**/usage.spec.ts",
     "**/analytics.spec.ts",

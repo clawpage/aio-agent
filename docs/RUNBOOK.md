@@ -217,6 +217,20 @@ member 首次访问或服务启动时创建独立 `aio-user-<散列>` 容器及�
 - compose 模式的凭据都是只读挂载的原文件（`var/deploy/aio.env` 的 `AIO_SECRET_*`），镜像里不含密钥。
 - tunnel 凭据：`var/cloudflared/credentials.json`（0600）。不要复制到别处或提交。
 
+### 给账号发客服卡片
+
+修复说明、重做的文件等需要直接送到某个账号主会话时（界面见 [功能说明](FEATURES.md#客服卡片)），在本机执行，正文 Markdown 从标准输入读：
+
+```bash
+docker exec -i aio-control-1 node bin/support-card.mjs <账号> --title "<标题>" --id <幂等键> < message.md   # compose 模式
+node --env-file=var/runtime.env bin/support-card.mjs <账号> --title "<标题>" --id <幂等键> < message.md    # host 模式
+```
+
+- 输出 JSON：`taskId`、`duplicate`（同一 `--id` 已发过时为 true，不会再发一张）、`pushed`（收到通知的设备数）；`--no-push` 不发通知。
+- 要附图片或文件，先把文件放进**该账号自己的**工作区（例如 `tasks/<目录>/`，成员在其 `aio-user-<散列>` 容器的 `/home/gem/workspace` 下），
+  正文里写 `![说明](/home/gem/workspace/tasks/<目录>/<文件>.png)`；别的账号工作区里的文件不会显示。
+- 卡片直接写进该账号的运行库（owner 为根库，成员为 `users/<散列>/agent.sqlite`），主会话下次轮询（约 2.5 秒）即出现；账号从未登录过时没有运行库，命令会拒绝。
+
 ## 5. Tunnel 与 DNS
 
 - 专用 tunnel 名 `personal-agent`，ID `384645fd-a428-4df6-a84b-e392c6e0df2d`；

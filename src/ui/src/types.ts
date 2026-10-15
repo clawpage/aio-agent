@@ -218,6 +218,8 @@ export interface Task {
   phone?: boolean;
   /** Set on a run a schedule started (nobody typed it then). */
   schedule?: { id: string; title: string; rule: string; builtin?: string } | null;
+  /** A message from the people running this deployment, not something the person typed. */
+  support?: boolean;
 }
 
 /** When a schedule runs (the control plane's ScheduleSpec). */

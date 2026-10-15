@@ -67,9 +67,11 @@ export const feed = {
   },
   report: {
     schedule: (rule: string) => `定时 · ${rule}`,
+    support: "客服",
     noResult: "任务已结束，但没有返回文字结果，请打开详情核对。",
   },
   scheduleRun: (title: string, rule: string) => `定时任务「${title}」自动运行 · ${rule} · `,
+  supportNote: "客服发来的消息 · ",
   userMessage: "用户消息",
   quoted: (title: string) => `引用：${title}`,
   earlierTask: "此前任务",

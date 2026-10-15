@@ -68,9 +68,11 @@ export const feed: typeof zh = {
   },
   report: {
     schedule: (rule: string) => `Scheduled · ${rule}`,
+    support: "Support",
     noResult: "The task finished without a text result. Open the details to check.",
   },
   scheduleRun: (title: string, rule: string) => `Scheduled task "${title}" ran automatically · ${rule} · `,
+  supportNote: "A message from support · ",
   userMessage: "Your message",
   quoted: (title: string) => `Quoting: ${title}`,
   earlierTask: "an earlier task",

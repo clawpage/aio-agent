@@ -10,6 +10,7 @@ import { AgentManager, TurnConflictError, type AgentEvent, type CodexSessionLike
 import { claimsConflict, resolveResources, type Claims, type ResourceSandbox } from "./resources.js";
 import { applyTaskReference, parsePlan, planningPrompt, type PlanningTask, type PlanReport, type TaskPlan } from "./planning.js";
 import { executorQuestion } from "./executorQuestion.js";
+import { isSupportCard } from "./support.js";
 import { RECALL_CAP, recordRecall, STEP_ANSWER_CHARS, STEP_PROMPT_CHARS, TaskRecall, tokenize, type RecallEvent, type RecallSource } from "./recall.js";
 import { processSteps, standingAgreements } from "./history.js";
 import type { DispatchTimingSink } from "../codex/dispatchTiming.js";
@@ -231,6 +232,8 @@ export class TaskService {
             form: row.status === "needs_input" ? plan?.form ?? null : null,
             dependencies: plan?.dependencies ?? [], createdAt: row.created_at, startedAt: turn?.started_at ?? null, completedAt: row.completed_at,
             schedule: row.schedule_id ? this.scheduleLabel(row.schedule_id) ?? { id: row.schedule_id, title: row.title, rule: "定时任务已删除" } : null,
+            // A support card (support.ts): nobody typed it, so the console shows a support note instead.
+            support: isSupportCard(row.client_message_id),
             approvals: TERMINAL.has(row.status) ? 0 : this.agent.listPendingRequests(this.executor(row)).length,
         };
     }

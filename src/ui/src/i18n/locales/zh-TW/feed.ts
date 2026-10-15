@@ -68,9 +68,11 @@ export const feed: typeof zh = {
   },
   report: {
     schedule: (rule: string) => `定時 · ${rule}`,
+    support: "客服",
     noResult: "任務已結束，但沒有返回文字結果，請開啟詳情核對。",
   },
   scheduleRun: (title: string, rule: string) => `定時任務「${title}」自動執行 · ${rule} · `,
+  supportNote: "客服傳來的訊息 · ",
   userMessage: "使用者訊息",
   quoted: (title: string) => `引用：${title}`,
   earlierTask: "此前任務",
