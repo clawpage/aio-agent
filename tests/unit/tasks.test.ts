@@ -758,11 +758,14 @@ describe("main inbox delegation", () => {
         db.prepare("UPDATE tasks SET status='completed',completed_at=created_at+1").run();
         db.prepare("UPDATE tasks SET status='running',completed_at=NULL WHERE id=?").run(jobs[0]!.id);
         const latest = tasks.list();
-        expect(latest.tasks).toHaveLength(101);
+        // The first screen: the latest 20, plus the old task still running.
+        expect(latest.tasks).toHaveLength(21);
         expect(latest.tasks.some(t => t.id === jobs[0]!.id)).toBe(true);
-        const older = tasks.list(latest.nextBefore!);
-        expect(older.nextBefore).toBeNull();
-        expect(new Set([...latest.tasks, ...older.tasks].map(t => t.id)).size).toBe(120);
+        const seen = new Set(latest.tasks.map(t => t.id));
+        let before = latest.nextBefore, pages = 1;
+        while (before) { const older = tasks.list(before); older.tasks.forEach(t => seen.add(t.id)); before = older.nextBefore; pages++; }
+        expect(pages).toBe(6);
+        expect(seen.size).toBe(120);
         db.prepare("UPDATE tasks SET status='completed',completed_at=? WHERE id=?").run(Date.now()+1000,jobs[0]!.id);
         expect(tasks.list().tasks.find(t=>t.id===jobs[0]!.id)?.status).toBe("completed");
     });

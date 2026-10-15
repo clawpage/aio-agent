@@ -140,7 +140,7 @@ export const api = {
   recallStats: (days: number) => request<{ stats: import('./types').RecallStats }>(`/api/settings/recall?days=${days}`),
   dispatchLog: (taskId: string) => request<import('./types').DispatchLog>(`/api/settings/dispatch-log/${encodeURIComponent(taskId)}`),
   saveSoul: (body:{content:string;revision:string}) => request<{ok:true;content:string;revision:string}>('/api/settings/soul',{method:'PUT',body}),
-  main: (before?: number, signal?: AbortSignal) => request<{ mode: "tasks"; tasks: import("./types").Task[]; nextBefore: number | null; version: string }>(`/api/main${before ? `?before=${before}` : ""}`, { signal }),
+  main: (before?: number, signal?: AbortSignal, limit?: number) => request<{ mode: "tasks"; tasks: import("./types").Task[]; nextBefore: number | null; version: string }>(`/api/main${before ? `?before=${before}` : limit ? `?limit=${limit}` : ""}`, { signal }),
   /** The live first page, unless it is still the version the caller holds. */
   mainSince: (version: string | null) => request<{ mode: "tasks"; unchanged: true; version: string } | { mode: "tasks"; unchanged?: undefined; tasks: import("./types").Task[]; nextBefore: number | null; version: string }>(`/api/main${version ? `?v=${encodeURIComponent(version)}` : ""}`),
   /** The task list: counts by status and one filtered page; `cursor` continues where the last page ended. */
@@ -215,6 +215,9 @@ export const api = {
     request<{ conversation: Conversation; turns: Turn[]; approvals: ApprovalRequest[] }>(`/api/conversations/${encodeURIComponent(id)}`),
   events: async (id: string, since = 0) =>
     (await request<{ events: import("./types").AgentEvent[] }>(`/api/conversations/${encodeURIComponent(id)}/events?format=json&since=${since}`)).events,
+  /** The latest turns of a conversation (before an event id, for older ones); `more` is absent from a control plane that sends everything. */
+  eventsTail: (id: string, before?: number, signal?: AbortSignal) =>
+    request<{ events: import("./types").AgentEvent[]; more?: boolean }>(`/api/conversations/${encodeURIComponent(id)}/events?format=json&tail=200${before ? `&before=${before}` : ""}`, { signal, cache: "no-store" }),
   submitTurn: (id: string, body: { text: string; clientMessageId: string; attachments?: Attachment[] }) =>
     request<{ turn: Turn; duplicate: boolean }>(`/api/conversations/${encodeURIComponent(id)}/turns`, { method: "POST", body }),
   interrupt: (id: string) =>
@@ -450,18 +453,18 @@ export function openEventStream(
 }
 
 /**
- * Null when this page and the control plane speak compatible API versions, else
- * a message for the person. A page cached from an older or newer release is told
+ * `mismatch` is null when this page and the control plane speak compatible API versions, else
+ * a message for the person; `answered` says whether the control plane has the version endpoint at all. A page cached from an older or newer release is told
  * to reload instead of half-working.
  */
-export async function versionMismatch(): Promise<string | null> {
+export async function versionMismatch(): Promise<{ answered: boolean; mismatch: string | null }> {
   try {
-    const v = await request<{ api: number; apiMin: number }>("/api/version", { cache: "no-store" });
-    if (apiCompatible(API_VERSION, v.api, v.apiMin)) return null;
-    return t.app.versionMismatch(API_VERSION, v.apiMin, v.api, v.api < API_VERSION ? "server" : "ui");
+    const v = await request<{ api: number; apiMin: number }>("/api/version", { cache: "no-store", signal: AbortSignal.timeout(8000) });
+    if (apiCompatible(API_VERSION, v.api, v.apiMin)) return { answered: true, mismatch: null };
+    return { answered: true, mismatch: t.app.versionMismatch(API_VERSION, v.apiMin, v.api, v.api < API_VERSION ? "server" : "ui") };
   } catch {
     // An older control plane has no version endpoint; it is served as before (see App's legacy mode).
-    return null;
+    return { answered: false, mismatch: null };
   }
 }
 

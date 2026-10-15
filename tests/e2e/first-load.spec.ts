@@ -30,7 +30,7 @@ test("opening the console: the drawn mark until the feed is here and the drawing
   await expect(cover).toBeVisible();
   await expect(page.locator(".task-feed")).toHaveAttribute("aria-busy", "true");
   await expect(page.locator(".feed-skeleton, .feed-loading")).toHaveCount(0);
-  await expect(page.getByText("把事情交给我")).toHaveCount(0);
+  await expect(page.getByText("你好，我是一站")).toHaveCount(0);
   await expect(cover.locator(".loading-mark")).toBeVisible();
 
   // Note where in its drawing the mark stands when the cover goes.
@@ -70,14 +70,27 @@ test("a feed that does not come gives the console back, with the mark loading in
   await expect(page.locator(".boot-cover")).toBeVisible();
   await expect(page.locator(".boot-cover")).toHaveCount(0, { timeout: 15_000 });
   await expect(page.locator(".feed-loading .loading-mark")).toBeVisible();
-  await expect(page.getByText("把事情交给我")).toHaveCount(0);
+  await expect(page.getByText("你好，我是一站")).toHaveCount(0);
   await expect(page.getByRole("textbox", { name: "消息", exact: true })).toBeVisible();
 });
 
-test("an account with nothing yet sees the empty state once the feed answers", async ({ page }) => {
+test("an account with nothing yet is greeted once the feed answers, and a starter fills the composer", async ({ page }, info) => {
   await mockConsole(page, { conversations: [] });
   await page.route("**/api/main*", (r) => r.fulfill({ json: { mode: "tasks", version: "v0", tasks: [], nextBefore: null } }));
   await page.goto("/");
-  await expect(page.getByText("把事情交给我")).toBeVisible();
+  await expect(page.getByText("你好，我是一站")).toBeVisible();
   await expect(page.locator(".boot-cover")).toHaveCount(0);
+  const starters = page.locator(".welcome-starters button");
+  await expect(starters).toHaveCount(4);
+  for (const button of await starters.all()) await expect(button).toBeInViewport();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1);
+  await page.screenshot({ path: info.outputPath("welcome.png") });
+  // A starter is put in the composer, to send as is or change first; nothing is sent by itself.
+  let sent = 0;
+  await page.route("**/api/tasks", (r) => { sent++; return r.fallback(); });
+  await page.getByRole("button", { name: "规划出游", exact: true }).click();
+  const composer = page.getByRole("textbox", { name: "消息", exact: true });
+  await expect(composer).toHaveValue(/周末两天的短途出游/);
+  await expect(composer).toBeFocused();
+  expect(sent).toBe(0);
 });

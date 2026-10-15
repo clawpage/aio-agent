@@ -646,9 +646,10 @@ export function createApiRouter(context: AppContext): Router {
 
   router.get("/main", requireKind("primary"), requireSession, asyncHandler(async (req, res) => {
     const before = Number(req.query.before ?? Number.MAX_SAFE_INTEGER);
-    const page = context.tasks.list(Number.isSafeInteger(before) && before > 0 ? before : Number.MAX_SAFE_INTEGER, ctxOf(req).session!.ownerId);
-    const { decorate } = await browserState();
-    const tasks = page.tasks.map(decorate);
+    const limit = Number(req.query.limit ?? 20);
+    const page = context.tasks.list(Number.isSafeInteger(before) && before > 0 ? before : Number.MAX_SAFE_INTEGER, ctxOf(req).session!.ownerId, Number.isSafeInteger(limit) && limit >= 1 && limit <= 20 ? limit : 20);
+    // An account with nothing yet (a new one, above all) answers without asking the sandbox about tabs.
+    const tasks = page.tasks.length ? page.tasks.map((await browserState()).decorate) : page.tasks;
     // A poll names the version it holds; an unchanged feed answers in a few bytes instead of the whole page.
     const body = { mode: "tasks", ...page, tasks };
     const version = createHash("sha256").update(JSON.stringify(body)).digest("base64url").slice(0, 22);
@@ -1223,6 +1224,13 @@ export function createApiRouter(context: AppContext): Router {
       }
       const sinceParam = req.query.since ?? req.get("last-event-id");
       const since = Number.parseInt(String(sinceParam ?? "0"), 10);
+      if (req.query.format === "json" && req.query.tail !== undefined) {
+        // A task's process opens at its latest turns and reads older ones as the person scrolls up.
+        const tail = Number.parseInt(String(req.query.tail), 10);
+        const before = Number.parseInt(String(req.query.before ?? ""), 10);
+        res.json(agent.listEventsTail(conversationId, Number.isSafeInteger(before) && before > 0 ? before : Number.MAX_SAFE_INTEGER, Math.min(Math.max(Number.isFinite(tail) ? tail : 200, 1), 1000)));
+        return;
+      }
       if (req.query.format === "json") {
         res.json({ events: agent.listEvents(conversationId, Number.isFinite(since) ? since : 0) });
         return;

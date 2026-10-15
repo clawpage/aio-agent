@@ -9,6 +9,10 @@ export const chat: typeof zh = {
     pendingApprovals: (n: number) => `${n} pending`,
     workspace: "Workspace",
   },
+  older: {
+    loading: "Loading earlier steps…",
+    retry: "Earlier steps didn't load. Tap to retry",
+  },
   empty: {
     title: "Start a new conversation",
     body: "This is an always-on Codex agent running in your own AIO sandbox. It can read and write sandbox files, run commands, drive a real browser, and see the desktop.",

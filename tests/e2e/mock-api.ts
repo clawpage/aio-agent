@@ -278,7 +278,17 @@ export async function mockConsole(page: Page, opts: MockConsoleOptions): Promise
     return json(route, { conversation, turns: [], approvals: [] });
   });
   await page.route((url) => url.pathname.startsWith("/api/conversations/") && url.pathname.endsWith("/events"), (route) => {
-    const id = new URL(route.request().url()).pathname.split("/")[3] ?? "";
+    const url = new URL(route.request().url());
+    const id = url.pathname.split("/")[3] ?? "";
+    // The detail pane first reads the latest turns as JSON: the same events the stream would replay, all on one page.
+    if (url.searchParams.get("format") === "json") {
+      const events = (opts.sse?.[id] ?? "").split("\n\n").flatMap((frame) => {
+        const data = frame.split("\n").find((line) => line.startsWith("data: "));
+        const parsed = data ? (JSON.parse(data.slice(6)) as { id?: unknown; type?: unknown }) : null;
+        return parsed && typeof parsed.id === "number" && typeof parsed.type === "string" ? [parsed] : [];
+      });
+      return json(route, { events, more: false });
+    }
     return route.fulfill({
       status: 200,
       headers: { "content-type": "text/event-stream; charset=utf-8", "cache-control": "no-cache" },

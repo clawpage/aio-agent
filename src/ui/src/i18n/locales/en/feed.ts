@@ -63,8 +63,15 @@ export const feed: typeof zh = {
     loading: "Loading earlier tasks…",
   },
   empty: {
-    title: "Hand things off to me",
-    body: "Send as many different tasks as you like. The steps stay tucked away, and results are reported here when done.",
+    title: "Hi, I'm Clawpage Agent",
+    body: "Just tell me what you need done: research something online, compare prices before you buy, plan a trip, write a document or a spreadsheet, sort out files. I work on my own computer and report progress and results right here. You can keep sending other tasks while I work.",
+    hint: "Not sure where to start? Try one:",
+    starters: [
+      { label: "Compare earbuds", prompt: "Find me noise-cancelling wireless earbuds for commuting: compare a few popular models on price and reviews, and recommend the best value." },
+      { label: "Plan a weekend trip", prompt: "Plan a two-day weekend getaway for me, with the route, where to stay and a plan for each day, on a moderate budget." },
+      { label: "Today's tech news", prompt: "Look through today's tech news, pick the 5 stories most worth knowing, and sum up each in two or three sentences." },
+      { label: "Daily reminder", prompt: "Every morning at 8, tell me today's weather and what to wear." },
+    ],
   },
   report: {
     schedule: (rule: string) => `Scheduled · ${rule}`,

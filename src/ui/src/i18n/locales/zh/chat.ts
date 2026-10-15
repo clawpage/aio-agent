@@ -8,6 +8,10 @@ export const chat = {
     pendingApprovals: (n: number) => `${n} 项待处理`,
     workspace: "工作区",
   },
+  older: {
+    loading: "正在加载更早的过程…",
+    retry: "更早的过程没加载出来，点此重试",
+  },
   empty: {
     title: "开始新的对话",
     body: "这是一个常驻的 Codex 智能体，运行在你自己的 AIO 沙箱里。它可以读写沙箱文件、运行命令、操作真实浏览器并查看桌面。",

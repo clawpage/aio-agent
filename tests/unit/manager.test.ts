@@ -193,6 +193,36 @@ describe("AgentManager", () => {
     expect(agent.respondToRequest(pending[0]!.id, "accept").ok).toBe(false);
   });
 
+  it("pages a conversation's events from the latest turns back, never starting inside a turn", () => {
+    const a = agent.createConversation({ title: "long" });
+    const put = db.prepare("INSERT INTO events (conversation_id, turn_id, type, payload, created_at) VALUES (?, ?, ?, '{}', 0)");
+    // Three turns of 5, 120 and 150 events.
+    for (const [turn, n] of [["t1", 5], ["t2", 120], ["t3", 150]] as const)
+      for (let i = 0; i < n; i++) put.run(a.id, turn, i === 0 ? "turn.queued" : "item/completed");
+    const all = agent.listEvents(a.id, 0, -1);
+
+    // 100 is inside t3: the page is t3 whole, newest last.
+    const latest = agent.listEventsTail(a.id, undefined, 100);
+    expect(latest.events.map((e) => e.turnId)).toEqual(Array(150).fill("t3"));
+    expect(latest.events[0]!.type).toBe("turn.queued");
+    expect(latest.events.at(-1)!.id).toBe(all.at(-1)!.id);
+    expect(latest.more).toBe(true);
+
+    // 200 reaches into t2: t2 is read from its start, and earlier events remain.
+    expect(agent.listEventsTail(a.id, undefined, 200).events[0]).toMatchObject({ turnId: "t2", type: "turn.queued" });
+
+    // Older pages go back from the first event shown, down to the conversation's start.
+    const older = agent.listEventsTail(a.id, latest.events[0]!.id, 100);
+    expect(older.events.map((e) => e.turnId)).toEqual(Array(120).fill("t2"));
+    expect(older.events.at(-1)!.id).toBe(latest.events[0]!.id - 1);
+    expect(older.more).toBe(true);
+    const start = agent.listEventsTail(a.id, older.events[0]!.id, 100);
+    expect(start.events.map((e) => e.turnId)).toEqual([null, "t1", "t1", "t1", "t1", "t1"]);
+    expect(start.events[0]!.type).toBe("conversation.created");
+    expect(start.more).toBe(false);
+    expect(agent.listEventsTail(a.id, start.events[0]!.id, 100)).toEqual({ events: [], more: false });
+  });
+
   it("flushes buffered deltas before item/completed so text is never duplicated", async () => {
     const a = agent.createConversation({ title: "stream" });
     codex.holdTurn("thread_1");

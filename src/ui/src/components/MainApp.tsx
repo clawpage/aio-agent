@@ -45,7 +45,8 @@ async function pushEndpoint(): Promise<string | undefined> {
     return (await registration?.pushManager.getSubscription().catch(() => null))?.endpoint;
 }
 
-export function MainApp() {
+/** `firstSession`: the session check already under way when the console opens, used by its first look. */
+export function MainApp({ firstSession }: { firstSession?: ReturnType<typeof api.session> } = {}) {
     useKeyboardViewport();
     const [mobile, setMobile] = useState(() => matchMedia("(max-width: 900px)").matches);
     const [menuOpen, setMenuOpen] = useState(false);
@@ -167,9 +168,12 @@ export function MainApp() {
         return () => window.removeEventListener("popstate", back);
     }, [auth, username, role, applyRoute]);
     const expired = useCallback(() => { setAuth(false); setMenuOpen(false); setNotice(t.auth.sessionExpired); }, []);
+    const primed = useRef(firstSession);
     const check = useCallback(async () => { try {
         // A stuck request falls back to the login screen, which keeps checking and restores the session.
-        const session = await api.session(AbortSignal.timeout(10000));
+        const first = primed.current;
+        primed.current = undefined;
+        const session = await (first ?? api.session(AbortSignal.timeout(10000)));
         if (session.authenticated && session.username) {
             const at = pathUser();
             // An address without an account (the root, /login, an old link) becomes your own; one naming a page keeps it.

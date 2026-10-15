@@ -61,9 +61,17 @@ export const feed = {
     retry: "更早的任务没加载出来，点此重试",
     loading: "正在加载更早的任务…",
   },
+  /** A new account's first screen: the agent says hello and offers a few ways to begin. */
   empty: {
-    title: "把事情交给我",
-    body: "可以接着发不同任务。过程会收拢，完成后在这里回报。",
+    title: "你好，我是一站",
+    body: "把要办的事直接告诉我就行：上网查资料、购物前比价、规划行程、写文档做表格、整理文件……我在自己的电脑上替你办，进展和结果都会在这里回报。办事期间你可以接着发别的任务。",
+    hint: "不知道从哪开始？点一个试试：",
+    starters: [
+      { label: "比价选购", prompt: "帮我挑一款适合通勤的降噪蓝牙耳机，对比几个热门型号的价格和口碑，推荐一个最值的。" },
+      { label: "规划出游", prompt: "帮我规划一个周末两天的短途出游，包括路线、住宿和每天的安排，预算适中。" },
+      { label: "看科技新闻", prompt: "帮我看看今天的科技新闻，挑 5 条最值得关注的，每条用两三句话总结。" },
+      { label: "每日提醒", prompt: "每天早上 8 点提醒我今天的天气和穿衣建议。" },
+    ],
   },
   report: {
     schedule: (rule: string) => `定时 · ${rule}`,

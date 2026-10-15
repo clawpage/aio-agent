@@ -265,15 +265,16 @@ export class TaskService {
         if (!parent && active.length >= this.cfg.agent.maxConcurrentTurns) return { label: "等待执行空位", message: `已有 ${this.cfg.agent.maxConcurrentTurns} 个任务执行中，空位释放后自动开始。` };
         return { label: parent ? "正在追加" : "即将开始", message: parent ? "正在将补充交给原任务。" : "已满足执行条件，正在调度。" };
     }
-    list(before = Number.MAX_SAFE_INTEGER, userId = "owner_1") {
-        const rows = this.db.prepare("SELECT * FROM tasks WHERE conversation_id IN (SELECT id FROM conversations WHERE owner_id=?) AND created_at < ? ORDER BY created_at DESC LIMIT 101").all(userId, before) as unknown as TaskRow[];
-        const page = rows.slice(0, 100);
-        const nextBefore = rows.length > 100 ? page.at(-1)!.created_at : null;
+    /** One page of the main feed: the latest `limit` tasks (the first screen shows only these), older ones by `before`. */
+    list(before = Number.MAX_SAFE_INTEGER, userId = "owner_1", limit = 20) {
+        const rows = this.db.prepare("SELECT * FROM tasks WHERE conversation_id IN (SELECT id FROM conversations WHERE owner_id=?) AND created_at < ? ORDER BY created_at DESC LIMIT ?").all(userId, before, limit + 1) as unknown as TaskRow[];
+        const page = rows.slice(0, limit);
+        const nextBefore = rows.length > limit ? page.at(-1)!.created_at : null;
         // Polls must also update older unfinished work after a long burst of messages.
         const pending = before === Number.MAX_SAFE_INTEGER ? this.db.prepare("SELECT * FROM tasks WHERE conversation_id IN (SELECT id FROM conversations WHERE owner_id=?) AND status NOT IN ('completed','failed','interrupted','unknown','merged')").all(userId) as unknown as TaskRow[] : [];
         // An old running task can finish outside the admission-time page. Keep
         // recent reports in the live feed too, so it never gets stuck at Working.
-        const finished = before === Number.MAX_SAFE_INTEGER ? this.db.prepare("SELECT * FROM tasks WHERE conversation_id IN (SELECT id FROM conversations WHERE owner_id=?) AND completed_at IS NOT NULL ORDER BY completed_at DESC LIMIT 100").all(userId) as unknown as TaskRow[] : [];
+        const finished = before === Number.MAX_SAFE_INTEGER ? this.db.prepare("SELECT * FROM tasks WHERE conversation_id IN (SELECT id FROM conversations WHERE owner_id=?) AND completed_at IS NOT NULL ORDER BY completed_at DESC LIMIT ?").all(userId, limit) as unknown as TaskRow[] : [];
         const merged = new Map([...page, ...pending, ...finished].map(r => [r.id, r]));
         return { tasks: [...merged.values()].sort((a, b) => a.created_at - b.created_at).map(r => this.view(r)), nextBefore };
     }

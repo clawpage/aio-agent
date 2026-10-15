@@ -1,12 +1,13 @@
 import { ComposerIcon, SEND_SHORTCUT, isSendShortcut, useComposerHeight } from "./ComposerControls";
 import { PopupPresence } from "./PopupMotion";
 import { MessageTime, useDisplayClock } from "./MessageTime";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { api, openEventStream } from "../api";
 import { saveFile } from "../saveFile";
 import type { AgentEvent, Attachment, Conversation, StatusResponse } from "../types";
 import {
   applyEvent,
+  buildTimeline,
   childInProgress,
   cloneTimeline,
   emptyTimeline,
@@ -31,6 +32,7 @@ import { dispatchedSupplement, dispatchedTask } from "../dispatchText";
 import { isPreviewableKind, isSandboxLink, workspaceFileKind } from "../sandboxLink";
 import { openNativeBrowser } from "../deviceBrowser";
 import { t } from "../i18n";
+import { InlineLoading } from "./Brand";
 
 interface Props {
   readOnly?: boolean;
@@ -92,17 +94,43 @@ export function Chat({
   onChangedRef.current = onConversationChanged;
   const onStatusRef = useRef(onStatusChanged);
   onStatusRef.current = onStatusChanged;
-  // Load history, then stream. Reconnects resume from the last seen event id.
+  /** The server events behind the timeline, in order: older turns go in front and the timeline is built again. */
+  const eventsRef = useRef<AgentEvent[]>([]);
+  /** The first event shown while earlier ones remain to be read; null once the start is on screen. */
+  const [olderBefore, setOlderBefore] = useState<number | null>(null);
+  /** Until the first history arrives, the pane says it is loading instead of showing an empty conversation. */
+  const [loaded, setLoaded] = useState(false);
+  const conversationRef = useRef(conversation.id);
+  conversationRef.current = conversation.id;
+  // Load the latest turns in one go, then stream from them. Reconnects resume from the last seen event id.
   useEffect(() => {
     let disposed = false;
     let close: (() => void) | null = null;
     let retry: number | null = null;
+    const controller = new AbortController();
     setTimeline(emptyTimeline());
     setConnected(false);
+    setLoaded(false);
+    setOlderBefore(null);
     lastIdRef.current = 0;
+    eventsRef.current = [];
 
     const start = async () => {
-      connect();
+      try {
+        const page = await api.eventsTail(conversation.id, undefined, controller.signal);
+        if (disposed) return;
+        // A control plane without paging answers otherwise; the stream then replays everything.
+        if (Array.isArray(page.events)) {
+          eventsRef.current = page.events;
+          lastIdRef.current = page.events.at(-1)?.id ?? 0;
+          setTimeline(buildTimeline(page.events));
+          setOlderBefore(page.more && page.events.length ? page.events[0]!.id : null);
+          setLoaded(true);
+        }
+      } catch {
+        /* the stream below replays the whole history instead */
+      }
+      if (!disposed) connect();
     };
 
     const connect = () => {
@@ -110,6 +138,7 @@ export function Chat({
         onEvent: (event: AgentEvent) => {
           if (event.id <= lastIdRef.current) return;
           lastIdRef.current = event.id;
+          eventsRef.current.push(event);
           setTimeline((prev) => {
             const next = cloneTimeline(prev);
             applyEvent(next, event);
@@ -125,6 +154,7 @@ export function Chat({
         },
         onOpen: () => {
           setConnected(true);
+          setLoaded(true);
         },
         onError: () => {
           setConnected(false);
@@ -146,16 +176,58 @@ export function Chat({
     void start();
     return () => {
       disposed = true;
+      controller.abort();
       if (retry !== null) window.clearTimeout(retry);
       close?.();
     };
   }, [conversation.id]);
 
-  // Keep the view pinned to the newest content unless the user scrolled up.
+  // Earlier turns load by themselves as the top comes near, and what was on screen stays put.
+  // (Only a control plane that pages reaches this, and there the pane is read-only: no optimistic message to keep.)
+  const olderTop = useRef<HTMLDivElement | null>(null);
+  const loadingOlder = useRef(false);
+  const [olderState, setOlderState] = useState<"idle" | "loading" | "failed">("idle");
+  /** Distance from the bottom to keep while older turns are put in front. */
+  const anchorRef = useRef<number | null>(null);
+  const loadOlder = useCallback(async () => {
+    if (olderBefore === null || loadingOlder.current) return;
+    const id = conversation.id;
+    loadingOlder.current = true;
+    setOlderState("loading");
+    try {
+      const page = await api.eventsTail(id, olderBefore);
+      if (conversationRef.current !== id || !Array.isArray(page.events)) return;
+      const node = scrollRef.current;
+      anchorRef.current = node ? node.scrollHeight - node.scrollTop : null;
+      stickRef.current = false;
+      eventsRef.current = [...page.events, ...eventsRef.current];
+      setTimeline(buildTimeline([...eventsRef.current]));
+      setOlderBefore(page.more && page.events.length ? page.events[0]!.id : null);
+      setOlderState("idle");
+    } catch {
+      if (conversationRef.current === id) setOlderState("failed");
+    } finally {
+      loadingOlder.current = false;
+    }
+  }, [conversation.id, olderBefore]);
   useEffect(() => {
+    const node = scrollRef.current, top = olderTop.current;
+    if (!node || !top || olderBefore === null || typeof IntersectionObserver !== "function") return;
+    const observer = new IntersectionObserver((entries) => { if (entries.some((e) => e.isIntersecting)) void loadOlder(); }, { root: node, rootMargin: "300px 0px 0px 0px" });
+    observer.observe(top);
+    return () => observer.disconnect();
+  }, [olderBefore, loadOlder]);
+
+  // Keep the view pinned to the newest content unless the user scrolled up; before the paint, so it never shows the top first.
+  useLayoutEffect(() => {
     const node = scrollRef.current;
-    if (!node || !stickRef.current) return;
-    node.scrollTop = node.scrollHeight;
+    if (!node) return;
+    if (anchorRef.current !== null) {
+      node.scrollTop = node.scrollHeight - anchorRef.current;
+      anchorRef.current = null;
+      return;
+    }
+    if (stickRef.current) node.scrollTop = node.scrollHeight;
   }, [timeline]);
 
   const activeTurns = status?.agent.activeTurns ?? [];
@@ -314,7 +386,15 @@ export function Chat({
           stickRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
         }}
       >
-        {blocks.length === 0 && (
+        {!loaded && blocks.length === 0 && <div className="feed-loading"><InlineLoading label={t.common.loading} /></div>}
+        {olderBefore !== null && (
+          <div className="feed-older" ref={olderTop}>
+            {olderState === "failed"
+              ? <button type="button" className="ghost tiny" onClick={() => void loadOlder()}>{t.chat.older.retry}</button>
+              : <span className="muted tiny">{olderState === "loading" && <InlineLoading label={t.chat.older.loading} />}</span>}
+          </div>
+        )}
+        {loaded && blocks.length === 0 && (
           <div className="empty">
             <h3>{t.chat.empty.title}</h3>
             <p>

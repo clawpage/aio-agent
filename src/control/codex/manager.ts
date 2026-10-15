@@ -571,10 +571,10 @@ export class AgentManager {
     return event;
   }
 
-  listEvents(conversationId: string, sinceId = 0, limit = 2000): AgentEvent[] {
+  listEvents(conversationId: string, sinceId = 0, limit = 2000, beforeId = Number.MAX_SAFE_INTEGER): AgentEvent[] {
     const rows = this.#db
-      .prepare("SELECT id, conversation_id, turn_id, type, payload, created_at FROM events WHERE conversation_id = ? AND id > ? ORDER BY id ASC LIMIT ?")
-      .all(conversationId, sinceId, limit) as Array<{
+      .prepare("SELECT id, conversation_id, turn_id, type, payload, created_at FROM events WHERE conversation_id = ? AND id > ? AND id < ? ORDER BY id ASC LIMIT ?")
+      .all(conversationId, sinceId, beforeId, limit) as Array<{
       id: number;
       conversation_id: string;
       turn_id: string | null;
@@ -590,6 +590,25 @@ export class AgentManager {
       payload: JSON.parse(r.payload) as unknown,
       createdAt: r.created_at,
     }));
+  }
+
+  /**
+   * The latest events before `beforeId`, newest last: about `limit` of them,
+   * widened back to the start of the oldest turn they touch so a page never
+   * begins in the middle of a turn. `more` says whether earlier events exist.
+   */
+  listEventsTail(conversationId: string, beforeId = Number.MAX_SAFE_INTEGER, limit = 200): { events: AgentEvent[]; more: boolean } {
+    const oldest = this.#db
+      .prepare("SELECT id, turn_id FROM (SELECT id, turn_id FROM events WHERE conversation_id = ? AND id < ? ORDER BY id DESC LIMIT ?) ORDER BY id ASC LIMIT 1")
+      .get(conversationId, beforeId, limit) as { id: number; turn_id: string | null } | undefined;
+    if (!oldest) return { events: [], more: false };
+    const turnStart = oldest.turn_id
+      ? (this.#db.prepare("SELECT MIN(id) AS id FROM events WHERE conversation_id = ? AND turn_id = ?").get(conversationId, oldest.turn_id) as { id: number }).id
+      : oldest.id;
+    const start = Math.min(turnStart, oldest.id);
+    const events = this.listEvents(conversationId, start - 1, -1, beforeId);
+    const more = Boolean(this.#db.prepare("SELECT 1 FROM events WHERE conversation_id = ? AND id < ? LIMIT 1").get(conversationId, start));
+    return { events, more };
   }
 
   // --------------------------------------------------------- conversations

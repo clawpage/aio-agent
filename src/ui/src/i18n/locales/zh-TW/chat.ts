@@ -9,6 +9,10 @@ export const chat: typeof zh = {
     pendingApprovals: (n: number) => `${n} 項待處理`,
     workspace: "工作區",
   },
+  older: {
+    loading: "正在載入更早的過程…",
+    retry: "更早的過程沒載入出來，點此重試",
+  },
   empty: {
     title: "開始新的對話",
     body: "這是一個常駐的 Codex 智慧體，執行在你自己的 AIO 沙箱裡。它可以讀寫沙箱檔案、執行命令、操作真實瀏覽器並檢視桌面。",

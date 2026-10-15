@@ -716,12 +716,20 @@ function RenameDialog({
 export function App() {
   const [mode, setMode] = useState<"loading" | "tasks" | "legacy">("loading");
   const [mismatch, setMismatch] = useState<string | null>(null);
-  // Only a 404 means an older control plane; a slow or failed answer must not hold the page on "加载中…".
-  useEffect(() => { void api.main(undefined, AbortSignal.timeout(8000)).then(() => setMode("tasks")).catch(err => setMode(err instanceof ApiError && err.status === 404 ? "legacy" : "tasks")); }, []);
-  // The UI and the control plane deploy separately: say so when they no longer fit together.
-  useEffect(() => { void versionMismatch().then(setMismatch); }, []);
+  // Asked beside the mode check, so opening the console waits for one round trip instead of two in a row.
+  const [session] = useState(() => { const asked = api.session(AbortSignal.timeout(10000)); asked.catch(() => undefined); return asked; });
+  useEffect(() => {
+    // The UI and the control plane deploy separately: say so when they no longer fit together. The version answer is
+    // quick, and a control plane that gives one has the task inbox; only one without it is asked for the inbox itself,
+    // where only a 404 means an older control plane (a slow or failed answer must not hold the page on "加载中…").
+    void versionMismatch().then(({ answered, mismatch }) => {
+      setMismatch(mismatch);
+      if (answered) { setMode("tasks"); return; }
+      void api.main(undefined, AbortSignal.timeout(8000), 1).then(() => setMode("tasks")).catch(err => setMode(err instanceof ApiError && err.status === 404 ? "legacy" : "tasks"));
+    });
+  }, []);
   return <>
     {mismatch && <div className="banner error version-banner" role="alert">{mismatch}</div>}
-    {mode === "loading" ? <PageLoading label={t.common.loading} /> : mode === "legacy" ? <LegacyApp /> : <MainApp />}
+    {mode === "loading" ? <PageLoading label={t.common.loading} /> : mode === "legacy" ? <LegacyApp /> : <MainApp firstSession={session} />}
   </>;
 }

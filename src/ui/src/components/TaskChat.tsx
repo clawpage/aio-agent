@@ -1,5 +1,5 @@
 import { SupportDialog } from './Support';
-import { BootCover, InlineLoading, LoadingMark } from "./Brand";
+import { BootCover, BrandMark, InlineLoading, LoadingMark } from "./Brand";
 import { createPortal } from "react-dom";
 import { ComposerIcon, SEND_SHORTCUT, isSendShortcut, useComposerHeight } from "./ComposerControls";
 import { PopupPresence } from "./PopupMotion";
@@ -482,7 +482,12 @@ export function TaskChat({ onDetails, onOpenLink, onOpenFileInBrowser, onExpired
       {nextBefore && <div className="feed-older" ref={olderTop}>{olderState === "failed"
         ? <button className="ghost tiny" onClick={() => void loadOlder()}>{i18n.feed.older.retry}</button>
         : <span className="muted tiny">{olderState === "loading" && <InlineLoading label={i18n.feed.older.loading}/>}</span>}</div>}
-      {!tasks.length && !outbox.length && arrival !== "loading" && <div className="empty"><h3>{i18n.feed.empty.title}</h3><p>{i18n.feed.empty.body}</p></div>}
+      {/* Nothing here yet (a new account): the agent says hello, and a starter fills the composer to send or change. */}
+      {!tasks.length && !outbox.length && arrival !== "loading" && <div className="feed-welcome">
+        <article className="msg assistant welcome-msg"><div className="bubble"><div className="welcome-head"><BrandMark size={24}/><strong>{i18n.feed.empty.title}</strong></div><p>{i18n.feed.empty.body}</p></div></article>
+        <p className="welcome-hint muted tiny">{i18n.feed.empty.hint}</p>
+        <div className="welcome-starters">{i18n.feed.empty.starters.map(s => <button type="button" key={s.label} onClick={() => { setDraft(s.prompt); input.current?.focus(); }}>{s.label}</button>)}</div>
+      </div>}
       {feed.map(({ task: t, report }) => report ? <article className={`msg assistant task-report ${t.status}`} key={`${t.id}:report`} data-task-id={t.id}>
         <div className="task-report-heading"><span>{t.title}</span>{t.schedule && <span className="schedule-badge">{i18n.feed.report.schedule(t.schedule.rule)}</span>}{t.support && <span className="schedule-badge">{i18n.feed.report.support}</span>}<span className="muted tiny">{labels[t.status]}</span></div>
         <MessagePreview title={t.title}><Markdown source={t.result || (t.status === "completed" ? i18n.feed.report.noResult : t.error || labels[t.status] || t.status)} onOpenLink={onOpenLink} onOpenFile={setPreview} choices={{ onChoose: option => void choose(t, option), chosen: choosing[`${t.id}:${t.revision}`] ?? replyTo(t)?.text ?? null }}/>{t.result && <MessageFileCards text={t.result} onOpen={setPreview} onOpenLink={onOpenLink}/>}{t.error && t.result && <p className="error">{t.error}</p>}</MessagePreview>
