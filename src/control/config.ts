@@ -438,7 +438,7 @@ export function loadConfig(): {
     gadgetUsageUrl: envStr("PA_GADGET_USAGE_URL", ""),
     gadgetFirmwareDir: envStr("PA_GADGET_FIRMWARE_DIR", path.join(dataDir, "gadget-firmware")),
     asrUrl: envStr("PA_ASR_URL", ""),
-    polishModel: envStr("PA_DICTATION_MODEL", "claude-sonnet-5-5"),
+    polishModel: envStr("PA_DICTATION_MODEL", "claude-haiku-5-5"),
     googleMapsKey: (() => {
       if (envStr("PA_GOOGLE_MAPS_API_KEY").trim()) return envStr("PA_GOOGLE_MAPS_API_KEY").trim();
       // No file (or compose's /dev/null placeholder) leaves the maps on OpenStreetMap.
