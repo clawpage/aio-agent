@@ -8,6 +8,7 @@ import {DecisionGateway} from "./decision.js";
 import {KbGateway} from "./kb.js";
 import {HaGateway} from "./ha.js";
 import { HaCameras } from "./camera.js";
+import { HaHistory } from "./haHistory.js";
 import {PhoneGateway} from "./phone.js";
 import {UserBrowserGateway} from "./userBrowser.js";
 import {DeviceLinks} from "./deviceLink.js";
@@ -477,7 +478,7 @@ async function main(): Promise<void> {
   decision.provision(ctx.cfg);
   const kb=new KbGateway({cfg:ctx.cfg,log:ctx.log,port:ctx.cfg.memberModelPort??4902,usernameOf:id=>account("SELECT username AS v FROM owners WHERE id=?",id)});
   kb.provision(ctx.cfg);
-  const ha=new HaGateway({cfg:ctx.cfg,log:ctx.log,port:ctx.cfg.memberModelPort??4902,usernameOf:id=>account("SELECT username AS v FROM owners WHERE id=?",id),cameras:ctx.cameras});
+  const ha=new HaGateway({cfg:ctx.cfg,log:ctx.log,port:ctx.cfg.memberModelPort??4902,usernameOf:id=>account("SELECT username AS v FROM owners WHERE id=?",id),cameras:ctx.cameras,history:HaHistory.from(ctx.cfg,ctx.log)});
   ha.provision(ctx.cfg);
   const printer=new PrinterGateway({port:ctx.cfg.memberModelPort??4902,log:ctx.log,printerUri:ctx.cfg.printing.printerUri,accounts:ctx.cfg.printing.accounts,
     workspace:ctx.cfg.sandbox.containerWorkspaceDir,usernameOf:id=>account("SELECT username AS v FROM owners WHERE id=?",id),

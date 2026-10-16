@@ -558,6 +558,12 @@ Jev（TypeSafe System One）根据状态和选项返回选择、各选项概率�
 - **能力范围由 HA 决定**：只提供「暴露给 Assist」的实体，工具为 HA 意图（`HassTurnOn`、`HassLightSet`、`GetLiveContext` 等）。
   收窄设备范围在 HA 中修改暴露名单；收回授权可移出 `PA_HA_MCP_ACCOUNTS` 并重启，或在 HA 中删除令牌。
 - 执行会话只操作用户本次要求的设备，操作后读一次状态确认。
+- **历史**（`src/control/haHistory.ts`，同一 `aio_ha` 上追加的 `ha_history`，不经 HA 的 MCP Server，用同一令牌走 HA 的 WebSocket 接口）：
+  按实体 id 或名称（精确名称优先，否则包含即匹配，最多 10 个）查一段本地时间（默认最近 24 小时）的变化。有长期统计的测量型传感器（温度、湿度等）
+  返回每段的平均 / 最低 / 最高与整段高低点，粒度按时长自动选（≤6 小时 5 分钟、≤5 天每小时、≤120 天每天，再长每周，也可指定）；
+  HA 的小时与天统计长期保留、5 分钟统计约 10 天，当前未结束的一段还没有统计，以「现在」的读数补上。其他实体（温控器、灯、开关、二元传感器）
+  返回状态变化与各状态累计时长，温控器另按 `hvac_action` 统计加热 / 制冷 / 空闲时长（逐条记录约保留 10 天，取决于 HA recorder）。
+  只读「暴露给 Assist」的实体，与 HA 自己的 MCP 工具同一范围；数值保持 HA 的单位。
 - **摄像头**（`src/control/camera.ts`，同一 `aio_ha` 上追加的工具，不经 HA 的 MCP Server，直接用同一令牌调 HA 的 REST / WebSocket / 媒体接口）：
   `camera_list`（各摄像头能力与录像范围）、`camera_snapshot`（当前画面，图片回给执行器）、`camera_ptz`（方向点按或预置位，转完回一张画面）、
   `camera_recordings`（连续录像覆盖范围、缺口与侦测事件）、`camera_recording_frames`（从录像某一时刻起取最多 6 张图）。

@@ -262,6 +262,26 @@ export const CAMERA_POLICY =
 type ToolResult = { content: Array<{ type: "text"; text: string } | { type: "image"; data: string; mimeType: string }>; isError?: boolean };
 type WsMessage = Record<string, unknown> & { type: string };
 
+/** HA's address from PA_HA_MCP_URL and its token from HA_MCP_TOKEN (read on first use); null without a usable URL. */
+export function haAccess(cfg: Config): { baseUrl: string; token: () => string | null } | null {
+  if (!cfg.haMcp.upstreamUrl) return null;
+  let origin: string;
+  try {
+    origin = new URL(cfg.haMcp.upstreamUrl).origin;
+  } catch {
+    return null;
+  }
+  let token: string | null | undefined;
+  const read = () => {
+    if (token !== undefined) return token;
+    const fromEnv = process.env[TOKEN_KEY]?.trim();
+    if (fromEnv) return (token = fromEnv);
+    const file = readSecretFile(expandHome(cfg.haMcp.secretsFile), TOKEN_KEY);
+    return (token = file.ok ? file.value : null);
+  };
+  return { baseUrl: origin, token: read };
+}
+
 export class HaCameras {
   #base: string;
   #token: () => string | null;
@@ -280,24 +300,10 @@ export class HaCameras {
     this.#ffmpeg = opts.ffmpeg ?? "ffmpeg";
   }
 
-  /** The deployment's cameras: HA's address from PA_HA_MCP_URL, its token from HA_MCP_TOKEN; null without either. */
+  /** The deployment's cameras (haAccess); null without HA. */
   static from(cfg: Config, log: Logger): HaCameras | null {
-    if (!cfg.haMcp.upstreamUrl) return null;
-    let origin: string;
-    try {
-      origin = new URL(cfg.haMcp.upstreamUrl).origin;
-    } catch {
-      return null;
-    }
-    let token: string | null | undefined;
-    const read = () => {
-      if (token !== undefined) return token;
-      const fromEnv = process.env[TOKEN_KEY]?.trim();
-      if (fromEnv) return (token = fromEnv);
-      const file = readSecretFile(expandHome(cfg.haMcp.secretsFile), TOKEN_KEY);
-      return (token = file.ok ? file.value : null);
-    };
-    return new HaCameras({ baseUrl: origin, token: read, cameras: cfg.haMcp.cameras, log });
+    const access = haAccess(cfg);
+    return access ? new HaCameras({ ...access, cameras: cfg.haMcp.cameras, log }) : null;
   }
 
   #auth(): string {
