@@ -8,6 +8,7 @@ import { startHarness } from "../helpers/harness.js";
 import { MemberModelGateway } from "../../src/control/memberModelGateway.js";
 import { HaGateway } from "../../src/control/ha.js";
 import { HaHistory, autoPeriod, resolveEntities } from "../../src/control/haHistory.js";
+import { HaDashboard, dashboardNotes } from "../../src/control/haDashboard.js";
 import { formatLocal } from "../../src/control/camera.js";
 import { memberConfig } from "../../src/control/tenants.js";
 
@@ -17,6 +18,30 @@ const HOUR = 3600_000;
 /** A stand-in Home Assistant WebSocket API with a thermostat, its temperature sensor, a switch and an entity not exposed to Assist. */
 async function fakeHa(from: number) {
   const seen: Array<Record<string, any>> = [];
+  const panel = {
+    dashboards: [{ url_path: "home-panel", mode: "yaml" }],
+    failing: false,
+    config: {
+      views: [
+        {
+          title: "家",
+          badges: [{ type: "entity", entity: "switch.aisle", name: "走廊" }],
+          sections: [
+            {
+              type: "grid",
+              cards: [
+                { type: "heading", heading: "房间温湿度", heading_style: "title" },
+                { type: "heading", heading: "温度", heading_style: "subtitle" },
+                { type: "grid", cards: [{ type: "tile", entity: "sensor.upstairs_temperature", name: "婴儿卧室" }] },
+                { type: "tile", entity: "device_tracker.phone", name: "爸爸手机" },
+              ],
+            },
+            { type: "grid", cards: [{ type: "heading", heading: "走廊与车库" }, { type: "tile", entity: "switch.aisle", name: "走廊" }] },
+          ],
+        },
+      ],
+    } as Record<string, any>,
+  };
   const states = [
     { entity_id: "sensor.upstairs_temperature", state: "74.8", attributes: { friendly_name: "Upstairs Temperature", unit_of_measurement: "°F", state_class: "measurement" } },
     { entity_id: "climate.upstairs", state: "cool", attributes: { friendly_name: "Upstairs", hvac_action: "idle", temperature: 75 } },
@@ -37,6 +62,14 @@ async function fakeHa(from: number) {
       if (m.type === "get_config") return reply({ unit_system: { temperature: "°F" } });
       if (m.type === "homeassistant/expose_entity/list") {
         return reply({ exposed_entities: { "sensor.upstairs_temperature": { conversation: true }, "climate.upstairs": { conversation: true }, "switch.aisle": { conversation: true }, "device_tracker.phone": { conversation: false } } });
+      }
+      if (m.type === "lovelace/dashboards/list") {
+        if (panel.failing) return ws.send(JSON.stringify({ id: m.id, type: "result", success: false, error: { code: "unauthorized", message: "Unauthorized" } }));
+        return reply(panel.dashboards);
+      }
+      if (m.type === "lovelace/config") {
+        if (m.url_path === "home-panel") return reply(panel.config);
+        return ws.send(JSON.stringify({ id: m.id, type: "result", success: false, error: { code: "config_not_found", message: "No config found." } }));
       }
       if (m.type === "recorder/statistics_during_period") {
         const rows = [0, 1, 2].map((i) => ({ start: from + i * HOUR, end: from + (i + 1) * HOUR, mean: 75 - i, min: 74.5 - i, max: 75.5 - i }));
@@ -61,6 +94,7 @@ async function fakeHa(from: number) {
   return {
     base: `http://127.0.0.1:${(server.address() as { port: number }).port}`,
     seen,
+    panel,
     close: () => { for (const c of wss.clients) c.terminate(); wss.close(); server.closeAllConnections(); server.close(); },
   };
 }
@@ -146,6 +180,97 @@ it("adds ha_history to aio_ha: statistics for sensors, state changes and run tim
     expect(unknown.content[0].text).toContain('No entity exposed to Assist matches garage door. Exposed: sensor.upstairs_temperature "Upstairs Temperature", climate.upstairs "Upstairs", switch.aisle "Aisle"');
     expect((await call({ entities: [] })).isError).toBe(true);
     expect((await call({ entities: ["switch.aisle"], from: formatLocal(to), to: formatLocal(from) })).content[0].text).toBe("to must be after from");
+  } finally {
+    if (saved !== undefined) process.env.HA_MCP_TOKEN = saved;
+    gateway.close();
+    mcp.closeAllConnections();
+    mcp.close();
+    ha.close();
+    await h.shutdown();
+  }
+});
+
+it("reads the names and places a dashboard shows entities under", () => {
+  const notes = dashboardNotes({
+    views: [
+      {
+        title: "车",
+        badges: ["binary_sensor.lock", { entity: "sensor.battery", name: "电量" }],
+        cards: [
+          { type: "heading", heading: "车况" },
+          { type: "entities", title: "门窗", entities: [{ entity: "binary_sensor.door", name: "车门" }, "binary_sensor.window", { entity: "opower:pge_cost", name: "电费" }] },
+          { type: "vertical-stack", cards: [{ type: "tile", entity: "sensor.inside", name: "车内温度" }] },
+          { type: "conditional", card: { type: "tile", entity: "sensor.outside" } },
+        ],
+      },
+    ],
+  });
+  expect(Object.fromEntries(notes)).toEqual({
+    "binary_sensor.lock": [{ name: null, place: "车" }],
+    "sensor.battery": [{ name: "电量", place: "车" }],
+    "binary_sensor.door": [{ name: "车门", place: "车 › 车况 › 门窗" }],
+    "binary_sensor.window": [{ name: null, place: "车 › 车况 › 门窗" }],
+    "sensor.inside": [{ name: "车内温度", place: "车 › 车况" }],
+    "sensor.outside": [{ name: null, place: "车 › 车况" }],
+  });
+  expect(dashboardNotes(null).size).toBe(0);
+});
+
+it("adds the dashboard's names to GetLiveContext and ha_history, exposed entities only, following dashboard edits", async () => {
+  const from = Date.now() - 12 * HOUR;
+  const ha = await fakeHa(from);
+  const h = await startHarness();
+  const upstreamCalls: any[] = [];
+  const mcp = http.createServer(async (req, res) => {
+    let data = "";
+    for await (const chunk of req) data += chunk;
+    const body = JSON.parse(data);
+    upstreamCalls.push(body);
+    const result = body.method === "tools/list" ? { tools: [{ name: "GetLiveContext" }] } : { content: [{ type: "text", text: "Live Context: - names: Upstairs Temperature" }] };
+    res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ jsonrpc: "2.0", id: body.id, result }));
+  });
+  await new Promise<void>((r) => mcp.listen(0, "127.0.0.1", r));
+  const keyFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "aio-ha-dashboard-")), "ha-mcp.env");
+  fs.writeFileSync(keyFile, `HA_MCP_TOKEN=${TOKEN}\n`, { mode: 0o600 });
+  const saved = process.env.HA_MCP_TOKEN;
+  delete process.env.HA_MCP_TOKEN;
+  const cfg = { ...h.ctx.cfg, memberModelPort: 0, haMcp: { upstreamUrl: `http://127.0.0.1:${(mcp.address() as { port: number }).port}/api/mcp`, secretsFile: keyFile, accounts: ["cr"], cameras: {} } };
+  const access = { baseUrl: ha.base, token: () => TOKEN, log: h.ctx.log };
+  const dashboard = new HaDashboard({ ...access, ttlMs: 0 });
+  const history = new HaHistory({ ...access, dashboard });
+  const gatewayHa = new HaGateway({ cfg, log: h.ctx.log, port: 0, usernameOf: (id) => (id === "user_cr" ? "cr" : null), history, dashboard });
+  const gateway = new MemberModelGateway(cfg, h.ctx.log, undefined, undefined, undefined, undefined, undefined, undefined, undefined, gatewayHa);
+  await gateway.start();
+  try {
+    const member = memberConfig(cfg, "user_cr", 18095);
+    gateway.provision(member);
+    const url = member.ha!.url.replace(/^http:\/\/host\.docker\.internal:0/, `http://127.0.0.1:${gateway.port}`);
+    let id = 0;
+    const rpc = async (method: string, params?: unknown) => (await (await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: ++id, method, params }) })).json()) as any;
+    const live = async () => (await rpc("tools/call", { name: "GetLiveContext", arguments: {} })).result.content as Array<{ type: string; text: string }>;
+
+    const content = await live();
+    expect(content[0]).toEqual({ type: "text", text: "Live Context: - names: Upstairs Temperature" });
+    expect(content).toHaveLength(2);
+    expect(content[1]!.text).toContain("- Upstairs Temperature (sensor.upstairs_temperature): 婴儿卧室 — 家 › 房间温湿度 › 温度");
+    // The view badge's 走廊 is covered by the tile under its heading.
+    expect(content[1]!.text).toContain("- Aisle (switch.aisle): 走廊 — 家 › 走廊与车库\n");
+    expect(content[1]!.text).not.toContain("爸爸手机");
+    expect(upstreamCalls.filter((c) => c.method === "tools/call").map((c) => c.params.name)).toEqual(["GetLiveContext"]);
+
+    const byRoom = (await rpc("tools/call", { name: "ha_history", arguments: { entities: ["婴儿卧室"] } })).result;
+    expect(byRoom.isError).toBeUndefined();
+    expect(byRoom.content[0].text).toContain("Upstairs Temperature (sensor.upstairs_temperature) [dashboard: 婴儿卧室 — 家 › 房间温湿度 › 温度], °F:");
+    expect(byRoom.content[0].text).not.toContain("climate.upstairs");
+
+    // Renamed on the dashboard: the next call says so.
+    ha.panel.config.views[0].sections[0].cards[2].cards[0].name = "Roy 房间";
+    expect((await live())[1]!.text).toContain("(sensor.upstairs_temperature): Roy 房间 — 家 › 房间温湿度 › 温度");
+
+    // Dashboards unreadable: GetLiveContext is HA's answer, unchanged.
+    const fresh = new HaDashboard({ ...access, ttlMs: 0 });
+    ha.panel.failing = true;
+    expect(await fresh.liveContextText()).toBeNull();
   } finally {
     if (saved !== undefined) process.env.HA_MCP_TOKEN = saved;
     gateway.close();

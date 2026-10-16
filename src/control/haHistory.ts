@@ -1,6 +1,8 @@
 import type { Config } from "./config.js";
 import type { Logger } from "../common/logger.js";
 import { formatLocal, haAccess, parseLocal } from "./camera.js";
+import { formatNote, type DashboardNote, type HaDashboard } from "./haDashboard.js";
+import { HaError, withHaSocket, type HaCall } from "./haSocket.js";
 
 /**
  * Home Assistant's history on aio_ha: how the home's entities changed over a
@@ -13,9 +15,6 @@ import { formatLocal, haAccess, parseLocal } from "./camera.js";
  * it goes over HA's WebSocket API with the gateway's token, on the host.
  */
 
-class HistoryError extends Error {}
-
-const TIMEOUT_MS = 25_000;
 const DAY = 24 * 3600_000;
 const MAX_ENTITIES = 10;
 const MAX_ROWS = 120;
@@ -37,7 +36,7 @@ export const HA_HISTORY_TOOLS = [
           type: "array",
           items: { type: "string" },
           maxItems: MAX_ENTITIES,
-          description: "Entity ids (e.g. sensor.upstairs_temperature) or device names as the state tools show them; a partial name matches every exposed entity containing it",
+          description: "Entity ids (e.g. sensor.upstairs_temperature), device names as the state tools show them, or names on the home dashboard (e.g. a room); a partial name matches every exposed entity containing it",
         },
         from: { type: "string", description: "Start of the range, local time; default 24 hours before `to`. For \"today\" use today's 00:00:00" },
         to: { type: "string", description: "End of the range, local time; default now" },
@@ -59,7 +58,6 @@ type State = { entity_id: string; state: string; attributes: Record<string, unkn
 type StatRow = { start: number | string; end: number | string; mean?: number | null; min?: number | null; max?: number | null };
 /** HA's compressed history rows: state, attributes (when they changed), last updated in seconds. */
 type HistoryRow = { s: string; a?: Record<string, unknown>; lu: number };
-type Call = (message: Record<string, unknown>) => Promise<unknown>;
 
 export function autoPeriod(spanMs: number): Period {
   if (spanMs <= 6 * 3600_000) return "5minute";
@@ -79,14 +77,18 @@ function periodStart(ms: number, period: Period): number {
 const norm = (s: string) => s.toLowerCase().replace(/[\s_]+/g, " ").trim();
 const nameOf = (s: State) => (typeof s.attributes.friendly_name === "string" ? s.attributes.friendly_name : s.entity_id);
 
-/** The entities a request names: an exact id or name wins, otherwise every entity whose id or name contains it. */
-export function resolveEntities(asked: string[], states: State[]): { picked: State[]; missing: string[] } {
+/**
+ * The entities a request names: an exact id, name or dashboard name wins,
+ * otherwise every entity whose id, name or dashboard name contains it.
+ */
+export function resolveEntities(asked: string[], states: State[], notes: Map<string, DashboardNote[]> = new Map()): { picked: State[]; missing: string[] } {
   const picked = new Map<string, State>();
   const missing: string[] = [];
+  const keys = (s: State) => [s.entity_id, nameOf(s), ...(notes.get(s.entity_id) ?? []).flatMap((n) => (n.name ? [n.name] : []))].map(norm);
   for (const raw of asked) {
     const q = norm(raw);
-    const exact = states.filter((s) => norm(s.entity_id) === q || norm(nameOf(s)) === q);
-    const found = exact.length ? exact : states.filter((s) => norm(s.entity_id).includes(q) || norm(nameOf(s)).includes(q));
+    const exact = states.filter((s) => keys(s).includes(q));
+    const found = exact.length ? exact : states.filter((s) => keys(s).some((k) => k.includes(q)));
     if (!found.length) missing.push(raw);
     for (const s of found) picked.set(s.entity_id, s);
   }
@@ -105,7 +107,7 @@ function duration(msLong: number): string {
   return h ? `${h}h${m ? `${m}m` : ""}` : `${m}m`;
 }
 
-function statsBlock(state: State, rows: StatRow[], period: Period): string[] {
+function statsBlock(state: State, title: string, rows: StatRow[], period: Period): string[] {
   const unit = typeof state.attributes.unit_of_measurement === "string" ? state.attributes.unit_of_measurement : "";
   const points = rows.map((r) => ({ start: ms(r.start), end: ms(r.end), mean: r.mean ?? null, min: r.min ?? null, max: r.max ?? null }));
   const lows = points.filter((p) => p.min !== null);
@@ -113,7 +115,7 @@ function statsBlock(state: State, rows: StatRow[], period: Period): string[] {
   const means = points.flatMap((p) => (p.mean === null ? [] : [p.mean]));
   const low = lows.reduce((a, b) => (b.min! < a.min! ? b : a), lows[0]!);
   const high = highs.reduce((a, b) => (b.max! > a.max! ? b : a), highs[0]!);
-  const out = [`${nameOf(state)} (${state.entity_id})${unit ? `, ${unit}` : ""}: ${period} statistics ${when(points[0]!.start, period)} to ${formatLocal(points.at(-1)!.end).slice(5, 16)}`];
+  const out = [`${title}${unit ? `, ${unit}` : ""}: ${period} statistics ${when(points[0]!.start, period)} to ${formatLocal(points.at(-1)!.end).slice(5, 16)}`];
   const summary: string[] = [];
   if (low) summary.push(`low ${num(low.min!)} (${period} from ${when(low.start, period)})`);
   if (high) summary.push(`high ${num(high.max!)} (${period} from ${when(high.start, period)})`);
@@ -128,7 +130,7 @@ function statsBlock(state: State, rows: StatRow[], period: Period): string[] {
   return out;
 }
 
-function changesBlock(state: State, rows: HistoryRow[], end: number, tempUnit: string): string[] {
+function changesBlock(state: State, title: string, rows: HistoryRow[], end: number, tempUnit: string): string[] {
   const climate = state.entity_id.startsWith("climate.");
   const unit = typeof state.attributes.unit_of_measurement === "string" ? ` ${state.attributes.unit_of_measurement}` : "";
   let attrs: Record<string, unknown> = {};
@@ -136,7 +138,7 @@ function changesBlock(state: State, rows: HistoryRow[], end: number, tempUnit: s
     if (r.a) attrs = r.a;
     return { at: r.lu * 1000, s: r.s, a: attrs };
   });
-  const head = `${nameOf(state)} (${state.entity_id})`;
+  const head = title;
   if (!points.length) return [`${head}: no recorded history in this range (Home Assistant keeps detailed history only for its recorder's purge window, 10 days by default).`];
   const target = (a: Record<string, unknown>) =>
     a.temperature != null ? `target ${a.temperature}${tempUnit}` : a.target_temp_low != null || a.target_temp_high != null ? `target ${a.target_temp_low ?? "?"}–${a.target_temp_high ?? "?"}${tempUnit}` : "";
@@ -165,53 +167,56 @@ export class HaHistory {
   #base: string;
   #token: () => string | null;
   #log: Logger;
+  #dashboard: HaDashboard | null;
 
-  constructor(opts: { baseUrl: string; token: () => string | null; log: Logger }) {
+  constructor(opts: { baseUrl: string; token: () => string | null; log: Logger; dashboard?: HaDashboard | null }) {
     this.#base = opts.baseUrl.replace(/\/+$/, "");
     this.#token = opts.token;
     this.#log = opts.log.child("ha-history");
+    this.#dashboard = opts.dashboard ?? null;
   }
 
-  static from(cfg: Config, log: Logger): HaHistory | null {
+  static from(cfg: Config, log: Logger, dashboard?: HaDashboard | null): HaHistory | null {
     const access = haAccess(cfg);
-    return access ? new HaHistory({ ...access, log }) : null;
+    return access ? new HaHistory({ ...access, log, dashboard }) : null;
   }
 
   async tool(name: string, args: Record<string, unknown>): Promise<ToolResult> {
     try {
-      if (name !== "ha_history") throw new HistoryError(`unknown tool ${name}`);
+      if (name !== "ha_history") throw new HaError(`unknown tool ${name}`);
       return { content: [{ type: "text", text: await this.#history(args) }] };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      if (!(err instanceof HistoryError)) this.#log.warn("history tool failed", { tool: name, error: message });
+      if (!(err instanceof HaError)) this.#log.warn("history tool failed", { tool: name, error: message });
       return { content: [{ type: "text", text: message }], isError: true };
     }
   }
 
   async #history(args: Record<string, unknown>): Promise<string> {
     const asked = (Array.isArray(args.entities) ? args.entities : [args.entities]).filter((e): e is string => typeof e === "string" && e.trim() !== "");
-    if (!asked.length) throw new HistoryError('entities must list entity ids or names, e.g. ["sensor.upstairs_temperature"]');
+    if (!asked.length) throw new HaError('entities must list entity ids or names, e.g. ["sensor.upstairs_temperature"]');
     const now = Date.now();
     const to = args.to === undefined ? now : parseLocal(args.to);
     const from = args.from === undefined ? (to ?? now) - DAY : parseLocal(args.from);
-    if (from === null || to === null) throw new HistoryError("from/to must be local times like 2026-10-15 00:00:00");
-    if (to <= from) throw new HistoryError("to must be after from");
-    if (from >= now) throw new HistoryError(`from is in the future (now ${formatLocal(now)})`);
+    if (from === null || to === null) throw new HaError("from/to must be local times like 2026-10-15 00:00:00");
+    if (to <= from) throw new HaError("to must be after from");
+    if (from >= now) throw new HaError(`from is in the future (now ${formatLocal(now)})`);
     const end = Math.min(to, now);
     const period = args.period === undefined ? autoPeriod(end - from) : (args.period as Period);
-    if (!PERIODS.includes(period)) throw new HistoryError(`period must be one of ${PERIODS.join(", ")}`);
+    if (!PERIODS.includes(period)) throw new HaError(`period must be one of ${PERIODS.join(", ")}`);
 
-    return await this.#session(async (call) => {
+    const notes = (await this.#dashboard?.notes()) ?? new Map<string, DashboardNote[]>();
+    return await withHaSocket({ baseUrl: this.#base, token: this.#token, log: this.#log }, async (call: HaCall) => {
       const [states, exposure, config] = (await Promise.all([
         call({ type: "get_states" }),
         call({ type: "homeassistant/expose_entity/list" }),
         call({ type: "get_config" }),
       ])) as [State[], { exposed_entities?: Record<string, { conversation?: boolean }> }, { unit_system?: { temperature?: string } }];
       const exposed = states.filter((s) => exposure.exposed_entities?.[s.entity_id]?.conversation === true);
-      const { picked, missing } = resolveEntities(asked, exposed);
+      const { picked, missing } = resolveEntities(asked, exposed, notes);
       if (!picked.length) {
-        const names = exposed.filter((s) => /^(sensor|climate|binary_sensor|light|switch|fan|cover|lock|vacuum|media_player)\./.test(s.entity_id)).map((s) => `${s.entity_id} "${nameOf(s)}"`);
-        throw new HistoryError(`No entity exposed to Assist matches ${missing.join(", ")}. Exposed: ${names.join(", ")}`);
+        const names = exposed.filter((s) => /^(sensor|climate|binary_sensor|light|switch|fan|cover|lock|vacuum|media_player)\./.test(s.entity_id)).map((s) => `${s.entity_id} "${[nameOf(s), ...(notes.get(s.entity_id) ?? []).flatMap((n) => (n.name ? [n.name] : []))].join(" / ")}"`);
+        throw new HaError(`No entity exposed to Assist matches ${missing.join(", ")}. Exposed: ${names.join(", ")}`);
       }
       const chosen = picked.slice(0, MAX_ENTITIES);
       const measured = chosen.filter((s) => s.attributes.state_class === "measurement");
@@ -239,69 +244,22 @@ export class HaHistory {
         : {}) as Record<string, HistoryRow[]>;
 
       const out = [`History ${formatLocal(from)} to ${formatLocal(end)} (local time; now ${formatLocal(now)}):`];
+      const title = (s: State) => {
+        const named = notes.get(s.entity_id) ?? [];
+        return `${nameOf(s)} (${s.entity_id})${named.length ? ` [dashboard: ${named.map(formatNote).join("; ")}]` : ""}`;
+      };
       for (const s of chosen) {
         out.push("");
         const rows = stats[s.entity_id];
-        if (rows?.length) out.push(...statsBlock(s, rows, period));
+        if (rows?.length) out.push(...statsBlock(s, title(s), rows, period));
         else {
           if (measured.includes(s)) out.push(`(no ${period} statistics for ${s.entity_id} in this range: HA writes one when each period ends${period === "5minute" ? " and keeps 5-minute ones about 10 days" : ""}; raw readings follow)`);
-          out.push(...changesBlock(s, history[s.entity_id] ?? [], end, config.unit_system?.temperature ?? ""));
+          out.push(...changesBlock(s, title(s), history[s.entity_id] ?? [], end, config.unit_system?.temperature ?? ""));
         }
       }
       if (picked.length > chosen.length) out.push("", `${picked.length - chosen.length} more entities matched (${picked.slice(MAX_ENTITIES).map((s) => s.entity_id).join(", ")}); ask for them separately.`);
       if (missing.length) out.push("", `Not found among the entities exposed to Assist: ${missing.join(", ")}.`);
       return out.join("\n");
     });
-  }
-
-  /** One WebSocket connection for a tool call: authenticate, then any number of commands. */
-  async #session<T>(work: (call: Call) => Promise<T>): Promise<T> {
-    const token = this.#token();
-    if (!token) throw new HistoryError("Home Assistant is not configured");
-    const ws = new WebSocket(`${this.#base.replace(/^http/, "ws")}/api/websocket`);
-    const pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
-    let fail: (err: Error) => void = () => {};
-    const broken = new Promise<never>((_, reject) => { fail = reject; });
-    broken.catch(() => {});
-    const abort = (err: Error) => {
-      fail(err);
-      for (const p of pending.values()) p.reject(err);
-      pending.clear();
-    };
-    let authed: () => void = () => {};
-    const ready = new Promise<void>((resolve) => { authed = resolve; });
-    ws.onerror = () => abort(new HistoryError("Cannot reach Home Assistant"));
-    ws.onclose = () => abort(new HistoryError("Home Assistant closed the connection"));
-    ws.onmessage = (ev) => {
-      let m: { type?: string; id?: number; success?: boolean; result?: unknown; error?: { message?: string } };
-      try { m = JSON.parse(String(ev.data)); } catch { return; }
-      if (m.type === "auth_required") ws.send(JSON.stringify({ type: "auth", access_token: token }));
-      else if (m.type === "auth_ok") authed();
-      else if (m.type === "auth_invalid") {
-        this.#log.warn("Home Assistant rejected the history token");
-        abort(new HistoryError("Home Assistant refused the request"));
-      } else if (m.type === "result" && typeof m.id === "number") {
-        const p = pending.get(m.id);
-        if (!p) return;
-        pending.delete(m.id);
-        if (m.success) p.resolve(m.result);
-        else p.reject(new HistoryError(m.error?.message ?? "Home Assistant refused the request"));
-      }
-    };
-    let nextId = 0;
-    const call: Call = (message) => new Promise((resolve, reject) => {
-      const id = ++nextId;
-      pending.set(id, { resolve, reject });
-      ws.send(JSON.stringify({ id, ...message }));
-    });
-    const timer = setTimeout(() => abort(new HistoryError("Home Assistant did not answer in time")), TIMEOUT_MS);
-    try {
-      await Promise.race([ready, broken]);
-      return await Promise.race([work(call), broken]);
-    } finally {
-      clearTimeout(timer);
-      ws.onclose = null;
-      try { ws.close(); } catch { /* already closed */ }
-    }
   }
 }
