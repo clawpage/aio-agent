@@ -555,6 +555,9 @@ export function createApiRouter(context: AppContext): Router {
    * console offers the microphone only in the languages listed here.
    */
   const dictation = new Dictation(cfg, log);
+  // The accounts the knowledge base is offered to (KbGateway): only their transcripts get its names.
+  const kbReader = (user: { username: string; role: string } | null | undefined) =>
+    Boolean(user && (user.role === "owner" || cfg.kbMcp.members.includes(user.username)));
   router.get("/asr", requireKind("primary"), requireSession, (_req, res) => {
     res.json({ enabled: Boolean(cfg.asrUrl), locales: ASR_LOCALES });
   });
@@ -569,7 +572,7 @@ export function createApiRouter(context: AppContext): Router {
       if (!upstream.ok) throw new Error(`upstream ${upstream.status}`);
       const json = (await upstream.json()) as { text?: unknown };
       const heard = typeof json.text === "string" ? json.text.trim() : "";
-      const out = heard ? await dictation.polish(heard) : { text: "", polished: false };
+      const out = heard ? await dictation.polish(heard, { names: kbReader(getUser(db, ctxOf(req).session!.ownerId)) }) : { text: "", polished: false };
       res.json(out);
       track(req, "voice_input", { ok: true, seconds: Math.round((audio.byteLength - 44) / 32000) });
     } catch (err) {
@@ -811,7 +814,7 @@ export function createApiRouter(context: AppContext): Router {
     const gadget = { audioS: num(req.body?.audioS), asrMs: num(req.body?.asrMs), prevSendMs: num(req.body?.prevSendMs),
       psramKb: num(req.body?.psramKb), psramMinKb: num(req.body?.psramMinKb) };
     const started = Date.now();
-    const out = await dictation.polish(text);
+    const out = await dictation.polish(text, { names: kbReader(caller) });
     const polishMs = Date.now() - started;
     try {
       await dictation.type(out.text);

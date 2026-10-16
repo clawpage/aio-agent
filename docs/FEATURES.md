@@ -481,7 +481,9 @@ iOS App 需为声明了存入相册权限、带 `aioSaveFiles` 标记的新版�
   现有部署指向 Usage HUD 的回环快照 `http://host.docker.internal:4796/gadget.json`，配件「用量」页每分钟拉取一次。
 - **语音键盘**：配件「语音键盘」页点麦克风开始录音、再点一下结束；转写后发 `POST /api/gadget/dictation`（配件令牌，JSON `{text}`，最多 4000 字），
   控制面用 owner 的 Claude 凭据调 `PA_DICTATION_MODEL`（默认 `claude-sonnet-5-5`，10 秒超时；输入区语音输入共用）去赘词、改错字、补标点，
-  再交给宿主 Mac 上的键盘桥（`bin/keyboard-bridge.mjs`）粘贴到当前光标处，返回 `{text, polished}`。润色失败时照原文输入（`polished:false`）；
+  再交给宿主 Mac 上的键盘桥（`bin/keyboard-bridge.mjs`）粘贴到当前光标处，返回 `{text, polished}`。
+  说话的账号能用知识库（owner 与 `PA_KB_MCP_MEMBERS`）时，润色还会参考知识库里照片标注的人名（出现至少 10 次的，最多 40 个；
+  经 `kb_sql` 读取，每 6 小时重读，读不到时 5 分钟后再试、照常润色），把被识别成同音字或拼错的人名改回原写法；其他账号不注入。润色失败时照原文输入（`polished:false`）；
   Mac 未授予辅助功能 409 `not_trusted`，桥连不上 502，未配置 `PA_KEYBOARD_BRIDGE_URL` 404。键盘桥只经这个接口触达，沙箱与执行器都用不到它；
   粘贴后剪贴板恢复原样，且标记为临时内容，剪贴板历史工具不记录。
 - **固件无线升级**：`GET /api/gadget/firmware` 返回当前固件信息（版本、构建时间、大小、`elfSha256`），`GET /api/gadget/firmware.bin` 下载镜像；

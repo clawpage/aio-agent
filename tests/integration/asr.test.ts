@@ -97,8 +97,14 @@ it("polishes what was heard with the dictation model, and falls back to it as he
   const claudeFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "asr-")), "claude.env");
   fs.writeFileSync(claudeFile, "CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat-test\n", { mode: 0o600 });
   const asrUrl = h.ctx.cfg.asrUrl;
+  // A knowledge base that does not answer: the transcript is still polished, just without its names.
+  const kbDown = http.createServer((_req, res) => { res.writeHead(500).end(); });
+  await new Promise<void>(resolve => kbDown.listen(0, "127.0.0.1", resolve));
+  const kbFile = path.join(path.dirname(claudeFile), "kb.env");
+  fs.writeFileSync(kbFile, "KB_MCP_TOKEN=kb-test-token\n", { mode: 0o600 });
   const polishing = await startHarness({}, { configure: cfg => {
     cfg.asrUrl = asrUrl;
+    cfg.kbMcp = { upstreamUrl: `http://127.0.0.1:${(kbDown.address() as AddressInfo).port}/mcp`, secretsFile: kbFile, members: [] };
     cfg.polishModel = "claude-sonnet-5-5";
     Object.assign(cfg.claudeCode, { enabled: "on", secretsFile: claudeFile, apiBaseUrl: `http://127.0.0.1:${(model.address() as AddressInfo).port}` });
   } });
@@ -107,6 +113,7 @@ it("polishes what was heard with the dictation model, and falls back to it as he
     expect(await (await post(polishing, { audioBase64: recording.toString("base64") })).json()).toEqual({ text: "打开走廊的灯。", polished: true });
     expect(requests.at(-1).model).toBe("claude-sonnet-5-5");
     expect(requests.at(-1).messages[0].content).toContain("嗯打开那个走廊灯");
+    expect(JSON.stringify(requests.at(-1).system)).not.toContain("<names>");
 
     // Nothing heard: nothing to polish.
     answer = { status: 200, text: "" };
@@ -119,5 +126,6 @@ it("polishes what was heard with the dictation model, and falls back to it as he
   } finally {
     await polishing.shutdown();
     model.close();
+    kbDown.close();
   }
 });

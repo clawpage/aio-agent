@@ -1,5 +1,6 @@
 import type { Config } from "./config.js";
 import type { Logger } from "../common/logger.js";
+import { readSecretFile } from "../common/secrets.js";
 import { McpGateway } from "./mcpGateway.js";
 
 /**
@@ -40,4 +41,25 @@ export class KbGateway extends McpGateway {
       timeoutMs: TIMEOUT_MS,
     });
   }
+}
+
+/**
+ * One read-only query (kb_sql) for the control plane's own use: its rows, or
+ * null when no knowledge base is configured. Throws when it does not answer.
+ */
+export async function kbSql(cfg: Config, query: string): Promise<unknown[][] | null> {
+  if (!cfg.kbMcp.upstreamUrl) return null;
+  const token = readSecretFile(cfg.kbMcp.secretsFile, KB_MCP_KEY);
+  if (!token.ok) return null;
+  const res = await fetch(cfg.kbMcp.upstreamUrl, {
+    method: "POST",
+    headers: { "content-type": "application/json", accept: "application/json", authorization: `Bearer ${token.value}`, "x-aio-user": "aio-control" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "kb_sql", arguments: { query } } }),
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const body = (await res.json()) as { result?: { content?: Array<{ text?: string }>; isError?: boolean } };
+  const text = body.result?.content?.[0]?.text;
+  if (!text || body.result?.isError) throw new Error(text?.slice(0, 200) ?? "no result");
+  return (JSON.parse(text) as { rows: unknown[][] }).rows;
 }

@@ -5,6 +5,7 @@ import path from "node:path";
 import type { AddressInfo } from "node:net";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { startHarness, type TestHarness } from "../helpers/harness.js";
+import { createMember } from "../../src/control/auth/owner.js";
 
 let h: TestHarness;
 const TOKEN = "gadget-test-token-0123456789";
@@ -14,6 +15,7 @@ const dictate = (text: unknown, token = TOKEN) =>
 
 const model = { fail: false, requests: [] as Array<{ headers: http.IncomingHttpHeaders; body: any }> };
 const bridge = { status: 200, url: "", typed: [] as Array<{ auth: string | undefined; text: string }> };
+const kb = { calls: [] as Array<{ auth: string | undefined; body: any }> };
 const servers: http.Server[] = [];
 
 async function listen(handler: (req: http.IncomingMessage, body: any, res: http.ServerResponse) => void): Promise<string> {
@@ -44,6 +46,15 @@ beforeAll(async () => {
     bridge.typed.push({ auth: req.headers.authorization, text: body.text });
     res.writeHead(bridge.status, { "content-type": "application/json" }).end("{}");
   });
+  const kbUrl = await listen((req, body, res) => {
+    kb.calls.push({ auth: req.headers.authorization, body });
+    const rows = { columns: ["name", "n"], rows: [["Roy", 512], ["Rui Chao", 306]], truncated: false };
+    res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ jsonrpc: "2.0", id: body.id, result: { content: [{ type: "text", text: JSON.stringify(rows) }] } }));
+  });
+  const kbFile = path.join(dir, "kb.env");
+  fs.writeFileSync(kbFile, "KB_MCP_TOKEN=kb-test-token\n", { mode: 0o600 });
+  h.ctx.cfg.kbMcp = { upstreamUrl: `${kbUrl}/mcp`, secretsFile: kbFile, members: [] };
+  await createMember(h.ctx.db, "guest", "member-password-123");
   Object.assign(h.ctx.cfg.claudeCode, { enabled: "on", secretsFile: claudeFile, apiBaseUrl: modelUrl });
   h.ctx.cfg.keyboardBridge = { url: "", secretsFile: bridgeFile };
   h.ctx.cfg.polishModel = "claude-sonnet-5-5";
@@ -91,4 +102,27 @@ it("says so when the Mac hasn't allowed the bridge to type, and rejects empty te
   expect((await dictate("  ")).status).toBe(400);
   expect((await dictate(42)).status).toBe(400);
   expect(bridge.typed).toHaveLength(before);
+});
+
+it("tells the model the knowledge base's names, only for an account the knowledge base is offered to", async () => {
+  h.ctx.cfg.keyboardBridge.url = bridge.url;
+  const systemOf = () => (model.requests.at(-1)!.body.system as Array<{ text: string }>).map((b) => b.text).join("\n");
+
+  // The owner (the gadget's account when the token names none).
+  await dictate("帮我给若伊约一下体检");
+  expect(systemOf()).toContain("<names>\nRoy\nRui Chao\n</names>");
+  expect(kb.calls).toHaveLength(1);
+  expect(kb.calls[0]!.auth).toBe("Bearer kb-test-token");
+  expect(kb.calls[0]!.body).toMatchObject({ method: "tools/call", params: { name: "kb_sql" } });
+
+  // A member the knowledge base is not offered to.
+  fs.writeFileSync(h.ctx.cfg.gadgetTokenPath, `AIO_GADGET_TOKEN=${TOKEN}\nAIO_GADGET_USER=guest\n`, { mode: 0o600 });
+  await dictate("帮我给若伊约一下体检");
+  expect(systemOf()).not.toContain("<names>");
+  h.ctx.cfg.kbMcp.members = ["guest"];
+  await dictate("帮我给若伊约一下体检");
+  expect(systemOf()).toContain("Rui Chao");
+  // Read once, then reused.
+  expect(kb.calls).toHaveLength(1);
+  fs.writeFileSync(h.ctx.cfg.gadgetTokenPath, `AIO_GADGET_TOKEN=${TOKEN}\n`, { mode: 0o600 });
 });
