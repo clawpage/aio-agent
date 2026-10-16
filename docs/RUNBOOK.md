@@ -311,7 +311,7 @@ owner 与成员默认都开启（`PA_SANDBOX_RELEASE_IDLE=1` / `PA_MEMBER_SANDBO
 - 已知窗口：成员容器刚启动、还没装好出站隔离规则之前，有几秒不受网络限制（镜像自带的服务在跑，智能体进程还没启动）。休眠后容器启停变频繁，这个窗口出现得也更多。
 - 预备沙箱：`sqlite3 <控制面库> "SELECT value FROM meta WHERE key='spare_user_id'"` 是它的 id，容器名是 `aio-user-<该 id 的 sha256 前 20 位>`；
   日志里 `spare sandbox taken by a new account` 表示被注册接手、下一个已开始准备，`spare sandbox not prepared` 表示准备失败（下次服务启动或下一次接手时重试）。
-  它没有账号，不要为它手动建账号或删除它的卷。
+  它常驻运行、不因空闲停掉（`docker ps` 里一直是 `Up`），注册接手后才按普通成员休眠；它没有账号，不要为它手动建账号或删除它的卷。
 - 重启服务不会拉起停着的容器（owner 与成员相同）：运行时照常建立（定时任务、未完成的任务照旧），容器按休眠接管，等该账号的页面显示或有任务时再启动；日志里是 `sandbox left stopped at start`。重启时正在运行的容器照常接管，没人用的话 5 分钟后停掉；还不存在的容器（新账号）照常创建。
 
 ## 9. 崩溃恢复验证（唯一可靠方式）

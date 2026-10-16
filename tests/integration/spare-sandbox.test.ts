@@ -15,6 +15,7 @@ it('keeps one sandbox provisioned for the next registration, which takes it over
  const h=await startHarness();
  try{
   h.ctx.cfg.sandbox.autostart=true;
+  h.ctx.cfg.sandbox.memberReleaseWhenIdle=true;h.ctx.cfg.browser.memberReleaseWhenIdle=true;
   Object.assign(h.ctx.container,{protectMemberPorts:async()=>{}});
   const made:{config:Config;identity:{id:string;username:string};shut:boolean;calls:string[]}[]=[];
   const factory=async(opts?:{config?:Config;identity?:{id:string;username:string;role:string}})=>{
@@ -33,6 +34,9 @@ it('keeps one sandbox provisioned for the next registration, which takes it over
   expect(made).toHaveLength(1);
   expect(made[0]!.identity).toMatchObject({id:first,username:'spare'});
   expect(made[0]!.config.agent.dailyFeed).toBe(false);
+  // The spare never stops for idleness, so the next registration finds it running.
+  expect(made[0]!.config.sandbox.releaseWhenIdle).toBe(false);
+  expect(made[0]!.config.browser.releaseWhenIdle).toBe(false);
   // Preparing again keeps the one spare.
   registry.prepareSpare();expect(made).toHaveLength(1);
   // The spare has no account: it cannot sign in and does not count toward the open-registration limit.
@@ -52,6 +56,9 @@ it('keeps one sandbox provisioned for the next registration, which takes it over
   expect(own.config.sandbox.containerName).toBe(made[0]!.config.sandbox.containerName);
   expect(own.config.sandbox.hostPort).toBe(made[0]!.config.sandbox.hostPort);
   expect(own.config.agent.dailyFeed).toBe(true);
+  // The account that takes it rests like any member.
+  expect(own.config.sandbox.releaseWhenIdle).toBe(true);
+  expect(own.config.browser.releaseWhenIdle).toBe(true);
   // The next spare is already on its way, under a new id.
   const next=spareId(h.ctx)!;
   expect(next).not.toBe(first);

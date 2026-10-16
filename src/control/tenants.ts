@@ -122,8 +122,9 @@ export class UserRuntimes {
     const assigned=this.root.db.prepare('SELECT value FROM meta WHERE key=?').get(`member_model:${user.id}`) as {value:string}|undefined;
     const effort=this.root.db.prepare('SELECT value FROM meta WHERE key=?').get(`member_effort:${user.id}`) as {value:string}|undefined;
     // An assignment no longer offered (DeepSeek, before it was removed) falls back to the default.
+    // The spare is resident too: a parked spare would make the next registration wait for a cold start.
     const config=memberConfig(this.root.cfg,user.id,port,assigned&&MEMBER_MODELS.includes(assigned.value)?assigned.value:MEMBER_MODEL,
-      effort&&MEMBER_EFFORTS.includes(effort.value)?effort.value:undefined,this.root.cfg.sandbox.residentMembers.includes(user.username));
+      effort&&MEMBER_EFFORTS.includes(effort.value)?effort.value:undefined,spare||this.root.cfg.sandbox.residentMembers.includes(user.username));
     // The daily feed's slot (`feed_slot:<id>`, kept like the port): a few minutes apart per account,
     // so the members' sandboxes do not all wake on the node at the owner's 08:00.
     const slotKey=`feed_slot:${user.id}`;

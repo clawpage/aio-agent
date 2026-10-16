@@ -65,12 +65,12 @@ export const feed: typeof zh = {
   empty: {
     title: "Hi, I'm Clawpage Agent",
     body: "Just tell me what you need done: research something online, compare prices before you buy, plan a trip, write a document or a spreadsheet, sort out files. I work on my own computer and report progress and results right here. You can keep sending other tasks while I work.",
-    hint: "Not sure where to start? Try one:",
+    hint: "Not sure where to start? Tap one and I'll get going:",
     starters: [
-      { label: "Compare earbuds", prompt: "Find me noise-cancelling wireless earbuds for commuting: compare a few popular models on price and reviews, and recommend the best value." },
-      { label: "Plan a weekend trip", prompt: "Plan a two-day weekend getaway for me, with the route, where to stay and a plan for each day, on a moderate budget." },
-      { label: "Today's tech news", prompt: "Look through today's tech news, pick the 5 stories most worth knowing, and sum up each in two or three sentences." },
-      { label: "Daily reminder", prompt: "Every morning at 8, tell me today's weather and what to wear." },
+      { label: "Watch me browse", prompt: "Open the browser, go to GitHub Trending, and look at today's 5 hottest open-source projects: open each one, read its README, tell me what each is for, and send me a screenshot of the list." },
+      { label: "Research into a spreadsheet", prompt: "Look up 4 popular noise-cancelling earbuds online (price, battery life, what reviews say about the noise cancelling), put it all in an Excel file for me, and recommend the best value." },
+      { label: "Make a page to share", prompt: "Make me a web page with a two-day weekend trip guide (you pick the destination; route, food and budget), and publish it as a link I can share with friends." },
+      { label: "Watch a price", prompt: "Check the current price of the iPhone 17 Pro on Apple's website and tell me, then check again every morning and let me know if it drops." },
     ],
   },
   report: {

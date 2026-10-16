@@ -284,6 +284,14 @@ export function TaskChat({ onDetails, onOpenLink, onOpenFileInBrowser, onExpired
         // collapses on the next tap would move the feed under the finger).
         if (matchMedia("(pointer: fine)").matches) input.current?.focus();
     };
+    /** A welcome starter goes out at once as its own message; the composer's draft is left alone. */
+    const sendStarter = (text: string) => {
+        const message: Outgoing = { id: crypto.randomUUID(), text, reference: null, attachments: [], uploads: [], state: "sending" };
+        setOutboxNow(old => [...old, message]);
+        setError(null);
+        stick.current = true;
+        queue(message.id);
+    };
     const retry = (id: string) => {
         setOutboxNow(old => old.map(x => x.id === id ? { ...x, state: "sending", error: undefined } : x));
         queue(id);
@@ -482,11 +490,11 @@ export function TaskChat({ onDetails, onOpenLink, onOpenFileInBrowser, onExpired
       {nextBefore && <div className="feed-older" ref={olderTop}>{olderState === "failed"
         ? <button className="ghost tiny" onClick={() => void loadOlder()}>{i18n.feed.older.retry}</button>
         : <span className="muted tiny">{olderState === "loading" && <InlineLoading label={i18n.feed.older.loading}/>}</span>}</div>}
-      {/* Nothing here yet (a new account): the agent says hello, and a starter fills the composer to send or change. */}
+      {/* Nothing here yet (a new account): the agent says hello, and a starter is sent with one tap. */}
       {!tasks.length && !outbox.length && arrival !== "loading" && <div className="feed-welcome">
         <article className="msg assistant welcome-msg"><div className="bubble"><div className="welcome-head"><BrandMark size={24}/><strong>{i18n.feed.empty.title}</strong></div><p>{i18n.feed.empty.body}</p></div></article>
         <p className="welcome-hint muted tiny">{i18n.feed.empty.hint}</p>
-        <div className="welcome-starters">{i18n.feed.empty.starters.map(s => <button type="button" key={s.label} onClick={() => { setDraft(s.prompt); input.current?.focus(); }}>{s.label}</button>)}</div>
+        <div className="welcome-starters">{i18n.feed.empty.starters.map(s => <button type="button" key={s.label} onClick={() => sendStarter(s.prompt)}>{s.label}</button>)}</div>
       </div>}
       {feed.map(({ task: t, report }) => report ? <article className={`msg assistant task-report ${t.status}`} key={`${t.id}:report`} data-task-id={t.id}>
         <div className="task-report-heading"><span>{t.title}</span>{t.schedule && <span className="schedule-badge">{i18n.feed.report.schedule(t.schedule.rule)}</span>}{t.support && <span className="schedule-badge">{i18n.feed.report.support}</span>}<span className="muted tiny">{labels[t.status]}</span></div>

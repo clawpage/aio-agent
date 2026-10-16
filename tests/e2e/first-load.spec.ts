@@ -74,9 +74,10 @@ test("a feed that does not come gives the console back, with the mark loading in
   await expect(page.getByRole("textbox", { name: "消息", exact: true })).toBeVisible();
 });
 
-test("an account with nothing yet is greeted once the feed answers, and a starter fills the composer", async ({ page }, info) => {
+test("an account with nothing yet is greeted once the feed answers, and a starter is sent with one tap", async ({ page }, info) => {
   await mockConsole(page, { conversations: [] });
-  await page.route("**/api/main*", (r) => r.fulfill({ json: { mode: "tasks", version: "v0", tasks: [], nextBefore: null } }));
+  const rows: Array<Record<string, unknown>> = [];
+  await page.route("**/api/main*", (r) => r.fulfill({ json: { mode: "tasks", version: `v${rows.length}`, tasks: rows, nextBefore: null } }));
   await page.goto("/");
   await expect(page.getByText("你好，我是一站")).toBeVisible();
   await expect(page.locator(".boot-cover")).toHaveCount(0);
@@ -85,12 +86,21 @@ test("an account with nothing yet is greeted once the feed answers, and a starte
   for (const button of await starters.all()) await expect(button).toBeInViewport();
   expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1);
   await page.screenshot({ path: info.outputPath("welcome.png") });
-  // A starter is put in the composer, to send as is or change first; nothing is sent by itself.
-  let sent = 0;
-  await page.route("**/api/tasks", (r) => { sent++; return r.fallback(); });
-  await page.getByRole("button", { name: "规划出游", exact: true }).click();
+  // A starter goes out at once as its own message; a draft already in the composer stays where it is.
+  const bodies: Array<Record<string, any>> = [];
+  await page.route("**/api/tasks", async (r) => {
+    const body = r.request().postDataJSON();
+    bodies.push(body);
+    const sent = { ...task(1), id: "starter", title: "周末出游攻略网页", text: body.text, status: "planning", result: null, completedAt: null, clientMessageId: body.clientMessageId, createdAt: Date.now() };
+    rows.push(sent);
+    await r.fulfill({ status: 202, json: { task: sent, duplicate: false } });
+  });
   const composer = page.getByRole("textbox", { name: "消息", exact: true });
-  await expect(composer).toHaveValue(/周末两天的短途出游/);
-  await expect(composer).toBeFocused();
-  expect(sent).toBe(0);
+  await composer.fill("我自己的草稿");
+  await page.getByRole("button", { name: "做网页发链接", exact: true }).click();
+  await expect.poll(() => bodies.length).toBe(1);
+  expect(bodies[0]!.text).toMatch(/出游攻略网页/);
+  await expect(page.locator(".feed-welcome")).toHaveCount(0);
+  await expect(composer).toHaveValue("我自己的草稿");
+  await page.screenshot({ path: info.outputPath("starter-sent.png") });
 });
