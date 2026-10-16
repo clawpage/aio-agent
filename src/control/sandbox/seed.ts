@@ -617,9 +617,11 @@ Show it in your reply with ![description](path to the png). The HTML stays in th
 /**
  * Market data (A-shares, Hong Kong, US and other markets) from free public
  * sources: Sina for search and A-share quotes with the standard library only,
- * akshare and yfinance (pinned) for the rest. The CLI installs those libraries
- * into its own venv in the persistent tool directory on first use, so starting
- * a sandbox never waits on pip. Managed like the graphic skill.
+ * akshare and yfinance (pinned) for the rest, in the CLI's own venv in the
+ * persistent tool directory. The control plane runs its `setup` in the
+ * background after every start (one stamp read once installed), so a new
+ * sandbox has them before the first question and no start waits on pip.
+ * Managed like the graphic skill.
  */
 export const MARKET_TOOL_DIR = "tools/aio-market";
 export const MARKET_SKILL_DIR = "skills/aio-market";
@@ -627,7 +629,8 @@ export const MARKET_CLI_PY = String.raw`#!/usr/bin/env python3
 """aio-market: free stock / index / ETF data (China A-shares, Hong Kong, US and more), managed by AIO Agent.
 
 A-share quotes and search come straight from Sina (no extra libraries); history, company info and news
-use akshare (A-shares) and yfinance (Yahoo; everything else), installed into a private venv on first use.
+use akshare (A-shares) and yfinance (Yahoo; everything else), installed into a private venv by setup after the
+sandbox starts, or by the first command that needs them.
 """
 import argparse, datetime, fcntl, json, math, os, re, shutil, subprocess, sys, urllib.parse, urllib.request
 
@@ -671,7 +674,7 @@ def ensure_venv():
         fcntl.flock(lock, fcntl.LOCK_EX)
         if venv_ready():
             return
-        print("aio-market: installing the market data libraries (first use, about a minute)...", file=sys.stderr)
+        print("aio-market: installing the market data libraries (a new sandbox, about a minute).", file=sys.stderr)
         shutil.rmtree(VENV, ignore_errors=True)
         steps = [[sys.executable, "-m", "venv", VENV],
                  [VENV_PY, "-m", "pip", "install", "--quiet", "--disable-pip-version-check", *REQUIREMENTS]]
@@ -1009,14 +1012,18 @@ def cmd_news(args):
 
 
 def cmd_setup(args):
-    if not venv_ready() and os.path.realpath(sys.prefix) != os.path.realpath(VENV):
+    """Install the libraries when missing; an installed venv costs one stamp read unless --verify imports them."""
+    installed = not venv_ready()
+    if installed:
         ensure_venv()
-    res = subprocess.run([VENV_PY, "-c", "import yfinance, akshare; print(yfinance.__version__, akshare.__version__)"],
-                         capture_output=True, text=True, timeout=120)
-    if res.returncode != 0:
-        fail("The libraries are installed but do not import: " + res.stderr.strip()[-300:])
-    yv, av = res.stdout.split()
-    out({"ok": True, "python": VENV_PY, "yfinance": yv, "akshare": av})
+    result = {"ok": True, "python": VENV_PY, "installed": installed, "requirements": REQUIREMENTS}
+    if installed or args.verify:
+        res = subprocess.run([VENV_PY, "-c", "import yfinance, akshare; print(yfinance.__version__, akshare.__version__)"],
+                             capture_output=True, text=True, timeout=120)
+        if res.returncode != 0:
+            fail("The libraries are installed but do not import: " + res.stderr.strip()[-300:])
+        result["yfinance"], result["akshare"] = res.stdout.split()
+    out(result)
 
 
 def main():
@@ -1041,7 +1048,8 @@ def main():
     n = sub.add_parser("news", help="Latest news headlines")
     n.add_argument("symbol")
     n.add_argument("--limit", type=int, default=10)
-    sub.add_parser("setup", help="Install or check the libraries (done automatically on first use)")
+    st = sub.add_parser("setup", help="Install the libraries if missing (the sandbox does this after it starts)")
+    st.add_argument("--verify", action="store_true", help="Also import them and print their versions")
     args = p.parse_args()
     try:
         {"search": cmd_search, "quote": cmd_quote, "history": cmd_history, "info": cmd_info,
@@ -1067,8 +1075,9 @@ One command covers the common questions. It prints JSON; every result carries it
 python3 /home/gem/.codex/tools/aio-market/aio-market.py <command> ...
 \`\`\`
 
-The command is not on PATH; use the absolute path. The first command that needs the data libraries installs them into a private venv
-(about a minute, once per sandbox); later calls are immediate. \`setup\` does it ahead of time and prints the versions.
+The command is not on PATH; use the absolute path. The data libraries live in a private venv that the sandbox installs in the background
+after it starts. If a command prints that it is installing them (a brand-new sandbox, about a minute), it simply waits for that install and then answers;
+\`setup --verify\` prints the installed versions.
 
 ## Commands
 
@@ -1109,7 +1118,7 @@ When unsure of a code, run \`search\` first; never guess a code from memory.
 
 ## Going further: the libraries directly
 
-After the first use, the venv has \`akshare\` and \`yfinance\` (with pandas):
+The venv has \`akshare\` and \`yfinance\` (with pandas):
 
 \`\`\`bash
 /home/gem/.codex/tools/aio-market/venv/bin/python - <<'PY'

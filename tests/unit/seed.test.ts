@@ -203,6 +203,24 @@ describe("sandbox workspace seed", () => {
     expect(MARKET_CLI_PY).toMatch(/REQUIREMENTS = \["yfinance==[\d.]+", "akshare==[\d.]+"\]/);
   });
 
+  it("installs the market data libraries through the CLI's own setup and reports whether it installed them", async () => {
+    const cfg = testConfig("/tmp/pa-market-libs-test", 1);
+    const container = new SandboxContainer(cfg, new Logger("error", undefined, false), testNode());
+    const execs: Array<{ argv: string[]; timeoutMs?: number }> = [];
+    let stdout = JSON.stringify({ ok: true, installed: true });
+    container.execInSandbox = (async (argv: string[], opts?: { timeoutMs?: number }) => (execs.push({ argv, timeoutMs: opts?.timeoutMs }), { code: 0, stdout, stderr: "" })) as typeof container.execInSandbox;
+    expect(await container.ensureMarketLibraries()).toBe(true);
+    expect(execs[0].argv).toEqual(["python3", `${cfg.sandbox.containerCodexHome}/tools/aio-market/aio-market.py`, "setup"]);
+    // pip in a fresh sandbox takes about a minute; the call must not time out first.
+    expect(execs[0].timeoutMs).toBeGreaterThanOrEqual(600_000);
+    stdout = JSON.stringify({ ok: true, installed: false });
+    expect(await container.ensureMarketLibraries()).toBe(false);
+    container.execInSandbox = (async () => ({ code: 1, stdout: JSON.stringify({ ok: false, error: "pip failed" }), stderr: "" })) as typeof container.execInSandbox;
+    await expect(container.ensureMarketLibraries()).rejects.toThrow("pip failed");
+    // An installed venv is answered from its stamp; importing the libraries is only for --verify or a fresh install.
+    expect(MARKET_CLI_PY).toContain("if installed or args.verify:");
+  });
+
   it("gives every sandbox the mail skill, its scripts and the pinned himalaya/ortie on PATH", async () => {
     const cfg = testConfig("/tmp/pa-mail-seed-test", 1);
     const container = new SandboxContainer(cfg, new Logger("error", undefined, false), testNode());

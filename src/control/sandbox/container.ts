@@ -396,6 +396,18 @@ export class SandboxContainer {
     }
   }
 
+  /**
+   * Install the market skill's pinned libraries before anyone asks: a new or
+   * recreated sandbox takes about a minute, one that has them a stamp read.
+   * Returns whether this call installed them.
+   */
+  async ensureMarketLibraries(): Promise<boolean> {
+    const cli = `${this.#cfg.sandbox.containerCodexHome}/${MARKET_TOOL_DIR}/aio-market.py`;
+    const res = await this.execInSandbox(["python3", cli, "setup"], { timeoutMs: 900_000 });
+    if (res.code !== 0) throw new Error((res.stdout || res.stderr).trim().slice(-300));
+    return (JSON.parse(res.stdout) as { installed?: boolean }).installed === true;
+  }
+
   /** A separate managed policy avoids rewriting the user's persistent config. */
   async enforceCodexIsolation(): Promise<void> {
     const script = `import os, pathlib, sys, tempfile

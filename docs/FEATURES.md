@@ -631,8 +631,9 @@ Android 手机用 USB 接在装了 Mac App 的 Mac 上，由 App 运行的 `bin/
   默认前复权，可 `--csv` 存文件）、`info`（公司概况与估值指标）、`news`（个股新闻）。输出 JSON，带数据来源与时间。
 - **数据源**：搜索与 A 股实时行情走新浪（只用标准库，随时可用）；A 股个股与 ETF 的历史 K 线、公司卡片、新闻走东方财富（akshare），
   A 股指数日线走新浪；港股、美股及其他市场走 Yahoo（yfinance，行情可能延迟 15 分钟）。
-- **安装**：akshare 与 yfinance 固定版本（`src/control/sandbox/seed.ts` 的 `MARKET_CLI_PY`），由 CLI 首次用到时装进持久卷里的私有 venv
-  （约一分钟，并发调用排队等同一次安装），沙箱启动不等 pip；Python 版本或固定版本变化时自动重装。
+- **安装**：akshare 与 yfinance 固定版本（`src/control/sandbox/seed.ts` 的 `MARKET_CLI_PY`），装在持久卷里的私有 venv。固定镜像不改；
+  和文档工具一样，每次沙箱启动后控制面在后台跑一次 `aio-market.py setup`：新账号或重建的容器约一分钟装好，已装好的只读一次标记文件，
+  启动本身不等 pip、安装失败只记日志。装好前就来的查询会排队等同一次安装；Python 版本或固定版本变化时自动重装。
 - 只提供数据，不下单；最终回复注明来源与时间，取数失败如实说明，不凭记忆补数字。
 
 ### 邮件（Gmail / Outlook）

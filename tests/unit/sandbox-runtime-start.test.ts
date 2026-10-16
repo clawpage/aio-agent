@@ -43,6 +43,25 @@ it("checks the document tools on every start, without waiting for them or failin
   expect(ensureProvisioned).toHaveBeenCalledTimes(2);
 });
 
+it("installs the market data libraries on every start in the background, never failing the start", async () => {
+  const cfg = testConfig("/tmp/pa-runtime-start", 1, { PA_SANDBOX_AUTOSTART: "1" });
+  let release: (err: Error) => void = () => undefined;
+  const ensureMarketLibraries = vi.fn(() => new Promise<boolean>((_, reject) => { release = reject; }));
+  const ctx = {
+    cfg, log: new Logger("error", undefined, false), sandboxSetupError: null, sandboxSurfaces: null,
+    container: { node: { check: async () => ({ ok: true }) }, ensureRunning: async () => ({ image: "img", healthy: true }), alignBrowserIdentity: async () => false, surfaces: async () => ({}), ensureMarketLibraries },
+    agent: { ensureSession: async () => undefined },
+    documents: { ensureProvisioned: async () => undefined },
+  } as unknown as AppContext;
+  // The pip install is still running when the start returns.
+  await startSandboxRuntime(ctx);
+  expect(ensureMarketLibraries).toHaveBeenCalledTimes(1);
+  expect(ctx.sandboxSetupError).toBeNull();
+  release(new Error("pip failed"));
+  await new Promise((r) => setTimeout(r, 5));
+  expect(ctx.sandboxSetupError).toBeNull();
+});
+
 it("leaves the browser alone when the configured build could not be checked", async () => {
   const cfg = testConfig("/tmp/pa-runtime-start", 1, { PA_SANDBOX_AUTOSTART: "1" });
   cfg.browser.build = { packages: [{ url: "https://example.com/chromium.deb", sha256: "a".repeat(64) }], arch: "aarch64" };

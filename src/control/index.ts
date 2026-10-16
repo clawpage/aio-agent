@@ -267,6 +267,11 @@ async function prepareSandboxBrowser(ctx: AppContext): Promise<void> {
   void ctx.tabs?.ensure().catch((err) => log.warn("browser tab server not refreshed", { error: String(err) }));
   // Word, Excel and PowerPoint tools belong to every sandbox; install what is missing in the background.
   void ctx.documents.ensureProvisioned().catch((err) => log.warn("document tools not checked", { error: String(err) }));
+  // So do the market data libraries, ready before the first question; never part of the start itself.
+  void Promise.resolve()
+    .then(() => container.ensureMarketLibraries())
+    .then((installed) => installed && log.info("market data libraries installed"))
+    .catch((err) => log.warn("market data libraries not installed", { error: String(err).slice(0, 300) }));
 }
 
 /** Bring the sandbox container and Codex session up in the background. */
