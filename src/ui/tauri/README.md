@@ -19,7 +19,10 @@ page that loaded, which shows "现在连不上一站" and reloads to the latest 
 as soon as the server answers. Online, the page always comes from the server.
 The shell itself bundles no UI, so a UI change still ships with the next UI deploy.
 
-- Android: WebView runs service workers as is; no native change.
+- Android: WebView runs service workers as is, but never learns about connectivity by
+  itself (`navigator.onLine` stays true, no `online` event). `MainActivity.kt` follows the
+  default network and calls `setNetworkAvailable` (needs `ACCESS_NETWORK_STATE`), so the
+  page says the device is offline and reloads the moment the network is back (0.1.2).
 - iOS: WKWebView runs service workers only with App-Bound Domains. The main window
   sets `limitNavigationsToAppBoundDomains` (`src-tauri/tauri.conf.json`), and
   `WKAppBoundDomains` (`gen/apple/project.yml` and the generated `Info.plist`) lists

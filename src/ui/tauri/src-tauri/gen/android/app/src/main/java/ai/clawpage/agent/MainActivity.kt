@@ -4,6 +4,8 @@ import android.os.Bundle
 import android.content.Intent
 import org.json.JSONObject
 import android.net.Uri
+import android.net.ConnectivityManager
+import android.net.Network
 import android.webkit.WebView
 import android.webkit.CookieManager
 import android.widget.Toast
@@ -19,6 +21,25 @@ class MainActivity : TauriActivity() {
   private var authWebView: WebView? = null
   private var authReady = false
   private var pendingAuth: String? = null
+  private var networkCallback: ConnectivityManager.NetworkCallback? = null
+  /**
+   * WebView never learns about connectivity by itself: navigator.onLine stays true offline and
+   * the "online" event never fires. The console uses both when it opens without a network (to say
+   * the device is offline, and to reload the latest UI as soon as it is back).
+   */
+  private fun followNetwork(webView: WebView) {
+    val connectivity = getSystemService(ConnectivityManager::class.java) ?: return
+    networkCallback?.let { connectivity.unregisterNetworkCallback(it) }
+    webView.setNetworkAvailable(connectivity.activeNetwork != null)
+    val callback = object : ConnectivityManager.NetworkCallback() {
+      override fun onAvailable(network: Network) { webView.post { webView.setNetworkAvailable(true) } }
+      override fun onLost(network: Network) {
+        webView.post { webView.setNetworkAvailable(connectivity.activeNetwork.let { it != null && it != network }) }
+      }
+    }
+    connectivity.registerDefaultNetworkCallback(callback)
+    networkCallback = callback
+  }
   private fun receiveAuth(intent: Intent?) {
     val url = intent?.data ?: return
     if (url.scheme != "aioagent" || url.host != "auth" || url.path.orEmpty().isNotEmpty()) return
@@ -50,6 +71,7 @@ class MainActivity : TauriActivity() {
     super.onWebViewCreate(webView)
     authWebView = webView
     authReady = false
+    followNetwork(webView)
     // The browser bridge is only injected into this exact origin. Subframes
     // and navigations to other sites receive no access to native operations.
     if (WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)) {
@@ -74,6 +96,11 @@ class MainActivity : TauriActivity() {
         }
       }
     }
+  }
+  override fun onDestroy() {
+    networkCallback?.let { getSystemService(ConnectivityManager::class.java)?.unregisterNetworkCallback(it) }
+    networkCallback = null
+    super.onDestroy()
   }
   override fun onPause() {
     super.onPause()
