@@ -625,6 +625,17 @@ Android 手机用 USB 接在装了 Mac App 的 Mac 上，由 App 运行的 `bin/
 - **隔离**：页面位于工作区来源，响应带 `Content-Security-Policy: sandbox allow-scripts …`（无 `allow-same-origin`），读不到工作区会话、
   cookie 或 localStorage；另带 `nosniff`、`no-referrer`、`noindex`，不设置 cookie。这是全站唯一不需要登录的路径。
 
+### 数据图表（消息里的 K 线、走势、对比、占比）
+
+执行器在回复里写 ```` ```chart ```` 代码块（JSON 数据），控制台用 ECharts 在画布上画成可交互的图表，不生成图片：
+
+- **类型**：`candlestick`（K 线，`data` 为 `[日期, 开, 高, 低, 收, 成交量?]` 或 `aio-market history` 输出的行对象；`ma` 加均线；
+  涨跌配色默认中文界面红涨绿跌、其他语言绿涨红跌，`up` 可覆盖）、`line` / `bar` / `area`（`x` + `series`，系列可混用柱线、`axis: "right"` 双轴、`stack` 堆叠）、`pie`（≤12 块）。
+  可选 `title`、`note`（来源与截至时间）、`unit` / `unitRight`。解析与限额在 `src/ui/src/chartBlocks.ts`（每图 ≤2000 点、≤8 个系列），格式不对时按普通代码块显示。
+- **交互**：点按（桌面悬停）显示当天数值；超过 60 根时底部出现滑块拖看更早的数据（不拦截页面滚动）；跟随深浅主题重绘；「保存图片」导出 PNG。
+- **安全**：所有文字都画在画布上，提示框用 richText 模式，执行器写的内容不会成为主站上的 HTML。图表库按需加载（首次出现图表时才下载）。
+- 执行器规则见 `src/control/tasks/service.ts`「Data charts」；`aio-market history --chart` 直接输出可用的 K 线块。
+
 ### 行情数据（A 股 / 港股 / 美股）
 
 每个账号的沙箱内置 `aio-market` skill，命令为 `python3 /home/gem/.codex/tools/aio-market/aio-market.py`，全部是免费公开数据源、不需要 API key：

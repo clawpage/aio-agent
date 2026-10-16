@@ -201,6 +201,10 @@ describe("sandbox workspace seed", () => {
     expect(MARKET_SKILL_MD).toContain("/home/gem/.codex/tools/aio-market/venv/bin/python");
     expect(MARKET_CLI_PY).toContain('VENV = os.path.join(HERE, "venv")');
     expect(MARKET_CLI_PY).toMatch(/REQUIREMENTS = \["yfinance==[\d.]+", "akshare==[\d.]+"\]/);
+    // history --chart hands the executor a ready chart block, and the skill tells it to use one instead of an image.
+    expect(MARKET_CLI_PY).toContain('h.add_argument("--chart"');
+    expect(MARKET_CLI_PY).toContain('"type": "candlestick"');
+    expect(MARKET_SKILL_MD).toContain("history --chart");
   });
 
   it("installs the market data libraries through the CLI's own setup and reports whether it installed them", async () => {

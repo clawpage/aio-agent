@@ -58,7 +58,7 @@ export function imageMcpServers(cfg: Config): Record<string, unknown> {
 export const IMAGE_POLICY =
   "When the user wants an image (photos, illustrations, posters, avatars, product renderings, stickers, and other raster images), or wants an image edited or extended, generate it with image_generate from aio_image, with path set to a .png in this task's folder; after it is generated, show it directly in your reply with ![description](path). " +
   "An image that is mainly text or layout (tables, schedules, meal or study plans, checklists, menus, infographics, text-heavy posters) is never drawn or edited with image_generate, which redraws every pixel and garbles text a little more on each edit: build it as HTML and render it to PNG with the aio-graphic skill, change it by editing that HTML, and use image_generate only for the illustrations placed in it. " +
-  "Flowcharts are better written as a mermaid code block, and line drawings such as diagrams and charts are better written directly as an svg code block.";
+  "Flowcharts are better written as a mermaid code block; charts of data (K-lines, trends, bars, pies) as a chart code block, which the console draws from the numbers; other line drawings such as diagrams directly as an svg code block.";
 
 /** Reading and saving pictures in one account's workspace. */
 export interface ImageFiles {

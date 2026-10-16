@@ -104,6 +104,12 @@
   --chart-2: var(--done);
   --chart-3: var(--you);
   --chart-4: var(--error);
+  --chart-5: #5ab0f0;
+  --chart-6: #d685e6;
+  /* Data charts: a market's rise and fall (which one is "up" depends on the market's convention), and the grid */
+  --chart-red: #f0605a;
+  --chart-green: #3fb27f;
+  --chart-grid: rgb(236 235 243 / 0.08);
 
   /* Diagrams (Mermaid) are drawn on paper in both themes */
   --diagram-node: #f1efff;
@@ -133,6 +139,11 @@
   --done: #1f8a5b;
   --done-soft: #e6f5ee;
   --error: #cc3b33;
+  --chart-5: #2f7fc4;
+  --chart-6: #a347b5;
+  --chart-red: #d9363e;
+  --chart-green: #1a9a5e;
+  --chart-grid: rgb(29 27 38 / 0.08);
   --on-accent: #ffffff;
   --on-you: #ffffff;
   --media-inset: rgb(20 16 40 / 0.1);

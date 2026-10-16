@@ -922,6 +922,17 @@ def yf_history(raw, start, end, interval, adjust):
     return rows, "yahoo via yfinance" + ("" if adjust == "none" else " (adjusted for splits and dividends)")
 
 
+def chart_block(symbol, interval, adjust, source, rows):
+    """A chart code block for the reply: the console draws it as a live K-line."""
+    period = {"1d": "daily", "1wk": "weekly", "1mo": "monthly"}.get(interval, interval)
+    adjusted = {"qfq": ", forward adjusted", "hfq": ", backward adjusted"}.get(adjust, "") if "akshare" in source and "index" not in source else ""
+    data = [[r["date"], r["open"], r["high"], r["low"], r["close"], r.get("volume_lots", r.get("volume_shares"))] for r in rows]
+    spec = {"type": "candlestick", "title": "%s %s%s" % (symbol, period, adjusted), "note": "%s · as of %s" % (source.split(" (")[0], rows[-1]["date"]),
+            "data": data, "ma": [5, 20] if len(rows) >= 30 else []}
+    fence = "\x60" * 3  # three backticks, spelled out so this source stays a TypeScript template literal
+    return fence + "chart\n" + json.dumps(spec, ensure_ascii=False, separators=(",", ":")) + "\n" + fence
+
+
 def cmd_history(args):
     libs()
     # The date in the furthest-ahead time zone, so today's session in Asia is never cut off by a US clock.
@@ -952,6 +963,8 @@ def cmd_history(args):
         result["note"] = "Showing the last %d of %d rows; use --limit 0 or --csv for all" % (len(shown), len(rows))
     if args.csv:
         result["csv"] = os.path.abspath(args.csv)
+    if args.chart and shown:
+        result["chart"] = chart_block(display_symbol(args.symbol), args.interval, args.adjust, source, shown)
     out(result)
 
 
@@ -1043,6 +1056,7 @@ def main():
                    help="qfq = forward adjusted (default), hfq = backward adjusted, none = raw prices")
     h.add_argument("--limit", type=int, default=60, help="Rows to print, newest last (0 = all)")
     h.add_argument("--csv", help="Also write every row to this CSV file")
+    h.add_argument("--chart", action="store_true", help="Also print the shown rows as a chart code block for the reply")
     i = sub.add_parser("info", help="Company profile, valuation and key financial ratios")
     i.add_argument("symbol")
     n = sub.add_parser("news", help="Latest news headlines")
@@ -1084,7 +1098,7 @@ after it starts. If a command prints that it is installing them (a brand-new san
 \`\`\`bash
 aio-market.py search 茅台                      # name or code -> symbols (A-share, HK, US, exchange ETFs)
 aio-market.py quote 600519 0700.HK AAPL sh000001  # latest price, change, open/high/low, volume, time
-aio-market.py history 600519 --start 2026-01-01 --end 2026-06-30 [--interval 1d|1wk|1mo|1m|5m|15m|30m|60m] [--adjust qfq|hfq|none] [--limit 60] [--csv <file>]
+aio-market.py history 600519 --start 2026-01-01 --end 2026-06-30 [--interval 1d|1wk|1mo|1m|5m|15m|30m|60m] [--adjust qfq|hfq|none] [--limit 60] [--csv <file>] [--chart]
 aio-market.py info 600519                       # profile, market cap, PE/PB, margins, 52-week range, analyst target
 aio-market.py news 600519 --limit 10            # latest headlines with links
 \`\`\`
@@ -1138,7 +1152,10 @@ PY
 
 - Lead with the answer: price, change and its time, or the trend and key numbers for the period asked; name the source and the as-of time
   (for example "新浪行情 2026-10-16 13:27 北京时间").
-- For a trend, a table of a few rows or a chart works better than a long list; build charts from the \`--csv\` file.
+- For a trend or a K-line, show a chart, not a long list of numbers and not an image: \`history --chart\` adds a \`chart\` field holding a
+  ready \`\`\`chart code block (the rows shown, with MA5/MA20 when there are 30 or more). Paste it into the reply as is, changing only its \`title\`
+  (the company name instead of the code, in the user's language) and \`note\`. The console draws it live from the numbers. For other charts
+  (several stocks' changes, revenue by year, holdings) write the \`\`\`chart block yourself as the main-session instructions describe.
 - This is market data, not investment advice. When the user asks what to buy or sell, give the facts and the considerations, not a recommendation;
   this skill places no trades.
 `;

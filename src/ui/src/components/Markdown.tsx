@@ -21,6 +21,8 @@ import { ChoiceList } from "./ChoiceList";
 import { ProductCards } from "./ProductCards";
 import { splitCameraBlocks, type CameraPart } from "../cameraBlocks";
 import { CameraCard } from "./CameraCard";
+import { splitChartBlocks, type ChartPart } from "../chartBlocks";
+import { ChartCard } from "./ChartCard";
 
 marked.setOptions({ gfm: true, breaks: true });
 
@@ -108,7 +110,7 @@ type MarkdownProps = {
 
 /**
  * A message: Markdown, with ```map blocks drawn as map cards, ```svg blocks as
- * pictures, ```mermaid blocks as diagrams, ```cards (or ```products) blocks as picture-and-text cards, ```camera blocks as camera cards, ```choices blocks as answers
+ * pictures, ```mermaid blocks as diagrams, ```chart blocks as live data charts, ```cards (or ```products) blocks as picture-and-text cards, ```camera blocks as camera cards, ```choices blocks as answers
  * to tap and ```form blocks as forms to fill in, where they stand.
  */
 export function Markdown(props: MarkdownProps) {
@@ -120,7 +122,8 @@ export function Markdown(props: MarkdownProps) {
       .flatMap<MessagePart | SvgPart | MermaidPart | ChoicePart | ProductPart>((part) => (part.kind === "text" ? splitProductBlocks(part.text) : [part]))
       .flatMap<MessagePart | SvgPart | MermaidPart | ChoicePart | ProductPart | AskPart>((part) => (part.kind === "text" ? splitAskBlocks(part.text) : [part]))
       .flatMap<MessagePart | SvgPart | MermaidPart | ChoicePart | ProductPart | AskPart | FormPart>((part) => (part.kind === "text" ? splitFormBlocks(part.text) : [part]))
-      .flatMap<MessagePart | SvgPart | MermaidPart | ChoicePart | ProductPart | AskPart | FormPart | CameraPart>((part) => (part.kind === "text" ? splitCameraBlocks(part.text) : [part])),
+      .flatMap<MessagePart | SvgPart | MermaidPart | ChoicePart | ProductPart | AskPart | FormPart | CameraPart>((part) => (part.kind === "text" ? splitCameraBlocks(part.text) : [part]))
+      .flatMap<MessagePart | SvgPart | MermaidPart | ChoicePart | ProductPart | AskPart | FormPart | CameraPart | ChartPart>((part) => (part.kind === "text" ? splitChartBlocks(part.text) : [part])),
     [props.source],
   );
   if (parts.length === 1 && parts[0]!.kind === "text") return <MarkdownBlock {...props} source={parts[0]!.text} />;
@@ -134,6 +137,8 @@ export function Markdown(props: MarkdownProps) {
             ? <MermaidCard key={i} code={part.code} />
           : part.kind === "camera"
             ? <CameraCard key={i} spec={part.spec} />
+          : part.kind === "chart"
+            ? <ChartCard key={i} spec={part.spec} />
           : part.kind === "products"
             ? <ProductCards key={i} items={part.items} onOpenLink={props.onOpenLink} onOpenFile={props.onOpenFile} />
           : part.kind === "choices"

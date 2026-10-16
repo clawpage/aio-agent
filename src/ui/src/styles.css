@@ -3824,6 +3824,24 @@ button.product-media { cursor: zoom-in; }
 }
 /* A ```mermaid diagram while Mermaid loads and draws it (then it is an ordinary svg card). */
 .mermaid-pending { padding: 16px 12px; }
+/* A data chart drawn from the numbers in a message (```chart). */
+.chart-card {
+  width: 100%;
+  margin: 8px 0;
+  padding: 8px;
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  position: relative;
+}
+.chart-canvas { width: 100%; }
+.chart-status {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+}
+
 .svg-actions {
   display: flex;
   justify-content: flex-end;
