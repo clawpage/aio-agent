@@ -615,6 +615,526 @@ Show it in your reply with ![description](path to the png). The HTML stays in th
 `;
 
 /**
+ * Market data (A-shares, Hong Kong, US and other markets) from free public
+ * sources: Sina for search and A-share quotes with the standard library only,
+ * akshare and yfinance (pinned) for the rest. The CLI installs those libraries
+ * into its own venv in the persistent tool directory on first use, so starting
+ * a sandbox never waits on pip. Managed like the graphic skill.
+ */
+export const MARKET_TOOL_DIR = "tools/aio-market";
+export const MARKET_SKILL_DIR = "skills/aio-market";
+export const MARKET_CLI_PY = String.raw`#!/usr/bin/env python3
+"""aio-market: free stock / index / ETF data (China A-shares, Hong Kong, US and more), managed by AIO Agent.
+
+A-share quotes and search come straight from Sina (no extra libraries); history, company info and news
+use akshare (A-shares) and yfinance (Yahoo; everything else), installed into a private venv on first use.
+"""
+import argparse, datetime, fcntl, json, math, os, re, shutil, subprocess, sys, urllib.parse, urllib.request
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+VENV = os.path.join(HERE, "venv")
+VENV_PY = os.path.join(VENV, "bin", "python")
+REQUIREMENTS = ["yfinance==1.7.0", "akshare==1.18.88"]
+SINA_HEADERS = {"Referer": "https://finance.sina.com.cn", "User-Agent": "Mozilla/5.0"}
+# Sina suggest type codes worth returning: A-share, B-share, exchange fund/ETF, Hong Kong, US.
+SUGGEST_TYPES = {"11": "CN", "12": "CN", "203": "CN", "31": "HK", "41": "US"}
+
+
+def out(data):
+    print(json.dumps(data, ensure_ascii=False, indent=2, default=str))
+
+
+def fail(message, code=1):
+    out({"ok": False, "error": message})
+    sys.exit(code)
+
+
+# ---------- the private venv ----------
+
+def stamp_text():
+    return json.dumps({"requirements": REQUIREMENTS, "python": sys.version.split()[0]})
+
+
+def venv_ready():
+    try:
+        with open(os.path.join(VENV, "aio-market.stamp")) as f:
+            return os.path.exists(VENV_PY) and f.read() == stamp_text()
+    except OSError:
+        return False
+
+
+def ensure_venv():
+    """Create the venv with the pinned libraries once; parallel callers wait on one lock."""
+    if venv_ready():
+        return
+    with open(os.path.join(HERE, ".venv.lock"), "w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        if venv_ready():
+            return
+        print("aio-market: installing the market data libraries (first use, about a minute)...", file=sys.stderr)
+        shutil.rmtree(VENV, ignore_errors=True)
+        steps = [[sys.executable, "-m", "venv", VENV],
+                 [VENV_PY, "-m", "pip", "install", "--quiet", "--disable-pip-version-check", *REQUIREMENTS]]
+        for step in steps:
+            res = subprocess.run(step, capture_output=True, text=True, timeout=900)
+            if res.returncode != 0:
+                shutil.rmtree(VENV, ignore_errors=True)
+                fail("Installing the market data libraries failed: " + (res.stderr or res.stdout).strip()[-500:])
+        with open(os.path.join(VENV, "aio-market.stamp"), "w") as f:
+            f.write(stamp_text())
+
+
+def libs():
+    """Run the rest of this command inside the venv (re-executing once if needed)."""
+    if os.path.realpath(sys.prefix) == os.path.realpath(VENV):
+        import warnings
+        warnings.filterwarnings("ignore")
+        return
+    ensure_venv()
+    os.execv(VENV_PY, [VENV_PY, os.path.abspath(__file__), *sys.argv[1:]])
+
+
+# ---------- symbols ----------
+
+def parse_symbol(raw):
+    """-> ("CN", "sh"|"sz"|"bj", code) | ("HK", None, "00700") | ("YF", None, yahoo symbol)."""
+    s = raw.strip()
+    low = s.lower()
+    m = re.fullmatch(r"(sh|sz|bj)(\d{6})", low)
+    if m:
+        return ("CN", m.group(1), m.group(2))
+    m = re.fullmatch(r"(\d{6})\.(ss|sh|sz|bj)", low)
+    if m:
+        return ("CN", {"ss": "sh"}.get(m.group(2), m.group(2)), m.group(1))
+    if re.fullmatch(r"\d{6}", low):
+        if low.startswith(("92", "4", "8")):
+            return ("CN", "bj", low)
+        return ("CN", "sh" if low[0] in "659" else "sz", low)
+    m = re.fullmatch(r"(?:hk)?(\d{1,5})(?:\.hk)?", low)
+    if m and (low.startswith("hk") or low.endswith(".hk") or len(m.group(1)) == 5):
+        return ("HK", None, m.group(1).zfill(5))
+    return ("YF", None, s.upper())
+
+
+def cn_kind(ex, code):
+    if (ex == "sh" and code.startswith("000")) or (ex == "sz" and code.startswith("399")) or (ex == "bj" and code.startswith("899")):
+        return "index"
+    if (ex == "sh" and code[0] == "6") or (ex == "sz" and code[:2] in ("00", "30")) or ex == "bj":
+        return "stock"
+    if (ex == "sh" and code[0] == "5") or (ex == "sz" and code[0] == "1"):
+        return "fund"
+    return "other"
+
+
+def yahoo_symbol(raw):
+    market, ex, code = parse_symbol(raw)
+    if market == "CN":
+        return code + {"sh": ".SS", "sz": ".SZ", "bj": ".BJ"}[ex]
+    if market == "HK":
+        return code[-4:] + ".HK" if code.startswith("0") else code + ".HK"
+    return code
+
+
+def display_symbol(raw):
+    market, ex, code = parse_symbol(raw)
+    return ex + code if market == "CN" else yahoo_symbol(raw)
+
+
+def num(x):
+    try:
+        v = float(x)
+    except (TypeError, ValueError):
+        return None
+    return None if math.isnan(v) or math.isinf(v) else round(v, 4)
+
+
+# ---------- Sina: search and A-share quotes (standard library only) ----------
+
+def sina(url):
+    req = urllib.request.Request(url, headers=SINA_HEADERS)
+    with urllib.request.urlopen(req, timeout=15) as res:
+        return res.read().decode("gbk", "replace")
+
+
+def cmd_search(args):
+    text = sina("https://suggest3.sinajs.cn/suggest/type=&key=" + urllib.parse.quote(args.keyword) + "&name=s")
+    body = text.split('"', 2)[1] if '"' in text else ""
+    seen, results = set(), []
+    for row in body.split(";"):
+        f = row.split(",")
+        if len(f) < 5 or f[1] not in SUGGEST_TYPES:
+            continue
+        market = SUGGEST_TYPES[f[1]]
+        if market == "CN":
+            symbol = f[3]
+            if not re.fullmatch(r"(sh|sz|bj)\d{6}", symbol):
+                continue
+        elif market == "HK":
+            symbol = yahoo_symbol("hk" + f[2])
+        else:
+            symbol = f[2].upper()
+        if symbol in seen:
+            continue
+        seen.add(symbol)
+        results.append({"symbol": symbol, "name": f[4], "market": market})
+    out({"ok": True, "keyword": args.keyword, "results": results[: args.limit]})
+
+
+def cn_quotes(items):
+    text = sina("https://hq.sinajs.cn/list=" + ",".join(ex + code for _, ex, code in items))
+    quotes = {}
+    for line in text.splitlines():
+        m = re.match(r'var hq_str_(\w+)="(.*)";?', line.strip())
+        if not m:
+            continue
+        f = m.group(2).split(",")
+        if len(f) < 32:
+            quotes[m.group(1)] = {"symbol": m.group(1), "error": "No such symbol on Sina"}
+            continue
+        ex, code = m.group(1)[:2], m.group(1)[2:]
+        kind = cn_kind(ex, code)
+        price, prev = num(f[3]), num(f[2])
+        traded = bool(price)
+        q = {"symbol": m.group(1), "name": f[0], "market": "CN", "kind": kind, "currency": "CNY",
+             "price": price if traded else prev, "prev_close": prev, "open": num(f[1]) or None,
+             "high": num(f[4]) or None, "low": num(f[5]) or None, "amount": num(f[9]),
+             "time": f[30] + " " + f[31] + " Asia/Shanghai", "source": "sina (real time)"}
+        if traded and prev:
+            q["change"] = round(price - prev, 4)
+            q["change_pct"] = round((price - prev) / prev * 100, 2)
+        if kind != "index":
+            q["volume_shares"] = num(f[8])
+        if not traded:
+            q["note"] = "No trade yet today or suspended; price shows the previous close"
+        quotes[m.group(1)] = q
+    return [quotes.get(ex + code, {"symbol": ex + code, "error": "No data"}) for _, ex, code in items]
+
+
+def yf_quote(raw):
+    import yfinance as yf
+    sym = yahoo_symbol(raw)
+    info = yf.Ticker(sym).info or {}
+    if info.get("regularMarketPrice") is None:
+        return {"symbol": sym, "error": "No quote from Yahoo for this symbol; check it with search"}
+    t = info.get("regularMarketTime")
+    q = {"symbol": sym, "name": info.get("longName") or info.get("shortName"), "market": info.get("exchange"),
+         "currency": info.get("currency"), "price": num(info.get("regularMarketPrice")),
+         "change": num(info.get("regularMarketChange")), "change_pct": num(info.get("regularMarketChangePercent")),
+         "prev_close": num(info.get("regularMarketPreviousClose")), "open": num(info.get("regularMarketOpen")),
+         "high": num(info.get("regularMarketDayHigh")), "low": num(info.get("regularMarketDayLow")),
+         "volume_shares": num(info.get("regularMarketVolume")), "market_state": info.get("marketState"),
+         "time": datetime.datetime.fromtimestamp(t, datetime.timezone.utc).isoformat() if t else None,
+         "source": "yahoo (may be delayed up to 15 minutes)"}
+    for k in ("preMarketPrice", "postMarketPrice"):
+        if info.get(k) is not None:
+            q[re.sub(r"([A-Z])", r"_\1", k).lower()] = num(info[k])
+    return q
+
+
+def cmd_quote(args):
+    parsed = [(raw, parse_symbol(raw)) for raw in args.symbols]
+    cn = [p for _, p in parsed if p[0] == "CN"]
+    if len(cn) < len(parsed):
+        libs()
+    cn_result = iter(cn_quotes(cn) if cn else [])
+    quotes = []
+    for raw, p in parsed:
+        if p[0] == "CN":
+            quotes.append(next(cn_result))
+        else:
+            try:
+                quotes.append(yf_quote(raw))
+            except Exception as e:
+                quotes.append({"symbol": yahoo_symbol(raw), "error": "%s: %s" % (type(e).__name__, str(e)[:200])})
+    out({"ok": True, "quotes": quotes})
+
+
+# ---------- history, info, news (akshare / yfinance) ----------
+
+def frame_rows(df, columns):
+    rows = []
+    for rec in df.to_dict("records"):
+        row = {}
+        for name, src in columns.items():
+            if src in rec:
+                v = rec[src]
+                row[name] = str(v)[:10] if name == "date" else num(v)
+        rows.append(row)
+    return rows
+
+
+EM_COLUMNS = {"date": "日期", "open": "开盘", "high": "最高", "low": "最低", "close": "收盘", "volume_lots": "成交量",
+              "amount": "成交额", "change_pct": "涨跌幅", "turnover_pct": "换手率"}
+PERIODS = {"1d": "daily", "1wk": "weekly", "1mo": "monthly"}
+
+
+def cn_history(kind, ex, code, start, end, interval, adjust):
+    """A-share stocks and exchange funds from Eastmoney (falling back to Sina for daily bars); indexes from Sina."""
+    import akshare as ak
+    adj = "" if adjust == "none" else adjust
+    s, e = start.replace("-", ""), end.replace("-", "")
+    if kind == "index":
+        df = ak.stock_zh_index_daily(symbol=ex + code)
+        df = df[(df["date"].astype(str) >= start) & (df["date"].astype(str) <= end)]
+        if interval != "1d":
+            import pandas as pd
+            df = df.assign(date=pd.to_datetime(df["date"]))
+            df = df.groupby(df["date"].dt.to_period("W" if interval == "1wk" else "M")).agg(
+                date=("date", "last"), open=("open", "first"), high=("high", "max"), low=("low", "min"),
+                close=("close", "last"), volume=("volume", "sum"))
+        cols = {"date": "date", "open": "open", "high": "high", "low": "low", "close": "close", "volume_shares": "volume"}
+        return frame_rows(df, cols), "sina via akshare (index level, not adjusted)"
+    try:
+        if kind == "fund":
+            df = ak.fund_etf_hist_em(symbol=code, period=PERIODS[interval], start_date=s, end_date=e, adjust=adj)
+        else:
+            df = ak.stock_zh_a_hist(symbol=code, period=PERIODS[interval], start_date=s, end_date=e, adjust=adj)
+        return frame_rows(df, EM_COLUMNS), "eastmoney via akshare"
+    except Exception:
+        if interval != "1d":
+            raise
+    if kind == "fund":
+        df = ak.fund_etf_hist_sina(symbol=ex + code)
+        df = df[(df["date"].astype(str) >= start) & (df["date"].astype(str) <= end)]
+        cols = {"date": "date", "open": "open", "high": "high", "low": "low", "close": "close", "volume_shares": "volume", "amount": "amount"}
+        return frame_rows(df, cols), "sina via akshare (not adjusted)"
+    df = ak.stock_zh_a_daily(symbol=ex + code, start_date=s, end_date=e, adjust=adj)
+    cols = {"date": "date", "open": "open", "high": "high", "low": "low", "close": "close", "volume_shares": "volume", "amount": "amount"}
+    return frame_rows(df, cols), "sina via akshare"
+
+
+def yf_history(raw, start, end, interval, adjust):
+    import yfinance as yf
+    end_excl = (datetime.date.fromisoformat(end) + datetime.timedelta(days=1)).isoformat()
+    df = yf.Ticker(yahoo_symbol(raw)).history(start=start, end=end_excl, interval=interval, auto_adjust=adjust != "none")
+    df = df.reset_index()
+    date_col = "Datetime" if "Datetime" in df.columns else "Date"
+    if date_col == "Datetime":
+        df[date_col] = df[date_col].astype(str)
+    rows = []
+    for rec in df.to_dict("records"):
+        rows.append({"date": str(rec[date_col]) if date_col == "Datetime" else str(rec[date_col])[:10],
+                     "open": num(rec.get("Open")), "high": num(rec.get("High")), "low": num(rec.get("Low")),
+                     "close": num(rec.get("Close")), "volume_shares": num(rec.get("Volume"))})
+    return rows, "yahoo via yfinance" + ("" if adjust == "none" else " (adjusted for splits and dividends)")
+
+
+def cmd_history(args):
+    libs()
+    # The date in the furthest-ahead time zone, so today's session in Asia is never cut off by a US clock.
+    end = args.end or datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=14))).date().isoformat()
+    start = args.start or (datetime.date.fromisoformat(end) - datetime.timedelta(days=90)).isoformat()
+    market, ex, code = parse_symbol(args.symbol)
+    try:
+        if market == "CN" and cn_kind(ex, code) != "other" and args.interval in PERIODS:
+            rows, source = cn_history(cn_kind(ex, code), ex, code, start, end, args.interval, args.adjust)
+        else:
+            rows, source = yf_history(args.symbol, start, end, args.interval, args.adjust)
+    except Exception as e:
+        fail("Could not fetch history for %s: %s: %s" % (args.symbol, type(e).__name__, str(e)[:300]))
+    if args.csv:
+        import csv
+        os.makedirs(os.path.dirname(os.path.abspath(args.csv)), exist_ok=True)
+        keys = list(rows[0].keys()) if rows else ["date"]
+        with open(args.csv, "w", newline="") as f:
+            w = csv.DictWriter(f, fieldnames=keys)
+            w.writeheader()
+            w.writerows(rows)
+    shown = rows[-args.limit:] if args.limit else rows
+    result = {"ok": True, "symbol": display_symbol(args.symbol), "interval": args.interval, "adjust": args.adjust,
+              "start": start, "end": end, "source": source, "count": len(rows), "rows": shown}
+    if not rows:
+        result["note"] = "No bars in this range: a market holiday, a wrong symbol (check it with search) or no data at this source"
+    elif len(shown) < len(rows):
+        result["note"] = "Showing the last %d of %d rows; use --limit 0 or --csv for all" % (len(shown), len(rows))
+    if args.csv:
+        result["csv"] = os.path.abspath(args.csv)
+    out(result)
+
+
+INFO_FIELDS = ["longName", "shortName", "exchange", "currency", "sector", "industry", "country", "website", "fullTimeEmployees",
+               "marketCap", "enterpriseValue", "trailingPE", "forwardPE", "priceToBook", "trailingEps", "dividendYield",
+               "payoutRatio", "beta", "fiftyTwoWeekHigh", "fiftyTwoWeekLow", "fiftyDayAverage", "twoHundredDayAverage",
+               "totalRevenue", "revenueGrowth", "grossMargins", "profitMargins", "returnOnEquity", "debtToEquity",
+               "recommendationKey", "targetMeanPrice", "numberOfAnalystOpinions", "longBusinessSummary"]
+
+
+def cmd_info(args):
+    libs()
+    import yfinance as yf
+    market, ex, code = parse_symbol(args.symbol)
+    result = {"ok": True, "symbol": display_symbol(args.symbol)}
+    try:
+        info = yf.Ticker(yahoo_symbol(args.symbol)).info or {}
+        yahoo = {k: info[k] for k in INFO_FIELDS if info.get(k) not in (None, "")}
+        if "longBusinessSummary" in yahoo:
+            yahoo["longBusinessSummary"] = yahoo["longBusinessSummary"][:1200]
+        if yahoo:
+            result["yahoo"] = yahoo
+    except Exception as e:
+        result["yahoo_error"] = "%s: %s" % (type(e).__name__, str(e)[:200])
+    if market == "CN" and cn_kind(ex, code) == "stock":
+        try:
+            import akshare as ak
+            df = ak.stock_individual_info_em(symbol=code)
+            result["eastmoney"] = {str(r["item"]): r["value"] for r in df.to_dict("records")}
+        except Exception as e:
+            result["eastmoney_error"] = "%s: %s" % (type(e).__name__, str(e)[:200])
+    if "yahoo" not in result and "eastmoney" not in result:
+        fail("No company information found for " + args.symbol)
+    out(result)
+
+
+def cmd_news(args):
+    libs()
+    market, ex, code = parse_symbol(args.symbol)
+    items = []
+    try:
+        if market == "CN" and cn_kind(ex, code) == "stock":
+            import akshare as ak
+            for r in ak.stock_news_em(symbol=code).to_dict("records")[: args.limit]:
+                items.append({"title": r.get("新闻标题"), "time": str(r.get("发布时间")), "source": r.get("文章来源"),
+                              "url": r.get("新闻链接"), "summary": str(r.get("新闻内容") or "")[:300]})
+            source = "eastmoney via akshare"
+        else:
+            import yfinance as yf
+            for n in yf.Search(yahoo_symbol(args.symbol), max_results=1, news_count=args.limit).news[: args.limit]:
+                t = n.get("providerPublishTime")
+                items.append({"title": n.get("title"), "publisher": n.get("publisher"), "url": n.get("link"),
+                              "time": datetime.datetime.fromtimestamp(t, datetime.timezone.utc).isoformat() if t else None})
+            source = "yahoo via yfinance"
+    except Exception as e:
+        fail("Could not fetch news for %s: %s: %s" % (args.symbol, type(e).__name__, str(e)[:300]))
+    out({"ok": True, "symbol": display_symbol(args.symbol), "source": source, "news": items})
+
+
+def cmd_setup(args):
+    if not venv_ready() and os.path.realpath(sys.prefix) != os.path.realpath(VENV):
+        ensure_venv()
+    res = subprocess.run([VENV_PY, "-c", "import yfinance, akshare; print(yfinance.__version__, akshare.__version__)"],
+                         capture_output=True, text=True, timeout=120)
+    if res.returncode != 0:
+        fail("The libraries are installed but do not import: " + res.stderr.strip()[-300:])
+    yv, av = res.stdout.split()
+    out({"ok": True, "python": VENV_PY, "yfinance": yv, "akshare": av})
+
+
+def main():
+    p = argparse.ArgumentParser(prog="aio-market", description="Free market data: A-shares (Shanghai/Shenzhen/Beijing), Hong Kong, US and other Yahoo symbols.")
+    sub = p.add_subparsers(dest="cmd", required=True)
+    s = sub.add_parser("search", help="Find symbols by Chinese/English name or code")
+    s.add_argument("keyword")
+    s.add_argument("--limit", type=int, default=10)
+    q = sub.add_parser("quote", help="Latest price for one or more symbols")
+    q.add_argument("symbols", nargs="+")
+    h = sub.add_parser("history", help="Price history (OHLC bars)")
+    h.add_argument("symbol")
+    h.add_argument("--start", help="YYYY-MM-DD (default: 90 days before --end)")
+    h.add_argument("--end", help="YYYY-MM-DD (default: today)")
+    h.add_argument("--interval", default="1d", choices=["1m", "5m", "15m", "30m", "60m", "1d", "1wk", "1mo"])
+    h.add_argument("--adjust", default="qfq", choices=["qfq", "hfq", "none"],
+                   help="qfq = forward adjusted (default), hfq = backward adjusted, none = raw prices")
+    h.add_argument("--limit", type=int, default=60, help="Rows to print, newest last (0 = all)")
+    h.add_argument("--csv", help="Also write every row to this CSV file")
+    i = sub.add_parser("info", help="Company profile, valuation and key financial ratios")
+    i.add_argument("symbol")
+    n = sub.add_parser("news", help="Latest news headlines")
+    n.add_argument("symbol")
+    n.add_argument("--limit", type=int, default=10)
+    sub.add_parser("setup", help="Install or check the libraries (done automatically on first use)")
+    args = p.parse_args()
+    try:
+        {"search": cmd_search, "quote": cmd_quote, "history": cmd_history, "info": cmd_info,
+         "news": cmd_news, "setup": cmd_setup}[args.cmd](args)
+    except OSError as e:
+        fail("Network error: %s" % e)
+
+
+if __name__ == "__main__":
+    main()
+`;
+
+export const MARKET_SKILL_MD = `---
+name: aio-market
+description: Free stock, index and ETF market data for China A-shares (Shanghai/Shenzhen/Beijing), Hong Kong, the US and other markets — find a symbol by Chinese or English name, latest quotes, price history (daily/weekly/monthly/intraday), company profile and valuation, and news, via Sina, Eastmoney (akshare) and Yahoo Finance (yfinance). Use whenever the user asks about 股票/股价/行情/大盘/指数/ETF/基金净值走势/市值/市盈率/财报/个股新闻, or wants a chart or table built from market data.
+---
+
+# Market data (free, no API key)
+
+One command covers the common questions. It prints JSON; every result carries its \`source\`, and quotes carry a \`time\`.
+
+\`\`\`bash
+python3 /home/gem/.codex/tools/aio-market/aio-market.py <command> ...
+\`\`\`
+
+The command is not on PATH; use the absolute path. The first command that needs the data libraries installs them into a private venv
+(about a minute, once per sandbox); later calls are immediate. \`setup\` does it ahead of time and prints the versions.
+
+## Commands
+
+\`\`\`bash
+aio-market.py search 茅台                      # name or code -> symbols (A-share, HK, US, exchange ETFs)
+aio-market.py quote 600519 0700.HK AAPL sh000001  # latest price, change, open/high/low, volume, time
+aio-market.py history 600519 --start 2026-01-01 --end 2026-06-30 [--interval 1d|1wk|1mo|1m|5m|15m|30m|60m] [--adjust qfq|hfq|none] [--limit 60] [--csv <file>]
+aio-market.py info 600519                       # profile, market cap, PE/PB, margins, 52-week range, analyst target
+aio-market.py news 600519 --limit 10            # latest headlines with links
+\`\`\`
+
+(The examples shorten the path; always call it by the absolute path above.)
+
+- \`history\` defaults to the last 90 days of daily bars, forward adjusted (\`qfq\`). It prints the newest \`--limit\` rows (0 = all);
+  \`--csv\` writes every row to a file (put it in the task folder) for charts or further analysis.
+- Intraday bars come from Yahoo and only reach back a short window (about 7 days for 1m, 60 days for the others).
+
+## Symbols
+
+When unsure of a code, run \`search\` first; never guess a code from memory.
+
+| Market | Accepted forms | Notes |
+| --- | --- | --- |
+| A-shares, ETFs, indexes | \`sh600519\`, \`600519.SS\`, \`600519\` | A bare 6-digit code is read as a stock or fund (6/5/9 -> Shanghai, 0/1/2/3 -> Shenzhen, 4/8/92 -> Beijing). **Indexes need the prefix**: \`sh000001\` 上证指数, \`sz399001\` 深证成指, \`sz399006\` 创业板指, \`sh000300\` 沪深300, \`sh000688\` 科创50 — a bare \`000001\` is 平安银行. |
+| Hong Kong | \`0700.HK\`, \`hk00700\`, \`00700\` | |
+| US and everything else | Yahoo symbols: \`AAPL\`, \`^GSPC\`, \`^IXIC\`, \`^HSI\`, \`7203.T\`, \`BTC-USD\`, \`CNY=X\` | |
+
+## Sources and what the numbers mean
+
+- A-share quotes (stocks, ETFs, indexes) come from Sina in real time. In \`history\`, A-share stocks and ETFs come from Eastmoney
+  (\`volume_lots\` is in lots of 100 shares, \`change_pct\` and \`turnover_pct\` are percentages); indexes come from Sina and their latest
+  daily bar appears only after the close (use \`quote\` for today).
+- Hong Kong, US and other markets come from Yahoo; quotes may be delayed up to 15 minutes. Check \`market_state\` (\`PRE\`, \`REGULAR\`, \`POST\`, \`CLOSED\`)
+  and \`time\` before calling a price "current"; outside trading hours the price is the last close.
+- \`info\` merges Yahoo's ratios with Eastmoney's company card for A-shares. Yahoo's ratios are its own computation and can differ from Chinese data sites.
+- These are free public sources: an individual call can fail or time out. Report a failure truthfully (the JSON has \`error\`), retry once if it looks like a network hiccup,
+  and never fill a gap with remembered or invented numbers.
+
+## Going further: the libraries directly
+
+After the first use, the venv has \`akshare\` and \`yfinance\` (with pandas):
+
+\`\`\`bash
+/home/gem/.codex/tools/aio-market/venv/bin/python - <<'PY'
+import akshare as ak, yfinance as yf
+print(ak.stock_financial_abstract_ths(symbol="600519", indicator="按年度").tail(5))   # A-share financial summary by year
+print(ak.stock_bid_ask_em(symbol="600519"))                                            # A-share five-level order book
+print(yf.Ticker("AAPL").income_stmt)                                                   # also balance_sheet, cashflow, dividends, earnings_dates, option_chain
+PY
+\`\`\`
+
+- akshare has hundreds of functions (sectors, fund flows, dragon-tiger lists, macro data, futures, funds): see https://akshare.akfamily.xyz/data/index.html
+  and try one on a small range first; many scrape web pages and can break or be slow.
+- Avoid full-market snapshots such as \`ak.stock_zh_a_spot_em()\` or \`ak.stock_zh_a_spot()\` unless the task needs every stock: they page through
+  the whole market and take one to three minutes.
+
+## Delivery
+
+- Lead with the answer: price, change and its time, or the trend and key numbers for the period asked; name the source and the as-of time
+  (for example "新浪行情 2026-10-16 13:27 北京时间").
+- For a trend, a table of a few rows or a chart works better than a long list; build charts from the \`--csv\` file.
+- This is market data, not investment advice. When the user asks what to buy or sell, give the facts and the considerations, not a recommendation;
+  this skill places no trades.
+`;
+
+/**
  * Mail: the Himalaya CLI plus Ortie for OAuth tokens, both static musl builds
  * pinned by version and per-architecture sha256. They live in the Codex volume
  * so a recreated container keeps them, and are linked into /usr/local/bin so

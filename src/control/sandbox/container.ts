@@ -32,6 +32,10 @@ import {
   GRAPHIC_SKILL_DIR,
   GRAPHIC_SKILL_MD,
   GRAPHIC_TOOL_DIR,
+  MARKET_CLI_PY,
+  MARKET_SKILL_DIR,
+  MARKET_SKILL_MD,
+  MARKET_TOOL_DIR,
   refreshWorkspaceAgents,
 } from "./seed.js";
 
@@ -290,13 +294,14 @@ export class SandboxContainer {
         await Promise.all(skillDirs.map((dir) => this.writeFileInSandbox(`${dir}/SKILL.md`, DOCUMENT_SKILL_MD)));
       }
     };
-    // Each part writes its own files: run together, a start pays for one round of container calls, not seven.
+    // Each part writes its own files: run together, a start pays for one round of container calls, not eight.
     await Promise.all([
       agents(),
       this.writeFileInSandbox(`${s.containerCodexHome}/config.toml`, CODEX_CONFIG_TOML, { onlyIfAbsent: true }),
       documentSkill(),
       this.seedShare(),
       this.seedGraphic(),
+      this.seedMarket(),
       this.seedMail(),
       this.enforceCodexIsolation(),
     ]);
@@ -369,6 +374,25 @@ export class SandboxContainer {
       for (const dir of skillDirs) await this.writeFileInSandbox(`${dir}/SKILL.md`, GRAPHIC_SKILL_MD);
     } catch (err) {
       this.#log.warn("could not seed the sandbox graphic skill", { error: String(err).slice(0, 200) });
+    }
+  }
+
+  /**
+   * The market data skill for both executors plus its CLI. The CLI installs its
+   * libraries on first use, so nothing here waits on the network. Like the
+   * graphic skill, a failure is logged and never blocks the sandbox.
+   */
+  async seedMarket(): Promise<void> {
+    const s = this.#cfg.sandbox;
+    const toolDir = `${s.containerCodexHome}/${MARKET_TOOL_DIR}`;
+    const skillDirs = [`${s.containerCodexHome}/${MARKET_SKILL_DIR}`, `${this.#cfg.claudeCode.configDir}/${MARKET_SKILL_DIR}`];
+    try {
+      const mkdir = await this.execInSandbox(["mkdir", "-p", toolDir, ...skillDirs], { timeoutMs: 15_000 });
+      if (mkdir.code !== 0) throw new Error((mkdir.stderr || mkdir.stdout).trim().slice(0, 200));
+      await this.writeFileInSandbox(`${toolDir}/aio-market.py`, MARKET_CLI_PY);
+      for (const dir of skillDirs) await this.writeFileInSandbox(`${dir}/SKILL.md`, MARKET_SKILL_MD);
+    } catch (err) {
+      this.#log.warn("could not seed the sandbox market skill", { error: String(err).slice(0, 200) });
     }
   }
 

@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 import { SandboxContainer } from "../../src/control/sandbox/container.js";
-import { CODEX_CONFIG_TOML, DOCUMENT_SKILL_DIR, DOCUMENT_SKILL_MD, GRAPHIC_RENDER_PY, GRAPHIC_SKILL_MD, MAIL_BINARIES, MAIL_INSTALL_SH, MAIL_RO_SH, MAIL_SETUP_PY, MAIL_SKILL_MD, SHARE_CLI_PY, SHARE_SKILL_MD, WORKSPACE_AGENTS_BEGIN, WORKSPACE_AGENTS_END, WORKSPACE_AGENTS_MD, refreshWorkspaceAgents } from "../../src/control/sandbox/seed.js";
+import { CODEX_CONFIG_TOML, DOCUMENT_SKILL_DIR, DOCUMENT_SKILL_MD, GRAPHIC_RENDER_PY, GRAPHIC_SKILL_MD, MAIL_BINARIES, MARKET_CLI_PY, MARKET_SKILL_MD, MAIL_INSTALL_SH, MAIL_RO_SH, MAIL_SETUP_PY, MAIL_SKILL_MD, SHARE_CLI_PY, SHARE_SKILL_MD, WORKSPACE_AGENTS_BEGIN, WORKSPACE_AGENTS_END, WORKSPACE_AGENTS_MD, refreshWorkspaceAgents } from "../../src/control/sandbox/seed.js";
 import { Logger } from "../../src/common/logger.js";
 import { testConfig, testNode } from "../helpers/harness.js";
 
@@ -173,6 +173,34 @@ describe("sandbox workspace seed", () => {
     expect(GRAPHIC_SKILL_MD).toContain("python3 /home/gem/.codex/tools/aio-graphic/aio-render.py");
     expect(GRAPHIC_SKILL_MD).toMatch(/^---\nname: aio-graphic\ndescription: /);
     expect(GRAPHIC_SKILL_MD).toContain("never use image_generate to change its text");
+  });
+
+  it("gives both executors the market data skill and its CLI on every sandbox, without installing anything at start", async () => {
+    const cfg = testConfig("/tmp/pa-market-seed-test", 1);
+    const container = new SandboxContainer(cfg, new Logger("error", undefined, false), testNode());
+    vi.spyOn(container, "enforceCodexIsolation").mockResolvedValue();
+    const calls: Array<{ path: string; content: string }> = [];
+    container.writeFileInSandbox = (async (filePath: string, content: string) => {
+      calls.push({ path: filePath, content });
+    }) as typeof container.writeFileInSandbox;
+    const execs: string[][] = [];
+    container.execInSandbox = (async (argv: string[]) => (execs.push(argv), { code: 0, stdout: "", stderr: "" })) as typeof container.execInSandbox;
+    await container.seedWorkspace();
+    const skills = calls.filter((c) => c.path.endsWith("/skills/aio-market/SKILL.md"));
+    expect(skills.map((c) => c.path).sort()).toEqual([
+      `${cfg.claudeCode.configDir}/skills/aio-market/SKILL.md`,
+      `${cfg.sandbox.containerCodexHome}/skills/aio-market/SKILL.md`,
+    ].sort());
+    for (const s of skills) expect(s.content).toBe(MARKET_SKILL_MD);
+    expect(calls.find((c) => c.path === `${cfg.sandbox.containerCodexHome}/tools/aio-market/aio-market.py`)?.content).toBe(MARKET_CLI_PY);
+    // The libraries are installed by the CLI on first use, never on the sandbox start path.
+    expect(execs.some((argv) => argv.join(" ").includes("pip"))).toBe(false);
+    expect(MARKET_SKILL_MD).toMatch(/^---\nname: aio-market\ndescription: /);
+    expect(MARKET_SKILL_MD).toContain("python3 /home/gem/.codex/tools/aio-market/aio-market.py");
+    // The venv the skill points at is the one the CLI creates beside itself, with pinned libraries.
+    expect(MARKET_SKILL_MD).toContain("/home/gem/.codex/tools/aio-market/venv/bin/python");
+    expect(MARKET_CLI_PY).toContain('VENV = os.path.join(HERE, "venv")');
+    expect(MARKET_CLI_PY).toMatch(/REQUIREMENTS = \["yfinance==[\d.]+", "akshare==[\d.]+"\]/);
   });
 
   it("gives every sandbox the mail skill, its scripts and the pinned himalaya/ortie on PATH", async () => {

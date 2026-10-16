@@ -622,6 +622,18 @@ Android 手机用 USB 接在装了 Mac App 的 Mac 上，由 App 运行的 `bin/
 - **隔离**：页面位于工作区来源，响应带 `Content-Security-Policy: sandbox allow-scripts …`（无 `allow-same-origin`），读不到工作区会话、
   cookie 或 localStorage；另带 `nosniff`、`no-referrer`、`noindex`，不设置 cookie。这是全站唯一不需要登录的路径。
 
+### 行情数据（A 股 / 港股 / 美股）
+
+每个账号的沙箱内置 `aio-market` skill，命令为 `python3 /home/gem/.codex/tools/aio-market/aio-market.py`，全部是免费公开数据源、不需要 API key：
+
+- **命令**：`search`（中英文名称或代码查代码，覆盖 A 股、港股、美股、场内 ETF）、`quote`（最新价）、`history`（日/周/月 K 线与分钟线，
+  默认前复权，可 `--csv` 存文件）、`info`（公司概况与估值指标）、`news`（个股新闻）。输出 JSON，带数据来源与时间。
+- **数据源**：搜索与 A 股实时行情走新浪（只用标准库，随时可用）；A 股个股与 ETF 的历史 K 线、公司卡片、新闻走东方财富（akshare），
+  A 股指数日线走新浪；港股、美股及其他市场走 Yahoo（yfinance，行情可能延迟 15 分钟）。
+- **安装**：akshare 与 yfinance 固定版本（`src/control/sandbox/seed.ts` 的 `MARKET_CLI_PY`），由 CLI 首次用到时装进持久卷里的私有 venv
+  （约一分钟，并发调用排队等同一次安装），沙箱启动不等 pip；Python 版本或固定版本变化时自动重装。
+- 只提供数据，不下单；最终回复注明来源与时间，取数失败如实说明，不凭记忆补数字。
+
 ### 邮件（Gmail / Outlook）
 
 每个账号的沙箱内置 `himalaya-email` skill，命令为 `himalaya`：
