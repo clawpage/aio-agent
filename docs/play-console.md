@@ -177,3 +177,19 @@ Google 提示审核通常在 7 天内完成，也可能更久；这不是获批�
 无需重打或重新上传 native AAB，当前远程 UI/control 已是 `0.1.0-open20`。
 
 本次发布结果截图位于 workspace `.scratch/artifacts/aio-open-registration/play-resubmitted-20261011.png`。
+
+## 2026-10-16 0.1.2：无网打开（送审）
+
+- 改动：控制台 service worker 保存最近打开的页面，无网时打开保存的页面并提示「现在连不上一站」，联网后整页重载为最新线上界面
+  （`cb317e8`，见 `docs/FEATURES.md`「无网打开」）；Android 的 `MainActivity` 跟随系统默认网络调用 `setNetworkAvailable`
+  （新增普通权限 `ACCESS_NETWORK_STATE`，`d1c9081`）；iOS 开启 App-Bound Domains（只本机安装，不经商店）。
+- 界面层先上线：ui `0.1.2-offline-cb317e8`（干净 detached worktree 构建；Docker Desktop 拉 `docker/dockerfile:1` 前端卡死，
+  构建时临时去掉该 worktree 里 `deploy/ui.Dockerfile` 的 `# syntax` 行，镜像内容不变）。`refresh ui` 后公网 smoke 38/38。
+- 包：`0.1.2`，versionCode `1002`，arm64，target SDK 37，上传密钥签名（证书 SHA-256 `cb1bdb71…f272`），`apksigner`/`jarsigner`、
+  16 KB ZIP 与 ELF 对齐通过；AAB/APK 与 `SHA256SUMS` 在被忽略的 `var/android-releases/0.1.2-ai.clawpage.agent-20261016/`。
+- 真机（Galaxy Z Flip6，上传签名 0.1.1 → 0.1.2 覆盖安装、保留登录）：飞行模式冷启动显示「This device is offline」离线卡片，
+  关闭飞行模式后约 5 秒自动回到主会话；0.1.1 同样能离线打开，但只显示「服务器连不上」且恢复要等约 1 分钟的重试。
+- Play：送审前 0.1.1（1001）已上线、无在审变更。正式版新建发布 `1002 (0.1.2)`（不含 1001），四语言版本说明，100% 发布；
+  校验只有可选的原生调试符号提醒，支持设备数不变。按用户「改完上架 Google Play」的授权提交 1 项变更送审。
+  约 14 分钟后送审前快速检查通过，发布概览显示「您的更改目前正在接受审核」；这不代表已获批或上线。自管式发布仍关闭，获批后自动发布。
+  获批前 Play 用户仍是 0.1.1：界面层已上线，0.1.1 同样能无网打开，只是文案与恢复速度不如 0.1.2。
