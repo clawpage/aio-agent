@@ -79,3 +79,54 @@ it("answers the gateway from one session with the browser tools, and only while 
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+/** Like FAKE_SERVER, but its first tool call waits for an "allowed" file: Chrome's prompt, answered late. */
+const PROMPTING_SERVER = `
+import fs from "node:fs";
+import readline from "node:readline";
+const send = (m) => process.stdout.write(JSON.stringify(m) + "\\n");
+let starts = 0;
+readline.createInterface({ input: process.stdin }).on("line", (line) => {
+  const m = JSON.parse(line);
+  if (m.id === undefined) return;
+  if (m.method === "initialize") { fs.appendFileSync(process.env.STARTS, "x"); return send({ jsonrpc: "2.0", id: m.id, result: { protocolVersion: "2025-03-26", capabilities: {}, serverInfo: { name: "chrome_devtools", version: "x" } } }); }
+  const answer = () => send({ jsonrpc: "2.0", id: m.id, result: { content: [{ type: "text", text: "## Pages" }] } });
+  const wait = () => fs.existsSync(process.env.ALLOWED) ? answer() : setTimeout(wait, 20);
+  wait();
+});
+`;
+
+it("keeps a connection waiting in Chrome's prompt, so a late Allow still counts and no new prompt is raised", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "user-browser-"));
+  const entry = path.join(dir, "server.mjs");
+  fs.writeFileSync(entry, PROMPTING_SERVER);
+  const profile = path.join(dir, "profile");
+  fs.mkdirSync(profile);
+  const chrome = net.createServer((s) => s.end());
+  await new Promise<void>((resolve) => chrome.listen(0, "127.0.0.1", resolve));
+  fs.writeFileSync(path.join(profile, "DevToolsActivePort"), `${(chrome.address() as net.AddressInfo).port}\n/devtools/browser/x\n`);
+  process.env.ALLOWED = path.join(dir, "allowed");
+  process.env.STARTS = path.join(dir, "starts");
+  const browser = createUserBrowser({ entry, userDataDir: profile, log: () => undefined, waitMs: { connect: 300, stillWaiting: 100 } });
+  const text = (a: unknown) => (a as { result: { content: Array<{ text: string }>; isError?: boolean } }).result;
+  try {
+    // Nobody allowed it yet: the first call waits the full time, the next only briefly.
+    let t = Date.now();
+    expect(text(await browser.handle(call("list_pages"))).content[0]!.text).toMatch(/did not accept the connection/);
+    expect(Date.now() - t).toBeGreaterThanOrEqual(300);
+    t = Date.now();
+    expect(text(await browser.handle(call("list_pages"))).isError).toBe(true);
+    expect(Date.now() - t).toBeLessThan(300);
+    // The user allows it later: the same connection goes through, without a new one (a new prompt).
+    fs.writeFileSync(process.env.ALLOWED, "");
+    expect(text(await browser.handle(call("list_pages")))).toEqual({ content: [{ type: "text", text: "## Pages" }] });
+    expect(await browser.status()).toEqual({ available: true, connected: true });
+    expect(fs.readFileSync(process.env.STARTS, "utf8")).toBe("x");
+  } finally {
+    browser.close();
+    chrome.close();
+    delete process.env.ALLOWED;
+    delete process.env.STARTS;
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

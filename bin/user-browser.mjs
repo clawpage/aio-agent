@@ -55,6 +55,8 @@ const PAGE_URL = /^(https?:\/\/|about:blank$)/i;
 const CALL_TIMEOUT_MS = 100_000;
 /** Until the child has reached Chrome once, a call that hangs is Chrome waiting for the user to allow the connection. */
 const CONNECT_TIMEOUT_MS = 40_000;
+/** Once one call has waited that long, later ones only check whether the user has allowed it meanwhile. */
+const STILL_WAITING_MS = 3_000;
 
 export const UNAVAILABLE =
   "The user's Chrome on their Mac is not available for automation right now: Chrome is not open, or remote debugging is not turned on in chrome://inspect/#remote-debugging. Use the sandbox browser (aio_tabs) for this task instead.";
@@ -116,8 +118,11 @@ const toolError = (id, text) => reply(id, { content: [{ type: "text", text }], i
  * @param {string} opts.entry        chrome-devtools-mcp's bin script
  * @param {string} [opts.userDataDir] the Chrome profile to attach to (Chrome's own by default)
  * @param {(msg: string, extra?: object) => void} opts.log
+ * @param {{ connect?: number, stillWaiting?: number }} [opts.waitMs]  shorter waits for tests
  */
-export function createUserBrowser({ entry, userDataDir = defaultUserDataDir(), log }) {
+export function createUserBrowser({ entry, userDataDir = defaultUserDataDir(), log, waitMs = {} }) {
+  const connectMs = waitMs.connect ?? CONNECT_TIMEOUT_MS;
+  const stillWaitingMs = waitMs.stillWaiting ?? STILL_WAITING_MS;
   /** @type {null | {proc: import("node:child_process").ChildProcess, init: Promise<object>, pending: Map<number, (m: object) => void>, reached: boolean}} */
   let child = null;
   let next = 1;
@@ -129,7 +134,7 @@ export function createUserBrowser({ entry, userDataDir = defaultUserDataDir(), l
       stdio: ["pipe", "pipe", "ignore"],
     });
     const pending = new Map();
-    const self = { proc, pending, reached: false, init: null };
+    const self = { proc, pending, reached: false, asked: false, init: null };
     readline.createInterface({ input: proc.stdout }).on("line", (line) => {
       let msg;
       try { msg = JSON.parse(line); } catch { return; }
@@ -196,13 +201,15 @@ export function createUserBrowser({ entry, userDataDir = defaultUserDataDir(), l
     if (why) return toolError(id, why);
     if (!(await chromeReady(userDataDir))) return toolError(id, UNAVAILABLE);
     const { self } = await ready();
-    const answer = await call(self, "tools/call", params, self.reached ? CALL_TIMEOUT_MS : CONNECT_TIMEOUT_MS);
+    const answer = await call(self, "tools/call", params, self.reached ? CALL_TIMEOUT_MS : self.asked ? stillWaitingMs : connectMs);
     if (answer.timeout) {
-      // A child stuck connecting would hold every later call behind it: the next call starts a new one.
-      if (!self.reached) { stop(self); return toolError(id, NOT_ALLOWED); }
+      // The connection stays pending in Chrome's prompt: a later Allow still counts, and no new prompt is raised per task.
+      if (!self.reached) { self.asked = true; return toolError(id, NOT_ALLOWED); }
       return toolError(id, "The user's browser did not answer in time; read the page again before retrying.");
     }
     if (answer.result && !answer.result.isError) self.reached = true;
+    // Chrome went away while the prompt was up (the call failed): the next connection asks again in full.
+    else self.asked = false;
     return answer.result ? reply(id, answer.result) : toolError(id, answer.error?.message ?? "the browser tools failed");
   }
 
