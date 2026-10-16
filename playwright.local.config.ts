@@ -79,6 +79,7 @@ export default defineConfig({
     "**/home-screen-save.spec.ts",
     "**/send-shortcut.spec.ts",
     "**/mac-phone-link.spec.ts",
+    "**/offline.spec.ts",
   ],
   outputDir: "var/.playwright-local",
   timeout: 60_000,
@@ -92,6 +93,9 @@ export default defineConfig({
     // The specs are written against the Chinese console, which a browser asking for Chinese gets.
     locale: "zh-CN",
     storageState: { cookies: [], origins: [] },
+    // Mocks are page routes, which a page under the console's service worker can slip past
+    // (WebKit). Only offline.spec.ts, which tests the worker itself, lets it register.
+    serviceWorkers: "block",
   },
   webServer: {
     command: `node tests/e2e/static-server.mjs ${PORT}`,

@@ -31,6 +31,12 @@ export function Login({ onSuccess, notice, username: named }: { onSuccess: () =>
 
   const [checking, setChecking] = useState(true);
   const [sessionError, setSessionError] = useState(false);
+  // Opened without ever reaching the server (offline, or the console came from the saved copy):
+  // whether there is a session is unknown, so no form is shown, and the first answer reloads the
+  // page so it is the latest deployed one.
+  const [offline, setOffline] = useState<"noNetwork" | "unreachable" | null>(null);
+  const verified = useRef(false);
+  const wasOffline = useRef(false);
   const onRestored = useRef(onSuccess);
   onRestored.current = onSuccess;
   const request = useRef<AbortController | null>(null);
@@ -45,6 +51,8 @@ export function Login({ onSuccess, notice, username: named }: { onSuccess: () =>
       try {
         const session = await api.session(controller.signal);
         if (!mounted || controller.signal.aborted || submitting.current) return;
+        if (wasOffline.current) { location.reload(); return; }
+        verified.current = true;
         setSessionError(false);
         setInviteEmail(session.inviteEmail ?? null);
         setRequiresInvite(session.registrationRequiresInvite !== false);
@@ -64,7 +72,10 @@ export function Login({ onSuccess, notice, username: named }: { onSuccess: () =>
           } catch { /* Password sign-in remains available if the Google endpoint is unavailable. */ }
         }
       } catch {
-        if (mounted && !submitting.current) setSessionError(true);
+        if (mounted && !submitting.current) {
+          setSessionError(true);
+          if (!verified.current) { wasOffline.current = true; setOffline(navigator.onLine ? "unreachable" : "noNetwork"); }
+        }
       } finally {
         clearTimeout(timeout);
         if (request.current === controller) request.current = null;
@@ -164,6 +175,15 @@ export function Login({ onSuccess, notice, username: named }: { onSuccess: () =>
     }
   };
 
+  if (offline) return (
+    <div className="login">
+      <div className="login-card login-offline" role="alert">
+        <div className="login-brand"><BrandMark size={36}/><span>{t.auth.brand}</span></div>
+        <header className="login-heading"><h1>{t.auth.offline.title}</h1><p>{t.auth.offline[offline]}</p></header>
+        <button type="button" className="primary block" onClick={() => location.reload()}>{t.auth.offline.retry}</button>
+      </div>
+    </div>
+  );
   if (checking) return <PageLoading label={t.auth.restoring}/>;
 
   return (

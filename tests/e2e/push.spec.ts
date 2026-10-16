@@ -44,7 +44,8 @@ test("turns phone notifications on, tests and turns them off", async ({ page }, 
   await control.click();
   await expect(page.locator(".sidebar")).toContainText("手机通知已开启");
   // Permission comes first, straight from the tap; then the worker, then the subscription.
-  expect(await page.evaluate(() => (window as unknown as { pushCalls: string[] }).pushCalls)).toEqual(["permission", "register:/sw.js", "subscribe:65"]);
+  // (The first registration is the console's own, at load: the same worker keeps it openable offline.)
+  expect(await page.evaluate(() => (window as unknown as { pushCalls: string[] }).pushCalls)).toEqual(["register:/sw.js", "permission", "register:/sw.js", "subscribe:65"]);
   expect(bodies.subscribe).toEqual({ subscription: { endpoint: "https://web.push.apple.com/fake", keys: { p256dh: "p", auth: "a" } } });
   await page.locator(".sidebar").getByRole("button", { name: "测试", exact: true }).click();
   await expect(page.locator(".sidebar")).toContainText("测试通知已发出");

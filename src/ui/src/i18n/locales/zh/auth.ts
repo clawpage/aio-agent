@@ -40,6 +40,8 @@ export const auth = {
     askAdmin: "邀请码向管理员索取，每个邀请码只能注册一个账号。",
   },
   sessionUnverified: "暂时无法验证登录状态，网络恢复后会自动重试。",
+  /** The console opened without reaching the server (no network, or the service is down). */
+  offline: { title: "现在连不上一站", noNetwork: "这台设备没有联网。联网后会自动打开。", unreachable: "暂时连不上服务器，恢复后会自动打开。", retry: "重试" },
   submit: {
     register: "注册并登录",
     registering: "注册中…",

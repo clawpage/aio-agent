@@ -30,7 +30,7 @@ test('temporary session failure recovers online without losing a valid cookie or
  await setup(page);let unavailable=true;
  await page.context().addCookies([{name:'pa_session',value:'valid-fixture',url:'http://127.0.0.1:4288',httpOnly:true,sameSite:'Lax'}]);
  await page.route('**/api/auth/session',r=>r.fulfill({status:unavailable?503:200,json:unavailable?{message:'稍后重试'}:{authenticated:true,username:'owner'}}));
- await page.goto('/');await expect(page.getByText('暂时无法验证登录状态，网络恢复后会自动重试。')).toBeVisible();
+ await page.goto('/');await expect(page.getByText('暂时连不上服务器，恢复后会自动打开。')).toBeVisible();await expect(password(page)).toHaveCount(0);
  expect((await page.context().cookies()).some(c=>c.name==='pa_session')).toBe(true);
  unavailable=false;await page.evaluate(()=>window.dispatchEvent(new Event('online')));await expect(inbox(page)).toBeVisible();
 });

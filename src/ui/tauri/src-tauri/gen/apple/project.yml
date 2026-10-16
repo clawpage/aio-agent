@@ -48,6 +48,9 @@ targets:
         NSMicrophoneUsageDescription: 语音输入时录下你说的话，转成文字放进输入框。
         NSCameraUsageDescription: 拍照或录像作为附件发给一站。
         NSPhotoLibraryAddUsageDescription: 下载图片时存入你的相册。
+        # Service workers (the console opening offline) need App-Bound Domains; navigation is then
+        # limited to these registrable domains (the console and its workspace, the embedded players).
+        WKAppBoundDomains: [localhost, clawpage.ai, youtube-nocookie.com, bilibili.com]
         LSRequiresIPhoneOS: true
         UILaunchStoryboardName: LaunchScreen
         UIRequiredDeviceCapabilities: [arm64, metal]

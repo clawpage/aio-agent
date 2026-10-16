@@ -8,8 +8,27 @@ bridge changes require an app update. Change this directory only for native
 concerns (web view insets, keyboard, icons, signing).
 
 Only the main frame at `https://agent.clawpage.ai` can ask the bridge to open an
-HTTP(S) URL. The page gets no Tauri IPC; `fallback/` is only shown if the remote
-page cannot load.
+HTTP(S) URL. The page gets no Tauri IPC. `fallback/` is only the bundled
+`frontendDist`; the window opens the remote URL, so it is not an offline page.
+
+## Offline
+
+Without a network the app still opens: the console's service worker
+(`src/ui/public/sw.js`, see "无网打开" in `docs/FEATURES.md`) serves the last console
+page that loaded, which shows "现在连不上一站" and reloads to the latest deployed UI
+as soon as the server answers. Online, the page always comes from the server.
+The shell itself bundles no UI, so a UI change still ships with the next UI deploy.
+
+- Android: WebView runs service workers as is; no native change.
+- iOS: WKWebView runs service workers only with App-Bound Domains. The main window
+  sets `limitNavigationsToAppBoundDomains` (`src-tauri/tauri.conf.json`), and
+  `WKAppBoundDomains` (`gen/apple/project.yml` and the generated `Info.plist`) lists
+  `localhost`, `clawpage.ai` (console and workspace), `youtube-nocookie.com` and
+  `bilibili.com` (embedded players; see `frame-src` in `src/ui/edge.mjs`). The web view
+  can no longer navigate to any other site; outside links already open in the system
+  browser. A new embedded site must be added here and needs a new app build (at most 10).
+- A device that never opened the console online has no saved page and shows the
+  web view's own error page.
 
 ## Native adjustments
 
@@ -109,7 +128,7 @@ page cannot load.
   iOS PNGs to opaque RGB (the App Store rejects alpha) and copy them over `src-tauri/icons/ios`
   and `src-tauri/icons/android`.
 
-Re-running `tauri ios init` / `android init` overwrites `gen/`: re-apply the native browser sources/framework/dependency, keyboard, name and icon
+Re-running `tauri ios init` / `android init` overwrites `gen/`: re-apply the native browser sources/framework/dependency, App-Bound Domains, keyboard, name and icon
 `gen/` changes above.
 
 ## Build and run

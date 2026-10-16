@@ -13,6 +13,12 @@ document.title = t.app.brand.name;
 // the loading screen then matches the page that came before it, with no flash between.
 document.documentElement.dataset.theme ??= matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
 
+// The worker keeps the console openable without a network (public/sw.js); it never serves an
+// old page while the server answers. Not in dev, where the page is rebuilt on every change.
+if (import.meta.env.PROD && "serviceWorker" in navigator) {
+  addEventListener("load", () => void navigator.serviceWorker.register("/sw.js", { scope: "/" }).catch(() => undefined));
+}
+
 const container = document.getElementById("root");
 if (!container) throw new Error("#root not found");
 createRoot(container).render(

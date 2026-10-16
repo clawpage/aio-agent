@@ -40,6 +40,8 @@ export const auth: typeof zh = {
     askAdmin: "Ask your administrator for an invite code. Each code can register one account.",
   },
   sessionUnverified: "Can't verify your session right now. We'll retry once you're back online.",
+  /** The console opened without reaching the server (no network, or the service is down). */
+  offline: { title: "Can't reach Clawpage Agent", noNetwork: "This device is offline. The app opens by itself once you're back online.", unreachable: "The server can't be reached right now. The app opens by itself once it's back.", retry: "Try again" },
   submit: {
     register: "Sign up and log in",
     registering: "Signing up…",

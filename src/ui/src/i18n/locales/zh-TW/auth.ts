@@ -40,6 +40,8 @@ export const auth: typeof zh = {
     askAdmin: "邀請碼向管理員索取，每個邀請碼只能註冊一個帳號。",
   },
   sessionUnverified: "暫時無法驗證登入狀態，網路恢復後會自動重試。",
+  /** The console opened without reaching the server (no network, or the service is down). */
+  offline: { title: "現在連不上一站", noNetwork: "這台裝置沒有連上網路。連上後會自動開啟。", unreachable: "暫時連不上伺服器，恢復後會自動開啟。", retry: "重試" },
   submit: {
     register: "註冊並登入",
     registering: "註冊中…",
