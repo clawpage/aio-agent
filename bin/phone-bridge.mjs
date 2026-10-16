@@ -12,6 +12,8 @@
  *   GET  /status  the connected phone, if any
  *   GET  /screenshot  the screen now (JPEG where macOS sips can shrink it, else PNG)
  *   WS   /screen  the live screen (scrcpy, H.264) and touch / key input
+ *   POST /browser/mcp     the user's own Chrome on this Mac (user-browser.mjs)
+ *   GET  /browser/status  whether that Chrome can be used now
  *
  * PA_PHONE_SCREEN_OFF=1 keeps the phone's own screen dark while all of the above
  * still sees it (see keepDark).
@@ -37,6 +39,7 @@ import process from "node:process";
 import { promisify } from "node:util";
 import { WebSocketServer } from "ws";
 import { linkDevice } from "./device-link-client.mjs";
+import { createUserBrowser } from "./user-browser.mjs";
 
 const run = promisify(execFile);
 const ROOT = path.resolve(import.meta.dirname, "..");
@@ -47,6 +50,7 @@ const TOKEN_KEY = "PHONE_BRIDGE_TOKEN";
 
 const MOBILE_MCP_DIR = path.join(DIR, "mobile-mcp");
 const MOBILE_MCP_ENTRY = path.join(MOBILE_MCP_DIR, "node_modules", "@mobilenext", "mobile-mcp", "lib", "index.js");
+const BROWSER_MCP_ENTRY = path.join(MOBILE_MCP_DIR, "node_modules", "chrome-devtools-mcp", "build", "src", "bin", "chrome-devtools-mcp.js");
 const SCRCPY_VERSION = "4.1";
 const SCRCPY_SERVER = path.join(DIR, `scrcpy-server-v${SCRCPY_VERSION}`);
 const SCRCPY_URL = `https://github.com/Genymobile/scrcpy/releases/download/v${SCRCPY_VERSION}/scrcpy-server-v${SCRCPY_VERSION}`;
@@ -611,6 +615,10 @@ async function serve() {
   await startMobileMcp();
   const dark = process.env.PA_PHONE_SCREEN_OFF === "1" ? keepDark() : null;
   const screen = new Screen();
+  // An older phone runtime has no browser tools: the browser then answers unavailable, the phone works on.
+  const browser = fs.existsSync(BROWSER_MCP_ENTRY)
+    ? createUserBrowser({ entry: BROWSER_MCP_ENTRY, ...(process.env.PA_BROWSER_USER_DATA_DIR ? { userDataDir: process.env.PA_BROWSER_USER_DATA_DIR } : {}), log })
+    : null;
   const wss = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024 });
   const server = http.createServer(async (req, res) => {
     try {
@@ -625,7 +633,10 @@ async function serve() {
         res.writeHead(200, { "content-type": shot.type, "cache-control": "no-store" });
         return res.end(shot.body);
       }
-      if (url.pathname === "/mcp") {
+      if (url.pathname === "/browser/status" && req.method === "GET") {
+        return sendJson(res, 200, browser ? await browser.status() : { available: false, connected: false });
+      }
+      if (url.pathname === "/mcp" || url.pathname === "/browser/mcp") {
         if (req.method === "DELETE") return sendJson(res, 200, {});
         if (req.method !== "POST") return sendJson(res, 405, { error: "method not allowed" });
         const chunks = [];
@@ -635,7 +646,13 @@ async function serve() {
           if (size > 1024 * 1024) return sendJson(res, 413, { error: "too large" });
           chunks.push(chunk);
         }
-        return await handleMcp(req, res, Buffer.concat(chunks));
+        if (url.pathname === "/mcp") return await handleMcp(req, res, Buffer.concat(chunks));
+        if (!browser) return sendJson(res, 503, { error: "browser tools missing; reinstall the phone runtime (Mac app)" });
+        let msg;
+        try { msg = JSON.parse(Buffer.concat(chunks).toString("utf8")); } catch { return sendJson(res, 400, rpcError(null, "invalid JSON")); }
+        const answer = await browser.handle(msg);
+        if (answer === null) { res.writeHead(202, { "cache-control": "no-store" }); return res.end(); }
+        return sendJson(res, 200, answer);
       }
       sendJson(res, 404, { error: "not found" });
     } catch (err) {
@@ -676,14 +693,15 @@ async function serve() {
     link?.close();
     clearInterval(dark);
     screen.stop("shutdown");
+    browser?.close();
     mcpChild?.kill("SIGTERM");
     server.close();
     setTimeout(() => process.exit(0), 1000).unref();
   };
   process.on("SIGTERM", shutdown);
   process.on("SIGINT", shutdown);
-  // However the bridge ends (its port taken, a crash), mobile-mcp goes with it instead of piling up orphaned.
-  process.on("exit", () => mcpChild?.kill("SIGTERM"));
+  // However the bridge ends (its port taken, a crash), mobile-mcp and the browser tools go with it instead of piling up orphaned.
+  process.on("exit", () => { mcpChild?.kill("SIGTERM"); browser?.close(); });
 }
 
 if (process.argv[2] === "devicekit") {

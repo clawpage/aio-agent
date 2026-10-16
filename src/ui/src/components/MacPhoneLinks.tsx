@@ -7,7 +7,7 @@ import { hasDeviceLink, linkThisMac, listenDeviceLink, unlinkThisMac, type Nativ
 const day = (ms: number) => new Date(ms).toLocaleDateString();
 
 /**
- * Phones on a Mac (the workspace's Phone app): the Macs this account linked, and,
+ * Phones and Chrome on a Mac (the workspace's Phone app): the Macs this account linked, and,
  * inside the Mac app, the switch that links this one. Every account sees only its
  * own links. `onChange` is told when a link appears, connects or goes.
  */
@@ -74,6 +74,7 @@ export function MacPhoneLinks({ onChange }: { onChange?: () => void }) {
         </div>
       )}
       {inApp && thisMac && <p className="muted tiny" role="note">{t.phone.link.usbHint}</p>}
+      {inApp && thisMac && <p className="muted tiny" role="note">{t.phone.link.browserHint}</p>}
       {error && <p className="banner error" role="alert">{error}</p>}
       {links && links.length === 0 && <p className="muted tiny">{t.phone.link.empty}</p>}
       {links && links.length > 0 && (

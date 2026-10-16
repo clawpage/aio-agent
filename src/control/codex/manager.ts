@@ -15,6 +15,7 @@ import { DECISION_POLICY } from "../decision.js";
 import { KB_POLICY } from "../kb.js";
 import { HA_POLICY } from "../ha.js";
 import { PHONE_POLICY } from "../phone.js";
+import { USER_BROWSER_POLICY } from "../userBrowser.js";
 import { EXPERIENCE_POLICY } from "./experience.js";
 import { SCHEDULE_POLICY } from "../scheduleTool.js";
 import { HISTORY_POLICY } from "../historyTool.js";
@@ -1167,7 +1168,7 @@ export class AgentManager {
   #threadSettings(conversation: ConversationRow): { developerInstructions: string; browserTask: BrowserTask | undefined } {
     const soul = readSoul(this.#cfg).content;
     const withTabs = this.#tabs ? withTabPolicy(soul) : soul;
-    const policies = [EXPERIENCE_POLICY, this.#cfg.decision ? DECISION_POLICY : "", this.#cfg.schedule ? SCHEDULE_POLICY : "", this.#cfg.history ? HISTORY_POLICY : "", this.#cfg.image ? IMAGE_POLICY : "", this.#cfg.kb ? KB_POLICY : "", this.#cfg.ha ? HA_POLICY : "", this.#cfg.printer ? PRINTER_POLICY : "", this.#cfg.phone ? PHONE_POLICY : ""].filter(Boolean);
+    const policies = [EXPERIENCE_POLICY, this.#cfg.decision ? DECISION_POLICY : "", this.#cfg.schedule ? SCHEDULE_POLICY : "", this.#cfg.history ? HISTORY_POLICY : "", this.#cfg.image ? IMAGE_POLICY : "", this.#cfg.kb ? KB_POLICY : "", this.#cfg.ha ? HA_POLICY : "", this.#cfg.printer ? PRINTER_POLICY : "", this.#cfg.phone ? PHONE_POLICY : "", this.#cfg.userBrowser && this.#tabs ? USER_BROWSER_POLICY : ""].filter(Boolean);
     const developerInstructions = policies.length ? [withTabs.trimEnd(), ...policies].join("\n\n").trim() : withTabs;
     // Every execution thread gets tab tools under its conversation's identity,
     // which stays the same across its turns, resumes and forks.

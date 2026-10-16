@@ -43,10 +43,10 @@ test("in a browser the Phone app lists the account's Macs but cannot link itself
   await mockConsole(page, { conversations: [] });
   const calls = await mockLinks(page, [{ id: "dlink_1", name: "Office iMac", createdAt: Date.UTC(2026, 9, 1), lastSeenAt: Date.UTC(2026, 9, 2), online: false }]);
   await openPhoneApp(page, info.project.name.startsWith("mobile"));
-  const card = page.getByRole("region", { name: "Mac 上的手机" });
+  const card = page.getByRole("region", { name: "Mac 上的手机和浏览器" });
   await expect(card).toContainText("在 Mac 上安装一站 App");
   await expect(card).toContainText("Office iMac");
-  await expect(card.getByRole("button", { name: "连接这台 Mac 的手机" })).toHaveCount(0);
+  await expect(card.getByRole("button", { name: "连接这台 Mac", exact: true })).toHaveCount(0);
   await card.getByRole("button", { name: "移除" }).click();
   await expect(card).toContainText("还没有连接过 Mac。");
   expect(calls).toContain("DELETE /api/device-links/dlink_1");
@@ -72,13 +72,14 @@ test("inside the Mac app, the Phone app links this Mac: the token goes to the ap
   await mockConsole(page, { conversations: [] });
   const calls = await mockLinks(page, []);
   await openPhoneApp(page, info.project.name.startsWith("mobile"));
-  const card = page.getByRole("region", { name: "Mac 上的手机" });
-  await expect(card).toContainText("把用数据线接在这台 Mac 上的 Android 手机交给 AI 操作");
-  await card.getByRole("button", { name: "连接这台 Mac 的手机" }).click();
+  const card = page.getByRole("region", { name: "Mac 上的手机和浏览器" });
+  await expect(card).toContainText("把用数据线接在这台 Mac 上的 Android 手机，以及这台 Mac 上的 Chrome，交给 AI 操作");
+  await card.getByRole("button", { name: "连接这台 Mac", exact: true }).click();
   await expect(card).toContainText("Mengxiao's MacBook Pro （这台 Mac）");
   await expect(card.getByRole("status")).toContainText("在线");
   await expect(card).toContainText("打开 USB 调试");
-  await expect(card.getByRole("button", { name: "连接这台 Mac 的手机" })).toHaveCount(0);
+  await expect(card).toContainText("chrome://inspect/#remote-debugging");
+  await expect(card.getByRole("button", { name: "连接这台 Mac", exact: true })).toHaveCount(0);
   expect(calls).toContain("POST /api/device-links");
   const sent = await page.evaluate(() => (window as unknown as { __sent: Array<{ type: string; token?: string; linkId?: string }> }).__sent);
   expect(sent).toContainEqual({ type: "link", token: `dl_${"t".repeat(43)}`, linkId: "dlink_new" });
@@ -88,7 +89,7 @@ test("inside the Mac app, the Phone app links this Mac: the token goes to the ap
   await expect(page.locator("body")).not.toHaveCSS("overflow-x", "scroll");
 
   await card.getByRole("button", { name: "移除" }).click();
-  await expect(card.getByRole("button", { name: "连接这台 Mac 的手机" })).toBeVisible();
+  await expect(card.getByRole("button", { name: "连接这台 Mac", exact: true })).toBeVisible();
   expect(await page.evaluate(() => (window as unknown as { __sent: Array<{ type: string }> }).__sent.at(-1))).toEqual({ type: "unlink" });
 });
 
@@ -98,7 +99,7 @@ test("with a phone the Phone app shows its screen, and the Macs one tap away", a
   await openPhoneApp(page, info.project.name.startsWith("mobile"), true);
   await expect(page.locator(".phone-app .phone")).toBeVisible();
   await page.getByRole("button", { name: "Mac 上的手机" }).click();
-  const card = page.getByRole("region", { name: "Mac 上的手机" });
+  const card = page.getByRole("region", { name: "Mac 上的手机和浏览器" });
   await expect(card).toContainText("Home Mac");
   await page.getByRole("button", { name: "← 返回手机画面" }).click();
   await expect(page.locator(".phone-app .phone")).toBeVisible();
@@ -110,5 +111,5 @@ test("settings no longer carry the Macs", async ({ page }, info) => {
   if (info.project.name.startsWith("mobile")) await page.locator(".bottom-nav button", { hasText: "配置" }).click();
   else await page.locator(".sidebar-foot button", { hasText: "配置" }).click();
   await expect(page.getByRole("heading", { name: "配置" })).toBeVisible();
-  await expect(page.getByRole("region", { name: "Mac 上的手机" })).toHaveCount(0);
+  await expect(page.getByRole("region", { name: "Mac 上的手机和浏览器" })).toHaveCount(0);
 });

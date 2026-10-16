@@ -31,7 +31,7 @@ cookie 名 `pa_*` 与 `PA_*` 前缀**保持不变**——它们承载既有容�
 | `tests/unit/`、`tests/integration/` | vitest；集成测试自带假沙箱和假节点，不需要 Docker |
 | `tests/e2e/live-smoke.mjs` | 对已部署实例的真实冒烟（`npm run smoke`） |
 | `bin/serve` | 生产守护：按 `PA_DEPLOY` 以三个宿主进程（host）或 Docker Compose（compose）运行三层，外加专用 tunnel，转发信号 |
-| `bin/phone-bridge.mjs` | Mac 上 USB 接的 Android 手机（mobile-mcp 工具白名单 + scrcpy 实时画面），由 Mac App 运行，只听 loopback、要 App 给的桥接令牌，经 `bin/device-link-client.mjs` 主动连回控制面，交给连接这台 Mac 的账号 |
+| `bin/phone-bridge.mjs` | Mac 上 USB 接的 Android 手机（mobile-mcp 工具白名单 + scrcpy 实时画面）以及该 Mac 上用户的 Chrome（`bin/user-browser.mjs`），由 Mac App 运行，只听 loopback、要 App 给的桥接令牌，经 `bin/device-link-client.mjs` 主动连回控制面，交给连接这台 Mac 的账号 |
 | `bin/keyboard-bridge.mjs` | 可选宿主进程：语音配件的「语音键盘」把润色后的文字粘贴到宿主 Mac 光标处；实际输入由 `bin/keyboard-bridge/main.swift` 编译的后台 App 完成（辅助功能权限只给它），只听 loopback、要桥接令牌，只由 `/api/gadget/dictation` 调用 |
 | `bin/dns-agent.py` | 现有部署专用的 DNS 辅助脚本：依赖仓库外的 `tools/linode-local/dns.py`，**不是 quickstart 入口**，公开使用者通常不需要 |
 | `var/` | 运行时数据（DB、日志、owner 凭据、tunnel 凭据），全部 git 忽略；compose 部署时控制面数据在命名卷里 |
@@ -51,7 +51,8 @@ cookie 名 `pa_*` 与 `PA_*` 前缀**保持不变**——它们承载既有容�
    （`docs/FEATURES.md`“知识库”）、Home Assistant MCP（`docs/FEATURES.md`“Home Assistant”）与打印机（`docs/FEATURES.md`“打印机”）只经成员网关按账号转发，令牌不进沙箱；不要为它们另开直连端口，也不要把授权名单
    之外的账号接进去。手机（`bin/phone-bridge.mjs`，`docs/FEATURES.md`“手机”）每个账号只用自己的：只经 Mac App 接入，
    Mac 连接的手机只给连接它的账号（设备令牌只存哈希、可随时移除），控制面宿主不直接接手机；工具经成员网关，画面只在主站；
-   桥接只放行作用在手机本身的 mobile-mcp 工具，不得放开读写宿主机（含用户的 Mac）文件或云手机的工具。键盘桥（`bin/keyboard-bridge.mjs`）只接受配件令牌下
+   桥接只放行作用在手机本身的 mobile-mcp 工具，不得放开读写宿主机（含用户的 Mac）文件或云手机的工具。同一桥接经 `bin/user-browser.mjs` 提供用户 Mac 上的 Chrome
+   （`aio_user_browser`，与沙箱浏览器并存、不可用时回退沙箱），只放行作用在浏览器里的工具，不得放开上传文件、带文件路径的参数或打开 `file://` 等非网页地址，也不得由桥接自己启动 Chrome。键盘桥（`bin/keyboard-bridge.mjs`）只接受配件令牌下
    `/api/gadget/dictation` 的输入，不得接进成员网关或任何执行器工具。
 4. **两个来源**：主站与伴随站必须保持不同来源；不要把 AIO 生成内容放到主站上，也不要为了
    本地调试放宽 cookie 安全属性（localhost 明文是唯一例外）。

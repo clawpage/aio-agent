@@ -1,6 +1,7 @@
-//! The phones plugged into this Mac, offered to the signed-in account's agent.
+//! The phones plugged into this Mac, and the user's own Chrome on it, offered to
+//! the signed-in account's agent.
 //!
-//! The console (settings, "Link this Mac's phone") asks the control plane for a
+//! The console (the Phone app, "Link this Mac") asks the control plane for a
 //! device token and hands it here. This keeps the token in a file only this user
 //! can read, installs the phone runtime on first use (`phone/install.sh`: Node.js,
 //! mobile-mcp, adb, scrcpy, all pinned and checksummed) and runs

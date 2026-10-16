@@ -2,15 +2,16 @@
  * The phone bridge's way out of the user's home network: it dials the control
  * plane (src/control/deviceLink.ts) with the device token its account issued
  * and serves what comes down the socket from its own loopback server. Only the
- * bridge's endpoints pass: POST /mcp, GET /status, GET /screenshot, and the
- * /screen WebSocket; anything else is answered 404 without reaching it.
+ * bridge's endpoints pass: POST /mcp, GET /status, GET /screenshot, the
+ * browser's POST /browser/mcp and GET /browser/status, and the /screen
+ * WebSocket; anything else is answered 404 without reaching it.
  *
  * Frames: JSON text for requests, responses and channel control; binary frames
  * carry a channel's binary data, prefixed by the channel id (4 bytes, big endian).
  */
 import WebSocket from "ws";
 
-const ROUTES = new Set(["POST /mcp", "GET /status", "GET /screenshot"]);
+const ROUTES = new Set(["POST /mcp", "GET /status", "GET /screenshot", "POST /browser/mcp", "GET /browser/status"]);
 const PASSED_HEADERS = ["content-type", "accept", "mcp-session-id", "mcp-protocol-version"];
 const REPLY_HEADERS = ["content-type", "mcp-session-id"];
 const MAX_FRAME = 32 * 1024 * 1024;

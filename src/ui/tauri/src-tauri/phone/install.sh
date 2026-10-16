@@ -1,7 +1,7 @@
 #!/bin/sh
 # The Mac app's phone runtime (src/phone_link.rs runs this before the bridge):
-# Node.js, mobile-mcp and ws from the bundled lockfile, the scrcpy server, and
-# Android's adb. Everything is a pinned version checked against its SHA-256, and
+# Node.js, mobile-mcp, chrome-devtools-mcp (the user's own Chrome) and ws from the
+# bundled lockfile, the scrcpy server, and Android's adb. Everything is a pinned version checked against its SHA-256, and
 # lives in the app's data directory, so installing the app is all a user does.
 # An adb already on this Mac is used as it is: it shares its server with
 # whatever else talks to the phone.
@@ -58,11 +58,11 @@ if [ -z "$ADB" ]; then
 fi
 
 # The bridge scripts sit beside their node_modules so `ws` resolves; a new app version reinstalls.
-STAMP=$(cat "$RES/package-lock.json" "$RES/phone-bridge.mjs" "$RES/device-link-client.mjs" | shasum -a 256 | cut -d' ' -f1)
+STAMP=$(cat "$RES/package-lock.json" "$RES/phone-bridge.mjs" "$RES/device-link-client.mjs" "$RES/user-browser.mjs" | shasum -a 256 | cut -d' ' -f1)
 if [ "$(cat mobile-mcp/.stamp 2>/dev/null || true)" != "$STAMP" ]; then
   echo "step mobile-mcp"
   mkdir -p mobile-mcp
-  cp "$RES/package.json" "$RES/package-lock.json" "$RES/phone-bridge.mjs" "$RES/device-link-client.mjs" mobile-mcp/
+  cp "$RES/package.json" "$RES/package-lock.json" "$RES/phone-bridge.mjs" "$RES/device-link-client.mjs" "$RES/user-browser.mjs" mobile-mcp/
   if ! (cd mobile-mcp && PATH="$NODE_BIN:$PATH" npm ci --omit=dev --ignore-scripts --no-audit --no-fund >/dev/null 2>&1); then
     echo "error npm ci failed"; exit 1
   fi

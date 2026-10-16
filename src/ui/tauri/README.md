@@ -95,6 +95,11 @@ page cannot load.
   `device-link.json` beside it (0600), not the Keychain: an ad-hoc signed build would re-prompt for
   Keychain access after every rebuild. When `phone/package.json` changes, regenerate the lock with
   `npm install --package-lock-only` in that directory. iPhone is not supported yet.
+- macOS browser: the same bridge offers the user's own Chrome (`bin/user-browser.mjs`, bundled as a
+  resource beside the bridge; chrome-devtools-mcp from the same lockfile). It attaches with `--autoConnect`
+  to the Chrome the user runs once they turn on remote debugging in `chrome://inspect/#remote-debugging`
+  and click Allow in Chrome's prompt; it never launches Chrome. The control plane offers it as
+  `aio_user_browser` next to the sandbox browser, which takes over whenever Chrome is not reachable.
 - Home-screen name: iOS 一站 in `gen/apple/project.yml` (`CFBundleDisplayName`, then
   `xcodegen generate`); Android Clawpage Agent in `gen/android/app/src/main/res/values/strings.xml`
   and 一站 in `values-zh/strings.xml`.

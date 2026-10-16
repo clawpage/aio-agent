@@ -12,6 +12,7 @@ import type {DecisionGateway} from './decision.js';
 import type {KbGateway} from './kb.js';
 import type {HaGateway} from './ha.js';
 import type {PhoneGateway} from './phone.js';
+import type {UserBrowserGateway} from './userBrowser.js';
 import type {ScheduleGateway} from './scheduleTool.js';
 import type {HistoryGateway} from './historyTool.js';
 import type {BrowserGateway} from './browser/gateway.js';
@@ -55,7 +56,7 @@ export class MemberModelGateway {
   private claudeModels=new Map<string,string>();
   private gptUsers=new Set<string>();
   private server:http.Server|null=null;
-  constructor(private cfg:Config,private log:Logger,private share?:ShareStore,private decision?:DecisionGateway,private kb?:KbGateway,private schedule?:ScheduleGateway,private hostTokens?:Pick<HostTokenSource,'getTokens'|'invalidate'>,private image?:ImageGateway,private browser?:BrowserGateway,private ha?:HaGateway,private printer?:PrinterGateway,private phone?:PhoneGateway,private history?:HistoryGateway){}
+  constructor(private cfg:Config,private log:Logger,private share?:ShareStore,private decision?:DecisionGateway,private kb?:KbGateway,private schedule?:ScheduleGateway,private hostTokens?:Pick<HostTokenSource,'getTokens'|'invalidate'>,private image?:ImageGateway,private browser?:BrowserGateway,private ha?:HaGateway,private printer?:PrinterGateway,private phone?:PhoneGateway,private history?:HistoryGateway,private userBrowser?:UserBrowserGateway){}
   provision(cfg:Config):void {
     fs.mkdirSync(cfg.dataDir,{recursive:true,mode:0o700});
     const file=path.join(cfg.dataDir,'model-token');
@@ -77,6 +78,8 @@ export class MemberModelGateway {
     this.browser?.provision(cfg);
     // A member's own phone, on the Mac it linked; never another account's.
     this.phone?.provision(cfg);
+    // Likewise its own Chrome on that Mac.
+    this.userBrowser?.provision(cfg);
     if(cfg.memberModel===MEMBER_GPT_MODEL)this.gptUsers.add(cfg.runtimeUserId!);else this.gptUsers.delete(cfg.runtimeUserId!);
     if(cfg.memberModel!==MEMBER_CLAUDE_MODEL){this.claudeModels.delete(cfg.runtimeUserId!);return;}
     const claudeSecret=path.join(cfg.dataDir,'claude.env');
@@ -96,6 +99,7 @@ export class MemberModelGateway {
       if(this.printer&&(req.url??'').startsWith('/printer/')){await this.printer.handle(req,res);return;}
       // A runtime holds a phone token only for its own account's phone (PhoneGateway.available).
       if(this.phone?.owns(req.url)){await this.phone.handle(req,res);return;}
+      if(this.userBrowser?.owns(req.url)){await this.userBrowser.handle(req,res);return;}
       if(this.schedule&&(req.url??'').startsWith('/schedule/')){await this.schedule.handle(req,res);return;}
       if(this.history&&(req.url??'').startsWith('/history/')){await this.history.handle(req,res);return;}
       if(this.image&&(req.url??'').startsWith('/image/')){await this.image.handle(req,res);return;}
