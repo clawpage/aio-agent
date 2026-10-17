@@ -314,6 +314,8 @@ export function loadConfig(): {
     timeoutMs: number;
     /** How long a dispatch waits for Jev before deciding without it. */
     dispatchTimeoutMs: number;
+    /** Above this route probability Jev's suggestion is the plan and no dispatcher model runs (1 or more: never). */
+    directProbability: number;
   };
   /** The decision tool reachable from this runtime's sandbox; set by the decision gateway. */
   decision?: { url: string };
@@ -615,6 +617,7 @@ export function loadConfig(): {
       secretsFile: envStr("PA_JEV_SECRETS_FILE", path.join(os.homedir(), ".config", "aio-agent", "jev.env")),
       timeoutMs: Math.max(5_000, envInt("PA_JEV_TIMEOUT_SECONDS", 30) * 1000),
       dispatchTimeoutMs: Math.max(2_000, envInt("PA_JEV_DISPATCH_TIMEOUT_SECONDS", 15) * 1000),
+      directProbability: Number(process.env.PA_JEV_DIRECT_PROBABILITY ?? "") || 0.9,
     },
     kbMcp: {
       upstreamUrl: envStr("PA_KB_MCP_URL", ""),

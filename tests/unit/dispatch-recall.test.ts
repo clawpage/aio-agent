@@ -100,7 +100,8 @@ it("omits Jev 0%-related task details from Luna", async () => {
   const jev = { enabled: true, decide: async (_state: unknown, questions: Record<string, { criteria: Record<string, string> }>) => {
     const routeIds = Object.keys(questions.route!.criteria);
     return { answers: Object.fromEntries(Object.keys(questions).map(name => name === "route"
-      ? [name, { choice: "NEW", confidence: 0.9, probabilities: Object.fromEntries(routeIds.map(id => [id, id === "NEW" ? 1 : 0])) }]
+      // Not sure enough to skip the dispatcher (see the Jev-direct tests).
+      ? [name, { choice: "NEW", confidence: 0.9, probabilities: Object.fromEntries(routeIds.map(id => [id, id === "NEW" ? 0.9 : 0.1 / (routeIds.length - 1)])) }]
       : [name, { choice: name === `relevance:${ids[0]}` ? "unrelated" : "related", confidence: 0.9,
         probabilities: name === `relevance:${ids[0]}` ? { related: 0, unrelated: 1 } : { related: 0.8, unrelated: 0.2 } }])), usage: null, latencyMs: 1 };
   } };
@@ -208,5 +209,65 @@ it("bounds document recall and gives Luna one decision even for broad terms", as
   const previous = view(codex.prompts.at(-1)!).data.previous;
   expect(previous.filter((t) => t.source === "recall").length).toBeLessThanOrEqual(4);
   expect(previous.length).toBeLessThanOrEqual(14);
+  expect(codex.prompts).toHaveLength(1);
+});
+
+/** Jev sure of its route (95%), with each task's relevance as given. */
+const sureJev = (pick: string, related: Record<string, number> = {}) => ({ enabled: true, decide: async (_s: unknown, questions: Record<string, { criteria: Record<string, string> }>) => {
+  const routeIds = Object.keys(questions.route!.criteria);
+  const choice = pick === "NEW" ? "NEW" : routeIds.find(id => id.endsWith(`:${pick}`))!;
+  return { answers: Object.fromEntries(Object.keys(questions).map(name => {
+    if (name === "route") return [name, { choice, confidence: 0.95, probabilities: Object.fromEntries(routeIds.map(id => [id, id === choice ? 0.95 : 0.05 / (routeIds.length - 1)])) }];
+    const p = related[name.slice("relevance:".length)] ?? 0.1;
+    return [name, { choice: p >= 0.5 ? "related" : "unrelated", confidence: 0.9, probabilities: { related: p, unrelated: 1 - p } }];
+  })), usage: null, latencyMs: 1 };
+} });
+const withJev = (jev: unknown) => { tasks.close(); tasks = new TaskService(db, testConfig("/tmp/aio-dispatch-recall", 1), agent, codex, undefined, jev as never); tasks.init(); };
+const row = (id: string) => db.prepare("SELECT * FROM tasks WHERE id=?").get(id) as { title: string; status: string; plan_json: string; related_task_id: string | null; execution_conversation_id: string | null; conversation_id: string };
+
+it("takes Jev's sure route as the plan: the executor starts at once and a small model names the task on the side", async () => {
+  const ids = history(2, { 0: { title: "无关的花园计划", input: "规划花园", result: "已规划" }, 1: { title: "东京行程", input: "规划东京五日游", result: "第一天浅草" } });
+  withJev(sureJev("NEW", { [ids[1]!]: 0.8 }));
+  let answer!: (title: string | null) => void;
+  const titled: string[] = [];
+  (codex as unknown as { titleTask: (p: string) => Promise<string | null> }).titleTask = (p) => { titled.push(p); return new Promise(r => { answer = r; }); };
+  const job = submit("顺便查一下东京迪士尼门票价格");
+  await tick();
+  // No dispatcher call; the executor is already working under the provisional title.
+  expect(codex.prompts).toHaveLength(0);
+  expect(codex.startedTurns).toHaveLength(1);
+  const plan = JSON.parse(row(job.id).plan_json);
+  expect(plan).toMatchObject({ decision: { kind: "new", taskId: null }, related: [ids[1]], dependencies: [], appendTo: null, resume: null });
+  expect(plan.description).toMatch(/Routed by Jev directly \(95%\)/);
+  expect(row(job.id).title).toBe("顺便查一下东京迪士尼门票价格");
+  expect(titled).toHaveLength(1);
+  expect(titled[0]).toContain("顺便查一下东京迪士尼门票价格");
+  answer("“东京迪士尼门票”。");
+  await tick();
+  expect(row(job.id).title).toBe("东京迪士尼门票");
+  expect(JSON.parse(row(job.id).plan_json).title).toBe("东京迪士尼门票");
+  // The dispatch log shows the plan Jev made.
+  expect(JSON.parse(events().at(-1)!.steps_json as string).findLast((s: { kind: string }) => s.kind === "plan").plan.decision).toEqual({ kind: "new", taskId: null });
+});
+
+it("resumes the finished task Jev is sure of in its own execution session, and keeps the title when naming fails", async () => {
+  const ids = history(2);
+  withJev(sureJev(ids[1]!, { [ids[1]!]: 0.9 }));
+  (codex as unknown as { titleTask: () => Promise<string | null> }).titleTask = async () => null;
+  const job = submit("改成按上上次的格式");
+  await tick();
+  expect(codex.prompts).toHaveLength(0);
+  const r = row(job.id), target = row(ids[1]!);
+  expect(JSON.parse(r.plan_json)).toMatchObject({ decision: { kind: "resume", taskId: ids[1] }, related: [ids[1]], resume: ids[1] });
+  expect(r.related_task_id).toBe(ids[1]);
+  expect(r.execution_conversation_id).toBe(target.execution_conversation_id ?? target.conversation_id);
+  expect(r.title).toBe("改成按上上次的格式");
+});
+
+it("still asks the dispatcher when Jev is at or below the threshold", async () => {
+  history(2);
+  withJev({ enabled: true, decide: async (_s: unknown, questions: Record<string, { criteria: Record<string, string> }>) => ({ answers: jevAnswers(questions), usage: null, latencyMs: 1 }) });
+  submit("看看今天天气");
+  await tick();
   expect(codex.prompts).toHaveLength(1);
 });

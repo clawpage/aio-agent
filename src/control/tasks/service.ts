@@ -8,7 +8,7 @@ import type { Config } from "../config.js";
 import { randomId } from "../auth/passwords.js";
 import { AgentManager, TurnConflictError, type AgentEvent, type CodexSessionLike, type TurnAttachment } from "../codex/manager.js";
 import { claimsConflict, resolveResources, type Claims, type ResourceSandbox } from "./resources.js";
-import { applyTaskReference, parsePlan, planningPrompt, type PlanningTask, type PlanReport, type TaskPlan } from "./planning.js";
+import { applyTaskReference, cleanTitle, jevPlan, parsePlan, planningPrompt, titlePrompt, type PlanningTask, type PlanReport, type TaskPlan } from "./planning.js";
 import { executorQuestion } from "./executorQuestion.js";
 import { isSupportCard } from "./support.js";
 import { RECALL_CAP, recordRecall, STEP_ANSWER_CHARS, STEP_PROMPT_CHARS, TaskRecall, tokenize, type RecallEvent, type RecallSource } from "./recall.js";
@@ -610,6 +610,20 @@ export class TaskService {
                 if (this.taskContext(this.get(row.id)!) !== inputContext) return;
             }
             const previous: PlanningTask[] = [...candidates.values()];
+            // Jev sure of the route (it agrees with the dispatcher ~97% of the time there): take it as the
+            // plan, start the executor now and name the task on the side, without waiting for a dispatcher.
+            const direct = relevance?.suggestion && relevance.suggestion.probability > this.cfg.jev.directProbability
+                ? jevPlan(relevance, previous, row.title) : null;
+            if (direct) {
+                trace.candidates = [...candidates.values()].map(c => ({ id: c.id, source: c.source, ...(c.rank ? { rank: c.rank, score: c.score } : {}) }));
+                trace.repairs = []; trace.failReason = null; trace.failed = false;
+                measured = true;
+                steps.push({ kind: "plan", at: Date.now(), plan: direct, repairs: [] });
+                await this.admitPlan(row, direct, inputContext);
+                // A supplement keeps the title of the task it joins.
+                if (!direct.appendTo && this.get(row.id)?.status === "waiting") void this.nameTask(row.id, inputContext);
+                return;
+            }
             // Jev's displayed 0% means the task cannot help the dispatcher classify this
             // message. Keep the full candidate set in the dispatch log, but do
             // not send that task's input/result/latest message (or its timeline
@@ -708,6 +722,17 @@ export class TaskService {
             }
             this.schedule();
         }
+    }
+    /** Name a task Jev routed directly, once the small title model answers; it never holds up the task. */
+    private async nameTask(id: string, text: string): Promise<void> {
+        const row = this.get(id);
+        if (!row || !this.codex.titleTask) return;
+        const model = isMember(this.db, this.ownerId(row)) ? this.agent.memberSettings().model : undefined;
+        const title = cleanTitle(await this.codex.titleTask(titlePrompt(text, this.locale()), model).catch(() => null));
+        const now = this.get(id);
+        if (!title || this.#closed || !now || now.merged_into || now.title !== row.title) return;
+        this.db.prepare("UPDATE tasks SET title=?,plan_json=json_set(plan_json,'$.title',?) WHERE id=?").run(title, title, id);
+        this.agent.renameConversation(now.conversation_id, title);
     }
     /** Admit a planning task under its plan: a supplement to the task it steers, or a waiting task of its own. */
     private async admitPlan(row: TaskRow, plan: TaskPlan, inputContext: string) {

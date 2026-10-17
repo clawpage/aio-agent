@@ -323,6 +323,17 @@ export class SandboxCodexSession {
     return text;
   }
 
+  /** A short task title on Luna (the owner's own login) or a member's assigned model; null on any failure. */
+  async titleTask(prompt: string, model?: string): Promise<string | null> {
+    try {
+      const { text, error, timedOut } = await this.#auxiliaryText(prompt, "low", 30_000, undefined, model, undefined, model ? undefined : "gpt-6-luna");
+      return error || timedOut ? null : text;
+    } catch (err) {
+      this.#log.warn("title call failed", { error: err instanceof Error ? err.message : String(err) });
+      return null;
+    }
+  }
+
   /** `ownModel` picks another model on the owner's own login; `requestedModel` goes through the gateway. */
   async #auxiliaryText(prompt: string, effort: string | null, timeoutMs: number, developerInstructions?: string, requestedModel?: string, onTiming?: DispatchTimingSink, ownModel?: string): Promise<{ text: string | null; error: string | null; timedOut?: boolean }> {
     const connectionStarted = Date.now();

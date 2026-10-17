@@ -75,6 +75,8 @@ export interface CodexSessionLike {
   compactThread?(threadId: string): Promise<string>;
   /** One throwaway, tool-free run used only for automatic conversation titles. */
   planTask?(prompt: string, developerInstructions?: string, model?: string, onTiming?: DispatchTimingSink): Promise<string | null>;
+  /** A short title on a small model (a member's on their assigned one); null when it gave none. Never throws. */
+  titleTask?(prompt: string, model?: string): Promise<string | null>;
   answer(id: string, result: unknown): boolean;
   close(): void;
 }

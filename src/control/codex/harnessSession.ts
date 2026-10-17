@@ -91,6 +91,10 @@ export class HarnessSession implements CodexSessionLike {
     if (!this.#codex.planTask) return Promise.resolve(null);
     return this.#codex.planTask(prompt, developerInstructions, model, onTiming);
   }
+  titleTask(prompt: string, model?: string) {
+    if (model ? this.#claude.owns(model) : this.#claudeSelected()) return this.#claude.titleTask(prompt);
+    return this.#codex.titleTask?.(prompt, model) ?? Promise.resolve(null);
+  }
   answer(id: string, result: unknown) {
     return this.#codex.answer(id, result);
   }

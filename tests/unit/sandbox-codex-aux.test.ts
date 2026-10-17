@@ -488,3 +488,22 @@ describe("SandboxCodexSession thread compaction", () => {
     } finally { session.close(); }
   });
 });
+
+it('names a task on Luna at low effort for the owner and on the assigned model for a member, and returns null on failure',async()=>{
+ const server=new FakeAppServer();
+ server.handle('thread/start',()=>({thread:{id:'title-thread'}}));
+ server.handle('turn/start',()=>{setTimeout(()=>server.notify('turn/completed',{threadId:'title-thread',turn:{id:'title-turn',status:'completed',items:[{type:'agentMessage',text:'东京迪士尼门票'}]}}),5);return {turn:{id:'title-turn'}};});
+ const bridge={providerForModel:()=> 'aio_gateway',providerConfigArgs:()=>[],providerEnv:()=>({})} as unknown as BridgeModel;
+ const session=makeSession(server,200,bridge);
+ try {
+  expect(await session.titleTask('name it')).toBe('东京迪士尼门票');
+  expect(server.inbound.find(r=>r.method==='turn/start')?.params).toMatchObject({model:'gpt-6-luna',effort:'low'});
+  expect(await session.titleTask('name it','gpt-6.1-sol')).toBe('东京迪士尼门票');
+  expect(server.inbound.filter(r=>r.method==='thread/start').at(-1)?.params).toMatchObject({model:'gpt-6.1-sol',modelProvider:'aio_gateway'});
+ } finally {session.close();}
+ const failing=new FakeAppServer();
+ failing.handle('thread/start',()=>({thread:{id:'t'}}));
+ failing.handle('turn/start',()=>{setTimeout(()=>failing.notify('turn/completed',{threadId:'t',turn:{id:'x',status:'failed',error:{message:'at capacity'}}}),5);return {turn:{id:'x'}};});
+ const s2=makeSession(failing,200);
+ try {expect(await s2.titleTask('name it')).toBeNull();} finally {s2.close();}
+});

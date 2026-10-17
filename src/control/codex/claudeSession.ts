@@ -326,6 +326,11 @@ export class ClaudeCodeSession {
     finally { onTiming?.({ classifierMs: Date.now() - started }); }
   }
 
+  /** A short task title: the same one-shot run at low effort. */
+  async titleTask(prompt: string): Promise<string | null> {
+    try { return await this.#oneShot(prompt, "low", 30_000); } catch { return null; }
+  }
+
   async #oneShot(prompt: string, effort: string, timeoutMs: number, developerInstructions?: string): Promise<string | null> {
     if (!this.#harness.enabled) return null;
     await this.#ensureCli();

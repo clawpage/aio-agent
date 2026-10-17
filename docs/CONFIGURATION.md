@@ -112,6 +112,7 @@
 | `PA_JEV_SECRETS_FILE` | `~/.config/aio-agent/jev.env` | `TYPESAFE_API_KEY`（环境变量优先）；缺失则不提供 Jev |
 | `PA_JEV_ENDPOINT` / `PA_JEV_MODEL` | `https://api.typesafe.ai/v1/systemone` / `jev-latest` | Jev 接口与模型 |
 | `PA_JEV_TIMEOUT_SECONDS` / `PA_JEV_DISPATCH_TIMEOUT_SECONDS` | `30` / `15` | `decide` 工具与派单评分的等待上限 |
+| `PA_JEV_DIRECT_PROBABILITY` | `0.9` | Jev 路由建议概率高于此值时直接派单、不调用派单器；设为 `1` 关闭 |
 | `PA_KB_MCP_URL` | 空 | 宿主上知识库 MCP 服务地址；为空则不提供 |
 | `PA_KB_MCP_SECRETS_FILE` | `~/.config/aio-agent/kb-mcp.env` | `KB_MCP_TOKEN`（环境变量优先） |
 | `PA_KB_MCP_MEMBERS` | 空 | 获准使用知识库的成员，逗号分隔；owner 始终可用 |
