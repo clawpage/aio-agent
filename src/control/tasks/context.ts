@@ -33,6 +33,16 @@ export interface TimelineEntry {
   current: boolean;
   /** A scheduled run's instruction, not something the user said. */
   scheduled?: boolean;
+  /** An earlier turn of the session `taskId` now leads (that task resumed this one's session). */
+  session?: boolean;
+}
+
+/** How a session that several tasks continued in turn began; its latest task stands for it in dispatch. */
+export interface SessionInfo {
+  turns: number;
+  /** The first task's title and request. */
+  title: string;
+  request: string;
 }
 
 const clip = (text: string, n: number) => {
@@ -91,7 +101,8 @@ export function formatTimeline(entries: TimelineEntry[], now = Date.now(), relev
       // A scheduled run's instruction is labelled as such: the user did not type it.
       const head = `${e.current ? "▶ " : "  "}[${time(e.at, now)}] ${e.scheduled ? "Scheduled run" : "User"}: "${e.text}"`;
       if (e.current) return `${head}  ← this ${e.scheduled ? "run" : "message"}`;
-      const where = e.taskId === e.id ? `task ${e.taskId} "${clip(e.title, 30)}" (${e.status})` : `supplement to task ${e.taskId} "${clip(e.title, 30)}" (${e.status})`;
+      const where = e.session ? `an earlier turn of the session task ${e.taskId} "${clip(e.title, 30)}" (${e.status}) continues`
+        : e.taskId === e.id ? `task ${e.taskId} "${clip(e.title, 30)}" (${e.status})` : `supplement to task ${e.taskId} "${clip(e.title, 30)}" (${e.status})`;
       const p = likely.get(e.taskId);
       return `${head} → ${where}${e.ask ? `; the assistant last asked: "${e.ask}"` : ""}${p === undefined ? "" : ` [Jev: relevance ${percent(p)}]`}`;
     })
@@ -157,7 +168,7 @@ export function dispatchAdvice(answers: Record<string, JevAnswer>, candidates: A
  * or is it new. Candidates carry their order, time, status and open question so
  * a terse reply lands on the task that is actually waiting for it.
  */
-export function routingQuestion(message: string, candidates: Array<ContextTask & { clarification?: string | null; recalled?: boolean; turn_id?: string | null; latestMessage?: string | null }>, entries: TimelineEntry[], now = Date.now()): { state: Record<string, unknown>; questions: Record<string, JevQuestion> } {
+export function routingQuestion(message: string, candidates: Array<ContextTask & { clarification?: string | null; recalled?: boolean; turn_id?: string | null; latestMessage?: string | null; session?: SessionInfo }>, entries: TimelineEntry[], now = Date.now()): { state: Record<string, unknown>; questions: Record<string, JevQuestion> } {
   const byTime = [...candidates].sort((a, b) => b.created_at - a.created_at);
   // The latest tasks by rank, then the older ones recall found by what the message says.
   const ordered = [...byTime.filter((t) => !t.recalled), ...byTime.filter((t) => t.recalled)];
@@ -167,6 +178,7 @@ export function routingQuestion(message: string, candidates: Array<ContextTask &
     const ask = lastQuestion(t);
     const description = [
       `${t.recalled ? "Earlier task recalled by content" : `${ordinal(i + 1)} most recent`} (${time(t.created_at, now)}) "${clip(t.title, 40)}", status ${t.status}`,
+      t.session ? `Latest turn of one execution session (${t.session.turns} turns so far), which began with "${clip(t.session.title, 40)}": ${clip(t.session.request, 160)}` : "",
       `User's words: ${clip(t.input_text, 200)}`,
       ask ? `The assistant last asked the user: ${ask}` : "",
       t.result ? `Result summary: ${clip(t.result, 200)}` : "",

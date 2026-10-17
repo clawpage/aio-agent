@@ -338,9 +338,9 @@ describe("main inbox delegation", () => {
         writeAgentSettings(db,{model:"gpt-6-sol",effort:null});
         const done=submit("done");await tick();await codex.runTurn(codex.startedTurns[0]!.turnId,{text:"Original result"});await tick();
         const other=submit("other");await tick();await codex.runTurn(codex.startedTurns.at(-1)!.turnId,{text:"Other result"});await tick();
-        // Each follow-up resumes the latest task of the chain, keeping both earlier tasks as background.
+        // Each follow-up resumes the latest task of the chain (all dispatch sees of it), keeping the chain and the other task as background.
         let latest=done.id;
-        codex.plan=async()=>JSON.stringify({title:"follow-up",decision:{kind:"resume",taskId:latest},related:[done.id,other.id],dependencies:[],resources:[]});
+        codex.plan=async()=>JSON.stringify({title:"follow-up",decision:{kind:"resume",taskId:latest},related:[latest,other.id],dependencies:[],resources:[]});
         const followUp=async(text:string)=>{const t=submit(text);await tick();const sent=codex.startedTurns.at(-1)!;await codex.runTurn(sent.turnId,{text:`${text} 完成`});await tick();latest=t.id;return {task:tasks.get(t.id)!,sent};};
         // The other task ran in another thread: given in full; the original ran in this one: named.
         const first=await followUp("first follow-up");

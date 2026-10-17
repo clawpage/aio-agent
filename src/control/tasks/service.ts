@@ -124,6 +124,8 @@ function decodeCursor(cursor: string): [number, number, string] {
 }
 /** client_message_id prefix of messages from the voice gadget (submitGadget). */
 const GADGET_PREFIX = "gadget:";
+/** Related tasks an executor's turn gets as background, once sessions are expanded into their turns. */
+const MAX_RELATED_TURNS = 12;
 const DISPATCHED = new Set(["queued", "running", "stopping"]);
 /** The main inbox owns delegation; manual continuations reuse the same executor thread. */
 /** A session idle this long is picked up with a reminder that what it holds may be out of date. */
@@ -505,9 +507,23 @@ export class TaskService {
                 latestMessage: t.result ?? (t.turn_id && DISPATCHED.has(t.status) ? this.latestAgentMessage(t.turn_id) : null),
             }));
             const byId = new Map(all.map(t => [t.id, t]));
+            // Dispatch is per session: a task and the tasks that resumed it share one execution session,
+            // so they are one candidate, represented by the session's latest task (what a steer or resume
+            // reaches), with how the session began. Otherwise Jev and the dispatcher split one continuation
+            // between a session's turns.
+            const sessions = new Map<string, Array<(typeof all)[number]>>();
+            for (const t of all) sessions.set(this.executor(t), [...(sessions.get(this.executor(t)) ?? []), t]);
+            const covered = new Set<string>();
             const candidates = new Map<string, PlanningTask & { source: RecallSource; rank?: number; score?: number }>();
-            const add = (t: PlanningTask, source: RecallSource, hit?: { rank: number; score: number }) => {
-                if (!candidates.has(t.id)) candidates.set(t.id, { ...t, source, ...(hit ? { rank: hit.rank, score: Math.round(hit.score * 100) / 100 } : {}) });
+            const add = (t: PlanningTask, source: RecallSource, hit?: { rank: number; score: number }): boolean => {
+                const turns = sessions.get(this.executor(byId.get(t.id) ?? (t as TaskRow))) ?? [];
+                const lead = turns.at(-1) ?? t, first = turns[0];
+                for (const turn of turns) covered.add(turn.id);
+                covered.add(t.id);
+                if (candidates.has(lead.id)) return false;
+                candidates.set(lead.id, { ...lead, source, ...(hit ? { rank: hit.rank, score: Math.round(hit.score * 100) / 100 } : {}),
+                    ...(first && turns.length > 1 ? { session: { turns: turns.length, title: first.title, request: first.input_text } } : {}) });
+                return true;
             };
             // Separate live work from finished work before inverted-document
             // search, so a burst in one group cannot evict the other.
@@ -520,7 +536,7 @@ export class TaskService {
             for (const t of [...finishedTasks].reverse()) {
                 if (recent >= RECENT_CANDIDATES) break;
                 if (byId.get(t.id)?.schedule_id && ++scheduledRecent > RECENT_SCHEDULED_CANDIDATES) continue;
-                add(t, "recent"); recent += 1;
+                if (add(t, "recent")) recent += 1;
             }
             const windowIds = new Set(candidates.keys());
             const explicit = row.related_task_id ? this.get(row.related_task_id) : null;
@@ -531,7 +547,7 @@ export class TaskService {
                 const take = Math.min(RECALL_CAP, MAX_CANDIDATES - candidates.size);
                 if (take <= 0) return;
                 trace.searches.push(query);
-                for (const hit of this.recall.search(trace.ownerId, query, { exclude: new Set([row.id, ...candidates.keys()]), cap: take })) {
+                for (const hit of this.recall.search(trace.ownerId, query, { exclude: new Set([row.id, ...covered]), cap: take })) {
                     const t = byId.get(hit.id);
                     if (t) add(t, source, hit);
                 }
@@ -587,13 +603,19 @@ export class TaskService {
                 }
             };
             // The conversation in order, and Jev's second opinion on which task this message continues.
-            const timelineText = formatTimeline(timeline(everything, row), row.created_at);
+            // The timeline names each message's session by the same task the candidates use.
+            const lines = timeline(everything, row).map(entry => {
+                const owner = byId.get(entry.taskId);
+                const lead = owner ? sessions.get(this.executor(owner))?.at(-1) : undefined;
+                return lead && lead.id !== entry.taskId ? { ...entry, taskId: lead.id, title: lead.title, status: lead.status, ask: lastQuestion(lead), session: true } : entry;
+            });
+            const timelineText = formatTimeline(lines, row.created_at);
             const scheduling = { now: Date.now(), timezone: this.cfg.browser.timezone, schedules: this.planningSchedules(trace.ownerId) };
             steps.push({ kind: "context", at: Date.now(), timeline: timelineText, candidates: candidates.size });
             let relevance: JevRelevance | null = null;
             if (candidates.size && this.jev?.enabled) {
                 const pool = [...candidates.values()].map(t => ({ ...byId.get(t.id)!, ...t, recalled: RECALLED.has(t.source) }));
-                const q = routingQuestion(inputContext, pool, timeline(everything, row), row.created_at);
+                const q = routingQuestion(inputContext, pool, lines, row.created_at);
                 const criteria = q.questions.route!.criteria;
                 try {
                     const r = await this.jev.decide(q.state, q.questions, { timeoutMs: this.cfg.jev.dispatchTimeoutMs });
@@ -631,7 +653,7 @@ export class TaskService {
             const zeroIds = new Set(previous.filter(t => relevance?.scores?.[t.id] === 0).map(t => t.id));
             const lunaCandidates = previous.filter(t => !zeroIds.has(t.id));
             const lunaTimeline = zeroIds.size
-                ? formatTimeline(timeline(everything, row).filter(entry => entry.current || !zeroIds.has(entry.taskId)), row.created_at)
+                ? formatTimeline(lines.filter(entry => entry.current || !zeroIds.has(entry.taskId)), row.created_at)
                 : timelineText;
             trace.rounds = 1;
             const prompt = planningPrompt(planningInput, lunaCandidates, row.related_task_id, { timeline: lunaTimeline, jev: relevance, now: describeNow(scheduling.now, scheduling.timezone), timezone: scheduling.timezone, schedules: scheduling.schedules, locale: this.locale() });
@@ -723,6 +745,20 @@ export class TaskService {
             this.schedule();
         }
     }
+    /**
+     * Related tasks with the sessions they lead: dispatch sees a session as its latest turn, but its first turn
+     * usually holds the main result, so the executor gets the first and the latest two (the rest via history_get).
+     */
+    private sessionTurns(related: string[], row: TaskRow): string[] {
+        const rows = this.rows().filter(t => t.created_at < row.created_at && !t.merged_into);
+        const out = related.flatMap(id => {
+            const t = this.get(id);
+            if (!t) return [id];
+            const turns = rows.filter(r => this.executor(r) === this.executor(t) && r.created_at <= t.created_at);
+            return [...new Set([turns[0]?.id, ...turns.slice(-2).map(r => r.id), id].filter((x): x is string => !!x))];
+        });
+        return [...new Set(out)].slice(0, MAX_RELATED_TURNS);
+    }
     /** Name a task Jev routed directly, once the small title model answers; it never holds up the task. */
     private async nameTask(id: string, text: string): Promise<void> {
         const row = this.get(id);
@@ -737,6 +773,7 @@ export class TaskService {
     /** Admit a planning task under its plan: a supplement to the task it steers, or a waiting task of its own. */
     private async admitPlan(row: TaskRow, plan: TaskPlan, inputContext: string) {
         const root = this.cfg.sandbox.containerWorkspaceDir;
+        plan.related = this.sessionTurns([...plan.dependencies, ...plan.related], row);
         // Historical resource hints only coordinate queueing/prewarming;
         // they are not an authorization boundary for the executor.
         if (this.resourceSandbox && plan.resources.length)

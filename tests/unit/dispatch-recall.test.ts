@@ -271,3 +271,33 @@ it("still asks the dispatcher when Jev is at or below the threshold", async () =
   await tick();
   expect(codex.prompts).toHaveLength(1);
 });
+
+it("dispatches per session: a task and the tasks that resumed it are one candidate, led by the latest turn", async () => {
+  const ids = history(4, {
+    0: { title: "东京五日游行程", input: "规划东京五日游，住新宿", result: "第一天浅草" },
+    1: { title: "行程加一天镰仓", input: "加一天去镰仓", result: "已加入镰仓" },
+    2: { title: "改成住银座", input: "酒店改到银座", result: "已改银座" },
+    3: { title: "花园计划", input: "规划花园", result: "已规划" },
+  });
+  const tokyo = row(ids[0]!).conversation_id;
+  db.prepare("UPDATE tasks SET execution_conversation_id=?, related_task_id=? WHERE id IN (?,?)").run(tokyo, ids[0], ids[1], ids[2]);
+  const asked: Array<Record<string, { criteria: Record<string, string> }>> = [];
+  const states: Array<{ main_session_timeline: string }> = [];
+  withJev({ enabled: true, decide: async (state: { main_session_timeline: string }, questions: Record<string, { criteria: Record<string, string> }>) => {
+    asked.push(questions); states.push(state);
+    return { answers: jevAnswers(questions), usage: null, latencyMs: 1 };
+  } });
+  submit("预算控制在两万以内");
+  await tick();
+  const criteria = asked[0]!.route!.criteria;
+  // One option per session: the latest turn stands for it, the earlier turns are not separate choices.
+  expect(Object.keys(criteria).sort()).toEqual([`resume:${ids[2]}`, `resume:${ids[3]}`, "NEW"].sort());
+  expect(asked[0]![`relevance:${ids[0]}`]).toBeUndefined();
+  expect(criteria[`resume:${ids[2]}`]).toContain('Latest turn of one execution session (3 turns so far), which began with "东京五日游行程": 规划东京五日游，住新宿');
+  expect(criteria[`resume:${ids[3]}`]).not.toContain("execution session");
+  // The timeline names the session's earlier turns by the same task.
+  expect(states[0]!.main_session_timeline).toContain(`"规划东京五日游，住新宿" → an earlier turn of the session task ${ids[2]} "改成住银座"`);
+  const previous = view(codex.prompts.at(-1)!).data.previous as Array<Entry & { session?: { turns: number; startedWith: string } }>;
+  expect(previous.map(t => t.id).sort()).toEqual([ids[2], ids[3]].sort());
+  expect(previous.find(t => t.id === ids[2])!.session).toMatchObject({ turns: 3, startedWith: "东京五日游行程" });
+});

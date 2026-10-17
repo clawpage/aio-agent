@@ -146,8 +146,10 @@ it("keeps the person's standing agreements, gives each execution thread them onc
     expect((await call(owner.history!.url, "memory_forget", { id: rule.id })).content[0]!.text).toBe("Deleted this agreement");
     expect((await call(owner.history!.url, "memory_forget", { id: rule.id })).isError).toBe(true);
 
-    // A related task is given as a gist with a pointer, not its whole result.
-    Object.assign(h.codex, { planTask: async () => JSON.stringify({ title: "test", related: [taskId], dependencies: [], resources: [] }) });
+    // A related task is given as a gist with a pointer, not its whole result. The dispatcher sees the
+    // session as its latest turn (the follow-up); the executor still gets the turn that holds the result.
+    const followUpId = (h.ctx.db.prepare("SELECT id FROM tasks WHERE client_message_id='ag-2'").get() as { id: string }).id;
+    Object.assign(h.codex, { planTask: async () => JSON.stringify({ title: "test", related: [followUpId], dependencies: [], resources: [] }) });
     h.ctx.tasks.submit({ userId: "owner_1", text: "给卧室也挑一台", clientMessageId: "ag-3" });
     await vi.waitFor(() => expect(h.codex.startedTurns.length).toBe(3));
     const third = h.codex.startedTurns[2]!.text;
