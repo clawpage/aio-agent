@@ -644,8 +644,18 @@ Android 手机用 USB 接在装了 Mac App 的 Mac 上，由 App 运行的 `bin/
   等待、点击、悬停、填写、表单、输入、按键、拖动、对话框、页面内脚本、控制台与网络请求。上传文件、任何带文件路径的参数（存截图/快照/脚本结果/请求体到路径）、
   模拟设备与改窗口大小、性能追踪、Lighthouse、堆快照一律拒绝，工具描述里也去掉这些参数。
 - 执行会话在用户的 Chrome 里用 `new_page` 开自己的页面并带 `pageId` 操作，不动用户原有的标签页（除非用户问的就是那个页面），用完关掉自己开的页面；
-  密码、验证码、两步验证、支付信息由用户本人在 Chrome 里完成；付款、下单、发消息、删除、改账号设置前先确认。没有沙箱浏览器的接管/密码器（`browser_login`、`browser_request_human` 只在 `aio_tabs`）。
-  同一账号的多个任务共用这一个 Chrome，页面归属靠执行规则约束，不像 `aio_tabs` 那样由服务强制。
+  付款、下单、发消息、删除、改账号设置前先确认。沙箱浏览器的密码器（`browser_login`）只在 `aio_tabs`。
+  同一账号的多个任务共用这一个 Chrome；除了被接管的页面，页面归属靠执行规则约束，不像 `aio_tabs` 那样由服务强制。
+- **任务卡片上的预览与接管**：每次调用都带任务身份（与 `aio_tabs` 相同的 `X-AIO-Task`，即执行会话），网关据此记住每个任务在用的页面（`new_page` 开出的、或调用里的 `pageId`；
+  只存在控制面内存里，重启或 Chrome 重连后要等任务再用一次）。用过的任务卡片上有一行「你的 Chrome」：谁在操作、页面地址，点开才截图
+  （`/api/tasks/<id>/user-browser/screenshot`，经 Mac 的桥接截那个页面），执行中每 10 秒刷新。
+  - 「接管」（`POST /api/tasks/<id>/user-browser/control`）把那个页面切到 Mac 上 Chrome 的前台并挡住 AI：这个任务除 `list_pages` 外的调用都返回“用户已接管，请用 request_human 等待”；
+    「交还给 AI」恢复。网关自己的工具 `request_human`（不经 Mac）让执行会话请用户做一步（登录、验证码、两步验证、支付信息、最后确认）：卡片显示原因，调用一直等到用户交还（最长 30 分钟，
+    所以这个服务的工具超时与 `aio_tabs` 同为 31 分钟），然后执行会话重新读页面再继续。卡片上的「完成，继续」就是交还。
+  - **实时画面**：卡片或预览点开是那个页面的实时画面（WebSocket `/api/user-browser/screen?key=<执行会话>`，只认主站来源上本账号的会话），
+    桥接经同一条已允许的 Chrome 连接每约 300 毫秒截一张 JPEG（`--screenshotMaxWidth/Height 1600`），观看端跟不上时丢帧。
+    接管后才能操作：点按（`click_at`，只给人用、不给执行会话）、拖动或滚轮滚动（滚动指针下的可滚动区域）、后退/前进/刷新、回车/退格/Tab/Esc、发送文字到当前输入框（支持中文）；
+    没接管时控制面丢弃一切输入。坐标按画面比例换算成页面视口的 CSS 像素。
 
 ### 分享网页
 
@@ -733,7 +743,7 @@ owner 侧栏「用量看板」按账号显示每日 token 趋势、输入 / 输�
   `auth_view`（登录/注册页曝光，唯一允许未登录上报的事件，需同源 Origin，每 IP 每小时 30 次）。已登录每账号每小时 300 次。
 - **服务端记录**：`signup`、`login`（方式、用邮箱还是用户名）、`login_failed`、`logout`、`task_submit`（附件数、是否引用任务）、`task_stop`、
   `task_archive`、`task_retry`、`schedule_edit`、`schedule_action`、`push_subscribe`/`push_unsubscribe`、`locale_change`、`vault_save`、
-  `support_request`、`voice_input`（是否成功、时长）、`browser_takeover`/`browser_handback`。新增埋点在 `src/control/http/api.ts` 调 `track()`。
+  `support_request`、`voice_input`（是否成功、时长）、`browser_takeover`/`browser_handback`、`user_browser_takeover`/`user_browser_handback`（本机 Chrome）。新增埋点在 `src/control/http/api.ts` 调 `track()`。
 - **统计页**：owner 侧栏「运营统计」（`/u/<用户名>/analytics`，`GET /api/analytics/report?days=7|30|90`，仅 owner）显示账号总数与新注册、
   今日 / 7 天 / 30 天活跃账号、任务数与完成率、注册转化（同期注册页浏览与经注册页完成的邮箱注册事件，不含 Google 注册与历史账号）、每日趋势与明细、各事件次数与账号数、平台分布、任务来源。
   活跃 = 当天有事件或手动提交任务的账号（定时任务自动执行不算）。任务数字在读报表时从各账号自己的任务表统计（只读打开，含历史，

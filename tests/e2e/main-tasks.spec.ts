@@ -1021,3 +1021,52 @@ test("owner debug mode shows each message's dispatch log step by step", async ({
     await page.keyboard.press("Escape");
     await expect(dialog).toHaveCount(0);
 });
+test("a task working in the user's own Chrome shows its page, asks for the person, and is taken over and handed back", async ({ page }, info) => {
+    const row: Task = { ...task(1), title: "登录银行", userBrowser: { page: true, title: "网上银行", url: "https://bank.example/login", holder: "ai", request: "请在页面上完成短信验证" } };
+    const jpeg = fs.readFileSync("src/ui/public/icon-192.png");
+    const controls: string[] = [];
+    let shots = 0;
+    await page.route("**/api/tasks/task-1/user-browser/screenshot*", r => { shots += 1; return r.fulfill({ contentType: "image/png", body: jpeg }); });
+    await page.route("**/api/tasks/task-1/user-browser/control", async r => {
+        const { action } = r.request().postDataJSON();
+        controls.push(action);
+        row.userBrowser = { ...row.userBrowser!, holder: action === "take" ? "human" : "ai", request: action === "take" ? row.userBrowser!.request : null };
+        await r.fulfill({ json: { userBrowser: row.userBrowser } });
+    });
+    const sent: string[] = [];
+    await page.routeWebSocket(/\/api\/user-browser\/screen\?key=child-1$/, ws => {
+        ws.send(JSON.stringify({ type: "size", width: 1280, height: 800 }));
+        ws.send(jpeg);
+        ws.onMessage(m => sent.push(String(m)));
+    });
+    await setup(page, [row]);
+    const card = page.getByRole("group", { name: "你的 Chrome：需要你在 Chrome 上操作" });
+    await expect(card).toContainText("bank.example/login");
+    await expect(card).toContainText("请在页面上完成短信验证");
+    await expect(card.getByRole("img")).toHaveCount(0);
+    expect(shots).toBe(0);
+    await press(info, card.getByRole("button", { name: "展开 bank.example/login 的画面" }));
+    await expect(card.getByRole("img", { name: "bank.example/login 的画面" })).toBeVisible();
+    await expect.poll(() => shots).toBe(1);
+    await card.screenshot({ path: info.outputPath("user-browser-card.png") });
+
+    // Taking over opens the live page; input goes out only now.
+    await press(info, card.getByRole("button", { name: "接管", exact: true }));
+    const dialog = page.getByRole("dialog", { name: "你的 Chrome" });
+    const live = dialog.getByRole("img", { name: "页面画面" });
+    await expect(live).toBeVisible();
+    expect(controls).toEqual(["take"]);
+    await press(info, live, { x: 10, y: 10 });
+    await expect.poll(() => sent.some(m => JSON.parse(m).t === "click")).toBe(true);
+    await dialog.getByRole("textbox", { name: "发送到页面的文字" }).fill("123456");
+    await dialog.getByRole("button", { name: "发送", exact: true }).click();
+    await expect.poll(() => sent.map(m => JSON.parse(m)).find(m => m.t === "text")).toEqual({ t: "text", s: "123456" });
+    await page.screenshot({ path: info.outputPath("user-browser-live.png") });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
+
+    // Done hands the page back to the waiting agent.
+    await dialog.getByRole("button", { name: "完成，继续", exact: true }).click();
+    expect(controls).toEqual(["take", "release"]);
+    await expect(dialog.getByRole("button", { name: "接管", exact: true })).toBeVisible();
+    await expect(dialog.getByRole("textbox", { name: "发送到页面的文字" })).toHaveCount(0);
+});

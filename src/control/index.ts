@@ -497,6 +497,7 @@ async function main(): Promise<void> {
   const userBrowser=new UserBrowserGateway({cfg:ctx.cfg,log:ctx.log,port:ctx.cfg.memberModelPort??4902,links:deviceLinks,
     usernameOf:id=>account("SELECT username AS v FROM owners WHERE id=?",id),userIdOf:name=>account("SELECT id AS v FROM owners WHERE username=?",name)});
   userBrowser.provision(ctx.cfg);
+  ctx.userBrowser=userBrowser;
   // A first link gives the account's runtime the phone and browser tools; removing the last one takes them away.
   deviceLinks.onAccountChange=id=>void (id===ctx.cfg.runtimeUserId?Promise.resolve(ctx):ctx.runtimeForUser!(id)).then(rt=>{phone.refresh(rt.cfg);userBrowser.refresh(rt.cfg);},
     err=>ctx.log.warn("phone tools not refreshed",{error:err instanceof Error?err.message:String(err)}));
@@ -531,7 +532,8 @@ async function main(): Promise<void> {
   const app = createApp(ctx);
   const server = http.createServer(app);
   server.on("upgrade", (req, socket, head) => deviceLinks.ownsUpgrade(req) ? deviceLinks.handleUpgrade(req, socket, head)
-    : phone.ownsUpgrade(req) ? phone.handleUpgrade(ctx, req, socket, head) : handleUpgrade(ctx, req, socket, head));
+    : phone.ownsUpgrade(req) ? phone.handleUpgrade(ctx, req, socket, head)
+    : userBrowser.ownsUpgrade(req) ? userBrowser.handleUpgrade(ctx, req, socket, head) : handleUpgrade(ctx, req, socket, head));
 
   await new Promise<void>((resolve) => {
     server.listen(ctx.cfg.port, ctx.cfg.bind, () => resolve());

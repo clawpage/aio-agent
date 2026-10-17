@@ -15,6 +15,7 @@ import { FilePreview } from "./FilePreview";
 import { TaskBrowser } from "./TaskBrowser";
 import { VaultPrompt } from "./VaultPrompt";
 import { TaskPhone } from "./TaskPhone";
+import { TaskUserBrowser } from "./TaskUserBrowser";
 import { MessagePreview } from "./MessagePreview";
 import { ComposerAttachments, releasePreviews, useUploadTray, type PendingUpload } from "./ComposerAttachments";
 import { TurnPills } from "./TurnPills";
@@ -467,6 +468,7 @@ export function TaskChat({ onDetails, onOpenLink, onOpenFileInBrowser, onExpired
           {/* Only what the executor said last: each new word replaces the one before, in place. */}
           {!!t.messages?.length && ["running", "stopping"].includes(t.status) && <div className="task-intro task-messages"><Markdown key={t.messages.length} source={t.messages.at(-1)!} onOpenLink={onOpenLink} onOpenFile={setPreview}/></div>}
           {ownsBrowser(t) && <><VaultPrompt task={t}/><TaskBrowser task={t} onReveal={onRevealBrowser}/></>}
+          {t.userBrowser && !t.mergedInto && !terminal.has(t.status) && <TaskUserBrowser task={t}/>}
           {t.phone && !t.mergedInto && ["needs_input", "queued", "running", "stopping"].includes(t.status) && <TaskPhone task={t} onDone={() => void choose(t, i18n.feed.phoneDone)}/>}
           <TaskDuration task={t} now={now}/>
           {t.error && <p className="tiny">{t.error}</p>}
@@ -500,6 +502,7 @@ export function TaskChat({ onDetails, onOpenLink, onOpenFileInBrowser, onExpired
         <div className="task-report-heading"><span>{t.title}</span>{t.schedule && <span className="schedule-badge">{i18n.feed.report.schedule(t.schedule.rule)}</span>}{t.support && <span className="schedule-badge">{i18n.feed.report.support}</span>}<span className="muted tiny">{labels[t.status]}</span></div>
         <MessagePreview title={t.title}><Markdown source={t.result || (t.status === "completed" ? i18n.feed.report.noResult : t.error || labels[t.status] || t.status)} onOpenLink={onOpenLink} onOpenFile={setPreview} choices={{ onChoose: option => void choose(t, option), chosen: choosing[`${t.id}:${t.revision}`] ?? replyTo(t)?.text ?? null }}/>{t.result && <MessageFileCards text={t.result} onOpen={setPreview} onOpenLink={onOpenLink}/>}{t.error && t.result && <p className="error">{t.error}</p>}</MessagePreview>
         {ownsBrowser(t) && <><VaultPrompt task={t}/><TaskBrowser task={t} onReveal={onRevealBrowser}/></>}
+        {t.userBrowser && !t.mergedInto && <TaskUserBrowser task={t}/>}
         <div className="message-meta"><MessageTime at={t.completedAt} now={now}/><TaskDuration task={t} now={now}/></div>
         <div className="task-actions">
           {/* Until something follows it up: a retry (or any reply) then carries the task on. */}

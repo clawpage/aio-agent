@@ -628,13 +628,16 @@ export function createApiRouter(context: AppContext): Router {
     if (hit) phoneConversations.add(conversationId);
     return Boolean(hit);
   };
-  const browserState = async () => {
+  const browserState = async (userId: string) => {
     const tabs = context.tabs ? await Promise.race([context.tabs.list().catch(() => []), new Promise<[]>((r) => setTimeout(() => r([]), 2000).unref())]) : [];
     const byKey = new Map<string, typeof tabs>();
     for (const tab of tabs) byKey.set(tab.key, [...(byKey.get(tab.key) ?? []), tab]);
     const asking = [...byKey].filter(([, own]) => own.some((t) => t.request && t.holder === "ai")).map(([key]) => key);
     const decorate = <T extends { mergedInto?: string | null; conversationId: string }>(found: T) => {
-      const task = !found.mergedInto && usedPhone(found.conversationId) ? { ...found, phone: true } : found;
+      const phoned = !found.mergedInto && usedPhone(found.conversationId) ? { ...found, phone: true } : found;
+      // The page it works in on the user's own Chrome, if any (UserBrowserGateway).
+      const userBrowser = phoned.mergedInto ? null : context.userBrowser?.view(userId, phoned.conversationId);
+      const task = userBrowser ? { ...phoned, userBrowser } : phoned;
       const own = task.mergedInto ? undefined : byKey.get(task.conversationId);
       if (!own?.length) {
         // Its tab is closed now: the page it last showed stays on the card, to be opened again.
@@ -652,7 +655,7 @@ export function createApiRouter(context: AppContext): Router {
     const limit = Number(req.query.limit ?? 20);
     const page = context.tasks.list(Number.isSafeInteger(before) && before > 0 ? before : Number.MAX_SAFE_INTEGER, ctxOf(req).session!.ownerId, Number.isSafeInteger(limit) && limit >= 1 && limit <= 20 ? limit : 20);
     // An account with nothing yet (a new one, above all) answers without asking the sandbox about tabs.
-    const tasks = page.tasks.length ? page.tasks.map((await browserState()).decorate) : page.tasks;
+    const tasks = page.tasks.length ? page.tasks.map((await browserState(ctxOf(req).session!.ownerId)).decorate) : page.tasks;
     // A poll names the version it holds; an unchanged feed answers in a few bytes instead of the whole page.
     const body = { mode: "tasks", ...page, tasks };
     const version = createHash("sha256").update(JSON.stringify(body)).digest("base64url").slice(0, 22);
@@ -668,7 +671,7 @@ export function createApiRouter(context: AppContext): Router {
       res.status(400).json({ error: "bad_request", message: "筛选条件无效" });
       return;
     }
-    const { asking, decorate } = await browserState();
+    const { asking, decorate } = await browserState(ctxOf(req).session!.ownerId);
     try {
       const page = context.tasks.page({ userId: ctxOf(req).session!.ownerId, filter, query, cursor, limit: Number(req.query.limit ?? 30) || 30, asking });
       res.setHeader("Cache-Control", "no-store");
@@ -1032,6 +1035,23 @@ export function createApiRouter(context: AppContext): Router {
     if (!tab) { res.status(404).json({ error: "tab_not_found", message: "这个标签页已经关闭或不属于该任务" }); return; }
     track(req, action === "take" ? "browser_takeover" : "browser_handback");
     res.json({ tab });
+  }));
+  // A task's page on the user's own Chrome (UserBrowserGateway): its picture, and the person taking it over or handing it back.
+  router.get("/tasks/:id/user-browser/screenshot", requireKind("primary"), requireSession, asyncHandler(async (req, res) => {
+    const key = taskBrowserKey(req);
+    const shot = key && context.userBrowser ? await context.userBrowser.screenshot(ctxOf(req).session!.ownerId, key) : null;
+    if (!shot) { res.status(404).json({ error: "not_found" }); return; }
+    res.setHeader("Cache-Control", "no-store");
+    res.type(shot.type).send(shot.body);
+  }));
+  router.post("/tasks/:id/user-browser/control", requireKind("primary"), requireSession, asyncHandler(async (req, res) => {
+    const key = taskBrowserKey(req);
+    const action = req.body?.action;
+    if (action !== "take" && action !== "release") { res.status(400).json({ error: "bad_action" }); return; }
+    const view = key && context.userBrowser ? await context.userBrowser.control(ctxOf(req).session!.ownerId, key, action) : null;
+    if (!view) { res.status(404).json({ error: "not_found" }); return; }
+    track(req, action === "take" ? "user_browser_takeover" : "user_browser_handback");
+    res.json({ userBrowser: view });
   }));
   // The person answers a task's sign-in request from the vault: a saved account, or one typed here
   // (saved unless they say not to). The account goes into the page; the response only says what happened.

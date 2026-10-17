@@ -14,6 +14,9 @@
  *   WS   /screen  the live screen (scrcpy, H.264) and touch / key input
  *   POST /browser/mcp     the user's own Chrome on this Mac (user-browser.mjs)
  *   GET  /browser/status  whether that Chrome can be used now
+ *   GET  /browser/screenshot?page=<id>  a picture of one page, for the person
+ *   POST /browser/front?page=<id>       bring that page to the front (the person takes it over)
+ *   WS   /browser/screen?page=<id>      that page live, with the person's clicks, scrolling and typing
  *
  * PA_PHONE_SCREEN_OFF=1 keeps the phone's own screen dark while all of the above
  * still sees it (see keepDark).
@@ -636,6 +639,21 @@ async function serve() {
       if (url.pathname === "/browser/status" && req.method === "GET") {
         return sendJson(res, 200, browser ? await browser.status() : { available: false, connected: false });
       }
+      const page = Number(url.searchParams.get("page"));
+      if ((url.pathname === "/browser/screenshot" || url.pathname === "/browser/front") && browser && Number.isInteger(page) && page > 0) {
+        try {
+          if (url.pathname === "/browser/front") {
+            if (req.method !== "POST") return sendJson(res, 405, { error: "method not allowed" });
+            await browser.front(page);
+            return sendJson(res, 200, { ok: true });
+          }
+          const shot = await browser.screenshot(page);
+          res.writeHead(200, { "content-type": shot.type, "cache-control": "no-store" });
+          return res.end(shot.body);
+        } catch (err) {
+          return sendJson(res, 404, { error: err.message });
+        }
+      }
       if (url.pathname === "/mcp" || url.pathname === "/browser/mcp") {
         if (req.method === "DELETE") return sendJson(res, 200, {});
         if (req.method !== "POST") return sendJson(res, 405, { error: "method not allowed" });
@@ -662,11 +680,14 @@ async function serve() {
     }
   });
   server.on("upgrade", (req, socket, head) => {
-    if (new URL(req.url ?? "/", "http://bridge").pathname !== "/screen" || !authorized(req, token)) {
+    const url = new URL(req.url ?? "/", "http://bridge");
+    const page = Number(url.searchParams.get("page"));
+    const browserScreen = url.pathname === "/browser/screen" && browser && Number.isInteger(page) && page > 0;
+    if ((url.pathname !== "/screen" && !browserScreen) || !authorized(req, token)) {
       socket.end("HTTP/1.1 401 Unauthorized\r\nConnection: close\r\nContent-Length: 0\r\n\r\n");
       return;
     }
-    wss.handleUpgrade(req, socket, head, (ws) => void screen.join(ws));
+    wss.handleUpgrade(req, socket, head, (ws) => (browserScreen ? browser.stream(ws, page) : void screen.join(ws)));
   });
   let link = null;
   server.listen(PORT, BIND, () => {

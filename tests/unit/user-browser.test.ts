@@ -66,7 +66,7 @@ it("answers the gateway from one session with the browser tools, and only while 
     fs.writeFileSync(path.join(profile, "DevToolsActivePort"), `${(chrome.address() as net.AddressInfo).port}\n/devtools/browser/x\n`);
     const answer = (await browser.handle({ ...call("list_pages"), id: "req-9" })) as { id: unknown; result: { content: Array<{ text: string }> } };
     expect(answer.id).toBe("req-9");
-    expect(answer.result.content[0]!.text).toBe(`called list_pages --autoConnect --userDataDir ${profile} --performanceCrux=false`);
+    expect(answer.result.content[0]!.text).toMatch(new RegExp(`^called list_pages --autoConnect --userDataDir ${profile} --performanceCrux=false --experimentalVision`));
     expect(await browser.status()).toEqual({ available: true, connected: true });
     expect((await browser.handle(call("upload_file"))) as unknown).toEqual({ jsonrpc: "2.0", id: 1, result: { content: [{ type: "text", text: expect.stringMatching(/not available/) }], isError: true } });
 

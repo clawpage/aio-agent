@@ -16,6 +16,11 @@
  * chrome-devtools-mcp speaks MCP over stdio; this module keeps one child and one
  * MCP session with it, and answers each JSON-RPC request the gateway sends on its
  * own (the gateway keeps no session with the Mac).
+ *
+ * The person's console gets the same Chrome through that one connection (Chrome
+ * asks to allow each new one): a picture of a task's page, bringing it to the
+ * front, and a live view (JPEG frames) that takes clicks, scrolling, keys and text.
+ * Those use tools the agent is not offered (click_at), never files on this Mac.
  */
 import { spawn } from "node:child_process";
 import fs from "node:fs";
@@ -62,6 +67,10 @@ export const UNAVAILABLE =
   "The user's Chrome on their Mac is not available for automation right now: Chrome is not open, or remote debugging is not turned on in chrome://inspect/#remote-debugging. Use the sandbox browser (aio_tabs) for this task instead.";
 const NOT_ALLOWED =
   "Chrome on the user's Mac did not accept the connection in time: Chrome asks the user to allow remote debugging when the agent connects, and nobody allowed it yet. Use the sandbox browser (aio_tabs) for now, or ask the user to click Allow in Chrome and try again.";
+/** Live view: at most this often a new frame, sooner after an input. */
+const FRAME_MS = 300;
+/** Keys the person's live view may press. */
+const KEYS = new Set(["Enter", "Backspace", "Tab", "Escape", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "PageUp", "PageDown"]);
 const NO_FILES = "Files on the user's Mac are not reachable from here: call it again without any file path (screenshots and snapshots come back in the reply).";
 
 /** Chrome's own profile directory, where a Chrome open for remote debugging writes DevToolsActivePort. */
@@ -111,6 +120,8 @@ export async function chromeReady(userDataDir) {
 }
 
 const reply = (id, result) => ({ jsonrpc: "2.0", id, result });
+const textOf = (result) => (result?.content ?? []).filter((c) => c.type === "text").map((c) => c.text).join("\n");
+const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, Number(v) || 0));
 const toolError = (id, text) => reply(id, { content: [{ type: "text", text }], isError: true });
 
 /**
@@ -129,7 +140,9 @@ export function createUserBrowser({ entry, userDataDir = defaultUserDataDir(), l
   let closed = false;
 
   function start() {
-    const proc = spawn(process.execPath, [entry, "--autoConnect", "--userDataDir", userDataDir, "--performanceCrux=false"], {
+    // --experimentalVision adds click_at, which only the person's live view uses; smaller screenshots travel faster.
+    const proc = spawn(process.execPath, [entry, "--autoConnect", "--userDataDir", userDataDir, "--performanceCrux=false", "--experimentalVision",
+      "--screenshotMaxWidth", "1600", "--screenshotMaxHeight", "1600"], {
       env: { ...process.env, CHROME_DEVTOOLS_MCP_NO_USAGE_STATISTICS: "1", CHROME_DEVTOOLS_MCP_NO_UPDATE_CHECKS: "1" },
       stdio: ["pipe", "pipe", "ignore"],
     });
@@ -213,8 +226,101 @@ export function createUserBrowser({ entry, userDataDir = defaultUserDataDir(), l
     return answer.result ? reply(id, answer.result) : toolError(id, answer.error?.message ?? "the browser tools failed");
   }
 
+  /** A tool for the person's console (not offered to the agent): its result, or an Error. */
+  async function personTool(name, args, timeoutMs = 20_000) {
+    if (!(await chromeReady(userDataDir))) throw new Error("Chrome on this Mac is not available");
+    const { self } = await ready();
+    const answer = await call(self, "tools/call", { name, arguments: args }, self.reached ? timeoutMs : stillWaitingMs);
+    if (answer.timeout) throw new Error("Chrome did not answer");
+    if (!answer.result || answer.result.isError) throw new Error(textOf(answer.result) || answer.error?.message || `${name} failed`);
+    self.reached = true;
+    return answer.result;
+  }
+
+  async function screenshot(pageId) {
+    const result = await personTool("take_screenshot", { pageId, format: "jpeg", quality: 60 });
+    const image = result.content?.find((c) => c.type === "image");
+    if (!image) throw new Error("no picture of the page");
+    return { type: image.mimeType ?? "image/jpeg", body: Buffer.from(image.data, "base64") };
+  }
+
+  /** The page's viewport in CSS pixels: where the live view's fractions land. */
+  async function viewport(pageId) {
+    const found = /\[\s*(\d+)\s*,\s*(\d+)\s*\]/.exec(textOf(await personTool("evaluate_script", { pageId, function: "() => [innerWidth, innerHeight]" })));
+    if (!found) throw new Error("the page did not report its size");
+    return { width: Number(found[1]), height: Number(found[2]) };
+  }
+
+  /** One input from the live view; positions are fractions of the viewport. */
+  async function input(pageId, msg, size) {
+    const at = (v, n) => Math.round(clamp(v, 0, 1) * n);
+    if (msg.t === "click") return personTool("click_at", { pageId, x: at(msg.x, size.width), y: at(msg.y, size.height) });
+    if (msg.t === "scroll") {
+      // The scrollable box under the pointer (or the page): wheel scrolling as the person expects.
+      const x = at(msg.x, size.width), y = at(msg.y, size.height), dy = Math.round(clamp(msg.dy, -5000, 5000));
+      return personTool("evaluate_script", { pageId, function: `() => { let el = document.elementFromPoint(${x}, ${y}); while (el && !(el.scrollHeight > el.clientHeight + 1 && /(auto|scroll|overlay)/.test(getComputedStyle(el).overflowY))) el = el.parentElement; (el ?? document.scrollingElement ?? document.documentElement).scrollBy(0, ${dy}); }` });
+    }
+    if (msg.t === "text" && typeof msg.s === "string" && msg.s) return personTool("type_text", { pageId, text: msg.s.slice(0, 2000) });
+    if (msg.t === "key" && KEYS.has(msg.k)) return personTool("press_key", { pageId, key: msg.k });
+    if (msg.t === "nav" && ["back", "forward", "reload"].includes(msg.to)) return personTool("navigate_page", { pageId, type: msg.to });
+    return null;
+  }
+
+  /**
+   * The live view of one page on a WebSocket: binary frames are JPEG pictures,
+   * text frames `{type:"size"}` / `{type:"error"}`; what comes back is input.
+   */
+  function stream(ws, pageId) {
+    let open = true;
+    let size = null;
+    let sizeAt = 0;
+    let wake = null;
+    const say = (msg) => { if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(msg)); };
+    ws.on("close", () => { open = false; wake?.(); });
+    ws.on("error", () => ws.terminate());
+    ws.on("message", async (data, binary) => {
+      if (binary) return;
+      let msg;
+      try { msg = JSON.parse(data.toString("utf8")); } catch { return; }
+      try {
+        size ??= await viewport(pageId);
+        await input(pageId, msg, size);
+      } catch (err) {
+        say({ type: "error", message: err.message });
+      }
+      wake?.();
+    });
+    void (async () => {
+      while (open) {
+        const started = Date.now();
+        try {
+          if (!size || started - sizeAt > 5000) {
+            size = await viewport(pageId);
+            sizeAt = started;
+            say({ type: "size", ...size });
+          }
+          const shot = await screenshot(pageId);
+          // A slow viewer skips frames instead of piling them up.
+          if (ws.readyState === ws.OPEN && ws.bufferedAmount < 1024 * 1024) ws.send(shot.body, { binary: true });
+        } catch (err) {
+          say({ type: "error", message: err.message });
+          await new Promise((r) => setTimeout(r, 2000));
+        }
+        if (!open) break;
+        await new Promise((r) => { wake = r; setTimeout(r, Math.max(0, FRAME_MS - (Date.now() - started))); });
+        wake = null;
+      }
+    })();
+  }
+
   return {
     handle,
+    screenshot,
+    /** Bring a task's page to the front of the user's Chrome window (the person takes it over). */
+    async front(pageId) {
+      await personTool("select_page", { pageId, bringToFront: true });
+    },
+    stream,
     /** Whether the user's Chrome can be used now (open for remote debugging). */
     async status() {
       return { available: await chromeReady(userDataDir), connected: Boolean(child?.reached) };

@@ -151,6 +151,7 @@ export class UserRuntimes {
     runtime.ctx.push=this.root.push;
     runtime.ctx.analytics=this.root.analytics;
     runtime.ctx.phone=this.root.phone;
+    runtime.ctx.userBrowser=this.root.userBrowser;
     runtime.ctx.deviceLinks=this.root.deviceLinks;
     // A container found stopped stays stopped: its account's first use starts it, so a
     // service start no longer wakes every account. Only where idle stopping is on;

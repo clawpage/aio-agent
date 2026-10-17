@@ -14,6 +14,7 @@ import { dispatch } from "./dispatch";
 import { workspace } from "./workspace";
 import { browser } from "./browser";
 import { phone } from "./phone";
+import { userBrowser } from "./userBrowser";
 import { settings } from "./settings";
 import { tasks } from "./tasks";
 import { schedules } from "./schedules";
@@ -22,6 +23,6 @@ import { files } from "./files";
 import { cards } from "./cards";
 
 /** Chinese is the reference language: its shape is the contract every other language matches. */
-export const zh = { support, common, app, auth, nav, time, voice, usage, analytics, gadget, chat, feed, dispatch, workspace, browser, phone, settings, tasks, schedules, vault, files, cards };
+export const zh = { support, common, app, auth, nav, time, voice, usage, analytics, gadget, chat, feed, dispatch, workspace, browser, phone, userBrowser, settings, tasks, schedules, vault, files, cards };
 
 export type Messages = typeof zh;

@@ -515,7 +515,7 @@ export class SandboxCodexSession {
   #executionConfig(task: BrowserTask | undefined): { config?: Record<string, unknown> } {
     if (!task) return {};
     const tabs = tabThreadConfig(task) as { mcp_servers: Record<string, unknown> };
-    return { config: { ...tabs, mcp_servers: { ...tabs.mcp_servers, ...decisionThreadServers(this.#cfg), ...scheduleThreadServers(this.#cfg), ...historyThreadServers(this.#cfg), ...imageThreadServers(this.#cfg), ...kbThreadServers(this.#cfg), ...haThreadServers(this.#cfg), ...printerThreadServers(this.#cfg), ...phoneThreadServers(this.#cfg), ...userBrowserThreadServers(this.#cfg) } } };
+    return { config: { ...tabs, mcp_servers: { ...tabs.mcp_servers, ...decisionThreadServers(this.#cfg), ...scheduleThreadServers(this.#cfg), ...historyThreadServers(this.#cfg), ...imageThreadServers(this.#cfg), ...kbThreadServers(this.#cfg), ...haThreadServers(this.#cfg), ...printerThreadServers(this.#cfg), ...phoneThreadServers(this.#cfg), ...userBrowserThreadServers(this.#cfg, task) } } };
   }
 
   async startThread(

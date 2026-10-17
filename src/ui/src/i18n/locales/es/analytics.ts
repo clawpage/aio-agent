@@ -29,7 +29,7 @@ export const analytics: typeof zh = {
     app_open: "Abrió la aplicación", page_view: "Páginas vistas", auth_view: "Visitas a acceso / registro", signup: "Registros", login: "Accesos", login_failed: "Accesos fallidos", logout: "Cierres de sesión",
     task_submit: "Mensajes enviados", task_stop: "Tareas detenidas", task_archive: "Tareas archivadas", task_retry: "Reintentos de asignación", schedule_edit: "Programaciones editadas", schedule_action: "Acciones de programación",
     push_subscribe: "Notificaciones activadas", push_unsubscribe: "Notificaciones desactivadas", locale_change: "Cambios de idioma", vault_save: "Contraseñas guardadas", support_request: "Soporte y denuncias",
-    voice_input: "Entrada de voz", browser_takeover: "Navegador tomado", browser_handback: "Navegador devuelto",
+    voice_input: "Entrada de voz", browser_takeover: "Navegador tomado", browser_handback: "Navegador devuelto", user_browser_takeover: "Chrome propio tomado", user_browser_handback: "Chrome propio devuelto",
   },
   platformNames: { web: "Web", pwa: "Web en pantalla de inicio", ios: "App de iOS", android: "App de Android", mac: "App de Mac", unknown: "Sin indicar" },
   sources: (manual: string, schedule: string, gadget: string) => `Origen de las tareas: escritas ${manual} · programadas ${schedule} · accesorio de voz ${gadget}. Las ejecuciones programadas no cuentan como actividad.`,

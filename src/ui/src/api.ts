@@ -174,6 +174,8 @@ export const api = {
   vaultReveal: (id: string) => request<{ password: string }>(`/api/vault/${encodeURIComponent(id)}/reveal`, { method: "POST", body: {} }),
   taskBrowserLastShotUrl: (id: string, at: number) => apiUrl(`/api/tasks/${encodeURIComponent(id)}/browser/last-shot?at=${at}`),
   taskBrowserReopen: (id: string) => request<{ tab: import("./types").TaskTab }>(`/api/tasks/${encodeURIComponent(id)}/browser/reopen`, { method: "POST", body: {} }),
+  taskUserBrowserScreenshotUrl: (id: string, at: number) => apiUrl(`/api/tasks/${encodeURIComponent(id)}/user-browser/screenshot?at=${at}`),
+  taskUserBrowserControl: (id: string, action: "take" | "release") => request<{ userBrowser: import("./types").UserBrowserState }>(`/api/tasks/${encodeURIComponent(id)}/user-browser/control`, { method: "POST", body: { action } }),
   taskBrowserScreenshotUrl: (id: string, tab: string, at: number) => apiUrl(`/api/tasks/${encodeURIComponent(id)}/browser/screenshot?tab=${encodeURIComponent(tab)}&at=${at}`),
   session: (signal?: AbortSignal) => request<{ authenticated: boolean; role?: "owner" | "member"; username: string | null; email?: string | null; expiresAt?: number; secure?: boolean; inviteEmail?: string | null; registrationRequiresInvite?: boolean }>("/api/auth/session", {signal,cache:"no-store"}),
   /** `email` is the account's email, or the username of an account from before email. */

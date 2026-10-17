@@ -122,6 +122,9 @@ The shell itself bundles no UI, so a UI change still ships with the next UI depl
   to the Chrome the user runs once they turn on remote debugging in `chrome://inspect/#remote-debugging`
   and click Allow in Chrome's prompt; it never launches Chrome. The control plane offers it as
   `aio_user_browser` next to the sandbox browser, which takes over whenever Chrome is not reachable.
+  The console's task cards show a task's page (a screenshot, or a live view of JPEG frames over
+  the link) and take it over; the person's clicks use chrome-devtools-mcp's `click_at`
+  (`--experimentalVision`), which the agent is not offered.
 - Home-screen name: iOS 一站 in `gen/apple/project.yml` (`CFBundleDisplayName`, then
   `xcodegen generate`); Android Clawpage Agent in `gen/android/app/src/main/res/values/strings.xml`
   and 一站 in `values-zh/strings.xml`.

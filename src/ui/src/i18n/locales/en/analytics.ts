@@ -29,7 +29,7 @@ export const analytics: typeof zh = {
     app_open: "Opened the app", page_view: "Page views", auth_view: "Sign-in / sign-up page views", signup: "Sign-ups", login: "Sign-ins", login_failed: "Failed sign-ins", logout: "Sign-outs",
     task_submit: "Messages sent", task_stop: "Tasks stopped", task_archive: "Tasks archived", task_retry: "Dispatch retries", schedule_edit: "Schedules edited", schedule_action: "Schedule actions",
     push_subscribe: "Notifications on", push_unsubscribe: "Notifications off", locale_change: "Language changes", vault_save: "Passwords saved", support_request: "Support and reports",
-    voice_input: "Voice input", browser_takeover: "Browser taken over", browser_handback: "Browser handed back",
+    voice_input: "Voice input", browser_takeover: "Browser taken over", browser_handback: "Browser handed back", user_browser_takeover: "Own Chrome taken over", user_browser_handback: "Own Chrome handed back",
   },
   platformNames: { web: "Web", pwa: "Home-screen web app", ios: "iOS app", android: "Android app", mac: "Mac app", unknown: "Not stated" },
   sources: (manual: string, schedule: string, gadget: string) => `Task sources: typed ${manual} · scheduled ${schedule} · voice gadget ${gadget}. Scheduled runs don't count as activity.`,

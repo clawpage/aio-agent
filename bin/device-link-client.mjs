@@ -3,15 +3,24 @@
  * plane (src/control/deviceLink.ts) with the device token its account issued
  * and serves what comes down the socket from its own loopback server. Only the
  * bridge's endpoints pass: POST /mcp, GET /status, GET /screenshot, the
- * browser's POST /browser/mcp and GET /browser/status, and the /screen
- * WebSocket; anything else is answered 404 without reaching it.
+ * browser's POST /browser/mcp, GET /browser/status, GET /browser/screenshot and
+ * POST /browser/front, and the /screen and /browser/screen WebSockets; anything
+ * else is answered 404 without reaching it.
  *
  * Frames: JSON text for requests, responses and channel control; binary frames
  * carry a channel's binary data, prefixed by the channel id (4 bytes, big endian).
  */
 import WebSocket from "ws";
 
-const ROUTES = new Set(["POST /mcp", "GET /status", "GET /screenshot", "POST /browser/mcp", "GET /browser/status"]);
+const ROUTES = new Set(["POST /mcp", "GET /status", "GET /screenshot", "POST /browser/mcp", "GET /browser/status", "GET /browser/screenshot", "POST /browser/front"]);
+/** A browser page named by its id, the only query a path may carry. */
+const PAGE_QUERY = /^(?:\?page=[1-9]\d{0,5})?$/;
+/** The routes a path names, or null when it carries anything else. */
+const route = (method, path) => {
+  const at = String(path).indexOf("?");
+  const name = at < 0 ? String(path) : String(path).slice(0, at), query = at < 0 ? "" : String(path).slice(at);
+  return PAGE_QUERY.test(query) && ROUTES.has(`${method} ${name}`) ? name : null;
+};
 const PASSED_HEADERS = ["content-type", "accept", "mcp-session-id", "mcp-protocol-version"];
 const REPLY_HEADERS = ["content-type", "mcp-session-id"];
 const MAX_FRAME = 32 * 1024 * 1024;
@@ -44,7 +53,7 @@ export function linkDevice({ url, token, name, local, localToken, onState, silen
   const send = (msg) => { if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg)); };
 
   async function request({ id, method, path, headers = {}, body = "" }) {
-    if (!ROUTES.has(`${method} ${path}`)) return send({ t: "res", id, status: 404, headers: {}, body: "" });
+    if (!route(method, path)) return send({ t: "res", id, status: 404, headers: {}, body: "" });
     try {
       const passed = Object.fromEntries(PASSED_HEADERS.filter((h) => typeof headers[h] === "string").map((h) => [h, headers[h]]));
       const res = await fetch(`${local}${path}`, { method, headers: { ...passed, ...auth }, body: method === "POST" ? Buffer.from(body, "base64") : undefined });
@@ -57,8 +66,8 @@ export function linkDevice({ url, token, name, local, localToken, onState, silen
   }
 
   function open(ch, path) {
-    if (path !== "/screen") return send({ t: "closed", ch, code: 1008 });
-    const upstream = new WebSocket(`${local.replace(/^http/, "ws")}/screen`, { headers: auth, maxPayload: 16 * 1024 * 1024 });
+    if (path !== "/screen" && !/^\/browser\/screen\?page=[1-9]\d{0,5}$/.test(String(path))) return send({ t: "closed", ch, code: 1008 });
+    const upstream = new WebSocket(`${local.replace(/^http/, "ws")}${path}`, { headers: auth, maxPayload: 16 * 1024 * 1024 });
     channels.set(ch, upstream);
     upstream.on("open", () => send({ t: "opened", ch }));
     upstream.on("message", (data, binary) => {

@@ -67,7 +67,7 @@ export class McpGateway {
   }
 
   /** A JSON-RPC message the subclass answers itself (its own tools); undefined forwards it upstream. */
-  protected async local(_message: unknown, _username: string): Promise<unknown> {
+  protected async local(_message: unknown, _username: string, _headers: http.IncomingHttpHeaders): Promise<unknown> {
     return undefined;
   }
 
@@ -147,7 +147,7 @@ export class McpGateway {
       } catch {
         message = undefined; // not JSON: the upstream answers it
       }
-      const answer = message === undefined ? undefined : await this.local(message, username);
+      const answer = message === undefined ? undefined : await this.local(message, username, req.headers);
       if (answer !== undefined) return answer === null ? send(202) : send(200, answer);
       const call: McpCall = { username, body: Buffer.concat(chunks), headers: { ...passed("mcp-session-id"), ...passed("mcp-protocol-version") } };
       if (await this.forward(call, res)) return;

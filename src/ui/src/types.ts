@@ -216,6 +216,8 @@ export interface Task {
   browser?: { tabs: number; request: string | null; human: boolean; last?: { url: string; title: string; at: number; shot: boolean } };
   /** The task's agent used the account's phone (its card shows the phone). */
   phone?: boolean;
+  /** The page its agent works in on the account's own Chrome (a linked Mac), and who drives it. */
+  userBrowser?: UserBrowserState;
   /** Set on a run a schedule started (nobody typed it then). */
   schedule?: { id: string; title: string; rule: string; builtin?: string } | null;
   /** A message from the people running this deployment, not something the person typed. */
@@ -368,4 +370,14 @@ export interface DispatchLogEntry {
 export interface DispatchLog {
   task: { id: string; title: string; text: string; status: string };
   entries: DispatchLogEntry[];
+}
+
+/** A task's page on the account's own Chrome, as its card shows it. */
+export interface UserBrowserState {
+  page: boolean;
+  title: string;
+  url: string;
+  holder: "ai" | "human";
+  /** What the agent asked the person to do there, while it waits. */
+  request: string | null;
 }
