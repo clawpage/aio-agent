@@ -18,7 +18,7 @@
 - [13. 手机通知（Web Push）](#13-手机通知web-push)
 - [14. 外部集成](#14-外部集成)
 - [15. Claude Code 执行器](#15-claude-code-执行器)
-- [16. 用量看板](#16-用量看板)
+- [16. 运营看板](#16-运营看板)
 - [16a. 使用统计（埋点）](#16a-使用统计埋点)
 - [17. 界面与交互](#17-界面与交互)
 
@@ -723,12 +723,18 @@ Android 手机用 USB 接在装了 Mac App 的 Mac 上，由 App 运行的 `bin/
   （权限宽于 600 / 400 拒绝）。只经 `docker exec -e <变量名>` 传入，argv 中只有变量名；凭据在沙箱进程内可见（CLI 需要读取）。
 - **已知边界**：Claude Code 的子代理只以一条工具调用出现在时间线；CLI 的审批与交互式提问不接入。
 
-## 16. 用量看板
+## 16. 运营看板
 
-owner 侧栏「用量看板」按账号显示每日 token 趋势、输入 / 输出 / 缓存汇总与每日明细，支持最近 7 / 30 / 90 天与单账号筛选，每 30 秒刷新。
-统计时区取 `PA_BROWSER_TIMEZONE`。`GET /api/usage?days=30` 仅 owner 可访问。
+owner 侧栏「运营看板」（`/u/<用户名>/analytics`，旧地址 `/usage` 也打开这里）一页合并运营统计与 token 用量，共用一个时间范围（最近 7 / 30 / 90 天），
+每分钟并行读取 `GET /api/analytics/report` 与 `GET /api/usage`（都仅 owner）；一边读取失败时另一边照常显示，并提示哪部分可能过期。
 
-计数持久保存在各账号控制数据库，覆盖 Codex / Claude 执行、派单与标题调用。缓存读写计入输入，总 token = 输入 + 输出。
+- **指标卡**：账号总数、今日活跃、本期任务（完成率）、注册转化、本期 token（输入 / 输出）。
+- **每日趋势**：活跃账号、任务（完成 / 失败 / 进行中及其他叠加）、新注册各一张柱状图，各自刻度，标题旁给日均或合计，悬停看当天数字。
+- **token 用量**：可按用户筛选；按账号叠加的每日柱状图、按用量从高到低排序的用户表（占比、输入、其中缓存、输出；手机隐藏缓存列）与可展开的每日明细。
+  token 数用紧凑单位显示（如 6000.4万 / 60M），悬停显示精确值。
+- **功能使用与平台分布**：按次数 / 账号数从高到低，数值附比例条；运营每日明细与「统计口径」（任务来源、活跃定义、token 计数范围、各账号采集起点）默认折叠。
+
+token 统计时区取 `PA_BROWSER_TIMEZONE`。计数持久保存在各账号控制数据库，覆盖 Codex / Claude 执行、派单与标题调用。缓存读写计入输入，总 token = 输入 + 输出。
 历史只回填已保存的 Codex 用量事件；旧 Claude、旧派单、外部客户端、图片生成与 Jev 不计入，不推算账单或订阅额度。
 口径详见[运行手册](RUNBOOK.md#13-token-用量统计)。
 
@@ -744,7 +750,7 @@ owner 侧栏「用量看板」按账号显示每日 token 趋势、输入 / 输�
 - **服务端记录**：`signup`、`login`（方式、用邮箱还是用户名）、`login_failed`、`logout`、`task_submit`（附件数、是否引用任务）、`task_stop`、
   `task_archive`、`task_retry`、`schedule_edit`、`schedule_action`、`push_subscribe`/`push_unsubscribe`、`locale_change`、`vault_save`、
   `support_request`、`voice_input`（是否成功、时长）、`browser_takeover`/`browser_handback`、`user_browser_takeover`/`user_browser_handback`（本机 Chrome）。新增埋点在 `src/control/http/api.ts` 调 `track()`。
-- **统计页**：owner 侧栏「运营统计」（`/u/<用户名>/analytics`，`GET /api/analytics/report?days=7|30|90`，仅 owner）显示账号总数与新注册、
+- **统计页**：显示在「运营看板」（见第 16 节；`GET /api/analytics/report?days=7|30|90`，仅 owner）：账号总数与新注册、
   今日 / 7 天 / 30 天活跃账号、任务数与完成率、注册转化（同期注册页浏览与经注册页完成的邮箱注册事件，不含 Google 注册与历史账号）、每日趋势与明细、各事件次数与账号数、平台分布、任务来源。
   活跃 = 当天有事件或手动提交任务的账号（定时任务自动执行不算）。任务数字在读报表时从各账号自己的任务表统计（只读打开，含历史，
   合并进其他任务的补充不单独计）；注册数来自账号创建时间；其余数字从事件开始记录（`meta.analytics_started`）之后才有。

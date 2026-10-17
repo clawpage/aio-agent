@@ -433,7 +433,7 @@ model。不能只凭任务卡上的执行模型，把分配失败归因于该模
 
 ## 13. Token 用量统计
 
-- owner 侧栏「用量看板」；`GET /api/usage?days=7|30|90`。主站认证且仅 owner，成员 403。
+- owner 侧栏「运营看板」的 token 用量部分；`GET /api/usage?days=7|30|90`。主站认证且仅 owner，成员 403。
   查询直接读取控制机的根库与账号库，不会创建执行器或唤醒远程沙盒。
 - 每账号的控制数据库增量增加 `token_usage`、`token_usage_counters`、`token_usage_meta` 三表；
   只保存数字、时间和内部去重键，不复制消息或凭据。随原控制数据备份，不在沙盒节点记账。

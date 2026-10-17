@@ -16,7 +16,6 @@ export default defineConfig({
   // never run against a real deployment: they need no server, and one of them
   // writes visual-QA screenshots to the workspace.
   testIgnore: [
-    /usage\.spec\.ts/,
     /analytics\.spec\.ts/,
     /task-retry\.spec\.ts/,
     /support-card\.spec\.ts/,

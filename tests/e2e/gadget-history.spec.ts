@@ -54,7 +54,7 @@ test('no entry when the gadget has no account of its own, and none for a member'
   for (role of ['owner', 'member']) {
     await page.goto('/'); await expect(page.getByRole('heading', { name: '主会话', exact: true })).toBeVisible();
     if (info.project.name.startsWith('mobile')) await page.getByRole('button', { name: '打开导航' }).click();
-    await expect(page.getByRole('button', { name: '用量看板', exact: true })).toHaveCount(role === 'owner' ? 1 : 0);
+    await expect(page.getByRole('button', { name: '运营看板', exact: true })).toHaveCount(role === 'owner' ? 1 : 0);
     await expect(page.locator('.sidebar button', { hasText: /^Betaw$/ })).toHaveCount(0);
   }
   expect(asked).toHaveLength(1);   // only the owner asked
