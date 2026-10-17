@@ -13,7 +13,8 @@ const BRIDGE_TOKEN = "b".repeat(64);
 const dictate = (text: unknown, token = TOKEN) =>
   h.request("/api/gadget/dictation", { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify({ text }) });
 
-const model = { fail: false, requests: [] as Array<{ headers: http.IncomingHttpHeaders; body: any }> };
+const POLISHED = "<text>明天下午三点开会，记得带电脑。</text>";
+const model = { fail: false, reply: POLISHED, requests: [] as Array<{ headers: http.IncomingHttpHeaders; body: any }> };
 const bridge = { status: 200, url: "", typed: [] as Array<{ auth: string | undefined; text: string }> };
 const kb = { calls: [] as Array<{ auth: string | undefined; body: any }> };
 const servers: http.Server[] = [];
@@ -40,7 +41,7 @@ beforeAll(async () => {
   const modelUrl = await listen((req, body, res) => {
     model.requests.push({ headers: req.headers, body });
     if (model.fail) { res.writeHead(529).end(); return; }
-    res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ content: [{ type: "text", text: "明天下午三点开会，记得带电脑。" }] }));
+    res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ content: [{ type: "text", text: model.reply }] }));
   });
   const bridgeUrl = await listen((req, body, res) => {
     bridge.typed.push({ auth: req.headers.authorization, text: body.text });
@@ -90,6 +91,18 @@ it("types the transcript as heard when the model can't be reached", async () => 
   model.fail = false;
   expect(await res.json()).toEqual({ text: "你好世界", polished: false });
   expect(bridge.typed.at(-1)!.text).toBe("你好世界");
+});
+
+it("enters only the last <text> block, never the model's deliberation", async () => {
+  model.reply = "<text>帮我去淘宝选一个裤子。</text>\n\nWait, I need to correct that: 露露联 e e is likely lululemon.\n\n<text>帮我去 lululemon 选一条直筒裤。</text>";
+  let res = await dictate("帮我去露露联 e e 选一个裤子那种直筒的裤子");
+  expect(await res.json()).toEqual({ text: "帮我去 lululemon 选一条直筒裤。", polished: true });
+  // A reply without a <text> block may be all deliberation: type what was heard.
+  model.reply = "Hmm, 露露联 might be lululemon. 帮我去 lululemon 选一条直筒裤。";
+  res = await dictate("帮我去露露联选一条直筒裤");
+  model.reply = POLISHED;
+  expect(await res.json()).toEqual({ text: "帮我去露露联选一条直筒裤", polished: false });
+  expect(bridge.typed.at(-1)!.text).toBe("帮我去露露联选一条直筒裤");
 });
 
 it("says so when the Mac hasn't allowed the bridge to type, and rejects empty text", async () => {

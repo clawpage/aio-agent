@@ -90,7 +90,7 @@ it("polishes what was heard with the dictation model, and falls back to it as he
     req.on("end", () => {
       requests.push(JSON.parse(Buffer.concat(parts).toString()));
       if (fail) { res.writeHead(529).end(); return; }
-      res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ content: [{ type: "text", text: "打开走廊的灯。" }] }));
+      res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ content: [{ type: "text", text: "<text>打开走廊的灯。</text>" }] }));
     });
   });
   await new Promise<void>(resolve => model.listen(0, "127.0.0.1", resolve));
