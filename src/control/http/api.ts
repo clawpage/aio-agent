@@ -662,6 +662,12 @@ export function createApiRouter(context: AppContext): Router {
     res.setHeader("Cache-Control", "no-store");
     res.json(req.query.v === version ? { mode: "tasks", unchanged: true, version } : { ...body, version });
   }));
+  // The files page: the main session's messages that hold files, one page at a time.
+  router.get("/main/files", requireKind("primary"), requireSession, (req, res) => {
+    const before = Number(req.query.before ?? Number.MAX_SAFE_INTEGER);
+    res.setHeader("Cache-Control", "no-store");
+    res.json(context.tasks.files(ctxOf(req).session!.ownerId, Number.isSafeInteger(before) && before > 0 ? before : Number.MAX_SAFE_INTEGER));
+  });
   // The task list: counts by status, then one filtered page at a time (keyset cursor).
   router.get("/tasks", requireKind("primary"), requireSession, asyncHandler(async (req, res) => {
     const filter = String(req.query.filter ?? "all") as TaskFilter;

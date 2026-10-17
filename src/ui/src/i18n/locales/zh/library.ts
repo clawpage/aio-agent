@@ -1,0 +1,17 @@
+export const library = {
+  title: "文件库",
+  sub: "主会话里的图片、文档等文件，都收在这里",
+  back: "← 返回文件库",
+  shelfGroup: "按类型筛选",
+  shelves: { all: "全部", images: "图片", documents: "文档", media: "音视频", other: "其他" },
+  fromYou: "你发送",
+  fromAi: "AI 回复",
+  openTask: (title: string) => `查看「${title}」的对话`,
+  emptyTitle: "还没有文件",
+  emptyBody: "在主会话里发图片、文档，或让 AI 帮你做表格、报告、图片，文件都会自动收到这里。",
+  shelfEmpty: "这一类还没有文件。",
+  loading: "正在读取…",
+  loadFailed: "文件列表读取失败",
+  retry: "重试",
+  noMore: "没有更多了",
+};

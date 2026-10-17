@@ -1,0 +1,42 @@
+import { describe, expect, it } from "vitest";
+import { fileShelf, libraryFiles } from "../../src/ui/src/fileLibrary.js";
+import type { FileMessage } from "../../src/ui/src/types.js";
+
+const ROOT = "/home/gem/workspace";
+const message = (taskId: string, at: number, result: string | null, attachments: FileMessage["attachments"] = []): FileMessage =>
+  ({ taskId, title: `任务 ${taskId}`, createdAt: at, completedAt: at + 5, attachments, result });
+
+describe("the files page", () => {
+  it("lists the files a reply shows and the files sent, newest first, each once where it last came up", () => {
+    const files = libraryFiles([
+      message("b", 200, `图在这：![](${ROOT}/tasks/b/chart.png)\n\n[报告](${ROOT}/tasks/b/report.docx)，原图 [photo](${ROOT}/uploads/photo.jpg)`),
+      message("a", 100, "收到", [{ path: `${ROOT}/uploads/photo.jpg`, name: "photo.jpg", kind: "image", size: 1 }]),
+    ]);
+    expect(files.map((f) => [f.path, f.taskId, f.from, f.at])).toEqual([
+      [`${ROOT}/tasks/b/chart.png`, "b", "ai", 205],
+      [`${ROOT}/tasks/b/report.docx`, "b", "ai", 205],
+      [`${ROOT}/uploads/photo.jpg`, "b", "ai", 205],
+    ]);
+    expect(files[1]).toMatchObject({ title: "报告", kind: "word", taskTitle: "任务 b" });
+  });
+
+  it("leaves out web links, paths outside the workspace and paths only mentioned in code", () => {
+    const files = libraryFiles([message("a", 1, [
+      "[网页](https://example.com/report.pdf)",
+      "[外面](/etc/passwd)",
+      "`/home/gem/workspace/tasks/a/notes.md`",
+      "```\n[代码](/home/gem/workspace/tasks/a/code.py)\n```",
+    ].join("\n\n"), [{ path: "/tmp/x.png", name: "x.png", kind: "image", size: 1 }])]);
+    expect(files).toEqual([]);
+  });
+
+  it("shows an audio or video link on a line of its own like the conversation does, and keeps it", () => {
+    const files = libraryFiles([message("a", 1, `[录音](${ROOT}/tasks/a/cry.mp3)`)]);
+    expect(files.map((f) => f.kind)).toEqual(["audio"]);
+  });
+
+  it("puts each kind on a shelf", () => {
+    expect(["image", "video", "audio", "pdf", "word", "excel", "ppt", "text", "unsupported"].map((k) => fileShelf(k as never)))
+      .toEqual(["images", "media", "media", "documents", "documents", "documents", "documents", "documents", "other"]);
+  });
+});

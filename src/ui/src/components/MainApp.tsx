@@ -9,7 +9,7 @@ import { homePath, pathUser } from "../userPath";
 import { namesPage, OWNER_VIEWS, parseRoute, routePath, type AppRoute } from "../route";
 
 /** Where a task's process was opened from: its back button returns there. */
-type DetailFrom = "main" | "tasks" | "schedules";
+type DetailFrom = "main" | "tasks" | "files" | "schedules";
 import { BrandMark, LoadingMark, PageLoading } from "./Brand";
 import { NavIcon } from "./NavIcon";
 import { Chat } from "./Chat";
@@ -22,6 +22,7 @@ import { useDebugMode } from "../debugMode";
 import { Workspace } from "./Workspace";
 import { TaskChat } from "./TaskChat";
 import { TaskList } from "./TaskList";
+import { FileLibrary } from "./FileLibrary";
 import { ScheduleList } from "./ScheduleList";
 import { VaultList } from "./VaultList";
 import { PushToggle } from "./PushToggle";
@@ -91,7 +92,7 @@ export function MainApp({ firstSession }: { firstSession?: ReturnType<typeof api
     const [status, setStatus] = useState<StatusResponse | null>(null);
     const [view, setView] = useState<AppRoute["view"]>("main");
     const [taskFeed,setTaskFeed]=useState<TaskFeed>({tasks:[],nextBefore:null,connected:false});
-    const [detailReturn,setDetailReturn]=useState<'main'|'tasks'|'schedules'>('main');
+    const [detailReturn,setDetailReturn]=useState<DetailFrom>('main');
     const [detailTask,setDetailTask]=useState<Task|null>(null);
     const [detail, setDetail] = useState<Conversation | null>(null);
     const detailRequest = useRef(0);
@@ -326,6 +327,7 @@ export function MainApp({ firstSession }: { firstSession?: ReturnType<typeof api
       <button className="mobile-menu-close ghost" aria-label={t.nav.close} onClick={closeMenu}><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden><path d="M6 6l12 12M18 6L6 18"/></svg></button><div className="brand"><BrandMark/><div><strong>{t.app.brand.name}</strong><span className="muted tiny">{t.app.brand.tagline}</span></div></div>
       <button className={`ghost block ${view === "main" && !workspace ? "active" : ""}`} aria-current={view === "main" && !workspace ? "page" : undefined} onClick={() => navigate({ view: "main" })}><NavIcon name="chat"/>{t.nav.main}</button>
       <button className={`ghost block ${view === "tasks" && !workspace ? "active" : ""}`} aria-current={view === "tasks" && !workspace ? "page" : undefined} onClick={() => navigate({ view: "tasks" })}><NavIcon name="tasks"/>{t.nav.tasks}</button>
+      <button className={`ghost block ${view === "files" && !workspace ? "active" : ""}`} aria-current={view === "files" && !workspace ? "page" : undefined} onClick={() => navigate({ view: "files" })}><NavIcon name="files"/>{t.library.title}</button>
       <button className={`ghost block ${view === "schedules" && !workspace ? "active" : ""}`} aria-current={view === "schedules" && !workspace ? "page" : undefined} onClick={() => navigate({ view: "schedules" })}><NavIcon name="schedule"/>{t.nav.schedules}</button>
       <button className={`ghost block ${view === "vault" && !workspace ? "active" : ""}`} aria-current={view === "vault" && !workspace ? "page" : undefined} onClick={() => navigate({ view: "vault" })}><NavIcon name="vault"/>{t.nav.vault}</button>
       {role === 'owner' && gadgetAccount && <button className={`ghost block ${view === 'gadget' && !workspace ? 'active' : ''}`} aria-current={view === "gadget" && !workspace ? "page" : undefined} onClick={() => navigate({ view: "gadget" })}><NavIcon name="gadget"/>{accountLabel(gadgetAccount)}</button>}
@@ -340,12 +342,13 @@ export function MainApp({ firstSession }: { firstSession?: ReturnType<typeof api
       {startFailed && <div className="banner error">{t.app.agentNotReady(startFailed)}</div>}
       <div className="view-slot" hidden={view !== "main"}><TaskChat debug={role === "owner" && debug} onFeed={setTaskFeed} onDetails={t => void details(t)} onOpenLink={u => void openLink(u)} onOpenFileInBrowser={p => void openFileInBrowser(p)} onExpired={expired} onRevealBrowser={revealBrowser}/></div>
       <div className="view-slot" hidden={view !== 'tasks'}><TaskList feed={taskFeed} active={view === 'tasks'} onDetails={t=>void details(t,'tasks')} onExpired={expired}/></div>
+      <div className="view-slot" hidden={view !== 'files'}><FileLibrary active={view === 'files' && !workspace} onOpenTask={id => void details(id, 'files')} onOpenLink={u => void openLink(u)} onOpenFileInBrowser={p => void openFileInBrowser(p)} onExpired={expired}/></div>
       <div className="view-slot" hidden={view !== 'schedules'}><ScheduleList active={view === 'schedules'} onExpired={expired} onOpenTask={id => void details(id, 'schedules')}/></div>
       <div className="view-slot" hidden={view !== 'vault'}><VaultList active={view === 'vault'} onExpired={expired}/></div>
       {view === "settings" && (role === "owner" ? <Settings onBack={() => go({ view: "main" })}/> : <MemberSettings onBack={() => go({ view: "main" })}/>)}
       {role === 'owner' && view === 'analytics' && <AnalyticsDashboard onExpired={expired}/>}
       {role === 'owner' && view === 'gadget' && <GadgetHistory active={!workspace} onExpired={expired}/>}
-      {view === "detail" && detail && <div className="task-detail"><div className="task-detail-bar"><button className="ghost" onClick={() => { if ((history.state as { aio?: boolean; from?: DetailFrom } | null)?.from) history.back(); else go({ view: detailReturn }); }}>{detailReturn === 'tasks' ? t.nav.backTo.tasks : detailReturn === 'schedules' ? t.nav.backTo.schedules : t.nav.backTo.main}</button><span className="muted tiny">{taskStatusLabels[(taskFeed.tasks.find(t=>t.id===detailTask?.id)??detailTask)?.status??'']??t.app.detail.fallbackStatus}</span></div><Chat key={detail.id} readOnly conversation={detail} status={status} onConversationChanged={() => { }} onStatusChanged={() => void refreshStatus()} onOpenWorkspace={openWorkspace} onOpenBrowserLink={u => void openLink(u)} onOpenBrowserFile={p => void openFileInBrowser(p)}/></div>}
+      {view === "detail" && detail && <div className="task-detail"><div className="task-detail-bar"><button className="ghost" onClick={() => { if ((history.state as { aio?: boolean; from?: DetailFrom } | null)?.from) history.back(); else go({ view: detailReturn }); }}>{detailReturn === 'tasks' ? t.nav.backTo.tasks : detailReturn === 'files' ? t.library.back : detailReturn === 'schedules' ? t.nav.backTo.schedules : t.nav.backTo.main}</button><span className="muted tiny">{taskStatusLabels[(taskFeed.tasks.find(t=>t.id===detailTask?.id)??detailTask)?.status??'']??t.app.detail.fallbackStatus}</span></div><Chat key={detail.id} readOnly conversation={detail} status={status} onConversationChanged={() => { }} onStatusChanged={() => void refreshStatus()} onOpenWorkspace={openWorkspace} onOpenBrowserLink={u => void openLink(u)} onOpenBrowserFile={p => void openFileInBrowser(p)}/></div>}
     </main>
     <PopupPresence>{opening && <PopupSurface className="task-console-overlay opening-overlay" role="presentation">
       <div className="opening-card" role="status" aria-live="polite">

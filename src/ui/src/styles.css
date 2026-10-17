@@ -3415,6 +3415,22 @@ button.turn-pill:focus-visible { outline: 2px solid currentColor; outline-offset
 .task-group-count { font-size:11px; font-weight:400; color:var(--text-dim); font-variant-numeric:tabular-nums; }
 .task-tag { border:1px solid var(--border); border-radius:6px; padding:0 6px; line-height:18px; font-size:11px; color:var(--text-dim); }
 .task-list-end { min-height:1px; padding:4px 0 16px; text-align:center; }
+/* The files page: the main session's files as cards, each with the message it came from; pictures as a grid. */
+.library-page { display:flex; flex-direction:column; height:100%; min-height:0; }
+.library-list, .library-grid { list-style:none; margin:0 auto 16px; padding:0; max-width:var(--page-max); }
+.library-list { display:grid; gap:12px; }
+.library-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(150px, 1fr)); gap:14px 10px; }
+.library-item { display:flex; flex-direction:column; gap:4px; min-width:0; }
+.library-list .library-item { width:min(100%, 560px); }
+.library-list .file-card { width:100%; }
+.library-grid .file-card-media { border-radius:10px; }
+.library-source { display:flex; align-items:center; gap:6px; min-width:0; padding:0 2px; }
+.library-from { flex:none; }
+.library-task { min-width:0; padding:0; border:0; background:none; color:var(--text-dim); font:inherit; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; cursor:pointer; text-decoration:underline; text-decoration-color:color-mix(in srgb, var(--text-dim) 40%, transparent); text-underline-offset:2px; }
+.library-task:hover, .library-task:focus-visible { color:var(--accent); text-decoration-color:currentColor; }
+.library-source .message-time { flex:none; margin-left:auto; }
+.library-grid .library-source .message-time { display:none; }
+@media(max-width:900px) { .library-grid { grid-template-columns:repeat(auto-fill, minmax(104px, 1fr)); gap:12px 8px; } }
 @media(max-width:900px) { .task-list-scroll { padding:12px; } .task-list-meta { gap:8px; flex-wrap:wrap; } .task-group-head { top:-12px; } .task-list-tools { gap:8px; } .task-filters { flex-wrap:nowrap; overflow-x:auto; scrollbar-width:none; width:100%; } .task-filter { flex:none; } .task-search { max-width:none; margin-left:0; flex-basis:100%; } }
 
 .soul-settings textarea { min-height:300px; width:100%; resize:vertical; font:14px/1.65 ui-monospace,SFMono-Regular,Menlo,monospace; overflow-wrap:anywhere; }

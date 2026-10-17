@@ -55,6 +55,9 @@ it('isolates ledger reads, references, stops, events, replay IDs and planner con
  expect(start).toHaveBeenLastCalledWith(expect.objectContaining({developerInstructions:`${readSoul(h.ctx.cfg).content.trimEnd()}\n\n${EXPERIENCE_POLICY}`,model:MEMBER_MODEL}));
  const planned=planner.mock.calls.find(c=>c[2]===MEMBER_MODEL)!;expect(planned).toBeDefined();expect(planned[1]).toBe(readSoul(h.ctx.cfg).content);expect(planned[0]).not.toContain('owner-private-task');
  const feed=await h.request('/api/main',{headers:member});expect((await feed.json() as any).tasks.map((t:any)=>t.id)).toEqual([b.body.task.id]);
+ h.ctx.db.prepare("UPDATE tasks SET result=? WHERE id=?").run(`owner file ${h.ctx.cfg.sandbox.containerWorkspaceDir}/tasks/a/owner.pdf`,a.body.task.id);
+ const files=async(headers:Record<string,string>)=>{const r=await h.request('/api/main/files',{headers});expect(r.status).toBe(200);return (await r.json() as any).messages.map((m:any)=>m.taskId);};
+ expect(await files(owner)).toContain(a.body.task.id);expect(await files(member)).not.toContain(a.body.task.id);
  const ownerFeed=await h.request('/api/main',{headers:owner});expect((await ownerFeed.json() as any).tasks.map((t:any)=>t.id)).not.toContain(b.body.task.id);
  for(const suffix of ['', '/events?format=json','/turns']) expect((await h.request(`/api/conversations/${a.body.task.conversationId}${suffix}`,{headers:member})).status).toBe(404);
  for(const suffix of ['stop','retry-planning']) expect((await h.request(`/api/tasks/${a.body.task.id}/${suffix}`,{method:'POST',headers:member,body:'{}'})).status).toBe(404);

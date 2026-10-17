@@ -224,6 +224,17 @@ export interface Task {
   support?: boolean;
 }
 
+/** A message of the main session that holds files: what the person attached, and the reply shown for it. */
+export interface FileMessage {
+  /** The task to open for it (a supplement opens the task it was folded into). */
+  taskId: string;
+  title: string;
+  createdAt: number;
+  completedAt: number | null;
+  attachments: Attachment[];
+  result: string | null;
+}
+
 /** When a schedule runs (the control plane's ScheduleSpec). */
 export interface ScheduleSpec {
   kind: "once" | "daily" | "weekly" | "monthly" | "interval" | "dates";

@@ -7,6 +7,7 @@ describe("console addresses", () => {
     expect(parseRoute("/u/owner/")).toEqual({ view: "main" });
     expect(parseRoute("/u/owner/tasks")).toEqual({ view: "tasks" });
     expect(parseRoute("/u/owner/tasks/task_1a")).toEqual({ view: "detail", task: "task_1a" });
+    expect(parseRoute("/u/cr/files")).toEqual({ view: "files" });
     expect(parseRoute("/u/cr/schedules")).toEqual({ view: "schedules" });
     expect(parseRoute("/u/cr/vault")).toEqual({ view: "vault" });
     expect(parseRoute("/u/owner/usage")).toEqual({ view: "analytics" });
@@ -20,6 +21,7 @@ describe("console addresses", () => {
     const routes = [{ view: "main" }, { view: "tasks" }, { view: "detail", task: "task 1/x" }, { view: "schedules" }, { view: "vault" }, { view: "analytics" }, { view: "gadget" }, { view: "settings" }, { view: "main", workspace: true }] as const;
     for (const route of routes) expect(parseRoute(routePath("alice", route))).toEqual(route);
     expect(routePath("alice", { view: "main" })).toBe("/u/alice");
+    expect(routePath("alice", { view: "files" })).toBe("/u/alice/files");
     expect(routePath("alice", { view: "detail", task: "task_9" })).toBe("/u/alice/tasks/task_9");
   });
 

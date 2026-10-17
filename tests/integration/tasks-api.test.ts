@@ -87,3 +87,32 @@ it("keeps the console language per account: messages and one opening follow the 
     expect((await put({ locale: "en" })).status).toBe(200);
     expect(h.ctx.tasks.locale()).toBe("en");
 });
+it("lists the main session's messages that hold files for the files page, newest first, the account's own only", async () => {
+    expect((await h.request("/api/main/files")).status).toBe(401);
+    const { cookie, csrf } = await login(h);
+    const headers = { cookie, "x-csrf-token": csrf, "content-type": "application/json" };
+    const ws = h.ctx.cfg.sandbox.containerWorkspaceDir;
+    const post = async (text: string, extra: object = {}) => ((await (await h.request("/api/tasks", { method: "POST", headers, body: JSON.stringify({ text, clientMessageId: `files-${text}`, ...extra }) })).json()) as { task: { id: string } }).task.id;
+    const sent = await post("看看这张图", { attachments: [{ path: `${ws}/uploads/photo.png`, kind: "image", name: "photo.png" }] });
+    const report = await post("写个报告");
+    const web = await post("找个网页");
+    const running = await post("还在做");
+    const finish = (id: string, status: string, result: string, at: number) => h.ctx.db.prepare("UPDATE tasks SET status=?, result=?, created_at=?, completed_at=? WHERE id=?").run(status, result, at, at + 1, id);
+    finish(sent, "completed", "图里是一只猫。", 1_000);
+    finish(report, "completed", `做好了：[报告](${ws}/tasks/r/report.docx)`, 2_000);
+    finish(web, "completed", "看这里 https://example.com/page", 3_000);
+    finish(running, "running", `草稿 ${ws}/tasks/x/draft.md`, 4_000);
+    const res = await h.request("/api/main/files", { headers: { cookie } });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("cache-control")).toBe("no-store");
+    const body = (await res.json()) as { messages: Array<{ taskId: string; title: string; attachments: Array<{ path: string }>; result: string | null; createdAt: number }>; nextBefore: number | null };
+    const mine = body.messages.filter((m) => [sent, report, web, running].includes(m.taskId));
+    // Web links are not files, and a reply still being written is not shown yet.
+    expect(mine.map((m) => m.taskId)).toEqual([report, sent]);
+    expect(mine[0]!.result).toContain("report.docx");
+    expect(mine[1]!.attachments.map((a) => a.path)).toEqual([`${ws}/uploads/photo.png`]);
+    expect(body.nextBefore).toBeNull();
+    const older = (await (await h.request("/api/main/files?before=2000", { headers: { cookie } })).json()) as { messages: Array<{ taskId: string }> };
+    expect(older.messages.map((m) => m.taskId)).toContain(sent);
+    expect(older.messages.map((m) => m.taskId)).not.toContain(report);
+});

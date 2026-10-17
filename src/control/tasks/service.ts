@@ -279,6 +279,33 @@ export class TaskService {
         return { tasks: [...merged.values()].sort((a, b) => a.created_at - b.created_at).map(r => this.view(r)), nextBefore };
     }
     /**
+     * The files page: the main session's messages that hold files, newest first, `limit`
+     * at a time (older ones by `before`). A message holds files when the person attached
+     * some, or when the reply shown for it names a path in the workspace. The console picks
+     * the files out of the reply with the same Markdown parser it shows the reply with, so
+     * the page lists exactly the files the conversation shows as cards (web links are not files).
+     */
+    files(userId: string, before = Number.MAX_SAFE_INTEGER, limit = 40) {
+        const shown = [...TERMINAL, "needs_input"];
+        const named = `%${this.cfg.sandbox.containerWorkspaceDir.replace(/[\\%_]/g, c => `\\${c}`)}/%`;
+        const rows = this.db.prepare(`SELECT * FROM tasks WHERE conversation_id IN (SELECT id FROM conversations WHERE owner_id=?) AND created_at < ?
+            AND (attachments_json <> '[]' OR (status IN (${shown.map(() => "?").join(",")}) AND result LIKE ? ESCAPE '\\'))
+            ORDER BY created_at DESC LIMIT ?`).all(userId, before, ...shown, named, limit + 1) as unknown as TaskRow[];
+        const page = rows.slice(0, limit);
+        return {
+            messages: page.map(row => {
+                // A supplement folded into another task belongs to that task's conversation.
+                const task = row.merged_into ? this.get(row.merged_into) ?? row : row;
+                return {
+                    taskId: task.id, title: task.title, createdAt: row.created_at, completedAt: row.completed_at,
+                    attachments: JSON.parse(row.attachments_json) as TurnAttachment[],
+                    result: shown.includes(row.status) ? this.shownResult(row) : null,
+                };
+            }),
+            nextBefore: rows.length > limit ? page.at(-1)!.created_at : null,
+        };
+    }
+    /**
      * The task list: counts over all of the account's tasks (narrowed only by the
      * search) and one page of the filtered list. Under "all", the person's turn and
      * running work come first; everything else is newest first by when it finished,

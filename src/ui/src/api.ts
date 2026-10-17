@@ -141,6 +141,8 @@ export const api = {
   dispatchLog: (taskId: string) => request<import('./types').DispatchLog>(`/api/settings/dispatch-log/${encodeURIComponent(taskId)}`),
   saveSoul: (body:{content:string;revision:string}) => request<{ok:true;content:string;revision:string}>('/api/settings/soul',{method:'PUT',body}),
   main: (before?: number, signal?: AbortSignal, limit?: number) => request<{ mode: "tasks"; tasks: import("./types").Task[]; nextBefore: number | null; version: string }>(`/api/main${before ? `?before=${before}` : limit ? `?limit=${limit}` : ""}`, { signal }),
+  /** The files page: the main session's messages that hold files, newest first; older ones by `before`. */
+  mainFiles: (before?: number, signal?: AbortSignal) => request<{ messages: import("./types").FileMessage[]; nextBefore: number | null }>(`/api/main/files${before ? `?before=${before}` : ""}`, { signal, cache: "no-store" }),
   /** The live first page, unless it is still the version the caller holds. */
   mainSince: (version: string | null) => request<{ mode: "tasks"; unchanged: true; version: string } | { mode: "tasks"; unchanged?: undefined; tasks: import("./types").Task[]; nextBefore: number | null; version: string }>(`/api/main${version ? `?v=${encodeURIComponent(version)}` : ""}`),
   /** The task list: counts by status and one filtered page; `cursor` continues where the last page ended. */
