@@ -3425,7 +3425,6 @@ button.turn-pill:focus-visible { outline: 2px solid currentColor; outline-offset
 .library-list .file-card { width:100%; }
 .library-grid .file-card-media { border-radius:10px; }
 .library-source { display:flex; align-items:center; gap:6px; min-width:0; padding:0 2px; }
-.library-from { flex:none; }
 .library-task { min-width:0; padding:0; border:0; background:none; color:var(--text-dim); font:inherit; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; cursor:pointer; text-decoration:underline; text-decoration-color:color-mix(in srgb, var(--text-dim) 40%, transparent); text-underline-offset:2px; }
 .library-task:hover, .library-task:focus-visible { color:var(--accent); text-decoration-color:currentColor; }
 .library-source .message-time { flex:none; margin-left:auto; }

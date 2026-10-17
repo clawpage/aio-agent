@@ -10,7 +10,7 @@ import { MessageTime, useDisplayClock } from "./MessageTime";
 import { t } from "../i18n";
 
 /**
- * Every file of the main session in one place, newest first, on a few shelves by
+ * Every file the AI made in the main session in one place, newest first, on a few shelves by
  * type. The server sends the messages that hold files a page at a time; the next
  * page is asked for as the end of the list scrolls into view (and keeps coming
  * while a shelf has too few to fill the screen). Coming back to the page reads it
@@ -80,7 +80,6 @@ export function FileLibrary({ active, onOpenTask, onOpenLink, onOpenFileInBrowse
   const now = useDisplayClock();
   const grid = shelf === "images";
   const source = (file: LibraryFile) => <div className="library-source muted tiny">
-    <span className="library-from">{file.from === "you" ? t.library.fromYou : t.library.fromAi}</span>
     <button type="button" className="library-task" onClick={() => onOpenTask(file.taskId)} title={t.library.openTask(file.taskTitle)} aria-label={t.library.openTask(file.taskTitle)}>{file.taskTitle}</button>
     <MessageTime at={file.at} now={now}/>
   </div>;

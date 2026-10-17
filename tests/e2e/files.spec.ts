@@ -24,18 +24,16 @@ function solidPng(width: number, height: number): Buffer {
 
 const WS = "/home/gem/workspace";
 const now = Date.now();
-const message = (taskId: string, title: string, at: number, result: string | null, attachments: FileMessage["attachments"] = []): FileMessage =>
-  ({ taskId, title, createdAt: at, completedAt: result ? at + 60_000 : null, attachments, result });
+const message = (taskId: string, title: string, at: number, result: string): FileMessage =>
+  ({ taskId, title, createdAt: at, completedAt: at + 60_000, result });
 
 /** Two pages: the second comes on its own, since the first does not fill the screen. */
 const PAGES: Record<string, { messages: FileMessage[]; nextBefore: number | null }> = {
   first: {
     messages: [
       message("t-report", "做一份季度报告", now - 3_600_000, `做好了：\n\n![销售趋势](${WS}/tasks/t-report/chart.png)\n\n[季度报告](${WS}/tasks/t-report/report.docx)，参考了 [官网](https://example.com/q3.pdf)。`),
-      message("t-photo", "看看这张照片", now - 7_200_000, "照片里是一只猫。", [
-        { path: `${WS}/uploads/cat.jpg`, name: "cat.jpg", kind: "image", size: 1 },
-        { path: `${WS}/uploads/体检报告.pdf`, name: "体检报告.pdf", kind: "file", size: 1 },
-      ]),
+      // What the person sent (uploads/) is theirs, not the AI's, even when the reply shows it again.
+      message("t-photo", "修一下这张照片", now - 7_200_000, `原图 ![](${WS}/uploads/cat.jpg)\n\n修好了：![](${WS}/tasks/t-photo/cat-fixed.jpg)\n\n[修图说明](${WS}/tasks/t-photo/说明.pdf)`),
     ],
     nextBefore: 100,
   },
@@ -56,7 +54,7 @@ async function setup(page: Page, pages = PAGES) {
   return asked;
 }
 
-test("the files page gathers the main session's files by type, and leads back to where each came from", async ({ page }, info) => {
+test("the files page gathers the files the AI made in the main session by type, and leads back to where each came from", async ({ page }, info) => {
   const asked = await setup(page);
   await page.goto("/u/owner");
   const mobile = (page.viewportSize()?.width ?? 1440) < 900;
@@ -72,17 +70,17 @@ test("the files page gathers the main session's files by type, and leads back to
 
   const list = page.getByTestId("library-files");
   const paths = () => list.locator("li").evaluateAll((items) => items.map((li) => li.getAttribute("data-path")));
-  // Newest first, the reply's files before what was sent with it, the older page after; the web link is not a file.
+  // Newest first, the older page after; the web link and the person's own upload are not the AI's files.
   await expect.poll(paths).toEqual([
     `${WS}/tasks/t-report/chart.png`, `${WS}/tasks/t-report/report.docx`,
-    `${WS}/uploads/cat.jpg`, `${WS}/uploads/体检报告.pdf`, `${WS}/tasks/t-cry/cry.mp3`,
+    `${WS}/tasks/t-photo/cat-fixed.jpg`, `${WS}/tasks/t-photo/说明.pdf`, `${WS}/tasks/t-cry/cry.mp3`,
   ]);
   expect(asked).toEqual(["first", "100"]);
   await expect(page.getByText("example.com")).toHaveCount(0);
   const report = list.locator(`li[data-path="${WS}/tasks/t-report/report.docx"]`);
   await expect(report.getByTestId("file-card")).toContainText("季度报告");
-  await expect(report.locator(".library-source")).toContainText("AI 回复");
-  await expect(list.locator(`li[data-path="${WS}/uploads/cat.jpg"] .library-source`)).toContainText("你发送");
+  await expect(report.locator(".library-source")).toContainText("做一份季度报告");
+  await expect(page.locator(`[data-path="${WS}/uploads/cat.jpg"]`)).toHaveCount(0);
   await expect(page.getByText("没有更多了")).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
   await page.screenshot({ path: info.outputPath("files-all.png") });
@@ -91,11 +89,11 @@ test("the files page gathers the main session's files by type, and leads back to
   const shelf = (name: string) => page.getByRole("group", { name: "按类型筛选" }).getByRole("button", { name, exact: true });
   await shelf("图片").click();
   await expect(shelf("图片")).toHaveAttribute("aria-pressed", "true");
-  await expect.poll(paths).toEqual([`${WS}/tasks/t-report/chart.png`, `${WS}/uploads/cat.jpg`]);
+  await expect.poll(paths).toEqual([`${WS}/tasks/t-report/chart.png`, `${WS}/tasks/t-photo/cat-fixed.jpg`]);
   await expect(page.locator(".library-grid [data-testid=file-card-thumb]")).toHaveCount(2);
   await page.screenshot({ path: info.outputPath("files-images.png") });
   await shelf("文档").click();
-  await expect.poll(paths).toEqual([`${WS}/tasks/t-report/report.docx`, `${WS}/uploads/体检报告.pdf`]);
+  await expect.poll(paths).toEqual([`${WS}/tasks/t-report/report.docx`, `${WS}/tasks/t-photo/说明.pdf`]);
   await shelf("音视频").click();
   await expect.poll(paths).toEqual([`${WS}/tasks/t-cry/cry.mp3`]);
   await shelf("其他").click();
@@ -103,8 +101,8 @@ test("the files page gathers the main session's files by type, and leads back to
 
   // A picture opens in the preview.
   await shelf("图片").click();
-  await list.locator(`li[data-path="${WS}/uploads/cat.jpg"]`).getByRole("button", { name: "预览 cat.jpg" }).click();
-  const dialog = page.getByRole("dialog", { name: "预览 cat.jpg" });
+  await list.locator(`li[data-path="${WS}/tasks/t-photo/cat-fixed.jpg"]`).getByRole("button", { name: "预览 cat-fixed.jpg" }).click();
+  const dialog = page.getByRole("dialog", { name: "预览 cat-fixed.jpg" });
   await expect(dialog).toBeVisible();
   await dialog.getByRole("button", { name: "关闭预览" }).click();
   await expect(dialog).toHaveCount(0);

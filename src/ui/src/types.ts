@@ -224,15 +224,14 @@ export interface Task {
   support?: boolean;
 }
 
-/** A message of the main session that holds files: what the person attached, and the reply shown for it. */
+/** A reply of the main session that names workspace files (the files page). */
 export interface FileMessage {
-  /** The task to open for it (a supplement opens the task it was folded into). */
+  /** The task to open for it. */
   taskId: string;
   title: string;
   createdAt: number;
   completedAt: number | null;
-  attachments: Attachment[];
-  result: string | null;
+  result: string;
 }
 
 /** When a schedule runs (the control plane's ScheduleSpec). */
