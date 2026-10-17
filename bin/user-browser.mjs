@@ -68,7 +68,7 @@ export const UNAVAILABLE =
 const NOT_ALLOWED =
   "Chrome on the user's Mac did not accept the connection in time: Chrome asks the user to allow remote debugging when the agent connects, and nobody allowed it yet. Use the sandbox browser (aio_tabs) for now, or ask the user to click Allow in Chrome and try again.";
 /** Live view: at most this often a new frame, sooner after an input. */
-const FRAME_MS = 300;
+const FRAME_MS = 500;
 /** Keys the person's live view may press. */
 const KEYS = new Set(["Enter", "Backspace", "Tab", "Escape", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "PageUp", "PageDown"]);
 const NO_FILES = "Files on the user's Mac are not reachable from here: call it again without any file path (screenshots and snapshots come back in the reply).";
@@ -140,9 +140,9 @@ export function createUserBrowser({ entry, userDataDir = defaultUserDataDir(), l
   let closed = false;
 
   function start() {
-    // --experimentalVision adds click_at, which only the person's live view uses; smaller screenshots travel faster.
-    const proc = spawn(process.execPath, [entry, "--autoConnect", "--userDataDir", userDataDir, "--performanceCrux=false", "--experimentalVision",
-      "--screenshotMaxWidth", "1600", "--screenshotMaxHeight", "1600"], {
+    // --experimentalVision adds click_at, which only the person's live view uses. No --screenshotMaxWidth/Height:
+    // a downscaled capture is a clipped one beyond the viewport, which makes the user's Chrome window flash on every picture.
+    const proc = spawn(process.execPath, [entry, "--autoConnect", "--userDataDir", userDataDir, "--performanceCrux=false", "--experimentalVision"], {
       env: { ...process.env, CHROME_DEVTOOLS_MCP_NO_USAGE_STATISTICS: "1", CHROME_DEVTOOLS_MCP_NO_UPDATE_CHECKS: "1" },
       stdio: ["pipe", "pipe", "ignore"],
     });
@@ -238,7 +238,7 @@ export function createUserBrowser({ entry, userDataDir = defaultUserDataDir(), l
   }
 
   async function screenshot(pageId) {
-    const result = await personTool("take_screenshot", { pageId, format: "jpeg", quality: 60 });
+    const result = await personTool("take_screenshot", { pageId, format: "jpeg", quality: 50 });
     const image = result.content?.find((c) => c.type === "image");
     if (!image) throw new Error("no picture of the page");
     return { type: image.mimeType ?? "image/jpeg", body: Buffer.from(image.data, "base64") };
