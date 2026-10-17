@@ -64,6 +64,11 @@ test("the files page gathers the main session's files by type, and leads back to
   await page.getByRole("button", { name: "文件库", exact: true }).click();
   await expect(page).toHaveURL(/\/u\/owner\/files$/);
   await expect(page.getByRole("heading", { name: "文件库" })).toBeVisible();
+  if (mobile) {
+    // The title leaves room for the menu button over the header's corner.
+    const menu = (await page.getByRole("button", { name: "打开导航" }).boundingBox())!, title = (await page.getByRole("heading", { name: "文件库" }).boundingBox())!;
+    expect(title.x).toBeGreaterThanOrEqual(menu.x + menu.width);
+  }
 
   const list = page.getByTestId("library-files");
   const paths = () => list.locator("li").evaluateAll((items) => items.map((li) => li.getAttribute("data-path")));

@@ -3234,7 +3234,7 @@ button.turn-pill:focus-visible { outline: 2px solid currentColor; outline-offset
   .mobile-menu-button { display: flex; align-items: center; justify-content: center; position: fixed; top: calc(6px + var(--safe-top)); left: calc(8px + var(--safe-left)); width: 44px; height: 44px; padding: 0; z-index: 71; border-color: transparent; }
   .mobile-menu-close { display: flex; align-items: center; justify-content: center; position: absolute; top: calc(6px + var(--safe-top)); right: calc(8px + var(--safe-right)); width: 44px; height: 44px; padding: 0; border-color: transparent; }
   .mobile-menu-backdrop { position: fixed; inset: 0; z-index: 85; background: var(--scrim); backdrop-filter: blur(2px); }
-  .main-inbox-app .main > .banner, .main-inbox-app .task-chat .chat-head, .main-inbox-app .task-list-page > .chat-head, .main-inbox-app .schedule-page > .chat-head, .main-inbox-app .usage-dashboard > .chat-head, .main-inbox-app .gadget-history > .chat-head, .main-inbox-app .settings-head, .main-inbox-app .task-detail-bar, .main-inbox-app .workspace .ws-head { padding-left: 60px; min-height: 56px; }
+  .main-inbox-app .main > .banner, .main-inbox-app .task-chat .chat-head, .main-inbox-app .task-list-page > .chat-head, .main-inbox-app .library-page > .chat-head, .main-inbox-app .schedule-page > .chat-head, .main-inbox-app .usage-dashboard > .chat-head, .main-inbox-app .gadget-history > .chat-head, .main-inbox-app .settings-head, .main-inbox-app .task-detail-bar, .main-inbox-app .workspace .ws-head { padding-left: 60px; min-height: 56px; }
   .main-inbox-app .task-detail .chat-head { padding-top: 8px; }
   .main-inbox-app .workspace:not(.fullscreen) { bottom: 0; padding-bottom: var(--safe-bottom); }
   .main-inbox-app .composer { padding-bottom: 12px; }
