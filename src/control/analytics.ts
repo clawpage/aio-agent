@@ -5,7 +5,7 @@ import type { Db } from "./db.js";
 import type { Config } from "./config.js";
 import type { Logger } from "../common/logger.js";
 import { userNamespace } from "./auth/workspaceHost.js";
-import { PLATFORMS, type AnalyticsDay, type AnalyticsReport, type Platform } from "../common/analytics.js";
+import { PLATFORMS, type ActiveAccount, type AnalyticsDay, type AnalyticsReport, type Platform } from "../common/analytics.js";
 
 /**
  * First-party product analytics: one table in the central control database,
@@ -80,9 +80,20 @@ export class Analytics {
     const daily = new Map<string, AnalyticsDay>(dates.map(date => [date, { date, active: 0, signups: 0, logins: 0, tasks: 0, completed: 0, failed: 0 }]));
     // Who was active on each date of the wider window (for the 7/30-day figures).
     const activeOn = new Map<string, Set<string>>(allDates.map(date => [date, new Set()]));
-    const mark = (date: string, userId: string | null) => { if (userId) activeOn.get(date)?.add(userId); };
+    // Today's detail per active account, for the list behind the "active today" figure.
+    const todayBy = new Map<string, { lastSeenAt: number; events: number; tasks: number; platforms: Set<string> }>();
+    const mark = (date: string, userId: string | null, at: number, kind: "event" | "task", platform: string | null = null) => {
+      if (!userId) return;
+      activeOn.get(date)?.add(userId);
+      if (date !== today) return;
+      const a = todayBy.get(userId) ?? { lastSeenAt: 0, events: 0, tasks: 0, platforms: new Set<string>() };
+      a.lastSeenAt = Math.max(a.lastSeenAt, at);
+      if (kind === "event") a.events++; else a.tasks++;
+      if (platform) a.platforms.add(platform);
+      todayBy.set(userId, a);
+    };
 
-    const users = this.db.prepare("SELECT id,role,created_at FROM owners ORDER BY created_at,id").all() as Array<{ id: string; role: string; created_at: number }>;
+    const users = this.db.prepare("SELECT id,username,role,created_at FROM owners ORDER BY created_at,id").all() as Array<{ id: string; username: string; role: string; created_at: number }>;
     for (const u of users) { const d = daily.get(dateAt(u.created_at)); if (d) d.signups++; }
 
     const events = new Map<string, { count: number; users: Set<string> }>();
@@ -92,7 +103,7 @@ export class Analytics {
     let registerViews = 0, loginViews = 0, formSignups = 0;
     for (const row of this.db.prepare("SELECT ts,name,user_id,platform,props FROM analytics_events WHERE ts>=? AND ts<=?").iterate(since, now) as Iterable<{ ts: number; name: string; user_id: string | null; platform: string | null; props: string | null }>) {
       const date = dateAt(row.ts);
-      mark(date, row.user_id);
+      mark(date, row.user_id, row.ts, "event", row.platform);
       if (!inRange.has(date)) continue;
       const e = events.get(row.name) ?? { count: 0, users: new Set<string>() };
       e.count++; if (row.user_id) e.users.add(row.user_id); events.set(row.name, e);
@@ -118,7 +129,7 @@ export class Analytics {
           const date = dateAt(t.created_at);
           const scheduled = Boolean(t.schedule_id), gadget = t.client_message_id.startsWith(GADGET_PREFIX);
           // A schedule running on its own is not the person using the product.
-          if (!scheduled) mark(date, user.id);
+          if (!scheduled) mark(date, user.id, t.created_at, "task");
           const d = daily.get(date);
           if (!d) continue;
           d.tasks++; totals.tasks++;
@@ -134,10 +145,16 @@ export class Analytics {
     for (const d of daily.values()) { d.active = activeOn.get(d.date)!.size; totals.signups += d.signups; }
     const distinct = (n: number) => new Set(allDates.slice(-n).flatMap(date => [...activeOn.get(date)!])).size;
     totals.activeToday = distinct(1); totals.active7 = distinct(7); totals.active30 = distinct(30);
+    const byId = new Map(users.map(u => [u.id, u]));
+    const activeTodayAccounts: ActiveAccount[] = [...todayBy].map(([id, a]) => ({
+      username: byId.get(id)?.username ?? null, role: byId.get(id)?.role ?? null,
+      lastSeenAt: a.lastSeenAt, events: a.events, tasks: a.tasks, platforms: [...a.platforms].sort(),
+    })).sort((a, b) => b.lastSeenAt - a.lastSeenAt);
     const started = this.db.prepare("SELECT value FROM meta WHERE key='analytics_started'").get() as { value: string } | undefined;
     return {
       timezone, days, dates, generatedAt: now, totals,
       daily: [...daily.values()],
+      activeTodayAccounts,
       events: [...events].map(([name, e]) => ({ name, count: e.count, users: e.users.size })).sort((a, b) => b.count - a.count || a.name.localeCompare(b.name)),
       platforms: [...platforms].map(([platform, p]) => ({ platform, users: p.users.size, events: p.events })).sort((a, b) => b.events - a.events),
       funnel: { registerViews, loginViews, signups: formSignups },

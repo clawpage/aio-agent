@@ -19,6 +19,9 @@ export type AnalyticsDay = {
   failed: number;
 };
 
+/** One account's activity today: when it was last seen, its events and typed (not scheduled) tasks, and the platforms it used. */
+export type ActiveAccount = { username: string | null; role: string | null; lastSeenAt: number; events: number; tasks: number; platforms: string[] };
+
 export type AnalyticsReport = {
   timezone: string;
   days: number;
@@ -38,6 +41,9 @@ export type AnalyticsReport = {
     sources: { manual: number; schedule: number; gadget: number };
   };
   daily: AnalyticsDay[];
+  /** Who counts towards `totals.activeToday`, most recently seen first. `username` is null for a deleted account.
+   * Optional so a console can read a report from a control plane that predates it. */
+  activeTodayAccounts?: ActiveAccount[];
   /** Every recorded event in the range, most frequent first. */
   events: Array<{ name: string; count: number; users: number }>;
   platforms: Array<{ platform: string; users: number; events: number }>;

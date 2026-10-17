@@ -9,6 +9,12 @@ const report = (days: number): AnalyticsReport => {
   return {
     timezone: 'America/Los_Angeles', days, dates, generatedAt: Date.now(), collectionStartedAt: Date.UTC(2026, 9, 13),
     totals: { accounts: 12, signups: days === 7 ? 3 : 8, activeToday: 4, active7: 7, active30: 9, tasks: 40, completed: 30, failed: 4, sources: { manual: 30, schedule: 8, gadget: 2 } },
+    activeTodayAccounts: [
+      { username: 'yzmy', role: 'member', lastSeenAt: Date.UTC(2026, 9, 13, 20, 5), events: 12, tasks: 3, platforms: ['android', 'web'] },
+      { username: 'owner', role: 'owner', lastSeenAt: Date.UTC(2026, 9, 13, 16, 30), events: 4, tasks: 0, platforms: ['mac'] },
+      { username: 'cr', role: 'member', lastSeenAt: Date.UTC(2026, 9, 13, 15, 0), events: 0, tasks: 1, platforms: [] },
+      { username: null, role: null, lastSeenAt: Date.UTC(2026, 9, 13, 14, 0), events: 1, tasks: 0, platforms: ['ios'] },
+    ],
     daily: dates.map((date, i) => ({ date, active: i % 4, signups: i % 2, logins: i % 3, tasks: i % 5, completed: Math.max(0, i % 5 - 1), failed: i % 5 === 4 ? 1 : 0 })),
     events: [{ name: 'task_submit', count: 40, users: 5 }, { name: 'page_view', count: 120, users: 6 }, { name: 'brand_new_event', count: 1, users: 1 }],
     platforms: [{ platform: 'android', users: 2, events: 50 }, { platform: 'web', users: 5, events: 100 }],
@@ -48,6 +54,17 @@ test('the owner reads one dashboard with product and token figures at desktop an
   // 30 days × (100 + 10 + 2,000,000 + 10) tokens, shown short with the exact figure on hover.
   await expect(metrics).toContainText('6000.4万');
   await expect(metrics.locator('[title="60,003,600"]')).toBeVisible();
+  // The active-today figure opens who it counts, latest first, in the report's time zone.
+  await page.getByRole('button', { name: /今日活跃账号/ }).click();
+  const dialog = page.getByRole('dialog', { name: '今日活跃账号 · 4' });
+  await expect(dialog.locator('li')).toHaveCount(4);
+  await expect(dialog.locator('li').first()).toContainText('yzmy'); await expect(dialog.locator('li').first()).toContainText('最近 13:05');
+  await expect(dialog.locator('li').first()).toContainText('事件 12 · 手动任务 3 · Android App、网页');
+  await expect(dialog.locator('li').nth(3)).toContainText('已删除的账号');
+  await page.evaluate(() => Promise.allSettled(document.getAnimations().filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => a.finished)));
+  if (!mobile) await page.screenshot({ path: info.outputPath('active-today-1440.png') });
+  await page.keyboard.press('Escape'); await expect(dialog).toHaveCount(0);
+  await expect(page.getByRole('button', { name: /今日活跃账号/ })).toBeFocused();
   for (const name of ['活跃账号 · 每日柱状图', '任务 · 每日柱状图', '新注册 · 每日柱状图', '每日用量 · 每日柱状图']) await expect(page.getByRole('img', { name })).toBeVisible();
   await expect(page.locator('.dash-chart').nth(1)).toContainText('合计 40');
 
@@ -79,6 +96,11 @@ test('the owner reads one dashboard with product and token figures at desktop an
   for (const width of mobile ? [390, 360] : [1440]) {
     await page.setViewportSize({ width, height: mobile ? 844 : 900 });
     expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1);
+    await page.getByRole('button', { name: /今日活跃账号/ }).click();
+    await expect(page.getByRole('dialog')).toBeVisible(); await page.evaluate(() => Promise.allSettled(document.getAnimations().filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => a.finished)));
+    expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1);
+    await page.screenshot({ path: info.outputPath(`active-today-${width}.png`) });
+    await page.getByRole('button', { name: '关闭', exact: true }).click(); await expect(page.getByRole('dialog')).toHaveCount(0);
     for (const [i, top] of [0, 800, 1600].entries()) {
       await page.locator('.usage-body').evaluate((el, y) => { el.scrollTop = y; }, top);
       await page.screenshot({ path: info.outputPath(`dashboard-${width}-${i}.png`) });

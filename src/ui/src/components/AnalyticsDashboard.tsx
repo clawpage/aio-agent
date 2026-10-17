@@ -1,7 +1,9 @@
 import { InlineLoading } from "./Brand";
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { api, ApiError } from '../api';
-import type { AnalyticsReport } from '../../../common/analytics';
+import { PopupPresence, PopupSurface } from './PopupMotion';
+import type { ActiveAccount, AnalyticsReport } from '../../../common/analytics';
 import type { UsageReport } from '../../../common/usage';
 import { locale, t } from '../i18n';
 
@@ -56,12 +58,36 @@ function BarChart({ label, summary, dates, series, axis = fmt }: { label: string
   </figure>;
 }
 
+/** Who was active today: one line each, latest first, with what they did and where. */
+function ActiveTodayDialog({ accounts, timezone, onClose }: { accounts: ActiveAccount[] | undefined; timezone: string; onClose: () => void }) {
+  const l = t.analytics.activeList;
+  useEffect(() => {
+    const key = (event: KeyboardEvent) => { if (event.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', key);
+    return () => window.removeEventListener('keydown', key);
+  }, [onClose]);
+  return createPortal(<PopupSurface className="modal-backdrop" onClick={onClose}>
+    <div className="modal dash-active" role="dialog" aria-modal="true" aria-labelledby="dash-active-title" onClick={e => e.stopPropagation()}>
+      <h3 id="dash-active-title">{l.title(fmt(accounts?.length ?? 0))}</h3>
+      {!accounts ? <p className="muted">{l.unsupported}</p> : accounts.length === 0 ? <p className="muted">{l.empty}</p> :
+        <ul>{accounts.map((a, i) => <li key={`${a.username ?? ''}-${i}`}>
+          <div><strong>{a.username ?? l.deleted}</strong>{a.role && <small>{a.role === 'owner' ? t.usage.roles.owner : t.usage.roles.member}</small>}
+            <time className="muted" dateTime={new Date(a.lastSeenAt).toISOString()}>{l.lastSeen(new Date(a.lastSeenAt).toLocaleTimeString(locale, { timeZone: timezone, hour: '2-digit', minute: '2-digit' }))}</time></div>
+          <p className="muted tiny">{[l.events(fmt(a.events)), l.tasks(fmt(a.tasks)), ...(a.platforms.length ? [a.platforms.map(p => t.analytics.platformNames[p] ?? p).join(l.separator)] : [])].join(' · ')}</p>
+        </li>)}</ul>}
+      <div className="modal-actions"><button className="ghost" onClick={onClose} autoFocus>{l.close}</button></div>
+    </div>
+  </PopupSurface>, document.body);
+}
+
 /** The owner's dashboard: accounts, activity, tasks, token usage, feature use and platforms (src/control/analytics.ts, src/control/usage). */
 export function AnalyticsDashboard({ onExpired }: { onExpired: () => void }) {
   const [days, setDays] = useState(30), [account, setAccount] = useState('all');
   const [product, setProduct] = useState<AnalyticsReport | null>(null), [usage, setUsage] = useState<UsageReport | null>(null);
   const [errors, setErrors] = useState<{ product?: string; usage?: string }>({});
   const [refresh, setRefresh] = useState(0);
+  const [showActive, setShowActive] = useState(false);
+  const activeButton = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     const controller = new AbortController();
     let busy = false;
@@ -109,7 +135,7 @@ export function AnalyticsDashboard({ onExpired }: { onExpired: () => void }) {
       <div className="usage-metrics analytics-metrics">
         {totals && p && <>
           <article><span className="muted">{t.analytics.metrics.accounts}</span><strong>{fmt(totals.accounts)}</strong><span className="muted tiny">{t.analytics.metrics.newInRange(fmt(totals.signups))}</span></article>
-          <article><span className="muted">{t.analytics.metrics.active}</span><strong>{fmt(totals.activeToday)}</strong><span className="muted tiny">{t.analytics.metrics.activeWindows(fmt(totals.active7), fmt(totals.active30))}</span></article>
+          <button ref={activeButton} type="button" className="dash-kpi-button" aria-haspopup="dialog" onClick={() => setShowActive(true)}><span className="muted">{t.analytics.metrics.active}</span><strong>{fmt(totals.activeToday)}</strong><span className="muted tiny">{t.analytics.metrics.activeWindows(fmt(totals.active7), fmt(totals.active30))}</span><span className="dash-kpi-more">{t.analytics.activeList.open}</span></button>
           <article><span className="muted">{t.analytics.metrics.tasks}</span><strong>{fmt(totals.tasks)}</strong><span className="muted tiny">{t.analytics.metrics.outcomes(pct(totals.completed, totals.tasks), fmt(totals.failed))}</span></article>
           <article><span className="muted">{t.analytics.metrics.conversion}</span><strong>{pct(p.funnel.signups, p.funnel.registerViews)}</strong><span className="muted tiny">{t.analytics.metrics.funnel(fmt(p.funnel.registerViews), fmt(p.funnel.signups))}</span></article>
         </>}
@@ -159,5 +185,6 @@ export function AnalyticsDashboard({ onExpired }: { onExpired: () => void }) {
       </details>
     </>}
     </div>
+    <PopupPresence onExited={() => activeButton.current?.focus()}>{showActive && p && <ActiveTodayDialog accounts={p.activeTodayAccounts} timezone={p.timezone} onClose={() => setShowActive(false)}/>}</PopupPresence>
   </section>;
 }

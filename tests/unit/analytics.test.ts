@@ -58,6 +58,9 @@ it('reports accounts, activity, tasks from every account store, events and platf
   expect(report.totals).toMatchObject({ accounts: 3, signups: 2, tasks: 4, completed: 3, failed: 1, sources: { manual: 2, schedule: 1, gadget: 1 } });
   // A scheduled run is not activity: today has user_a's typed task and user_b's open.
   expect(report.totals.activeToday).toBe(2);
+  // The list behind it: user_a's typed task (not the scheduled one) and user_b's two events, latest first.
+  expect(report.activeTodayAccounts).toHaveLength(2);
+  expect(report.activeTodayAccounts!.map(a => [a.username, a.events, a.tasks, a.platforms])).toEqual(expect.arrayContaining([['user_b', 2, 0, ['ios']], ['user_a', 0, 1, []]]));
   expect(report.totals.active7).toBe(3);
   // The 30-day window reaches past the 7-day range: the owner's page view 20 days ago.
   expect(report.totals.active30).toBe(3);

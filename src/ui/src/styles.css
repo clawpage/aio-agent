@@ -4180,9 +4180,20 @@ button.map-card-switch { flex: 0 0 auto; padding: 4px 10px; }
 .usage-metrics { display: grid; grid-template-columns: repeat(5,minmax(0,1fr)); gap: 12px; }
 .usage-metrics article, .dash-chart, .usage-table-wrap { padding: 18px 20px; border: 1px solid var(--border); background: var(--bg-soft); border-radius: var(--radius-card); box-shadow: var(--shadow-card); }
 .usage-metrics article { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
-.usage-metrics article > span:first-child { font-size: var(--fs-sm); }
+.dash-kpi-button { display: flex; flex-direction: column; align-items: stretch; gap: 6px; min-width: 0; height: auto; text-align: left; font: inherit; color: inherit; cursor: pointer; padding: 18px 20px; border: 1px solid var(--border); background: var(--bg-soft); border-radius: var(--radius-card); box-shadow: var(--shadow-card); }
+.dash-kpi-button:hover { border-color: var(--border-strong); }
+.dash-kpi-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.dash-kpi-more { font-size: 12px; color: var(--accent); }
+.dash-kpi-more::after { content: " ›"; }
+.usage-metrics :is(article, .dash-kpi-button) > span:first-child { font-size: var(--fs-sm); }
 .usage-metrics strong { font-size: clamp(22px,2.2vw,28px); font-weight: 600; letter-spacing: -0.01em; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .usage-metrics .tiny { line-height: 1.5; }
+.dash-active ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.dash-active li { padding: 10px 0; border-bottom: 1px solid var(--border); display: flex; flex-direction: column; gap: 3px; }
+.dash-active li:last-child { border-bottom: 0; }
+.dash-active li > div { display: flex; align-items: baseline; gap: 8px; }
+.dash-active li small { font-size: 11px; color: var(--text-dim); }
+.dash-active li time { margin-left: auto; font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .usage-legend { display: flex; flex-wrap: wrap; gap: 6px 14px; }
 .usage-legend span { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-dim); }
 .usage-legend i { width: 10px; height: 10px; border-radius: 3px; }
@@ -4231,8 +4242,8 @@ button.map-card-switch { flex: 0 0 auto; padding: 4px 10px; }
 @media (max-width: 720px) {
   .usage-body { padding: 14px 14px 24px; gap: 14px; }
   .usage-metrics { grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; }
-  .usage-metrics article { padding: 14px; }
-  .usage-metrics article:last-child:nth-child(odd) { grid-column: 1 / -1; }
+  .usage-metrics :is(article, .dash-kpi-button) { padding: 14px; }
+  .usage-metrics > :last-child:nth-child(odd) { grid-column: 1 / -1; }
   .dash-charts { grid-template-columns: minmax(0,1fr); }
   .dash-chart, .usage-table-wrap { padding: 14px; }
   .dash-wide { display: none; }
