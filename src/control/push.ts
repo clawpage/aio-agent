@@ -5,7 +5,7 @@ import type { AppContext } from "./context.js";
 import type { Db } from "./db.js";
 import type { Logger } from "../common/logger.js";
 import type { Locale } from "./locale.js";
-import { t } from "./i18n/index.js";
+import { runInLocale, t } from "./i18n/index.js";
 
 /**
  * Notifications on the person's phone through the standard Web Push protocol:
@@ -198,7 +198,8 @@ export function startTaskNotifications(ctx: AppContext, push: PushService, inter
   const timer = setInterval(() => {
     if (polling || !ctx.tabs || !ctx.tasks.hasRunning()) return;
     polling = true;
-    void ctx.tabs.list().then((tabs) => {
+    // The tab service words a request without a reason of its own in the language current when listing.
+    void runInLocale(() => ctx.tasks.locale(), () => ctx.tabs!.list()).then((tabs) => {
       for (const tab of tabs) {
         if (!tab.request || tab.holder !== "ai") continue;
         // The vault answers a sign-in it has an account for within seconds: only one still waiting is the person's.
