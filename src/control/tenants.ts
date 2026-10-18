@@ -153,6 +153,9 @@ export class UserRuntimes {
     runtime.ctx.phone=this.root.phone;
     runtime.ctx.userBrowser=this.root.userBrowser;
     runtime.ctx.deviceLinks=this.root.deviceLinks;
+    // Clawpages live centrally; the member's console and executor see the account's own.
+    runtime.ctx.share=this.root.share;
+    if(this.root.share)runtime.ctx.tasks.setClawpages(id=>this.root.share!.list(id));
     // A container found stopped stays stopped: its account's first use starts it, so a
     // service start no longer wakes every account. Only where idle stopping is on;
     // without it nothing would start the container later.

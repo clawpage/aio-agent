@@ -287,24 +287,36 @@ Below is the overview of the long-term memory accumulated so far (including work
 }
 
 /**
- * Public share pages. The CLI and its skill are managed like the document
- * skill; the per-runtime config holding the share token is written beside the
- * CLI only when the control plane provisioned sharing.
+ * Clawpages (public share pages with data of their own). The CLI, the browser SDK
+ * and the skill are managed like the document skill; the per-runtime config holding
+ * the share token is written beside the CLI only when the control plane provisioned
+ * sharing. The skill was called aio-share before pages had data; its old directory
+ * is removed when the new one is seeded.
  */
 export const SHARE_TOOL_DIR = "tools/aio-share";
-export const SHARE_SKILL_DIR = "skills/aio-share";
+export const SHARE_SKILL_DIR = "skills/clawpages";
+export const LEGACY_SHARE_SKILL_DIR = "skills/aio-share";
 export const SHARE_CLI_PY = String.raw`#!/usr/bin/env python3
-"""aio-share: publish a page directory as a public web page (managed by AIO Agent)."""
-import argparse, base64, json, os, re, sys, urllib.error, urllib.request
+"""aio-share: publish and manage clawpages (public pages and mini apps with data), managed by Clawpage Agent."""
+import argparse, base64, json, os, re, shutil, sys, urllib.error, urllib.parse, urllib.request
 
-CONFIG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
+HERE = os.path.dirname(os.path.abspath(__file__))
+CONFIG = os.path.join(HERE, "config.json")
+SDK = os.path.join(HERE, "clawpage-sdk.js")
+SDK_NAME = "clawpage-sdk.js"
 NAME = re.compile(r"^[a-z0-9][a-z0-9-]{0,62}$")
+TABLE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,62}[a-z0-9]$")
 MAX_FILES, MAX_BYTES = 200, 20 * 1024 * 1024
+SHARE_ROOT = "/home/gem/workspace/share"
 
 
 def fail(message):
     print(json.dumps({"ok": False, "error": message}, ensure_ascii=False))
     sys.exit(1)
+
+
+def out(value):
+    print(json.dumps(value, ensure_ascii=False, indent=2))
 
 
 def call(method, path, body=None):
@@ -327,6 +339,39 @@ def call(method, path, body=None):
             fail("HTTP %d" % err.code)
     except OSError as err:
         fail("Cannot connect to the share service: %s" % err)
+
+
+def page_name(name):
+    if not NAME.match(name):
+        fail("Invalid page name: " + name)
+    return name
+
+
+def table_name(name):
+    if not TABLE.match(name):
+        fail("Invalid table name (2-64 lowercase letters, digits, - or _): " + name)
+    return name
+
+
+def q(text):
+    return urllib.parse.quote(text, safe="")
+
+
+def json_arg(text):
+    """A JSON value given inline, or @path to read it from a file."""
+    try:
+        if text.startswith("@"):
+            with open(text[1:]) as f:
+                return json.load(f)
+        return json.loads(text)
+    except (OSError, ValueError) as err:
+        fail("Not valid JSON (%s): %s" % (err, text[:100]))
+
+
+def copy_sdk(root):
+    if not os.path.isfile(SDK):
+        fail("The clawpage SDK is missing: " + SDK)
+    shutil.copyfile(SDK, os.path.join(root, SDK_NAME))
 
 
 def collect(root):
@@ -353,25 +398,130 @@ def collect(root):
     return files
 
 
+def data_command(args):
+    page = page_name(args.page)
+    base = "/pages/%s/data" % page
+    c = args.data_cmd
+    if c == "tables":
+        return out(call("GET", base))
+    tbl = "/" + q(table_name(args.table))
+    if c == "create":
+        return out(call("POST", base, {"name": args.table, "permission": args.permission}))
+    if c == "permission":
+        return out(call("PATCH", base + tbl, {"permission": args.permission}))
+    if c == "drop":
+        call("DELETE", base + tbl)
+        return out({"ok": True, "dropped": args.table})
+    if c == "list":
+        if args.all:
+            records, after = [], None
+            while True:
+                page_ = call("GET", base + tbl + "?limit=500" + ("&after=" + q(after) if after else ""))
+                records += page_["records"]
+                after = page_.get("nextCursor")
+                if not after:
+                    return out({"records": records, "count": len(records)})
+        query = "?limit=%d" % args.limit + ("&after=" + q(args.after) if args.after else "")
+        return out(call("GET", base + tbl + query))
+    if c == "export":
+        data = call("GET", base + tbl + "?export=1")
+        if args.out:
+            with open(args.out, "w") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+            return out({"ok": True, "file": args.out, "records": len(data["records"])})
+        return out(data)
+    if c == "import":
+        data = json_arg("@" + args.file)
+        records = data.get("records", data) if isinstance(data, dict) else None
+        if not isinstance(records, dict):
+            fail("The file must hold an object of key: value (or an export with \"records\")")
+        return out(call("PUT", base + tbl, {"records": records}))
+    if c == "add":
+        return out(call("POST", base + tbl, {"value": json_arg(args.value)}))
+    rec = base + tbl + "/" + q(args.key)
+    if c == "get":
+        return out(call("GET", rec))
+    if c == "put":
+        return out(call("PUT", rec, {"value": json_arg(args.value)}))
+    if c == "patch":
+        return out(call("PATCH", rec, {"value": json_arg(args.value)}))
+    if c == "incr":
+        return out(call("POST", rec + "/incr", {"field": args.field, "by": args.by}))
+    if c == "delete":
+        call("DELETE", rec)
+        return out({"ok": True, "deleted": args.key})
+
+
 def main():
-    parser = argparse.ArgumentParser(prog="aio-share", description="Publish a page directory as a public web page; publishing again under the same name updates it and keeps the link.")
+    parser = argparse.ArgumentParser(prog="aio-share", description="Publish and manage clawpages: public pages and mini apps with data of their own. Publishing again under the same name updates a page and keeps its link.")
     sub = parser.add_subparsers(dest="cmd", required=True)
     p = sub.add_parser("publish", help="Publish or update a page")
     p.add_argument("dir", help="Page directory; must contain index.html")
     p.add_argument("--name", help="Page name (lowercase letters, digits, hyphens); defaults to the directory name")
     p.add_argument("--title", help="Page title (used in the list)")
-    sub.add_parser("list", help="List published pages")
-    d = sub.add_parser("delete", help="Delete a page (its link stops working immediately)")
+    sub.add_parser("list", help="List published pages with their data tables")
+    d = sub.add_parser("delete", help="Delete a page and all its data (its link stops working immediately)")
     d.add_argument("name")
+    pl = sub.add_parser("pull", help="Download a published page's files to work on it again")
+    pl.add_argument("name")
+    pl.add_argument("--dir", help="Where to put it (default %s/<name>)" % SHARE_ROOT)
+    pl.add_argument("--force", action="store_true", help="Replace the directory if it already has files")
+    s = sub.add_parser("sdk", help="Copy the clawpage SDK into a page directory as " + SDK_NAME)
+    s.add_argument("dir")
+
+    data = sub.add_parser("data", help="A page's data tables (you act as the page's owner)")
+    dsub = data.add_subparsers(dest="data_cmd", required=True)
+    def cmd(name, help_, *extra):
+        c = dsub.add_parser(name, help=help_)
+        c.add_argument("page")
+        for e in extra:
+            c.add_argument(e)
+        return c
+    cmd("tables", "List the page's tables")
+    cmd("create", "Create a table", "table").add_argument("--permission", default="private", choices=["private", "read-public", "public"])
+    cmd("permission", "Change who may read and write a table", "table").add_argument("permission", choices=["private", "read-public", "public"])
+    cmd("drop", "Delete a table and all its records", "table")
+    lc = cmd("list", "List records in insertion order", "table")
+    lc.add_argument("--limit", type=int, default=100)
+    lc.add_argument("--after", help="Continue after this key (the previous page's nextCursor)")
+    lc.add_argument("--all", action="store_true", help="Every record")
+    cmd("get", "Read one record", "table", "key")
+    cmd("put", "Write a record whole (JSON, or @file)", "table", "key", "value")
+    cmd("patch", "Merge an object into a record (JSON, or @file)", "table", "key", "value")
+    cmd("add", "Add a record under a new key (JSON, or @file)", "table", "value")
+    ic = cmd("incr", "Add to a number field atomically", "table", "key", "field")
+    ic.add_argument("--by", type=float, default=1)
+    cmd("delete", "Delete a record", "table", "key")
+    cmd("export", "The whole table as {key: value}", "table").add_argument("--out", help="Write to this file instead")
+    cmd("import", "Upsert records from a JSON file of {key: value}", "table", "file")
     args = parser.parse_args()
 
     if args.cmd == "list":
-        print(json.dumps(call("GET", "/pages"), ensure_ascii=False, indent=2))
+        out(call("GET", "/pages"))
     elif args.cmd == "delete":
-        if not NAME.match(args.name):
-            fail("Invalid page name: " + args.name)
-        call("DELETE", "/pages/" + args.name)
-        print(json.dumps({"ok": True, "deleted": args.name}, ensure_ascii=False))
+        call("DELETE", "/pages/" + page_name(args.name))
+        out({"ok": True, "deleted": args.name})
+    elif args.cmd == "data":
+        data_command(args)
+    elif args.cmd == "sdk":
+        root = os.path.abspath(args.dir)
+        os.makedirs(root, exist_ok=True)
+        copy_sdk(root)
+        out({"ok": True, "file": os.path.join(root, SDK_NAME), "script": '<script src="%s"></script>' % SDK_NAME})
+    elif args.cmd == "pull":
+        name = page_name(args.name)
+        root = os.path.abspath(args.dir or os.path.join(SHARE_ROOT, name))
+        page = call("GET", "/pages/%s/files" % name)
+        if os.path.isdir(root) and os.listdir(root) and not args.force:
+            fail("%s already has files; edit them there, or pass --force to replace them with the published version" % root)
+        if os.path.isdir(root):
+            shutil.rmtree(root)
+        for f in page["files"]:
+            full = os.path.join(root, *f["path"].split("/"))
+            os.makedirs(os.path.dirname(full), exist_ok=True)
+            with open(full, "wb") as fh:
+                fh.write(base64.b64decode(f["data"]))
+        out({"ok": True, "dir": root, "files": len(page["files"])})
     else:
         root = os.path.abspath(args.dir)
         if not os.path.isdir(root):
@@ -379,9 +529,12 @@ def main():
         name = args.name or re.sub(r"[^a-z0-9-]+", "-", os.path.basename(root).lower()).strip("-")[:63]
         if not NAME.match(name):
             fail("Invalid page name; use --name to give a name made of lowercase letters, digits and hyphens")
+        # A page that uses the SDK gets the current one.
+        if os.path.isfile(os.path.join(root, SDK_NAME)):
+            copy_sdk(root)
         page = call("POST", "/pages/" + name, {"title": args.title, "files": collect(root)})
         page["ok"] = True
-        print(json.dumps(page, ensure_ascii=False, indent=2))
+        out(page)
 
 
 if __name__ == "__main__":
@@ -389,49 +542,118 @@ if __name__ == "__main__":
 `;
 
 export const SHARE_SKILL_MD = `---
-name: aio-share
-description: Publish a web page the user can share with anyone as a public link (/u/<user>/share/<name>/). Use when the user wants a shareable page, a link to send others, or to update, list or delete pages already shared.
+name: clawpages
+description: Build, publish and manage clawpages - public web pages and mini apps (trackers, sign-up sheets, polls, guestbooks, small tools) that keep data in tables of their own, at /u/<user>/share/<name>/. Use when the user wants a shareable page or link, a small app that saves data, to change an existing clawpage, or to read, edit or summarize what is stored in one.
 ---
 
-# Sharing a web page (public)
+# Clawpages: pages and mini apps with data
 
-Publish a page directory as a web page that **anyone with the link can open**. There is no password and no private mode.
+A clawpage is a folder of static files (\`index.html\` plus anything it needs) published at a public link,
+optionally with **data tables** the page reads and writes through the clawpage SDK. Anyone with the link can open the page;
+what they can do with its data depends on each table's permission. The user sees and manages all their clawpages
+on the Clawpages page of the console.
 
-## Confirm before publishing
+The CLI is not on PATH; set a variable for it in each shell first (the commands below use it):
+\`CP="python3 /home/gem/.codex/tools/aio-share/aio-share.py"\`
 
-- The page is public: do not include personal information the user has not explicitly agreed to make public (home address, phone number, ID documents, itinerary details, accounts, internal links),
-  and never include any secret key or token. When in doubt, ask the user first.
-- When the user only wants to see the result and has not asked to share it, do not publish; just build the page in the workspace and show it to the user.
+## Before publishing
 
-## Building the page
+- The page is public: never put personal information the user has not explicitly agreed to make public (address, phone, ID documents,
+  itinerary details, accounts, internal links) or any secret key or token into its files. When in doubt, ask.
+- When the user only wants to see something and has not asked to share it, build it in the workspace and show it; do not publish.
+- Data the user would not show strangers goes in a **private** table, never in a read-public or public one.
 
-1. Put the page directory at \`/home/gem/workspace/share/<name>/\`; its entry point must be \`index.html\`.
-   \`<name>\` uses lowercase letters, digits and hyphens, short and meaningful (e.g. \`tokyo-trip-plan\`); it becomes part of the link.
-2. Prefer a single self-contained \`index.html\`; when you need images, CSS or JS, put them in the same directory and reference them by **relative path**.
-   The limit is 200 files and 20 MB in total; files whose names start with a dot are not uploaded.
-3. Make it mobile-friendly (\`<meta name="viewport" content="width=device-width, initial-scale=1">\`), with fallback fonts for Chinese text.
-4. The page runs in an isolated environment: scripts can run and can call external APIs that allow cross-origin requests,
-   but they **cannot use cookies, localStorage or sessionStorage**, and cannot read or write the workspace. Do not build interactions that need to save state.
-5. Before publishing, open \`file:///home/gem/workspace/share/<name>/index.html\` in the sandbox browser to check how it looks.
+## Build
 
-## Publish, update, list, delete
+1. The folder is \`/home/gem/workspace/share/<name>/\`, entry \`index.html\`. \`<name>\`: lowercase letters, digits, hyphens, short and meaningful
+   (\`team-lunch-poll\`); it becomes part of the link. Prefer one self-contained \`index.html\`; other files by **relative path**. Limit 200 files, 20 MB; dot-files are skipped.
+2. Mobile first (\`<meta name="viewport" content="width=device-width, initial-scale=1">\`), fallback fonts for Chinese, readable in light and dark.
+3. The page runs isolated: scripts run and may call outside APIs that allow cross-origin requests, but there are **no cookies, localStorage or sessionStorage**
+   and no access to the workspace. Anything to keep goes in its tables.
+4. To keep data, add the SDK: \`$CP sdk /home/gem/workspace/share/<name>\` copies \`clawpage-sdk.js\` into the folder; load it with
+   \`<script src="clawpage-sdk.js"></script>\` (publishing refreshes this copy).
+5. Preview \`file:///home/gem/workspace/share/<name>/index.html\` in the sandbox browser before publishing. In a preview the SDK keeps data in memory, so the page works but nothing is saved.
 
-Commands (not on PATH; use the absolute path):
+## The SDK (in the page)
 
-\`\`\`bash
-python3 /home/gem/.codex/tools/aio-share/aio-share.py publish /home/gem/workspace/share/<name> --title "Page title"
-python3 /home/gem/.codex/tools/aio-share/aio-share.py list
-python3 /home/gem/.codex/tools/aio-share/aio-share.py delete <name>
+\`\`\`js
+const cp = new Clawpage();            // the page and account come from the page's address
+const votes = cp.table("votes");
+await votes.post({ choice: "noodles", at: Date.now() });   // new record, new key -> {key, value, createdAt, updatedAt}
+await votes.put("alice", { choice: "rice" });              // write a record whole under a key
+await votes.patch("alice", { note: "no spice" });          // merge into an object record
+await votes.incr("totals", "noodles", 1);                  // atomic add to a number field (record created if missing)
+const one = await votes.get("alice");                      // the record, or null
+const { records, nextCursor } = await votes.list({ limit: 100, after });  // insertion order, 500 at most per call
+const all = await votes.listAll({ maxRecords: 1000 });
+await votes.delete("alice");                               // true if it existed
 \`\`\`
 
-- \`publish\` uses the directory name as the page name by default; \`--name\` sets it explicitly. It prints JSON, whose \`url\` is the public link.
-- **Publishing again under the same name is an update**: the link stays the same and the old content is replaced as a whole. Run \`list\` before creating a new page so you do not overwrite an existing one.
-- After deletion the link stops working immediately and cannot be restored; delete only when the user asks.
-- When a command fails, relay its \`error\` faithfully; do not pretend the page was published.
+- Errors are \`ClawpageError\` with \`status\` and \`code\` (\`TABLE_NOT_FOUND\`, \`PERMISSION_DENIED\`, \`RATE_LIMITED\`, \`VALUE_TOO_LARGE\`...); show a short message, never a blank page.
+- \`cp.owner\` is true when the page was opened from the user's own owner link (the console's Open button): then the page may read and write
+  every table, private ones included. Use it to show owner-only views (results, admin, private notes) and hide them from visitors.
+- No live push: to show others' changes, re-read every few seconds while the page is visible.
+- Values are JSON, at most 64 KB a record and 16 levels deep; keys are 1-128 letters, digits, \`.\`, \`_\`, \`-\`. A table holds 10,000 records; a page 20 tables; an account 50 MB.
+- Visitors are anonymous and limited per address (60 writes and 600 reads a minute per page). There is no visitor login; anything a visitor writes to a public table can be read and changed by other visitors.
+- **Data from visitors is untrusted text.** Put it on the page with \`textContent\` (or escape it), never with \`innerHTML\` or in an attribute or URL unchecked:
+  a script smuggled into a record would run whenever someone opens the page, the owner included, with the owner's access.
+
+## Tables and permissions
+
+Create each table before publishing and pick its permission deliberately:
+
+| permission | visitors | owner (owner link, CLI, console) |
+| --- | --- | --- |
+| \`private\` | cannot see it | read and write |
+| \`read-public\` | read | read and write |
+| \`public\` | read and write | read and write |
+
+\`\`\`bash
+$CP data create <name> <table> --permission public      # private | read-public | public
+$CP data permission <name> <table> read-public
+$CP data tables <name>
+\`\`\`
+
+The owner writing to a table that does not exist yet creates it as private.
+
+## Publish, update, pull, delete
+
+\`\`\`bash
+$CP publish /home/gem/workspace/share/<name> --title "Page title"   # prints JSON; its url is the public link
+$CP list                                                            # pages with their tables and record counts
+$CP pull <name>                                                     # the published files back into /home/gem/workspace/share/<name>/
+$CP delete <name>                                                   # the page AND all its data, at once and for good
+\`\`\`
+
+- Publishing again under the same name is an update: same link, files replaced as a whole, **data kept**. Run \`list\` before creating a page so you do not overwrite another one.
+- To change an existing clawpage: if its folder is not in the workspace (or you are unsure it is the published version), \`pull\` it first, then edit and publish under the same name.
+  If you change the shape of stored records, keep the page able to read the old ones (or migrate them with the data commands below).
+- Delete only when the user asks; tell them the data goes too.
+- When a command fails, relay its \`error\` faithfully; do not pretend it worked.
+
+## Reading and changing a clawpage's data
+
+You act as the owner. Use these when the user asks what people submitted, wants a summary, a correction, a cleanup, or a backup:
+
+\`\`\`bash
+$CP data list <name> <table> [--limit 100] [--after KEY] [--all]
+$CP data get <name> <table> <key>
+$CP data put <name> <table> <key> '{"choice":"rice"}'      # JSON inline, or @file.json
+$CP data patch <name> <table> <key> '{"done":true}'
+$CP data add <name> <table> '{"text":"hello"}'
+$CP data incr <name> <table> <key> <field> --by 1
+$CP data delete <name> <table> <key>
+$CP data export <name> <table> --out /home/gem/workspace/tasks/<task>/backup.json
+$CP data import <name> <table> backup.json                   # upsert {key: value} (an export file works too)
+$CP data drop <name> <table>                                 # the table and all its records
+\`\`\`
+
+The data belongs to the user and the page's visitors: do not delete or overwrite it unless asked; before a large change, export a backup first.
 
 ## Delivery
 
-Send the user the \`url\` as a link with a short, meaningful title, and tell them that "anyone with the link can see it".
+Send the \`url\` as a link with a short, meaningful title, and say that anyone with the link can open it (and what visitors can do with its data).
+To use the owner-only parts, the user opens it from the Clawpages page in the console.
 `;
 
 /**

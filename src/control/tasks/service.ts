@@ -18,6 +18,7 @@ import { dispatchAdvice, formatRelevance, formatTimeline, lastQuestion, routingQ
 import { describeNow, describeSchedule, formatWhen, MAX_ACTIVE_SCHEDULES, nextRun, validateSchedule, type ScheduleSpec } from "./schedules.js";
 import type { PlanningSchedule, ScheduleActionName } from "./planning.js";
 import { answerLanguage, isLocale, readLocale, writeLocale, type Locale } from "../locale.js";
+import type { SharePage } from "../share.js";
 import { ATTENTION_STATUSES, DONE_STATUSES, WORKING_STATUSES, type TaskBucket, type TaskCounts, type TaskFilter, type TaskListPage } from "../../common/taskList.js";
 
 /** Bounded context keeps both live work and older matches in one Jev call. */
@@ -112,6 +113,8 @@ export interface TaskInput {
     locale?: string | null;
 }
 const TERMINAL = new Set(["completed", "failed", "interrupted", "unknown"]);
+/** How many clawpages an execution prompt names. */
+const CLAWPAGES_SHOWN = 12;
 /** The task list's keyset cursor: [rank, time, id] of the last row a page held. */
 const encodeCursor = (key: [number, number, string]) => Buffer.from(JSON.stringify(key)).toString("base64url");
 export class TaskCursorError extends Error {}
@@ -190,6 +193,22 @@ export class TaskService {
     /** The language a console opened in: taken once per account, and never over a choice. */
     syncLocale(locale: Locale): boolean { return writeLocale(this.db, locale, "open"); }
     setNotifier(notifier: ((task: ReturnType<TaskService["view"]>) => void) | null): void { this.#notifier = notifier; }
+    /** The account's clawpages, so its executor knows what it already built and what their data holds. */
+    setClawpages(list: ((userId: string) => SharePage[]) | null): void { this.#clawpages = list; }
+    #clawpages: ((userId: string) => SharePage[]) | null = null;
+    /** The account's clawpages for an execution prompt: the most recently active first, each with its tables. */
+    private clawpagesNote(row: TaskRow): string | null {
+        let pages: SharePage[];
+        try { pages = this.#clawpages?.(this.ownerId(row)) ?? []; } catch { return null; }
+        if (!pages.length) return null;
+        const active = (p: SharePage) => Math.max(p.updatedAt, ...p.tables.map(t => t.updatedAt));
+        const when = (ts: number) => formatWhen(ts, this.cfg.browser.timezone);
+        const shown = [...pages].sort((a, b) => active(b) - active(a)).slice(0, CLAWPAGES_SHOWN);
+        const lines = shown.map(p => `- ${p.name} "${p.title}" ${p.url} (published ${when(p.updatedAt)})${p.tables.length
+            ? `; tables: ${p.tables.map(t => `${t.name} (${t.permission}, ${t.records} records${t.records ? `, last change ${when(t.updatedAt)}` : ""})`).join(", ")}`
+            : "; no data tables"}`);
+        return [`The user's clawpages (web pages and mini apps published for them; ${pages.length} in all${pages.length > shown.length ? `, the ${shown.length} most recently active listed` : ""}). When this message is about one of them, work on that clawpage with the clawpages skill: read or change its data with its data commands, and to change the page, pull it, edit, and publish again under the same name so the link stays. The data reflects what visitors and the user did since; it is the user's, so do not delete or overwrite it unless asked:`, ...lines].join("\n");
+    }
     /** Tell the notifier about a status this task just reached, if it is news for the person. */
     private notifyChange(id: string, before: string): void {
         const row = this.get(id);
@@ -1009,6 +1028,7 @@ export class TaskService {
                 ...(continuation ? [continuation] : []),
                 ...(row.schedule_id ? [this.scheduledRunNote(row)] : []),
                 `The user's current time: ${describeNow(Date.now(), this.cfg.browser.timezone)} (${this.cfg.browser.timezone}).`,
+                ...(() => { const note = this.clawpagesNote(row); return note ? [note] : []; })(),
                 "The user's task this time:", this.taskContext(row),
                 answerLanguage(this.locale(), !row.schedule_id),
             ].join("\n\n");

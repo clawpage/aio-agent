@@ -4,9 +4,10 @@ import type http from "node:http";
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import type { NextFunction, Request, Response } from "express";
 import type { Config } from "./config.js";
+import { ClawpageData, DataError, type Caller, type TableSummary } from "./clawpages.js";
 
 /**
- * Public share pages.
+ * Public share pages: clawpages.
  *
  * The sandbox `aio-share` CLI publishes a page directory to the member gateway
  * with its runtime's own share token; the control plane keeps a snapshot on the
@@ -15,6 +16,11 @@ import type { Config } from "./config.js";
  * traffic cannot load or reach it, and every response runs in a CSP sandbox:
  * the page gets an opaque origin, so it can neither read the workspace session
  * nor make credentialed same-origin calls to the workspace.
+ *
+ * A page can keep data in tables of its own (clawpages.ts): visitors reach them
+ * at `/u/<username>/share/<name>/.data/...` (no cookies; CORS open, since the
+ * page's origin is opaque), the owner through an owner link's token, the
+ * account's sandbox through the same share channel it publishes with.
  */
 
 export const SHARE_NAME = /^[a-z0-9][a-z0-9-]{0,62}$/;
@@ -33,6 +39,20 @@ const TYPES: Record<string, string> = {
   ".mp3": "audio/mpeg", ".mp4": "video/mp4", ".webm": "video/webm", ".pdf": "application/pdf",
 };
 
+/** A data request's body: a record (64 KB) with room for the JSON around it; an import from the sandbox may be larger. */
+const DATA_BODY = { visitor: 128 * 1024, owner: 16 * 1024 * 1024 };
+
+/** The page's data API answers any origin (the page's own is opaque) and never involves cookies. */
+const DATA_HEADERS = {
+  "content-type": "application/json; charset=utf-8",
+  "cache-control": "no-store",
+  "x-content-type-options": "nosniff",
+  "access-control-allow-origin": "*",
+  "access-control-allow-methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+  "access-control-allow-headers": "authorization, content-type",
+  "access-control-max-age": "600",
+};
+
 /** No script on the page shares the workspace origin; it still runs, opens links and submits forms. */
 const PAGE_HEADERS = {
   "content-security-policy": "sandbox allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-modals allow-downloads",
@@ -48,7 +68,7 @@ export class ShareError extends Error {
   }
 }
 
-export interface SharePage { name: string; title: string; url: string; files: number; bytes: number; updatedAt: number }
+export interface SharePage { name: string; title: string; url: string; files: number; bytes: number; updatedAt: number; tables: TableSummary[] }
 export interface ShareFile { path: string; data: string }
 
 /** A relative path of plain segments: no traversal, no hidden files, no backslashes or control characters. */
@@ -69,17 +89,21 @@ export class ShareStore {
   #tokens = new Map<string, string>();
   #usernameOf: (userId: string) => string | null;
   #userIdOf: (username: string) => string | null;
+  /** The pages' tables; absent where a store is built without data (tests of the page side only). */
+  readonly data?: ClawpageData;
 
   constructor(opts: {
     cfg: Config; port: number;
     usernameOf: (userId: string) => string | null;
     userIdOf: (username: string) => string | null;
+    data?: ClawpageData;
   }) {
     this.#cfg = opts.cfg;
     this.#root = path.join(opts.cfg.dataDir, "shares");
     this.#port = opts.port;
     this.#usernameOf = opts.usernameOf;
     this.#userIdOf = opts.userIdOf;
+    this.data = opts.data;
   }
 
   /** Give a runtime its publish capability; its sandbox receives the token through `cfg.share`. */
@@ -98,7 +122,7 @@ export class ShareStore {
     cfg.share = { token, endpoint: `http://host.docker.internal:${this.#port}/share/${userId}` };
   }
 
-  #pageUrl(userId: string, name: string): string {
+  pageUrl(userId: string, name: string): string {
     return `https://${this.#cfg.workspaceHost}/u/${this.#usernameOf(userId) ?? userId}/share/${name}/`;
   }
 
@@ -113,10 +137,11 @@ export class ShareStore {
     } catch {
       return [];
     }
+    const tables = this.data?.overview(userId) ?? new Map<string, TableSummary[]>();
     return names.flatMap((name) => {
       try {
         const meta = JSON.parse(fs.readFileSync(path.join(this.#userDir(userId), name, META), "utf8")) as Omit<SharePage, "name" | "url">;
-        return [{ name, url: this.#pageUrl(userId, name), title: meta.title, files: meta.files, bytes: meta.bytes, updatedAt: meta.updatedAt }];
+        return [{ name, url: this.pageUrl(userId, name), title: meta.title, files: meta.files, bytes: meta.bytes, updatedAt: meta.updatedAt, tables: tables.get(name) ?? [] }];
       } catch {
         return [];
       }
@@ -165,18 +190,74 @@ export class ShareStore {
       if (fs.existsSync(target)) fs.renameSync(target, retired);
       fs.renameSync(staging, target);
       fs.rmSync(retired, { recursive: true, force: true });
-      return { name, title, url: this.#pageUrl(userId, name), files: files.length, bytes, updatedAt };
+      return { name, title, url: this.pageUrl(userId, name), files: files.length, bytes, updatedAt, tables: this.data?.tables(userId, name) ?? [] };
     } finally {
       fs.rmSync(staging, { recursive: true, force: true });
     }
   }
 
+  exists(userId: string, name: string): boolean {
+    return SHARE_NAME.test(name) && fs.existsSync(path.join(this.#userDir(userId), name, META));
+  }
+
+  /** A page goes with its data. */
   remove(userId: string, name: string): boolean {
     if (!SHARE_NAME.test(name)) return false;
     const target = path.join(this.#userDir(userId), name);
-    if (!fs.existsSync(target)) return false;
+    const existed = fs.existsSync(target);
     fs.rmSync(target, { recursive: true, force: true });
-    return true;
+    const hadData = (this.data?.tables(userId, name).length ?? 0) > 0;
+    this.data?.dropPage(userId, name);
+    return existed || hadData;
+  }
+
+  /** The published files of a page, to work on it again in the sandbox (`aio-share pull`). */
+  files(userId: string, name: string): ShareFile[] | null {
+    if (!this.exists(userId, name)) return null;
+    const root = path.join(this.#userDir(userId), name);
+    const out: ShareFile[] = [];
+    const walk = (dir: string, prefix: string) => {
+      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        if (entry.name.startsWith(".")) continue;
+        const rel = prefix ? `${prefix}/${entry.name}` : entry.name;
+        if (entry.isDirectory()) walk(path.join(dir, entry.name), rel);
+        else if (entry.isFile()) out.push({ path: rel, data: fs.readFileSync(path.join(dir, entry.name)).toString("base64") });
+      }
+    };
+    walk(root, "");
+    return out;
+  }
+
+  /**
+   * One request to a page's data, after the caller is known. `rest` is the path below
+   * `.data` (public) or `data` (sandbox): nothing (the tables), a table, a record, or a
+   * record's `incr`. Managing tables is the owner's.
+   */
+  dataRequest(userId: string, page: string, rest: string[], method: string, query: URLSearchParams, body: Record<string, unknown>, caller: Caller): { status: number; body?: unknown } {
+    const data = this.data;
+    if (!data) throw new DataError(404, "NOT_FOUND", "This deployment has no page data");
+    const ownerOnly = () => { if (!caller.owner) throw new DataError(403, "PERMISSION_DENIED", "Only the page's owner can do this"); };
+    const [table, key, action] = rest;
+    if (rest.length > 3 || (action !== undefined && action !== "incr")) throw new DataError(404, "NOT_FOUND", "No such data path");
+    if (table === undefined) {
+      if (method === "GET") return { status: 200, body: { tables: data.tables(userId, page).filter((t) => caller.owner || t.permission !== "private") } };
+      if (method === "POST") { ownerOnly(); return { status: 201, body: data.createTable(userId, page, String(body.name ?? ""), body.permission ?? "private") }; }
+    } else if (key === undefined) {
+      if (method === "GET" && query.get("export")) { ownerOnly(); return { status: 200, body: data.exportTable(userId, page, table) }; }
+      if (method === "GET") return { status: 200, body: data.list(userId, page, table, caller, { limit: query.get("limit"), after: query.get("after") }) };
+      if (method === "POST") return { status: 201, body: data.post(userId, page, table, body.value, caller) };
+      if (method === "PUT") { ownerOnly(); return { status: 200, body: data.importTable(userId, page, table, body.records) }; }
+      if (method === "PATCH") { ownerOnly(); return { status: 200, body: data.setPermission(userId, page, table, body.permission) }; }
+      if (method === "DELETE") { ownerOnly(); return data.dropTable(userId, page, table) ? { status: 204 } : { status: 404, body: { error: "TABLE_NOT_FOUND", message: `Table ${table} does not exist` } }; }
+    } else if (action === "incr") {
+      if (method === "POST") return { status: 200, body: data.incr(userId, page, table, key, body.field, body.by, caller) };
+    } else {
+      if (method === "GET") return { status: 200, body: data.get(userId, page, table, key, caller) };
+      if (method === "PUT") return { status: 200, body: data.put(userId, page, table, key, body.value, caller) };
+      if (method === "PATCH") return { status: 200, body: data.patch(userId, page, table, key, body.value, caller) };
+      if (method === "DELETE") return data.remove(userId, page, table, key, caller) ? { status: 204 } : { status: 404, body: { error: "RECORD_NOT_FOUND", message: `No record ${key}` } };
+    }
+    throw new DataError(405, "METHOD_NOT_ALLOWED", `${method} is not allowed here`);
   }
 
   /**
@@ -188,15 +269,27 @@ export class ShareStore {
       res.writeHead(status, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" });
       res.end(body === undefined ? undefined : JSON.stringify(body));
     };
-    const match = /^\/share\/([a-zA-Z0-9_]+)\/pages(?:\/([^/?]+))?$/.exec(req.url ?? "");
+    const url = new URL(req.url ?? "/", "http://gateway");
+    const match = /^\/share\/([a-zA-Z0-9_]+)\/pages(?:\/([^/]+)(?:\/(files|data)((?:\/[^/]+)*))?)?$/.exec(url.pathname);
     const expected = match ? this.#tokens.get(match[1]!) : undefined;
     const supplied = (req.headers.authorization ?? "").replace(/^Bearer /, "");
     if (!match || !expected || !TOKEN.test(supplied) || !timingSafeEqual(Buffer.from(supplied), Buffer.from(expected))) {
       reply(403, { error: "forbidden" });
       return;
     }
-    const [, userId, name] = match as unknown as [string, string, string | undefined];
+    const [, userId, name, sub, tail] = match as unknown as [string, string, string | undefined, string | undefined, string | undefined];
     try {
+      if (name && !SHARE_NAME.test(name)) return reply(400, { error: "Invalid page name" });
+      if (sub === "files") {
+        const files = req.method === "GET" ? this.files(userId, name!) : undefined;
+        return files === undefined ? reply(405, { error: "method_not_allowed" }) : files ? reply(200, { name, files }) : reply(404, { error: "The page does not exist" });
+      }
+      if (sub === "data") {
+        const rest = (tail ?? "").split("/").filter(Boolean).map((s) => decodeURIComponent(s));
+        const body = req.method === "GET" || req.method === "DELETE" ? {} : await readJson(req, DATA_BODY.owner);
+        const out = this.dataRequest(userId, name!, rest, req.method ?? "GET", url.searchParams, body, { owner: true });
+        return reply(out.status, out.body);
+      }
       if (req.method === "GET" && !name) return reply(200, { pages: this.list(userId) });
       if (req.method === "DELETE" && name) return this.remove(userId, name) ? reply(204) : reply(404, { error: "The page does not exist" });
       if (req.method !== "POST" || !name) return reply(405, { error: "method_not_allowed" });
@@ -217,14 +310,43 @@ export class ShareStore {
       reply(200, this.publish(userId, name, input));
     } catch (err) {
       if (err instanceof ShareError) reply(err.status, { error: err.message });
-      else reply(500, { error: "Publishing failed" });
+      else if (err instanceof DataError) reply(err.status, { error: err.message, code: err.code });
+      else reply(500, { error: "The request failed" });
+    }
+  }
+
+  /** `/u/<username>/share/<name>/.data/...`: a page's data for its visitors and its owner's link. */
+  async #serveData(req: Request, res: Response, userId: string, page: string, rest: string, query: string): Promise<void> {
+    const reply = (status: number, body?: unknown) => {
+      res.status(status).set(DATA_HEADERS);
+      if (body === undefined) res.end();
+      else res.send(JSON.stringify(body));
+    };
+    if (req.method === "OPTIONS") return reply(204);
+    const data = this.data;
+    if (!data || !this.exists(userId, page)) return reply(404, { error: "PAGE_NOT_FOUND", message: "The page does not exist" });
+    const token = String(req.headers.authorization ?? "").replace(/^Bearer\s+/i, "");
+    const owner = !!token && data.isOwnerToken(token, userId, page);
+    const write = req.method !== "GET" && req.method !== "HEAD";
+    if (!owner && !data.allow(req.paCtx?.ip ?? "unknown", userId, page, write ? "writes" : "reads")) {
+      return reply(429, { error: "RATE_LIMITED", message: "Too many requests; try again in a minute" });
+    }
+    try {
+      const segments = rest.split("/").filter(Boolean).map((s) => decodeURIComponent(s));
+      const body = write && req.method !== "DELETE" ? await readJson(req, owner ? DATA_BODY.owner : DATA_BODY.visitor) : {};
+      const out = this.dataRequest(userId, page, segments, req.method === "HEAD" ? "GET" : req.method, new URLSearchParams(query), body, { owner, ip: req.paCtx?.ip });
+      reply(out.status, out.body);
+    } catch (err) {
+      if (err instanceof DataError) reply(err.status, { error: err.code, message: err.message });
+      else if (err instanceof URIError) reply(400, { error: "INVALID_PATH", message: "Invalid path" });
+      else reply(500, { error: "INTERNAL", message: "The request failed" });
     }
   }
 
   /** The public side: `/u/<username>/share/<name>/...` on the workspace origin, no session involved. */
   serve() {
     return (req: Request, res: Response, next: NextFunction) => {
-      if (req.paCtx?.kind !== "workspace" || (req.method !== "GET" && req.method !== "HEAD")) return next();
+      if (req.paCtx?.kind !== "workspace") return next();
       const url = req.originalUrl;
       const q = url.indexOf("?");
       const pathname = q < 0 ? url : url.slice(0, q);
@@ -232,6 +354,14 @@ export class ShareStore {
       const m = /^\/u\/([A-Za-z0-9_-]{2,40})\/share(?:\/([^/]*)(\/.*)?)?$/.exec(pathname);
       if (!m) return next();
       const [, username, rawName, rest] = m;
+      const dataPath = rawName && SHARE_NAME.test(rawName) && rest !== undefined ? /^\/\.data(\/.*)?$/.exec(rest) : null;
+      if (dataPath) {
+        const userId = this.#userIdOf(username!);
+        if (!userId) return void res.status(404).set(DATA_HEADERS).send(JSON.stringify({ error: "PAGE_NOT_FOUND", message: "The page does not exist" }));
+        void this.#serveData(req, res, userId, rawName!, dataPath[1] ?? "", query);
+        return;
+      }
+      if (req.method !== "GET" && req.method !== "HEAD") return next();
       const notFound = () => {
         res.status(404).set({ ...PAGE_HEADERS, "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" }).send("页面不存在或已删除");
       };
@@ -270,5 +400,24 @@ export class ShareStore {
       if (req.method === "HEAD") return res.end();
       fs.createReadStream(file).on("error", () => res.destroy()).pipe(res);
     };
+  }
+}
+
+/** A JSON object body, at most `limit` bytes. */
+async function readJson(req: http.IncomingMessage, limit: number): Promise<Record<string, unknown>> {
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of req) {
+    size += (chunk as Buffer).length;
+    if (size > limit) throw new DataError(413, "BODY_TOO_LARGE", "The request body is too large");
+    chunks.push(chunk as Buffer);
+  }
+  if (!size) return {};
+  try {
+    const body = JSON.parse(Buffer.concat(chunks).toString()) as unknown;
+    if (typeof body !== "object" || body === null || Array.isArray(body)) throw new Error();
+    return body as Record<string, unknown>;
+  } catch {
+    throw new DataError(400, "INVALID_JSON", "The request body must be a JSON object");
   }
 }

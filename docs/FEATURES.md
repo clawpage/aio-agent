@@ -678,18 +678,32 @@ Android 手机用 USB 接在装了 Mac App 的 Mac 上，由 App 运行的 `bin/
     接管后才能操作：点按（`click_at`，只给人用、不给执行会话）、拖动或滚轮滚动（滚动指针下的可滚动区域）、后退/前进/刷新、回车/退格/Tab/Esc、发送文字到当前输入框（支持中文）；
     没接管时控制面丢弃一切输入。坐标按画面比例换算成页面视口的 CSS 像素。
 
-### 分享网页
+### Clawpages（分享网页与带数据的小应用）
 
-沙箱内置 `aio-share` skill：智能体把页面目录（`/home/gem/workspace/share/<页面名>/`，入口 `index.html`）用
-`python3 /home/gem/.codex/tools/aio-share/aio-share.py publish <目录>` 发布，得到公开地址
-`https://<工作区域名>/u/<用户名>/share/<页面名>/`（短地址 `/u/<用户名>/share?<页面名>`）。只有公开页面，没有密码或私密模式。
+沙箱内置 `clawpages` skill（原名 `aio-share`，重新播种时删除旧目录），Codex 与 Claude Code 两个执行器都装：智能体把页面目录
+（`/home/gem/workspace/share/<页面名>/`，入口 `index.html`）用 `python3 /home/gem/.codex/tools/aio-share/aio-share.py publish <目录>`
+发布，得到公开地址 `https://<工作区域名>/u/<用户名>/share/<页面名>/`（短地址 `/u/<用户名>/share?<页面名>`）。页面本身只有公开模式；
+数据按表设权限。侧栏「Clawpages」（`/u/<用户名>/clawpages`，所有账号）列出本账号的 clawpages 与数据。
 
 - **发布**：经成员网关 `/share/<账号>/pages[/<页面名>]`，只认该运行时的分享令牌（宿主 `<数据目录>/share-token`，沙箱内 0600）。
-  同名发布整体替换、链接不变；另有 `list` / `delete`。
-- **存储**：快照存在宿主 `<PA_DATA_DIR>/shares/<账号>/<页面名>/`，访问时只读快照，不触碰沙箱。每页最多 200 个文件、20 MB，每账号 100 页；
-  路径拒绝 `..`、隐藏文件、反斜杠与控制字符。
-- **隔离**：页面位于工作区来源，响应带 `Content-Security-Policy: sandbox allow-scripts …`（无 `allow-same-origin`），读不到工作区会话、
-  cookie 或 localStorage；另带 `nosniff`、`no-referrer`、`noindex`，不设置 cookie。这是全站唯一不需要登录的路径。
+  同名发布整体替换文件、链接不变、**数据保留**；`list` 带每页的表与记录数；`pull <页面名>` 把已发布文件取回工作区接着改
+  （目录已有文件时需 `--force`）；`delete` 同时删除该页全部数据。
+- **数据**：每个 clawpage 有自己的表（与 clawpage.ai 的数据表同语义，但按页隔离而不是按账号共享），存在宿主
+  `<PA_DATA_DIR>/clawpages.sqlite`，访客读写不解析、不唤醒任何账号的运行时或沙箱。表权限 `private`（访客看不到，读作不存在）/
+  `read-public`（访客只读）/ `public`（访客读写）；记录操作：整条写、对象深合并、自动键追加、数值原子加、删除、按插入顺序游标分页
+  （每页最多 500）、导入导出。限额：单条 64 KB、嵌套 16 层，每表 1 万条，每页 20 张表，每账号 50 MB；匿名访问按客户端地址与页面
+  每分钟 60 次写、600 次读（超出 429）。主人写入不存在的表时自动建为 `private`。
+- **页面里用**：`aio-share.py sdk <目录>` 把 `clawpage-sdk.js` 复制进页面（发布时自动刷新这份拷贝），`new Clawpage().table(名).list/get/put/patch/post/incr/delete`
+  访问 `/u/<用户名>/share/<页面名>/.data/<表>[/<键>[/incr]]`。该路径 CORS 全开（页面来源是不透明的 `null`）、不用 cookie；用 `file://` 预览时 SDK 改用内存。
+- **主人身份**：控制台点「打开」时由 `POST /api/clawpages/<页面名>/open` 生成主人链接：页面地址后附 `#cp=<令牌>`（片段不发给服务器），
+  令牌用部署自己的密钥（`<PA_DATA_DIR>/clawpages-key`）签名，只对该账号该页有效、12 小时过期；SDK 取走后立即从地址栏抹掉。持令牌可读写所有表、不受限流。
+- **执行器**：沙箱 CLI `data tables|create|permission|drop|list|get|put|patch|add|incr|delete|export|import` 以主人身份操作；每次执行提示词附上本账号
+  最近活跃的 12 个 clawpages（地址、发布时间、各表权限、记录数与最近改动时间），主会话因此知道已有哪些小应用、数据有什么变化，并按 skill 拉取 → 修改 → 同名发布迭代。
+- **控制台**：`GET /api/clawpages` 列表；`/api/clawpages/<页面名>/tables/<表>` 浏览记录（`PATCH` 改权限、`DELETE` 删表）、`/export` 导出 JSON、
+  `/records/<键>` 删除单条；`DELETE /api/clawpages/<页面名>` 删除页面和数据。均只作用于本账号。
+- **存储与隔离**：快照存在宿主 `<PA_DATA_DIR>/shares/<账号>/<页面名>/`，访问时只读快照，不触碰沙箱。每页最多 200 个文件、20 MB，每账号 100 页；
+  路径拒绝 `..`、隐藏文件、反斜杠与控制字符。页面位于工作区来源，响应带 `Content-Security-Policy: sandbox allow-scripts …`（无 `allow-same-origin`），
+  读不到工作区会话、cookie 或 localStorage；另带 `nosniff`、`no-referrer`、`noindex`，不设置 cookie。页面与其 `.data` 是全站仅有的不需要登录的路径。
 
 ### 数据图表（消息里的 K 线、走势、对比、占比）
 

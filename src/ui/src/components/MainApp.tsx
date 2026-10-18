@@ -23,6 +23,7 @@ import { Workspace } from "./Workspace";
 import { TaskChat } from "./TaskChat";
 import { TaskList } from "./TaskList";
 import { FileLibrary } from "./FileLibrary";
+import { ClawpageList } from "./ClawpageList";
 import { ScheduleList } from "./ScheduleList";
 import { VaultList } from "./VaultList";
 import { PushToggle } from "./PushToggle";
@@ -328,6 +329,7 @@ export function MainApp({ firstSession }: { firstSession?: ReturnType<typeof api
       <button className={`ghost block ${view === "main" && !workspace ? "active" : ""}`} aria-current={view === "main" && !workspace ? "page" : undefined} onClick={() => navigate({ view: "main" })}><NavIcon name="chat"/>{t.nav.main}</button>
       <button className={`ghost block ${view === "tasks" && !workspace ? "active" : ""}`} aria-current={view === "tasks" && !workspace ? "page" : undefined} onClick={() => navigate({ view: "tasks" })}><NavIcon name="tasks"/>{t.nav.tasks}</button>
       <button className={`ghost block ${view === "files" && !workspace ? "active" : ""}`} aria-current={view === "files" && !workspace ? "page" : undefined} onClick={() => navigate({ view: "files" })}><NavIcon name="files"/>{t.library.title}</button>
+      <button className={`ghost block ${view === "clawpages" && !workspace ? "active" : ""}`} aria-current={view === "clawpages" && !workspace ? "page" : undefined} onClick={() => navigate({ view: "clawpages" })}><NavIcon name="clawpages"/>{t.clawpages.title}</button>
       <button className={`ghost block ${view === "schedules" && !workspace ? "active" : ""}`} aria-current={view === "schedules" && !workspace ? "page" : undefined} onClick={() => navigate({ view: "schedules" })}><NavIcon name="schedule"/>{t.nav.schedules}</button>
       <button className={`ghost block ${view === "vault" && !workspace ? "active" : ""}`} aria-current={view === "vault" && !workspace ? "page" : undefined} onClick={() => navigate({ view: "vault" })}><NavIcon name="vault"/>{t.nav.vault}</button>
       {role === 'owner' && gadgetAccount && <button className={`ghost block ${view === 'gadget' && !workspace ? 'active' : ''}`} aria-current={view === "gadget" && !workspace ? "page" : undefined} onClick={() => navigate({ view: "gadget" })}><NavIcon name="gadget"/>{accountLabel(gadgetAccount)}</button>}
@@ -342,6 +344,7 @@ export function MainApp({ firstSession }: { firstSession?: ReturnType<typeof api
       {startFailed && <div className="banner error">{t.app.agentNotReady(startFailed)}</div>}
       <div className="view-slot" hidden={view !== "main"}><TaskChat debug={role === "owner" && debug} onFeed={setTaskFeed} onDetails={t => void details(t)} onOpenLink={u => void openLink(u)} onOpenFileInBrowser={p => void openFileInBrowser(p)} onExpired={expired} onRevealBrowser={revealBrowser}/></div>
       <div className="view-slot" hidden={view !== 'tasks'}><TaskList feed={taskFeed} active={view === 'tasks'} onDetails={t=>void details(t,'tasks')} onExpired={expired}/></div>
+      <div className="view-slot" hidden={view !== 'clawpages'}><ClawpageList active={view === 'clawpages' && !workspace} onExpired={expired}/></div>
       <div className="view-slot" hidden={view !== 'files'}><FileLibrary active={view === 'files' && !workspace} onOpenTask={id => void details(id, 'files')} onOpenLink={u => void openLink(u)} onOpenFileInBrowser={p => void openFileInBrowser(p)} onExpired={expired}/></div>
       <div className="view-slot" hidden={view !== 'schedules'}><ScheduleList active={view === 'schedules'} onExpired={expired} onOpenTask={id => void details(id, 'schedules')}/></div>
       <div className="view-slot" hidden={view !== 'vault'}><VaultList active={view === 'vault'} onExpired={expired}/></div>

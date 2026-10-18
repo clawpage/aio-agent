@@ -21,6 +21,8 @@ import { readFirmware } from "../gadgetFirmware.js";
 import { Dictation, DictationError, DICTATION_MAX_CHARS } from "../dictation.js";
 import { VoiceLog, type VoiceRecord } from "../voiceLog.js";
 import type { AppContext } from "../context.js";
+import { DataError } from "../clawpages.js";
+import { SHARE_NAME } from "../share.js";
 import {
   InvalidConversationTitleError,
   normalizeConversationTitle,
@@ -678,6 +680,53 @@ export function createApiRouter(context: AppContext): Router {
     res.setHeader("Cache-Control", "no-store");
     res.json(context.tasks.files(ctxOf(req).session!.ownerId, Number.isSafeInteger(before) && before > 0 ? before : Number.MAX_SAFE_INTEGER));
   });
+  // Clawpages: the account's published pages and their data, managed from the console as the owner.
+  const clawpages = (req: Request, res: Response, run: (userId: string, page: string, share: NonNullable<AppContext["share"]>) => unknown) => {
+    const share = context.share;
+    const page = String(req.params.page ?? "");
+    if (!share?.data) { res.status(404).json({ error: "not_found", message: "Clawpages are not enabled" }); return; }
+    if (!SHARE_NAME.test(page)) { res.status(400).json({ error: "bad_request", message: "Invalid page name" }); return; }
+    res.setHeader("Cache-Control", "no-store");
+    try {
+      const out = run(ctxOf(req).session!.ownerId, page, share);
+      if (out === undefined) res.status(204).end(); else res.json(out);
+    } catch (err) {
+      if (!(err instanceof DataError)) throw err;
+      res.status(err.status).json({ error: err.code, message: err.message });
+    }
+  };
+  const owner = { owner: true };
+  router.get("/clawpages", requireKind("primary"), requireSession, (req, res) => {
+    res.setHeader("Cache-Control", "no-store");
+    res.json({ pages: context.share?.data ? context.share.list(ctxOf(req).session!.ownerId) : [] });
+  });
+  // An owner link: the page with a token in its fragment that lets this account's owner read and write every table, for a while.
+  router.post("/clawpages/:page/open", requireKind("primary"), requireSession, (req, res) => clawpages(req, res, (userId, page, share) => {
+    if (!share.exists(userId, page)) throw new DataError(404, "PAGE_NOT_FOUND", "The page does not exist");
+    track(req, "clawpage_open", {});
+    return { url: `${share.pageUrl(userId, page)}#cp=${encodeURIComponent(share.data!.ownerToken(userId, page))}` };
+  }));
+  router.delete("/clawpages/:page", requireKind("primary"), requireSession, (req, res) => clawpages(req, res, (userId, page, share) => {
+    if (!share.remove(userId, page)) throw new DataError(404, "PAGE_NOT_FOUND", "The page does not exist");
+    return undefined;
+  }));
+  router.get("/clawpages/:page/tables/:table", requireKind("primary"), requireSession, (req, res) => clawpages(req, res, (userId, page, share) =>
+    share.data!.list(userId, page, String(req.params.table), owner, { limit: req.query.limit, after: req.query.after })));
+  router.get("/clawpages/:page/tables/:table/export", requireKind("primary"), requireSession, (req, res) => clawpages(req, res, (userId, page, share) => {
+    const table = String(req.params.table);
+    res.setHeader("Content-Disposition", `attachment; filename="${page}-${table}.json"`);
+    return share.data!.exportTable(userId, page, table);
+  }));
+  router.patch("/clawpages/:page/tables/:table", requireKind("primary"), requireSession, (req, res) => clawpages(req, res, (userId, page, share) =>
+    share.data!.setPermission(userId, page, String(req.params.table), req.body?.permission)));
+  router.delete("/clawpages/:page/tables/:table", requireKind("primary"), requireSession, (req, res) => clawpages(req, res, (userId, page, share) => {
+    if (!share.data!.dropTable(userId, page, String(req.params.table))) throw new DataError(404, "TABLE_NOT_FOUND", "The table does not exist");
+    return undefined;
+  }));
+  router.delete("/clawpages/:page/tables/:table/records/:key", requireKind("primary"), requireSession, (req, res) => clawpages(req, res, (userId, page, share) => {
+    if (!share.data!.remove(userId, page, String(req.params.table), String(req.params.key), owner)) throw new DataError(404, "RECORD_NOT_FOUND", "The record does not exist");
+    return undefined;
+  }));
   // The task list: counts by status, then one filtered page at a time (keyset cursor).
   router.get("/tasks", requireKind("primary"), requireSession, asyncHandler(async (req, res) => {
     const filter = String(req.query.filter ?? "all") as TaskFilter;

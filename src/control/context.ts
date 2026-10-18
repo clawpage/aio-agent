@@ -28,7 +28,7 @@ import type { Analytics } from "./analytics.js";
 
 export interface AppContext {
   runtimeForUser?: (userId: string) => Promise<AppContext>;
-  /** Public share pages (root context only). */
+  /** Clawpages (public share pages) and their data: one store, shared by every runtime. */
   share?: ShareStore;
   /** Jev structured decisions (host-side key; absent without one). */
   jev?: Jev;

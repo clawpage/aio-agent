@@ -26,6 +26,7 @@ import {
   MAIL_TOOL_DIR,
   SHARE_CLI_PY,
   SHARE_SKILL_DIR,
+  LEGACY_SHARE_SKILL_DIR,
   SHARE_SKILL_MD,
   SHARE_TOOL_DIR,
   GRAPHIC_RENDER_PY,
@@ -38,6 +39,7 @@ import {
   MARKET_TOOL_DIR,
   refreshWorkspaceAgents,
 } from "./seed.js";
+import { CLAWPAGE_SDK_JS } from "./clawpageSdk.js";
 
 export type { ContainerState };
 /** One finished command inside the sandbox. */
@@ -337,9 +339,10 @@ export class SandboxContainer {
   }
 
   /**
-   * The share skill for both executors (Codex skills and the Claude Code config
-   * directory) plus the CLI and this runtime's publish token. Like the document
-   * skill, a failure is logged and never blocks the sandbox.
+   * The clawpages skill for both executors (Codex skills and the Claude Code config
+   * directory) plus the CLI, the browser SDK it copies into pages, and this runtime's
+   * publish token. The skill's earlier name (aio-share) is removed so the executor
+   * never sees both. Like the document skill, a failure is logged and never blocks the sandbox.
    */
   async seedShare(): Promise<void> {
     const s = this.#cfg.sandbox;
@@ -347,10 +350,13 @@ export class SandboxContainer {
     if (!share) return;
     const toolDir = `${s.containerCodexHome}/${SHARE_TOOL_DIR}`;
     const skillDirs = [`${s.containerCodexHome}/${SHARE_SKILL_DIR}`, `${this.#cfg.claudeCode.configDir}/${SHARE_SKILL_DIR}`];
+    const legacy = [`${s.containerCodexHome}/${LEGACY_SHARE_SKILL_DIR}`, `${this.#cfg.claudeCode.configDir}/${LEGACY_SHARE_SKILL_DIR}`];
     try {
+      await this.execInSandbox(["rm", "-rf", ...legacy], { timeoutMs: 15_000 });
       const mkdir = await this.execInSandbox(["mkdir", "-p", toolDir, ...skillDirs], { timeoutMs: 15_000 });
       if (mkdir.code !== 0) throw new Error((mkdir.stderr || mkdir.stdout).trim().slice(0, 200));
       await this.writeFileInSandbox(`${toolDir}/aio-share.py`, SHARE_CLI_PY);
+      await this.writeFileInSandbox(`${toolDir}/clawpage-sdk.js`, CLAWPAGE_SDK_JS);
       await this.writeFileInSandbox(`${toolDir}/config.json`, JSON.stringify(share));
       await this.execInSandbox(["chmod", "600", `${toolDir}/config.json`], { timeoutMs: 15_000 });
       for (const dir of skillDirs) await this.writeFileInSandbox(`${dir}/SKILL.md`, SHARE_SKILL_MD);

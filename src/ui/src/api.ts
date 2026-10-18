@@ -141,6 +141,19 @@ export const api = {
   dispatchLog: (taskId: string) => request<import('./types').DispatchLog>(`/api/settings/dispatch-log/${encodeURIComponent(taskId)}`),
   saveSoul: (body:{content:string;revision:string}) => request<{ok:true;content:string;revision:string}>('/api/settings/soul',{method:'PUT',body}),
   main: (before?: number, signal?: AbortSignal, limit?: number) => request<{ mode: "tasks"; tasks: import("./types").Task[]; nextBefore: number | null; version: string }>(`/api/main${before ? `?before=${before}` : limit ? `?limit=${limit}` : ""}`, { signal }),
+  /** Clawpages: the account's published pages and mini apps, with their data tables. */
+  clawpages: (signal?: AbortSignal) => request<{ pages: import("./types").Clawpage[] }>("/api/clawpages", { signal, cache: "no-store" }),
+  /** An owner link: the page with a token (in its fragment) that opens every table to its owner for a while. */
+  clawpageOpen: (page: string) => request<{ url: string }>(`/api/clawpages/${encodeURIComponent(page)}/open`, { method: "POST", body: {} }),
+  clawpageDelete: (page: string) => request<void>(`/api/clawpages/${encodeURIComponent(page)}`, { method: "DELETE" }),
+  clawpageRecords: (page: string, table: string, after?: string | null, signal?: AbortSignal) =>
+    request<{ records: import("./types").ClawpageRecord[]; nextCursor: string | null }>(`/api/clawpages/${encodeURIComponent(page)}/tables/${encodeURIComponent(table)}?limit=50${after ? `&after=${encodeURIComponent(after)}` : ""}`, { signal, cache: "no-store" }),
+  clawpageExportUrl: (page: string, table: string) => apiUrl(`/api/clawpages/${encodeURIComponent(page)}/tables/${encodeURIComponent(table)}/export`),
+  clawpagePermission: (page: string, table: string, permission: import("./types").ClawpagePermission) =>
+    request<import("./types").ClawpageTable>(`/api/clawpages/${encodeURIComponent(page)}/tables/${encodeURIComponent(table)}`, { method: "PATCH", body: { permission } }),
+  clawpageDropTable: (page: string, table: string) => request<void>(`/api/clawpages/${encodeURIComponent(page)}/tables/${encodeURIComponent(table)}`, { method: "DELETE" }),
+  clawpageDeleteRecord: (page: string, table: string, key: string) =>
+    request<void>(`/api/clawpages/${encodeURIComponent(page)}/tables/${encodeURIComponent(table)}/records/${encodeURIComponent(key)}`, { method: "DELETE" }),
   /** The files page: the main session's messages that hold files, newest first; older ones by `before`. */
   mainFiles: (before?: number, signal?: AbortSignal) => request<{ messages: import("./types").FileMessage[]; nextBefore: number | null }>(`/api/main/files${before ? `?before=${before}` : ""}`, { signal, cache: "no-store" }),
   /** The live first page, unless it is still the version the caller holds. */

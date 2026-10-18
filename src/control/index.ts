@@ -3,6 +3,7 @@ import { Analytics } from "./analytics.js";
 import path from "node:path";
 import {MemberModelGateway} from "./memberModelGateway.js";
 import {ShareStore} from "./share.js";
+import {ClawpageData} from "./clawpages.js";
 import {Jev} from "./jev.js";
 import {DecisionGateway} from "./decision.js";
 import {KbGateway} from "./kb.js";
@@ -472,7 +473,9 @@ async function main(): Promise<void> {
   const account=(sql:string,value:string)=>(ctx.db.prepare(sql).get(value) as {v:string}|undefined)?.v??null;
   ctx.share=new ShareStore({cfg:ctx.cfg,port:ctx.cfg.memberModelPort??4902,
     usernameOf:id=>account("SELECT username AS v FROM owners WHERE id=?",id),
-    userIdOf:name=>account("SELECT id AS v FROM owners WHERE username=?",name)});
+    userIdOf:name=>account("SELECT id AS v FROM owners WHERE username=?",name),
+    data:new ClawpageData(ctx.cfg.dataDir)});
+  ctx.tasks.setClawpages(id=>ctx.share!.list(id));
   // The owner sandbox receives its token when refreshSandboxContent seeds it below.
   ctx.share.provision(ctx.cfg);
   const decision=new DecisionGateway({db:ctx.db,jev:ctx.jev!,log:ctx.log,port:ctx.cfg.memberModelPort??4902});

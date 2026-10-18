@@ -22,6 +22,7 @@ import { schedules } from "./schedules";
 import { vault } from "./vault";
 import { files } from "./files";
 import { library } from "./library";
+import { clawpages } from "./clawpages";
 import { cards } from "./cards";
 
-export const en: Messages = { support, common, app, auth, nav, time, voice, usage, analytics, gadget, chat, feed, dispatch, workspace, browser, phone, userBrowser, settings, tasks, schedules, vault, files, library, cards };
+export const en: Messages = { support, common, app, auth, nav, time, voice, usage, analytics, gadget, chat, feed, dispatch, workspace, browser, phone, userBrowser, settings, tasks, schedules, vault, files, library, clawpages, cards };

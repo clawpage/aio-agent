@@ -1,3 +1,4 @@
+import { CLAWPAGE_SDK_JS } from "../../src/control/sandbox/clawpageSdk.js";
 import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 import { SandboxContainer } from "../../src/control/sandbox/container.js";
@@ -136,17 +137,22 @@ describe("sandbox workspace seed", () => {
       return { cfg, calls, execCalls };
     };
     const none = await seed();
-    expect(none.calls.some((c) => c.path.includes("aio-share"))).toBe(false);
+    expect(none.calls.some((c) => c.path.includes("aio-share") || c.path.includes("clawpages"))).toBe(false);
 
     const share = { endpoint: "http://host.docker.internal:4902/share/owner_1", token: "a".repeat(64) };
     const { cfg, calls, execCalls } = await seed(share);
-    const skills = calls.filter((c) => c.path.endsWith("/skills/aio-share/SKILL.md"));
+    const skills = calls.filter((c) => c.path.endsWith("/skills/clawpages/SKILL.md"));
     expect(skills.map((c) => c.path).sort()).toEqual([
-      `${cfg.claudeCode.configDir}/skills/aio-share/SKILL.md`,
-      `${cfg.sandbox.containerCodexHome}/skills/aio-share/SKILL.md`,
+      `${cfg.claudeCode.configDir}/skills/clawpages/SKILL.md`,
+      `${cfg.sandbox.containerCodexHome}/skills/clawpages/SKILL.md`,
     ].sort());
     for (const s of skills) expect(s.content).toBe(SHARE_SKILL_MD);
+    expect(SHARE_SKILL_MD).toMatch(/^---\nname: clawpages\n/);
+    // The skill's earlier name goes, so the executor never sees both.
+    expect(execCalls).toContainEqual(["rm", "-rf", `${cfg.sandbox.containerCodexHome}/skills/aio-share`, `${cfg.claudeCode.configDir}/skills/aio-share`]);
+    expect(calls.some((c) => c.path.includes("/skills/aio-share/"))).toBe(false);
     expect(calls.find((c) => c.path.endsWith("/tools/aio-share/aio-share.py"))?.content).toBe(SHARE_CLI_PY);
+    expect(calls.find((c) => c.path.endsWith("/tools/aio-share/clawpage-sdk.js"))?.content).toBe(CLAWPAGE_SDK_JS);
     const config = calls.find((c) => c.path.endsWith("/tools/aio-share/config.json"));
     expect(JSON.parse(config!.content)).toEqual(share);
     expect(execCalls).toContainEqual(["chmod", "600", config!.path]);

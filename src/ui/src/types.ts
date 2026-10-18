@@ -224,6 +224,13 @@ export interface Task {
   support?: boolean;
 }
 
+/** Who may use a clawpage table: only the owner, everyone reads, or everyone reads and writes. */
+export type ClawpagePermission = "private" | "read-public" | "public";
+export interface ClawpageTable { name: string; permission: ClawpagePermission; records: number; bytes: number; createdAt: number; updatedAt: number }
+/** A published clawpage (a public page, a mini app when it has tables). */
+export interface Clawpage { name: string; title: string; url: string; files: number; bytes: number; updatedAt: number; tables: ClawpageTable[] }
+export interface ClawpageRecord { key: string; value: unknown; createdAt: number; updatedAt: number }
+
 /** A reply of the main session that names workspace files (the files page). */
 export interface FileMessage {
   /** The task to open for it. */
