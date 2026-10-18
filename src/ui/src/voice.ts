@@ -23,12 +23,79 @@ export function voiceSupported(): boolean {
   return Boolean(navigator.mediaDevices?.getUserMedia) && Boolean(audioContextClass());
 }
 
+const PROCESSING = { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true };
+const BUILT_IN_KEY = "voice.builtInMicrophone";
+
+/** Phones and tablets (an iPad's Safari says Macintosh, but has a touch screen). */
+export function mobileOs(userAgent: string, touchPoints = 0): "ios" | "android" | null {
+  if (/Android/i.test(userAgent)) return "android";
+  if (/iPhone|iPad|iPod/i.test(userAgent) || (/Macintosh/i.test(userAgent) && touchPoints > 1)) return "ios";
+  return null;
+}
+
+/**
+ * The phone's own microphone among the inputs, never a Bluetooth, wired or USB
+ * one. Pages see only names: Chrome and WebView on Android call the built-in
+ * microphone "Speakerphone" or "Headset earpiece" (Chromium's
+ * CommunicationDeviceSelector); WebKit uses the system's port name, "iPhone
+ * Microphone" or "iPad Microphone", in the phone's language.
+ */
+export function builtInMicrophone(os: "ios" | "android", inputs: Pick<MediaDeviceInfo, "deviceId" | "label">[]): string | null {
+  // Android: speakerphone first, the microphone set up for a phone held in front of you.
+  const preference: ((label: string) => boolean)[] = os === "android"
+    ? [label => /^speakerphone$/i.test(label), label => /^headset earpiece$/i.test(label)]
+    : [label => /iphone|ipad|built-?in|内建|內建|内置|內置/i.test(label) && !/bluetooth|airpods|headset|耳机|耳機/i.test(label)]; // i18n-exempt: iOS names its microphones in the phone's language
+  for (const matches of preference) {
+    const device = inputs.find(d => d.deviceId && matches(d.label.trim()));
+    if (device) return device.deviceId;
+  }
+  return null;
+}
+
+const open = (deviceId?: string) =>
+  navigator.mediaDevices.getUserMedia({ audio: deviceId ? { ...PROCESSING, deviceId: { exact: deviceId } } : PROCESSING });
+
+/**
+ * On a phone, always the phone's own microphone, even with a Bluetooth headset
+ * connected; the system's choice elsewhere, or when the phone's can't be found.
+ * Names are only readable once the microphone is allowed, so the first
+ * recording may open it twice; the device found is remembered for the next.
+ */
+async function openMicrophone(): Promise<MediaStream> {
+  const os = mobileOs(navigator.userAgent, navigator.maxTouchPoints);
+  if (!os) return open();
+  const builtIn = (stream: MediaStream) => {
+    const track = stream.getAudioTracks()[0];
+    return Boolean(track && builtInMicrophone(os, [{ deviceId: "x", label: track.label }]));
+  };
+  const saved = localStorage.getItem(BUILT_IN_KEY);
+  if (saved) {
+    const stream = await open(saved).catch(() => null);
+    if (stream && builtIn(stream)) return stream;
+    stream?.getTracks().forEach(track => track.stop());
+    localStorage.removeItem(BUILT_IN_KEY);
+  }
+  const stream = await open();
+  const inputs = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === "audioinput");
+  const id = builtInMicrophone(os, inputs);
+  if (!id) return stream;
+  if (stream.getAudioTracks()[0]?.getSettings().deviceId === id) {
+    localStorage.setItem(BUILT_IN_KEY, id);
+    return stream;
+  }
+  stream.getTracks().forEach(track => track.stop());
+  const own = await open(id).catch(() => null);
+  if (!own) return open();
+  localStorage.setItem(BUILT_IN_KEY, id);
+  return own;
+}
+
 export async function startRecording(): Promise<Recording> {
   // Made before waiting for the microphone, while the tap still counts as a user gesture (iOS).
   const audio = new (audioContextClass()!)();
   let stream: MediaStream;
   try {
-    stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+    stream = await openMicrophone();
     await audio.resume();
   } catch (err) {
     void audio.close();

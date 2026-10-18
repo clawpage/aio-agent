@@ -481,6 +481,9 @@ iOS App 需为声明了存入相册权限、带 `aioSaveFiles` 标记的新版�
   （X-ASR 中英双语模型，常用词表作热词；请求 `/asr?punct=1` 时加标点并去掉口头禅，只有口头禅时返回空，按钮提示「没听清」）。未配置时 `GET /api/asr` 返回 `{enabled:false}`，按钮不显示。
 - **语言**：`GET /api/asr` 同时返回识别服务能听懂的界面语言 `locales`（X-ASR 听普通话和英语，不支持西班牙语，因此是 `zh-CN`、`zh-TW`、`en`；见 `src/control/http/api.ts` 的 `ASR_LOCALES`）。界面语言（配置页选择或跟随系统）不在其中时不显示麦克风；旧控制面不返回该字段时照常显示。
   现有部署复用语音配件的识别服务：`PA_ASR_URL=http://192.168.1.118:4910/asr?punct=1`（old-mb）。
+- **麦克风**：手机和平板（iOS/Android，含网页与 App）上始终用机身麦克风，连着蓝牙、有线或 USB 耳机也不用它们的麦克风：网页只能看到设备名，
+  Android（Chrome/WebView）取「Speakerphone」，没有再取「Headset earpiece」，iOS 取名字含 iPhone/iPad 的那个；第一次录音先按默认打开（授权后才看得到名字），
+  若不是机身麦克风就换成它（`deviceId: exact`），并把它记在本机（localStorage `voice.builtInMicrophone`），之后直接打开；找不到或打不开时退回系统默认。桌面不变。
 - **链路**：浏览器取麦克风原始采样，降到 16 kHz 编为 WAV，经 `POST /api/asr`（JSON `{audioBase64}`，带 CSRF）交给控制面转发；
   识别出的文字再经与语音键盘同一套润色（`PA_DICTATION_MODEL`，owner 的 Claude 凭据，见「语音配件」）后返回 `{text, polished}`；
   识别服务返回的 `words`（它的常用词表）一并交给润色，用来改回它仍听错的品牌、地名等，
