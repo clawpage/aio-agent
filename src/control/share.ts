@@ -459,10 +459,12 @@ export class ShareStore {
         return notFound();
       }
       if (!stat.isFile() || !file.startsWith(pageDir + path.sep)) return notFound();
-      // Publishing writes every file anew, so a file's size and time name its version.
-      const etag = `"${stat.size.toString(36)}-${Math.floor(stat.mtimeMs).toString(36)}"`;
+      // Publishing writes every file anew, so a file's size and time name its version. Weak, because the
+      // CDN in front compresses pages and drops a strong ETag when it does (a weak one it keeps).
+      const tag = `"${stat.size.toString(36)}-${Math.floor(stat.mtimeMs).toString(36)}"`;
+      const etag = `W/${tag}`;
       const known = String(req.headers["if-none-match"] ?? "").split(",").map((t) => t.trim().replace(/^W\//, ""));
-      if (known.includes(etag)) {
+      if (known.includes(tag)) {
         res.status(304).set({ ...PAGE_HEADERS, etag }).end();
         return;
       }

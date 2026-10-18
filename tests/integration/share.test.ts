@@ -102,9 +102,9 @@ it("publishes a page from the sandbox channel and serves it publicly, sandboxed,
     // Every load asks whether the file changed: an unchanged one answers 304 (still sandboxed), never a stale copy.
     expect(html.headers.get("cache-control")).toBe("no-cache");
     const etag = html.headers.get("etag")!;
-    expect(etag).toMatch(/^"[0-9a-z]+-[0-9a-z]+"$/);
+    expect(etag).toMatch(/^W\/"[0-9a-z]+-[0-9a-z]+"$/);
     expect(html.headers.get("last-modified")).toBeTruthy();
-    const unchanged = await h.request("/u/owner/share/trip/", { host: "workspace", headers: { "if-none-match": `W/${etag}` } });
+    const unchanged = await h.request("/u/owner/share/trip/", { host: "workspace", headers: { "if-none-match": etag } });
     expect(unchanged.status).toBe(304);
     expect(unchanged.headers.get("content-security-policy")).toMatch(/^sandbox /);
     expect(await unchanged.text()).toBe("");
