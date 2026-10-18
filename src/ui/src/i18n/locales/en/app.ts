@@ -29,7 +29,7 @@ export const app: typeof zh = {
     completed: "Done",
     failed: "Failed",
     interrupted: "Stopped",
-    unknown: "Result unconfirmed",
+    unknown: "Result needs checking",
     blocked: "Needs more info",
     merging: "Adding",
     steering: "Adding",
@@ -55,7 +55,7 @@ export const app: typeof zh = {
     slow: "Slower than usual: the browser may be waking up. This usually takes under half a minute",
     loading: "Loading in the sandbox browser",
     timeout: "Timed out: the sandbox browser isn't responding. Please try again later.",
-    consoleLabel: "Web page",
+    consoleLabel: "Use the web page",
     closePage: "Close page",
   },
   push: {

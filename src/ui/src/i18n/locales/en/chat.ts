@@ -23,7 +23,7 @@ export const chat: typeof zh = {
     },
   },
   errors: {
-    sessionExpired: "Your session has expired. Please sign in again.",
+    sessionExpired: "Your session has expired. Please log in again.",
     sendFailed: (message: string) => `${message} (your message is kept, so you can retry)`,
     uploadItem: (name: string, message: string) => `${name}: ${message}`,
     uploadFailed: (failures: string[], kept: boolean) => `Some attachments failed to upload: ${failures.join("; ")}${kept ? " (the uploaded ones are kept)" : ""}`,

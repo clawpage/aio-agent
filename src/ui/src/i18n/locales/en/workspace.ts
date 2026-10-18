@@ -88,7 +88,7 @@ export const workspace: typeof zh = {
     run: "Convert",
     cancel: "Cancel",
     currentKind: (kind: string) => `File type: ${kind}`,
-    disabled: "Document processing is turned off in settings. Browsing, uploading and downloading files still work.",
+    disabled: "Document processing is turned off in the configuration. Browsing, uploading and downloading files still work.",
     authoringReady: "Creating and editing are ready; PDF and image previews still work.",
     notReady: "Converting needs document processing to be ready; PDF and image previews still work.",
     generated: "Created ",
