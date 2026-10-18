@@ -1,2 +1,77 @@
 import type { agent as zh } from "../zh/agent.js";
-export const agent: typeof zh = {};
+export const agent: typeof zh = {
+    conversation: {
+        titleEmpty: "The title can't be empty",
+        titleTooLong: (max: number) => `The title can be at most ${max} characters`,
+        missing: "This conversation doesn't exist",
+        archived: "This conversation is archived; messages can't be sent to it",
+    },
+    turn: {
+        serviceUnavailable: "The service is temporarily unavailable. Please try again later.",
+        duplicateMessageId: "This message ID is already used by a different message, so the repeated submission was refused",
+        textOnlyModel: "This model accepts text only. Remove the image attachments and try again.",
+        restartedWhileRunning: "The service restarted while this turn was running. Its outcome is unknown and it may already have acted in the sandbox",
+        restartedWhileRunningNotice: "The service restarted while this turn was running. Its outcome is unknown and it may already have acted in the sandbox (files, processes, browser state). Check the sandbox first and resend only once you've confirmed; the system never replays the turn on its own.",
+        restartedWhileQueued: "The queued turn was cancelled because the service restarted",
+        restartedWhileQueuedNotice: "The service restarted before this turn started, so it was cancelled. It's safe to send it again.",
+        startConnectionLost: "The connection to the sandbox Codex was lost while starting the turn; the outcome is unknown",
+        connectionLost: "The connection to the sandbox Codex was lost",
+        connectionLostBecause: (reason: string) => `The connection to the sandbox Codex was lost: ${reason}`,
+        outcomeUnknown: (cause: string) => `${cause}; the outcome of this run is unknown`,
+        outcomeUnknownNotice: (cause: string) => `${cause}; the outcome of this run is unknown and it may already have acted. Check the files and processes in the sandbox first; the system never replays the turn on its own.`,
+        checkSandbox: (message: string) => `${message}. Check the files and processes in the sandbox first; the system never replays the turn on its own.`,
+        failed: (reason: string) => `Run failed: ${reason}`,
+        codexEnded: (status: string) => `The Codex turn ended with status: ${status}`,
+        stopTimedOut: (minutes: number) => `Still not finished ${minutes} ${minutes === 1 ? "minute" : "minutes"} after the stop request`,
+        crossHarnessFork: "A Codex session and a Claude Code session can't be forked from each other",
+    },
+    stop: {
+        queuedCancelled: "The user cancelled the queued turn",
+        queued: "Cancelled the queued turn",
+        none: "Nothing is running or queued right now",
+        notDelivered: "The stop request hasn't reached the sandbox yet; if the run hasn't ended within two minutes, it will be marked “Result needs checking”",
+        requested: "Asked the current run to stop",
+        starting: "Stop requested; the turn will be interrupted as soon as it has finished starting",
+    },
+    approval: {
+        missing: "This approval request doesn't exist",
+        handled: "This approval has already been handled",
+        unsupported: (method: string) => `Unsupported approval type: ${method}`,
+        expired: "This approval has expired",
+        done: "Done",
+    },
+    claude: {
+        disabled: "The Claude Code executor isn't enabled",
+        busy: "This session already has a turn running",
+        failed: "Claude Code failed",
+        steerNotDelivered: "The turn had already ended; the supplement wasn't delivered",
+        outputTruncated: "… (output too long, truncated)",
+        image: "[image]",
+    },
+    dispatch: {
+        failed: (error: string) => `Task assignment failed: ${error}`,
+        timedOut: (seconds: number) => `Dispatch timed out: the dispatcher gave no result within ${seconds} seconds. Tap “Retry”.`,
+    },
+    hostCodex: {
+        off: "This deployment doesn't use the host's Codex login (PA_HOST_CODEX=off)",
+        unavailable: (message: string) => `Host Codex login unavailable: ${message}`,
+    },
+    models: {
+        claudeName: (name: string) => `${name} (Claude Code)`,
+        claudeOpus: "Claude Code executor, recommended.",
+        claudeSonnet: "Claude Code executor, faster.",
+        claudeFable: "Claude Code executor, most capable and most expensive.",
+        bridgeChatgpt: "Uses the owner's ChatGPT login through the member model gateway; the credential is added only on the host.",
+        bridgeTextOnly: "A model provided through the member model gateway; text input only.",
+    },
+    jev: {
+        notConfigured: "Jev isn't configured",
+        httpStatus: (status: number) => `Jev returned HTTP ${status}`,
+        incomplete: (question: string) => `Jev's answer to ${question} is incomplete`,
+    },
+    soul: {
+        invalid: "SOUL.md must be valid text no larger than 64 KB.",
+        notLoaded: "Load SOUL.md before saving it.",
+        conflict: "SOUL.md was changed on another page. Reload it and merge your changes.",
+    },
+};

@@ -6,10 +6,10 @@ import { getMeta, setMeta } from "./db.js";
  * written in English; what a model writes for people follows the account's choice.
  */
 export const LOCALE_NAMES = {
-    "zh-CN": "Simplified Chinese (简体中文)",
+    "zh-CN": "Simplified Chinese (简体中文)", // i18n-exempt: language name in English prompts for the model
     en: "English",
     es: "Spanish (español)",
-    "zh-TW": "Traditional Chinese (繁體中文)",
+    "zh-TW": "Traditional Chinese (繁體中文)", // i18n-exempt: language name in English prompts for the model
 } as const;
 export type Locale = keyof typeof LOCALE_NAMES;
 /** The language of an account, a request or a process that has none of its own. */

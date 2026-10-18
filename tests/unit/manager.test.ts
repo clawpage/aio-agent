@@ -266,7 +266,7 @@ describe("AgentManager", () => {
     await tick(60);
     const row = db.prepare("SELECT status, error FROM turns WHERE client_message_id = 'm1'").get() as { status: string; error: string };
     expect(row.status).toBe("unknown");
-    expect(row.error).toContain("结果未知");
+    expect(row.error).toContain("outcome of this run is unknown");
     // No automatic replay of the unknown turn.
     expect(codex.startedTurns.length).toBe(1);
   });
@@ -301,9 +301,9 @@ describe("AgentManager", () => {
       error: string;
     };
     expect(runningRow.status).toBe("unknown");
-    expect(runningRow.error).toContain("结果未知");
+    expect(runningRow.error).toContain("outcome is unknown");
     expect(queuedRow.status).toBe("interrupted");
-    expect(queuedRow.error).toContain("排队");
+    expect(queuedRow.error).toContain("queued");
 
     const reconciled = agent.listEvents(conv.id, 0).filter((e) => e.type === "turn.reconciled");
     expect(reconciled.length).toBe(2);

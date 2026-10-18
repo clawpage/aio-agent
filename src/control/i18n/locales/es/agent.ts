@@ -1,2 +1,77 @@
 import type { agent as zh } from "../zh/agent.js";
-export const agent: typeof zh = {};
+export const agent: typeof zh = {
+    conversation: {
+        titleEmpty: "El título no puede estar vacío",
+        titleTooLong: (max: number) => `El título admite hasta ${max} caracteres`,
+        missing: "La conversación no existe",
+        archived: "La conversación está archivada; no se le pueden enviar mensajes",
+    },
+    turn: {
+        serviceUnavailable: "El servicio no está disponible por el momento. Inténtalo de nuevo más tarde.",
+        duplicateMessageId: "Este ID de mensaje ya se usó para otro mensaje con un contenido distinto, así que se rechazó el envío repetido",
+        textOnlyModel: "Este modelo solo admite texto. Quita las imágenes adjuntas e inténtalo de nuevo.",
+        restartedWhileRunning: "El servicio se reinició mientras este turno se ejecutaba. Se desconoce el resultado y es posible que ya haya actuado en el entorno aislado",
+        restartedWhileRunningNotice: "El servicio se reinició mientras este turno se ejecutaba. Se desconoce el resultado y es posible que ya haya actuado en el entorno aislado (archivos, procesos, estado del navegador). Revisa primero el entorno aislado y vuelve a enviarlo solo cuando lo hayas confirmado; el sistema nunca repite el turno por su cuenta.",
+        restartedWhileQueued: "El turno en cola se canceló porque el servicio se reinició",
+        restartedWhileQueuedNotice: "El servicio se reinició antes de que empezara este turno, así que se canceló. Puedes volver a enviarlo sin riesgo.",
+        startConnectionLost: "Se perdió la conexión con Codex del entorno aislado al iniciar el turno; se desconoce el resultado",
+        connectionLost: "Se perdió la conexión con Codex del entorno aislado",
+        connectionLostBecause: (reason: string) => `Se perdió la conexión con Codex del entorno aislado: ${reason}`,
+        outcomeUnknown: (cause: string) => `${cause}; se desconoce el resultado de esta ejecución`,
+        outcomeUnknownNotice: (cause: string) => `${cause}; se desconoce el resultado de esta ejecución y es posible que ya haya actuado. Revisa primero los archivos y procesos del entorno aislado; el sistema nunca repite el turno por su cuenta.`,
+        checkSandbox: (message: string) => `${message}. Revisa primero los archivos y procesos del entorno aislado; el sistema nunca repite el turno por su cuenta.`,
+        failed: (reason: string) => `La ejecución falló: ${reason}`,
+        codexEnded: (status: string) => `El turno de Codex terminó con el estado: ${status}`,
+        stopTimedOut: (minutes: number) => `Sigue sin terminar ${minutes} ${minutes === 1 ? "minuto" : "minutos"} después de la solicitud de detención`,
+        crossHarnessFork: "No se puede derivar una sesión de Codex de una de Claude Code ni al revés",
+    },
+    stop: {
+        queuedCancelled: "El usuario canceló el turno en cola",
+        queued: "Se canceló el turno en cola",
+        none: "No hay nada en ejecución ni en cola",
+        notDelivered: "La solicitud de detención aún no llegó al entorno aislado; si la ejecución no termina en dos minutos, se marcará como «Resultado por comprobar»",
+        requested: "Se pidió detener la ejecución actual",
+        starting: "Se pidió la detención; el turno se interrumpirá en cuanto termine de iniciarse",
+    },
+    approval: {
+        missing: "La solicitud de aprobación no existe",
+        handled: "Esta aprobación ya se procesó",
+        unsupported: (method: string) => `Tipo de aprobación no admitido: ${method}`,
+        expired: "Esta aprobación caducó",
+        done: "Hecho",
+    },
+    claude: {
+        disabled: "El ejecutor Claude Code no está activado",
+        busy: "Esta sesión ya tiene un turno en ejecución",
+        failed: "Claude Code falló",
+        steerNotDelivered: "El turno ya había terminado; la información adicional no se entregó",
+        outputTruncated: "… (salida demasiado larga, truncada)",
+        image: "[imagen]",
+    },
+    dispatch: {
+        failed: (error: string) => `La asignación de la tarea falló: ${error}`,
+        timedOut: (seconds: number) => `Se agotó el tiempo de asignación: el asignador no dio un resultado en ${seconds} segundos. Toca «Reintentar».`,
+    },
+    hostCodex: {
+        off: "Esta instalación no usa el acceso de Codex del equipo anfitrión (PA_HOST_CODEX=off)",
+        unavailable: (message: string) => `El acceso de Codex del equipo anfitrión no está disponible: ${message}`,
+    },
+    models: {
+        claudeName: (name: string) => `${name} (Claude Code)`,
+        claudeOpus: "Ejecutor Claude Code, recomendado.",
+        claudeSonnet: "Ejecutor Claude Code, más rápido.",
+        claudeFable: "Ejecutor Claude Code, el más capaz y el más caro.",
+        bridgeChatgpt: "Usa el acceso de ChatGPT del propietario a través de la pasarela de modelos de miembros; la credencial solo se añade en el equipo anfitrión.",
+        bridgeTextOnly: "Modelo ofrecido a través de la pasarela de modelos de miembros; solo admite texto.",
+    },
+    jev: {
+        notConfigured: "Jev no está configurado",
+        httpStatus: (status: number) => `Jev respondió HTTP ${status}`,
+        incomplete: (question: string) => `La respuesta de Jev a ${question} está incompleta`,
+    },
+    soul: {
+        invalid: "SOUL.md debe ser texto válido de no más de 64 KB.",
+        notLoaded: "Carga SOUL.md antes de guardarlo.",
+        conflict: "SOUL.md se modificó en otra página. Vuelve a cargarlo y combina tus cambios.",
+    },
+};

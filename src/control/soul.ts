@@ -2,8 +2,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {createHash,randomUUID} from 'node:crypto';
 import type {Config} from './config.js';
+import {t} from './i18n/index.js';
 
-export const DEFAULT_SOUL = `# SOUL.md
+export const DEFAULT_SOUL = /* i18n-exempt: model-facing, names the brand in Chinese */ `# SOUL.md
 
 You are Clawpage Agent (一站 in Chinese), the user's personal AI assistant. Think of a reliable, curious, occasionally witty partner: someone who gets things done and talks like a person.
 
@@ -17,7 +18,7 @@ You are Clawpage Agent (一站 in Chinese), the user's personal AI assistant. Th
 - Reply in the language the user writes in, and switch when they ask for another. This identity and style also apply to the sub-agents that take on tasks.
 `;
 /** The Chinese default used until 2026-10-15, under both names it had. */
-const CHINESE_DEFAULT = `# SOUL.md
+const CHINESE_DEFAULT = /* i18n-exempt: an older default, recognised in stored SOUL.md files */ `# SOUL.md
 
 你是一站（英文名 Clawpage Agent），用户的个人 AI 助理。像一位靠谱、有好奇心、偶尔有点机灵的搭档：能把事情办妥，也能把话说得有人味。
 
@@ -31,12 +32,12 @@ const CHINESE_DEFAULT = `# SOUL.md
 - 默认中文，用户指定其他语言时遵循要求。这份身份与风格同样适用于承接任务的子 agent。
 `;
 /** Earlier defaults: a SOUL.md still exactly one of them was never edited, so it follows the current default. */
-export const PREVIOUS_DEFAULTS = [CHINESE_DEFAULT, CHINESE_DEFAULT.replace('你是一站（英文名 Clawpage Agent），', '你是 AIO Agent，')];
+export const PREVIOUS_DEFAULTS = [CHINESE_DEFAULT, CHINESE_DEFAULT.replace('你是一站（英文名 Clawpage Agent），', '你是 AIO Agent，')]; // i18n-exempt: older defaults, recognised in stored SOUL.md files
 export const SOUL_MAX_BYTES = 64 * 1024;
 export class SoulError extends Error { constructor(public status:number,message:string){super(message);} }
 const revision=(content:string)=>createHash('sha256').update(content).digest('hex');
 function validate(content:unknown):asserts content is string {
-  if(typeof content!=='string'||Buffer.byteLength(content,'utf8')>SOUL_MAX_BYTES||content.includes('\0'))throw new SoulError(400,'SOUL.md 必须是有效文本，大小不超过 64 KB。');
+  if(typeof content!=='string'||Buffer.byteLength(content,'utf8')>SOUL_MAX_BYTES||content.includes('\0'))throw new SoulError(400,t().agent.soul.invalid);
 }
 /** Control-plane owned, outside the agent's writable sandbox workspace. */
 export function readSoul(cfg:Pick<Config,'dataDir'>) {
@@ -53,8 +54,8 @@ export function readSoul(cfg:Pick<Config,'dataDir'>) {
 }
 export function writeSoul(cfg:Pick<Config,'dataDir'>,content:unknown,expectedRevision:unknown) {
   validate(content);
-  if(typeof expectedRevision!=='string')throw new SoulError(400,'请先加载 SOUL.md 再保存。');
-  if(readSoul(cfg).revision!==expectedRevision)throw new SoulError(409,'SOUL.md 已在其他页面修改，请重新加载后合并你的修改。');
+  if(typeof expectedRevision!=='string')throw new SoulError(400,t().agent.soul.notLoaded);
+  if(readSoul(cfg).revision!==expectedRevision)throw new SoulError(409,t().agent.soul.conflict);
   const file=path.join(cfg.dataDir,'SOUL.md');const temp=`${file}.${randomUUID()}.tmp`;
   try{fs.writeFileSync(temp,content,{encoding:'utf8',mode:0o600,flag:'wx'});fs.renameSync(temp,file);}finally{fs.rmSync(temp,{force:true});}
   return {content,revision:revision(content)};

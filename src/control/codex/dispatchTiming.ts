@@ -1,3 +1,5 @@
+import { t } from "../i18n/index.js";
+
 /** Milliseconds spent in each dispatcher stage. Missing fields were not observable. */
 export interface DispatchTiming {
   model?: string;
@@ -27,7 +29,7 @@ export type DispatchTimingSink = (timing: Partial<DispatchTiming>) => void;
  */
 export class DispatchTimeoutError extends Error {
   constructor(seconds: number) {
-    super(`派单超时：派单器 ${seconds} 秒内没有给出结果，请点“重试”`);
+    super(t().agent.dispatch.timedOut(seconds));
     this.name = "DispatchTimeoutError";
   }
 }

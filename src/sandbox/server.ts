@@ -18,14 +18,15 @@ import {
   type SpawnServerMessage,
 } from "../common/protocol.js";
 import { SANDBOX_PROTOCOL } from "../common/version.js";
-import type { SandboxDriver } from "./driver.js";
+import { SandboxRefusal, type SandboxDriver } from "./driver.js";
 
 const OUR_HEADERS = new Set([NODE_TOKEN_HEADER, PROTOCOL_HEADER, SANDBOX_HEADER]);
 const MAX_BODY = 64 * 1024 * 1024;
 const ROUTE = /^\/v1\/sandboxes\/([A-Za-z0-9][A-Za-z0-9_.-]{0,127})(?:\/(ensure|stop|restart|peer-ports|exec|spawn))?$/;
 
+/** `code` (and `details`) are what the control plane words for people; the message is English, for logs. */
 class HttpError extends Error {
-  constructor(readonly status: number, readonly code: string, message: string) {
+  constructor(readonly status: number, readonly code: string, message: string, readonly details: Record<string, string> = {}) {
     super(message);
   }
 }
@@ -62,9 +63,9 @@ export function createSandboxd(opts: SandboxdOptions): http.Server {
       try {
         const url = new URL(req.url ?? "/", "http://sandboxd");
         if (req.method === "GET" && url.pathname === "/healthz") return send(res, 200, { ok: true });
-        if (!authorized(req)) throw new HttpError(401, "unauthorized", "节点令牌无效");
+        if (!authorized(req)) throw new HttpError(401, "unauthorized", "invalid node token");
         if (req.method === "GET" && url.pathname === "/v1/version") return send(res, 200, version());
-        if (!compatible(req)) throw new HttpError(409, "incompatible", `沙箱节点协议 ${SANDBOX_PROTOCOL} 不在控制面支持的范围（${String(req.headers[PROTOCOL_HEADER] ?? "未声明")}）内`);
+        if (!compatible(req)) throw new HttpError(409, "incompatible", `sandbox node protocol ${SANDBOX_PROTOCOL} is outside the range the control plane supports (${String(req.headers[PROTOCOL_HEADER] ?? "none given")})`, { protocol: String(SANDBOX_PROTOCOL) });
         if (req.headers[SANDBOX_HEADER]) return await proxyHttp(driver, log, req, res);
         if (req.method === "GET" && url.pathname === "/v1/node") {
           const info = await driver.info();
@@ -74,15 +75,15 @@ export function createSandboxd(opts: SandboxdOptions): http.Server {
           return send(res, 200, { ...version(), ...info, memAvailable } satisfies NodeInfo);
         }
         const route = ROUTE.exec(url.pathname);
-        if (!route) throw new HttpError(404, "not_found", "没有这个接口");
+        if (!route) throw new HttpError(404, "not_found", "no such endpoint");
         const [, name, action] = route;
         if (!action && req.method === "GET") return send(res, 200, await driver.inspect(name!));
-        if (req.method !== "POST" || !action || action === "spawn") throw new HttpError(405, "method_not_allowed", "不支持的请求方法");
+        if (req.method !== "POST" || !action || action === "spawn") throw new HttpError(405, "method_not_allowed", "method not allowed");
         const body = (await readJson(req)) as Record<string, unknown>;
         switch (action) {
           case "ensure": {
             const { spec, readyTimeoutMs } = body as unknown as EnsureRequest;
-            if (spec?.name !== name) throw new HttpError(400, "bad_request", "沙箱名与参数不一致");
+            if (spec?.name !== name) throw new HttpError(400, "bad_request", "the sandbox name does not match its spec");
             return send(res, 200, await driver.ensure(spec, clampTimeout(readyTimeoutMs, 180_000)));
           }
           case "stop":
@@ -102,10 +103,10 @@ export function createSandboxd(opts: SandboxdOptions): http.Server {
           return;
         }
         const status = err instanceof HttpError ? err.status : 500;
-        const code = err instanceof HttpError ? err.code : "failed";
+        const coded = err instanceof HttpError || err instanceof SandboxRefusal ? err : null;
         const message = err instanceof Error ? err.message : String(err);
         if (status >= 500) log.warn("request failed", { url: req.url, error: message });
-        send(res, status, { error: code, message });
+        send(res, status, { error: coded?.code ?? "failed", message, ...(coded && Object.keys(coded.details).length ? { details: coded.details } : {}) });
       }
     })();
   });
@@ -113,11 +114,11 @@ export function createSandboxd(opts: SandboxdOptions): http.Server {
   server.on("upgrade", (req, socket, head) => {
     void (async () => {
       try {
-        if (!authorized(req)) throw new HttpError(401, "unauthorized", "节点令牌无效");
-        if (!compatible(req)) throw new HttpError(409, "incompatible", "协议不兼容");
+        if (!authorized(req)) throw new HttpError(401, "unauthorized", "invalid node token");
+        if (!compatible(req)) throw new HttpError(409, "incompatible", "incompatible protocol");
         if (req.headers[SANDBOX_HEADER]) return await proxyUpgrade(driver, log, req, socket, head);
         const route = ROUTE.exec(new URL(req.url ?? "/", "http://sandboxd").pathname);
-        if (!route || route[2] !== "spawn") throw new HttpError(404, "not_found", "没有这个接口");
+        if (!route || route[2] !== "spawn") throw new HttpError(404, "not_found", "no such endpoint");
         wss.handleUpgrade(req, socket, head, (ws) => spawnSession(driver, log, route[1]!, ws));
       } catch (err) {
         const status = err instanceof HttpError ? err.status : 500;
@@ -144,14 +145,14 @@ async function readJson(req: http.IncomingMessage): Promise<unknown> {
   let size = 0;
   for await (const chunk of req) {
     size += (chunk as Buffer).length;
-    if (size > MAX_BODY) throw new HttpError(413, "too_large", "请求过大");
+    if (size > MAX_BODY) throw new HttpError(413, "too_large", "request too large");
     chunks.push(chunk as Buffer);
   }
   if (!size) return {};
   try {
     return JSON.parse(Buffer.concat(chunks).toString("utf8"));
   } catch {
-    throw new HttpError(400, "bad_request", "请求不是 JSON");
+    throw new HttpError(400, "bad_request", "request body is not JSON");
   }
 }
 
@@ -173,7 +174,7 @@ async function proxyHttp(driver: SandboxDriver, log: Logger, req: http.IncomingM
   });
   upstream.on("error", (err) => {
     log.debug("proxy error", { error: String(err) });
-    if (!res.headersSent) send(res, 502, { error: "sandbox_unreachable", message: "沙箱暂时无法连接" });
+    if (!res.headersSent) send(res, 502, { error: "sandbox_unreachable", message: "the sandbox can't be reached right now" });
     else res.destroy();
   });
   res.on("close", () => upstream.destroy());
@@ -235,7 +236,7 @@ function spawnSession(driver: SandboxDriver, log: Logger, name: string, ws: WebS
     let proc: import("node:child_process").ChildProcess;
     try {
       const start = JSON.parse(String(raw)) as SpawnClientMessage;
-      if (binary || start.type !== "start") throw new Error("第一条消息必须是 start");
+      if (binary || start.type !== "start") throw new Error("the first message must be start");
       proc = await driver.spawn(name, start);
     } catch (err) {
       finish({ type: "error", message: err instanceof Error ? err.message : String(err) });

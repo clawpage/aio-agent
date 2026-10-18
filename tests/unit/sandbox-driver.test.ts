@@ -134,16 +134,16 @@ describe("sandbox node driver", () => {
 
   it("refuses specs that could reach the host, and commands it cannot pass through intact", () => {
     expect(specError(spec(), [IMAGE])).toBeNull();
-    expect(specError(spec({ image: "alpine:latest" }), [IMAGE])).toContain("不在本节点允许");
+    expect(specError(spec({ image: "alpine:latest" }), [IMAGE])).toContain("not in this node's allowed list");
     expect(specError(spec({ workspaceVolume: "/Users/me" }), [IMAGE])).toContain("workspaceVolume");
     expect(specError(spec({ codexVolume: "./here" }), [IMAGE])).toContain("codexVolume");
     expect(specError(spec({ name: "x;rm" }), [IMAGE])).toContain("name");
-    expect(specError(spec({ extraEnv: ["A=1\nB=2"] }), [IMAGE])).toContain("环境变量");
-    expect(specError(spec({ hostPort: 80 }), [IMAGE])).toContain("端口");
+    expect(specError(spec({ extraEnv: ["A=1\nB=2"] }), [IMAGE])).toContain("environment variables");
+    expect(specError(spec({ hostPort: 80 }), [IMAGE])).toContain("port");
     expect(execError({ argv: ["id"], user: "gem" })).toBeNull();
-    expect(execError({ argv: [], user: "gem" })).toContain("命令");
-    expect(execError({ argv: ["id"], user: "gem --privileged" })).toContain("用户");
-    expect(execError({ argv: ["id"], user: "root", env: { "A B": "1" } })).toContain("环境变量");
+    expect(execError({ argv: [], user: "gem" })).toContain("command");
+    expect(execError({ argv: ["id"], user: "gem --privileged" })).toContain("user");
+    expect(execError({ argv: ["id"], user: "root", env: { "A B": "1" } })).toContain("environment variables");
   });
 
   it("refuses to adopt a container this system did not create", async () => {
@@ -152,7 +152,7 @@ describe("sandbox node driver", () => {
     docker.managed = false;
     const driver = new SandboxDriver(config(), log, docker as unknown as DockerCli);
     await expect(driver.ensure(spec(), 1000)).rejects.toThrow("personal-agent.managed=1");
-    await expect(driver.exec("aio-user-abc", { argv: ["id"], user: "gem" })).rejects.toThrow("不是本系统管理的沙箱");
+    await expect(driver.exec("aio-user-abc", { argv: ["id"], user: "gem" })).rejects.toThrow("isn't a sandbox managed by this system");
   });
 
   it("passes secret values to docker exec by name only", async () => {

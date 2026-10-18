@@ -17,6 +17,7 @@ import {
   type SpawnServerMessage,
 } from "../../common/protocol.js";
 import { SANDBOX_PROTOCOL_MAX, SANDBOX_PROTOCOL_MIN, sandboxCompatible } from "../../common/version.js";
+import { t } from "../i18n/index.js";
 
 /** Where and how to reach one sandbox's web port through its node. */
 export interface SandboxUpstream {
@@ -61,9 +62,9 @@ export class SandboxNode {
     try {
       const v = await this.#call<NodeVersion>("GET", "v1/version", undefined, 10_000);
       const ok = v.component === "sandbox" && sandboxCompatible(v.protocol, SANDBOX_PROTOCOL_MIN, SANDBOX_PROTOCOL_MAX);
-      this.#compat = { ok, version: v.version, protocol: v.protocol, error: ok ? null : `沙箱节点 ${this.name} 的协议 ${v.protocol} 不在本控制面支持的 ${SANDBOX_PROTOCOL_MIN}-${SANDBOX_PROTOCOL_MAX} 内` };
+      this.#compat = { ok, version: v.version, protocol: v.protocol, error: ok ? null : t().sandbox.node.incompatible(this.name, v.protocol, `${SANDBOX_PROTOCOL_MIN}-${SANDBOX_PROTOCOL_MAX}`) };
     } catch (err) {
-      this.#compat = { ok: false, version: null, protocol: null, error: `沙箱节点 ${this.name} 无法连接：${err instanceof Error ? err.message : String(err)}` };
+      this.#compat = { ok: false, version: null, protocol: null, error: t().sandbox.node.unreachable(this.name, err instanceof Error ? err.message : String(err)) };
     }
     this.#checkedAt = Date.now();
     return this.#compat;
@@ -129,12 +130,33 @@ export class SandboxNode {
     } catch {
       /* a proxy in between answered */
     }
-    if (!res.ok) {
-      const message = (parsed as { message?: string } | null)?.message;
-      throw new Error(message || `沙箱节点 ${this.name} 返回 HTTP ${res.status}`);
-    }
+    if (!res.ok) throw new Error(this.#refusal(parsed as NodeError | null) ?? t().sandbox.node.httpStatus(this.name, res.status));
     return parsed as T;
   }
+
+  /** What the node refused, in the language of whoever this runs for; its own English for a code not known here. */
+  #refusal(body: NodeError | null): string | undefined {
+    const words = t().sandbox.node;
+    const d = body?.details ?? {};
+    switch (body?.error) {
+      case "unauthorized": return words.unauthorized;
+      case "incompatible": return words.incompatible(this.name, d.protocol ?? "?", `${SANDBOX_PROTOCOL_MIN}-${SANDBOX_PROTOCOL_MAX}`);
+      case "container_foreign": return d.name ? words.containerForeign(d.name) : body.message;
+      case "image_mismatch": return d.name && d.image && d.expected ? words.imageMismatch(d.name, d.image, d.expected) : body.message;
+      case "volume_missing": return d.name && d.volume && d.destination ? words.volumeMissing(d.name, d.volume, d.destination) : body.message;
+      case "sandbox_missing": return d.name ? words.sandboxMissing(d.name) : body.message;
+      case "sandbox_unmanaged": return d.name ? words.sandboxUnmanaged(d.name) : body.message;
+      case "no_web_port": return d.name ? words.noWebPort(d.name) : body.message;
+      default: return body?.message || undefined;
+    }
+  }
+}
+
+/** A node's error answer: a machine `code` (with its `details`) and an English message (src/sandbox/server.ts). */
+interface NodeError {
+  error?: string;
+  message?: string;
+  details?: Record<string, string>;
 }
 
 /**

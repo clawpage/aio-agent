@@ -10,6 +10,8 @@
  * sub-agent's internals out of the main timeline.
  */
 
+import { t } from "../i18n/index.js";
+
 export type Emit = (method: string, params: Record<string, unknown>) => void;
 
 /** Bound one tool output stored in an event; the sandbox keeps the real data. */
@@ -24,7 +26,7 @@ function str(value: unknown): string {
 }
 
 function clip(text: string): string {
-  return text.length > MAX_TOOL_OUTPUT_CHARS ? `${text.slice(0, MAX_TOOL_OUTPUT_CHARS)}\n…（输出过长，已截断）` : text;
+  return text.length > MAX_TOOL_OUTPUT_CHARS ? `${text.slice(0, MAX_TOOL_OUTPUT_CHARS)}\n${t().agent.claude.outputTruncated}` : text;
 }
 
 /** A short, human label for a generic tool call. */
@@ -56,7 +58,7 @@ export function toolResultText(content: unknown): string {
     .map((block) => {
       const b = (block ?? {}) as Json;
       if (b.type === "text") return str(b.text);
-      if (b.type === "image") return "[图片]";
+      if (b.type === "image") return t().agent.claude.image;
       return "";
     })
     .filter(Boolean)

@@ -18,10 +18,11 @@ import { historyMcpServers } from "../historyTool.js";
 import { imageMcpServers } from "../imageTool.js";
 import { printerMcpServers } from "../printer/gateway.js";
 import { JsonRpcResponseError } from "./jsonrpc.js";
+import { t } from "../i18n/index.js";
 
 /** A definite refusal: the addition was never consumed (the task service treats it as not delivered). */
 function notDelivered(): Error {
-  return new JsonRpcResponseError("turn/steer", -32000, "轮次已结束，补充未送达");
+  return new JsonRpcResponseError("turn/steer", -32000, t().agent.claude.steerNotDelivered);
 }
 
 /**
@@ -77,8 +78,8 @@ export function withAttachments(text: string, attachments: TurnAttachment[] = []
 
 function resultMessage(result: Json | null, stderrTail: string): string {
   const text = typeof result?.result === "string" ? result.result.trim() : "";
-  const errors = Array.isArray(result?.errors) ? (result!.errors as unknown[]).filter((e) => typeof e === "string").join("；") : "";
-  return text || errors || stderrTail.trim().split("\n").slice(-3).join(" ") || "Claude Code 执行失败";
+  const errors = Array.isArray(result?.errors) ? (result!.errors as unknown[]).filter((e) => typeof e === "string").join("; ") : "";
+  return text || errors || stderrTail.trim().split("\n").slice(-3).join(" ") || t().agent.claude.failed;
 }
 
 /**
@@ -132,7 +133,7 @@ export class ClaudeCodeSession {
   }
 
   async startThread(opts: { model?: string; developerInstructions?: string; browserTask?: BrowserTask }): Promise<{ threadId: string; model: string; cwd: string; modelProvider: string }> {
-    if (!this.#harness.enabled) throw new Error("Claude Code 执行器未启用");
+    if (!this.#harness.enabled) throw new Error(t().agent.claude.disabled);
     const threadId = `${CLAUDE_THREAD_PREFIX}${randomUUID()}`;
     if (opts.developerInstructions !== undefined) this.#instructions.set(threadId, opts.developerInstructions);
     if (opts.browserTask) this.#browserTasks.set(threadId, opts.browserTask);
@@ -146,8 +147,8 @@ export class ClaudeCodeSession {
 
   async startTurn(params: { threadId: string; text: string; attachments?: TurnAttachment[]; model?: string | null; effort?: string | null }): Promise<string> {
     const { threadId } = params;
-    if (!this.#harness.enabled) throw new Error("Claude Code 执行器未启用");
-    if (this.#runs.has(threadId)) throw new Error("该会话已有执行中的轮次");
+    if (!this.#harness.enabled) throw new Error(t().agent.claude.disabled);
+    if (this.#runs.has(threadId)) throw new Error(t().agent.claude.busy);
     await this.#ensureCli();
     const sessionId = threadId.slice(CLAUDE_THREAD_PREFIX.length);
     const resume = await this.#container.claudeSessionExists(sessionId);
@@ -307,7 +308,7 @@ export class ClaudeCodeSession {
         if (index >= 0) run.pendingSteers.splice(index, 1);
         // Written but never echoed: it may still be consumed, so this is not a
         // clean refusal; the caller records the outcome as unknown.
-        reject(new Error("补充已写入但未确认送达"));
+        reject(new Error("the supplement was written but its delivery was never confirmed"));
       }, STEER_ACK_TIMEOUT_MS);
       timer.unref?.();
       run.pendingSteers.push({ resolve, reject, timer });

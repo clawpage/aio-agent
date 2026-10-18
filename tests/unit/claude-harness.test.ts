@@ -655,6 +655,6 @@ describe("AgentManager with the Claude Code harness", () => {
     codex.emitNotification("turn/completed", { threadId: started.threadId, turn: { id: started.turnId, status: "failed", error: { message: "Not logged in" } } });
     await tick();
     const row = db.prepare("SELECT status, error FROM turns WHERE id = ?").get(turn.id) as { status: string; error: string };
-    expect(row).toMatchObject({ status: "failed", error: "执行失败：Not logged in" });
+    expect(row).toMatchObject({ status: "failed", error: "Run failed: Not logged in" });
   });
 });

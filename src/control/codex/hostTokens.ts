@@ -4,6 +4,7 @@ import { spawn } from "node:child_process";
 import type { Config } from "../config.js";
 import type { Logger } from "../../common/logger.js";
 import { JsonRpcPeer } from "./jsonrpc.js";
+import { t } from "../i18n/index.js";
 
 export interface HostTokens {
   accessToken: string;
@@ -118,7 +119,7 @@ export class HostTokenSource {
    * cached token is missing or close to expiry. Concurrent callers share one refresh.
    */
   async getTokens(opts: { force?: boolean } = {}): Promise<HostTokens> {
-    if (!this.#cfg.hostCodex.enabled) throw new Error("本部署未启用宿主 Codex 登录（PA_HOST_CODEX=off）");
+    if (!this.#cfg.hostCodex.enabled) throw new Error(t().agent.hostCodex.off);
     const skew = this.#cfg.hostCodex.tokenRefreshSkewMs;
     if (!opts.force && this.#cache && this.#cache.expiresAt - Date.now() > skew) {
       return this.#cache;
@@ -184,7 +185,7 @@ export class HostTokenSource {
         error: message,
       };
       this.#log.error("host token refresh failed", { error: message });
-      throw new Error(`host Codex 认证不可用：${message}`);
+      throw new Error(t().agent.hostCodex.unavailable(message));
     }
   }
 

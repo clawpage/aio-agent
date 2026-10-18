@@ -2,6 +2,7 @@ import type { Config } from "./config.js";
 import type { Logger } from "../common/logger.js";
 import type { CodexModel } from "./codex/sandboxCodex.js";
 import { expandHome, readSecretFile } from "../common/secrets.js";
+import { t } from "./i18n/index.js";
 
 /**
  * Provider id Codex uses for its own ChatGPT-account provider. A conversation
@@ -17,7 +18,8 @@ export const CHATGPT_PROVIDER_ID = "openai";
  */
 interface BridgeModelSpec {
   displayName: string;
-  description: string;
+  /** Written when the catalog is listed, in the language of whoever lists it. */
+  description: () => string;
   supportedReasoningEfforts: string[];
   defaultReasoningEffort: string;
   inputModalities: string[];
@@ -25,7 +27,7 @@ interface BridgeModelSpec {
 const BRIDGE_MODEL_SPECS: Record<string, BridgeModelSpec> = {
   "gpt-6.1-sol": {
     displayName: "GPT-6.1 Sol",
-    description: "经成员模型网关使用 owner 的 ChatGPT 登录；凭据只在宿主侧附加。",
+    description: () => t().agent.models.bridgeChatgpt,
     supportedReasoningEfforts: ["low", "medium", "high", "xhigh", "max", "ultra"],
     defaultReasoningEffort: "low",
     inputModalities: ["text", "image"],
@@ -37,7 +39,7 @@ function bridgeModelSpec(model: string): BridgeModelSpec {
   return (
     BRIDGE_MODEL_SPECS[model] ?? {
       displayName: model,
-      description: "经成员模型网关提供的模型；仅支持文本输入。",
+      description: () => t().agent.models.bridgeTextOnly,
       supportedReasoningEfforts: ["low", "high"],
       defaultReasoningEffort: "high",
       inputModalities: ["text"],
@@ -106,7 +108,7 @@ export class BridgeModel {
       setting,
     } as const;
     if (setting === "off") {
-      this.#status = { ...base, enabled: false, reason: "未启用成员模型网关", secret: null };
+      this.#status = { ...base, enabled: false, reason: "member model gateway turned off", secret: null };
       return this.#status;
     }
 
@@ -121,17 +123,17 @@ export class BridgeModel {
     }
 
     if (!secret) {
-      const message = reason ?? `环境变量 ${b.envKey} 未设置且密钥文件不可用`;
+      const message = reason ?? `${b.envKey} is not set and the secrets file is unavailable`;
       // An explicit opt-in that cannot work must be loud, and either way the
       // model list never advertises a model whose every turn would fail.
-      if (setting === "on") this.#log.warn("成员模型网关已要求启用但取不到令牌，保持关闭", { reason: message });
-      else this.#log.debug("成员模型网关未启用", { reason: message });
+      if (setting === "on") this.#log.warn("member model gateway was asked for but has no token; staying off", { reason: message });
+      else this.#log.debug("member model gateway not enabled", { reason: message });
       this.#status = { ...base, enabled: false, reason: message, secret: null };
       return this.#status;
     }
 
     this.#status = { ...base, enabled: true, reason: null, secret };
-    this.#log.info("成员模型网关已启用", {
+    this.#log.info("member model gateway enabled", {
       models: b.models,
       provider: b.providerId,
       baseUrl: b.baseUrl,
@@ -164,7 +166,7 @@ export class BridgeModel {
         id,
         model: id,
         displayName: spec.displayName,
-        description: spec.description,
+        description: spec.description(),
         isDefault: false,
         supportedReasoningEfforts: [...spec.supportedReasoningEfforts],
         defaultReasoningEffort: spec.defaultReasoningEffort,

@@ -11,34 +11,45 @@ const ENV_KEY = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const CONTAINER_PATH = /^\/[^\0\n]*$/;
 const GUARD_IMAGE = "aio-agent-network-guard:1";
 
+/**
+ * A refusal the control plane may show a person: sandboxd sends its `code` and
+ * `details` along with the English message, and the control plane words it in
+ * the person's language (control/sandbox/node.ts).
+ */
+export class SandboxRefusal extends Error {
+  constructor(readonly code: string, message: string, readonly details: Record<string, string> = {}) {
+    super(message);
+  }
+}
+
 /** Why a spec is refused, or null. Only named volumes and allowed images ever reach `docker run`. */
 export function specError(spec: SandboxSpec, images: string[]): string | null {
-  if (!spec || typeof spec !== "object") return "缺少沙箱参数";
+  if (!spec || typeof spec !== "object") return "missing sandbox spec";
   for (const key of ["name", "workspaceVolume", "codexVolume", "browserVolume"] as const) {
     // A name that starts with a letter or digit and has no slash is a named volume, never a host path.
-    if (typeof spec[key] !== "string" || !NAME.test(spec[key])) return `沙箱参数 ${key} 不合法`;
+    if (typeof spec[key] !== "string" || !NAME.test(spec[key])) return `invalid sandbox spec field ${key}`;
   }
-  if (!images.includes(spec.image)) return `镜像 ${String(spec.image)} 不在本节点允许的列表里`;
-  if (!Number.isInteger(spec.hostPort) || spec.hostPort < 1024 || spec.hostPort > 65535) return "沙箱端口不合法";
-  if (typeof spec.containerUser !== "string" || !USER.test(spec.containerUser)) return "沙箱用户不合法";
+  if (!images.includes(spec.image)) return `image ${String(spec.image)} is not in this node's allowed list`;
+  if (!Number.isInteger(spec.hostPort) || spec.hostPort < 1024 || spec.hostPort > 65535) return "invalid sandbox port";
+  if (typeof spec.containerUser !== "string" || !USER.test(spec.containerUser)) return "invalid sandbox user";
   for (const key of ["containerWorkspaceDir", "containerCodexHome"] as const) {
-    if (typeof spec[key] !== "string" || !CONTAINER_PATH.test(spec[key])) return `沙箱参数 ${key} 不合法`;
+    if (typeof spec[key] !== "string" || !CONTAINER_PATH.test(spec[key])) return `invalid sandbox spec field ${key}`;
   }
-  if (!Array.isArray(spec.extraEnv) || spec.extraEnv.some((e) => typeof e !== "string" || !/^[A-Za-z_][A-Za-z0-9_]*=[^\0\n]*$/.test(e))) return "沙箱环境变量不合法";
+  if (!Array.isArray(spec.extraEnv) || spec.extraEnv.some((e) => typeof e !== "string" || !/^[A-Za-z_][A-Za-z0-9_]*=[^\0\n]*$/.test(e))) return "invalid sandbox environment variables";
   if (spec.member) {
-    if (!NAME.test(String(spec.member.networkName))) return "沙箱网络名不合法";
-    if (!validPort(spec.member.gatewayPort)) return "网关端口不合法";
+    if (!NAME.test(String(spec.member.networkName))) return "invalid sandbox network name";
+    if (!validPort(spec.member.gatewayPort)) return "invalid gateway port";
   }
-  if (spec.peerPorts !== undefined && (!Array.isArray(spec.peerPorts) || !spec.peerPorts.every(validPort))) return "端口列表不合法";
+  if (spec.peerPorts !== undefined && (!Array.isArray(spec.peerPorts) || !spec.peerPorts.every(validPort))) return "invalid port list";
   return null;
 }
 
 /** Why a command is refused, or null. The command itself runs inside the sandbox, never on the node. */
 export function execError(req: Pick<ExecRequest, "argv" | "user" | "workdir" | "env">): string | null {
-  if (!Array.isArray(req.argv) || !req.argv.length || req.argv.some((a) => typeof a !== "string" || a.includes("\0"))) return "命令不合法";
-  if (typeof req.user !== "string" || !USER.test(req.user)) return "沙箱用户不合法";
-  if (req.workdir !== undefined && (typeof req.workdir !== "string" || !CONTAINER_PATH.test(req.workdir))) return "工作目录不合法";
-  if (req.env !== undefined && (typeof req.env !== "object" || Object.entries(req.env).some(([k, v]) => !ENV_KEY.test(k) || typeof v !== "string" || v.includes("\0")))) return "环境变量不合法";
+  if (!Array.isArray(req.argv) || !req.argv.length || req.argv.some((a) => typeof a !== "string" || a.includes("\0"))) return "invalid command";
+  if (typeof req.user !== "string" || !USER.test(req.user)) return "invalid sandbox user";
+  if (req.workdir !== undefined && (typeof req.workdir !== "string" || !CONTAINER_PATH.test(req.workdir))) return "invalid working directory";
+  if (req.env !== undefined && (typeof req.env !== "object" || Object.entries(req.env).some(([k, v]) => !ENV_KEY.test(k) || typeof v !== "string" || v.includes("\0")))) return "invalid environment variables";
   return null;
 }
 
@@ -73,7 +84,7 @@ export class SandboxDriver {
   }
 
   async inspect(name: string): Promise<ContainerState> {
-    if (!NAME.test(name)) throw new Error("沙箱名不合法");
+    if (!NAME.test(name)) throw new Error("invalid sandbox name");
     const res = await this.#docker.run(
       ["inspect", "--format", '{{json .State}}|{{.Config.Image}}|{{index .Config.Labels "personal-agent.managed"}}|{{json .Mounts}}', name],
       { timeoutMs: 15_000 },
@@ -113,10 +124,10 @@ export class SandboxDriver {
   assertOwned(state: ContainerState, spec: SandboxSpec): void {
     if (!state.exists) return;
     if (state.managedLabel !== "1") {
-      throw new Error(`容器名 ${spec.name} 已被非本系统创建的容器占用（缺少 personal-agent.managed=1 标签）。请先人工确认并重命名或移除该容器。`);
+      throw new SandboxRefusal("container_foreign", `The container name ${spec.name} is taken by a container this system didn't create (it lacks the personal-agent.managed=1 label). Check it by hand, then rename or remove that container.`, { name: spec.name });
     }
     if (state.image && state.image !== spec.image) {
-      throw new Error(`容器 ${spec.name} 使用的镜像 ${state.image} 与固定镜像 ${spec.image} 不一致，已停止自动接管。`);
+      throw new SandboxRefusal("image_mismatch", `Container ${spec.name} uses image ${state.image}, not the pinned image ${spec.image}, so it wasn't taken over automatically.`, { name: spec.name, image: state.image, expected: spec.image });
     }
     const expected: Array<[string, string]> = [
       [spec.workspaceVolume, spec.containerWorkspaceDir],
@@ -126,7 +137,7 @@ export class SandboxDriver {
     for (const [volume, destination] of expected) {
       // Docker Desktop reports the source as an internal /var/lib/docker path, so match the name too.
       const found = state.mounts.some((m) => m.destination === destination && (m.name === volume || m.source.endsWith(volume) || m.source.includes(`${volume}/`)));
-      if (!found) throw new Error(`容器 ${spec.name} 缺少持久卷挂载 ${volume} -> ${destination}，为避免数据丢失已停止接管。`);
+      if (!found) throw new SandboxRefusal("volume_missing", `Container ${spec.name} is missing the persistent volume mount ${volume} -> ${destination}, so it wasn't taken over, to avoid losing data.`, { name: spec.name, volume, destination });
     }
   }
 
@@ -201,7 +212,7 @@ export class SandboxDriver {
     if (known) return known;
     const res = await this.#docker.run(["inspect", "--format", '{{(index (index .HostConfig.PortBindings "8080/tcp") 0).HostPort}}', name], { timeoutMs: 15_000 });
     const port = Number(res.stdout.trim());
-    if (res.code !== 0 || !validPort(port)) throw new Error(`沙箱 ${name} 没有发布网页端口`);
+    if (res.code !== 0 || !validPort(port)) throw new SandboxRefusal("no_web_port", `Sandbox ${name} doesn't publish a web port`, { name });
     this.#ports.set(name, port);
     return port;
   }
@@ -224,7 +235,7 @@ export class SandboxDriver {
 
   /** Ports of other accounts' sandboxes this one must not reach; the set only grows. */
   peerPorts(name: string, ports: number[]): Promise<void> {
-    if (!NAME.test(name) || !Array.isArray(ports) || !ports.every(validPort)) return Promise.reject(new Error("端口列表不合法"));
+    if (!NAME.test(name) || !Array.isArray(ports) || !ports.every(validPort)) return Promise.reject(new Error("invalid port list"));
     const merged = [...new Set([...(this.#peers.get(name) ?? []), ...ports])];
     this.#peers.set(name, merged);
     const next = (this.#peerPolicy.get(name) ?? Promise.resolve()).catch(() => undefined).then(() => this.#applyPeerPorts(name, merged));
@@ -233,12 +244,12 @@ export class SandboxDriver {
   }
 
   async #assertManaged(name: string): Promise<void> {
-    if (!NAME.test(name)) throw new Error("沙箱名不合法");
+    if (!NAME.test(name)) throw new Error("invalid sandbox name");
     const seen = this.#managed.get(name);
     if (seen && Date.now() - seen < 60_000) return;
     const state = await this.inspect(name);
-    if (!state.exists) throw new Error(`沙箱 ${name} 不存在`);
-    if (state.managedLabel !== "1") throw new Error(`容器 ${name} 不是本系统管理的沙箱`);
+    if (!state.exists) throw new SandboxRefusal("sandbox_missing", `Sandbox ${name} doesn't exist`, { name });
+    if (state.managedLabel !== "1") throw new SandboxRefusal("sandbox_unmanaged", `Container ${name} isn't a sandbox managed by this system`, { name });
     this.#managed.set(name, Date.now());
   }
 

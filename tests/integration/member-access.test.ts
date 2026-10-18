@@ -78,7 +78,7 @@ it('isolates ledger reads, references, stops, events, replay IDs and planner con
 it('fails closed when the gateway provider is unavailable instead of using the owner ChatGPT login',async()=>{
  const disabled=await startHarness();
  try {const user=await createMember(disabled.ctx.db,'member2','member-password-456');
- expect(()=>disabled.ctx.tasks.submit({userId:user.id,text:'hi',clientMessageId:'blocked'})).toThrow('服务暂时不可用');
+ expect(()=>disabled.ctx.tasks.submit({userId:user.id,text:'hi',clientMessageId:'blocked'})).toThrow('temporarily unavailable');
  expect(disabled.codex.startedTurns).toHaveLength(0);
  } finally {await disabled.shutdown();}
 });
