@@ -29,7 +29,7 @@ export function apiUrl(path: string): string {
   return `${API_BASE}${path}`;
 }
 
-/** Short Chinese fallback for responses that carry no usable JSON message. */
+/** A short message for responses that carry no usable JSON message. */
 export function friendlyStatusMessage(status: number): string {
   switch (status) {
     case 401:
@@ -78,6 +78,8 @@ async function request<T>(
   if (init.body !== undefined) headers["content-type"] = "application/json";
   if (csrf) headers["x-csrf-token"] = csrf;
   headers["x-client-platform"] = clientPlatform();
+  // The control plane writes its messages in this console's language.
+  headers["x-aio-locale"] = locale;
   const res = await fetch(apiUrl(path), {
     method: init.method ?? "GET",
     headers,

@@ -419,6 +419,12 @@ END;`);
   if (!conversationColumns.includes("model_provider")) {
     db.exec("ALTER TABLE conversations ADD COLUMN model_provider TEXT");
   }
+  // Accounts without a language once defaulted to Simplified Chinese, and now to English: those that already
+  // have tasks keep the language they have been answered in. Checked once, so a later account is never assigned it.
+  if (getMeta(db, "account.locale.legacy_checked") === null) {
+    if (getMeta(db, "account.locale") === null && db.prepare("SELECT 1 FROM tasks LIMIT 1").get()) setMeta(db, "account.locale", "zh-CN");
+    setMeta(db, "account.locale.legacy_checked", "1");
+  }
   // A single-slot mirror of the running turn that nothing read; `turns` is the record.
   db.exec("DROP TABLE IF EXISTS agent_state");
   // Lookups on every Codex notification and every task event; created here,

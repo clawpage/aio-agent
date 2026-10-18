@@ -69,9 +69,9 @@ it("keeps the console language per account: messages and one opening follow the 
     const { cookie, csrf } = await login(h);
     const headers = { cookie, "x-csrf-token": csrf, "content-type": "application/json" };
     const put = (body: object) => h.request("/api/account/locale", { method: "PUT", headers, body: JSON.stringify(body) });
-    expect(h.ctx.tasks.locale()).toBe("zh-CN");
-    await h.request("/api/tasks", { method: "POST", headers, body: JSON.stringify({ text: "hello", clientMessageId: "locale-en", locale: "en" }) });
     expect(h.ctx.tasks.locale()).toBe("en");
+    await h.request("/api/tasks", { method: "POST", headers, body: JSON.stringify({ text: "你好", clientMessageId: "locale-zh", locale: "zh-CN" }) });
+    expect(h.ctx.tasks.locale()).toBe("zh-CN");
     // A console opening in its system language is taken once per account.
     expect(await (await put({ locale: "es", sync: true })).json()).toEqual({ ok: true, applied: true });
     expect(h.ctx.tasks.locale()).toBe("es");

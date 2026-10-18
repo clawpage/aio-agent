@@ -7,6 +7,7 @@ import { resolveRequest, type RequestContext } from "./security.js";
 import { COOKIE_NAMES, sessionCookies } from "../auth/sessions.js";
 import { safeRedirectPath } from "../auth/tickets.js";
 import { audit } from "../db.js";
+import { requestLocale, runInLocale } from "../i18n/index.js";
 
 
 /** Control API calls served by the sandbox; a container stopped for idleness starts first. */
@@ -127,6 +128,9 @@ export function createApp(ctx: AppContext): express.Express {
     }
     jsonParser(req, res, next);
   });
+
+  // Each request is answered in its console's language (after body parsing, whose stream events would lose it).
+  app.use((req: Request, _res: Response, next: NextFunction) => runInLocale(requestLocale(req.headers), next));
 
   // Companion-origin bootstrap: one-time ticket -> host-only workspace session cookie.
   app.get("/_bootstrap", (req: Request, res: Response) => {

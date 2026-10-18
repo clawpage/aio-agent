@@ -187,7 +187,7 @@ export function createApiRouter(context: AppContext): Router {
       res.setHeader("Access-Control-Allow-Origin", origin);
       res.setHeader("Access-Control-Allow-Credentials", "true");
       res.setHeader("Vary", "Origin");
-      res.setHeader("Access-Control-Allow-Headers", "content-type, x-client-platform");
+      res.setHeader("Access-Control-Allow-Headers", "content-type, x-client-platform, x-aio-locale");
       res.setHeader("Access-Control-Allow-Methods", req.path === "/workspace/refresh" ? "POST,OPTIONS" : "GET,OPTIONS");
     }
     if (req.method === "OPTIONS") {

@@ -530,22 +530,22 @@ describe("main inbox delegation", () => {
         expect(answerLanguage("zh-CN", true)).toContain("in the language the user's own message is written in");
         expect(answerLanguage("zh-CN", true)).toContain("use Simplified Chinese (简体中文)");
         expect(answerLanguage("zh-CN")).toContain("in Simplified Chinese (简体中文), whatever language");
-        // No choice yet: Simplified Chinese as the fallback.
+        // No choice yet: English as the fallback.
         const first=submit("规划带娃三天行程");await tick();
-        expect(codex.plans[0]!.split("\n").at(-1)).toBe(answerLanguage("zh-CN", true));
-        expect(codex.startedTurns[0]!.text.endsWith(`\n\n${answerLanguage("zh-CN", true)}`)).toBe(true);
+        expect(codex.plans[0]!.split("\n").at(-1)).toBe(answerLanguage("en", true));
+        expect(codex.startedTurns[0]!.text.endsWith(`\n\n${answerLanguage("en", true)}`)).toBe(true);
         // The person's words still show on their own on the execution page.
         expect(dispatchedTask(codex.startedTurns[0]!.text)).toBe("规划带娃三天行程");
-        // A message sent from an English console makes English the account's language, for the dispatcher and the supplement alike.
+        // A message sent from a Chinese console makes Chinese the account's language, for the dispatcher and the supplement alike.
         codex.plan=async()=>JSON.stringify({title:"extra",decision:{kind:"steer",taskId:first.id},related:[first.id],dependencies:[],resources:[]});
-        tasks.submit({text:"make it four days",clientMessageId:"en-1",locale:"en"});await tick();await tick();
-        expect(tasks.locale()).toBe("en");
-        expect(codex.plans.at(-1)!.split("\n").at(-1)).toBe(answerLanguage("en", true));
-        expect(codex.steers[0]!.text.endsWith(`\n\n${answerLanguage("en", true)}`)).toBe(true);
+        tasks.submit({text:"make it four days",clientMessageId:"zh-1",locale:"zh-CN"});await tick();await tick();
+        expect(tasks.locale()).toBe("zh-CN");
+        expect(codex.plans.at(-1)!.split("\n").at(-1)).toBe(answerLanguage("zh-CN", true));
+        expect(codex.steers[0]!.text.endsWith(`\n\n${answerLanguage("zh-CN", true)}`)).toBe(true);
         expect(dispatchedSupplement(codex.steers[0]!.text)).toBe("make it four days");
         // Anything but a console language changes nothing; the settings switch does.
         tasks.submit({text:"x",clientMessageId:"fr",locale:"fr"});
-        expect(tasks.locale()).toBe("en");
+        expect(tasks.locale()).toBe("zh-CN");
         tasks.setLocale("es");
         await codex.runTurn(codex.startedTurns[0]!.turnId,{text:"done"});await tick();
         codex.plan=async()=>JSON.stringify({title:"新的",related:[],dependencies:[],resources:[]});

@@ -22,6 +22,8 @@ import {UserRuntimes} from "./tenants.js";
 import { loadConfig, ensureDataDirs, type Config } from "./config.js";
 import { Logger } from "../common/logger.js";
 import { openDb, type Db } from "./db.js";
+import { runInLocale } from "./i18n/index.js";
+import { readLocale } from "./locale.js";
 import { UsageLedger } from './usage.js';
 import { SessionStore } from "./auth/sessions.js";
 import { TicketStore } from "./auth/tickets.js";
@@ -88,6 +90,11 @@ export async function bootstrap(opts: BootstrapOptions = {}): Promise<Bootstrapp
     opts.log ??
     new Logger(process.env.PA_LOG_LEVEL === "debug" ? "debug" : "info", `${cfg.logDir}/personal-agent.log`, true);
   const db = openDb(cfg.dbPath);
+  // Everything this runtime starts on its own writes for people in its account's language.
+  return runInLocale(() => readLocale(db), () => bootstrapRuntime(opts, cfg, log, db));
+}
+
+async function bootstrapRuntime(opts: BootstrapOptions, cfg: Config, log: Logger, db: Db): Promise<Bootstrapped> {
   if(!cfg.memberRuntime)cfg.protectedMemberPorts=(db.prepare("SELECT value FROM meta WHERE key LIKE 'sandbox_port:%'").all() as {value:string}[]).map(x=>Number(x.value));
 
   if (opts.identity) {

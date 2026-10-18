@@ -12,11 +12,35 @@ export const LOCALE_NAMES = {
     "zh-TW": "Traditional Chinese (繁體中文)",
 } as const;
 export type Locale = keyof typeof LOCALE_NAMES;
-export const DEFAULT_LOCALE: Locale = "zh-CN";
+/** The language of an account, a request or a process that has none of its own. */
+export const DEFAULT_LOCALE: Locale = "en";
 const LOCALE_META_KEY = "account.locale";
 
 export function isLocale(value: unknown): value is Locale {
     return typeof value === "string" && Object.hasOwn(LOCALE_NAMES, value);
+}
+
+/** The console language closest to a BCP 47 tag such as "es-ES" or "zh-Hant-HK", if any (as the console's matchLocale). */
+export function matchLocale(tag: string): Locale | null {
+    const lower = tag.trim().toLowerCase();
+    if (lower === "zh" || lower.startsWith("zh-")) return /^zh-(hant|tw|hk|mo)\b/.test(lower) ? "zh-TW" : "zh-CN";
+    if (lower === "en" || lower.startsWith("en-")) return "en";
+    if (lower === "es" || lower.startsWith("es-")) return "es";
+    return null;
+}
+
+/** The first language of an Accept-Language header the console speaks, in the order of preference it gives. */
+export function acceptedLocale(header: string | undefined): Locale | null {
+    const tags = (header ?? "").split(",").map((part, index) => {
+        const [tag, ...params] = part.split(";");
+        const q = params.map(p => p.trim()).find(p => p.startsWith("q="));
+        return { tag: tag.trim(), q: q ? Number(q.slice(2)) : 1, index };
+    }).filter(e => e.tag && e.q > 0).sort((a, b) => b.q - a.q || a.index - b.index);
+    for (const { tag } of tags) {
+        const match = matchLocale(tag);
+        if (match) return match;
+    }
+    return null;
 }
 
 /** The account's console language; each account's runtime database holds its own. */
