@@ -57,7 +57,7 @@ export const auth: typeof zh = {
   foreign: {
     title: (owner: string) => `這是 ${owner} 的頁面`,
     body: (current: string) => `目前登入的是 ${current}。同一瀏覽器一次只能登入一個帳號。`,
-    switchTo: (owner: string) => `退出並登入 ${owner}`,
+    switchTo: (owner: string) => `登出並改以 ${owner} 登入`,
     backHome: "回到我的頁面",
   },
 };

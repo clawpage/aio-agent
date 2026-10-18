@@ -19,7 +19,7 @@ export const dispatch: typeof zh = {
   },
   entry: {
     index: (n: number) => `Dispatch ${n} · `,
-    latency: (seconds: string) => `${seconds} s`,
+    latency: (seconds: string) => `Took ${seconds} s`,
     rounds: (n: number) => `${n} dispatcher round${n === 1 ? "" : "s"}`,
     promptChars: (chars: string) => `Prompt: ${chars} chars`,
     related: (titles: string[]) => `Related context: ${titles.map((title) => `"${title}"`).join(", ")}`,
@@ -54,7 +54,7 @@ export const dispatch: typeof zh = {
     fullPrompt: (chars: string) => `Full prompt (${chars} chars)`,
     timing: (round: number) => `Dispatch timing · round ${round}`,
     noModel: "Model not reported",
-    attempts: (n: number) => `${n} attempts (retried after a session timeout or a busy model)`,
+    attempts: (n: number) => `${n} attempt${n === 1 ? "" : "s"} (retried after creating the session timed out or the model was busy)`,
     stagesLabel: "Time per stage",
     modelCall: (duration: string) => `Model call ${duration}`,
     roundTotal: (duration: string) => `Round total ${duration}`,

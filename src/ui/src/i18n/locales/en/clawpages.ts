@@ -23,7 +23,7 @@ export const clawpages: typeof zh = {
   close: "Close",
   tip: "To change it, just say so in the main chat, like “add a deadline to the poll”.",
   permission: "Who has access",
-  permissions: { private: "Only me", "read-public": "Anyone reads", public: "Anyone writes" },
+  permissions: { private: "Only me", "read-public": "Public, read-only", public: "Public, read & write" },
   permissionHints: { private: "Visitors can't see this table", "read-public": "Visitors can read, not change", public: "Visitors can read and write" },
   exportJson: "Export",
   dropTable: "Delete table",
@@ -40,5 +40,5 @@ export const clawpages: typeof zh = {
   confirmDelete: "Delete",
   deleting: "Deleting…",
   cancel: "Cancel",
-  pageLabel: (title: string) => `Details of ${title}`,
+  pageLabel: (title: string) => `Open details of ${title}`,
 };

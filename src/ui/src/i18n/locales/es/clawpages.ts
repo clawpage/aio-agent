@@ -23,7 +23,7 @@ export const clawpages: typeof zh = {
   close: "Cerrar",
   tip: "Para cambiarla, dilo en el chat principal, por ejemplo «añade una fecha límite a la votación».",
   permission: "Quién tiene acceso",
-  permissions: { private: "Solo yo", "read-public": "Todos leen", public: "Todos escriben" },
+  permissions: { private: "Solo yo", "read-public": "Público, solo lectura", public: "Público, lectura y escritura" },
   permissionHints: { private: "Los visitantes no ven esta tabla", "read-public": "Los visitantes leen, no cambian", public: "Los visitantes leen y escriben" },
   exportJson: "Exportar",
   dropTable: "Eliminar tabla",
@@ -40,5 +40,5 @@ export const clawpages: typeof zh = {
   confirmDelete: "Eliminar",
   deleting: "Eliminando…",
   cancel: "Cancelar",
-  pageLabel: (title: string) => `Detalles de ${title}`,
+  pageLabel: (title: string) => `Abrir los detalles de ${title}`,
 };
