@@ -1915,18 +1915,19 @@ def stop_browser(
         pass
     except OSError as exc:
         return err(redact_urls(f"sending the stop signal failed: {exc}"), pid=pid)
+    # One deadline for both waits, and no poll sleeps past it: --timeout-s is the total.
     deadline = time.monotonic() + timeout_s
     while time.monotonic() < deadline:
         if not same_process(pid, starttime):
             break
-        time.sleep(0.2)
+        time.sleep(max(0.0, min(0.2, deadline - time.monotonic())))
     else:
         return err("the browser supervisor did not exit within the timeout; check by hand", pid=pid)
 
     while time.monotonic() < deadline:
         if not pid_alive(browser_pid):
             break
-        time.sleep(0.2)
+        time.sleep(max(0.0, min(0.2, deadline - time.monotonic())))
 
     remaining: list[str] = []
     if pid_alive(browser_pid):
