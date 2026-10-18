@@ -31,6 +31,8 @@ const FAKE_RENDERER = `import base64
 class Page:
     def __init__(self, width, scale):
         self.size = (width, scale)
+        with open(LOG_PATH, "a") as f:
+            f.write("start\\n")
     def metrics(self, height):
         pass
     def call(self, method, params=None, session=False, timeout=60):
@@ -42,7 +44,7 @@ class Page:
             return {"data": "${JPEG.toString("base64")}"}
         return {}
     def evaluate(self, expression):
-        return None
+        return True
     def close(self):
         pass
 `;
@@ -71,7 +73,7 @@ beforeAll(async () => {
   tool = path.join(toolRoot, "aio-share");
   fs.mkdirSync(tool);
   fs.mkdirSync(path.join(toolRoot, "aio-graphic"));
-  fs.writeFileSync(path.join(toolRoot, "aio-graphic", "aio-render.py"), FAKE_RENDERER.replace("LOG_PATH", JSON.stringify(path.join(toolRoot, "rendered.log"))));
+  fs.writeFileSync(path.join(toolRoot, "aio-graphic", "aio-render.py"), FAKE_RENDERER.replaceAll("LOG_PATH", JSON.stringify(path.join(toolRoot, "rendered.log"))));
   fs.writeFileSync(path.join(tool, "aio-share.py"), SHARE_CLI_PY);
   fs.writeFileSync(path.join(tool, "clawpage-sdk.js"), CLAWPAGE_SDK_JS);
   fs.writeFileSync(path.join(tool, "config.json"), JSON.stringify({ ...owner.share, endpoint: `http://127.0.0.1:${gateway.port}/share/owner_1` }));
@@ -374,9 +376,9 @@ it("publishing renders a cover of the live page; the console serves it to its ow
   const before = rendered().length;
 
   const published = await cli("publish", dir, "--title", "照片墙");
-  expect(published).toMatchObject({ ok: true, name: "photo-wall", cover: expect.any(Number) });
+  expect(published, JSON.stringify(published)).toMatchObject({ ok: true, name: "photo-wall", cover: expect.any(Number) });
   // The live page as a visitor sees it, not the file in the workspace.
-  expect(rendered().slice(before)).toEqual([`https://${h.ctx.cfg.workspaceHost}/u/owner/share/photo-wall/`]);
+  expect(rendered().slice(before)).toEqual(["start", `https://${h.ctx.cfg.workspaceHost}/u/owner/share/photo-wall/`]);
   expect(store.list("owner_1").find((p) => p.name === "photo-wall")?.cover).toBe(published.cover);
 
   // The console: the picture itself, checked by its bytes, kept long only under its version.
@@ -407,9 +409,21 @@ it("publishing renders a cover of the live page; the console serves it to its ow
   // A page without a cover (published before covers, or rendering failed) gets one from `cover --missing`.
   fs.rmSync(path.join(h.ctx.cfg.dataDir, "shares", "owner_1", "photo-wall", ".cover"));
   expect(store.list("owner_1").find((p) => p.name === "photo-wall")?.cover).toBeNull();
+  const other = path.join(tool, "menu");
+  fs.mkdirSync(other);
+  fs.writeFileSync(path.join(other, "index.html"), "<h1>菜单</h1>");
+  expect(await cli("publish", other, "--no-cover")).toMatchObject({ ok: true });
+  // While another run holds the lock, a second one does nothing.
+  const holder = execFile("python3", ["-c", "import fcntl,time; f=open('/tmp/aio-share-cover.lock','w'); fcntl.flock(f, fcntl.LOCK_EX); print('locked', flush=True); time.sleep(3)"]);
+  await new Promise((r) => holder.stdout!.once("data", r));
+  expect(await cli("cover", "--missing")).toMatchObject({ covers: [], skipped: expect.any(String) });
+  await new Promise((r) => holder.once("exit", r));
+  const mark = rendered().length;
   const missing = await cli("cover", "--missing");
-  expect(missing.covers.map((c: { name: string }) => c.name)).toContain("photo-wall");
+  expect(missing.covers.map((c: { name: string }) => c.name).sort()).toEqual(expect.arrayContaining(["menu", "photo-wall"]));
   expect(missing.covers.every((c: { cover?: number }) => typeof c.cover === "number")).toBe(true);
+  // One browser for all of them.
+  expect(rendered().slice(mark).filter((l) => l === "start")).toHaveLength(1);
   expect((await cli("cover", "--missing")).covers).toEqual([]);
 
   // Another account's console never gets it.

@@ -298,7 +298,7 @@ export const SHARE_SKILL_DIR = "skills/clawpages";
 export const LEGACY_SHARE_SKILL_DIR = "skills/aio-share";
 export const SHARE_CLI_PY = String.raw`#!/usr/bin/env python3
 """aio-share: publish and manage clawpages (public pages and mini apps with data), managed by Clawpage Agent."""
-import argparse, base64, importlib.util, json, os, re, shutil, sys, urllib.error, urllib.parse, urllib.request
+import argparse, base64, fcntl, importlib.util, json, os, re, shutil, sys, time, urllib.error, urllib.parse, urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 RENDERER = os.path.join(os.path.dirname(HERE), "aio-graphic", "aio-render.py")
@@ -387,33 +387,50 @@ def copy_sdk(root):
     shutil.copyfile(SDK, os.path.join(root, SDK_NAME))
 
 
-def render_cover(url):
-    """A JPEG of the published page as a visitor sees it (its data loaded), from the sandbox's headless Chromium."""
-    spec = importlib.util.spec_from_file_location("aio_render", RENDERER)
-    if spec is None or not os.path.isfile(RENDERER):
-        raise RuntimeError("the renderer is missing: " + RENDERER)
-    render = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(render)
-    page = render.Page(COVER_W, COVER_SCALE)
-    try:
-        page.metrics(COVER_H)
+class Covers:
+    """Covers from one headless Chromium (started on first use), each the published page as a visitor sees it, data loaded."""
+
+    def __init__(self):
+        self.page = None
+
+    def render(self, url):
+        if self.page is None:
+            spec = importlib.util.spec_from_file_location("aio_render", RENDERER)
+            if spec is None or not os.path.isfile(RENDERER):
+                raise RuntimeError("the renderer is missing: " + RENDERER)
+            render = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(render)
+            self.page = render.Page(COVER_W, COVER_SCALE)
+            self.page.metrics(COVER_H)
+        page = self.page
         page.call("Page.navigate", {"url": url}, session=True)
-        # The document, its fonts and pictures, then a moment for the data it fetches to arrive and draw.
-        page.evaluate("""new Promise(r => {const go = () => document.fonts.ready.then(() => Promise.all([...document.images].map(i => i.complete ? 0 : new Promise(d => {i.onload = i.onerror = d;})))).then(() => setTimeout(r, 1500)); document.readyState === 'complete' ? go() : addEventListener('load', go);})""")
+        # Until the new document has loaded (at most 20 s), then its fonts and pictures (at most 8 s),
+        # then a moment for the data it fetches to arrive and draw.
+        deadline = time.time() + 20
+        target = json.dumps(url.split("#")[0])
+        while time.time() < deadline and not page.evaluate("document.readyState === 'complete' && location.href.split('#')[0] === %s" % target):
+            time.sleep(0.25)
+        page.evaluate("""Promise.race([document.fonts.ready.then(() => Promise.all([...document.images].map(i => i.complete ? 0 : new Promise(d => {i.onload = i.onerror = d;})))), new Promise(r => setTimeout(r, 8000))]).then(() => new Promise(r => setTimeout(r, 1500)))""")
         page.evaluate("new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))")
         shot = page.call("Page.captureScreenshot", {"format": "jpeg", "quality": 78, "captureBeyondViewport": False,
                                                     "clip": {"x": 0, "y": 0, "width": COVER_W, "height": COVER_H, "scale": 1}}, session=True)
         return shot["data"]
-    finally:
-        page.close()
 
+    def make(self, name, url):
+        """Render and keep a page's cover; a failure is reported, never fatal."""
+        try:
+            return {"cover": call("POST", "/pages/%s/cover" % name, {"data": self.render(url)}, soft=True)["cover"]}
+        except Exception as err:
+            # The browser may be what failed: start a new one for the next page.
+            self.close()
+            return {"coverError": str(err)[:200]}
 
-def make_cover(name, url):
-    """Render and keep a page's cover; a failure is reported, never fatal."""
-    try:
-        return {"cover": call("POST", "/pages/%s/cover" % name, {"data": render_cover(url)}, soft=True)["cover"]}
-    except Exception as err:
-        return {"coverError": str(err)[:200]}
+    def close(self):
+        if self.page is not None:
+            try:
+                self.page.close()
+            finally:
+                self.page = None
 
 
 def collect(root):
@@ -559,7 +576,18 @@ def main():
                 fail("The page does not exist: " + args.name)
         else:
             fail("Name a page, or pass --missing")
-        out({"ok": True, "covers": [dict(name=p["name"], **make_cover(p["name"], p["url"])) for p in chosen]})
+        if args.missing:
+            # One backfill at a time: a sandbox started twice in a row does not render everything twice.
+            lock = open("/tmp/aio-share-cover.lock", "w")
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except OSError:
+                return out({"ok": True, "covers": [], "skipped": "another cover run is in progress"})
+        covers = Covers()
+        try:
+            out({"ok": True, "covers": [dict(name=p["name"], **covers.make(p["name"], p["url"])) for p in chosen]})
+        finally:
+            covers.close()
     elif args.cmd == "sdk":
         root = os.path.abspath(args.dir)
         os.makedirs(root, exist_ok=True)
@@ -592,7 +620,11 @@ def main():
         page = call("POST", "/pages/" + name, {"title": args.title, "files": collect(root)})
         page["ok"] = True
         if not args.no_cover:
-            page.update(make_cover(name, page["url"]))
+            covers = Covers()
+            try:
+                page.update(covers.make(name, page["url"]))
+            finally:
+                covers.close()
         out(page)
 
 

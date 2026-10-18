@@ -182,6 +182,10 @@ test("a clawpage linked in the main session shows as a card with its cover; anot
   expect(await mine.getByTestId("share-card-cover").evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(96);
   await expect(mine.getByTestId("share-card-url")).toHaveText(own);
   await expect(mine.getByRole("link", { name: "打开" })).toHaveAttribute("href", own);
+  // A strip, not a poster: the thumbnail beside the text keeps the card short on a phone too.
+  const box = (await mine.boundingBox())!, thumb = (await mine.getByTestId("share-card-cover").boundingBox())!;
+  expect(box.height).toBeLessThanOrEqual(160);
+  expect(thumb.width).toBeLessThanOrEqual(100);
   // Someone else's page: the card, but no cover asked for under this account's name.
   const theirs = cards.filter({ hasText: "投票页" });
   await expect(theirs.getByTestId("share-card-url")).toHaveText(other);

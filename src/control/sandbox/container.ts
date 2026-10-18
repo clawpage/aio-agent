@@ -307,11 +307,13 @@ export class SandboxContainer {
       this.seedMail(),
       this.enforceCodexIsolation(),
     ]);
-    // Pages published before covers existed (or whose cover failed) get one, in the background.
+    // Pages published before covers existed (or whose cover failed) get one. Rendering takes a while on a
+    // slow node, so it runs detached in the sandbox (one at a time, see the CLI) and this returns at once.
     if (this.#cfg.share) {
-      void this.execInSandbox(["python3", `${s.containerCodexHome}/${SHARE_TOOL_DIR}/aio-share.py`, "cover", "--missing"], { timeoutMs: 600_000 })
-        .then((r) => { if (r.code !== 0) this.#log.warn("clawpage covers not rendered", { error: (r.stdout || r.stderr).trim().slice(0, 200) }); })
-        .catch((err: unknown) => this.#log.warn("clawpage covers not rendered", { error: String(err).slice(0, 200) }));
+      const cli = `${s.containerCodexHome}/${SHARE_TOOL_DIR}/aio-share.py`;
+      void this.execInSandbox(["bash", "-c", 'nohup python3 "$1" cover --missing >/tmp/aio-share-cover.log 2>&1 </dev/null &', "covers", cli], { timeoutMs: 15_000 })
+        .then((r) => { if (r.code !== 0) this.#log.warn("clawpage covers not started", { error: (r.stderr || r.stdout).trim().slice(0, 200) }); })
+        .catch((err: unknown) => this.#log.warn("clawpage covers not started", { error: String(err).slice(0, 200) }));
     }
   }
 

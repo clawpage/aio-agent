@@ -2516,6 +2516,32 @@ button .loading-mark { color: inherit; }
   object-fit: cover;
   object-position: top center;
 }
+/* With a cover the card is a strip: the page's top as a thumbnail beside its title, address and actions. */
+.share-card.has-cover {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr);
+}
+.share-card.has-cover .share-card-cover {
+  aspect-ratio: auto;
+  min-height: 100%;
+  max-height: 144px;
+  border-bottom: 0;
+  border-right: 1px solid var(--border);
+}
+.share-card.has-cover .share-card-body {
+  justify-content: center;
+  padding: 10px 12px;
+}
+.share-card.has-cover .share-card-title {
+  font-size: 14px;
+}
+.share-card.has-cover .share-card-actions {
+  margin-top: 4px;
+  gap: 6px;
+}
+@media (max-width: 420px) {
+  .share-card.has-cover { grid-template-columns: 84px minmax(0, 1fr); }
+}
 .share-card-body {
   display: flex;
   flex-direction: column;
