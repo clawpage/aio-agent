@@ -1,5 +1,6 @@
 import type { Db } from "./db.js";
 import { getMeta, setMeta } from "./db.js";
+import { t } from "./i18n/index.js";
 
 /**
  * Owner-level agent settings, applied to every later message from any device.
@@ -66,14 +67,14 @@ function normalizeField(value: unknown): string | null {
  */
 export function validateAgentSettings(input: unknown, models: ValidatableModel[]): SettingsValidation {
   if (typeof input !== "object" || input === null || Array.isArray(input)) {
-    return { ok: false, message: "设置必须是一个对象" };
+    return { ok: false, message: t().http.settings.notObject };
   }
   const record = input as Record<string, unknown>;
   for (const field of ["model", "effort"] as const) {
-    if (!(field in record)) return { ok: false, message: `缺少设置字段：${field}` };
+    if (!(field in record)) return { ok: false, message: t().http.settings.missingField(field) };
     const value = record[field];
     if (value !== null && typeof value !== "string") {
-      return { ok: false, message: `${field} 必须是字符串或 null` };
+      return { ok: false, message: t().http.settings.fieldType(field) };
     }
   }
 
@@ -81,15 +82,15 @@ export function validateAgentSettings(input: unknown, models: ValidatableModel[]
   const requestedEffort = normalizeField(record.effort);
 
   if (model && !models.some((m) => m.id === model)) {
-    return { ok: false, message: "未知的模型，请刷新后重试" };
+    return { ok: false, message: t().http.settings.unknownModel };
   }
 
   // Effort is only meaningful against a concrete model.
   const target = model ? models.find((m) => m.id === model) : undefined;
   if (requestedEffort) {
-    if (!target) return { ok: false, message: "请先选择一个具体模型，再设置思考强度" };
+    if (!target) return { ok: false, message: t().http.settings.effortNeedsModel };
     if (!target.supportedReasoningEfforts.includes(requestedEffort)) {
-      return { ok: false, message: "该模型不支持这个思考强度" };
+      return { ok: false, message: t().http.settings.effortUnsupported };
     }
   }
 

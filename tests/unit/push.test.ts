@@ -7,6 +7,7 @@ import { openDb } from "../../src/control/db.js";
 import { Logger } from "../../src/common/logger.js";
 import { loadVapidKeys, notificationText, PushService, startTaskNotifications, taskNotification, validEndpoint } from "../../src/control/push.js";
 import type { AppContext } from "../../src/control/context.js";
+import { runInLocale } from "../../src/control/i18n/index.js";
 
 const log = new Logger("error", undefined, false);
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), "push-"));
@@ -41,8 +42,8 @@ describe("phone notifications", () => {
     const { push } = service();
     push.subscribe("owner_1", sub());
     expect(push.count("owner_1")).toBe(1);
-    expect(() => push.subscribe("owner_1", sub("https://evil.example.com/x"))).toThrow("不支持的推送地址");
-    expect(() => push.subscribe("owner_1", { endpoint: apple, keys: { p256dh: "short", auth: "x" } })).toThrow("推送订阅不完整");
+    expect(() => push.subscribe("owner_1", sub("https://evil.example.com/x"))).toThrow("Unsupported push address");
+    expect(() => push.subscribe("owner_1", { endpoint: apple, keys: { p256dh: "short", auth: "x" } })).toThrow("The push subscription is incomplete");
     push.subscribe("member_1", sub());
     expect([push.count("owner_1"), push.count("member_1")]).toEqual([0, 1]);
     push.unsubscribe("member_1", apple);
@@ -84,17 +85,24 @@ describe("phone notifications", () => {
 
   it("turns task news into a short lock-screen line", () => {
     const base = { id: "t1", title: "查 Mac Studio 价格", result: null, error: null, clarification: null };
-    expect(taskNotification({ ...base, status: "completed", result: "**降价了**：[Apple 官网](https://apple.com) 现价 $1,799。\n```map\n{}\n```" }))
+    expect(taskNotification({ ...base, status: "completed", result: "**降价了**：[Apple 官网](https://apple.com) 现价 $1,799。\n```map\n{}\n```" }, "zh-CN"))
       .toEqual({ title: "已完成：查 Mac Studio 价格", body: "降价了：Apple 官网 现价 $1,799。", tag: "t1" });
-    expect(taskNotification({ ...base, status: "needs_input", clarification: "要哪个配置？" })!.title).toBe("需要你补充：查 Mac Studio 价格");
-    expect(taskNotification({ ...base, status: "failed", error: "网站打不开" })!.body).toBe("网站打不开");
-    expect(taskNotification({ ...base, status: "running" })).toBeNull();
+    expect(taskNotification({ ...base, status: "needs_input", clarification: "要哪个配置？" }, "zh-CN")!.title).toBe("需要你补充：查 Mac Studio 价格");
+    expect(taskNotification({ ...base, status: "failed", error: "网站打不开" }, "zh-CN")!.body).toBe("网站打不开");
+    expect(taskNotification({ ...base, status: "running" }, "zh-CN")).toBeNull();
+    // In the account's language, whatever language the code runs in.
+    expect(taskNotification({ ...base, status: "unknown" }, "en")).toEqual({ title: "Result needs checking: 查 Mac Studio 价格", body: "The connection was lost; please check the result.", tag: "t1" });
+    expect(runInLocale("en", () => taskNotification({ ...base, status: "completed" }, "es"))!.title).toBe("Terminada: 查 Mac Studio 价格");
+    // The daily feed's heading is its title, in either language.
+    const feed = { ...base, status: "completed", schedule: { builtin: "daily_feed" } };
+    expect(taskNotification({ ...feed, result: "Picked for you today\n- Mac Studio is down to $1,799." }, "en")).toEqual({ title: "Picked for you today", body: "- Mac Studio is down to $1,799.", tag: "daily-feed" });
+    expect(taskNotification({ ...feed, result: "今日为你留意\n- Mac Studio 降到 $1,799。" }, "en")!.body).toBe("- Mac Studio 降到 $1,799。");
     expect(notificationText("x".repeat(300), 10)).toBe("xxxxxxxxx…");
   });
 });
 
 describe("what triggers a notification", () => {
-  it("task news, approvals and a browser hand-over, each once", async () => {
+  it("task news, approvals and a browser hand-over, each once, in the account's language", async () => {
     vi.useFakeTimers();
     try {
       let notifier: ((t: unknown) => void) | null = null;
@@ -102,7 +110,7 @@ describe("what triggers a notification", () => {
       const ctx = {
         cfg: { runtimeUserId: "owner_1" },
         agent: { events: new EventEmitter() },
-        tasks: { setNotifier: (n: typeof notifier) => { notifier = n; }, taskForConversation: () => ({ id: "task-1", title: "比价" }), hasRunning: () => true },
+        tasks: { setNotifier: (n: typeof notifier) => { notifier = n; }, taskForConversation: () => ({ id: "task-1", title: "比价" }), hasRunning: () => true, locale: () => "zh-CN" },
         tabs: { list: async () => tabs },
       } as unknown as AppContext;
       const sent: Array<{ title: string; tag?: string }> = [];

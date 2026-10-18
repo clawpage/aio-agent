@@ -7,7 +7,7 @@ import { resolveRequest, type RequestContext } from "./security.js";
 import { COOKIE_NAMES, sessionCookies } from "../auth/sessions.js";
 import { safeRedirectPath } from "../auth/tickets.js";
 import { audit } from "../db.js";
-import { requestLocale, runInLocale } from "../i18n/index.js";
+import { currentLocale, requestLocale, runInLocale, t } from "../i18n/index.js";
 
 
 /** Control API calls served by the sandbox; a container stopped for idleness starts first. */
@@ -17,9 +17,13 @@ const SANDBOX_API = /^\/(files|documents|sandbox|models)(\/|$)|^\/browser\/(?!st
 function isNavigation(req: import("node:http").IncomingMessage): boolean {
   return req.headers["sec-fetch-mode"] === "navigate";
 }
-const PARKED_HTML = `<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>环境已休眠</title>` +
-  `<body style="font-family:system-ui;background:#111;color:#eee;padding:2rem"><h1>环境空闲已休眠</h1>` +
-  `<p>刷新页面即可唤醒（约半分钟），或回到主控制台。</p></body></html>`;
+/** A small page in the request's language; `body` is HTML. */
+function notice(title: string, heading: string, body: string): string {
+  return `<!doctype html><html lang="${currentLocale()}"><meta charset="utf-8"><title>${title}</title>` +
+    `<body style="font-family:system-ui;background:#111;color:#eee;padding:2rem"><h1>${heading}</h1>` +
+    `<p>${body}</p></body></html>`;
+}
+const parkedHtml = () => notice(t().http.pages.parkedTitle, t().http.pages.parkedHeading, t().http.pages.parkedBody);
 
 function attach(req: Request, ctx: RequestContext | null): void {
   if (ctx) req.paCtx = ctx;
@@ -63,7 +67,8 @@ export function createApp(ctx: AppContext): express.Express {
     if (!legacy || legacy === ctx.cfg.primaryHost || host !== legacy) { next(); return; }
     res.setHeader("Cache-Control", "no-store");
     if (req.method === "GET" || req.method === "HEAD") res.redirect(302, `https://${ctx.cfg.primaryHost}/`);
-    else res.status(410).json({error:"moved",message:"入口已迁移，请从新域名登录"});
+    // Before the language middleware below, so the language is read here.
+    else res.status(410).json({error:"moved",message:t(requestLocale(req.headers)).http.pages.moved});
   });
 
   // Host classification happens first: an unknown Host never reaches any handler.
@@ -156,9 +161,7 @@ export function createApp(ctx: AppContext): express.Express {
         .status(403)
         .type("html")
         .send(
-          `<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>需要授权</title>` +
-            `<body style="font-family:system-ui;background:#111;color:#eee;padding:2rem"><h1>链接已失效</h1>` +
-            `<p>该工作区入口票据已过期或已使用，请回到主控制台重新打开。</p></body></html>`,
+          notice(t().http.pages.ticketTitle, t().http.pages.ticketHeading, t().http.pages.ticketBody),
         );
       return;
     }
@@ -199,7 +202,7 @@ export function createApp(ctx: AppContext): express.Express {
         await runtime.idle.wake();
       }
       api(req,res,next);
-    } catch {res.status(503).json({error:"runtime_unavailable",message:"独立环境暂不可用，请稍后重试"});}
+    } catch {res.status(503).json({error:"runtime_unavailable",message:t().http.common.runtimeUnavailable});}
   });
 
   // Everything else on the companion origin is the authenticated sandbox proxy.
@@ -215,13 +218,12 @@ export function createApp(ctx: AppContext): express.Express {
           .status(401)
           .type("html")
           .send(
-            `<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>需要登录</title>` +
-              `<body style="font-family:system-ui;background:#111;color:#eee;padding:2rem"><h1>工作区需要授权</h1>` +
-              `<p>请从主控制台（<a style="color:#7cc4ff" href="https://${ctx.cfg.primaryHost}">${ctx.cfg.primaryHost}</a>）打开工作区。</p></body></html>`,
+            notice(t().http.pages.signInTitle, t().http.pages.workspaceUnauthorized,
+              t().http.pages.openFromConsole(`<a style="color:#7cc4ff" href="https://${ctx.cfg.primaryHost}">${ctx.cfg.primaryHost}</a>`)),
           );
         return;
       }
-      res.status(401).json({ error: "unauthenticated", message: "工作区需要授权" });
+      res.status(401).json({ error: "unauthenticated", message: t().http.pages.workspaceUnauthorized });
       return;
     }
     void (async()=>{
@@ -231,8 +233,8 @@ export function createApp(ctx: AppContext): express.Express {
           // A refused request must not count as use either, or it would cancel a stop in progress.
           if(!await runtime.idle.enter(isNavigation(req))){
             res.setHeader("Cache-Control","no-store");
-            if(acceptsHtml(req))res.status(503).type("html").send(PARKED_HTML);
-            else res.status(503).json({error:"sandbox_parked",message:"环境空闲已休眠，刷新页面即可唤醒"});
+            if(acceptsHtml(req))res.status(503).type("html").send(parkedHtml());
+            else res.status(503).json({error:"sandbox_parked",message:t().http.pages.parked});
             return;
           }
           const release=runtime.idle.hold();res.on("close",release);
@@ -262,7 +264,7 @@ export function createApp(ctx: AppContext): express.Express {
   app.use((err: Error, req: Request, res: Response, _next: NextFunction) => {
     ctx.log.error("unhandled request error", { url: req.url, error: err.message });
     if (res.headersSent) return;
-    res.status(500).json({ error: "internal_error", message: "服务器内部错误" });
+    res.status(500).json({ error: "internal_error", message: t(requestLocale(req.headers)).http.common.internalError });
   });
 
   return app;

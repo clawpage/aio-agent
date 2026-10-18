@@ -180,7 +180,7 @@ export class UserRuntimes {
       if(asleep)runtime.ctx.log.info('sandbox left stopped at start');
       else{
         await startSandboxRuntime(runtime.ctx);
-        if(runtime.ctx.sandboxSetupError){await runtime.shutdown();throw new Error('用户独立环境启动失败');}
+        if(runtime.ctx.sandboxSetupError){await runtime.shutdown();throw new Error('the account\'s sandbox failed to start');}
       }
       const recovery=startRuntimeRecovery(runtime.ctx);recoveries.push(recovery);
       idle??=startSandboxIdle(runtime.ctx);if(idle)recoveries.push(idle);

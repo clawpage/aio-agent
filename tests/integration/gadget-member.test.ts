@@ -158,7 +158,7 @@ it("offers the published firmware to the gadget token: what it is, then the imag
 
     // Anything that is not an app image is refused before it replaces the offered one.
     fs.writeFileSync(source, Buffer.from("not firmware"));
-    expect(() => publishFirmware(h.ctx.cfg.gadgetFirmwareDir, source)).toThrow("不是 ESP-IDF 应用镜像");
+    expect(() => publishFirmware(h.ctx.cfg.gadgetFirmwareDir, source)).toThrow("not an ESP-IDF app image");
     expect(describeFirmware(Buffer.alloc(600), 600)).toBeNull();
     expect(((await (await h.request("/api/gadget/firmware", { headers: auth })).json()) as { version: string }).version).toBe("999.0.1");
 });

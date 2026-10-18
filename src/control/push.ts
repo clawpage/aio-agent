@@ -4,6 +4,8 @@ import webpush from "web-push";
 import type { AppContext } from "./context.js";
 import type { Db } from "./db.js";
 import type { Logger } from "../common/logger.js";
+import type { Locale } from "./locale.js";
+import { t } from "./i18n/index.js";
 
 /**
  * Notifications on the person's phone through the standard Web Push protocol:
@@ -77,8 +79,8 @@ export class PushService {
   /** Store (or move to this account) a browser's subscription. */
   subscribe(ownerId: string, input: PushSubscriptionInput, userAgent = ""): void {
     const p256dh = input.keys?.p256dh, auth = input.keys?.auth;
-    if (!validEndpoint(input.endpoint)) throw new Error("不支持的推送地址");
-    if (typeof p256dh !== "string" || typeof auth !== "string" || !/^[A-Za-z0-9_-]{20,200}$/.test(p256dh) || !/^[A-Za-z0-9_-]{8,100}$/.test(auth)) throw new Error("推送订阅不完整");
+    if (!validEndpoint(input.endpoint)) throw new Error(t().http.push.badEndpoint);
+    if (typeof p256dh !== "string" || typeof auth !== "string" || !/^[A-Za-z0-9_-]{20,200}$/.test(p256dh) || !/^[A-Za-z0-9_-]{8,100}$/.test(auth)) throw new Error(t().http.push.incomplete);
     this.#db.prepare(`INSERT INTO push_subscriptions (endpoint,owner_id,p256dh,auth,user_agent,created_at,failures) VALUES (?,?,?,?,?,?,0)
       ON CONFLICT(endpoint) DO UPDATE SET owner_id=excluded.owner_id,p256dh=excluded.p256dh,auth=excluded.auth,user_agent=excluded.user_agent,failures=0`)
       .run(input.endpoint, ownerId, p256dh, auth, userAgent.slice(0, 300), Date.now());
@@ -150,18 +152,21 @@ export function notificationText(text: string | null | undefined, max = 140): st
 
 type TaskView = { id: string; title: string; status: string; result: string | null; error: string | null; clarification: string | null; schedule?: { builtin?: string } | null };
 
-/** What a task's news looks like on the phone, or null for news that is not worth a notification. */
-export function taskNotification(task: TaskView): PushPayload | null {
-  // The daily feed reads as what it is; its first line ("今日为你留意") is the title already.
+/** What a task's news looks like on the phone, in the account's language, or null for news that is not worth a notification. */
+export function taskNotification(task: TaskView, locale: Locale): PushPayload | null {
+  const m = t(locale).http.push;
+  // The daily feed reads as what it is; its first line ("今日为你留意", or the heading in the account's language) is the title already.
   if (task.schedule?.builtin === "daily_feed") {
     if (task.status !== "completed") return null;
-    const body = notificationText((task.result ?? "").replace(/^\s*今日为你留意[：:]?\s*/, ""));
-    return body ? { title: "今日为你留意", body, tag: "daily-feed" } : null;
+    const result = (task.result ?? "").replace(/^\s*今日为你留意[：:]?\s*/, "");
+    const heading = result.trimStart();
+    const body = notificationText(heading.toLowerCase().startsWith(m.dailyFeed.toLowerCase()) ? heading.slice(m.dailyFeed.length).replace(/^[：:]?\s*/, "") : result);
+    return body ? { title: m.dailyFeed, body, tag: "daily-feed" } : null;
   }
-  if (task.status === "completed") return { title: `已完成：${task.title}`, body: notificationText(task.result) || "任务已完成，打开一站查看。", tag: task.id };
-  if (task.status === "failed") return { title: `没有完成：${task.title}`, body: notificationText(task.error) || "执行失败，打开一站查看。", tag: task.id };
-  if (task.status === "unknown") return { title: `结果待核对：${task.title}`, body: "连接中断，结果需要你核对。", tag: task.id };
-  if (task.status === "needs_input") return { title: `需要你补充：${task.title}`, body: notificationText(task.clarification) || "打开一站补充信息。", tag: task.id };
+  if (task.status === "completed") return { title: m.completed(task.title), body: notificationText(task.result) || m.completedBody, tag: task.id };
+  if (task.status === "failed") return { title: m.failed(task.title), body: notificationText(task.error) || m.failedBody, tag: task.id };
+  if (task.status === "unknown") return { title: m.unknown(task.title), body: m.unknownBody, tag: task.id };
+  if (task.status === "needs_input") return { title: m.needsInput(task.title), body: notificationText(task.clarification) || m.needsInputBody, tag: task.id };
   return null;
 }
 
@@ -179,11 +184,13 @@ export function startTaskNotifications(ctx: AppContext, push: PushService, inter
   const send = (payload: PushPayload | null) => {
     if (payload) void push.notify(ownerId, payload).catch(() => undefined);
   };
-  ctx.tasks.setNotifier((task) => send(taskNotification(task)));
+  // Written for the account whatever runs when the news comes (a task, an event, this timer): in its language.
+  const m = () => t(ctx.tasks.locale()).http.push;
+  ctx.tasks.setNotifier((task) => send(taskNotification(task, ctx.tasks.locale())));
   const onEvent = (event: { type: string; conversationId: string }) => {
     if (event.type !== "approval.requested") return;
     const task = ctx.tasks.taskForConversation(event.conversationId);
-    if (task) send({ title: `需要你确认：${task.title}`, body: "有一个操作等你确认，打开一站查看。", tag: `${task.id}:approval` });
+    if (task) send({ title: m().approval(task.title), body: m().approvalBody, tag: `${task.id}:approval` });
   };
   ctx.agent.events.on("event", onEvent);
   const asked = new Set<string>();
@@ -200,7 +207,7 @@ export function startTaskNotifications(ctx: AppContext, push: PushService, inter
         if (asked.has(key)) continue;
         asked.add(key);
         const task = ctx.tasks.taskForConversation(tab.key);
-        send({ title: `需要你操作浏览器：${task?.title ?? tab.title}`, body: notificationText(tab.request.reason, 120) || "打开一站接管浏览器。", tag: `${task?.id ?? tab.id}:browser` });
+        send({ title: m().browser(task?.title ?? tab.title), body: notificationText(tab.request.reason, 120) || m().browserBody, tag: `${task?.id ?? tab.id}:browser` });
       }
     }).catch(() => undefined).finally(() => { polling = false; });
   }, intervalMs);

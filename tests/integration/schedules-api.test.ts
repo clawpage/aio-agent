@@ -26,6 +26,10 @@ describe("schedules API", () => {
     const paused = await h.request("/api/schedules/sched-own/pause", { method: "POST", headers, body: "{}" });
     expect(await paused.json()).toMatchObject({ schedule: { status: "paused" } });
     expect((await h.request("/api/schedules/sched-other/pause", { method: "POST", headers, body: "{}" })).status).toBe(404);
+    // Another account's schedule is not found in the console's language, whatever the service says about it.
+    const missing = await h.request("/api/schedules/sched-other/run", { method: "POST", headers: { ...headers, "x-aio-locale": "zh-CN" }, body: "{}" });
+    expect(missing.status).toBe(404);
+    expect(await missing.json()).toEqual({ error: "schedule_refused", message: "定时任务不存在" });
     expect((await h.request("/api/schedules/sched-own/explode", { method: "POST", headers, body: "{}" })).status).toBe(404);
     expect((await h.request("/api/schedules/sched-own/cancel", { method: "POST", headers, body: "{}" })).status).toBe(200);
     expect(h.ctx.db.prepare("SELECT id FROM schedules WHERE builtin IS NULL ORDER BY id").all()).toEqual([{ id: "sched-other" }]);

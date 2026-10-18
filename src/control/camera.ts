@@ -228,7 +228,7 @@ export const CAMERA_TOOLS = [
         camera: { type: "string", description: "The camera entity" },
         from: { type: "string", description: "Start of the range, local time; default 24 hours ago" },
         to: { type: "string", description: "End of the range, local time; default now" },
-        label: { type: "string", description: "Only events whose label contains this, e.g. 人形 (person) or 移动 (motion)" },
+        label: { type: "string", description: "Only events whose label contains this, e.g. 人形 (person) or 移动 (motion)" }, // i18n-exempt: the labels the cameras report
       },
       required: ["camera"],
     },

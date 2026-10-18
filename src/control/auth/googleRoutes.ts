@@ -5,6 +5,7 @@ import { originAllowed } from "../http/security.js";
 import { generateSecret, sha256Hex } from "./passwords.js";
 import { RegisterError, registerGoogleWithInvite } from "./invites.js";
 import { serializeCookie, sessionCookies } from "./sessions.js";
+import { t } from "../i18n/index.js";
 import { GoogleLogin, GoogleAuthError, GOOGLE_TTL, GOOGLE_CLIENT_COOKIE, GOOGLE_BROWSER_COOKIE, type GoogleFlow } from "./google.js";
 
 export function googleRouter(context: AppContext): Router {
@@ -20,13 +21,13 @@ export function googleRouter(context: AppContext): Router {
     if (req.paCtx!.kind !== "primary") { res.status(404).json({error: "not_found"}); return; }
     if (req.method === "POST") {
       if (!originAllowed(cfg, "primary", req.paCtx!.origin)) { res.status(403).json({error: "origin_denied"}); return; }
-      if (limiter.state(req.paCtx!.ip).locked) { res.status(429).json({error: "rate_limited", message: "尝试次数过多，请稍后重试"}); return; }
+      if (limiter.state(req.paCtx!.ip).locked) { res.status(429).json({error: "rate_limited", message: t().http.auth.tooManyAttempts}); return; }
     }
     next();
   });
   const run = (fn: (req: Request, res: Response) => void | Promise<void>) => (req: Request, res: Response, next: NextFunction) => {
     void Promise.resolve().then(() => fn(req, res)).catch(err => {
-      if (err instanceof GoogleAuthError) { res.status(401).json({error: "google_expired", message: "Google 登录失败或已过期，请重新登录"}); return; }
+      if (err instanceof GoogleAuthError) { res.status(401).json({error: "google_expired", message: t().http.auth.googleFailed}); return; }
       next(err);
     });
   };
@@ -53,7 +54,7 @@ export function googleRouter(context: AppContext): Router {
     res.json({enabled: google.enabled, pending: row ? {email: row.email} : null});
   });
   router.post("/start", run((req, res) => {
-    if (!google.enabled) { res.status(503).json({error: "google_disabled", message: "Google 登录尚未配置"}); return; }
+    if (!google.enabled) { res.status(503).json({error: "google_disabled", message: t().http.auth.googleDisabled}); return; }
     google.discard(client(req));
     const flow = google.start(req.body?.native === true);
     res.setHeader("Set-Cookie", cookie(GOOGLE_CLIENT_COOKIE, flow.client, req.paCtx!.secure));

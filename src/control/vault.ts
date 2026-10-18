@@ -5,6 +5,7 @@ import type { Db } from "./db.js";
 import type { AppContext } from "./context.js";
 import type { LoginStep, TabRecord } from "./browser/tabs.js";
 import { randomId } from "./auth/passwords.js";
+import { t } from "./i18n/index.js";
 
 /**
  * The password vault: accounts a person saved so the agent can sign in for them
@@ -90,7 +91,7 @@ export function siteCovers(site: string, host: string): boolean {
 function vaultMethod(input: unknown): VaultMethod {
   if (input === undefined || input === "password") return "password";
   if (input === "google") return "google";
-  throw new VaultError("bad_method", "登录方式只能是账号密码或 Google 登录");
+  throw new VaultError("bad_method", t().http.vault.badMethod);
 }
 
 export class VaultError extends Error {
@@ -123,7 +124,7 @@ export class Vault {
       fs.writeFileSync(this.#keyFile, `${hex}\n`, { mode: 0o600, flag: "wx" });
     }
     const key = Buffer.from(hex, "hex");
-    if (key.length !== 32) throw new VaultError("bad_key", "密码器密钥文件损坏", 500);
+    if (key.length !== 32) throw new VaultError("bad_key", t().http.vault.badKey, 500);
     this.#key = key;
     return key;
   }
@@ -183,16 +184,16 @@ export class Vault {
     const out: { site?: string; username?: string; password?: string } = {};
     if (input.site !== undefined || required) {
       const site = normalizeSite(input.site);
-      if (!site) throw new VaultError("bad_site", "网站写成域名或网址，例如 github.com");
+      if (!site) throw new VaultError("bad_site", t().http.vault.badSite);
       out.site = site;
     }
     if (input.username !== undefined || required) {
-      if (typeof input.username !== "string" || input.username.length > MAX_USERNAME) throw new VaultError("bad_username", `账号最多 ${MAX_USERNAME} 个字`);
+      if (typeof input.username !== "string" || input.username.length > MAX_USERNAME) throw new VaultError("bad_username", t().http.vault.usernameTooLong(MAX_USERNAME));
       out.username = input.username.trim();
     }
     if (method === "google") return out;
     if (input.password !== undefined || required) {
-      if (typeof input.password !== "string" || !input.password || input.password.length > MAX_PASSWORD) throw new VaultError("bad_password", `密码不能为空，最多 ${MAX_PASSWORD} 个字`);
+      if (typeof input.password !== "string" || !input.password || input.password.length > MAX_PASSWORD) throw new VaultError("bad_password", t().http.vault.badPassword(MAX_PASSWORD));
       out.password = input.password;
     }
     return out;
@@ -202,7 +203,7 @@ export class Vault {
     const method = vaultMethod(input.method);
     const v = this.#checked({ ...input, username: input.username ?? "" }, true, method);
     const count = (this.#db.prepare("SELECT COUNT(*) AS n FROM vault_entries WHERE owner_id = ?").get(this.#ownerId) as { n: number }).n;
-    if (count >= VAULT_MAX_ENTRIES) throw new VaultError("full", `密码器最多保存 ${VAULT_MAX_ENTRIES} 个账号`, 409);
+    if (count >= VAULT_MAX_ENTRIES) throw new VaultError("full", t().http.vault.full(VAULT_MAX_ENTRIES), 409);
     const id = randomId("vault");
     const now = Date.now();
     this.#db
@@ -217,7 +218,7 @@ export class Vault {
     const method = input.method === undefined ? row.method : vaultMethod(input.method);
     // Turning a Google sign-in into a password one needs the password.
     const v = this.#checked(input, false, method);
-    if (method === "password" && row.method !== "password" && v.password === undefined) throw new VaultError("bad_password", "改成账号密码登录时要填密码");
+    if (method === "password" && row.method !== "password" && v.password === undefined) throw new VaultError("bad_password", t().http.vault.passwordNeeded);
     const secret = method === "google" ? "" : v.password === undefined ? row.secret : this.#seal(id, v.password);
     this.#db
       .prepare("UPDATE vault_entries SET site = ?, method = ?, username = ?, secret = ?, updated_at = ? WHERE id = ? AND owner_id = ?")
@@ -274,9 +275,9 @@ export async function vaultLogin(
   input: { entryId?: unknown; username?: unknown; password?: unknown; save?: unknown; method?: unknown },
 ): Promise<VaultLoginResult> {
   const fail = (status: number, error: string, message: string): VaultLoginResult => ({ ok: false, status, error, message });
-  if (!ctx.tabs || !ctx.vault) return fail(404, "not_found", "密码器不可用");
+  if (!ctx.tabs || !ctx.vault) return fail(404, "not_found", t().http.vault.unavailable);
   const host = siteOfUrl(tab.url);
-  if (tab.request?.kind !== "login" || tab.holder !== "ai" || !host) return fail(409, "no_request", "这个页面没有在等待登录");
+  if (tab.request?.kind !== "login" || tab.holder !== "ai" || !host) return fail(409, "no_request", t().http.vault.noRequest);
   let username: string;
   let password = "";
   let method: VaultMethod = "password";
@@ -284,13 +285,13 @@ export async function vaultLogin(
   if (typeof input.entryId === "string") {
     const entry = ctx.vault.get(input.entryId);
     // An account is only ever typed into the site it was saved for.
-    if (!entry || !siteCovers(entry.site, host)) return fail(404, "no_entry", "密码器里没有这个网站的这个账号");
+    if (!entry || !siteCovers(entry.site, host)) return fail(404, "no_entry", t().http.vault.noSiteEntry);
     username = entry.username;
     method = entry.method;
     entryId = entry.id;
     if (method === "password") {
       const secret = ctx.vault.secret(entry.id);
-      if (secret === null) return fail(500, "unreadable", "这个账号的密码读不出来了，请在密码器里重新保存");
+      if (secret === null) return fail(500, "unreadable", t().http.vault.unreadable);
       password = secret;
     }
   } else if (input.method === "google") {
@@ -302,7 +303,7 @@ export async function vaultLogin(
       entryId = same ? ctx.vault.update(same.id, { username })!.id : ctx.vault.create({ site: host, method, username }).id;
     }
   } else {
-    if (typeof input.username !== "string" || typeof input.password !== "string" || !input.password) return fail(400, "bad_request", "请输入账号和密码");
+    if (typeof input.username !== "string" || typeof input.password !== "string" || !input.password) return fail(400, "bad_request", t().http.vault.credentialsRequired);
     username = input.username.trim();
     password = input.password;
     if (input.save !== false) {
@@ -313,7 +314,7 @@ export async function vaultLogin(
   // The agent's own steps travel with its request; otherwise the steps that worked on this site last time.
   const kept = method === "password" && !tab.request?.steps ? ctx.vault.script(host) : null;
   const out = await ctx.tabs.login(tab.key, tab.id, method === "google" ? { site: host, method, username } : { site: host, username, password, ...(kept ? { steps: kept.steps, startUrl: kept.startUrl } : {}) });
-  if (out.status !== 200) return fail(out.status, String(out.body.error ?? "failed"), String(out.body.message ?? "没能填入，请稍后重试"));
+  if (out.status !== 200) return fail(out.status, String(out.body.error ?? "failed"), String(out.body.message ?? t().http.vault.fillFailed));
   if (entryId && (out.body.result === "submitted" || out.body.result === "google")) ctx.vault.used(entryId);
   return { ok: true, result: String(out.body.result ?? ""), ...(typeof out.body.error === "string" ? { error: out.body.error } : {}) };
 }

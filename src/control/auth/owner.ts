@@ -103,8 +103,8 @@ export function getUser(db: Db, id: string): User | null {
   return db.prepare("SELECT id,username,role FROM owners WHERE id=?").get(id) as User | undefined ?? null;
 }
 export async function createMember(db: Db, username: string, password: string): Promise<User> {
-  if (!/^[a-zA-Z0-9_-]{2,40}$/.test(username) || username === BOOTSTRAP_USERNAME) throw new Error("账号格式无效");
-  if (password.length < 12) throw new Error("密码至少需要12个字符");
+  if (!/^[a-zA-Z0-9_-]{2,40}$/.test(username) || username === BOOTSTRAP_USERNAME) throw new Error("invalid username");
+  if (password.length < 12) throw new Error("the password needs at least 12 characters");
   const rec = await hashPassword(password);
   const id = randomId("user");
   db.prepare("INSERT INTO owners (id,username,password_hash,password_salt,password_params,created_at,role) VALUES (?,?,?,?,?,?,'member')")

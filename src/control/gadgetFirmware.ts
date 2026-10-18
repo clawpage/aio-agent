@@ -60,7 +60,7 @@ export function readFirmware(dir: string): (FirmwareInfo & { file: string }) | n
 export function publishFirmware(dir: string, source: string): FirmwareInfo {
   const data = fs.readFileSync(source);
   const info = describeFirmware(data.subarray(0, 512), data.length);
-  if (!info) throw new Error("不是 ESP-IDF 应用镜像");
+  if (!info) throw new Error("not an ESP-IDF app image");
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
   const temp = path.join(dir, `.${FIRMWARE_FILE}.${process.pid}.tmp`);
   fs.writeFileSync(temp, data, { mode: 0o600 });

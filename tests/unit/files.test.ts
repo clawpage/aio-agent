@@ -19,14 +19,14 @@ describe("sandbox shell result interpretation", () => {
       data: { session_id: "s1", status: "completed", exit_code: 1, output: "mkdir: cannot create directory" },
     });
     expect(outcome.ok).toBe(false);
-    expect(outcome.message).toContain("退出码 1");
+    expect(outcome.message).toContain("exit code 1");
   });
 
   it("rejects a still-running command instead of claiming success", () => {
     const outcome = interpretShellResult({ success: true, data: { session_id: "s1", status: "running" } });
     expect(outcome.ok).toBe(false);
     expect(outcome.status).toBe("running");
-    expect(outcome.message).toContain("仍在运行");
+    expect(outcome.message).toContain("still running");
   });
 
   it("rejects an envelope-level failure", () => {

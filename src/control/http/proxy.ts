@@ -11,6 +11,7 @@ import { COOKIE_NAMES, parseCookies } from "../auth/sessions.js";
 import type { SessionStore } from "../auth/sessions.js";
 import type { Logger } from "../../common/logger.js";
 import { isBrowserBoundPath, isStaticAssetPath } from "../browser/service.js";
+import { requestLocale, t } from "../i18n/index.js";
 
 const CONTROL_COOKIES = new Set(Object.values(COOKIE_NAMES).flatMap((n) => [n.session, n.csrf]));
 
@@ -297,10 +298,12 @@ export function handleProxyHttp(
   res: http.ServerResponse,
 ): void {
   const { cfg, log } = deps;
+  // A logout elsewhere can end this response, so its language is the request's own, not the ambient one.
+  const m = t(requestLocale(req.headers));
   if (UNSAFE_METHODS.has(req.method ?? "GET")) {
     if (!ctx.origin || !originAllowed(cfg, "workspace", ctx.origin)) {
       res.writeHead(403, { "content-type": "application/json; charset=utf-8" });
-      res.end(JSON.stringify({ error: "origin_denied", message: "来源站点不被允许" }));
+      res.end(JSON.stringify({ error: "origin_denied", message: m.http.common.originDenied }));
       return;
     }
   }
@@ -336,7 +339,7 @@ export function handleProxyHttp(
     clientGone = true;
     releaseOnce();
     if (!res.headersSent) res.writeHead(401, { "content-type": "application/json; charset=utf-8" });
-    res.end(JSON.stringify({ error: "session_revoked", message: "会话已失效，请重新登录" }));
+    res.end(JSON.stringify({ error: "session_revoked", message: m.http.session.invalid }));
   });
   void (async () => {
     try {
@@ -348,7 +351,7 @@ export function handleProxyHttp(
       req.off("aborted", onClientGone);
       log.warn("browser unavailable for proxied request", { error: err instanceof Error ? err.message : String(err) });
       if (!res.headersSent) res.writeHead(503, { "content-type": "application/json; charset=utf-8" });
-      res.end(JSON.stringify({ error: "browser_unavailable", message: "浏览器正在恢复，请稍后重试" }));
+      res.end(JSON.stringify({ error: "browser_unavailable", message: m.http.session.browserRestoring }));
       return;
     }
     // The wait is over: hand the remaining lifetime to the upstream pass, which
@@ -375,6 +378,7 @@ function proxyHttpUpstream(
   releaseBrowser: (() => void) | null,
 ): void {
   const { cfg, log } = deps;
+  const m = t(requestLocale(req.headers));
 
   const node = deps.upstream;
   const upstream = (node.url.protocol === "https:" ? https : http).request({
@@ -407,13 +411,13 @@ function proxyHttpUpstream(
     if (!res.headersSent) {
       res.writeHead(502, { "content-type": "application/json; charset=utf-8" });
     }
-    res.end(JSON.stringify({ error: "sandbox_unavailable", message: "沙箱服务暂不可用，请稍后重试" }));
+    res.end(JSON.stringify({ error: "sandbox_unavailable", message: m.http.session.sandboxUnavailable }));
   });
 
   const detachGuard = attachSessionGuard(deps, ctx, () => {
     upstream.destroy();
     if (!res.headersSent) res.writeHead(401, { "content-type": "application/json; charset=utf-8" });
-    res.end(JSON.stringify({ error: "session_revoked", message: "会话已失效，请重新登录" }));
+    res.end(JSON.stringify({ error: "session_revoked", message: m.http.session.invalid }));
   });
 
   req.pipe(upstream);

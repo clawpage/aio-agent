@@ -52,11 +52,11 @@ it('validates report ownership in a separate member ledger, ignores client suppl
   try {
     ledger.prepare('INSERT INTO conversations(id,owner_id,title,created_at,updated_at) VALUES(?,?,?,?,?)').run('member-conv',userId,'member',1,1);
     ledger.prepare('INSERT INTO tasks(id,client_message_id,conversation_id,title,input_text,result,status,created_at) VALUES(?,?,?,?,?,?,?,?)').run('member-task','member-message','member-conv','Reply title','private request','a'.repeat(25000),'completed',1);
-    expect(() => createSupportRequest(h.ctx.db,'owner_1',{kind:'content',taskId:'member-task',note:'cross-account'},Date.now(),ledger)).toThrow('未找到');
+    expect(() => createSupportRequest(h.ctx.db,'owner_1',{kind:'content',taskId:'member-task',note:'cross-account'},Date.now(),ledger)).toThrow('No reply to report was found');
     const id = createSupportRequest(h.ctx.db,userId,{kind:'content',taskId:'member-task',note:'Unsafe content',content:'forged reply'},Date.now(),ledger);
     const row = supportQueue(h.ctx.db).find(r=>r.id===id)!;
     expect(row.content).toBe('a'.repeat(20000)); expect(JSON.stringify(row)).not.toContain('private request');
-    expect(() => createSupportRequest(h.ctx.db,null,{kind:'content',email:'a@example.com',note:'test'},Date.now(),ledger)).toThrow('请先登录');
+    expect(() => createSupportRequest(h.ctx.db,null,{kind:'content',email:'a@example.com',note:'test'},Date.now(),ledger)).toThrow('Please log in first');
   } finally { ledger.close(); }
 });
 it('routes member reports to their ledger while keeping the review queue at central authentication', async () => {

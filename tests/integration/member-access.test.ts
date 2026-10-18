@@ -42,7 +42,7 @@ it('authenticates the requested username and protects owner configuration',async
  expect(await status()).toBeNull();
  // A member learns that the start failed, never why.
  h.ctx.sandboxSetupError='pull access denied for a private image';
- try{expect(await status()).toBe('服务正在连接');}finally{h.ctx.sandboxSetupError=null;}
+ try{expect(await status()).toBe('Connecting to the service');}finally{h.ctx.sandboxSetupError=null;}
 });
 it('isolates ledger reads, references, stops, events, replay IDs and planner context',async()=>{
  const a=await submit(owner,'owner-private-task');expect(a.status).toBe(202);

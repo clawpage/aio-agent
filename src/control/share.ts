@@ -5,6 +5,7 @@ import { randomBytes, timingSafeEqual } from "node:crypto";
 import type { NextFunction, Request, Response } from "express";
 import type { Config } from "./config.js";
 import { ClawpageData, DataError, type Caller, type TableSummary } from "./clawpages.js";
+import { requestLocale, t } from "./i18n/index.js";
 
 /**
  * Public share pages: clawpages.
@@ -436,7 +437,7 @@ export class ShareStore {
       }
       if (req.method !== "GET" && req.method !== "HEAD") return next();
       const notFound = () => {
-        res.status(404).set({ ...PAGE_HEADERS, "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" }).send("页面不存在或已删除");
+        res.status(404).set({ ...PAGE_HEADERS, "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" }).send(t(requestLocale(req.headers)).http.share.notFound);
       };
       const userId = this.#userIdOf(username!);
       if (!userId) return notFound();

@@ -98,7 +98,7 @@ export function FormCard({ spec, onSubmit, sent = null, disabled = false, embedd
       {spec.title && !embedded && <div className="form-card-title">{spec.title}</div>}
       {spec.fields.map(field)}
       {tried && missing.length > 0 && <p className="form-card-error" role="alert">{t.chat.form.missing(missing)}</p>}
-      {onSubmit && <button type="submit" className="primary form-card-submit" disabled={closed}>{spec.submit}</button>}
+      {onSubmit && <button type="submit" className="primary form-card-submit" disabled={closed}>{spec.submit ?? t.chat.approval.submit}</button>}
     </form>
   );
 }

@@ -22,7 +22,7 @@ import {UserRuntimes} from "./tenants.js";
 import { loadConfig, ensureDataDirs, type Config } from "./config.js";
 import { Logger } from "../common/logger.js";
 import { openDb, type Db } from "./db.js";
-import { runInLocale } from "./i18n/index.js";
+import { runInLocale, t } from "./i18n/index.js";
 import { readLocale } from "./locale.js";
 import { UsageLedger } from './usage.js';
 import { SessionStore } from "./auth/sessions.js";
@@ -295,7 +295,7 @@ export async function startSandboxRuntime(ctx: AppContext): Promise<void> {
   try {
     // A node this control plane cannot drive is refused before anything is asked of it.
     const compat = await container.node.check(0);
-    if (!compat.ok) throw new Error(compat.error ?? "沙箱节点不可用");
+    if (!compat.ok) throw new Error(compat.error ?? t().http.common.nodeUnavailable);
     const state = await container.ensureRunning();
     log.info("sandbox container ready", { name: state.image, healthy: state.healthy });
   } catch (err) {

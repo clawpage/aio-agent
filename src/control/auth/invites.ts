@@ -3,6 +3,7 @@ import type { Db } from "../db.js";
 import { hashPassword, randomId, generateSecret } from "./passwords.js";
 import type { User } from "./owner.js";
 import { emailTaken, normalizeEmail, usernameFromEmail } from "./email.js";
+import { t } from "../i18n/index.js";
 
 /**
  * One-time invite codes: required once the deployment has 20 accounts.
@@ -77,22 +78,22 @@ export function revokeInvite(db: Db, code: string): boolean {
 export async function registerWithInvite(db: Db, input: { email: string; password: string; code: string }, google?: { subject: string; email: string; clientHash: string }): Promise<User & { email: string }> {
   const email = normalizeEmail(input.email);
   const code = normalizeCode(input.code);
-  if (!email) throw new RegisterError(400, "invalid_email", "请输入有效的邮箱");
-  if (input.password.length < MIN_PASSWORD) throw new RegisterError(400, "weak_password", `密码至少需要 ${MIN_PASSWORD} 个字符`);
+  if (!email) throw new RegisterError(400, "invalid_email", t().http.auth.invalidEmail);
+  if (input.password.length < MIN_PASSWORD) throw new RegisterError(400, "weak_password", t().http.auth.weakPassword(MIN_PASSWORD));
   const rec = await hashPassword(input.password);
   let id = randomId("user");
   let username = "";
   db.exec("BEGIN IMMEDIATE");
   try {
-    if (!code && registrationRequiresInvite(db)) throw new RegisterError(400, "invite_required", "免邀请码注册名额已满，请输入邀请码");
+    if (!code && registrationRequiresInvite(db)) throw new RegisterError(400, "invite_required", t().http.auth.inviteRequired);
     if (code) {
       const invite = db.prepare("SELECT used_at,revoked_at FROM invites WHERE code=?").get(code) as { used_at: number | null; revoked_at: number | null } | undefined;
-      if (!invite || invite.revoked_at !== null) throw new RegisterError(400, "invalid_invite", "邀请码无效");
-      if (invite.used_at !== null) throw new RegisterError(400, "invite_used", "这个邀请码已经用过了");
+      if (!invite || invite.revoked_at !== null) throw new RegisterError(400, "invalid_invite", t().http.auth.invalidInvite);
+      if (invite.used_at !== null) throw new RegisterError(400, "invite_used", t().http.auth.inviteUsed);
     }
     if (emailTaken(db, email)) {
-      throw google ? new RegisterError(409, "email_taken", "这个邮箱已经注册过，请用邮箱和密码登录")
-        : new RegisterError(409, "email_taken", "这个邮箱已经注册过，请直接登录");
+      throw google ? new RegisterError(409, "email_taken", t().http.auth.emailTakenUsePassword)
+        : new RegisterError(409, "email_taken", t().http.auth.emailTaken);
     }
     username = usernameFromEmail(db, email);
     const now = Date.now();
@@ -102,9 +103,9 @@ export async function registerWithInvite(db: Db, input: { email: string; passwor
     if (spare) db.prepare("DELETE FROM meta WHERE key=?").run(SPARE_ACCOUNT_KEY);
     if (google) {
       const flow = db.prepare("SELECT subject FROM google_login_flows WHERE client_hash=? AND status='ready' AND expires_at>?").get(google.clientHash, now) as {subject: string} | undefined;
-      if (flow?.subject !== google.subject) throw new RegisterError(401, "google_expired", "Google 登录已过期，请重新登录");
+      if (flow?.subject !== google.subject) throw new RegisterError(401, "google_expired", t().http.auth.googleExpired);
       if (db.prepare("SELECT 1 FROM google_identities WHERE subject=?").get(google.subject)) {
-        throw new RegisterError(409, "google_registered", "这个 Google 账号已注册，请重新用 Google 登录");
+        throw new RegisterError(409, "google_registered", t().http.auth.googleRegistered);
       }
     }
     db.prepare("INSERT INTO owners (id,username,email,password_hash,password_salt,password_params,created_at,role) VALUES (?,?,?,?,?,?,?,'member')")
