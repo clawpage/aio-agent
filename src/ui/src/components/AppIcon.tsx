@@ -13,6 +13,14 @@ const GLYPHS: Record<string, ReactNode> = {
       <path d="M24.5 15.5 21.6 21.6 15.5 24.5 18.4 18.4Z" fill="var(--app-glyph)" />
     </>
   ),
+  // A laptop with the compass on its screen: the AI's Chrome on the person's Mac.
+  macBrowser: (
+    <>
+      <rect x="10" y="11" width="20" height="14" rx="2" fill="none" stroke="var(--app-glyph)" strokeWidth="2.2" />
+      <path d="M7.5 28.5h25" stroke="var(--app-glyph)" strokeWidth="2.4" strokeLinecap="round" />
+      <path d="M22.6 15.4 21 19.6 16.9 21.2 18.5 17Z" fill="var(--app-glyph)" />
+    </>
+  ),
   // A prompt.
   terminal: (
     <>

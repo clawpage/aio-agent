@@ -1131,6 +1131,40 @@ export function createApiRouter(context: AppContext): Router {
     track(req, action === "take" ? "user_browser_takeover" : "user_browser_handback");
     res.json({ userBrowser: view });
   }));
+  // The workspace's Mac browser: every page of the AI's Chrome on the account's Mac, and pages the person opens there themselves.
+  router.get("/user-browser/pages", requireKind("primary"), requireSession, asyncHandler(async (req, res) => {
+    if (!context.userBrowser) { res.json({ state: "unlinked", pages: [] }); return; }
+    const { state, pages } = await context.userBrowser.macPages(ctxOf(req).session!.ownerId);
+    const taskOf = db.prepare(`SELECT id, title FROM tasks WHERE COALESCE(execution_conversation_id, conversation_id)=? ORDER BY created_at DESC LIMIT 1`);
+    res.setHeader("Cache-Control", "no-store");
+    res.json({
+      state,
+      pages: pages.map(({ taskKey, ...page }) => {
+        const task = taskKey ? (taskOf.get(taskKey) as { id: string; title: string } | undefined) : undefined;
+        return { ...page, task: task ? { id: task.id, title: task.title } : null };
+      }),
+    });
+  }));
+  router.post("/user-browser/pages", requireKind("primary"), requireSession, asyncHandler(async (req, res) => {
+    const url = String(req.body?.url ?? "").trim();
+    if (!/^https?:\/\/[^\s]+$/i.test(url) || url.length > 2000) { res.status(400).json({ error: "bad_url", message: "请输入以 http:// 或 https:// 开头的网址" }); return; }
+    if (!context.userBrowser) { res.status(404).json({ error: "not_found" }); return; }
+    try {
+      res.json({ page: await context.userBrowser.openMacPage(ctxOf(req).session!.ownerId, url) });
+    } catch (err) {
+      res.status(502).json({ error: "unavailable", message: err instanceof Error ? err.message : String(err) });
+    }
+  }));
+  router.delete("/user-browser/pages/:id", requireKind("primary"), requireSession, asyncHandler(async (req, res) => {
+    const id = Number(param(req, "id"));
+    if (!context.userBrowser || !Number.isInteger(id) || id <= 0) { res.status(404).json({ error: "not_found" }); return; }
+    try {
+      if (!(await context.userBrowser.closeMacPage(ctxOf(req).session!.ownerId, id))) { res.status(409).json({ error: "in_use", message: "这个页面正被任务使用，请在任务卡片里处理" }); return; }
+      res.json({ ok: true });
+    } catch (err) {
+      res.status(502).json({ error: "unavailable", message: err instanceof Error ? err.message : String(err) });
+    }
+  }));
   // The person answers a task's sign-in request from the vault: a saved account, or one typed here
   // (saved unless they say not to). The account goes into the page; the response only says what happened.
   router.post("/tasks/:id/browser/login", requireKind("primary"), requireSession, asyncHandler(async (req, res) => {

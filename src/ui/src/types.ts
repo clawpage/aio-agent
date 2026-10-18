@@ -390,6 +390,18 @@ export interface DispatchLog {
 }
 
 /** A task's page on the account's own Chrome, as its card shows it. */
+/** One page of the AI's Chrome on the account's Mac, as the workspace's Mac browser lists it. */
+export interface MacBrowserPage {
+  id: number;
+  title: string;
+  url: string;
+  /** Opened by the person here ("you"), worked in by a task ("task"), or neither (a popup, say). */
+  owner: "you" | "task" | "none";
+  /** Who drives a task's page (the person once they took it over). */
+  holder: "ai" | "human" | null;
+  task: { id: string; title: string } | null;
+}
+
 export interface UserBrowserState {
   page: boolean;
   title: string;

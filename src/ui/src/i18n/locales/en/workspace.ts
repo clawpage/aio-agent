@@ -2,7 +2,8 @@ import type { workspace as zh } from "../zh/workspace";
 
 export const workspace: typeof zh = {
   apps: {
-    browser: "Browser",
+    browser: "Sandbox Browser",
+    macBrowser: "Mac Browser",
     terminal: "Terminal",
     files: "Files",
     editor: "Editor",

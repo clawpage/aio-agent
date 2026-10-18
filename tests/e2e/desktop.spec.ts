@@ -27,10 +27,10 @@ test("the workspace is a desktop: a menu bar, one app window, a Dock, and minimi
   const desk = page.locator(".workspace.desktop");
   const dock = page.getByRole("tablist", { name: "应用" });
   await expect(desk.locator(".menubar")).toBeVisible();
-  await expect(dock.getByRole("tab")).toHaveCount(8);
-  await expect(dock.getByRole("tab", { name: "浏览器" })).toHaveAttribute("aria-selected", "true");
-  await expect(desk.locator(".menubar-app")).toHaveText("浏览器");
-  await expect(desk.locator(".window-title")).toHaveText("浏览器");
+  await expect(dock.getByRole("tab")).toHaveCount(9);
+  await expect(dock.getByRole("tab", { name: "沙盒浏览器" })).toHaveAttribute("aria-selected", "true");
+  await expect(desk.locator(".menubar-app")).toHaveText("沙盒浏览器");
+  await expect(desk.locator(".window-title")).toHaveText("沙盒浏览器");
   await expect(desk.locator(".window iframe")).toBeVisible();
   // On a phone the browser desktop opens 1.3 times the width, on its middle; on a wide screen it fits.
   const frame = desk.locator(".desktop-frame");
@@ -99,7 +99,7 @@ test("the workspace is a desktop: a menu bar, one app window, a Dock, and minimi
   await expect(desk.locator(".window")).toHaveCount(0);
   await expect(desk.locator("iframe")).toHaveCount(0);
   await expect(desk.locator(".menubar-app")).toHaveText("桌面");
-  await expect(desk.locator(".desktop-icon")).toHaveCount(8);
+  await expect(desk.locator(".desktop-icon")).toHaveCount(9);
   await expect(dock.getByRole("tab", { name: "编辑器" })).toHaveAttribute("aria-selected", "false");
   // The app that was open keeps its Dock dot.
   await expect(dock.getByRole("tab", { name: "编辑器" })).toHaveClass(/running/);
@@ -119,8 +119,8 @@ test("the workspace is a desktop: a menu bar, one app window, a Dock, and minimi
 
   // Closing the window also returns to the desktop; closing the workspace removes it.
   await desk.getByRole("button", { name: "关闭窗口" }).click();
-  await expect(desk.locator(".desktop-icon")).toHaveCount(8);
-  await dock.getByRole("tab", { name: "浏览器" }).click();
+  await expect(desk.locator(".desktop-icon")).toHaveCount(9);
+  await dock.getByRole("tab", { name: "沙盒浏览器" }).click();
   await expect(desk.locator(".window iframe")).toBeVisible();
   if (mobile) await page.setViewportSize({ width: 360, height: 844 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1);

@@ -1,7 +1,8 @@
 import type { workspace as zh } from '../zh/workspace';
 export const workspace: typeof zh = {
   apps: {
-    browser: "瀏覽器",
+    browser: "沙盒瀏覽器",
+    macBrowser: "Mac 瀏覽器",
     terminal: "終端",
     files: "檔案",
     editor: "編輯器",

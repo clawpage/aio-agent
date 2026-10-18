@@ -209,7 +209,7 @@ test("the workspace browser is the sandbox desktop (noVNC), with no separate des
   });
   await page.goto("/");
   await page.getByRole("button", { name: "工作区", exact: true }).first().click();
-  await expect(page.getByRole("tab", { name: "浏览器" })).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByRole("tab", { name: "沙盒浏览器" })).toHaveAttribute("aria-selected", "true");
   await expect(page.locator(".workspace iframe")).toBeVisible();
   expect(tickets[0]).toBe(`/vnc/vnc.html?autoconnect=1&resize=scale&reconnect=1&path=ws&aio=${NOVNC_ASSET_VERSION}`);
   await expect(page.getByRole("tab", { name: "桌面" })).toHaveCount(0);

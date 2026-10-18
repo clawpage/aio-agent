@@ -99,6 +99,23 @@ export interface UserBrowserView {
 }
 
 const KEY = /^[A-Za-z0-9_-]{1,80}$/;
+/** A page line of chrome-devtools-mcp's page list: `3: Title (https://…) [selected]`, or `2: about:blank` untitled. */
+const PAGE_LINE = /^(\d+): (?:(.*) \((\S+)\)|(\S+))(?: \[selected\])?\s*$/;
+
+/** One page of the AI's Chrome as the workspace's Mac browser lists it. */
+export interface MacBrowserPage {
+  id: number;
+  title: string;
+  url: string;
+  /** Opened by the person in the workspace ("you"), worked in by a task ("task"), or neither (a popup, say). */
+  owner: "you" | "task" | "none";
+  /** The task's key (its execution conversation) when a task works in the page, and who drives it. */
+  taskKey: string | null;
+  holder: "ai" | "human" | null;
+}
+
+/** Whether the account's Mac browser can be used: no Mac linked, the Mac away, no Chrome on it, or ready. */
+export type MacBrowserState = "unlinked" | "offline" | "unavailable" | "ready";
 
 export class UserBrowserGateway extends McpGateway {
   #cfg: Config;
@@ -108,6 +125,8 @@ export class UserBrowserGateway extends McpGateway {
   /** account -> task key -> its page */
   #pages = new Map<string, Map<string, TaskPage>>();
   #wss = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024 });
+  /** account -> the pages the person opened in the workspace's Mac browser */
+  #own = new Map<string, Set<number>>();
 
   constructor(opts: { cfg: Config; log: Logger; port: number; usernameOf: (userId: string) => string | null; userIdOf: (username: string) => string | null; links: DeviceLinks }) {
     super({
@@ -170,6 +189,74 @@ export class UserBrowserGateway extends McpGateway {
       page.waiters.clear();
     }
     return this.view(userId, key);
+  }
+
+  /** The task working in one page of the account's Chrome, if any. */
+  #taskOf(userId: string, pageId: number): { key: string; page: TaskPage } | null {
+    for (const [key, page] of this.#pages.get(userId) ?? []) if (page.pageId === pageId) return { key, page };
+    return null;
+  }
+
+  /** One tool call on the account's Mac for the person (the workspace's Mac browser): its text, or an Error. */
+  async #personCall(userId: string, name: string, args: Record<string, unknown>): Promise<string> {
+    const tunnel = this.#links.hasLink(userId) ? this.#links.tunnelFor(userId) : null;
+    if (!tunnel) throw new Error(MAC_OFFLINE);
+    const answer = (await this.#rpc(tunnel, { jsonrpc: "2.0", id: `person-${Date.now()}`, method: "tools/call", params: { name, arguments: args } })) as {
+      result?: { content?: Array<{ type?: string; text?: string }>; isError?: boolean };
+      error?: { message?: string };
+    };
+    const text = (answer.result?.content ?? []).filter((c) => c.type === "text").map((c) => c.text ?? "").join("\n");
+    if (!answer.result || answer.result.isError) throw new Error(text || answer.error?.message || `${name} failed`);
+    return text;
+  }
+
+  /** Every page open in the account's Chrome on its Mac, with who works in it (the workspace's Mac browser). */
+  async macPages(userId: string): Promise<{ state: MacBrowserState; pages: MacBrowserPage[] }> {
+    if (!this.#links.hasLink(userId)) return { state: "unlinked", pages: [] };
+    if (!this.#links.tunnelFor(userId)) return { state: "offline", pages: [] };
+    let text: string;
+    try {
+      text = await this.#personCall(userId, "list_pages", {});
+    } catch (err) {
+      this.#log.warn("mac browser pages not listed", { error: err instanceof Error ? err.message : String(err) });
+      return { state: this.#links.tunnelFor(userId) ? "unavailable" : "offline", pages: [] };
+    }
+    const own = this.#own.get(userId) ?? new Set<number>();
+    const pages: MacBrowserPage[] = [];
+    for (const line of text.split("\n")) {
+      const found = PAGE_LINE.exec(line.trim());
+      if (!found) continue;
+      const id = Number(found[1]);
+      const url = found[3] ?? found[4]!;
+      const task = this.#taskOf(userId, id);
+      const owner = own.has(id) ? "you" : task ? "task" : "none";
+      // Chrome's own first blank page is nobody's and shows nothing.
+      if (owner === "none" && url === "about:blank") continue;
+      pages.push({ id, title: (found[2] ?? "").slice(0, 200), url: url.slice(0, 2000), owner, taskKey: task?.key ?? null, holder: task?.page.holder ?? null });
+    }
+    // Pages the person opened that are gone (closed in a task, Chrome restarted) are forgotten.
+    for (const id of own) if (!pages.some((p) => p.id === id)) own.delete(id);
+    return { state: "ready", pages };
+  }
+
+  /** The person opens a page of their own (to sign in to a site, say): its id. */
+  async openMacPage(userId: string, url: string): Promise<number> {
+    if (!/^https?:\/\//i.test(url)) throw new Error("Only http(s) pages can be opened.");
+    const text = await this.#personCall(userId, "new_page", { url });
+    const id = Number(/^(\d+): .*\[selected\]\s*$/m.exec(text)?.[1] ?? NaN);
+    if (!Number.isInteger(id)) throw new Error("the new page did not show up");
+    let own = this.#own.get(userId);
+    if (!own) this.#own.set(userId, (own = new Set()));
+    own.add(id);
+    return id;
+  }
+
+  /** The person closes a page no task works in. False when a task does (or it is not there). */
+  async closeMacPage(userId: string, pageId: number): Promise<boolean> {
+    if (this.#taskOf(userId, pageId)) return false;
+    await this.#personCall(userId, "close_page", { pageId });
+    this.#own.get(userId)?.delete(pageId);
+    return true;
   }
 
   /** A picture of a task's page now; null when the Mac or the page is not there. */
@@ -292,9 +379,11 @@ export class UserBrowserGateway extends McpGateway {
   }
 
   /**
-   * A task's page live, for its account's console (`?key=<task key>`): its session
-   * on the primary origin, opened by the console itself (Origin), relayed to that
-   * account's Mac. Input passes only while the person holds the page.
+   * A page live, for its account's console: a task's (`?key=<task key>`) or any
+   * page of the account's Chrome by its id (`?page=<id>`, the workspace's Mac
+   * browser). Its session on the primary origin, opened by the console itself
+   * (Origin), relayed to that account's Mac. Input passes only while the person
+   * holds the page: a page a task works in once taken over, any other page always.
    */
   handleUpgrade(deps: { db: Db; sessions: SessionStore }, req: http.IncomingMessage, socket: Duplex, head: Buffer): void {
     const rec = resolveRequest({ cfg: this.#cfg, sessions: deps.sessions, req });
@@ -306,12 +395,24 @@ export class UserBrowserGateway extends McpGateway {
       this.#log.warn("browser screen refused", { origin: rec?.origin ?? null, kind: rec?.kind ?? null });
       return endSocket(socket, "HTTP/1.1 403 Forbidden\r\nConnection: close\r\nContent-Length: 0\r\n\r\n");
     }
-    const key = new URL(req.url ?? "/", "http://console").searchParams.get("key") ?? "";
-    const page = KEY.test(key) ? this.#page(user.id, key) : undefined;
-    if (!page || page.pageId === null) return endSocket(socket, "HTTP/1.1 404 Not Found\r\nConnection: close\r\nContent-Length: 0\r\n\r\n");
+    const query = new URL(req.url ?? "/", "http://console").searchParams;
+    const key = query.get("key") ?? "";
+    const byId = Number(query.get("page"));
+    let pageId: number | null = null;
+    let held: () => boolean;
+    if (query.has("page")) {
+      if (!Number.isInteger(byId) || byId <= 0 || !this.#links.hasLink(user.id)) return endSocket(socket, "HTTP/1.1 404 Not Found\r\nConnection: close\r\nContent-Length: 0\r\n\r\n");
+      pageId = byId;
+      held = () => { const task = this.#taskOf(user.id, byId); return !task || task.page.holder === "human"; };
+    } else {
+      const page = KEY.test(key) ? this.#page(user.id, key) : undefined;
+      if (!page || page.pageId === null) return endSocket(socket, "HTTP/1.1 404 Not Found\r\nConnection: close\r\nContent-Length: 0\r\n\r\n");
+      pageId = page.pageId;
+      held = () => page.holder === "human";
+    }
     this.#wss.handleUpgrade(req, socket, head, (client) => {
-      const upstream = this.#links.tunnelFor(user.id)?.socket(`/browser/screen?page=${page.pageId}`);
-      this.#relay(client, upstream, () => deps.sessions.isLive(session!.id), () => page.holder === "human");
+      const upstream = this.#links.tunnelFor(user.id)?.socket(`/browser/screen?page=${pageId}`);
+      this.#relay(client, upstream, () => deps.sessions.isLive(session!.id), held);
     });
   }
 

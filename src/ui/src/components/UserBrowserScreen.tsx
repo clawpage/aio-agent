@@ -12,10 +12,12 @@ import { RemoteStage, type RemoteInput } from "./RemoteStage";
  * keyboard (the Mac app), a click on the page lets typing go straight into it.
  */
 interface Props {
-  /** The task's key (its execution conversation). */
-  taskKey: string;
+  /** The task's key (its execution conversation), or a page of the Chrome by its id (the workspace's Mac browser). */
+  target: { taskKey: string } | { pageId: number };
   /** The person holds the page: input goes through (the control plane drops it otherwise). */
   canAct: boolean;
+  /** What the strip says while the person only watches (by default: take over to use it). */
+  watchHint?: string;
 }
 
 type State = "connecting" | "live" | "closed";
@@ -34,15 +36,17 @@ const PAGE_KEYS = new Set(["Enter", "Backspace", "Tab", "Escape", "Delete", "Arr
 /** Shortcuts passed on as editing commands; paste arrives as text from the clipboard. */
 const SHORTCUTS = new Set(["a", "z", "x", "c"]);
 
-function screenUrl(key: string): string {
-  const url = new URL(apiUrl(`/api/user-browser/screen?key=${encodeURIComponent(key)}`), window.location.href);
+function screenUrl(target: Props["target"]): string {
+  const query = "taskKey" in target ? `key=${encodeURIComponent(target.taskKey)}` : `page=${target.pageId}`;
+  const url = new URL(apiUrl(`/api/user-browser/screen?${query}`), window.location.href);
   url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
   return url.toString();
 }
 
 const modsOf = (e: React.KeyboardEvent) => [e.altKey && "alt", e.ctrlKey && "ctrl", e.metaKey && "meta", e.shiftKey && "shift"].filter(Boolean) as string[];
 
-export function UserBrowserScreen({ taskKey, canAct }: Props) {
+export function UserBrowserScreen({ target, canAct, watchHint }: Props) {
+  const targetId = "taskKey" in target ? `key:${target.taskKey}` : `page:${target.pageId}`;
   const wsRef = useRef<WebSocket | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const keysRef = useRef<HTMLTextAreaElement | null>(null);
@@ -87,7 +91,7 @@ export function UserBrowserScreen({ taskKey, canAct }: Props) {
     };
     setState("connecting");
     setError(null);
-    const ws = new WebSocket(screenUrl(taskKey));
+    const ws = new WebSocket(screenUrl(target));
     ws.binaryType = "blob";
     wsRef.current = ws;
     ws.onmessage = (event) => {
@@ -112,7 +116,7 @@ export function UserBrowserScreen({ taskKey, canAct }: Props) {
       wsRef.current = null;
       ws.close();
     };
-  }, [taskKey, retry]);
+  }, [targetId, retry]);
 
   const onInput = useCallback((msg: RemoteInput) => send(msg), [send]);
 
@@ -145,7 +149,7 @@ export function UserBrowserScreen({ taskKey, canAct }: Props) {
     <div className="user-browser-screen">
       <div className="phone-bar">
         <span className={`phone-dot ${state === "live" ? "live" : ""}`} aria-hidden="true" />
-        <span className="phone-name">{state === "closed" ? t.userBrowser.screen.reconnecting : state === "connecting" ? t.userBrowser.screen.connecting : canAct ? (typing ? t.userBrowser.screen.typingHint : t.userBrowser.screen.actHint) : t.userBrowser.screen.watchHint}</span>
+        <span className="phone-name">{state === "closed" ? t.userBrowser.screen.reconnecting : state === "connecting" ? t.userBrowser.screen.connecting : canAct ? (typing ? t.userBrowser.screen.typingHint : t.userBrowser.screen.actHint) : (watchHint ?? t.userBrowser.screen.watchHint)}</span>
       </div>
       <RemoteStage
         className={`user-browser-stage${canAct ? " acting" : ""}`}

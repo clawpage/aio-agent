@@ -18,7 +18,8 @@ const LOCAL_TOKEN = "local-bridge-secret";
 const REQUEST_HUMAN = expect.objectContaining({ name: "request_human" });
 
 /** A stand-in for the browser half of bin/phone-bridge.mjs: answers each JSON-RPC message on its own, and the person's picture, front and live view. */
-async function fakeBridge(pages = "## Pages\n1: Inbox") {
+async function fakeBridge(initial = "## Pages\n1: Inbox") {
+  const state = { pages: initial };
   const seen: Array<{ path: string; body: { id?: unknown; method?: string; params?: { name?: string } } }> = [];
   const screenInput: string[] = [];
   const server = http.createServer(async (req, res) => {
@@ -34,7 +35,7 @@ async function fakeBridge(pages = "## Pages\n1: Inbox") {
     res.writeHead(200, { "content-type": "application/json" });
     res.end(JSON.stringify(body.method === "tools/list"
       ? { jsonrpc: "2.0", id: body.id, result: { tools: [{ name: "list_pages" }] } }
-      : { jsonrpc: "2.0", id: body.id, result: { content: [{ type: "text", text: pages }] } }));
+      : { jsonrpc: "2.0", id: body.id, result: { content: [{ type: "text", text: state.pages }] } }));
   });
   const wss = new WebSocketServer({ noServer: true });
   server.on("upgrade", (req, socket, head) => {
@@ -47,7 +48,7 @@ async function fakeBridge(pages = "## Pages\n1: Inbox") {
     });
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  return { url: `http://127.0.0.1:${(server.address() as { port: number }).port}`, seen, screenInput, close: () => { server.closeAllConnections(); server.close(); } };
+  return { url: `http://127.0.0.1:${(server.address() as { port: number }).port}`, seen, screenInput, state, close: () => { server.closeAllConnections(); server.close(); } };
 }
 
 async function signIn(h: Awaited<ReturnType<typeof startHarness>>, username: string) {
@@ -223,6 +224,90 @@ it("shows the page a task works in on the user's Chrome, and hands it to the per
     expect((await agent("click", { pageId: 2, uid: "1_1" })).isError).toBeFalsy();
     ws.close();
     expect((await h.request(`/api/tasks/${task.id}/user-browser/control`, { method: "POST", headers, body: JSON.stringify({ action: "close" }) })).status).toBe(400);
+  } finally {
+    client?.close();
+    links.close();
+    gateway.close();
+    bridge.close();
+    await h.shutdown();
+  }
+});
+
+it("lists every page of the Mac's AI Chrome in the workspace, opens the person's own, and lets them use it", async () => {
+  const bridge = await fakeBridge("## Pages\n1: about:blank\n2: Example Domain (https://example.com/) [selected]");
+  const h = await startHarness();
+  Object.assign(h.codex, { planTask: async () => JSON.stringify({ title: "查网页", related: [], dependencies: [], resources: [] }) });
+  const cfg = Object.assign(h.ctx.cfg, { memberModelPort: 0 });
+  const names = (id: string) => (h.ctx.db.prepare("SELECT username AS v FROM owners WHERE id=?").get(id) as { v: string } | undefined)?.v ?? null;
+  const ids = (name: string) => (h.ctx.db.prepare("SELECT id AS v FROM owners WHERE username=?").get(name) as { v: string } | undefined)?.v ?? null;
+  const links = new DeviceLinks(h.ctx.db, cfg, h.ctx.log);
+  const browser = new UserBrowserGateway({ cfg, log: h.ctx.log, port: 0, usernameOf: names, userIdOf: ids, links });
+  const gateway = new MemberModelGateway(cfg, h.ctx.log, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, browser);
+  await gateway.start();
+  Object.assign(h.ctx, { deviceLinks: links, userBrowser: browser });
+  h.server.removeAllListeners("upgrade");
+  h.server.on("upgrade", (req, socket, head) => links.ownsUpgrade(req) ? links.handleUpgrade(req, socket, head)
+    : browser.ownsUpgrade(req) ? browser.handleUpgrade(h.ctx, req, socket, head) : handleUpgrade(h.ctx, req, socket, head));
+  let client: { close(): void } | null = null;
+  try {
+    const owner = await login(h);
+    const headers = { cookie: owner.cookie, "x-csrf-token": owner.csrf, "content-type": "application/json" };
+    const list = async () => (await (await h.request("/api/user-browser/pages", { headers: { cookie: owner.cookie } })).json()) as { state: string; pages: Array<Record<string, unknown>> };
+    // No Mac linked yet: the app says so instead of listing anything.
+    expect(await list()).toEqual({ state: "unlinked", pages: [] });
+    const ownerId = (h.ctx.db.prepare("SELECT id FROM owners WHERE role='owner'").get() as { id: string }).id;
+    cfg.runtimeUserId = ownerId;
+    const { token } = links.create(ownerId, "Mac");
+    browser.provision(cfg);
+    expect((await list()).state).toBe("offline");
+    const states: string[] = [];
+    client = linkDevice({ url: `ws://localhost:${h.primaryPort}${DEVICE_LINK_PATH}`, token, name: "Mac", local: bridge.url, localToken: LOCAL_TOKEN, onState: (s: string) => states.push(s) });
+    await expect.poll(() => states.at(-1)).toBe("online");
+
+    // A task works in page 2.
+    const task = ((await (await h.request("/api/tasks", { method: "POST", headers, body: JSON.stringify({ text: "查个网页", clientMessageId: "mb-1" }) })).json()) as { task: { id: string } }).task;
+    const key = h.ctx.tasks.browserKey(task.id)!;
+    await fetch(cfg.userBrowser!.url.replace(/^http:\/\/host\.docker\.internal:0/, `http://127.0.0.1:${gateway.port}`), {
+      method: "POST", headers: { "content-type": "application/json", "X-AIO-Task": key }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "new_page", arguments: { url: "https://example.com" } } }) });
+
+    // The person opens a page of their own to sign in; only http(s) goes.
+    expect((await h.request("/api/user-browser/pages", { method: "POST", headers, body: JSON.stringify({ url: "file:///etc/passwd" }) })).status).toBe(400);
+    bridge.state.pages = "## Pages\n1: about:blank\n2: Example Domain (https://example.com/)\n3: Sign in (https://accounts.example/) [selected]";
+    const opened = await h.request("/api/user-browser/pages", { method: "POST", headers, body: JSON.stringify({ url: "https://accounts.example/" }) });
+    expect(await opened.json()).toEqual({ page: 3 });
+    expect(bridge.seen.some((s) => s.body.params?.name === "new_page" && JSON.stringify(s.body).includes("accounts.example"))).toBe(true);
+
+    // Every page but Chrome's own blank one, with who works in it.
+    expect(await list()).toEqual({ state: "ready", pages: [
+      { id: 2, title: "Example Domain", url: "https://example.com/", owner: "task", holder: "ai", task: { id: task.id, title: expect.any(String) } },
+      { id: 3, title: "Sign in", url: "https://accounts.example/", owner: "you", holder: null, task: null },
+    ] });
+
+    // The person's own page takes their input at once; a task's page only once taken over.
+    const origin = `http://localhost:${h.primaryPort}`;
+    const live = async (page: number) => {
+      const ws = new WebSocket(`ws://127.0.0.1:${h.primaryPort}${USER_BROWSER_SCREEN_PATH}?page=${page}`, { headers: { Host: `localhost:${h.primaryPort}`, Origin: origin, Cookie: owner.cookie } });
+      await new Promise<void>((resolve, reject) => { ws.on("message", () => resolve()); ws.on("error", reject); });
+      return ws;
+    };
+    expect((await rawUpgrade(h.primaryPort, `${USER_BROWSER_SCREEN_PATH}?page=3`, { Host: `localhost:${h.primaryPort}`, Origin: "https://evil.example", Cookie: owner.cookie })).statusLine).toContain("403");
+    const mine = await live(3);
+    mine.send(JSON.stringify({ t: "text", s: "me@example.com" }));
+    await expect.poll(() => bridge.screenInput).toEqual([JSON.stringify({ t: "text", s: "me@example.com" })]);
+    const theirs = await live(2);
+    theirs.send(JSON.stringify({ t: "text", s: "not yet" }));
+    await new Promise((r) => setTimeout(r, 200));
+    expect(bridge.screenInput).toHaveLength(1);
+    await h.request(`/api/tasks/${task.id}/user-browser/control`, { method: "POST", headers, body: JSON.stringify({ action: "take" }) });
+    theirs.send(JSON.stringify({ t: "text", s: "now" }));
+    await expect.poll(() => bridge.screenInput.at(-1)).toBe(JSON.stringify({ t: "text", s: "now" }));
+    mine.close();
+    theirs.close();
+
+    // A task's page is not the person's to close here; their own is.
+    expect((await h.request("/api/user-browser/pages/2", { method: "DELETE", headers })).status).toBe(409);
+    expect((await h.request("/api/user-browser/pages/3", { method: "DELETE", headers })).status).toBe(200);
+    expect(bridge.seen.some((s) => s.body.params?.name === "close_page" && JSON.stringify(s.body).includes('"pageId":3'))).toBe(true);
   } finally {
     client?.close();
     links.close();

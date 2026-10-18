@@ -125,6 +125,10 @@ export const api = {
   reviewSupport: (id: string, decision: string) => request<{ok:true}>(`/api/settings/support/${encodeURIComponent(id)}/review`, {method:'POST',body:{decision}}),
   /** The account's phone (on a Mac it linked): offered at all, and which device is connected. */
   phoneScreenshotUrl: (at: number) => apiUrl(`/api/phone/screenshot?at=${at}`),
+  /** The workspace's Mac browser: the pages of the AI's Chrome on the account's Mac, and the person's own pages there. */
+  macBrowserPages: () => request<{ state: "unlinked" | "offline" | "unavailable" | "ready"; pages: import("./types").MacBrowserPage[] }>("/api/user-browser/pages", { cache: "no-store" }),
+  macBrowserOpen: (url: string) => request<{ page: number }>("/api/user-browser/pages", { method: "POST", body: { url } }),
+  macBrowserClose: (page: number) => request<{ ok: boolean }>(`/api/user-browser/pages/${page}`, { method: "DELETE" }),
   phone: () => request<{ available: boolean; reachable?: boolean; device: { serial: string; model: string; name: string; android: string } | null }>("/api/phone", { cache: "no-store" }),
   /** Home Assistant cameras for camera cards (only accounts granted Home Assistant; others get 404). */
   camera: (entity: string, signal?: AbortSignal) => request<{ camera: CameraInfo; timeZone: string }>(`/api/cameras/${encodeURIComponent(entity)}`, { signal, cache: "no-store" }),

@@ -124,7 +124,7 @@ export function TaskUserBrowser({ task }: { task: Task }) {
                 : <button type="button" className="primary tiny" disabled={busy} onClick={() => void control("take")}>{t.userBrowser.task.takeOver}</button>}
               <button type="button" className="ghost tiny" onClick={close}>{t.userBrowser.task.close}</button>
             </header>
-            <UserBrowserScreen taskKey={task.conversationId} canAct={human} />
+            <UserBrowserScreen target={{ taskKey: task.conversationId }} canAct={human} />
           </div>
         </PopupSurface>,
         document.body,

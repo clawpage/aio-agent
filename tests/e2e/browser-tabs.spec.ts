@@ -20,7 +20,7 @@ async function openBrowser(page: Page) {
   const workspace = page.getByRole("button", { name: "工作区", exact: true });
   if (!(await workspace.isVisible())) await page.getByRole("button", { name: /菜单|打开导航/ }).first().click();
   await workspace.click();
-  const icon = page.locator(".desktop-icon", { hasText: "浏览器" });
+  const icon = page.locator(".desktop-icon", { hasText: "沙盒浏览器" });
   if (await icon.isVisible().catch(() => false)) await icon.click();
   await expect(page.locator(".workspace .desktop-frame iframe")).toBeVisible();
 }

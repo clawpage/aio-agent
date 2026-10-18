@@ -53,7 +53,7 @@ test.describe("assistant markdown links", () => {
     await expect.poll(() => requested).toBe(LINK);
     // The workspace opens on its browser view instead of a host tab.
     await expect(page.locator(".workspace")).toBeVisible({ timeout: 20_000 });
-    await expect(page.getByRole("tab", { name: "浏览器" })).toHaveAttribute("aria-selected", "true");
+    await expect(page.getByRole("tab", { name: "沙盒浏览器" })).toHaveAttribute("aria-selected", "true");
     expect(popupOpened).toBe(false);
     expect(page.context().pages().length).toBe(1);
   });
@@ -104,7 +104,7 @@ test.describe("assistant markdown links", () => {
     await page.getByRole("link", { name: "示例链接" }).click();
     // The already-open workspace switches back to the browser view (a fresh
     // one-time ticket) instead of opening a second panel.
-    await expect(page.getByRole("tab", { name: "浏览器" })).toHaveAttribute("aria-selected", "true", { timeout: 20_000 });
+    await expect(page.getByRole("tab", { name: "沙盒浏览器" })).toHaveAttribute("aria-selected", "true", { timeout: 20_000 });
   });
 
   test("a relative link is inert and cannot open the control-plane origin in the sandbox", async ({ page }) => {
