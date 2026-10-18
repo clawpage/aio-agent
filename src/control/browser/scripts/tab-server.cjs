@@ -376,7 +376,8 @@ async function newTab(key, title) {
     await makeRoom(key);
     const m = memory();
     if (m && m.used + MEM_NEED > m.max) {
-      throw new Error('沙箱内存紧张，暂不新建标签页。请复用已有标签页，或先关闭本任务已读取完成的页面再继续；这不是浏览器权限问题。');
+      // `code` lets the control plane word it for a person who reopened a page.
+      throw Object.assign(new Error('Sandbox memory is tight, so no new tab is opened for now. Reuse an existing tab, or first close the pages of this task you have finished reading, then continue; this is not a browser permission problem.'), { code: 'memory_tight' });
     }
     session = await browser.newBrowserCDPSession();
     // While a person looks at another tab the window opens without taking focus (keepFront still guards its stacking).
@@ -390,7 +391,7 @@ async function newTab(key, title) {
         if (!known.has(candidate) && (await targetIdOf(candidate).catch(() => null)) === targetId) page = candidate;
       }
       if (page) break;
-      if (Date.now() > deadline) throw new Error('新开的窗口没有找到');
+      if (Date.now() > deadline) throw Object.assign(new Error('The newly opened window was not found'), { code: 'window_missing' });
       await context.waitForEvent('page', { timeout: 1000 }).catch(() => undefined);
     }
     return adoptNew(page, key, title, { targetId });
@@ -638,7 +639,8 @@ function scrub(message, secrets) {
   return text;
 }
 
-const describeStep = (step, i) => `第 ${i + 1} 步（${step.action}${step.selector ? ` ${step.selector}` : ''}${step.key ? ` ${step.key}` : ''}）`;
+const stepLabel = (step) => `${step.action}${step.selector ? ` ${step.selector}` : ''}${step.key ? ` ${step.key}` : ''}`;
+const describeStep = (step, i) => `Step ${i + 1} (${stepLabel(step)})`;
 
 /**
  * Run sign-in steps from a fresh load of `startUrl`, so an agent's script cannot
@@ -656,7 +658,7 @@ async function runLoginSteps(tab, steps, startUrl, username, password) {
         const value = step.value === '{{username}}' ? username : step.value === '{{password}}' ? password : step.value;
         if (step.value === '{{password}}') {
           const type = await target.evaluate((el) => (el.getAttribute('type') || '').toLowerCase(), undefined, { timeout: VAULT_STEP_MS });
-          if (type !== 'password') return { result: 'failed', step: i, error: `${describeStep(step, i)}指向的不是密码框（type=${type || 'text'}），密码只会填进密码框` };
+          if (type !== 'password') return { result: 'failed', step: i, error: `${describeStep(step, i)} does not point at a password box (type=${type || 'text'}); the password only goes into a password box`, failure: { code: 'not_password', step: i + 1, label: stepLabel(step), type: type || 'text' } };
         }
         await target.fill(value, { timeout: VAULT_STEP_MS });
       } else if (step.action === 'select') await target.selectOption(step.value, { timeout: VAULT_STEP_MS });
@@ -668,7 +670,8 @@ async function runLoginSteps(tab, steps, startUrl, username, password) {
         else await page.waitForTimeout(step.ms);
       }
     } catch (err) {
-      return { result: 'failed', step: i, error: `${describeStep(step, i)}失败：${scrub(err && err.message, [username, password])}` };
+      const detail = scrub(err && err.message, [username, password]);
+      return { result: 'failed', step: i, error: `${describeStep(step, i)} failed: ${detail}`, failure: { code: 'step_failed', step: i + 1, label: stepLabel(step), detail } };
     }
   }
   await page.waitForLoadState('domcontentloaded', { timeout: VAULT_STEP_MS }).catch(() => undefined);
@@ -698,20 +701,20 @@ async function clearPasswords(page) {
  */
 async function vaultLogin(body) {
   const tab = registry.get(String(body.tab || ''));
-  if (!tab || tab.page.isClosed() || (body.key && tab.key !== body.key)) return { status: 404, body: { error: 'no_tab', message: '这个标签页已经关闭或不属于该任务' } };
-  if (!tab.request || tab.request.kind !== 'login' || tab.holder !== 'ai') return { status: 409, body: { error: 'no_request', message: '这个页面没有在等待登录' } };
+  if (!tab || tab.page.isClosed() || (body.key && tab.key !== body.key)) return { status: 404, body: { error: 'no_tab', message: 'This tab has been closed or does not belong to this task' } };
+  if (!tab.request || tab.request.kind !== 'login' || tab.holder !== 'ai') return { status: 409, body: { error: 'no_request', message: 'This page is not waiting for a sign-in' } };
   // A retry while the first run still types (its caller gave up) would leave a run unlocking the page under the other.
-  if (tab.locked) return { status: 409, body: { error: 'busy', message: '密码器正在这个页面填写登录信息，请稍候' } };
+  if (tab.locked) return { status: 409, body: { error: 'busy', message: 'The password manager is filling in the sign-in on this page; please wait' } };
   if (body.method === 'google') {
     // Nothing secret: the browser already holds the person's Google login. The agent uses the site's Google button.
-    if (!siteCovers(String(body.site || ''), hostOf(safeUrl(tab.page)))) return { status: 409, body: { error: 'site_changed', message: '页面已经不在这个网站' } };
+    if (!siteCovers(String(body.site || ''), hostOf(safeUrl(tab.page)))) return { status: 409, body: { error: 'site_changed', message: 'The page is no longer on this site' } };
     tab.request = null;
     save();
     settleWaiters(tab.id, { login: 'google', account: typeof body.username === 'string' ? body.username.slice(0, 200) : '' });
     return { status: 200, body: { result: 'google' } };
   }
   if (typeof body.username !== 'string' || typeof body.password !== 'string' || !body.password || body.password.length > 1000 || body.username.length > 200) return { status: 400, body: { error: 'bad_request' } };
-  if (!siteCovers(String(body.site || ''), hostOf(safeUrl(tab.page)))) return { status: 409, body: { error: 'site_changed', message: '页面已经不在这个网站，没有填入' } };
+  if (!siteCovers(String(body.site || ''), hostOf(safeUrl(tab.page)))) return { status: 409, body: { error: 'site_changed', message: 'The page is no longer on this site; nothing was filled in' } };
   // The agent's steps for this request, else the steps kept for the site (from where they worked), else the guess.
   const own = Array.isArray(tab.request.steps) ? tab.request.steps : null;
   const kept = own ? null : loginSteps(body.steps);
@@ -736,7 +739,7 @@ async function vaultLogin(body) {
   tab.request = null;
   save();
   settleWaiters(tab.id, { login: outcome.result, step: outcome.step, error: outcome.error, source });
-  return { status: 200, body: { result: outcome.result, ...(outcome.error ? { error: outcome.error } : {}) } };
+  return { status: 200, body: { result: outcome.result, ...(outcome.error ? { error: outcome.error } : {}), ...(outcome.failure ? { failure: outcome.failure } : {}) } };
 }
 
 /** Keys a person may press from the phone input bar. */
@@ -751,12 +754,12 @@ const PERSON_KEYS = new Set(['Enter', 'Backspace', 'Delete', 'Tab', 'Escape', 'A
 function heldTab(body) {
   if (body.tab) {
     const tab = registry.get(String(body.tab));
-    if (!tab || tab.page.isClosed() || (body.task && tab.key !== body.task)) return { error: { status: 404, body: { error: 'no_tab', message: '这个标签页已经关闭或不属于该任务' } } };
-    if (tab.holder !== 'human') return { error: { status: 409, body: { error: 'not_held', message: `这个页面正由任务「${tab.title}」操作，请先点“接管”` } } };
+    if (!tab || tab.page.isClosed() || (body.task && tab.key !== body.task)) return { error: { status: 404, body: { error: 'no_tab', message: 'This tab has been closed or does not belong to this task' } } };
+    if (tab.holder !== 'human') return { error: { status: 409, body: { error: 'not_held', task: tab.title, message: `Task "${tab.title}" is operating this page; tap "Take over" first` } } };
     return { tab };
   }
   const tab = [...registry.values()].filter((t) => t.holder === 'human' && !t.page.isClosed() && (!body.task || t.key === body.task)).sort((a, b) => b.humanSince - a.humanSince)[0];
-  if (!tab) return { error: { status: 409, body: { error: 'no_held_tab', message: '先在任务卡片上点“接管”要操作的页面，再在这里输入' } } };
+  if (!tab) return { error: { status: 409, body: { error: 'no_held_tab', message: 'First tap "Take over" on the task card for the page you want to use, then type here' } } };
   return { tab };
 }
 
@@ -766,7 +769,7 @@ async function personInput(body) {
   if (error) return error;
   const page = tab.page;
   if (typeof body.text === 'string' && body.text) {
-    if (body.text.length > 2000) return { status: 400, body: { error: 'too_long', message: '一次最多输入 2000 个字' } };
+    if (body.text.length > 2000) return { status: 400, body: { error: 'too_long', message: 'At most 2000 characters at a time' } };
     await page.keyboard.insertText(body.text);
   }
   if (body.key !== undefined) {
@@ -791,7 +794,8 @@ function isWorkspaceFile(url) {
 async function personOpen(body) {
   const url = String(body.url || '');
   if (!/^https?:\/\//i.test(url) && !isWorkspaceFile(url)) return { status: 400, body: { error: 'bad_url' } };
-  const tab = await newTab(PERSON, '你打开的网页');
+  // The control plane names the tab in the person's language until the page gives its own title.
+  const tab = await newTab(PERSON, String(body.title || '').slice(0, 200) || 'Opened page');
   // The person asked for this page: it is what they look at now.
   pin(tab);
   await tab.page.bringToFront().catch(() => undefined);
@@ -812,9 +816,9 @@ async function reopenTab(body) {
   if (!key || key === PERSON || !/^https?:\/\//i.test(url)) return { status: 400, body: { error: 'bad_request' } };
   let tab;
   try {
-    tab = await newTab(key, String(body.title || '').slice(0, 200) || '重新打开的页面');
+    tab = await newTab(key, String(body.title || '').slice(0, 200) || 'Reopened page');
   } catch (err) {
-    return { status: 503, body: { error: 'unavailable', message: String(err && err.message || err) } };
+    return { status: 503, body: { error: 'unavailable', ...(err && err.code ? { reason: err.code } : {}), message: String(err && err.message || err) } };
   }
   // A finished task's page: kept while the person holds it, cleared like its others once handed back.
   tab.finishedAt = Date.now();
@@ -842,7 +846,7 @@ async function personPointer(body) {
   // of the desktop; stacking windows changes nothing for the agent driving it.
   if (body.action === 'focus') {
     const watched = registry.get(String(body.tab || ''));
-    if (!watched || watched.page.isClosed() || (body.task && watched.key !== body.task)) return { status: 404, body: { error: 'no_tab', message: '这个标签页已经关闭或不属于该任务' } };
+    if (!watched || watched.page.isClosed() || (body.task && watched.key !== body.task)) return { status: 404, body: { error: 'no_tab', message: 'This tab has been closed or does not belong to this task' } };
     // The console keeps showing this tab: other tasks' new windows go underneath it.
     pin(watched);
     watched.lastUsed = Date.now();
@@ -935,7 +939,7 @@ async function thumbnail(page) {
       const { cssLayoutViewport: v } = await session.send('Page.getLayoutMetrics');
       return Buffer.from((await session.send('Page.captureScreenshot', { format: 'jpeg', quality: 60, clip: { x: v.pageX, y: v.pageY, width: v.clientWidth, height: v.clientHeight, scale: 0.4 } })).data, 'base64');
     })();
-    return await Promise.race([work, new Promise((_, reject) => setTimeout(() => reject(new Error('截图超时，页面可能正在加载，请稍后再试')), 15000))]);
+    return await Promise.race([work, new Promise((_, reject) => setTimeout(() => reject(new Error('The screenshot timed out; the page may still be loading, try again later')), 15000))]);
   } finally {
     await session.detach().catch(() => undefined);
   }
@@ -948,7 +952,7 @@ async function thumbnail(page) {
  */
 async function bringTargetFront(target) {
   const found = await pageOfTarget(target);
-  if (!found) return { status: 404, body: { error: 'no_page', message: '这个标签页已经关闭' } };
+  if (!found) return { status: 404, body: { error: 'no_page', message: 'This tab has been closed' } };
   if (found.tab) pin(found.tab);
   else pinned = null;
   await found.page.bringToFront().catch(() => undefined);
@@ -1319,7 +1323,8 @@ const TOOLS = {
     input: { reason: str, tab: ownTabArg }, required: ['reason'],
     run: async (ctx, a, signal) => {
       const tab = await resolveTab(ctx, a.tab, 'write', false, true);
-      tab.request = { reason: String(a.reason || '').slice(0, 300) || '需要你在浏览器里操作', at: Date.now() };
+      // Without a reason the control plane words a default for the person.
+      tab.request = { reason: String(a.reason || '').slice(0, 300), at: Date.now() };
       save();
       const outcome = await waitForHuman(tab, signal);
       if (outcome === 'released') {
@@ -1352,7 +1357,8 @@ const TOOLS = {
       }
       const steps = loginSteps(a.steps);
       if (typeof steps === 'string') return { content: [{ type: 'text', text: `steps cannot be used: ${steps}. Fix them and call again.` }], isError: true };
-      tab.request = { kind: 'login', site, reason: `需要登录 ${site}`, at: Date.now(), ...(steps ? { steps, url: safeUrl(tab.page) } : {}) };
+      // The control plane words the reason for the person, from `kind` and `site`.
+      tab.request = { kind: 'login', site, reason: '', at: Date.now(), ...(steps ? { steps, url: safeUrl(tab.page) } : {}) };
       save();
       const outcome = await waitForHuman(tab, signal);
       const left = Math.max(0, MAX_LOGIN_TRIES - (tab.loginTries || 0));
@@ -1362,7 +1368,7 @@ const TOOLS = {
       }
       if (outcome && outcome.login === 'google') {
         const which = outcome.account ? `the Google account ${outcome.account}` : 'the Google account already signed in to the browser';
-        return textResult(`The user saved "Sign in with Google" for ${site}, with ${which}. Click a button on the page such as 「使用 Google 登录」, "Continue with Google" or "Sign in with Google" (if you cannot find one, click the sign-in entry first); when Google's account chooser appears, choose ${outcome.account ? 'this account' : 'the signed-in account'}, and if an authorization confirmation appears, click continue. Do not call browser_login again, and do not enter any password; if Google asks for a password, a verification code or two-factor verification, call browser_request_human. When done, read the page to confirm you are signed in. ${await describe(tab)}`);
+        return textResult(`The user saved "Sign in with Google" for ${site}, with ${which}. Click a button on the page such as 「使用 Google 登录」, "Continue with Google" or "Sign in with Google" (if you cannot find one, click the sign-in entry first); when Google's account chooser appears, choose ${outcome.account ? 'this account' : 'the signed-in account'}, and if an authorization confirmation appears, click continue. Do not call browser_login again, and do not enter any password; if Google asks for a password, a verification code or two-factor verification, call browser_request_human. When done, read the page to confirm you are signed in. ${await describe(tab)}`); // i18n-exempt: button text the agent looks for on Chinese sites
       }
       if (outcome && outcome.login === 'username_only') {
         return textResult(`The password manager filled in the account and moved to the next step, but no password box appeared. ${await describe(tab)}\nRead the page to confirm its state, write steps, then call browser_login again.`);

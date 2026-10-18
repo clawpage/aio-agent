@@ -380,6 +380,20 @@ describe("working groups", () => {
     expect(status.text).toContain("沙箱崩了");
   });
 
+  it("marks a turn that failed for want of a browser, whatever language its message is in", () => {
+    const state = feed([
+      ev("turn.started", { turnId: "t1" }, "t1"),
+      ev("turn.browser_unavailable", { turnId: "t1", message: "Couldn't restore the browser; the snapshot is kept" }, "t1"),
+      ev("turn.failed", { turnId: "t1", message: "Couldn't restore the browser; the snapshot is kept" }, "t1"),
+      ev("turn.started", { turnId: "t2" }, "t2"),
+      ev("turn.failed", { turnId: "t2", message: "boom" }, "t2"),
+    ]);
+    const notices = state.blocks.filter((b) => b.kind === "status") as Array<{ id: string; browser?: boolean }>;
+    expect(notices.map((n) => [n.id, n.browser ?? false])).toEqual([["fail:t1", true], ["fail:t2", false]]);
+    // The mark survives the copy the console renders from.
+    expect((cloneTimeline(state).blocks.find((b) => b.kind === "status") as { browser?: boolean }).browser).toBe(true);
+  });
+
   it("never animates a queued turn and only animates once it actually started", () => {
     const queued = feed([
       ev("turn.queued", { turnId: "t1", text: "排队" }),

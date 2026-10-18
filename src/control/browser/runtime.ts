@@ -24,6 +24,7 @@ import type { Logger } from "../../common/logger.js";
 import type { SandboxContainer } from "../sandbox/container.js";
 import type { BrowserRuntimeLike, RuntimeStatus, SnapshotOutcome, StopOutcome, WakeOutcome } from "./lifecycle.js";
 import type { SnapshotWarning } from "./types.js";
+import { t } from "../i18n/index.js";
 
 /** Bundled files written into the sandbox's persistent tool directory. */
 const SCRIPT_NAME = "browser-runtime.py";
@@ -134,9 +135,9 @@ for part in [p, *p.parents]:
     if s.st_mode & 0o022 and not (part != p and s.st_mode & stat.S_ISVTX): sys.exit(${OWNERSHIP_VIOLATION})
 p.mkdir(parents=True, exist_ok=True, mode=0o755)
 `, this.#cfg.browser.toolDir], { timeoutMs: 15_000, user: "root" });
-      if (secure.code === OWNERSHIP_VIOLATION) throw new Error("浏览器工具目录必须由 root 管理且不可由沙盒用户替换");
+      if (secure.code === OWNERSHIP_VIOLATION) throw new Error(t().browser.runtime.toolDirOwnership);
       if (secure.code !== 0) {
-        throw new Error(`无法检查浏览器工具目录，沙盒可能未运行或不可达（exit ${secure.code}）：${redact(secure.stderr || secure.stdout)}`);
+        throw new Error(t().browser.runtime.toolDirUnreachable(secure.code, redact(secure.stderr || secure.stdout)));
       }
       const { body, digest } = this.#script();
       const marker = path.posix.join(this.#cfg.browser.toolDir, MARKER_NAME);
@@ -150,7 +151,7 @@ p.mkdir(parents=True, exist_ok=True, mode=0o755)
         user: "root",
       });
       if (mkdir.code !== 0) {
-        throw new Error(`无法创建浏览器工具目录：${redact(mkdir.stderr || mkdir.stdout)}`);
+        throw new Error(t().browser.runtime.toolDirCreate(redact(mkdir.stderr || mkdir.stdout)));
       }
       await this.#container.writeFileInSandbox(this.scriptPath, body, { user: "root" });
       const chmod = await this.#container.execInSandbox(["chmod", "0755", this.scriptPath], {
@@ -158,7 +159,7 @@ p.mkdir(parents=True, exist_ok=True, mode=0o755)
         user: "root",
       });
       if (chmod.code !== 0) {
-        throw new Error(`无法设置浏览器工具脚本权限：${redact(chmod.stderr || chmod.stdout)}`);
+        throw new Error(t().browser.runtime.scriptChmod(redact(chmod.stderr || chmod.stdout)));
       }
       await this.#provisionStorage();
       await this.#container.writeFileInSandbox(marker, `${digest}\n`, { user: "root" });
@@ -190,7 +191,7 @@ p.mkdir(parents=True, exist_ok=True, mode=0o755)
       user: "root",
     });
     if (chmod.code !== 0) {
-      throw new Error(`无法设置浏览器存储脚本权限：${redact(chmod.stderr || chmod.stdout)}`);
+      throw new Error(t().browser.runtime.storageChmod(redact(chmod.stderr || chmod.stdout)));
     }
     // The dependency already exists on an unchanged sandbox; the marker digest
     // above is what decides reuse, so a re-extract only happens on a real change.
@@ -200,7 +201,7 @@ p.mkdir(parents=True, exist_ok=True, mode=0o755)
       { timeoutMs: 120_000, user: "root", stdin: vendor.toString("base64") },
     );
     if (extract.code !== 0) {
-      throw new Error(`无法安装浏览器存储依赖：${redact(extract.stderr || extract.stdout)}`);
+      throw new Error(t().browser.runtime.storageInstall(redact(extract.stderr || extract.stdout)));
     }
     await this.#container.writeFileInSandbox(marker, `${digest}\n`, { user: "root" });
     this.#log.info("browser storage helper provisioned", { dir: vendorDir });
@@ -221,16 +222,16 @@ p.mkdir(parents=True, exist_ok=True, mode=0o755)
     }
     const text = (result.stdout || "").trim();
     if (!text) {
-      return { ok: false, message: `浏览器运行时无输出（exit ${result.code}）：${redact(result.stderr)}` };
+      return { ok: false, message: `browser runtime gave no output (exit ${result.code}): ${redact(result.stderr)}` };
     }
     try {
       const parsed = JSON.parse(text.split("\n").pop() ?? text) as HelperResult;
       if (typeof parsed !== "object" || parsed === null || typeof parsed.ok !== "boolean") {
-        return { ok: false, message: "浏览器运行时返回了无法识别的结果" };
+        return { ok: false, message: "browser runtime returned an unrecognised result" };
       }
       return parsed;
     } catch {
-      return { ok: false, message: `浏览器运行时返回了非 JSON 结果：${redact(text)}` };
+      return { ok: false, message: `browser runtime returned a non-JSON result: ${redact(text)}` };
     }
   }
 

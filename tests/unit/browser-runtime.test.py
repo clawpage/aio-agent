@@ -660,7 +660,7 @@ def test_read_snapshot_reports_missing_and_corrupt() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         path = os.path.join(tmp, "snapshot.json")
         snapshot, problem = rt.read_snapshot(path)
-        assert_true(snapshot is None and "尚未保存" in problem, "缺少快照应给出明确原因")
+        assert_true(snapshot is None and "no snapshot has been saved" in problem, "缺少快照应给出明确原因")
         with open(path, "w", encoding="utf-8") as handle:
             handle.write("{not json")
         snapshot, problem = rt.read_snapshot(path)
@@ -713,7 +713,7 @@ def test_stop_refuses_when_snapshot_belongs_to_another_browser() -> None:
                 os.kill = saved_kill  # type: ignore[assignment]
             assert_false(result["ok"], "快照属于别的浏览器时必须拒绝停止")
             assert_eq(signals, [], "拒绝时不得发出任何信号")
-            assert_true("另一个浏览器进程" in result["message"], "应说明快照不属于当前浏览器")
+            assert_true("another browser process" in result["message"], "应说明快照不属于当前浏览器")
     finally:
         restore()
 
@@ -969,7 +969,7 @@ def test_stop_reports_failure_when_processes_survive() -> None:
                 os.kill = saved_kill  # type: ignore[assignment]
             assert_false(result["ok"], "进程未退出时绝不能声称成功")
             assert_true(
-                "未在超时内退出" in result["message"] or "请人工确认" in result["message"],
+                "did not exit within the timeout" in result["message"] or "check by hand" in result["message"],
                 f"应如实报告未退出，实际 {result['message']!r}",
             )
             # It must never claim the browser is gone, and the evidence stays.
@@ -1082,7 +1082,7 @@ def test_start_refuses_without_upstream_config() -> None:
             finally:
                 os.listdir = saved_listdir  # type: ignore[assignment]
             assert_false(result["ok"], "缺少上游配置时必须拒绝启动")
-            assert_true("拒绝自行编造" in result["message"], "不得自行编造上游配置")
+            assert_true("refusing to make one up" in result["message"], "不得自行编造上游配置")
     finally:
         restore()
 
@@ -1758,7 +1758,7 @@ def test_cdp_call_turns_recv_timeout_into_a_structured_error() -> None:
     try:
         cdp.call("Runtime.enable", {}, session_id="s1")
     except rt.CdpError as exc:
-        assert_true("超时" in str(exc), "必须是结构化超时说明")
+        assert_true("timed out" in str(exc), "必须是结构化超时说明")
     except Exception as exc:  # noqa: BLE001 - this is the regression under test
         raise AssertionError(f"recv 超时必须转为 CdpError，实际 {type(exc).__name__}: {exc}") from exc
     else:
@@ -1781,7 +1781,7 @@ def test_cdp_call_turns_a_broken_transport_into_a_structured_error() -> None:
     try:
         cdp.call("Runtime.enable", {}, session_id="s1")
     except rt.CdpError as exc:
-        assert_true("连接中断" in str(exc), "必须是结构化断连说明")
+        assert_true("connection lost" in str(exc), "必须是结构化断连说明")
     except Exception as exc:  # noqa: BLE001
         raise AssertionError(f"断连必须转为 CdpError，实际 {type(exc).__name__}") from exc
     else:
@@ -1832,7 +1832,7 @@ def test_preflight_connect_failure_is_a_structured_error() -> None:
     finally:
         rt.Cdp = original
     assert_false(result["ok"], "无法连接 CDP 时必须返回结构化错误")
-    assert_true("无法连接浏览器 CDP" in (result.get("message") or ""), "错误信息应说明无法连接")
+    assert_true("cannot connect to the browser CDP" in (result.get("message") or ""), "错误信息应说明无法连接")
 
 
 @test
@@ -1970,7 +1970,7 @@ def test_stop_refuses_a_snapshot_without_storage() -> None:
             fake.add(555, ["/opt/browser/chrome", f"--user-data-dir={rt.DEFAULT_PROFILE_DIR}"], uid=0, ppid=4242, starttime=9)
             result = rt.stop_browser(path, helper_pid_file=helper_pid, browser_pid_file=browser_pid, timeout_s=0.3)
             assert_false(result["ok"], "旧 schema 缺少存储时必须拒绝停止")
-            assert_true("存储" in result["message"] or "拒绝停止" in result["message"], "应给出诚实原因")
+            assert_true("localStorage" in result["message"] or "refusing to stop" in result["message"], "应给出诚实原因")
             assert_eq(result.get("reason"), "snapshot_storage_missing", "应给出稳定的拒绝码")
     finally:
         restore()

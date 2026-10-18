@@ -541,52 +541,52 @@ READABLE_SNAPSHOT_SCHEMAS = (1, SNAPSHOT_SCHEMA)
 def validate_snapshot(obj: Any) -> tuple[bool, str]:
     """Validate a decoded snapshot. Returns (ok, error-message)."""
     if not isinstance(obj, dict):
-        return False, "快照不是 JSON 对象"
+        return False, "snapshot is not a JSON object"
     if obj.get("schema") not in READABLE_SNAPSHOT_SCHEMAS:
-        return False, f"快照 schema 不受支持：{obj.get('schema')!r}"
+        return False, f"unsupported snapshot schema: {obj.get('schema')!r}"
     tabs = obj.get("tabs")
     if not isinstance(tabs, list):
-        return False, "快照缺少 tabs 数组"
+        return False, "snapshot has no tabs array"
     for index, tab in enumerate(tabs):
         if not isinstance(tab, dict):
-            return False, f"第 {index} 个标签不是对象"
+            return False, f"tab {index} is not an object"
         url = tab.get("url")
         if not isinstance(url, str) or not url:
-            return False, f"第 {index} 个标签缺少 url"
+            return False, f"tab {index} has no url"
         if not isinstance(tab.get("active"), bool):
-            return False, f"第 {index} 个标签的 active 不是布尔值"
+            return False, f"active of tab {index} is not a boolean"
         scroll = tab.get("scrollY", None)
         if scroll is not None and not isinstance(scroll, (int, float)):
-            return False, f"第 {index} 个标签的 scrollY 不是数字"
+            return False, f"scrollY of tab {index} is not a number"
         storage = tab.get("sessionStorage", None)
         if storage is not None and not isinstance(storage, dict):
-            return False, f"第 {index} 个标签的 sessionStorage 不是对象"
+            return False, f"sessionStorage of tab {index} is not an object"
     warnings = obj.get("warnings", [])
     if not isinstance(warnings, list):
-        return False, "快照的 warnings 不是数组"
+        return False, "snapshot warnings is not an array"
     for index, warning in enumerate(warnings):
         if not isinstance(warning, dict):
-            return False, f"第 {index} 条 warning 不是对象"
+            return False, f"warning {index} is not an object"
         if warning.get("code") not in SNAPSHOT_WARNING_CODES:
-            return False, f"第 {index} 条 warning 的 code 未知：{warning.get('code')!r}"
+            return False, f"warning {index} has an unknown code: {warning.get('code')!r}"
     if not isinstance(obj.get("orderVerified", False), bool):
-        return False, "快照的 orderVerified 不是布尔值"
+        return False, "snapshot orderVerified is not a boolean"
     source = obj.get("source", None)
     if source is not None and not isinstance(source, dict):
-        return False, "快照的 source 不是对象"
+        return False, "snapshot source is not an object"
     storage = obj.get("storage", None)
     if storage is not None:
         if not isinstance(storage, dict):
-            return False, "快照的 storage 不是对象"
+            return False, "snapshot storage is not an object"
         if storage.get("schema") != 1:
-            return False, f"快照 storage schema 不受支持：{storage.get('schema')!r}"
+            return False, f"unsupported snapshot storage schema: {storage.get('schema')!r}"
         if not isinstance(storage.get("state"), dict):
-            return False, "快照 storage 缺少 state 对象"
+            return False, "snapshot storage has no state object"
         state = storage["state"]
         if not isinstance(state.get("cookies"), list):
-            return False, "快照 storage state 缺少 cookies 数组"
+            return False, "snapshot storage state has no cookies array"
         if not isinstance(state.get("origins"), list):
-            return False, "快照 storage state 缺少 origins 数组"
+            return False, "snapshot storage state has no origins array"
     return True, ""
 
 
@@ -863,18 +863,18 @@ def verify_helper(
     """Confirm the pid file really points at the image's browser supervisor."""
     pid = read_pid_file(pid_file)
     if pid is None:
-        return err("未找到浏览器守护进程的 PID 文件")
+        return err("browser supervisor PID file not found")
     if not pid_alive(pid):
-        return err("浏览器守护进程未运行", pid=pid)
+        return err("browser supervisor is not running", pid=pid)
     argv = parse_argv(read_cmdline_raw(pid))
     if not is_helper_argv(argv, helper_script):
-        return err("PID 文件指向的进程不是 browser-supervisor.py", pid=pid)
+        return err("the PID file points at a process that is not browser-supervisor.py", pid=pid)
     stat = read_stat(pid)
     if stat is None:
-        return err("无法读取浏览器守护进程状态", pid=pid)
+        return err("cannot read the browser supervisor state", pid=pid)
     uid = read_uid(pid)
     if expected_uid is not None and uid != expected_uid:
-        return err(f"浏览器守护进程的 UID 不是预期的 {expected_uid}", pid=pid, uid=uid)
+        return err(f"browser supervisor UID is not the expected {expected_uid}", pid=pid, uid=uid)
     return ok(pid=pid, starttime=stat[0], uid=uid, cmdline=read_cmdline(pid))
 
 
@@ -900,32 +900,32 @@ def verify_browser(
     """
     pid = read_pid_file(pid_file)
     if pid is None:
-        return err("未找到浏览器进程的 PID 文件", attribution="absent")
+        return err("browser PID file not found", attribution="absent")
     if not pid_alive(pid):
-        return err("浏览器进程未运行", pid=pid, attribution="absent")
+        return err("browser process is not running", pid=pid, attribution="absent")
     argv = parse_argv(read_cmdline_raw(pid))
     matched, reason = browser_argv_verdict(argv, profile_dir)
     if not matched:
         message = {
-            "empty_cmdline": "无法读取浏览器进程的命令行，归属未知",
-            "relative_binary": "浏览器进程的可执行路径不是绝对路径，归属未知",
-            "unknown_binary": "PID 文件指向的进程不是已知的 Chromium 可执行文件",
-            "child_process": "PID 文件指向的是浏览器子进程，不是浏览器主进程",
-            "profile_mismatch": "PID 文件指向的进程未使用该 profile",
-        }.get(reason, "无法确认浏览器进程归属")
+            "empty_cmdline": "cannot read the browser process command line; ownership unknown",
+            "relative_binary": "browser process executable path is not absolute; ownership unknown",
+            "unknown_binary": "the PID file points at a process that is not a known Chromium executable",
+            "child_process": "the PID file points at a browser child process, not the browser main process",
+            "profile_mismatch": "the PID file points at a process not using this profile",
+        }.get(reason, "cannot confirm browser process ownership")
         return err(message, pid=pid, attribution="unknown", reason=reason)
     stat = read_stat(pid)
     if stat is None:
-        return err("无法读取浏览器进程状态", pid=pid, attribution="unknown")
+        return err("cannot read the browser process state", pid=pid, attribution="unknown")
     uid = read_uid(pid)
     owner = profile_owner_uid(profile_dir)
     if owner is not None and uid is not None and uid != owner:
-        return err("浏览器进程的 UID 与 profile 目录所有者不一致", pid=pid, uid=uid, attribution="unknown")
+        return err("browser process UID does not match the profile directory owner", pid=pid, uid=uid, attribution="unknown")
     if expected_uid is not None and uid != expected_uid:
-        return err(f"浏览器进程的 UID 不是预期的 {expected_uid}", pid=pid, uid=uid, attribution="unknown")
+        return err(f"browser process UID is not the expected {expected_uid}", pid=pid, uid=uid, attribution="unknown")
     ppid = read_ppid(pid)
     if expected_ppid is not None and ppid != expected_ppid:
-        return err("浏览器进程的父进程不是已验证的守护进程", pid=pid, ppid=ppid, attribution="unknown")
+        return err("browser process parent is not the verified supervisor", pid=pid, ppid=ppid, attribution="unknown")
     return ok(
         pid=pid,
         starttime=stat[0],
@@ -1010,7 +1010,7 @@ class FileLock:
             except OSError as exc:
                 if time.monotonic() >= deadline:
                     os.close(fd)
-                    raise LockBusy(f"另一个浏览器生命周期操作正在进行（{exc}）") from exc
+                    raise LockBusy(f"another browser lifecycle operation is in progress ({exc})") from exc
                 time.sleep(0.05)
         self._fd = fd
 
@@ -1071,7 +1071,7 @@ class Cdp:
                 raise CdpError(f"CDP {path} -> HTTP {response.status}")
             return json.loads(payload.decode("utf-8"))
         except OSError as exc:
-            raise CdpError(f"无法连接 CDP：{exc}") from exc
+            raise CdpError(f"cannot connect to CDP: {exc}") from exc
         finally:
             conn.close()
 
@@ -1081,7 +1081,7 @@ class Cdp:
     def targets(self) -> list[dict[str, Any]]:
         data = self.cdp_http("/json/list")
         if not isinstance(data, list):
-            raise CdpError("CDP /json/list 返回了非数组")
+            raise CdpError("CDP /json/list returned a non-array")
         return [t for t in data if isinstance(t, dict)]
 
     def connect(self, ws_url: str | None = None) -> None:
@@ -1092,13 +1092,13 @@ class Cdp:
             info = self.version()
             url = info.get("webSocketDebuggerUrl")
         if not isinstance(url, str) or not url:
-            raise CdpError("CDP 未提供 webSocketDebuggerUrl")
+            raise CdpError("CDP provided no webSocketDebuggerUrl")
         try:
             self._ws = ws_connect(url, open_timeout=self.timeout, max_size=64 * 1024 * 1024)
         except Exception as exc:  # noqa: BLE001 - websockets raises several transport types
             # Never echo the URL: it is host-local, but errors must stay secret-free
             # and JSON-serialisable so the control plane can fail closed.
-            raise CdpError(f"无法建立 CDP 连接：{type(exc).__name__}") from exc
+            raise CdpError(f"cannot open a CDP connection: {type(exc).__name__}") from exc
 
     def close(self) -> None:
         if self._ws is not None:
@@ -1123,7 +1123,7 @@ class Cdp:
         session_id: str | None = None,
     ) -> dict[str, Any]:
         if self._ws is None:
-            raise CdpError("CDP 尚未连接")
+            raise CdpError("CDP is not connected yet")
         self._next_id += 1
         message_id = self._next_id
         payload: dict[str, Any] = {"id": message_id, "method": method}
@@ -1136,16 +1136,16 @@ class Cdp:
         while True:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
-                raise CdpError(f"CDP {method} 超时")
+                raise CdpError(f"CDP {method} timed out")
             try:
                 raw = self._ws.recv(timeout=remaining)
             except TimeoutError:
                 # Verified in this sandbox: a wedged page (Runtime.enable on a
                 # busy renderer) never replies, so this must surface as a
                 # structured timeout, never as a raw TimeoutError traceback.
-                raise CdpError(f"CDP {method} 超时") from None
+                raise CdpError(f"CDP {method} timed out") from None
             except Exception as exc:  # noqa: BLE001 - closed/broken transport
-                raise CdpError(f"CDP {method} 连接中断：{type(exc).__name__}") from exc
+                raise CdpError(f"CDP {method} connection lost: {type(exc).__name__}") from exc
             try:
                 message = json.loads(raw)
             except (TypeError, ValueError):
@@ -1153,7 +1153,7 @@ class Cdp:
             if not isinstance(message, dict) or message.get("id") != message_id:
                 continue
             if "error" in message:
-                raise CdpError(f"CDP {method} 失败：{message['error']}")
+                raise CdpError(f"CDP {method} failed: {message['error']}")
             result = message.get("result")
             return result if isinstance(result, dict) else {}
 
@@ -1161,7 +1161,7 @@ class Cdp:
         session = self.call("Target.attachToTarget", {"targetId": target_id, "flatten": True})
         session_id = session.get("sessionId")
         if not isinstance(session_id, str) or not session_id:
-            raise CdpError("CDP 无法附加到目标标签")
+            raise CdpError("CDP cannot attach to the target tab")
         return session_id
 
     def evaluate(self, session_id: str, expression: str) -> Any:
@@ -1171,7 +1171,7 @@ class Cdp:
             session_id=session_id,
         )
         if result.get("exceptionDetails"):
-            raise CdpError("页面脚本执行失败")
+            raise CdpError("page script failed")
         return (result.get("result") or {}).get("value")
 
 
@@ -1231,15 +1231,15 @@ def aio_tabs() -> tuple[list[dict[str, Any]] | None, str]:
         response = conn.getresponse()
         payload = response.read()
         if response.status != 200:
-            return None, f"AIO tabs 接口返回 HTTP {response.status}"
+            return None, f"AIO tabs API returned HTTP {response.status}"
         parsed = json.loads(payload.decode("utf-8"))
     except (OSError, ValueError) as exc:
-        return None, f"无法读取 AIO tabs 接口：{exc}"
+        return None, f"cannot read the AIO tabs API: {exc}"
     finally:
         conn.close()
     data = parsed.get("data") if isinstance(parsed, dict) else parsed
     if not isinstance(data, list):
-        return None, "AIO tabs 接口未返回数组"
+        return None, "AIO tabs API did not return an array"
     rows: list[dict[str, Any]] = []
     for item in data:
         if not isinstance(item, dict):
@@ -1272,15 +1272,15 @@ def aio_request(method: str, path: str, body: Mapping[str, Any] | None = None) -
         response = conn.getresponse()
         payload = response.read()
         if response.status >= 400:
-            return None, f"AIO {path} 返回 HTTP {response.status}"
+            return None, f"AIO {path} returned HTTP {response.status}"
         if not payload:
             return {}, ""
         try:
             return json.loads(payload.decode("utf-8")), ""
         except ValueError:
-            return None, f"AIO {path} 返回了非 JSON 响应"
+            return None, f"AIO {path} returned a non-JSON response"
     except OSError as exc:
-        return None, f"无法访问 AIO 接口：{exc}"
+        return None, f"cannot reach the AIO API: {exc}"
     finally:
         conn.close()
 
@@ -1432,14 +1432,14 @@ def tab_plan(
         warnings.append(
             {
                 "code": "tab_order_unverified",
-                "message": f"无法确认标签顺序（{aio_error or 'AIO tabs 接口不可用'}），恢复时将按当前顺序打开且不会自动切换选中标签",
+                "message": f"cannot confirm the tab order ({aio_error or 'AIO tabs API unavailable'}); the restore opens tabs in the current order and does not switch the selected tab",
                 "tabIndex": None,
             }
         )
         warnings.append(
             {
                 "code": "active_unknown",
-                "message": "无法确认当前选中标签，恢复后不会自动切换",
+                "message": "cannot confirm the selected tab; the restore does not switch tabs",
                 "tabIndex": None,
             }
         )
@@ -1529,7 +1529,7 @@ def _capture_one_tab(
         if dirty:
             warning = {
                 "code": "dirty_input",
-                "message": f"标签有未提交的输入（{dirty}），已放弃释放以避免丢失",
+                "message": f"a tab has unsubmitted input ({dirty}); release abandoned so it is not lost",
                 "tabIndex": None,
             }
             if policy == "block":
@@ -1549,7 +1549,7 @@ def _capture_one_tab(
             "blocking": True,
             "warning": {
                 "code": "tab_error",
-                "message": redact_urls(f"标签内容无法读取（{exc}），已放弃释放以避免丢页"),
+                "message": redact_urls(f"tab content cannot be read ({exc}); release abandoned so the page is not lost"),
                 "tabIndex": None,
             },
         }
@@ -1573,7 +1573,7 @@ def capture_snapshot(
     downloads = find_in_flight_downloads(download_dirs)
     if downloads:
         return err(
-            f"检测到未完成的下载（{len(downloads)} 个 .crdownload），保守起见不保存也不释放",
+            f"unfinished downloads found ({len(downloads)} .crdownload); not saving or releasing, to be safe",
             blocked=True,
             reason="download_in_flight",
         )
@@ -1588,7 +1588,7 @@ def capture_snapshot(
         int(browser["starttime"]) if browser["ok"] else None,
     ):
         return err(
-            "上次释放的标签尚未恢复，拒绝用当前浏览器覆盖快照",
+            "the tabs of the last release are not restored yet; refusing to overwrite the snapshot with the current browser",
             blocked=True,
             reason="restore_pending",
         )
@@ -1597,18 +1597,18 @@ def capture_snapshot(
     try:
         info = cdp.version()
     except CdpError as exc:
-        return err(redact_urls(f"无法连接浏览器 CDP：{exc}"), blocked=True)
+        return err(redact_urls(f"cannot connect to the browser CDP: {exc}"), blocked=True)
 
     try:
         pages = [t for t in cdp.targets() if t.get("type") == "page"]
     except CdpError as exc:
-        return err(redact_urls(f"无法读取标签列表：{exc}"), blocked=True)
+        return err(redact_urls(f"cannot read the tab list: {exc}"), blocked=True)
 
     if not pages:
         return err(
-            "没有可保存的标签页",
+            "no tabs to save",
             blocked=True,
-            warnings=[{"code": "no_tabs", "message": "当前没有标签页", "tabIndex": None}],
+            warnings=[{"code": "no_tabs", "message": "no tabs are open", "tabIndex": None}],
         )
 
     aio_rows, aio_error = aio_tabs()
@@ -1625,15 +1625,15 @@ def capture_snapshot(
         # The API and CDP listings disagree, or a URL repeats: the tab↔target
         # pairing is not provable, so no snapshot is written and nothing is stopped.
         explain = {
-            "tab_set_mismatch": "AIO 标签列表与浏览器实际标签不一致（数量或多重集不同），无法安全配对",
-            "ambiguous_duplicate_tabs": "存在多个相同 URL 的标签，无法区分各自内容，已放弃保存",
-            "tab_target_not_unique": "无法为某个标签唯一确定 CDP 目标，已放弃保存",
-            "cdp_target_missing_id": "有标签缺少 CDP 目标 id，已放弃保存",
-            "tab_identity_unverified": "标签身份核对失败或核对期间页面发生变化，已保留浏览器",
-            "tab_focus_unverified": "无法恢复核对前的选中标签，已保留浏览器",
-        }.get(blocked_reason, "无法确认标签与 CDP 目标的对应关系")
+            "tab_set_mismatch": "the AIO tab list does not match the browser's actual tabs (count or multiset differs); they cannot be paired safely",
+            "ambiguous_duplicate_tabs": "several tabs share a URL and cannot be told apart; saving abandoned",
+            "tab_target_not_unique": "no unique CDP target for a tab; saving abandoned",
+            "cdp_target_missing_id": "a tab has no CDP target id; saving abandoned",
+            "tab_identity_unverified": "tab identity check failed or a page changed during it; browser kept",
+            "tab_focus_unverified": "cannot restore the tab selected before the check; browser kept",
+        }.get(blocked_reason, "cannot confirm which CDP target belongs to which tab")
         return err(
-            f"{explain}；已放弃释放浏览器，请整理标签后重试",
+            f"{explain}; browser release abandoned, tidy up the tabs and retry",
             blocked=True,
             reason=blocked_reason,
             warnings=warnings,
@@ -1643,7 +1643,7 @@ def capture_snapshot(
         cdp.connect()
     except CdpError as exc:
         # Fails closed: no snapshot is written and nothing is released.
-        return err(redact_urls(f"无法连接浏览器 CDP：{exc}"), blocked=True)
+        return err(redact_urls(f"cannot connect to the browser CDP: {exc}"), blocked=True)
     tabs: list[dict[str, Any]] = []
     try:
         for index, planned in enumerate(plan):
@@ -1651,14 +1651,14 @@ def capture_snapshot(
             restorable, scheme = classify_url(url)
             if not restorable:
                 return err(
-                    f"第 {index + 1} 个标签使用 {scheme or '未知'} 协议，无法自动恢复；已放弃释放浏览器，请手动处理后重试",
+                    f"tab {index + 1} uses the {scheme or 'unknown'} scheme and cannot be restored automatically; browser release abandoned, handle it by hand and retry",
                     blocked=True,
                     reason="unsupported_scheme",
                     warnings=warnings
                     + [
                         {
                             "code": "unsupported_scheme",
-                            "message": f"第 {index + 1} 个标签（{scheme or '未知'} 协议）无法自动恢复",
+                            "message": f"tab {index + 1} ({scheme or 'unknown'} scheme) cannot be restored automatically",
                             "tabIndex": index,
                         }
                     ],
@@ -1675,7 +1675,7 @@ def capture_snapshot(
             target_id = planned.get("targetId")
             if not isinstance(target_id, str) or not target_id:
                 return err(
-                    f"第 {index + 1} 个标签无法在 CDP 中定位，已放弃释放浏览器",
+                    f"tab {index + 1} cannot be found in CDP; browser release abandoned",
                     blocked=True,
                     reason="tab_error",
                     warnings=warnings,
@@ -1695,13 +1695,13 @@ def capture_snapshot(
         cdp.close()
 
     if not tabs:
-        return err("所有标签都无法安全保存", blocked=True, warnings=warnings)
+        return err("no tab can be saved safely", blocked=True, warnings=warnings)
 
     if not any(tab["active"] for tab in tabs) and order_verified and aio_rows:
         # The API listed tabs but none was focused (e.g. the window lost focus).
         # Do not invent one: report it and leave focus alone on restore.
         warnings = warnings + [
-            {"code": "active_unknown", "message": "接口未报告选中标签，恢复后不会自动切换", "tabIndex": None}
+            {"code": "active_unknown", "message": "the API reported no selected tab; the restore does not switch tabs", "tabIndex": None}
         ]
 
     # Cookies + localStorage + IndexedDB. The persistent profile alone is NOT
@@ -1714,7 +1714,7 @@ def capture_snapshot(
         storage = export_storage_state(storage_origins, timeout=max(timeout, 45.0))
     except StorageError as exc:
         return err(
-            "无法导出浏览器存储（cookies/localStorage/IndexedDB），已放弃释放以避免丢失登录状态",
+            "cannot export browser storage (cookies/localStorage/IndexedDB); release abandoned so sign-ins are not lost",
             blocked=True,
             reason="storage_unavailable",
             detail=str(exc),
@@ -1722,7 +1722,7 @@ def capture_snapshot(
             + [
                 {
                     "code": "storage_unavailable",
-                    "message": "无法导出浏览器存储，已放弃释放以避免丢失登录状态",
+                    "message": "cannot export browser storage; release abandoned so sign-ins are not lost",
                     "tabIndex": None,
                 }
             ],
@@ -1748,11 +1748,11 @@ def capture_snapshot(
     }
     valid, problem = validate_snapshot(snapshot)
     if not valid:
-        return err(f"生成的快照未通过校验：{problem}", blocked=True)
+        return err(f"the new snapshot failed validation: {problem}", blocked=True)
     try:
         write_snapshot(snapshot_path, snapshot)
     except OSError as exc:
-        return err(redact_urls(f"写入快照失败：{exc}"), blocked=True)
+        return err(redact_urls(f"writing the snapshot failed: {exc}"), blocked=True)
     return ok(
         savedAt=snapshot["savedAt"],
         tabs=len(tabs),
@@ -1793,9 +1793,9 @@ def read_snapshot(snapshot_path: str) -> tuple[dict[str, Any] | None, str]:
         with open(snapshot_path, encoding="utf-8") as handle:
             data = json.load(handle)
     except FileNotFoundError:
-        return None, "尚未保存过快照"
+        return None, "no snapshot has been saved yet"
     except (OSError, ValueError) as exc:
-        return None, f"读取快照失败：{exc}"
+        return None, f"reading the snapshot failed: {exc}"
     valid, problem = validate_snapshot(data)
     if not valid:
         return None, problem
@@ -1842,12 +1842,12 @@ def stop_browser(
     """
     snapshot, problem = read_snapshot(snapshot_path)
     if snapshot is None:
-        return err(f"没有可用快照，拒绝停止浏览器：{problem}", blocked=True)
+        return err(f"no usable snapshot; refusing to stop the browser: {problem}", blocked=True)
 
     snapshot_pid, snapshot_start = snapshot_source_pids(snapshot)
     if snapshot_pid is None or snapshot_start is None:
         return err(
-            "快照未记录完整的浏览器进程身份（PID/starttime），拒绝停止",
+            "the snapshot does not record the full browser process identity (PID/starttime); refusing to stop",
             blocked=True,
             reason="snapshot_source_incomplete",
         )
@@ -1858,7 +1858,7 @@ def stop_browser(
         # An unverifiable supervisor means we cannot attribute the process tree we
         # are about to signal; "unknown" must fail closed, never be read as absent.
         return err(
-            "浏览器守护进程归属未知，拒绝停止",
+            "browser supervisor ownership unknown; refusing to stop",
             blocked=True,
             reason="helper_unattributed",
             helperAttribution="absent" if helper.get("attribution") == "absent" else "unknown",
@@ -1866,7 +1866,7 @@ def stop_browser(
     browser = verify_browser(browser_pid_file, profile_dir, expected_ppid=int(helper["pid"]))
     if not browser["ok"]:
         return err(
-            "浏览器进程归属未知或不是该 profile 的浏览器，拒绝停止",
+            "browser process ownership unknown or not this profile's browser; refusing to stop",
             blocked=True,
             reason="browser_unattributed",
             browserAttribution=str(browser.get("attribution") or "unknown"),
@@ -1875,20 +1875,20 @@ def stop_browser(
     browser_pid = int(browser["pid"])
     browser_start = int(browser["starttime"])
     if browser_pid != snapshot_pid:
-        return err("快照属于另一个浏览器进程，拒绝停止当前的浏览器", blocked=True)
+        return err("the snapshot belongs to another browser process; refusing to stop the current browser", blocked=True)
     if browser_start != snapshot_start:
-        return err("浏览器进程已重启（starttime 不匹配），快照不再适用，拒绝停止", blocked=True)
+        return err("the browser process restarted (starttime mismatch); the snapshot no longer applies, refusing to stop", blocked=True)
     if source_pid is not None and int(source_pid) != browser_pid:
-        return err("控制面核验的 PID 与当前浏览器不一致，拒绝停止", blocked=True)
+        return err("the PID the control plane verified does not match the current browser; refusing to stop", blocked=True)
     if source_starttime is not None and int(source_starttime) != browser_start:
-        return err("控制面核验的 starttime 与当前浏览器不一致，拒绝停止", blocked=True)
+        return err("the starttime the control plane verified does not match the current browser; refusing to stop", blocked=True)
 
     # A schema-1 snapshot (or any snapshot without the storage capture) is not a
     # complete snapshot: releasing on it would drop cookies/localStorage/IndexedDB.
     # This is a conservative refusal the operator sees, never a silent data loss.
     if not snapshot_has_storage(snapshot):
         return err(
-            "快照不包含 cookies/localStorage/IndexedDB（旧 schema 或存储导出缺失），拒绝停止以免丢失登录状态；请重新保存快照",
+            "the snapshot has no cookies/localStorage/IndexedDB (old schema or missing storage export); refusing to stop so sign-ins are not lost; save a new snapshot",
             blocked=True,
             reason="snapshot_storage_missing",
             snapshotSchema=snapshot.get("schema"),
@@ -1899,29 +1899,29 @@ def stop_browser(
     # Re-verify the whole attribution immediately before signalling: a PID recycled
     # (or a restart that raced this call) must never receive the signal.
     if not same_process(pid, starttime):
-        return err("浏览器守护进程在发送信号前已发生变化，未执行停止", pid=pid)
+        return err("the browser supervisor changed before the signal was sent; not stopped", pid=pid)
     if read_ppid(browser_pid) != pid:
-        return err("浏览器进程的父进程已不是已核验的守护进程，未执行停止", pid=browser_pid)
+        return err("the browser process parent is no longer the verified supervisor; not stopped", pid=browser_pid)
     if read_stat(browser_pid) is None or read_stat(browser_pid)[0] != browser_start:
-        return err("浏览器进程在发送信号前已发生变化，未执行停止", pid=browser_pid)
+        return err("the browser process changed before the signal was sent; not stopped", pid=browser_pid)
 
     try:
         mark_released(snapshot_path, snapshot)
     except OSError as exc:
-        return err(redact_urls(f"无法记录释放标记，未执行停止：{exc}"), pid=pid)
+        return err(redact_urls(f"cannot record the release marker; not stopped: {exc}"), pid=pid)
     try:
         os.kill(pid, signal.SIGTERM)
     except ProcessLookupError:
         pass
     except OSError as exc:
-        return err(redact_urls(f"发送停止信号失败：{exc}"), pid=pid)
+        return err(redact_urls(f"sending the stop signal failed: {exc}"), pid=pid)
     deadline = time.monotonic() + timeout_s
     while time.monotonic() < deadline:
         if not same_process(pid, starttime):
             break
         time.sleep(0.2)
     else:
-        return err("浏览器守护进程在超时内未退出，请人工确认", pid=pid)
+        return err("the browser supervisor did not exit within the timeout; check by hand", pid=pid)
 
     while time.monotonic() < deadline:
         if not pid_alive(browser_pid):
@@ -1934,7 +1934,7 @@ def stop_browser(
     if same_process(pid, starttime):
         remaining.append(f"supervisor pid={pid}")
     if remaining:
-        return err(f"浏览器进程未在超时内退出（{', '.join(remaining)}）")
+        return err(f"browser processes did not exit within the timeout ({', '.join(remaining)})")
     # Only remove the pid files that still name the processes we verified.
     remove_pid_file_if_owned(helper_pid_file, pid)
     remove_pid_file_if_owned(browser_pid_file, browser_pid)
@@ -1988,14 +1988,14 @@ def start_supervisor(
         candidates = [int(unverified["pid"]), *candidates]
     if candidates:
         return err(
-            f"已有使用该 profile 的浏览器进程（pid={candidates[0]}）但守护进程不可验证，拒绝重复启动",
+            f"a browser process already uses this profile (pid={candidates[0]}) but its supervisor cannot be verified; refusing to start a second one",
             blocked=True,
             orphanPids=candidates[:5],
         )
     if not os.path.exists(helper_script):
-        return err(f"找不到上游浏览器守护脚本 {helper_script}")
+        return err(f"upstream browser supervisor script not found: {helper_script}")
     if not os.path.exists(helper_config):
-        return err(f"缺少上游浏览器守护配置 {helper_config}，拒绝自行编造")
+        return err(f"upstream browser supervisor config missing: {helper_config}; refusing to make one up")
 
     log_dir = os.path.dirname(helper_log)
     if log_dir:
@@ -2098,7 +2098,7 @@ def _close_startup_pages(cdp: Cdp, startup_ids: set[str], keep_ids: set[str]) ->
 
 def deadline_exceeded(**fields: Any) -> dict[str, Any]:
     """The wake/restore budget ran out. Progress is kept, so a retry resumes."""
-    return err("浏览器恢复超出时间预算，进度已保存，重试会接着完成", reason="deadline_exceeded", **fields)
+    return err("the browser restore ran past its time budget; progress is saved and a retry finishes it", reason="deadline_exceeded", **fields)
 
 
 def restore_tabs(
@@ -2148,7 +2148,7 @@ def restore_tabs(
     try:
         cdp.connect()
     except CdpError as exc:
-        return err(redact_urls(f"无法连接浏览器 CDP：{exc}"))
+        return err(redact_urls(f"cannot connect to the browser CDP: {exc}"))
 
     state = read_restore_state(snapshot_path)
     if state is None or state.get("snapshotSavedAt") != saved_at:
@@ -2184,7 +2184,7 @@ def restore_tabs(
             # Fail closed: opening the tabs without their cookies/storage would
             # look like a successful restore while the user is logged out.
             return err(
-                "无法导入浏览器存储，恢复未完成；快照已保留以便重试",
+                "cannot import browser storage; restore not finished, snapshot kept for a retry",
                 restoredTabs=0,
                 failed=[{"index": None, "reason": "storage_import_failed", "detail": str(exc)}],
                 problems=["storage_import_failed"],
@@ -2211,7 +2211,7 @@ def restore_tabs(
         if not any(isinstance(entry, dict) and entry.get("targetId") in existing_ids for entry in entries):
             _, reconnect_error = aio_request("POST", "/v1/browser/restart", {"mode": "soft"})
             if reconnect_error:
-                return err("无法连接 AIO 浏览器接口，快照已保留", restoredTabs=0)
+                return err("cannot reach the AIO browser API; snapshot kept", restoredTabs=0)
         # 1. Make sure every snapshot tab has a live target (re-using existing ones).
         for index, tab in enumerate(tabs):
             if out_of_time():
@@ -2424,7 +2424,7 @@ def restore_tabs(
 
     except CdpError as exc:
         return err(
-            redact_urls(f"恢复标签失败：{exc}"), restoredTabs=_restored_count(entries), failed=failed
+            redact_urls(f"restoring tabs failed: {exc}"), restoredTabs=_restored_count(entries), failed=failed
         )
     finally:
         cdp.close()
@@ -2447,9 +2447,9 @@ def restore_tabs(
         state["completed"] = False
         write_restore_state(snapshot_path, state)
         if failed:
-            message = f"有 {len(failed)} 个标签未能完整恢复，快照已保留以便重试"
+            message = f"{len(failed)} tab(s) were not fully restored; snapshot kept for a retry"
         else:
-            message = "标签已重建，但无法把焦点同步给 AIO 接口，快照已保留以便重试"
+            message = "tabs rebuilt, but the focus could not be synced to the AIO API; snapshot kept for a retry"
         return err(message, restoredTabs=restored, failed=failed, problems=problems)
     # Record completion instead of deleting the record: `status` needs it to tell
     # "the running browser has applied this snapshot" from "still pending", and it
@@ -2490,7 +2490,7 @@ def reconnect_mcp_browser(deadline: float | None = None) -> dict[str, Any]:
                                capture_output=True, text=True, timeout=cap(5), check=False)
         pid = int(check.stdout.strip())
         if check.returncode != 0 or pid < 0:
-            return err("无法确认浏览器 MCP 服务状态")
+            return err("cannot confirm the browser MCP service state")
         if pid:
             argv = parse_argv(read_cmdline_raw(pid))
             stat = read_stat(pid)
@@ -2498,13 +2498,13 @@ def reconnect_mcp_browser(deadline: float | None = None) -> dict[str, Any]:
                     or os.path.realpath(argv[1]) != os.path.realpath("/usr/local/bin/mcp-server-browser")
                     or read_uid(pid) != pwd.getpwnam("gem").pw_uid
                     or stat is None or not same_process(pid, stat[0])):
-                return err("浏览器 MCP 进程归属不明，未执行重连")
+                return err("browser MCP process ownership unclear; not reconnected")
         result = subprocess.run(["supervisorctl", "restart", "mcp-server-browser"],
                                 capture_output=True, text=True, timeout=cap(20), check=False)
         if result.returncode != 0:
-            return err("浏览器 MCP 服务重连失败，快照已保留")
+            return err("reconnecting the browser MCP service failed; snapshot kept")
     except (OSError, ValueError, KeyError, subprocess.SubprocessError):
-        return err("浏览器 MCP 重连或验证超时，快照已保留")
+        return err("browser MCP reconnect or check timed out; snapshot kept")
     # `supervisorctl restart` returns once node is spawned, before it listens on
     # 8100; a probe in that window gets AIO's "Client failed to connect". The
     # probe is a read-only tab list, so retrying it until the deadline is safe.
@@ -2515,7 +2515,7 @@ def reconnect_mcp_browser(deadline: float | None = None) -> dict[str, Any]:
         if _probe_mcp_page_tool(timeout=cap(15)):
             return ok()
         if time.monotonic() >= probe_deadline:
-            return err("浏览器 MCP 页面连接验证失败，快照已保留")
+            return err("browser MCP page connection check failed; snapshot kept")
         time.sleep(MCP_PROBE_INTERVAL_S)
 
 
@@ -2649,17 +2649,17 @@ def wake_browser(
     snapshot, problem = read_snapshot(snapshot_path)
     never_saved = not os.path.exists(snapshot_path) and not os.path.exists(restore_state_path_for(snapshot_path))
     if snapshot is None and not allow_blank and not never_saved:
-        return err(f"没有可恢复的快照，拒绝启动空白浏览器：{problem}", blocked=True)
+        return err(f"no snapshot to restore; refusing to start a blank browser: {problem}", blocked=True)
     if snapshot is not None and snapshot_consumed(snapshot_path, snapshot):
         # Restored once already: this browser starts from its own profile.
-        snapshot, problem = None, "快照已恢复过"
+        snapshot, problem = None, "the snapshot was already restored"
     elif (
         snapshot is not None
         and snapshot.get("releaseTracked") is True
         and not restore_pending(snapshot_path, *_current_browser_identity())
     ):
         # Never released, or the browser it came from is still the one running.
-        snapshot, problem = None, "快照未被释放过，浏览器沿用自己的 profile"
+        snapshot, problem = None, "the snapshot was never released; the browser keeps its own profile"
 
     if deadline is not None and deadline <= time.monotonic():
         return deadline_exceeded()
@@ -2680,13 +2680,13 @@ def wake_browser(
         if wait_s <= 0:
             return deadline_exceeded()
     if not wait_for_cdp(timeout_s=wait_s):
-        return err("浏览器启动后未在超时内暴露 CDP")
+        return err("the browser did not expose CDP within the timeout after starting")
 
     if snapshot is None:
         mcp = reconnect_mcp_browser(deadline=deadline)
         if not mcp["ok"]:
             return mcp
-        return ok(restoredTabs=0, message=f"浏览器已启动，无快照可恢复：{problem}")
+        return ok(restoredTabs=0, message=f"browser started, no snapshot to restore: {problem}")
 
     restored = restore_tabs(snapshot, snapshot_path=snapshot_path, deadline=deadline)
     if not restored["ok"]:
@@ -2719,7 +2719,7 @@ def preflight(policy: str, download_dirs: Sequence[str] = DEFAULT_DOWNLOAD_DIRS)
     try:
         pages = [t for t in cdp.targets() if t.get("type") == "page"]
     except CdpError as exc:
-        return err(redact_urls(f"无法连接浏览器 CDP：{exc}"))
+        return err(redact_urls(f"cannot connect to the browser CDP: {exc}"))
     if not pages:
         return ok(safe=False, reason="no_tabs", downloadCoverage="partial")
 
@@ -2730,7 +2730,7 @@ def preflight(policy: str, download_dirs: Sequence[str] = DEFAULT_DOWNLOAD_DIRS)
     try:
         cdp.connect()
     except CdpError as exc:
-        return err(redact_urls(f"无法连接浏览器 CDP：{exc}"))
+        return err(redact_urls(f"cannot connect to the browser CDP: {exc}"))
     try:
         for page in pages:
             url = str(page.get("url") or "")
@@ -2958,7 +2958,7 @@ def dispatch(args: argparse.Namespace) -> dict[str, Any]:
                 else:  # restore
                     snapshot, problem = read_snapshot(args.snapshot)
                     if snapshot is None:
-                        result = err(f"无法读取快照：{problem}", blocked=True)
+                        result = err(f"cannot read the snapshot: {problem}", blocked=True)
                     else:
                         result = restore_tabs(
                             snapshot, snapshot_path=args.snapshot, timeout=args.timeout_s, deadline=deadline
@@ -2975,7 +2975,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     except Exception as exc:  # noqa: BLE001 - a traceback is not an API contract
         # Verified live: an unexpected failure (e.g. a wedged renderer) must still
         # produce one structured, secret-free JSON line with a non-zero exit.
-        result = err(f"浏览器运行时内部错误：{type(exc).__name__}", blocked=True)
+        result = err(f"browser runtime internal error: {type(exc).__name__}", blocked=True)
     print(json.dumps(result, ensure_ascii=False))
     return 0 if result.get("ok") else 1
 

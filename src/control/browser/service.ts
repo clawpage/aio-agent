@@ -76,7 +76,7 @@ const NON_BROWSER_PATH_PREFIXES = ["/v1/shell", "/v1/files", "/v1/jupyter", "/ap
  * not a user-visible string: both the server and the panel match on it, and the
  * panel filters `status().pins` by it to rebuild its own toggle state.
  */
-export const UI_KEEP_ALIVE_NOTE = "UI 手动保留浏览器";
+export const UI_KEEP_ALIVE_NOTE = "UI 手动保留浏览器"; // i18n-exempt: protocol token matched by the panel, never shown
 
 export function isBrowserBoundPath(url: string): boolean {
   let pathname: string;
