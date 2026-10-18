@@ -87,8 +87,8 @@ it("gives every account an image tool that draws with the control plane's own lo
 
     // Nothing outside the workspace, nothing but .png, no SVG or missing references.
     for (const [args, message] of [
-      [{ prompt: "x", path: "/etc/x.png" }, "只允许访问沙箱工作区内的文件"],
-      [{ prompt: "x", path: "/home/gem/workspace/../.codex/x.png" }, "只允许访问沙箱工作区内的文件"],
+      [{ prompt: "x", path: "/etc/x.png" }, "Only files inside the sandbox workspace can be accessed"],
+      [{ prompt: "x", path: "/home/gem/workspace/../.codex/x.png" }, "Only files inside the sandbox workspace can be accessed"],
       [{ prompt: "x", path: "/home/gem/workspace/a.jpg" }, ".png"],
       [{ prompt: "" }, "Missing prompt"],
       [{ prompt: "x", reference_paths: ["/home/gem/workspace/none.png"] }, "文件不存在"],

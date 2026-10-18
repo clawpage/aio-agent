@@ -5,6 +5,7 @@ import path from "node:path";
 import { DocumentError, DocumentService } from "../../src/control/documents/service.js";
 import { loadConfig, type Config } from "../../src/control/config.js";
 import { Logger } from "../../src/common/logger.js";
+import { runInLocale } from "../../src/control/i18n/index.js";
 import type { SandboxContainer, DockerRunResult } from "../../src/control/sandbox/container.js";
 
 const ROOT = "/home/gem/workspace";
@@ -355,6 +356,28 @@ describe("DocumentService render confinement", () => {
     expect(rmCalls[0]?.[2]?.startsWith(`${TOOL_DIR}/cache/`)).toBe(true);
   });
 
+  it("words a script failure by its code in the reader's language, and keeps the script's text for an unknown code", async () => {
+    const failing = (code: string, message: string) =>
+      service(baseHandler({ render: () => ({ code: 0, stdout: `${JSON.stringify({ ok: false, code, message })}\n`, stderr: "" }) })).svc;
+    await expect(failing("no_pages", "x").render(`${ROOT}/a.docx`)).rejects.toMatchObject({
+      code: "render_failed",
+      message: "No valid preview pages were produced (the file may be empty or damaged)",
+    });
+    await expect(runInLocale("zh-CN", () => failing("missing_pdftoppm", "x").render(`${ROOT}/a.docx`))).rejects.toMatchObject({
+      code: "missing_tool",
+      status: 503,
+      message: "沙箱缺少 poppler-utils（pdftoppm），无法生成预览",
+    });
+    await expect(failing("outside_workspace", "x").render(`${ROOT}/a.docx`)).rejects.toMatchObject({
+      code: "outside_workspace",
+      message: "Only files inside the workspace can be previewed (or the path points outside it)",
+    });
+    await expect(failing("brand_new", "Something new failed").render(`${ROOT}/a.docx`)).rejects.toMatchObject({
+      code: "render_failed",
+      message: "Something new failed",
+    });
+  });
+
   it("reports a container timeout as a timeout error", async () => {
     const { svc } = service(baseHandler({ render: () => ({ code: 1, stdout: "", stderr: "command timed out" }) }));
     await expect(svc.render(`${ROOT}/a.docx`)).rejects.toMatchObject({ code: "timeout", status: 504 });
@@ -608,7 +631,8 @@ describe("DocumentService provisioning", () => {
     const rootIndex = container.users.findIndex((user) => user === "root");
     expect(rootIndex).toBeGreaterThanOrEqual(0);
     // No apt run was needed, so the summary must not claim one.
-    expect(result.message).toContain("工具目录权限");
+    expect(result.message).toContain("tool directory permissions");
+    expect(result.message).not.toContain("system dependencies");
     // The root step must run before any managed script is written: otherwise the
     // write itself would fail on the root-owned directory.
     const firstWrite = container.calls.findIndex((argv) => argv[0] === "cat" || argv[0] === "mkdir");
@@ -654,7 +678,23 @@ describe("DocumentService provisioning", () => {
     });
     const result = await svc.provision();
     expect(result.ok).toBe(false);
-    expect(result.message).toContain("没有网络出口");
+    // The script's code is worded by the control plane, in the reader's language.
+    expect(result.message).toBe("apt-get update failed (usually the sandbox has no outbound network access)");
+    expect((await runInLocale("zh-CN", () => svc.provision())).message).toBe("apt-get update 失败（通常是沙箱没有网络出口）");
+  });
+
+  it("keeps the root step's own message for a code it does not know", async () => {
+    const { svc } = service((argv) => {
+      if (isProbe(argv)) return probe(["soffice"], { writable: false });
+      if (argv.includes("aio-doc-root-install")) {
+        return { code: 0, stdout: '{"ok":false,"code":"something_new","message":"Something new went wrong"}\n', stderr: "" };
+      }
+      if (argv[0] === "bash" && String(argv[1]).endsWith("provision.sh")) {
+        return { code: 0, stdout: `${JSON.stringify({ ok: true, ready: false, previewReady: false, authoringReady: false, needsRoot: true })}\n`, stderr: "" };
+      }
+      return undefined;
+    });
+    expect((await svc.provision()).message).toBe("Something new went wrong");
   });
 });
 

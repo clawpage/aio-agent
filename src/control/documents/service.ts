@@ -5,6 +5,7 @@ import type { Config } from "../config.js";
 import type { Logger } from "../../common/logger.js";
 import type { SandboxContainer } from "../sandbox/container.js";
 import { looksLikeSvg } from "../../common/svg.js";
+import { t, type Messages } from "../i18n/index.js";
 import {
   documentKind,
   mediaSignatureMatches,
@@ -163,7 +164,7 @@ class Semaphore {
       return () => this.#release();
     }
     if (this.#waiters.length >= this.#maxWaiters) {
-      throw new DocumentError("busy", "文档转换任务排队已满，请稍后重试", 429);
+      throw new DocumentError("busy", t().documents.busy, 429);
     }
     await new Promise<void>((resolve) => this.#waiters.push(resolve));
     this.#active += 1;
@@ -275,7 +276,7 @@ export class DocumentService {
     if (mkdir.code !== 0) {
       throw new DocumentError(
         "tools_not_ready",
-        `无法创建沙箱工具目录（${(mkdir.stderr || mkdir.stdout).trim().slice(0, 200)}）；请先运行文档工具安装`,
+        t().documents.scriptDirFailed((mkdir.stderr || mkdir.stdout).trim().slice(0, 200)),
         503,
       );
     }
@@ -292,7 +293,7 @@ export class DocumentService {
       if (chmod.code !== 0) {
         throw new DocumentError(
           "tools_not_ready",
-          `无法设置沙箱工具脚本权限（${(chmod.stderr || chmod.stdout).trim().slice(0, 200)}）；请先运行文档工具安装`,
+          t().documents.scriptChmodFailed((chmod.stderr || chmod.stdout).trim().slice(0, 200)),
           503,
         );
       }
@@ -360,7 +361,7 @@ export class DocumentService {
       tools: {},
       python: {},
       missing: [],
-      error: "文档工具已由配置关闭（PA_DOCUMENTS_ENABLED=0）",
+      error: t().documents.disabledByConfig,
       checkedAt: Date.now(),
     };
   }
@@ -387,10 +388,10 @@ export class DocumentService {
         timeoutMs: 60_000,
       });
       if (result.code !== 0) {
-        return this.#unready(`就绪检查退出码 ${result.code}：${(result.stderr || result.stdout).trim().slice(0, 300)}`);
+        return this.#unready(t().documents.checkExit(result.code, (result.stderr || result.stdout).trim().slice(0, 300)));
       }
       const parsed = parseJsonLine(result.stdout);
-      if (!parsed) return this.#unready("就绪检查未返回可解析结果");
+      if (!parsed) return this.#unready(t().documents.checkUnparsable);
       return {
         enabled: true,
         ready: parsed.ready === true,
@@ -434,7 +435,7 @@ export class DocumentService {
    */
   async provision(): Promise<{ ok: boolean; message: string; readiness: DocumentReadiness }> {
     if (!this.#cfg.documents.enabled) {
-      throw new DocumentError("disabled", "文档工具已由配置关闭", 409);
+      throw new DocumentError("disabled", t().documents.disabled, 409);
     }
     this.#provisionInFlight ??= this.#provision().finally(() => {
       this.#provisionInFlight = null;
@@ -471,7 +472,7 @@ export class DocumentService {
         const readiness = await this.readiness(true);
         return { ok: false, message: root.message, readiness };
       }
-      steps.push(root.aptRan ? "系统依赖" : "工具目录权限");
+      steps.push(root.aptRan ? t().documents.install.stepSystem : t().documents.install.stepToolDir);
     }
 
     // Only now is the directory writable by the sandbox user, so the managed
@@ -484,8 +485,8 @@ export class DocumentService {
       { timeoutMs: Math.max(this.#cfg.documents.timeoutMs, 600_000) },
     );
     const parsed = parseJsonLine(result.stdout);
-    const message = typeof parsed?.message === "string" ? parsed.message : `安装脚本退出码 ${result.code}`;
-    if (result.code === 0 && parsed?.ok === true && parsed?.code === "installed") steps.push("Python 库与 CLI");
+    const message = installMessage(parsed, this.#cfg.documents.toolDir) ?? t().documents.install.exitCode(result.code);
+    if (result.code === 0 && parsed?.ok === true && parsed?.code === "installed") steps.push(t().documents.install.stepPython);
 
     // `ok` means the toolchain is actually usable, not merely that the last
     // command printed ok:true. `provision.sh check` always exits with ok:true
@@ -494,8 +495,8 @@ export class DocumentService {
     const ok = readiness.ready;
     const summary = ok
       ? steps.length > 0
-        ? `文档工具安装完成（${steps.join("、")}）`
-        : "文档工具已就绪，无需重复安装"
+        ? t().documents.install.installed(steps)
+        : t().documents.install.alreadyReady
       : message;
     return { ok, message: summary, readiness };
   }
@@ -571,7 +572,7 @@ print("venv" if venv_python else "novenv")
         ok: false,
         ran: false,
         aptRan: false,
-        message: `控制面缺少 root 安装脚本：${err instanceof Error ? err.message : String(err)}`,
+        message: t().documents.install.rootScriptMissing(err instanceof Error ? err.message : String(err)),
       };
     }
     const result = await this.#container.execInSandbox(
@@ -585,11 +586,12 @@ print("venv" if venv_python else "novenv")
     );
     const parsed = parseJsonLine(result.stdout);
     if (result.code !== 0 || !parsed) {
+      const detail = (result.stderr || result.stdout).trim().slice(0, 300);
       return {
         ok: false,
         ran: true,
         aptRan: true,
-        message: `系统依赖安装失败：${(result.stderr || result.stdout).trim().slice(0, 300) || `退出码 ${result.code}`}`,
+        message: detail ? t().documents.install.rootFailed(detail) : t().documents.install.rootExitCode(result.code),
       };
     }
     if (parsed.ok !== true) {
@@ -597,10 +599,10 @@ print("venv" if venv_python else "novenv")
         ok: false,
         ran: true,
         aptRan: false,
-        message: typeof parsed.message === "string" ? parsed.message : "系统依赖安装失败",
+        message: rootInstallMessage(parsed) ?? t().documents.install.rootFailedGeneric,
       };
     }
-    return { ok: true, ran: true, aptRan: parsed.aptRan === true, message: "系统依赖已就绪" };
+    return { ok: true, ran: true, aptRan: parsed.aptRan === true, message: t().documents.install.rootReady };
   }
 
   /**
@@ -637,17 +639,17 @@ print("venv" if venv_python else "novenv")
   /** Render (or serve from cache) the page rasters of one workspace document. */
   async render(validatedPath: string): Promise<RenderResult> {
     if (!this.#cfg.documents.enabled) {
-      throw new DocumentError("disabled", "文档工具已由配置关闭", 409);
+      throw new DocumentError("disabled", t().documents.disabled, 409);
     }
     const kind = documentKind(validatedPath);
     if (!isRenderableKind(kind)) {
-      throw new DocumentError("unsupported", "该格式暂不支持在线预览，请直接下载", 415);
+      throw new DocumentError("unsupported", t().documents.previewUnsupported, 415);
     }
     const stat = await this.stat(validatedPath);
-    if (!stat.exists) throw new DocumentError("not_found", "文件不存在或已被移动", 404);
-    if (!stat.isFile) throw new DocumentError("not_a_file", "该路径不是普通文件", 400);
-    if (stat.size === 0) throw new DocumentError("empty_file", "文件是空的（0 字节）", 422);
-    if (stat.size > MAX_SOURCE_BYTES) throw new DocumentError("too_large", "文件超过 100MB，无法在线预览，请下载后处理", 413);
+    if (!stat.exists) throw new DocumentError("not_found", t().documents.notFound, 404);
+    if (!stat.isFile) throw new DocumentError("not_a_file", t().documents.notAFile, 400);
+    if (stat.size === 0) throw new DocumentError("empty_file", t().documents.emptyFile, 422);
+    if (stat.size > MAX_SOURCE_BYTES) throw new DocumentError("too_large", t().documents.tooLargePreview, 413);
 
     // The cache key is built from the *resolved* path and the real revision, so
     // a symlink that now points somewhere else, or a same-size fast edit, can
@@ -696,7 +698,7 @@ print("venv" if venv_python else "novenv")
       if (!readiness.previewReady) {
         throw new DocumentError(
           "tools_not_ready",
-          readiness.error ?? "沙箱文档工具尚未就绪，请先安装（工作区 → 文档工具 → 安装/检查）",
+          readiness.error ?? t().documents.toolsNotReadyPreview,
           503,
         );
       }
@@ -720,18 +722,18 @@ print("venv" if venv_python else "novenv")
       const parsed = parseJsonLine(result.stdout);
       if (!parsed) {
         if (result.code !== 0 && /timed out|SIGTERM/i.test(result.stderr)) {
-          throw new DocumentError("timeout", "预览转换超时，文件可能过大或过于复杂", 504);
+          throw new DocumentError("timeout", t().documents.previewTimeout, 504);
         }
-        throw new DocumentError("render_failed", "沙箱未返回可解析的预览结果", 502);
+        throw new DocumentError("render_failed", t().documents.previewUnparsable, 502);
       }
       if (parsed.ok !== true) {
-        throw mapRenderFailure(parsed);
+        throw mapRenderFailure(parsed, "preview");
       }
       // Page paths are only accepted when they are a direct child of THIS run's
       // cache directory: a script that returned some other path (however it got
       // there) cannot make the control plane fetch an arbitrary container file.
       const pagePaths = this.#confinePagePaths(parsed.pages, cacheDir);
-      if (pagePaths.length === 0) throw new DocumentError("render_failed", "没有生成任何预览页", 502);
+      if (pagePaths.length === 0) throw new DocumentError("render_failed", t().documents.noPreviewPages, 502);
 
       const pages: RenderPage[] = [];
       try {
@@ -742,7 +744,7 @@ print("venv" if venv_python else "novenv")
       } catch (err) {
         throw err instanceof DocumentError
           ? err
-          : new DocumentError("render_failed", "读取预览图片失败", 502);
+          : new DocumentError("render_failed", t().documents.previewImageReadFailed, 502);
       }
 
       const totalPages = typeof parsed.totalPages === "number" ? parsed.totalPages : pages.length;
@@ -789,22 +791,21 @@ print("venv" if venv_python else "novenv")
 
   async #fetchSandboxFile(target: string): Promise<Buffer> {
     const res = await this.#container.fetch(`/v1/file/download?path=${encodeURIComponent(target)}`, { signal: AbortSignal.timeout(60_000) });
-    if (!res.ok) throw new DocumentError("page_unavailable", "无法从沙箱读取预览图片", 502);
+    if (!res.ok) throw new DocumentError("page_unavailable", t().documents.previewImageUnavailable, 502);
     const buffer = Buffer.from(await res.arrayBuffer());
-    if (buffer.byteLength === 0) throw new DocumentError("page_unavailable", "预览图片为空", 502);
+    if (buffer.byteLength === 0) throw new DocumentError("page_unavailable", t().documents.previewImageEmpty, 502);
     return buffer;
   }
 
   /** Stream audio or video from the sandbox, preserving range requests for seeking/Safari. */
   async media(validatedPath: string, range: string | undefined, head: boolean, signal: AbortSignal): Promise<Response> {
-    if (!this.enabled) throw new DocumentError("disabled", "文档工具已由配置关闭", 409);
+    if (!this.enabled) throw new DocumentError("disabled", t().documents.disabled, 409);
     const kind = documentKind(validatedPath);
-    if (kind !== "video" && kind !== "audio") throw new DocumentError("unsupported", "仅支持音频和视频播放", 415);
-    const noun = kind === "video" ? "视频" : "音频";
+    if (kind !== "video" && kind !== "audio") throw new DocumentError("unsupported", t().documents.mediaOnly, 415);
     const stat = await this.stat(validatedPath);
-    if (!stat.exists) throw new DocumentError("not_found", "文件不存在或已被移动", 404);
-    if (!stat.isFile) throw new DocumentError("not_a_file", "该路径不是普通文件", 400);
-    if (!stat.size) throw new DocumentError("empty_file", "文件是空的（0 字节）", 422);
+    if (!stat.exists) throw new DocumentError("not_found", t().documents.notFound, 404);
+    if (!stat.isFile) throw new DocumentError("not_a_file", t().documents.notAFile, 400);
+    if (!stat.size) throw new DocumentError("empty_file", t().documents.emptyFile, 422);
     // Only one byte range is needed by media elements. Avoid multipart responses
     // and validate numbers before handing them to the sandbox HTTP server.
     if (range && !/^bytes=(?:\d+-\d*|-\d+)$/.test(range)) {
@@ -815,7 +816,7 @@ print("venv" if venv_python else "novenv")
     // Never buffer a full file when an upstream stops honoring Range.
     if (probe.status !== 206 || Number(probe.headers.get("content-length")) > 32) {
       await probe.body?.cancel();
-      throw new DocumentError("sandbox_unreachable", `无法分段读取${noun}，请重试或下载查看`, 502);
+      throw new DocumentError("sandbox_unreachable", t().documents.mediaRangeFailed(kind), 502);
     }
     const reader = probe.body?.getReader();
     const prefix = Buffer.alloc(32);
@@ -829,14 +830,14 @@ print("venv" if venv_python else "novenv")
       }
     } finally { await reader?.cancel(); }
     if (!mediaSignatureMatches(validatedPath, prefix.subarray(0, count))) {
-      throw new DocumentError("unsupported", `文件内容不是有效的${noun}（和扩展名不符）`, 415);
+      throw new DocumentError("unsupported", t().documents.mediaMismatch(kind), 415);
     }
     // AIO's download route does not implement HEAD. Fetch only its headers,
     // then cancel the body for HEAD rather than exposing that upstream 405.
     const upstream = await this.#container.fetch(url, { headers: range ? { Range: range } : {}, signal });
     if (![200, 206, 416].includes(upstream.status)) {
       await upstream.body?.cancel();
-      throw new DocumentError("sandbox_unreachable", `无法读取${noun}，请重试或下载查看`, 502);
+      throw new DocumentError("sandbox_unreachable", t().documents.mediaReadFailed(kind), 502);
     }
     if (upstream.status === 416) {
       await upstream.body?.cancel();
@@ -870,11 +871,11 @@ print("venv" if venv_python else "novenv")
 
   /** Serve one cached page, or re-render when the entry was evicted. */
   async page(validatedPath: string, index: number): Promise<{ bytes: Buffer; kind: DocumentKind }> {
-    if (!Number.isInteger(index) || index < 1) throw new DocumentError("bad_request", "页码非法");
+    if (!Number.isInteger(index) || index < 1) throw new DocumentError("bad_request", t().documents.badPage);
     const result = await this.render(validatedPath);
     const page = result.pages.find((p) => p.index === index);
     if (!page) {
-      throw new DocumentError("page_unavailable", `该文件只有 ${result.pageCount} 页可预览`, 404);
+      throw new DocumentError("page_unavailable", t().documents.pageCount(result.pageCount), 404);
     }
     return { bytes: page.bytes, kind: result.kind };
   }
@@ -886,24 +887,24 @@ print("venv" if venv_python else "novenv")
    * command shape is fixed — no caller-supplied argv reaches the container.
    */
   async convert(validatedPath: string, targetFormat: string): Promise<{ path: string; bytes: number }> {
-    if (!this.#cfg.documents.enabled) throw new DocumentError("disabled", "文档工具已由配置关闭", 409);
+    if (!this.#cfg.documents.enabled) throw new DocumentError("disabled", t().documents.disabled, 409);
     const format = targetFormat.trim().toLowerCase();
     if (!CONVERT_TARGETS.has(format)) {
-      throw new DocumentError("bad_request", `不支持的目标格式：${targetFormat || "（空）"}`, 400);
+      throw new DocumentError("bad_request", t().documents.badTarget(targetFormat), 400);
     }
     const kind = documentKind(validatedPath);
     if (!isRenderableKind(kind) && kind !== "text") {
-      throw new DocumentError("unsupported", "该格式暂不支持转换", 415);
+      throw new DocumentError("unsupported", t().documents.convertUnsupported, 415);
     }
     const stat = await this.stat(validatedPath);
-    if (!stat.exists) throw new DocumentError("not_found", "文件不存在或已被移动", 404);
-    if (!stat.isFile) throw new DocumentError("not_a_file", "该路径不是普通文件", 400);
-    if (stat.size === 0) throw new DocumentError("empty_file", "文件是空的（0 字节）", 422);
-    if (stat.size > MAX_SOURCE_BYTES) throw new DocumentError("too_large", "文件超过 100MB，无法转换", 413);
+    if (!stat.exists) throw new DocumentError("not_found", t().documents.notFound, 404);
+    if (!stat.isFile) throw new DocumentError("not_a_file", t().documents.notAFile, 400);
+    if (stat.size === 0) throw new DocumentError("empty_file", t().documents.emptyFile, 422);
+    if (stat.size > MAX_SOURCE_BYTES) throw new DocumentError("too_large", t().documents.tooLargeConvert, 413);
 
     const readiness = await this.readiness();
     if (!readiness.previewReady) {
-      throw new DocumentError("tools_not_ready", readiness.error ?? "沙箱文档工具尚未就绪，请先安装", 503);
+      throw new DocumentError("tools_not_ready", readiness.error ?? t().documents.toolsNotReady, 503);
     }
     await this.ensureScripts();
 
@@ -914,7 +915,7 @@ print("venv" if venv_python else "novenv")
     const outputName = withExtension(base, format);
     const outputPath = path.posix.join(dir, outputName);
     if (outputPath === realPath) {
-      throw new DocumentError("bad_request", "转换结果会覆盖原文件，请换一个目标格式", 400);
+      throw new DocumentError("bad_request", t().documents.wouldOverwrite, 400);
     }
 
     const release = await this.#semaphore.acquire();
@@ -935,11 +936,11 @@ print("venv" if venv_python else "novenv")
       const parsed = parseJsonLine(result.stdout);
       if (!parsed) {
         if (result.code !== 0 && /timed out|SIGTERM/i.test(result.stderr)) {
-          throw new DocumentError("timeout", "转换超时，文件可能过大或过于复杂", 504);
+          throw new DocumentError("timeout", t().documents.convertTimeout, 504);
         }
-        throw new DocumentError("convert_failed", "沙箱未返回可解析的转换结果", 502);
+        throw new DocumentError("convert_failed", t().documents.convertUnparsable, 502);
       }
-      if (parsed.ok !== true) throw mapRenderFailure(parsed);
+      if (parsed.ok !== true) throw mapRenderFailure(parsed, "convert");
       // Only a path the container reports inside the same directory is trusted;
       // anything else falls back to the path we computed ourselves.
       const reported = typeof parsed.path === "string" ? parsed.path : "";
@@ -955,15 +956,15 @@ print("venv" if venv_python else "novenv")
   /** Read a small text file for inline display; larger files are download-only. */
   async text(validatedPath: string): Promise<{ text: string; size: number; truncated: boolean }> {
     const stat = await this.stat(validatedPath);
-    if (!stat.exists) throw new DocumentError("not_found", "文件不存在或已被移动", 404);
-    if (!stat.isFile) throw new DocumentError("not_a_file", "该路径不是普通文件", 400);
+    if (!stat.exists) throw new DocumentError("not_found", t().documents.notFound, 404);
+    if (!stat.isFile) throw new DocumentError("not_a_file", t().documents.notAFile, 400);
     // Read the *resolved* path, so a symlink that leaves the workspace is
     // rejected here rather than being followed by the sandbox file API.
     const realPath = stat.realPath;
     if (stat.size > this.#cfg.documents.textMaxBytes) {
       throw new DocumentError(
         "too_large",
-        `文件 ${formatBytes(stat.size)} 超过内联显示上限（${formatBytes(this.#cfg.documents.textMaxBytes)}），请下载后查看`,
+        t().documents.textTooLarge(formatBytes(stat.size), formatBytes(this.#cfg.documents.textMaxBytes)),
         413,
       );
     }
@@ -978,12 +979,12 @@ print("venv" if venv_python else "novenv")
     );
     const json = (await res.json()) as { success?: boolean; data?: { content?: string; error_type?: string; message?: string } };
     if (!json.success || json.data?.error_type) {
-      throw new DocumentError("not_found", json.data?.message ?? "读取文件失败", 502);
+      throw new DocumentError("not_found", json.data?.message ?? t().documents.readFailed, 502);
     }
     const raw = json.data?.content ?? "";
     // A binary file misnamed as text would otherwise be rendered as garbage.
     if (raw.includes("\u0000")) {
-      throw new DocumentError("unsupported", "该文件不是可显示的文本（包含二进制内容），请下载后查看", 415);
+      throw new DocumentError("unsupported", t().documents.binaryText, 415);
     }
     const truncated = Buffer.byteLength(raw) > this.#cfg.documents.textMaxBytes;
     return {
@@ -1008,14 +1009,14 @@ print("venv" if venv_python else "novenv")
   async image(validatedPath: string, known?: string): Promise<{ bytes: Buffer; contentType: string; etag?: string } | { notModified: true; etag: string }> {
     const kind = documentKind(validatedPath);
     if (kind !== "image") {
-      throw new DocumentError("unsupported", "该文件不是可内联显示的图片", 415);
+      throw new DocumentError("unsupported", t().documents.notImage, 415);
     }
     const stat = await this.stat(validatedPath);
-    if (!stat.exists) throw new DocumentError("not_found", "文件不存在或已被移动", 404);
-    if (!stat.isFile) throw new DocumentError("not_a_file", "该路径不是普通文件", 400);
-    if (stat.size === 0) throw new DocumentError("empty_file", "文件是空的（0 字节）", 422);
+    if (!stat.exists) throw new DocumentError("not_found", t().documents.notFound, 404);
+    if (!stat.isFile) throw new DocumentError("not_a_file", t().documents.notAFile, 400);
+    if (stat.size === 0) throw new DocumentError("empty_file", t().documents.emptyFile, 422);
     if (stat.size > MAX_IMAGE_BYTES) {
-      throw new DocumentError("too_large", `图片超过 ${formatBytes(MAX_IMAGE_BYTES)}，请下载后查看`, 413);
+      throw new DocumentError("too_large", t().documents.imageTooLarge(formatBytes(MAX_IMAGE_BYTES)), 413);
     }
     // The version a console keeps a copy under: the same file, size and mtime answer
     // "unchanged" without the bytes ever leaving the sandbox.
@@ -1025,7 +1026,7 @@ print("venv" if venv_python else "novenv")
     // An .svg must really be an SVG; a raster extension must hold raster bytes.
     const contentType = extensionOf(validatedPath) === "svg" ? (looksLikeSvg(bytes.toString("utf8")) ? "image/svg+xml" : null) : sniffImage(bytes);
     if (!contentType) {
-      throw new DocumentError("unsupported", "文件内容不是可识别的图片格式", 415);
+      throw new DocumentError("unsupported", t().documents.notRecognizedImage, 415);
     }
     return { bytes, contentType, etag };
   }
@@ -1041,9 +1042,9 @@ print("venv" if venv_python else "novenv")
     try {
       url = new URL(raw);
     } catch {
-      throw new DocumentError("bad_request", "图片地址无效", 400);
+      throw new DocumentError("bad_request", t().documents.badImageUrl, 400);
     }
-    if (url.protocol !== "https:" || url.username || url.password || raw.length > 2048) throw new DocumentError("bad_request", "只能显示 https 图片", 400);
+    if (url.protocol !== "https:" || url.username || url.password || raw.length > 2048) throw new DocumentError("bad_request", t().documents.httpsOnly, 400);
     const key = url.href;
     const cached = this.#webImages.get(key);
     if (cached && Date.now() - cached.at < ("failed" in cached ? WEB_IMAGE_FAILED_TTL_MS : WEB_IMAGE_TTL_MS)) {
@@ -1075,11 +1076,11 @@ print("venv" if venv_python else "novenv")
     const result = await this.#container.execInSandbox(["python3", "-c", WEB_IMAGE_SCRIPT, key], { timeoutMs: 25_000 });
     let failure: DocumentError | null = null;
     let bytes = Buffer.alloc(0);
-    if (result.code === 3) failure = new DocumentError("too_large", `图片超过 ${formatBytes(MAX_WEB_IMAGE_BYTES)}`, 413);
-    else if (result.code !== 0) failure = new DocumentError("fetch_failed", "图片暂时取不到", 502);
+    if (result.code === 3) failure = new DocumentError("too_large", t().documents.webImageTooLarge(formatBytes(MAX_WEB_IMAGE_BYTES)), 413);
+    else if (result.code !== 0) failure = new DocumentError("fetch_failed", t().documents.webImageUnavailable, 502);
     else bytes = Buffer.from(result.stdout.trim(), "base64");
     const contentType = failure ? null : sniffImage(bytes);
-    if (!failure && !contentType) failure = new DocumentError("unsupported", "地址返回的不是图片", 415);
+    if (!failure && !contentType) failure = new DocumentError("unsupported", t().documents.notAnImage, 415);
     if (failure) {
       remember({ failed: failure });
       throw failure;
@@ -1122,36 +1123,98 @@ function asBoolMap(value: unknown): Record<string, boolean> {
   return out;
 }
 
-function mapRenderFailure(parsed: Record<string, unknown>): DocumentError {
+type Words = Messages["documents"];
+
+/**
+ * What render.sh reports, by its code: the error it becomes and the words a
+ * person reads. A code missing here keeps the script's own (English) message.
+ */
+const RENDER_FAILURES: Record<string, [DocumentErrorCode, number, (m: Words, mode: "preview" | "convert") => string]> = {
+  outside_workspace: ["outside_workspace", 400, (m, mode) => (mode === "preview" ? m.render.outsidePreview : m.render.outsideConvert)],
+  outdir_outside_workspace: ["outside_workspace", 400, (m) => m.render.outdirOutside],
+  outdir_not_found: ["not_found", 404, (m) => m.render.outdirNotFound],
+  not_a_file: ["not_a_file", 400, (m) => m.notAFile],
+  too_large: ["too_large", 413, (m) => m.render.tooLarge],
+  empty_file: ["empty_file", 422, (m) => m.emptyFile],
+  unsupported: ["unsupported", 415, (m) => m.previewUnsupported],
+  missing_lo_run: ["missing_tool", 503, (m) => m.render.missingLoRun],
+  missing_soffice: ["missing_tool", 503, (m) => m.render.missingSoffice],
+  missing_pdftoppm: ["missing_tool", 503, (m) => m.render.missingPdftoppm],
+  bad_format: ["bad_request", 400, (m) => m.render.badFormat],
+  missing_path: ["bad_request", 400, (m) => m.render.missingPath],
+  missing_outdir: ["bad_request", 400, (m) => m.render.missingOutdir],
+  missing_cache_dir: ["bad_request", 400, (m) => m.render.missingCacheDir],
+  bad_max_pages: ["bad_request", 400, (m) => m.render.badMaxPages],
+  bad_cache_dir: ["bad_request", 400, (m) => m.render.badCacheDir],
+  would_overwrite: ["bad_request", 400, (m) => m.wouldOverwrite],
+  convert_failed: ["render_failed", 422, (m, mode) => (mode === "preview" ? m.render.previewConvertFailed : m.render.convertFailed)],
+  no_output: ["render_failed", 422, (m) => m.render.noOutput],
+  write_failed: ["render_failed", 422, (m) => m.render.writeFailed],
+  no_pdf: ["render_failed", 422, (m) => m.render.noPdf],
+  cache_write_failed: ["render_failed", 422, (m) => m.render.cacheWriteFailed],
+  cache_error: ["render_failed", 422, (m) => m.render.cacheError],
+  temp_error: ["render_failed", 422, (m) => m.render.tempError],
+  render_failed: ["render_failed", 422, (m) => m.render.renderFailed],
+  no_pages: ["render_failed", 422, (m) => m.render.noPages],
+};
+
+function mapRenderFailure(parsed: Record<string, unknown>, mode: "preview" | "convert"): DocumentError {
   const code = typeof parsed.code === "string" ? parsed.code : "render_failed";
-  const message = typeof parsed.message === "string" ? parsed.message : "预览失败";
-  switch (code) {
-    case "outside_workspace":
-      return new DocumentError("outside_workspace", message, 400);
-    case "not_found":
-      return new DocumentError("not_found", message, 404);
-    case "not_a_file":
-      return new DocumentError("not_a_file", message, 400);
-    case "too_large":
-      return new DocumentError("too_large", message, 413);
-    case "empty_file":
-      return new DocumentError("empty_file", message, 422);
-    case "unsupported":
-      return new DocumentError("unsupported", message, 415);
-    case "missing_tool":
-      return new DocumentError("missing_tool", message, 503);
-    case "bad_request":
-      return new DocumentError("bad_request", message, 400);
-    case "convert_failed":
-    case "render_failed":
-      return new DocumentError("render_failed", message, 422);
-    default:
-      return new DocumentError("render_failed", message, 422);
+  const fallback = typeof parsed.message === "string" ? parsed.message : t().documents.previewFailed;
+  const known = Object.hasOwn(RENDER_FAILURES, code) ? RENDER_FAILURES[code] : undefined;
+  if (!known) return new DocumentError("render_failed", fallback, 422);
+  const [errorCode, status, words] = known;
+  return new DocumentError(errorCode, words(t().documents, mode), status);
+}
+
+/** What provision.sh reports, by its code; the script's own message for an unknown one. */
+const INSTALL_MESSAGES: Record<string, (m: Words["install"], toolDir: string) => string> = {
+  already: (m) => m.alreadyReady,
+  cli_missing: (m) => m.cliMissing,
+  cli_dir: (m) => m.cliDir,
+  cli_copy_failed: (m) => m.cliCopyFailed,
+  cli_chmod_failed: (m) => m.cliChmodFailed,
+  bad_mode: (m) => m.badMode,
+  tool_dir: (m, toolDir) => m.toolDir(toolDir),
+  tool_dir_readonly: (m, toolDir) => m.toolDirReadonly(toolDir),
+  need_root: (m) => m.needRoot,
+  need_root_venv: (m) => m.needRootVenv,
+  venv_failed: (m) => m.venvFailed,
+  pip_failed: (m) => m.pipFailed,
+  verify_failed: (m) => m.verifyFailed,
+};
+
+function installMessage(parsed: Record<string, unknown> | null, toolDir: string): string | null {
+  const code = typeof parsed?.code === "string" ? parsed.code : "";
+  if (Object.hasOwn(INSTALL_MESSAGES, code)) return INSTALL_MESSAGES[code]!(t().documents.install, toolDir);
+  return typeof parsed?.message === "string" ? parsed.message : null;
+}
+
+/** What install-root.sh reports, by its code; the script's own message for an unknown one. */
+const ROOT_INSTALL_MESSAGES: Record<string, (m: Words["install"], path: string) => string> = {
+  missing_tool_dir: (m) => m.missingToolDir,
+  bad_tool_dir: (m) => m.badToolDir,
+  tool_dir_outside: (m) => m.toolDirOutside,
+  no_apt: (m) => m.noApt,
+  apt_update_failed: (m) => m.aptUpdateFailed,
+  apt_install_failed: (m) => m.aptInstallFailed,
+  no_user: (m) => m.noUser,
+  tool_dir_symlink: (m, path) => m.toolDirSymlink(path),
+  tool_dir: (m) => m.rootToolDir,
+  chown_failed: (m) => m.chownFailed,
+  chmod_failed: (m) => m.chmodFailed,
+};
+
+function rootInstallMessage(parsed: Record<string, unknown>): string | null {
+  const code = typeof parsed.code === "string" ? parsed.code : "";
+  if (Object.hasOwn(ROOT_INSTALL_MESSAGES, code)) {
+    return ROOT_INSTALL_MESSAGES[code]!(t().documents.install, typeof parsed.path === "string" ? parsed.path : "");
   }
+  return typeof parsed.message === "string" ? parsed.message : null;
 }
 
 export function formatBytes(bytes: number): string {
-  if (!Number.isFinite(bytes) || bytes < 0) return "未知大小";
+  if (!Number.isFinite(bytes) || bytes < 0) return t().documents.unknownSize;
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;

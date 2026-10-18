@@ -1,4 +1,5 @@
 import type { Logger } from "../../common/logger.js";
+import { t, type Messages } from "../i18n/index.js";
 
 /** What the client needs of the sandbox: requests to its web port (through its node). */
 export interface SandboxWeb {
@@ -37,7 +38,8 @@ export interface CapabilityInventory {
 export class AioClient {
   #sandbox: SandboxWeb;
   #log: Logger;
-  #cache: { at: number; inventory: CapabilityInventory } | null = null;
+  /** What the sandbox reported; grouped per call, so each reader gets their own language. */
+  #cache: { at: number; paths: Record<string, Record<string, { summary?: string }>>; version: string | null } | null = null;
 
   constructor(log: Logger, sandbox: SandboxWeb) {
     this.#sandbox = sandbox;
@@ -137,38 +139,36 @@ export class AioClient {
       });
       json = (await res.json().catch(() => null)) as { success?: boolean; message?: string; data?: unknown } | null;
     } catch (err) {
-      return { ok: false, message: `无法连接沙箱浏览器：${err instanceof Error ? err.message : String(err)}` };
+      return { ok: false, message: t().documents.aio.browserUnreachable(err instanceof Error ? err.message : String(err)) };
     }
     if (!res.ok) {
-      return { ok: false, message: json?.message ?? `沙箱返回 HTTP ${res.status}` };
+      return { ok: false, message: json?.message ?? t().documents.aio.sandboxHttp(res.status) };
     }
     if (!json || json.success === false) {
-      return { ok: false, message: json?.message ?? "沙箱未确认新标签页已创建" };
+      return { ok: false, message: json?.message ?? t().documents.aio.tabUnconfirmed };
     }
-    return { ok: true, message: json.message ?? "已打开", data: json.data ?? null };
+    return { ok: true, message: json.message ?? t().documents.aio.opened, data: json.data ?? null };
   }
 
   async buildInventory(force = false): Promise<CapabilityInventory> {
-    if (!force && this.#cache && Date.now() - this.#cache.at < 60_000) return this.#cache.inventory;
-
-    let paths: Record<string, Record<string, { summary?: string }>> = {};
-    let version: string | null = null;
-    try {
-      paths = await this.openApiPaths();
-      version = await this.version();
-    } catch (err) {
-      this.#log.warn("capability inventory unavailable", { error: String(err) });
+    if (force || !this.#cache || Date.now() - this.#cache.at >= 60_000) {
+      let paths: Record<string, Record<string, { summary?: string }>> = {};
+      let version: string | null = null;
+      try {
+        paths = await this.openApiPaths();
+        version = await this.version();
+      } catch (err) {
+        this.#log.warn("capability inventory unavailable", { error: String(err) });
+      }
+      this.#cache = { at: Date.now(), paths, version };
     }
-
-    const groups = groupEndpoints(paths);
-    const inventory: CapabilityInventory = {
-      generatedAt: Date.now(),
+    const { at, paths, version } = this.#cache;
+    return {
+      generatedAt: at,
       sandboxVersion: version,
-      groups,
+      groups: groupEndpoints(paths),
       openApiPathCount: Object.keys(paths).length || null,
     };
-    this.#cache = { at: Date.now(), inventory };
-    return inventory;
   }
 }
 
@@ -185,85 +185,73 @@ export interface BrowserTabResult {
  */
 export function parseHttpUrl(input: string): { ok: true; url: string } | { ok: false; message: string } {
   const value = input.trim();
-  if (!value) return { ok: false, message: "缺少链接地址" };
+  if (!value) return { ok: false, message: t().documents.aio.linkMissing };
   let parsed: URL;
   try {
     parsed = new URL(value);
   } catch {
-    return { ok: false, message: "链接地址无效" };
+    return { ok: false, message: t().documents.aio.linkInvalid };
   }
   if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-    return { ok: false, message: "只允许 http/https 链接" };
+    return { ok: false, message: t().documents.aio.linkHttpOnly };
   }
   if (parsed.username || parsed.password) {
-    return { ok: false, message: "链接不能包含用户名或密码" };
+    return { ok: false, message: t().documents.aio.linkCredentials };
   }
   return { ok: true, url: parsed.href };
 }
 
+type GroupId = keyof Messages["documents"]["aio"]["groups"];
+type SurfaceLabel = (m: Messages["documents"]["aio"]["surfaces"]) => string;
+
+/** Titles, descriptions and surface labels are looked up when an inventory is built, in its reader's language. */
 const GROUP_DEFS: Array<{
-  id: string;
-  title: string;
-  description: string;
+  id: Exclude<GroupId, "other">;
   match: (path: string) => boolean;
-  surfaces: Array<{ label: string; path: string; kind: "page" | "api" }>;
+  surfaces: Array<{ label: SurfaceLabel; path: string; kind: "page" | "api" }>;
 }> = [
   {
     id: "browser",
-    title: "浏览器与桌面",
-    description: "真实 Chromium 浏览器、CDP 调试与 VNC 桌面，可在手机上进行触摸操作。",
     match: (p) => p.startsWith("/v1/browser") || p.startsWith("/v1/display") || p === "/cdp" || p.startsWith("/json") || p.startsWith("/devtools"),
     surfaces: [
-      { label: "浏览器桌面（VNC）", path: "/vnc/vnc.html?autoconnect=1&resize=scale&path=ws", kind: "page" },
-      { label: "浏览器控制台", path: "/browser-ui", kind: "page" },
-      { label: "CDP 信息", path: "/cdp/json/version", kind: "api" },
+      { label: (m) => m.vnc, path: "/vnc/vnc.html?autoconnect=1&resize=scale&path=ws", kind: "page" },
+      { label: (m) => m.browserUi, path: "/browser-ui", kind: "page" },
+      { label: (m) => m.cdp, path: "/cdp/json/version", kind: "api" },
     ],
   },
   {
     id: "terminal",
-    title: "终端与 Shell",
-    description: "交互式终端会话、后台进程、等待与写入。",
     match: (p) => p.startsWith("/v1/shell") || p.startsWith("/v1/bash"),
     surfaces: [
-      { label: "交互终端", path: "/terminal", kind: "page" },
-      { label: "Shell WebSocket", path: "/v1/shell/ws", kind: "api" },
+      { label: (m) => m.terminal, path: "/terminal", kind: "page" },
+      { label: () => "Shell WebSocket", path: "/v1/shell/ws", kind: "api" },
     ],
   },
   {
     id: "files",
-    title: "文件管理",
-    description: "在沙箱内任意路径浏览、读写、搜索、上传与下载文件。",
     match: (p) => p.startsWith("/v1/file"),
     surfaces: [],
   },
   {
     id: "editor",
-    title: "代码编辑器",
-    description: "code-server（VS Code Web），可直接编辑沙箱内项目。",
     match: (p) => p.startsWith("/code-server"),
-    surfaces: [{ label: "code-server", path: "/code-server/", kind: "page" }],
+    surfaces: [{ label: () => "code-server", path: "/code-server/", kind: "page" }],
   },
   {
     id: "notebook",
-    title: "Jupyter 笔记本",
-    description: "JupyterLab 与多内核代码执行（Python 3.10/3.11/3.12）。",
     match: (p) => p.startsWith("/v1/jupyter") || p.startsWith("/v1/code") || p.startsWith("/v1/nodejs"),
     surfaces: [
-      { label: "JupyterLab", path: "/jupyter/lab", kind: "page" },
-      { label: "内核信息", path: "/v1/jupyter/info", kind: "api" },
+      { label: () => "JupyterLab", path: "/jupyter/lab", kind: "page" },
+      { label: (m) => m.kernel, path: "/v1/jupyter/info", kind: "api" },
     ],
   },
   {
     id: "mcp",
-    title: "MCP 与技能",
-    description: "MCP 服务器与工具调用、技能注册与读取。",
     match: (p) => p.startsWith("/v1/mcp") || p.startsWith("/v1/skills"),
-    surfaces: [{ label: "MCP 端点", path: "/mcp", kind: "api" }],
+    surfaces: [{ label: (m) => m.mcp, path: "/mcp", kind: "api" }],
   },
   {
     id: "sandbox",
-    title: "沙箱与预览",
-    description: "环境信息、包列表、端口映射、代理与页面预览。",
     match: (p) => p.startsWith("/v1/sandbox") || p.startsWith("/v1/proxy") || p.startsWith("/v1/util"),
     surfaces: [],
   },
@@ -277,13 +265,14 @@ export function groupEndpoints(paths: Record<string, Record<string, { summary?: 
       all.push({ method: method.toUpperCase(), path, summary: op?.summary ?? "", group });
     }
   }
+  const words = t().documents.aio;
   const groups: CapabilityGroup[] = GROUP_DEFS.map((def) => {
     const endpoints = all.filter((e) => e.group === def.id).map(({ method, path, summary }) => ({ method, path, summary }));
     return {
       id: def.id,
-      title: def.title,
-      description: def.description,
-      surfaces: def.surfaces,
+      title: words.groups[def.id].title,
+      description: words.groups[def.id].description,
+      surfaces: def.surfaces.map(({ label, path, kind }) => ({ label: label(words.surfaces), path, kind })),
       endpoints,
       available: endpoints.length > 0 ? true : null,
     };
@@ -292,8 +281,8 @@ export function groupEndpoints(paths: Record<string, Record<string, { summary?: 
   if (other.length) {
     groups.push({
       id: "other",
-      title: "其他接口",
-      description: "沙箱提供的其余 REST 接口。",
+      title: words.groups.other.title,
+      description: words.groups.other.description,
       surfaces: [],
       endpoints: other.map(({ method, path, summary }) => ({ method, path, summary })),
       available: true,

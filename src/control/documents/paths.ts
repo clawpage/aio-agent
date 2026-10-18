@@ -13,6 +13,8 @@
  * rejected even though the lexical path looked valid.
  */
 
+import { t } from "../i18n/index.js";
+
 export type DocumentKind = "image" | "video" | "audio" | "pdf" | "word" | "excel" | "ppt" | "text" | "unsupported";
 
 /**
@@ -155,13 +157,13 @@ export function requireWorkspaceFilePath(
   workspaceRoot: string,
 ): { ok: true; path: string } | { ok: false; message: string } {
   const value = typeof input === "string" ? input : "";
-  if (!value) return { ok: false, message: "缺少路径" };
-  if (value.length > 4096) return { ok: false, message: "路径过长" };
-  if (!value.startsWith("/")) return { ok: false, message: "路径必须是沙箱内的绝对路径" };
-  if (value.startsWith("//")) return { ok: false, message: "路径格式非法" };
+  if (!value) return { ok: false, message: t().documents.path.missing };
+  if (value.length > 4096) return { ok: false, message: t().documents.path.tooLong };
+  if (!value.startsWith("/")) return { ok: false, message: t().documents.path.notAbsolute };
+  if (value.startsWith("//")) return { ok: false, message: t().documents.path.malformed };
   // eslint-disable-next-line no-control-regex
-  if (/[\u0000-\u001f\u007f]/.test(value)) return { ok: false, message: "路径包含非法控制字符" };
-  if (value.includes("\\")) return { ok: false, message: "路径不能包含反斜杠" };
+  if (/[\u0000-\u001f\u007f]/.test(value)) return { ok: false, message: t().documents.path.controlChars };
+  if (value.includes("\\")) return { ok: false, message: t().documents.path.backslash };
 
   const root = workspaceRoot.replace(/\/+$/, "");
   const parts: string[] = [];
@@ -171,14 +173,14 @@ export function requireWorkspaceFilePath(
       parts.pop();
       continue;
     }
-    if (segment.startsWith("-")) return { ok: false, message: "路径片段不能以 - 开头" };
+    if (segment.startsWith("-")) return { ok: false, message: t().documents.path.dashSegment };
     parts.push(segment);
   }
   const normalized = `/${parts.join("/")}`;
   if (normalized !== root && !normalized.startsWith(`${root}/`)) {
-    return { ok: false, message: "只允许访问沙箱工作区内的文件" };
+    return { ok: false, message: t().documents.path.outsideWorkspace };
   }
-  if (normalized === root) return { ok: false, message: "需要一个文件路径，而不是工作区根目录" };
+  if (normalized === root) return { ok: false, message: t().documents.path.workspaceRoot };
   return { ok: true, path: normalized };
 }
 

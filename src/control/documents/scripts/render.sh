@@ -46,7 +46,8 @@ DEFAULT_RENDER_TIMEOUT=180
 MAX_TIMEOUT=600
 
 fail() {
-  # $1 = machine code, $2 = human message (Chinese, shown to the user)
+  # $1 = machine code, $2 = English message. The control plane shows people
+  # its own words for every known code; the message is the fallback.
   json_fail "$1" "$2"
   exit 0
 }
@@ -119,10 +120,10 @@ require_size_ok() {
   size=$(stat -c %s -- "$target" 2>/dev/null || echo 0)
   case "$size" in ''|*[!0-9]*) size=0 ;; esac
   if [ "$size" -gt "$MAX_SOURCE_BYTES" ]; then
-    fail "too_large" "文件超过 100MB，无法在线处理，请下载后处理"
+    fail "too_large" "The file is larger than 100MB and cannot be processed online; download it instead"
   fi
   if [ "$size" -eq 0 ]; then
-    fail "empty_file" "文件是空的（0 字节）"
+    fail "empty_file" "The file is empty (0 bytes)"
   fi
 }
 
@@ -171,26 +172,26 @@ if [ "${1:-}" = "--convert" ]; then
 
   case "$CONVERT_FORMAT" in
     pdf|docx|xlsx|pptx|csv|txt|odt|ods|odp|html) : ;;
-    *) fail "bad_request" "不支持的目标格式" ;;
+    *) fail "bad_format" "Unsupported target format" ;;
   esac
-  [ -n "$CONVERT_INPUT" ] || fail "bad_request" "缺少文件路径"
-  [ -n "$CONVERT_OUTDIR" ] || fail "bad_request" "缺少输出目录"
+  [ -n "$CONVERT_INPUT" ] || fail "missing_path" "Missing file path"
+  [ -n "$CONVERT_OUTDIR" ] || fail "missing_outdir" "Missing output directory"
 
-  CONVERT_REAL=$(resolve_in_workspace "$CONVERT_INPUT") || fail "outside_workspace" "只允许转换工作区内的文件（或该路径指向工作区之外）"
-  [ -f "$CONVERT_REAL" ] || fail "not_a_file" "该路径不是普通文件"
+  CONVERT_REAL=$(resolve_in_workspace "$CONVERT_INPUT") || fail "outside_workspace" "Only files inside the workspace can be converted (or the path points outside it)"
+  [ -f "$CONVERT_REAL" ] || fail "not_a_file" "The path is not a regular file"
   require_size_ok "$CONVERT_REAL"
 
-  OUTDIR_REAL=$(resolve_in_workspace "$CONVERT_OUTDIR") || fail "outside_workspace" "输出目录必须在工作区内"
-  [ -d "$OUTDIR_REAL" ] || fail "not_found" "输出目录不存在"
+  OUTDIR_REAL=$(resolve_in_workspace "$CONVERT_OUTDIR") || fail "outdir_outside_workspace" "The output directory must be inside the workspace"
+  [ -d "$OUTDIR_REAL" ] || fail "outdir_not_found" "The output directory does not exist"
 
-  [ -x "$LO_RUN" ] || fail "missing_tool" "沙箱缺少 LibreOffice 运行脚本"
-  command -v soffice >/dev/null 2>&1 || fail "missing_tool" "沙箱缺少 LibreOffice"
+  [ -x "$LO_RUN" ] || fail "missing_lo_run" "The sandbox is missing the LibreOffice run script"
+  command -v soffice >/dev/null 2>&1 || fail "missing_soffice" "The sandbox is missing LibreOffice"
 
   STEM=$(basename -- "${CONVERT_REAL%.*}")
   TARGET_NAME="$STEM.$CONVERT_FORMAT"
   if [ "$CONVERT_REAL" = "$OUTDIR_REAL/$TARGET_NAME" ]; then
     # A same-format conversion would rewrite the user's own file in place.
-    fail "bad_request" "转换结果会覆盖原文件，请换一个目标格式"
+    fail "would_overwrite" "The result would overwrite the original file; choose another target format"
   fi
 
   # LibreOffice writes into a throwaway directory first. Writing straight into
@@ -198,13 +199,13 @@ if [ "${1:-}" = "--convert" ]; then
   # file of the same name, and a failed conversion that left an *old* file behind
   # was then reported as a success. A fresh temp directory makes "did this run
   # produce anything?" a real question.
-  CONVERT_TMP=$(mktemp -d /tmp/aio-lo-convert-XXXXXX 2>/dev/null) || fail "temp_error" "无法创建临时目录"
+  CONVERT_TMP=$(mktemp -d /tmp/aio-lo-convert-XXXXXX 2>/dev/null) || fail "temp_error" "Could not create a temporary directory"
   # The inner cap is the configured budget; the outer `timeout` is only a
   # backstop in case soffice ignores its own deadline, so it is deliberately
   # larger. Nothing here kills anything but this conversion's own children.
   if ! timeout "$((CONVERT_TIMEOUT + 15))" "$LO_RUN" convert "$CONVERT_REAL" "$CONVERT_FORMAT" "$CONVERT_TMP" "$CONVERT_TIMEOUT" >/dev/null 2>&1; then
     rm -rf -- "$CONVERT_TMP" 2>/dev/null || true
-    fail "convert_failed" "转换失败：文件可能已损坏，或不支持该目标格式"
+    fail "convert_failed" "Conversion failed: the file may be damaged, or the target format is not supported"
   fi
   PRODUCED="$CONVERT_TMP/$TARGET_NAME"
   if [ ! -s "$PRODUCED" ]; then
@@ -217,7 +218,7 @@ if [ "${1:-}" = "--convert" ]; then
   fi
   if [ ! -s "$PRODUCED" ]; then
     rm -rf -- "$CONVERT_TMP" 2>/dev/null || true
-    fail "convert_failed" "LibreOffice 未生成预期的输出文件"
+    fail "no_output" "LibreOffice did not produce the expected output file"
   fi
 
   # Publish without ever overwriting. The destination is created exclusively
@@ -226,7 +227,7 @@ if [ "${1:-}" = "--convert" ]; then
   # plain `cp` into the same file, which was observed to fail under concurrency.
   if ! FINAL=$(publish_exclusive "$PRODUCED" "$OUTDIR_REAL" "$STEM" "$CONVERT_FORMAT"); then
     rm -rf -- "$CONVERT_TMP" 2>/dev/null || true
-    fail "convert_failed" "无法写入转换结果"
+    fail "write_failed" "Could not write the conversion result"
   fi
   rm -rf -- "$CONVERT_TMP" 2>/dev/null || true
 
@@ -246,16 +247,16 @@ case "$CONVERT_TIMEOUT" in ''|*[!0-9]*) CONVERT_TIMEOUT="$DEFAULT_CONVERT_TIMEOU
 [ "$CONVERT_TIMEOUT" -le "$MAX_TIMEOUT" ] || CONVERT_TIMEOUT="$MAX_TIMEOUT"
 RENDER_TIMEOUT="$CONVERT_TIMEOUT"
 
-[ -n "$INPUT" ] || fail "bad_request" "缺少文件路径"
-[ -n "$CACHE_DIR" ] || fail "bad_request" "缺少缓存目录"
+[ -n "$INPUT" ] || fail "missing_path" "Missing file path"
+[ -n "$CACHE_DIR" ] || fail "missing_cache_dir" "Missing cache directory"
 case "$MAX_PAGES" in
-  ''|*[!0-9]*) fail "bad_request" "页数上限非法" ;;
+  ''|*[!0-9]*) fail "bad_max_pages" "Invalid page limit" ;;
 esac
-[ "$MAX_PAGES" -ge 1 ] || fail "bad_request" "页数上限非法"
+[ "$MAX_PAGES" -ge 1 ] || fail "bad_max_pages" "Invalid page limit"
 [ "$MAX_PAGES" -le "$MAX_RENDER_PAGES" ] || MAX_PAGES="$MAX_RENDER_PAGES"
 
-REAL=$(resolve_in_workspace "$INPUT") || fail "outside_workspace" "只允许预览工作区内的文件（或该路径指向工作区之外）"
-[ -f "$REAL" ] || fail "not_a_file" "该路径不是普通文件"
+REAL=$(resolve_in_workspace "$INPUT") || fail "outside_workspace" "Only files inside the workspace can be previewed (or the path points outside it)"
+[ -f "$REAL" ] || fail "not_a_file" "The path is not a regular file"
 require_size_ok "$REAL"
 
 # The cache directory must be a dedicated subdirectory of the managed cache
@@ -264,12 +265,12 @@ require_size_ok "$REAL"
 # itself: only a per-run directory is ever cleared.
 case "$CACHE_DIR" in
   "$CACHE_ROOT"/*) : ;;
-  *) fail "bad_request" "缓存目录必须是受管缓存根目录下的子目录" ;;
+  *) fail "bad_cache_dir" "The cache directory must be a subdirectory of the managed cache root" ;;
 esac
 case "$CACHE_DIR" in
-  *..*) fail "bad_request" "缓存目录不能包含 .." ;;
+  *..*) fail "bad_cache_dir" "The cache directory must not contain .." ;;
 esac
-mkdir -p -- "$CACHE_DIR" || fail "cache_error" "无法创建缓存目录"
+mkdir -p -- "$CACHE_DIR" || fail "cache_error" "Could not create the cache directory"
 rm -f -- "$CACHE_DIR"/page-*.png 2>/dev/null || true
 rm -f -- "$CACHE_DIR"/source.pdf 2>/dev/null || true
 
@@ -283,11 +284,11 @@ case "$EXT" in
     PDF_PATH="$REAL"
     ;;
   doc|docx|odt|rtf|xls|xlsx|ods|ppt|pptx|odp)
-    [ -x "$LO_RUN" ] || fail "missing_tool" "沙箱缺少 LibreOffice 运行脚本"
-    TMP_OUT=$(mktemp -d /tmp/aio-lo-out-XXXXXX 2>/dev/null) || fail "temp_error" "无法创建临时目录"
+    [ -x "$LO_RUN" ] || fail "missing_lo_run" "The sandbox is missing the LibreOffice run script"
+    TMP_OUT=$(mktemp -d /tmp/aio-lo-out-XXXXXX 2>/dev/null) || fail "temp_error" "Could not create a temporary directory"
     if ! timeout "$((CONVERT_TIMEOUT + 15))" "$LO_RUN" convert "$REAL" pdf "$TMP_OUT" "$CONVERT_TIMEOUT" >/dev/null 2>&1; then
       rm -rf -- "$TMP_OUT" 2>/dev/null || true
-      fail "convert_failed" "转换失败：文件可能已损坏，或包含当前工具不支持的复杂特性"
+      fail "convert_failed" "Conversion failed: the file may be damaged, or use features the current tools do not support"
     fi
     CANDIDATE="$TMP_OUT/${BASE%.*}.pdf"
     if [ ! -s "$CANDIDATE" ]; then
@@ -295,17 +296,17 @@ case "$EXT" in
     fi
     if [ -z "$CANDIDATE" ] || [ ! -s "$CANDIDATE" ]; then
       rm -rf -- "$TMP_OUT" 2>/dev/null || true
-      fail "convert_failed" "转换失败：没有生成 PDF 中间文件"
+      fail "no_pdf" "Conversion failed: no intermediate PDF was produced"
     fi
     PDF_PATH="$CACHE_DIR/source.pdf"
     if ! cp -- "$CANDIDATE" "$PDF_PATH" 2>/dev/null; then
       rm -rf -- "$TMP_OUT" 2>/dev/null || true
-      fail "convert_failed" "转换结果无法写入缓存目录"
+      fail "cache_write_failed" "The conversion result could not be written to the cache directory"
     fi
     rm -rf -- "$TMP_OUT" 2>/dev/null || true
     ;;
   *)
-    fail "unsupported" "该格式暂不支持在线预览，请直接下载"
+    fail "unsupported" "This format cannot be previewed online yet; download it instead"
     ;;
 esac
 
@@ -315,13 +316,13 @@ if command -v pdfinfo >/dev/null 2>&1; then
 fi
 case "$TOTAL_PAGES" in ''|*[!0-9]*) TOTAL_PAGES="" ;; esac
 
-command -v pdftoppm >/dev/null 2>&1 || fail "missing_tool" "沙箱缺少 poppler-utils（pdftoppm），无法生成预览"
+command -v pdftoppm >/dev/null 2>&1 || fail "missing_pdftoppm" "The sandbox is missing poppler-utils (pdftoppm), so no preview can be made"
 
 # -scale-to caps the longest side in pixels, so a huge page cannot allocate an
 # unbounded bitmap. No `--` separator: every path is absolute and validated.
 if ! timeout "$RENDER_TIMEOUT" pdftoppm -png -scale-to "$MAX_PAGE_PIXELS" -f 1 -l "$MAX_PAGES" \
     "$PDF_PATH" "$CACHE_DIR/page" >/dev/null 2>&1; then
-  fail "render_failed" "生成预览图片失败"
+  fail "render_failed" "Could not generate the preview images"
 fi
 
 # Each entry is three shell words: index, path, bytes. json_emit turns them into
@@ -344,7 +345,7 @@ for f in "$CACHE_DIR"/page-*.png; do
 done
 
 if [ "$COUNT" -eq 0 ]; then
-  fail "render_failed" "没有生成任何有效预览页（文件可能是空的或已损坏）"
+  fail "no_pages" "No valid preview page was produced (the file may be empty or damaged)"
 fi
 
 TRUNCATED="false"
