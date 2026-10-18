@@ -19,6 +19,7 @@ import { readSecretFile } from "../../common/secrets.js";
 import fs from "node:fs";
 import { readFirmware } from "../gadgetFirmware.js";
 import { Dictation, DictationError, DICTATION_MAX_CHARS } from "../dictation.js";
+import { VoiceLog, type VoiceRecord } from "../voiceLog.js";
 import type { AppContext } from "../context.js";
 import {
   InvalidConversationTitleError,
@@ -555,6 +556,7 @@ export function createApiRouter(context: AppContext): Router {
    * console offers the microphone only in the languages listed here.
    */
   const dictation = new Dictation(cfg, log);
+  const voiceLog = new VoiceLog(cfg.voiceLog.dir, cfg.voiceLog.users, cfg.voiceLog.days, log);
   // The accounts the knowledge base is offered to (KbGateway): only their transcripts get its names.
   const kbReader = (user: { username: string; role: string } | null | undefined) =>
     Boolean(user && (user.role === "owner" || cfg.kbMcp.members.includes(user.username)));
@@ -567,19 +569,27 @@ export function createApiRouter(context: AppContext): Router {
     if (audio.byteLength < 44 || audio.toString("ascii", 0, 4) !== "RIFF") { res.status(400).json({ error: "bad_audio", message: "录音格式不对" }); return; }
     // The speech server takes about a minute of 16 kHz audio.
     if (audio.byteLength > 2 * 1024 * 1024) { res.status(413).json({ error: "too_long", message: "录音太长，每段请在一分钟内" }); return; }
+    const user = getUser(db, ctxOf(req).session!.ownerId);
+    const record: Omit<VoiceRecord, "audio"> = { user: user?.username ?? "?", platform: req.get("x-client-platform") ?? null, asr: null, polish: null, error: null };
     try {
+      let started = Date.now();
       const upstream = await fetch(cfg.asrUrl, { method: "POST", headers: { "content-type": "audio/wav" }, body: new Uint8Array(audio), signal: AbortSignal.timeout(30_000) });
       if (!upstream.ok) throw new Error(`upstream ${upstream.status}`);
-      const json = (await upstream.json()) as { text?: unknown };
+      const json = (await upstream.json()) as { text?: unknown; raw?: unknown; model?: unknown };
       const heard = typeof json.text === "string" ? json.text.trim() : "";
-      const out = heard ? await dictation.polish(heard, { names: kbReader(getUser(db, ctxOf(req).session!.ownerId)) }) : { text: "", polished: false };
+      record.asr = { url: cfg.asrUrl, model: typeof json.model === "string" ? json.model : null, ms: Date.now() - started, text: heard, raw: typeof json.raw === "string" ? json.raw : null };
+      started = Date.now();
+      const out = heard ? await dictation.polish(heard, { names: kbReader(user) }) : { text: "", polished: false };
+      if (heard) record.polish = { model: cfg.polishModel, effort: cfg.polishEffort, ms: Date.now() - started, ...out };
       res.json(out);
       track(req, "voice_input", { ok: true, seconds: Math.round((audio.byteLength - 44) / 32000) });
     } catch (err) {
+      record.error = err instanceof Error ? err.message : String(err);
       track(req, "voice_input", { ok: false });
-      log.warn("asr failed", { error: err instanceof Error ? err.message : String(err) });
+      log.warn("asr failed", { error: record.error });
       res.status(502).json({ error: "asr_unavailable", message: "语音识别暂时不可用，请稍后再试" });
     }
+    voiceLog.record({ ...record, audio });
   }));
 
   /** Phone notifications (Web Push): the key to subscribe with, and this account's devices. */

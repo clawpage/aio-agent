@@ -129,3 +129,27 @@ it("polishes what was heard with the dictation model, and falls back to it as he
     kbDown.close();
   }
 });
+
+it("keeps the listed accounts' recordings with what was heard, for re-running the recognizer later", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "voice-log-"));
+  const logging = await startHarness({}, { configure: cfg => { cfg.asrUrl = h.ctx.cfg.asrUrl; cfg.voiceLog = { dir, users: ["owner"], days: 30 }; } });
+  try {
+    answer = { status: 200, text: "打开走廊灯。" };
+    await post(logging, { audioBase64: recording.toString("base64") });
+    answer = { status: 500, text: "" };
+    expect((await post(logging, { audioBase64: recording.toString("base64") })).status).toBe(502);
+    const [day] = fs.readdirSync(dir);
+    const files = fs.readdirSync(path.join(dir, day!)).sort();
+    expect(files.filter(f => f.endsWith(".wav"))).toHaveLength(2);
+    const metas = files.filter(f => f.endsWith(".json")).map(f => JSON.parse(fs.readFileSync(path.join(dir, day!, f), "utf8")));
+    const heard = metas.find(m => m.asr)!;
+    expect(heard).toMatchObject({ user: "owner", seconds: 0.1, asr: { url: h.ctx.cfg.asrUrl, text: "打开走廊灯。", raw: "打开走廊灯。" }, polish: { polished: false, text: "打开走廊灯。" }, error: null });
+    expect(fs.readFileSync(path.join(dir, heard.id.split("/")[0], `${heard.id.split("/")[1]}.wav`)).equals(recording)).toBe(true);
+    expect(metas.find(m => !m.asr)).toMatchObject({ user: "owner", error: "upstream 500" });
+    expect(fs.statSync(path.join(dir, day!, files[0]!)).mode & 0o777).toBe(0o600);
+  } finally {
+    await logging.shutdown();
+  }
+  // Not listed: nothing kept (the default harness logs no one).
+  expect(fs.existsSync(h.ctx.cfg.voiceLog.dir)).toBe(false);
+});

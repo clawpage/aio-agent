@@ -481,7 +481,11 @@ iOS App 需为声明了存入相册权限、带 `aioSaveFiles` 标记的新版�
   现有部署复用语音配件的识别服务：`PA_ASR_URL=http://192.168.1.118:4910/asr?punct=1`（old-mb）。
 - **链路**：浏览器取麦克风原始采样，降到 16 kHz 编为 WAV，经 `POST /api/asr`（JSON `{audioBase64}`，带 CSRF）交给控制面转发；
   识别出的文字再经与语音键盘同一套润色（`PA_DICTATION_MODEL`，owner 的 Claude 凭据，见「语音配件」）后返回 `{text, polished}`，
-  润色失败或未配置 Claude 凭据时返回原文（`polished:false`）。录音不落盘、不进沙箱。超过 2 MB 返回 413，非 WAV 返回 400，识别服务出错或 30 秒无应答返回 502。
+  润色失败或未配置 Claude 凭据时返回原文（`polished:false`）。录音不进沙箱；默认不落盘。
+- **回测日志**：`PA_VOICE_LOG_USERS` 列出的账号（`*` 为全部）每次语音输入在控制面数据目录 `voice-log/<日期>/` 留下录音 WAV 和同名 JSON
+  （识别服务地址与其报告的模型、识别原文 `text`/`raw`、润色模型/effort/结果、各段耗时、错误），文件 0600，超过 `PA_VOICE_LOG_DAYS` 天（默认 30）的日期目录在新的一天第一次写入时删除。
+  `node bin/voice-replay.mjs`（compose：`docker exec aio-control-1 node bin/voice-replay.mjs`）把这些录音重新送去识别：`--asr <地址>` 可给多个做对比，
+  `--since/--until/--user/--limit` 筛选，`--polish` 同时跑润色，`--out` 写 JSON 报告；在某条 JSON 里加 `"expected": "<正确文字>"` 后，报告给出该条与总体的字错率（CER，忽略大小写、标点和空格）。超过 2 MB 返回 413，非 WAV 返回 400，识别服务出错或 30 秒无应答返回 502。
 - **权限**：浏览器首次询问麦克风权限；App 声明了 iOS `NSMicrophoneUsageDescription` 与 Android `RECORD_AUDIO`。
 
 ## 11. 语音配件

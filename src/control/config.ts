@@ -94,6 +94,8 @@ export function loadConfig(): {
   polishModel: string;
   /** The polisher's effort (`output_config.effort`); empty: the model's default. */
   polishEffort: string;
+  /** Voice inputs kept for re-running the recognizer (src/control/voiceLog.ts): these usernames, `*` for all; empty: none. */
+  voiceLog: { dir: string; users: string[]; days: number };
   /** Google Maps Platform key (Maps Static + Geocoding) for map cards; empty: OpenStreetMap. */
   googleMapsKey: string;
   logDir: string;
@@ -444,6 +446,11 @@ export function loadConfig(): {
     asrUrl: envStr("PA_ASR_URL", ""),
     polishModel: envStr("PA_DICTATION_MODEL", "claude-sonnet-5-5"),
     polishEffort: envStr("PA_DICTATION_EFFORT", "low"),
+    voiceLog: {
+      dir: envStr("PA_VOICE_LOG_DIR", path.join(dataDir, "voice-log")),
+      users: parseList(envStr("PA_VOICE_LOG_USERS", "")),
+      days: Math.max(1, Number(envStr("PA_VOICE_LOG_DAYS", "30")) || 30),
+    },
     googleMapsKey: (() => {
       if (envStr("PA_GOOGLE_MAPS_API_KEY").trim()) return envStr("PA_GOOGLE_MAPS_API_KEY").trim();
       // No file (or compose's /dev/null placeholder) leaves the maps on OpenStreetMap.
