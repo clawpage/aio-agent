@@ -56,13 +56,17 @@ const DATA_HEADERS = {
   "access-control-max-age": "600",
 };
 
-/** No script on the page shares the workspace origin; it still runs, opens links and submits forms. */
+/**
+ * No script on the page shares the workspace origin; it still runs, opens links and submits forms.
+ * Every load asks whether a file changed (no-cache, answered by its ETag with a 304 when it did not),
+ * so a page republished under the same link shows its new version at once, never a copy kept for a while.
+ */
 const PAGE_HEADERS = {
   "content-security-policy": "sandbox allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-modals allow-downloads",
   "x-content-type-options": "nosniff",
   "referrer-policy": "no-referrer",
   "x-robots-tag": "noindex",
-  "cache-control": "public, max-age=60",
+  "cache-control": "no-cache",
 };
 
 export class ShareError extends Error {
@@ -455,8 +459,17 @@ export class ShareStore {
         return notFound();
       }
       if (!stat.isFile() || !file.startsWith(pageDir + path.sep)) return notFound();
+      // Publishing writes every file anew, so a file's size and time name its version.
+      const etag = `"${stat.size.toString(36)}-${Math.floor(stat.mtimeMs).toString(36)}"`;
+      const known = String(req.headers["if-none-match"] ?? "").split(",").map((t) => t.trim().replace(/^W\//, ""));
+      if (known.includes(etag)) {
+        res.status(304).set({ ...PAGE_HEADERS, etag }).end();
+        return;
+      }
       res.status(200).set({
         ...PAGE_HEADERS,
+        etag,
+        "last-modified": stat.mtime.toUTCString(),
         "content-type": TYPES[path.extname(file).toLowerCase()] ?? "application/octet-stream",
         "content-length": String(stat.size),
       });

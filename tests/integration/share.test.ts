@@ -99,9 +99,23 @@ it("publishes a page from the sandbox channel and serves it publicly, sandboxed,
     ]) expect((await h.request(probe, { host: "workspace" })).status, probe).toBe(404);
     expect(await (await h.request("/u/owner/share/trip/", { host: "primary" })).text()).not.toContain('document.title="ok"');
 
-    // Republishing replaces the page as a whole under the same address.
+    // Every load asks whether the file changed: an unchanged one answers 304 (still sandboxed), never a stale copy.
+    expect(html.headers.get("cache-control")).toBe("no-cache");
+    const etag = html.headers.get("etag")!;
+    expect(etag).toMatch(/^"[0-9a-z]+-[0-9a-z]+"$/);
+    expect(html.headers.get("last-modified")).toBeTruthy();
+    const unchanged = await h.request("/u/owner/share/trip/", { host: "workspace", headers: { "if-none-match": `W/${etag}` } });
+    expect(unchanged.status).toBe(304);
+    expect(unchanged.headers.get("content-security-policy")).toMatch(/^sandbox /);
+    expect(await unchanged.text()).toBe("");
+
+    // Republishing replaces the page as a whole under the same address, and the copy a browser kept is out of date at once.
+    await new Promise((r) => setTimeout(r, 5));
     expect((await publish([{ path: "index.html", data: b64("<p>v2</p>") }])).status).toBe(200);
-    expect(await (await h.request("/u/owner/share/trip/", { host: "workspace" })).text()).toBe("<p>v2</p>");
+    const fresh = await h.request("/u/owner/share/trip/", { host: "workspace", headers: { "if-none-match": etag } });
+    expect(fresh.status).toBe(200);
+    expect(fresh.headers.get("etag")).not.toBe(etag);
+    expect(await fresh.text()).toBe("<p>v2</p>");
     expect((await h.request("/u/owner/share/trip/img/a.png", { host: "workspace" })).status).toBe(404);
 
     // A member publishes under its own address with its own token.

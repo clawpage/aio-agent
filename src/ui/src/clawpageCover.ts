@@ -6,10 +6,12 @@ import { api, API_CREDENTIALS } from "./api";
  * fetched with the console's credentials and kept as object URLs: the list, the
  * sheet and every card in the conversation share one copy. A cover named with its
  * version is fetched once; one asked for without (a card that only has the link)
- * is the latest, and a page without a cover is not asked about again for a while.
+ * is the latest, asked again after a minute so a page just republished shows its
+ * new cover; a page without a cover is likewise asked about again after a minute.
  */
 const covers = new Map<string, { promise: Promise<string | null>; at: number }>();
-const MISSING_RETRY_MS = 60_000;
+/** How long a miss, or the latest cover of a page named without a version, is taken as it is. */
+const RECHECK_MS = 60_000;
 
 function load(page: string, version: number | null): Promise<string | null> {
   const key = `${page}@${version ?? "latest"}`;
@@ -22,8 +24,8 @@ function load(page: string, version: number | null): Promise<string | null> {
     })
     .catch(() => null)
     .then((url) => {
-      // A miss is asked again later: the cover may be rendering right now.
-      if (!url) setTimeout(() => { if (covers.get(key)?.promise === promise) covers.delete(key); }, MISSING_RETRY_MS);
+      // A miss is asked again later (the cover may be rendering right now), and so is a latest cover (it may be replaced).
+      if (!url || version === null) setTimeout(() => { if (covers.get(key)?.promise === promise) covers.delete(key); }, RECHECK_MS);
       return url;
     });
   covers.set(key, { promise, at: Date.now() });
