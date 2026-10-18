@@ -74,13 +74,13 @@ describe("password vault", () => {
     vault.update(entry.id, { password: SECRET, site: "gitlab.com" });
     expect(vault.secret(entry.id)).toBe(SECRET);
     expect(vault.get(entry.id)?.site).toBe("gitlab.com");
-    expect(() => vault.create({ site: "no spaces allowed", username: "u", password: "p" })).toThrow("网站");
-    expect(() => vault.create({ site: "a.com", username: "u", password: "" })).toThrow("密码");
-    expect(() => vault.update(entry.id, { password: "x".repeat(1001) })).toThrow("密码");
+    expect(() => vault.create({ site: "no spaces allowed", username: "u", password: "p" })).toThrow("github.com");
+    expect(() => vault.create({ site: "a.com", username: "u", password: "" })).toThrow("password");
+    expect(() => vault.update(entry.id, { password: "x".repeat(1001) })).toThrow("password");
     expect(vault.remove(entry.id)).toBe(true);
     expect(vault.list()).toEqual([]);
     for (let i = 0; i < VAULT_MAX_ENTRIES; i += 1) vault.create({ site: `s${i}.example.com`, username: "u", password: "p" });
-    expect(() => vault.create({ site: "one-too-many.com", username: "u", password: "p" })).toThrow("最多");
+    expect(() => vault.create({ site: "one-too-many.com", username: "u", password: "p" })).toThrow("at most");
   });
 });
 
@@ -232,12 +232,12 @@ describe("signing in with Google", () => {
     expect(vault.secret(entry.id)).toBeNull();
     expect((db.prepare("SELECT secret FROM vault_entries").get() as { secret: string }).secret).toBe("");
     expect(vault.update(entry.id, { username: "max@gmail.com" })).toMatchObject({ method: "google", username: "max@gmail.com" });
-    expect(() => vault.update(entry.id, { method: "password" })).toThrow("密码");
+    expect(() => vault.update(entry.id, { method: "password" })).toThrow("needs a password");
     vault.update(entry.id, { method: "password", password: SECRET });
     expect(vault.secret(entry.id)).toBe(SECRET);
     vault.update(entry.id, { method: "google" });
     expect(vault.secret(entry.id)).toBeNull();
-    expect(() => vault.create({ site: "x.com", method: "facebook", username: "" })).toThrow("登录方式");
+    expect(() => vault.create({ site: "x.com", method: "facebook", username: "" })).toThrow("sign-in method");
   });
 
   it("tells the page to use Google with the saved account, and saves a typed one under the page's site", async () => {

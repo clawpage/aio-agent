@@ -780,6 +780,10 @@ describe("workspace bootstrap tickets", () => {
     // Replay must fail: tickets are single use.
     const replay = await h.request(`/_bootstrap?ticket=${encodeURIComponent(ticket)}`, { host: "workspace" });
     expect(replay.status).toBe(403);
+    // The page is in the browser's language (English when it names none), and says so.
+    expect(await replay.text()).toContain('<html lang="en">');
+    const replayTw = await h.request(`/_bootstrap?ticket=${encodeURIComponent(ticket)}`, { host: "workspace", headers: { "accept-language": "zh-TW,zh;q=0.9" } });
+    expect(await replayTw.text()).toMatch(/<html lang="zh-TW">.*連結已失效/s);
 
     // A frame that reloads its spent link (a phone back from the background) still
     // carries its workspace session, which is enough on its own.
@@ -841,7 +845,7 @@ describe("file manager failures are reported truthfully", () => {
     expect(res.status).toBe(502);
     const body = (await res.json()) as { error: string; message: string };
     expect(body.error).toBe("mkdir_failed");
-    expect(body.message).toContain("退出码 1");
+    expect(body.message).toContain("exit code 1");
     h.sandbox.script.shell = undefined;
   });
 

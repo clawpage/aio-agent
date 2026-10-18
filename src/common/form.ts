@@ -35,7 +35,8 @@ export interface FormField {
 export interface FormSpec {
   title: string | null;
   fields: FormField[];
-  submit: string;
+  /** The button's own words; null when the executor gave none, and the console shows its own. */
+  submit: string | null;
 }
 
 export const MAX_FORM_FIELDS = 8;
@@ -88,7 +89,7 @@ export function parseForm(value: unknown): FormSpec | null {
     }
     fields.push(field);
   }
-  return { title: short(raw.title, 40), fields, submit: short(raw.submit, 12) ?? "提交" };
+  return { title: short(raw.title, 40), fields, submit: short(raw.submit, 12) ?? null };
 }
 
 /** The answers as the message the person sends: one "label：value" line per answered field. */
@@ -96,8 +97,8 @@ export function formAnswerText(spec: FormSpec, values: Record<string, string | s
   const lines: string[] = [];
   for (const field of spec.fields) {
     const value = values[field.name];
-    const text = Array.isArray(value) ? value.join("、") : (value ?? "").trim();
-    if (text) lines.push(`${field.label}：${text}`);
+    const text = Array.isArray(value) ? value.join("、") : (value ?? "").trim(); // i18n-exempt: the reply format FormCard reads back from sent messages
+    if (text) lines.push(`${field.label}：${text}`); // i18n-exempt: the reply format FormCard reads back from sent messages
   }
   return lines.join("\n");
 }

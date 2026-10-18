@@ -78,7 +78,7 @@ it("refuses what is not a WAV or is too long, and says when the speech server fa
   answer = { status: 500, text: "" };
   const failed = await post(h, { audioBase64: recording.toString("base64") });
   expect(failed.status).toBe(502);
-  expect(((await failed.json()) as { message: string }).message).toContain("语音识别暂时不可用");
+  expect(((await failed.json()) as { message: string }).message).toContain("Speech recognition isn't available right now");
 });
 
 it("polishes what was heard with the dictation model, and falls back to it as heard", async () => {

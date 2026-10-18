@@ -12,6 +12,8 @@ import { endSocket } from "./http/proxy.js";
 import { McpGateway, type McpCall } from "./mcpGateway.js";
 import type { DeviceLinks, Tunnel, TunnelChannel } from "./deviceLink.js";
 import { PHONE_SERVER, PHONE_TOOLS } from "./phoneTools.js";
+import { requestLocale, t } from "./i18n/index.js";
+import type { Locale } from "./locale.js";
 
 /**
  * An account's Android phone: plugged into a Mac that runs the app, which runs
@@ -36,7 +38,7 @@ export function phoneMcpServers(cfg: Config): Record<string, unknown> {
 }
 
 export const PHONE_POLICY =
-  "The user's own Android phone is connected (aio_phone, attached by USB to the user's Mac, not a cloud phone): when the user wants you to open an app on the phone, tap, type, look at content on the phone, or do something only a phone app can do, operate it directly with its tools; do not make the user tap it themselves. First get the device id with mobile_list_available_devices; to see the screen, prefer mobile_list_elements_on_screen, and take a screenshot only for what is not in the elements; do known consecutive steps in one go with mobile_batch_commands; after each key step, read the screen once to confirm the result. The user can watch your actions live in 手机 (Phone) in the console workspace. For steps with external effects or that are hard to undo, such as paying, transferring money, placing orders, sending messages or posts to others, deleting content, or changing account or security settings, first tell the user what you are about to do and wait for confirmation. SMS verification codes: when the user asks you to read a verification code this phone received, read it in the SMS app and fill it in, only for the account the user asked you to sign in to or verify this time; when the user has not said so, stop and ask. Sign-in passwords, payment passwords, and fingerprint or face recognition are done by the user personally. When the user needs to operate the phone with their own hands, ask and wait, saying clearly which step to do: the task card shows the phone screen, the user can open it and operate directly, and will reply to you when done; then read the screen once more to confirm before continuing. Do only what the user asked for this time; do not open or change other apps along the way.";
+  "The user's own Android phone is connected (aio_phone, attached by USB to the user's Mac, not a cloud phone): when the user wants you to open an app on the phone, tap, type, look at content on the phone, or do something only a phone app can do, operate it directly with its tools; do not make the user tap it themselves. First get the device id with mobile_list_available_devices; to see the screen, prefer mobile_list_elements_on_screen, and take a screenshot only for what is not in the elements; do known consecutive steps in one go with mobile_batch_commands; after each key step, read the screen once to confirm the result. The user can watch your actions live in Phone in the console workspace. For steps with external effects or that are hard to undo, such as paying, transferring money, placing orders, sending messages or posts to others, deleting content, or changing account or security settings, first tell the user what you are about to do and wait for confirmation. SMS verification codes: when the user asks you to read a verification code this phone received, read it in the SMS app and fill it in, only for the account the user asked you to sign in to or verify this time; when the user has not said so, stop and ask. Sign-in passwords, payment passwords, and fingerprint or face recognition are done by the user personally. When the user needs to operate the phone with their own hands, ask and wait, saying clearly which step to do: the task card shows the phone screen, the user can open it and operate directly, and will reply to you when done; then read the screen once more to confirm before continuing. Do only what the user asked for this time; do not open or change other apps along the way.";
 
 type Device = { serial: string; model: string; name: string; android: string };
 
@@ -219,11 +221,11 @@ export class PhoneGateway extends McpGateway {
     }
     if (!this.available(user.id)) return endSocket(socket, "HTTP/1.1 404 Not Found\r\nConnection: close\r\nContent-Length: 0\r\n\r\n");
     this.#wss.handleUpgrade(req, socket, head, (client) => {
-      this.#relay(client, channelSocket(this.#links.tunnelFor(user.id)?.socket("/screen")), () => deps.sessions.isLive(session!.id));
+      this.#relay(client, channelSocket(this.#links.tunnelFor(user.id)?.socket("/screen")), () => deps.sessions.isLive(session!.id), requestLocale(req.headers));
     });
   }
 
-  #relay(client: WebSocket, upstream: ScreenUpstream, live: () => boolean): void {
+  #relay(client: WebSocket, upstream: ScreenUpstream, live: () => boolean, locale: Locale): void {
     const close = (code = 1011, reason = "") => {
       clearInterval(timer);
       if (client.readyState === WebSocket.OPEN || client.readyState === WebSocket.CONNECTING) client.close(code, reason);
@@ -247,7 +249,7 @@ export class PhoneGateway extends McpGateway {
     upstream.on("close", (code) => close(code === 1000 ? 1000 : 1011, "phone closed"));
     upstream.on("error", (err) => {
       this.#log.warn("phone bridge unreachable", { error: err.message });
-      if (client.readyState === WebSocket.OPEN) client.send(JSON.stringify({ type: "error", message: "手机服务暂时不可用" }));
+      if (client.readyState === WebSocket.OPEN) client.send(JSON.stringify({ type: "error", message: t(locale).http.phone.unavailable }));
       close();
     });
     client.on("close", () => close(1000));

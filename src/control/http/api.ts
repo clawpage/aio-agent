@@ -47,6 +47,7 @@ import { PERSON_KEY } from "../browser/tabs.js";
 import { normalizeSite, vaultLogin, VaultError, type Vault } from "../vault.js";
 import { DocumentError } from "../documents/service.js";
 import { isLocale, type Locale } from "../locale.js";
+import { t } from "../i18n/index.js";
 import type { BrowserStatusView } from "../browser/service.js";
 import { documentKind, isRenderableKind, mediaType, requireWorkspaceFilePath } from "../documents/paths.js";
 
@@ -101,7 +102,7 @@ function requireKind(kind: HostKind) {
 function requireSession(req: Request, res: Response, next: NextFunction): void {
   const ctx = ctxOf(req);
   if (!ctx.session) {
-    res.status(401).json({ error: "unauthenticated", message: "请先登录" });
+    res.status(401).json({ error: "unauthenticated", message: t().http.common.signInFirst });
     return;
   }
   next();
@@ -124,7 +125,7 @@ export function workspaceOrigin(ctx: RequestContext, cfg: AppContext["cfg"]): st
 /**
  * Public, secret-free view of the browser lifecycle for the control-plane UI.
  *
- * It deliberately exposes only counts, a Chinese state label and a Chinese idle
+ * It deliberately exposes only counts, a state label in the request's language and an idle
  * deadline: the snapshot path, page URLs, cookies and storage values never leave
  * the server, and the raw container message is replaced by a fixed sentence
  * keyed on the stable error code.
@@ -135,7 +136,7 @@ function browserStatusPayload(status: BrowserStatusView): Record<string, unknown
     enabled: status.enabled,
     resident: status.resident,
     state: status.state,
-    stateLabel: BROWSER_STATE_LABELS[status.state] ?? status.state,
+    stateLabel: browserStateLabel(status.state),
     idleDeadline: status.idleDeadline,
     idleRemainingMs,
     idleMinutes: idleRemainingMs === null ? null : Math.ceil(idleRemainingMs / 60_000),
@@ -157,15 +158,11 @@ function browserStatusPayload(status: BrowserStatusView): Record<string, unknown
   };
 }
 
-/** Chinese state labels shown in the browser panel; never machine identifiers. */
-export const BROWSER_STATE_LABELS: Record<string, string> = {
-  awake: "浏览器已就绪",
-  idle: "浏览器空闲中，即将释放",
-  snapshotting: "正在保存浏览器状态",
-  asleep: "浏览器已释放，等待按需恢复",
-  restoring: "正在恢复浏览器",
-  error: "浏览器状态异常",
-};
+/** The state label shown in the browser panel, in the request's language; never a machine identifier. */
+export function browserStateLabel(state: string): string {
+  const labels: Record<string, string> = t().http.browser.states;
+  return Object.hasOwn(labels, state) ? labels[state]! : state;
+}
 
 export function createApiRouter(context: AppContext): Router {
   const router = express.Router();
@@ -235,7 +232,7 @@ export function createApiRouter(context: AppContext): Router {
     const pathname = req.path.toLowerCase().replace(/\/+$/, "");
     const ownerPaths = ["/usage", "/analytics/report", "/settings", "/models", "/capabilities", "/sandbox/context", "/documents/provision", "/gadget/history"];
     if (restricted && ownerPaths.some(p => pathname === p || pathname.startsWith(p + "/"))) {
-      res.status(403).json({ error: "forbidden", message: "此操作仅限所有者" }); return;
+      res.status(403).json({ error: "forbidden", message: t().http.common.ownerOnly }); return;
     }
     const match = /^\/(conversations|tasks)\/([^/]+)/i.exec(req.path);
     if (match) {
@@ -253,7 +250,7 @@ export function createApiRouter(context: AppContext): Router {
       res.json = (body: unknown) => json(publicPayload(body));
       // Legacy free-form conversations are owner-only; member execution always uses tasks.
       if (pathname === "/conversations" && req.method !== "GET") {
-        res.status(403).json({ error: "forbidden", message: "请通过主会话提交任务" }); return;
+        res.status(403).json({ error: "forbidden", message: t().http.common.useMainChat }); return;
       }
     }
     next();
@@ -273,7 +270,7 @@ export function createApiRouter(context: AppContext): Router {
       const now = Date.now();
       for (const [key, value] of publicRequests) if (now - value.since > 3600000) publicRequests.delete(key);
       const bucket = publicRequests.get(ctx.ip) ?? {since: now, count: 0};
-      if (bucket.count >= 4 || publicRequests.size >= 1000 && !publicRequests.has(ctx.ip)) { res.status(429).json({error:'rate_limited',message:'提交过于频繁，请稍后再试'}); return; }
+      if (bucket.count >= 4 || publicRequests.size >= 1000 && !publicRequests.has(ctx.ip)) { res.status(429).json({error:'rate_limited',message:t().http.common.tooFrequent}); return; }
       bucket.count++; publicRequests.set(ctx.ip, bucket);
     }
     try {
@@ -314,14 +311,14 @@ export function createApiRouter(context: AppContext): Router {
   });
   router.get('/analytics/report', requireKind('primary'), requireSession, (req, res) => {
     const days = req.query.days === undefined ? 30 : Number(req.query.days);
-    if (![7,30,90].includes(days)) { res.status(400).json({error:'invalid_days',message:'请选择 7、30 或 90 天'}); return; }
+    if (![7,30,90].includes(days)) { res.status(400).json({error:'invalid_days',message:t().http.common.badDays}); return; }
     if (!context.analytics) { res.status(404).json({ error: 'not_found' }); return; }
     res.setHeader('Cache-Control','no-store');
     res.json(context.analytics.report(cfg, days));
   });
   router.get('/usage', requireKind('primary'), requireSession, asyncHandler(async (req, res) => {
     const days = req.query.days === undefined ? 30 : Number(req.query.days);
-    if (![7,30,90].includes(days)) { res.status(400).json({error:'invalid_days',message:'请选择 7、30 或 90 天'}); return; }
+    if (![7,30,90].includes(days)) { res.status(400).json({error:'invalid_days',message:t().http.common.badDays}); return; }
     res.setHeader('Cache-Control','no-store');
     res.json(usageReport(db,cfg,days));
   }));
@@ -333,20 +330,20 @@ export function createApiRouter(context: AppContext): Router {
       // Login is unauthenticated, so it cannot rely on the session-bound CSRF
       // check above; validate Origin explicitly to block cross-site logins.
       if (!ctx.origin || !originAllowed(cfg, "primary", ctx.origin)) {
-        res.status(403).json({ error: "origin_denied", message: "来源站点不被允许" });
+        res.status(403).json({ error: "origin_denied", message: t().http.common.originDenied });
         return;
       }
       const state = limiter.state(ctx.ip);
       if (state.locked) {
         res.status(429).json({
           error: "rate_limited",
-          message: `尝试次数过多，请在 ${Math.ceil(state.retryAfterMs / 60000)} 分钟后重试`,
+          message: t().http.auth.retryIn(Math.ceil(state.retryAfterMs / 60000)),
         });
         return;
       }
       const password = typeof req.body?.password === "string" ? req.body.password : "";
       if (!password) {
-        res.status(400).json({ error: "password_required", message: "请输入密码" });
+        res.status(400).json({ error: "password_required", message: t().http.auth.passwordRequired });
         return;
       }
       // An account signs in with its email; accounts from before email also with their username.
@@ -359,7 +356,7 @@ export function createApiRouter(context: AppContext): Router {
         track(req, "login_failed", { method: "password" });
         res.status(401).json({
           error: "invalid_credentials",
-          message: after.locked ? "密码错误次数过多，账号已临时锁定" : "密码错误",
+          message: after.locked ? t().http.auth.locked : t().http.auth.wrongPassword,
         });
         return;
       }
@@ -383,12 +380,12 @@ export function createApiRouter(context: AppContext): Router {
     asyncHandler(async (req, res, ctx) => {
       // Unauthenticated like login: no session-bound CSRF, so check Origin explicitly.
       if (!ctx.origin || !originAllowed(cfg, "primary", ctx.origin)) {
-        res.status(403).json({ error: "origin_denied", message: "来源站点不被允许" });
+        res.status(403).json({ error: "origin_denied", message: t().http.common.originDenied });
         return;
       }
       const state = limiter.state(ctx.ip);
       if (state.locked) {
-        res.status(429).json({ error: "rate_limited", message: `尝试次数过多，请在 ${Math.ceil(state.retryAfterMs / 60000)} 分钟后重试` });
+        res.status(429).json({ error: "rate_limited", message: t().http.auth.retryIn(Math.ceil(state.retryAfterMs / 60000)) });
         return;
       }
       const str = (v: unknown) => (typeof v === "string" ? v : "");
@@ -444,7 +441,7 @@ export function createApiRouter(context: AppContext): Router {
       const renewed = sessions.heartbeat(ctx.session!);
       if (!renewed) {
         res.setHeader("Set-Cookie", clearSessionCookies("primary", ctx.secure));
-        res.status(401).json({ error: "session_expired", message: "会话已过期，请重新登录" });
+        res.status(401).json({ error: "session_expired", message: t().http.auth.sessionExpired });
         return;
       }
       const csrf = ctx.cookies[COOKIE_NAMES.primary.csrf] ?? "";
@@ -497,9 +494,9 @@ export function createApiRouter(context: AppContext): Router {
       // A dozing one is up (only its browser is released), so it reports nothing.
       const idle = context.idle && context.idle.state !== "running" && context.idle.state !== "dozing" ? context.idle.state : null;
       if (isMember(db, ctxOf(_req).session!.ownerId)) {
-        res.json({ agent: { sessionReady: agentStatus.sessionReady, lastError: agentStatus.sessionReady ? null : "服务正在连接" },
+        res.json({ agent: { sessionReady: agentStatus.sessionReady, lastError: agentStatus.sessionReady ? null : t().http.common.connecting },
           // A member learns that the start failed, not why.
-          hostAuth: { ok: hostAuth.ok }, sandbox: { running: sandboxState.running, healthy: sandboxReady, setupError: context.sandboxSetupError ? "服务正在连接" : null, surfaces: context.sandboxSurfaces, idle },
+          hostAuth: { ok: hostAuth.ok }, sandbox: { running: sandboxState.running, healthy: sandboxReady, setupError: context.sandboxSetupError ? t().http.common.connecting : null, surfaces: context.sandboxSurfaces, idle },
           workspaceOrigin: workspaceOrigin(ctxOf(_req), cfg) });
         return;
       }
@@ -566,11 +563,11 @@ export function createApiRouter(context: AppContext): Router {
     res.json({ enabled: Boolean(cfg.asrUrl), locales: ASR_LOCALES });
   });
   router.post("/asr", requireKind("primary"), requireSession, asyncHandler(async (req, res) => {
-    if (!cfg.asrUrl) { res.status(404).json({ error: "not_configured", message: "没有配置语音识别" }); return; }
+    if (!cfg.asrUrl) { res.status(404).json({ error: "not_configured", message: t().http.voice.notConfigured }); return; }
     const audio = Buffer.from(typeof req.body?.audioBase64 === "string" ? req.body.audioBase64 : "", "base64");
-    if (audio.byteLength < 44 || audio.toString("ascii", 0, 4) !== "RIFF") { res.status(400).json({ error: "bad_audio", message: "录音格式不对" }); return; }
+    if (audio.byteLength < 44 || audio.toString("ascii", 0, 4) !== "RIFF") { res.status(400).json({ error: "bad_audio", message: t().http.voice.badAudio }); return; }
     // The speech server takes about a minute of 16 kHz audio.
-    if (audio.byteLength > 2 * 1024 * 1024) { res.status(413).json({ error: "too_long", message: "录音太长，每段请在一分钟内" }); return; }
+    if (audio.byteLength > 2 * 1024 * 1024) { res.status(413).json({ error: "too_long", message: t().http.voice.tooLong }); return; }
     const user = getUser(db, ctxOf(req).session!.ownerId);
     const record: Omit<VoiceRecord, "audio"> = { user: user?.username ?? "?", platform: req.get("x-client-platform") ?? null, asr: null, polish: null, error: null };
     try {
@@ -591,7 +588,7 @@ export function createApiRouter(context: AppContext): Router {
       record.error = err instanceof Error ? err.message : String(err);
       track(req, "voice_input", { ok: false });
       log.warn("asr failed", { error: record.error });
-      res.status(502).json({ error: "asr_unavailable", message: "语音识别暂时不可用，请稍后再试" });
+      res.status(502).json({ error: "asr_unavailable", message: t().http.voice.unavailable });
     }
     voiceLog.record({ ...record, audio });
   }));
@@ -602,12 +599,12 @@ export function createApiRouter(context: AppContext): Router {
     res.json(context.push ? { supported: true, publicKey: context.push.publicKey, devices: context.push.count(ctxOf(req).session!.ownerId) } : { supported: false });
   }));
   router.post("/push/subscribe", requireKind("primary"), requireSession, asyncHandler(async (req, res) => {
-    if (!context.push) { res.status(404).json({ error: "push_unavailable", message: "通知暂不可用" }); return; }
+    if (!context.push) { res.status(404).json({ error: "push_unavailable", message: t().http.push.unavailable }); return; }
     try {
       context.push.subscribe(ctxOf(req).session!.ownerId, req.body?.subscription ?? {}, req.get("user-agent") ?? "");
       track(req, "push_subscribe");
       res.json({ ok: true, devices: context.push.count(ctxOf(req).session!.ownerId) });
-    } catch (err) { res.status(400).json({ error: "bad_subscription", message: err instanceof Error ? err.message : "订阅无效" }); }
+    } catch (err) { res.status(400).json({ error: "bad_subscription", message: err instanceof Error ? err.message : t().http.push.badSubscription }); }
   }));
   router.post("/push/unsubscribe", requireKind("primary"), requireSession, asyncHandler(async (req, res) => {
     const endpoint = typeof req.body?.endpoint === "string" ? req.body.endpoint : "";
@@ -616,8 +613,8 @@ export function createApiRouter(context: AppContext): Router {
     res.json({ ok: true });
   }));
   router.post("/push/test", requireKind("primary"), requireSession, asyncHandler(async (req, res) => {
-    if (!context.push) { res.status(404).json({ error: "push_unavailable", message: "通知暂不可用" }); return; }
-    const sent = await context.push.notify(ctxOf(req).session!.ownerId, { title: "一站通知已开启", body: "任务完成、需要你补充或确认时，会在这里提醒你。", tag: "test" }, { force: true });
+    if (!context.push) { res.status(404).json({ error: "push_unavailable", message: t().http.push.unavailable }); return; }
+    const sent = await context.push.notify(ctxOf(req).session!.ownerId, { title: t().http.push.testTitle, body: t().http.push.testBody, tag: "test" }, { force: true });
     res.json({ sent });
   }));
 
@@ -746,7 +743,7 @@ export function createApiRouter(context: AppContext): Router {
     const query = typeof req.query.q === "string" ? req.query.q : "";
     const cursor = typeof req.query.cursor === "string" && req.query.cursor ? req.query.cursor : null;
     if (!TASK_FILTERS.includes(filter) || query.length > 200) {
-      res.status(400).json({ error: "bad_request", message: "筛选条件无效" });
+      res.status(400).json({ error: "bad_request", message: t().http.tasks.badFilter });
       return;
     }
     const { asking, decorate } = await browserState(ctxOf(req).session!.ownerId);
@@ -762,7 +759,7 @@ export function createApiRouter(context: AppContext): Router {
   // The console language decides what language the account's agents write for people in.
   router.put("/account/locale", requireKind("primary"), requireSession, (req, res) => {
     const locale = req.body?.locale;
-    if (!isLocale(locale)) { res.status(400).json({ error: "bad_request", message: "不支持的语言" }); return; }
+    if (!isLocale(locale)) { res.status(400).json({ error: "bad_request", message: t().http.common.unsupportedLocale }); return; }
     // A console reporting the language it opened in is not a person switching languages.
     if (req.body?.sync === true) { res.json({ ok: true, applied: context.tasks.syncLocale(locale) }); return; }
     context.tasks.setLocale(locale);
@@ -772,9 +769,9 @@ export function createApiRouter(context: AppContext): Router {
   router.post("/tasks", requireKind("primary"), requireSession, asyncHandler(async (req, res) => {
     try {
       const b = req.body ?? {};
-      if (typeof b.text !== "string" || typeof b.clientMessageId !== "string") throw new Error("消息格式不正确");
+      if (typeof b.text !== "string" || typeof b.clientMessageId !== "string") throw new Error(t().http.tasks.badMessage);
       const attachments = Array.isArray(b.attachments) ? b.attachments.map((a: {path?:unknown;kind?:unknown;name?:unknown}) => {
-        if (!a || typeof a.path !== "string") throw new Error("附件路径无效");
+        if (!a || typeof a.path !== "string") throw new Error(t().http.tasks.badAttachment);
         const checked = requireWorkspaceFilePath(a.path, cfg.sandbox.containerWorkspaceDir);
         if (!checked.ok) throw new Error(checked.message);
         return { path: checked.path, kind: a.kind === "image" ? "image" as const : "file" as const, name: typeof a.name === "string" ? a.name : "" };
@@ -783,7 +780,7 @@ export function createApiRouter(context: AppContext): Router {
       if (!result.duplicate) track(req, "task_submit", { attachments: attachments.length, images: attachments.filter((a: { kind: string }) => a.kind === "image").length, reference: typeof b.relatedTaskId === "string" });
       res.status(result.duplicate ? 200 : 202).json(result);
     } catch (err) {
-      res.status(err instanceof TurnConflictError ? 409 : 400).json({ error: "task_submit_failed", message: err instanceof Error ? err.message : "任务提交失败" });
+      res.status(err instanceof TurnConflictError ? 409 : 400).json({ error: "task_submit_failed", message: err instanceof Error ? err.message : t().http.tasks.submitFailed });
     }
   }));
   // ---------------------------------------------------------------- gadget
@@ -818,7 +815,7 @@ export function createApiRouter(context: AppContext): Router {
       if (!context.runtimeForUser) throw new Error("no member runtimes");
       return { userId: user.id, tasks: (await context.runtimeForUser(user.id)).tasks };
     } catch {
-      res.status(503).json({ error: "runtime_unavailable", message: "独立环境暂不可用，请稍后重试" });
+      res.status(503).json({ error: "runtime_unavailable", message: t().http.common.runtimeUnavailable });
       return null;
     }
   };
@@ -835,7 +832,7 @@ export function createApiRouter(context: AppContext): Router {
       const runtime = await context.runtimeForUser(user.id);
       res.json({ account: user.username, ...runtime.tasks.gadgetHistory(user.id, before, limit) });
     } catch {
-      res.status(503).json({ error: "runtime_unavailable", message: `${user.username} 的环境暂不可用，请稍后重试` });
+      res.status(503).json({ error: "runtime_unavailable", message: t().http.common.runtimeUnavailableFor(user.username) });
     }
   }));
   // The gadget's usage page: the JSON at cfg.gadgetUsageUrl (Usage HUD's snapshot on the host), passed through as is.
@@ -849,7 +846,7 @@ export function createApiRouter(context: AppContext): Router {
       if (!upstream.ok || text.length > 64 * 1024) throw new Error(`upstream ${upstream.status}`);
       res.json(JSON.parse(text));
     } catch {
-      res.status(502).json({ error: "usage_unavailable", message: "用量数据暂时拿不到" });
+      res.status(502).json({ error: "usage_unavailable", message: t().http.tasks.gadgetUsageUnavailable });
     }
   }));
   // Firmware updates over Wi-Fi: what is offered, then the image itself.
@@ -913,11 +910,11 @@ export function createApiRouter(context: AppContext): Router {
     if (!account) return;
     try {
       const b = req.body ?? {};
-      if (typeof b.text !== "string" || typeof b.clientMessageId !== "string") throw new Error("消息格式不正确");
+      if (typeof b.text !== "string" || typeof b.clientMessageId !== "string") throw new Error(t().http.tasks.badMessage);
       const row = account.tasks.submitGadget({ userId: account.userId, text: b.text, clientMessageId: b.clientMessageId });
       res.status(202).json(account.tasks.gadgetReply(row.id, account.userId));
     } catch (err) {
-      res.status(err instanceof TurnConflictError ? 409 : 400).json({ error: "gadget_submit_failed", message: err instanceof Error ? err.message : "提交失败" });
+      res.status(err instanceof TurnConflictError ? 409 : 400).json({ error: "gadget_submit_failed", message: err instanceof Error ? err.message : t().http.tasks.sendFailed });
     }
   }));
   // `?wait=N` (at most 25 s) holds the answer back until the message is done or N
@@ -938,20 +935,22 @@ export function createApiRouter(context: AppContext): Router {
   }));
   router.post("/tasks/:id/stop", requireKind("primary"), requireSession, asyncHandler(async (req, res) => {
     try { await context.tasks.stop(param(req, "id")); track(req, "task_stop"); res.json({ ok: true }); }
-    catch (err) { res.status(409).json({ error: "stop_failed", message: err instanceof Error ? err.message : "停止失败" }); }
+    catch (err) { res.status(409).json({ error: "stop_failed", message: err instanceof Error ? err.message : t().http.tasks.stopFailed }); }
   }));
   router.post("/tasks/:id/archive", requireKind("primary"), requireSession, (req, res) => {
     const id = param(req, "id");
     if (!context.tasks.belongsTo(id, ctxOf(req).session!.ownerId)) { res.status(404).json({ error: "not_found" }); return; }
     try { context.tasks.archive(id); track(req, "task_archive"); res.json({ ok: true }); }
-    catch (err) { res.status(409).json({ error: "archive_refused", message: err instanceof Error ? err.message : "归档失败" }); }
+    catch (err) { res.status(409).json({ error: "archive_refused", message: err instanceof Error ? err.message : t().http.tasks.archiveFailed }); }
   });
   router.post("/tasks/:id/retry-planning", requireKind("primary"), requireSession, asyncHandler(async (req, res) => {
     try { context.tasks.retryPlanning(param(req, "id")); track(req, "task_retry"); res.json({ ok: true }); }
-    catch (err) { res.status(409).json({ error: "retry_refused", message: err instanceof Error ? err.message : "无法重试" }); }
+    catch (err) { res.status(409).json({ error: "retry_refused", message: err instanceof Error ? err.message : t().http.tasks.retryRefused }); }
   }));
 
   // Scheduled and recurring tasks: created by asking in the main session, managed here.
+  // A schedule that is not the account's is not found, whatever the service would say about it.
+  const ownSchedule = (req: Request): boolean => context.tasks.listSchedules(ctxOf(req).session!.ownerId).some((s) => s.id === param(req, "id"));
   router.get("/schedules", requireKind("primary"), requireSession, asyncHandler(async (req, res) => {
     res.setHeader("Cache-Control", "no-store");
     res.json({ schedules: context.tasks.listSchedules(ctxOf(req).session!.ownerId) });
@@ -959,21 +958,22 @@ export function createApiRouter(context: AppContext): Router {
   // Edit a schedule from the page: any of title, instruction, schedule (the whole new rule), needsBrowser.
   router.patch("/schedules/:id", requireKind("primary"), requireSession, asyncHandler(async (req, res) => {
     const body = (req.body ?? {}) as Record<string, unknown>;
+    if (!ownSchedule(req)) { res.status(404).json({ error: "schedule_refused", message: t().http.tasks.scheduleNotFound }); return; }
     const changed = context.tasks.updateScheduleFor(ctxOf(req).session!.ownerId, { id: param(req, "id"), title: body.title, instruction: body.instruction, schedule: body.schedule, needsBrowser: body.needsBrowser });
     if (changed.ok) { track(req, "schedule_edit"); res.json({ message: changed.message, schedule: changed.schedule }); return; }
-    res.status(changed.error === "定时任务不存在" ? 404 : 409).json({ error: "schedule_refused", message: changed.error });
+    res.status(409).json({ error: "schedule_refused", message: changed.error });
   }));
   router.post("/schedules/:id/:action", requireKind("primary"), requireSession, asyncHandler(async (req, res) => {
     const action = param(req, "action");
     const userId = ctxOf(req).session!.ownerId;
+    if (!ownSchedule(req)) { res.status(404).json({ error: "schedule_refused", message: t().http.tasks.scheduleNotFound }); return; }
     try {
       if (action === "run") { res.json(context.tasks.runScheduleNow(param(req, "id"), userId)); track(req, "schedule_action", { action }); return; }
       if (action !== "pause" && action !== "resume" && action !== "cancel") { res.status(404).json({ error: "not_found" }); return; }
       res.json(context.tasks.changeSchedule(param(req, "id"), userId, action));
       track(req, "schedule_action", { action });
     } catch (err) {
-      const message = err instanceof Error ? err.message : "操作失败";
-      res.status(message === "定时任务不存在" ? 404 : 409).json({ error: "schedule_refused", message });
+      res.status(409).json({ error: "schedule_refused", message: err instanceof Error ? err.message : t().http.tasks.actionFailed });
     }
   }));
 
@@ -1014,7 +1014,7 @@ export function createApiRouter(context: AppContext): Router {
   router.post("/tasks/:id/browser/reopen", requireKind("primary"), requireSession, asyncHandler(async (req, res) => {
     const key = taskBrowserKey(req);
     const last = key ? context.tabs?.lastPage?.(key) : null;
-    if (!key || !last || !context.tabs?.reopen) { res.status(404).json({ error: "not_found", message: "这个任务没有可以重新打开的页面" }); return; }
+    if (!key || !last || !context.tabs?.reopen) { res.status(404).json({ error: "not_found", message: t().http.browser.noReopen }); return; }
     // Only the page the task itself was on: the address is never taken from the request.
     const out = await context.tabs.reopen(key, last.url, last.title);
     res.status(out.status).json(out.body);
@@ -1060,7 +1060,7 @@ export function createApiRouter(context: AppContext): Router {
   // The person's overview of every page open in their browser: which, a preview of each, and switching to one.
   router.get("/browser/overview", requireKind("primary"), requireSession, asyncHandler(async (_req, res) => {
     const pages = context.tabs?.overview ? await context.tabs.overview() : null;
-    if (!pages) { res.status(503).json({ error: "unavailable", message: "浏览器暂不可用，请稍后重试" }); return; }
+    if (!pages) { res.status(503).json({ error: "unavailable", message: t().http.browser.unavailable }); return; }
     res.setHeader("Cache-Control", "no-store");
     res.json({ pages });
   }));
@@ -1110,7 +1110,7 @@ export function createApiRouter(context: AppContext): Router {
       for (const held of own.filter((t) => t.holder === "human")) tab = (await context.tabs.control(key, held.id, "release")) ?? tab;
       tab ??= own.find((t) => t.request) ?? own[0] ?? null;
     }
-    if (!tab) { res.status(404).json({ error: "tab_not_found", message: "这个标签页已经关闭或不属于该任务" }); return; }
+    if (!tab) { res.status(404).json({ error: "tab_not_found", message: t().http.browser.tabGone }); return; }
     track(req, action === "take" ? "browser_takeover" : "browser_handback");
     res.json({ tab });
   }));
@@ -1147,7 +1147,7 @@ export function createApiRouter(context: AppContext): Router {
   }));
   router.post("/user-browser/pages", requireKind("primary"), requireSession, asyncHandler(async (req, res) => {
     const url = String(req.body?.url ?? "").trim();
-    if (!/^https?:\/\/[^\s]+$/i.test(url) || url.length > 2000) { res.status(400).json({ error: "bad_url", message: "请输入以 http:// 或 https:// 开头的网址" }); return; }
+    if (!/^https?:\/\/[^\s]+$/i.test(url) || url.length > 2000) { res.status(400).json({ error: "bad_url", message: t().http.browser.badUrl }); return; }
     if (!context.userBrowser) { res.status(404).json({ error: "not_found" }); return; }
     try {
       res.json({ page: await context.userBrowser.openMacPage(ctxOf(req).session!.ownerId, url) });
@@ -1159,7 +1159,7 @@ export function createApiRouter(context: AppContext): Router {
     const id = Number(param(req, "id"));
     if (!context.userBrowser || !Number.isInteger(id) || id <= 0) { res.status(404).json({ error: "not_found" }); return; }
     try {
-      if (!(await context.userBrowser.closeMacPage(ctxOf(req).session!.ownerId, id))) { res.status(409).json({ error: "in_use", message: "这个页面正被任务使用，请在任务卡片里处理" }); return; }
+      if (!(await context.userBrowser.closeMacPage(ctxOf(req).session!.ownerId, id))) { res.status(409).json({ error: "in_use", message: t().http.browser.pageInUse }); return; }
       res.json({ ok: true });
     } catch (err) {
       res.status(502).json({ error: "unavailable", message: err instanceof Error ? err.message : String(err) });
@@ -1170,7 +1170,7 @@ export function createApiRouter(context: AppContext): Router {
   router.post("/tasks/:id/browser/login", requireKind("primary"), requireSession, asyncHandler(async (req, res) => {
     const key = taskBrowserKey(req);
     const tab = key && context.tabs ? (await context.tabs.list(key)).find((t) => t.id === String(req.body?.tab ?? "")) : undefined;
-    if (!tab || ctxOf(req).session!.ownerId !== (cfg.runtimeUserId ?? "owner_1")) { res.status(404).json({ error: "tab_not_found", message: "这个标签页已经关闭或不属于该任务" }); return; }
+    if (!tab || ctxOf(req).session!.ownerId !== (cfg.runtimeUserId ?? "owner_1")) { res.status(404).json({ error: "tab_not_found", message: t().http.browser.tabGone }); return; }
     res.setHeader("Cache-Control", "no-store");
     try {
       const out = await vaultLogin(context, tab, { entryId: req.body?.entryId, username: req.body?.username, password: req.body?.password, save: req.body?.save, method: req.body?.method });
@@ -1216,26 +1216,26 @@ export function createApiRouter(context: AppContext): Router {
     try {
       const entry = v.update(param(req, "id"), { site: req.body?.site, username: req.body?.username, password: req.body?.password, method: req.body?.method });
       if (entry) res.json({ entry });
-      else res.status(404).json({ error: "not_found", message: "密码器里没有这个账号" });
+      else res.status(404).json({ error: "not_found", message: t().http.vault.noEntry });
     } catch (err) { vaultFailure(res, err); }
   }));
   router.delete("/vault/:id", requireKind("primary"), requireSession, asyncHandler(async (req, res) => {
     const v = vault(req, res);
     if (!v) return;
     if (v.remove(param(req, "id"))) res.json({ ok: true });
-    else res.status(404).json({ error: "not_found", message: "密码器里没有这个账号" });
+    else res.status(404).json({ error: "not_found", message: t().http.vault.noEntry });
   }));
   router.delete("/vault/scripts/:site", requireKind("primary"), requireSession, asyncHandler(async (req, res) => {
     const v = vault(req, res);
     if (!v) return;
     if (v.forgetScript(param(req, "site"))) res.json({ ok: true });
-    else res.status(404).json({ error: "not_found", message: "这个网站没有记下的登录步骤" });
+    else res.status(404).json({ error: "not_found", message: t().http.vault.noScript });
   }));
   router.post("/vault/:id/reveal", requireKind("primary"), requireSession, asyncHandler(async (req, res) => {
     const v = vault(req, res);
     if (!v) return;
     const password = v.secret(param(req, "id"));
-    if (password === null) res.status(404).json({ error: "not_found", message: "密码器里没有这个账号，或它的密码读不出来了" });
+    if (password === null) res.status(404).json({ error: "not_found", message: t().http.vault.noSecret });
     else res.json({ password });
   }));
 
@@ -1288,12 +1288,12 @@ export function createApiRouter(context: AppContext): Router {
       const id = param(req, "id");
       const body = (req.body ?? {}) as Record<string, unknown>;
       if (context.tasks.ownsConversation(id)) {
-        res.status(409).json({ error: "managed_task", message: "子任务由主会话管理" });
+        res.status(409).json({ error: "managed_task", message: t().http.tasks.managedTask });
         return;
       }
       if ("title" in body) {
         if (typeof body.title !== "string") {
-          res.status(400).json({ error: "invalid_title", message: "标题必须是字符串" });
+          res.status(400).json({ error: "invalid_title", message: t().http.tasks.titleNotString });
           return;
         }
         // Validate before any mutation, so a rejected title never renames the
@@ -1310,7 +1310,7 @@ export function createApiRouter(context: AppContext): Router {
         if (renamed.conflict) {
           res.status(409).json({
             error: "conversation_conflict",
-            message: "已有一个活跃的空白默认会话，请先给它命名或归档，再使用这个标题",
+            message: t().http.tasks.renameConflict,
           });
           return;
         }
@@ -1323,7 +1323,7 @@ export function createApiRouter(context: AppContext): Router {
           if (restored.conflict) {
             res.status(409).json({
               error: "conversation_conflict",
-              message: "已有一个活跃的空白默认会话，请先使用、重命名或归档它，再恢复这一个",
+              message: t().http.tasks.restoreConflict,
             });
             return;
           }
@@ -1382,7 +1382,7 @@ export function createApiRouter(context: AppContext): Router {
       const conversationId = param(req, "id");
       const text = typeof req.body?.text === "string" ? req.body.text : "";
       if (context.tasks.ownsConversation(conversationId)) {
-        res.status(409).json({ error: "managed_task", message: "请在主会话提交关联任务" });
+        res.status(409).json({ error: "managed_task", message: t().http.tasks.relatedInMain });
         return;
       }
       const clientMessageId =
@@ -1393,7 +1393,7 @@ export function createApiRouter(context: AppContext): Router {
             .map((a) => ({ path: a.path as string, kind: a.kind === "image" ? ("image" as const) : ("file" as const), name: a.name ?? "" }))
         : [];
       if (!text.trim() && attachments.length === 0) {
-        res.status(400).json({ error: "empty_message", message: "消息不能为空" });
+        res.status(400).json({ error: "empty_message", message: t().http.tasks.emptyMessage });
         return;
       }
       try {
@@ -1453,7 +1453,7 @@ export function createApiRouter(context: AppContext): Router {
     asyncHandler(async (req, res) => {
       const decision = typeof req.body?.decision === "string" ? req.body.decision : "";
       if (!["accept", "acceptForSession", "decline", "cancel"].includes(decision)) {
-        res.status(400).json({ error: "bad_decision", message: "无效的处理决定" });
+        res.status(400).json({ error: "bad_decision", message: t().http.tasks.badDecision });
         return;
       }
       const result = agent.respondToRequest(param(req, "requestId"), decision, req.body?.extra);
@@ -1528,7 +1528,7 @@ export function createApiRouter(context: AppContext): Router {
     res.json({ invite });
   });
   router.delete("/settings/invites/:code", requireKind("primary"), requireSession, (req, res) => {
-    if (!revokeInvite(db, String(req.params.code))) { res.status(409).json({ error: "not_revocable", message: "这个邀请码已经用过或已作废" }); return; }
+    if (!revokeInvite(db, String(req.params.code))) { res.status(409).json({ error: "not_revocable", message: t().http.auth.inviteNotRevocable }); return; }
     audit(db, "invite_revoked", undefined, ctxOf(req).ip);
     res.json({ ok: true });
   });
@@ -1538,7 +1538,7 @@ export function createApiRouter(context: AppContext): Router {
     const ownerId = ctxOf(req).session!.ownerId;
     const task = db.prepare("SELECT id,title,input_text,status FROM tasks WHERE id=?").get(String(req.params.taskId)) as { id: string; title: string; input_text: string; status: string } | undefined;
     res.setHeader("Cache-Control", "no-store");
-    if (!task || !context.tasks.belongsTo(task.id, ownerId)) { res.status(404).json({ error: "not_found", message: "任务不存在" }); return; }
+    if (!task || !context.tasks.belongsTo(task.id, ownerId)) { res.status(404).json({ error: "not_found", message: t().http.tasks.notFound }); return; }
     res.json({ task: { id: task.id, title: task.title, text: task.input_text, status: task.status }, entries: dispatchLog(db, ownerId, task.id) });
   });
 
@@ -1590,12 +1590,12 @@ export function createApiRouter(context: AppContext): Router {
     asyncHandler(async (req, res) => {
       const body: unknown = req.body ?? {};
       if (typeof body !== "object" || body === null || Array.isArray(body)) {
-        res.status(400).json({ error: "invalid_settings", message: "设置必须是一个对象" });
+        res.status(400).json({ error: "invalid_settings", message: t().http.settings.notObject });
         return;
       }
       const record = body as Record<string, unknown>;
       if (!("model" in record) && !("effort" in record)) {
-        res.status(400).json({ error: "invalid_settings", message: "缺少要保存的设置" });
+        res.status(400).json({ error: "invalid_settings", message: t().http.settings.nothingToSave });
         return;
       }
       let models: Array<{ id: string; displayName: string; supportedReasoningEfforts: string[]; defaultReasoningEffort: string | null }>;
@@ -1606,7 +1606,7 @@ export function createApiRouter(context: AppContext): Router {
         return;
       }
       if (models.length === 0) {
-        res.status(503).json({ error: "models_unavailable", message: "暂时无法获取模型列表，请稍后重试" });
+        res.status(503).json({ error: "models_unavailable", message: t().http.settings.modelsUnavailable });
         return;
       }
       const stored = agent.agentSettings();
@@ -1647,7 +1647,7 @@ export function createApiRouter(context: AppContext): Router {
     requireSession,
     asyncHandler(async (req, res) => {
       const shot = await context.phone?.screenshot(ctxOf(req).session!.ownerId);
-      if (!shot) { res.status(404).json({ error: "phone_unavailable", message: "手机未连接" }); return; }
+      if (!shot) { res.status(404).json({ error: "phone_unavailable", message: t().http.phone.notConnected }); return; }
       res.setHeader("Cache-Control", "no-store");
       res.type(shot.type).send(shot.body);
     }),
@@ -1768,7 +1768,7 @@ export function createApiRouter(context: AppContext): Router {
       const json = (await upstream.json()) as { success?: boolean; data?: unknown; message?: string };
       const opError = fileOperationError(json.data);
       if (!json.success || opError) {
-        res.status(502).json({ error: "list_failed", message: opError ?? json.message ?? "列目录失败" });
+        res.status(502).json({ error: "list_failed", message: opError ?? json.message ?? t().http.files.listFailed });
         return;
       }
       res.json(json.data);
@@ -1793,7 +1793,7 @@ export function createApiRouter(context: AppContext): Router {
       const json = (await upstream.json()) as { success?: boolean; data?: { content?: string }; message?: string };
       const opError = fileOperationError(json.data);
       if (!json.success || opError) {
-        res.status(502).json({ error: "read_failed", message: opError ?? json.message ?? "读取失败" });
+        res.status(502).json({ error: "read_failed", message: opError ?? json.message ?? t().http.files.readFailed });
         return;
       }
       res.json({ path: checked.path, content: json.data?.content ?? "" });
@@ -1819,7 +1819,7 @@ export function createApiRouter(context: AppContext): Router {
       const json = (await upstream.json()) as { success?: boolean; data?: unknown; message?: string };
       const opError = fileOperationError(json.data);
       if (!json.success || opError) {
-        res.status(502).json({ error: "write_failed", message: opError ?? json.message ?? "写入失败" });
+        res.status(502).json({ error: "write_failed", message: opError ?? json.message ?? t().http.files.writeFailed });
         return;
       }
       res.json({ ok: true, path: checked.path });
@@ -1837,18 +1837,18 @@ export function createApiRouter(context: AppContext): Router {
         return;
       }
       if (checked.path === "/" || checked.path === cfg.sandbox.containerWorkspaceDir) {
-        res.status(400).json({ error: "bad_path", message: "不允许删除工作区根目录" });
+        res.status(400).json({ error: "bad_path", message: t().http.files.rootDelete });
         return;
       }
       // The pinned image has no unlink endpoint, so deletion runs inside the sandbox shell.
       const outcome = await runSandboxCommand(`rm -rf -- ${shellQuote(checked.path)}`);
       if (!outcome.ok) {
-        res.status(502).json({ error: "delete_failed", message: outcome.message ?? "删除失败", detail: outcome.output.slice(0, 500) });
+        res.status(502).json({ error: "delete_failed", message: outcome.message ?? t().http.files.deleteFailed, detail: outcome.output.slice(0, 500) });
         return;
       }
       const stillThere = await statSandboxPath(checked.path);
       if (stillThere.exists) {
-        res.status(502).json({ error: "delete_unverified", message: "命令已执行，但沙箱中该路径仍然存在" });
+        res.status(502).json({ error: "delete_unverified", message: t().http.files.deleteUnverified });
         return;
       }
       res.json({ ok: true, path: checked.path });
@@ -1867,12 +1867,12 @@ export function createApiRouter(context: AppContext): Router {
       }
       const outcome = await runSandboxCommand(`mkdir -p -- ${shellQuote(checked.path)}`);
       if (!outcome.ok) {
-        res.status(502).json({ error: "mkdir_failed", message: outcome.message ?? "创建目录失败", detail: outcome.output.slice(0, 500) });
+        res.status(502).json({ error: "mkdir_failed", message: outcome.message ?? t().http.files.mkdirFailed, detail: outcome.output.slice(0, 500) });
         return;
       }
       const stat = await statSandboxPath(checked.path);
       if (!stat.exists || !stat.isDirectory) {
-        res.status(502).json({ error: "mkdir_unverified", message: "命令已执行，但沙箱中未确认该目录存在" });
+        res.status(502).json({ error: "mkdir_unverified", message: t().http.files.mkdirUnverified });
         return;
       }
       res.json({ ok: true, path: checked.path });
@@ -1895,7 +1895,7 @@ export function createApiRouter(context: AppContext): Router {
         120_000,
       );
       if (!upstream.ok || !upstream.body) {
-        res.status(502).json({ error: "download_failed", message: "下载失败" });
+        res.status(502).json({ error: "download_failed", message: t().http.files.downloadFailed });
         return;
       }
       res.setHeader("Content-Type", upstream.headers.get("content-type") ?? "application/octet-stream");
@@ -1930,7 +1930,7 @@ export function createApiRouter(context: AppContext): Router {
           return;
         }
         log.error("document endpoint failed", { url: req.url, error: err instanceof Error ? err.message : String(err) });
-        res.status(502).json({ error: "document_failed", message: "文档服务暂时不可用" });
+        res.status(502).json({ error: "document_failed", message: t().http.files.documentsUnavailable });
       }
     };
 
@@ -1967,7 +1967,7 @@ export function createApiRouter(context: AppContext): Router {
       const kind = documentKind(target);
       const stat = await context.documents.stat(target);
       if (!stat.exists) {
-        res.status(404).json({ error: "not_found", message: "文件不存在或已被移动" });
+        res.status(404).json({ error: "not_found", message: t().http.files.notFound });
         return;
       }
       res.setHeader("Cache-Control", "no-store");
@@ -2128,11 +2128,11 @@ export function createApiRouter(context: AppContext): Router {
     documentHandler(async (req, res) => {
       const target = checkedDocumentPath(String(req.query.path ?? ""));
       if (!/\.html?$/i.test(target)) {
-        res.status(400).json({error:"unsupported",message:"仅支持 HTML 页面"}); return;
+        res.status(400).json({error:"unsupported",message:t().http.files.htmlOnly}); return;
       }
       const result = await context.documents.text(target);
       if (result.truncated) {
-        res.status(413).json({error:"too_large",message:"页面过大，请下载完整文件查看"}); return;
+        res.status(413).json({error:"too_large",message:t().http.files.pageTooLarge}); return;
       }
       res.setHeader("Content-Security-Policy", `${HTML_PREVIEW_CSP}; frame-ancestors ${cfg.primaryOrigins.join(" ")}`);
       res.setHeader("Content-Type", "text/html; charset=utf-8");
@@ -2169,11 +2169,11 @@ export function createApiRouter(context: AppContext): Router {
       const method = String(req.body?.method ?? "GET").toUpperCase();
       const pathname = String(req.body?.path ?? "");
       if (!["GET", "POST", "PUT", "PATCH", "DELETE"].includes(method)) {
-        res.status(400).json({ error: "bad_method", message: "不支持的请求方法" });
+        res.status(400).json({ error: "bad_method", message: t().http.sandbox.badMethod });
         return;
       }
       if (!/^\/(v1|mcp|cdp|json)(\/|$|\?)/.test(pathname)) {
-        res.status(400).json({ error: "bad_path", message: "仅允许访问沙箱自身的 /v1、/mcp、/cdp 接口" });
+        res.status(400).json({ error: "bad_path", message: t().http.sandbox.badPath });
         return;
       }
       const upstream = await sandboxFetch(pathname, {
@@ -2185,7 +2185,7 @@ export function createApiRouter(context: AppContext): Router {
       res.status(upstream.status).json({
         status: upstream.status,
         contentType: upstream.headers.get("content-type"),
-        body: text.length > 200_000 ? `${text.slice(0, 200_000)}\n…(已截断)` : text,
+        body: text.length > 200_000 ? `${text.slice(0, 200_000)}\n${t().http.sandbox.truncated}` : text,
       });
     }),
   );
@@ -2237,12 +2237,12 @@ export function createApiRouter(context: AppContext): Router {
   router.get("/map/geocode", requireKind("primary"), requireSession,
     asyncHandler(async (req, res) => {
       const q = typeof req.query.q === "string" ? req.query.q.trim() : "";
-      if (!q || q.length > 200) { res.status(400).json({error:"bad_query",message:"缺少有效的地址"}); return; }
+      if (!q || q.length > 200) { res.status(400).json({error:"bad_query",message:t().http.maps.badQuery}); return; }
       try {
         res.setHeader("Cache-Control", "private, max-age=86400");
         res.json({place: await maps.geocode(q)});
       } catch {
-        res.status(502).json({error:"geocode_unavailable",message:"暂时无法定位这个地址"});
+        res.status(502).json({error:"geocode_unavailable",message:t().http.maps.geocodeFailed});
       }
     }),
   );
@@ -2254,7 +2254,7 @@ export function createApiRouter(context: AppContext): Router {
     const ctx = ctxOf(req);
     const user = ctx.session ? getUser(db, ctx.session.ownerId) : null;
     if (!context.cameras || !user || !cfg.haMcp.accounts.includes(user.username)) {
-      res.status(404).json({ error: "camera_unavailable", message: "这个账号没有开通摄像头" });
+      res.status(404).json({ error: "camera_unavailable", message: t().http.cameras.notEnabled });
       return null;
     }
     return context.cameras;
@@ -2276,7 +2276,7 @@ export function createApiRouter(context: AppContext): Router {
         if (!(err instanceof CameraError)) throw err;
         if (res.headersSent) { res.destroy(); return; }
         const notFound = err.message === "not_found";
-        res.status(notFound ? 404 : 502).json({ error: notFound ? "not_found" : "camera_error", message: notFound ? "录像已不在了" : err.message });
+        res.status(notFound ? 404 : 502).json({ error: notFound ? "not_found" : "camera_error", message: notFound ? t().http.cameras.recordingGone : err.message });
       }
     });
   const cameraTime = (raw: unknown): number | null => (typeof raw === "string" && /^\d{12,14}$/.test(raw) ? Number(raw) : parseLocal(raw));
@@ -2317,7 +2317,7 @@ export function createApiRouter(context: AppContext): Router {
   router.get("/cameras/:entity/playback", requireKind("primary"), requireSession,
     cameraHandler(async (req, res, cameras, entity) => {
       const at = cameraTime(req.query.at);
-      if (at === null) { res.status(400).json({ error: "bad_time", message: "时间格式不对" }); return; }
+      if (at === null) { res.status(400).json({ error: "bad_time", message: t().http.cameras.badTime }); return; }
       const { piece, offset, next } = await cameras.locate(entity, at);
       res.setHeader("Cache-Control", "no-store");
       res.json({
@@ -2357,7 +2357,7 @@ export function createApiRouter(context: AppContext): Router {
         }));
         res.json({sessions});
       } catch {
-        res.status(502).json({error:"sessions_unavailable",message:"暂时无法读取终端会话，请重试"});
+        res.status(502).json({error:"sessions_unavailable",message:t().http.sandbox.terminalsUnavailable});
       }
     }),
   );
@@ -2369,7 +2369,7 @@ export function createApiRouter(context: AppContext): Router {
       const result = await upstream.json().catch(() => null) as {success?:boolean;data?:unknown}|null;
       let id: string | null = null;
       try { id = typeof result?.data === "string" ? new URL(result.data).searchParams.get("session_id") : null; } catch { id = null; }
-      if (!upstream.ok || !result?.success || !id || !TERMINAL_ID.test(id)) { res.status(502).json({message:"创建终端失败，请重试"}); return; }
+      if (!upstream.ok || !result?.success || !id || !TERMINAL_ID.test(id)) { res.status(502).json({message:t().http.sandbox.terminalCreateFailed}); return; }
       terminals.add(id);
       res.status(201).json({id});
     }),
@@ -2377,12 +2377,12 @@ export function createApiRouter(context: AppContext): Router {
   router.delete("/sandbox/shell-sessions/:id", requireKind("primary"), requireSession,
     asyncHandler(async (req, res) => {
       const id = String(req.params.id);
-      if (!TERMINAL_ID.test(id)) { res.status(400).json({message:"无效的终端会话 ID"}); return; }
-      if (!terminals.has(id)) { res.status(404).json({message:"终端不存在或已结束"}); return; }
+      if (!TERMINAL_ID.test(id)) { res.status(400).json({message:t().http.sandbox.badTerminal}); return; }
+      if (!terminals.has(id)) { res.status(404).json({message:t().http.sandbox.terminalGone}); return; }
       try {
         await exitTerminal(container.upstream(), id);
       } catch {
-        res.status(502).json({message:"关闭终端失败，会话可能仍在运行，请刷新后核对"}); return;
+        res.status(502).json({message:t().http.sandbox.terminalCloseFailed}); return;
       }
       terminals.remove(id);
       res.json({ok:true});
@@ -2401,12 +2401,12 @@ export function createApiRouter(context: AppContext): Router {
       const name = typeof req.body?.name === "string" ? req.body.name : "";
       const contentBase64 = typeof req.body?.contentBase64 === "string" ? req.body.contentBase64 : "";
       if (!name || !contentBase64) {
-        res.status(400).json({ error: "bad_request", message: "缺少文件名或内容" });
+        res.status(400).json({ error: "bad_request", message: t().http.files.uploadMissing });
         return;
       }
       const buffer = Buffer.from(contentBase64, "base64");
       if (buffer.byteLength > 25 * 1024 * 1024) {
-        res.status(413).json({ error: "too_large", message: "文件不能超过 25MB" });
+        res.status(413).json({ error: "too_large", message: t().http.files.uploadTooLarge });
         return;
       }
       const safeName = name.replace(/[^\w.\-()\u4e00-\u9fa5]+/g, "_").slice(-120) || "upload.bin";
@@ -2426,12 +2426,12 @@ export function createApiRouter(context: AppContext): Router {
       if (!explicitDir) {
         const mkdir = await runSandboxCommand(`mkdir -p -- ${shellQuote(dir)}`);
         if (!mkdir.ok) {
-          res.status(502).json({ error: "mkdir_failed", message: mkdir.message ?? "创建附件目录失败", detail: mkdir.output.slice(0, 500) });
+          res.status(502).json({ error: "mkdir_failed", message: mkdir.message ?? t().http.files.uploadDirFailed, detail: mkdir.output.slice(0, 500) });
           return;
         }
         const dirStat = await statSandboxPath(dir);
         if (!dirStat.exists || !dirStat.isDirectory) {
-          res.status(502).json({ error: "mkdir_unverified", message: "命令已执行，但沙箱中未确认附件目录存在" });
+          res.status(502).json({ error: "mkdir_unverified", message: t().http.files.uploadDirUnverified });
           return;
         }
       }
@@ -2448,7 +2448,7 @@ export function createApiRouter(context: AppContext): Router {
       });
       const json = (await upstream.json()) as { success?: boolean; message?: string };
       if (!upstream.ok || json.success === false) {
-        res.status(502).json({ error: "upload_failed", message: json.message ?? "上传失败" });
+        res.status(502).json({ error: "upload_failed", message: json.message ?? t().http.files.uploadFailed });
         return;
       }
       const kind = /^image\//.test(String(req.body?.mime ?? "")) || /\.(png|jpe?g|gif|webp|bmp)$/i.test(safeName) ? "image" : "file";
@@ -2485,18 +2485,18 @@ export function createApiRouter(context: AppContext): Router {
       try {
         await context.browser.wake();
       } catch (err) {
-        res.status(503).json({ error: "browser_wake_failed", message: err instanceof Error ? err.message : "浏览器恢复失败，请稍后重试" });
+        res.status(503).json({ error: "browser_wake_failed", message: err instanceof Error ? err.message : t().http.browser.wakeFailedRetry });
         return;
       }
       // A link the person opens gets a tab of their own, operated from the console
       // like a taken-over task tab; without the tab server it is a plain browser tab.
       if (context.tabs) {
         const opened = await context.tabs.open(checked.url);
-        if (opened.status === 200 && opened.body.tab) { res.json({ ok: true, message: "已打开", data: null, tab: opened.body.tab }); return; }
+        if (opened.status === 200 && opened.body.tab) { res.json({ ok: true, message: t().http.browser.opened, data: null, tab: opened.body.tab }); return; }
       }
       const result = await aio.createBrowserTab(checked.url);
       if (!result.ok) {
-        res.status(503).json({ error: "browser_tab_failed", message: `打开链接失败：${result.message}` });
+        res.status(503).json({ error: "browser_tab_failed", message: t().http.browser.openFailed(result.message) });
         return;
       }
       res.json({ ok: true, message: result.message, data: result.data ?? null });
@@ -2517,27 +2517,27 @@ export function createApiRouter(context: AppContext): Router {
     documentHandler(async (req, res) => {
       const target = checkedDocumentPath(String(req.body?.path ?? ""));
       if (!/\.(html?|xhtml)$/i.test(target)) {
-        res.status(415).json({ error: "unsupported", message: "只有 HTML 页面可以在浏览器里打开" });
+        res.status(415).json({ error: "unsupported", message: t().http.browser.htmlOnly });
         return;
       }
       const stat = await context.documents.stat(target);
       if (!stat.exists || !stat.isFile) {
-        res.status(404).json({ error: "not_found", message: "文件不存在或已被移动" });
+        res.status(404).json({ error: "not_found", message: t().http.files.notFound });
         return;
       }
       if (!context.tabs) {
-        res.status(503).json({ error: "browser_unavailable", message: "沙箱浏览器暂不可用" });
+        res.status(503).json({ error: "browser_unavailable", message: t().http.browser.sandboxBrowserUnavailable });
         return;
       }
       try {
         await context.browser.wake();
       } catch (err) {
-        res.status(503).json({ error: "browser_wake_failed", message: err instanceof Error ? err.message : "浏览器恢复失败，请稍后重试" });
+        res.status(503).json({ error: "browser_wake_failed", message: err instanceof Error ? err.message : t().http.browser.wakeFailedRetry });
         return;
       }
       const opened = await context.tabs.open(pathToFileURL(stat.realPath).href);
       if (opened.status !== 200 || !opened.body.tab) {
-        res.status(503).json({ error: "browser_tab_failed", message: "在浏览器里打开页面失败，请稍后重试" });
+        res.status(503).json({ error: "browser_tab_failed", message: t().http.browser.openPageFailed });
         return;
       }
       res.json({ ok: true, tab: opened.body.tab });
@@ -2588,13 +2588,13 @@ export function createApiRouter(context: AppContext): Router {
         Boolean(ctx.origin) &&
         (originAllowed(cfg, "workspace", ctx.origin) || originAllowed(cfg, "primary", ctx.origin));
       if (!fromAllowedOrigin) {
-        res.status(403).json({ error: "origin_denied", message: "来源站点不被允许" });
+        res.status(403).json({ error: "origin_denied", message: t().http.common.originDenied });
         return;
       }
       const renewed = sessions.heartbeat(ctx.session!);
       if (!renewed) {
         res.setHeader("Set-Cookie", clearSessionCookies("workspace", ctx.secure));
-        res.status(401).json({ error: "session_expired", message: "工作区会话已过期" });
+        res.status(401).json({ error: "session_expired", message: t().http.session.workspaceExpired });
         return;
       }
       const csrf = ctx.cookies[COOKIE_NAMES.workspace.csrf] ?? "";
@@ -2644,7 +2644,7 @@ export function createApiRouter(context: AppContext): Router {
     asyncHandler(async (req, res, ctx) => {
       const id = typeof req.body?.id === "string" ? req.body.id.trim() : "";
       if (!id || id.length > 128) {
-        res.status(400).json({ error: "bad_viewer_id", message: "缺少有效的观看标识" });
+        res.status(400).json({ error: "bad_viewer_id", message: t().http.browser.badViewer });
         return;
       }
       const generation = Number.isFinite(Number(req.body?.generation)) ? Math.trunc(Number(req.body.generation)) : 0;
@@ -2652,7 +2652,7 @@ export function createApiRouter(context: AppContext): Router {
       if (!lease) {
         // The panel's incarnation was already released; it must remount rather
         // than assume it still holds the browser awake.
-        res.status(409).json({ error: "stale_viewer", message: "该面板的观看授权已失效，请重新打开浏览器面板" });
+        res.status(409).json({ error: "stale_viewer", message: t().http.browser.staleViewer });
         return;
       }
       res.json({ ok: true, generation: lease.generation, status: browserStatusPayload(context.browser.status()) });
@@ -2691,7 +2691,7 @@ export function createApiRouter(context: AppContext): Router {
       const raw = typeof req.body?.note === "string" ? req.body.note.trim() : "";
       const pin = req.body?.ui === true
         ? context.browser.pinUiKeepAlive()
-        : context.browser.pin((raw || "手动保留").slice(0, 120), Math.min(ttl ?? cfg.browser.keepAliveMs, cfg.browser.keepAliveMs));
+        : context.browser.pin((raw || t().http.browser.manualPin).slice(0, 120), Math.min(ttl ?? cfg.browser.keepAliveMs, cfg.browser.keepAliveMs));
       res.json({
         ok: true,
         pin: { id: pin.id, note: pin.note, expiresAt: Number.isFinite(pin.expiresAt) ? pin.expiresAt : null },
@@ -2726,7 +2726,7 @@ export function createApiRouter(context: AppContext): Router {
       } catch (err) {
         // The lifecycle always throws a fixed, secret-free sentence, but the
         // code is what the UI keys its retry text on.
-        const message = err instanceof Error ? err.message : "浏览器恢复失败";
+        const message = err instanceof Error ? err.message : t().http.browser.wakeFailed;
         res.status(502).json({ error: "browser_wake_failed", message, status: browserStatusPayload(context.browser.status()) });
       }
     }),
@@ -2750,6 +2750,8 @@ function streamEvents(
   since: number,
 ): void {
   const { agent, sessions, log } = context;
+  // Written later from timers and other requests' events, so the request's language is taken now.
+  const m = t().http.session;
   res.writeHead(200, {
     "Content-Type": "text/event-stream; charset=utf-8",
     "Cache-Control": "no-cache, no-transform",
@@ -2785,7 +2787,7 @@ function streamEvents(
 
   const heartbeat = setInterval(() => {
     if (!ctx.session || !sessions.isLive(ctx.session.id)) {
-      res.write(`event: session.revoked\ndata: ${JSON.stringify({ message: "会话已过期" })}\n\n`);
+      res.write(`event: session.revoked\ndata: ${JSON.stringify({ message: m.expired })}\n\n`);
       cleanup();
       res.end();
       return;
@@ -2795,7 +2797,7 @@ function streamEvents(
 
   const onRevoked = (sessionId: string) => {
     if (sessionId !== ctx.session?.id) return;
-    res.write(`event: session.revoked\ndata: ${JSON.stringify({ message: "会话已注销" })}\n\n`);
+    res.write(`event: session.revoked\ndata: ${JSON.stringify({ message: m.revoked })}\n\n`);
     cleanup();
     res.end();
   };
@@ -2836,7 +2838,7 @@ export interface ShellOutcome {
 export function interpretShellResult(payload: unknown): ShellOutcome {
   const root = (payload ?? {}) as { success?: boolean; message?: string; data?: Record<string, unknown> | null };
   if (root.success === false) {
-    return { ok: false, status: "rejected", exitCode: null, output: "", message: root.message ?? "沙箱拒绝了该命令" };
+    return { ok: false, status: "rejected", exitCode: null, output: "", message: root.message ?? t().http.files.commandRejected };
   }
   const data = root.data ?? {};
   const status = String(data.status ?? "unknown");
@@ -2844,13 +2846,13 @@ export function interpretShellResult(payload: unknown): ShellOutcome {
   const exitCode = typeof rawExit === "number" ? rawExit : null;
   const output = typeof data.output === "string" ? data.output : "";
   if (status === "running") {
-    return { ok: false, status, exitCode, output, message: "命令仍在运行，无法确认执行结果" };
+    return { ok: false, status, exitCode, output, message: t().http.files.commandRunning };
   }
   if (status !== "completed") {
-    return { ok: false, status, exitCode, output, message: `命令状态异常（${status}）` };
+    return { ok: false, status, exitCode, output, message: t().http.files.commandStatus(status) };
   }
   if (exitCode !== 0) {
-    return { ok: false, status, exitCode, output, message: `命令退出码 ${exitCode ?? "未知"}` };
+    return { ok: false, status, exitCode, output, message: t().http.files.commandExit(exitCode) };
   }
   return { ok: true, status, exitCode, output };
 }
@@ -2868,9 +2870,9 @@ export function fileOperationError(data: unknown): string | null {
 /** Sandbox paths must be absolute container paths; the host filesystem is never touched. */
 export function requireAbsoluteSandboxPath(input: string): { ok: true; path: string } | { ok: false; message: string } {
   const value = input.trim();
-  if (!value) return { ok: false, message: "缺少路径" };
-  if (!value.startsWith("/")) return { ok: false, message: "路径必须是沙箱内的绝对路径" };
-  if (value.includes("\u0000") || value.includes("\n")) return { ok: false, message: "路径包含非法字符" };
+  if (!value) return { ok: false, message: t().http.files.missingPath };
+  if (!value.startsWith("/")) return { ok: false, message: t().http.files.relativePath };
+  if (value.includes("\u0000") || value.includes("\n")) return { ok: false, message: t().http.files.badChars };
   const parts: string[] = [];
   for (const segment of value.split("/")) {
     if (!segment || segment === ".") continue;

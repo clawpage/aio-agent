@@ -2,6 +2,7 @@ import type { IncomingMessage } from "node:http";
 import type { Config } from "../config.js";
 import type { Session, SessionStore } from "../auth/sessions.js";
 import { COOKIE_NAMES, parseCookies } from "../auth/sessions.js";
+import { t } from "../i18n/index.js";
 
 export type HostKind = "primary" | "workspace";
 
@@ -165,14 +166,14 @@ export function guardUnsafe(
   opts: { requireCsrf: boolean },
 ): GuardResult {
   if (!ctx.origin) {
-    return { ok: false, status: 403, code: "origin_missing", message: "缺少 Origin 头，已拒绝该请求" };
+    return { ok: false, status: 403, code: "origin_missing", message: t().http.session.originMissing };
   }
   if (!originAllowed(cfg, ctx.kind, ctx.origin)) {
-    return { ok: false, status: 403, code: "origin_denied", message: "来源站点不被允许" };
+    return { ok: false, status: 403, code: "origin_denied", message: t().http.common.originDenied };
   }
   if (opts.requireCsrf) {
     if (!ctx.session || !sessions.verifyCsrf(ctx.session, csrfToken)) {
-      return { ok: false, status: 403, code: "csrf_invalid", message: "CSRF 校验失败，请刷新页面重试" };
+      return { ok: false, status: 403, code: "csrf_invalid", message: t().http.session.csrfInvalid };
     }
   }
   return { ok: true, status: 200, code: "ok", message: "ok" };

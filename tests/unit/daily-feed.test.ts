@@ -95,7 +95,7 @@ describe("the built-in daily feed", () => {
     await tick();
     due(); fire(); await tick();
     const seen: Array<{ title: string } | null> = [];
-    tasks.setNotifier((t) => seen.push(taskNotification(t)));
+    tasks.setNotifier((t) => seen.push(taskNotification(t, "zh-CN")));
     await finishFeed("今日为你留意\n- Mac Studio 在 Best Buy 降到 $1,799。\n<!--feed-topics: [\"Mac Studio 降价\"]-->");
     const run = tasks.view(tasks.get(feed().last_task_id!)!);
     expect(run.result).toBe("今日为你留意\n- Mac Studio 在 Best Buy 降到 $1,799。");

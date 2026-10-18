@@ -25,18 +25,18 @@ export function readSecretFile(
   try {
     stat = fs.statSync(filePath);
   } catch {
-    return { ok: false, reason: `密钥文件不存在或不可读：${filePath}` };
+    return { ok: false, reason: `secret file missing or unreadable: ${filePath}` };
   }
-  if (!stat.isFile()) return { ok: false, reason: `密钥路径不是普通文件：${filePath}` };
+  if (!stat.isFile()) return { ok: false, reason: `secret path is not a regular file: ${filePath}` };
   const mode = stat.mode & 0o777;
   if ((mode & 0o077) !== 0) {
-    return { ok: false, reason: `密钥文件权限过宽（${mode.toString(8)}），要求 600 或 400：${filePath}` };
+    return { ok: false, reason: `secret file permissions too open (${mode.toString(8)}), 600 or 400 required: ${filePath}` };
   }
   let text: string;
   try {
     text = fs.readFileSync(filePath, "utf8");
   } catch {
-    return { ok: false, reason: `密钥文件读取失败：${filePath}` };
+    return { ok: false, reason: `secret file could not be read: ${filePath}` };
   }
   for (const line of text.split(/\r?\n/)) {
     const trimmed = line.trim();
@@ -50,8 +50,8 @@ export function readSecretFile(
       value.length >= 2 &&
       ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'")));
     if (quoted) value = value.slice(1, -1);
-    if (!value) return { ok: false, reason: `密钥文件里 ${keyName} 为空：${filePath}` };
+    if (!value) return { ok: false, reason: `${keyName} is empty in the secret file: ${filePath}` };
     return { ok: true, value };
   }
-  return { ok: false, reason: `密钥文件里没有 ${keyName}：${filePath}` };
+  return { ok: false, reason: `no ${keyName} in the secret file: ${filePath}` };
 }

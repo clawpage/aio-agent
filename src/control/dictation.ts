@@ -15,7 +15,7 @@ const NAMES_FIRST_WAIT_MS = 1_000;
 // People's names on the knowledge base's labelled photos; one seen this rarely is more likely a mislabel.
 const NAMES_SQL = "SELECT json_extract(j.value,'$.name') AS name, count(*) AS n FROM v_media, json_each(v_media.people) j GROUP BY 1 HAVING n >= 10 ORDER BY n DESC LIMIT 40";
 
-const POLISH_PROMPT = `You are the polisher for a voice input method. <transcript> is the raw output of a speech recognizer (mostly Mandarin, often mixed with English terms); the user wants it entered as if they had typed it themselves.
+const POLISH_PROMPT = /* i18n-exempt: Mandarin misrecognitions shown to the model as examples */ `You are the polisher for a voice input method. <transcript> is the raw output of a speech recognizer (mostly Mandarin, often mixed with English terms); the user wants it entered as if they had typed it themselves.
 The recognizer gets words wrong by sound: it writes a homophone or near-homophone that does not fit the sentence (原码 for 源码, 部属 for 部署, 在见 for 再见), turns English words, brand names, acronyms and codes into Chinese characters or broken pieces (get hub → GitHub, 派森 → Python, 三W → 3W), and repeats words after a slip of the tongue.
 Read it the way an attentive listener would: work out what the user actually said, then write that.
 - Check every word: one sentence can hold several errors. A word or phrase that is odd or meaningless in context is a recognition error: replace it with the similar-sounding word that makes the sentence make sense. Leave a word as is only when it already fits naturally;
@@ -133,9 +133,9 @@ export class Dictation {
 
   /** Types `text` at the cursor on the host Mac. */
   async type(text: string): Promise<void> {
-    if (!this.enabled) throw new DictationError("not_configured", "没有配置键盘桥");
+    if (!this.enabled) throw new DictationError("not_configured", "no keyboard bridge configured");
     const token = readSecretFile(this.#cfg.keyboardBridge.secretsFile, "KEYBOARD_BRIDGE_TOKEN");
-    if (!token.ok) throw new DictationError("not_configured", "没有键盘桥令牌");
+    if (!token.ok) throw new DictationError("not_configured", "no keyboard bridge token");
     let res: Response;
     try {
       res = await fetch(`${this.#cfg.keyboardBridge.url}/type`, {
@@ -145,9 +145,9 @@ export class Dictation {
         signal: AbortSignal.timeout(TYPE_TIMEOUT_MS),
       });
     } catch {
-      throw new DictationError("bridge_unavailable", "键盘桥连不上");
+      throw new DictationError("bridge_unavailable", "keyboard bridge unreachable");
     }
-    if (res.status === 403) throw new DictationError("not_trusted", "Mac 上还没允许 AIO Keyboard 使用辅助功能");
-    if (!res.ok) throw new DictationError("bridge_unavailable", `键盘桥返回 ${res.status}`);
+    if (res.status === 403) throw new DictationError("not_trusted", "AIO Keyboard has no Accessibility permission on the Mac yet");
+    if (!res.ok) throw new DictationError("bridge_unavailable", `keyboard bridge answered ${res.status}`);
   }
 }
