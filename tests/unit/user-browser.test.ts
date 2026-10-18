@@ -124,7 +124,9 @@ it("runs the AI's own Chrome on first use: a window per page, a screencast and t
     ]);
     expect(session.find((c) => c.method === "Input.insertText")!.params).toEqual({ text: "你好" });
     expect(session.find((c) => c.method === "Page.navigateToHistoryEntry")!.params).toEqual({ entryId: 10 });
-    expect(session.find((c) => c.method === "Page.screencastFrameAck")!.params).toEqual({ sessionId: 1 });
+    // The next picture is asked for only after a pause (FRAME_GAP_MS), so a scrolling page cannot flood the link.
+    await until(() => calls().some((c) => c.method === "Page.screencastFrameAck"));
+    expect(calls().find((c) => c.method === "Page.screencastFrameAck")!.params).toEqual({ sessionId: 1 });
     ws.close();
     await until(() => calls().some((c) => c.method === "Page.stopScreencast"));
 

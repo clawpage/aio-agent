@@ -64,6 +64,8 @@ const START_TIMEOUT_MS = 30_000;
 const PAGE_SIZE = { width: 1280, height: 800 };
 /** Live view: the largest picture sent (pages are 1280 wide; a zoomed phone wants every pixel of that). */
 const FRAME_MAX = 1600;
+/** …and at most one picture this often: a scrolling page paints far faster than the link to the console carries. */
+const FRAME_GAP_MS = 125;
 
 export const UNAVAILABLE =
   "The AI's Chrome on the user's Mac is not available right now: Google Chrome is not installed on that Mac, or it did not start. Use the sandbox browser (aio_tabs) for this task instead.";
@@ -554,9 +556,14 @@ export function createUserBrowser({ entry, profileDir, chromePath = defaultChrom
             const width = Math.round(metadata.deviceWidth), height = Math.round(metadata.deviceHeight);
             if (width !== size.width || height !== size.height) { size = { width, height }; say({ type: "size", ...size }); }
             if (ws.readyState === ws.OPEN) ws.send(Buffer.from(data, "base64"), { binary: true });
-            // The next picture is asked for once this one has left: a slow viewer gets fewer, never a backlog.
+            // The next picture is asked for once this one has left, and not sooner than FRAME_GAP_MS: a slow viewer gets fewer, never a backlog.
             unacked = frame;
-            const drain = () => { if (!open || ws.bufferedAmount < 256 * 1024) { pump = null; ack(); } else pump = setTimeout(drain, 50); };
+            const sentAt = Date.now();
+            const drain = () => {
+              const wait = FRAME_GAP_MS - (Date.now() - sentAt);
+              if (open && (wait > 0 || ws.bufferedAmount >= 256 * 1024)) pump = setTimeout(drain, Math.max(wait, 50));
+              else { pump = null; ack(); }
+            };
             if (!pump) drain();
           }
         });
@@ -576,7 +583,7 @@ export function createUserBrowser({ entry, profileDir, chromePath = defaultChrom
         // The page as it is now, then whatever it paints next.
         const first = await cdp.send("Page.captureScreenshot", { format: "jpeg", quality: 60 }, sessionId).catch(() => null);
         if (first && ws.readyState === ws.OPEN) ws.send(Buffer.from(first.data, "base64"), { binary: true });
-        await cdp.send("Page.startScreencast", { format: "jpeg", quality: 60, maxWidth: FRAME_MAX, maxHeight: FRAME_MAX, everyNthFrame: 1 }, sessionId);
+        await cdp.send("Page.startScreencast", { format: "jpeg", quality: 55, maxWidth: FRAME_MAX, maxHeight: FRAME_MAX, everyNthFrame: 1 }, sessionId);
         // One input at a time, in order: a press, its moves and its release stay a drag.
         let queue = Promise.resolve();
         ws.on("message", (data, binary) => {
