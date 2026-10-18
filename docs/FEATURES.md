@@ -721,7 +721,8 @@ Android 手机用 USB 接在装了 Mac App 的 Mac 上，由 App 运行的 `bin/
   经 `/share/<账号>/pages/<页面名>/cover` 存为页面目录下的 `.cover`（只认 JPEG/PNG/WebP 文件头，≤1.5 MB；公开路径不提供隐藏文件）。
   渲染失败不影响发布（输出 `coverError`），`aio-share.py cover <页面名>|--missing` 可重渲；同名重发布保留旧封面直到新封面写入；
   沙箱每次播种后在沙箱里脱离执行一次 `cover --missing`（同一时间只跑一个，日志在 `/tmp/aio-share-cover.log`），
-  复用同一个无头浏览器依次为没有封面的页面补上；每页最多等 20 秒加载、8 秒字体与图片。控制台经 `GET /api/clawpages/<页面名>/cover[?v=<版本>]`
+  复用同一个无头浏览器依次为没有封面的页面补上；每页最多等 20 秒加载、8 秒字体与图片，整页超过 60 秒即放弃并换新浏览器；
+  封面超过 1.4 MB 时依次降低 JPEG 质量（78→62→48→36）重截。请求体超限时服务端读完再回 413，不中途断开。控制台经 `GET /api/clawpages/<页面名>/cover[?v=<版本>]`
   读取（只给本账号，带版本时长期缓存）：Clawpages 列表与详情用它做封面（没有时用标题首字），主会话里指向本账号 clawpage 的卡片也显示它（左侧竖条缩略图，卡片保持紧凑）。
 - **控制台**：`GET /api/clawpages` 列表；`/api/clawpages/<页面名>/tables/<表>` 浏览记录（`PATCH` 改权限、`DELETE` 删表）、`/export` 导出 JSON、
   `/records/<键>` 删除单条；`DELETE /api/clawpages/<页面名>` 删除页面和数据。均只作用于本账号。

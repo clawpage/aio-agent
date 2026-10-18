@@ -479,15 +479,19 @@ export class ShareStore {
   }
 }
 
-/** A JSON object body, at most `limit` bytes. */
+/**
+ * A JSON object body, at most `limit` bytes. A larger one is read to its end (up to four times the
+ * limit) before the 413, so the caller gets the answer instead of a connection cut mid-upload.
+ */
 async function readJson(req: http.IncomingMessage, limit: number): Promise<Record<string, unknown>> {
   const chunks: Buffer[] = [];
   let size = 0;
   for await (const chunk of req) {
     size += (chunk as Buffer).length;
-    if (size > limit) throw new DataError(413, "BODY_TOO_LARGE", "The request body is too large");
-    chunks.push(chunk as Buffer);
+    if (size > limit * 4) throw new DataError(413, "BODY_TOO_LARGE", "The request body is too large");
+    if (size <= limit) chunks.push(chunk as Buffer);
   }
+  if (size > limit) throw new DataError(413, "BODY_TOO_LARGE", "The request body is too large");
   if (!size) return {};
   try {
     const body = JSON.parse(Buffer.concat(chunks).toString()) as unknown;

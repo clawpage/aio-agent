@@ -27,7 +27,7 @@ const b64 = (text: string) => Buffer.from(text).toString("base64");
 /** A JPEG's first bytes: enough for the cover check, which goes by signature. */
 const JPEG = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.from("cover")]);
 /** Stands in for aio-render.py's Page: records the address it was sent to and "captures" a JPEG. */
-const FAKE_RENDERER = `import base64
+const FAKE_RENDERER = `import base64, time
 class Page:
     def __init__(self, width, scale):
         self.size = (width, scale)
@@ -37,10 +37,18 @@ class Page:
         pass
     def call(self, method, params=None, session=False, timeout=60):
         if method == "Page.navigate":
+            self.url = params["url"]
             with open(LOG_PATH, "a") as f:
                 f.write(params["url"] + "\\n")
+            if "hang" in self.url:
+                time.sleep(30)
         if method == "Page.captureScreenshot":
             assert params["format"] == "jpeg" and params["clip"]["width"] == 480 and params["clip"]["height"] == 640
+            with open(LOG_PATH, "a") as f:
+                f.write("q%d\\n" % params["quality"])
+            # A picture-heavy page is too large at high quality.
+            if "heavy" in self.url and params["quality"] > 62:
+                return {"data": base64.b64encode(b"\\xff\\xd8\\xff" + b"x" * (1500 * 1024)).decode()}
             return {"data": "${JPEG.toString("base64")}"}
         return {}
     def evaluate(self, expression):
@@ -84,6 +92,7 @@ afterAll(async () => {
   await h?.shutdown();
 });
 
+const cliWith = (env: Record<string, string>, ...args: string[]) => promisify(execFile)("python3", [path.join(tool, "aio-share.py"), ...args], { env: { ...process.env, ...env } }).then((r) => JSON.parse(r.stdout), (e) => JSON.parse(e.stdout));
 const cli = (...args: string[]) => promisify(execFile)("python3", [path.join(tool, "aio-share.py"), ...args]).then((r) => JSON.parse(r.stdout), (e) => JSON.parse(e.stdout));
 const pub = (pathname: string, init: { method?: string; headers?: Record<string, string>; body?: unknown } = {}) =>
   h.request(pathname, { host: "workspace", method: init.method, headers: { ...(init.body === undefined ? {} : { "content-type": "application/json" }), ...init.headers }, body: init.body === undefined ? undefined : JSON.stringify(init.body) });
@@ -378,7 +387,7 @@ it("publishing renders a cover of the live page; the console serves it to its ow
   const published = await cli("publish", dir, "--title", "照片墙");
   expect(published, JSON.stringify(published)).toMatchObject({ ok: true, name: "photo-wall", cover: expect.any(Number) });
   // The live page as a visitor sees it, not the file in the workspace.
-  expect(rendered().slice(before)).toEqual(["start", `https://${h.ctx.cfg.workspaceHost}/u/owner/share/photo-wall/`]);
+  expect(rendered().slice(before)).toEqual(["start", `https://${h.ctx.cfg.workspaceHost}/u/owner/share/photo-wall/`, "q78"]);
   expect(store.list("owner_1").find((p) => p.name === "photo-wall")?.cover).toBe(published.cover);
 
   // The console: the picture itself, checked by its bytes, kept long only under its version.
@@ -434,4 +443,24 @@ it("publishing renders a cover of the live page; the console serves it to its ow
   // A cover goes with its page.
   expect(await cli("delete", "photo-wall")).toEqual({ ok: true, deleted: "photo-wall" });
   expect((await h.request("/api/clawpages/photo-wall/cover", { headers: { cookie } })).status).toBe(404);
+});
+
+it("a cover too large is captured again at lower quality, a page that hangs is given up, and an oversized upload is answered", async () => {
+  const log = () => fs.readFileSync(path.join(toolRoot, "rendered.log"), "utf8").trim().split("\n");
+  const page = (name: string) => { const dir = path.join(tool, name); fs.mkdirSync(dir); fs.writeFileSync(path.join(dir, "index.html"), `<h1>${name}</h1>`); return dir; };
+
+  const mark = log().length;
+  const heavy = await cli("publish", page("heavy-photos"));
+  expect(heavy, JSON.stringify(heavy)).toMatchObject({ ok: true, cover: expect.any(Number) });
+  expect(log().slice(mark).filter((l) => l.startsWith("q"))).toEqual(["q78", "q62"]);
+
+  const started = Date.now();
+  const hung = await cliWith({ AIO_SHARE_COVER_SECONDS: "2" }, "publish", page("hang-page"));
+  expect(hung).toMatchObject({ ok: true, name: "hang-page", cover: null, coverError: expect.stringContaining("longer than 2 s") });
+  expect(Date.now() - started).toBeLessThan(20_000);
+
+  const oversized = await fetch(`http://127.0.0.1:${gateway.port}/share/owner_1/pages/heavy-photos/cover`, {
+    method: "POST", headers: { authorization: `Bearer ${owner.share!.token}`, "content-type": "application/json" },
+    body: JSON.stringify({ data: Buffer.alloc(2 * 1024 * 1024).toString("base64") }) });
+  expect(oversized.status).toBe(413);
 });

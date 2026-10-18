@@ -298,12 +298,16 @@ export const SHARE_SKILL_DIR = "skills/clawpages";
 export const LEGACY_SHARE_SKILL_DIR = "skills/aio-share";
 export const SHARE_CLI_PY = String.raw`#!/usr/bin/env python3
 """aio-share: publish and manage clawpages (public pages and mini apps with data), managed by Clawpage Agent."""
-import argparse, base64, fcntl, importlib.util, json, os, re, shutil, sys, time, urllib.error, urllib.parse, urllib.request
+import argparse, base64, fcntl, importlib.util, json, os, re, shutil, signal, sys, time, urllib.error, urllib.parse, urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 RENDERER = os.path.join(os.path.dirname(HERE), "aio-graphic", "aio-render.py")
 # A cover is the page as a phone shows it on arrival: 480 x 640 CSS pixels at twice the density.
 COVER_W, COVER_H, COVER_SCALE = 480, 640, 2
+# The service keeps covers up to 1.5 MB; a picture-heavy page is captured again at lower quality until it fits.
+COVER_MAX, COVER_QUALITIES = 1400 * 1024, (78, 62, 48, 36)
+# A page that takes longer than this is given up (and its browser closed), so a run never hangs.
+COVER_PAGE_SECONDS = int(os.environ.get("AIO_SHARE_COVER_SECONDS") or 60)
 CONFIG = os.path.join(HERE, "config.json")
 SDK = os.path.join(HERE, "clawpage-sdk.js")
 SDK_NAME = "clawpage-sdk.js"
@@ -412,18 +416,30 @@ class Covers:
             time.sleep(0.25)
         page.evaluate("""Promise.race([document.fonts.ready.then(() => Promise.all([...document.images].map(i => i.complete ? 0 : new Promise(d => {i.onload = i.onerror = d;})))), new Promise(r => setTimeout(r, 8000))]).then(() => new Promise(r => setTimeout(r, 1500)))""")
         page.evaluate("new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))")
-        shot = page.call("Page.captureScreenshot", {"format": "jpeg", "quality": 78, "captureBeyondViewport": False,
-                                                    "clip": {"x": 0, "y": 0, "width": COVER_W, "height": COVER_H, "scale": 1}}, session=True)
-        return shot["data"]
+        for quality in COVER_QUALITIES:
+            data = page.call("Page.captureScreenshot", {"format": "jpeg", "quality": quality, "captureBeyondViewport": False,
+                                                        "clip": {"x": 0, "y": 0, "width": COVER_W, "height": COVER_H, "scale": 1}}, session=True)["data"]
+            if len(data) * 3 // 4 <= COVER_MAX:
+                return data
+        raise RuntimeError("the cover is too large even at the lowest quality")
 
     def make(self, name, url):
         """Render and keep a page's cover; a failure is reported, never fatal."""
+        def give_up(signum, frame):
+            raise TimeoutError("the page took longer than %d s" % COVER_PAGE_SECONDS)
+        previous = signal.signal(signal.SIGALRM, give_up)
+        signal.alarm(COVER_PAGE_SECONDS)
         try:
-            return {"cover": call("POST", "/pages/%s/cover" % name, {"data": self.render(url)}, soft=True)["cover"]}
+            data = self.render(url)
+            signal.alarm(0)
+            return {"cover": call("POST", "/pages/%s/cover" % name, {"data": data}, soft=True)["cover"]}
         except Exception as err:
             # The browser may be what failed: start a new one for the next page.
+            signal.alarm(0)
             self.close()
             return {"coverError": str(err)[:200]}
+        finally:
+            signal.signal(signal.SIGALRM, previous)
 
     def close(self):
         if self.page is not None:
