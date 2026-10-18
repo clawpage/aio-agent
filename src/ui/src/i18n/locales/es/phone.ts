@@ -11,7 +11,7 @@ export const phone: typeof zh = {
     introWeb: "Instala la app Clawpage en un Mac e inicia sesión para que la IA maneje el teléfono Android conectado a ese Mac y Chrome en ese Mac. Aquí aparecen los Mac que has vinculado.",
     link: "Vincular este Mac",
     linking: "Vinculando…",
-    browserHint: "Chrome: abre chrome://inspect/#remote-debugging en Chrome y activa la depuración remota; cuando la IA se conecte por primera vez, Chrome te preguntará y tocas Permitir. La IA usa primero Chrome en este Mac (con las cuentas en las que ya iniciaste sesión); si Chrome está cerrado, no lo permitiste o el Mac está sin conexión, usa el navegador del entorno aislado en la nube.",
+    browserHint: "Navegador: la IA usa un Chrome propio en este Mac (hace falta tener Google Chrome instalado). Funciona en segundo plano con un perfil propio: sin avisos ni ventanas, así que nunca ocupa tu pantalla, tu ratón ni tu teclado, y no toca tu propio Chrome. Míralo en directo y toma el control desde la tarjeta de la tarea; los sitios en los que inicies sesión ahí siguen con la sesión iniciada. Si el Mac está sin conexión o no tiene Chrome, la IA usa el navegador del entorno aislado en la nube.",
     usbHint: "Activa la depuración USB en las opciones de desarrollador del teléfono, conéctalo a este Mac con un cable y toca Permitir cuando el teléfono lo pida. La IA puede usar el teléfono mientras la app Clawpage esté abierta.",
     thisMac: "(este Mac)",
     unnamed: "Mac sin nombre",

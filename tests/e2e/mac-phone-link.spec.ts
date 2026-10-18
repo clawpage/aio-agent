@@ -78,7 +78,9 @@ test("inside the Mac app, the Phone app links this Mac: the token goes to the ap
   await expect(card).toContainText("Mengxiao's MacBook Pro （这台 Mac）");
   await expect(card.getByRole("status")).toContainText("在线");
   await expect(card).toContainText("打开 USB 调试");
-  await expect(card).toContainText("chrome://inspect/#remote-debugging");
+  // The AI's own Chrome needs nothing turned on: no remote-debugging switch, no Allow prompt.
+  await expect(card).toContainText("一个专给它的 Chrome");
+  await expect(card).not.toContainText("chrome://inspect");
   await expect(card.getByRole("button", { name: "连接这台 Mac", exact: true })).toHaveCount(0);
   expect(calls).toContain("POST /api/device-links");
   const sent = await page.evaluate(() => (window as unknown as { __sent: Array<{ type: string; token?: string; linkId?: string }> }).__sent);

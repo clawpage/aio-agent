@@ -93,14 +93,43 @@ describe("noVNC page", () => {
 });
 
 describe("noVNC under the console's toolbar", () => {
-  it("adds the host pinch relay to a desktop patched by the previous toolbar version", () => {
+  it("adds the gesture layer's pointer to a desktop patched by the previous version", () => {
     const patched = patchNoVncUi(ui)!;
-    const start = patched.indexOf("\n/* aio-agent: pinch scales the host preview */");
-    const older = patched.slice(0, start - 1) + patched.slice(patched.indexOf("\nexport default UI;"));
-    expect(patchNoVncUi(older)).toBe(patched);
-    expect(patched).toContain("e.detail.type !== 'pinch'");
-    expect(patched).toContain("e.stopImmediatePropagation();");
-    expect(patched).toContain("ratio: magnitude / startMagnitude");
+    const start = patched.indexOf("\n/* aio-agent: the console's gesture layer drives the pointer */");
+    const older = patched.slice(0, start - 1) + patched.slice(patched.indexOf("\n/* aio-agent: the console hears that someone uses the desktop */") - 1);
+    expect(older).not.toContain("gesture layer");
+    expect(patchNoVncUi(older)).toContain("RFB.messages.pointerEvent(UI.rfb._sock, x, y, mask)");
+    expect(patchNoVncUi(patchNoVncUi(older)!)).toBe(patchNoVncUi(older));
+  });
+
+  it("clicks, holds a button across moves and turns the wheel from the framing page only", () => {
+    const patched = patchNoVncUi(ui)!;
+    const marker = "/* aio-agent: the console's gesture layer drives the pointer */";
+    const block = patched.slice(patched.indexOf(marker), patched.indexOf("/* aio-agent: the console hears that someone uses the desktop */"));
+    const parent = {};
+    let listener: ((e: { source: unknown; data: unknown }) => void) | null = null;
+    const sent: Array<[number, number, number]> = [];
+    const win = { parent, addEventListener: (_: string, fn: typeof listener) => { listener = fn; } };
+    const UI = { rfb: { _rfbConnectionState: "connected", viewOnly: false, _fbWidth: 1281, _fbHeight: 1025, _sock: {} } };
+    const RFB = { messages: { pointerEvent: (_sock: unknown, x: number, y: number, mask: number) => sent.push([x, y, mask]) } };
+    new Function("window", "UI", "RFB", block)(win, UI, RFB);
+    const post = (data: Record<string, unknown>, source: unknown = parent) => listener!({ source, data: { aio: "desktop", ...data } });
+    post({ type: "click", x: 0.5, y: 0.25, button: "right" });
+    expect(sent.splice(0)).toEqual([[640, 256, 0], [640, 256, 4], [640, 256, 0]]);
+    post({ type: "pointer", phase: "down", x: 0, y: 0 });
+    post({ type: "pointer", phase: "move", x: 1, y: 1 });
+    post({ type: "pointer", phase: "up", x: 1, y: 1 });
+    expect(sent.splice(0)).toEqual([[0, 0, 1], [1280, 1024, 1], [1280, 1024, 0]]);
+    // 120 px down is two notches (the rest waits for the next turn); 60 px left is one.
+    post({ type: "wheel", x: 0.5, y: 0.5, dx: -60, dy: 120 });
+    expect(sent.splice(0)).toEqual([[640, 512, 0x10], [640, 512, 0], [640, 512, 0x10], [640, 512, 0], [640, 512, 0x20], [640, 512, 0]]);
+    post({ type: "wheel", x: 0.5, y: 0.5, dx: 0, dy: 30 });
+    expect(sent.splice(0)).toEqual([[640, 512, 0x10], [640, 512, 0]]);
+    // Another window, or a view-only desktop, moves nothing.
+    post({ type: "click", x: 0.5, y: 0.5 }, {});
+    UI.rfb.viewOnly = true;
+    post({ type: "click", x: 0.5, y: 0.5 });
+    expect(sent).toEqual([]);
   });
   it("lets only the framing page hide the left bar and send keys, text and a paste", () => {
     const patched = patchNoVncUi(ui)!;

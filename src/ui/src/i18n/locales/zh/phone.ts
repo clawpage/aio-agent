@@ -50,7 +50,7 @@ export const phone = {
     introWeb: "在 Mac 上安装一站 App 并登录后，可以把接在那台 Mac 上的 Android 手机和那台 Mac 上的 Chrome 交给 AI 操作。这里列出你连接过的 Mac。",
     link: "连接这台 Mac",
     linking: "连接中…",
-    browserHint: "Chrome：在 Chrome 地址栏打开 chrome://inspect/#remote-debugging，打开远程调试；AI 第一次连接时 Chrome 会弹窗，点「允许」。AI 会优先用你这台 Mac 上的 Chrome（带你已登录的账号）；Chrome 没开、没允许或 Mac 离线时，自动改用云端的沙盒浏览器。",
+    browserHint: "浏览器：AI 会用这台 Mac 上一个专给它的 Chrome（需要装有 Google Chrome）。它用独立的配置在后台运行：不弹窗、没有窗口，不占你的屏幕、鼠标和键盘，也碰不到你自己的 Chrome。任务卡片里能看实时画面、随时接管；网站在那里登录一次就会一直保留。Mac 离线或没装 Chrome 时，自动改用云端的沙盒浏览器。",
     usbHint: "在手机的开发者选项里打开 USB 调试，用数据线接到这台 Mac，手机上弹出提示时点「允许」。一站 App 开着时 AI 才能用到这部手机。",
     thisMac: "（这台 Mac）",
     unnamed: "未命名的 Mac",

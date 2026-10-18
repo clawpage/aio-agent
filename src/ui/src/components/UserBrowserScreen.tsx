@@ -1,12 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { apiUrl } from "../api";
 import { t } from "../i18n";
+import { PHONE_ZOOM, usePhoneDesktop } from "./DesktopFrame";
+import { RemoteStage, type RemoteInput } from "./RemoteStage";
 
 /**
- * One task's page on the account's own Chrome, live: JPEG pictures from the
- * Mac's bridge (bin/user-browser.mjs), and, once the person holds the page,
- * clicks, scrolling, keys and text sent back. Positions go out as fractions of
- * the picture, so the bridge maps them onto the page whatever its size.
+ * One task's page on the AI's Chrome on the account's Mac, live: JPEG pictures
+ * as Chrome paints them, from the Mac's bridge (bin/user-browser.mjs). Watching,
+ * the picture zooms and pans; once the person holds the page, taps, drags, the
+ * wheel, keys and text go back to it (RemoteStage has the gestures). With a
+ * keyboard (the Mac app), a click on the page lets typing go straight into it.
  */
 interface Props {
   /** The task's key (its execution conversation). */
@@ -26,6 +29,10 @@ const KEYS: Array<{ msg: Record<string, string>; label: string; title: string }>
   { msg: { t: "key", k: "Tab" }, label: t.userBrowser.screen.tab, title: t.userBrowser.screen.tab },
   { msg: { t: "key", k: "Escape" }, label: t.userBrowser.screen.escape, title: t.userBrowser.screen.escape },
 ];
+/** Keys typed on a keyboard that go to the page as keys (everything else arrives as text). */
+const PAGE_KEYS = new Set(["Enter", "Backspace", "Tab", "Escape", "Delete", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Home", "End", "PageUp", "PageDown"]);
+/** Shortcuts passed on as editing commands; paste arrives as text from the clipboard. */
+const SHORTCUTS = new Set(["a", "z", "x", "c"]);
 
 function screenUrl(key: string): string {
   const url = new URL(apiUrl(`/api/user-browser/screen?key=${encodeURIComponent(key)}`), window.location.href);
@@ -33,15 +40,19 @@ function screenUrl(key: string): string {
   return url.toString();
 }
 
+const modsOf = (e: React.KeyboardEvent) => [e.altKey && "alt", e.ctrlKey && "ctrl", e.metaKey && "meta", e.shiftKey && "shift"].filter(Boolean) as string[];
+
 export function UserBrowserScreen({ taskKey, canAct }: Props) {
   const wsRef = useRef<WebSocket | null>(null);
-  const imgRef = useRef<HTMLImageElement | null>(null);
-  const size = useRef<{ width: number; height: number } | null>(null);
-  const [frame, setFrame] = useState<string | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const keysRef = useRef<HTMLTextAreaElement | null>(null);
+  const [size, setSize] = useState({ width: 1280, height: 800 });
   const [state, setState] = useState<State>("connecting");
   const [error, setError] = useState<string | null>(null);
   const [text, setText] = useState("");
+  const [typing, setTyping] = useState(false);
   const [retry, setRetry] = useState(0);
+  const phone = usePhoneDesktop();
 
   const send = useCallback((msg: unknown) => {
     const ws = wsRef.current;
@@ -51,7 +62,29 @@ export function UserBrowserScreen({ taskKey, canAct }: Props) {
   useEffect(() => {
     let disposed = false;
     let reconnect: number | undefined;
-    let shown: string | null = null;
+    // Pictures are drawn in order, one at a time; one that arrives while another decodes replaces the waiting one.
+    let drawing = false;
+    let waiting: Blob | null = null;
+    const draw = async (blob: Blob) => {
+      if (drawing) { waiting = blob; return; }
+      drawing = true;
+      try {
+        const bitmap = await createImageBitmap(blob);
+        const canvas = canvasRef.current;
+        if (canvas && !disposed) {
+          if (canvas.width !== bitmap.width || canvas.height !== bitmap.height) { canvas.width = bitmap.width; canvas.height = bitmap.height; }
+          canvas.getContext("2d")?.drawImage(bitmap, 0, 0);
+        }
+        bitmap.close();
+      } catch {
+        // A picture that does not decode is skipped; the next one follows.
+      } finally {
+        drawing = false;
+        const next = waiting;
+        waiting = null;
+        if (next && !disposed) void draw(next);
+      }
+    };
     setState("connecting");
     setError(null);
     const ws = new WebSocket(screenUrl(taskKey));
@@ -60,14 +93,11 @@ export function UserBrowserScreen({ taskKey, canAct }: Props) {
     ws.onmessage = (event) => {
       if (typeof event.data === "string") {
         const msg = JSON.parse(event.data) as { type: string; width?: number; height?: number; message?: string };
-        if (msg.type === "size") size.current = { width: msg.width!, height: msg.height! };
+        if (msg.type === "size" && msg.width! > 0 && msg.height! > 0) setSize({ width: msg.width!, height: msg.height! });
         else if (msg.type === "error") setError(msg.message ?? t.userBrowser.screen.unavailable);
         return;
       }
-      const next = URL.createObjectURL(event.data as Blob);
-      if (shown) URL.revokeObjectURL(shown);
-      shown = next;
-      setFrame(next);
+      void draw(event.data as Blob);
       setState("live");
       setError(null);
     };
@@ -81,51 +111,29 @@ export function UserBrowserScreen({ taskKey, canAct }: Props) {
       window.clearTimeout(reconnect);
       wsRef.current = null;
       ws.close();
-      if (shown) URL.revokeObjectURL(shown);
     };
   }, [taskKey, retry]);
 
-  // A tap clicks; a drag scrolls (touch screens have no wheel).
-  const down = useRef<{ x: number; y: number } | null>(null);
-  const fraction = (clientX: number, clientY: number) => {
-    const rect = imgRef.current!.getBoundingClientRect();
-    return { x: (clientX - rect.left) / rect.width, y: (clientY - rect.top) / rect.height };
-  };
-  const onPointerDown = (event: React.PointerEvent<HTMLImageElement>) => {
-    event.preventDefault();
-    down.current = { x: event.clientX, y: event.clientY };
-  };
-  const onPointerUp = (event: React.PointerEvent<HTMLImageElement>) => {
-    const start = down.current;
-    down.current = null;
-    if (!start || !imgRef.current) return;
-    const moved = event.clientY - start.y;
-    if (Math.abs(moved) < 8 && Math.abs(event.clientX - start.x) < 8) {
-      send({ t: "click", ...fraction(event.clientX, event.clientY) });
-      return;
-    }
-    const scale = (size.current?.height ?? imgRef.current.naturalHeight) / imgRef.current.getBoundingClientRect().height;
-    send({ t: "scroll", ...fraction(start.x, start.y), dy: Math.round(-moved * scale) });
-  };
+  const onInput = useCallback((msg: RemoteInput) => send(msg), [send]);
 
-  useEffect(() => {
-    // React's onWheel is passive, so the console would scroll too; listen directly.
-    const img = imgRef.current;
-    if (!img) return;
-    let pending = 0;
-    let timer: number | undefined;
-    let at = { x: 0.5, y: 0.5 };
-    const onWheel = (event: WheelEvent) => {
-      event.preventDefault();
-      at = fraction(event.clientX, event.clientY);
-      pending += event.deltaMode === 1 ? event.deltaY * 16 : event.deltaY;
-      // One scroll per burst of wheel events: each is a round trip to the Mac.
-      window.clearTimeout(timer);
-      timer = window.setTimeout(() => { send({ t: "scroll", ...at, dy: Math.round(pending) }); pending = 0; }, 120);
-    };
-    img.addEventListener("wheel", onWheel, { passive: false });
-    return () => { img.removeEventListener("wheel", onWheel); window.clearTimeout(timer); };
-  }, [send, frame !== null]);
+  // A keyboard types into the page through this hidden box (IME composition included).
+  const flushTyped = () => {
+    const el = keysRef.current;
+    if (!el || !el.value) return;
+    send({ t: "text", s: el.value });
+    el.value = "";
+  };
+  const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.nativeEvent.isComposing || e.key === "Process") return;
+    const mods = modsOf(e);
+    if ((e.metaKey || e.ctrlKey) && SHORTCUTS.has(e.key.toLowerCase())) {
+      e.preventDefault();
+      send({ t: "key", k: e.key, mods });
+    } else if (PAGE_KEYS.has(e.key)) {
+      e.preventDefault();
+      send({ t: "key", k: e.key, mods });
+    }
+  };
 
   const sendText = () => {
     if (!text.trim()) return;
@@ -137,23 +145,37 @@ export function UserBrowserScreen({ taskKey, canAct }: Props) {
     <div className="user-browser-screen">
       <div className="phone-bar">
         <span className={`phone-dot ${state === "live" ? "live" : ""}`} aria-hidden="true" />
-        <span className="phone-name">{state === "closed" ? t.userBrowser.screen.reconnecting : state === "connecting" ? t.userBrowser.screen.connecting : canAct ? t.userBrowser.task.states.human : t.userBrowser.screen.watchHint}</span>
+        <span className="phone-name">{state === "closed" ? t.userBrowser.screen.reconnecting : state === "connecting" ? t.userBrowser.screen.connecting : canAct ? (typing ? t.userBrowser.screen.typingHint : t.userBrowser.screen.actHint) : t.userBrowser.screen.watchHint}</span>
       </div>
-      <div className={`user-browser-stage ${canAct ? "acting" : ""}`}>
-        {frame && (
-          <img
-            ref={imgRef}
-            src={frame}
-            alt={t.userBrowser.screen.page}
-            draggable={false}
-            onPointerDown={onPointerDown}
-            onPointerUp={onPointerUp}
-            onContextMenu={(e) => e.preventDefault()}
-          />
-        )}
-        {error && <div className="frame-hint error">{error}</div>}
-      </div>
+      <RemoteStage
+        className={`user-browser-stage${canAct ? " acting" : ""}`}
+        remote={size}
+        mouse
+        initialScale={phone ? PHONE_ZOOM : 1}
+        onInput={canAct ? onInput : undefined}
+        onMousePress={() => keysRef.current?.focus({ preventScroll: true })}
+        label={t.userBrowser.screen.page}
+      >
+        {(style) => <canvas ref={canvasRef} className="user-browser-picture" style={style} aria-hidden="true" />}
+      </RemoteStage>
+      {error && <div className="frame-hint error">{error}</div>}
       {canAct && <>
+        <textarea
+          ref={keysRef}
+          className="user-browser-keys"
+          aria-label={t.userBrowser.screen.keyboardLabel}
+          autoCapitalize="off"
+          autoComplete="off"
+          autoCorrect="off"
+          spellCheck={false}
+          tabIndex={-1}
+          onFocus={() => setTyping(true)}
+          onBlur={() => setTyping(false)}
+          onKeyDown={onKeyDown}
+          onInput={(e) => { if (!(e.nativeEvent as InputEvent).isComposing) flushTyped(); }}
+          onCompositionEnd={flushTyped}
+          onPaste={(e) => { e.preventDefault(); const s = e.clipboardData.getData("text"); if (s) send({ t: "text", s }); }}
+        />
         <div className="phone-keys" role="toolbar" aria-label={t.userBrowser.screen.toolbar}>
           {KEYS.map((key) => (
             <button key={key.title} type="button" className="ghost" title={key.title} aria-label={key.title} onClick={() => send(key.msg)}>{key.label}</button>

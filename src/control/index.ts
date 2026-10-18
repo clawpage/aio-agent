@@ -496,7 +496,7 @@ async function main(): Promise<void> {
     usernameOf:id=>account("SELECT username AS v FROM owners WHERE id=?",id),userIdOf:name=>account("SELECT id AS v FROM owners WHERE username=?",name)});
   phone.provision(ctx.cfg);
   ctx.phone=phone;
-  // The same Mac offers the account's own Chrome, next to the sandbox browser.
+  // The same Mac offers the AI's Chrome on it, next to the sandbox browser.
   const userBrowser=new UserBrowserGateway({cfg:ctx.cfg,log:ctx.log,port:ctx.cfg.memberModelPort??4902,links:deviceLinks,
     usernameOf:id=>account("SELECT username AS v FROM owners WHERE id=?",id),userIdOf:name=>account("SELECT id AS v FROM owners WHERE username=?",name)});
   userBrowser.provision(ctx.cfg);

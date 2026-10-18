@@ -63,7 +63,8 @@ export const browser: typeof zh = {
     keyboard: "Keyboard",
     paste: "Paste",
     enter: "Enter",
-    hint: "Pinch to zoom · swipe to pan",
+    hint: "Drag to scroll · long-press to drag · pinch to zoom",
+    watchHint: "Pinch to zoom · drag to look around · double-tap to zoom in",
     input: "Type into the desktop",
   },
   console: {

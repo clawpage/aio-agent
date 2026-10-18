@@ -2,7 +2,6 @@ import { test, expect, type Locator, type Page, type TestInfo } from "@playwrigh
 import { makeConversation, mockConsole, mockTaskList } from "./mock-api";
 import type { Task } from "../../src/ui/src/types";
 import fs from "node:fs";
-import { patchNoVncUi } from "../../src/control/sandbox/novncPatch";
 function task(n: number, status = "running"): Task {
     return { id: `task-${n}`, revision: 1, title: `任务 ${n}`, text: `请求 ${n}`, conversationId: `child-${n}`, status, result: null, error: null, attachments: [], relatedTaskId: null, dependencies: [], approvals: 0, createdAt: 1000 + n, completedAt: null };
 }
@@ -641,9 +640,8 @@ test("a link in a reply opens in the person's own tab, operated on the desktop l
     await page.route("**/api/browser/viewer/release", r => { lease.push("release"); return r.fulfill({ json: { ok: true } }); });
     await page.route("**/api/browser/wake", r => { lease.push("wake"); order.push("wake"); return r.fulfill({ json: { ok: true, status: {} } }); });
     await setup(page, [row]);
-    const patchedUi = patchNoVncUi(fs.readFileSync(new URL("../fixtures/novnc-ui-1.4.0.js", import.meta.url), "utf8"))!;
-    const relay = patchedUi.slice(patchedUi.indexOf("/* aio-agent: pinch scales the host preview */"), patchedUi.indexOf("\nexport default UI;"));
-    await page.route("http://127.0.0.1:4289/**", r => r.fulfill({ contentType: "text/html", body: `<html class="aio-host-bar"><body style="margin:0;background:#eee"><div style="height:100%;background:repeating-linear-gradient(45deg,#eee,#eee 30px,#ccc 30px,#ccc 60px)">预览画面</div><script>${relay}</script></body></html>` }));
+    // The framed desktop records what the console's gesture layer sends it (the patched noVNC turns these into the pointer).
+    await page.route("http://127.0.0.1:4289/**", r => r.fulfill({ contentType: "text/html", body: `<html><body style="margin:0;background:#eee"><div style="height:100%;background:repeating-linear-gradient(45deg,#eee,#eee 30px,#ccc 30px,#ccc 60px)">预览画面</div><script>window.got = []; addEventListener("message", (e) => { if (e.source === parent) got.push(e.data); });</script></body></html>` }));
     await page.route("**/api/workspace/ticket", async r => { order.push("ticket"); await r.fulfill({ json: { ticket: "t", origin: "http://127.0.0.1:4289", url: "http://127.0.0.1:4289/vnc/vnc.html?ticket=t", expiresAt: Date.now() + 60_000 } }); });
     let opened: string | null = null;
     await page.route("**/api/browser/tabs", async r => {
@@ -661,74 +659,68 @@ test("a link in a reply opens in the person's own tab, operated on the desktop l
     expect(page.context().pages()).toHaveLength(1);
     await expect(panel).toContainText("OpenTable: Nopa");
     await expect(panel.locator('iframe[title="沙箱桌面"]')).toHaveAttribute("src", /vnc\.html/);
-    // On a phone the desktop is 1.3 times the screen's width (PHONE_ZOOM); a swipe on the black around it pans.
+    // On a phone the desktop opens 1.3 times the screen's width (PHONE_ZOOM), on its middle; the console's gestures move it.
     const frame = panel.locator(".desktop-frame");
-    const geometry = await frame.evaluate((el) => ({ box: el.clientWidth, frame: el.querySelector("iframe")!.getBoundingClientRect().width, scroll: el.scrollWidth }));
+    const picture = panel.locator('iframe[title="沙箱桌面"]');
+    const place = () => frame.evaluate((el) => { const box = el.getBoundingClientRect(), pic = el.querySelector("iframe")!.getBoundingClientRect(); return { box: box.width, frame: pic.width, left: pic.left - box.left, height: pic.height }; });
+    const geometry = await place();
     if (info.project.name.startsWith("mobile")) {
         expect(Math.abs(geometry.frame - geometry.box * 1.3)).toBeLessThan(2);
-        expect(geometry.scroll).toBeGreaterThan(geometry.box * 1.2);
-        // It opens on the middle of the desktop, not its left edge.
-        expect(Math.abs((await frame.evaluate((el) => el.scrollLeft)) - (geometry.scroll - geometry.box) / 2)).toBeLessThan(2);
-        // The desktop's controls sit in the black strip under it, where noVNC's left bar used to be.
+        expect(Math.abs(geometry.left - (geometry.box - geometry.frame) / 2)).toBeLessThan(2);
+        // The desktop's controls sit in the strip under it, where noVNC's left bar used to be.
         const bar = panel.getByRole("toolbar", { name: "桌面操作" });
-        await expect(bar).toContainText("双指缩放 · 左右滑动");
+        await expect(bar).toContainText("拖动滚动 · 长按拖拽 · 双指缩放");
         for (const name of ["键盘", "粘贴", "回车", "Tab", "Esc"]) await expect(bar.getByRole("button", { name, exact: true })).toBeVisible();
         const fits = await bar.evaluate((el) => { const r = el.getBoundingClientRect(), p = el.closest(".desktop-frame")!.getBoundingClientRect(); return r.left >= p.left - 1 && r.right <= p.right + 1 && r.bottom <= p.bottom + 1; });
         expect(fits).toBe(true);
         await page.screenshot({ path: info.outputPath("desktop-bar.png") });
-        await frame.evaluate((el) => { el.scrollLeft = 150; });
-        expect(await frame.evaluate((el) => el.scrollLeft)).toBeGreaterThan(100);
-        // Pinches on the framed desktop relay to the host; other windows cannot change the scale.
-        const remote = page.frameLocator('iframe[title="沙箱桌面"]');
-        const gesture = async (phase: string, magnitude: number) => {
-            await remote.locator("body").evaluate((el, data) => el.dispatchEvent(new CustomEvent(data.phase, { detail: { type: "pinch", magnitudeX: data.magnitude, magnitudeY: 0, clientX: innerWidth / 2 } })), { phase, magnitude });
-        };
-        const picture = panel.locator('iframe[title="沙箱桌面"]');
-        await gesture("gesturestart", 100);
-        await gesture("gesturemove", 150);
-        await expect.poll(async () => (await picture.boundingBox())!.width).toBeCloseTo(Math.floor(geometry.box * 1.3 * 1.5), 0);
-        await gesture("gestureend", 150);
-        await gesture("gesturestart", 100);
-        await gesture("gesturemove", 10);
-        await expect.poll(async () => (await picture.boundingBox())!.width).toBeCloseTo(geometry.box, 0);
-        await gesture("gestureend", 10);
-        await gesture("gesturestart", 100);
-        await gesture("gesturemove", 1000);
-        await expect.poll(async () => (await picture.boundingBox())!.width).toBeCloseTo(Math.floor(geometry.box * 3.2), 0);
-        await gesture("gestureend", 1000);
-        await gesture("gesturestart", 100);
-        await gesture("gesturemove", 62.5);
-        await expect.poll(async () => (await picture.boundingBox())!.width).toBeCloseTo(geometry.box * 2, 0);
-        await gesture("gestureend", 62.5);
-        const originalWidth = (await picture.boundingBox())!.width;
-        await page.evaluate(() => window.postMessage({ aio: "desktop", type: "pinch", phase: "move", ratio: 2, x: 0.5 }, "*"));
-        expect((await picture.boundingBox())!.width).toBe(originalWidth);
+        // A tap clicks the desktop where it lands, as a fraction of the desktop.
+        const remote = page.frame({ url: /127\.0\.0\.1:4289/ })!;
+        const got = () => remote.evaluate(() => (window as unknown as { got: Array<Record<string, unknown>> }).got);
+        const stage = panel.locator(".remote-touch");
+        const at = (await stage.boundingBox())!;
+        await stage.tap({ position: { x: at.width / 2, y: at.height / 2 } });
+        await expect.poll(async () => (await got()).find(m => m.type === "click")).toMatchObject({ aio: "desktop", type: "click", button: "left" });
+        const click = (await got()).find(m => m.type === "click")!;
+        expect(Number(click.x)).toBeCloseTo(0.5, 1);
+        expect(Number(click.y)).toBeCloseTo(0.5, 1);
+        if (info.project.name === "mobile") {
+            const cdp = await page.context().newCDPSession(page);
+            const c = { x: at.x + at.width / 2, y: at.y + at.height / 2 };
+            // Sideways the zoomed picture pans; up and down the desktop's page scrolls (the wheel, in its own pixels).
+            await cdp.send("Input.synthesizeScrollGesture", { x: c.x, y: c.y, xDistance: 100, yDistance: 0, gestureSourceType: "touch", speed: 600 });
+            await expect.poll(async () => (await place()).left).toBeGreaterThan(geometry.left + 30);
+            await cdp.send("Input.synthesizeScrollGesture", { x: c.x, y: c.y, xDistance: 0, yDistance: -150, gestureSourceType: "touch", speed: 600 });
+            await expect.poll(async () => (await got()).filter(m => m.type === "wheel").reduce((n, m) => n + Number(m.dy), 0)).toBeGreaterThan(200);
+            // Two fingers zoom; the picture is laid out again at the new size, so noVNC draws it sharp.
+            await cdp.send("Input.synthesizePinchGesture", { x: c.x, y: c.y, scaleFactor: 2, relativeSpeed: 600, gestureSourceType: "touch" });
+            await expect.poll(() => picture.evaluate((el) => el.clientWidth)).toBeGreaterThan(geometry.frame * 1.6);
+        }
         // Simulate an iPhone keyboard: only visualViewport shrinks, while layout width stays unchanged.
-        // The page scale and pan must survive; the keyboard and key buttons remain usable above it.
+        // The picture's scale and place must survive; the keyboard and key buttons remain usable above it.
         await press(info, bar.getByRole("button", { name: "键盘", exact: true }));
         await expect(panel.getByRole("textbox", { name: "输入到桌面" })).toBeFocused();
-        const pan = await frame.evaluate((el) => el.scrollLeft);
-        const before = await picture.boundingBox();
+        const before = await place();
         await page.evaluate(() => {
             Object.defineProperty(window.visualViewport!, "height", { configurable: true, value: 480 });
             window.visualViewport!.dispatchEvent(new Event("resize"));
         });
         await expect.poll(() => page.locator(".task-console-overlay").evaluate((el) => el.clientHeight)).toBe(480);
-        await expect.poll(async () => (await picture.boundingBox())!.width).toBeCloseTo(before!.width, 0);
-        expect((await picture.boundingBox())!.height).toBeCloseTo(before!.height, 0);
-        expect(await frame.evaluate((el) => el.scrollLeft)).toBeCloseTo(pan, 0);
+        await expect.poll(async () => (await place()).frame).toBeCloseTo(before.frame, 0);
+        expect((await place()).height).toBeCloseTo(before.height, 0);
+        expect((await place()).left).toBeCloseTo(before.left, 0);
         const keyboard = bar.getByRole("button", { name: "键盘", exact: true });
         const keyBox = (await keyboard.boundingBox())!;
         expect(keyBox.y).toBeGreaterThanOrEqual(0);
         expect(keyBox.y + keyBox.height).toBeLessThanOrEqual(480);
         await press(info, bar.getByRole("button", { name: "回车", exact: true }));
+        await expect.poll(async () => (await got()).some(m => m.type === "key" && m.key === "Enter")).toBe(true);
         await page.screenshot({ path: info.outputPath("browser-keyboard.png") });
         await page.evaluate(() => {
             delete (window.visualViewport! as unknown as Record<string, unknown>).height;
             window.visualViewport!.dispatchEvent(new Event("resize"));
         });
-        await expect.poll(async () => (await picture.boundingBox())!.width).toBeCloseTo(before!.width, 0);
-        await frame.evaluate((el) => { el.scrollLeft = 0; });
+        await expect.poll(async () => (await place()).frame).toBeCloseTo(before.frame, 0);
     } else {
         expect(Math.abs(geometry.frame - geometry.box)).toBeLessThan(2);
     }
@@ -1021,7 +1013,7 @@ test("owner debug mode shows each message's dispatch log step by step", async ({
     await page.keyboard.press("Escape");
     await expect(dialog).toHaveCount(0);
 });
-test("a task working in the user's own Chrome shows its page, asks for the person, and is taken over and handed back", async ({ page }, info) => {
+test("a task working in the AI's Chrome on the Mac shows its page, asks for the person, and is taken over and handed back", async ({ page }, info) => {
     const row: Task = { ...task(1), title: "登录银行", userBrowser: { page: true, title: "网上银行", url: "https://bank.example/login", holder: "ai", request: "请在页面上完成短信验证" } };
     const jpeg = fs.readFileSync("src/ui/public/icon-192.png");
     const controls: string[] = [];
@@ -1039,8 +1031,9 @@ test("a task working in the user's own Chrome shows its page, asks for the perso
         ws.send(jpeg);
         ws.onMessage(m => sent.push(String(m)));
     });
+    const messages = () => sent.map(m => JSON.parse(m) as Record<string, unknown>);
     await setup(page, [row]);
-    const card = page.getByRole("group", { name: "你的 Chrome：需要你在 Chrome 上操作" });
+    const card = page.getByRole("group", { name: "AI Chrome：需要你在 AI Chrome 里操作" });
     await expect(card).toContainText("bank.example/login");
     await expect(card).toContainText("请在页面上完成短信验证");
     await expect(card.getByRole("img")).toHaveCount(0);
@@ -1052,15 +1045,46 @@ test("a task working in the user's own Chrome shows its page, asks for the perso
 
     // Taking over opens the live page; input goes out only now.
     await press(info, card.getByRole("button", { name: "接管", exact: true }));
-    const dialog = page.getByRole("dialog", { name: "你的 Chrome" });
-    const live = dialog.getByRole("img", { name: "页面画面" });
+    const dialog = page.getByRole("dialog", { name: "Mac 上的 AI Chrome" });
+    const live = dialog.getByRole("application", { name: "页面画面" });
     await expect(live).toBeVisible();
+    await expect(dialog.locator("canvas.user-browser-picture")).toHaveJSProperty("width", 192);
     expect(controls).toEqual(["take"]);
-    await press(info, live, { x: 10, y: 10 });
-    await expect.poll(() => sent.some(m => JSON.parse(m).t === "click")).toBe(true);
+    const box = (await live.boundingBox())!;
+    const picture = () => dialog.locator("canvas.user-browser-picture").evaluate((el) => el.getBoundingClientRect().width);
+    if (info.project.use.hasTouch) {
+        // A tap is a click, sent once it is clear no second tap follows.
+        await live.tap({ position: { x: box.width / 2, y: box.height / 2 } });
+        await expect.poll(() => messages().find(m => m.t === "click")).toMatchObject({ t: "click", button: "left" });
+    } else {
+        // The mouse is a mouse: press and release where it is, its wheel scrolls the page, and a click lets the keyboard type into it.
+        await live.click({ position: { x: box.width / 2, y: box.height / 2 } });
+        await expect.poll(() => messages().filter(m => m.t === "pointer" && m.phase !== "move").map(m => m.phase)).toEqual(["down", "up"]);
+        await page.mouse.wheel(0, 300);
+        await expect.poll(() => messages().find(m => m.t === "wheel")).toMatchObject({ dx: 0, dy: 300 });
+        await page.keyboard.type("ab");
+        await page.keyboard.press("Enter");
+        await expect.poll(() => messages().filter(m => m.t === "text" || m.t === "key").map(m => m.s ?? m.k)).toEqual(["a", "b", "Enter"]);
+    }
+    if (info.project.name === "mobile") {
+        const cdp = await page.context().newCDPSession(page);
+        const c = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+        // One finger up scrolls the page down (the zoomed picture has no height to move); two fingers zoom the picture.
+        await cdp.send("Input.synthesizeScrollGesture", { x: c.x, y: c.y, xDistance: 0, yDistance: -200, gestureSourceType: "touch", speed: 600 });
+        await expect.poll(() => messages().filter(m => m.t === "wheel").reduce((n, m) => n + Number(m.dy), 0)).toBeGreaterThan(300);
+        const before = await picture();
+        await cdp.send("Input.synthesizePinchGesture", { x: c.x, y: c.y, scaleFactor: 2, relativeSpeed: 600, gestureSourceType: "touch" });
+        await expect.poll(picture).toBeGreaterThan(before * 1.6);
+        // A long press holds the mouse button; moving then drags (a slider, a "press and hold" check).
+        await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x: c.x, y: c.y }] });
+        await expect.poll(() => messages().some(m => m.t === "pointer" && m.phase === "down")).toBe(true);
+        await cdp.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x: c.x + 40, y: c.y }] });
+        await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+        await expect.poll(() => messages().filter(m => m.t === "pointer").map(m => m.phase)).toEqual(["down", "move", "up"]);
+    }
     await dialog.getByRole("textbox", { name: "发送到页面的文字" }).fill("123456");
     await dialog.getByRole("button", { name: "发送", exact: true }).click();
-    await expect.poll(() => sent.map(m => JSON.parse(m)).find(m => m.t === "text")).toEqual({ t: "text", s: "123456" });
+    await expect.poll(() => messages().find(m => m.t === "text" && m.s === "123456")).toEqual({ t: "text", s: "123456" });
     await page.screenshot({ path: info.outputPath("user-browser-live.png") });
     expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
 

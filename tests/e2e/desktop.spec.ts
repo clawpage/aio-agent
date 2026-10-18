@@ -1,9 +1,12 @@
 import { test, expect } from "@playwright/test";
 import { mockConsole } from "./mock-api";
 
-/** The desktop frame's geometry: on a phone 1.3 times the box's width, panned by scrolling the box. */
+/** Where the desktop's picture sits in its frame (on a phone it is zoomed and panned by the console's gestures). */
 async function desktopGeometry(frame: import("@playwright/test").Locator) {
-  return frame.evaluate((el) => ({ box: el.clientWidth, frame: el.querySelector("iframe")!.getBoundingClientRect().width, scroll: el.scrollWidth }));
+  return frame.evaluate((el) => {
+    const box = el.getBoundingClientRect(), pic = el.querySelector("iframe")!.getBoundingClientRect();
+    return { box: box.width, frame: pic.width, left: pic.left - box.left, top: pic.top - box.top, scroll: el.scrollWidth - el.clientWidth };
+  });
 }
 
 test("the workspace is a desktop: a menu bar, one app window, a Dock, and minimizing back to the desktop", async ({ page }, info) => {
@@ -29,48 +32,54 @@ test("the workspace is a desktop: a menu bar, one app window, a Dock, and minimi
   await expect(desk.locator(".menubar-app")).toHaveText("浏览器");
   await expect(desk.locator(".window-title")).toHaveText("浏览器");
   await expect(desk.locator(".window iframe")).toBeVisible();
-  // On a phone the browser desktop is drawn 1.3 times the width and pans; on a wide screen it fits.
+  // On a phone the browser desktop opens 1.3 times the width, on its middle; on a wide screen it fits.
   const frame = desk.locator(".desktop-frame");
   await expect.poll(() => desk.evaluate(n => n.getAnimations().length)).toBe(0);
   const geometry = await desktopGeometry(frame);
   if (mobile) {
     expect(Math.abs(geometry.frame - geometry.box * 1.3)).toBeLessThan(2);
-    expect(geometry.scroll).toBeGreaterThan(geometry.box * 1.25);
-    // It opens on the middle of the desktop, not its left edge.
-    expect(Math.abs((await frame.evaluate((el) => el.scrollLeft)) - (geometry.scroll - geometry.box) / 2)).toBeLessThan(2);
-    await frame.evaluate((el) => { el.scrollLeft = 40; });
-    expect(await frame.evaluate((el) => el.scrollLeft)).toBeGreaterThan(30);
-    // A finger on the black strip pans sideways only; a vertical swipe moves neither the view nor the page.
+    expect(Math.abs(geometry.left - (geometry.box - geometry.frame) / 2)).toBeLessThan(2);
+    // No strip to scroll sideways any more: the picture itself moves under the fingers.
+    expect(geometry.scroll).toBeLessThanOrEqual(1);
+    const bar = page.getByRole("toolbar", { name: "桌面操作" });
+    await expect(bar).toContainText("双指缩放");
     // (Touch gestures are synthesised through Chromium's CDP; WebKit checks the layout only.)
-    const strip = page.getByRole("toolbar", { name: "桌面操作" });
     const cdp = info.project.name === "mobile-webkit" ? null : await page.context().newCDPSession(page);
-    const swipe = cdp && (async (xDistance: number, yDistance: number) => {
-      const at = (await strip.boundingBox())!;
-      await cdp.send("Input.synthesizeScrollGesture", { x: at.x + at.width / 2, y: at.y + at.height / 2, xDistance, yDistance, gestureSourceType: "touch", speed: 1200 });
-    });
-    const at = () => frame.evaluate((el) => ({ left: el.scrollLeft, top: el.scrollTop, page: document.scrollingElement!.scrollTop }));
-    if (swipe) {
-      const before = await at();
-      await swipe(0, -300);
-      expect(await at()).toEqual(before);
-      await swipe(-120, 0);
-      expect((await at()).left).toBeGreaterThan(before.left + 60);
+    const stage = desk.locator(".remote-touch");
+    const centre = async () => { const at = (await stage.boundingBox())!; return { x: at.x + at.width / 2, y: at.y + at.height / 2 }; };
+    const pageScroll = () => page.evaluate(() => document.scrollingElement!.scrollTop);
+    if (cdp) {
+      // One finger sideways pans the zoomed picture; up and down it scrolls the desktop's page, never the console.
+      const c = await centre();
+      await cdp.send("Input.synthesizeScrollGesture", { x: c.x, y: c.y, xDistance: -120, yDistance: 0, gestureSourceType: "touch", speed: 600 });
+      await expect.poll(async () => (await desktopGeometry(frame)).left).toBeLessThan(geometry.left - 40);
+      const panned = await desktopGeometry(frame);
+      await cdp.send("Input.synthesizeScrollGesture", { x: c.x, y: c.y, xDistance: 0, yDistance: -200, gestureSourceType: "touch", speed: 600 });
+      expect((await desktopGeometry(frame)).top).toBeCloseTo(panned.top, 0);
+      expect(await pageScroll()).toBe(0);
+      // Two fingers pinch the picture larger; a double tap goes back to the whole desktop.
+      await cdp.send("Input.synthesizePinchGesture", { x: c.x, y: c.y, scaleFactor: 2, relativeSpeed: 600, gestureSourceType: "touch" });
+      await expect.poll(async () => (await desktopGeometry(frame)).frame).toBeGreaterThan(geometry.frame * 1.6);
+      await cdp.send("Input.synthesizeTapGesture", { x: c.x, y: c.y, tapCount: 2, gestureSourceType: "touch" });
+      await expect.poll(async () => Math.round((await desktopGeometry(frame)).frame)).toBe(Math.round(geometry.box));
+      await page.screenshot({ path: info.outputPath("desktop-browser-fitted.png") });
     }
-    // A short panel keeps the page readable at the same scale, with the toolbar over the clipped picture.
+    // A short panel keeps the picture's scale (a keyboard, say), clipped above the toolbar.
+    const width = (await desktopGeometry(frame)).frame;
     await page.setViewportSize({ width: 390, height: 520 });
-    await expect.poll(async () => (await desktopGeometry(frame)).frame).toBeCloseTo(geometry.frame, 0);
+    await expect.poll(async () => (await desktopGeometry(frame)).frame).toBeCloseTo(width, 0);
     const fit = await frame.evaluate((el) => {
       const pic = el.querySelector("iframe")!.getBoundingClientRect(), bar = el.querySelector(".desktop-bar")!.getBoundingClientRect(), box = el.getBoundingClientRect();
       return { top: pic.top - box.top, bottom: bar.bottom - box.bottom, barTop: bar.top - box.top };
     });
-    expect(fit.top).toBeGreaterThanOrEqual(0);
+    expect(fit.top).toBeGreaterThanOrEqual(-1);
     expect(fit.bottom).toBeLessThanOrEqual(1);
     expect(fit.barTop).toBeGreaterThanOrEqual(0);
     await page.screenshot({ path: info.outputPath("desktop-browser-short.png") });
-    if (swipe) {
-      const short = await at();
-      await swipe(0, -300);
-      expect(await at()).toEqual(short);
+    if (cdp) {
+      const c = await centre();
+      await cdp.send("Input.synthesizeScrollGesture", { x: c.x, y: c.y, xDistance: 0, yDistance: -300, gestureSourceType: "touch", speed: 600 });
+      expect(await pageScroll()).toBe(0);
     }
     await page.setViewportSize({ width: 390, height: 844 });
   } else {

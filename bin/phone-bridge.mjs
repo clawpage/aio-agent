@@ -12,10 +12,10 @@
  *   GET  /status  the connected phone, if any
  *   GET  /screenshot  the screen now (JPEG where macOS sips can shrink it, else PNG)
  *   WS   /screen  the live screen (scrcpy, H.264) and touch / key input
- *   POST /browser/mcp     the user's own Chrome on this Mac (user-browser.mjs)
+ *   POST /browser/mcp     the AI's own Chrome on this Mac (user-browser.mjs)
  *   GET  /browser/status  whether that Chrome can be used now
  *   GET  /browser/screenshot?page=<id>  a picture of one page, for the person
- *   POST /browser/front?page=<id>       bring that page to the front (the person takes it over)
+ *   POST /browser/front?page=<id>       check that page is still open (the person takes it over)
  *   WS   /browser/screen?page=<id>      that page live, with the person's clicks, scrolling and typing
  *
  * PA_PHONE_SCREEN_OFF=1 keeps the phone's own screen dark while all of the above
@@ -620,7 +620,7 @@ async function serve() {
   const screen = new Screen();
   // An older phone runtime has no browser tools: the browser then answers unavailable, the phone works on.
   const browser = fs.existsSync(BROWSER_MCP_ENTRY)
-    ? createUserBrowser({ entry: BROWSER_MCP_ENTRY, ...(process.env.PA_BROWSER_USER_DATA_DIR ? { userDataDir: process.env.PA_BROWSER_USER_DATA_DIR } : {}), log })
+    ? createUserBrowser({ entry: BROWSER_MCP_ENTRY, profileDir: process.env.PA_AI_CHROME_PROFILE ?? path.join(DIR, "ai-chrome"), ...(process.env.PA_AI_CHROME_PATH ? { chromePath: process.env.PA_AI_CHROME_PATH } : {}), log })
     : null;
   const wss = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024 });
   const server = http.createServer(async (req, res) => {

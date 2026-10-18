@@ -117,14 +117,14 @@ The shell itself bundles no UI, so a UI change still ships with the next UI depl
   `device-link.json` beside it (0600), not the Keychain: an ad-hoc signed build would re-prompt for
   Keychain access after every rebuild. When `phone/package.json` changes, regenerate the lock with
   `npm install --package-lock-only` in that directory. iPhone is not supported yet.
-- macOS browser: the same bridge offers the user's own Chrome (`bin/user-browser.mjs`, bundled as a
-  resource beside the bridge; chrome-devtools-mcp from the same lockfile). It attaches with `--autoConnect`
-  to the Chrome the user runs once they turn on remote debugging in `chrome://inspect/#remote-debugging`
-  and click Allow in Chrome's prompt; it never launches Chrome. The control plane offers it as
-  `aio_user_browser` next to the sandbox browser, which takes over whenever Chrome is not reachable.
-  The console's task cards show a task's page (a screenshot, or a live view of JPEG frames over
-  the link) and take it over; the person's clicks use chrome-devtools-mcp's `click_at`
-  (`--experimentalVision`), which the agent is not offered.
+- macOS browser: the same bridge offers the AI its own Chrome on this Mac (`bin/user-browser.mjs`, bundled as a
+  resource beside the bridge; chrome-devtools-mcp from the same lockfile). The bridge starts the installed Google
+  Chrome headless with a profile of its own (`ai-chrome` beside the phone runtime), so there is no Allow prompt, no
+  window, no Dock icon and no focus taken from the person at the Mac; sign-ins made in it stay. It never attaches to
+  the user's own Chrome profile. The control plane offers it as `aio_user_browser` next to the sandbox browser, which
+  takes over whenever the Mac or Chrome is not there. The console's task cards show a task's page (a screenshot, or a
+  live CDP screencast over the link) and take it over; the person's input goes in over the bridge's own DevTools
+  connection. `PA_AI_CHROME_PROFILE` / `PA_AI_CHROME_PATH` override the profile and the Chrome binary (tests, other installs).
 - Home-screen name: iOS 一站 in `gen/apple/project.yml` (`CFBundleDisplayName`, then
   `xcodegen generate`); Android Clawpage Agent in `gen/android/app/src/main/res/values/strings.xml`
   and 一站 in `values-zh/strings.xml`.

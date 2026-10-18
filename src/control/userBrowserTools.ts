@@ -1,5 +1,5 @@
 /**
- * What the user's browser MCP server (chrome-devtools-mcp 1.10.1 behind
+ * What the Mac's browser MCP server (chrome-devtools-mcp 1.10.1 behind
  * bin/user-browser.mjs, its tool whitelist applied) lists, recorded from a live
  * bridge. The gateway answers the tool list from this when the account's Mac is
  * offline, so an executor's aio_user_browser always starts (Codex starts a
@@ -576,14 +576,6 @@ export const USER_BROWSER_TOOLS: unknown[] = [
         "url": {
           "type": "string",
           "description": "URL to load in a new page."
-        },
-        "background": {
-          "description": "Whether to open the page in the background without bringing it to the front. Default is false (foreground).",
-          "type": "boolean"
-        },
-        "isolatedContext": {
-          "description": "If specified, the page is created in an isolated browser context with the given name. Pages in the same browser context share cookies and storage. Pages in different browser contexts are fully isolated (useful for clean-slate testing of cookies and authentication).",
-          "type": "string"
         },
         "timeout": {
           "description": "Maximum wait time in milliseconds. If set to 0, the default timeout will be used.",

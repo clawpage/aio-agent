@@ -52,7 +52,7 @@ export const phone: typeof zh = {
     introWeb: "Install the Clawpage app on a Mac and sign in to let the AI operate the Android phone plugged into that Mac and Chrome on that Mac. The Macs you have linked are listed here.",
     link: "Link this Mac",
     linking: "Linking…",
-    browserHint: "Chrome: open chrome://inspect/#remote-debugging in Chrome and turn on remote debugging; when the AI first connects, Chrome asks, and you click Allow. The AI uses Chrome on this Mac first (with the accounts you are signed in to); when Chrome is closed, not allowed, or the Mac is offline, it uses the sandbox browser in the cloud instead.",
+    browserHint: "Browser: the AI uses a Chrome of its own on this Mac (Google Chrome must be installed). It runs in the background with a profile of its own: no prompts and no window, so it never takes your screen, mouse or keyboard, and it never touches your own Chrome. Watch it live and take over from the task card; sites you sign in to there stay signed in. When the Mac is offline or Chrome is not installed, the AI uses the sandbox browser in the cloud instead.",
     usbHint: "Turn on USB debugging in the phone's developer options, plug it into this Mac with a cable, and tap Allow when the phone asks. The AI can use the phone while the Clawpage app is open.",
     thisMac: "(this Mac)",
     unnamed: "Unnamed Mac",

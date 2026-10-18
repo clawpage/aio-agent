@@ -51,7 +51,7 @@ export const phone: typeof zh = {
     introWeb: "在 Mac 上安裝一站 App 並登入後，可以把接在那台 Mac 上的 Android 手機和那台 Mac 上的 Chrome 交給 AI 操作。這裡列出你連接過的 Mac。",
     link: "連接這台 Mac",
     linking: "連接中…",
-    browserHint: "Chrome：在 Chrome 網址列開啟 chrome://inspect/#remote-debugging，開啟遠端偵錯；AI 第一次連線時 Chrome 會跳出視窗，點「允許」。AI 會優先用你這台 Mac 上的 Chrome（帶著你已登入的帳號）；Chrome 沒開、沒允許或 Mac 離線時，自動改用雲端的沙盒瀏覽器。",
+    browserHint: "瀏覽器：AI 會用這台 Mac 上一個專給它的 Chrome（需要裝有 Google Chrome）。它用獨立的設定在背景執行：不跳出視窗、沒有視窗，不占用你的螢幕、滑鼠和鍵盤，也碰不到你自己的 Chrome。任務卡片裡能看即時畫面、隨時接管；網站在那裡登入一次就會一直保留。Mac 離線或沒裝 Chrome 時，自動改用雲端的沙盒瀏覽器。",
     usbHint: "在手機的開發人員選項裡開啟 USB 偵錯，用傳輸線接到這台 Mac，手機上跳出提示時點「允許」。一站 App 開著時 AI 才能用到這支手機。",
     thisMac: "（這台 Mac）",
     unnamed: "未命名的 Mac",

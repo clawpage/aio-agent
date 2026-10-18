@@ -78,7 +78,7 @@ export class MemberModelGateway {
     this.browser?.provision(cfg);
     // A member's own phone, on the Mac it linked; never another account's.
     this.phone?.provision(cfg);
-    // Likewise its own Chrome on that Mac.
+    // Likewise the AI's Chrome on that Mac.
     this.userBrowser?.provision(cfg);
     if(cfg.memberModel===MEMBER_GPT_MODEL)this.gptUsers.add(cfg.runtimeUserId!);else this.gptUsers.delete(cfg.runtimeUserId!);
     if(cfg.memberModel!==MEMBER_CLAUDE_MODEL){this.claudeModels.delete(cfg.runtimeUserId!);return;}

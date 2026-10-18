@@ -61,7 +61,8 @@ export const browser = {
     keyboard: "键盘",
     paste: "粘贴",
     enter: "回车",
-    hint: "双指缩放 · 左右滑动",
+    hint: "拖动滚动 · 长按拖拽 · 双指缩放",
+    watchHint: "双指缩放 · 拖动查看 · 双击放大",
     input: "输入到桌面",
   },
   console: {

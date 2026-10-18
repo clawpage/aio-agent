@@ -649,7 +649,7 @@ export function createApiRouter(context: AppContext): Router {
     const asking = [...byKey].filter(([, own]) => own.some((t) => t.request && t.holder === "ai")).map(([key]) => key);
     const decorate = <T extends { mergedInto?: string | null; conversationId: string }>(found: T) => {
       const phoned = !found.mergedInto && usedPhone(found.conversationId) ? { ...found, phone: true } : found;
-      // The page it works in on the user's own Chrome, if any (UserBrowserGateway).
+      // The page it works in on the AI's Chrome on the user's Mac, if any (UserBrowserGateway).
       const userBrowser = phoned.mergedInto ? null : context.userBrowser?.view(userId, phoned.conversationId);
       const task = userBrowser ? { ...phoned, userBrowser } : phoned;
       const own = task.mergedInto ? undefined : byKey.get(task.conversationId);
@@ -1103,7 +1103,7 @@ export function createApiRouter(context: AppContext): Router {
     track(req, action === "take" ? "browser_takeover" : "browser_handback");
     res.json({ tab });
   }));
-  // A task's page on the user's own Chrome (UserBrowserGateway): its picture, and the person taking it over or handing it back.
+  // A task's page on the AI's Chrome on the user's Mac (UserBrowserGateway): its picture, and the person taking it over or handing it back.
   router.get("/tasks/:id/user-browser/screenshot", requireKind("primary"), requireSession, asyncHandler(async (req, res) => {
     const key = taskBrowserKey(req);
     const shot = key && context.userBrowser ? await context.userBrowser.screenshot(ctxOf(req).session!.ownerId, key) : null;

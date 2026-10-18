@@ -39,7 +39,7 @@ export interface AppContext {
   push?: PushService;
   /** Phones (bin/phone-bridge.mjs on a Mac an account linked); shared by every runtime. */
   phone?: PhoneGateway;
-  /** The user's own Chrome on that Mac (bin/user-browser.mjs): its tasks' pages and takeover; shared by every runtime. */
+  /** The AI's Chrome on that Mac (bin/user-browser.mjs): its tasks' pages and takeover; shared by every runtime. */
   userBrowser?: UserBrowserGateway;
   /** Home Assistant cameras for camera cards; absent without Home Assistant (the API also checks the account's grant). */
   cameras?: HaCameras;

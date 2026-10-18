@@ -15,8 +15,10 @@ import { TAB_TASK_HEADER, TAB_TOOL_TIMEOUT_SEC, type BrowserTask } from "./brows
 import { USER_BROWSER_TOOLS } from "./userBrowserTools.js";
 
 /**
- * An account's own Chrome, on the Mac it linked for its phones (DeviceLinks):
- * the Mac app's bridge serves it from bin/user-browser.mjs. It sits next to the
+ * An account's AI Chrome, on the Mac it linked for its phones (DeviceLinks):
+ * the Mac app's bridge serves it from bin/user-browser.mjs (Google Chrome in a
+ * profile of its own, headless, so it never gets in the way of the person at
+ * the Mac; sign-ins made there stay). It sits next to the
  * sandbox browser (aio_tabs), never in its place: the executor reaches it as
  * aio_user_browser through the member gateway (`/user-browser/<token>/mcp`),
  * prefers it, and falls back to aio_tabs whenever the Mac or its Chrome is not
@@ -33,20 +35,20 @@ const TIMEOUT_MS = 110_000;
 const HUMAN_WAIT_MS = 30 * 60_000;
 export const USER_BROWSER_SCREEN_PATH = "/api/user-browser/screen";
 const MAC_OFFLINE =
-  "The user's Mac is not connected right now (the app on it is closed, asleep or offline), so their own Chrome is unavailable. Use the sandbox browser (aio_tabs) for this task instead.";
+  "The user's Mac is not connected right now (the app on it is closed, asleep or offline), so the AI's Chrome on it is unavailable. Use the sandbox browser (aio_tabs) for this task instead.";
 const TAKEN_OVER =
-  "The user has taken over this task's page in their Chrome and is operating it now. Call request_human to wait until they hand it back; do not act on the page meanwhile.";
+  "The user has taken over this task's page and is operating it now. Call request_human to wait until they hand it back; do not act on the page meanwhile.";
 
 const SERVER = {
   serverInfo: { name: "aio_user_browser", version: "1" },
   instructions:
-    "The user's own Google Chrome on their Mac: their open tabs and signed-in accounts, on the screen in front of them. This is not the sandbox browser (aio_tabs). Start with list_pages; when a call reports that the user's browser is unavailable, use aio_tabs instead. Open your own pages with new_page and pass their pageId on every call.",
+    "The AI's own Google Chrome on the user's Mac: a profile of its own that keeps the sign-ins the user made in it, running in the background (it never covers the user's screen); the user watches its pages from the console. This is not the sandbox browser (aio_tabs). Start with list_pages; when a call reports that this browser is unavailable, use aio_tabs instead. Open your own pages with new_page and pass their pageId on every call.",
 } as const;
 
 /** The gateway's own tool: wait for the person to do a step in the task's page. */
 const REQUEST_HUMAN_TOOL = {
   name: "request_human",
-  title: "Ask the user to act in their Chrome",
+  title: "Ask the user to act in the page",
   description:
     "Ask the user to do a step themselves in the page this task works in (sign in, solve a CAPTCHA, two-factor verification, payment details, a final confirmation). The task card shows the request and the page; the user takes it over, does the step, and hands it back. This call waits until they do (up to 30 minutes); then read the page again before continuing.",
   inputSchema: {
@@ -70,12 +72,12 @@ export function userBrowserMcpServers(cfg: Config, task?: BrowserTask): Record<s
 }
 
 export const USER_BROWSER_POLICY =
-  "Two browsers are available: aio_user_browser is the user's own Google Chrome on their Mac (their open tabs and signed-in accounts; the user sees everything you do there), and aio_tabs is the sandbox browser in the cloud. For browser work, use the user's Chrome first: begin with its list_pages; if that or a later call says the user's browser is unavailable, switch to aio_tabs for the rest of this task without asking, and mention the switch in one sentence in your reply. Use aio_tabs from the start only when the work needs files from the workspace (uploading or downloading) or the user asked for the sandbox browser. " +
-  "In the user's Chrome: open the page you work in with new_page and pass its pageId on every call; do not navigate, type into or close tabs the user already had open unless the user asked about that tab; close the pages you opened once you no longer need them, unless the user should look at the result. Prefer take_snapshot to read a page and act on its uids; take a screenshot only for what the snapshot does not show. The task card shows the user the page you work in and lets them take it over. " +
+  "Two browsers are available: aio_user_browser is the AI's own Google Chrome on the user's Mac (a profile of its own that keeps the sign-ins the user made in it, on the user's home network; the user can watch every page you work in from the console), and aio_tabs is the sandbox browser in the cloud. For browser work, use aio_user_browser first: begin with its list_pages; if that or a later call says this browser is unavailable, switch to aio_tabs for the rest of this task without asking, and mention the switch in one sentence in your reply. Use aio_tabs from the start only when the work needs files from the workspace (uploading or downloading) or the user asked for the sandbox browser. " +
+  "In aio_user_browser: open the page you work in with new_page and pass its pageId on every call; pages you did not open belong to other tasks, so leave them alone; close the pages you opened once you no longer need them, unless the user should look at the result. Prefer take_snapshot to read a page and act on its uids; take a screenshot only for what the snapshot does not show. The task card shows the user the page you work in and lets them take it over. " +
   "When a site asks for a password, a CAPTCHA, two-factor verification, a QR-code sign-in or payment details, or a final step only the user may take, call aio_user_browser's request_human with the reason and wait; after it returns, read the page again before continuing. If a call says the user has taken over the page, call request_human to wait for them. (aio_tabs' browser_login and browser_request_human are only for the sandbox browser.) " +
   "For steps with external effects or that are hard to undo, such as paying, placing orders, sending messages or posts, deleting content, or changing account or security settings, first tell the user what you are about to do and wait for confirmation. Files on the Mac are not reachable: never pass file paths.";
 
-/** The page a task works in on the user's Chrome, and who drives it. */
+/** The page a task works in on the AI's Chrome, and who drives it. */
 interface TaskPage {
   pageId: number | null;
   title: string;
@@ -115,7 +117,7 @@ export class UserBrowserGateway extends McpGateway {
       upstreamUrl: "",
       secretKey: "",
       secretsFile: "",
-      // Each account only its own Chrome: one on a Mac it linked.
+      // Each account only the Chrome on a Mac it linked.
       granted: (username) => opts.links.hasLink(opts.userIdOf(username) ?? ""),
       assign: (runtime, url) => { runtime.userBrowser = { url }; },
       timeoutMs: TIMEOUT_MS,
@@ -144,14 +146,14 @@ export class UserBrowserGateway extends McpGateway {
     return page;
   }
 
-  /** A task's page as its card shows it; null when the task never worked in the user's Chrome. */
+  /** A task's page as its card shows it; null when the task never worked in the AI's Chrome. */
   view(userId: string, key: string): UserBrowserView | null {
     const page = this.#page(userId, key);
     if (!page || (page.pageId === null && !page.request && page.holder === "ai")) return null;
     return { page: page.pageId !== null, title: page.title, url: page.url, holder: page.holder, request: page.request?.reason ?? null };
   }
 
-  /** The person takes a task's page over (brought to the front, the agent shut out) or hands it back. */
+  /** The person takes a task's page over (the agent shut out, the person working in its live view) or hands it back. */
   async control(userId: string, key: string, action: "take" | "release"): Promise<UserBrowserView | null> {
     const page = this.#page(userId, key);
     if (!page) return null;
@@ -252,7 +254,7 @@ export class UserBrowserGateway extends McpGateway {
   /** request_human: show the request on the task's card and wait until the person hands the page back. */
   async #waitForHuman(id: unknown, userId: string, key: string, reason: string): Promise<unknown> {
     const page = this.#page(userId, key, true)!;
-    if (page.holder === "ai") page.request = { reason: reason || "Please do this step in your Chrome.", at: Date.now() };
+    if (page.holder === "ai") page.request = { reason: reason || "Please do this step in the page.", at: Date.now() };
     const done = await new Promise<boolean>((resolve) => {
       const wake = () => { clearTimeout(timer); resolve(true); };
       const timer = setTimeout(() => { page.waiters.delete(wake); resolve(false); }, HUMAN_WAIT_MS);

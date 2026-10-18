@@ -62,7 +62,8 @@ export const browser: typeof zh = {
     keyboard: "鍵盤",
     paste: "貼上",
     enter: "回車",
-    hint: "雙指縮放 · 左右滑動",
+    hint: "拖動捲動 · 長按拖曳 · 雙指縮放",
+    watchHint: "雙指縮放 · 拖動查看 · 點兩下放大",
     input: "輸入到桌面",
   },
   console: {

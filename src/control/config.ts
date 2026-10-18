@@ -373,7 +373,7 @@ export function loadConfig(): {
   printer?: { url: string };
   /** This runtime's phone tools URL on the member gateway, when its account linked a Mac (PhoneGateway). */
   phone?: { url: string };
-  /** This runtime's URL for its account's own Chrome on the member gateway, when it linked a Mac (UserBrowserGateway). */
+  /** This runtime's URL for the AI's Chrome on its account's Mac on the member gateway, when it linked a Mac (UserBrowserGateway). */
   userBrowser?: { url: string };
   /**
    * The voice gadget's dictation page (src/control/dictation.ts): the keyboard
