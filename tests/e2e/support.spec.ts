@@ -80,3 +80,21 @@ test('the public support form initiates deletion without app installation or log
   await expect(page.getByRole('status')).toContainText('external-reference');
   expect(sent).toEqual({kind:'deletion',email:'fixture@example.com',username:'fixture-member',note:'Delete my account and data.'});
 });
+test('public pages show one language: ?lang=, then the console choice, then the browser',async({page})=>{
+  let locale: string|undefined; await page.route('**/api/support/requests',async r=>{locale=r.request().headers()['x-aio-locale'];await r.fulfill({status:429,json:{error:'rate_limited',message:'Demasiadas solicitudes'}});});
+  await page.goto('/account-deletion.html?lang=es');
+  await expect(page.locator('html')).toHaveAttribute('lang','es'); await expect(page).toHaveTitle('Soporte y eliminación de la cuenta · Clawpage Agent');
+  await expect(page.locator('main > section:visible')).toHaveCount(1); await expect(page.locator('main > section:visible')).toHaveAttribute('lang','es');
+  await page.getByLabel('Correo electrónico de contacto').fill('fixture@example.com');
+  await page.getByLabel('Explicación').fill('Borrar mi cuenta.');
+  await page.getByRole('button',{name:'Enviar solicitud'}).click();
+  await expect(page.getByRole('status')).toHaveText('Demasiadas solicitudes'); expect(locale).toBe('es');
+  await page.getByRole('link',{name:'Política de privacidad'}).click();
+  await expect(page).toHaveURL(/\/privacy\.html\?lang=es$/);
+  await page.evaluate(()=>localStorage.setItem('aio.locale','zh-TW'));
+  await page.goto('/privacy.html');
+  await expect(page.locator('main > section:visible')).toHaveAttribute('lang','zh-TW'); await expect(page).toHaveTitle('隱私權政策 · 一站 Clawpage Agent');
+  await page.evaluate(()=>localStorage.removeItem('aio.locale'));
+  await page.goto('/terms.html');
+  await expect(page.locator('html')).toHaveAttribute('lang','zh-CN'); await expect(page.getByRole('heading',{level:1})).toHaveText('服务条款');
+});
