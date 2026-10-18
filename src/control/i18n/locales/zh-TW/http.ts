@@ -187,7 +187,7 @@ export const http: typeof zh = {
     pageTooLarge: "頁面過大，請下載完整檔案查看",
     uploadMissing: "缺少檔名或內容",
     uploadTooLarge: "檔案不能超過 25MB",
-    uploadDirFailed: "建立附件目錄失敗",
+    uploadDirFailed: "建立附件資料夾失敗",
     uploadDirUnverified: "指令已執行，但沙箱中未確認附件資料夾存在",
     uploadFailed: "上傳失敗",
     missingPath: "缺少路徑",
