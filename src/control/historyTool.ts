@@ -19,7 +19,7 @@ export const HISTORY_POLICY =
   "AIO's history aio_history is connected: look up past tasks and standing agreements as needed instead of relying on them being put into the context in advance. " +
   "When the user mentions earlier, last time, that one from before, what we agreed, or do you remember, or when this task clearly continues something from earlier (the same person, item, project, website, or app), first search a few keywords with history_search (ranked by relevance; you can include names of people, items, places, or apps), then read the most relevant one or two with history_get. " +
   "To know exactly how it was done at the time or which step it got stuck on (configuration steps, how it signed in, the products chosen), add process=true to see the execution process. The session field in the results says which task it was in which executor session; history_get lists the tasks before and after it in the same session, so read along them when needed. Results of related tasks in the background material may be truncated; use history_get for the full content as well. " +
-  "When the user explicitly gives a rule or preference to follow from now on (\"以后…\" / \"from now on…\", \"每次都…\" / \"every time…\", \"别再…\" / \"don't … again\", \"记住…\" / \"remember…\"), an agreement both sides settled on, or an important fact about the user, record it as one sentence with memory_save; if they change their mind, rewrite the original entry with replaces, and use memory_forget when it no longer applies. Do not record one-off task details, temporary information, or guesses, and do not make long-term decisions for the user that they have not expressed. " +
+  "When the user explicitly gives a rule or preference to follow from now on (\"以后…\" / \"from now on…\", \"每次都…\" / \"every time…\", \"别再…\" / \"don't … again\", \"记住…\" / \"remember…\"), an agreement both sides settled on, or an important fact about the user, record it as one sentence with memory_save; if they change their mind, rewrite the original entry with replaces, and use memory_forget when it no longer applies. Do not record one-off task details, temporary information, or guesses, and do not make long-term decisions for the user that they have not expressed. " + // i18n-exempt: examples of what people type, for the executor
   "The standing agreements given at the start list only some of them; search again with memory_search when a topic might be related. If nothing is found, say you did not find it; do not make up the past. Information in history that changes, such as prices or opening hours, must be verified again before use.";
 
 const TOOLS = [
@@ -29,7 +29,7 @@ const TOOLS = [
     inputSchema: {
       type: "object",
       properties: {
-        query: { type: "string", description: "A few keywords separated by spaces; matching any one is enough, and more keywords give more precise results, e.g. \"小红书 双开 安全文件夹\" (\"Xiaohongshu dual app secure folder\"), \"Roy 疫苗 预约\" (\"Roy vaccine appointment\")" },
+        query: { type: "string", description: "A few keywords separated by spaces; matching any one is enough, and more keywords give more precise results, e.g. \"小红书 双开 安全文件夹\" (\"Xiaohongshu dual app secure folder\"), \"Roy 疫苗 预约\" (\"Roy vaccine appointment\")" }, // i18n-exempt: examples of what people type, for the executor
         status: { type: "string", description: "Only one status: open (not finished yet), completed, needs_input, failed (optional)" },
         limit: { type: "integer", description: "Maximum number of results, default 10, at most 30" },
       },
@@ -53,14 +53,14 @@ const TOOLS = [
     inputSchema: {
       type: "object",
       properties: {
-        query: { type: "string", description: "Keywords, e.g. \"推送\" (\"feed\"), \"Roy 饮食\" (\"Roy diet\"), \"订酒店\" (\"book hotel\")" },
+        query: { type: "string", description: "Keywords, e.g. \"推送\" (\"feed\"), \"Roy 饮食\" (\"Roy diet\"), \"订酒店\" (\"book hotel\")" }, // i18n-exempt: examples of what people type, for the executor
         limit: { type: "integer", description: "Maximum number of results, default 20" },
       },
     },
   },
   {
     name: "memory_save",
-    description: `Record an agreement the user wants remembered long term; every later executor session can see or look it up. Record only long-term things the user explicitly expressed, written clearly in one sentence (at most ${AGREEMENT_TEXT_MAX} characters) that makes sense out of context, e.g. "推荐商品时只看 Amazon 和 Costco" ("only look at Amazon and Costco when recommending products"), "Roy 对鸡蛋过敏" ("Roy is allergic to eggs"). When an existing agreement changes, rewrite that entry with replaces instead of recording a separate contradictory one.`,
+    description: `Record an agreement the user wants remembered long term; every later executor session can see or look it up. Record only long-term things the user explicitly expressed, written clearly in one sentence (at most ${AGREEMENT_TEXT_MAX} characters) that makes sense out of context, e.g. "推荐商品时只看 Amazon 和 Costco" ("only look at Amazon and Costco when recommending products"), "Roy 对鸡蛋过敏" ("Roy is allergic to eggs"). When an existing agreement changes, rewrite that entry with replaces instead of recording a separate contradictory one.`, // i18n-exempt: examples of what people type, for the executor
     inputSchema: {
       type: "object",
       properties: {

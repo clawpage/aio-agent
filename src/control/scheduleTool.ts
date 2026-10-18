@@ -5,6 +5,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import type { Config } from "./config.js";
 import type { Logger } from "../common/logger.js";
 import type { TaskService } from "./tasks/service.js";
+import { runInLocale } from "./i18n/index.js";
 import { MAX_DATES, MAX_TIMES_A_DAY, MIN_INTERVAL_MINUTES } from "./tasks/schedules.js";
 
 /**
@@ -37,13 +38,13 @@ const TOOLS = [
   {
     name: "schedule_create",
     description:
-      "Create a scheduled task for the user. Scheduled tasks are saved in the user's AIO account, not in the current conversation or session: they keep running on time after this answer ends and after the session closes. When one is due, AIO automatically creates a new task to carry out the instruction and sends the result to the user's main session (the phone can get a push notification); the user can pause it, run it now, or delete it on the 定时任务 (Scheduled tasks) page. " +
-      "Use it for: reminding the user or doing something at a future time (\"明早 9 点提醒我…\" / \"remind me at 9 tomorrow morning…\", \"10/6 那天帮我看看…\" / \"check … for me on 10/6\"), repeating on a pattern (daily, weekly, monthly, every so often), and \"帮我盯着\" (\"keep an eye on it for me\") requests such as prices, stock, sale launches, or event days that need checking periodically. When watching something, pick a suitable cadence, for example check once a day until the event ends (until), and create a separate one to check a few more times on the day of the event. " +
+      "Create a scheduled task for the user. Scheduled tasks are saved in the user's AIO account, not in the current conversation or session: they keep running on time after this answer ends and after the session closes. When one is due, AIO automatically creates a new task to carry out the instruction and sends the result to the user's main session (the phone can get a push notification); the user can pause it, run it now, or delete it on the Scheduled tasks page. " +
+      "Use it for: reminding the user or doing something at a future time (\"明早 9 点提醒我…\" / \"remind me at 9 tomorrow morning…\", \"10/6 那天帮我看看…\" / \"check … for me on 10/6\"), repeating on a pattern (daily, weekly, monthly, every so often), and \"帮我盯着\" (\"keep an eye on it for me\") requests such as prices, stock, sale launches, or event days that need checking periodically. When watching something, pick a suitable cadence, for example check once a day until the event ends (until), and create a separate one to check a few more times on the day of the event. " + // i18n-exempt: examples of what people type, for the executor
       "Do not use sleep, cron, background processes, or in-session timer tools instead of it.",
     inputSchema: {
       type: "object",
       properties: {
-        title: { type: "string", description: "Name of the scheduled task (at most 40 characters), e.g. \"盯 Prime Day 扫地机价格\" (\"Watch robot vacuum prices for Prime Day\")" },
+        title: { type: "string", description: "Name of the scheduled task (at most 40 characters), e.g. \"盯 Prime Day 扫地机价格\" (\"Watch robot vacuum prices for Prime Day\")" }, // i18n-exempt: examples of what people type, for the executor
         instruction: {
           type: "string",
           description: "What to do on each run: one self-contained sentence without the timing. Say clearly what to check, what to compare it with, and when it is worth telling the user, e.g. \"Check the price of the Ecovacs T90 Pro Omni on Amazon; if it is below $449 or has a Prime member-exclusive discount, give the price and link, otherwise say in one sentence that nothing changed\"",
@@ -90,14 +91,14 @@ const TOOLS = [
   {
     name: "feed_get",
     description:
-      "View the built-in 每日推送 (daily feed): its push time, status, the requirements the user gave it (instruction; customized=false means it is still the default one-sentence instruction), and what it remembers in memory (care: things to pay more attention to; avoid: things not to push again; note: the user's habits and preferences about the feed; source is user if the user said it, or feed if the feed learned it on its own). " +
+      "View the built-in daily feed: its push time, status, the requirements the user gave it (instruction; customized=false means it is still the default one-sentence instruction), and what it remembers in memory (care: things to pay more attention to; avoid: things not to push again; note: the user's habits and preferences about the feed; source is user if the user said it, or feed if the feed learned it on its own). " +
       "Each time the daily feed runs, the system includes a complete set of instructions: read all of the user's past tasks, check the latest information online, look read-only at the email and feeds the user is signed in to, use the last few feeds and the user's reactions to avoid repetition, plus the requirements and memory here. Use it to see the current state before describing the feed to the user or changing it.",
     inputSchema: { type: "object", properties: {} },
   },
   {
     name: "feed_update",
     description:
-      "Change the built-in 每日推送 (daily feed). Use it when the user wants to change what the feed does or where it looks (e.g. \"每天推送时帮我看看 Gmail 有没有账单\" / \"check Gmail for bills in the daily feed\", \"推送少说新闻\" / \"less news in the feed\"), change the push time, tells you what they care about or no longer want to see, or gives feedback on a feed item (useful, want more, stop pushing this). Record all of these with it, and every later daily feed will follow them. " +
+      "Change the built-in daily feed. Use it when the user wants to change what the feed does or where it looks (e.g. \"每天推送时帮我看看 Gmail 有没有账单\" / \"check Gmail for bills in the daily feed\", \"推送少说新闻\" / \"less news in the feed\"), change the push time, tells you what they care about or no longer want to see, or gives feedback on a feed item (useful, want more, stop pushing this). Record all of these with it, and every later daily feed will follow them. " + // i18n-exempt: examples of what people type, for the executor
       "instruction replaces the user's previous requirements as a whole: rewrite on top of the existing requirements and do not drop parts that still apply; pass an empty string to restore the default. add adds memory; remove deletes memory by the id from feed_get; at most 30 entries per kind. Do not create a separate scheduled task to adjust the feed.",
     inputSchema: {
       type: "object",
@@ -111,7 +112,7 @@ const TOOLS = [
             type: "object",
             properties: {
               kind: { type: "string", enum: ["care", "avoid", "note"], description: "care: things or sources to pay more attention to; avoid: topics not to push again; note: preferences about the feed's format or timing" },
-              text: { type: "string", description: "One sentence (at most 200 characters), e.g. \"Roy 的疫苗和体检预约\" (\"Roy's vaccine and checkup appointments\"), \"不要再推加密货币行情\" (\"stop pushing crypto prices\"), \"只在有降价时才提商品\" (\"mention products only when there is a price drop\")" },
+              text: { type: "string", description: "One sentence (at most 200 characters), e.g. \"Roy 的疫苗和体检预约\" (\"Roy's vaccine and checkup appointments\"), \"不要再推加密货币行情\" (\"stop pushing crypto prices\"), \"只在有降价时才提商品\" (\"mention products only when there is a price drop\")" }, // i18n-exempt: examples of what people type, for the executor
             },
             required: ["kind", "text"],
           },
@@ -134,8 +135,8 @@ export function scheduleMcpServers(cfg: Config): Record<string, unknown> {
 }
 
 export const SCHEDULE_POLICY =
-  "When the user asks to do something at a future time, to repeat something on a pattern, or says things like \"帮我盯着…\" (\"keep an eye on … for me\") or \"到时候提醒我…\" (\"remind me when it's time…\"), create a scheduled task with schedule_create from aio_schedule (use kind=dates for a few irregular dates and times for several runs a day). It is saved in the user's AIO account and stays in effect across conversations and sessions; when due it automatically creates a new task to run and sends the result to the main session. Do not say that scheduled tasks only last for the current session, and do not ask the user to use some other reminder method because of that; when useful, you can check once now and then create the scheduled task. Inside a scheduled task's own automatic run, do not create further scheduled tasks. When the user wants to change an existing scheduled task's time, number of runs, or content, find it with schedule_list first, then change it with schedule_update; do not delete it and recreate it. " +
-  "Each account has a built-in 每日推送 (daily feed): when the user wants to change what it does, where it looks, or when it pushes, mentions what they care about or no longer want to see, or gives feedback on a feed item (useful, want more, stop pushing this), use feed_get to see the current state and feed_update to change or record it; do not create a separate scheduled task.";
+  "When the user asks to do something at a future time, to repeat something on a pattern, or says things like \"帮我盯着…\" (\"keep an eye on … for me\") or \"到时候提醒我…\" (\"remind me when it's time…\"), create a scheduled task with schedule_create from aio_schedule (use kind=dates for a few irregular dates and times for several runs a day). It is saved in the user's AIO account and stays in effect across conversations and sessions; when due it automatically creates a new task to run and sends the result to the main session. Do not say that scheduled tasks only last for the current session, and do not ask the user to use some other reminder method because of that; when useful, you can check once now and then create the scheduled task. Inside a scheduled task's own automatic run, do not create further scheduled tasks. When the user wants to change an existing scheduled task's time, number of runs, or content, find it with schedule_list first, then change it with schedule_update; do not delete it and recreate it. " + // i18n-exempt: examples of what people type, for the executor
+  "Each account has a built-in daily feed: when the user wants to change what it does, where it looks, or when it pushes, mentions what they care about or no longer want to see, or gives feedback on a feed item (useful, want more, stop pushing this), use feed_get to see the current state and feed_update to change or record it; do not create a separate scheduled task.";
 
 export class ScheduleGateway {
   #port: number;
@@ -225,27 +226,32 @@ export class ScheduleGateway {
     const text = (value: unknown, isError = false) => ({ content: [{ type: "text", text: typeof value === "string" ? value : JSON.stringify(value, null, 2) }], ...(isError ? { isError: true } : {}) });
     try {
       const tasks = await this.#tasksFor(userId);
-      if (name === "schedule_create") {
-        const created = tasks.createScheduleFor(userId, args);
-        return created.ok ? text(`${created.message}\n\nid: ${created.schedule.id}`) : text(created.error, true);
-      }
-      if (name === "schedule_list") {
-        const list = tasks.listSchedules(userId).map(({ spec: { anchorAt: _anchor, ...schedule }, ...s }) => ({ id: s.id, title: s.title, rule: s.rule, schedule, status: s.status, nextRun: s.nextRunText, instruction: s.instruction, needsBrowser: s.needsBrowser, ...(s.builtin ? { builtin: true, note: "The built-in daily feed: view its full settings and memory with feed_get, change them with feed_update" } : {}) }));
-        return text(list.length ? list : "No scheduled tasks yet.");
-      }
-      if (name === "schedule_update") {
-        const changed = tasks.updateScheduleFor(userId, args);
-        return changed.ok ? text(changed.message) : text(changed.error, true);
-      }
-      if (name === "feed_get") return text(tasks.feedSettings(userId));
-      if (name === "feed_update") return text(tasks.updateFeed(userId, args));
-      const action = args.action;
-      if (action !== "pause" && action !== "resume" && action !== "cancel") return text("action must be pause, resume, or cancel", true);
-      return text(tasks.changeSchedule(String(args.id ?? ""), userId, action).message);
+      // This gateway serves every account: its replies (which also reach the person) are in the account's language.
+      return runInLocale(() => tasks.locale(), () => this.#answer(tasks, userId, name, args, text));
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       this.#log.warn("schedule tool call failed", { tool: name, error: message });
       return text(message, true);
     }
+  }
+
+  #answer(tasks: TaskService, userId: string, name: string, args: Record<string, unknown>, text: (value: unknown, isError?: boolean) => unknown): unknown {
+    if (name === "schedule_create") {
+      const created = tasks.createScheduleFor(userId, args);
+      return created.ok ? text(`${created.message}\n\nid: ${created.schedule.id}`) : text(created.error, true);
+    }
+    if (name === "schedule_list") {
+      const list = tasks.listSchedules(userId).map(({ spec: { anchorAt: _anchor, ...schedule }, ...s }) => ({ id: s.id, title: s.title, rule: s.rule, schedule, status: s.status, nextRun: s.nextRunText, instruction: s.instruction, needsBrowser: s.needsBrowser, ...(s.builtin ? { builtin: true, note: "The built-in daily feed: view its full settings and memory with feed_get, change them with feed_update" } : {}) }));
+      return text(list.length ? list : "No scheduled tasks yet.");
+    }
+    if (name === "schedule_update") {
+      const changed = tasks.updateScheduleFor(userId, args);
+      return changed.ok ? text(changed.message) : text(changed.error, true);
+    }
+    if (name === "feed_get") return text(tasks.feedSettings(userId));
+    if (name === "feed_update") return text(tasks.updateFeed(userId, args));
+    const action = args.action;
+    if (action !== "pause" && action !== "resume" && action !== "cancel") return text("action must be pause, resume, or cancel", true);
+    return text(tasks.changeSchedule(String(args.id ?? ""), userId, action).message);
   }
 }

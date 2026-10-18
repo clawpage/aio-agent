@@ -19,6 +19,7 @@ import { describeNow, describeSchedule, formatWhen, MAX_ACTIVE_SCHEDULES, nextRu
 import type { PlanningSchedule, ScheduleActionName } from "./planning.js";
 import { answerLanguage, isLocale, readLocale, writeLocale, type Locale } from "../locale.js";
 import type { SharePage } from "../share.js";
+import { t } from "../i18n/index.js";
 import { ATTENTION_STATUSES, DONE_STATUSES, WORKING_STATUSES, type TaskBucket, type TaskCounts, type TaskFilter, type TaskListPage } from "../../common/taskList.js";
 
 /** Bounded context keeps both live work and older matches in one Jev call. */
@@ -80,8 +81,16 @@ export function feedTimeFor(slot: number): string {
     return `${String(Math.floor(minutes / 60) % 24).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
 }
 const clockMinutes = (at: string) => { const [h, m] = at.split(":").map(Number); return h! * 60 + m!; };
-/** The feed's own instruction until the person words it themselves. */
-const FEED_INSTRUCTION = "根据你过往的任务，整理今天你可能感兴趣的内容和需要的提醒";
+/**
+ * The feed's own instruction until the person words it themselves (the model reads it;
+ * people see it in their language, `feedInstruction` in the catalog). Older feeds hold
+ * the earlier Chinese one, which counts as the default too.
+ */
+const FEED_INSTRUCTION = "From the user's past tasks, gather what they may find interesting today and the reminders they need";
+const LEGACY_FEED_INSTRUCTION = "根据你过往的任务，整理今天你可能感兴趣的内容和需要的提醒"; // i18n-exempt: the default instruction older feeds stored
+const isDefaultFeedInstruction = (instruction: string) => [FEED_INSTRUCTION, LEGACY_FEED_INSTRUCTION].includes(instruction.trim());
+/** The stored title of a new feed; people see the feed under `feedTitle` in their language, whatever its rows hold. */
+const FEED_TITLE = "Daily feed";
 /** What the feed keeps in mind: what the person cares about, what to stop pushing, what their reactions taught it. */
 type FeedMemoryKind = "care" | "avoid" | "note";
 const FEED_MEMORY_KINDS: FeedMemoryKind[] = ["care", "avoid", "note"];
@@ -118,12 +127,17 @@ const CLAWPAGES_SHOWN = 12;
 /** The task list's keyset cursor: [rank, time, id] of the last row a page held. */
 const encodeCursor = (key: [number, number, string]) => Buffer.from(JSON.stringify(key)).toString("base64url");
 export class TaskCursorError extends Error {}
+/** None of the account's schedules has this id. */
+export class ScheduleNotFoundError extends Error {
+    readonly code = "not_found";
+    constructor() { super(t().tasks.schedules.notFound); }
+}
 function decodeCursor(cursor: string): [number, number, string] {
     try {
         const key = JSON.parse(Buffer.from(cursor, "base64url").toString("utf8")) as unknown;
         if (Array.isArray(key) && key.length === 3 && Number.isInteger(key[0]) && Number.isFinite(key[1]) && typeof key[2] === "string") return key as [number, number, string];
     } catch { /* falls through */ }
-    throw new TaskCursorError("分页位置无效");
+    throw new TaskCursorError(t().tasks.errors.badCursor);
 }
 /** client_message_id prefix of messages from the voice gadget (submitGadget). */
 const GADGET_PREFIX = "gadget:";
@@ -148,7 +162,7 @@ export class TaskService {
     init(): void {
         // AgentManager reconciles in-flight turns before this runs. Never replay an
         // executor with uncertain side effects. Unsubmitted planning is safe to resume.
-        this.db.prepare("UPDATE tasks SET status='merge_unknown',error=? WHERE status='steering'").run("重启前的补充消息是否送达无法确认，请核对任务结果，不会自动重发。");
+        this.db.prepare("UPDATE tasks SET status='merge_unknown',error=? WHERE status='steering'").run(t().tasks.errors.steeringAfterRestart);
         for (const row of this.rows()) {
             if (row.turn_id && !row.merged_into && !TERMINAL.has(row.status))
                 this.syncTurn(row);
@@ -236,8 +250,10 @@ export class TaskService {
         const plan = row.plan_json ? JSON.parse(row.plan_json) as TaskPlan : null;
         const turn = row.turn_id ? this.db.prepare("SELECT started_at FROM turns WHERE id=?").get(row.turn_id) as { started_at: number | null } | undefined : undefined;
         const parent = row.merged_into ? this.get(row.merged_into) : null;
+        const s = row.schedule_id ? this.scheduleRow(row.schedule_id) : null;
         return {
-            id: row.id, revision: row.revision, title: row.title, text: row.input_text, conversationId: this.executor(parent ?? row), mergedInto: row.merged_into, mergedTitle: parent?.title ?? null,
+            // A feed run is named after the feed, in the language it is shown in.
+            id: row.id, revision: row.revision, title: s?.builtin === DAILY_FEED && row.title === s.title ? this.scheduleTitle(s) : row.title, text: row.input_text, conversationId: this.executor(parent ?? row), mergedInto: row.merged_into, mergedTitle: parent?.title ?? null,
             // The id the console sent it under: a message shown before the server answered is matched by it.
             clientMessageId: row.client_message_id,
             // A task waiting for the person carries what its executor wrote before the question (the draft it asks about).
@@ -252,7 +268,7 @@ export class TaskService {
             options: row.status === "needs_input" ? plan?.options ?? null : null,
             form: row.status === "needs_input" ? plan?.form ?? null : null,
             dependencies: plan?.dependencies ?? [], createdAt: row.created_at, startedAt: turn?.started_at ?? null, completedAt: row.completed_at,
-            schedule: row.schedule_id ? this.scheduleLabel(row.schedule_id) ?? { id: row.schedule_id, title: row.title, rule: "定时任务已删除" } : null,
+            schedule: row.schedule_id ? (s ? this.scheduleLabel(s) : { id: row.schedule_id, title: row.title, rule: t().tasks.schedules.deleted }) : null,
             // A support card (support.ts): nobody typed it, so the console shows a support note instead.
             support: isSupportCard(row.client_message_id),
             approvals: TERMINAL.has(row.status) ? 0 : this.agent.listPendingRequests(this.executor(row)).length,
@@ -270,21 +286,22 @@ export class TaskService {
     }
     private waitReason(row: TaskRow): { label: string; message: string } | null {
         if (!["waiting", "merging"].includes(row.status) || !row.plan_json) return null;
+        const words = t().tasks.waiting;
         const plan = JSON.parse(row.plan_json) as TaskPlan;
         const reference = this.referenceTarget(row);
-        if (reference?.status === "stopping") return { label: "等待原任务停止", message: `“${reference.title}”停止后继续处理本次要求。` };
+        if (reference?.status === "stopping") return { label: words.stopping, message: words.stoppingMessage(reference.title) };
         const dependency = plan.dependencies.map(id => this.get(id)).find(t => t && t.status !== "completed");
-        if (dependency) return { label: "等待前置任务", message: `等待“${dependency.title}”完成后继续。` };
+        if (dependency) return { label: words.dependency, message: words.dependencyMessage(dependency.title) };
         const parent = row.merged_into ? this.get(row.merged_into) : null;
         const claims = parent ? [...this.claims(parent), ...this.claims(row)] : this.claims(row);
         const active = this.rows().filter(t => DISPATCHED.has(t.status) && t.id !== parent?.id);
         const blocker = active.find(t => (parent ? [parent, row] : [row]).some(mine => claimsConflict(this.held(mine), this.held(t))));
         if (blocker) {
             const browser = claims.includes("browser") && this.claims(blocker).includes("browser");
-            return { label: browser ? "等待浏览器" : "等待文件操作", message: `${this.ownerId(blocker) === this.ownerId(row) ? `“${blocker.title}”` : "另一项任务"}正在使用${browser ? "共享浏览器" : "同一文件范围或共享环境"}，结束后自动继续。` };
+            return { label: browser ? words.browser : words.files, message: words.busyMessage(this.ownerId(blocker) === this.ownerId(row) ? blocker.title : null, browser) };
         }
-        if (!parent && active.length >= this.cfg.agent.maxConcurrentTurns) return { label: "等待执行空位", message: `已有 ${this.cfg.agent.maxConcurrentTurns} 个任务执行中，空位释放后自动开始。` };
-        return { label: parent ? "正在追加" : "即将开始", message: parent ? "正在将补充交给原任务。" : "已满足执行条件，正在调度。" };
+        if (!parent && active.length >= this.cfg.agent.maxConcurrentTurns) return { label: words.slot, message: words.slotMessage(this.cfg.agent.maxConcurrentTurns) };
+        return { label: parent ? words.appending : words.starting, message: parent ? words.appendingMessage : words.startingMessage };
     }
     /** One page of the main feed: the latest `limit` tasks (the first screen shows only these), older ones by `before`. */
     list(before = Number.MAX_SAFE_INTEGER, userId = "owner_1", limit = 20) {
@@ -368,26 +385,26 @@ export class TaskService {
         const requestedRelated = input.relatedTaskId ? this.get(input.relatedTaskId) : null;
         const related = requestedRelated?.merged_into ?? input.relatedTaskId ?? null;
         if (!text && !attachments.length)
-            throw new Error("消息不能为空");
+            throw new Error(t().tasks.errors.emptyMessage);
         if (text.length > 64000 || attachments.length > 6 || !input.clientMessageId || input.clientMessageId.length > 200)
-            throw new Error("消息或附件超出限制");
+            throw new Error(t().tasks.errors.messageTooLarge);
         const existing = this.db.prepare("SELECT * FROM tasks WHERE client_message_id = ?").get(input.clientMessageId) as unknown as TaskRow | undefined;
         if (existing) {
-            if (this.ownerId(existing) !== userId) throw new TurnConflictError("消息 ID 已被使用");
+            if (this.ownerId(existing) !== userId) throw new TurnConflictError(t().tasks.errors.idTaken);
             if (existing.input_text !== text || existing.attachments_json !== JSON.stringify(attachments) || existing.related_task_id !== related)
-                throw new TurnConflictError("消息 ID 已对应另一项任务");
+                throw new TurnConflictError(t().tasks.errors.idOtherTask);
             return { task: this.view(existing), duplicate: true };
         }
         if (related && !this.belongsTo(related, userId))
-            throw new Error("关联任务不存在");
+            throw new Error(t().tasks.errors.relatedMissing);
         if (isLocale(input.locale)) writeLocale(this.db, input.locale, "message");
         const frozen = isMember(this.db, userId) ? this.agent.memberSettings() : this.agent.resolveSubmitSettings({ conversationId: "main", text, clientMessageId: input.clientMessageId });
         const id = randomId("task");
-        const title = [...(text || attachments.map(a => a.name ?? a.path).join("、"))].slice(0, 40).join("");
+        const title = [...(text || attachments.map(a => a.name ?? a.path).join(t().tasks.titleSeparator))].slice(0, 40).join("");
         // One transaction prevents a failed admission leaving an orphan child.
         this.db.exec("BEGIN IMMEDIATE");
         try {
-            const conv = this.agent.createConversation({ ownerId: userId, title: `任务：${title}`, model: frozen.model });
+            const conv = this.agent.createConversation({ ownerId: userId, title: t().tasks.conversations.task(title), model: frozen.model });
             const last = this.db.prepare("SELECT MAX(created_at) AS n FROM tasks").get() as {
                 n: number | null;
             };
@@ -411,22 +428,22 @@ export class TaskService {
      */
     submitGadget(input: { userId: string; text: string; clientMessageId: string }) {
         const text = input.text.trim();
-        if (!text) throw new Error("消息不能为空");
-        if (text.length > 4000 || !input.clientMessageId || input.clientMessageId.length > 200) throw new Error("消息超出限制");
+        if (!text) throw new Error(t().tasks.errors.emptyMessage);
+        if (text.length > 4000 || !input.clientMessageId || input.clientMessageId.length > 200) throw new Error(t().tasks.errors.gadgetTooLarge);
         const clientMessageId = GADGET_PREFIX + input.clientMessageId;
         const existing = this.db.prepare("SELECT * FROM tasks WHERE client_message_id = ?").get(clientMessageId) as unknown as TaskRow | undefined;
         if (existing) {
-            if (this.ownerId(existing) !== input.userId || existing.input_text !== text) throw new TurnConflictError("消息 ID 已对应另一项任务");
+            if (this.ownerId(existing) !== input.userId || existing.input_text !== text) throw new TurnConflictError(t().tasks.errors.idOtherTask);
             return existing;
         }
         const frozen = isMember(this.db, input.userId) ? this.agent.memberSettings() : this.agent.resolveSubmitSettings({ conversationId: "main", text, clientMessageId, effort: "medium" });
         const previous = this.db.prepare("SELECT * FROM tasks WHERE client_message_id LIKE 'gadget:%' AND conversation_id IN (SELECT id FROM conversations WHERE owner_id=?) ORDER BY created_at DESC LIMIT 1").get(input.userId) as unknown as TaskRow | undefined;
         const id = randomId("task");
         const title = [...text].slice(0, 40).join("");
-        const plan: TaskPlan = { title, description: "来自语音配件，直接执行。", related: [], dependencies: [], resources: [], appendTo: null, resume: null, clarification: null };
+        const plan: TaskPlan = { title, description: t().tasks.notes.gadget, related: [], dependencies: [], resources: [], appendTo: null, resume: null, clarification: null };
         this.db.exec("BEGIN IMMEDIATE");
         try {
-            const conv = this.agent.createConversation({ ownerId: input.userId, title: `配件：${title}`, model: frozen.model });
+            const conv = this.agent.createConversation({ ownerId: input.userId, title: t().tasks.conversations.gadget(title), model: frozen.model });
             const last = this.db.prepare("SELECT MAX(created_at) AS n FROM tasks").get() as { n: number | null };
             const now = Math.max(Date.now(), (last.n ?? 0) + 1);
             this.db.prepare("INSERT INTO tasks (id,client_message_id,conversation_id,execution_conversation_id,title,input_text,attachments_json,model,effort,created_at,status,plan_json) VALUES (?,?,?,?,?,?,'[]',?,?,?,'waiting',?)")
@@ -456,8 +473,8 @@ export class TaskService {
     async stop(id: string) {
         const row = this.get(id);
         if (!row)
-            throw new Error("任务不存在");
-        if (row.merged_into && row.status !== "merging") throw new Error("补充已经发送或送达状态待确认；如需停止执行，请停止原任务。");
+            throw new Error(t().tasks.errors.notFound);
+        if (row.merged_into && row.status !== "merging") throw new Error(t().tasks.errors.stopSupplement);
         if (TERMINAL.has(row.status))
             return;
         if (!row.turn_id || row.status === "needs_input") {
@@ -480,16 +497,16 @@ export class TaskService {
     archive(id: string) {
         const row = this.get(id);
         if (!row || row.merged_into)
-            throw new Error("任务不存在");
+            throw new Error(t().tasks.errors.notFound);
         if (row.status !== "unknown")
-            throw new Error("只有结果待核对的任务可以归档；进行中的任务请停止");
-        const note = "结果没有核对，已由你归档。";
+            throw new Error(t().tasks.errors.archiveOnlyUnknown);
+        const note = t().tasks.notes.archived;
         this.db.prepare("UPDATE tasks SET status='interrupted',error=?,completed_at=COALESCE(completed_at,?) WHERE id=? AND status='unknown'").run(row.error ? `${row.error}\n${note}` : note, Date.now(), id);
     }
     retryPlanning(id: string) {
         const row = this.get(id);
         if (!row || row.status !== "planning_failed" || row.turn_id)
-            throw new Error("只有尚未执行的派单失败任务可以重试");
+            throw new Error(t().tasks.errors.retryOnlyUnplanned);
         this.db.prepare("UPDATE tasks SET status='planning',error=NULL WHERE id=?").run(id);
         this.schedule();
     }
@@ -687,16 +704,16 @@ export class TaskService {
             // (A dispatcher that gave no answer in time throws instead: re-asking would only wait again.)
             if (!plan) {
                 trace.rounds += 1;
-                const prompt = planningPrompt(planningInput, lunaCandidates, row.related_task_id, { correction: report.error ?? "格式不符合要求", timeline: lunaTimeline, jev: relevance, now: describeNow(scheduling.now, scheduling.timezone), timezone: scheduling.timezone, schedules: scheduling.schedules, locale: this.locale() });
+                const prompt = planningPrompt(planningInput, lunaCandidates, row.related_task_id, { correction: report.error ?? t().tasks.planning.unusable, timeline: lunaTimeline, jev: relevance, now: describeNow(scheduling.now, scheduling.timezone), timezone: scheduling.timezone, schedules: scheduling.schedules, locale: this.locale() });
                 trace.promptChars += prompt.length;
                 raw = await askWithTiming(prompt, trace.rounds);
                 if (this.#closed || this.get(row.id)?.status !== "planning") return;
                 if (this.taskContext(this.get(row.id)!) !== inputContext) return;
                 const first = report.error;
-                steps.push({ kind: "ask", at: Date.now(), round: trace.rounds, prompt: prompt.slice(0, STEP_PROMPT_CHARS), answer: raw?.slice(0, STEP_ANSWER_CHARS) ?? null, correction: first ?? "格式不符合要求" });
+                steps.push({ kind: "ask", at: Date.now(), round: trace.rounds, prompt: prompt.slice(0, STEP_PROMPT_CHARS), answer: raw?.slice(0, STEP_ANSWER_CHARS) ?? null, correction: first ?? t().tasks.planning.unusable });
                 report.error = undefined;
                 plan = parsePlan(raw ?? null, lunaCandidates, row.related_task_id, this.cfg.sandbox.containerWorkspaceDir, report, scheduling);
-                report.repairs.unshift(`第一次回答无法使用：${first ?? "格式不符合要求"}，已重问一次`);
+                report.repairs.unshift(t().tasks.planning.retried(first ?? t().tasks.planning.unusable));
             }
             // Old model output may still contain a preflight question. The
             // executor has the tools and history needed to decide whether to ask.
@@ -721,7 +738,7 @@ export class TaskService {
             trace.latencyMs = Date.now() - started;
             if (plan) { trace.failed = false; trace.chosen = { related: plan.related, appendTo: plan.appendTo ?? null, resume: plan.resume ?? null }; steps.push({ kind: "plan", at: Date.now(), plan, repairs: report.repairs }); }
             if (!plan)
-                throw new Error(`任务分配暂时失败，尚未执行。请重试分配。（派单结果无法使用：${report.error ?? "格式不符合要求"}）`);
+                throw new Error(t().tasks.errors.planningFailed(report.error ?? t().tasks.planning.unusable));
             // Setting up or changing a schedule needs no executor: answer right here.
             if (plan.scheduleAction || (plan.schedule && !plan.schedule.runNow)) {
                 if (this.#closed || this.get(row.id)?.status !== "planning") return;
@@ -729,7 +746,7 @@ export class TaskService {
                 let answer: string;
                 if (plan.scheduleAction?.action === "update") {
                     const changed = this.updateScheduleFor(trace.ownerId, { id: plan.scheduleAction.id, title: plan.title, instruction: plan.schedule!.instruction, schedule: plan.schedule!.spec });
-                    answer = changed.ok ? changed.message : `没有修改定时任务：${changed.error}`;
+                    answer = changed.ok ? changed.message : t().tasks.schedules.notUpdated(changed.error);
                 } else {
                     // Cancelling one schedule and setting up another in the same message does both.
                     const action = plan.scheduleAction?.action;
@@ -743,7 +760,7 @@ export class TaskService {
         }
         catch (err) {
             if (!this.#closed && this.get(row.id)?.status === "planning") {
-                const reason = err instanceof Error ? err.message : "任务分配失败";
+                const reason = err instanceof Error ? err.message : t().tasks.errors.planningFailedGeneric;
                 this.db.prepare("UPDATE tasks SET status='planning_failed',error=? WHERE id=?").run(reason, row.id);
                 measured = true; trace.failed = true; trace.failReason ??= reason;
                 steps.push({ kind: "failed", at: Date.now(), reason });
@@ -812,7 +829,7 @@ export class TaskService {
         if (finalContinued?.status === "needs_input" && finalContinued.turn_id) {
             const answeredPlan = JSON.parse(finalContinued.plan_json!) as TaskPlan;
             answeredPlan.answeredBy = row.id;
-            const acknowledgement = "已收到补充，结果请看后续任务。";
+            const acknowledgement = t().tasks.notes.supplementReceived;
             this.db.prepare("UPDATE tasks SET status='completed',result=?,plan_json=? WHERE id=? AND status='needs_input'")
                 .run([finalContinued.result, acknowledgement].filter(Boolean).join("\n\n"), JSON.stringify(answeredPlan), finalContinued.id);
         }
@@ -869,7 +886,7 @@ export class TaskService {
                 const plan=JSON.parse(row.plan_json!) as TaskPlan;
                 const dependencies = plan.dependencies.map(id => this.get(id));
                 if (dependencies.some(t => !t || ['blocked','planning_failed'].includes(t.status) || (TERMINAL.has(t.status) && t.status !== 'completed'))) {
-                    this.db.prepare("UPDATE tasks SET status='merge_failed',error=? WHERE id=?").run('补充所需的前置结果尚未成功，请核对后继续。', row.id);
+                    this.db.prepare("UPDATE tasks SET status='merge_failed',error=? WHERE id=?").run(t().tasks.errors.supplementDependency, row.id);
                     continue;
                 }
                 if (dependencies.some(t => t!.status !== 'completed')) continue;
@@ -893,7 +910,7 @@ export class TaskService {
                         `${handed ? `When the user sent this supplement, the browser tabs you had asked them to take over (${handed}) were still in their hands; they have now been handed back to you automatically, so you can carry on directly. Ask for a takeover again only if they really must act by hand.\n\n` : ""}This is the user's supplement to the current task, sent at ${new Date(row.created_at).toLocaleTimeString("sv-SE", { hour: "2-digit", minute: "2-digit" })} (the same matter, not a new task). First work out what they mean, then carry on: if they corrected something or changed a condition (date, place, subject, quantity, etc.), adjust to the new requirement, and the approach and conclusions based on the old condition no longer hold; if they added a requirement or information, fold it in and complete everything together; if they ask you to stop or do something else, do so. Parts already done that are still valid need not be redone. The final reply follows the latest requirement and gives the complete result: carry over content you sent before that is still valid, and leave out anything that has been overturned. Use whatever files, browser and tools the user's request needs; the dispatcher's resource hints do not limit you.\n\nRecent conversation in the main session (in time order; ▶ is this supplement):\n${formatTimeline(timeline(this.rows().filter(t => this.ownerId(t) === this.ownerId(row)), row, 6), Date.now(), plan.jev)}${plan.jev ? `\n\nJev's per-task relevance and routing suggestion (background only):\n${formatRelevance(plan.jev, id => this.get(id)) ?? "none"}` : ''}\n\nThe dispatcher's judgment (background only): ${JSON.stringify({title:plan.title,description:plan.description,decision:plan.decision})}${dependencies.length ? `\n\nResults of the completed tasks this supplement needs: ${JSON.stringify(dependencies.map(t => ({id:t!.id,result:t!.result?.slice(0,16000)})))}` : ''}\n\nThe user's supplement:\n\n${row.input_text}\n\n${answerLanguage(this.locale(), true)}`,
                         JSON.parse(row.attachments_json),resources.includes("browser"));
                     if(this.#closed) return;
-                    if(result==='browser_unavailable') this.db.prepare("UPDATE tasks SET status='merge_failed',error=? WHERE id=?").run('此补充需要浏览器，但浏览器暂未恢复；原任务仍可继续，请恢复浏览器后重新补充。',row.id);
+                    if(result==='browser_unavailable') this.db.prepare("UPDATE tasks SET status='merge_failed',error=? WHERE id=?").run(t().tasks.errors.supplementNeedsBrowser,row.id);
                     else if(result==='not_active') { this.fallbackSupplement(row); this.schedule(); }
                     else {
                         // The task keeps its own title: a supplement adds to it, it does not take it over.
@@ -904,7 +921,7 @@ export class TaskService {
                     // Only an explicit RPC rejection proves that it was not delivered.
                     if(err instanceof JsonRpcResponseError && TERMINAL.has(this.get(parent.id)!.status)) { this.fallbackSupplement(row); this.schedule(); }
                     else this.db.prepare('UPDATE tasks SET status=?,error=? WHERE id=?').run(err instanceof JsonRpcResponseError?'merge_failed':'merge_unknown',
-                        err instanceof JsonRpcResponseError ? `补充未被接收：${err.message}` : '补充消息的送达状态待核对，不会自动重复发送。',row.id);
+                        err instanceof JsonRpcResponseError ? t().tasks.errors.supplementRejected(err.message) : t().tasks.errors.supplementUnknown,row.id);
                 }
             }
         } finally { this.#merging=false; if(this.#mergeAgain) { this.#mergeAgain=false; this.schedule(); } }
@@ -969,7 +986,7 @@ export class TaskService {
             if (row.related_task_id && this.get(row.related_task_id)?.status === "stopping") continue;
             const deps = plan.dependencies.map(id => this.get(id));
             if (deps.some(d => !d || ["blocked", "planning_failed"].includes(d.status) || (TERMINAL.has(d.status) && d.status !== "completed"))) {
-                this.db.prepare("UPDATE tasks SET status='blocked',error=? WHERE id=?").run("前置任务没有成功完成。请核对结果后补充一个关联任务，不会自动继续执行。", row.id);
+                this.db.prepare("UPDATE tasks SET status='blocked',error=? WHERE id=?").run(t().tasks.errors.dependencyFailed, row.id);
                 continue;
             }
             if (deps.some(d => d!.status !== "completed"))
@@ -1043,7 +1060,7 @@ export class TaskService {
                 active.push(this.get(row.id)!);
             }
             catch (err) {
-                this.db.prepare("UPDATE tasks SET status='failed',error=?,completed_at=? WHERE id=?").run(err instanceof Error ? err.message : "执行失败", Date.now(), row.id);
+                this.db.prepare("UPDATE tasks SET status='failed',error=?,completed_at=? WHERE id=?").run(err instanceof Error ? err.message : t().tasks.errors.runFailed, Date.now(), row.id);
             }
         }
     }
@@ -1102,11 +1119,18 @@ export class TaskService {
     }
     private planningSchedules(ownerId: string): PlanningSchedule[] {
         return (this.db.prepare("SELECT * FROM schedules WHERE owner_id=? AND status IN ('active','paused') ORDER BY created_at").all(ownerId) as unknown as ScheduleRow[])
-            .map(s => ({ id: s.id, title: s.title, rule: describeSchedule(JSON.parse(s.spec_json) as ScheduleSpec), status: s.status, instruction: s.instruction.slice(0, 400) }));
+            .map(s => ({ id: s.id, title: this.scheduleTitle(s), rule: describeSchedule(JSON.parse(s.spec_json) as ScheduleSpec), status: s.status, instruction: s.instruction.slice(0, 400) }));
     }
-    private scheduleLabel(id: string): { id: string; title: string; rule: string; builtin?: string } | null {
-        const s = this.scheduleRow(id);
-        return s ? { id: s.id, title: s.title, rule: describeSchedule(JSON.parse(s.spec_json) as ScheduleSpec), ...(s.builtin ? { builtin: s.builtin } : {}) } : null;
+    private scheduleLabel(s: ScheduleRow): { id: string; title: string; rule: string; builtin?: string } {
+        return { id: s.id, title: this.scheduleTitle(s), rule: describeSchedule(JSON.parse(s.spec_json) as ScheduleSpec), ...(s.builtin ? { builtin: s.builtin } : {}) };
+    }
+    /** A schedule's name as people read it: the built-in feed's (which nobody renames) is in their language. */
+    private scheduleTitle(s: ScheduleRow): string {
+        return s.builtin === DAILY_FEED ? t().tasks.schedules.feedTitle : s.title;
+    }
+    /** What each run does, as people read it: the feed's default instruction is in their language. */
+    private scheduleInstruction(s: ScheduleRow): string {
+        return s.builtin === DAILY_FEED && isDefaultFeedInstruction(s.instruction) ? t().tasks.schedules.feedInstruction : s.instruction;
     }
     /** A feed run's machine lines (topics, nothing-today) stay out of what the person reads. */
     private shownResult(row: TaskRow): string | null {
@@ -1134,7 +1158,7 @@ export class TaskService {
         const tz = this.cfg.browser.timezone;
         const now = Date.now();
         this.db.prepare("INSERT INTO schedules (id,owner_id,title,instruction,spec_json,timezone,resources_json,status,next_run_at,created_at,updated_at,builtin) VALUES (?,?,?,?,?,?,?,'active',?,?,?,?)")
-            .run(randomId("sched"), ownerId, "每日推送", FEED_INSTRUCTION, JSON.stringify(spec), tz, JSON.stringify(["browser"]), nextRun(spec, now, tz), now, now, DAILY_FEED);
+            .run(randomId("sched"), ownerId, FEED_TITLE, FEED_INSTRUCTION, JSON.stringify(spec), tz, JSON.stringify(["browser"]), nextRun(spec, now, tz), now, now, DAILY_FEED);
     }
     /** Did the person send anything (not a scheduled run) since `since`? */
     private spokeSince(ownerId: string, since: number): boolean {
@@ -1179,7 +1203,7 @@ export class TaskService {
             return { date: date(f.created_at), topics: JSON.parse(f.topics_json) as string[], nothingToday: !!f.empty, userTasksAfter: after, ...(replies.length ? { replies } : {}) };
         });
         const s = row.schedule_id ? this.scheduleRow(row.schedule_id) : null;
-        const asked = s && s.instruction.trim() !== FEED_INSTRUCTION ? s.instruction.trim() : null;
+        const asked = s && !isDefaultFeedInstruction(s.instruction) ? s.instruction.trim() : null;
         const memory = this.feedMemory(ownerId);
         const kept = Object.fromEntries(FEED_MEMORY_KINDS.map(k => [k, memory.filter(m => m.kind === k).map(m => ({ id: m.id, text: m.text, from: m.source === "user" ? "said by the user" : "learned by the feed", date: date(m.created_at) }))]));
         return [
@@ -1191,7 +1215,7 @@ export class TaskService {
             "Read-only look at the user's own pages: on sites where the user is already signed in in the sandbox browser, that appear in the task records, or that they asked you to check (e.g. Gmail or Outlook mail, X or Xiaohongshu feeds they follow, order pages on shopping sites, billing pages), you may open them to see whether anything needs a reminder today: email to act on or about to expire (bills, renewals, appointment confirmations, people waiting for a reply), order and delivery changes, important news from people or topics they follow. Strictly read-only: only open, scroll and read; never send, reply, comment, like, follow, buy, order, delete, archive or label anything, and change no settings. Do not open unread email or direct messages (that marks them read); judge by the titles and snippets in the list. Skip sites where the user is not signed in; do not sign in and do not ask the user for help. For private content such as email, write only the gist, never the full text. Close the tabs you opened when you are done.",
             "Avoid nagging: consult feedHistory (topics of the last few feeds; userTasksAfter are the user's new tasks afterwards; replies are what the user said in direct reply to that feed). A topic pushed 3 times in a row recently with no related new task from the user since means they no longer care; stop pushing it unless something major has changed. New interests shown in the user's recent tasks come first; anything said yesterday with no change is not repeated. In the remembered memory, care is what to watch more closely, avoid is what not to push again, and note is the user's habits and preferences about the feed; follow all of them.",
             "Keep improving: when feedHistory shows a clear reaction to the feed (e.g. a reply saying it helped, asking for more or to stop, a task started right after an item, or a topic pushed several times that nobody responded to), record it with aio_schedule's feed_update (source set to \"feed\"): add care for what to watch more closely, avoid for what not to push again, note for preferences about the feed's form and timing, and remove outdated or contradicting old entries. Change at most 3 entries each time, record only what has clear evidence, do not duplicate existing entries, and record nothing when unsure.",
-            "Format: the first line is the heading \"Picked for you today\" (in Simplified Chinese write exactly 今日为你留意), followed by one item per thing, each one or two sentences, with links or map cards when needed; use picture cards (with images) for specific price drops, places worth visiting or articles worth reading. It should read quickly on a phone. When there is truly nothing worth saying today, reply with a single sentence saying there is nothing in particular to flag today (in Simplified Chinese: 今天没有需要特别提醒的事), and write <!--feed-empty--> on a line of its own at the end.",
+            "Format: the first line is the heading \"Picked for you today\" (in Simplified Chinese write exactly 今日为你留意), followed by one item per thing, each one or two sentences, with links or map cards when needed; use picture cards (with images) for specific price drops, places worth visiting or articles worth reading. It should read quickly on a phone. When there is truly nothing worth saying today, reply with a single sentence saying there is nothing in particular to flag today (in Simplified Chinese: 今天没有需要特别提醒的事), and write <!--feed-empty--> on a line of its own at the end.", // i18n-exempt: the exact Chinese wording asked of the model for Chinese feeds
             "On the last line by itself write <!--feed-topics: [\"topic 1\", \"topic 2\"]-->, listing the topics covered this time (short phrases, e.g. \"Mac Studio price drop\", \"Roy's vaccine appointment\"); the system uses it to adjust later feeds and the user never sees this line. Do not ask a question and wait, and do not create schedules.",
             "Remembered memory:", JSON.stringify(kept),
             `The user's task records for the last ${FEED_TASK_DAYS} days (newest first; the newest ${FEED_TASK_DETAILED} carry request and result summaries, older ones only the date and title, with only the latest of identical titles):`, JSON.stringify(tasks),
@@ -1203,7 +1227,7 @@ export class TaskService {
     }
     private feedSchedule(ownerId: string): ScheduleRow {
         const s = this.db.prepare("SELECT * FROM schedules WHERE owner_id=? AND builtin=?").get(ownerId, DAILY_FEED) as unknown as ScheduleRow | undefined;
-        if (!s) throw new Error("这个账号没有每日推送");
+        if (!s) throw new Error("This account has no daily feed");
         return s;
     }
     /** The daily feed as the person's tasks see and change it. */
@@ -1211,9 +1235,9 @@ export class TaskService {
         const s = this.feedSchedule(userId);
         const tz = this.cfg.browser.timezone;
         return {
-            title: s.title, rule: describeSchedule(JSON.parse(s.spec_json) as ScheduleSpec), status: s.status,
+            title: this.scheduleTitle(s), rule: describeSchedule(JSON.parse(s.spec_json) as ScheduleSpec), status: s.status,
             nextRun: s.next_run_at && s.status === "active" ? formatWhen(s.next_run_at, s.timezone) : null,
-            instruction: s.instruction, customized: s.instruction.trim() !== FEED_INSTRUCTION,
+            instruction: this.scheduleInstruction(s), customized: !isDefaultFeedInstruction(s.instruction),
             memory: this.feedMemory(userId).map(m => ({ id: m.id, kind: m.kind, text: m.text, source: m.source, date: describeNow(m.created_at, tz) })),
         };
     }
@@ -1285,7 +1309,7 @@ export class TaskService {
     private insertSchedule(ownerId: string, s: { title: string; instruction: string; spec: ScheduleSpec; nextRunAt: number; resources: string[]; sourceTaskId: string | null }): { id: string } | { refused: string } {
         const active = (this.db.prepare("SELECT COUNT(*) AS n FROM schedules WHERE owner_id=? AND status='active' AND builtin IS NULL").get(ownerId) as { n: number }).n;
         if (active >= MAX_ACTIVE_SCHEDULES)
-            return { refused: `没有创建定时任务：已有 ${active} 个进行中的定时任务（上限 ${MAX_ACTIVE_SCHEDULES} 个）。请先在「定时任务」页暂停或删除不需要的。` };
+            return { refused: t().tasks.schedules.limitReached(active, MAX_ACTIVE_SCHEDULES) };
         const id = randomId("sched");
         const now = Date.now();
         this.db.prepare("INSERT INTO schedules (id,owner_id,title,instruction,spec_json,timezone,resources_json,status,next_run_at,source_task_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,'active',?,?,?,?)")
@@ -1295,18 +1319,15 @@ export class TaskService {
     /** What was set up, for the person. */
     private scheduleCreated(title: string, instruction: string, spec: ScheduleSpec, nextRunAt: number): string {
         const tz = this.cfg.browser.timezone;
-        return [
-            `已创建定时任务「${title}」：${describeSchedule(spec)}（按 ${tz} 时间），下次运行 ${formatWhen(nextRunAt, tz)}。`,
-            `每次会做：${instruction}`,
-            "可以在「定时任务」页暂停、立即运行或删除，也可以直接告诉我。",
-        ].join("\n\n");
+        const words = t().tasks.schedules;
+        return [words.created(title, describeSchedule(spec), tz, formatWhen(nextRunAt, tz)), words.eachRun(instruction), words.manageHint].join("\n\n");
     }
     /** Store the schedule a plan asked for; the sentence that tells the person what was set up. */
     private createSchedule(row: TaskRow, plan: TaskPlan, runningNow = false): string {
         const planned = plan.schedule!;
         const stored = this.insertSchedule(this.ownerId(row), { title: plan.title, instruction: planned.instruction, spec: planned.spec, nextRunAt: planned.nextRunAt, resources: plan.resources, sourceTaskId: row.id });
         if ("refused" in stored) return stored.refused;
-        if (runningNow) return `已创建定时任务（${describeSchedule(planned.spec)}，下次 ${formatWhen(planned.nextRunAt, this.cfg.browser.timezone)}），现在先运行一次。`;
+        if (runningNow) return t().tasks.schedules.createdRunningNow(describeSchedule(planned.spec), formatWhen(planned.nextRunAt, this.cfg.browser.timezone));
         return this.scheduleCreated(plan.title, planned.instruction, planned.spec, planned.nextRunAt);
     }
     /**
@@ -1314,10 +1335,11 @@ export class TaskService {
      * kept here and run as new tasks whatever conversation asked for it.
      */
     createScheduleFor(userId: string, input: { title?: unknown; instruction?: unknown; schedule?: unknown; needsBrowser?: unknown }): { ok: true; message: string; schedule: ReturnType<TaskService["viewSchedule"]> } | { ok: false; error: string } {
+        const words = t().tasks.schedules;
         const title = typeof input.title === "string" ? [...input.title.trim()].slice(0, 40).join("") : "";
         const instruction = typeof input.instruction === "string" ? input.instruction.trim().slice(0, 2000) : "";
-        if (!title) return { ok: false, error: "title 不能为空" };
-        if (!instruction) return { ok: false, error: "instruction 不能为空：写每次运行要做的事" };
+        if (!title) return { ok: false, error: words.emptyTitle };
+        if (!instruction) return { ok: false, error: words.emptyInstruction };
         const checked = validateSchedule(input.schedule, Date.now(), this.cfg.browser.timezone);
         if ("error" in checked) return { ok: false, error: checked.error };
         const stored = this.insertSchedule(userId, { title, instruction, spec: checked.spec, nextRunAt: checked.next, resources: input.needsBrowser === false ? [] : ["browser"], sourceTaskId: null });
@@ -1330,18 +1352,19 @@ export class TaskService {
      * schedule with runs ahead starts again within the active cap. The built-in feed is
      * changed through its own settings instead.
      */
-    updateScheduleFor(userId: string, input: { id?: unknown; title?: unknown; instruction?: unknown; schedule?: unknown; needsBrowser?: unknown }): { ok: true; message: string; schedule: ReturnType<TaskService["viewSchedule"]> } | { ok: false; error: string } {
+    updateScheduleFor(userId: string, input: { id?: unknown; title?: unknown; instruction?: unknown; schedule?: unknown; needsBrowser?: unknown }): { ok: true; message: string; schedule: ReturnType<TaskService["viewSchedule"]> } | { ok: false; error: string; code?: "not_found" } {
+        const words = t().tasks.schedules;
         const s = this.scheduleRow(String(input.id ?? ""));
-        if (!s || s.owner_id !== userId) return { ok: false, error: "定时任务不存在" };
-        if (s.builtin) return { ok: false, error: `「${s.title}」是内置的每日推送，请用推送设置修改（feed_update），这里不能改` };
+        if (!s || s.owner_id !== userId) return { ok: false, error: words.notFound, code: "not_found" };
+        if (s.builtin) return { ok: false, error: words.builtinFeed(this.scheduleTitle(s)) };
         let title = s.title, instruction = s.instruction, resources = s.resources_json;
         if (input.title !== undefined) {
             title = typeof input.title === "string" ? [...input.title.trim()].slice(0, 40).join("") : "";
-            if (!title) return { ok: false, error: "title 不能为空" };
+            if (!title) return { ok: false, error: words.emptyTitle };
         }
         if (input.instruction !== undefined) {
             instruction = typeof input.instruction === "string" ? input.instruction.trim().slice(0, 2000) : "";
-            if (!instruction) return { ok: false, error: "instruction 不能为空：写每次运行要做的事" };
+            if (!instruction) return { ok: false, error: words.emptyInstruction };
         }
         if (typeof input.needsBrowser === "boolean") resources = JSON.stringify(input.needsBrowser ? ["browser"] : []);
         const now = Date.now();
@@ -1353,40 +1376,42 @@ export class TaskService {
             runCount = 0;
             if (status === "done") {
                 const active = (this.db.prepare("SELECT COUNT(*) AS n FROM schedules WHERE owner_id=? AND status='active' AND builtin IS NULL").get(userId) as { n: number }).n;
-                if (active >= MAX_ACTIVE_SCHEDULES) return { ok: false, error: `已有 ${active} 个进行中的定时任务（上限 ${MAX_ACTIVE_SCHEDULES} 个），这个已结束的不能再开始。请先暂停或删除不需要的。` };
+                if (active >= MAX_ACTIVE_SCHEDULES) return { ok: false, error: words.limitRestart(active, MAX_ACTIVE_SCHEDULES) };
                 status = "active";
             }
         }
         this.db.prepare("UPDATE schedules SET title=?,instruction=?,spec_json=?,resources_json=?,status=?,next_run_at=?,run_count=?,updated_at=? WHERE id=?")
             .run(title, instruction, JSON.stringify(spec), resources, status, status === "done" ? null : next, runCount, now, s.id);
         const tz = s.timezone;
-        const when = status === "paused" ? "目前已暂停，恢复后按新的时间运行。" : status === "done" ? "已经没有下一次运行。" : `下次运行 ${formatWhen(next!, tz)}。`;
-        return { ok: true, message: [`已更新定时任务「${title}」：${describeSchedule(spec)}（按 ${tz} 时间），${when}`, `每次会做：${instruction}`].join("\n\n"), schedule: this.viewSchedule(this.scheduleRow(s.id)!) };
+        const when = status === "paused" ? words.updatedPaused : status === "done" ? words.updatedDone : words.updatedNext(formatWhen(next!, tz));
+        return { ok: true, message: [words.updated(title, describeSchedule(spec), tz, when), words.eachRun(instruction)].join("\n\n"), schedule: this.viewSchedule(this.scheduleRow(s.id)!) };
     }
     /** Pause, resume or cancel one of the owner's schedules; the sentence that says what happened. */
     private applyScheduleAction(ownerId: string, id: string, action: ScheduleActionName): string {
+        const words = t().tasks.schedules;
         const s = this.scheduleRow(id);
-        if (!s || s.owner_id !== ownerId) return "没有找到这个定时任务，可能已经删除了。";
+        if (!s || s.owner_id !== ownerId) return words.missing;
         const now = Date.now();
+        const title = this.scheduleTitle(s);
         if (action === "cancel" && s.builtin) {
             this.db.prepare("UPDATE schedules SET status='paused',updated_at=? WHERE id=?").run(now, id);
-            return `「${s.title}」是内置的定时任务，已为你关闭。想恢复时告诉我，或在「定时任务」页重新开启。`;
+            return words.builtinClosed(title);
         }
         if (action === "cancel") {
             this.db.prepare("DELETE FROM schedules WHERE id=?").run(id);
-            return `已取消定时任务「${s.title}」，之后不会再运行。`;
+            return words.cancelled(title);
         }
         if (action === "pause") {
             this.db.prepare("UPDATE schedules SET status='paused',updated_at=? WHERE id=?").run(now, id);
-            return `已暂停定时任务「${s.title}」。需要时告诉我，或在「定时任务」页恢复。`;
+            return words.paused(title);
         }
         const next = nextRun(JSON.parse(s.spec_json) as ScheduleSpec, now, s.timezone);
         if (next === null) {
             this.db.prepare("UPDATE schedules SET status='done',next_run_at=NULL,updated_at=? WHERE id=?").run(now, id);
-            return `定时任务「${s.title}」已经没有下一次运行（时间或结束日期已过），没有恢复。`;
+            return words.noNextRun(title);
         }
         this.db.prepare("UPDATE schedules SET status='active',next_run_at=?,updated_at=? WHERE id=?").run(next, now, id);
-        return `已恢复定时任务「${s.title}」，下次运行 ${formatWhen(next, s.timezone)}。`;
+        return words.resumed(title, formatWhen(next, s.timezone));
     }
     /** Start every run that is due; a run missed while the service was down is made up once. */
     private runDueSchedules(): void {
@@ -1426,13 +1451,13 @@ export class TaskService {
         const frozen = isMember(this.db, s.owner_id) ? this.agent.memberSettings() : this.agent.resolveSubmitSettings({ conversationId: "main", text: s.instruction, clientMessageId });
         const id = randomId("task");
         const plan: TaskPlan = {
-            title: s.title, description: `定时任务（${describeSchedule(JSON.parse(s.spec_json) as ScheduleSpec)}）的自动运行。`,
+            title: s.title, description: t().tasks.schedules.runDescription(describeSchedule(JSON.parse(s.spec_json) as ScheduleSpec)),
             related: previous && s.builtin !== DAILY_FEED ? [previous.id] : [], dependencies: [], resources: JSON.parse(s.resources_json) as string[],
             appendTo: null, resume: null, clarification: null,
         };
         this.db.exec("BEGIN IMMEDIATE");
         try {
-            const conv = this.agent.createConversation({ ownerId: s.owner_id, title: `定时：${s.title}`, model: frozen.model });
+            const conv = this.agent.createConversation({ ownerId: s.owner_id, title: t().tasks.conversations.scheduled(this.scheduleTitle(s)), model: frozen.model });
             const last = this.db.prepare("SELECT MAX(created_at) AS n FROM tasks").get() as { n: number | null };
             const now = Math.max(Date.now(), (last.n ?? 0) + 1);
             this.db.prepare("INSERT INTO tasks (id,client_message_id,conversation_id,title,input_text,attachments_json,model,effort,created_at,status,plan_json,schedule_id) VALUES (?,?,?,?,?,'[]',?,?,?,'waiting',?,?)")
@@ -1452,11 +1477,11 @@ export class TaskService {
     private viewSchedule(s: ScheduleRow) {
         const last = s.last_task_id ? this.get(s.last_task_id) : null;
         return {
-            id: s.id, title: s.title, instruction: s.instruction, rule: describeSchedule(JSON.parse(s.spec_json) as ScheduleSpec), spec: JSON.parse(s.spec_json) as ScheduleSpec, needsBrowser: (JSON.parse(s.resources_json) as string[]).includes("browser"), status: s.status,
+            id: s.id, title: this.scheduleTitle(s), instruction: this.scheduleInstruction(s), rule: describeSchedule(JSON.parse(s.spec_json) as ScheduleSpec), spec: JSON.parse(s.spec_json) as ScheduleSpec, needsBrowser: (JSON.parse(s.resources_json) as string[]).includes("browser"), status: s.status,
             timezone: s.timezone, nextRunAt: s.next_run_at, nextRunText: s.next_run_at ? formatWhen(s.next_run_at, s.timezone) : null,
             lastRunAt: s.last_run_at, lastTask: last ? { id: last.id, status: last.status } : null, runCount: s.run_count, createdAt: s.created_at,
             builtin: s.builtin,
-            ...(s.builtin === DAILY_FEED ? { feed: { customized: s.instruction.trim() !== FEED_INSTRUCTION, memory: this.feedMemory(s.owner_id).map(m => ({ id: m.id, kind: m.kind, text: m.text, source: m.source })) } } : {}),
+            ...(s.builtin === DAILY_FEED ? { feed: { customized: !isDefaultFeedInstruction(s.instruction), memory: this.feedMemory(s.owner_id).map(m => ({ id: m.id, kind: m.kind, text: m.text, source: m.source })) } } : {}),
         };
     }
     /**
@@ -1528,7 +1553,7 @@ export class TaskService {
     /** Pause, resume or cancel from the schedules page. */
     changeSchedule(id: string, userId: string, action: ScheduleActionName) {
         const s = this.scheduleRow(id);
-        if (!s || s.owner_id !== userId) throw new Error("定时任务不存在");
+        if (!s || s.owner_id !== userId) throw new ScheduleNotFoundError();
         const message = this.applyScheduleAction(userId, id, action);
         const after = this.scheduleRow(id);
         return { message, schedule: after ? this.viewSchedule(after) : null };
@@ -1536,10 +1561,10 @@ export class TaskService {
     /** One extra run right now; the regular rhythm is unchanged. */
     runScheduleNow(id: string, userId: string) {
         const s = this.scheduleRow(id);
-        if (!s || s.owner_id !== userId) throw new Error("定时任务不存在");
-        if (s.status === "done") throw new Error("这个定时任务已经结束");
+        if (!s || s.owner_id !== userId) throw new ScheduleNotFoundError();
+        if (s.status === "done") throw new Error(t().tasks.schedules.ended);
         const taskId = this.fireSchedule(s, Date.now(), true);
-        if (!taskId) throw new Error("上一次运行还没结束，结束后再试");
+        if (!taskId) throw new Error(t().tasks.schedules.stillRunning);
         this.schedule();
         return { task: this.view(this.get(taskId)!), schedule: this.viewSchedule(this.scheduleRow(id)!) };
     }
