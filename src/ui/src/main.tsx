@@ -5,9 +5,10 @@ import { locale, t } from "./i18n";
 import "./theme.css";
 import "./styles.css";
 
-// The page speaks the chosen language: its lang (fonts, screen readers) and the tab title.
+// The page speaks the chosen language: its lang (fonts, screen readers), the tab title and the home-screen name.
 document.documentElement.lang = locale;
 document.title = t.app.brand.name;
+document.querySelector('meta[name="apple-mobile-web-app-title"]')?.setAttribute("content", t.app.brand.name);
 
 // The theme the app starts in (MainApp's own first choice), set before the first paint:
 // the loading screen then matches the page that came before it, with no flash between.

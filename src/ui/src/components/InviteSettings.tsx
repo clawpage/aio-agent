@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../api";
 import type { Invite } from "../types";
-import { t } from "../i18n";
+import { locale, t } from "../i18n";
 
-const day = (ms: number) => new Date(ms).toLocaleDateString();
+const day = (ms: number) => new Date(ms).toLocaleDateString(locale);
 
 function stateOf(i: Invite): string {
   if (i.usedAt !== null) return t.settings.invite.usedBy(i.usedBy ?? t.settings.invite.deletedAccount, day(i.usedAt));

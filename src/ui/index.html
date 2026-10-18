@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="en">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
@@ -11,7 +11,8 @@
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <link rel="manifest" href="/manifest.webmanifest" />
-    <title>一站</title>
+    <title>Clawpage Agent</title>
+    <!-- Its lang, title and splash label are English, the fallback language, until main.tsx sets the console's. -->
     <!-- The page before the app's script arrives: the theme's background and the loading mark
          (Brand.tsx LoadingMark, the mark sketched in one line) where the app's own loading screen
          shows it next, so the drawing carries on without a jump. The stylesheet is linked in the
@@ -25,7 +26,7 @@
     </style>
   </head>
   <body>
-    <div id="root"><div class="boot-splash" aria-label="加载中"><svg class="loading-mark" width="56" height="56" viewBox="0 0 40 40" aria-hidden="true"><g class="lm-draw"><path class="lm-stroke lm-frame" d="M4 20V13A9 9 0 0 1 13 4H27A9 9 0 0 1 36 13V27A9 9 0 0 1 27 36H13A9 9 0 0 1 4 27Z" pathLength="1" fill="none" stroke="#8f86ff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/><path class="lm-stroke lm-in" d="M9 20H13.2" pathLength="1" fill="none" stroke="#8f86ff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/><path class="lm-stroke lm-ring" d="M13.2 20A6.8 6.8 0 1 1 26.8 20A6.8 6.8 0 1 1 13.2 20" pathLength="1" fill="none" stroke="#8f86ff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/><path class="lm-stroke lm-out" d="M26.8 20H31" pathLength="1" fill="none" stroke="#8f86ff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/><circle class="lm-stop" cx="20" cy="20" r="2.6" fill="#8f86ff"/></g></svg></div></div>
+    <div id="root"><div class="boot-splash" aria-label="Loading"><svg class="loading-mark" width="56" height="56" viewBox="0 0 40 40" aria-hidden="true"><g class="lm-draw"><path class="lm-stroke lm-frame" d="M4 20V13A9 9 0 0 1 13 4H27A9 9 0 0 1 36 13V27A9 9 0 0 1 27 36H13A9 9 0 0 1 4 27Z" pathLength="1" fill="none" stroke="#8f86ff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/><path class="lm-stroke lm-in" d="M9 20H13.2" pathLength="1" fill="none" stroke="#8f86ff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/><path class="lm-stroke lm-ring" d="M13.2 20A6.8 6.8 0 1 1 26.8 20A6.8 6.8 0 1 1 13.2 20" pathLength="1" fill="none" stroke="#8f86ff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/><path class="lm-stroke lm-out" d="M26.8 20H31" pathLength="1" fill="none" stroke="#8f86ff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/><circle class="lm-stop" cx="20" cy="20" r="2.6" fill="#8f86ff"/></g></svg></div></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../api';
-import { t } from '../i18n';
+import { locale, t } from '../i18n';
 import { openNativeBrowser } from '../deviceBrowser';
 
 export function SupportDialog({taskId, onClose}: {taskId?: string; onClose: () => void}) {
@@ -60,7 +60,7 @@ export function SupportSettings() {
     {!requests.length && <p className="muted">{t.support.empty}</p>}
     {requests.map(r => <article key={r.id} className="support-request">
       <strong>{t.support.kinds[r.kind]} · {r.account_username || r.username || r.id}</strong>
-      <p className="tiny muted">{new Date(r.created_at).toLocaleString()} · {r.status === 'pending' ? t.support.pending : t.support.reviewed} · {r.account_email || r.email}</p>
+      <p className="tiny muted">{new Date(r.created_at).toLocaleString(locale)} · {r.status === 'pending' ? t.support.pending : t.support.reviewed} · {r.account_email || r.email}</p>
       <p className="support-note">{r.note}</p>
       {r.content && <details><summary>{r.title}</summary><pre>{r.content}</pre></details>}
       {r.decision && <p className="support-note">{r.decision}</p>}

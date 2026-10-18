@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../api";
 import type { DeviceLink } from "../types";
-import { t } from "../i18n";
+import { locale, t } from "../i18n";
 import { hasDeviceLink, linkThisMac, listenDeviceLink, unlinkThisMac, type NativeLink } from "../deviceLink";
 
-const day = (ms: number) => new Date(ms).toLocaleDateString();
+const day = (ms: number) => new Date(ms).toLocaleDateString(locale);
 
 /**
  * Phones and Chrome on a Mac (the workspace's Phone app): the Macs this account linked, and,

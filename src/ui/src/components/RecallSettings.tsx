@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
 import type { RecallStats } from "../types";
-import { t } from "../i18n";
+import { locale, t } from "../i18n";
 
 const pct = (v: number | null) => (v === null ? "—" : `${Math.round(v * 100)}%`);
 
@@ -29,7 +29,7 @@ export function RecallSettings() {
         [t.settings.recall.chosen, t.settings.recall.chosenValue(stats.chosen, stats.chosenFromRecall)],
         [t.settings.recall.labelled, stats.labelled ? t.settings.recall.labelledValue(stats.labelled, stats.cap, pct(stats.recallAtCap), String(stats.mrr ?? "—")) : t.settings.recall.none],
         [t.settings.recall.cap, t.settings.recall.capValue(stats.cap)],
-        [t.settings.recall.latency, t.settings.recall.latencyValue((stats.avgLatencyMs / 1000).toFixed(1), stats.p90PromptChars.toLocaleString())],
+        [t.settings.recall.latency, t.settings.recall.latencyValue((stats.avgLatencyMs / 1000).toFixed(1), stats.p90PromptChars.toLocaleString(locale))],
       ]
     : [];
 

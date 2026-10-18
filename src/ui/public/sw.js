@@ -82,7 +82,7 @@ async function buildFile(event) {
 self.addEventListener("push", (event) => {
   let data = {};
   try { data = event.data ? event.data.json() : {}; } catch { data = { body: event.data ? event.data.text() : "" }; }
-  event.waitUntil(self.registration.showNotification(data.title || "一站", {
+  event.waitUntil(self.registration.showNotification(data.title || "Clawpage Agent", {
     body: data.body || "",
     tag: data.tag || undefined,
     icon: "/icon-192.png",

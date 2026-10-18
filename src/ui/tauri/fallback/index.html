@@ -1,5 +1,16 @@
 <!doctype html>
-<html lang="zh-CN">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>一站</title></head>
-<body style="font-family:system-ui;padding:2rem">正在打开一站…</body>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Clawpage Agent</title></head>
+<body style="font-family:system-ui;padding:2rem"><p id="opening">Opening Clawpage Agent…</p>
+<script>
+  // The first of the system's languages the console speaks (as its systemLocale does); English otherwise.
+  const words = { "zh-CN": ["一站", "正在打开一站…"], "zh-TW": ["一站", "正在開啟一站…"], es: ["Clawpage Agent", "Abriendo Clawpage Agent…"] };
+  const match = (tag) => /^zh-(hant|tw|hk|mo)\b/.test(tag) ? "zh-TW" : /^zh(-|$)/.test(tag) ? "zh-CN" : /^en(-|$)/.test(tag) ? "en" : /^es(-|$)/.test(tag) ? "es" : null;
+  const lang = (navigator.languages || [navigator.language]).map((tag) => match(String(tag).toLowerCase())).find(Boolean);
+  if (lang && words[lang]) {
+    document.documentElement.lang = lang;
+    [document.title, document.getElementById("opening").textContent] = words[lang];
+  }
+</script>
+</body>
 </html>

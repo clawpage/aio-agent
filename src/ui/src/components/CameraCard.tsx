@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { api, apiUrl, API_BASE, ApiError, type CameraInfo } from "../api";
 import type { CameraSpec } from "../cameraBlocks";
 import { useNearViewport } from "./ProductCards";
-import { t } from "../i18n";
+import { locale, t } from "../i18n";
 
 type Playback = { url: string; offset: number; start: number; end: number; next: number | null };
 type Direction = "left" | "right" | "up" | "down";
@@ -12,9 +12,9 @@ const SNAPSHOT_REFRESH_MS = 10_000;
 /** A wall-clock time in the house's zone (the server's), not the viewer's. */
 function clock(ms: number, timeZone: string, withDate: boolean): string {
   try {
-    return new Intl.DateTimeFormat(undefined, { timeZone, hour12: false, ...(withDate ? { month: "numeric", day: "numeric" } : {}), hour: "2-digit", minute: "2-digit", second: "2-digit" }).format(ms);
+    return new Intl.DateTimeFormat(locale, { timeZone, hour12: false, ...(withDate ? { month: "numeric", day: "numeric" } : {}), hour: "2-digit", minute: "2-digit", second: "2-digit" }).format(ms);
   } catch {
-    return new Date(ms).toLocaleTimeString();
+    return new Date(ms).toLocaleTimeString(locale);
   }
 }
 

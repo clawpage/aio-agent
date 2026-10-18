@@ -97,11 +97,12 @@ The shell itself bundles no UI, so a UI change still ships with the next UI depl
   narrow bridge (`mac` in `src-tauri/src/lib.rs`) opens links and the Google
   authorization page in the default browser, because Google stops at the account
   chooser inside the web view. The browser returns through the `aioagent` URL scheme,
-  and microphone permission text is in `src-tauri/Info.macos.plist`. Build with
+  and microphone permission text is in `src-tauri/Info.macos.plist` (English, the fallback) and, per
+  language, in `src-tauri/macos/*.lproj/InfoPlist.strings`. Build with
   `env -u NODE_ENV npm run -- tauri build --bundles app` and copy
   `src-tauri/target/release/bundle/macos/Clawpage.app` to `/Applications`. A copy
   left in `target/` also claims the scheme; unregister it with `lsregister -u <path>`.
-  The Mac app is named Clawpage in English and 一站 in Chinese (`productName` in
+  The Mac app is named Clawpage in English and Spanish and 一站 in Simplified and Traditional Chinese (`productName` in
   `tauri.macos.conf.json`, `src-tauri/macos/*.lproj/InfoPlist.strings`); the window title is
   read from the same localized name at start. Since 0.1.1 (versionCode 1001) Android shows Clawpage
   Agent, and 一站 on a Chinese device (`values-zh`); iOS still shows 一站.

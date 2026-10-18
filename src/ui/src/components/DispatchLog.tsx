@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { PopupSurface } from "./PopupMotion";
 import { useEffect, useState } from "react";
 import { api } from "../api";
-import { t as i18n } from "../i18n";
+import { locale, t as i18n } from "../i18n";
 import type { DispatchLog as Log, DispatchLogEntry, DispatchStep } from "../types";
 
 // "today" and "search" only appear in dispatch logs recorded before those sources were removed.
@@ -92,7 +92,7 @@ function Step({ step, name, start }: { step: DispatchStep; name: (id: string) =>
           <StepHead title={i18n.dispatch.steps.ask(step.round)} offset={offset} />
           {step.correction && <p className="error tiny">{i18n.dispatch.steps.correction(step.correction)}</p>}
           <pre>{step.answer ?? i18n.dispatch.steps.noAnswer}</pre>
-          <details><summary>{i18n.dispatch.steps.fullPrompt(step.prompt.length.toLocaleString())}</summary><pre>{step.prompt}</pre></details>
+          <details><summary>{i18n.dispatch.steps.fullPrompt(step.prompt.length.toLocaleString(locale))}</summary><pre>{step.prompt}</pre></details>
         </li>
       );
     case "timing": {
@@ -175,7 +175,7 @@ export function DispatchLog({ taskId, onClose }: { taskId: string; onClose: () =
                   {models(entry).map((m) => <span key={m} className="dispatch-log-chip">{m}</span>)}
                   <span className="dispatch-log-chip">{i18n.dispatch.entry.latency((entry.latencyMs / 1000).toFixed(1))}</span>
                   <span className="dispatch-log-chip">{i18n.dispatch.entry.rounds(entry.rounds)}</span>
-                  <span className="dispatch-log-chip">{i18n.dispatch.entry.promptChars(entry.promptChars.toLocaleString())}</span>
+                  <span className="dispatch-log-chip">{i18n.dispatch.entry.promptChars(entry.promptChars.toLocaleString(locale))}</span>
                   <span className="muted tiny">{clock(entry.at)}</span>
                 </div>
                 {entry.chosen.related.length > 0 && <p>{i18n.dispatch.entry.related(entry.chosen.related.map(name))}</p>}

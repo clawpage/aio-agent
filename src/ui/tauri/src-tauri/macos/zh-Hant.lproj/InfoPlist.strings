@@ -1,0 +1,3 @@
+"CFBundleDisplayName" = "一站";
+"CFBundleName" = "一站";
+"NSMicrophoneUsageDescription" = "語音輸入時錄下你說的話，轉成文字放進輸入框。";

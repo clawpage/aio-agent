@@ -1,6 +1,6 @@
 import {useCallback,useEffect,useState} from 'react';
 import {api} from '../api';
-import {t} from '../i18n';
+import {locale, t} from '../i18n';
 
 export function SoulSettings() {
   const [content,setContent]=useState('');
@@ -25,7 +25,7 @@ export function SoulSettings() {
   return <section className="settings-card soul-settings" aria-label={t.settings.soul.title}>
     <div className="settings-section-head"><h3>{t.settings.soul.title} <span className="settings-file-label">SOUL.md</span></h3><p>{t.settings.soul.intro}</p></div>
     <label className="field"><span>{t.settings.soul.contentLabel}</span><textarea aria-label={t.settings.soul.contentLabel} value={content} onChange={e=>{setContent(e.target.value);setSaved(false);}} disabled={busy||!loaded} spellCheck={false}/></label>
-    <div className="muted tiny">{t.settings.soul.size(bytes.toLocaleString())}</div>
+    <div className="muted tiny">{t.settings.soul.size(bytes.toLocaleString(locale))}</div>
     {error&&<p className="banner error" role="alert">{error} {t.settings.soul.reloadWarning}</p>}
     {saved&&<p className="banner ok soul-saved" role="status">{t.settings.soul.saved}</p>}
     <div className="settings-actions soul-actions">

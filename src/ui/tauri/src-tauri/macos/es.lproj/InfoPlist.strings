@@ -1,0 +1,3 @@
+"CFBundleDisplayName" = "Clawpage";
+"CFBundleName" = "Clawpage";
+"NSMicrophoneUsageDescription" = "La entrada de voz graba lo que dices y lo convierte en texto en el cuadro de mensaje.";

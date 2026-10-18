@@ -1,2 +1,3 @@
 "CFBundleDisplayName" = "Clawpage";
 "CFBundleName" = "Clawpage";
+"NSMicrophoneUsageDescription" = "Voice input records what you say and turns it into text in the message box.";
