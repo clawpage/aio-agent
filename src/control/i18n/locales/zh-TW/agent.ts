@@ -4,7 +4,7 @@ export const agent: typeof zh = {
         titleEmpty: "標題不能為空",
         titleTooLong: (max: number) => `標題最長 ${max} 個字元`,
         missing: "對話不存在",
-        archived: "對話已歸檔，無法傳送訊息",
+        archived: "對話已封存，無法傳送訊息",
     },
     turn: {
         serviceUnavailable: "服務暫時無法使用，請稍後再試",
