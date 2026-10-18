@@ -81,6 +81,7 @@ it("polishes the transcript with the configured model and types the result", asy
   expect(sent.headers.authorization).toBe("Bearer sk-ant-oat-test");
   expect(sent.headers["anthropic-beta"]).toBe("oauth-2025-04-20");
   expect(sent.body.model).toBe("claude-sonnet-5-5");
+  expect(sent.body.output_config).toEqual({ effort: "low" });
   expect(sent.body.messages[0].content).toContain("嗯那个明天下午三点开会呃记得带电脑");
   expect(bridge.typed.at(-1)).toEqual({ auth: `Bearer ${BRIDGE_TOKEN}`, text: "明天下午三点开会，记得带电脑。" });
 });

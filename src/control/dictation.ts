@@ -81,6 +81,7 @@ export class Dictation {
         body: JSON.stringify({
           model: this.#cfg.polishModel,
           max_tokens: 2048,
+          ...(this.#cfg.polishEffort ? { output_config: { effort: this.#cfg.polishEffort } } : {}),
           system: [
             // A subscription credential only serves requests that introduce themselves as Claude Code.
             { type: "text", text: "You are Claude Code, Anthropic's official CLI for Claude." },

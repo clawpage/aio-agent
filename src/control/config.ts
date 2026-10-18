@@ -92,6 +92,8 @@ export function loadConfig(): {
   asrUrl: string;
   /** The Claude model (owner's credential) that polishes every transcript: the composer's voice input and the gadget's dictation (src/control/dictation.ts). */
   polishModel: string;
+  /** The polisher's effort (`output_config.effort`); empty: the model's default. */
+  polishEffort: string;
   /** Google Maps Platform key (Maps Static + Geocoding) for map cards; empty: OpenStreetMap. */
   googleMapsKey: string;
   logDir: string;
@@ -441,6 +443,7 @@ export function loadConfig(): {
     gadgetFirmwareDir: envStr("PA_GADGET_FIRMWARE_DIR", path.join(dataDir, "gadget-firmware")),
     asrUrl: envStr("PA_ASR_URL", ""),
     polishModel: envStr("PA_DICTATION_MODEL", "claude-sonnet-5-5"),
+    polishEffort: envStr("PA_DICTATION_EFFORT", "low"),
     googleMapsKey: (() => {
       if (envStr("PA_GOOGLE_MAPS_API_KEY").trim()) return envStr("PA_GOOGLE_MAPS_API_KEY").trim();
       // No file (or compose's /dev/null placeholder) leaves the maps on OpenStreetMap.
