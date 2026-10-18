@@ -1,4 +1,5 @@
 import type { AppContext } from "../context.js";
+import { t } from "../i18n/index.js";
 
 /** Task states that mean the sandbox is about to be used (planning runs on the sandbox Codex). */
 const ACTIVE_TASKS = "'planning','queued','running','steering','stopping','merging'";
@@ -162,7 +163,7 @@ export class SandboxIdle {
         // The browser reconciles with what the container holds before any release.
         if (this.#ctx.cfg.browser.enabled) this.#ctx.browser.containerStarted();
       }
-      if (this.#ctx.sandboxSetupError) throw new Error("沙箱启动失败，请稍后重试");
+      if (this.#ctx.sandboxSetupError) throw new Error(t().sandbox.startFailed);
     })().finally(() => {
       this.#waking = null;
     });

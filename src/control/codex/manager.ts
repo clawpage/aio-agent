@@ -22,6 +22,7 @@ import { HISTORY_POLICY } from "../historyTool.js";
 import { IMAGE_POLICY } from "../imageTool.js";
 import { PRINTER_POLICY } from "../printer/gateway.js";
 import { DEFAULT_CONVERSATION_TITLE, TITLE_UPDATED_EVENT } from "./conversationTitle.js";
+import { t } from "../i18n/index.js";
 import {
   effectiveAgentSettings,
   readAgentSettings,
@@ -212,9 +213,9 @@ export class InvalidConversationTitleError extends Error {
  */
 export function normalizeConversationTitle(raw: string): string {
   const title = raw.trim();
-  if (!title) throw new InvalidConversationTitleError("标题不能为空");
+  if (!title) throw new InvalidConversationTitleError(t().agent.conversation.titleEmpty);
   if (title.length > CONVERSATION_TITLE_MAX_CHARS) {
-    throw new InvalidConversationTitleError(`标题最长 ${CONVERSATION_TITLE_MAX_CHARS} 个字符`);
+    throw new InvalidConversationTitleError(t().agent.conversation.titleTooLong(CONVERSATION_TITLE_MAX_CHARS));
   }
   return title;
 }
@@ -423,24 +424,23 @@ export class AgentManager {
         // side effects. Never auto-retry this; make the user verify first.
         this.#db
           .prepare("UPDATE turns SET status = 'unknown', error = ?, completed_at = ? WHERE id = ?")
-          .run("服务重启时该轮次正在执行，执行结果未知，可能已在沙箱内产生操作", Date.now(), turn.id);
+          .run(t().agent.turn.restartedWhileRunning, Date.now(), turn.id);
         this.#appendEvent(turn.conversation_id, turn.id, "turn.reconciled", {
           turnId: turn.id,
           reason: "server_restart_while_running",
           status: "unknown",
-          message:
-            "服务重启时该轮次正在执行，执行结果未知，可能已在沙箱内产生操作（文件、进程、浏览器状态）。请先核对沙箱状态，确认后再重新发送；系统不会自动重放该轮次。",
+          message: t().agent.turn.restartedWhileRunningNotice,
         });
         if (this.#tabs && !cold) void this.#tabs.finish(turn.conversation_id).catch((err) => this.#log.warn("tab finish failed", { error: String(err) }));
       } else {
         this.#db
           .prepare("UPDATE turns SET status = 'interrupted', error = ?, completed_at = ? WHERE id = ?")
-          .run("服务重启导致排队中的轮次被取消", Date.now(), turn.id);
+          .run(t().agent.turn.restartedWhileQueued, Date.now(), turn.id);
         this.#appendEvent(turn.conversation_id, turn.id, "turn.reconciled", {
           turnId: turn.id,
           reason: "server_restart_before_start",
           status: "interrupted",
-          message: "服务重启导致该轮次尚未开始即被取消，可以安全地重新发送。",
+          message: t().agent.turn.restartedWhileQueuedNotice,
         });
       }
     }
@@ -801,7 +801,7 @@ export class AgentManager {
     // and a GPT member runs only while the control plane has its own ChatGPT login.
     const available = (this.#claudeCode?.owns(model) || (this.#bridge?.providerForModel(model) ?? "openai") !== "openai")
       && (model !== MEMBER_GPT_MODEL || this.#cfg.hostCodex.enabled);
-    if (!available) throw new Error("服务暂时不可用，请稍后重试");
+    if (!available) throw new Error(t().agent.turn.serviceUnavailable);
     return { model, effort: this.#cfg.memberEffort ?? MEMBER_EFFORT };
   }
 
@@ -836,14 +836,14 @@ export class AgentManager {
       const sameText = existing.input_text === input.text;
       const sameAttachments = existing.attachments_json === JSON.stringify(input.attachments ?? []);
       if (!sameConversation || !sameText || !sameAttachments) {
-        throw new TurnConflictError("该消息 ID 已用于另一条内容不同的消息，已拒绝重复提交");
+        throw new TurnConflictError(t().agent.turn.duplicateMessageId);
       }
       return { turn: existing, duplicate: true };
     }
 
     const conversation = this.getConversation(input.conversationId);
-    if (!conversation) throw new Error("会话不存在");
-    if (conversation.archived) throw new Error("会话已归档，无法发送消息");
+    if (!conversation) throw new Error(t().agent.conversation.missing);
+    if (conversation.archived) throw new Error(t().agent.conversation.archived);
 
     const now = Date.now();
     const id = randomId("turn");
@@ -856,7 +856,7 @@ export class AgentManager {
     // rather than letting Codex reject the turn remotely.
     const model = resolved.model ?? this.#cfg.agent.defaultModel;
     if (attachments.some((a) => a.kind === "image") && this.#bridge?.isTextOnly(model)) {
-      throw new TurnInputUnsupportedError("该模型只支持文本输入，请移除图片附件后重试");
+      throw new TurnInputUnsupportedError(t().agent.turn.textOnlyModel);
     }
     try {
       this.#db
@@ -973,7 +973,7 @@ export class AgentManager {
 
   async #runTurn(turn: TurnRow, ctx: ActiveTurn): Promise<void> {
     const conversation = this.getConversation(turn.conversation_id);
-    if (!conversation) throw new Error("会话不存在");
+    if (!conversation) throw new Error(t().agent.conversation.missing);
     // Validate at claim time too, in case it was interrupted concurrently.
     const claimed = this.#db
       .prepare("UPDATE turns SET status = 'running', started_at = ? WHERE id = ? AND status = 'queued'")
@@ -1117,7 +1117,7 @@ export class AgentManager {
       // failed, or before the request timed out: unknown, not a clean failure.
       // Only a definite rejection (an error answer) means it never started.
       if (this.#codexGeneration !== generation || !this.#codex.ready || err instanceof JsonRpcTimeoutError) {
-        throw new TurnOutcomeUnknownError("启动轮次时与沙箱 Codex 的连接中断，执行结果未知");
+        throw new TurnOutcomeUnknownError(t().agent.turn.startConnectionLost);
       }
       throw err;
     }
@@ -1152,17 +1152,17 @@ export class AgentManager {
       this.#db.prepare("UPDATE turns SET status = 'interrupted', completed_at = ? WHERE id = ?").run(Date.now(), turn.id);
       this.#appendEvent(conversation.id, turn.id, "turn.finished", { turnId: turn.id, status: "interrupted" });
     } else if (status === "unknown") {
-      const cause = reason ?? "与沙箱 Codex 的连接中断";
+      const cause = reason ?? t().agent.turn.connectionLost;
       this.#db
         .prepare("UPDATE turns SET status = 'unknown', error = ?, completed_at = ? WHERE id = ?")
-        .run(`${cause}，本次执行结果未知`, Date.now(), turn.id);
+        .run(t().agent.turn.outcomeUnknown(cause), Date.now(), turn.id);
       this.#appendEvent(conversation.id, turn.id, "turn.finished", {
         turnId: turn.id,
         status: "unknown",
-        message: `${cause}，本次执行结果未知，可能已产生操作。请先核对沙箱内文件/进程状态，系统不会自动重放该轮次。`,
+        message: t().agent.turn.outcomeUnknownNotice(cause),
       });
     } else {
-      this.#failTurn(turn, reason ? `执行失败：${reason}` : `Codex 轮次结束状态：${status}`);
+      this.#failTurn(turn, reason ? t().agent.turn.failed(reason) : t().agent.turn.codexEnded(status));
     }
   }
 
@@ -1340,7 +1340,7 @@ export class AgentManager {
    */
   #handleCodexClosed(reason: string): void {
     this.#log.warn("sandbox codex closed; marking in-flight work unknown", { reason });
-    this.#lastError = `与沙箱 Codex 的连接中断：${reason}`;
+    this.#lastError = t().agent.turn.connectionLostBecause(reason);
     this.#codexGeneration += 1;
     for (const [turnId] of this.#completionWaiters) {
       this.#completedTurns.set(turnId, { status: "unknown" });
@@ -1375,7 +1375,7 @@ export class AgentManager {
       if (!waiter) return;
       this.#completionWaiters.delete(codexTurnId);
       this.#completedTurns.set(codexTurnId, { status: "unknown" });
-      this.#turnErrors.set(codexTurnId, `停止请求发出后 ${Math.round(this.#stopGraceMs / 60_000)} 分钟仍未结束`);
+      this.#turnErrors.set(codexTurnId, t().agent.turn.stopTimedOut(Math.round(this.#stopGraceMs / 60_000)));
       waiter();
     }, this.#stopGraceMs);
     timer.unref?.();
@@ -1389,7 +1389,7 @@ export class AgentManager {
     this.#appendEvent(turn.conversation_id, turn.id, "turn.finished", {
       turnId: turn.id,
       status: "unknown",
-      message: `${message}。请先核对沙箱内文件与进程状态，系统不会自动重放该轮次。`,
+      message: t().agent.turn.checkSandbox(message),
     });
   }
 
@@ -1424,7 +1424,7 @@ export class AgentManager {
     } else {
       const conversation = this.getConversation(conversationId);
       if (!turn.codex_turn_id || !conversation?.codex_thread_id) return "starting";
-      if (!this.#codex.steerTurn) throw new Error("当前执行器不支持运行中补充");
+      if (!this.#codex.steerTurn) throw new Error("This executor cannot take additions while a turn runs");
       if (requiresBrowser && turn.browser_required === 0) {
         try { await this.#browser?.ready(); await this.#tabs?.ensure(); }
         catch { return "browser_unavailable"; }
@@ -1455,10 +1455,10 @@ export class AgentManager {
     if (queued) {
       const res = this.#db
         .prepare("UPDATE turns SET status = 'interrupted', error = ?, completed_at = ? WHERE id = ? AND status = 'queued'")
-        .run("用户取消了排队中的轮次", Date.now(), queued.id);
+        .run(t().agent.stop.queuedCancelled, Date.now(), queued.id);
       if (res.changes === 1) {
         this.#appendEvent(conversationId, queued.id, "turn.cancelled", { turnId: queued.id, stage: "queued" });
-        return { ok: true, status: "queued", message: "已取消排队中的轮次" };
+        return { ok: true, status: "queued", message: t().agent.stop.queued };
       }
     }
 
@@ -1466,7 +1466,7 @@ export class AgentManager {
       .prepare("SELECT * FROM turns WHERE conversation_id = ? AND status = 'running' ORDER BY created_at DESC LIMIT 1")
       .get(conversationId) as unknown as TurnRow | undefined;
     if (!running) {
-      return { ok: false, status: "none", message: "当前没有正在执行或排队中的轮次" };
+      return { ok: false, status: "none", message: t().agent.stop.none };
     }
 
     const conversation = this.getConversation(conversationId);
@@ -1478,15 +1478,15 @@ export class AgentManager {
       } catch (err) {
         this.#log.warn("interrupt not delivered", { error: String(err) });
         this.#appendEvent(conversationId, running.id, "turn.interrupt_requested", { turnId: running.id, stage: "running", delivered: false });
-        return { ok: true, status: "running", message: "停止请求暂未送达沙箱；如果两分钟内仍未结束，会标为结果待核对" };
+        return { ok: true, status: "running", message: t().agent.stop.notDelivered };
       }
       this.#appendEvent(conversationId, running.id, "turn.interrupt_requested", { turnId: running.id, stage: "running" });
-      return { ok: true, status: "running", message: "已请求停止当前执行" };
+      return { ok: true, status: "running", message: t().agent.stop.requested };
     }
 
     this.#db.prepare("UPDATE turns SET cancel_requested = 1 WHERE id = ? AND status = 'running'").run(running.id);
     this.#appendEvent(conversationId, running.id, "turn.interrupt_requested", { turnId: running.id, stage: "starting" });
-    return { ok: true, status: "starting", message: "已请求停止，该轮次将在启动完成后立即中断" };
+    return { ok: true, status: "starting", message: t().agent.stop.starting };
   }
 
   // ------------------------------------------------------------ approvals
@@ -1652,15 +1652,15 @@ export class AgentManager {
           status: string;
         }
       | undefined;
-    if (!row) return { ok: false, message: "审批请求不存在" };
-    if (row.status !== "pending") return { ok: false, message: "该审批已处理" };
+    if (!row) return { ok: false, message: t().agent.approval.missing };
+    if (row.status !== "pending") return { ok: false, message: t().agent.approval.handled };
 
     const response = buildApprovalResponse(row.method, decision, extra);
-    if (!response) return { ok: false, message: `不支持的审批类型：${row.method}` };
+    if (!response) return { ok: false, message: t().agent.approval.unsupported(row.method) };
     if (!this.#codex.answer(row.codex_request_id, response)) {
       this.#db.prepare("UPDATE server_requests SET status = 'expired', resolved_at = ? WHERE id = ?").run(Date.now(), requestId);
       this.#appendEvent(row.conversation_id, row.turn_id, "approval.resolved", { requestId, decision: "expired" });
-      return { ok: false, message: "该审批已失效" };
+      return { ok: false, message: t().agent.approval.expired };
     }
     const timer = this.#approvalTimers.get(requestId);
     if (timer) {
@@ -1671,7 +1671,7 @@ export class AgentManager {
       .prepare("UPDATE server_requests SET status = 'answered', response = ?, resolved_at = ? WHERE id = ?")
       .run(JSON.stringify(response), Date.now(), requestId);
     this.#appendEvent(row.conversation_id, row.turn_id, "approval.resolved", { requestId, decision, response });
-    return { ok: true, message: "已处理" };
+    return { ok: true, message: t().agent.approval.done };
   }
 
   #defaultDeny(method: string): unknown {

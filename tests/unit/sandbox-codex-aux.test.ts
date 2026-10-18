@@ -139,7 +139,7 @@ describe("SandboxCodexSession dispatcher thread isolation", () => {
     server.handle('thread/start',()=>({thread:{id:'aux-usage'}}));server.handle('turn/start',()=>({turn:{id:'turn'}}));
     const session=makeSession(server,30,null,new UsageLedger(db));const forwarded:unknown[]=[];session.onNotification((m,p)=>forwarded.push([m,p]));
     try {
-      await expect(session.planTask('classify')).rejects.toThrow('派单超时');
+      await expect(session.planTask('classify')).rejects.toThrow('Dispatch timed out');
       server.notify('thread/tokenUsage/updated',{threadId:'aux-usage',tokenUsage:{total:{inputTokens:100,outputTokens:4},last:{inputTokens:100,outputTokens:4}}});
       await wait(20);
       expect(db.prepare('SELECT SUM(input) input,SUM(output) output FROM token_usage').get()).toMatchObject({input:100,output:4});
@@ -156,7 +156,7 @@ describe("SandboxCodexSession dispatcher thread isolation", () => {
 
     try {
       // The scripted turn never completes, so the dispatcher run times out (reported as such, not as an empty answer).
-      await expect(session.planTask("第一轮用户消息")).rejects.toThrow("派单超时");
+      await expect(session.planTask("第一轮用户消息")).rejects.toThrow("Dispatch timed out");
 
       // The main conversation is mid-turn (delta for a real thread is forwarded).
       server.notify("item/agentMessage/delta", { threadId: "main_1", turnId: "turn_main", itemId: "i2", delta: "正常增量" });
@@ -195,7 +195,7 @@ describe("SandboxCodexSession dispatcher thread isolation", () => {
     session.onNotification((method) => forwarded.push(method));
 
     try {
-      await expect(session.planTask("第一轮")).rejects.toThrow("派单超时");
+      await expect(session.planTask("第一轮")).rejects.toThrow("Dispatch timed out");
       // The interrupted turn finally reports completion: the tombstone is dropped.
       server.notify("turn/completed", { threadId: "aux_2", turn: { id: "turn_aux_2", status: "interrupted" } });
       await wait(10);
@@ -347,7 +347,7 @@ it('runs member planning through the fixed provider at low effort and refuses an
   expect(server.inbound.find(r=>r.method==='turn/start')?.params).toMatchObject({model:'gpt-6.1-sol',effort:'low'});
  } finally {session.close();}
  const unavailable=makeSession(new FakeAppServer(),200);
- try {await expect(unavailable.planTask('request','soul','gpt-6.1-sol')).rejects.toThrow('服务暂时不可用');}finally{unavailable.close();}
+ try {await expect(unavailable.planTask('request','soul','gpt-6.1-sol')).rejects.toThrow('temporarily unavailable');}finally{unavailable.close();}
 });
 
 it('shows the reason a planning turn failed',async()=>{
@@ -357,7 +357,7 @@ it('shows the reason a planning turn failed',async()=>{
  server.handle('turn/start',()=>{setTimeout(()=>server.notify('turn/completed',{threadId:'quota-thread',turn:{id:'quota-turn',status:'failed',error:{message:limit}}}),5);return {turn:{id:'quota-turn'}};});
  const session=makeSession(server,200);
  try {
-  await expect(session.planTask('request','soul')).rejects.toThrow(`任务分配失败：${limit}`);
+  await expect(session.planTask('request','soul')).rejects.toThrow(`Task assignment failed: ${limit}`);
  } finally {session.close();}
 });
 
@@ -383,7 +383,7 @@ it('retries a member at capacity once on the assigned model, then shows the reas
  const bridge={providerForModel:()=> 'aio_gateway',providerConfigArgs:()=>[],providerEnv:()=>({})} as unknown as BridgeModel;
  const session=makeSession(server,200,bridge);
  try {
-  await expect(session.planTask('request','soul','gpt-6.1-sol')).rejects.toThrow(`任务分配失败：${busy}`);
+  await expect(session.planTask('request','soul','gpt-6.1-sol')).rejects.toThrow(`Task assignment failed: ${busy}`);
   expect(server.inbound.filter(r=>r.method==='turn/start').map(r=>r.params?.model)).toEqual(['gpt-6.1-sol','gpt-6.1-sol']);
   expect(server.inbound.filter(r=>r.method==='thread/start').map(r=>r.params?.modelProvider)).toEqual(['aio_gateway','aio_gateway']);
  } finally {session.close();}

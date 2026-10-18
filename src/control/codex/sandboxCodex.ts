@@ -17,6 +17,7 @@ import { JsonRpcPeer, JsonRpcTimeoutError } from "./jsonrpc.js";
 import { DispatchTimeoutError, type DispatchTimingSink } from "./dispatchTiming.js";
 import type { HostTokenSource } from "./hostTokens.js";
 import type { UsageLedger } from '../usage.js';
+import { t } from "../i18n/index.js";
 
 export interface SandboxAccount {
   email: string | null;
@@ -318,7 +319,7 @@ export class SandboxCodexSession {
     const { text, error, timedOut } = result;
     // A reported reason (such as an exhausted usage limit) is shown on the task
     // instead of a generic "try again".
-    if (error) throw new Error(`任务分配失败：${error}`);
+    if (error) throw new Error(t().agent.dispatch.failed(error));
     if (timedOut) throw new DispatchTimeoutError(Math.round(this.planTimeoutMs / 1000));
     return text;
   }
@@ -342,7 +343,7 @@ export class SandboxCodexSession {
     const peer = this.#peer;
     if (!peer?.alive) return { text: null, error: null };
     const model = requestedModel ?? ownModel ?? this.#cfg.agent.titleModel;
-    if (requestedModel && (this.#bridge?.providerForModel(model) ?? "openai") === "openai") throw new Error("服务暂时不可用，请稍后重试");
+    if (requestedModel && (this.#bridge?.providerForModel(model) ?? "openai") === "openai") throw new Error(t().agent.turn.serviceUnavailable);
     const modelProvider = requestedModel ? this.#bridge!.providerForModel(model) : undefined;
     const threadStarted = Date.now();
     const threadRes = (await peer.request(

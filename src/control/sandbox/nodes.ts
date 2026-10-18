@@ -39,7 +39,7 @@ export class SandboxNodes {
     const row = db.prepare("SELECT value FROM meta WHERE key=?").get(key) as { value: string } | undefined;
     if (row) {
       const node = this.get(row.value);
-      if (!node) throw new Error(`账号的沙箱在节点 ${row.value} 上，但该节点不在 PA_SANDBOX_NODES 中`);
+      if (!node) throw new Error(`the account's sandbox is on node ${row.value}, which is not in PA_SANDBOX_NODES`);
       return node;
     }
     const node = existing || this.nodes.length === 1 ? this.nodes[0]! : await this.#roomiest();
@@ -57,7 +57,7 @@ export class SandboxNodes {
       }),
     );
     const best = scored.filter((s) => s.room >= 0).sort((a, b) => b.room - a.room)[0];
-    if (!best) throw new Error("没有可用的沙箱节点");
+    if (!best) throw new Error("no sandbox node is available");
     return best.node;
   }
 }

@@ -12,10 +12,10 @@ describe('SOUL.md persistence',()=>{
   expect(fs.statSync(path.join(cfg.dataDir,'SOUL.md')).mode&0o777).toBe(0o600);
   const content='# Soul\r\n\n你是小助理。  \n';const saved=writeSoul(cfg,content,original.revision);
   expect(readSoul(cfg)).toEqual(saved);expect(saved.content).toBe(content);
-  expect(()=>writeSoul(cfg,'overwrite',original.revision)).toThrow('其他页面');
+  expect(()=>writeSoul(cfg,'overwrite',original.revision)).toThrow('another page');
   expect(readSoul(cfg)).toEqual(saved);
   expect(()=>writeSoul(cfg,'a'.repeat(SOUL_MAX_BYTES+1),saved.revision)).toThrow('64 KB');
-  expect(()=>writeSoul(cfg,'\0',saved.revision)).toThrow('有效文本');
+  expect(()=>writeSoul(cfg,'\0',saved.revision)).toThrow('valid text');
   expect(writeSoul(cfg,'',saved.revision).content).toBe('');expect(readSoul(cfg).content).toBe('');
  });
  it('moves an unedited earlier default (both Chinese ones) to the English one and leaves an edited one alone',()=>{

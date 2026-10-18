@@ -9,6 +9,7 @@ import { createSandboxd } from "../../src/sandbox/server.js";
 import { SandboxDriver } from "../../src/sandbox/driver.js";
 import type { DockerCli } from "../../src/sandbox/docker.js";
 import { SandboxNode } from "../../src/control/sandbox/node.js";
+import { runInLocale } from "../../src/control/i18n/index.js";
 
 const TOKEN = "t".repeat(48);
 const NAME = "aio-user-node-test";
@@ -103,7 +104,7 @@ describe("control plane <-> sandbox node", () => {
     try {
       const result = await new SandboxNode("old", `http://127.0.0.1:${(odd.address() as AddressInfo).port}`, TOKEN).check(0);
       expect(result).toMatchObject({ ok: false, protocol: 99 });
-      expect(result.error).toContain("不在本控制面支持");
+      expect(result.error).toContain("outside the range");
     } finally {
       odd.close();
     }
@@ -112,11 +113,17 @@ describe("control plane <-> sandbox node", () => {
   it("runs one-shot commands with stdin and secret env, and refuses unmanaged names and bad specs", async () => {
     const res = await node.exec(NAME, { argv: ["sh", "-c", 'printf "%s|" "$KEY"; cat'], user: "gem", env: { KEY: "s3cret" }, stdin: "from-stdin" });
     expect(res).toEqual({ code: 0, stdout: "s3cret|from-stdin", stderr: "" });
-    await expect(node.exec("someone-else", { argv: ["id"], user: "gem" })).rejects.toThrow("不存在");
-    await expect(node.exec(NAME, { argv: ["id"], user: "gem --privileged" })).rejects.toThrow("用户");
+    await expect(node.exec("someone-else", { argv: ["id"], user: "gem" })).rejects.toThrow("doesn't exist");
+    await expect(node.exec(NAME, { argv: ["id"], user: "gem --privileged" })).rejects.toThrow("user");
     await expect(
       node.ensure(NAME, { spec: { name: NAME, image: "alpine:latest", hostPort: 18099, workspaceVolume: "w", codexVolume: "c", browserVolume: "b", containerWorkspaceDir: "/w", containerCodexHome: "/c", containerUser: "gem", extraEnv: [] }, readyTimeoutMs: 1000 }),
-    ).rejects.toThrow("不在本节点允许");
+    ).rejects.toThrow("not in this node's allowed list");
+  });
+
+  it("words a refusal the node sends by code in the language of whoever asked", async () => {
+    await expect(runInLocale("zh-CN", () => node.exec("someone-else", { argv: ["id"], user: "gem" }))).rejects.toThrow("沙箱 someone-else 不存在");
+    // A refusal with no code known here keeps the node's own English.
+    await expect(runInLocale("zh-CN", () => node.exec(NAME, { argv: ["id"], user: "gem --privileged" }))).rejects.toThrow("invalid sandbox user");
   });
 
   it("streams a long-lived command both ways and reports its exit like a child process", async () => {

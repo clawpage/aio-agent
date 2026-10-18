@@ -85,7 +85,7 @@ describe("main inbox delegation", () => {
         codex.plan = async () => { throw new DispatchTimeoutError(90); };
         const job = submit("慢"); await tick();
         expect(tasks.get(job.id)).toMatchObject({ status: "planning_failed" });
-        expect(tasks.get(job.id)?.error).toContain("派单超时");
+        expect(tasks.get(job.id)?.error).toContain("Dispatch timed out");
         expect(tasks.get(job.id)?.error).not.toContain("JSON");
         expect(codex.plans).toHaveLength(1);
     });
@@ -513,7 +513,7 @@ describe("main inbox delegation", () => {
         tasks.init();
         await tick();
         expect(tasks.get(a.id)?.status).toBe("unknown");
-        expect(tasks.list().tasks[0]?.error).toContain("未知");
+        expect(tasks.list().tasks[0]?.error).toContain("unknown");
         expect(codex.startedTurns).toHaveLength(0);
     });
     it("keeps executor commentary folded until an actual terminal result", async () => {

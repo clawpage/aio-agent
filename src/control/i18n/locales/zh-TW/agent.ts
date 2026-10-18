@@ -1,2 +1,77 @@
 import type { agent as zh } from "../zh/agent.js";
-export const agent: typeof zh = {};
+export const agent: typeof zh = {
+    conversation: {
+        titleEmpty: "標題不能為空",
+        titleTooLong: (max: number) => `標題最長 ${max} 個字元`,
+        missing: "對話不存在",
+        archived: "對話已歸檔，無法傳送訊息",
+    },
+    turn: {
+        serviceUnavailable: "服務暫時無法使用，請稍後再試",
+        duplicateMessageId: "這個訊息 ID 已用於另一則內容不同的訊息，已拒絕重複送出",
+        textOnlyModel: "這個模型只支援文字輸入，請移除圖片附件後再試",
+        restartedWhileRunning: "服務重新啟動時這個輪次正在執行，執行結果未知，可能已在沙箱內產生操作",
+        restartedWhileRunningNotice: "服務重新啟動時這個輪次正在執行，執行結果未知，可能已在沙箱內產生操作（檔案、程序、瀏覽器狀態）。請先核對沙箱狀態，確認後再重新傳送；系統不會自動重放這個輪次。",
+        restartedWhileQueued: "服務重新啟動導致排隊中的輪次被取消",
+        restartedWhileQueuedNotice: "服務重新啟動導致這個輪次尚未開始就被取消，可以放心重新傳送。",
+        startConnectionLost: "啟動輪次時與沙箱 Codex 的連線中斷，執行結果未知",
+        connectionLost: "與沙箱 Codex 的連線中斷",
+        connectionLostBecause: (reason: string) => `與沙箱 Codex 的連線中斷：${reason}`,
+        outcomeUnknown: (cause: string) => `${cause}，本次執行結果未知`,
+        outcomeUnknownNotice: (cause: string) => `${cause}，本次執行結果未知，可能已產生操作。請先核對沙箱內的檔案／程序狀態，系統不會自動重放這個輪次。`,
+        checkSandbox: (message: string) => `${message}。請先核對沙箱內的檔案與程序狀態，系統不會自動重放這個輪次。`,
+        failed: (reason: string) => `執行失敗：${reason}`,
+        codexEnded: (status: string) => `Codex 輪次結束狀態：${status}`,
+        stopTimedOut: (minutes: number) => `停止請求送出後 ${minutes} 分鐘仍未結束`,
+        crossHarnessFork: "Codex 與 Claude Code 的工作階段不能互相衍生",
+    },
+    stop: {
+        queuedCancelled: "使用者取消了排隊中的輪次",
+        queued: "已取消排隊中的輪次",
+        none: "目前沒有正在執行或排隊中的輪次",
+        notDelivered: "停止請求暫時未送達沙箱；如果兩分鐘內仍未結束，會標為「結果待核對」",
+        requested: "已請求停止目前的執行",
+        starting: "已請求停止，這個輪次會在啟動完成後立即中斷",
+    },
+    approval: {
+        missing: "審核請求不存在",
+        handled: "這個審核已處理",
+        unsupported: (method: string) => `不支援的審核類型：${method}`,
+        expired: "這個審核已失效",
+        done: "已處理",
+    },
+    claude: {
+        disabled: "Claude Code 執行器未啟用",
+        busy: "這個對話已有執行中的輪次",
+        failed: "Claude Code 執行失敗",
+        steerNotDelivered: "輪次已結束，補充未送達",
+        outputTruncated: "…（輸出過長，已截斷）",
+        image: "[圖片]",
+    },
+    dispatch: {
+        failed: (error: string) => `任務分配失敗：${error}`,
+        timedOut: (seconds: number) => `派單逾時：派單器 ${seconds} 秒內沒有給出結果，請點「重試」`,
+    },
+    hostCodex: {
+        off: "本部署未啟用宿主機 Codex 登入（PA_HOST_CODEX=off）",
+        unavailable: (message: string) => `宿主機 Codex 驗證無法使用：${message}`,
+    },
+    models: {
+        claudeName: (name: string) => `${name}（Claude Code）`,
+        claudeOpus: "Claude Code 執行器，預設推薦。",
+        claudeSonnet: "Claude Code 執行器，速度更快。",
+        claudeFable: "Claude Code 執行器，能力最強、價格最高。",
+        bridgeChatgpt: "經成員模型閘道使用所有者的 ChatGPT 登入；憑證只在宿主機端附加。",
+        bridgeTextOnly: "經成員模型閘道提供的模型；僅支援文字輸入。",
+    },
+    jev: {
+        notConfigured: "Jev 未設定",
+        httpStatus: (status: number) => `Jev 回傳 HTTP ${status}`,
+        incomplete: (question: string) => `Jev 對 ${question} 的回答不完整`,
+    },
+    soul: {
+        invalid: "SOUL.md 必須是有效文字，大小不超過 64 KB。",
+        notLoaded: "請先載入 SOUL.md 再儲存。",
+        conflict: "SOUL.md 已在其他頁面修改，請重新載入後合併你的修改。",
+    },
+};

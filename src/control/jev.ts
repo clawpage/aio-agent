@@ -1,6 +1,7 @@
 import type { Config } from "./config.js";
 import type { Logger } from "../common/logger.js";
 import { expandHome, readSecretFile } from "../common/secrets.js";
+import { t } from "./i18n/index.js";
 
 /**
  * Jev (TypeSafe System One): one request asks one or more choice questions about
@@ -75,7 +76,7 @@ export class Jev {
   /** Ask every question at once; an answer that breaks the invariants fails the call. */
   async decide(state: Record<string, unknown>, questions: Record<string, JevQuestion>, opts: { timeoutMs?: number; signal?: AbortSignal } = {}): Promise<JevResult> {
     const key = this.#secret();
-    if (!key) throw new Error("Jev 未配置");
+    if (!key) throw new Error(t().agent.jev.notConfigured);
     const body = JSON.stringify({
       model: this.#cfg.jev.model,
       state,
@@ -96,12 +97,12 @@ export class Jev {
         await new Promise((resolve) => setTimeout(resolve, 500 * 2 ** attempt));
         continue;
       }
-      if (!res.ok) throw new Error(`Jev 返回 HTTP ${res.status}`);
+      if (!res.ok) throw new Error(t().agent.jev.httpStatus(res.status));
       const parsed = (await res.json()) as { answers?: Record<string, unknown>; usage?: unknown };
       const answers: Record<string, JevAnswer> = {};
       for (const [name, q] of Object.entries(questions)) {
         const answer = parsed.answers?.[name];
-        if (!valid(answer, Object.keys(q.criteria))) throw new Error(`Jev 对 ${name} 的回答不完整`);
+        if (!valid(answer, Object.keys(q.criteria))) throw new Error(t().agent.jev.incomplete(name));
         answers[name] = { choice: answer.choice, confidence: answer.confidence, probabilities: answer.probabilities };
       }
       return { answers, usage: parsed.usage ?? null, latencyMs: Date.now() - started };

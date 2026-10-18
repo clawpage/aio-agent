@@ -3,6 +3,7 @@ import type { CodexSessionLike, TurnAttachment } from "./manager.js";
 import type { ClaudeCodeSession } from "./claudeSession.js";
 import type { BrowserTask } from "../browser/tabs.js";
 import type { DispatchTimingSink } from "./dispatchTiming.js";
+import { t } from "../i18n/index.js";
 
 /**
  * One session surface over two harnesses.
@@ -62,7 +63,7 @@ export class HarnessSession implements CodexSessionLike {
   }
   forkThread(threadId: string, opts: Parameters<CodexSessionLike["forkThread"]>[1]) {
     if (isClaudeThread(threadId) || opts.modelProvider === CLAUDE_CODE_PROVIDER_ID) {
-      return Promise.reject(new Error("Codex 与 Claude Code 会话不能互相派生"));
+      return Promise.reject(new Error(t().agent.turn.crossHarnessFork));
     }
     return this.#codex.forkThread(threadId, opts);
   }
@@ -78,12 +79,12 @@ export class HarnessSession implements CodexSessionLike {
     return isClaudeThread(threadId) ? this.#claude.interrupt(threadId, turnId) : this.#codex.interrupt(threadId, turnId);
   }
   compactThread(threadId: string) {
-    if (isClaudeThread(threadId) || !this.#codex.compactThread) return Promise.reject(new Error("该会话不支持压缩"));
+    if (isClaudeThread(threadId) || !this.#codex.compactThread) return Promise.reject(new Error("This session cannot be compacted"));
     return this.#codex.compactThread(threadId);
   }
   steerTurn(params: { threadId: string; expectedTurnId: string; text: string; attachments?: TurnAttachment[] }) {
     if (isClaudeThread(params.threadId)) return this.#claude.steerTurn(params);
-    if (!this.#codex.steerTurn) return Promise.reject(new Error("当前执行器不支持运行中补充"));
+    if (!this.#codex.steerTurn) return Promise.reject(new Error("This executor cannot take additions while a turn runs"));
     return this.#codex.steerTurn(params);
   }
   planTask(prompt: string, developerInstructions?: string, model?: string, onTiming?: DispatchTimingSink) {

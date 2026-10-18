@@ -308,7 +308,7 @@ describe("A member assigned GPT", () => {
       await tick();
       expect(codex.threadProviders.get(codex.startedThreads[0]!.threadId)).toBe("aio_gateway");
       expect(codex.startedTurns[0]).toMatchObject({ model: "gpt-6.1-sol", effort: "high" });
-      expect(() => off.memberSettings()).toThrow("服务暂时不可用");
+      expect(() => off.memberSettings()).toThrow("temporarily unavailable");
     } finally {
       member.shutdown();
       off.shutdown();

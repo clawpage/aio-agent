@@ -9,6 +9,7 @@ import type { ContainerState, ExecRequest, ExecResult, SandboxSpec } from "../..
 import type { SandboxNode, SandboxUpstream } from "./node.js";
 import { NOVNC_HTML_PATH, NOVNC_RFB_PATH, NOVNC_UI_PATH, patchNoVncHtml, patchNoVncRfb, patchNoVncUi } from "./novncPatch.js";
 import { GEM_INIT_PATH, patchGemInit } from "./browserBoot.js";
+import { t } from "../i18n/index.js";
 import {
   CODEX_CONFIG_TOML,
   CODEX_ISOLATION_MARKER,
@@ -247,16 +248,12 @@ export class SandboxContainer {
     });
     const install = await this.execInSandbox(["npm", "install", "--prefix", s.codexPrefix, "--no-audit", "--no-fund", `@openai/codex@${s.codexVersion}`], { timeoutMs: 600_000 });
     if (install.code !== 0) {
-      throw new Error(
-        `沙箱 Codex CLI 安装失败（需要 @openai/codex@${s.codexVersion}）：${install.stderr.trim() || install.stdout.trim()}`,
-      );
+      throw new Error(t().sandbox.codexInstallFailed(s.codexVersion, install.stderr.trim() || install.stdout.trim()));
     }
     const verify = await this.execInSandbox([s.codexBin, "--version"], { timeoutMs: 30_000 });
     const installed = parseCodexVersion(verify.stdout);
     if (verify.code !== 0 || installed !== s.codexVersion) {
-      throw new Error(
-        `沙箱 Codex CLI 安装后校验失败：期望 ${s.codexVersion}，实际 ${installed ?? (verify.stdout.trim() || verify.stderr.trim())}`,
-      );
+      throw new Error(t().sandbox.codexVerifyFailed(s.codexVersion, installed ?? (verify.stdout.trim() || verify.stderr.trim())));
     }
     return { version: s.codexVersion, installed: true };
   }
@@ -478,16 +475,16 @@ finally:
       this.#log.warn("installing pinned sandbox claude code cli", { wanted: c.version, prefix: c.prefix });
       const install = await this.execInSandbox(["npm", "install", "--prefix", c.prefix, "--no-audit", "--no-fund", `@anthropic-ai/claude-code@${c.version}`], { user, timeoutMs: 600_000 });
       if (install.code !== 0) {
-        throw new Error(`沙箱 Claude Code CLI 安装失败（需要 @anthropic-ai/claude-code@${c.version}）：${install.stderr.trim() || install.stdout.trim()}`);
+        throw new Error(t().sandbox.claudeInstallFailed(c.version, install.stderr.trim() || install.stdout.trim()));
       }
       const verify = await this.execInSandbox([c.bin, "--version"], { user, timeoutMs: 30_000 });
       if (verify.code !== 0 || !verify.stdout.startsWith(`${c.version} `)) {
-        throw new Error(`沙箱 Claude Code CLI 安装后校验失败：期望 ${c.version}，实际 ${verify.stdout.trim() || verify.stderr.trim()}`);
+        throw new Error(t().sandbox.claudeVerifyFailed(c.version, verify.stdout.trim() || verify.stderr.trim()));
       }
     }
     const memory = claudeCodeUserMemory(this.#cfg.sandbox.containerWorkspaceDir, this.#cfg.sandbox.containerCodexHome);
     const seeded = await this.execInSandbox(["sh", "-c", 'mkdir -p "$1" && cat > "$1/CLAUDE.md"', "sh", c.configDir], { user, stdin: memory, timeoutMs: 30_000 });
-    if (seeded.code !== 0) throw new Error(`Claude Code 配置目录初始化失败：${seeded.stderr.trim()}`);
+    if (seeded.code !== 0) throw new Error(t().sandbox.claudeConfigFailed(seeded.stderr.trim()));
   }
 
   /** Whether the Claude Code session file for this UUID has been written yet. */

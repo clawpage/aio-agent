@@ -1,1 +1,77 @@
-export const agent = {};
+/** The agent's turns, conversations, executors and their settings (codex/, claudeCode.ts, bridgeModel.ts, jev.ts, soul.ts). */
+export const agent = {
+    conversation: {
+        titleEmpty: "标题不能为空",
+        titleTooLong: (max: number) => `标题最长 ${max} 个字符`,
+        missing: "会话不存在",
+        archived: "会话已归档，无法发送消息",
+    },
+    turn: {
+        serviceUnavailable: "服务暂时不可用，请稍后重试",
+        duplicateMessageId: "该消息 ID 已用于另一条内容不同的消息，已拒绝重复提交",
+        textOnlyModel: "该模型只支持文本输入，请移除图片附件后重试",
+        restartedWhileRunning: "服务重启时该轮次正在执行，执行结果未知，可能已在沙箱内产生操作",
+        restartedWhileRunningNotice: "服务重启时该轮次正在执行，执行结果未知，可能已在沙箱内产生操作（文件、进程、浏览器状态）。请先核对沙箱状态，确认后再重新发送；系统不会自动重放该轮次。",
+        restartedWhileQueued: "服务重启导致排队中的轮次被取消",
+        restartedWhileQueuedNotice: "服务重启导致该轮次尚未开始即被取消，可以安全地重新发送。",
+        startConnectionLost: "启动轮次时与沙箱 Codex 的连接中断，执行结果未知",
+        connectionLost: "与沙箱 Codex 的连接中断",
+        connectionLostBecause: (reason: string) => `与沙箱 Codex 的连接中断：${reason}`,
+        outcomeUnknown: (cause: string) => `${cause}，本次执行结果未知`,
+        outcomeUnknownNotice: (cause: string) => `${cause}，本次执行结果未知，可能已产生操作。请先核对沙箱内文件/进程状态，系统不会自动重放该轮次。`,
+        checkSandbox: (message: string) => `${message}。请先核对沙箱内文件与进程状态，系统不会自动重放该轮次。`,
+        failed: (reason: string) => `执行失败：${reason}`,
+        codexEnded: (status: string) => `Codex 轮次结束状态：${status}`,
+        stopTimedOut: (minutes: number) => `停止请求发出后 ${minutes} 分钟仍未结束`,
+        crossHarnessFork: "Codex 与 Claude Code 会话不能互相派生",
+    },
+    stop: {
+        queuedCancelled: "用户取消了排队中的轮次",
+        queued: "已取消排队中的轮次",
+        none: "当前没有正在执行或排队中的轮次",
+        notDelivered: "停止请求暂未送达沙箱；如果两分钟内仍未结束，会标为结果待核对",
+        requested: "已请求停止当前执行",
+        starting: "已请求停止，该轮次将在启动完成后立即中断",
+    },
+    approval: {
+        missing: "审批请求不存在",
+        handled: "该审批已处理",
+        unsupported: (method: string) => `不支持的审批类型：${method}`,
+        expired: "该审批已失效",
+        done: "已处理",
+    },
+    claude: {
+        disabled: "Claude Code 执行器未启用",
+        busy: "该会话已有执行中的轮次",
+        failed: "Claude Code 执行失败",
+        steerNotDelivered: "轮次已结束，补充未送达",
+        outputTruncated: "…（输出过长，已截断）",
+        image: "[图片]",
+    },
+    dispatch: {
+        failed: (error: string) => `任务分配失败：${error}`,
+        timedOut: (seconds: number) => `派单超时：派单器 ${seconds} 秒内没有给出结果，请点“重试”`,
+    },
+    hostCodex: {
+        off: "本部署未启用宿主 Codex 登录（PA_HOST_CODEX=off）",
+        unavailable: (message: string) => `host Codex 认证不可用：${message}`,
+    },
+    models: {
+        claudeName: (name: string) => `${name}（Claude Code）`,
+        claudeOpus: "Claude Code 执行器，默认推荐。",
+        claudeSonnet: "Claude Code 执行器，速度更快。",
+        claudeFable: "Claude Code 执行器，能力最强、价格最高。",
+        bridgeChatgpt: "经成员模型网关使用 owner 的 ChatGPT 登录；凭据只在宿主侧附加。",
+        bridgeTextOnly: "经成员模型网关提供的模型；仅支持文本输入。",
+    },
+    jev: {
+        notConfigured: "Jev 未配置",
+        httpStatus: (status: number) => `Jev 返回 HTTP ${status}`,
+        incomplete: (question: string) => `Jev 对 ${question} 的回答不完整`,
+    },
+    soul: {
+        invalid: "SOUL.md 必须是有效文本，大小不超过 64 KB。",
+        notLoaded: "请先加载 SOUL.md 再保存。",
+        conflict: "SOUL.md 已在其他页面修改，请重新加载后合并你的修改。",
+    },
+};

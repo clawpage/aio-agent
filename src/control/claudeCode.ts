@@ -2,6 +2,7 @@ import type { Config } from "./config.js";
 import type { Logger } from "../common/logger.js";
 import type { CodexModel } from "./codex/sandboxCodex.js";
 import { expandHome, readSecretFile } from "../common/secrets.js";
+import { t } from "./i18n/index.js";
 
 /**
  * Provider id recorded on conversations that run on the Claude Code harness.
@@ -24,12 +25,13 @@ const CLAUDE_EFFORTS = ["low", "medium", "high", "xhigh", "max"];
 /**
  * Models offered on the Claude Code harness. The effort default is left null:
  * without `--effort` the CLI applies its own per-model default, which this
- * control plane does not claim to know.
+ * control plane does not claim to know. Names and descriptions are shown in
+ * the console's language (agent.models in the catalog).
  */
-const CLAUDE_MODELS: Array<{ id: string; displayName: string; description: string }> = [
-  { id: "claude-opus-5-5", displayName: "Claude Opus 5.5（Claude Code）", description: "Claude Code 执行器，默认推荐。" },
-  { id: "claude-sonnet-5-5", displayName: "Claude Sonnet 5.5（Claude Code）", description: "Claude Code 执行器，速度更快。" },
-  { id: "claude-fable-5-1", displayName: "Claude Fable 5.1（Claude Code）", description: "Claude Code 执行器，能力最强、价格最高。" },
+const CLAUDE_MODELS: Array<{ id: string; name: string; description: "claudeOpus" | "claudeSonnet" | "claudeFable" }> = [
+  { id: "claude-opus-5-5", name: "Claude Opus 5.5", description: "claudeOpus" },
+  { id: "claude-sonnet-5-5", name: "Claude Sonnet 5.5", description: "claudeSonnet" },
+  { id: "claude-fable-5-1", name: "Claude Fable 5.1", description: "claudeFable" },
 ];
 
 export type ClaudeCodeEnabledSetting = "auto" | "on" | "off";
@@ -78,11 +80,11 @@ export class ClaudeCodeHarness {
     const setting = parseEnabledSetting(this.#cfg.claudeCode.enabled);
     if (this.#cfg.memberRuntime) {
       // Never the process environment or the owner's file: those hold the owner's credential.
-      if (!this.#cfg.claudeCode.gatewayUrl) return (this.#status = off("成员账号未分配 Claude 模型"));
+      if (!this.#cfg.claudeCode.gatewayUrl) return (this.#status = off("no Claude model is assigned to this member account"));
       const file = readSecretFile(this.#cfg.claudeCode.secretsFile, MEMBER_GATEWAY_TOKEN_KEY);
       return (this.#status = file.ok ? this.#enable(MEMBER_GATEWAY_TOKEN_KEY, file.value, "file") : off(file.reason));
     }
-    if (setting === "off") return (this.#status = off("PA_CLAUDE_CODE_ENABLED 已显式关闭"));
+    if (setting === "off") return (this.#status = off("turned off by PA_CLAUDE_CODE_ENABLED"));
 
     const reasons: string[] = [];
     for (const key of CREDENTIAL_KEYS) {
@@ -92,14 +94,14 @@ export class ClaudeCodeHarness {
       if (file.ok) return (this.#status = this.#enable(key, file.value, "file"));
       reasons.push(file.reason);
     }
-    const message = reasons[0] ?? "未找到 Claude Code 凭据";
-    if (setting === "on") this.#log.warn("Claude Code 执行器已要求启用但取不到凭据，保持关闭", { reason: message });
-    else this.#log.debug("Claude Code 执行器未启用", { reason: message });
+    const message = reasons[0] ?? "no Claude Code credential found";
+    if (setting === "on") this.#log.warn("Claude Code executor was asked for but has no credential; staying off", { reason: message });
+    else this.#log.debug("Claude Code executor not enabled", { reason: message });
     return (this.#status = off(message));
   }
 
   #enable(envKey: string, secret: string, source: "env" | "file"): ClaudeCodeStatus {
-    this.#log.info("Claude Code 执行器已启用", { envKey, source, version: this.#cfg.claudeCode.version });
+    this.#log.info("Claude Code executor enabled", { envKey, source, version: this.#cfg.claudeCode.version });
     return { enabled: true, reason: null, envKey, secret };
   }
 
@@ -110,11 +112,12 @@ export class ClaudeCodeHarness {
   /** Catalog entries added to the model picker; empty while the harness is off. */
   modelEntries(): CodexModel[] {
     if (!this.enabled) return [];
+    const words = t().agent.models;
     return this.#models().map((m) => ({
       id: m.id,
       model: m.id,
-      displayName: m.displayName,
-      description: m.description,
+      displayName: words.claudeName(m.name),
+      description: words[m.description],
       isDefault: false,
       supportedReasoningEfforts: [...CLAUDE_EFFORTS],
       defaultReasoningEffort: null,

@@ -40,7 +40,7 @@ describe("turn outcomes are reported honestly (AGENTS.md rules 6 and 7)", () => 
     expect(await agent.interrupt(a!.id)).toMatchObject({ ok: true, status: "running" });
     await tick(150);
     expect(turn("m0")).toMatchObject({ status: "unknown" });
-    expect(turn("m0").error).toContain("停止请求发出后");
+    expect(turn("m0").error).toContain("after the stop request");
     // Its slot went to the waiting turn.
     expect(codex.startedTurns).toHaveLength(4);
   });
@@ -53,7 +53,7 @@ describe("turn outcomes are reported honestly (AGENTS.md rules 6 and 7)", () => 
     codex.interrupt = async () => { throw new JsonRpcTimeoutError("turn/interrupt", "codex", 30_000); };
     const result = await agent.interrupt(conv.id);
     expect(result).toMatchObject({ ok: true, status: "running" });
-    expect(result.message).toContain("暂未送达");
+    expect(result.message).toContain("hasn't reached the sandbox");
     expect(agent.listEvents(conv.id, 0).find((e) => e.type === "turn.interrupt_requested")?.payload).toMatchObject({ delivered: false });
     await tick(150);
     expect(turn("lost-stop").status).toBe("unknown");
