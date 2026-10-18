@@ -79,7 +79,6 @@ export const cards: typeof zh = {
   },
   share: {
     defaultTitle: "分享頁面",
-    badge: "分享頁",
     copied: "已複製",
     copyFailed: "複製失敗，請長按連結",
     copy: "複製連結",

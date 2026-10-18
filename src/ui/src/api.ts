@@ -145,6 +145,8 @@ export const api = {
   clawpages: (signal?: AbortSignal) => request<{ pages: import("./types").Clawpage[] }>("/api/clawpages", { signal, cache: "no-store" }),
   /** An owner link: the page with a token (in its fragment) that opens every table to its owner for a while. */
   clawpageOpen: (page: string) => request<{ url: string }>(`/api/clawpages/${encodeURIComponent(page)}/open`, { method: "POST", body: {} }),
+  /** A clawpage's cover picture; with its version the browser keeps it. */
+  clawpageCoverUrl: (page: string, version?: number | null) => apiUrl(`/api/clawpages/${encodeURIComponent(page)}/cover${version ? `?v=${version}` : ""}`),
   clawpageDelete: (page: string) => request<void>(`/api/clawpages/${encodeURIComponent(page)}`, { method: "DELETE" }),
   clawpageRecords: (page: string, table: string, after?: string | null, signal?: AbortSignal) =>
     request<{ records: import("./types").ClawpageRecord[]; nextCursor: string | null }>(`/api/clawpages/${encodeURIComponent(page)}/tables/${encodeURIComponent(table)}?limit=50${after ? `&after=${encodeURIComponent(after)}` : ""}`, { signal, cache: "no-store" }),

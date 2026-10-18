@@ -708,6 +708,17 @@ export function createApiRouter(context: AppContext): Router {
     track(req, "clawpage_open", {});
     return { url: `${share.pageUrl(userId, page)}#cp=${encodeURIComponent(share.data!.ownerToken(userId, page))}` };
   }));
+  // A page's cover: only a picture (checked by its bytes), kept long when the address names its version.
+  router.get("/clawpages/:page/cover", requireKind("primary"), requireSession, (req, res) => {
+    const page = String(req.params.page ?? "");
+    const cover = SHARE_NAME.test(page) ? context.share?.cover(ctxOf(req).session!.ownerId, page) : null;
+    if (!cover) { res.status(404).setHeader("Cache-Control", "no-store"); res.json({ error: "not_found", message: "No cover" }); return; }
+    res.set({
+      "Content-Type": cover.type, "X-Content-Type-Options": "nosniff", "Content-Security-Policy": "default-src 'none'",
+      "Cache-Control": req.query.v === String(cover.at) ? "private, max-age=31536000, immutable" : "private, no-cache",
+    });
+    res.send(cover.data);
+  });
   router.delete("/clawpages/:page", requireKind("primary"), requireSession, (req, res) => clawpages(req, res, (userId, page, share) => {
     if (!share.remove(userId, page)) throw new DataError(404, "PAGE_NOT_FOUND", "The page does not exist");
     return undefined;

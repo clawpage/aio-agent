@@ -138,6 +138,7 @@ describe("sandbox workspace seed", () => {
     };
     const none = await seed();
     expect(none.calls.some((c) => c.path.includes("aio-share") || c.path.includes("clawpages"))).toBe(false);
+    expect(none.execCalls.some((argv) => argv.includes("--missing"))).toBe(false);
 
     const share = { endpoint: "http://host.docker.internal:4902/share/owner_1", token: "a".repeat(64) };
     const { cfg, calls, execCalls } = await seed(share);
@@ -153,6 +154,8 @@ describe("sandbox workspace seed", () => {
     expect(calls.some((c) => c.path.includes("/skills/aio-share/"))).toBe(false);
     expect(calls.find((c) => c.path.endsWith("/tools/aio-share/aio-share.py"))?.content).toBe(SHARE_CLI_PY);
     expect(calls.find((c) => c.path.endsWith("/tools/aio-share/clawpage-sdk.js"))?.content).toBe(CLAWPAGE_SDK_JS);
+    // Pages without a cover get one in the background once the tools are in place.
+    expect(execCalls).toContainEqual(["python3", `${cfg.sandbox.containerCodexHome}/tools/aio-share/aio-share.py`, "cover", "--missing"]);
     const config = calls.find((c) => c.path.endsWith("/tools/aio-share/config.json"));
     expect(JSON.parse(config!.content)).toEqual(share);
     expect(execCalls).toContainEqual(["chmod", "600", config!.path]);

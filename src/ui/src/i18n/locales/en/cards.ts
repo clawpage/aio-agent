@@ -80,7 +80,6 @@ export const cards: typeof zh = {
   },
   share: {
     defaultTitle: "Shared page",
-    badge: "Shared page",
     copied: "Copied",
     copyFailed: "Copy failed. Long-press the link instead",
     copy: "Copy link",

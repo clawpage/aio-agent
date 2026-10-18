@@ -1,18 +1,39 @@
 import { test, expect, type Page } from "@playwright/test";
+import zlib from "node:zlib";
 import { mockConsole } from "./mock-api";
 import type { Clawpage, ClawpageRecord } from "../../src/ui/src/types";
 
 const WS = "https://agent-workspace.example.com";
+
+/** A real PNG (one flat color) for a cover. */
+function solidPng(width: number, height: number): Buffer {
+  const chunk = (type: string, data: Buffer) => {
+    const body = Buffer.concat([Buffer.from(type, "ascii"), data]);
+    const out = Buffer.alloc(body.length + 8);
+    out.writeUInt32BE(data.length, 0);
+    body.copy(out, 4);
+    out.writeUInt32BE(zlib.crc32(body), body.length + 4);
+    return out;
+  };
+  const header = Buffer.alloc(13);
+  header.writeUInt32BE(width, 0);
+  header.writeUInt32BE(height, 4);
+  header.set([8, 2, 0, 0, 0], 8);
+  const row = Buffer.concat([Buffer.from([0]), Buffer.alloc(width * 3, 0xc8)]);
+  const pixels = zlib.deflateSync(Buffer.concat(Array.from({ length: height }, () => row)));
+  return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk("IHDR", header), chunk("IDAT", pixels), chunk("IEND", Buffer.alloc(0))]);
+}
+const COVER = solidPng(96, 128);
 const now = Date.now();
 const PAGES: Clawpage[] = [
   {
-    name: "lunch-poll", title: "午饭投票", url: `${WS}/u/owner/share/lunch-poll/`, files: 2, bytes: 18_432, updatedAt: now - 3_600_000,
+    name: "lunch-poll", title: "午饭投票", url: `${WS}/u/owner/share/lunch-poll/`, files: 2, bytes: 18_432, updatedAt: now - 3_600_000, cover: 123,
     tables: [
       { name: "votes", permission: "public", records: 3, bytes: 300, createdAt: now - 7_200_000, updatedAt: now - 600_000 },
       { name: "notes", permission: "private", records: 1, bytes: 80, createdAt: now - 7_200_000, updatedAt: now - 900_000 },
     ],
   },
-  { name: "tokyo-trip", title: "东京行程", url: `${WS}/u/owner/share/tokyo-trip/`, files: 1, bytes: 9_000, updatedAt: now - 86_400_000, tables: [] },
+  { name: "tokyo-trip", title: "东京行程", url: `${WS}/u/owner/share/tokyo-trip/`, files: 1, bytes: 9_000, updatedAt: now - 86_400_000, tables: [], cover: null },
 ];
 const RECORDS: Record<string, ClawpageRecord[]> = {
   votes: [
@@ -36,6 +57,7 @@ async function setup(page: Page, pages = PAGES) {
     calls.push(`${req.method()} ${parts.join("/")}`);
     const [name, sub, table, rest, key] = parts;
     if (!name) return r.fulfill({ json: { pages: list } });
+    if (sub === "cover") return name === "lunch-poll" ? r.fulfill({ contentType: "image/png", body: COVER }) : r.fulfill({ status: 404, json: { error: "not_found" } });
     if (sub === "open") return r.fulfill({ json: { url: `${WS}/u/owner/share/${name}/#cp=owner-token` } });
     if (!sub && req.method() === "DELETE") { list = list.filter((p) => p.name !== name); return r.fulfill({ status: 204 }); }
     if (sub === "tables" && rest === "records" && req.method() === "DELETE") {
@@ -71,12 +93,19 @@ test("the clawpages page is a home screen of mini apps and pages; an icon opens 
   const apps = page.getByRole("region", { name: "小应用" }), pages = page.getByRole("region", { name: "网页" });
   await expect(apps.getByRole("heading")).toHaveText("小应用1");
   const poll = apps.locator('li[data-page="lunch-poll"]');
-  await expect(poll.locator(".clawpage-glyph")).toHaveText("午");
-  await expect(poll.locator(".clawpage-glyph")).toHaveClass(/is-app/);
+  // Its cover, the page as rendered; on it, how much data the app holds.
+  await expect(poll.locator(".clawpage-cover img")).toHaveJSProperty("complete", true);
+  expect(await poll.locator(".clawpage-cover img").evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(96);
+  expect(calls).toContain("GET lunch-poll/cover");
+  await expect(poll.locator(".clawpage-cover")).toHaveClass(/is-app/);
   await expect(poll.locator(".clawpage-tile-title")).toHaveText("午饭投票");
-  await expect(poll.locator(".clawpage-tile-count")).toHaveText("4 条");
-  await expect(pages.locator('li[data-page="tokyo-trip"] .clawpage-glyph')).toHaveClass(/is-page/);
-  await expect(pages.locator('li[data-page="tokyo-trip"] .clawpage-tile-count')).toHaveCount(0);
+  await expect(poll.locator(".clawpage-cover-count")).toHaveText("4 条");
+  // No cover: the title's first character stands in, and nothing is asked for.
+  const trip = pages.locator('li[data-page="tokyo-trip"]');
+  await expect(trip.locator(".clawpage-cover")).toHaveClass(/is-page/);
+  await expect(trip.locator(".clawpage-cover-glyph")).toHaveText("东");
+  await expect(trip.locator(".clawpage-cover-count")).toHaveCount(0);
+  expect(calls).not.toContain("GET tokyo-trip/cover");
   // Nothing else on the list: no links, names, sizes or buttons.
   await expect(page.locator(".clawpages-page").getByText("lunch-poll")).toHaveCount(0);
   expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
@@ -87,6 +116,7 @@ test("the clawpages page is a home screen of mini apps and pages; an icon opens 
   await poll.getByRole("button", { name: "打开 午饭投票 的详情" }).click();
   const sheet = page.getByRole("dialog", { name: "午饭投票" });
   await expect(sheet).toContainText("2 张表，4 条数据");
+  await expect(sheet.locator(".clawpage-sheet-cover img")).toBeVisible();
   await context.route(`${WS}/**`, (r) => r.fulfill({ contentType: "text/html", body: "<p>clawpage</p>" }));
   const [tab] = await Promise.all([context.waitForEvent("page"), sheet.getByRole("button", { name: "打开", exact: true }).click()]);
   await expect.poll(() => tab.url()).toContain("/u/owner/share/lunch-poll/#cp=owner-token");
@@ -119,13 +149,14 @@ test("the clawpages page is a home screen of mini apps and pages; an icon opens 
 
   // Deleting a clawpage asks first, and says its data goes too.
   await pages.getByRole("button", { name: "打开 东京行程 的详情" }).click();
-  const trip = page.getByRole("dialog", { name: "东京行程" });
-  await expect(trip).toContainText("网页，不存数据");
-  await expect(trip.getByTestId("clawpage-data")).toHaveCount(0);
-  await trip.getByRole("button", { name: "删除这个 clawpage" }).click();
-  await expect(trip.getByRole("alertdialog")).toContainText("里面的数据也一起删除");
-  await trip.getByRole("button", { name: "确认删除" }).click();
-  await expect(trip).toHaveCount(0);
+  const tripSheet = page.getByRole("dialog", { name: "东京行程" });
+  await expect(tripSheet).toContainText("网页，不存数据");
+  await expect(tripSheet.locator(".clawpage-sheet-cover .clawpage-cover-glyph")).toHaveText("东");
+  await expect(tripSheet.getByTestId("clawpage-data")).toHaveCount(0);
+  await tripSheet.getByRole("button", { name: "删除这个 clawpage" }).click();
+  await expect(tripSheet.getByRole("alertdialog")).toContainText("里面的数据也一起删除");
+  await tripSheet.getByRole("button", { name: "确认删除" }).click();
+  await expect(tripSheet).toHaveCount(0);
   await expect(page.locator('li[data-page="tokyo-trip"]')).toHaveCount(0);
   expect(calls).toContain("DELETE tokyo-trip");
 });
@@ -135,4 +166,30 @@ test("an account without clawpages is told how to make one", async ({ page }) =>
   await page.goto("/u/owner/clawpages");
   await expect(page.getByRole("heading", { name: "还没有 clawpage" })).toBeVisible();
   await expect(page.getByText("做个团队午饭投票")).toBeVisible();
+});
+
+test("a clawpage linked in the main session shows as a card with its cover; another account's page has none", async ({ page }, info) => {
+  const calls = await setup(page);
+  const own = `${WS}/u/owner/share/lunch-poll/`, other = `${WS}/u/someone/share/lunch-poll/`;
+  const task = { id: "task-1", revision: 1, title: "做个午饭投票", text: "做个午饭投票", conversationId: "child-1", status: "completed",
+    result: `做好了：[午饭投票](${own})\n\n参考了别人的 [投票页](${other})。`, error: null, attachments: [], relatedTaskId: null, dependencies: [], approvals: 0, createdAt: now - 60_000, completedAt: now };
+  await page.route((url) => url.pathname === "/api/main", (r) => r.fulfill({ json: { mode: "tasks", tasks: [task], nextBefore: null, version: "v1" } }));
+  await page.goto("/u/owner");
+  const cards = page.getByTestId("share-card");
+  await expect(cards).toHaveCount(2);
+  const mine = cards.filter({ hasText: "午饭投票" }).first();
+  await expect(mine.getByTestId("share-card-cover")).toBeVisible();
+  expect(await mine.getByTestId("share-card-cover").evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(96);
+  await expect(mine.getByTestId("share-card-url")).toHaveText(own);
+  await expect(mine.getByRole("link", { name: "打开" })).toHaveAttribute("href", own);
+  // Someone else's page: the card, but no cover asked for under this account's name.
+  const theirs = cards.filter({ hasText: "投票页" });
+  await expect(theirs.getByTestId("share-card-url")).toHaveText(other);
+  await expect(theirs.getByTestId("share-card-cover")).toHaveCount(0);
+  expect(calls.filter((c) => c === "GET lunch-poll/cover")).toHaveLength(1);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
+  await expect(page.locator(".boot-cover")).toHaveCount(0);
+  await mine.scrollIntoViewIfNeeded();
+  await page.waitForTimeout(400);
+  await page.screenshot({ path: info.outputPath("share-card-cover.png") });
 });

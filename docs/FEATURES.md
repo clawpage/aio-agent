@@ -710,6 +710,11 @@ Android 手机用 USB 接在装了 Mac App 的 Mac 上，由 App 运行的 `bin/
   令牌用部署自己的密钥（`<PA_DATA_DIR>/clawpages-key`）签名，只对该账号该页有效、12 小时过期；SDK 取走后立即从地址栏抹掉。持令牌可读写所有表、不受限流。
 - **执行器**：沙箱 CLI `data tables|create|permission|drop|list|get|put|patch|add|incr|delete|export|import` 以主人身份操作；每次执行提示词附上本账号
   最近活跃的 12 个 clawpages（地址、发布时间、各表权限、记录数与最近改动时间），主会话因此知道已有哪些小应用、数据有什么变化，并按 skill 拉取 → 修改 → 同名发布迭代。
+- **封面**：`publish` 发布后，沙箱用 `aio-render` 的无头 Chromium 打开线上页面（访客视角、数据已加载），截 480×640（2 倍密度）的 JPEG，
+  经 `/share/<账号>/pages/<页面名>/cover` 存为页面目录下的 `.cover`（只认 JPEG/PNG/WebP 文件头，≤1.5 MB；公开路径不提供隐藏文件）。
+  渲染失败不影响发布（输出 `coverError`），`aio-share.py cover <页面名>|--missing` 可重渲；同名重发布保留旧封面直到新封面写入；
+  沙箱每次播种后在后台跑一次 `cover --missing`，为没有封面的页面补上。控制台经 `GET /api/clawpages/<页面名>/cover[?v=<版本>]`
+  读取（只给本账号，带版本时长期缓存）：Clawpages 列表与详情用它做封面（没有时用标题首字），主会话里指向本账号 clawpage 的卡片也显示它。
 - **控制台**：`GET /api/clawpages` 列表；`/api/clawpages/<页面名>/tables/<表>` 浏览记录（`PATCH` 改权限、`DELETE` 删表）、`/export` 导出 JSON、
   `/records/<键>` 删除单条；`DELETE /api/clawpages/<页面名>` 删除页面和数据。均只作用于本账号。
 - **存储与隔离**：快照存在宿主 `<PA_DATA_DIR>/shares/<账号>/<页面名>/`，访问时只读快照，不触碰沙箱。每页最多 200 个文件、20 MB，每账号 100 页；

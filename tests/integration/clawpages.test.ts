@@ -19,10 +19,33 @@ let h: TestHarness;
 let store: ShareStore;
 let gateway: MemberModelGateway;
 let tool: string;
+let toolRoot: string;
 let owner: { runtimeUserId: string; dataDir: string; share?: { token: string; endpoint: string } };
 let memberId: string;
 let memberToken: string;
 const b64 = (text: string) => Buffer.from(text).toString("base64");
+/** A JPEG's first bytes: enough for the cover check, which goes by signature. */
+const JPEG = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.from("cover")]);
+/** Stands in for aio-render.py's Page: records the address it was sent to and "captures" a JPEG. */
+const FAKE_RENDERER = `import base64
+class Page:
+    def __init__(self, width, scale):
+        self.size = (width, scale)
+    def metrics(self, height):
+        pass
+    def call(self, method, params=None, session=False, timeout=60):
+        if method == "Page.navigate":
+            with open(LOG_PATH, "a") as f:
+                f.write(params["url"] + "\\n")
+        if method == "Page.captureScreenshot":
+            assert params["format"] == "jpeg" and params["clip"]["width"] == 480 and params["clip"]["height"] == 640
+            return {"data": "${JPEG.toString("base64")}"}
+        return {}
+    def evaluate(self, expression):
+        return None
+    def close(self):
+        pass
+`;
 
 beforeAll(async () => {
   h = await startHarness();
@@ -43,13 +66,18 @@ beforeAll(async () => {
   const memberCfg = memberConfig(h.ctx.cfg, member.id, 18091);
   store.provision(memberCfg);
   memberToken = memberCfg.share!.token;
-  tool = fs.mkdtempSync(path.join(os.tmpdir(), "pa-clawpages-cli-"));
+  // The sandbox's tools directory: the CLI beside a stand-in for the graphic renderer (no Chromium here).
+  toolRoot = fs.mkdtempSync(path.join(os.tmpdir(), "pa-clawpages-cli-"));
+  tool = path.join(toolRoot, "aio-share");
+  fs.mkdirSync(tool);
+  fs.mkdirSync(path.join(toolRoot, "aio-graphic"));
+  fs.writeFileSync(path.join(toolRoot, "aio-graphic", "aio-render.py"), FAKE_RENDERER.replace("LOG_PATH", JSON.stringify(path.join(toolRoot, "rendered.log"))));
   fs.writeFileSync(path.join(tool, "aio-share.py"), SHARE_CLI_PY);
   fs.writeFileSync(path.join(tool, "clawpage-sdk.js"), CLAWPAGE_SDK_JS);
   fs.writeFileSync(path.join(tool, "config.json"), JSON.stringify({ ...owner.share, endpoint: `http://127.0.0.1:${gateway.port}/share/owner_1` }));
 });
 afterAll(async () => {
-  fs.rmSync(tool, { recursive: true, force: true });
+  fs.rmSync(toolRoot, { recursive: true, force: true });
   gateway?.close();
   await h?.shutdown();
 });
@@ -336,4 +364,60 @@ it.skipIf(!hasChromium)("in a real browser, a published page in its CSP sandbox 
   } finally {
     await browser.close();
   }
+});
+
+it("publishing renders a cover of the live page; the console serves it to its own account only, and a sandbox start fills in missing ones", async () => {
+  const dir = path.join(tool, "photo-wall");
+  fs.mkdirSync(dir);
+  fs.writeFileSync(path.join(dir, "index.html"), "<h1>照片墙</h1>");
+  const rendered = () => fs.existsSync(path.join(toolRoot, "rendered.log")) ? fs.readFileSync(path.join(toolRoot, "rendered.log"), "utf8").trim().split("\n") : [];
+  const before = rendered().length;
+
+  const published = await cli("publish", dir, "--title", "照片墙");
+  expect(published).toMatchObject({ ok: true, name: "photo-wall", cover: expect.any(Number) });
+  // The live page as a visitor sees it, not the file in the workspace.
+  expect(rendered().slice(before)).toEqual([`https://${h.ctx.cfg.workspaceHost}/u/owner/share/photo-wall/`]);
+  expect(store.list("owner_1").find((p) => p.name === "photo-wall")?.cover).toBe(published.cover);
+
+  // The console: the picture itself, checked by its bytes, kept long only under its version.
+  const { cookie } = await login(h);
+  const cover = await h.request(`/api/clawpages/photo-wall/cover?v=${published.cover}`, { headers: { cookie } });
+  expect(cover.status).toBe(200);
+  expect(cover.headers.get("content-type")).toBe("image/jpeg");
+  expect(cover.headers.get("x-content-type-options")).toBe("nosniff");
+  expect(cover.headers.get("cache-control")).toContain("immutable");
+  expect((await h.request("/api/clawpages/photo-wall/cover", { headers: { cookie } })).headers.get("cache-control")).toBe("private, no-cache");
+  expect((await h.request("/api/clawpages/photo-wall/cover")).status).toBe(401);
+  // Never on the page's public path.
+  expect((await pub("/u/owner/share/photo-wall/.cover")).status).toBe(404);
+
+  // Only pictures, only for pages that exist, only through the account's own channel.
+  const upload = (name: string, data: Buffer, token = owner.share!.token, userId = "owner_1") => fetch(`http://127.0.0.1:${gateway.port}/share/${userId}/pages/${name}/cover`, {
+    method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify({ data: data.toString("base64") }) });
+  expect((await upload("photo-wall", Buffer.from("<svg onload=alert(1)>"))).status).toBe(400);
+  expect((await upload("photo-wall", Buffer.concat([JPEG, Buffer.alloc(1600 * 1024)]))).status).toBe(413);
+  expect((await upload("nowhere", JPEG)).status).toBe(404);
+  expect((await upload("photo-wall", JPEG, memberToken)).status).toBe(403);
+
+  // Republishing keeps the cover until a new one is rendered; --no-cover skips rendering.
+  const again = await cli("publish", dir, "--no-cover");
+  expect(again.cover).toBe(published.cover);
+  expect(again.coverError).toBeUndefined();
+
+  // A page without a cover (published before covers, or rendering failed) gets one from `cover --missing`.
+  fs.rmSync(path.join(h.ctx.cfg.dataDir, "shares", "owner_1", "photo-wall", ".cover"));
+  expect(store.list("owner_1").find((p) => p.name === "photo-wall")?.cover).toBeNull();
+  const missing = await cli("cover", "--missing");
+  expect(missing.covers.map((c: { name: string }) => c.name)).toContain("photo-wall");
+  expect(missing.covers.every((c: { cover?: number }) => typeof c.cover === "number")).toBe(true);
+  expect((await cli("cover", "--missing")).covers).toEqual([]);
+
+  // Another account's console never gets it.
+  const signin = await h.request("/api/auth/login", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ username: "cr", password: "member-password-123" }) });
+  const memberCookie = (signin.headers.getSetCookie?.() ?? []).map((c) => c.split(";")[0]!).join("; ");
+  expect((await h.request("/api/clawpages/photo-wall/cover", { headers: { cookie: memberCookie } })).status).toBe(404);
+
+  // A cover goes with its page.
+  expect(await cli("delete", "photo-wall")).toEqual({ ok: true, deleted: "photo-wall" });
+  expect((await h.request("/api/clawpages/photo-wall/cover", { headers: { cookie } })).status).toBe(404);
 });

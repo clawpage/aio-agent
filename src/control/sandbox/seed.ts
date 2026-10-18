@@ -298,9 +298,12 @@ export const SHARE_SKILL_DIR = "skills/clawpages";
 export const LEGACY_SHARE_SKILL_DIR = "skills/aio-share";
 export const SHARE_CLI_PY = String.raw`#!/usr/bin/env python3
 """aio-share: publish and manage clawpages (public pages and mini apps with data), managed by Clawpage Agent."""
-import argparse, base64, json, os, re, shutil, sys, urllib.error, urllib.parse, urllib.request
+import argparse, base64, importlib.util, json, os, re, shutil, sys, urllib.error, urllib.parse, urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+RENDERER = os.path.join(os.path.dirname(HERE), "aio-graphic", "aio-render.py")
+# A cover is the page as a phone shows it on arrival: 480 x 640 CSS pixels at twice the density.
+COVER_W, COVER_H, COVER_SCALE = 480, 640, 2
 CONFIG = os.path.join(HERE, "config.json")
 SDK = os.path.join(HERE, "clawpage-sdk.js")
 SDK_NAME = "clawpage-sdk.js"
@@ -319,12 +322,21 @@ def out(value):
     print(json.dumps(value, ensure_ascii=False, indent=2))
 
 
-def call(method, path, body=None):
+class CallError(Exception):
+    pass
+
+
+def call(method, path, body=None, soft=False):
+    """One request to the share service; a failure ends the command, or with soft raises CallError."""
+    def error(message):
+        if soft:
+            raise CallError(message)
+        fail(message)
     try:
         with open(CONFIG) as f:
             cfg = json.load(f)
     except OSError:
-        fail("Sharing is not enabled: missing " + CONFIG)
+        error("Sharing is not enabled: missing " + CONFIG)
     data = None if body is None else json.dumps(body).encode()
     req = urllib.request.Request(cfg["endpoint"] + path, data=data, method=method,
                                  headers={"authorization": "Bearer " + cfg["token"], "content-type": "application/json"})
@@ -334,11 +346,12 @@ def call(method, path, body=None):
             return json.loads(raw) if raw else {}
     except urllib.error.HTTPError as err:
         try:
-            fail(json.loads(err.read()).get("error") or "HTTP %d" % err.code)
+            message = json.loads(err.read()).get("error") or "HTTP %d" % err.code
         except ValueError:
-            fail("HTTP %d" % err.code)
+            message = "HTTP %d" % err.code
+        error(message)
     except OSError as err:
-        fail("Cannot connect to the share service: %s" % err)
+        error("Cannot connect to the share service: %s" % err)
 
 
 def page_name(name):
@@ -372,6 +385,35 @@ def copy_sdk(root):
     if not os.path.isfile(SDK):
         fail("The clawpage SDK is missing: " + SDK)
     shutil.copyfile(SDK, os.path.join(root, SDK_NAME))
+
+
+def render_cover(url):
+    """A JPEG of the published page as a visitor sees it (its data loaded), from the sandbox's headless Chromium."""
+    spec = importlib.util.spec_from_file_location("aio_render", RENDERER)
+    if spec is None or not os.path.isfile(RENDERER):
+        raise RuntimeError("the renderer is missing: " + RENDERER)
+    render = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(render)
+    page = render.Page(COVER_W, COVER_SCALE)
+    try:
+        page.metrics(COVER_H)
+        page.call("Page.navigate", {"url": url}, session=True)
+        # The document, its fonts and pictures, then a moment for the data it fetches to arrive and draw.
+        page.evaluate("""new Promise(r => {const go = () => document.fonts.ready.then(() => Promise.all([...document.images].map(i => i.complete ? 0 : new Promise(d => {i.onload = i.onerror = d;})))).then(() => setTimeout(r, 1500)); document.readyState === 'complete' ? go() : addEventListener('load', go);})""")
+        page.evaluate("new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))")
+        shot = page.call("Page.captureScreenshot", {"format": "jpeg", "quality": 78, "captureBeyondViewport": False,
+                                                    "clip": {"x": 0, "y": 0, "width": COVER_W, "height": COVER_H, "scale": 1}}, session=True)
+        return shot["data"]
+    finally:
+        page.close()
+
+
+def make_cover(name, url):
+    """Render and keep a page's cover; a failure is reported, never fatal."""
+    try:
+        return {"cover": call("POST", "/pages/%s/cover" % name, {"data": render_cover(url)}, soft=True)["cover"]}
+    except Exception as err:
+        return {"coverError": str(err)[:200]}
 
 
 def collect(root):
@@ -459,7 +501,11 @@ def main():
     p.add_argument("dir", help="Page directory; must contain index.html")
     p.add_argument("--name", help="Page name (lowercase letters, digits, hyphens); defaults to the directory name")
     p.add_argument("--title", help="Page title (used in the list)")
+    p.add_argument("--no-cover", action="store_true", help="Do not render a cover picture after publishing")
     sub.add_parser("list", help="List published pages with their data tables")
+    cv = sub.add_parser("cover", help="Render a page's cover picture again (the console shows it on the page's icon and cards)")
+    cv.add_argument("name", nargs="?")
+    cv.add_argument("--missing", action="store_true", help="Every page that has no cover yet")
     d = sub.add_parser("delete", help="Delete a page and all its data (its link stops working immediately)")
     d.add_argument("name")
     pl = sub.add_parser("pull", help="Download a published page's files to work on it again")
@@ -503,6 +549,17 @@ def main():
         out({"ok": True, "deleted": args.name})
     elif args.cmd == "data":
         data_command(args)
+    elif args.cmd == "cover":
+        pages = call("GET", "/pages")["pages"]
+        if args.missing:
+            chosen = [p for p in pages if not p.get("cover")]
+        elif args.name:
+            chosen = [p for p in pages if p["name"] == page_name(args.name)]
+            if not chosen:
+                fail("The page does not exist: " + args.name)
+        else:
+            fail("Name a page, or pass --missing")
+        out({"ok": True, "covers": [dict(name=p["name"], **make_cover(p["name"], p["url"])) for p in chosen]})
     elif args.cmd == "sdk":
         root = os.path.abspath(args.dir)
         os.makedirs(root, exist_ok=True)
@@ -534,6 +591,8 @@ def main():
             copy_sdk(root)
         page = call("POST", "/pages/" + name, {"title": args.title, "files": collect(root)})
         page["ok"] = True
+        if not args.no_cover:
+            page.update(make_cover(name, page["url"]))
         out(page)
 
 
@@ -625,6 +684,9 @@ $CP pull <name>                                                     # the publis
 $CP delete <name>                                                   # the page AND all its data, at once and for good
 \`\`\`
 
+- \`publish\` also renders a **cover**: a picture of the live page as a phone shows it on arrival, used on the page's icon in the console and on its card in the conversation.
+  Make the first screen worth seeing (title and the main content, not an empty state or a spinner). If the output has \`coverError\`, the page is published anyway;
+  \`$CP cover <name>\` renders it again (also after changing data the first screen shows).
 - Publishing again under the same name is an update: same link, files replaced as a whole, **data kept**. Run \`list\` before creating a page so you do not overwrite another one.
 - To change an existing clawpage: if its folder is not in the workspace (or you are unsure it is the published version), \`pull\` it first, then edit and publish under the same name.
   If you change the shape of stored records, keep the page able to read the old ones (or migrate them with the data commands below).

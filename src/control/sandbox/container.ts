@@ -307,6 +307,12 @@ export class SandboxContainer {
       this.seedMail(),
       this.enforceCodexIsolation(),
     ]);
+    // Pages published before covers existed (or whose cover failed) get one, in the background.
+    if (this.#cfg.share) {
+      void this.execInSandbox(["python3", `${s.containerCodexHome}/${SHARE_TOOL_DIR}/aio-share.py`, "cover", "--missing"], { timeoutMs: 600_000 })
+        .then((r) => { if (r.code !== 0) this.#log.warn("clawpage covers not rendered", { error: (r.stdout || r.stderr).trim().slice(0, 200) }); })
+        .catch((err: unknown) => this.#log.warn("clawpage covers not rendered", { error: String(err).slice(0, 200) }));
+    }
   }
 
   /**

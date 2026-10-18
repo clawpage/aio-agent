@@ -78,7 +78,6 @@ export const cards = {
   },
   share: {
     defaultTitle: "分享页面",
-    badge: "分享页",
     copied: "已复制",
     copyFailed: "复制失败，请长按链接",
     copy: "复制链接",

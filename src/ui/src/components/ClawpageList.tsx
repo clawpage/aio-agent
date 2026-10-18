@@ -7,6 +7,7 @@ import { onDownloadClick } from "../saveFile";
 import { InlineLoading } from "./Brand";
 import { MessageTime, useDisplayClock } from "./MessageTime";
 import { PopupPresence, PopupSurface } from "./PopupMotion";
+import { useClawpageCover } from "../clawpageCover";
 import { t } from "../i18n";
 
 const PERMISSIONS: ClawpagePermission[] = ["private", "read-public", "public"];
@@ -38,6 +39,16 @@ function glyph(title: string): string {
 }
 
 const records = (page: Clawpage) => page.tables.reduce((n, table) => n + table.records, 0);
+
+/** A clawpage's picture: its cover (the page as a phone shows it), else its title's first character. */
+function Cover({ page, className, count = false }: { page: Clawpage; className: string; count?: boolean }) {
+  const url = useClawpageCover(page.cover ? page.name : null, page.cover);
+  const app = page.tables.length > 0;
+  return <span className={`${className} ${app ? "is-app" : "is-page"}${url ? " has-cover" : ""}`} aria-hidden="true">
+    {url ? <img src={url} alt="" decoding="async" draggable={false}/> : <span className="clawpage-cover-glyph">{glyph(page.title)}</span>}
+    {count && app && <span className="clawpage-cover-count">{t.clawpages.count(records(page))}</span>}
+  </span>;
+}
 
 function Icon({ d }: { d: string }) {
   return <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={d}/></svg>;
@@ -82,9 +93,8 @@ export function ClawpageList({ active, onExpired }: { active: boolean; onExpired
     <ul className="clawpage-grid" data-testid={`clawpage-${kind}s`}>
       {list.map((p) => <li key={p.name} data-page={p.name}>
         <button type="button" className="clawpage-tile" aria-label={t.clawpages.pageLabel(p.title)} onClick={() => setSelected(p.name)}>
-          <span className={`clawpage-glyph is-${kind}`} aria-hidden="true">{glyph(p.title)}</span>
+          <Cover page={p} className="clawpage-cover" count/>
           <span className="clawpage-tile-title">{p.title}</span>
-          {kind === "app" && <span className="clawpage-tile-count">{t.clawpages.count(records(p))}</span>}
         </button>
       </li>)}
     </ul>
@@ -157,8 +167,8 @@ function ClawpageSheet({ page, onClose, onChanged, onRemoved, onError }: { page:
   return createPortal(
     <PopupSurface className="file-preview-overlay" role="presentation" onClick={(event) => { if (event.target === event.currentTarget) onClose(); }}>
       <div className="file-preview clawpage-sheet" role="dialog" aria-modal="true" aria-labelledby="clawpage-sheet-title" data-page={page.name}>
+        <Cover page={page} className="clawpage-sheet-cover"/>
         <header className="clawpage-sheet-head">
-          <span className={`clawpage-glyph ${app ? "is-app" : "is-page"}`} aria-hidden="true">{glyph(page.title)}</span>
           <div className="clawpage-sheet-name">
             <h2 id="clawpage-sheet-title">{page.title}</h2>
             <p className="muted tiny">{app ? t.clawpages.summaryApp(page.tables.length, records(page)) : t.clawpages.summaryPage}<MessageTime at={Math.max(page.updatedAt, ...page.tables.map((x) => x.updatedAt))} now={now}/></p>

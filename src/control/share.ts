@@ -26,6 +26,9 @@ import { ClawpageData, DataError, type Caller, type TableSummary } from "./clawp
 export const SHARE_NAME = /^[a-z0-9][a-z0-9-]{0,62}$/;
 export const SHARE_LIMITS = { files: 200, bytes: 20 * 1024 * 1024, pages: 100 };
 const META = ".meta.json";
+/** A page's cover: a picture of the page as published, rendered in the sandbox (never served on the page's own path). */
+const COVER = ".cover";
+export const COVER_MAX_BYTES = 1536 * 1024;
 const TOKEN = /^[a-f0-9]{64}$/;
 
 /** Only these types are labelled; anything else is served as opaque bytes. */
@@ -68,8 +71,16 @@ export class ShareError extends Error {
   }
 }
 
-export interface SharePage { name: string; title: string; url: string; files: number; bytes: number; updatedAt: number; tables: TableSummary[] }
+export interface SharePage { name: string; title: string; url: string; files: number; bytes: number; updatedAt: number; tables: TableSummary[]; cover: number | null }
 export interface ShareFile { path: string; data: string }
+
+/** What a cover's bytes are, by their signature; anything else is not a cover. */
+export function coverType(data: Buffer): "image/jpeg" | "image/png" | "image/webp" | null {
+  if (data.length > 3 && data[0] === 0xff && data[1] === 0xd8 && data[2] === 0xff) return "image/jpeg";
+  if (data.length > 8 && data.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return "image/png";
+  if (data.length > 12 && data.toString("latin1", 0, 4) === "RIFF" && data.toString("latin1", 8, 12) === "WEBP") return "image/webp";
+  return null;
+}
 
 /** A relative path of plain segments: no traversal, no hidden files, no backslashes or control characters. */
 function safeSegments(rel: string): string[] | null {
@@ -141,7 +152,7 @@ export class ShareStore {
     return names.flatMap((name) => {
       try {
         const meta = JSON.parse(fs.readFileSync(path.join(this.#userDir(userId), name, META), "utf8")) as Omit<SharePage, "name" | "url">;
-        return [{ name, url: this.pageUrl(userId, name), title: meta.title, files: meta.files, bytes: meta.bytes, updatedAt: meta.updatedAt, tables: tables.get(name) ?? [] }];
+        return [{ name, url: this.pageUrl(userId, name), title: meta.title, files: meta.files, bytes: meta.bytes, updatedAt: meta.updatedAt, tables: tables.get(name) ?? [], cover: this.#coverAt(userId, name) }];
       } catch {
         return [];
       }
@@ -186,13 +197,56 @@ export class ShareStore {
       }
       const updatedAt = Date.now();
       fs.writeFileSync(path.join(staging, META), JSON.stringify({ title, files: files.length, bytes, updatedAt }));
+      // The old cover stays until the new one is rendered.
+      // Its time is its version: the console keeps showing the copy it has.
+      try {
+        const old = fs.statSync(path.join(target, COVER));
+        fs.copyFileSync(path.join(target, COVER), path.join(staging, COVER));
+        fs.utimesSync(path.join(staging, COVER), old.mtimeMs / 1000, old.mtimeMs / 1000);
+      } catch { /* no cover yet */ }
       const retired = path.join(userDir, `.retired-${randomBytes(6).toString("hex")}`);
       if (fs.existsSync(target)) fs.renameSync(target, retired);
       fs.renameSync(staging, target);
       fs.rmSync(retired, { recursive: true, force: true });
-      return { name, title, url: this.pageUrl(userId, name), files: files.length, bytes, updatedAt, tables: this.data?.tables(userId, name) ?? [] };
+      return { name, title, url: this.pageUrl(userId, name), files: files.length, bytes, updatedAt, tables: this.data?.tables(userId, name) ?? [], cover: this.#coverAt(userId, name) };
     } finally {
       fs.rmSync(staging, { recursive: true, force: true });
+    }
+  }
+
+  /** When the page's cover was last written, or null without one. */
+  #coverAt(userId: string, name: string): number | null {
+    try {
+      return Math.floor(fs.statSync(path.join(this.#userDir(userId), name, COVER)).mtimeMs);
+    } catch {
+      return null;
+    }
+  }
+
+  /** Keep a picture of the page as its cover (the sandbox renders it after publishing). */
+  setCover(userId: string, name: string, data: Buffer): number {
+    if (!this.exists(userId, name)) throw new ShareError(404, "The page does not exist");
+    if (data.length > COVER_MAX_BYTES) throw new ShareError(413, `A cover is at most ${COVER_MAX_BYTES / 1024} KB`);
+    if (!coverType(data)) throw new ShareError(400, "A cover must be a JPEG, PNG or WebP picture");
+    const file = path.join(this.#userDir(userId), name, COVER);
+    const tmp = `${file}.${randomBytes(4).toString("hex")}`;
+    fs.writeFileSync(tmp, data);
+    // A whole millisecond, so the version survives being copied on republish.
+    const at = Date.now() / 1000;
+    fs.utimesSync(tmp, at, at);
+    fs.renameSync(tmp, file);
+    return this.#coverAt(userId, name)!;
+  }
+
+  /** The page's cover, for the account's own console. */
+  cover(userId: string, name: string): { data: Buffer; type: string; at: number } | null {
+    if (!this.exists(userId, name)) return null;
+    try {
+      const data = fs.readFileSync(path.join(this.#userDir(userId), name, COVER));
+      const type = coverType(data);
+      return type ? { data, type, at: this.#coverAt(userId, name)! } : null;
+    } catch {
+      return null;
     }
   }
 
@@ -270,7 +324,7 @@ export class ShareStore {
       res.end(body === undefined ? undefined : JSON.stringify(body));
     };
     const url = new URL(req.url ?? "/", "http://gateway");
-    const match = /^\/share\/([a-zA-Z0-9_]+)\/pages(?:\/([^/]+)(?:\/(files|data)((?:\/[^/]+)*))?)?$/.exec(url.pathname);
+    const match = /^\/share\/([a-zA-Z0-9_]+)\/pages(?:\/([^/]+)(?:\/(files|data|cover)((?:\/[^/]+)*))?)?$/.exec(url.pathname);
     const expected = match ? this.#tokens.get(match[1]!) : undefined;
     const supplied = (req.headers.authorization ?? "").replace(/^Bearer /, "");
     if (!match || !expected || !TOKEN.test(supplied) || !timingSafeEqual(Buffer.from(supplied), Buffer.from(expected))) {
@@ -283,6 +337,15 @@ export class ShareStore {
       if (sub === "files") {
         const files = req.method === "GET" ? this.files(userId, name!) : undefined;
         return files === undefined ? reply(405, { error: "method_not_allowed" }) : files ? reply(200, { name, files }) : reply(404, { error: "The page does not exist" });
+      }
+      if (sub === "cover") {
+        if (req.method !== "POST" || tail) return reply(405, { error: "method_not_allowed" });
+        const body = await readJson(req, Math.ceil(COVER_MAX_BYTES * 1.4) + 1024).catch((err: unknown) => {
+          if (err instanceof DataError) throw new ShareError(err.status, err.message);
+          throw err;
+        });
+        if (typeof body.data !== "string") return reply(400, { error: "No cover data" });
+        return reply(200, { name, cover: this.setCover(userId, name!, Buffer.from(body.data, "base64")) });
       }
       if (sub === "data") {
         const rest = (tail ?? "").split("/").filter(Boolean).map((s) => decodeURIComponent(s));
