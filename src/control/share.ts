@@ -193,13 +193,19 @@ export class ShareStore {
     }
     // Build beside the target and swap, so a reader never sees a half-written page.
     const staging = path.join(userDir, `.staging-${randomBytes(6).toString("hex")}`);
+    // Every file of a version carries its time, a whole second after the last version's: browsers
+    // revalidate by Last-Modified (seconds) where the CDN drops the ETag, and must never take a
+    // version published within the same second for the one they hold.
+    let previous = 0;
+    try { previous = (JSON.parse(fs.readFileSync(path.join(target, META), "utf8")) as { updatedAt?: number }).updatedAt ?? 0; } catch { /* a new page */ }
+    const updatedAt = Math.max(Date.now(), (Math.floor(previous / 1000) + 1) * 1000);
     try {
       for (const f of files) {
         const file = path.join(staging, ...f.segments);
         fs.mkdirSync(path.dirname(file), { recursive: true });
         fs.writeFileSync(file, f.data);
+        fs.utimesSync(file, updatedAt / 1000, updatedAt / 1000);
       }
-      const updatedAt = Date.now();
       fs.writeFileSync(path.join(staging, META), JSON.stringify({ title, files: files.length, bytes, updatedAt }));
       // The old cover stays until the new one is rendered.
       // Its time is its version: the console keeps showing the copy it has.
@@ -463,9 +469,11 @@ export class ShareStore {
       // CDN in front compresses pages and drops a strong ETag when it does (a weak one it keeps).
       const tag = `"${stat.size.toString(36)}-${Math.floor(stat.mtimeMs).toString(36)}"`;
       const etag = `W/${tag}`;
-      const known = String(req.headers["if-none-match"] ?? "").split(",").map((t) => t.trim().replace(/^W\//, ""));
-      if (known.includes(tag)) {
-        res.status(304).set({ ...PAGE_HEADERS, etag }).end();
+      const ifNoneMatch = req.headers["if-none-match"];
+      const known = String(ifNoneMatch ?? "").split(",").map((t) => t.trim().replace(/^W\//, ""));
+      const since = ifNoneMatch === undefined ? Date.parse(String(req.headers["if-modified-since"] ?? "")) : NaN;
+      if (known.includes(tag) || Math.floor(stat.mtimeMs / 1000) * 1000 <= since) {
+        res.status(304).set({ ...PAGE_HEADERS, etag, "last-modified": stat.mtime.toUTCString() }).end();
         return;
       }
       res.status(200).set({

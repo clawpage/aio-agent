@@ -116,6 +116,15 @@ it("publishes a page from the sandbox channel and serves it publicly, sandboxed,
     expect(fresh.status).toBe(200);
     expect(fresh.headers.get("etag")).not.toBe(etag);
     expect(await fresh.text()).toBe("<p>v2</p>");
+    // Where a CDN drops the ETag, Last-Modified does the same job: each version a whole second apart,
+    // even when published within the same second, so the copy a browser holds is never taken for the new one.
+    const v2Modified = fresh.headers.get("last-modified")!;
+    expect((await h.request("/u/owner/share/trip/", { host: "workspace", headers: { "if-modified-since": v2Modified } })).status).toBe(304);
+    expect((await publish([{ path: "index.html", data: b64("<p>v3</p>") }])).status).toBe(200);
+    const v3 = await h.request("/u/owner/share/trip/", { host: "workspace", headers: { "if-modified-since": v2Modified } });
+    expect(v3.status).toBe(200);
+    expect(await v3.text()).toBe("<p>v3</p>");
+    expect(Date.parse(v3.headers.get("last-modified")!)).toBeGreaterThan(Date.parse(v2Modified));
     expect((await h.request("/u/owner/share/trip/img/a.png", { host: "workspace" })).status).toBe(404);
 
     // A member publishes under its own address with its own token.
