@@ -134,17 +134,17 @@ emit_install_result() {
 # A failed copy/chmod is reported, never silently treated as success.
 publish_cli() {
   local src="$TOOL_DIR/scripts/aio-doc" dst="$TOOL_DIR/bin/aio-doc"
-  [ -f "$src" ] || { emit_install_result false "cli_missing" "控制面脚本目录缺少 aio-doc"; return 1; }
+  [ -f "$src" ] || { emit_install_result false "cli_missing" "aio-doc is missing from the control plane scripts directory"; return 1; }
   if ! mkdir -p -- "$TOOL_DIR/bin"; then
-    emit_install_result false "cli_dir" "无法创建 bin 目录"
+    emit_install_result false "cli_dir" "Could not create the bin directory"
     return 1
   fi
   if ! cp -- "$src" "$dst"; then
-    emit_install_result false "cli_copy_failed" "复制 aio-doc 到 bin 目录失败"
+    emit_install_result false "cli_copy_failed" "Could not copy aio-doc into the bin directory"
     return 1
   fi
   if ! chmod 0755 -- "$dst"; then
-    emit_install_result false "cli_chmod_failed" "设置 aio-doc 执行权限失败"
+    emit_install_result false "cli_chmod_failed" "Could not make aio-doc executable"
     return 1
   fi
   return 0
@@ -156,28 +156,28 @@ if [ "$MODE" = "check" ]; then
 fi
 
 if [ "$MODE" != "install" ]; then
-  emit_install_result false "bad_mode" "未知模式：只支持 check / install"
+  emit_install_result false "bad_mode" "Unknown mode: only check / install are supported"
   exit 0
 fi
 
 # The user-side step needs a directory it can write. `install-root.sh` grants it;
 # if it is still not writable, say so instead of failing halfway.
 if ! mkdir -p -- "$TOOL_DIR" 2>/dev/null; then
-  emit_install_result false "tool_dir" "无法创建工具目录 $TOOL_DIR（需要先运行 root 安装步骤）"
+  emit_install_result false "tool_dir" "Could not create the tool directory $TOOL_DIR (the root install step must run first)"
   exit 0
 fi
 if [ ! -w "$TOOL_DIR" ]; then
-  emit_install_result false "tool_dir_readonly" "工具目录 $TOOL_DIR 对沙箱用户不可写；需要先运行 root 安装步骤设置权限"
+  emit_install_result false "tool_dir_readonly" "The tool directory $TOOL_DIR is not writable by the sandbox user; the root install step must set its permissions first"
   exit 0
 fi
 
 # Root-side dependencies must already be in place: this script never calls apt.
 if ! have soffice || ! have pdftoppm || ! have pdfinfo; then
-  emit_install_result false "need_root" "缺少 LibreOffice/poppler；需要先运行 root 安装步骤"
+  emit_install_result false "need_root" "LibreOffice/poppler is missing; the root install step must run first"
   exit 0
 fi
 if ! have_ensurepip; then
-  emit_install_result false "need_root" "缺少 python3-venv（无法创建隔离 venv）；需要先运行 root 安装步骤"
+  emit_install_result false "need_root_venv" "python3-venv is missing (the isolated venv cannot be created); the root install step must run first"
   exit 0
 fi
 
@@ -191,7 +191,7 @@ if [ -f "$MARKER" ] && grep -q "$MARKER_VERSION" "$MARKER" 2>/dev/null; then
     if "$VENV_PY" -c 'import docx, openpyxl, pptx' >/dev/null 2>&1; then
       publish_cli || exit 0
       mkdir -p -- "$TOOL_DIR/cache" 2>/dev/null || true
-      emit_install_result true "already" "文档工具已就绪，无需重复安装"
+      emit_install_result true "already" "The document tools are ready; nothing to install"
       emit_check
       exit 0
     fi
@@ -210,7 +210,7 @@ if [ ! -x "$VENV_PY" ]; then
   # image's own site-packages.
   if ! python3 -m venv --system-site-packages "$VENV_DIR" >/dev/null 2>&1; then
     rm -rf -- "$VENV_DIR" 2>/dev/null || true
-    emit_install_result false "venv_failed" "创建隔离 venv 失败（可能仍缺少 python3-venv 或 ensurepip）"
+    emit_install_result false "venv_failed" "Could not create the isolated venv (python3-venv or ensurepip may still be missing)"
     exit 0
   fi
 fi
@@ -218,13 +218,13 @@ fi
 if ! "$VENV_PY" -c 'import docx, openpyxl, pptx' >/dev/null 2>&1; then
   if ! "$VENV_PY" -m pip install --quiet --disable-pip-version-check \
       python-docx openpyxl python-pptx pypdf reportlab >/dev/null 2>&1; then
-    emit_install_result false "pip_failed" "安装 Python 文档库失败（通常是沙箱没有网络出口）"
+    emit_install_result false "pip_failed" "Could not install the Python document libraries (usually the sandbox has no outbound network)"
     exit 0
   fi
 fi
 
 if ! "$VENV_PY" -c 'import docx, openpyxl, pptx' >/dev/null 2>&1; then
-  emit_install_result false "verify_failed" "安装后仍无法导入文档库，未标记为就绪"
+  emit_install_result false "verify_failed" "The document libraries still cannot be imported after installing; not marked as ready"
   exit 0
 fi
 
@@ -236,5 +236,5 @@ publish_cli || exit 0
 mkdir -p -- "$TOOL_DIR/cache" 2>/dev/null || true
 
 printf '{"version":"%s","installedAt":%s}\n' "$MARKER_VERSION" "$(date +%s)" > "$MARKER" 2>/dev/null || true
-emit_install_result true "installed" "文档工具安装完成"
+emit_install_result true "installed" "The document tools are installed"
 emit_check
