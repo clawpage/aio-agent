@@ -52,7 +52,7 @@ export const documents = {
   notAFile: "该路径不是普通文件",
   emptyFile: "文件是空的（0 字节）",
   tooLargePreview: "文件超过 100MB，无法在线预览，请下载后处理",
-  toolsNotReadyPreview: "沙箱文档工具尚未就绪，请先安装（工作区 → 文档工具 → 安装/检查）",
+  toolsNotReadyPreview: "沙箱文档工具尚未就绪，请先安装（工作区 → 文档处理 → 安装/修复）",
   previewTimeout: "预览转换超时，文件可能过大或过于复杂",
   previewUnparsable: "沙箱未返回可解析的预览结果",
   noPreviewPages: "没有生成任何预览页",
