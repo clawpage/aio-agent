@@ -4,7 +4,8 @@
 // into a record's JSON. Usage (compose: docker exec aio-control-1 node bin/voice-replay.mjs ...):
 //   node bin/voice-replay.mjs [--since YYYY-MM-DD] [--until YYYY-MM-DD] [--user NAME] [--limit N]
 //                             [--asr URL]... [--polish] [--out report.json]
-// Without --asr it uses PA_ASR_URL. --polish also runs the polisher on what each recognizer heard.
+// Without --asr it uses PA_ASR_URL. --polish also runs the polisher on what each recognizer heard,
+// with the vocabulary that recognizer answers with, as /api/asr does.
 import fs from 'node:fs';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
@@ -58,13 +59,14 @@ for (const { meta, wav } of records) {
   for (const [i, url] of urls.entries()) {
     const s = stats[i];
     const started = Date.now();
-    let text = null, model = null, error = null, polished = null;
+    let text = null, model = null, error = null, polished = null, terms = [];
     try {
       const res = await fetch(url, { method: 'POST', headers: { 'content-type': 'audio/wav' }, body: audio, signal: AbortSignal.timeout(60_000) });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json = await res.json();
       text = String(json.text ?? '').trim();
       model = json.model ?? null;
+      if (Array.isArray(json.words)) terms = json.words.filter((w) => typeof w === 'string');
     } catch (err) { error = err instanceof Error ? err.message : String(err); }
     const ms = Date.now() - started;
     if (text !== null) {
@@ -72,7 +74,7 @@ for (const { meta, wav } of records) {
       if (text !== row.then) s.changed++;
       if (row.expected) s.cer.push(cer(text, row.expected));
       if (dictation && text) {
-        polished = (await dictation.polish(text, { names: meta.user === 'owner' || cfg.kbMcp.members.includes(meta.user) })).text;
+        polished = (await dictation.polish(text, { names: meta.user === 'owner' || cfg.kbMcp.members.includes(meta.user), terms })).text;
         if (row.expected) s.polishedCer.push(cer(polished, row.expected));
       }
     }
