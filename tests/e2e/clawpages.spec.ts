@@ -54,7 +54,7 @@ async function setup(page: Page, pages = PAGES) {
   return calls;
 }
 
-test("the clawpages page lists the mini apps with their data, opens one as the owner, and manages its data", async ({ page, context }, info) => {
+test("the clawpages page is a home screen of mini apps and pages; an icon opens its sheet to open, look through and manage it", async ({ page, context }, info) => {
   const calls = await setup(page);
   await page.goto("/u/owner");
   const mobile = (page.viewportSize()?.width ?? 1440) < 900;
@@ -67,46 +67,66 @@ test("the clawpages page lists the mini apps with their data, opens one as the o
     expect(title.x).toBeGreaterThanOrEqual(menu.x + menu.width);
   }
 
-  const poll = page.locator('li[data-page="lunch-poll"]');
-  await expect(poll.locator(".clawpage-title")).toHaveText("午饭投票");
-  await expect(poll.locator(".clawpage-url")).toHaveText(`${WS}/u/owner/share/lunch-poll/`);
-  await expect(poll.locator(".clawpage-chip")).toHaveText(["votes · 公开读写 · 3 条", "notes · 仅自己 · 1 条"]);
-  await expect(page.locator('li[data-page="tokyo-trip"] .task-tag')).toHaveText("静态页面");
-  await expect(page.locator('li[data-page="tokyo-trip"]').getByRole("button", { name: /^数据/ })).toHaveCount(0);
+  // Two shelves: mini apps (with data), then plain pages; an icon, a title, and for an app how much data it holds.
+  const apps = page.getByRole("region", { name: "小应用" }), pages = page.getByRole("region", { name: "网页" });
+  await expect(apps.getByRole("heading")).toHaveText("小应用1");
+  const poll = apps.locator('li[data-page="lunch-poll"]');
+  await expect(poll.locator(".clawpage-glyph")).toHaveText("午");
+  await expect(poll.locator(".clawpage-glyph")).toHaveClass(/is-app/);
+  await expect(poll.locator(".clawpage-tile-title")).toHaveText("午饭投票");
+  await expect(poll.locator(".clawpage-tile-count")).toHaveText("4 条");
+  await expect(pages.locator('li[data-page="tokyo-trip"] .clawpage-glyph')).toHaveClass(/is-page/);
+  await expect(pages.locator('li[data-page="tokyo-trip"] .clawpage-tile-count')).toHaveCount(0);
+  // Nothing else on the list: no links, names, sizes or buttons.
+  await expect(page.locator(".clawpages-page").getByText("lunch-poll")).toHaveCount(0);
   expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
-  // The menu has slid away before the picture.
   if (mobile) { await expect(page.locator(".sidebar.show-mobile")).toHaveCount(0); await page.waitForTimeout(500); }
   await page.screenshot({ path: info.outputPath("clawpages-list.png") });
 
-  // Open: an owner link, in a new tab opened by the tap itself.
+  // The sheet: who it is, open as the owner in a new tab, its data.
+  await poll.getByRole("button", { name: "打开 午饭投票 的详情" }).click();
+  const sheet = page.getByRole("dialog", { name: "午饭投票" });
+  await expect(sheet).toContainText("2 张表，4 条数据");
   await context.route(`${WS}/**`, (r) => r.fulfill({ contentType: "text/html", body: "<p>clawpage</p>" }));
-  const [tab] = await Promise.all([context.waitForEvent("page"), poll.getByRole("button", { name: "打开", exact: true }).click()]);
+  const [tab] = await Promise.all([context.waitForEvent("page"), sheet.getByRole("button", { name: "打开", exact: true }).click()]);
   await expect.poll(() => tab.url()).toContain("/u/owner/share/lunch-poll/#cp=owner-token");
   await tab.close();
 
-  // Data: records of the first table, permission, deleting a record takes two taps.
-  await poll.getByRole("button", { name: "数据 · 4" }).click();
-  const data = poll.getByTestId("clawpage-data");
-  await expect(data.locator(".clawpage-record")).toHaveCount(3);
-  await expect(data.locator('.clawpage-record[data-key="carol"] pre')).toContainText('"note": "no spice"');
-  await data.getByRole("button", { name: "删除记录 bob" }).click();
+  // Records as a table: their fields as columns.
+  const data = sheet.getByTestId("clawpage-data");
+  await expect(data.locator("thead th")).toHaveText(["时间", "choice", "note", ""]);
+  await expect(data.locator("tbody tr")).toHaveCount(3);
+  await expect(data.locator('tr[data-key="carol"] td').nth(2)).toHaveText("no spice");
+  await page.waitForTimeout(400);
+  await page.screenshot({ path: info.outputPath("clawpages-sheet.png") });
+  // Deleting a record takes two taps.
+  await data.getByRole("button", { name: "删除这条数据（bob）" }).click();
   expect(calls.filter((c) => c.startsWith("DELETE"))).toEqual([]);
-  await data.getByRole("button", { name: "删除记录 bob" }).click();
-  await expect(data.locator(".clawpage-record")).toHaveCount(2);
+  await data.getByRole("button", { name: "删除这条数据（bob）" }).click();
+  await expect(data.locator("tbody tr")).toHaveCount(2);
   expect(calls).toContain("DELETE lunch-poll/tables/votes/records/bob");
-  await data.getByLabel("谁能访问").selectOption("read-public");
-  await expect(poll.locator(".clawpage-chip").first()).toHaveText("votes · 公开只读 · 2 条");
-  await data.getByRole("group", { name: "数据表" }).getByRole("button", { name: /^notes/ }).click();
-  await expect(data.locator(".clawpage-record")).toHaveText([/订 12 点的位子/]);
-  await expect(data.getByRole("link", { name: "导出 JSON" })).toHaveAttribute("href", /\/api\/clawpages\/lunch-poll\/tables\/notes\/export$/);
-  await page.screenshot({ path: info.outputPath("clawpages-data.png") });
+  // Who has access, as three choices.
+  await data.getByRole("radio", { name: "公开只读" }).click();
+  await expect(data.getByRole("radio", { name: "公开只读" })).toHaveAttribute("aria-checked", "true");
+  await expect(data.locator(".clawpage-permission-hint")).toHaveText("访客能看、不能改");
+  expect(calls).toContain("PATCH lunch-poll/tables/votes");
+  await data.getByRole("tab", { name: /^notes/ }).click();
+  await expect(data.locator("thead th")).toHaveText(["时间", "text", ""]);
+  await expect(data.locator("tbody tr")).toHaveText([/订 12 点的位子/]);
+  await expect(data.getByRole("link", { name: "导出" })).toHaveAttribute("href", /\/api\/clawpages\/lunch-poll\/tables\/notes\/export$/);
+  await page.keyboard.press("Escape");
+  await expect(sheet).toHaveCount(0);
 
-  // Deleting a page asks first, and says its data goes too.
-  const trip = page.locator('li[data-page="tokyo-trip"]');
-  await trip.getByRole("button", { name: "删除", exact: true }).click();
-  await expect(trip.getByRole("alertdialog")).toContainText("页面里的数据也一起删除");
+  // Deleting a clawpage asks first, and says its data goes too.
+  await pages.getByRole("button", { name: "打开 东京行程 的详情" }).click();
+  const trip = page.getByRole("dialog", { name: "东京行程" });
+  await expect(trip).toContainText("网页，不存数据");
+  await expect(trip.getByTestId("clawpage-data")).toHaveCount(0);
+  await trip.getByRole("button", { name: "删除这个 clawpage" }).click();
+  await expect(trip.getByRole("alertdialog")).toContainText("里面的数据也一起删除");
   await trip.getByRole("button", { name: "确认删除" }).click();
   await expect(trip).toHaveCount(0);
+  await expect(page.locator('li[data-page="tokyo-trip"]')).toHaveCount(0);
   expect(calls).toContain("DELETE tokyo-trip");
 });
 
@@ -114,5 +134,5 @@ test("an account without clawpages is told how to make one", async ({ page }) =>
   await setup(page, []);
   await page.goto("/u/owner/clawpages");
   await expect(page.getByRole("heading", { name: "还没有 clawpage" })).toBeVisible();
-  await expect(page.getByText("做个团队午饭投票页")).toBeVisible();
+  await expect(page.getByText("做个团队午饭投票")).toBeVisible();
 });

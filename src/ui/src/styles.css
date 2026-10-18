@@ -3429,32 +3429,77 @@ button.turn-pill:focus-visible { outline: 2px solid currentColor; outline-offset
 .library-task:hover, .library-task:focus-visible { color:var(--accent); text-decoration-color:currentColor; }
 .library-source .message-time { flex:none; margin-left:auto; }
 .library-grid .library-source .message-time { display:none; }
-/* Clawpages: one card per page, its tables as chips, its data opened below it. */
-.clawpages-tip { max-width:var(--page-max); margin:0 auto 12px; }
-.clawpages-list { list-style:none; margin:0 auto 16px; padding:0; max-width:var(--page-max); display:grid; gap:12px; }
-.clawpage-item { display:flex; flex-direction:column; gap:8px; min-width:0; padding:14px 16px; border:1px solid var(--border); border-radius:var(--radius-card); background:var(--bg-soft); box-shadow:var(--shadow-card); }
-.clawpage-head { display:flex; flex-wrap:wrap; align-items:baseline; gap:6px 12px; }
-.clawpage-title { font-size:15px; font-weight:600; overflow-wrap:anywhere; }
-.clawpage-meta { display:inline-flex; flex-wrap:wrap; gap:10px; }
-.clawpage-url { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
-.clawpage-tables { display:flex; flex-wrap:wrap; gap:6px; }
-.clawpage-chip { border-radius:999px; padding:1px 9px; font-size:11.5px; line-height:1.7; background:var(--bg-raised); color:var(--text-dim); overflow-wrap:anywhere; }
-.clawpage-chip.public { color:var(--warn); background:color-mix(in srgb,var(--warn) 10%,transparent); }
-.clawpage-chip.read-public { color:var(--accent); background:var(--accent-soft); }
-.clawpage-actions, .clawpage-table-tools { display:flex; flex-wrap:wrap; align-items:center; gap:6px; }
-.clawpage-actions .spacer, .clawpage-table-tools .spacer, .clawpage-record-head .spacer { flex:1; }
-.clawpage-confirm { display:flex; flex-wrap:wrap; align-items:center; gap:8px; padding:8px 10px; border-radius:10px; background:color-mix(in srgb,var(--error) 8%,transparent); }
+/* Clawpages: a home screen. One icon per clawpage, set in its title's first character;
+   a filled indigo square is a mini app with data, an outlined one a plain page. */
+.clawpage-shelf { max-width:var(--page-max); margin:0 auto 28px; }
+.clawpage-shelf-head { display:flex; align-items:baseline; gap:8px; margin:4px 2px 14px; font-size:15px; font-weight:600; color:var(--text); }
+.clawpage-shelf-head span { font-size:var(--fs-xs); font-weight:400; color:var(--text-dim); font-variant-numeric:tabular-nums; }
+.clawpage-grid { list-style:none; margin:0; padding:0; display:grid; grid-template-columns:repeat(auto-fill, minmax(112px, 1fr)); gap:22px 12px; }
+.clawpage-tile { display:flex; flex-direction:column; align-items:center; gap:8px; width:100%; padding:6px 4px; border:0; border-radius:16px; background:none; color:var(--text); text-align:center; cursor:pointer; }
+.clawpage-tile:focus-visible { outline:2px solid color-mix(in srgb, var(--accent) 70%, transparent); outline-offset:2px; }
+.clawpage-tile:active .clawpage-glyph { transform:scale(.94); }
+.clawpage-glyph { display:inline-grid; place-items:center; flex:none; width:68px; height:68px; border-radius:20px; font-size:30px; font-weight:650; line-height:1; letter-spacing:-.02em; transition:transform var(--dur-fast) ease; }
+.clawpage-glyph.is-app { background:var(--accent); color:var(--on-accent); }
+.clawpage-glyph.is-page { background:var(--bg-raised); color:var(--text-dim); border:1.5px solid var(--border); }
+.clawpage-tile-title { max-width:100%; font-size:var(--fs-sm); line-height:1.35; display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; overflow:hidden; overflow-wrap:anywhere; }
+.clawpage-tile-count { margin-top:-4px; font-size:11.5px; color:var(--accent); font-variant-numeric:tabular-nums; }
+.clawpages-empty .clawpage-glyph { margin-bottom:6px; font-weight:400; }
+.clawpages-error { max-width:var(--page-max); margin:0 auto; }
+@media (prefers-reduced-motion: reduce) { .clawpage-glyph { transition:none; } .clawpage-tile:active .clawpage-glyph { transform:none; } }
+
+/* The sheet a clawpage opens: who it is, what to do with it, then its data. */
+.clawpage-sheet { width:min(760px, 100%); }
+.clawpage-sheet-head { display:flex; align-items:center; gap:14px; padding:18px 18px 0; }
+.clawpage-sheet-head .clawpage-glyph { width:56px; height:56px; border-radius:16px; font-size:25px; }
+.clawpage-sheet-name { flex:1; min-width:0; }
+.clawpage-sheet-name h2 { margin:0; font-size:18px; font-weight:650; line-height:1.3; overflow-wrap:anywhere; }
+.clawpage-sheet-name p { display:flex; flex-wrap:wrap; gap:4px 10px; margin:4px 0 0; }
+.clawpage-icon-button { display:inline-grid; place-items:center; width:38px; height:38px; padding:0; }
+.clawpage-sheet-head button.clawpage-icon-button { align-self:flex-start; border-color:transparent; background:none; }
+.clawpage-sheet-actions { display:flex; align-items:center; gap:8px; padding:16px 18px; }
+.clawpage-sheet-actions .primary { min-width:112px; height:38px; }
+.clawpage-copied { color:var(--ok); }
+.clawpage-sheet-body { flex:1; min-height:0; overflow:auto; padding:0 18px 18px; display:flex; flex-direction:column; gap:14px; }
+.clawpage-tip { margin:0; }
+button.clawpage-delete { align-self:flex-start; padding:2px 0; border:0; background:none; }
+button.clawpage-delete:hover { text-decoration:underline; }
+.clawpage-confirm { display:flex; flex-wrap:wrap; align-items:center; gap:8px; padding:10px 12px; border-radius:12px; background:color-mix(in srgb,var(--error) 8%,transparent); }
 .clawpage-confirm-actions { display:inline-flex; gap:6px; margin-left:auto; }
-.clawpage-data { display:flex; flex-direction:column; gap:10px; padding-top:10px; border-top:1px solid var(--border); }
-.clawpage-permission { display:inline-flex; align-items:center; gap:6px; color:var(--text-dim); white-space:nowrap; }
-.clawpage-permission select { height:var(--control-h-sm); border:1px solid var(--border); border-radius:8px; background:var(--bg); color:var(--text); padding:0 8px; font-size:var(--fs-xs); }
+
+.clawpage-data { display:flex; flex-direction:column; gap:10px; padding-top:14px; border-top:1px solid var(--border); }
+.clawpage-tabs { display:flex; gap:18px; overflow-x:auto; scrollbar-width:none; border-bottom:1px solid var(--border); }
+.clawpage-tab { flex:none; display:inline-flex; align-items:baseline; gap:6px; padding:0 0 8px; border:0; border-bottom:2px solid transparent; margin-bottom:-1px; background:none; color:var(--text-dim); font-size:var(--fs-sm); cursor:pointer; }
+.clawpage-tab span { font-size:11px; font-variant-numeric:tabular-nums; }
+.clawpage-tab[aria-selected="true"] { color:var(--text); border-bottom-color:var(--accent); font-weight:600; }
+.clawpage-table-tools { display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
+.clawpage-table-tools .spacer { flex:1; }
+.clawpage-segments { display:inline-flex; padding:3px; border-radius:11px; background:var(--bg); border:1px solid var(--border); }
+.clawpage-segment { border:0; background:none; border-radius:8px; padding:5px 11px; font-size:var(--fs-xs); color:var(--text-dim); white-space:nowrap; cursor:pointer; }
+.clawpage-segment[aria-checked="true"] { background:var(--bg-raised); color:var(--text); font-weight:600; box-shadow:var(--shadow-card); }
+.clawpage-segment.public[aria-checked="true"] { color:var(--warn); }
+.clawpage-permission-hint { margin:-4px 2px 0; }
 .clawpage-export { padding:5px 10px; }
-.clawpage-records { list-style:none; margin:0; padding:0; display:grid; gap:8px; }
-.clawpage-record { border:1px solid var(--border); border-radius:10px; background:var(--bg); padding:6px 10px; min-width:0; }
-.clawpage-record-head { display:flex; align-items:center; gap:8px; font-size:11.5px; color:var(--text-dim); }
-.clawpage-record-head code { color:var(--text); overflow-wrap:anywhere; }
-.clawpage-record-value { margin:6px 0 2px; max-height:180px; overflow:auto; font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace; white-space:pre-wrap; overflow-wrap:anywhere; color:var(--text); }
-@media(max-width:900px) { .clawpage-item { padding:12px; } .clawpage-confirm-actions { margin-left:0; } }
+.clawpage-no-rows { margin:6px 2px; }
+.clawpage-table-wrap { overflow-x:auto; border:1px solid var(--border); border-radius:12px; background:var(--bg); }
+.clawpage-table { width:100%; border-collapse:collapse; font-size:var(--fs-sm); }
+.clawpage-table th { position:sticky; top:0; padding:8px 12px; text-align:left; font-size:11.5px; font-weight:500; color:var(--text-dim); background:var(--bg-soft); border-bottom:1px solid var(--border); white-space:nowrap; }
+.clawpage-table td { padding:9px 12px; border-bottom:1px solid var(--border); vertical-align:top; max-width:260px; overflow-wrap:anywhere; }
+.clawpage-table tbody tr:last-child td { border-bottom:0; }
+.clawpage-time { width:1%; white-space:nowrap; color:var(--text-dim); font-size:var(--fs-xs); }
+.clawpage-row-action { width:1%; padding:4px 8px !important; text-align:right; vertical-align:middle !important; }
+button.clawpage-row-delete { display:inline-grid; place-items:center; min-width:28px; height:28px; padding:0 8px; border-color:transparent; background:none; color:var(--text-dim); }
+.clawpage-row-delete svg { width:14px; height:14px; }
+button.clawpage-row-delete.danger { background:var(--error); border-color:var(--error); color:var(--on-error); }
+.clawpage-more { align-self:center; }
+@media(max-width:900px) {
+  .clawpage-grid { grid-template-columns:repeat(auto-fill, minmax(80px, 1fr)); gap:18px 6px; }
+  .clawpage-glyph { width:60px; height:60px; border-radius:18px; font-size:26px; }
+  .clawpage-tile-title { font-size:12px; }
+  .clawpage-sheet-head { padding:14px 14px 0; }
+  .clawpage-sheet-actions { padding:14px; }
+  .clawpage-sheet-body { padding:0 14px 14px; }
+  .clawpage-confirm-actions { margin-left:0; }
+}
 @media(max-width:900px) { .library-grid { grid-template-columns:repeat(auto-fill, minmax(104px, 1fr)); gap:12px 8px; } }
 @media(max-width:900px) { .task-list-scroll { padding:12px; } .task-list-meta { gap:8px; flex-wrap:wrap; } .task-group-head { top:-12px; } .task-list-tools { gap:8px; } .task-filters { flex-wrap:nowrap; overflow-x:auto; scrollbar-width:none; width:100%; } .task-filter { flex:none; } .task-search { max-width:none; margin-left:0; flex-basis:100%; } }
 
