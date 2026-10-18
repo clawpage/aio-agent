@@ -31,7 +31,7 @@ export interface RecallHit {
 
 /** Bigrams too common to say anything about which task a message means. */
 const STOP = new Set(
-  "帮我 一下 我们 你们 他们 这个 那个 一个 可以 什么 怎么 需要 现在 然后 还是 就是 没有 不是 因为 所以 如果 或者 已经 请你 给我 看看 一些 这些 那些 时候 的话 之后 之前 以后 以前 继续 刚才 上次".split(" "),
+  "帮我 一下 我们 你们 他们 这个 那个 一个 可以 什么 怎么 需要 现在 然后 还是 就是 没有 不是 因为 所以 如果 或者 已经 请你 给我 看看 一些 这些 那些 时候 的话 之后 之前 以后 以前 继续 刚才 上次".split(" "), // i18n-exempt: Chinese words in messages people typed
 );
 
 export function tokenize(text: string): string[] {

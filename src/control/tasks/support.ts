@@ -32,15 +32,15 @@ export function isSupportCard(clientMessageId: string): boolean {
 /** Write the card into the account's runtime database. */
 export function postSupportCard(db: Db, input: SupportCardInput): { taskId: string; conversationId: string; duplicate: boolean } {
   const title = input.title.trim(), body = input.body.trim(), key = (input.key ?? randomId("card")).trim();
-  if (!title || [...title].length > SUPPORT_LIMITS.title) throw new Error(`标题需为 1–${SUPPORT_LIMITS.title} 个字`);
-  if (!body || body.length > SUPPORT_LIMITS.body) throw new Error(`正文需为 1–${SUPPORT_LIMITS.body} 个字符`);
-  if (!/^[A-Za-z0-9_.:-]+$/.test(key) || key.length > SUPPORT_LIMITS.key) throw new Error("--id 只能用字母、数字和 _ . : -");
+  if (!title || [...title].length > SUPPORT_LIMITS.title) throw new Error(`The title must be 1–${SUPPORT_LIMITS.title} characters`);
+  if (!body || body.length > SUPPORT_LIMITS.body) throw new Error(`The body must be 1–${SUPPORT_LIMITS.body} characters`);
+  if (!/^[A-Za-z0-9_.:-]+$/.test(key) || key.length > SUPPORT_LIMITS.key) throw new Error("--id may only use letters, digits and _ . : -");
   const clientMessageId = SUPPORT_PREFIX + key;
   const existing = db.prepare("SELECT t.id, t.conversation_id, c.owner_id FROM tasks t JOIN conversations c ON c.id=t.conversation_id WHERE t.client_message_id=?").get(clientMessageId) as
     | { id: string; conversation_id: string; owner_id: string }
     | undefined;
   if (existing) {
-    if (existing.owner_id !== input.ownerId) throw new Error("这个 --id 已用于另一个账号");
+    if (existing.owner_id !== input.ownerId) throw new Error("This --id is already used for another account");
     return { taskId: existing.id, conversationId: existing.conversation_id, duplicate: true };
   }
   // A follow-up that quotes the card reads its plan; nothing is dispatched for the card itself.

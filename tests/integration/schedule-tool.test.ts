@@ -47,7 +47,7 @@ it("gives every account a schedule tool that creates and manages its own schedul
       schedule: { kind: "daily", at: "09:00", until },
     });
     expect(created.isError).toBeUndefined();
-    expect(created.content[0]!.text).toContain("已创建定时任务「盯 Prime Day 扫地机价格」：每天 09:00");
+    expect(created.content[0]!.text).toContain('Created the scheduled task "盯 Prime Day 扫地机价格": Every day at 09:00');
     const row = h.ctx.db.prepare("SELECT id,owner_id,status,resources_json,source_task_id,spec_json FROM schedules WHERE title=?").get("盯 Prime Day 扫地机价格") as Record<string, string>;
     expect(row).toMatchObject({ owner_id: "user_m", status: "active", resources_json: '["browser"]', source_task_id: null });
     expect(JSON.parse(row.spec_json)).toMatchObject({ kind: "daily", at: "09:00", until });
@@ -61,6 +61,8 @@ it("gives every account a schedule tool that creates and manages its own schedul
     expect(offline.isError).toBeUndefined();
     expect(h.ctx.db.prepare("SELECT resources_json FROM schedules WHERE title=?").get("每周一提醒交房租")).toEqual({ resources_json: "[]" });
 
+    // The gateway serves every account; it answers in the account's language, not the process's.
+    h.ctx.tasks.setLocale("zh-CN");
     // Each account sees and changes only its own.
     const mine = JSON.parse((await call(member.schedule!.url, "schedule_list", {})).content[0]!.text) as Array<{ id: string; title: string }>;
     expect(mine.map((s) => s.title)).toEqual(expect.arrayContaining(["盯 Prime Day 扫地机价格", "每周一提醒交房租"]));

@@ -163,9 +163,9 @@ it("finishes inverted-index recall before Luna and only retries malformed output
   job = submit("随便找找");
   await tick();
   expect(codex.prompts).toHaveLength(2);
-  expect(codex.prompts[1]).toContain("Your previous answer could not be used: 缺少 title");
+  expect(codex.prompts[1]).toContain("Your previous answer could not be used: title is missing");
   expect(tasks.get(job.id)!.status).toBe("planning_failed");
-  expect(events().at(-1)).toMatchObject({ rounds: 2, failed: 1, fail_reason: "缺少 title" });
+  expect(events().at(-1)).toMatchObject({ rounds: 2, failed: 1, fail_reason: "title is missing" });
 });
 
 it("measures where search ranks a task picked by hand, beyond the recent window", async () => {

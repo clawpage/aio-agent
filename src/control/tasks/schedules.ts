@@ -1,9 +1,10 @@
 /**
  * Scheduled and recurring tasks: the rule a person asked for ("明早 9 点",
  * "每天 8 点", "每周一三", "每 2 小时"), when it runs next in their time zone,
- * and how to say it back to them. Pure functions; the task service stores the
- * schedules and starts each run.
+ * and how to say it back to them (in the language this code runs for). Pure
+ * functions; the task service stores the schedules and starts each run.
  */
+import { t } from "../i18n/index.js";
 
 export type ScheduleKind = "once" | "daily" | "weekly" | "monthly" | "interval" | "dates";
 
@@ -40,7 +41,8 @@ const KINDS: ScheduleKind[] = ["once", "daily", "weekly", "monthly", "interval",
 const TIME = /^([01]\d|2[0-3]):([0-5]\d)$/;
 const DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
 const MOMENT = /^(\d{4}-\d{2}-\d{2}) ([01]\d|2[0-3]):([0-5]\d)$/;
-const WEEKDAY_NAMES = ["", "一", "二", "三", "四", "五", "六", "日"];
+/** For the dispatcher, which reads English. */
+const WEEKDAY_NAMES = ["", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
 interface Local { y: number; m: number; d: number; h: number; mi: number; weekday: number }
 
@@ -130,86 +132,86 @@ const validDate = (s: unknown): s is string => {
  * be used. `now` anchors intervals and rules out a one-off time already past.
  */
 export function validateSchedule(raw: unknown, now: number, tz: string): { spec: ScheduleSpec; next: number } | { error: string } {
-  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return { error: "schedule 必须是对象" };
+  const invalid = t().tasks.schedules.invalid;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return { error: invalid.notObject };
   const r = raw as Record<string, unknown>;
   const kind = r.kind as ScheduleKind;
-  if (!KINDS.includes(kind)) return { error: `schedule.kind 只能是 ${KINDS.join("/")}` };
+  if (!KINDS.includes(kind)) return { error: invalid.kind(KINDS.join("/")) };
   const spec: ScheduleSpec = { kind };
   if (kind === "interval") {
     const every = Number(r.everyMinutes);
-    if (!Number.isInteger(every) || every < MIN_INTERVAL_MINUTES || every > 31 * 24 * 60) return { error: `schedule.everyMinutes 须是 ${MIN_INTERVAL_MINUTES} 到 44640 之间的整数` };
+    if (!Number.isInteger(every) || every < MIN_INTERVAL_MINUTES || every > 31 * 24 * 60) return { error: invalid.everyMinutes(MIN_INTERVAL_MINUTES, 31 * 24 * 60) };
     spec.everyMinutes = every;
     spec.anchorAt = now;
   } else if (kind === "dates") {
     const dates = Array.isArray(r.dates) ? [...new Set(r.dates.map((d) => String(d).trim().replace("T", " ")))].sort() : [];
-    if (!dates.length || dates.length > MAX_DATES) return { error: `schedule.dates 须是 1 到 ${MAX_DATES} 个 "YYYY-MM-DD HH:MM"` };
+    if (!dates.length || dates.length > MAX_DATES) return { error: invalid.dates(MAX_DATES) };
     const bad = dates.find((d) => !MOMENT.test(d) || !validDate(d.slice(0, 10)));
-    if (bad) return { error: `schedule.dates 里的「${bad}」不是有效的 "YYYY-MM-DD HH:MM"` };
+    if (bad) return { error: invalid.badDate(bad) };
     spec.dates = dates;
   } else if (kind !== "once" && Array.isArray(r.times) && r.times.length) {
     const times = [...new Set(r.times.map(String))].sort();
-    if (times.length > MAX_TIMES_A_DAY || times.some((t) => !TIME.test(t))) return { error: `schedule.times 须是 1 到 ${MAX_TIMES_A_DAY} 个 HH:MM（24 小时制）` };
+    if (times.length > MAX_TIMES_A_DAY || times.some((t) => !TIME.test(t))) return { error: invalid.times(MAX_TIMES_A_DAY) };
     spec.at = times[0];
     if (times.length > 1) spec.times = times;
   } else {
-    if (typeof r.at !== "string" || !TIME.test(r.at)) return { error: "schedule.at 须是 HH:MM（24 小时制）" };
+    if (typeof r.at !== "string" || !TIME.test(r.at)) return { error: invalid.at };
     spec.at = r.at;
   }
   if (kind === "once") {
-    if (!validDate(r.date)) return { error: "schedule.date 须是有效的 YYYY-MM-DD" };
+    if (!validDate(r.date)) return { error: invalid.date };
     spec.date = r.date;
   }
   if (kind === "weekly") {
     const days = Array.isArray(r.weekdays) ? [...new Set(r.weekdays.map(Number))].sort() : [];
-    if (!days.length || days.some((d) => !Number.isInteger(d) || d < 1 || d > 7)) return { error: "schedule.weekdays 须是 1-7 的数组（1=周一）" };
+    if (!days.length || days.some((d) => !Number.isInteger(d) || d < 1 || d > 7)) return { error: invalid.weekdays };
     spec.weekdays = days;
   }
   if (kind === "monthly") {
     const day = Number(r.monthDay);
-    if (!Number.isInteger(day) || day < 1 || day > 31) return { error: "schedule.monthDay 须是 1-31" };
+    if (!Number.isInteger(day) || day < 1 || day > 31) return { error: invalid.monthDay };
     spec.monthDay = day;
   }
   if (r.maxRuns != null) {
     const n = Number(r.maxRuns);
-    if (!Number.isInteger(n) || n < 1 || n > 1000) return { error: "schedule.maxRuns 须是 1-1000 的整数或 null" };
+    if (!Number.isInteger(n) || n < 1 || n > 1000) return { error: invalid.maxRuns };
     if (kind !== "once" && kind !== "dates") spec.maxRuns = n;
   }
   if (r.until != null) {
-    if (!validDate(r.until)) return { error: "schedule.until 须是有效的 YYYY-MM-DD 或 null" };
+    if (!validDate(r.until)) return { error: invalid.until };
     if (kind !== "once" && kind !== "dates") spec.until = r.until;
   }
   const next = nextRun(spec, now, tz);
-  if (next === null) return { error: kind === "once" ? "这个时间已经过去了" : kind === "dates" ? "这些时间都已经过去了" : "按这个规则已经没有下一次运行（结束日期已过）" };
+  if (next === null) return { error: kind === "once" ? invalid.past : kind === "dates" ? invalid.allPast : invalid.noNext };
   return { spec, next };
 }
 
-/** The rule in words: "每天 08:00", "每周一、三 09:30", "每 2 小时", "10月8日 09:00、10月15日 14:30（共 2 次）"… */
+/** The rule in words: "每天 08:00", "Every Mon, Wed at 09:30", "Cada 2 horas", "10月8日 09:00、10月15日 14:30（共 2 次）"… */
 export function describeSchedule(spec: ScheduleSpec): string {
-  const md = (date: string) => { const [, m, d] = ymd(date); return `${m}月${d}日`; };
-  const at = spec.kind === "once" || spec.kind === "dates" || spec.kind === "interval" ? "" : timesOf(spec).join("、");
+  const words = t().tasks.schedules;
+  const md = (date: string) => { const [, m, d] = ymd(date); return words.monthDay(m, d); };
+  const at = spec.kind === "once" || spec.kind === "dates" || spec.kind === "interval" ? [] : timesOf(spec);
   let text: string;
-  if (spec.kind === "once") text = `${md(spec.date!)} ${spec.at}（一次）`;
-  else if (spec.kind === "dates") {
-    const shown = spec.dates!.slice(0, 3).map((d) => `${md(d.slice(0, 10))} ${d.slice(11)}`).join("、");
-    text = `${shown}${spec.dates!.length > 3 ? " 等" : ""}（共 ${spec.dates!.length} 次）`;
-  }
-  else if (spec.kind === "daily") text = `每天 ${at}`;
-  else if (spec.kind === "weekly") text = `每周${spec.weekdays!.map((d) => WEEKDAY_NAMES[d]).join("、")} ${at}`;
-  else if (spec.kind === "monthly") text = `每月 ${spec.monthDay} 日 ${at}`;
-  else text = spec.everyMinutes! % 60 === 0 ? `每 ${spec.everyMinutes! / 60} 小时` : `每 ${spec.everyMinutes} 分钟`;
-  if (spec.maxRuns) text += `，共 ${spec.maxRuns} 次`;
-  if (spec.until) text += `，到 ${md(spec.until)}为止`;
+  if (spec.kind === "once") text = words.rule.once(md(spec.date!), spec.at!);
+  else if (spec.kind === "dates") text = words.rule.dates(spec.dates!.slice(0, 3).map((d) => `${md(d.slice(0, 10))} ${d.slice(11)}`), spec.dates!.length > 3, spec.dates!.length);
+  else if (spec.kind === "daily") text = words.rule.daily(at);
+  else if (spec.kind === "weekly") text = words.rule.weekly(spec.weekdays!.map((d) => words.weekdays[d - 1]!), at);
+  else if (spec.kind === "monthly") text = words.rule.monthly(spec.monthDay!, at);
+  else text = spec.everyMinutes! % 60 === 0 ? words.rule.hours(spec.everyMinutes! / 60) : words.rule.minutes(spec.everyMinutes!);
+  if (spec.maxRuns) text += words.rule.maxRuns(spec.maxRuns);
+  if (spec.until) text += words.rule.until(md(spec.until));
   return text;
 }
 
-/** An instant as the person reads it: "10月3日 周五 08:00". */
+/** An instant as the person reads it: "10月3日 周五 08:00", "Fri, Oct 3, 08:00". */
 export function formatWhen(ts: number, tz: string): string {
+  const words = t().tasks.schedules;
   const p = local(ts, tz);
-  return `${p.m}月${p.d}日 周${WEEKDAY_NAMES[p.weekday]} ${String(p.h).padStart(2, "0")}:${String(p.mi).padStart(2, "0")}`;
+  return words.when(words.monthDay(p.m, p.d), words.weekdays[p.weekday - 1]!, `${String(p.h).padStart(2, "0")}:${String(p.mi).padStart(2, "0")}`);
 }
 
 /** "now" for the dispatcher: local date, weekday and time. */
 export function describeNow(ts: number, tz: string): string {
   const p = local(ts, tz);
-  return `${p.y}-${String(p.m).padStart(2, "0")}-${String(p.d).padStart(2, "0")} 周${WEEKDAY_NAMES[p.weekday]} ${String(p.h).padStart(2, "0")}:${String(p.mi).padStart(2, "0")}`;
+  return `${p.y}-${String(p.m).padStart(2, "0")}-${String(p.d).padStart(2, "0")} ${WEEKDAY_NAMES[p.weekday]} ${String(p.h).padStart(2, "0")}:${String(p.mi).padStart(2, "0")}`;
 }

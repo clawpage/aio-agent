@@ -29,8 +29,8 @@ it("puts a support card in the account's feed as a finished answer that nobody t
 it("refuses a key used for another account and out-of-range cards", () => {
   const cwd = "/home/gem/workspace";
   postSupportCard(h.ctx.db, { ownerId: "owner_1", title: "通知", body: "正文", key: "shared-key", cwd });
-  expect(() => postSupportCard(h.ctx.db, { ownerId: "user_other", title: "通知", body: "正文", key: "shared-key", cwd })).toThrow("另一个账号");
-  expect(() => postSupportCard(h.ctx.db, { ownerId: "owner_1", title: " ", body: "正文", cwd })).toThrow("标题");
-  expect(() => postSupportCard(h.ctx.db, { ownerId: "owner_1", title: "通知", body: "x".repeat(20_001), cwd })).toThrow("正文");
+  expect(() => postSupportCard(h.ctx.db, { ownerId: "user_other", title: "通知", body: "正文", key: "shared-key", cwd })).toThrow("already used for another account");
+  expect(() => postSupportCard(h.ctx.db, { ownerId: "owner_1", title: " ", body: "正文", cwd })).toThrow("The title must be");
+  expect(() => postSupportCard(h.ctx.db, { ownerId: "owner_1", title: "通知", body: "x".repeat(20_001), cwd })).toThrow("The body must be");
   expect(() => postSupportCard(h.ctx.db, { ownerId: "owner_1", title: "通知", body: "正文", key: "bad key", cwd })).toThrow("--id");
 });

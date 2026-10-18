@@ -11,6 +11,7 @@ import { writeAgentSettings } from "../../src/control/settings.js";
 import { FakeCodex, testConfig } from "../helpers/harness.js";
 import { dispatchedSupplement, dispatchedTask } from "../../src/ui/src/dispatchText.js";
 import { answerLanguage, LOCALE_NAMES } from "../../src/control/locale.js";
+import { runInLocale } from "../../src/control/i18n/index.js";
 import { LOCALES } from "../../src/ui/src/i18n/index.js";
 class PlanningCodex extends FakeCodex {
     plans: string[] = [];
@@ -98,7 +99,7 @@ describe("main inbox delegation", () => {
         expect(prompt).not.toContain("本次文件与共享环境资源范围");
         // The person's time, not the sandbox's UTC clock.
         expect(prompt).toContain("the sandbox system clock is UTC");
-        expect(prompt).toMatch(/The user's current time: \d{4}-\d{2}-\d{2} 周. \d{2}:\d{2} \(/);
+        expect(prompt).toMatch(/The user's current time: \d{4}-\d{2}-\d{2} [A-Z][a-z]{2} \d{2}:\d{2} \(/);
         codex.plan=async()=>JSON.stringify({title:"网页",related:[],dependencies:[],resources:["browser"]});
         const web=submit("打开网页"); await tick();
         expect(db.prepare("SELECT browser_required FROM turns WHERE id=?").get(tasks.get(web.id)!.turn_id)?.browser_required).toBe(1);
@@ -139,7 +140,7 @@ describe("main inbox delegation", () => {
         expect(tasks.get(answer.id)?.execution_conversation_id).toBe(tasks.get(first.id)?.conversation_id);
         expect(tasks.get(answer.id)?.merged_into).toBeNull();
         expect(tasks.get(first.id)?.status).toBe("completed");
-        expect(tasks.get(first.id)?.result).toContain("已收到补充，结果请看后续任务");
+        expect(tasks.get(first.id)?.result).toContain("Got your addition; the result is in the task that follows.");
         expect((JSON.parse(tasks.get(first.id)!.plan_json!) as {answeredBy?:string}).answeredBy).toBe(answer.id);
         expect(codex.startedTurns.at(-1)?.text).toContain("罗马，11月12日");
         expect(codex.startedTurns.at(-1)?.text).toContain("请告诉我目的地和日期？");
@@ -370,7 +371,7 @@ describe("main inbox delegation", () => {
     it("waits for a referenced task to stop, then proceeds even when it was interrupted",async()=>{
         const first=submit("first");await tick();db.prepare("UPDATE tasks SET status='stopping' WHERE id=?").run(first.id);
         const update=submit("continue after stop",first.id);await tick();expect(tasks.get(update.id)?.status).toBe("waiting");
-        expect(tasks.view(tasks.get(update.id)!).waitReason?.label).toBe("等待原任务停止");
+        expect(tasks.view(tasks.get(update.id)!).waitReason?.label).toBe("Waiting for the original task to stop");
         codex.completeTurn(codex.startedTurns[0]!.turnId,"interrupted");await tick();
         expect(tasks.get(update.id)?.status).toBe("running");
     });
@@ -389,7 +390,7 @@ describe("main inbox delegation", () => {
         const a=submit("a");await tick();
         const overlap=submit("overlap"), b=submit("b"), doc=submit("document");await tick();await tick();
         expect(tasks.get(a.id)?.status).toBe("running");expect(tasks.get(b.id)?.status).toBe("running");expect(tasks.get(doc.id)?.status).toBe("running");
-        const waiting=tasks.view(tasks.get(overlap.id)!);expect(waiting.status).toBe("waiting");expect(waiting.waitReason?.label).toBe("等待文件操作");expect(waiting.waitReason?.message).toContain("“a”");
+        const waiting=tasks.view(tasks.get(overlap.id)!);expect(waiting.status).toBe("waiting");expect(waiting.waitReason?.label).toBe("Waiting on files");expect(waiting.waitReason?.message).toContain('"a"');expect(runInLocale("zh-CN",()=>tasks.view(tasks.get(overlap.id)!).waitReason)).toEqual({label:"等待文件操作",message:"“a”正在使用同一文件范围或共享环境，结束后自动继续。"});
         codex.completeTurn(codex.startedTurns[0]!.turnId);await tick();expect(tasks.get(overlap.id)?.status).toBe("running");expect(tasks.view(tasks.get(overlap.id)!).waitReason).toBeNull();
     });
     it("protects implicit task directories from path claims over them",async()=>{
@@ -408,10 +409,10 @@ describe("main inbox delegation", () => {
         codex.completeTurn(codex.startedTurns[2]!.turnId);await tick();expect(tasks.get(chat.id)?.status).toBe("completed");
         plan("edit","write:/home/gem/workspace/projects/a");const edit=submit("edit project");await tick();
         plan("second install","workspace");const second=submit("another global install");await tick();
-        for(const t of [edit,second]){const waiting=tasks.view(tasks.get(t.id)!);expect(waiting.status).toBe("waiting");expect(waiting.waitReason?.label).toBe("等待文件操作");expect(waiting.waitReason?.message).toContain("“install”");}
+        for(const t of [edit,second]){const waiting=tasks.view(tasks.get(t.id)!);expect(waiting.status).toBe("waiting");expect(waiting.waitReason?.label).toBe("Waiting on files");expect(waiting.waitReason?.message).toContain('"install"');}
         codex.completeTurn(codex.startedTurns[1]!.turnId);await tick();
         expect(tasks.get(install.id)?.status).toBe("completed");expect(tasks.get(edit.id)?.status).toBe("running");
-        const still=tasks.view(tasks.get(second.id)!);expect(still.status).toBe("waiting");expect(still.waitReason?.message).toContain("“edit”");
+        const still=tasks.view(tasks.get(second.id)!);expect(still.status).toBe("waiting");expect(still.waitReason?.message).toContain('"edit"');
     });
     it("waits for a scoped resource upgrade without reserving it or blocking independent work",async()=>{
         codex.plan=async()=>JSON.stringify({title:"writer",related:[],dependencies:[],resources:["write:/home/gem/workspace/projects/a"]});
@@ -420,18 +421,18 @@ describe("main inbox delegation", () => {
         const doc=submit("doc");await tick();
         codex.plan=async()=>JSON.stringify({title:"extra",appendTo:doc.id,related:[],dependencies:[],resources:["read:/home/gem/workspace/projects/a/report.md"]});
         const extra=submit("extra");await tick();expect(tasks.get(extra.id)?.status).toBe("merging");expect(codex.steers).toHaveLength(0);
-        expect(tasks.view(tasks.get(extra.id)!).waitReason?.label).toBe("等待文件操作");
+        expect(tasks.view(tasks.get(extra.id)!).waitReason?.label).toBe("Waiting on files");
         codex.completeTurn(codex.startedTurns[0]!.turnId);await tick();expect(codex.steers).toHaveLength(1);expect(tasks.get(extra.id)?.status).toBe("merged");
     });
     it("archives a task whose result was never confirmed, and nothing else", async () => {
         const job = submit("archive me"); await tick();
-        expect(() => tasks.archive(job.id)).toThrow("只有结果待核对的任务可以归档");
+        expect(() => tasks.archive(job.id)).toThrow("Only a task whose result needs checking can be archived");
         db.prepare("UPDATE tasks SET status='unknown',error='连接中断，结果待核对' WHERE id=?").run(job.id);
         tasks.archive(job.id);
-        expect(tasks.get(job.id)).toMatchObject({ status: "interrupted", error: "连接中断，结果待核对\n结果没有核对，已由你归档。" });
+        expect(tasks.get(job.id)).toMatchObject({ status: "interrupted", error: "连接中断，结果待核对\nThe result was never checked; you archived it." });
         expect(tasks.get(job.id)!.completed_at).toBeGreaterThan(0);
-        expect(() => tasks.archive(job.id)).toThrow("只有结果待核对");
-        expect(() => tasks.archive("task_missing")).toThrow("任务不存在");
+        expect(() => tasks.archive(job.id)).toThrow("Only a task whose result needs checking");
+        expect(() => tasks.archive("task_missing")).toThrow("Task not found");
     });
     it("stops only the selected child and accepts further work", async () => {
         const a = submit("a"), b = submit("b");
@@ -474,11 +475,11 @@ describe("main inbox delegation", () => {
         const a = submit("a");
         await tick();
         expect(tasks.get(a.id)?.status).toBe("planning_failed");
-        expect(tasks.get(a.id)?.error).toContain("缺少 title");
+        expect(tasks.get(a.id)?.error).toBe("Assigning the task failed for now; nothing has run yet. Retry the assignment. (The dispatcher's answer was unusable: title is missing)");
         expect(codex.plans).toHaveLength(2);
-        expect(codex.plans[1]).toContain("Your previous answer could not be used: 缺少 title");
+        expect(codex.plans[1]).toContain("Your previous answer could not be used: title is missing");
         expect(codex.startedTurns).toHaveLength(0);
-        expect(db.prepare("SELECT failed, fail_reason, rounds FROM recall_events").get()).toMatchObject({ failed: 1, fail_reason: "缺少 title", rounds: 2 });
+        expect(db.prepare("SELECT failed, fail_reason, rounds FROM recall_events").get()).toMatchObject({ failed: 1, fail_reason: "title is missing", rounds: 2 });
         codex.plan = async () => '{"title":"ok","related":[],"dependencies":[],"resources":[]}';
         tasks.retryPlanning(a.id);
         await tick();
@@ -783,7 +784,7 @@ it("converts a stale steering target to resume rather than sending to a finished
     expect(parsePlan(JSON.stringify(plan),[],null)).toMatchObject({appendTo:null,related:[]});
     const report={repairs:[] as string[]};
     expect(parsePlan(JSON.stringify(plan),[{id:"a",title:"a",input_text:"a",status:"completed",result:"done"}],null,undefined,report)).toMatchObject({appendTo:null,resume:"a",decision:{kind:"resume",taskId:"a"},related:["a"]});
-    expect(report.repairs).toEqual(["steer 指向已结束的执行轮次，改为 resume"]);
+    expect(report.repairs).toEqual(["steer points at a finished turn; changed to resume"]);
 });
 
 it("uses Luna's formal decision and enforces the actual turn state",()=>{
@@ -822,8 +823,11 @@ it("repairs what does not change what may run, and says why an answer is unusabl
     expect(plan.related[0]).toBe("t19");
     expect(plan.dependencies).toEqual(["t19"]);
     expect([...plan.clarification!]).toHaveLength(200);
-    expect(report.repairs).toEqual(["dependencies 去掉 1 个不在列表中的 id","clarification 超过 200 字，已截断","related 去掉 1 个不在列表中的 id","related 共 20 个，只保留 12 个"]);
-    for(const [raw,error] of [["不是 JSON","回答不是 JSON"],['{"related":[],"dependencies":[],"resources":[]}',"缺少 title"],['{"title":"x","related":"t1","dependencies":[],"resources":[]}',"related、dependencies 必须是数组"]] as const){
+    expect(report.repairs).toEqual(["dependencies: dropped 1 id not in the list","clarification over 200 characters; shortened","related: dropped 1 id not in the list","related had 20; kept 12"]);
+    const zh={repairs:[] as string[]} as {repairs:string[];error?:string};
+    runInLocale("zh-CN",()=>parsePlan('{"title":"x","related":["ghost"],"dependencies":[],"resources":[]}',previous,null,undefined,zh));
+    expect(zh.repairs).toEqual(["related 去掉 1 个不在列表中的 id"]);
+    for(const [raw,error] of [["不是 JSON","the answer isn't JSON"],['{"related":[],"dependencies":[],"resources":[]}',"title is missing"],['{"title":"x","related":"t1","dependencies":[],"resources":[]}',"related and dependencies must be arrays"]] as const){
         const r={repairs:[] as string[]} as {repairs:string[];error?:string};
         expect(parsePlan(raw,previous,null,undefined,r)).toBeNull();
         expect(r.error).toBe(error);
@@ -843,11 +847,11 @@ it("keeps 2–5 short distinct answers with a question, and none without one",()
     expect(parse({clarification:null,options:["雅培","美赞臣"]}).plan.options).toBeUndefined();
     const many=parse({clarification:"选哪个？",options:["一","二","三","四","五","六"]});
     expect(many.plan.options).toEqual(["一","二","三","四","五"]);
-    expect(many.report.repairs).toContain("options 超过 5 个，只保留前 5 个");
+    expect(many.report.repairs).toContain("more than 5 options; kept the first 5");
     const thin=parse({clarification:"选哪个？",options:["只有一个","问".repeat(31)]});
     expect(thin.plan.options).toBeUndefined();
-    expect(thin.report.repairs).toContain("options 不足 2 个有效选项，已忽略");
-    expect(parse({clarification:"选哪个？",options:"雅培"}).report.repairs).toContain("options 不是列表，已忽略");
+    expect(thin.report.repairs).toContain("fewer than 2 valid options; ignored");
+    expect(parse({clarification:"选哪个？",options:"雅培"}).report.repairs).toContain("options isn't a list; ignored");
 });
 
 it("validates optional clarification and resumes the finished turn that asked a question",()=>{
@@ -981,7 +985,7 @@ describe("main-session order, Jev's second opinion and resuming a finished sessi
         expect(plan({ resume: "t_blocked" }).plan).toMatchObject({ resume: null, related: ["t_blocked"] });
         const both = plan({ resume: "t_done", appendTo: "t_run" });
         expect(both.plan).toMatchObject({ resume: null, appendTo: "t_run" });
-        expect(both.report.repairs.join()).toContain("同时给出");
+        expect(both.report.repairs.join()).toContain("both resume and appendTo given");
     });
 });
 describe("owner dispatch log", () => {
@@ -1018,6 +1022,6 @@ describe("owner dispatch log", () => {
         const [failed] = dispatchLog(db, "owner_1", broken.id);
         expect(failed!.failed).toBe(true);
         expect(failed!.steps.map(s => s.kind)).toEqual(["context", "jev", "timing", "ask", "timing", "ask", "failed"]);
-        expect((failed!.steps[5] as any).correction).toBe("回答不是 JSON");
+        expect((failed!.steps[5] as any).correction).toBe("the answer isn't JSON");
     });
 });

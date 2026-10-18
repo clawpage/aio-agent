@@ -111,7 +111,7 @@ export function processSteps(db: Db, turnId: string, limit = 40): { steps: strin
       const query = item.query || (item.action as { query?: string } | null)?.query;
       if (query) steps.push(`search ${clip(query, 120)}`);
     } else if (type === "fileChange") {
-      const files = Array.isArray(item.changes) ? (item.changes as Array<{ path?: string }>).map((c) => c.path).filter(Boolean).join("、") : "";
+      const files = Array.isArray(item.changes) ? (item.changes as Array<{ path?: string }>).map((c) => c.path).filter(Boolean).join(", ") : "";
       steps.push(`edit files ${clip(files, 140)}`);
     } else if (type === "agentMessage") {
       steps.push(`said ${clip(item.text, 200)}`);

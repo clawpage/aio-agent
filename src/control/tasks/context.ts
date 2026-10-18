@@ -62,9 +62,9 @@ export function lastQuestion(task: Pick<ContextTask, "plan_json" | "result" | "s
   const result = task.result?.replace(/```choices[ \t]*\r?\n[\s\S]*?```\s*$/, "").trim();
   if (!result) return null;
   const tail = result.slice(-400);
-  const at = Math.max(tail.lastIndexOf("？"), tail.lastIndexOf("?"));
+  const at = Math.max(tail.lastIndexOf("？"), tail.lastIndexOf("?")); // i18n-exempt: punctuation of the executor's own reply
   if (at < 0 || tail.length - at > 120) return null;
-  const start = Math.max(...["。", "！", "\n", "!"].map((m) => tail.lastIndexOf(m, at - 1))) + 1;
+  const start = Math.max(...["。", "！", "\n", "!"].map((m) => tail.lastIndexOf(m, at - 1))) + 1; // i18n-exempt: punctuation of the executor's own reply
   return clip(tail.slice(start, at + 1), 200);
 }
 
@@ -203,7 +203,7 @@ export function routingQuestion(message: string, candidates: Array<ContextTask &
           goal: "Suggest whether this message should be handled as a separate new task or continue an existing piece of work. steer means appending to a task that is still running; resume means starting a new turn in the same execution session. Only suggest; the dispatcher makes the final decision.",
           rules: [
             "Read the main-session timeline in order: the closer a conversation is to this message, the more likely it is what the message is about.",
-            "A short confirmation or reply (e.g. \"已授权\" (authorized), \"可以\" (OK), \"好的\" (sure), \"就这个\" (this one), \"第二个\" (the second), \"改成周六\" (make it Saturday)) answers the task that most recently asked the user a question or for confirmation.",
+            "A short confirmation or reply (e.g. \"已授权\" (authorized), \"可以\" (OK), \"好的\" (sure), \"就这个\" (this one), \"第二个\" (the second), \"改成周六\" (make it Saturday)) answers the task that most recently asked the user a question or for confirmation.", // i18n-exempt: examples of what people type, for Jev
             "When the message explicitly names an entity from a task (a person, place, product, file or website), the named one wins even if it is not the most recent (including earlier tasks recalled by content).",
             "When it only shares keywords with an earlier task, or draws on an earlier result for a separate new goal, choose NEW.",
           ],

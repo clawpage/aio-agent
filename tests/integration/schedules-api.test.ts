@@ -17,10 +17,10 @@ describe("schedules API", () => {
     const headers = { cookie, "x-csrf-token": csrf, "content-type": "application/json" };
     const all = (await (await h.request("/api/schedules", { headers: { cookie } })).json()) as { schedules: Array<{ id: string; rule: string; nextRunText: string; builtin: string | null }> };
     // Every account also has the built-in daily feed.
-    expect(all.schedules.filter((s) => s.builtin)).toMatchObject([{ builtin: "daily_feed", rule: "每天 08:00" }]);
+    expect(all.schedules.filter((s) => s.builtin)).toMatchObject([{ builtin: "daily_feed", rule: "Every day at 08:00" }]);
     const list = { schedules: all.schedules.filter((s) => !s.builtin) };
     expect(list.schedules.map((s) => s.id)).toEqual(["sched-own"]);
-    expect(list.schedules[0]).toMatchObject({ rule: "每天 08:00", nextRunText: expect.stringMatching(/^\d+月\d+日 周. \d{2}:\d{2}$/) });
+    expect(list.schedules[0]).toMatchObject({ rule: "Every day at 08:00", nextRunText: expect.stringMatching(/^\w{3}, \w{3} \d+, \d{2}:\d{2}$/) });
     expect((await h.request("/api/schedules/sched-own/pause", { method: "POST", body: "{}" })).status).toBe(401);
     expect((await h.request("/api/schedules/sched-own/pause", { method: "POST", headers: { cookie }, body: "{}" })).status).toBe(403);
     const paused = await h.request("/api/schedules/sched-own/pause", { method: "POST", headers, body: "{}" });
@@ -40,7 +40,10 @@ describe("schedules API", () => {
     const dates = [5, 12].map((n) => new Date(Date.now() + n * 86400_000).toISOString().slice(0, 10));
     const edited = await patch("sched-edit", { title: "交材料", instruction: "提醒交材料", schedule: { kind: "dates", dates: [`${dates[0]} 09:00`, `${dates[1]} 14:30`] }, needsBrowser: false });
     expect(edited.status).toBe(200);
-    expect(await edited.json()).toMatchObject({ message: expect.stringContaining("已更新定时任务「交材料」"), schedule: { id: "sched-edit", title: "交材料", instruction: "提醒交材料", needsBrowser: false, spec: { kind: "dates" }, rule: expect.stringContaining("（共 2 次）") } });
+    expect(await edited.json()).toMatchObject({ message: expect.stringContaining('Updated the scheduled task "交材料"'), schedule: { id: "sched-edit", title: "交材料", instruction: "提醒交材料", needsBrowser: false, spec: { kind: "dates" }, rule: expect.stringContaining("(2 times)") } });
+    // Said in the language of the console that asked.
+    const zh = await patch("sched-edit", { title: "交材料" }, { "x-csrf-token": csrf, "x-aio-locale": "zh-CN" });
+    expect(await zh.json()).toMatchObject({ message: expect.stringContaining("已更新定时任务「交材料」"), schedule: { rule: expect.stringContaining("（共 2 次）") } });
     const bad = await patch("sched-edit", { schedule: { kind: "daily", times: ["8点"] } });
     expect(bad.status).toBe(409);
     expect(await bad.json()).toMatchObject({ error: "schedule_refused", message: expect.stringContaining("times") });
