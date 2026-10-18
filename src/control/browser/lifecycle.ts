@@ -20,6 +20,7 @@
  * extends the idle deadline, so a status poll cannot keep the browser alive.
  */
 
+import { t } from "../i18n/index.js";
 import { STORAGE_SNAPSHOT_SCHEMAS } from "./types.js";
 import type {
   BrowserLifecycleState,
@@ -315,7 +316,8 @@ export class BrowserLifecycle {
   #state: BrowserLifecycleState;
   #epoch = 0;
   #since: number;
-  #lastError: string | null = null;
+  /** The snapshot refusal that names the real problem behind `#lastErrorCode`, if any. */
+  #lastErrorReason: string | null = null;
   #lastErrorCode: LifecycleErrorCode | null = null;
 
   /** Physical truth: true only after a stop confirmed the browser is gone. */
@@ -355,6 +357,8 @@ export class BrowserLifecycle {
   #storageCounts: NonNullable<RuntimeStatus["storageCounts"]> | null = null;
   #transitionBusy = false;
   #warnings: SnapshotWarning[] = [];
+  /** Set when `#warnings` is the one refusal the lifecycle itself describes, so it is told in the reader's language. */
+  #warningReason: string | null = null;
   #unrestoredTabCount: number | null = null;
   /** First release blocked by unsubmitted input since the browser was last held. */
   #dirtySince: number | null = null;
@@ -443,12 +447,14 @@ status(): BrowserLifecycleStatus {
       epoch: this.#epoch,
       leases: this.#leaseSummary(now),
       pins: [...this.#pins.values()].filter((p) => p.expiresAt > now),
-      lastError: this.#lastError,
+      lastError: this.#errorText(),
       lastErrorCode: this.#lastErrorCode,
       snapshotAt: this.#snapshotAt,
       restoredSnapshotAt: this.#restoredSnapshotAt,
       restorePending: this.#pendingRestore,
-      lastSnapshotWarnings: this.#warnings,
+      lastSnapshotWarnings: this.#warningReason
+        ? [{ code: this.#warningReason as SnapshotWarning["code"], message: blockMessage(this.#warningReason) ?? errorMessage("snapshot_blocked"), tabIndex: null }]
+        : this.#warnings,
       unrestoredTabCount: this.#unrestoredTabCount,
       browserRunning: this.#browserRunning,
       probedAt: this.#probedAt,
@@ -518,7 +524,7 @@ status(): BrowserLifecycleStatus {
         this.#cancelRetry();
         this.#setState("awake");
         this.#fail("restore_pending");
-        this.#emit("reconciled", "浏览器在运行，但快照尚未恢复；下次打开时会先恢复标签");
+        this.#emit("reconciled", "browser running, snapshot not restored yet; it is restored before next use");
       } else {
         // Still owed: keep the countdown off and remember the identity it belongs to.
         this.#cancelIdle();
@@ -547,7 +553,7 @@ status(): BrowserLifecycleStatus {
       this.#epoch += 1;
       this.#cancelIdle();
       this.#setState("asleep");
-      this.#emit("reconciled", "检测到浏览器已停止，已同步为休眠状态");
+      this.#emit("reconciled", "browser found stopped; now asleep");
     } else if (res.browserRunning && this.#asleep) {
       // The runtime is the only authority on whether a restore is owed. A
       // snapshot file merely existing - e.g. a capture that was followed by a
@@ -561,7 +567,7 @@ status(): BrowserLifecycleStatus {
         this.#cancelRetry();
         this.#cancelIdle();
         this.#fail("restore_pending");
-        this.#emit("reconciled", "浏览器在运行，但快照尚未恢复；下次打开时会先恢复标签");
+        this.#emit("reconciled", "browser running, snapshot not restored yet; it is restored before next use");
         this.#rememberPendingIdentity(res);
       } else {
         // A browser that came back without being released for a snapshot we still
@@ -570,7 +576,7 @@ status(): BrowserLifecycleStatus {
         this.#cancelRetry();
         this.#clearError();
         this.#resumeUsable();
-        this.#emit("reconciled", "检测到浏览器正在运行，已同步为可用状态");
+        this.#emit("reconciled", "browser found running; now usable");
       }
       this.#asleep = false;
     } else if (this.#pendingRestore && res.browserRunning === true) {
@@ -582,7 +588,7 @@ status(): BrowserLifecycleStatus {
       this.#restoredSnapshotAt = res.restoredSnapshotAt ?? this.#snapshotAt;
       this.#clearError();
       this.#resumeUsable();
-      this.#emit("reconciled", "快照已恢复到运行中的浏览器");
+      this.#emit("reconciled", "snapshot restored into the running browser");
     } else if (
       res.browserRunning === true &&
       !this.#asleep &&
@@ -669,7 +675,7 @@ status(): BrowserLifecycleStatus {
         if (this.#clock.now() >= deadline) {
           throw this.#reconcileError(
             "reconcile_failed",
-            "另一个进程仍在停止/恢复浏览器，等待超时",
+            "another process is still stopping/restoring the browser; timed out waiting",
           );
         }
         await this.#sleep(this.#reconcileRetryMs);
@@ -679,7 +685,7 @@ status(): BrowserLifecycleStatus {
       // it would let the next caller start a second Chromium.
       if (res.browserRunning === null || res.browserAttribution === "unknown") {
         this.#browserRunning = null;
-        throw this.#reconcileError("reconcile_failed", "无法确认浏览器归属");
+        throw this.#reconcileError("reconcile_failed", "browser ownership could not be confirmed");
       }
       // A successful probe means the transient reconcile failure is over: clear it
       // so the status stops reporting a stale error.
@@ -1122,13 +1128,13 @@ status(): BrowserLifecycleStatus {
   /**
    * Errors from the container runtime can embed page URLs, cookies, tokens or
    * serialized storage. Nothing that reaches the API or the UI may carry those,
-   * so the caller-visible text is a fixed Chinese sentence chosen by a stable
+   * so the caller-visible text is a fixed catalog sentence chosen by a stable
    * code; the raw text is only ever reduced to a short redacted breadcrumb for
    * the server log, where it stays inside this process.
    */
   #fail(code: LifecycleErrorCode, raw?: unknown): { code: LifecycleErrorCode; message: string } {
-    const message = ERROR_MESSAGES[code];
-    this.#lastError = message;
+    const message = errorMessage(code);
+    this.#lastErrorReason = null;
     this.#lastErrorCode = code;
     if (raw !== undefined) {
       this.#log.warn?.("browser lifecycle failure", { code, detail: sanitizeDetail(raw) });
@@ -1137,8 +1143,14 @@ status(): BrowserLifecycleStatus {
   }
 
   #clearError(): void {
-    this.#lastError = null;
+    this.#lastErrorReason = null;
     this.#lastErrorCode = null;
+  }
+
+  /** What went wrong last, worded when it is read: a status poll is answered in its reader's language. */
+  #errorText(): string | null {
+    if (this.#lastErrorCode === null) return null;
+    return (this.#lastErrorReason !== null ? blockMessage(this.#lastErrorReason) : undefined) ?? errorMessage(this.#lastErrorCode);
   }
 
   /**
@@ -1260,7 +1272,7 @@ status(): BrowserLifecycleStatus {
   }
 
   #assertUsable(): void {
-    if (this.#disposed) throw new Error("浏览器生命周期已关闭");
+    if (this.#disposed) throw new Error(t().browser.lifecycle.closed);
   }
 
   #leaseSummary(now: number): LeaseSummary {
@@ -1349,7 +1361,7 @@ status(): BrowserLifecycleStatus {
       this.#idleDeadline = null;
       void this.#runSleepCycle().catch(() => undefined);
     }, delay);
-    this.#emit("idle.scheduled", `将在 ${Math.round(delay / 1000)} 秒后释放浏览器`);
+    this.#emit("idle.scheduled", `browser released in ${Math.round(delay / 1000)} s`);
   }
 
   #cancelIdle(): void {
@@ -1426,14 +1438,14 @@ status(): BrowserLifecycleStatus {
       // case: Chromium is up but its tabs still have to be rebuilt.
       const intoRunning = !this.#asleep;
       this.#setState("restoring");
-      this.#emit("wake.started", intoRunning ? "正在把快照恢复进正在运行的浏览器" : "正在启动并恢复浏览器");
+      this.#emit("wake.started", intoRunning ? "restoring the snapshot into the running browser" : "starting and restoring the browser");
       try {
         const res = await this.#runtime.wake({ timeoutMs: this.#wakeTimeoutMs });
         if (!res.ok) {
           // Reject with the fixed, secret-free text: the caller (and its logs)
           // must never receive a container message that can embed a page URL.
           // (Only here: recorded before the check, every successful wake logged a failure.)
-          throw new Error(this.#fail("wake_failed", res.message).message);
+          throw new WakeRefused(this.#fail("wake_failed", res.message).message);
         }
         this.#asleep = false;
         this.#pendingRestore = false;
@@ -1446,13 +1458,13 @@ status(): BrowserLifecycleStatus {
         this.#epoch += 1;
         this.#clearError();
         this.#setState("awake");
-        this.#emit("wake.done", "浏览器已恢复");
+        this.#emit("wake.done", "browser restored");
         if (this.#hasHolders()) this.#cancelIdle();
         else this.#scheduleIdle();
       } catch (err) {
         // Keep the snapshot and the asleep flag: the next ready() retries the
         // restore instead of pretending the browser is usable.
-        const known = err instanceof Error && err.message === ERROR_MESSAGES.wake_failed;
+        const known = err instanceof WakeRefused;
         const { message } = known ? this.#fail("wake_failed") : this.#fail("wake_failed", err);
         this.#pendingRestore = true;
         this.#setState("error");
@@ -1501,7 +1513,7 @@ status(): BrowserLifecycleStatus {
       try {
         await this.#reconcile();
       } catch {
-        const message = this.#lastError ?? ERROR_MESSAGES.reconcile_failed;
+        const message = this.#errorText() ?? errorMessage("reconcile_failed");
         this.#emit("sleep.blocked", message);
         this.#scheduleRetry();
         return { verdict: "blocked", message, warnings: this.#warnings, savedAt: this.#snapshotAt };
@@ -1523,7 +1535,7 @@ status(): BrowserLifecycleStatus {
     }
     this.#cancelIdle();
     this.#setState("snapshotting");
-    this.#emit("sleep.started", "正在保存浏览器快照");
+    this.#emit("sleep.started", "saving the browser snapshot");
 
     let snap = await this.#runtime.snapshot({ timeoutMs: this.#snapshotTimeoutMs });
     if (snap.blocked && snap.reason === "dirty_input") {
@@ -1558,12 +1570,12 @@ status(): BrowserLifecycleStatus {
       const failure = this.#fail(code, snap.message);
       // Only allowlisted, static text reaches the UI; runtime messages may
       // contain URLs or storage. Do not retain warnings from an older snapshot.
-      const detail = snap.blocked && snap.reason
-        ? SNAPSHOT_BLOCK_MESSAGES.get(snap.reason)
-        : undefined;
+      const reason = snap.blocked && snap.reason ? snap.reason : null;
+      const detail = reason !== null ? blockMessage(reason) : undefined;
       const message = detail ?? failure.message;
-      this.#lastError = message;
-      this.#warnings = detail ? [{ code: snap.reason as SnapshotWarning["code"], message: detail, tabIndex: null }] : [];
+      this.#lastErrorReason = detail ? reason : null;
+      this.#warnings = detail ? [{ code: reason as SnapshotWarning["code"], message: detail, tabIndex: null }] : [];
+      this.#warningReason = detail ? reason : null;
       this.#setState("error");
       this.#log.warn?.("browser snapshot failed; keeping the browser running", { error: message });
       this.#emit("sleep.failed", message);
@@ -1573,6 +1585,7 @@ status(): BrowserLifecycleStatus {
     }
     this.#snapshotAt = snap.savedAt ?? this.#clock.now();
     this.#warnings = snap.warnings ?? [];
+    this.#warningReason = null;
     this.#unrestoredTabCount = snap.skipped ?? 0;
     this.#snapshotHasStorage = snap.storageCounts != null;
     this.#storageCounts = snap.storageCounts ?? null;
@@ -1583,8 +1596,8 @@ status(): BrowserLifecycleStatus {
     // the browser's fate and shutting the control plane down is not a reason to
     // release a browser the operator may still be using.
     if (this.#disposed) {
-      this.#emit("sleep.cancelled", "生命周期已关闭，取消释放");
-      return { verdict: "cancelled", message: "生命周期已关闭，取消释放", warnings: this.#warnings, savedAt: this.#snapshotAt };
+      this.#emit("sleep.cancelled", "lifecycle disposed; release cancelled");
+      return { verdict: "cancelled", message: "lifecycle disposed; release cancelled", warnings: this.#warnings, savedAt: this.#snapshotAt };
     }
 
     // Re-check holders *after* the snapshot: a lease that arrived while we were
@@ -1593,8 +1606,8 @@ status(): BrowserLifecycleStatus {
     if (this.#hasHolders() || !this.#enabled) {
       this.#clearError();
       this.#setState("awake");
-      this.#emit("sleep.cancelled", "快照期间出现新的占用，已取消释放");
-      return { verdict: "cancelled", message: "快照期间出现新的占用，已取消释放", warnings: this.#warnings, savedAt: this.#snapshotAt };
+      this.#emit("sleep.cancelled", "browser held again during the snapshot; release cancelled");
+      return { verdict: "cancelled", message: "browser held again during the snapshot; release cancelled", warnings: this.#warnings, savedAt: this.#snapshotAt };
     }
 
     // Prove *which* browser is about to be released before asking for the stop.
@@ -1606,8 +1619,8 @@ status(): BrowserLifecycleStatus {
     if (this.#hasHolders() || !this.#enabled || this.#disposed) {
       this.#clearError();
       this.#setState("awake");
-      this.#emit("sleep.cancelled", "核对浏览器期间出现新的占用，已取消释放");
-      return { verdict: "cancelled", message: "核对浏览器期间出现新的占用，已取消释放", warnings: this.#warnings, savedAt: this.#snapshotAt };
+      this.#emit("sleep.cancelled", "browser held again while it was being checked; release cancelled");
+      return { verdict: "cancelled", message: "browser held again while it was being checked; release cancelled", warnings: this.#warnings, savedAt: this.#snapshotAt };
     }
     if (source.kind === "already-gone") {
       // The release already happened; nothing is left to signal. Record it and let
@@ -1618,7 +1631,7 @@ status(): BrowserLifecycleStatus {
       this.#browserRunning = false;
       this.#clearError();
       this.#setState("asleep");
-      this.#emit("sleep.done", "浏览器本已停止，已按休眠处理");
+      this.#emit("sleep.done", "browser was already stopped; now asleep");
       return { verdict: "asleep", message: null, warnings: this.#warnings, savedAt: this.#snapshotAt };
     }
     if (source.kind !== "ready") {
@@ -1718,7 +1731,7 @@ status(): BrowserLifecycleStatus {
     this.#stopSourcePid = null;
     this.#stopSourceStarttime = null;
     this.#setState("asleep");
-    this.#emit("sleep.done", "浏览器已释放");
+    this.#emit("sleep.done", "browser released");
     return { verdict: "asleep", message: null, warnings: this.#warnings, savedAt: this.#snapshotAt };
   }
 
@@ -1749,40 +1762,23 @@ status(): BrowserLifecycleStatus {
 }
 
 /**
- * Fixed, secret-free text per failure code. The UI shows this verbatim (or maps
- * the code to its own copy); nothing derived from a runtime error ever lands
- * here, so a URL, cookie or token cannot leak through the status API.
+ * Fixed, secret-free text per failure code (catalog `browser.lifecycle`), in the
+ * language this code runs for. The UI shows this verbatim (or maps the code to
+ * its own copy); nothing derived from a runtime error ever lands here, so a URL,
+ * cookie or token cannot leak through the status API.
  */
-const SNAPSHOT_BLOCK_MESSAGES = new Map<string, string>([
-  ["ambiguous_duplicate_tabs", "同网址标签的身份无法确认，已保留浏览器；稍后自动重试"],
-  ["tab_identity_unverified", "核对标签身份时页面发生变化或连接失败，已保留浏览器；稍后自动重试"],
-  ["tab_focus_unverified", "无法确认原选中标签，已保留浏览器；稍后自动重试"],
-  ["tab_set_mismatch", "浏览器与工具的标签列表不一致，已保留浏览器；稍后自动重试"],
-  ["tab_target_not_unique", "无法唯一确认标签身份，已保留浏览器"],
-  ["cdp_target_missing_id", "标签缺少运行标识，已保留浏览器"],
-  ["dirty_input", "页面有未提交的输入，已保留浏览器；提交或清除输入后可自动回收"],
-  ["download_in_flight", "存在未完成的下载，已保留浏览器；下载完成后可自动回收"],
-  ["unsupported_scheme", "有页面类型暂不支持恢复，已保留浏览器"],
-  ["tab_error", "页面状态读取失败，已保留浏览器；稍后自动重试"],
-  ["storage_unavailable", "站点存储保存失败，已保留浏览器以保护登录状态"],
-]);
+function errorMessage(code: LifecycleErrorCode): string {
+  return t().browser.lifecycle.errors[code];
+}
 
-const ERROR_MESSAGES: Record<LifecycleErrorCode, string> = {
-  disabled: "浏览器生命周期未启用",
-  holders: "存在占用（任务/观看/保留），未释放浏览器",
-  shutdown: "生命周期已关闭，取消释放浏览器",
-  snapshot_failed: "浏览器快照失败，已保留浏览器运行",
-  snapshot_blocked: "页面状态无法安全保存，已放弃释放浏览器",
-  snapshot_incomplete: "快照未覆盖全部标签，已放弃释放浏览器",
-  snapshot_storage_missing: "快照缺少 cookies/本地存储/IndexedDB，已放弃释放浏览器以免丢失登录状态",
-  reconcile_failed: "无法确认浏览器真实状态，已阻止使用浏览器",
-  restore_pending: "存在尚未恢复到运行中浏览器的快照，暂不释放浏览器",
-  transition_busy: "另一个进程正在停止或恢复浏览器，暂不释放；稍后自动重试",
-  stop_failed: "停止浏览器失败，正在核对真实状态",
-  stop_unattributed: "无法确认正在运行的浏览器归属，已放弃释放浏览器",
-  wake_failed: "恢复浏览器失败，快照仍然保留",
-  runtime_error: "浏览器生命周期运行时错误",
-};
+/** The sentence for a snapshot refusal the runtime named by a known code. */
+function blockMessage(reason: string): string | undefined {
+  const blocked = t().browser.lifecycle.blocked;
+  return Object.hasOwn(blocked, reason) ? blocked[reason as keyof typeof blocked] : undefined;
+}
+
+/** A wake the runtime refused: the failure is already recorded, with its detail logged. */
+class WakeRefused extends Error {}
 
 /**
  * Reduce an arbitrary error to a short, URL-free, token-free breadcrumb. This is

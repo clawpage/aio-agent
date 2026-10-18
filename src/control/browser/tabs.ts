@@ -7,6 +7,7 @@ import type { SandboxContainer } from "../sandbox/container.js";
 import { redact, type BrowserRuntime } from "./runtime.js";
 import type { BrowserRuntimeLike } from "./lifecycle.js";
 import { LastPages, type LastPage } from "./lastPages.js";
+import { t } from "../i18n/index.js";
 
 /** Loopback MCP endpoint of the tab server inside every sandbox. */
 export const TAB_SERVER_PORT = 8190;
@@ -112,6 +113,46 @@ export interface TabServerLike {
   lastShot?(key: string): Buffer | null;
   /** Open that page again as a new tab of the task, held by the person. */
   reopen?(key: string, url: string, title: string): Promise<PersonResult>;
+}
+
+/**
+ * The tab server answers in English with a stable `error` code (its words are
+ * what agents read); what a person reads is worded here, in their language. An
+ * unknown code keeps the server's text.
+ */
+function worded(body: Record<string, unknown>, login?: "google" | "password"): Record<string, unknown> {
+  const m = t().browser.tabs;
+  let message: string | undefined;
+  if (typeof body.message === "string") {
+    switch (body.error) {
+      case "no_tab": message = m.noTab; break;
+      case "no_page": message = m.pageClosed; break;
+      case "no_request": message = m.noRequest; break;
+      case "busy": message = m.loginBusy; break;
+      case "site_changed": message = login === "google" ? m.siteChanged : m.siteChangedNotFilled; break;
+      case "not_held": message = m.notHeld(String(body.task ?? "")); break;
+      case "no_held_tab": message = m.noHeldTab; break;
+      case "too_long": message = m.tooLong; break;
+      case "unavailable": message = body.reason === "memory_tight" ? m.memoryTight : body.reason === "window_missing" ? m.windowMissing : undefined; break;
+    }
+  }
+  // A sign-in step that failed: the person sees which step, in their words.
+  const failure = body.failure as { code?: unknown; step?: unknown; label?: unknown; type?: unknown; detail?: unknown } | undefined;
+  let error: string | undefined;
+  if (typeof body.error === "string" && failure && typeof failure === "object") {
+    const step = Number(failure.step), label = String(failure.label ?? "");
+    if (failure.code === "not_password") error = m.loginNotPassword(step, label, String(failure.type ?? ""));
+    else if (failure.code === "step_failed") error = m.loginStepFailed(step, label, String(failure.detail ?? ""));
+  }
+  return message === undefined && error === undefined ? body : { ...body, ...(message !== undefined ? { message } : {}), ...(error !== undefined ? { error } : {}) };
+}
+
+/** A request the agent left without words (a sign-in, or no reason given) is worded for the person reading it. */
+function withReasons(tabs: TabRecord[]): TabRecord[] {
+  return tabs.map((tab) => !tab.request || tab.request.reason ? tab : {
+    ...tab,
+    request: { ...tab.request, reason: tab.request.kind === "login" ? t().browser.tabs.signIn(tab.request.site ?? "") : t().browser.tabs.needsYou },
+  });
 }
 
 /** The tab a task's card shows: one waiting for the person, then one they hold, then the most recently used. */
@@ -235,7 +276,7 @@ export class TabServer implements TabServerLike {
     await this.#runtime.ensureScripts();
     await this.#container.writeFileInSandbox(this.scriptPath, body, { user: "root" });
     const chmod = await this.#container.execInSandbox(["chmod", "0755", this.scriptPath], { timeoutMs: 15_000, user: "root" });
-    if (chmod.code !== 0) throw new Error(`无法安装浏览器标签页服务：${redact(chmod.stderr || chmod.stdout)}`);
+    if (chmod.code !== 0) throw new Error(t().browser.tabs.installFailed(redact(chmod.stderr || chmod.stdout)));
     if (health?.pid) {
       // An older version is still listening: stop exactly that process before starting the new one.
       await this.#container.execInSandbox(["kill", String(health.pid)], { timeoutMs: 10_000 });
@@ -249,7 +290,7 @@ export class TabServer implements TabServerLike {
         AIO_TABS_OUTPUT: path.posix.join(this.#cfg.sandbox.containerWorkspaceDir, ".scratch", "artifacts", "browser"),
       },
     });
-    if (started.code !== 0) throw new Error(`无法启动浏览器标签页服务：${redact(started.stderr || started.stdout)}`);
+    if (started.code !== 0) throw new Error(t().browser.tabs.startFailed(redact(started.stderr || started.stdout)));
     for (let attempt = 0; attempt < 20; attempt += 1) {
       if ((await this.#health())?.version === version) {
         this.#log.info("browser tab server running", { version });
@@ -257,7 +298,7 @@ export class TabServer implements TabServerLike {
       }
       await new Promise((resolve) => setTimeout(resolve, 500));
     }
-    throw new Error("浏览器标签页服务启动后未在超时内就绪");
+    throw new Error(t().browser.tabs.startTimeout);
   }
 
   /** Best effort: a server that is gone has no tabs left to mark or close. */
@@ -296,10 +337,10 @@ export class TabServer implements TabServerLike {
 
   async list(key?: string): Promise<TabRecord[]> {
     if (key !== undefined && !KEY.test(key)) return [];
-    if (key) return (await this.#get<{ tabs: TabRecord[] }>(`/tabs?key=${key}`))?.tabs ?? [];
+    if (key) return withReasons((await this.#get<{ tabs: TabRecord[] }>(`/tabs?key=${key}`))?.tabs ?? []);
     // Every feed read wants the whole record: concurrent ones share one sandbox call.
     this.#listing ??= this.#get<{ tabs: TabRecord[] }>("/tabs").then((r) => r?.tabs ?? []).finally(() => { this.#listing = null; });
-    return this.#listing;
+    return withReasons(await this.#listing);
   }
 
   async control(key: string, tab: string, action: "take" | "release"): Promise<TabRecord | null> {
@@ -325,7 +366,8 @@ export class TabServer implements TabServerLike {
   }
 
   async open(url: string): Promise<PersonResult> {
-    return this.#person("/open", { url } as PersonTarget & { url: string });
+    // The tab is named in the person's language until the page gives its own title.
+    return this.#person("/open", { url, title: t().browser.tabs.openedPage } as PersonTarget & { url: string });
   }
 
   async close(tab: string): Promise<PersonResult> {
@@ -333,20 +375,20 @@ export class TabServer implements TabServerLike {
   }
 
   async login(key: string, tab: string, account: { site: string; username: string; password: string; steps?: LoginStep[]; startUrl?: string } | { site: string; method: "google"; username: string }): Promise<PersonResult> {
-    if (!KEY.test(key)) return { status: 404, body: { error: "no_tab", message: "这个标签页已经关闭或不属于该任务" } };
+    if (!KEY.test(key)) return { status: 404, body: { error: "no_tab", message: t().browser.tabs.noTab } };
     // The account travels on stdin, never in a command line; filling and submitting can take a while.
-    return this.#person("/login", { key, tab, ...account } as unknown as PersonTarget & object, LOGIN_TIMEOUT_SEC);
+    return this.#person("/login", { key, tab, ...account } as unknown as PersonTarget & object, LOGIN_TIMEOUT_SEC, "method" in account ? "google" : "password");
   }
 
-  async #person(route: "/input" | "/pointer" | "/open" | "/close" | "/login" | "/reopen", body: PersonTarget & object, seconds = 20): Promise<PersonResult> {
+  async #person(route: "/input" | "/pointer" | "/open" | "/close" | "/login" | "/reopen", body: PersonTarget & object, seconds = 20, login?: "google" | "password"): Promise<PersonResult> {
     if ((body.task !== undefined && !KEY.test(body.task)) || (body.tab !== undefined && !/^t\d{1,9}$/.test(body.tab))) {
-      return { status: 404, body: { error: "no_tab", message: "这个标签页已经关闭或不属于该任务" } };
+      return { status: 404, body: { error: "no_tab", message: t().browser.tabs.noTab } };
     }
     // A person may act before any task turn has started the current server version.
     try {
       await this.ensure();
     } catch {
-      return { status: 503, body: { error: "unavailable", message: "浏览器输入暂不可用，请稍后重试" } };
+      return { status: 503, body: { error: "unavailable", message: t().browser.tabs.inputUnavailable } };
     }
     const res = await this.#container.execInSandbox(
       ["curl", "-s", "-m", String(seconds), "-w", "\n%{http_code}", "-X", "POST", "-H", "content-type: application/json", "--data-binary", "@-", `http://127.0.0.1:${TAB_SERVER_PORT}${route}`],
@@ -354,9 +396,9 @@ export class TabServer implements TabServerLike {
     );
     const cut = res.stdout.lastIndexOf("\n");
     const status = Number(res.stdout.slice(cut + 1));
-    if (res.code !== 0 || !status) return { status: 503, body: { error: "unavailable", message: "浏览器输入暂不可用，请稍后重试" } };
+    if (res.code !== 0 || !status) return { status: 503, body: { error: "unavailable", message: t().browser.tabs.inputUnavailable } };
     try {
-      return { status, body: JSON.parse(res.stdout.slice(0, cut)) as Record<string, unknown> };
+      return { status, body: worded(JSON.parse(res.stdout.slice(0, cut)) as Record<string, unknown>, login) };
     } catch {
       return { status: 502, body: { error: "bad_response" } };
     }
@@ -379,7 +421,7 @@ export class TabServer implements TabServerLike {
 
   async reopen(key: string, url: string, title: string): Promise<PersonResult> {
     if (!KEY.test(key) || !/^https?:\/\//i.test(url)) return { status: 400, body: { error: "bad_request" } };
-    return this.#person("/reopen", { key, url, title } as unknown as PersonTarget & object, 40);
+    return this.#person("/reopen", { key, url, title: title || t().browser.tabs.reopenedPage } as unknown as PersonTarget & object, 40);
   }
 
   async overview(): Promise<OverviewPage[] | null> {
@@ -394,16 +436,16 @@ export class TabServer implements TabServerLike {
   }
 
   async front(target: string): Promise<PersonResult> {
-    if (!TARGET.test(target)) return { status: 404, body: { error: "no_page", message: "这个标签页已经关闭" } };
+    if (!TARGET.test(target)) return { status: 404, body: { error: "no_page", message: t().browser.tabs.pageClosed } };
     const res = await this.#container.execInSandbox(
       ["curl", "-s", "-m", "20", "-w", "\n%{http_code}", "-X", "POST", "-H", "content-type: application/json", "--data-binary", "@-", `http://127.0.0.1:${TAB_SERVER_PORT}/overview/front`],
       { timeoutMs: 25_000, stdin: JSON.stringify({ target }) },
     );
     const cut = res.stdout.lastIndexOf("\n");
     const status = Number(res.stdout.slice(cut + 1));
-    if (res.code !== 0 || !status) return { status: 503, body: { error: "unavailable", message: "浏览器暂不可用，请稍后重试" } };
+    if (res.code !== 0 || !status) return { status: 503, body: { error: "unavailable", message: t().browser.tabs.unavailable } };
     try {
-      return { status, body: JSON.parse(res.stdout.slice(0, cut)) as Record<string, unknown> };
+      return { status, body: worded(JSON.parse(res.stdout.slice(0, cut)) as Record<string, unknown>) };
     } catch {
       return { status: 502, body: { error: "bad_response" } };
     }

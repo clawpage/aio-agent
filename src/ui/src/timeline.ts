@@ -55,6 +55,8 @@ export interface StatusBlock {
   id: string;
   text: string;
   level: "info" | "warn" | "error";
+  /** The turn failed because the sandbox browser could not be made ready (`turn.browser_unavailable`). */
+  browser?: boolean;
 }
 
 /**
@@ -115,6 +117,8 @@ export interface TimelineState {
    * content is never swallowed.
    */
   blankAssistantItems: Set<string>;
+  /** Turns that could not start because the browser was unavailable: their failure points at the workspace. */
+  browserTurns: Set<string>;
   /** Most recent turn-scoped id, used to attribute events carrying no turnId. */
   currentTurnId: string | null;
 }
@@ -264,6 +268,7 @@ export function cloneTimeline(state: TimelineState): TimelineState {
     boundaryItems: new Set(state.boundaryItems),
     turnStatus: new Map(state.turnStatus),
     blankAssistantItems: new Set(state.blankAssistantItems),
+    browserTurns: new Set(state.browserTurns),
     currentTurnId: state.currentTurnId,
   };
 }
@@ -279,6 +284,7 @@ export function emptyTimeline(): TimelineState {
     boundaryItems: new Set(),
     turnStatus: new Map(),
     blankAssistantItems: new Set(),
+    browserTurns: new Set(),
     currentTurnId: null,
   };
 }
@@ -905,6 +911,12 @@ export function applyEvent(state: TimelineState, event: AgentEvent): void {
       });
       return;
     }
+    case "turn.browser_unavailable": {
+      // The turn's failure follows; it is told by the turn.failed notice.
+      const turnId = event.turnId || text(p.turnId) || "";
+      if (turnId) state.browserTurns.add(turnId);
+      return;
+    }
     case "turn.failed": {
       const turnId = event.turnId || text(p.turnId) || "";
       if (turnId) setTurnStatus(state, turnId, "error");
@@ -913,6 +925,7 @@ export function applyEvent(state: TimelineState, event: AgentEvent): void {
         id: `fail:${String(p.turnId ?? event.id)}`,
         text: t.chat.timeline.notices.failed(text(p.message)),
         level: "error",
+        ...(turnId && state.browserTurns.has(turnId) ? { browser: true } : {}),
       });
       return;
     }

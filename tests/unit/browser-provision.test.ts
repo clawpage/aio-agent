@@ -58,11 +58,11 @@ const isHelper=(argv:string[])=>argv[0]==='python3'&&argv[1]==='/opt/aio-browser
 it('blames the directory owner only for a real ownership violation, not a stopped sandbox',async()=>{
  const stopped=scripted(argv=>isCheck(argv)?{code:1,stdout:'',stderr:'container personal-agent-sandbox is not running'}:undefined);
  const err=await stopped.runtime.ensureScripts().then(()=>new Error("resolved"),(e:Error)=>e);
- expect(err.message).not.toContain('必须由 root 管理');
- expect(err.message).toContain('不可达');
+ expect(err.message).not.toContain('must be managed by root');
+ expect(err.message).toContain('may not be running or reachable');
  expect(err.message).toContain('not running');
  const owned=scripted(argv=>isCheck(argv)?{code:3,stdout:'',stderr:''}:undefined);
- await expect(owned.runtime.ensureScripts()).rejects.toThrow('浏览器工具目录必须由 root 管理且不可由沙盒用户替换');
+ await expect(owned.runtime.ensureScripts()).rejects.toThrow('The browser tool directory must be managed by root and must not be replaceable by the sandbox user');
  // The check itself exits with the dedicated code for every violation.
  const check=stopped.execs.find(isCheck)![2]!;
  expect(check).not.toMatch(/sys\.exit\(1\)/);

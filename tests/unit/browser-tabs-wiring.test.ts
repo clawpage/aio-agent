@@ -230,6 +230,42 @@ it("waits for a vault sign-in as long as its longest run can take", async () => 
   expect(login.timeoutMs).toBeGreaterThan(seconds * 1000);
 });
 
+it("words the tab server's refusals, sign-in failures and unworded requests in the reader's language", async () => {
+  const { TabServer } = await import("../../src/control/browser/tabs.js");
+  const { runInLocale } = await import("../../src/control/i18n/index.js");
+  const { container } = scriptedTabServer(["current"]);
+  const sent: Record<string, unknown>[] = [];
+  const exec = container.execInSandbox;
+  const answers: Record<string, string> = {
+    "/input": JSON.stringify({ error: "not_held", task: "Book flights", message: "Task \"Book flights\" is operating this page; tap \"Take over\" first" }) + "\n409",
+    "/login": JSON.stringify({ result: "failed", error: "Step 2 (fill #pw) failed: Timeout", failure: { code: "step_failed", step: 2, label: "fill #pw", detail: "Timeout" } }) + "\n200",
+    "/open": JSON.stringify({ tab: { id: "t9" } }) + "\n200",
+    "/tabs": JSON.stringify({ tabs: [
+      { id: "t1", key: "conv_1", title: "x", request: { reason: "", at: 1 } },
+      { id: "t2", key: "conv_1", title: "x", request: { kind: "login", site: "example.com", reason: "", at: 1 } },
+      { id: "t3", key: "conv_1", title: "x", request: { reason: "Solve the CAPTCHA", at: 1 } },
+    ] }),
+  };
+  container.execInSandbox = async (argv: string[], opts?: { stdin?: string }) => {
+    const route = Object.keys(answers).find((r) => argv.some((a) => a.split("?")[0]!.endsWith(`8190${r}`)));
+    if (!route) return exec(argv);
+    if (opts?.stdin) sent.push(JSON.parse(opts.stdin) as Record<string, unknown>);
+    return { code: 0, stdout: answers[route]!, stderr: "" };
+  };
+  const tabs = new TabServer(testConfig("/tmp/pa-tabs-worded", 1), new Logger("error", undefined, false), container as never, { ensureScripts: async () => undefined } as never);
+  // Each request is answered in its own language, not the sandbox's English.
+  expect((await runInLocale("zh-CN", () => tabs.input({ text: "hi" }))).body.message).toBe("这个页面正由任务「Book flights」操作，请先点“接管”");
+  expect((await tabs.input({ text: "hi" })).body.message).toBe('The task "Book flights" is using this page. Tap "Take over" first.');
+  expect((await runInLocale("es", () => tabs.login("conv_1", "t1", { site: "example.com", username: "u", password: "p" }))).body.error).toBe("El paso 2 (fill #pw) falló: Timeout");
+  // A tab a person opens is named in their language until the page gives its own title.
+  await runInLocale("zh-TW", () => tabs.open("https://example.com/"));
+  expect(sent.at(-1)).toMatchObject({ url: "https://example.com/", title: "你開啟的網頁" });
+  // A request the agent left without words is worded for whoever reads the list; its own words stay.
+  const reasons = (await runInLocale("zh-CN", () => tabs.list("conv_1"))).map((tab) => tab.request?.reason);
+  expect(reasons).toEqual(["需要你在浏览器里操作", "需要登录 example.com", "Solve the CAPTCHA"]);
+  expect((await tabs.list("conv_1"))[1]!.request!.reason).toBe("Sign-in needed for example.com");
+});
+
 it("says so when a turn's end never reached the tab server", async () => {
   const { TabServer } = await import("../../src/control/browser/tabs.js");
   const container = { execInSandbox: async () => ({ code: 22, stdout: "", stderr: "curl: (22) The requested URL returned error: 500" }) };

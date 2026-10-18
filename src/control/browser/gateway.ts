@@ -40,7 +40,8 @@ export class BrowserGateway {
       send(200);
     } catch {
       this.opts.log.warn("browser recovery failed at tool call", { userId });
-      send(503, "浏览器暂未就绪，自动恢复失败；请稍后重试。不是浏览器授权缺失。");
+      // Read by the tab server only, which tells the agent in its own words.
+      send(503, "browser not ready; automatic recovery failed");
     }
   }
 }

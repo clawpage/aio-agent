@@ -276,7 +276,7 @@ it.skipIf(!hasChromium)("lets a person type and tap only in a tab they took over
   // Nothing taken over: nothing is typed anywhere, however many pages are open.
   const refused = await typeIn({ text: "hi" });
   expect(refused.status).toBe(409);
-  expect(((await refused.json()) as { message: string }).message).toContain("先在任务卡片上点“接管”");
+  expect(((await refused.json()) as { message: string }).message).toContain('First tap "Take over" on the task card');
   // A named tab its agent still drives is refused too; a tab of another task is not found.
   expect((await typeIn({ tab: tabK, task: "K", text: "hi" })).status).toBe(409);
   expect((await typeIn({ tab: tabK, task: "L", text: "hi" })).status).toBe(404);
@@ -629,7 +629,7 @@ it.skipIf(!hasChromium)("frees memory near the limit, least valuable pages first
     setMemory(0.95);
     const refused = await call("MN", "browser_navigate", { url: html("Needed") });
     expect(refused.result?.isError).toBe(true);
-    expect(text(refused)).toContain("沙箱内存紧张");
+    expect(text(refused)).toContain("Sandbox memory is tight");
     const left = await titles();
     expect(left).not.toContain("Stray");
     expect(left).toEqual(expect.arrayContaining(["Running", "Held", "Typing"]));
@@ -839,7 +839,7 @@ it.skipIf(!hasChromium)("signs in with steps the agent wrote, from the vault's v
     const sneaky = call("S", "browser_login", { steps: [...good.slice(0, 2), { action: "fill", selector: "#note", value: "{{password}}" }] });
     await asked("S");
     expect((await login({ key: "S", tab, ...cred })).result).toBe("failed");
-    expect(text(await sneaky)).toContain("不是密码框");
+    expect(text(await sneaky)).toContain("does not point at a password box");
     expect(text(await sneaky)).toContain("Attempts left: 2");
 
     // A step that does not match: the agent hears which step and why, never a value.
@@ -847,7 +847,7 @@ it.skipIf(!hasChromium)("signs in with steps the agent wrote, from the vault's v
     await asked("S");
     expect((await login({ key: "S", tab, ...cred })).result).toBe("failed");
     const told = text(await wrong);
-    expect(told).toContain("第 2 步（fill #secret）失败");
+    expect(told).toContain("Step 2 (fill #secret) failed");
     expect(told).toContain("Attempts left: 1");
     expect(told).not.toContain(SECRET);
     expect(received).toEqual([]);

@@ -680,7 +680,7 @@ function BlockView({
   return (
     <div className={`status-line ${status.level}`}>
       {status.text}
-      {status.text.includes("浏览器") && ( // i18n-exempt: matches notice text from the server/executor
+      {(status.browser || status.text.includes("浏览器")) && ( // i18n-exempt: older notices and executor/server text not yet carrying a code
         <button type="button" className="link" onClick={() => onOpenWorkspace()}>
           {t.chat.openWorkspace}
         </button>

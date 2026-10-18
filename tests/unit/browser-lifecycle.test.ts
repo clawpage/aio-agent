@@ -531,7 +531,7 @@ describe("BrowserLifecycle ready() and wake", () => {
     await settle();
     let fail = true;
     runtime.wake = async () => (fail ? { ok: false, message: "start failed" } : { ok: true, restoredTabs: 2 });
-    await expect(life.ready()).rejects.toThrow("恢复浏览器失败");
+    await expect(life.ready()).rejects.toThrow("Couldn't restore the browser");
     expect(life.status().state).toBe("error");
     expect(life.status().lastErrorCode).toBe("wake_failed");
     // Still asleep: the next caller retries instead of using a dead browser.
@@ -608,7 +608,7 @@ describe("BrowserLifecycle race safety", () => {
     const lease = life.reserve("turn");
     const blocked = await life.sleepNow();
     expect(blocked.verdict).toBe("blocked");
-    expect(blocked.message).toBe("存在占用（任务/观看/保留），未释放浏览器");
+    expect(blocked.message).toBe("The browser is in use (a task, a viewer or a keep), so it was not released");
     expect(runtime.calls.snapshot).toBe(0);
     expect(runtime.calls.stop).toBe(0);
     // There is no force path: occupancy always wins, so a caller cannot ask this
@@ -652,10 +652,26 @@ describe("BrowserLifecycle race safety", () => {
     await settle();
     const status = life.status();
     expect(status.lastErrorCode).toBe("snapshot_blocked");
-    expect(status.lastError).not.toBe("页面状态无法安全保存，已放弃释放浏览器");
+    expect(status.lastError).not.toBe("The page state couldn't be saved safely, so the browser was not released");
     expect(status.lastSnapshotWarnings[0]?.code).toBe(reason);
     expect(JSON.stringify(status)).not.toMatch(/private|secret/);
     expect(runtime.calls.stop).toBe(0);
+    life.shutdown();
+  });
+
+  it("words a refusal when its status is read, in the reader's language", async () => {
+    const { runInLocale } = await import("../../src/control/i18n/index.js");
+    const runtime = makeRuntime({ snapshot: { ok: false, blocked: true, reason: "dirty_input", message: "dirty" } });
+    // The refusal happens on the account's timer, in English here.
+    const { life, clock } = makeLifecycle(runtime);
+    clock.advance(300_000);
+    await settle();
+    expect(life.status().lastError).toBe("A page has unsubmitted input, so the browser was kept; it can be released automatically once the input is submitted or cleared");
+    const zh = runInLocale("zh-CN", () => life.status());
+    expect(zh.lastErrorCode).toBe("snapshot_blocked");
+    expect(zh.lastError).toBe("页面有未提交的输入，已保留浏览器；提交或清除输入后可自动回收");
+    expect(zh.lastSnapshotWarnings).toEqual([{ code: "dirty_input", message: "页面有未提交的输入，已保留浏览器；提交或清除输入后可自动回收", tabIndex: null }]);
+    expect(runInLocale("zh-TW", () => life.status()).lastError).toBe("頁面有未提交的輸入，已保留瀏覽器；提交或清除輸入後可自動回收");
     life.shutdown();
   });
 
@@ -720,7 +736,7 @@ describe("BrowserLifecycle race safety", () => {
     expect(status.state).toBe("error");
     expect(status.lastErrorCode).toBe("snapshot_blocked");
     // Nothing derived from the runtime message reaches the API surface.
-    expect(status.lastError).toBe("页面状态无法安全保存，已放弃释放浏览器");
+    expect(status.lastError).toBe("The page state couldn't be saved safely, so the browser was not released");
     expect(JSON.stringify(status)).not.toContain("example.com");
     expect(JSON.stringify(status)).not.toContain("abcdefghijklmnopqrstuvwxyz");
     // The log keeps a redacted breadcrumb only.
@@ -886,7 +902,7 @@ describe("BrowserLifecycle reconcile barrier", () => {
   it("fails closed when the first probe cannot attribute the browser", async () => {
     const runtime = makeRuntime({ browserRunning: null, pid: null });
     const { life } = makeLifecycle(runtime);
-    await expect(life.ready()).rejects.toThrow("无法确认浏览器真实状态");
+    await expect(life.ready()).rejects.toThrow("Couldn't confirm the browser's real state");
     expect(runtime.calls.wake).toBe(0);
     expect(life.status().lastErrorCode).toBe("reconcile_failed");
     life.shutdown();
@@ -895,7 +911,7 @@ describe("BrowserLifecycle reconcile barrier", () => {
   it("fails closed on a failed probe and does not start a second browser", async () => {
     const runtime = makeRuntime({ statusOk: false });
     const { life } = makeLifecycle(runtime);
-    await expect(life.ready()).rejects.toThrow("无法确认浏览器真实状态");
+    await expect(life.ready()).rejects.toThrow("Couldn't confirm the browser's real state");
     expect(runtime.calls.wake).toBe(0);
     life.shutdown();
   });
@@ -924,7 +940,7 @@ describe("BrowserLifecycle reconcile barrier", () => {
   it("retries a reconcile that failed so a later ready() can succeed", async () => {
     const runtime = makeRuntime({ browserRunning: [null, true] });
     const { life } = makeLifecycle(runtime);
-    await expect(life.ready()).rejects.toThrow("无法确认");
+    await expect(life.ready()).rejects.toThrow("Couldn't confirm");
     await life.ready();
     expect(life.status().lastErrorCode).toBeNull();
     // Confirmed running with no holders → the idle countdown is re-armed.
@@ -1039,7 +1055,7 @@ describe("BrowserLifecycle reconciliation", () => {
     // 1. The idle path must not snapshot over the tabs the user still needs.
     const blocked = await life.sleepNow();
     expect(blocked.verdict).toBe("blocked");
-    expect(blocked.message).toBe("存在尚未恢复到运行中浏览器的快照，暂不释放浏览器");
+    expect(blocked.message).toBe("A snapshot hasn't been restored into the running browser yet, so the browser isn't released for now");
     expect(runtime.calls.snapshot).toBe(0);
     expect(runtime.calls.stop).toBe(0);
     // 2. The first real caller rebuilds the snapshot into the running browser.
@@ -1318,10 +1334,10 @@ describe("BrowserLifecycle lease bookkeeping", () => {
     const runtime = makeRuntime({ browserRunning: false, wake: leak });
     const { life } = makeLifecycle(runtime);
     await life.observeRuntime();
-    await expect(life.ready()).rejects.toThrow("恢复浏览器失败，快照仍然保留");
+    await expect(life.ready()).rejects.toThrow("Couldn't restore the browser; the snapshot is kept");
     await expect(life.ready()).rejects.not.toThrow("bank.example.com");
     const status = life.status();
-    expect(status.lastError).toBe("恢复浏览器失败，快照仍然保留");
+    expect(status.lastError).toBe("Couldn't restore the browser; the snapshot is kept");
     expect(JSON.stringify(status)).not.toContain("bank.example.com");
     expect(JSON.stringify(status)).not.toContain("abc123");
     // The snapshot is kept: the next caller retries the restore.
@@ -1582,7 +1598,7 @@ describe("BrowserLifecycle review fixes", () => {
     await life.observeRuntime();
     expect(life.status().state).toBe("asleep");
     runtime.wake = async () => ({ ok: false, message: "cdp timeout" });
-    await expect(life.wake()).rejects.toThrow("恢复浏览器失败");
+    await expect(life.wake()).rejects.toThrow("Couldn't restore the browser");
     await life.observeRuntime();
     const status = life.status();
     expect(status.state).toBe("error");
@@ -1618,7 +1634,7 @@ describe("BrowserLifecycle review fixes", () => {
     const out = await life.sleepNow();
     expect(out.verdict).toBe("blocked");
     expect(life.status().lastErrorCode).toBe("transition_busy");
-    expect(life.status().lastError).not.toContain("快照");
+    expect(life.status().lastError).not.toContain("snapshot");
     expect(runtime.calls.stop).toBe(0);
     life.shutdown();
   });
