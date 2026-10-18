@@ -9,13 +9,13 @@ import { wav } from "../../src/ui/src/voice.js";
 
 // A stand-in for the speech server: answers what it was sent, or fails on demand.
 let received: { type: string | undefined; body: Buffer }[] = [];
-let answer: { status: number; text: string } = { status: 200, text: "" };
+let answer: { status: number; text: string; words?: unknown } = { status: 200, text: "" };
 const speech = http.createServer((req, res) => {
   const parts: Buffer[] = [];
   req.on("data", c => parts.push(c));
   req.on("end", () => {
     received.push({ type: req.headers["content-type"], body: Buffer.concat(parts) });
-    res.writeHead(answer.status, { "content-type": "application/json" }).end(JSON.stringify({ text: answer.text, raw: answer.text }));
+    res.writeHead(answer.status, { "content-type": "application/json" }).end(JSON.stringify({ text: answer.text, raw: answer.text, words: answer.words }));
   });
 });
 let h: TestHarness;
@@ -114,11 +114,17 @@ it("polishes what was heard with the dictation model, and falls back to it as he
     expect(requests.at(-1).model).toBe("claude-sonnet-5-5");
     expect(requests.at(-1).messages[0].content).toContain("嗯打开那个走廊灯");
     expect(JSON.stringify(requests.at(-1).system)).not.toContain("<names>");
+    expect(JSON.stringify(requests.at(-1).system)).not.toContain("<terms>");
+
+    // The speech server's vocabulary goes to the polisher; anything but words is dropped.
+    answer = { status: 200, text: "帮我去露露联选裤子", words: ["lululemon", "Costco", 42, null] };
+    await post(polishing, { audioBase64: recording.toString("base64") });
+    expect(requests.at(-1).system.at(-1).text).toMatch(/<terms>\nlululemon\nCostco\n<\/terms>$/);
 
     // Nothing heard: nothing to polish.
     answer = { status: 200, text: "" };
     expect(await (await post(polishing, { audioBase64: recording.toString("base64") })).json()).toEqual({ text: "", polished: false });
-    expect(requests).toHaveLength(1);
+    expect(requests).toHaveLength(2);
 
     fail = true;
     answer = { status: 200, text: "你好世界" };

@@ -475,12 +475,13 @@ iOS App 需为声明了存入相册权限、带 `aioSaveFiles` 标记的新版�
 
 主会话输入区的麦克风按钮：点一下开始，再点一下停止（最长一分钟），识别文字追加到草稿，不自动发送。所有账号可用。
 
-- **开启**：`PA_ASR_URL` 指向语音识别服务（`POST` 16 位单声道 WAV，返回 `{text}`），例如 muse-gadget-sdk 的 `tts-server`
-  （SenseVoice；请求 `/asr?punct=1` 时加标点并去掉口头禅，只有口头禅时返回空，按钮提示「没听清」）。未配置时 `GET /api/asr` 返回 `{enabled:false}`，按钮不显示。
-- **语言**：`GET /api/asr` 同时返回识别服务能听懂的界面语言 `locales`（SenseVoice 听普通话、粤语和英语，不支持西班牙语，因此是 `zh-CN`、`zh-TW`、`en`；见 `src/control/http/api.ts` 的 `ASR_LOCALES`）。界面语言（配置页选择或跟随系统）不在其中时不显示麦克风；旧控制面不返回该字段时照常显示。
+- **开启**：`PA_ASR_URL` 指向语音识别服务（`POST` 16 位单声道 WAV，返回 `{text}`，可选 `model`、`words`），例如 muse-gadget-sdk 的 `tts-server`
+  （X-ASR 中英双语模型，常用词表作热词；请求 `/asr?punct=1` 时加标点并去掉口头禅，只有口头禅时返回空，按钮提示「没听清」）。未配置时 `GET /api/asr` 返回 `{enabled:false}`，按钮不显示。
+- **语言**：`GET /api/asr` 同时返回识别服务能听懂的界面语言 `locales`（X-ASR 听普通话和英语，不支持西班牙语，因此是 `zh-CN`、`zh-TW`、`en`；见 `src/control/http/api.ts` 的 `ASR_LOCALES`）。界面语言（配置页选择或跟随系统）不在其中时不显示麦克风；旧控制面不返回该字段时照常显示。
   现有部署复用语音配件的识别服务：`PA_ASR_URL=http://192.168.1.118:4910/asr?punct=1`（old-mb）。
 - **链路**：浏览器取麦克风原始采样，降到 16 kHz 编为 WAV，经 `POST /api/asr`（JSON `{audioBase64}`，带 CSRF）交给控制面转发；
-  识别出的文字再经与语音键盘同一套润色（`PA_DICTATION_MODEL`，owner 的 Claude 凭据，见「语音配件」）后返回 `{text, polished}`，
+  识别出的文字再经与语音键盘同一套润色（`PA_DICTATION_MODEL`，owner 的 Claude 凭据，见「语音配件」）后返回 `{text, polished}`；
+  识别服务返回的 `words`（它的常用词表）一并交给润色，用来改回它仍听错的品牌、地名等，
   润色失败或未配置 Claude 凭据时返回原文（`polished:false`）。录音不进沙箱；默认不落盘。
 - **回测日志**：`PA_VOICE_LOG_USERS` 列出的账号（`*` 为全部）每次语音输入在控制面数据目录 `voice-log/<日期>/` 留下录音 WAV 和同名 JSON
   （识别服务地址与其报告的模型、识别原文 `text`/`raw`、润色模型/effort/结果、各段耗时、错误），文件 0600，超过 `PA_VOICE_LOG_DAYS` 天（默认 30）的日期目录在新的一天第一次写入时删除。

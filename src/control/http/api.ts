@@ -554,7 +554,7 @@ export function createApiRouter(context: AppContext): Router {
    * Voice input: the composer's recording (16-bit mono WAV, base64) goes to the
    * speech server at cfg.asrUrl (the one the voice gadget uses); only the text comes back,
    * polished by the same model as the gadget's dictation. The speech server
-   * (SenseVoice) hears Mandarin, Cantonese and English but not Spanish, so the
+   * (X-ASR) hears Mandarin and English but not Spanish, so the
    * console offers the microphone only in the languages listed here.
    */
   const dictation = new Dictation(cfg, log);
@@ -577,11 +577,13 @@ export function createApiRouter(context: AppContext): Router {
       let started = Date.now();
       const upstream = await fetch(cfg.asrUrl, { method: "POST", headers: { "content-type": "audio/wav" }, body: new Uint8Array(audio), signal: AbortSignal.timeout(30_000) });
       if (!upstream.ok) throw new Error(`upstream ${upstream.status}`);
-      const json = (await upstream.json()) as { text?: unknown; raw?: unknown; model?: unknown };
+      const json = (await upstream.json()) as { text?: unknown; raw?: unknown; model?: unknown; words?: unknown };
       const heard = typeof json.text === "string" ? json.text.trim() : "";
       record.asr = { url: cfg.asrUrl, model: typeof json.model === "string" ? json.model : null, ms: Date.now() - started, text: heard, raw: typeof json.raw === "string" ? json.raw : null };
       started = Date.now();
-      const out = heard ? await dictation.polish(heard, { names: kbReader(user) }) : { text: "", polished: false };
+      // The speech server's vocabulary, which it may still have misheard (an older server sends none).
+      const terms = Array.isArray(json.words) ? json.words.filter((w): w is string => typeof w === "string").slice(0, 200) : [];
+      const out = heard ? await dictation.polish(heard, { names: kbReader(user), terms }) : { text: "", polished: false };
       if (heard) record.polish = { model: cfg.polishModel, effort: cfg.polishEffort, ms: Date.now() - started, ...out };
       res.json(out);
       track(req, "voice_input", { ok: true, seconds: Math.round((audio.byteLength - 44) / 32000) });

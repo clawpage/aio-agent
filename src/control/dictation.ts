@@ -30,6 +30,8 @@ const TIDIED = /<text>([\s\S]*?)<\/text>/g;
 
 const NAMES_PROMPT = `<names> lists the people in the user's family and circle, spelled as the user writes them, from the user's own records. Speech recognition often turns these names into similar-sounding Chinese characters or a broken English spelling: when a word in the transcript is clearly such a misrecognition of one of them and the context is about a person, write the name as given here. Change nothing else for them, and never add a name the speaker did not say.`;
 
+const TERMS_PROMPT = `<terms> lists words the user often says (brands, places, products), spelled as the user writes them. The recognizer often turns them into similar-sounding Chinese characters or broken English: when a word in the transcript is clearly such a misrecognition of one of them, write it as given here. Never put one in where the speaker did not say it.`;
+
 export class DictationError extends Error {
   constructor(readonly code: "not_configured" | "not_trusted" | "bridge_unavailable", message: string) {
     super(message);
@@ -63,8 +65,9 @@ export class Dictation {
   /**
    * The polished text; the transcript as it was if the model can't be reached.
    * `names`: the speaker may read the knowledge base, so its people's names help.
+   * `terms`: the speech server's vocabulary (its hotwords), which it may still have misheard.
    */
-  async polish(text: string, opts: { names?: boolean } = {}): Promise<{ text: string; polished: boolean }> {
+  async polish(text: string, opts: { names?: boolean; terms?: string[] } = {}): Promise<{ text: string; polished: boolean }> {
     const state = this.#claude.status();
     if (!state.enabled || !state.secret) return { text, polished: false };
     const names = opts.names ? await this.#familyNames() : [];
@@ -87,6 +90,7 @@ export class Dictation {
             { type: "text", text: "You are Claude Code, Anthropic's official CLI for Claude." },
             { type: "text", text: POLISH_PROMPT },
             ...(names.length ? [{ type: "text", text: `${NAMES_PROMPT}\n<names>\n${names.join("\n")}\n</names>` }] : []),
+            ...(opts.terms?.length ? [{ type: "text", text: `${TERMS_PROMPT}\n<terms>\n${opts.terms.join("\n")}\n</terms>` }] : []),
           ],
           messages: [{ role: "user", content: `<transcript>\n${text}\n</transcript>` }],
         }),
