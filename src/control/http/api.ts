@@ -569,7 +569,14 @@ export function createApiRouter(context: AppContext): Router {
     // The speech server takes about a minute of 16 kHz audio.
     if (audio.byteLength > 2 * 1024 * 1024) { res.status(413).json({ error: "too_long", message: t().http.voice.tooLong }); return; }
     const user = getUser(db, ctxOf(req).session!.ownerId);
-    const record: Omit<VoiceRecord, "audio"> = { user: user?.username ?? "?", platform: req.get("x-client-platform") ?? null, asr: null, polish: null, error: null };
+    const mic = req.body?.microphone;
+    const name = (v: unknown) => (typeof v === "string" ? v.slice(0, 120) : "");
+    const microphone = mic && typeof mic === "object" ? {
+      used: name(mic.used),
+      inputs: Array.isArray(mic.inputs) ? mic.inputs.slice(0, 12).map(name) : [],
+      rate: typeof mic.rate === "number" && Number.isFinite(mic.rate) ? mic.rate : null,
+    } : null;
+    const record: Omit<VoiceRecord, "audio"> = { user: user?.username ?? "?", platform: req.get("x-client-platform") ?? null, microphone, asr: null, polish: null, error: null };
     try {
       let started = Date.now();
       const upstream = await fetch(cfg.asrUrl, { method: "POST", headers: { "content-type": "audio/wav" }, body: new Uint8Array(audio), signal: AbortSignal.timeout(30_000) });

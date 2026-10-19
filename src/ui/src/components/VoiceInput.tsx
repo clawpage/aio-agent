@@ -41,7 +41,7 @@ export function VoiceButton({ disabled, onText, onError }: { disabled: boolean; 
     recording.current = null;
     setState("transcribing");
     try {
-      const { text } = await api.transcribe(r.stop());
+      const { text } = await api.transcribe(r.stop(), r.microphone);
       if (text) callbacks.current.onText(text);
       else callbacks.current.onError(t.voice.notHeard);
     } catch (err) {

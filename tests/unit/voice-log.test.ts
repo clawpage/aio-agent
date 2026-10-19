@@ -7,7 +7,7 @@ import { VoiceLog } from "../../src/control/voiceLog.js";
 import { wav } from "../../src/ui/src/voice.js";
 
 const audio = Buffer.from(wav(new Float32Array(8000), 16_000));
-const entry = (user: string) => ({ user, platform: null, audio, asr: null, polish: null, error: "x" });
+const entry = (user: string) => ({ user, platform: null, microphone: null, audio, asr: null, polish: null, error: "x" });
 
 it("keeps only the named accounts, or everyone's with *", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "voice-log-"));

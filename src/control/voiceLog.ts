@@ -9,6 +9,8 @@ const DAY = /^\d{4}-\d{2}-\d{2}$/;
 export interface VoiceRecord {
   user: string;
   platform: string | null;
+  /** What the console says recorded it: the microphone's name, the ones it could see, the hardware rate. */
+  microphone: { used: string; inputs: string[]; rate: number | null } | null;
   audio: Buffer;
   asr: { url: string; model: string | null; ms: number; text: string; raw: string | null } | null;
   polish: { model: string; effort: string; ms: number; polished: boolean; text: string } | null;

@@ -8,7 +8,16 @@
 export const MAX_SECONDS = 60;
 const RATE = 16_000;
 
+/** Which microphone recorded, for the voice log: on a phone it should be the phone's own. */
+export interface MicrophoneInfo {
+  used: string;
+  inputs: string[];
+  /** The audio hardware's rate: a Bluetooth or car microphone usually runs at 16 or 24 kHz, a phone's at 48. */
+  rate: number;
+}
+
 export interface Recording {
+  microphone: MicrophoneInfo;
   /** Stops the microphone; the WAV of everything heard. */
   stop(): Uint8Array;
   /** Stops the microphone and drops what was heard. */
@@ -102,6 +111,8 @@ export async function startRecording(): Promise<Recording> {
     throw err;
   }
   const rate = audio.sampleRate;
+  const inputs = await navigator.mediaDevices.enumerateDevices().then(all => all.filter(d => d.kind === "audioinput").map(d => d.label), () => []);
+  const microphone = { used: stream.getAudioTracks()[0]?.label ?? "", inputs, rate };
   const source = audio.createMediaStreamSource(stream);
   // ScriptProcessor is deprecated but, unlike an AudioWorklet, needs no separate module and works in every WebKit.
   const node = audio.createScriptProcessor(4096, 1, 1);
@@ -117,6 +128,7 @@ export async function startRecording(): Promise<Recording> {
     void audio.close();
   };
   return {
+    microphone,
     stop() {
       release();
       const samples = new Float32Array(chunks.reduce((n, c) => n + c.length, 0));
