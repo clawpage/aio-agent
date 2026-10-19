@@ -3551,6 +3551,21 @@ button.clawpage-row-delete { display:inline-grid; place-items:center; min-width:
 .clawpage-row-delete svg { width:14px; height:14px; }
 button.clawpage-row-delete.danger { background:var(--error); border-color:var(--error); color:var(--on-error); }
 .clawpage-more { align-self:center; }
+.clawpage-updated-by { color:var(--text-dim); }
+.clawpage-collab { display:flex; flex-direction:column; gap:10px; padding-top:14px; border-top:1px solid var(--border); }
+.clawpage-collab h3 { margin:0; font-size:var(--fs-sm); font-weight:600; }
+.clawpage-collab > p { margin:-4px 0 0; }
+.clawpage-collab-list { list-style:none; margin:0; padding:0; border:1px solid var(--border); border-radius:12px; background:var(--bg); }
+.clawpage-collab-list li { display:flex; align-items:center; gap:10px; padding:6px 8px 6px 12px; border-bottom:1px solid var(--border); }
+.clawpage-collab-list li:last-child { border-bottom:0; }
+.clawpage-collab-name { flex:1; min-width:0; font-size:var(--fs-sm); overflow-wrap:anywhere; }
+.clawpage-collab-new { display:flex; gap:8px; }
+.clawpage-collab-new input { flex:1; min-width:0; }
+.clawpage-invitation { display:flex; flex-direction:column; gap:8px; padding:12px; border-radius:12px; background:var(--you-soft); }
+.clawpage-invitation p { margin:0; }
+.clawpage-invitation textarea { width:100%; resize:vertical; font-family:var(--mono); font-size:12px; line-height:1.5; }
+.clawpage-invitation-actions { display:flex; align-items:center; gap:8px; }
+.clawpage-invitation-actions .spacer { flex:1; }
 @media(max-width:900px) {
   .clawpage-grid { grid-template-columns:repeat(2, minmax(0, 1fr)); gap:20px 12px; }
   .clawpage-tile-title { font-size:13px; }

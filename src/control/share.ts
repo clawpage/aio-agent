@@ -22,11 +22,20 @@ import { requestLocale, t } from "./i18n/index.js";
  * at `/u/<username>/share/<name>/.data/...` (no cookies; CORS open, since the
  * page's origin is opaque), the owner through an owner link's token, the
  * account's sandbox through the same share channel it publishes with.
+ *
+ * The owner can also let other people's agents maintain a page: each collaborator
+ * token works on `/u/<username>/share/<name>/.api/...`, which describes the page
+ * and how to work on it (a prompt, with the page's `AGENTS.md` guide), hands out
+ * its files, takes a new version and reads and writes its data. A collaborator
+ * publishes only on top of the version it pulled, so nobody's change is lost.
  */
 
 export const SHARE_NAME = /^[a-z0-9][a-z0-9-]{0,62}$/;
 export const SHARE_LIMITS = { files: 200, bytes: 20 * 1024 * 1024, pages: 100 };
 const META = ".meta.json";
+/** The page's guide for agents working on it: published and pulled with its files, never served to visitors. */
+export const GUIDE = "AGENTS.md";
+const GUIDE_MAX = 64 * 1024;
 /** A page's cover: a picture of the page as published, rendered in the sandbox (never served on the page's own path). */
 const COVER = ".cover";
 export const COVER_MAX_BYTES = 1536 * 1024;
@@ -62,6 +71,14 @@ const DATA_HEADERS = {
  * Every load asks whether a file changed (no-cache, answered by its ETag with a 304 when it did not),
  * so a page republished under the same link shows its new version at once, never a copy kept for a while.
  */
+/** The collaborators' API: for agents, not pages, so no CORS. */
+const API_HEADERS = {
+  "content-type": "application/json; charset=utf-8",
+  "cache-control": "no-store",
+  "x-content-type-options": "nosniff",
+  "x-robots-tag": "noindex",
+};
+
 const PAGE_HEADERS = {
   "content-security-policy": "sandbox allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-modals allow-downloads",
   "x-content-type-options": "nosniff",
@@ -76,7 +93,11 @@ export class ShareError extends Error {
   }
 }
 
-export interface SharePage { name: string; title: string; url: string; files: number; bytes: number; updatedAt: number; tables: TableSummary[]; cover: number | null }
+/** `updatedBy` names the collaborator who published the current version (null when the owner did). */
+export interface SharePage { name: string; title: string; url: string; files: number; bytes: number; updatedAt: number; updatedBy: string | null; collaborators: number; tables: TableSummary[]; cover: number | null }
+interface PageMeta { title: string; files: number; bytes: number; updatedAt: number; updatedBy?: string | null }
+/** A publish: the page's files, and the version they were made from (a collaborator must name it). */
+export interface PublishInput { title?: unknown; files?: unknown; baseUpdatedAt?: unknown; force?: unknown }
 export interface ShareFile { path: string; data: string }
 
 /** What a cover's bytes are, by their signature; anything else is not a cover. */
@@ -142,6 +163,19 @@ export class ShareStore {
     return `https://${this.#cfg.workspaceHost}/u/${this.#usernameOf(userId) ?? userId}/share/${name}/`;
   }
 
+  /** Where collaborators' agents work on the page. */
+  apiUrl(userId: string, name: string): string {
+    return `${this.pageUrl(userId, name)}.api`;
+  }
+
+  #meta(userId: string, name: string): PageMeta | null {
+    try {
+      return JSON.parse(fs.readFileSync(path.join(this.#userDir(userId), name, META), "utf8")) as PageMeta;
+    } catch {
+      return null;
+    }
+  }
+
   #userDir(userId: string): string {
     return path.join(this.#root, userId);
   }
@@ -154,22 +188,44 @@ export class ShareStore {
       return [];
     }
     const tables = this.data?.overview(userId) ?? new Map<string, TableSummary[]>();
+    const collaborators = this.data?.collaboratorCounts(userId) ?? new Map<string, number>();
     return names.flatMap((name) => {
-      try {
-        const meta = JSON.parse(fs.readFileSync(path.join(this.#userDir(userId), name, META), "utf8")) as Omit<SharePage, "name" | "url">;
-        return [{ name, url: this.pageUrl(userId, name), title: meta.title, files: meta.files, bytes: meta.bytes, updatedAt: meta.updatedAt, tables: tables.get(name) ?? [], cover: this.#coverAt(userId, name) }];
-      } catch {
-        return [];
-      }
+      const meta = this.#meta(userId, name);
+      return meta ? [this.#page(userId, name, meta, tables.get(name) ?? [], collaborators.get(name) ?? 0)] : [];
     }).sort((a, b) => b.updatedAt - a.updatedAt);
   }
 
-  /** Create or replace a page as a whole; the URL stays the same across updates. */
-  publish(userId: string, name: string, input: { title?: unknown; files?: unknown }): SharePage {
+  #page(userId: string, name: string, meta: PageMeta, tables: TableSummary[], collaborators: number): SharePage {
+    return { name, url: this.pageUrl(userId, name), title: meta.title, files: meta.files, bytes: meta.bytes, updatedAt: meta.updatedAt,
+      updatedBy: meta.updatedBy ?? null, collaborators, tables, cover: this.#coverAt(userId, name) };
+  }
+
+  /** One page as `list` shows it, or null. */
+  page(userId: string, name: string): SharePage | null {
+    const meta = SHARE_NAME.test(name) ? this.#meta(userId, name) : null;
+    return meta ? this.#page(userId, name, meta, this.data?.tables(userId, name) ?? [], this.data?.collaborators(userId, name).length ?? 0) : null;
+  }
+
+  /** The page's AGENTS.md, if it has one. */
+  guide(userId: string, name: string): string | null {
+    try {
+      const file = path.join(this.#userDir(userId), name, GUIDE);
+      if (fs.statSync(file).size > GUIDE_MAX) return `(${GUIDE} is larger than ${GUIDE_MAX / 1024} KB; read it from the pulled files)`;
+      return fs.readFileSync(file, "utf8");
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Create or replace a page as a whole; the URL stays the same across updates. `by` is the
+   * collaborator publishing, who must build on the current version (`baseUpdatedAt`); the owner
+   * naming a version is held to it too, and must not silently replace a collaborator's version.
+   */
+  publish(userId: string, name: string, input: PublishInput, by?: string): SharePage {
     if (!SHARE_NAME.test(name)) throw new ShareError(400, "The page name can only use lowercase letters, digits, and hyphens (at most 63 characters)");
     if (!Array.isArray(input.files) || input.files.length === 0) throw new ShareError(400, "No files");
     if (input.files.length > SHARE_LIMITS.files) throw new ShareError(413, `The number of files exceeds the limit of ${SHARE_LIMITS.files}`);
-    const title = typeof input.title === "string" && input.title.trim() ? input.title.trim().slice(0, 200) : name;
     const files: Array<{ segments: string[]; data: Buffer }> = [];
     const seen = new Set<string>();
     let bytes = 0;
@@ -197,8 +253,13 @@ export class ShareStore {
     // Every file of a version carries its time, a whole second after the last version's: browsers
     // revalidate by Last-Modified (seconds) where the CDN drops the ETag, and must never take a
     // version published within the same second for the one they hold.
-    let previous = 0;
-    try { previous = (JSON.parse(fs.readFileSync(path.join(target, META), "utf8")) as { updatedAt?: number }).updatedAt ?? 0; } catch { /* a new page */ }
+    const before = this.#meta(userId, name);
+    if (before) this.#checkBase(before, input, by);
+    else if (by) throw new ShareError(404, "The page does not exist");
+    // One line (it is shown in lists and told to agents); without one the page keeps the title it has.
+    const given = typeof input.title === "string" ? input.title.replace(/[\u0000-\u001f\u007f\u2028\u2029]+/g, " ").trim().slice(0, 200) : "";
+    const title = given || before?.title || name;
+    const previous = before?.updatedAt ?? 0;
     const updatedAt = Math.max(Date.now(), (Math.floor(previous / 1000) + 1) * 1000);
     try {
       for (const f of files) {
@@ -207,7 +268,8 @@ export class ShareStore {
         fs.writeFileSync(file, f.data);
         fs.utimesSync(file, updatedAt / 1000, updatedAt / 1000);
       }
-      fs.writeFileSync(path.join(staging, META), JSON.stringify({ title, files: files.length, bytes, updatedAt }));
+      const meta: PageMeta = { title, files: files.length, bytes, updatedAt, updatedBy: by ?? null };
+      fs.writeFileSync(path.join(staging, META), JSON.stringify(meta));
       // The old cover stays until the new one is rendered.
       // Its time is its version: the console keeps showing the copy it has.
       try {
@@ -219,10 +281,20 @@ export class ShareStore {
       if (fs.existsSync(target)) fs.renameSync(target, retired);
       fs.renameSync(staging, target);
       fs.rmSync(retired, { recursive: true, force: true });
-      return { name, title, url: this.pageUrl(userId, name), files: files.length, bytes, updatedAt, tables: this.data?.tables(userId, name) ?? [], cover: this.#coverAt(userId, name) };
+      return this.#page(userId, name, meta, this.data?.tables(userId, name) ?? [], this.data?.collaborators(userId, name).length ?? 0);
     } finally {
       fs.rmSync(staging, { recursive: true, force: true });
     }
+  }
+
+  /** A new version replaces the one it was made from, never one published since by someone else. */
+  #checkBase(before: PageMeta, input: PublishInput, by?: string): void {
+    const base = typeof input.baseUpdatedAt === "number" ? input.baseUpdatedAt : null;
+    const last = `${new Date(before.updatedAt).toISOString()} by ${before.updatedBy ? `collaborator "${before.updatedBy}"` : "the owner"}`;
+    if (by && base === null) throw new ShareError(409, `Pull the page first and publish on top of that version (baseUpdatedAt); it was last published ${last}`);
+    if (input.force === true && !by) return;
+    if (base !== null && base !== before.updatedAt) throw new ShareError(409, `The page changed since the version you have (last published ${last}): pull it again, redo your change on that version, then publish`);
+    if (base === null && before.updatedBy) throw new ShareError(409, `The page was last published ${last}: pull it first so that change is not lost (or publish with --force to replace it anyway)`);
   }
 
   /** When the page's cover was last written, or null without one. */
@@ -302,6 +374,8 @@ export class ShareStore {
     const data = this.data;
     if (!data) throw new DataError(404, "NOT_FOUND", "This deployment has no page data");
     const ownerOnly = () => { if (!caller.owner) throw new DataError(403, "PERMISSION_DENIED", "Only the page's owner can do this"); };
+    // Who may see a table and whether it exists stay the owner's decisions.
+    const manageOnly = () => { if (!caller.owner || caller.manage === false) throw new DataError(403, "PERMISSION_DENIED", "Only the page's owner (the CLI or the console) can change a table's permission or drop it"); };
     const [table, key, action] = rest;
     if (rest.length > 3 || (action !== undefined && action !== "incr")) throw new DataError(404, "NOT_FOUND", "No such data path");
     if (table === undefined) {
@@ -312,8 +386,8 @@ export class ShareStore {
       if (method === "GET") return { status: 200, body: data.list(userId, page, table, caller, { limit: query.get("limit"), after: query.get("after") }) };
       if (method === "POST") return { status: 201, body: data.post(userId, page, table, body.value, caller) };
       if (method === "PUT") { ownerOnly(); return { status: 200, body: data.importTable(userId, page, table, body.records) }; }
-      if (method === "PATCH") { ownerOnly(); return { status: 200, body: data.setPermission(userId, page, table, body.permission) }; }
-      if (method === "DELETE") { ownerOnly(); return data.dropTable(userId, page, table) ? { status: 204 } : { status: 404, body: { error: "TABLE_NOT_FOUND", message: `Table ${table} does not exist` } }; }
+      if (method === "PATCH") { manageOnly(); return { status: 200, body: data.setPermission(userId, page, table, body.permission) }; }
+      if (method === "DELETE") { manageOnly(); return data.dropTable(userId, page, table) ? { status: 204 } : { status: 404, body: { error: "TABLE_NOT_FOUND", message: `Table ${table} does not exist` } }; }
     } else if (action === "incr") {
       if (method === "POST") return { status: 200, body: data.incr(userId, page, table, key, body.field, body.by, caller) };
     } else {
@@ -323,6 +397,100 @@ export class ShareStore {
       if (method === "DELETE") return data.remove(userId, page, table, key, caller) ? { status: 204 } : { status: 404, body: { error: "RECORD_NOT_FOUND", message: `No record ${key}` } };
     }
     throw new DataError(405, "METHOD_NOT_ALLOWED", `${method} is not allowed here`);
+  }
+
+  /** Let someone else's agent maintain a page: a new collaborator token, and the invitation to hand over with it. */
+  invite(userId: string, name: string, label: unknown): ReturnType<ClawpageData["addCollaborator"]> & { api: string; invitation: string } {
+    if (!this.data) throw new DataError(404, "NOT_FOUND", "This deployment has no page data");
+    const page = this.page(userId, name);
+    if (!page) throw new DataError(404, "PAGE_NOT_FOUND", "The page does not exist");
+    const added = this.data.addCollaborator(userId, name, label);
+    const api = this.apiUrl(userId, name);
+    const owner = this.#usernameOf(userId) ?? userId;
+    const invitation = [
+      `${owner} invites your agent to help maintain the clawpage "${page.title}" (${page.url}), a web page / mini app made with Clawpage Agent.`,
+      "",
+      `Collaborator API: ${api}`,
+      `Token: ${added.token}`,
+      "",
+      `Start by reading its instructions: GET ${api}/prompt with the header "Authorization: Bearer <token>" (the same as JSON, with the page's facts: GET ${api}). Then work on the page as your user asks, following them.`,
+      `In a Clawpage Agent sandbox: python3 /home/gem/.codex/tools/aio-share/aio-share.py --api ${api} --token <token> info`,
+      "",
+      "Keep the token secret: it lets its holder change this page's files and read and write all of its data, private tables included. Never put it in the page, its data, a public message or a log.",
+    ].join("\n");
+    return { ...added, api, invitation };
+  }
+
+  /** What a collaborator's agent is told about the page: its facts, its guide and how to work on it. */
+  describe(userId: string, name: string, label: string): Record<string, unknown> | null {
+    const page = this.page(userId, name);
+    if (!page) return null;
+    const { collaborators: _, ...facts } = page;
+    return { ...facts, api: this.apiUrl(userId, name), owner: this.#usernameOf(userId) ?? userId, you: label, guide: this.guide(userId, name), prompt: this.agentPrompt(userId, name, label) };
+  }
+
+  /** The instructions a collaborator's agent follows (models read English). */
+  agentPrompt(userId: string, name: string, label: string): string {
+    const page = this.page(userId, name)!;
+    const api = this.apiUrl(userId, name);
+    const owner = this.#usernameOf(userId) ?? userId;
+    const guide = this.guide(userId, name);
+    const by = page.updatedBy ? `collaborator "${page.updatedBy}"` : "the owner";
+    const dir = `/home/gem/workspace/share/remote/${owner}/${name}`;
+    return [
+      `# Maintaining the clawpage "${page.title}"`,
+      "",
+      `${owner} invited you (as "${label}") to help maintain this clawpage: a public web page or mini app made with Clawpage Agent, with data tables of its own.`,
+      "",
+      `- Page: ${page.url} (public: anyone with the link can open it)`,
+      `- API: ${api}`,
+      `- Current version: updatedAt ${page.updatedAt} (${new Date(page.updatedAt).toISOString()}), published by ${by}; ${page.files} files`,
+      `- Tables: ${page.tables.length ? page.tables.map((t) => `${t.name} (${t.permission}, ${t.records} records)`).join(", ") : "none"}`,
+      "",
+      "Change only what the person you work for asks of this page, and keep the owner's design, data and conventions.",
+      "",
+      `## The page's guide (${GUIDE})`,
+      "",
+      guide?.trim() || `The page has no ${GUIDE} yet. When you make more than a small change, add one at the top of the folder: what the page is for, how its files are organized, and each table's purpose and record shape. It is published with the page but never shown to visitors.`,
+      "",
+      "## Access",
+      "",
+      "Every request carries `Authorization: Bearer <token>` (the collaborator token from your invitation). Keep the token secret: never put it in the page's files, its data, a public message or a log.",
+      "With it you can change the page's files and read and write all of its data, private tables included. You cannot delete the page, drop a table or change who may see a table: ask the owner for those.",
+      "",
+      "### With the Clawpage Agent CLI (in a Clawpage Agent sandbox)",
+      "",
+      "```bash",
+      `CP="python3 /home/gem/.codex/tools/aio-share/aio-share.py"`,
+      `$CP --api ${api} --token "$TOKEN" pull          # the files into ${dir}/, which remembers the API, token and version`,
+      `# edit there, preview file://${dir}/index.html in the sandbox browser`,
+      `$CP publish ${dir}                              # publishes back to this page, on top of the version you pulled`,
+      `$CP --remote ${dir} data tables ${name}          # data commands as in the clawpages skill: list, get, put, patch, add, incr, delete, export, import`,
+      `$CP --remote ${dir} info                         # these instructions again, current`,
+      "```",
+      "",
+      "### With plain HTTP",
+      "",
+      `- \`GET ${api}\`: this description as JSON (facts, \`guide\`, \`prompt\`); \`GET ${api}/prompt\`: only this text.`,
+      `- \`GET ${api}/files\`: \`{"updatedAt": <version>, "files": [{"path": "index.html", "data": "<base64>"}, ...]}\`.`,
+      `- \`POST ${api}\` with \`{"title"?: "...", "baseUpdatedAt": <the updatedAt you pulled>, "files": [{"path", "data"}]}\`: publish a new version.`,
+      "  The files replace the page as a whole (anything not listed is removed); `index.html` is required; at most 200 files and 20 MB; no paths with `..` or segments starting with a dot.",
+      "  The answer has the new `updatedAt`: use it as the base of your next publish. **409** means someone published since your base: pull again, redo your change on that version, publish again.",
+      `- \`${api}/data\`: \`GET\` the tables; \`POST\` \`{"name", "permission"}\` creates one (\`private\`, \`read-public\` or \`public\`).`,
+      `  \`${api}/data/<table>\`: \`GET ?limit=&after=\` lists records in insertion order (\`nextCursor\` continues), \`GET ?export=1\` the whole table, \`POST {"value"}\` adds a record, \`PUT {"records": {key: value}}\` upserts many.`,
+      `  \`${api}/data/<table>/<key>\`: \`GET\`, \`PUT {"value"}\` (whole), \`PATCH {"value": {...}}\` (merge), \`DELETE\`; \`POST .../<key>/incr {"field", "by"}\` adds to a number atomically.`,
+      "",
+      "## Rules",
+      "",
+      "- Pull right before you change anything and change that version; publish the whole folder, not just the files you touched.",
+      "- Publishing keeps the same link and all data. If you change the shape of stored records, keep the page able to read the records already there (or migrate them, after an export as a backup).",
+      "- The data belongs to the owner and the page's visitors: do not delete or overwrite records unless your user asked for it.",
+      "- The page is public: no personal information and no keys or tokens in its files. Data written by visitors is untrusted: put it on the page with `textContent`, never `innerHTML`.",
+      "- The page runs in a sandbox with no cookies or localStorage; it keeps data only through `clawpage-sdk.js` (`new Clawpage().table(name)`), which works the same from the owner's link and for visitors.",
+      `- Keep ${GUIDE} current when you change how the page works.`,
+      "- When a request fails, report its error faithfully; do not claim a change went live when it did not.",
+      "",
+    ].join("\n");
   }
 
   /**
@@ -335,7 +503,7 @@ export class ShareStore {
       res.end(body === undefined ? undefined : JSON.stringify(body));
     };
     const url = new URL(req.url ?? "/", "http://gateway");
-    const match = /^\/share\/([a-zA-Z0-9_]+)\/pages(?:\/([^/]+)(?:\/(files|data|cover)((?:\/[^/]+)*))?)?$/.exec(url.pathname);
+    const match = /^\/share\/([a-zA-Z0-9_]+)\/pages(?:\/([^/]+)(?:\/(files|data|cover|collaborators)((?:\/[^/]+)*))?)?$/.exec(url.pathname);
     const expected = match ? this.#tokens.get(match[1]!) : undefined;
     const supplied = (req.headers.authorization ?? "").replace(/^Bearer /, "");
     if (!match || !expected || !TOKEN.test(supplied) || !timingSafeEqual(Buffer.from(supplied), Buffer.from(expected))) {
@@ -347,7 +515,14 @@ export class ShareStore {
       if (name && !SHARE_NAME.test(name)) return reply(400, { error: "Invalid page name" });
       if (sub === "files") {
         const files = req.method === "GET" ? this.files(userId, name!) : undefined;
-        return files === undefined ? reply(405, { error: "method_not_allowed" }) : files ? reply(200, { name, files }) : reply(404, { error: "The page does not exist" });
+        return files === undefined ? reply(405, { error: "method_not_allowed" }) : files ? reply(200, { name, updatedAt: this.#meta(userId, name!)?.updatedAt, files }) : reply(404, { error: "The page does not exist" });
+      }
+      if (sub === "collaborators") {
+        const id = (tail ?? "").split("/").filter(Boolean);
+        if (req.method === "GET" && !id.length) return this.exists(userId, name!) ? reply(200, { collaborators: this.data?.collaborators(userId, name!) ?? [] }) : reply(404, { error: "The page does not exist" });
+        if (req.method === "POST" && !id.length) return reply(201, this.invite(userId, name!, (await readJson(req, 4096)).label));
+        if (req.method === "DELETE" && id.length === 1) return this.data?.removeCollaborator(userId, name!, id[0]!) ? reply(204) : reply(404, { error: "No such collaborator" });
+        return reply(405, { error: "method_not_allowed" });
       }
       if (sub === "cover") {
         if (req.method !== "POST" || tail) return reply(405, { error: "method_not_allowed" });
@@ -367,25 +542,50 @@ export class ShareStore {
       if (req.method === "GET" && !name) return reply(200, { pages: this.list(userId) });
       if (req.method === "DELETE" && name) return this.remove(userId, name) ? reply(204) : reply(404, { error: "The page does not exist" });
       if (req.method !== "POST" || !name) return reply(405, { error: "method_not_allowed" });
-      const chunks: Buffer[] = [];
-      let size = 0;
-      // base64 inflates the page by a third; leave room for the JSON around it.
-      for await (const chunk of req) {
-        size += (chunk as Buffer).length;
-        if (size > SHARE_LIMITS.bytes * 1.5) return reply(413, { error: `The total page size exceeds the limit of ${SHARE_LIMITS.bytes / 1024 / 1024} MB` });
-        chunks.push(chunk as Buffer);
-      }
-      let input: { title?: unknown; files?: unknown };
-      try {
-        input = JSON.parse(Buffer.concat(chunks).toString());
-      } catch {
-        return reply(400, { error: "The request is not valid JSON" });
-      }
-      reply(200, this.publish(userId, name, input));
+      reply(200, this.publish(userId, name, await readPublish(req)));
     } catch (err) {
       if (err instanceof ShareError) reply(err.status, { error: err.message });
       else if (err instanceof DataError) reply(err.status, { error: err.message, code: err.code });
       else reply(500, { error: "The request failed" });
+    }
+  }
+
+  /** `/u/<username>/share/<name>/.api/...`: the page for the agents of the collaborators its owner invited. */
+  async #serveApi(req: Request, res: Response, userId: string, page: string, rest: string, query: string): Promise<void> {
+    const reply = (status: number, body?: unknown) => {
+      res.status(status).set(API_HEADERS);
+      if (body === undefined) res.end();
+      else res.send(JSON.stringify(body));
+    };
+    const token = String(req.headers.authorization ?? "").replace(/^Bearer\s+/i, "");
+    const collaborator = token && this.exists(userId, page) ? this.data?.collaboratorOf(token, userId, page) : null;
+    if (!collaborator) return reply(401, { error: "UNAUTHORIZED", message: "This needs a collaborator token for this page: Authorization: Bearer cpc_..." });
+    const method = req.method ?? "GET";
+    try {
+      const [sub, ...tail] = rest.split("/").filter(Boolean).map((s) => decodeURIComponent(s));
+      if (sub === undefined && method === "GET") return reply(200, this.describe(userId, page, collaborator.label));
+      if (sub === undefined && method === "POST") return reply(200, this.publish(userId, page, await readPublish(req), collaborator.label));
+      if (sub === "prompt" && !tail.length && method === "GET") {
+        res.status(200).set({ ...API_HEADERS, "content-type": "text/markdown; charset=utf-8" }).send(this.agentPrompt(userId, page, collaborator.label));
+        return;
+      }
+      if (sub === "files" && !tail.length && method === "GET") return reply(200, { name: page, updatedAt: this.#meta(userId, page)?.updatedAt, files: this.files(userId, page) });
+      if (sub === "cover" && !tail.length && method === "POST") {
+        const body = await readJson(req, Math.ceil(COVER_MAX_BYTES * 1.4) + 1024);
+        if (typeof body.data !== "string") return reply(400, { error: "MISSING_COVER", message: "No cover data" });
+        return reply(200, { name: page, cover: this.setCover(userId, page, Buffer.from(body.data, "base64")) });
+      }
+      if (sub === "data") {
+        const body = method === "GET" || method === "DELETE" ? {} : await readJson(req, DATA_BODY.owner);
+        const out = this.dataRequest(userId, page, tail, method, new URLSearchParams(query), body, { owner: true, manage: false, collaborator: collaborator.label });
+        return reply(out.status, out.body);
+      }
+      reply(sub === undefined || ["prompt", "files", "cover"].includes(sub) ? 405 : 404, { error: "NOT_FOUND", message: `${method} ${sub ?? ""} is not part of this API; GET it for the instructions` });
+    } catch (err) {
+      if (err instanceof ShareError) reply(err.status, { error: SHARE_CODES[err.status] ?? "FAILED", message: err.message });
+      else if (err instanceof DataError) reply(err.status, { error: err.code, message: err.message });
+      else if (err instanceof URIError) reply(400, { error: "INVALID_PATH", message: "Invalid path" });
+      else reply(500, { error: "INTERNAL", message: "The request failed" });
     }
   }
 
@@ -408,7 +608,8 @@ export class ShareStore {
     try {
       const segments = rest.split("/").filter(Boolean).map((s) => decodeURIComponent(s));
       const body = write && req.method !== "DELETE" ? await readJson(req, owner ? DATA_BODY.owner : DATA_BODY.visitor) : {};
-      const out = this.dataRequest(userId, page, segments, req.method === "HEAD" ? "GET" : req.method, new URLSearchParams(query), body, { owner, ip: req.paCtx?.ip });
+      // The page's script holds an owner link's token: it uses the tables, never manages them (a collaborator may have written it).
+      const out = this.dataRequest(userId, page, segments, req.method === "HEAD" ? "GET" : req.method, new URLSearchParams(query), body, { owner, manage: false, ip: req.paCtx?.ip });
       reply(out.status, out.body);
     } catch (err) {
       if (err instanceof DataError) reply(err.status, { error: err.code, message: err.message });
@@ -429,6 +630,13 @@ export class ShareStore {
       if (!m) return next();
       const [, username, rawName, rest] = m;
       const dataPath = rawName && SHARE_NAME.test(rawName) && rest !== undefined ? /^\/\.data(\/.*)?$/.exec(rest) : null;
+      const apiPath = rawName && SHARE_NAME.test(rawName) && rest !== undefined ? /^\/\.api(\/.*)?$/.exec(rest) : null;
+      if (apiPath) {
+        const userId = this.#userIdOf(username!);
+        if (!userId) return void res.status(401).set(API_HEADERS).send(JSON.stringify({ error: "UNAUTHORIZED", message: "This needs a collaborator token for this page" }));
+        void this.#serveApi(req, res, userId, rawName!, apiPath[1] ?? "", query);
+        return;
+      }
       if (dataPath) {
         const userId = this.#userIdOf(username!);
         if (!userId) return void res.status(404).set(DATA_HEADERS).send(JSON.stringify({ error: "PAGE_NOT_FOUND", message: "The page does not exist" }));
@@ -456,7 +664,8 @@ export class ShareStore {
       }
       if (rel === "" || rel.endsWith("/")) rel += "index.html";
       const segments = safeSegments(rel);
-      if (!segments) return notFound();
+      // The guide is for the agents working on the page, not its visitors (any case: the disk may not care).
+      if (!segments || segments.join("/").toLowerCase() === GUIDE.toLowerCase()) return notFound();
       const pageDir = path.join(this.#userDir(userId), rawName);
       const file = path.join(pageDir, ...segments);
       let stat: fs.Stats;
@@ -487,6 +696,27 @@ export class ShareStore {
       if (req.method === "HEAD") return res.end();
       fs.createReadStream(file).on("error", () => res.destroy()).pipe(res);
     };
+  }
+}
+
+/** The `error` code of a ShareError on the collaborators' API, by its status. */
+const SHARE_CODES: Record<number, string> = { 400: "BAD_REQUEST", 404: "PAGE_NOT_FOUND", 409: "PAGE_CHANGED", 413: "TOO_LARGE" };
+
+/** A publish's body: the page's files in base64, which inflates them by a third; room is left for the JSON around them. */
+async function readPublish(req: http.IncomingMessage): Promise<PublishInput> {
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of req) {
+    size += (chunk as Buffer).length;
+    if (size > SHARE_LIMITS.bytes * 1.5) throw new ShareError(413, `The total page size exceeds the limit of ${SHARE_LIMITS.bytes / 1024 / 1024} MB`);
+    chunks.push(chunk as Buffer);
+  }
+  try {
+    const body = JSON.parse(Buffer.concat(chunks).toString()) as unknown;
+    if (typeof body !== "object" || body === null || Array.isArray(body)) throw new Error();
+    return body as PublishInput;
+  } catch {
+    throw new ShareError(400, "The request is not valid JSON");
   }
 }
 

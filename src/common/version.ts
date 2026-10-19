@@ -9,8 +9,8 @@
  * when the newer side still understands the older one.
  */
 
-/** The control plane's HTTP API version the UI is written against (6: the workspace's Mac browser pages; 5: clawpages and their data). */
-export const API_VERSION = 6;
+/** The control plane's HTTP API version the UI is written against (7: clawpage collaborators; 6: the workspace's Mac browser pages; 5: clawpages and their data). */
+export const API_VERSION = 7;
 /** The oldest UI API version this control plane still serves (a v2 UI registers with a username, which v3 refuses). */
 export const API_MIN = 3;
 

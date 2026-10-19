@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 
 /**
  * Clawpages' data: the tables a published page (a "clawpage", see share.ts) reads
@@ -15,6 +15,8 @@ import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
  *
  * Who may do what is decided by the caller: `owner` is the account itself (its
  * sandbox's share token, its console session, or an owner link's token);
+ * a collaborator (someone else's agent holding a token the owner gave out for one
+ * page) reads and writes every table like the owner but does not manage them;
  * everyone else is a visitor, held to the table's permission.
  */
 
@@ -27,6 +29,9 @@ export const DATA_LIMITS = { tablesPerPage: 20, recordsPerTable: 10_000, valueBy
 export const RATE_LIMITS = { writes: 60, reads: 600 };
 /** An owner link stays usable this long. */
 export const OWNER_LINK_MS = 12 * 3600_000;
+/** Collaborator tokens a page can have at once. */
+export const COLLABORATORS_PER_PAGE = 20;
+const COLLABORATOR_TOKEN = /^cpc_[A-Za-z0-9_-]{43}$/;
 
 export class DataError extends Error {
   constructor(readonly status: number, readonly code: string, message: string) {
@@ -36,7 +41,13 @@ export class DataError extends Error {
 
 export interface TableSummary { name: string; permission: Permission; records: number; bytes: number; createdAt: number; updatedAt: number }
 export interface RecordSummary { key: string; value: unknown; createdAt: number; updatedAt: number }
-export interface Caller { owner: boolean; ip?: string }
+/**
+ * `owner` may use every table. Managing tables (permissions, dropping) also takes `manage`: the account
+ * itself has it, while an owner link (which runs whatever script the page holds) and a collaborator
+ * (`collaborator`, its label) use the tables on the owner's behalf without it.
+ */
+export interface Caller { owner: boolean; manage?: boolean; collaborator?: string; ip?: string }
+export interface Collaborator { id: string; label: string; createdAt: number; lastUsedAt: number | null }
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS cp_tables (
@@ -52,6 +63,11 @@ CREATE TABLE IF NOT EXISTS cp_records (
   PRIMARY KEY (user_id, page, tbl, key)
 );
 CREATE INDEX IF NOT EXISTS cp_records_order ON cp_records (user_id, page, tbl, seq);
+CREATE TABLE IF NOT EXISTS cp_collaborators (
+  id TEXT PRIMARY KEY, user_id TEXT NOT NULL, page TEXT NOT NULL, label TEXT NOT NULL,
+  token_hash TEXT NOT NULL UNIQUE, created_at INTEGER NOT NULL, last_used_at INTEGER
+);
+CREATE INDEX IF NOT EXISTS cp_collaborators_page ON cp_collaborators (user_id, page);
 `;
 
 type TableRow = { name: string; permission: Permission; records: number; bytes: number; seq: number; created_at: number; updated_at: number };
@@ -72,6 +88,9 @@ function deepMerge(base: Record<string, unknown>, patch: Record<string, unknown>
   for (const [k, v] of Object.entries(patch)) out[k] = isObject(v) && isObject(out[k]) ? deepMerge(out[k] as Record<string, unknown>, v) : v;
   return out;
 }
+
+/** Collaborator tokens are kept as their hash: the database never holds one that works. */
+const hashToken = (token: string) => createHash("sha256").update(token).digest("hex");
 
 export class ClawpageData {
   readonly db: DatabaseSync;
@@ -120,6 +139,48 @@ export class ClawpageData {
     } catch {
       return false;
     }
+  }
+
+  // ------------------------------------------------------------------ collaborators
+
+  /**
+   * A token for someone else's agent to maintain one page: its files and its data, never deleting
+   * the page or managing its tables. Shown once; only its hash is kept. It lasts until removed.
+   */
+  addCollaborator(userId: string, page: string, label: unknown): Collaborator & { token: string } {
+    const name = typeof label === "string" ? label.trim().replace(/[\u0000-\u001f\u007f]/g, " ").slice(0, 80) : "";
+    if (!name) throw new DataError(400, "INVALID_LABEL", "Name the collaborator (whose agent gets the token)");
+    const count = (this.db.prepare("SELECT COUNT(*) AS n FROM cp_collaborators WHERE user_id=? AND page=?").get(userId, page) as { n: number }).n;
+    if (count >= COLLABORATORS_PER_PAGE) throw new DataError(409, "TOO_MANY_COLLABORATORS", `A page can have at most ${COLLABORATORS_PER_PAGE} collaborators`);
+    const id = randomBytes(6).toString("hex");
+    const token = `cpc_${randomBytes(32).toString("base64url")}`;
+    const now = Date.now();
+    this.db.prepare("INSERT INTO cp_collaborators (id,user_id,page,label,token_hash,created_at) VALUES (?,?,?,?,?,?)").run(id, userId, page, name, hashToken(token), now);
+    return { id, label: name, createdAt: now, lastUsedAt: null, token };
+  }
+
+  collaborators(userId: string, page: string): Collaborator[] {
+    return (this.db.prepare("SELECT id,label,created_at,last_used_at FROM cp_collaborators WHERE user_id=? AND page=? ORDER BY created_at").all(userId, page) as Array<{ id: string; label: string; created_at: number; last_used_at: number | null }>)
+      .map((c) => ({ id: c.id, label: c.label, createdAt: c.created_at, lastUsedAt: c.last_used_at }));
+  }
+
+  /** How many collaborators each of the account's pages has. */
+  collaboratorCounts(userId: string): Map<string, number> {
+    return new Map((this.db.prepare("SELECT page, COUNT(*) AS n FROM cp_collaborators WHERE user_id=? GROUP BY page").all(userId) as Array<{ page: string; n: number }>).map((r) => [r.page, r.n]));
+  }
+
+  removeCollaborator(userId: string, page: string, id: string): boolean {
+    return this.db.prepare("DELETE FROM cp_collaborators WHERE user_id=? AND page=? AND id=?").run(userId, page, id).changes > 0;
+  }
+
+  /** The collaborator a token belongs to, if it is a live token for exactly this account's page; marks it used. */
+  collaboratorOf(token: string, userId: string, page: string, now = Date.now()): Collaborator | null {
+    if (!COLLABORATOR_TOKEN.test(token)) return null;
+    const row = this.db.prepare("SELECT id,label,created_at,last_used_at FROM cp_collaborators WHERE token_hash=? AND user_id=? AND page=?").get(hashToken(token), userId, page) as { id: string; label: string; created_at: number; last_used_at: number | null } | undefined;
+    if (!row) return null;
+    // At most once a minute, so a busy agent does not write on every read.
+    if (!row.last_used_at || now - row.last_used_at > 60_000) this.db.prepare("UPDATE cp_collaborators SET last_used_at=? WHERE id=?").run(now, row.id);
+    return { id: row.id, label: row.label, createdAt: row.created_at, lastUsedAt: now };
   }
 
   // ------------------------------------------------------------------ rate limits
@@ -191,10 +252,11 @@ export class ClawpageData {
     }
   }
 
-  /** A deleted page takes its data with it. */
+  /** A deleted page takes its data and its collaborators with it. */
   dropPage(userId: string, page: string): void {
     this.db.prepare("DELETE FROM cp_tables WHERE user_id=? AND page=?").run(userId, page);
     this.db.prepare("DELETE FROM cp_records WHERE user_id=? AND page=?").run(userId, page);
+    this.db.prepare("DELETE FROM cp_collaborators WHERE user_id=? AND page=?").run(userId, page);
   }
 
   // ------------------------------------------------------------------ records

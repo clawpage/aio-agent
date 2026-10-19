@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { api, ApiError } from "../api";
-import type { Clawpage, ClawpagePermission, ClawpageRecord } from "../types";
+import type { Clawpage, ClawpageCollaborator, ClawpagePermission, ClawpageRecord } from "../types";
 import { hasNativeBrowser, openNativeBrowser } from "../deviceBrowser";
 import { onDownloadClick } from "../saveFile";
 import { InlineLoading } from "./Brand";
@@ -60,8 +60,8 @@ const CLOSE = "M6 6l12 12 M18 6 6 18";
 /**
  * The account's clawpages as a home screen: one icon each, mini apps (pages with
  * data) apart from plain pages. An icon opens the clawpage's sheet: open it as the
- * owner, copy or share its link, look through its data, delete it. Changing a page
- * itself is the main session's job.
+ * owner, copy or share its link, look through its data, invite other people's
+ * agents to maintain it, delete it. Changing a page itself is an agent's job.
  */
 export function ClawpageList({ active, onExpired }: { active: boolean; onExpired: () => void }) {
   const [pages, setPages] = useState<Clawpage[] | null>(null);
@@ -171,7 +171,7 @@ function ClawpageSheet({ page, onClose, onChanged, onRemoved, onError }: { page:
         <header className="clawpage-sheet-head">
           <div className="clawpage-sheet-name">
             <h2 id="clawpage-sheet-title">{page.title}</h2>
-            <p className="muted tiny">{app ? t.clawpages.summaryApp(page.tables.length, records(page)) : t.clawpages.summaryPage}<MessageTime at={Math.max(page.updatedAt, ...page.tables.map((x) => x.updatedAt))} now={now}/></p>
+            <p className="muted tiny">{app ? t.clawpages.summaryApp(page.tables.length, records(page)) : t.clawpages.summaryPage}<MessageTime at={Math.max(page.updatedAt, ...page.tables.map((x) => x.updatedAt))} now={now}/>{page.updatedBy && <span className="clawpage-updated-by">{t.clawpages.updatedBy(page.updatedBy)}</span>}</p>
           </div>
           <button type="button" className="ghost clawpage-icon-button" aria-label={t.clawpages.close} title={t.clawpages.close} onClick={onClose}><Icon d={CLOSE}/></button>
         </header>
@@ -184,6 +184,7 @@ function ClawpageSheet({ page, onClose, onChanged, onRemoved, onError }: { page:
         <div className="clawpage-sheet-body">
           {app && <ClawpageData page={page} onChanged={onChanged} onError={onError}/>}
           <p className="clawpage-tip muted tiny">{t.clawpages.tip}</p>
+          <ClawpageCollaborators page={page} onChanged={onChanged} onError={onError}/>
           {confirming
             ? <div className="clawpage-confirm" role="alertdialog" aria-label={t.clawpages.deleteHint}>
               <span className="tiny">{t.clawpages.deleteHint}</span>
@@ -195,6 +196,87 @@ function ClawpageSheet({ page, onClose, onChanged, onRemoved, onError }: { page:
     </PopupSurface>,
     document.body,
   );
+}
+
+/**
+ * Other people's agents allowed to maintain the page. A new one comes with its invitation (the API,
+ * its token and how to start), shown here once to copy and pass on; a collaborator can be removed any time.
+ */
+function ClawpageCollaborators({ page, onChanged, onError }: { page: Clawpage; onChanged: () => void; onError: (err: unknown) => void }) {
+  const now = useDisplayClock();
+  const [list, setList] = useState<ClawpageCollaborator[] | null>(null);
+  const [label, setLabel] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [invitation, setInvitation] = useState<string | null>(null);
+  const [copied, setCopied] = useState<"ok" | "failed" | null>(null);
+  /** The collaborator whose remove was tapped once: the second tap removes it. */
+  const [armed, setArmed] = useState<string | null>(null);
+  const load = useCallback(async () => {
+    try {
+      setList((await api.clawpageCollaborators(page.name)).collaborators);
+    } catch (err) {
+      onError(err);
+    }
+  }, [page.name, onError]);
+  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    if (!copied) return;
+    const timer = setTimeout(() => setCopied(null), 2000);
+    return () => clearTimeout(timer);
+  }, [copied]);
+
+  const invite = async () => {
+    if (!label.trim()) return;
+    setBusy(true);
+    try {
+      const out = await api.clawpageInvite(page.name, label.trim());
+      setInvitation(out.invitation);
+      setLabel("");
+      void load();
+      onChanged();
+    } catch (err) {
+      onError(err);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const revoke = async (id: string) => {
+    if (armed !== id) { setArmed(id); return; }
+    setArmed(null);
+    try {
+      await api.clawpageRevoke(page.name, id);
+      setList((old) => old?.filter((c) => c.id !== id) ?? null);
+      onChanged();
+    } catch (err) {
+      onError(err);
+    }
+  };
+
+  return <section className="clawpage-collab" aria-labelledby="clawpage-collab-title" data-testid="clawpage-collab">
+    <h3 id="clawpage-collab-title">{t.clawpages.collabTitle}</h3>
+    <p className="muted tiny">{t.clawpages.collabIntro}</p>
+    {invitation && <div className="clawpage-invitation" data-testid="clawpage-invitation">
+      <p className="tiny">{t.clawpages.invitationHint}</p>
+      <textarea readOnly value={invitation} rows={7} aria-label={t.clawpages.copyInvitation} onFocus={(event) => event.currentTarget.select()}/>
+      <div className="clawpage-invitation-actions">
+        <button type="button" className="primary" onClick={() => void copyText(invitation).then((ok) => setCopied(ok ? "ok" : "failed"))}>{t.clawpages.copyInvitation}</button>
+        <span className="clawpage-copied tiny" role="status">{copied === "ok" ? t.clawpages.invitationCopied : copied === "failed" ? t.clawpages.copyFailed : ""}</span>
+        <span className="spacer"/>
+        <button type="button" className="ghost" onClick={() => setInvitation(null)}>{t.clawpages.done}</button>
+      </div>
+    </div>}
+    {list && list.length > 0 && <ul className="clawpage-collab-list">
+      {list.map((c) => <li key={c.id} data-id={c.id}>
+        <span className="clawpage-collab-name">{c.label}</span>
+        <span className="muted tiny">{c.lastUsedAt ? <>{t.clawpages.lastUsed} <MessageTime at={c.lastUsedAt} now={now}/></> : t.clawpages.neverUsed}</span>
+        <button type="button" className={`tiny clawpage-row-delete ${armed === c.id ? "danger" : "ghost"}`} aria-label={t.clawpages.revoke(c.label)} title={t.clawpages.revoke(c.label)} onClick={() => void revoke(c.id)}>{armed === c.id ? t.clawpages.confirmRevoke : <Icon d={CLOSE}/>}</button>
+      </li>)}
+    </ul>}
+    <form className="clawpage-collab-new" onSubmit={(event) => { event.preventDefault(); void invite(); }}>
+      <input value={label} onChange={(event) => setLabel(event.target.value)} placeholder={t.clawpages.collabPlaceholder} aria-label={t.clawpages.collabLabel} maxLength={80}/>
+      <button type="submit" className="ghost" disabled={busy || !label.trim()}>{busy ? t.clawpages.inviting : t.clawpages.invite}</button>
+    </form>
+  </section>;
 }
 
 /** A cell's text: strings as written, anything else as compact JSON. */

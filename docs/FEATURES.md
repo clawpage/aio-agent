@@ -717,9 +717,20 @@ Android 手机用 USB 接在装了 Mac App 的 Mac 上，由 App 运行的 `bin/
 - **页面里用**：`aio-share.py sdk <目录>` 把 `clawpage-sdk.js` 复制进页面（发布时自动刷新这份拷贝），`new Clawpage().table(名).list/get/put/patch/post/incr/delete`
   访问 `/u/<用户名>/share/<页面名>/.data/<表>[/<键>[/incr]]`。该路径 CORS 全开（页面来源是不透明的 `null`）、不用 cookie；用 `file://` 预览时 SDK 改用内存。
 - **主人身份**：控制台点「打开」时由 `POST /api/clawpages/<页面名>/open` 生成主人链接：页面地址后附 `#cp=<令牌>`（片段不发给服务器），
-  令牌用部署自己的密钥（`<PA_DATA_DIR>/clawpages-key`）签名，只对该账号该页有效、12 小时过期；SDK 取走后立即从地址栏抹掉。持令牌可读写所有表、不受限流。
+  令牌用部署自己的密钥（`<PA_DATA_DIR>/clawpages-key`）签名，只对该账号该页有效、12 小时过期；SDK 取走后立即从地址栏抹掉。持令牌可读写所有表、不受限流，但不能改表权限或删表（页面脚本可能出自协作者之手；这两项只在控制台与沙箱 CLI 做）。
 - **执行器**：沙箱 CLI `data tables|create|permission|drop|list|get|put|patch|add|incr|delete|export|import` 以主人身份操作；每次执行提示词附上本账号
-  最近活跃的 12 个 clawpages（地址、发布时间、各表权限、记录数与最近改动时间），主会话因此知道已有哪些小应用、数据有什么变化，并按 skill 拉取 → 修改 → 同名发布迭代。
+  最近活跃的 12 个 clawpages（地址、发布时间与发布者、协作者数、各表权限、记录数与最近改动时间），主会话因此知道已有哪些小应用、数据有什么变化，并按 skill 拉取 → 修改 → 同名发布迭代。
+- **版本**：`pull`/`publish` 在页面目录里写 `.clawpage.json`（页面名与所持版本 `updatedAt`，0600，点文件不发布）；之后发布带上 `baseUpdatedAt`，
+  页面在此之后被别人发布过就回 409（拉取新版、重做改动再发）。主人不带版本发布时，若当前版本是协作者发的也回 409，`publish --force` 才覆盖。
+- **协作者（别人的 Agent 一起改）**：主人在 Clawpage 详情的「让别人的 Agent 一起改」或沙箱 `invite <页面> --label <名称>` 生成邀请：一个协作者令牌
+  （`cpc_…`，库里只存 SHA-256、只在邀请里出现一次、不过期，`collaborators` 列出最近使用时间，`revoke`/控制台随时移除；每页最多 20 个，删页一并删除）
+  和协作接口 `https://<工作区域名>/u/<用户名>/share/<页面名>/.api`。邀请文本交给对方贴进任何能发 HTTP 请求的 Agent：
+  `GET .api` 返回页面事实、`guide` 与 `prompt`（英文的完整操作说明，含页面的 `AGENTS.md`），`GET .api/prompt` 只给说明文字，`GET .api/files` 取文件与版本，
+  `POST .api {files, baseUpdatedAt, title?}` 发布新版本（**必须**基于当前版本，否则 409），`POST .api/cover` 存封面，`.api/data/...` 读写数据（含 private 表、可建表、导入导出）。
+  协作者不能删页、删表或改表权限（403），令牌只对这一页有效，接口不开 CORS、无令牌或令牌错一律 401。另一个一站沙箱里用
+  `aio-share.py --api <接口> --token <令牌> info|pull`，拉到 `share/remote/<主人>/<页面名>/`，该目录记住接口与令牌，之后直接 `publish <目录>` 发回原页、
+  `--remote <目录> data ...` 操作数据，并照常渲染封面。页面元数据记录 `updatedBy`（协作者名称），控制台显示「由 X 更新」。
+- **页面指南**：页面目录顶层的 `AGENTS.md` 随页面发布与拉取，写给接手的 Agent（用途、文件结构、各表用途与记录形状），访客路径上一律 404（不分大小写），协作接口的说明里会附上它。
 - **封面**：`publish` 发布后，沙箱用 `aio-render` 的无头 Chromium 打开线上页面（访客视角、数据已加载），截 480×640（2 倍密度）的 JPEG，
   经 `/share/<账号>/pages/<页面名>/cover` 存为页面目录下的 `.cover`（只认 JPEG/PNG/WebP 文件头，≤1.5 MB；公开路径不提供隐藏文件）。
   渲染失败不影响发布（输出 `coverError`），`aio-share.py cover <页面名>|--missing` 可重渲；同名重发布保留旧封面直到新封面写入；
@@ -732,7 +743,7 @@ Android 手机用 USB 接在装了 Mac App 的 Mac 上，由 App 运行的 `bin/
 - **存储与隔离**：快照存在宿主 `<PA_DATA_DIR>/shares/<账号>/<页面名>/`，访问时只读快照，不触碰沙箱。每页最多 200 个文件、20 MB，每账号 100 页；
   路径拒绝 `..`、隐藏文件、反斜杠与控制字符。页面位于工作区来源，响应带 `Content-Security-Policy: sandbox allow-scripts …`（无 `allow-same-origin`），
   读不到工作区会话、cookie 或 localStorage；另带 `nosniff`、`no-referrer`、`noindex`，不设置 cookie。页面文件一律 `Cache-Control: no-cache` 并带弱 ETag 与 Last-Modified（经 Cloudflare 时 ETag 会被去掉，靠 Last-Modified；每次发布的文件时间至少比上一版晚一秒）：
-  每次打开都向服务器确认，未变的文件回 304、不重传，同名重发布后访客立刻看到新版本，不会被浏览器或 CDN 缓存挡住。页面与其 `.data` 是全站仅有的不需要登录的路径。
+  每次打开都向服务器确认，未变的文件回 304、不重传，同名重发布后访客立刻看到新版本，不会被浏览器或 CDN 缓存挡住。页面、其 `.data` 与凭协作者令牌访问的 `.api` 是全站仅有的不需要登录的路径。
 
 ### 数据图表（消息里的 K 线、走势、对比、占比）
 

@@ -154,6 +154,12 @@ export const api = {
   /** A clawpage's cover picture; with its version the browser keeps it. */
   clawpageCoverUrl: (page: string, version?: number | null) => apiUrl(`/api/clawpages/${encodeURIComponent(page)}/cover${version ? `?v=${version}` : ""}`),
   clawpageDelete: (page: string) => request<void>(`/api/clawpages/${encodeURIComponent(page)}`, { method: "DELETE" }),
+  /** Other people's agents allowed to maintain a clawpage. */
+  clawpageCollaborators: (page: string) => request<{ collaborators: import("./types").ClawpageCollaborator[] }>(`/api/clawpages/${encodeURIComponent(page)}/collaborators`, { cache: "no-store" }),
+  /** A new collaborator: its invitation (API and token) is shown once. */
+  clawpageInvite: (page: string, label: string) =>
+    request<import("./types").ClawpageCollaborator & { api: string; invitation: string }>(`/api/clawpages/${encodeURIComponent(page)}/collaborators`, { method: "POST", body: { label } }),
+  clawpageRevoke: (page: string, id: string) => request<void>(`/api/clawpages/${encodeURIComponent(page)}/collaborators/${encodeURIComponent(id)}`, { method: "DELETE" }),
   clawpageRecords: (page: string, table: string, after?: string | null, signal?: AbortSignal) =>
     request<{ records: import("./types").ClawpageRecord[]; nextCursor: string | null }>(`/api/clawpages/${encodeURIComponent(page)}/tables/${encodeURIComponent(table)}?limit=50${after ? `&after=${encodeURIComponent(after)}` : ""}`, { signal, cache: "no-store" }),
   clawpageExportUrl: (page: string, table: string) => apiUrl(`/api/clawpages/${encodeURIComponent(page)}/tables/${encodeURIComponent(table)}/export`),

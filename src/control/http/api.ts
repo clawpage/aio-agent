@@ -720,6 +720,19 @@ export function createApiRouter(context: AppContext): Router {
     if (!share.remove(userId, page)) throw new DataError(404, "PAGE_NOT_FOUND", "The page does not exist");
     return undefined;
   }));
+  // Collaborators: other people's agents the owner lets maintain a page; a new one's token is shown once, in its invitation.
+  router.get("/clawpages/:page/collaborators", requireKind("primary"), requireSession, (req, res) => clawpages(req, res, (userId, page, share) => {
+    if (!share.exists(userId, page)) throw new DataError(404, "PAGE_NOT_FOUND", "The page does not exist");
+    return { collaborators: share.data!.collaborators(userId, page) };
+  }));
+  router.post("/clawpages/:page/collaborators", requireKind("primary"), requireSession, (req, res) => clawpages(req, res, (userId, page, share) => {
+    track(req, "clawpage_invite", {});
+    return share.invite(userId, page, req.body?.label);
+  }));
+  router.delete("/clawpages/:page/collaborators/:id", requireKind("primary"), requireSession, (req, res) => clawpages(req, res, (userId, page, share) => {
+    if (!share.data!.removeCollaborator(userId, page, String(req.params.id))) throw new DataError(404, "COLLABORATOR_NOT_FOUND", "No such collaborator");
+    return undefined;
+  }));
   router.get("/clawpages/:page/tables/:table", requireKind("primary"), requireSession, (req, res) => clawpages(req, res, (userId, page, share) =>
     share.data!.list(userId, page, String(req.params.table), owner, { limit: req.query.limit, after: req.query.after })));
   router.get("/clawpages/:page/tables/:table/export", requireKind("primary"), requireSession, (req, res) => clawpages(req, res, (userId, page, share) => {

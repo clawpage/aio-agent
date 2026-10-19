@@ -1,7 +1,7 @@
 import { test, expect, type Page } from "@playwright/test";
 import zlib from "node:zlib";
 import { mockConsole } from "./mock-api";
-import type { Clawpage, ClawpageRecord } from "../../src/ui/src/types";
+import type { Clawpage, ClawpageCollaborator, ClawpageRecord } from "../../src/ui/src/types";
 
 const WS = "https://agent-workspace.example.com";
 
@@ -27,13 +27,13 @@ const COVER = solidPng(96, 128);
 const now = Date.now();
 const PAGES: Clawpage[] = [
   {
-    name: "lunch-poll", title: "午饭投票", url: `${WS}/u/owner/share/lunch-poll/`, files: 2, bytes: 18_432, updatedAt: now - 3_600_000, cover: 123,
+    name: "lunch-poll", title: "午饭投票", url: `${WS}/u/owner/share/lunch-poll/`, files: 2, bytes: 18_432, updatedAt: now - 3_600_000, updatedBy: "Rui 的 Agent", collaborators: 1, cover: 123,
     tables: [
       { name: "votes", permission: "public", records: 3, bytes: 300, createdAt: now - 7_200_000, updatedAt: now - 600_000 },
       { name: "notes", permission: "private", records: 1, bytes: 80, createdAt: now - 7_200_000, updatedAt: now - 900_000 },
     ],
   },
-  { name: "tokyo-trip", title: "东京行程", url: `${WS}/u/owner/share/tokyo-trip/`, files: 1, bytes: 9_000, updatedAt: now - 86_400_000, tables: [], cover: null },
+  { name: "tokyo-trip", title: "东京行程", url: `${WS}/u/owner/share/tokyo-trip/`, files: 1, bytes: 9_000, updatedAt: now - 86_400_000, updatedBy: null, collaborators: 0, tables: [], cover: null },
 ];
 const RECORDS: Record<string, ClawpageRecord[]> = {
   votes: [
@@ -48,6 +48,7 @@ async function setup(page: Page, pages = PAGES) {
   const calls: string[] = [];
   let list = structuredClone(pages);
   const records = structuredClone(RECORDS);
+  let collaborators: ClawpageCollaborator[] = [{ id: "c1", label: "Rui 的 Agent", createdAt: now - 7_200_000, lastUsedAt: now - 600_000 }];
   await mockConsole(page, { conversations: [] });
   await page.route((url) => url.pathname === "/api/main", (r) => r.fulfill({ json: { mode: "tasks", tasks: [], nextBefore: null, version: "v1" } }));
   await page.route((url) => url.pathname.startsWith("/api/clawpages"), async (r) => {
@@ -58,6 +59,14 @@ async function setup(page: Page, pages = PAGES) {
     const [name, sub, table, rest, key] = parts;
     if (!name) return r.fulfill({ json: { pages: list } });
     if (sub === "cover") return name === "lunch-poll" ? r.fulfill({ contentType: "image/png", body: COVER }) : r.fulfill({ status: 404, json: { error: "not_found" } });
+    if (sub === "collaborators" && req.method() === "GET") return r.fulfill({ json: { collaborators: name === "lunch-poll" ? collaborators : [] } });
+    if (sub === "collaborators" && req.method() === "POST") {
+      const { label } = req.postDataJSON() as { label: string };
+      const added = { id: "c2", label, createdAt: Date.now(), lastUsedAt: null };
+      collaborators = [...collaborators, added];
+      return r.fulfill({ status: 201, json: { ...added, api: `${WS}/u/owner/share/${name}/.api`, invitation: `owner invites your agent…\nCollaborator API: ${WS}/u/owner/share/${name}/.api\nToken: cpc_secret` } });
+    }
+    if (sub === "collaborators" && req.method() === "DELETE") { collaborators = collaborators.filter((c) => c.id !== table); return r.fulfill({ status: 204 }); }
     if (sub === "open") return r.fulfill({ json: { url: `${WS}/u/owner/share/${name}/#cp=owner-token` } });
     if (!sub && req.method() === "DELETE") { list = list.filter((p) => p.name !== name); return r.fulfill({ status: 204 }); }
     if (sub === "tables" && rest === "records" && req.method() === "DELETE") {
@@ -159,6 +168,42 @@ test("the clawpages page is a home screen of mini apps and pages; an icon opens 
   await expect(tripSheet).toHaveCount(0);
   await expect(page.locator('li[data-page="tokyo-trip"]')).toHaveCount(0);
   expect(calls).toContain("DELETE tokyo-trip");
+});
+
+test("a clawpage's sheet lets the owner invite other people's agents, hands over the invitation once, and removes a collaborator", async ({ page, context }, info) => {
+  const calls = await setup(page);
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]).catch(() => undefined);
+  await page.goto("/u/owner/clawpages");
+  await page.getByRole("button", { name: "打开 午饭投票 的详情" }).click();
+  const sheet = page.getByRole("dialog", { name: "午饭投票" });
+  // Who published the version shown.
+  await expect(sheet.locator(".clawpage-sheet-name")).toContainText("由 Rui 的 Agent 更新");
+  const collab = sheet.getByTestId("clawpage-collab");
+  await expect(collab.getByRole("heading", { name: "让别人的 Agent 一起改" })).toBeVisible();
+  await expect(collab.locator('li[data-id="c1"]')).toContainText("Rui 的 Agent");
+  await expect(collab.locator('li[data-id="c1"]')).toContainText("最近使用");
+  // A name first; then the invitation, with its token, shown once to copy.
+  await expect(collab.getByRole("button", { name: "生成邀请" })).toBeDisabled();
+  await collab.getByRole("textbox", { name: "协作者名称" }).fill("妈妈的 Agent");
+  await collab.getByRole("button", { name: "生成邀请" }).click();
+  const invitation = collab.getByTestId("clawpage-invitation");
+  await expect(invitation.locator("textarea")).toHaveValue(/Token: cpc_secret/);
+  expect(calls).toContain("POST lunch-poll/collaborators");
+  await expect(collab.locator('li[data-id="c2"]')).toContainText("还没用过");
+  await collab.getByRole("button", { name: "复制邀请" }).click();
+  await expect(invitation.getByRole("status")).toHaveText(/邀请已复制|复制失败/);
+  await sheet.evaluate((el) => el.querySelector(".clawpage-sheet-body")?.scrollTo(0, 1e6));
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
+  await page.waitForTimeout(300);
+  await page.screenshot({ path: info.outputPath("clawpage-collaborators.png") });
+  await collab.getByRole("button", { name: "完成" }).click();
+  await expect(invitation).toHaveCount(0);
+  // Removing takes two taps.
+  await collab.getByRole("button", { name: "移除 Rui 的 Agent" }).click();
+  expect(calls.filter((c) => c.startsWith("DELETE"))).toEqual([]);
+  await collab.getByRole("button", { name: "移除 Rui 的 Agent" }).click();
+  await expect(collab.locator('li[data-id="c1"]')).toHaveCount(0);
+  expect(calls).toContain("DELETE lunch-poll/collaborators/c1");
 });
 
 test("an account without clawpages is told how to make one", async ({ page }) => {
