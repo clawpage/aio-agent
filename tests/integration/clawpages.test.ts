@@ -506,6 +506,7 @@ it("a collaborator's agent maintains a page through its API: instructions, files
   expect(info).toMatchObject({ updatedAt: v1.updatedAt, you: "Rui's agent", owner: "owner", guide: "# Guide\nVotes go in table votes." });
   expect(info.prompt).toContain("Votes go in table votes.");
   expect(info.prompt).toContain("baseUpdatedAt");
+  expect(info.prompt).toContain("User-Agent");
   expect(info.prompt).not.toContain(token);
   expect(await (await pub("/u/owner/share/team-board/.api/prompt", { headers: auth })).text()).toBe(info.prompt);
   const pulled = JSON.parse(await (await pub("/u/owner/share/team-board/.api/files", { headers: auth })).text()) as { updatedAt: number; files: Array<{ path: string }> };

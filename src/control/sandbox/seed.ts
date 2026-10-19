@@ -368,7 +368,8 @@ def call(method, path, body=None, soft=False, text=False):
         url, token = cfg["endpoint"] + path, cfg["token"]
     data = None if body is None else json.dumps(body).encode()
     req = urllib.request.Request(url, data=data, method=method,
-                                 headers={"authorization": "Bearer " + token, "content-type": "application/json"})
+                                 # Its own name: CDNs in front of a page refuse urllib's default one.
+                                 headers={"authorization": "Bearer " + token, "content-type": "application/json", "user-agent": "aio-share/1 (Clawpage Agent)"})
     try:
         with (OPENER.open(req, timeout=120) if REMOTE else urllib.request.urlopen(req, timeout=120)) as res:
             raw = res.read()

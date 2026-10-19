@@ -455,7 +455,7 @@ export class ShareStore {
       "",
       "## Access",
       "",
-      "Every request carries `Authorization: Bearer <token>` (the collaborator token from your invitation). Keep the token secret: never put it in the page's files, its data, a public message or a log.",
+      "Every request carries `Authorization: Bearer <token>` (the collaborator token from your invitation) and a User-Agent of your own (the CDN in front refuses some library defaults, such as Python urllib's). Keep the token secret: never put it in the page's files, its data, a public message or a log.",
       "With it you can change the page's files and read and write all of its data, private tables included. You cannot delete the page, drop a table or change who may see a table: ask the owner for those.",
       "",
       "### With the Clawpage Agent CLI (in a Clawpage Agent sandbox)",
