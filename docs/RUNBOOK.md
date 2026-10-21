@@ -181,6 +181,19 @@ curl -s -H "authorization: Bearer $T" http://127.0.0.1:4904/status    # {"truste
 
 停用：删去 `PA_KEYBOARD_BRIDGE_URL` 并重启（键盘桥退出时会让 App 一起退出）。
 
+### 朗读服务（aio_tts）
+
+所有账号的朗读工具共用 old-mb 上的一台语音服务（`docs/FEATURES.md`「朗读」）：Qwen3-TTS 12Hz 0.6B CustomVoice，纯 C 引擎
+`gabriele-mastrapasqua/qwen3-tts`（钉在 `ef339be`，AVX2 构建），`--int8 -j 6 --serve 4911`，launchd 标签 `com.workspace.qwen3-tts`，
+目录 `~/workspace/projects/qwen3-tts`（`src/` 源码与二进制、`models/qwen3-tts-0.6b/` 约 2.4 GB、`var/server.log`）。
+
+- 部署或升级：本机运行 `deploy/tts/deploy.sh`（默认 `max@100.80.219.88`；改钉住的提交就改脚本里的 `rev`），会编译、补下载模型、重写 plist 并重启。
+- 启用：`var/deploy/control.env` 加 `PA_TTS_URL=http://192.168.1.118:4911/v1/tts`，重建并重启控制面；新开的执行会话获得 `aio_tts`。
+- 看状态：`curl -s http://192.168.1.118:4911/v1/health`（`num_requests_running`、`timed_out` 等计数）；控制面日志
+  `docker logs aio-control-1 2>&1 | grep tts-tool`（`speech made` 含字数、分段、等候与耗时，`speech failed` 是失败）。
+- 实测（2026-10-21，经局域网）：4 秒音频 6.6 秒、27 秒音频 39 秒，RTF 约 1.45；用 X-ASR 回听，中英混读、小数、百分号都读对。
+- 服务监听所有网卡、没有鉴权（同 `:4910`），只在家庭网络与 tailnet 内可达；沙箱不直接调用它。
+
 ## 4. 账号与凭据
 
 创建受信任普通成员（构建后，使用同一生产环境配置）：

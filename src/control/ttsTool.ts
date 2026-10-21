@@ -43,7 +43,7 @@ const TOOLS = [
     name: "text_to_speech",
     description:
       "Read text aloud: synthesize it as speech (a 24 kHz mono WAV), save it to the workspace, and return its path. " +
-      `Up to ${MAX_CHARS} characters per call; synthesis is slower than real time (roughly a minute or two per minute of speech), and requests from everyone wait their turn. ` +
+      `Up to ${MAX_CHARS} characters per call; synthesis is slower than real time (about a minute and a half per minute of speech), and requests from everyone wait their turn. ` +
       "Pass the words exactly as they should be spoken: no Markdown, links, or emoji; write out numbers, units, and abbreviations the way they should be read when that matters. " +
       "Square brackets are control tags ([pause:500ms] inserts a pause), so leave out any other bracketed text.",
     inputSchema: {
@@ -73,7 +73,7 @@ export const TTS_POLICY =
   "Text to speech is available (aio_tts): when the user wants something read aloud or wants an audio or voice version of text (a story, an article, a message, a pronunciation, a podcast script), make it with text_to_speech, with path set to a .wav in this task's folder; do not install or call other speech engines or online TTS services. " +
   "Then put the file in your reply as a link on a line of its own, [description](path), which the console shows as a player. " +
   "Longer text than one call takes: make several files in order and join them with ffmpeg in the sandbox; convert to mp3 there too when the user wants a smaller file. " +
-  "Speech takes a while to make (roughly a minute or two per minute of audio), so for long text tell the user first how long it will be.";
+  "Speech takes a while to make (about a minute and a half per minute of audio, and Chinese is read at roughly 4 to 5 characters a second), so for long text tell the user first how long it will be.";
 
 /** Saving audio in one account's workspace. */
 export interface SpeechFiles {
