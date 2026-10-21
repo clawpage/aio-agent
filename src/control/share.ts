@@ -5,6 +5,7 @@ import { randomBytes, timingSafeEqual } from "node:crypto";
 import type { NextFunction, Request, Response } from "express";
 import type { Config } from "./config.js";
 import { ClawpageData, DataError, type Caller, type TableSummary } from "./clawpages.js";
+import { AI_EFFORTS, AiError, type AiEffort, type AiMessage, type ClawpageAi } from "./clawpageAi.js";
 import { requestLocale, t } from "./i18n/index.js";
 
 /**
@@ -28,6 +29,12 @@ import { requestLocale, t } from "./i18n/index.js";
  * and how to work on it (a prompt, with the page's `AGENTS.md` guide), hands out
  * its files, takes a new version and reads and writes its data. A collaborator
  * publishes only on top of the version it pulled, so nobody's change is lost.
+ *
+ * Visitors may sign in to a page with their account here: `.auth/sign-in` sends them
+ * to the console's origin, which asks them once per page and comes back with a visitor
+ * token in the fragment (clawpages.ts). With it the page's script reads and writes the
+ * tables kept for signed-in visitors and asks `.ai` for answers from the visitor's own
+ * AI (clawpageAi.ts), shaped by the prompts the page ships in `prompts/<name>.md`.
  */
 
 export const SHARE_NAME = /^[a-z0-9][a-z0-9-]{0,62}$/;
@@ -51,6 +58,12 @@ const TYPES: Record<string, string> = {
   ".woff": "font/woff", ".woff2": "font/woff2", ".ttf": "font/ttf", ".otf": "font/otf",
   ".mp3": "audio/mpeg", ".mp4": "video/mp4", ".webm": "video/webm", ".pdf": "application/pdf",
 };
+
+/** A page's prompt for its AI answers: `prompts/<name>.md`, published with the page. */
+export const PROMPT_NAME = /^[a-z0-9][a-z0-9_-]{0,62}$/;
+const PROMPT_MAX = 32 * 1024;
+/** What a page may send the AI at once. */
+const AI_INPUT = { messages: 40, chars: 60_000, body: 256 * 1024 };
 
 /** A data request's body: a record (64 KB) with room for the JSON around it; an import from the sandbox may be larger. */
 const DATA_BODY = { visitor: 128 * 1024, owner: 16 * 1024 * 1024 };
@@ -128,12 +141,15 @@ export class ShareStore {
   #userIdOf: (username: string) => string | null;
   /** The pages' tables; absent where a store is built without data (tests of the page side only). */
   readonly data?: ClawpageData;
+  /** AI answers on signed-in visitors' own accounts; absent where the deployment offers none. */
+  ai?: Pick<ClawpageAi, "answer">;
 
   constructor(opts: {
     cfg: Config; port: number;
     usernameOf: (userId: string) => string | null;
     userIdOf: (username: string) => string | null;
     data?: ClawpageData;
+    ai?: Pick<ClawpageAi, "answer">;
   }) {
     this.#cfg = opts.cfg;
     this.#root = path.join(opts.cfg.dataDir, "shares");
@@ -141,6 +157,16 @@ export class ShareStore {
     this.#usernameOf = opts.usernameOf;
     this.#userIdOf = opts.userIdOf;
     this.data = opts.data;
+    this.ai = opts.ai;
+  }
+
+  /** The account a page address names (`/u/<username>/...`). */
+  userIdOf(username: string): string | null {
+    return this.#userIdOf(username);
+  }
+
+  usernameOf(userId: string): string | null {
+    return this.#usernameOf(userId);
   }
 
   /** Give a runtime its publish capability; its sandbox receives the token through `cfg.share`. */
@@ -161,6 +187,14 @@ export class ShareStore {
 
   pageUrl(userId: string, name: string): string {
     return `https://${this.#cfg.workspaceHost}/u/${this.#usernameOf(userId) ?? userId}/share/${name}/`;
+  }
+
+  /**
+   * Where a signed-in visitor goes back to: the page, or a path inside it (`return`, relative
+   * to the page's folder, with its query), carrying the sign-in's outcome in the fragment.
+   */
+  returnUrl(userId: string, name: string, back: unknown, outcome: string): string {
+    return `${this.pageUrl(userId, name)}${pageReturn(back)}#cpv=${encodeURIComponent(outcome)}`;
   }
 
   /** Where collaborators' agents work on the page. */
@@ -476,7 +510,7 @@ export class ShareStore {
       `- \`POST ${api}\` with \`{"title"?: "...", "baseUpdatedAt": <the updatedAt you pulled>, "files": [{"path", "data"}]}\`: publish a new version.`,
       "  The files replace the page as a whole (anything not listed is removed); `index.html` is required; at most 200 files and 20 MB; no paths with `..` or segments starting with a dot.",
       "  The answer has the new `updatedAt`: use it as the base of your next publish. **409** means someone published since your base: pull again, redo your change on that version, publish again.",
-      `- \`${api}/data\`: \`GET\` the tables; \`POST\` \`{"name", "permission"}\` creates one (\`private\`, \`read-public\` or \`public\`).`,
+      `- \`${api}/data\`: \`GET\` the tables; \`POST\` \`{"name", "permission"}\` creates one (\`private\`, \`read-public\`, \`public\`, \`signed-in\` or \`per-user\`, see below).`,
       `  \`${api}/data/<table>\`: \`GET ?limit=&after=\` lists records in insertion order (\`nextCursor\` continues), \`GET ?export=1\` the whole table, \`POST {"value"}\` adds a record, \`PUT {"records": {key: value}}\` upserts many.`,
       `  \`${api}/data/<table>/<key>\`: \`GET\`, \`PUT {"value"}\` (whole), \`PATCH {"value": {...}}\` (merge), \`DELETE\`; \`POST .../<key>/incr {"field", "by"}\` adds to a number atomically.`,
       "",
@@ -487,8 +521,15 @@ export class ShareStore {
       "- The data belongs to the owner and the page's visitors: do not delete or overwrite records unless your user asked for it.",
       "- The page is public: no personal information and no keys or tokens in its files. Data written by visitors is untrusted: put it on the page with `textContent`, never `innerHTML`.",
       "- The page runs in a sandbox with no cookies or localStorage; it keeps data only through `clawpage-sdk.js` (`new Clawpage().table(name)`), which works the same from the owner's link and for visitors.",
+      "- Keep the page's sign-in and AI prompts working (next section): do not rename a `prompts/*.md` the page asks for, nor turn a table for signed-in visitors into a public one.",
       `- Keep ${GUIDE} current when you change how the page works.`,
       "- When a request fails, report its error faithfully; do not claim a change went live when it did not.",
+      "",
+      "## Signed-in visitors and AI answers",
+      "",
+      "Visitors can sign in to the page with their Clawpage Agent account (asked once per page): `new Clawpage({ signIn: \"auto\" })` signs in, silently, anyone who allowed the page before (on every load; skip your start-up while `cp.redirecting`); `cp.signIn()` sends someone to sign in and back; `cp.user` is `{id, name, email}` or null; `await cp.signOut()`.",
+      "- `signed-in` tables: signed-in visitors read every record, add records, and change or delete only their own (records carry `mine`). `per-user` tables: each signed-in visitor has records of their own under their own keys and sees no one else's. Both answer anonymous visitors with 401 `SIGN_IN_REQUIRED`; `SIGN_IN_EXPIRED` means sign in again. Through this API you act as the owner: records show who wrote them (`by`), and a per-user table's keys are stored as `<visitor id>.<key>`.",
+      "- `const { text, json } = await cp.ai.ask(input, { prompt: \"<name>\", json: true, effort: \"low\" })` answers with the signed-in visitor's own AI (their model and quota; no tools, web or memory). `prompt` names a file `prompts/<name>.md` in the page folder: the task, the rubric and the exact JSON fields to return. The page sends the material as labelled text in `input` (or `{messages: [{role, content}]}`). Errors: `SIGN_IN_REQUIRED`, `PROMPT_NOT_FOUND`, `RATE_LIMITED` (10 a minute, 300 a day per person and page), `AI_BUSY`, `AI_FAILED`, `AI_TIMEOUT`; in a `file://` preview, `PREVIEW`.",
       "",
     ].join("\n");
   }
@@ -601,6 +642,9 @@ export class ShareStore {
     if (!data || !this.exists(userId, page)) return reply(404, { error: "PAGE_NOT_FOUND", message: "The page does not exist" });
     const token = String(req.headers.authorization ?? "").replace(/^Bearer\s+/i, "");
     const owner = !!token && data.isOwnerToken(token, userId, page);
+    const visitor = !owner && data.isVisitorToken(token) ? data.visitorOf(token, userId, page) : null;
+    // A page holding a stale sign-in is told so, never quietly treated as anonymous (its writes would lose their author).
+    if (!owner && data.isVisitorToken(token) && !visitor) return reply(401, { error: "SIGN_IN_EXPIRED", message: "The sign-in has expired or was signed out; sign in again" });
     const write = req.method !== "GET" && req.method !== "HEAD";
     if (!owner && !data.allow(req.paCtx?.ip ?? "unknown", userId, page, write ? "writes" : "reads")) {
       return reply(429, { error: "RATE_LIMITED", message: "Too many requests; try again in a minute" });
@@ -609,11 +653,88 @@ export class ShareStore {
       const segments = rest.split("/").filter(Boolean).map((s) => decodeURIComponent(s));
       const body = write && req.method !== "DELETE" ? await readJson(req, owner ? DATA_BODY.owner : DATA_BODY.visitor) : {};
       // The page's script holds an owner link's token: it uses the tables, never manages them (a collaborator may have written it).
-      const out = this.dataRequest(userId, page, segments, req.method === "HEAD" ? "GET" : req.method, new URLSearchParams(query), body, { owner, manage: false, ip: req.paCtx?.ip });
+      const out = this.dataRequest(userId, page, segments, req.method === "HEAD" ? "GET" : req.method, new URLSearchParams(query), body, { owner, manage: false, ip: req.paCtx?.ip, visitor });
       reply(out.status, out.body);
     } catch (err) {
       if (err instanceof DataError) reply(err.status, { error: err.code, message: err.message });
       else if (err instanceof URIError) reply(400, { error: "INVALID_PATH", message: "Invalid path" });
+      else reply(500, { error: "INTERNAL", message: "The request failed" });
+    }
+  }
+
+  /**
+   * `/u/<username>/share/<name>/.auth[/sign-in]`: a page's visitors signing in.
+   * `sign-in` sends the browser to the console's origin (which knows the person and asks them once
+   * per page); `GET .auth` with a visitor token says who it names, `DELETE` signs them out of the page.
+   */
+  #serveAuth(req: Request, res: Response, userId: string, page: string, rest: string, query: string): void {
+    const reply = (status: number, body?: unknown) => {
+      res.status(status).set(DATA_HEADERS);
+      if (body === undefined) res.end();
+      else res.send(JSON.stringify(body));
+    };
+    if (req.method === "OPTIONS") return reply(204);
+    if (!this.data || !this.exists(userId, page)) return reply(404, { error: "PAGE_NOT_FOUND", message: "The page does not exist" });
+    if (rest === "/sign-in") {
+      if (req.method !== "GET") return reply(405, { error: "METHOD_NOT_ALLOWED", message: "GET only" });
+      const params = new URLSearchParams(query);
+      const target = new URLSearchParams({ owner: this.#usernameOf(userId) ?? userId, page, return: pageReturn(params.get("return")) });
+      if (params.get("silent") === "1") target.set("silent", "1");
+      res.status(302).set({ location: `https://${this.#cfg.primaryHost}/api/clawpage-sso/authorize?${target}`, "cache-control": "no-store", "referrer-policy": "no-referrer" }).end();
+      return;
+    }
+    if (rest !== "" && rest !== "/") return reply(404, { error: "NOT_FOUND", message: "No such path" });
+    const token = String(req.headers.authorization ?? "").replace(/^Bearer\s+/i, "");
+    const visitor = this.data.visitorOf(token, userId, page);
+    if (!visitor) return reply(401, { error: "SIGN_IN_REQUIRED", message: "Not signed in to this page" });
+    if (req.method === "GET") return reply(200, { user: visitor });
+    if (req.method === "DELETE") { this.data.revokeGrant(userId, page, visitor.id); return reply(204); }
+    reply(405, { error: "METHOD_NOT_ALLOWED", message: `${req.method} is not allowed here` });
+  }
+
+  /** The page's prompt for its AI answers, or null when it has none of that name. */
+  prompt(userId: string, page: string, name: string): string | null {
+    if (!PROMPT_NAME.test(name)) return null;
+    try {
+      const file = path.join(this.#userDir(userId), page, "prompts", `${name}.md`);
+      if (fs.statSync(file).size > PROMPT_MAX) throw new DataError(413, "PROMPT_TOO_LARGE", `prompts/${name}.md is larger than ${PROMPT_MAX / 1024} KB`);
+      return fs.readFileSync(file, "utf8");
+    } catch (err) {
+      if (err instanceof DataError) throw err;
+      return null;
+    }
+  }
+
+  /**
+   * `/u/<username>/share/<name>/.ai`: an answer from the signed-in visitor's own AI. The page names
+   * one of its published prompts (`prompts/<name>.md`) and sends the conversation; nothing else of
+   * the visitor's account is involved, and the page never learns which model answered beyond its name.
+   */
+  async #serveAi(req: Request, res: Response, userId: string, page: string, rest: string): Promise<void> {
+    const reply = (status: number, body?: unknown) => {
+      res.status(status).set(DATA_HEADERS);
+      if (body === undefined) res.end();
+      else res.send(JSON.stringify(body));
+    };
+    if (req.method === "OPTIONS") return reply(204);
+    if (!this.data || !this.exists(userId, page)) return reply(404, { error: "PAGE_NOT_FOUND", message: "The page does not exist" });
+    if (rest !== "" && rest !== "/") return reply(404, { error: "NOT_FOUND", message: "No such path" });
+    if (req.method !== "POST") return reply(405, { error: "METHOD_NOT_ALLOWED", message: "POST only" });
+    const token = String(req.headers.authorization ?? "").replace(/^Bearer\s+/i, "");
+    const visitor = this.data.visitorOf(token, userId, page);
+    if (!visitor) return reply(401, { error: this.data.isVisitorToken(token) ? "SIGN_IN_EXPIRED" : "SIGN_IN_REQUIRED", message: "AI answers need the visitor to sign in to this page" });
+    if (!this.ai) return reply(503, { error: "AI_UNAVAILABLE", message: "This deployment offers no AI answers" });
+    try {
+      const body = await readJson(req, AI_INPUT.body);
+      const ask = aiInput(body);
+      const instructions = ask.prompt === null ? null : this.prompt(userId, page, ask.prompt);
+      if (ask.prompt !== null && instructions === null) throw new DataError(404, "PROMPT_NOT_FOUND", `The page has no prompts/${ask.prompt}.md`);
+      if (!this.data.allowAi(visitor.id, userId, page)) return reply(429, { error: "RATE_LIMITED", message: "Too many AI requests; try again in a minute" });
+      const meta = this.#meta(userId, page);
+      const answer = await this.ai.answer(visitor.id, { system: aiSystem(meta?.title ?? page, this.#usernameOf(userId) ?? userId, instructions, ask.json), messages: ask.messages, effort: ask.effort });
+      reply(200, { text: answer.text, ...(ask.json ? { json: parseJsonAnswer(answer.text) } : {}), model: answer.model });
+    } catch (err) {
+      if (err instanceof DataError || err instanceof AiError) reply(err.status, { error: err.code, message: err.message });
       else reply(500, { error: "INTERNAL", message: "The request failed" });
     }
   }
@@ -631,6 +752,15 @@ export class ShareStore {
       const [, username, rawName, rest] = m;
       const dataPath = rawName && SHARE_NAME.test(rawName) && rest !== undefined ? /^\/\.data(\/.*)?$/.exec(rest) : null;
       const apiPath = rawName && SHARE_NAME.test(rawName) && rest !== undefined ? /^\/\.api(\/.*)?$/.exec(rest) : null;
+      const authPath = rawName && SHARE_NAME.test(rawName) && rest !== undefined ? /^\/\.auth(\/.*)?$/.exec(rest) : null;
+      const aiPath = rawName && SHARE_NAME.test(rawName) && rest !== undefined ? /^\/\.ai(\/.*)?$/.exec(rest) : null;
+      if (authPath || aiPath) {
+        const userId = this.#userIdOf(username!);
+        if (!userId) return void res.status(404).set(DATA_HEADERS).send(JSON.stringify({ error: "PAGE_NOT_FOUND", message: "The page does not exist" }));
+        if (authPath) return this.#serveAuth(req, res, userId, rawName!, authPath[1] ?? "", query);
+        void this.#serveAi(req, res, userId, rawName!, aiPath![1] ?? "");
+        return;
+      }
       if (apiPath) {
         const userId = this.#userIdOf(username!);
         if (!userId) return void res.status(401).set(API_HEADERS).send(JSON.stringify({ error: "UNAUTHORIZED", message: "This needs a collaborator token for this page" }));
@@ -740,5 +870,59 @@ async function readJson(req: http.IncomingMessage, limit: number): Promise<Recor
     return body as Record<string, unknown>;
   } catch {
     throw new DataError(400, "INVALID_JSON", "The request body must be a JSON object");
+  }
+}
+
+/**
+ * A path inside a page to come back to after signing in: relative to the page's folder, with its
+ * query; anything that could lead elsewhere (an absolute path, `..`, a scheme, a fragment) is dropped.
+ */
+export function pageReturn(raw: unknown): string {
+  if (typeof raw !== "string" || raw.length > 512 || /[\u0000-\u001f\u007f\\#]/.test(raw)) return "";
+  const [rel, query] = [raw.split("?")[0]!, raw.includes("?") ? raw.slice(raw.indexOf("?")) : ""];
+  if (rel && !safeSegments(rel.endsWith("/") ? `${rel}index.html` : rel)) return "";
+  return rel + query;
+}
+
+/** What a page asks the AI: its prompt's name, the conversation (or one `input`), JSON or text, how hard to think. */
+function aiInput(body: Record<string, unknown>): { prompt: string | null; messages: AiMessage[]; json: boolean; effort: AiEffort } {
+  const prompt = body.prompt === undefined || body.prompt === null ? null : String(body.prompt);
+  if (prompt !== null && !PROMPT_NAME.test(prompt)) throw new DataError(400, "INVALID_PROMPT", "prompt names a file prompts/<name>.md: lowercase letters, digits, - or _");
+  const raw = typeof body.input === "string" ? [{ role: "user", content: body.input }] : body.messages;
+  if (!Array.isArray(raw) || !raw.length || raw.length > AI_INPUT.messages) throw new DataError(400, "INVALID_MESSAGES", `Send input (text) or messages (1-${AI_INPUT.messages} of {role: "user"|"assistant", content: text})`);
+  let chars = 0;
+  const messages = raw.map((m: unknown) => {
+    const { role, content } = (m ?? {}) as { role?: unknown; content?: unknown };
+    if ((role !== "user" && role !== "assistant") || typeof content !== "string" || !content.trim()) throw new DataError(400, "INVALID_MESSAGES", "Each message is {role: \"user\"|\"assistant\", content: non-empty text}");
+    chars += content.length;
+    return { role, content } as AiMessage;
+  });
+  if (chars > AI_INPUT.chars) throw new DataError(413, "INPUT_TOO_LARGE", `The messages hold at most ${AI_INPUT.chars} characters`);
+  if (messages.at(-1)!.role !== "user") throw new DataError(400, "INVALID_MESSAGES", "The last message is the user's");
+  const effort = body.effort === undefined ? "low" : body.effort;
+  if (!AI_EFFORTS.includes(effort as AiEffort)) throw new DataError(400, "INVALID_EFFORT", `effort is one of ${AI_EFFORTS.join(", ")}`);
+  return { prompt, messages, json: body.json === true, effort: effort as AiEffort };
+}
+
+/** The frame around a page's prompt (models read English): who is asking, what the model cannot do, the answer's form. */
+function aiSystem(title: string, owner: string, instructions: string | null, json: boolean): string {
+  return [
+    `You answer requests from "${title}", a web page / mini app made by ${owner} with Clawpage Agent, for the person using it, on their own AI.`,
+    "You have no tools: you cannot browse, run code, look anything up or remember earlier requests; everything you know about the task is in this prompt and the messages.",
+    "Answer only what the page asks, in the language its instructions or the person's text call for.",
+    ...(json ? ["Reply with exactly one JSON object and nothing else: no code fences, no text before or after it."] : []),
+    ...(instructions?.trim() ? ["", "The page's instructions:", "", instructions.trim()] : []),
+  ].join("\n");
+}
+
+/** The JSON object an answer holds (models sometimes fence it anyway), or null when it holds none. */
+export function parseJsonAnswer(text: string): unknown {
+  const fenced = /```(?:json)?\s*([\s\S]*?)```/i.exec(text)?.[1] ?? text;
+  const start = fenced.indexOf("{"), end = fenced.lastIndexOf("}");
+  if (start < 0 || end <= start) return null;
+  try {
+    return JSON.parse(fenced.slice(start, end + 1)) as unknown;
+  } catch {
+    return null;
   }
 }

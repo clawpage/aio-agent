@@ -1,6 +1,7 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
+import { ClawpageSignIn } from "./components/ClawpageSignIn";
 import { locale, t } from "./i18n";
 import "./theme.css";
 import "./styles.css";
@@ -24,6 +25,7 @@ const container = document.getElementById("root");
 if (!container) throw new Error("#root not found");
 createRoot(container).render(
   <StrictMode>
-    <App />
+    {/* Signing in to a clawpage stands apart from the console: no account address, no task inbox. */}
+    {location.pathname === "/clawpage-sso" ? <ClawpageSignIn /> : <App />}
   </StrictMode>,
 );

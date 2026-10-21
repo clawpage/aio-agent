@@ -41,7 +41,7 @@ const RECORDS: Record<string, ClawpageRecord[]> = {
     { key: "bob", value: { choice: "rice" }, createdAt: now - 800_000, updatedAt: now - 800_000 },
     { key: "carol", value: { choice: "rice", note: "no spice" }, createdAt: now - 700_000, updatedAt: now - 700_000 },
   ],
-  notes: [{ key: "n1", value: { text: "订 12 点的位子" }, createdAt: now - 900_000, updatedAt: now - 900_000 }],
+  notes: [{ key: "n1", value: { text: "订 12 点的位子" }, createdAt: now - 900_000, updatedAt: now - 900_000, by: { id: "user_rui", name: "rui", email: "rui@example.com" } }],
 };
 
 async function setup(page: Page, pages = PAGES) {
@@ -144,14 +144,18 @@ test("the clawpages page is a home screen of mini apps and pages; an icon opens 
   await data.getByRole("button", { name: "删除这条数据（bob）" }).click();
   await expect(data.locator("tbody tr")).toHaveCount(2);
   expect(calls).toContain("DELETE lunch-poll/tables/votes/records/bob");
-  // Who has access, as three choices.
+  // Who has access, as five choices (two for visitors who sign in), all within the sheet even on a phone.
+  await expect(data.getByRole("radio")).toHaveText(["仅自己", "公开只读", "公开读写", "登录后共享", "每人各自"]);
+  const [segments, panel] = await Promise.all([data.locator(".clawpage-segments").boundingBox(), data.boundingBox()]);
+  expect(segments!.x + segments!.width).toBeLessThanOrEqual(panel!.x + panel!.width + 1);
   await data.getByRole("radio", { name: "公开只读" }).click();
   await expect(data.getByRole("radio", { name: "公开只读" })).toHaveAttribute("aria-checked", "true");
   await expect(data.locator(".clawpage-permission-hint")).toHaveText("访客能看、不能改");
   expect(calls).toContain("PATCH lunch-poll/tables/votes");
   await data.getByRole("tab", { name: /^notes/ }).click();
-  await expect(data.locator("thead th")).toHaveText(["时间", "text", ""]);
-  await expect(data.locator("tbody tr")).toHaveText([/订 12 点的位子/]);
+  // A record a signed-in visitor wrote says who.
+  await expect(data.locator("thead th")).toHaveText(["时间", "谁写的", "text", ""]);
+  await expect(data.locator("tbody tr")).toHaveText([/rui@example\.com.*订 12 点的位子/]);
   await expect(data.getByRole("link", { name: "导出" })).toHaveAttribute("href", /\/api\/clawpages\/lunch-poll\/tables\/notes\/export$/);
   await page.keyboard.press("Escape");
   await expect(sheet).toHaveCount(0);

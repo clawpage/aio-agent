@@ -225,13 +225,18 @@ export interface Task {
 }
 
 /** Who may use a clawpage table: only the owner, everyone reads, or everyone reads and writes. */
-export type ClawpagePermission = "private" | "read-public" | "public";
+export type ClawpagePermission = "private" | "read-public" | "public" | "signed-in" | "per-user";
 export interface ClawpageTable { name: string; permission: ClawpagePermission; records: number; bytes: number; createdAt: number; updatedAt: number }
 /** A published clawpage (a public page, a mini app when it has tables). */
 export interface Clawpage { name: string; title: string; url: string; files: number; bytes: number; updatedAt: number; /** The collaborator who published this version; null when the owner did. */ updatedBy: string | null; /** How many other people's agents may maintain it. */ collaborators: number; tables: ClawpageTable[]; /** When its cover was rendered; null without one. */ cover: number | null }
 /** Someone else's agent the owner lets maintain a clawpage (its token is only ever in the invitation). */
 export interface ClawpageCollaborator { id: string; label: string; createdAt: number; lastUsedAt: number | null }
-export interface ClawpageRecord { key: string; value: unknown; createdAt: number; updatedAt: number }
+/** Someone signed in to a clawpage (email null for an account without one). */
+export interface ClawpageVisitor { id: string; name: string; email: string | null }
+/** `by`: the signed-in visitor who wrote the record. */
+export interface ClawpageRecord { key: string; value: unknown; createdAt: number; updatedAt: number; by?: ClawpageVisitor }
+/** What signing in to someone's clawpage shows: the page, and (signed in) the account it would know. */
+export interface ClawpageSsoPage { title: string; owner: string; url: string; cancelUrl: string; account: ClawpageVisitor | null }
 
 /** A reply of the main session that names workspace files (the files page). */
 export interface FileMessage {

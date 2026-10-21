@@ -317,6 +317,7 @@ MAX_FILES, MAX_BYTES = 200, 20 * 1024 * 1024
 SHARE_ROOT = "/home/gem/workspace/share"
 # What a page folder came from: its name and the version it holds; for someone else's page, also its API and token.
 STATE = ".clawpage.json"
+PERMISSIONS = ["private", "read-public", "public", "signed-in", "per-user"]
 # Over HTTPS (plain HTTP only to this machine itself).
 API_URL = re.compile(r"^(?:https://[^/@]+|http://(?:127\.0\.0\.1|localhost)(?::\d+)?)/u/([A-Za-z0-9_-]{2,40})/share/([a-z0-9][a-z0-9-]{0,62})/\.api/?$")
 # Set when working on another account's clawpage through its collaborator API (--api / --remote).
@@ -628,8 +629,8 @@ def main():
             c.add_argument(e)
         return c
     cmd("tables", "List the page's tables")
-    cmd("create", "Create a table", "table").add_argument("--permission", default="private", choices=["private", "read-public", "public"])
-    cmd("permission", "Change who may read and write a table", "table").add_argument("permission", choices=["private", "read-public", "public"])
+    cmd("create", "Create a table", "table").add_argument("--permission", default="private", choices=PERMISSIONS)
+    cmd("permission", "Change who may read and write a table", "table").add_argument("permission", choices=PERMISSIONS)
     cmd("drop", "Delete a table and all its records", "table")
     lc = cmd("list", "List records in insertion order", "table")
     lc.add_argument("--limit", type=int, default=100)
@@ -780,7 +781,7 @@ if __name__ == "__main__":
 
 export const SHARE_SKILL_MD = `---
 name: clawpages
-description: Build, publish and manage clawpages - public web pages and mini apps (trackers, sign-up sheets, polls, guestbooks, small tools) that keep data in tables of their own, at /u/<user>/share/<name>/. Use when the user wants a shareable page or link, a small app that saves data, to change an existing clawpage, to read, edit or summarize what is stored in one, to let someone else's agent work on one, or when given an invitation (a clawpage collaborator API and token) to work on someone else's.
+description: Build, publish and manage clawpages - public web pages and mini apps (trackers, sign-up sheets, polls, guestbooks, study and practice apps, small tools) that keep data in tables of their own, can let visitors sign in with their Clawpage Agent account (each with records of their own) and can answer with the signed-in visitor's own AI (grading, feedback, explanations), at /u/<user>/share/<name>/. Use when the user wants a shareable page or link, a small app that saves data, to change an existing clawpage, to read, edit or summarize what is stored in one, to let someone else's agent work on one, or when given an invitation (a clawpage collaborator API and token) to work on someone else's.
 ---
 
 # Clawpages: pages and mini apps with data
@@ -831,7 +832,7 @@ await votes.delete("alice");                               // true if it existed
   every table, private ones included. Use it to show owner-only views (results, admin, private notes) and hide them from visitors.
 - No live push: to show others' changes, re-read every few seconds while the page is visible.
 - Values are JSON, at most 64 KB a record and 16 levels deep; keys are 1-128 letters, digits, \`.\`, \`_\`, \`-\`. A table holds 10,000 records; a page 20 tables; an account 50 MB.
-- Visitors are anonymous and limited per address (60 writes and 600 reads a minute per page). There is no visitor login; anything a visitor writes to a public table can be read and changed by other visitors.
+- Visitors are anonymous unless they sign in (below), and limited per address (60 writes and 600 reads a minute per page). Anything written to a public table can be read and changed by every other visitor.
 - **Data from visitors is untrusted text.** Put it on the page with \`textContent\` (or escape it), never with \`innerHTML\` or in an attribute or URL unchecked:
   a script smuggled into a record would run whenever someone opens the page, the owner included, with the owner's access.
 
@@ -844,14 +845,50 @@ Create each table before publishing and pick its permission deliberately:
 | \`private\` | cannot see it | read and write |
 | \`read-public\` | read | read and write |
 | \`public\` | read and write | read and write |
+| \`signed-in\` | signed-in visitors read every record, add records, and change or delete only the ones they wrote; anonymous visitors must sign in | read and write; sees who wrote each record (\`by\`) |
+| \`per-user\` | each signed-in visitor has records of their own (their own keys: \`put("progress", ...)\` is theirs alone) and sees no one else's; anonymous visitors must sign in | read and write every visitor's records, stored as \`<visitor id>.<key>\`, with \`by\` |
 
 \`\`\`bash
-$CP data create <name> <table> --permission public      # private | read-public | public
+$CP data create <name> <table> --permission public      # private | read-public | public | signed-in | per-user
 $CP data permission <name> <table> read-public
 $CP data tables <name>
 \`\`\`
 
 The owner writing to a table that does not exist yet creates it as private.
+
+## Signed-in visitors and AI answers
+
+A page can let its visitors sign in with their account on this deployment (Clawpage Agent): the console asks each person once per page
+whether the page may know who they are (their name and email) and use their AI. Use it when visitors need data of their own
+(progress, answers, notes) or AI answers; leave pages that need neither anonymous.
+
+\`\`\`js
+const cp = new Clawpage({ signIn: "auto" });    // "auto": someone who allowed the page before is signed in on every visit, silently
+if (cp.redirecting) return;                     // (inside your start-up code) the page is checking the sign-in and reloads by itself
+cp.user;                                        // {id, name, email} when signed in (email may be null), else null
+cp.signIn();                                    // a "Sign in" button: goes to the console and comes back signed in (or cp.signInDenied)
+await cp.signOut();                             // forget this page's sign-in; the next one asks again
+const mine = cp.table("progress");              // a per-user table: each person's own records
+await mine.put("state", { day: 3, done: [1, 2] });
+const { text, json } = await cp.ai.ask("Essay: ...", { prompt: "grade", json: true });   // the visitor's own AI
+\`\`\`
+
+- Without \`signIn: "auto"\`, a person is signed in only right after pressing your sign-in button (the page cannot keep it across reloads).
+  With it, every load first passes by the console once (a quick redirect); use it when the page is mostly for signed-in use.
+- Records read by a signed-in visitor carry \`mine\` (whether they wrote it). Tables for signed-in visitors answer anonymous ones with \`SIGN_IN_REQUIRED\` (401);
+  \`SIGN_IN_EXPIRED\` means the sign-in ran out or was signed out: \`cp.user\` is null again, offer to sign in. Show a clear sign-in button wherever it is needed.
+- In a \`file://\` preview, \`signIn()\` signs in a stand-in person (\`id: "preview"\`) and \`ai.ask\` fails with \`PREVIEW\`: AI answers work once published.
+
+**AI answers** (\`cp.ai.ask\`) need a signed-in visitor and run on *their* account (their model, counted in their usage, 10 a minute and 300 a day per page);
+the model has no tools, no web, no memory and nothing of their account: only the page's prompt and the messages it sends. Design that prompt as part of the page:
+
+- Put each one in \`prompts/<name>.md\` in the page folder (published with it, and visible to anyone, like every file): the task, the rubric or rules,
+  and the exact answer format. For anything the page shows or stores, ask for JSON with named fields and pass \`json: true\`; the answer's \`json\` is the parsed object (null if the model did not return one: fall back to \`text\`).
+- Send the material in the message, labelled (the question, the reference answer, the person's answer). Keep a reply under the user's control: show it, store it in their records if useful.
+- \`effort\`: \`low\` (default, fastest) for instant feedback, \`medium\`/\`high\` for harder judgement; a member account may be capped lower.
+- Errors: \`SIGN_IN_REQUIRED\`, \`PROMPT_NOT_FOUND\`, \`RATE_LIMITED\`, \`AI_BUSY\` (the account's quota), \`AI_FAILED\`/\`AI_TIMEOUT\`: say so and keep the person's input on the page.
+
+Describe the sign-in, the per-user tables and each prompt in the page's \`AGENTS.md\` (below), so whoever works on the page next keeps them working.
 
 ## Publish, update, pull, delete
 

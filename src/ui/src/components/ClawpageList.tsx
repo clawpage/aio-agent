@@ -10,7 +10,7 @@ import { PopupPresence, PopupSurface } from "./PopupMotion";
 import { useClawpageCover } from "../clawpageCover";
 import { t } from "../i18n";
 
-const PERMISSIONS: ClawpagePermission[] = ["private", "read-public", "public"];
+const PERMISSIONS: ClawpagePermission[] = ["private", "read-public", "public", "signed-in", "per-user"];
 /** Columns shown for object records; the rest of a record is in its tooltip. */
 const MAX_COLUMNS = 5;
 
@@ -319,6 +319,8 @@ function ClawpageData({ page, onChanged, onError }: { page: Clawpage; onChanged:
     for (const r of rows) if (isObject(r.value)) for (const k of Object.keys(r.value)) if (!keys.includes(k)) keys.push(k);
     return keys.slice(0, MAX_COLUMNS);
   }, [rows]);
+  // Records written by signed-in visitors say who.
+  const authored = rows.some((r) => r.by);
 
   if (!table) return null;
   const permission = async (value: ClawpagePermission) => {
@@ -374,11 +376,13 @@ function ClawpageData({ page, onChanged, onError }: { page: Clawpage; onChanged:
       <table className="clawpage-table">
         <thead><tr>
           <th scope="col">{t.clawpages.timeColumn}</th>
+          {authored && <th scope="col">{t.clawpages.byColumn}</th>}
           {columns.length ? columns.map((c) => <th key={c} scope="col">{c}</th>) : <th scope="col">{t.clawpages.valueColumn}</th>}
           <th scope="col" aria-label={t.clawpages.confirmDeleteRecord}/>
         </tr></thead>
         <tbody>{rows.map((r) => <tr key={r.key} data-key={r.key} title={JSON.stringify(r.value, null, 2)}>
           <td className="clawpage-time"><MessageTime at={r.updatedAt} now={now}/></td>
+          {authored && <td>{r.by ? r.by.email ?? r.by.name : ""}</td>}
           {columns.length ? columns.map((c) => <td key={c}>{isObject(r.value) ? cell(r.value[c]) : ""}</td>) : <td>{cell(r.value)}</td>}
           <td className="clawpage-row-action"><button type="button" className={`tiny clawpage-row-delete ${armed === r.key ? "danger" : "ghost"}`} aria-label={t.clawpages.deleteRecord(r.key)} title={t.clawpages.deleteRecord(r.key)} onClick={() => void removeRow(r.key)}>{armed === r.key ? t.clawpages.confirmDeleteRecord : <Icon d={CLOSE}/>}</button></td>
         </tr>)}</tbody>

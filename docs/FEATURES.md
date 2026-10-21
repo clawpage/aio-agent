@@ -704,7 +704,7 @@ Android 手机用 USB 接在装了 Mac App 的 Mac 上，由 App 运行的 `bin/
 沙箱内置 `clawpages` skill（原名 `aio-share`，重新播种时删除旧目录），Codex 与 Claude Code 两个执行器都装：智能体把页面目录
 （`/home/gem/workspace/share/<页面名>/`，入口 `index.html`）用 `python3 /home/gem/.codex/tools/aio-share/aio-share.py publish <目录>`
 发布，得到公开地址 `https://<工作区域名>/u/<用户名>/share/<页面名>/`（短地址 `/u/<用户名>/share?<页面名>`）。页面本身只有公开模式；
-数据按表设权限。侧栏「Clawpages」（`/u/<用户名>/clawpages`，所有账号）列出本账号的 clawpages 与数据。
+数据按表设权限，访客可用本站账号登录（每人自己的数据、调用自己的 AI，见下）。侧栏「Clawpages」（`/u/<用户名>/clawpages`，所有账号）列出本账号的 clawpages 与数据。
 
 - **发布**：经成员网关 `/share/<账号>/pages[/<页面名>]`，只认该运行时的分享令牌（宿主 `<数据目录>/share-token`，沙箱内 0600）。
   同名发布整体替换文件、链接不变、**数据保留**；`list` 带每页的表与记录数；`pull <页面名>` 把已发布文件取回工作区接着改
@@ -716,6 +716,21 @@ Android 手机用 USB 接在装了 Mac App 的 Mac 上，由 App 运行的 `bin/
   每分钟 60 次写、600 次读（超出 429）。主人写入不存在的表时自动建为 `private`。
 - **页面里用**：`aio-share.py sdk <目录>` 把 `clawpage-sdk.js` 复制进页面（发布时自动刷新这份拷贝），`new Clawpage().table(名).list/get/put/patch/post/incr/delete`
   访问 `/u/<用户名>/share/<页面名>/.data/<表>[/<键>[/incr]]`。该路径 CORS 全开（页面来源是不透明的 `null`）、不用 cookie；用 `file://` 预览时 SDK 改用内存。
+- **访客登录（SSO）**：页面调 `cp.signIn()` 跳到自己的 `.auth/sign-in?return=<页内路径>`，再被送到主站 `GET /api/clawpage-sso/authorize`。主站已登录且此前允许过这一页时，
+  直接 303 回页面地址并在片段里带 `#cpv=<访客令牌>`（片段不发给服务器，只有该页收到；SDK 取走后立即抹掉）；否则进主站的 `/clawpage-sso` 页：未登录先登录，
+  再问一次「允许这个页面知道你是谁（邮箱，没有邮箱的老账号给用户名）、以你的身份存数据、用你的 AI」，允许后（`POST /api/clawpage-sso/grant`，要 CSRF）带令牌回页面，
+  不允许则回 `#cpv=denied`。`new Clawpage({ signIn: "auto" })` 每次打开页面先静默问一次（`silent=1`，不出界面，没登录或没允许过回 `#cpv=none`），
+  允许过的人回来就是登录状态。返回路径只接受页面目录内的相对路径（含查询），其余一律回页面首页。访客令牌（`cpv1.` 开头）用部署密钥单独签名（与主人链接互不通用），
+  只对这一页有效、24 小时过期，每次使用都核对授权仍在；页面里 `cp.signOut()`（`DELETE .auth`）撤销授权，此后令牌立即失效、下次登录重新询问。`GET .auth` 返回令牌对应的人。
+  授权记录（谁、邮箱、首次与最近使用）存 `clawpages.sqlite` 的 `cp_grants`，撤销后保留身份以便主人分辨数据归属，删页一并删除。主站的 Google 登录完成后回到控制台，需回页面再点一次登录。
+- **登录访客的表权限**：`signed-in`（登录访客都能读、能新增，只能改删自己写的，别人的回 403 `NOT_YOURS`）与 `per-user`（每个登录访客只看到、只改自己的记录，
+  键按人隔离：同一个 `put("state")` 各是各的，库里存为 `<账号 id>.<键>`）。两者对匿名访客回 401 `SIGN_IN_REQUIRED`；过期或已退出的令牌回 401 `SIGN_IN_EXPIRED`（SDK 随即把 `cp.user` 置空）。
+  每条记录记下首次写入它的登录访客（`author` 列）：主人（控制台、CLI、主人链接、协作者）读到 `by: {id, name, email}`，控制台表格多一列「谁写的」；登录访客读到 `mine`。
+- **AI 回答**：`cp.ai.ask(input, { prompt, json, effort })` → `POST .ai`，必须登录。用**访客自己账号**的模型回答（成员为分配的模型、推理强度不超过分配值；owner 为其所选模型，
+  Claude 模型走 owner 的 Claude 凭据，其余走控制面的 ChatGPT 登录），在宿主侧直接调用（不唤醒任何沙箱），用量记入该访客账号。只有文字进出：没有工具、联网、记忆，
+  也碰不到该账号的文件与历史。系统提示 = 平台说明（页面名、主人、无工具、按要求的语言作答；`json: true` 时只回一个 JSON 对象）+ 页面目录里 `prompts/<名>.md`（≤32 KB，随页面发布，访客可见），
+  `json: true` 时服务端解析出 `json`（解析不了为 null）。输入为 `input` 文本或 `messages`（≤40 条、共 ≤6 万字，最后一条是用户），`effort` 为 `low`（默认）/`medium`/`high`。
+  限额：每人每页每分钟 10 次、每天 300 次（超出 429）；超时 120 秒。错误码：`SIGN_IN_REQUIRED`、`PROMPT_NOT_FOUND`、`RATE_LIMITED`、`AI_BUSY`（账号额度）、`AI_FAILED`、`AI_TIMEOUT`、`AI_UNAVAILABLE`。
 - **主人身份**：控制台点「打开」时由 `POST /api/clawpages/<页面名>/open` 生成主人链接：页面地址后附 `#cp=<令牌>`（片段不发给服务器），
   令牌用部署自己的密钥（`<PA_DATA_DIR>/clawpages-key`）签名，只对该账号该页有效、12 小时过期；SDK 取走后立即从地址栏抹掉。持令牌可读写所有表、不受限流，但不能改表权限或删表（页面脚本可能出自协作者之手；这两项只在控制台与沙箱 CLI 做）。
 - **执行器**：沙箱 CLI `data tables|create|permission|drop|list|get|put|patch|add|incr|delete|export|import` 以主人身份操作；每次执行提示词附上本账号
@@ -743,7 +758,7 @@ Android 手机用 USB 接在装了 Mac App 的 Mac 上，由 App 运行的 `bin/
 - **存储与隔离**：快照存在宿主 `<PA_DATA_DIR>/shares/<账号>/<页面名>/`，访问时只读快照，不触碰沙箱。每页最多 200 个文件、20 MB，每账号 100 页；
   路径拒绝 `..`、隐藏文件、反斜杠与控制字符。页面位于工作区来源，响应带 `Content-Security-Policy: sandbox allow-scripts …`（无 `allow-same-origin`），
   读不到工作区会话、cookie 或 localStorage；另带 `nosniff`、`no-referrer`、`noindex`，不设置 cookie。页面文件一律 `Cache-Control: no-cache` 并带弱 ETag 与 Last-Modified（经 Cloudflare 时 ETag 会被去掉，靠 Last-Modified；每次发布的文件时间至少比上一版晚一秒）：
-  每次打开都向服务器确认，未变的文件回 304、不重传，同名重发布后访客立刻看到新版本，不会被浏览器或 CDN 缓存挡住。页面、其 `.data` 与凭协作者令牌访问的 `.api` 是全站仅有的不需要登录的路径。
+  每次打开都向服务器确认，未变的文件回 304、不重传，同名重发布后访客立刻看到新版本，不会被浏览器或 CDN 缓存挡住。页面、其 `.data`、`.auth`、`.ai`（后两者凭访客令牌）与凭协作者令牌访问的 `.api` 是全站仅有的不需要登录的路径。
 
 ### 数据图表（消息里的 K 线、走势、对比、占比）
 

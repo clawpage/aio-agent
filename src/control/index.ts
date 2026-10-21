@@ -4,6 +4,7 @@ import path from "node:path";
 import {MemberModelGateway} from "./memberModelGateway.js";
 import {ShareStore} from "./share.js";
 import {ClawpageData} from "./clawpages.js";
+import {ClawpageAi} from "./clawpageAi.js";
 import {Jev} from "./jev.js";
 import {DecisionGateway} from "./decision.js";
 import {KbGateway} from "./kb.js";
@@ -481,7 +482,10 @@ async function main(): Promise<void> {
   ctx.share=new ShareStore({cfg:ctx.cfg,port:ctx.cfg.memberModelPort??4902,
     usernameOf:id=>account("SELECT username AS v FROM owners WHERE id=?",id),
     userIdOf:name=>account("SELECT id AS v FROM owners WHERE username=?",name),
-    data:new ClawpageData(ctx.cfg.dataDir)});
+    data:new ClawpageData(ctx.cfg.dataDir),
+    // A page's AI answers come from the signed-in visitor's own account, counted in its usage.
+    ai:new ClawpageAi({cfg:ctx.cfg,log:ctx.log,db:ctx.db,hostTokens:ctx.hostTokens,claude:new ClaudeCodeHarness(ctx.cfg,ctx.log),
+      usageDb:async id=>id===ctx.cfg.runtimeUserId?ctx.db:(await ctx.runtimeForUser!(id)).db})});
   ctx.tasks.setClawpages(id=>ctx.share!.list(id));
   // The owner sandbox receives its token when refreshSandboxContent seeds it below.
   ctx.share.provision(ctx.cfg);

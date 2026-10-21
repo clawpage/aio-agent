@@ -757,6 +757,55 @@ export function createApiRouter(context: AppContext): Router {
     if (!share.data!.remove(userId, page, String(req.params.table), String(req.params.key), owner)) throw new DataError(404, "RECORD_NOT_FOUND", "The record does not exist");
     return undefined;
   }));
+  // Signing in to a clawpage (a page or mini app any account published): the page sends its visitor here (`.auth/sign-in`);
+  // the person is asked once per page whether it may know who they are and use their AI, then goes back with a visitor
+  // token in the page address's fragment, which only that page receives. Asked again silently, it only answers.
+  const ssoPage = (req: Request): { userId: string; page: string; title: string; url: string } | null => {
+    const share = context.share;
+    const owner = typeof req.query.owner === "string" ? req.query.owner : typeof req.body?.owner === "string" ? req.body.owner : "";
+    const page = typeof req.query.page === "string" ? req.query.page : typeof req.body?.page === "string" ? req.body.page : "";
+    const userId = share?.data && /^[A-Za-z0-9_-]{2,40}$/.test(owner) ? share.userIdOf(owner) : null;
+    const facts = userId ? share!.page(userId, page) : null;
+    return facts ? { userId: userId!, page, title: facts.title, url: facts.url } : null;
+  };
+  const visitorOf = (userId: string): { id: string; name: string; email: string | null } => ({ id: userId, name: getUser(db, userId)?.username ?? userId, email: visibleEmail(db, userId) });
+  router.get("/clawpage-sso/authorize", requireKind("primary"), (req, res) => {
+    const target = ssoPage(req);
+    res.setHeader("Cache-Control", "no-store");
+    res.setHeader("Referrer-Policy", "no-referrer");
+    if (!target) { res.status(404).json({ error: "PAGE_NOT_FOUND", message: "The page does not exist" }); return; }
+    const share = context.share!;
+    const session = ctxOf(req).session;
+    if (session && share.data!.granted(target.userId, target.page, session.ownerId)) {
+      const visitor = visitorOf(session.ownerId);
+      share.data!.grant(target.userId, target.page, visitor);
+      res.redirect(303, share.returnUrl(target.userId, target.page, req.query.return, share.data!.visitorToken(target.userId, target.page, visitor)));
+      return;
+    }
+    if (req.query.silent === "1") { res.redirect(303, share.returnUrl(target.userId, target.page, req.query.return, "none")); return; }
+    const params = new URLSearchParams({ owner: String(req.query.owner), page: target.page, return: typeof req.query.return === "string" ? req.query.return : "" });
+    res.redirect(303, `/clawpage-sso?${params}`);
+  });
+  // What the sign-in page shows: the page, and (signed in) who would be signed in to it.
+  router.get("/clawpage-sso/page", requireKind("primary"), (req, res) => {
+    const target = ssoPage(req);
+    res.setHeader("Cache-Control", "no-store");
+    if (!target) { res.status(404).json({ error: "PAGE_NOT_FOUND", message: "The page does not exist" }); return; }
+    const session = ctxOf(req).session;
+    const share = context.share!;
+    res.json({ title: target.title, owner: share.usernameOf(target.userId), url: target.url, cancelUrl: share.returnUrl(target.userId, target.page, req.query.return, "denied"),
+      account: session ? visitorOf(session.ownerId) : null });
+  });
+  router.post("/clawpage-sso/grant", requireKind("primary"), requireSession, (req, res) => {
+    const target = ssoPage(req);
+    res.setHeader("Cache-Control", "no-store");
+    if (!target) { res.status(404).json({ error: "PAGE_NOT_FOUND", message: "The page does not exist" }); return; }
+    const share = context.share!;
+    const visitor = visitorOf(ctxOf(req).session!.ownerId);
+    share.data!.grant(target.userId, target.page, visitor);
+    track(req, "clawpage_sign_in", {});
+    res.json({ url: share.returnUrl(target.userId, target.page, req.body?.return, share.data!.visitorToken(target.userId, target.page, visitor)) });
+  });
   // The task list: counts by status, then one filtered page at a time (keyset cursor).
   router.get("/tasks", requireKind("primary"), requireSession, asyncHandler(async (req, res) => {
     const filter = String(req.query.filter ?? "all") as TaskFilter;

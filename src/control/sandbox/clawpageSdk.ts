@@ -11,6 +11,13 @@
  * An owner link carries a token in the fragment (`#cp=...`), which never reaches a
  * server; the SDK takes it and clears it from the address bar, so a link copied
  * from the page afterwards is a visitor's link.
+ *
+ * Visitors sign in the same way: `signIn()` goes to the page's `.auth/sign-in`, which
+ * sends them to the console's origin and back with `#cpv=<visitor token>` (or `none`,
+ * `denied`); the SDK takes it, clears it, and knows the person from it (`user`). With
+ * `signIn: "auto"` it asks silently on every load, so a person who allowed the page
+ * once is signed in whenever they come back. `ai.ask` gets an answer from the signed-in
+ * visitor's own AI, shaped by one of the page's `prompts/<name>.md`.
  */
 export const CLAWPAGE_SDK_JS = String.raw`/* clawpage-sdk.js - data for a clawpage (managed by Clawpage Agent; republishing refreshes this copy). */
 (function (root) {
@@ -28,10 +35,10 @@ export const CLAWPAGE_SDK_JS = String.raw`/* clawpage-sdk.js - data for a clawpa
   ClawpageError.prototype = Object.create(Error.prototype);
   ClawpageError.prototype.constructor = ClawpageError;
 
-  function takeToken(loc) {
-    var m = /(?:^#|&)cp=([^&]+)/.exec(loc.hash || "");
+  function takeToken(loc, name) {
+    var m = new RegExp("(?:^#|&)" + name + "=([^&]*)").exec(loc.hash || "");
     if (!m) return null;
-    var rest = loc.hash.replace(/(^#|&)cp=[^&]+/, "$1").replace(/^#&/, "#");
+    var rest = loc.hash.replace(new RegExp("(^#|&)" + name + "=[^&]*"), "$1").replace(/^#&/, "#");
     try {
       root.history.replaceState(root.history.state, "", loc.pathname + loc.search + (rest === "#" ? "" : rest));
     } catch (e) {
@@ -40,11 +47,20 @@ export const CLAWPAGE_SDK_JS = String.raw`/* clawpage-sdk.js - data for a clawpa
     try { return decodeURIComponent(m[1]); } catch (e) { return null; }
   }
 
+  // Who a visitor token names (its middle part is plain JSON; the server checks the signature).
+  function personOf(token) {
+    try {
+      var body = token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
+      var claim = JSON.parse(decodeURIComponent(escape(root.atob(body))));
+      return { id: claim.v, name: claim.n, email: claim.m || null };
+    } catch (e) { return null; }
+  }
+
   // ------------------------------------------------------------------ live: the page's tables
 
-  function live(base, token) {
+  function live(base, auth) {
     function call(method, path, body) {
-      var headers = {};
+      var headers = {}, token = auth();
       if (token) headers.authorization = "Bearer " + token;
       if (body !== undefined) headers["content-type"] = "application/json";
       return root.fetch(base + path, { method: method, headers: headers, body: body === undefined ? undefined : JSON.stringify(body), credentials: "omit", cache: "no-store" })
@@ -144,16 +160,72 @@ export const CLAWPAGE_SDK_JS = String.raw`/* clawpage-sdk.js - data for a clawpa
   function Clawpage(opts) {
     if (!(this instanceof Clawpage)) return new Clawpage(opts);
     opts = opts || {};
+    var self = this;
     var loc = root.location;
     var m = loc && /^https?:$/.test(loc.protocol) ? PAGE.exec(loc.pathname) : null;
-    var token = opts.token || (loc ? takeToken(loc) : null);
+    var token = opts.token || (loc ? takeToken(loc, "cp") : null);
+    // The outcome of a sign-in that just came back: a visitor token, "none" (not signed in) or "denied".
+    var outcome = loc ? takeToken(loc, "cpv") : null;
+    var visitor = outcome && outcome.indexOf("cpv1.") === 0 ? outcome : null;
     this.mode = m || opts.base ? "live" : "preview";
     this.page = m ? m[2] : null;
     this.owner = !!token;
-    var call = this.mode === "live" ? live(opts.base || (loc.protocol + "//" + loc.host + "/u/" + m[1] + "/share/" + m[2] + "/.data"), token) : memory();
+    this.user = visitor ? personOf(visitor) : null;
+    this.signInDenied = outcome === "denied";
+    var pageRoot = opts.base ? opts.base.replace(/\/\.data\/?$/, "") : m ? loc.protocol + "//" + loc.host + "/u/" + m[1] + "/share/" + m[2] : null;
+    var auth = function () { return token || visitor; };
+    var call = this.mode === "live" ? live(pageRoot + "/.data", auth) : memory();
+    var request = this.mode === "live" ? live(pageRoot, auth) : null;
+    // A sign-in that expired or was signed out elsewhere: the page is anonymous again.
+    var guard = function (promise) {
+      return promise.catch(function (err) {
+        if (err && err.status === 401 && err.code === "SIGN_IN_EXPIRED") { visitor = null; self.user = null; }
+        throw err;
+      });
+    };
     if (this.mode === "preview" && root.console) root.console.info("[clawpage] preview: data is kept in memory until the page is published");
-    this.table = function (name) { return new Table(call, name); };
+    this.table = function (name) { return new Table(function (method, path, body) { return guard(call(method, path, body)); }, name); };
     this.tables = function () { return call("GET", "").then(function (r) { return r.tables; }); };
+
+    // ---------------------------------------------------------------- signing in
+    var back = function () { return m ? loc.pathname.slice(("/u/" + m[1] + "/share/" + m[2] + "/").length) + loc.search : ""; };
+    var go = function (silent) {
+      loc.assign(pageRoot + "/.auth/sign-in?" + (silent ? "silent=1&" : "") + "return=" + encodeURIComponent(back()));
+    };
+    /** Go sign in (the console asks once per page) and come back signed in; in a preview, a stand-in person. */
+    this.signIn = function () {
+      if (self.mode !== "live") { self.user = { id: "preview", name: "preview", email: null }; return Promise.resolve(self.user); }
+      go(false);
+      return new Promise(function () { /* the page is leaving */ });
+    };
+    /** Sign out of this page: the next sign-in asks again. */
+    this.signOut = function () {
+      var had = visitor;
+      visitor = null; self.user = null;
+      if (self.mode !== "live" || !had) return Promise.resolve();
+      return root.fetch(pageRoot + "/.auth", { method: "DELETE", headers: { authorization: "Bearer " + had }, credentials: "omit", cache: "no-store" }).then(function () {}, function () {});
+    };
+    this.redirecting = false;
+    // Asked silently on every load, at most once: the answer comes back in the fragment.
+    if (opts.signIn === "auto" && this.mode === "live" && m && !token && outcome === null) { this.redirecting = true; go(true); }
+
+    // ---------------------------------------------------------------- AI
+    this.ai = {
+      /**
+       * An answer from the signed-in visitor's own AI. input: text, or {messages: [{role, content}]};
+       * options: prompt (the page's prompts/<name>.md), json (answer as an object, in .json), effort (low | medium | high).
+       */
+      ask: function (input, o) {
+        o = o || {};
+        if (self.mode !== "live") return Promise.reject(ClawpageError(0, "PREVIEW", "AI answers work once the page is published"));
+        if (!visitor) return Promise.reject(ClawpageError(401, "SIGN_IN_REQUIRED", "Sign in to use AI on this page"));
+        var body = typeof input === "string" ? { input: input } : { messages: input && input.messages };
+        if (o.prompt) body.prompt = o.prompt;
+        if (o.json) body.json = true;
+        if (o.effort) body.effort = o.effort;
+        return guard(request("POST", "/.ai", body));
+      },
+    };
   }
 
   root.Clawpage = Clawpage;

@@ -166,6 +166,10 @@ export const api = {
   clawpagePermission: (page: string, table: string, permission: import("./types").ClawpagePermission) =>
     request<import("./types").ClawpageTable>(`/api/clawpages/${encodeURIComponent(page)}/tables/${encodeURIComponent(table)}`, { method: "PATCH", body: { permission } }),
   clawpageDropTable: (page: string, table: string) => request<void>(`/api/clawpages/${encodeURIComponent(page)}/tables/${encodeURIComponent(table)}`, { method: "DELETE" }),
+  /** Signing in to a clawpage (any account's): the page and who would sign in, then the way back with the sign-in. */
+  clawpageSsoPage: (q: { owner: string; page: string; return: string }) =>
+    request<import("./types").ClawpageSsoPage>(`/api/clawpage-sso/page?${new URLSearchParams(q)}`, { cache: "no-store" }),
+  clawpageSsoGrant: (q: { owner: string; page: string; return: string }) => request<{ url: string }>("/api/clawpage-sso/grant", { method: "POST", body: q }),
   clawpageDeleteRecord: (page: string, table: string, key: string) =>
     request<void>(`/api/clawpages/${encodeURIComponent(page)}/tables/${encodeURIComponent(table)}/records/${encodeURIComponent(key)}`, { method: "DELETE" }),
   /** The files page: the main session's messages that hold files, newest first; older ones by `before`. */

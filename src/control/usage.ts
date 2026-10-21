@@ -56,6 +56,11 @@ export class UsageLedger {
     const total = counts(p.tokenUsage?.total, false), last = counts(p.tokenUsage?.last, false);
     if (total && (!last || Object.keys(total).every(k => last[k as keyof TokenCounts] <= total[k as keyof TokenCounts]))) this.snapshot(`codex:${p.threadId}`, total, last, at);
   }
+  /** One stateless call's counts (a clawpage's AI answer), under a key of its own. */
+  once(key: string, raw: Json | undefined, claude: boolean, at = Date.now()): void {
+    const value = counts(raw, claude);
+    if (value) this.add(key, value, at);
+  }
   claude(result: Json, session: string, resumed: boolean, at = Date.now()): void {
     const models = result.modelUsage ?? result.model_usage;
     if (models && typeof models === 'object' && Object.keys(models).length) {
