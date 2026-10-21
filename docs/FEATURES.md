@@ -757,7 +757,7 @@ Android 手机用 USB 接在装了 Mac App 的 Mac 上，由 App 运行的 `bin/
   `/records/<键>` 删除单条；`DELETE /api/clawpages/<页面名>` 删除页面和数据。均只作用于本账号。
 - **存储与隔离**：快照存在宿主 `<PA_DATA_DIR>/shares/<账号>/<页面名>/`，访问时只读快照，不触碰沙箱。每页最多 200 个文件、20 MB，每账号 100 页；
   路径拒绝 `..`、隐藏文件、反斜杠与控制字符。页面位于工作区来源，响应带 `Content-Security-Policy: sandbox allow-scripts …`（无 `allow-same-origin`），
-  读不到工作区会话、cookie 或 localStorage；另带 `nosniff`、`no-referrer`、`noindex`，不设置 cookie。页面文件一律 `Cache-Control: no-cache` 并带弱 ETag 与 Last-Modified（经 Cloudflare 时 ETag 会被去掉，靠 Last-Modified；每次发布的文件时间至少比上一版晚一秒）：
+  读不到工作区会话、cookie 或 localStorage；另带 `nosniff`、`no-referrer`、`noindex`，不设置 cookie。页面文件一律 `Cache-Control: private, no-cache`（只写 `no-cache` 时 Cloudflare 的 Browser Cache TTL 会把 js/css 等改成 `max-age=14400`，重发布后访客最多 4 小时还在跑旧脚本；`private` 它不改写）并带弱 ETag 与 Last-Modified（经 Cloudflare 时 ETag 会被去掉，靠 Last-Modified；每次发布的文件时间至少比上一版晚一秒）：
   每次打开都向服务器确认，未变的文件回 304、不重传，同名重发布后访客立刻看到新版本，不会被浏览器或 CDN 缓存挡住。页面、其 `.data`、`.auth`、`.ai`（后两者凭访客令牌）与凭协作者令牌访问的 `.api` 是全站仅有的不需要登录的路径。
 
 ### 数据图表（消息里的 K 线、走势、对比、占比）

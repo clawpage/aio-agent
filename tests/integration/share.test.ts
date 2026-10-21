@@ -100,7 +100,7 @@ it("publishes a page from the sandbox channel and serves it publicly, sandboxed,
     expect(await (await h.request("/u/owner/share/trip/", { host: "primary" })).text()).not.toContain('document.title="ok"');
 
     // Every load asks whether the file changed: an unchanged one answers 304 (still sandboxed), never a stale copy.
-    expect(html.headers.get("cache-control")).toBe("no-cache");
+    expect(html.headers.get("cache-control")).toBe("private, no-cache");
     const etag = html.headers.get("etag")!;
     expect(etag).toMatch(/^W\/"[0-9a-z]+-[0-9a-z]+"$/);
     expect(html.headers.get("last-modified")).toBeTruthy();

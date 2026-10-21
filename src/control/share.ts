@@ -97,7 +97,9 @@ const PAGE_HEADERS = {
   "x-content-type-options": "nosniff",
   "referrer-policy": "no-referrer",
   "x-robots-tag": "noindex",
-  "cache-control": "no-cache",
+  // `private` too: the CDN in front replaces a bare no-cache on scripts and styles with a browser TTL of hours
+  // (its "Browser Cache TTL"), so a republished page ran with its old scripts; it leaves a private response alone.
+  "cache-control": "private, no-cache",
 };
 
 export class ShareError extends Error {
