@@ -2,17 +2,14 @@ import type { clawpages as zh } from "../zh/clawpages";
 
 export const clawpages: typeof zh = {
   title: "Clawpages",
-  sub: "Miniapps y páginas que la IA hizo para ti",
-  apps: "Miniapps",
-  pages: "Páginas",
+  sub: "Clawpages que la IA hizo para ti",
   count: (n: number) => `${n} ${n === 1 ? "registro" : "registros"}`,
   emptyTitle: "Aún no hay clawpages",
   emptyBody: "Pídelo en el chat principal, por ejemplo «haz una votación para el almuerzo» o «haz un registro de gastos». Aparecerá aquí cuando esté lista.",
   loading: "Cargando…",
   loadFailed: "No se pudo cargar",
   retry: "Reintentar",
-  summaryApp: (tables: number, records: number) => `${tables} ${tables === 1 ? "tabla" : "tablas"}, ${records} ${records === 1 ? "registro" : "registros"}`,
-  summaryPage: "Una página, sin datos",
+  summaryData: (tables: number, records: number) => `${tables} ${tables === 1 ? "tabla" : "tablas"}, ${records} ${records === 1 ? "registro" : "registros"}`,
   open: "Abrir",
   openHint: "Abrir como propietario: ver y cambiar todos los datos durante 12 horas",
   opening: "Abriendo…",
@@ -35,7 +32,7 @@ export const clawpages: typeof zh = {
   byColumn: "Escrito por",
   sso: {
     heading: (title: string) => `Iniciar sesión en «${title}»`,
-    madeBy: (owner: string) => `Una mini app de ${owner}`,
+    madeBy: (owner: string) => `Una clawpage de ${owner}`,
     intro: "Si lo permites, esta página podrá:",
     identity: (who: string) => `Saber quién eres: ${who}`,
     data: "Guardar datos en esta página a tu nombre",

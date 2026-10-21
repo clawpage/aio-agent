@@ -3493,15 +3493,13 @@ button.turn-pill:focus-visible { outline: 2px solid currentColor; outline-offset
 .clawpage-tile:active .clawpage-cover { transform:scale(.98); }
 .clawpage-cover { position:relative; display:block; aspect-ratio:3 / 4; border-radius:14px; overflow:hidden; border:1px solid var(--border); background:var(--bg-raised); transition:transform var(--dur-fast) ease; }
 .clawpage-cover img, .clawpage-sheet-cover img { display:block; width:100%; height:100%; object-fit:cover; object-position:top center; }
-.clawpage-cover.is-app:not(.has-cover), .clawpage-sheet-cover.is-app:not(.has-cover) { background:var(--accent); border-color:transparent; color:var(--on-accent); }
-.clawpage-cover.is-page:not(.has-cover), .clawpage-sheet-cover.is-page:not(.has-cover) { color:var(--text-dim); }
+.clawpage-cover:not(.has-cover), .clawpage-sheet-cover:not(.has-cover) { background:var(--accent); border-color:transparent; color:var(--on-accent); }
 .clawpage-cover-glyph { position:absolute; inset:0; display:grid; place-items:center; font-size:46px; font-weight:650; line-height:1; letter-spacing:-.02em; }
 .clawpage-cover-count { position:absolute; left:8px; bottom:8px; padding:2px 9px; border-radius:999px; background:var(--accent); color:var(--on-accent); font-size:11.5px; line-height:1.7; font-variant-numeric:tabular-nums; }
-.clawpage-cover.is-app:not(.has-cover) .clawpage-cover-count { background:var(--on-accent); color:var(--accent); }
+.clawpage-cover:not(.has-cover) .clawpage-cover-count { background:var(--on-accent); color:var(--accent); }
 .clawpage-tile-title { padding:0 2px; font-size:13.5px; line-height:1.4; display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; overflow:hidden; overflow-wrap:anywhere; }
 /* The empty state's mark. */
-.clawpage-glyph { display:inline-grid; place-items:center; width:68px; height:68px; border-radius:20px; font-size:30px; line-height:1; }
-.clawpage-glyph.is-app { background:var(--accent); color:var(--on-accent); }
+.clawpage-glyph { display:inline-grid; place-items:center; width:68px; height:68px; border-radius:20px; font-size:30px; line-height:1; background:var(--accent); color:var(--on-accent); }
 .clawpages-empty .clawpage-glyph { margin-bottom:6px; }
 .clawpages-error { max-width:var(--page-max); margin:0 auto; }
 @media (prefers-reduced-motion: reduce) { .clawpage-cover { transition:none; } .clawpage-tile:active .clawpage-cover { transform:none; } }

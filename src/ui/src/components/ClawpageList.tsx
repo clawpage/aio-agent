@@ -43,10 +43,9 @@ const records = (page: Clawpage) => page.tables.reduce((n, table) => n + table.r
 /** A clawpage's picture: its cover (the page as a phone shows it), else its title's first character. */
 function Cover({ page, className, count = false }: { page: Clawpage; className: string; count?: boolean }) {
   const url = useClawpageCover(page.cover ? page.name : null, page.cover);
-  const app = page.tables.length > 0;
-  return <span className={`${className} ${app ? "is-app" : "is-page"}${url ? " has-cover" : ""}`} aria-hidden="true">
+  return <span className={`${className}${url ? " has-cover" : ""}`} aria-hidden="true">
     {url ? <img src={url} alt="" decoding="async" draggable={false}/> : <span className="clawpage-cover-glyph">{glyph(page.title)}</span>}
-    {count && app && <span className="clawpage-cover-count">{t.clawpages.count(records(page))}</span>}
+    {count && page.tables.length > 0 && <span className="clawpage-cover-count">{t.clawpages.count(records(page))}</span>}
   </span>;
 }
 
@@ -58,8 +57,8 @@ const SHARE = "M12 15V4 M8 7.5 12 4l4 3.5 M7 11H6a1.5 1.5 0 0 0-1.5 1.5v6A1.5 1.
 const CLOSE = "M6 6l12 12 M18 6 6 18";
 
 /**
- * The account's clawpages as a home screen: one icon each, mini apps (pages with
- * data) apart from plain pages. An icon opens the clawpage's sheet: open it as the
+ * The account's clawpages as a home screen: one icon each, newest first, whether or
+ * not a page keeps data (all of them are clawpages). An icon opens the clawpage's sheet: open it as the
  * owner, copy or share its link, look through its data, invite other people's
  * agents to maintain it, delete it. Changing a page itself is an agent's job.
  */
@@ -85,12 +84,9 @@ export function ClawpageList({ active, onExpired }: { active: boolean; onExpired
   }, [fail]);
   useEffect(() => { if (active) void load(); }, [active, load]);
 
-  const apps = pages?.filter((p) => p.tables.length > 0) ?? [];
-  const plain = pages?.filter((p) => p.tables.length === 0) ?? [];
   const page = pages?.find((p) => p.name === selected) ?? null;
-  const shelf = (label: string, list: Clawpage[], kind: "app" | "page") => list.length > 0 && <section className="clawpage-shelf" aria-label={label}>
-    <h3 className="clawpage-shelf-head">{label}<span>{list.length}</span></h3>
-    <ul className="clawpage-grid" data-testid={`clawpage-${kind}s`}>
+  const shelf = (list: Clawpage[]) => list.length > 0 && <section className="clawpage-shelf">
+    <ul className="clawpage-grid" data-testid="clawpage-list">
       {list.map((p) => <li key={p.name} data-page={p.name}>
         <button type="button" className="clawpage-tile" aria-label={t.clawpages.pageLabel(p.title)} onClick={() => setSelected(p.name)}>
           <Cover page={p} className="clawpage-cover" count/>
@@ -104,11 +100,10 @@ export function ClawpageList({ active, onExpired }: { active: boolean; onExpired
     <header className="chat-head"><div className="chat-title"><h2>{t.clawpages.title}</h2><span className="library-sub muted tiny">{t.clawpages.sub}</span></div></header>
     <div className="task-list-scroll">
       {pages && pages.length === 0 && <div className="empty clawpages-empty">
-        <span className="clawpage-glyph is-app" aria-hidden="true">+</span>
+        <span className="clawpage-glyph" aria-hidden="true">+</span>
         <h3>{t.clawpages.emptyTitle}</h3><p>{t.clawpages.emptyBody}</p>
       </div>}
-      {shelf(t.clawpages.apps, apps, "app")}
-      {shelf(t.clawpages.pages, plain, "page")}
+      {shelf(pages ?? [])}
       {error && <p className="error clawpages-error" role="alert">{error}{!loading && <> <button type="button" className="ghost" onClick={() => void load()}>{t.clawpages.retry}</button></>}</p>}
       {loading && !pages && <div className="task-list-end"><span className="muted tiny"><InlineLoading label={t.clawpages.loading}/></span></div>}
     </div>
@@ -123,7 +118,7 @@ function ClawpageSheet({ page, onClose, onChanged, onRemoved, onError }: { page:
   const [opening, setOpening] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const app = page.tables.length > 0;
+  const hasData = page.tables.length > 0;
   const canShare = typeof navigator !== "undefined" && typeof navigator.share === "function";
   useEffect(() => {
     if (!copied) return;
@@ -171,7 +166,7 @@ function ClawpageSheet({ page, onClose, onChanged, onRemoved, onError }: { page:
         <header className="clawpage-sheet-head">
           <div className="clawpage-sheet-name">
             <h2 id="clawpage-sheet-title">{page.title}</h2>
-            <p className="muted tiny">{app ? t.clawpages.summaryApp(page.tables.length, records(page)) : t.clawpages.summaryPage}<MessageTime at={Math.max(page.updatedAt, ...page.tables.map((x) => x.updatedAt))} now={now}/>{page.updatedBy && <span className="clawpage-updated-by">{t.clawpages.updatedBy(page.updatedBy)}</span>}</p>
+            <p className="muted tiny">{page.tables.length > 0 && t.clawpages.summaryData(page.tables.length, records(page))}<MessageTime at={Math.max(page.updatedAt, ...page.tables.map((x) => x.updatedAt))} now={now}/>{page.updatedBy && <span className="clawpage-updated-by">{t.clawpages.updatedBy(page.updatedBy)}</span>}</p>
           </div>
           <button type="button" className="ghost clawpage-icon-button" aria-label={t.clawpages.close} title={t.clawpages.close} onClick={onClose}><Icon d={CLOSE}/></button>
         </header>
@@ -182,7 +177,7 @@ function ClawpageSheet({ page, onClose, onChanged, onRemoved, onError }: { page:
           <span className="clawpage-copied tiny" role="status">{copied === "ok" ? t.clawpages.copied : copied === "failed" ? t.clawpages.copyFailed : ""}</span>
         </div>
         <div className="clawpage-sheet-body">
-          {app && <ClawpageData page={page} onChanged={onChanged} onError={onError}/>}
+          {hasData && <ClawpageData page={page} onChanged={onChanged} onError={onError}/>}
           <p className="clawpage-tip muted tiny">{t.clawpages.tip}</p>
           <ClawpageCollaborators page={page} onChanged={onChanged} onError={onError}/>
           {confirming
@@ -355,7 +350,7 @@ function ClawpageData({ page, onChanged, onError }: { page: Clawpage; onChanged:
   };
 
   return <div className="clawpage-data" data-testid="clawpage-data">
-    {page.tables.length > 1 && <div className="clawpage-tabs" role="tablist" aria-label={t.clawpages.summaryApp(page.tables.length, records(page))}>
+    {page.tables.length > 1 && <div className="clawpage-tabs" role="tablist" aria-label={t.clawpages.summaryData(page.tables.length, records(page))}>
       {page.tables.map((x) => <button key={x.name} type="button" role="tab" aria-selected={x.name === table.name} className="clawpage-tab" onClick={() => setSelected(x.name)}>{x.name}<span>{x.records}</span></button>)}
     </div>}
     <div className="clawpage-table-tools">

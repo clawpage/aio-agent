@@ -2,17 +2,14 @@ import type { clawpages as zh } from "../zh/clawpages";
 
 export const clawpages: typeof zh = {
   title: "Clawpages",
-  sub: "AI 為你做的小應用和網頁",
-  apps: "小應用",
-  pages: "網頁",
+  sub: "AI 為你做的 clawpage",
   count: (n: number) => `${n} 筆`,
   emptyTitle: "還沒有 clawpage",
   emptyBody: "在主對話裡說一句，例如「做個團隊午餐投票」或「做個記帳小程式」，做好後就在這裡。",
   loading: "正在讀取…",
   loadFailed: "讀取失敗",
   retry: "重試",
-  summaryApp: (tables: number, records: number) => `${tables} 張表，${records} 筆資料`,
-  summaryPage: "網頁，不存資料",
+  summaryData: (tables: number, records: number) => `${tables} 張表，${records} 筆資料`,
   open: "開啟",
   openHint: "以擁有者身分開啟，12 小時內能看到並修改所有資料",
   opening: "正在開啟…",
@@ -35,7 +32,7 @@ export const clawpages: typeof zh = {
   byColumn: "誰寫的",
   sso: {
     heading: (title: string) => `登入到「${title}」`,
-    madeBy: (owner: string) => `${owner} 做的小應用`,
+    madeBy: (owner: string) => `${owner} 做的 clawpage`,
     intro: "允許後，這個頁面可以：",
     identity: (who: string) => `知道你是誰：${who}`,
     data: "用你的身分在這個頁面儲存資料",

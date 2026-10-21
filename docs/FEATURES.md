@@ -714,12 +714,12 @@ Android 手机用 USB 接在装了 Mac App 的 Mac 上，由 App 运行的 `bin/
     双指捏合缩放并平移（1～5 倍，只缩放本地画面）、双击放大到 2.5 倍或还原、长按 0.45 秒后拖动＝按住左键拖拽、双指轻点＝右键。
     手机上默认 1.3 倍屏宽、居中。电脑上（Mac App）鼠标就是鼠标：按下/移动/松开、悬停、滚轮滚页面，触控板捏合缩放画面；点一下画面后键盘直接输入到页面（含输入法与粘贴）。
 
-### Clawpages（分享网页与带数据的小应用）
+### Clawpages（可分享、可存数据的页面）
 
 沙箱内置 `clawpages` skill（原名 `aio-share`，重新播种时删除旧目录），Codex 与 Claude Code 两个执行器都装：智能体把页面目录
 （`/home/gem/workspace/share/<页面名>/`，入口 `index.html`）用 `python3 /home/gem/.codex/tools/aio-share/aio-share.py publish <目录>`
 发布，得到公开地址 `https://<工作区域名>/u/<用户名>/share/<页面名>/`（短地址 `/u/<用户名>/share?<页面名>`）。页面本身只有公开模式；
-数据按表设权限，访客可用本站账号登录（每人自己的数据、调用自己的 AI，见下）。侧栏「Clawpages」（`/u/<用户名>/clawpages`，所有账号）列出本账号的 clawpages 与数据。
+数据按表设权限，访客可用本站账号登录（每人自己的数据、调用自己的 AI，见下）。侧栏「Clawpages」（`/u/<用户名>/clawpages`，所有账号）按更新时间列出本账号的全部 clawpage（有没有数据都在同一列表、都叫 clawpage，有数据的封面上标记录数）与数据。
 
 - **发布**：经成员网关 `/share/<账号>/pages[/<页面名>]`，只认该运行时的分享令牌（宿主 `<数据目录>/share-token`，沙箱内 0600）。
   同名发布整体替换文件、链接不变、**数据保留**；`list` 带每页的表与记录数；`pull <页面名>` 把已发布文件取回工作区接着改
@@ -749,7 +749,7 @@ Android 手机用 USB 接在装了 Mac App 的 Mac 上，由 App 运行的 `bin/
 - **主人身份**：控制台点「打开」时由 `POST /api/clawpages/<页面名>/open` 生成主人链接：页面地址后附 `#cp=<令牌>`（片段不发给服务器），
   令牌用部署自己的密钥（`<PA_DATA_DIR>/clawpages-key`）签名，只对该账号该页有效、12 小时过期；SDK 取走后立即从地址栏抹掉。持令牌可读写所有表、不受限流，但不能改表权限或删表（页面脚本可能出自协作者之手；这两项只在控制台与沙箱 CLI 做）。
 - **执行器**：沙箱 CLI `data tables|create|permission|drop|list|get|put|patch|add|incr|delete|export|import` 以主人身份操作；每次执行提示词附上本账号
-  最近活跃的 12 个 clawpages（地址、发布时间与发布者、协作者数、各表权限、记录数与最近改动时间），主会话因此知道已有哪些小应用、数据有什么变化，并按 skill 拉取 → 修改 → 同名发布迭代。
+  最近活跃的 12 个 clawpages（地址、发布时间与发布者、协作者数、各表权限、记录数与最近改动时间），主会话因此知道已有哪些 clawpage、数据有什么变化，并按 skill 拉取 → 修改 → 同名发布迭代。
 - **版本**：`pull`/`publish` 在页面目录里写 `.clawpage.json`（页面名与所持版本 `updatedAt`，0600，点文件不发布）；之后发布带上 `baseUpdatedAt`，
   页面在此之后被别人发布过就回 409（拉取新版、重做改动再发）。主人不带版本发布时，若当前版本是协作者发的也回 409，`publish --force` 才覆盖。
 - **协作者（别人的 Agent 一起改）**：主人在 Clawpage 详情的「让别人的 Agent 一起改」或沙箱 `invite <页面> --label <名称>` 生成邀请：一个协作者令牌

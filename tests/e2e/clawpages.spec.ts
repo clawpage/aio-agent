@@ -98,20 +98,19 @@ test("the clawpages page is a home screen of mini apps and pages; an icon opens 
     expect(title.x).toBeGreaterThanOrEqual(menu.x + menu.width);
   }
 
-  // Two shelves: mini apps (with data), then plain pages; an icon, a title, and for an app how much data it holds.
-  const apps = page.getByRole("region", { name: "小应用" }), pages = page.getByRole("region", { name: "网页" });
-  await expect(apps.getByRole("heading")).toHaveText("小应用1");
-  const poll = apps.locator('li[data-page="lunch-poll"]');
+  // One list of clawpages, newest first, whether or not they keep data: an icon, a title, and how much data it holds.
+  const list = page.getByTestId("clawpage-list");
+  await expect(list.locator("li")).toHaveCount(2);
+  await expect(page.getByRole("heading", { name: /小应用|网页/ })).toHaveCount(0);
+  const poll = list.locator('li[data-page="lunch-poll"]');
   // Its cover, the page as rendered; on it, how much data the app holds.
   await expect(poll.locator(".clawpage-cover img")).toHaveJSProperty("complete", true);
   expect(await poll.locator(".clawpage-cover img").evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(96);
   expect(calls).toContain("GET lunch-poll/cover");
-  await expect(poll.locator(".clawpage-cover")).toHaveClass(/is-app/);
   await expect(poll.locator(".clawpage-tile-title")).toHaveText("午饭投票");
   await expect(poll.locator(".clawpage-cover-count")).toHaveText("4 条");
   // No cover: the title's first character stands in, and nothing is asked for.
-  const trip = pages.locator('li[data-page="tokyo-trip"]');
-  await expect(trip.locator(".clawpage-cover")).toHaveClass(/is-page/);
+  const trip = list.locator('li[data-page="tokyo-trip"]');
   await expect(trip.locator(".clawpage-cover-glyph")).toHaveText("东");
   await expect(trip.locator(".clawpage-cover-count")).toHaveCount(0);
   expect(calls).not.toContain("GET tokyo-trip/cover");
@@ -161,9 +160,9 @@ test("the clawpages page is a home screen of mini apps and pages; an icon opens 
   await expect(sheet).toHaveCount(0);
 
   // Deleting a clawpage asks first, and says its data goes too.
-  await pages.getByRole("button", { name: "打开 东京行程 的详情" }).click();
+  await list.getByRole("button", { name: "打开 东京行程 的详情" }).click();
   const tripSheet = page.getByRole("dialog", { name: "东京行程" });
-  await expect(tripSheet).toContainText("网页，不存数据");
+  await expect(tripSheet).not.toContainText("网页");
   await expect(tripSheet.locator(".clawpage-sheet-cover .clawpage-cover-glyph")).toHaveText("东");
   await expect(tripSheet.getByTestId("clawpage-data")).toHaveCount(0);
   await tripSheet.getByRole("button", { name: "删除这个 clawpage" }).click();
