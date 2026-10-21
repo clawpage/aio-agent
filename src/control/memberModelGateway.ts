@@ -19,6 +19,7 @@ import type {BrowserGateway} from './browser/gateway.js';
 import type {HostTokenSource} from './codex/hostTokens.js';
 import type {ImageGateway} from './imageTool.js';
 import type {PrinterGateway} from './printer/gateway.js';
+import type {TtsGateway} from './ttsTool.js';
 
 /** The CLI's subscription credential needs this beta on the Messages API. */
 const OAUTH_BETA='oauth-2025-04-20';
@@ -56,7 +57,7 @@ export class MemberModelGateway {
   private claudeModels=new Map<string,string>();
   private gptUsers=new Set<string>();
   private server:http.Server|null=null;
-  constructor(private cfg:Config,private log:Logger,private share?:ShareStore,private decision?:DecisionGateway,private kb?:KbGateway,private schedule?:ScheduleGateway,private hostTokens?:Pick<HostTokenSource,'getTokens'|'invalidate'>,private image?:ImageGateway,private browser?:BrowserGateway,private ha?:HaGateway,private printer?:PrinterGateway,private phone?:PhoneGateway,private history?:HistoryGateway,private userBrowser?:UserBrowserGateway){}
+  constructor(private cfg:Config,private log:Logger,private share?:ShareStore,private decision?:DecisionGateway,private kb?:KbGateway,private schedule?:ScheduleGateway,private hostTokens?:Pick<HostTokenSource,'getTokens'|'invalidate'>,private image?:ImageGateway,private browser?:BrowserGateway,private ha?:HaGateway,private printer?:PrinterGateway,private phone?:PhoneGateway,private history?:HistoryGateway,private userBrowser?:UserBrowserGateway,private tts?:TtsGateway){}
   provision(cfg:Config):void {
     fs.mkdirSync(cfg.dataDir,{recursive:true,mode:0o700});
     const file=path.join(cfg.dataDir,'model-token');
@@ -75,6 +76,7 @@ export class MemberModelGateway {
     this.schedule?.provision(cfg);
     this.history?.provision(cfg);
     this.image?.provision(cfg);
+    this.tts?.provision(cfg);
     this.browser?.provision(cfg);
     // A member's own phone, on the Mac it linked; never another account's.
     this.phone?.provision(cfg);
@@ -103,6 +105,7 @@ export class MemberModelGateway {
       if(this.schedule&&(req.url??'').startsWith('/schedule/')){await this.schedule.handle(req,res);return;}
       if(this.history&&(req.url??'').startsWith('/history/')){await this.history.handle(req,res);return;}
       if(this.image&&(req.url??'').startsWith('/image/')){await this.image.handle(req,res);return;}
+      if(this.tts&&(req.url??'').startsWith('/tts/')){await this.tts.handle(req,res);return;}
       if(this.browser&&(req.url??'').startsWith('/browser/')){await this.browser.handle(req,res);return;}
       const match=/^\/u\/(user_[a-zA-Z0-9]+)\/v1\/responses$/.exec(req.url??'');
       const messages=/^\/u\/(user_[a-zA-Z0-9]+)\/anthropic(\/v1\/messages(?:\/count_tokens)?)(\?beta=true)?$/.exec(req.url??'');

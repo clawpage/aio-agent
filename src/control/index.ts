@@ -19,6 +19,7 @@ import {ScheduleGateway} from "./scheduleTool.js";
 import {HistoryGateway} from "./historyTool.js";
 import { ImageGateway, sandboxImageFiles } from "./imageTool.js";
 import { PrinterGateway, sandboxPrintFiles } from "./printer/gateway.js";
+import { TtsGateway, sandboxSpeechFiles } from "./ttsTool.js";
 import {UserRuntimes} from "./tenants.js";
 import { loadConfig, ensureDataDirs, type Config } from "./config.js";
 import { Logger } from "../common/logger.js";
@@ -528,6 +529,11 @@ async function main(): Promise<void> {
     chatgptUrl:ctx.cfg.hostCodex.chatgptUrl,workspace:ctx.cfg.sandbox.containerWorkspaceDir,
     filesFor:async id=>sandboxImageFiles(id===ctx.cfg.runtimeUserId?ctx:await ctx.runtimeForUser!(id))}):undefined;
   image?.provision(ctx.cfg);
+  // Speech for every account, from the one speech server the deployment names.
+  const tts=ctx.cfg.speech.url?new TtsGateway({port:ctx.cfg.memberModelPort??4902,log:ctx.log,speechUrl:ctx.cfg.speech.url,
+    workspace:ctx.cfg.sandbox.containerWorkspaceDir,
+    filesFor:async id=>sandboxSpeechFiles(id===ctx.cfg.runtimeUserId?ctx:await ctx.runtimeForUser!(id))}):undefined;
+  tts?.provision(ctx.cfg);
   const browserGateway=new BrowserGateway({port:ctx.cfg.memberModelPort??4902,log:ctx.log,
     readyFor:async id=>{
       const runtime=id===ctx.cfg.runtimeUserId?ctx:await ctx.runtimeForUser!(id);
@@ -535,7 +541,7 @@ async function main(): Promise<void> {
       await runtime.browser.withCall("call",()=>undefined);
     }});
   browserGateway.provision(ctx.cfg);
-  const modelGateway=new MemberModelGateway(ctx.cfg,ctx.log,ctx.share,decision,kb,schedule,ctx.hostTokens,image,browserGateway,ha,printer,phone,history,userBrowser);
+  const modelGateway=new MemberModelGateway(ctx.cfg,ctx.log,ctx.share,decision,kb,schedule,ctx.hostTokens,image,browserGateway,ha,printer,phone,history,userBrowser,tts);
   await modelGateway.start();
   // Phone notifications: one key pair and one subscription store for every account.
   ctx.push=new PushService({db:ctx.db,log:ctx.log,keyFile:path.join(ctx.cfg.dataDir,"vapid.json"),subject:`https://${ctx.cfg.primaryHost}`});

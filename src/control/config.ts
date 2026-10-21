@@ -371,6 +371,13 @@ export function loadConfig(): {
   };
   /** This runtime's printer URL on the member gateway, when granted (PrinterGateway). */
   printer?: { url: string };
+  /**
+   * The speech server every account's text to speech uses (ttsTool.ts): its
+   * `POST /v1/tts` endpoint. Without a URL the feature is absent.
+   */
+  speech: { url: string };
+  /** This runtime's text-to-speech URL on the member gateway (TtsGateway). */
+  tts?: { url: string };
   /** This runtime's phone tools URL on the member gateway, when its account linked a Mac (PhoneGateway). */
   phone?: { url: string };
   /** This runtime's URL for the AI's Chrome on its account's Mac on the member gateway, when it linked a Mac (UserBrowserGateway). */
@@ -644,6 +651,7 @@ export function loadConfig(): {
       printerUri: envStr("PA_PRINTER_URI", ""),
       accounts: parseList(envStr("PA_PRINTER_ACCOUNTS", "")),
     },
+    speech: { url: envStr("PA_TTS_URL", "") },
     keyboardBridge: {
       url: envStr("PA_KEYBOARD_BRIDGE_URL", "").replace(/\/+$/, ""),
       secretsFile: envStr("PA_KEYBOARD_BRIDGE_SECRETS_FILE", path.join(os.homedir(), ".config", "aio-agent", "keyboard-bridge.env")),

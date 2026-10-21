@@ -15,6 +15,7 @@
 - [10. 语音输入](#10-语音输入)
 - [11. 语音配件](#11-语音配件)
 - [12. 出图（aio_image）](#12-出图aio_image)
+- [12a. 朗读（aio_tts）](#12a-朗读aio_tts)
 - [13. 手机通知（Web Push）](#13-手机通知web-push)
 - [14. 外部集成](#14-外部集成)
 - [15. Claude Code 执行器](#15-claude-code-执行器)
@@ -538,6 +539,20 @@ iOS App 需为声明了存入相册权限、带 `aioSaveFiles` 标记的新版�
   反复改字会越改越糊、字越改越错。执行器按沙箱 skill `aio-graphic` 写 HTML 页面（`tasks/<任务>/<名字>.html` + `assets/`），
   用 `~/.codex/tools/aio-graphic/aio-render.py` 以沙箱内无头 Chromium 渲染成 2 倍 PNG；改图就改 HTML 再渲染。
   `image_generate` 只画其中的插画素材，每张生成一次后重复使用。skill 与渲染脚本随沙箱启动写入（同分享 skill）。
+
+## 12a. 朗读（aio_tts）
+
+在主会话说「把这段读出来」「做成语音」即可。设置 `PA_TTS_URL` 后，每个账号的执行会话注册 MCP 服务 `aio_tts`（成员网关 `/tts/<运行时令牌>/mcp`，只写本账号工作区），
+工具 `text_to_speech`：
+
+- **参数**：`text`（一次最多 1500 字）；`path`（工作区内 `.wav`，默认存入 `workspace/audio/`）；可选 `voice`（模型的 9 个预置音色：
+  vivian、serena、uncle_fu、dylan、eric 讲中文，ryan、aiden 讲英文，ono_anna 日文，sohee 韩文）与 `language`（中、英、日、韩、德、法、俄、葡、西、意）。
+  不给语言时按文字判断（有汉字为中文，假名为日文，韩文字母为韩文，其余英文），不给音色时按语言选默认音色。方括号是控制标记（`[pause:500ms]` 停顿）。
+- **实现**：所有账号共用一台语音服务：Qwen3-TTS 12Hz 0.6B CustomVoice，INT8 量化、CPU 推理（纯 C 引擎 qwen3-tts 的 `--serve`，`POST /v1/tts`
+  收 `{text, speaker, language}`、回 24 kHz 16 位单声道 WAV；任何同样契约的服务都可替换）。控制面按句切成不超过 120 字的段（服务端单次生成约 48 秒音频封顶）依次请求，拼成一个 WAV
+  写进该账号工作区；沙箱本身不接触语音服务。服务比实时慢，控制面同一时间只送一个请求，其他账号的请求排队等候（工具超时 20 分钟）。
+- **展示**：执行器把文件写成单独一行的链接 `[说明](路径)`，消息里显示为播放器（见「富内容块」）；要 mp3 或更长的音频由执行器在沙箱里用 ffmpeg 转换、拼接。
+- 现有部署：语音服务在 old-mb（`PA_TTS_URL=http://192.168.1.118:4911/v1/tts`），部署与排障见 [运行手册](RUNBOOK.md)「朗读服务」。
 
 ## 13. 手机通知（Web Push）
 

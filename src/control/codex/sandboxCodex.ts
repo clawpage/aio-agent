@@ -9,6 +9,7 @@ import { scheduleThreadServers } from "../scheduleTool.js";
 import { historyThreadServers } from "../historyTool.js";
 import { imageThreadServers } from "../imageTool.js";
 import { printerThreadServers } from "../printer/gateway.js";
+import { ttsThreadServers } from "../ttsTool.js";
 import type { Config } from "../config.js";
 import type { Logger } from "../../common/logger.js";
 import type { SandboxContainer } from "../sandbox/container.js";
@@ -527,7 +528,7 @@ export class SandboxCodexSession {
   #executionConfig(task: BrowserTask | undefined): { config?: Record<string, unknown> } {
     if (!task) return {};
     const tabs = tabThreadConfig(task) as { mcp_servers: Record<string, unknown> };
-    return { config: { ...tabs, mcp_servers: { ...tabs.mcp_servers, ...decisionThreadServers(this.#cfg), ...scheduleThreadServers(this.#cfg), ...historyThreadServers(this.#cfg), ...imageThreadServers(this.#cfg), ...kbThreadServers(this.#cfg), ...haThreadServers(this.#cfg), ...printerThreadServers(this.#cfg), ...phoneThreadServers(this.#cfg), ...userBrowserThreadServers(this.#cfg, task) } } };
+    return { config: { ...tabs, mcp_servers: { ...tabs.mcp_servers, ...decisionThreadServers(this.#cfg), ...scheduleThreadServers(this.#cfg), ...historyThreadServers(this.#cfg), ...imageThreadServers(this.#cfg), ...ttsThreadServers(this.#cfg), ...kbThreadServers(this.#cfg), ...haThreadServers(this.#cfg), ...printerThreadServers(this.#cfg), ...phoneThreadServers(this.#cfg), ...userBrowserThreadServers(this.#cfg, task) } } };
   }
 
   async startThread(

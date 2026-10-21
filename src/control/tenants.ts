@@ -51,6 +51,8 @@ export function memberConfig(base: Config, userId: string, port: number, model: 
     history:undefined,
     // Nor its image tool: each account's saves only into its own workspace.
     image:undefined,
+    // Nor its text to speech, likewise.
+    tts:undefined,
   };
 }
 

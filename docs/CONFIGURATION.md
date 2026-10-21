@@ -108,6 +108,7 @@
 | --- | --- | --- |
 | `PA_DAILY_FEED` | `1` | 为每个账号内置每日推送 |
 | `PA_ASR_URL` | 空 | 语音输入的识别服务；为空则不显示麦克风按钮 |
+| `PA_TTS_URL` | 空 | 朗读工具 `aio_tts` 的语音服务（`POST` JSON `{text, speaker, language}`、回 WAV 的地址，如 Qwen3-TTS 引擎的 `/v1/tts`）；为空则不提供 |
 | `PA_GOOGLE_MAPS_SECRETS_FILE` | 空 | `PA_GOOGLE_MAPS_API_KEY`（环境变量优先；Google Maps Platform key，只需开通 Maps Static API 与 Geocoding API，建议限制为这两项）；缺失则地图卡片用 OpenStreetMap |
 | `PA_JEV_SECRETS_FILE` | `~/.config/aio-agent/jev.env` | `TYPESAFE_API_KEY`（环境变量优先）；缺失则不提供 Jev |
 | `PA_JEV_ENDPOINT` / `PA_JEV_MODEL` | `https://api.typesafe.ai/v1/systemone` / `jev-latest` | Jev 接口与模型 |
