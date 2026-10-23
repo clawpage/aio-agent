@@ -1179,7 +1179,8 @@ export class TaskService {
     /** What a feed run works from: every earlier task of the person, what recent feeds said and what followed, and what the feed was told to keep in mind. */
     private feedBrief(row: TaskRow): string {
         const ownerId = this.ownerId(row);
-        const tz = this.cfg.browser.timezone;
+        const s = row.schedule_id ? this.scheduleRow(row.schedule_id) : null;
+        const tz = s?.timezone ?? this.cfg.browser.timezone;
         const date = (ts: number) => describeNow(ts, tz);
         const cut = (text: string | null, n: number) => { const c = [...(text ?? "").replace(/\s+/g, " ").trim()]; return c.length > n ? c.slice(0, n - 1).join("") + "…" : c.join(""); };
         // A window of days, not of tasks: on a busy account a fixed count covered barely one day.
@@ -1202,7 +1203,6 @@ export class TaskService {
                 .map(t => ({ title: t.title, request: cut(t.input_text, 120) }));
             return { date: date(f.created_at), topics: JSON.parse(f.topics_json) as string[], nothingToday: !!f.empty, userTasksAfter: after, ...(replies.length ? { replies } : {}) };
         });
-        const s = row.schedule_id ? this.scheduleRow(row.schedule_id) : null;
         const asked = s && !isDefaultFeedInstruction(s.instruction) ? s.instruction.trim() : null;
         const memory = this.feedMemory(ownerId);
         const kept = Object.fromEntries(FEED_MEMORY_KINDS.map(k => [k, memory.filter(m => m.kind === k).map(m => ({ id: m.id, text: m.text, from: m.source === "user" ? "said by the user" : "learned by the feed", date: date(m.created_at) }))]));
@@ -1224,6 +1224,19 @@ export class TaskService {
     }
     private feedMemory(ownerId: string): FeedMemoryRow[] {
         return this.db.prepare("SELECT * FROM feed_memory WHERE owner_id=? ORDER BY created_at").all(ownerId) as unknown as FeedMemoryRow[];
+    }
+    /**
+     * The daily feed runs on the clock of the place the person last signed in from:
+     * the same time of day, in that time zone. False when nothing changed.
+     */
+    followFeedTimezone(ownerId: string, tz: string): boolean {
+        const s = this.db.prepare("SELECT * FROM schedules WHERE owner_id=? AND builtin=?").get(ownerId, DAILY_FEED) as unknown as ScheduleRow | undefined;
+        if (!s || s.timezone === tz) return false;
+        const now = Date.now();
+        // A paused or finished feed keeps no next run; resuming it counts in its new zone.
+        const next = s.status === "active" ? nextRun(JSON.parse(s.spec_json) as ScheduleSpec, now, tz) : s.next_run_at;
+        this.db.prepare("UPDATE schedules SET timezone=?,next_run_at=?,updated_at=? WHERE id=?").run(tz, next, now, s.id);
+        return true;
     }
     private feedSchedule(ownerId: string): ScheduleRow {
         const s = this.db.prepare("SELECT * FROM schedules WHERE owner_id=? AND builtin=?").get(ownerId, DAILY_FEED) as unknown as ScheduleRow | undefined;

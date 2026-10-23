@@ -37,6 +37,7 @@ import { visibleEmail } from "../auth/email.js";
 import { CLIENT_EVENTS } from "../../common/analytics.js";
 import { RegisterError, createInvite, listInvites, registerWithInvite, registrationRequiresInvite, revokeInvite } from "../auth/invites.js";
 import { googleRouter } from "../auth/googleRoutes.js";
+import { followLoginTimezone } from "../auth/loginTimezone.js";
 import { createSupportRequest, reviewSupportRequest, supportQueue, SupportError } from '../support.js';
 import { parseHttpUrl } from "../aio/client.js";
 import { COOKIE_NAMES, clearSessionCookies, sessionCookies } from "../auth/sessions.js";
@@ -369,6 +370,7 @@ export function createApiRouter(context: AppContext): Router {
       audit(db, "login_ok", owner.username, ctx.ip);
       track(req, "login", { method: "password", with: identifier.includes("@") ? "email" : "username" }, owner.id);
       log.info("user logged in", { ip: ctx.ip });
+      followLoginTimezone(context, owner.id, req.body?.timeZone);
       res.json({ ok: true, username: owner.username, role: owner.role, expiresAt: session.expiresAt });
     }),
   );
@@ -408,6 +410,7 @@ export function createApiRouter(context: AppContext): Router {
       audit(db, "register_ok", user.username, ctx.ip);
       track(req, "signup", { method: "password", invite: Boolean(str(req.body?.inviteCode).trim()) }, user.id);
       log.info("user registered", { ip: ctx.ip });
+      followLoginTimezone(context, user.id, req.body?.timeZone);
       res.json({ ok: true, username: user.username, email: user.email, role: user.role, expiresAt: session.expiresAt });
     }),
   );

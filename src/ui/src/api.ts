@@ -61,6 +61,15 @@ export class ApiError extends Error {
   }
 }
 
+/** The browser's IANA time zone, e.g. "Asia/Shanghai"; empty when it cannot tell. */
+function browserTimeZone(): string {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone ?? "";
+  } catch {
+    return "";
+  }
+}
+
 function cookie(name: string): string {
   const match = document.cookie
     .split(";")
@@ -212,10 +221,11 @@ export const api = {
   taskBrowserScreenshotUrl: (id: string, tab: string, at: number) => apiUrl(`/api/tasks/${encodeURIComponent(id)}/browser/screenshot?tab=${encodeURIComponent(tab)}&at=${at}`),
   session: (signal?: AbortSignal) => request<{ authenticated: boolean; role?: "owner" | "member"; username: string | null; email?: string | null; expiresAt?: number; secure?: boolean; inviteEmail?: string | null; registrationRequiresInvite?: boolean }>("/api/auth/session", {signal,cache:"no-store"}),
   /** `email` is the account's email, or the username of an account from before email. */
-  login: (password: string, email = "owner") => request<{ ok: boolean; username: string; expiresAt: number }>("/api/auth/login", { method: "POST", body: { password, email } }),
-  register: (account: { email: string; password: string; inviteCode: string }) => request<{ ok: boolean; username: string; expiresAt: number }>("/api/auth/register", { method: "POST", body: account }),
+  // Signing in tells the server the browser's time zone: the daily feed follows it.
+  login: (password: string, email = "owner") => request<{ ok: boolean; username: string; expiresAt: number }>("/api/auth/login", { method: "POST", body: { password, email, timeZone: browserTimeZone() } }),
+  register: (account: { email: string; password: string; inviteCode: string }) => request<{ ok: boolean; username: string; expiresAt: number }>("/api/auth/register", { method: "POST", body: { ...account, timeZone: browserTimeZone() } }),
   googlePending: (signal?: AbortSignal) => request<{enabled: boolean; pending: {email: string} | null}>("/api/auth/google/pending", {cache: "no-store", signal}),
-  googleStart: (native: boolean) => request<{url: string}>("/api/auth/google/start", {method: "POST", body: {native}}),
+  googleStart: (native: boolean) => request<{url: string}>("/api/auth/google/start", {method: "POST", body: {native, timeZone: browserTimeZone()}}),
   googleRedeem: (ticket: string) => request<{authenticated: boolean; pending?: {email: string}}>("/api/auth/google/redeem", {method: "POST", body: {ticket}}),
   googleRegister: (account: {inviteCode: string}) => request<{ok: boolean}>("/api/auth/google/register", {method: "POST", body: account}),
   googleCancel: () => request<{ok: boolean}>("/api/auth/google/cancel", {method: "POST"}),

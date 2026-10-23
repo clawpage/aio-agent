@@ -6,6 +6,7 @@ import { generateSecret, sha256Hex } from "./passwords.js";
 import { RegisterError, registerGoogleWithInvite } from "./invites.js";
 import { serializeCookie, sessionCookies } from "./sessions.js";
 import { t } from "../i18n/index.js";
+import { followLoginTimezone } from "./loginTimezone.js";
 import { GoogleLogin, GoogleAuthError, GOOGLE_TTL, GOOGLE_CLIENT_COOKIE, GOOGLE_BROWSER_COOKIE, type GoogleFlow } from "./google.js";
 
 export function googleRouter(context: AppContext): Router {
@@ -15,6 +16,17 @@ export function googleRouter(context: AppContext): Router {
   const cookie = (name: string, value: string, secure: boolean) => serializeCookie({name, value, httpOnly: true,
     secure, sameSite: "Lax", path: "/api/auth/google", maxAgeSeconds: value ? GOOGLE_TTL / 1000 : 0});
   const client = (req: Request) => req.paCtx!.cookies[GOOGLE_CLIENT_COOKIE] ?? "";
+  /**
+   * The browser's time zone, told when a Google sign-in starts, by the flow's client hash:
+   * a web sign-in ends in a redirect, where the page cannot say it. Short-lived like the flow.
+   */
+  const zones = new Map<string, {timeZone: unknown; at: number}>();
+  const zoneOf = (clientHash: string): unknown => {
+    for (const [key, value] of zones) if (Date.now() - value.at > GOOGLE_TTL) zones.delete(key);
+    const found = zones.get(clientHash);
+    zones.delete(clientHash);
+    return found?.timeZone;
+  };
   router.use((req, res, next) => {
     res.setHeader("Cache-Control", "no-store");
     res.setHeader("Referrer-Policy", "no-referrer");
@@ -46,6 +58,7 @@ export function googleRouter(context: AppContext): Router {
     limiter.recordSuccess(ctx.ip);
     audit(db, "google_login_ok", user.username, ctx.ip);
     context.analytics?.track("login", {userId: user.id, platform: req.get("x-client-platform"), props: {method: "google", native: Boolean(row.native)}});
+    followLoginTimezone(context, user.id, zoneOf(row.client_hash));
     if (redirect) res.redirect(303, "/login");
     else res.json({authenticated: true, username: user.username, role: user.role});
   };
@@ -57,6 +70,7 @@ export function googleRouter(context: AppContext): Router {
     if (!google.enabled) { res.status(503).json({error: "google_disabled", message: t().http.auth.googleDisabled}); return; }
     google.discard(client(req));
     const flow = google.start(req.body?.native === true);
+    if (zones.size < 1000) zones.set(sha256Hex(flow.client), {timeZone: req.body?.timeZone, at: Date.now()});
     res.setHeader("Set-Cookie", cookie(GOOGLE_CLIENT_COOKIE, flow.client, req.paCtx!.secure));
     res.json({url: flow.url});
   }));
@@ -105,6 +119,7 @@ export function googleRouter(context: AppContext): Router {
       limiter.recordSuccess(ctx.ip);
       audit(db, "google_register_ok", user.username, ctx.ip);
       context.analytics?.track("signup", {userId: user.id, platform: req.get("x-client-platform"), props: {method: "google", invite: Boolean(str(req.body?.inviteCode).trim())}});
+      followLoginTimezone(context, user.id, zoneOf(row.client_hash));
       res.json({ok: true, username: user.username, email: user.email, role: user.role});
     } catch (err) {
       if (!(err instanceof RegisterError)) throw err;

@@ -6,6 +6,7 @@ import { Logger } from "../../src/common/logger.js";
 import { taskNotification } from "../../src/control/push.js";
 import { FakeCodex, testConfig } from "../helpers/harness.js";
 import { answerLanguage } from "../../src/control/locale.js";
+import { nextRun } from "../../src/control/tasks/schedules.js";
 import { runInLocale } from "../../src/control/i18n/index.js";
 
 class PlanningCodex extends FakeCodex {
@@ -276,5 +277,25 @@ describe("what the daily feed keeps in mind", () => {
     await tick();
     expect(section(brief(), "Feed history feedHistory (newest first):")[0]).toMatchObject({ topics: ["Mac Studio 降价"], replies: [{ request: "这个有用，以后降价都告诉我" }] });
     expect(brief()).toContain("feed_update (source set to \"feed\")");
+  });
+
+  it("runs at the same time of day in the time zone the person signed in from", () => {
+    const zone = () => db.prepare("SELECT timezone,next_run_at FROM schedules WHERE builtin='daily_feed'").get() as { timezone: string; next_run_at: number | null };
+    expect(zone().timezone).toBe(cfg.browser.timezone);
+    const before = Date.now();
+    expect(tasks.followFeedTimezone("owner_1", "Asia/Shanghai")).toBe(true);
+    const after = Date.now();
+    const moved = zone();
+    expect(moved.timezone).toBe("Asia/Shanghai");
+    expect([nextRun({ kind: "daily", at: "08:00" }, before, "Asia/Shanghai"), nextRun({ kind: "daily", at: "08:00" }, after, "Asia/Shanghai")]).toContain(moved.next_run_at);
+    expect(new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Shanghai", hour: "2-digit", minute: "2-digit" }).format(moved.next_run_at!)).toBe("08:00");
+    expect(tasks.listSchedules("owner_1")[0]).toMatchObject({ timezone: "Asia/Shanghai", rule: "Every day at 08:00" });
+    // Signing in again from the same place changes nothing; a paused feed stays without a next run.
+    expect(tasks.followFeedTimezone("owner_1", "Asia/Shanghai")).toBe(false);
+    db.prepare("UPDATE schedules SET status='paused',next_run_at=NULL WHERE builtin='daily_feed'").run();
+    expect(tasks.followFeedTimezone("owner_1", "Europe/London")).toBe(true);
+    expect(zone()).toEqual({ timezone: "Europe/London", next_run_at: null });
+    // An account without a feed has nothing to move.
+    expect(tasks.followFeedTimezone("nobody", "Asia/Tokyo")).toBe(false);
   });
 });
