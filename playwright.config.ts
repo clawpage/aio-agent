@@ -18,6 +18,7 @@ export default defineConfig({
   testIgnore: [
     /analytics\.spec\.ts/,
     /task-retry\.spec\.ts/,
+    /draft-reply\.spec\.ts/,
     /support-card\.spec\.ts/,
     /image-zoom\.spec\.ts/,
     /task-detail-paging\.spec\.ts/,

@@ -77,6 +77,7 @@ export const feed: typeof zh = {
     schedule: (rule: string) => `排程 · ${rule}`,
     support: "客服",
     noResult: "任務已結束，但沒有回傳文字結果，請開啟詳情核對。",
+    writing: "正在回覆",
   },
   scheduleRun: (title: string, rule: string) => `排程任務「${title}」自動執行 · ${rule} · `,
   supportNote: "客服傳來的訊息 · ",

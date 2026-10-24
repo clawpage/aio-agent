@@ -17,6 +17,8 @@ import { VaultPrompt } from "./VaultPrompt";
 import { TaskPhone } from "./TaskPhone";
 import { TaskUserBrowser } from "./TaskUserBrowser";
 import { MessagePreview } from "./MessagePreview";
+import { DraftReply } from "./DraftReply";
+import { nextDraft, type Draft } from "../draftText";
 import { ComposerAttachments, releasePreviews, useUploadTray, type PendingUpload } from "./ComposerAttachments";
 import { TurnPills } from "./TurnPills";
 import { FormCard } from "./FormCard";
@@ -205,14 +207,19 @@ export function TaskChat({ onDetails, onOpenLink, onOpenFileInBrowser, onExpired
         return () => observer.disconnect();
     }, [nextBefore, loadOlder]);
     const runningIds = tasks.filter(t => ["running", "queued"].includes(t.status)).map(t => t.conversationId).sort().join(",");
+    /** The final answer each execution conversation is writing, followed on its event stream: the feed shows it as it is written. */
+    const [drafts, setDrafts] = useState<Record<string, Draft>>({});
     useEffect(() => {
         const closes = runningIds.split(",").filter(Boolean).map(id => {
             let live = false;
+            // The stream replays from the beginning, which rebuilds the answer in progress.
+            setDrafts(old => { if (!(id in old)) return old; const next = { ...old }; delete next[id]; return next; });
             return openEventStream(id, 0, {
                 onOpen: () => { live = true; }, onError: () => { live = false; }, onRevoked: () => callbacks.current.onExpired(),
                 onEvent: event => {
                     if (live && ["turn.finished", "turn.failed", "approval.requested", "approval.resolved"].includes(event.type))
                         void refresh();
+                    setDrafts(old => { const draft = nextDraft(old[id] ?? null, event); return draft === (old[id] ?? null) ? old : { ...old, [id]: draft }; });
                 },
             });
         });
@@ -475,7 +482,10 @@ export function TaskChat({ onDetails, onOpenLink, onOpenFileInBrowser, onExpired
           <div className="task-actions"><button className="ghost tiny" onClick={() => quoteTask(t)} aria-label={i18n.feed.actions.quoteLabel(t.title)}>{i18n.feed.actions.quote}</button>{t.status === "planning_failed" ? <button className="ghost tiny" onClick={() => void act(() => api.retryTaskPlanning(t.id))}>{i18n.feed.actions.retryPlanning}</button> : t.status === "blocked" ? null : <button className="ghost tiny" disabled={t.status === "stopping"} onClick={() => void act(() => api.stopTask(t.id))}>{i18n.feed.actions.stop}</button>}</div>
         </div>;
     const [reportedTask, setReportedTask] = useState<string | null>(null);
-    const feed = tasks.flatMap(t => [{ task: t, report: false, at: t.createdAt }, ...(!t.mergedInto && terminal.has(t.status) ? [{ task: t, report: true, at: t.completedAt ?? t.createdAt }] : [])])
+    /** The answer a running task is writing, shown where its reply will be until the reply itself arrives. */
+    const draftOf = (t: Task) => !t.mergedInto && ["running", "stopping"].includes(t.status) ? drafts[t.conversationId]?.text || null : null;
+    const keepLatest = useCallback(() => { const n = scroll.current; if (n && stick.current) n.scrollTop = n.scrollHeight; }, []);
+    const feed = tasks.flatMap(t => [{ task: t, report: false, at: t.createdAt }, ...(!t.mergedInto && terminal.has(t.status) ? [{ task: t, report: true, at: t.completedAt ?? t.createdAt }] : draftOf(t) ? [{ task: t, report: true, at: Number.MAX_SAFE_INTEGER }] : [])])
         .sort((a, b) => a.at - b.at || Number(a.report) - Number(b.report) || a.task.id.localeCompare(b.task.id));
     return <section className="chat task-chat">
     {reportedTask && <SupportDialog taskId={reportedTask} onClose={() => setReportedTask(null)}/>}
@@ -498,7 +508,11 @@ export function TaskChat({ onDetails, onOpenLink, onOpenFileInBrowser, onExpired
         <p className="welcome-hint muted tiny">{i18n.feed.empty.hint}</p>
         <div className="welcome-starters">{i18n.feed.empty.starters.map(s => <button type="button" key={s.label} onClick={() => sendStarter(s.prompt)}>{s.label}</button>)}</div>
       </div>}
-      {feed.map(({ task: t, report }) => report ? <article className={`msg assistant task-report ${t.status}`} key={`${t.id}:report`} data-task-id={t.id}>
+      {/* Same key as the reply it becomes: the finished reply takes its place without coming in again. */}
+      {feed.map(({ task: t, report }) => report && !terminal.has(t.status) ? <article className="msg assistant task-report drafting" key={`${t.id}:report`} data-task-id={t.id} aria-busy="true">
+        <div className="task-report-heading"><span>{t.title}</span>{t.schedule && <span className="schedule-badge">{i18n.feed.report.schedule(t.schedule.rule)}</span>}<span className="muted tiny">{i18n.feed.report.writing}</span></div>
+        <MessagePreview title={t.title}><DraftReply text={draftOf(t)!} onGrow={keepLatest} onOpenLink={onOpenLink} onOpenFile={setPreview}/></MessagePreview>
+      </article> : report ? <article className={`msg assistant task-report ${t.status}`} key={`${t.id}:report`} data-task-id={t.id}>
         <div className="task-report-heading"><span>{t.title}</span>{t.schedule && <span className="schedule-badge">{i18n.feed.report.schedule(t.schedule.rule)}</span>}{t.support && <span className="schedule-badge">{i18n.feed.report.support}</span>}<span className="muted tiny">{labels[t.status]}</span></div>
         <MessagePreview title={t.title}><Markdown source={t.result || (t.status === "completed" ? i18n.feed.report.noResult : t.error || labels[t.status] || t.status)} onOpenLink={onOpenLink} onOpenFile={setPreview} choices={{ onChoose: option => void choose(t, option), chosen: choosing[`${t.id}:${t.revision}`] ?? replyTo(t)?.text ?? null }}/>{t.result && <MessageFileCards text={t.result} onOpen={setPreview} onOpenLink={onOpenLink}/>}{t.error && t.result && <p className="error">{t.error}</p>}</MessagePreview>
         {ownsBrowser(t) && <><VaultPrompt task={t}/><TaskBrowser task={t} onReveal={onRevealBrowser}/></>}

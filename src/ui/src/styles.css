@@ -3234,6 +3234,9 @@ button .loading-mark { color: inherit; }
 .task-report.completed .bubble { --rail: var(--done); }
 .task-report.failed .bubble, .task-report.unknown .bubble { --rail: var(--error); }
 .task-report.completed .task-report-heading > .muted { color: var(--done); }
+/* A reply still being written: the AI's colour until it is done. */
+.task-report.drafting .bubble { --rail: var(--ai); }
+.task-report.drafting .task-report-heading > .muted { color: var(--ai); }
 .turn-pill { display: inline-block; margin-right: 6px; padding: 1px 9px; border-radius: 999px; font-size: 12px; font-weight: 600; line-height: 1.6; white-space: nowrap; }
 .turn-pill.you { background: var(--you-soft); color: var(--you); }
 .turn-pill.ai { background: var(--ai-soft); color: var(--ai); }
