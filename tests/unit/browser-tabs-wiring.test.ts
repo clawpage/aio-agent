@@ -300,3 +300,22 @@ it("marks the tabs of a turn cut off by a restart finished, unless the sandbox i
   const cut = await restart(false);
   expect(finished).toEqual([cut]);
 });
+
+it("reuses a whole tab listing for a moment, and reads again after a change", async () => {
+  const { TabServer } = await import("../../src/control/browser/tabs.js");
+  let listings = 0;
+  const container = {
+    execInSandbox: async (argv: string[]) => {
+      if (argv.some((a) => a.endsWith("/tabs"))) { listings += 1; return { code: 0, stdout: JSON.stringify({ tabs: [] }), stderr: "" }; }
+      return { code: 0, stdout: JSON.stringify({ tab: null }), stderr: "" };
+    },
+    writeFileInSandbox: async () => undefined,
+    execDetached: async () => ({ code: 0, stdout: "", stderr: "" }),
+  };
+  const tabs = new TabServer(testConfig("/tmp/pa-tabs-reuse", 1), new Logger("error", undefined, false), container as never, { ensureScripts: async () => undefined } as never);
+  await tabs.list(); await tabs.list(); await tabs.list();
+  expect(listings).toBe(1);
+  await tabs.control("task_a", "t1", "take");
+  await tabs.list();
+  expect(listings).toBe(2);
+});

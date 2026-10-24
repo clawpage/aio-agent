@@ -123,7 +123,14 @@ export function TaskChat({ onDetails, onOpenLink, onOpenFileInBrowser, onExpired
                 callbacks.current.onExpired();
         }
     }, [merge]);
-    useEffect(() => { void refresh(); const timer = window.setInterval(() => void refresh(), 2500); return () => clearInterval(timer); }, [refresh]);
+    // Each poll costs the sandbox a tab listing: a hidden console waits, and asks at once when shown again.
+    useEffect(() => {
+        void refresh();
+        const timer = window.setInterval(() => { if (document.visibilityState === "visible") void refresh(); }, 2500);
+        const shown = () => { if (document.visibilityState === "visible") void refresh(); };
+        document.addEventListener("visibilitychange", shown);
+        return () => { clearInterval(timer); document.removeEventListener("visibilitychange", shown); };
+    }, [refresh]);
     useEffect(() => { if (scroll.current && stick.current)
         scroll.current.scrollTop = scroll.current.scrollHeight; }, [tasks]);
     // A phone keyboard, or the composer growing on focus, resizes the feed without scrolling it: keep the

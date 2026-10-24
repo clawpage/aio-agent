@@ -215,7 +215,8 @@ export function MainApp({ firstSession }: { firstSession?: ReturnType<typeof api
         if (!auth)
             return;
         void refreshStatus();
-        const poll = setInterval(() => void refreshStatus(), 8000);
+        // A hidden console does not ask; coming back asks at once (see visible below).
+        const poll = setInterval(() => { if (document.visibilityState === "visible") void refreshStatus(); }, 8000);
         const renew = async () => { try {
             await api.refresh();
         }

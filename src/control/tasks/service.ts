@@ -176,6 +176,12 @@ export class TaskService {
     }
     close(): void { this.#closed = true; this.agent.events.off("event", this.onEvent); if (this.#ticker) clearInterval(this.#ticker); }
     private rows(): TaskRow[] { return this.db.prepare("SELECT * FROM tasks WHERE (? IS NULL OR conversation_id IN (SELECT id FROM conversations WHERE owner_id=?)) ORDER BY created_at, id").all(this.cfg.runtimeUserId ?? null, this.cfg.runtimeUserId ?? null) as unknown as TaskRow[]; }
+    /** rows() narrowed to some statuses (idx_tasks_status): the scheduler and the feed's wait reasons run often and need only these. */
+    private rowsWithStatus(...statuses: string[]): TaskRow[] { return this.db.prepare(`SELECT * FROM tasks WHERE status IN (${statuses.map(() => "?").join(",")}) AND (? IS NULL OR conversation_id IN (SELECT id FROM conversations WHERE owner_id=?)) ORDER BY created_at, id`).all(...statuses, this.cfg.runtimeUserId ?? null, this.cfg.runtimeUserId ?? null) as unknown as TaskRow[]; }
+    /** The supplements merged into a task (idx_tasks_merged). */
+    private mergedRows(id: string): TaskRow[] { return this.db.prepare("SELECT * FROM tasks WHERE merged_into=? AND status='merged' ORDER BY created_at, id").all(id) as unknown as TaskRow[]; }
+    /** rows() of one executor session (idx_tasks_execution). */
+    private sessionRows(executor: string): TaskRow[] { return this.db.prepare("SELECT * FROM tasks WHERE COALESCE(execution_conversation_id, conversation_id)=? AND (? IS NULL OR conversation_id IN (SELECT id FROM conversations WHERE owner_id=?)) ORDER BY created_at, id").all(executor, this.cfg.runtimeUserId ?? null, this.cfg.runtimeUserId ?? null) as unknown as TaskRow[]; }
     get(id: string): TaskRow | null { return this.db.prepare("SELECT * FROM tasks WHERE id = ?").get(id) as unknown as TaskRow ?? null; }
     ownerId(row: TaskRow): string { return this.agent.getConversation(row.conversation_id)!.owner_id; }
     belongsTo(id: string, userId: string): boolean { const row = this.get(id); return !!row && this.ownerId(row) === userId; }
@@ -197,7 +203,7 @@ export class TaskService {
     private referenceTarget(row: TaskRow): TaskRow | null {
         const ref = row.related_task_id ? this.get(row.related_task_id) : null;
         if (!ref) return null;
-        const same = this.rows().filter(t => t.id !== row.id && t.created_at < row.created_at && !t.merged_into && this.executor(t) === this.executor(ref));
+        const same = this.sessionRows(this.executor(ref)).filter(t => t.id !== row.id && t.created_at < row.created_at && !t.merged_into);
         return same.filter(t => ["planning", "needs_input", "waiting", "queued", "running", "stopping"].includes(t.status)).at(-1) ?? ref;
     }
     /** The account's console language: what its user-visible model output is written in. */
@@ -294,7 +300,7 @@ export class TaskService {
         if (dependency) return { label: words.dependency, message: words.dependencyMessage(dependency.title) };
         const parent = row.merged_into ? this.get(row.merged_into) : null;
         const claims = parent ? [...this.claims(parent), ...this.claims(row)] : this.claims(row);
-        const active = this.rows().filter(t => DISPATCHED.has(t.status) && t.id !== parent?.id);
+        const active = this.rowsWithStatus(...DISPATCHED).filter(t => t.id !== parent?.id);
         const blocker = active.find(t => (parent ? [parent, row] : [row]).some(mine => claimsConflict(this.held(mine), this.held(t))));
         if (blocker) {
             const browser = claims.includes("browser") && this.claims(blocker).includes("browser");
@@ -526,7 +532,7 @@ export class TaskService {
     private async planNext() {
         if (this.#closed || this.#planning)
             return;
-        const row = this.rows().find(t => t.status === "planning");
+        const row = this.rowsWithStatus("planning")[0];
         if (!row)
             return;
         this.#planning = true;
@@ -535,7 +541,8 @@ export class TaskService {
         const trace: RecallEvent = { taskId: row.id, ownerId: this.ownerId(row), candidates: [], searches: [], rounds: 0, chosen: { related: [], appendTo: null }, gold: null, latencyMs: 0, promptChars: 0, failed: true, steps: [] };
         const steps = trace.steps!;
         try {
-            const everything = this.rows().filter(t => this.ownerId(t) === this.ownerId(row));
+            const owner = this.ownerId(row);
+            const everything = this.rows().filter(t => this.ownerId(t) === owner);
             const all = everything.filter(t => !t.merged_into && t.created_at < row.created_at).map(t => ({
                 ...t,
                 input_text: this.taskContext(t),
@@ -608,7 +615,7 @@ export class TaskService {
             // once more with the adjacent task titles, still before Jev.
             if (inputContext.trim().length < 30 && candidates.size < MAX_CANDIDATES)
                 recalled(`${inputContext}\n${all.filter(t => !t.schedule_id).slice(-3).map(t => t.title).join("\n")}`, "context");
-            const files = [row,...this.rows().filter(t=>t.merged_into===row.id && t.status==='merged')]
+            const files = [row,...this.mergedRows(row.id)]
                 .flatMap(t=>JSON.parse(t.attachments_json) as TurnAttachment[]);
             const planningInput = [inputContext, ...(files.length ? [`Attachments so far (the executor can read them): ${JSON.stringify(files)}`] : [])].filter(Boolean).join("\n\n");
             const soul = readSoul(this.cfg).content;
@@ -874,7 +881,7 @@ export class TaskService {
         if(this.#merging) { this.#mergeAgain=true; return; }
         this.#merging=true;
         try {
-            for(const candidate of this.rows().filter(t=>t.status==='merging')) {
+            for(const candidate of this.rowsWithStatus('merging')) {
                 if(this.#closed) return;
                 const row = this.get(candidate.id);
                 if (!row || row.status !== 'merging') continue;
@@ -892,7 +899,7 @@ export class TaskService {
                 if (dependencies.some(t => t!.status !== 'completed')) continue;
                 const parentPlan=JSON.parse(parent.plan_json) as TaskPlan;
                 const resources=[...new Set([...parentPlan.resources,...plan.resources])];
-                const otherActive=this.rows().filter(t=>t.id!==parent.id && DISPATCHED.has(t.status));
+                const otherActive=this.rowsWithStatus(...DISPATCHED).filter(t=>t.id!==parent.id);
                 if(otherActive.some(t=>claimsConflict(this.held(parent, parentPlan),this.held(t)) || claimsConflict(this.held(row, plan),this.held(t)))) continue;
                 // Reserve the expanded resource set before sending the update.
                 parentPlan.resources=resources;
@@ -968,7 +975,7 @@ export class TaskService {
         ].join("\n\n");
     }
     private dispatch() {
-        const rows = this.rows();
+        const rows = this.rowsWithStatus("waiting", ...DISPATCHED);
         const active = rows.filter(t => DISPATCHED.has(t.status));
         for (const row of rows.filter(t => t.status === "waiting")) {
             const reference = this.referenceTarget(row);
@@ -1055,7 +1062,7 @@ export class TaskService {
                 // Answering a task whose tabs the person still holds hands them back for this turn.
                 if (row.execution_conversation_id) void this.handBackTabs(this.executor(row));
                 this.db.prepare("UPDATE tasks SET status='queued',plan_json=? WHERE id=?").run(JSON.stringify({ ...plan, injectedContext: gadget ? {} : Object.fromEntries(fresh.map(c => [c.id, injected[c.id]])), rulesVersion: gadget || rulesKnown ? undefined : rulesVersion, agreementsVersion: agreements && !agreementsKnown ? agreements.version : undefined }), row.id);
-                const { turn } = this.agent.submitTurn({ conversationId: this.executor(row), clientMessageId: `task:${row.id}`, text: prompt, attachments: [...JSON.parse(row.attachments_json),...this.rows().filter(t=>t.merged_into===row.id && t.status==='merged').flatMap(t=>JSON.parse(t.attachments_json))], requiresBrowser: plan.resources.includes("browser"), frozenSettings: { model: row.model!, effort: row.effort } });
+                const { turn } = this.agent.submitTurn({ conversationId: this.executor(row), clientMessageId: `task:${row.id}`, text: prompt, attachments: [...JSON.parse(row.attachments_json),...this.mergedRows(row.id).flatMap(t=>JSON.parse(t.attachments_json))], requiresBrowser: plan.resources.includes("browser"), frozenSettings: { model: row.model!, effort: row.effort } });
                 this.db.prepare("UPDATE tasks SET turn_id=? WHERE id=?").run(turn.id, row.id);
                 active.push(this.get(row.id)!);
             }

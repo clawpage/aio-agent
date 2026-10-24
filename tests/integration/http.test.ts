@@ -155,11 +155,11 @@ describe("conversation and agent endpoints", () => {
 
     const events = await h.request(`/api/conversations/${conversation.id}/events?format=json`, { headers: { cookie } });
     expect(events.status).toBe(200);
-    const payload = (await events.json()) as { events: Array<{ type: string }> };
+    const payload = (await events.json()) as { events: Array<{ id: number; type: string }> };
     expect(payload.events.map((e) => e.type)).toContain("conversation.created");
 
     // A reconnecting EventSource keeps its ?since=0 URL; its Last-Event-ID header decides where the replay starts.
-    const lastId = Math.max(...(payload.events as Array<{ id: number }>).map((e) => e.id));
+    const lastId = Math.max(...payload.events.map((e) => e.id));
     for (const [extra, replayed] of [[{}, payload.events.length], [{ "last-event-id": String(lastId) }, 0]] as const) {
       const sse = await fetch(`http://localhost:${h.primaryPort}/api/conversations/${conversation.id}/events?since=0`, { headers: { cookie, ...extra } });
       const reader = sse.body!.getReader();

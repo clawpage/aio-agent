@@ -11,6 +11,8 @@ import { t } from "../i18n/index.js";
 
 /** Loopback MCP endpoint of the tab server inside every sandbox. */
 export const TAB_SERVER_PORT = 8190;
+/** How long a whole tab listing is reused by other readers. */
+const LISTING_REUSE_MS = 2000;
 export const TAB_SERVER_URL = `http://127.0.0.1:${TAB_SERVER_PORT}/mcp`;
 /** Header that names the task (its execution conversation) on every tool call. */
 export const TAB_TASK_HEADER = "X-AIO-Task";
@@ -303,10 +305,12 @@ export class TabServer implements TabServerLike {
 
   /** Best effort: a server that is gone has no tabs left to mark or close. */
   async #post(route: string, body: unknown): Promise<void> {
+    this.#changed();
     const res = await this.#container.execInSandbox(
       ["curl", "-s", "-f", "-m", "20", "-X", "POST", "-H", "content-type: application/json", "--data-binary", "@-", `http://127.0.0.1:${TAB_SERVER_PORT}${route}`],
       { timeoutMs: 25_000, stdin: JSON.stringify(body) },
     );
+    this.#changed();
     // A /finish that never lands leaves the task's tabs counted as a running task's, kept from every cleanup.
     if (res.code !== 0) this.#log.warn("tab server call failed", { route, error: redact(res.stderr || res.stdout) });
   }
@@ -334,21 +338,39 @@ export class TabServer implements TabServerLike {
   }
 
   #listing: Promise<TabRecord[]> | null = null;
+  /** The last whole listing, reused for a moment: every open console polls it, each read a docker exec. */
+  #recent: { at: number; tabs: TabRecord[] } | null = null;
+  /** Bumped around every change, so a listing read across one is not kept. */
+  #generation = 0;
+
+  #changed(): void {
+    this.#generation += 1;
+    this.#recent = null;
+  }
 
   async list(key?: string): Promise<TabRecord[]> {
     if (key !== undefined && !KEY.test(key)) return [];
     if (key) return withReasons((await this.#get<{ tabs: TabRecord[] }>(`/tabs?key=${key}`))?.tabs ?? []);
+    if (this.#recent && Date.now() - this.#recent.at < LISTING_REUSE_MS) return withReasons(this.#recent.tabs);
     // Every feed read wants the whole record: concurrent ones share one sandbox call.
-    this.#listing ??= this.#get<{ tabs: TabRecord[] }>("/tabs").then((r) => r?.tabs ?? []).finally(() => { this.#listing = null; });
+    if (!this.#listing) {
+      const generation = this.#generation;
+      this.#listing = this.#get<{ tabs: TabRecord[] }>("/tabs").then((r) => {
+        if (r && generation === this.#generation) this.#recent = { at: Date.now(), tabs: r.tabs };
+        return r?.tabs ?? [];
+      }).finally(() => { this.#listing = null; });
+    }
     return withReasons(await this.#listing);
   }
 
   async control(key: string, tab: string, action: "take" | "release"): Promise<TabRecord | null> {
     if (!KEY.test(key) || !/^t\d{1,9}$/.test(tab)) return null;
+    this.#changed();
     const res = await this.#container.execInSandbox(
       ["curl", "-s", "-f", "-m", "20", "-X", "POST", "-H", "content-type: application/json", "--data-binary", "@-", `http://127.0.0.1:${TAB_SERVER_PORT}/control`],
       { timeoutMs: 25_000, stdin: JSON.stringify({ key, tab, action }) },
     );
+    this.#changed();
     if (res.code !== 0) return null;
     try {
       return (JSON.parse(res.stdout) as { tab: TabRecord }).tab;
@@ -390,10 +412,12 @@ export class TabServer implements TabServerLike {
     } catch {
       return { status: 503, body: { error: "unavailable", message: t().browser.tabs.inputUnavailable } };
     }
+    this.#changed();
     const res = await this.#container.execInSandbox(
       ["curl", "-s", "-m", String(seconds), "-w", "\n%{http_code}", "-X", "POST", "-H", "content-type: application/json", "--data-binary", "@-", `http://127.0.0.1:${TAB_SERVER_PORT}${route}`],
       { timeoutMs: (seconds + 5) * 1000, stdin: JSON.stringify(body) },
     );
+    this.#changed();
     const cut = res.stdout.lastIndexOf("\n");
     const status = Number(res.stdout.slice(cut + 1));
     if (res.code !== 0 || !status) return { status: 503, body: { error: "unavailable", message: t().browser.tabs.inputUnavailable } };
@@ -437,10 +461,12 @@ export class TabServer implements TabServerLike {
 
   async front(target: string): Promise<PersonResult> {
     if (!TARGET.test(target)) return { status: 404, body: { error: "no_page", message: t().browser.tabs.pageClosed } };
+    this.#changed();
     const res = await this.#container.execInSandbox(
       ["curl", "-s", "-m", "20", "-w", "\n%{http_code}", "-X", "POST", "-H", "content-type: application/json", "--data-binary", "@-", `http://127.0.0.1:${TAB_SERVER_PORT}/overview/front`],
       { timeoutMs: 25_000, stdin: JSON.stringify({ target }) },
     );
+    this.#changed();
     const cut = res.stdout.lastIndexOf("\n");
     const status = Number(res.stdout.slice(cut + 1));
     if (res.code !== 0 || !status) return { status: 503, body: { error: "unavailable", message: t().browser.tabs.unavailable } };

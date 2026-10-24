@@ -435,6 +435,7 @@ CREATE INDEX IF NOT EXISTS idx_turns_codex ON turns(codex_turn_id);
 CREATE INDEX IF NOT EXISTS idx_events_turn ON events(turn_id);
 CREATE INDEX IF NOT EXISTS idx_tasks_execution ON tasks(COALESCE(execution_conversation_id, conversation_id));
 CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
+CREATE INDEX IF NOT EXISTS idx_tasks_merged ON tasks(merged_into, created_at) WHERE merged_into IS NOT NULL;
 `);
 }
 
