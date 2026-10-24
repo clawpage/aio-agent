@@ -102,6 +102,8 @@ export function createEdge({ dist, control, workspaceOrigin = "", log = () => un
     const out = client.request({ host: upstream.hostname, port: upstreamPort, method: req.method, path: req.url, headers }, (up) => {
       res.writeHead(up.statusCode ?? 502, up.statusMessage, stripHop(up.rawHeaders));
       up.pipe(res);
+      // The control plane died mid-response (e.g. restarted under an SSE stream): end ours too so the client reconnects.
+      up.on("close", () => { if (!up.complete) res.destroy(); });
     });
     out.on("error", (err) => {
       log("control unreachable", String(err));
@@ -161,6 +163,7 @@ export function createEdge({ dist, control, workspaceOrigin = "", log = () => un
 
   // WebSocket upgrades under /api go through untouched; nothing else upgrades here.
   server.on("upgrade", (req, socket, head) => {
+    socket.on("error", () => socket.destroy()); // a client reset with no listener would crash the edge
     if (!(req.url ?? "").startsWith("/api/")) {
       socket.end("HTTP/1.1 404 Not Found\r\nConnection: close\r\nContent-Length: 0\r\n\r\n");
       return;

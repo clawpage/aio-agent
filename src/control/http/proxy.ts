@@ -262,6 +262,7 @@ export function rewriteHandshakeResponse(head: string, secure: boolean): string 
  */
 export function endSocket(socket: Duplex, response: string): void {
   if (socket.destroyed) return;
+  socket.on("error", () => socket.destroy());
   socket.end(response);
   const timer = setTimeout(() => socket.destroy(), 2000);
   timer.unref?.();

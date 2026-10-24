@@ -199,6 +199,7 @@ export function createApp(ctx: AppContext): express.Express {
       if(!api){api=createApiRouter(runtime);tenantApis.set(runtime,api);}
       if(runtime.idle && SANDBOX_API.test(req.path)){
         const release=runtime.idle.hold();res.on("close",release);
+        if(res.destroyed){release();return;}
         await runtime.idle.wake();
       }
       api(req,res,next);
@@ -238,6 +239,8 @@ export function createApp(ctx: AppContext): express.Express {
             return;
           }
           const release=runtime.idle.hold();res.on("close",release);
+          // The client may have left while the container woke; "close" has already fired then.
+          if(res.destroyed){release();return;}
         }
         if(!ctx.sessions.isLive(rec.session!.id)){res.status(401).end();return;}
         // The editor and notebook servers run only while used: the first request starts them.
@@ -276,6 +279,8 @@ function acceptsHtml(req: Request): boolean {
 
 /** WebSocket / CDP upgrades are proxied to the sandbox only on the companion origin. */
 export function handleUpgrade(ctx: AppContext, req: import("node:http").IncomingMessage, socket: import("node:stream").Duplex, head: Buffer): void {
+  // A client reset with no 'error' listener would crash the process; handleProxyUpgrade adds its own later.
+  socket.on("error", () => socket.destroy());
   const rec = resolveAppRequest(ctx,req);
   if (!rec || rec.kind !== "workspace") {
     endSocket(socket, "HTTP/1.1 404 Not Found\r\nConnection: close\r\nContent-Length: 0\r\n\r\n");

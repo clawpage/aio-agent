@@ -950,7 +950,9 @@ export function createApiRouter(context: AppContext): Router {
     const firmware = readFirmware(cfg.gadgetFirmwareDir);
     if (!firmware) { res.status(404).json({ error: "no_firmware" }); return; }
     res.writeHead(200, { "Content-Type": "application/octet-stream", "Content-Length": String(firmware.size), "Cache-Control": "no-store" });
-    fs.createReadStream(firmware.file).on("error", () => res.destroy()).pipe(res);
+    const stream = fs.createReadStream(firmware.file).on("error", () => res.destroy());
+    res.on("close", () => stream.destroy()); // an aborted download would otherwise keep the fd open
+    stream.pipe(res);
   });
   // The dictation page: what the gadget heard, polished and typed at the cursor on the host Mac.
   router.post("/gadget/dictation", requireKind("primary"), asyncHandler(async (req, res) => {

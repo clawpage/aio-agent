@@ -169,7 +169,8 @@ it("returns only to paths inside the page, and reads JSON out of an answer", () 
   expect(pageReturn("lesson.html?d=1")).toBe("lesson.html?d=1");
   expect(pageReturn("?view=review")).toBe("?view=review");
   expect(pageReturn("sub/")).toBe("sub/");
-  for (const bad of ["/u/other/share/x/", "../x", "//evil.example", "https://evil.example", "a#b", ".hidden", "a\\b", 7]) expect(pageReturn(bad)).toBe("");
+  expect(pageReturn("%E8%AF%BE.html")).toBe("%E8%AF%BE.html");
+  for (const bad of ["/u/other/share/x/", "../x", "//evil.example", "https://evil.example", "a#b", ".hidden", "a\\b", "%2e%2e/x", "%2E%2e/x", ".%2e/x", "a%2fb", "%2e%2e%2fx", "%zz", 7]) expect(pageReturn(bad)).toBe("");
   expect(parseJsonAnswer('{"a":1}')).toEqual({ a: 1 });
   expect(parseJsonAnswer('Here:\n```json\n{"a": {"b": 2}}\n```')).toEqual({ a: { b: 2 } });
   expect(parseJsonAnswer("no json")).toBeNull();

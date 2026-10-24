@@ -826,7 +826,9 @@ export class ShareStore {
         "content-length": String(stat.size),
       });
       if (req.method === "HEAD") return res.end();
-      fs.createReadStream(file).on("error", () => res.destroy()).pipe(res);
+      const stream = fs.createReadStream(file).on("error", () => res.destroy());
+      res.on("close", () => stream.destroy()); // an aborted download would otherwise keep the fd open
+      stream.pipe(res);
     };
   }
 }
@@ -883,6 +885,15 @@ export function pageReturn(raw: unknown): string {
   if (typeof raw !== "string" || raw.length > 512 || /[\u0000-\u001f\u007f\\#]/.test(raw)) return "";
   const [rel, query] = [raw.split("?")[0]!, raw.includes("?") ? raw.slice(raw.indexOf("?")) : ""];
   if (rel && !safeSegments(rel.endsWith("/") ? `${rel}index.html` : rel)) return "";
+  // The browser decodes %2e%2e as "..": check each segment as it will be resolved.
+  try {
+    const decoded = rel.split("/").map(decodeURIComponent);
+    if (decoded.some((s) => /[/\\]/.test(s))) return "";
+    const plain = decoded.join("/");
+    if (plain && !safeSegments(plain.endsWith("/") ? `${plain}index.html` : plain)) return "";
+  } catch {
+    return "";
+  }
   return rel + query;
 }
 

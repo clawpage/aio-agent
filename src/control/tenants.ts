@@ -182,7 +182,12 @@ export class UserRuntimes {
       if(asleep)runtime.ctx.log.info('sandbox left stopped at start');
       else{
         await startSandboxRuntime(runtime.ctx);
-        if(runtime.ctx.sandboxSetupError){await runtime.shutdown();throw new Error('the account\'s sandbox failed to start');}
+        if(runtime.ctx.sandboxSetupError){
+          // Timers already started would tick on the closed database and crash the process.
+          for(const recovery of recoveries)recovery.stop();idle?.stop();
+          if(this.recoveries.get(user.id)===recoveries)this.recoveries.delete(user.id);
+          await runtime.shutdown();throw new Error('the account\'s sandbox failed to start');
+        }
       }
       const recovery=startRuntimeRecovery(runtime.ctx);recoveries.push(recovery);
       idle??=startSandboxIdle(runtime.ctx);if(idle)recoveries.push(idle);
