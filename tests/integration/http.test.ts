@@ -158,6 +158,17 @@ describe("conversation and agent endpoints", () => {
     const payload = (await events.json()) as { events: Array<{ type: string }> };
     expect(payload.events.map((e) => e.type)).toContain("conversation.created");
 
+    // A reconnecting EventSource keeps its ?since=0 URL; its Last-Event-ID header decides where the replay starts.
+    const lastId = Math.max(...(payload.events as Array<{ id: number }>).map((e) => e.id));
+    for (const [extra, replayed] of [[{}, payload.events.length], [{ "last-event-id": String(lastId) }, 0]] as const) {
+      const sse = await fetch(`http://localhost:${h.primaryPort}/api/conversations/${conversation.id}/events?since=0`, { headers: { cookie, ...extra } });
+      const reader = sse.body!.getReader();
+      let text = "";
+      while (!text.includes("event: replay.complete")) text += new TextDecoder().decode((await reader.read()).value);
+      await reader.cancel();
+      expect(text).toContain(`"replayed":${replayed}`);
+    }
+
     const status = await h.request("/api/status", { headers: { cookie } });
     const body = (await status.json()) as { agent: { queuedTurns: number }; sandbox: { running: boolean } };
     expect(body.sandbox.running).toBe(true);

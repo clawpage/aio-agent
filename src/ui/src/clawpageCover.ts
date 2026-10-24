@@ -32,6 +32,12 @@ function load(page: string, version: number | null): Promise<string | null> {
   return promise;
 }
 
+/** Forget every cover when the signed-in account changes (page names repeat across accounts). */
+export function forgetCovers(): void {
+  for (const { promise } of covers.values()) void promise.then((url) => { if (url) URL.revokeObjectURL(url); });
+  covers.clear();
+}
+
 /** The cover of one of the account's clawpages, or null (none, or not loaded yet). */
 export function useClawpageCover(page: string | null, version: number | null = null): string | null {
   const [url, setUrl] = useState<string | null>(null);

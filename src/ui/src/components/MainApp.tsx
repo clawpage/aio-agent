@@ -2,6 +2,8 @@ import { useKeyboardViewport } from "../useKeyboardViewport";
 import { PopupPresence, PopupSurface } from "./PopupMotion";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { forgetImages, setImageAccount } from "../imageStore";
+import { forgetCachedImages } from "../imageCache";
+import { forgetCovers } from "../clawpageCover";
 import { api, ApiError } from "../api";
 import type { Conversation, StatusResponse, Task, TaskTab } from "../types";
 import { personConsoleTarget, TaskConsole } from "./TaskConsole";
@@ -78,7 +80,13 @@ export function MainApp({ firstSession }: { firstSession?: ReturnType<typeof api
     const [role, setRole] = useState<"owner" | "member">("member");
     const [debug] = useDebugMode();
     const [username, setUsername] = useState<string | null>(null);
-    useEffect(() => setImageAccount(username), [username]);
+    const imageAccount = useRef<string | null>(null);
+    useEffect(() => {
+        setImageAccount(username);
+        // Another account (or none) in the same tab: its pictures must not show the previous one's.
+        if (imageAccount.current !== null && imageAccount.current !== username) { forgetCachedImages(); forgetCovers(); }
+        imageAccount.current = username;
+    }, [username]);
     /** The address names another account than the one signed in. */
     const [foreign, setForeign] = useState<string | null>(null);
     const [auth, setAuth] = useState<boolean | null>(null);

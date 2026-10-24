@@ -1431,7 +1431,8 @@ export function createApiRouter(context: AppContext): Router {
         res.status(404).json({ error: "not_found" });
         return;
       }
-      const sinceParam = req.query.since ?? req.get("last-event-id");
+      // An EventSource reconnects with its original URL; the header it adds says what it already has.
+      const sinceParam = req.get("last-event-id") ?? req.query.since;
       const since = Number.parseInt(String(sinceParam ?? "0"), 10);
       if (req.query.format === "json" && req.query.tail !== undefined) {
         // A task's process opens at its latest turns and reads older ones as the person scrolls up.
@@ -1963,19 +1964,27 @@ export function createApiRouter(context: AppContext): Router {
         res.status(400).json({ error: "bad_path", message: checked.message });
         return;
       }
-      const upstream = await sandboxFetch(
-        `/v1/file/download?path=${encodeURIComponent(checked.path)}`,
-        { method: "GET" },
-        120_000,
-      );
-      if (!upstream.ok || !upstream.body) {
-        res.status(502).json({ error: "download_failed", message: t().http.files.downloadFailed });
-        return;
-      }
-      res.setHeader("Content-Type", upstream.headers.get("content-type") ?? "application/octet-stream");
-      const disposition = upstream.headers.get("content-disposition");
-      if (disposition) res.setHeader("Content-Disposition", disposition);
-      res.end(Buffer.from(await upstream.arrayBuffer()));
+      // Streamed like /documents/media: a large file is not held in memory, and a client that leaves stops the read.
+      const controller = new AbortController();
+      const cancel = () => controller.abort();
+      res.on("close", cancel);
+      try {
+        const upstream = await container.fetch(`/v1/file/download?path=${encodeURIComponent(checked.path)}`,
+          { method: "GET", signal: AbortSignal.any([controller.signal, AbortSignal.timeout(10 * 60_000)]) });
+        if (!upstream.ok || !upstream.body) {
+          await upstream.body?.cancel();
+          res.status(502).json({ error: "download_failed", message: t().http.files.downloadFailed });
+          return;
+        }
+        res.setHeader("Content-Type", upstream.headers.get("content-type") ?? "application/octet-stream");
+        for (const key of ["content-disposition", "content-length"]) {
+          const value = upstream.headers.get(key); if (value) res.setHeader(key, value);
+        }
+        await pipeline(Readable.fromWeb(upstream.body as import("node:stream/web").ReadableStream), res);
+      } catch (err) {
+        if (res.headersSent || controller.signal.aborted) { res.destroy(); return; }
+        throw err;
+      } finally { res.off("close", cancel); }
     }),
   );
 
@@ -2834,6 +2843,7 @@ function streamEvents(
   });
   res.write("retry: 3000\n\n");
 
+  const member = isMember(context.db, ctx.session!.ownerId);
   let lastId = since;
   // Replay the full backlog in pages so long histories reconnect completely.
   const REPLAY_PAGE = 2000;
@@ -2843,7 +2853,7 @@ function streamEvents(
     const page = agent.listEvents(conversationId, lastId, REPLAY_PAGE);
     if (!page.length) break;
     for (const event of page) {
-      writeEvent(res, isMember(context.db, ctx.session!.ownerId) ? publicPayload(event) : event);
+      writeEvent(res, member ? publicPayload(event) : event);
       lastId = event.id;
       replayed++;
     }
@@ -2855,7 +2865,7 @@ function streamEvents(
     if (event.conversationId !== conversationId) return;
     if (event.id <= lastId) return;
     lastId = event.id;
-    writeEvent(res, isMember(context.db, ctx.session!.ownerId) ? publicPayload(event) : event);
+    writeEvent(res, member ? publicPayload(event) : event);
   };
   agent.events.on("event", listener);
 

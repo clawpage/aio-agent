@@ -112,6 +112,15 @@ export function primeImage(src: ImageSource, blob: Blob): void {
   evict();
 }
 
+/**
+ * Forget every picture when the signed-in account changes: workspace paths are the same in every
+ * account's sandbox, so a kept URL would show the previous account's file. One still shown keeps its URL.
+ */
+export function forgetCachedImages(): void {
+  for (const e of entries.values()) if (e.refs === 0 && e.url) URL.revokeObjectURL(e.url);
+  entries.clear();
+}
+
 /** Forget that a picture failed, so an explicit retry fetches it again now. */
 export function retryImage(src: ImageSource): void {
   if (entries.get(src)?.failed) entries.delete(src);
