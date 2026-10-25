@@ -453,8 +453,8 @@ def copy_sdk(root):
 CHECK_LIST_MAX, CHECK_TEXT_MAX = 10, 200
 # At most this many error answers of the page's own data paths are read, each small and quick, to name their error code.
 CHECK_BODY_MAX, CHECK_BODIES, CHECK_BODY_SECONDS = 4096, 5, 3
-# Marks the expression for stand-ins in tests: whether the first screen shows anything at all.
-HAS_CONTENT_JS = "/* clawpage-check:has-content */ !!document.body && (document.body.innerText.trim() !== '' || !!document.querySelector('img, canvas, svg, video, picture'))"
+# Marks the expression for stand-ins in tests: whether the first screen shows anything at all (text, a picture, a form control or a frame).
+HAS_CONTENT_JS = "/* clawpage-check:has-content */ !!document.body && (document.body.innerText.trim() !== '' || !!document.querySelector('img, canvas, svg, video, picture, input, textarea, select, button, iframe'))"
 
 
 def keep_event(msg):
@@ -605,7 +605,12 @@ class Covers:
             for domain in ("Runtime", "Log", "Network"):
                 self.page.call(domain + ".enable", session=True)
         page = self.page
-        # Events of the page before belong to that page.
+        # Events of the page before belong to that page: leave it (its timers and requests end with its document),
+        # read on until a blank one answers, so what it sent until then is in hand, and drop all of it.
+        page.call("Page.navigate", {"url": "about:blank"}, session=True)
+        deadline = time.time() + 5
+        while time.time() < deadline and page.evaluate("location.href") != "about:blank":
+            time.sleep(0.05)
         page.drain()
         page.call("Page.navigate", {"url": url}, session=True)
         # Until the new document has loaded (at most 20 s), then its fonts and pictures (at most 8 s),
@@ -1058,8 +1063,11 @@ $CP delete <name>                                                   # the page A
   \`$CP cover <name>\` renders it again (also after changing data the first screen shows).
 - \`publish\` (and \`cover <name>\`) also prints a **check**: what the browser ran into when it opened the live page as an anonymous visitor.
   If \`check.ok\` is false, fix it and publish again before you hand the page to the user:
-  \`TABLE_NOT_FOUND\` in \`failedRequests\` means a table was never created (\`data create\`, with a deliberate permission); \`PERMISSION_DENIED\`, a table's permission is wrong;
-  another status or a \`reason\`, a wrong path or a broken outside resource; \`errors\` are script errors (\`where\` says where); \`blank: true\` means the first screen shows nothing: do not leave it to a spinner alone.
+  \`TABLE_NOT_FOUND\` in \`failedRequests\`: if \`data tables <name>\` does not list the table, it was never created (\`data create\`, with a deliberate permission);
+  if it does, the table is private, which visitors cannot see: change the page to read that table only when \`cp.owner\`.
+  **Never loosen a private table's permission just to pass the check.** \`PERMISSION_DENIED\`, a table's permission is wrong;
+  another status or a \`reason\`, a wrong path or a broken outside resource; \`errors\` are script errors (\`where\` says where); \`blank: true\` means the first screen
+  has no text, picture or form control (boxes drawn only with CSS count as blank: give it a title): do not leave it to a spinner alone.
   \`SIGN_IN_REQUIRED\` and \`RECORD_NOT_FOUND\` under \`expected\` are normal for an anonymous visitor. An entry with only a host name is an outside address and may have nothing to do with the page: judge it.
   Fix for two rounds at most; if it still fails, tell the user plainly what is wrong. **Never tell the user a page works while its check reports problems.**
   After changing only data (for example creating a table), not files, run \`$CP cover <name>\` to check again. The check covers what an anonymous visitor sees, not the owner-only parts.

@@ -61,6 +61,7 @@ class Page:
     def __init__(self, width, scale):
         self.size = (width, scale)
         self.fresh = False
+        self.url = "about:blank"
         with open(LOG_PATH, "a") as f:
             f.write("start\\n")
     def metrics(self, height):
@@ -75,6 +76,11 @@ class Page:
         return json.loads(json.dumps(events).replace("@PAGE@", page).replace("@HOST@", host))
     def call(self, method, params=None, session=False, timeout=60):
         if method == "Page.navigate":
+            # Every page is opened from a blank one, never straight from the page before (not logged).
+            if params["url"] == "about:blank":
+                self.url, self.fresh = "about:blank", False
+                return {}
+            assert self.url == "about:blank", "opened straight from the page before"
             self.url = params["url"]
             self.fresh = True
             with open(LOG_PATH, "a") as f:
@@ -95,6 +101,8 @@ class Page:
             return {"data": "${JPEG.toString("base64")}"}
         return {}
     def evaluate(self, expression):
+        if expression == "location.href":
+            return self.url
         if "has-content" in expression and "blank" in self.url:
             return False
         return True

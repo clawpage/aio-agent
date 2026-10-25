@@ -85,6 +85,18 @@ elif job["do"] == "bodies":
             return body
     page = Page()
     print(json.dumps({"bodies": m.fetch_bodies(page, job["events"], job["url"]), "asked": page.asked}))
+elif job["do"] == "renders":
+    # Several pages from one browser, as cover --missing does, with a pause between them like the cover's upload.
+    import time
+    covers, out = m.Covers(), []
+    try:
+        for url in job["urls"]:
+            covers.render(url)
+            out.append(covers.health)
+            time.sleep(job.get("pause", 0))
+        print(json.dumps(out))
+    finally:
+        covers.close()
 else:
     covers = m.Covers()
     try:
@@ -281,4 +293,29 @@ it.skipIf(!fs.existsSync(chromium.executablePath()))("in a real browser, a page'
   expect(r.errors).toContainEqual(expect.objectContaining({ kind: "exception", message: expect.stringContaining("boom"), where: "index.html:3" }));
   expect(r.failedRequests).toContainEqual(expect.objectContaining({ url: "missing.png", status: null }));
   expect(r).toMatchObject({ ok: false, blank: false });
+});
+
+it.skipIf(!fs.existsSync(chromium.executablePath()))("in a real browser, what the page before keeps doing is not counted for the next one", () => {
+  const site = path.join(dir, "site-pages");
+  fs.mkdirSync(site);
+  // Page A throws and asks for missing pictures again and again, also while the next page is being opened.
+  fs.writeFileSync(path.join(site, "a.html"), '<!doctype html><meta charset="utf-8"><h1>A</h1><script>let n = 0;\n' +
+    'setInterval(() => { new Image().src = "gone-" + (n++) + ".png"; }, 50);\nsetInterval(() => { throw new Error("from page A"); }, 50);</script>');
+  fs.writeFileSync(path.join(site, "b.html"), '<!doctype html><meta charset="utf-8"><h1>B</h1>');
+  const [a, b] = python("health.py", { do: "renders", urls: [`file://${site}/a.html`, `file://${site}/b.html`], pause: 1.5 });
+  expect(a.errors).toContainEqual(expect.objectContaining({ message: expect.stringContaining("from page A") }));
+  expect(a.ok).toBe(false);
+  expect(b).toEqual(clean);
+});
+
+it.skipIf(!fs.existsSync(chromium.executablePath()))("in a real browser, only a first screen without text, pictures or form controls is blank", () => {
+  const site = path.join(dir, "site-blank");
+  fs.mkdirSync(site);
+  fs.writeFileSync(path.join(site, "empty.html"), '<!doctype html><meta charset="utf-8"><div class="spinner" style="width:40px;height:40px;border:4px solid #888"></div>');
+  fs.writeFileSync(path.join(site, "form.html"), '<!doctype html><meta charset="utf-8"><input placeholder="Your name">');
+  fs.writeFileSync(path.join(site, "frame.html"), '<!doctype html><meta charset="utf-8"><iframe srcdoc="<p>inside</p>"></iframe>');
+  const [empty, form, frame] = python("health.py", { do: "renders", urls: ["empty", "form", "frame"].map((n) => `file://${site}/${n}.html`) });
+  expect(empty).toMatchObject({ ok: false, blank: true });
+  expect(form).toEqual(clean);
+  expect(frame).toEqual(clean);
 });

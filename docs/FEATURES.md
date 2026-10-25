@@ -775,13 +775,14 @@ Android 手机用 USB 接在装了 Mac App 的 Mac 上，由 App 运行的 `bin/
   复用同一个无头浏览器依次为没有封面的页面补上；每页最多等 20 秒加载、8 秒字体与图片，整页超过 60 秒即放弃并换新浏览器；
   封面超过 1.4 MB 时依次降低 JPEG 质量（78→62→48→36）重截。请求体超限时服务端读完再回 413，不中途断开。控制台经 `GET /api/clawpages/<页面名>/cover[?v=<版本>]`
   读取（只给本账号，带版本时长期缓存）：Clawpages 列表与详情用它做封面（没有时用标题首字），主会话里指向本账号 clawpage 的卡片也显示它（左侧竖条缩略图，卡片保持紧凑）。
-- **发布检查**：与封面渲染是同一次页面加载（匿名访客视角），渲染器在加载期间收集 Runtime、Log、Network 事件（只留错误与请求相关的几类，缓冲最多 1000 条、每页清空），
+- **发布检查**：与封面渲染是同一次页面加载（匿名访客视角），渲染器在加载期间收集 Runtime、Log、Network 事件（只留错误与请求相关的几类，缓冲最多 1000 条；每页先切到空白页、读完上一页残留的事件再清空，上一页的定时器和请求不会算到下一页），
   `publish`、`cover <页面名>`、`cover --missing` 的每页结果附 `check`：`errors`（脚本异常与 `console.error`，附位置）、`failedRequests`（状态码 ≥400 或加载失败的请求；
-  本页数据接口 `.data`/`.ai`/`.auth` 失败时读取其 JSON 错误响应附上错误码，如 `TABLE_NOT_FOUND`、`PERMISSION_DENIED`）、`blank`（首屏无文字也无图片/画布等元素）、`ok`。
+  本页数据接口 `.data`/`.ai`/`.auth` 失败时读取其 JSON 错误响应附上错误码，如 `TABLE_NOT_FOUND`、`PERMISSION_DENIED`）、`blank`（首屏无文字，也无图片/画布/表单控件/iframe 等元素；纯 CSS 方块算空白）、`ok`。
+  `TABLE_NOT_FOUND` 既可能是没建表，也可能是表为 private（访客看不到）：skill 要求先用 `data tables` 区分，后者改页面只在 `cp.owner` 时读该表，绝不为通过检查放宽 private 表的权限。
   匿名访客的预期结果（`SIGN_IN_REQUIRED`、`RECORD_NOT_FOUND`）单独列在 `expected`，不算问题；被取消或中止的加载与 favicon 不报。
   上限：每类 10 条（超出时给 `omitted` 总数），每条文字 200 字；最多读取 5 个本页数据接口的错误响应体，每个不超过 4 KB、最多等 3 秒，整页仍受 60 秒闹钟约束。
   本页文件按相对路径报告，第三方地址（含主站）只报主机名，不带路径和查询参数。页面产生的错误文本视为不可信，截断后只出现在 CLI 输出里给执行器看，
-  不存储、不上传、不进控制台；执行器按 skill 修好后重发布（只改数据时用 `cover <页面名>` 复查），检查有问题时不得对用户说页面可用。
+  不上传、不进控制台，服务端不存储（沙箱启动时后台补封面的 `cover --missing` 把输出写到沙箱内 `/tmp/aio-share-cover.log`，其中也有检查结果）；执行器按 skill 修好后重发布（只改数据时用 `cover <页面名>` 复查），检查有问题时不得对用户说页面可用。
   只检查匿名访客视角（不含主人链接与登录访客）；`--no-cover` 时不渲染也就没有检查，渲染超时或浏览器崩溃时只有 `coverError`。
 - **控制台**：`GET /api/clawpages` 列表；`/api/clawpages/<页面名>/tables/<表>` 浏览记录（`PATCH` 改权限、`DELETE` 删表）、`/export` 导出 JSON、
   `/records/<键>` 删除单条；`DELETE /api/clawpages/<页面名>` 删除页面和数据。均只作用于本账号。
