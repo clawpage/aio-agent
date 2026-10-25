@@ -1094,3 +1094,69 @@ test("a task working in the AI's Chrome on the Mac shows its page, asks for the 
     await expect(dialog.getByRole("button", { name: "接管", exact: true })).toBeVisible();
     await expect(dialog.getByRole("textbox", { name: "发送到页面的文字" })).toHaveCount(0);
 });
+test("card titles lead in the text colour, and a failure's status word is red, in both themes", async ({ page }) => {
+    const rows: Task[] = [
+        { ...task(1, "completed"), result: "已办好。", completedAt: 2001 },
+        { ...task(2, "failed"), error: "网络超时", completedAt: 2002 },
+        { ...task(3, "unknown"), error: "连接中断，结果未知", completedAt: 2003 },
+        { ...task(4, "interrupted"), completedAt: 2004 },
+        { ...task(5), messages: ["正在查资料。"] },
+        { ...task(6, "needs_input"), clarification: "几位用餐？", options: ["2 位", "4 位"] },
+    ];
+    await setup(page, rows);
+    /** What a theme colour token resolves to right now, as the browser writes colours. */
+    const token = (name: string) => page.evaluate(name => {
+        const probe = document.body.appendChild(document.createElement("div"));
+        probe.style.color = `var(${name})`;
+        const color = getComputedStyle(probe).color;
+        probe.remove();
+        return color;
+    }, name);
+    const style = (target: Locator) => target.evaluate(el => { const s = getComputedStyle(el); return { size: parseFloat(s.fontSize), weight: Number(s.fontWeight), color: s.color }; });
+    const status = (id: string) => page.locator(`.task-report[data-task-id="${id}"] .task-report-heading > .muted`);
+    for (const scheme of ["dark", "light"] as const) {
+        await page.emulateMedia({ colorScheme: scheme, reducedMotion: "reduce" });
+        await page.reload();
+        await expect(page.locator("html")).toHaveAttribute("data-theme", scheme);
+        await expect(page.locator(".task-report")).toHaveCount(4);
+        const text = await token("--text");
+        for (const id of ["task-1", "task-2", "task-3", "task-4"]) {
+            const title = await style(page.locator(`.task-report[data-task-id="${id}"] .task-report-title`));
+            expect(title.size).toBe(14);
+            expect(title.weight).toBeGreaterThanOrEqual(600);
+            expect(title.color).toBe(text);
+        }
+        expect((await style(status("task-2"))).color).toBe(await token("--error"));
+        expect((await style(status("task-3"))).color).toBe(await token("--error"));
+        expect((await style(status("task-1"))).color).toBe(await token("--done"));
+        expect((await style(status("task-4"))).color).toBe(await token("--text-dim"));
+        const running = page.locator('.task-progress.turn-ai[data-progress-for="task-5"]');
+        const progressTitle = await style(running.locator(".task-progress-title"));
+        expect(progressTitle.size).toBe(14);
+        expect(progressTitle.color).toBe(text);
+        expect((await style(running.locator(".task-progress-label"))).size).toBeLessThanOrEqual(12);
+        // Only the person's turn stays loud.
+        const yours = await style(page.locator('.task-progress.turn-you[data-progress-for="task-6"] .task-progress-label'));
+        expect(yours.color).toBe(await token("--you"));
+        expect(yours.weight).toBeGreaterThanOrEqual(700);
+        expect(yours.size).toBeGreaterThan(12);
+    }
+    // A long title is cut on one line, never pushing the page sideways.
+    const long = "帮我把下周去杭州出差的高铁酒店和会议室全部订好并发日程提醒我";
+    expect(long.length).toBe(30);
+    rows[0]!.title = long;
+    rows[4]!.title = long;
+    await page.setViewportSize({ width: 360, height: 780 });
+    for (const scheme of ["dark", "light"] as const) {
+        await page.emulateMedia({ colorScheme: scheme, reducedMotion: "reduce" });
+        await page.reload();
+        await expect(page.locator("html")).toHaveAttribute("data-theme", scheme);
+        for (const title of [page.locator('.task-report[data-task-id="task-1"] .task-report-title'), page.locator('.task-progress[data-progress-for="task-5"] .task-progress-title')]) {
+            await expect(title).toHaveText(long);
+            const box = await title.evaluate(el => ({ scroll: el.scrollWidth, client: el.clientWidth, height: el.getBoundingClientRect().height }));
+            expect(box.scroll).toBeGreaterThan(box.client);
+            expect(box.height).toBeLessThanOrEqual(22);
+        }
+        expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1);
+    }
+});

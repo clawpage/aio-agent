@@ -47,6 +47,13 @@ test('the main session writes out the final answer as the executor writes it, an
   await emit(page, 'stream.delta', delta('f1', ANSWER.slice(0, cut)));
   await expect(draft).toBeVisible();
   await expect(draft.locator('.task-report-heading')).toContainText('正在回复');
+  // Right under its own progress card the two read as one: the card steps back, the reply does not repeat the title.
+  const progress = page.locator('.task-progress[data-progress-for="live"]');
+  await expect(progress).toHaveClass(/\bwriting\b/);
+  await expect(progress).not.toContainText('我查一下明天的预报。');
+  await expect(draft).toHaveClass(/\bfollows-progress\b/);
+  await expect(draft.locator('.task-report-heading')).not.toContainText('明天天气');
+  await expect(draft.locator('.task-report-title')).toHaveCount(0);
   await expect(draft).toContainText('明天晴，适合出游。');
   await expect(draft).toContainText('推荐这两处');
   // A card half written waits for its closing fence instead of showing as raw code.
@@ -58,9 +65,17 @@ test('the main session writes out the final answer as the executor writes it, an
   await draft.evaluate(el => { el.dataset.same = 'yes'; });
   await expect(page.locator('.boot-cover')).toHaveCount(0);
   await page.screenshot({ path: info.outputPath('drafting.png') });
-  for (const width of info.project.name.startsWith('mobile') ? [390, 360] : [1440]) {
-    await page.setViewportSize({ width, height: info.project.name.startsWith('mobile') ? 844 : 900 });
+  const mobile = info.project.name.startsWith('mobile');
+  for (const width of mobile ? [390, 360] : [1440]) {
+    await page.setViewportSize({ width, height: mobile ? 844 : 900 });
     expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1);
+    // Two rows: the title, then the time and the actions side by side; the reply sits close under it.
+    const card = (await progress.boundingBox())!;
+    expect(card.height).toBeLessThanOrEqual(88);
+    expect((await draft.boundingBox())!.y - (card.y + card.height)).toBeLessThanOrEqual(mobile ? 8 : 12);
+    const time = (await progress.locator('.task-duration').boundingBox())!;
+    const actions = (await progress.locator('.task-actions').boundingBox())!;
+    expect(Math.abs((time.y + time.height / 2) - (actions.y + actions.height / 2))).toBeLessThanOrEqual(4);
   }
 
   // The answer is done: the finished reply takes the same place, without coming in again.
@@ -73,26 +88,61 @@ test('the main session writes out the final answer as the executor writes it, an
   await expect(page.locator('.task-report[data-task-id="live"]')).toHaveCount(1);
   await expect(reply).toHaveAttribute('data-same', 'yes');
   await expect(reply).toContainText('湖边步道');
+  // Finished, it stands on its own again: the title and the status.
+  await expect(reply.locator('.task-report-heading')).toContainText('明天天气');
+  await expect(reply.locator('.task-report-heading')).toContainText('已完成');
+  await expect(reply).not.toHaveClass(/\bfollows-progress\b/);
+  await expect(page.locator('.task-progress[data-progress-for="live"]')).toHaveCount(0);
 });
 
 test('an answer overtaken by a supplement leaves the feed until the executor answers again', async ({ page }) => {
   nextId = 1;
   await page.addInitScript(fakeEventSource);
   await mockConsole(page, { conversations: [] });
-  const task = { id: 'live', revision: 1, title: '明天天气', text: '明天适合出去玩吗', conversationId: 'exec', status: 'running', result: null, error: null, attachments: [], relatedTaskId: null, dependencies: [], approvals: 0, createdAt: Date.now() - 60_000, startedAt: Date.now() - 50_000, completedAt: null, messages: [] };
+  const task = { id: 'live', revision: 1, title: '明天天气', text: '明天适合出去玩吗', conversationId: 'exec', status: 'running', result: null, error: null, attachments: [], relatedTaskId: null, dependencies: [], approvals: 0, createdAt: Date.now() - 60_000, startedAt: Date.now() - 50_000, completedAt: null, messages: ['我查一下明天的预报。'] };
   await page.route('**/api/main*', r => r.fulfill({ json: { mode: 'tasks', tasks: [task], nextBefore: null, version: 'v1' } }));
   await page.goto('/');
+  const progress = page.locator('.task-progress[data-progress-for="live"]');
+  await expect(progress).toContainText('我查一下明天的预报。');
   await expect.poll(() => page.evaluate(() => 'exec' in ((window as unknown as { __sources: object }).__sources))).toBe(true);
   await emit(page, 'item/started', started('f1', 'final_answer'));
   await emit(page, 'stream.delta', delta('f1', '明天晴。'));
   const draft = page.locator('.task-report.drafting[data-task-id="live"]');
   await expect(draft).toContainText('明天晴。');
+  await expect(progress).toHaveClass(/\bwriting\b/);
+  await expect(progress).not.toContainText('我查一下明天的预报。');
   await emit(page, 'turn.input_appended', { text: '改成后天' });
   await expect(draft).toHaveCount(0);
+  // The reply is withdrawn: the card is back to its usual self, with the latest sentence.
+  await expect(progress).not.toHaveClass(/\bwriting\b/);
+  await expect(progress).toContainText('我查一下明天的预报。');
   await emit(page, 'item/started', started('f2', 'final_answer'));
   await emit(page, 'stream.delta', delta('f2', '后天有雨。'));
   await expect(draft).toContainText('后天有雨。');
   await expect(draft).not.toContainText('明天晴');
+});
+
+test('a reply with another task between it and its progress card keeps its title', async ({ page }) => {
+  nextId = 1;
+  await page.addInitScript(fakeEventSource);
+  await mockConsole(page, { conversations: [] });
+  const base = { revision: 1, result: null, error: null, attachments: [], relatedTaskId: null, dependencies: [], approvals: 0, status: 'running', completedAt: null };
+  const live = { ...base, id: 'live', title: '明天天气', text: '明天适合出去玩吗', conversationId: 'exec', createdAt: Date.now() - 60_000, startedAt: Date.now() - 50_000, messages: ['我查一下明天的预报。'] };
+  const other = { ...base, id: 'other', title: '查快递', text: '我的快递到哪了', conversationId: 'exec2', createdAt: Date.now() - 30_000, startedAt: Date.now() - 25_000, messages: ['正在查询物流。'] };
+  await page.route('**/api/main*', r => r.fulfill({ json: { mode: 'tasks', tasks: [live, other], nextBefore: null, version: 'v1' } }));
+  await page.goto('/');
+  await expect(page.locator('.task-progress[data-progress-for="other"]')).toContainText('正在查询物流。');
+  await expect.poll(() => page.evaluate(() => 'exec' in ((window as unknown as { __sources: object }).__sources))).toBe(true);
+  await emit(page, 'item/started', started('f1', 'final_answer'));
+  await emit(page, 'stream.delta', delta('f1', '明天晴。'));
+  const draft = page.locator('.task-report.drafting[data-task-id="live"]');
+  await expect(draft).toContainText('明天晴。');
+  await expect(draft).not.toHaveClass(/\bfollows-progress\b/);
+  await expect(draft.locator('.task-report-heading')).toContainText('明天天气');
+  const progress = page.locator('.task-progress[data-progress-for="live"]');
+  await expect(progress).toHaveClass(/\bwriting\b/);
+  await expect(progress).not.toContainText('我查一下明天的预报。');
+  await expect(page.locator('.task-progress[data-progress-for="other"]')).toContainText('正在查询物流。');
 });
 
 test('the feed can be scrolled up while an answer is being written, and follows again back at the bottom', async ({ page }, info) => {
