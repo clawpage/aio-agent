@@ -38,6 +38,10 @@ import {
   MARKET_SKILL_DIR,
   MARKET_SKILL_MD,
   MARKET_TOOL_DIR,
+  PHOTO_CLI_PY,
+  PHOTO_SKILL_DIR,
+  PHOTO_SKILL_MD,
+  PHOTO_TOOL_DIR,
   refreshWorkspaceAgents,
 } from "./seed.js";
 import { CLAWPAGE_SDK_JS } from "./clawpageSdk.js";
@@ -301,6 +305,7 @@ export class SandboxContainer {
       this.seedShare(),
       this.seedGraphic(),
       this.seedMarket(),
+      this.seedPhoto(),
       this.seedMail(),
       this.enforceCodexIsolation(),
     ]);
@@ -415,6 +420,35 @@ export class SandboxContainer {
   async ensureMarketLibraries(): Promise<boolean> {
     const cli = `${this.#cfg.sandbox.containerCodexHome}/${MARKET_TOOL_DIR}/aio-market.py`;
     const res = await this.execInSandbox(["python3", cli, "setup"], { timeoutMs: 900_000 });
+    if (res.code !== 0) throw new Error((res.stdout || res.stderr).trim().slice(-300));
+    return (JSON.parse(res.stdout) as { installed?: boolean }).installed === true;
+  }
+
+  /**
+   * The photo retouching skill for both executors plus its CLI. Like the market skill, its libraries are
+   * installed in the background (ensurePhotoLibraries), never on the start path, and a failure is logged.
+   */
+  async seedPhoto(): Promise<void> {
+    const s = this.#cfg.sandbox;
+    const toolDir = `${s.containerCodexHome}/${PHOTO_TOOL_DIR}`;
+    const skillDirs = [`${s.containerCodexHome}/${PHOTO_SKILL_DIR}`, `${this.#cfg.claudeCode.configDir}/${PHOTO_SKILL_DIR}`];
+    try {
+      const mkdir = await this.execInSandbox(["mkdir", "-p", toolDir, ...skillDirs], { timeoutMs: 15_000 });
+      if (mkdir.code !== 0) throw new Error((mkdir.stderr || mkdir.stdout).trim().slice(0, 200));
+      await this.writeFileInSandbox(`${toolDir}/aio-photo.py`, PHOTO_CLI_PY);
+      for (const dir of skillDirs) await this.writeFileInSandbox(`${dir}/SKILL.md`, PHOTO_SKILL_MD);
+    } catch (err) {
+      this.#log.warn("could not seed the sandbox photo skill", { error: String(err).slice(0, 200) });
+    }
+  }
+
+  /**
+   * Install the photo skill's pinned libraries and models before anyone asks (a minute or two on a new
+   * sandbox, a stamp read after). Returns whether this call installed them.
+   */
+  async ensurePhotoLibraries(): Promise<boolean> {
+    const cli = `${this.#cfg.sandbox.containerCodexHome}/${PHOTO_TOOL_DIR}/aio-photo.py`;
+    const res = await this.execInSandbox(["python3", cli, "setup"], { timeoutMs: 1_800_000 });
     if (res.code !== 0) throw new Error((res.stdout || res.stderr).trim().slice(-300));
     return (JSON.parse(res.stdout) as { installed?: boolean }).installed === true;
   }

@@ -1917,6 +1917,604 @@ PY
 `;
 
 /**
+ * Photo retouching: real photos of people are retouched from the original and never redrawn. retouch changes
+ * light and color the same way for every pixel and, when asked, cleans up or replaces only the background around
+ * the people, who are cut out of the original (rembg's human model) and put back pixel for pixel; check measures
+ * each face against the original before delivery. Pinned libraries live in the CLI's own venv in the persistent
+ * tool directory, installed in the background after every start like the market skill. Managed like it.
+ */
+export const PHOTO_TOOL_DIR = "tools/aio-photo";
+export const PHOTO_SKILL_DIR = "skills/aio-photo";
+export const PHOTO_CLI_PY = String.raw`#!/usr/bin/env python3
+"""aio-photo: retouch real photos and keep the people exactly as photographed, managed by AIO Agent.
+
+retouch adjusts light and color evenly over the whole photo and, when asked, cleans up or replaces only the
+background around the people (who are cut out from the original and put back pixel for pixel); check compares
+the faces of an edited photo with the original. The cut-out model (rembg) lives in a private venv that setup
+installs after the sandbox starts, or the first command that needs it.
+"""
+import argparse, fcntl, json, math, os, shutil, subprocess, sys
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+VENV = os.path.join(HERE, "venv")
+VENV_PY = os.path.join(VENV, "bin", "python")
+MODELS = os.path.join(HERE, "models")
+REQUIREMENTS = ["rembg==2.0.69", "onnxruntime==1.23.2", "opencv-python-headless==4.14.0.94"]
+# People (with their clothes and what they hold) by default; anything else (a product, a pet) on request.
+MODELS_BY_SUBJECT = {"people": "u2net_human_seg", "any": "isnet-general-use"}
+# OpenCV's YuNet face detector, pinned to one commit and checked by hash.
+FACE_MODEL = "face_detection_yunet_2023mar.onnx"
+FACE_MODEL_URL = "https://github.com/opencv/opencv_zoo/raw/f12e12798e8314f7c074a6656816c048dcc95b7a/models/face_detection_yunet/" + FACE_MODEL
+FACE_MODEL_SHA256 = "8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4"
+# A face whose fine detail matches the original less than this was redrawn, not retouched.
+SIMILAR = 0.85
+STUDIO = "#EEE5D8"
+
+
+def out(data):
+    print(json.dumps(data, ensure_ascii=False, indent=2))
+
+
+def fail(message, code=1):
+    out({"ok": False, "error": message})
+    sys.exit(code)
+
+
+# ---------- the private venv ----------
+
+def stamp_text():
+    return json.dumps({"requirements": REQUIREMENTS, "model": MODELS_BY_SUBJECT["people"], "python": sys.version.split()[0]})
+
+
+def venv_ready():
+    try:
+        with open(os.path.join(VENV, "aio-photo.stamp")) as f:
+            return os.path.exists(VENV_PY) and f.read() == stamp_text()
+    except OSError:
+        return False
+
+
+def face_model():
+    """The face detector's file, fetched once and checked against its pinned hash."""
+    import hashlib, urllib.request
+    path = os.path.join(MODELS, FACE_MODEL)
+    def good():
+        try:
+            with open(path, "rb") as f:
+                return hashlib.sha256(f.read()).hexdigest() == FACE_MODEL_SHA256
+        except OSError:
+            return False
+    if good():
+        return path
+    os.makedirs(MODELS, exist_ok=True)
+    tmp = path + ".part"
+    with urllib.request.urlopen(FACE_MODEL_URL, timeout=60) as res, open(tmp, "wb") as f:
+        f.write(res.read())
+    os.replace(tmp, path)
+    if not good():
+        os.remove(path)
+        fail("The face detector download did not match its pinned hash.")
+    return path
+
+
+def ensure_venv():
+    """Create the venv with the pinned libraries and fetch the cut-out model once; parallel callers wait on one lock."""
+    if venv_ready():
+        return False
+    os.makedirs(MODELS, exist_ok=True)
+    with open(os.path.join(HERE, ".venv.lock"), "w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        if venv_ready():
+            return False
+        print("aio-photo: installing the photo tools (a new sandbox, a minute or two).", file=sys.stderr)
+        shutil.rmtree(VENV, ignore_errors=True)
+        steps = [[sys.executable, "-m", "venv", VENV],
+                 [VENV_PY, "-m", "pip", "install", "--quiet", "--disable-pip-version-check", *REQUIREMENTS],
+                 [VENV_PY, "-c", "import rembg; rembg.new_session(%r)" % MODELS_BY_SUBJECT["people"]]]
+        env = dict(os.environ, U2NET_HOME=MODELS)
+        for step in steps:
+            res = subprocess.run(step, capture_output=True, text=True, timeout=1800, env=env)
+            if res.returncode != 0:
+                shutil.rmtree(VENV, ignore_errors=True)
+                fail("Installing the photo tools failed: " + (res.stderr or res.stdout).strip()[-500:])
+        face_model()
+        with open(os.path.join(VENV, "aio-photo.stamp"), "w") as f:
+            f.write(stamp_text())
+        return True
+
+
+def in_venv():
+    """Run this command inside the venv (re-executing once if needed)."""
+    if os.path.realpath(sys.prefix) == os.path.realpath(VENV):
+        return
+    ensure_venv()
+    os.environ["U2NET_HOME"] = MODELS
+    os.execv(VENV_PY, [VENV_PY, os.path.abspath(__file__), *sys.argv[1:]])
+
+
+# ---------- images ----------
+
+def load(path):
+    from PIL import Image, ImageOps
+    if not os.path.isfile(path):
+        fail("No such image: " + path)
+    try:
+        img = ImageOps.exif_transpose(Image.open(path))
+    except Exception as err:
+        fail("Not an image this tool can read (%s): %s" % (path, err))
+    return img if img.mode == "RGB" else img.convert("RGB")
+
+
+def to_float(img):
+    import numpy as np
+    return np.asarray(img, dtype=np.float32) / 255.0
+
+
+def save(arr, path, source_info=None):
+    """Save 8-bit RGB pixels as JPEG (quality 95, full color detail) or PNG, keeping the original's color profile."""
+    from PIL import Image
+    os.makedirs(os.path.dirname(os.path.abspath(path)) or ".", exist_ok=True)
+    img = Image.fromarray(arr)
+    icc = (source_info or {}).get("icc_profile")
+    if path.lower().endswith((".jpg", ".jpeg")):
+        img.save(path, quality=95, subsampling=0, icc_profile=icc)
+    else:
+        img.save(path, icc_profile=icc)
+
+
+# Photos are worked on in 8 bits with lookup tables and in strips of rows: a 24-megapixel photo stays well within
+# the sandbox's memory, where whole-photo float arrays would need several gigabytes.
+MASK_SIDE = 2048
+STRIP = 512
+
+
+def subject_mask(path, size, subject="people"):
+    """The people and what they hold in the photo at path, as a soft alpha in 0..1 at its size (w, h).
+
+    The cut-out model runs in its own short-lived process on a copy at most MASK_SIDE pixels long, before the
+    photo itself is worked on: the model's memory (about a gigabyte) is gone by then instead of adding up."""
+    import cv2
+    import numpy as np
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        mask = os.path.join(tmp, "mask.png")
+        res = subprocess.run([sys.executable, os.path.abspath(__file__), "_mask", path, mask, subject], capture_output=True, text=True, timeout=600)
+        if res.returncode != 0 or not os.path.exists(mask):
+            fail("Could not find the people in the photo: " + (res.stderr or res.stdout).strip()[-300:])
+        alpha = cv2.imread(mask, cv2.IMREAD_GRAYSCALE).astype(np.float32) / 255.0
+    return cv2.resize(alpha, size, interpolation=cv2.INTER_LINEAR) if alpha.shape[::-1] != tuple(size) else alpha
+
+
+def cmd_mask(args):
+    import rembg
+    img = load(args.input)
+    w, h = img.size
+    scale = min(1.0, MASK_SIDE / max(w, h))
+    if scale < 1:
+        img = img.resize((max(1, round(w * scale)), max(1, round(h * scale))))
+    rembg.remove(img, session=rembg.new_session(MODELS_BY_SUBJECT[args.subject]), only_mask=True, post_process_mask=True).convert("L").save(args.output)
+
+
+def feather(alpha, size):
+    """Soften the cut-out edge by about a thousandth of the photo, so it never reads as pasted."""
+    import cv2
+    return cv2.GaussianBlur(alpha, (0, 0), max(0.8, max(size) / 1500.0))
+
+
+# ---------- light and color, the same for every pixel ----------
+
+def tone_tables(pixels, light, exposure, warmth, contrast, weight=None):
+    """One 256-entry table per channel for the whole adjustment: auto light, exposure, warmth and contrast."""
+    import numpy as np
+    x = np.linspace(0, 1, 256, dtype=np.float64)
+    curve = x.copy()
+    if light == "auto":
+        lum = pixels[..., 0] * 0.2126 + pixels[..., 1] * 0.7152 + pixels[..., 2] * 0.0722
+        mean = float((lum * weight).sum() / max(weight.sum(), 1e-6)) if weight is not None else float(lum.mean())
+        # A gentle pull of the people's mid-tones toward a bright, natural portrait level, never a full correction.
+        gamma = math.log(0.52) / math.log(min(max(mean, 0.05), 0.95))
+        gamma = 1.0 + (min(max(gamma, 0.75), 1.25) - 1.0) * 0.7
+        curve = np.power(curve, 1.0 / gamma)
+    curve = curve * (2.0 ** exposure)
+    tables = []
+    for gain in ((1.0 + 0.05 * warmth), (1.0 + 0.01 * warmth), (1.0 - 0.06 * warmth)):
+        c = np.clip(curve * gain, 0, 1)
+        if contrast:
+            # An S-curve around mid-grey; black and white stay where they are.
+            c = np.clip(c + 1.5 * contrast * c * (1 - c) * (2 * c - 1), 0, 1)
+        tables.append(np.round(c * 255).astype(np.uint8))
+    return tables
+
+
+def adjust(rgb, tables, saturation):
+    """The adjusted photo, 8-bit: the same tables for every pixel, so faces keep every detail they had."""
+    import cv2
+    import numpy as np
+    out_ = np.empty_like(rgb)
+    for ch in range(3):
+        out_[..., ch] = cv2.LUT(rgb[..., ch], tables[ch])
+    if saturation:
+        for y0 in range(0, out_.shape[0], STRIP):
+            block = out_[y0:y0 + STRIP]
+            hsv = cv2.cvtColor(block, cv2.COLOR_RGB2HSV).astype(np.float32)
+            hsv[..., 1] = np.clip(hsv[..., 1] * (1.0 + saturation), 0, 255)
+            block[...] = cv2.cvtColor(hsv.astype(np.uint8), cv2.COLOR_HSV2RGB)
+    return out_
+
+
+# ---------- backgrounds ----------
+
+def hex_color(value):
+    v = value.lstrip("#")
+    try:
+        if len(v) != 6:
+            raise ValueError
+        return [int(v[i:i + 2], 16) / 255.0 for i in (0, 2, 4)]
+    except ValueError:
+        fail("A color is #RRGGBB, e.g. %s" % STUDIO)
+
+
+def smooth_background(rgb, alpha):
+    """The photo's own background with every wrinkle and fold ironed out: its color, light falloff and soft shadows stay."""
+    import cv2
+    import numpy as np
+    h, w = alpha.shape
+    scale = 768.0 / max(h, w)
+    size = (max(1, int(w * scale)), max(1, int(h * scale)))
+    small = cv2.resize(rgb, size, interpolation=cv2.INTER_AREA)
+    hole = cv2.dilate((cv2.resize(alpha, size, interpolation=cv2.INTER_AREA) > 0.05).astype(np.uint8), np.ones((9, 9), np.uint8))
+    filled = cv2.inpaint(small, hole, 9, cv2.INPAINT_TELEA)
+    flat = cv2.GaussianBlur(filled.astype(np.float32), (0, 0), max(size) / 40.0)
+    return lambda y0, y1: rows_of(flat, w, h, y0, y1) / 255.0
+
+
+def rows_of(small, w, h, y0, y1):
+    """Rows y0..y1 of a small picture scaled up to w x h, without making the whole big one."""
+    import cv2
+    import numpy as np
+    sh = small.shape[0]
+    ys = (np.arange(y0, y1, dtype=np.float32) + 0.5) * sh / h - 0.5
+    xs = (np.arange(w, dtype=np.float32) + 0.5) * small.shape[1] / w - 0.5
+    mx, my = np.meshgrid(xs, ys)
+    return cv2.remap(small, mx, my, cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE)
+
+
+def studio_background(shape, color, alpha):
+    """A seamless studio sweep in one color: lighter in the middle, a slightly darker floor, a soft vignette, a fine grain."""
+    import numpy as np
+    h, w = shape
+    base = np.array(color, dtype=np.float32)
+    rows = np.where(alpha.max(axis=1) > 0.5)[0]
+    floor = (rows[-1] / h) if rows.size else 0.85
+    x = np.linspace(-1, 1, w, dtype=np.float32)[None, :]
+
+    def block(y0, y1):
+        y = (np.arange(y0, y1, dtype=np.float32) / max(h - 1, 1))[:, None]
+        wall = 0.95 + 0.07 * np.exp(-((y - 0.45) ** 2) / 0.08)
+        sweep = np.where(y > floor - 0.08, 1.0 - 0.05 * np.clip((y - floor + 0.08) / 0.3, 0, 1), 1.0)
+        shade = (wall * sweep * (1.0 - 0.08 * x ** 2 - 0.06 * ((y - 0.5) * 2) ** 2))[..., None]
+        grain = np.random.default_rng(y0).normal(0, 0.6 / 255.0, (y1 - y0, w, 1)).astype(np.float32)
+        return np.clip(base[None, None, :] * shade + grain, 0, 1)
+    return block
+
+
+def plate_background(path, size):
+    """A background picture (an empty studio, a scene) cropped to fill the photo."""
+    import numpy as np
+    from PIL import ImageOps
+    plate = np.asarray(ImageOps.fit(load(path), size))
+    return lambda y0, y1: plate[y0:y1].astype(np.float32) / 255.0
+
+
+def contact_shadow(alpha):
+    """A soft shadow where the people meet the floor, so they stand on the new background instead of floating."""
+    import cv2
+    import numpy as np
+    h, w = alpha.shape
+    rows = np.where(alpha.max(axis=1) > 0.5)[0]
+    if not rows.size:
+        return lambda y0, y1: np.zeros((y1 - y0, w), np.float32)
+    scale = 512.0 / max(h, w)
+    small = cv2.resize(alpha, (max(1, int(w * scale)), max(1, int(h * scale))), interpolation=cv2.INTER_AREA)
+    blurred = cv2.GaussianBlur(small, (0, 0), max(small.shape) / 60.0)
+    bottom = rows[-1]
+
+    def block(y0, y1):
+        y = np.arange(y0, y1, dtype=np.float32)[:, None]
+        near_floor = np.clip(1.0 - np.abs(y - bottom) / (h * 0.12), 0, 1)
+        return np.clip(rows_of(blurred, w, h, y0, y1) * near_floor * 0.35, 0, 0.35)
+    return block
+
+
+# ---------- checking the cut-out ----------
+
+def cutout_warnings(img, alpha):
+    """Signs that the cut-out lost part of a person: a face kept without the body under it, or a face left out."""
+    import numpy as np
+    h, w = alpha.shape
+    warnings = []
+    for (x, y, fw, fh) in faces_in(img):
+        face = alpha[y:y + fh, x:x + fw]
+        if face.size and float(face.mean()) < 0.5:
+            warnings.append("A face at %d,%d is not in the cut-out (it would be replaced by the background)." % (x, y))
+            continue
+        top, bottom = y + fh, min(h, y + fh + int(fh * 1.5))
+        if bottom - top < fh * 0.5:
+            continue  # the face is at the bottom edge: no body in the photo to look for
+        body = alpha[top:bottom, max(0, x - fw // 2):min(w, x + fw + fw // 2)]
+        if body.size and float(body.mean()) < 0.35:
+            warnings.append("The person whose face is at %d,%d seems cut off below the head (their body was taken for background)." % (x, y))
+    return warnings
+
+
+def save_cutout_preview(img, soft, path):
+    """The kept people on plain grey, at most 1200 pixels long, to see what the cut-out kept and lost."""
+    import cv2
+    import numpy as np
+    from PIL import Image
+    scale = min(1.0, 1200.0 / max(img.size))
+    size = (max(1, int(img.size[0] * scale)), max(1, int(img.size[1] * scale)))
+    rgb = np.asarray(img.resize(size)).astype(np.float32)
+    a = cv2.resize(soft, size, interpolation=cv2.INTER_AREA)[..., None]
+    Image.fromarray(np.clip(rgb * a + 128.0 * (1 - a), 0, 255).astype(np.uint8)).save(path, quality=88)
+
+
+# ---------- commands ----------
+
+def cmd_setup(args):
+    installed = ensure_venv()
+    out({"ok": True, "installed": installed})
+
+
+def cmd_retouch(args):
+    import cv2
+    import numpy as np
+    from PIL import Image, ImageOps
+    if os.path.realpath(args.input) == os.path.realpath(args.output):
+        fail("Write the result to a new file; the original stays as it is.")
+    with Image.open(args.input) as probe_img:
+        info = dict(probe_img.info)
+        size = ImageOps.exif_transpose(probe_img).size
+    need_mask = args.background != "keep"
+    alpha = subject_mask(args.input, size, args.subject) if need_mask or args.light == "auto" else None
+    img = load(args.input)
+    rgb = np.asarray(img)
+    # The light is judged on the people (when found) from a small copy of the photo.
+    probe_scale = 512.0 / max(img.size)
+    probe_size = (max(1, int(img.size[0] * probe_scale)), max(1, int(img.size[1] * probe_scale)))
+    probe = cv2.resize(rgb, probe_size, interpolation=cv2.INTER_AREA).astype(np.float32) / 255.0
+    weight = cv2.resize(alpha, probe_size, interpolation=cv2.INTER_AREA) if alpha is not None and alpha.mean() > 0.02 else None
+    tables = tone_tables(probe, args.light, args.exposure, args.warmth, args.contrast, weight)
+    adjusted = adjust(rgb, tables, args.saturation)
+    result = adjusted
+    if need_mask:
+        if alpha.mean() < 0.01:
+            fail("Found no people or main subject to keep in this photo; use --background keep.")
+        soft = feather(alpha, img.size)
+        shadow = None
+        if args.background == "smooth":
+            background = smooth_background(adjusted, alpha)
+        elif args.background == "studio":
+            background, shadow = studio_background(alpha.shape, hex_color(args.color), alpha), contact_shadow(alpha)
+        else:
+            background, shadow = plate_background(args.background, img.size), contact_shadow(alpha)
+        share = float(alpha.mean())
+        warnings = cutout_warnings(img, alpha) if args.subject == "people" else []
+        preview = os.path.splitext(args.output)[0] + "-cutout.jpg"
+        save_cutout_preview(img, soft, preview)
+        del alpha
+        result = np.empty_like(adjusted)
+        for y0 in range(0, adjusted.shape[0], STRIP):
+            y1 = min(adjusted.shape[0], y0 + STRIP)
+            a = soft[y0:y1, :, None]
+            bg = background(y0, y1)
+            if shadow is not None:
+                bg = bg * (1.0 - shadow(y0, y1)[..., None])
+            mix = adjusted[y0:y1].astype(np.float32) / 255.0 * a + bg * (1.0 - a)
+            result[y0:y1] = np.clip(mix * 255.0 + 0.5, 0, 255).astype(np.uint8)
+    save(result, args.output, info)
+    report = {"ok": True, "input": args.input, "output": args.output, "size": list(img.size),
+         "background": args.background if args.background in ("keep", "smooth", "studio") else "plate",
+         "subjectShare": round(share, 3) if need_mask else (round(float(alpha.mean()), 3) if alpha is not None else None),
+         "params": {k: getattr(args, k) for k in ("light", "exposure", "warmth", "contrast", "saturation", "background", "subject", "color")}}
+    if need_mask:
+        report["cutout"] = preview
+        report["warnings"] = warnings
+        report["next"] = ("Look at the cut-out (the kept people on grey) and the result before going on: whole people, nothing of them left behind, no background stuck to them."
+                          if not warnings else "The cut-out looks wrong: " + " ".join(warnings) + " Look at it; if a person is cut, use --background keep (light and color only) instead of delivering this.")
+    out(report)
+
+
+def faces_in(img):
+    """Face boxes (x, y, w, h) in the photo, largest first, from OpenCV's YuNet detector (confident ones only)."""
+    import cv2
+    import numpy as np
+    scale = min(1.0, 1280.0 / max(img.size))
+    size = (max(1, int(img.size[0] * scale)), max(1, int(img.size[1] * scale)))
+    bgr = cv2.cvtColor(np.asarray(img.resize(size) if scale < 1 else img), cv2.COLOR_RGB2BGR)
+    detector = cv2.FaceDetectorYN.create(face_model(), "", size, 0.8, 0.3, 50)
+    _, found = detector.detect(bgr)
+    boxes = [[int(f[0] / scale), int(f[1] / scale), int(f[2] / scale), int(f[3] / scale)] for f in (found if found is not None else [])]
+    boxes = [[max(0, x), max(0, y), w, h] for x, y, w, h in boxes if w > 0 and h > 0]
+    return sorted(boxes, key=lambda b: -b[2] * b[3])[:6]
+
+
+def detail_similarity(a, b):
+    """How closely the fine detail (edges, texture) of two crops matches, 1 for the same, ignoring overall light and color."""
+    import cv2
+    import numpy as np
+    def detail(x):
+        g = cv2.cvtColor((x * 255).astype(np.uint8), cv2.COLOR_RGB2GRAY).astype(np.float32)
+        g = cv2.resize(g, (256, 256), interpolation=cv2.INTER_AREA)
+        hp = g - cv2.GaussianBlur(g, (0, 0), 3)
+        return (hp - hp.mean()) / (hp.std() + 1e-6)
+    da, db = detail(a), detail(b)
+    return float((da * db).mean())
+
+
+def cmd_check(args):
+    import numpy as np
+    from PIL import Image, ImageDraw
+    original, edited = load(args.original), load(args.edited)
+    reframed = original.size != edited.size
+    if abs(original.size[0] / original.size[1] - edited.size[0] / edited.size[1]) > 0.01:
+        return out({"ok": False, "framing": "changed", "message": "The edited photo has a different shape than the original: it was cropped or redrawn. Retouch from the original without changing its framing."})
+    if reframed:
+        edited = edited.resize(original.size)
+    boxes = [list(map(int, b.split(","))) for b in args.box] if args.box else faces_in(original)
+    source = "given" if args.box else "faces"
+    if not boxes:
+        # No face found (a profile, sunglasses, a hand over it): the top of the people stands in for the head.
+        alpha = subject_mask(args.original, original.size)
+        ys, xs = np.where(alpha > 0.5)
+        if not ys.size:
+            return out({"ok": False, "message": "Found no face or person to compare; pass the face position with --box x,y,w,h."})
+        x0, x1, y0, y1 = xs.min(), xs.max(), ys.min(), ys.max()
+        boxes = [[int(x0), int(y0), int(x1 - x0), int(max(1, (y1 - y0) * 0.4))]]
+        source = "people"
+    regions, crops = [], []
+    W, H = original.size
+    for (x, y, w, h) in boxes:
+        m = int(max(w, h) * 0.15)
+        x0, y0, x1, y1 = max(0, x - m), max(0, y - m), min(W, x + w + m), min(H, y + h + m)
+        # The measure looks only inside the face (never at hair edges or the background around it, which a new
+        # background rightly changes); the sheet shows a margin around it.
+        inner = (x + w // 10, y + h // 10, x + w - w // 10, y + h - h // 10)
+        ca, cb = to_float(original.crop(inner)), to_float(edited.crop(inner))
+        sim = detail_similarity(ca, cb)
+        regions.append({"box": [x, y, w, h], "similarity": round(sim, 3), "redrawn": sim < SIMILAR})
+        crops.append((original.crop((x0, y0, x1, y1)), edited.crop((x0, y0, x1, y1))))
+    sheet_path = args.output or os.path.splitext(args.edited)[0] + "-check.png"
+    tiles = []
+    for left, right in crops:
+        height = 420
+        lw, rw = max(1, int(left.width * height / left.height)), max(1, int(right.width * height / right.height))
+        tile = Image.new("RGB", (lw + rw + 12, height + 28), (255, 255, 255))
+        tile.paste(left.resize((lw, height)), (0, 28))
+        tile.paste(right.resize((rw, height)), (lw + 12, 28))
+        draw = ImageDraw.Draw(tile)
+        draw.text((6, 6), "original", fill=(60, 60, 60))
+        draw.text((lw + 18, 6), "edited", fill=(60, 60, 60))
+        tiles.append(tile)
+    sheet = Image.new("RGB", (max(t.width for t in tiles), sum(t.height + 10 for t in tiles)), (255, 255, 255))
+    y = 0
+    for t in tiles:
+        sheet.paste(t, (0, y))
+        y += t.height + 10
+    os.makedirs(os.path.dirname(os.path.abspath(sheet_path)) or ".", exist_ok=True)
+    sheet.save(sheet_path)
+    ok = not any(r["redrawn"] for r in regions)
+    out({"ok": ok, "regions": regions, "compared": source, "resized": reframed, "sheet": sheet_path,
+         "message": "The faces keep the original detail." if ok else
+         "A face was redrawn (its detail no longer matches the original; redrawn faces also come out with patches of color): redo this photo from the original with retouch (do not edit the edited one), and do not deliver it as is."})
+
+
+def main():
+    p = argparse.ArgumentParser(prog="aio-photo", description=__doc__)
+    sub = p.add_subparsers(dest="cmd", required=True)
+    sub.add_parser("setup", help="Install the photo tools (also done after the sandbox starts)")
+    r = sub.add_parser("retouch", help="Retouch a real photo from the original: light, color and background, people kept as photographed")
+    r.add_argument("input", help="The ORIGINAL photo (the user's upload), never an earlier result")
+    r.add_argument("-o", "--output", required=True, help="Where to save the result (.png or .jpg) in this task's folder")
+    r.add_argument("--light", choices=["auto", "none"], default="auto", help="auto: gently brighten or tame the people's mid-tones (default)")
+    r.add_argument("--exposure", type=float, default=0.0, help="Extra exposure in stops, e.g. 0.3 brighter, -0.2 darker")
+    r.add_argument("--warmth", type=float, default=0.0, help="-1 cooler … 1 warmer; 0.3 is a soft warm studio tone")
+    r.add_argument("--contrast", type=float, default=0.0, help="-1 flatter … 1 punchier; 0.15 is a light lift")
+    r.add_argument("--saturation", type=float, default=0.0, help="-1 grey … 1 vivid; keep within ±0.2 for skin")
+    r.add_argument("--background", default="keep", help="keep (default) | smooth (iron out wrinkles in the photo's own backdrop) | studio (a seamless studio sweep in --color) | a path to a background picture")
+    r.add_argument("--subject", choices=sorted(MODELS_BY_SUBJECT), default="people", help="What to keep in front of a new background: people (default: everyone, their clothes and what they hold) or any (a product, a pet, an object)")
+    r.add_argument("--color", default=STUDIO, help="Studio backdrop color #RRGGBB (default warm cream %s)" % STUDIO)
+    c = sub.add_parser("check", help="Compare the faces of an edited photo with the original before delivering it")
+    c.add_argument("original")
+    c.add_argument("edited")
+    c.add_argument("-o", "--output", help="Where to save the side-by-side sheet (default next to the edited photo)")
+    c.add_argument("--box", action="append", help="A face to compare, x,y,w,h in the original (repeatable); default: found automatically")
+    m = sub.add_parser("_mask", help=argparse.SUPPRESS)
+    m.add_argument("input")
+    m.add_argument("output")
+    m.add_argument("subject", choices=sorted(MODELS_BY_SUBJECT))
+    args = p.parse_args()
+    if args.cmd == "setup":
+        return cmd_setup(args)
+    in_venv()
+    return {"retouch": cmd_retouch, "check": cmd_check, "_mask": cmd_mask}[args.cmd](args)
+
+
+if __name__ == "__main__":
+    main()
+`;
+
+export const PHOTO_SKILL_MD = /* i18n-exempt: model-facing, Chinese trigger words and examples */ `---
+name: aio-photo
+description: Retouch real photos of people (修图/P图/精修/调色/调亮/摄影棚效果/写真/宝宝照/亲子照/证件照/换背景/去背景/背景布平整/去褶皱) and keep every person exactly as photographed — light and color, a smoothed or new studio background, and a face check against the original before delivering. Use whenever the user wants a real photo of people edited; image_generate must never redraw such a photo.
+---
+
+# Retouching real photos of people (人像修图)
+
+## The rule: retouch, never redraw
+
+image_generate redraws every pixel. On a real photo the faces, skin, eyes, hands and hair come back as someone similar, not the same
+person or child, and every further edit drifts more and leaves blotchy patches of color on the skin. So for a real photo of people:
+
+1. **Start from the original every time**: the photo the user sent (in uploads/) or the one they point at. Never feed an earlier result
+   back in. A follow-up ("背景再平整些", "再亮一点", "重新修", "颜色暖一点") runs retouch again on the original with changed options.
+2. **One photo, one command.** Never use another photo, or another photo's result, as a reference for this one.
+3. **Keep everyone and everything of the people**: adults in the frame, hands holding the baby, props (sunglasses, toys), clothes.
+   Do not crop or change the framing unless asked.
+4. **When the user sends originals again or says 再来/重做/重新修, redo them from those originals.** Never copy or resend earlier results.
+5. image_generate only for: an empty background picture without people (then \`--background <that png>\`), or when the user explicitly
+   asks to change the content (add or remove an object or a person, change clothes, make a drawing or cartoon of the photo). Then say plainly
+   that the picture is AI-redrawn and the faces may not be exactly theirs, and still run check.
+
+## Retouch
+
+\`\`\`bash
+python3 /home/gem/.codex/tools/aio-photo/aio-photo.py retouch <original> -o /home/gem/workspace/tasks/<task id>/<name>.jpg [options]
+\`\`\`
+
+The command is not on PATH; use the absolute path. A first use in a new sandbox installs the tools (a minute or two); it simply waits.
+The light and color change is the same for every pixel, so faces keep all their detail; the people are cut out of the original and put
+back pixel for pixel in front of a changed background.
+
+- \`--light auto|none\`: auto (default) gently brightens or tames the people's mid-tones.
+- \`--exposure <stops>\` (0.3 brighter, -0.2 darker), \`--warmth -1..1\` (0.2–0.4 is a warm studio tone), \`--contrast\` (0.1–0.2 a light lift),
+  \`--saturation\` (keep within ±0.15 for skin).
+- \`--background\`:
+  - \`keep\` (default): light and color only. The safest; use it when the background is fine or when the cut-out fails.
+  - \`smooth\`: the photo's own backdrop ironed flat — wrinkles, folds and creases of a backdrop cloth or paper go, its color, light falloff
+    and soft shadows stay. For a plain cloth or wall with wrinkles (背景布平整). Not for busy backgrounds (plants, rooms, furniture): they turn
+    into blur; use studio or a background picture there.
+  - \`studio\`: a seamless studio sweep in \`--color\` (default warm cream #EEE5D8) with a soft contact shadow ("摄影棚效果" on a messy background).
+  - a path to a picture: that background, cropped to fill (e.g. an empty seamless studio backdrop made with image_generate: no people, the
+    photo's orientation).
+- \`--subject any\` keeps a product, a pet or an object instead of people.
+
+Several photos: one retouch per photo in a shell loop, same options. Keep the options you used (the output's \`params\`) so a follow-up changes
+only what the user asked.
+
+## Before delivering, for every photo
+
+1. **warnings**: if the output lists any, the cut-out lost a person or part of one. Do not deliver that result: retouch the photo with
+   \`--background keep\` (light and color only) and tell the user the background of that photo could not be cleaned up automatically.
+2. **Look** at the \`cutout\` preview (what was kept, on grey) and at the result: whole people (heads, bodies, hands, feet, what they hold),
+   no chunks of the old background stuck to them, no halo.
+3. **Check the faces against the original**:
+   \`\`\`bash
+   python3 /home/gem/.codex/tools/aio-photo/aio-photo.py check <original> <result>
+   \`\`\`
+   It prints \`ok\` and each face's \`similarity\` (1 = the original's detail; below 0.85 = redrawn, which is also what leaves patches of
+   color on skin), and saves a side-by-side \`sheet\`; look at it. Deliver only when \`ok\` is true. Otherwise redo from the original with
+   retouch: never edit the result, never deliver it, and never tell the user it is fine.
+4. In the reply: the results as images (\`![...](path)\`), several photos also as one zip in the task folder; one sentence on what changed
+   (brighter, warmer, backdrop smoothed). Do not show cut-out previews or check sheets unless asked, and do not mention the tools.
+
+## Limits (say them honestly)
+
+- No skin retouching (blemishes, smoothing, slimming): it changes faces. If asked, offer light overall adjustments and say why.
+- The cut-out follows the people's outline; fine wisps of hair against a busy background may blur. The preview shows it.
+`;
+
+/**
  * Mail: the Himalaya CLI plus Ortie for OAuth tokens, both static musl builds
  * pinned by version and per-architecture sha256. They live in the Codex volume
  * so a recreated container keeps them, and are linked into /usr/local/bin so

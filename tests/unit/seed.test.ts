@@ -2,7 +2,7 @@ import { CLAWPAGE_SDK_JS } from "../../src/control/sandbox/clawpageSdk.js";
 import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 import { SandboxContainer } from "../../src/control/sandbox/container.js";
-import { CODEX_CONFIG_TOML, DOCUMENT_SKILL_DIR, DOCUMENT_SKILL_MD, GRAPHIC_RENDER_PY, GRAPHIC_SKILL_MD, MAIL_BINARIES, MARKET_CLI_PY, MARKET_SKILL_MD, MAIL_INSTALL_SH, MAIL_RO_SH, MAIL_SETUP_PY, MAIL_SKILL_MD, SHARE_CLI_PY, SHARE_SKILL_MD, WORKSPACE_AGENTS_BEGIN, WORKSPACE_AGENTS_END, WORKSPACE_AGENTS_MD, refreshWorkspaceAgents } from "../../src/control/sandbox/seed.js";
+import { CODEX_CONFIG_TOML, DOCUMENT_SKILL_DIR, DOCUMENT_SKILL_MD, GRAPHIC_RENDER_PY, GRAPHIC_SKILL_MD, MAIL_BINARIES, MARKET_CLI_PY, MARKET_SKILL_MD, PHOTO_CLI_PY, PHOTO_SKILL_MD, MAIL_INSTALL_SH, MAIL_RO_SH, MAIL_SETUP_PY, MAIL_SKILL_MD, SHARE_CLI_PY, SHARE_SKILL_MD, WORKSPACE_AGENTS_BEGIN, WORKSPACE_AGENTS_END, WORKSPACE_AGENTS_MD, refreshWorkspaceAgents } from "../../src/control/sandbox/seed.js";
 import { Logger } from "../../src/common/logger.js";
 import { testConfig, testNode } from "../helpers/harness.js";
 
@@ -218,6 +218,54 @@ describe("sandbox workspace seed", () => {
     expect(MARKET_CLI_PY).toContain('h.add_argument("--chart"');
     expect(MARKET_CLI_PY).toContain('"type": "candlestick"');
     expect(MARKET_SKILL_MD).toContain("history --chart");
+  });
+
+  it("gives both executors the photo retouching skill and its CLI, never installing anything at start", async () => {
+    const cfg = testConfig("/tmp/pa-photo-seed-test", 1);
+    const container = new SandboxContainer(cfg, new Logger("error", undefined, false), testNode());
+    vi.spyOn(container, "enforceCodexIsolation").mockResolvedValue();
+    const calls: Array<{ path: string; content: string }> = [];
+    container.writeFileInSandbox = (async (filePath: string, content: string) => {
+      calls.push({ path: filePath, content });
+    }) as typeof container.writeFileInSandbox;
+    const execs: string[][] = [];
+    container.execInSandbox = (async (argv: string[]) => (execs.push(argv), { code: 0, stdout: "", stderr: "" })) as typeof container.execInSandbox;
+    await container.seedWorkspace();
+    const skills = calls.filter((c) => c.path.endsWith("/skills/aio-photo/SKILL.md"));
+    expect(skills.map((c) => c.path).sort()).toEqual([
+      `${cfg.claudeCode.configDir}/skills/aio-photo/SKILL.md`,
+      `${cfg.sandbox.containerCodexHome}/skills/aio-photo/SKILL.md`,
+    ].sort());
+    for (const s of skills) expect(s.content).toBe(PHOTO_SKILL_MD);
+    expect(calls.find((c) => c.path === `${cfg.sandbox.containerCodexHome}/tools/aio-photo/aio-photo.py`)?.content).toBe(PHOTO_CLI_PY);
+    expect(execs.some((argv) => argv.join(" ").includes("pip"))).toBe(false);
+    expect(PHOTO_SKILL_MD).toMatch(/^---\nname: aio-photo\ndescription: /);
+    expect(PHOTO_SKILL_MD).toContain("python3 /home/gem/.codex/tools/aio-photo/aio-photo.py retouch");
+    expect(PHOTO_SKILL_MD).toContain("python3 /home/gem/.codex/tools/aio-photo/aio-photo.py check");
+    // The lessons of a real failure: never redraw, always from the original, no other photo as reference, redo on resend, check first.
+    expect(PHOTO_SKILL_MD).toContain("Start from the original every time");
+    expect(PHOTO_SKILL_MD).toContain("Never use another photo, or another photo's result, as a reference");
+    expect(PHOTO_SKILL_MD).toContain("Never copy or resend earlier results");
+    expect(PHOTO_SKILL_MD).toContain("Deliver only when `ok` is true");
+    // Pinned libraries that still install on the sandbox's Python 3.10, OpenCV 4 for the face detector, its model by hash.
+    expect(PHOTO_CLI_PY).toMatch(/REQUIREMENTS = \["rembg==2\.0\.69", "onnxruntime==1\.23\.2", "opencv-python-headless==4\.[\d.]+"\]/);
+    expect(PHOTO_CLI_PY).toMatch(/FACE_MODEL_SHA256 = "[0-9a-f]{64}"/);
+    expect(PHOTO_CLI_PY).toContain('"people": "u2net_human_seg"');
+  });
+
+  it("installs the photo tools through the CLI's own setup, with time for a fresh install", async () => {
+    const cfg = testConfig("/tmp/pa-photo-libs-test", 1);
+    const container = new SandboxContainer(cfg, new Logger("error", undefined, false), testNode());
+    const execs: Array<{ argv: string[]; timeoutMs?: number }> = [];
+    let stdout = JSON.stringify({ ok: true, installed: true });
+    container.execInSandbox = (async (argv: string[], opts?: { timeoutMs?: number }) => (execs.push({ argv, timeoutMs: opts?.timeoutMs }), { code: 0, stdout, stderr: "" })) as typeof container.execInSandbox;
+    expect(await container.ensurePhotoLibraries()).toBe(true);
+    expect(execs[0].argv).toEqual(["python3", `${cfg.sandbox.containerCodexHome}/tools/aio-photo/aio-photo.py`, "setup"]);
+    expect(execs[0].timeoutMs).toBeGreaterThanOrEqual(900_000);
+    stdout = JSON.stringify({ ok: true, installed: false });
+    expect(await container.ensurePhotoLibraries()).toBe(false);
+    container.execInSandbox = (async () => ({ code: 1, stdout: JSON.stringify({ ok: false, error: "pip failed" }), stderr: "" })) as typeof container.execInSandbox;
+    await expect(container.ensurePhotoLibraries()).rejects.toThrow("pip failed");
   });
 
   it("installs the market data libraries through the CLI's own setup and reports whether it installed them", async () => {

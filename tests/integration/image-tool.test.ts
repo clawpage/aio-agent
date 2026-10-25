@@ -61,6 +61,9 @@ it("gives every account an image tool that draws with the control plane's own lo
     const init = await rpc(member.image!.url, { jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18" } });
     expect(init.headers.get("mcp-session-id")).toBeTruthy();
     expect((await init.json()).result).toMatchObject({ serverInfo: { name: "aio_image" }, instructions: IMAGE_POLICY });
+    // A real photo of people is retouched with the aio-photo skill, never redrawn by the image model.
+    expect(IMAGE_POLICY).toContain("never redrawn with image_generate");
+    expect(IMAGE_POLICY).toContain("aio-photo skill");
     const tools = (await (await rpc(member.image!.url, { jsonrpc: "2.0", id: 2, method: "tools/list" })).json()).result.tools as Array<{ name: string }>;
     expect(tools.map((t) => t.name)).toEqual(["image_generate"]);
 
