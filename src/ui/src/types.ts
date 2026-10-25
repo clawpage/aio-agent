@@ -228,7 +228,9 @@ export interface Task {
 export type ClawpagePermission = "private" | "read-public" | "public" | "signed-in" | "per-user";
 export interface ClawpageTable { name: string; permission: ClawpagePermission; records: number; bytes: number; createdAt: number; updatedAt: number }
 /** A published clawpage (a public page, a mini app when it has tables). */
-export interface Clawpage { name: string; title: string; url: string; files: number; bytes: number; updatedAt: number; /** The collaborator who published this version; null when the owner did. */ updatedBy: string | null; /** How many other people's agents may maintain it. */ collaborators: number; tables: ClawpageTable[]; /** When its cover was rendered; null without one. */ cover: number | null }
+export interface Clawpage { name: string; title: string; url: string; files: number; bytes: number; updatedAt: number; /** The collaborator who published this version; null when the owner did. */ updatedBy: string | null; /** How many other people's agents may maintain it. */ collaborators: number; tables: ClawpageTable[]; /** When its cover was rendered; null without one. */ cover: number | null; /** The earlier version this one was restored from; null when it was published. */ restoredFrom?: number | null }
+/** A version of a clawpage that a later publish replaced (`at` is its time). */
+export interface ClawpageVersion { at: number; title: string; files: number; bytes: number; updatedBy: string | null; restoredFrom: number | null }
 /** Someone else's agent the owner lets maintain a clawpage (its token is only ever in the invitation). */
 export interface ClawpageCollaborator { id: string; label: string; createdAt: number; lastUsedAt: number | null }
 /** Someone signed in to a clawpage (email null for an account without one). */

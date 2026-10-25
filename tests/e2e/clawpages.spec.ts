@@ -1,7 +1,7 @@
 import { test, expect, type Page } from "@playwright/test";
 import zlib from "node:zlib";
 import { mockConsole } from "./mock-api";
-import type { Clawpage, ClawpageCollaborator, ClawpageRecord } from "../../src/ui/src/types";
+import type { Clawpage, ClawpageCollaborator, ClawpageRecord, ClawpageVersion } from "../../src/ui/src/types";
 
 const WS = "https://agent-workspace.example.com";
 
@@ -44,11 +44,18 @@ const RECORDS: Record<string, ClawpageRecord[]> = {
   notes: [{ key: "n1", value: { text: "订 12 点的位子" }, createdAt: now - 900_000, updatedAt: now - 900_000, by: { id: "user_rui", name: "rui", email: "rui@example.com" } }],
 };
 
+/** Earlier versions of lunch-poll: one a collaborator published, one the owner did. */
+const VERSIONS: ClawpageVersion[] = [
+  { at: now - 7_200_000, title: "午饭投票", files: 2, bytes: 18_000, updatedBy: "Rui 的 Agent", restoredFrom: null },
+  { at: now - 86_400_000, title: "午饭投票（旧）", files: 1, bytes: 2_300_000, updatedBy: null, restoredFrom: null },
+];
+
 async function setup(page: Page, pages = PAGES) {
   const calls: string[] = [];
   let list = structuredClone(pages);
   const records = structuredClone(RECORDS);
   let collaborators: ClawpageCollaborator[] = [{ id: "c1", label: "Rui 的 Agent", createdAt: now - 7_200_000, lastUsedAt: now - 600_000 }];
+  let versions: ClawpageVersion[] = structuredClone(VERSIONS);
   await mockConsole(page, { conversations: [] });
   await page.route((url) => url.pathname === "/api/main", (r) => r.fulfill({ json: { mode: "tasks", tasks: [], nextBefore: null, version: "v1" } }));
   await page.route((url) => url.pathname.startsWith("/api/clawpages"), async (r) => {
@@ -67,6 +74,15 @@ async function setup(page: Page, pages = PAGES) {
       return r.fulfill({ status: 201, json: { ...added, api: `${WS}/u/owner/share/${name}/.api`, invitation: `owner invites your agent…\nCollaborator API: ${WS}/u/owner/share/${name}/.api\nToken: cpc_secret` } });
     }
     if (sub === "collaborators" && req.method() === "DELETE") { collaborators = collaborators.filter((c) => c.id !== table); return r.fulfill({ status: 204 }); }
+    if (sub === "versions" && req.method() === "GET") return r.fulfill({ json: { versions: name === "lunch-poll" ? versions : [] } });
+    if (sub === "versions" && rest === "restore" && req.method() === "POST") {
+      const at = Number(table), from = versions.find((v) => v.at === at)!;
+      const current = list.find((p) => p.name === name)!;
+      const restored: Clawpage = { ...current, title: from.title, files: from.files, bytes: from.bytes, updatedAt: Date.now(), updatedBy: null, restoredFrom: at, cover: Date.now() };
+      versions = [{ at: current.updatedAt, title: current.title, files: current.files, bytes: current.bytes, updatedBy: current.updatedBy, restoredFrom: current.restoredFrom ?? null }, ...versions];
+      list = list.map((p) => p.name === name ? restored : p);
+      return r.fulfill({ json: restored });
+    }
     if (sub === "open") return r.fulfill({ json: { url: `${WS}/u/owner/share/${name}/#cp=owner-token` } });
     if (!sub && req.method() === "DELETE") { list = list.filter((p) => p.name !== name); return r.fulfill({ status: 204 }); }
     if (sub === "tables" && rest === "records" && req.method() === "DELETE") {
@@ -244,4 +260,58 @@ test("a clawpage linked in the main session shows as a card with its cover; anot
   await mine.scrollIntoViewIfNeeded();
   await page.waitForTimeout(400);
   await page.screenshot({ path: info.outputPath("share-card-cover.png") });
+});
+
+test("a clawpage's earlier versions are folded until asked for; restoring one takes two taps and refreshes the page", async ({ page }, info) => {
+  const calls = await setup(page);
+  await page.goto("/u/owner/clawpages");
+  await page.getByRole("button", { name: "打开 午饭投票 的详情" }).click();
+  const sheet = page.getByRole("dialog", { name: "午饭投票" });
+  const history = sheet.getByTestId("clawpage-versions");
+  const toggle = history.getByRole("button", { name: "历史版本" });
+  // Folded, and not read until opened.
+  await expect(toggle).toHaveAttribute("aria-expanded", "false");
+  await expect(toggle).toHaveAttribute("aria-controls", "clawpage-versions-list");
+  await expect(history.locator("li")).toHaveCount(0);
+  await expect(sheet.getByTestId("clawpage-collab").locator('li[data-id="c1"]')).toBeVisible();
+  expect(calls.filter((c) => c.includes("versions"))).toEqual([]);
+
+  await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-expanded", "true");
+  expect(calls).toContain("GET lunch-poll/versions");
+  await expect(history).toContainText("只恢复页面文件，数据保持现状");
+  const rows = history.locator("li");
+  await expect(rows).toHaveCount(2);
+  await expect(rows.nth(0)).toContainText("由 Rui 的 Agent 发布");
+  await expect(rows.nth(0)).toContainText("2 个文件 · 18 KB");
+  await expect(rows.nth(1)).toContainText("由你发布");
+  await expect(rows.nth(1)).toContainText("1 个文件 · 2.2 MB");
+
+  // At 360 wide nothing scrolls sideways, and the restore buttons stay in view.
+  await page.setViewportSize({ width: 360, height: 760 });
+  await rows.nth(1).scrollIntoViewIfNeeded();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
+  const [button, row] = await Promise.all([rows.nth(1).getByRole("button", { name: "恢复这一版" }).boundingBox(), rows.nth(1).boundingBox()]);
+  expect(button!.x + button!.width).toBeLessThanOrEqual(row!.x + row!.width + 1);
+  await page.waitForTimeout(300);
+  await page.screenshot({ path: info.outputPath("clawpage-versions.png") });
+
+  // The first tap only asks; the second restores. A screen reader hears what the button now says.
+  await rows.nth(1).getByRole("button", { name: "恢复这一版" }).click();
+  const confirm = rows.nth(1).getByRole("button", { name: "确认恢复" });
+  await expect(confirm).toHaveText("确认恢复");
+  await expect(confirm).toHaveClass(/danger/);
+  await expect(rows.nth(0).getByRole("button", { name: "恢复这一版" })).toBeVisible();
+  expect(calls.filter((c) => c.startsWith("POST"))).toEqual([]);
+  const listsBefore = calls.filter((c) => c === "GET ").length;
+  await confirm.click();
+  await expect(history.getByRole("status")).toHaveText("已恢复");
+  expect(calls).toContain(`POST lunch-poll/versions/${VERSIONS[1]!.at}/restore`);
+  // The list is read again (the page's new version and cover), and so are its versions: the replaced one on top.
+  await expect.poll(() => calls.filter((c) => c === "GET ").length).toBeGreaterThan(listsBefore);
+  await expect(rows).toHaveCount(3);
+  await expect(sheet.locator("#clawpage-sheet-title")).toHaveText("午饭投票（旧）");
+  await expect(rows.nth(0)).toContainText("由 Rui 的 Agent 发布");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
+  await expect(history.getByRole("status")).toHaveText("", { timeout: 4000 });
 });

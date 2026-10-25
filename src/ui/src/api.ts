@@ -169,6 +169,9 @@ export const api = {
   clawpageInvite: (page: string, label: string) =>
     request<import("./types").ClawpageCollaborator & { api: string; invitation: string }>(`/api/clawpages/${encodeURIComponent(page)}/collaborators`, { method: "POST", body: { label } }),
   clawpageRevoke: (page: string, id: string) => request<void>(`/api/clawpages/${encodeURIComponent(page)}/collaborators/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  /** Earlier versions of a clawpage, newest first; restoring one makes it the live page again (files only). */
+  clawpageVersions: (page: string) => request<{ versions: import("./types").ClawpageVersion[] }>(`/api/clawpages/${encodeURIComponent(page)}/versions`, { cache: "no-store" }),
+  clawpageRestore: (page: string, at: number) => request<import("./types").Clawpage>(`/api/clawpages/${encodeURIComponent(page)}/versions/${at}/restore`, { method: "POST", body: {} }),
   clawpageRecords: (page: string, table: string, after?: string | null, signal?: AbortSignal) =>
     request<{ records: import("./types").ClawpageRecord[]; nextCursor: string | null }>(`/api/clawpages/${encodeURIComponent(page)}/tables/${encodeURIComponent(table)}?limit=50${after ? `&after=${encodeURIComponent(after)}` : ""}`, { signal, cache: "no-store" }),
   clawpageExportUrl: (page: string, table: string) => apiUrl(`/api/clawpages/${encodeURIComponent(page)}/tables/${encodeURIComponent(table)}/export`),

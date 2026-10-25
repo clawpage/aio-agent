@@ -766,6 +766,10 @@ def main():
     rv = sub.add_parser("revoke", help="Remove a collaborator: their token stops working at once")
     rv.add_argument("name")
     rv.add_argument("id")
+    sub.add_parser("versions", help="Earlier versions of one of your pages, newest first").add_argument("name")
+    rs = sub.add_parser("restore", help="Make an earlier version the live page again (files only; data stays as it is)")
+    rs.add_argument("name")
+    rs.add_argument("at", help="The version's at, from versions")
     sub.add_parser("list", help="List published pages with their data tables")
     cv = sub.add_parser("cover", help="Render a page's cover picture again (the console shows it on the page's icon and cards)")
     cv.add_argument("name", nargs="?")
@@ -818,7 +822,7 @@ def main():
         state = read_state(os.path.abspath(args.dir))
         if state and state.get("api"):
             use_remote(state["api"], state.get("token"))
-    if REMOTE and args.cmd in ("delete", "invite", "collaborators", "revoke"):
+    if REMOTE and args.cmd in ("delete", "invite", "collaborators", "revoke", "versions", "restore"):
         fail("Only the page's owner can do this; a collaborator token cannot")
 
     if args.cmd == "list":
@@ -835,6 +839,18 @@ def main():
     elif args.cmd == "revoke":
         call("DELETE", "/pages/%s/collaborators/%s" % (page_name(args.name), q(args.id)))
         out({"ok": True, "revoked": args.id})
+    elif args.cmd == "versions":
+        r = call("GET", "/pages/%s/versions" % page_name(args.name))
+        for v in r.get("versions", []):
+            v["published"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(v["at"] / 1000))
+        out(r)
+    elif args.cmd == "restore":
+        name = page_name(args.name)
+        if not args.at.isdigit():
+            fail("Not a version: %s (use an at from: versions %s)" % (args.at, name))
+        page = call("POST", "/pages/%s/versions/%s/restore" % (name, args.at), {})
+        # The folder keeps the version it holds: publishing it now would fail with a version conflict, not undo the restore.
+        out(dict(page, ok=True, next="pull %s --force before changing this page again: your local folder still holds the version that was replaced" % name))
     elif args.cmd == "delete":
         call("DELETE", "/pages/" + page_name(args.name))
         out({"ok": True, "deleted": args.name})
@@ -1078,6 +1094,22 @@ $CP delete <name>                                                   # the page A
   for example because a collaborator published: \`pull <name> --force\` the new version, redo the change on it, publish again. \`publish --force\` replaces it anyway; only when the user wants exactly that.
 - Delete only when the user asks; tell them the data goes too.
 - When a command fails, relay its \`error\` faithfully; do not pretend it worked.
+
+## Undoing a change: earlier versions
+
+Every publish keeps the version it replaces: the 5 most recent per page; when the account's history passes 200 MB, the versions replaced longest ago go first.
+When the user says "change it back", "restore yesterday's version" or "a collaborator broke it":
+
+\`\`\`bash
+$CP versions <name>          # earlier versions, newest first: at, published (UTC), title, files, who published it
+$CP restore <name> <at>      # that version becomes the live page again, under the same link
+\`\`\`
+
+- A restore brings back the files only; the data stays as it is. If the old version expects records of another shape, tell the user.
+- The version that was live goes into the history too, so a restore can itself be undone.
+- After a restore your local folder is out of date: \`pull <name> --force\` before changing the page again. Publishing the old folder fails with a version conflict, on purpose.
+- A restored version without a cover shows the title's first letter in the console: \`$CP cover <name>\` renders one.
+- Only the page's owner can restore; the user can also do it in the console, in the page's details.
 
 ## Reading and changing a clawpage's data
 

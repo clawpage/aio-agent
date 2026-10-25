@@ -3564,6 +3564,21 @@ button.clawpage-row-delete.danger { background:var(--error); border-color:var(--
 .clawpage-collab-name { flex:1; min-width:0; font-size:var(--fs-sm); overflow-wrap:anywhere; }
 .clawpage-collab-new { display:flex; gap:8px; }
 .clawpage-collab-new input { flex:1; min-width:0; }
+.clawpage-versions { display:flex; flex-direction:column; gap:10px; padding-top:14px; border-top:1px solid var(--border); }
+.clawpage-versions h3 { margin:0; font-size:var(--fs-sm); font-weight:600; }
+button.clawpage-versions-toggle { display:flex; align-items:center; gap:8px; width:100%; padding:0; border:0; background:none; color:inherit; font:inherit; text-align:left; cursor:pointer; }
+.clawpage-versions-chevron { width:7px; height:7px; margin-left:auto; border-right:1.5px solid var(--text-dim); border-bottom:1.5px solid var(--text-dim); transform:rotate(45deg); transition:transform .15s ease; }
+.clawpage-versions-toggle[aria-expanded="true"] .clawpage-versions-chevron { transform:rotate(-135deg); }
+.clawpage-versions-panel { display:flex; flex-direction:column; gap:10px; }
+.clawpage-versions-panel[hidden] { display:none; }
+.clawpage-versions-panel > p { margin:0; }
+.clawpage-versions-list { list-style:none; margin:0; padding:0; border:1px solid var(--border); border-radius:12px; background:var(--bg); }
+.clawpage-versions-list li { display:flex; align-items:center; gap:10px; padding:8px 8px 8px 12px; border-bottom:1px solid var(--border); }
+.clawpage-versions-list li:last-child { border-bottom:0; }
+.clawpage-version-info { flex:1; min-width:0; display:flex; flex-wrap:wrap; align-items:baseline; gap:2px 10px; overflow-wrap:anywhere; }
+.clawpage-version-time { font-size:var(--fs-sm); }
+button.clawpage-version-restore { flex:none; white-space:nowrap; }
+button.clawpage-version-restore.danger { background:var(--error); border-color:var(--error); color:var(--on-error); }
 .clawpage-invitation { display:flex; flex-direction:column; gap:8px; padding:12px; border-radius:12px; background:var(--you-soft); }
 .clawpage-invitation p { margin:0; }
 .clawpage-invitation textarea { width:100%; resize:vertical; font-family:var(--mono); font-size:12px; line-height:1.5; }
