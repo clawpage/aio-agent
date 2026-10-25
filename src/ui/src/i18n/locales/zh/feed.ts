@@ -48,10 +48,6 @@ export const feed = {
     details: "查看过程",
     dispatchLog: "派单日志",
     dispatchLogLabel: (title: string) => `派单日志：${title}`,
-    copy: "复制",
-    copyLabel: (title: string) => `复制回复：${title}`,
-    copied: "已复制",
-    copyFailed: "复制失败，请长按选择",
   },
   head: {
     title: "主会话",

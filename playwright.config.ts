@@ -31,7 +31,6 @@ export default defineConfig({
     /menu-qa\.spec\.ts/,
     /vault\.spec\.ts/,
     /register\.spec\.ts/,
-    /copy-reply\.spec\.ts/,
   ],
   // Failure artifacts (traces/snapshots) can contain typed secrets such as the
   // owner password, so they are written under the git-ignored var/ directory

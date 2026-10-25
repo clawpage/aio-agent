@@ -49,10 +49,6 @@ export const feed: typeof zh = {
     details: "View steps",
     dispatchLog: "Dispatch log",
     dispatchLogLabel: (title: string) => `Dispatch log: ${title}`,
-    copy: "Copy",
-    copyLabel: (title: string) => `Copy reply: ${title}`,
-    copied: "Copied",
-    copyFailed: "Couldn't copy. Press and hold to select.",
   },
   head: {
     title: "Main chat",

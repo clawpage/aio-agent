@@ -7,15 +7,21 @@ import { isWebLink, isSandboxLink, isWorkspaceFilePath, workspaceFileKind, works
 import { openNativeBrowser } from "../deviceBrowser";
 import { t } from "../i18n";
 import { embedMediaLinks } from "../fileRefs";
-import { splitMessageParts } from "../messageParts";
+import { splitMapBlocks, type MessagePart } from "../mapBlocks";
+import { splitSvgBlocks, type SvgPart } from "../svgBlocks";
+import { splitMermaidBlocks, type MermaidPart } from "../mermaidBlocks";
+import { splitAskBlocks, splitChoiceBlocks, splitFormBlocks, type AskPart, type ChoicePart, type FormPart } from "../choices";
 import { FormCard } from "./FormCard";
+import { splitProductBlocks, type ProductPart } from "../productBlocks";
 import { cjkStrong } from "../markdownStrong";
 import { MapCard } from "./MapCard";
 import { SvgCard } from "./SvgCard";
 import { MermaidCard } from "./MermaidCard";
 import { ChoiceList } from "./ChoiceList";
 import { ProductCards } from "./ProductCards";
+import { splitCameraBlocks, type CameraPart } from "../cameraBlocks";
 import { CameraCard } from "./CameraCard";
+import { splitChartBlocks, type ChartPart } from "../chartBlocks";
 import { ChartCard } from "./ChartCard";
 
 marked.setOptions({ gfm: true, breaks: true });
@@ -109,7 +115,15 @@ type MarkdownProps = {
  */
 export function Markdown(props: MarkdownProps) {
   const parts = useMemo(
-    () => splitMessageParts(props.source ?? ""),
+    () => splitMapBlocks(props.source ?? "")
+      .flatMap<MessagePart | SvgPart>((part) => (part.kind === "text" ? splitSvgBlocks(part.text) : [part]))
+      .flatMap<MessagePart | SvgPart | MermaidPart>((part) => (part.kind === "text" ? splitMermaidBlocks(part.text) : [part]))
+      .flatMap<MessagePart | SvgPart | MermaidPart | ChoicePart>((part) => (part.kind === "text" ? splitChoiceBlocks(part.text) : [part]))
+      .flatMap<MessagePart | SvgPart | MermaidPart | ChoicePart | ProductPart>((part) => (part.kind === "text" ? splitProductBlocks(part.text) : [part]))
+      .flatMap<MessagePart | SvgPart | MermaidPart | ChoicePart | ProductPart | AskPart>((part) => (part.kind === "text" ? splitAskBlocks(part.text) : [part]))
+      .flatMap<MessagePart | SvgPart | MermaidPart | ChoicePart | ProductPart | AskPart | FormPart>((part) => (part.kind === "text" ? splitFormBlocks(part.text) : [part]))
+      .flatMap<MessagePart | SvgPart | MermaidPart | ChoicePart | ProductPart | AskPart | FormPart | CameraPart>((part) => (part.kind === "text" ? splitCameraBlocks(part.text) : [part]))
+      .flatMap<MessagePart | SvgPart | MermaidPart | ChoicePart | ProductPart | AskPart | FormPart | CameraPart | ChartPart>((part) => (part.kind === "text" ? splitChartBlocks(part.text) : [part])),
     [props.source],
   );
   if (parts.length === 1 && parts[0]!.kind === "text") return <MarkdownBlock {...props} source={parts[0]!.text} />;

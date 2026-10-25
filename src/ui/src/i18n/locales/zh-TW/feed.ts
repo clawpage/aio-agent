@@ -49,10 +49,6 @@ export const feed: typeof zh = {
     details: "檢視過程",
     dispatchLog: "派單日誌",
     dispatchLogLabel: (title: string) => `派單日誌：${title}`,
-    copy: "複製",
-    copyLabel: (title: string) => `複製回覆：${title}`,
-    copied: "已複製",
-    copyFailed: "複製失敗，請長按選取",
   },
   head: {
     title: "主對話",
