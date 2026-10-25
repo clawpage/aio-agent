@@ -94,3 +94,52 @@ test('an answer overtaken by a supplement leaves the feed until the executor ans
   await expect(draft).toContainText('后天有雨。');
   await expect(draft).not.toContainText('明天晴');
 });
+
+test('the feed can be scrolled up while an answer is being written, and follows again back at the bottom', async ({ page }, info) => {
+  nextId = 1;
+  await page.addInitScript(fakeEventSource);
+  await mockConsole(page, { conversations: [] });
+  const long = Array.from({ length: 12 }, (_, i) => `第 ${i + 1} 段：这是一段较长的已完成回复，用来让主会话可以滚动。`).join('\n\n');
+  const done = Array.from({ length: 4 }, (_, i) => ({ id: `old${i}`, revision: 1, title: `旧任务 ${i}`, text: `问题 ${i}`, conversationId: `c${i}`, status: 'completed', result: long, error: null, attachments: [], relatedTaskId: null, dependencies: [], approvals: 0, createdAt: Date.now() - 600_000 + i * 1000, startedAt: null, completedAt: Date.now() - 500_000 + i * 1000, messages: [] }));
+  const task = { id: 'live', revision: 1, title: '明天天气', text: '明天适合出去玩吗', conversationId: 'exec', status: 'running', result: null, error: null, attachments: [], relatedTaskId: null, dependencies: [], approvals: 0, createdAt: Date.now() - 60_000, startedAt: Date.now() - 50_000, completedAt: null, messages: [] };
+  await page.route('**/api/main*', r => r.fulfill({ json: { mode: 'tasks', tasks: [...done, task], nextBefore: null, version: 'v1' } }));
+  await page.goto('/');
+  await expect.poll(() => page.evaluate(() => 'exec' in ((window as unknown as { __sources: object }).__sources))).toBe(true);
+  await emit(page, 'item/started', started('f1', 'final_answer'));
+  // The executor keeps writing, a piece every 60ms, the whole time.
+  await page.evaluate(() => {
+    const source = (window as unknown as { __sources: Record<string, { emit(t: string, d: unknown): void }> }).__sources.exec!;
+    let id = 1000;
+    (window as unknown as { __pump: number }).__pump = window.setInterval(() => source.emit('stream.delta', { id: id++, conversationId: 'exec', turnId: 't1', type: 'stream.delta', payload: { itemId: 'f1', kind: 'item/agentMessage/delta', delta: '明天晴，适合出游，记得带外套。' }, createdAt: Date.now() }), 60);
+  });
+  const feed = page.locator('.task-feed');
+  const fromBottom = () => feed.evaluate(n => n.scrollHeight - n.scrollTop - n.clientHeight);
+  await expect(page.locator('.task-report.drafting[data-task-id="live"]')).toBeVisible();
+  await expect(page.locator('.boot-cover')).toHaveCount(0);
+  await expect.poll(fromBottom).toBeLessThan(5);
+  const box = (await feed.boundingBox())!;
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  // A wheel, or (mobile WebKit has none) a finger: down, the feed moves under it, up.
+  const nudge = (dy: number) => info.project.name === 'mobile-webkit'
+    ? feed.evaluate((n, dy) => new Promise(done => {
+      const fire = (type: string) => n.dispatchEvent(new Event(type, { bubbles: true }));
+      fire('touchstart'); n.scrollTop += dy; fire('touchmove');
+      setTimeout(() => { fire('touchend'); done(null); }, 50);
+    }), dy)
+    : page.mouse.wheel(0, dy);
+  // A small nudge up stays where the person left it, not snapped back to the bottom.
+  await nudge(-40);
+  await page.waitForTimeout(600);
+  expect(await fromBottom()).toBeGreaterThan(20);
+  await nudge(-600);
+  await page.waitForTimeout(800);
+  expect(await fromBottom()).toBeGreaterThan(300);
+  const top = await feed.evaluate(n => n.scrollTop);
+  await page.waitForTimeout(800);
+  expect(Math.abs(await feed.evaluate(n => n.scrollTop) - top)).toBeLessThan(2);
+  // Back at the bottom it follows the writing again.
+  await nudge(5000);
+  await page.waitForTimeout(300);
+  await expect.poll(fromBottom).toBeLessThan(5);
+  await page.evaluate(() => clearInterval((window as unknown as { __pump: number }).__pump));
+});

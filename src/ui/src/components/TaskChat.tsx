@@ -151,11 +151,19 @@ export function TaskChat({ onDetails, onOpenLink, onOpenFileInBrowser, onExpired
     const [away, setAway] = useState(false);
     /** A jump to a card is under way: its first scroll steps are still near the bottom and must not stick the feed there again. */
     const jumping = useRef(false);
+    /** The person is scrolling the feed (a finger on it, or a wheel, scrollbar or key just now): what they do wins over following the latest. */
+    const touching = useRef(false);
+    const scrolledAt = useRef(0);
+    const lastTop = useRef(0);
+    const byHand = () => { scrolledAt.current = Date.now(); };
     const onFeedScroll = (n: HTMLDivElement) => {
         // WebKit fires the resize's own scroll event before the observer runs: settle the resize first.
         if (!n.clientHeight) return;
         if (height.current || hidden.current) refit(n);
-        if (!jumping.current) stick.current = n.scrollHeight - n.scrollTop - n.clientHeight < 80;
+        // Any move up by the person leaves the bottom, however small; back near the bottom it follows again.
+        const up = n.scrollTop < lastTop.current && (touching.current || Date.now() - scrolledAt.current < 300);
+        lastTop.current = n.scrollTop;
+        if (!jumping.current) stick.current = !up && n.scrollHeight - n.scrollTop - n.clientHeight < 80;
         edge.current = n.scrollTop + n.clientHeight;
         setAway(n.scrollHeight - n.scrollTop - n.clientHeight > n.clientHeight);
     };
@@ -491,7 +499,14 @@ export function TaskChat({ onDetails, onOpenLink, onOpenFileInBrowser, onExpired
     const [reportedTask, setReportedTask] = useState<string | null>(null);
     /** The answer a running task is writing, shown where its reply will be until the reply itself arrives. */
     const draftOf = (t: Task) => !t.mergedInto && ["running", "stopping"].includes(t.status) ? drafts[t.conversationId]?.text || null : null;
-    const keepLatest = useCallback(() => { const n = scroll.current; if (n && stick.current) n.scrollTop = n.scrollHeight; }, []);
+    /** A reply being written keeps the latest in view only when it has grown, and never under the person's finger (a scroll each keystroke would fight their scrolling). */
+    const followed = useRef(0);
+    const keepLatest = useCallback(() => {
+        const n = scroll.current;
+        if (!n || !stick.current || touching.current || n.scrollHeight === followed.current) return;
+        followed.current = n.scrollHeight;
+        n.scrollTop = n.scrollHeight;
+    }, []);
     const feed = tasks.flatMap(t => [{ task: t, report: false, at: t.createdAt }, ...(!t.mergedInto && terminal.has(t.status) ? [{ task: t, report: true, at: t.completedAt ?? t.createdAt }] : draftOf(t) ? [{ task: t, report: true, at: Number.MAX_SAFE_INTEGER }] : [])])
         .sort((a, b) => a.at - b.at || Number(a.report) - Number(b.report) || a.task.id.localeCompare(b.task.id));
     return <section className="chat task-chat">
@@ -503,7 +518,8 @@ export function TaskChat({ onDetails, onOpenLink, onOpenFileInBrowser, onExpired
             { key: "ai", tone: "ai", label: i18n.feed.head.active(active.length - browserAsks.length), tasks: active.filter(t => !browserAsks.includes(t)), state: t => labels[t.status] ?? t.status },
           ]}/>
         : connected ? i18n.feed.head.idle : i18n.feed.head.connecting}</span></div></header>
-    <div className={`chat-scroll task-feed${bubbles ? " has-needs-you" : ""}${quiet ? " quiet" : ""}`} ref={scroll} onScroll={e => onFeedScroll(e.currentTarget)} aria-busy={arrival === "loading" || undefined}>
+    <div className={`chat-scroll task-feed${bubbles ? " has-needs-you" : ""}${quiet ? " quiet" : ""}`} ref={scroll} onScroll={e => onFeedScroll(e.currentTarget)} onWheel={byHand} onPointerDown={byHand} onKeyDown={byHand}
+      onTouchStart={() => { touching.current = true; byHand(); }} onTouchMove={byHand} onTouchEnd={() => { touching.current = false; byHand(); }} onTouchCancel={() => { touching.current = false; }} aria-busy={arrival === "loading" || undefined}>
       {covered && createPortal(<BootCover ready={arrival === "ready" || waited} label={i18n.common.loading} onDone={() => setCovered(false)}/>, document.body)}
       {arrival === "loading" && !covered && <div className="feed-loading"><InlineLoading label={i18n.common.loading}/></div>}
       {nextBefore && <div className="feed-older" ref={olderTop}>{olderState === "failed"
