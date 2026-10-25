@@ -743,6 +743,17 @@ export function createApiRouter(context: AppContext): Router {
     if (!share.data!.removeCollaborator(userId, page, String(req.params.id))) throw new DataError(404, "COLLABORATOR_NOT_FOUND", "No such collaborator");
     return undefined;
   }));
+  // Earlier versions: what publishes replaced, and making one of them the live page again (files only; the data stays).
+  router.get("/clawpages/:page/versions", requireKind("primary"), requireSession, (req, res) => clawpages(req, res, (userId, page, share) => {
+    const versions = share.versions(userId, page);
+    if (!versions) throw new DataError(404, "PAGE_NOT_FOUND", "The page does not exist");
+    return { versions };
+  }));
+  router.post("/clawpages/:page/versions/:at/restore", requireKind("primary"), requireSession, (req, res) => clawpages(req, res, (userId, page, share) => {
+    const restored = share.restore(userId, page, String(req.params.at));
+    track(req, "clawpage_restore", {});
+    return restored;
+  }));
   router.get("/clawpages/:page/tables/:table", requireKind("primary"), requireSession, (req, res) => clawpages(req, res, (userId, page, share) =>
     share.data!.list(userId, page, String(req.params.table), owner, { limit: req.query.limit, after: req.query.after })));
   router.get("/clawpages/:page/tables/:table/export", requireKind("primary"), requireSession, (req, res) => clawpages(req, res, (userId, page, share) => {

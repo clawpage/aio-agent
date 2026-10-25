@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { api, ApiError } from "../api";
-import type { Clawpage, ClawpageCollaborator, ClawpagePermission, ClawpageRecord } from "../types";
+import type { Clawpage, ClawpageCollaborator, ClawpagePermission, ClawpageRecord, ClawpageVersion } from "../types";
 import { hasNativeBrowser, openNativeBrowser } from "../deviceBrowser";
 import { onDownloadClick } from "../saveFile";
 import { InlineLoading } from "./Brand";
@@ -180,6 +180,7 @@ function ClawpageSheet({ page, onClose, onChanged, onRemoved, onError }: { page:
           {hasData && <ClawpageData page={page} onChanged={onChanged} onError={onError}/>}
           <p className="clawpage-tip muted tiny">{t.clawpages.tip}</p>
           <ClawpageCollaborators page={page} onChanged={onChanged} onError={onError}/>
+          <ClawpageVersions page={page} onChanged={onChanged} onError={onError}/>
           {confirming
             ? <div className="clawpage-confirm" role="alertdialog" aria-label={t.clawpages.deleteHint}>
               <span className="tiny">{t.clawpages.deleteHint}</span>
@@ -271,6 +272,75 @@ function ClawpageCollaborators({ page, onChanged, onError }: { page: Clawpage; o
       <input value={label} onChange={(event) => setLabel(event.target.value)} placeholder={t.clawpages.collabPlaceholder} aria-label={t.clawpages.collabLabel} maxLength={80}/>
       <button type="submit" className="ghost" disabled={busy || !label.trim()}>{busy ? t.clawpages.inviting : t.clawpages.invite}</button>
     </form>
+  </section>;
+}
+
+/**
+ * The versions publishes replaced, to make one the live page again (its files only; the data stays).
+ * Folded until asked for, and only then read; restoring takes two taps.
+ */
+function ClawpageVersions({ page, onChanged, onError }: { page: Clawpage; onChanged: () => void; onError: (err: unknown) => void }) {
+  const now = useDisplayClock();
+  const [open, setOpen] = useState(false);
+  const [list, setList] = useState<ClawpageVersion[] | null>(null);
+  /** The version whose restore was tapped once: the second tap restores it. */
+  const [armed, setArmed] = useState<number | null>(null);
+  const [busy, setBusy] = useState<number | null>(null);
+  const [done, setDone] = useState(false);
+  const load = useCallback(async () => {
+    try {
+      setList((await api.clawpageVersions(page.name)).versions);
+    } catch (err) {
+      onError(err);
+    }
+  }, [page.name, onError]);
+  useEffect(() => { if (open) void load(); }, [open, load, page.updatedAt]);
+  useEffect(() => {
+    if (!done) return;
+    const timer = setTimeout(() => setDone(false), 2000);
+    return () => clearTimeout(timer);
+  }, [done]);
+
+  const restore = async (at: number) => {
+    if (armed !== at) { setArmed(at); return; }
+    setArmed(null);
+    setBusy(at);
+    try {
+      await api.clawpageRestore(page.name, at);
+      onChanged();
+      setDone(true);
+      void load();
+    } catch (err) {
+      onError(err);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  return <section className="clawpage-versions" data-testid="clawpage-versions">
+    <h3><button type="button" className="clawpage-versions-toggle" aria-expanded={open} aria-controls="clawpage-versions-list" onClick={() => setOpen((o) => !o)}>
+      <span>{t.clawpages.versionsTitle}</span><span className="clawpage-versions-chevron" aria-hidden="true"/>
+    </button></h3>
+    <div id="clawpage-versions-list" className="clawpage-versions-panel" hidden={!open}>
+      {open && <>
+        <p className="muted tiny">{t.clawpages.versionsIntro}</p>
+        {list === null && <span className="muted tiny"><InlineLoading label={t.clawpages.loading}/></span>}
+        {list && list.length === 0 && <p className="muted tiny">{t.clawpages.versionsEmpty}</p>}
+        {list && list.length > 0 && <ul className="clawpage-versions-list">
+          {list.map((v) => <li key={v.at} data-at={v.at}>
+            <span className="clawpage-version-info">
+              <span className="clawpage-version-time"><MessageTime at={v.at} now={now}/></span>
+              <span className="muted tiny">{v.restoredFrom ? <>{t.clawpages.versionRestoredFrom} <MessageTime at={v.restoredFrom} now={now}/></> : v.updatedBy ? t.clawpages.versionBy(v.updatedBy) : t.clawpages.versionByYou}</span>
+              <span className="muted tiny">{t.clawpages.versionSize(v.files, v.bytes)}</span>
+            </span>
+            <button type="button" className={`tiny clawpage-version-restore ${armed === v.at ? "danger" : "ghost"}`} disabled={busy !== null} aria-label={t.clawpages.restoreVersion} title={t.clawpages.restoreVersion} onClick={() => void restore(v.at)}>
+              {busy === v.at ? t.clawpages.restoring : armed === v.at ? t.clawpages.confirmRestore : t.clawpages.restoreVersion}
+            </button>
+          </li>)}
+        </ul>}
+        <span className="clawpage-copied tiny" role="status">{done ? t.clawpages.restored : ""}</span>
+      </>}
+    </div>
   </section>;
 }
 

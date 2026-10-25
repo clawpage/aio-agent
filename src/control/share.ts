@@ -47,6 +47,12 @@ const GUIDE_MAX = 64 * 1024;
 const COVER = ".cover";
 export const COVER_MAX_BYTES = 1536 * 1024;
 const TOKEN = /^[a-f0-9]{64}$/;
+/** Where the versions a publish replaced are kept, per account: `.versions/<name>/<updatedAt>/` (never a page name, never served). */
+const VERSIONS = ".versions";
+/** A kept version's directory name: the 13-digit millisecond `updatedAt` it had. */
+const VERSION_AT = /^\d{13}$/;
+/** How many replaced versions are kept: the most recent per page, and up to a total per account (the oldest go first). */
+export const HISTORY_LIMITS = { perPage: 5, accountBytes: 200 * 1024 * 1024 };
 
 /** Only these types are labelled; anything else is served as opaque bytes. */
 const TYPES: Record<string, string> = {
@@ -109,8 +115,11 @@ export class ShareError extends Error {
 }
 
 /** `updatedBy` names the collaborator who published the current version (null when the owner did). */
-export interface SharePage { name: string; title: string; url: string; files: number; bytes: number; updatedAt: number; updatedBy: string | null; collaborators: number; tables: TableSummary[]; cover: number | null }
-interface PageMeta { title: string; files: number; bytes: number; updatedAt: number; updatedBy?: string | null }
+export interface SharePage { name: string; title: string; url: string; files: number; bytes: number; updatedAt: number; updatedBy: string | null; collaborators: number; tables: TableSummary[]; cover: number | null; restoredFrom: number | null }
+/** `restoredFrom`: the version this one was restored from (its `updatedAt`), null when it was published. */
+interface PageMeta { title: string; files: number; bytes: number; updatedAt: number; updatedBy?: string | null; restoredFrom?: number | null }
+/** A version a publish replaced, as the owner sees it in the page's history. */
+export interface PageVersion { at: number; title: string; files: number; bytes: number; updatedBy: string | null; restoredFrom: number | null }
 /** A publish: the page's files, and the version they were made from (a collaborator must name it). */
 export interface PublishInput { title?: unknown; files?: unknown; baseUpdatedAt?: unknown; force?: unknown }
 export interface ShareFile { path: string; data: string }
@@ -145,6 +154,7 @@ export class ShareStore {
   readonly data?: ClawpageData;
   /** AI answers on signed-in visitors' own accounts; absent where the deployment offers none. */
   ai?: Pick<ClawpageAi, "answer">;
+  #history: typeof HISTORY_LIMITS;
 
   constructor(opts: {
     cfg: Config; port: number;
@@ -152,6 +162,8 @@ export class ShareStore {
     userIdOf: (username: string) => string | null;
     data?: ClawpageData;
     ai?: Pick<ClawpageAi, "answer">;
+    /** Smaller history limits, for tests. */
+    history?: Partial<typeof HISTORY_LIMITS>;
   }) {
     this.#cfg = opts.cfg;
     this.#root = path.join(opts.cfg.dataDir, "shares");
@@ -160,6 +172,7 @@ export class ShareStore {
     this.#userIdOf = opts.userIdOf;
     this.data = opts.data;
     this.ai = opts.ai;
+    this.#history = { ...HISTORY_LIMITS, ...opts.history };
   }
 
   /** The account a page address names (`/u/<username>/...`). */
@@ -233,7 +246,7 @@ export class ShareStore {
 
   #page(userId: string, name: string, meta: PageMeta, tables: TableSummary[], collaborators: number): SharePage {
     return { name, url: this.pageUrl(userId, name), title: meta.title, files: meta.files, bytes: meta.bytes, updatedAt: meta.updatedAt,
-      updatedBy: meta.updatedBy ?? null, collaborators, tables, cover: this.#coverAt(userId, name) };
+      updatedBy: meta.updatedBy ?? null, collaborators, tables, cover: this.#coverAt(userId, name), restoredFrom: meta.restoredFrom ?? null };
   }
 
   /** One page as `list` shows it, or null. */
@@ -295,8 +308,7 @@ export class ShareStore {
     // One line (it is shown in lists and told to agents); without one the page keeps the title it has.
     const given = typeof input.title === "string" ? input.title.replace(/[\u0000-\u001f\u007f\u2028\u2029]+/g, " ").trim().slice(0, 200) : "";
     const title = given || before?.title || name;
-    const previous = before?.updatedAt ?? 0;
-    const updatedAt = Math.max(Date.now(), (Math.floor(previous / 1000) + 1) * 1000);
+    const updatedAt = this.#nextUpdatedAt(before);
     try {
       for (const f of files) {
         const file = path.join(staging, ...f.segments);
@@ -313,10 +325,143 @@ export class ShareStore {
         fs.copyFileSync(path.join(target, COVER), path.join(staging, COVER));
         fs.utimesSync(path.join(staging, COVER), old.mtimeMs / 1000, old.mtimeMs / 1000);
       } catch { /* no cover yet */ }
-      const retired = path.join(userDir, `.retired-${randomBytes(6).toString("hex")}`);
-      if (fs.existsSync(target)) fs.renameSync(target, retired);
-      fs.renameSync(staging, target);
-      fs.rmSync(retired, { recursive: true, force: true });
+      this.#swap(userId, name, staging, before);
+      return this.#page(userId, name, meta, this.data?.tables(userId, name) ?? [], this.data?.collaborators(userId, name).length ?? 0);
+    } finally {
+      fs.rmSync(staging, { recursive: true, force: true });
+    }
+  }
+
+  /** A new version's time: now, and a whole second after the version it replaces (see publish). */
+  #nextUpdatedAt(before: PageMeta | null): number {
+    return Math.max(Date.now(), (Math.floor((before?.updatedAt ?? 0) / 1000) + 1) * 1000);
+  }
+
+  #versionsDir(userId: string, name: string): string {
+    return path.join(this.#userDir(userId), VERSIONS, name);
+  }
+
+  /**
+   * Put a built version in the page's place. The version it replaces goes to the page's history
+   * (`.versions/<name>/<its updatedAt>/`); a page folder without readable metadata is simply removed.
+   */
+  #swap(userId: string, name: string, staging: string, before: PageMeta | null): void {
+    const target = path.join(this.#userDir(userId), name);
+    if (fs.existsSync(target)) {
+      if (before) {
+        const dir = this.#versionsDir(userId, name);
+        fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+        const kept = path.join(dir, String(before.updatedAt));
+        if (fs.existsSync(kept)) fs.rmSync(kept, { recursive: true, force: true });
+        fs.renameSync(target, kept);
+      } else {
+        const retired = path.join(this.#userDir(userId), `.retired-${randomBytes(6).toString("hex")}`);
+        fs.renameSync(target, retired);
+        fs.rmSync(retired, { recursive: true, force: true });
+      }
+    }
+    fs.renameSync(staging, target);
+    // Keeping history must never fail a publish.
+    try { this.#prune(userId, name); } catch { /* the next publish tries again */ }
+  }
+
+  /** A kept version's metadata, or null when it cannot be read. */
+  #versionMeta(dir: string): PageMeta | null {
+    try {
+      const meta = JSON.parse(fs.readFileSync(path.join(dir, META), "utf8")) as PageMeta;
+      return meta && typeof meta === "object" && typeof meta.updatedAt === "number" ? meta : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /** The kept versions of a page, newest first. */
+  #kept(userId: string, name: string): Array<{ at: number; dir: string }> {
+    const root = this.#versionsDir(userId, name);
+    let names: string[];
+    try {
+      names = fs.readdirSync(root).filter((n) => VERSION_AT.test(n));
+    } catch {
+      return [];
+    }
+    return names.map((n) => ({ at: Number(n), dir: path.join(root, n) })).sort((a, b) => b.at - a.at);
+  }
+
+  /** Keep the page's most recent versions, then the account's history within its total size, dropping the oldest first. */
+  #prune(userId: string, name: string): void {
+    for (const old of this.#kept(userId, name).slice(this.#history.perPage)) fs.rmSync(old.dir, { recursive: true, force: true });
+    const all: Array<{ at: number; dir: string; size: number }> = [];
+    let pages: string[];
+    try {
+      pages = fs.readdirSync(path.join(this.#userDir(userId), VERSIONS));
+    } catch {
+      return;
+    }
+    for (const page of pages) {
+      for (const v of this.#kept(userId, page)) {
+        const meta = this.#versionMeta(v.dir);
+        if (!meta) { fs.rmSync(v.dir, { recursive: true, force: true }); continue; }
+        let cover = 0;
+        try { cover = fs.statSync(path.join(v.dir, COVER)).size; } catch { /* no cover */ }
+        all.push({ ...v, size: (Number(meta.bytes) || 0) + cover });
+      }
+    }
+    let total = all.reduce((n, v) => n + v.size, 0);
+    for (const v of all.sort((a, b) => a.at - b.at)) {
+      if (total <= this.#history.accountBytes) break;
+      fs.rmSync(v.dir, { recursive: true, force: true });
+      total -= v.size;
+    }
+  }
+
+  /** The versions publishes replaced, newest first; null when the page does not exist. */
+  versions(userId: string, name: string): PageVersion[] | null {
+    if (!this.exists(userId, name)) return null;
+    return this.#kept(userId, name).flatMap(({ at, dir }) => {
+      const meta = this.#versionMeta(dir);
+      return meta ? [{ at, title: meta.title, files: meta.files, bytes: meta.bytes, updatedBy: meta.updatedBy ?? null, restoredFrom: meta.restoredFrom ?? null }] : [];
+    });
+  }
+
+  /**
+   * Make a kept version the live page again: its files (and the cover it had) become a new version,
+   * so visitors get it at once and anyone holding the replaced version must pull first. The replaced
+   * version goes to the history like any other, so a restore can be undone; the data is not touched.
+   */
+  restore(userId: string, name: string, at: string): SharePage {
+    const current = SHARE_NAME.test(name) ? this.#meta(userId, name) : null;
+    if (!current) throw new DataError(404, "PAGE_NOT_FOUND", "The page does not exist");
+    const missing = () => new DataError(404, "VERSION_NOT_FOUND", "No such version");
+    if (!VERSION_AT.test(at)) throw missing();
+    const root = path.resolve(this.#versionsDir(userId, name));
+    const dir = path.resolve(root, at);
+    if (!dir.startsWith(root + path.sep)) throw missing();
+    let isDir = false;
+    try { isDir = fs.lstatSync(dir).isDirectory(); } catch { /* none */ }
+    const version = isDir ? this.#versionMeta(dir) : null;
+    if (!version) throw missing();
+    const staging = path.join(this.#userDir(userId), `.staging-${randomBytes(6).toString("hex")}`);
+    try {
+      fs.cpSync(dir, staging, { recursive: true });
+      const updatedAt = this.#nextUpdatedAt(current);
+      const touch = (d: string) => {
+        for (const entry of fs.readdirSync(d, { withFileTypes: true })) {
+          const full = path.join(d, entry.name);
+          if (d === staging && (entry.name === META || entry.name === COVER)) continue;
+          if (entry.isDirectory()) touch(full);
+          else if (entry.isFile()) fs.utimesSync(full, updatedAt / 1000, updatedAt / 1000);
+        }
+      };
+      touch(staging);
+      const meta: PageMeta = { title: version.title, files: version.files, bytes: version.bytes, updatedAt, updatedBy: null, restoredFrom: Number(at) };
+      fs.writeFileSync(path.join(staging, META), JSON.stringify(meta));
+      // The cover it had, as a new one (the console fetches it again); without one, none.
+      const cover = path.join(staging, COVER);
+      if (fs.existsSync(cover)) {
+        const now = Date.now() / 1000;
+        fs.utimesSync(cover, now, now);
+      }
+      this.#swap(userId, name, staging, current);
       return this.#page(userId, name, meta, this.data?.tables(userId, name) ?? [], this.data?.collaborators(userId, name).length ?? 0);
     } finally {
       fs.rmSync(staging, { recursive: true, force: true });
@@ -379,6 +524,7 @@ export class ShareStore {
     const target = path.join(this.#userDir(userId), name);
     const existed = fs.existsSync(target);
     fs.rmSync(target, { recursive: true, force: true });
+    fs.rmSync(this.#versionsDir(userId, name), { recursive: true, force: true });
     const hadData = (this.data?.tables(userId, name).length ?? 0) > 0;
     this.data?.dropPage(userId, name);
     return existed || hadData;
@@ -546,7 +692,7 @@ export class ShareStore {
       res.end(body === undefined ? undefined : JSON.stringify(body));
     };
     const url = new URL(req.url ?? "/", "http://gateway");
-    const match = /^\/share\/([a-zA-Z0-9_]+)\/pages(?:\/([^/]+)(?:\/(files|data|cover|collaborators)((?:\/[^/]+)*))?)?$/.exec(url.pathname);
+    const match = /^\/share\/([a-zA-Z0-9_]+)\/pages(?:\/([^/]+)(?:\/(files|data|cover|collaborators|versions)((?:\/[^/]+)*))?)?$/.exec(url.pathname);
     const expected = match ? this.#tokens.get(match[1]!) : undefined;
     const supplied = (req.headers.authorization ?? "").replace(/^Bearer /, "");
     if (!match || !expected || !TOKEN.test(supplied) || !timingSafeEqual(Buffer.from(supplied), Buffer.from(expected))) {
@@ -565,6 +711,15 @@ export class ShareStore {
         if (req.method === "GET" && !id.length) return this.exists(userId, name!) ? reply(200, { collaborators: this.data?.collaborators(userId, name!) ?? [] }) : reply(404, { error: "The page does not exist" });
         if (req.method === "POST" && !id.length) return reply(201, this.invite(userId, name!, (await readJson(req, 4096)).label));
         if (req.method === "DELETE" && id.length === 1) return this.data?.removeCollaborator(userId, name!, id[0]!) ? reply(204) : reply(404, { error: "No such collaborator" });
+        return reply(405, { error: "method_not_allowed" });
+      }
+      if (sub === "versions") {
+        const rest = (tail ?? "").split("/").filter(Boolean);
+        if (req.method === "GET" && !rest.length) {
+          const versions = this.versions(userId, name!);
+          return versions ? reply(200, { name, versions }) : reply(404, { error: "The page does not exist" });
+        }
+        if (req.method === "POST" && rest.length === 2 && rest[1] === "restore") return reply(200, this.restore(userId, name!, rest[0]!));
         return reply(405, { error: "method_not_allowed" });
       }
       if (sub === "cover") {
