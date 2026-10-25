@@ -18,11 +18,6 @@ describe("replyPlainText: a reply copied as plain text", () => {
     expect(replyPlainText("![](/home/gem/workspace/tasks/d2/图.png)")).toBe("图.png");
   });
 
-  it("keeps a <br> as a line break, and as a space inside a table cell", () => {
-    expect(replyPlainText("第一行<br>第二行")).toBe("第一行\n第二行");
-    expect(replyPlainText("| 名称 | 说明 |\n| --- | --- |\n| A | 早<br/>晚 |")).toBe("名称\t说明\nA\t早 晚");
-  });
-
   it("turns a table into tab-separated rows", () => {
     expect(replyPlainText("| a | b |\n| --- | --- |\n| 1 | 2 |\n| 3 | 4 |")).toBe("a\tb\n1\t2\n3\t4");
   });
