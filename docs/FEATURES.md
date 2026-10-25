@@ -789,7 +789,7 @@ Android 手机用 USB 接在装了 Mac App 的 Mac 上，由 App 运行的 `bin/
   `TABLE_NOT_FOUND` 既可能是没建表，也可能是表为 private（访客看不到）：skill 要求先用 `data tables` 区分，后者改页面只在 `cp.owner` 时读该表，绝不为通过检查放宽 private 表的权限。
   匿名访客的预期结果（`SIGN_IN_REQUIRED`、`RECORD_NOT_FOUND`）单独列在 `expected`，不算问题；被取消或中止的加载与 favicon 不报。
   上限：每类 10 条（超出时给 `omitted` 总数），每条文字 200 字；最多读取 5 个本页数据接口的错误响应体，每个不超过 4 KB、最多等 3 秒，整页仍受 60 秒闹钟约束。
-  本页文件按相对路径报告，第三方地址（含主站）只报主机名，不带路径和查询参数。页面产生的错误文本视为不可信，截断后只出现在 CLI 输出里给执行器看，
+  本页文件按相对路径报告，第三方地址（含主站）只报主机名，不带路径和查询参数。CDN 给每个页面加的东西（Cloudflare 的 `/cdn-cgi/` 统计信标与预取规则、`static.cloudflareinsights.com`）在页面的不透明来源下必然跨域失败，不算页面的问题，一律不报。页面产生的错误文本视为不可信，截断后只出现在 CLI 输出里给执行器看，
   不上传、不进控制台，服务端不存储（沙箱启动时后台补封面的 `cover --missing` 把输出写到沙箱内 `/tmp/aio-share-cover.log`，其中也有检查结果）；执行器按 skill 修好后重发布（只改数据时用 `cover <页面名>` 复查），检查有问题时不得对用户说页面可用。
   只检查匿名访客视角（不含主人链接与登录访客）；`--no-cover` 时不渲染也就没有检查，渲染超时或浏览器崩溃时只有 `coverError`。
 - **控制台**：`GET /api/clawpages` 列表；`/api/clawpages/<页面名>/tables/<表>` 浏览记录（`PATCH` 改权限、`DELETE` 删表）、`/export` 导出 JSON、

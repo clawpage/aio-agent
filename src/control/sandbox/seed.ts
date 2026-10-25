@@ -488,6 +488,12 @@ def where_in(root, url):
     return None
 
 
+def cdn_added(url):
+    """What the CDN in front puts into every page (Cloudflare's /cdn-cgi/ beacon and prefetch rules), not the page's own doing."""
+    parts = urllib.parse.urlsplit(url or "")
+    return parts.path.startswith("/cdn-cgi/") or parts.hostname == "static.cloudflareinsights.com"
+
+
 def own_data(path):
     return path in (".data", ".ai", ".auth") or path.startswith(".data/") or path.startswith(".auth/")
 
@@ -541,7 +547,7 @@ def page_health(events, bodies, page_url, has_content):
                 continue
             verb, url = requests[rid]
             path = where(url)
-            if path is None or urllib.parse.urlsplit(url).path == "/favicon.ico":
+            if path is None or urllib.parse.urlsplit(url).path == "/favicon.ico" or cdn_added(url):
                 continue
             if method == "Network.responseReceived":
                 entry = {"method": cut(verb), "url": cut(path), "status": (p.get("response") or {}).get("status")}
@@ -563,7 +569,8 @@ def page_health(events, bodies, page_url, has_content):
             d = p.get("exceptionDetails") or {}
             description = (d.get("exception") or {}).get("description")
             message = description.split("\n")[0] if isinstance(description, str) and description else d.get("text")
-            errors.append(located({"kind": "exception", "message": cut(message or "")}, d.get("url"), d.get("lineNumber") or 0))
+            if not cdn_added(d.get("url")):
+                errors.append(located({"kind": "exception", "message": cut(message or "")}, d.get("url"), d.get("lineNumber") or 0))
         elif method == "Runtime.consoleAPICalled":
             first = (p.get("args") or [{}])[0]
             value = first.get("value")
@@ -571,7 +578,8 @@ def page_health(events, bodies, page_url, has_content):
             errors.append({"kind": "console", "message": cut(message)})
         elif method == "Log.entryAdded":
             entry = p.get("entry") or {}
-            if entry.get("source") != "network":
+            # The CDN's own requests fail against the page's opaque origin; their CORS lines name the /cdn-cgi/ address.
+            if entry.get("source") != "network" and "/cdn-cgi/" not in (entry.get("text") or "") and not cdn_added(entry.get("url")):
                 errors.append(located({"kind": "log", "message": cut(entry.get("text") or "")}, entry.get("url")))
     omitted = sum(max(0, len(items) - CHECK_LIST_MAX) for items in (errors, failed, expected))
     blank = not has_content

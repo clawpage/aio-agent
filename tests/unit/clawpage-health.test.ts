@@ -200,6 +200,19 @@ describe("page_health", () => {
     expect(r.ok).toBe(false);
   });
 
+  it("leaves out what the CDN adds to every page: Cloudflare's /cdn-cgi/ beacon and prefetch rules", () => {
+    // As seen on the live deployment: the beacon and speculation rules fail against the page's opaque origin.
+    const r = health([
+      sent("b", "https://w.example.com/cdn-cgi/rum?"), loadFailed("b", { errorText: "net::ERR_FAILED" }),
+      sent("o", "https://w.example.com/cdn-cgi/rum?", "OPTIONS"), answered("o", "https://w.example.com/cdn-cgi/rum?", 404),
+      sent("s", "https://w.example.com/cdn-cgi/speculation"), loadFailed("s", { errorText: "net::ERR_FAILED" }),
+      sent("i", "https://static.cloudflareinsights.com/beacon.min.js"), answered("i", "https://static.cloudflareinsights.com/beacon.min.js", 403),
+      { method: "Log.entryAdded", params: { entry: { source: "javascript", level: "error", url: `${PAGE}index.html`, text: "Access to XMLHttpRequest at 'https://w.example.com/cdn-cgi/rum?' from origin 'null' has been blocked by CORS policy" } } },
+      { method: "Runtime.exceptionThrown", params: { exceptionDetails: { text: "Uncaught", url: "https://static.cloudflareinsights.com/beacon.min.js", lineNumber: 0, exception: { description: "TypeError: x" } } } },
+    ]);
+    expect(r).toEqual(clean);
+  });
+
   it("gives the page's own data errors their code; sign-in and missing records are expected", () => {
     const urls: Record<string, string> = { t: ".data/votes", p: ".data/secret/k", s: ".ai", r: ".data/notes/k1", a: ".auth/session", n: ".data/plain", x: ".data/x" };
     const events = Object.entries(urls).flatMap(([id, u]) => [sent(id, PAGE + u, id === "s" ? "POST" : "GET"), answered(id, PAGE + u, id === "s" || id === "a" ? 401 : id === "x" ? 500 : 404)]);
