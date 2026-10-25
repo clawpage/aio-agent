@@ -26,22 +26,65 @@ let memberToken: string;
 const b64 = (text: string) => Buffer.from(text).toString("base64");
 /** A JPEG's first bytes: enough for the cover check, which goes by signature. */
 const JPEG = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.from("cover")]);
-/** Stands in for aio-render.py's Page: records the address it was sent to and "captures" a JPEG. */
-const FAKE_RENDERER = `import base64, time
+/** DevTools events a visitor's browser would report on a page, scripted by a word in its address (@PAGE@ is the page's address, @HOST@ its scheme and host). */
+const sent = (requestId: string, url: string, method = "GET") => ({ method: "Network.requestWillBeSent", params: { requestId, request: { url, method } } });
+const answered = (requestId: string, url: string, status: number) => ({ method: "Network.responseReceived", params: { requestId, response: { url, status } } });
+const loadFailed = (requestId: string, more: Record<string, unknown>) => ({ method: "Network.loadingFailed", params: { requestId, ...more } });
+const thrown = (description: string, lineNumber: number) => ({ method: "Runtime.exceptionThrown", params: { exceptionDetails: { text: "Uncaught", url: "@PAGE@", lineNumber, exception: { description } } } });
+const SCRIPTED: Record<string, unknown[]> = {
+  "missing-table": [sent("mt-1", "@PAGE@.data/votes"), answered("mt-1", "@PAGE@.data/votes", 404)],
+  "script-error": [thrown("Error: boom" + "x".repeat(500) + "\n    at @PAGE@:12:7", 11)],
+  "signin-page": [sent("si-1", "@PAGE@.ai", "POST"), answered("si-1", "@PAGE@.ai", 401), sent("si-2", "@PAGE@.data/notes/k1?x=1"), answered("si-2", "@PAGE@.data/notes/k1?x=1", 404)],
+  // 1200 requests, 15 exceptions, 20 third-party 404s, an unreachable host, and two loads cut short (never reported).
+  "noisy-page": [
+    ...Array.from({ length: 1200 }, (_, i) => sent(`n-${i}`, i === 0 ? "https://api.gone.example/feed" : i < 3 ? `https://cut.example.org/${i}` : `https://cdn.example.net/lib-${i}.js`)),
+    loadFailed("n-0", { errorText: "net::ERR_NAME_NOT_RESOLVED", canceled: false }),
+    loadFailed("n-1", { errorText: "net::ERR_FAILED", canceled: true }),
+    loadFailed("n-2", { errorText: "net::ERR_ABORTED" }),
+    ...Array.from({ length: 20 }, (_, i) => answered(`n-${i + 3}`, `https://cdn.example.net/lib-${i + 3}.js`, 404)),
+    ...Array.from({ length: 15 }, (_, i) => thrown(`TypeError: broken ${i}`, i)),
+  ],
+};
+/** Every page also asks for the host's favicon, which the check ignores. */
+const FAVICON = [sent("favicon", "@HOST@/favicon.ico"), answered("favicon", "@HOST@/favicon.ico", 404)];
+const BODIES: Record<string, string> = {
+  "mt-1": '{"error":"TABLE_NOT_FOUND","message":"Table votes does not exist"}',
+  "si-1": '{"error":"SIGN_IN_REQUIRED"}',
+  "si-2": '{"error":"RECORD_NOT_FOUND"}',
+};
+/** Stands in for aio-render.py's Page: records the address it was sent to, "captures" a JPEG, and reports the scripted events of a page once after it is opened. */
+const FAKE_RENDERER = `import base64, json, time
+SCRIPTED = json.loads(${JSON.stringify(JSON.stringify(SCRIPTED))})
+FAVICON = json.loads(${JSON.stringify(JSON.stringify(FAVICON))})
+BODIES = json.loads(${JSON.stringify(JSON.stringify(BODIES))})
 class Page:
     def __init__(self, width, scale):
         self.size = (width, scale)
+        self.fresh = False
         with open(LOG_PATH, "a") as f:
             f.write("start\\n")
     def metrics(self, height):
         pass
+    def drain(self):
+        if not self.fresh:
+            return []
+        self.fresh = False
+        page = self.url.split("#")[0]
+        host = "/".join(page.split("/")[:3])
+        events = FAVICON + [e for word, scripted in SCRIPTED.items() if word in page for e in scripted]
+        return json.loads(json.dumps(events).replace("@PAGE@", page).replace("@HOST@", host))
     def call(self, method, params=None, session=False, timeout=60):
         if method == "Page.navigate":
             self.url = params["url"]
+            self.fresh = True
             with open(LOG_PATH, "a") as f:
                 f.write(params["url"] + "\\n")
             if "hang" in self.url:
                 time.sleep(30)
+        if method == "Network.getResponseBody":
+            if params["requestId"] not in BODIES:
+                raise RuntimeError("No resource with given identifier found")
+            return {"body": BODIES[params["requestId"]], "base64Encoded": False}
         if method == "Page.captureScreenshot":
             assert params["format"] == "jpeg" and params["clip"]["width"] == 480 and params["clip"]["height"] == 640
             with open(LOG_PATH, "a") as f:
@@ -52,6 +95,8 @@ class Page:
             return {"data": "${JPEG.toString("base64")}"}
         return {}
     def evaluate(self, expression):
+        if "has-content" in expression and "blank" in self.url:
+            return False
         return True
     def close(self):
         pass
@@ -418,6 +463,7 @@ it("publishing renders a cover of the live page; the console serves it to its ow
   const again = await cli("publish", dir, "--no-cover");
   expect(again.cover).toBe(published.cover);
   expect(again.coverError).toBeUndefined();
+  expect(again.check).toBeUndefined();
 
   // A page without a cover (published before covers, or rendering failed) gets one from `cover --missing`.
   fs.rmSync(path.join(h.ctx.cfg.dataDir, "shares", "owner_1", "photo-wall", ".cover"));
@@ -461,12 +507,61 @@ it("a cover too large is captured again at lower quality, a page that hangs is g
   const started = Date.now();
   const hung = await cliWith({ AIO_SHARE_COVER_SECONDS: "2" }, "publish", page("hang-page"));
   expect(hung).toMatchObject({ ok: true, name: "hang-page", cover: null, coverError: expect.stringContaining("longer than 2 s") });
+  // Given up before its events were read: no check.
+  expect(hung.check).toBeUndefined();
   expect(Date.now() - started).toBeLessThan(20_000);
 
   const oversized = await fetch(`http://127.0.0.1:${gateway.port}/share/owner_1/pages/heavy-photos/cover`, {
     method: "POST", headers: { authorization: `Bearer ${owner.share!.token}`, "content-type": "application/json" },
     body: JSON.stringify({ data: Buffer.alloc(2 * 1024 * 1024).toString("base64") }) });
   expect(oversized.status).toBe(413);
+});
+
+it("publishing checks the live page as an anonymous visitor: script errors, failed requests and a blank first screen go back to the agent", async () => {
+  const page = (name: string) => { const dir = path.join(tool, name); fs.mkdirSync(dir); fs.writeFileSync(path.join(dir, "index.html"), `<h1>${name}</h1>`); return dir; };
+  const clean = { ok: true, errors: [], failedRequests: [], expected: [], blank: false };
+
+  // A table the page reads was never created: named by its code, and the cover is kept all the same. The favicon's 404 is no problem.
+  const missing = await cli("publish", page("missing-table"));
+  expect(missing, JSON.stringify(missing)).toMatchObject({ ok: true, cover: expect.any(Number) });
+  expect(missing.check).toEqual({ ok: false, errors: [], failedRequests: [{ method: "GET", url: ".data/votes", status: 404, code: "TABLE_NOT_FOUND" }], expected: [], blank: false });
+
+  // A script error, cut short, with where it happened.
+  const broken = (await cli("publish", page("script-error"))).check;
+  expect(broken.ok).toBe(false);
+  expect(broken.errors).toEqual([{ kind: "exception", message: expect.stringMatching(/^Error: boom/), where: "index.html:12" }]);
+  expect(broken.errors[0].message.length).toBeLessThanOrEqual(200);
+
+  // An anonymous visitor asked to sign in, and a record not there yet: expected, not problems.
+  const signin = (await cli("publish", page("signin-page"))).check;
+  expect(signin).toEqual({ ...clean, expected: [
+    { method: "POST", url: ".ai", status: 401, code: "SIGN_IN_REQUIRED" },
+    { method: "GET", url: ".data/notes/k1", status: 404, code: "RECORD_NOT_FOUND" },
+  ] });
+
+  // A page with nothing wrong, and one whose first screen shows nothing.
+  expect((await cli("publish", page("plain-page"))).check).toEqual(clean);
+  expect((await cli("publish", page("blank-page"))).check).toEqual({ ...clean, ok: false, blank: true });
+
+  // A noisy page: ten of each at most and how many were left out; other hosts by name alone; loads cut short are not failures.
+  const noisy = (await cli("publish", page("noisy-page"))).check;
+  expect(noisy.errors).toHaveLength(10);
+  expect(noisy.failedRequests).toHaveLength(10);
+  expect(noisy.omitted).toBe(5 + 11);
+  expect(noisy.failedRequests[0]).toEqual({ method: "GET", url: "api.gone.example", status: null, reason: "net::ERR_NAME_NOT_RESOLVED" });
+  expect(noisy.failedRequests.slice(1).every((r: { url: string; status: number }) => r.url === "cdn.example.net" && r.status === 404)).toBe(true);
+  expect(JSON.stringify(noisy)).not.toContain("cut.example.org");
+
+  // Rendering a cover again checks again; no cover, no check; a page that hangs has only its cover error.
+  const again = await cli("cover", "missing-table");
+  expect(again.covers).toEqual([{ name: "missing-table", cover: expect.any(Number), check: missing.check }]);
+  expect((await cli("publish", page("quiet-page"), "--no-cover")).check).toBeUndefined();
+  const backfill = await cliWith({ AIO_SHARE_COVER_SECONDS: "2" }, "cover", "--missing");
+  expect(backfill.covers.find((c: { name: string }) => c.name === "quiet-page")).toEqual({ name: "quiet-page", cover: expect.any(Number), check: clean });
+  for (const c of backfill.covers) {
+    if (c.coverError) expect(c.check).toBeUndefined();
+    else expect(c.check).toMatchObject({ ok: expect.any(Boolean) });
+  }
 });
 
 it("a collaborator's agent maintains a page through its API: instructions, files, versions, data, never managing tables or the page", async () => {
@@ -586,7 +681,7 @@ it("the sandbox CLI works on someone else's clawpage from an invitation: info, p
   fs.writeFileSync(path.join(work, "index.html"), "<h1>list v2</h1>");
   // A plain publish of the folder goes back to the owner's page, never to one of the collaborator's own.
   const published = await cli("publish", work);
-  expect(published).toMatchObject({ ok: true, name: "shared-list", updatedBy: "cr's agent", cover: expect.any(Number) });
+  expect(published).toMatchObject({ ok: true, name: "shared-list", updatedBy: "cr's agent", cover: expect.any(Number), check: expect.objectContaining({ ok: true }) });
   expect(await (await pub("/u/owner/share/shared-list/")).text()).toBe("<h1>list v2</h1>");
   expect(fs.readFileSync(path.join(work, "index.html"), "utf8")).toBe("<h1>list v2</h1>");
 
