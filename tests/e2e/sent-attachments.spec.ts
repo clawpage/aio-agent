@@ -164,3 +164,38 @@ test("the composer shows what is about to be sent as thumbnails, and a sent pict
   expect(fetched).toEqual([]);
   await page.screenshot({ path: info.outputPath("sent-after-tray.png") });
 });
+
+test("ten photos picked at once all go with the message; past twenty the first twenty go and the composer says so", async ({ page }) => {
+  await mockConsole(page, { conversations: [] });
+  const PNG = Buffer.from("89504e470d0a1a0a0000000d49484452000000020000000108020000007b40e8dd0000000f49444154789c63f8cfc0c0b0200000079101f0e7755c1d0000000049454e44ae426082", "hex");
+  await page.route("**/api/sandbox/upload*", (r) => {
+    const name = JSON.parse(r.request().postData() ?? "{}").name as string;
+    return r.fulfill({ json: { path: `/home/gem/workspace/uploads/${name}`, name, kind: "image", size: 160_000 } });
+  });
+  await page.route("**/api/documents/image*", (r) => r.fulfill({ contentType: "image/png", body: PNG }));
+  let tasks: unknown[] = [];
+  const sent: Array<{ attachments: unknown[] }> = [];
+  await page.route("**/api/main*", (r) => r.fulfill({ json: { mode: "tasks", version: `v${tasks.length}`, tasks, nextBefore: null } }));
+  await page.route("**/api/tasks", async (r) => {
+    const body = JSON.parse(r.request().postData()!);
+    sent.push(body);
+    const task = { ...base, id: `t-${sent.length}`, title: "摄影棚修图", text: body.text, conversationId: `c-${sent.length}`, attachments: body.attachments, status: "planning", result: null, createdAt: Date.now(), completedAt: null };
+    tasks = [...tasks, task];
+    return r.fulfill({ status: 202, json: { task, duplicate: false } });
+  });
+  const photos = (n: number) => Array.from({ length: n }, (_, i) => ({ name: `DSC000${String(i).padStart(2, "0")}.png`, mimeType: "image/png", buffer: PNG }));
+  await page.goto("/");
+  const tray = page.locator(".composer .composer-tray");
+  await page.getByTestId("attachment-input").setInputFiles(photos(10));
+  await expect(tray.locator(".chip:not(.uploading)")).toHaveCount(10);
+  await expect(page.getByText(/一次最多发/)).toHaveCount(0);
+  await page.getByRole("textbox", { name: "消息" }).fill("这些都按摄影棚效果p一下");
+  await page.getByRole("button", { name: "发送" }).click();
+  await expect.poll(() => sent.length).toBe(1);
+  expect(sent[0]!.attachments).toHaveLength(10);
+
+  await page.getByTestId("attachment-input").setInputFiles(photos(25));
+  await expect(tray.locator(".chip:not(.uploading)")).toHaveCount(20);
+  await expect(page.getByText("一次最多发 20 个附件，已加入前 20 个")).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
+});

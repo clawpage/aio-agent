@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, expect, it } from "vitest";
+import { MAX_ATTACHMENTS } from "../../src/common/attachments.js";
 import { login, startHarness, type TestHarness } from "../helpers/harness.js";
 let h: TestHarness;
 beforeAll(async () => { h = await startHarness(); Object.assign(h.codex, { planTask: async () => JSON.stringify({ title: "test", related: [], dependencies: [], resources: [] }) }); });
@@ -64,6 +65,18 @@ it("rejects invalid references and out-of-workspace attachments before creating 
         const res = await h.request("/api/tasks", { method: "POST", headers, body: JSON.stringify({ text: "a", clientMessageId: JSON.stringify(extra), ...extra }) });
         expect(res.status).toBe(400);
     }
+});
+it("takes up to twenty attachments in one message, and refuses more", async () => {
+    const { cookie, csrf } = await login(h);
+    const headers = { cookie, "x-csrf-token": csrf, "content-type": "application/json" };
+    const ws = h.ctx.cfg.sandbox.containerWorkspaceDir;
+    const photos = (n: number) => Array.from({ length: n }, (_, i) => ({ path: `${ws}/uploads/DSC000${i}.jpeg`, kind: "image", name: `DSC000${i}.jpeg` }));
+    const send = (n: number) => h.request("/api/tasks", { method: "POST", headers, body: JSON.stringify({ text: "这些都按摄影棚效果p一下", clientMessageId: `many-${n}`, attachments: photos(n) }) });
+    const ten = await send(10);
+    expect(ten.status).toBe(202);
+    expect(((await ten.json()) as { task: { attachments: unknown[] } }).task.attachments).toHaveLength(10);
+    expect((await send(MAX_ATTACHMENTS)).status).toBe(202);
+    expect((await send(MAX_ATTACHMENTS + 1)).status).toBe(400);
 });
 it("keeps the console language per account: messages and one opening follow the console until a choice in settings", async () => {
     const { cookie, csrf } = await login(h);

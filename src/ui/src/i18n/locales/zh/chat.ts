@@ -25,6 +25,7 @@ export const chat = {
     sessionExpired: "会话已失效，请重新登录",
     sendFailed: (message: string) => `${message}（内容已保留，可直接重试）`,
     uploadItem: (name: string, message: string) => `${name}：${message}`,
+    tooManyFiles: (max: number, taken: number) => `一次最多发 ${max} 个附件，已加入前 ${taken} 个`,
     uploadFailed: (failures: string[], kept: boolean) => `部分附件上传失败：${failures.join("；")}${kept ? "（已上传的附件已保留）" : ""}`,
   },
   composer: {

@@ -26,6 +26,7 @@ export const chat: typeof zh = {
     sessionExpired: "登入已失效，請重新登入",
     sendFailed: (message: string) => `${message}（內容已保留，可直接重試）`,
     uploadItem: (name: string, message: string) => `${name}：${message}`,
+    tooManyFiles: (max: number, taken: number) => `一次最多傳 ${max} 個附件，已加入前 ${taken} 個`,
     uploadFailed: (failures: string[], kept: boolean) => `部分附件上傳失敗：${failures.join("；")}${kept ? "（已上傳的附件已保留）" : ""}`,
   },
   composer: {

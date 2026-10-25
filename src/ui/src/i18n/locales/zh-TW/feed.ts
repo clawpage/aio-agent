@@ -24,6 +24,7 @@ export const feed: typeof zh = {
     notUploaded: (names: string) => `${names} 沒傳上去`,
     retry: (message: string) => `${message}（可以再點一次）`,
     upload: (name: string, message: string) => `${name}：${message}`,
+    tooManyFiles: (max: number, taken: number) => `一次最多傳 ${max} 個附件，已加入前 ${taken} 個`,
     uploadFailed: "上傳失敗",
   },
   progress: {

@@ -23,6 +23,7 @@ export const feed = {
     notUploaded: (names: string) => `${names} 没传上去`,
     retry: (message: string) => `${message}（可以再点一次）`,
     upload: (name: string, message: string) => `${name}：${message}`,
+    tooManyFiles: (max: number, taken: number) => `一次最多发 ${max} 个附件，已加入前 ${taken} 个`,
     uploadFailed: "上传失败",
   },
   progress: {

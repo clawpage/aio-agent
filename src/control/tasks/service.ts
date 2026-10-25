@@ -20,6 +20,7 @@ import type { PlanningSchedule, ScheduleActionName } from "./planning.js";
 import { answerLanguage, isLocale, readLocale, writeLocale, type Locale } from "../locale.js";
 import type { SharePage } from "../share.js";
 import { t } from "../i18n/index.js";
+import { MAX_ATTACHMENTS } from "../../common/attachments.js";
 import { ATTENTION_STATUSES, DONE_STATUSES, WORKING_STATUSES, type TaskBucket, type TaskCounts, type TaskFilter, type TaskListPage } from "../../common/taskList.js";
 
 /** Bounded context keeps both live work and older matches in one Jev call. */
@@ -392,7 +393,7 @@ export class TaskService {
         const related = requestedRelated?.merged_into ?? input.relatedTaskId ?? null;
         if (!text && !attachments.length)
             throw new Error(t().tasks.errors.emptyMessage);
-        if (text.length > 64000 || attachments.length > 6 || !input.clientMessageId || input.clientMessageId.length > 200)
+        if (text.length > 64000 || attachments.length > MAX_ATTACHMENTS || !input.clientMessageId || input.clientMessageId.length > 200)
             throw new Error(t().tasks.errors.messageTooLarge);
         const existing = this.db.prepare("SELECT * FROM tasks WHERE client_message_id = ?").get(input.clientMessageId) as unknown as TaskRow | undefined;
         if (existing) {

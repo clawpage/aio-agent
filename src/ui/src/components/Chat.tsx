@@ -32,6 +32,7 @@ import { dispatchedSupplement, dispatchedTask } from "../dispatchText";
 import { isPreviewableKind, isSandboxLink, workspaceFileKind } from "../sandboxLink";
 import { openNativeBrowser } from "../deviceBrowser";
 import { t } from "../i18n";
+import { MAX_ATTACHMENTS } from "../../../common/attachments";
 import { InlineLoading } from "./Brand";
 
 interface Props {
@@ -331,9 +332,9 @@ export function Chat({
 
   const onPickFiles = useCallback(async (files: FileList | null) => {
     if (!files || files.length === 0) return;
-    const picked = Array.from(files).slice(0, 6);
+    const picked = Array.from(files).slice(0, MAX_ATTACHMENTS);
     setUploading(true);
-    setError(null);
+    setError(picked.length < files.length ? t.chat.errors.tooManyFiles(MAX_ATTACHMENTS, picked.length) : null);
     // Upload one by one and keep every success even if a later file fails, so a
     // partial failure never discards attachments that already made it.
     const uploaded: Attachment[] = [];

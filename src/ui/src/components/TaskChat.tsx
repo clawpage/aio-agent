@@ -25,6 +25,7 @@ import { FormCard } from "./FormCard";
 import { VoiceButton } from "./VoiceInput";
 import type {TaskFeed} from '../taskStatus';
 import { t as i18n } from "../i18n";
+import { MAX_ATTACHMENTS } from "../../../common/attachments";
 const terminal = new Set(["completed", "failed", "interrupted", "unknown"]);
 /** Whose move it is: the person's (amber), the AI's (indigo), or stuck on an error (red). */
 function turnOf(t: Task): "you" | "ai" | "err" {
@@ -382,7 +383,10 @@ export function TaskChat({ onDetails, onOpenLink, onOpenFileInBrowser, onExpired
         if (!files)
             return;
         setError(null);
-        for (const item of tray.begin([...files].slice(0, Math.max(0, 6 - attachments.length - tray.pending.length)))) {
+        // More than a message can carry: the first ones go in, and the person is told the rest did not.
+        const taken = [...files].slice(0, Math.max(0, MAX_ATTACHMENTS - attachments.length - tray.pending.length));
+        if (taken.length < files.length) setError(i18n.feed.errors.tooManyFiles(MAX_ATTACHMENTS, taken.length));
+        for (const item of tray.begin(taken)) {
             // One left in the composer is an ordinary attachment from here on; only one a message took is waited for.
             const done = uploadChain.current.then(() => api.upload(item.file)).then(a => {
                 if (!handed.current.has(item.id)) { setAttachments(old => [...old, a]); uploads.current.delete(item.id); }

@@ -25,6 +25,7 @@ export const feed: typeof zh = {
     notUploaded: (names: string) => `${names} didn't upload`,
     retry: (message: string) => `${message} (you can try again)`,
     upload: (name: string, message: string) => `${name}: ${message}`,
+    tooManyFiles: (max: number, taken: number) => `A message can carry at most ${max} attachments; the first ${taken} were added`,
     uploadFailed: "Upload failed",
   },
   progress: {
