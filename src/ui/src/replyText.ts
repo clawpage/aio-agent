@@ -50,7 +50,8 @@ function inlineToken(token: Token): string {
       return text || (file ? basename(file) : "");
     }
     case "html":
-      return stripTags(token.text);
+      // A line break written as <br> (common in table cells) stays a break, not words run together.
+      return /^<br\s*\/?>$/i.test(token.text.trim()) ? "\n" : stripTags(token.text);
     default:
       return "tokens" in token && token.tokens?.length ? inline(token.tokens) : "text" in token && typeof token.text === "string" ? token.text : "";
   }
@@ -80,7 +81,8 @@ function block(token: Token): string {
       return (token as Tokens.Code).text;
     case "table": {
       const table = token as Tokens.Table;
-      const row = (cells: Tokens.TableCell[]) => cells.map((cell) => inline(cell.tokens)).join("\t");
+      // A break inside a cell would start a new row in the pasted table: it becomes a space there.
+      const row = (cells: Tokens.TableCell[]) => cells.map((cell) => inline(cell.tokens).replace(/\s*\n\s*/g, " ")).join("\t");
       return [row(table.header), ...table.rows.map(row)].join("\n");
     }
     case "html":
