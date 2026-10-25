@@ -228,6 +228,25 @@ it("the account's history drops the versions replaced longest ago: a page left a
   }
 });
 
+it("versions replaced in the same millisecond keep their order: the one replaced last still goes last", () => {
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "pa-clawpage-versions-tie-"));
+  // A fast machine: every publish and restore lands in the same millisecond.
+  const clock = vi.spyOn(Date, "now").mockReturnValue(1_800_000_000_000);
+  try {
+    const own = new ShareStore({ cfg: { ...h.ctx.cfg, dataDir }, port: 0, usernameOf: () => null, userIdOf: () => null, history: { accountBytes: 50_000 } });
+    const put = (name: string, n: string) => own.publish("acct", name, { title: n, files: [{ path: "index.html", data: b64(`<h1>${n}</h1>${"x".repeat(20_000)}`) }] });
+    const good = put("stable", "good");
+    for (let i = 1; i <= 4; i++) put("busy", `b${i}`);
+    const bad = put("stable", "bad");
+    own.restore("acct", "stable", String(good.updatedAt));
+    expect(own.versions("acct", "stable")!.map((v) => v.at)).toEqual([bad.updatedAt, good.updatedAt]);
+    expect(own.versions("acct", "busy")).toEqual([]);
+  } finally {
+    clock.mockRestore();
+    fs.rmSync(dataDir, { recursive: true, force: true });
+  }
+});
+
 it("a page whose metadata has a time that is no version time is not kept: nothing the history cannot list or prune is left behind", () => {
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "pa-clawpage-versions-damaged-"));
   try {

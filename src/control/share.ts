@@ -156,6 +156,8 @@ export class ShareStore {
   /** AI answers on signed-in visitors' own accounts; absent where the deployment offers none. */
   ai?: Pick<ClawpageAi, "answer">;
   #history: typeof HISTORY_LIMITS;
+  /** The last `retiredAt` given out: each is later than the one before, so two versions replaced in the same millisecond still have an order. */
+  #retired = 0;
 
   constructor(opts: {
     cfg: Config; port: number;
@@ -366,7 +368,10 @@ export class ShareStore {
     fs.renameSync(staging, target);
     // Keeping history must never fail a publish.
     try {
-      if (kept && before) fs.writeFileSync(path.join(kept, META), JSON.stringify({ ...before, retiredAt: Date.now() }));
+      if (kept && before) {
+        this.#retired = Math.max(Date.now(), this.#retired + 1);
+        fs.writeFileSync(path.join(kept, META), JSON.stringify({ ...before, retiredAt: this.#retired }));
+      }
       this.#prune(userId, name);
     } catch { /* the next publish tries again */ }
   }
