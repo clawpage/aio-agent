@@ -333,7 +333,7 @@ function ClawpageVersions({ page, onChanged, onError }: { page: Clawpage; onChan
               <span className="muted tiny">{v.restoredFrom ? <>{t.clawpages.versionRestoredFrom} <MessageTime at={v.restoredFrom} now={now}/></> : v.updatedBy ? t.clawpages.versionBy(v.updatedBy) : t.clawpages.versionByYou}</span>
               <span className="muted tiny">{t.clawpages.versionSize(v.files, v.bytes)}</span>
             </span>
-            <button type="button" className={`tiny clawpage-version-restore ${armed === v.at ? "danger" : "ghost"}`} disabled={busy !== null} aria-label={t.clawpages.restoreVersion} title={t.clawpages.restoreVersion} onClick={() => void restore(v.at)}>
+            <button type="button" className={`tiny clawpage-version-restore ${armed === v.at ? "danger" : "ghost"}`} disabled={busy !== null} aria-label={armed === v.at ? t.clawpages.confirmRestore : t.clawpages.restoreVersion} title={t.clawpages.restoreVersion} onClick={() => void restore(v.at)}>
               {busy === v.at ? t.clawpages.restoring : armed === v.at ? t.clawpages.confirmRestore : t.clawpages.restoreVersion}
             </button>
           </li>)}

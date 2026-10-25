@@ -296,14 +296,15 @@ test("a clawpage's earlier versions are folded until asked for; restoring one ta
   await page.waitForTimeout(300);
   await page.screenshot({ path: info.outputPath("clawpage-versions.png") });
 
-  // The first tap only asks; the second restores.
-  const restore = rows.nth(1).getByRole("button", { name: "恢复这一版" });
-  await restore.click();
-  await expect(restore).toHaveText("确认恢复");
-  await expect(restore).toHaveClass(/danger/);
+  // The first tap only asks; the second restores. A screen reader hears what the button now says.
+  await rows.nth(1).getByRole("button", { name: "恢复这一版" }).click();
+  const confirm = rows.nth(1).getByRole("button", { name: "确认恢复" });
+  await expect(confirm).toHaveText("确认恢复");
+  await expect(confirm).toHaveClass(/danger/);
+  await expect(rows.nth(0).getByRole("button", { name: "恢复这一版" })).toBeVisible();
   expect(calls.filter((c) => c.startsWith("POST"))).toEqual([]);
   const listsBefore = calls.filter((c) => c === "GET ").length;
-  await restore.click();
+  await confirm.click();
   await expect(history.getByRole("status")).toHaveText("已恢复");
   expect(calls).toContain(`POST lunch-poll/versions/${VERSIONS[1]!.at}/restore`);
   // The list is read again (the page's new version and cover), and so are its versions: the replaced one on top.

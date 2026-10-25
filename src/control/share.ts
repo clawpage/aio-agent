@@ -117,7 +117,8 @@ export class ShareError extends Error {
 /** `updatedBy` names the collaborator who published the current version (null when the owner did). */
 export interface SharePage { name: string; title: string; url: string; files: number; bytes: number; updatedAt: number; updatedBy: string | null; collaborators: number; tables: TableSummary[]; cover: number | null; restoredFrom: number | null }
 /** `restoredFrom`: the version this one was restored from (its `updatedAt`), null when it was published. */
-interface PageMeta { title: string; files: number; bytes: number; updatedAt: number; updatedBy?: string | null; restoredFrom?: number | null }
+/** retiredAt: when a kept version was replaced; the account's history drops the longest replaced first. */
+interface PageMeta { title: string; files: number; bytes: number; updatedAt: number; updatedBy?: string | null; restoredFrom?: number | null; retiredAt?: number }
 /** A version a publish replaced, as the owner sees it in the page's history. */
 export interface PageVersion { at: number; title: string; files: number; bytes: number; updatedBy: string | null; restoredFrom: number | null }
 /** A publish: the page's files, and the version they were made from (a collaborator must name it). */
@@ -343,15 +344,17 @@ export class ShareStore {
 
   /**
    * Put a built version in the page's place. The version it replaces goes to the page's history
-   * (`.versions/<name>/<its updatedAt>/`); a page folder without readable metadata is simply removed.
+   * (`.versions/<name>/<its updatedAt>/`, marked with when it was replaced); a page folder without
+   * usable metadata is simply removed, since the history could never list, prune or count it.
    */
   #swap(userId: string, name: string, staging: string, before: PageMeta | null): void {
     const target = path.join(this.#userDir(userId), name);
+    let kept: string | null = null;
     if (fs.existsSync(target)) {
-      if (before) {
+      if (before && Number.isSafeInteger(before.updatedAt) && VERSION_AT.test(String(before.updatedAt))) {
         const dir = this.#versionsDir(userId, name);
         fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
-        const kept = path.join(dir, String(before.updatedAt));
+        kept = path.join(dir, String(before.updatedAt));
         if (fs.existsSync(kept)) fs.rmSync(kept, { recursive: true, force: true });
         fs.renameSync(target, kept);
       } else {
@@ -362,7 +365,10 @@ export class ShareStore {
     }
     fs.renameSync(staging, target);
     // Keeping history must never fail a publish.
-    try { this.#prune(userId, name); } catch { /* the next publish tries again */ }
+    try {
+      if (kept && before) fs.writeFileSync(path.join(kept, META), JSON.stringify({ ...before, retiredAt: Date.now() }));
+      this.#prune(userId, name);
+    } catch { /* the next publish tries again */ }
   }
 
   /** A kept version's metadata, or null when it cannot be read. */
@@ -387,10 +393,14 @@ export class ShareStore {
     return names.map((n) => ({ at: Number(n), dir: path.join(root, n) })).sort((a, b) => b.at - a.at);
   }
 
-  /** Keep the page's most recent versions, then the account's history within its total size, dropping the oldest first. */
+  /**
+   * Keep the page's most recent versions, then the account's history within its total size, dropping
+   * the versions replaced longest ago first: a page left alone for months still keeps the version a
+   * bad publish just replaced, however old that version is.
+   */
   #prune(userId: string, name: string): void {
     for (const old of this.#kept(userId, name).slice(this.#history.perPage)) fs.rmSync(old.dir, { recursive: true, force: true });
-    const all: Array<{ at: number; dir: string; size: number }> = [];
+    const all: Array<{ at: number; dir: string; size: number; retiredAt: number }> = [];
     let pages: string[];
     try {
       pages = fs.readdirSync(path.join(this.#userDir(userId), VERSIONS));
@@ -403,11 +413,11 @@ export class ShareStore {
         if (!meta) { fs.rmSync(v.dir, { recursive: true, force: true }); continue; }
         let cover = 0;
         try { cover = fs.statSync(path.join(v.dir, COVER)).size; } catch { /* no cover */ }
-        all.push({ ...v, size: (Number(meta.bytes) || 0) + cover });
+        all.push({ ...v, size: (Number(meta.bytes) || 0) + cover, retiredAt: Number.isFinite(meta.retiredAt) ? meta.retiredAt! : v.at });
       }
     }
     let total = all.reduce((n, v) => n + v.size, 0);
-    for (const v of all.sort((a, b) => a.at - b.at)) {
+    for (const v of all.sort((a, b) => a.retiredAt - b.retiredAt || a.at - b.at)) {
       if (total <= this.#history.accountBytes) break;
       fs.rmSync(v.dir, { recursive: true, force: true });
       total -= v.size;

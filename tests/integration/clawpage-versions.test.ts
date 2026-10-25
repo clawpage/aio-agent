@@ -206,6 +206,46 @@ it("keeps the 5 most recent versions of a page, and the account's history within
   expect((await versionsOf("many"))).toHaveLength(5);
 });
 
+it("the account's history drops the versions replaced longest ago: a page left alone keeps the version a bad publish replaced", () => {
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "pa-clawpage-versions-age-"));
+  try {
+    // Two 20 KB versions fit; a third does not.
+    const own = new ShareStore({ cfg: { ...h.ctx.cfg, dataDir }, port: 0, usernameOf: () => null, userIdOf: () => null, history: { accountBytes: 50_000 } });
+    const put = (name: string, n: string) => own.publish("acct", name, { title: n, files: [{ path: "index.html", data: b64(`<h1>${n}</h1>${"x".repeat(20_000)}`) }] });
+    const good = put("stable", "good");
+    for (let i = 1; i <= 4; i++) put("busy", `b${i}`);
+    expect(own.versions("acct", "busy")).toHaveLength(2);
+    // The stable page's only version is the oldest in the account, but it was replaced just now.
+    const bad = put("stable", "bad");
+    expect(own.versions("acct", "stable")!.map((v) => v.at)).toEqual([good.updatedAt]);
+    expect(own.versions("acct", "busy")).toHaveLength(1);
+    // Restoring it keeps the version the restore replaced, so the restore can be undone too.
+    own.restore("acct", "stable", String(good.updatedAt));
+    expect(own.versions("acct", "stable")!.map((v) => v.at)).toEqual([bad.updatedAt, good.updatedAt]);
+    expect(own.versions("acct", "busy")).toEqual([]);
+  } finally {
+    fs.rmSync(dataDir, { recursive: true, force: true });
+  }
+});
+
+it("a page whose metadata has a time that is no version time is not kept: nothing the history cannot list or prune is left behind", () => {
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "pa-clawpage-versions-damaged-"));
+  try {
+    const own = new ShareStore({ cfg: { ...h.ctx.cfg, dataDir }, port: 0, usernameOf: () => null, userIdOf: () => null });
+    const put = (n: string) => own.publish("acct", "damaged", { title: n, files: [{ path: "index.html", data: b64(`<h1>${n}</h1>`) }] });
+    put("d1");
+    const root = path.join(dataDir, "shares", "acct");
+    fs.writeFileSync(path.join(root, "damaged", ".meta.json"), JSON.stringify({ title: "damaged", files: 1, bytes: 9, updatedAt: 1_700_000_000 }));
+    put("d2");
+    const kept = path.join(root, ".versions", "damaged");
+    expect(fs.existsSync(kept) ? fs.readdirSync(kept) : []).toEqual([]);
+    expect(fs.readdirSync(root).filter((n) => n.startsWith("."))).toEqual(fs.existsSync(path.join(root, ".versions")) ? [".versions"] : []);
+    expect(own.versions("acct", "damaged")).toEqual([]);
+  } finally {
+    fs.rmSync(dataDir, { recursive: true, force: true });
+  }
+});
+
 it("refuses versions that are not there, and the history never shows on a public path or in the list", async () => {
   const s1 = await publish("guarded", "<h1>g1</h1>");
   await publish("guarded", "<h1>g2</h1>");

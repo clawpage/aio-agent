@@ -928,7 +928,7 @@ $CP delete <name>                                                   # the page A
 
 ## Undoing a change: earlier versions
 
-Every publish keeps the version it replaces: the 5 most recent per page; when the account's history passes 200 MB, the oldest go first.
+Every publish keeps the version it replaces: the 5 most recent per page; when the account's history passes 200 MB, the versions replaced longest ago go first.
 When the user says "change it back", "restore yesterday's version" or "a collaborator broke it":
 
 \`\`\`bash
