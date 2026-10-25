@@ -22,6 +22,7 @@ import { nextDraft, type Draft } from "../draftText";
 import { ComposerAttachments, releasePreviews, useUploadTray, type PendingUpload } from "./ComposerAttachments";
 import { TurnPills } from "./TurnPills";
 import { FormCard } from "./FormCard";
+import { CopyReply } from "./CopyReply";
 import { VoiceButton } from "./VoiceInput";
 import type {TaskFeed} from '../taskStatus';
 import { t as i18n } from "../i18n";
@@ -544,6 +545,7 @@ export function TaskChat({ onDetails, onOpenLink, onOpenFileInBrowser, onExpired
         <div className="task-actions">
           {/* Until something follows it up: a retry (or any reply) then carries the task on. */}
           {t.status === "failed" && !replyTo(t) && <button className="ghost tiny task-retry" disabled={!!choosing[`${t.id}:${t.revision}`]} onClick={() => void retryTask(t)} aria-label={i18n.feed.actions.retryLabel(t.title)}>{i18n.feed.actions.retry}</button>}
+          {t.result?.trim() && <CopyReply source={t.result} title={t.title}/>}
           <button className="ghost tiny" onClick={() => quoteTask(t)} aria-label={i18n.feed.actions.quoteLabel(t.title)}>{i18n.feed.actions.quote}</button><button className="ghost tiny" onClick={() => onDetails(t)}>{i18n.feed.actions.details}</button>
           {/* Reporting stays available but out of the way: a quiet link at the end of the row. */}
           {t.result && !t.support && <button className="link tiny report-response" onClick={() => setReportedTask(t.id)}>{i18n.support.report}</button>}

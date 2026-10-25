@@ -4590,3 +4590,5 @@ button.map-card-switch { flex: 0 0 auto; padding: 4px 10px; }
 .task-actions .report-response { padding: 3px 0; border: 0; background: none; color: var(--text-dim); font-size: 12px; text-decoration: none; opacity: .7; }
 .task-actions .report-response:hover, .task-actions .report-response:focus-visible { opacity: 1; text-decoration: underline; }
 .login-policy { text-align:center; margin:18px 0 0; }
+.task-actions .copy-reply[data-state="copied"] { color: var(--done); border-color: color-mix(in srgb, var(--done) 45%, var(--border)); }
+.task-actions .copy-reply[data-state="failed"] { color: var(--error); border-color: color-mix(in srgb, var(--error) 45%, var(--border)); }
