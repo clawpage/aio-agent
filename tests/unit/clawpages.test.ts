@@ -99,7 +99,8 @@ describe("owner links and visitor limits", () => {
     const [body, sig] = token.split(".");
     const forged = Buffer.from(JSON.stringify({ u: "u1", p: "poll", e: 9e15 })).toString("base64url");
     expect(data.isOwnerToken(`${forged}.${sig}`, "u1", "poll", 2000)).toBe(false);
-    expect(data.isOwnerToken(`${body}.x${sig!.slice(1)}`, "u1", "poll", 2000)).toBe(false);
+    // A changed signature character (never the one it already has: one in 64 signatures starts with "x").
+    expect(data.isOwnerToken(`${body}.${sig![0] === "x" ? "y" : "x"}${sig!.slice(1)}`, "u1", "poll", 2000)).toBe(false);
     // Another deployment's key signs nothing here.
     const other = new ClawpageData(fs.mkdtempSync(path.join(os.tmpdir(), "pa-clawpages-other-")));
     expect(data.isOwnerToken(other.ownerToken("u1", "poll", 1000), "u1", "poll", 2000)).toBe(false);
