@@ -449,13 +449,149 @@ def copy_sdk(root):
     shutil.copyfile(SDK, os.path.join(root, SDK_NAME))
 
 
+# The publish check: what a visitor's browser ran into on the live page, from the same load as its cover.
+CHECK_LIST_MAX, CHECK_TEXT_MAX = 10, 200
+# At most this many error answers of the page's own data paths are read, each small and quick, to name their error code.
+CHECK_BODY_MAX, CHECK_BODIES, CHECK_BODY_SECONDS = 4096, 5, 3
+# Marks the expression for stand-ins in tests: whether the first screen shows anything at all (text, a picture, a form control or a frame).
+HAS_CONTENT_JS = "/* clawpage-check:has-content */ !!document.body && (document.body.innerText.trim() !== '' || !!document.querySelector('img, canvas, svg, video, picture, input, textarea, select, button, iframe'))"
+
+
+def keep_event(msg):
+    """The DevTools events the check reads; the rest (data received, extra info, page events) are not kept."""
+    method, params = msg.get("method"), msg.get("params") or {}
+    if method in ("Runtime.exceptionThrown", "Network.requestWillBeSent", "Network.loadingFailed"):
+        return True
+    if method == "Runtime.consoleAPICalled":
+        return params.get("type") == "error"
+    if method == "Log.entryAdded":
+        return (params.get("entry") or {}).get("level") == "error"
+    if method == "Network.responseReceived":
+        status = (params.get("response") or {}).get("status")
+        return isinstance(status, (int, float)) and status >= 400
+    return False
+
+
+def page_root(page_url):
+    base = page_url.split("#")[0].split("?")[0]
+    return base[:base.rfind("/") + 1]
+
+
+def where_in(root, url):
+    """A file of the page by its path, anywhere else by its host alone; None for data:, blob: and the like."""
+    url = url or ""
+    if root and url.startswith(root):
+        return url[len(root):].split("?")[0].split("#")[0] or "index.html"
+    parts = urllib.parse.urlsplit(url)
+    if parts.scheme in ("http", "https") and parts.hostname:
+        return parts.hostname
+    return None
+
+
+def own_data(path):
+    return path in (".data", ".ai", ".auth") or path.startswith(".data/") or path.startswith(".auth/")
+
+
+def fetch_bodies(page, events, page_url):
+    """The error answers of the page's own data paths (small JSON), by request id."""
+    root, bodies = page_root(page_url), {}
+    for e in events:
+        if len(bodies) >= CHECK_BODIES:
+            break
+        if e.get("method") != "Network.responseReceived":
+            continue
+        params = e.get("params") or {}
+        rid, path = params.get("requestId"), where_in(root, (params.get("response") or {}).get("url"))
+        if not rid or rid in bodies or path is None or not own_data(path):
+            continue
+        try:
+            got = page.call("Network.getResponseBody", {"requestId": rid}, session=True, timeout=CHECK_BODY_SECONDS)
+        except TimeoutError:
+            raise
+        except Exception:
+            continue
+        text = got.get("body")
+        if got.get("base64Encoded") or not isinstance(text, str) or len(text) > CHECK_BODY_MAX:
+            continue
+        bodies[rid] = text
+    return bodies
+
+
+def page_health(events, bodies, page_url, has_content):
+    """The check from the page's events: script errors, failed requests (expected ones apart) and a blank first screen."""
+    root = page_root(page_url)
+    def cut(value):
+        return value[:CHECK_TEXT_MAX] if isinstance(value, str) else value
+    def where(url):
+        return where_in(root, url)
+    def located(entry, url, line=None):
+        place = where(url) if url else None
+        if place is not None:
+            entry["where"] = cut(place if line is None else "%s:%d" % (place, line + 1))
+        return entry
+    requests, errors, failed, expected = {}, [], [], []
+    for e in events:
+        method, p = e.get("method"), e.get("params") or {}
+        if method == "Network.requestWillBeSent":
+            req = p.get("request") or {}
+            requests[p.get("requestId")] = (req.get("method") or "GET", req.get("url") or "")
+        elif method in ("Network.responseReceived", "Network.loadingFailed"):
+            rid = p.get("requestId")
+            if rid not in requests:
+                continue
+            verb, url = requests[rid]
+            path = where(url)
+            if path is None or urllib.parse.urlsplit(url).path == "/favicon.ico":
+                continue
+            if method == "Network.responseReceived":
+                entry = {"method": cut(verb), "url": cut(path), "status": (p.get("response") or {}).get("status")}
+                code = None
+                if own_data(path) and rid in bodies:
+                    try:
+                        reply = json.loads(bodies[rid])
+                    except ValueError:
+                        reply = None
+                    if isinstance(reply, dict) and isinstance(reply.get("error"), str):
+                        code = entry["code"] = cut(reply["error"])
+                (expected if code in ("SIGN_IN_REQUIRED", "RECORD_NOT_FOUND") else failed).append(entry)
+            else:
+                if p.get("canceled") or p.get("errorText") == "net::ERR_ABORTED":
+                    continue
+                reason = "blocked:%s" % p["blockedReason"] if p.get("blockedReason") else p.get("errorText")
+                failed.append({"method": cut(verb), "url": cut(path), "status": None, "reason": cut(reason)})
+        elif method == "Runtime.exceptionThrown":
+            d = p.get("exceptionDetails") or {}
+            description = (d.get("exception") or {}).get("description")
+            message = description.split("\n")[0] if isinstance(description, str) and description else d.get("text")
+            errors.append(located({"kind": "exception", "message": cut(message or "")}, d.get("url"), d.get("lineNumber") or 0))
+        elif method == "Runtime.consoleAPICalled":
+            first = (p.get("args") or [{}])[0]
+            value = first.get("value")
+            message = value if isinstance(value, str) else first.get("description") or json.dumps(value)
+            errors.append({"kind": "console", "message": cut(message)})
+        elif method == "Log.entryAdded":
+            entry = p.get("entry") or {}
+            if entry.get("source") != "network":
+                errors.append(located({"kind": "log", "message": cut(entry.get("text") or "")}, entry.get("url")))
+    omitted = sum(max(0, len(items) - CHECK_LIST_MAX) for items in (errors, failed, expected))
+    blank = not has_content
+    health = {"ok": not errors and not failed and not blank, "errors": errors[:CHECK_LIST_MAX], "failedRequests": failed[:CHECK_LIST_MAX],
+              "expected": expected[:CHECK_LIST_MAX], "blank": blank}
+    if omitted:
+        health["omitted"] = omitted
+    return health
+
+
 class Covers:
     """Covers from one headless Chromium (started on first use), each the published page as a visitor sees it, data loaded."""
 
     def __init__(self):
         self.page = None
+        # The publish check of the page rendered last (None until its events were read).
+        self.health = None
 
     def render(self, url):
+        self.health = None
         if self.page is None:
             spec = importlib.util.spec_from_file_location("aio_render", RENDERER)
             if spec is None or not os.path.isfile(RENDERER):
@@ -464,7 +600,18 @@ class Covers:
             spec.loader.exec_module(render)
             self.page = render.Page(COVER_W, COVER_SCALE)
             self.page.metrics(COVER_H)
+            # What the visitor's browser runs into, for the publish check.
+            self.page.keep = keep_event
+            for domain in ("Runtime", "Log", "Network"):
+                self.page.call(domain + ".enable", session=True)
         page = self.page
+        # Events of the page before belong to that page: leave it (its timers and requests end with its document),
+        # read on until a blank one answers, so what it sent until then is in hand, and drop all of it.
+        page.call("Page.navigate", {"url": "about:blank"}, session=True)
+        deadline = time.time() + 5
+        while time.time() < deadline and page.evaluate("location.href") != "about:blank":
+            time.sleep(0.05)
+        page.drain()
         page.call("Page.navigate", {"url": url}, session=True)
         # Until the new document has loaded (at most 20 s), then its fonts and pictures (at most 8 s),
         # then a moment for the data it fetches to arrive and draw.
@@ -474,6 +621,15 @@ class Covers:
             time.sleep(0.25)
         page.evaluate("""Promise.race([document.fonts.ready.then(() => Promise.all([...document.images].map(i => i.complete ? 0 : new Promise(d => {i.onload = i.onerror = d;})))), new Promise(r => setTimeout(r, 8000))]).then(() => new Promise(r => setTimeout(r, 1500)))""")
         page.evaluate("new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))")
+        try:
+            has_content = bool(page.evaluate(HAS_CONTENT_JS))
+        except TimeoutError:
+            raise
+        except Exception:
+            # Unknown is not reported as blank.
+            has_content = True
+        events = page.drain()
+        self.health = page_health(events, fetch_bodies(page, events, url), url, has_content)
         for quality in COVER_QUALITIES:
             data = page.call("Page.captureScreenshot", {"format": "jpeg", "quality": quality, "captureBeyondViewport": False,
                                                         "clip": {"x": 0, "y": 0, "width": COVER_W, "height": COVER_H, "scale": 1}}, session=True)["data"]
@@ -490,12 +646,15 @@ class Covers:
         try:
             data = self.render(url)
             signal.alarm(0)
-            return {"cover": call("POST", "/pages/%s/cover" % name, {"data": data}, soft=True)["cover"]}
+            return {"cover": call("POST", "/pages/%s/cover" % name, {"data": data}, soft=True)["cover"], "check": self.health}
         except Exception as err:
             # The browser may be what failed: start a new one for the next page.
             signal.alarm(0)
             self.close()
-            return {"coverError": str(err)[:200]}
+            failed = {"coverError": str(err)[:200]}
+            if self.health is not None:
+                failed["check"] = self.health
+            return failed
         finally:
             signal.signal(signal.SIGALRM, previous)
 
@@ -902,6 +1061,16 @@ $CP delete <name>                                                   # the page A
 - \`publish\` also renders a **cover**: a picture of the live page as a phone shows it on arrival, used on the page's icon in the console and on its card in the conversation.
   Make the first screen worth seeing (title and the main content, not an empty state or a spinner). If the output has \`coverError\`, the page is published anyway;
   \`$CP cover <name>\` renders it again (also after changing data the first screen shows).
+- \`publish\` (and \`cover <name>\`) also prints a **check**: what the browser ran into when it opened the live page as an anonymous visitor.
+  If \`check.ok\` is false, fix it and publish again before you hand the page to the user:
+  \`TABLE_NOT_FOUND\` in \`failedRequests\`: if \`data tables <name>\` does not list the table, it was never created (\`data create\`, with a deliberate permission);
+  if it does, the table is private, which visitors cannot see: change the page to read that table only when \`cp.owner\`.
+  **Never loosen a private table's permission just to pass the check.** \`PERMISSION_DENIED\`, a table's permission is wrong;
+  another status or a \`reason\`, a wrong path or a broken outside resource; \`errors\` are script errors (\`where\` says where); \`blank: true\` means the first screen
+  has no text, picture or form control (boxes drawn only with CSS count as blank: give it a title): do not leave it to a spinner alone.
+  \`SIGN_IN_REQUIRED\` and \`RECORD_NOT_FOUND\` under \`expected\` are normal for an anonymous visitor. An entry with only a host name is an outside address and may have nothing to do with the page: judge it.
+  Fix for two rounds at most; if it still fails, tell the user plainly what is wrong. **Never tell the user a page works while its check reports problems.**
+  After changing only data (for example creating a table), not files, run \`$CP cover <name>\` to check again. The check covers what an anonymous visitor sees, not the owner-only parts.
 - Publishing again under the same name is an update: same link, files replaced as a whole, **data kept**. Run \`list\` before creating a page so you do not overwrite another one.
 - To change an existing clawpage: if its folder is not in the workspace (or you are unsure it is the published version), \`pull\` it first, then edit and publish under the same name.
   If you change the shape of stored records, keep the page able to read the old ones (or migrate them with the data commands below).
@@ -979,9 +1148,11 @@ export const GRAPHIC_TOOL_DIR = "tools/aio-graphic";
 export const GRAPHIC_SKILL_DIR = "skills/aio-graphic";
 export const GRAPHIC_RENDER_PY = String.raw`#!/usr/bin/env python3
 """aio-render: render a local HTML page to a PNG with the sandbox's headless Chromium (managed by AIO Agent)."""
-import argparse, base64, fcntl, json, os, shutil, subprocess, sys, tempfile, time
+import argparse, base64, collections, fcntl, json, os, shutil, subprocess, sys, tempfile, time
 
 BROWSER = "/usr/local/bin/chromium"
+# Events kept for whoever asked for them (keep), the newest at most: a page cannot fill the memory.
+EVENTS_MAX = 1000
 
 
 class Page:
@@ -1011,6 +1182,9 @@ class Page:
         self.buf = b""
         self.next_id = 0
         self.width, self.scale = width, scale
+        # Events (messages without an id) are dropped unless keep, set by the caller, wants them.
+        self.events = collections.deque(maxlen=EVENTS_MAX)
+        self.keep = None
         try:
             targets = self.call("Target.getTargets")["targetInfos"]
             target = next(t["targetId"] for t in targets if t["type"] == "page")
@@ -1032,7 +1206,9 @@ class Page:
             while b"\0" in self.buf:
                 raw, self.buf = self.buf.split(b"\0", 1)
                 reply = json.loads(raw)
-                if reply.get("id") == self.next_id:
+                if "id" not in reply and "method" in reply and self.keep is not None and self.keep(reply):
+                    self.events.append(reply)
+                elif reply.get("id") == self.next_id:
                     if "error" in reply:
                         raise RuntimeError(f"{method}: {reply['error'].get('message')}")
                     return reply.get("result", {})
@@ -1041,6 +1217,12 @@ class Page:
                 raise RuntimeError("the browser exited")
             self.buf += chunk
         raise RuntimeError(f"{method}: timed out")
+
+    def drain(self):
+        """The events kept since the last drain, oldest first."""
+        events = list(self.events)
+        self.events.clear()
+        return events
 
     def metrics(self, height):
         self.call("Emulation.setDeviceMetricsOverride",

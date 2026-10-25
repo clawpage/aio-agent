@@ -149,6 +149,10 @@ describe("sandbox workspace seed", () => {
     ].sort());
     for (const s of skills) expect(s.content).toBe(SHARE_SKILL_MD);
     expect(SHARE_SKILL_MD).toMatch(/^---\nname: clawpages\n/);
+    // The publish check's TABLE_NOT_FOUND is also a private table: the page changes, the table's permission never loosens for the check.
+    const check = SHARE_SKILL_MD.slice(SHARE_SKILL_MD.indexOf("also prints a **check**"));
+    expect(check).toMatch(/if it does, the table is private, which visitors cannot see: change the page to read that table only when `cp\.owner`/);
+    expect(check).toContain("**Never loosen a private table's permission just to pass the check.**");
     // The skill's earlier name goes, so the executor never sees both.
     expect(execCalls).toContainEqual(["rm", "-rf", `${cfg.sandbox.containerCodexHome}/skills/aio-share`, `${cfg.claudeCode.configDir}/skills/aio-share`]);
     expect(calls.some((c) => c.path.includes("/skills/aio-share/"))).toBe(false);
