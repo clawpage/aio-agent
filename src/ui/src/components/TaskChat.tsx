@@ -469,7 +469,10 @@ export function TaskChat({ onDetails, onOpenLink, onOpenFileInBrowser, onExpired
         card.classList.add("attention");
         window.setTimeout(() => card.classList.remove("attention"), 1800);
     };
-    const renderProgress = (t: Task) => <div data-progress-for={t.id} className={`task-progress turn-${turnOf(t)} ${t.status === "running" || t.status === "planning" ? "active" : ""} ${t.status === "needs_input" ? "needs-input" : ""}`}>
+    const renderProgress = (t: Task) => {
+      // Its answer is being written below it: the card steps back to its title, time and actions.
+      const writing = draftOf(t) !== null;
+      return <div data-progress-for={t.id} className={`task-progress turn-${turnOf(t)} ${t.status === "running" || t.status === "planning" ? "active" : ""} ${t.status === "needs_input" ? "needs-input" : ""}${writing ? " writing" : ""}`}>
           {(() => {
             const summary = <><span className={`dot ${t.approvals || t.browser?.request ? "warn" : ""}`}/><span className="task-progress-label">{t.approvals ? i18n.feed.progress.needsConfirm : t.browser?.request && t.status === "running" ? i18n.feed.progress.needsBrowser : t.waitReason?.label ?? labels[t.status] ?? t.status}</span><span className="task-progress-title">{t.title}</span></>;
             // Still being dispatched (or dispatch failed): nothing has run yet, so there are no details to open.
@@ -488,7 +491,7 @@ export function TaskChat({ onDetails, onOpenLink, onOpenFileInBrowser, onExpired
             <span className="task-question-hint">{t.form ? i18n.feed.question.hintForm : t.options?.length ? i18n.feed.question.hintOptions : i18n.feed.question.hintText}</span>
           </div>}
           {/* Only what the executor said last: each new word replaces the one before, in place. */}
-          {!!t.messages?.length && ["running", "stopping"].includes(t.status) && <div className="task-intro task-messages"><Markdown key={t.messages.length} source={t.messages.at(-1)!} onOpenLink={onOpenLink} onOpenFile={setPreview}/></div>}
+          {!!t.messages?.length && ["running", "stopping"].includes(t.status) && !writing && <div className="task-intro task-messages"><Markdown key={t.messages.length} source={t.messages.at(-1)!} onOpenLink={onOpenLink} onOpenFile={setPreview}/></div>}
           {ownsBrowser(t) && <><VaultPrompt task={t}/><TaskBrowser task={t} onReveal={onRevealBrowser}/></>}
           {t.userBrowser && !t.mergedInto && !terminal.has(t.status) && <TaskUserBrowser task={t}/>}
           {t.phone && !t.mergedInto && ["needs_input", "queued", "running", "stopping"].includes(t.status) && <TaskPhone task={t} onDone={() => void choose(t, i18n.feed.phoneDone)}/>}
@@ -496,6 +499,7 @@ export function TaskChat({ onDetails, onOpenLink, onOpenFileInBrowser, onExpired
           {t.error && <p className="tiny">{t.error}</p>}
           <div className="task-actions"><button className="ghost tiny" onClick={() => quoteTask(t)} aria-label={i18n.feed.actions.quoteLabel(t.title)}>{i18n.feed.actions.quote}</button>{t.status === "planning_failed" ? <button className="ghost tiny" onClick={() => void act(() => api.retryTaskPlanning(t.id))}>{i18n.feed.actions.retryPlanning}</button> : t.status === "blocked" ? null : <button className="ghost tiny" disabled={t.status === "stopping"} onClick={() => void act(() => api.stopTask(t.id))}>{i18n.feed.actions.stop}</button>}</div>
         </div>;
+    };
     const [reportedTask, setReportedTask] = useState<string | null>(null);
     /** The answer a running task is writing, shown where its reply will be until the reply itself arrives. */
     const draftOf = (t: Task) => !t.mergedInto && ["running", "stopping"].includes(t.status) ? drafts[t.conversationId]?.text || null : null;
@@ -532,11 +536,14 @@ export function TaskChat({ onDetails, onOpenLink, onOpenFileInBrowser, onExpired
         <div className="welcome-starters">{i18n.feed.empty.starters.map(s => <button type="button" key={s.label} onClick={() => sendStarter(s.prompt)}>{s.label}</button>)}</div>
       </div>}
       {/* Same key as the reply it becomes: the finished reply takes its place without coming in again. */}
-      {feed.map(({ task: t, report }) => report && !terminal.has(t.status) ? <article className="msg assistant task-report drafting" key={`${t.id}:report`} data-task-id={t.id} aria-busy="true">
-        <div className="task-report-heading"><span>{t.title}</span>{t.schedule && <span className="schedule-badge">{i18n.feed.report.schedule(t.schedule.rule)}</span>}<span className="muted tiny">{i18n.feed.report.writing}</span></div>
+      {feed.map(({ task: t, report }, i) => {
+        // Right under its own progress card (the card is the last thing in its entry): one block, so the title is not said twice.
+        const follows = report && !terminal.has(t.status) && i > 0 && !feed[i - 1].report && progressAt.get(feed[i - 1].task.id)?.id === t.id;
+        return report && !terminal.has(t.status) ? <article className={`msg assistant task-report drafting${follows ? " follows-progress" : ""}`} key={`${t.id}:report`} data-task-id={t.id} aria-busy="true">
+        <div className="task-report-heading">{!follows && <span className="task-report-title">{t.title}</span>}{t.schedule && <span className="schedule-badge">{i18n.feed.report.schedule(t.schedule.rule)}</span>}<span className="muted tiny">{i18n.feed.report.writing}</span></div>
         <MessagePreview title={t.title}><DraftReply text={draftOf(t)!} onGrow={keepLatest} onOpenLink={onOpenLink} onOpenFile={setPreview}/></MessagePreview>
       </article> : report ? <article className={`msg assistant task-report ${t.status}`} key={`${t.id}:report`} data-task-id={t.id}>
-        <div className="task-report-heading"><span>{t.title}</span>{t.schedule && <span className="schedule-badge">{i18n.feed.report.schedule(t.schedule.rule)}</span>}{t.support && <span className="schedule-badge">{i18n.feed.report.support}</span>}<span className="muted tiny">{labels[t.status]}</span></div>
+        <div className="task-report-heading"><span className="task-report-title">{t.title}</span>{t.schedule && <span className="schedule-badge">{i18n.feed.report.schedule(t.schedule.rule)}</span>}{t.support && <span className="schedule-badge">{i18n.feed.report.support}</span>}<span className="muted tiny">{labels[t.status]}</span></div>
         <MessagePreview title={t.title}><Markdown source={t.result || (t.status === "completed" ? i18n.feed.report.noResult : t.error || labels[t.status] || t.status)} onOpenLink={onOpenLink} onOpenFile={setPreview} choices={{ onChoose: option => void choose(t, option), chosen: choosing[`${t.id}:${t.revision}`] ?? replyTo(t)?.text ?? null }}/>{t.result && <MessageFileCards text={t.result} onOpen={setPreview} onOpenLink={onOpenLink}/>}{t.error && t.result && <p className="error">{t.error}</p>}</MessagePreview>
         {ownsBrowser(t) && <><VaultPrompt task={t}/><TaskBrowser task={t} onReveal={onRevealBrowser}/></>}
         {t.userBrowser && !t.mergedInto && <TaskUserBrowser task={t}/>}
@@ -553,7 +560,8 @@ export function TaskChat({ onDetails, onOpenLink, onOpenFileInBrowser, onExpired
         {t.mergedInto && <div className="task-supplement"><button className="ghost tiny" onClick={() => onDetails(t)}>{(t.status === "merged" ? i18n.feed.supplement.merged : t.status === "merging" || t.status === "steering" ? i18n.feed.supplement.merging : t.status === "interrupted" ? i18n.feed.supplement.cancelled : i18n.feed.supplement.check)(t.mergedTitle ?? "")}</button>{t.waitReason && <p className="tiny">{t.waitReason.message}</p>}{t.error && <p className="tiny error">{t.error}</p>}</div>}
         {debug && <div className="task-actions debug-actions"><button className="ghost tiny" onClick={() => setDispatchLogFor(t.id)} aria-label={i18n.feed.actions.dispatchLogLabel(t.title)}>{i18n.feed.actions.dispatchLog}</button></div>}
         {progressAt.get(t.id) && renderProgress(progressAt.get(t.id)!)}
-      </div>)}
+      </div>;
+      })}
       {outbox.filter(o => !tasks.some(t => t.clientMessageId === o.id)).map(o => <div className="task-entry outgoing" key={o.id} data-outgoing={o.state}>
         <article className="msg user"><MessagePreview title={i18n.feed.userMessage} user>
           {o.reference && <small className="muted">{i18n.feed.quoted(o.reference.title)}</small>}
