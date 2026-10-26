@@ -2489,6 +2489,9 @@ back pixel for pixel in front of a changed background.
     photo's orientation).
 - \`--subject any\` keeps a product, a pet or an object instead of people.
 
+Save every result as a \`.jpg\` (retouch writes quality 95 with full color detail), also after any step you do yourself (a composite,
+an object removed with an AI-filled background): never deliver a full-size photo as PNG. It is 20+ MB, slow to send and to open on a phone.
+
 Several photos: one retouch per photo in a shell loop, same options. Keep the options you used (the output's \`params\`) so a follow-up changes
 only what the user asked.
 

@@ -394,7 +394,7 @@ owner 容器休眠期间新成员的端口隔离规则先记下，容器下次�
 
 | 内容 | 写法 | 行为 |
 | --- | --- | --- |
-| 图片、音视频 | `![说明](工作区绝对路径)` | 按位置嵌入正文；图片经 `/api/documents/image` 取回并校验类型，点开看大图 |
+| 图片、音视频 | `![说明](工作区绝对路径)` | 按位置嵌入正文；图片经 `/api/documents/image` 取回并校验类型，点开看大图；超过 12 MB 的位图（如存成 PNG 的整张相机照片）由沙箱用 Pillow 转成摆正、长边 2560 的 JPEG 显示，下载仍是原图，超过 100 MB 或 SVG 才拒绝 |
 | 网上图片 | `![说明](https://…)` | 由该账号沙箱取回（`/api/documents/web-image`，仅 https、6 MB 内、仅位图，缓存一天）；浏览器不直连图片站 |
 | 图文卡片 | ```` ```cards ```` JSON 数组（```` ```products ```` 同义） | 最多 8 张（`title`、`image`、`subtitle`、`tags`、`text`、`points`、`note`、`url`、`action`、`badge`；商品另有 `price`、`was`、`rating`）；手机一行一张、桌面一行两张 |
 | 地图卡片 | ```` ```map ```` JSON | `name`、`address`、`lat`/`lng`（高德 / 腾讯坐标加 `"coord": "gcj02"`）；无坐标时由控制面定位（配置 Google key 时用 Google Geocoding，否则 Nominatim） |

@@ -247,6 +247,8 @@ describe("sandbox workspace seed", () => {
     expect(PHOTO_SKILL_MD).toContain("Never use another photo, or another photo's result, as a reference");
     expect(PHOTO_SKILL_MD).toContain("Never copy or resend earlier results");
     expect(PHOTO_SKILL_MD).toContain("Deliver only when `ok` is true");
+    // A full-size photo delivered as PNG (24.7 MB) could not be shown in the conversation.
+    expect(PHOTO_SKILL_MD).toContain("never deliver a full-size photo as PNG");
     // Pinned libraries that still install on the sandbox's Python 3.10, OpenCV 4 for the face detector, its model by hash.
     expect(PHOTO_CLI_PY).toMatch(/REQUIREMENTS = \["rembg==2\.0\.69", "onnxruntime==1\.23\.2", "opencv-python-headless==4\.[\d.]+"\]/);
     expect(PHOTO_CLI_PY).toMatch(/FACE_MODEL_SHA256 = "[0-9a-f]{64}"/);

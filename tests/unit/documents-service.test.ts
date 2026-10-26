@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { execFileSync, spawnSync } from "node:child_process";
 import { DocumentError, DocumentService } from "../../src/control/documents/service.js";
 import { loadConfig, type Config } from "../../src/control/config.js";
 import { Logger } from "../../src/common/logger.js";
@@ -442,6 +443,48 @@ describe("DocumentService image", () => {
     } finally {
       fetchSpy.mockRestore();
     }
+  });
+
+  it("shows a picture too large to send inline (a full-size photo saved as PNG) from a smaller upright JPEG the sandbox makes", async () => {
+    // The real file and the real preview script where Pillow is installed (the sandbox always has it).
+    const pillow = spawnSync("python3", ["-I", "-c", "import PIL"]).status === 0;
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pa-image-preview-"));
+    const photo = path.join(dir, "修去红柱.png");
+    if (pillow) execFileSync("python3", ["-I", "-c", "from PIL import Image; Image.new('RGB', (4284, 5712), (200, 120, 60)).save(__import__('sys').argv[1])", photo]);
+    const JPEG = Buffer.from("ffd8ffe000104a46494600010100000100010000ffd9", "hex");
+    const scripts: string[][] = [];
+    const run = (argv: string[]) => {
+      if (argv[0] !== "python3" || !argv[2]?.includes("thumbnail")) return undefined;
+      scripts.push(argv);
+      if (!pillow) return { code: 0, stdout: JPEG.toString("base64"), stderr: "" };
+      const r = spawnSync("python3", ["-I", "-c", argv[2]!, photo], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
+      return { code: r.status ?? 1, stdout: r.stdout, stderr: r.stderr };
+    };
+    const handler = baseHandler({ realPath: `${ROOT}/tasks/t1/修去红柱.png`, size: "24772419" });
+    const { svc } = service((argv) => run(argv) ?? handler(argv));
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async () => { throw new Error("the original is never read"); });
+    try {
+      const shown = await svc.image(`${ROOT}/tasks/t1/修去红柱.png`, undefined);
+      if ("notModified" in shown) throw new Error("expected bytes");
+      expect(shown.contentType).toBe("image/jpeg");
+      expect(scripts[0]!.at(-1)).toBe(`${ROOT}/tasks/t1/修去红柱.png`);
+      expect(fetchSpy).not.toHaveBeenCalled();
+      if (pillow) {
+        const size = execFileSync("python3", ["-I", "-c", "import io,sys; from PIL import Image; i=Image.open(io.BytesIO(sys.stdin.buffer.read())); print(i.format, *i.size)"], { input: shown.bytes, encoding: "utf8" }).trim();
+        expect(size).toBe("JPEG 1920 2560");
+      }
+      // An unchanged picture is answered by its version without making the copy again.
+      expect(await svc.image(`${ROOT}/tasks/t1/修去红柱.png`, shown.etag)).toEqual({ notModified: true, etag: shown.etag });
+      expect(scripts).toHaveLength(1);
+    } finally {
+      fetchSpy.mockRestore();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+    // Past what the sandbox may read at all, or when no copy can be made, it is still refused as too large.
+    const huge = service(baseHandler({ realPath: `${ROOT}/a.png`, size: String(200 * 1024 * 1024) }));
+    await expect(huge.svc.image(`${ROOT}/a.png`)).rejects.toMatchObject({ code: "too_large" });
+    const broken = service((argv) => argv[0] === "python3" && argv[2]?.includes("thumbnail") ? { code: 2, stdout: "", stderr: "UnidentifiedImageError" } : baseHandler({ realPath: `${ROOT}/b.png`, size: String(20 * 1024 * 1024) })(argv));
+    await expect(broken.svc.image(`${ROOT}/b.png`)).rejects.toMatchObject({ code: "too_large" });
   });
 
   it("refuses a non-image kind and a file that is not really an image", async () => {

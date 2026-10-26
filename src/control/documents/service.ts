@@ -27,6 +27,25 @@ const MAX_RENDER_PAGES = 50;
 /** A single raster page above this is refused before it enters the cache. */
 /** An image served inline is bounded too, so a huge "image" cannot be streamed. */
 const MAX_IMAGE_BYTES = 12 * 1024 * 1024;
+/**
+ * A picture above MAX_IMAGE_BYTES (a full-size photo saved as PNG is 20+ MB) is shown from a smaller copy the
+ * sandbox makes with Pillow: upright, at most PREVIEW_SIDE pixels long, JPEG. The download still gives the original.
+ */
+const PREVIEW_SIDE = 2560;
+const PREVIEW_SCRIPT = `import base64, io, sys
+from PIL import Image, ImageOps
+try:
+    img = Image.open(sys.argv[1])
+    img.draft("RGB", (${PREVIEW_SIDE}, ${PREVIEW_SIDE}))
+    img = ImageOps.exif_transpose(img).convert("RGB")
+    img.thumbnail((${PREVIEW_SIDE}, ${PREVIEW_SIDE}))
+    out = io.BytesIO()
+    img.save(out, "JPEG", quality=85)
+except Exception as e:
+    sys.stderr.write(type(e).__name__)
+    sys.exit(2)
+sys.stdout.write(base64.b64encode(out.getvalue()).decode())
+`;
 /** A web picture in a message (a product photo, say): fetched by the sandbox, bounded, cached. */
 const MAX_WEB_IMAGE_BYTES = 6 * 1024 * 1024;
 const WEB_IMAGE_CACHE_BYTES = 64 * 1024 * 1024;
@@ -1015,13 +1034,22 @@ print("venv" if venv_python else "novenv")
     if (!stat.exists) throw new DocumentError("not_found", t().documents.notFound, 404);
     if (!stat.isFile) throw new DocumentError("not_a_file", t().documents.notAFile, 400);
     if (stat.size === 0) throw new DocumentError("empty_file", t().documents.emptyFile, 422);
-    if (stat.size > MAX_IMAGE_BYTES) {
+    const large = stat.size > MAX_IMAGE_BYTES;
+    if (large && (stat.size > MAX_SOURCE_BYTES || extensionOf(validatedPath) === "svg")) {
       throw new DocumentError("too_large", t().documents.imageTooLarge(formatBytes(MAX_IMAGE_BYTES)), 413);
     }
     // The version a console keeps a copy under: the same file, size and mtime answer
     // "unchanged" without the bytes ever leaving the sandbox.
-    const etag = `"${createHash("sha256").update(`${stat.realPath}\0${stat.size}\0${stat.mtimeToken}`).digest("hex").slice(0, 32)}"`;
+    const etag = `"${createHash("sha256").update(`${stat.realPath}\0${stat.size}\0${stat.mtimeToken}${large ? "\0preview" : ""}`).digest("hex").slice(0, 32)}"`;
     if (known && known === etag) return { notModified: true, etag };
+    if (large) {
+      const preview = await this.#container.execInSandbox(["python3", "-c", PREVIEW_SCRIPT, stat.realPath], { timeoutMs: 60_000 });
+      const bytes = preview.code === 0 ? Buffer.from(preview.stdout.trim(), "base64") : Buffer.alloc(0);
+      if (sniffImage(bytes) !== "image/jpeg") {
+        throw new DocumentError("too_large", t().documents.imageTooLarge(formatBytes(MAX_IMAGE_BYTES)), 413);
+      }
+      return { bytes, contentType: "image/jpeg", etag };
+    }
     const bytes = await this.#fetchSandboxFile(stat.realPath);
     // An .svg must really be an SVG; a raster extension must hold raster bytes.
     const contentType = extensionOf(validatedPath) === "svg" ? (looksLikeSvg(bytes.toString("utf8")) ? "image/svg+xml" : null) : sniffImage(bytes);
