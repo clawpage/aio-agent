@@ -27,6 +27,14 @@ const OAUTH_BETA='oauth-2025-04-20';
 const CODEX_HEADERS=/^(accept|user-agent|originator|version|session-id|thread-id|x-client-request-id|x-codex-[a-z0-9-]+|x-openai-internal-codex-[a-z0-9-]+)$/;
 /** Read limit for one request; images from earlier turns are dropped before it is forwarded. */
 const MAX_REQUEST_BYTES=128*1024*1024;
+/**
+ * ChatGPT now and then answers 429 for a minute; the member's Codex retried within two seconds and failed the
+ * task. A brief limit is waited out here instead, before anything has gone back (so asking again is safe):
+ * at most RATE_LIMIT_WAIT_MS in all, never a single pause above RATE_LIMIT_MAX_PAUSE_MS, never a usage cap.
+ */
+const RATE_LIMIT_WAIT_MS=60_000;
+const RATE_LIMIT_MAX_PAUSE_MS=30_000;
+const RATE_LIMIT_TRIES=8;
 const IMAGE_DROPPED={type:'input_text',text:'[An image a tool returned in an earlier turn was removed to keep the request small; view it again if it is still needed.]'};
 
 /**
@@ -35,6 +43,41 @@ const IMAGE_DROPPED={type:'input_text',text:'[An image a tool returned in an ear
  * passed the size limit and the thread could not run at all. Tool images before the latest user
  * message are replaced by a note; the current turn keeps its own, and user uploads are kept.
  */
+/** How long to wait before asking again after a 429 answer, or null to hand that answer on now. */
+export function rateLimitWait(headers:Headers,body:string,attempt:number,waited:number,now=Date.now()):number|null{
+  try{
+    // A usage cap resets in hours: the executor shows it, nothing is gained by waiting here.
+    const e=(JSON.parse(body) as {error?:{type?:unknown;code?:unknown}}).error;
+    if([e?.type,e?.code].some(v=>typeof v==='string'&&/usage_limit|quota|not_included/.test(v)))return null;
+  }catch{/* not JSON */}
+  const ms=headers.get('retry-after-ms'),after=headers.get('retry-after');
+  let wait=ms!==null&&ms!==''&&Number.isFinite(Number(ms))?Number(ms):after!==null&&after!==''?(Number.isFinite(Number(after))?Number(after)*1000:Date.parse(after)-now):NaN;
+  if(!Number.isFinite(wait))wait=Math.min(RATE_LIMIT_MAX_PAUSE_MS,1000*2**attempt);
+  wait=Math.max(0,wait);
+  return wait>RATE_LIMIT_MAX_PAUSE_MS||waited+wait>RATE_LIMIT_WAIT_MS?null:wait;
+}
+
+function pause(ms:number,signal:AbortSignal):Promise<void>{
+  return new Promise((resolve,reject)=>{
+    if(signal.aborted){reject(new Error('aborted'));return;}
+    const timer=setTimeout(resolve,ms);
+    signal.addEventListener('abort',()=>{clearTimeout(timer);reject(new Error('aborted'));},{once:true});
+  });
+}
+
+/** Pass an upstream answer on: a stream as it comes; an error read first so the log says why (it never holds a token). */
+async function relay(upstream:Response,res:http.ServerResponse,log:Logger,userId:string):Promise<void>{
+  const headers:Record<string,string>={'content-type':upstream.headers.get('content-type')??'application/json','cache-control':'no-store'};
+  const retry=upstream.headers.get('retry-after');if(retry)headers['retry-after']=retry;
+  if(!upstream.ok){
+    const text=await upstream.text();
+    log.warn('member model upstream error',{userId,status:upstream.status,retryAfter:retry,error:text.slice(0,300)});
+    res.writeHead(upstream.status,headers).end(text);return;
+  }
+  res.writeHead(upstream.status,headers);
+  if(upstream.body)Readable.fromWeb(upstream.body as never).on('error',()=>res.destroy()).pipe(res);else res.end();
+}
+
 export function dropEarlierToolImages(input:unknown):void{
   if(!Array.isArray(input))return;
   const items=input as Array<{type?:unknown;role?:unknown;output?:unknown}|null>;
@@ -128,8 +171,8 @@ export class MemberModelGateway {
             ...(betas.length?{'anthropic-beta':betas.join(',')}:{}),...(req.headers['user-agent']?{'user-agent':String(req.headers['user-agent'])}:{}),
             ...(oauth?{authorization:`Bearer ${state.secret}`}:{'x-api-key':state.secret})};
           const upstream=await fetch(this.cfg.claudeCode.apiBaseUrl.replace(/\/$/,'')+messages[2]+(messages[3]??''),{method:'POST',headers,body:JSON.stringify(input),signal:abort.signal});
-          res.writeHead(upstream.status,{'content-type':upstream.headers.get('content-type')??'application/json','cache-control':'no-store'});
-          if(upstream.body)Readable.fromWeb(upstream.body as never).on('error',()=>res.destroy()).pipe(res);else res.end();
+          // Claude Code's own client waits out a 429 by its Retry-After, which therefore goes back with it.
+          await relay(upstream,res,this.log,userId!);
           return;
         }
         if(input.previous_response_id||input.conversation||input.background){res.writeHead(400).end();return;}
@@ -146,11 +189,19 @@ export class MemberModelGateway {
           dropEarlierToolImages(input.input);
           const headers:Record<string,string>={'content-type':'application/json',authorization:`Bearer ${tokens.accessToken}`,'chatgpt-account-id':tokens.chatgptAccountId};
           for(const [name,value] of Object.entries(req.headers))if(typeof value==='string'&&CODEX_HEADERS.test(name))headers[name]=value;
-          const upstream=await fetch(this.cfg.hostCodex.chatgptUrl.replace(/\/$/,'')+'/responses',{method:'POST',headers,body:JSON.stringify(input),signal:abort.signal});
+          const target=this.cfg.hostCodex.chatgptUrl.replace(/\/$/,'')+'/responses',payload=JSON.stringify(input);
+          const ask=()=>fetch(target,{method:'POST',headers,body:payload,signal:abort.signal});
+          let upstream=await ask();
+          for(let attempt=0,waited=0;upstream.status===429&&attempt<RATE_LIMIT_TRIES;attempt++){
+            const text=await upstream.text();
+            const wait=rateLimitWait(upstream.headers,text,attempt,waited);
+            if(wait===null){upstream=new Response(text,{status:429,headers:upstream.headers});break;}
+            this.log.info('member model rate limited, asking again',{userId,attempt:attempt+1,waitMs:wait});
+            await pause(wait,abort.signal);waited+=wait;upstream=await ask();
+          }
           // A rejected token is fetched afresh on the next request.
           if(upstream.status===401)this.hostTokens.invalidate();
-          res.writeHead(upstream.status,{'content-type':upstream.headers.get('content-type')??'application/json','cache-control':'no-store'});
-          if(upstream.body)Readable.fromWeb(upstream.body as never).on('error',()=>res.destroy()).pipe(res);else res.end();
+          await relay(upstream,res,this.log,userId!);
           return;
         }
         res.writeHead(403).end();

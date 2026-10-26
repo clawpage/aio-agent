@@ -20,6 +20,7 @@ export const agent = {
         outcomeUnknown: (cause: string) => `${cause}，本次执行结果未知`,
         outcomeUnknownNotice: (cause: string) => `${cause}，本次执行结果未知，可能已产生操作。请先核对沙箱内文件/进程状态，系统不会自动重放该轮次。`,
         checkSandbox: (message: string) => `${message}。请先核对沙箱内文件与进程状态，系统不会自动重放该轮次。`,
+        modelBusy: "模型服务这会儿太忙（限流），等待重试后仍未成功；请过一两分钟再发一次",
         failed: (reason: string) => `执行失败：${reason}`,
         codexEnded: (status: string) => `Codex 轮次结束状态：${status}`,
         stopTimedOut: (minutes: number) => `停止请求发出后 ${minutes} 分钟仍未结束`,

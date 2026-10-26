@@ -657,4 +657,19 @@ describe("AgentManager with the Claude Code harness", () => {
     const row = db.prepare("SELECT status, error FROM turns WHERE id = ?").get(turn.id) as { status: string; error: string };
     expect(row).toMatchObject({ status: "failed", error: "Run failed: Not logged in" });
   });
+
+  it("says in words what a run still rate limited after every retry means", async () => {
+    agent.saveAgentSettings({ model: "claude-opus-5-5", effort: null }, await agent.listModels());
+    const conv = agent.createConversation({ title: "busy" });
+    const { turn } = agent.submitTurn({ conversationId: conv.id, text: "旧的肉泥放到第二顿", clientMessageId: "b1" });
+    await tick();
+    const started = codex.startedTurns[0]!;
+    codex.emitNotification("turn/completed", { threadId: started.threadId, turn: { id: started.turnId, status: "failed",
+      error: { message: "exceeded retry limit, last status: 429 Too Many Requests", codexErrorInfo: { responseTooManyFailedAttempts: { httpStatusCode: 429 } } } } });
+    await tick();
+    const row = db.prepare("SELECT status, error FROM turns WHERE id = ?").get(turn.id) as { status: string; error: string };
+    expect(row.status).toBe("failed");
+    expect(row.error).toContain("rate limited");
+    expect(row.error).not.toContain("exceeded retry limit");
+  });
 });

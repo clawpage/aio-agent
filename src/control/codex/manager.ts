@@ -1690,10 +1690,13 @@ export class AgentManager {
     const p = (params ?? {}) as Record<string, unknown>;
 
     if (method === "turn/completed") {
-      const turn = p.turn as { id?: string; status?: string; error?: { message?: unknown } | null } | undefined;
+      const turn = p.turn as { id?: string; status?: string; error?: { message?: unknown; codexErrorInfo?: { responseTooManyFailedAttempts?: { httpStatusCode?: unknown } } } | null } | undefined;
       if (turn?.id) {
         this.#flushDeltas();
-        if (typeof turn.error?.message === "string" && turn.error.message) this.#turnErrors.set(turn.id, turn.error.message);
+        // Still rate limited after Codex's retries and the gateway's wait: said in words the person can act on.
+        const busy = turn.error?.codexErrorInfo?.responseTooManyFailedAttempts?.httpStatusCode === 429;
+        if (busy) this.#turnErrors.set(turn.id, t().agent.turn.modelBusy);
+        else if (typeof turn.error?.message === "string" && turn.error.message) this.#turnErrors.set(turn.id, turn.error.message);
         this.#completedTurns.set(turn.id, { status: turn.status ?? "completed" });
         const waiter = this.#completionWaiters.get(turn.id);
         if (waiter) {

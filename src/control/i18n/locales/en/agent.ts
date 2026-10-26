@@ -20,6 +20,7 @@ export const agent: typeof zh = {
         outcomeUnknown: (cause: string) => `${cause}; the outcome of this run is unknown`,
         outcomeUnknownNotice: (cause: string) => `${cause}; the outcome of this run is unknown and it may already have acted. Check the files and processes in the sandbox first; the system never replays the turn on its own.`,
         checkSandbox: (message: string) => `${message}. Check the files and processes in the sandbox first; the system never replays the turn on its own.`,
+        modelBusy: "the model service is busy right now (rate limited) and still was after waiting and retrying; please send it again in a minute or two",
         failed: (reason: string) => `Run failed: ${reason}`,
         codexEnded: (status: string) => `The Codex turn ended with status: ${status}`,
         stopTimedOut: (minutes: number) => `Still not finished ${minutes} ${minutes === 1 ? "minute" : "minutes"} after the stop request`,

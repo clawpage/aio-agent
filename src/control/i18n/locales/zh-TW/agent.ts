@@ -20,6 +20,7 @@ export const agent: typeof zh = {
         outcomeUnknown: (cause: string) => `${cause}，本次執行結果未知`,
         outcomeUnknownNotice: (cause: string) => `${cause}，本次執行結果未知，可能已產生操作。請先核對沙箱內的檔案／程序狀態，系統不會自動重放這個輪次。`,
         checkSandbox: (message: string) => `${message}。請先核對沙箱內的檔案與程序狀態，系統不會自動重放這個輪次。`,
+        modelBusy: "模型服務這會兒太忙（限流），等待重試後仍未成功；請過一兩分鐘再傳一次",
         failed: (reason: string) => `執行失敗：${reason}`,
         codexEnded: (status: string) => `Codex 輪次結束狀態：${status}`,
         stopTimedOut: (minutes: number) => `停止請求送出後 ${minutes} 分鐘仍未結束`,

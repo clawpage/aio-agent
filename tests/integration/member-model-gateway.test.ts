@@ -3,7 +3,7 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import {startHarness} from '../helpers/harness.js';
-import {MemberModelGateway} from '../../src/control/memberModelGateway.js';
+import {MemberModelGateway,rateLimitWait} from '../../src/control/memberModelGateway.js';
 import {memberConfig} from '../../src/control/tenants.js';
 it('refuses forged, cross-member and response-lookup requests before anything is forwarded',async()=>{
  const h=await startHarness();
@@ -116,4 +116,46 @@ it('sends only a GPT-assigned member to ChatGPT on its model, adding the control
   loggedIn=false;count=seen.length;
   expect((await post('user_alpha',token(a),{input:'hi'})).status).toBe(502);expect(seen).toHaveLength(count);
  }finally{gateway.close();upstream.closeAllConnections();await new Promise<void>(resolve=>upstream.close(()=>resolve()));await h.shutdown();}
+});
+
+it('waits out a brief ChatGPT rate limit before answering, but hands a usage cap or a long wait straight back with its Retry-After',async()=>{
+ const h=await startHarness();let calls=0;let plan:Array<{status:number,headers?:Record<string,string>,body?:string}>=[];
+ const upstream=http.createServer(async(req,res)=>{for await(const _ of req){/* drain */}calls++;
+  const next=plan.shift()??{status:200};
+  if(next.status===200){res.setHeader('content-type','text/event-stream');res.end('data: {"type":"response.completed"}\n\n');return;}
+  res.writeHead(next.status,{'content-type':'application/json',...next.headers}).end(next.body??'{"error":{"message":"Too Many Requests"}}');});
+ await new Promise<void>(resolve=>upstream.listen(0,'127.0.0.1',resolve));
+ const hostTokens={getTokens:async()=>({accessToken:'owner-chatgpt-access',chatgptAccountId:'acct_owner',planType:'pro',expiresAt:Date.now()+3600_000}),invalidate:()=>{}};
+ const cfg={...h.ctx.cfg,memberModelPort:0,hostCodex:{...h.ctx.cfg.hostCodex,chatgptUrl:`http://127.0.0.1:${(upstream.address() as any).port}/backend-api/codex/`}};
+ const gateway=new MemberModelGateway(cfg,h.ctx.log,undefined,undefined,undefined,undefined,hostTokens);await gateway.start();
+ try{
+  const a=memberConfig(cfg,'user_alpha',18082,'gpt-6.1-sol');gateway.provision(a);
+  const token=fs.readFileSync(path.join(a.dataDir,'model-token'),'utf8');
+  const post=()=>fetch(`http://127.0.0.1:${gateway.port}/u/user_alpha/v1/responses`,{method:'POST',headers:{authorization:`Bearer ${token}`,'content-type':'application/json'},body:JSON.stringify({input:'旧的肉泥放到第二顿',stream:true})});
+  // Two 429s a moment apart, then an answer: the member's executor only ever sees the answer.
+  plan=[{status:429,headers:{'retry-after':'0'}},{status:429,headers:{'retry-after-ms':'10'}}];calls=0;
+  const ok=await post();expect(ok.status).toBe(200);expect(await ok.text()).toContain('response.completed');expect(calls).toBe(3);
+  // A usage cap is not waited out: it goes back at once, as it came.
+  plan=[{status:429,headers:{'retry-after':'7200'},body:'{"error":{"type":"usage_limit_reached","resets_in_seconds":7200}}'}];calls=0;
+  const cap=await post();expect(cap.status).toBe(429);expect(cap.headers.get('retry-after')).toBe('7200');expect(await cap.text()).toContain('usage_limit_reached');expect(calls).toBe(1);
+  // Nor is a pause longer than the gateway waits: the executor gets the Retry-After to go by.
+  plan=[{status:429,headers:{'retry-after':'120'}}];calls=0;
+  const later=await post();expect(later.status).toBe(429);expect(later.headers.get('retry-after')).toBe('120');expect(calls).toBe(1);
+  // Other errors pass through unchanged (and are logged with their reason).
+  plan=[{status:500,body:'{"error":{"message":"upstream broke"}}'}];calls=0;
+  const broke=await post();expect(broke.status).toBe(500);expect(await broke.text()).toContain('upstream broke');expect(calls).toBe(1);
+ }finally{gateway.close();upstream.closeAllConnections();await new Promise<void>(resolve=>upstream.close(()=>resolve()));await h.shutdown();}
+});
+
+it('decides how long to wait after a 429 from its Retry-After, backing off without one, within a minute in all',()=>{
+ const H=(h:Record<string,string>={})=>new Headers(h);const now=Date.parse('2026-10-26T07:07:05Z');
+ expect(rateLimitWait(H({'retry-after':'3'}),'',0,0,now)).toBe(3000);
+ expect(rateLimitWait(H({'retry-after-ms':'250','retry-after':'3'}),'',0,0,now)).toBe(250);
+ expect(rateLimitWait(H({'retry-after':new Date(now+5000).toUTCString()}),'',0,0,now)).toBe(5000);
+ expect([0,1,2,3,4].map(n=>rateLimitWait(H(),'',n,0,now))).toEqual([1000,2000,4000,8000,16000]);
+ expect(rateLimitWait(H(),'',5,0,now)).toBe(30000);
+ expect(rateLimitWait(H({'retry-after':'45'}),'',0,0,now)).toBeNull();
+ expect(rateLimitWait(H({'retry-after':'20'}),'',0,45000,now)).toBeNull();
+ expect(rateLimitWait(H(),'{"error":{"code":"insufficient_quota"}}',0,0,now)).toBeNull();
+ expect(rateLimitWait(H({'retry-after':'1'}),'{"error":{"type":"usage_limit_reached"}}',0,0,now)).toBeNull();
 });
