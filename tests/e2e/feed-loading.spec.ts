@@ -140,3 +140,53 @@ test("coming back to the main feed after reading a little way up keeps the same 
   expect(Math.abs(await feed.evaluate((n) => n.scrollTop) - before)).toBeLessThan(5);
   expect(olderAsked).toEqual([]);
 });
+
+test("an older task's late reply landing above what is being read does not move it", async ({ page }) => {
+  // The first page's oldest task has a short message and a long reply; the person reads that reply.
+  const recent = Array.from({ length: 8 }, (_, k) => task(11 + k));
+  // An older task that finished late: its reply sorts between task 11's message and task 11's reply.
+  const lateFinisher = { ...task(5, `晚完成的旧任务。\n\n${"它的回复也很长。".repeat(60)}`), completedAt: recent[0]!.createdAt + 100 };
+  const { olderAsked } = await setup(page, {
+    first: () => ({ version: "v1", tasks: recent, nextBefore: recent[0]!.createdAt }),
+    older: () => ({ tasks: [...Array.from({ length: 4 }, (_, k) => task(1 + k)), lateFinisher], nextBefore: null }),
+  });
+  const feed = page.locator(".task-feed");
+  const reading = page.locator('.task-report[data-task-id="task-11"]');
+  await expect(reading).toBeAttached({ timeout: 60_000 });
+  await page.waitForTimeout(500);
+  // Reading task 11's reply, its top just above the top of the feed (within the distance that loads more).
+  const at = await feed.evaluate((n) => {
+    const r = n.querySelector('.task-report[data-task-id="task-11"]')!;
+    n.scrollTop = r.getBoundingClientRect().top - n.getBoundingClientRect().top + n.scrollTop + 40;
+    return r.getBoundingClientRect().top - n.getBoundingClientRect().top;
+  });
+  await expect.poll(() => olderAsked.length).toBe(1);
+  await expect(page.locator('.task-report[data-task-id="task-5"]')).toBeAttached();
+  await page.waitForTimeout(300);
+  const now = await reading.evaluate((el) => el.getBoundingClientRect().top - el.closest(".task-feed")!.getBoundingClientRect().top);
+  expect(Math.abs(now - at)).toBeLessThan(3);
+});
+
+test("a message above the one being read growing (a picture arriving) does not push the reading down", async ({ page }) => {
+  const recent = Array.from({ length: 8 }, (_, k) => task(11 + k));
+  await setup(page, { first: () => ({ version: "v1", tasks: recent, nextBefore: null }) });
+  const feed = page.locator(".task-feed");
+  const reading = page.locator('.task-report[data-task-id="task-15"]');
+  await expect(reading).toBeAttached({ timeout: 60_000 });
+  await page.waitForTimeout(500);
+  const at = await feed.evaluate((n) => {
+    const r = n.querySelector('.task-report[data-task-id="task-15"]')!;
+    n.scrollTop += r.getBoundingClientRect().top - n.getBoundingClientRect().top - 60;
+    return r.getBoundingClientRect().top - n.getBoundingClientRect().top;
+  });
+  // Something well above the screen gets taller, as a picture does when it loads.
+  await feed.evaluate((n) => {
+    const above = n.querySelector('.task-entry[data-task-id="task-12"] .msg.user')!;
+    const pic = document.createElement("div");
+    pic.style.height = "420px";
+    above.appendChild(pic);
+  });
+  await page.waitForTimeout(300);
+  const now = await reading.evaluate((el) => el.getBoundingClientRect().top - el.closest(".task-feed")!.getBoundingClientRect().top);
+  expect(Math.abs(now - at)).toBeLessThan(3);
+});

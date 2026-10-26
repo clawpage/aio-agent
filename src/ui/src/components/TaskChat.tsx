@@ -188,14 +188,26 @@ export function TaskChat({ onDetails, onOpenLink, onOpenFileInBrowser, onExpired
     const loadingOlder = useRef(false);
     const [olderState, setOlderState] = useState<"idle" | "loading" | "failed">("idle");
     const anchor = useRef<{ el: Element; top: number } | null>(null);
+    /**
+     * What is being read: the topmost feed item still on screen, and where it is. Older tasks do not only go in
+     * at the very top (an old task that finished late has its reply sorted among newer ones), so it is this item,
+     * not the first one, that must stay where it was.
+     */
+    const readingAnchor = (n: HTMLDivElement) => {
+        const top = n.getBoundingClientRect().top;
+        for (const el of n.querySelectorAll("[data-task-id]")) {
+            const box = el.getBoundingClientRect();
+            if (box.bottom > top + 1) return { el, top: box.top };
+        }
+        return null;
+    };
     const loadOlder = useCallback(async () => {
         if (!nextBefore || loadingOlder.current) return;
         loadingOlder.current = true;
         setOlderState("loading");
         try {
             const d = await api.main(nextBefore);
-            const first = scroll.current?.querySelector("[data-task-id]");
-            anchor.current = first ? { el: first, top: first.getBoundingClientRect().top } : null;
+            anchor.current = scroll.current ? readingAnchor(scroll.current) : null;
             stick.current = false;
             merge(d.tasks);
             setNextBefore(d.nextBefore);
@@ -213,7 +225,17 @@ export function TaskChat({ onDetails, onOpenLink, onOpenFileInBrowser, onExpired
         const n = scroll.current, a = anchor.current;
         if (!n || !a) return;
         anchor.current = null;
-        n.scrollTop += a.el.getBoundingClientRect().top - a.top;
+        if (!a.el.isConnected) return;
+        // Zero where the browser already kept it in place (scroll anchoring); otherwise the whole shift.
+        const shift = a.el.getBoundingClientRect().top - a.top;
+        if (Math.abs(shift) < 1) return;
+        // A touch fling carries on over a scrollTop set from script (WebKit) and would land among the older
+        // tasks: pausing the scroll for a frame ends the fling so the correction holds. Only where the
+        // scrollbar takes no room, so hiding it changes no line widths.
+        const overlay = n.offsetWidth === n.clientWidth;
+        if (overlay) n.style.overflowY = "hidden";
+        n.scrollTop += shift;
+        if (overlay) requestAnimationFrame(() => { n.style.overflowY = ""; });
     }, [tasks]);
     useEffect(() => {
         const n = scroll.current, top = olderTop.current;
