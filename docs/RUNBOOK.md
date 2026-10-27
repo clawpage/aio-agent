@@ -159,6 +159,8 @@ docker exec -u gem personal-agent-sandbox \
 - Mac 上：组件与令牌在 `~/Library/Application Support/ai.clawpage.agent/`；删掉其中 `phone/` 会在下次连接时重装。
 - 中文输入：在 Mac 上用 App 装好的 Node 运行 `PA_PHONE_DIR=<上述目录>/phone <上述目录>/phone/node-*/bin/node <上述目录>/phone/mobile-mcp/phone-bridge.mjs devicekit`，
   把 devicekit 装到手机上。
+- Mac 终端（`aio_mac_shell`）：在那台 Mac 的 App 里「手机」打开「允许 AI 使用这台 Mac 的终端」，需要 Mac 上有 tmux（`brew install tmux`）。
+  旁观或排查：`tmux -L aio-agent ls`、`tmux -L aio-agent attach -t aio-<执行会话>`；会话文件在 `$TMPDIR/aio-mac-shell/`。关掉开关或退出 App 会结束全部会话。
 
 ### 语音键盘（配件说话，Mac 光标处输入）
 

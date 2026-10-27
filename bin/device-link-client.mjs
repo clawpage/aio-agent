@@ -4,7 +4,8 @@
  * and serves what comes down the socket from its own loopback server. Only the
  * bridge's endpoints pass: POST /mcp, GET /status, GET /screenshot, the
  * browser's POST /browser/mcp, GET /browser/status, GET /browser/screenshot and
- * POST /browser/front, and the /screen and /browser/screen WebSockets; anything
+ * POST /browser/front, the terminal's POST /shell/mcp and GET /shell/status, and
+ * the /screen and /browser/screen WebSockets; anything
  * else is answered 404 without reaching it.
  *
  * Frames: JSON text for requests, responses and channel control; binary frames
@@ -12,7 +13,7 @@
  */
 import WebSocket from "ws";
 
-const ROUTES = new Set(["POST /mcp", "GET /status", "GET /screenshot", "POST /browser/mcp", "GET /browser/status", "GET /browser/screenshot", "POST /browser/front"]);
+const ROUTES = new Set(["POST /mcp", "GET /status", "GET /screenshot", "POST /browser/mcp", "GET /browser/status", "GET /browser/screenshot", "POST /browser/front", "POST /shell/mcp", "GET /shell/status"]);
 /** A browser page named by its id, the only query a path may carry. */
 const PAGE_QUERY = /^(?:\?page=[1-9]\d{0,5})?$/;
 /** The routes a path names, or null when it carries anything else. */
@@ -21,7 +22,7 @@ const route = (method, path) => {
   const name = at < 0 ? String(path) : String(path).slice(0, at), query = at < 0 ? "" : String(path).slice(at);
   return PAGE_QUERY.test(query) && ROUTES.has(`${method} ${name}`) ? name : null;
 };
-const PASSED_HEADERS = ["content-type", "accept", "mcp-session-id", "mcp-protocol-version"];
+const PASSED_HEADERS = ["content-type", "accept", "mcp-session-id", "mcp-protocol-version", "x-aio-shell-session"];
 const REPLY_HEADERS = ["content-type", "mcp-session-id"];
 const MAX_FRAME = 32 * 1024 * 1024;
 

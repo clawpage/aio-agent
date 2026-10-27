@@ -58,11 +58,11 @@ if [ -z "$ADB" ]; then
 fi
 
 # The bridge scripts sit beside their node_modules so `ws` resolves; a new app version reinstalls.
-STAMP=$(cat "$RES/package-lock.json" "$RES/phone-bridge.mjs" "$RES/device-link-client.mjs" "$RES/user-browser.mjs" | shasum -a 256 | cut -d' ' -f1)
+STAMP=$(cat "$RES/package-lock.json" "$RES/phone-bridge.mjs" "$RES/device-link-client.mjs" "$RES/user-browser.mjs" "$RES/mac-shell.mjs" | shasum -a 256 | cut -d' ' -f1)
 if [ "$(cat mobile-mcp/.stamp 2>/dev/null || true)" != "$STAMP" ]; then
   echo "step mobile-mcp"
   mkdir -p mobile-mcp
-  cp "$RES/package.json" "$RES/package-lock.json" "$RES/phone-bridge.mjs" "$RES/device-link-client.mjs" "$RES/user-browser.mjs" mobile-mcp/
+  cp "$RES/package.json" "$RES/package-lock.json" "$RES/phone-bridge.mjs" "$RES/device-link-client.mjs" "$RES/user-browser.mjs" "$RES/mac-shell.mjs" mobile-mcp/
   if ! (cd mobile-mcp && PATH="$NODE_BIN:$PATH" npm ci --omit=dev --ignore-scripts --no-audit --no-fund >/dev/null 2>&1); then
     echo "error npm ci failed"; exit 1
   fi

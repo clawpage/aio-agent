@@ -51,6 +51,8 @@ export const phone = {
     link: "连接这台 Mac",
     linking: "连接中…",
     browserHint: "浏览器：AI 会用这台 Mac 上一个专给它的 Chrome（需要装有 Google Chrome）。它用独立的配置在后台运行：不弹窗、没有窗口，不占你的屏幕、鼠标和键盘，也碰不到你自己的 Chrome。任务卡片里能看实时画面、随时接管；网站在那里登录一次就会一直保留。Mac 离线或没装 Chrome 时，自动改用云端的沙盒浏览器。",
+    shellToggle: "允许 AI 使用这台 Mac 的终端",
+    shellHint: "终端：打开后，AI 能在这台 Mac 上读写和修改你账号下的任何文件、运行命令（bash，跑在专用的 tmux 里，每个任务一个会话；可用 tmux -L aio-agent attach 旁观）。它和你本人一样有这台 Mac 的权限，只在你需要它动这台 Mac 时打开。默认关闭；只能在这台 Mac 的 App 里开关。",
     usbHint: "在手机的开发者选项里打开 USB 调试，用数据线接到这台 Mac，手机上弹出提示时点「允许」。一站 App 开着时 AI 才能用到这部手机。",
     thisMac: "（这台 Mac）",
     unnamed: "未命名的 Mac",

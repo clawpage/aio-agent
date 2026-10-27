@@ -746,6 +746,29 @@ Android 手机用 USB 接在装了 Mac App 的 Mac 上，由 App 运行的 `bin/
     双指捏合缩放并平移（1～5 倍，只缩放本地画面）、双击放大到 2.5 倍或还原、长按 0.45 秒后拖动＝按住左键拖拽、双指轻点＝右键。
     手机上默认 1.3 倍屏宽、居中。电脑上（Mac App）鼠标就是鼠标：按下/移动/松开、悬停、滚轮滚页面，触控板捏合缩放画面；点一下画面后键盘直接输入到页面（含输入法与粘贴）。
 
+### Mac 上的终端
+
+同一条 Mac 连接还可以提供那台 Mac 的终端（`aio_mac_shell`），像 pi 一样只有四个工具：`read`、`write`、`edit`、`bash`。
+由同一个 `bin/phone-bridge.mjs` 经 `bin/mac-shell.mjs` 提供（`POST /shell/mcp`、`GET /shell/status`），控制面 `src/control/macShell.ts` 经成员网关 `/mac-shell/<运行时令牌>/mcp` 转发。
+
+- **默认关闭，只能在那台 Mac 上打开**：开关「允许 AI 使用这台 Mac 的终端」只出现在 Mac App 里、这台 Mac 已连接时（工作区「手机」→ Mac 列表上方）。
+  选择存在 App 数据目录的 `device-link.json`（与设备令牌同一个 0600 文件），App 以 `PA_MAC_SHELL=1` 重启桥接才生效；控制面、网页版和别的设备都改不了它。
+  关着时调用返回“终端没打开，请用户在那台 Mac 的 App 里打开，或改在沙箱里做”。旧版 App 不报告这个开关，控制台就不显示它，调用返回“Mac 没有应答（App 可能需要更新），结果未知”。
+- **授权**：与手机、Mac 浏览器相同，只给连过 Mac 的账号，连上第一台 Mac 时获得、移除最后一台后失去；握手和工具列表由网关回答（定义在 `src/control/macShell.ts`），Mac 不在线也不会让线程丢掉它。
+  它和用户本人一样有这台 Mac 的权限：执行规则要求删除或覆盖不是自己创建的文件、改系统或应用设置、装卸软件、sudo、把数据发出 Mac 之前先确认，不主动读密钥类文件。
+- **bash 跑在 tmux 里**：专用的 tmux 服务器（socket `aio-agent`，`-f /dev/null` 不读用户的 tmux.conf），每个任务一个会话 `aio-<执行会话>`（不带任务身份的调用共用 `aio-main`），
+  所以 `cd` 和 `export` 在同一任务的多次调用之间保留。每次调用把命令写进会话目录（`$TMPDIR/aio-mac-shell/<会话>/`，0700）再在会话里 source，
+  输出写文件、退出码写文件；标准输入是 `/dev/null`（等输入的命令会一直等到超时）。返回最后 2000 行或 50 KB，被截掉时写明完整输出的文件路径。
+  超时默认 120 秒、最长 240 秒（设备连接用 fetch 转发，它等应答最多 300 秒）：到时发 Ctrl-C，停不下来就重建会话；命令自己 `exit` 了，下次调用开新 shell。
+  上一次的命令还在跑（例如网关那头断了）时，下一次先 Ctrl-C、不行就重建，并在输出里说明。用户可以 `tmux -L aio-agent attach -t aio-<…>` 旁观（只看到命令和输出的末尾）。
+- **干净的环境**：shell 只继承用户名、HOME、语言、TMPDIR 和 PATH，桥接自己的令牌（`PHONE_BRIDGE_TOKEN`、`PA_DEVICE_LINK_TOKEN`）不进去；
+  没有语言设置时补 `en_US.UTF-8`；PATH 先放 Homebrew（`/opt/homebrew`、`/usr/local`），再跑 `path_helper`；不读用户的 shell 配置，`PAGER`/`GIT_PAGER` 为 `cat`，历史记录写在会话目录里。
+  Mac 上没有 tmux 时 `bash` 返回“请安装 tmux（brew install tmux）”，另外三个工具照常可用（`PA_TMUX` 可指定 tmux 路径）。
+- **文件工具**：路径可以是绝对路径、`~/…`，或相对于这个任务的 shell 当前目录（还没有 shell 时是用户主目录）。`read` 文本每次最多 2000 行或 50 KB（`offset`/`limit` 续读），
+  二进制文件拒绝，png/jpg/gif/webp 以图片返回（大于 1 MB 用 `sips` 缩成 JPEG）；`write` 整体写入并建目录；`edit` 用 `edits[]` 做精确替换，每段 `oldText` 必须唯一且互不重叠，
+  任何一段不匹配就整个不写，保留文件原有的 CRLF 和 BOM。同一文件的写入串行，同一会话的命令串行。
+- **生命周期**：六小时没用过的会话连同目录一起删掉；桥接退出（App 退出、关掉终端开关、移除连接）时整个 tmux 服务器随之结束，在跑的命令也会结束，要长跑的放后台（`nohup … &`）。
+
 ### Clawpages（可分享、可存数据的页面）
 
 沙箱内置 `clawpages` skill（原名 `aio-share`，重新播种时删除旧目录），Codex 与 Claude Code 两个执行器都装：智能体把页面目录

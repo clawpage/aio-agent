@@ -4573,6 +4573,9 @@ button.map-card-switch { flex: 0 0 auto; padding: 4px 10px; }
 .phone-link-panel { height: 100%; overflow-y: auto; box-sizing: border-box; padding: 20px 16px; display: flex; flex-direction: column; gap: 12px; }
 .phone-link-panel > * { width: 100%; max-width: 640px; margin: 0 auto; box-sizing: border-box; }
 .phone-links { display: grid; gap: 12px; }
+.mac-shell-toggle { display: inline-flex; justify-self: start; align-items: center; gap: 8px; }
+/* A checkbox keeps its own size; the global field rule would stretch it across the card. */
+.mac-shell-toggle input { width: auto; margin: 0; }
 
 /* A task's phone in its card (TaskPhone): a portrait picture, and the live phone in the task console. */
 .task-phone-shot { width: auto; max-width: 100%; }

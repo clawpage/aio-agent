@@ -8,6 +8,11 @@
 //! `phone-bridge.mjs`, which dials the control plane with the token
 //! (`device-link-client.mjs`). The bridge runs while the app is open; its state
 //! is reported to the console as `aio-device-link` events.
+//!
+//! The terminal (`mac-shell.mjs`: the agent reads, writes and edits files and
+//! runs commands here) is off until the person turns it on in the console inside
+//! this app; the choice is kept here, beside the token, and the bridge only gets
+//! it as `PA_MAC_SHELL`, so nothing outside this Mac can switch it on.
 use serde::{Deserialize, Serialize};
 use std::io::{BufRead, BufReader, Read};
 use std::path::PathBuf;
@@ -25,6 +30,9 @@ const STORE: &str = "device-link.json";
 struct Stored {
     token: String,
     link_id: String,
+    /// The agent may use this Mac's terminal (off for a link made before the switch existed).
+    #[serde(default)]
+    shell: bool,
 }
 
 #[derive(Clone, Serialize)]
@@ -36,6 +44,8 @@ struct Report {
     name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     detail: Option<String>,
+    /// Whether the terminal is on; the console shows its switch only to an app that reports it.
+    shell: bool,
 }
 
 struct Inner {
@@ -82,6 +92,7 @@ impl PhoneLink {
             #[serde(rename_all = "camelCase")]
             Link { token: String, link_id: String },
             Unlink,
+            Shell { enabled: bool },
         }
         match serde_json::from_str::<Message>(body) {
             Ok(Message::Status) => self.report(),
@@ -90,7 +101,7 @@ impl PhoneLink {
                     return;
                 }
                 self.stop();
-                let stored = Stored { token, link_id };
+                let stored = Stored { token, link_id, shell: false };
                 if let Err(err) = self.save(Some(&stored)) {
                     self.set("error", Some(format!("{err}")));
                     return;
@@ -99,8 +110,26 @@ impl PhoneLink {
                 self.start();
             }
             Ok(Message::Unlink) => self.forget(),
+            Ok(Message::Shell { enabled }) => self.set_shell(enabled),
             Err(_) => {}
         }
+    }
+
+    /// Turn the terminal on or off: kept with the token, and the bridge starts again with it.
+    fn set_shell(&self, enabled: bool) {
+        let Some(mut stored) = self.inner.lock().unwrap().stored.clone() else { return };
+        if stored.shell == enabled {
+            return self.report();
+        }
+        stored.shell = enabled;
+        if let Err(err) = self.save(Some(&stored)) {
+            self.set("error", Some(format!("{err}")));
+            return;
+        }
+        self.stop();
+        self.inner.lock().unwrap().stored = Some(stored);
+        self.start();
+        self.report();
     }
 
     /// Stop the bridge and forget the token (the console removed this Mac, or the server did).
@@ -227,6 +256,7 @@ impl PhoneLink {
             .env("PA_DEVICE_LINK_URL", LINK_URL)
             .env("PA_DEVICE_LINK_TOKEN", &stored.token)
             .env("PA_DEVICE_NAME", &self.name)
+            .env("PA_MAC_SHELL", if stored.shell { "1" } else { "0" })
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
         let mut child = match command.spawn() {
@@ -298,6 +328,7 @@ impl PhoneLink {
                 link_id: inner.stored.as_ref().map(|s| s.link_id.clone()),
                 name: self.name.clone(),
                 detail: inner.detail.clone(),
+                shell: inner.stored.as_ref().is_some_and(|s| s.shell),
             }
         };
         let Ok(json) = serde_json::to_string(&report) else { return };

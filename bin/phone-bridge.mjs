@@ -17,6 +17,10 @@
  *   GET  /browser/screenshot?page=<id>  a picture of one page, for the person
  *   POST /browser/front?page=<id>       check that page is still open (the person takes it over)
  *   WS   /browser/screen?page=<id>      that page live, with the person's clicks, scrolling and typing
+ *   POST /shell/mcp     this Mac's terminal (mac-shell.mjs: read, write, edit, bash in tmux), only
+ *                       once the person here turned it on in the app (PA_MAC_SHELL=1); the task's
+ *                       shell is named by X-AIO-Shell-Session
+ *   GET  /shell/status  whether it is on, and whether tmux is there
  *
  * PA_PHONE_SCREEN_OFF=1 keeps the phone's own screen dark while all of the above
  * still sees it (see keepDark).
@@ -43,6 +47,7 @@ import { promisify } from "node:util";
 import { WebSocketServer } from "ws";
 import { linkDevice } from "./device-link-client.mjs";
 import { createUserBrowser } from "./user-browser.mjs";
+import { createMacShell } from "./mac-shell.mjs";
 
 const run = promisify(execFile);
 const ROOT = path.resolve(import.meta.dirname, "..");
@@ -622,6 +627,8 @@ async function serve() {
   const browser = fs.existsSync(BROWSER_MCP_ENTRY)
     ? createUserBrowser({ entry: BROWSER_MCP_ENTRY, profileDir: process.env.PA_AI_CHROME_PROFILE ?? path.join(DIR, "ai-chrome"), ...(process.env.PA_AI_CHROME_PATH ? { chromePath: process.env.PA_AI_CHROME_PATH } : {}), log })
     : null;
+  // Off unless the person at this Mac turned it on in the app; an older app never passes it.
+  const shell = createMacShell({ enabled: process.env.PA_MAC_SHELL === "1", log });
   const wss = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024 });
   const server = http.createServer(async (req, res) => {
     try {
@@ -639,6 +646,7 @@ async function serve() {
       if (url.pathname === "/browser/status" && req.method === "GET") {
         return sendJson(res, 200, browser ? await browser.status() : { available: false, connected: false });
       }
+      if (url.pathname === "/shell/status" && req.method === "GET") return sendJson(res, 200, shell.status());
       const page = Number(url.searchParams.get("page"));
       if ((url.pathname === "/browser/screenshot" || url.pathname === "/browser/front") && browser && Number.isInteger(page) && page > 0) {
         try {
@@ -654,7 +662,7 @@ async function serve() {
           return sendJson(res, 404, { error: err.message });
         }
       }
-      if (url.pathname === "/mcp" || url.pathname === "/browser/mcp") {
+      if (url.pathname === "/mcp" || url.pathname === "/browser/mcp" || url.pathname === "/shell/mcp") {
         if (req.method === "DELETE") return sendJson(res, 200, {});
         if (req.method !== "POST") return sendJson(res, 405, { error: "method not allowed" });
         const chunks = [];
@@ -665,6 +673,13 @@ async function serve() {
           chunks.push(chunk);
         }
         if (url.pathname === "/mcp") return await handleMcp(req, res, Buffer.concat(chunks));
+        if (url.pathname === "/shell/mcp") {
+          let msg;
+          try { msg = JSON.parse(Buffer.concat(chunks).toString("utf8")); } catch { return sendJson(res, 400, rpcError(null, "invalid JSON")); }
+          const answer = await shell.handle(msg, req.headers["x-aio-shell-session"]);
+          if (answer === null) { res.writeHead(202, { "cache-control": "no-store" }); return res.end(); }
+          return sendJson(res, 200, answer);
+        }
         if (!browser) return sendJson(res, 503, { error: "browser tools missing; reinstall the phone runtime (Mac app)" });
         let msg;
         try { msg = JSON.parse(Buffer.concat(chunks).toString("utf8")); } catch { return sendJson(res, 400, rpcError(null, "invalid JSON")); }
@@ -715,14 +730,15 @@ async function serve() {
     clearInterval(dark);
     screen.stop("shutdown");
     browser?.close();
+    shell.close();
     mcpChild?.kill("SIGTERM");
     server.close();
     setTimeout(() => process.exit(0), 1000).unref();
   };
   process.on("SIGTERM", shutdown);
   process.on("SIGINT", shutdown);
-  // However the bridge ends (its port taken, a crash), mobile-mcp and the browser tools go with it instead of piling up orphaned.
-  process.on("exit", () => { mcpChild?.kill("SIGTERM"); browser?.close(); });
+  // However the bridge ends (its port taken, a crash), mobile-mcp, the browser tools and the shells go with it instead of piling up orphaned.
+  process.on("exit", () => { mcpChild?.kill("SIGTERM"); browser?.close(); shell.close(); });
 }
 
 if (process.argv[2] === "devicekit") {

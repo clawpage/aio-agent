@@ -18,6 +18,8 @@ export interface NativeLink {
   name?: string;
   /** While preparing: the step being downloaded; on error: what failed. */
   detail?: string;
+  /** Whether the agent may use this Mac's terminal; an app from before the switch leaves it out. */
+  shell?: boolean;
 }
 
 function bridge(): LinkBridge | undefined {
@@ -42,4 +44,9 @@ export function linkThisMac(token: string, linkId: string): void {
 
 export function unlinkThisMac(): void {
   bridge()?.postMessage(JSON.stringify({ type: "unlink" }));
+}
+
+/** Let the agent use this Mac's terminal, or not: the app keeps the choice and restarts its bridge. */
+export function setMacShell(enabled: boolean): void {
+  bridge()?.postMessage(JSON.stringify({ type: "shell", enabled }));
 }

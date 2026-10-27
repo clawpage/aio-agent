@@ -382,6 +382,8 @@ export function loadConfig(): {
   phone?: { url: string };
   /** This runtime's URL for the AI's Chrome on its account's Mac on the member gateway, when it linked a Mac (UserBrowserGateway). */
   userBrowser?: { url: string };
+  /** This runtime's URL for the terminal on its account's Mac on the member gateway, when it linked a Mac (MacShellGateway). */
+  macShell?: { url: string };
   /**
    * The voice gadget's dictation page (src/control/dictation.ts): the keyboard
    * bridge on the host Mac (bin/keyboard-bridge.mjs) types what the gadget heard,

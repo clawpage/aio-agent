@@ -45,6 +45,8 @@ export function memberConfig(base: Config, userId: string, port: number, model: 
     phone:undefined,
     // Nor the Chrome on the owner's Mac: the gateway gives an account that linked a Mac its own.
     userBrowser:undefined,
+    // Nor the terminal on the owner's Mac: the gateway gives an account that linked a Mac its own.
+    macShell:undefined,
     // Nor the owner's schedule tool: the gateway gives every member one that reaches only its own schedules.
     schedule:undefined,
     // Nor its history tool: each account's reaches only its own tasks and agreements.

@@ -53,6 +53,8 @@ export const phone: typeof zh = {
     link: "Link this Mac",
     linking: "Linking…",
     browserHint: "Browser: the AI uses a Chrome of its own on this Mac (Google Chrome must be installed). It runs in the background with a profile of its own: no pop-ups and no visible window, so it never takes your screen, mouse or keyboard, and it never touches your own Chrome. Watch it live and take over from the task card; sites you sign in to there stay signed in. When the Mac is offline or Chrome isn't installed, the AI uses the sandbox browser in the cloud instead.",
+    shellToggle: "Let the AI use this Mac's terminal",
+    shellHint: "Terminal: when on, the AI can read, write and change any file your user account can, and run commands on this Mac (bash in a tmux of its own, one session per task; watch with tmux -L aio-agent attach). It has the same access to this Mac as you, so turn it on only when you want it to work on this Mac. Off by default; it can only be switched in the app on this Mac.",
     usbHint: "Turn on USB debugging in the phone's developer options, plug it into this Mac with a cable, and tap Allow when the phone asks. The AI can use the phone while the Clawpage Agent app is open.",
     thisMac: "(this Mac)",
     unnamed: "Unnamed Mac",

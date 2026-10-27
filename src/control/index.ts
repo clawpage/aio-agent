@@ -14,6 +14,7 @@ import { HaHistory } from "./haHistory.js";
 import { HaDashboard } from "./haDashboard.js";
 import {PhoneGateway} from "./phone.js";
 import {UserBrowserGateway} from "./userBrowser.js";
+import {MacShellGateway} from "./macShell.js";
 import {DeviceLinks} from "./deviceLink.js";
 import {ScheduleGateway} from "./scheduleTool.js";
 import {HistoryGateway} from "./historyTool.js";
@@ -517,8 +518,12 @@ async function main(): Promise<void> {
     usernameOf:id=>account("SELECT username AS v FROM owners WHERE id=?",id),userIdOf:name=>account("SELECT id AS v FROM owners WHERE username=?",name)});
   userBrowser.provision(ctx.cfg);
   ctx.userBrowser=userBrowser;
-  // A first link gives the account's runtime the phone and browser tools; removing the last one takes them away.
-  deviceLinks.onAccountChange=id=>void (id===ctx.cfg.runtimeUserId?Promise.resolve(ctx):ctx.runtimeForUser!(id)).then(rt=>{phone.refresh(rt.cfg);userBrowser.refresh(rt.cfg);},
+  // And its terminal, once the person at that Mac turns it on in the app.
+  const macShell=new MacShellGateway({cfg:ctx.cfg,log:ctx.log,port:ctx.cfg.memberModelPort??4902,links:deviceLinks,
+    usernameOf:id=>account("SELECT username AS v FROM owners WHERE id=?",id),userIdOf:name=>account("SELECT id AS v FROM owners WHERE username=?",name)});
+  macShell.provision(ctx.cfg);
+  // A first link gives the account's runtime the phone, browser and terminal tools; removing the last one takes them away.
+  deviceLinks.onAccountChange=id=>void (id===ctx.cfg.runtimeUserId?Promise.resolve(ctx):ctx.runtimeForUser!(id)).then(rt=>{phone.refresh(rt.cfg);userBrowser.refresh(rt.cfg);macShell.refresh(rt.cfg);},
     err=>ctx.log.warn("phone tools not refreshed",{error:err instanceof Error?err.message:String(err)}));
   // Each account's schedules live in its own runtime: the owner's here, a member's in its runtime.
   const schedule=new ScheduleGateway({port:ctx.cfg.memberModelPort??4902,log:ctx.log,
@@ -545,7 +550,7 @@ async function main(): Promise<void> {
       await runtime.browser.withCall("call",()=>undefined);
     }});
   browserGateway.provision(ctx.cfg);
-  const modelGateway=new MemberModelGateway(ctx.cfg,ctx.log,ctx.share,decision,kb,schedule,ctx.hostTokens,image,browserGateway,ha,printer,phone,history,userBrowser,tts);
+  const modelGateway=new MemberModelGateway(ctx.cfg,ctx.log,ctx.share,decision,kb,schedule,ctx.hostTokens,image,browserGateway,ha,printer,phone,history,userBrowser,tts,macShell);
   await modelGateway.start();
   // Phone notifications: one key pair and one subscription store for every account.
   ctx.push=new PushService({db:ctx.db,log:ctx.log,keyFile:path.join(ctx.cfg.dataDir,"vapid.json"),subject:`https://${ctx.cfg.primaryHost}`});

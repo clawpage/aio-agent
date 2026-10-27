@@ -31,7 +31,8 @@
       "phone/package-lock.json": "phone/package-lock.json",
       "../../../../bin/phone-bridge.mjs": "phone/phone-bridge.mjs",
       "../../../../bin/device-link-client.mjs": "phone/device-link-client.mjs",
-      "../../../../bin/user-browser.mjs": "phone/user-browser.mjs"
+      "../../../../bin/user-browser.mjs": "phone/user-browser.mjs",
+      "../../../../bin/mac-shell.mjs": "phone/mac-shell.mjs"
     }
   }
 }
