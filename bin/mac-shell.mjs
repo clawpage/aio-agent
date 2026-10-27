@@ -71,8 +71,12 @@ PS1='\\w \\$ '
 __aio_run() {
   local __aio_p="$1"
   printf '\\n$ %s\\n' "$(head -n 20 "$__aio_p.cmd")"
+  # Ctrl-C (a timeout) stops the command, not this runner: bash 5 otherwise drops the rest of the
+  # function once a child dies of SIGINT, and the exit code would never be written.
+  trap : INT
   { . "$__aio_p.cmd"; } > "$__aio_p.out" 2>&1 < /dev/null
   printf '%s' "$?" > "$__aio_p.rc.tmp"
+  trap - INT
   tail -n 50 "$__aio_p.out"
   mv "$__aio_p.rc.tmp" "$__aio_p.rc"
 }
