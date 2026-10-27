@@ -192,7 +192,7 @@ describe("what the daily feed keeps in mind", () => {
     expect(section(brief(), "Remembered memory:")).toEqual({ care: [], avoid: [], note: [] });
   });
 
-  it("reads a week of the person's tasks, the newest in detail and older ones by title, and asks it to check what they are shopping for", async () => {
+  it("reads a week of the person's tasks, the newest in detail and older ones by title, and asks it to check what they follow and bring new things from what they ask about", async () => {
     tasks.submit({ text: "seed", clientMessageId: "seed" });
     await tick();
     codex.completeTurn(codex.startedTurns[0]!.turnId);
@@ -212,7 +212,10 @@ describe("what the daily feed keeps in mind", () => {
     expect(records.filter((t) => t.title === "复查卡地亚项链折扣")).toEqual([{ date: expect.any(String), title: "复查卡地亚项链折扣" }]);
     expect(records.some((t) => t.title === "八天前的事")).toBe(false);
     expect(brief()).toContain("3–8 things");
-    expect(brief()).toContain("Email and order tracking are only one part");
+    expect(brief()).toContain("Email, orders and prices are only one kind of lead");
+    // A feed with nothing that changed fills up with new things from the person's questions instead of going empty.
+    expect(brief()).toContain("New things worth their time");
+    expect(brief()).toContain("an unchanged price or no new email does not count");
     expect(brief()).toContain('is not bound by the rules above to "match the effort to what the request actually needs" and "keep the commentary short"');
   });
 
