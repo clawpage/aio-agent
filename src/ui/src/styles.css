@@ -1703,6 +1703,7 @@ button .loading-mark { color: inherit; }
 .app-icon[data-app="browser"] .app-icon-tile { fill: color-mix(in srgb, var(--ai) 35%, var(--done)); }
 .app-icon[data-app="macBrowser"] .app-icon-tile { fill: color-mix(in srgb, var(--ai) 55%, var(--tile-dark)); }
 .app-icon[data-app="terminal"] .app-icon-tile { fill: var(--tile-dark); }
+.app-icon[data-app="macTerminal"] .app-icon-tile { fill: color-mix(in srgb, var(--ai) 30%, var(--tile-dark)); }
 .app-icon[data-app="files"] .app-icon-tile { fill: color-mix(in srgb, var(--ai) 60%, var(--done)); }
 .app-icon[data-app="editor"] .app-icon-tile { fill: color-mix(in srgb, var(--ai) 75%, var(--tile-dark)); }
 .app-icon[data-app="notebook"] .app-icon-tile { fill: color-mix(in srgb, var(--you) 85%, var(--error)); }
@@ -4566,6 +4567,16 @@ button.map-card-switch { flex: 0 0 auto; padding: 4px 10px; }
 .mac-browser-screen .user-browser-screen { padding: 0; }
 .mac-browser-empty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 24px 16px; text-align: center; color: var(--text-dim); line-height: 1.6; }
 .mac-browser-empty p { max-width: 520px; margin: 0; }
+/* The workspace's Mac Terminal (MacTerminal): the state of the terminal on the account's Mac, and its switch inside the Mac app. */
+.mac-terminal { flex: 1; overflow: auto; display: flex; justify-content: center; padding: 24px 16px; }
+.mac-terminal-card { display: grid; align-content: start; gap: 12px; width: 100%; max-width: 560px; line-height: 1.6; }
+.mac-terminal-card p { margin: 0; }
+.mac-terminal-card > button { justify-self: start; }
+.mac-terminal-state { font-weight: 600; }
+.mac-terminal-state.on { color: var(--done); }
+.mac-terminal-toggle { display: inline-flex; justify-self: start; align-items: center; gap: 8px; }
+/* A checkbox keeps its own size; the global field rule would stretch it across the card. */
+.mac-terminal-toggle input { width: auto; margin: 0; }
 .mac-browser-note { flex: none; margin: 0; text-align: center; }
 .phone-app { display: flex; flex-direction: column; height: 100%; min-height: 0; }
 .phone-app-screen { flex: 1; min-height: 0; }
@@ -4573,9 +4584,7 @@ button.map-card-switch { flex: 0 0 auto; padding: 4px 10px; }
 .phone-link-panel { height: 100%; overflow-y: auto; box-sizing: border-box; padding: 20px 16px; display: flex; flex-direction: column; gap: 12px; }
 .phone-link-panel > * { width: 100%; max-width: 640px; margin: 0 auto; box-sizing: border-box; }
 .phone-links { display: grid; gap: 12px; }
-.mac-shell-toggle { display: inline-flex; justify-self: start; align-items: center; gap: 8px; }
-/* A checkbox keeps its own size; the global field rule would stretch it across the card. */
-.mac-shell-toggle input { width: auto; margin: 0; }
+
 
 /* A task's phone in its card (TaskPhone): a portrait picture, and the live phone in the task console. */
 .task-phone-shot { width: auto; max-width: 100%; }

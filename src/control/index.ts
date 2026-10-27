@@ -522,6 +522,7 @@ async function main(): Promise<void> {
   const macShell=new MacShellGateway({cfg:ctx.cfg,log:ctx.log,port:ctx.cfg.memberModelPort??4902,links:deviceLinks,
     usernameOf:id=>account("SELECT username AS v FROM owners WHERE id=?",id),userIdOf:name=>account("SELECT id AS v FROM owners WHERE username=?",name)});
   macShell.provision(ctx.cfg);
+  ctx.macShell=macShell;
   // A first link gives the account's runtime the phone, browser and terminal tools; removing the last one takes them away.
   deviceLinks.onAccountChange=id=>void (id===ctx.cfg.runtimeUserId?Promise.resolve(ctx):ctx.runtimeForUser!(id)).then(rt=>{phone.refresh(rt.cfg);userBrowser.refresh(rt.cfg);macShell.refresh(rt.cfg);},
     err=>ctx.log.warn("phone tools not refreshed",{error:err instanceof Error?err.message:String(err)}));

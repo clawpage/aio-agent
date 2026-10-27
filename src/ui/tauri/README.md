@@ -128,7 +128,7 @@ The shell itself bundles no UI, so a UI change still ships with the next UI depl
   connection. `PA_AI_CHROME_PROFILE` / `PA_AI_CHROME_PATH` override the profile and the Chrome binary (tests, other installs).
 - macOS terminal: the same bridge can give the agent this Mac's terminal (`bin/mac-shell.mjs`, bundled beside the bridge):
   read, write, edit and bash, bash in a tmux server of its own (`tmux -L aio-agent`), one session per task. It is off
-  until the person turns on "Let the AI use this Mac's terminal" in the console inside this app; the console posts
+  until the person turns on "Let the AI use this Mac's terminal" in the workspace's Mac Terminal app inside this app; the console posts
   `{"type":"shell","enabled":…}`, the app keeps it in `device-link.json` (`shell`), restarts the bridge with
   `PA_MAC_SHELL=1` and reports `shell` in its `aio-device-link` events. Needs tmux on the Mac (Homebrew's is found;
   `PA_TMUX` overrides). The control plane offers it as `aio_mac_shell` (`src/control/macShell.ts`).

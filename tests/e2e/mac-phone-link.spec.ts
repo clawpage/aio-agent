@@ -57,17 +57,12 @@ test("inside the Mac app, the Phone app links this Mac: the token goes to the ap
   await page.addInitScript(() => {
     const sent: unknown[] = [];
     (window as unknown as { __sent: unknown[] }).__sent = sent;
-    // The app reports whether this Mac's terminal is on, and keeps the choice itself.
-    let shell = false;
-    const emit = (detail: object) => window.dispatchEvent(new CustomEvent("aio-device-link", { detail: { ...detail, shell } }));
-    let linkId = "";
+    const emit = (detail: unknown) => window.dispatchEvent(new CustomEvent("aio-device-link", { detail }));
     (window as unknown as { webkit: unknown }).webkit = { messageHandlers: { aioDeviceLink: { postMessage(raw: string) {
-      const message = JSON.parse(raw) as { type: string; linkId?: string; enabled?: boolean };
+      const message = JSON.parse(raw) as { type: string; linkId?: string };
       sent.push(message);
       if (message.type === "status") setTimeout(() => emit({ state: "off", name: "Mengxiao's MacBook Pro" }));
-      if (message.type === "shell") { shell = Boolean(message.enabled); setTimeout(() => emit({ state: "online", linkId, name: "Mengxiao's MacBook Pro" })); }
       if (message.type === "link") {
-        linkId = message.linkId ?? "";
         setTimeout(() => emit({ state: "preparing", linkId: message.linkId, name: "Mengxiao's MacBook Pro", detail: "Node.js" }));
         setTimeout(() => emit({ state: "online", linkId: message.linkId, name: "Mengxiao's MacBook Pro" }), 300);
       }
@@ -88,14 +83,8 @@ test("inside the Mac app, the Phone app links this Mac: the token goes to the ap
   await expect(card).not.toContainText("chrome://inspect");
   await expect(card.getByRole("button", { name: "连接这台 Mac", exact: true })).toHaveCount(0);
   expect(calls).toContain("POST /api/device-links");
-  // The terminal is off until the person here turns it on; the choice goes to the app, not the server.
-  const terminal = card.getByRole("checkbox", { name: "允许 AI 使用这台 Mac 的终端" });
-  await expect(terminal).not.toBeChecked();
-  await expect(card).toContainText("它和你本人一样有这台 Mac 的权限");
-  await terminal.check();
-  await expect(terminal).toBeChecked();
-  expect(await page.evaluate(() => (window as unknown as { __sent: unknown[] }).__sent.at(-1))).toEqual({ type: "shell", enabled: true });
-  expect(calls.filter((c) => !c.startsWith("GET "))).toEqual(["POST /api/device-links"]);
+  // The terminal has its own app (Mac 终端); Phone does not carry its switch.
+  await expect(card.getByRole("checkbox")).toHaveCount(0);
   const sent = await page.evaluate(() => (window as unknown as { __sent: Array<{ type: string; token?: string; linkId?: string }> }).__sent);
   expect(sent).toContainEqual({ type: "link", token: `dl_${"t".repeat(43)}`, linkId: "dlink_new" });
   await mkdir(evidence, { recursive: true });

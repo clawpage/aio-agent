@@ -1216,6 +1216,11 @@ export function createApiRouter(context: AppContext): Router {
     track(req, action === "take" ? "user_browser_takeover" : "user_browser_handback");
     res.json({ userBrowser: view });
   }));
+  // The workspace's Mac Terminal: whether the terminal on the account's Mac is on (only the app on that Mac switches it).
+  router.get("/mac-shell/status", requireKind("primary"), requireSession, asyncHandler(async (req, res) => {
+    res.setHeader("Cache-Control", "no-store");
+    res.json(context.macShell ? await context.macShell.status(ctxOf(req).session!.ownerId) : { state: "unlinked" });
+  }));
   // The workspace's Mac browser: every page of the AI's Chrome on the account's Mac, and pages the person opens there themselves.
   router.get("/user-browser/pages", requireKind("primary"), requireSession, asyncHandler(async (req, res) => {
     if (!context.userBrowser) { res.json({ state: "unlinked", pages: [] }); return; }

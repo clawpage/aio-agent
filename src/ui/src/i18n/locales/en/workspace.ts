@@ -4,6 +4,7 @@ export const workspace: typeof zh = {
   apps: {
     browser: "Sandbox Browser",
     macBrowser: "Mac Browser",
+    macTerminal: "Mac Terminal",
     terminal: "Terminal",
     files: "Files",
     editor: "Editor",

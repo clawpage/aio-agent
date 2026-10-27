@@ -399,6 +399,11 @@ export interface DispatchLog {
 }
 
 /** A task's page on the account's own Chrome, as its card shows it. */
+/** The terminal on the account's Mac (GET /api/mac-shell/status): no Mac linked, away, its app too old, or what the Mac says. */
+export type MacShellStatus =
+  | { state: "unlinked" | "offline" | "outdated" }
+  | { state: "ready"; enabled: boolean; tmux: boolean };
+
 /** One page of the AI's Chrome on the account's Mac, as the workspace's Mac browser lists it. */
 export interface MacBrowserPage {
   id: number;

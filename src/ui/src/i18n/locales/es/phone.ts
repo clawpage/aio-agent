@@ -12,8 +12,6 @@ export const phone: typeof zh = {
     link: "Vincular este Mac",
     linking: "Vinculando…",
     browserHint: "Navegador: la IA usa un Chrome propio en este Mac (hace falta tener Google Chrome instalado). Funciona en segundo plano con un perfil propio: sin ventanas emergentes ni ventana visible, así que nunca ocupa tu pantalla, tu ratón ni tu teclado, y no toca tu propio Chrome. Míralo en directo y toma el control desde la tarjeta de la tarea; los sitios en los que inicies sesión ahí siguen con la sesión iniciada. Si el Mac está sin conexión o no tiene Chrome, la IA usa el navegador del entorno aislado en la nube.",
-    shellToggle: "Permitir que la IA use la terminal de este Mac",
-    shellHint: "Terminal: si está activada, la IA puede leer, escribir y cambiar cualquier archivo de tu cuenta de usuario y ejecutar comandos en este Mac (bash en un tmux propio, una sesión por tarea; obsérvalo con tmux -L aio-agent attach). Tiene el mismo acceso a este Mac que tú, así que actívala solo cuando quieras que trabaje en este Mac. Desactivada por defecto; solo se puede cambiar en la app de este Mac.",
     usbHint: "Activa la depuración USB en las opciones de desarrollador del teléfono, conéctalo a este Mac con un cable y toca Permitir cuando el teléfono lo pida. La IA puede usar el teléfono mientras la app Clawpage Agent esté abierta.",
     thisMac: "(este Mac)",
     unnamed: "Mac sin nombre",

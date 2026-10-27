@@ -13,6 +13,7 @@ import { BrowserStatusBar, fetchBrowserStatus, STATUS_POLL_MS } from "./BrowserS
 import { needsRestore } from "../browserStatusView";
 import { DESKTOP_PATH } from "./TaskConsole";
 import { MacBrowser } from "./MacBrowser";
+import { MacTerminal } from "./MacTerminal";
 import { DesktopFrame } from "./DesktopFrame";
 import { BrowserTabs } from "./BrowserTabs";
 import { AppIcon } from "./AppIcon";
@@ -31,13 +32,15 @@ interface Props {
   browserNonce?: number;
 }
 
-type TabId = "browser" | "macBrowser" | "terminal" | "files" | "editor" | "notebook" | "preview" | "phone" | "api";
+type TabId = "browser" | "macBrowser" | "macTerminal" | "terminal" | "files" | "editor" | "notebook" | "preview" | "phone" | "api";
 
 const TABS: Array<{ id: TabId; label: string; path?: string; kind: "frame" | "native" }> = [
   // The browser is shown on the sandbox desktop (noVNC): its own keyboard, gestures and windows.
   { id: "browser", label: t.workspace.apps.browser, path: DESKTOP_PATH, kind: "frame" },
   // The AI's own Chrome on a Mac the account linked (bin/user-browser.mjs): its pages live, and the person's own.
   { id: "macBrowser", label: t.workspace.apps.macBrowser, kind: "native" },
+  // The terminal on that Mac (bin/mac-shell.mjs): whether the agent may use it, and the switch inside the Mac app.
+  { id: "macTerminal", label: t.workspace.apps.macTerminal, kind: "native" },
   { id: "terminal", label: t.workspace.apps.terminal, path: "/terminal", kind: "native" },
   { id: "files", label: t.workspace.apps.files, kind: "native" },
   { id: "editor", label: t.workspace.apps.editor, path: "/code-server/", kind: "frame" },
@@ -524,6 +527,7 @@ export function Workspace({ open, status, initialPath, onClose, onNotify, browse
               <span className="window-title">{currentDef?.label}</span>
             </div>
             <div className="ws-body">
+              {tab === "macTerminal" && <MacTerminal active={docVisible} onLinkMac={() => { setManagingPhones(true); void navigateTo("phone"); }} />}
               {tab === "macBrowser" && <MacBrowser active={docVisible} onNotify={onNotify} onLinkMac={() => { setManagingPhones(true); void navigateTo("phone"); }} />}
               {tab === "terminal" && <TerminalSessions active={docVisible} selectedId={terminalId} onSelect={setTerminalId} onNotify={onNotify}/>}
               {holdsBrowser && (

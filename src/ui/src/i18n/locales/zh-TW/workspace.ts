@@ -3,6 +3,7 @@ export const workspace: typeof zh = {
   apps: {
     browser: "沙箱瀏覽器",
     macBrowser: "Mac 瀏覽器",
+    macTerminal: "Mac 終端機",
     terminal: "終端機",
     files: "檔案",
     editor: "編輯器",

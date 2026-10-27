@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { api } from "../api";
 import type { DeviceLink } from "../types";
 import { locale, t } from "../i18n";
-import { hasDeviceLink, linkThisMac, listenDeviceLink, setMacShell, unlinkThisMac, type NativeLink } from "../deviceLink";
+import { hasDeviceLink, linkThisMac, listenDeviceLink, unlinkThisMac, type NativeLink } from "../deviceLink";
 
 const day = (ms: number) => new Date(ms).toLocaleDateString(locale);
 
@@ -17,9 +17,6 @@ export function MacPhoneLinks({ onChange }: { onChange?: () => void }) {
   const [native, setNative] = useState<NativeLink | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  /** The terminal switch as the person just set it, until the app (restarting its bridge) reports the same. */
-  const [shellWanted, setShellWanted] = useState<boolean | null>(null);
-  useEffect(() => { if (shellWanted !== null && native?.shell === shellWanted) setShellWanted(null); }, [native?.shell, shellWanted]);
 
   const load = useCallback(async () => {
     try { setLinks((await api.deviceLinks()).links); }
@@ -78,16 +75,6 @@ export function MacPhoneLinks({ onChange }: { onChange?: () => void }) {
       )}
       {inApp && thisMac && <p className="muted tiny" role="note">{t.phone.link.usbHint}</p>}
       {inApp && thisMac && <p className="muted tiny" role="note">{t.phone.link.browserHint}</p>}
-      {/* The terminal is this Mac's own choice: the switch only exists inside the app on it (an app too old to report it shows none). */}
-      {inApp && thisMac && typeof native?.shell === "boolean" && (
-        <>
-          <label className="mac-shell-toggle">
-            <input type="checkbox" checked={shellWanted ?? native.shell} onChange={(event) => { setShellWanted(event.target.checked); setMacShell(event.target.checked); }} />
-            <span>{t.phone.link.shellToggle}</span>
-          </label>
-          <p className="muted tiny" role="note">{t.phone.link.shellHint}</p>
-        </>
-      )}
       {error && <p className="banner error" role="alert">{error}</p>}
       {links && links.length === 0 && <p className="muted tiny">{t.phone.link.empty}</p>}
       {links && links.length > 0 && (

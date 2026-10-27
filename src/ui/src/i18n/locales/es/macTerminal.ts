@@ -1,0 +1,15 @@
+export const macTerminal = {
+  title: "Terminal del Mac",
+  loading: "Consultando la terminal del Mac…",
+  unlinked: "Aún no hay ningún Mac conectado. En un Mac con la app Clawpage Agent, abre Teléfono y luego \"Teléfonos y navegador en un Mac\" para conectar ese Mac.",
+  linkMac: "Conectar un Mac",
+  offline: "El Mac conectado está sin conexión: la app está cerrada o el Mac está en reposo.",
+  outdated: "La app Clawpage Agent de ese Mac es demasiado antigua y no tiene terminal. Actualiza la app y actívala aquí.",
+  on: "Activada: la IA puede leer y escribir archivos y ejecutar comandos en tu Mac.",
+  off: "Desactivada: la IA no puede usar la terminal de tu Mac.",
+  toggle: "Permitir que la IA use la terminal de este Mac",
+  onlyInApp: "Solo se puede cambiar en ese Mac, en Terminal del Mac dentro de la app Clawpage Agent.",
+  noTmux: "tmux no está instalado en este Mac, así que la IA aún no puede ejecutar comandos (leer y escribir archivos sí funciona). Instálalo ejecutando brew install tmux en la Terminal del Mac.",
+  hint: "Si está activada, la IA puede leer, escribir y cambiar cualquier archivo de tu usuario del Mac y ejecutar comandos (bash en un tmux propio, una sesión por tarea). Tiene el mismo acceso a este Mac que tú, así que actívala solo cuando quieras que trabaje en este Mac; antes de borrar o cambiar archivos, instalar software, usar sudo y similares te pregunta. Desactivada por defecto.",
+  watch: "Para ver lo que la IA ejecuta en el Mac: ejecuta tmux -L aio-agent attach en la Terminal del Mac.",
+};

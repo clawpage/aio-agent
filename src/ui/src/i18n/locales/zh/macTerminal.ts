@@ -1,0 +1,15 @@
+export const macTerminal = {
+  title: "Mac 终端",
+  loading: "正在读取 Mac 的终端…",
+  unlinked: "还没有连接 Mac。在装了一站 Mac App 的 Mac 上，打开「手机」里的「Mac 上的手机和浏览器」连接这台 Mac。",
+  linkMac: "去连接 Mac",
+  offline: "连接的 Mac 现在不在线：Mac 上的 App 没打开，或者 Mac 睡眠了。",
+  outdated: "那台 Mac 上的一站 App 版本太旧，还没有终端。更新 App 后再来这里打开。",
+  on: "已打开：AI 可以在你的 Mac 上读写文件、运行命令。",
+  off: "已关闭：AI 用不了你的 Mac 的终端。",
+  toggle: "允许 AI 使用这台 Mac 的终端",
+  onlyInApp: "只能在那台 Mac 上的一站 App 里，打开这个「Mac 终端」来开关。",
+  noTmux: "这台 Mac 没装 tmux，AI 还不能运行命令（读写文件不受影响）。在 Mac 的终端里运行 brew install tmux 安装。",
+  hint: "打开后，AI 能读写和修改你的 Mac 用户能访问的任何文件、运行命令（bash，跑在专用的 tmux 里，每个任务一个会话）。它和你本人一样有这台 Mac 的权限，只在你需要它动这台 Mac 时打开；删改文件、装软件、sudo 之类的操作它会先问你。默认关闭。",
+  watch: "想看 AI 在 Mac 上跑了什么：在 Mac 的终端里运行 tmux -L aio-agent attach。",
+};

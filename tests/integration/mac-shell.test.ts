@@ -15,6 +15,7 @@ const LOCAL_TOKEN = "local-bridge-secret";
 
 /** A stand-in for the terminal half of bin/phone-bridge.mjs: answers each call with the command and the task's shell it ran in. */
 async function fakeBridge() {
+  const state: { status: { enabled: boolean; tmux: boolean } | null } = { status: { enabled: false, tmux: true } };
   const seen: Array<{ path: string; session: string | undefined; body: { id?: unknown; method?: string; params?: { name?: string; arguments?: Record<string, unknown> } } }> = [];
   const server = http.createServer(async (req, res) => {
     if (req.headers.authorization !== `Bearer ${LOCAL_TOKEN}`) { res.writeHead(401).end(); return; }
@@ -23,13 +24,19 @@ async function fakeBridge() {
     const body = data ? JSON.parse(data) : {};
     const session = req.headers["x-aio-shell-session"] as string | undefined;
     seen.push({ path: req.url ?? "", session, body });
+    if (req.url === "/shell/status") {
+      if (!state.status) { res.writeHead(404).end(); return; }
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify(state.status));
+      return;
+    }
     // An app from before the terminal has no such path.
     if (body.params?.arguments?.command === "from an old app") { res.writeHead(404).end(); return; }
     res.writeHead(200, { "content-type": "application/json" });
     res.end(JSON.stringify({ jsonrpc: "2.0", id: body.id, result: { content: [{ type: "text", text: `ran ${body.params?.arguments?.command} in ${session ?? "main"}` }] } }));
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  return { url: `http://127.0.0.1:${(server.address() as { port: number }).port}`, seen, close: () => { server.closeAllConnections(); server.close(); } };
+  return { url: `http://127.0.0.1:${(server.address() as { port: number }).port}`, seen, state, close: () => { server.closeAllConnections(); server.close(); } };
 }
 
 async function signIn(h: Awaited<ReturnType<typeof startHarness>>, username: string) {
@@ -52,7 +59,7 @@ it("offers an account the terminal on the Mac it linked, one shell per task, and
   const shell = new MacShellGateway({ cfg, log: h.ctx.log, port: 0, usernameOf: names, userIdOf: ids, links });
   const gateway = new MemberModelGateway(cfg, h.ctx.log, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, shell);
   await gateway.start();
-  Object.assign(h.ctx, { deviceLinks: links });
+  Object.assign(h.ctx, { deviceLinks: links, macShell: shell });
   h.server.removeAllListeners("upgrade");
   h.server.on("upgrade", (req, socket, head) => links.ownsUpgrade(req) ? links.handleUpgrade(req, socket, head) : handleUpgrade(h.ctx, req, socket, head));
   let client: { close(): void } | null = null;
@@ -89,6 +96,11 @@ it("offers an account the terminal on the Mac it linked, one shell per task, and
     // A token nobody was given reaches nothing.
     expect((await rpc({ jsonrpc: "2.0", id: 1, method: "initialize" }, undefined, url.replace(/[a-f0-9]{64}/, "0".repeat(64)))).status).toBe(403);
 
+    // The workspace's Mac Terminal reads its state: the account's own Mac only.
+    const status = async (who: { cookie: string }) => (await (await h.request("/api/mac-shell/status", { headers: { cookie: who.cookie } })).json());
+    expect(await status(alice)).toEqual({ state: "offline" });
+    expect(await status(bob)).toEqual({ state: "unlinked" });
+
     // With the Mac away the server still starts and lists its four tools; a call says the Mac is away.
     expect((await rpc({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18" } })).body).toEqual({ jsonrpc: "2.0", id: 1, result: expect.objectContaining({ protocolVersion: "2025-06-18", serverInfo: { name: "aio_mac_shell", version: "1" } }) });
     expect((await rpc({ jsonrpc: "2.0", id: 2, method: "tools/list" })).body).toEqual({ jsonrpc: "2.0", id: 2, result: { tools: MAC_SHELL_TOOLS } });
@@ -102,6 +114,11 @@ it("offers an account the terminal on the Mac it linked, one shell per task, and
     const states: string[] = [];
     client = linkDevice({ url: `ws://localhost:${h.primaryPort}${DEVICE_LINK_PATH}`, token, name: "Mac", local: bridge.url, localToken: LOCAL_TOKEN, onState: (s: string) => states.push(s) });
     await expect.poll(() => states.at(-1)).toBe("online");
+    expect(await status(alice)).toEqual({ state: "ready", enabled: false, tmux: true });
+    bridge.state.status = { enabled: true, tmux: false };
+    expect(await status(alice)).toEqual({ state: "ready", enabled: true, tmux: false });
+    expect(await status(bob)).toEqual({ state: "unlinked" });
+    bridge.seen.length = 0;
     expect((await bash("pwd", "conv_1", 5)).body).toEqual({ jsonrpc: "2.0", id: 5, result: { content: [{ type: "text", text: "ran pwd in conv_1" }] } });
     expect((await bash("pwd", undefined, 6)).body).toEqual({ jsonrpc: "2.0", id: 6, result: { content: [{ type: "text", text: "ran pwd in main" }] } });
     // A task key that is not one never names a shell.
@@ -118,6 +135,9 @@ it("offers an account the terminal on the Mac it linked, one shell per task, and
     // A Mac app from before the terminal answers its path 404: the executor learns the result is unknown, not that it failed.
     const old = (await bash("from an old app")).body as { result: { isError: boolean; content: Array<{ text: string }> } };
     expect(old.result).toEqual({ isError: true, content: [{ type: "text", text: expect.stringMatching(/did not answer.*unknown/s) }] });
+    // …and has no terminal to report.
+    bridge.state.status = null;
+    expect(await status(alice)).toEqual({ state: "outdated" });
 
     // Removing the link takes the terminal away.
     expect((await h.request(`/api/device-links/${link.id}`, { method: "DELETE", headers: { cookie: alice.cookie, "x-csrf-token": alice.csrf } })).status).toBe(200);

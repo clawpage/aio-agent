@@ -2,6 +2,7 @@ export const workspace = {
   apps: {
     browser: "沙盒浏览器",
     macBrowser: "Mac 浏览器",
+    macTerminal: "Mac 终端",
     terminal: "终端",
     files: "文件",
     editor: "编辑器",

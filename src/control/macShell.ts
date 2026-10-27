@@ -108,6 +108,11 @@ export const MAC_SHELL_TOOLS = [
   },
 ];
 
+/** Whether the account's Mac terminal can be used: no Mac linked, the Mac away, its app too old to have one, or the Mac's answer. */
+export type MacShellStatus =
+  | { state: "unlinked" | "offline" | "outdated" }
+  | { state: "ready"; enabled: boolean; tmux: boolean };
+
 /** Thread-level MCP wiring for a Codex executor, under the task's identity (its own shell). */
 export function macShellThreadServers(cfg: Config, task?: BrowserTask): Record<string, unknown> {
   return cfg.macShell
@@ -155,6 +160,23 @@ export class MacShellGateway extends McpGateway {
   refresh(runtime: Config): void {
     if (this.#links.hasLink(runtime.runtimeUserId ?? "")) this.provision(runtime);
     else delete runtime.macShell;
+  }
+
+  /** What the account's Mac says about its terminal (the workspace's Mac Terminal app). */
+  async status(userId: string): Promise<MacShellStatus> {
+    if (!this.#links.hasLink(userId)) return { state: "unlinked" };
+    const tunnel = this.#links.tunnelFor(userId);
+    if (!tunnel) return { state: "offline" };
+    try {
+      const reply = await tunnel.request("GET", "/shell/status", { timeoutMs: 15_000 });
+      // A Mac app from before the terminal has no such path.
+      if (reply.status === 404) return { state: "outdated" };
+      if (reply.status !== 200) return { state: "offline" };
+      const body = JSON.parse(reply.body.toString("utf8")) as { enabled?: unknown; tmux?: unknown };
+      return { state: "ready", enabled: body.enabled === true, tmux: body.tmux === true };
+    } catch {
+      return { state: "offline" };
+    }
   }
 
   protected override async local(message: unknown, username: string, headers: http.IncomingHttpHeaders): Promise<unknown> {

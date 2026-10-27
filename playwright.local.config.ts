@@ -82,6 +82,7 @@ export default defineConfig({
     "**/send-shortcut.spec.ts",
     "**/mac-phone-link.spec.ts",
     "**/mac-browser.spec.ts",
+    "**/mac-terminal.spec.ts",
     "**/offline.spec.ts",
   ],
   outputDir: "var/.playwright-local",

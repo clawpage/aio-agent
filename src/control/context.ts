@@ -21,6 +21,7 @@ import type { OnDemandPrograms } from "./sandbox/programs.js";
 import type { PushService } from "./push.js";
 import type { PhoneGateway } from "./phone.js";
 import type { UserBrowserGateway } from "./userBrowser.js";
+import type { MacShellGateway } from "./macShell.js";
 import type { HaCameras } from "./camera.js";
 import type { DeviceLinks } from "./deviceLink.js";
 import type { Vault } from "./vault.js";
@@ -41,6 +42,8 @@ export interface AppContext {
   phone?: PhoneGateway;
   /** The AI's Chrome on that Mac (bin/user-browser.mjs): its tasks' pages and takeover; shared by every runtime. */
   userBrowser?: UserBrowserGateway;
+  /** The terminal on that Mac (bin/mac-shell.mjs): whether it is on; shared by every runtime. */
+  macShell?: MacShellGateway;
   /** Home Assistant cameras for camera cards; absent without Home Assistant (the API also checks the account's grant). */
   cameras?: HaCameras;
   /** The Macs accounts linked to offer their phones; shared by every runtime. */

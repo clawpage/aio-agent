@@ -1,0 +1,15 @@
+export const macTerminal = {
+  title: "Mac 終端機",
+  loading: "正在讀取 Mac 的終端機…",
+  unlinked: "還沒有連接 Mac。在裝了一站 Mac App 的 Mac 上，打開「手機」裡的「Mac 上的手機和瀏覽器」連接這台 Mac。",
+  linkMac: "去連接 Mac",
+  offline: "連接的 Mac 現在不在線：Mac 上的 App 沒打開，或者 Mac 睡眠了。",
+  outdated: "那台 Mac 上的一站 App 版本太舊，還沒有終端機。更新 App 後再來這裡開啟。",
+  on: "已開啟：AI 可以在你的 Mac 上讀寫檔案、執行指令。",
+  off: "已關閉：AI 用不了你的 Mac 的終端機。",
+  toggle: "允許 AI 使用這台 Mac 的終端機",
+  onlyInApp: "只能在那台 Mac 上的一站 App 裡，打開這個「Mac 終端機」來開關。",
+  noTmux: "這台 Mac 沒裝 tmux，AI 還不能執行指令（讀寫檔案不受影響）。在 Mac 的終端機裡執行 brew install tmux 安裝。",
+  hint: "開啟後，AI 能讀寫和修改你的 Mac 使用者能存取的任何檔案、執行指令（bash，跑在專用的 tmux 裡，每個任務一個工作階段）。它和你本人一樣有這台 Mac 的權限，只在你需要它動這台 Mac 時開啟；刪改檔案、裝軟體、sudo 之類的操作它會先問你。預設關閉。",
+  watch: "想看 AI 在 Mac 上跑了什麼：在 Mac 的終端機裡執行 tmux -L aio-agent attach。",
+};

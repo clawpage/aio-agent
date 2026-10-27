@@ -16,6 +16,7 @@ import { workspace } from "./workspace";
 import { browser } from "./browser";
 import { phone } from "./phone";
 import { userBrowser } from "./userBrowser";
+import { macTerminal } from "./macTerminal";
 import { settings } from "./settings";
 import { tasks } from "./tasks";
 import { schedules } from "./schedules";
@@ -25,4 +26,4 @@ import { library } from "./library";
 import { clawpages } from "./clawpages";
 import { cards } from "./cards";
 
-export const en: Messages = { support, common, app, auth, nav, time, voice, usage, analytics, gadget, chat, feed, dispatch, workspace, browser, phone, userBrowser, settings, tasks, schedules, vault, files, library, clawpages, cards };
+export const en: Messages = { support, common, app, auth, nav, time, voice, usage, analytics, gadget, chat, feed, dispatch, workspace, browser, phone, userBrowser, macTerminal, settings, tasks, schedules, vault, files, library, clawpages, cards };

@@ -1,0 +1,15 @@
+export const macTerminal = {
+  title: "Mac Terminal",
+  loading: "Checking the Mac's terminal…",
+  unlinked: "No Mac is linked yet. On a Mac with the Clawpage Agent app, open Phone, then \"Phones and browser on a Mac\", and link that Mac.",
+  linkMac: "Link a Mac",
+  offline: "The linked Mac is offline: the app on it is closed, or the Mac is asleep.",
+  outdated: "The Clawpage Agent app on that Mac is too old to have a terminal. Update the app, then turn it on here.",
+  on: "On: the AI can read and write files and run commands on your Mac.",
+  off: "Off: the AI can't use your Mac's terminal.",
+  toggle: "Let the AI use this Mac's terminal",
+  onlyInApp: "It can only be switched on that Mac, in Mac Terminal inside the Clawpage Agent app.",
+  noTmux: "tmux isn't installed on this Mac, so the AI can't run commands yet (reading and writing files still works). Install it by running brew install tmux in the Mac's Terminal.",
+  hint: "When on, the AI can read, write and change any file your Mac user can, and run commands (bash in a tmux of its own, one session per task). It has the same access to this Mac as you, so turn it on only when you want it to work on this Mac; it asks you first before deleting or changing files, installing software, sudo and the like. Off by default.",
+  watch: "To watch what the AI runs on the Mac: run tmux -L aio-agent attach in the Mac's Terminal.",
+};

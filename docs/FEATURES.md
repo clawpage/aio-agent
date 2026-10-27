@@ -751,7 +751,9 @@ Android 手机用 USB 接在装了 Mac App 的 Mac 上，由 App 运行的 `bin/
 同一条 Mac 连接还可以提供那台 Mac 的终端（`aio_mac_shell`），像 pi 一样只有四个工具：`read`、`write`、`edit`、`bash`。
 由同一个 `bin/phone-bridge.mjs` 经 `bin/mac-shell.mjs` 提供（`POST /shell/mcp`、`GET /shell/status`），控制面 `src/control/macShell.ts` 经成员网关 `/mac-shell/<运行时令牌>/mcp` 转发。
 
-- **默认关闭，只能在那台 Mac 上打开**：开关「允许 AI 使用这台 Mac 的终端」只出现在 Mac App 里、这台 Mac 已连接时（工作区「手机」→ Mac 列表上方）。
+- **工作区「Mac 终端」**：单独的一个应用（图标是带提示符的笔记本电脑，与沙箱的「终端」分开），显示连接的 Mac 的终端状态：没连 Mac（带「去连接 Mac」，转到「手机」）、Mac 不在线、Mac 上的 App 太旧、已打开或已关闭，Mac 没装 tmux 时另有提示。
+  状态来自 `GET /api/mac-shell/status`（经设备连接问 Mac 的 `GET /shell/status`，只回本账号的 Mac；接口版本因此升到 10，`src/common/version.ts`），打开时每 4 秒刷新。
+- **默认关闭，只能在那台 Mac 上打开**：开关「允许 AI 使用这台 Mac 的终端」只出现在「Mac 终端」里，而且只在 Mac App 内、这台 Mac 持有的是本账号的连接时（别的账号连的 Mac、网页版、手机上都只显示状态）。
   选择存在 App 数据目录的 `device-link.json`（与设备令牌同一个 0600 文件），App 以 `PA_MAC_SHELL=1` 重启桥接才生效；控制面、网页版和别的设备都改不了它。
   关着时调用返回“终端没打开，请用户在那台 Mac 的 App 里打开，或改在沙箱里做”。旧版 App 不报告这个开关，控制台就不显示它，调用返回“Mac 没有应答（App 可能需要更新），结果未知”。
 - **授权**：与手机、Mac 浏览器相同，只给连过 Mac 的账号，连上第一台 Mac 时获得、移除最后一台后失去；握手和工具列表由网关回答（定义在 `src/control/macShell.ts`），Mac 不在线也不会让线程丢掉它。

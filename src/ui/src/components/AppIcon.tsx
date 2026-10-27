@@ -21,6 +21,14 @@ const GLYPHS: Record<string, ReactNode> = {
       <path d="M22.6 15.4 21 19.6 16.9 21.2 18.5 17Z" fill="var(--app-glyph)" />
     </>
   ),
+  // A laptop with a prompt on its screen: the terminal on the person's Mac.
+  macTerminal: (
+    <>
+      <rect x="10" y="11" width="20" height="14" rx="2" fill="none" stroke="var(--app-glyph)" strokeWidth="2.2" />
+      <path d="M7.5 28.5h25" stroke="var(--app-glyph)" strokeWidth="2.4" strokeLinecap="round" />
+      <path d="M14.5 15.5l3 2.5-3 2.5M19.5 21h5" fill="none" stroke="var(--app-glyph)" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" />
+    </>
+  ),
   // A prompt.
   terminal: (
     <>

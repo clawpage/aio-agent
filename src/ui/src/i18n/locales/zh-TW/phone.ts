@@ -52,8 +52,6 @@ export const phone: typeof zh = {
     link: "連線這台 Mac",
     linking: "連線中…",
     browserHint: "瀏覽器：AI 會用這台 Mac 上一個專給它的 Chrome（需要裝有 Google Chrome）。它用獨立的設定在背景執行：不跳出視窗、沒有視窗，不佔用你的螢幕、滑鼠和鍵盤，也碰不到你自己的 Chrome。任務卡片裡能看即時畫面、隨時接管；網站在那裡登入一次就會一直保留。Mac 離線或沒裝 Chrome 時，自動改用雲端的沙箱瀏覽器。",
-    shellToggle: "允許 AI 使用這台 Mac 的終端機",
-    shellHint: "終端機：開啟後，AI 能在這台 Mac 上讀寫和修改你帳號下的任何檔案、執行指令（bash，跑在專用的 tmux 裡，每個任務一個工作階段；可用 tmux -L aio-agent attach 旁觀）。它和你本人一樣有這台 Mac 的權限，只在你需要它動這台 Mac 時開啟。預設關閉；只能在這台 Mac 的 App 裡開關。",
     usbHint: "在手機的開發人員選項裡開啟 USB 偵錯，用傳輸線接到這台 Mac，手機上跳出提示時點「允許」。一站 App 開著時 AI 才能用到這支手機。",
     thisMac: "（這台 Mac）",
     unnamed: "未命名的 Mac",

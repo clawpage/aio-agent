@@ -137,6 +137,7 @@ export const api = {
   /** The account's phone (on a Mac it linked): offered at all, and which device is connected. */
   phoneScreenshotUrl: (at: number) => apiUrl(`/api/phone/screenshot?at=${at}`),
   /** The workspace's Mac browser: the pages of the AI's Chrome on the account's Mac, and the person's own pages there. */
+  macShellStatus: () => request<import("./types").MacShellStatus>("/api/mac-shell/status", { cache: "no-store" }),
   macBrowserPages: () => request<{ state: "unlinked" | "offline" | "unavailable" | "ready"; pages: import("./types").MacBrowserPage[] }>("/api/user-browser/pages", { cache: "no-store" }),
   macBrowserOpen: (url: string) => request<{ page: number }>("/api/user-browser/pages", { method: "POST", body: { url } }),
   macBrowserClose: (page: number) => request<{ ok: boolean }>(`/api/user-browser/pages/${page}`, { method: "DELETE" }),

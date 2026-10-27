@@ -156,6 +156,7 @@ export class UserRuntimes {
     runtime.ctx.analytics=this.root.analytics;
     runtime.ctx.phone=this.root.phone;
     runtime.ctx.userBrowser=this.root.userBrowser;
+    runtime.ctx.macShell=this.root.macShell;
     runtime.ctx.deviceLinks=this.root.deviceLinks;
     // Clawpages live centrally; the member's console and executor see the account's own.
     runtime.ctx.share=this.root.share;
