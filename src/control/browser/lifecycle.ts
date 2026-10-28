@@ -135,7 +135,19 @@ export interface WakeOutcome {
   ok: boolean;
   restoredTabs?: number | null;
   message?: string | null;
+  /** Tabs this restore could not bring back (a failed wake that is otherwise fine). */
+  failedTabs?: number;
+  /** The runtime's reason for a failed wake (`deadline_exceeded`, …). */
+  reason?: string | null;
 }
+
+/**
+ * Restores of one snapshot after which the runtime gives up a tab that keeps
+ * failing (browser-runtime.py RESTORE_TAB_MAX_ATTEMPTS), so the browser comes back
+ * without it. A wake spends them at once: spread over separate wakes, every try
+ * would fail the task that needed the browser (a daily task, for days).
+ */
+const WAKE_TAB_TRIES = 3;
 
 /**
  * The container-side capabilities this state machine drives. Implementations must
@@ -1440,7 +1452,13 @@ status(): BrowserLifecycleStatus {
       this.#setState("restoring");
       this.#emit("wake.started", intoRunning ? "restoring the snapshot into the running browser" : "starting and restoring the browser");
       try {
-        const res = await this.#runtime.wake({ timeoutMs: this.#wakeTimeoutMs });
+        let res = await this.#runtime.wake({ timeoutMs: this.#wakeTimeoutMs });
+        // Only tabs failed (a sign-in page that no longer takes its saved session, say): try
+        // again now; the runtime resumes the restore and gives such a tab up on its last try.
+        for (let tries = 1; !res.ok && (res.failedTabs ?? 0) > 0 && res.reason !== "deadline_exceeded" && tries < WAKE_TAB_TRIES; tries++) {
+          this.#log.warn?.("browser restore left tabs behind; trying again", { failedTabs: res.failedTabs, attempt: tries + 1 });
+          res = await this.#runtime.wake({ timeoutMs: this.#wakeTimeoutMs });
+        }
         if (!res.ok) {
           // Reject with the fixed, secret-free text: the caller (and its logs)
           // must never receive a container message that can embed a page URL.

@@ -1612,6 +1612,57 @@ describe("BrowserLifecycle review fixes", () => {
     life.shutdown();
   });
 
+  it("spends a stuck tab's restore attempts in one wake instead of failing a task for each", async () => {
+    const runtime = makeRuntime();
+    const { life } = makeLifecycle(runtime, { releaseWhenIdle: false });
+    runtime.script.browserRunning = false;
+    await life.observeRuntime();
+    // One tab (a sign-in page) fails twice; the runtime gives it up on the third restore.
+    const tries: WakeOutcome[] = [
+      { ok: false, message: "1 tab(s) were not fully restored; snapshot kept for a retry", failedTabs: 1 },
+      { ok: false, message: "1 tab(s) were not fully restored; snapshot kept for a retry", failedTabs: 1 },
+      { ok: true, restoredTabs: 1 },
+    ];
+    let calls = 0;
+    runtime.wake = async () => tries[calls++]!;
+    runtime.script.browserRunning = true;
+    await life.wake();
+    expect(calls).toBe(3);
+    expect(life.status().state).not.toBe("error");
+    expect(life.status().lastErrorCode).toBeNull();
+    expect(life.status().restorePending).toBe(false);
+
+    // Not tabs (the time budget, the focus, the browser itself): one try, as before.
+    for (const failed of [
+      { ok: false, message: "ran past its time budget", failedTabs: 1, reason: "deadline_exceeded" },
+      { ok: false, message: "focus could not be synced", failedTabs: 0 },
+      { ok: false, message: "cdp timeout" },
+    ] satisfies WakeOutcome[]) {
+      const again = makeRuntime();
+      const { life: other } = makeLifecycle(again, { releaseWhenIdle: false });
+      again.script.browserRunning = false;
+      await other.observeRuntime();
+      let n = 0;
+      again.wake = async () => { n += 1; return failed; };
+      await expect(other.wake()).rejects.toThrow("Couldn't restore the browser");
+      expect(n).toBe(1);
+      other.shutdown();
+    }
+
+    // Tabs that still fail after the last try fail the wake, the snapshot kept.
+    const stuck = makeRuntime();
+    const { life: last } = makeLifecycle(stuck, { releaseWhenIdle: false });
+    stuck.script.browserRunning = false;
+    await last.observeRuntime();
+    let m = 0;
+    stuck.wake = async () => { m += 1; return { ok: false, message: "1 tab(s) were not fully restored", failedTabs: 1 }; };
+    await expect(last.wake()).rejects.toThrow("Couldn't restore the browser");
+    expect(m).toBe(3);
+    expect(last.status().restorePending).toBe(true);
+    last.shutdown();
+    life.shutdown();
+  });
+
   it("cancels the stop when a lease arrives during the pre-stop probe", async () => {
     const runtime = makeRuntime();
     const { life } = makeLifecycle(runtime);

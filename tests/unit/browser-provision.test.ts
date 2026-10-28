@@ -79,6 +79,13 @@ it('bounds the helper stop and the whole wake inside their exec timeouts',async(
  expect(flag(helper[1]!,'--deadline-s')).toBe('80');
  expect(flag(helper[2]!,'--timeout-s')).toBe('5');
 });
+it('tells a wake that failed on its tabs from one that failed for other reasons',async()=>{
+ let answer='{"ok":false,"message":"1 tab(s) were not fully restored; snapshot kept for a retry","failed":[{"index":1,"reason":"storage_failed"}]}';
+ const f=scripted(argv=>isHelper(argv)?{code:1,stdout:answer,stderr:''}:undefined);
+ expect(await f.runtime.wake({timeoutMs:90_000})).toMatchObject({ok:false,failedTabs:1,reason:null});
+ answer='{"ok":false,"message":"past its time budget","reason":"deadline_exceeded","failed":[{"index":0,"reason":"load_timeout"}]}';
+ expect(await f.runtime.wake({timeoutMs:90_000})).toMatchObject({ok:false,failedTabs:1,reason:'deadline_exceeded'});
+});
 it('provisions the helper again when a recreated container lost it',async()=>{
  let lost=false;
  const f=scripted(argv=>{

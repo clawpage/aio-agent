@@ -316,6 +316,8 @@ p.mkdir(parents=True, exist_ok=True, mode=0o755)
       ok: res.ok,
       restoredTabs: typeof res.restoredTabs === "number" ? res.restoredTabs : null,
       message: typeof res.message === "string" ? redact(res.message) : null,
+      failedTabs: Array.isArray(res.failed) ? res.failed.length : 0,
+      reason: typeof res.reason === "string" ? res.reason : null,
     };
   }
 }
