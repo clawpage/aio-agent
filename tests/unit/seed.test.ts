@@ -256,7 +256,10 @@ describe("sandbox workspace seed", () => {
     // Every account develops with the same LightCraft release, checked by hash for both processors.
     expect(PHOTO_CLI_PY).toContain('LIGHTCRAFT_VERSION = "0.14.0"');
     expect(PHOTO_CLI_PY).toMatch(/"x86_64": "[0-9a-f]{64}",\s+"aarch64": "[0-9a-f]{64}"/);
-    expect(PHOTO_SKILL_MD).toContain("do not install or\ncall another copy");
+    const flat = PHOTO_SKILL_MD.replace(/\s+/g, " ");
+    expect(flat).toContain("**Every photo is developed with LightCraft**");
+    expect(flat).toContain("do not install or call another copy, and do not adjust light or color with your own scripts");
+    expect(PHOTO_CLI_PY).toContain('r.add_argument("--engine", choices=["lightcraft", "basic"], default="lightcraft"');
     // Results go back as a before/after comparison, the original always on the before side.
     expect(PHOTO_SKILL_MD).toContain("```compare");
     expect(PHOTO_SKILL_MD).toContain("`before` is always the original");

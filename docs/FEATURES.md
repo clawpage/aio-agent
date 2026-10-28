@@ -560,16 +560,19 @@ iOS App 需为声明了存入相册权限、带 `aioSaveFiles` 标记的新版�
 - **真人照片修图**（修图、P 图、精修、专业修图、调亮调色、通透、天空过曝、磨皮、肤色、摄影棚效果、背景布平整、换背景）**不用** `image_generate`：它会把整张照片重画，
   脸、皮肤、手和头发变成"像但不是本人"，在 AI 结果上再改还会越改越失真、脸上出色块。执行器按所有账号内置的沙箱 skill `aio-photo` 处理，
   工具 `~/.codex/tools/aio-photo/aio-photo.py`（skill 与工具随沙箱启动写入，所有账号同一份；沙箱里改动 skill 会在下次启动时被覆盖，长期规则要改源码）：
-  - **调色用 LightCraft**（开源的 Lightroom 式照片冲印软件，固定 0.14.0，x86_64 / aarch64 两个 Linux 版本按 SHA-256 校验，装在工具目录 `lightcraft-0.14.0/`，
-    约 110 MB 下载、210 MB 占用，后台随照片库一起安装，换版本时删掉旧目录）：`retouch` 的 `--auto`（LightCraft 自动：曝光、对比、高光、阴影、白、黑、自然饱和度）、
+  - **所有调色都用 LightCraft**（用户 2026-10-28 定：LightCraft 更好用，都用它；开源的 Lightroom 式照片冲印软件，固定 0.14.0，x86_64 / aarch64 两个 Linux 版本按 SHA-256 校验，装在工具目录 `lightcraft-0.14.0/`，
+    约 110 MB 下载、210 MB 占用，后台随照片库一起安装，换版本时删掉旧目录）：`retouch` 默认从 LightCraft 自动设置开始（曝光、对比、高光、阴影、白、黑、自然饱和度；
+    `--manual` 改为从原片出发），叠加
     `--look bright|clear|sky`（调亮 / 通透去灰 / 压回过曝天空并加深蓝色的起点）与可重复的 `--develop 控件=值`（LightCraft 的 122 个冲印控件，
     如 `light.shadows`、`effects.dehaze`、`mixer.orange.sat`、`detail.nrLuminance`；控件名先校验，不认识的由 LightCraft 拒绝）。
-    LightCraft 对整张照片做同样的全局调整，脸上细节不变；用了这些选项时内置的「自动提亮中间调」默认关闭，`--warmth` 等简单调整仍可叠加。
+    `--exposure`（档）、`--warmth`（白平衡，±1 对应 ±2500 K）、`--contrast`、`--saturation` 也换算成 LightCraft 的相对调整（`develop.adjust`）叠在最后。
+    LightCraft 对整张照片做同样的全局调整，脸上细节不变。只有 LightCraft 装不上时，skill 要求先告诉用户，用户仍要时才用 `--engine basic`
+    （下面的查表调整，不支持自动、预设、控件和磨皮）并说明不是 LightCraft。
     2026-10-28 在 owner 沙箱实测：900 万像素约 1 秒（CPU），手机竖拍（EXIF 方向）照片方向与尺寸正确，人脸核对相似度 0.98–0.99。
   - **磨皮** `--soften 0..1`：同样的冲印再加一份降低纹理（`effects.texture = −60×soften`、`effects.clarity = −12×soften`）的版本，只按「人物抠图 × 肤色（YCrCb）」
     的柔边蒙版混入 80%，眼睛、眉毛、嘴唇、头发、衣服和背景保持原样清晰；skill 建议 0.3–0.5、宝宝 0.2–0.3、不超过 0.7。实测全图降纹理 −70 会把眉眼一起糊掉，
     而人脸核对仍有 0.93、拦不住，所以靠蒙版限制范围而不是靠核对。仍不做瘦脸、放大眼睛等改形。
-  - `retouch <原片> -o <输出>`：每次都从原片开始；不用 LightCraft 时，光影色彩（自动提亮人物中间调、曝光、冷暖、对比、饱和度）对每个像素做同一个查表变换，
+  - `retouch <原片> -o <输出>`：每次都从原片开始；`--engine basic` 时，光影色彩（自动提亮人物中间调、曝光、冷暖、对比、饱和度）对每个像素做同一个查表变换，
     脸上的细节一点不变；`--background smooth`（把原背景布的褶皱熨平，保留颜色、光线过渡和柔和阴影，只适合纯色背景布）/
     `studio`（无缝摄影棚背景，默认暖奶油色 `#EEE5D8`，带脚下柔和投影）/ 一张背景图（如 `image_generate` 生成的空摄影棚背景）时，
     人物用 rembg 的人像模型（`u2net_human_seg`）从原片抠出，按原像素放回新背景前；`--subject any` 改为保留商品、宠物等主体。

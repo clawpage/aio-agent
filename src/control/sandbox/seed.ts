@@ -2323,18 +2323,20 @@ def save_cutout_preview(img, soft, path):
 
 # ---------- developing with LightCraft ----------
 
-def develop(src, dest, auto, settings):
+def develop(src, dest, auto, settings, nudges=None):
     """Develop src into dest (an 8-bit PNG at full size) with LightCraft: its auto settings when asked, then settings
-    (control id -> value) on top. Returns what auto chose (or None)."""
+    (control id -> value) on top, then nudges (control id -> change from there). Returns what auto chose (or None)."""
     try:
         ensure_lightcraft()
     except Exception as err:
-        fail("LightCraft is not available: %s Retouch without --auto/--look/--develop/--soften." % err)
+        fail("LightCraft is not available: %s Tell the user; only if they still want the photo now, retouch with --engine basic (a plain even adjustment)." % err)
     cmd = [LIGHTCRAFT, "run", "--import", src]
     if auto:
         cmd.append("develop.auto")
     for key, value in settings.items():
         cmd += ["develop.set", "control=" + key, "value=" + repr(float(value))]
+    for key, delta in (nudges or {}).items():
+        cmd += ["develop.adjust", "control=" + key, "delta=" + repr(float(delta))]
     cmd += ["app.export", "path=" + dest, "format=png", "longEdge=0", "metadata=none"]
     res = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
     chosen = None
@@ -2410,10 +2412,21 @@ def cmd_retouch(args):
     settings = dict(look, **develop_values(args.develop))
     if not 0 <= args.soften <= 1:
         fail("--soften is 0 (none) … 1 (the most that still looks like skin); 0.3–0.5 is a natural portrait.")
-    use_lightcraft = args.auto or bool(settings) or args.soften > 0
-    # LightCraft's develop does the light; the plain even adjustment then only adds what is asked of it.
-    if args.light is None:
-        args.light = "none" if args.auto or settings else "auto"
+    # Every photo is developed with LightCraft: its auto settings unless --manual, then the look, the controls and
+    # the simple nudges on top. The plain even adjustment (--engine basic) is only for when LightCraft cannot run.
+    use_lightcraft = args.engine == "lightcraft"
+    if use_lightcraft:
+        args.auto = not args.manual
+        args.light = "none"
+        # A warmer photo is a higher white-balance temperature; the others in LightCraft's own units.
+        nudges = {k: v for k, v in (("light.exposure", args.exposure), ("light.contrast", 100.0 * args.contrast),
+                                     ("color.saturation", 100.0 * args.saturation), ("wb.temp", 2500.0 * args.warmth)) if v}
+    else:
+        if settings or args.soften > 0 or args.auto:
+            fail("--auto, --look, --develop and --soften need LightCraft; --engine basic only adjusts light and color evenly.")
+        if args.light is None:
+            args.light = "auto"
+        nudges = {}
     need_mask = args.background != "keep"
     alpha = subject_mask(args.input, size, args.subject) if need_mask or args.light == "auto" or args.soften > 0 else None
     img = load(args.input)
@@ -2422,14 +2435,14 @@ def cmd_retouch(args):
     if use_lightcraft:
         import tempfile
         with tempfile.TemporaryDirectory() as tmp:
-            chosen = develop(args.input, os.path.join(tmp, "base.png"), args.auto, settings) if args.auto or settings else None
-            base = np.asarray(load(os.path.join(tmp, "base.png"))) if args.auto or settings else rgb
+            chosen = develop(args.input, os.path.join(tmp, "base.png"), args.auto, settings, nudges)
+            base = np.asarray(load(os.path.join(tmp, "base.png")))
             if base.shape != rgb.shape:
-                fail("LightCraft returned the photo at another size (%dx%d, not %dx%d); retouch without --auto/--look/--develop/--soften." % (base.shape[1], base.shape[0], rgb.shape[1], rgb.shape[0]))
+                fail("LightCraft returned the photo at another size (%dx%d, not %dx%d)." % (base.shape[1], base.shape[0], rgb.shape[1], rgb.shape[0]))
             if args.soften > 0:
                 # The same development with less skin texture, mixed in on the skin alone.
                 soft_settings = dict(settings, **{"effects.texture": -60.0 * args.soften, "effects.clarity": -12.0 * args.soften})
-                develop(args.input, os.path.join(tmp, "soft.png"), args.auto, soft_settings)
+                develop(args.input, os.path.join(tmp, "soft.png"), args.auto, soft_settings, nudges)
                 soft = np.asarray(load(os.path.join(tmp, "soft.png")))
                 skin = skin_mask(rgb, alpha)
                 mixed = np.empty_like(base)
@@ -2438,15 +2451,18 @@ def cmd_retouch(args):
                     mixed[y0:y0 + STRIP] = np.clip(base[y0:y0 + STRIP] * (1.0 - a) + soft[y0:y0 + STRIP] * a + 0.5, 0, 255).astype(np.uint8)
                 base = mixed
                 del soft, skin
-        developed = {"auto": chosen, "set": settings, "look": args.look}
+        developed = {"auto": chosen, "set": settings, "look": args.look, "nudge": nudges}
         rgb = base
     # The light is judged on the people (when found) from a small copy of the photo.
     probe_scale = 512.0 / max(img.size)
     probe_size = (max(1, int(img.size[0] * probe_scale)), max(1, int(img.size[1] * probe_scale)))
     probe = cv2.resize(rgb, probe_size, interpolation=cv2.INTER_AREA).astype(np.float32) / 255.0
     weight = cv2.resize(alpha, probe_size, interpolation=cv2.INTER_AREA) if alpha is not None and alpha.mean() > 0.02 else None
-    tables = tone_tables(probe, args.light, args.exposure, args.warmth, args.contrast, weight)
-    adjusted = adjust(rgb, tables, args.saturation)
+    if use_lightcraft:
+        adjusted = rgb
+    else:
+        tables = tone_tables(probe, args.light, args.exposure, args.warmth, args.contrast, weight)
+        adjusted = adjust(rgb, tables, args.saturation)
     result = adjusted
     if need_mask:
         if alpha.mean() < 0.01:
@@ -2477,7 +2493,7 @@ def cmd_retouch(args):
     report = {"ok": True, "input": args.input, "output": args.output, "size": list(img.size),
          "background": args.background if args.background in ("keep", "smooth", "studio") else "plate",
          "subjectShare": round(share, 3) if need_mask else (round(float(alpha.mean()), 3) if alpha is not None else None),
-         "params": {k: getattr(args, k) for k in ("light", "exposure", "warmth", "contrast", "saturation", "background", "subject", "color", "auto", "look", "develop", "soften")},
+         "params": {k: getattr(args, k) for k in ("engine", "manual", "look", "develop", "soften", "exposure", "warmth", "contrast", "saturation", "background", "subject", "color")},
          "lightcraft": developed,
          # One item of the compare block the reply shows the photo in (the original beside the result).
          "compare": {"before": args.input, "after": args.output}}
@@ -2580,15 +2596,17 @@ def main():
     r = sub.add_parser("retouch", help="Retouch a real photo from the original: light, color and background, people kept as photographed")
     r.add_argument("input", help="The ORIGINAL photo (the user's upload), never an earlier result")
     r.add_argument("-o", "--output", required=True, help="Where to save the result (.png or .jpg) in this task's folder")
-    r.add_argument("--auto", action="store_true", help="Start from LightCraft's auto settings (exposure, contrast, highlights, shadows, whites, blacks, vibrance)")
+    r.add_argument("--engine", choices=["lightcraft", "basic"], default="lightcraft", help="lightcraft (default: every photo is developed with LightCraft); basic only when LightCraft cannot be installed")
+    r.add_argument("--manual", action="store_true", help="Start from the photo as shot instead of LightCraft's auto settings")
+    r.add_argument("--auto", action="store_true", help=argparse.SUPPRESS)
     r.add_argument("--look", choices=sorted(LOOKS), help="A starting point: bright (lift the people and shadows), clear (less haze, more depth), sky (bring back a bright sky and deepen its blue)")
     r.add_argument("--develop", action="append", metavar="CONTROL=VALUE", help="Any LightCraft develop control, repeatable, e.g. light.shadows=40 effects.dehaze=15 mixer.orange.sat=-5 (applied after --auto and --look)")
     r.add_argument("--soften", type=float, default=0.0, help="Soften skin only (0 none … 1 most; 0.3–0.5 natural); eyes, brows, lips and hair stay sharp")
-    r.add_argument("--light", choices=["auto", "none"], default=None, help="The plain even brightening of the people's mid-tones: auto by default, none when --auto/--look/--develop develop the light")
-    r.add_argument("--exposure", type=float, default=0.0, help="Extra exposure in stops, e.g. 0.3 brighter, -0.2 darker")
-    r.add_argument("--warmth", type=float, default=0.0, help="-1 cooler … 1 warmer; 0.3 is a soft warm studio tone")
-    r.add_argument("--contrast", type=float, default=0.0, help="-1 flatter … 1 punchier; 0.15 is a light lift")
-    r.add_argument("--saturation", type=float, default=0.0, help="-1 grey … 1 vivid; keep within ±0.2 for skin")
+    r.add_argument("--light", choices=["auto", "none"], default=None, help="--engine basic: the plain even brightening of the people's mid-tones (auto by default)")
+    r.add_argument("--exposure", type=float, default=0.0, help="More or less exposure in stops on top of the rest, e.g. 0.3 brighter, -0.2 darker")
+    r.add_argument("--warmth", type=float, default=0.0, help="-1 cooler … 1 warmer (white balance); 0.3 is a soft warm studio tone")
+    r.add_argument("--contrast", type=float, default=0.0, help="-1 flatter … 1 punchier on top of the rest; 0.15 is a light lift")
+    r.add_argument("--saturation", type=float, default=0.0, help="-1 grey … 1 vivid on top of the rest; keep within ±0.2 for skin")
     r.add_argument("--background", default="keep", help="keep (default) | smooth (iron out wrinkles in the photo's own backdrop) | studio (a seamless studio sweep in --color) | a path to a background picture")
     r.add_argument("--subject", choices=sorted(MODELS_BY_SUBJECT), default="people", help="What to keep in front of a new background: people (default: everyone, their clothes and what they hold) or any (a product, a pet, an object)")
     r.add_argument("--color", default=STUDIO, help="Studio backdrop color #RRGGBB (default warm cream %s)" % STUDIO)
@@ -2641,14 +2659,16 @@ person or child, and every further edit drifts more and leaves blotchy patches o
 python3 /home/gem/.codex/tools/aio-photo/aio-photo.py retouch <original> -o /home/gem/workspace/tasks/<task id>/<name>.jpg [options]
 \`\`\`
 
-The command is not on PATH; use the absolute path. It brings its own LightCraft (pinned, the same in every account): do not install or
-call another copy. A first use in a new sandbox installs the tools (a minute or two); it simply waits.
+The command is not on PATH; use the absolute path. **Every photo is developed with LightCraft** (the user's choice; pinned, the same in
+every account): retouch brings its own copy, so do not install or call another copy, and do not adjust light or color with your own
+scripts. A first use in a new sandbox installs the tools (a minute or two); it simply waits.
 
 Light and color (LightCraft develops the whole photo, the same for every pixel, so faces keep all their detail):
-- \`--auto\`: LightCraft's auto settings (exposure, contrast, highlights, shadows, whites, blacks, vibrance) — a good start for 修图/精修.
+- By default retouch starts from LightCraft's auto settings (exposure, contrast, highlights, shadows, whites, blacks, vibrance) — a good
+  start for 修图/精修. \`--manual\` starts from the photo as shot instead (when the user only wants one thing changed, e.g. 只要暖一点).
 - \`--look bright|clear|sky\`: starting points. bright lifts the people and the shadows (调亮); clear takes out haze and adds depth (通透, 去灰,
   白蒙蒙); sky brings back a bright sky and deepens its blue (天空过曝, when the sky still has some detail).
-- \`--develop control=value\` (repeatable, after --auto and --look): any LightCraft control. The useful ones:
+- \`--develop control=value\` (repeatable, after auto and --look): any LightCraft control. The useful ones:
   - light: \`light.exposure\` (stops, ±0.2–0.5), \`light.contrast\`, \`light.highlights\` (−40…−80 recovers a bright sky or white clothes),
     \`light.shadows\` (+20…+60 opens dark faces), \`light.whites\`, \`light.blacks\` (−5…−20 for depth)
   - presence: \`effects.dehaze\` (10–25 通透), \`effects.clarity\` (5–15; never on babies' skin), \`color.vibrance\` (5–20), \`color.saturation\` (±10)
@@ -2656,7 +2676,10 @@ Light and color (LightCraft develops the whole photo, the same for every pixel, 
   - sky and sea: \`mixer.blue.sat\`, \`mixer.blue.lum\` (−10…−25 deeper blue), \`mixer.aqua.sat\`
   - night or phone noise: \`detail.nrLuminance\` (20–40), \`detail.nrColor\` (25–50); crisper: \`detail.sharpenAmount\` (30–60)
   - all values are −100…100 unless shown; ranges past these look overdone on people.
-- \`--warmth -1..1\` (0.2–0.4 a warm studio tone), \`--exposure\`, \`--contrast\`, \`--saturation\`: a plain even adjustment after LightCraft.
+- \`--exposure <stops>\`, \`--warmth -1..1\` (white balance; 0.2–0.4 a warm studio tone), \`--contrast -1..1\`, \`--saturation -1..1\`: nudges on top of
+  everything above, also done by LightCraft (e.g. "再亮一点": the same options as before plus \`--exposure 0.2\`).
+- If retouch says LightCraft is not available, tell the user. Only if they still want the photo now, \`--engine basic\` makes a plain even
+  light and color adjustment (no auto, looks, controls or softening); say that it is not LightCraft.
 
 Skin:
 - \`--soften 0..1\` (磨皮): less skin texture on the people's skin only; eyes, brows, lips, hair, clothes and the background stay sharp.
@@ -2671,12 +2694,12 @@ Background:
 - \`--subject any\` keeps a product, a pet or an object instead of people.
 
 Common asks:
-- 修一下 / 精修 / 专业修图: \`--auto --soften 0.35\`, then judge the result and add what it lacks (\`--develop light.shadows=…\`, \`--look clear\`).
+- 修一下 / 精修 / 专业修图: \`--soften 0.35\` (auto is on by default), then judge the result and add what it lacks (\`--develop light.shadows=…\`, \`--look clear\`).
 - 太暗 / 调亮: \`--look bright\` (more: \`--develop light.exposure=0.4 --develop light.shadows=50\`).
 - 白蒙蒙 / 不通透 / 灰: \`--look clear\` (more: \`--develop effects.dehaze=20 --develop light.blacks=-15\`).
 - 天空过曝: \`--look sky\`. Where the sky is pure white there is nothing to bring back: say so, and offer an AI-made sky (rule 5).
 - 肤色发黄发红: \`--develop mixer.orange.sat=-10 --develop mixer.orange.lum=10\`.
-- 摄影棚效果: \`--auto --soften 0.35 --background studio\` (or smooth for a wrinkled backdrop).
+- 摄影棚效果: \`--soften 0.35 --background studio\` (or smooth for a wrinkled backdrop).
 
 Save every result as a \`.jpg\` (retouch writes quality 95 with full color detail), also after any step you do yourself:
 never deliver a full-size photo as PNG. Several photos: one retouch per photo in a shell loop, same options.
