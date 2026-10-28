@@ -253,6 +253,14 @@ describe("sandbox workspace seed", () => {
     expect(PHOTO_CLI_PY).toMatch(/REQUIREMENTS = \["rembg==2\.0\.69", "onnxruntime==1\.23\.2", "opencv-python-headless==4\.[\d.]+"\]/);
     expect(PHOTO_CLI_PY).toMatch(/FACE_MODEL_SHA256 = "[0-9a-f]{64}"/);
     expect(PHOTO_CLI_PY).toContain('"people": "u2net_human_seg"');
+    // Every account develops with the same LightCraft release, checked by hash for both processors.
+    expect(PHOTO_CLI_PY).toContain('LIGHTCRAFT_VERSION = "0.14.0"');
+    expect(PHOTO_CLI_PY).toMatch(/"x86_64": "[0-9a-f]{64}",\s+"aarch64": "[0-9a-f]{64}"/);
+    expect(PHOTO_SKILL_MD).toContain("do not install or\ncall another copy");
+    // Results go back as a before/after comparison, the original always on the before side.
+    expect(PHOTO_SKILL_MD).toContain("```compare");
+    expect(PHOTO_SKILL_MD).toContain("`before` is always the original");
+    expect(PHOTO_SKILL_MD).toContain("--soften 0..1");
   });
 
   it("installs the photo tools through the CLI's own setup, with time for a fresh install", async () => {

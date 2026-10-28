@@ -3899,6 +3899,68 @@ button.clawpage-version-restore.danger { background:var(--error); border-color:v
 .product-page.prev { left: -6px; }
 .product-page.next { right: -6px; }
 @media (hover: hover) and (pointer: fine) { .product-page { display: flex; } }
+/* Before/after photo comparisons (```compare): the result under the original, a handle between them. */
+.photo-compares { display: grid; gap: 14px; margin: 8px 0; }
+.photo-compare { margin: 0; padding: 10px; background: var(--bg-soft); border: 1px solid var(--border); border-radius: var(--radius-card); min-width: 0; }
+.photo-compare-title { font-weight: 600; margin: 0 0 8px; }
+.photo-compare-stage {
+  position: relative;
+  width: 100%;
+  margin: 0 auto;
+  overflow: hidden;
+  border-radius: 10px;
+  background: var(--media-bg);
+  cursor: ew-resize;
+  /* Vertical swipes still scroll the conversation; sideways ones move the handle. */
+  touch-action: pan-y;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+.photo-compare-stage.pending { min-height: 220px; }
+.photo-compare-stage:focus-visible { outline: 2px solid var(--ai); outline-offset: 2px; }
+.photo-compare-stage img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; pointer-events: none; }
+.photo-compare-status { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; padding: 16px; text-align: center; }
+.photo-compare-label {
+  position: absolute;
+  top: 8px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  color: var(--on-media);
+  background: var(--media-chip-strong);
+  transition: opacity 0.15s;
+  pointer-events: none;
+}
+.photo-compare-label.before { left: 8px; }
+.photo-compare-label.after { right: 8px; }
+.photo-compare-handle { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: var(--on-media); box-shadow: 0 0 0 1px var(--media-hairline); pointer-events: none; }
+.photo-compare-handle span {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 32px;
+  height: 32px;
+  margin: -16px 0 0 -16px;
+  border-radius: 50%;
+  background: var(--on-media);
+  box-shadow: var(--shadow-chip);
+}
+.photo-compare-handle span::before, .photo-compare-handle span::after {
+  content: "";
+  position: absolute;
+  top: 11px;
+  border: 5px solid transparent;
+}
+.photo-compare-handle span::before { left: 3px; border-right-color: var(--media-bg); }
+.photo-compare-handle span::after { right: 3px; border-left-color: var(--media-bg); }
+.photo-compare-side { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.photo-compare-pane { position: relative; min-height: 120px; border-radius: 10px; overflow: hidden; background: var(--media-bg); }
+.photo-compare-pane img { display: block; width: 100%; height: 100%; max-height: 60vh; object-fit: contain; }
+.photo-compare-bar { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.photo-compare-hold { user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; touch-action: none; }
+.photo-compare-hold[aria-pressed="true"] { background: var(--ai-soft); }
+.photo-compare-note { margin: 8px 0 0; color: var(--text-dim); font-size: 13px; }
 .product-card {
   display: flex;
   gap: 12px;

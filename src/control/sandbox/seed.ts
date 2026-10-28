@@ -1928,10 +1928,11 @@ export const PHOTO_SKILL_DIR = "skills/aio-photo";
 export const PHOTO_CLI_PY = String.raw`#!/usr/bin/env python3
 """aio-photo: retouch real photos and keep the people exactly as photographed, managed by AIO Agent.
 
-retouch adjusts light and color evenly over the whole photo and, when asked, cleans up or replaces only the
-background around the people (who are cut out from the original and put back pixel for pixel); check compares
-the faces of an edited photo with the original. The cut-out model (rembg) lives in a private venv that setup
-installs after the sandbox starts, or the first command that needs it.
+retouch develops the photo's light and color (LightCraft's develop controls, the same as Lightroom's panel, or a
+plain even adjustment), softens skin gently when asked (skin only, never eyes, brows, lips or hair) and, when asked,
+cleans up or replaces only the background around the people (who are cut out and put back pixel for pixel); check
+compares the faces of an edited photo with the original. The cut-out model (rembg) lives in a private venv and
+LightCraft in its own folder; setup installs both after the sandbox starts, or the first command that needs them.
 """
 import argparse, fcntl, json, math, os, shutil, subprocess, sys
 
@@ -1949,6 +1950,18 @@ FACE_MODEL_SHA256 = "8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed25
 # A face whose fine detail matches the original less than this was redrawn, not retouched.
 SIMILAR = 0.85
 STUDIO = "#EEE5D8"
+# LightCraft (github.com/storytold/lightcraft), an open-source photo developer: one pinned release, checked by hash.
+LIGHTCRAFT_VERSION = "0.14.0"
+LIGHTCRAFT_SHA256 = {"x86_64": "b8233b9373d6e99b1180c1c39fdcb13d49c441f80092770831fab195c4c4fda2",
+                     "aarch64": "eba0b3ca3704b7023fc485897443ecaaf40b378540a9921f59c9ca74f2f8cfe0"}
+LIGHTCRAFT_DIR = os.path.join(HERE, "lightcraft-" + LIGHTCRAFT_VERSION)
+LIGHTCRAFT = os.path.join(LIGHTCRAFT_DIR, "bin", "lightcraft-cli")
+# Starting points for common asks; --develop changes any control on top.
+LOOKS = {
+    "bright": {"light.exposure": 0.2, "light.shadows": 30, "light.highlights": -25, "color.vibrance": 10},
+    "clear": {"effects.dehaze": 12, "effects.clarity": 8, "light.blacks": -8, "color.vibrance": 12},
+    "sky": {"light.highlights": -70, "light.whites": -15, "mixer.blue.sat": 15, "mixer.blue.lum": -15, "effects.dehaze": 8},
+}
 
 
 def out(data):
@@ -2020,6 +2033,55 @@ def ensure_venv():
         face_model()
         with open(os.path.join(VENV, "aio-photo.stamp"), "w") as f:
             f.write(stamp_text())
+        return True
+
+
+def lightcraft_ready():
+    return os.access(LIGHTCRAFT, os.X_OK)
+
+
+def ensure_lightcraft():
+    """Install the pinned LightCraft release once (about 110 MB); parallel callers wait on one lock. Raises on failure."""
+    if lightcraft_ready():
+        return False
+    import hashlib, platform, tarfile, tempfile, urllib.request
+    arch = {"amd64": "x86_64", "arm64": "aarch64"}.get(platform.machine().lower(), platform.machine().lower())
+    if arch not in LIGHTCRAFT_SHA256:
+        raise RuntimeError("LightCraft has no Linux build for this processor (%s)." % arch)
+    with open(os.path.join(HERE, ".lightcraft.lock"), "w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        if lightcraft_ready():
+            return False
+        print("aio-photo: installing LightCraft %s (about 110 MB, once)." % LIGHTCRAFT_VERSION, file=sys.stderr)
+        name = "lightcraft-%s-linux-%s" % (LIGHTCRAFT_VERSION, arch)
+        url = "https://github.com/storytold/lightcraft/releases/download/v%s/%s.tar.gz" % (LIGHTCRAFT_VERSION, name)
+        tmp = tempfile.mkdtemp(dir=HERE, prefix=".lightcraft-")
+        try:
+            archive, digest = os.path.join(tmp, "a.tgz"), hashlib.sha256()
+            with urllib.request.urlopen(url, timeout=120) as res, open(archive, "wb") as f:
+                while True:
+                    chunk = res.read(1 << 20)
+                    if not chunk:
+                        break
+                    digest.update(chunk)
+                    f.write(chunk)
+            if digest.hexdigest() != LIGHTCRAFT_SHA256[arch]:
+                raise RuntimeError("The LightCraft download did not match its pinned hash.")
+            with tarfile.open(archive) as t:
+                if hasattr(tarfile, "data_filter"):
+                    t.extractall(tmp, filter="data")
+                else:
+                    t.extractall(tmp)
+            found = [d for d in os.listdir(tmp) if os.path.isfile(os.path.join(tmp, d, "bin", "lightcraft-cli"))]
+            if not found:
+                raise RuntimeError("The LightCraft archive has no lightcraft-cli.")
+            os.replace(os.path.join(tmp, found[0]), LIGHTCRAFT_DIR)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+        # Older releases go once this one is in place.
+        for old in os.listdir(HERE):
+            if old.startswith("lightcraft-") and os.path.join(HERE, old) != LIGHTCRAFT_DIR:
+                shutil.rmtree(os.path.join(HERE, old), ignore_errors=True)
         return True
 
 
@@ -2259,11 +2321,80 @@ def save_cutout_preview(img, soft, path):
     Image.fromarray(np.clip(rgb * a + 128.0 * (1 - a), 0, 255).astype(np.uint8)).save(path, quality=88)
 
 
+# ---------- developing with LightCraft ----------
+
+def develop(src, dest, auto, settings):
+    """Develop src into dest (an 8-bit PNG at full size) with LightCraft: its auto settings when asked, then settings
+    (control id -> value) on top. Returns what auto chose (or None)."""
+    try:
+        ensure_lightcraft()
+    except Exception as err:
+        fail("LightCraft is not available: %s Retouch without --auto/--look/--develop/--soften." % err)
+    cmd = [LIGHTCRAFT, "run", "--import", src]
+    if auto:
+        cmd.append("develop.auto")
+    for key, value in settings.items():
+        cmd += ["develop.set", "control=" + key, "value=" + repr(float(value))]
+    cmd += ["app.export", "path=" + dest, "format=png", "longEdge=0", "metadata=none"]
+    res = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+    chosen = None
+    for line in res.stdout.splitlines():
+        try:
+            step = json.loads(line)
+        except ValueError:
+            continue
+        if not step.get("ok"):
+            fail("LightCraft could not %s: %s" % (step.get("command"), step.get("error")))
+        if step.get("command") == "develop.auto":
+            chosen = step.get("result")
+    if res.returncode != 0 or not os.path.exists(dest):
+        fail("LightCraft did not develop the photo: " + (res.stderr or res.stdout).strip()[-400:])
+    return chosen
+
+
+def develop_values(pairs):
+    """--develop control=value pairs, checked: LightCraft's control ids (light.exposure, effects.dehaze, …) and numbers."""
+    import re
+    values = {}
+    for pair in pairs or []:
+        key, _, value = pair.partition("=")
+        key = key.strip()
+        if not re.match(r"^[a-z]+(\.[a-zA-Z]+)+$", key):
+            fail("--develop takes control=value with a LightCraft control id, e.g. light.shadows=40 (got %r)." % pair)
+        try:
+            values[key] = float(value)
+        except ValueError:
+            fail("--develop %s needs a number." % key)
+    return values
+
+
+def skin_mask(rgb, people):
+    """Where the people's skin is (face, neck, arms), soft-edged: skin tones inside the people, never eyes, brows,
+    lips, hair, clothes or the background."""
+    import cv2
+    import numpy as np
+    h, w = people.shape
+    scale = min(1.0, 2048.0 / max(h, w))
+    size = (max(1, int(w * scale)), max(1, int(h * scale)))
+    ycc = cv2.cvtColor(cv2.resize(rgb, size, interpolation=cv2.INTER_AREA), cv2.COLOR_RGB2YCrCb)
+    y, cr, cb = ycc[..., 0], ycc[..., 1], ycc[..., 2]
+    m = ((cr >= 135) & (cr <= 180) & (cb >= 80) & (cb <= 135) & (y >= 40)).astype(np.float32)
+    k = max(3, int(max(size) / 400)) | 1
+    m = cv2.morphologyEx(m, cv2.MORPH_OPEN, np.ones((k, k), np.uint8))
+    m = cv2.GaussianBlur(m, (0, 0), max(size) / 600.0) * cv2.resize((people > 0.5).astype(np.float32), size, interpolation=cv2.INTER_AREA)
+    return cv2.resize(m, (w, h), interpolation=cv2.INTER_LINEAR)
+
+
 # ---------- commands ----------
 
 def cmd_setup(args):
     installed = ensure_venv()
-    out({"ok": True, "installed": installed})
+    try:
+        lightcraft = ensure_lightcraft()
+    except Exception as err:
+        # The even light and color adjustment, the backgrounds and check still work; retouch tries again when asked.
+        return out({"ok": True, "installed": installed, "lightcraft": "failed: %s" % err})
+    out({"ok": True, "installed": installed or lightcraft, "lightcraft": LIGHTCRAFT_VERSION})
 
 
 def cmd_retouch(args):
@@ -2275,10 +2406,40 @@ def cmd_retouch(args):
     with Image.open(args.input) as probe_img:
         info = dict(probe_img.info)
         size = ImageOps.exif_transpose(probe_img).size
+    look = LOOKS.get(args.look, {}) if args.look else {}
+    settings = dict(look, **develop_values(args.develop))
+    if not 0 <= args.soften <= 1:
+        fail("--soften is 0 (none) … 1 (the most that still looks like skin); 0.3–0.5 is a natural portrait.")
+    use_lightcraft = args.auto or bool(settings) or args.soften > 0
+    # LightCraft's develop does the light; the plain even adjustment then only adds what is asked of it.
+    if args.light is None:
+        args.light = "none" if args.auto or settings else "auto"
     need_mask = args.background != "keep"
-    alpha = subject_mask(args.input, size, args.subject) if need_mask or args.light == "auto" else None
+    alpha = subject_mask(args.input, size, args.subject) if need_mask or args.light == "auto" or args.soften > 0 else None
     img = load(args.input)
     rgb = np.asarray(img)
+    developed = None
+    if use_lightcraft:
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            chosen = develop(args.input, os.path.join(tmp, "base.png"), args.auto, settings) if args.auto or settings else None
+            base = np.asarray(load(os.path.join(tmp, "base.png"))) if args.auto or settings else rgb
+            if base.shape != rgb.shape:
+                fail("LightCraft returned the photo at another size (%dx%d, not %dx%d); retouch without --auto/--look/--develop/--soften." % (base.shape[1], base.shape[0], rgb.shape[1], rgb.shape[0]))
+            if args.soften > 0:
+                # The same development with less skin texture, mixed in on the skin alone.
+                soft_settings = dict(settings, **{"effects.texture": -60.0 * args.soften, "effects.clarity": -12.0 * args.soften})
+                develop(args.input, os.path.join(tmp, "soft.png"), args.auto, soft_settings)
+                soft = np.asarray(load(os.path.join(tmp, "soft.png")))
+                skin = skin_mask(rgb, alpha)
+                mixed = np.empty_like(base)
+                for y0 in range(0, base.shape[0], STRIP):
+                    a = (skin[y0:y0 + STRIP] * 0.8)[..., None]
+                    mixed[y0:y0 + STRIP] = np.clip(base[y0:y0 + STRIP] * (1.0 - a) + soft[y0:y0 + STRIP] * a + 0.5, 0, 255).astype(np.uint8)
+                base = mixed
+                del soft, skin
+        developed = {"auto": chosen, "set": settings, "look": args.look}
+        rgb = base
     # The light is judged on the people (when found) from a small copy of the photo.
     probe_scale = 512.0 / max(img.size)
     probe_size = (max(1, int(img.size[0] * probe_scale)), max(1, int(img.size[1] * probe_scale)))
@@ -2316,7 +2477,10 @@ def cmd_retouch(args):
     report = {"ok": True, "input": args.input, "output": args.output, "size": list(img.size),
          "background": args.background if args.background in ("keep", "smooth", "studio") else "plate",
          "subjectShare": round(share, 3) if need_mask else (round(float(alpha.mean()), 3) if alpha is not None else None),
-         "params": {k: getattr(args, k) for k in ("light", "exposure", "warmth", "contrast", "saturation", "background", "subject", "color")}}
+         "params": {k: getattr(args, k) for k in ("light", "exposure", "warmth", "contrast", "saturation", "background", "subject", "color", "auto", "look", "develop", "soften")},
+         "lightcraft": developed,
+         # One item of the compare block the reply shows the photo in (the original beside the result).
+         "compare": {"before": args.input, "after": args.output}}
     if need_mask:
         report["cutout"] = preview
         report["warnings"] = warnings
@@ -2416,7 +2580,11 @@ def main():
     r = sub.add_parser("retouch", help="Retouch a real photo from the original: light, color and background, people kept as photographed")
     r.add_argument("input", help="The ORIGINAL photo (the user's upload), never an earlier result")
     r.add_argument("-o", "--output", required=True, help="Where to save the result (.png or .jpg) in this task's folder")
-    r.add_argument("--light", choices=["auto", "none"], default="auto", help="auto: gently brighten or tame the people's mid-tones (default)")
+    r.add_argument("--auto", action="store_true", help="Start from LightCraft's auto settings (exposure, contrast, highlights, shadows, whites, blacks, vibrance)")
+    r.add_argument("--look", choices=sorted(LOOKS), help="A starting point: bright (lift the people and shadows), clear (less haze, more depth), sky (bring back a bright sky and deepen its blue)")
+    r.add_argument("--develop", action="append", metavar="CONTROL=VALUE", help="Any LightCraft develop control, repeatable, e.g. light.shadows=40 effects.dehaze=15 mixer.orange.sat=-5 (applied after --auto and --look)")
+    r.add_argument("--soften", type=float, default=0.0, help="Soften skin only (0 none … 1 most; 0.3–0.5 natural); eyes, brows, lips and hair stay sharp")
+    r.add_argument("--light", choices=["auto", "none"], default=None, help="The plain even brightening of the people's mid-tones: auto by default, none when --auto/--look/--develop develop the light")
     r.add_argument("--exposure", type=float, default=0.0, help="Extra exposure in stops, e.g. 0.3 brighter, -0.2 darker")
     r.add_argument("--warmth", type=float, default=0.0, help="-1 cooler … 1 warmer; 0.3 is a soft warm studio tone")
     r.add_argument("--contrast", type=float, default=0.0, help="-1 flatter … 1 punchier; 0.15 is a light lift")
@@ -2446,25 +2614,26 @@ if __name__ == "__main__":
 
 export const PHOTO_SKILL_MD = /* i18n-exempt: model-facing, Chinese trigger words and examples */ `---
 name: aio-photo
-description: Retouch real photos of people (修图/P图/精修/调色/调亮/摄影棚效果/写真/宝宝照/亲子照/证件照/换背景/去背景/背景布平整/去褶皱) and keep every person exactly as photographed — light and color, a smoothed or new studio background, and a face check against the original before delivering. Use whenever the user wants a real photo of people edited; image_generate must never redraw such a photo.
+description: Retouch real photos (修图/P图/精修/专业修图/调色/调亮/通透/去灰/天空过曝/磨皮/肤色/摄影棚效果/写真/宝宝照/亲子照/证件照/换背景/去背景/背景布平整/降噪) with LightCraft's develop controls (the same as Lightroom's panel) and keep every person exactly as photographed — light and color, gentle skin softening, a smoothed or new studio background, a face check against the original, and a before/after comparison in the reply. Use whenever the user wants a real photo edited; image_generate must never redraw such a photo.
 ---
 
-# Retouching real photos of people (人像修图)
+# Retouching real photos (修图)
 
 ## The rule: retouch, never redraw
 
 image_generate redraws every pixel. On a real photo the faces, skin, eyes, hands and hair come back as someone similar, not the same
-person or child, and every further edit drifts more and leaves blotchy patches of color on the skin. So for a real photo of people:
+person or child, and every further edit drifts more and leaves blotchy patches of color on the skin. So for a real photo:
 
 1. **Start from the original every time**: the photo the user sent (in uploads/) or the one they point at. Never feed an earlier result
-   back in. A follow-up ("背景再平整些", "再亮一点", "重新修", "颜色暖一点") runs retouch again on the original with changed options.
+   back in. A follow-up ("再亮一点", "不够通透", "背景再平整些", "重新修") runs retouch again on the original with changed options:
+   take the previous run's \`params\` and \`lightcraft\` from its output and change only what the user asked.
 2. **One photo, one command.** Never use another photo, or another photo's result, as a reference for this one.
-3. **Keep everyone and everything of the people**: adults in the frame, hands holding the baby, props (sunglasses, toys), clothes.
-   Do not crop or change the framing unless asked.
+3. **Keep everyone and everything of the people**: adults in the frame, hands holding the baby, props, clothes. Do not crop or change the
+   framing unless asked.
 4. **When the user sends originals again or says 再来/重做/重新修, redo them from those originals.** Never copy or resend earlier results.
 5. image_generate only for: an empty background picture without people (then \`--background <that png>\`), or when the user explicitly
-   asks to change the content (add or remove an object or a person, change clothes, make a drawing or cartoon of the photo). Then say plainly
-   that the picture is AI-redrawn and the faces may not be exactly theirs, and still run check.
+   asks to change the content (a new sky with clouds where the original is blown out, add or remove an object or a person, change clothes,
+   a drawing or cartoon). Then say plainly what was AI-made, keep the people from the original, and still run check.
 
 ## Retouch
 
@@ -2472,48 +2641,76 @@ person or child, and every further edit drifts more and leaves blotchy patches o
 python3 /home/gem/.codex/tools/aio-photo/aio-photo.py retouch <original> -o /home/gem/workspace/tasks/<task id>/<name>.jpg [options]
 \`\`\`
 
-The command is not on PATH; use the absolute path. A first use in a new sandbox installs the tools (a minute or two); it simply waits.
-The light and color change is the same for every pixel, so faces keep all their detail; the people are cut out of the original and put
-back pixel for pixel in front of a changed background.
+The command is not on PATH; use the absolute path. It brings its own LightCraft (pinned, the same in every account): do not install or
+call another copy. A first use in a new sandbox installs the tools (a minute or two); it simply waits.
 
-- \`--light auto|none\`: auto (default) gently brightens or tames the people's mid-tones.
-- \`--exposure <stops>\` (0.3 brighter, -0.2 darker), \`--warmth -1..1\` (0.2–0.4 is a warm studio tone), \`--contrast\` (0.1–0.2 a light lift),
-  \`--saturation\` (keep within ±0.15 for skin).
-- \`--background\`:
-  - \`keep\` (default): light and color only. The safest; use it when the background is fine or when the cut-out fails.
-  - \`smooth\`: the photo's own backdrop ironed flat — wrinkles, folds and creases of a backdrop cloth or paper go, its color, light falloff
-    and soft shadows stay. For a plain cloth or wall with wrinkles (背景布平整). Not for busy backgrounds (plants, rooms, furniture): they turn
-    into blur; use studio or a background picture there.
-  - \`studio\`: a seamless studio sweep in \`--color\` (default warm cream #EEE5D8) with a soft contact shadow ("摄影棚效果" on a messy background).
-  - a path to a picture: that background, cropped to fill (e.g. an empty seamless studio backdrop made with image_generate: no people, the
-    photo's orientation).
+Light and color (LightCraft develops the whole photo, the same for every pixel, so faces keep all their detail):
+- \`--auto\`: LightCraft's auto settings (exposure, contrast, highlights, shadows, whites, blacks, vibrance) — a good start for 修图/精修.
+- \`--look bright|clear|sky\`: starting points. bright lifts the people and the shadows (调亮); clear takes out haze and adds depth (通透, 去灰,
+  白蒙蒙); sky brings back a bright sky and deepens its blue (天空过曝, when the sky still has some detail).
+- \`--develop control=value\` (repeatable, after --auto and --look): any LightCraft control. The useful ones:
+  - light: \`light.exposure\` (stops, ±0.2–0.5), \`light.contrast\`, \`light.highlights\` (−40…−80 recovers a bright sky or white clothes),
+    \`light.shadows\` (+20…+60 opens dark faces), \`light.whites\`, \`light.blacks\` (−5…−20 for depth)
+  - presence: \`effects.dehaze\` (10–25 通透), \`effects.clarity\` (5–15; never on babies' skin), \`color.vibrance\` (5–20), \`color.saturation\` (±10)
+  - skin tone: \`mixer.orange.sat\` (−5…−15 less red or orange skin), \`mixer.orange.lum\` (+5…+15 brighter skin), \`mixer.red.sat\`
+  - sky and sea: \`mixer.blue.sat\`, \`mixer.blue.lum\` (−10…−25 deeper blue), \`mixer.aqua.sat\`
+  - night or phone noise: \`detail.nrLuminance\` (20–40), \`detail.nrColor\` (25–50); crisper: \`detail.sharpenAmount\` (30–60)
+  - all values are −100…100 unless shown; ranges past these look overdone on people.
+- \`--warmth -1..1\` (0.2–0.4 a warm studio tone), \`--exposure\`, \`--contrast\`, \`--saturation\`: a plain even adjustment after LightCraft.
+
+Skin:
+- \`--soften 0..1\` (磨皮): less skin texture on the people's skin only; eyes, brows, lips, hair, clothes and the background stay sharp.
+  0.3–0.5 is a natural portrait, 0.2–0.3 for babies; never above 0.7 (it turns plastic). Nothing reshapes faces or bodies.
+
+Background:
+- \`--background keep\` (default): the safest; use it when the background is fine or when the cut-out fails.
+- \`smooth\`: the photo's own backdrop ironed flat (wrinkles of a backdrop cloth or paper go; its color and light stay). For a plain cloth or
+  wall, not for busy backgrounds (they turn into blur; use studio or a background picture).
+- \`studio\`: a seamless studio sweep in \`--color\` (default warm cream #EEE5D8) with a soft contact shadow ("摄影棚效果").
+- a path to a picture: that background, cropped to fill (e.g. an empty seamless backdrop made with image_generate: no people).
 - \`--subject any\` keeps a product, a pet or an object instead of people.
 
-Save every result as a \`.jpg\` (retouch writes quality 95 with full color detail), also after any step you do yourself (a composite,
-an object removed with an AI-filled background): never deliver a full-size photo as PNG. It is 20+ MB, slow to send and to open on a phone.
+Common asks:
+- 修一下 / 精修 / 专业修图: \`--auto --soften 0.35\`, then judge the result and add what it lacks (\`--develop light.shadows=…\`, \`--look clear\`).
+- 太暗 / 调亮: \`--look bright\` (more: \`--develop light.exposure=0.4 --develop light.shadows=50\`).
+- 白蒙蒙 / 不通透 / 灰: \`--look clear\` (more: \`--develop effects.dehaze=20 --develop light.blacks=-15\`).
+- 天空过曝: \`--look sky\`. Where the sky is pure white there is nothing to bring back: say so, and offer an AI-made sky (rule 5).
+- 肤色发黄发红: \`--develop mixer.orange.sat=-10 --develop mixer.orange.lum=10\`.
+- 摄影棚效果: \`--auto --soften 0.35 --background studio\` (or smooth for a wrinkled backdrop).
 
-Several photos: one retouch per photo in a shell loop, same options. Keep the options you used (the output's \`params\`) so a follow-up changes
-only what the user asked.
+Save every result as a \`.jpg\` (retouch writes quality 95 with full color detail), also after any step you do yourself:
+never deliver a full-size photo as PNG. Several photos: one retouch per photo in a shell loop, same options.
 
 ## Before delivering, for every photo
 
 1. **warnings**: if the output lists any, the cut-out lost a person or part of one. Do not deliver that result: retouch the photo with
-   \`--background keep\` (light and color only) and tell the user the background of that photo could not be cleaned up automatically.
-2. **Look** at the \`cutout\` preview (what was kept, on grey) and at the result: whole people (heads, bodies, hands, feet, what they hold),
-   no chunks of the old background stuck to them, no halo.
+   \`--background keep\` and tell the user the background of that photo could not be cleaned up automatically.
+2. **Look** at the result (and the \`cutout\` preview when the background changed): whole people, nothing left behind, no halo, skin that
+   still looks like skin, colors that are not overdone. If it does not look clearly better than the original, change the options and redo.
 3. **Check the faces against the original**:
    \`\`\`bash
    python3 /home/gem/.codex/tools/aio-photo/aio-photo.py check <original> <result>
    \`\`\`
-   It prints \`ok\` and each face's \`similarity\` (1 = the original's detail; below 0.85 = redrawn, which is also what leaves patches of
-   color on skin), and saves a side-by-side \`sheet\`; look at it. Deliver only when \`ok\` is true. Otherwise redo from the original with
-   retouch: never edit the result, never deliver it, and never tell the user it is fine.
-4. In the reply: the results as images (\`![...](path)\`), several photos also as one zip in the task folder; one sentence on what changed
-   (brighter, warmer, backdrop smoothed). Do not show cut-out previews or check sheets unless asked, and do not mention the tools.
+   Deliver only when \`ok\` is true. Otherwise redo from the original with retouch: never edit the result, never deliver it.
+
+## Delivering: a before/after comparison
+
+Show the results in a \`compare\` block, one item per photo, from retouch's \`compare\` output (\`before\` is always the original):
+
+\`\`\`\`text
+\`\`\`compare
+{"items": [{"before": "/home/gem/workspace/uploads/IMG_1234.jpg", "after": "/home/gem/workspace/tasks/<task id>/IMG_1234-修图.jpg", "title": "海边夕阳", "note": "提亮人物，压回天空，自然磨皮"}]}
+\`\`\`
+\`\`\`\`
+
+The console shows each as the result with a slider to the original (and side by side); \`title\` and \`note\` (one short line each, in the
+user's language) are optional. Several photos: every item in one block, and also one zip of the results in the task folder, linked below the
+block. Then one sentence on what changed. Do not show originals, cut-out previews or check sheets separately, and do not mention the tools.
 
 ## Limits (say them honestly)
 
-- No skin retouching (blemishes, smoothing, slimming): it changes faces. If asked, offer light overall adjustments and say why.
+- No reshaping (slimming, bigger eyes, a different smile): it changes who people are. Skin softening is the only skin retouching.
+- Blown-out areas (pure white sky or skin) have no detail left to recover; only an AI-made replacement changes them (rule 5).
 - The cut-out follows the people's outline; fine wisps of hair against a busy background may blur. The preview shows it.
 `;
 

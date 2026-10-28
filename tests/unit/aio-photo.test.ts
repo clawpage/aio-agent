@@ -42,7 +42,7 @@ results = {}
 for bg in ("studio", "smooth"):
     out = os.path.join(${JSON.stringify(dir)}, "out-%s.png" % bg)
     args = argparse.Namespace(input=src, output=out, light="auto", exposure=0.0, warmth=0.3, contrast=0.15, saturation=0.0,
-                              background=bg, color=ap.STUDIO, subject="people")
+                              background=bg, color=ap.STUDIO, subject="people", auto=False, look=None, develop=None, soften=0.0)
     ap.cmd_retouch(args)
     res = np.asarray(Image.open(out))
     probe = cv2.resize(rgb, (384, 512), interpolation=cv2.INTER_AREA).astype(np.float32) / 255.0
@@ -104,5 +104,64 @@ ap.cmd_retouch(argparse.Namespace(input=${JSON.stringify(src)}, output=${JSON.st
 `], { encoding: "utf8" });
     expect(r.status).toBe(1);
     expect(JSON.parse(r.stdout).error).toContain("the original stays");
+  });
+
+  it("softens skin only: the people's skin takes the softer development, eyes, clothes and the background do not", () => {
+    const r = py(`
+import argparse, os
+h, w = 400, 300
+rgb = np.zeros((h, w, 3), np.uint8)
+rgb[:] = (40, 120, 200)                    # a blue background
+rgb[60:340, 60:240] = (60, 60, 160)        # dark blue clothes
+rgb[60:200, 90:210] = (205, 150, 120)      # skin: a face
+rgb[110:125, 115:140] = (30, 25, 25)       # an eye
+rgb = np.clip(rgb.astype(int) + rng.normal(0, 6, rgb.shape), 0, 255).astype(np.uint8)
+src = os.path.join(${JSON.stringify(dir)}, "skin.png"); Image.fromarray(rgb).save(src)
+people = np.zeros((h, w), np.float32); people[55:345, 55:245] = 1.0
+ap.subject_mask = lambda path, size, subject="people": people
+ap.faces_in = lambda img: []
+calls = []
+def fake_develop(src_, dest, auto, settings):
+    # Stands in for LightCraft: the softer development is a blur, the plain one the photo as it is.
+    calls.append({"auto": auto, "settings": settings})
+    img = np.asarray(Image.open(src_).convert("RGB"))
+    Image.fromarray(cv2.GaussianBlur(img, (0, 0), 3) if "effects.texture" in settings else img).save(dest)
+    return {"exposure": 0.25} if auto else None
+ap.develop = fake_develop
+out = os.path.join(${JSON.stringify(dir)}, "skin-out.png")
+args = argparse.Namespace(input=src, output=out, light=None, exposure=0.0, warmth=0.0, contrast=0.0, saturation=0.0,
+                          background="keep", color=ap.STUDIO, subject="people", auto=True, look=None, develop=["light.shadows=30"], soften=0.5)
+ap.cmd_retouch(args)
+res = np.asarray(Image.open(out)).astype(int)
+diff = lambda a, b, c, d: float(np.abs(res[a:b, c:d] - rgb[a:b, c:d].astype(int)).mean())
+print(json.dumps({"face": diff(150, 190, 100, 200), "eye": diff(112, 123, 118, 137), "clothes": diff(260, 330, 70, 230),
+                  "background": diff(0, 40, 0, 300), "calls": calls, "light": args.light}))
+`);
+    // The face is softened, the eye beside it, the clothes and the background are untouched.
+    expect(r.face).toBeGreaterThan(2);
+    expect(r.eye).toBeLessThan(1);
+    expect(r.clothes).toBeLessThan(1);
+    expect(r.background).toBeLessThan(1);
+    // One development with the asked settings, one softer on top of the same settings; LightCraft does the light.
+    expect(r.calls).toEqual([
+      { auto: true, settings: { "light.shadows": 30 } },
+      { auto: true, settings: { "light.shadows": 30, "effects.texture": -30, "effects.clarity": -6 } },
+    ]);
+    expect(r.light).toBe("none");
+  });
+
+  it("takes LightCraft's control ids and numbers, and refuses anything else before running it", () => {
+    const r = py(`
+import subprocess
+ok = ap.develop_values(["light.shadows=40", "mixer.orange.sat=-5", "effects.dehaze=12.5"])
+bad = []
+for pair in ["rm -rf /=1", "light.shadows=a lot", "--set=1", "light=3"]:
+    res = subprocess.run([sys.executable, "-I", "-c", "import importlib.util; s=importlib.util.spec_from_file_location('ap', %r); m=importlib.util.module_from_spec(s); s.loader.exec_module(m); m.develop_values([%r])" % (spec.origin, pair)], capture_output=True, text=True)
+    bad.append(json.loads(res.stdout)["ok"])
+print(json.dumps({"ok": ok, "bad": bad, "looks": sorted(ap.LOOKS)}))
+`);
+    expect(r.ok).toEqual({ "light.shadows": 40, "mixer.orange.sat": -5, "effects.dehaze": 12.5 });
+    expect(r.bad).toEqual([false, false, false, false]);
+    expect(r.looks).toEqual(["bright", "clear", "sky"]);
   });
 });

@@ -30,7 +30,7 @@ const TOOLS = [
       "To edit or reference existing images, put their paths in reference_paths (png/jpg/webp in the workspace, at most 5). " +
       "Each call makes one image and usually takes a minute or two; call it separately for each different image you need. " +
       "Not for images that are mainly text or layout (tables, schedules, plans, checklists, menus, infographics): build those as HTML and render them with the aio-graphic skill, and never use this tool to change their text; use it only for the illustrations they contain. " +
-      "Never use it to retouch a real photo of people (light, color, a studio look, the background smoothed or replaced): it redraws the faces; follow the aio-photo skill, which keeps the people as photographed.",
+      "Never use it to retouch a real photo of people (light, color, skin softening, a studio look, the background smoothed or replaced): it redraws the faces; follow the aio-photo skill, which keeps the people as photographed.",
     inputSchema: {
       type: "object",
       properties: {
@@ -59,7 +59,7 @@ export function imageMcpServers(cfg: Config): Record<string, unknown> {
 export const IMAGE_POLICY =
   "When the user wants an image (photos, illustrations, posters, avatars, product renderings, stickers, and other raster images), or wants an image edited or extended, generate it with image_generate from aio_image, with path set to a .png in this task's folder; after it is generated, show it directly in your reply with ![description](path). " +
   "An image that is mainly text or layout (tables, schedules, meal or study plans, checklists, menus, infographics, text-heavy posters) is never drawn or edited with image_generate, which redraws every pixel and garbles text a little more on each edit: build it as HTML and render it to PNG with the aio-graphic skill, change it by editing that HTML, and use image_generate only for the illustrations placed in it. " +
-  "A real photo of people that the user wants retouched (light and color, a studio look, a smoother or new background) is never redrawn with image_generate, which turns the faces into someone similar and leaves patches of color with each further edit: follow the aio-photo skill, which keeps the people's original pixels, always works from the original and checks the faces before delivery. " +
+  "A real photo of people that the user wants retouched (light and color, skin softening, a studio look, a smoother or new background) is never redrawn with image_generate, which turns the faces into someone similar and leaves patches of color with each further edit: follow the aio-photo skill, which keeps the people's original pixels, always works from the original and checks the faces before delivery. " +
   "Flowcharts are better written as a mermaid code block; charts of data (K-lines, trends, bars, pies) as a chart code block, which the console draws from the numbers; other line drawings such as diagrams directly as an svg code block.";
 
 /** Reading and saving pictures in one account's workspace. */
