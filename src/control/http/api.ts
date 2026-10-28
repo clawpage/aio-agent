@@ -1100,6 +1100,14 @@ export function createApiRouter(context: AppContext): Router {
     const key = taskBrowserKey(req);
     const last = key ? context.tabs?.lastPage?.(key) : null;
     if (!key || !last || !context.tabs?.reopen) { res.status(404).json({ error: "not_found", message: t().http.browser.noReopen }); return; }
+    // A task's page is often closed because the browser was released for idleness: bring it back first
+    // (as for a link the person opens), or the tab server finds no Chromium to open the page in.
+    try {
+      await context.browser.wake();
+    } catch (err) {
+      res.status(503).json({ error: "browser_wake_failed", message: err instanceof Error ? err.message : t().http.browser.wakeFailedRetry });
+      return;
+    }
     // Only the page the task itself was on: the address is never taken from the request.
     const out = await context.tabs.reopen(key, last.url, last.title);
     res.status(out.status).json(out.body);

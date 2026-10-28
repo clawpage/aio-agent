@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, expect, it } from "vitest";
+import { afterAll, beforeAll, expect, it, vi } from "vitest";
 import { login, startHarness, type TestHarness } from "../helpers/harness.js";
 import type { TabRecord, TabServerLike } from "../../src/control/browser/tabs.js";
 
@@ -190,6 +190,8 @@ it("keeps the page a task's closed tab last showed: on its card, as a picture, a
   const key = h.ctx.tasks.browserKey(task.id)!;
   const last = { url: "https://www.amazon.com/checkout/p/p-123/spc", title: "Amazon Checkout", at: 5, shot: true };
   const reopened: string[] = [];
+  // The browser comes back before the page is opened again (it may have been released for idleness).
+  const wake = vi.spyOn(h.ctx.browser, "wake").mockImplementation(async () => { reopened.push("wake"); });
   h.ctx.tabs = {
     ...fakeTabs,
     list: async () => [],
@@ -211,12 +213,21 @@ it("keeps the page a task's closed tab last showed: on its card, as a picture, a
     const out = await h.request(`/api/tasks/${task.id}/browser/reopen`, { method: "POST", headers, body: JSON.stringify({ url: "https://evil.example/" }) });
     expect(out.status).toBe(200);
     expect(((await out.json()) as { tab: TabRecord }).tab).toMatchObject({ id: "t4", holder: "human" });
-    expect(reopened).toEqual([`${key}|${last.url}|${last.title}`]);
+    expect(reopened).toEqual(["wake", `${key}|${last.url}|${last.title}`]);
+
+    // A browser that does not come back: said so, and nothing is opened.
+    wake.mockRejectedValueOnce(new Error("Couldn't restore the browser; the snapshot is kept"));
+    reopened.length = 0;
+    const failed = await h.request(`/api/tasks/${task.id}/browser/reopen`, { method: "POST", headers, body: "{}" });
+    expect(failed.status).toBe(503);
+    expect(await failed.json()).toEqual({ error: "browser_wake_failed", message: "Couldn't restore the browser; the snapshot is kept" });
+    expect(reopened).toEqual([]);
 
     // Another account's task, or one with nothing kept, has nothing to open.
     expect((await h.request(`/api/tasks/task_unknown/browser/reopen`, { method: "POST", headers, body: "{}" })).status).toBe(404);
     expect((await h.request(`/api/tasks/task_unknown/browser/last-shot`, { headers: { cookie } })).status).toBe(404);
   } finally {
+    wake.mockRestore();
     h.ctx.tabs = fakeTabs;
   }
 });
