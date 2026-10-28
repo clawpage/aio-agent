@@ -232,6 +232,24 @@ it.skipIf(!hasChromium)("hands a tab to a person and back: the agent waits in pl
   expect(text(await call("OTHER", "browser_get_text", { tab }))).toContain("please sign in");
 });
 
+it.skipIf(!hasChromium)("a waiting request ends when the control plane hands the tab back unasked, freeing the task's later calls", async () => {
+  // The agent asked for a sign-in; the person answered in the chat instead (use another account) and never took the tab.
+  const tab = tabIdOf(await call("R", "browser_navigate", { url: page("Login", "please sign in") }))!;
+  const waiting = call("R", "browser_request_human", { reason: "请登录 Rui 的账号" });
+  await new Promise((r) => setTimeout(r, 200));
+  // The task's next call queues behind the wait.
+  let later: string | null = null;
+  const next = call("R", "browser_get_text", { tab }).then((r) => { later = text(r); });
+  await new Promise((r) => setTimeout(r, 300));
+  expect(later).toBeNull();
+  expect((await records("R"))[0]).toMatchObject({ holder: "ai", request: { reason: "请登录 Rui 的账号" } });
+  expect((await control(tab, "release", "R")).status).toBe(200);
+  expect(text(await waiting)).toContain("The user has handed control back");
+  await next;
+  expect(later).toContain("please sign in");
+  expect((await records("R"))[0]).toMatchObject({ holder: "ai", request: null });
+});
+
 it.skipIf(!hasChromium)("stops waiting on timeout, on a stopped caller and on a finished task, clearing the request", async () => {
   const tab = tabIdOf(await call("W", "browser_navigate", { url: page("Wait", "wait") }))!;
   const timedOut = await call("W", "browser_request_human", { reason: "等你" });

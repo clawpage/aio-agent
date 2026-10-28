@@ -199,6 +199,35 @@ export function withTabPolicy(instructions: string): string {
 }
 
 /**
+ * A message to a task means the person is back with its agent: every tab they took
+ * over, and every tab where the agent still waits for them to act (request_human, a
+ * vault sign-in), goes back to the agent. Its waiting call returns at once instead of
+ * holding the task's other browser calls behind it, which ran one at a time: the
+ * agent asked for a sign-in, the person said to use another account instead, and
+ * every browser call after that waited behind the sign-in nobody would do. The same
+ * for the task's page on the AI's Chrome on the account's Mac. Returns how many went back.
+ */
+export async function handBackToAgent(
+  key: string,
+  tabs: Pick<TabServerLike, "list" | "control"> | null,
+  mac?: { view(key: string): { holder: "ai" | "human"; request: string | null } | null; control(key: string, action: "release"): Promise<unknown> } | null,
+): Promise<number> {
+  let handed = 0;
+  if (tabs) {
+    for (const tab of (await tabs.list(key)).filter((t) => t.holder === "human" || t.request)) {
+      await tabs.control(key, tab.id, "release");
+      handed += 1;
+    }
+  }
+  const page = mac?.view(key);
+  if (page && (page.holder === "human" || page.request)) {
+    await mac!.control(key, "release");
+    handed += 1;
+  }
+  return handed;
+}
+
+/**
  * The browser is only released for idleness when no task, viewer or pin holds
  * it; finished tasks' tabs are destroyed right before that snapshot, so they are
  * never saved and later restored as tabs nobody owns.

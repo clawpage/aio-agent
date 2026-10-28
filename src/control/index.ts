@@ -45,7 +45,7 @@ import { SandboxCodexSession } from "./codex/sandboxCodex.js";
 import { AgentManager } from "./codex/manager.js";
 import { BridgeModel } from "./bridgeModel.js";
 import { ClaudeCodeHarness } from "./claudeCode.js";
-import { pruneBeforeSnapshot, TabServer } from "./browser/tabs.js";
+import { handBackToAgent, pruneBeforeSnapshot, TabServer } from "./browser/tabs.js";
 import { readAgentSettings } from "./settings.js";
 import { ClaudeCodeSession } from "./codex/claudeSession.js";
 import { HarnessSession } from "./codex/harnessSession.js";
@@ -159,11 +159,10 @@ async function bootstrapRuntime(opts: BootstrapOptions, cfg: Config, log: Logger
 
   const jev = new Jev(cfg, log);
   const tasks = new TaskService(db, cfg, agent, codex, container, jev);
-  if (tabs) tasks.setHumanTabRelease(async (key) => {
-    const held = (await tabs.list(key)).filter((t) => t.holder === "human");
-    for (const t of held) await tabs.control(key, t.id, "release");
-    return held.length;
-  });
+  tasks.setHumanTabRelease((key) => handBackToAgent(key, tabs, ctx.userBrowser ? {
+    view: (k) => ctx.userBrowser!.view(cfg.runtimeUserId ?? "", k),
+    control: (k, action) => ctx.userBrowser!.control(cfg.runtimeUserId ?? "", k, action),
+  } : null));
   const ctx: AppContext = {
     jev,
     tasks,

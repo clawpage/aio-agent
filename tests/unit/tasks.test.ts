@@ -609,7 +609,7 @@ describe("main inbox delegation", () => {
         codex.plan=async()=>JSON.stringify({title:"换账号",appendTo:parent.id,related:[parent.id],dependencies:[],resources:[]});
         submit("你先退出登录，我来登 RA 的账号");await tick();await tick();
         expect(released).toEqual([key]);
-        expect(codex.steers[0]!.text).toMatch(/^When the user sent this supplement, the browser tabs you had asked them to take over \(1\) were still in their hands; they have now been handed back to you automatically/);
+        expect(codex.steers[0]!.text).toMatch(/^When the user sent this supplement, 1 browser tab\(s\) were still waiting on them \(taken over, or where you had asked them to act\); they have now been handed back to you automatically/);
         // The task then asks, and the answer resumes its session: the tabs are handed back again first.
         await codex.runTurn(codex.startedTurns[0]!.turnId,{text:"请登录后告诉我"});await tick();
         released.length=0;

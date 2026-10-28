@@ -5,7 +5,7 @@ import { createHash } from "node:crypto";
 import { AgentManager } from "../../src/control/codex/manager.js";
 import { openDb, type Db } from "../../src/control/db.js";
 import { Logger } from "../../src/common/logger.js";
-import { pruneBeforeSnapshot, TAB_POLICY, tabMcpServers, tabThreadConfig, type BrowserTask } from "../../src/control/browser/tabs.js";
+import { handBackToAgent, pruneBeforeSnapshot, TAB_POLICY, tabMcpServers, tabThreadConfig, type BrowserTask, type TabRecord } from "../../src/control/browser/tabs.js";
 import type { BrowserRuntimeLike } from "../../src/control/browser/lifecycle.js";
 import { FakeCodex, testConfig } from "../helpers/harness.js";
 import { KB_POLICY } from "../../src/control/kb.js";
@@ -318,4 +318,24 @@ it("reuses a whole tab listing for a moment, and reads again after a change", as
   await tabs.control("task_a", "t1", "take");
   await tabs.list();
   expect(listings).toBe(2);
+});
+
+it("hands back to the agent every tab waiting on the person: taken over, or asked for and not yet taken", async () => {
+  const tab = (id: string, holder: "ai" | "human", request: TabRecord["request"]) => ({ id, key: "conv_1", title: id, url: "https://example.com/", createdAt: 0, lastUsed: 0, finishedAt: null, holder, humanSince: null, request }) as TabRecord;
+  const released: string[] = [];
+  const tabs = {
+    list: async () => [tab("t1", "human", null), tab("t2", "ai", { reason: "请登录", at: 1 }), tab("t3", "ai", null)],
+    control: async (_key: string, id: string) => { released.push(id); return null; },
+  };
+  // The page on the Mac's AI Chrome too, when the agent waits on it.
+  const mac = { waiting: { holder: "ai" as const, request: "请登录" as string | null }, released: 0 };
+  const macPage = { view: () => mac.waiting, control: async () => { mac.released += 1; } };
+  expect(await handBackToAgent("conv_1", tabs, macPage)).toBe(3);
+  expect(released).toEqual(["t1", "t2"]);
+  expect(mac.released).toBe(1);
+  // Nothing waiting: nothing handed back.
+  mac.waiting = { holder: "ai", request: null };
+  expect(await handBackToAgent("conv_1", { list: async () => [tab("t3", "ai", null)], control: tabs.control }, macPage)).toBe(0);
+  expect(await handBackToAgent("conv_1", null, null)).toBe(0);
+  expect(mac.released).toBe(1);
 });
