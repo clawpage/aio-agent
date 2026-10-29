@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type CDPSession, type Page } from "@playwright/test";
 import { mkdir } from "node:fs/promises";
 import { deflateSync } from "node:zlib";
 import { mockConsole } from "./mock-api";
@@ -46,7 +46,23 @@ async function colorAt(page: Page, x: number, y: number): Promise<"original" | "
   return r! > 150 && g! < 110 ? "original" : g! > 130 && r! < 110 ? "edited" : "other";
 }
 
-test("a compare block shows each retouched photo against its original: slide, hold, side by side, full size", async ({ page }, info) => {
+/** A finger pressing and lifting at a point: real touches where the browser can take them (Chromium), touch pointers otherwise. */
+const touchSessions = new WeakMap<Page, CDPSession>();
+async function finger(page: Page, type: "down" | "up", x: number, y: number) {
+  if (page.context().browser()?.browserType().name() === "chromium") {
+    // One session for the whole touch: the browser ties a touch's end to the session that started it.
+    let cdp = touchSessions.get(page);
+    if (!cdp) touchSessions.set(page, cdp = await page.context().newCDPSession(page));
+    await cdp.send("Input.dispatchTouchEvent", { type: type === "down" ? "touchStart" : "touchEnd", touchPoints: type === "down" ? [{ x, y }] : [] });
+    return;
+  }
+  await page.evaluate(({ type, x, y }) => {
+    const el = document.elementFromPoint(x, y)!;
+    el.dispatchEvent(new PointerEvent(type === "down" ? "pointerdown" : "pointerup", { pointerId: 1, pointerType: "touch", isPrimary: true, button: 0, clientX: x, clientY: y, bubbles: true, cancelable: true }));
+  }, { type, x, y });
+}
+
+test("a compare block shows each retouched photo, and its original while it is held", async ({ page }, info) => {
   await setup(page);
   const cards = page.locator(".photo-compare");
   await expect(cards).toHaveCount(2, { timeout: 60_000 });
@@ -57,12 +73,20 @@ test("a compare block shows each retouched photo against its original: slide, ho
   await expect(first.locator(".photo-compare-note")).toHaveText("提亮人物，压回天空，自然磨皮");
   // Untitled photos are numbered.
   await expect(cards.nth(1).locator(".photo-compare-title")).toHaveText("第 2 张");
-  const stage = first.getByRole("slider", { name: "拖动对比原图和修后" });
+  const stage = first.getByRole("button", { name: "按住看原图" });
   await stage.scrollIntoViewIfNeeded();
-  await expect(stage).toHaveAttribute("aria-valuenow", "50");
+  await expect(stage).toHaveAttribute("aria-pressed", "false");
+  // Both pictures are loaded before anyone presses, so the original never flashes in blank.
   await expect.poll(() => first.locator("img").evaluateAll((imgs) => imgs.map((i) => (i as HTMLImageElement).naturalWidth))).toEqual([300, 300]);
-  await expect(first.locator(".photo-compare-label.before")).toHaveText("原图");
-  await expect(first.locator(".photo-compare-label.after")).toHaveText("修后");
+  // Nothing else to work: no slider, no mode switches.
+  await expect(first.getByRole("slider")).toHaveCount(0);
+  await expect(first.getByRole("button")).toHaveCount(2);
+  const hint = first.locator(".photo-compare-hint");
+  await expect(hint).toHaveText("按住看原图");
+  // A long press gets no system menu, no picture drag, no text selection.
+  expect(await stage.evaluate((el) => { const s = getComputedStyle(el) as CSSStyleDeclaration & { webkitTouchCallout?: string; webkitUserSelect?: string }; return [s.webkitTouchCallout ?? "none", s.userSelect || s.webkitUserSelect]; })).toEqual(["none", "none"]);
+  expect(await first.locator("img").evaluateAll((imgs) => imgs.map((i) => (i as HTMLImageElement).draggable))).toEqual([false, false]);
+  expect(await stage.evaluate((el) => !el.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true })))).toBe(true);
   // The frame takes the photo's shape.
   const box = (await stage.boundingBox())!;
   expect(Math.abs(box.width / box.height - 1.5)).toBeLessThan(0.03);
@@ -73,48 +97,38 @@ test("a compare block shows each retouched photo against its original: slide, ho
   expect(Math.abs(figure.width - box.width)).toBeLessThan(1);
   expect(box.height).toBeLessThanOrEqual(421);
 
-  // The original is left of the handle, the edit right of it.
-  const y = box.y + box.height * 0.6;
-
-  expect(await colorAt(page, box.x + box.width * 0.25, y)).toBe("original");
-  expect(await colorAt(page, box.x + box.width * 0.75, y)).toBe("edited");
-  // Tap or drag moves the handle.
-  await page.mouse.click(box.x + box.width * 0.1, y);
-  await expect.poll(async () => Number(await stage.getAttribute("aria-valuenow"))).toBeLessThan(15);
-  // Moving it never opens the message the comparison sits in.
-  await expect(page.locator(".full-message")).toHaveCount(0);
-  expect(await colorAt(page, box.x + box.width * 0.25, y)).toBe("edited");
-  await page.mouse.move(box.x + box.width * 0.2, y);
-  await page.mouse.down();
-  await page.mouse.move(box.x + box.width * 0.9, y, { steps: 5 });
-  await page.mouse.up();
-  await expect.poll(async () => Number(await stage.getAttribute("aria-valuenow"))).toBeGreaterThan(85);
-  expect(await colorAt(page, box.x + box.width * 0.75, y)).toBe("original");
-  // Keys too.
-  await stage.focus();
-  await page.keyboard.press("Home");
-  await expect(stage).toHaveAttribute("aria-valuenow", "0");
-  await page.keyboard.press("ArrowRight");
-  await expect(stage).toHaveAttribute("aria-valuenow", "5");
-
-  // Holding the button shows the whole original; letting go brings the edit back.
-  const hold = first.getByRole("button", { name: "按住看原图" });
-  const held = (await hold.boundingBox())!;
-  await page.mouse.move(held.x + held.width / 2, held.y + held.height / 2);
-  await page.mouse.down();
-  expect(await colorAt(page, box.x + box.width * 0.75, y)).toBe("original");
-  await page.mouse.up();
-  expect(await colorAt(page, box.x + box.width * 0.75, y)).toBe("edited");
-
-  // Side by side, and back.
-  await first.getByRole("button", { name: "并排看" }).click();
-  await expect(first.locator(".photo-compare-side img")).toHaveCount(2);
+  const x = box.x + box.width * 0.5, y = box.y + box.height * 0.6;
   await mkdir(evidence, { recursive: true });
-  await first.scrollIntoViewIfNeeded();
-  await page.screenshot({ path: `${evidence}/${info.project.name}-side.png` });
-  await first.getByRole("button", { name: "滑动对比" }).click();
-  await expect(first.getByRole("slider")).toBeVisible();
-  await page.screenshot({ path: `${evidence}/${info.project.name}-slider.png` });
+  // The edit shows by default.
+  expect(await colorAt(page, x, y)).toBe("edited");
+  // Pressing shows the original; letting go brings the edit back.
+  if (info.project.use.hasTouch) await finger(page, "down", x, y);
+  else { await page.mouse.move(x, y); await page.mouse.down(); }
+  await expect(stage).toHaveAttribute("aria-pressed", "true");
+  await expect(hint).toHaveText("原图");
+  expect(await colorAt(page, x, y)).toBe("original");
+  await page.screenshot({ path: `${evidence}/${info.project.name}-held.png` });
+  if (info.project.use.hasTouch) await finger(page, "up", x, y);
+  else await page.mouse.up();
+  await expect(stage).toHaveAttribute("aria-pressed", "false");
+  await expect(hint).toHaveText("按住看原图");
+  expect(await colorAt(page, x, y)).toBe("edited");
+  await page.screenshot({ path: `${evidence}/${info.project.name}-normal.png` });
+  // Pressing never opens the message the comparison sits in.
+  await expect(page.locator(".full-message")).toHaveCount(0);
+  // A press the browser takes over (a scroll, say) lets go too.
+  await stage.dispatchEvent("pointerdown", { pointerId: 7, pointerType: "touch", isPrimary: true, button: 0 });
+  await expect(stage).toHaveAttribute("aria-pressed", "true");
+  await stage.dispatchEvent("pointercancel", { pointerId: 7, pointerType: "touch" });
+  await expect(stage).toHaveAttribute("aria-pressed", "false");
+  // Holding Space shows the original too.
+  await stage.focus();
+  await page.keyboard.down(" ");
+  await expect(stage).toHaveAttribute("aria-pressed", "true");
+  expect(await colorAt(page, x, y)).toBe("original");
+  await page.keyboard.up(" ");
+  await expect(stage).toHaveAttribute("aria-pressed", "false");
+  expect(await colorAt(page, x, y)).toBe("edited");
 
   // Full size opens the edit in the file preview.
   await first.getByRole("button", { name: "查看大图" }).click();

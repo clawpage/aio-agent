@@ -3899,7 +3899,7 @@ button.clawpage-version-restore.danger { background:var(--error); border-color:v
 .product-page.prev { left: -6px; }
 .product-page.next { right: -6px; }
 @media (hover: hover) and (pointer: fine) { .product-page { display: flex; } }
-/* Before/after photo comparisons (```compare): the result under the original, a handle between them. */
+/* Before/after photo comparisons (```compare): the result, and the original while the picture is held. */
 .photo-compares { display: grid; gap: 20px; margin: 10px 0; }
 /*
  * A photo in the message, not a card around one: no frame of its own, the same height cap as an
@@ -3913,7 +3913,6 @@ button.clawpage-version-restore.danger { background:var(--error); border-color:v
   min-width: 0;
   max-width: calc(var(--compare-h) * var(--compare-r));
 }
-.photo-compare.side { max-width: none; }
 .photo-compare-title { font-weight: 600; margin: 0 0 6px; }
 .photo-compare-stage {
   position: relative;
@@ -3923,56 +3922,33 @@ button.clawpage-version-restore.danger { background:var(--error); border-color:v
   border-radius: 10px;
   background: var(--media-bg);
   box-shadow: 0 0 0 1px var(--border);
-  cursor: ew-resize;
-  /* Vertical swipes still scroll the conversation; sideways ones move the handle. */
+  cursor: pointer;
+  /* Swipes still scroll the conversation (and let go of the original); a long press shows no system menu. */
   touch-action: pan-y;
   user-select: none;
   -webkit-user-select: none;
   -webkit-touch-callout: none;
 }
 .photo-compare-stage:focus-visible { outline: 2px solid var(--ai); outline-offset: 2px; }
-.photo-compare-stage img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; pointer-events: none; }
+.photo-compare-stage img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; pointer-events: none; -webkit-user-drag: none; }
 .photo-compare-status { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; padding: 16px; text-align: center; }
-.photo-compare-label {
+.photo-compare-hint {
   position: absolute;
   top: 8px;
+  left: 8px;
+  max-width: calc(100% - 16px);
   padding: 2px 9px;
   line-height: 18px;
   border-radius: 999px;
   font-size: 12px;
   color: var(--on-media);
   background: var(--media-chip-strong);
-  transition: opacity 0.15s;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   pointer-events: none;
 }
-.photo-compare-label.before { left: 8px; }
-.photo-compare-label.after { right: 8px; }
-.photo-compare-handle { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: var(--on-media); box-shadow: 0 0 0 1px var(--media-hairline); pointer-events: none; }
-.photo-compare-handle span {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  width: 34px;
-  height: 34px;
-  margin: -17px 0 0 -17px;
-  border-radius: 50%;
-  background: var(--on-media);
-  box-shadow: 0 0 0 1px var(--media-ring), var(--shadow-chip);
-}
-.photo-compare-handle span::before, .photo-compare-handle span::after {
-  content: "";
-  position: absolute;
-  top: 12px;
-  border: 5px solid transparent;
-}
-.photo-compare-handle span::before { left: 3px; border-right-color: var(--media-bg); }
-.photo-compare-handle span::after { right: 3px; border-left-color: var(--media-bg); }
-.photo-compare-side { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; max-width: calc(2 * var(--compare-h) * var(--compare-r)); }
-.photo-compare-pane { position: relative; min-height: 120px; border-radius: 10px; overflow: hidden; background: var(--media-bg); box-shadow: 0 0 0 1px var(--border); }
-.photo-compare-pane img { display: block; width: 100%; height: 100%; max-height: var(--compare-h); object-fit: contain; }
 .photo-compare-bar { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
-.photo-compare-hold { user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; touch-action: none; }
-.photo-compare-hold[aria-pressed="true"] { background: var(--ai-soft); }
 .photo-compare-note { margin: 6px 0 0; color: var(--text-dim); font-size: 13px; }
 .product-card {
   display: flex;
