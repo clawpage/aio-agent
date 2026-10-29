@@ -171,7 +171,7 @@ it("reads finished tasks in batches when the sandbox is awake and nothing else r
     const work = await task("帮我查 Roy 的儿科诊所电话", "Bay Pediatrics 的电话是 650-555-0100。", { url: "https://baypeds.example/contact", content: "Call us: 650-555-0100. Open Mon-Fri." });
     const answers: string[] = [];
     let busy = false;
-    let state: "running" | "dozing" = "running";
+    let state: "running" | "dozing" | "parked" = "running";
     const codex = {
       maintainKb: vi.fn(async (prompt: string, _instructions: string, opts: { member: boolean; servers: Record<string, unknown> }) => {
         expect(opts.member).toBe(false);
@@ -187,9 +187,9 @@ it("reads finished tasks in batches when the sandbox is awake and nothing else r
     // A chat that used no tools is not worth reading.
     expect(pending.map((p) => p.task_id)).toEqual([work]);
 
-    state = "dozing";
+    state = "parked";
     expect(await m.run()).toBe(0);
-    state = "running"; busy = true;
+    state = "dozing"; busy = true;
     expect(await m.run()).toBe(0);
     busy = false;
     const packet = pending[0]!.id;

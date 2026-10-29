@@ -158,10 +158,13 @@ export class TaskKbMaintainer {
     this.#timer.unref?.();
   }
 
-  /** Whether a run may start now: an awake sandbox (never woken for this) and none of the account's tasks at work. */
+  /**
+   * Whether a run may start now: a running container (never started for this) and none of the account's
+   * tasks at work. Dozing counts: the container is up and only the browser, which the maintainer never
+   * touches, is released; an idle sandbox dozes within minutes, so "running" alone almost never holds.
+   */
   async #canRun(): Promise<boolean> {
-    const state = this.#d.idleState();
-    if (state && state !== "running") return false;
+    if (!awake(this.#d.idleState())) return false;
     return !(await this.#d.busy());
   }
 
@@ -373,8 +376,7 @@ export class TaskKbMaintainer {
   /** Bring the sandbox's kb/ files up to date, only while it is awake. */
   async #project(): Promise<void> {
     if (getMeta(this.#d.db, PROJECTION_DIRTY) !== "1") return;
-    const state = this.#d.idleState();
-    if (state && state !== "running") return;
+    if (!awake(this.#d.idleState())) return;
     try {
       await renderKbProjection({ db: this.#d.db, ownerId: this.#owner, workspaceDir: this.#d.cfg.sandbox.containerWorkspaceDir, container: this.#d.container });
       setMeta(this.#d.db, PROJECTION_DIRTY, "0");
@@ -389,6 +391,8 @@ export class TaskKbMaintainer {
     void this.#project();
   }
 }
+
+const awake = (state: SandboxIdleState | undefined) => !state || state === "running" || state === "dozing";
 
 /** The JSON object in a model answer, with or without a code fence or words around it. */
 export function parseAnswer(text: string | null): KbAnswer | null {
