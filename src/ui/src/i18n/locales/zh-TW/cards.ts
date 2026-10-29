@@ -40,6 +40,14 @@ export const cards: typeof zh = {
     loading: "正在載入圖片…",
     failed: "圖片暫時無法顯示",
   },
+  widget: {
+    label: (name: string) => `元件：${name}`,
+    loading: "正在載入元件…",
+    failed: "這個元件暫時無法顯示",
+    data: "查看資料",
+    busy: "同時進行的請求太多，請稍後再試",
+    callFailed: "請求失敗，請稍後再試",
+  },
   chart: {
     drawing: "正在繪製圖表…",
     failed: "這張圖表無法繪製",

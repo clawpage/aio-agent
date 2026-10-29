@@ -39,6 +39,14 @@ export const cards = {
     loading: "正在载入图片…",
     failed: "图片暂时无法显示",
   },
+  widget: {
+    label: (name: string) => `组件：${name}`,
+    loading: "正在加载组件…",
+    failed: "这个组件暂时无法显示",
+    data: "查看数据",
+    busy: "同时进行的请求太多，请稍后再试",
+    callFailed: "请求失败，请稍后再试",
+  },
   chart: {
     drawing: "正在绘制图表…",
     failed: "这张图表无法绘制",

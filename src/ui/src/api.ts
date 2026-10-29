@@ -309,6 +309,11 @@ export const api = {
   sandboxContext: () => request<{ context: string | null }>("/api/sandbox/context"),
 
   ticket: (next = "/") => request<{ ticket: string; origin: string; url: string; expiresAt: number }>("/api/workspace/ticket", { method: "POST", body: { next } }),
+  /** A message widget's calls (WidgetCard): the account's model, and a web fetch through the server. */
+  widgetAi: (name: string, args: Record<string, unknown>) =>
+    request<{ text: string; json?: unknown; model: string }>("/api/widgets/ai", { method: "POST", body: { ...args, name } }),
+  widgetFetch: (name: string, args: Record<string, unknown>) =>
+    request<{ status: number; url: string; contentType: string; text?: string; base64?: string; truncated: boolean }>("/api/widgets/fetch", { method: "POST", body: { ...args, name } }),
 
   upload: (file: File, dir?: string) =>
     new Promise<Attachment>((resolve, reject) => {

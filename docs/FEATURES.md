@@ -417,6 +417,7 @@ owner 容器休眠期间新成员的端口隔离规则先记下，容器下次�
 | SVG 图 | ```` ```svg ```` 或 `.svg` 文件 | 在 `<img>` 中绘制（不执行脚本、不加载外部资源），可全屏、下载为白底 PNG |
 | 流程图 | ```` ```mermaid ```` | 首次出现时按需加载 Mermaid（strict 安全级别），之后与 SVG 相同 |
 | 选项 | ```` ```choices ```` | 见[追问与选择](#追问与选择) |
+| 自建组件 | ```` ```widget ```` JSON | 见下方「自建组件」：本账号执行器发布的组件，带本条消息的数据嵌入 |
 
 - **图文卡片**：介绍或比较几样值得配图看的具体东西，代替宽表格：商品、酒店、餐厅、景点、活动、文章、视频、帖子、菜谱、App 等。
   `subtitle` 写来源或类别（商店、地点与类型、作者与网站），`tags` 是营业时间、距离、时长这类短标签（最多 4 个），`text` 是一两句介绍，
@@ -431,6 +432,22 @@ owner 容器休眠期间新成员的端口隔离规则先记下，容器下次�
   坐标只用查到的数值，查不到只给地址。
 - **SVG 与流程图**：SVG 最多 100 万字符，Mermaid 最多 2 万字符；画不出时显示源码。`/api/documents/image` 返回 SVG 时附加 `sandbox` CSP，
   服务端核对 `.svg` 内容确为 SVG。无固定宽度的图按消息宽度显示。流程、分支、时间线和关系图建议用 mermaid（竖屏优先 `flowchart TD`），其他示意图用 svg。
+- **自建组件（widgets）**：执行器在消息里需要更合适的呈现（看板、时间线、对比、进度、计算器、实时视图）时，可以自己做一个组件并复用。
+  沙箱 `widgets` skill 与 CLI（`/home/gem/.codex/tools/aio-widget/aio-widget.py`，两个执行器都装）：在 `/home/gem/workspace/widgets/<名字>/` 写 `index.html` 与
+  `widget.json`（`title`、`description`：显示什么与数据的完整形状、`example`：示例数据），`preview` 用沙箱无头 Chromium 按示例数据出图自查（默认 390 宽，可 `--width`/`--dark`），
+  `publish` 经成员网关 `/share/<账号>/widgets/<名字>`（与 clawpages 同一个分享令牌）发布到宿主 `<PA_DATA_DIR>/widgets/<账号>/<名字>/`（同名整体替换；每个组件 ≤50 个文件、5 MB，每账号 ≤100 个），
+  `pull`/`list`/`delete` 同理。组件**只属于本账号**：执行提示词列出本账号的组件（最近改的 20 个，名字、标题、说明），要求先复用或改进已有的，改动保持数据形状向后兼容（旧消息仍用旧数据）。
+  消息里写 ```` ```widget {"component": 名字, "title"?: 标题, "data": 数据} ```` 嵌入（名字不合法或 JSON 坏了按代码块显示）。
+  控制台（`src/ui/src/widgetBlocks.ts`、`components/WidgetCard.tsx`）在卡片进入视野附近时申请伴随站票据，把 `https://<工作区域名>/u/<用户名>/widgets/<名字>/` 放进
+  `sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox allow-forms"` 的 iframe：只有该账号的工作区会话能取到（其他账号 401），响应带 `sandbox` CSP（不透明来源，
+  拿不到工作区 cookie、不能同源调用）与只允许主站嵌入的 `frame-ancestors`；不读沙箱，显示消息不会唤醒沙箱。服务端在页面 `<head>` 最前注入运行时
+  （`src/control/widgetRuntime.ts`，`window.aio`），运行时只与外层控制台用 postMessage 通信（控制台只认来自该 iframe 的消息）：
+  控制台交给它消息里的 `data`、标题、账号（`user`）、界面语言和主题（`--aio-bg`/`--aio-surface`/`--aio-text`/`--aio-accent` 等具体色值，跟随深浅切换）；高度随内容自适应（60–1600 px）；
+  并代为调用本账号被允许的能力：`aio.ai.ask` → `POST /api/widgets/ai`（本账号的模型，与 clawpage `.ai` 相同：无工具、无记忆，用量记本账号，每分钟 20 次），
+  `aio.fetch` → `POST /api/widgets/fetch`（由本账号沙箱发出，只许公网地址、每次重定向都复查，≤2 MB，不带浏览器 cookie，每分钟 60 次；不许设置 Host、Cookie 等头），
+  `aio.send(text)` 把文字放进主会话输入框（接在已有文字后、聚焦，**由人确认发送**，不自动发出），`aio.open(url)` 新标签页打开 http(s) 链接。
+  组件页面本身也能直接联网（CSP 不限制连接，受各站 CORS 约束）。伴随站对写请求与 WebSocket 都核对 Origin，组件的不透明来源（`null`）够不到终端、文件等沙箱入口。
+  票据失败或 12 秒内没有握手时卡片显示一行提示，并可展开原始数据，不影响消息其余部分；每张卡片同时最多 4 个调用。主控制台 `GET /api/widgets` 列出本账号的组件。
 
 ### 链接
 

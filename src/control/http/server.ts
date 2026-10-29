@@ -11,7 +11,7 @@ import { currentLocale, requestLocale, runInLocale, t } from "../i18n/index.js";
 
 
 /** Control API calls served by the sandbox; a container stopped for idleness starts first. */
-const SANDBOX_API = /^\/(files|documents|sandbox|models)(\/|$)|^\/browser\/(?!status$)|^\/tasks\/[^/]+\/browser/;
+const SANDBOX_API = /^\/(files|documents|sandbox|models)(\/|$)|^\/widgets\/fetch$|^\/browser\/(?!status$)|^\/tasks\/[^/]+\/browser/;
 
 /** Only a page load (a person opening or reloading a workspace page) may start a stopped container. */
 function isNavigation(req: import("node:http").IncomingMessage): boolean {
@@ -88,6 +88,8 @@ export function createApp(ctx: AppContext): express.Express {
 
   // Public share pages: the one unauthenticated path on the workspace origin, served in a CSP sandbox.
   app.use((req: Request, res: Response, next: NextFunction) => (ctx.share ? ctx.share.serve()(req, res, next) : next()));
+  // The account's own widgets, framed in its main session: a workspace session of that account only.
+  app.use((req: Request, res: Response, next: NextFunction) => (ctx.share?.widgets ? ctx.share.widgets.serve()(req, res, next) : next()));
 
   // Minimal, unauthenticated liveness/readiness. No identities, ids or errors.
   app.get("/healthz", (_req, res) => {

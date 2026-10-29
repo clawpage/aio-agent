@@ -22,7 +22,8 @@ import { Dictation, DictationError, DICTATION_MAX_CHARS } from "../dictation.js"
 import { VoiceLog, type VoiceRecord } from "../voiceLog.js";
 import type { AppContext } from "../context.js";
 import { DataError } from "../clawpages.js";
-import { SHARE_NAME } from "../share.js";
+import { SHARE_NAME, aiInput, parseJsonAnswer } from "../share.js";
+import { AiError } from "../clawpageAi.js";
 import {
   InvalidConversationTitleError,
   normalizeConversationTitle,
@@ -46,7 +47,7 @@ import { audit } from "../db.js";
 import { dispatchLog, recallStats } from "../tasks/recall.js";
 import { PERSON_KEY } from "../browser/tabs.js";
 import { normalizeSite, vaultLogin, VaultError, type Vault } from "../vault.js";
-import { DocumentError } from "../documents/service.js";
+import { DocumentError, WEB_FETCH_LIMITS, type WebFetchRequest } from "../documents/service.js";
 import { isLocale, type Locale } from "../locale.js";
 import { t } from "../i18n/index.js";
 import { deleteKbNode } from "../taskKb/kernel.js";
@@ -707,6 +708,56 @@ export function createApiRouter(context: AppContext): Router {
     }
   };
   const owner = { owner: true };
+  // ------------------------------------------------------------ widgets
+  // The console relays what a widget framed in a message may ask (widgets.ts): answers from
+  // this account's AI and web requests made from its sandbox, both counted and limited per account.
+  router.get("/widgets", requireKind("primary"), requireSession, (req, res) => {
+    res.setHeader("Cache-Control", "no-store");
+    res.json({ widgets: context.share?.widgets?.list(ctxOf(req).session!.ownerId) ?? [] });
+  });
+  const widgetCall = (req: Request, res: Response, kind: "ai" | "fetch", perMinute: number) => {
+    const userId = ctxOf(req).session!.ownerId;
+    const name = String(req.body?.name ?? "");
+    const widgets = context.share?.widgets;
+    res.setHeader("Cache-Control", "no-store");
+    if (!widgets || !widgets.get(userId, name)) { res.status(404).json({ error: "WIDGET_NOT_FOUND", message: "The widget does not exist" }); return null; }
+    if (!widgets.allow(userId, kind, perMinute)) { res.status(429).json({ error: "RATE_LIMITED", message: "Too many requests; try again in a minute" }); return null; }
+    return { userId, widget: widgets.get(userId, name)! };
+  };
+  router.post("/widgets/ai", requireKind("primary"), requireSession, async (req, res) => {
+    const call = widgetCall(req, res, "ai", 20);
+    if (!call) return;
+    const ai = context.share?.ai;
+    if (!ai) { res.status(503).json({ error: "AI_UNAVAILABLE", message: "This deployment offers no AI answers" }); return; }
+    try {
+      const ask = aiInput({ ...req.body, prompt: undefined });
+      const extra = typeof req.body?.system === "string" ? req.body.system.trim().slice(0, 32 * 1024) : "";
+      const system = [
+        `You answer requests from "${call.widget.title}", a widget in this person's own Clawpage Agent console, for them, on their own AI.`,
+        "You have no tools: you cannot browse, run code, look anything up or remember earlier requests; everything you know is in this prompt and the messages.",
+        "Answer only what the widget asks, in the language its instructions or the person's text call for.",
+        ...(ask.json ? ["Reply with exactly one JSON object and nothing else: no code fences, no text before or after it."] : []),
+        ...(extra ? ["", "The widget's instructions:", "", extra] : []),
+      ].join("\n");
+      const answer = await ai.answer(call.userId, { system, messages: ask.messages, effort: ask.effort });
+      res.json({ text: answer.text, ...(ask.json ? { json: parseJsonAnswer(answer.text) } : {}), model: answer.model });
+    } catch (err) {
+      if (err instanceof DataError || err instanceof AiError) res.status(err.status).json({ error: err.code, message: err.message });
+      else res.status(500).json({ error: "AI_FAILED", message: "The request failed" });
+    }
+  });
+  router.post("/widgets/fetch", requireKind("primary"), requireSession, async (req, res) => {
+    const spec = webFetchSpec(req.body);
+    if (typeof spec === "string") { res.status(400).json({ error: "INVALID_REQUEST", message: spec }); return; }
+    if (!widgetCall(req, res, "fetch", 60)) return;
+    try {
+      res.json(await context.documents.webFetch(spec));
+    } catch (err) {
+      const status = err instanceof DocumentError ? err.status : 502;
+      res.status(status).json({ error: status === 403 ? "BLOCKED" : "FETCH_FAILED", message: err instanceof Error ? err.message : "The address could not be fetched" });
+    }
+  });
+
   router.get("/clawpages", requireKind("primary"), requireSession, (req, res) => {
     res.setHeader("Cache-Control", "no-store");
     res.json({ pages: context.share?.data ? context.share.list(ctxOf(req).session!.ownerId) : [] });
@@ -3043,3 +3094,26 @@ function summarize(value: unknown): unknown {
 }
 
 export { asyncHandler, requireKind, requireSession, ctxOf, audit };
+
+const FETCH_METHODS = new Set(["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"]);
+/** Headers a widget's request may not set: the ones that say who is asking or how the bytes travel. */
+const FETCH_HEADERS_DROPPED = /^(host|cookie|content-length|connection|transfer-encoding|proxy-.*|te|upgrade|expect)$/i;
+
+/** A widget's web request, checked; a string says what is wrong with it. */
+export function webFetchSpec(body: Record<string, unknown> | undefined): WebFetchRequest | string {
+  const url = typeof body?.url === "string" ? body.url : "";
+  if (!/^https?:\/\//i.test(url) || url.length > 4096) return "url must be an http(s) address";
+  const method = typeof body?.method === "string" ? body.method.toUpperCase() : "GET";
+  if (!FETCH_METHODS.has(method)) return `method is one of ${[...FETCH_METHODS].join(", ")}`;
+  const headers: Record<string, string> = {};
+  const given = body?.headers ?? {};
+  if (typeof given !== "object" || given === null || Array.isArray(given) || Object.keys(given).length > 30) return "headers is an object of at most 30 text values";
+  for (const [k, v] of Object.entries(given)) {
+    if (!/^[A-Za-z0-9!#$%&'*+.^_`|~-]{1,64}$/.test(k) || typeof v !== "string" || v.length > 8192 || /[\r\n]/.test(v)) return `invalid header: ${k.slice(0, 64)}`;
+    if (!FETCH_HEADERS_DROPPED.test(k)) headers[k] = v;
+  }
+  const raw = body?.body;
+  if (raw !== undefined && raw !== null && typeof raw !== "string") return "body is text (JSON.stringify an object first)";
+  if (typeof raw === "string" && raw.length > WEB_FETCH_LIMITS.body) return `body is at most ${WEB_FETCH_LIMITS.body / 1024} KB`;
+  return { url, method, headers, body: typeof raw === "string" && method !== "GET" && method !== "HEAD" ? raw : null };
+}

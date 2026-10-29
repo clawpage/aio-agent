@@ -66,6 +66,54 @@ if len(data) > limit:
 sys.stdout.write(base64.b64encode(data).decode())
 `;
 
+/** A widget's web request (widgets.ts), made from the sandbox: the request arrives as JSON on stdin. */
+export const WEB_FETCH_LIMITS = { bytes: 2 * 1024 * 1024, body: 256 * 1024, timeoutMs: 20_000 };
+export const WEB_FETCH_SCRIPT = `import base64, ipaddress, json, socket, sys, urllib.error, urllib.parse, urllib.request
+limit = ${WEB_FETCH_LIMITS.bytes}
+spec = json.load(sys.stdin)
+def public(url):
+    u = urllib.parse.urlsplit(url)
+    if u.scheme not in ("http", "https") or not u.hostname or u.username or u.password:
+        return False
+    try:
+        infos = socket.getaddrinfo(u.hostname, u.port or (443 if u.scheme == "https" else 80))
+    except Exception:
+        return False
+    return all(ipaddress.ip_address(i[4][0].split("%")[0]).is_global for i in infos)
+class Redirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        if not public(newurl):
+            raise urllib.error.URLError("blocked")
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+def out(o, code=0):
+    sys.stdout.write(json.dumps(o)); sys.exit(code)
+if not public(spec["url"]):
+    out({"error": "BLOCKED"}, 4)
+body = spec.get("body")
+req = urllib.request.Request(spec["url"], data=None if body is None else body.encode(), method=spec.get("method", "GET"), headers=spec.get("headers", {}))
+req.add_header("User-Agent", spec.get("headers", {}).get("User-Agent") or "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36")
+try:
+    r = urllib.request.build_opener(Redirect).open(req, timeout=${WEB_FETCH_LIMITS.timeoutMs / 1000 - 2})
+except urllib.error.HTTPError as e:
+    r = e
+except Exception as e:
+    out({"error": "BLOCKED" if "blocked" in str(e) else "FETCH_FAILED", "detail": type(e).__name__}, 2)
+data = r.read(limit + 1)
+ctype = r.headers.get("content-type", "") if r.headers else ""
+res = {"status": r.status if hasattr(r, "status") else r.code, "url": r.geturl(), "contentType": ctype, "truncated": len(data) > limit}
+data = data[:limit]
+textual = ctype.split(";")[0].strip().lower()
+if textual.startswith("text/") or textual.endswith("json") or textual.endswith("xml") or textual in ("application/javascript", "application/x-www-form-urlencoded", ""):
+    res["text"] = data.decode(r.headers.get_content_charset() or "utf-8", "replace") if r.headers else data.decode("utf-8", "replace")
+else:
+    res["base64"] = base64.b64encode(data).decode()
+out(res)
+`;
+
+/** What a widget's web request may say: http(s) to a public address, GET/POST/PUT/PATCH/DELETE/HEAD, plain headers, a text body. */
+export interface WebFetchRequest { url: string; method: string; headers: Record<string, string>; body: string | null }
+export interface WebFetchResult { status: number; url: string; contentType: string; truncated: boolean; text?: string; base64?: string }
+
 /**
  * Identify an image by its leading bytes. The extension already said "image";
  * this is what stops a file that merely *ends* in `.png` from being served with
@@ -1116,6 +1164,20 @@ print("venv" if venv_python else "novenv")
     const image = { bytes, contentType: contentType! };
     remember(image);
     return image;
+  }
+
+  /**
+   * A widget's web request, made from the account's sandbox (its network, never the host's) to
+   * public addresses only, checked again at every redirect. The answer comes back as text, or
+   * as base64 for anything that is not text.
+   */
+  async webFetch(spec: WebFetchRequest): Promise<WebFetchResult> {
+    const result = await this.#container.execInSandbox(["python3", "-c", WEB_FETCH_SCRIPT], { stdin: JSON.stringify(spec), timeoutMs: WEB_FETCH_LIMITS.timeoutMs });
+    let parsed: Record<string, unknown> | null = null;
+    try { parsed = JSON.parse(result.stdout) as Record<string, unknown>; } catch { /* reported below */ }
+    if (result.code === 4 || parsed?.error === "BLOCKED") throw new DocumentError("bad_request", "Only public web addresses can be fetched", 403);
+    if (result.code !== 0 || !parsed || typeof parsed.status !== "number") throw new DocumentError("fetch_failed", "The address could not be fetched", 502);
+    return parsed as unknown as WebFetchResult;
   }
 
   /** Drop one file's cached renders (used after a document-tool write). */

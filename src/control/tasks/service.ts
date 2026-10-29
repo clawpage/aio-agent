@@ -19,6 +19,7 @@ import { describeNow, describeSchedule, formatWhen, MAX_ACTIVE_SCHEDULES, nextRu
 import type { PlanningSchedule, ScheduleActionName } from "./planning.js";
 import { answerLanguage, isLocale, readLocale, writeLocale, type Locale } from "../locale.js";
 import type { SharePage } from "../share.js";
+import type { Widget } from "../widgets.js";
 import { t } from "../i18n/index.js";
 import { kbBrief, kbEnabled } from "../taskKb/read.js";
 import { MAX_ATTACHMENTS } from "../../common/attachments.js";
@@ -124,6 +125,8 @@ export interface TaskInput {
     locale?: string | null;
 }
 const TERMINAL = new Set(["completed", "failed", "interrupted", "unknown"]);
+/** How many widgets an execution prompt names. */
+const WIDGETS_SHOWN = 20;
 /** How many clawpages an execution prompt names. */
 const CLAWPAGES_SHOWN = 12;
 /** The task list's keyset cursor: [rank, time, id] of the last row a page held. */
@@ -233,6 +236,19 @@ export class TaskService {
             ? `; tables: ${p.tables.map(t => `${t.name} (${t.permission}, ${t.records} records${t.records ? `, last change ${when(t.updatedAt)}` : ""})`).join(", ")}`
             : "; no data tables"}`);
         return [`The user's clawpages (web pages and mini apps published for them; ${pages.length} in all${pages.length > shown.length ? `, the ${shown.length} most recently active listed` : ""}). When this message is about one of them, work on that clawpage with the clawpages skill: read or change its data with its data commands, and to change the page, pull it, edit, and publish again under the same name so the link stays. The data reflects what visitors and the user did since; it is the user's, so do not delete or overwrite it unless asked. A page with collaborators is also changed by other people's agents: pull it before changing it:`, ...lines].join("\n");
+    }
+    /** The account's widgets, so its executor reuses and improves them instead of building another. */
+    setWidgets(list: ((userId: string) => Widget[]) | null): void { this.#widgets = list; }
+    #widgets: ((userId: string) => Widget[]) | null = null;
+    private widgetsNote(row: TaskRow): string | null {
+        if (!this.#widgets) return null;
+        let widgets: Widget[];
+        try { widgets = this.#widgets(this.ownerId(row)); } catch { return null; }
+        const intro = "Widgets: when content would read better as an interactive or visual component than as text (a board, timeline, comparison, tracker, calculator, live view), show it with a widget block in your reply; the widgets skill says how to build, publish and embed one.";
+        if (!widgets.length) return intro;
+        const shown = widgets.slice(0, WIDGETS_SHOWN);
+        return [`${intro} The user's widgets (${widgets.length}${widgets.length > shown.length ? `, the ${shown.length} most recently changed listed` : ""}); reuse or improve one that fits before building a new one:`,
+            ...shown.map(w => `- ${w.name} "${w.title}": ${w.description.replace(/\s+/g, " ").slice(0, 300)}`)].join("\n");
     }
     /** Tell the notifier about a status this task just reached, if it is news for the person. */
     private notifyChange(id: string, before: string): void {
@@ -1062,6 +1078,7 @@ export class TaskService {
                 ...(row.schedule_id ? [this.scheduledRunNote(row)] : []),
                 `The user's current time: ${describeNow(Date.now(), this.cfg.browser.timezone)} (${this.cfg.browser.timezone}).`,
                 ...(() => { const note = this.clawpagesNote(row); return note ? [note] : []; })(),
+                ...(() => { const note = this.widgetsNote(row); return note ? [note] : []; })(),
                 "The user's task this time:", this.taskContext(row),
                 answerLanguage(this.locale(), !row.schedule_id),
             ].join("\n\n");

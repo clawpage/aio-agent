@@ -10,6 +10,7 @@ import type { Attachment, Task } from "../types";
 import { AttachmentCards, MessageFileCards } from "./Chat";
 import { DispatchLog } from "./DispatchLog";
 import { Markdown } from "./Markdown";
+import { WidgetComposer } from "./WidgetCard";
 import { ChoiceList } from "./ChoiceList";
 import { FilePreview } from "./FilePreview";
 import { TaskBrowser } from "./TaskBrowser";
@@ -91,6 +92,11 @@ export function TaskChat({ onDetails, onOpenLink, onOpenFileInBrowser, onExpired
     const stick = useRef(true);
     const input = useRef<HTMLTextAreaElement>(null);
     useComposerHeight(input, draft);
+    /** A widget's `send`: its text goes into the composer, after what is already there, for the person to send. */
+    const fillComposer = useCallback((text: string) => {
+        setDraft(old => (old.trim() ? `${old.replace(/\s+$/, "")}\n${text}` : text));
+        input.current?.focus();
+    }, []);
     const pageLoaded = useRef(false);
     const callbacks = useRef({ onExpired });
     callbacks.current = { onExpired };
@@ -539,7 +545,7 @@ export function TaskChat({ onDetails, onOpenLink, onOpenFileInBrowser, onExpired
     }, []);
     const feed = tasks.flatMap(t => [{ task: t, report: false, at: t.createdAt }, ...(!t.mergedInto && terminal.has(t.status) ? [{ task: t, report: true, at: t.completedAt ?? t.createdAt }] : draftOf(t) ? [{ task: t, report: true, at: Number.MAX_SAFE_INTEGER }] : [])])
         .sort((a, b) => a.at - b.at || Number(a.report) - Number(b.report) || a.task.id.localeCompare(b.task.id));
-    return <section className="chat task-chat">
+    return <WidgetComposer.Provider value={fillComposer}><section className="chat task-chat">
     {reportedTask && <SupportDialog taskId={reportedTask} onClose={() => setReportedTask(null)}/>}
     <header className="chat-head"><div className="chat-title"><h2>{i18n.feed.head.title}</h2><span className={`dot ${connected ? "ok" : "warn"}`}/><span className="chat-sub">{active.length || awaiting.length
         ? <TurnPills onJump={showWaiting} groups={[
@@ -616,5 +622,5 @@ export function TaskChat({ onDetails, onOpenLink, onOpenFileInBrowser, onExpired
     </div>
     <PopupPresence>{preview && <FilePreview path={preview} onClose={() => setPreview(null)} onOpenLink={onOpenLink} onOpenInBrowser={onOpenFileInBrowser}/>}</PopupPresence>
     <PopupPresence>{debug && dispatchLogFor && <DispatchLog taskId={dispatchLogFor} onClose={() => setDispatchLogFor(null)}/>}</PopupPresence>
-  </section>;
+  </section></WidgetComposer.Provider>;
 }

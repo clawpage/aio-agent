@@ -3120,3 +3120,217 @@ python3 ${cliPath} propose '{"type":"correct","task":"<this task id>","target":"
 Evidence must be the exact words, from a file in this task's directory (\`path\`), a page this task opened (\`url\`), or the user's own words in this task. Never propose passwords, codes, identity or card numbers, or one-off details.
 `;
 }
+
+/**
+ * Widgets: components the executor builds for the main session (control widgets.ts). The CLI
+ * publishes a folder through the member gateway with the share token; `preview` renders it with
+ * its example data in the sandbox's headless Chromium, so the executor sees what it built.
+ */
+export const WIDGET_TOOL_DIR = "tools/aio-widget";
+export const WIDGET_SKILL_DIR = "skills/widgets";
+export const WIDGET_CLI_PY = String.raw`#!/usr/bin/env python3
+"""aio-widget: build, publish and manage widgets for the main session (Clawpage Agent)."""
+import argparse, base64, json, os, re, subprocess, sys, urllib.error, urllib.request
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+CONFIG = os.path.join(HERE, "config.json")
+RUNTIME = os.path.join(HERE, "widget-runtime.js")
+RENDERER = os.path.join(os.path.dirname(HERE), "aio-graphic", "aio-render.py")
+ROOT = os.environ.get("AIO_WIDGET_ROOT") or "/home/gem/workspace/widgets"
+NAME = re.compile(r"^[a-z0-9][a-z0-9-]{0,62}$")
+MAX_FILES, MAX_BYTES = 50, 5 * 1024 * 1024
+META = "widget.json"
+FENCE = chr(96) * 3
+
+
+def fail(message):
+    print(json.dumps({"ok": False, "error": message}, ensure_ascii=False))
+    sys.exit(1)
+
+
+def api(method, path="", body=None):
+    try:
+        cfg = json.load(open(CONFIG))
+    except Exception:
+        fail("widgets are not available in this sandbox (WIDGETS_NOT_CONFIGURED)")
+    data = None if body is None else json.dumps(body).encode()
+    req = urllib.request.Request(cfg["endpoint"] + "/widgets" + path, data=data, method=method,
+                                 headers={"authorization": "Bearer " + cfg["token"], "content-type": "application/json", "user-agent": "aio-widget/1 (Clawpage Agent)"})
+    try:
+        with urllib.request.urlopen(req, timeout=60) as res:
+            raw = res.read()
+            return json.loads(raw) if raw else {}
+    except urllib.error.HTTPError as e:
+        try:
+            fail(json.loads(e.read()).get("error") or ("HTTP %d" % e.code))
+        except ValueError:
+            fail("HTTP %d" % e.code)
+    except urllib.error.URLError as e:
+        fail("the widget service could not be reached: %s" % e.reason)
+
+
+def folder(path):
+    path = os.path.abspath(path)
+    if not os.path.isfile(os.path.join(path, "index.html")):
+        fail("%s has no index.html" % path)
+    try:
+        meta = json.load(open(os.path.join(path, META)))
+    except FileNotFoundError:
+        fail("%s has no %s (title, description, example)" % (path, META))
+    except ValueError as e:
+        fail("%s is not valid JSON: %s" % (META, e))
+    return path, meta
+
+
+def publish(args):
+    path, meta = folder(args.dir)
+    name = args.name or os.path.basename(path)
+    if not NAME.match(name):
+        fail("the widget name (the folder name or --name) can only use lowercase letters, digits and hyphens")
+    if not str(meta.get("description") or "").strip():
+        fail("%s needs a description: what the widget shows and the shape of its data" % META)
+    files, size = [], 0
+    for base, dirs, names in os.walk(path):
+        dirs[:] = sorted(d for d in dirs if not d.startswith("."))
+        for n in sorted(names):
+            if n.startswith(".") or (base == path and n == META):
+                continue
+            full = os.path.join(base, n)
+            data = open(full, "rb").read()
+            size += len(data)
+            files.append({"path": os.path.relpath(full, path), "data": base64.b64encode(data).decode()})
+    if len(files) > MAX_FILES or size > MAX_BYTES:
+        fail("a widget holds at most %d files and %d MB" % (MAX_FILES, MAX_BYTES // 1024 // 1024))
+    out = api("POST", "/" + name, {"title": meta.get("title"), "description": meta.get("description"), "example": meta.get("example"), "files": files})
+    out["ok"] = True
+    out["embed"] = FENCE + "widget\n" + json.dumps({"component": name, "data": "<the data, shaped like the example>"}, ensure_ascii=False) + "\n" + FENCE
+    print(json.dumps(out, ensure_ascii=False))
+
+
+def pull(args):
+    if not NAME.match(args.name):
+        fail("invalid widget name")
+    got = api("GET", "/" + args.name + "/files")
+    target = os.path.join(ROOT, args.name)
+    if os.path.isdir(target) and os.listdir(target) and not args.force:
+        fail("%s already has files; pass --force to replace them" % target)
+    os.makedirs(target, exist_ok=True)
+    for f in got.get("files", []):
+        full = os.path.normpath(os.path.join(target, f["path"]))
+        if not full.startswith(target + os.sep):
+            continue
+        os.makedirs(os.path.dirname(full), exist_ok=True)
+        open(full, "wb").write(base64.b64decode(f["data"]))
+    json.dump({"title": got.get("title"), "description": got.get("description"), "example": got.get("example")}, open(os.path.join(target, META), "w"), ensure_ascii=False, indent=2)
+    print(json.dumps({"ok": True, "dir": target, "files": len(got.get("files", []))}, ensure_ascii=False))
+
+
+DARK = ("<script>(function(){var r=document.documentElement,v={'--aio-bg':'#17171c','--aio-surface':'#202028','--aio-text':'#ececf1',"
+        "'--aio-muted':'#9a9aa8','--aio-border':'#33333d'};r.setAttribute('data-theme','dark');for(var k in v)r.style.setProperty(k,v[k]);"
+        "r.style.background='#17171c'})()</script>")
+
+
+def preview(args):
+    path, meta = folder(args.dir)
+    html = open(os.path.join(path, "index.html"), encoding="utf-8").read()
+    data = meta.get("example") if args.data is None else json.load(open(args.data))
+    tag = "<script>window.__aioExample=" + json.dumps(data, ensure_ascii=False).replace("<", "\\u003c") + ";" + open(RUNTIME).read() + "</script>"
+    if args.dark:
+        tag += DARK
+    m = re.search(r"<head(\s[^>]*)?>", html, re.I)
+    html = html[:m.end()] + tag + html[m.end():] if m else tag + html
+    # Beside index.html, so the widget's own relative files load.
+    page = os.path.join(path, ".preview.html")
+    open(page, "w", encoding="utf-8").write(html)
+    png = args.png or os.path.join("/tmp", "widget-%s-%d%s.png" % (os.path.basename(path), args.width, "-dark" if args.dark else ""))
+    try:
+        r = subprocess.run([sys.executable, RENDERER, page, png, "--width", str(args.width), "--scale", "2"], capture_output=True, text=True, timeout=120)
+    finally:
+        os.remove(page)
+    if r.returncode != 0:
+        fail("render failed: %s" % (r.stderr or r.stdout).strip()[-400:])
+    print(json.dumps({"ok": True, "png": png, "width": args.width, "render": (r.stdout.strip().splitlines() or [""])[-1][:2000]}, ensure_ascii=False))
+
+
+def main():
+    p = argparse.ArgumentParser(prog="aio-widget", description="Widgets: reusable components the main session shows inside messages.")
+    sub = p.add_subparsers(dest="cmd", required=True)
+    sub.add_parser("list", help="the account's widgets")
+    s = sub.add_parser("publish", help="publish a widget folder (index.html + widget.json); the same name replaces it")
+    s.add_argument("dir")
+    s.add_argument("--name")
+    s = sub.add_parser("pull", help="fetch a published widget into /home/gem/workspace/widgets/<name>")
+    s.add_argument("name")
+    s.add_argument("--force", action="store_true")
+    s = sub.add_parser("delete", help="delete a widget (messages that use it then show its raw data)")
+    s.add_argument("name")
+    s = sub.add_parser("preview", help="render the folder with its example data to a PNG, to look at")
+    s.add_argument("dir")
+    s.add_argument("--data", help="a JSON file to show instead of the example")
+    s.add_argument("--width", type=int, default=390, help="CSS width (390 = phone; also try 720)")
+    s.add_argument("--dark", action="store_true")
+    s.add_argument("--png")
+    args = p.parse_args()
+    if args.cmd == "list":
+        print(json.dumps(api("GET"), ensure_ascii=False))
+    elif args.cmd == "publish":
+        publish(args)
+    elif args.cmd == "pull":
+        pull(args)
+    elif args.cmd == "delete":
+        api("DELETE", "/" + args.name)
+        print(json.dumps({"ok": True}))
+    elif args.cmd == "preview":
+        preview(args)
+
+
+if __name__ == "__main__":
+    main()
+`;
+
+export const WIDGET_SKILL_MD = `---
+name: widgets
+description: Build and embed widgets — reusable HTML components the main session shows inside your reply (boards, timelines, comparisons, trackers, calculators, live views). Use when content would read better as a visual or interactive component than as text, when the user asks for a component, card or view, or to reuse or improve one of the user's existing widgets.
+---
+
+# Widgets
+
+A widget is a small web component the user's main session renders inside a message. Build it once (a folder with \`index.html\`), publish it, and from then on any reply in this account can show it with fresh data by including a fenced block in the reply:
+
+    \`\`\`widget
+    {"component": "flight-board", "title": "Flights this week", "data": {"flights": [{"no": "UA 857", "from": "SFO", "to": "PVG", "dep": "2026-11-02T11:05", "status": "On time"}]}}
+    \`\`\`
+
+The block is the whole embed: the data the widget needs goes in \`data\` (keep it under about 50 KB). Write the reply so it still makes sense if the widget fails to load (a sentence of summary next to it). Prefer the built-in blocks when they fit (chart, map, products, mermaid, choices); build a widget when they do not, or when the same kind of content will come back.
+
+Widgets belong to this account only. The prompt lists the existing ones: reuse or improve one before making another. Changing a widget changes every earlier message that uses it, so keep its data shape backward compatible (add optional fields; never rename or remove one).
+
+## Build
+
+\`CLI="python3 /home/gem/.codex/tools/aio-widget/aio-widget.py"\`
+
+1. Folder \`/home/gem/workspace/widgets/<name>/\` (name: lowercase letters, digits, hyphens), or \`$CLI pull <name>\` to change an existing one.
+2. \`index.html\`: self-contained is best (inline CSS and JS); libraries from a CDN (jsDelivr, cdnjs, unpkg) and other files in the folder also work.
+3. \`widget.json\`: \`{"title": "...", "description": "what it shows and the exact shape of data, every field", "example": {realistic data}}\`. The description is what later tasks read to reuse it.
+4. \`$CLI preview <dir>\` (390 px wide; also \`--width 720\` and \`--dark\`) renders it with the example data to a PNG: look at the PNG and fix what is wrong before publishing.
+5. \`$CLI publish <dir>\` (the same name replaces it), then embed it. Also \`$CLI list\`, \`$CLI delete <name>\`.
+
+## The runtime: window.aio
+
+The page has \`window.aio\` before its own scripts run:
+
+- \`aio.onData(data => render(data))\`: called with the block's \`data\` (in a preview, the example). \`aio.title\`, \`aio.user\` ({username, name}), \`aio.locale\` (e.g. "zh", "en"; write labels in that language).
+- Theme: style with the CSS variables \`--aio-bg --aio-surface --aio-text --aio-muted --aio-border --aio-accent --aio-attention --aio-success --aio-danger --aio-font --aio-radius\` (light and dark follow the console). The body is transparent, the message card is the background; use \`--aio-surface\` for inner panels. \`aio.onTheme(theme => ...)\` for canvas or chart colors.
+- Size: the frame follows the page's height by itself; never use \`100vh\` or heights over about 900 px. The width is the message width (360 to 760 px): design phone-first, no horizontal scrolling.
+- \`await aio.ai.ask(input or messages, {system, json: true, effort: "low"})\` gives \`{text, json}\`: an answer from the user's own AI (no tools, no memory; about 20 a minute).
+- \`await aio.fetch(url, {method, headers, body})\` gives \`{status, url, contentType, text or base64, truncated}\`: a web request made from this sandbox (public addresses only, at most 2 MB, no browser cookies; about 60 a minute). For live data such as prices, status pages and APIs. A plain \`fetch()\` from the page also works for APIs that allow any origin.
+- \`aio.send(text)\`: puts text in the user's input box for them to send to the main session (the user confirms it). For buttons like "Book this one" or "Explain this row".
+- \`aio.open(url)\`: opens a link in a new tab.
+- Errors from ai and fetch carry \`err.code\` (RATE_LIMITED, BLOCKED, FETCH_FAILED, AI_BUSY, PREVIEW in a preview, ...): show a short message in the widget, never a blank one.
+
+## Rules
+
+- Never put secrets, tokens or passwords in a widget or its data; the data is stored in the message.
+- Handle missing or extra fields and empty lists gracefully (old messages keep their old data).
+- Keep it light: render something at once; no large libraries for a small view.
+`;

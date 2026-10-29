@@ -7,6 +7,7 @@ import type { Config } from "./config.js";
 import { ClawpageData, DataError, type Caller, type TableSummary } from "./clawpages.js";
 import { AI_EFFORTS, AiError, type AiEffort, type AiMessage, type ClawpageAi } from "./clawpageAi.js";
 import { requestLocale, t } from "./i18n/index.js";
+import { WIDGET_NAME, type WidgetStore } from "./widgets.js";
 
 /**
  * Public share pages: clawpages.
@@ -55,7 +56,7 @@ const VERSION_AT = /^\d{13}$/;
 export const HISTORY_LIMITS = { perPage: 5, accountBytes: 200 * 1024 * 1024 };
 
 /** Only these types are labelled; anything else is served as opaque bytes. */
-const TYPES: Record<string, string> = {
+export const CONTENT_TYPES: Record<string, string> = {
   ".html": "text/html; charset=utf-8", ".htm": "text/html; charset=utf-8",
   ".css": "text/css; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".mjs": "text/javascript; charset=utf-8",
   ".json": "application/json; charset=utf-8", ".txt": "text/plain; charset=utf-8", ".md": "text/plain; charset=utf-8",
@@ -134,7 +135,7 @@ export function coverType(data: Buffer): "image/jpeg" | "image/png" | "image/web
 }
 
 /** A relative path of plain segments: no traversal, no hidden files, no backslashes or control characters. */
-function safeSegments(rel: string): string[] | null {
+export function safeSegments(rel: string): string[] | null {
   if (!rel || rel.length > 512) return null;
   const segments = rel.split("/");
   if (segments.length > 8) return null;
@@ -155,6 +156,8 @@ export class ShareStore {
   readonly data?: ClawpageData;
   /** AI answers on signed-in visitors' own accounts; absent where the deployment offers none. */
   ai?: Pick<ClawpageAi, "answer">;
+  /** Components the account's executor builds for its main session (widgets.ts); published over the same token. */
+  widgets?: WidgetStore;
   #history: typeof HISTORY_LIMITS;
   /** The last `retiredAt` given out: each is later than the one before, so two versions replaced in the same millisecond still have an order. */
   #retired = 0;
@@ -708,12 +711,15 @@ export class ShareStore {
     };
     const url = new URL(req.url ?? "/", "http://gateway");
     const match = /^\/share\/([a-zA-Z0-9_]+)\/pages(?:\/([^/]+)(?:\/(files|data|cover|collaborators|versions)((?:\/[^/]+)*))?)?$/.exec(url.pathname);
-    const expected = match ? this.#tokens.get(match[1]!) : undefined;
+    const widget = /^\/share\/([a-zA-Z0-9_]+)\/widgets(?:\/([^/]+)(\/files)?)?$/.exec(url.pathname);
+    const owner = (match ?? widget)?.[1];
+    const expected = owner ? this.#tokens.get(owner) : undefined;
     const supplied = (req.headers.authorization ?? "").replace(/^Bearer /, "");
-    if (!match || !expected || !TOKEN.test(supplied) || !timingSafeEqual(Buffer.from(supplied), Buffer.from(expected))) {
+    if (!owner || !expected || !TOKEN.test(supplied) || !timingSafeEqual(Buffer.from(supplied), Buffer.from(expected))) {
       reply(403, { error: "forbidden" });
       return;
     }
+    if (widget) return this.#widgetApi(req, reply, owner, widget[2], Boolean(widget[3]));
     const [, userId, name, sub, tail] = match as unknown as [string, string, string | undefined, string | undefined, string | undefined];
     try {
       if (name && !SHARE_NAME.test(name)) return reply(400, { error: "Invalid page name" });
@@ -759,6 +765,26 @@ export class ShareStore {
     } catch (err) {
       if (err instanceof ShareError) reply(err.status, { error: err.message });
       else if (err instanceof DataError) reply(err.status, { error: err.message, code: err.code });
+      else reply(500, { error: "The request failed" });
+    }
+  }
+
+  /** `/share/<userId>/widgets[/<name>[/files]]`: the sandbox lists, publishes, pulls and deletes the account's widgets. */
+  async #widgetApi(req: http.IncomingMessage, reply: (status: number, body?: unknown) => void, userId: string, name: string | undefined, files: boolean): Promise<void> {
+    const widgets = this.widgets;
+    if (!widgets) return reply(404, { error: "Widgets are not available" });
+    try {
+      if (name && !WIDGET_NAME.test(name)) return reply(400, { error: "Invalid widget name" });
+      if (req.method === "GET" && !name) return reply(200, { widgets: widgets.list(userId) });
+      if (req.method === "GET" && name && files) {
+        const out = widgets.files(userId, name);
+        return out ? reply(200, { name, ...widgets.get(userId, name), files: out }) : reply(404, { error: "The widget does not exist" });
+      }
+      if (req.method === "DELETE" && name && !files) return widgets.remove(userId, name) ? reply(204) : reply(404, { error: "The widget does not exist" });
+      if (req.method !== "POST" || !name || files) return reply(405, { error: "method_not_allowed" });
+      reply(200, widgets.publish(userId, name, await readPublish(req)));
+    } catch (err) {
+      if (err instanceof ShareError) reply(err.status, { error: err.message });
       else reply(500, { error: "The request failed" });
     }
   }
@@ -992,7 +1018,7 @@ export class ShareStore {
         ...PAGE_HEADERS,
         etag,
         "last-modified": stat.mtime.toUTCString(),
-        "content-type": TYPES[path.extname(file).toLowerCase()] ?? "application/octet-stream",
+        "content-type": CONTENT_TYPES[path.extname(file).toLowerCase()] ?? "application/octet-stream",
         "content-length": String(stat.size),
       });
       if (req.method === "HEAD") return res.end();
@@ -1028,7 +1054,7 @@ async function readPublish(req: http.IncomingMessage): Promise<PublishInput> {
  * A JSON object body, at most `limit` bytes. A larger one is read to its end (up to four times the
  * limit) before the 413, so the caller gets the answer instead of a connection cut mid-upload.
  */
-async function readJson(req: http.IncomingMessage, limit: number): Promise<Record<string, unknown>> {
+export async function readJson(req: http.IncomingMessage, limit: number): Promise<Record<string, unknown>> {
   const chunks: Buffer[] = [];
   let size = 0;
   for await (const chunk of req) {
@@ -1068,7 +1094,7 @@ export function pageReturn(raw: unknown): string {
 }
 
 /** What a page asks the AI: its prompt's name, the conversation (or one `input`), JSON or text, how hard to think. */
-function aiInput(body: Record<string, unknown>): { prompt: string | null; messages: AiMessage[]; json: boolean; effort: AiEffort } {
+export function aiInput(body: Record<string, unknown>): { prompt: string | null; messages: AiMessage[]; json: boolean; effort: AiEffort } {
   const prompt = body.prompt === undefined || body.prompt === null ? null : String(body.prompt);
   if (prompt !== null && !PROMPT_NAME.test(prompt)) throw new DataError(400, "INVALID_PROMPT", "prompt names a file prompts/<name>.md: lowercase letters, digits, - or _");
   const raw = typeof body.input === "string" ? [{ role: "user", content: body.input }] : body.messages;

@@ -41,6 +41,14 @@ export const cards: typeof zh = {
     loading: "Loading the photos…",
     failed: "The photo can't be shown right now",
   },
+  widget: {
+    label: (name: string) => `Component: ${name}`,
+    loading: "Loading the component…",
+    failed: "This component can't be shown right now",
+    data: "View data",
+    busy: "Too many requests at once; try again shortly",
+    callFailed: "The request failed; try again shortly",
+  },
   chart: {
     drawing: "Drawing the chart…",
     failed: "This chart couldn't be drawn",

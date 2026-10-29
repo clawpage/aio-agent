@@ -3,6 +3,7 @@ import { Analytics } from "./analytics.js";
 import path from "node:path";
 import {MemberModelGateway} from "./memberModelGateway.js";
 import {ShareStore} from "./share.js";
+import {WidgetStore} from "./widgets.js";
 import {ClawpageData} from "./clawpages.js";
 import {ClawpageAi} from "./clawpageAi.js";
 import {Jev} from "./jev.js";
@@ -501,6 +502,8 @@ async function main(): Promise<void> {
     ai:new ClawpageAi({cfg:ctx.cfg,log:ctx.log,db:ctx.db,hostTokens:ctx.hostTokens,claude:new ClaudeCodeHarness(ctx.cfg,ctx.log),
       usageDb:async id=>id===ctx.cfg.runtimeUserId?ctx.db:(await ctx.runtimeForUser!(id)).db})});
   ctx.tasks.setClawpages(id=>ctx.share!.list(id));
+  ctx.share.widgets=new WidgetStore(ctx.cfg);
+  ctx.tasks.setWidgets(id=>ctx.share!.widgets!.list(id));
   // The owner sandbox receives its token when refreshSandboxContent seeds it below.
   ctx.share.provision(ctx.cfg);
   const decision=new DecisionGateway({db:ctx.db,jev:ctx.jev!,log:ctx.log,port:ctx.cfg.memberModelPort??4902});

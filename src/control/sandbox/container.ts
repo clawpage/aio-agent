@@ -1,4 +1,5 @@
 import type { ChildProcess } from "node:child_process";
+import { WIDGET_RUNTIME_JS } from "../widgetRuntime.js";
 import { createHash } from "node:crypto";
 import path from "node:path";
 import { TAB_TOOL_TIMEOUT_SEC } from "../browser/tabs.js";
@@ -30,6 +31,10 @@ import {
   LEGACY_SHARE_SKILL_DIR,
   SHARE_SKILL_MD,
   SHARE_TOOL_DIR,
+  WIDGET_TOOL_DIR,
+  WIDGET_SKILL_DIR,
+  WIDGET_CLI_PY,
+  WIDGET_SKILL_MD,
   GRAPHIC_RENDER_PY,
   GRAPHIC_SKILL_DIR,
   GRAPHIC_SKILL_MD,
@@ -307,6 +312,7 @@ export class SandboxContainer {
       this.writeFileInSandbox(`${s.containerCodexHome}/config.toml`, CODEX_CONFIG_TOML, { onlyIfAbsent: true }),
       documentSkill(),
       this.seedShare(),
+      this.seedWidgets(),
       this.seedGraphic(),
       this.seedMarket(),
       this.seedPhoto(),
@@ -377,6 +383,30 @@ export class SandboxContainer {
       for (const dir of skillDirs) await this.writeFileInSandbox(`${dir}/SKILL.md`, SHARE_SKILL_MD);
     } catch (err) {
       this.#log.warn("could not seed the sandbox share skill", { error: String(err).slice(0, 200) });
+    }
+  }
+
+  /**
+   * The widgets skill for both executors plus its CLI, the runtime its previews use, and the
+   * same publish token as clawpages (widgets travel the same channel). A failure is logged and
+   * never blocks the sandbox.
+   */
+  async seedWidgets(): Promise<void> {
+    const s = this.#cfg.sandbox;
+    const share = this.#cfg.share;
+    if (!share) return;
+    const toolDir = `${s.containerCodexHome}/${WIDGET_TOOL_DIR}`;
+    const skillDirs = [`${s.containerCodexHome}/${WIDGET_SKILL_DIR}`, `${this.#cfg.claudeCode.configDir}/${WIDGET_SKILL_DIR}`];
+    try {
+      const mkdir = await this.execInSandbox(["mkdir", "-p", toolDir, ...skillDirs], { timeoutMs: 15_000 });
+      if (mkdir.code !== 0) throw new Error((mkdir.stderr || mkdir.stdout).trim().slice(0, 200));
+      await this.writeFileInSandbox(`${toolDir}/aio-widget.py`, WIDGET_CLI_PY);
+      await this.writeFileInSandbox(`${toolDir}/widget-runtime.js`, WIDGET_RUNTIME_JS);
+      await this.writeFileInSandbox(`${toolDir}/config.json`, JSON.stringify(share));
+      await this.execInSandbox(["chmod", "600", `${toolDir}/config.json`], { timeoutMs: 15_000 });
+      for (const dir of skillDirs) await this.writeFileInSandbox(`${dir}/SKILL.md`, WIDGET_SKILL_MD);
+    } catch (err) {
+      this.#log.warn("could not seed the sandbox widgets skill", { error: String(err).slice(0, 200) });
     }
   }
 
