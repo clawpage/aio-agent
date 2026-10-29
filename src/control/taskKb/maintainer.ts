@@ -31,16 +31,17 @@ export interface KbMaintainerDeps {
 }
 
 /** A batch reads at most this many packets and this much material. */
-const BATCH_PACKETS = 4;
-const BATCH_CHARS = 40_000;
+const BATCH_PACKETS = 10;
+const BATCH_CHARS = 100_000;
 const TASK_CHARS = 12_000;
 const RUN_TIMEOUT_MS = 10 * 60_000;
 const ATTEMPTS = 3;
 /** Corrections are looked at within a minute; everything else waits to be batched. */
 const URGENT_MS = 60_000;
 const NORMAL_MS = 10 * 60_000;
-const NEXT_BATCH_MS = 2 * 60_000;
-const RETRY_MS = 5 * 60_000;
+/** A backlog (the owner's look back) is worked through batch after batch. */
+const NEXT_BATCH_MS = 10_000;
+const RETRY_MS = 60_000;
 const BACKFILL_DAYS = 14;
 const BACKFILL_KEY = "task_kb.backfill_v1";
 const PROJECTION_DIRTY = "task_kb.projection_dirty";
@@ -143,9 +144,15 @@ export class TaskKbMaintainer {
     return turns.some((turn) => this.#d.db.prepare("SELECT 1 FROM events WHERE turn_id=? AND type='item/completed' AND (payload LIKE '%\"type\":\"mcpToolCall\"%' OR payload LIKE '%\"type\":\"commandExecution\"%' OR payload LIKE '%\"type\":\"webSearch\"%' OR payload LIKE '%\"type\":\"fileChange\"%') LIMIT 1").get(turn));
   }
 
+  /**
+   * Proposals first (corrections before additions, oldest first), then finished tasks newest first:
+   * a task that just ended is read in the next batch instead of waiting behind the owner's look back,
+   * which fills the gaps in between.
+   */
   #pending(): PacketRow[] {
     const rows = this.#d.db.prepare("SELECT * FROM kb_packets WHERE owner_id=? AND status='pending' ORDER BY created_at").all(this.#owner) as unknown as PacketRow[];
-    return rows.sort((a, b) => (a.kind === b.kind ? 0 : a.kind === "propose" ? -1 : 1) || (PRIORITY[a.type ?? ""] ?? 9) - (PRIORITY[b.type ?? ""] ?? 9) || a.created_at - b.created_at);
+    return rows.sort((a, b) => (a.kind === b.kind ? 0 : a.kind === "propose" ? -1 : 1) || (PRIORITY[a.type ?? ""] ?? 9) - (PRIORITY[b.type ?? ""] ?? 9)
+      || (a.kind === "extract" ? b.created_at - a.created_at : a.created_at - b.created_at));
   }
 
   #schedule(ms: number): void {

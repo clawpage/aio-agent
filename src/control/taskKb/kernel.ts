@@ -44,7 +44,7 @@ export const KB_LIMITS = {
   claim: 400,
   quote: 600,
   wiki: 6000,
-  ops: 60,
+  ops: 120,
   wikiPages: 50,
   /** A node reaches the wiki only after this many reads by tasks. */
   wikiReads: 3,

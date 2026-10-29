@@ -236,6 +236,15 @@ it("looks back fourteen days for the owner only, and gives a node a wiki page on
     m.start();
     m.stop();
     expect((h.ctx.db.prepare("SELECT task_id FROM kb_packets").all() as Array<{ task_id: string }>).map((p) => p.task_id)).toEqual([b]);
+    // A task that finishes now is read before what the look back queued.
+    const c = await task("查 UA858 回程", "UA858 每天 13:00 从 PVG 起飞。", { url: "https://united.example/ua858", content: "UA858 departs PVG daily at 13:00." });
+    m.taskCompleted(c);
+    const read = vi.fn(async (_prompt: string) => ({ text: null, error: "stop" }));
+    await new TaskKbMaintainer({ db: h.ctx.db, cfg: owner, log: h.ctx.log, codex: { maintainKb: read }, container, busy: async () => false, idleState: () => "dozing" }).run();
+    const prompt = read.mock.calls[0]![0];
+    expect(prompt.indexOf(`finished task ${c}`)).toBeGreaterThan(-1);
+    expect(prompt.indexOf(`finished task ${c}`)).toBeLessThan(prompt.indexOf(`finished task ${b}`));
+    h.ctx.db.prepare("DELETE FROM kb_packets WHERE task_id=?").run(c);
 
     await applyKbAnswer(kernel(), { decisions: [], ops: [
       { op: "node", ref: "f", kind: "fact", domain: "travel", title: "UA857", summary: "SFO 到上海的直飞" },
