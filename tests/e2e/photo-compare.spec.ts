@@ -66,6 +66,12 @@ test("a compare block shows each retouched photo against its original: slide, ho
   // The frame takes the photo's shape.
   const box = (await stage.boundingBox())!;
   expect(Math.abs(box.width / box.height - 1.5)).toBeLessThan(0.03);
+  // No frame around it: the figure is as wide as the photo, so title and buttons sit on its edges,
+  // and it stays an inline picture's height rather than filling the screen.
+  const figure = (await first.boundingBox())!;
+  expect(Math.abs(figure.x - box.x)).toBeLessThan(1);
+  expect(Math.abs(figure.width - box.width)).toBeLessThan(1);
+  expect(box.height).toBeLessThanOrEqual(421);
 
   // The original is left of the handle, the edit right of it.
   const y = box.y + box.height * 0.6;

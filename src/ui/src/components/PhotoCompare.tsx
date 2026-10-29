@@ -1,4 +1,4 @@
-import { useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
+import { useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent } from "react";
 import type { CompareItem } from "../compareBlocks";
 import { useMessageImage, useNearViewport } from "./ProductCards";
 import { t } from "../i18n";
@@ -46,7 +46,9 @@ function Compare({ item, index, total, onOpenFile }: { item: CompareItem; index:
   const status = failed ? t.cards.compare.failed : !after.url || !before.url ? t.cards.compare.loading : null;
 
   return (
-    <figure ref={root} className="photo-compare" aria-label={name ?? t.cards.compare.label}>
+    <figure ref={root} className={`photo-compare${side ? " side" : ""}`} aria-label={name ?? t.cards.compare.label}
+      // The photo's shape sizes the whole figure, so title, picture and buttons line up on its edges.
+      style={ratio ? ({ "--compare-ratio": String(ratio) } as CSSProperties) : undefined}>
       {name && <figcaption className="photo-compare-title">{name}</figcaption>}
       {side ? (
         <div className="photo-compare-side">
@@ -60,8 +62,7 @@ function Compare({ item, index, total, onOpenFile }: { item: CompareItem; index:
       ) : (
         <div
           ref={stage}
-          className={`photo-compare-stage${ratio ? "" : " pending"}`}
-          style={ratio ? { aspectRatio: String(ratio), maxWidth: `calc(70vh * ${ratio})` } : undefined}
+          className="photo-compare-stage"
           role="slider"
           tabIndex={0}
           aria-label={t.cards.compare.slider}

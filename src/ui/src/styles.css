@@ -3900,16 +3900,29 @@ button.clawpage-version-restore.danger { background:var(--error); border-color:v
 .product-page.next { right: -6px; }
 @media (hover: hover) and (pointer: fine) { .product-page { display: flex; } }
 /* Before/after photo comparisons (```compare): the result under the original, a handle between them. */
-.photo-compares { display: grid; gap: 14px; margin: 8px 0; }
-.photo-compare { margin: 0; padding: 10px; background: var(--bg-soft); border: 1px solid var(--border); border-radius: var(--radius-card); min-width: 0; }
-.photo-compare-title { font-weight: 600; margin: 0 0 8px; }
+.photo-compares { display: grid; gap: 20px; margin: 10px 0; }
+/*
+ * A photo in the message, not a card around one: no frame of its own, the same height cap as an
+ * inline picture, and as wide as the photo's shape allows (square while it loads, so a portrait
+ * photo does not push the message down when it arrives), with title and buttons on its edges.
+ */
+.photo-compare {
+  --compare-h: min(60vh, 420px);
+  --compare-r: var(--compare-ratio, 1);
+  margin: 0;
+  min-width: 0;
+  max-width: calc(var(--compare-h) * var(--compare-r));
+}
+.photo-compare.side { max-width: none; }
+.photo-compare-title { font-weight: 600; margin: 0 0 6px; }
 .photo-compare-stage {
   position: relative;
   width: 100%;
-  margin: 0 auto;
+  aspect-ratio: var(--compare-r);
   overflow: hidden;
   border-radius: 10px;
   background: var(--media-bg);
+  box-shadow: 0 0 0 1px var(--border);
   cursor: ew-resize;
   /* Vertical swipes still scroll the conversation; sideways ones move the handle. */
   touch-action: pan-y;
@@ -3917,14 +3930,14 @@ button.clawpage-version-restore.danger { background:var(--error); border-color:v
   -webkit-user-select: none;
   -webkit-touch-callout: none;
 }
-.photo-compare-stage.pending { min-height: 220px; }
 .photo-compare-stage:focus-visible { outline: 2px solid var(--ai); outline-offset: 2px; }
 .photo-compare-stage img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; pointer-events: none; }
 .photo-compare-status { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; padding: 16px; text-align: center; }
 .photo-compare-label {
   position: absolute;
   top: 8px;
-  padding: 2px 8px;
+  padding: 2px 9px;
+  line-height: 18px;
   border-radius: 999px;
   font-size: 12px;
   color: var(--on-media);
@@ -3939,28 +3952,28 @@ button.clawpage-version-restore.danger { background:var(--error); border-color:v
   position: absolute;
   top: 50%;
   left: 50%;
-  width: 32px;
-  height: 32px;
-  margin: -16px 0 0 -16px;
+  width: 34px;
+  height: 34px;
+  margin: -17px 0 0 -17px;
   border-radius: 50%;
   background: var(--on-media);
-  box-shadow: var(--shadow-chip);
+  box-shadow: 0 0 0 1px var(--media-ring), var(--shadow-chip);
 }
 .photo-compare-handle span::before, .photo-compare-handle span::after {
   content: "";
   position: absolute;
-  top: 11px;
+  top: 12px;
   border: 5px solid transparent;
 }
 .photo-compare-handle span::before { left: 3px; border-right-color: var(--media-bg); }
 .photo-compare-handle span::after { right: 3px; border-left-color: var(--media-bg); }
-.photo-compare-side { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
-.photo-compare-pane { position: relative; min-height: 120px; border-radius: 10px; overflow: hidden; background: var(--media-bg); }
-.photo-compare-pane img { display: block; width: 100%; height: 100%; max-height: 60vh; object-fit: contain; }
+.photo-compare-side { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; max-width: calc(2 * var(--compare-h) * var(--compare-r)); }
+.photo-compare-pane { position: relative; min-height: 120px; border-radius: 10px; overflow: hidden; background: var(--media-bg); box-shadow: 0 0 0 1px var(--border); }
+.photo-compare-pane img { display: block; width: 100%; height: 100%; max-height: var(--compare-h); object-fit: contain; }
 .photo-compare-bar { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .photo-compare-hold { user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; touch-action: none; }
 .photo-compare-hold[aria-pressed="true"] { background: var(--ai-soft); }
-.photo-compare-note { margin: 8px 0 0; color: var(--text-dim); font-size: 13px; }
+.photo-compare-note { margin: 6px 0 0; color: var(--text-dim); font-size: 13px; }
 .product-card {
   display: flex;
   gap: 12px;
