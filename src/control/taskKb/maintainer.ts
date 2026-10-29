@@ -6,10 +6,9 @@ import type { CodexSessionLike } from "../codex/manager.js";
 import type { SandboxContainer } from "../sandbox/container.js";
 import type { SandboxIdleState } from "../sandbox/idle.js";
 import { randomId } from "../auth/passwords.js";
-import { historyThreadServers } from "../historyTool.js";
 import { applyKbAnswer, ensureDomains, KB_CERTAINTIES, KB_KINDS, KB_LIMITS, KB_RELS, wikiIneligible, type KbAnswer } from "./kernel.js";
-import { getKbNode, kbEnabled } from "./read.js";
-import { sandboxKbFiles, taskKbThreadServers } from "./gateway.js";
+import { getKbNode, kbEnabled, searchKb } from "./read.js";
+import { sandboxKbFiles } from "./gateway.js";
 import { renderKbProjection } from "./projection.js";
 
 /**
@@ -57,7 +56,7 @@ export const MAINTAINER_INSTRUCTIONS = `You are the knowledge maintainer of one 
 
 What belongs in it: things worth knowing the next time this person asks for something similar. People, products, stores, websites and apps they deal with (entity); subjects they keep coming back to (topic); how something is done, including the steps that worked and the pitfalls (procedure); and facts with lasting value (fact). Keep it small and reusable: skip small talk, one-off details, your own guesses presented as facts, temporary states, and anything already obvious. Never record passwords, codes, identity, card or account numbers (they are refused).
 
-Before creating a node, search the knowledge base (aio_task_kb kb_search, then kb_get) for an existing node about the same thing and add to that one. Use merge when two existing nodes are the same thing. When a new claim contradicts an existing one, write the new claim with replaces (if it is now true) or link the nodes with contradicts (if both may hold), never silently drop the old one. You may read a task's files with shell commands (cat, ls, head) under its directory, and older tasks with aio_history.
+The existing nodes most related to this batch are listed with their ids and current claims (you have no tools to search for more): when one is about the same thing, add to it instead of creating a new node. Use merge when two existing nodes are the same thing. When a new claim contradicts an existing one, write the new claim with replaces (if it is now true) or link the nodes with contradicts (if both may hold), never silently drop the old one. You may read a task's files with shell commands (cat, ls, head) under its directory.
 
 Certainty: user_said = the person said it; observed = seen in a page, file or tool output during the task; inferred = your own conclusion. Volatility: changes = prices, opening hours, availability, schedules, anything that goes stale (give verify_after_days); stable otherwise.
 
@@ -258,16 +257,44 @@ export class TaskKbMaintainer {
     ].join("\n");
   }
 
+  /** The existing nodes nearest to each packet (its task's words, or the proposal's), with their claims and ids. */
+  #related(packets: PacketRow[]): string {
+    const { db } = this.#d;
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const p of packets) {
+      let query = "";
+      if (p.kind === "extract") {
+        const t = db.prepare("SELECT title, input_text, result FROM tasks WHERE id=?").get(p.task_id) as { title: string; input_text: string; result: string | null } | undefined;
+        query = t ? `${t.title}\n${t.input_text.slice(0, 600)}\n${(t.result ?? "").slice(0, 600)}` : "";
+      } else {
+        query = (JSON.parse(p.payload_json) as { text?: string }).text ?? "";
+      }
+      for (const hit of query ? searchKb(db, this.#owner, { query, limit: 6 }) : []) {
+        if (seen.has(hit.id) || seen.size >= 20) continue;
+        seen.add(hit.id);
+        const node = getKbNode(db, this.#owner, hit.id)!;
+        out.push(JSON.stringify({ id: node.id, kind: node.kind, domain: node.domain, title: node.title, summary: node.summary, claims: node.claims.map((c) => ({ id: c.id, text: c.text, certainty: c.certainty })), links: node.links.map((l) => `${l.direction === "out" ? "" : "← "}${l.rel} ${l.title} (${l.node})`) }));
+      }
+    }
+    return out.length ? `Existing nodes related to this batch:\n${out.join("\n")}` : "Existing nodes related to this batch: none yet.";
+  }
+
   #wikiCandidates(): string {
     const rows = this.#d.db.prepare("SELECT id, title, reads FROM kb_nodes WHERE owner_id=? AND status='active' AND wiki_md IS NULL AND wiki_draft IS NULL AND reads>=? ORDER BY reads DESC LIMIT 20").all(this.#owner, KB_LIMITS.wikiReads) as Array<{ id: string; title: string; reads: number }>;
     const ok = rows.filter((r) => !wikiIneligible(this.#d.db, this.#owner, r.id)).slice(0, 3);
     return ok.length ? `Wiki candidates (often read; write a wiki page for any that would help as a quick reference): ${ok.map((r) => `${r.title} (${r.id}, read ${r.reads} times)`).join("; ")}` : "No wiki candidates this time.";
   }
 
-  async #ask(prompt: string, instructions = MAINTAINER_INSTRUCTIONS, servers?: Record<string, unknown>): Promise<string | null> {
+  /**
+   * The maintainer's thread gets no MCP tools: a read-only thread with approval `never` has its
+   * tool calls refused (seen on the first production batch), so what it would have searched for
+   * is looked up here and handed to it.
+   */
+  async #ask(prompt: string, instructions = MAINTAINER_INSTRUCTIONS): Promise<string | null> {
     const res = await this.#d.codex.maintainKb!(prompt, instructions, {
       member: !!this.#d.cfg.memberRuntime,
-      servers: servers ?? { ...taskKbThreadServers(this.#d.cfg), ...historyThreadServers(this.#d.cfg) },
+      servers: {},
       timeoutMs: RUN_TIMEOUT_MS,
     });
     if (res.error || res.timedOut) throw new Error(res.error ?? "the maintainer run timed out");
@@ -278,7 +305,7 @@ export class TaskKbMaintainer {
     const { db } = this.#d;
     const ids = packets.map((p) => p.id);
     const domains = (db.prepare("SELECT name, description FROM kb_domains WHERE owner_id=? ORDER BY name").all(this.#owner) as Array<{ name: string; description: string }>).map((d) => `${d.name}: ${d.description}`).join("\n");
-    const prompt = [`Domains:\n${domains}`, this.#wikiCandidates(), `Packets to handle (${ids.join(", ")}):`, material, `Now answer with the JSON change list, with a decision for each of ${ids.join(", ")}.`].join("\n\n");
+    const prompt = [`Domains:\n${domains}`, this.#related(packets), this.#wikiCandidates(), `Packets to handle (${ids.join(", ")}):`, material, `Now answer with the JSON change list, with a decision for each of ${ids.join(", ")}.`].join("\n\n");
     const kernel = { db, ownerId: this.#owner, workspaceDir: this.#d.cfg.sandbox.containerWorkspaceDir, readFile: sandboxKbFiles(this.#d.container), packets: ids };
     let answer: KbAnswer | null = null;
     let errors: string[] = [];
@@ -325,7 +352,6 @@ export class TaskKbMaintainer {
         const text = await this.#ask(
           `Wiki draft for node ${d.id}:\n${d.wiki_draft}\n\nThe node with its claims and the recorded quotes of their sources:\n${JSON.stringify(node)}`,
           'You check a reference page before it is published to a personal knowledge base. Every statement in the draft must be supported by the node\'s claims and the quotes of their sources; nothing may be added, overstated, or stated as current when it is marked as changing. Answer with only JSON: {"pass": true|false, "problems": ["..."]}.',
-          {},
         );
         verdict = text ? (parseAnswer(text) as { pass?: unknown; problems?: unknown } | null) : null;
       } catch (err) {

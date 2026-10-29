@@ -175,7 +175,8 @@ it("reads finished tasks in batches when the sandbox is awake and nothing else r
     const codex = {
       maintainKb: vi.fn(async (prompt: string, _instructions: string, opts: { member: boolean; servers: Record<string, unknown> }) => {
         expect(opts.member).toBe(false);
-        expect(Object.keys(opts.servers).sort()).toEqual(["aio_task_kb"]);
+        // No tools: a read-only thread with approval `never` has its tool calls refused.
+        expect(opts.servers).toEqual({});
         return { text: answers.shift() ?? null, error: null, prompt };
       }),
     };
@@ -203,6 +204,7 @@ it("reads finished tasks in batches when the sandbox is awake and nothing else r
     expect(codex.maintainKb).toHaveBeenCalledTimes(2);
     // The material carried what the task saw, and the retry carried why the first answer was refused.
     expect(codex.maintainKb.mock.calls[0]![0]).toContain("Call us: 650-555-0100");
+    expect(codex.maintainKb.mock.calls[0]![0]).toContain("Existing nodes related to this batch: none yet.");
     expect(codex.maintainKb.mock.calls[1]![0]).toContain("It was not accepted");
     expect(h.ctx.db.prepare("SELECT status, note FROM kb_packets WHERE id=?").get(packet)).toMatchObject({ status: "accepted", note: "clinic contact" });
     expect(searchKb(h.ctx.db, "owner_1", { query: "儿科诊所" })[0]!.title).toBe("Bay Pediatrics");
