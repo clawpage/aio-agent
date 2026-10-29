@@ -11,7 +11,7 @@ import { homePath, pathUser } from "../userPath";
 import { namesPage, OWNER_VIEWS, parseRoute, routePath, type AppRoute } from "../route";
 
 /** Where a task's process was opened from: its back button returns there. */
-type DetailFrom = "main" | "tasks" | "files" | "schedules";
+type DetailFrom = "main" | "tasks" | "files" | "schedules" | "knowledge";
 import { BrandMark, LoadingMark, PageLoading } from "./Brand";
 import { NavIcon } from "./NavIcon";
 import { Chat } from "./Chat";
@@ -28,6 +28,7 @@ import { FileLibrary } from "./FileLibrary";
 import { ClawpageList } from "./ClawpageList";
 import { ScheduleList } from "./ScheduleList";
 import { VaultList } from "./VaultList";
+import { KnowledgeList } from "./KnowledgeList";
 import { PushToggle } from "./PushToggle";
 import {taskStatusLabels,type TaskFeed} from '../taskStatus';
 import { isSandboxLink } from "../sandboxLink";
@@ -340,6 +341,7 @@ export function MainApp({ firstSession }: { firstSession?: ReturnType<typeof api
       <button className={`ghost block ${view === "files" && !workspace ? "active" : ""}`} aria-current={view === "files" && !workspace ? "page" : undefined} onClick={() => navigate({ view: "files" })}><NavIcon name="files"/>{t.library.title}</button>
       <button className={`ghost block ${view === "clawpages" && !workspace ? "active" : ""}`} aria-current={view === "clawpages" && !workspace ? "page" : undefined} onClick={() => navigate({ view: "clawpages" })}><NavIcon name="clawpages"/>{t.clawpages.title}</button>
       <button className={`ghost block ${view === "schedules" && !workspace ? "active" : ""}`} aria-current={view === "schedules" && !workspace ? "page" : undefined} onClick={() => navigate({ view: "schedules" })}><NavIcon name="schedule"/>{t.nav.schedules}</button>
+      <button className={`ghost block ${view === "knowledge" && !workspace ? "active" : ""}`} aria-current={view === "knowledge" && !workspace ? "page" : undefined} onClick={() => navigate({ view: "knowledge" })}><NavIcon name="knowledge"/>{t.nav.knowledge}</button>
       <button className={`ghost block ${view === "vault" && !workspace ? "active" : ""}`} aria-current={view === "vault" && !workspace ? "page" : undefined} onClick={() => navigate({ view: "vault" })}><NavIcon name="vault"/>{t.nav.vault}</button>
       {role === 'owner' && gadgetAccount && <button className={`ghost block ${view === 'gadget' && !workspace ? 'active' : ''}`} aria-current={view === "gadget" && !workspace ? "page" : undefined} onClick={() => navigate({ view: "gadget" })}><NavIcon name="gadget"/>{accountLabel(gadgetAccount)}</button>}
       {role === 'owner' && <button className={`ghost block ${view === 'analytics' && !workspace ? 'active' : ''}`} aria-current={view === "analytics" && !workspace ? "page" : undefined} onClick={() => navigate({ view: "analytics" })}><NavIcon name="analytics"/>{t.nav.analytics}</button>}
@@ -356,11 +358,12 @@ export function MainApp({ firstSession }: { firstSession?: ReturnType<typeof api
       <div className="view-slot" hidden={view !== 'clawpages'}><ClawpageList active={view === 'clawpages' && !workspace} onExpired={expired}/></div>
       <div className="view-slot" hidden={view !== 'files'}><FileLibrary active={view === 'files' && !workspace} onOpenTask={id => void details(id, 'files')} onOpenLink={u => void openLink(u)} onOpenFileInBrowser={p => void openFileInBrowser(p)} onExpired={expired}/></div>
       <div className="view-slot" hidden={view !== 'schedules'}><ScheduleList active={view === 'schedules'} onExpired={expired} onOpenTask={id => void details(id, 'schedules')}/></div>
+      <div className="view-slot" hidden={view !== 'knowledge'}><KnowledgeList active={view === 'knowledge' && !workspace} onExpired={expired} onOpenTask={id => void details(id, 'knowledge')} onOpenLink={u => void openLink(u)}/></div>
       <div className="view-slot" hidden={view !== 'vault'}><VaultList active={view === 'vault'} onExpired={expired}/></div>
       {view === "settings" && (role === "owner" ? <Settings onBack={() => go({ view: "main" })}/> : <MemberSettings onBack={() => go({ view: "main" })}/>)}
       {role === 'owner' && view === 'analytics' && <AnalyticsDashboard onExpired={expired}/>}
       {role === 'owner' && view === 'gadget' && <GadgetHistory active={!workspace} onExpired={expired}/>}
-      {view === "detail" && detail && <div className="task-detail"><div className="task-detail-bar"><button className="ghost" onClick={() => { if ((history.state as { aio?: boolean; from?: DetailFrom } | null)?.from) history.back(); else go({ view: detailReturn }); }}>{detailReturn === 'tasks' ? t.nav.backTo.tasks : detailReturn === 'files' ? t.library.back : detailReturn === 'schedules' ? t.nav.backTo.schedules : t.nav.backTo.main}</button><span className="muted tiny">{taskStatusLabels[(taskFeed.tasks.find(t=>t.id===detailTask?.id)??detailTask)?.status??'']??t.app.detail.fallbackStatus}</span></div><Chat key={detail.id} readOnly conversation={detail} status={status} onConversationChanged={() => { }} onStatusChanged={() => void refreshStatus()} onOpenWorkspace={openWorkspace} onOpenBrowserLink={u => void openLink(u)} onOpenBrowserFile={p => void openFileInBrowser(p)}/></div>}
+      {view === "detail" && detail && <div className="task-detail"><div className="task-detail-bar"><button className="ghost" onClick={() => { if ((history.state as { aio?: boolean; from?: DetailFrom } | null)?.from) history.back(); else go({ view: detailReturn }); }}>{detailReturn === 'tasks' ? t.nav.backTo.tasks : detailReturn === 'files' ? t.library.back : detailReturn === 'schedules' ? t.nav.backTo.schedules : detailReturn === 'knowledge' ? t.nav.backTo.knowledge : t.nav.backTo.main}</button><span className="muted tiny">{taskStatusLabels[(taskFeed.tasks.find(t=>t.id===detailTask?.id)??detailTask)?.status??'']??t.app.detail.fallbackStatus}</span></div><Chat key={detail.id} readOnly conversation={detail} status={status} onConversationChanged={() => { }} onStatusChanged={() => void refreshStatus()} onOpenWorkspace={openWorkspace} onOpenBrowserLink={u => void openLink(u)} onOpenBrowserFile={p => void openFileInBrowser(p)}/></div>}
     </main>
     <PopupPresence>{opening && <PopupSurface className="task-console-overlay opening-overlay" role="presentation">
       <div className="opening-card" role="status" aria-live="polite">

@@ -19,6 +19,7 @@ export default defineConfig({
   // instance, never here.
   testMatch: [
     "**/languages.spec.ts",
+    "**/knowledge.spec.ts",
     "**/support.spec.ts",
     "**/support-card.spec.ts",
     "**/image-zoom.spec.ts",
@@ -124,6 +125,7 @@ export default defineConfig({
     "**/support.spec.ts",
         "**/image-zoom.spec.ts",
         "**/photo-compare.spec.ts",
+        "**/knowledge.spec.ts",
         "**/analytics.spec.ts",
         "**/gadget-history.spec.ts",
         "**/browser-lifecycle.spec.ts",

@@ -8,6 +8,7 @@ import { userBrowserThreadServers } from "../userBrowser.js";
 import { macShellThreadServers } from "../macShell.js";
 import { scheduleThreadServers } from "../scheduleTool.js";
 import { historyThreadServers } from "../historyTool.js";
+import { taskKbThreadServers } from "../taskKb/gateway.js";
 import { imageThreadServers } from "../imageTool.js";
 import { printerThreadServers } from "../printer/gateway.js";
 import { ttsThreadServers } from "../ttsTool.js";
@@ -337,8 +338,18 @@ export class SandboxCodexSession {
     }
   }
 
-  /** `ownModel` picks another model on the owner's own login; `requestedModel` goes through the gateway. */
-  async #auxiliaryText(prompt: string, effort: string | null, timeoutMs: number, developerInstructions?: string, requestedModel?: string, onTiming?: DispatchTimingSink, ownModel?: string): Promise<{ text: string | null; error: string | null; timedOut?: boolean }> {
+  /**
+   * One run of the account's knowledge maintainer (docs/TASK-KB.md): GPT-6.1 Sol at low
+   * effort for every account (a member's through its gateway, the owner's on its own
+   * login), in a read-only ephemeral thread that may read the sandbox and use the given
+   * read-only tools. It answers with text; only the control plane's kernel writes.
+   */
+  async maintainKb(prompt: string, developerInstructions: string, opts: { member: boolean; servers: Record<string, unknown>; timeoutMs: number }): Promise<{ text: string | null; error: string | null; timedOut?: boolean }> {
+    return this.#auxiliaryText(prompt, "low", opts.timeoutMs, developerInstructions, opts.member ? MEMBER_GPT_MODEL : undefined, undefined, opts.member ? undefined : MEMBER_GPT_MODEL, opts.servers);
+  }
+
+  /** `ownModel` picks another model on the owner's own login; `requestedModel` goes through the gateway; `servers` are the only MCP servers the thread gets. */
+  async #auxiliaryText(prompt: string, effort: string | null, timeoutMs: number, developerInstructions?: string, requestedModel?: string, onTiming?: DispatchTimingSink, ownModel?: string, servers: Record<string, unknown> = {}): Promise<{ text: string | null; error: string | null; timedOut?: boolean }> {
     const connectionStarted = Date.now();
     await this.start();
     onTiming?.({ connectionMs: Date.now() - connectionStarted });
@@ -362,6 +373,7 @@ export class SandboxCodexSession {
         // shared browser MCP or load unrelated CLI memories during thread/start.
         config: { features: { memories: false }, mcp_servers: {
           aio_browser: { enabled: false, url: "http://127.0.0.1:8080/mcp" },
+          ...servers,
         } },
       },
       this.auxiliaryStartTimeoutMs,
@@ -529,7 +541,7 @@ export class SandboxCodexSession {
   #executionConfig(task: BrowserTask | undefined): { config?: Record<string, unknown> } {
     if (!task) return {};
     const tabs = tabThreadConfig(task) as { mcp_servers: Record<string, unknown> };
-    return { config: { ...tabs, mcp_servers: { ...tabs.mcp_servers, ...decisionThreadServers(this.#cfg), ...scheduleThreadServers(this.#cfg), ...historyThreadServers(this.#cfg), ...imageThreadServers(this.#cfg), ...ttsThreadServers(this.#cfg), ...kbThreadServers(this.#cfg), ...haThreadServers(this.#cfg), ...printerThreadServers(this.#cfg), ...phoneThreadServers(this.#cfg), ...userBrowserThreadServers(this.#cfg, task), ...macShellThreadServers(this.#cfg, task) } } };
+    return { config: { ...tabs, mcp_servers: { ...tabs.mcp_servers, ...decisionThreadServers(this.#cfg), ...scheduleThreadServers(this.#cfg), ...historyThreadServers(this.#cfg), ...taskKbThreadServers(this.#cfg), ...imageThreadServers(this.#cfg), ...ttsThreadServers(this.#cfg), ...kbThreadServers(this.#cfg), ...haThreadServers(this.#cfg), ...printerThreadServers(this.#cfg), ...phoneThreadServers(this.#cfg), ...userBrowserThreadServers(this.#cfg, task), ...macShellThreadServers(this.#cfg, task) } } };
   }
 
   async startThread(

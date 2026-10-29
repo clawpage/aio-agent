@@ -26,6 +26,7 @@ import type { HaCameras } from "./camera.js";
 import type { DeviceLinks } from "./deviceLink.js";
 import type { Vault } from "./vault.js";
 import type { Analytics } from "./analytics.js";
+import type { TaskKbMaintainer } from "./taskKb/maintainer.js";
 
 export interface AppContext {
   runtimeForUser?: (userId: string) => Promise<AppContext>;
@@ -52,6 +53,8 @@ export interface AppContext {
   vault?: Vault;
   /** Whole-container idle stop/start; absent when the runtime keeps its container up. */
   idle?: SandboxIdle;
+  /** The account's knowledge maintainer (docs/TASK-KB.md). */
+  taskKb?: TaskKbMaintainer;
   /** Editor and notebook servers started on use; absent in runtimes built by hand in tests. */
   programs?: OnDemandPrograms;
   cfg: Config;

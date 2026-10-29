@@ -6,6 +6,7 @@ export const nav = {
   tasks: "任务列表",
   schedules: "定时任务",
   vault: "密码器",
+  knowledge: "知识库",
   analytics: "运营看板",
   workspace: "工作区",
   settings: "配置",
@@ -18,5 +19,6 @@ export const nav = {
     main: "← 返回主会话",
     tasks: "← 返回任务列表",
     schedules: "← 返回定时任务",
+    knowledge: "← 返回知识库",
   },
 };

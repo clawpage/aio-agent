@@ -309,6 +309,99 @@ CREATE TRIGGER IF NOT EXISTS task_revision AFTER UPDATE ON tasks
 WHEN NEW.revision = OLD.revision
 BEGIN UPDATE tasks SET revision=OLD.revision+1 WHERE id=NEW.id; END;
 
+-- The account's personal knowledge base (docs/TASK-KB.md): a graph distilled from its
+-- tasks. Only the control plane's kernel writes it (src/control/taskKb/kernel.ts), from
+-- the knowledge maintainer's answers; executors read it and send proposals (kb_packets).
+CREATE TABLE IF NOT EXISTS kb_domains (
+  owner_id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (owner_id, name)
+);
+CREATE TABLE IF NOT EXISTS kb_nodes (
+  id TEXT PRIMARY KEY,
+  owner_id TEXT NOT NULL,
+  kind TEXT NOT NULL CHECK (kind IN ('entity','topic','procedure','fact')),
+  domain TEXT NOT NULL,
+  title TEXT NOT NULL,
+  summary TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','superseded','retired')),
+  superseded_by TEXT,
+  wiki_md TEXT,
+  wiki_draft TEXT,
+  wiki_at INTEGER,
+  reads INTEGER NOT NULL DEFAULT 0,
+  last_read_at INTEGER,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_kb_nodes_owner ON kb_nodes(owner_id, status, domain);
+CREATE TABLE IF NOT EXISTS kb_claims (
+  id TEXT PRIMARY KEY,
+  node_id TEXT NOT NULL REFERENCES kb_nodes(id) ON DELETE CASCADE,
+  text TEXT NOT NULL,
+  certainty TEXT NOT NULL CHECK (certainty IN ('user_said','observed','inferred')),
+  volatility TEXT NOT NULL DEFAULT 'stable' CHECK (volatility IN ('stable','changes')),
+  verify_after INTEGER,
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','superseded','retired')),
+  superseded_by TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_kb_claims_node ON kb_claims(node_id, status);
+CREATE TABLE IF NOT EXISTS kb_edges (
+  id TEXT PRIMARY KEY,
+  src TEXT NOT NULL REFERENCES kb_nodes(id) ON DELETE CASCADE,
+  dst TEXT NOT NULL REFERENCES kb_nodes(id) ON DELETE CASCADE,
+  rel TEXT NOT NULL CHECK (rel IN ('about','part_of','uses','related_to','supersedes','contradicts')),
+  created_at INTEGER NOT NULL,
+  UNIQUE (src, dst, rel)
+);
+CREATE INDEX IF NOT EXISTS idx_kb_edges_dst ON kb_edges(dst);
+CREATE TABLE IF NOT EXISTS kb_sources (
+  id TEXT PRIMARY KEY,
+  owner_id TEXT NOT NULL,
+  task_id TEXT NOT NULL,
+  path TEXT,
+  url TEXT,
+  sha256 TEXT,
+  excerpt TEXT NOT NULL,
+  captured_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS kb_cites (
+  item_id TEXT NOT NULL,
+  source_id TEXT NOT NULL REFERENCES kb_sources(id) ON DELETE CASCADE,
+  PRIMARY KEY (item_id, source_id)
+);
+CREATE INDEX IF NOT EXISTS idx_kb_cites_source ON kb_cites(source_id);
+CREATE TABLE IF NOT EXISTS kb_packets (
+  id TEXT PRIMARY KEY,
+  owner_id TEXT NOT NULL,
+  kind TEXT NOT NULL CHECK (kind IN ('extract','propose')),
+  type TEXT,
+  task_id TEXT,
+  target TEXT,
+  payload_json TEXT NOT NULL DEFAULT '{}',
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','accepted','merged','rejected','failed')),
+  note TEXT,
+  attempts INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL,
+  processed_at INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_kb_packets_status ON kb_packets(owner_id, status, created_at);
+CREATE INDEX IF NOT EXISTS idx_kb_packets_target ON kb_packets(target) WHERE target IS NOT NULL;
+CREATE TABLE IF NOT EXISTS kb_revisions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  owner_id TEXT NOT NULL,
+  packets TEXT NOT NULL DEFAULT '',
+  object_id TEXT NOT NULL,
+  op TEXT NOT NULL,
+  detail_json TEXT NOT NULL DEFAULT '{}',
+  at INTEGER NOT NULL
+);
+CREATE VIRTUAL TABLE IF NOT EXISTS kb_search USING fts5(node_id UNINDEXED, owner_id UNINDEXED, title, body);
+
 -- Dispatcher recall: past tasks indexed as CJK bigrams + latin words (BM25),
 -- and what each dispatch saw and chose, for monitoring.
 CREATE VIRTUAL TABLE IF NOT EXISTS task_search USING fts5(task_id UNINDEXED, owner_id UNINDEXED, title, body);

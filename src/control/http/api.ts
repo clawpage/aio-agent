@@ -49,6 +49,8 @@ import { normalizeSite, vaultLogin, VaultError, type Vault } from "../vault.js";
 import { DocumentError } from "../documents/service.js";
 import { isLocale, type Locale } from "../locale.js";
 import { t } from "../i18n/index.js";
+import { deleteKbNode } from "../taskKb/kernel.js";
+import { getKbNode, kbEnabled, listKb, setKbEnabled } from "../taskKb/read.js";
 import type { BrowserStatusView } from "../browser/service.js";
 import { documentKind, isRenderableKind, mediaType, requireWorkspaceFilePath } from "../documents/paths.js";
 
@@ -1061,6 +1063,41 @@ export function createApiRouter(context: AppContext): Router {
       res.status(409).json({ error: "schedule_refused", message: err instanceof Error ? err.message : t().http.tasks.actionFailed });
     }
   }));
+
+  // The account's personal knowledge base (docs/TASK-KB.md): the person browses it, reads where each claim
+  // came from, deletes what should be forgotten, or turns it off. Only the kernel writes anything else.
+  router.get("/knowledge", requireKind("primary"), requireSession, (req, res) => {
+    res.setHeader("Cache-Control", "no-store");
+    res.json({ enabled: kbEnabled(context.db), ...listKb(context.db, ctxOf(req).session!.ownerId) });
+  });
+  router.get("/knowledge/nodes/:id", requireKind("primary"), requireSession, (req, res) => {
+    const node = getKbNode(context.db, ctxOf(req).session!.ownerId, param(req, "id"), { history: true });
+    if (!node) { res.status(404).json({ error: "not_found" }); return; }
+    res.setHeader("Cache-Control", "no-store");
+    res.json({ node: { ...node, sourceTasks: Object.fromEntries([...new Set(node.claims.flatMap((c) => c.sources.map((s) => s.task)))].map((id) => [id, context.tasks.get(id)?.title ?? null])) } });
+  });
+  router.delete("/knowledge/nodes/:id", requireKind("primary"), requireSession, (req, res) => {
+    const userId = ctxOf(req).session!.ownerId;
+    if (!deleteKbNode(context.db, userId, param(req, "id"), "person")) { res.status(404).json({ error: "not_found" }); return; }
+    context.taskKb?.markChanged();
+    track(req, "knowledge_delete", { what: "node" });
+    res.json({ ok: true });
+  });
+  router.delete("/knowledge/domains/:name", requireKind("primary"), requireSession, (req, res) => {
+    const userId = ctxOf(req).session!.ownerId;
+    const ids = (context.db.prepare("SELECT id FROM kb_nodes WHERE owner_id=? AND domain=?").all(userId, param(req, "name")) as Array<{ id: string }>).map((r) => r.id);
+    for (const id of ids) deleteKbNode(context.db, userId, id, "person");
+    context.taskKb?.markChanged();
+    track(req, "knowledge_delete", { what: "domain" });
+    res.json({ ok: true, deleted: ids.length });
+  });
+  router.post("/knowledge/settings", requireKind("primary"), requireSession, (req, res) => {
+    const enabled = (req.body as { enabled?: unknown } | undefined)?.enabled;
+    if (typeof enabled !== "boolean") { res.status(400).json({ error: "bad_request" }); return; }
+    setKbEnabled(context.db, enabled);
+    track(req, "knowledge_toggle", { enabled });
+    res.json({ enabled });
+  });
 
   // A task's browser tabs: what its agent is doing there, and the person taking over or handing back.
   const taskBrowserKey = (req: Request): string | null => {

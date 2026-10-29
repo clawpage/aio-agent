@@ -249,8 +249,8 @@ url = "http://127.0.0.1:8190/mcp"
  * The policy for one runtime: the sandbox's own servers, plus the gateway tools this
  * account was given (Codex disables a thread's MCP server whose exact URL is not listed).
  */
-export function codexRequirementsToml(cfg: { decision?: { url: string }; schedule?: { url: string }; history?: { url: string }; image?: { url: string }; tts?: { url: string }; kb?: { url: string }; ha?: { url: string }; printer?: { url: string }; phone?: { url: string }; userBrowser?: { url: string }; macShell?: { url: string } }): string {
-  const gateway = ([["aio_decision", cfg.decision], ["aio_schedule", cfg.schedule], ["aio_history", cfg.history], ["aio_image", cfg.image], ["aio_tts", cfg.tts], ["aio_kb", cfg.kb], ["aio_ha", cfg.ha], ["aio_printer", cfg.printer], ["aio_phone", cfg.phone], ["aio_user_browser", cfg.userBrowser], ["aio_mac_shell", cfg.macShell]] as const)
+export function codexRequirementsToml(cfg: { decision?: { url: string }; schedule?: { url: string }; history?: { url: string }; taskKb?: { url: string }; image?: { url: string }; tts?: { url: string }; kb?: { url: string }; ha?: { url: string }; printer?: { url: string }; phone?: { url: string }; userBrowser?: { url: string }; macShell?: { url: string } }): string {
+  const gateway = ([["aio_decision", cfg.decision], ["aio_schedule", cfg.schedule], ["aio_history", cfg.history], ["aio_task_kb", cfg.taskKb], ["aio_image", cfg.image], ["aio_tts", cfg.tts], ["aio_kb", cfg.kb], ["aio_ha", cfg.ha], ["aio_printer", cfg.printer], ["aio_phone", cfg.phone], ["aio_user_browser", cfg.userBrowser], ["aio_mac_shell", cfg.macShell]] as const)
     .filter(([, server]) => server)
     .map(([name, server]) => `\n[mcp_servers.${name}.identity]\nurl = ${JSON.stringify(server!.url)}\n`);
   return CODEX_REQUIREMENTS_TOML + gateway.join("");
@@ -3011,3 +3011,112 @@ himalaya -a gmail message delete <ID...>             # goes to Trash first
 Note: both accounts use IMAP/SMTP + XOAUTH2. The granted scope includes full mailbox access; read-only use and "confirm before sending" are enforced only by this skill and \`mail-ro\`.
 Gmail users need IMAP enabled in their Google account (it is enabled by default for personal Gmail).
 `;
+
+/**
+ * The personal knowledge base for whatever does not call MCP tools (terminals, scripts,
+ * sub-agents): a small CLI on the same read-and-propose URL the executor has, and a skill
+ * that says when to use it. Neither can write knowledge; only the control plane does.
+ */
+export const TASK_KB_TOOL_DIR = "tools/aio-kb";
+export const TASK_KB_SKILL_DIR = "skills/aio-kb";
+export const TASK_KB_CLI_PY = String.raw`#!/usr/bin/env python3
+"""aio-kb: read the personal knowledge base and send proposals to its maintainer (Clawpage Agent)."""
+import json, os, sys, urllib.request
+
+CONFIG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
+USAGE = """usage:
+  aio-kb.py search <words> [--domain D] [--kind K] [--limit N]
+  aio-kb.py get <node id>
+  aio-kb.py neighbors <node id> [--depth 1|2]
+  aio-kb.py source <source id>
+  aio-kb.py propose '<json: {"type","task","target","text","reason","evidence":[{"quote","path"|"url"}]}>'
+  aio-kb.py status <proposal id>"""
+
+def call(tool, args):
+    try:
+        url = json.load(open(CONFIG))["url"]
+    except Exception:
+        sys.exit("aio-kb: the knowledge base is not connected in this sandbox (KB_NOT_CONFIGURED)")
+    body = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": tool, "arguments": args}}).encode()
+    req = urllib.request.Request(url, data=body, headers={"content-type": "application/json", "accept": "application/json"})
+    with urllib.request.urlopen(req, timeout=60) as res:
+        result = json.load(res).get("result", {})
+    text = "".join(c.get("text", "") for c in result.get("content", []))
+    print(text)
+    sys.exit(1 if result.get("isError") else 0)
+
+def flags(argv):
+    out, rest, i = {}, [], 0
+    while i < len(argv):
+        if argv[i].startswith("--") and i + 1 < len(argv):
+            out[argv[i][2:]] = argv[i + 1]; i += 2
+        else:
+            rest.append(argv[i]); i += 1
+    return out, rest
+
+def main():
+    if len(sys.argv) < 2:
+        sys.exit(USAGE)
+    cmd, (opts, rest) = sys.argv[1], flags(sys.argv[2:])
+    if cmd == "search":
+        args = {"query": " ".join(rest)}
+        for k in ("domain", "kind"):
+            if k in opts: args[k] = opts[k]
+        if "limit" in opts: args["limit"] = int(opts["limit"])
+        call("kb_search", args)
+    elif cmd == "get" and rest:
+        call("kb_get", {"id": rest[0]})
+    elif cmd == "neighbors" and rest:
+        call("kb_neighbors", {"id": rest[0], "depth": int(opts.get("depth", "1"))})
+    elif cmd == "source" and rest:
+        call("kb_source", {"id": rest[0]})
+    elif cmd == "propose" and rest:
+        call("kb_propose", json.loads(rest[0]))
+    elif cmd == "status" and rest:
+        call("kb_propose_status", {"id": rest[0]})
+    else:
+        sys.exit(USAGE)
+
+if __name__ == "__main__":
+    main()
+`;
+
+export function taskKbSkillMd(cliPath: string): string {
+  return `---
+name: aio-kb
+description: The user's personal knowledge base, built from this account's earlier tasks (people, products, stores, websites and apps, procedures, pitfalls, facts). Use it before redoing something that may have been done before, when the user refers to earlier work, or when a script or terminal needs that knowledge; send the knowledge maintainer a proposal when something in it is wrong or a task found something the record will not show.
+---
+
+# Personal knowledge base
+
+The knowledge base is kept by the account's knowledge maintainer from finished tasks. Every claim has sources (a task, a file in its directory, or a page it opened, with the exact words). You cannot edit it; the files under \`kb/\` in the workspace are a generated copy (\`kb/INDEX.md\` lists every node by domain, \`kb/wiki/\` holds checked quick references).
+
+## Reading
+
+Prefer the aio_task_kb tools when they are available (kb_search, kb_get, kb_neighbors, kb_source). From a terminal or script:
+
+\`\`\`bash
+python3 ${cliPath} search Costco returns          # nodes by relevance
+python3 ${cliPath} get <node id>                    # claims, sources, links, pending corrections
+python3 ${cliPath} neighbors <node id> --depth 2
+python3 ${cliPath} source <source id>               # the evidence, and whether it is still current
+\`\`\`
+
+How far to trust a claim: user_said > observed > inferred. recheck=true (prices, hours, availability, or past its verify date) and nodes with pending corrections must be checked again before use. Family members' records in the family knowledge base (aio_kb) take precedence.
+
+## Proposing
+
+The maintainer reads every finished task by itself, so do not report routine results. Propose only:
+
+- **add**: something worth reusing that the task record will not show (the wording of a policy you read, a pitfall and how you got past it);
+- **correct**: a claim differs from what you see now;
+- **outdated**: a procedure, link or arrangement no longer works;
+- **wrong**: the user corrected it.
+
+\`\`\`bash
+python3 ${cliPath} propose '{"type":"correct","task":"<this task id>","target":"<node or claim id>","text":"Opening hours are now 9:00-18:00","evidence":[{"quote":"Hours: 9:00 AM - 6:00 PM","url":"https://example.com/store"}]}'
+\`\`\`
+
+Evidence must be the exact words, from a file in this task's directory (\`path\`), a page this task opened (\`url\`), or the user's own words in this task. Never propose passwords, codes, identity or card numbers, or one-off details.
+`;
+}

@@ -4688,3 +4688,45 @@ button.map-card-switch { flex: 0 0 auto; padding: 4px 10px; }
 .task-actions .report-response { padding: 3px 0; border: 0; background: none; color: var(--text-dim); font-size: 12px; text-decoration: none; opacity: .7; }
 .task-actions .report-response:hover, .task-actions .report-response:focus-visible { opacity: 1; text-decoration: underline; }
 .login-policy { text-align:center; margin:18px 0 0; }
+
+/* ------------------------------------------------------------ personal knowledge base (KnowledgeList) */
+.knowledge-status { max-width: var(--page-max); margin: 0 auto 14px; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; }
+.knowledge-toggle { display: inline-flex; align-items: center; gap: 8px; font-size: var(--fs-sm); }
+.knowledge-toggle input { width: auto; margin: 0; }
+.knowledge-off { flex-basis: 100%; margin: 0; }
+.knowledge-domain-actions { max-width: var(--page-max); margin: 0 auto 10px; }
+.knowledge-nomatch { max-width: var(--page-max); margin: 8px auto; }
+.knowledge-page .task-list-meta { flex-wrap: wrap; }
+/* Small labels: plain by default, amber where it is the person's turn (a pending correction, a claim to recheck). */
+.knowledge-tag { display: inline-flex; align-items: center; border-radius: 999px; padding: 1px 8px; font-size: 11px; line-height: 1.6; white-space: nowrap; background: var(--bg-raised); color: var(--text-dim); }
+.knowledge-tag.attention { color: var(--warn); background: color-mix(in srgb, var(--warn) 12%, transparent); }
+.knowledge-detail { max-width: var(--page-max); margin: 0 auto; min-width: 0; }
+.knowledge-back { margin-bottom: 12px; }
+.knowledge-detail button.knowledge-back.ghost { background: transparent; }
+.knowledge-node { min-width: 0; }
+.knowledge-node-title { margin: 0 0 6px; font-size: 20px; font-weight: 600; overflow-wrap: anywhere; }
+.knowledge-meta { display: flex; flex-wrap: wrap; gap: 4px 12px; margin: 0 0 12px; }
+.knowledge-summary { margin: 0 0 16px; line-height: 1.65; color: var(--text); overflow-wrap: anywhere; }
+.knowledge-pending { margin: 0 0 18px; padding: 12px 14px; border: 1px solid color-mix(in srgb, var(--warn) 45%, var(--border)); border-radius: 12px; background: color-mix(in srgb, var(--warn) 8%, var(--bg-soft)); }
+.knowledge-pending > strong { color: var(--warn); font-size: var(--fs-sm); }
+.knowledge-pending > p { margin: 4px 0 8px; color: var(--text-dim); }
+.knowledge-pending ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 6px; font-size: var(--fs-sm); line-height: 1.6; overflow-wrap: anywhere; }
+.knowledge-pending .knowledge-tag { margin-right: 6px; }
+.knowledge-section { margin: 0 0 20px; min-width: 0; }
+.knowledge-section > h4 { margin: 0 0 8px; font-size: var(--fs-sm); font-weight: 600; color: var(--text-dim); }
+.knowledge-claims { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.knowledge-claims > li { padding: 12px 14px; border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--bg-soft); min-width: 0; }
+.knowledge-claims > li.superseded { opacity: .55; }
+.knowledge-claims > li.superseded .knowledge-claim-text { text-decoration: line-through; }
+.knowledge-claim-text { margin: 0; line-height: 1.6; overflow-wrap: anywhere; }
+.knowledge-tags { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 0; }
+.knowledge-sources { list-style: none; margin: 10px 0 0; padding: 10px 0 0; border-top: 1px solid var(--border); display: grid; gap: 10px; }
+.knowledge-sources > li { min-width: 0; }
+.knowledge-source-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
+.knowledge-sources button.link { padding: 0; text-align: left; overflow-wrap: anywhere; }
+.knowledge-source-ref { display: block; margin-top: 2px; max-width: 100%; color: var(--text-dim); overflow-wrap: anywhere; word-break: break-all; }
+.knowledge-excerpt { margin: 6px 0 0; padding: 2px 0 2px 10px; border-left: 2px solid var(--border-strong); color: var(--text-dim); font-size: var(--fs-sm); line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
+.knowledge-links { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.knowledge-links > li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; min-width: 0; }
+.knowledge-links button.link { padding: 0; text-align: left; overflow-wrap: anywhere; }
+.knowledge-wiki { padding: 12px 14px; border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--bg-soft); overflow-x: auto; }

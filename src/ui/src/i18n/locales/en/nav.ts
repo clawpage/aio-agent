@@ -8,6 +8,7 @@ export const nav: typeof zh = {
   tasks: "Tasks",
   schedules: "Scheduled tasks",
   vault: "Passwords",
+  knowledge: "Knowledge",
   analytics: "Dashboard",
   workspace: "Workspace",
   settings: "Settings",
@@ -20,5 +21,6 @@ export const nav: typeof zh = {
     main: "← Back to main chat",
     tasks: "← Back to tasks",
     schedules: "← Back to scheduled tasks",
+    knowledge: "← Back to knowledge",
   },
 };

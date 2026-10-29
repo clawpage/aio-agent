@@ -424,3 +424,49 @@ export interface UserBrowserState {
   /** What the agent asked the person to do there, while it waits. */
   request: string | null;
 }
+
+/** The personal knowledge base (`/api/knowledge`): what the knowledge keeper has sorted out of finished tasks. */
+export type KnowledgeKind = "entity" | "topic" | "procedure" | "fact";
+export interface KnowledgeDomain { name: string; description: string; nodes: number }
+export interface KnowledgeNodeSummary {
+  id: string;
+  kind: KnowledgeKind;
+  domain: string;
+  title: string;
+  summary: string;
+  /** How many claims it holds. */
+  claims: number;
+  /** Whether it has a quick-reference page. */
+  wiki: boolean;
+  /** Corrections waiting for the keeper. */
+  flagged: number;
+  /** Day of the last change, YYYY-MM-DD. */
+  updated: string;
+}
+export interface KnowledgeOverview { enabled: boolean; domains: KnowledgeDomain[]; nodes: KnowledgeNodeSummary[]; pending: number }
+export interface KnowledgeSource { id: string; task: string; path: string | null; url: string | null; excerpt: string; captured: string }
+export interface KnowledgeClaim {
+  id: string;
+  text: string;
+  certainty: "user_said" | "observed" | "inferred";
+  volatility: "stable" | "changes";
+  recheck: boolean;
+  status: "active" | "superseded";
+  supersededBy: string | null;
+  sources: KnowledgeSource[];
+}
+export interface KnowledgeNode {
+  id: string;
+  kind: KnowledgeKind;
+  domain: string;
+  title: string;
+  summary: string;
+  status: string;
+  updated: string;
+  reads: number;
+  claims: KnowledgeClaim[];
+  links: { rel: string; direction: "out" | "in"; node: string; title: string }[];
+  pendingCorrections: { packet: string; type: string; text: string; task: string | null; at: string }[];
+  wiki: string | null;
+  sourceTasks: Record<string, string | null>;
+}

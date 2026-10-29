@@ -16,6 +16,7 @@ import type {UserBrowserGateway} from './userBrowser.js';
 import type {MacShellGateway} from './macShell.js';
 import type {ScheduleGateway} from './scheduleTool.js';
 import type {HistoryGateway} from './historyTool.js';
+import type {TaskKbGateway} from './taskKb/gateway.js';
 import type {BrowserGateway} from './browser/gateway.js';
 import type {HostTokenSource} from './codex/hostTokens.js';
 import type {ImageGateway} from './imageTool.js';
@@ -101,7 +102,7 @@ export class MemberModelGateway {
   private claudeModels=new Map<string,string>();
   private gptUsers=new Set<string>();
   private server:http.Server|null=null;
-  constructor(private cfg:Config,private log:Logger,private share?:ShareStore,private decision?:DecisionGateway,private kb?:KbGateway,private schedule?:ScheduleGateway,private hostTokens?:Pick<HostTokenSource,'getTokens'|'invalidate'>,private image?:ImageGateway,private browser?:BrowserGateway,private ha?:HaGateway,private printer?:PrinterGateway,private phone?:PhoneGateway,private history?:HistoryGateway,private userBrowser?:UserBrowserGateway,private tts?:TtsGateway,private macShell?:MacShellGateway){}
+  constructor(private cfg:Config,private log:Logger,private share?:ShareStore,private decision?:DecisionGateway,private kb?:KbGateway,private schedule?:ScheduleGateway,private hostTokens?:Pick<HostTokenSource,'getTokens'|'invalidate'>,private image?:ImageGateway,private browser?:BrowserGateway,private ha?:HaGateway,private printer?:PrinterGateway,private phone?:PhoneGateway,private history?:HistoryGateway,private userBrowser?:UserBrowserGateway,private tts?:TtsGateway,private macShell?:MacShellGateway,private taskKb?:TaskKbGateway){}
   provision(cfg:Config):void {
     fs.mkdirSync(cfg.dataDir,{recursive:true,mode:0o700});
     const file=path.join(cfg.dataDir,'model-token');
@@ -119,6 +120,7 @@ export class MemberModelGateway {
     this.printer?.provision(cfg);
     this.schedule?.provision(cfg);
     this.history?.provision(cfg);
+    this.taskKb?.provision(cfg);
     this.image?.provision(cfg);
     this.tts?.provision(cfg);
     this.browser?.provision(cfg);
@@ -151,6 +153,7 @@ export class MemberModelGateway {
       if(this.macShell?.owns(req.url)){await this.macShell.handle(req,res);return;}
       if(this.schedule&&(req.url??'').startsWith('/schedule/')){await this.schedule.handle(req,res);return;}
       if(this.history&&(req.url??'').startsWith('/history/')){await this.history.handle(req,res);return;}
+      if(this.taskKb&&(req.url??'').startsWith('/task-kb/')){await this.taskKb.handle(req,res);return;}
       if(this.image&&(req.url??'').startsWith('/image/')){await this.image.handle(req,res);return;}
       if(this.tts&&(req.url??'').startsWith('/tts/')){await this.tts.handle(req,res);return;}
       if(this.browser&&(req.url??'').startsWith('/browser/')){await this.browser.handle(req,res);return;}

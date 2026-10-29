@@ -18,6 +18,8 @@ import {MacShellGateway} from "./macShell.js";
 import {DeviceLinks} from "./deviceLink.js";
 import {ScheduleGateway} from "./scheduleTool.js";
 import {HistoryGateway} from "./historyTool.js";
+import {TaskKbGateway} from "./taskKb/gateway.js";
+import {TaskKbMaintainer} from "./taskKb/maintainer.js";
 import { ImageGateway, sandboxImageFiles } from "./imageTool.js";
 import { PrinterGateway, sandboxPrintFiles } from "./printer/gateway.js";
 import { TtsGateway, sandboxSpeechFiles } from "./ttsTool.js";
@@ -53,7 +55,7 @@ import { AioClient } from "./aio/client.js";
 import { createApp, handleUpgrade } from "./http/server.js";
 import { TaskService } from "./tasks/service.js";
 import type { AppContext } from "./context.js";
-import { SandboxIdle } from "./sandbox/idle.js";
+import { ACTIVE_TASKS, SandboxIdle } from "./sandbox/idle.js";
 import { OnDemandPrograms } from "./sandbox/programs.js";
 import { startVaultAutofill, Vault } from "./vault.js";
 import { PushService, startTaskNotifications } from "./push.js";
@@ -191,6 +193,11 @@ async function bootstrapRuntime(opts: BootstrapOptions, cfg: Config, log: Logger
     cameras: opts.overrides?.cameras ?? HaCameras.from(cfg, log) ?? undefined,
   };
 
+  // The account's knowledge maintainer reads its finished tasks; started with the runtime (startTaskKb).
+  ctx.taskKb = new TaskKbMaintainer({ db, cfg, log, codex, container, idleState: () => ctx.idle?.state,
+    busy: async () => { const s = await agent.status(); return s.activeTurns.length > 0 || s.queuedTurns > 0 || !!db.prepare(`SELECT 1 FROM tasks WHERE status IN (${ACTIVE_TASKS}) LIMIT 1`).get(); } });
+  tasks.onTaskCompleted((id) => ctx.taskKb?.taskCompleted(id));
+
   if(!opts.deferAgentInit){await agent.init();tasks.init();}
 
   const maintenance = setInterval(() => {
@@ -205,6 +212,7 @@ async function bootstrapRuntime(opts: BootstrapOptions, cfg: Config, log: Logger
 
   const shutdown = async (): Promise<void> => {
     clearInterval(maintenance);
+    ctx.taskKb?.stop();
     tasks.close();
     agent.shutdown();
     // Stops only this service's own timers. It never signals the browser: a
@@ -473,6 +481,7 @@ export async function initOwnerRuntime(ctx: AppContext): Promise<SandboxIdle | n
   const idle = asleep ? startSandboxIdle(ctx, undefined, true) : null;
   await ctx.agent.init({ cold: asleep });
   ctx.tasks.init();
+  ctx.taskKb?.start();
   if (asleep) ctx.log.info("sandbox left stopped at start");
   return idle;
 }
@@ -533,6 +542,10 @@ async function main(): Promise<void> {
   const history=new HistoryGateway({port:ctx.cfg.memberModelPort??4902,log:ctx.log,
     runtimeFor:async id=>id===ctx.cfg.runtimeUserId?ctx:await ctx.runtimeForUser!(id)});
   history.provision(ctx.cfg);
+  // And its personal knowledge base, read by every agent of the account and written only by its kernel.
+  const taskKb=new TaskKbGateway({port:ctx.cfg.memberModelPort??4902,log:ctx.log,
+    runtimeFor:async id=>id===ctx.cfg.runtimeUserId?ctx:await ctx.runtimeForUser!(id)});
+  taskKb.provision(ctx.cfg);
   // Pictures come from the control plane's own ChatGPT login, so only a deployment with one offers them.
   const image=ctx.cfg.hostCodex.enabled?new ImageGateway({port:ctx.cfg.memberModelPort??4902,log:ctx.log,hostTokens:ctx.hostTokens,
     chatgptUrl:ctx.cfg.hostCodex.chatgptUrl,workspace:ctx.cfg.sandbox.containerWorkspaceDir,
@@ -550,7 +563,7 @@ async function main(): Promise<void> {
       await runtime.browser.withCall("call",()=>undefined);
     }});
   browserGateway.provision(ctx.cfg);
-  const modelGateway=new MemberModelGateway(ctx.cfg,ctx.log,ctx.share,decision,kb,schedule,ctx.hostTokens,image,browserGateway,ha,printer,phone,history,userBrowser,tts,macShell);
+  const modelGateway=new MemberModelGateway(ctx.cfg,ctx.log,ctx.share,decision,kb,schedule,ctx.hostTokens,image,browserGateway,ha,printer,phone,history,userBrowser,tts,macShell,taskKb);
   await modelGateway.start();
   // Phone notifications: one key pair and one subscription store for every account.
   ctx.push=new PushService({db:ctx.db,log:ctx.log,keyFile:path.join(ctx.cfg.dataDir,"vapid.json"),subject:`https://${ctx.cfg.primaryHost}`});

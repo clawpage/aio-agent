@@ -55,6 +55,8 @@ export interface TaskPlan {
     rulesVersion?: string;
     /** The version of the standing agreements this turn's prompt carried in full (none when it only named them). */
     agreementsVersion?: string;
+    /** Version of the personal-knowledge notes given to the thread with this task. */
+    knowledgeVersion?: string;
 }
 export interface PlanningTask {
     id: string;

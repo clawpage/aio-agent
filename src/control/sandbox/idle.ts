@@ -2,7 +2,7 @@ import type { AppContext } from "../context.js";
 import { t } from "../i18n/index.js";
 
 /** Task states that mean the sandbox is about to be used (planning runs on the sandbox Codex). */
-const ACTIVE_TASKS = "'planning','queued','running','steering','stopping','merging'";
+export const ACTIVE_TASKS = "'planning','queued','running','steering','stopping','merging'";
 /** Shell commands still running: `no_change_timeout` returned early but did not stop the command. */
 const RUNNING_SHELL = new Set(["running", "no_change_timeout"]);
 

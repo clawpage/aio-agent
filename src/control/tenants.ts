@@ -51,6 +51,8 @@ export function memberConfig(base: Config, userId: string, port: number, model: 
     schedule:undefined,
     // Nor its history tool: each account's reaches only its own tasks and agreements.
     history:undefined,
+    // Nor its personal knowledge base: each account's is its own.
+    taskKb:undefined,
     // Nor its image tool: each account's saves only into its own workspace.
     image:undefined,
     // Nor its text to speech, likewise.
@@ -179,6 +181,8 @@ export class UserRuntimes {
     // The gate goes in before queued work resumes, or it would run against the stopped container.
     let idle=asleep?startSandboxIdle(runtime.ctx,undefined,true):null;
     await runtime.ctx.agent.init({cold:asleep});runtime.ctx.tasks.init();
+    // Nobody's knowledge lives in the spare; the account that takes it starts its own.
+    if(spare)runtime.ctx.taskKb?.stop();else runtime.ctx.taskKb?.start();
     if(runtime.ctx.push)recoveries.push(startTaskNotifications(runtime.ctx,runtime.ctx.push));
     recoveries.push(startVaultAutofill(runtime.ctx));
     if(runtime.ctx.cfg.sandbox.autostart){

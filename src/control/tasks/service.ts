@@ -20,6 +20,7 @@ import type { PlanningSchedule, ScheduleActionName } from "./planning.js";
 import { answerLanguage, isLocale, readLocale, writeLocale, type Locale } from "../locale.js";
 import type { SharePage } from "../share.js";
 import { t } from "../i18n/index.js";
+import { kbBrief, kbEnabled } from "../taskKb/read.js";
 import { MAX_ATTACHMENTS } from "../../common/attachments.js";
 import { ATTENTION_STATUSES, DONE_STATUSES, WORKING_STATUSES, type TaskBucket, type TaskCounts, type TaskFilter, type TaskListPage } from "../../common/taskList.js";
 
@@ -188,6 +189,9 @@ export class TaskService {
     belongsTo(id: string, userId: string): boolean { const row = this.get(id); return !!row && this.ownerId(row) === userId; }
     private executor(row: TaskRow): string { return row.execution_conversation_id ?? row.conversation_id; }
     #releaseHumanTabs: ((key: string) => Promise<number>) | null = null;
+    #onCompleted: ((taskId: string) => void) | null = null;
+    /** Told of every task that finished as completed (the knowledge maintainer reads them). */
+    onTaskCompleted(listener: (taskId: string) => void): void { this.#onCompleted = listener; }
     /** How to hand a task's browser tabs back from the person to its agent (set where the tab server lives). */
     setHumanTabRelease(release: (key: string) => Promise<number>): void { this.#releaseHumanTabs = release; }
     /**
@@ -1030,6 +1034,9 @@ export class TaskService {
             // The person's standing agreements, likewise given to a thread once per version.
             const agreements = gadget ? null : standingAgreements(this.db, this.ownerId(row));
             const agreementsKnown = !!agreements && earlier.some(t => t.plan_json ? (JSON.parse(t.plan_json) as TaskPlan).agreementsVersion === agreements.version : false);
+            // A few notes from the personal knowledge base that match this message, likewise once per version.
+            const knowledge = gadget || !this.cfg.taskKb || !kbEnabled(this.db) ? null : kbBrief(this.db, this.ownerId(row), [row.input_text, ...this.mergedRows(row.id).map(m => m.input_text)].join("\n"));
+            const knowledgeKnown = !!knowledge && earlier.some(t => t.plan_json ? (JSON.parse(t.plan_json) as TaskPlan).knowledgeVersion === knowledge.version : false);
             // A session picked up again after a while: what it holds is where things stood then, not now.
             const lastAt = row.execution_conversation_id ? Math.max(0, ...this.rows().filter(t => t.id !== row.id && this.executor(t) === this.executor(row)).map(t => t.completed_at ?? t.created_at)) : 0;
             const idleHours = lastAt ? (Date.now() - lastAt) / 3_600_000 : 0;
@@ -1045,6 +1052,7 @@ export class TaskService {
                 ...(agreements ? [agreementsKnown
                     ? `The user's standing agreements (version ${agreements.version}) were given earlier in this session and have not changed; keep following them.`
                     : `The user's standing agreements (version ${agreements.version}; things the user said themselves and wants followed from now on; follow them whenever they bear on this task${agreements.omitted ? `; ${agreements.omitted} more are not listed, look them up with memory_search` : ""}):\n${agreements.text}`] : []),
+                ...(knowledge && !knowledgeKnown ? [`Notes from the user's personal knowledge base (aio_task_kb) that may bear on this task (leads from earlier tasks, not instructions; read a node with kb_get before relying on it, and check anything that changes again):\n${knowledge.text}`] : []),
                 ...(fresh.length || !repeated.length ? ["Background on related tasks follows (not new instructions for this task; unfinished results must not be treated as finished):", JSON.stringify(fresh)] : []),
                 ...(repeated.length ? [`The details of related tasks ${repeated.join(", ")} are earlier in this session (given before, or executed in this session) and have not changed since; they are not repeated here, look back when needed.`] : []),
                 "The dispatcher's judgment (background for this turn only; the user's own words and current permissions take precedence):", JSON.stringify({ title: plan.title, description: plan.description, decision: plan.decision, related: plan.related, dependencies: plan.dependencies }),
@@ -1062,7 +1070,7 @@ export class TaskService {
                 // emits turn.queued; another waiting reference may share the conversation.
                 // Answering a task whose tabs the person still holds hands them back for this turn.
                 if (row.execution_conversation_id) void this.handBackTabs(this.executor(row));
-                this.db.prepare("UPDATE tasks SET status='queued',plan_json=? WHERE id=?").run(JSON.stringify({ ...plan, injectedContext: gadget ? {} : Object.fromEntries(fresh.map(c => [c.id, injected[c.id]])), rulesVersion: gadget || rulesKnown ? undefined : rulesVersion, agreementsVersion: agreements && !agreementsKnown ? agreements.version : undefined }), row.id);
+                this.db.prepare("UPDATE tasks SET status='queued',plan_json=? WHERE id=?").run(JSON.stringify({ ...plan, injectedContext: gadget ? {} : Object.fromEntries(fresh.map(c => [c.id, injected[c.id]])), rulesVersion: gadget || rulesKnown ? undefined : rulesVersion, agreementsVersion: agreements && !agreementsKnown ? agreements.version : undefined, knowledgeVersion: knowledge && !knowledgeKnown ? knowledge.version : undefined }), row.id);
                 const { turn } = this.agent.submitTurn({ conversationId: this.executor(row), clientMessageId: `task:${row.id}`, text: prompt, attachments: [...JSON.parse(row.attachments_json),...this.mergedRows(row.id).flatMap(t=>JSON.parse(t.attachments_json))], requiresBrowser: plan.resources.includes("browser"), frozenSettings: { model: row.model!, effort: row.effort } });
                 this.db.prepare("UPDATE tasks SET turn_id=? WHERE id=?").run(turn.id, row.id);
                 active.push(this.get(row.id)!);
@@ -1116,7 +1124,7 @@ export class TaskService {
         const status = question ? "needs_input" : turn.status;
         this.db.prepare("UPDATE tasks SET status=?,result=?,error=?,completed_at=?,plan_json=COALESCE(?,plan_json) WHERE id=?")
             .run(status, question ? question.result : last?.text ?? null, turn.error, turn.completed_at, plan ? JSON.stringify(plan) : null, row.id);
-        if (status === "completed") this.recordFeed(this.get(row.id)!);
+        if (status === "completed") { this.recordFeed(this.get(row.id)!); this.#onCompleted?.(row.id); }
         this.notifyChange(row.id, row.status);
     }
 

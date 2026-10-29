@@ -7,6 +7,7 @@ export const nav: typeof zh = {
   tasks: "任務列表",
   schedules: "排程任務",
   vault: "密碼器",
+  knowledge: "知識庫",
   analytics: "營運看板",
   workspace: "工作區",
   settings: "設定",
@@ -19,5 +20,6 @@ export const nav: typeof zh = {
     main: "← 返回主對話",
     tasks: "← 返回任務列表",
     schedules: "← 返回排程任務",
+    knowledge: "← 返回知識庫",
   },
 };

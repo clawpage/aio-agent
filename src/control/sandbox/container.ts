@@ -40,6 +40,10 @@ import {
   MARKET_TOOL_DIR,
   PHOTO_CLI_PY,
   PHOTO_SKILL_DIR,
+  TASK_KB_TOOL_DIR,
+  TASK_KB_SKILL_DIR,
+  TASK_KB_CLI_PY,
+  taskKbSkillMd,
   PHOTO_SKILL_MD,
   PHOTO_TOOL_DIR,
   refreshWorkspaceAgents,
@@ -307,6 +311,7 @@ export class SandboxContainer {
       this.seedMarket(),
       this.seedPhoto(),
       this.seedMail(),
+      this.seedTaskKb(),
       this.enforceCodexIsolation(),
     ]);
     // Pages published before covers existed (or whose cover failed) get one. Rendering takes a while on a
@@ -422,6 +427,23 @@ export class SandboxContainer {
     const res = await this.execInSandbox(["python3", cli, "setup"], { timeoutMs: 900_000 });
     if (res.code !== 0) throw new Error((res.stdout || res.stderr).trim().slice(-300));
     return (JSON.parse(res.stdout) as { installed?: boolean }).installed === true;
+  }
+
+  /** The personal knowledge base's skill for both executors and its CLI, with this runtime's read-and-propose URL. */
+  async seedTaskKb(): Promise<void> {
+    if (!this.#cfg.taskKb) return;
+    const s = this.#cfg.sandbox;
+    const toolDir = `${s.containerCodexHome}/${TASK_KB_TOOL_DIR}`;
+    const skillDirs = [`${s.containerCodexHome}/${TASK_KB_SKILL_DIR}`, `${this.#cfg.claudeCode.configDir}/${TASK_KB_SKILL_DIR}`];
+    try {
+      const mkdir = await this.execInSandbox(["mkdir", "-p", toolDir, ...skillDirs], { timeoutMs: 15_000 });
+      if (mkdir.code !== 0) throw new Error((mkdir.stderr || mkdir.stdout).trim().slice(0, 200));
+      await this.writeFileInSandbox(`${toolDir}/aio-kb.py`, TASK_KB_CLI_PY);
+      await this.writeFileInSandbox(`${toolDir}/config.json`, JSON.stringify({ url: this.#cfg.taskKb.url }));
+      for (const dir of skillDirs) await this.writeFileInSandbox(`${dir}/SKILL.md`, taskKbSkillMd(`${toolDir}/aio-kb.py`));
+    } catch (err) {
+      this.#log.warn("could not seed the sandbox knowledge-base skill", { error: String(err).slice(0, 200) });
+    }
   }
 
   /**

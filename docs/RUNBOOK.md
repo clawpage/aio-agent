@@ -468,6 +468,23 @@ model。不能只凭任务卡上的执行模型，把分配失败归因于该模
   看板展示各账号实时采集开始时间和最早记录；无记录不代表供应商实际零消耗。
 - 本功能只重建 `ui control` 两层并定点重启，不重建用户沙盒或改变 4 GiB 配额。
 
+## 13a. 个人知识库（知识管家）
+
+行为见 [功能说明](FEATURES.md#个人知识库aio_task_kb)。日常只需看日志与队列：
+
+```bash
+grep -E "knowledge (batch applied|batch not applied|backfill queued|maintainer run failed|files not written)|wiki review failed" var/logs/personal-agent.log var/users/*/logs/personal-agent.log | tail
+# 队列（owner 在主库，member 在各自的 var/users/<散列>/agent.sqlite；compose 部署在 aio-control-1 的 /data 下）
+sqlite3 <库> "SELECT kind,type,status,count(*) FROM kb_packets GROUP BY 1,2,3"
+sqlite3 <库> "SELECT status,count(*) FROM kb_nodes GROUP BY 1"
+```
+
+- `batch not applied` 带前 5 条校验错误：多数是管家引用的原话与原文不一致，下一批会重试，三次后该消息标 failed，不影响其他消息。
+- 一直 pending 不动：管家只在沙箱醒着且该账号没有任务在跑时运行，这是预期；沙箱休眠的账号要等下次使用。
+- owner 回溯只做一次（`meta` 表 `task_kb.backfill_v1`）；要重做，先确认没有在跑的批次，删掉这一行后重启服务。
+- 只读副本 `workspace/kb/` 坏了或被改了不用管，下一次变更会重写；要立刻重写，可在页面上删一条无关内容，或等管家下一批。
+- 用户在页面上关掉知识库后，已有内容保留、仍可读；不再整理新任务、不再注入派单。
+
 ## 14. 已知限制
 
 - 未实现自动滚动升级镜像；升级需人工按第 3 节执行。沙箱内 Codex CLI 是卷里的固定版本，
