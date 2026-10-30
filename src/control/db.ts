@@ -281,7 +281,7 @@ CREATE TABLE IF NOT EXISTS feed_memory (
 CREATE INDEX IF NOT EXISTS idx_feed_memory_owner ON feed_memory(owner_id, created_at);
 
 -- Standing agreements the person asked the assistant to keep (rules, preferences,
--- facts, commitments): saved by executors through aio_history, read back into
+-- facts, commitments): saved by executors through aio_task_kb, read back into
 -- every execution thread once and searchable on demand.
 CREATE TABLE IF NOT EXISTS agreements (
   id TEXT PRIMARY KEY,

@@ -143,7 +143,7 @@ export async function kbSourceText(db: Db, ownerId: string, id: string, readFile
   const corpus = taskCorpus(db, ownerId, s.task_id);
   if (!corpus) return { ...base, state: "missing", note: "The task no longer exists; only the recorded quote remains." };
   const around = window(corpus);
-  return { ...base, state: around ? "current" : "missing", ...(around ? { context: around } : { note: "The task no longer contains the quote; only the recorded quote remains." }), more: `Read task ${s.task_id} with aio_history's history_get for its full record.` };
+  return { ...base, state: around ? "current" : "missing", ...(around ? { context: around } : { note: "The task no longer contains the quote; only the recorded quote remains." }), more: `Read task ${s.task_id} with history_get for its full record.` };
 }
 
 /**

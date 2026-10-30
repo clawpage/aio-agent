@@ -19,7 +19,6 @@ import {MacShellGateway} from "./macShell.js";
 import {MacNativeGateway} from "./macNative.js";
 import {DeviceLinks} from "./deviceLink.js";
 import {ScheduleGateway} from "./scheduleTool.js";
-import {HistoryGateway} from "./historyTool.js";
 import {TaskKbGateway} from "./taskKb/gateway.js";
 import {TaskKbMaintainer} from "./taskKb/maintainer.js";
 import { ImageGateway, sandboxImageFiles } from "./imageTool.js";
@@ -541,11 +540,7 @@ async function main(): Promise<void> {
   const schedule=new ScheduleGateway({port:ctx.cfg.memberModelPort??4902,log:ctx.log,
     tasksFor:async id=>id===ctx.cfg.runtimeUserId?ctx.tasks:(await ctx.runtimeForUser!(id)).tasks});
   schedule.provision(ctx.cfg);
-  // Likewise each account's past tasks and agreements.
-  const history=new HistoryGateway({port:ctx.cfg.memberModelPort??4902,log:ctx.log,
-    runtimeFor:async id=>id===ctx.cfg.runtimeUserId?ctx:await ctx.runtimeForUser!(id)});
-  history.provision(ctx.cfg);
-  // And its personal knowledge base, read by every agent of the account and written only by its kernel.
+  // Likewise its personal knowledge base, read by every agent of the account and written only by its kernel, with the past tasks and agreements beside it.
   const taskKb=new TaskKbGateway({port:ctx.cfg.memberModelPort??4902,log:ctx.log,
     runtimeFor:async id=>id===ctx.cfg.runtimeUserId?ctx:await ctx.runtimeForUser!(id)});
   taskKb.provision(ctx.cfg);
@@ -566,7 +561,7 @@ async function main(): Promise<void> {
       await runtime.browser.withCall("call",()=>undefined);
     }});
   browserGateway.provision(ctx.cfg);
-  const modelGateway=new MemberModelGateway(ctx.cfg,ctx.log,ctx.share,decision,kb,schedule,ctx.hostTokens,image,browserGateway,ha,printer,macNative,history,tts,taskKb);
+  const modelGateway=new MemberModelGateway(ctx.cfg,ctx.log,ctx.share,decision,kb,schedule,ctx.hostTokens,image,browserGateway,ha,printer,macNative,tts,taskKb);
   await modelGateway.start();
   // Phone notifications: one key pair and one subscription store for every account.
   ctx.push=new PushService({db:ctx.db,log:ctx.log,keyFile:path.join(ctx.cfg.dataDir,"vapid.json"),subject:`https://${ctx.cfg.primaryHost}`});

@@ -177,7 +177,7 @@
 - **调试模式（仅 owner）**：配置页开关（只记在当前浏览器）打开后，每条消息下方出现「派单日志」，按步骤展示候选、Jev 分数、
   派单器提示词与原始回答、重问原因、最终计划、失败原因与分阶段耗时。日志存于 `recall_events.steps_json`，保留 14 天；
   接口 `GET /api/settings/dispatch-log/<任务id>`。
-- **按需查历史（`aio_history`）**：每个账号的执行会话注册 MCP 服务 `aio_history`（成员网关 `/history/<运行时令牌>/mcp`，只通向本账号）。
+- **按需查历史（`aio_task_kb` 的 `history_*`）**：原先单独的 `aio_history` 服务器已并入个人知识库服务器 `aio_task_kb`（2026-10-30），工具名不变，只通向本账号。
   `history_search` 用派单器同一套 FTS5 索引（中文两字切词、BM25，标题加权）按相关度搜本账号任务，多个关键词命中任意即可，结果给出命中处的片段
   和它在执行会话里的位置（第几个/共几个）；`history_get` 读单个任务全文、同一执行会话的前后任务，`process=true` 另附执行过程
   （工具调用与参数、命令、搜索、发言，每步一行，最多 40 步）。派单注入的相关任务只给要点：原话最多 1500 字、结果最多 2500 字，截断处注明用 `history_get` 读全文。
@@ -556,7 +556,7 @@ iOS App 需为声明了存入相册权限、带 `aioSaveFiles` 标记的新版�
 - **接口**：`POST /api/gadget/messages`（`Authorization: Bearer <令牌>`，JSON `{text, clientMessageId}`）返回 202 `{id, status, done, reply, error}`；
   之后轮询 `GET /api/gadget/messages/<id>`，可带 `?wait=N`（最多 25 秒）长轮询。同一 `clientMessageId` 重发得到同一任务。不使用 cookie，因此不检查 CSRF。
 - **执行**：不经派单器，直接建已派好的任务。代表 owner 时推理强度固定 medium，代表成员时用其分配的模型与推理强度。所有配件消息共用一个执行会话，
-  回答按朗读要求输出（纯文本口语、一到三句、不用 Markdown、不追问）。问到其他任务时，执行会话用 `aio_history` 的 `history_search` / `history_get` 自行查询。
+  回答按朗读要求输出（纯文本口语、一到三句、不用 Markdown、不追问）。问到其他任务时，执行会话用 `aio_task_kb` 的 `history_search` / `history_get` 自行查询。
   每条消息是主会话中描述为「来自语音配件」的任务，完成时不发手机通知。
 - **后台压缩**：共用会话某轮结束后上下文超过窗口 80%，且之后静默 3 分钟，控制面在后台执行一次 Codex 压缩（`thread/compact/start`）；
   压缩不进会话记录，期间到达的消息排在其后；沙箱休眠时不为此唤醒，Claude Code 会话不压缩。

@@ -325,9 +325,7 @@ export function loadConfig(): {
   decision?: { url: string };
   /** The account's schedule tool reachable from this runtime's sandbox; set by the schedule gateway. */
   schedule?: { url: string };
-  /** The account's past tasks and standing agreements reachable from this runtime's sandbox; set by the history gateway. */
-  history?: { url: string };
-  /** The account's personal knowledge base (taskKb/gateway.ts), reachable from this runtime's sandbox. */
+  /** The account's personal knowledge base, past tasks and standing agreements (taskKb/gateway.ts), reachable from this runtime's sandbox. */
   taskKb?: { url: string };
   /** The image tool on the member gateway (imageTool.ts), when the control plane has a ChatGPT login. */
   image?: { url: string };

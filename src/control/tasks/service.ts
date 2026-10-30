@@ -988,7 +988,7 @@ export class TaskService {
     private gadgetPrompt(row: TaskRow): string {
         return [
             `You are Clawpage Agent's voice gadget session. Task ID: ${row.id}. The user is speaking to the voice gadget on their desk (a small screen and a speaker): this sentence was transcribed by speech recognition and may contain homophone errors, so take the most plausible meaning; your answer is shown on the small screen and read aloud. Identity and tone follow the SOUL.md injected at the system level. Do not delegate recursively.`,
-            "This is an ongoing gadget session that keeps the earlier gadget conversation; when the user says \"just now\" or \"that one\", look for what they mean here first. The user's other tasks in the main session are not here: when asked about something earlier, a task's progress or result, or what was done recently, find it with aio_history's history_search (a few keywords), then read the full content with history_get, instead of answering from impression; skip the lookup when it is not needed.",
+            "This is an ongoing gadget session that keeps the earlier gadget conversation; when the user says \"just now\" or \"that one\", look for what they mean here first. The user's other tasks in the main session are not here: when asked about something earlier, a task's progress or result, or what was done recently, find it with aio_task_kb's history_search (a few keywords), then read the full content with history_get, instead of answering from impression; skip the lookup when it is not needed.",
             "Answer in plain spoken text: no Markdown, bullets, tables, code blocks, links or emoji, and none of the cards or code blocks such as cards, products, map, choices, form or ask_user. By default one to three sentences, within about 100 Chinese characters or 60 English words, conclusion first; expand only when the user asks for detail, and even then stay within about 300 Chinese characters or 180 English words. Write numbers, times and units so they read aloud naturally.",
             `Do not ask follow-up questions: when information is missing, go with the most reasonable default and state the assumption in half a sentence. Use tools as usual when you need to look things up, use the browser or work with files, without describing the process in the answer; files you need to write go in ${this.cfg.sandbox.containerWorkspaceDir}/tasks/${row.id}/.`,
             `It is now ${describeNow(row.created_at, this.cfg.browser.timezone)}. This time the user says: ${this.taskContext(row)}`,
@@ -1025,7 +1025,7 @@ export class TaskService {
             const related = plan.related.map(id => this.get(id)).filter((t): t is TaskRow => !!t);
             const clock = (ts: number) => new Date(ts).toLocaleString("sv-SE", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
             // A pointer and the gist, not the whole record: the executor reads the rest with history_get when it needs it.
-            const gist = (text: string | null | undefined, n: number, id: string) => text && text.length > n ? `${text.slice(0, n)}… (truncated; read the full content of ${id} with aio_history's history_get)` : text ?? null;
+            const gist = (text: string | null | undefined, n: number, id: string) => text && text.length > n ? `${text.slice(0, n)}… (truncated; read the full content of ${id} with aio_task_kb's history_get)` : text ?? null;
             const context = related.map(t => ({ id: t.id, createdAt: clock(t.created_at), message: gist(t.input_text, 1500, t.id), status: t.status, lastQuestionToUser: lastQuestion(t), result: gist(t.result, 2500, t.id) }));
             const injected = Object.fromEntries(context.map(c => [c.id, createHash("sha256").update(JSON.stringify(c)).digest("hex").slice(0, 16)]));
             // A resumed thread already holds what earlier turns in it were given or
@@ -1057,7 +1057,7 @@ export class TaskService {
             const lastAt = row.execution_conversation_id ? Math.max(0, ...this.rows().filter(t => t.id !== row.id && this.executor(t) === this.executor(row)).map(t => t.completed_at ?? t.created_at)) : 0;
             const idleHours = lastAt ? (Date.now() - lastAt) / 3_600_000 : 0;
             const staleness = idleHours >= STALE_SESSION_HOURS
-                ? `This session last did work at ${formatWhen(lastAt, this.cfg.browser.timezone)} (${idleHours < 48 ? `${Math.round(idleHours)} hours` : `${Math.round(idleHours / 24)} days`} ago); things may have changed since, so the old content in the session is a lead, not the answer. If the user is asking how things stand now or how something turned out (what it actually cost, how far it got, the status of appointments and orders, prices, the latest news), first check current sources for anything new (the knowledge base, email, later tasks in aio_history, relevant web pages) before answering, and say what the answer rests on and from when; if they are only looking back at what was said then, no need to check again.`
+                ? `This session last did work at ${formatWhen(lastAt, this.cfg.browser.timezone)} (${idleHours < 48 ? `${Math.round(idleHours)} hours` : `${Math.round(idleHours / 24)} days`} ago); things may have changed since, so the old content in the session is a lead, not the answer. If the user is asking how things stand now or how something turned out (what it actually cost, how far it got, the status of appointments and orders, prices, the latest news), first check current sources for anything new (the knowledge base, email, later tasks in aio_task_kb's history, relevant web pages) before answering, and say what the answer rests on and from when; if they are only looking back at what was said then, no need to check again.`
                 : null;
             const prompt = gadget ? this.gadgetPrompt(row) : [
                 `You are a sub-agent delegated by Clawpage Agent's main session. Task ID: ${row.id}. ${row.execution_conversation_id ? "This turn resumes the same session as the earlier task and keeps its full context; continue, add to or update the work according to the user's new request instead of starting over." : "Handle only this task."} Do not delegate recursively. Identity, tone and behavior follow the SOUL.md injected at the system level; this applies to sub-tasks too, so do not replace the personal-assistant identity with an internal executor role.`,
@@ -1532,7 +1532,7 @@ export class TaskService {
         };
     }
     /**
-     * The account's past tasks for an executor searching them (aio_history history_search):
+     * The account's past tasks for an executor searching them (aio_task_kb history_search):
      * ranked by the same BM25 index the dispatcher recalls with (any of the words, titles
      * weigh double), newest first without a query. Each hit says which execution session it
      * belongs to and where in it, so a chain of follow-ups can be read in order.
@@ -1573,7 +1573,7 @@ export class TaskService {
         };
     }
     /**
-     * One of the account's tasks in full (aio_history history_get), with the tasks of its
+     * One of the account's tasks in full (aio_task_kb history_get), with the tasks of its
      * execution session in order, and on request what it actually did; null if it isn't theirs.
      */
     historyDetailFor(userId: string, id: string, opts: { process?: boolean } = {}) {

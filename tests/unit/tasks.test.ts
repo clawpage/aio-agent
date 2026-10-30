@@ -595,7 +595,7 @@ describe("main inbox delegation", () => {
         const resumed=codex.startedTurns[1]!.text;
         expect(resumed).toContain("This turn resumes the same session as the earlier task");
         expect(resumed).toMatch(/This session last did work at .+ \(3 days ago\); things may have changed since/);
-        expect(resumed).toContain("the knowledge base, email, later tasks in aio_history");
+        expect(resumed).toContain("the knowledge base, email, later tasks in aio_task_kb's history");
         // Asked again right away, the session is current: no reminder.
         await codex.runTurn(codex.startedTurns[1]!.turnId,{text:"列好了"});await tick();
         tasks.submit({text:"用英文再列一遍",clientMessageId:"right-after",relatedTaskId:later.id});await tick();await tick();

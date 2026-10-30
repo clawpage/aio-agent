@@ -2,7 +2,8 @@ import { it, expect, vi } from "vitest";
 import path from "node:path";
 import { startHarness } from "../helpers/harness.js";
 import { MemberModelGateway } from "../../src/control/memberModelGateway.js";
-import { HISTORY_POLICY, HistoryGateway, historyMcpServers, historyThreadServers } from "../../src/control/historyTool.js";
+import { TaskKbGateway, taskKbMcpServers, taskKbThreadServers } from "../../src/control/taskKb/gateway.js";
+import { HISTORY_POLICY } from "../../src/control/taskKb/historyTools.js";
 import { memberConfig } from "../../src/control/tenants.js";
 import { codexRequirementsToml } from "../../src/control/sandbox/seed.js";
 
@@ -12,13 +13,13 @@ async function setup() {
   const h = await startHarness();
   Object.assign(h.codex, { planTask: async () => JSON.stringify({ title: "test", related: [], dependencies: [], resources: [] }) });
   const cfg = { ...h.ctx.cfg, memberModelPort: 0 };
-  const history = new HistoryGateway({ port: 0, log: h.ctx.log, runtimeFor: async () => h.ctx });
-  const gateway = new MemberModelGateway(cfg, h.ctx.log, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, history);
+  const history = new TaskKbGateway({ port: 0, log: h.ctx.log, runtimeFor: async () => h.ctx });
+  const gateway = new MemberModelGateway(cfg, h.ctx.log, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, history);
   await gateway.start();
   const owner = { ...cfg, runtimeUserId: "owner_1", dataDir: path.join(h.dataDir, "owner-runtime") };
   history.provision(owner);
   // The owner's runtime config is the one the executor prompt and thread wiring read.
-  Object.assign(h.ctx.cfg, { history: owner.history });
+  Object.assign(h.ctx.cfg, { taskKb: owner.taskKb });
   const local = (u: string) => u.replace(/^http:\/\/host\.docker\.internal:0/, `http://127.0.0.1:${gateway.port}`);
   const rpc = (u: string, body: unknown) => fetch(local(u), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
   const call = async (u: string, name: string, args: unknown) => (await (await rpc(u, { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } })).json()).result as Result;
@@ -26,22 +27,23 @@ async function setup() {
   return { h, gateway, history, owner, cfg, rpc, call, json };
 }
 
-it("gives every account its own history tool, wired into the executor like the other gateway tools", async () => {
+it("gives every account its past tasks and agreements as tools of its own knowledge base server", async () => {
   const { h, gateway, owner, rpc } = await setup();
   try {
     const member = memberConfig(owner, "user_m", 18092);
-    expect(member.history).toBeUndefined();
+    expect(member.taskKb).toBeUndefined();
     gateway.provision(member);
-    expect(member.history!.url).toMatch(/^http:\/\/host\.docker\.internal:0\/history\/[a-f0-9]{64}\/mcp$/);
-    expect(member.history!.url).not.toBe(owner.history!.url);
-    expect(historyThreadServers(member)).toEqual({ aio_history: { url: member.history!.url, tool_timeout_sec: 30 } });
-    expect(historyMcpServers(member)).toEqual({ aio_history: { type: "http", url: member.history!.url } });
-    expect(codexRequirementsToml(member)).toContain(`[mcp_servers.aio_history.identity]\nurl = "${member.history!.url}"\n`);
-    expect((await rpc(member.history!.url.replace(/[a-f0-9]{64}/, "f".repeat(64)), { jsonrpc: "2.0", id: 1, method: "tools/list" })).status).toBe(403);
-    const init = await rpc(member.history!.url, { jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18" } });
-    expect((await init.json()).result).toMatchObject({ serverInfo: { name: "aio_history" }, instructions: HISTORY_POLICY });
-    const tools = (await (await rpc(member.history!.url, { jsonrpc: "2.0", id: 2, method: "tools/list" })).json()).result.tools as Array<{ name: string }>;
-    expect(tools.map((t) => t.name)).toEqual(["history_search", "history_get", "memory_search", "memory_save", "memory_forget"]);
+    expect(member.taskKb!.url).toMatch(/^http:\/\/host\.docker\.internal:0\/task-kb\/[a-f0-9]{64}\/mcp$/);
+    expect(member.taskKb!.url).not.toBe(owner.taskKb!.url);
+    expect(taskKbThreadServers(member)).toEqual({ aio_task_kb: { url: member.taskKb!.url, tool_timeout_sec: 30 } });
+    expect(taskKbMcpServers(member)).toEqual({ aio_task_kb: { type: "http", url: member.taskKb!.url } });
+    expect(codexRequirementsToml(member)).toContain(`[mcp_servers.aio_task_kb.identity]\nurl = "${member.taskKb!.url}"\n`);
+    expect(codexRequirementsToml(member)).not.toContain("aio_history");
+    expect((await rpc(member.taskKb!.url.replace(/[a-f0-9]{64}/, "f".repeat(64)), { jsonrpc: "2.0", id: 1, method: "tools/list" })).status).toBe(403);
+    const init = await rpc(member.taskKb!.url, { jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18" } });
+    expect((await init.json()).result).toMatchObject({ serverInfo: { name: "aio_task_kb" }, instructions: expect.stringContaining(HISTORY_POLICY) });
+    const tools = (await (await rpc(member.taskKb!.url, { jsonrpc: "2.0", id: 2, method: "tools/list" })).json()).result.tools as Array<{ name: string }>;
+    expect(tools.map((t) => t.name).slice(-5)).toEqual(["history_search", "history_get", "memory_search", "memory_save", "memory_forget"]);
   } finally {
     gateway.close();
     await h.shutdown();
@@ -66,42 +68,42 @@ it("finds past tasks by any of several words, best match first, with their sessi
 
     // "Roy 疫苗" is not a substring of anything: words are matched separately, and the
     // task about the vaccine itself ranks above the one that only mentions it.
-    const found = json<Array<{ id: string; title: string; request: string; result: string }>>(await call(owner.history!.url, "history_search", { query: "Roy 疫苗" }));
+    const found = json<Array<{ id: string; title: string; request: string; result: string }>>(await call(owner.taskKb!.url, "history_search", { query: "Roy 疫苗" }));
     expect(found.map((f) => f.request)).toEqual(["帮 Roy 预约下一针疫苗", "比较三款婴儿推车"]);
     // A hit deep in a long result shows that part, not the opening lines.
     expect(found[1]!.result).toContain("Roy 的疫苗在 11 月 3 日");
     expect([...found[1]!.result].length).toBeLessThanOrEqual(201);
 
-    const detail = json<{ request: string; result: string; process?: string[] }>(await call(owner.history!.url, "history_get", { id: found[1]!.id }));
+    const detail = json<{ request: string; result: string; process?: string[] }>(await call(owner.taskKb!.url, "history_get", { id: found[1]!.id }));
     expect(detail).toMatchObject({ request: "比较三款婴儿推车", result: long });
     expect(detail.process).toBeUndefined();
-    const withProcess = json<{ process: string[] }>(await call(owner.history!.url, "history_get", { id: found[0]!.id, process: true }));
+    const withProcess = json<{ process: string[] }>(await call(owner.taskKb!.url, "history_get", { id: found[0]!.id, process: true }));
     expect(withProcess.process).toEqual([
       'tool aio_tabs.browser_open({"url":"https://clinic.example/book"}) → error: 页面要求登录',
       "said 诊所网站要登录，请你先登录。",
     ]);
 
     // No query: newest first. A filter by status. A lone symbol is matched literally.
-    expect(json<unknown[]>(await call(owner.history!.url, "history_search", {}))).toHaveLength(3);
-    expect(json<unknown[]>(await call(owner.history!.url, "history_search", { status: "completed" }))).toHaveLength(3);
-    expect((await call(owner.history!.url, "history_search", { status: "open" })).content[0]!.text).toContain("No matching tasks found");
-    expect((await call(owner.history!.url, "history_search", { query: "%" })).content[0]!.text).toContain("No matching tasks found");
+    expect(json<unknown[]>(await call(owner.taskKb!.url, "history_search", {}))).toHaveLength(3);
+    expect(json<unknown[]>(await call(owner.taskKb!.url, "history_search", { status: "completed" }))).toHaveLength(3);
+    expect((await call(owner.taskKb!.url, "history_search", { status: "open" })).content[0]!.text).toContain("No matching tasks found");
+    expect((await call(owner.taskKb!.url, "history_search", { query: "%" })).content[0]!.text).toContain("No matching tasks found");
 
     // A follow-up runs in the same execution session: both show where they stand in it.
     h.ctx.tasks.submit({ userId: "owner_1", text: "那第二款推车有现货吗", clientMessageId: "hs-4", relatedTaskId: found[1]!.id });
     await vi.waitFor(() => expect(h.codex.startedTurns.length).toBe(4));
     await h.codex.runTurn(h.codex.startedTurns[3]!.turnId, { text: "第二款有现货" });
-    const chain = json<Array<{ request: string; session?: string }>>(await call(owner.history!.url, "history_search", { query: "推车" }));
+    const chain = json<Array<{ request: string; session?: string }>>(await call(owner.taskKb!.url, "history_search", { query: "推车" }));
     expect(chain.map((c) => c.session)).toEqual(expect.arrayContaining(["task 1 of 2 in the same execution session", "task 2 of 2 in the same execution session"]));
-    const first = json<{ session: Array<{ title: string; current?: boolean }> }>(await call(owner.history!.url, "history_get", { id: found[1]!.id }));
+    const first = json<{ session: Array<{ title: string; current?: boolean }> }>(await call(owner.taskKb!.url, "history_get", { id: found[1]!.id }));
     expect(first.session).toHaveLength(2);
     expect(first.session[0]!.current).toBe(true);
 
     // Another account sees none of it.
     const member = memberConfig(owner, "user_m", 18092);
     gateway.provision(member);
-    expect((await call(member.history!.url, "history_search", {})).content[0]!.text).toContain("No matching tasks found");
-    expect((await call(member.history!.url, "history_get", { id: found[0]!.id })).isError).toBe(true);
+    expect((await call(member.taskKb!.url, "history_search", {})).content[0]!.text).toContain("No matching tasks found");
+    expect((await call(member.taskKb!.url, "history_get", { id: found[0]!.id })).isError).toBe(true);
   } finally {
     gateway.close();
     await h.shutdown();
@@ -111,16 +113,16 @@ it("finds past tasks by any of several words, best match first, with their sessi
 it("keeps the person's standing agreements, gives each execution thread them once, and keeps related tasks to a gist", async () => {
   const { h, gateway, owner, call, json } = await setup();
   try {
-    const saved = await call(owner.history!.url, "memory_save", { kind: "rule", text: "推荐商品时只看 Amazon 和 Costco" });
+    const saved = await call(owner.taskKb!.url, "memory_save", { kind: "rule", text: "推荐商品时只看 Amazon 和 Costco" });
     expect(saved.content[0]!.text).toMatch(/^Recorded agreement \(mem_/);
-    await call(owner.history!.url, "memory_save", { kind: "fact", text: "Roy 对鸡蛋过敏" });
-    expect((await call(owner.history!.url, "memory_save", { kind: "wish", text: "x" })).isError).toBe(true);
-    expect((await call(owner.history!.url, "memory_save", { kind: "rule", text: "长".repeat(301) })).isError).toBe(true);
-    const egg = json<Array<{ id: string; text: string }>>(await call(owner.history!.url, "memory_search", { query: "鸡蛋" }));
+    await call(owner.taskKb!.url, "memory_save", { kind: "fact", text: "Roy 对鸡蛋过敏" });
+    expect((await call(owner.taskKb!.url, "memory_save", { kind: "wish", text: "x" })).isError).toBe(true);
+    expect((await call(owner.taskKb!.url, "memory_save", { kind: "rule", text: "长".repeat(301) })).isError).toBe(true);
+    const egg = json<Array<{ id: string; text: string }>>(await call(owner.taskKb!.url, "memory_search", { query: "鸡蛋" }));
     expect(egg.map((m) => m.text)).toEqual(["Roy 对鸡蛋过敏"]);
     // A changed mind rewrites the entry instead of adding a contradicting one.
-    expect((await call(owner.history!.url, "memory_save", { kind: "fact", text: "Roy 对鸡蛋已不过敏", replaces: egg[0]!.id })).content[0]!.text).toContain("Rewrote");
-    expect(json<unknown[]>(await call(owner.history!.url, "memory_search", {}))).toHaveLength(2);
+    expect((await call(owner.taskKb!.url, "memory_save", { kind: "fact", text: "Roy 对鸡蛋已不过敏", replaces: egg[0]!.id })).content[0]!.text).toContain("Rewrote");
+    expect(json<unknown[]>(await call(owner.taskKb!.url, "memory_search", {}))).toHaveLength(2);
 
     // A new execution thread starts with them...
     h.ctx.tasks.submit({ userId: "owner_1", text: "推荐一款空气净化器", clientMessageId: "ag-1" });
@@ -142,9 +144,9 @@ it("keeps the person's standing agreements, gives each execution thread them onc
     await h.codex.runTurn(h.codex.startedTurns[1]!.turnId, { text: "滤芯 $40" });
 
     // ...and once one is forgotten, the next thread no longer carries it.
-    const rule = json<Array<{ id: string }>>(await call(owner.history!.url, "memory_search", { query: "Costco" }))[0]!;
-    expect((await call(owner.history!.url, "memory_forget", { id: rule.id })).content[0]!.text).toBe("Deleted this agreement");
-    expect((await call(owner.history!.url, "memory_forget", { id: rule.id })).isError).toBe(true);
+    const rule = json<Array<{ id: string }>>(await call(owner.taskKb!.url, "memory_search", { query: "Costco" }))[0]!;
+    expect((await call(owner.taskKb!.url, "memory_forget", { id: rule.id })).content[0]!.text).toBe("Deleted this agreement");
+    expect((await call(owner.taskKb!.url, "memory_forget", { id: rule.id })).isError).toBe(true);
 
     // A related task is given as a gist with a pointer, not its whole result. The dispatcher sees the
     // session as its latest turn (the follow-up); the executor still gets the turn that holds the result.
@@ -154,13 +156,13 @@ it("keeps the person's standing agreements, gives each execution thread them onc
     await vi.waitFor(() => expect(h.codex.startedTurns.length).toBe(3));
     const third = h.codex.startedTurns[2]!.text;
     expect(third).not.toContain("推荐商品时只看 Amazon 和 Costco");
-    expect(third).toContain(`truncated; read the full content of ${taskId} with aio_history's history_get`);
+    expect(third).toContain(`truncated; read the full content of ${taskId} with aio_task_kb's history_get`);
     expect(third).not.toContain(result);
 
     // Agreements belong to their account.
     const member = memberConfig(owner, "user_m", 18092);
     gateway.provision(member);
-    expect((await call(member.history!.url, "memory_search", {})).content[0]!.text).toBe("No matching agreements.");
+    expect((await call(member.taskKb!.url, "memory_search", {})).content[0]!.text).toBe("No matching agreements.");
   } finally {
     gateway.close();
     await h.shutdown();

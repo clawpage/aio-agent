@@ -8,22 +8,27 @@ import type { Logger } from "../../common/logger.js";
 import type { SandboxContainer } from "../sandbox/container.js";
 import { KB_CERTAINTIES, KB_KINDS, KB_PROPOSAL_TYPES, KB_RELS, sha256, type KbReadFile } from "./kernel.js";
 import { getKbNode, kbNeighbors, kbSourceText, proposalStatus, proposeKb, searchKb } from "./read.js";
+import { callHistoryTool, HISTORY_POLICY, HISTORY_TOOLS } from "./historyTools.js";
+import type { TaskService } from "../tasks/service.js";
 
 /**
  * The personal knowledge base, offered to every agent of the account as one MCP
- * server on the member gateway (`/task-kb/<token>/mcp`, like aio_history): reading
- * tools and kb_propose. There is no writing tool on any URL; only the control
- * plane's kernel writes, from the maintainer's answers (maintainer.ts).
+ * server on the member gateway (`/task-kb/<token>/mcp`): reading tools and
+ * kb_propose, and beside them the raw task history and standing agreements it is
+ * distilled from (historyTools.ts). There is no tool that writes knowledge on any
+ * URL; only the control plane's kernel does, from the maintainer's answers (maintainer.ts).
  */
 
-export const TASK_KB_POLICY =
+const KNOWLEDGE_POLICY =
   "The user's personal knowledge base aio_task_kb is connected: what earlier tasks of this account found out, kept by a knowledge maintainer as a graph of entities, topics, procedures and facts, each claim with its sources. " +
   "Before working on something this account may have dealt with before (a person, product, store, website or app, a trip, a recurring chore, a setup), search it with kb_search, read the relevant node with kb_get, follow related nodes with kb_neighbors, and read the evidence with kb_source when the exact wording or numbers matter. " +
   "Claims marked observed or inferred are leads, not guarantees; claims that change (prices, opening hours, availability) or nodes with pending corrections must be checked again before use. The family knowledge base (aio_kb, when connected) takes precedence on family members' records. " +
   "You cannot change the knowledge base yourself, and you do not need to report routine results: the maintainer reads every finished task. Use kb_propose only for what the task record will not show or for knowledge that is now wrong: " +
   "add (something worth reusing you saw while working, such as a pitfall or the wording of a policy), correct (a claim differs from what you see now), outdated (a procedure or link no longer works), wrong (the user corrected it). Each proposal needs evidence from this task: an exact quote, with the file path in this task's directory or the page address it came from. Never propose credentials, identity numbers or one-off details.";
 
-const TOOLS = [
+export const TASK_KB_POLICY = `${KNOWLEDGE_POLICY}\n\n${HISTORY_POLICY}`;
+
+const KB_TOOLS = [
   {
     name: "kb_search",
     description: "Search the personal knowledge base: nodes ranked by relevance, each with its domain, kind, gist, its best-matching claims, and how many corrections are pending. Without query, lists the most recently changed nodes.",
@@ -89,6 +94,9 @@ export function taskKbMcpServers(cfg: Config): Record<string, unknown> {
   return cfg.taskKb ? { aio_task_kb: { type: "http", url: cfg.taskKb.url } } : {};
 }
 
+const TOOLS = [...KB_TOOLS, ...HISTORY_TOOLS];
+const HISTORY_TOOL_NAMES = new Set(HISTORY_TOOLS.map((t) => t.name));
+
 const MAX_FILE_BYTES = 2_000_000;
 
 /** A file's text (its first 2 MB) and that text's fingerprint, read inside the account's sandbox. */
@@ -101,7 +109,7 @@ export function sandboxKbFiles(container: Pick<SandboxContainer, "execInSandbox"
   };
 }
 
-export interface TaskKbRuntime { db: Db; cfg: Config; container: Pick<SandboxContainer, "execInSandbox">; taskKb?: { nudge(urgent: boolean): void } }
+export interface TaskKbRuntime { db: Db; tasks: TaskService; cfg: Config; container: Pick<SandboxContainer, "execInSandbox">; taskKb?: { nudge(urgent: boolean): void } }
 
 export class TaskKbGateway {
   #port: number;
@@ -192,6 +200,7 @@ export class TaskKbGateway {
     const str = (v: unknown) => (typeof v === "string" ? v : undefined);
     try {
       const runtime = await this.#runtimeFor(userId);
+      if (HISTORY_TOOL_NAMES.has(name)) return callHistoryTool(runtime, userId, name, args);
       const { db, cfg } = runtime;
       const readFile = sandboxKbFiles(runtime.container);
       const workspaceDir = cfg.sandbox.containerWorkspaceDir;

@@ -45,8 +45,6 @@ export function memberConfig(base: Config, userId: string, port: number, model: 
     macNative:undefined,
     // Nor the owner's schedule tool: the gateway gives every member one that reaches only its own schedules.
     schedule:undefined,
-    // Nor its history tool: each account's reaches only its own tasks and agreements.
-    history:undefined,
     // Nor its personal knowledge base: each account's is its own.
     taskKb:undefined,
     // Nor its image tool: each account's saves only into its own workspace.
