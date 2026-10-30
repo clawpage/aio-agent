@@ -122,7 +122,7 @@ The shell itself bundles no UI, so a UI change still ships with the next UI depl
   resource beside the bridge; chrome-devtools-mcp from the same lockfile). The bridge starts the installed Google
   Chrome headless with a profile of its own (`ai-chrome` beside the phone runtime), so there is no Allow prompt, no
   window, no Dock icon and no focus taken from the person at the Mac; sign-ins made in it stay. It never attaches to
-  the user's own Chrome profile. The control plane offers it as `aio_user_browser` next to the sandbox browser, which
+  the user's own Chrome profile. The control plane offers it as part of `aio_mac_native` next to the sandbox browser, which
   takes over whenever the Mac or Chrome is not there. The console's task cards show a task's page (a screenshot, or a
   live CDP screencast over the link) and take it over; the person's input goes in over the bridge's own DevTools
   connection. `PA_AI_CHROME_PROFILE` / `PA_AI_CHROME_PATH` override the profile and the Chrome binary (tests, other installs).
@@ -131,7 +131,7 @@ The shell itself bundles no UI, so a UI change still ships with the next UI depl
   until the person turns on "Let the AI use this Mac's terminal" in the workspace's Mac Terminal app inside this app; the console posts
   `{"type":"shell","enabled":…}`, the app keeps it in `device-link.json` (`shell`), restarts the bridge with
   `PA_MAC_SHELL=1` and reports `shell` in its `aio-device-link` events. Needs tmux on the Mac (Homebrew's is found;
-  `PA_TMUX` overrides). The control plane offers it as `aio_mac_shell` (`src/control/macShell.ts`).
+  `PA_TMUX` overrides). The control plane offers it as part of `aio_mac_native` (`src/control/macShell.ts`, `src/control/macNative.ts`).
 - Home-screen name: iOS 一站 in `gen/apple/project.yml` (`CFBundleDisplayName`, then
   `xcodegen generate`); Android Clawpage Agent in `gen/android/app/src/main/res/values/strings.xml`
   and 一站 in `values-zh/strings.xml`.

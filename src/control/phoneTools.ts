@@ -2,7 +2,7 @@
  * What the phone's MCP server (mobile-mcp 1.0.9 behind bin/phone-bridge.mjs, its
  * tool whitelist applied) says about itself, recorded from a live bridge. The
  * gateway answers the handshake and the tool list from this when the account's
- * Mac is offline, so an executor's aio_phone always starts (Codex starts a
+ * Mac is offline, so an executor's aio_mac_native always starts (Codex starts a
  * thread's MCP servers once and never retries a failed one). Refresh it when
  * the bridge's mobile-mcp version or tool whitelist changes.
  */

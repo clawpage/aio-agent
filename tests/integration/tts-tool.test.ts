@@ -42,7 +42,7 @@ it("gives every account text to speech from one speech server, saved into that a
   };
   const tts = new TtsGateway({ port: 0, log: h.ctx.log, speechUrl: `http://127.0.0.1:${(upstream.address() as { port: number }).port}/v1/tts`, workspace: "/home/gem/workspace", filesFor });
   const cfg = { ...h.ctx.cfg, memberModelPort: 0 };
-  const gateway = new MemberModelGateway(cfg, h.ctx.log, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, tts);
+  const gateway = new MemberModelGateway(cfg, h.ctx.log, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, tts);
   await gateway.start();
   try {
     const owner = { ...cfg, runtimeUserId: "owner_1", dataDir: path.join(h.dataDir, "owner-runtime") };

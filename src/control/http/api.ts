@@ -646,9 +646,10 @@ export function createApiRouter(context: AppContext): Router {
   // Execution conversations that called the phone tools: their task cards show the phone.
   const phoneConversations = new Set<string>();
   const usedPhone = (conversationId: string): boolean => {
-    if (!context.phone?.enabled) return false;
+    if (!context.phone) return false;
     if (phoneConversations.has(conversationId)) return true;
-    const hit = db.prepare(`SELECT 1 FROM events WHERE conversation_id=? AND type='item/started' AND payload LIKE '%"server":"aio_phone"%' LIMIT 1`).get(conversationId);
+    // aio_phone: tasks from before the Mac's tools were one server.
+    const hit = db.prepare(`SELECT 1 FROM events WHERE conversation_id=? AND type='item/started' AND (payload LIKE '%"server":"aio_phone"%' OR (payload LIKE '%"server":"aio_mac_native"%' AND payload LIKE '%"tool":"mobile\\_%' ESCAPE '\\')) LIMIT 1`).get(conversationId);
     if (hit) phoneConversations.add(conversationId);
     return Boolean(hit);
   };

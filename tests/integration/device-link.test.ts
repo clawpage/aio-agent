@@ -3,7 +3,9 @@ import http from "node:http";
 import WebSocket, { WebSocketServer } from "ws";
 import { startHarness, login, rawUpgrade } from "../helpers/harness.js";
 import { MemberModelGateway } from "../../src/control/memberModelGateway.js";
-import { PhoneGateway, phoneMcpServers, phoneThreadServers, PHONE_SCREEN_PATH } from "../../src/control/phone.js";
+import { PHONE_SCREEN_PATH } from "../../src/control/phone.js";
+import { macNativeMcpServers, macNativeThreadServers } from "../../src/control/macNative.js";
+import { macParts } from "../helpers/macNative.js";
 import { codexRequirementsToml } from "../../src/control/sandbox/seed.js";
 import { DeviceLinks, DEVICE_LINK_PATH } from "../../src/control/deviceLink.js";
 import { memberConfig } from "../../src/control/tenants.js";
@@ -59,8 +61,8 @@ it("links a Mac's phone to the account that linked it, over the socket the Mac d
   const names = (id: string) => (h.ctx.db.prepare("SELECT username AS v FROM owners WHERE id=?").get(id) as { v: string } | undefined)?.v ?? null;
   const ids = (name: string) => (h.ctx.db.prepare("SELECT id AS v FROM owners WHERE username=?").get(name) as { v: string } | undefined)?.v ?? null;
   const links = new DeviceLinks(h.ctx.db, cfg, h.ctx.log);
-  const phone = new PhoneGateway({ cfg, log: h.ctx.log, port: 0, usernameOf: names, userIdOf: ids, links });
-  const gateway = new MemberModelGateway(cfg, h.ctx.log, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, phone);
+  const { phone, native } = macParts({ cfg, log: h.ctx.log, usernameOf: names, userIdOf: ids, links });
+  const gateway = new MemberModelGateway(cfg, h.ctx.log, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, native);
   await gateway.start();
   Object.assign(h.ctx, { phone, deviceLinks: links });
   h.server.removeAllListeners("upgrade");
@@ -77,7 +79,7 @@ it("links a Mac's phone to the account that linked it, over the socket the Mac d
     for (const who of [alice, bob, owner]) expect(await (await h.request("/api/phone", { headers: { cookie: who.cookie } })).json()).toEqual({ available: false, device: null });
     const aliceCfg = memberConfig(cfg, alice.id, 18092);
     gateway.provision(aliceCfg);
-    expect(aliceCfg.phone).toBeUndefined();
+    expect(aliceCfg.macNative).toBeUndefined();
 
     // Alice links her Mac: the token comes back once; it is not stored in the clear.
     const created = await h.request("/api/device-links", { method: "POST", headers: as(alice), body: JSON.stringify({ name: "From console" }) });
@@ -85,18 +87,18 @@ it("links a Mac's phone to the account that linked it, over the socket the Mac d
     const { token, link } = (await created.json()) as { token: string; link: { id: string } };
     expect(token).toMatch(/^dl_[A-Za-z0-9_-]{43}$/);
     expect(JSON.stringify(h.ctx.db.prepare("SELECT * FROM device_links").all())).not.toContain(token);
-    phone.refresh(aliceCfg);
-    expect(aliceCfg.phone!.url).toMatch(/^http:\/\/host\.docker\.internal:0\/phone\/[a-f0-9]{64}\/mcp$/);
-    expect(phoneThreadServers(aliceCfg)).toEqual({ aio_phone: { url: aliceCfg.phone!.url, tool_timeout_sec: expect.any(Number) } });
-    expect(phoneMcpServers(aliceCfg)).toEqual({ aio_phone: { type: "http", url: aliceCfg.phone!.url } });
-    expect(codexRequirementsToml(aliceCfg)).toContain(`[mcp_servers.aio_phone.identity]\nurl = "${aliceCfg.phone!.url}"\n`);
+    native.refresh(aliceCfg);
+    expect(aliceCfg.macNative!.url).toMatch(/^http:\/\/host\.docker\.internal:0\/mac-native\/[a-f0-9]{64}\/mcp$/);
+    expect(macNativeThreadServers(aliceCfg)).toEqual({ aio_mac_native: { url: aliceCfg.macNative!.url, tool_timeout_sec: expect.any(Number) } });
+    expect(macNativeMcpServers(aliceCfg)).toEqual({ aio_mac_native: { type: "http", url: aliceCfg.macNative!.url } });
+    expect(codexRequirementsToml(aliceCfg)).toContain(`[mcp_servers.aio_mac_native.identity]\nurl = "${aliceCfg.macNative!.url}"\n`);
     // Nobody else's runtime gets one: not Bob's, not the owner's (the host has no phone of its own any more).
     const bobCfg = memberConfig(cfg, bob.id, 18093);
     gateway.provision(bobCfg);
-    phone.provision(cfg);
-    expect(bobCfg.phone).toBeUndefined();
-    expect(cfg.phone).toBeUndefined();
-    expect(codexRequirementsToml(bobCfg)).not.toContain("aio_phone");
+    native.provision(cfg);
+    expect(bobCfg.macNative).toBeUndefined();
+    expect(cfg.macNative).toBeUndefined();
+    expect(codexRequirementsToml(bobCfg)).not.toContain("aio_mac_native");
 
     // Only her token, only on the primary host, opens the socket.
     const primary = { Host: `localhost:${h.primaryPort}`, Upgrade: "websocket" };
@@ -126,9 +128,12 @@ it("links a Mac's phone to the account that linked it, over the socket the Mac d
     // the gateway holds its own session with mobile-mcp there.
     const local = (url: string) => url.replace(/^http:\/\/host\.docker\.internal:0/, `http://127.0.0.1:${gateway.port}`);
     const call = { jsonrpc: "2.0", id: 5, method: "tools/list" };
-    const res = await fetch(local(aliceCfg.phone!.url), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(call) });
+    const res = await fetch(local(aliceCfg.macNative!.url), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(call) });
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ jsonrpc: "2.0", id: 5, result: { tools: [{ name: "mobile_list_available_devices" }] } });
+    // The phone's live tools come first, next to the browser's and the terminal's.
+    const tools = ((await res.json()) as { result: { tools: Array<{ name: string }> } }).result.tools;
+    expect(tools[0]).toEqual({ name: "mobile_list_available_devices" });
+    expect(tools.map((t) => t.name)).toEqual(expect.arrayContaining(["request_human", "read", "bash"]));
     expect(bridge.seen.filter((s) => s.path === "/mcp").map((s) => [(s.body as { method: string }).method, s.session])).toEqual([
       ["initialize", undefined], ["notifications/initialized", "sess-1"], ["tools/list", "sess-1"]]);
 
@@ -157,8 +162,8 @@ it("links a Mac's phone to the account that linked it, over the socket the Mac d
     expect((await h.request(`/api/device-links/${link.id}`, { method: "DELETE", headers: as(bob) })).status).toBe(404);
     expect((await h.request(`/api/device-links/${link.id}`, { method: "DELETE", headers: as(alice) })).status).toBe(200);
     await expect.poll(() => states.at(-1)).toBe("revoked");
-    phone.refresh(aliceCfg);
-    expect(aliceCfg.phone).toBeUndefined();
+    native.refresh(aliceCfg);
+    expect(aliceCfg.macNative).toBeUndefined();
     expect(await (await h.request("/api/phone", { headers: { cookie: alice.cookie } })).json()).toEqual({ available: false, device: null });
   } finally {
     client?.close();
@@ -194,8 +199,8 @@ it("keeps the executor's phone tools working through a Mac that is offline at fi
   const names = (id: string) => (h.ctx.db.prepare("SELECT username AS v FROM owners WHERE id=?").get(id) as { v: string } | undefined)?.v ?? null;
   const ids = (name: string) => (h.ctx.db.prepare("SELECT id AS v FROM owners WHERE username=?").get(name) as { v: string } | undefined)?.v ?? null;
   const links = new DeviceLinks(h.ctx.db, cfg, h.ctx.log);
-  const phone = new PhoneGateway({ cfg, log: h.ctx.log, port: 0, usernameOf: names, userIdOf: ids, links });
-  const gateway = new MemberModelGateway(cfg, h.ctx.log, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, phone);
+  const { phone, native } = macParts({ cfg, log: h.ctx.log, usernameOf: names, userIdOf: ids, links });
+  const gateway = new MemberModelGateway(cfg, h.ctx.log, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, native);
   await gateway.start();
   h.server.removeAllListeners("upgrade");
   h.server.on("upgrade", (req, socket, head) => links.ownsUpgrade(req) ? links.handleUpgrade(req, socket, head) : handleUpgrade(h.ctx, req, socket, head));
@@ -224,8 +229,8 @@ it("keeps the executor's phone tools working through a Mac that is offline at fi
   let client: { close(): void } | null = null;
   try {
     const { token } = links.create("owner_1", "Mac");
-    phone.provision(cfg);
-    const url = cfg.phone!.url.replace(/^http:\/\/host\.docker\.internal:0/, `http://127.0.0.1:${gateway.port}`);
+    native.provision(cfg);
+    const url = cfg.macNative!.url.replace(/^http:\/\/host\.docker\.internal:0/, `http://127.0.0.1:${gateway.port}`);
     const rpc = async (body: unknown) => {
       const res = await fetch(url, { method: "POST", headers: { "content-type": "application/json", accept: "application/json, text/event-stream" }, body: JSON.stringify(body) });
       return { status: res.status, body: res.status === 202 ? null : await res.json() };
@@ -235,7 +240,7 @@ it("keeps the executor's phone tools working through a Mac that is offline at fi
     // The Mac is offline when the executor's thread starts: the server still starts, with the tools.
     const init = await rpc({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "codex", version: "1" } } });
     expect(init.status).toBe(200);
-    expect(init.body).toMatchObject({ id: 1, result: { protocolVersion: "2025-06-18", capabilities: { tools: {} }, serverInfo: { name: "mobile-mcp" } } });
+    expect(init.body).toMatchObject({ id: 1, result: { protocolVersion: "2025-06-18", capabilities: { tools: {} }, serverInfo: { name: "aio_mac_native" }, instructions: expect.stringContaining("mobile_list_available_devices") } });
     expect((await rpc({ jsonrpc: "2.0", method: "notifications/initialized" })).status).toBe(202);
     const listed = await rpc({ jsonrpc: "2.0", id: 2, method: "tools/list" });
     expect((listed.body as { result: { tools: Array<{ name: string }> } }).result.tools.map((t) => t.name)).toContain("mobile_list_available_devices");
@@ -309,8 +314,8 @@ it("works with a mobile-mcp that keeps no sessions (the real one)", async () => 
   const names = (id: string) => (h.ctx.db.prepare("SELECT username AS v FROM owners WHERE id=?").get(id) as { v: string } | undefined)?.v ?? null;
   const ids = (name: string) => (h.ctx.db.prepare("SELECT id AS v FROM owners WHERE username=?").get(name) as { v: string } | undefined)?.v ?? null;
   const links = new DeviceLinks(h.ctx.db, cfg, h.ctx.log);
-  const phone = new PhoneGateway({ cfg, log: h.ctx.log, port: 0, usernameOf: names, userIdOf: ids, links });
-  const gateway = new MemberModelGateway(cfg, h.ctx.log, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, phone);
+  const { phone, native } = macParts({ cfg, log: h.ctx.log, usernameOf: names, userIdOf: ids, links });
+  const gateway = new MemberModelGateway(cfg, h.ctx.log, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, native);
   await gateway.start();
   h.server.removeAllListeners("upgrade");
   h.server.on("upgrade", (req, socket, head) => links.ownsUpgrade(req) ? links.handleUpgrade(req, socket, head) : handleUpgrade(h.ctx, req, socket, head));
@@ -328,10 +333,10 @@ it("works with a mobile-mcp that keeps no sessions (the real one)", async () => 
   let client: { close(): void } | null = null;
   try {
     const { token } = links.create("owner_1", "Mac");
-    phone.provision(cfg);
+    native.provision(cfg);
     client = linkDevice({ url: `ws://localhost:${h.primaryPort}${DEVICE_LINK_PATH}`, token, name: "Mac", local: `http://127.0.0.1:${(bridge.address() as { port: number }).port}`, localToken: LOCAL_TOKEN, onState: () => undefined });
     await expect.poll(() => Boolean(links.tunnelFor("owner_1"))).toBe(true);
-    const url = cfg.phone!.url.replace(/^http:\/\/host\.docker\.internal:0/, `http://127.0.0.1:${gateway.port}`);
+    const url = cfg.macNative!.url.replace(/^http:\/\/host\.docker\.internal:0/, `http://127.0.0.1:${gateway.port}`);
     const res = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 7, method: "tools/call", params: { name: "mobile_list_available_devices", arguments: {} } }) });
     expect(await res.json()).toEqual({ jsonrpc: "2.0", id: 7, result: { content: [{ type: "text", text: "Galaxy Z Flip6" }] } });
     expect(sent).toEqual([undefined, undefined, undefined]);

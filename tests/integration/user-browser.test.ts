@@ -3,7 +3,9 @@ import http from "node:http";
 import WebSocket, { WebSocketServer } from "ws";
 import { startHarness, login, rawUpgrade } from "../helpers/harness.js";
 import { MemberModelGateway } from "../../src/control/memberModelGateway.js";
-import { UserBrowserGateway, userBrowserMcpServers, userBrowserThreadServers, USER_BROWSER_SCREEN_PATH } from "../../src/control/userBrowser.js";
+import { USER_BROWSER_SCREEN_PATH } from "../../src/control/userBrowser.js";
+import { macNativeMcpServers, macNativeThreadServers } from "../../src/control/macNative.js";
+import { macParts } from "../helpers/macNative.js";
 import { USER_BROWSER_TOOLS } from "../../src/control/userBrowserTools.js";
 import { codexRequirementsToml } from "../../src/control/sandbox/seed.js";
 import { DeviceLinks, DEVICE_LINK_PATH } from "../../src/control/deviceLink.js";
@@ -68,8 +70,8 @@ it("offers an account its own Chrome on the Mac it linked, and sends the executo
   const names = (id: string) => (h.ctx.db.prepare("SELECT username AS v FROM owners WHERE id=?").get(id) as { v: string } | undefined)?.v ?? null;
   const ids = (name: string) => (h.ctx.db.prepare("SELECT id AS v FROM owners WHERE username=?").get(name) as { v: string } | undefined)?.v ?? null;
   const links = new DeviceLinks(h.ctx.db, cfg, h.ctx.log);
-  const browser = new UserBrowserGateway({ cfg, log: h.ctx.log, port: 0, usernameOf: names, userIdOf: ids, links });
-  const gateway = new MemberModelGateway(cfg, h.ctx.log, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, browser);
+  const { browser, native } = macParts({ cfg, log: h.ctx.log, usernameOf: names, userIdOf: ids, links });
+  const gateway = new MemberModelGateway(cfg, h.ctx.log, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, native);
   await gateway.start();
   Object.assign(h.ctx, { deviceLinks: links });
   h.server.removeAllListeners("upgrade");
@@ -81,23 +83,23 @@ it("offers an account its own Chrome on the Mac it linked, and sends the executo
     const aliceCfg = memberConfig(cfg, alice.id, 18092);
     const bobCfg = memberConfig(cfg, bob.id, 18093);
     gateway.provision(aliceCfg);
-    expect(aliceCfg.userBrowser).toBeUndefined();
-    expect(userBrowserThreadServers(aliceCfg)).toEqual({});
+    expect(aliceCfg.macNative).toBeUndefined();
+    expect(macNativeThreadServers(aliceCfg)).toEqual({});
 
     // Linking her Mac gives her runtime the tools; nobody else's runtime gets them.
     const created = await h.request("/api/device-links", { method: "POST", headers: { cookie: alice.cookie, "x-csrf-token": alice.csrf, "content-type": "application/json" }, body: JSON.stringify({ name: "Mac" }) });
     const { token, link } = (await created.json()) as { token: string; link: { id: string } };
-    browser.refresh(aliceCfg);
-    const url = aliceCfg.userBrowser!.url;
-    expect(url).toMatch(/^http:\/\/host\.docker\.internal:0\/user-browser\/[a-f0-9]{64}\/mcp$/);
-    expect(userBrowserThreadServers(aliceCfg)).toEqual({ aio_user_browser: { url, tool_timeout_sec: expect.any(Number) } });
-    expect(userBrowserThreadServers(aliceCfg, { key: "conv_1", title: "t" })).toEqual({ aio_user_browser: { url, http_headers: { "X-AIO-Task": "conv_1" }, tool_timeout_sec: 31 * 60 } });
-    expect(userBrowserMcpServers(aliceCfg)).toEqual({ aio_user_browser: { type: "http", url } });
-    expect(codexRequirementsToml(aliceCfg)).toContain(`[mcp_servers.aio_user_browser.identity]\nurl = "${url}"\n`);
+    native.refresh(aliceCfg);
+    const url = aliceCfg.macNative!.url;
+    expect(url).toMatch(/^http:\/\/host\.docker\.internal:0\/mac-native\/[a-f0-9]{64}\/mcp$/);
+    expect(macNativeThreadServers(aliceCfg)).toEqual({ aio_mac_native: { url, tool_timeout_sec: expect.any(Number) } });
+    expect(macNativeThreadServers(aliceCfg, { key: "conv_1", title: "t" })).toEqual({ aio_mac_native: { url, http_headers: { "X-AIO-Task": "conv_1" }, tool_timeout_sec: 31 * 60 } });
+    expect(macNativeMcpServers(aliceCfg)).toEqual({ aio_mac_native: { type: "http", url } });
+    expect(codexRequirementsToml(aliceCfg)).toContain(`[mcp_servers.aio_mac_native.identity]\nurl = "${url}"\n`);
     gateway.provision(bobCfg);
-    browser.provision(cfg);
-    expect(bobCfg.userBrowser).toBeUndefined();
-    expect(cfg.userBrowser).toBeUndefined();
+    native.provision(cfg);
+    expect(bobCfg.macNative).toBeUndefined();
+    expect(cfg.macNative).toBeUndefined();
 
     const rpc = async (body: unknown, to = url) => {
       const res = await fetch(to.replace(/^http:\/\/host\.docker\.internal:0/, `http://127.0.0.1:${gateway.port}`), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
@@ -107,8 +109,8 @@ it("offers an account its own Chrome on the Mac it linked, and sends the executo
     expect((await rpc({ jsonrpc: "2.0", id: 1, method: "initialize" }, url.replace(/[a-f0-9]{64}/, "0".repeat(64)))).status).toBe(403);
 
     // With the Mac away the server still starts, lists its tools, and a call says to use the sandbox browser.
-    expect((await rpc({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18" } })).body).toEqual({ jsonrpc: "2.0", id: 1, result: expect.objectContaining({ protocolVersion: "2025-06-18", serverInfo: { name: "aio_user_browser", version: "1" }, instructions: expect.stringContaining("aio_tabs") }) });
-    expect((await rpc({ jsonrpc: "2.0", id: 2, method: "tools/list" })).body).toEqual({ jsonrpc: "2.0", id: 2, result: { tools: [...USER_BROWSER_TOOLS, REQUEST_HUMAN] } });
+    expect((await rpc({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18" } })).body).toEqual({ jsonrpc: "2.0", id: 1, result: expect.objectContaining({ protocolVersion: "2025-06-18", serverInfo: { name: "aio_mac_native", version: "1" }, instructions: expect.stringContaining("aio_tabs") }) });
+    expect((await rpc({ jsonrpc: "2.0", id: 2, method: "tools/list" })).body).toEqual({ jsonrpc: "2.0", id: 2, result: { tools: expect.arrayContaining([...USER_BROWSER_TOOLS, REQUEST_HUMAN]) } });
     const away = (await rpc({ jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "list_pages", arguments: {} } })).body as { result: { isError: boolean; content: Array<{ text: string }> } };
     expect(away.result.isError).toBe(true);
     expect(away.result.content[0]!.text).toMatch(/not connected.*aio_tabs/s);
@@ -118,7 +120,9 @@ it("offers an account its own Chrome on the Mac it linked, and sends the executo
     const states: string[] = [];
     client = linkDevice({ url: `ws://localhost:${h.primaryPort}${DEVICE_LINK_PATH}`, token, name: "Mac", local: bridge.url, localToken: LOCAL_TOKEN, onState: (s: string) => states.push(s) });
     await expect.poll(() => states.at(-1)).toBe("online");
-    expect((await rpc({ jsonrpc: "2.0", id: 4, method: "tools/list" })).body).toEqual({ jsonrpc: "2.0", id: 4, result: { tools: [{ name: "list_pages" }, REQUEST_HUMAN] } });
+    expect((await rpc({ jsonrpc: "2.0", id: 4, method: "tools/list" })).body).toEqual({ jsonrpc: "2.0", id: 4, result: { tools: expect.arrayContaining([{ name: "list_pages" }, REQUEST_HUMAN]) } });
+    // The same list asked the phone's half too; only the browser's half is looked at here.
+    bridge.seen.splice(0, bridge.seen.length, ...bridge.seen.filter((s) => s.path.startsWith("/browser/")));
     expect((await rpc({ jsonrpc: "2.0", id: 5, method: "tools/call", params: { name: "list_pages", arguments: {} } })).body).toEqual({ jsonrpc: "2.0", id: 5, result: { content: [{ type: "text", text: "## Pages\n1: Inbox" }] } });
     expect(bridge.seen.map((s) => [s.path, s.body.method, s.body.id])).toEqual([["/browser/mcp", "tools/list", 4], ["/browser/mcp", "tools/call", 5]]);
     // The handshake never goes to the Mac.
@@ -132,8 +136,8 @@ it("offers an account its own Chrome on the Mac it linked, and sends the executo
     // Removing the link takes the tools away.
     expect((await h.request(`/api/device-links/${link.id}`, { method: "DELETE", headers: { cookie: alice.cookie, "x-csrf-token": alice.csrf } })).status).toBe(200);
     await expect.poll(() => states.at(-1)).toBe("revoked");
-    browser.refresh(aliceCfg);
-    expect(aliceCfg.userBrowser).toBeUndefined();
+    native.refresh(aliceCfg);
+    expect(aliceCfg.macNative).toBeUndefined();
   } finally {
     client?.close();
     links.close();
@@ -151,8 +155,8 @@ it("shows the page a task works in on the user's Chrome, and hands it to the per
   const names = (id: string) => (h.ctx.db.prepare("SELECT username AS v FROM owners WHERE id=?").get(id) as { v: string } | undefined)?.v ?? null;
   const ids = (name: string) => (h.ctx.db.prepare("SELECT id AS v FROM owners WHERE username=?").get(name) as { v: string } | undefined)?.v ?? null;
   const links = new DeviceLinks(h.ctx.db, cfg, h.ctx.log);
-  const browser = new UserBrowserGateway({ cfg, log: h.ctx.log, port: 0, usernameOf: names, userIdOf: ids, links });
-  const gateway = new MemberModelGateway(cfg, h.ctx.log, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, browser);
+  const { browser, native } = macParts({ cfg, log: h.ctx.log, usernameOf: names, userIdOf: ids, links });
+  const gateway = new MemberModelGateway(cfg, h.ctx.log, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, native);
   await gateway.start();
   Object.assign(h.ctx, { deviceLinks: links, userBrowser: browser });
   h.server.removeAllListeners("upgrade");
@@ -165,7 +169,7 @@ it("shows the page a task works in on the user's Chrome, and hands it to the per
     const ownerId = (h.ctx.db.prepare("SELECT id FROM owners WHERE role='owner'").get() as { id: string }).id;
     cfg.runtimeUserId = ownerId;
     const { token } = links.create(ownerId, "Mac");
-    browser.provision(cfg);
+    native.provision(cfg);
     const states: string[] = [];
     client = linkDevice({ url: `ws://localhost:${h.primaryPort}${DEVICE_LINK_PATH}`, token, name: "Mac", local: bridge.url, localToken: LOCAL_TOKEN, onState: (s: string) => states.push(s) });
     await expect.poll(() => states.at(-1)).toBe("online");
@@ -176,7 +180,7 @@ it("shows the page a task works in on the user's Chrome, and hands it to the per
 
     // The executor's calls carry its task: the page it opens is that task's page.
     const agent = async (name: string, args: Record<string, unknown> = {}, id = 1) => {
-      const res = await fetch(cfg.userBrowser!.url.replace(/^http:\/\/host\.docker\.internal:0/, `http://127.0.0.1:${gateway.port}`), {
+      const res = await fetch(cfg.macNative!.url.replace(/^http:\/\/host\.docker\.internal:0/, `http://127.0.0.1:${gateway.port}`), {
         method: "POST", headers: { "content-type": "application/json", "X-AIO-Task": key }, body: JSON.stringify({ jsonrpc: "2.0", id, method: "tools/call", params: { name, arguments: args } }) });
       return ((await res.json()) as { result: { content: Array<{ text: string }>; isError?: boolean } }).result;
     };
@@ -241,8 +245,8 @@ it("lists every page of the Mac's AI Chrome in the workspace, opens the person's
   const names = (id: string) => (h.ctx.db.prepare("SELECT username AS v FROM owners WHERE id=?").get(id) as { v: string } | undefined)?.v ?? null;
   const ids = (name: string) => (h.ctx.db.prepare("SELECT id AS v FROM owners WHERE username=?").get(name) as { v: string } | undefined)?.v ?? null;
   const links = new DeviceLinks(h.ctx.db, cfg, h.ctx.log);
-  const browser = new UserBrowserGateway({ cfg, log: h.ctx.log, port: 0, usernameOf: names, userIdOf: ids, links });
-  const gateway = new MemberModelGateway(cfg, h.ctx.log, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, browser);
+  const { browser, native } = macParts({ cfg, log: h.ctx.log, usernameOf: names, userIdOf: ids, links });
+  const gateway = new MemberModelGateway(cfg, h.ctx.log, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, native);
   await gateway.start();
   Object.assign(h.ctx, { deviceLinks: links, userBrowser: browser });
   h.server.removeAllListeners("upgrade");
@@ -258,7 +262,7 @@ it("lists every page of the Mac's AI Chrome in the workspace, opens the person's
     const ownerId = (h.ctx.db.prepare("SELECT id FROM owners WHERE role='owner'").get() as { id: string }).id;
     cfg.runtimeUserId = ownerId;
     const { token } = links.create(ownerId, "Mac");
-    browser.provision(cfg);
+    native.provision(cfg);
     expect((await list()).state).toBe("offline");
     const states: string[] = [];
     client = linkDevice({ url: `ws://localhost:${h.primaryPort}${DEVICE_LINK_PATH}`, token, name: "Mac", local: bridge.url, localToken: LOCAL_TOKEN, onState: (s: string) => states.push(s) });
@@ -267,7 +271,7 @@ it("lists every page of the Mac's AI Chrome in the workspace, opens the person's
     // A task works in page 2.
     const task = ((await (await h.request("/api/tasks", { method: "POST", headers, body: JSON.stringify({ text: "查个网页", clientMessageId: "mb-1" }) })).json()) as { task: { id: string } }).task;
     const key = h.ctx.tasks.browserKey(task.id)!;
-    await fetch(cfg.userBrowser!.url.replace(/^http:\/\/host\.docker\.internal:0/, `http://127.0.0.1:${gateway.port}`), {
+    await fetch(cfg.macNative!.url.replace(/^http:\/\/host\.docker\.internal:0/, `http://127.0.0.1:${gateway.port}`), {
       method: "POST", headers: { "content-type": "application/json", "X-AIO-Task": key }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "new_page", arguments: { url: "https://example.com" } } }) });
 
     // The person opens a page of their own to sign in; only http(s) goes.

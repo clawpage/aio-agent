@@ -41,12 +41,8 @@ export function memberConfig(base: Config, userId: string, port: number, model: 
     ha:undefined,
     // Nor its printer address: the gateway grants a listed account its own.
     printer:undefined,
-    // Nor ever its phone: only the owner reaches it.
-    phone:undefined,
-    // Nor the Chrome on the owner's Mac: the gateway gives an account that linked a Mac its own.
-    userBrowser:undefined,
-    // Nor the terminal on the owner's Mac: the gateway gives an account that linked a Mac its own.
-    macShell:undefined,
+    // Nor the owner's Mac (its phone, Chrome and terminal): the gateway gives an account that linked a Mac its own.
+    macNative:undefined,
     // Nor the owner's schedule tool: the gateway gives every member one that reaches only its own schedules.
     schedule:undefined,
     // Nor its history tool: each account's reaches only its own tasks and agreements.

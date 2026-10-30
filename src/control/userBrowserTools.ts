@@ -2,7 +2,7 @@
  * What the Mac's browser MCP server (chrome-devtools-mcp 1.10.1 behind
  * bin/user-browser.mjs, its tool whitelist applied) lists, recorded from a live
  * bridge. The gateway answers the tool list from this when the account's Mac is
- * offline, so an executor's aio_user_browser always starts (Codex starts a
+ * offline, so an executor's aio_mac_native always starts (Codex starts a
  * thread's MCP servers once and never retries a failed one). Refresh it when the
  * bridge's chrome-devtools-mcp version or tool whitelist changes.
  */

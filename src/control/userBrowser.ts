@@ -9,9 +9,8 @@ import type { SessionStore } from "./auth/sessions.js";
 import { getUser } from "./auth/owner.js";
 import { resolveRequest } from "./http/security.js";
 import { endSocket } from "./http/proxy.js";
-import { McpGateway, type McpCall } from "./mcpGateway.js";
 import type { DeviceLinks, Tunnel, TunnelChannel } from "./deviceLink.js";
-import { TAB_TASK_HEADER, TAB_TOOL_TIMEOUT_SEC, type BrowserTask } from "./browser/tabs.js";
+import { TAB_TASK_HEADER } from "./browser/tabs.js";
 import { USER_BROWSER_TOOLS } from "./userBrowserTools.js";
 
 /**
@@ -19,9 +18,9 @@ import { USER_BROWSER_TOOLS } from "./userBrowserTools.js";
  * the Mac app's bridge serves it from bin/user-browser.mjs (Google Chrome in a
  * profile of its own, headless, so it never gets in the way of the person at
  * the Mac; sign-ins made there stay). It sits next to the
- * sandbox browser (aio_tabs), never in its place: the executor reaches it as
- * aio_user_browser through the member gateway (`/user-browser/<token>/mcp`),
- * prefers it, and falls back to aio_tabs whenever the Mac or its Chrome is not
+ * sandbox browser (aio_tabs), never in its place: the executor reaches it
+ * through aio_mac_native on the member gateway (MacNativeGateway), prefers it,
+ * and falls back to aio_tabs whenever the Mac or its Chrome is not
  * there. Each account reaches only the Chrome on a Mac it linked.
  *
  * Every call names its task (the execution conversation, as for aio_tabs), so the
@@ -39,11 +38,8 @@ const MAC_OFFLINE =
 const TAKEN_OVER =
   "The user has taken over this task's page and is operating it now. Call request_human to wait until they hand it back; do not act on the page meanwhile.";
 
-const SERVER = {
-  serverInfo: { name: "aio_user_browser", version: "1" },
-  instructions:
-    "The AI's own Google Chrome on the user's Mac: a profile of its own that keeps the sign-ins the user made in it, running in the background (it never covers the user's screen); the user watches its pages from the console. This is not the sandbox browser (aio_tabs). Start with list_pages; when a call reports that this browser is unavailable, use aio_tabs instead. Open your own pages with new_page and pass their pageId on every call.",
-} as const;
+export const USER_BROWSER_INSTRUCTIONS =
+    "The AI's own Google Chrome on the user's Mac: a profile of its own that keeps the sign-ins the user made in it, running in the background (it never covers the user's screen); the user watches its pages from the console. This is not the sandbox browser (aio_tabs). Start with list_pages; when a call reports that this browser is unavailable, use aio_tabs instead. Open your own pages with new_page and pass their pageId on every call.";
 
 /** The gateway's own tool: wait for the person to do a step in the task's page. */
 const REQUEST_HUMAN_TOOL = {
@@ -59,22 +55,10 @@ const REQUEST_HUMAN_TOOL = {
   annotations: { readOnlyHint: false, openWorldHint: false },
 };
 
-/** Thread-level MCP wiring for a Codex executor, under the task's identity. */
-export function userBrowserThreadServers(cfg: Config, task?: BrowserTask): Record<string, unknown> {
-  return cfg.userBrowser
-    ? { aio_user_browser: { url: cfg.userBrowser.url, ...(task ? { http_headers: { [TAB_TASK_HEADER]: task.key } } : {}), tool_timeout_sec: TAB_TOOL_TIMEOUT_SEC } }
-    : {};
-}
-
-/** The same for a Claude Code turn (`--mcp-config`). */
-export function userBrowserMcpServers(cfg: Config, task?: BrowserTask): Record<string, unknown> {
-  return cfg.userBrowser ? { aio_user_browser: { type: "http", url: cfg.userBrowser.url, ...(task ? { headers: { [TAB_TASK_HEADER]: task.key } } : {}) } } : {};
-}
-
 export const USER_BROWSER_POLICY =
-  "Two browsers are available: aio_user_browser is the AI's own Google Chrome on the user's Mac (a profile of its own that keeps the sign-ins the user made in it, on the user's home network; the user can watch every page you work in from the console), and aio_tabs is the sandbox browser in the cloud. For browser work, use aio_user_browser first: begin with its list_pages; if that or a later call says this browser is unavailable, switch to aio_tabs for the rest of this task without asking, and mention the switch in one sentence in your reply. Use aio_tabs from the start only when the work needs files from the workspace (uploading or downloading) or the user asked for the sandbox browser. " +
-  "In aio_user_browser: open the page you work in with new_page and pass its pageId on every call; pages you did not open belong to other tasks, so leave them alone; close the pages you opened once you no longer need them, unless the user should look at the result. Prefer take_snapshot to read a page and act on its uids; take a screenshot only for what the snapshot does not show. The task card shows the user the page you work in and lets them take it over. " +
-  "When a site asks for a password, a CAPTCHA, two-factor verification, a QR-code sign-in or payment details, or a final step only the user may take, call aio_user_browser's request_human with the reason and wait; after it returns, read the page again before continuing. If a call says the user has taken over the page, call request_human to wait for them. (aio_tabs' browser_login and browser_request_human are only for the sandbox browser.) " +
+  "Two browsers are available: the browser tools of aio_mac_native (list_pages, new_page, take_snapshot, click, …) drive the AI's own Google Chrome on the user's Mac (a profile of its own that keeps the sign-ins the user made in it, on the user's home network; the user can watch every page you work in from the console), and aio_tabs is the sandbox browser in the cloud. For browser work, use the Mac's Chrome first: begin with aio_mac_native's list_pages; if that or a later call says this browser is unavailable, switch to aio_tabs for the rest of this task without asking, and mention the switch in one sentence in your reply. Use aio_tabs from the start only when the work needs files from the workspace (uploading or downloading) or the user asked for the sandbox browser. " +
+  "In the Mac's Chrome: open the page you work in with new_page and pass its pageId on every call; pages you did not open belong to other tasks, so leave them alone; close the pages you opened once you no longer need them, unless the user should look at the result. Prefer take_snapshot to read a page and act on its uids; take a screenshot only for what the snapshot does not show. The task card shows the user the page you work in and lets them take it over. " +
+  "When a site asks for a password, a CAPTCHA, two-factor verification, a QR-code sign-in or payment details, or a final step only the user may take, call aio_mac_native's request_human with the reason and wait; after it returns, read the page again before continuing. If a call says the user has taken over the page, call request_human to wait for them. (aio_tabs' browser_login and browser_request_human are only for the sandbox browser.) " +
   "For steps with external effects or that are hard to undo, such as paying, placing orders, sending messages or posts, deleting content, or changing account or security settings, first tell the user what you are about to do and wait for confirmation. Files on the Mac are not reachable: never pass file paths.";
 
 /** The page a task works in on the AI's Chrome, and who drives it. */
@@ -117,7 +101,7 @@ export interface MacBrowserPage {
 /** Whether the account's Mac browser can be used: no Mac linked, the Mac away, no Chrome on it, or ready. */
 export type MacBrowserState = "unlinked" | "offline" | "unavailable" | "ready";
 
-export class UserBrowserGateway extends McpGateway {
+export class UserBrowserGateway {
   #cfg: Config;
   #log: Logger;
   #links: DeviceLinks;
@@ -128,33 +112,11 @@ export class UserBrowserGateway extends McpGateway {
   /** account -> the pages the person opened in the workspace's Mac browser */
   #own = new Map<string, Set<number>>();
 
-  constructor(opts: { cfg: Config; log: Logger; port: number; usernameOf: (userId: string) => string | null; userIdOf: (username: string) => string | null; links: DeviceLinks }) {
-    super({
-      ...opts,
-      name: "user-browser",
-      // No upstream of its own: every call goes down the socket of the account's Mac (local).
-      upstreamUrl: "",
-      secretKey: "",
-      secretsFile: "",
-      // Each account only the Chrome on a Mac it linked.
-      granted: (username) => opts.links.hasLink(opts.userIdOf(username) ?? ""),
-      assign: (runtime, url) => { runtime.userBrowser = { url }; },
-      timeoutMs: TIMEOUT_MS,
-    });
+  constructor(opts: { cfg: Config; log: Logger; userIdOf: (username: string) => string | null; links: DeviceLinks }) {
     this.#cfg = opts.cfg;
     this.#log = opts.log.child("user-browser");
     this.#links = opts.links;
     this.#userIdOf = opts.userIdOf;
-  }
-
-  override get enabled(): boolean {
-    return true;
-  }
-
-  /** Give or take away the runtime's browser tools after its account linked or unlinked a Mac. */
-  refresh(runtime: Config): void {
-    if (this.#links.hasLink(runtime.runtimeUserId ?? "")) this.provision(runtime);
-    else delete runtime.userBrowser;
   }
 
   #page(userId: string, key: string, create = false): TaskPage | undefined {
@@ -272,20 +234,14 @@ export class UserBrowserGateway extends McpGateway {
   }
 
   /**
-   * The handshake and the tool list never depend on the Mac (Codex starts a
-   * thread's MCP servers once and never retries a failed one); only tool calls
-   * go down to it, and while it is offline they come back as a tool error that
-   * sends the executor to the sandbox browser.
+   * The browser's half of a tools/list or tools/call (MacNativeGateway answers the
+   * handshake). The tool list never depends on the Mac (Codex starts a thread's MCP
+   * servers once and never retries a failed one); only tool calls go down to it,
+   * and while it is offline they come back as a tool error that sends the executor
+   * to the sandbox browser.
    */
-  protected override async local(message: unknown, username: string, headers: http.IncomingHttpHeaders): Promise<unknown> {
-    if (Array.isArray(message)) return { jsonrpc: "2.0", id: null, error: { code: -32600, message: "batches are not supported" } };
-    const { method, id, params } = (message ?? {}) as { method?: string; id?: unknown; params?: { protocolVersion?: unknown; name?: unknown; arguments?: Record<string, unknown> } };
-    if (id === undefined || id === null) return null;
-    if (method === "initialize") {
-      const version = typeof params?.protocolVersion === "string" ? params.protocolVersion : "2025-03-26";
-      return { jsonrpc: "2.0", id, result: { protocolVersion: version, capabilities: { tools: {} }, ...SERVER } };
-    }
-    if (method === "ping") return { jsonrpc: "2.0", id, result: {} };
+  async answer(message: unknown, username: string, headers: http.IncomingHttpHeaders): Promise<unknown> {
+    const { method, id, params } = (message ?? {}) as { method?: string; id?: unknown; params?: { name?: unknown; arguments?: Record<string, unknown> } };
     const userId = this.#userIdOf(username) ?? "";
     const tunnel = this.#links.hasLink(userId) ? this.#links.tunnelFor(userId) : null;
     if (method === "tools/list") {
@@ -353,13 +309,6 @@ export class UserBrowserGateway extends McpGateway {
       ? "The user handed the page back. Read it again (take_snapshot) before continuing, and do not redo an action whose result is uncertain."
       : "The user did not hand the page back within 30 minutes. Tell them what is still needed and stop here.";
     return { jsonrpc: "2.0", id, result: { content: [{ type: "text", text }], ...(done ? {} : { isError: true }) } };
-  }
-
-  /** Something that is not JSON never reaches the Mac. */
-  protected override async forward(_call: McpCall, res: http.ServerResponse): Promise<boolean> {
-    res.writeHead(400, { "content-type": "application/json", "cache-control": "no-store" });
-    res.end(JSON.stringify({ jsonrpc: "2.0", id: null, error: { code: -32700, message: "invalid JSON" } }));
-    return true;
   }
 
   /** One JSON-RPC request to the Mac's browser bridge, which keeps the MCP session itself. */

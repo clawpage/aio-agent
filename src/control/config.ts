@@ -380,12 +380,8 @@ export function loadConfig(): {
   speech: { url: string };
   /** This runtime's text-to-speech URL on the member gateway (TtsGateway). */
   tts?: { url: string };
-  /** This runtime's phone tools URL on the member gateway, when its account linked a Mac (PhoneGateway). */
-  phone?: { url: string };
-  /** This runtime's URL for the AI's Chrome on its account's Mac on the member gateway, when it linked a Mac (UserBrowserGateway). */
-  userBrowser?: { url: string };
-  /** This runtime's URL for the terminal on its account's Mac on the member gateway, when it linked a Mac (MacShellGateway). */
-  macShell?: { url: string };
+  /** This runtime's URL for its account's Mac (phone, AI's Chrome, terminal) on the member gateway, when it linked a Mac (MacNativeGateway). */
+  macNative?: { url: string };
   /**
    * The voice gadget's dictation page (src/control/dictation.ts): the keyboard
    * bridge on the host Mac (bin/keyboard-bridge.mjs) types what the gadget heard,

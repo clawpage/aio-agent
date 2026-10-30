@@ -9,7 +9,7 @@ const POLL_MS = 4000;
 
 /**
  * The workspace's Mac Terminal: whether the agent may use the terminal on the
- * account's Mac (bin/mac-shell.mjs, aio_mac_shell). Only the Mac app on that Mac
+ * account's Mac (bin/mac-shell.mjs, aio_mac_native's terminal tools). Only the Mac app on that Mac
  * switches it, so the switch is here only inside the app, on a Mac this account
  * linked; anywhere else the app shows its state.
  */

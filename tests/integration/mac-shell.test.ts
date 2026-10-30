@@ -2,7 +2,9 @@ import { it, expect } from "vitest";
 import http from "node:http";
 import { startHarness } from "../helpers/harness.js";
 import { MemberModelGateway } from "../../src/control/memberModelGateway.js";
-import { MacShellGateway, MAC_SHELL_TOOLS, macShellMcpServers, macShellThreadServers } from "../../src/control/macShell.js";
+import { MAC_SHELL_TOOLS } from "../../src/control/macShell.js";
+import { macNativeMcpServers, macNativeThreadServers } from "../../src/control/macNative.js";
+import { macParts } from "../helpers/macNative.js";
 import { codexRequirementsToml } from "../../src/control/sandbox/seed.js";
 import { DeviceLinks, DEVICE_LINK_PATH } from "../../src/control/deviceLink.js";
 import { memberConfig } from "../../src/control/tenants.js";
@@ -56,8 +58,8 @@ it("offers an account the terminal on the Mac it linked, one shell per task, and
   const names = (id: string) => (h.ctx.db.prepare("SELECT username AS v FROM owners WHERE id=?").get(id) as { v: string } | undefined)?.v ?? null;
   const ids = (name: string) => (h.ctx.db.prepare("SELECT id AS v FROM owners WHERE username=?").get(name) as { v: string } | undefined)?.v ?? null;
   const links = new DeviceLinks(h.ctx.db, cfg, h.ctx.log);
-  const shell = new MacShellGateway({ cfg, log: h.ctx.log, port: 0, usernameOf: names, userIdOf: ids, links });
-  const gateway = new MemberModelGateway(cfg, h.ctx.log, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, shell);
+  const { shell, native } = macParts({ cfg, log: h.ctx.log, usernameOf: names, userIdOf: ids, links });
+  const gateway = new MemberModelGateway(cfg, h.ctx.log, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, native);
   await gateway.start();
   Object.assign(h.ctx, { deviceLinks: links, macShell: shell });
   h.server.removeAllListeners("upgrade");
@@ -69,23 +71,23 @@ it("offers an account the terminal on the Mac it linked, one shell per task, and
     const aliceCfg = memberConfig(cfg, alice.id, 18092);
     const bobCfg = memberConfig(cfg, bob.id, 18093);
     gateway.provision(aliceCfg);
-    expect(aliceCfg.macShell).toBeUndefined();
-    expect(macShellThreadServers(aliceCfg)).toEqual({});
+    expect(aliceCfg.macNative).toBeUndefined();
+    expect(macNativeThreadServers(aliceCfg)).toEqual({});
 
     // Linking her Mac gives her runtime the terminal; nobody else's runtime gets one.
     const created = await h.request("/api/device-links", { method: "POST", headers: { cookie: alice.cookie, "x-csrf-token": alice.csrf, "content-type": "application/json" }, body: JSON.stringify({ name: "Mac" }) });
     const { token, link } = (await created.json()) as { token: string; link: { id: string } };
-    shell.refresh(aliceCfg);
-    const url = aliceCfg.macShell!.url;
-    expect(url).toMatch(/^http:\/\/host\.docker\.internal:0\/mac-shell\/[a-f0-9]{64}\/mcp$/);
-    expect(macShellThreadServers(aliceCfg, { key: "conv_1", title: "t" })).toEqual({ aio_mac_shell: { url, http_headers: { "X-AIO-Task": "conv_1" }, tool_timeout_sec: expect.any(Number) } });
-    expect(macShellMcpServers(aliceCfg, { key: "conv_1", title: "t" })).toEqual({ aio_mac_shell: { type: "http", url, headers: { "X-AIO-Task": "conv_1" } } });
-    expect(codexRequirementsToml(aliceCfg)).toContain(`[mcp_servers.aio_mac_shell.identity]\nurl = "${url}"\n`);
+    native.refresh(aliceCfg);
+    const url = aliceCfg.macNative!.url;
+    expect(url).toMatch(/^http:\/\/host\.docker\.internal:0\/mac-native\/[a-f0-9]{64}\/mcp$/);
+    expect(macNativeThreadServers(aliceCfg, { key: "conv_1", title: "t" })).toEqual({ aio_mac_native: { url, http_headers: { "X-AIO-Task": "conv_1" }, tool_timeout_sec: expect.any(Number) } });
+    expect(macNativeMcpServers(aliceCfg, { key: "conv_1", title: "t" })).toEqual({ aio_mac_native: { type: "http", url, headers: { "X-AIO-Task": "conv_1" } } });
+    expect(codexRequirementsToml(aliceCfg)).toContain(`[mcp_servers.aio_mac_native.identity]\nurl = "${url}"\n`);
     gateway.provision(bobCfg);
-    shell.provision(cfg);
-    expect(bobCfg.macShell).toBeUndefined();
-    expect(cfg.macShell).toBeUndefined();
-    expect(codexRequirementsToml(bobCfg)).not.toContain("aio_mac_shell");
+    native.provision(cfg);
+    expect(bobCfg.macNative).toBeUndefined();
+    expect(cfg.macNative).toBeUndefined();
+    expect(codexRequirementsToml(bobCfg)).not.toContain("aio_mac_native");
 
     const rpc = async (body: unknown, task?: string, to = url) => {
       const res = await fetch(to.replace(/^http:\/\/host\.docker\.internal:0/, `http://127.0.0.1:${gateway.port}`), {
@@ -102,8 +104,8 @@ it("offers an account the terminal on the Mac it linked, one shell per task, and
     expect(await status(bob)).toEqual({ state: "unlinked" });
 
     // With the Mac away the server still starts and lists its four tools; a call says the Mac is away.
-    expect((await rpc({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18" } })).body).toEqual({ jsonrpc: "2.0", id: 1, result: expect.objectContaining({ protocolVersion: "2025-06-18", serverInfo: { name: "aio_mac_shell", version: "1" } }) });
-    expect((await rpc({ jsonrpc: "2.0", id: 2, method: "tools/list" })).body).toEqual({ jsonrpc: "2.0", id: 2, result: { tools: MAC_SHELL_TOOLS } });
+    expect((await rpc({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18" } })).body).toEqual({ jsonrpc: "2.0", id: 1, result: expect.objectContaining({ protocolVersion: "2025-06-18", serverInfo: { name: "aio_mac_native", version: "1" } }) });
+    expect((await rpc({ jsonrpc: "2.0", id: 2, method: "tools/list" })).body).toEqual({ jsonrpc: "2.0", id: 2, result: { tools: expect.arrayContaining(MAC_SHELL_TOOLS) } });
     expect(MAC_SHELL_TOOLS.map((t) => t.name)).toEqual(["read", "write", "edit", "bash"]);
     const away = (await bash("ls")).body as { result: { isError: boolean; content: Array<{ text: string }> } };
     expect(away.result.isError).toBe(true);
@@ -128,9 +130,10 @@ it("offers an account the terminal on the Mac it linked, one shell per task, and
       ["/shell/mcp", undefined, "tools/call", 6],
       ["/shell/mcp", undefined, "tools/call", 7],
     ]);
-    // The handshake and the tool list never go to the Mac.
-    await rpc({ jsonrpc: "2.0", id: 8, method: "tools/list" });
-    expect(bridge.seen).toHaveLength(3);
+    // The handshake and the terminal's tools never go to the Mac (the phone's and the browser's may).
+    await rpc({ jsonrpc: "2.0", id: 8, method: "initialize" });
+    await rpc({ jsonrpc: "2.0", id: 9, method: "tools/list" });
+    expect(bridge.seen.filter((s) => s.path.startsWith("/shell/"))).toHaveLength(3);
 
     // A Mac app from before the terminal answers its path 404: the executor learns the result is unknown, not that it failed.
     const old = (await bash("from an old app")).body as { result: { isError: boolean; content: Array<{ text: string }> } };
@@ -142,8 +145,8 @@ it("offers an account the terminal on the Mac it linked, one shell per task, and
     // Removing the link takes the terminal away.
     expect((await h.request(`/api/device-links/${link.id}`, { method: "DELETE", headers: { cookie: alice.cookie, "x-csrf-token": alice.csrf } })).status).toBe(200);
     await expect.poll(() => states.at(-1)).toBe("revoked");
-    shell.refresh(aliceCfg);
-    expect(aliceCfg.macShell).toBeUndefined();
+    native.refresh(aliceCfg);
+    expect(aliceCfg.macNative).toBeUndefined();
   } finally {
     client?.close();
     links.close();

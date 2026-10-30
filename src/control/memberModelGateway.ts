@@ -11,9 +11,7 @@ import type {ShareStore} from './share.js';
 import type {DecisionGateway} from './decision.js';
 import type {KbGateway} from './kb.js';
 import type {HaGateway} from './ha.js';
-import type {PhoneGateway} from './phone.js';
-import type {UserBrowserGateway} from './userBrowser.js';
-import type {MacShellGateway} from './macShell.js';
+import type {MacNativeGateway} from './macNative.js';
 import type {ScheduleGateway} from './scheduleTool.js';
 import type {HistoryGateway} from './historyTool.js';
 import type {TaskKbGateway} from './taskKb/gateway.js';
@@ -102,7 +100,7 @@ export class MemberModelGateway {
   private claudeModels=new Map<string,string>();
   private gptUsers=new Set<string>();
   private server:http.Server|null=null;
-  constructor(private cfg:Config,private log:Logger,private share?:ShareStore,private decision?:DecisionGateway,private kb?:KbGateway,private schedule?:ScheduleGateway,private hostTokens?:Pick<HostTokenSource,'getTokens'|'invalidate'>,private image?:ImageGateway,private browser?:BrowserGateway,private ha?:HaGateway,private printer?:PrinterGateway,private phone?:PhoneGateway,private history?:HistoryGateway,private userBrowser?:UserBrowserGateway,private tts?:TtsGateway,private macShell?:MacShellGateway,private taskKb?:TaskKbGateway){}
+  constructor(private cfg:Config,private log:Logger,private share?:ShareStore,private decision?:DecisionGateway,private kb?:KbGateway,private schedule?:ScheduleGateway,private hostTokens?:Pick<HostTokenSource,'getTokens'|'invalidate'>,private image?:ImageGateway,private browser?:BrowserGateway,private ha?:HaGateway,private printer?:PrinterGateway,private macNative?:MacNativeGateway,private history?:HistoryGateway,private tts?:TtsGateway,private taskKb?:TaskKbGateway){}
   provision(cfg:Config):void {
     fs.mkdirSync(cfg.dataDir,{recursive:true,mode:0o700});
     const file=path.join(cfg.dataDir,'model-token');
@@ -124,12 +122,8 @@ export class MemberModelGateway {
     this.image?.provision(cfg);
     this.tts?.provision(cfg);
     this.browser?.provision(cfg);
-    // A member's own phone, on the Mac it linked; never another account's.
-    this.phone?.provision(cfg);
-    // Likewise the AI's Chrome on that Mac.
-    this.userBrowser?.provision(cfg);
-    // And the terminal on that Mac (whether it is on is the Mac's to say).
-    this.macShell?.provision(cfg);
+    // A member's own Mac (its phone, the AI's Chrome, its terminal); never another account's.
+    this.macNative?.provision(cfg);
     if(cfg.memberModel===MEMBER_GPT_MODEL)this.gptUsers.add(cfg.runtimeUserId!);else this.gptUsers.delete(cfg.runtimeUserId!);
     if(cfg.memberModel!==MEMBER_CLAUDE_MODEL){this.claudeModels.delete(cfg.runtimeUserId!);return;}
     const claudeSecret=path.join(cfg.dataDir,'claude.env');
@@ -147,10 +141,8 @@ export class MemberModelGateway {
       if(this.kb&&(req.url??'').startsWith('/kb/')){await this.kb.handle(req,res);return;}
       if(this.ha?.owns(req.url)){await this.ha.handle(req,res);return;}
       if(this.printer&&(req.url??'').startsWith('/printer/')){await this.printer.handle(req,res);return;}
-      // A runtime holds a phone token only for its own account's phone (PhoneGateway.available).
-      if(this.phone?.owns(req.url)){await this.phone.handle(req,res);return;}
-      if(this.userBrowser?.owns(req.url)){await this.userBrowser.handle(req,res);return;}
-      if(this.macShell?.owns(req.url)){await this.macShell.handle(req,res);return;}
+      // A runtime holds a Mac token only for a Mac its own account linked.
+      if(this.macNative?.owns(req.url)){await this.macNative.handle(req,res);return;}
       if(this.schedule&&(req.url??'').startsWith('/schedule/')){await this.schedule.handle(req,res);return;}
       if(this.history&&(req.url??'').startsWith('/history/')){await this.history.handle(req,res);return;}
       if(this.taskKb&&(req.url??'').startsWith('/task-kb/')){await this.taskKb.handle(req,res);return;}

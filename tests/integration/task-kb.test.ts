@@ -36,7 +36,7 @@ async function setup() {
   const owner = { ...cfg, runtimeUserId: "owner_1", dataDir: path.join(h.dataDir, "owner-runtime") };
   const runtime = { db: h.ctx.db, cfg: owner, container, taskKb: { nudge: vi.fn() } };
   const taskKb = new TaskKbGateway({ port: 0, log: h.ctx.log, runtimeFor: async () => runtime });
-  const gateway = new MemberModelGateway(cfg, h.ctx.log, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, taskKb);
+  const gateway = new MemberModelGateway(cfg, h.ctx.log, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, taskKb);
   await gateway.start();
   taskKb.provision(owner);
   Object.assign(h.ctx.cfg, { taskKb: owner.taskKb });

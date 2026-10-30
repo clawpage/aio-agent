@@ -249,7 +249,7 @@
 ## 4. 浏览器
 
 每个账号只有一个沙箱浏览器（登录状态共享），多个任务可以同时使用。连了 Mac 的账号另有用户自己 Mac 上的 Chrome
-（`aio_user_browser`，见「手机」之后的「Mac 上的浏览器」），两者并存：执行会话优先用 Mac 上的 AI Chrome，用不了时自动改用沙箱浏览器。
+（`aio_mac_native` 的浏览器工具，见「手机」之后的「Mac 上的浏览器」），两者并存：执行会话优先用 Mac 上的 AI Chrome，用不了时自动改用沙箱浏览器。
 
 ### 标签页归属
 
@@ -387,7 +387,7 @@ owner 容器休眠期间新成员的端口隔离规则先记下，容器下次�
 
 工作区是伴随来源上的一台「小电脑」，外观参照 macOS：顶部菜单栏（当前应用、新标签页、时钟、关闭），中间桌面与一个应用窗口，
 底部程序坞（沙盒浏览器、Mac 浏览器、终端、文件、编辑器、笔记本、预览、手机；owner 另有接口与 MCP）。红、黄按钮把窗口收回桌面并卸载页面，绿按钮全屏。
-两个浏览器分开：「沙盒浏览器」（指南针图标）是云端沙箱的桌面（noVNC，`aio_tabs`）；「Mac 浏览器」（笔记本电脑图标）是连接的 Mac 上 AI 专用的 Chrome（`aio_user_browser`，见「Mac 上的浏览器」）。
+两个浏览器分开：「沙盒浏览器」（指南针图标）是云端沙箱的桌面（noVNC，`aio_tabs`）；「Mac 浏览器」（笔记本电脑图标）是连接的 Mac 上 AI 专用的 Chrome（`aio_mac_native` 的浏览器工具，见「Mac 上的浏览器」）。
 手机上程序坞的图标按宽度缩小，360 宽也不用横向滚动。
 
 - **文件**：统一承担目录导航、上传、新建、预览、下载、文本编辑与删除；可转换格式的文件提供「转换」入口，工具就绪状态收在底部「文档处理」。
@@ -737,9 +737,9 @@ Android 手机用 USB 接在装了 Mac App 的 Mac 上，由 App 运行的 `bin/
   然后运行桥接。桥接主动连到 `wss://<主站>/api/device-link/connect`（`bin/device-link-client.mjs`），控制面把该账号的工具调用、状态、截图和实时画面经这条连接发给它；
   这条连接只放行桥接自己的入口（手机的 MCP、状态、截图、实时画面，以及浏览器的 MCP 与状态）。App 开着时手机可用；「手机」里列出该账号连过的 Mac，可随时移除，移除后连接立即断开、App 删掉令牌。
   一个账号连了多台 Mac 时用最近连上的那台。在浏览器里打开时「手机」只列出连过的 Mac 并说明要装 Mac App。
-- **授权**：每个账号只有自己的手机。成员网关只给连过 Mac 的账号发手机令牌：连上第一台 Mac 时该账号新开的执行会话获得 `aio_phone`，
+- **授权**：每个账号只有自己的手机。成员网关只给连过 Mac 的账号发手机令牌：连上第一台 Mac 时该账号新开的执行会话获得 `aio_mac_native`，
   移除最后一台后失去；`/api/phone` 与画面接口只返回本账号的手机，没有时返回“不可用”。
-- **执行器工具**：`aio_phone`（成员网关 `/phone/<运行时令牌>/mcp`）。握手（`initialize`、工具列表）由网关回答，不依赖 Mac：Codex 每个线程只在开始时启动一次 MCP，
+- **执行器工具**：一台 Mac 上的手机、浏览器和终端对执行器是同一个 MCP `aio_mac_native`（成员网关 `/mac-native/<运行时令牌>/mcp`，`src/control/macNative.ts`），按工具名分给三部分：`mobile_*` 归手机，`read`/`write`/`edit`/`bash` 归终端，其余（`list_pages`、`click`、`request_human` 等）归浏览器；工具名与 Mac 上桥接的接口都没变，Mac App 不用更新。手机工具即其中的 `mobile_*`。握手（`initialize`、工具列表）由网关回答，不依赖 Mac：Codex 每个线程只在开始时启动一次 MCP，
   Mac 恰好不在线也不会让这个线程永久失去手机；工具列表在 Mac 在线时取自 Mac，否则用 `src/control/phoneTools.ts` 里记录的同一份。
   工具调用经网关自己与该 Mac 上 mobile-mcp 的会话转发（mobile-mcp 重启丢了会话时重开一次）；Mac 不在线时调用返回工具错误，提示用户打开那台 Mac 上的 App。上游是 mobile-mcp（固定版本，关闭遥测），桥接只放行作用在手机本身的工具：
   列设备与应用、启动/关闭应用、点按/长按/双击/滑动、读屏幕元素、截图（只回给调用方）、按键、打开网址、输入文字、方向、手机剪贴板、批量执行。
@@ -749,7 +749,7 @@ Android 手机用 USB 接在装了 Mac App 的 Mac 上，由 App 运行的 `bin/
   浏览器用 WebCodecs 解码（Safari 16.4+ / Chrome）。可直接点按、拖动、滚轮，下方有返回、主屏幕、最近应用、音量、电源键，
   文字框经手机剪贴板粘贴到当前输入框（支持中文，会覆盖手机剪贴板）。接口只接受主站来源（Origin）上本账号的会话，会话退出后断开；
   伴随站不提供，以免沙箱生成的页面借工作区 cookie 操作手机。没人看时桥接在 15 秒后停止编码；观看端跟不上时丢帧，追上后要一个关键帧，而不是积压。
-- **任务卡片里的手机**：用过 `aio_phone` 的任务（执行记录里有它的工具调用），在执行中或等待补充时卡片显示一行手机横条，点开才显示手机截图（`/api/phone/screenshot`，
+- **任务卡片里的手机**：用过手机工具的任务（执行记录里有 `aio_mac_native` 的 `mobile_*` 调用，或合并前的 `aio_phone` 调用），在执行中或等待补充时卡片显示一行手机横条，点开才显示手机截图（`/api/phone/screenshot`，
   桥接 `screencap`，macOS 上用 `sips` 压成 JPEG；展开时每 10 秒刷新，收起不截图），点截图或「去手机操作」弹出可操作的实时画面；等待补充时另有「完成，继续」，
   替用户回复“已在手机上操作完成”，执行会话读屏确认后继续。
 - 执行会话操作手机时，用户能实时看到；付款、发消息、删除这类步骤先确认。用户让它读取本机短信验证码时它可以读取并填写（仅用于这次要登录的账号），
@@ -772,7 +772,7 @@ Android 手机用 USB 接在装了 Mac App 的 Mac 上，由 App 运行的 `bin/
   启动前删掉配置里残留的 `DevToolsActivePort`，以免把已退出的 Chrome 的端口当成新的。Mac 没装 Chrome 或启动失败时，工具返回写明「改用沙箱浏览器」的错误。
 - **每个页面一个窗口**：`new_page` 由桥接自己用 CDP 建一个新窗口（1280×800，后台）再导航，不用 chrome-devtools-mcp 的新标签页：标签页在别的任务的页面切到前面时会停止渲染。
   智能体的 `select_page` 一律不带到前台；`new_page` 的 `background`、`isolatedContext` 参数不提供。
-- **授权**：与手机相同，只给连过 Mac 的账号（成员网关 `/user-browser/<运行时令牌>/mcp`，执行器里叫 `aio_user_browser`），连上第一台 Mac 时获得、移除最后一台后失去。
+- **授权**：与手机相同，只给连过 Mac 的账号（执行器里是 `aio_mac_native` 的浏览器工具），连上第一台 Mac 时获得、移除最后一台后失去。
   握手与工具列表由网关回答（Mac 不在线时用 `src/control/userBrowserTools.ts` 里记录的一份），线程开始时 Mac 不在线也不会丢掉它。
 - **优先与回退**：执行会话先调 `list_pages`；Mac 不在线、没装 Chrome、或 Mac 上的 App 旧到没有浏览器时，工具立即返回写明「改用沙箱浏览器（aio_tabs）」的错误，
   执行会话在本任务余下部分改用 `aio_tabs`，并在回复里说一句。要上传或下载工作区文件、或用户指定沙箱浏览器时直接用 `aio_tabs`。
@@ -802,8 +802,8 @@ Android 手机用 USB 接在装了 Mac App 的 Mac 上，由 App 运行的 `bin/
 
 ### Mac 上的终端
 
-同一条 Mac 连接还可以提供那台 Mac 的终端（`aio_mac_shell`），像 pi 一样只有四个工具：`read`、`write`、`edit`、`bash`。
-由同一个 `bin/phone-bridge.mjs` 经 `bin/mac-shell.mjs` 提供（`POST /shell/mcp`、`GET /shell/status`），控制面 `src/control/macShell.ts` 经成员网关 `/mac-shell/<运行时令牌>/mcp` 转发。
+同一条 Mac 连接还可以提供那台 Mac 的终端（`aio_mac_native` 的终端工具），像 pi 一样只有四个工具：`read`、`write`、`edit`、`bash`。
+由同一个 `bin/phone-bridge.mjs` 经 `bin/mac-shell.mjs` 提供（`POST /shell/mcp`、`GET /shell/status`），控制面 `src/control/macShell.ts` 经 `aio_mac_native`（成员网关 `/mac-native/<运行时令牌>/mcp`）转发。
 
 - **工作区「Mac 终端」**：单独的一个应用（图标是带提示符的笔记本电脑，与沙箱的「终端」分开），显示连接的 Mac 的终端状态：没连 Mac（带「去连接 Mac」，转到「手机」）、Mac 不在线、Mac 上的 App 太旧、已打开或已关闭，Mac 没装 tmux 时另有提示。
   状态来自 `GET /api/mac-shell/status`（经设备连接问 Mac 的 `GET /shell/status`，只回本账号的 Mac；接口版本因此升到 10，`src/common/version.ts`），打开时每 4 秒刷新。
