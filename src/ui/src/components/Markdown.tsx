@@ -27,8 +27,11 @@ import { splitCompareBlocks, type ComparePart } from "../compareBlocks";
 import { PhotoCompare } from "./PhotoCompare";
 import { splitWidgetBlocks, type WidgetPart } from "../widgetBlocks";
 import { WidgetCard } from "./WidgetCard";
+import { copyText } from "./ShareCard";
 
 marked.setOptions({ gfm: true, breaks: true });
+
+const COPY_ICON = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 9.5A1.5 1.5 0 0 1 10.5 8h8A1.5 1.5 0 0 1 20 9.5v9a1.5 1.5 0 0 1-1.5 1.5h-8A1.5 1.5 0 0 1 9 18.5Z M15 8V5.5A1.5 1.5 0 0 0 13.5 4h-8A1.5 1.5 0 0 0 4 5.5v9A1.5 1.5 0 0 0 5.5 16H9"/></svg>';
 
 function escapeAttr(value: string): string {
   return value.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -240,6 +243,32 @@ function MarkdownBlock({
       media.forEach((el) => { if (el instanceof HTMLImageElement && cachedImage(el.getAttribute("data-web-image") ?? el.getAttribute("data-sandbox-image"))) load(el); else observer!.observe(el); });
     } else media.forEach(load);
     return () => { live = false; observer?.disconnect(); releases.forEach((release) => release()); };
+  }, [html]);
+
+  // Every code block gets a copy button in its corner (outside the part that scrolls sideways).
+  useEffect(() => {
+    const container = root.current;
+    if (!container) return;
+    const timers: number[] = [];
+    for (const pre of container.querySelectorAll("pre")) {
+      const block = window.document.createElement("div");
+      block.className = "code-block";
+      pre.replaceWith(block);
+      block.appendChild(pre);
+      const button = window.document.createElement("button");
+      button.type = "button";
+      button.className = "code-copy";
+      button.title = button.ariaLabel = t.cards.markdown.copyCode;
+      button.innerHTML = COPY_ICON;
+      button.addEventListener("click", () => {
+        void copyText((pre.textContent ?? "").replace(/\n$/, "")).then((ok) => {
+          button.textContent = ok ? t.cards.markdown.copied : t.cards.markdown.copyFailed;
+          timers.push(window.setTimeout(() => { button.innerHTML = COPY_ICON; }, 1500));
+        });
+      });
+      block.appendChild(button);
+    }
+    return () => timers.forEach((id) => window.clearTimeout(id));
   }, [html]);
 
   const onClick = useCallback(

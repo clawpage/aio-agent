@@ -26,6 +26,9 @@ export const cards: typeof zh = {
     main: (name: string) => `地圖：${name}，點開選擇地圖 App`,
   },
   markdown: {
+    copyCode: "複製",
+    copied: "已複製",
+    copyFailed: "複製失敗",
     ask: "向你提問",
     imageFailed: (name: string) => `圖片暫時無法顯示：${name}`,
     mediaFailed: "暫時放不了（檔案可能已移動，或這個瀏覽器不支援這種格式）：點上面的標題開啟預覽或下載。",

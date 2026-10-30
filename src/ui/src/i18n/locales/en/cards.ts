@@ -27,6 +27,9 @@ export const cards: typeof zh = {
     main: (name: string) => `Map: ${name}. Tap to choose a map app`,
   },
   markdown: {
+    copyCode: "Copy",
+    copied: "Copied",
+    copyFailed: "Copy failed",
     ask: "Question for you",
     imageFailed: (name: string) => `Image can't be shown right now: ${name}`,
     mediaFailed: "Can't play this right now (the file may have moved, or this browser doesn't support the format). Tap the title above to preview or download it.",

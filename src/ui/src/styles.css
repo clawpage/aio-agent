@@ -1087,6 +1087,27 @@ button .loading-mark { color: inherit; }
   background: none;
   padding: 0;
 }
+.markdown .code-block {
+  position: relative;
+}
+.markdown .code-block pre {
+  padding-right: 44px;
+}
+.markdown .code-copy {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  display: inline-grid;
+  place-items: center;
+  min-width: 32px;
+  height: 32px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-soft);
+  color: var(--text-dim);
+  font-size: 12px;
+}
 /* A table keeps readable columns and scrolls sideways when they do not fit, instead of
    squeezing every cell down to a character per line. */
 .markdown table {

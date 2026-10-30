@@ -25,6 +25,9 @@ export const cards = {
     main: (name: string) => `地图：${name}，点开选择地图应用`,
   },
   markdown: {
+    copyCode: "复制",
+    copied: "已复制",
+    copyFailed: "复制失败",
     ask: "向你提问",
     imageFailed: (name: string) => `图片暂时无法显示：${name}`,
     mediaFailed: "暂时放不了（文件可能已移动，或这个浏览器不支持这种格式）：点上面的标题打开预览或下载。",
