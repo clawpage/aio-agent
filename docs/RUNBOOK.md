@@ -334,7 +334,7 @@ owner 与成员默认都开启（`PA_SANDBOX_RELEASE_IDLE=1` / `PA_MEMBER_SANDBO
 ```bash
 # compose 模式：容器崩溃由 Docker 的 unless-stopped 拉起；守护链本身这样验
 cd /Users/mengxiao/workspace
-docker exec aio-control-1 kill -TERM 1  # 控制层进程退出（docker kill/stop 算人工停止，不会自动拉起）
+docker exec aio-control-1 node -e 'process.kill(1,"SIGTERM")'  # 控制层进程退出（镜像里没有 kill 命令）（docker kill/stop 算人工停止，不会自动拉起）
 sleep 15 && docker inspect aio-control-1 --format '{{.State.Status}} restarts={{.RestartCount}}'   # running，次数 +1（2026-10-02 实测 6 秒恢复）
 curl -s http://127.0.0.1:4892/healthz   # 应恢复 ready:true、compatible:true
 # host 模式：杀子进程，bin/serve 应在 ~3s 后拉起
