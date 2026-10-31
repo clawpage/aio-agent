@@ -707,6 +707,9 @@ Jev（TypeSafe System One）根据状态和选项返回选择、各选项概率�
   控制面读分片尾部的索引（mfra），按 Range 只取初始化段和目标所在的两个分片交给 ffmpeg 解码，取一张约 0.1–2 秒；正在写的最后一片
   还没有索引，由 ffmpeg 经 HTTP 顺序读到该时刻），事件是
   `YYYY-MM-DD_HH-MM-SS_<标签>.mp4`；时间一律按控制面时区（`TZ`）的本地时间。云台调声明的集成的 `move`（x、y）与 `goto_preset`（name）服务。
+  声明了 `accounts`（用户名列表）的摄像头只对这些账号存在：其他账号的 `camera_list` 不列出，摄像头工具与卡片接口一律按「没有这个摄像头」回答，
+  也不会为它向 HA 发任何请求。现在 `camera.betaw_cam`（M5Stack CoreS3 配件的摄像头和麦克风，固件 muse-gadget-sdk `muse_cam.c`）只给 owner、cr，
+  配件自己的账号 betaw 看不到；它在 HA 里也不暴露给 Assist，所以经 HA 自带的 MCP 工具也看不到。
 - **摄像头卡片**：执行器在回复里写 ```` ```camera ```` 块（`{"camera": "<实体>"}` 为直播，加 `"at": "YYYY-MM-DD HH:MM:SS"` 为从该时刻回放）。
   直播先显示快照，点播放后经 `/api/cameras/hls/<令牌>/…` 转发 HA 的 LL-HLS（Safari/iOS 原生播放，其他浏览器按需加载 hls.js；
   只转发本进程发出的流令牌与 HLS 文件名）；声明了云台的摄像头在画面边缘有四个方向键。HA 只能给 WebRTC 的摄像头（Ring）在卡片里是每 10 秒刷新的快照。
