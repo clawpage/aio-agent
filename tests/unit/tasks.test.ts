@@ -500,18 +500,29 @@ describe("main inbox delegation", () => {
         await tick();
         expect(tasks.get(repair.id)?.status).toBe("running");
     });
-    it("does not replay uncertain work after a restart and keeps the main report", async () => {
+    it("carries a task cut off by restarts on in its own session, checking first, at most twice", async () => {
         const a = submit("a");
         await tick();
-        tasks.close();
-        agent.shutdown();
-        const cfg = testConfig("/tmp/aio-main-tasks", 1);
-        codex = new PlanningCodex();
-        agent = new AgentManager({ db, cfg, codex, log: new Logger("error", undefined, false) });
-        await agent.init();
-        tasks = new TaskService(db, cfg, agent, codex);
-        tasks.init();
-        await tick();
+        const restart = async () => {
+            tasks.close();
+            agent.shutdown();
+            const cfg = testConfig("/tmp/aio-main-tasks", 1);
+            codex = new PlanningCodex();
+            agent = new AgentManager({ db, cfg, codex, log: new Logger("error", undefined, false) });
+            await agent.init();
+            tasks = new TaskService(db, cfg, agent, codex);
+            tasks.init();
+            await tick(); await tick();
+        };
+        const first = tasks.get(a.id)!.turn_id;
+        await restart();
+        expect(tasks.get(a.id)?.status).toBe("running");
+        expect(tasks.get(a.id)?.turn_id).not.toBe(first);
+        expect(codex.startedTurns).toHaveLength(1);
+        expect(codex.startedTurns[0]!.text).toContain("do not do any of it again");
+        await restart();
+        expect(tasks.get(a.id)?.status).toBe("running");
+        await restart();
         expect(tasks.get(a.id)?.status).toBe("unknown");
         expect(tasks.list().tasks[0]?.error).toContain("unknown");
         expect(codex.startedTurns).toHaveLength(0);

@@ -153,6 +153,8 @@ const DISPATCHED = new Set(["queued", "running", "stopping"]);
 /** The main inbox owns delegation; manual continuations reuse the same executor thread. */
 /** A session idle this long is picked up with a reminder that what it holds may be out of date. */
 const STALE_SESSION_HOURS = 6;
+/** A task cut off by restarts carries on by itself this many times; after that its result waits to be checked. */
+const RESTART_RESUMES = 2;
 
 export class TaskService {
     #closed = false;
@@ -169,11 +171,12 @@ export class TaskService {
         // AgentManager reconciles in-flight turns before this runs. Never replay an
         // executor with uncertain side effects. Unsubmitted planning is safe to resume.
         this.db.prepare("UPDATE tasks SET status='merge_unknown',error=? WHERE status='steering'").run(t().tasks.errors.steeringAfterRestart);
+        // Listening first: a task a restart cut off carries on in a new turn right here.
+        this.agent.events.on("event", this.onEvent);
         for (const row of this.rows()) {
             if (row.turn_id && !row.merged_into && !TERMINAL.has(row.status))
                 this.syncTurn(row);
         }
-        this.agent.events.on("event", this.onEvent);
         this.schedule();
         this.ensureDailyFeed();
         // Timers keep the language of whatever started them: scheduled runs are written in the account's.
@@ -1183,6 +1186,8 @@ export class TaskService {
         } | undefined;
         if (!turn)
             return;
+        if (turn.status === "unknown" && this.resumeAfterRestart(row))
+            return;
         const messages = this.db.prepare("SELECT payload FROM events WHERE turn_id=? AND type='item/completed' ORDER BY id").all(row.turn_id) as {
             payload: string;
         }[];
@@ -1198,6 +1203,34 @@ export class TaskService {
             .run(status, question ? question.result : last?.text ?? null, turn.error, turn.completed_at, plan ? JSON.stringify(plan) : null, row.id);
         if (status === "completed") { this.recordFeed(this.get(row.id)!); this.#onCompleted?.(row.id); }
         this.notifyChange(row.id, row.status);
+    }
+    /**
+     * A turn cut off by a restart or a lost connection (`unknown`) carries on in a new turn of the
+     * same session instead of waiting for the person: the session holds what it already did, and the
+     * executor checks what took effect before going on, so nothing is done twice. A turn that never
+     * reached Codex is given its whole prompt again. False when the task has used its resumes, or is
+     * the gadget's (a spoken answer that late is no use); its result then waits to be checked.
+     */
+    private resumeAfterRestart(row: TaskRow): boolean {
+        if (row.merged_into || !row.plan_json || row.client_message_id.startsWith(GADGET_PREFIX)) return false;
+        const plan = JSON.parse(row.plan_json) as TaskPlan;
+        const resumes = plan.restartResumes ?? 0;
+        if (resumes >= RESTART_RESUMES) return false;
+        const cut = this.db.prepare("SELECT codex_turn_id,input_text,attachments_json,browser_required,model,effort FROM turns WHERE id=?").get(row.turn_id) as
+            { codex_turn_id: string | null; input_text: string; attachments_json: string; browser_required: number; model: string | null; effort: string | null } | undefined;
+        if (!cut) return false;
+        const note = "The service running this session restarted while your previous turn was still working, so that turn was cut off partway. Carry on with the same task from where it stopped. First check what already took effect (this session's history, the task directory, browser tabs, anything sent, submitted, booked, bought or published) and do not do any of it again; then finish the task and give the complete final answer as usual.";
+        const text = cut.codex_turn_id ? note : `${note}\n\nThe cut-off turn had not started yet, so here is its message in full:\n\n${cut.input_text}`;
+        try {
+            this.db.prepare("UPDATE tasks SET status='queued',turn_id=NULL,error=NULL,plan_json=? WHERE id=?").run(JSON.stringify({ ...plan, restartResumes: resumes + 1 }), row.id);
+            const { turn } = this.agent.submitTurn({ conversationId: this.executor(row), clientMessageId: `task:${row.id}:resume${resumes + 1}`, text, attachments: cut.codex_turn_id ? [] : JSON.parse(cut.attachments_json), requiresBrowser: cut.browser_required === 1, frozenSettings: { model: cut.model ?? row.model!, effort: cut.effort ?? row.effort } });
+            this.db.prepare("UPDATE tasks SET turn_id=? WHERE id=?").run(turn.id, row.id);
+            return true;
+        } catch {
+            // Leave it as it was: the cut-off turn's unknown result, for the person to check.
+            this.db.prepare("UPDATE tasks SET status=?,turn_id=?,plan_json=? WHERE id=?").run(row.status, row.turn_id, row.plan_json, row.id);
+            return false;
+        }
     }
 
     // ------------------------------------------------------------- schedules

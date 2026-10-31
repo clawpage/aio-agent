@@ -92,7 +92,7 @@ Claude Code `--mcp-config`）接入它并关闭 `aio_browser`。回合结束只�
 状态为 planning → waiting → queued/running → completed/failed/interrupted/unknown。
 planning_failed 可安全重试分类；blocked 提示前置结果需要核对。每条用户消息 ID 唯一、payload
 冲突返回 409；消息和内部会话同一事务创建。执行中断恢复由 AgentManager 先核对，TaskService
-再从已持久化 turn 同步，绝不自动重放未知执行。任务行 revision 递增，客户端合并忽略陈旧快照。
+再从已持久化 turn 同步；任务被重启或断线截断（`unknown`）时，在同一执行会话里自动续跑（新 turn，先核对已生效的操作再继续，不原样重放；每个任务最多 2 次，配件任务除外），用完次数才停在 unknown 等人核对。任务行 revision 递增，客户端合并忽略陈旧快照。
 主时间线只取终结后的最终消息，过程仍保留在子线程详情；审批仍按子线程独立处理。
 
 ## 认证与会话
@@ -178,7 +178,7 @@ HTTP、SSE、WebSocket、文件预览、上传、终端与浏览器都走同一�
 - 停止：排队中的轮次被原子取消；正在执行的发送 `turn/interrupt`；刚提交还没拿到 turn id 的
   记录取消意图，拿到 id 后立即中断。三者都如实返回状态，不会谎报已停止。
 - 未知结果：进程中断、连接断开或 `turn/start` 中途失败时，轮次标记为 `unknown` 并明确提示
-  “可能已在沙箱内产生操作，请先核对”，**绝不自动重放**。服务重启时 `running` 与 `queued`
+  “可能已在沙箱内产生操作，请先核对”，轮次本身**绝不原样重放**（任务层会另起一轮续跑，见上）。服务重启时 `running` 与 `queued`
   分别按 `unknown` / `interrupted` 处理。
 - 审批与输入请求（命令/文件/权限/`requestUserInput`/MCP elicitation）成为 UI 上可操作的卡片，
   按各自 schema 回填响应，15 分钟无响应自动拒绝，Codex 断开时立即失效而不是干等超时。
