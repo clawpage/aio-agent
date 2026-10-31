@@ -316,6 +316,74 @@ describe("DocumentService path and revision handling", () => {
   });
 });
 
+describe("DocumentService renders kept in the sandbox", () => {
+  const renderOk = (argv: string[]) => {
+    const cacheDir = argv[3] ?? "";
+    return { code: 0, stdout: `${JSON.stringify({ ok: true, pages: [{ index: 1, path: `${cacheDir}/page-1.png` }, { index: 2, path: `${cacheDir}/page-2.png` }], pageCount: 2, totalPages: 2, truncated: false, size: 100 })}\n`, stderr: "" };
+  };
+
+  it("keeps a finished render and serves it after a restart without converting again", async () => {
+    let renders = 0;
+    const manifests = new Map<string, string>();
+    const handler: Handler = (argv) => {
+      if (argv[0] === "cat" && String(argv[1]).endsWith("/manifest.json")) {
+        const saved = manifests.get(String(argv[1]));
+        return saved ? { code: 0, stdout: saved, stderr: "" } : { code: 1, stdout: "", stderr: "" };
+      }
+      if (argv[0] === "bash" && String(argv[1]).endsWith("render.sh")) {
+        renders += 1;
+        const result = renderOk(argv);
+        manifests.set(`${argv[3]}/manifest.json`, result.stdout);
+        return result;
+      }
+      return baseHandler({})(argv);
+    };
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response(new Uint8Array(PNG), { status: 200 }));
+    try {
+      const first = service(handler);
+      await first.svc.render(`${ROOT}/a.docx`);
+      expect(first.container.calls.some((argv) => argv[0] === "rm")).toBe(false);
+      // A new control plane: nothing in memory, the pages still in the sandbox.
+      const second = service(handler);
+      const result = await second.svc.render(`${ROOT}/a.docx`);
+      expect(renders).toBe(1);
+      expect(result.pageCount).toBe(2);
+      expect(second.container.calls.some((argv) => argv[0] === "bash" && String(argv[1]).endsWith("provision.sh"))).toBe(false);
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+
+  it("renders again when the kept manifest points elsewhere or a page is not a PNG", async () => {
+    for (const bad of ["path", "bytes"]) {
+      let renders = 0;
+      const handler: Handler = (argv) => {
+        if (argv[0] === "cat" && String(argv[1]).endsWith("/manifest.json")) {
+          const dir = String(argv[1]).replace(/\/manifest\.json$/, "");
+          const pages = [{ index: 1, path: bad === "path" ? "/etc/passwd" : `${dir}/page-1.png` }];
+          return { code: 0, stdout: `${JSON.stringify({ ok: true, pages, pageCount: 1, totalPages: 1, truncated: false, size: 100 })}\n`, stderr: "" };
+        }
+        if (argv[0] === "bash" && String(argv[1]).endsWith("render.sh")) { renders += 1; return renderOk(argv); }
+        return baseHandler({})(argv);
+      };
+      let calls = 0;
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
+        calls += 1;
+        // The kept page (the first fetch) is not an image; the fresh render's are.
+        return new Response(new Uint8Array(bad === "bytes" && calls === 1 ? Buffer.from("<html>") : PNG), { status: 200 });
+      });
+      try {
+        const { svc } = service(handler);
+        const result = await svc.render(`${ROOT}/a.docx`);
+        expect(renders).toBe(1);
+        expect(result.pageCount).toBe(2);
+      } finally {
+        fetchSpy.mockRestore();
+      }
+    }
+  });
+});
+
 describe("DocumentService render confinement", () => {
   it("drops page paths that are not a direct child of this run's cache directory", async () => {
     const { svc } = service(

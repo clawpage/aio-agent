@@ -13,6 +13,7 @@ const idle = {
   touch() { this.calls.push("touch"); },
   foreground() { this.calls.push("foreground"); },
   async wake() { this.calls.push("wake"); this.state = "running"; },
+  async wakeContainer() { this.calls.push("wakeContainer"); this.state = "running"; },
   async enter(wakes: boolean) {
     this.calls.push(`enter:${wakes}`);
     if (this.state === "parked" && !wakes) return false;
@@ -85,6 +86,11 @@ describe("whole-container idle stop over HTTP", () => {
     idle.state = "parked";
     idle.calls = [];
     await h.request("/api/files/list", { method: "POST", headers: { cookie, "x-csrf-token": csrf, "content-type": "application/json" }, body: JSON.stringify({ path: "/home/gem/workspace" }) });
+    // Files and documents need only the container, not the Codex session or the browser.
+    expect(idle.calls.slice(0, 2)).toEqual(["hold", "wakeContainer"]);
+    idle.state = "parked";
+    idle.calls = [];
+    await h.request("/api/sandbox/shell-sessions", { headers: { cookie } });
     expect(idle.calls.slice(0, 2)).toEqual(["hold", "wake"]);
     // Status polls never wake it.
     idle.state = "parked";

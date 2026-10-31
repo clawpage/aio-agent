@@ -115,6 +115,34 @@ print(json.dumps({"ok": False, "code": sys.argv[1], "message": sys.argv[2]}, ens
 PYEOF
 }
 
+# Kept renders are dropped after 30 days, and oldest first beyond 300MB in all.
+# Runs touched in the last 10 minutes are left alone: one may still be rendering.
+prune_cache() {
+  python3 - "$CACHE_ROOT" "$CACHE_DIR" <<'PYEOF' >/dev/null 2>&1 || true
+import os, shutil, sys, time
+root, current = sys.argv[1:3]
+now = time.time()
+runs = []
+for name in os.listdir(root):
+    run = os.path.join(root, name)
+    if run == current or os.path.islink(run) or not os.path.isdir(run):
+        continue
+    try:
+        mtime = os.stat(run).st_mtime
+        size = sum(os.path.getsize(os.path.join(run, f)) for f in os.listdir(run))
+    except OSError:
+        continue
+    runs.append((mtime, size, run))
+total = sum(os.path.getsize(os.path.join(current, f)) for f in os.listdir(current))
+for mtime, size, run in sorted(runs, reverse=True):
+    total += size
+    if now - mtime < 600:
+        continue
+    if now - mtime > 30 * 86400 or total > 300 * 1024 * 1024:
+        shutil.rmtree(run, ignore_errors=True)
+PYEOF
+}
+
 require_size_ok() {
   local target="$1" size
   size=$(stat -c %s -- "$target" 2>/dev/null || echo 0)
@@ -271,7 +299,7 @@ case "$CACHE_DIR" in
   *..*) fail "bad_cache_dir" "The cache directory must not contain .." ;;
 esac
 mkdir -p -- "$CACHE_DIR" || fail "cache_error" "Could not create the cache directory"
-rm -f -- "$CACHE_DIR"/page-*.png 2>/dev/null || true
+rm -f -- "$CACHE_DIR"/manifest.json "$CACHE_DIR"/page-*.png 2>/dev/null || true
 rm -f -- "$CACHE_DIR"/source.pdf 2>/dev/null || true
 
 BASE=$(basename -- "$REAL")
@@ -357,4 +385,12 @@ case "$SIZE" in ''|*[!0-9]*) SIZE=0 ;; esac
 # Emit through json_emit so page paths (which come from the filesystem) are
 # escaped rather than spliced into a template.
 # shellcheck disable=SC2086
-json_emit "$COUNT" $PAGES pageCount "$COUNT" totalPages "${TOTAL_PAGES:-$COUNT}" truncated "$TRUNCATED" size "$SIZE"
+RESULT=$(json_emit "$COUNT" $PAGES pageCount "$COUNT" totalPages "${TOTAL_PAGES:-$COUNT}" truncated "$TRUNCATED" size "$SIZE")
+
+# The pages stay for the next request of the same revision (the directory name is
+# a digest of the path, size and mtime): the manifest is the same line, written
+# last and atomically, so a half-finished run is never taken for a finished one.
+rm -f -- "$CACHE_DIR"/source.pdf 2>/dev/null || true
+printf '%s\n' "$RESULT" > "$CACHE_DIR/manifest.json.tmp" && mv -f -- "$CACHE_DIR/manifest.json.tmp" "$CACHE_DIR/manifest.json"
+prune_cache
+printf '%s\n' "$RESULT"

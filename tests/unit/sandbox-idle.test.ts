@@ -320,3 +320,38 @@ describe("dozing before the stop", () => {
     expect(idle.state).toBe("parked");
   });
 });
+
+describe("waking for the container only", () => {
+  it("lets a file or document request through once the container runs, before the session and browser", async () => {
+    const { ctx } = setup(true);
+    let finish!: () => void;
+    const rest = new Promise<void>((resolve) => { finish = resolve; });
+    const steps: string[] = [];
+    const idle = new SandboxIdle({
+      ctx, idleMs: IDLE, parked: true,
+      start: async (_ctx, containerUp) => {
+        steps.push("container");
+        containerUp();
+        await rest;
+        steps.push("session");
+      },
+    });
+    await idle.wakeContainer();
+    expect(steps).toEqual(["container"]);
+    expect(idle.state).toBe("waking");
+    // A full wake still waits for the rest of the start.
+    const full = idle.wake();
+    finish();
+    await full;
+    expect(steps).toEqual(["container", "session"]);
+    expect(idle.state).toBe("running");
+    // Running: immediate.
+    await idle.wakeContainer();
+  });
+
+  it("reports a start that fails before the container is up", async () => {
+    const { ctx } = setup(true);
+    const idle = new SandboxIdle({ ctx, idleMs: IDLE, parked: true, start: async () => { throw new Error("no node"); } });
+    await expect(idle.wakeContainer()).rejects.toThrow("no node");
+  });
+});

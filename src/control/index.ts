@@ -301,7 +301,7 @@ async function prepareSandboxBrowser(ctx: AppContext): Promise<void> {
 }
 
 /** Bring the sandbox container and Codex session up in the background. */
-export async function startSandboxRuntime(ctx: AppContext): Promise<void> {
+export async function startSandboxRuntime(ctx: AppContext, containerUp?: () => void): Promise<void> {
   const { cfg, log, container, agent } = ctx;
   if (!cfg.sandbox.autostart) {
     log.info("sandbox autostart disabled by configuration");
@@ -313,6 +313,7 @@ export async function startSandboxRuntime(ctx: AppContext): Promise<void> {
     if (!compat.ok) throw new Error(compat.error ?? t().http.common.nodeUnavailable);
     const state = await container.ensureRunning();
     log.info("sandbox container ready", { name: state.image, healthy: state.healthy });
+    containerUp?.();
   } catch (err) {
     ctx.sandboxSetupError = err instanceof Error ? err.message : String(err);
     log.error("sandbox container failed to start", { error: ctx.sandboxSetupError });

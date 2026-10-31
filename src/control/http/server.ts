@@ -12,6 +12,8 @@ import { currentLocale, requestLocale, runInLocale, t } from "../i18n/index.js";
 
 /** Control API calls served by the sandbox; a container stopped for idleness starts first. */
 const SANDBOX_API = /^\/(files|documents|sandbox|models)(\/|$)|^\/widgets\/fetch$|^\/browser\/(?!status$)|^\/tasks\/[^/]+\/browser/;
+/** Of those, the ones that need only the container, not the Codex session or the browser. */
+const CONTAINER_API = /^\/(files|documents)(\/|$)/;
 
 /** Only a page load (a person opening or reloading a workspace page) may start a stopped container. */
 function isNavigation(req: import("node:http").IncomingMessage): boolean {
@@ -202,7 +204,7 @@ export function createApp(ctx: AppContext): express.Express {
       if(runtime.idle && SANDBOX_API.test(req.path)){
         const release=runtime.idle.hold();res.on("close",release);
         if(res.destroyed){release();return;}
-        await runtime.idle.wake();
+        await (CONTAINER_API.test(req.path)?runtime.idle.wakeContainer():runtime.idle.wake());
       }
       api(req,res,next);
     } catch {res.status(503).json({error:"runtime_unavailable",message:t().http.common.runtimeUnavailable});}

@@ -32,6 +32,7 @@ const MAX_IMAGE_BYTES = 12 * 1024 * 1024;
  * sandbox makes with Pillow: upright, at most PREVIEW_SIDE pixels long, JPEG. The download still gives the original.
  */
 const PREVIEW_SIDE = 2560;
+const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4e, 0x47]);
 const PREVIEW_SCRIPT = `import base64, io, sys
 from PIL import Image, ImageOps
 try:
@@ -748,6 +749,8 @@ print("venv" if venv_python else "novenv")
     // never anything the user created.
     const digest = createHash("sha256").update(key).digest("hex").slice(0, 24);
     const cacheDir = path.posix.join(this.cacheRoot, digest);
+    const started = Date.now();
+    let kept = false;
     let cacheDirCleared = false;
     const clearCacheDir = async (): Promise<void> => {
       if (cacheDirCleared) return;
@@ -760,6 +763,16 @@ print("venv" if venv_python else "novenv")
       // Re-check the cache: a queued request may have been satisfied while waiting.
       const cached = this.#cache.get(key);
       if (cached) return cached.result;
+
+      // Rendered before (this control plane restarted since, or the entry was evicted):
+      // the pages are still in the sandbox, so this costs no LibreOffice run.
+      const saved = await this.#savedRender(cacheDir, kind, signature);
+      if (saved) {
+        kept = true;
+        this.#store(key, saved);
+        this.#log.info("document preview from the sandbox cache", { kind, pages: saved.pageCount, ms: Date.now() - started });
+        return saved;
+      }
 
       const readiness = await this.readiness();
       if (!readiness.previewReady) {
@@ -796,39 +809,60 @@ print("venv" if venv_python else "novenv")
       if (parsed.ok !== true) {
         throw mapRenderFailure(parsed, "preview");
       }
-      // Page paths are only accepted when they are a direct child of THIS run's
-      // cache directory: a script that returned some other path (however it got
-      // there) cannot make the control plane fetch an arbitrary container file.
-      const pagePaths = this.#confinePagePaths(parsed.pages, cacheDir);
-      if (pagePaths.length === 0) throw new DocumentError("render_failed", t().documents.noPreviewPages, 502);
-
-      const pages: RenderPage[] = [];
-      try {
-        for (const pagePath of pagePaths) {
-          const bytes = await this.#fetchSandboxFile(pagePath);
-          pages.push({ index: pages.length + 1, bytes });
-        }
-      } catch (err) {
-        throw err instanceof DocumentError
-          ? err
-          : new DocumentError("render_failed", t().documents.previewImageReadFailed, 502);
-      }
-
-      const totalPages = typeof parsed.totalPages === "number" ? parsed.totalPages : pages.length;
-      const renderResult: RenderResult = {
-        kind,
-        pageCount: pages.length,
-        totalPages,
-        truncated: parsed.truncated === true || totalPages > pages.length,
-        size: typeof parsed.size === "number" ? parsed.size : 0,
-        pages,
-        signature,
-      };
+      const renderResult = await this.#collectPages(parsed, cacheDir, kind, signature);
+      // The pages stay in the sandbox (render.sh wrote their manifest and prunes old runs).
+      kept = true;
       this.#store(key, renderResult);
+      this.#log.info("document preview rendered", { kind, pages: renderResult.pageCount, ms: Date.now() - started });
       return renderResult;
     } finally {
-      await clearCacheDir();
+      if (!kept) await clearCacheDir();
       release();
+    }
+  }
+
+  /** The pages a render reported (its stdout, or the manifest it left), fetched from the sandbox. */
+  async #collectPages(parsed: Record<string, unknown>, cacheDir: string, kind: DocumentKind, signature: string): Promise<RenderResult> {
+    // Page paths are only accepted when they are a direct child of THIS run's
+    // cache directory: a script that returned some other path (however it got
+    // there) cannot make the control plane fetch an arbitrary container file.
+    const pagePaths = this.#confinePagePaths(parsed.pages, cacheDir);
+    if (pagePaths.length === 0) throw new DocumentError("render_failed", t().documents.noPreviewPages, 502);
+
+    let pages: RenderPage[];
+    try {
+      const bytes = await Promise.all(pagePaths.map((pagePath) => this.#fetchSandboxFile(pagePath)));
+      pages = bytes.map((b, i) => ({ index: i + 1, bytes: b }));
+    } catch (err) {
+      throw err instanceof DocumentError
+        ? err
+        : new DocumentError("render_failed", t().documents.previewImageReadFailed, 502);
+    }
+
+    const totalPages = typeof parsed.totalPages === "number" ? parsed.totalPages : pages.length;
+    return {
+      kind,
+      pageCount: pages.length,
+      totalPages,
+      truncated: parsed.truncated === true || totalPages > pages.length,
+      size: typeof parsed.size === "number" ? parsed.size : 0,
+      pages,
+      signature,
+    };
+  }
+
+  /** A finished render of this revision still in the sandbox, or null (then it is rendered again). */
+  async #savedRender(cacheDir: string, kind: DocumentKind, signature: string): Promise<RenderResult | null> {
+    const manifest = await this.#container.execInSandbox(["cat", path.posix.join(cacheDir, "manifest.json")], { timeoutMs: 15_000 });
+    if (manifest.code !== 0) return null;
+    const parsed = parseJsonLine(manifest.stdout);
+    if (!parsed || parsed.ok !== true) return null;
+    try {
+      const result = await this.#collectPages(parsed, cacheDir, kind, signature);
+      // Only real PNGs: the directory is writable by the sandbox user.
+      return result.pages.every((p) => p.bytes.subarray(0, 4).equals(PNG_MAGIC)) ? result : null;
+    } catch {
+      return null;
     }
   }
 

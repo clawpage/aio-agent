@@ -23,8 +23,8 @@ export interface SandboxIdleOptions {
   coldMs?: number;
   /** A dozing sandbox stops early once the node has less free memory than this (bytes); 0 never. */
   parkBelowFreeBytes?: number;
-  /** Brings the container and the Codex session back (startSandboxRuntime). */
-  start: (ctx: AppContext) => Promise<void>;
+  /** Brings the container and the Codex session back (startSandboxRuntime); calls `containerUp` once the container runs. */
+  start: (ctx: AppContext, containerUp: () => void) => Promise<void>;
   /** A console heartbeat counts for this long (it is sent every 20 s while visible). */
   foregroundTtlMs?: number;
   /** Container CPU above this is work nobody told us about (a build, a kernel). */
@@ -53,7 +53,7 @@ export class SandboxIdle {
   readonly #coldMs: number;
   readonly #parkBelowFreeBytes: number;
   #memCheckedAt = 0;
-  readonly #start: (ctx: AppContext) => Promise<void>;
+  readonly #start: (ctx: AppContext, containerUp: () => void) => Promise<void>;
   readonly #foregroundTtlMs: number;
   readonly #cpuBusyPercent: number;
   readonly #now: () => number;
@@ -63,6 +63,8 @@ export class SandboxIdle {
   #foregroundAt = 0;
   #parking: Promise<void> | null = null;
   #waking: Promise<void> | null = null;
+  /** Settles once a waking container runs, before its Codex session and browser are back. */
+  #containerUp: Promise<void> | null = null;
   #ticking = false;
   /** Last reason the sandbox counted as in use, logged once per change. */
   #reason: string | null = null;
@@ -146,6 +148,8 @@ export class SandboxIdle {
       return;
     }
     if (this.#waking) return this.#waking;
+    let containerUp!: () => void;
+    this.#containerUp = new Promise<void>((resolve) => { containerUp = resolve; });
     this.#waking = (async () => {
       // A stop in progress finishes first (or aborts on this very activity). The
       // yield lets a stop that started in this same tick register its promise.
@@ -155,7 +159,7 @@ export class SandboxIdle {
       this.#state = "waking";
       this.#ctx.log.info("sandbox waking from idle");
       try {
-        await this.#start(this.#ctx);
+        await this.#start(this.#ctx, containerUp);
       } finally {
         // Running again either way: a failed start is the recovery loop's to retry.
         this.#state = "running";
@@ -166,8 +170,23 @@ export class SandboxIdle {
       if (this.#ctx.sandboxSetupError) throw new Error(t().sandbox.startFailed);
     })().finally(() => {
       this.#waking = null;
+      this.#containerUp = null;
     });
     return this.#waking;
+  }
+
+  /**
+   * Like `wake`, for a request that only needs the container (files, document
+   * previews): it goes on as soon as the container runs instead of also waiting
+   * for the Codex session and the browser, several seconds more on a cold start.
+   */
+  async wakeContainer(): Promise<void> {
+    const full = this.wake();
+    const up = this.#containerUp;
+    if (!up) return await full;
+    // A start that fails after the container is up is the full wake's to report.
+    full.catch(() => undefined);
+    await Promise.race([full, up]);
   }
 
   /** Why the sandbox counts as in use right now, or null. Cheap: no container calls. */
