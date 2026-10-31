@@ -18,6 +18,8 @@ export interface MicrophoneInfo {
 
 export interface Recording {
   microphone: MicrophoneInfo;
+  /** How loud it is right now, 0 (silence) to 1 (speaking up), for the listening animation. */
+  level(): number;
   /** Stops the microphone; the WAV of everything heard. */
   stop(): Uint8Array;
   /** Stops the microphone and drops what was heard. */
@@ -119,16 +121,29 @@ export async function startRecording(): Promise<Recording> {
   const chunks: Float32Array[] = [];
   node.onaudioprocess = e => { chunks.push(new Float32Array(e.inputBuffer.getChannelData(0))); };
   source.connect(node);
+  const analyser = audio.createAnalyser();
+  analyser.fftSize = 1024;
+  const frame = new Float32Array(analyser.fftSize);
+  source.connect(analyser);
   node.connect(audio.destination);   // Chrome only runs a processor that leads somewhere; it outputs silence
   const release = () => {
     node.onaudioprocess = null;
     node.disconnect();
+    analyser.disconnect();
     source.disconnect();
     stream.getTracks().forEach(track => track.stop());
     void audio.close();
   };
   return {
     microphone,
+    level() {
+      analyser.getFloatTimeDomainData(frame);
+      let sum = 0;
+      for (const v of frame) sum += v * v;
+      // Loudness in decibels, -50 dB (a quiet room) to -10 dB (a raised voice).
+      const db = 10 * Math.log10(sum / frame.length + 1e-10);
+      return Math.min(1, Math.max(0, (db + 50) / 40));
+    },
     stop() {
       release();
       const samples = new Float32Array(chunks.reduce((n, c) => n + c.length, 0));

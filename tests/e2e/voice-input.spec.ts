@@ -28,6 +28,8 @@ test("records from the microphone, sends 16 kHz mono WAV and adds what was said 
   const stop = composer.getByRole("button", { name: /停止录音/ });
   await expect(stop).toHaveAttribute("aria-pressed", "true");
   await expect(stop).toHaveClass(/recording/);
+  // The ring follows the fake microphone, which beeps about twice a second.
+  await expect.poll(() => stop.evaluate(el => Number(el.style.getPropertyValue("--voice-level"))), { intervals: [50], timeout: 3000 }).toBeGreaterThan(0.3);
   await page.waitForTimeout(1500);
   await page.screenshot({ path: info.outputPath("recording.png") });
   await stop.click();

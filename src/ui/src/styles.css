@@ -4633,24 +4633,31 @@ button.map-card-switch { flex: 0 0 auto; padding: 4px 10px; }
   .chat.running .composer::before { inset: -1px; height: auto; border-radius: inherit; z-index: -1; }
 }
 @media (prefers-reduced-motion: reduce) { .composer { transition: none; } }
-/* Voice input: amber while it listens (your turn to talk), in the attachment button's quiet style otherwise. */
+/* Voice input: amber while it listens (your turn to talk), in the attachment button's quiet style otherwise.
+   Its ring swells with the voice (--voice-level, 0 to 1, set each frame by VoiceButton) and breathes softly in silence. */
 .composer-row > .voice-button.recording {
   color: var(--you); background: var(--you-soft); border-color: color-mix(in srgb, var(--you) 45%, transparent);
-  animation: voice-listening 1.6s ease-in-out infinite;
+  box-shadow: 0 0 0 calc(var(--voice-breath, 1px) + var(--voice-level, 0) * var(--voice-reach, 6px)) color-mix(in srgb, var(--you) 20%, transparent);
+  animation: voice-listening 2.4s ease-in-out infinite;
 }
+.composer-row > .voice-button.recording .composer-icon { transform: scale(calc(1 - var(--voice-level, 0) * .15)); }
 .voice-button .composer-button-label { font-variant-numeric: tabular-nums; }
-@keyframes voice-listening { 0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--you) 45%, transparent); } 50% { box-shadow: 0 0 0 6px transparent; } }
+@property --voice-breath { syntax: "<length>"; inherits: false; initial-value: 1px; }
+@keyframes voice-listening { 0%, 100% { --voice-breath: 1px; } 50% { --voice-breath: 3px; } }
 @media (min-width: 901px) {
   .composer-row > .voice-button:not(.recording) { border-color: transparent; background: transparent; color: var(--text-dim); }
   .composer-row > .voice-button:not(.recording):hover { color: var(--text); }
 }
 @media (max-width: 900px) {
   /* Beside the send button; the idle one-line field leaves room for both. */
-  .composer-row > .voice-button { right: 44px; }
+  .composer-row > .voice-button { right: 44px; --voice-reach: 3px; }   /* the ring stays clear of send and the card's edge */
   .composer-row > .voice-button:not(.recording) { border-color: transparent; background: transparent; }
   .composer:has(.voice-button) textarea { padding-right: 92px; }
 }
-@media (prefers-reduced-motion: reduce) { .composer-row > .voice-button.recording { animation: none; } }
+@media (prefers-reduced-motion: reduce) {
+  .composer-row > .voice-button.recording { animation: none; box-shadow: 0 0 0 2px color-mix(in srgb, var(--you) 20%, transparent); }
+  .composer-row > .voice-button.recording .composer-icon { transform: none; }
+}
 
 /* The account's phone, live (PhoneScreen): the screen fills the window height, keys and text below. */
 .phone { display: flex; flex-direction: column; gap: 8px; height: 100%; min-height: 0; padding: 8px; box-sizing: border-box; }

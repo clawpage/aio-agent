@@ -24,6 +24,7 @@ export function VoiceButton({ disabled, onText, onError }: { disabled: boolean; 
   const [state, setState] = useState<"idle" | "starting" | "recording" | "transcribing">("idle");
   const [seconds, setSeconds] = useState(0);
   const recording = useRef<Recording | null>(null);
+  const button = useRef<HTMLButtonElement>(null);
   const callbacks = useRef({ onText, onError });
   callbacks.current = { onText, onError };
 
@@ -65,6 +66,20 @@ export function VoiceButton({ disabled, onText, onError }: { disabled: boolean; 
     return () => clearInterval(timer);
   }, [state]);
 
+  // The ring follows the voice: straight onto the button's style each frame, no re-render.
+  useEffect(() => {
+    if (state !== "recording") return;
+    let shown = 0, frame = 0;
+    const tick = () => {
+      const heard = recording.current?.level() ?? 0;
+      shown += (heard - shown) * (heard > shown ? 0.5 : 0.12);   // rises with the voice, settles gently
+      button.current?.style.setProperty("--voice-level", shown.toFixed(3));
+      frame = requestAnimationFrame(tick);
+    };
+    frame = requestAnimationFrame(tick);
+    return () => { cancelAnimationFrame(frame); button.current?.style.removeProperty("--voice-level"); };
+  }, [state]);
+
   const start = async () => {
     setState("starting");
     callbacks.current.onError(null);
@@ -80,7 +95,7 @@ export function VoiceButton({ disabled, onText, onError }: { disabled: boolean; 
   if (!enabled) return null;
   const listening = state === "recording";
   const clock = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
-  return <button type="button" className={`ghost voice-button${listening ? " recording" : ""}`} data-testid="voice-button"
+  return <button ref={button} type="button" className={`ghost voice-button${listening ? " recording" : ""}`} data-testid="voice-button"
     disabled={(disabled && !listening) || state === "starting" || state === "transcribing"}
     aria-pressed={listening} aria-label={listening ? t.voice.stopRecording(clock) : state === "transcribing" ? t.voice.transcribing : t.voice.input} title={listening ? t.voice.stopAndTranscribe : t.voice.input}
     onClick={() => void (listening ? finish() : start())}>
