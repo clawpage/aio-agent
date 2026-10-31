@@ -222,7 +222,25 @@ export class TaskService {
     syncLocale(locale: Locale): boolean { return writeLocale(this.db, locale, "open"); }
     setNotifier(notifier: ((task: ReturnType<TaskService["view"]>) => void) | null): void { this.#notifier = notifier; }
     /** The account's clawpages, so its executor knows what it already built and what their data holds. */
+    /** The personal knowledge base's best matches, then each shared library's, under its name. */
+    knowledgeBrief(userId: string, query: string): { text: string; version: string } | null {
+        const parts: string[] = [];
+        const own = kbBrief(this.db, userId, query);
+        if (own) parts.push(own.text);
+        let libraries: Array<{ db: Db; id: string; name: string }> = [];
+        try { libraries = this.#libraries?.(userId) ?? []; } catch { /* a library that cannot be read adds nothing */ }
+        for (const lib of libraries) {
+            const brief = kbBrief(lib.db, lib.id, query, 400);
+            if (brief) parts.push(`From the shared knowledge base "${lib.name}" (kept with other people):\n${brief.text}`);
+        }
+        if (!parts.length) return null;
+        const text = parts.join("\n");
+        return { text, version: createHash("sha256").update(text).digest("hex").slice(0, 8) };
+    }
     setClawpages(list: ((userId: string) => SharePage[]) | null): void { this.#clawpages = list; }
+    /** The shared knowledge bases an account reads (docs/SHARED-KB.md), for the notes a task starts with. */
+    setSharedLibraries(list: ((userId: string) => Array<{ db: Db; id: string; name: string }>) | null): void { this.#libraries = list; }
+    #libraries: ((userId: string) => Array<{ db: Db; id: string; name: string }>) | null = null;
     #clawpages: ((userId: string) => SharePage[]) | null = null;
     /** The account's clawpages for an execution prompt: the most recently active first, each with its tables. */
     private clawpagesNote(row: TaskRow): string | null {
@@ -1051,7 +1069,7 @@ export class TaskService {
             const agreements = gadget ? null : standingAgreements(this.db, this.ownerId(row));
             const agreementsKnown = !!agreements && earlier.some(t => t.plan_json ? (JSON.parse(t.plan_json) as TaskPlan).agreementsVersion === agreements.version : false);
             // A few notes from the personal knowledge base that match this message, likewise once per version.
-            const knowledge = gadget || !this.cfg.taskKb || !kbEnabled(this.db) ? null : kbBrief(this.db, this.ownerId(row), [row.input_text, ...this.mergedRows(row.id).map(m => m.input_text)].join("\n"));
+            const knowledge = gadget || !this.cfg.taskKb || !kbEnabled(this.db) ? null : this.knowledgeBrief(this.ownerId(row), [row.input_text, ...this.mergedRows(row.id).map(m => m.input_text)].join("\n"));
             const knowledgeKnown = !!knowledge && earlier.some(t => t.plan_json ? (JSON.parse(t.plan_json) as TaskPlan).knowledgeVersion === knowledge.version : false);
             // A session picked up again after a while: what it holds is where things stood then, not now.
             const lastAt = row.execution_conversation_id ? Math.max(0, ...this.rows().filter(t => t.id !== row.id && this.executor(t) === this.executor(row)).map(t => t.completed_at ?? t.created_at)) : 0;

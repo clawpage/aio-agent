@@ -6,7 +6,8 @@ import type { CodexSessionLike } from "../codex/manager.js";
 import type { SandboxContainer } from "../sandbox/container.js";
 import type { SandboxIdleState } from "../sandbox/idle.js";
 import { randomId } from "../auth/passwords.js";
-import { applyKbAnswer, ensureDomains, KB_CERTAINTIES, KB_KINDS, KB_LIMITS, KB_RELS, wikiIneligible, type KbAnswer } from "./kernel.js";
+import { applyKbAnswer, ensureDomains, KB_CERTAINTIES, KB_KINDS, KB_LIMITS, KB_RELS, wikiIneligible, type KbAnswer, type KbShare } from "./kernel.js";
+import type { SharedKbs } from "./shared.js";
 import { getKbNode, kbEnabled, searchKb } from "./read.js";
 import { sandboxKbFiles } from "./gateway.js";
 import { renderKbProjection } from "./projection.js";
@@ -28,6 +29,8 @@ export interface KbMaintainerDeps {
   /** Whether the account's own tasks are running or queued: the maintainer gives way. */
   busy: () => Promise<boolean>;
   idleState: () => SandboxIdleState | undefined;
+  /** The shared libraries (docs/SHARED-KB.md): what fits one of the account's is passed on there. */
+  shared?: () => SharedKbs | undefined;
 }
 
 /** A batch reads at most this many packets and this much material. */
@@ -315,8 +318,11 @@ export class TaskKbMaintainer {
     const { db } = this.#d;
     const ids = packets.map((p) => p.id);
     const domains = (db.prepare("SELECT name, description FROM kb_domains WHERE owner_id=? ORDER BY name").all(this.#owner) as Array<{ name: string; description: string }>).map((d) => `${d.name}: ${d.description}`).join("\n");
-    const prompt = [`Domains:\n${domains}`, this.#related(packets), this.#wikiCandidates(), `Packets to handle (${ids.join(", ")}):`, material, `Now answer with the JSON change list, with a decision for each of ${ids.join(", ")}.`].join("\n\n");
-    const kernel = { db, ownerId: this.#owner, workspaceDir: this.#d.cfg.sandbox.containerWorkspaceDir, readFile: sandboxKbFiles(this.#d.container), packets: ids };
+    const shared = this.#d.shared?.();
+    const libraries = shared ? shared.librariesOf(this.#owner) : [];
+    const prompt = [`Domains:\n${domains}`, this.#related(packets), this.#wikiCandidates(), ...(libraries.length ? [this.#sharing(shared!, libraries)] : []),
+      `Packets to handle (${ids.join(", ")}):`, material, `Now answer with the JSON change list, with a decision for each of ${ids.join(", ")}.`].join("\n\n");
+    const kernel = { db, ownerId: this.#owner, workspaceDir: this.#d.cfg.sandbox.containerWorkspaceDir, readFile: sandboxKbFiles(this.#d.container), packets: ids, libraries };
     let answer: KbAnswer | null = null;
     let errors: string[] = [];
     let text: string | null = null;
@@ -324,11 +330,11 @@ export class TaskKbMaintainer {
       text = await this.#ask(prompt);
       answer = parseAnswer(text);
       if (!answer) errors = ["the answer was not a JSON object"];
-      else { const r = await applyKbAnswer(kernel, answer); if (r.ok) return this.#settle(ids, r.changed); errors = r.errors; }
+      else { const r = await applyKbAnswer(kernel, answer); if (r.ok) { this.#share(r.shares); return this.#settle(ids, r.changed); } errors = r.errors; }
       // One more try with the reasons, as dispatch does.
       const again = await this.#ask(`${prompt}\n\nYour previous answer:\n${clip(text, 20_000)}\n\nIt was not accepted:\n${errors.slice(0, 30).map((e) => `- ${e}`).join("\n")}\nFix these (drop an item whose evidence you cannot quote exactly) and answer with the complete corrected JSON.`);
       answer = parseAnswer(again);
-      if (answer) { const r = await applyKbAnswer(kernel, answer); if (r.ok) return this.#settle(ids, r.changed); errors = r.errors; }
+      if (answer) { const r = await applyKbAnswer(kernel, answer); if (r.ok) { this.#share(r.shares); return this.#settle(ids, r.changed); } errors = r.errors; }
       else errors = ["the corrected answer was not a JSON object"];
     } catch (err) {
       errors = [err instanceof Error ? err.message : String(err)];
@@ -340,6 +346,30 @@ export class TaskKbMaintainer {
       else db.prepare("UPDATE kb_packets SET attempts=attempts+1 WHERE id=?").run(p.id);
     }
     return 0;
+  }
+
+  /** The first judgement (docs/SHARED-KB.md §3.1): the libraries this person shares with others, and how to pass something on. */
+  #sharing(shared: SharedKbs, libraries: Array<{ id: string; name: string }>): string {
+    return [
+      "Shared knowledge bases this person keeps with other people. After deciding what goes into this personal knowledge base, pass on to a shared library what clearly fits its rules and would help its other members, with a share op:",
+      '{"op":"share","library":"<library id>","title":"<subject, at most 80 chars>","text":"<one statement, at most 400 chars>","sources":[the same kind of sources as a claim]}',
+      "When in doubt, do not share. Never share what concerns only this person, anything they would not want the other members to see, or anything the user asked to keep private. Sharing does not replace recording it here.",
+      ...libraries.map((l) => `- ${l.id} "${l.name}" (members: ${shared.members(l.id).map((m) => m.username).join(", ")}). Rules:\n${shared.rules(l.id).text || "(none written: share only what every member would clearly find useful)"}`),
+    ].join("\n");
+  }
+
+  /** Hand what was judged worth sharing to each library's mailbox, its quotes with it. */
+  #share(shares: KbShare[]): void {
+    const shared = this.#d.shared?.();
+    if (!shared) return;
+    for (const s of shares) {
+      try {
+        shared.enqueue(s.library, { from: this.#owner, type: "add", task: s.sources[0]?.task ?? null, target: null, title: s.title, text: s.text, evidence: s.sources.map((e) => ({ ...e, contributor: this.#owner })) });
+      } catch (err) {
+        this.#log.warn("knowledge not passed on to a shared library", { library: s.library, error: err instanceof Error ? err.message : String(err) });
+      }
+    }
+    if (shares.length) this.#log.info("knowledge passed on to shared libraries", { items: shares.length });
   }
 
   /** Packets the answer gave no decision count as accepted when it changed something, else as merged. */

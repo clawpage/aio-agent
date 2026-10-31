@@ -50,6 +50,7 @@ async function setup(page: Page) {
     const method = r.request().method();
     if (method !== "GET") writes.push({ method, path: pathname, body: method === "POST" ? r.request().postDataJSON() : null });
     if (pathname === "/api/knowledge") return r.fulfill({ json: overview() });
+    if (pathname === "/api/knowledge/libraries") return r.fulfill({ json: { libraries: [], presets: { family: "收：家里的事", project: "收：项目的事", blank: "" } } });
     if (pathname === "/api/knowledge/settings") { enabled = r.request().postDataJSON().enabled; return r.fulfill({ json: { enabled } }); }
     const nodeId = /^\/api\/knowledge\/nodes\/([^/]+)$/.exec(pathname)?.[1];
     if (nodeId) {

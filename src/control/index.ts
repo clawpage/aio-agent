@@ -21,6 +21,8 @@ import {DeviceLinks} from "./deviceLink.js";
 import {ScheduleGateway} from "./scheduleTool.js";
 import {TaskKbGateway} from "./taskKb/gateway.js";
 import {TaskKbMaintainer} from "./taskKb/maintainer.js";
+import {SharedKbs} from "./taskKb/shared.js";
+import {SharedKbMaintainer} from "./taskKb/sharedMaintainer.js";
 import { ImageGateway, sandboxImageFiles } from "./imageTool.js";
 import { PrinterGateway, sandboxPrintFiles } from "./printer/gateway.js";
 import { TtsGateway, sandboxSpeechFiles } from "./ttsTool.js";
@@ -195,7 +197,7 @@ async function bootstrapRuntime(opts: BootstrapOptions, cfg: Config, log: Logger
   };
 
   // The account's knowledge maintainer reads its finished tasks; started with the runtime (startTaskKb).
-  ctx.taskKb = new TaskKbMaintainer({ db, cfg, log, codex, container, idleState: () => ctx.idle?.state,
+  ctx.taskKb = new TaskKbMaintainer({ db, cfg, log, codex, container, idleState: () => ctx.idle?.state, shared: () => ctx.sharedKb,
     busy: async () => { const s = await agent.status(); return s.activeTurns.length > 0 || s.queuedTurns > 0 || !!db.prepare(`SELECT 1 FROM tasks WHERE status IN (${ACTIVE_TASKS}) LIMIT 1`).get(); } });
   tasks.onTaskCompleted((id) => ctx.taskKb?.taskCompleted(id));
 
@@ -495,13 +497,21 @@ async function main(): Promise<void> {
   const { ctx, shutdown } = await bootstrap({config, nodes, deferAgentInit: true});
   const parked = await initOwnerRuntime(ctx);
   const account=(sql:string,value:string)=>(ctx.db.prepare(sql).get(value) as {v:string}|undefined)?.v??null;
+  // Answers counted in an account's own usage: a page's signed-in visitor, a shared library's contributor.
+  const ai=new ClawpageAi({cfg:ctx.cfg,log:ctx.log,db:ctx.db,hostTokens:ctx.hostTokens,claude:new ClaudeCodeHarness(ctx.cfg,ctx.log),
+    usageDb:async id=>id===ctx.cfg.runtimeUserId?ctx.db:(await ctx.runtimeForUser!(id)).db});
   ctx.share=new ShareStore({cfg:ctx.cfg,port:ctx.cfg.memberModelPort??4902,
     usernameOf:id=>account("SELECT username AS v FROM owners WHERE id=?",id),
     userIdOf:name=>account("SELECT id AS v FROM owners WHERE username=?",name),
     data:new ClawpageData(ctx.cfg.dataDir),
     // A page's AI answers come from the signed-in visitor's own account, counted in its usage.
-    ai:new ClawpageAi({cfg:ctx.cfg,log:ctx.log,db:ctx.db,hostTokens:ctx.hostTokens,claude:new ClaudeCodeHarness(ctx.cfg,ctx.log),
-      usageDb:async id=>id===ctx.cfg.runtimeUserId?ctx.db:(await ctx.runtimeForUser!(id)).db})});
+    ai});
+  // Shared knowledge bases (docs/SHARED-KB.md): one registry for every runtime, and their maintainer.
+  const kbs=ctx.sharedKb=new SharedKbs({db:ctx.db,dataDir:ctx.cfg.dataDir,log:ctx.log});
+  const sharedMaintainer=new SharedKbMaintainer({kbs,log:ctx.log,ask:(id,system,prompt)=>ai.maintain(id,system,prompt)});
+  kbs.onPacket=(library,urgent)=>sharedMaintainer.nudge(library,urgent);
+  ctx.tasks.setSharedLibraries(id=>kbs.librariesOf(id).map(l=>({db:kbs.db(l.id),id:l.id,name:l.name})));
+  sharedMaintainer.start(ctx.db);
   ctx.tasks.setClawpages(id=>ctx.share!.list(id));
   ctx.share.widgets=new WidgetStore(ctx.cfg);
   ctx.tasks.setWidgets(id=>ctx.share!.widgets!.list(id));
@@ -605,7 +615,9 @@ async function main(): Promise<void> {
     server.close();
     modelGateway.close();
     deviceLinks.close();
+    sharedMaintainer.stop();
     await users.shutdown();
+    ctx.sharedKb?.close();
     await shutdown();
     setTimeout(() => process.exit(0), 200).unref?.();
   };

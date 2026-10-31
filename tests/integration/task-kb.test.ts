@@ -75,7 +75,7 @@ it("gives every account its own read-and-propose knowledge tool with no way to w
     const init = await rpc(owner.taskKb!.url, { jsonrpc: "2.0", id: 1, method: "initialize", params: {} });
     expect((await init.json()).result).toMatchObject({ serverInfo: { name: "aio_task_kb" }, instructions: TASK_KB_POLICY });
     const tools = (await (await rpc(owner.taskKb!.url, { jsonrpc: "2.0", id: 2, method: "tools/list" })).json()).result.tools as Array<{ name: string }>;
-    expect(tools.map((t) => t.name)).toEqual(["kb_search", "kb_get", "kb_neighbors", "kb_source", "kb_propose", "kb_propose_status", "history_search", "history_get", "memory_search", "memory_save", "memory_forget"]);
+    expect(tools.map((t) => t.name)).toEqual(["kb_search", "kb_get", "kb_neighbors", "kb_source", "kb_libraries", "kb_propose", "kb_propose_status", "history_search", "history_get", "memory_search", "memory_save", "memory_forget"]);
   } finally {
     gateway.close();
     await h.shutdown();

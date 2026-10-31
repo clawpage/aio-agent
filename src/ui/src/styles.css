@@ -4764,3 +4764,26 @@ button.map-card-switch { flex: 0 0 auto; padding: 4px 10px; }
 .knowledge-links > li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; min-width: 0; }
 .knowledge-links button.link { padding: 0; text-align: left; overflow-wrap: anywhere; }
 .knowledge-wiki { padding: 12px 14px; border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--bg-soft); overflow-x: auto; }
+/* shared knowledge bases (SharedLibrary) */
+.knowledge-switcher { max-width: var(--page-max); margin: 0 auto; padding: 0 16px; }
+.knowledge-libraries { flex-wrap: wrap; margin: 4px 0 10px; }
+.knowledge-switch-notice { max-width: var(--page-max); margin: 0 auto 10px; }
+.knowledge-join { max-width: var(--page-max); margin: 0 auto 12px; padding: 12px 14px; border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border)); border-radius: var(--radius-card); background: color-mix(in srgb, var(--accent) 8%, var(--bg-soft)); }
+.knowledge-join > p { margin: 0 0 6px; line-height: 1.6; overflow-wrap: anywhere; }
+.knowledge-shared-head { max-width: var(--page-max); margin: 0 auto 12px; }
+.knowledge-shared-head > p { margin: 0 0 6px; }
+.knowledge-tabs { flex-wrap: wrap; margin-top: 8px; }
+.knowledge-shared-actions { max-width: var(--page-max); margin: 0 auto 12px; }
+.knowledge-inline-actions { margin-top: 8px; flex-wrap: wrap; }
+.knowledge-form { display: grid; gap: 10px; max-width: var(--page-max); margin: 0 auto 16px; min-width: 0; }
+.knowledge-form > h3 { margin: 0; font-size: 17px; font-weight: 600; }
+.knowledge-form label { display: grid; gap: 4px; font-size: var(--fs-sm); color: var(--text-dim); min-width: 0; }
+.knowledge-form input, .knowledge-form select, .knowledge-form textarea, .knowledge-claims textarea { width: 100%; box-sizing: border-box; color: var(--text); }
+.knowledge-form textarea, .knowledge-claims textarea { resize: vertical; line-height: 1.6; font: inherit; }
+.knowledge-form-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; }
+.knowledge-changes { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.knowledge-changes > li { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; min-width: 0; overflow-wrap: anywhere; }
+.knowledge-rules-text { white-space: pre-wrap; }
+.knowledge-invite-link { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 8px; align-items: center; margin: 10px 0; }
+.knowledge-invite-link > p { grid-column: 1 / -1; margin: 0; }
+.knowledge-invite-link input { width: 100%; min-width: 0; box-sizing: border-box; }

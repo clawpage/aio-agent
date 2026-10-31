@@ -9,6 +9,108 @@ export const SCHEMA_VERSION = 1;
 /** The domain of the hidden placeholder email given to accounts that have no email of their own. */
 export const PLACEHOLDER_EMAIL_DOMAIN = "clawpage.ai";
 
+/**
+ * A knowledge base's tables (docs/TASK-KB.md): in every account's database for its personal
+ * library, and the same in each shared library's own file (docs/SHARED-KB.md), where
+ * `owner_id` holds the library's id. Only the control plane's kernel writes them.
+ */
+export const KB_SCHEMA = `
+-- The account's personal knowledge base (docs/TASK-KB.md): a graph distilled from its
+-- tasks. Only the control plane's kernel writes it (src/control/taskKb/kernel.ts), from
+-- the knowledge maintainer's answers; executors read it and send proposals (kb_packets).
+CREATE TABLE IF NOT EXISTS kb_domains (
+  owner_id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (owner_id, name)
+);
+CREATE TABLE IF NOT EXISTS kb_nodes (
+  id TEXT PRIMARY KEY,
+  owner_id TEXT NOT NULL,
+  kind TEXT NOT NULL CHECK (kind IN ('entity','topic','procedure','fact')),
+  domain TEXT NOT NULL,
+  title TEXT NOT NULL,
+  summary TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','superseded','retired')),
+  superseded_by TEXT,
+  wiki_md TEXT,
+  wiki_draft TEXT,
+  wiki_at INTEGER,
+  reads INTEGER NOT NULL DEFAULT 0,
+  last_read_at INTEGER,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_kb_nodes_owner ON kb_nodes(owner_id, status, domain);
+CREATE TABLE IF NOT EXISTS kb_claims (
+  id TEXT PRIMARY KEY,
+  node_id TEXT NOT NULL REFERENCES kb_nodes(id) ON DELETE CASCADE,
+  text TEXT NOT NULL,
+  certainty TEXT NOT NULL CHECK (certainty IN ('user_said','observed','inferred')),
+  volatility TEXT NOT NULL DEFAULT 'stable' CHECK (volatility IN ('stable','changes')),
+  verify_after INTEGER,
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','superseded','retired')),
+  superseded_by TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_kb_claims_node ON kb_claims(node_id, status);
+CREATE TABLE IF NOT EXISTS kb_edges (
+  id TEXT PRIMARY KEY,
+  src TEXT NOT NULL REFERENCES kb_nodes(id) ON DELETE CASCADE,
+  dst TEXT NOT NULL REFERENCES kb_nodes(id) ON DELETE CASCADE,
+  rel TEXT NOT NULL CHECK (rel IN ('about','part_of','uses','related_to','supersedes','contradicts')),
+  created_at INTEGER NOT NULL,
+  UNIQUE (src, dst, rel)
+);
+CREATE INDEX IF NOT EXISTS idx_kb_edges_dst ON kb_edges(dst);
+CREATE TABLE IF NOT EXISTS kb_sources (
+  id TEXT PRIMARY KEY,
+  owner_id TEXT NOT NULL,
+  task_id TEXT NOT NULL,
+  path TEXT,
+  url TEXT,
+  sha256 TEXT,
+  excerpt TEXT NOT NULL,
+  captured_at INTEGER NOT NULL,
+  kind TEXT NOT NULL DEFAULT 'task',
+  contributor TEXT
+);
+CREATE TABLE IF NOT EXISTS kb_cites (
+  item_id TEXT NOT NULL,
+  source_id TEXT NOT NULL REFERENCES kb_sources(id) ON DELETE CASCADE,
+  PRIMARY KEY (item_id, source_id)
+);
+CREATE INDEX IF NOT EXISTS idx_kb_cites_source ON kb_cites(source_id);
+CREATE TABLE IF NOT EXISTS kb_packets (
+  id TEXT PRIMARY KEY,
+  owner_id TEXT NOT NULL,
+  kind TEXT NOT NULL CHECK (kind IN ('extract','propose')),
+  type TEXT,
+  task_id TEXT,
+  target TEXT,
+  payload_json TEXT NOT NULL DEFAULT '{}',
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','accepted','merged','rejected','failed')),
+  note TEXT,
+  attempts INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL,
+  processed_at INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_kb_packets_status ON kb_packets(owner_id, status, created_at);
+CREATE INDEX IF NOT EXISTS idx_kb_packets_target ON kb_packets(target) WHERE target IS NOT NULL;
+CREATE TABLE IF NOT EXISTS kb_revisions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  owner_id TEXT NOT NULL,
+  packets TEXT NOT NULL DEFAULT '',
+  object_id TEXT NOT NULL,
+  op TEXT NOT NULL,
+  detail_json TEXT NOT NULL DEFAULT '{}',
+  at INTEGER NOT NULL
+);
+CREATE VIRTUAL TABLE IF NOT EXISTS kb_search USING fts5(node_id UNINDEXED, owner_id UNINDEXED, title, body);
+`;
+
 const SCHEMA = `
 PRAGMA journal_mode = WAL;
 PRAGMA foreign_keys = ON;
@@ -309,98 +411,33 @@ CREATE TRIGGER IF NOT EXISTS task_revision AFTER UPDATE ON tasks
 WHEN NEW.revision = OLD.revision
 BEGIN UPDATE tasks SET revision=OLD.revision+1 WHERE id=NEW.id; END;
 
--- The account's personal knowledge base (docs/TASK-KB.md): a graph distilled from its
--- tasks. Only the control plane's kernel writes it (src/control/taskKb/kernel.ts), from
--- the knowledge maintainer's answers; executors read it and send proposals (kb_packets).
-CREATE TABLE IF NOT EXISTS kb_domains (
-  owner_id TEXT NOT NULL,
+${KB_SCHEMA}
+-- Shared knowledge bases (docs/SHARED-KB.md): who belongs to which. Only the owner runtime's
+-- database holds them; each library's own contents live in its file under data/kbs/.
+CREATE TABLE IF NOT EXISTS kb_libraries (
+  id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
-  description TEXT NOT NULL DEFAULT '',
-  created_at INTEGER NOT NULL,
-  PRIMARY KEY (owner_id, name)
+  admin_id TEXT NOT NULL,
+  created_by TEXT NOT NULL,
+  created_at INTEGER NOT NULL
 );
-CREATE TABLE IF NOT EXISTS kb_nodes (
+CREATE TABLE IF NOT EXISTS kb_library_members (
+  library_id TEXT NOT NULL REFERENCES kb_libraries(id) ON DELETE CASCADE,
+  user_id TEXT NOT NULL,
+  joined_at INTEGER NOT NULL,
+  PRIMARY KEY (library_id, user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_kb_library_members_user ON kb_library_members(user_id);
+CREATE TABLE IF NOT EXISTS kb_library_invites (
   id TEXT PRIMARY KEY,
-  owner_id TEXT NOT NULL,
-  kind TEXT NOT NULL CHECK (kind IN ('entity','topic','procedure','fact')),
-  domain TEXT NOT NULL,
-  title TEXT NOT NULL,
-  summary TEXT NOT NULL DEFAULT '',
-  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','superseded','retired')),
-  superseded_by TEXT,
-  wiki_md TEXT,
-  wiki_draft TEXT,
-  wiki_at INTEGER,
-  reads INTEGER NOT NULL DEFAULT 0,
-  last_read_at INTEGER,
+  library_id TEXT NOT NULL REFERENCES kb_libraries(id) ON DELETE CASCADE,
+  token_hash TEXT NOT NULL UNIQUE,
+  created_by TEXT NOT NULL,
   created_at INTEGER NOT NULL,
-  updated_at INTEGER NOT NULL
+  expires_at INTEGER NOT NULL,
+  revoked_at INTEGER,
+  uses INTEGER NOT NULL DEFAULT 0
 );
-CREATE INDEX IF NOT EXISTS idx_kb_nodes_owner ON kb_nodes(owner_id, status, domain);
-CREATE TABLE IF NOT EXISTS kb_claims (
-  id TEXT PRIMARY KEY,
-  node_id TEXT NOT NULL REFERENCES kb_nodes(id) ON DELETE CASCADE,
-  text TEXT NOT NULL,
-  certainty TEXT NOT NULL CHECK (certainty IN ('user_said','observed','inferred')),
-  volatility TEXT NOT NULL DEFAULT 'stable' CHECK (volatility IN ('stable','changes')),
-  verify_after INTEGER,
-  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','superseded','retired')),
-  superseded_by TEXT,
-  created_at INTEGER NOT NULL,
-  updated_at INTEGER NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_kb_claims_node ON kb_claims(node_id, status);
-CREATE TABLE IF NOT EXISTS kb_edges (
-  id TEXT PRIMARY KEY,
-  src TEXT NOT NULL REFERENCES kb_nodes(id) ON DELETE CASCADE,
-  dst TEXT NOT NULL REFERENCES kb_nodes(id) ON DELETE CASCADE,
-  rel TEXT NOT NULL CHECK (rel IN ('about','part_of','uses','related_to','supersedes','contradicts')),
-  created_at INTEGER NOT NULL,
-  UNIQUE (src, dst, rel)
-);
-CREATE INDEX IF NOT EXISTS idx_kb_edges_dst ON kb_edges(dst);
-CREATE TABLE IF NOT EXISTS kb_sources (
-  id TEXT PRIMARY KEY,
-  owner_id TEXT NOT NULL,
-  task_id TEXT NOT NULL,
-  path TEXT,
-  url TEXT,
-  sha256 TEXT,
-  excerpt TEXT NOT NULL,
-  captured_at INTEGER NOT NULL
-);
-CREATE TABLE IF NOT EXISTS kb_cites (
-  item_id TEXT NOT NULL,
-  source_id TEXT NOT NULL REFERENCES kb_sources(id) ON DELETE CASCADE,
-  PRIMARY KEY (item_id, source_id)
-);
-CREATE INDEX IF NOT EXISTS idx_kb_cites_source ON kb_cites(source_id);
-CREATE TABLE IF NOT EXISTS kb_packets (
-  id TEXT PRIMARY KEY,
-  owner_id TEXT NOT NULL,
-  kind TEXT NOT NULL CHECK (kind IN ('extract','propose')),
-  type TEXT,
-  task_id TEXT,
-  target TEXT,
-  payload_json TEXT NOT NULL DEFAULT '{}',
-  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','accepted','merged','rejected','failed')),
-  note TEXT,
-  attempts INTEGER NOT NULL DEFAULT 0,
-  created_at INTEGER NOT NULL,
-  processed_at INTEGER
-);
-CREATE INDEX IF NOT EXISTS idx_kb_packets_status ON kb_packets(owner_id, status, created_at);
-CREATE INDEX IF NOT EXISTS idx_kb_packets_target ON kb_packets(target) WHERE target IS NOT NULL;
-CREATE TABLE IF NOT EXISTS kb_revisions (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  owner_id TEXT NOT NULL,
-  packets TEXT NOT NULL DEFAULT '',
-  object_id TEXT NOT NULL,
-  op TEXT NOT NULL,
-  detail_json TEXT NOT NULL DEFAULT '{}',
-  at INTEGER NOT NULL
-);
-CREATE VIRTUAL TABLE IF NOT EXISTS kb_search USING fts5(node_id UNINDEXED, owner_id UNINDEXED, title, body);
 
 -- Dispatcher recall: past tasks indexed as CJK bigrams + latin words (BM25),
 -- and what each dispatch saw and chose, for monitoring.
@@ -493,6 +530,10 @@ END;`);
   if (!scheduleColumns.some(c => c.name === "builtin")) db.exec("ALTER TABLE schedules ADD COLUMN builtin TEXT");
   const vaultColumns = db.prepare("PRAGMA table_info(vault_entries)").all() as Array<{ name: string }>;
   if (!vaultColumns.some(c => c.name === "method")) db.exec("ALTER TABLE vault_entries ADD COLUMN method TEXT NOT NULL DEFAULT 'password' CHECK (method IN ('password','google'))");
+  // Where a claim's evidence came from: a task (the original), or in a shared library also a member's own words.
+  const kbSourceColumns = db.prepare("PRAGMA table_info(kb_sources)").all() as Array<{ name: string }>;
+  if (!kbSourceColumns.some(c => c.name === "kind")) db.exec("ALTER TABLE kb_sources ADD COLUMN kind TEXT NOT NULL DEFAULT 'task'");
+  if (!kbSourceColumns.some(c => c.name === "contributor")) db.exec("ALTER TABLE kb_sources ADD COLUMN contributor TEXT");
   const recallColumns = db.prepare("PRAGMA table_info(recall_events)").all() as Array<{ name: string }>;
   if (!recallColumns.some(c => c.name === "fail_reason")) db.exec("ALTER TABLE recall_events ADD COLUMN fail_reason TEXT");
   if (!recallColumns.some(c => c.name === "repairs_json")) db.exec("ALTER TABLE recall_events ADD COLUMN repairs_json TEXT NOT NULL DEFAULT '[]'");

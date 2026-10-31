@@ -3,6 +3,7 @@ import path from "node:path";
 import type { Db } from "../db.js";
 import { randomId } from "../auth/passwords.js";
 import { tokenize } from "../tasks/recall.js";
+import { beginChange, endChange, type ChangeMeta } from "./ledger.js";
 
 /**
  * The write kernel of the account's personal knowledge base (docs/TASK-KB.md).
@@ -58,6 +59,7 @@ export type KbReadFile = (absolutePath: string) => Promise<{ text: string; sha25
 
 export interface KbKernelDeps {
   db: Db;
+  /** The library: the account's id for its personal one, the library's id for a shared one. */
   ownerId: string;
   /** The sandbox's workspace directory, under which `tasks/<id>/` holds each task's files. */
   workspaceDir: string;
@@ -65,9 +67,20 @@ export interface KbKernelDeps {
   /** The packets this answer handles; decisions may name only these. */
   packets: string[];
   now?: number;
+  /** How a source is checked when it is not a task of this account (a shared library's mail). */
+  verify?: (where: string, input: unknown, errors: string[]) => Promise<PreparedSource | null>;
+  /** A shared library records the answer as one change (docs/SHARED-KB.md §2.2). */
+  change?: ChangeMeta;
+  /** The shared libraries this account belongs to: `share` ops may name only these. */
+  libraries?: Array<{ id: string; name: string }>;
+  /** No wiki pages (a shared library has none). */
+  noWiki?: boolean;
 }
 
-export interface KbApplyResult { ok: boolean; errors: string[]; changed: number; nodes: string[] }
+/** What the personal maintainer passes on to a shared library's mailbox (docs/SHARED-KB.md §3.1). */
+export interface KbShare { library: string; title: string; text: string; sources: PreparedSource[] }
+
+export interface KbApplyResult { ok: boolean; errors: string[]; changed: number; nodes: string[]; shares: KbShare[] }
 
 const clean = (s: unknown) => (typeof s === "string" ? s.replace(/\s+/g, " ").trim() : "");
 const chars = (s: string) => [...s].length;
@@ -116,7 +129,11 @@ export function taskCorpus(db: Db, ownerId: string, taskId: string): string | nu
   return parts.join("\n");
 }
 
-export interface PreparedSource { task: string; path: string | null; url: string | null; sha256: string | null; excerpt: string }
+export interface PreparedSource {
+  task: string; path: string | null; url: string | null; sha256: string | null; excerpt: string;
+  /** task (default), manual (a member's own words), url; and who it came from, in a shared library. */
+  kind?: "task" | "manual" | "url"; contributor?: string | null;
+}
 type Ref = { kind: "new"; ref: string } | { kind: "existing"; id: string };
 type PreparedOp =
   | { op: "domain"; name: string; description: string }
@@ -126,7 +143,8 @@ type PreparedOp =
   | { op: "link"; src: Ref; dst: Ref; rel: string; sources: PreparedSource[] }
   | { op: "merge"; from: string; into: Ref }
   | { op: "retire"; id: string; reason: string }
-  | { op: "wiki"; node: string; markdown: string };
+  | { op: "wiki"; node: string; markdown: string }
+  | { op: "share"; share: KbShare };
 
 /** Check one piece of evidence: a task of this account, and words that really are in it (or in a file of its directory). */
 export async function verifySource(deps: Pick<KbKernelDeps, "workspaceDir" | "readFile"> & { corpus: (task: string) => string | null }, where: string, input: unknown, errors: string[]): Promise<PreparedSource | null> {
@@ -170,7 +188,7 @@ export async function applyKbAnswer(deps: KbKernelDeps, answer: KbAnswer): Promi
   const errors: string[] = [];
   const ops = Array.isArray(answer.ops) ? answer.ops : [];
   const decisions = Array.isArray(answer.decisions) ? answer.decisions : [];
-  if (!Array.isArray(answer.ops) && !Array.isArray(answer.decisions)) return { ok: false, errors: ["the answer needs an ops array and a decisions array"], changed: 0, nodes: [] };
+  if (!Array.isArray(answer.ops) && !Array.isArray(answer.decisions)) return { ok: false, errors: ["the answer needs an ops array and a decisions array"], changed: 0, nodes: [], shares: [] };
   if (ops.length > KB_LIMITS.ops) errors.push(`at most ${KB_LIMITS.ops} ops per answer; keep only what is worth remembering`);
 
   const domains = new Set((db.prepare("SELECT name FROM kb_domains WHERE owner_id=?").all(ownerId) as Array<{ name: string }>).map((d) => d.name));
@@ -196,7 +214,7 @@ export async function applyKbAnswer(deps: KbKernelDeps, answer: KbAnswer): Promi
     if (node.status !== "active") { errors.push(`${where}: node ${v} is ${node.status}; use the node that replaced it`); return null; }
     return { kind: "existing", id: v };
   };
-  const source = (where: string, input: unknown) => verifySource({ ...deps, corpus }, where, input, errors);
+  const source = (where: string, input: unknown) => deps.verify ? deps.verify(where, input, errors) : verifySource({ ...deps, corpus }, where, input, errors);
   const sources = async (where: string, list: unknown, required: boolean): Promise<PreparedSource[]> => {
     const items = Array.isArray(list) ? list : [];
     if (required && !items.length) { errors.push(`${where} needs at least one source`); return []; }
@@ -289,7 +307,18 @@ export async function applyKbAnswer(deps: KbKernelDeps, answer: KbAnswer): Promi
         prepared.push({ op: "retire", id, reason });
         break;
       }
+      case "share": {
+        const library = clean(o.library);
+        if (!deps.libraries?.some((l) => l.id === library)) { errors.push(`${where}.library must be the id of one of the listed shared libraries`); break; }
+        const title = text(`${where}.title`, o.title, KB_LIMITS.title);
+        const t = text(`${where}.text`, o.text, KB_LIMITS.claim);
+        const srcs = await sources(`${where}.sources`, o.sources, true);
+        if (title === null || t === null || !srcs.length) break;
+        prepared.push({ op: "share", share: { library, title, text: t, sources: srcs } });
+        break;
+      }
       case "wiki": {
+        if (deps.noWiki) { errors.push(`${where}: this knowledge base has no wiki pages`); break; }
         const id = clean(o.node);
         const why = wikiIneligible(db, ownerId, id);
         if (why) { errors.push(`${where}: ${why}`); break; }
@@ -301,7 +330,7 @@ export async function applyKbAnswer(deps: KbKernelDeps, answer: KbAnswer): Promi
         break;
       }
       default:
-        errors.push(`${where}.op must be one of domain, node, update_node, claim, link, merge, retire, wiki`);
+        errors.push(`${where}.op must be one of domain, node, update_node, claim, link, merge, retire, ${deps.noWiki ? "" : "wiki, "}${deps.libraries?.length ? "share" : ""}`.replace(/, $/, ""));
     }
   }
   for (const r of refs) if (!claimed.has(r)) errors.push(`node ${r} has no claim in this answer; every new node needs at least one sourced claim`);
@@ -314,7 +343,7 @@ export async function applyKbAnswer(deps: KbKernelDeps, answer: KbAnswer): Promi
     if (!["accepted", "merged", "rejected"].includes(String(d.status))) { errors.push(`decisions[${i}].status must be accepted, merged or rejected`); continue; }
     decided.push({ packet, status: String(d.status), note: clean(d.note).slice(0, 300) });
   }
-  if (errors.length) return { ok: false, errors, changed: 0, nodes: [] };
+  if (errors.length) return { ok: false, errors, changed: 0, nodes: [], shares: [] };
 
   const ids = new Map<string, string>();
   const idOf = (r: Ref) => (r.kind === "new" ? ids.get(r.ref)! : r.id);
@@ -324,17 +353,21 @@ export async function applyKbAnswer(deps: KbKernelDeps, answer: KbAnswer): Promi
   const log = (object: string, op: string, detail: unknown) => revision.run(ownerId, packetsLabel, object, op, JSON.stringify(detail), now);
   const cite = (item: string, list: PreparedSource[]) => {
     for (const s of list) {
-      const existing = db.prepare("SELECT id FROM kb_sources WHERE owner_id=? AND task_id=? AND COALESCE(path,'')=? AND COALESCE(url,'')=? AND excerpt=?")
-        .get(ownerId, s.task, s.path ?? "", s.url ?? "", s.excerpt) as { id: string } | undefined;
+      const existing = db.prepare("SELECT id FROM kb_sources WHERE owner_id=? AND task_id=? AND COALESCE(path,'')=? AND COALESCE(url,'')=? AND excerpt=? AND COALESCE(contributor,'')=?")
+        .get(ownerId, s.task, s.path ?? "", s.url ?? "", s.excerpt, s.contributor ?? "") as { id: string } | undefined;
       const sid = existing?.id ?? randomId("kbs");
-      if (!existing) db.prepare("INSERT INTO kb_sources (id, owner_id, task_id, path, url, sha256, excerpt, captured_at) VALUES (?,?,?,?,?,?,?,?)").run(sid, ownerId, s.task, s.path, s.url, s.sha256, s.excerpt, now);
+      if (!existing) db.prepare("INSERT INTO kb_sources (id, owner_id, task_id, path, url, sha256, excerpt, captured_at, kind, contributor) VALUES (?,?,?,?,?,?,?,?,?,?)")
+        .run(sid, ownerId, s.task, s.path, s.url, s.sha256, s.excerpt, now, s.kind ?? "task", s.contributor ?? null);
       db.prepare("INSERT OR IGNORE INTO kb_cites (item_id, source_id) VALUES (?,?)").run(item, sid);
     }
   };
   let changed = 0;
+  const shares: KbShare[] = [];
   db.exec("BEGIN IMMEDIATE");
   try {
+    const change = deps.change ? beginChange(db, deps.change, now) : null;
     for (const op of prepared) {
+      if (op.op === "share") { shares.push(op.share); continue; }
       changed++;
       if (op.op === "domain") {
         db.prepare("INSERT OR IGNORE INTO kb_domains (owner_id, name, description, created_at) VALUES (?,?,?,?)").run(ownerId, op.name, op.description, now);
@@ -402,12 +435,13 @@ export async function applyKbAnswer(deps: KbKernelDeps, answer: KbAnswer): Promi
       db.prepare("UPDATE kb_packets SET status=?, note=?, processed_at=? WHERE id=? AND owner_id=?").run(d.status, d.note || null, now, d.packet, ownerId);
     }
     for (const id of touched) reindexNode(db, id);
+    if (change !== null) endChange(db, change);
     db.exec("COMMIT");
   } catch (err) {
     db.exec("ROLLBACK");
     throw err;
   }
-  return { ok: true, errors: [], changed, nodes: [...touched] };
+  return { ok: true, errors: [], changed, nodes: [...touched], shares };
 }
 
 /** Why a node may not have a wiki page yet, or null when it may. */
@@ -442,11 +476,12 @@ export function reindexNode(db: Db, id: string): void {
  * The person's own deletion: the node, its claims and edges, and the sources only they
  * cited, gone for good. The ledger keeps only that it happened.
  */
-export function deleteKbNode(db: Db, ownerId: string, id: string, by: string): boolean {
+export function deleteKbNode(db: Db, ownerId: string, id: string, by: string, change?: ChangeMeta): boolean {
   const node = db.prepare("SELECT id FROM kb_nodes WHERE id=? AND owner_id=?").get(id, ownerId);
   if (!node) return false;
   db.exec("BEGIN IMMEDIATE");
   try {
+    const opened = change ? beginChange(db, change) : null;
     const items = [id, ...(db.prepare("SELECT id FROM kb_claims WHERE node_id=?").all(id) as Array<{ id: string }>).map((c) => c.id),
       ...(db.prepare("SELECT id FROM kb_edges WHERE src=? OR dst=?").all(id, id) as Array<{ id: string }>).map((e) => e.id)];
     const cites = db.prepare("DELETE FROM kb_cites WHERE item_id=?");
@@ -459,6 +494,7 @@ export function deleteKbNode(db: Db, ownerId: string, id: string, by: string): b
     db.prepare("DELETE FROM kb_nodes WHERE id=?").run(id);
     db.prepare("UPDATE kb_packets SET target=NULL WHERE target=?").run(id);
     db.prepare("INSERT INTO kb_revisions (owner_id, packets, object_id, op, detail_json, at) VALUES (?,?,?,?,?,?)").run(ownerId, "", id, "deleted", JSON.stringify({ by }), Date.now());
+    if (opened !== null) endChange(db, opened);
     db.exec("COMMIT");
   } catch (err) {
     db.exec("ROLLBACK");

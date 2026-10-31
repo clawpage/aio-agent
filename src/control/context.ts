@@ -27,6 +27,7 @@ import type { DeviceLinks } from "./deviceLink.js";
 import type { Vault } from "./vault.js";
 import type { Analytics } from "./analytics.js";
 import type { TaskKbMaintainer } from "./taskKb/maintainer.js";
+import type { SharedKbs } from "./taskKb/shared.js";
 
 export interface AppContext {
   runtimeForUser?: (userId: string) => Promise<AppContext>;
@@ -55,6 +56,8 @@ export interface AppContext {
   idle?: SandboxIdle;
   /** The account's knowledge maintainer (docs/TASK-KB.md). */
   taskKb?: TaskKbMaintainer;
+  /** Shared knowledge bases (docs/SHARED-KB.md); one for every runtime, owned by the owner runtime. */
+  sharedKb?: SharedKbs;
   /** Editor and notebook servers started on use; absent in runtimes built by hand in tests. */
   programs?: OnDemandPrograms;
   cfg: Config;

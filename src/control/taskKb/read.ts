@@ -14,7 +14,7 @@ import { KB_PROPOSAL_TYPES, normalizeForMatch, sensitiveReason, taskCorpus, veri
 
 interface NodeRow { id: string; kind: string; domain: string; title: string; summary: string; status: string; superseded_by: string | null; wiki_md: string | null; reads: number; created_at: number; updated_at: number }
 interface ClaimRow { id: string; node_id: string; text: string; certainty: string; volatility: string; verify_after: number | null; status: string; superseded_by: string | null; updated_at: number }
-interface SourceRow { id: string; task_id: string; path: string | null; url: string | null; sha256: string | null; excerpt: string; captured_at: number }
+interface SourceRow { id: string; task_id: string; path: string | null; url: string | null; sha256: string | null; excerpt: string; captured_at: number; kind: string; contributor: string | null }
 
 const day = (ts: number) => new Date(ts).toISOString().slice(0, 10);
 
@@ -62,7 +62,7 @@ export function searchKb(db: Db, ownerId: string, opts: { query?: string; domain
 
 export interface KbNodeDetail {
   id: string; kind: string; domain: string; title: string; summary: string; status: string; supersededBy: string | null; updated: string; reads: number;
-  claims: Array<{ id: string; text: string; certainty: string; volatility: string; recheck: boolean; status: string; supersededBy: string | null; sources: Array<{ id: string; task: string; path: string | null; url: string | null; excerpt: string; captured: string }> }>;
+  claims: Array<{ id: string; text: string; certainty: string; volatility: string; recheck: boolean; status: string; supersededBy: string | null; sources: Array<{ id: string; task: string; path: string | null; url: string | null; excerpt: string; captured: string; kind: string; contributor: string | null }> }>;
   links: Array<{ rel: string; direction: "out" | "in"; node: string; title: string }>;
   pendingCorrections: KbFlag[];
   wiki: string | null;
@@ -84,7 +84,7 @@ export function getKbNode(db: Db, ownerId: string, id: string, opts: { read?: bo
     id: n.id, kind: n.kind, domain: n.domain, title: n.title, summary: n.summary, status: n.status, supersededBy: n.superseded_by, updated: day(n.updated_at), reads: n.reads + (opts.read ? 1 : 0),
     claims: claims.map((c) => ({
       id: c.id, text: c.text, certainty: c.certainty, volatility: c.volatility, recheck: c.volatility === "changes" || (c.verify_after !== null && c.verify_after <= now), status: c.status, supersededBy: c.superseded_by,
-      sources: (sources.all(c.id) as unknown as SourceRow[]).map((s) => ({ id: s.id, task: s.task_id, path: s.path, url: s.url, excerpt: s.excerpt, captured: day(s.captured_at) })),
+      sources: (sources.all(c.id) as unknown as SourceRow[]).map((s) => ({ id: s.id, task: s.task_id, path: s.path, url: s.url, excerpt: s.excerpt, captured: day(s.captured_at), kind: s.kind ?? "task", contributor: s.contributor ?? null })),
     })),
     links,
     pendingCorrections: pendingFlags(db, ownerId, [id]).get(id) ?? [],
@@ -175,11 +175,13 @@ export function kbBrief(db: Db, ownerId: string, query: string, budget = 800): {
 
 export const KB_PROPOSALS_PER_TASK = 12;
 
-/** A proposal from an agent at work: checked like any evidence, then left for the maintainer. */
-export async function proposeKb(
+export interface CheckedProposal { type: KbProposalType; task: string; text: string; reason: string; evidence: PreparedSource[] }
+
+/** What every proposal must hold, wherever it goes: a known type, this task, words, and evidence found in this task. */
+export async function checkProposal(
   deps: { db: Db; ownerId: string; workspaceDir: string; readFile: KbReadFile },
-  input: { type?: unknown; task?: unknown; target?: unknown; text?: unknown; reason?: unknown; evidence?: unknown },
-): Promise<{ id: string; target: string | null } | { error: string }> {
+  input: { type?: unknown; task?: unknown; text?: unknown; reason?: unknown; evidence?: unknown },
+): Promise<CheckedProposal | { error: string }> {
   const { db, ownerId } = deps;
   const type = String(input.type ?? "") as KbProposalType;
   if (!KB_PROPOSAL_TYPES.includes(type)) return { error: `type must be one of ${KB_PROPOSAL_TYPES.join(", ")}` };
@@ -191,15 +193,6 @@ export async function proposeKb(
   if (!text) return { error: "text must say what to add or what is now true" };
   const sensitive = sensitiveReason(`${text} ${reason}`);
   if (sensitive) return { error: `the proposal ${sensitive}; credentials and identity numbers are never recorded` };
-  let target: string | null = null;
-  const raw = typeof input.target === "string" ? input.target.trim() : "";
-  if (raw) {
-    const node = db.prepare("SELECT id FROM kb_nodes WHERE id=? AND owner_id=?").get(raw, ownerId) as { id: string } | undefined;
-    const claim = node ? undefined : db.prepare("SELECT c.node_id FROM kb_claims c JOIN kb_nodes n ON n.id=c.node_id WHERE c.id=? AND n.owner_id=?").get(raw, ownerId) as { node_id: string } | undefined;
-    target = node?.id ?? claim?.node_id ?? null;
-    if (!target) return { error: `target ${raw} is not a node or claim of this knowledge base` };
-  }
-  if (type !== "add" && !target) return { error: `a ${type} proposal needs target: the node or claim it is about` };
   const errors: string[] = [];
   const evidence: PreparedSource[] = [];
   const items = Array.isArray(input.evidence) ? input.evidence.slice(0, 5) : [];
@@ -210,6 +203,27 @@ export async function proposeKb(
     if (s) evidence.push(s);
   }
   if (errors.length) return { error: errors.join("; ") };
+  return { type, task, text, reason, evidence };
+}
+
+/** A proposal from an agent at work: checked like any evidence, then left for the maintainer. */
+export async function proposeKb(
+  deps: { db: Db; ownerId: string; workspaceDir: string; readFile: KbReadFile },
+  input: { type?: unknown; task?: unknown; target?: unknown; text?: unknown; reason?: unknown; evidence?: unknown },
+): Promise<{ id: string; target: string | null } | { error: string }> {
+  const { db, ownerId } = deps;
+  let target: string | null = null;
+  const raw = typeof input.target === "string" ? input.target.trim() : "";
+  if (raw) {
+    const node = db.prepare("SELECT id FROM kb_nodes WHERE id=? AND owner_id=?").get(raw, ownerId) as { id: string } | undefined;
+    const claim = node ? undefined : db.prepare("SELECT c.node_id FROM kb_claims c JOIN kb_nodes n ON n.id=c.node_id WHERE c.id=? AND n.owner_id=?").get(raw, ownerId) as { node_id: string } | undefined;
+    target = node?.id ?? claim?.node_id ?? null;
+    if (!target) return { error: `target ${raw} is not a node or claim of this knowledge base` };
+  }
+  const checked = await checkProposal(deps, input);
+  if ("error" in checked) return checked;
+  const { type, task, text, reason, evidence } = checked;
+  if (type !== "add" && !target) return { error: `a ${type} proposal needs target: the node or claim it is about` };
   const sent = (db.prepare("SELECT count(*) AS n FROM kb_packets WHERE owner_id=? AND kind='propose' AND task_id=?").get(ownerId, task) as { n: number }).n;
   if (sent >= KB_PROPOSALS_PER_TASK) return { error: `this task already sent ${KB_PROPOSALS_PER_TASK} proposals; the maintainer reads the task when it ends, so only send what its record will not show` };
   // The same task saying the same thing about the same node again is one proposal.

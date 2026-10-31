@@ -52,6 +52,8 @@ import { isLocale, type Locale } from "../locale.js";
 import { t } from "../i18n/index.js";
 import { deleteKbNode } from "../taskKb/kernel.js";
 import { getKbNode, kbEnabled, listKb, setKbEnabled } from "../taskKb/read.js";
+import { SharedKbError, type SharedKbs } from "../taskKb/shared.js";
+import { listChanges, nodeChanges, restoreNode, undoChange } from "../taskKb/ledger.js";
 import type { BrowserStatusView } from "../browser/service.js";
 import { documentKind, isRenderableKind, mediaType, requireWorkspaceFilePath } from "../documents/paths.js";
 
@@ -1150,6 +1152,103 @@ export function createApiRouter(context: AppContext): Router {
     track(req, "knowledge_toggle", { enabled });
     res.json({ enabled });
   });
+
+  // Shared knowledge bases (docs/SHARED-KB.md): libraries kept with other people. Every call acts for the signed-in
+  // account and SharedKbs checks it belongs to the library; one it does not belong to answers 404.
+  const shared = (fn: (req: Request, res: Response, kbs: SharedKbs, userId: string) => unknown) => (req: Request, res: Response) => {
+    const kbs = context.sharedKb;
+    if (!kbs) { res.status(404).json({ error: "not_found" }); return; }
+    res.setHeader("Cache-Control", "no-store");
+    try {
+      const out = fn(req, res, kbs, ctxOf(req).session!.ownerId);
+      if (!res.headersSent) res.json(out ?? { ok: true });
+    } catch (err) {
+      if (err instanceof SharedKbError) { res.status(err.status).json({ error: err.code, message: err.message }); return; }
+      log.error("shared knowledge request failed", { error: err instanceof Error ? err.message : String(err) });
+      res.status(500).json({ error: "internal" });
+    }
+  };
+  const body = (req: Request) => (req.body ?? {}) as Record<string, unknown>;
+  /** A shared node as its members see it: who gave each source, and the task title only for their own tasks. */
+  const sharedNodeView = (kbs: SharedKbs, lib: string, userId: string, id: string) => {
+    const node = getKbNode(kbs.db(lib), lib, id, { history: true });
+    if (!node) throw new SharedKbError(404, "not_found", t().knowledge.notFound);
+    const claims = node.claims.map((c) => ({ ...c, sources: c.sources.map((s) => ({ ...s, from: s.contributor ? kbs.usernameOf(s.contributor) : null, mine: s.contributor === userId, path: s.contributor === userId ? s.path : null })) }));
+    const own = [...new Set(claims.flatMap((c) => c.sources.filter((s) => s.mine && s.task).map((s) => s.task)))];
+    return { ...node, claims, sourceTasks: Object.fromEntries(own.map((tid) => [tid, context.tasks.get(tid)?.title ?? null])) };
+  };
+  const undoFailed = (r: { ok: false; conflicts: string[] }) => new SharedKbError(409, "conflict", t().knowledge.undoConflict(r.conflicts.length));
+  router.get("/knowledge/libraries", requireKind("primary"), requireSession, shared((_req, _res, kbs, userId) => ({
+    libraries: kbs.librariesOf(userId),
+    presets: t().knowledge.presets,
+  })));
+  router.post("/knowledge/libraries", requireKind("primary"), requireSession, shared((req, _res, kbs, userId) => {
+    const id = kbs.create(userId, body(req).name, body(req).rules);
+    track(req, "shared_kb_create");
+    return { id };
+  }));
+  router.get("/knowledge/libraries/:lib", requireKind("primary"), requireSession, shared((req, _res, kbs, userId) => {
+    const lib = kbs.member(param(req, "lib"), userId);
+    const rules = kbs.rules(lib.id);
+    const db = kbs.db(lib.id);
+    return {
+      library: { id: lib.id, name: lib.name, admin: lib.admin_id === userId, adminName: kbs.usernameOf(lib.admin_id), members: kbs.members(lib.id), rules: { ...rules, by: rules.by ? kbs.usernameOf(rules.by) : null } },
+      ...listKb(db, lib.id),
+    };
+  }));
+  router.patch("/knowledge/libraries/:lib", requireKind("primary"), requireSession, shared((req, _res, kbs, userId) => { kbs.rename(param(req, "lib"), userId, body(req).name); }));
+  router.delete("/knowledge/libraries/:lib", requireKind("primary"), requireSession, shared((req, _res, kbs, userId) => { kbs.dissolve(param(req, "lib"), userId); track(req, "shared_kb_dissolve"); }));
+  router.post("/knowledge/libraries/:lib/leave", requireKind("primary"), requireSession, shared((req, _res, kbs, userId) => kbs.leave(param(req, "lib"), userId)));
+  router.delete("/knowledge/libraries/:lib/members/:user", requireKind("primary"), requireSession, shared((req, _res, kbs, userId) => { kbs.removeMember(param(req, "lib"), userId, param(req, "user")); }));
+  router.post("/knowledge/libraries/:lib/admin", requireKind("primary"), requireSession, shared((req, _res, kbs, userId) => { kbs.transfer(param(req, "lib"), userId, String(body(req).to ?? "")); }));
+  router.get("/knowledge/libraries/:lib/invites", requireKind("primary"), requireSession, shared((req, _res, kbs, userId) => ({ invites: kbs.invites(param(req, "lib"), userId) })));
+  router.post("/knowledge/libraries/:lib/invites", requireKind("primary"), requireSession, shared((req, _res, kbs, userId) => {
+    const invite = kbs.createInvite(param(req, "lib"), userId);
+    track(req, "shared_kb_invite");
+    return invite;
+  }));
+  router.delete("/knowledge/libraries/:lib/invites/:invite", requireKind("primary"), requireSession, shared((req, _res, kbs, userId) => { kbs.revokeInvite(param(req, "lib"), userId, param(req, "invite")); }));
+  router.get("/knowledge/invites/:token", requireKind("primary"), requireSession, shared((req, _res, kbs, userId) => kbs.previewInvite(param(req, "token"), userId)));
+  router.post("/knowledge/join", requireKind("primary"), requireSession, shared((req, _res, kbs, userId) => {
+    const library = kbs.join(body(req).token, userId);
+    track(req, "shared_kb_join");
+    return { library };
+  }));
+  router.put("/knowledge/libraries/:lib/rules", requireKind("primary"), requireSession, shared((req, _res, kbs, userId) => ({ version: kbs.setRules(param(req, "lib"), userId, body(req).text) })));
+  router.get("/knowledge/libraries/:lib/rules", requireKind("primary"), requireSession, shared((req, _res, kbs, userId) => ({ versions: kbs.ruleHistory(param(req, "lib"), userId) })));
+  router.post("/knowledge/libraries/:lib/rules/restore", requireKind("primary"), requireSession, shared((req, _res, kbs, userId) => ({ version: kbs.restoreRules(param(req, "lib"), userId, Number(body(req).version)) })));
+  router.post("/knowledge/libraries/:lib/nodes", requireKind("primary"), requireSession, shared((req, _res, kbs, userId) => ({ id: kbs.createEntry(param(req, "lib"), userId, body(req)) })));
+  router.get("/knowledge/libraries/:lib/nodes/:id", requireKind("primary"), requireSession, shared((req, _res, kbs, userId) => {
+    const lib = kbs.member(param(req, "lib"), userId).id;
+    return { node: sharedNodeView(kbs, lib, userId, param(req, "id")) };
+  }));
+  router.patch("/knowledge/libraries/:lib/nodes/:id", requireKind("primary"), requireSession, shared((req, _res, kbs, userId) => { kbs.updateNode(param(req, "lib"), userId, param(req, "id"), body(req)); }));
+  router.delete("/knowledge/libraries/:lib/nodes/:id", requireKind("primary"), requireSession, shared((req, _res, kbs, userId) => { kbs.deleteNode(param(req, "lib"), userId, param(req, "id")); }));
+  router.post("/knowledge/libraries/:lib/nodes/:id/claims", requireKind("primary"), requireSession, shared((req, _res, kbs, userId) => ({ id: kbs.addClaim(param(req, "lib"), userId, param(req, "id"), body(req).text) })));
+  router.patch("/knowledge/libraries/:lib/claims/:id", requireKind("primary"), requireSession, shared((req, _res, kbs, userId) => { kbs.updateClaim(param(req, "lib"), userId, param(req, "id"), body(req).text); }));
+  router.delete("/knowledge/libraries/:lib/claims/:id", requireKind("primary"), requireSession, shared((req, _res, kbs, userId) => { kbs.deleteClaim(param(req, "lib"), userId, param(req, "id")); }));
+  router.get("/knowledge/libraries/:lib/nodes/:id/history", requireKind("primary"), requireSession, shared((req, _res, kbs, userId) => {
+    const lib = kbs.member(param(req, "lib"), userId).id;
+    return { changes: nodeChanges(kbs.db(lib), param(req, "id")).map((c) => ({ ...c, by: kbs.usernameOf(c.by) })) };
+  }));
+  router.post("/knowledge/libraries/:lib/nodes/:id/restore", requireKind("primary"), requireSession, shared((req, _res, kbs, userId) => {
+    const lib = kbs.member(param(req, "lib"), userId).id;
+    const r = restoreNode(kbs.db(lib), param(req, "id"), Number(body(req).change), userId);
+    if (!r.ok) throw undoFailed(r);
+    return { change: r.change };
+  }));
+  router.get("/knowledge/libraries/:lib/changes", requireKind("primary"), requireSession, shared((req, _res, kbs, userId) => {
+    const lib = kbs.member(param(req, "lib"), userId).id;
+    const before = Number(req.query.before);
+    return { changes: listChanges(kbs.db(lib), { before: Number.isFinite(before) && before > 0 ? before : undefined }).map((c) => ({ ...c, by: kbs.usernameOf(c.by) })) };
+  }));
+  router.post("/knowledge/libraries/:lib/changes/:id/undo", requireKind("primary"), requireSession, shared((req, _res, kbs, userId) => {
+    const lib = kbs.member(param(req, "lib"), userId).id;
+    const r = undoChange(kbs.db(lib), Number(param(req, "id")), userId);
+    if (!r) throw new SharedKbError(404, "not_found", t().knowledge.notFound);
+    if (!r.ok) throw undoFailed(r);
+    return { change: r.change };
+  }));
 
   // A task's browser tabs: what its agent is doing there, and the person taking over or handing back.
   const taskBrowserKey = (req: Request): string | null => {

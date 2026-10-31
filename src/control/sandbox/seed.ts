@@ -3029,7 +3029,8 @@ USAGE = """usage:
   aio-kb.py get <node id>
   aio-kb.py neighbors <node id> [--depth 1|2]
   aio-kb.py source <source id>
-  aio-kb.py propose '<json: {"type","task","target","text","reason","evidence":[{"quote","path"|"url"}]}>'
+  aio-kb.py libraries
+  aio-kb.py propose '<json: {"type","task","target","library","text","reason","evidence":[{"quote","path"|"url"}]}>'
   aio-kb.py status <proposal id>"""
 
 def call(tool, args):
@@ -3070,6 +3071,8 @@ def main():
         call("kb_neighbors", {"id": rest[0], "depth": int(opts.get("depth", "1"))})
     elif cmd == "source" and rest:
         call("kb_source", {"id": rest[0]})
+    elif cmd == "libraries":
+        call("kb_libraries", {})
     elif cmd == "propose" and rest:
         call("kb_propose", json.loads(rest[0]))
     elif cmd == "status" and rest:
@@ -3101,6 +3104,10 @@ python3 ${cliPath} get <node id>                    # claims, sources, links, pe
 python3 ${cliPath} neighbors <node id> --depth 2
 python3 ${cliPath} source <source id>               # the evidence, and whether it is still current
 \`\`\`
+
+## Shared knowledge bases
+
+The person may also belong to shared knowledge bases kept with other people (a family, a project). Searches and reads cover them too, and each result names its library; \`python3 ${cliPath} libraries\` lists them with their rules. Only quotes of a shared claim's sources are kept, with who contributed them. When the user asks to record something in a shared library by name, propose type add with \`"library": "<its name>"\`; otherwise the maintainer decides after the task what is shared.
 
 How far to trust a claim: user_said > observed > inferred. recheck=true (prices, hours, availability, or past its verify date) and nodes with pending corrections must be checked again before use. Family members' records in the family knowledge base (aio_kb) take precedence.
 

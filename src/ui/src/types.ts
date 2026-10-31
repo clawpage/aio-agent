@@ -444,7 +444,13 @@ export interface KnowledgeNodeSummary {
   updated: string;
 }
 export interface KnowledgeOverview { enabled: boolean; domains: KnowledgeDomain[]; nodes: KnowledgeNodeSummary[]; pending: number }
-export interface KnowledgeSource { id: string; task: string; path: string | null; url: string | null; excerpt: string; captured: string }
+export interface KnowledgeSource {
+  id: string; task: string; path: string | null; url: string | null; excerpt: string; captured: string;
+  /** task, or in a shared library also manual (a member's own words) or url. */
+  kind?: string;
+  /** In a shared library: who it came from, and whether that is this account (only then is the task theirs to open). */
+  from?: string | null; mine?: boolean;
+}
 export interface KnowledgeClaim {
   id: string;
   text: string;
@@ -470,3 +476,18 @@ export interface KnowledgeNode {
   wiki: string | null;
   sourceTasks: Record<string, string | null>;
 }
+
+/** Shared knowledge bases (`/api/knowledge/libraries`, docs/SHARED-KB.md): libraries kept with other people. */
+export interface KbLibraryRef { id: string; name: string; admin: boolean }
+export interface KbRulePresets { family: string; project: string; blank: string }
+export interface KbMember { id: string; username: string; joinedAt: number }
+export interface KbLibraryOverview {
+  library: { id: string; name: string; admin: boolean; adminName: string; members: KbMember[]; rules: { version: number; text: string; by: string | null; at: number } };
+  domains: KnowledgeDomain[];
+  nodes: KnowledgeNodeSummary[];
+  pending: number;
+}
+export interface KbInvite { id: string; createdBy: string; createdAt: number; expiresAt: number; uses: number }
+export interface KbInvitePreview { library: string; name: string; inviter: string; member: boolean; members: number }
+export interface KbRuleVersion { version: number; text: string; by: string; at: number; restoredFrom: number | null }
+export interface KbChange { id: number; by: string; kind: "maintainer" | "edit" | "undo" | "restore"; summary: string; undoes: number | null; at: number; rows: number; undone: boolean }

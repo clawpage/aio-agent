@@ -90,6 +90,20 @@ export class ClawpageAi {
     return { text, model: account.model };
   }
 
+  /**
+   * One answer for a shared library's maintainer (docs/SHARED-KB.md §3.3): GPT-6.1 Sol at low effort on the
+   * control plane's login, whatever the account's own model, counted in `userId`'s usage.
+   */
+  async maintain(userId: string, system: string, prompt: string): Promise<string> {
+    const { text, usage } = await this.#gptAnswer(MEMBER_GPT_MODEL, "low", { system, messages: [{ role: "user", content: prompt }], effort: "low" });
+    try {
+      new UsageLedger(await this.#usageDb(userId), userId).once(`kb-shared:${randomUUID()}`, usage, false);
+    } catch (err) {
+      this.#log.warn("shared maintainer usage not recorded", { userId, error: err instanceof Error ? err.message : String(err) });
+    }
+    return text;
+  }
+
   /** The ChatGPT Responses endpoint with the control plane's own login, streamed (as Codex asks for it). */
   async #gptAnswer(model: string, effort: AiEffort, req: AiRequest): Promise<{ text: string; usage: Record<string, unknown> | undefined }> {
     if (!this.#cfg.hostCodex.enabled) throw new AiError(503, "AI_UNAVAILABLE", "This deployment has no ChatGPT login for AI answers");

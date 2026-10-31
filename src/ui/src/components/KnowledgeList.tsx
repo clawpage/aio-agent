@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, ApiError } from "../api";
-import type { KnowledgeNode, KnowledgeOverview } from "../types";
+import type { KbInvitePreview, KbLibraryRef, KbRulePresets, KnowledgeNode, KnowledgeOverview } from "../types";
 import { Markdown } from "./Markdown";
+import { CreateLibrary, SharedLibrary } from "./SharedLibrary";
 import { t } from "../i18n";
 
 /** A domain's name in this language; a domain the keeper made up keeps its own slug. */
@@ -24,6 +25,11 @@ export function KnowledgeList({ active, onExpired, onOpenTask, onOpenLink }: { a
   const [missing, setMissing] = useState(false);
   const [confirm, setConfirm] = useState<"node" | "domain" | null>(null);
   const [busy, setBusy] = useState(false);
+  // Which library is shown: the personal one, a shared one (docs/SHARED-KB.md), or the form for a new one.
+  const [scope, setScope] = useState<string>("personal");
+  const [libraries, setLibraries] = useState<KbLibraryRef[]>([]);
+  const [presets, setPresets] = useState<KbRulePresets | null>(null);
+  const [invite, setInvite] = useState<{ token: string; preview: KbInvitePreview } | null>(null);
 
   const fail = useCallback((err: unknown, fallback: string) => {
     if (err instanceof ApiError && err.status === 401) onExpired();
@@ -33,6 +39,32 @@ export function KnowledgeList({ active, onExpired, onOpenTask, onOpenLink }: { a
     try { setData(await api.knowledge()); setError(null); }
     catch (err) { fail(err, t.knowledge.list.loadFailed); }
   }, [fail]);
+  const loadLibraries = useCallback(async () => {
+    try { const r = await api.kbLibraries(); setLibraries(r.libraries); setPresets(r.presets); }
+    catch (err) { fail(err, t.knowledge.list.loadFailed); }
+  }, [fail]);
+  useEffect(() => { if (active) void loadLibraries(); }, [active, loadLibraries]);
+  // An invitation link (`/knowledge?join=<token>`): who invites to what, then one click to join.
+  useEffect(() => {
+    if (!active) return;
+    const token = new URLSearchParams(location.search).get("join");
+    if (!token) return;
+    const url = new URL(location.href);
+    url.searchParams.delete("join");
+    history.replaceState(history.state, "", url.pathname + url.search + url.hash);
+    api.kbInvitePreview(token).then((preview) => {
+      if (preview.member) { setScope(preview.library); setNotice(t.knowledge.shared.join.already(preview.name)); }
+      else setInvite({ token, preview });
+    }, (err) => fail(err, t.knowledge.shared.join.failed));
+  }, [active, fail]);
+  const left = useCallback(() => { setScope("personal"); void loadLibraries(); }, [loadLibraries]);
+  const join = async () => {
+    if (!invite) return;
+    setBusy(true);
+    try { const r = await api.kbJoin(invite.token); setInvite(null); await loadLibraries(); setScope(r.library); setNotice(t.knowledge.shared.join.joined(invite.preview.name)); }
+    catch (err) { fail(err, t.knowledge.shared.join.failed); }
+    finally { setBusy(false); }
+  };
   useEffect(() => {
     if (!active) return;
     void load();
@@ -87,7 +119,29 @@ export function KnowledgeList({ active, onExpired, onOpenTask, onOpenLink }: { a
   const domainCount = domain ? domains.find((d) => d.name === domain)?.count ?? 0 : 0;
 
   const L = t.knowledge.list, D = t.knowledge.detail;
-  const head = <header className="chat-head"><div className="chat-title"><h2>{L.title}</h2><span className="task-list-sub muted tiny">{data ? L.count(data.nodes.length) : L.loading}</span></div></header>;
+  const S = t.knowledge.shared;
+  const shownLibrary = libraries.find((l) => l.id === scope);
+  const switcher = <div className="task-filters knowledge-libraries" role="group" aria-label={S.switcher}>
+    <button type="button" className="task-filter" aria-pressed={scope === "personal"} onClick={() => { setScope("personal"); setNotice(null); }}>{S.personal}</button>
+    {libraries.map((l) => <button key={l.id} type="button" className="task-filter" aria-pressed={scope === l.id} onClick={() => { setScope(l.id); setNotice(null); }}>{l.name}</button>)}
+    <button type="button" className="task-filter" aria-pressed={scope === "new"} onClick={() => { setScope("new"); setNotice(null); }}>{S.newLibrary}</button>
+  </div>;
+  const joinCard = invite && <div className="knowledge-join" role="dialog" aria-label={S.join.accept}>
+    <p>{S.join.invited(invite.preview.inviter, invite.preview.name, invite.preview.members)}</p>
+    <p className="muted tiny">{S.join.explain}</p>
+    <div className="schedule-actions"><button className="ghost tiny" onClick={() => setInvite(null)}>{S.join.decline}</button><button className="primary tiny" disabled={busy} onClick={() => void join()}>{S.join.accept}</button></div>
+  </div>;
+  const head = <>
+    <header className="chat-head"><div className="chat-title"><h2>{scope === "personal" || !shownLibrary ? L.title : shownLibrary.name}</h2>
+      <span className="task-list-sub muted tiny">{scope === "personal" ? (data ? L.count(data.nodes.length) : L.loading) : L.title}</span></div></header>
+    <div className="knowledge-switcher">{switcher}</div>
+    {joinCard}
+    {notice && scope !== "personal" && <p className="banner ok knowledge-switch-notice" role="status">{notice}</p>}
+  </>;
+
+  if (scope === "new" && presets) return <CreateLibrary head={head} presets={presets} onCancel={() => setScope("personal")} onError={(err) => fail(err, S.create.failed)}
+    onCreated={(id) => { void loadLibraries().then(() => setScope(id)); }}/>;
+  if (scope !== "personal" && scope !== "new" && shownLibrary) return <SharedLibrary lib={scope} active={active} head={head} onExpired={onExpired} onOpenTask={onOpenTask} onOpenLink={onOpenLink} onLeft={left}/>;
 
   if (openId) return <section className="schedule-page knowledge-page" aria-label={L.title}>
     {head}
