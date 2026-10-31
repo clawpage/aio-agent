@@ -859,6 +859,7 @@ Android 手机用 USB 接在装了 Mac App 的 Mac 上，由 App 运行的 `bin/
   每分钟 60 次写、600 次读（超出 429）。主人写入不存在的表时自动建为 `private`。
 - **页面里用**：`aio-share.py sdk <目录>` 把 `clawpage-sdk.js` 复制进页面（发布时自动刷新这份拷贝），`new Clawpage().table(名).list/get/put/patch/post/incr/delete`
   访问 `/u/<用户名>/share/<页面名>/.data/<表>[/<键>[/incr]]`。该路径 CORS 全开（页面来源是不透明的 `null`）、不用 cookie；用 `file://` 预览时 SDK 改用内存。
+- **页面外观**：`aio-share.py style <目录> --palette <名>` 把起步样式表 `clawpage-style.css`（`src/control/sandbox/clawpageStyle.ts`，与 SDK 一起装进每个沙箱）复制进页面，之后归页面所有、发布不覆盖。用一站的中性色、字体、间距与圆角，强调色六选一：indigo（默认，控制台的靛紫）、amber（家庭/美食/活动）、harbor（数据/理财/出行）、plum（学习/孩子/创作）、pine（只用于健康/运动/户外/植物）、ink（文章/指南/正式文件）；浅色与深色跟随访客系统（`data-scheme` 可固定），各色在浅色下对比度都过 AA。技能要求按页面主题选色、不要默认绿色，状态色只表达状态（完成绿、待你琥珀、出错红），并给出常用组件类与几种版式（记录、报名投票、练习、看板、文章）。
 - **访客登录（SSO）**：页面调 `cp.signIn()` 跳到自己的 `.auth/sign-in?return=<页内路径>`，再被送到主站 `GET /api/clawpage-sso/authorize`。主站已登录且此前允许过这一页时，
   直接 303 回页面地址并在片段里带 `#cpv=<访客令牌>`（片段不发给服务器，只有该页收到；SDK 取走后立即抹掉）；否则进主站的 `/clawpage-sso` 页：未登录先登录，
   再问一次「允许这个页面知道你是谁（邮箱，没有邮箱的老账号给用户名）、以你的身份存数据、用你的 AI」，允许后（`POST /api/clawpage-sso/grant`，要 CSRF）带令牌回页面，

@@ -8,6 +8,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { SHARE_CLI_PY } from "../../src/control/sandbox/seed.js";
 import { CLAWPAGE_SDK_JS } from "../../src/control/sandbox/clawpageSdk.js";
+import { CLAWPAGE_STYLE_CSS, CLAWPAGE_STYLE_PALETTES } from "../../src/control/sandbox/clawpageStyle.js";
 import { login, startHarness, type TestHarness } from "../helpers/harness.js";
 import { createMember } from "../../src/control/auth/owner.js";
 import { MemberModelGateway } from "../../src/control/memberModelGateway.js";
@@ -137,6 +138,7 @@ beforeAll(async () => {
   fs.writeFileSync(path.join(toolRoot, "aio-graphic", "aio-render.py"), FAKE_RENDERER.replaceAll("LOG_PATH", JSON.stringify(path.join(toolRoot, "rendered.log"))));
   fs.writeFileSync(path.join(tool, "aio-share.py"), SHARE_CLI_PY);
   fs.writeFileSync(path.join(tool, "clawpage-sdk.js"), CLAWPAGE_SDK_JS);
+  fs.writeFileSync(path.join(tool, "clawpage-style.css"), CLAWPAGE_STYLE_CSS);
   fs.writeFileSync(path.join(tool, "config.json"), JSON.stringify({ ...owner.share, endpoint: `http://127.0.0.1:${gateway.port}/share/owner_1` }));
 });
 afterAll(async () => {
@@ -193,6 +195,19 @@ it("the sandbox CLI builds a mini app: SDK, tables, data, list, pull, and delete
   expect(await cli("delete", "lunch-poll")).toEqual({ ok: true, deleted: "lunch-poll" });
   expect(store.data!.tables("owner_1", "lunch-poll")).toEqual([]);
   expect((await pub("/u/owner/share/lunch-poll/.data/votes")).status).toBe(404);
+});
+
+it("the sandbox CLI starts a page from the starter stylesheet with the palette its subject calls for", async () => {
+  const dir = path.join(tool, "family-menu");
+  expect(await cli("style", dir, "--palette", "amber")).toMatchObject({ ok: true, link: '<link rel="stylesheet" href="clawpage-style.css">', html: '<html lang="zh-CN" data-palette="amber">' });
+  expect(fs.readFileSync(path.join(dir, "clawpage-style.css"), "utf8")).toBe(CLAWPAGE_STYLE_CSS);
+  // The CLI offers exactly the stylesheet's palettes, each with light and dark accents.
+  expect(SHARE_CLI_PY).toContain(`PALETTES = (${CLAWPAGE_STYLE_PALETTES.map((p) => `"${p}"`).join(", ")})`);
+  for (const palette of CLAWPAGE_STYLE_PALETTES.filter((p) => p !== "indigo")) {
+    expect(CLAWPAGE_STYLE_CSS).toContain(`:root[data-palette="${palette}"]`);
+    expect(CLAWPAGE_STYLE_CSS).toContain(`:root[data-scheme="dark"][data-palette="${palette}"]`);
+    expect(CLAWPAGE_STYLE_CSS).toContain(`:root:not([data-scheme="light"])[data-palette="${palette}"]`);
+  }
 });
 
 it("serves a page's data to visitors by permission, with open CORS and no cookies, and to its owner link fully", async () => {

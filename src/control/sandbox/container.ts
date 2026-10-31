@@ -54,6 +54,7 @@ import {
   refreshWorkspaceAgents,
 } from "./seed.js";
 import { CLAWPAGE_SDK_JS } from "./clawpageSdk.js";
+import { CLAWPAGE_STYLE_CSS } from "./clawpageStyle.js";
 
 export type { ContainerState };
 /** One finished command inside the sandbox. */
@@ -378,6 +379,7 @@ export class SandboxContainer {
       if (mkdir.code !== 0) throw new Error((mkdir.stderr || mkdir.stdout).trim().slice(0, 200));
       await this.writeFileInSandbox(`${toolDir}/aio-share.py`, SHARE_CLI_PY);
       await this.writeFileInSandbox(`${toolDir}/clawpage-sdk.js`, CLAWPAGE_SDK_JS);
+      await this.writeFileInSandbox(`${toolDir}/clawpage-style.css`, CLAWPAGE_STYLE_CSS);
       await this.writeFileInSandbox(`${toolDir}/config.json`, JSON.stringify(share));
       await this.execInSandbox(["chmod", "600", `${toolDir}/config.json`], { timeoutMs: 15_000 });
       for (const dir of skillDirs) await this.writeFileInSandbox(`${dir}/SKILL.md`, SHARE_SKILL_MD);

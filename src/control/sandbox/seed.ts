@@ -311,6 +311,9 @@ COVER_PAGE_SECONDS = int(os.environ.get("AIO_SHARE_COVER_SECONDS") or 60)
 CONFIG = os.path.join(HERE, "config.json")
 SDK = os.path.join(HERE, "clawpage-sdk.js")
 SDK_NAME = "clawpage-sdk.js"
+STYLE = os.path.join(HERE, "clawpage-style.css")
+STYLE_NAME = "clawpage-style.css"
+PALETTES = ("indigo", "amber", "harbor", "plum", "pine", "ink")
 NAME = re.compile(r"^[a-z0-9][a-z0-9-]{0,62}$")
 TABLE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,62}[a-z0-9]$")
 MAX_FILES, MAX_BYTES = 200, 20 * 1024 * 1024
@@ -793,6 +796,9 @@ def main():
     pl.add_argument("--force", action="store_true", help="Replace the directory if it already has files")
     s = sub.add_parser("sdk", help="Copy the clawpage SDK into a page directory as " + SDK_NAME)
     s.add_argument("dir")
+    st = sub.add_parser("style", help="Copy the starter stylesheet (Clawpage Agent's look, a choice of palettes) into a page directory as " + STYLE_NAME)
+    st.add_argument("dir")
+    st.add_argument("--palette", default="indigo", choices=PALETTES, help="The accent: indigo (default, the console's own), amber, harbor, plum, pine, ink")
 
     data = sub.add_parser("data", help="A page's data tables (you act as the page's owner)")
     dsub = data.add_subparsers(dest="data_cmd", required=True)
@@ -897,6 +903,14 @@ def main():
         os.makedirs(root, exist_ok=True)
         copy_sdk(root)
         out({"ok": True, "file": os.path.join(root, SDK_NAME), "script": '<script src="%s"></script>' % SDK_NAME})
+    elif args.cmd == "style":
+        if not os.path.isfile(STYLE):
+            fail("The starter stylesheet is missing: " + STYLE)
+        root = os.path.abspath(args.dir)
+        os.makedirs(root, exist_ok=True)
+        shutil.copyfile(STYLE, os.path.join(root, STYLE_NAME))
+        out({"ok": True, "file": os.path.join(root, STYLE_NAME), "link": '<link rel="stylesheet" href="%s">' % STYLE_NAME,
+             "html": '<html lang="zh-CN" data-palette="%s">' % args.palette})
     elif args.cmd == "pull":
         if REMOTE and args.name and args.name != REMOTE["name"]:
             fail("This collaborator token works on %s's page %s only" % (REMOTE["owner"], REMOTE["name"]))
@@ -1000,6 +1014,40 @@ The CLI is not on PATH; set a variable for it in each shell first (the commands 
 4. To keep data, add the SDK: \`$CP sdk /home/gem/workspace/share/<name>\` copies \`clawpage-sdk.js\` into the folder; load it with
    \`<script src="clawpage-sdk.js"></script>\` (publishing refreshes this copy).
 5. Preview \`file:///home/gem/workspace/share/<name>/index.html\` in the sandbox browser before publishing. In a preview the SDK keeps data in memory, so the page works but nothing is saved.
+
+## Design: of a piece with Clawpage Agent
+
+Every new page starts from the starter stylesheet, so pages look like they belong with the console (its neutrals, type and spacing) instead of a one-off:
+
+\`\`\`bash
+$CP style /home/gem/workspace/share/<name> --palette <palette>   # copies clawpage-style.css; prints the <link> and the <html data-palette> to use
+\`\`\`
+
+**Pick the palette from what the page is about, not from habit. Do not default to green.**
+
+| palette | accent | for |
+| --- | --- | --- |
+| \`indigo\` (default) | the console's own indigo | tools, trackers, anything general or mixed |
+| \`amber\` | warm amber | family, home, food and recipes, events, invitations, gifts |
+| \`harbor\` | calm blue | data and money, travel, schedules, work, reports |
+| \`plum\` | violet-plum | study and languages, children, culture, creative work, games |
+| \`pine\` | green | only health, fitness, outdoors, plants and gardening |
+| \`ink\` | near-black | reading: articles, guides, résumés, letters, formal documents |
+
+- The user's own colors or brand win: set \`--accent\` / \`--accent-soft\` (and dark-mode values) at the top of the page's own CSS. A page that already has a look keeps it unless the user asks to restyle it.
+- Use the tokens (\`var(--accent)\`, \`--surface\`, \`--border\`, \`--text-dim\`, \`--s1\`…\`--s7\` spacing, \`--r\` radius) and do not write other color values. Status colors keep one meaning:
+  \`--done\` saved or finished, \`--you\` needs the visitor, \`--error\` failed; they are not decoration (a green header or button is not "the brand").
+- One accent-filled main action per screen (\`.cp-btn.primary\`); the rest \`.cp-btn\` or \`.cp-btn.quiet\`. Touch targets at least 44 px, body text 16 px, no horizontal scrolling at 360 px wide, light and dark both checked.
+- Quiet by default: flat surfaces with a soft shadow, no gradients, glass or glow, no emoji as icons (simple inline SVG strokes in \`currentColor\`), at most two font weights per screen.
+- Classes: \`.cp-page\` (\`.wide\`), \`.cp-header\`, \`.cp-eyebrow\`, \`.cp-card\` (\`.flat\`), \`.cp-stack\`, \`.cp-row\`, \`.cp-grid\`, \`.cp-list\`, \`.cp-stat\`, \`.cp-btn\` (\`.primary\` \`.quiet\` \`.small\`),
+  \`.cp-field\` + \`.cp-label\` + \`.cp-input\`, \`.cp-chip\` (\`.done\` \`.you\` \`.error\`), \`.cp-note\` (\`.you\` \`.error\`), \`.cp-tabs\` (buttons with \`aria-selected\`), \`.cp-progress > i\`, \`.cp-empty\`, \`.cp-toast\`, \`dialog.cp-dialog\`, \`.cp-footer\`.
+
+Layouts that work (adapt, do not copy blindly):
+- **Tracker or diary**: header (eyebrow, title, date switcher) → a \`.cp-grid\` of \`.cp-stat\` for today → entries as a \`.cp-list\` inside cards → one primary "add" button; history as a week strip or list.
+- **Sign-up, poll or form**: an intro card (what, when, who) → \`.cp-field\`s → one primary submit → the live results as a list with \`.cp-chip\`s.
+- **Quiz or practice**: \`.cp-progress\` → one question card → answers as full-width \`.cp-btn\`s → feedback in a \`.cp-note\` (done or error) → next.
+- **Dashboard**: \`.cp-page.wide\`, a \`.cp-grid\` of \`.cp-stat\`s, then charts (series in \`--accent\`, \`--done\`, \`--you\`, then \`#5ab0f0\`, \`#d685e6\`) and tables with tabular numbers.
+- **Article or guide**: \`ink\`, 17 px text, a 680 px column, headings that scan, generous spacing between sections.
 
 ## The SDK (in the page)
 
