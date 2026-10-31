@@ -5,7 +5,7 @@ import { randomBytes, timingSafeEqual } from "node:crypto";
 import type { NextFunction, Request, Response } from "express";
 import type { Config } from "./config.js";
 import { ClawpageData, DataError, type Caller, type TableSummary } from "./clawpages.js";
-import { AI_EFFORTS, AiError, type AiEffort, type AiMessage, type ClawpageAi } from "./clawpageAi.js";
+import { AI_EFFORTS, AiError, type AiEffort, type AiMessage, type AiPart, type ClawpageAi } from "./clawpageAi.js";
 import { requestLocale, t } from "./i18n/index.js";
 import { WIDGET_NAME, type WidgetStore } from "./widgets.js";
 
@@ -69,8 +69,9 @@ export const CONTENT_TYPES: Record<string, string> = {
 /** A page's prompt for its AI answers: `prompts/<name>.md`, published with the page. */
 export const PROMPT_NAME = /^[a-z0-9][a-z0-9_-]{0,62}$/;
 const PROMPT_MAX = 32 * 1024;
-/** What a page may send the AI at once. */
-const AI_INPUT = { messages: 40, chars: 60_000, body: 256 * 1024 };
+/** What a page may send the AI at once: text, and a few pictures inline (a data: URL each, about 1.5 MB). */
+const AI_INPUT = { messages: 40, chars: 60_000, images: 4, imageChars: 2_000_000, body: 9 * 1024 * 1024 };
+const IMAGE_URL = /^data:(image\/(?:jpeg|png|webp|gif));base64,([A-Za-z0-9+/]+={0,2})$/;
 
 /** A data request's body: a record (64 KB) with room for the JSON around it; an import from the sandbox may be larger. */
 const DATA_BODY = { visitor: 128 * 1024, owner: 16 * 1024 * 1024 };
@@ -695,7 +696,7 @@ export class ShareStore {
       "",
       "Visitors can sign in to the page with their Clawpage Agent account (asked once per page): `new Clawpage({ signIn: \"auto\" })` signs in, silently, anyone who allowed the page before (on every load; skip your start-up while `cp.redirecting`); `cp.signIn()` sends someone to sign in and back; `cp.user` is `{id, name, email}` or null; `await cp.signOut()`.",
       "- `signed-in` tables: signed-in visitors read every record, add records, and change or delete only their own (records carry `mine`). `per-user` tables: each signed-in visitor has records of their own under their own keys and sees no one else's. Both answer anonymous visitors with 401 `SIGN_IN_REQUIRED`; `SIGN_IN_EXPIRED` means sign in again. Through this API you act as the owner: records show who wrote them (`by`), and a per-user table's keys are stored as `<visitor id>.<key>`.",
-      "- `const { text, json } = await cp.ai.ask(input, { prompt: \"<name>\", json: true, effort: \"low\" })` answers with the signed-in visitor's own AI (their model and quota; no tools, web or memory). `prompt` names a file `prompts/<name>.md` in the page folder: the task, the rubric and the exact JSON fields to return. The page sends the material as labelled text in `input` (or `{messages: [{role, content}]}`). Errors: `SIGN_IN_REQUIRED`, `PROMPT_NOT_FOUND`, `RATE_LIMITED` (10 a minute, 300 a day per person and page), `AI_BUSY`, `AI_FAILED`, `AI_TIMEOUT`; in a `file://` preview, `PREVIEW`.",
+      "- `const { text, json } = await cp.ai.ask(input, { prompt: \"<name>\", json: true, effort: \"low\" })` answers with the signed-in visitor's own AI (their model and quota; no tools, web or memory). `prompt` names a file `prompts/<name>.md` in the page folder: the task, the rubric and the exact JSON fields to return. The page sends the material as labelled text in `input` (or `{messages: [{role, content}]}`). To ask about a picture (a photo the visitor takes or picks), send a user message whose content is `[{type: \"text\", text: \"...\"}, {type: \"image_url\", image_url: {url: dataUrl}}]`: the picture inline as a `data:image/jpeg;base64,...` URL (JPEG, PNG, WebP or GIF; scale it to about 1024 px on a canvas first; at most 4 pictures, each under 2 MB as a data URL); a web address is not fetched. Errors: `SIGN_IN_REQUIRED`, `PROMPT_NOT_FOUND`, `RATE_LIMITED` (10 a minute, 300 a day per person and page), `AI_BUSY`, `AI_FAILED`, `AI_TIMEOUT`, `INVALID_IMAGE`, `IMAGE_TOO_LARGE`; in a `file://` preview, `PREVIEW`.",
       "",
     ].join("\n");
   }
@@ -1098,15 +1099,40 @@ export function aiInput(body: Record<string, unknown>): { prompt: string | null;
   const prompt = body.prompt === undefined || body.prompt === null ? null : String(body.prompt);
   if (prompt !== null && !PROMPT_NAME.test(prompt)) throw new DataError(400, "INVALID_PROMPT", "prompt names a file prompts/<name>.md: lowercase letters, digits, - or _");
   const raw = typeof body.input === "string" ? [{ role: "user", content: body.input }] : body.messages;
-  if (!Array.isArray(raw) || !raw.length || raw.length > AI_INPUT.messages) throw new DataError(400, "INVALID_MESSAGES", `Send input (text) or messages (1-${AI_INPUT.messages} of {role: "user"|"assistant", content: text})`);
+  const shape = `Send input (text) or messages (1-${AI_INPUT.messages} of {role: "user"|"assistant", content: text, or a user's [{type: "text", text}, {type: "image_url", image_url: {url: "data:image/jpeg;base64,..."}}]})`;
+  if (!Array.isArray(raw) || !raw.length || raw.length > AI_INPUT.messages) throw new DataError(400, "INVALID_MESSAGES", shape);
   let chars = 0;
+  let images = 0;
   const messages = raw.map((m: unknown) => {
     const { role, content } = (m ?? {}) as { role?: unknown; content?: unknown };
-    if ((role !== "user" && role !== "assistant") || typeof content !== "string" || !content.trim()) throw new DataError(400, "INVALID_MESSAGES", "Each message is {role: \"user\"|\"assistant\", content: non-empty text}");
-    chars += content.length;
-    return { role, content } as AiMessage;
+    if (role !== "user" && role !== "assistant") throw new DataError(400, "INVALID_MESSAGES", shape);
+    if (typeof content === "string") {
+      if (!content.trim()) throw new DataError(400, "INVALID_MESSAGES", shape);
+      chars += content.length;
+      return { role, content } as AiMessage;
+    }
+    if (role !== "user" || !Array.isArray(content) || !content.length) throw new DataError(400, "INVALID_MESSAGES", shape);
+    const parts = content.map((p: unknown): AiPart => {
+      const part = (p ?? {}) as { type?: unknown; text?: unknown; image_url?: unknown };
+      if ((part.type === "text" || part.type === "input_text") && typeof part.text === "string") {
+        chars += part.text.length;
+        return { type: "text", text: part.text };
+      }
+      if (part.type === "image_url" || part.type === "input_image") {
+        const url = typeof part.image_url === "string" ? part.image_url : (part.image_url as { url?: unknown } | null)?.url;
+        if (typeof url === "string" && url.length > AI_INPUT.imageChars) throw new DataError(413, "IMAGE_TOO_LARGE", `Each picture is at most ${AI_INPUT.imageChars / 1_000_000} MB as a data: URL; scale it down first`);
+        const image = typeof url === "string" ? IMAGE_URL.exec(url) : null;
+        if (!image) throw new DataError(400, "INVALID_IMAGE", "A picture is a data: URL of a JPEG, PNG, WebP or GIF image, base64 encoded");
+        images++;
+        return { type: "image", mediaType: image[1]!, data: image[2]! };
+      }
+      throw new DataError(400, "INVALID_MESSAGES", shape);
+    });
+    if (!parts.some((p) => (p.type === "text" && p.text.trim()) || p.type === "image")) throw new DataError(400, "INVALID_MESSAGES", shape);
+    return { role, content: parts } as AiMessage;
   });
   if (chars > AI_INPUT.chars) throw new DataError(413, "INPUT_TOO_LARGE", `The messages hold at most ${AI_INPUT.chars} characters`);
+  if (images > AI_INPUT.images) throw new DataError(413, "TOO_MANY_IMAGES", `Send at most ${AI_INPUT.images} pictures at once`);
   if (messages.at(-1)!.role !== "user") throw new DataError(400, "INVALID_MESSAGES", "The last message is the user's");
   const effort = body.effort === undefined ? "low" : body.effort;
   if (!AI_EFFORTS.includes(effort as AiEffort)) throw new DataError(400, "INVALID_EFFORT", `effort is one of ${AI_EFFORTS.join(", ")}`);

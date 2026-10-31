@@ -212,7 +212,8 @@ export const CLAWPAGE_SDK_JS = String.raw`/* clawpage-sdk.js - data for a clawpa
     // ---------------------------------------------------------------- AI
     this.ai = {
       /**
-       * An answer from the signed-in visitor's own AI. input: text, or {messages: [{role, content}]};
+       * An answer from the signed-in visitor's own AI. input: text, or {messages: [{role, content}]}
+       * (a user's content may be [{type: "text", text}, {type: "image_url", image_url: {url: "data:image/jpeg;base64,..."}}]);
        * options: prompt (the page's prompts/<name>.md), json (answer as an object, in .json), effort (low | medium | high).
        */
       ask: function (input, o) {

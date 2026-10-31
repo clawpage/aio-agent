@@ -155,9 +155,22 @@ it("answers with the signed-in visitor's own AI, framed by the page's prompt", a
     expect(await (await ws(h, ".ai", { method: "POST", token, body: { input: "x", effort: "max" } })).json()).toMatchObject({ error: "INVALID_EFFORT" });
     expect((await ws(h, ".ai", { method: "POST", token, body: { input: "x".repeat(60_001) } })).status).toBe(413);
 
-    // Ten a minute per person and page.
+    // A photo goes inline with the text, as a page sends it from a canvas; nothing is fetched from a URL.
+    const photo = `data:image/jpeg;base64,${"A".repeat(900_000)}`;
+    const pic = await ws(h, ".ai", { method: "POST", token, body: { prompt: "grade", json: true, messages: [{ role: "user", content: [{ type: "text", text: "热量？" }, { type: "image_url", image_url: { url: photo } }] }] } });
+    expect(pic.status).toBe(200);
+    expect(asked.at(-1)!.messages).toEqual([{ role: "user", content: [{ type: "text", text: "热量？" }, { type: "image", mediaType: "image/jpeg", data: "A".repeat(900_000) }] }]);
+    const bad = (content: unknown, role = "user") => ws(h, ".ai", { method: "POST", token, body: { messages: [{ role, content }] } }).then(async (r) => [r.status, ((await r.json()) as { error: string }).error]);
+    expect(await bad([{ type: "image_url", image_url: { url: "https://example.com/a.jpg" } }])).toEqual([400, "INVALID_IMAGE"]);
+    expect(await bad([{ type: "image_url", image_url: { url: "data:image/svg+xml;base64,PHN2Zz4=" } }])).toEqual([400, "INVALID_IMAGE"]);
+    expect(await bad([{ type: "image_url", image_url: { url: `data:image/png;base64,${"A".repeat(2_000_000)}` } }])).toEqual([413, "IMAGE_TOO_LARGE"]);
+    expect(await bad(Array.from({ length: 5 }, () => ({ type: "image_url", image_url: { url: "data:image/png;base64,AAAA" } })))).toEqual([413, "TOO_MANY_IMAGES"]);
+    expect(await bad([{ type: "text", text: "  " }])).toEqual([400, "INVALID_MESSAGES"]);
+    expect(await bad([{ type: "audio", data: "x" }])).toEqual([400, "INVALID_MESSAGES"]);
+
+    // Ten a minute per person and page (the photo above was the second).
     const statuses: number[] = [];
-    for (let i = 0; i < 10; i++) statuses.push((await ws(h, ".ai", { method: "POST", token, body: { input: "again" } })).status);
+    for (let i = 0; i < 9; i++) statuses.push((await ws(h, ".ai", { method: "POST", token, body: { input: "again" } })).status);
     expect(statuses.filter((s) => s === 429).length).toBe(1);
   } finally {
     await h.shutdown();

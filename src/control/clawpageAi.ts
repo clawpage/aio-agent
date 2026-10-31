@@ -13,7 +13,7 @@ import { UsageLedger } from "./usage.js";
  * Clawpages' AI answers: a page asks on behalf of the visitor signed in to it, and the
  * answer comes from that visitor's own account: the model it runs on (a member's assigned
  * model, at most at its assigned effort; the owner's chosen model), counted in that
- * account's usage. Text in, text out: no tools, no sandbox, nothing of the account's
+ * account's usage. Text (and pictures a page sends) in, text out: no tools, no sandbox, nothing of the account's
  * memory, files or history, so a page can never steer someone's agent into acting for
  * them. The request is made here on the host with the credentials the member gateway
  * adds (the control plane's ChatGPT login, the owner's Claude credential).
@@ -26,7 +26,9 @@ const MAX_OUTPUT_TOKENS = 8192;
 export const AI_EFFORTS = ["low", "medium", "high"] as const;
 export type AiEffort = (typeof AI_EFFORTS)[number];
 
-export interface AiMessage { role: "user" | "assistant"; content: string }
+/** A piece of a visitor's message: text, or a picture sent inline (base64, never fetched from a URL). */
+export type AiPart = { type: "text"; text: string } | { type: "image"; mediaType: string; data: string };
+export interface AiMessage { role: "user" | "assistant"; content: string | AiPart[] }
 export interface AiRequest { system: string; messages: AiMessage[]; effort: AiEffort }
 export interface AiAnswer { text: string; model: string }
 
@@ -86,7 +88,8 @@ export class ClawpageAi {
     } catch (err) {
       this.#log.warn("clawpage AI usage not recorded", { userId, error: err instanceof Error ? err.message : String(err) });
     }
-    this.#log.info("clawpage AI answered", { userId, model: account.model, effort, ms: Date.now() - started, chars: text.length });
+    const images = req.messages.reduce((n, m) => n + parts(m).filter((p) => p.type === "image").length, 0);
+    this.#log.info("clawpage AI answered", { userId, model: account.model, effort, ms: Date.now() - started, chars: text.length, images });
     return { text, model: account.model };
   }
 
@@ -114,7 +117,10 @@ export class ClawpageAi {
       body: JSON.stringify({
         model,
         instructions: req.system,
-        input: req.messages.map((m) => ({ type: "message", role: m.role, content: [{ type: m.role === "user" ? "input_text" : "output_text", text: m.content }] })),
+        input: req.messages.map((m) => ({
+          type: "message", role: m.role,
+          content: parts(m).map((p) => p.type === "text" ? { type: m.role === "user" ? "input_text" : "output_text", text: p.text } : { type: "input_image", image_url: `data:${p.mediaType};base64,${p.data}` }),
+        })),
         reasoning: { effort },
         tools: [],
         tool_choice: "auto",
@@ -165,7 +171,10 @@ export class ClawpageAi {
           ...(oauth ? [{ type: "text", text: "You are Claude Code, Anthropic's official CLI for Claude." }] : []),
           { type: "text", text: req.system },
         ],
-        messages: req.messages,
+        messages: req.messages.map((m) => typeof m.content === "string" ? m : {
+          role: m.role,
+          content: m.content.map((p) => p.type === "text" ? { type: "text", text: p.text } : { type: "image", source: { type: "base64", media_type: p.mediaType, data: p.data } }),
+        }),
       }),
       signal: AbortSignal.timeout(TIMEOUT_MS),
     }).catch((err: unknown) => { throw upstreamFailure(err); });
@@ -175,6 +184,10 @@ export class ClawpageAi {
     if (!text.trim()) throw new AiError(502, "AI_FAILED", "The AI gave an empty answer");
     return { text, usage: body.usage };
   }
+}
+
+function parts(m: AiMessage): AiPart[] {
+  return typeof m.content === "string" ? [{ type: "text", text: m.content }] : m.content;
 }
 
 function upstreamFailure(err: unknown): AiError {

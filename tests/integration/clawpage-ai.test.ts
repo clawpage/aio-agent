@@ -58,6 +58,13 @@ it("answers on the account's own model: a GPT member's at most at its assigned e
     const usage = db.prepare("SELECT source_key, input, output, cached FROM token_usage WHERE source_key LIKE 'clawpage-ai:%' ORDER BY id").all() as Array<{ input: number; output: number; cached: number }>;
     expect(usage.map((u) => [u.input, u.output, u.cached])).toEqual([[120, 8, 100], [50, 5, 0]]);
 
+    // A picture goes to each API in its own shape.
+    const photo = { system: "Count it.", effort: "low" as const, messages: [{ role: "user" as const, content: [{ type: "text" as const, text: "热量？" }, { type: "image" as const, mediaType: "image/jpeg", data: "QUJD" }] }] };
+    await ai.answer(gpt.id, photo);
+    expect(calls[2]!.body.input).toEqual([{ type: "message", role: "user", content: [{ type: "input_text", text: "热量？" }, { type: "input_image", image_url: "data:image/jpeg;base64,QUJD" }] }]);
+    await ai.answer(claude.id, photo);
+    expect(calls[3]!.body.messages).toEqual([{ role: "user", content: [{ type: "text", text: "热量？" }, { type: "image", source: { type: "base64", media_type: "image/jpeg", data: "QUJD" } }] }]);
+
     // Upstream refusals become the page's errors, never a hang.
     vi.stubGlobal("fetch", async () => new Response("slow down", { status: 429 }));
     await expect(ai.answer(gpt.id, request)).rejects.toMatchObject({ status: 429, code: "AI_BUSY" });

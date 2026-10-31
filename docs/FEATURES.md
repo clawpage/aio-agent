@@ -870,9 +870,9 @@ Android 手机用 USB 接在装了 Mac App 的 Mac 上，由 App 运行的 `bin/
   键按人隔离：同一个 `put("state")` 各是各的，库里存为 `<账号 id>.<键>`）。两者对匿名访客回 401 `SIGN_IN_REQUIRED`；过期或已退出的令牌回 401 `SIGN_IN_EXPIRED`（SDK 随即把 `cp.user` 置空）。
   每条记录记下首次写入它的登录访客（`author` 列）：主人（控制台、CLI、主人链接、协作者）读到 `by: {id, name, email}`，控制台表格多一列「谁写的」；登录访客读到 `mine`。
 - **AI 回答**：`cp.ai.ask(input, { prompt, json, effort })` → `POST .ai`，必须登录。用**访客自己账号**的模型回答（成员为分配的模型、推理强度不超过分配值；owner 为其所选模型，
-  Claude 模型走 owner 的 Claude 凭据，其余走控制面的 ChatGPT 登录），在宿主侧直接调用（不唤醒任何沙箱），用量记入该访客账号。只有文字进出：没有工具、联网、记忆，
+  Claude 模型走 owner 的 Claude 凭据，其余走控制面的 ChatGPT 登录），在宿主侧直接调用（不唤醒任何沙箱），用量记入该访客账号。文字（及页面随消息附上的图片）进、文字出：没有工具、联网、记忆，
   也碰不到该账号的文件与历史。系统提示 = 平台说明（页面名、主人、无工具、按要求的语言作答；`json: true` 时只回一个 JSON 对象）+ 页面目录里 `prompts/<名>.md`（≤32 KB，随页面发布，访客可见），
-  `json: true` 时服务端解析出 `json`（解析不了为 null）。输入为 `input` 文本或 `messages`（≤40 条、共 ≤6 万字，最后一条是用户），`effort` 为 `low`（默认）/`medium`/`high`。
+  `json: true` 时服务端解析出 `json`（解析不了为 null）。输入为 `input` 文本或 `messages`（≤40 条、共 ≤6 万字，最后一条是用户；用户消息的 `content` 也可以是 `[{type:"text",text}, {type:"image_url",image_url:{url:"data:image/jpeg;base64,…"}}]`，图片只收内嵌的 JPEG/PNG/WebP/GIF data URL、每次 ≤4 张、每张 ≤2 MB，不抓取网址，请求体 ≤9 MB；错误码 `INVALID_IMAGE`、`IMAGE_TOO_LARGE`、`TOO_MANY_IMAGES`），`effort` 为 `low`（默认）/`medium`/`high`。
   限额：每人每页每分钟 10 次、每天 300 次（超出 429）；超时 120 秒。错误码：`SIGN_IN_REQUIRED`、`PROMPT_NOT_FOUND`、`RATE_LIMITED`、`AI_BUSY`（账号额度）、`AI_FAILED`、`AI_TIMEOUT`、`AI_UNAVAILABLE`。
 - **主人身份**：控制台点「打开」时由 `POST /api/clawpages/<页面名>/open` 生成主人链接：页面地址后附 `#cp=<令牌>`（片段不发给服务器），
   令牌用部署自己的密钥（`<PA_DATA_DIR>/clawpages-key`）签名，只对该账号该页有效、12 小时过期；SDK 取走后立即从地址栏抹掉。持令牌可读写所有表、不受限流，但不能改表权限或删表（页面脚本可能出自协作者之手；这两项只在控制台与沙箱 CLI 做）。
