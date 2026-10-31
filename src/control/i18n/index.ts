@@ -41,6 +41,11 @@ export function runInLocale<T>(locale: Locale | (() => Locale), fn: () => T): T 
     return current.run(typeof locale === "function" ? locale : () => locale, fn);
 }
 
+/** Run `fn` in the language already in force (a request's), or else in `fallback` (e.g. a timer's, the account's). */
+export function runInLocaleOr<T>(fallback: () => Locale, fn: () => T): T {
+    return current.getStore() ? fn() : current.run(fallback, fn);
+}
+
 /** The language a request asks for: the console's own, else the browser's, else English. */
 export function requestLocale(headers: { [name: string]: string | string[] | undefined }): Locale {
     const own = headers["x-aio-locale"];

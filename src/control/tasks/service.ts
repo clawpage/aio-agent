@@ -20,7 +20,7 @@ import type { PlanningSchedule, ScheduleActionName } from "./planning.js";
 import { answerLanguage, isLocale, readLocale, writeLocale, type Locale } from "../locale.js";
 import type { SharePage } from "../share.js";
 import type { Widget } from "../widgets.js";
-import { t } from "../i18n/index.js";
+import { runInLocaleOr, t } from "../i18n/index.js";
 import { kbBrief, kbEnabled } from "../taskKb/read.js";
 import { MAX_ATTACHMENTS } from "../../common/attachments.js";
 import { ATTENTION_STATUSES, DONE_STATUSES, WORKING_STATUSES, type TaskBucket, type TaskCounts, type TaskFilter, type TaskListPage } from "../../common/taskList.js";
@@ -175,7 +175,8 @@ export class TaskService {
         this.agent.events.on("event", this.onEvent);
         this.schedule();
         this.ensureDailyFeed();
-        this.#ticker = setInterval(() => this.runDueSchedules(), SCHEDULE_TICK_MS);
+        // Timers keep the language of whatever started them: scheduled runs are written in the account's.
+        this.#ticker = setInterval(() => runInLocaleOr(() => this.locale(), () => this.runDueSchedules()), SCHEDULE_TICK_MS);
         this.#ticker.unref?.();
         this.runDueSchedules();
     }
@@ -559,14 +560,15 @@ export class TaskService {
         if (this.#closed || this.#scheduled)
             return;
         this.#scheduled = true;
-        queueMicrotask(() => {
+        // Started from a timer (no request), tasks run and write their errors in the account's language.
+        queueMicrotask(() => runInLocaleOr(() => this.locale(), () => {
             this.#scheduled = false;
             if (this.#closed)
                 return;
             void this.deliverSupplements();
             this.dispatch();
             void this.planNext();
-        });
+        }));
     }
     private async planNext() {
         if (this.#closed || this.#planning)

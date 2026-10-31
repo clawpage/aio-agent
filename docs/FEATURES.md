@@ -356,6 +356,8 @@
 - **恢复**：重建页面并导航回原 URL（不保留 JS 堆），导航前注入按 origin 限定的 `sessionStorage` 脚本，站点存储在应用启动前导入；
   核对顺序后激活原选中页。恢复同时重建 AIO REST 与浏览器 MCP 连接（精确重启 `mcp-server-browser` 并以 `browser_tab_list` 验证）。
   失败时保留快照并如实报错，可重试，不自动重放用户操作。
+  AIO REST 的标签列表不应答（其 Playwright 客户端卡死，2026-10-31 曾让一个成员的每次恢复都在同步选中页时失败）时，恢复前先重启 `python-server` 一次（Chromium 不是它的子进程，标签与登录都在），
+  与控制面的规则相同：有 shell 命令在跑或有终端连着就不重启。定时任务等由计时器发起的工作，报错用账号的语言而不是英文。
 - **只恢复一次**：快照只恢复一次，之后浏览器重启沿用 profile 数据。镜像每次启动会把 cookie 设为「仅限会话」，控制面在沙箱启动时写入
   管理策略 `/etc/chromium/policies/managed/aio-cookies.json`（`DefaultCookiesSetting: 1`）使 cookie 跨退出保留。
 - **边界**：不删除用户 profile；不承诺保存 JS 堆、未落盘的编辑器状态或未打开站点的数据库。存储工具与标签页服务使用锁定的

@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import ts from "typescript";
 import os from "node:os";
-import { MESSAGES, requestLocale, runInLocale, t } from "../../src/control/i18n/index.js";
+import { MESSAGES, currentLocale, requestLocale, runInLocale, runInLocaleOr, t } from "../../src/control/i18n/index.js";
 import { getMeta, openDb } from "../../src/control/db.js";
 import { readLocale } from "../../src/control/locale.js";
 
@@ -76,6 +76,13 @@ function addTask(db: ReturnType<typeof openDb>): void {
   db.exec("PRAGMA foreign_keys=OFF");
   db.prepare("INSERT INTO tasks (id,client_message_id,conversation_id,title,input_text,created_at) VALUES ('t1','m1','c1','hi','hi',1)").run();
 }
+
+it("work started from a timer is written in the account's language; a request keeps its own", async () => {
+  // A timer callback carries no language: without the fallback it would fall to English.
+  const fromTimer = await new Promise<string>((resolve) => setTimeout(() => resolve(runInLocaleOr(() => "zh-CN", () => currentLocale())), 0));
+  expect(fromTimer).toBe("zh-CN");
+  expect(runInLocale("es", () => runInLocaleOr(() => "zh-CN", () => currentLocale()))).toBe("es");
+});
 
 it("keeps Simplified Chinese for accounts that had tasks before English became the default, once", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pa-locale-"));

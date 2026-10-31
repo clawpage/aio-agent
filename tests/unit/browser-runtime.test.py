@@ -492,6 +492,40 @@ def test_tab_plan_refuses_to_guess_when_api_is_unavailable() -> None:
 
 
 @test
+def test_heal_aio_api_restarts_a_wedged_python_server_only_when_idle() -> None:
+    saved = (rt.aio_tabs, rt._python_server_idle, rt.subprocess.run, rt.time.sleep, rt.AIO_HEAL_DEADLINE_S)
+    calls: list[list[str]] = []
+    state = {"alive": False, "idle": True}
+
+    def fake_run(argv: list[str], **_: Any) -> Any:
+        calls.append(list(argv))
+        state["alive"] = True
+        return rt.subprocess.CompletedProcess(argv, 0, "", "")
+
+    try:
+        rt.aio_tabs = lambda: ([{"index": 0}], "") if state["alive"] else (None, "cannot read the AIO tabs API: timed out")
+        rt._python_server_idle = lambda: state["idle"]
+        rt.subprocess.run = fake_run
+        rt.time.sleep = lambda _s: None
+        rt.AIO_HEAL_DEADLINE_S = 1.0
+        # Answering: nothing is restarted.
+        state["alive"] = True
+        assert_true(rt.heal_aio_api(), "接口正常时直接通过")
+        assert_eq(calls, [], "接口正常时不得重启")
+        # Wedged and idle: one restart, then it answers.
+        state["alive"] = False
+        assert_true(rt.heal_aio_api(), "重启后接口恢复")
+        assert_eq(calls, [["supervisorctl", "restart", "python-server"]], "只重启 python-server 一次")
+        # Wedged while a terminal is in use: left alone.
+        calls.clear()
+        state["alive"], state["idle"] = False, False
+        assert_false(rt.heal_aio_api(), "终端在用时不重启")
+        assert_eq(calls, [], "终端在用时不得重启")
+    finally:
+        rt.aio_tabs, rt._python_server_idle, rt.subprocess.run, rt.time.sleep, rt.AIO_HEAL_DEADLINE_S = saved
+
+
+@test
 def test_tab_plan_blocks_when_api_and_cdp_disagree() -> None:
     """A page one side lists and the other does not has no provable pairing."""
     pages = [

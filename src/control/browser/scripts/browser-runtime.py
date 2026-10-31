@@ -1260,6 +1260,57 @@ def aio_tabs() -> tuple[list[dict[str, Any]] | None, str]:
     return rows, ""
 
 
+AIO_HEAL_DEADLINE_S = 45.0
+
+
+def _python_server_idle() -> bool:
+    """No shell command running and no connection to python-server (a terminal is a long-lived one)."""
+    import http.client
+
+    try:
+        conn = http.client.HTTPConnection(AIO_API_HOST, 8091, timeout=AIO_TIMEOUT_S)
+        try:
+            conn.request("GET", "/v1/shell/sessions")
+            sessions = json.loads(conn.getresponse().read().decode("utf-8"))["data"]["sessions"].values()
+        finally:
+            conn.close()
+        if any(isinstance(v, dict) and v.get("status") in ("running", "no_change_timeout") for v in sessions):
+            return False
+        clients = subprocess.run(["ss", "-tnH", "state", "established", "( sport = :8091 )"],
+                                 capture_output=True, text=True, timeout=5, check=False)
+        return clients.returncode == 0 and not clients.stdout.strip()
+    except (OSError, ValueError, KeyError, TypeError, AttributeError, subprocess.SubprocessError):
+        return False
+
+
+def heal_aio_api(deadline: float | None = None) -> bool:
+    """Make sure the AIO browser API answers, restarting python-server once when it hangs.
+
+    Its Playwright client can wedge on a page and then hang every tab call (seen 2026-10-31: the
+    tab list never answered while /v1/browser/info still did), so every restore failed on the focus
+    sync forever. Restarting python-server only re-creates that client: Chromium is not its child and
+    keeps every tab. It also serves the terminal, so it is restarted only when idle (the same rule as
+    the control plane's dropImageCdpClients). Returns whether the tab list answers.
+    """
+    for _ in range(2):  # a slow but working API answers in a few seconds
+        if aio_tabs()[0] is not None:
+            return True
+    if not _python_server_idle():
+        return False
+    try:
+        subprocess.run(["supervisorctl", "restart", "python-server"], capture_output=True, text=True, timeout=30, check=False)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    until = time.monotonic() + AIO_HEAL_DEADLINE_S
+    if deadline is not None:
+        until = min(until, deadline)
+    while time.monotonic() < until:
+        if aio_tabs()[0] is not None:
+            return True
+        time.sleep(1.0)
+    return False
+
+
 def aio_request(method: str, path: str, body: Mapping[str, Any] | None = None) -> tuple[Any, str]:
     """One small JSON call against the container's own browser API."""
     import http.client
@@ -2376,6 +2427,9 @@ def restore_tabs(
             problems.append("tab_unrestored")
         kept = [i for i in range(len(entries)) if i not in given_up]
         live = [entries[i] for i in kept]
+
+        # A wedged AIO API would fail the focus sync below on every retry: heal it first.
+        heal_aio_api(deadline)
 
         # 3. Move AIO off its startup page before closing placeholders. If its
         # selected Playwright page is closed, AIO reconnects on the next request
