@@ -149,7 +149,9 @@ export type DispatchStep =
   | { kind: "timing"; at: number; round: number; timing: import("../codex/dispatchTiming.js").DispatchTiming }
   | { kind: "ask"; at: number; round: number; prompt: string; answer: string | null; correction?: string }
   | { kind: "plan"; at: number; plan: unknown; repairs: string[] }
-  | { kind: "failed"; at: number; reason: string };
+  | { kind: "failed"; at: number; reason: string }
+  /** How the task's reasoning effort was chosen (accounts on Auto only). */
+  | { kind: "effort"; at: number; decision: import("./effort.js").EffortDecision };
 
 /** Debug log entries are capped so one dispatch never bloats the database. */
 export const STEP_PROMPT_CHARS = 40_000;

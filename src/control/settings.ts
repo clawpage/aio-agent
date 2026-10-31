@@ -10,7 +10,7 @@ import { t } from "./i18n/index.js";
 export interface AgentSettings {
   /** Model id, or null to use the configured default model. */
   model: string | null;
-  /** Reasoning effort, or null to use the chosen model's own default. */
+  /** Reasoning effort, or null for Auto: Jev picks per task (see tasks/effort.ts), else the model's own default. */
   effort: string | null;
 }
 

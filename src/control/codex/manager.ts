@@ -1,4 +1,5 @@
-import { isMember, MEMBER_EFFORT, MEMBER_GPT_MODEL, MEMBER_MODEL } from "../auth/policy.js";
+import { isMember, MEMBER_EFFORT, MEMBER_EFFORTS, MEMBER_GPT_MODEL, MEMBER_MODEL } from "../auth/policy.js";
+import { AUTO_EFFORT_LEVELS, type AutoEffort } from "../tasks/effort.js";
 import { JsonRpcTimeoutError } from "./jsonrpc.js";
 import {readSoul} from '../soul.js';
 import { EventEmitter } from "node:events";
@@ -809,9 +810,31 @@ export class AgentManager {
     return { model, effort: this.#cfg.memberEffort ?? MEMBER_EFFORT };
   }
 
+  /**
+   * An account whose effort is on Auto: the levels Jev may pick for a task on `model`, and the
+   * effort that runs when it cannot decide. Null when the effort is a fixed level (an owner's chosen
+   * one, a member's assigned one) or the model's levels are not known.
+   * The owner's Auto is a stored effort of null and falls back to the model's own default; a member
+   * with no assigned level (`member_effort:<id>` absent or `auto`) is on Auto and falls back to high.
+   */
+  autoEffort(ownerId: string, model: string | null): AutoEffort | null {
+    if (isMember(this.#db, ownerId)) {
+      return this.#cfg.memberEffort === undefined ? { levels: AUTO_EFFORT_LEVELS.filter((level) => MEMBER_EFFORTS.includes(level)), fallback: MEMBER_EFFORT } : null;
+    }
+    if (effectiveAgentSettings(this.agentSettings(), this.#modelCatalog, this.#cfg.agent.defaultModel).effort) return null;
+    const catalog = this.#modelCatalog.find((m) => m.id === (model ?? this.#cfg.agent.defaultModel));
+    const levels = AUTO_EFFORT_LEVELS.filter((level) => catalog?.supportedReasoningEfforts.includes(level));
+    return levels.length >= 2 ? { levels, fallback: null } : null;
+  }
+
+  /** A member on Auto runs the effort Jev chose for the task (frozen on it), within the member levels. */
+  #memberEffort(frozen: string | null | undefined): string {
+    return this.#cfg.memberEffort === undefined && frozen && MEMBER_EFFORTS.includes(frozen) ? frozen : this.#cfg.memberEffort ?? MEMBER_EFFORT;
+  }
+
   resolveSubmitSettings(input: SubmitTurnInput): { model: string; effort: string | null } {
     const conversation = this.getConversation(input.conversationId);
-    if (conversation && isMember(this.#db, conversation.owner_id)) return this.memberSettings();
+    if (conversation && isMember(this.#db, conversation.owner_id)) return { ...this.memberSettings(), effort: this.#memberEffort(input.frozenSettings?.effort) };
     if (input.frozenSettings) return input.frozenSettings;
     const stored = effectiveAgentSettings(this.agentSettings(), this.#modelCatalog, this.#cfg.agent.defaultModel);
     const model = input.model ?? stored.model ?? this.#cfg.agent.defaultModel;
@@ -1028,7 +1051,7 @@ export class AgentManager {
     // configured default (never Codex's own gpt-6-astra default).
     const policy = isMember(this.#db, conversation.owner_id) ? this.memberSettings() : null;
     const model = policy?.model ?? turn.model ?? conversation.model ?? this.#cfg.agent.defaultModel;
-    if (policy) turn.effort = policy.effort;
+    if (policy) turn.effort = this.#memberEffort(turn.effort);
     const { desiredProvider, currentProvider, startsFresh } = this.#threadPlan(conversation, model, turn.id);
     const inputText = startsFresh ? this.#withPriorContext(conversation.id, turn.id, turn.input_text) : turn.input_text;
     const { developerInstructions, browserTask } = this.#threadSettings(conversation);

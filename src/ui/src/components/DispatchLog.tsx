@@ -8,6 +8,7 @@ import type { DispatchLog as Log, DispatchLogEntry, DispatchStep } from "../type
 
 // "today" and "search" only appear in dispatch logs recorded before those sources were removed.
 const SOURCES: Record<string, string> = i18n.dispatch.sources;
+const EFFORTS: Record<string, string> = i18n.settings.run.efforts;
 
 const clock = (ts: number) => new Date(ts).toLocaleString("sv-SE", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit" });
 const pct = (p: number) => `${Math.round(p * 100)}%`;
@@ -124,6 +125,20 @@ function Step({ step, name, start }: { step: DispatchStep; name: (id: string) =>
           {typeof plan.description === "string" && <p className="tiny">{plan.description}</p>}
           {step.repairs.length > 0 && <p className="tiny">{i18n.dispatch.entry.repairs(step.repairs)}</p>}
           <details><summary>{i18n.dispatch.steps.planJson}</summary><pre>{JSON.stringify(step.plan, null, 2)}</pre></details>
+        </li>
+      );
+    }
+    case "effort": {
+      const d = step.decision;
+      const label = (level: string | null) => (level ? EFFORTS[level] ?? level : i18n.dispatch.steps.effortModelDefault);
+      const probabilities = d.answer?.probabilities;
+      return (
+        <li data-testid="dispatch-effort">
+          <StepHead title={i18n.dispatch.steps.effort} offset={offset}>
+            {" "}<span className="dispatch-log-chip">{label(d.effort)}</span>
+          </StepHead>
+          <p>{d.source === "jev" ? i18n.dispatch.steps.effortJev(label(d.effort), pct(probabilities?.[d.effort!] ?? 0)) : i18n.dispatch.steps.effortFallback(label(d.effort), d.error ?? i18n.dispatch.steps.effortUnsure)}</p>
+          {probabilities && <Bars label={i18n.dispatch.steps.effortLevels} rows={d.levels.map((level) => ({ key: level, name: label(level), share: probabilities[level] ?? 0, value: pct(probabilities[level] ?? 0) }))} />}
         </li>
       );
     }

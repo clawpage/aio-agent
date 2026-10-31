@@ -66,9 +66,11 @@ test("config page saves, survives a reload and applies to later messages without
   await openSettings(page, mobile);
   await waitForLoadedSettings(page);
 
-  // Default choice: model defaults to the app default, effort to "按模型默认".
+  // Default choice: model defaults to the app default, effort to Auto (Jev picks per task).
   await expect(page.getByLabel("模型", { exact: true })).toHaveValue("gpt-6-sol");
   await expect(page.getByLabel("思考强度", { exact: true })).toHaveValue("");
+  await expect(page.getByLabel("思考强度", { exact: true }).locator("option:checked")).toHaveText("自动");
+  await expect(page.getByText("自动：按每个任务的难度决定；拿不准时用该模型的默认强度（中）。")).toBeVisible();
 
   await page.getByLabel("模型", { exact: true }).selectOption("gpt-5.5");
   // gpt-5.5 supports only minimal/low.
@@ -400,4 +402,25 @@ test("the debug switch is remembered by this browser", async ({ page }, info) =>
   await page.reload();
   await openSettings(page, info.project.name.startsWith("mobile"));
   await expect(page.getByRole("checkbox", { name: "已开启" })).toBeChecked();
+});
+
+test("a fixed effort can be switched back to Auto, which saves as null", async ({ page }, info) => {
+  const mobile = info.project.name.startsWith("mobile");
+  const settings = await setup(page, { settings: { model: "gpt-6-sol", effort: "high" } });
+  let savedBody: unknown;
+  await page.route("**/api/settings", async (route) => {
+    if (route.request().method() === "PUT") savedBody = route.request().postDataJSON();
+    await route.fallback();
+  });
+  await openSettings(page, mobile);
+  await waitForLoadedSettings(page);
+  const effort = page.getByLabel("思考强度", { exact: true });
+  await expect(effort).toHaveValue("high");
+  await effort.selectOption({ label: "自动" });
+  await page.getByRole("button", { name: "保存", exact: true }).click();
+  await expect(page.locator(".banner.ok")).toContainText("已保存");
+  expect(savedBody).toMatchObject({ model: "gpt-6-sol", effort: null });
+  expect(settings).toMatchObject({ model: "gpt-6-sol", effort: null });
+  await mkdir(evidence, { recursive: true });
+  await page.screenshot({ path: `${evidence}/effort-auto-${info.project.name}.png`, fullPage: true });
 });

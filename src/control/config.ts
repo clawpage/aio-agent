@@ -77,7 +77,7 @@ export function loadConfig(): {
   memberRuntime?: boolean;
   /** The one model a member runtime runs; set by the tenant layer, never by the member. */
   memberModel?: string;
-  /** The reasoning effort the administrator assigned this member (`member_effort:<id>`); absent: MEMBER_EFFORT. */
+  /** The reasoning effort the administrator assigned this member (`member_effort:<id>`); absent (or `auto`): Auto, Jev picks per task and MEMBER_EFFORT is the fallback. */
   memberEffort?: string;
   memberModelPort?: number;
   /** Publish capability handed to this runtime's sandbox (`aio-share`); set by the share store. */

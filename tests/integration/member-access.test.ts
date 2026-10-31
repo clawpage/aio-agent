@@ -65,7 +65,16 @@ it('isolates ledger reads, references, stops, events, replay IDs and planner con
  expect((await submit(member,'owner-private-task')).status).toBe(409);
  const detail=await h.request(`/api/conversations/${b.body.task.conversationId}`,{headers:member});expect(await detail.text()).not.toMatch(/"model"|"effort"|model_provider/);
  const events=await h.request(`/api/conversations/${b.body.task.conversationId}/events?format=json`,{headers:member});expect(await events.text()).not.toContain(MEMBER_MODEL);
- expect(h.ctx.agent.resolveSubmitSettings({conversationId:b.body.task.conversationId,text:'bypass',clientMessageId:'x',frozenSettings:{model:'gpt-6-sol',effort:'low'}})).toEqual({model:MEMBER_MODEL,effort:'high'});
+ // A member on Auto (no assigned level) keeps the level Jev froze on its task, never another model or a level above the member levels.
+ expect(h.ctx.agent.resolveSubmitSettings({conversationId:b.body.task.conversationId,text:'bypass',clientMessageId:'x',frozenSettings:{model:'gpt-6-sol',effort:'low'}})).toEqual({model:MEMBER_MODEL,effort:'low'});
+ expect(h.ctx.agent.resolveSubmitSettings({conversationId:b.body.task.conversationId,text:'bypass',clientMessageId:'y',frozenSettings:{model:'gpt-6-sol',effort:'xhigh'}})).toEqual({model:MEMBER_MODEL,effort:'high'});
+ expect(h.ctx.agent.autoEffort(userId,MEMBER_MODEL)).toEqual({levels:['low','medium','high'],fallback:'high'});
+ // An assigned level is used as is: Jev is not asked and a frozen level does not change it.
+ h.ctx.cfg.memberEffort='low';
+ try{
+  expect(h.ctx.agent.autoEffort(userId,MEMBER_MODEL)).toBeNull();
+  expect(h.ctx.agent.resolveSubmitSettings({conversationId:b.body.task.conversationId,text:'bypass',clientMessageId:'z',frozenSettings:{model:'gpt-6-sol',effort:'high'}})).toEqual({model:MEMBER_MODEL,effort:'low'});
+ }finally{delete h.ctx.cfg.memberEffort;}
  expect(h.ctx.db.prepare('SELECT owner_id FROM conversations WHERE id=?').get(b.body.task.conversationId)).toMatchObject({owner_id:userId});
  await h.codex.runTurn(run.turnId,{text:'member result'});
  const resumed=await submit(member,'resume-my-task',{relatedTaskId:b.body.task.id,model:'gpt-6-sol'});expect(resumed.status).toBe(202);

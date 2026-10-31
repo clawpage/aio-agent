@@ -1005,8 +1005,10 @@ describe("owner dispatch log", () => {
         const hotel = submit("酒店要靠近新宿"); await tick(); await tick();
         const { dispatchLog } = await import("../../src/control/tasks/recall.js");
         const [entry] = dispatchLog(db, "owner_1", hotel.id);
-        expect(entry!.steps.map(s => s.kind)).toEqual(["context", "jev", "timing", "ask", "plan"]);
-        const [context, decided, timing, answer, plan] = entry!.steps as any[];
+        // The owner's effort is on Auto: the effort answer (unusable from this fake) is logged as a fallback.
+        expect(entry!.steps.map(s => s.kind)).toEqual(["context", "jev", "effort", "timing", "ask", "plan"]);
+        const [context, decided, effort, timing, answer, plan] = entry!.steps as any[];
+        expect(effort.decision).toMatchObject({ effort: null, source: "fallback", levels: ["low", "medium", "high"] });
         expect(context.timeline).toMatch(/▶ .*"酒店要靠近新宿"/);
         expect(decided.result).toMatchObject({ choice: trip.id, confident: true, latencyMs: 4, scores:{[trip.id]:0.8},suggestion:{kind:"steer",taskId:trip.id} });
         expect(timing.timing).toMatchObject({ model: "fake-luna", effort: "high", connectionMs: 2 });
@@ -1021,7 +1023,7 @@ describe("owner dispatch log", () => {
         const broken = submit("坏掉的派单"); await tick(); await tick();
         const [failed] = dispatchLog(db, "owner_1", broken.id);
         expect(failed!.failed).toBe(true);
-        expect(failed!.steps.map(s => s.kind)).toEqual(["context", "jev", "timing", "ask", "timing", "ask", "failed"]);
-        expect((failed!.steps[5] as any).correction).toBe("the answer isn't JSON");
+        expect(failed!.steps.map(s => s.kind)).toEqual(["context", "jev", "effort", "timing", "ask", "timing", "ask", "failed"]);
+        expect((failed!.steps[6] as any).correction).toBe("the answer isn't JSON");
     });
 });

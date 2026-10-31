@@ -124,7 +124,7 @@ export function Settings({ onBack, onSaved }: Props) {
     (next: Harness) => {
       if (next === harness) return;
       // Switching executor selects that executor's first model (the configured
-      // default when it belongs there) with the model's own default effort.
+      // default when it belongs there) with the effort on Auto.
       const candidates = models.filter((m) => harnessOf(m) === next);
       const target = candidates.find((m) => m.id === defaultModel) ?? candidates[0];
       if (!target) return;
@@ -251,7 +251,7 @@ export function Settings({ onBack, onSaved }: Props) {
               }}
               disabled={locked || effortDisabled}
             >
-              <option value="">{t.settings.run.effortModelDefault}</option>
+              <option value="">{t.settings.run.effortAuto}</option>
               {efforts.map((value) => (
                 <option key={value} value={value}>
                   {effortLabel(value)}
@@ -260,8 +260,8 @@ export function Settings({ onBack, onSaved }: Props) {
             </select>
             <span className="muted tiny">
               {currentModel?.defaultReasoningEffort
-                ? t.settings.run.effortHintWithDefault(effortLabel(currentModel.defaultReasoningEffort))
-                : t.settings.run.effortHint}
+                ? t.settings.run.effortAutoHintWithDefault(effortLabel(currentModel.defaultReasoningEffort))
+                : t.settings.run.effortAutoHint}
             </span>
           </label>
         </div>

@@ -12,7 +12,7 @@ async function setup(page: Page) {
   await mockTaskList(page, () => [task]);
   await page.route("**/api/settings/dispatch-log/*", r => r.fulfill({ json: {
     task, entries: [{ at: 1000, latencyMs: 100, rounds: 1, promptChars: 1000, failed: false, repairs: [], candidates: [], searches: [], chosen: { related: [], appendTo: null, resume: null }, jev: null,
-      steps: [{ kind: "context", at: 1000, timeline: "长日志内容\n".repeat(100), candidates: 0 }, { kind: "ask", at: 1000, round: 1, prompt: "完整提示\n".repeat(100), answer: "最终结果" }],
+      steps: [{ kind: "context", at: 1000, timeline: "长日志内容\n".repeat(100), candidates: 0 }, { kind: "effort", at: 1000, decision: { effort: "high", source: "jev", levels: ["low", "medium", "high"], answer: { choice: "high", probabilities: { low: 0.05, medium: 0.15, high: 0.8 } } } }, { kind: "ask", at: 1000, round: 1, prompt: "完整提示\n".repeat(100), answer: "最终结果" }],
     }],
   } }));
   await page.route("**/api/documents/text**", r => r.fulfill({ json: { path: "", text: "# 报告\n\n" + "正文\n\n".repeat(150), size: 1000, truncated: false } }));
@@ -89,6 +89,8 @@ for (const c of cases) {
     await page.getByRole("button", { name: `派单日志：${task.title}` }).click();
     const log = page.getByRole("dialog", { name: "派单日志" });
     await expect(log).toContainText("最终结果");
+    // The effort Jev chose for the task (Auto) shows next to the dispatcher's own steps.
+    await expect(log.getByTestId("dispatch-effort")).toContainText("Jev 选了「高」（80%），这个任务按它执行。");
     await contained(page, log, c.safe);
     await contained(page, log.getByRole("button", { name: "关闭", exact: true }), c.safe);
     await log.locator(".dispatch-log-body").evaluate(n => { n.scrollTop = n.scrollHeight; });

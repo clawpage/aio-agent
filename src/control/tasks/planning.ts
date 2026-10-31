@@ -3,6 +3,7 @@ export { resourcesConflict } from "./resources.js";
 import { validateSchedule, type ScheduleSpec } from "./schedules.js";
 import type { JevRelevance, SessionInfo } from "./context.js";
 import type { FormSpec } from "../../common/form.js";
+import type { EffortDecision } from "./effort.js";
 import { answerLanguage, type Locale } from "../locale.js";
 import { t } from "../i18n/index.js";
 
@@ -49,6 +50,8 @@ export interface TaskPlan {
     scheduleAction?: { id: string; action: ScheduleActionName | "update" } | null;
     /** Jev's reading of which earlier task this message continues, passed on to the executor. */
     jev?: JevRelevance | null;
+    /** How this task's reasoning effort was chosen, when the account's effort is on Auto. */
+    effort?: EffortDecision;
     /** Related tasks this task's turn gave the executor in full, by a fingerprint of what it was given. */
     injectedContext?: Record<string, string>;
     /** The executor rules version this task's turn gave its thread in full. */

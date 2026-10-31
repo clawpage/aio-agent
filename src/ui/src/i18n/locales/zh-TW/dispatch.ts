@@ -61,6 +61,12 @@ export const dispatch: typeof zh = {
     plan: "最終計畫",
     planJson: "計畫 JSON",
     failed: "派單失敗",
+    effort: "推理強度（自動）",
+    effortJev: (level: string, share: string) => `Jev 選了「${level}」（${share}），這個任務依它執行。`,
+    effortFallback: (level: string, reason: string) => `Jev 拿不準，依預設「${level}」執行（${reason}）。`,
+    effortUnsure: "把握不夠",
+    effortModelDefault: "模型預設",
+    effortLevels: "各強度機率",
   },
   stages: {
     queue: "排隊",

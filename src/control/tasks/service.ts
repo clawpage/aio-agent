@@ -14,7 +14,8 @@ import { isSupportCard } from "./support.js";
 import { RECALL_CAP, recordRecall, STEP_ANSWER_CHARS, STEP_PROMPT_CHARS, TaskRecall, tokenize, type RecallEvent, type RecallSource } from "./recall.js";
 import { processSteps, standingAgreements } from "./history.js";
 import type { DispatchTimingSink } from "../codex/dispatchTiming.js";
-import { dispatchAdvice, formatRelevance, formatTimeline, lastQuestion, routingQuestion, timeline, type JevRelevance } from "./context.js";
+import { dispatchAdvice, formatRelevance, formatTimeline, lastQuestion, routingQuestion, timeline, type JevRelevance, type TimelineEntry } from "./context.js";
+import { decideEffort, EFFORT_QUESTION, effortQuestion, type AutoEffort, type EffortDecision } from "./effort.js";
 import { describeNow, describeSchedule, formatWhen, MAX_ACTIVE_SCHEDULES, nextRun, validateSchedule, type ScheduleSpec } from "./schedules.js";
 import type { PlanningSchedule, ScheduleActionName } from "./planning.js";
 import { answerLanguage, isLocale, readLocale, writeLocale, type Locale } from "../locale.js";
@@ -584,6 +585,8 @@ export class TaskService {
         try {
             const owner = this.ownerId(row);
             const everything = this.rows().filter(t => this.ownerId(t) === owner);
+            // Auto effort: Jev also says how much reasoning this message needs (see effort.ts).
+            const auto = this.jev?.enabled ? this.agent.autoEffort(owner, row.model) : null;
             const all = everything.filter(t => !t.merged_into && t.created_at < row.created_at).map(t => ({
                 ...t,
                 input_text: this.taskContext(t),
@@ -644,11 +647,15 @@ export class TaskService {
                 // it finished), so no dispatcher model runs: the message keeps that task's title.
                 const plan: TaskPlan = { title: explicit.title, related: [], dependencies: [], resources: [], clarification: null };
                 applyTaskReference(plan, this.referenceTarget(row)!);
+                // A steer joins a turn already running at its own effort; a resume starts a new turn.
+                const effort = auto && !plan.appendTo ? await this.askEffort(auto, inputContext, timeline(everything, row), row.created_at) : undefined;
+                if (this.#closed || this.get(row.id)?.status !== "planning") return;
+                if (effort) steps.push({ kind: "effort", at: Date.now(), decision: effort });
                 trace.candidates = [{ id: explicit.id, source: "explicit" }];
                 trace.repairs = []; trace.failReason = null; trace.failed = false;
                 measured = true;
                 steps.push({ kind: "plan", at: Date.now(), plan, repairs: [] });
-                await this.admitPlan(row, plan, inputContext);
+                await this.admitPlan(row, plan, inputContext, effort);
                 return;
             }
             recalled(inputContext, "recall");
@@ -697,13 +704,20 @@ export class TaskService {
             const scheduling = { now: Date.now(), timezone: this.cfg.browser.timezone, schedules: this.planningSchedules(trace.ownerId) };
             steps.push({ kind: "context", at: Date.now(), timeline: timelineText, candidates: candidates.size });
             let relevance: JevRelevance | null = null;
+            let effort: EffortDecision | undefined;
+            // Without a routing question, the effort question goes alone, alongside the dispatcher.
+            const effortAsk = auto && !candidates.size ? this.askEffort(auto, inputContext, lines, row.created_at) : null;
             if (candidates.size && this.jev?.enabled) {
                 const pool = [...candidates.values()].map(t => ({ ...byId.get(t.id)!, ...t, recalled: RECALLED.has(t.source) }));
                 const q = routingQuestion(inputContext, pool, lines, row.created_at);
                 const criteria = q.questions.route!.criteria;
+                // One request: the effort answer rides along and, being optional, never fails the routing.
+                if (auto) q.questions[EFFORT_QUESTION] = effortQuestion(auto.levels);
                 try {
-                    const r = await this.jev.decide(q.state, q.questions, { timeoutMs: this.cfg.jev.dispatchTimeoutMs });
-                    relevance = dispatchAdvice(r.answers, pool);
+                    const r = await this.jev.decide(q.state, q.questions, { timeoutMs: this.cfg.jev.dispatchTimeoutMs, optional: [EFFORT_QUESTION] });
+                    const { [EFFORT_QUESTION]: effortAnswer, ...routing } = r.answers;
+                    if (auto) effort = decideEffort(auto, effortAnswer);
+                    relevance = dispatchAdvice(routing, pool);
                     const advice = relevance.suggestion!;
                     trace.jev = { choice: relevance.choice, probability: advice.probability, confident: relevance.confident, latencyMs: r.latencyMs, scores: relevance.scores!, suggestion: advice, answers: r.answers };
                     const probabilities = Object.fromEntries(Object.entries(r.answers.route!.probabilities).map(([key, p]) => [key === "NEW" ? "NEW" : key.split(":", 2)[1]!, p]));
@@ -711,7 +725,9 @@ export class TaskService {
                 } catch (err) {
                     trace.jev = { error: err instanceof Error ? err.message : String(err) };
                     steps.push({ kind: "jev", at: Date.now(), criteria, error: trace.jev.error });
+                    if (auto) effort = decideEffort(auto, null, trace.jev.error);
                 }
+                if (effort) steps.push({ kind: "effort", at: Date.now(), decision: effort });
                 if (this.#closed || this.get(row.id)?.status !== "planning") return;
                 if (this.taskContext(this.get(row.id)!) !== inputContext) return;
             }
@@ -725,7 +741,7 @@ export class TaskService {
                 trace.repairs = []; trace.failReason = null; trace.failed = false;
                 measured = true;
                 steps.push({ kind: "plan", at: Date.now(), plan: direct, repairs: [] });
-                await this.admitPlan(row, direct, inputContext);
+                await this.admitPlan(row, direct, inputContext, effort);
                 // A supplement keeps the title of the task it joins.
                 if (!direct.appendTo && this.get(row.id)?.status === "waiting") void this.nameTask(row.id, inputContext);
                 return;
@@ -804,7 +820,12 @@ export class TaskService {
                 this.agent.renameConversation(row.conversation_id, plan.title);
                 return;
             }
-            await this.admitPlan(row, plan, inputContext);
+            if (effortAsk) {
+                effort = await effortAsk;
+                if (this.#closed || this.get(row.id)?.status !== "planning") return;
+                steps.push({ kind: "effort", at: Date.now(), decision: effort });
+            }
+            await this.admitPlan(row, plan, inputContext, effort);
         }
         catch (err) {
             if (!this.#closed && this.get(row.id)?.status === "planning") {
@@ -854,8 +875,17 @@ export class TaskService {
         this.db.prepare("UPDATE tasks SET title=?,plan_json=json_set(plan_json,'$.title',?) WHERE id=?").run(title, title, id);
         this.agent.renameConversation(now.conversation_id, title);
     }
+    /** Jev's effort question on its own (no routing question to ride along with); never throws. */
+    private async askEffort(auto: AutoEffort, message: string, entries: TimelineEntry[], at: number): Promise<EffortDecision> {
+        try {
+            const r = await this.jev!.decide({ now: new Date(at).toISOString(), main_session_timeline: formatTimeline(entries, at), message: message.slice(0, 2000) }, { [EFFORT_QUESTION]: effortQuestion(auto.levels) }, { timeoutMs: this.cfg.jev.dispatchTimeoutMs, optional: [EFFORT_QUESTION] });
+            return decideEffort(auto, r.answers[EFFORT_QUESTION]);
+        } catch (err) {
+            return decideEffort(auto, null, err instanceof Error ? err.message : String(err));
+        }
+    }
     /** Admit a planning task under its plan: a supplement to the task it steers, or a waiting task of its own. */
-    private async admitPlan(row: TaskRow, plan: TaskPlan, inputContext: string) {
+    private async admitPlan(row: TaskRow, plan: TaskPlan, inputContext: string, effort?: EffortDecision) {
         const root = this.cfg.sandbox.containerWorkspaceDir;
         plan.related = this.sessionTurns([...plan.dependencies, ...plan.related], row);
         // Historical resource hints only coordinate queueing/prewarming;
@@ -864,6 +894,11 @@ export class TaskService {
             plan.resources = await resolveResources(plan.resources, root, this.resourceSandbox);
         if (this.#closed || this.get(row.id)?.status !== "planning") return;
         if (this.taskContext(this.get(row.id)!) !== inputContext) return;
+        // Jev's level replaces the fallback frozen at submit; a supplement that later becomes its own task keeps it too.
+        if (effort) {
+            plan.effort = effort;
+            if (effort.source === "jev") this.db.prepare("UPDATE tasks SET effort=? WHERE id=?").run(effort.effort, row.id);
+        }
         if (plan.appendTo) {
             this.db.prepare("UPDATE tasks SET title=?,plan_json=?,merged_into=?,status='merging',error=NULL WHERE id=?").run(plan.title,JSON.stringify(plan),plan.appendTo,row.id);
             return;

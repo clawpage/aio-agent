@@ -24,9 +24,9 @@ export const settings: typeof zh = {
     modelHint: "所有新訊息都會使用這個模型。",
     textOnlyHint: "該模型只支援文字輸入；帶圖片的附件會被拒絕，需要圖片能力請換回 ChatGPT 模型。",
     effort: "思考強度",
-    effortModelDefault: "依模型預設",
-    effortHintWithDefault: (label: string) => `留空時使用該模型的預設強度（${label}）。`,
-    effortHint: "留空時使用該模型的預設強度。",
+    effortAuto: "自動",
+    effortAutoHintWithDefault: (label: string) => `自動：依每個任務的難度決定；拿不準時用該模型的預設強度（${label}）。`,
+    effortAutoHint: "自動：依每個任務的難度決定；拿不準時用該模型的預設強度。",
     efforts: {
       minimal: "最低",
       low: "低",

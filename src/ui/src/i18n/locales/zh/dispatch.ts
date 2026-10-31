@@ -60,6 +60,12 @@ export const dispatch = {
     plan: "最终计划",
     planJson: "计划 JSON",
     failed: "派单失败",
+    effort: "推理强度（自动）",
+    effortJev: (level: string, share: string) => `Jev 选了「${level}」（${share}），这个任务按它执行。`,
+    effortFallback: (level: string, reason: string) => `Jev 拿不准，按默认「${level}」执行（${reason}）。`,
+    effortUnsure: "把握不够",
+    effortModelDefault: "模型默认",
+    effortLevels: "各强度概率",
   },
   stages: {
     queue: "排队",

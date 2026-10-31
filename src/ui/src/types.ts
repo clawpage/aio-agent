@@ -57,7 +57,7 @@ export interface ModelInfo {
 
 /**
  * Unified owner settings applied to every later message. `null` means "use the
- * model's own default" (model) or "use the model's default effort" (effort).
+ * configured default model" (model) or Auto (effort: picked per task, else the model's default).
  */
 export interface AgentSettings {
   model: string | null;
@@ -376,7 +376,8 @@ export type DispatchStep =
   | { kind: "timing"; at: number; round: number; timing: { model?: string; effort?: string; queueMs?: number; contextMs?: number; jevMs?: number; sandboxMs?: number; connectionMs?: number; threadStartMs?: number; turnStartMs?: number; firstTextMs?: number; finishMs?: number; classifierMs?: number; totalMs?: number; attempts?: number } }
   | { kind: "ask"; at: number; round: number; prompt: string; answer: string | null; correction?: string }
   | { kind: "plan"; at: number; plan: Record<string, unknown>; repairs: string[] }
-  | { kind: "failed"; at: number; reason: string };
+  | { kind: "failed"; at: number; reason: string }
+  | { kind: "effort"; at: number; decision: { effort: string | null; source: "jev" | "fallback"; levels: string[]; answer?: { choice: string; probabilities: Record<string, number> }; error?: string } };
 
 export interface DispatchLogEntry {
   at: number;

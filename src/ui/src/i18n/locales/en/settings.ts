@@ -25,9 +25,9 @@ export const settings: typeof zh = {
     modelHint: "All new messages use this model.",
     textOnlyHint: "This model only accepts text, so image attachments will be rejected. Switch back to a ChatGPT model if you need images.",
     effort: "Reasoning effort",
-    effortModelDefault: "Model default",
-    effortHintWithDefault: (label: string) => `Leave empty to use the model's default (${label}).`,
-    effortHint: "Leave empty to use the model's default.",
+    effortAuto: "Auto",
+    effortAutoHintWithDefault: (label: string) => `Auto: chosen for each task by how hard it is; when that is unclear, the model's default (${label}).`,
+    effortAutoHint: "Auto: chosen for each task by how hard it is; when that is unclear, the model's default.",
     efforts: {
       minimal: "Minimal",
       low: "Low",

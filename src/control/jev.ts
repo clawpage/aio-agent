@@ -73,8 +73,11 @@ export class Jev {
     return this.#secret() !== null;
   }
 
-  /** Ask every question at once; an answer that breaks the invariants fails the call. */
-  async decide(state: Record<string, unknown>, questions: Record<string, JevQuestion>, opts: { timeoutMs?: number; signal?: AbortSignal } = {}): Promise<JevResult> {
+  /**
+   * Ask every question at once; an answer that breaks the invariants fails the call,
+   * except for the `optional` questions, whose unusable answers are left out instead.
+   */
+  async decide(state: Record<string, unknown>, questions: Record<string, JevQuestion>, opts: { timeoutMs?: number; signal?: AbortSignal; optional?: string[] } = {}): Promise<JevResult> {
     const key = this.#secret();
     if (!key) throw new Error(t().agent.jev.notConfigured);
     const body = JSON.stringify({
@@ -102,7 +105,10 @@ export class Jev {
       const answers: Record<string, JevAnswer> = {};
       for (const [name, q] of Object.entries(questions)) {
         const answer = parsed.answers?.[name];
-        if (!valid(answer, Object.keys(q.criteria))) throw new Error(t().agent.jev.incomplete(name));
+        if (!valid(answer, Object.keys(q.criteria))) {
+          if (opts.optional?.includes(name)) continue;
+          throw new Error(t().agent.jev.incomplete(name));
+        }
         answers[name] = { choice: answer.choice, confidence: answer.confidence, probabilities: answer.probabilities };
       }
       return { answers, usage: parsed.usage ?? null, latencyMs: Date.now() - started };

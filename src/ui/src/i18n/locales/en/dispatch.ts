@@ -61,6 +61,12 @@ export const dispatch: typeof zh = {
     plan: "Final plan",
     planJson: "Plan JSON",
     failed: "Dispatch failed",
+    effort: "Reasoning effort (Auto)",
+    effortJev: (level: string, share: string) => `Jev chose "${level}" (${share}); this task runs at it.`,
+    effortFallback: (level: string, reason: string) => `Jev was not sure; running at the default "${level}" (${reason}).`,
+    effortUnsure: "not confident enough",
+    effortModelDefault: "model default",
+    effortLevels: "Probability per level",
   },
   stages: {
     queue: "Queue",

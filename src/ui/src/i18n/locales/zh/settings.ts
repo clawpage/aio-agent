@@ -23,9 +23,9 @@ export const settings = {
     modelHint: "所有新消息都会使用这个模型。",
     textOnlyHint: "该模型只支持文本输入；带图片的附件会被拒绝，需要图片能力请换回 ChatGPT 模型。",
     effort: "思考强度",
-    effortModelDefault: "按模型默认",
-    effortHintWithDefault: (label: string) => `留空时使用该模型的默认强度（${label}）。`,
-    effortHint: "留空时使用该模型的默认强度。",
+    effortAuto: "自动",
+    effortAutoHintWithDefault: (label: string) => `自动：按每个任务的难度决定；拿不准时用该模型的默认强度（${label}）。`,
+    effortAutoHint: "自动：按每个任务的难度决定；拿不准时用该模型的默认强度。",
     efforts: {
       minimal: "最低",
       low: "低",

@@ -1,12 +1,14 @@
 #!/usr/bin/env node
-// Local administrator command: assign the one model a member runs, and optionally its reasoning effort. Takes effect on the next service restart.
+// Local administrator command: assign the one model a member runs, and optionally its reasoning effort
+// (a fixed level, or `auto`: Jev picks per task). Takes effect on the next service restart.
 import { loadConfig } from '../dist/control/config.js';
 import { openDb } from '../dist/control/db.js';
 import { MEMBER_EFFORTS, MEMBER_MODELS } from '../dist/control/auth/policy.js';
 
 const [username, model, effort] = process.argv.slice(2);
-if (!username || !MEMBER_MODELS.includes(model) || (effort !== undefined && !MEMBER_EFFORTS.includes(effort))) {
-  throw new Error(`用法: node bin/set-user-model.mjs <普通用户账号> <${MEMBER_MODELS.join('|')}> [${MEMBER_EFFORTS.join('|')}]`);
+const efforts = ['auto', ...MEMBER_EFFORTS];
+if (!username || !MEMBER_MODELS.includes(model) || (effort !== undefined && !efforts.includes(effort))) {
+  throw new Error(`用法: node bin/set-user-model.mjs <普通用户账号> <${MEMBER_MODELS.join('|')}> [${efforts.join('|')}]`);
 }
 const cfg = loadConfig();
 const db = openDb(cfg.dbPath);
