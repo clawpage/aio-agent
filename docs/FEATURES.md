@@ -618,6 +618,17 @@ iOS App 需为声明了存入相册权限、带 `aioSaveFiles` 标记的新版�
   - **磨皮** `--soften 0..1`：同样的冲印再加一份降低纹理（`effects.texture = −60×soften`、`effects.clarity = −12×soften`）的版本，只按「人物抠图 × 肤色（YCrCb）」
     的柔边蒙版混入 80%，眼睛、眉毛、嘴唇、头发、衣服和背景保持原样清晰；skill 建议 0.3–0.5、宝宝 0.2–0.3、不超过 0.7。实测全图降纹理 −70 会把眉眼一起糊掉，
     而人脸核对仍有 0.93、拦不住，所以靠蒙版限制范围而不是靠核对。仍不做瘦脸、放大眼睛等改形。
+  - **2026-10-31 扩展**（owner 沙箱里智能体写的 6 份修图参考译成英文、按 LightCraft 0.14.0 实测订正后随 skill 写给所有账号，
+    放在 skill 目录 `references/`，SKILL.md 说明各自何时读：处理顺序与审片、场景（宝宝、人像、逆光、风景、夜景、雪景、商品美食、室内、宠物、黑白）、
+    局部精修、风格与调色、换背景与收边、证件照、LightCraft 控件与直接用引擎、来源）。新增选项：
+    `--look warm|film|clean|mono|night`（暖调人像 / 胶片 / 商业干净 / 黑白 / 夜景，night 从原片出发）；
+    `--wb-pick X,Y`（按中性点定白平衡，LightCraft `develop.wbPick`）；
+    `--local 区域 控件=增量…`（只改一个区域：people / background / faces / top=F / bottom=F / radial=X,Y,R，每个区域是同一原片再冲一份、
+    按柔边蒙版混入，像素仍全部来自 LightCraft）；`--heal X,Y,R`（LightCraft 修复小点，半径不超过长边 2%）与 `--blemishes`
+    （LightCraft 在脸上找小的暗/红点并修复，用工具已有的同一个 YuNet 模型装进工具目录 `lightcraft-config/`，LightCraft 的设置不再写进用户 home）；
+    `--crop 比例`、`--id-photo us|schengen|uk|cn|cn-visa|1inch|2inch`（按官方头部比例裁切并输出规定像素与 DPI，从原片出发且拒绝美颜类选项；
+    加拿大规定连裁切都不许，故不提供）；`--background plain`（纯色无阴影）。裁切后的成片用 `check 原片 成片 --crop x0,y0,x1,y1` 核对。
+    同时修正：成片改用 LightCraft 输出的 sRGB 配置文件，不再把原片（可能是 Display P3）的配置文件贴到 sRGB 像素上。
   - `retouch <原片> -o <输出>`：每次都从原片开始；`--engine basic` 时，光影色彩（自动提亮人物中间调、曝光、冷暖、对比、饱和度）对每个像素做同一个查表变换，
     脸上的细节一点不变；`--background smooth`（把原背景布的褶皱熨平，保留颜色、光线过渡和柔和阴影，只适合纯色背景布）/
     `studio`（无缝摄影棚背景，默认暖奶油色 `#EEE5D8`，带脚下柔和投影）/ 一张背景图（如 `image_generate` 生成的空摄影棚背景）时，

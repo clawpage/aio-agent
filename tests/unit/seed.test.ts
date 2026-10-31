@@ -2,7 +2,7 @@ import { CLAWPAGE_SDK_JS } from "../../src/control/sandbox/clawpageSdk.js";
 import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 import { SandboxContainer } from "../../src/control/sandbox/container.js";
-import { CODEX_CONFIG_TOML, DOCUMENT_SKILL_DIR, DOCUMENT_SKILL_MD, GRAPHIC_RENDER_PY, GRAPHIC_SKILL_MD, MAIL_BINARIES, MARKET_CLI_PY, MARKET_SKILL_MD, PHOTO_CLI_PY, PHOTO_SKILL_MD, MAIL_INSTALL_SH, MAIL_RO_SH, MAIL_SETUP_PY, MAIL_SKILL_MD, SHARE_CLI_PY, SHARE_SKILL_MD, WORKSPACE_AGENTS_BEGIN, WORKSPACE_AGENTS_END, WORKSPACE_AGENTS_MD, refreshWorkspaceAgents } from "../../src/control/sandbox/seed.js";
+import { CODEX_CONFIG_TOML, DOCUMENT_SKILL_DIR, DOCUMENT_SKILL_MD, GRAPHIC_RENDER_PY, GRAPHIC_SKILL_MD, MAIL_BINARIES, MARKET_CLI_PY, MARKET_SKILL_MD, PHOTO_CLI_PY, PHOTO_REFERENCES, PHOTO_SKILL_MD, MAIL_INSTALL_SH, MAIL_RO_SH, MAIL_SETUP_PY, MAIL_SKILL_MD, SHARE_CLI_PY, SHARE_SKILL_MD, WORKSPACE_AGENTS_BEGIN, WORKSPACE_AGENTS_END, WORKSPACE_AGENTS_MD, refreshWorkspaceAgents } from "../../src/control/sandbox/seed.js";
 import { Logger } from "../../src/common/logger.js";
 import { testConfig, testNode } from "../helpers/harness.js";
 
@@ -264,6 +264,27 @@ describe("sandbox workspace seed", () => {
     expect(PHOTO_SKILL_MD).toContain("```compare");
     expect(PHOTO_SKILL_MD).toContain("`before` is always the original");
     expect(PHOTO_SKILL_MD).toContain("--soften 0..1");
+    // The reference files go next to SKILL.md for both executors, and SKILL.md says when to read each one.
+    const names = Object.keys(PHOTO_REFERENCES).sort();
+    expect(names).toEqual(["background-compositing.md", "id-photos.md", "lightcraft-controls.md", "local-retouch.md", "looks-and-grading.md",
+      "scene-playbook.md", "sources.md", "workflow-and-quality.md"]);
+    for (const dir of [cfg.sandbox.containerCodexHome, cfg.claudeCode.configDir]) {
+      for (const name of names) {
+        expect(calls.find((c) => c.path === `${dir}/skills/aio-photo/references/${name}`)?.content).toBe(PHOTO_REFERENCES[name]);
+        expect(PHOTO_SKILL_MD).toContain(`\`${name}\``);
+      }
+    }
+    expect(execs.some((argv) => argv[0] === "mkdir" && argv.some((a) => a.endsWith("skills/aio-photo/references")))).toBe(true);
+    // Model-facing text is English; relative links between references resolve.
+    for (const [name, text] of Object.entries(PHOTO_REFERENCES)) {
+      expect(text, name).toMatch(/^# [A-Z]/);
+      for (const link of text.matchAll(/\]\(([a-z-]+\.md)\)/g)) expect(names, `${name} links ${link[1]}`).toContain(link[1]);
+    }
+    // Every option the skill names exists in the CLI.
+    for (const option of ["--local", "--heal", "--blemishes", "--wb-pick", "--crop", "--id-photo", "--manual"]) {
+      expect(PHOTO_SKILL_MD).toContain(option);
+      expect(PHOTO_CLI_PY).toContain(`"${option}"`);
+    }
   });
 
   it("installs the photo tools through the CLI's own setup, with time for a fresh install", async () => {

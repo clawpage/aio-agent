@@ -44,6 +44,7 @@ import {
   MARKET_SKILL_MD,
   MARKET_TOOL_DIR,
   PHOTO_CLI_PY,
+  PHOTO_REFERENCES,
   PHOTO_SKILL_DIR,
   TASK_KB_TOOL_DIR,
   TASK_KB_SKILL_DIR,
@@ -479,7 +480,7 @@ export class SandboxContainer {
   }
 
   /**
-   * The photo retouching skill for both executors plus its CLI. Like the market skill, its libraries are
+   * The photo retouching skill (SKILL.md and its references/) for both executors plus its CLI. Like the market skill, its libraries are
    * installed in the background (ensurePhotoLibraries), never on the start path, and a failure is logged.
    */
   async seedPhoto(): Promise<void> {
@@ -487,10 +488,13 @@ export class SandboxContainer {
     const toolDir = `${s.containerCodexHome}/${PHOTO_TOOL_DIR}`;
     const skillDirs = [`${s.containerCodexHome}/${PHOTO_SKILL_DIR}`, `${this.#cfg.claudeCode.configDir}/${PHOTO_SKILL_DIR}`];
     try {
-      const mkdir = await this.execInSandbox(["mkdir", "-p", toolDir, ...skillDirs], { timeoutMs: 15_000 });
+      const mkdir = await this.execInSandbox(["mkdir", "-p", toolDir, ...skillDirs.map((dir) => `${dir}/references`)], { timeoutMs: 15_000 });
       if (mkdir.code !== 0) throw new Error((mkdir.stderr || mkdir.stdout).trim().slice(0, 200));
       await this.writeFileInSandbox(`${toolDir}/aio-photo.py`, PHOTO_CLI_PY);
-      for (const dir of skillDirs) await this.writeFileInSandbox(`${dir}/SKILL.md`, PHOTO_SKILL_MD);
+      for (const dir of skillDirs) {
+        await this.writeFileInSandbox(`${dir}/SKILL.md`, PHOTO_SKILL_MD);
+        for (const [name, text] of Object.entries(PHOTO_REFERENCES)) await this.writeFileInSandbox(`${dir}/references/${name}`, text);
+      }
     } catch (err) {
       this.#log.warn("could not seed the sandbox photo skill", { error: String(err).slice(0, 200) });
     }

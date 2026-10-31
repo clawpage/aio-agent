@@ -1987,8 +1987,10 @@ export const PHOTO_CLI_PY = String.raw`#!/usr/bin/env python3
 
 retouch develops the photo's light and color (LightCraft's develop controls, the same as Lightroom's panel, or a
 plain even adjustment), softens skin gently when asked (skin only, never eyes, brows, lips or hair) and, when asked,
-cleans up or replaces only the background around the people (who are cut out and put back pixel for pixel); check
-compares the faces of an edited photo with the original. The cut-out model (rembg) lives in a private venv and
+cleans up or replaces only the background around the people (who are cut out and put back pixel for pixel). It can
+also change one region on its own (people, background, faces, a sky gradient, a radial spot), heal small spots, take the
+white balance from a neutral point, and crop to an aspect ratio or an official ID photo size. check compares the faces
+of an edited photo with the original. The cut-out model (rembg) lives in a private venv and
 LightCraft in its own folder; setup installs both after the sandbox starts, or the first command that needs them.
 """
 import argparse, fcntl, json, math, os, shutil, subprocess, sys
@@ -2013,12 +2015,53 @@ LIGHTCRAFT_SHA256 = {"x86_64": "b8233b9373d6e99b1180c1c39fdcb13d49c441f800927708
                      "aarch64": "eba0b3ca3704b7023fc485897443ecaaf40b378540a9921f59c9ca74f2f8cfe0"}
 LIGHTCRAFT_DIR = os.path.join(HERE, "lightcraft-" + LIGHTCRAFT_VERSION)
 LIGHTCRAFT = os.path.join(LIGHTCRAFT_DIR, "bin", "lightcraft-cli")
-# Starting points for common asks; --develop changes any control on top.
+# Starting points for common asks, all LightCraft controls; --develop changes any control on top. "set" gives controls
+# their values, "adjust" moves them from where auto left them (white balance), "then" runs LightCraft commands first,
+# "manual" starts from the photo as shot (a night stays a night).
 LOOKS = {
-    "bright": {"light.exposure": 0.2, "light.shadows": 30, "light.highlights": -25, "color.vibrance": 10},
-    "clear": {"effects.dehaze": 12, "effects.clarity": 8, "light.blacks": -8, "color.vibrance": 12},
-    "sky": {"light.highlights": -70, "light.whites": -15, "mixer.blue.sat": 15, "mixer.blue.lum": -15, "effects.dehaze": 8},
+    "bright": {"set": {"light.exposure": 0.2, "light.shadows": 30, "light.highlights": -25, "color.vibrance": 10}},
+    "clear": {"set": {"effects.dehaze": 12, "effects.clarity": 8, "light.blacks": -8, "color.vibrance": 12}},
+    "sky": {"set": {"light.highlights": -70, "light.whites": -15, "mixer.blue.sat": 15, "mixer.blue.lum": -15, "effects.dehaze": 8}},
+    # A warm, soft portrait: warmer light, skin kept from turning orange, a hint of gold in the highlights.
+    "warm": {"set": {"color.vibrance": 8, "mixer.orange.sat": -6, "mixer.orange.lum": 6, "grading.highlights.hue": 40,
+                     "grading.highlights.sat": 10, "effects.clarity": -5},
+             "adjust": {"wb.temp": 350}},
+    # Soft film: a matte curve (blacks lifted, whites eased), cool shadows and warm highlights, less saturation, fine grain.
+    "film": {"set": {"color.saturation": -10, "grading.shadows.hue": 200, "grading.shadows.sat": 12,
+                     "grading.highlights.hue": 42, "grading.highlights.sat": 10, "grain.amount": 12, "grain.size": 20},
+             "then": [["develop.curve", {"channel": "master", "points": [[0, 0.05], [0.25, 0.25], [0.75, 0.77], [1, 0.96]]}]]},
+    # Clean commercial: bright clean whites, true colors, crisp detail (products, food, catalog portraits).
+    "clean": {"set": {"light.whites": 12, "light.blacks": -6, "color.vibrance": 6, "effects.clarity": 6,
+                      "effects.dehaze": 3, "detail.sharpenAmount": 35, "detail.sharpenMasking": 40}},
+    # Black and white from the photo's own colors, with a little more contrast and depth.
+    "mono": {"set": {"light.contrast": 12, "effects.clarity": 6},
+             "then": [["develop.treatment", {"bw": True}], ["develop.autoBwMix", {}]]},
+    # A night or low-light scene: kept dark, lights held back, noise cleaned up.
+    "night": {"manual": True, "set": {"light.highlights": -45, "light.shadows": 20, "light.blacks": -8, "color.vibrance": 6,
+                                      "detail.nrLuminance": 25, "detail.nrColor": 40, "detail.sharpenAmount": 20, "detail.sharpenMasking": 50}},
 }
+# Regions --local can adjust on their own (see local_masks).
+LOCAL_REGIONS = ("people", "background", "faces", "top", "bottom", "radial")
+# Heal spots stay small: a blemish, a crumb, a speck of dust, never a feature.
+MAX_HEAL_RADIUS = 0.02
+MAX_HEAL_SPOTS = 40
+# LightCraft keeps its own settings and models (the face detector the blemish finder needs) next to this tool.
+LIGHTCRAFT_CONFIG = os.path.join(HERE, "lightcraft-config")
+# Official ID photo rules (sources in the skill's references/id-photos.md): the print size in millimetres, the pixels
+# delivered, the head height (chin to the top of the hair) allowed as a share of the photo's height, and the margin above
+# the head. 1inch/2inch are common Chinese print sizes with no official head rule. Canada is left out on purpose: its
+# rules forbid any edit, cropping included.
+ID_PHOTOS = {
+    "us": {"mm": (51, 51), "px": (1200, 1200), "head": (0.50, 0.69), "top": 0.11},
+    "schengen": {"mm": (35, 45), "px": (827, 1063), "head": (0.711, 0.80), "top": 0.07},
+    "uk": {"mm": (35, 45), "px": (827, 1063), "head": (0.644, 0.756), "top": 0.09},
+    "cn": {"mm": (33, 48), "px": (390, 567), "head": (0.583, 0.688), "top": 0.083},
+    "cn-visa": {"mm": (33, 48), "px": (354, 472), "head": (0.583, 0.688), "top": 0.083},
+    "1inch": {"mm": (25, 35), "px": (295, 413), "head": (0.60, 0.70), "top": 0.10},
+    "2inch": {"mm": (35, 49), "px": (413, 579), "head": (0.60, 0.70), "top": 0.10},
+}
+ASPECTS = {"1:1": (1, 1), "4:5": (4, 5), "5:4": (5, 4), "3:4": (3, 4), "4:3": (4, 3), "2:3": (2, 3), "3:2": (3, 2),
+           "9:16": (9, 16), "16:9": (16, 9)}
 
 
 def out(data):
@@ -2175,10 +2218,11 @@ def save(arr, path, source_info=None):
     os.makedirs(os.path.dirname(os.path.abspath(path)) or ".", exist_ok=True)
     img = Image.fromarray(arr)
     icc = (source_info or {}).get("icc_profile")
+    extra = {"dpi": tuple(source_info["dpi"])} if (source_info or {}).get("dpi") else {}
     if path.lower().endswith((".jpg", ".jpeg")):
-        img.save(path, quality=95, subsampling=0, icc_profile=icc)
+        img.save(path, quality=95, subsampling=0, icc_profile=icc, **extra)
     else:
-        img.save(path, icc_profile=icc)
+        img.save(path, icc_profile=icc, **extra)
 
 
 # Photos are worked on in 8 bits with lookup tables and in strips of rows: a 24-megapixel photo stays well within
@@ -2380,9 +2424,35 @@ def save_cutout_preview(img, soft, path):
 
 # ---------- developing with LightCraft ----------
 
-def develop(src, dest, auto, settings, nudges=None):
-    """Develop src into dest (an 8-bit PNG at full size) with LightCraft: its auto settings when asked, then settings
-    (control id -> value) on top, then nudges (control id -> change from there). Returns what auto chose (or None)."""
+# What LightCraft found while developing (the blemishes it healed), for the report.
+FOUND = {}
+
+
+def ensure_face_detector():
+    """The blemish finder needs LightCraft's face detector: the same pinned YuNet file check uses, installed once into
+    LightCraft's own settings next to this tool (an MIT-licensed model already in use here)."""
+    if os.path.exists(os.path.join(LIGHTCRAFT_CONFIG, "lightcraft", "models", "yunet-2023mar", "model.onnx")):
+        return
+    try:
+        ensure_lightcraft()
+    except Exception as err:
+        fail("LightCraft is not available: %s" % err)
+    res = subprocess.run([LIGHTCRAFT, "run", "faces.models.install",
+                          json.dumps({"path": face_model(), "acknowledged": True, "activate": False})],
+                         capture_output=True, text=True, timeout=120, env=lightcraft_env())
+    if res.returncode != 0:
+        fail("Could not set up the blemish finder: " + (res.stdout or res.stderr).strip()[-300:])
+
+
+def lightcraft_env():
+    """LightCraft's settings and models live next to this tool, not in the user's home."""
+    return dict(os.environ, XDG_CONFIG_HOME=LIGHTCRAFT_CONFIG)
+
+
+def develop(src, dest, auto, settings, nudges=None, pre=None, post=None):
+    """Develop src into dest (an 8-bit PNG at full size) with LightCraft: its auto settings when asked, then pre
+    commands (a white balance pick, a look's black and white or curve), settings (control id -> value) on top, nudges
+    (control id -> change from there), then post commands (heal spots). Returns what auto chose (or None)."""
     try:
         ensure_lightcraft()
     except Exception as err:
@@ -2390,12 +2460,16 @@ def develop(src, dest, auto, settings, nudges=None):
     cmd = [LIGHTCRAFT, "run", "--import", src]
     if auto:
         cmd.append("develop.auto")
+    for name, params in pre or []:
+        cmd += [name, json.dumps(params)]
     for key, value in settings.items():
         cmd += ["develop.set", "control=" + key, "value=" + repr(float(value))]
     for key, delta in (nudges or {}).items():
         cmd += ["develop.adjust", "control=" + key, "delta=" + repr(float(delta))]
+    for name, params in post or []:
+        cmd += [name, json.dumps(params)]
     cmd += ["app.export", "path=" + dest, "format=png", "longEdge=0", "metadata=none"]
-    res = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+    res = subprocess.run(cmd, capture_output=True, text=True, timeout=600, env=lightcraft_env())
     chosen = None
     for line in res.stdout.splitlines():
         try:
@@ -2406,6 +2480,8 @@ def develop(src, dest, auto, settings, nudges=None):
             fail("LightCraft could not %s: %s" % (step.get("command"), step.get("error")))
         if step.get("command") == "develop.auto":
             chosen = step.get("result")
+        if step.get("command") == "spot.findBlemishes":
+            FOUND["blemishes"] = (step.get("result") or {}).get("spots", [])
     if res.returncode != 0 or not os.path.exists(dest):
         fail("LightCraft did not develop the photo: " + (res.stderr or res.stdout).strip()[-400:])
     return chosen
@@ -2444,6 +2520,163 @@ def skin_mask(rgb, people):
     return cv2.resize(m, (w, h), interpolation=cv2.INTER_LINEAR)
 
 
+# ---------- options with positions ----------
+
+def numbers(text, count, what):
+    """count comma-separated numbers, or a clear failure naming the option."""
+    try:
+        vals = [float(v) for v in str(text).split(",")]
+        if len(vals) != count:
+            raise ValueError
+        return vals
+    except ValueError:
+        fail("%s takes %d comma-separated numbers (got %r)." % (what, count, text))
+
+
+def heal_spots(values, size):
+    """--heal x,y,r (pixels in the original) as LightCraft heal spots; only small spots, never a feature."""
+    w, h = size
+    long_edge = float(max(w, h))
+    spots = []
+    if len(values or []) > MAX_HEAL_SPOTS:
+        fail("At most %d --heal spots per photo." % MAX_HEAL_SPOTS)
+    for v in values or []:
+        x, y, r = numbers(v, 3, "--heal")
+        if not (0 <= x < w and 0 <= y < h) or r <= 0:
+            fail("--heal %s is outside the photo (%dx%d) or has no radius." % (v, w, h))
+        if r > MAX_HEAL_RADIUS * long_edge:
+            fail("--heal radius %g px is too big: a heal spot is a small blemish or speck (at most %d px on this photo). Larger areas stay as they are." % (r, int(MAX_HEAL_RADIUS * long_edge)))
+        # LightCraft's spot size is its diameter as a fraction of the long edge; a little margin covers the spot's rim.
+        spots.append(["spot.add", {"mode": "heal", "points": [[x / w, y / h]], "size": round(2.6 * r / long_edge, 5)}])
+    return spots
+
+
+def local_specs(groups):
+    """--local REGION CONTROL=DELTA … as (region, value, {control: delta}), checked before anything runs."""
+    specs = []
+    for group in groups or []:
+        region, deltas = group[0], develop_values(group[1:])
+        kind, _, value = region.partition("=")
+        if kind not in LOCAL_REGIONS:
+            fail("--local region is one of people, background, faces, top=F, bottom=F, radial=X,Y,R (got %r)." % region)
+        if not deltas:
+            fail("--local %s needs at least one CONTROL=DELTA, e.g. light.exposure=0.3." % region)
+        if kind in ("top", "bottom"):
+            f = numbers(value, 1, "--local " + kind)[0]
+            if not 0 < f <= 1:
+                fail("--local %s=F: F is how far down (top) or up (bottom) the change fades out, 0..1." % kind)
+            value = f
+        elif kind == "radial":
+            value = numbers(value, 3, "--local radial=X,Y,R")
+        elif value:
+            fail("--local %s takes no value." % kind)
+        specs.append((kind, value, deltas))
+    return specs
+
+
+MASK_SMALL = 1024
+
+
+def local_masks(specs, size, people=None, faces=()):
+    """One soft weight per --local region, 0..1, on a small copy (at most MASK_SMALL long): wide, smooth falloffs never
+    draw an edge. people: the cut-out (full size) where the region needs it; faces: face boxes in the original."""
+    import cv2
+    import numpy as np
+    w, h = size
+    scale = min(1.0, float(MASK_SMALL) / max(w, h))
+    sw, sh = max(1, int(round(w * scale))), max(1, int(round(h * scale)))
+    soft_edge = max(sw, sh) / 60.0
+    small_people = None
+    if people is not None:
+        small_people = cv2.GaussianBlur(cv2.resize(people.astype(np.float32), (sw, sh), interpolation=cv2.INTER_AREA), (0, 0), soft_edge)
+    ys = (np.arange(sh, dtype=np.float32) + 0.5) / sh
+    smooth = lambda t: t * t * (3 - 2 * t)
+    masks = []
+    for kind, value, _ in specs:
+        if kind in ("people", "background"):
+            m = small_people if kind == "people" else 1.0 - small_people
+        elif kind == "faces":
+            m = np.zeros((sh, sw), np.float32)
+            for (x, y, fw, fh) in faces:
+                # The face and a little around it (forehead, chin), feathered wide: light that follows the face.
+                cv2.ellipse(m, (int((x + fw / 2.0) * scale), int((y + fh * 0.45) * scale)),
+                            (max(1, int(fw * 0.7 * scale)), max(1, int(fh * 0.85 * scale))), 0, 0, 360, 1.0, -1)
+            m = cv2.GaussianBlur(m, (0, 0), max(1.0, (max(f[2] for f in faces) * scale / 6.0) if faces else 1.0))
+        elif kind in ("top", "bottom"):
+            t = ys if kind == "top" else 1.0 - ys
+            ramp = smooth(np.clip(1.0 - t / value, 0, 1))[:, None]
+            m = np.repeat(ramp, sw, axis=1)
+            if small_people is not None:
+                m = m * (1.0 - small_people)
+        else:
+            cx, cy, r = value
+            yy, xx = np.mgrid[0:sh, 0:sw].astype(np.float32)
+            d = np.sqrt((xx - cx * scale) ** 2 + (yy - cy * scale) ** 2) / max(r * scale, 1.0)
+            m = smooth(np.clip(1.5 - d, 0, 1))  # full inside half the radius, fading out to nothing at 1.5 R
+        masks.append(np.clip(m, 0, 1).astype(np.float32))
+    return masks
+
+
+def subject_box(alpha, faces, size):
+    """The part of the photo that matters for a crop: the faces (with room around them) or else the people."""
+    import numpy as np
+    w, h = size
+    if faces:
+        xs = [f[0] for f in faces] + [f[0] + f[2] for f in faces]
+        ys = [f[1] for f in faces] + [f[1] + f[3] for f in faces]
+        return min(xs), min(ys), max(xs), max(ys)
+    if alpha is not None and alpha.max() > 0.5:
+        rows, cols = np.where(alpha > 0.5)
+        return int(cols.min()), int(rows.min()), int(cols.max()), int(rows.max())
+    return 0, 0, w, h
+
+
+def aspect_crop(size, ratio, box):
+    """The largest crop of ratio (w, h) inside the photo, centred on box as far as the frame allows: (x0, y0, x1, y1)."""
+    w, h = size
+    rw, rh = ratio
+    cw, ch = (w, int(round(w * rh / float(rw)))) if w * rh <= h * rw else (int(round(h * rw / float(rh))), h)
+    cx, cy = (box[0] + box[2]) / 2.0, (box[1] + box[3]) / 2.0
+    # Faces sit a little above the middle of a good portrait crop.
+    cy = cy + ch * 0.1 if box != (0, 0, w, h) else cy
+    x0 = int(round(min(max(cx - cw / 2.0, 0), w - cw)))
+    y0 = int(round(min(max(cy - ch / 2.0, 0), h - ch)))
+    return x0, y0, x0 + cw, y0 + ch
+
+
+def head_top(alpha, face):
+    """The top of the head (hair included) above a face, from the cut-out; the face box alone when there is none."""
+    import numpy as np
+    x, y, fw, fh = face
+    if alpha is not None:
+        cols = alpha[:, max(0, int(x + fw * 0.25)):int(x + fw * 0.75)]
+        rows = np.where(cols.max(axis=1) > 0.5)[0]
+        rows = rows[rows <= y + fh * 0.5]
+        if rows.size:
+            return int(rows.min())
+    # YuNet's box starts around the brows; the hair is about half a box higher.
+    return int(y - fh * 0.5)
+
+
+def id_crop(size, spec, face, top_of_head):
+    """The crop for an official ID photo: the head (chin to the top of the hair) at the middle of the allowed share of the
+    height, the top of the head the given margin below the top edge, centred on the face. None when the photo has no room."""
+    w, h = size
+    pw, ph = spec["px"]
+    x, y, fw, fh = face
+    chin = y + fh
+    head = chin - top_of_head
+    share = sum(spec["head"]) / 2.0
+    ch = head / share
+    cw = ch * pw / float(ph)
+    y0 = top_of_head - spec["top"] * ch
+    x0 = x + fw / 2.0 - cw / 2.0
+    box = tuple(int(round(v)) for v in (x0, y0, x0 + cw, y0 + ch))
+    if box[0] < 0 or box[1] < 0 or box[2] > w or box[3] > h:
+        return None, share
+    return box, share
+
+
 # ---------- commands ----------
 
 def cmd_setup(args):
@@ -2462,54 +2695,118 @@ def cmd_retouch(args):
     from PIL import Image, ImageOps
     if os.path.realpath(args.input) == os.path.realpath(args.output):
         fail("Write the result to a new file; the original stays as it is.")
+    # Options added later are read with defaults, so older callers keep working.
+    opt = lambda name, default=None: getattr(args, name, default) if getattr(args, name, None) is not None else default
     with Image.open(args.input) as probe_img:
         info = dict(probe_img.info)
         size = ImageOps.exif_transpose(probe_img).size
     look = LOOKS.get(args.look, {}) if args.look else {}
-    settings = dict(look, **develop_values(args.develop))
+    settings = dict(look.get("set", {}), **develop_values(args.develop))
     if not 0 <= args.soften <= 1:
         fail("--soften is 0 (none) … 1 (the most that still looks like skin); 0.3–0.5 is a natural portrait.")
+    locals_ = local_specs(opt("local", []))
+    heal = heal_spots(opt("heal", []), size)
+    blemishes = opt("blemishes")
+    if blemishes is not None and not 0 <= blemishes <= 100:
+        fail("--blemishes is the finder's sensitivity, 0..100 (50 by default).")
+    wb_pick = numbers(opt("wb_pick"), 2, "--wb-pick") if opt("wb_pick") else None
+    if wb_pick and not (0 <= wb_pick[0] < size[0] and 0 <= wb_pick[1] < size[1]):
+        fail("--wb-pick %s is outside the photo (%dx%d)." % (opt("wb_pick"), size[0], size[1]))
+    crop, id_photo = opt("crop"), opt("id_photo")
+    if crop and id_photo:
+        fail("Use --crop or --id-photo, not both.")
+    if crop and crop not in ASPECTS:
+        fail("--crop is one of %s." % ", ".join(ASPECTS))
+    if id_photo and id_photo not in ID_PHOTOS:
+        fail("--id-photo is one of %s." % ", ".join(ID_PHOTOS))
+    if id_photo and (args.look or args.soften > 0 or opt("local") or opt("heal") or blemishes is not None):
+        fail("An ID photo must show the person unaltered (the authorities reject retouched photos): no --look, --soften, --local, --heal or --blemishes. Only light, white balance and the framing.")
     # Every photo is developed with LightCraft: its auto settings unless --manual, then the look, the controls and
     # the simple nudges on top. The plain even adjustment (--engine basic) is only for when LightCraft cannot run.
     use_lightcraft = args.engine == "lightcraft"
     if use_lightcraft:
-        args.auto = not args.manual
+        args.auto = not (args.manual or look.get("manual") or id_photo)
         args.light = "none"
         # A warmer photo is a higher white-balance temperature; the others in LightCraft's own units.
         nudges = {k: v for k, v in (("light.exposure", args.exposure), ("light.contrast", 100.0 * args.contrast),
                                      ("color.saturation", 100.0 * args.saturation), ("wb.temp", 2500.0 * args.warmth)) if v}
+        for k, v in look.get("adjust", {}).items():
+            nudges[k] = nudges.get(k, 0.0) + v
+        # The look's own commands (black and white, a curve) come before the controls, so --develop (e.g. bw.blue)
+        # still changes what they set; heal spots come last.
+        pre = ([["develop.wbPick", {"x": wb_pick[0] / size[0], "y": wb_pick[1] / size[1]}]] if wb_pick else []) + [list(c) for c in look.get("then", [])]
+        post = list(heal)
+        if blemishes is not None:
+            ensure_face_detector()
+            post.append(["spot.findBlemishes", {"sensitivity": blemishes, "maxPerFace": 6}])
     else:
-        if settings or args.soften > 0 or args.auto:
-            fail("--auto, --look, --develop and --soften need LightCraft; --engine basic only adjusts light and color evenly.")
+        if settings or args.soften > 0 or args.auto or locals_ or heal or blemishes is not None or wb_pick:
+            fail("--auto, --look, --develop, --soften, --local, --heal, --blemishes and --wb-pick need LightCraft; --engine basic only adjusts light and color evenly.")
         if args.light is None:
             args.light = "auto"
-        nudges = {}
+        nudges, pre, post = {}, [], []
     need_mask = args.background != "keep"
-    alpha = subject_mask(args.input, size, args.subject) if need_mask or args.light == "auto" or args.soften > 0 else None
+    need_people = (need_mask or args.light == "auto" or args.soften > 0 or id_photo
+                   or any(kind in ("people", "background", "top", "bottom") for kind, _, _ in locals_))
+    alpha = subject_mask(args.input, size, args.subject) if need_people else None
     img = load(args.input)
     rgb = np.asarray(img)
+    faces = faces_in(img) if (id_photo or crop or any(kind == "faces" for kind, _, _ in locals_)) else []
+    if any(kind == "faces" for kind, _, _ in locals_) and not faces:
+        fail("Found no face for --local faces; use --local people or radial=X,Y,R instead.")
     developed = None
     if use_lightcraft:
         import tempfile
         with tempfile.TemporaryDirectory() as tmp:
-            chosen = develop(args.input, os.path.join(tmp, "base.png"), args.auto, settings, nudges)
+            chosen = develop(args.input, os.path.join(tmp, "base.png"), args.auto, settings, nudges, pre, post)
             base = np.asarray(load(os.path.join(tmp, "base.png")))
+            # LightCraft hands back its pixels in sRGB (with that profile): the result carries LightCraft's profile,
+            # never the original's (a Display P3 profile on sRGB pixels would shift every color).
+            with Image.open(os.path.join(tmp, "base.png")) as developed_img:
+                info = dict(info, icc_profile=developed_img.info.get("icc_profile"))
             if base.shape != rgb.shape:
                 fail("LightCraft returned the photo at another size (%dx%d, not %dx%d)." % (base.shape[1], base.shape[0], rgb.shape[1], rgb.shape[0]))
+            soft = None
             if args.soften > 0:
-                # The same development with less skin texture, mixed in on the skin alone.
+                # The same development with less skin texture; its difference is mixed in on the skin alone.
                 soft_settings = dict(settings, **{"effects.texture": -60.0 * args.soften, "effects.clarity": -12.0 * args.soften})
-                develop(args.input, os.path.join(tmp, "soft.png"), args.auto, soft_settings, nudges)
+                develop(args.input, os.path.join(tmp, "soft.png"), args.auto, soft_settings, nudges, pre, post)
                 soft = np.asarray(load(os.path.join(tmp, "soft.png")))
+            composite = base
+            if locals_:
+                # Each region is the same development with its own changes on top, blended in with a soft mask: every
+                # pixel still comes from LightCraft's development of the original.
+                composite = base.copy()
+                for (kind, value, deltas), mask in zip(locals_, local_masks(locals_, img.size, alpha, faces)):
+                    layer_nudges = dict(nudges)
+                    for k, v in deltas.items():
+                        layer_nudges[k] = layer_nudges.get(k, 0.0) + v
+                    develop(args.input, os.path.join(tmp, "local.png"), args.auto, settings, layer_nudges, pre, post)
+                    layer = np.asarray(load(os.path.join(tmp, "local.png")))
+                    for y0 in range(0, base.shape[0], STRIP):
+                        y1 = min(base.shape[0], y0 + STRIP)
+                        a = rows_of(mask, img.size[0], img.size[1], y0, y1)[..., None]
+                        composite[y0:y1] = np.clip(composite[y0:y1] * (1.0 - a) + layer[y0:y1] * a + 0.5, 0, 255).astype(np.uint8)
+                    del layer
+            if soft is not None:
                 skin = skin_mask(rgb, alpha)
-                mixed = np.empty_like(base)
-                for y0 in range(0, base.shape[0], STRIP):
+                mixed = np.empty_like(composite)
+                for y0 in range(0, composite.shape[0], STRIP):
                     a = (skin[y0:y0 + STRIP] * 0.8)[..., None]
-                    mixed[y0:y0 + STRIP] = np.clip(base[y0:y0 + STRIP] * (1.0 - a) + soft[y0:y0 + STRIP] * a + 0.5, 0, 255).astype(np.uint8)
-                base = mixed
+                    change = soft[y0:y0 + STRIP].astype(np.float32) - base[y0:y0 + STRIP]
+                    mixed[y0:y0 + STRIP] = np.clip(composite[y0:y0 + STRIP] + change * a + 0.5, 0, 255).astype(np.uint8)
+                composite = mixed
                 del soft, skin
         developed = {"auto": chosen, "set": settings, "look": args.look, "nudge": nudges}
-        rgb = base
+        if wb_pick:
+            developed["wbPick"] = wb_pick
+        if locals_:
+            developed["local"] = [{"region": kind, "value": value, "adjust": deltas} for kind, value, deltas in locals_]
+        if heal:
+            developed["healed"] = len(heal)
+        if blemishes is not None:
+            developed["blemishes"] = FOUND.get("blemishes", [])
+        rgb = composite
     # The light is judged on the people (when found) from a small copy of the photo.
     probe_scale = 512.0 / max(img.size)
     probe_size = (max(1, int(img.size[0] * probe_scale)), max(1, int(img.size[1] * probe_scale)))
@@ -2521,39 +2818,76 @@ def cmd_retouch(args):
         tables = tone_tables(probe, args.light, args.exposure, args.warmth, args.contrast, weight)
         adjusted = adjust(rgb, tables, args.saturation)
     result = adjusted
+    share = None
     if need_mask:
         if alpha.mean() < 0.01:
             fail("Found no people or main subject to keep in this photo; use --background keep.")
-        soft = feather(alpha, img.size)
+        soft_alpha = feather(alpha, img.size)
         shadow = None
         if args.background == "smooth":
             background = smooth_background(adjusted, alpha)
         elif args.background == "studio":
             background, shadow = studio_background(alpha.shape, hex_color(args.color), alpha), contact_shadow(alpha)
+        elif args.background == "plain":
+            flat = np.array(hex_color(args.color), dtype=np.float32)
+            background = lambda y0, y1: np.broadcast_to(flat, (y1 - y0, img.size[0], 3))
         else:
             background, shadow = plate_background(args.background, img.size), contact_shadow(alpha)
         share = float(alpha.mean())
         warnings = cutout_warnings(img, alpha) if args.subject == "people" else []
         preview = os.path.splitext(args.output)[0] + "-cutout.jpg"
-        save_cutout_preview(img, soft, preview)
-        del alpha
+        save_cutout_preview(img, soft_alpha, preview)
         result = np.empty_like(adjusted)
         for y0 in range(0, adjusted.shape[0], STRIP):
             y1 = min(adjusted.shape[0], y0 + STRIP)
-            a = soft[y0:y1, :, None]
+            a = soft_alpha[y0:y1, :, None]
             bg = background(y0, y1)
             if shadow is not None:
                 bg = bg * (1.0 - shadow(y0, y1)[..., None])
             mix = adjusted[y0:y1].astype(np.float32) / 255.0 * a + bg * (1.0 - a)
             result[y0:y1] = np.clip(mix * 255.0 + 0.5, 0, 255).astype(np.uint8)
+        del soft_alpha
+    # Framing changes last, on the finished photo: a crop of the original's own pixels, never anything added.
+    box, id_report = None, None
+    if crop:
+        box = aspect_crop(img.size, ASPECTS[crop], subject_box(alpha, faces, img.size))
+    elif id_photo:
+        spec = ID_PHOTOS[id_photo]
+        if not faces:
+            fail("Found no face for an ID photo; it needs one person facing the camera.")
+        if len(faces) > 1:
+            fail("Found %d faces; an ID photo has one person alone." % len(faces))
+        top = head_top(alpha, faces[0])
+        box, target = id_crop(img.size, spec, faces[0], top)
+        if box is None:
+            fail("The photo has too little room around the head for a %s ID photo (the crop would go past its edges). Ask for a photo with more space above the head and below the shoulders." % id_photo)
+        head = (faces[0][1] + faces[0][3] - top) / float(box[3] - box[1])
+        id_report = {"spec": id_photo, "printMm": list(spec["mm"]), "pixels": list(spec["px"]), "headShare": round(head, 3),
+                     "allowedHeadShare": list(spec["head"]),
+                     "note": "The head is measured from the chin to the top of the hair the cut-out found: look at the result. "
+                             + ("A replaced background makes this a composite, which several authorities reject (China, Schengen and the UK ask for an unaltered photo): tell the user."
+                                if need_mask else "Check that the backdrop is plain and light as the rules ask.")}
+    if box is not None:
+        result = np.ascontiguousarray(result[box[1]:box[3], box[0]:box[2]])
+        if id_photo:
+            result = cv2.resize(result, tuple(ID_PHOTOS[id_photo]["px"]), interpolation=cv2.INTER_AREA)
+            spec = ID_PHOTOS[id_photo]
+            info = dict(info, dpi=(round(spec["px"][0] / (spec["mm"][0] / 25.4)), round(spec["px"][1] / (spec["mm"][1] / 25.4))))
     save(result, args.output, info)
-    report = {"ok": True, "input": args.input, "output": args.output, "size": list(img.size),
-         "background": args.background if args.background in ("keep", "smooth", "studio") else "plate",
+    report = {"ok": True, "input": args.input, "output": args.output, "size": [int(result.shape[1]), int(result.shape[0])],
+         "background": args.background if args.background in ("keep", "smooth", "studio", "plain") else "plate",
          "subjectShare": round(share, 3) if need_mask else (round(float(alpha.mean()), 3) if alpha is not None else None),
-         "params": {k: getattr(args, k) for k in ("engine", "manual", "look", "develop", "soften", "exposure", "warmth", "contrast", "saturation", "background", "subject", "color")},
+         "params": {k: getattr(args, k, None) for k in ("engine", "manual", "look", "develop", "soften", "exposure", "warmth", "contrast",
+                                                        "saturation", "background", "subject", "color", "local", "heal", "blemishes",
+                                                        "wb_pick", "crop", "id_photo")},
          "lightcraft": developed,
          # One item of the compare block the reply shows the photo in (the original beside the result).
          "compare": {"before": args.input, "after": args.output}}
+    if box is not None:
+        report["crop"] = list(box)
+        report["check"] = "check %s %s --crop %s" % (args.input, args.output, ",".join(str(v) for v in box))
+    if id_report:
+        report["idPhoto"] = id_report
     if need_mask:
         report["cutout"] = preview
         report["warnings"] = warnings
@@ -2593,16 +2927,28 @@ def cmd_check(args):
     import numpy as np
     from PIL import Image, ImageDraw
     original, edited = load(args.original), load(args.edited)
+    full_size = original.size
+    if getattr(args, "crop", None):
+        # retouch cropped it (--crop, --id-photo): compare with that part of the original. Face boxes stay in the
+        # original's coordinates and are taken from the cropped part.
+        x0, y0, x1, y1 = [int(v) for v in numbers(args.crop, 4, "--crop")]
+        if not (0 <= x0 < x1 <= original.size[0] and 0 <= y0 < y1 <= original.size[1]):
+            return out({"ok": False, "message": "--crop %s is not inside the original (%dx%d); pass the crop retouch printed." % (args.crop, original.size[0], original.size[1])})
+        original = original.crop((x0, y0, x1, y1))
+        if args.box:
+            args.box = ["%d,%d,%s" % (int(b.split(",")[0]) - x0, int(b.split(",")[1]) - y0, ",".join(b.split(",")[2:])) for b in args.box]
     reframed = original.size != edited.size
     if abs(original.size[0] / original.size[1] - edited.size[0] / edited.size[1]) > 0.01:
-        return out({"ok": False, "framing": "changed", "message": "The edited photo has a different shape than the original: it was cropped or redrawn. Retouch from the original without changing its framing."})
+        return out({"ok": False, "framing": "changed", "message": "The edited photo has a different shape than the original: it was cropped or redrawn. If retouch cropped it (--crop, --id-photo), pass its crop: check <original> <result> --crop x0,y0,x1,y1. Otherwise retouch from the original without changing its framing."})
     if reframed:
         edited = edited.resize(original.size)
     boxes = [list(map(int, b.split(","))) for b in args.box] if args.box else faces_in(original)
     source = "given" if args.box else "faces"
     if not boxes:
         # No face found (a profile, sunglasses, a hand over it): the top of the people stands in for the head.
-        alpha = subject_mask(args.original, original.size)
+        alpha = subject_mask(args.original, full_size)
+        if getattr(args, "crop", None):
+            alpha = alpha[y0:y1, x0:x1]
         ys, xs = np.where(alpha > 0.5)
         if not ys.size:
             return out({"ok": False, "message": "Found no face or person to compare; pass the face position with --box x,y,w,h."})
@@ -2656,7 +3002,7 @@ def main():
     r.add_argument("--engine", choices=["lightcraft", "basic"], default="lightcraft", help="lightcraft (default: every photo is developed with LightCraft); basic only when LightCraft cannot be installed")
     r.add_argument("--manual", action="store_true", help="Start from the photo as shot instead of LightCraft's auto settings")
     r.add_argument("--auto", action="store_true", help=argparse.SUPPRESS)
-    r.add_argument("--look", choices=sorted(LOOKS), help="A starting point: bright (lift the people and shadows), clear (less haze, more depth), sky (bring back a bright sky and deepen its blue)")
+    r.add_argument("--look", choices=sorted(LOOKS), help="A starting point: bright (lift the people and shadows), clear (less haze, more depth), sky (bring back a bright sky and deepen its blue), warm (a warm soft portrait), film (soft matte film tones and fine grain), clean (clean commercial whites, crisp), mono (black and white), night (keeps a night dark, holds lights back, less noise; starts from the photo as shot)")
     r.add_argument("--develop", action="append", metavar="CONTROL=VALUE", help="Any LightCraft develop control, repeatable, e.g. light.shadows=40 effects.dehaze=15 mixer.orange.sat=-5 (applied after --auto and --look)")
     r.add_argument("--soften", type=float, default=0.0, help="Soften skin only (0 none … 1 most; 0.3–0.5 natural); eyes, brows, lips and hair stay sharp")
     r.add_argument("--light", choices=["auto", "none"], default=None, help="--engine basic: the plain even brightening of the people's mid-tones (auto by default)")
@@ -2664,7 +3010,14 @@ def main():
     r.add_argument("--warmth", type=float, default=0.0, help="-1 cooler … 1 warmer (white balance); 0.3 is a soft warm studio tone")
     r.add_argument("--contrast", type=float, default=0.0, help="-1 flatter … 1 punchier on top of the rest; 0.15 is a light lift")
     r.add_argument("--saturation", type=float, default=0.0, help="-1 grey … 1 vivid on top of the rest; keep within ±0.2 for skin")
-    r.add_argument("--background", default="keep", help="keep (default) | smooth (iron out wrinkles in the photo's own backdrop) | studio (a seamless studio sweep in --color) | a path to a background picture")
+    r.add_argument("--wb-pick", metavar="X,Y", help="White balance from a neutral point (grey or white with detail, pixels in the original), e.g. a white wall or a grey shirt; never skin")
+    r.add_argument("--local", nargs="+", action="append", metavar="REGION CONTROL=DELTA",
+                   help="Change one region only, on top of the rest, repeatable: REGION is people | background | faces | top=F | bottom=F (a gradient fading out F of the way down/up, people left out) | radial=X,Y,R (pixels); then LightCraft controls as changes, e.g. --local faces light.exposure=0.3 light.shadows=15")
+    r.add_argument("--heal", action="append", metavar="X,Y,R", help="Heal one small spot (a blemish, a crumb, dust), center and radius in pixels of the original, repeatable; at most 2%% of the long edge")
+    r.add_argument("--blemishes", type=float, nargs="?", const=50.0, help="Let LightCraft find and heal small dark or red spots on faces (sensitivity 0..100, 50 if omitted; at most 6 a face; moles and freckles in clusters are left)")
+    r.add_argument("--crop", help="Crop to an aspect ratio around the people: %s" % " ".join(ASPECTS))
+    r.add_argument("--id-photo", help="Crop and size an ID photo by official head-size rules: %s (one person; use with --background plain --color #FFFFFF when the backdrop is not already plain)" % " ".join(ID_PHOTOS))
+    r.add_argument("--background", default="keep", help="keep (default) | smooth (iron out wrinkles in the photo's own backdrop) | studio (a seamless studio sweep in --color) | plain (one flat --color, for ID photos and product cut-outs) | a path to a background picture")
     r.add_argument("--subject", choices=sorted(MODELS_BY_SUBJECT), default="people", help="What to keep in front of a new background: people (default: everyone, their clothes and what they hold) or any (a product, a pet, an object)")
     r.add_argument("--color", default=STUDIO, help="Studio backdrop color #RRGGBB (default warm cream %s)" % STUDIO)
     c = sub.add_parser("check", help="Compare the faces of an edited photo with the original before delivering it")
@@ -2672,6 +3025,7 @@ def main():
     c.add_argument("edited")
     c.add_argument("-o", "--output", help="Where to save the side-by-side sheet (default next to the edited photo)")
     c.add_argument("--box", action="append", help="A face to compare, x,y,w,h in the original (repeatable); default: found automatically")
+    c.add_argument("--crop", help="x0,y0,x1,y1: the part of the original a cropped result shows (retouch prints it as crop)")
     m = sub.add_parser("_mask", help=argparse.SUPPRESS)
     m.add_argument("input")
     m.add_argument("output")
@@ -2722,9 +3076,13 @@ scripts. A first use in a new sandbox installs the tools (a minute or two); it s
 
 Light and color (LightCraft develops the whole photo, the same for every pixel, so faces keep all their detail):
 - By default retouch starts from LightCraft's auto settings (exposure, contrast, highlights, shadows, whites, blacks, vibrance) — a good
-  start for 修图/精修. \`--manual\` starts from the photo as shot instead (when the user only wants one thing changed, e.g. 只要暖一点).
-- \`--look bright|clear|sky\`: starting points. bright lifts the people and the shadows (调亮); clear takes out haze and adds depth (通透, 去灰,
-  白蒙蒙); sky brings back a bright sky and deepens its blue (天空过曝, when the sky still has some detail).
+  start for 修图/精修. \`--manual\` starts from the photo as shot instead: when the user only wants one thing changed (只要暖一点), when the
+  original's exposure is already right (auto turns bright landscapes and snow grey), for dusk and night, and for a set that must match.
+  If the result looks duller than the original, redo with \`--manual\`.
+- \`--look bright|clear|sky|warm|film|clean|mono|night\`: starting points. bright lifts the people and the shadows (调亮); clear takes out
+  haze and adds depth (通透, 去灰, 白蒙蒙); sky brings back a bright sky and deepens its blue (天空过曝, when the sky still has some detail);
+  warm is a warm soft portrait (暖色); film soft matte film tones with fine grain (胶片感, 复古); clean crisp commercial whites (商品, 美食,
+  商业风); mono black and white (黑白); night keeps a night dark, holds lights back and cleans noise (夜景). Styles only when asked.
 - \`--develop control=value\` (repeatable, after auto and --look): any LightCraft control. The useful ones:
   - light: \`light.exposure\` (stops, ±0.2–0.5), \`light.contrast\`, \`light.highlights\` (−40…−80 recovers a bright sky or white clothes),
     \`light.shadows\` (+20…+60 opens dark faces), \`light.whites\`, \`light.blacks\` (−5…−20 for depth)
@@ -2733,6 +3091,8 @@ Light and color (LightCraft develops the whole photo, the same for every pixel, 
   - sky and sea: \`mixer.blue.sat\`, \`mixer.blue.lum\` (−10…−25 deeper blue), \`mixer.aqua.sat\`
   - night or phone noise: \`detail.nrLuminance\` (20–40), \`detail.nrColor\` (25–50); crisper: \`detail.sharpenAmount\` (30–60)
   - all values are −100…100 unless shown; ranges past these look overdone on people.
+- \`--wb-pick X,Y\` (pixels in the original): white balance from a neutral that still has detail — a light grey or off-white wall, a grey
+  shirt, a white plate; never pure white, a reflection or skin (偏色, 发黄, 发蓝).
 - \`--exposure <stops>\`, \`--warmth -1..1\` (white balance; 0.2–0.4 a warm studio tone), \`--contrast -1..1\`, \`--saturation -1..1\`: nudges on top of
   everything above, also done by LightCraft (e.g. "再亮一点": the same options as before plus \`--exposure 0.2\`).
 - If retouch says LightCraft is not available, tell the user. Only if they still want the photo now, \`--engine basic\` makes a plain even
@@ -2742,11 +3102,26 @@ Skin:
 - \`--soften 0..1\` (磨皮): less skin texture on the people's skin only; eyes, brows, lips, hair, clothes and the background stay sharp.
   0.3–0.5 is a natural portrait, 0.2–0.3 for babies; never above 0.7 (it turns plastic). Nothing reshapes faces or bodies.
 
+Local changes (one region only, on top of everything above; each is LightCraft's development of the original blended in softly):
+- \`--local REGION CONTROL=DELTA …\` (repeatable). REGION: \`people\`, \`background\` (all but the people), \`faces\`, \`top=F\` (full at the top,
+  gone F of the way down, people left out: a sky), \`bottom=F\`, \`radial=X,Y,R\` (pixels). Controls as changes, e.g.
+  \`--local faces light.exposure=0.4 light.shadows=20\` (逆光脸黑), \`--local top=0.4 light.highlights=-40 mixer.blue.sat=10\` (压天空),
+  \`--local background light.exposure=-0.2\` (突出人物). Keep changes modest (about ±0.5 EV); larger ones glow around the edge.
+- \`--heal X,Y,R\` (repeatable, pixels; at most 2 % of the long edge): heal one small spot — a blemish, a scratch, a crumb, dust.
+  \`--blemishes [0..100]\`: LightCraft finds and heals small dark or red spots on faces (at most 6 a face). Moles, freckles and scars stay
+  unless the user asks. Look at every healed spot at 100 %.
+
+Framing (only when asked; the face check then needs the crop retouch prints):
+- \`--crop 1:1|4:5|3:2|…\`: the largest crop of that shape around the people.
+- \`--id-photo us|schengen|uk|cn|cn-visa|1inch|2inch\` (证件照, 护照, 签证照): crops and sizes by the official head-size rule, from the
+  photo as shot, no retouching (authorities reject altered photos). Read references/id-photos.md first.
+
 Background:
 - \`--background keep\` (default): the safest; use it when the background is fine or when the cut-out fails.
 - \`smooth\`: the photo's own backdrop ironed flat (wrinkles of a backdrop cloth or paper go; its color and light stay). For a plain cloth or
   wall, not for busy backgrounds (they turn into blur; use studio or a background picture).
 - \`studio\`: a seamless studio sweep in \`--color\` (default warm cream #EEE5D8) with a soft contact shadow ("摄影棚效果").
+- \`plain\`: one flat \`--color\` with no shading (an ID photo on white, a product on #FFFFFF).
 - a path to a picture: that background, cropped to fill (e.g. an empty seamless backdrop made with image_generate: no people).
 - \`--subject any\` keeps a product, a pet or an object instead of people.
 
@@ -2757,6 +3132,26 @@ Common asks:
 - 天空过曝: \`--look sky\`. Where the sky is pure white there is nothing to bring back: say so, and offer an AI-made sky (rule 5).
 - 肤色发黄发红: \`--develop mixer.orange.sat=-10 --develop mixer.orange.lum=10\`.
 - 摄影棚效果: \`--soften 0.35 --background studio\` (or smooth for a wrinkled backdrop).
+- 逆光 / 脸太黑: \`--local faces light.exposure=0.4 light.shadows=20\` (the sky and background stay).
+- 风景 / 天空: \`--manual --local top=0.4 light.highlights=-35 mixer.blue.sat=10\`, plus \`--develop effects.dehaze=8\` if hazy.
+- 痘痘 / 瑕疵: \`--soften 0.35 --blemishes\`, then \`--heal\` what it missed.
+- 夜景: \`--look night\`. 商品 / 白底: \`--look clean\` (white backdrop: \`--subject any --background plain --color #FFFFFF\`).
+- 证件照: \`--id-photo <spec>\` (references/id-photos.md).
+
+## More detail (read the one that applies before you start)
+
+In \`references/\` next to this SKILL.md (for Codex \`/home/gem/.codex/skills/aio-photo/references/\`):
+- \`workflow-and-quality.md\`: the order of decisions, when auto hurts, reviewing at three scales, sets of photos, output. For 精修 and
+  for any result that does not look clearly better.
+- \`scene-playbook.md\`: babies and children, portraits and groups, backlight, landscapes and sunsets, night, snow, products and food,
+  interiors, pets, black and white — with commands.
+- \`local-retouch.md\`: blemishes, redness, gentle dodge and burn, stains on clothes, redoing only what the user corrected.
+- \`looks-and-grading.md\`: what each look sets, color grading by hand, black and white mixing. For any style request.
+- \`background-compositing.md\`: new backgrounds, edge contamination, white specks, contact shadows, the edge review. Before any
+  background change and for edge complaints.
+- \`id-photos.md\`: official ID and passport photo rules and steps. For every 证件照.
+- \`lightcraft-controls.md\`: every control with its real range, and the engine used directly (RAW, other exports, native masks).
+- \`sources.md\`: where the methods come from.
 
 Save every result as a \`.jpg\` (retouch writes quality 95 with full color detail), also after any step you do yourself:
 never deliver a full-size photo as PNG. Several photos: one retouch per photo in a shell loop, same options.
@@ -2771,6 +3166,7 @@ never deliver a full-size photo as PNG. Several photos: one retouch per photo in
    \`\`\`bash
    python3 /home/gem/.codex/tools/aio-photo/aio-photo.py check <original> <result>
    \`\`\`
+   After \`--crop\` or \`--id-photo\` add the crop retouch printed: \`check <original> <result> --crop x0,y0,x1,y1\`.
    Deliver only when \`ok\` is true. Otherwise redo from the original with retouch: never edit the result, never deliver it.
 
 ## Delivering: a before/after comparison
@@ -2789,10 +3185,547 @@ block. Then one sentence on what changed. Do not show originals, cut-out preview
 
 ## Limits (say them honestly)
 
-- No reshaping (slimming, bigger eyes, a different smile): it changes who people are. Skin softening is the only skin retouching.
+- No reshaping (slimming, bigger eyes, a different smile): it changes who people are. Skin softening and healing small spots are the
+  only skin retouching.
+- No straightening or perspective correction (it would break the face check against the original); say so if asked.
 - Blown-out areas (pure white sky or skin) have no detail left to recover; only an AI-made replacement changes them (rule 5).
 - The cut-out follows the people's outline; fine wisps of hair against a busy background may blur. The preview shows it.
 `;
+
+/**
+ * The photo skill's reference files (references/<name> next to its SKILL.md): what SKILL.md links to for one kind of
+ * photo or problem, so the skill itself stays short. Model-facing, English; first written from the owner's own notes
+ * of 2026-10-29, checked against the bundled LightCraft and extended from published tutorials and official ID rules.
+ */
+export const PHOTO_REFERENCES: Record<string, string> = {
+  "workflow-and-quality.md": /* i18n-exempt: model-facing, Chinese trigger words */ `# Workflow and quality review
+
+Read for any 精修/专业修图, a set of photos, or when a first result does not look clearly better. Source numbers refer to
+[sources.md](sources.md).
+
+## Order of decisions
+
+This is the order to decide in, not LightCraft's internal pipeline. Change one problem at a time and stop when it looks right.
+
+1. **Read the original**: orientation, size, what the phone already did (HDR, sharpening, smoothing), which highlights and
+   shadows still hold detail. The histogram is a hint, not a score: snow, silhouettes, stage lights and speculars are
+   allowed to clip. [A1]
+2. **Purpose**: a record (ID photo, product color, a keepsake) stays true; a portrait or landscape may take a style.
+   Unstated: natural look, original framing, nothing added or removed.
+3. **White balance** before anything else, on the main light. Pick a neutral that still has detail (a light grey or
+   off-white wall, a grey shirt) with \`--wb-pick X,Y\`; never pure white, a reflection, a colored bounce or skin. Under
+   mixed light keep the background's own warmth or coolness. Neutral is not always best for portraits: a little warmth
+   (\`--warmth 0.1–0.3\`) is a choice. [A2, A8, S35]
+4. **Exposure from the subject's mid-tones**, then highlights, shadows, whites, blacks. Do not crush everything grey and
+   then pull shadows hard: that brings out noise and halos. [A1, A9]
+5. **Local light** only when the global result is right for one part and wrong for another (a dark face against snow, a
+   bright sky over a good foreground): \`--local\`. [A3, S16]
+6. **Color**: HSL changes hit everything of that color (orange is also wood and sunsets, red is also lips and clothes,
+   blue is also denim and shadows). Look at what else shares the color before moving a mixer slider. [S1, S7]
+7. **Detail**: noise reduction before sharpening; sharpen real edges only (\`detail.sharpenMasking\`). [S20, S21]
+8. **Style last** (\`--look\`, color grading), and only as far as the subject and the time of day allow.
+
+## LightCraft auto: when to turn it off
+
+retouch starts from LightCraft's auto settings. Auto aims for a "correct" mid exposure, so it:
+- darkens bright scenes (snow, beaches, a well-exposed landscape) and can make them grey and dull;
+- brightens dusk, night, stage and candle light toward daytime.
+
+Use \`--manual\` (start from the photo as shot) when the original's exposure is already right, for night and dusk, and for
+a set that must match. Compare the result with the original every time; if auto made it worse, redo with \`--manual\`.
+
+## Review at three scales
+
+1. **Phone size**: subject, mood, colors, distractions. Does it look clearly better than the original?
+2. **100 %** (crop with Python to look): eyes, skin texture, hair, fabric, noise, banding, heal seams, cut-out edges.
+   200–300 % only to find a defect; judge it again at 100 %.
+3. **The specific risk**: faces and hands for people, lines for buildings, color and labels for products, edges on dark
+   and light grounds for a new background, consistency for a set.
+
+Claim only what you looked at. \`check\` measures face detail, not taste, edges or identity; a photo where no face was
+found is not thereby fine.
+
+## A set of photos
+
+- Same light, same scene: one set of options for all of them (a shell loop), then look at each.
+- Exposure or light differs (indoor vs outdoor, front-lit vs backlit): group them and give each group its own options;
+  \`--manual\` plus the same \`--develop\` values keeps colors consistent, auto adapts exposure per photo.
+- Never copy local masks or heal spots from one photo to another: subjects move. [S36]
+- Never use one photo (or its result) as pixels for another.
+
+## Output
+
+- Full-size JPEG (retouch writes quality 95, full color detail, sRGB with LightCraft's profile). PNG only for a
+  transparent or lossless request, never a full-size delivery.
+- Changing the DPI number adds no detail; upscaling is not retouching.
+- Prints: screen and paper match only on calibrated equipment; do not promise it.
+- Open the saved file again before delivering: orientation, size, edges, sky gradients, JPEG blocks, skin.
+
+## Situations to test your decision against
+
+| Input or feedback | Right decision |
+|---|---|
+| Baby in natural light | no adult skin softening, whitening or clarity; keep the fine hair |
+| Dusk landscape | \`--manual\`; do not turn it into daytime; no skin softening |
+| Dark people, good sky | \`--local people\` or \`faces\`, not more global exposure |
+| Highlights lost in a JPEG, RAW available | try the RAW (see [lightcraft-controls.md](lightcraft-controls.md)) before saying it is gone |
+| Window light plus tungsten | white balance on the main light, keep the other warm; do not strip all orange |
+| Neon night | \`--look night\`, check single-channel clipping, keep the dark |
+| White clothes on white, new background | check the clothing edge, never erode the whole outline |
+| "Only the shadows" | keep everything else; change only that option |
+| Glass bottle, jewelry | keep text, reflections, transparency; no opaque cut-out |
+| Indoor and outdoor shots in one set | group them, options per group |
+`,
+  "scene-playbook.md": /* i18n-exempt: model-facing, Chinese trigger words */ `# Scene playbook
+
+Read when the photo is one of these kinds. Values are gentle starting points to judge on the result, not presets or
+"best" values from the sources. \`R\` means \`python3 /home/gem/.codex/tools/aio-photo/aio-photo.py retouch <original> -o <out>.jpg\`.
+Source numbers refer to [sources.md](sources.md).
+
+## Babies, children, family
+
+- Goal: soft, natural, with volume; the expression, fine hair, lashes, catchlights, creases and natural redness stay.
+- Skin: usually no softening; if wanted \`--soften 0.1–0.25\`. Never adult values, never clarity or texture plus on babies.
+- Red patches: \`--develop mixer.red.sat=-8 --develop mixer.red.lum=5\` (moves all reds, so check clothes and lips).
+  Yellowish skin: a slight magenta tint (\`--develop wb.tint=5\`) or \`mixer.orange.sat=-5\`, checked against a neutral white.
+  Never present an edit as a health judgement (jaundice is for a doctor). [S22]
+- Fix only what is clearly a flaw: a scratch, a milk spot, a crumb (\`--heal\`). Birthmarks and moles stay. [S23]
+- Adults and the baby in one frame: the baby's skin decides \`--soften\`; keep the hands that hold the baby whole.
+- Example: \`R --soften 0.2 --look bright\`
+
+## Adult portraits, couples, groups
+
+- Main light and overall skin tone first, then local fixes ([local-retouch.md](local-retouch.md)).
+- Skin too orange or green-orange: a small \`mixer.orange.sat=-5…-10\` and \`mixer.orange.hue=-5\` (toward red); larger
+  pushes look painted. [S1]
+- Every person has their own skin tone and light; do not make all faces the same.
+- Eyes and teeth: leave them unless asked; never bright white eyes or teeth (they look fake, and changing how someone
+  looks needs their consent). [S6, S8]
+- Background separation: \`--local background light.exposure=-0.2\` or \`effects.clarity=-10\`, or a slightly cooler
+  background (\`wb.temp=-300\`) against warm skin. [S1]
+- Example: \`R --soften 0.35 --look warm --blemishes\`
+
+## Backlit, window light
+
+- Decide first: an intended silhouette, or a face that is really too dark.
+- Lift the face, not the sky: \`--local faces light.exposure=0.3–0.6 light.shadows=20\` (or \`people\`). Keep the rim light.
+- Check the lifted shadows for colored noise and a grey face; dark areas with no detail stay dark. [S15]
+- Example: \`R --manual --local faces light.exposure=0.5 light.shadows=20 --develop light.highlights=-30\`
+
+## Landscapes, sea, sunsets, haze
+
+- Pick the subject (light, ridge, clouds, water, foreground) and keep the time of day.
+- If the original is well exposed, \`--manual\`: auto darkens bright landscapes and turns them grey.
+- Sky: \`--local top=0.35–0.5 light.highlights=-30…-50 mixer.blue.sat=10 mixer.blue.lum=-10\` (fades out by that share of
+  the height; people are left out). Check that ridges, trees and buildings at the horizon do not darken in a band; lower
+  F if they do. [S16]
+- Foreground: \`--local bottom=0.3 light.shadows=20 wb.temp=200\`. [S16]
+- Sunset glow: keep the warmth; exposure down to protect the sky, shadows and blacks up; the sun disc may stay clipped. [S15]
+- Dehaze sparingly (5–15): it adds contrast and saturation fast and removes the air between near and far. Haze and fog
+  may stay. [S17]
+- Sea: keep reflections and texture, not everything deep blue. Foliage: no fluorescent green.
+- Example: \`R --manual --develop effects.dehaze=8 --develop color.vibrance=10 --local top=0.35 light.highlights=-35 mixer.blue.sat=12 mixer.blue.lum=-10\`
+
+## Night, low light, stage, stars
+
+- \`--look night\` (starts from the photo as shot, holds lights back, cleans noise). Keep the dark sky, light colors and
+  black level; lift only the subject.
+- Noise: color noise first (\`detail.nrColor\` 25–50), then luminance (\`detail.nrLuminance\` 15–35); more turns skin and
+  stone to wax. Sharpen lightly with masking after. Judge at 100 % and at fit. [S20, S21]
+- Stars, hair, window frames and signs are detail, not noise. Motion blur and missed focus cannot be fixed.
+- Mixed light: white balance on the subject's light; tame a second cast with a mixer saturation cut on that color. [S19]
+
+## Snow, white clothes, high-key
+
+- White should be bright and still hold texture. Auto tends to make snow grey: try \`--manual --develop light.whites=10\`.
+- Snow shadows may be blue; do not bleach everything neutral. [A2]
+
+## Products, food, flowers
+
+- True color, material, outline and labels come first; no \`--soften\`. Keep labels and text unless the user asks. [S18]
+- \`--look clean\`; white balance from a grey card or a white plate (\`--wb-pick\`).
+- Dust, crumbs and specks: \`--heal\`. A pure white backdrop: \`--subject any --background plain --color #FFFFFF\` (look
+  at the cut-out: glass, jewelry and liquids are partly transparent and do not cut out cleanly). [S34]
+- Food: keep wet highlights, no orange meat or neon greens. Flowers: check red channel clipping instead of adding saturation.
+- Crop for a listing: \`--crop 1:1\` or \`--crop 4:5\`.
+
+## Indoors, architecture
+
+- Keep the relation between window light and lamps; a white wall need not turn blue.
+- Lines and perspective: retouch does not straighten (it would change the framing check). Say so if asked; do not warp
+  rooms or furniture.
+
+## Pets, fur, feathers
+
+- No skin softening. Keep eyes, nose, whiskers, fur direction and markings; black fur not grey, white fur not clipped.
+- New background: \`--subject any\`; check ears, tail and whiskers in the cut-out preview.
+
+## Black and white, film, explicit styles
+
+- Only on request or when the user agreed to a style. \`--look mono\` builds black and white from the photo's own colors;
+  judge the tonal separation, not just the lack of color.
+- \`--look film\`: matte blacks, cool shadows and warm highlights, less saturation, fine grain. Intended grain is not noise.
+- A style never hides an exposure or retouching flaw.
+
+## New backgrounds and edge rework
+
+Read [background-compositing.md](background-compositing.md).
+`,
+  "local-retouch.md": /* i18n-exempt: model-facing, Chinese trigger words */ `# Local retouching: skin, spots, dodge and burn, stains
+
+Read when automatic softening leaves visible blemishes or redness, when light should follow the face, or when the user
+asks to clean a stain off clothes. Light and color always come from LightCraft's development of the original; local
+work only decides where.
+
+## Decide what the problem is
+
+Look at the face at 100 % first. Blemishes, redness and rough texture are different problems with different tools; pores
+on the nose, stubble, moles and freckles are not blemishes. Removing too much detail looks unnatural; keep what makes the
+person who they are. [S11, S12]
+
+| Problem | Tool |
+|---|---|
+| Rough texture overall | \`--soften 0.3–0.5\` (adults), 0.1–0.25 (babies); never above 0.7 |
+| A few spots (spots, scratches, crumbs) | \`--blemishes\` (LightCraft finds small dark or red round spots on faces and heals them) or \`--heal X,Y,R\` for each spot you saw |
+| Redness on cheeks or nose | \`--develop mixer.red.sat=-8…-15\` with \`mixer.red.lum=+5\`; it moves every red, so check lips and clothes |
+| Uneven light on the face | dodge and burn with \`--local\` (below) |
+
+\`--soften 0.6\` does not fix spots or redness; it is a different problem, not a stronger setting.
+
+## Heal spots
+
+- \`--blemishes [0..100]\` (50 by default): at most 6 spots per face; faces smaller than about 160 px wide and faces with
+  many candidates (stubble, freckles) get none. The output lists the spots under \`lightcraft.blemishes\`; look at them.
+- \`--heal X,Y,R\` (repeatable, pixels in the original; R at most 2 % of the long edge): find the spot by cropping the
+  original with Python at 100 %, then give its centre and a radius just covering it. LightCraft heals from the best
+  matching skin nearby.
+- Never heal moles that identify someone, freckles, scars the user did not ask about, or features (eyes, lips, brows).
+- Check every healed spot at 100 %: texture continues, no smudge, no repeated pattern. Then run \`check\`.
+
+## Dodge and burn, gently
+
+Follow the light the photo already has: brighten what is already lit (forehead, nose bridge, cheekbone), darken what is
+already shadowed (under the jaw, beside the nose). A highlight on the wrong side looks wrong even when nobody can say why.
+Dodge more than burn; heavy burning looks muddy. Build up small changes; the result should be hard to spot next to the
+original. [S9, S10]
+
+- A face too dark against its surroundings: \`--local faces light.exposure=0.2–0.5 light.shadows=10–25\`.
+- A spot of light on the subject (a vignette in reverse): \`--local radial=X,Y,R light.exposure=0.2\` (full inside R/2,
+  fading to nothing at 1.5 R, pixels in the original).
+- Subject separation: \`--local background light.exposure=-0.2\` (people kept).
+- No reshaping: nothing makes a face slimmer, a nose smaller or eyes bigger.
+
+## Stains on clothes or hats
+
+- First \`--heal\` small marks (it keeps the fabric's texture, folds, seams, printed or embroidered text).
+- A larger stain heal cannot fix: say so. Only if the user wants it, an AI patch may be made for **that object alone**
+  (crop just the stained part, ask image_generate to remove the stain keeping size and framing), aligned back and blended
+  with a soft mask that covers only the stain. Never on faces, skin, hair or hands; text and embroidery must match the
+  original; tell the user which part is AI-made. Then run \`check\` on the final photo.
+
+## After the user corrects you
+
+"The hat is fine, the skin is not": keep what was approved and redo only the skin. Every new development still starts
+from the original; never feed the previous result back in. Compare original, new version and the previous one at 100 %
+where it changed.
+`,
+  "looks-and-grading.md": /* i18n-exempt: model-facing, Chinese trigger words */ `# Looks and color grading
+
+Read when the user asks for a style (暖色, 胶片感, 日系, 清新, 高级感, 黑白, 夜景, 商业风) or a look needs tuning. A style comes
+after the photo is corrected (white balance, exposure); grading cannot fix a wrong white balance and cannot take
+saturation away. [S2]
+
+## The built-in looks (\`--look\`)
+
+| Look | What it sets (LightCraft controls) | For |
+|---|---|---|
+| bright | exposure +0.2, shadows +30, highlights −25, vibrance +10 | dark people, 调亮 |
+| clear | dehaze +12, clarity +8, blacks −8, vibrance +12 | haze, 通透, 去灰 |
+| sky | highlights −70, whites −15, blue sat +15 / lum −15, dehaze +8 | a bright sky that still has detail |
+| warm | white balance +350 K, vibrance +8, orange sat −6 / lum +6, gold highlights (hue 40, sat 10), clarity −5 | warm, soft portraits, 暖色 |
+| film | matte curve (blacks lifted to 5 %, whites eased to 96 %), cool shadows (hue 200, sat 12), warm highlights (hue 42, sat 10), saturation −10, fine grain 12 | 胶片感, 复古 |
+| clean | whites +12, blacks −6, vibrance +6, clarity +6, dehaze +3, sharpening 35 with masking 40 | products, food, catalog portraits, 商业风 |
+| mono | black and white mixed from the photo's own colors, contrast +12, clarity +6 | 黑白 |
+| night | starts from the photo as shot; highlights −45, shadows +20, blacks −8, noise reduction (luminance 25, color 40), light sharpening | night, low light |
+
+Any \`--develop\` value replaces the look's value for that control; \`--warmth\` and the other nudges add on top. Judge the
+result: a look is a starting point, and one strength does not fit every photo.
+
+## Grading by hand (\`grading.*\`)
+
+- Hue wheels: shadows, midtones, highlights, global; \`sat\` 5–15 is already visible, 20+ is strong. [S2]
+- Choose hues already in the photo, or complementary pairs (cool shadows ~200–220 with warm highlights ~35–50). [S2]
+- \`grading.blending\` (50): lower keeps shadow and highlight colors apart, higher mixes them. \`grading.balance\`: negative
+  counts more of the photo as shadow. [S2]
+- Warm sunset or portrait: orange (hue ~35–45) in highlights and midtones, a slight highlight luminance lift; leave the
+  shadows uncolored, only darker. [S15]
+- Film: lift the black point with a curve (the film look's \`develop.curve\`), lower saturation, complementary tones in
+  moderation, grain last and judged at 100 %. [S13, S14]
+- Clean commercial: neutral white balance from a grey or white reference, colors checked against the product, no grain,
+  no colored grading. [S7, S18]
+- Skin must still look like skin after grading: check faces at 100 % and keep \`grading.highlights.sat\` low on portraits.
+
+## Black and white
+
+\`--look mono\` uses LightCraft's automatic mix from the photo's colors. To change how a color turns grey, add
+\`--develop bw.<red|orange|yellow|green|aqua|blue|purple|magenta>=±N\` (e.g. \`bw.orange=10\` brighter skin, \`bw.blue=-20\`
+darker sky; foliage is mostly yellow and green, so darken it with both, e.g. \`bw.yellow=-40 bw.green=-40\`). Judge tonal separation between subject and background, not just the absence of color.
+`,
+  "background-compositing.md": /* i18n-exempt: model-facing, Chinese trigger words */ `# New backgrounds and clean edges
+
+Read before changing a background (\`--background smooth|studio|plain|<picture>\`) and whenever an edge, a white speck or
+a floating person needs rework. The people, expressions, hands, clothes, props and framing always come from the original;
+light and color from LightCraft; cut-outs, masks and blending may use Pillow/OpenCV. Never redraw people.
+
+## Keep the work in layers
+
+- Keep the background picture, the people mask, edge fixes and shadow as separate files in the task's \`.tmp/\`. When
+  the user points at one thing ("the shadow", "the sleeve", "white dots"), redo that layer only and keep what was approved.
+- Every new composite still takes the people's pixels from the original (developed by retouch), never from the last result.
+- A new background must match the light direction, color temperature, camera height, scale, depth of field and floor
+  perspective. An AI-made empty backdrop (no people) is fine for \`--background <picture>\`; say it is AI-made. [A6]
+
+## Diagnose before fixing the edge
+
+Three different failures; feathering or blurring more fixes none of them:
+
+1. **Wrong mask shape**: a missing hat brim, a changed sleeve, lost fingers or a cord, a piece of old background still
+   attached.
+2. **Color contamination**: the outline is right but old background color sits in it (white specks, a bright rim, grain).
+3. **No ground contact**: a clean outline, but the person floats, or the floor gets a few separate grey blobs.
+
+Automatic cut-outs can leave light background crumbs without any warning. Look at the \`cutout\` preview every time.
+
+## Mask and edge color
+
+- Walk the outline against the original: hat brim, glasses and cords, below the ears, neck, collar, both cuffs, trouser
+  hems, between fingers, socks. White clothes against a light backdrop need special care at corners and folds; never
+  erode the whole outline to make it cleaner.
+- Remove isolated pieces of old background first, then attached ones. Never "keep only the largest region": several
+  people, separate pieces of clothing and small props would be deleted.
+- Attached light fragments: remove them only near the confirmed edge, judged by the original background's color and
+  position there; never delete "everything light" (white shirts, glasses frames, embroidery, nails, real highlights).
+  Thresholds and coordinates belong to this photo only.
+- Contaminated edge color: fix the color, not just the alpha. In a narrow band, extend the color of trusted pixels just
+  inside the same object outward, then anti-alias. Hard edges (a brim, a collar) stay hard; hair and thin cords keep a
+  soft partial transparency. Decontaminate only where contamination is confirmed. [A5]
+- Keep transitions narrow and smooth at full size; a fixed feather in pixels is not right for every resolution.
+- Blend in one color space (retouch works in sRGB); premultiplied alpha used as straight alpha makes dark or light rims.
+  Glass, hair and reflective objects are not fully opaque.
+
+## Shadows and contact
+
+- A contact shadow belongs under what touches the ground (hands, seat, hem, soles); parts higher up cast softer, lighter
+  shadow in the scene's light direction. A few elliptical grey blobs or one band under the lowest point look fake.
+- When the original floor is simple and its real shadow separable, keep its contact geometry as a soft darkening layer on
+  the new floor; when materials or light differ a lot, rebuild it.
+- Check hands, both feet and the hem for contact, and the shadow for continuity: no black edge, no heavy patch, no floating.
+
+## Before delivering
+
+1. Whole photo: light direction, depth, scale, floor perspective, contact.
+2. Put the cut-out on a dark and on a contrasting plain color (inspection images only, not delivered) and walk the whole
+   outline: dark shows white specks and halos, the other shows holes and dark leftovers.
+3. Every outline segment at 100 %; cords, cuffs, fingers at 200–300 % to locate, then judge at 100 % again; isolated and
+   attached specks alike, not only the spot the user mentioned.
+4. Back on the final background: every fixed segment and the shadow, against the original and the previous version.
+5. \`check <original> <final>\`; deliver only with \`ok: true\` and your own look passing. The face score says nothing about
+   edges or taste.
+`,
+  "id-photos.md": /* i18n-exempt: model-facing, Chinese trigger words */ `# ID and passport photos (证件照)
+
+Read whenever the user wants a passport, visa, ID or 证件照 photo. The rules come from the authorities' own pages
+([sources.md](sources.md), read 2026-10-31); rules change, so tell the user to confirm with the office they apply to.
+
+## What every authority says
+
+Almost all of them want the photo **unaltered**: no retouching, filters, composites or AI. So for an ID photo retouch:
+- only frames and sizes the photo by the head-size rule, starting from the photo as shot (no auto, no looks, no
+  softening, no heal, no local changes: \`--id-photo\` refuses them);
+- may correct light and white balance if the original is too dark or tinted (\`--exposure\`, \`--wb-pick\`; China's visa page
+  asks for a natural tone, neither over nor under exposed);
+- replaces the background (\`--background plain --color #FFFFFF\`) only when the user accepts that this makes a composite,
+  which China ("no alterations, no composite photos"), Schengen consulates and the UK ("unaltered by computer software")
+  may reject. Best is a photo taken against a plain light wall, with \`--background keep\`.
+
+Canada forbids any edit, cropping included: do not make Canadian passport photos; tell the user to use the original as
+taken by the photographer.
+
+## Specs (\`--id-photo SPEC\`)
+
+| SPEC | Print | Head (chin to top of hair) | Other rules | Output |
+|---|---|---|---|---|
+| \`us\` | 2 × 2 in (51 × 51 mm) | 1–1 3/8 in (25–35 mm), 50–69 % of the height | plain white or off-white background, no glasses, taken in the last 6 months [S24] | 1200 × 1200 px |
+| \`schengen\` | 35 × 45 mm | 32–36 mm (face 70–80 % of the photo) | white or off-white; glasses only if frames do not cover the eyes; not older than 3–6 months [S27, S28] | 827 × 1063 px |
+| \`uk\` | 35 × 45 mm (not trimmed from a larger photo) | 29–34 mm | plain cream or light grey, no shadows; digital at least 600 × 750 px, taken in the last month [S25, S26] | 827 × 1063 px |
+| \`cn\` | 33 × 48 mm (passport, travel document) | 28–33 mm, head width 15–22 mm; 3–5 mm above the head, at least 7 mm below the chin | white background, color, untinted glasses only [S29] | 390 × 567 px |
+| \`cn-visa\` | 33 × 48 mm | as \`cn\` | online upload JPEG at most 354 × 472, 40–120 KB; white or near-white, ears visible [S30, S31, S32] | 354 × 472 px |
+| \`1inch\` / \`2inch\` | 25 × 35 / 35 × 49 mm | 60–70 % (convention, no official rule) | common Chinese 一寸/二寸 print sizes | 295 × 413 / 413 × 579 px |
+
+Japan's passport photo (35 × 45 mm, head 34 ± 2 mm) could not be checked on MOFA's page; use \`schengen\` framing only if
+the user confirms. US eye-height and digital-size rules could not be checked either.
+
+## Steps
+
+1. The original must show one person facing the camera, the whole head with room above and the shoulders below; a
+   turned head, sunglasses or a hat are refused by the rules, not fixed by editing. Say so before cropping.
+2. \`retouch <original> -o <task>/<name>-id.jpg --id-photo us\` (add \`--exposure\`/\`--wb-pick\` only if needed, and the plain
+   background only if the user agreed to a composite).
+3. Read \`idPhoto.headShare\` against \`allowedHeadShare\` and look at the result: the top of the hair as the cut-out found
+   it, the chin, the eyes level and open, no shadows on the face. Big hair or a hat brim can mislead the head measure.
+4. Check with the crop retouch printed: \`check <original> <result> --crop x0,y0,x1,y1\`.
+5. Deliver the JPEG at the spec's pixels (with the right DPI for printing at the stated size); for a print sheet, tile
+   copies on a 4 × 6 in page only if asked.
+`,
+  "lightcraft-controls.md": /* i18n-exempt: model-facing, Chinese trigger words */ `# LightCraft controls and the engine itself
+
+Read when you need a control beyond the common ones in SKILL.md, a RAW or HEIC original, or an export retouch does not
+offer. Checked against the bundled LightCraft 0.14.0 (\`controls --json\`, \`commands --json\`, real runs) on 2026-10-31. Do
+not update or install another copy for ordinary retouching.
+
+\`\`\`bash
+L=/home/gem/.codex/tools/aio-photo/lightcraft-0.14.0/bin/lightcraft-cli
+$L controls --json      # every control: id, range, default
+$L commands --json      # every command and its parameters
+\`\`\`
+
+## Controls (\`--develop ID=VALUE\` sets; \`--local REGION ID=DELTA\` changes from there)
+
+| Control | Range | Gentle start, what to watch |
+|---|---|---|
+| \`light.exposure\` | −5…5 EV | ±0.1–0.4; a dark subject under a good sky is a \`--local\` job |
+| \`light.contrast\` | −100…100 | ±5–15; check skin and shadows |
+| \`light.highlights\` | −100…100 | −15…−40 where highlights still hold detail; −60…−80 only for skies and white clothes |
+| \`light.shadows\` | −100…100 | +10…+30, more only with noise checked |
+| \`light.whites\` / \`light.blacks\` | −100…100 | ±5–15; do not force the histogram to touch both ends |
+| \`wb.temp\` | 2000…50000 (K) | as shot ≈ 6500 on a JPEG; \`--warmth 0.1\` ≈ +250. Use \`--wb-pick\` for a neutral |
+| \`wb.tint\` | −150…150 | small: green ↔ magenta |
+| \`color.vibrance\` / \`color.saturation\` | −100…100 | ±5–10; vibrance is not a skin protector |
+| \`effects.dehaze\` | −100…100 | +3…+15; keep the air between near and far |
+| \`effects.clarity\` / \`effects.texture\` | −100…100 | landscapes +3…+10; never plus on babies' skin; skin softening is \`--soften\` |
+| \`mixer.<red|orange|yellow|green|aqua|blue|purple|magenta>.<hue|sat|lum>\` | −100…100 | small steps; check everything of that color |
+| \`grading.<shadows|midtones|highlights|global>.hue\` / \`.sat\` / \`.lum\` | hue 0…360, sat 0…100, lum −100…100 | sat 5–15 is visible; see [looks-and-grading.md](looks-and-grading.md) |
+| \`grading.blending\` / \`grading.balance\` | 0…100 (50) / −100…100 | blending 0 keeps the ranges apart; balance left = more counts as shadow |
+| \`curve.highlights/lights/darks/shadows\` | −100…100 | the parametric tone curve |
+| \`vignette.amount\` (+ midpoint, roundness, feather) | −100…100 | −5…−15 for a quiet edge; never on ID or product photos |
+| \`grain.amount\` / \`.size\` / \`.roughness\` | 0…100 | 5–15 for film; judge at 100 % |
+| \`detail.nrLuminance\` / \`detail.nrColor\` | 0…100 | 10–30 / 15–40 when there is noise; more turns faces to wax |
+| \`detail.sharpenAmount\` | 0…150 | 10–40; phone photos are often sharpened already |
+| \`detail.sharpenRadius\` / \`.sharpenDetail\` / \`.sharpenMasking\` | 0.5…3 / 0…100 / 0…100 | masking 40–60 keeps smooth areas (skin, sky) unsharpened |
+| \`optics.defringePurple\` / \`optics.defringeGreen\` | 0…20 | only for real fringes; real purple or green objects lose color too |
+| \`geometry.*\`, \`crop.angle\` | | change the framing; retouch does not use them (the face check compares unchanged framing) |
+
+\`--soften\` is the wrapper's 0…1 strength (a second development with less texture, mixed in on skin only), not a
+LightCraft control.
+
+## What retouch does with LightCraft
+
+Every development runs from the original: auto (unless \`--manual\`), \`--wb-pick\`, the look and \`--develop\` values,
+the nudges (\`--exposure\`, \`--warmth\`, \`--contrast\`, \`--saturation\`), then the look's commands (black and white, curve) and
+heal spots. Each \`--local\` region is one more development with its changes added, blended in with a soft mask; the
+result is sRGB with LightCraft's profile.
+
+## The engine directly (only when retouch cannot)
+
+Use the same binary, one \`run\` per photo (separate runs do not share edits), outputs in the task folder, temporary files
+in its \`.tmp/\`; give the run \`XDG_CONFIG_HOME=/home/gem/.codex/tools/aio-photo/lightcraft-config\` so it uses the tool's
+own settings.
+
+\`\`\`bash
+$L run --import "<original>" develop.auto \\
+  mask.add '{"kind":"linear","start":[0.5,0.0],"end":[0.5,0.45],"name":"sky"}' \\
+  mask.adjust '{"values":{"exposure":-0.3,"highlights":-30}}' \\
+  app.export '{"path":"<task>/<name>.jpg","format":"jpeg","longEdge":0,"quality":95,"colorSpace":"srgb","metadata":"none"}'
+\`\`\`
+
+- \`app.export\` defaults to a 3000 px long edge: always pass \`longEdge: 0\` for full size. Formats: jpeg, png, tiff, webp,
+  avif, jxl; \`colorSpace: srgb|displayP3|adobeRgb|proPhoto|rec2020\`, \`bitDepth\` 8/16 for png/tiff.
+- Masks without models: \`linear\` (\`start\`/\`end\`, normalized), \`radial\` (\`center\`, \`rx\`, \`ry\`, \`angle\`, \`feather\`), \`brush\`,
+  \`luminanceRange\`, \`colorRange\`; combine with \`mask.addComponent\` (\`op: add|subtract|intersect\`). \`mask.adjust\` takes
+  local keys (\`exposure\`, \`contrast\`, \`highlights\`, \`shadows\`, \`whites\`, \`blacks\`, \`temp\`, \`tint\`, \`texture\`, \`clarity\`,
+  \`dehaze\`, \`saturation\`, …), not the global control ids. A linear mask is not a sky mask: it covers mountains and people
+  too unless subtracted.
+- \`object\` and \`prompt\` masks need the SAM 3 model (about 3.4 GB, Meta's licence, not installed); do not download it.
+  \`sky\` and \`subject\` run without it but are rough here: in a test the sky mask also darkened the upper mountains. Look at
+  the effect with a strong value first; retouch's own cut-out (\`--local people|background\`) and \`top=F\` are the tested
+  ways.
+- \`spot.add {mode: heal|clone|fill, points, size}\` (size ≈ the spot's diameter as a share of the long edge);
+  \`develop.wbPick {x, y}\`; \`crop.autoStraighten\`, \`geometry.upright {mode}\` change the framing.
+- RAW and HEIC: retouch reads with Pillow first; a RAW it cannot open may still develop in LightCraft. Say whether the
+  full RAW or only its embedded preview was developed; a preview is not a RAW recovery.
+
+A direct run still needs the face \`check\` and your own look before delivery.
+`,
+  "sources.md": /* i18n-exempt: model-facing, Chinese trigger words */ `# Sources
+
+The method notes in these references summarize the pages below in our own words; they are not copies. Starting values,
+scene choices and review checks are this skill's own judgement unless a source is cited, and a slider value from
+Lightroom or Capture One does not carry over one to one to LightCraft. Pages not actually read are not listed as read.
+
+## Tutorials and guides (read 2026-10-31)
+
+- S1 Fstoppers, How to Edit Portrait Skin Tones in Lightroom — https://fstoppers.com/education/how-edit-portrait-skin-tones-lightroom-902830
+- S2 Adobe Blog, What is Color Grading in Lightroom? — https://blog.adobe.com/en/publish/2020/10/20/introducing-color-grading
+- S6 Digital Photography School, How to Edit Portraits in Lightroom — https://digital-photography-school.com/11-steps-basic-portrait-editing-lightroom-beginners-guide/
+- S7 Capture One Blog, Beauty retouch by Michael Woloszynowicz — https://www.captureone.com/blog/portrait-and-beauty-retouching-workflow
+- S8 Digital Photography School, How to Whiten Teeth in Lightroom — https://digital-photography-school.com/how-to-whiten-teeth-in-lightroom/
+- S9 PHLEARN, Dodge and Burn in Photoshop With Curves — https://phlearn.com/tutorial/how-to-dodge-and-burn-in-photoshop/
+- S10 Digital Photography School, The Simple Secrets of Dodging and Burning — https://digital-photography-school.com/more-than-a-vignette-the-simple-secrets-of-dodging-and-burning/
+- S11 PHLEARN, Advanced Portrait Retouching in Photoshop — https://phlearn.com/tutorial/advanced-portrait-retouching-photoshop/
+- S12 SLR Lounge, Frequency separation in Photoshop: the complete guide — https://www.slrlounge.com/the-many-faces-of-frequency-separation/
+- S13 SLR Lounge, Adding a Matte Look in Lightroom — https://www.slrlounge.com/adding-matte-look-lightroom-easy/
+- S14 Light Stalking, How To Create The Film Look In Lightroom Without Presets — https://www.lightstalking.com/how-to-create-the-film-look-in-lightroom-without-presets/
+- S15 Fstoppers, Raising Blacks for Sunset Glow in Lightroom — https://fstoppers.com/landscapes/why-raising-blacks-can-make-lightroom-sunset-glow-905015
+- S16 Adobe Learn, Edit a landscape photo with linear gradient adjustments — https://www.adobe.com/au/learn/lightroom-cc/web/linear-gradient-tool
+- S17 Fstoppers, The Good, Bad, and the Ugly of Lightroom's Dehaze Tool — https://fstoppers.com/lightroom/good-bad-and-ugly-lightrooms-dehaze-tool-330394
+- S18 Adobe, Product photography: tips and techniques — https://www.adobe.com/creativecloud/photography/type/product-photography.html
+- S19 Fstoppers, 3 Ways To Fix Mixed Lighting in Your Photos — https://fstoppers.com/lightroom/3-ways-fix-mixed-lighting-your-photos-574506
+- S20 Adobe Blog, Denoise Demystified — https://blog.adobe.com/en/publish/2023/04/18/denoise-demystified
+- S21 Digital Photography School, How to Do Noise Reduction in Lightroom — https://digital-photography-school.com/how-to-do-noise-reduction-in-lightroom/
+- S22 Digital Photography School, How to Edit Newborn Photos Using Lightroom — https://digital-photography-school.com/how-to-edit-newborn-photo-using-lightroom/
+- S23 Fstoppers, How to Retouch Newborn Photography in Photoshop — https://fstoppers.com/education/how-retouch-newborn-photography-photoshop-215176
+- S34 Fstoppers, How to Make A Perfect White Background Using Photoshop — https://fstoppers.com/education/how-make-perfect-white-background-within-minutes-using-photoshop-102589
+- S35 Digital Photography School, How to Achieve the Perfect White Balance in Lightroom — https://digital-photography-school.com/how-to-achieve-perfect-white-balance-in-lightroom/
+- S36 Digital Photography School, 4 Batch Processing Techniques in Lightroom — https://digital-photography-school.com/4-batch-processing-techniques-speed-workflow-lightroom/
+
+## Official ID photo rules (read 2026-10-31)
+
+- S24 U.S. Department of State, DS-82 instructions (04-2025) — https://eforms.state.gov/Forms/ds82_pdf.pdf
+- S25 GOV.UK, Photos for passports (digital) — https://www.gov.uk/photos-for-passports
+- S26 GOV.UK, Photos for passports: printed photos — https://www.gov.uk/photos-for-passports/photo-requirements
+- S27 German Embassy London, Visa FAQ — https://uk.diplo.de/uk-en/02/visa/visa-faq-2442852
+- S28 VisaMetric (Germany visas), Photo requirements — https://www.visametric.com/Russia/Germany/en/p/photo-requirements
+- S29 Embassy of the PRC in the USA, 护照/旅行证照片规格 — https://us.china-embassy.gov.cn/lsfw/zj/hzlxz/201903/t20190309_5098803.htm
+- S30 PRC Consulate General Los Angeles, Photo Requirements for Visa — https://losangeles.china-consulate.gov.cn/eng/visa/chinavisa/201611/t20161122_5421687.htm
+- S31 Chinese Visa Application Service Center (Sydney), Photo requirements — https://www.visaforchina.cn/SYD3_EN/qianzhengyewu/jichuzhishi/changjianwenti/355135188537315328.html
+- S32 Chinese Visa Application Service Center (Manila), Uploading the photo — https://www.visaforchina.cn/MAN3_EN/qianzhengyewu/jichuzhishi/changjianwenti/164185152103256105.html
+- S33 Government of Canada, Passport photos (any alteration, cropping included, is refused) — https://www.canada.ca/en/immigration-refugees-citizenship/services/canadian-passports/photos.html
+
+Could not be read (blocked): travel.state.gov photo pages (the US ban on filters and AI is known only from search
+snippets), MOFA Japan, Adobe's Match Total Exposures help page.
+
+## Software makers' documentation (read 2026-10-29 for the owner's first notes)
+
+- A1 Adobe, Lightroom basic edits and the histogram — https://helpx.adobe.com/lightroom/desktop/edit-photos/edit-photos.html
+- A2 Adobe, Tone, white balance and grayscale — https://helpx.adobe.com/lightroom-classic/desktop/process-and-develop-photos/image-tone-color.html
+- A3 Adobe, Masking — https://helpx.adobe.com/lightroom/desktop/edit-photos/masking.html
+- A4 Adobe, Noise reduction, sharpening and lens corrections — https://helpx.adobe.com/lightroom-classic/desktop/process-and-develop-photos/retouch-photos.html
+- A5 Adobe, Select and Mask (soft and hard edges, color decontamination) — https://helpx.adobe.com/ee/photoshop/how-to/make-precise-selections-in-select-mask.html
+- A6 Adobe Learn, Matching light, color, perspective and scale in composites — https://www.adobe.com/learn/photoshop/web/photography-effects
+- A7 Adobe, Color management and output — https://helpx.adobe.com/lightroom-classic/desktop/workspace/color-management.html
+- A8 RawPedia, White balance — https://rawpedia.pixls.us/white_balance/
+- A9 darktable, Processing workflow — https://docs.darktable.org/usermanual/development/en/overview/workflow/process/
+- A10 LightCraft v0.14.0 README and control protocol — https://raw.githubusercontent.com/storytold/lightcraft/v0.14.0/README.md , https://raw.githubusercontent.com/storytold/lightcraft/v0.14.0/docs/control-protocol.md
+
+## Checked on the engine itself
+
+- L1 The bundled LightCraft 0.14.0 (\`controls --json\`, \`commands --json\`) and real runs on 2026-10-31: control ranges,
+  heal spot size, white balance pick, black and white, linear masks, the sky mask without a model, sRGB export.
+- L2 Edge-cleaning rules the owner approved on real photos (the people's original pixels; isolated and attached specks
+  both removed; cords, cuffs and texture protected; contact shadows; outlines checked on dark and contrasting grounds).
+  These are the user's standard, not a quote from a tutorial.
+`,
+};
 
 /**
  * Mail: the Himalaya CLI plus Ortie for OAuth tokens, both static musl builds

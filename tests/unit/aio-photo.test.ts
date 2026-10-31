@@ -121,7 +121,7 @@ people = np.zeros((h, w), np.float32); people[55:345, 55:245] = 1.0
 ap.subject_mask = lambda path, size, subject="people": people
 ap.faces_in = lambda img: []
 calls = []
-def fake_develop(src_, dest, auto, settings, nudges=None):
+def fake_develop(src_, dest, auto, settings, nudges=None, pre=None, post=None):
     # Stands in for LightCraft: the softer development is a blur, the plain one the photo as it is.
     calls.append({"auto": auto, "settings": settings, "nudges": nudges})
     img = np.asarray(Image.open(src_).convert("RGB"))
@@ -176,7 +176,186 @@ print(json.dumps({"ok": ok, "bad": bad, "looks": sorted(ap.LOOKS), "basic": json
 `);
     expect(r.ok).toEqual({ "light.shadows": 40, "mixer.orange.sat": -5, "effects.dehaze": 12.5 });
     expect(r.bad).toEqual([false, false, false, false]);
-    expect(r.looks).toEqual(["bright", "clear", "sky"]);
+    expect(r.looks).toEqual(["bright", "clean", "clear", "film", "mono", "night", "sky", "warm"]);
     expect(r.basic).toEqual({ ok: false, error: expect.stringMatching(/need LightCraft/) });
+  });
+
+  it("builds every look from LightCraft controls and commands, with ranges LightCraft accepts", () => {
+    const r = py(`
+print(json.dumps({k: v for k, v in ap.LOOKS.items()}))
+`);
+    // The control ranges of the bundled LightCraft 0.14.0 (controls --json).
+    const ranges: Record<string, [number, number]> = { "grading.shadows.hue": [0, 360], "grading.highlights.hue": [0, 360], "grading.shadows.sat": [0, 100],
+      "grading.highlights.sat": [0, 100], "grain.amount": [0, 100], "grain.size": [0, 100], "detail.nrLuminance": [0, 100], "detail.nrColor": [0, 100],
+      "detail.sharpenAmount": [0, 150], "detail.sharpenMasking": [0, 100], "light.exposure": [-5, 5] };
+    for (const [name, look] of Object.entries(r) as Array<[string, { set?: Record<string, number>; adjust?: Record<string, number>; then?: unknown[]; manual?: boolean }]>) {
+      for (const [control, value] of Object.entries(look.set ?? {})) {
+        expect(control, name).toMatch(/^[a-z]+(\.[a-zA-Z]+)+$/);
+        const [lo, hi] = ranges[control] ?? [-100, 100];
+        expect(value, `${name} ${control}`).toBeGreaterThanOrEqual(lo);
+        expect(value, `${name} ${control}`).toBeLessThanOrEqual(hi);
+      }
+    }
+    expect(r.mono.then).toEqual([["develop.treatment", { bw: true }], ["develop.autoBwMix", {}]]);
+    expect(r.night.manual).toBe(true);
+    expect(r.warm.adjust).toEqual({ "wb.temp": 350 });
+  });
+
+  it("checks local regions, heal spots and the white balance point before running anything", () => {
+    const r = py(`
+import subprocess
+def refused(code):
+    res = subprocess.run([sys.executable, "-I", "-c", "import importlib.util; s=importlib.util.spec_from_file_location('ap', %r); m=importlib.util.module_from_spec(s); s.loader.exec_module(m); %s" % (spec.origin, code)], capture_output=True, text=True)
+    return json.loads(res.stdout)["error"]
+ok = ap.local_specs([["faces", "light.exposure=0.4", "light.shadows=20"], ["top=0.4", "light.highlights=-40"], ["radial=100,200,50", "light.exposure=0.2"]])
+spots = ap.heal_spots(["500,400,6"], (1000, 800))
+print(json.dumps({"ok": ok, "spots": spots,
+  "region": refused("m.local_specs([['sky', 'light.exposure=1']])"),
+  "nodelta": refused("m.local_specs([['people']])"),
+  "fade": refused("m.local_specs([['top=2', 'light.exposure=1']])"),
+  "control": refused("m.local_specs([['people', 'rm -rf=1']])"),
+  "big": refused("m.heal_spots(['500,400,60'], (1000, 800))"),
+  "outside": refused("m.heal_spots(['1500,400,6'], (1000, 800))")}))
+`);
+    expect(r.ok).toEqual([["faces", "", { "light.exposure": 0.4, "light.shadows": 20 }], ["top", 0.4, { "light.highlights": -40 }], ["radial", [100, 200, 50], { "light.exposure": 0.2 }]]);
+    // A heal spot is LightCraft's spot at the normalized centre, its size a little more than the spot's diameter.
+    expect(r.spots).toEqual([["spot.add", { mode: "heal", points: [[0.5, 0.5]], size: 0.0156 }]]);
+    expect(r.region).toContain("--local region is one of");
+    expect(r.nodelta).toContain("needs at least one");
+    expect(r.fade).toContain("0..1");
+    expect(r.control).toContain("control=value");
+    expect(r.big).toContain("too big");
+    expect(r.outside).toContain("outside the photo");
+  });
+
+  it("makes soft local masks: a sky gradient that leaves the people out, a radial spot, the faces", () => {
+    const r = py(`
+w, h = 800, 600
+people = np.zeros((h, w), np.float32); people[100:600, 350:450] = 1
+specs = [("top", 0.5, {}), ("radial", [200, 300, 100], {}), ("faces", "", {}), ("background", "", {})]
+top, radial, faces, background = ap.local_masks(specs, (w, h), people, [[600, 100, 80, 100]])
+print(json.dumps({"shape": list(top.shape), "top_corner": float(top[2, 2]), "top_mid": float(top[int(h * 0.55), 10]),
+  "top_on_person": float(top[150, 400]), "radial_center": float(radial[300, 200]), "radial_far": float(radial[300, 700]),
+  "face": float(faces[150, 640]), "not_face": float(faces[500, 100]), "background_on_person": float(background[400, 400]),
+  "background_off": float(background[400, 50])}))
+`);
+    expect(r.shape).toEqual([600, 800]);
+    expect(r.top_corner).toBeGreaterThan(0.95);
+    expect(r.top_mid).toBe(0);
+    expect(r.top_on_person).toBeLessThan(0.2);
+    expect(r.radial_center).toBeGreaterThan(0.95);
+    expect(r.radial_far).toBe(0);
+    expect(r.face).toBeGreaterThan(0.8);
+    expect(r.not_face).toBeLessThan(0.01);
+    expect(r.background_on_person).toBeLessThan(0.1);
+    expect(r.background_off).toBeGreaterThan(0.9);
+  });
+
+  it("changes a local region only there, still from the development of the original", () => {
+    const r = py(`
+import argparse, os
+rgb = np.full((400, 300, 3), 100, np.uint8)
+src = os.path.join(${JSON.stringify(dir)}, "local.png"); Image.fromarray(rgb).save(src)
+ap.subject_mask = lambda path, size, subject="people": np.zeros((400, 300), np.float32)
+ap.faces_in = lambda img: []
+calls = []
+def fake_develop(src_, dest, auto, settings, nudges=None, pre=None, post=None):
+    calls.append(nudges)
+    img = np.asarray(Image.open(src_).convert("RGB")).astype(np.float32)
+    Image.fromarray(np.clip(img * (2 ** (nudges or {}).get("light.exposure", 0.0)), 0, 255).astype(np.uint8)).save(dest)
+ap.develop = fake_develop
+out = os.path.join(${JSON.stringify(dir)}, "local-out.png")
+ap.cmd_retouch(argparse.Namespace(input=src, output=out, light=None, exposure=0.0, warmth=0.0, contrast=0.0, saturation=0.0,
+    background="keep", color=ap.STUDIO, subject="people", engine="lightcraft", manual=True, auto=False, look=None, develop=None,
+    soften=0.0, local=[["top=0.5", "light.exposure=-1"]]))
+res = np.asarray(Image.open(out)).astype(int)
+print(json.dumps({"top": int(res[3, 150, 0]), "bottom": int(res[390, 150, 0]), "calls": calls}))
+`);
+    expect(r.top).toBeLessThan(55);
+    expect(r.bottom).toBe(100);
+    expect(r.calls).toEqual([{}, { "light.exposure": -1 }]);
+  });
+
+  it("crops to a shape around the subject and frames ID photos by the official head rule", () => {
+    const r = py(`
+size = (3000, 4000)
+face = [1400, 1200, 400, 500]
+crop = ap.aspect_crop(size, (1, 1), (1400, 1200, 1800, 1700))
+res = {"crop": crop}
+for spec in ("us", "cn", "schengen"):
+    box, share = ap.id_crop(size, ap.ID_PHOTOS[spec], face, 1000)
+    hgt = box[3] - box[1]
+    res[spec] = {"ratio": round((box[2] - box[0]) / float(hgt), 3), "want": round(ap.ID_PHOTOS[spec]["px"][0] / float(ap.ID_PHOTOS[spec]["px"][1]), 3),
+                 "head": round((1700 - 1000) / float(hgt), 3), "range": ap.ID_PHOTOS[spec]["head"],
+                 "top": round((1000 - box[1]) / float(hgt), 3), "centre": (box[0] + box[2]) / 2.0}
+res["tight"] = ap.id_crop((800, 900), ap.ID_PHOTOS["us"], [300, 100, 200, 250], 20)[0]
+print(json.dumps(res))
+`);
+    expect(r.crop[2] - r.crop[0]).toBe(r.crop[3] - r.crop[1]);
+    expect(r.crop[1]).toBeLessThanOrEqual(1200);
+    for (const spec of ["us", "cn", "schengen"]) {
+      expect(r[spec].ratio).toBeCloseTo(r[spec].want, 2);
+      expect(r[spec].head).toBeGreaterThan(r[spec].range[0]);
+      expect(r[spec].head).toBeLessThan(r[spec].range[1]);
+      expect(r[spec].centre).toBeCloseTo(1600, 0);
+    }
+    // China: 3–5 mm of 48 above the head.
+    expect(r.cn.top * 48).toBeGreaterThanOrEqual(3);
+    expect(r.cn.top * 48).toBeLessThanOrEqual(5);
+    expect(r.tight).toBeNull();
+  });
+
+  it("delivers an ID photo at the spec's pixels with no retouching, and check compares it with the cropped original", () => {
+    const r = py(`
+import argparse, contextlib, io, os
+rgb = photo(900, 1200)
+src = os.path.join(${JSON.stringify(dir)}, "id.png"); Image.fromarray(rgb).save(src, icc_profile=b"not-srgb")
+person = np.zeros((1200, 900), np.float32); person[300:1200, 250:650] = 1
+ap.subject_mask = lambda path, size, subject="people": person
+ap.faces_in = lambda img: [[350, 400, 200, 250]] if img.size == (900, 1200) else [[0, 0, 0, 0]][:0]
+calls = []
+def fake_develop(src_, dest, auto, settings, nudges=None, pre=None, post=None):
+    calls.append({"auto": auto, "settings": settings})
+    # Like LightCraft: the pixels back in sRGB, without the original's profile.
+    Image.fromarray(np.asarray(Image.open(src_).convert("RGB"))).save(dest)
+ap.develop = fake_develop
+def run(**kw):
+    said = io.StringIO()
+    base = dict(input=src, output=os.path.join(${JSON.stringify(dir)}, "id-out.jpg"), light=None, exposure=0.0, warmth=0.0, contrast=0.0,
+                saturation=0.0, background="keep", color=ap.STUDIO, subject="people", engine="lightcraft", manual=False, auto=False,
+                look=None, develop=None, soften=0.0, id_photo="us")
+    base.update(kw)
+    try:
+        with contextlib.redirect_stdout(said):
+            ap.cmd_retouch(argparse.Namespace(**base))
+    except SystemExit:
+        pass
+    return json.loads(said.getvalue())
+done = run()
+refused = run(soften=0.3)
+out = Image.open(done["output"])
+said = io.StringIO()
+with contextlib.redirect_stdout(said):
+    ap.cmd_check(argparse.Namespace(original=src, edited=done["output"], output=None, box=None, crop=",".join(map(str, done["crop"]))))
+checked = json.loads(said.getvalue())
+said = io.StringIO()
+with contextlib.redirect_stdout(said):
+    ap.cmd_check(argparse.Namespace(original=src, edited=done["output"], output=None, box=["350,400,200,250"], crop=None))
+uncropped = json.loads(said.getvalue())
+print(json.dumps({"size": list(out.size), "icc": repr(out.info.get("icc_profile")), "dpi": [round(v) for v in out.info.get("dpi", (0, 0))],
+                  "id": done["idPhoto"], "calls": calls, "refused": refused, "checked": checked["ok"], "uncropped": uncropped}))
+`);
+    expect(r.size).toEqual([1200, 1200]);
+    // The original's profile is never put on LightCraft's sRGB pixels.
+    expect(r.icc).toBe("None");
+    expect(r.dpi).toEqual([598, 598]);
+    expect(r.id.headShare).toBeGreaterThan(0.5);
+    expect(r.id.headShare).toBeLessThan(0.69);
+    // An ID photo starts from the photo as shot and refuses retouching.
+    expect(r.calls).toEqual([{ auto: false, settings: {} }]);
+    expect(r.refused.error).toContain("unaltered");
+    expect(r.checked).toBe(true);
+    expect(r.uncropped.ok).toBe(false);
+    expect(r.uncropped.message).toContain("--crop x0,y0,x1,y1");
   });
 });
