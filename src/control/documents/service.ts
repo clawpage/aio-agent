@@ -774,7 +774,11 @@ print("venv" if venv_python else "novenv")
         return saved;
       }
 
-      const readiness = await this.readiness();
+      // Tools once ready stay ready: a stale answer is checked again in the background, not before
+      // this render (the probe takes about a second; a tool gone missing still fails the render with its own code).
+      const known = this.#readiness?.previewReady ? this.#readiness : null;
+      if (known) void this.readiness().catch(() => undefined);
+      const readiness = known ?? await this.readiness();
       if (!readiness.previewReady) {
         throw new DocumentError(
           "tools_not_ready",

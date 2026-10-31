@@ -348,7 +348,19 @@ command -v pdftoppm >/dev/null 2>&1 || fail "missing_pdftoppm" "The sandbox is m
 
 # -scale-to caps the longest side in pixels, so a huge page cannot allocate an
 # unbounded bitmap. No `--` separator: every path is absolute and validated.
-if ! timeout "$RENDER_TIMEOUT" pdftoppm -png -scale-to "$MAX_PAGE_PIXELS" -f 1 -l "$MAX_PAGES" \
+# PNG encoding dominates (about half a second a page), so with a known page count
+# the pages are drawn side by side, a few at a time; the file names are the same.
+LAST=$MAX_PAGES
+if [ -n "$TOTAL_PAGES" ] && [ "$TOTAL_PAGES" -lt "$LAST" ]; then LAST=$TOTAL_PAGES; fi
+JOBS=$(nproc 2>/dev/null || echo 1)
+case "$JOBS" in ''|*[!0-9]*) JOBS=1 ;; esac
+[ "$JOBS" -le 6 ] || JOBS=6
+if [ -n "$TOTAL_PAGES" ] && [ "$LAST" -gt 1 ] && [ "$JOBS" -gt 1 ]; then
+  if ! seq 1 "$LAST" | timeout "$RENDER_TIMEOUT" xargs -P "$JOBS" -I{} \
+      pdftoppm -png -scale-to "$MAX_PAGE_PIXELS" -f {} -l {} "$PDF_PATH" "$CACHE_DIR/page" >/dev/null 2>&1; then
+    fail "render_failed" "Could not generate the preview images"
+  fi
+elif ! timeout "$RENDER_TIMEOUT" pdftoppm -png -scale-to "$MAX_PAGE_PIXELS" -f 1 -l "$MAX_PAGES" \
     "$PDF_PATH" "$CACHE_DIR/page" >/dev/null 2>&1; then
   fail "render_failed" "Could not generate the preview images"
 fi

@@ -497,7 +497,7 @@ iOS App 需为声明了存入相册权限、带 `aioSaveFiles` 标记的新版�
   预览均需鉴权；音视频保留 Range / 206 / 416 语义；主动内容一律以 `attachment` 下载。转换结果写成新文件，不覆盖原件。
 - 分页预览转出的图片留在沙箱里（文档工具目录的 `cache/`，按路径、大小与修改时间区分版本），控制面重启或内存缓存
   （`PA_DOC_CACHE_MAX_MB`）挤掉后再打开同一版本不再跑 LibreOffice；保留 30 天，总量超过 300MB 时先删最旧的。打开文件和预览只等容器启动，
-  不等 Codex 会话与浏览器。日志 `document preview rendered` / `document preview from the sandbox cache` 带耗时（`ms`）。
+  不等 Codex 会话与浏览器。首次渲染时各页并行转图（最多 6 个，PNG 编码约半秒一页，8 页从 4.6 秒降到 1.6 秒）；文档工具确认过可用后不再在渲染前重查（约 1 秒），改为后台复查。日志 `document preview rendered` / `document preview from the sandbox cache` 带耗时（`ms`）。
 - iPhone / iPad 添加到主屏幕的 web app 里，下载会让文件盖住整个应用且无法返回，所以那里的「下载」（文件卡片、预览、工作区、SVG/Mermaid 图）改为取回文件后打开系统分享面板（可「存储图像」「存储到文件」），应用停在原处；取回太慢使点按失效时，底部提示条再点一次「保存」即可。浏览器标签页里仍是普通下载。
 
 ## 9. 定时任务与每日推送
