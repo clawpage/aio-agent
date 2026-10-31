@@ -14,6 +14,7 @@ let base: string;
 let dist: string;
 let api = { api: 1, apiMin: 1 };
 const seen: http.IncomingHttpHeaders[] = [];
+let endStream = () => {};
 
 beforeAll(async () => {
   dist = fs.mkdtempSync(path.join(os.tmpdir(), "aio-edge-"));
@@ -28,7 +29,8 @@ beforeAll(async () => {
     if (req.url === "/api/stream") {
       res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-store" });
       res.write("data: first\n\n");
-      setTimeout(() => res.end("data: second\n\n"), 400);
+      // The second event waits for the test to have read the first: an edge that buffers never lets it.
+      endStream = () => res.end("data: second\n\n");
       return;
     }
     let body = "";
@@ -87,12 +89,11 @@ describe("UI edge", () => {
   });
 
   it("streams server-sent events as they come", async () => {
-    const started = Date.now();
     const res = await fetch(`${base}/api/stream`);
     const reader = res.body!.getReader();
     const first = new TextDecoder().decode((await reader.read()).value);
     expect(first).toContain("data: first");
-    expect(Date.now() - started).toBeLessThan(350);
+    endStream();
     let rest = "";
     for (;;) {
       const { value, done } = await reader.read();

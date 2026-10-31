@@ -86,6 +86,7 @@ docker exec -u root personal-agent-sandbox supervisorctl start code-server   # �
   镜像 label 与运行时握手都从这里来，`deploy/aio.mjs check` 会拒绝不兼容的组合。
 - 现有部署（本仓库最初的使用者）可选地继续用 workspace 根 `tools/start.sh` 管理；
   host 模式下 `bin/serve` 会在 `dist` 早于 `src` 时拒绝启动，compose 模式下由 `deploy/aio.mjs` 校验镜像，避免用旧构建验收。
+- 测试不得依赖真实时钟的快慢（CI 机器会卡顿几百毫秒）：Python 测试的时限用 `browser-runtime.test.py` 的 `fake_clock()` 检查；TS 测试对真实耗时的上限不得低于 1 秒，更细的先后关系让 fixture 等测试发信号而不是定时器。`tests/unit/timing-tests.test.ts` 守护。
 - 修改 UI 后要用真实浏览器验桌面（1440×900）与手机（390×844、360 宽）；`HTTP 200 不等于可用`。
 - 沙箱相关改动要在真容器上验证（健康接口检查 terminal；code-server / Jupyter 按需启动，打开它们的页面验证）。
 - 重启只针对本服务（现有部署）：`tools/start.sh restart personal-agent`，不要重载全局 supervisor，

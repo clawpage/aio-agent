@@ -17,7 +17,9 @@ import os
 import sys
 import tempfile
 import traceback
-from typing import Any, Callable
+from contextlib import contextmanager
+from typing import Any, Callable, Iterator
+from unittest.mock import patch
 
 # Loading the script for tests must not drop a __pycache__ next to the shipped
 # helper (the repo does not ignore one), so bytecode caching is off here.
@@ -56,6 +58,36 @@ def assert_eq(actual: Any, expected: Any, note: str = "") -> None:
 def assert_true(value: Any, note: str = "") -> None:
     if not value:
         raise AssertionError(f"{note}: 期望真值，实际 {value!r}")
+
+
+class FakeClock:
+    """time.monotonic/time.sleep for timing tests. Sleeping only moves this clock,
+    so a deadline is checked exactly and never against how busy the machine is
+    (a real-clock bound once failed CI at 0.82 s against 0.7 s)."""
+
+    def __init__(self) -> None:
+        self.now = 1000.0
+        self._due: list[tuple[float, Callable[[], None]]] = []
+
+    def monotonic(self) -> float:
+        return self.now
+
+    def sleep(self, seconds: float) -> None:
+        self.now += max(0.0, seconds)
+        for item in [d for d in self._due if d[0] <= self.now]:
+            self._due.remove(item)
+            item[1]()
+
+    def after(self, seconds: float, fn: Callable[[], None]) -> None:
+        """Runs fn once the clock has slept past now + seconds (stands in for threading.Timer)."""
+        self._due.append((self.now + seconds, fn))
+
+
+@contextmanager
+def fake_clock() -> Iterator[FakeClock]:
+    clock = FakeClock()
+    with patch.object(rt.time, "monotonic", clock.monotonic), patch.object(rt.time, "sleep", clock.sleep):
+        yield clock
 
 
 def assert_false(value: Any, note: str = "") -> None:
@@ -2327,28 +2359,28 @@ def test_restore_gives_up_on_a_tab_after_three_failed_attempts() -> None:
 
 @test
 def test_restore_does_not_count_a_deadline_as_a_tab_failure() -> None:
-    import time as _time
-
     cdp = _RestoreCdp()
 
-    def slow(*_a: Any, **_k: Any) -> bool:
-        _time.sleep(0.2)
-        return True
+    with tempfile.TemporaryDirectory() as tmp, fake_clock() as clock:
+        def slow(*_a: Any, **_k: Any) -> bool:
+            clock.sleep(0.2)
+            return True
 
-    with tempfile.TemporaryDirectory() as tmp, _restore_env(cdp, slow):
-        path = os.path.join(tmp, "snapshot.json")
-        snapshot = {"savedAt": 7, "tabs": [_tab(f"https://{n}.example/") for n in "abcde"]}
-        started = _time.monotonic()
-        result = rt.restore_tabs(snapshot, snapshot_path=path, deadline=_time.monotonic() + 0.3)
-        assert_true(_time.monotonic() - started < 0.8, "时间预算用尽后不得再开始新步骤")
-        assert_false(result["ok"], "预算用尽必须报失败")
-        assert_eq(result.get("reason"), "deadline_exceeded", "应报告时间预算用尽")
-        state = rt.read_restore_state(path)
-        assert_false(state.get("completed"), "预算用尽不能标记完成")
-        assert_false(state.get("tabFailures"), "预算用尽不计入标签失败次数")
-        result = rt.restore_tabs(snapshot, snapshot_path=path)
-        assert_true(result["ok"], f"重试应接着完成：{result}")
-        assert_eq(cdp.created(), 5, "重试复用已建标签")
+        with _restore_env(cdp, slow):
+            path = os.path.join(tmp, "snapshot.json")
+            snapshot = {"savedAt": 7, "tabs": [_tab(f"https://{n}.example/") for n in "abcde"]}
+            started = clock.now
+            result = rt.restore_tabs(snapshot, snapshot_path=path, deadline=clock.now + 0.3)
+            # Two 0.2 s steps start before the 0.3 s budget runs out; all five would take 1.0 s.
+            assert_true(abs(clock.now - started - 0.4) < 1e-9, f"时间预算用尽后不得再开始新步骤，实际 {clock.now - started:.2f}s")
+            assert_false(result["ok"], "预算用尽必须报失败")
+            assert_eq(result.get("reason"), "deadline_exceeded", "应报告时间预算用尽")
+            state = rt.read_restore_state(path)
+            assert_false(state.get("completed"), "预算用尽不能标记完成")
+            assert_false(state.get("tabFailures"), "预算用尽不计入标签失败次数")
+            result = rt.restore_tabs(snapshot, snapshot_path=path)
+            assert_true(result["ok"], f"重试应接着完成：{result}")
+            assert_eq(cdp.created(), 5, "重试复用已建标签")
 
 
 @test
@@ -2514,14 +2546,11 @@ def test_capture_refuses_while_a_restore_is_owed() -> None:
 
 @test
 def test_exclusive_lock_waits_briefly_for_a_status_probe() -> None:
-    import threading
-    import time as _time
-
-    with tempfile.TemporaryDirectory() as tmp:
+    with tempfile.TemporaryDirectory() as tmp, fake_clock() as clock:
         path = os.path.join(tmp, "snapshot.json.lock")
         probe = rt.FileLock(path, shared=True)
         probe.acquire()
-        threading.Timer(0.3, probe.release).start()
+        clock.after(0.3, probe.release)
         lock = rt.FileLock(path)
         lock.acquire()  # a status poll must not make a real transition fail "locked"
         lock.release()
@@ -2529,7 +2558,7 @@ def test_exclusive_lock_waits_briefly_for_a_status_probe() -> None:
         holder.acquire()
         saved = rt.LOCK_WAIT_S
         rt.LOCK_WAIT_S = 0.2
-        started = _time.monotonic()
+        started = clock.now
         try:
             rt.FileLock(path).acquire()
         except rt.LockBusy:
@@ -2539,7 +2568,7 @@ def test_exclusive_lock_waits_briefly_for_a_status_probe() -> None:
         finally:
             rt.LOCK_WAIT_S = saved
             holder.release()
-        assert_true(_time.monotonic() - started < 1.0, "等待有上限")
+        assert_true(0.2 <= clock.now - started <= 0.25 + 1e-9, f"等待 LOCK_WAIT_S 后放弃，实际 {clock.now - started:.2f}s")
 
 
 @test
@@ -2559,25 +2588,23 @@ def test_status_reports_restored_snapshot_only_after_a_completed_restore() -> No
 
 @test
 def test_stop_timeout_is_one_total_deadline() -> None:
-    import threading
-    import time as _time
-
     fake = FakeProc()
     restore = with_fake_proc(fake)
     try:
-        with tempfile.TemporaryDirectory() as tmp:
+        with tempfile.TemporaryDirectory() as tmp, fake_clock() as clock:
             path, helper_pid, browser_pid = _stop_fixture(fake, tmp, stoppable_snapshot())
             saved_kill = os.kill
             # The supervisor exits after 0.3 s; Chromium never does.
-            os.kill = lambda pid, sig: threading.Timer(0.3, lambda: fake.processes.pop(4242)).start()  # type: ignore[assignment]
-            started = _time.monotonic()
+            os.kill = lambda pid, sig: clock.after(0.3, lambda: fake.processes.pop(4242))  # type: ignore[assignment]
+            started = clock.now
             try:
                 result = rt.stop_browser(path, helper_pid_file=helper_pid, browser_pid_file=browser_pid, timeout_s=0.5)
             finally:
                 os.kill = saved_kill  # type: ignore[assignment]
-            elapsed = _time.monotonic() - started
+            elapsed = clock.now - started
             assert_false(result["ok"], "浏览器未退出必须报失败")
-            assert_true(elapsed < 0.7, f"--timeout-s 是两段等待的总上限，实际 {elapsed:.2f}s")
+            # Separate budgets per wait would take 0.3 + 0.5 s.
+            assert_true(abs(elapsed - 0.5) < 1e-9, f"--timeout-s 是两段等待的总上限，实际 {elapsed:.2f}s")
     finally:
         restore()
 
