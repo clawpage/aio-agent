@@ -137,6 +137,35 @@ describe("camera helpers", () => {
       "camera.bad": { recordings: undefined, events: undefined, ptz: undefined },
     });
     expect(parseCameras("not json")).toEqual({});
+    // A camera kept to some accounts; a list that isn't one keeps it from everyone.
+    expect(parseCameras(JSON.stringify({
+      "camera.betaw_cam": { accounts: ["owner", "cr", "../x", 3] },
+      "camera.typo": { accounts: "owner" },
+    }))).toEqual({
+      "camera.betaw_cam": { recordings: undefined, events: undefined, ptz: undefined, accounts: ["owner", "cr"] },
+      "camera.typo": { recordings: undefined, events: undefined, ptz: undefined, accounts: [] },
+    });
+  });
+
+  it("keeps a camera with an account list from every other account, in each tool", async () => {
+    const ha = await fakeHa();
+    const log = { child: () => log, info() {}, warn() {}, error() {}, debug() {} } as any;
+    const cameras = new HaCameras({ baseUrl: ha.base, token: () => TOKEN, cameras: { "camera.ring": { accounts: ["owner"] } }, log });
+    try {
+      expect(cameras.visible("camera.ring", "owner")).toBe(true);
+      expect(cameras.visible("camera.ring", "betaw")).toBe(false);
+      expect(cameras.visible("camera.c201", "betaw")).toBe(true);
+      expect((await cameras.list("betaw")).map((c) => c.entity)).toEqual(["camera.c201"]);
+      expect((await cameras.list("owner")).map((c) => c.entity)).toEqual(["camera.c201", "camera.ring"]);
+      for (const tool of ["camera_snapshot", "camera_ptz", "camera_recordings", "camera_recording_frames"]) {
+        const r = await cameras.tool(tool, { camera: "camera.ring", direction: "up", at: formatLocal(Date.now() - 60_000) }, "betaw");
+        expect([tool, r.isError, r.content[0]]).toEqual([tool, true, { type: "text", text: "There is no camera camera.ring; see camera_list" }]);
+      }
+      // No request about it reached Home Assistant for that account.
+      expect(ha.seen.rest.filter((r) => r.url.includes("camera.ring") || r.url.includes("camera_proxy/camera.ring"))).toHaveLength(0);
+    } finally {
+      ha.close();
+    }
   });
 
   it("finds the video track, its key frames and moves cut-out fragments", () => {
@@ -275,7 +304,7 @@ it("serves camera cards only to accounts granted Home Assistant: info, snapshot,
   fs.writeFileSync(keyFile, `HA_MCP_TOKEN=${TOKEN}\n`, { mode: 0o600 });
   const saved = process.env.HA_MCP_TOKEN;
   delete process.env.HA_MCP_TOKEN;
-  const env = { PA_HA_MCP_URL: `${ha.base}/api/mcp`, PA_HA_MCP_SECRETS_FILE: keyFile, PA_HA_CAMERAS: JSON.stringify(CAMERAS) };
+  const env = { PA_HA_MCP_URL: `${ha.base}/api/mcp`, PA_HA_MCP_SECRETS_FILE: keyFile, PA_HA_CAMERAS: JSON.stringify({ ...CAMERAS, "camera.ring": { accounts: ["cr"] } }) };
   const h = await startHarness({ ...env, PA_HA_MCP_ACCOUNTS: "owner" });
   const denied = await startHarness({ ...env, PA_HA_MCP_ACCOUNTS: "betaw" });
   try {
@@ -317,6 +346,13 @@ it("serves camera cards only to accounts granted Home Assistant: info, snapshot,
     const moved = await ptz({ direction: "up" }, { "x-csrf-token": csrf });
     expect([moved.status, await moved.json()]).toEqual([200, { ok: true, done: "turned up" }]);
     expect(ha.seen.rest.at(-1)).toMatchObject({ url: "/api/services/tapo_ptz/move", body: JSON.stringify({ x: 0, y: 10 }) });
+
+    // A camera kept to other accounts doesn't exist for this one, whichever card route asks.
+    for (const p of ["", "/snapshot", "/live", "/frame?at=1", "/playback?at=1"]) {
+      const r = await get(`/api/cameras/camera.ring${p}`);
+      expect([p, r.status, ((await r.json()) as { error: string }).error]).toEqual([p, 404, "not_found"]);
+    }
+    expect(ha.seen.rest.some((r) => r.url.includes("camera.ring"))).toBe(false);
 
     // An account not on the list has no cameras at all.
     const other = await login(denied);

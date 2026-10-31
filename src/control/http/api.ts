@@ -2446,14 +2446,14 @@ export function createApiRouter(context: AppContext): Router {
   // ----------------------------------------------------------- cameras
   // Camera cards in messages (HaCameras): live video, pan/tilt and recordings,
   // proxied same-origin and only for the accounts granted Home Assistant.
-  const camerasFor = (req: Request, res: Response): HaCameras | null => {
+  const camerasFor = (req: Request, res: Response): { cameras: HaCameras; username: string } | null => {
     const ctx = ctxOf(req);
     const user = ctx.session ? getUser(db, ctx.session.ownerId) : null;
     if (!context.cameras || !user || !cfg.haMcp.accounts.includes(user.username)) {
       res.status(404).json({ error: "camera_unavailable", message: t().http.cameras.notEnabled });
       return null;
     }
-    return context.cameras;
+    return { cameras: context.cameras, username: user.username };
   };
   const cameraEntity = (req: Request, res: Response): string | null => {
     const entity = param(req, "entity");
@@ -2461,13 +2461,18 @@ export function createApiRouter(context: AppContext): Router {
     res.status(400).json({ error: "bad_camera" });
     return null;
   };
-  const cameraHandler = (fn: (req: Request, res: Response, cameras: HaCameras, entity: string) => Promise<void>) =>
+  const cameraHandler = (fn: (req: Request, res: Response, cameras: HaCameras, entity: string, username: string) => Promise<void>) =>
     asyncHandler(async (req, res) => {
-      const cameras = camerasFor(req, res);
-      const entity = cameras && (req.params.token ? "" : cameraEntity(req, res));
-      if (!cameras || entity === null) return;
+      const granted = camerasFor(req, res);
+      const entity = granted && (req.params.token ? "" : cameraEntity(req, res));
+      if (!granted || entity === null) return;
+      // A camera kept to some accounts (PA_HA_CAMERAS accounts) doesn't exist for the rest.
+      if (entity && !granted.cameras.visible(entity, granted.username)) {
+        res.status(404).json({ error: "not_found", message: t().http.cameras.notEnabled });
+        return;
+      }
       try {
-        await fn(req, res, cameras, entity);
+        await fn(req, res, granted.cameras, entity, granted.username);
       } catch (err) {
         if (!(err instanceof CameraError)) throw err;
         if (res.headersSent) { res.destroy(); return; }
@@ -2483,9 +2488,9 @@ export function createApiRouter(context: AppContext): Router {
     }),
   );
   router.get("/cameras/:entity", requireKind("primary"), requireSession,
-    cameraHandler(async (_req, res, cameras, entity) => {
+    cameraHandler(async (_req, res, cameras, entity, username) => {
       res.setHeader("Cache-Control", "no-store");
-      res.json({ camera: await cameras.camera(entity), timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone });
+      res.json({ camera: await cameras.camera(entity, username), timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone });
     }),
   );
   router.get("/cameras/:entity/snapshot", requireKind("primary"), requireSession,

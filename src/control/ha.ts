@@ -86,7 +86,7 @@ export class HaGateway extends McpGateway {
     }
     if (method === "tools/call" && typeof params?.name === "string") {
       const args = params.arguments && typeof params.arguments === "object" ? (params.arguments as Record<string, unknown>) : {};
-      if (cameras && CAMERA_TOOL_NAMES.has(params.name)) return { jsonrpc: "2.0", id, result: await cameras.tool(params.name, args) };
+      if (cameras && CAMERA_TOOL_NAMES.has(params.name)) return { jsonrpc: "2.0", id, result: await cameras.tool(params.name, args, username) };
       if (history && HA_HISTORY_TOOL_NAMES.has(params.name)) return { jsonrpc: "2.0", id, result: await history.tool(params.name, args) };
     }
     return undefined;

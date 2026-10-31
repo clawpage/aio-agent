@@ -32,11 +32,13 @@ export interface HaCameraSpec {
   events?: string;
   /** Integration whose `move` (x, y) and `goto_preset` (name) services turn it, e.g. `tapo_ptz`. */
   ptz?: string;
+  /** Only these accounts (usernames) see it at all; without it, every account granted Home Assistant. */
+  accounts?: string[];
 }
 
 /**
  * Parse PA_HA_CAMERAS: a JSON object from camera entity to HaCameraSpec, e.g.
- * `{"camera.c201_go2rtc":{"recordings":"c201","events":"local/c201-events","ptz":"tapo_ptz"}}`.
+ * `{"camera.c201_go2rtc":{"recordings":"c201","events":"local/c201-events","ptz":"tapo_ptz"},"camera.betaw_cam":{"accounts":["owner","cr"]}}`.
  * Malformed entries are dropped: a typo must not open other paths of HA's media.
  */
 export function parseCameras(raw: string): Record<string, HaCameraSpec> {
@@ -53,7 +55,10 @@ export function parseCameras(raw: string): Record<string, HaCameraSpec> {
     if (!/^camera\.[a-z0-9_]+$/.test(entity) || !value || typeof value !== "object") continue;
     const v = value as Record<string, unknown>;
     const ptz = typeof v.ptz === "string" && /^[a-z0-9_]+$/.test(v.ptz) ? v.ptz : undefined;
-    out[entity] = { recordings: folder(v.recordings), events: folder(v.events), ptz };
+    // A list that isn't one hides the camera from everyone rather than showing it to all.
+    const accounts = v.accounts === undefined ? undefined
+      : Array.isArray(v.accounts) ? v.accounts.filter((a): a is string => typeof a === "string" && /^[\w.-]+$/.test(a)) : [];
+    out[entity] = { recordings: folder(v.recordings), events: folder(v.events), ptz, ...(accounts ? { accounts } : {}) };
   }
   return out;
 }

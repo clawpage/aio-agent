@@ -357,14 +357,21 @@ export class HaCameras {
     return (await res.json()) as Array<{ entity_id: string; state: string; attributes: Record<string, unknown> }>;
   }
 
-  async list(): Promise<CameraInfo[]> {
-    const cameras = (await this.#states()).filter((s) => s.entity_id.startsWith("camera."));
+  /** Whether the account may see this camera at all (its spec's accounts, if any). */
+  visible(entity: string, username: string): boolean {
+    const accounts = this.#cameras[entity]?.accounts;
+    return !accounts || accounts.includes(username);
+  }
+
+  async list(username: string): Promise<CameraInfo[]> {
+    const cameras = (await this.#states()).filter((s) => s.entity_id.startsWith("camera.") && this.visible(s.entity_id, username));
     return await Promise.all(cameras.map((s) => this.#info(s)));
   }
 
-  /** One camera; a name that is not a camera in HA is refused. */
-  async camera(entity: unknown): Promise<CameraInfo> {
+  /** One camera; a name that is not a camera in HA, or not one for this account, is refused alike. */
+  async camera(entity: unknown, username: string): Promise<CameraInfo> {
     if (typeof entity !== "string" || !/^camera\.[a-z0-9_]+$/.test(entity)) throw new CameraError("camera must be a camera entity such as camera.c201_go2rtc (see camera_list)");
+    if (!this.visible(entity, username)) throw new CameraError(`There is no camera ${entity}; see camera_list`);
     const res = await this.#rest(`/api/states/${entity}`);
     if (res.status === 404) throw new CameraError(`There is no camera ${entity}; see camera_list`);
     if (!res.ok) throw new CameraError(`Home Assistant answered ${res.status}`);
@@ -584,14 +591,14 @@ export class HaCameras {
 
   // ------------------------------------------------------------ MCP tools
 
-  async tool(name: string, args: Record<string, unknown>): Promise<ToolResult> {
+  async tool(name: string, args: Record<string, unknown>, username: string): Promise<ToolResult> {
     try {
       switch (name) {
-        case "camera_list": return text(await this.#toolList());
-        case "camera_snapshot": return await this.#toolSnapshot(args);
-        case "camera_ptz": return await this.#toolPtz(args);
-        case "camera_recordings": return text(await this.#toolRecordings(args));
-        case "camera_recording_frames": return await this.#toolFrames(args);
+        case "camera_list": return text(await this.#toolList(username));
+        case "camera_snapshot": return await this.#toolSnapshot(args, username);
+        case "camera_ptz": return await this.#toolPtz(args, username);
+        case "camera_recordings": return text(await this.#toolRecordings(args, username));
+        case "camera_recording_frames": return await this.#toolFrames(args, username);
         default: return { content: [{ type: "text", text: `unknown tool ${name}` }], isError: true };
       }
     } catch (err) {
@@ -601,8 +608,8 @@ export class HaCameras {
     }
   }
 
-  async #toolList(): Promise<string> {
-    const cameras = await this.list();
+  async #toolList(username: string): Promise<string> {
+    const cameras = await this.list(username);
     if (!cameras.length) return "Home Assistant has no cameras.";
     const lines = await Promise.all(cameras.map(async (c) => {
       const can = [c.live ? "live video" : "snapshots only (no live video here)"];
@@ -621,14 +628,14 @@ export class HaCameras {
     return [`Cameras (now ${formatLocal(Date.now())}):`, ...lines, "", CARD_HINT].join("\n");
   }
 
-  async #toolSnapshot(args: Record<string, unknown>): Promise<ToolResult> {
-    const camera = await this.camera(args.camera);
+  async #toolSnapshot(args: Record<string, unknown>, username: string): Promise<ToolResult> {
+    const camera = await this.camera(args.camera, username);
     const shot = await this.snapshot(camera.entity);
     return image(shot, `${camera.name} at ${formatLocal(Date.now())}`);
   }
 
-  async #toolPtz(args: Record<string, unknown>): Promise<ToolResult> {
-    const camera = await this.camera(args.camera);
+  async #toolPtz(args: Record<string, unknown>, username: string): Promise<ToolResult> {
+    const camera = await this.camera(args.camera, username);
     const done = await this.ptz(camera.entity, args);
     // The picture after the motor stops (a tap turns for well under a second; a preset takes longer).
     await new Promise((r) => setTimeout(r, typeof args.preset === "string" && args.preset.trim() ? 4000 : 1500));
@@ -637,8 +644,8 @@ export class HaCameras {
     return shot ? image(shot, `${note} The picture now (${formatLocal(Date.now())}):`) : text(`${note} The picture is not available right now.`);
   }
 
-  async #toolRecordings(args: Record<string, unknown>): Promise<string> {
-    const camera = await this.camera(args.camera);
+  async #toolRecordings(args: Record<string, unknown>, username: string): Promise<string> {
+    const camera = await this.camera(args.camera, username);
     if (!camera.recordings && !camera.events) return `${camera.name} has no recordings here.`;
     const now = Date.now();
     const to = args.to === undefined ? now : parseLocal(args.to);
@@ -676,8 +683,8 @@ export class HaCameras {
     return out.join("\n");
   }
 
-  async #toolFrames(args: Record<string, unknown>): Promise<ToolResult> {
-    const camera = await this.camera(args.camera);
+  async #toolFrames(args: Record<string, unknown>, username: string): Promise<ToolResult> {
+    const camera = await this.camera(args.camera, username);
     const at = parseLocal(args.at);
     if (at === null) throw new CameraError("at must be a local time like 2026-10-13 20:38:10");
     const count = args.count === undefined ? 1 : Number(args.count);
