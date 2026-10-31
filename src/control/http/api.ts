@@ -21,7 +21,7 @@ import { readFirmware } from "../gadgetFirmware.js";
 import { Dictation, DictationError, DICTATION_MAX_CHARS } from "../dictation.js";
 import { VoiceLog, type VoiceRecord } from "../voiceLog.js";
 import type { AppContext } from "../context.js";
-import { DataError } from "../clawpages.js";
+import { DataError, SANDBOX_SIGN_IN_MS } from "../clawpages.js";
 import { SHARE_NAME, aiInput, parseJsonAnswer } from "../share.js";
 import { AiError } from "../clawpageAi.js";
 import {
@@ -41,7 +41,7 @@ import { googleRouter } from "../auth/googleRoutes.js";
 import { followLoginTimezone } from "../auth/loginTimezone.js";
 import { createSupportRequest, reviewSupportRequest, supportQueue, SupportError } from '../support.js';
 import { parseHttpUrl } from "../aio/client.js";
-import { COOKIE_NAMES, clearSessionCookies, sessionCookies } from "../auth/sessions.js";
+import { COOKIE_NAMES, clearSessionCookies, serializeCookie, sessionCookies } from "../auth/sessions.js";
 import { safeRedirectPath } from "../auth/tickets.js";
 import { audit } from "../db.js";
 import { dispatchLog, recallStats } from "../tasks/recall.js";
@@ -839,6 +839,13 @@ export function createApiRouter(context: AppContext): Router {
     return facts ? { userId: userId!, page, title: facts.title, url: facts.url } : null;
   };
   const visitorOf = (userId: string): { id: string; name: string; email: string | null } => ({ id: userId, name: getUser(db, userId)?.username ?? userId, email: visibleEmail(db, userId) });
+  // The account's own sandbox browser (signed in by `aio-share sign-in`): it may sign in to the account's own pages,
+  // and to pages the account already allowed; nothing else of the console. Anything else asks a real sign-in.
+  const SANDBOX_SSO_COOKIE = "pa_sandbox_sso";
+  const sandboxAccount = (req: Request): string | null => {
+    const token = ctxOf(req).cookies[SANDBOX_SSO_COOKIE];
+    return token ? context.share?.data?.sandboxAccount(token, "cookie") ?? null : null;
+  };
   router.get("/clawpage-sso/authorize", requireKind("primary"), (req, res) => {
     const target = ssoPage(req);
     res.setHeader("Cache-Control", "no-store");
@@ -846,6 +853,13 @@ export function createApiRouter(context: AppContext): Router {
     if (!target) { res.status(404).json({ error: "PAGE_NOT_FOUND", message: "The page does not exist" }); return; }
     const share = context.share!;
     const session = ctxOf(req).session;
+    const sandbox = session ? null : sandboxAccount(req);
+    if (sandbox && getUser(db, sandbox) && (sandbox === target.userId || share.data!.granted(target.userId, target.page, sandbox))) {
+      const visitor = visitorOf(sandbox);
+      share.data!.grant(target.userId, target.page, visitor);
+      res.redirect(303, share.returnUrl(target.userId, target.page, req.query.return, share.data!.visitorToken(target.userId, target.page, visitor)));
+      return;
+    }
     if (session && share.data!.granted(target.userId, target.page, session.ownerId)) {
       const visitor = visitorOf(session.ownerId);
       share.data!.grant(target.userId, target.page, visitor);
@@ -855,6 +869,21 @@ export function createApiRouter(context: AppContext): Router {
     if (req.query.silent === "1") { res.redirect(303, share.returnUrl(target.userId, target.page, req.query.return, "none")); return; }
     const params = new URLSearchParams({ owner: String(req.query.owner), page: target.page, return: typeof req.query.return === "string" ? req.query.return : "" });
     res.redirect(303, `/clawpage-sso?${params}`);
+  });
+  // The link `aio-share sign-in` gives the sandbox: keeps the sign-in in that browser, then opens the page signed in.
+  router.get("/clawpage-sso/sandbox", requireKind("primary"), (req, res) => {
+    res.setHeader("Cache-Control", "no-store");
+    res.setHeader("Referrer-Policy", "no-referrer");
+    const share = context.share;
+    const userId = share?.data && typeof req.query.ticket === "string" ? share.data.sandboxAccount(req.query.ticket, "ticket") : null;
+    const page = typeof req.query.page === "string" ? req.query.page : "";
+    if (!userId || !getUser(db, userId)) { res.status(403).json({ error: "SIGN_IN_LINK_EXPIRED", message: "The sign-in link has expired; get a new one" }); return; }
+    if (!share!.page(userId, page)) { res.status(404).json({ error: "PAGE_NOT_FOUND", message: "The page does not exist" }); return; }
+    const visitor = visitorOf(userId);
+    share!.data!.grant(userId, page, visitor);
+    res.setHeader("Set-Cookie", serializeCookie({ name: SANDBOX_SSO_COOKIE, value: share!.data!.sandboxToken(userId, "cookie"), httpOnly: true, secure: ctxOf(req).secure,
+      sameSite: "Lax", path: "/api/clawpage-sso", maxAgeSeconds: SANDBOX_SIGN_IN_MS / 1000 }));
+    res.redirect(303, share!.returnUrl(userId, page, req.query.return, share!.data!.visitorToken(userId, page, visitor)));
   });
   // What the sign-in page shows: the page, and (signed in) who would be signed in to it.
   router.get("/clawpage-sso/page", requireKind("primary"), (req, res) => {

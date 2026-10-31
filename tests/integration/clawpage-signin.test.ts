@@ -1,8 +1,10 @@
 import { it, expect } from "vitest";
+import http from "node:http";
 import path from "node:path";
 import { startHarness, login, type TestHarness } from "../helpers/harness.js";
 import { ShareStore, pageReturn, parseJsonAnswer } from "../../src/control/share.js";
 import { ClawpageData, type Visitor } from "../../src/control/clawpages.js";
+import { createMember } from "../../src/control/auth/owner.js";
 import type { AiRequest } from "../../src/control/clawpageAi.js";
 
 const b64 = (text: string) => Buffer.from(text).toString("base64");
@@ -82,6 +84,58 @@ it("signs a visitor in through the console, once per page, and back with a token
     store.remove("owner_1", "toefl");
     expect(data.visitors("owner_1", "toefl")).toEqual([]);
   } finally {
+    await h.shutdown();
+  }
+});
+
+it("signs the account's own sandbox browser in to its own pages without asking anyone to sign in", async () => {
+  const { h, store, data } = await setup();
+  const cfg = { ...h.ctx.cfg, runtimeUserId: "owner_1", dataDir: path.join(h.dataDir, "runtime-owner") };
+  store.provision(cfg);
+  const gateway = http.createServer((req, res) => void store.handleApi(req, res));
+  await new Promise<void>((resolve) => gateway.listen(0, "127.0.0.1", resolve));
+  const port = (gateway.address() as { port: number }).port;
+  try {
+    store.publish("owner_1", "diary", { title: "轻记", files: [{ path: "index.html", data: b64("<p>diary</p>") }] });
+    const signIn = (page: string, token = cfg.share!.token) => fetch(`http://127.0.0.1:${port}/share/owner_1/pages/${page}/sign-in`, {
+      method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify({ return: "food.html?x=1" }),
+    });
+    expect((await signIn("toefl", "0".repeat(64))).status).toBe(403);
+    expect((await signIn("nope")).status).toBe(404);
+    const { url } = (await (await signIn("toefl")).json()) as { url: string };
+    const link = new URL(url);
+    expect(link.origin).toBe(`https://${h.ctx.cfg.primaryHost}`);
+    expect(link.pathname).toBe("/api/clawpage-sso/sandbox");
+
+    // Opening the link lands on the page signed in and keeps a cookie that only the sign-in routes see.
+    const opened = await h.request(`${link.pathname}${link.search}`);
+    expect(opened.status).toBe(303);
+    expect(opened.headers.get("location")).toMatch(/\/u\/owner\/share\/toefl\/food\.html\?x=1#cpv=cpv1\./);
+    const setCookie = opened.headers.get("set-cookie")!;
+    expect(setCookie).toMatch(/^pa_sandbox_sso=cpb1\./);
+    expect(setCookie).toContain("Path=/api/clawpage-sso");
+    expect(setCookie).toContain("HttpOnly");
+    const cookie = setCookie.split(";")[0]!;
+    const token = decodeURIComponent(opened.headers.get("location")!.split("#cpv=")[1]!);
+    expect(await (await ws(h, ".auth", { token })).json()).toMatchObject({ user: { id: "owner_1" } });
+
+    // After that, the account's other pages sign in silently too, and after a reload.
+    const silent = await h.request("/api/clawpage-sso/authorize?owner=owner&page=diary&silent=1", { headers: { cookie } });
+    expect(silent.headers.get("location")).toMatch(/\/u\/owner\/share\/diary\/#cpv=cpv1\./);
+    // The cookie is no console session, and a ticket is no cookie (nor the other way round).
+    expect((await h.request("/api/tasks", { headers: { cookie } })).status).toBe(401);
+    expect(data.sandboxAccount(link.searchParams.get("ticket")!, "cookie")).toBeNull();
+    expect(data.sandboxAccount(decodeURIComponent(cookie.split("=")[1]!), "ticket")).toBeNull();
+    expect(data.sandboxAccount(link.searchParams.get("ticket")!, "ticket", Date.now() + 3 * 60_000)).toBeNull();
+    expect((await h.request("/api/clawpage-sso/sandbox?ticket=cpb1.x.y&page=toefl")).status).toBe(403);
+
+    // Someone else's page the account never allowed still asks a real sign-in.
+    const other = await createMember(h.ctx.db, "rui", "member-password-123");
+    store.publish(other.id, "theirs", { title: "theirs", files: [{ path: "index.html", data: b64("<p>x</p>") }] });
+    expect((await h.request("/api/clawpage-sso/authorize?owner=rui&page=theirs&silent=1", { headers: { cookie } })).headers.get("location")).toMatch(/#cpv=none$/);
+    expect((await h.request("/api/clawpage-sso/authorize?owner=rui&page=theirs", { headers: { cookie } })).headers.get("location")).toMatch(/^\/clawpage-sso\?/);
+  } finally {
+    gateway.close();
     await h.shutdown();
   }
 });

@@ -42,6 +42,10 @@ const COLLABORATOR_TOKEN = /^cpc_[A-Za-z0-9_-]{43}$/;
 /** A signed-in visitor's token stays usable this long (the page holds it only while open; it signs in again on the next visit). */
 export const VISITOR_TOKEN_MS = 24 * 3600_000;
 const VISITOR_PREFIX = "cpv1.";
+/** The account's own sandbox browser, signed in to its own pages: a short ticket the sandbox opens, then a cookie on the console. */
+export const SANDBOX_TICKET_MS = 2 * 60_000;
+export const SANDBOX_SIGN_IN_MS = 30 * 24 * 3600_000;
+const SANDBOX_PREFIX = "cpb1.";
 /** AI answers a signed-in visitor may ask of one page, on their own account. */
 export const AI_LIMITS = { perMinute: 10, perDay: 300 };
 
@@ -235,6 +239,31 @@ export class ClawpageData {
   visitorToken(userId: string, page: string, visitor: Visitor, now = Date.now()): string {
     const body = Buffer.from(JSON.stringify({ v: visitor.id, n: visitor.name, m: visitor.email, u: userId, p: page, e: now + VISITOR_TOKEN_MS })).toString("base64url");
     return `${VISITOR_PREFIX}${body}.${createHmac("sha256", this.#key).update(VISITOR_PREFIX + body).digest("base64url")}`;
+  }
+
+  /**
+   * The sandbox browser's sign-in as its own account: `ticket` for the link the sandbox opens (minutes),
+   * `cookie` for what the console keeps in that browser (weeks). Neither passes for the other or for a visitor token.
+   */
+  sandboxToken(userId: string, kind: "ticket" | "cookie", now = Date.now()): string {
+    const body = Buffer.from(JSON.stringify({ k: kind, u: userId, e: now + (kind === "ticket" ? SANDBOX_TICKET_MS : SANDBOX_SIGN_IN_MS) })).toString("base64url");
+    return `${SANDBOX_PREFIX}${body}.${createHmac("sha256", this.#key).update(SANDBOX_PREFIX + body).digest("base64url")}`;
+  }
+
+  /** The account a live sandbox token of this kind names, or null. */
+  sandboxAccount(token: string, kind: "ticket" | "cookie", now = Date.now()): string | null {
+    if (!token.startsWith(SANDBOX_PREFIX) || token.length > 600) return null;
+    const [body, sig] = token.slice(SANDBOX_PREFIX.length).split(".");
+    if (!body || !sig) return null;
+    const expected = createHmac("sha256", this.#key).update(SANDBOX_PREFIX + body).digest();
+    const given = Buffer.from(sig, "base64url");
+    if (given.length !== expected.length || !timingSafeEqual(given, expected)) return null;
+    try {
+      const claim = JSON.parse(Buffer.from(body, "base64url").toString()) as { k?: unknown; u?: unknown; e?: unknown };
+      return claim.k === kind && typeof claim.u === "string" && typeof claim.e === "number" && claim.e > now ? claim.u : null;
+    } catch {
+      return null;
+    }
   }
 
   isVisitorToken(token: string): boolean {

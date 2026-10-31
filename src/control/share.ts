@@ -711,7 +711,7 @@ export class ShareStore {
       res.end(body === undefined ? undefined : JSON.stringify(body));
     };
     const url = new URL(req.url ?? "/", "http://gateway");
-    const match = /^\/share\/([a-zA-Z0-9_]+)\/pages(?:\/([^/]+)(?:\/(files|data|cover|collaborators|versions)((?:\/[^/]+)*))?)?$/.exec(url.pathname);
+    const match = /^\/share\/([a-zA-Z0-9_]+)\/pages(?:\/([^/]+)(?:\/(files|data|cover|collaborators|versions|sign-in)((?:\/[^/]+)*))?)?$/.exec(url.pathname);
     const widget = /^\/share\/([a-zA-Z0-9_]+)\/widgets(?:\/([^/]+)(\/files)?)?$/.exec(url.pathname);
     const owner = (match ?? widget)?.[1];
     const expected = owner ? this.#tokens.get(owner) : undefined;
@@ -743,6 +743,14 @@ export class ShareStore {
         }
         if (req.method === "POST" && rest.length === 2 && rest[1] === "restore") return reply(200, this.restore(userId, name!, rest[0]!));
         return reply(405, { error: "method_not_allowed" });
+      }
+      // The sandbox's own browser signed in to this page as the account, and to every page of the account after that.
+      if (sub === "sign-in") {
+        if (req.method !== "POST" || tail) return reply(405, { error: "method_not_allowed" });
+        if (!this.data || !this.exists(userId, name!)) return reply(404, { error: "The page does not exist" });
+        const body = await readJson(req, 4096);
+        const target = new URLSearchParams({ ticket: this.data.sandboxToken(userId, "ticket"), page: name!, return: pageReturn(body.return) });
+        return reply(200, { url: `https://${this.#cfg.primaryHost}/api/clawpage-sso/sandbox?${target}` });
       }
       if (sub === "cover") {
         if (req.method !== "POST" || tail) return reply(405, { error: "method_not_allowed" });

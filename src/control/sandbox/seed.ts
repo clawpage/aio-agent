@@ -778,6 +778,9 @@ def main():
     rs = sub.add_parser("restore", help="Make an earlier version the live page again (files only; data stays as it is)")
     rs.add_argument("name")
     rs.add_argument("at", help="The version's at, from versions")
+    si = sub.add_parser("sign-in", help="A link that opens one of your pages in this sandbox's browser signed in as this account (and keeps that browser signed in to your pages)")
+    si.add_argument("name")
+    si.add_argument("--return", dest="back", help="A path inside the page to land on, e.g. app.html?tab=food")
     sub.add_parser("list", help="List published pages with their data tables")
     cv = sub.add_parser("cover", help="Render a page's cover picture again (the console shows it on the page's icon and cards)")
     cv.add_argument("name", nargs="?")
@@ -830,7 +833,7 @@ def main():
         state = read_state(os.path.abspath(args.dir))
         if state and state.get("api"):
             use_remote(state["api"], state.get("token"))
-    if REMOTE and args.cmd in ("delete", "invite", "collaborators", "revoke", "versions", "restore"):
+    if REMOTE and args.cmd in ("delete", "invite", "collaborators", "revoke", "versions", "restore", "sign-in"):
         fail("Only the page's owner can do this; a collaborator token cannot")
 
     if args.cmd == "list":
@@ -844,6 +847,9 @@ def main():
         out({"ok": True, "id": invited["id"], "label": invited["label"], "api": invited["api"], "invitation": invited["invitation"]})
     elif args.cmd == "collaborators":
         out(call("GET", "/pages/%s/collaborators" % page_name(args.name)))
+    elif args.cmd == "sign-in":
+        r = call("POST", "/pages/%s/sign-in" % page_name(args.name), {"return": args.back or ""})
+        out({"url": r["url"], "next": "open this url in the browser within 2 minutes; it lands on the page signed in"})
     elif args.cmd == "revoke":
         call("DELETE", "/pages/%s/collaborators/%s" % (page_name(args.name), q(args.id)))
         out({"ok": True, "revoked": args.id})
@@ -1060,6 +1066,9 @@ const { text, json } = await cp.ai.ask("Essay: ...", { prompt: "grade", json: tr
   With it, every load first passes by the console once (a quick redirect); use it when the page is mostly for signed-in use.
 - Records read by a signed-in visitor carry \`mine\` (whether they wrote it). Tables for signed-in visitors answer anonymous ones with \`SIGN_IN_REQUIRED\` (401);
   \`SIGN_IN_EXPIRED\` means the sign-in ran out or was signed out: \`cp.user\` is null again, offer to sign in. Show a clear sign-in button wherever it is needed.
+- **Trying it yourself in the browser**: never ask the user to sign in for you. \`$CP sign-in <name>\` prints a link (valid 2 minutes); open it in your browser and you land on the page
+  signed in as this account. From then on that browser stays signed in to all of this account's pages (their sign-in button and \`signIn: "auto"\` just work, also after reloads),
+  so you can check per-user tables and real AI answers (\`ai.ask\`, photos included) end to end. If a page sends you to a console sign-in screen, run it again.
 - In a \`file://\` preview, \`signIn()\` signs in a stand-in person (\`id: "preview"\`) and \`ai.ask\` fails with \`PREVIEW\`: AI answers work once published.
 
 **AI answers** (\`cp.ai.ask\`) need a signed-in visitor and run on *their* account (their model, counted in their usage, 10 a minute and 300 a day per page);
