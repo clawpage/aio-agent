@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../api";
 import { t } from "../i18n";
+import { NavIcon } from "./NavIcon";
 
 type State = "loading" | "unsupported" | "install" | "off" | "on" | "denied";
 
@@ -69,8 +70,8 @@ export function PushToggle() {
   return <div className="push-toggle" aria-label={t.app.push.label}>
     {state === "install" && <span className="muted tiny">{t.app.push.install}</span>}
     {state === "denied" && <span className="muted tiny">{t.app.push.denied}</span>}
-    {state === "off" && <button className="ghost block" disabled={busy} onClick={() => void enable()}>{t.app.push.enable}</button>}
-    {state === "on" && <div className="push-on"><span className="tiny">{t.app.push.on}</span><button className="ghost tiny" disabled={busy} onClick={() => void test()}>{t.common.test}</button><button className="ghost tiny" disabled={busy} onClick={() => void disable()}>{t.common.close}</button></div>}
+    {state === "off" && <button className="ghost block" disabled={busy} onClick={() => void enable()}><NavIcon name="bell"/>{t.app.push.enable}</button>}
+    {state === "on" && <div className="push-on"><NavIcon name="bell"/><span className="tiny">{t.app.push.on}</span><span className="push-actions"><button className="ghost tiny" disabled={busy} onClick={() => void test()}>{t.common.test}</button><button className="ghost tiny" disabled={busy} onClick={() => void disable()}>{t.common.close}</button></span></div>}
     {message && <span className="muted tiny" role="status">{message}</span>}
   </div>;
 }
