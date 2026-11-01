@@ -132,9 +132,13 @@ The shell itself bundles no UI, so a UI change still ships with the next UI depl
   `{"type":"shell","enabled":…}`, the app keeps it in `device-link.json` (`shell`), restarts the bridge with
   `PA_MAC_SHELL=1` and reports `shell` in its `aio-device-link` events. Needs tmux on the Mac (Homebrew's is found;
   `PA_TMUX` overrides). The control plane offers it as part of `aio_mac_native` (`src/control/macShell.ts`, `src/control/macNative.ts`).
-- Home-screen name: iOS 一站 in `gen/apple/project.yml` (`CFBundleDisplayName`, then
-  `xcodegen generate`); Android Clawpage Agent in `gen/android/app/src/main/res/values/strings.xml`
-  and 一站 in `values-zh/strings.xml`.
+- Home-screen name: iOS shows Clawpage in English and Spanish and 一站 in Chinese
+  (`gen/apple/Localization/<lang>.lproj/InfoPlist.strings`, which also localize the permission prompts;
+  the base `CFBundleDisplayName` 一站 is in `gen/apple/project.yml`, then `xcodegen generate`); Android Clawpage Agent in
+  `gen/android/app/src/main/res/values/strings.xml` and 一站 in `values-zh/strings.xml`.
+- App Store: iPhone only, a privacy manifest (`gen/apple/aio-agent-tauri_iOS/PrivacyInfo.xcprivacy`) and
+  `ITSAppUsesNonExemptEncryption = false`; building, uploading and the App Store Connect answers are in
+  [app-store.md](../../../docs/app-store.md).
 - Icons: the 一站 mark (`src/ui/public/favicon.svg`) full bleed in `icon/app-icon.svg`, plus a
   glyph-only foreground and a solid background for the Android adaptive icon. Regenerate with
   `npm run -- tauri icon icon/icon.json`, which writes into `gen/` directly; then flatten the

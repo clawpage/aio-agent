@@ -41,6 +41,8 @@ targets:
         buildPhase: resources
         type: folder
       - path: LaunchScreen.storyboard
+      # Home-screen name and permission prompts per language (Clawpage in English/Spanish, 一站 in Chinese).
+      - path: Localization
     info:
       path: aio-agent-tauri_iOS/Info.plist
       properties:
@@ -52,6 +54,8 @@ targets:
         # limited to these registrable domains (the console and its workspace, the embedded players).
         WKAppBoundDomains: [localhost, clawpage.ai, youtube-nocookie.com, bilibili.com]
         LSRequiresIPhoneOS: true
+        # HTTPS only, no proprietary encryption: App Store Connect skips the export-compliance question.
+        ITSAppUsesNonExemptEncryption: false
         UILaunchStoryboardName: LaunchScreen
         UIRequiredDeviceCapabilities: [arm64, metal]
         UISupportedInterfaceOrientations:
@@ -63,8 +67,8 @@ targets:
           - UIInterfaceOrientationPortraitUpsideDown
           - UIInterfaceOrientationLandscapeLeft
           - UIInterfaceOrientationLandscapeRight
-        CFBundleShortVersionString: 0.1.0
-        CFBundleVersion: "0.1.0"
+        CFBundleShortVersionString: 0.1.2
+        CFBundleVersion: "0.1.2"
     entitlements:
       path: aio-agent-tauri_iOS/aio-agent-tauri_iOS.entitlements
     scheme:
@@ -74,6 +78,8 @@ targets:
     settings:
       base:
         ENABLE_BITCODE: false
+        # iPhone only: the console is a phone layout here, and iPad would need its own screenshots and review.
+        TARGETED_DEVICE_FAMILY: "1"
         ARCHS: [arm64]
         VALID_ARCHS: arm64
         LIBRARY_SEARCH_PATHS[arch=x86_64]: $(inherited) $(PROJECT_DIR)/Externals/x86_64/$(CONFIGURATION) $(SDKROOT)/usr/lib/swift $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/$(PLATFORM_NAME) $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift-5.0/$(PLATFORM_NAME)

@@ -1,0 +1,4 @@
+"CFBundleDisplayName" = "一站";
+"NSMicrophoneUsageDescription" = "語音輸入時錄下你說的話，轉成文字放進輸入框。";
+"NSCameraUsageDescription" = "拍照或錄影作為附件傳給一站。";
+"NSPhotoLibraryAddUsageDescription" = "下載圖片時存入你的相簿。";

@@ -1,0 +1,4 @@
+"CFBundleDisplayName" = "Clawpage";
+"NSMicrophoneUsageDescription" = "La entrada de voz graba lo que dices y lo convierte en texto en el cuadro de mensaje.";
+"NSCameraUsageDescription" = "Haz una foto o un vídeo para adjuntarlo a tu mensaje.";
+"NSPhotoLibraryAddUsageDescription" = "Guarda en tu fototeca las imágenes que descargas.";
