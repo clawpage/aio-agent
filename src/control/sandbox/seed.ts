@@ -1039,11 +1039,18 @@ $CP style /home/gem/workspace/share/<name> --palette <palette>   # copies clawpa
   \`--done\` saved or finished, \`--you\` needs the visitor, \`--error\` failed; they are not decoration (a green header or button is not "the brand").
 - One accent-filled main action per screen (\`.cp-btn.primary\`); the rest \`.cp-btn\` or \`.cp-btn.quiet\`. Touch targets at least 44 px, body text 16 px, no horizontal scrolling at 360 px wide, light and dark both checked.
 - Quiet by default: flat surfaces with a soft shadow, no gradients, glass or glow, no emoji as icons (simple inline SVG strokes in \`currentColor\`), at most two font weights per screen.
+- **Few words.** The page is the content and the controls, not an explanation of them. Before publishing, cut every line that only
+  describes the page, repeats a nearby label or reassures:
+  - Header: a short title, plus at most one short line (an eyebrow or a subtitle, not both). No slogans, taglines or lines saying what the page does or where its data comes from.
+  - No status or privacy lines ("synced", "only you can see this", "N items sorted by…"); show state with a \`.cp-chip\` or an icon only where it changes what the visitor does.
+  - Labels are one to three words (\`Search\`, not \`Search and filter: title, topic, type, interest\`); hints go in placeholders, not in extra text.
+  - A section shows its title once; no subtitle restating its tab, filter or sort. Card text: the title and one line of what matters, no filler badges.
+  - Write instructions only where a visitor would otherwise get stuck, in one sentence. Read the top screen at 360 px: if words fill more of it than content and controls do, cut more.
 - Classes: \`.cp-page\` (\`.wide\`), \`.cp-header\`, \`.cp-eyebrow\`, \`.cp-card\` (\`.flat\`), \`.cp-stack\`, \`.cp-row\`, \`.cp-grid\`, \`.cp-list\`, \`.cp-stat\`, \`.cp-btn\` (\`.primary\` \`.quiet\` \`.small\`),
   \`.cp-field\` + \`.cp-label\` + \`.cp-input\`, \`.cp-chip\` (\`.done\` \`.you\` \`.error\`), \`.cp-note\` (\`.you\` \`.error\`), \`.cp-tabs\` (buttons with \`aria-selected\`), \`.cp-progress > i\`, \`.cp-empty\`, \`.cp-toast\`, \`dialog.cp-dialog\`, \`.cp-footer\`.
 
 Layouts that work (adapt, do not copy blindly):
-- **Tracker or diary**: header (eyebrow, title, date switcher) → a \`.cp-grid\` of \`.cp-stat\` for today → entries as a \`.cp-list\` inside cards → one primary "add" button; history as a week strip or list.
+- **Tracker or diary**: header (title, date switcher) → a \`.cp-grid\` of \`.cp-stat\` for today → entries as a \`.cp-list\` inside cards → one primary "add" button; history as a week strip or list.
 - **Sign-up, poll or form**: an intro card (what, when, who) → \`.cp-field\`s → one primary submit → the live results as a list with \`.cp-chip\`s.
 - **Quiz or practice**: \`.cp-progress\` → one question card → answers as full-width \`.cp-btn\`s → feedback in a \`.cp-note\` (done or error) → next.
 - **Dashboard**: \`.cp-page.wide\`, a \`.cp-grid\` of \`.cp-stat\`s, then charts (series in \`--accent\`, \`--done\`, \`--you\`, then \`#5ab0f0\`, \`#d685e6\`) and tables with tabular numbers.

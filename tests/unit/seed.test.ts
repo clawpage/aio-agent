@@ -149,6 +149,9 @@ describe("sandbox workspace seed", () => {
     ].sort());
     for (const s of skills) expect(s.content).toBe(SHARE_SKILL_MD);
     expect(SHARE_SKILL_MD).toMatch(/^---\nname: clawpages\n/);
+    // Pages came out wordy (tagline, sync/privacy lines, long labels): the design rules keep copy to content and controls.
+    expect(SHARE_SKILL_MD).toContain("- **Few words.** The page is the content and the controls");
+    expect(SHARE_SKILL_MD).toContain("an eyebrow or a subtitle, not both");
     // The publish check's TABLE_NOT_FOUND is also a private table: the page changes, the table's permission never loosens for the check.
     const check = SHARE_SKILL_MD.slice(SHARE_SKILL_MD.indexOf("also prints a **check**"));
     expect(check).toMatch(/if it does, the table is private, which visitors cannot see: change the page to read that table only when `cp\.owner`/);
