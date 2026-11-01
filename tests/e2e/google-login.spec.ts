@@ -36,7 +36,7 @@ test("Google first visit asks only for the invite, taking the Google email, then
 test("Google login opens the provider and reports a cancelled authorization", async ({page}) => {
   await setup(page, false);
   await page.route("**/api/auth/google/start", r => {
-    expect(r.request().postDataJSON()).toEqual({native: false});
+    expect(r.request().postDataJSON()).toEqual({native: false, timeZone: expect.any(String)});
     return r.fulfill({json: {url: "http://127.0.0.1:4288/login?google=error"}});
   });
   await page.goto("/login");
@@ -51,7 +51,7 @@ test("native Google sign-in uses the browser bridge and redeems the callback bef
     (window as any).aioDeviceBrowser = {postMessage: (url: string) => (window as any).nativeUrls.push(url)};
   });
   await page.route("**/api/auth/google/start", r => {
-    expect(r.request().postDataJSON()).toEqual({native: true});
+    expect(r.request().postDataJSON()).toEqual({native: true, timeZone: expect.any(String)});
     return r.fulfill({json: {url: "https://agent.clawpage.ai/api/auth/google/authorize?state=fixture"}});
   });
   await page.route("**/api/auth/google/redeem", r => {

@@ -40,7 +40,7 @@ test("/register opens the register form; an invite code creates the account and 
   expect(await overflow(page)).toBeLessThanOrEqual(0);
   await page.getByRole("button", { name: "注册并登录" }).click();
   await expect(inbox(page)).toBeVisible();
-  expect(registers).toEqual([{ email: "alice@example.com", password: "alice-password-123", inviteCode: "ABCD-EFGH-JKMN" }]);
+  expect(registers).toEqual([{ email: "alice@example.com", password: "alice-password-123", inviteCode: "ABCD-EFGH-JKMN", timeZone: expect.any(String) }]);
   await expect.poll(() => new URL(page.url()).pathname).toBe("/u/alice");
 });
 
@@ -87,7 +87,7 @@ test("open registration hides the invite and signs in without one", async ({ pag
   expect(await overflow(page)).toBeLessThanOrEqual(0);
   await page.getByRole("button", { name: "注册并登录" }).click();
   await expect(inbox(page)).toBeVisible();
-  expect(registers).toEqual([{ email: "open-member@example.com", password: "open-password-123", inviteCode: "" }]);
+  expect(registers).toEqual([{ email: "open-member@example.com", password: "open-password-123", inviteCode: "", timeZone: expect.any(String) }]);
 });
 
 test("if the last place is taken, the form asks for an invite without losing the draft", async ({ page }) => {

@@ -97,9 +97,9 @@ test.describe("assistant markdown links", () => {
 
     await page.goto("/");
     await page.getByRole("button", { name: "工作区" }).first().click();
-    await expect(page.getByRole("tab", { name: "终端" })).toBeVisible({ timeout: 20_000 });
-    await page.getByRole("tab", { name: "终端" }).click();
-    await expect(page.getByRole("tab", { name: "终端" })).toHaveAttribute("aria-selected", "true");
+    await expect(page.getByRole("tab", { name: "终端", exact: true })).toBeVisible({ timeout: 20_000 });
+    await page.getByRole("tab", { name: "终端", exact: true }).click();
+    await expect(page.getByRole("tab", { name: "终端", exact: true })).toHaveAttribute("aria-selected", "true");
 
     await page.getByRole("link", { name: "示例链接" }).click();
     // The already-open workspace switches back to the browser view (a fresh

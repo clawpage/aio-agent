@@ -68,7 +68,7 @@ test.describe("browser lifecycle panel", () => {
 
     // Leaving the browser tab unmounts the frame and drops the lease, so the bar
     // (which only describes the browser panel) goes with it.
-    await page.getByRole("tab", { name: "终端" }).click();
+    await page.getByRole("tab", { name: "终端", exact: true }).click();
     await expect(page.locator(".browser-status")).toHaveCount(0);
   });
 

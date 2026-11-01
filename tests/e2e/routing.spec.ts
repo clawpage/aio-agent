@@ -90,7 +90,7 @@ test("a task's process has an address: from a card, back to where it was opened,
 
 test("an owner page's address leads a member to their main session", async ({ page }) => {
   await setup(page, { username: "yzmy", role: "member" });
-  await page.goto("/u/yzmy/settings");
+  await page.goto("/u/yzmy/analytics");
   await expect(page.getByRole("heading", { name: "主会话", exact: true })).toBeVisible();
   await expect.poll(() => path(page)).toBe("/u/yzmy");
   await page.goto("/u/yzmy/usage");
