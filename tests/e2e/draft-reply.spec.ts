@@ -193,3 +193,30 @@ test('the feed can be scrolled up while an answer is being written, and follows 
   await expect.poll(fromBottom).toBeLessThan(5);
   await page.evaluate(() => clearInterval((window as unknown as { __pump: number }).__pump));
 });
+
+test('Show more opens the reply while it is still being written', async ({ page }) => {
+  nextId = 1;
+  await page.addInitScript(fakeEventSource);
+  await mockConsole(page, { conversations: [] });
+  const task = { id: 'live', revision: 1, title: '回长沙路线', text: '带娃怎么回长沙', conversationId: 'exec', status: 'running', result: null, error: null, attachments: [], relatedTaskId: null, dependencies: [], approvals: 0, createdAt: Date.now() - 60_000, startedAt: Date.now() - 50_000, completedAt: null, messages: ['我比较几条路线。'] };
+  await page.route('**/api/main*', r => r.fulfill({ json: { mode: 'tasks', tasks: [task], nextBefore: null, version: 'v1' } }));
+  await page.goto('/');
+  await expect.poll(() => page.evaluate(() => 'exec' in ((window as unknown as { __sources: object }).__sources))).toBe(true);
+  await emit(page, 'item/started', started('f1', 'final_answer'));
+  const rows = Array.from({ length: 30 }, (_, i) => `| 路线 ${i} | 在机场内转机，托运行李可直挂 | 要选好衔接 | 值得优先 |`).join('\n');
+  await emit(page, 'stream.delta', delta('f1', `**先看这几条路线的实际区别**\n\n| 路线 | 优点 | 折腾点 | 建议 |\n| --- | --- | --- | --- |\n${rows}\n\n`));
+  const draft = page.locator('.task-report.drafting[data-task-id="live"]');
+  const more = draft.locator('.message-more');
+  await expect(more).toBeVisible();
+  // The executor keeps writing the whole time the person reaches for the button.
+  await page.evaluate(() => {
+    let n = 0;
+    const source = (window as unknown as { __sources: Record<string, { emit(t: string, d: unknown): void }> }).__sources.exec!;
+    (window as unknown as { __writer: number }).__writer = window.setInterval(() => source.emit('stream.delta', { id: 1000 + n, conversationId: 'exec', turnId: 't1', type: 'stream.delta', payload: { itemId: 'f1', kind: 'item/agentMessage/delta', delta: `SFO 机场目前列有直飞武汉、广州、香港的航班 ${n++}。` }, createdAt: Date.now() }), 30);
+  });
+  await page.waitForTimeout(300);
+  await more.click();
+  await expect(page.getByRole('dialog')).toBeVisible();
+  await expect(page.getByRole('dialog')).toContainText('先看这几条路线的实际区别');
+  await page.evaluate(() => clearInterval((window as unknown as { __writer: number }).__writer));
+});

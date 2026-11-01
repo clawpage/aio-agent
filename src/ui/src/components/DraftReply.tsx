@@ -1,6 +1,7 @@
-import { useEffect, useLayoutEffect, useState } from "react";
+import { useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Markdown } from "./Markdown";
 import { draftSource } from "../draftText";
+import { ReadingPage } from "./MessagePreview";
 
 const reduced = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
 
@@ -10,18 +11,26 @@ const reduced = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
  * steady writing. Cards wait for their closing fence (draftSource).
  */
 export function DraftReply({ text, onGrow, onOpenLink, onOpenFile }: { text: string; onGrow?: () => void; onOpenLink?: (url: string) => void; onOpenFile?: (path: string) => void }) {
-  const [shown, setShown] = useState(() => reduced() ? text.length : 0);
+  // The reading page shows what has arrived at once: it was already typed out in the feed.
+  const reading = useContext(ReadingPage);
+  const [shown, setShown] = useState(() => reading || reduced() ? text.length : 0);
+  const latest = useRef(text);
+  latest.current = text;
+  const behind = shown !== text.length;
+  // The next step waits on the last one, not on new text: pieces arriving faster than a step
+  // would otherwise cancel every step and leave the answer blank.
   useEffect(() => {
-    if (shown === text.length) return;
-    if (shown > text.length || reduced()) { setShown(text.length); return; }
+    if (!behind) return;
+    if (shown > latest.current.length || reading || reduced()) { setShown(latest.current.length); return; }
     const timer = window.setTimeout(() => setShown(n => {
-      let next = Math.min(text.length, n + Math.max(2, Math.ceil((text.length - n) / 20)));
+      const all = latest.current;
+      let next = Math.min(all.length, n + Math.max(2, Math.ceil((all.length - n) / 20)));
       // Never half an emoji.
-      if (/[\uD800-\uDBFF]/.test(text[next - 1] ?? "")) next++;
+      if (/[\uD800-\uDBFF]/.test(all[next - 1] ?? "")) next++;
       return next;
     }), 40);
     return () => clearTimeout(timer);
-  }, [text, shown]);
+  }, [shown, behind, reading]);
   useLayoutEffect(() => { onGrow?.(); }, [shown, onGrow]);
   return <Markdown source={draftSource(text.slice(0, shown))} onOpenLink={onOpenLink} onOpenFile={onOpenFile}/>;
 }

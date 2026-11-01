@@ -1,8 +1,11 @@
 import { PopupPresence, PopupSurface } from "./PopupMotion";
-import { useLayoutEffect, useRef, useState, type ReactNode, type KeyboardEvent } from "react";
+import { createContext, useLayoutEffect, useRef, useState, type ReactNode, type KeyboardEvent } from "react";
 import { createPortal } from "react-dom";
 import { isSandboxLink } from "../sandboxLink";
 import { t } from "../i18n";
+
+/** True inside the full-message reading page, where content is shown whole rather than animated in. */
+export const ReadingPage = createContext(false);
 
 /** Keep long main-inbox messages compact, with the complete interactive message at hand. */
 export function MessagePreview({ children, title, user = false }: { children: ReactNode; title: string; user?: boolean }) {
@@ -79,7 +82,7 @@ export function MessagePreview({ children, title, user = false }: { children: Re
     }}>
       <div className="full-message-grabber" aria-hidden="true" />
       <header className="full-message-head"><strong>{title}</strong><button ref={close} type="button" className="ghost full-message-close" onClick={dismiss} aria-label={t.chat.preview.closeLabel} title={t.chat.preview.closeTitle}><span className="full-message-close-label">{t.chat.preview.close}</span><svg className="full-message-close-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button></header>
-      <div className={`full-message-body${user ? " user" : ""}`}><article className="full-message-content">{children}</article></div>
+      <div className={`full-message-body${user ? " user" : ""}`}><article className="full-message-content"><ReadingPage.Provider value={true}>{children}</ReadingPage.Provider></article></div>
     </div></PopupSurface>, document.body)}</PopupPresence>
   </>;
 }
