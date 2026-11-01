@@ -110,6 +110,7 @@ export const tasks = {
     noNextRun: (title: string) => `定时任务「${title}」已经没有下一次运行（时间或结束日期已过），没有恢复。`,
     resumed: (title: string, next: string) => `已恢复定时任务「${title}」，下次运行 ${next}。`,
     runDescription: (rule: string) => `定时任务（${rule}）的自动运行。`,
+    conditional: "每次到点先在你的沙箱里检查条件，满足时才运行（才用到模型）。",
     invalid: {
       notObject: "schedule 必须是对象",
       kind: (kinds: string) => `schedule.kind 只能是 ${kinds}`,
@@ -123,6 +124,9 @@ export const tasks = {
       monthDay: "schedule.monthDay 须是 1-31",
       maxRuns: "schedule.maxRuns 须是 1-1000 的整数或 null",
       until: "schedule.until 须是有效的 YYYY-MM-DD 或 null",
+      conditionNotObject: "condition 须是含 language 与 code 的对象，或 null 表示去掉条件",
+      conditionLanguage: (languages: string) => `condition.language 须是 ${languages} 之一`,
+      conditionCode: (max: number) => `condition.code 须是 1 到 ${max} 个字符`,
       past: "这个时间已经过去了",
       allPast: "这些时间都已经过去了",
       noNext: "按这个规则已经没有下一次运行（结束日期已过）",

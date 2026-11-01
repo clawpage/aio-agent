@@ -463,6 +463,8 @@ export function startSandboxIdle(ctx: AppContext, intervalMs = 30_000, parked = 
   });
   ctx.idle = idle;
   ctx.agent.setSandboxGate(() => idle.wake());
+  // A schedule's condition check needs only the container, not the Codex session or the browser.
+  ctx.tasks.setSandboxWake(() => idle.wakeContainer());
   return idle;
 }
 

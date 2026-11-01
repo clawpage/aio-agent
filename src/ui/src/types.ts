@@ -283,6 +283,10 @@ export interface Schedule {
   lastTask: { id: string; status: string } | null;
   runCount: number;
   createdAt: number;
+  /** A script checked in the sandbox before each due run; the run starts only when it exits 0. */
+  condition?: { language: "bash" | "python" | "node"; code: string } | null;
+  /** How the condition's last check went. */
+  lastCheck?: { at: number; result: "fired" | "skipped" | "error"; error?: "timeout" | "exit" | "unavailable"; exitCode?: number; output?: string } | null;
   /** Set on a schedule every account gets (the daily feed): it can be paused, not deleted. */
   builtin?: string | null;
   /** The daily feed only: whether the person worded its instruction, and what it keeps in mind. */

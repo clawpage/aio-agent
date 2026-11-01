@@ -3,6 +3,7 @@ import { api, ApiError } from "../api";
 import type { Schedule, ScheduleSpec } from "../types";
 import { ScheduleEditor } from "./ScheduleEditor";
 import { t } from "../i18n";
+import { messageTime } from "../messageTime";
 
 const FEED_KIND = t.schedules.feedKind;
 const STATUS: Record<Schedule["status"], { label: string; tone: string }> = {
@@ -11,6 +12,15 @@ const STATUS: Record<Schedule["status"], { label: string; tone: string }> = {
   done: { label: t.schedules.status.done, tone: "done" },
 };
 const RUN_LABEL: Record<string, string> = t.schedules.run;
+
+/** How the condition's last check went, in words. */
+function checkText(check: NonNullable<Schedule["lastCheck"]>): string {
+  const words = t.schedules.list.check;
+  const result = check.result === "error"
+    ? check.error === "timeout" ? words.timeout : check.error === "exit" ? words.exit(check.exitCode ?? -1) : words.unavailable
+    : words[check.result];
+  return t.schedules.list.lastCheck(messageTime(check.at, Date.now()) ?? "", result);
+}
 
 /** Scheduled and recurring tasks: what runs when, and editing, pausing, running or removing them. */
 export function ScheduleList({ active, onExpired, onOpenTask }: { active: boolean; onExpired: () => void; onOpenTask: (taskId: string) => void }) {
@@ -66,6 +76,15 @@ export function ScheduleList({ active, onExpired, onOpenTask }: { active: boolea
           <div className="task-list-top"><strong>{s.title}{s.builtin && <span className="schedule-builtin">{t.schedules.list.builtin}</span>}</strong><span className={`task-status-badge ${STATUS[s.status].tone}`}>{STATUS[s.status].label}</span></div>
           {s.builtin === "daily_feed" && <p className="muted tiny">{t.schedules.list.dailyFeedHint}</p>}
           <p className="schedule-rule">{s.rule}{s.nextRunText && s.status === "active" ? <span className="muted">{t.schedules.list.nextRun(s.nextRunText)}</span> : null}</p>
+          {s.condition && <div className="schedule-condition" data-check={s.lastCheck?.result ?? "none"}>
+            <p className="tiny"><span className="schedule-feed-label">{t.schedules.list.conditional}</span><span className="schedule-check">{s.lastCheck ? checkText(s.lastCheck) : t.schedules.list.neverChecked}</span></p>
+            <details>
+              <summary className="link tiny">{t.schedules.list.showCondition}</summary>
+              <p className="muted tiny">{t.schedules.list.conditionHint}</p>
+              <pre className="schedule-condition-code"><code>{`# ${s.condition.language}\n${s.condition.code}`}</code></pre>
+              {s.lastCheck?.output && <pre className="schedule-condition-code muted">{s.lastCheck.output}</pre>}
+            </details>
+          </div>}
           <p className="task-list-summary">{s.feed?.customized ? <span className="schedule-feed-label">{t.schedules.list.yourRequest}</span> : null}{s.instruction}</p>
           {s.feed && s.feed.memory.length > 0 && <ul className="schedule-feed-memory" aria-label={t.schedules.list.feedMemory}>
             {s.feed.memory.map((m) => <li key={m.id} data-kind={m.kind}><span className="schedule-feed-label">{FEED_KIND[m.kind]}</span>{m.text}{m.source === "feed" && <span className="muted">{t.schedules.list.learnedFromFeedback}</span>}</li>)}

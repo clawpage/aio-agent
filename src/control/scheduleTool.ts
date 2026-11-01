@@ -7,6 +7,7 @@ import type { Logger } from "../common/logger.js";
 import type { TaskService } from "./tasks/service.js";
 import { runInLocale } from "./i18n/index.js";
 import { MAX_DATES, MAX_TIMES_A_DAY, MIN_INTERVAL_MINUTES } from "./tasks/schedules.js";
+import { CONDITION_LANGUAGES, CONDITION_TIMEOUT_SECONDS, MAX_CONDITION_CODE, MAX_CONDITION_OUTPUT } from "./tasks/scheduleCondition.js";
 
 /**
  * The schedule tool: the account's scheduled tasks, offered to its executors as one
@@ -34,6 +35,20 @@ const SCHEDULE_SCHEMA = {
   required: ["kind"],
 };
 
+const CONDITION_SCHEMA = {
+  type: ["object", "null"],
+  description:
+    `Optional condition that gates each run: a short script that AIO runs in the user's sandbox (as the sandbox user, in the workspace directory, no stdin, ${CONDITION_TIMEOUT_SECONDS}-second limit) every time the schedule is due, before anything reaches a model. ` +
+    "Exit code 0 = the condition is met: the run starts and receives what the script printed (keep it short and say why it fired, e.g. the new price). Exit code 1 = not met: the run is skipped silently and costs no model usage. Any other exit code, a timeout, or an unavailable sandbox counts as an error and also skips the run. " +
+    `Output beyond ${MAX_CONDITION_OUTPUT} characters is cut. Use it when a cheap check (an HTTP API, a file, a value compared with a threshold) can decide whether the run is worth doing, e.g. watching a price or stock that rarely changes with a short interval; it cannot use the browser. ` +
+    "Test the script once in the sandbox before saving it. A script that needs to remember the last value can keep it in a file under the workspace. Pass null in schedule_update to remove the condition.",
+  properties: {
+    language: { type: "string", enum: CONDITION_LANGUAGES, description: "bash runs with bash -c, python with python3 -c, node with node -e" },
+    code: { type: "string", description: `The script itself (at most ${MAX_CONDITION_CODE} characters)` },
+  },
+  required: ["language", "code"],
+};
+
 const TOOLS = [
   {
     name: "schedule_create",
@@ -51,13 +66,14 @@ const TOOLS = [
         },
         schedule: SCHEDULE_SCHEMA,
         needsBrowser: { type: "boolean", description: "Whether a run needs the browser to check web pages (default true)" },
+        condition: CONDITION_SCHEMA,
       },
       required: ["title", "instruction", "schedule"],
     },
   },
   {
     name: "schedule_list",
-    description: "List the user's existing scheduled tasks: id, name, rule (rule is the human-readable wording; schedule is the rule you can edit directly and pass to schedule_update), status, next run time, and what each run does. Check for an identical one before creating; use it to find the id before changing, pausing, resuming, or cancelling.",
+    description: "List the user's existing scheduled tasks: id, name, rule (rule is the human-readable wording; schedule is the rule you can edit directly and pass to schedule_update), status, next run time, what each run does, and for one with a condition the condition and how its last check went (lastCheck.result: fired, skipped, or error). Check for an identical one before creating; use it to find the id before changing, pausing, resuming, or cancelling.",
     inputSchema: { type: "object", properties: {} },
   },
   {
@@ -75,7 +91,7 @@ const TOOLS = [
   {
     name: "schedule_update",
     description:
-      "Change an existing scheduled task: its name, what each run does, its rule (change the time, add or remove run times, switch to a few irregular dates), or whether it uses the browser. Pass only the fields to change; when changing the rule, pass the complete new schedule (you can edit the schedule that schedule_list gives). After the rule changes, the run count (maxRuns) restarts from now, and a scheduled task that had finished starts again if it has a next run. Change the built-in daily feed with feed_update.",
+      "Change an existing scheduled task: its name, what each run does, its rule (change the time, add or remove run times, switch to a few irregular dates), whether it uses the browser, or its condition (pass null to remove it). Pass only the fields to change; when changing the rule, pass the complete new schedule (you can edit the schedule that schedule_list gives). After the rule changes, the run count (maxRuns) restarts from now, and a scheduled task that had finished starts again if it has a next run. Change the built-in daily feed with feed_update.",
     inputSchema: {
       type: "object",
       properties: {
@@ -84,6 +100,7 @@ const TOOLS = [
         instruction: { type: "string", description: "New description of what each run does, written the same way as for schedule_create" },
         schedule: SCHEDULE_SCHEMA,
         needsBrowser: { type: "boolean", description: "Whether a run needs the browser" },
+        condition: CONDITION_SCHEMA,
       },
       required: ["id"],
     },
@@ -241,7 +258,7 @@ export class ScheduleGateway {
       return created.ok ? text(`${created.message}\n\nid: ${created.schedule.id}`) : text(created.error, true);
     }
     if (name === "schedule_list") {
-      const list = tasks.listSchedules(userId).map(({ spec: { anchorAt: _anchor, ...schedule }, ...s }) => ({ id: s.id, title: s.title, rule: s.rule, schedule, status: s.status, nextRun: s.nextRunText, instruction: s.instruction, needsBrowser: s.needsBrowser, ...(s.builtin ? { builtin: true, note: "The built-in daily feed: view its full settings and memory with feed_get, change them with feed_update" } : {}) }));
+      const list = tasks.listSchedules(userId).map(({ spec: { anchorAt: _anchor, ...schedule }, ...s }) => ({ id: s.id, title: s.title, rule: s.rule, schedule, status: s.status, nextRun: s.nextRunText, instruction: s.instruction, needsBrowser: s.needsBrowser, ...(s.condition ? { condition: s.condition, lastCheck: s.lastCheck } : {}), ...(s.builtin ? { builtin: true, note: "The built-in daily feed: view its full settings and memory with feed_get, change them with feed_update" } : {}) }));
       return text(list.length ? list : "No scheduled tasks yet.");
     }
     if (name === "schedule_update") {

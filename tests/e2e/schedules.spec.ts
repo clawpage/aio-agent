@@ -126,3 +126,47 @@ test("a schedule is edited on the page: several times a day, or a few irregular 
   expect(sent.at(-1)).toMatchObject({ needsBrowser: false, schedule: { kind: "dates", dates: ["2099-10-08 09:00", "2099-10-15 14:30"] } });
   expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
 });
+
+test("a conditional schedule shows that it has a condition and how its last check went", async ({ page }, info) => {
+  await mockConsole(page, { conversations: [] });
+  await page.route("**/api/main*", (r) => r.fulfill({ json: { mode: "tasks", tasks: [], nextBefore: null } }));
+  await mockTaskList(page, () => []);
+  const code = "import json, sys, urllib.request\nprice = json.load(urllib.request.urlopen('https://api.example.com/vacuum'))['price']\nprint(f'price {price}')\nsys.exit(0 if price < 449 else 1)";
+  const items = [
+    schedule({ id: "c-skip", title: "盯扫地机价格", rule: "每 15 分钟", runCount: 0, lastTask: null, condition: { language: "python", code }, lastCheck: { at: Date.now() - 5 * 60_000, result: "skipped", output: "price 479" } }),
+    schedule({ id: "c-fired", title: "盯球票", rule: "每 30 分钟", condition: { language: "bash", code: "curl -s https://tickets.example.com | grep -q 'on sale'" }, lastCheck: { at: Date.now() - 2 * 60_000, result: "fired" } }),
+    schedule({ id: "c-error", title: "盯库存", rule: "每小时", condition: { language: "node", code: "process.exit(2)" }, lastCheck: { at: Date.now() - 60_000, result: "error", error: "exit", exitCode: 2 } }),
+    schedule({ id: "c-new", title: "盯新闻", rule: "每天 08:00", condition: { language: "bash", code: "exit 1" }, lastCheck: null }),
+    schedule({ id: "plain", title: "每日天气提醒" }),
+  ];
+  await page.route("**/api/schedules", (r) => r.fulfill({ json: { schedules: items } }));
+  await page.goto("/");
+  if (info.project.name.startsWith("mobile")) await page.getByRole("button", { name: "打开导航" }).click();
+  await page.locator(".sidebar").getByRole("button", { name: "定时任务", exact: true }).click();
+  const list = page.getByRole("region", { name: "定时任务" });
+  const skip = list.locator('[data-schedule-id="c-skip"] .schedule-condition');
+  await expect(skip).toContainText("条件触发");
+  await expect(skip).toContainText("上次检查 5 分钟前：未满足，已跳过");
+  await expect(list.locator('[data-schedule-id="c-fired"] .schedule-condition')).toContainText("上次检查 2 分钟前：满足，已运行");
+  await expect(list.locator('[data-schedule-id="c-error"] .schedule-condition')).toContainText("出错（退出码 2），已跳过");
+  await expect(list.locator('[data-schedule-id="c-new"] .schedule-condition')).toContainText("还没检查过");
+  await expect(list.locator('[data-schedule-id="plain"] .schedule-condition')).toHaveCount(0);
+  // Error and fired outcomes use the theme's error and done colors, not the muted text.
+  const color = (id: string) => list.locator(`[data-schedule-id="${id}"] .schedule-check`).evaluate((el) => getComputedStyle(el).color);
+  expect(new Set([await color("c-skip"), await color("c-fired"), await color("c-error")]).size).toBe(3);
+  // The script and its last output are one tap away.
+  await expect(skip.locator("pre").first()).toBeHidden();
+  await skip.getByText("查看条件").click();
+  await expect(skip).toContainText("满足（退出码 0）才运行");
+  await expect(skip.locator("pre").first()).toContainText("# python");
+  await expect(skip.locator("pre").first()).toContainText("sys.exit(0 if price < 449 else 1)");
+  await expect(skip.locator("pre").nth(1)).toHaveText("price 479");
+  await list.locator('[data-schedule-id="c-skip"]').screenshot({ path: info.outputPath("schedule-condition.png") });
+  await page.screenshot({ path: info.outputPath("schedule-conditions.png"), fullPage: true });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1);
+  if (info.project.name.startsWith("mobile")) {
+    await page.setViewportSize({ width: 360, height: 844 });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1);
+    await page.screenshot({ path: info.outputPath("schedule-conditions-360.png"), fullPage: true });
+  }
+});

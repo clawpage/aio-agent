@@ -4450,6 +4450,15 @@ button.map-card-switch { flex: 0 0 auto; padding: 4px 10px; }
 .schedule-feed-label { margin-right: 6px; padding: 0 5px; border-radius: 5px; font-size: 11px; color: var(--ai); background: var(--ai-soft); }
 .schedule-feed-memory { margin: 6px 0 2px; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--text); }
 .schedule-feed-memory li[data-kind="avoid"] .schedule-feed-label { color: var(--text-dim); background: var(--bg-raised); }
+/* A conditional schedule: the last check's outcome (error in the error color) and the script itself. */
+.schedule-condition { margin: 4px 0 2px; min-width: 0; }
+.schedule-condition > p { margin: 0; }
+.schedule-check { color: var(--text-dim); }
+.schedule-condition[data-check="fired"] .schedule-check { color: var(--done); }
+.schedule-condition[data-check="error"] .schedule-check { color: var(--error); }
+.schedule-condition summary { cursor: pointer; width: fit-content; margin-top: 2px; }
+.schedule-condition-code { margin: 6px 0 0; padding: 8px 10px; max-height: 240px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-raised); font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace); font-size: 12px; line-height: 1.5; color: var(--text); }
+.schedule-condition-code.muted { color: var(--text-dim); }
 
 /* Owner's read-only view of the voice gadget account's conversation. */
 .gadget-history { flex: 1; min-height: 0; display: flex; flex-direction: column; }

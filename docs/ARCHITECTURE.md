@@ -95,6 +95,12 @@ planning_failed 可安全重试分类；blocked 提示前置结果需要核对�
 再从已持久化 turn 同步；任务被重启或断线截断（`unknown`）时，在同一执行会话里自动续跑（新 turn，先核对已生效的操作再继续，不原样重放；每个任务最多 2 次，配件任务除外），用完次数才停在 unknown 等人核对。任务行 revision 递增，客户端合并忽略陈旧快照。
 主时间线只取终结后的最终消息，过程仍保留在子线程详情；审批仍按子线程独立处理。
 
+定时任务每 30 秒检查到点项，直接建 waiting 状态的已派好任务（不经召回、Jev 与派单器）。带条件的定时任务（`schedules.condition_json`，
+`src/control/tasks/scheduleCondition.ts`）先把下次时间推进，再经沙箱节点的容器内执行在**本账号沙箱**里跑那段 bash / Python / Node.js 脚本
+（沙箱用户、工作区目录、容器内 `timeout -k 5 60`、输出截到 4000 字符）；控制面只解析退出码，从不执行脚本。退出码 0 才建任务（脚本输出写进
+`plan_json.conditionOutput` 交给执行会话），1 记为跳过，其他、超时或沙箱不可用记为出错，结果写 `schedules.last_check_json`；跳过与出错都不建任务、
+不碰任何模型。容器因空闲停着时，检查只经 `SandboxIdle.wakeContainer()` 启动容器（不等 Codex 会话与浏览器）。
+
 ## 认证与会话
 
 - 一个 owner，可通过本地 `bin/create-user.mjs` 创建 member，或由 member 凭 owner 生成的一次性邀请码经 `POST /api/auth/register` 自助注册（`src/control/auth/invites.ts`）；owner 由 `PA_OWNER_PASSWORD` 或首次启动生成的

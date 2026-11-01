@@ -107,6 +107,7 @@ export const tasks: typeof zh = {
     noNextRun: (title: string) => `排程任務「${title}」已經沒有下一次執行（時間或結束日期已過），沒有恢復。`,
     resumed: (title: string, next: string) => `已恢復排程任務「${title}」，下次執行 ${next}。`,
     runDescription: (rule: string) => `排程任務（${rule}）的自動執行。`,
+    conditional: "每次到點先在你的沙箱裡檢查條件，滿足時才執行（才用到模型）。",
     invalid: {
       notObject: "schedule 必須是物件",
       kind: (kinds: string) => `schedule.kind 只能是 ${kinds}`,
@@ -120,6 +121,9 @@ export const tasks: typeof zh = {
       monthDay: "schedule.monthDay 須是 1-31",
       maxRuns: "schedule.maxRuns 須是 1-1000 的整數或 null",
       until: "schedule.until 須是有效的 YYYY-MM-DD 或 null",
+      conditionNotObject: "condition 須是含 language 與 code 的物件，或 null 表示移除條件",
+      conditionLanguage: (languages: string) => `condition.language 須是 ${languages} 之一`,
+      conditionCode: (max: number) => `condition.code 須是 1 到 ${max} 個字元`,
       past: "這個時間已經過去了",
       allPast: "這些時間都已經過去了",
       noNext: "按這個規則已經沒有下一次執行（結束日期已過）",

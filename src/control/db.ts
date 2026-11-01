@@ -528,6 +528,9 @@ END;`);
   if (!taskColumns.some(c => c.name === "schedule_id")) db.exec("ALTER TABLE tasks ADD COLUMN schedule_id TEXT");
   const scheduleColumns = db.prepare("PRAGMA table_info(schedules)").all() as Array<{ name: string }>;
   if (!scheduleColumns.some(c => c.name === "builtin")) db.exec("ALTER TABLE schedules ADD COLUMN builtin TEXT");
+  // A schedule's condition (scheduleCondition.ts) and how its last check went.
+  if (!scheduleColumns.some(c => c.name === "condition_json")) db.exec("ALTER TABLE schedules ADD COLUMN condition_json TEXT");
+  if (!scheduleColumns.some(c => c.name === "last_check_json")) db.exec("ALTER TABLE schedules ADD COLUMN last_check_json TEXT");
   const vaultColumns = db.prepare("PRAGMA table_info(vault_entries)").all() as Array<{ name: string }>;
   if (!vaultColumns.some(c => c.name === "method")) db.exec("ALTER TABLE vault_entries ADD COLUMN method TEXT NOT NULL DEFAULT 'password' CHECK (method IN ('password','google'))");
   // Where a claim's evidence came from: a task (the original), or in a shared library also a member's own words.

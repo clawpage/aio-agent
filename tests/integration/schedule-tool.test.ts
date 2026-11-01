@@ -109,3 +109,43 @@ it("gives every account a schedule tool that creates and manages its own schedul
     await h.shutdown();
   }
 });
+
+it("creates, lists, edits and removes a schedule's condition through the tool", async () => {
+  const h = await startHarness();
+  const cfg = { ...h.ctx.cfg, memberModelPort: 0 };
+  const schedule = new ScheduleGateway({ port: 0, log: h.ctx.log, tasksFor: async () => h.ctx.tasks });
+  const gateway = new MemberModelGateway(cfg, h.ctx.log, undefined, undefined, undefined, schedule);
+  await gateway.start();
+  try {
+    const owner = { ...cfg, runtimeUserId: "owner_1", dataDir: path.join(h.dataDir, "owner-runtime") };
+    schedule.provision(owner);
+    const url = owner.schedule!.url.replace(/^http:\/\/host\.docker\.internal:0/, `http://127.0.0.1:${gateway.port}`);
+    const rpc = async (body: unknown) => (await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })).json();
+    const call = async (name: string, args: unknown) => (await rpc({ jsonrpc: "2.0", id: 3, method: "tools/call", params: { name, arguments: args } })).result as { content: Array<{ text: string }>; isError?: boolean };
+    const tools = (await rpc({ jsonrpc: "2.0", id: 2, method: "tools/list" })).result.tools as Array<{ name: string; inputSchema: { properties: Record<string, { description?: string; properties?: Record<string, unknown> }> } }>;
+    for (const name of ["schedule_create", "schedule_update"]) {
+      const condition = tools.find((t) => t.name === name)!.inputSchema.properties.condition!;
+      expect(condition.description).toContain("Exit code 0 = the condition is met");
+      expect(Object.keys(condition.properties!)).toEqual(["language", "code"]);
+    }
+    const code = "curl -s https://api.example.com/price | python3 -c 'import json,sys; p=json.load(sys.stdin)[\"price\"]; print(p); sys.exit(0 if p < 449 else 1)'";
+    const created = await call("schedule_create", { title: "盯价格", instruction: "Tell the user the price dropped", schedule: { kind: "interval", everyMinutes: 30 }, needsBrowser: false, condition: { language: "bash", code } });
+    expect(created.isError).toBeUndefined();
+    expect(created.content[0]!.text).toContain("only when the condition is met");
+    const id = /id: (\S+)/.exec(created.content[0]!.text)![1]!;
+    expect(JSON.parse((h.ctx.db.prepare("SELECT condition_json FROM schedules WHERE id=?").get(id) as { condition_json: string }).condition_json)).toEqual({ language: "bash", code });
+    const listed = (JSON.parse((await call("schedule_list", {})).content[0]!.text) as Array<{ id: string }>).find((s) => s.id === id)!;
+    expect(listed).toMatchObject({ condition: { language: "bash", code }, lastCheck: null });
+    expect((await call("schedule_create", { title: "x", instruction: "y", schedule: { kind: "daily", at: "09:00" }, condition: { language: "perl", code: "1" } })).isError).toBe(true);
+    const edited = await call("schedule_update", { id, condition: { language: "python", code: "import sys; sys.exit(1)" } });
+    expect(edited.isError).toBeUndefined();
+    expect(JSON.parse((h.ctx.db.prepare("SELECT condition_json FROM schedules WHERE id=?").get(id) as { condition_json: string }).condition_json)).toEqual({ language: "python", code: "import sys; sys.exit(1)" });
+    expect((await call("schedule_update", { id, condition: null })).isError).toBeUndefined();
+    expect(h.ctx.db.prepare("SELECT condition_json FROM schedules WHERE id=?").get(id)).toEqual({ condition_json: null });
+    // A schedule without a condition lists no condition fields.
+    expect((JSON.parse((await call("schedule_list", {})).content[0]!.text) as Array<{ id: string }>).find((s) => s.id === id)).not.toHaveProperty("condition");
+  } finally {
+    gateway.close();
+    await h.shutdown();
+  }
+});

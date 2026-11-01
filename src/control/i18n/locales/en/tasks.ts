@@ -110,6 +110,7 @@ export const tasks: typeof zh = {
     noNextRun: (title: string) => `The scheduled task "${title}" has no next run left (its time or end date has passed), so it wasn't resumed.`,
     resumed: (title: string, next: string) => `Resumed the scheduled task "${title}"; next run ${next}.`,
     runDescription: (rule: string) => `An automatic run of a scheduled task (${rule}).`,
+    conditional: "Before each run its condition is checked in your sandbox; it runs (and uses the model) only when the condition is met.",
     invalid: {
       notObject: "schedule must be an object",
       kind: (kinds: string) => `schedule.kind must be one of ${kinds}`,
@@ -123,6 +124,9 @@ export const tasks: typeof zh = {
       monthDay: "schedule.monthDay must be 1-31",
       maxRuns: "schedule.maxRuns must be a whole number from 1 to 1000, or null",
       until: "schedule.until must be a valid YYYY-MM-DD or null",
+      conditionNotObject: "condition must be an object with language and code, or null to remove it",
+      conditionLanguage: (languages: string) => `condition.language must be one of ${languages}`,
+      conditionCode: (max: number) => `condition.code must be 1 to ${max} characters`,
       past: "That time has already passed",
       allPast: "All of these times have already passed",
       noNext: "This rule has no next run left (its end date has passed)",

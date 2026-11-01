@@ -26,7 +26,7 @@ describe("owner sandbox idle stopping", () => {
       log: new Logger("error", undefined, false),
       container: { inspect: async () => { calls.push("inspect"); return state; } },
       agent: { init: async (o?: { cold?: boolean }) => { calls.push(o?.cold ? "agent.init cold" : "agent.init"); }, setSandboxGate: () => { calls.push("gate"); } },
-      tasks: { init: () => { calls.push("tasks.init"); } },
+      tasks: { init: () => { calls.push("tasks.init"); }, setSandboxWake: () => {} },
     } as unknown as AppContext;
     return { ctx, calls };
   };

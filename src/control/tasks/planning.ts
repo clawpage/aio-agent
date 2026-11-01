@@ -46,6 +46,8 @@ export interface TaskPlan {
     resume?: string | null;
     /** The message asks for a scheduled or recurring task. */
     schedule?: PlannedSchedule | null;
+    /** A scheduled run started because its condition was met: what the check printed. */
+    conditionOutput?: string;
     /** The message pauses, resumes or cancels one of the account's schedules. */
     scheduleAction?: { id: string; action: ScheduleActionName | "update" } | null;
     /** Jev's reading of which earlier task this message continues, passed on to the executor. */

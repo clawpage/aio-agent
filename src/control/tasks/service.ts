@@ -18,6 +18,7 @@ import { dispatchAdvice, formatRelevance, formatTimeline, lastQuestion, routingQ
 import { decideEffort, EFFORT_QUESTION, effortQuestion, type AutoEffort, type EffortDecision } from "./effort.js";
 import { describeNow, describeSchedule, formatWhen, MAX_ACTIVE_SCHEDULES, nextRun, validateSchedule, type ScheduleSpec } from "./schedules.js";
 import type { PlanningSchedule, ScheduleActionName } from "./planning.js";
+import { checkCondition, validateCondition, type ConditionCheck, type ScheduleCondition } from "./scheduleCondition.js";
 import { answerLanguage, isLocale, readLocale, writeLocale, type Locale } from "../locale.js";
 import type { SharePage } from "../share.js";
 import type { Widget } from "../widgets.js";
@@ -72,6 +73,10 @@ interface ScheduleRow {
     created_at: number;
     updated_at: number;
     builtin: string | null;
+    /** A ScheduleCondition: each due run is checked in the sandbox first. */
+    condition_json: string | null;
+    /** The last ConditionCheck. */
+    last_check_json: string | null;
 }
 /** The built-in daily feed: a schedule every account gets. */
 const DAILY_FEED = "daily_feed";
@@ -163,6 +168,10 @@ export class TaskService {
     #mergeAgain = false;
     #scheduled = false;
     #ticker: ReturnType<typeof setInterval> | null = null;
+    /** Schedules whose condition is being checked right now. */
+    #checking = new Set<string>();
+    /** Starts a container stopped for idleness before a condition check (the idle manager's, when there is one). */
+    #sandboxWake: (() => Promise<void>) | null = null;
     /** Told when a task finishes, fails or needs an answer (phone notifications). */
     #notifier: ((task: ReturnType<TaskService["view"]>) => void) | null = null;
     readonly recall: TaskRecall;
@@ -197,6 +206,7 @@ export class TaskService {
     belongsTo(id: string, userId: string): boolean { const row = this.get(id); return !!row && this.ownerId(row) === userId; }
     private executor(row: TaskRow): string { return row.execution_conversation_id ?? row.conversation_id; }
     #releaseHumanTabs: ((key: string) => Promise<number>) | null = null;
+    setSandboxWake(wake: () => Promise<void>): void { this.#sandboxWake = wake; }
     #onCompleted: ((taskId: string) => void) | null = null;
     /** Told of every task that finished as completed (the knowledge maintainer reads them). */
     onTaskCompleted(listener: (taskId: string) => void): void { this.#onCompleted = listener; }
@@ -1442,21 +1452,21 @@ export class TaskService {
         return said.join("; ") + ".";
     }
     /** Store one schedule for the account (the cap applies however it was asked for); its id, or why not. */
-    private insertSchedule(ownerId: string, s: { title: string; instruction: string; spec: ScheduleSpec; nextRunAt: number; resources: string[]; sourceTaskId: string | null }): { id: string } | { refused: string } {
+    private insertSchedule(ownerId: string, s: { title: string; instruction: string; spec: ScheduleSpec; nextRunAt: number; resources: string[]; sourceTaskId: string | null; condition?: ScheduleCondition | null }): { id: string } | { refused: string } {
         const active = (this.db.prepare("SELECT COUNT(*) AS n FROM schedules WHERE owner_id=? AND status='active' AND builtin IS NULL").get(ownerId) as { n: number }).n;
         if (active >= MAX_ACTIVE_SCHEDULES)
             return { refused: t().tasks.schedules.limitReached(active, MAX_ACTIVE_SCHEDULES) };
         const id = randomId("sched");
         const now = Date.now();
-        this.db.prepare("INSERT INTO schedules (id,owner_id,title,instruction,spec_json,timezone,resources_json,status,next_run_at,source_task_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,'active',?,?,?,?)")
-            .run(id, ownerId, s.title, s.instruction, JSON.stringify(s.spec), this.cfg.browser.timezone, JSON.stringify(s.resources), s.nextRunAt, s.sourceTaskId, now, now);
+        this.db.prepare("INSERT INTO schedules (id,owner_id,title,instruction,spec_json,timezone,resources_json,status,next_run_at,source_task_id,created_at,updated_at,condition_json) VALUES (?,?,?,?,?,?,?,'active',?,?,?,?,?)")
+            .run(id, ownerId, s.title, s.instruction, JSON.stringify(s.spec), this.cfg.browser.timezone, JSON.stringify(s.resources), s.nextRunAt, s.sourceTaskId, now, now, s.condition ? JSON.stringify(s.condition) : null);
         return { id };
     }
     /** What was set up, for the person. */
-    private scheduleCreated(title: string, instruction: string, spec: ScheduleSpec, nextRunAt: number): string {
+    private scheduleCreated(title: string, instruction: string, spec: ScheduleSpec, nextRunAt: number, conditional = false): string {
         const tz = this.cfg.browser.timezone;
         const words = t().tasks.schedules;
-        return [words.created(title, describeSchedule(spec), tz, formatWhen(nextRunAt, tz)), words.eachRun(instruction), words.manageHint].join("\n\n");
+        return [words.created(title, describeSchedule(spec), tz, formatWhen(nextRunAt, tz)), words.eachRun(instruction), ...(conditional ? [words.conditional] : []), words.manageHint].join("\n\n");
     }
     /** Store the schedule a plan asked for; the sentence that tells the person what was set up. */
     private createSchedule(row: TaskRow, plan: TaskPlan, runningNow = false): string {
@@ -1470,7 +1480,7 @@ export class TaskService {
      * An executor's schedule tool (scheduleTool.ts): set up a schedule for the account,
      * kept here and run as new tasks whatever conversation asked for it.
      */
-    createScheduleFor(userId: string, input: { title?: unknown; instruction?: unknown; schedule?: unknown; needsBrowser?: unknown }): { ok: true; message: string; schedule: ReturnType<TaskService["viewSchedule"]> } | { ok: false; error: string } {
+    createScheduleFor(userId: string, input: { title?: unknown; instruction?: unknown; schedule?: unknown; needsBrowser?: unknown; condition?: unknown }): { ok: true; message: string; schedule: ReturnType<TaskService["viewSchedule"]> } | { ok: false; error: string } {
         const words = t().tasks.schedules;
         const title = typeof input.title === "string" ? [...input.title.trim()].slice(0, 40).join("") : "";
         const instruction = typeof input.instruction === "string" ? input.instruction.trim().slice(0, 2000) : "";
@@ -1478,9 +1488,11 @@ export class TaskService {
         if (!instruction) return { ok: false, error: words.emptyInstruction };
         const checked = validateSchedule(input.schedule, Date.now(), this.cfg.browser.timezone);
         if ("error" in checked) return { ok: false, error: checked.error };
-        const stored = this.insertSchedule(userId, { title, instruction, spec: checked.spec, nextRunAt: checked.next, resources: input.needsBrowser === false ? [] : ["browser"], sourceTaskId: null });
+        const condition = input.condition === undefined ? { condition: null } : validateCondition(input.condition);
+        if ("error" in condition) return { ok: false, error: condition.error };
+        const stored = this.insertSchedule(userId, { title, instruction, spec: checked.spec, nextRunAt: checked.next, resources: input.needsBrowser === false ? [] : ["browser"], sourceTaskId: null, condition: condition.condition });
         if ("refused" in stored) return { ok: false, error: stored.refused };
-        return { ok: true, message: this.scheduleCreated(title, instruction, checked.spec, checked.next), schedule: this.viewSchedule(this.scheduleRow(stored.id)!) };
+        return { ok: true, message: this.scheduleCreated(title, instruction, checked.spec, checked.next, !!condition.condition), schedule: this.viewSchedule(this.scheduleRow(stored.id)!) };
     }
     /**
      * Change one of the account's schedules: its name, what each run does, its rule, whether
@@ -1488,7 +1500,7 @@ export class TaskService {
      * schedule with runs ahead starts again within the active cap. The built-in feed is
      * changed through its own settings instead.
      */
-    updateScheduleFor(userId: string, input: { id?: unknown; title?: unknown; instruction?: unknown; schedule?: unknown; needsBrowser?: unknown }): { ok: true; message: string; schedule: ReturnType<TaskService["viewSchedule"]> } | { ok: false; error: string; code?: "not_found" } {
+    updateScheduleFor(userId: string, input: { id?: unknown; title?: unknown; instruction?: unknown; schedule?: unknown; needsBrowser?: unknown; condition?: unknown }): { ok: true; message: string; schedule: ReturnType<TaskService["viewSchedule"]> } | { ok: false; error: string; code?: "not_found" } {
         const words = t().tasks.schedules;
         const s = this.scheduleRow(String(input.id ?? ""));
         if (!s || s.owner_id !== userId) return { ok: false, error: words.notFound, code: "not_found" };
@@ -1503,6 +1515,14 @@ export class TaskService {
             if (!instruction) return { ok: false, error: words.emptyInstruction };
         }
         if (typeof input.needsBrowser === "boolean") resources = JSON.stringify(input.needsBrowser ? ["browser"] : []);
+        // A new or removed condition starts without the old one's last check.
+        let condition = s.condition_json, lastCheck = s.last_check_json;
+        if (input.condition !== undefined) {
+            const checked = validateCondition(input.condition);
+            if ("error" in checked) return { ok: false, error: checked.error };
+            const next = checked.condition ? JSON.stringify(checked.condition) : null;
+            if (next !== condition) { condition = next; lastCheck = null; }
+        }
         const now = Date.now();
         let spec = JSON.parse(s.spec_json) as ScheduleSpec, next = s.next_run_at, status = s.status, runCount = s.run_count;
         if (input.schedule !== undefined) {
@@ -1516,11 +1536,11 @@ export class TaskService {
                 status = "active";
             }
         }
-        this.db.prepare("UPDATE schedules SET title=?,instruction=?,spec_json=?,resources_json=?,status=?,next_run_at=?,run_count=?,updated_at=? WHERE id=?")
-            .run(title, instruction, JSON.stringify(spec), resources, status, status === "done" ? null : next, runCount, now, s.id);
+        this.db.prepare("UPDATE schedules SET title=?,instruction=?,spec_json=?,resources_json=?,status=?,next_run_at=?,run_count=?,condition_json=?,last_check_json=?,updated_at=? WHERE id=?")
+            .run(title, instruction, JSON.stringify(spec), resources, status, status === "done" ? null : next, runCount, condition, lastCheck, now, s.id);
         const tz = s.timezone;
         const when = status === "paused" ? words.updatedPaused : status === "done" ? words.updatedDone : words.updatedNext(formatWhen(next!, tz));
-        return { ok: true, message: [words.updated(title, describeSchedule(spec), tz, when), words.eachRun(instruction)].join("\n\n"), schedule: this.viewSchedule(this.scheduleRow(s.id)!) };
+        return { ok: true, message: [words.updated(title, describeSchedule(spec), tz, when), words.eachRun(instruction), ...(condition ? [words.conditional] : [])].join("\n\n"), schedule: this.viewSchedule(this.scheduleRow(s.id)!) };
     }
     /** Pause, resume or cancel one of the owner's schedules; the sentence that says what happened. */
     private applyScheduleAction(ownerId: string, id: string, action: ScheduleActionName): string {
@@ -1556,7 +1576,8 @@ export class TaskService {
         const due = this.db.prepare("SELECT * FROM schedules WHERE owner_id=? AND status='active' AND next_run_at IS NOT NULL AND next_run_at<=? ORDER BY next_run_at")
             .all(this.cfg.runtimeUserId ?? "owner_1", now) as unknown as ScheduleRow[];
         for (const s of due) {
-            try { this.fireSchedule(s, now); }
+            if (this.#checking.has(s.id)) continue;
+            try { if (s.condition_json && !s.builtin) this.checkThenFire(s, now); else this.fireSchedule(s, now); }
             catch {
                 // A run that cannot start (the model is unavailable, say) waits for the next beat.
                 const next = nextRun(JSON.parse(s.spec_json) as ScheduleSpec, now, s.timezone);
@@ -1580,8 +1601,44 @@ export class TaskService {
             .run(runs, taskId ? now : s.last_run_at, taskId ?? s.last_task_id, done ? null : next, done ? "done" : s.status, now, s.id);
         return taskId;
     }
+    /**
+     * A due run of a schedule with a condition: the schedule moves on to its next time at
+     * once, then the condition runs in the sandbox (woken if it was stopped for idleness).
+     * Only when it is met does the run start, as any other scheduled run; not met or an
+     * error is recorded and nothing reaches a model. A previous run still going skips the
+     * check itself. Manual runs ("run now") do not check.
+     */
+    private checkThenFire(s: ScheduleRow, now: number): void {
+        const spec = JSON.parse(s.spec_json) as ScheduleSpec;
+        const previous = s.last_task_id ? this.get(s.last_task_id) : null;
+        const next = nextRun(spec, now, s.timezone);
+        const key = String(s.next_run_at);
+        this.db.prepare("UPDATE schedules SET next_run_at=?,status=?,updated_at=? WHERE id=?").run(next, next === null ? "done" : s.status, now, s.id);
+        if (previous && !RUN_SETTLED.has(previous.status)) return;
+        const condition = JSON.parse(s.condition_json!) as ScheduleCondition;
+        const unavailable = (): ConditionCheck & { fullOutput: string } => ({ at: Date.now(), result: "error", error: "unavailable", fullOutput: "" });
+        this.#checking.add(s.id);
+        void (async () => {
+            const sandbox = this.resourceSandbox;
+            const awake = sandbox ? await (this.#sandboxWake?.() ?? Promise.resolve()).then(() => true, () => false) : false;
+            const check = sandbox && awake ? await checkCondition(sandbox, condition, this.cfg.sandbox.containerWorkspaceDir) : unavailable();
+            if (this.#closed) return;
+            const { fullOutput, ...shown } = check;
+            runInLocaleOr(() => this.locale(), () => {
+                // Deleted, paused or given another condition while it ran: this check no longer counts.
+                const current = this.scheduleRow(s.id);
+                if (!current || current.status === "paused" || current.condition_json !== s.condition_json) return;
+                const taskId = check.result === "fired" ? this.startScheduledRun(current, previous, key, fullOutput) : null;
+                const runs = current.run_count + (taskId ? 1 : 0);
+                const done = current.status === "done" || (spec.maxRuns != null && runs >= spec.maxRuns);
+                this.db.prepare("UPDATE schedules SET last_check_json=?,run_count=?,last_run_at=?,last_task_id=?,next_run_at=?,status=?,updated_at=? WHERE id=?")
+                    .run(JSON.stringify(shown), runs, taskId ? check.at : current.last_run_at, taskId ?? current.last_task_id, done ? null : current.next_run_at, done ? "done" : current.status, Date.now(), s.id);
+                if (taskId) this.schedule();
+            });
+        })().catch(() => undefined).finally(() => this.#checking.delete(s.id));
+    }
     /** A scheduled run is already planned: the schedule's instruction, resources and the previous run as background. */
-    private startScheduledRun(s: ScheduleRow, previous: TaskRow | null, key: string): string | null {
+    private startScheduledRun(s: ScheduleRow, previous: TaskRow | null, key: string, conditionOutput?: string): string | null {
         const clientMessageId = `schedule:${s.id}:${key}`;
         if (this.db.prepare("SELECT 1 FROM tasks WHERE client_message_id=?").get(clientMessageId)) return null;
         const frozen = isMember(this.db, s.owner_id) ? this.agent.memberSettings() : this.agent.resolveSubmitSettings({ conversationId: "main", text: s.instruction, clientMessageId });
@@ -1590,6 +1647,7 @@ export class TaskService {
             title: s.title, description: t().tasks.schedules.runDescription(describeSchedule(JSON.parse(s.spec_json) as ScheduleSpec)),
             related: previous && s.builtin !== DAILY_FEED ? [previous.id] : [], dependencies: [], resources: JSON.parse(s.resources_json) as string[],
             appendTo: null, resume: null, clarification: null,
+            ...(conditionOutput !== undefined ? { conditionOutput } : {}),
         };
         this.db.exec("BEGIN IMMEDIATE");
         try {
@@ -1608,7 +1666,8 @@ export class TaskService {
         const n = (this.db.prepare("SELECT COUNT(*) AS n FROM tasks WHERE schedule_id=? AND created_at<=?").get(row.schedule_id, row.created_at) as { n: number }).n;
         const rule = s ? ` (${describeSchedule(JSON.parse(s.spec_json) as ScheduleSpec)})` : "";
         const plan = JSON.parse(row.plan_json!) as TaskPlan;
-        return `This is run ${n} of the scheduled task "${row.title}"${rule}, started automatically at ${formatWhen(row.created_at, s?.timezone ?? this.cfg.browser.timezone)}. The user is not in the conversation right now: finish the work and report the result directly, write anything that needs the user's decision or confirmation into the result, do not ask a question and wait, and do not create another schedule.${plan.related.length ? " The background includes the previous run's result, so you can say what changed since then." : ""}`;
+        const condition = plan.conditionOutput === undefined ? "" : ` It started because its condition check (a script run in the sandbox before each due time) was met${plan.conditionOutput ? `; the check printed:\n\`\`\`\n${plan.conditionOutput}\n\`\`\`\nUse this as the reason it fired.` : " (the check printed nothing)."}`;
+        return `This is run ${n} of the scheduled task "${row.title}"${rule}, started automatically at ${formatWhen(row.created_at, s?.timezone ?? this.cfg.browser.timezone)}. The user is not in the conversation right now: finish the work and report the result directly, write anything that needs the user's decision or confirmation into the result, do not ask a question and wait, and do not create another schedule.${plan.related.length ? " The background includes the previous run's result, so you can say what changed since then." : ""}${condition}`;
     }
     private viewSchedule(s: ScheduleRow) {
         const last = s.last_task_id ? this.get(s.last_task_id) : null;
@@ -1617,6 +1676,8 @@ export class TaskService {
             timezone: s.timezone, nextRunAt: s.next_run_at, nextRunText: s.next_run_at ? formatWhen(s.next_run_at, s.timezone) : null,
             lastRunAt: s.last_run_at, lastTask: last ? { id: last.id, status: last.status } : null, runCount: s.run_count, createdAt: s.created_at,
             builtin: s.builtin,
+            condition: s.condition_json ? JSON.parse(s.condition_json) as ScheduleCondition : null,
+            lastCheck: s.last_check_json ? JSON.parse(s.last_check_json) as ConditionCheck : null,
             ...(s.builtin === DAILY_FEED ? { feed: { customized: !isDefaultFeedInstruction(s.instruction), memory: this.feedMemory(s.owner_id).map(m => ({ id: m.id, kind: m.kind, text: m.text, source: m.source })) } } : {}),
         };
     }

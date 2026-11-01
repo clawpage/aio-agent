@@ -110,6 +110,7 @@ export const tasks: typeof zh = {
     noNextRun: (title: string) => `La tarea programada «${title}» ya no tiene próxima ejecución (la hora o la fecha final ya pasaron), así que no se reanudó.`,
     resumed: (title: string, next: string) => `Se reanudó la tarea programada «${title}»; próxima ejecución: ${next}.`,
     runDescription: (rule: string) => `Ejecución automática de una tarea programada (${rule}).`,
+    conditional: "Antes de cada ejecución se comprueba su condición en tu sandbox; solo se ejecuta (y usa el modelo) si se cumple.",
     invalid: {
       notObject: "schedule debe ser un objeto",
       kind: (kinds: string) => `schedule.kind solo puede ser ${kinds}`,
@@ -123,6 +124,9 @@ export const tasks: typeof zh = {
       monthDay: "schedule.monthDay debe estar entre 1 y 31",
       maxRuns: "schedule.maxRuns debe ser un número entero entre 1 y 1000, o null",
       until: "schedule.until debe ser una fecha YYYY-MM-DD válida o null",
+      conditionNotObject: "condition debe ser un objeto con language y code, o null para quitarla",
+      conditionLanguage: (languages: string) => `condition.language debe ser uno de ${languages}`,
+      conditionCode: (max: number) => `condition.code debe tener de 1 a ${max} caracteres`,
       past: "Esa hora ya pasó",
       allPast: "Todas esas horas ya pasaron",
       noNext: "Con esta regla ya no hay próxima ejecución (la fecha final ya pasó)",
