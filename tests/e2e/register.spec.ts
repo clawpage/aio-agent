@@ -168,3 +168,21 @@ test("the login card stays on screen when the Android app's web view shrinks for
   await expect(page.getByLabel("邮箱", { exact: true })).toBeInViewport();
   await page.screenshot({ path: info.outputPath("login-keyboard.png") });
 });
+
+// On iOS the keyboard leaves the page only the area above it and the page is kept at the top
+// (useKeyboardViewport), so the form itself brings the box being typed in into view. With Apple
+// sign-in above it, the email box starts lower than the Android test's. The keyboard is stood in
+// for by shrinking the viewport while the box has focus.
+test("the box being typed in moves above an iPhone keyboard", async ({ page }, info) => {
+  test.skip(!info.project.name.startsWith("mobile"));
+  await signedOut(page);
+  await page.goto("/");
+  for (const name of ["邮箱", "密码"]) {
+    const box = page.getByLabel(name, { exact: true });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await box.focus();
+    await page.setViewportSize({ width: 390, height: 360 });
+    await expect(box).toBeInViewport({ ratio: 1 });
+  }
+  await page.screenshot({ path: info.outputPath("login-ios-keyboard.png") });
+});

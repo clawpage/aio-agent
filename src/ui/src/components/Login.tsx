@@ -165,6 +165,23 @@ export function Login({ onSuccess, notice, username: named }: { onSuccess: () =>
 
   const register = mode === "register";
   useEffect(() => { if (!checking && !pendingEmail) track("auth_view", { mode }); }, [mode, checking, pendingEmail]);
+  // A phone keyboard shrinks the page to the area above it and keeps the window at the top
+  // (useKeyboardViewport), so iOS no longer scrolls the box being typed in into view: the
+  // form scrolls itself, once the keyboard has settled.
+  useEffect(() => {
+    const vv = window.visualViewport;
+    let timer: number | undefined;
+    const reveal = () => {
+      clearTimeout(timer);
+      timer = window.setTimeout(() => {
+        const el = document.activeElement;
+        if (el instanceof HTMLInputElement && el.closest(".login")) el.scrollIntoView({ block: "nearest" });
+      }, 80);
+    };
+    vv?.addEventListener("resize", reveal);
+    document.addEventListener("focusin", reveal);
+    return () => { clearTimeout(timer); vv?.removeEventListener("resize", reveal); document.removeEventListener("focusin", reveal); };
+  }, []);
   const switchMode = (next: Mode) => {
     setMode(next);
     setError(null);

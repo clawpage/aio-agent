@@ -736,6 +736,8 @@ textarea:focus {
 .login-card .field { gap: 7px; }
 .login-card .field > span { font-size: var(--fs-sm); color: var(--text); font-weight: 500; }
 .login-card input { min-height: 48px; border-radius: 12px; padding: 12px 14px; font-size: 15px; background: var(--bg-raised); }
+/* Room around a box scrolled up above a phone keyboard, so its label and the next box show too. */
+.login-card input { scroll-margin-block: 56px 72px; }
 .login-card input::placeholder { color: var(--text-dim); font-size: var(--fs-sm); }
 .login-card input[autocapitalize="characters"] { font-family: var(--mono); letter-spacing: 0.08em; }
 .login-card button.primary.block { display: flex; align-items: center; justify-content: center; gap: 10px; min-height: 48px; border-radius: 12px; font-size: var(--fs-md); margin-top: 4px; }
