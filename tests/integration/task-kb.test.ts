@@ -74,6 +74,10 @@ it("gives every account its own read-and-propose knowledge tool with no way to w
     expect((await rpc(member.taskKb!.url.replace(/[a-f0-9]{64}/, "f".repeat(64)), { jsonrpc: "2.0", id: 1, method: "tools/list" })).status).toBe(403);
     const init = await rpc(owner.taskKb!.url, { jsonrpc: "2.0", id: 1, method: "initialize", params: {} });
     expect((await init.json()).result).toMatchObject({ serverInfo: { name: "aio_task_kb" }, instructions: TASK_KB_POLICY });
+    // The person's address: standing agreements first, the family base only through its source documents, never a guess.
+    expect(TASK_KB_POLICY).toContain("read that field with its kb_source");
+    expect(TASK_KB_POLICY).toContain("never tells you where they live");
+    expect(TASK_KB_POLICY).toContain("their home address when they state or confirm it");
     const tools = (await (await rpc(owner.taskKb!.url, { jsonrpc: "2.0", id: 2, method: "tools/list" })).json()).result.tools as Array<{ name: string }>;
     expect(tools.map((t) => t.name)).toEqual(["kb_search", "kb_get", "kb_neighbors", "kb_source", "kb_libraries", "kb_propose", "kb_propose_status", "history_search", "history_get", "memory_search", "memory_save", "memory_forget"]);
   } finally {
