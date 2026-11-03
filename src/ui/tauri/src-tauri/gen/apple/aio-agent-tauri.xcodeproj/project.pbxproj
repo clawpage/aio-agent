@@ -459,7 +459,7 @@
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = 1;
 				VALID_ARCHS = arm64;
-				DEVELOPMENT_TEAM = "Z3T74M8F47";
+				DEVELOPMENT_TEAM = "MGS58YVTW7";
 			};
 			name = debug;
 		};
@@ -491,7 +491,7 @@
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = 1;
 				VALID_ARCHS = arm64;
-				DEVELOPMENT_TEAM = "Z3T74M8F47";
+				DEVELOPMENT_TEAM = "MGS58YVTW7";
 			};
 			name = release;
 		};

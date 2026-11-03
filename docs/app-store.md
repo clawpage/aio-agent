@@ -5,10 +5,10 @@ iOS App 是 `src/ui/tauri` 的 Tauri 壳（见该目录 README），加载线上
 
 ## 送审前提
 
-- **付费 Apple Developer Program**：免费个人 team（`Z3T74M8F47`，`tauri.conf.json` 的 `bundle.iOS.developmentTeam`）只能装到自己的手机、7 天过期，
-  不能上传 App Store Connect。送审用付费 team 的 ID 替换 `developmentTeam`（个人或公司账号均可；公司账号需要 D-U-N-S）。
-- App Store Connect 里新建 App：平台 iOS，Bundle ID `ai.clawpage.agent`（与 Android 包名相同），SKU 自定，主要语言建议简体中文。
-  名称在 App Store 全局唯一；被占用时改用 `Clawpage Agent - AI 助手` 之类再试。
+- **付费 Apple Developer Program**：team `MGS58YVTW7`（`tauri.conf.json` 的 `bundle.iOS.developmentTeam` 与 `project.pbxproj`）。
+  旧的免费个人 team `Z3T74M8F47` 只能装到自己的手机、7 天过期，不能上传。
+- App ID `ai.clawpage.agent` 已开 Sign in with Apple（`APPLE_ID_AUTH`，与 entitlements 的 `com.apple.developer.applesignin` 对应）。
+- App Store Connect 的 App：「一站 Clawpage Agent」，Apple ID `6830089706`，SKU `aio-agent-ios`，主要语言简体中文。
 - 账号持有人需接受最新的 Program License Agreement，免费 App 不需要签付费协议与税务信息。
 
 ## 原生包里已经准备好的
@@ -26,10 +26,13 @@ iOS App 是 `src/ui/tauri` 的 Tauri 壳（见该目录 README），加载线上
 
 ## 构建与上传
 
-在 `src/ui/tauri`，付费 team 已登录 Xcode（Xcode → Settings → Accounts）后：
+签名用 App Store Connect API 密钥（Admin），不需要在 Xcode 登录账号：Xcode 按密钥自动生成发布证书和描述文件。
+密钥 `AuthKey_<Key ID>.p8` 放在 `var/user-secrets/`（Git 忽略），Key ID 与 Issuer ID 在 App Store Connect →「用户和访问」→「集成」。
+在 `src/ui/tauri`：
 
 ```bash
-env -u NODE_ENV npm run -- tauri ios build --target aarch64 --export-method app-store-connect --build-number 1
+env -u NODE_ENV APPLE_API_KEY=<Key ID> APPLE_API_ISSUER=<Issuer ID> APPLE_API_KEY_PATH=$PWD/../../../var/user-secrets/AuthKey_<Key ID>.p8 \
+  npm run -- tauri ios build --target aarch64 --export-method app-store-connect --build-number <N>
 # 产物：src-tauri/gen/apple/build/arm64/AIOAgent.ipa；归档：src-tauri/gen/apple/build/aio-agent-tauri_iOS.xcarchive
 ```
 
