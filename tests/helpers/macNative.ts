@@ -5,12 +5,13 @@ import { PhoneGateway } from "../../src/control/phone.js";
 import { UserBrowserGateway } from "../../src/control/userBrowser.js";
 import { MacShellGateway } from "../../src/control/macShell.js";
 import { MacNativeGateway } from "../../src/control/macNative.js";
+import type { Vault } from "../../src/control/vault.js";
 
 /** The Mac's three parts and the one MCP server (aio_mac_native) the executor reaches them through, as src/control/index.ts builds them. */
-export function macParts(opts: { cfg: Config; log: Logger; usernameOf: (userId: string) => string | null; userIdOf: (username: string) => string | null; links: DeviceLinks }) {
+export function macParts(opts: { cfg: Config; log: Logger; usernameOf: (userId: string) => string | null; userIdOf: (username: string) => string | null; links: DeviceLinks; vaultFor?: (userId: string) => Promise<Vault> }) {
   const part = { cfg: opts.cfg, log: opts.log, userIdOf: opts.userIdOf, links: opts.links };
   const phone = new PhoneGateway(part);
-  const browser = new UserBrowserGateway(part);
+  const browser = new UserBrowserGateway({ ...part, vaultFor: opts.vaultFor });
   const shell = new MacShellGateway(part);
   const native = new MacNativeGateway({ ...opts, port: 0, phone, browser, shell });
   return { phone, browser, shell, native };

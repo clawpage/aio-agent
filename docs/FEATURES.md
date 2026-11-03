@@ -841,7 +841,12 @@ Android 手机用 USB 接在装了 Mac App 的 Mac 上，由 App 运行的 `bin/
   等待、点击、悬停、填写、表单、输入、按键、拖动、对话框、页面内脚本、控制台与网络请求。上传文件、任何带文件路径的参数（存截图/快照/脚本结果/请求体到路径）、
   模拟设备与改窗口大小、性能追踪、Lighthouse、堆快照一律拒绝，工具描述里也去掉这些参数。
 - 执行会话用 `new_page` 开自己的页面并带 `pageId` 操作，不动别的任务的页面，用完关掉自己开的页面；付款、下单、发消息、删除、改账号设置前先确认。
-  沙箱浏览器的密码器（`browser_login`）只在 `aio_tabs`。同一账号的多个任务共用这一个 Chrome；除了被接管的页面，页面归属靠执行规则约束，不像 `aio_tabs` 那样由服务强制。
+  同一账号的多个任务共用这一个 Chrome；除了被接管的页面，页面归属靠执行规则约束，不像 `aio_tabs` 那样由服务强制。
+- **密码器**：`aio_mac_native` 也有 `browser_login` / `browser_login_report`（`src/control/macLogin.ts`），规则与沙箱浏览器相同：AI 写步骤、用 `{{username}}` / `{{password}}` 占位，
+  从重新加载的页面开始，密码只填进 `type=password` 的框，每次输入前核对页面仍在保存账号的网站（含子域名），结束后清空页面上的密码框，同一页面最多失败 3 次，
+  成功的步骤按网站记下（与沙箱浏览器共用一份）。由控制面调用桥接已有的工具执行（`navigate_page`、`evaluate_script` 聚焦输入框、`type_text` 键入、`press_key`），
+  Mac App 无需更新；账号密码只在这些调用里，不进任务记录、日志或 AI 的回复。登录期间该账号的其他浏览器调用不能碰这个页面（不带 `pageId` 的也拒绝）。
+  该网站恰好存了一个账号时直接登录，存的是「用 Google 登录」时告诉 AI 点 Google 按钮；没有或有多个账号时让 AI 用 `request_human` 请用户自己登录。
 - **工作区「Mac 浏览器」**：列出这个 Chrome 里打开的全部页面（`GET /api/user-browser/pages`，经 Mac 的 `list_pages`，Chrome 自己那个空白页不列），
   标出是谁的：任务的页面（任务标题，AI 在用 / 你在操作）、你在这里打开的（「你的」）、其他（例如登录弹窗）。选中一个即看实时画面（WebSocket `/api/user-browser/screen?page=<页面号>`）。
   地址栏打开你自己的页面（`POST /api/user-browser/pages`，只收 http(s)，没写协议补 https），用来先把 AI 要用的网站登录好；你的页面和「其他」页面直接可操作、可关闭

@@ -12,6 +12,9 @@ import { endSocket } from "./http/proxy.js";
 import type { DeviceLinks, Tunnel, TunnelChannel } from "./deviceLink.js";
 import { TAB_TASK_HEADER } from "./browser/tabs.js";
 import { USER_BROWSER_TOOLS } from "./userBrowserTools.js";
+import { siteCovers, siteOfUrl, type Vault } from "./vault.js";
+import { CLEAR_PASSWORDS_SCRIPT, loginSteps, MAX_MAC_LOGIN_TRIES, runMacLogin } from "./macLogin.js";
+import type { LoginStep } from "./browser/tabs.js";
 
 /**
  * An account's AI Chrome, on the Mac it linked for its phones (DeviceLinks):
@@ -55,10 +58,42 @@ const REQUEST_HUMAN_TOOL = {
   annotations: { readOnlyHint: false, openWorldHint: false },
 };
 
+/** The gateway's own tools: sign in with the person's password manager, then say whether it worked. */
+const LOGIN_TOOLS = [
+  {
+    name: "browser_login",
+    title: "Sign in with the password manager",
+    description:
+      "Sign in to the site of this task's page with the account the user saved in the password manager. First take_snapshot to see the sign-in form, then write steps: starting from a fresh load of the current page, open the sign-in form if needed, fill {{username}} into the account box and {{password}} into the password box (it must be a type=password box), and submit. The system puts the saved values in place of the placeholders and runs the steps; you never see them. Steps that worked on this site before are reused, so steps may be omitted. When it returns, read the page and call browser_login_report.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        pageId: { type: "number", description: "The page this task opened with new_page." },
+        steps: {
+          type: "array",
+          description: "At most 15 steps, each {action: click|fill|press|wait|select, selector?: a CSS selector, value?, key?, ms?}; a value of {{username}} or {{password}} is replaced with the saved value. May be omitted.",
+          items: { type: "object", properties: { action: { type: "string" }, selector: { type: "string" }, value: { type: "string" }, key: { type: "string" }, ms: { type: "number" } }, required: ["action"] },
+        },
+      },
+      required: ["pageId"],
+    },
+    annotations: { readOnlyHint: false, openWorldHint: false },
+  },
+  {
+    name: "browser_login_report",
+    title: "Report whether the sign-in worked",
+    description: "After browser_login, read the page and report whether sign-in really succeeded: ok=true remembers the steps for this site; ok=false with a one-sentence note on where it got stuck.",
+    inputSchema: { type: "object", properties: { pageId: { type: "number" }, ok: { type: "boolean" }, note: { type: "string" } }, required: ["pageId", "ok"] },
+    annotations: { readOnlyHint: false, openWorldHint: false },
+  },
+];
+const OWN_TOOLS = [REQUEST_HUMAN_TOOL, ...LOGIN_TOOLS];
+const SIGNING_IN = "The password manager is signing in on this page right now; wait for browser_login to return before using the page.";
+
 export const USER_BROWSER_POLICY =
   "Two browsers are available: the browser tools of aio_mac_native (list_pages, new_page, take_snapshot, click, …) drive the AI's own Google Chrome on the user's Mac (a profile of its own that keeps the sign-ins the user made in it, on the user's home network; the user can watch every page you work in from the console), and aio_tabs is the sandbox browser in the cloud. For browser work, use the Mac's Chrome first: begin with aio_mac_native's list_pages; if that or a later call says this browser is unavailable, switch to aio_tabs for the rest of this task without asking, and mention the switch in one sentence in your reply. Use aio_tabs from the start only when the work needs files from the workspace (uploading or downloading) or the user asked for the sandbox browser. " +
   "In the Mac's Chrome: open the page you work in with new_page and pass its pageId on every call; pages you did not open belong to other tasks, so leave them alone; close the pages you opened once you no longer need them, unless the user should look at the result. Prefer take_snapshot to read a page and act on its uids; take a screenshot only for what the snapshot does not show. The task card shows the user the page you work in and lets them take it over. " +
-  "When a site asks for a password, a CAPTCHA, two-factor verification, a QR-code sign-in or payment details, or a final step only the user may take, call aio_mac_native's request_human with the reason and wait; after it returns, read the page again before continuing. If a call says the user has taken over the page, call request_human to wait for them. (aio_tabs' browser_login and browser_request_human are only for the sandbox browser.) " +
+  "When a site needs signing in with an account and password, call aio_mac_native's browser_login with your page's pageId (never type a password yourself, never read password boxes, never ask the user for the password), then read the page and call browser_login_report; on failure rewrite the steps from the step it names, at most 3 times. When it says no account is saved, or for a CAPTCHA, two-factor verification, a QR-code sign-in, payment details or a final step only the user may take, call aio_mac_native's request_human with the reason and wait; after it returns, read the page again before continuing. If a call says the user has taken over the page, call request_human to wait for them. (aio_tabs' browser_login and browser_request_human are only for the sandbox browser.) " +
   "For steps with external effects or that are hard to undo, such as paying, placing orders, sending messages or posts, deleting content, or changing account or security settings, first tell the user what you are about to do and wait for confirmation. Files on the Mac are not reachable: never pass file paths.";
 
 /** The page a task works in on the AI's Chrome, and who drives it. */
@@ -71,6 +106,9 @@ interface TaskPage {
   request: { reason: string; at: number } | null;
   /** Agents waiting in request_human: resolved when the person hands the page back. */
   waiters: Set<() => void>;
+  /** Password manager sign-ins that did not work here, and the last one that was submitted (for browser_login_report). */
+  loginTries: number;
+  lastLogin: { site: string; steps: LoginStep[] | null; startUrl: string; source: "agent" | "kept" | "guess" } | null;
 }
 
 /** What a task's card shows of it. */
@@ -106,24 +144,28 @@ export class UserBrowserGateway {
   #log: Logger;
   #links: DeviceLinks;
   #userIdOf: (username: string) => string | null;
+  #vaultFor: ((userId: string) => Promise<Vault>) | null;
+  /** account -> the page the password manager is signing in on (no other call may touch it meanwhile) */
+  #signingIn = new Map<string, number>();
   /** account -> task key -> its page */
   #pages = new Map<string, Map<string, TaskPage>>();
   #wss = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024 });
   /** account -> the pages the person opened in the workspace's Mac browser */
   #own = new Map<string, Set<number>>();
 
-  constructor(opts: { cfg: Config; log: Logger; userIdOf: (username: string) => string | null; links: DeviceLinks }) {
+  constructor(opts: { cfg: Config; log: Logger; userIdOf: (username: string) => string | null; links: DeviceLinks; vaultFor?: (userId: string) => Promise<Vault> }) {
     this.#cfg = opts.cfg;
     this.#log = opts.log.child("user-browser");
     this.#links = opts.links;
     this.#userIdOf = opts.userIdOf;
+    this.#vaultFor = opts.vaultFor ?? null;
   }
 
   #page(userId: string, key: string, create = false): TaskPage | undefined {
     let own = this.#pages.get(userId);
     if (!own && create) this.#pages.set(userId, (own = new Map()));
     let page = own?.get(key);
-    if (!page && create) own!.set(key, (page = { pageId: null, title: "", url: "", holder: "ai", humanSince: null, request: null, waiters: new Set() }));
+    if (!page && create) own!.set(key, (page = { pageId: null, title: "", url: "", holder: "ai", humanSince: null, request: null, waiters: new Set(), loginTries: 0, lastLogin: null }));
     return page;
   }
 
@@ -248,12 +290,12 @@ export class UserBrowserGateway {
       if (tunnel) {
         try {
           const live = (await this.#rpc(tunnel, message)) as { result?: { tools?: unknown[] } };
-          if (Array.isArray(live?.result?.tools)) return { ...live, result: { ...live.result, tools: [...live.result.tools, REQUEST_HUMAN_TOOL] } };
+          if (Array.isArray(live?.result?.tools)) return { ...live, result: { ...live.result, tools: [...live.result.tools, ...OWN_TOOLS] } };
         } catch (err) {
           this.#log.warn("browser tool list from the Mac failed", { error: err instanceof Error ? err.message : String(err) });
         }
       }
-      return { jsonrpc: "2.0", id, result: { tools: [...USER_BROWSER_TOOLS, REQUEST_HUMAN_TOOL] } };
+      return { jsonrpc: "2.0", id, result: { tools: [...USER_BROWSER_TOOLS, ...OWN_TOOLS] } };
     }
     const failed = (why: string) => method === "tools/call"
       ? { jsonrpc: "2.0", id, result: { content: [{ type: "text", text: why }], isError: true } }
@@ -266,6 +308,19 @@ export class UserBrowserGateway {
       return this.#waitForHuman(id, userId, key, String(params?.arguments?.reason ?? "").trim().slice(0, 300));
     }
     if (method === "tools/call" && key && tool !== "list_pages" && this.#page(userId, key)?.holder === "human") return failed(TAKEN_OVER);
+    if (method === "tools/call" && this.#signingIn.has(userId) && tool !== "list_pages") {
+      // Nothing else acts on, or reads, the page while the password manager types into it; a call without a pageId could land on it.
+      const target = params?.arguments?.pageId;
+      if (target === undefined || target === this.#signingIn.get(userId)) return failed(SIGNING_IN);
+    }
+    if (method === "tools/call" && tool === "browser_login") {
+      if (!key) return failed("browser_login is not available in this session; ask the user to sign in instead.");
+      return this.#login(id, userId, key, params?.arguments ?? {});
+    }
+    if (method === "tools/call" && tool === "browser_login_report") {
+      if (!key) return failed("browser_login_report is not available in this session.");
+      return this.#loginReport(id, userId, key, params?.arguments ?? {});
+    }
     if (!tunnel) return failed(MAC_OFFLINE);
     try {
       const answer = await this.#rpc(tunnel, message);
@@ -292,6 +347,97 @@ export class UserBrowserGateway {
     if (page.pageId === null) return;
     const line = new RegExp(`^${page.pageId}: (.*) \\((https?:[^)\\s]*)\\)(?: \\[selected\\])?\\s*$`, "m").exec(text);
     if (line) { page.title = line[1]!.slice(0, 200); page.url = line[2]!.slice(0, 2000); }
+  }
+
+  /**
+   * browser_login: the person's password manager signs in on the task's page, with
+   * the one account saved for its site. The account and password go from the
+   * vault straight into the page through the Mac's browser tools; the agent hears
+   * only how it went.
+   */
+  async #login(id: unknown, userId: string, key: string, args: Record<string, unknown>): Promise<unknown> {
+    const reply = (text: string, isError = false) => ({ jsonrpc: "2.0", id, result: { content: [{ type: "text", text }], ...(isError ? { isError: true } : {}) } });
+    const page = this.#page(userId, key);
+    if (!page || page.pageId === null || args.pageId !== page.pageId) return reply("Pass the pageId of the page this task opened with new_page.", true);
+    if (page.holder === "human") return reply(TAKEN_OVER, true);
+    if (!this.#vaultFor) return reply("The password manager is not available here: call request_human to ask the user to sign in themselves.", true);
+    if (page.loginTries >= MAX_MAC_LOGIN_TRIES) {
+      return reply(`Signing in to this site has failed ${page.loginTries} times already. Do not call browser_login again: call request_human to ask the user to sign in themselves, and say which step it got stuck on.`, true);
+    }
+    const steps = loginSteps(args.steps);
+    if (typeof steps === "string") return reply(`steps cannot be used: ${steps}. Fix them and call again.`, true);
+    const pageId = page.pageId;
+    let url = "";
+    try {
+      const listed = await this.#personCall(userId, "list_pages", {});
+      for (const line of listed.split("\n")) {
+        const found = PAGE_LINE.exec(line.trim());
+        if (found && Number(found[1]) === pageId) url = found[3] ?? found[4]!;
+      }
+    } catch (err) {
+      return reply(err instanceof Error ? err.message : MAC_OFFLINE, true);
+    }
+    const host = siteOfUrl(url);
+    if (!host) return reply("This page is not a web page; first navigate_page to the site you want to sign in to.", true);
+    const vault = await this.#vaultFor(userId);
+    const entries = vault.matching(host);
+    const google = entries.filter((e) => e.method === "google");
+    const accounts = entries.filter((e) => e.method === "password");
+    if (accounts.length === 0 && google.length === 1) {
+      vault.used(google[0]!.id);
+      const which = google[0]!.username ? `the Google account ${google[0]!.username}` : "the Google account already signed in to this browser";
+      return reply(`The user saved "Sign in with Google" for ${host}, with ${which}. Click the site's Google sign-in button (such as 「使用 Google 登录」, "Continue with Google" or "Sign in with Google"; open the sign-in form first if you cannot find one); in Google's account chooser choose ${google[0]!.username ? "this account" : "the signed-in account"} and continue. Do not call browser_login again and do not enter any password; if Google asks for a password, a code or two-factor verification, call request_human.`); // i18n-exempt: button text the agent looks for on Chinese sites
+    }
+    if (accounts.length !== 1) {
+      return reply(accounts.length
+        ? `The password manager has ${accounts.length} accounts for ${host} and cannot tell which one to use: call request_human asking the user to sign in themselves in this page.`
+        : `The password manager has no account for ${host}: call request_human asking the user to sign in themselves in this page (they can also save the account in the password manager for next time).`, true);
+    }
+    const entry = accounts[0]!;
+    const password = vault.secret(entry.id);
+    if (password === null) return reply("The saved password could not be read: call request_human asking the user to sign in themselves.", true);
+    // The agent's steps start from where the page is; kept steps from where they worked; else the form is found as a person would.
+    const kept = steps ? null : vault.script(host);
+    const keptStart = kept && siteCovers(entry.site, siteOfUrl(kept.startUrl) ?? "") ? kept.startUrl : url;
+    const plan = { site: entry.site, steps: steps ?? kept?.steps ?? null, startUrl: steps ? url : keptStart };
+    const source = steps ? "agent" : kept ? "kept" : "guess";
+    const call = (name: string, a: Record<string, unknown>) => this.#personCall(userId, name, a);
+    this.#signingIn.set(userId, pageId);
+    let outcome;
+    try {
+      outcome = await runMacLogin(call, pageId, plan, entry.username, password);
+    } finally {
+      await call("evaluate_script", { pageId, function: CLEAR_PASSWORDS_SCRIPT }).catch(() => undefined);
+      this.#signingIn.delete(userId);
+    }
+    this.#log.info("mac sign-in", { site: host, result: outcome.result, source });
+    const used = source === "kept" ? " (using the steps that worked on this site last time)" : "";
+    if (outcome.result === "submitted") {
+      vault.used(entry.id);
+      page.lastLogin = { site: host, steps: plan.steps, startUrl: plan.startUrl, source };
+      return reply(`The password manager filled in the account and password and submitted${used}. Read the page (take_snapshot) to confirm whether sign-in succeeded, then call browser_login_report. If the page says the account or password is wrong, report failure and tell the user to check it in the password manager; if a code or two-factor verification is still needed, call request_human.`);
+    }
+    if (outcome.result === "username_only") return reply("The password manager filled in the account and went on, but no password box appeared. Read the page, write steps, then call browser_login again.");
+    page.loginTries++;
+    const left = MAX_MAC_LOGIN_TRIES - page.loginTries;
+    const why = outcome.error ?? "no account or password box was found on the page";
+    return reply(left > 0
+      ? `Sign-in did not complete${used}: ${why}.\nUse take_snapshot to see the sign-in form, rewrite steps (they start from a fresh load of the page and must open the sign-in form), then call browser_login again. Attempts left: ${left}.`
+      : `Sign-in did not complete: ${why}. It has been tried ${MAX_MAC_LOGIN_TRIES} times. Do not call browser_login again: call request_human asking the user to sign in themselves, and say which step it got stuck on.`, true);
+  }
+
+  /** browser_login_report: steps that worked become the site's in the vault (shared with the sandbox browser's). */
+  async #loginReport(id: unknown, userId: string, key: string, args: Record<string, unknown>): Promise<unknown> {
+    const reply = (text: string, isError = false) => ({ jsonrpc: "2.0", id, result: { content: [{ type: "text", text }], ...(isError ? { isError: true } : {}) } });
+    const page = this.#page(userId, key);
+    const last = page?.lastLogin;
+    if (!page || !last || !this.#vaultFor) return reply("This page has not signed in with the password manager recently.", true);
+    const ok = args.ok === true;
+    if (last.source !== "guess" || !ok) (await this.#vaultFor(userId)).noteLogin({ site: last.site, steps: last.steps, startUrl: last.startUrl, ok, note: String(args.note ?? "").slice(0, 300) });
+    page.lastLogin = null;
+    if (ok) page.loginTries = 0;
+    else page.loginTries++;
+    return reply(ok ? "Noted: these steps will be used the next time you sign in to this site." : "Noted.");
   }
 
   /** request_human: show the request on the task's card and wait until the person hands the page back. */

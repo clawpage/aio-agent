@@ -537,7 +537,8 @@ async function main(): Promise<void> {
   const phone=new PhoneGateway({cfg:ctx.cfg,log:ctx.log,links:deviceLinks,userIdOf});
   ctx.phone=phone;
   // The same Mac offers the AI's Chrome on it, next to the sandbox browser.
-  const userBrowser=new UserBrowserGateway({cfg:ctx.cfg,log:ctx.log,links:deviceLinks,userIdOf});
+  const userBrowser=new UserBrowserGateway({cfg:ctx.cfg,log:ctx.log,links:deviceLinks,userIdOf,
+    vaultFor:async id=>(id===ctx.cfg.runtimeUserId?ctx:await ctx.runtimeForUser!(id)).vault!});
   ctx.userBrowser=userBrowser;
   // And its terminal, once the person at that Mac turns it on in the app.
   const macShell=new MacShellGateway({cfg:ctx.cfg,log:ctx.log,links:deviceLinks,userIdOf});

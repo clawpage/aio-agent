@@ -28,7 +28,7 @@ const SERVER = {
   instructions: [
     "The user's own Mac (not the sandbox), in three parts:",
     `- Phone (mobile_* tools): the Android phone plugged into the Mac by USB. ${PHONE_SERVER.instructions}`,
-    `- Browser (list_pages, new_page, take_snapshot, click, …, request_human): ${USER_BROWSER_INSTRUCTIONS}`,
+    `- Browser (list_pages, new_page, take_snapshot, click, …, browser_login, request_human): ${USER_BROWSER_INSTRUCTIONS}`,
     `- Terminal (read, write, edit, bash): ${MAC_SHELL_INSTRUCTIONS}`,
   ].join("\n\n"),
 } as const;
