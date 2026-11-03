@@ -1,9 +1,11 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type Page } from "@playwright/test";
 import { mockConsole } from "./mock-api";
 
 // Browsers cannot reach a real push service here: the browser push APIs are stubbed,
 // and the test checks what the console does with them and what it sends the server.
-test("turns phone notifications on, tests and turns them off", async ({ page }, info) => {
+type Calls = { pushCalls: string[] };
+
+async function setup(page: Page) {
   await page.addInitScript(() => {
     const calls: string[] = [];
     (window as unknown as { pushCalls: string[] }).pushCalls = calls;
@@ -30,26 +32,60 @@ test("turns phone notifications on, tests and turns them off", async ({ page }, 
     });
   });
   await mockConsole(page, { conversations: [] });
-  await page.route("**/api/main*", (r) => r.fulfill({ json: { mode: "tasks", tasks: [], nextBefore: null } }));
+  await page.route("**/api/main*", (r) => r.fulfill({ json: { mode: "tasks", version: "v0", tasks: [], nextBefore: null } }));
   const bodies: Record<string, unknown> = {};
   await page.route("**/api/push", (r) => r.fulfill({ json: { supported: true, publicKey: "BEl62iUYgUivxIkv69yViEuiBIa-Ib9-SkvMeAtA3LFgDzkrxZJjSgSnfckjBJuBkr3qBUYIHBQFLXYp5Nksh8U", devices: 0 } }));
   await page.route("**/api/push/*", (r) => {
-    const name = new URL(r.request().url()).pathname.split("/").at(-1)!;
-    bodies[name] = r.request().postDataJSON();
-    return r.fulfill({ json: name === "test" ? { sent: 1 } : { ok: true, devices: 1 } });
+    bodies[new URL(r.request().url()).pathname.split("/").at(-1)!] = r.request().postDataJSON();
+    return r.fulfill({ json: { ok: true, devices: 1 } });
   });
+  return bodies;
+}
+
+test("the configuration page has one switch for phone notifications", async ({ page }, info) => {
+  const bodies = await setup(page);
   await page.goto("/");
   if (info.project.name.startsWith("mobile")) await page.getByRole("button", { name: "打开导航" }).click();
-  const control = page.locator(".sidebar").getByRole("button", { name: "开启手机通知" });
-  await control.click();
-  await expect(page.locator(".sidebar")).toContainText("手机通知已开启");
+  await page.locator(".sidebar-foot button", { hasText: "配置" }).click();
+  const card = page.getByRole("region", { name: "手机通知" });
+  const toggle = card.getByRole("checkbox");
+  await expect(card).toContainText("已关闭");
+  await expect(card.getByRole("button")).toHaveCount(0);
+  await toggle.click();
+  await expect(card).toContainText("已开启");
+  await expect(toggle).toBeChecked();
+  await card.screenshot({ path: info.outputPath("push-settings.png") });
   // Permission comes first, straight from the tap; then the worker, then the subscription.
   // (The first registration is the console's own, at load: the same worker keeps it openable offline.)
-  expect(await page.evaluate(() => (window as unknown as { pushCalls: string[] }).pushCalls)).toEqual(["register:/sw.js", "permission", "register:/sw.js", "subscribe:65"]);
+  expect(await page.evaluate(() => (window as unknown as Calls).pushCalls)).toEqual(["register:/sw.js", "permission", "register:/sw.js", "subscribe:65"]);
   expect(bodies.subscribe).toEqual({ subscription: { endpoint: "https://web.push.apple.com/fake", keys: { p256dh: "p", auth: "a" } } });
-  await page.locator(".sidebar").getByRole("button", { name: "测试", exact: true }).click();
-  await expect(page.locator(".sidebar")).toContainText("测试通知已发出");
-  await page.locator(".sidebar").getByRole("button", { name: "关闭", exact: true }).click();
-  await expect(page.locator(".sidebar").getByRole("button", { name: "开启手机通知" })).toBeVisible();
+  await toggle.click();
+  await expect(card).toContainText("已关闭");
   expect(bodies.unsubscribe).toEqual({ endpoint: "https://web.push.apple.com/fake" });
+});
+
+test("after the first message the console offers phone notifications, once", async ({ page }, info) => {
+  const bodies = await setup(page);
+  await page.route("**/api/tasks", async (r) => {
+    const body = r.request().postDataJSON() as Record<string, unknown>;
+    const task = { id: "task-1", revision: 1, title: String(body.text), text: body.text, conversationId: "c-1", status: "planning", result: null, error: null, attachments: [], relatedTaskId: null, dependencies: [], approvals: 0, createdAt: Date.now(), completedAt: null, clientMessageId: body.clientMessageId };
+    await r.fulfill({ status: 202, json: { task, duplicate: false } });
+  });
+  await page.goto("/");
+  await expect(page.locator(".boot-cover")).toHaveCount(0, { timeout: 60_000 });
+  const nudge = page.locator(".push-nudge");
+  await expect(nudge).toHaveCount(0);
+  await page.getByRole("textbox", { name: "消息", exact: true }).fill("帮我查天气");
+  await page.getByRole("button", { name: "发送", exact: true }).click();
+  await expect(nudge).toContainText("开启手机通知");
+  await page.screenshot({ path: info.outputPath("push-nudge.png") });
+  await nudge.getByRole("button", { name: "开启", exact: true }).click();
+  await expect(nudge).toHaveCount(0);
+  expect(bodies.subscribe).toBeTruthy();
+  // Answered on this device: a reload and another message do not ask again.
+  await page.reload();
+  await page.getByRole("textbox", { name: "消息", exact: true }).fill("再查一次");
+  await page.getByRole("button", { name: "发送", exact: true }).click();
+  await expect(page.getByText("再查一次").first()).toBeVisible();
+  await expect(nudge).toHaveCount(0);
 });

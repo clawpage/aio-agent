@@ -29,7 +29,6 @@ import { ClawpageList } from "./ClawpageList";
 import { ScheduleList } from "./ScheduleList";
 import { VaultList } from "./VaultList";
 import { KnowledgeList } from "./KnowledgeList";
-import { PushToggle } from "./PushToggle";
 import {taskStatusLabels,type TaskFeed} from '../taskStatus';
 import { isSandboxLink } from "../sandboxLink";
 import { openDeviceBrowser } from "../deviceBrowser";
@@ -346,7 +345,7 @@ export function MainApp({ firstSession }: { firstSession?: ReturnType<typeof api
       {role === 'owner' && gadgetAccount && <button className={`ghost block ${view === 'gadget' && !workspace ? 'active' : ''}`} aria-current={view === "gadget" && !workspace ? "page" : undefined} onClick={() => navigate({ view: "gadget" })}><NavIcon name="gadget"/>{accountLabel(gadgetAccount)}</button>}
       {role === 'owner' && <button className={`ghost block ${view === 'analytics' && !workspace ? 'active' : ''}`} aria-current={view === "analytics" && !workspace ? "page" : undefined} onClick={() => navigate({ view: "analytics" })}><NavIcon name="analytics"/>{t.nav.analytics}</button>}
       <button className={`ghost block ${workspace ? "active" : ""}`} aria-current={workspace ? "page" : undefined} onClick={() => { closeMenu(); openWorkspace(); }}><NavIcon name="workspace"/>{t.nav.workspace}</button>
-      <div className="sidebar-foot"><span className="sidebar-status muted tiny"><span className={`dot ${!status || startFailed ? "warn" : "ok"}`}/>{!status || startFailed ? t.nav.agentConnecting : t.nav.agentOnline}</span><PushToggle/><button className="ghost block" onClick={() => setTheme(t => t === "dark" ? "light" : "dark")}><NavIcon name={theme === "dark" ? "sun" : "moon"}/>{theme === "dark" ? t.nav.lightMode : t.nav.darkMode}</button>{<button className={`ghost block ${view === "settings" && !workspace ? "active" : ""}`} aria-current={view === "settings" && !workspace ? "page" : undefined} onClick={() => navigate({ view: "settings" })}><NavIcon name="settings"/>{t.nav.settings}</button>}<button className="ghost block" onClick={() => void logout()}><NavIcon name="logout"/>{t.nav.logout}</button></div>
+      <div className="sidebar-foot"><span className="sidebar-status muted tiny"><span className={`dot ${!status || startFailed ? "warn" : "ok"}`}/>{!status || startFailed ? t.nav.agentConnecting : t.nav.agentOnline}</span><button className="ghost block" onClick={() => setTheme(t => t === "dark" ? "light" : "dark")}><NavIcon name={theme === "dark" ? "sun" : "moon"}/>{theme === "dark" ? t.nav.lightMode : t.nav.darkMode}</button>{<button className={`ghost block ${view === "settings" && !workspace ? "active" : ""}`} aria-current={view === "settings" && !workspace ? "page" : undefined} onClick={() => navigate({ view: "settings" })}><NavIcon name="settings"/>{t.nav.settings}</button>}<button className="ghost block" onClick={() => void logout()}><NavIcon name="logout"/>{t.nav.logout}</button></div>
     </PopupSurface>
     </>}
     </PopupPresence>

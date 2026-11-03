@@ -24,6 +24,7 @@ import { ComposerAttachments, releasePreviews, useUploadTray, type PendingUpload
 import { TurnPills } from "./TurnPills";
 import { FormCard } from "./FormCard";
 import { VoiceButton } from "./VoiceInput";
+import { PushNudge } from "./PushSettings";
 import type {TaskFeed} from '../taskStatus';
 import { t as i18n } from "../i18n";
 import { MAX_ATTACHMENTS } from "../../../common/attachments";
@@ -283,6 +284,8 @@ export function TaskChat({ onDetails, onOpenLink, onOpenFileInBrowser, onExpired
     const outboxNow = useRef<Outgoing[]>([]);
     const setOutboxNow = (next: (old: Outgoing[]) => Outgoing[]) => { outboxNow.current = next(outboxNow.current); setOutbox(outboxNow.current); };
     const sending = useRef<Promise<unknown>>(Promise.resolve());
+    /** A message went through on this page: the moment to offer phone notifications. */
+    const [sent, setSent] = useState(false);
     const adopted = useRef(new Set<string>());
     /** Uploads by tray item: a message sent before they finish waits for them. */
     const uploads = useRef(new Map<string, Promise<Attachment | null>>());
@@ -301,6 +304,7 @@ export function TaskChat({ onDetails, onOpenLink, onOpenFileInBrowser, onExpired
         try {
             const { task } = await api.submitTask({ text: o.text, attachments: [...o.attachments, ...results as Attachment[]], relatedTaskId: o.reference?.id ?? null, clientMessageId: id });
             adopted.current.add(task.id);
+            setSent(true);
             stick.current = true;
             merge([task]);
             setOutboxNow(old => old.filter(x => x.id !== id));
@@ -610,6 +614,7 @@ export function TaskChat({ onDetails, onOpenLink, onOpenFileInBrowser, onExpired
       </div>)}
     </div>
     <div className="feed-latest-anchor">{waiting.length > 0 && <div className="needs-you" role="group" aria-label={i18n.feed.needsYou.label}>{waiting.map(t => <button type="button" key={t.id} className="needs-you-bubble" onClick={() => showWaiting(t.id)} aria-label={i18n.feed.needsYou.bubble(waitingLabel(t), t.title)}><span className="needs-you-dot" aria-hidden="true"/><span className="needs-you-kind">{waitingLabel(t)}</span><span className="needs-you-title">{t.title}</span></button>)}</div>}<button type="button" className={`feed-latest${away ? " show" : ""}`} aria-label={i18n.feed.toLatest} title={i18n.feed.toLatest} aria-hidden={!away} tabIndex={away ? 0 : -1} onClick={toLatest}><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 5v14M6 13l6 6 6-6"/></svg></button></div>
+    {sent && <PushNudge/>}
     {error && <div className="banner error" role="alert">{error}<button onClick={() => setError(null)}>{i18n.chat.close}</button></div>}
     <div className={`composer${draft || attachments.length || reference || uploading ? " has-content" : ""}`}>
       {reference && <div className="task-reference" role="status"><div><span className="muted tiny">{i18n.feed.reference.label}</span><strong title={reference.title}>{reference.title}</strong></div><button type="button" className="ghost" aria-label={i18n.feed.reference.cancel} onClick={() => { setReference(null); input.current?.focus(); }}><ComposerIcon kind="close"/></button></div>}

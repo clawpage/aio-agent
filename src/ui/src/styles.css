@@ -3140,7 +3140,6 @@ button .loading-mark { color: inherit; }
 /* Status lines keep the rows' columns (12px padding plus the rows' 1px border): the dot centered under the 18px icons, the words where the labels start. */
 .main-inbox-app .sidebar-status { min-height: 32px; padding: 0 13px; gap: 10px; font-size: var(--fs-sm); }
 .main-inbox-app .sidebar-status .dot { margin: 0 5px; }
-.main-inbox-app .sidebar-foot .push-toggle > .muted { padding: 0 13px 0 41px; line-height: 1.5; }
 .task-feed { gap: 22px; }
 /* A new account's feed: the agent's hello just above the composer, and starters that fill it. */
 .feed-welcome { margin-top: auto; display: flex; flex-direction: column; gap: 10px; }
@@ -4442,12 +4441,11 @@ button.map-card-switch { flex: 0 0 auto; padding: 4px 10px; }
 }
 
 /* ---------------------------------------------------- phone notifications */
-.push-toggle { display: flex; flex-direction: column; gap: 4px; margin: 4px 0; }
-/* On the sidebar's columns: bell under the icons, words and then the small buttons under the labels (12px padding plus the rows' 1px border). */
-.push-on { display: grid; grid-template-columns: 18px minmax(0, 1fr); align-items: center; column-gap: 10px; row-gap: 6px; padding: 6px 13px; color: var(--text-dim); }
-.push-on > .nav-icon { color: var(--done); }
-.push-actions { grid-column: 2; display: flex; gap: 6px; }
-.push-actions button.ghost { height: var(--control-h-sm); padding: 0 10px; border-radius: var(--radius-sm); font-size: var(--fs-xs); }
+/* After the first message: one line, its bell, and the two answers. */
+.push-nudge { display: flex; align-items: center; gap: 10px; }
+.push-nudge > span { flex: 1; min-width: 0; }
+.push-nudge > .nav-icon { flex: none; color: var(--ai); }
+.push-nudge button { margin-left: 0; }
 .schedule-builtin { margin-left: 8px; padding: 1px 6px; border-radius: 6px; font-size: 11px; font-weight: 500; color: var(--text-dim); background: var(--bg-raised); border: 1px solid var(--border); vertical-align: middle; }
 .schedule-feed-label { margin-right: 6px; padding: 0 5px; border-radius: 5px; font-size: 11px; color: var(--ai); background: var(--ai-soft); }
 .schedule-feed-memory { margin: 6px 0 2px; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--text); }
