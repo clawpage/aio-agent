@@ -72,10 +72,10 @@ export function revokeInvite(db: Db, code: string): boolean {
 /**
  * Create a member. Check the open-registration quota, claim any supplied code,
  * and insert the account in one write transaction. Concurrent registrations
- * cannot exceed the quota or spend the same code twice. A Google registration
- * takes the verified Google email as the account's email.
+ * cannot exceed the quota or spend the same code twice. A Google or Apple
+ * registration takes the provider's verified email as the account's email.
  */
-export async function registerWithInvite(db: Db, input: { email: string; password: string; code: string }, google?: { subject: string; email: string; clientHash: string }): Promise<User & { email: string }> {
+export async function registerWithInvite(db: Db, input: { email: string; password: string; code: string }, google?: OAuthIdentity): Promise<User & { email: string }> {
   const email = normalizeEmail(input.email);
   const code = normalizeCode(input.code);
   if (!email) throw new RegisterError(400, "invalid_email", t().http.auth.invalidEmail);
@@ -102,18 +102,20 @@ export async function registerWithInvite(db: Db, input: { email: string; passwor
     if (spare && !db.prepare("SELECT 1 FROM owners WHERE id=?").get(spare)) id = spare;
     if (spare) db.prepare("DELETE FROM meta WHERE key=?").run(SPARE_ACCOUNT_KEY);
     if (google) {
-      const flow = db.prepare("SELECT subject FROM google_login_flows WHERE client_hash=? AND status='ready' AND expires_at>?").get(google.clientHash, now) as {subject: string} | undefined;
-      if (flow?.subject !== google.subject) throw new RegisterError(401, "google_expired", t().http.auth.googleExpired);
-      if (db.prepare("SELECT 1 FROM google_identities WHERE subject=?").get(google.subject)) {
-        throw new RegisterError(409, "google_registered", t().http.auth.googleRegistered);
+      const apple = google.provider === "apple";
+      const flow = db.prepare(`SELECT subject FROM ${apple ? "apple" : "google"}_login_flows WHERE client_hash=? AND status='ready' AND expires_at>?`).get(google.clientHash, now) as {subject: string} | undefined;
+      if (flow?.subject !== google.subject) throw apple ? new RegisterError(401, "apple_expired", t().http.auth.appleExpired) : new RegisterError(401, "google_expired", t().http.auth.googleExpired);
+      if (db.prepare(`SELECT 1 FROM ${apple ? "apple" : "google"}_identities WHERE subject=?`).get(google.subject)) {
+        throw apple ? new RegisterError(409, "apple_registered", t().http.auth.appleRegistered) : new RegisterError(409, "google_registered", t().http.auth.googleRegistered);
       }
     }
     db.prepare("INSERT INTO owners (id,username,email,password_hash,password_salt,password_params,created_at,role) VALUES (?,?,?,?,?,?,?,'member')")
       .run(id, username, email, rec.hash, rec.salt, rec.params, now);
     if (code) db.prepare("UPDATE invites SET used_at=?,used_by=? WHERE code=?").run(now, id, code);
     if (google) {
-      db.prepare("INSERT INTO google_identities (subject,owner_id,email,created_at) VALUES (?,?,?,?)").run(google.subject, id, google.email, now);
-      db.prepare("DELETE FROM google_login_flows WHERE client_hash=?").run(google.clientHash);
+      const table = google.provider === "apple" ? "apple" : "google";
+      db.prepare(`INSERT INTO ${table}_identities (subject,owner_id,email,created_at) VALUES (?,?,?,?)`).run(google.subject, id, google.email, now);
+      db.prepare(`DELETE FROM ${table}_login_flows WHERE client_hash=?`).run(google.clientHash);
     }
     db.exec("COMMIT");
   } catch (err) {
@@ -123,7 +125,10 @@ export async function registerWithInvite(db: Db, input: { email: string; passwor
   return { id, username, email, role: "member" };
 }
 
+/** A verified sign-in that has no account yet; `provider` defaults to Google. */
+export interface OAuthIdentity { provider?: "google" | "apple"; subject: string; email: string; clientHash: string }
+
 /** OAuth-only accounts have an unguessable password, never disclosed or used by a caller. */
-export function registerGoogleWithInvite(db: Db, identity: {subject: string; email: string; clientHash: string}, input: {code: string}): Promise<User & { email: string }> {
+export function registerGoogleWithInvite(db: Db, identity: OAuthIdentity, input: {code: string}): Promise<User & { email: string }> {
   return registerWithInvite(db, {email: identity.email, password: generateSecret(48), code: input.code}, identity);
 }

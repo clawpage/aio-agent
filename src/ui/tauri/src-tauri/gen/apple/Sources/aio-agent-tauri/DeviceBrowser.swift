@@ -55,6 +55,50 @@ private final class DeviceBrowserHandler: NSObject, WKScriptMessageHandler, ASWe
     }
 }
 
+// Sign in with Apple through the system sheet (App Store rule 4.8). The console sends the
+// server's nonce; the identity token Apple signs goes back to the page, which hands it to
+// the server to check. Only the console's own main frame may ask.
+private final class AppleSignInHandler: NSObject, WKScriptMessageHandler, ASAuthorizationControllerDelegate, ASAuthorizationControllerPresentationContextProviding {
+    weak var webView: WKWebView?
+    private var controller: ASAuthorizationController?
+    init(_ webView: WKWebView) { self.webView = webView }
+
+    func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
+        let origin = message.frameInfo.securityOrigin
+        guard message.frameInfo.isMainFrame, origin.protocol == "https",
+              origin.host == "agent.clawpage.ai", origin.port == 443 || origin.port == 0,
+              let nonce = message.body as? String,
+              nonce.range(of: "^[A-Za-z0-9_-]{16,128}$", options: .regularExpression) != nil else { return }
+        let request = ASAuthorizationAppleIDProvider().createRequest()
+        request.requestedScopes = [.email]
+        request.nonce = nonce
+        let authorization = ASAuthorizationController(authorizationRequests: [request])
+        authorization.delegate = self
+        authorization.presentationContextProvider = self
+        self.controller = authorization
+        authorization.performRequests()
+    }
+    func authorizationController(controller: ASAuthorizationController, didCompleteWithAuthorization authorization: ASAuthorization) {
+        guard let credential = authorization.credential as? ASAuthorizationAppleIDCredential,
+              let data = credential.identityToken, let token = String(data: data, encoding: .utf8) else { reply(["error": "failed"]); return }
+        reply(["identityToken": token])
+    }
+    func authorizationController(controller: ASAuthorizationController, didCompleteWithError error: Error) {
+        reply(["error": (error as? ASAuthorizationError)?.code == .canceled ? "canceled" : "failed"])
+    }
+    func presentationAnchor(for controller: ASAuthorizationController) -> ASPresentationAnchor {
+        webView?.window ?? ASPresentationAnchor()
+    }
+    private func reply(_ detail: [String: String]) {
+        DispatchQueue.main.async {
+            self.controller = nil
+            guard let webView = self.webView, webView.url?.host == "agent.clawpage.ai", webView.url?.scheme == "https",
+                  let data = try? JSONSerialization.data(withJSONObject: detail), let json = String(data: data, encoding: .utf8) else { return }
+            webView.evaluateJavaScript("window.dispatchEvent(new CustomEvent('aio-apple-return',{detail:\(json)}));")
+        }
+    }
+}
+
 // A marker, not an operation: the console sees it and saves files through the share sheet,
 // because this shell declares the Photos permission behind its "Save Image" (Info.plist).
 // WKWebView ignores download links, and an older shell would be closed by iOS on that tap.
@@ -68,5 +112,6 @@ final class DeviceBrowser: NSObject {
     static func install(_ webView: WKWebView) {
         webView.configuration.userContentController.add(DeviceBrowserHandler(webView), name: "aioDeviceBrowser")
         webView.configuration.userContentController.add(SaveFilesMarker(), name: "aioSaveFiles")
+        webView.configuration.userContentController.add(AppleSignInHandler(webView), name: "aioAppleSignIn")
     }
 }

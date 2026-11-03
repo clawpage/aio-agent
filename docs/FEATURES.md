@@ -268,6 +268,11 @@
 - **注册**：登录页切换到注册（或打开 `/register`），填邮箱和密码（至少 12 位）；也可用 Google 首次认证，直接以 Google 邮箱为账号邮箱
   （该邮箱已被密码账号注册时拒绝，不自动关联）。现有账户总数不足 20 时免邀请码，达到 20 后必须填写邀请码；owner、管理员创建的成员与审核账户均计入总数。人数检查、邀请码领用与建号在同一写事务内，跨密码/Google 的并发注册不能超出免邀请码名额。
   邀请码由 owner 在配置页生成，格式 `XXXX-XXXX-XXXX`，一次有效，可手动作废；领用与建号在同一事务中。注册结果是普通 member。
+- **通过 Apple 登录**（iOS App，App Store 准则 4.8）：登录页在 Google 按钮之上显示同样大小的「通过 Apple 登录」，只在带 `aioAppleSignIn` 桥接的 iOS 壳里出现（网页、Android 与旧版 App 不显示）。
+  页面先 `POST /api/auth/apple/start` 取一次性 nonce（流程绑定 `pa_apple_client` cookie，10 分钟），壳用系统 `ASAuthorizationController`（只要邮箱）带上 nonce 请求，
+  把 Apple 签名的 identity token 交回页面，`POST /api/auth/apple/verify` 按 Apple 公钥（`appleid.apple.com/auth/keys`，未知 kid 最多每分钟重取一次）核对 RS256 签名、
+  `iss`、`aud`（`PA_APPLE_CLIENT_ID`，默认 bundle id `ai.clawpage.agent`，置空即关闭）、过期时间、nonce 与已验证邮箱，每个 nonce 只用一次。已关联的 Apple ID（`apple_identities`）直接登录；
+  新的 Apple ID 与 Google 一样走注册（以 Apple 给的邮箱为账号邮箱，可能是 `privaterelay.appleid.com` 转发地址，不按邮箱自动关联已有账号），邀请码规则相同。不保存任何 Apple 令牌。
   猜错邀请码与输错密码共用按 IP 的失败锁定。设置 `PA_INVITE_EMAIL` 后注册页显示申请邮箱。
 - **分配成员模型**：`node --env-file=var/runtime.env bin/set-user-model.mjs <用户名> <gpt-6.1-sol|claude-sonnet-5-5> [auto|low|medium|high]`，
   重启后生效；省略推理强度时不修改，`auto` 改回「自动」。从未分配过推理强度（没有 `member_effort:<id>`）的成员即为「自动」；分配过固定档位的保持不变。分配 Claude 需要 owner 已配置 Claude Code 凭据，分配 `gpt-6.1-sol` 需要控制面已

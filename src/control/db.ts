@@ -197,6 +197,21 @@ CREATE TABLE IF NOT EXISTS google_login_flows (
   email TEXT,
   ticket_hash TEXT UNIQUE
 );
+CREATE TABLE IF NOT EXISTS apple_identities (
+  subject TEXT PRIMARY KEY,
+  owner_id TEXT NOT NULL UNIQUE REFERENCES owners(id),
+  email TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);
+-- A Sign in with Apple attempt from the iOS app: its nonce, then the verified identity. No Apple tokens.
+CREATE TABLE IF NOT EXISTS apple_login_flows (
+  client_hash TEXT PRIMARY KEY,
+  nonce TEXT NOT NULL,
+  status TEXT NOT NULL,
+  expires_at INTEGER NOT NULL,
+  subject TEXT,
+  email TEXT
+);
 
 -- Requests are reviewed by the operator, never executed as agent instructions.
 CREATE TABLE IF NOT EXISTS support_requests (

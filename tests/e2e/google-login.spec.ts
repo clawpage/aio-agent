@@ -87,3 +87,69 @@ test("Google first visit can register without an invite while places remain", as
   await expect(page.getByRole("heading", { name: "主会话", exact: true })).toBeVisible();
   expect(registrations).toEqual([{ inviteCode: "" }]);
 });
+
+// The iOS shell's system Sign in with Apple, stood in for: it answers with an identity token, or a cancel.
+const appleShell = (a: {identityToken?: string; error?: string}) => {
+  (window as any).nonces = [];
+  (window as any).webkit = {messageHandlers: {aioSaveFiles: {postMessage() {}}, aioAppleSignIn: {postMessage: (nonce: string) => {
+    (window as any).nonces.push(nonce);
+    setTimeout(() => window.dispatchEvent(new CustomEvent("aio-apple-return", {detail: a})), 50);
+  }}}};
+};
+
+test("the iOS app signs in with Apple first, then a new Apple ID registers with its own email (App Store rule 4.8)", async ({page}, info) => {
+  const registrations = await setup(page, false, false);
+  let pending: {email: string} | null = null;
+  await page.route("**/api/auth/apple/pending", r => r.fulfill({json: {enabled: true, pending}}));
+  await page.route("**/api/auth/apple/start", r => r.fulfill({json: {nonce: "nonce-fixture"}}));
+  await page.route("**/api/auth/apple/verify", r => {
+    expect(r.request().postDataJSON()).toEqual({identityToken: "signed-by-apple", timeZone: expect.any(String)});
+    pending = {email: "abc@privaterelay.appleid.com"};
+    return r.fulfill({json: {authenticated: false, pending}});
+  });
+  const appleRegistrations: unknown[] = [];
+  await page.route("**/api/auth/apple/register", async r => {
+    appleRegistrations.push(r.request().postDataJSON());
+    await page.unroute("**/api/auth/session");
+    await page.route("**/api/auth/session", s => s.fulfill({json: {authenticated: true, username: "apple-member"}}));
+    return r.fulfill({json: {ok: true}});
+  });
+  await page.addInitScript(appleShell, {identityToken: "signed-by-apple"});
+  await page.goto("/login");
+  const apple = page.getByRole("button", {name: "通过 Apple 登录"});
+  const google = page.getByRole("button", {name: "使用 Google 登录 / 注册"});
+  await expect(apple).toBeVisible();
+  await expect(google).toBeVisible();
+  // First, and no smaller than Google's.
+  const [a, g] = [(await apple.boundingBox())!, (await google.boundingBox())!];
+  expect(a.y).toBeLessThan(g.y);
+  expect(a.height).toBeGreaterThanOrEqual(g.height);
+  expect(a.width).toBeGreaterThanOrEqual(g.width);
+  await page.screenshot({path: info.outputPath("apple-login.png"), fullPage: true});
+  await apple.click();
+  await expect(page.getByText("Apple ID 已验证")).toBeVisible();
+  await expect(page.getByText("abc@privaterelay.appleid.com")).toBeVisible();
+  expect(await page.evaluate(() => (window as any).nonces)).toEqual(["nonce-fixture"]);
+  await page.getByRole("button", {name: "注册并进入"}).click();
+  await expect(page.getByRole("heading", {name: "主会话", exact: true})).toBeVisible();
+  expect(appleRegistrations).toEqual([{inviteCode: "", timeZone: expect.any(String)}]);
+  expect(registrations).toEqual([]);
+});
+
+test("backing out of Sign in with Apple leaves the login page as it was, without an error", async ({page}) => {
+  await setup(page, false, false);
+  await page.route("**/api/auth/apple/pending", r => r.fulfill({json: {enabled: true, pending: null}}));
+  await page.route("**/api/auth/apple/start", r => r.fulfill({json: {nonce: "nonce-fixture"}}));
+  await page.addInitScript(appleShell, {error: "canceled"});
+  await page.goto("/login");
+  await page.getByRole("button", {name: "通过 Apple 登录"}).click();
+  await expect(page.getByRole("button", {name: "通过 Apple 登录"})).toBeEnabled();
+  await expect(page.locator(".banner.error")).toHaveCount(0);
+});
+
+test("the web console, with no iOS shell, shows no Apple button", async ({page}) => {
+  await setup(page, false);
+  await page.goto("/login");
+  await expect(page.getByRole("button", {name: "使用 Google 登录 / 注册"})).toBeVisible();
+  await expect(page.getByRole("button", {name: "通过 Apple 登录"})).toHaveCount(0);
+});

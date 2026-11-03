@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { api, ApiError } from "../api";
 import { BrandMark, PageLoading } from "./Brand";
 import { t } from "../i18n";
-import { hasNativeBrowser, listenGoogleReturn, openDeviceBrowser, openNativeBrowser } from "../deviceBrowser";
+import { hasAppleSignIn, hasNativeBrowser, listenGoogleReturn, openDeviceBrowser, openNativeBrowser, signInWithApple } from "../deviceBrowser";
 import { track } from "../analytics";
 
 function AuthIcon({name, size}: {name: "check" | "arrow" | "mail"; size: number}) {
@@ -11,6 +11,8 @@ function AuthIcon({name, size}: {name: "check" | "arrow" | "mail"; size: number}
 }
 
 type Mode = "login" | "register";
+/** A Google or Apple sign-in verified by the server that has no account yet: it registers next. */
+type Pending = { provider: "google" | "apple"; email: string };
 
 export function Login({ onSuccess, notice, username: named }: { onSuccess: () => void | Promise<void>; notice?: string | null; username?: string }) {
   // `/register` (linked from the clawpage.ai home page) opens straight on the register form.
@@ -25,7 +27,9 @@ export function Login({ onSuccess, notice, username: named }: { onSuccess: () =>
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [googleEnabled, setGoogleEnabled] = useState(false);
-  const [googleEmail, setGoogleEmail] = useState<string | null>(null);
+  const [appleEnabled, setAppleEnabled] = useState(false);
+  const [pending, setPending] = useState<Pending | null>(null);
+  const pendingEmail = pending?.email ?? null;
   const [googleWaiting, setGoogleWaiting] = useState(false);
   const googleError = useRef(new URLSearchParams(location.search).get("google") === "error");
 
@@ -61,10 +65,12 @@ export function Login({ onSuccess, notice, username: named }: { onSuccess: () =>
           await onRestored.current();
         } else {
           try {
-            const google = await api.googlePending(controller.signal);
+            const [google, apple] = await Promise.all([api.googlePending(controller.signal),
+              hasAppleSignIn() ? api.applePending(controller.signal) : Promise.resolve({enabled: false, pending: null})]);
             if (!mounted || controller.signal.aborted || submitting.current) return;
             setGoogleEnabled(google.enabled);
-            setGoogleEmail(google.pending?.email ?? null);
+            setAppleEnabled(apple.enabled);
+            setPending(google.pending ? {provider: "google", email: google.pending.email} : apple.pending ? {provider: "apple", email: apple.pending.email} : null);
             if (googleError.current) {
               setError(t.auth.google.failed);
               googleError.current = false;
@@ -109,7 +115,7 @@ export function Login({ onSuccess, notice, username: named }: { onSuccess: () =>
     setBusy(true);
     void api.googleRedeem(detail.ticket).then(async result => {
       if (result.authenticated) await onRestored.current();
-      else { setGoogleEmail(result.pending?.email ?? null); setError(null); }
+      else { setPending(result.pending ? {provider: "google", email: result.pending.email} : null); setError(null); }
     }).catch(() => setError(t.auth.google.failed)).finally(() => {
       submitting.current = false; setBusy(false); setChecking(false);
     });
@@ -129,18 +135,36 @@ export function Login({ onSuccess, notice, username: named }: { onSuccess: () =>
     finally { submitting.current = false; setBusy(false); }
   };
 
+  // The system sheet answers in the app; nothing waits on a browser.
+  const startApple = async () => {
+    if (submitting.current) return;
+    submitting.current = true;
+    request.current?.abort();
+    setBusy(true); setError(null);
+    try {
+      const {nonce} = await api.appleStart();
+      const answer = await signInWithApple(nonce);
+      if (answer.error === "canceled") return;
+      if (!answer.identityToken) { setError(t.auth.apple.failed); return; }
+      const result = await api.appleVerify(answer.identityToken);
+      if (result.authenticated) { setChecking(true); await onRestored.current(); }
+      else setPending(result.pending ? {provider: "apple", email: result.pending.email} : null);
+    } catch (err) { setError(err instanceof Error ? err.message : t.auth.apple.failed); }
+    finally { submitting.current = false; setBusy(false); }
+  };
+
   const cancelGoogle = async () => {
     if (submitting.current) return;
     submitting.current = true;
     request.current?.abort();
     setBusy(true);
-    try { await api.googleCancel(); setGoogleEmail(null); setGoogleWaiting(false); setError(null); }
+    try { await (pending?.provider === "apple" ? api.appleCancel() : api.googleCancel()); setPending(null); setGoogleWaiting(false); setError(null); }
     catch (err) { setError(err instanceof Error ? err.message : t.auth.google.failed); }
     finally { submitting.current = false; setBusy(false); }
   };
 
   const register = mode === "register";
-  useEffect(() => { if (!checking && !googleEmail) track("auth_view", { mode }); }, [mode, checking, googleEmail]);
+  useEffect(() => { if (!checking && !pendingEmail) track("auth_view", { mode }); }, [mode, checking, pendingEmail]);
   const switchMode = (next: Mode) => {
     setMode(next);
     setError(null);
@@ -150,14 +174,14 @@ export function Login({ onSuccess, notice, username: named }: { onSuccess: () =>
   };
 
   const submit = async () => {
-    if ((!googleEmail && !password) || submitting.current) return;
-    if (!googleEmail && register && password !== confirm) { setError(t.auth.passwordMismatch); return; }
+    if ((!pendingEmail && !password) || submitting.current) return;
+    if (!pendingEmail && register && password !== confirm) { setError(t.auth.passwordMismatch); return; }
     submitting.current = true;
     request.current?.abort();
     setBusy(true);
     setError(null);
     try {
-      if (googleEmail) await api.googleRegister({inviteCode: inviteCode.trim()});
+      if (pending) await (pending.provider === "apple" ? api.appleRegister : api.googleRegister)({inviteCode: inviteCode.trim()});
       else if (register) await api.register({ email: account.trim(), password, inviteCode: inviteCode.trim() });
       else await api.login(password, account.trim());
       setPassword("");
@@ -197,12 +221,17 @@ export function Login({ onSuccess, notice, username: named }: { onSuccess: () =>
       >
         <div className="login-brand"><BrandMark size={36}/><span>{t.auth.brand}</span></div>
         <header className="login-heading">
-          <h1>{googleEmail ? (requiresInvite ? t.auth.heading.invite : t.auth.heading.register) : register ? t.auth.heading.register : t.auth.heading.login}</h1>
-          <p>{(googleEmail || register) && !requiresInvite ? t.auth.intro.openRegistration : googleEmail ? t.auth.google.inviteIntro : register ? t.auth.intro.register : t.auth.intro.login}</p>
+          <h1>{pendingEmail ? (requiresInvite ? t.auth.heading.invite : t.auth.heading.register) : register ? t.auth.heading.register : t.auth.heading.login}</h1>
+          <p>{(pendingEmail || register) && !requiresInvite ? t.auth.intro.openRegistration : pendingEmail ? t.auth.google.inviteIntro : register ? t.auth.intro.register : t.auth.intro.login}</p>
         </header>
-        {googleEmail && <div className="login-identity"><span className="login-identity-check"><AuthIcon name="check" size={16}/></span><div><span>{t.auth.google.verified}</span><p className="login-google-email">{googleEmail}</p></div></div>}
-        {!googleEmail && googleEnabled && <>
-          <button type="button" className="login-google block" disabled={busy || googleWaiting} onClick={() => void startGoogle()}>
+        {pendingEmail && <div className="login-identity"><span className="login-identity-check"><AuthIcon name="check" size={16}/></span><div><span>{pending?.provider === "apple" ? t.auth.apple.verified : t.auth.google.verified}</span><p className="login-google-email">{pendingEmail}</p></div></div>}
+        {/* Apple's button comes first and as large as Google's (App Store rule 4.8). */}
+        {!pendingEmail && appleEnabled && hasAppleSignIn() && <button type="button" className="login-apple block" disabled={busy || googleWaiting} onClick={() => void startApple()}>
+          <svg viewBox="0 0 17 20" width="16" height="19" aria-hidden="true"><path fill="currentColor" d="M14.1 10.6c0-2.6 2.1-3.8 2.2-3.9-1.2-1.8-3.1-2-3.7-2-1.6-.2-3.1.9-3.9.9-.8 0-2-.9-3.4-.9-1.7 0-3.3 1-4.2 2.6-1.8 3.1-.5 7.7 1.3 10.2.9 1.2 1.9 2.6 3.2 2.6 1.3-.1 1.8-.8 3.3-.8 1.5 0 2 .8 3.4.8 1.4 0 2.3-1.3 3.1-2.5 1-1.4 1.4-2.8 1.4-2.9 0 0-2.7-1-2.7-4.1ZM11.6 3c.7-.9 1.2-2 1.1-3.2-1 0-2.3.7-3 1.6-.7.8-1.2 2-1.1 3.1 1.2.1 2.3-.6 3-1.5Z"/></svg>
+          <span>{t.auth.apple.button}</span>
+        </button>}
+        {!pendingEmail && (googleEnabled || (appleEnabled && hasAppleSignIn())) && <>
+          {googleEnabled && <button type="button" className="login-google block" disabled={busy || googleWaiting} onClick={() => void startGoogle()}>
             <svg className="login-google-mark" viewBox="0 0 48 48" width="20" height="20" aria-hidden="true">
               <path fill="var(--google-yellow)" d="M43.6 20.5H42V20H24v8h11.3A12 12 0 1 1 32.2 13l5.7-5.7A20 20 0 1 0 44 24c0-1.2-.1-2.4-.4-3.5Z"/>
               <path fill="var(--google-red)" d="m6.3 14.7 6.6 4.8A12 12 0 0 1 32.2 13l5.7-5.7A20 20 0 0 0 6.3 14.7Z"/>
@@ -210,12 +239,12 @@ export function Login({ onSuccess, notice, username: named }: { onSuccess: () =>
               <path fill="var(--google-blue)" d="M43.6 20.5H42V20H24v8h11.3a12 12 0 0 1-4 5.5l6.2 5.2A20 20 0 0 0 44 24c0-1.2-.1-2.4-.4-3.5Z"/>
             </svg>
             <span>{t.auth.google.button}</span>
-          </button>
+          </button>}
           <div className="login-divider"><span>{t.auth.passwordAlternative}</span></div>
         </>}
         {googleWaiting && <p className="banner" role="status">{t.auth.google.waiting}</p>}
         {/* A Google registration takes the verified Google email shown above. */}
-        {!googleEmail && <label className="field">
+        {!pendingEmail && <label className="field">
           <span>{t.auth.fields.email}</span>
           {/* Old account names are matched exactly: a phone must not capitalize or "correct" them. */}
           <input
@@ -231,7 +260,7 @@ export function Login({ onSuccess, notice, username: named }: { onSuccess: () =>
             placeholder={register ? t.auth.fields.emailHint : t.auth.fields.signInHint}
           />
         </label>}
-        {!googleEmail && <label className="field">
+        {!pendingEmail && <label className="field">
           <span>{t.auth.fields.password}</span>
           <input
             type="password"
@@ -242,9 +271,9 @@ export function Login({ onSuccess, notice, username: named }: { onSuccess: () =>
             placeholder={register ? t.auth.fields.newPasswordHint : t.auth.fields.passwordHint}
           />
         </label>}
-        {(register || googleEmail) && (
+        {(register || pendingEmail) && (
           <>
-            {!googleEmail && <label className="field">
+            {!pendingEmail && <label className="field">
               <span>{t.auth.fields.confirm}</span>
               <input type="password" value={confirm} autoComplete="new-password" onChange={(e) => setConfirm(e.target.value)} placeholder={t.auth.fields.confirmHint} />
             </label>}
@@ -270,11 +299,11 @@ export function Login({ onSuccess, notice, username: named }: { onSuccess: () =>
         {sessionError && <div className="banner warn" role="status">{t.auth.sessionUnverified}</div>}
         {notice && <div className="banner warn">{notice}</div>}
         {error && <div className="banner error">{error}</div>}
-        <button type="submit" className="primary block" disabled={busy || (googleEmail ? requiresInvite && !inviteCode.trim() : !account.trim() || !password || (register && (!confirm || (requiresInvite && !inviteCode.trim()))))}>
-          <span>{googleEmail ? (busy ? t.auth.google.activating : requiresInvite ? t.auth.google.activate : t.auth.google.activateOpen) : register ? (busy ? t.auth.submit.registering : t.auth.submit.register) : (busy ? t.auth.submit.loggingIn : t.auth.submit.login)}</span><AuthIcon name="arrow" size={18}/>
+        <button type="submit" className="primary block" disabled={busy || (pendingEmail ? requiresInvite && !inviteCode.trim() : !account.trim() || !password || (register && (!confirm || (requiresInvite && !inviteCode.trim()))))}>
+          <span>{pendingEmail ? (busy ? t.auth.google.activating : requiresInvite ? t.auth.google.activate : t.auth.google.activateOpen) : register ? (busy ? t.auth.submit.registering : t.auth.submit.register) : (busy ? t.auth.submit.loggingIn : t.auth.submit.login)}</span><AuthIcon name="arrow" size={18}/>
         </button>
-        {(googleEmail || googleWaiting) && <button type="button" className="link" disabled={busy} onClick={() => void cancelGoogle()}>{t.auth.google.cancel}</button>}
-        {!named && !googleEmail && (
+        {(pendingEmail || googleWaiting) && <button type="button" className="link" disabled={busy} onClick={() => void cancelGoogle()}>{t.auth.google.cancel}</button>}
+        {!named && !pendingEmail && (
           <p className="muted tiny login-switch">
             {register ? t.auth.switch.haveAccount : t.auth.switch.noAccount}
             <button type="button" className="link" onClick={() => switchMode(register ? "login" : "register")}>{register ? t.auth.switch.toLogin : t.auth.switch.toRegister}</button>

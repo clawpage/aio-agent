@@ -42,7 +42,7 @@
    - Docker 卷 `aio-user-<namespace>-workspace`、`-codex`、`-browser`。
    - `<PA_DATA_DIR>/user-secrets/<username>.txt`（若管理员创建了密码账号）。
    先核对标签、挂载和账号一致性，再逐对象删除；不能按模糊匹配删除其他卷或目录。
-5. 在中央账本事务中清除该账号的 Google 身份及对应临时 OAuth flow、会话与票据、已用邀请关联、支持请求；
+5. 在中央账本事务中清除该账号的 Google 与 Apple 身份（`google_identities`、`apple_identities`）及对应临时登录 flow、会话与票据、已用邀请关联、支持请求；
    核对旧版本迁移残留的 conversations/tasks、events/turns/server_requests、vault、schedules、feed/search/recall、
    agreements、push 和 decision 数据，只清理确属该用户的记录，再删除成员身份。必须核对外键，失败时回滚。
    所有者账号不走成员删除流程，需单独评估部署停止和数据范围。

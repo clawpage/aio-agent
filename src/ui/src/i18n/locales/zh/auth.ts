@@ -32,6 +32,7 @@ export const auth = {
     cancel: "换一个登录方式",
     retry: "重新登录 Google",
   },
+  apple: { button: "通过 Apple 登录", verified: "Apple ID 已验证", failed: "通过 Apple 登录未完成，请重试。" },
   invite: { quotaReached: "免邀请码注册名额已满，请输入邀请码。",
     /** Split around the mailto link. */
     askBefore: "需要邀请码？联系 ",

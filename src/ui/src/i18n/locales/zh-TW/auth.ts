@@ -32,6 +32,7 @@ export const auth: typeof zh = {
     cancel: "換一個登入方式",
     retry: "重新登入 Google",
   },
+  apple: { button: "透過 Apple 登入", verified: "Apple ID 已驗證", failed: "透過 Apple 登入未完成，請重試。" },
   invite: { quotaReached: "免邀請碼註冊名額已滿，請輸入邀請碼。",
     /** Split around the mailto link. */
     askBefore: "需要邀請碼？聯絡 ",

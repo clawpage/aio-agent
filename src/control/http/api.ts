@@ -38,6 +38,7 @@ import { visibleEmail } from "../auth/email.js";
 import { CLIENT_EVENTS } from "../../common/analytics.js";
 import { RegisterError, createInvite, listInvites, registerWithInvite, registrationRequiresInvite, revokeInvite } from "../auth/invites.js";
 import { googleRouter } from "../auth/googleRoutes.js";
+import { appleRouter } from "../auth/appleRoutes.js";
 import { followLoginTimezone } from "../auth/loginTimezone.js";
 import { createSupportRequest, reviewSupportRequest, supportQueue, SupportError } from '../support.js';
 import { parseHttpUrl } from "../aio/client.js";
@@ -299,6 +300,7 @@ export function createApiRouter(context: AppContext): Router {
     catch (err) { if (!(err instanceof SupportError)) throw err; res.status(err.status).json({error:err.code,message:err.message}); }
   });
   router.use("/auth/google", googleRouter(context));
+  router.use("/auth/apple", appleRouter(context));
   // Events the console reports (src/common/analytics.ts). Signed out, only the sign-in page's view is
   // accepted, from this site and at most a few per address per hour; signed in, a few hundred per account.
   const reported = new Map<string, { since: number; count: number }>();

@@ -76,6 +76,7 @@ Native features in this app:
 - Links in replies open in an in-app Safari sheet; downloaded images can be saved to Photos via the share sheet.
 - The app still opens its last page without a network connection.
 
+Sign in with Apple is offered first on the sign-in screen, alongside Google sign-in; a new Apple ID gets its own account (the private relay email works).
 Account deletion: side menu > Account & privacy > Request account deletion (the administrator verifies the request and deletes the account and its data). Reporting: each finished reply has "Report response".
 There are no purchases. AI replies come from the service's configured model providers (OpenAI; Anthropic optional).
 The task browser can visit arbitrary websites on the user's request, so the age rating declares unrestricted web access.

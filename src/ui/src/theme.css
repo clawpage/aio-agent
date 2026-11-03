@@ -50,6 +50,9 @@
   --google-surface: #ffffff;
   --google-text: #1f1f1f;
   --google-border: #747775;
+  /* Sign in with Apple: white on the dark theme, black on the light one (Apple's button styles). */
+  --apple-surface: #ffffff;
+  --apple-text: #000000;
 
   /* Sandbox desktop */
   --tile-dark: #24222d;
@@ -126,6 +129,8 @@
 }
 
 :root[data-theme="light"] {
+  --apple-surface: #000000;
+  --apple-text: #ffffff;
   --bg: #f5f4f8;
   --bg-soft: #ffffff;
   --bg-raised: #fafafd;

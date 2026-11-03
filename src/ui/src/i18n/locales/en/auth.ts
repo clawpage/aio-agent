@@ -33,6 +33,7 @@ export const auth: typeof zh = {
     cancel: "Use another sign-in method",
     retry: "Try Google sign-in again",
   },
+  apple: { button: "Sign in with Apple", verified: "Apple ID verified", failed: "Sign in with Apple didn't finish. Please try again." },
   invite: { quotaReached: "The places for registration without an invite are full. Please enter an invite code.",
     askBefore: "Need an invite? Contact ",
     askAfter: " to request one.",
