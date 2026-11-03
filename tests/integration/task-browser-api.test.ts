@@ -256,3 +256,33 @@ it("hands back the tabs the person holds when the card's own tab has been replac
     h.ctx.tabs = fakeTabs;
   }
 });
+
+it("shows the phone on a task card only while the phone is the device its agent used last", async () => {
+  const { cookie, csrf } = await login(h);
+  const headers = { cookie, "x-csrf-token": csrf, "content-type": "application/json" };
+  const task = ((await (await h.request("/api/tasks", { method: "POST", headers, body: JSON.stringify({ text: "登录网站", clientMessageId: "phone-last" }) })).json()) as { task: { id: string; conversationId: string } }).task;
+  const call = (server: string, tool: string) => h.ctx.db.prepare("INSERT INTO events (conversation_id, turn_id, type, payload, created_at) VALUES (?, NULL, 'item/started', ?, ?)")
+    .run(task.conversationId, JSON.stringify({ item: { type: "mcpToolCall", server, tool, arguments: {} } }), Date.now());
+  const phone = async () => ((await (await h.request("/api/main", { headers: { cookie } })).json()) as { tasks: Array<{ id: string; phone?: boolean }> }).tasks.find((t) => t.id === task.id)?.phone;
+  const saved = h.ctx.phone;
+  h.ctx.phone = {} as NonNullable<typeof h.ctx.phone>;
+  h.ctx.tabs = { ...fakeTabs, list: async () => [] };
+  try {
+    expect(await phone()).toBeUndefined();
+    call("aio_mac_native", "mobile_list_elements_on_screen");
+    expect(await phone()).toBe(true);
+    // The Mac's terminal is not a switch away from the phone.
+    call("aio_mac_native", "bash");
+    expect(await phone()).toBe(true);
+    // Back in the sandbox browser (the execution conversation carries on across related tasks): a wait is the browser's.
+    call("aio_tabs", "browser_request_human");
+    expect(await phone()).toBeUndefined();
+    call("aio_phone", "mobile_open_url");
+    expect(await phone()).toBe(true);
+    call("aio_mac_native", "navigate_page");
+    expect(await phone()).toBeUndefined();
+  } finally {
+    h.ctx.phone = saved;
+    h.ctx.tabs = fakeTabs;
+  }
+});

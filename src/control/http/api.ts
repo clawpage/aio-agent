@@ -57,6 +57,7 @@ import { SharedKbError, type SharedKbs } from "../taskKb/shared.js";
 import { listChanges, nodeChanges, restoreNode, undoChange } from "../taskKb/ledger.js";
 import type { BrowserStatusView } from "../browser/service.js";
 import { documentKind, isRenderableKind, mediaType, requireWorkspaceFilePath } from "../documents/paths.js";
+import { MAC_SHELL_TOOLS } from "../macShell.js";
 
 /** The console languages the speech server understands. */
 const ASR_LOCALES: Locale[] = ["zh-CN", "zh-TW", "en"];
@@ -647,15 +648,22 @@ export function createApiRouter(context: AppContext): Router {
   // One read of the tab record shows, per task, whether it has tabs, is waiting for
   // the person in the browser, or is being driven by the person right now.
   // A task feed must not wait on a slow sandbox: past two seconds it shows tasks without browser state.
-  // Execution conversations that called the phone tools: their task cards show the phone.
-  const phoneConversations = new Set<string>();
+  const MAC_SHELL_TOOL_NAMES = new Set(MAC_SHELL_TOOLS.map((tool) => tool.name));
+  // A task card shows the phone while it is the device its agent used last: an execution
+  // conversation carries on across related tasks, and once the agent is back in a browser
+  // (or the Mac's Chrome), a wait is about that browser, not the phone.
   const usedPhone = (conversationId: string): boolean => {
     if (!context.phone) return false;
-    if (phoneConversations.has(conversationId)) return true;
-    // aio_phone: tasks from before the Mac's tools were one server.
-    const hit = db.prepare(`SELECT 1 FROM events WHERE conversation_id=? AND type='item/started' AND (payload LIKE '%"server":"aio_phone"%' OR (payload LIKE '%"server":"aio_mac_native"%' AND payload LIKE '%"tool":"mobile\\_%' ESCAPE '\\')) LIMIT 1`).get(conversationId);
-    if (hit) phoneConversations.add(conversationId);
-    return Boolean(hit);
+    const calls = db.prepare(`SELECT payload FROM events WHERE conversation_id=? AND type='item/started' AND (payload LIKE '%"server":"aio_phone"%' OR payload LIKE '%"server":"aio_tabs"%' OR payload LIKE '%"server":"aio_mac_native"%') ORDER BY id DESC`).iterate(conversationId) as Iterable<{ payload: string }>;
+    for (const { payload } of calls) {
+      const item = (JSON.parse(payload) as { item?: { server?: string; tool?: string } }).item;
+      // aio_phone: tasks from before the Mac's tools were one server.
+      if (item?.server === "aio_phone" || item?.tool?.startsWith("mobile_")) return true;
+      // The Mac's terminal is neither a phone nor a browser.
+      if (item?.server === "aio_mac_native" && MAC_SHELL_TOOL_NAMES.has(item.tool ?? "")) continue;
+      return false;
+    }
+    return false;
   };
   const browserState = async (userId: string) => {
     const tabs = context.tabs ? await Promise.race([context.tabs.list().catch(() => []), new Promise<[]>((r) => setTimeout(() => r([]), 2000).unref())]) : [];
