@@ -225,6 +225,10 @@ member 首次访问或服务启动时创建独立 `aio-user-<散列>` 容器及�
   /Users/mengxiao/workspace/tools/start.sh start personal-agent
   ```
   轮换会同时撤销所有已登录会话，旧密码与旧 cookie 立即失效。
+- 普通成员密码（`bin/create-user.mjs` 建的账号，密码在卷内 `/data/user-secrets/<用户名>.txt`）：
+  `docker exec aio-control-1 node bin/reset-user-password.mjs <用户名>` 生成新密码、替换该文件，只登出这个账号的会话，
+  不打印密码；其他账号与 owner 不受影响（owner 仍用上面的 `PA_OWNER_PASSWORD_RESET`）。之后用
+  `docker exec aio-control-1 cat /data/user-secrets/<用户名>.txt > var/user-secrets/<用户名>.txt` 更新本机副本，不要输出到终端。
 - host 模式下沙箱 Codex 登录由 Mac 上已有 `codex login` 提供；失效时 `/healthz.ready=false`，
   控制台顶部显示明确提示，恢复方式是在 Mac 上重新 `codex login`，无需改配置。compose 模式使用控制面自己的登录
   （`deploy/aio.mjs codex-login`，存于卷内 `/data/codex-home`，`AIO_HOST_CODEX=on`），状态用 `codex-login status` 查看；
