@@ -79,7 +79,7 @@ it("gives every account its own read-and-propose knowledge tool with no way to w
     expect(TASK_KB_POLICY).toContain("never tells you where they live");
     expect(TASK_KB_POLICY).toContain("their home address when they state or confirm it");
     const tools = (await (await rpc(owner.taskKb!.url, { jsonrpc: "2.0", id: 2, method: "tools/list" })).json()).result.tools as Array<{ name: string }>;
-    expect(tools.map((t) => t.name)).toEqual(["kb_search", "kb_get", "kb_neighbors", "kb_source", "kb_libraries", "kb_propose", "kb_propose_status", "history_search", "history_get", "memory_search", "memory_save", "memory_forget"]);
+    expect(tools.map((t) => t.name)).toEqual(["kb_search", "kb_get", "kb_neighbors", "kb_source", "kb_propose", "kb_propose_status", "kb_libraries", "kb_library_create", "kb_library_manage", "kb_library_join", "kb_library_edit", "kb_library_history", "kb_library_undo", "history_search", "history_get", "memory_search", "memory_save", "memory_forget"]);
   } finally {
     gateway.close();
     await h.shutdown();

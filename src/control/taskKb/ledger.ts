@@ -131,7 +131,9 @@ function currentRow(db: Db, tbl: string, pk: string): string | null {
   return row ? row.j : null;
 }
 
-const same = (a: string | null, b: string | null) => (a === null || b === null ? a === b : JSON.stringify(JSON.parse(a)) === JSON.stringify(JSON.parse(b)));
+/** A row as a change left it; a node's read counters move on every kb_get, outside any change, and do not count. */
+const comparable = (state: string) => { const { reads: _reads, last_read_at: _lastRead, ...row } = JSON.parse(state) as Record<string, unknown>; return JSON.stringify(row); };
+const same = (a: string | null, b: string | null) => (a === null || b === null ? a === b : comparable(a) === comparable(b));
 
 /** Put one row back to `state` (null: it did not exist). */
 function putRow(db: Db, tbl: string, pk: string, state: string | null): void {

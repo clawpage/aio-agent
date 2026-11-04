@@ -10,14 +10,17 @@ import { KB_CERTAINTIES, KB_KINDS, KB_PROPOSAL_TYPES, KB_RELS, sha256, type KbRe
 import { checkProposal, getKbNode, kbNeighbors, kbSourceText, proposalStatus, proposeKb, searchKb } from "./read.js";
 import { SharedKbError, type SharedKbs } from "./shared.js";
 import { callHistoryTool, HISTORY_POLICY, HISTORY_TOOLS } from "./historyTools.js";
+import { callLibraryTool, LIBRARY_POLICY, LIBRARY_TOOL_NAMES, LIBRARY_TOOLS } from "./libraryTools.js";
+import type { Analytics } from "../analytics.js";
 import type { TaskService } from "../tasks/service.js";
 
 /**
  * The personal knowledge base, offered to every agent of the account as one MCP
  * server on the member gateway (`/task-kb/<token>/mcp`): reading tools and
- * kb_propose, and beside them the raw task history and standing agreements it is
- * distilled from (historyTools.ts). There is no tool that writes knowledge on any
- * URL; only the control plane's kernel does, from the maintainer's answers (maintainer.ts).
+ * kb_propose, the shared libraries the account belongs to, managed as in the console
+ * (libraryTools.ts), and beside them the raw task history and standing agreements it is
+ * distilled from (historyTools.ts). No tool writes the personal knowledge base; only the
+ * control plane's kernel does, from the maintainer's answers (maintainer.ts).
  */
 
 const KNOWLEDGE_POLICY =
@@ -25,12 +28,12 @@ const KNOWLEDGE_POLICY =
   "Before working on something this account may have dealt with before (a person, product, store, website or app, a trip, a recurring chore, a setup), search it with kb_search, read the relevant node with kb_get, follow related nodes with kb_neighbors, and read the evidence with kb_source when the exact wording or numbers matter. " +
   "Claims marked observed or inferred are leads, not guarantees; claims that change (prices, opening hours, availability) or nodes with pending corrections must be checked again before use. The family knowledge base (aio_kb, when connected) takes precedence on family members' records. " +
   "The person's own details (where they live, their phone, their family members' birthdays) come from the standing agreements first (memory_search), then from what they said in earlier tasks (history_search). The family knowledge base never copies addresses or numbers into its pages: search it for the document that holds the detail (a utility bill, lease, insurance card) and read that field with its kb_source. A place the person asked about, or a claim that says it was guessed, never tells you where they live; when nothing states it, ask. " +
-  "You cannot change the knowledge base yourself, and you do not need to report routine results: the maintainer reads every finished task. Use kb_propose only for what the task record will not show or for knowledge that is now wrong: " +
+  "You cannot change the personal knowledge base yourself, and you do not need to report routine results: the maintainer reads every finished task. Use kb_propose only for what the task record will not show or for knowledge that is now wrong: " +
   "add (something worth reusing you saw while working, such as a pitfall or the wording of a policy), correct (a claim differs from what you see now), outdated (a procedure or link no longer works), wrong (the user corrected it). Each proposal needs evidence from this task: an exact quote, with the file path in this task's directory or the page address it came from. Never propose credentials, identity numbers or one-off details. " +
   "The person may also belong to shared knowledge bases kept with other people (a family, a project): kb_search and kb_get cover them too and name the library each result comes from. Knowledge in a shared library was contributed by its members; only quotes of its sources are kept there. " +
-  "When the user asks to record something in a shared library by name (\"记到家庭知识库\", \"add this to the project's knowledge base\"), list them with kb_libraries and send kb_propose type add with library set to its name; when no library or more than one matches, propose it without library (the personal one) and tell the user which libraries exist. Otherwise the maintainer decides after the task what is shared, by each library's rules."; // i18n-exempt: an example of what people say, for the executor
+  "When the user asks to record something in a shared library by name (\"记到家庭知识库\", \"add this to the project's knowledge base\"), list them with kb_libraries and send kb_propose type add with library set to its name; when no library or more than one matches, propose it without library (the personal one) and tell the user which libraries exist, offering to create the one they meant (kb_library_create). Otherwise the maintainer decides after the task what is shared, by each library's rules."; // i18n-exempt: an example of what people say, for the executor
 
-export const TASK_KB_POLICY = `${KNOWLEDGE_POLICY}\n\n${HISTORY_POLICY}`;
+export const TASK_KB_POLICY = `${KNOWLEDGE_POLICY}\n\n${LIBRARY_POLICY}\n\n${HISTORY_POLICY}`;
 
 const KB_TOOLS = [
   {
@@ -60,11 +63,6 @@ const KB_TOOLS = [
     name: "kb_source",
     description: "Read the evidence behind a claim: the source file or task text around the recorded quote, and whether it is still current, has changed, or is gone.",
     inputSchema: { type: "object", properties: { id: { type: "string", description: "A source id from kb_get" } }, required: ["id"] },
-  },
-  {
-    name: "kb_libraries",
-    description: "The shared knowledge bases the person belongs to: each one's name, members and rules (what it keeps).",
-    inputSchema: { type: "object", properties: {} },
   },
   {
     name: "kb_propose",
@@ -104,7 +102,7 @@ export function taskKbMcpServers(cfg: Config): Record<string, unknown> {
   return cfg.taskKb ? { aio_task_kb: { type: "http", url: cfg.taskKb.url } } : {};
 }
 
-const TOOLS = [...KB_TOOLS, ...HISTORY_TOOLS];
+const TOOLS = [...KB_TOOLS, ...LIBRARY_TOOLS, ...HISTORY_TOOLS];
 const HISTORY_TOOL_NAMES = new Set(HISTORY_TOOLS.map((t) => t.name));
 
 const MAX_FILE_BYTES = 2_000_000;
@@ -119,7 +117,7 @@ export function sandboxKbFiles(container: Pick<SandboxContainer, "execInSandbox"
   };
 }
 
-export interface TaskKbRuntime { db: Db; tasks: TaskService; cfg: Config; container: Pick<SandboxContainer, "execInSandbox">; taskKb?: { nudge(urgent: boolean): void }; sharedKb?: SharedKbs }
+export interface TaskKbRuntime { db: Db; tasks: TaskService; cfg: Config; container: Pick<SandboxContainer, "execInSandbox">; taskKb?: { nudge(urgent: boolean): void }; sharedKb?: SharedKbs; analytics?: Pick<Analytics, "track"> }
 
 /** A shared node as an agent reads it: the library named, sources with who gave them (a path is someone else's file). */
 function sharedNode(shared: SharedKbs, library: string, node: NonNullable<ReturnType<typeof getKbNode>>) {
@@ -235,6 +233,7 @@ export class TaskKbGateway {
     try {
       const runtime = await this.#runtimeFor(userId);
       if (HISTORY_TOOL_NAMES.has(name)) return callHistoryTool(runtime, userId, name, args);
+      if (LIBRARY_TOOL_NAMES.has(name)) return callLibraryTool(runtime, userId, name, args, this.#log);
       const { db, cfg } = runtime;
       const readFile = sandboxKbFiles(runtime.container);
       const workspaceDir = cfg.sandbox.containerWorkspaceDir;
@@ -245,11 +244,6 @@ export class TaskKbGateway {
         const hits: Array<Record<string, unknown>> = searchKb(db, userId, opts).map((h) => ({ library: "personal", ...h }));
         for (const lib of libraries) hits.push(...searchKb(shared!.db(lib.id), lib.id, opts).map((h) => ({ library: lib.name, ...h })));
         return text(hits.length ? hits : "Nothing in the knowledge base matches. Try other keywords or names, or drop domain/kind; the knowledge base only holds what earlier tasks found out.");
-      }
-      if (name === "kb_libraries") {
-        return text(libraries.length
-          ? libraries.map((l) => ({ name: l.name, members: shared!.members(l.id).map((m) => m.username), rules: shared!.rules(l.id).text || "(none written yet: keep what the members would all find useful)" }))
-          : "The person belongs to no shared knowledge base; everything goes to their personal one.");
       }
       const id = String(args.id ?? "");
       const lib = shared && !db.prepare("SELECT 1 FROM kb_nodes WHERE id=? AND owner_id=?").get(id, userId) ? shared.libraryOfNode(userId, id) : null;

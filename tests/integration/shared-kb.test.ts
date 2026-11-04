@@ -106,7 +106,7 @@ it("reads shared libraries beside the personal one, and sends what fits to the l
       expect(node.library).toBe("张家");
       expect(node.claims[0]!.sources[0]!.from).toBe("cr");
       expect(JSON.parse((await call("kb_source", { id: node.claims[0]!.sources[0]!.id })).content[0]!.text)).toMatchObject({ library: "张家", from: "cr", state: "shared", quote: "每晚 8 点睡" });
-      expect(JSON.parse((await call("kb_libraries", {})).content[0]!.text)).toEqual([{ name: "张家", members: ["cr", "owner"], rules: "收：家里的事和孩子的事。不收：工作。" }]);
+      expect(JSON.parse((await call("kb_libraries", {})).content[0]!.text)).toMatchObject([{ id: lib, name: "张家", admin: "cr", you_are_admin: false, members: ["cr", "owner"], rules: "收：家里的事和孩子的事。不收：工作。", invites: [{ by: "cr", uses: 1 }] }]);
 
       // A finished task the personal maintainer reads: one thing for the person, one passed on to the library.
       const text = "记一下 Roy 午睡时间";
