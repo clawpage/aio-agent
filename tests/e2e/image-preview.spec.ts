@@ -70,3 +70,65 @@ for (const [label, size] of [["portrait", [1024, 1536]], ["landscape", [1536, 10
     }
   });
 }
+
+const SHOTS = "/Users/mengxiao/workspace/.scratch/artifacts/preview-page";
+
+/** Wait out the preview's opening slide, so boxes are measured where it settles. */
+const settled = (page: Page) => page.locator(".file-preview-overlay").evaluate((el) => Promise.all(el.getAnimations({ subtree: true }).filter((a) => a.effect?.getComputedTiming().iterations !== Infinity).map((a) => a.finished)));
+
+test("on a phone the preview is a full-screen page that the back gesture closes", async ({ page }, info) => {
+  const mobile = info.project.name.startsWith("mobile");
+  await setup(page, solidPng(1024, 1536));
+  const inline = page.locator(".bubble img.inline-media");
+  await expect.poll(() => inline.evaluate((el) => (el as HTMLImageElement).naturalWidth), { timeout: 60_000 }).toBe(1024);
+  const viewports = mobile ? [page.viewportSize()!, { width: 360, height: 740 }] : [page.viewportSize()!];
+  for (const viewport of viewports) {
+    await page.setViewportSize(viewport);
+    const before = await page.evaluate(() => history.length);
+    await inline.click();
+    const dialog = page.getByRole("dialog");
+    await expect(page.getByTestId("file-preview-image")).toBeVisible();
+    await settled(page);
+    const box = (await page.locator(".file-preview").boundingBox())!;
+    const close = page.getByRole("button", { name: "关闭预览" });
+    if (mobile) {
+      // Edge to edge: the page is the whole screen, nothing scrolls sideways.
+      expect(box).toEqual({ x: 0, y: 0, width: viewport.width, height: viewport.height });
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+      expect(await page.locator(".file-preview").evaluate((n) => n.scrollWidth <= n.clientWidth)).toBe(true);
+      // A page's top bar: back on the left, then the name; the download stays on screen.
+      const [back, name] = await Promise.all([close.boundingBox(), page.locator(".file-preview-name").boundingBox()]);
+      expect(back!.x).toBeLessThan(name!.x);
+      expect(back!.width).toBeGreaterThanOrEqual(44);
+      const download = (await page.getByTestId("file-preview-download").boundingBox())!;
+      expect(download.y + download.height).toBeLessThanOrEqual(viewport.height);
+      // Its own history entry, at the same address.
+      expect(await page.evaluate(() => typeof (history.state as { preview?: string } | null)?.preview)).toBe("string");
+    } else {
+      // A wide screen keeps the centred window over the dimmed page.
+      expect(box.width).toBeLessThan(viewport.width - 100);
+      expect(box.y).toBeGreaterThan(0);
+    }
+    await page.getByTestId("file-preview-image").evaluate((el) => (el as HTMLImageElement).decode());
+    await page.screenshot({ path: `${SHOTS}/${info.project.name}-${viewport.width}x${viewport.height}.png`, animations: "disabled" });
+    if (mobile) {
+      // The system back closes it, and leaves the console where it was.
+      const url = page.url();
+      await page.goBack();
+      await expect(dialog).toHaveCount(0);
+      expect(page.url()).toBe(url);
+      await expect(inline).toBeVisible();
+      // Its own back button closes it too, by going back off its entry.
+      await inline.click();
+      await settled(page);
+      await close.click();
+      await expect(dialog).toHaveCount(0);
+      expect(page.url()).toBe(url);
+      expect(await page.evaluate(() => (history.state as { preview?: string } | null)?.preview)).toBeUndefined();
+    } else {
+      await close.click();
+      await expect(dialog).toHaveCount(0);
+      expect(await page.evaluate(() => history.length)).toBe(before);
+    }
+  }
+});

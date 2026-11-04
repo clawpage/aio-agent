@@ -2397,6 +2397,32 @@ button .loading-mark { color: inherit; }
   }
 }
 
+/* The close control reads "Close" on a wide screen and is a back arrow on a phone. */
+.file-preview-close { display: inline-flex; align-items: center; gap: 4px; }
+.file-preview-close > .nav-icon { display: none; flex: none; }
+
+/* Phones: the preview is a page of its own, edge to edge, that slides up over the
+   one it came from (no card, no dimmed backdrop); it owns the safe-area insets. */
+@media (max-width: 900px) {
+  .file-preview-page { padding: 0; background: none; align-items: stretch; }
+  .file-preview-page[data-popup-motion] { animation: none; }
+  .file-preview-page > div.file-preview {
+    width: 100%;
+    height: 100%;
+    max-height: none;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+    padding: 0 var(--safe-right) var(--safe-bottom) var(--safe-left);
+  }
+  .file-preview-page .file-preview-head { min-height: calc(var(--head-h) + var(--safe-top)); padding: var(--safe-top) 12px 0 4px; gap: 6px; }
+  .file-preview-page .file-preview-close { order: -1; min-width: 44px; min-height: 44px; justify-content: center; padding: 0 6px; border: 0; }
+  .file-preview-page .file-preview-close > .nav-icon { display: block; width: 24px; height: 24px; }
+  .file-preview-page .file-preview-close > span { display: none; }
+  .file-preview-page .file-preview-body:has(> .zoomable-image) { padding: 0; }
+  .file-preview-page .file-preview-body > .zoomable-image { border-radius: 0; }
+}
+
 /* ------------------------------------------------------- conversation file cards */
 
 /* Cards for workspace files the agent produced or the user attached. */

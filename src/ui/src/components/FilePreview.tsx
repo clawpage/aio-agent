@@ -20,6 +20,7 @@ import {
 } from "../sandboxLink";
 import { Markdown } from "./Markdown";
 import { FileCard } from "./FileCard";
+import { NavIcon } from "./NavIcon";
 import { extractFileRefs } from "../fileRefs";
 
 /**
@@ -73,6 +74,14 @@ export function FilePreview({ path: initialPath, onClose, onOpenLink, onOpenInBr
   const [browserNote, setBrowserNote] = useState<string | null>(null);
   const autoOpened = useRef<string | null>(null);
   const closeRef = useRef<HTMLButtonElement | null>(null);
+  const closeLatest = useRef(onClose);
+  closeLatest.current = onClose;
+  /** On a phone the preview is a page with its own history entry, so the back gesture closes it. */
+  const entry = useRef<string | null>(null);
+  const close = useCallback(() => {
+    if (entry.current && (window.history.state as { preview?: string } | null)?.preview === entry.current) window.history.back();
+    else onClose();
+  }, [onClose]);
 
   // Focus the close control so Escape/Enter work immediately after opening.
   useEffect(() => {
@@ -83,12 +92,26 @@ export function FilePreview({ path: initialPath, onClose, onOpenLink, onOpenInBr
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         event.stopPropagation();
-        onClose();
+        close();
       }
     };
     document.addEventListener("keydown", onKeyDown, true);
     return () => document.removeEventListener("keydown", onKeyDown, true);
-  }, [onClose]);
+  }, [close]);
+
+  // Same address, one more entry (the state the page had is kept); leaving it any way closes the preview.
+  useEffect(() => {
+    if (!matchMedia("(max-width: 900px)").matches) return;
+    entry.current ??= Math.random().toString(36).slice(2);
+    const id = entry.current;
+    window.history.pushState({ ...(window.history.state as object | null), preview: id }, "");
+    const back = () => { if ((window.history.state as { preview?: string } | null)?.preview !== id) closeLatest.current(); };
+    window.addEventListener("popstate", back);
+    return () => {
+      window.removeEventListener("popstate", back);
+      if ((window.history.state as { preview?: string } | null)?.preview === id) window.history.back();
+    };
+  }, []);
 
   // One loader per path (and per explicit retry), so a late result from a
   // previous file can never overwrite the dialog that replaced it.
@@ -209,10 +232,10 @@ export function FilePreview({ path: initialPath, onClose, onOpenLink, onOpenInBr
 
   return createPortal(
     <PopupSurface
-      className="file-preview-overlay"
+      className="file-preview-overlay file-preview-page"
       role="presentation"
       onClick={(event) => {
-        if (event.target === event.currentTarget) onClose();
+        if (event.target === event.currentTarget) close();
       }}
     >
       <div className={`file-preview ${markdown || html ? "file-preview-document" : ""}`} role="dialog" aria-modal="true" aria-label={t.files.preview.dialog(name)}>
@@ -223,8 +246,9 @@ export function FilePreview({ path: initialPath, onClose, onOpenLink, onOpenInBr
           </span>
           <span className="muted tiny">{html ? t.files.preview.htmlPage : markdown ? t.files.preview.markdown : kindLabel(kind)}</span>
           <span className="spacer" />
-          <button type="button" className="ghost" onClick={onClose} ref={closeRef} aria-label={t.files.preview.closeLabel}>
-            {t.files.preview.close}
+          <button type="button" className="ghost file-preview-close" onClick={close} ref={closeRef} aria-label={t.files.preview.closeLabel}>
+            <NavIcon name="back" />
+            <span>{t.files.preview.close}</span>
           </button>
         </header>
 

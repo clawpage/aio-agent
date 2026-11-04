@@ -109,7 +109,10 @@ for (const c of cases) {
       if (name === "图片") await message.locator("img.inline-media").click();
       else await message.getByRole("button", { name: `预览 ${name}`, exact: true }).click();
       const preview = page.locator(".file-preview");
-      await contained(page, preview, c.safe);
+      // A phone opens the preview as a page of its own: it covers the screen and keeps its controls clear of the insets.
+      if (mobile) expect(await preview.boundingBox()).toEqual({ x: 0, y: 0, width: c.width, height: c.height });
+      else await contained(page, preview, c.safe);
+      await contained(page, preview.locator(".file-preview-name"), c.safe);
       await contained(page, preview.getByRole("button", { name: "关闭预览" }), c.safe);
       await contained(page, preview.locator(".file-preview-foot"), c.safe);
       await preview.getByRole("button", { name: "关闭预览" }).click();
