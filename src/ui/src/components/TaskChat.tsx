@@ -199,11 +199,14 @@ export function TaskChat({ onDetails, onOpenLink, onOpenFileInBrowser, onExpired
     /**
      * What is being read: the topmost feed item still on screen, and where it is. Older tasks do not only go in
      * at the very top (an old task that finished late has its reply sorted among newer ones), so it is this item,
-     * not the first one, that must stay where it was.
+     * not the first one, that must stay where it was. Items from before the page being loaded (`frontier`) are
+     * left out: unfinished tasks of any age come with the first page and sit at the very top, the older page goes
+     * in below them, and held by them the view stayed at the top and loaded page after page.
      */
-    const readingAnchor = (n: HTMLDivElement) => {
+    const readingAnchor = (n: HTMLDivElement, frontier: number) => {
         const top = n.getBoundingClientRect().top;
-        for (const el of n.querySelectorAll("[data-task-id]")) {
+        for (const el of n.querySelectorAll<HTMLElement>("[data-task-id]")) {
+            if (Number(el.dataset.at) < frontier) continue;
             const box = el.getBoundingClientRect();
             if (box.bottom > top + 1) return { el, top: box.top };
         }
@@ -215,7 +218,7 @@ export function TaskChat({ onDetails, onOpenLink, onOpenFileInBrowser, onExpired
         setOlderState("loading");
         try {
             const d = await api.main(nextBefore);
-            anchor.current = scroll.current ? readingAnchor(scroll.current) : null;
+            anchor.current = scroll.current ? readingAnchor(scroll.current, nextBefore) : null;
             stick.current = false;
             merge(d.tasks);
             setNextBefore(d.nextBefore);
@@ -573,13 +576,13 @@ export function TaskChat({ onDetails, onOpenLink, onOpenFileInBrowser, onExpired
         <div className="welcome-starters">{i18n.feed.empty.starters.map(s => <button type="button" key={s.label} onClick={() => sendStarter(s.prompt)}>{s.label}</button>)}</div>
       </div>}
       {/* Same key as the reply it becomes: the finished reply takes its place without coming in again. */}
-      {feed.map(({ task: t, report }, i) => {
+      {feed.map(({ task: t, report, at }, i) => {
         // Right under its own progress card (the card is the last thing in its entry): one block, so the title is not said twice.
         const follows = report && !terminal.has(t.status) && i > 0 && !feed[i - 1].report && progressAt.get(feed[i - 1].task.id)?.id === t.id;
-        return report && !terminal.has(t.status) ? <article className={`msg assistant task-report drafting${follows ? " follows-progress" : ""}`} key={`${t.id}:report`} data-task-id={t.id} aria-busy="true">
+        return report && !terminal.has(t.status) ? <article className={`msg assistant task-report drafting${follows ? " follows-progress" : ""}`} key={`${t.id}:report`} data-task-id={t.id} data-at={at} aria-busy="true">
         <div className="task-report-heading">{!follows && <span className="task-report-title">{t.title}</span>}{t.schedule && <span className="schedule-badge">{i18n.feed.report.schedule(t.schedule.rule)}</span>}<span className="muted tiny">{i18n.feed.report.writing}</span></div>
         <MessagePreview title={t.title}><DraftReply text={draftOf(t)!} onGrow={keepLatest} onOpenLink={onOpenLink} onOpenFile={setPreview}/></MessagePreview>
-      </article> : report ? <article className={`msg assistant task-report ${t.status}`} key={`${t.id}:report`} data-task-id={t.id}>
+      </article> : report ? <article className={`msg assistant task-report ${t.status}`} key={`${t.id}:report`} data-task-id={t.id} data-at={at}>
         <div className="task-report-heading"><span className="task-report-title">{t.title}</span>{t.schedule && <span className="schedule-badge">{i18n.feed.report.schedule(t.schedule.rule)}</span>}{t.support && <span className="schedule-badge">{i18n.feed.report.support}</span>}<span className="muted tiny">{labels[t.status]}</span></div>
         <MessagePreview title={t.title}><Markdown source={t.result || (t.status === "completed" ? i18n.feed.report.noResult : t.error || labels[t.status] || t.status)} onOpenLink={onOpenLink} onOpenFile={setPreview} choices={{ onChoose: option => void choose(t, option), chosen: choosing[`${t.id}:${t.revision}`] ?? replyTo(t)?.text ?? null }}/>{t.result && <MessageFileCards text={t.result} onOpen={setPreview} onOpenLink={onOpenLink}/>}{t.error && t.result && <p className="error">{t.error}</p>}</MessagePreview>
         {ownsBrowser(t) && <><VaultPrompt task={t}/><TaskBrowser task={t} onReveal={onRevealBrowser}/></>}
@@ -592,7 +595,7 @@ export function TaskChat({ onDetails, onOpenLink, onOpenFileInBrowser, onExpired
           {/* Reporting stays available but out of the way: a quiet link at the end of the row. */}
           {t.result && !t.support && <button className="link tiny report-response" onClick={() => setReportedTask(t.id)}>{i18n.support.report}</button>}
         </div>
-      </article> : <div className={`task-entry${adopted.current.has(t.id) ? " adopted" : ""}`} key={t.id} data-task-id={t.id}>
+      </article> : <div className={`task-entry${adopted.current.has(t.id) ? " adopted" : ""}`} key={t.id} data-task-id={t.id} data-at={at}>
         {t.schedule ? <div className="schedule-run-note" role="note">{i18n.feed.scheduleRun(t.schedule.title, t.schedule.rule)}<MessageTime at={t.createdAt} now={now}/></div> : t.support ? <div className="schedule-run-note" role="note">{i18n.feed.supportNote}<MessageTime at={t.createdAt} now={now}/></div> : t.handBack ? <div className="schedule-run-note" role="note">{i18n.feed.handBackNote}<MessageTime at={t.createdAt} now={now}/></div> : <article className="msg user"><MessagePreview title={i18n.feed.userMessage} user>{t.relatedTaskId && <small className="muted">{i18n.feed.quoted(t.relatedTaskTitle ?? tasks.find(task => task.id === t.relatedTaskId)?.title ?? i18n.feed.earlierTask)}</small>}<p>{t.text}</p>{t.attachments.length > 0 && <AttachmentCards attachments={t.attachments} onOpen={setPreview}/>}<div className="message-meta"><MessageTime at={t.createdAt} now={now}/></div></MessagePreview></article>}
         {t.mergedInto && <div className="task-supplement"><button className="ghost tiny" onClick={() => onDetails(t)}>{(t.status === "merged" ? i18n.feed.supplement.merged : t.status === "merging" || t.status === "steering" ? i18n.feed.supplement.merging : t.status === "interrupted" ? i18n.feed.supplement.cancelled : i18n.feed.supplement.check)(t.mergedTitle ?? "")}</button>{t.waitReason && <p className="tiny">{t.waitReason.message}</p>}{t.error && <p className="tiny error">{t.error}</p>}</div>}
         {debug && <div className="task-actions debug-actions"><button className="ghost tiny" onClick={() => setDispatchLogFor(t.id)} aria-label={i18n.feed.actions.dispatchLogLabel(t.title)}>{i18n.feed.actions.dispatchLog}</button></div>}

@@ -151,13 +151,14 @@ test("in the iOS app the rise ends exactly where the page is then laid out, with
     const animations = document.getAnimations().filter((a) => a.id === "keyboard");
     animations.forEach((a) => { a.pause(); a.currentTime = 499; });
     const at = new Function(`return (${w})()`)() as { last: number; composer: number };
+    const moved = getComputedStyle(document.querySelector(".composer textarea")!).caretColor;
     animations.forEach((a) => a.play());
-    return at;
+    return { ...at, moved };
   }, where.toString());
   // iOS would draw the caret where the box is laid out, away from where it is seen moving: none until it settles.
-  expect(await caret()).toBe("rgba(0, 0, 0, 0)");
+  expect(arriving.moved).toBe("rgba(0, 0, 0, 0)");
   await expect.poll(() => moving(page), { timeout: 3000 }).toBe(0);
-  expect(await page.evaluate((w) => new Function(`return (${w})()`)(), where.toString())).toEqual(arriving);
+  expect(await page.evaluate((w) => new Function(`return (${w})()`)(), where.toString())).toEqual({ last: arriving.last, composer: arriving.composer });
   expect(await caret()).toBe(shown);
   expect(shown).not.toBe("rgba(0, 0, 0, 0)");
 });

@@ -190,3 +190,33 @@ test("a message above the one being read growing (a picture arriving) does not p
   const now = await reading.evaluate((el) => el.getBoundingClientRect().top - el.closest(".task-feed")!.getBoundingClientRect().top);
   expect(Math.abs(now - at)).toBeLessThan(3);
 });
+
+test("old unfinished tasks at the very top do not hold the view there while older pages load", async ({ page }) => {
+  // The first page brings unfinished tasks of any age: here three whose assignment failed long ago.
+  const stale = [-30, -20, -10].map((k) => ({ ...task(k, ""), status: "planning_failed", result: null, error: "任务分配暂时失败，尚未执行。请重试分配。", completedAt: null }));
+  const recent = Array.from({ length: 8 }, (_, k) => task(31 + k));
+  const { olderAsked } = await setup(page, {
+    first: () => ({ version: "v1", tasks: [...stale, ...recent], nextBefore: recent[0]!.createdAt }),
+    older: (before) => {
+      const top = (before - 1000) / 1000;
+      return { tasks: Array.from({ length: 8 }, (_, k) => task(top - 7 + k)), nextBefore: top - 7 > 1 ? 1000 + (top - 7) * 1000 : null };
+    },
+  });
+  const feed = page.locator(".task-feed");
+  const reading = page.locator('.task-entry[data-task-id="task-31"]');
+  await expect(reading).toBeAttached({ timeout: 60_000 });
+  await page.waitForTimeout(500);
+  // Scrolled all the way up: the stale tasks, and below them the oldest recent one.
+  const at = await feed.evaluate((n) => {
+    n.scrollTop = 0;
+    const r = n.querySelector('.task-entry[data-task-id="task-31"]')!;
+    return r.getBoundingClientRect().top - n.getBoundingClientRect().top;
+  });
+  await expect.poll(() => olderAsked.length).toBe(1);
+  await expect(page.locator('.task-entry[data-task-id="task-30"]')).toBeAttached();
+  await page.waitForTimeout(800);
+  // What was being read stayed put, the page that came in went above it, and no further page was pulled in.
+  const now = await reading.evaluate((el) => el.getBoundingClientRect().top - el.closest(".task-feed")!.getBoundingClientRect().top);
+  expect(Math.abs(now - at)).toBeLessThan(3);
+  expect(olderAsked).toHaveLength(1);
+});
