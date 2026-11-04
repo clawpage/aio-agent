@@ -1,4 +1,14 @@
-import { useEffect } from "react";
+import { useEffect, type MouseEvent } from "react";
+
+/**
+ * On the composer's attachment button (pointerdown and mousedown; Chromium moves focus on the latter): a tap keeps the message box focused, so a phone keyboard stays up.
+ * Taking the focus closed the keyboard mid-tap, the composer slid back down, and the attachment menu the
+ * phone opened was left where the button had been.
+ */
+export function keepTyping(e: MouseEvent<HTMLElement>) {
+    const typing = document.activeElement;
+    if (typing instanceof HTMLTextAreaElement && e.currentTarget.closest(".composer")?.contains(typing)) e.preventDefault();
+}
 
 /** The iOS app takes the keyboard from WebKit and reports it (`aioKeyboard`, DeviceBrowser.swift). */
 const appKeyboard = () => !!(window as { webkit?: { messageHandlers?: { aioKeyboard?: unknown } } }).webkit?.messageHandlers?.aioKeyboard;

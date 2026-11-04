@@ -213,13 +213,14 @@ private final class PushHandler: NSObject, WKScriptMessageHandler, UNUserNotific
     }
 }
 
-// The keyboard is taken from WebKit, which scrolled the page to reveal the focused box while the
-// console put it back at the top (useKeyboardViewport), and the page sprang up and down. Resizing the
-// web view instead left the page blank while WebKit repainted, and moved the content in one step ahead
-// of the keyboard. So the web view keeps its size and the page is told the keyboard's height on every
-// frame of its animation (`aio-keyboard` events), read from a view animated with the keyboard's own
-// duration and curve; the page gives up that much at the bottom. While a keyboard is up the page is
-// held at the top, in case WebKit still scrolls to a focused box.
+// WebKit scrolled the page to reveal the focused box while the console put it back at the top
+// (useKeyboardViewport), and the page sprang up and down; resizing the web view instead left the page
+// blank while WebKit repainted, moved the content in one step ahead of the keyboard, and stranded menus
+// opened from the composer. So the web view keeps its size and is held at the top while a keyboard is
+// up, and the page is told the keyboard's height on every frame of its animation (`aio-keyboard`
+// events), read from a view animated with the keyboard's own duration and curve; the page gives up that
+// much at the bottom. WebKit keeps its own keyboard handling (it needs it, for one, to swap the keyboard
+// for the attachment menu).
 final class KeyboardFit: NSObject, WKScriptMessageHandler {
     private weak var webView: WKWebView?
     private let probe = UIView()
@@ -232,10 +233,6 @@ final class KeyboardFit: NSObject, WKScriptMessageHandler {
         self.webView = webView
         super.init()
         let center = NotificationCenter.default
-        for name in [UIResponder.keyboardWillShowNotification, UIResponder.keyboardDidShowNotification, UIResponder.keyboardWillHideNotification,
-                     UIResponder.keyboardWillChangeFrameNotification, UIResponder.keyboardDidChangeFrameNotification] {
-            center.removeObserver(webView, name: name, object: nil)
-        }
         center.addObserver(self, selector: #selector(change(_:)), name: UIResponder.keyboardWillChangeFrameNotification, object: nil)
         probe.alpha = 0
         probe.isUserInteractionEnabled = false

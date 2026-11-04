@@ -34,6 +34,7 @@ import { openNativeBrowser } from "../deviceBrowser";
 import { t } from "../i18n";
 import { MAX_ATTACHMENTS } from "../../../common/attachments";
 import { InlineLoading } from "./Brand";
+import { keepTyping } from "../useKeyboardViewport";
 
 interface Props {
   readOnly?: boolean;
@@ -468,7 +469,7 @@ export function Chat({
               refuse a programmatic click on a display:none input. The control is
               disabled while an upload or a send is in flight so picking a file
               can never race the composer being cleared on send. */}
-          <label className={`file-button ${uploading || busy ? "disabled" : ""}`} aria-disabled={uploading || busy}>
+          <label className={`file-button ${uploading || busy ? "disabled" : ""}`} aria-disabled={uploading || busy} onPointerDown={keepTyping} onMouseDown={keepTyping}>
             <ComposerIcon kind={uploading ? "busy" : "attach"}/>
             <span className="composer-button-label">{uploading ? t.chat.composer.uploading : t.chat.composer.attach}</span>
             <input

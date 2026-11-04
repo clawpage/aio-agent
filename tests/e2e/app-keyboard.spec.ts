@@ -57,3 +57,20 @@ test("without the app's marker the page ignores keyboard events from elsewhere",
   await keyboard(page, 300);
   expect(await composerBottom(page)).toBe(rest);
 });
+
+// iOS anchors the attachment menu to the button: losing focus closed the keyboard and the composer slid
+// away from the menu. (Chromium moves focus to a label's file input on activation; Android opens its file
+// chooser as a full screen, so there is nothing to strand there.)
+test("the attachment button keeps the message box focused, so an iPhone keyboard stays up for its menu", async ({ page }, info) => {
+  test.skip(info.project.name !== "mobile-webkit");
+  await mockConsole(page, { conversations: [] });
+  await page.route("**/api/main*", (r) => r.fulfill({ json: { mode: "tasks", version: "v0", tasks: [], nextBefore: null } }));
+  await page.goto("/");
+  const box = page.getByRole("textbox", { name: "消息", exact: true });
+  await box.click();
+  await expect(box).toBeFocused();
+  const chooser = page.waitForEvent("filechooser");
+  await page.locator(".composer .file-button").first().click();
+  await chooser;
+  await expect(box).toBeFocused();
+});

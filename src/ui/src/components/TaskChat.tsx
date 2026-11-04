@@ -28,6 +28,7 @@ import { PushNudge } from "./PushSettings";
 import type {TaskFeed} from '../taskStatus';
 import { t as i18n } from "../i18n";
 import { MAX_ATTACHMENTS } from "../../../common/attachments";
+import { keepTyping } from "../useKeyboardViewport";
 const terminal = new Set(["completed", "failed", "interrupted", "unknown"]);
 /** Whose move it is: the person's (amber), the AI's (indigo), or stuck on an error (red). */
 function turnOf(t: Task): "you" | "ai" | "err" {
@@ -623,7 +624,7 @@ export function TaskChat({ onDetails, onOpenLink, onOpenFileInBrowser, onExpired
         e.preventDefault();
         send();
     } }}/>
-      <div className="composer-row"><label className="file-button"><ComposerIcon kind={uploading ? "busy" : "attach"}/><span className="composer-button-label">{uploading ? i18n.chat.composer.uploading : i18n.chat.composer.attach}</span><input type="file" multiple className="file-input" aria-label={i18n.chat.composer.addAttachment} data-testid="attachment-input" onChange={e => { pick(e.target.files); e.target.value = ""; }}/></label><VoiceButton disabled={false} onError={setError} onText={heard => { setDraft(old => old + (/[A-Za-z0-9]$/.test(old) && /^[A-Za-z0-9]/.test(heard) ? " " : "") + heard); input.current?.focus(); }}/><span className="spacer"/><button className="primary" disabled={!draft.trim() && !attachments.length && !uploading} onClick={send} aria-label={i18n.chat.composer.send} title={`${i18n.chat.composer.send} (${SEND_SHORTCUT})`}><ComposerIcon kind="send"/><span className="composer-button-label">{i18n.chat.composer.send}</span></button></div>
+      <div className="composer-row"><label className="file-button" onPointerDown={keepTyping} onMouseDown={keepTyping}><ComposerIcon kind={uploading ? "busy" : "attach"}/><span className="composer-button-label">{uploading ? i18n.chat.composer.uploading : i18n.chat.composer.attach}</span><input type="file" multiple className="file-input" aria-label={i18n.chat.composer.addAttachment} data-testid="attachment-input" onChange={e => { pick(e.target.files); e.target.value = ""; }}/></label><VoiceButton disabled={false} onError={setError} onText={heard => { setDraft(old => old + (/[A-Za-z0-9]$/.test(old) && /^[A-Za-z0-9]/.test(heard) ? " " : "") + heard); input.current?.focus(); }}/><span className="spacer"/><button className="primary" disabled={!draft.trim() && !attachments.length && !uploading} onClick={send} aria-label={i18n.chat.composer.send} title={`${i18n.chat.composer.send} (${SEND_SHORTCUT})`}><ComposerIcon kind="send"/><span className="composer-button-label">{i18n.chat.composer.send}</span></button></div>
     </div>
     <PopupPresence>{preview && <FilePreview path={preview} onClose={() => setPreview(null)} onOpenLink={onOpenLink} onOpenInBrowser={onOpenFileInBrowser}/>}</PopupPresence>
     <PopupPresence>{debug && dispatchLogFor && <DispatchLog taskId={dispatchLogFor} onClose={() => setDispatchLogFor(null)}/>}</PopupPresence>
