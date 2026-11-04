@@ -280,8 +280,10 @@ export const api = {
   kbRestoreNode: (lib: string, id: string, change: number) => request<{ change: number | null }>(`/api/knowledge/libraries/${encodeURIComponent(lib)}/nodes/${encodeURIComponent(id)}/restore`, { method: "POST", body: { change } }),
   kbChanges: (lib: string, before?: number) => request<{ changes: import("./types").KbChange[] }>(`/api/knowledge/libraries/${encodeURIComponent(lib)}/changes${before ? `?before=${before}` : ""}`, { cache: "no-store" }),
   kbUndo: (lib: string, change: number) => request<{ change: number | null }>(`/api/knowledge/libraries/${encodeURIComponent(lib)}/changes/${change}/undo`, { method: "POST", body: {} }),
-  pushInfo: () => request<{ supported: boolean; publicKey?: string; devices?: number }>("/api/push", { cache: "no-store" }),
+  pushInfo: (endpoint?: string) => request<{ supported: boolean; publicKey?: string; apns?: boolean; devices?: number; subscribed?: boolean }>(`/api/push${endpoint ? `?endpoint=${encodeURIComponent(endpoint)}` : ""}`, { cache: "no-store" }),
   pushSubscribe: (subscription: PushSubscriptionJSON) => request<{ ok: boolean; devices: number }>("/api/push/subscribe", { method: "POST", body: { subscription } }),
+  /** The iOS app's APNs device token, in place of a Web Push subscription. */
+  pushSubscribeApp: (token: string, environment: string) => request<{ ok: boolean; devices: number; endpoint: string }>("/api/push/subscribe", { method: "POST", body: { apns: { token, environment } } }),
   pushUnsubscribe: (endpoint: string) => request<{ ok: boolean }>("/api/push/unsubscribe", { method: "POST", body: { endpoint } }),
   scheduleUpdate: (id: string, changes: { title?: string; instruction?: string; schedule?: import("./types").ScheduleSpec; needsBrowser?: boolean }) =>
     request<{ message: string; schedule: Schedule }>(`/api/schedules/${encodeURIComponent(id)}`, { method: "PATCH", body: changes }),

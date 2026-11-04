@@ -14,6 +14,7 @@ import { namesPage, OWNER_VIEWS, parseRoute, routePath, type AppRoute } from "..
 type DetailFrom = "main" | "tasks" | "files" | "schedules" | "knowledge";
 import { BrandMark, LoadingMark, PageLoading } from "./Brand";
 import { NavIcon } from "./NavIcon";
+import { devicePushEndpoint } from "./PushSettings";
 import { Chat } from "./Chat";
 import { Login } from "./Login";
 import { Settings } from "./Settings";
@@ -39,13 +40,6 @@ import { track, trackOpen } from "../analytics";
 /** The site a link goes to, named on the opening card. */
 function hostOf(url: string): string {
     try { return new URL(url).host || url; } catch { return url; }
-}
-
-/** This device's push subscription address, if notifications are on here. */
-async function pushEndpoint(): Promise<string | undefined> {
-    if (!("serviceWorker" in navigator) || !("PushManager" in window)) return undefined;
-    const registration = await navigator.serviceWorker.getRegistration("/").catch(() => undefined);
-    return (await registration?.pushManager.getSubscription().catch(() => null))?.endpoint;
 }
 
 /** `firstSession`: the session check already under way when the console opens, used by its first look. */
@@ -229,7 +223,7 @@ export function MainApp({ firstSession }: { firstSession?: ReturnType<typeof api
         // foreground half of idle detection. It names this device's push subscription (if any), so
         // only this device skips notifications while on screen.
         const present = () => { if (attention().attended)
-            void pushEndpoint().then((endpoint) => api.presence(endpoint)).catch(() => undefined); };
+            void devicePushEndpoint().then((endpoint) => api.presence(endpoint)).catch(() => undefined); };
         present();
         const presence = setInterval(present, 20000);
         // Coming back after a pause starts warming a stopped sandbox at once.

@@ -126,6 +126,8 @@ export function loadConfig(): {
   googleRedirectUri: string;
   /** Sign in with Apple's audience: the iOS app's bundle id; empty turns it off. */
   appleClientId: string;
+  /** The iOS app's notifications through APNs: a token key (.p8), its key id and team; any missing turns them off. */
+  apns: { keyFile: string; keyId: string; teamId: string; topic: string };
   ownerPassword: string;
   ownerPasswordReset: boolean;
   sandbox: {
@@ -501,6 +503,12 @@ export function loadConfig(): {
     })(),
     googleRedirectUri: envStr("PA_GOOGLE_REDIRECT_URI", `https://${primaryHost}/api/auth/google/callback`),
     appleClientId: envStr("PA_APPLE_CLIENT_ID", "ai.clawpage.agent").trim(),
+    apns: {
+      keyFile: envStr("PA_APNS_KEY_FILE", path.join(dataDir, "apns.p8")),
+      keyId: envStr("PA_APNS_KEY_ID").trim(),
+      teamId: envStr("PA_APNS_TEAM_ID").trim(),
+      topic: envStr("PA_APNS_TOPIC", "ai.clawpage.agent").trim(),
+    },
     ownerPassword: envStr("PA_OWNER_PASSWORD", ""),
     // Opt-in operator action: rotate the owner password and rewrite the local secret file.
     ownerPasswordReset: envStr("PA_OWNER_PASSWORD_RESET", "0") === "1",

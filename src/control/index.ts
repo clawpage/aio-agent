@@ -61,7 +61,7 @@ import type { AppContext } from "./context.js";
 import { ACTIVE_TASKS, SandboxIdle } from "./sandbox/idle.js";
 import { OnDemandPrograms } from "./sandbox/programs.js";
 import { startVaultAutofill, Vault } from "./vault.js";
-import { PushService, startTaskNotifications } from "./push.js";
+import { loadApns, PushService, startTaskNotifications } from "./push.js";
 
 export interface Bootstrapped {
   ctx: AppContext;
@@ -578,7 +578,7 @@ async function main(): Promise<void> {
   const modelGateway=new MemberModelGateway(ctx.cfg,ctx.log,ctx.share,decision,kb,schedule,ctx.hostTokens,image,browserGateway,ha,printer,macNative,tts,taskKb);
   await modelGateway.start();
   // Phone notifications: one key pair and one subscription store for every account.
-  ctx.push=new PushService({db:ctx.db,log:ctx.log,keyFile:path.join(ctx.cfg.dataDir,"vapid.json"),subject:`https://${ctx.cfg.primaryHost}`});
+  ctx.push=new PushService({db:ctx.db,log:ctx.log,keyFile:path.join(ctx.cfg.dataDir,"vapid.json"),subject:`https://${ctx.cfg.primaryHost}`,apns:loadApns(ctx.cfg.apns)});
   const ownerNotifications=startTaskNotifications(ctx,ctx.push);
   const ownerVault=startVaultAutofill(ctx);
   const users=new UserRuntimes(ctx,bootstrap,modelGateway,nodes);

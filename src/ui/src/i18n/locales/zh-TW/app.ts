@@ -73,6 +73,7 @@ export const app: typeof zh = {
     nudgeEnable: "開啟",
     nudgeLater: "暫不",
     nudgeOk: "知道了",
+    openSettings: "前往設定開啟",
   },
   attachments: {
     tray: "待傳送的附件",

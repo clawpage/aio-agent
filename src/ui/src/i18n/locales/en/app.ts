@@ -72,6 +72,7 @@ export const app: typeof zh = {
     nudgeEnable: "Turn on",
     nudgeLater: "Not now",
     nudgeOk: "Got it",
+    openSettings: "Open Settings",
   },
   attachments: {
     tray: "Attachments to send",

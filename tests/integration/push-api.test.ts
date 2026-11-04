@@ -7,9 +7,10 @@ import { PushService } from "../../src/control/push.js";
 
 let h: TestHarness;
 const send = vi.fn(async () => ({ statusCode: 201 }));
+const apns = vi.fn(async (): Promise<{ statusCode: number; reason?: string }> => ({ statusCode: 200 }));
 beforeAll(async () => {
   h = await startHarness();
-  h.ctx.push = new PushService({ db: h.ctx.db, log: h.ctx.log, keyFile: path.join(fs.mkdtempSync(path.join(os.tmpdir(), "push-")), "vapid.json"), subject: "https://agent.example.com", send });
+  h.ctx.push = new PushService({ db: h.ctx.db, log: h.ctx.log, keyFile: path.join(fs.mkdtempSync(path.join(os.tmpdir(), "push-")), "vapid.json"), subject: "https://agent.example.com", send, apns });
 });
 afterAll(async () => { await h.shutdown(); });
 
@@ -33,4 +34,21 @@ it("subscribes this account's device, sends a test, marks presence and unsubscri
   expect(send).toHaveBeenCalledTimes(1);
   await h.request("/api/push/unsubscribe", { method: "POST", headers, body: JSON.stringify({ endpoint: subscription.endpoint }) });
   expect(h.ctx.push!.count("owner_1")).toBe(0);
+});
+
+it("keeps the iOS app's device token, tells the app it is on, and forgets a token Apple refuses", async () => {
+  const { cookie, csrf } = await login(h);
+  const headers = { cookie, "x-csrf-token": csrf, "content-type": "application/json" };
+  const token = "0f".repeat(32);
+  expect((await h.request("/api/push/subscribe", { method: "POST", headers, body: JSON.stringify({ apns: { token: "not-a-token", environment: "production" } }) })).status).toBe(400);
+  expect((await h.request("/api/push/subscribe", { method: "POST", headers, body: JSON.stringify({ apns: { token, environment: "staging" } }) })).status).toBe(400);
+  const added = await (await h.request("/api/push/subscribe", { method: "POST", headers, body: JSON.stringify({ apns: { token, environment: "production" } }) })).json() as { endpoint: string };
+  expect(added).toEqual({ ok: true, devices: 1, endpoint: `apns:production:${token}` });
+  expect(await (await h.request(`/api/push?endpoint=${encodeURIComponent(added.endpoint)}`, { headers: { cookie } })).json()).toMatchObject({ apns: true, subscribed: true });
+  expect(await (await h.request("/api/push/test", { method: "POST", headers, body: "{}" })).json()).toEqual({ sent: 1 });
+  expect(apns).toHaveBeenLastCalledWith({ environment: "production", token }, expect.objectContaining({ tag: "test", url: "/" }));
+  // The app was removed from the phone: Apple says so, and the device is dropped.
+  apns.mockResolvedValueOnce({ statusCode: 410, reason: "Unregistered" });
+  expect(await (await h.request("/api/push/test", { method: "POST", headers, body: "{}" })).json()).toEqual({ sent: 0 });
+  expect(await (await h.request(`/api/push?endpoint=${encodeURIComponent(added.endpoint)}`, { headers: { cookie } })).json()).toMatchObject({ subscribed: false, devices: 0 });
 });

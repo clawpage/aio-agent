@@ -16,7 +16,7 @@
 - [11. 语音配件](#11-语音配件)
 - [12. 出图（aio_image）](#12-出图aio_image)
 - [12a. 朗读（aio_tts）](#12a-朗读aio_tts)
-- [13. 手机通知（Web Push）](#13-手机通知web-push)
+- [13. 手机通知（Web Push / iOS App）](#13-手机通知web-push--ios-app)
 - [14. 外部集成](#14-外部集成)
 - [15. Claude Code 执行器](#15-claude-code-执行器)
 - [16. 运营看板](#16-运营看板)
@@ -698,16 +698,19 @@ iOS App 需为声明了存入相册权限、带 `aioSaveFiles` 标记的新版�
 - **展示**：执行器把文件写成单独一行的链接 `[说明](路径)`，消息里显示为播放器（见「富内容块」）；要 mp3 或更长的音频由执行器在沙箱里用 ffmpeg 转换、拼接。
 - 现有部署：语音服务在 old-mb（`PA_TTS_URL=http://192.168.1.118:4911/v1/tts`），部署与排障见 [运行手册](RUNBOOK.md)「朗读服务」。
 
-## 13. 手机通知（Web Push）
+## 13. 手机通知（Web Push / iOS App）
 
-在 iPhone Safari 中把一站「添加到主屏幕」（iOS 16.4+），从主屏幕打开后在「配置 → 手机通知」打开开关；Android 与桌面浏览器同样可用。每个账号、每台设备各自订阅。
+在 iPhone Safari 中把一站「添加到主屏幕」（iOS 16.4+），从主屏幕打开后在「配置 → 手机通知」打开开关；Android 与桌面浏览器同样可用。iOS App 里同样在「配置 → 手机通知」开启，走 App 自己的 APNs 注册（WKWebView 没有 Web Push）。每个账号、每台设备各自订阅。
 
-- **引导**：在这台设备上发出第一条消息后，主会话输入框上方提示一次开启（可直接开启或「暂不」）；回答过、已开启或已被系统拒绝后不再提示（记在本浏览器）。iPhone Safari 未添加到主屏幕时提示改为先添加到主屏幕；App 内与不支持推送的浏览器不提示、配置页也不显示该项。
+- **引导**：在这台设备上发出第一条消息后，主会话输入框上方提示一次开启（可直接开启或「暂不」）；回答过、已开启或已被系统拒绝后不再提示（记在本浏览器）。iPhone Safari 未添加到主屏幕时提示改为先添加到主屏幕；不支持推送的浏览器、Android App 与未配置 APNs 密钥的部署里的 iOS App 不提示、配置页也不显示该项。
 
 - **触发**：任务完成、未完成或待核对，需要补充，有操作待确认，请你接管浏览器（含定时任务结果）。同一任务的后续消息替换前一条；
   控制台在前台（45 秒内有心跳）时不推送。
 - **送达**：标准 Web Push，使用本部署的 VAPID 密钥（首次启动生成于 `var/vapid.json`，0600），内容端到端加密，推送服务看不到内容。
   只向已知推送服务的 https 地址发送；返回 404 / 410 的订阅自动删除。
+- **iOS App**：控制台经 `window.webkit.messageHandlers.aioPush`（`DeviceBrowser.swift`，只认主站主框架）问 App：`status` / `enable`（系统授权弹窗，同意后向 APNs 注册）/ `settings`（打开本 App 的系统设置页），App 以 `aio-push` 事件回答授权状态、设备令牌与 APNs 环境（TestFlight 与 App Store 为 production，开发包按描述文件，模拟器为 development）。
+  令牌以 `apns:<环境>:<令牌>` 存进同一张表，`GET /api/push?endpoint=` 告诉 App 本机是否已开；系统里拒绝过时配置页显示「去设置开启」，从设置回来自动刷新。
+  服务器用 APNs 令牌密钥（ES256 JWT，见 `docs/CONFIGURATION.md` 的 `PA_APNS_*`）经 HTTP/2 发送；APNs 回 410 或 `BadDeviceToken` / `DeviceTokenNotForTopic` / `Unregistered` 的令牌自动删除。App 在前台也显示横幅（服务器已跳过控制台正在屏幕上的设备）。
 - service worker（`/sw.js`）显示通知、点按打开一站；它另外只缓存控制台页面与构建文件（见「无网打开」），不碰 `/api`。
 
 ## 14. 外部集成

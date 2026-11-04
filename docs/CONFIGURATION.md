@@ -107,6 +107,9 @@
 | 变量 | 默认 | 说明 |
 | --- | --- | --- |
 | `PA_DAILY_FEED` | `1` | 为每个账号内置每日推送 |
+| `PA_APNS_KEY_FILE` | `<数据目录>/apns.p8` | iOS App 的通知（APNs）令牌密钥（Apple Developer → Keys 建的 APNs 密钥 `.p8`）；文件、Key ID、Team ID 缺一则 App 内不提供通知开关，Web Push 不受影响 |
+| `PA_APNS_KEY_ID` / `PA_APNS_TEAM_ID` | 空（文件名为 `AuthKey_<Key ID>.p8` 时取自文件名）/ 空 | 该密钥的 Key ID 与开发者 Team ID |
+| `PA_APNS_TOPIC` | `ai.clawpage.agent` | iOS App 的 bundle id |
 | `PA_ASR_URL` | 空 | 语音输入的识别服务；为空则不显示麦克风按钮 |
 | `PA_TTS_URL` | 空 | 朗读工具 `aio_tts` 的语音服务（`POST` JSON `{text, speaker, language}`、回 WAV 的地址，如 Qwen3-TTS 引擎的 `/v1/tts`）；为空则不提供 |
 | `PA_GOOGLE_MAPS_SECRETS_FILE` | 空 | `PA_GOOGLE_MAPS_API_KEY`（环境变量优先；Google Maps Platform key，只需开通 Maps Static API 与 Geocoding API，建议限制为这两项）；缺失则地图卡片用 OpenStreetMap |

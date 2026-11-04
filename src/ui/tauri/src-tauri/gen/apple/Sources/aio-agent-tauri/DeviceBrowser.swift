@@ -2,6 +2,8 @@ import UIKit
 import WebKit
 import SafariServices
 import AuthenticationServices
+import UserNotifications
+import ObjectiveC
 
 // This bridge grants one operation to the main console frame, not Tauri IPC.
 private final class DeviceBrowserHandler: NSObject, WKScriptMessageHandler, ASWebAuthenticationPresentationContextProviding {
@@ -106,6 +108,111 @@ private final class SaveFilesMarker: NSObject, WKScriptMessageHandler {
     func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {}
 }
 
+// Notifications through APNs, because WKWebView has no Web Push. The console sends "status",
+// "enable" (the system prompt, then registering with APNs) or "settings" (this app's page in
+// Settings, where a refusal is undone). Each answer is an `aio-push` event with the permission
+// and, once granted, the device token and its APNs environment, for the console to hand to the server.
+private final class PushHandler: NSObject, WKScriptMessageHandler, UNUserNotificationCenterDelegate {
+    static weak var shared: PushHandler?
+    weak var webView: WKWebView?
+    init(_ webView: WKWebView) {
+        self.webView = webView
+        super.init()
+        PushHandler.shared = self
+        UNUserNotificationCenter.current().delegate = self
+        PushHandler.hookAppDelegate()
+    }
+
+    func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
+        let origin = message.frameInfo.securityOrigin
+        guard message.frameInfo.isMainFrame, origin.protocol == "https",
+              origin.host == "agent.clawpage.ai", origin.port == 443 || origin.port == 0,
+              let action = message.body as? String else { return }
+        switch action {
+        case "status": report()
+        case "enable":
+            UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { _, _ in
+                DispatchQueue.main.async { self.report() }
+            }
+        case "settings":
+            if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
+        default: return
+        }
+    }
+
+    // With the permission granted, registering again is how the token is learned: iOS answers at once with the current one.
+    private func report() {
+        UNUserNotificationCenter.current().getNotificationSettings { settings in
+            DispatchQueue.main.async {
+                switch settings.authorizationStatus {
+                case .authorized, .provisional, .ephemeral: UIApplication.shared.registerForRemoteNotifications()
+                case .denied: self.send(["permission": "denied"])
+                default: self.send(["permission": "default"])
+                }
+            }
+        }
+    }
+
+    fileprivate func registered(_ token: Data?) {
+        var detail = ["permission": "granted", "environment": PushHandler.environment]
+        if let token { detail["token"] = token.map { String(format: "%02x", $0) }.joined() } else { detail["error"] = "register" }
+        send(detail)
+    }
+
+    private func send(_ detail: [String: String]) {
+        guard let webView, webView.url?.host == "agent.clawpage.ai", webView.url?.scheme == "https",
+              let data = try? JSONSerialization.data(withJSONObject: detail), let json = String(data: data, encoding: .utf8) else { return }
+        webView.evaluateJavaScript("window.dispatchEvent(new CustomEvent('aio-push',{detail:\(json)}));")
+    }
+
+    // Shown while the app is open too: the server already skips a device whose console is on screen.
+    func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification, withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
+        completionHandler([.banner, .list, .sound])
+    }
+
+    // A tap opens the app on the console; a notification naming another console page opens that page.
+    func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse, withCompletionHandler completionHandler: @escaping () -> Void) {
+        defer { completionHandler() }
+        guard let path = response.notification.request.content.userInfo["url"] as? String, path.hasPrefix("/"), !path.hasPrefix("//"), path != "/",
+              let url = URL(string: "https://agent.clawpage.ai" + path), let webView else { return }
+        webView.load(URLRequest(url: url))
+    }
+
+    // TestFlight and App Store installs carry no provisioning profile and use APNs production;
+    // a development build's profile names its environment; the simulator uses the sandbox.
+    static let environment: String = {
+        #if targetEnvironment(simulator)
+        return "development"
+        #else
+        guard let url = Bundle.main.url(forResource: "embedded", withExtension: "mobileprovision"),
+              let raw = try? Data(contentsOf: url), let text = String(data: raw, encoding: .isoLatin1) else { return "production" }
+        guard let start = text.range(of: "<?xml"), let end = text.range(of: "</plist>"),
+              let plist = try? PropertyListSerialization.propertyList(from: Data(text[start.lowerBound..<end.upperBound].utf8), format: nil) as? [String: Any],
+              let entitlements = plist["Entitlements"] as? [String: Any],
+              let value = entitlements["aps-environment"] as? String else { return "development" }
+        return value == "production" ? "production" : "development"
+        #endif
+    }()
+
+    // The device token reaches the application delegate, which belongs to Tauri: add the two
+    // callbacks to its class, then set the delegate again so UIKit sees them (it caches what the
+    // delegate answers to when the delegate is set). UIApplication does not retain a delegate set
+    // later, so the one UIApplicationMain created is kept here.
+    private static var delegate: UIApplicationDelegate?
+    private static func hookAppDelegate() {
+        let app = UIApplication.shared
+        guard PushHandler.delegate == nil, let delegate = app.delegate else { return }
+        PushHandler.delegate = delegate
+        let cls: AnyClass = type(of: delegate)
+        let ok: @convention(block) (AnyObject, UIApplication, Data) -> Void = { _, _, token in PushHandler.shared?.registered(token) }
+        let failed: @convention(block) (AnyObject, UIApplication, NSError) -> Void = { _, _, _ in PushHandler.shared?.registered(nil) }
+        class_addMethod(cls, #selector(UIApplicationDelegate.application(_:didRegisterForRemoteNotificationsWithDeviceToken:)), imp_implementationWithBlock(ok), "v@:@@")
+        class_addMethod(cls, #selector(UIApplicationDelegate.application(_:didFailToRegisterForRemoteNotificationsWithError:)), imp_implementationWithBlock(failed), "v@:@@")
+        app.delegate = nil
+        app.delegate = delegate
+    }
+}
+
 @objc(AIODeviceBrowser)
 final class DeviceBrowser: NSObject {
     @objc(installDeviceBrowser:)
@@ -113,5 +220,6 @@ final class DeviceBrowser: NSObject {
         webView.configuration.userContentController.add(DeviceBrowserHandler(webView), name: "aioDeviceBrowser")
         webView.configuration.userContentController.add(SaveFilesMarker(), name: "aioSaveFiles")
         webView.configuration.userContentController.add(AppleSignInHandler(webView), name: "aioAppleSignIn")
+        webView.configuration.userContentController.add(PushHandler(webView), name: "aioPush")
     }
 }

@@ -72,6 +72,7 @@ export const app = {
     nudgeEnable: "开启",
     nudgeLater: "暂不",
     nudgeOk: "知道了",
+    openSettings: "去设置开启",
   },
   attachments: {
     tray: "待发送的附件",

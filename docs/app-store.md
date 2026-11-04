@@ -8,6 +8,8 @@ iOS App 是 `src/ui/tauri` 的 Tauri 壳（见该目录 README），加载线上
 - **付费 Apple Developer Program**：team `MGS58YVTW7`（`tauri.conf.json` 的 `bundle.iOS.developmentTeam` 与 `project.pbxproj`）。
   旧的免费个人 team `Z3T74M8F47` 只能装到自己的手机、7 天过期，不能上传。
 - App ID `ai.clawpage.agent` 已开 Sign in with Apple（`APPLE_ID_AUTH`，与 entitlements 的 `com.apple.developer.applesignin` 对应）。
+- App ID 已开 Push Notifications（`PUSH_NOTIFICATIONS`，entitlements 的 `aps-environment`；仓库里写 `development`，导出 App Store 包时 Xcode 按发布描述文件改成 `production`）。
+  服务器发通知要另一把 APNs 密钥（Apple Developer → Keys，勾 APNs，Sandbox & Production），放进控制面数据目录并配 `PA_APNS_*`（`docs/CONFIGURATION.md`）；App Store Connect API 密钥不能发通知。
 - App Store Connect 的 App：「一站 Clawpage Agent」，Apple ID `6830089706`，SKU `aio-agent-ios`，主要语言简体中文。
 - 账号持有人需接受最新的 Program License Agreement，免费 App 不需要签付费协议与税务信息。
 

@@ -611,17 +611,27 @@ export function createApiRouter(context: AppContext): Router {
     voiceLog.record({ ...record, audio });
   }));
 
-  /** Phone notifications (Web Push): the key to subscribe with, and this account's devices. */
+  /**
+   * Phone notifications: the Web Push key to subscribe with, whether the iOS app's APNs is set up,
+   * this account's devices and, for `?endpoint=`, whether that device is one of them.
+   */
   router.get("/push", requireKind("primary"), requireSession, asyncHandler(async (req, res) => {
     res.setHeader("Cache-Control", "no-store");
-    res.json(context.push ? { supported: true, publicKey: context.push.publicKey, devices: context.push.count(ctxOf(req).session!.ownerId) } : { supported: false });
+    if (!context.push) { res.json({ supported: false }); return; }
+    const ownerId = ctxOf(req).session!.ownerId;
+    const endpoint = typeof req.query.endpoint === "string" ? req.query.endpoint : "";
+    res.json({ supported: true, publicKey: context.push.publicKey, apns: context.push.apns, devices: context.push.count(ownerId), ...(endpoint ? { subscribed: context.push.has(ownerId, endpoint) } : {}) });
   }));
   router.post("/push/subscribe", requireKind("primary"), requireSession, asyncHandler(async (req, res) => {
     if (!context.push) { res.status(404).json({ error: "push_unavailable", message: t().http.push.unavailable }); return; }
     try {
-      context.push.subscribe(ctxOf(req).session!.ownerId, req.body?.subscription ?? {}, req.get("user-agent") ?? "");
+      const ownerId = ctxOf(req).session!.ownerId;
+      // The iOS app sends its APNs device token instead of a Web Push subscription.
+      const endpoint = req.body?.apns
+        ? context.push.subscribeApns(ownerId, req.body.apns.token, req.body.apns.environment, req.get("user-agent") ?? "")
+        : (context.push.subscribe(ownerId, req.body?.subscription ?? {}, req.get("user-agent") ?? ""), undefined);
       track(req, "push_subscribe");
-      res.json({ ok: true, devices: context.push.count(ctxOf(req).session!.ownerId) });
+      res.json({ ok: true, devices: context.push.count(ownerId), ...(endpoint ? { endpoint } : {}) });
     } catch (err) { res.status(400).json({ error: "bad_subscription", message: err instanceof Error ? err.message : t().http.push.badSubscription }); }
   }));
   router.post("/push/unsubscribe", requireKind("primary"), requireSession, asyncHandler(async (req, res) => {
