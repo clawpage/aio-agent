@@ -74,6 +74,7 @@ The shell itself bundles no UI, so a UI change still ships with the next UI depl
   insets into the shared tokens (headless browsers report zero), use real page
   interactions, and cover portrait, landscape, short viewports and keyboard
   resizing in Chromium/WebKit. They do not replace native-device acceptance.
+- iOS keyboard: `KeyboardFit` (`DeviceBrowser.swift`) takes the keyboard away from WKWebView and sizes the web view to the area above it, so the page lays itself out there like on Android. Left to WebKit, it scrolled the page to reveal the box while `useKeyboardViewport` put it back at the top, and the page sprang up and down each time the keyboard opened. The same file locks the page's zoom (`user-scalable=no`, honoured by WKWebView): the console does not pinch-zoom as a whole, while its image and remote-screen views handle pinching themselves.
 - Notifications: WKWebView has no Web Push, so `DeviceBrowser.swift` registers with APNs for the console (`aioPush`: status / enable / settings, answered with `aio-push` events) and adds the device-token callbacks to Tauri's app delegate at runtime; `aps-environment` is in the entitlements (see `docs/FEATURES.md` §13).
 - Microphone (the composer's voice input, `getUserMedia` in the web view): iOS declares
   `NSMicrophoneUsageDescription` (`gen/apple/project.yml` and the generated `Info.plist`);

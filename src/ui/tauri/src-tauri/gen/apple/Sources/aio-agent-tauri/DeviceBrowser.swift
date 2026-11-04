@@ -213,6 +213,36 @@ private final class PushHandler: NSObject, WKScriptMessageHandler, UNUserNotific
     }
 }
 
+// The web view is sized to the area above the keyboard instead of WebKit's own handling, which
+// scrolls the page up to reveal the focused box while the console puts it back at the top
+// (useKeyboardViewport): the page sprang up and down each time the keyboard opened. Sized like
+// this the page lays itself out above the keyboard, as on Android, and nothing scrolls.
+final class KeyboardFit: NSObject {
+    private weak var webView: WKWebView?
+    static var shared: KeyboardFit?
+
+    init(_ webView: WKWebView) {
+        self.webView = webView
+        super.init()
+        let center = NotificationCenter.default
+        for name in [UIResponder.keyboardWillShowNotification, UIResponder.keyboardDidShowNotification, UIResponder.keyboardWillHideNotification,
+                     UIResponder.keyboardWillChangeFrameNotification, UIResponder.keyboardDidChangeFrameNotification] {
+            center.removeObserver(webView, name: name, object: nil)
+        }
+        center.addObserver(self, selector: #selector(change(_:)), name: UIResponder.keyboardWillChangeFrameNotification, object: nil)
+    }
+
+    @objc private func change(_ note: Notification) {
+        guard let webView, let parent = webView.superview,
+              let end = (note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue)?.cgRectValue else { return }
+        let keyboard = parent.convert(end, from: nil)
+        let covered = max(0, parent.bounds.maxY - keyboard.minY)
+        // What shows under the web view while the keyboard slides in is the page's own background.
+        parent.backgroundColor = webView.underPageBackgroundColor
+        webView.frame = CGRect(x: 0, y: 0, width: parent.bounds.width, height: parent.bounds.height - covered)
+    }
+}
+
 @objc(AIODeviceBrowser)
 final class DeviceBrowser: NSObject {
     @objc(installDeviceBrowser:)
@@ -221,5 +251,12 @@ final class DeviceBrowser: NSObject {
         webView.configuration.userContentController.add(SaveFilesMarker(), name: "aioSaveFiles")
         webView.configuration.userContentController.add(AppleSignInHandler(webView), name: "aioAppleSignIn")
         webView.configuration.userContentController.add(PushHandler(webView), name: "aioPush")
+        KeyboardFit.shared = KeyboardFit(webView)
+        // In the app the console does not zoom as a whole page (WKWebView, unlike Safari, honours the
+        // limit); its image and remote-screen views handle pinching themselves. Run now as well, for a
+        // page that loaded before the script was added.
+        let noZoom = "document.querySelector('meta[name=viewport]')?.setAttribute('content','width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover')"
+        webView.configuration.userContentController.addUserScript(WKUserScript(source: noZoom, injectionTime: .atDocumentEnd, forMainFrameOnly: true))
+        webView.evaluateJavaScript(noZoom)
     }
 }
