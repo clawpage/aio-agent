@@ -95,6 +95,8 @@ pre {
   padding: var(--safe-top) var(--safe-right) var(--safe-bottom) var(--safe-left);
   width: 100%;
   overflow: hidden;
+  /* Not a scroll container: WebKit scrolled a hidden one to reveal a focused box (see .main). */
+  overflow: clip;
 }
 
 .app:has(> .workspace:not(.fullscreen)) {
@@ -382,7 +384,12 @@ pre {
   display: flex;
   flex-direction: column;
   min-width: 0;
+  /* What a hidden overflow gave it for free: the grid row, not its content, sets its height. */
+  min-height: 0;
   overflow: hidden;
+  /* Clipped, never scrolled: focusing the composer while it moved below the column (the keyboard's motion)
+     made WebKit scroll a hidden column to reveal it, and it stayed scrolled, leaving the page blank. */
+  overflow: clip;
 }
 
 /*

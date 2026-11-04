@@ -229,3 +229,21 @@ test("the attachment button keeps the message box focused, so an iPhone keyboard
   await chooser;
   await expect(box).toBeFocused();
 });
+
+test("in the iOS app focusing the composer while the keyboard's motion has it below the column never scrolls the page away", async ({ page }) => {
+  await setup(page);
+  await page.goto("/");
+  await expect(page.getByText("任务 23").first()).toBeVisible();
+  // Mid-motion the composer can sit below the column; WebKit then scrolled the clipped column to reveal
+  // the box being focused, and the column stayed scrolled: the page went blank but for the menu button.
+  const scrolled = await page.evaluate(() => {
+    const composer = document.querySelector<HTMLElement>(".composer")!;
+    composer.style.transform = "translateY(500px)";
+    document.querySelector<HTMLTextAreaElement>(".composer textarea")!.focus();
+    const at = [".main", ".app"].map((s) => document.querySelector(s)!.scrollTop);
+    composer.style.transform = "";
+    return at;
+  });
+  expect(scrolled).toEqual([0, 0]);
+  await expect(page.locator(".chat-head").first()).toBeInViewport();
+});
