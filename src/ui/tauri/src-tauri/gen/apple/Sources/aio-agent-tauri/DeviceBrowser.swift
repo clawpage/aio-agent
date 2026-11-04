@@ -216,26 +216,22 @@ private final class PushHandler: NSObject, WKScriptMessageHandler, UNUserNotific
 // WebKit scrolled the page to reveal the focused box while the console put it back at the top
 // (useKeyboardViewport), and the page sprang up and down; resizing the web view instead left the page
 // blank while WebKit repainted, moved the content in one step ahead of the keyboard, and stranded menus
-// opened from the composer. So the web view keeps its size and is held at the top while a keyboard is
-// up, and the page is told the keyboard's height on every frame of its animation (`aio-keyboard`
-// events), read from a view animated with the keyboard's own duration and curve; the page gives up that
-// much at the bottom. WebKit keeps its own keyboard handling (it needs it, for one, to swap the keyboard
-// for the attachment menu).
+// opened from the composer; sending the keyboard's height on every frame made the page lay itself out
+// on every frame, which a long conversation could not keep up with. So the web view keeps its size and
+// is held at the top while a keyboard is up or moving, and the page is told once, as the keyboard starts
+// to move, where it will end and whether it animates (`aio-keyboard` with `height` and `duration`); the
+// page moves its content with the keyboard's own curve on the compositor and settles its layout at the
+// end. WebKit keeps its own keyboard handling (it swaps the keyboard for the attachment menu, for one).
 final class KeyboardFit: NSObject, WKScriptMessageHandler {
     private weak var webView: WKWebView?
-    private let probe = UIView()
-    private var link: CADisplayLink?
-    private var animation = 0
-    private var sent: CGFloat = -1
+    private var height: CGFloat = 0
+    private var movingUntil = Date.distantPast
     static var shared: KeyboardFit?
 
     init(_ webView: WKWebView) {
         self.webView = webView
         super.init()
-        let center = NotificationCenter.default
-        center.addObserver(self, selector: #selector(change(_:)), name: UIResponder.keyboardWillChangeFrameNotification, object: nil)
-        probe.alpha = 0
-        probe.isUserInteractionEnabled = false
+        NotificationCenter.default.addObserver(self, selector: #selector(change(_:)), name: UIResponder.keyboardWillChangeFrameNotification, object: nil)
         webView.scrollView.addObserver(self, forKeyPath: "contentOffset", options: [.new], context: nil)
         // A marker: the console follows `aio-keyboard` only when the app sends it.
         webView.configuration.userContentController.add(self, name: "aioKeyboard")
@@ -244,46 +240,20 @@ final class KeyboardFit: NSObject, WKScriptMessageHandler {
     func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {}
 
     override func observeValue(forKeyPath keyPath: String?, of object: Any?, change: [NSKeyValueChangeKey: Any]?, context: UnsafeMutableRawPointer?) {
-        guard sent > 0 || link != nil, let scroll = webView?.scrollView, scroll.contentOffset != .zero else { return }
+        guard height > 0 || Date() < movingUntil, let scroll = webView?.scrollView, scroll.contentOffset != .zero else { return }
         scroll.contentOffset = .zero
     }
 
     @objc private func change(_ note: Notification) {
-        guard let webView, let parent = webView.superview, let info = note.userInfo,
+        guard let webView, let info = note.userInfo,
               let end = (info[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue)?.cgRectValue else { return }
-        let target = max(0, webView.frame.maxY - webView.convert(end, from: nil).minY - webView.frame.minY)
+        let target = max(0, webView.bounds.height - webView.convert(end, from: nil).minY)
         let duration = (info[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double) ?? 0
-        let curve = (info[UIResponder.keyboardAnimationCurveUserInfoKey] as? Int) ?? 7
-        if probe.superview == nil { parent.addSubview(probe) }
-        let from = probe.layer.presentation()?.frame.height ?? probe.frame.height
-        probe.layer.removeAllAnimations()
-        probe.frame = CGRect(x: 0, y: 0, width: 1, height: from)
-        animation += 1
-        let current = animation
-        guard duration > 0 else { stop(); send(target); return }
-        if link == nil {
-            let link = CADisplayLink(target: self, selector: #selector(frame))
-            link.add(to: .main, forMode: .common)
-            self.link = link
-        }
-        UIView.animate(withDuration: duration, delay: 0, options: [UIView.AnimationOptions(rawValue: UInt(curve) << 16)]) {
-            self.probe.frame = CGRect(x: 0, y: 0, width: 1, height: target)
-        } completion: { _ in
-            guard current == self.animation else { return }
-            self.stop()
-            self.send(target)
-        }
-    }
-
-    @objc private func frame() { send(probe.layer.presentation()?.frame.height ?? probe.frame.height) }
-
-    private func stop() { link?.invalidate(); link = nil }
-
-    private func send(_ height: CGFloat) {
-        let value = (height * 2).rounded() / 2
-        guard value != sent, let webView else { return }
-        sent = value
-        webView.evaluateJavaScript("window.dispatchEvent(new CustomEvent('aio-keyboard',{detail:{height:\(value)}}))")
+        let value = (target * 2).rounded() / 2
+        movingUntil = Date().addingTimeInterval(max(duration, 0.6))
+        guard value != height else { return }
+        height = value
+        webView.evaluateJavaScript("window.dispatchEvent(new CustomEvent('aio-keyboard',{detail:{height:\(value),duration:\(duration)}}))")
     }
 }
 

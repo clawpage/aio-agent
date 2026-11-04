@@ -790,6 +790,8 @@ textarea:focus {
   border-bottom: 1px solid var(--border);
   background: var(--bg);
 }
+/* While the iOS app's keyboard moves a chat (useKeyboardViewport), what slides up passes under its header. */
+:root.keyboard-moving .chat > .chat-head { position: relative; z-index: 6; }
 
 .chat-title {
   display: flex;

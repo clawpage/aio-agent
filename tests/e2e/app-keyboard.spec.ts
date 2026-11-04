@@ -22,7 +22,7 @@ const keyboard = (page: Page, height: number) => page.evaluate((h) => window.dis
 const composerBottom = (page: Page) => page.locator(".composer").first().evaluate((n) => n.getBoundingClientRect().bottom);
 const feedGap = (page: Page) => page.locator(".chat-scroll").first().evaluate((n) => n.scrollHeight - n.scrollTop - n.clientHeight);
 
-test("in the iOS app the composer and the feed follow the keyboard frame by frame", async ({ page }, info) => {
+test("an iOS app build that reports the keyboard on every frame has the page follow each report", async ({ page }, info) => {
   test.skip(!info.project.name.startsWith("mobile"));
   await setup(page);
   await page.goto("/");
@@ -44,6 +44,42 @@ test("in the iOS app the composer and the feed follow the keyboard frame by fram
     await keyboard(page, h);
     expect(await composerBottom(page)).toBeCloseTo(rest - h, 0);
   }
+  expect(Math.abs((await feedGap(page)) - gap)).toBeLessThan(2);
+});
+
+const animatedKeyboard = (page: Page, height: number) => page.evaluate((h) => window.dispatchEvent(new CustomEvent("aio-keyboard", { detail: { height: h, duration: 0.25 } })), height);
+const moving = (page: Page) => page.evaluate(() => document.getAnimations().filter((a) => a.id === "keyboard").length);
+
+test("in the iOS app the content moves with the keyboard on the compositor, and the layout settles where it ends", async ({ page }, info) => {
+  test.skip(!info.project.name.startsWith("mobile"));
+  await setup(page);
+  await page.goto("/");
+  await expect(page.getByText("任务 23").first()).toBeVisible();
+  const rest = await composerBottom(page);
+  const header = await page.locator(".chat-head").first().evaluate((n) => n.getBoundingClientRect().top);
+  const gap = await feedGap(page);
+  // Rising: nothing is laid out yet; the composer and the feed slide up on their own animations.
+  await animatedKeyboard(page, 336);
+  expect(await page.evaluate(() => document.documentElement.style.getPropertyValue("--keyboard-viewport"))).toBe("");
+  expect(await moving(page)).toBeGreaterThan(0);
+  await expect.poll(() => moving(page), { timeout: 3000 }).toBe(0);
+  expect(await composerBottom(page)).toBeCloseTo(rest - 336, 0);
+  expect(Math.abs((await feedGap(page)) - gap)).toBeLessThan(2);
+  expect(await page.locator(".chat-head").first().evaluate((n) => n.getBoundingClientRect().top)).toBe(header);
+  expect(await page.evaluate(() => window.scrollY)).toBe(0);
+  // Falling: the layout changes at once, and the composer starts from where it was and glides down.
+  const start = await page.evaluate(() => {
+    window.dispatchEvent(new CustomEvent("aio-keyboard", { detail: { height: 0, duration: 0.25 } }));
+    const animations = document.getAnimations().filter((a) => a.id === "keyboard");
+    animations.forEach((a) => a.pause());
+    const at = { laidOut: document.documentElement.style.getPropertyValue("--keyboard-viewport"), bottom: document.querySelector(".composer")!.getBoundingClientRect().bottom };
+    animations.forEach((a) => a.play());
+    return at;
+  });
+  expect(start.laidOut).toBe("");
+  expect(start.bottom).toBeCloseTo(rest - 336, 0);
+  await expect.poll(() => moving(page), { timeout: 3000 }).toBe(0);
+  expect(await composerBottom(page)).toBeCloseTo(rest, 0);
   expect(Math.abs((await feedGap(page)) - gap)).toBeLessThan(2);
 });
 
