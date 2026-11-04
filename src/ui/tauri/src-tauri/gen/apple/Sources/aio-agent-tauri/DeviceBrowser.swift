@@ -272,6 +272,25 @@ final class KeyboardFit: NSObject, WKScriptMessageHandler {
     }
 }
 
+// WebKit puts a bar over the keyboard (previous / next field and Done). The console has none of the forms it
+// is for: the composer sends on its own button and the keyboard closes with a tap on the conversation. Its
+// content view (WKContentView, the responder that supplies the bar) becomes a subclass that offers no bar.
+enum NoInputBar {
+    static func install(_ webView: WKWebView) {
+        guard let content = webView.scrollView.subviews.first(where: { String(describing: type(of: $0)).hasPrefix("WKContent") }) else { return }
+        let base: AnyClass = type(of: content)
+        let name = "AIONoInputBar_\(NSStringFromClass(base))"
+        var cls: AnyClass? = NSClassFromString(name)
+        if cls == nil, let made = objc_allocateClassPair(base, name, 0) {
+            let none: @convention(block) (AnyObject) -> UIView? = { _ in nil }
+            class_addMethod(made, #selector(getter: UIResponder.inputAccessoryView), imp_implementationWithBlock(none), "@@:")
+            objc_registerClassPair(made)
+            cls = made
+        }
+        if let cls { object_setClass(content, cls) }
+    }
+}
+
 @objc(AIODeviceBrowser)
 final class DeviceBrowser: NSObject {
     @objc(installDeviceBrowser:)
@@ -281,6 +300,7 @@ final class DeviceBrowser: NSObject {
         webView.configuration.userContentController.add(AppleSignInHandler(webView), name: "aioAppleSignIn")
         webView.configuration.userContentController.add(PushHandler(webView), name: "aioPush")
         KeyboardFit.shared = KeyboardFit(webView)
+        NoInputBar.install(webView)
         // In the app the console does not zoom as a whole page (WKWebView, unlike Safari, honours the
         // limit); its image and remote-screen views handle pinching themselves. Run now as well, for a
         // page that loaded before the script was added.
