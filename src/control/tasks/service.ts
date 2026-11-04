@@ -152,6 +152,8 @@ function decodeCursor(cursor: string): [number, number, string] {
 }
 /** client_message_id prefix of messages from the voice gadget (submitGadget). */
 const GADGET_PREFIX = "gadget:";
+/** client_message_id prefix of the continuation a hand-back of the browser sends (continueAfterHandBack); nobody typed it. */
+const HANDBACK_PREFIX = "handback:";
 /** Related tasks an executor's turn gets as background, once sessions are expanded into their turns. */
 const MAX_RELATED_TURNS = 12;
 const DISPATCHED = new Set(["queued", "running", "stopping"]);
@@ -222,6 +224,23 @@ export class TaskService {
     }
     /** The identity a task's browser tabs are recorded under: its execution conversation. */
     browserKey(id: string): string | null { const row = this.get(id); return row ? this.executor(row) : null; }
+    /**
+     * The person took over a browser page of a task that had ended its turn waiting for
+     * them (needs_input), and handed it back: the task carries on by itself, as a reply
+     * would carry it on, instead of waiting for them to type that they are done. Only the
+     * newest task of its session while nothing has followed it yet (a reply, an earlier
+     * hand-back), so one hand-back continues it once; never a task stopped or finished.
+     * The continuation's task, or null when nothing was continued.
+     */
+    continueAfterHandBack(id: string, userId: string, url: string | null) {
+        const row = this.get(id);
+        if (!row || this.ownerId(row) !== userId) return null;
+        const latest = this.sessionRows(this.executor(row)).at(-1);
+        if (!latest || latest.merged_into || latest.status !== "needs_input" || !latest.turn_id) return null;
+        const page = url ? ` (the page is now at ${url.slice(0, 500)})` : "";
+        const text = `(Sent automatically when the user handed the browser back; they did not type this.) The user took over this task's browser page, did what was needed there and handed it back to you${page}. Continue the task: first read the page again to see what they did (for example whether they are signed in now), then carry on from where you stopped. Do not redo an action whose result is uncertain; if something is still needed from them, say exactly what.`;
+        return this.submit({ userId, text, clientMessageId: `${HANDBACK_PREFIX}${latest.id}:${Date.now()}`, relatedTaskId: latest.id }).task;
+    }
     /** Referencing an old result while its resumed turn runs supplements that turn. */
     private referenceTarget(row: TaskRow): TaskRow | null {
         const ref = row.related_task_id ? this.get(row.related_task_id) : null;
@@ -331,6 +350,8 @@ export class TaskService {
             schedule: row.schedule_id ? (s ? this.scheduleLabel(s) : { id: row.schedule_id, title: row.title, rule: t().tasks.schedules.deleted }) : null,
             // A support card (support.ts): nobody typed it, so the console shows a support note instead.
             support: isSupportCard(row.client_message_id),
+            // Sent by handing the browser back (continueAfterHandBack): the console shows a note, not the person's message.
+            handBack: row.client_message_id.startsWith(HANDBACK_PREFIX),
             approvals: TERMINAL.has(row.status) ? 0 : this.agent.listPendingRequests(this.executor(row)).length,
         };
     }
@@ -925,7 +946,7 @@ export class TaskService {
         if (finalContinued?.status === "needs_input" && finalContinued.turn_id) {
             const answeredPlan = JSON.parse(finalContinued.plan_json!) as TaskPlan;
             answeredPlan.answeredBy = row.id;
-            const acknowledgement = t().tasks.notes.supplementReceived;
+            const acknowledgement = row.client_message_id.startsWith(HANDBACK_PREFIX) ? t().tasks.notes.handedBack : t().tasks.notes.supplementReceived;
             this.db.prepare("UPDATE tasks SET status='completed',result=?,plan_json=? WHERE id=? AND status='needs_input'")
                 .run([finalContinued.result, acknowledgement].filter(Boolean).join("\n\n"), JSON.stringify(answeredPlan), finalContinued.id);
         }
@@ -1046,7 +1067,7 @@ export class TaskService {
             "Map cards: when the answer involves a specific place to go (a restaurant, sight, hotel, meeting place, destination, etc.), insert one at the relevant spot in the text, one code block per place; the user taps it to open the place in their phone's maps:\n```map\n{\"name\": \"Place name\", \"address\": \"Full address\", \"lat\": latitude, \"lng\": longitude}\n```\nFill in coordinates only with values found in a reliable source (map search results, the official site); never estimate. When you cannot get them, write only name and address and the system locates the place by address. Coordinates are WGS-84 by default; for coordinates taken from Amap (Gaode) or Tencent Maps add \"coord\": \"gcj02\". Places mentioned only in passing need no card.",
             "Data charts (```chart, JSON; the console draws it from the numbers: tap for values, a slider for long histories, the user's theme). Use one when the shape of the numbers is the answer (a trend, a K-line, a comparison of a few items, shares); a single number or two are text. Never draw such a chart with image_generate, an svg block or a rendered PNG. One chart per code block, data only from a tool or source you actually read, never made up:\n- K-line: {\"type\": \"candlestick\", \"title\": \"Kweichow Moutai daily (forward adjusted)\", \"note\": \"Eastmoney · as of 2026-10-16\", \"data\": [[\"2026-10-15\", open, high, low, close, volume], ...], \"ma\": [5, 20]} (volume optional; \"up\": \"red\" or \"green\" overrides which color is a rise, otherwise red-up for Chinese, green-up for other languages). aio-market history --chart prints this block ready to use.\n- Line, bar or area: {\"type\": \"line\", \"title\": \"...\", \"unit\": \"%\", \"x\": [\"10-14\", \"10-15\"], \"series\": [{\"name\": \"Moutai\", \"data\": [0.87, 2.1]}]}; a series can say \"type\": \"bar\" or \"line\" and \"axis\": \"right\" (with \"unitRight\") to mix, e.g. revenue bars with a growth line; \"stack\": true stacks bars.\n- Pie (at most 12 slices): {\"type\": \"pie\", \"title\": \"...\", \"data\": [{\"name\": \"A\", \"value\": 45}]}.\nGive a short title, and a note with the source and as-of time; write numbers as plain JSON numbers (no units or thousands separators inside data). Up to 2,000 points; for a long history 60–250 bars read best. Put the chart next to the sentence it supports, and still state the key numbers in the text.",
             "[Asking the user]",
-            "First look things up yourself with the known context, memory and the tools you need; if a reasonable default exists, just go ahead and state the assumption in half a sentence. Then pick one of three:\n1. The task is done and you only offer optional follow-ups: ask at the end of the answer, followed immediately by a choices code block\n```choices\n[\"Option one\", \"Option two\"]\n```\nGive 2–5 options, each a complete phrase that can serve directly as the reply (at most 30 characters), and no \"Other\" (the user can always type their own).\n2. The task is done and an optional follow-up needs the user to fill in several items at once (date, number of people, place, preferences, etc.): use a form code block\n```form\n{\"title\": \"Form title\", \"fields\": [{\"name\": \"date\", \"label\": \"Date\", \"type\": \"date\", \"required\": true}, {\"name\": \"people\", \"label\": \"People\", \"type\": \"number\", \"min\": 1, \"default\": 2}, {\"name\": \"area\", \"label\": \"Area\", \"type\": \"select\", \"options\": [\"Option one\", \"Option two\"]}], \"submit\": \"Submit\"}\n```\ntype may be text, textarea, number, date, time, select, radio (single choice) or checkbox (multiple choice); select, radio and checkbox carry 2–10 options; at most 8 fields, each label at most 30 characters. Do not use a form to ask just one thing.\n3. Information only the user has, with no reasonable default, is missing and you really cannot continue: first summarize what is done, then end the reply with a separate ask_user code block\n```ask_user\n{\"question\": \"One specific question for the user to answer\", \"options\": [\"Option one\", \"Option two\"]}\n```\nOmit options when none fit. When the user needs to supply several items at once, use fields instead (the same format as the form fields above, optionally with submit), with question as one sentence of explanation; the main session shows it as a form. The system marks the task as waiting for the user, and the user's reply resumes this execution session. Do not perform operations that depend on the answer before you have it; do not end with only a plain question, and do not claim the task is complete.\nWhatever the user taps or submits resumes this task as a reply. When you can already complete the task, give the result directly without ask_user.",
+            "First look things up yourself with the known context, memory and the tools you need; if a reasonable default exists, just go ahead and state the assumption in half a sentence. Then pick one of three:\n1. The task is done and you only offer optional follow-ups: ask at the end of the answer, followed immediately by a choices code block\n```choices\n[\"Option one\", \"Option two\"]\n```\nGive 2–5 options, each a complete phrase that can serve directly as the reply (at most 30 characters), and no \"Other\" (the user can always type their own).\n2. The task is done and an optional follow-up needs the user to fill in several items at once (date, number of people, place, preferences, etc.): use a form code block\n```form\n{\"title\": \"Form title\", \"fields\": [{\"name\": \"date\", \"label\": \"Date\", \"type\": \"date\", \"required\": true}, {\"name\": \"people\", \"label\": \"People\", \"type\": \"number\", \"min\": 1, \"default\": 2}, {\"name\": \"area\", \"label\": \"Area\", \"type\": \"select\", \"options\": [\"Option one\", \"Option two\"]}], \"submit\": \"Submit\"}\n```\ntype may be text, textarea, number, date, time, select, radio (single choice) or checkbox (multiple choice); select, radio and checkbox carry 2–10 options; at most 8 fields, each label at most 30 characters. Do not use a form to ask just one thing.\n3. Information only the user has, with no reasonable default, is missing and you really cannot continue: first summarize what is done, then end the reply with a separate ask_user code block\n```ask_user\n{\"question\": \"One specific question for the user to answer\", \"options\": [\"Option one\", \"Option two\"]}\n```\nOmit options when none fit. When the user needs to supply several items at once, use fields instead (the same format as the form fields above, optionally with submit), with question as one sentence of explanation; the main session shows it as a form. The system marks the task as waiting for the user, and the user's reply resumes this execution session. Do not perform operations that depend on the answer before you have it; do not end with only a plain question, and do not claim the task is complete.\nWhatever the user taps or submits resumes this task as a reply. When you can already complete the task, give the result directly without ask_user.\nA step the user must do in a browser page (signing in, a CAPTCHA, a code or a confirmation typed into the page) is not a question: wait for it with the browser's request_human (browser_request_human in aio_tabs) instead of ending the turn.",
         ];
     }
     private executorRulesVersion(): string {

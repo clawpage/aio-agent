@@ -257,6 +257,34 @@ it("hands back the tabs the person holds when the card's own tab has been replac
   }
 });
 
+it("carries a task that ended its turn waiting for the person on once they hand a tab back they took over", async () => {
+  // Its own harness: the tasks above hold the browser and every turn slot.
+  const own = await startHarness();
+  Object.assign(own.codex, { planTask: async () => JSON.stringify({ title: "Weee", related: [], dependencies: [], resources: [] }) });
+  try {
+    const { cookie, csrf } = await login(own);
+    const headers = { cookie, "x-csrf-token": csrf, "content-type": "application/json" };
+    const holders = new Map<string, "ai" | "human">();
+    const tab = (key: string): TabRecord => ({ ...record(key, holders.get(key) ?? "ai"), url: "https://www.sayweee.com/account", request: null });
+    own.ctx.tabs = { ...fakeTabs, list: async (key) => (key ? [tab(key)] : []), control: async (key, _tab, action) => (holders.set(key, action === "take" ? "human" : "ai"), tab(key)) };
+    const task = ((await (await own.request("/api/tasks", { method: "POST", headers, body: JSON.stringify({ text: "在 Weee 加购", clientMessageId: "handback-tab" }) })).json()) as { task: { id: string } }).task;
+    await expect.poll(() => own.codex.startedTurns.length).toBe(1);
+    await own.codex.runTurn(own.codex.startedTurns[0]!.turnId, { text: '```ask_user\n{"question":"请在浏览器中登录 Weee，完成后交还。"}\n```' });
+    await expect.poll(() => own.ctx.tasks.get(task.id)?.status).toBe("needs_input");
+    const control = (action: "take" | "release") => own.request(`/api/tasks/${task.id}/browser/control`, { method: "POST", headers, body: JSON.stringify({ tab: "t1", action }) });
+    await control("take");
+    expect((await control("release")).status).toBe(200);
+    await expect.poll(() => own.codex.startedTurns.length).toBe(2);
+    expect(own.codex.startedTurns[1]!.text).toContain("https://www.sayweee.com/account");
+    expect(own.ctx.tasks.get(task.id)?.status).toBe("completed");
+    // Handing back again is not another hand-back.
+    await control("release");
+    expect((own.ctx.db.prepare("SELECT COUNT(*) AS n FROM tasks").get() as { n: number }).n).toBe(2);
+  } finally {
+    await own.shutdown();
+  }
+});
+
 it("shows the phone on a task card only while the phone is the device its agent used last", async () => {
   const { cookie, csrf } = await login(h);
   const headers = { cookie, "x-csrf-token": csrf, "content-type": "application/json" };

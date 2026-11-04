@@ -16,6 +16,7 @@ export const userBrowser: typeof zh = {
     unavailable: "暫時看不到畫面：那台 Mac 已離線，或它上面的 AI Chrome 沒有啟動。",
     pausedHint: "AI 已暫停在這個頁面上，你操作完點「交還給 AI」。",
     requestHint: "點「接管」在這裡操作這一步（例如登入），做完點「完成，繼續」。登入狀態會一直儲存在 AI Chrome 裡。",
+    continueHint: "在這個頁面裡做完後交還給 AI，任務會自動繼續，不用再回覆。",
     dialog: "Mac 上的 AI Chrome",
     close: "關閉",
     failed: "操作失敗",

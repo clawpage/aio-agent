@@ -16,6 +16,7 @@ export const userBrowser: typeof zh = {
     unavailable: "No hay imagen ahora: ese Mac está sin conexión o su Chrome de la IA no se inició.",
     pausedHint: "La IA está en pausa en esta página. Cuando termines, toca Devolver a la IA.",
     requestHint: "Toca Tomar el control para hacer este paso aquí (por ejemplo, iniciar sesión) y después toca Listo, continuar. Las sesiones quedan guardadas en el Chrome de la IA.",
+    continueHint: "Haz lo necesario en esta página y devuélvela a la IA: la tarea sigue sola, sin que tengas que responder.",
     dialog: "Chrome de la IA en tu Mac",
     close: "Cerrar",
     failed: "No se pudo hacer",

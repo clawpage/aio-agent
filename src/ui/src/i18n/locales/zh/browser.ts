@@ -97,6 +97,7 @@ export const browser = {
     tabCount: (n: number) => `共 ${n} 个标签页`,
     pausedHint: "AI 已暂停操作这个页面。完成后点“交还给 AI”，它会从当前页面继续。",
     endedHint: "任务已结束，你可以查看或继续操作这个页面。",
+    continueHint: "在这个页面里做完后交还给 AI，任务会自动继续，不用再回复。",
     operateLabel: "操作这个页面",
     viewLabel: "查看这个页面",
     shotAlt: (title: string) => `${title} 的页面预览`,

@@ -82,6 +82,8 @@ export const feed = {
   },
   scheduleRun: (title: string, rule: string) => `定时任务「${title}」自动运行 · ${rule} · `,
   supportNote: "客服发来的消息 · ",
+  handBackNote: "你交还了浏览器，任务自动继续 · ",
+  handBackSummary: "你交还了浏览器，任务自动继续",
   userMessage: "用户消息",
   quoted: (title: string) => `引用：${title}`,
   earlierTask: "此前任务",

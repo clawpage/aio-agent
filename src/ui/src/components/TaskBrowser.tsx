@@ -57,6 +57,8 @@ export function TaskBrowser({ task, onReveal }: { task: Task; onReveal: () => vo
   const [expanded, setExpanded] = useState(false);
   const consoleTarget = useMemo(() => taskConsoleTarget(task.id), [task.id]);
   const live = LIVE.has(task.status);
+  // Waiting for your reply: a tab handed back carries the task on, as a hand-back does while it runs.
+  const resumes = task.status === "needs_input";
   // The feed summary changes the moment the agent asks for you or you take over.
   const signal = `${task.browser?.tabs ?? 0}:${task.browser?.request ?? ""}:${task.browser?.human ?? false}:${task.status}`;
 
@@ -193,7 +195,7 @@ export function TaskBrowser({ task, onReveal }: { task: Task; onReveal: () => vo
         <div className="task-actions">
           {waiting && <button type="button" className={signIn ? "ghost tiny" : "primary tiny"} disabled={busy} onClick={() => void control("take")}>{t.browser.task.takeOver}</button>}
           {human && <>
-            <button type="button" className="primary tiny" disabled={busy} onClick={() => void control("release")}>{live ? t.browser.task.handBack : t.browser.task.endViewing}</button>
+            <button type="button" className="primary tiny" disabled={busy} onClick={() => void control("release")}>{live || resumes ? t.browser.task.handBack : t.browser.task.endViewing}</button>
             <button type="button" className="ghost tiny" onClick={() => setConsoleOpen(true)}>{t.browser.task.operate}</button>
           </>}
           {state === "ai" && <button type="button" className="ghost tiny" disabled={busy} onClick={() => void control("take")}>{t.browser.task.take}</button>}
@@ -201,8 +203,10 @@ export function TaskBrowser({ task, onReveal }: { task: Task; onReveal: () => vo
         </div>
       </div>
       {waiting && !signIn && <p className="task-browser-reason">{tab.request!.reason}</p>}
+      {/* The task ended its turn waiting for you: handing a tab back carries it on (TaskService.continueAfterHandBack). */}
+      {resumes && <p className="task-browser-hint">{t.browser.task.continueHint}</p>}
       {expanded && <>
-        {human && <p className="task-browser-hint">{live ? t.browser.task.pausedHint : t.browser.task.endedHint}</p>}
+        {human && !resumes && <p className="task-browser-hint">{live ? t.browser.task.pausedHint : t.browser.task.endedHint}</p>}
         {!shotFailed && (
           <button type="button" className="task-browser-shot" onClick={() => (human ? setConsoleOpen(true) : setWatching(true))} disabled={busy} aria-label={human ? t.browser.task.operateLabel : t.browser.task.viewLabel}>
             <img src={api.taskBrowserScreenshotUrl(task.id, tab.id, shotAt)} alt={t.browser.task.shotAlt(place(tab.url))} loading="lazy" onError={() => setShotFailed(true)} />
@@ -217,7 +221,7 @@ export function TaskBrowser({ task, onReveal }: { task: Task; onReveal: () => vo
           watching={!human}
           label={human ? t.browser.task.consoleOperate : t.browser.task.consoleView}
           primary={human
-            ? { label: live ? t.browser.task.handBack : t.browser.task.endViewing, busy, onClick: () => void control("release") }
+            ? { label: live || resumes ? t.browser.task.handBack : t.browser.task.endViewing, busy, onClick: () => void control("release") }
             : { label: live ? t.browser.task.manualTakeover : t.browser.task.operateThis, busy, onClick: () => void control("take") }}
           onClose={() => { setConsoleOpen(false); setWatching(false); }}
           onReveal={() => { setConsoleOpen(false); setWatching(false); onReveal(); }}

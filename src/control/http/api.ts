@@ -1318,6 +1318,15 @@ export function createApiRouter(context: AppContext): Router {
     const id = param(req, "id");
     return context.tasks.belongsTo(id, ctxOf(req).session!.ownerId) ? context.tasks.browserKey(id) : null;
   };
+  // The person handed back a page they had taken over: a task that ended its turn waiting for them carries on.
+  // Only here, where the person does it: a reply hands pages back too (handBackToAgent), and carries the task on itself.
+  const continueAfterHandBack = (req: Request, url: string | null) => {
+    try {
+      if (context.tasks.continueAfterHandBack(param(req, "id"), ctxOf(req).session!.ownerId, url)) track(req, "browser_handback_continue");
+    } catch (err) {
+      log.warn("hand-back did not continue the task", { error: err instanceof Error ? err.message : String(err) });
+    }
+  };
   // One of the account's tasks, for a console address that names it (`/u/<name>/tasks/<id>`).
   router.get("/tasks/:id", requireKind("primary"), requireSession, (req, res) => {
     const id = param(req, "id");
@@ -1446,6 +1455,7 @@ export function createApiRouter(context: AppContext): Router {
     const action = req.body?.action;
     if (!key || !context.tabs) { res.status(404).json({ error: "not_found" }); return; }
     if (action !== "take" && action !== "release") { res.status(400).json({ error: "bad_action" }); return; }
+    const held = action === "release" ? (await context.tabs.list(key)).filter((t) => t.holder === "human") : [];
     let tab = await context.tabs.control(key, String(req.body?.tab ?? ""), action);
     // The card may still show a tab the agent has since replaced, or memory closed. Handing back
     // means every tab of this task the person holds, so the agent never waits on one that is gone.
@@ -1456,6 +1466,7 @@ export function createApiRouter(context: AppContext): Router {
     }
     if (!tab) { res.status(404).json({ error: "tab_not_found", message: t().http.browser.tabGone }); return; }
     track(req, action === "take" ? "browser_takeover" : "browser_handback");
+    if (held.length) continueAfterHandBack(req, (held.find((t) => t.id === tab!.id) ?? held[0]!).url);
     res.json({ tab });
   }));
   // A task's page on the AI's Chrome on the user's Mac (UserBrowserGateway): its picture, and the person taking it over or handing it back.
@@ -1470,9 +1481,11 @@ export function createApiRouter(context: AppContext): Router {
     const key = taskBrowserKey(req);
     const action = req.body?.action;
     if (action !== "take" && action !== "release") { res.status(400).json({ error: "bad_action" }); return; }
+    const held = key && action === "release" ? context.userBrowser?.view(ctxOf(req).session!.ownerId, key)?.holder === "human" : false;
     const view = key && context.userBrowser ? await context.userBrowser.control(ctxOf(req).session!.ownerId, key, action) : null;
     if (!view) { res.status(404).json({ error: "not_found" }); return; }
     track(req, action === "take" ? "user_browser_takeover" : "user_browser_handback");
+    if (held) continueAfterHandBack(req, view.url || null);
     res.json({ userBrowser: view });
   }));
   // The workspace's Mac Terminal: whether the terminal on the account's Mac is on (only the app on that Mac switches it).

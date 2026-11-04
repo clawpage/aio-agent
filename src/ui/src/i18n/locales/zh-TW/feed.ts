@@ -82,6 +82,8 @@ export const feed: typeof zh = {
   },
   scheduleRun: (title: string, rule: string) => `排程任務「${title}」自動執行 · ${rule} · `,
   supportNote: "客服傳來的訊息 · ",
+  handBackNote: "你交還了瀏覽器，任務自動繼續 · ",
+  handBackSummary: "你交還了瀏覽器，任務自動繼續",
   userMessage: "使用者訊息",
   quoted: (title: string) => `引用：${title}`,
   earlierTask: "先前的任務",

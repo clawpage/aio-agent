@@ -26,6 +26,7 @@ export const tasks: typeof zh = {
   notes: {
     archived: "結果沒有核對，已由你封存。",
     supplementReceived: "已收到補充，結果請看後續任務。",
+    handedBack: "你已交還瀏覽器，任務在後續任務裡自動繼續。",
     gadget: "來自語音配件，直接執行。",
   },
   titleSeparator: "、",

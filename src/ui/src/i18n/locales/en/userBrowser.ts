@@ -16,6 +16,7 @@ export const userBrowser: typeof zh = {
     unavailable: "No picture right now: that Mac is offline, or its AI Chrome hasn't started.",
     pausedHint: "The AI is paused on this page. When you're done, tap Hand back to AI.",
     requestHint: "Tap Take over to do this step here (signing in, for example), then tap Done, continue. Sign-ins stay saved in AI Chrome.",
+    continueHint: "Do what's needed in this page and hand it back to the AI: the task carries on by itself, no reply needed.",
     dialog: "AI Chrome on your Mac",
     close: "Close",
     failed: "That didn't work",

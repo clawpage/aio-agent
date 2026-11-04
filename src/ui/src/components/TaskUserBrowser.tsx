@@ -75,7 +75,9 @@ export function TaskUserBrowser({ task }: { task: Task }) {
 
   const waiting = Boolean(view.request) && view.holder === "ai";
   const human = view.holder === "human";
-  const state = waiting ? "request" : human ? "human" : live ? "ai" : "done";
+  // Waiting for your reply, the AI is not using the page: it is yours to take over, and handing it back carries the task on.
+  const resumes = task.status === "needs_input";
+  const state = waiting ? "request" : human ? "human" : live && !resumes ? "ai" : "done";
   const label = t.userBrowser.task.states[state];
   const where = place(view.url, view.title);
 
@@ -96,11 +98,13 @@ export function TaskUserBrowser({ task }: { task: Task }) {
             <button type="button" className="primary tiny" disabled={busy} onClick={() => void control("release")}>{t.userBrowser.task.handBack}</button>
             {view.page && <button type="button" className="ghost tiny" onClick={() => setOpen(true)}>{t.userBrowser.task.operate}</button>}
           </>}
-          {state === "ai" && <button type="button" className="ghost tiny" disabled={busy} onClick={() => void control("take")}>{t.userBrowser.task.takeOver}</button>}
-          {state === "done" && view.page && <button type="button" className="ghost tiny" onClick={() => setOpen(true)}>{t.userBrowser.task.view}</button>}
+          {(state === "ai" || (state === "done" && resumes && view.page)) && <button type="button" className="ghost tiny" disabled={busy} onClick={() => void control("take")}>{t.userBrowser.task.takeOver}</button>}
+          {state === "done" && !resumes && view.page && <button type="button" className="ghost tiny" onClick={() => setOpen(true)}>{t.userBrowser.task.view}</button>}
         </div>
       </div>
       {waiting && <p className="task-browser-reason">{view.request}</p>}
+      {/* The task ended its turn waiting for you: handing this page back carries it on (TaskService.continueAfterHandBack). */}
+      {resumes && view.page && <p className="task-browser-hint">{t.userBrowser.task.continueHint}</p>}
       {expanded && view.page && <>
         {waiting && <p className="task-browser-hint">{t.userBrowser.task.requestHint}</p>}
         {human && <p className="task-browser-hint">{t.userBrowser.task.pausedHint}</p>}

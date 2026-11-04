@@ -222,6 +222,8 @@ export interface Task {
   schedule?: { id: string; title: string; rule: string; builtin?: string } | null;
   /** A message from the people running this deployment, not something the person typed. */
   support?: boolean;
+  /** Sent by handing the browser back to a task waiting for you (it carried on by itself), not something the person typed. */
+  handBack?: boolean;
 }
 
 /** Who may use a clawpage table: only the owner, everyone reads, or everyone reads and writes. */

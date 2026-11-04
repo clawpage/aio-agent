@@ -24,6 +24,7 @@ export const tasks = {
   notes: {
     archived: "结果没有核对，已由你归档。",
     supplementReceived: "已收到补充，结果请看后续任务。",
+    handedBack: "你已交还浏览器，任务在后续任务里自动继续。",
     gadget: "来自语音配件，直接执行。",
   },
   /** Joins attachment names into a title. */

@@ -121,7 +121,7 @@ export function TaskList({feed,active,onDetails,onExpired}:{feed:TaskFeed;active
         <ul className="task-list">{g.tasks.map(task=>{const action=endAction(task);const stop=action==='stop';return <li key={task.id} data-task-id={task.id} className={action?'task-list-row ends':'task-list-row'}>
           <button className="task-list-item" onClick={()=>onDetails(task)} aria-label={t.tasks.list.open(task.title)}>
             <div className="task-list-top"><strong>{task.title}</strong><span className={`task-status-badge ${taskStatusTone(task)}`}>{task.waitReason?.label??taskStatusLabels[task.status]??task.status}</span></div>
-            <p className="task-list-summary">{task.clarification||task.description||task.text}</p>
+            <p className="task-list-summary">{task.clarification||task.description||(task.handBack ? t.feed.handBackSummary : task.text)}</p>
             <div className="task-list-meta"><MessageTime at={taskTime(task)} now={now}/><TaskDuration task={task} now={now}/>{task.schedule&&<span className="task-tag" title={t.tasks.list.scheduled(task.schedule.title)}>{t.tasks.list.scheduledTag}</span>}<span className="spacer"/><span aria-hidden="true">›</span></div>
           </button>
           {action&&<div className="task-list-end-action">{confirming===task.id

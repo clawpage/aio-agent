@@ -14,6 +14,7 @@ export const userBrowser = {
     unavailable: "暂时看不到画面：那台 Mac 不在线，或它上面的 AI Chrome 没有启动。",
     pausedHint: "AI 已暂停在这个页面上，你操作完点“交还给 AI”。",
     requestHint: "点“接管”在这里操作这一步（比如登录），做完点“完成，继续”。登录状态会一直保存在 AI Chrome 里。",
+    continueHint: "在这个页面里做完后交还给 AI，任务会自动继续，不用再回复。",
     dialog: "Mac 上的 AI Chrome",
     close: "关闭",
     failed: "操作失败",

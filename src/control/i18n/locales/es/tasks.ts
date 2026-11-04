@@ -29,6 +29,7 @@ export const tasks: typeof zh = {
   notes: {
     archived: "El resultado no se comprobó; lo archivaste tú.",
     supplementReceived: "Adición recibida; el resultado aparece en la tarea siguiente.",
+    handedBack: "Devolviste el navegador; la tarea continúa en la tarea siguiente.",
     gadget: "Desde el accesorio de voz; se ejecuta directamente.",
   },
   titleSeparator: ", ",

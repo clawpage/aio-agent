@@ -320,3 +320,110 @@ it("lists every page of the Mac's AI Chrome in the workspace, opens the person's
     await h.shutdown();
   }
 });
+
+it("carries a task that ended its turn waiting for the person on once they hand its page back, once, and never one stopped or without a page", async () => {
+  const bridge = await fakeBridge("## Pages\n1: Inbox (https://mail.example/)\n2: Weee (https://www.sayweee.com/login) [selected]");
+  const h = await startHarness();
+  Object.assign(h.codex, { planTask: async () => JSON.stringify({ title: "Weee", related: [], dependencies: [], resources: [] }) });
+  const cfg = Object.assign(h.ctx.cfg, { memberModelPort: 0 });
+  const names = (id: string) => (h.ctx.db.prepare("SELECT username AS v FROM owners WHERE id=?").get(id) as { v: string } | undefined)?.v ?? null;
+  const ids = (name: string) => (h.ctx.db.prepare("SELECT id AS v FROM owners WHERE username=?").get(name) as { v: string } | undefined)?.v ?? null;
+  const links = new DeviceLinks(h.ctx.db, cfg, h.ctx.log);
+  const { browser, native } = macParts({ cfg, log: h.ctx.log, usernameOf: names, userIdOf: ids, links });
+  const gateway = new MemberModelGateway(cfg, h.ctx.log, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, native);
+  await gateway.start();
+  Object.assign(h.ctx, { deviceLinks: links, userBrowser: browser });
+  h.server.removeAllListeners("upgrade");
+  h.server.on("upgrade", (req, socket, head) => links.ownsUpgrade(req) ? links.handleUpgrade(req, socket, head) : handleUpgrade(h.ctx, req, socket, head));
+  let client: { close(): void } | null = null;
+  try {
+    const owner = await login(h);
+    const headers = { cookie: owner.cookie, "x-csrf-token": owner.csrf, "content-type": "application/json" };
+    const ownerId = (h.ctx.db.prepare("SELECT id FROM owners WHERE role='owner'").get() as { id: string }).id;
+    cfg.runtimeUserId = ownerId;
+    const { token } = links.create(ownerId, "Mac");
+    native.provision(cfg);
+    const states: string[] = [];
+    client = linkDevice({ url: `ws://localhost:${h.primaryPort}${DEVICE_LINK_PATH}`, token, name: "Mac", local: bridge.url, localToken: LOCAL_TOKEN, onState: (s: string) => states.push(s) });
+    await expect.poll(() => states.at(-1)).toBe("online");
+    const turns = h.codex.startedTurns;
+    const status = (id: string) => h.ctx.tasks.get(id)?.status;
+    const count = () => (h.ctx.db.prepare("SELECT COUNT(*) AS n FROM tasks").get() as { n: number }).n;
+    const control = async (id: string, action: "take" | "release") => h.request(`/api/tasks/${id}/user-browser/control`, { method: "POST", headers, body: JSON.stringify({ action }) });
+    // A task whose agent opened a page in the Mac's Chrome (or not) and then ended its turn asking the person to sign in there.
+    const waitingTask = async (text: string, page = true) => {
+      const before = turns.length;
+      const task = ((await (await h.request("/api/tasks", { method: "POST", headers, body: JSON.stringify({ text, clientMessageId: text }) })).json()) as { task: { id: string } }).task;
+      await expect.poll(() => turns.length).toBe(before + 1);
+      if (page) await fetch(cfg.macNative!.url.replace(/^http:\/\/host\.docker\.internal:0/, `http://127.0.0.1:${gateway.port}`), {
+        method: "POST", headers: { "content-type": "application/json", "X-AIO-Task": h.ctx.tasks.browserKey(task.id)! }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "new_page", arguments: { url: "https://www.sayweee.com/login" } } }) });
+      await h.codex.runTurn(turns.at(-1)!.turnId, { text: '需要登录。\n```ask_user\n{"question":"请在浏览器中登录 Weee 账号，完成后交还。"}\n```' });
+      await expect.poll(() => status(task.id)).toBe("needs_input");
+      return task;
+    };
+
+    const first = await waitingTask("在 Weee 加购牛奶");
+    // Handing back a page nobody took over is not a hand-back.
+    expect((await control(first.id, "release")).status).toBe(200);
+    expect(count()).toBe(1);
+
+    // Taken over and handed back: the task carries on by itself, in its own session, from the page.
+    const turnsBefore = turns.length;
+    await control(first.id, "take");
+    expect(((await (await control(first.id, "release")).json()) as { userBrowser: { holder: string } }).userBrowser.holder).toBe("ai");
+    await expect.poll(() => turns.length).toBe(turnsBefore + 1);
+    const continued = h.ctx.db.prepare("SELECT * FROM tasks WHERE related_task_id=?").get(first.id) as { id: string; client_message_id: string; input_text: string };
+    expect(continued.client_message_id).toMatch(/^handback:/);
+    expect(turns.at(-1)!.threadId).toBe(turns[0]!.threadId);
+    expect(turns.at(-1)!.text).toContain("handed the browser back");
+    expect(turns.at(-1)!.text).toContain("https://www.sayweee.com/login");
+    expect(h.ctx.tasks.get(first.id)).toMatchObject({ status: "completed" });
+    expect(h.ctx.tasks.get(first.id)!.result).toContain("You handed the browser back");
+    const feed = ((await (await h.request("/api/main", { headers: { cookie: owner.cookie } })).json()) as { tasks: Array<{ id: string; handBack?: boolean }> }).tasks;
+    expect(feed.find((t) => t.id === continued.id)?.handBack).toBe(true);
+    expect(feed.find((t) => t.id === first.id)?.handBack).toBe(false);
+
+    // Once per hand-back: handing back again, or taking over and handing back while it carries on, adds nothing.
+    await control(first.id, "release");
+    await control(continued.id, "take");
+    await control(continued.id, "release");
+    expect(count()).toBe(2);
+    expect(turns.length).toBe(turnsBefore + 1);
+    await h.codex.runTurn(turns.at(-1)!.turnId, { text: "已加购。" });
+    await expect.poll(() => status(continued.id)).toBe("completed");
+    // Finished: a hand-back now continues nothing.
+    await control(continued.id, "take");
+    await control(continued.id, "release");
+    expect(count()).toBe(2);
+
+    // A waiting task the person stopped stays stopped.
+    const stopped = await waitingTask("在 Weee 加购鸡蛋");
+    await h.request(`/api/tasks/${stopped.id}/stop`, { method: "POST", headers });
+    await expect.poll(() => status(stopped.id)).toBe("interrupted");
+    await control(stopped.id, "take");
+    await control(stopped.id, "release");
+    expect(count()).toBe(3);
+
+    // A reply hands the page back on its own: it carries the task on, and the hand-back adds no second continuation.
+    const replied = await waitingTask("在 Weee 加购面包");
+    await control(replied.id, "take");
+    await h.request("/api/tasks", { method: "POST", headers, body: JSON.stringify({ text: "登录好了", clientMessageId: "reply-1", relatedTaskId: replied.id }) });
+    await expect.poll(() => browser.view(ownerId, h.ctx.tasks.browserKey(replied.id)!)?.holder).toBe("ai");
+    await expect.poll(() => status(replied.id)).toBe("completed");
+    expect(count()).toBe(5);
+    expect((h.ctx.db.prepare("SELECT COUNT(*) AS n FROM tasks WHERE client_message_id LIKE 'handback:%'").get() as { n: number }).n).toBe(1);
+    await h.codex.runTurn(turns.at(-1)!.turnId, { text: "已加购。" });
+
+    // A waiting task with no page in the Mac's Chrome has nothing to hand back.
+    const pageless = await waitingTask("Weee 有什么优惠", false);
+    expect((await control(pageless.id, "take")).status).toBe(404);
+    expect((await control(pageless.id, "release")).status).toBe(404);
+    expect(count()).toBe(6);
+  } finally {
+    client?.close();
+    links.close();
+    gateway.close();
+    bridge.close();
+    await h.shutdown();
+  }
+});

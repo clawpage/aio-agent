@@ -99,6 +99,7 @@ export const browser: typeof zh = {
     tabCount: (n: number) => `${n} tab${n === 1 ? "" : "s"}`,
     pausedHint: "The AI has paused on this page. When you're done, tap \"Hand back to AI\" and it will continue from here.",
     endedHint: "The task has finished. You can view this page or keep using it.",
+    continueHint: "Do what's needed in this page and hand it back to the AI: the task carries on by itself, no reply needed.",
     operateLabel: "Use this page",
     viewLabel: "View this page",
     shotAlt: (title: string) => `Preview of ${title}`,

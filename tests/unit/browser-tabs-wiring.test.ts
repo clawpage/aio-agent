@@ -12,6 +12,8 @@ import { KB_POLICY } from "../../src/control/kb.js";
 import { SCHEDULE_POLICY } from "../../src/control/scheduleTool.js";
 import { IMAGE_POLICY } from "../../src/control/imageTool.js";
 import type { Config } from "../../src/control/config.js";
+import { macNativeMcpServers, macNativeThreadServers } from "../../src/control/macNative.js";
+import { USER_BROWSER_POLICY } from "../../src/control/userBrowser.js";
 
 class RecordingCodex extends FakeCodex {
   threadOpts: Array<{ browserTask?: BrowserTask; developerInstructions?: string }> = [];
@@ -338,4 +340,30 @@ it("hands back to the agent every tab waiting on the person: taken over, or aske
   expect(await handBackToAgent("conv_1", { list: async () => [tab("t3", "ai", null)], control: tabs.control }, macPage)).toBe(0);
   expect(await handBackToAgent("conv_1", null, null)).toBe(0);
   expect(mac.released).toBe(1);
+});
+
+it("gives every execution thread on a runtime with a linked Mac its task identity there, so request_human can always wait for the person", async () => {
+  cfg.macNative = { url: "http://host.docker.internal:4902/mac-native/token/mcp" };
+  const conv = agent.createConversation({ title: "Weee 加购" });
+  agent.submitTurn({ conversationId: conv.id, text: "在 Weee 加购", clientMessageId: "m1" });
+  await tick();
+  const task = codex.threadOpts[0]!.browserTask!;
+  expect(task).toEqual({ key: conv.id, title: "Weee 加购" });
+  // Both executors reach the Mac's tools under that identity (the header request_human needs).
+  expect(macNativeThreadServers(cfg, task)).toMatchObject({ aio_mac_native: { http_headers: { "X-AIO-Task": conv.id } } });
+  expect(macNativeMcpServers(cfg, task)).toMatchObject({ aio_mac_native: { headers: { "X-AIO-Task": conv.id } } });
+  // And are told to wait in it for a sign-in rather than end the turn asking.
+  expect(codex.threadOpts[0]!.developerInstructions).toContain(USER_BROWSER_POLICY);
+  expect(USER_BROWSER_POLICY).toContain("Never end your turn to ask the user to sign in");
+  expect(TAB_POLICY).toContain("Never end your turn to ask the user to sign in");
+
+  codex.completeTurn(codex.startedTurns[0]!.turnId);
+  await tick();
+  releaseGate();
+  agent.submitTurn({ conversationId: conv.id, text: "继续", clientMessageId: "m2" });
+  await tick();
+  expect(codex.resumes.at(-1)?.[2]).toEqual(task);
+  codex.completeTurn(codex.startedTurns[1]!.turnId);
+  await tick();
+  releaseGate();
 });

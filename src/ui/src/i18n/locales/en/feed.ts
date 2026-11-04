@@ -82,6 +82,8 @@ export const feed: typeof zh = {
   },
   scheduleRun: (title: string, rule: string) => `Scheduled task "${title}" ran automatically · ${rule} · `,
   supportNote: "A message from support · ",
+  handBackNote: "You handed the browser back, so the task carried on · ",
+  handBackSummary: "You handed the browser back, so the task carried on",
   userMessage: "Your message",
   quoted: (title: string) => `Quoting: ${title}`,
   earlierTask: "an earlier task",

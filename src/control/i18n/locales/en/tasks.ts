@@ -29,6 +29,7 @@ export const tasks: typeof zh = {
   notes: {
     archived: "The result was never checked; you archived it.",
     supplementReceived: "Got your addition; the result is in the task that follows.",
+    handedBack: "You handed the browser back; the task carries on in the task that follows.",
     gadget: "From the voice gadget, run directly.",
   },
   titleSeparator: ", ",

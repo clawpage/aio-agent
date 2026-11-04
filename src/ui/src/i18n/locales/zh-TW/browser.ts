@@ -98,6 +98,7 @@ export const browser: typeof zh = {
     tabCount: (n: number) => `共 ${n} 個分頁`,
     pausedHint: "AI 已暫停操作這個頁面。完成後點「交還給 AI」，它會從目前頁面繼續。",
     endedHint: "任務已結束，你可以檢視或繼續操作這個頁面。",
+    continueHint: "在這個頁面裡做完後交還給 AI，任務會自動繼續，不用再回覆。",
     operateLabel: "操作這個頁面",
     viewLabel: "檢視這個頁面",
     shotAlt: (title: string) => `${title} 的頁面預覽`,

@@ -1013,6 +1013,40 @@ test("owner debug mode shows each message's dispatch log step by step", async ({
     await page.keyboard.press("Escape");
     await expect(dialog).toHaveCount(0);
 });
+test("a task waiting for your input with a page in the Mac's Chrome says handing it back carries it on, and the continuation is a note, not your message", async ({ page }, info) => {
+    const waiting: Task = { ...task(1, "needs_input"), title: "Weee 加购", clarification: "请在浏览器中登录 Weee 账号，完成后交还。", userBrowser: { page: true, title: "Weee", url: "https://www.sayweee.com/login", holder: "ai", request: null } };
+    const rows = [waiting];
+    await page.route("**/api/tasks/task-1/user-browser/control", async r => {
+        const { action } = r.request().postDataJSON();
+        waiting.userBrowser = { ...waiting.userBrowser!, holder: action === "take" ? "human" : "ai" };
+        if (action === "release") {
+            // The server carries the task on: it is answered, and the continuation follows it.
+            Object.assign(waiting, { status: "completed", completedAt: Date.now(), result: "你已交还浏览器，任务在后续任务里自动继续。", revision: 2 });
+            rows.push({ ...task(2), title: "Weee 加购", text: "(Sent automatically when the user handed the browser back; they did not type this.)", relatedTaskId: "task-1", conversationId: "child-1", handBack: true, createdAt: Date.now() });
+        }
+        await r.fulfill({ json: { userBrowser: waiting.userBrowser } });
+    });
+    await page.route("**/api/tasks/task-1/user-browser/screenshot*", r => r.fulfill({ status: 404, body: "" }));
+    await page.routeWebSocket(/\/api\/user-browser\/screen\?key=child-1$/, ws => { ws.send(JSON.stringify({ type: "size", width: 1280, height: 800 })); });
+    await setup(page, rows);
+    const card = page.getByRole("group", { name: /^AI Chrome：/ });
+    await expect(card).toContainText("交还给 AI，任务会自动继续");
+    // The AI is not using the page while it waits for you.
+    await expect(card).not.toContainText("AI 正在用");
+    expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1);
+    await page.locator('[data-progress-for="task-1"]').screenshot({ path: info.outputPath("handback-waiting.png") });
+    if (info.project.use.hasTouch) {
+        await page.setViewportSize({ width: 360, height: 780 });
+        await expect(card).toContainText("交还给 AI，任务会自动继续");
+        expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1);
+    }
+    await press(info, card.getByRole("button", { name: "接管", exact: true }));
+    const dialog = page.getByRole("dialog", { name: "Mac 上的 AI Chrome" });
+    await press(info, dialog.getByRole("button", { name: "交还给 AI", exact: true }));
+    // The continuation shows as a note in the feed; the English text the agent got is not shown as your message.
+    await expect(page.locator(".task-entry[data-task-id='task-2'] .schedule-run-note")).toContainText("你交还了浏览器，任务自动继续", { timeout: 15_000 });
+    await expect(page.getByText("Sent automatically when the user handed the browser back")).toHaveCount(0);
+});
 test("a task working in the AI's Chrome on the Mac shows its page, asks for the person, and is taken over and handed back", async ({ page }, info) => {
     const row: Task = { ...task(1), title: "登录银行", userBrowser: { page: true, title: "网上银行", url: "https://bank.example/login", holder: "ai", request: "请在页面上完成短信验证" } };
     const jpeg = fs.readFileSync("src/ui/public/icon-192.png");
