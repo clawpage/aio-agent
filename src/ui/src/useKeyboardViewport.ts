@@ -50,8 +50,8 @@ function followAppKeyboard(root: HTMLElement) {
     root.style.setProperty("--composer-screen", "calc(100dvh - var(--safe-top) - var(--safe-bottom))");
     /** What the page gives up at the bottom beyond the safe area, as laid out now. */
     let reserved = 0;
-    /** The keyboard motion under way, and the layout it ends in (rising lays the page out at the end). */
-    let running: { animations: Animation[]; commit: number | null } | null = null;
+    /** The motion under way: what lays the page out when it ends (rising, shrinking), and the keyboard layout it ends in. */
+    let running: { animations: Animation[]; commit: (() => void) | null; ends: number | null } | null = null;
     const feeds = () => Array.from(document.querySelectorAll<HTMLElement>(".chat-scroll"));
     /** Run a layout change with chat feeds keeping their distance from the bottom. */
     const pinned = (change: () => void) => {
@@ -65,17 +65,24 @@ function followAppKeyboard(root: HTMLElement) {
         else root.style.removeProperty("--keyboard-viewport");
         reserved = r;
     });
-    /** What moves, and the point of it to follow: a feed's last message, anything else itself. Tops are as seen, motion included. */
+    /**
+     * What moves, and the point of it to follow (as seen, motion included): a feed's last message by its
+     * top; the composer by its bottom, so it stays on the keyboard however tall it grows; anything else
+     * by its top.
+     */
     const movers = () => Array.from(document.querySelectorAll<HTMLElement>(".chat > :not(.chat-head)"), (el) => {
         const anchor = el.classList.contains("chat-scroll") ? (el.lastElementChild as HTMLElement | null) : el;
-        return { el, top: () => anchor?.getBoundingClientRect().top ?? 0 };
+        const composer = el.classList.contains("composer");
+        // How tall it shows: less the part a growing composer has not opened yet.
+        const height = () => el.getBoundingClientRect().height - (parseFloat(/^inset\(([\d.]+)px/.exec(getComputedStyle(el).clipPath)?.[1] ?? "0") || 0);
+        return { el, composer, top: () => (composer ? anchor?.getBoundingClientRect().bottom : anchor?.getBoundingClientRect().top) ?? 0, height };
     });
-    /** Stop the motion under way where it is: the page is laid out as its end wants, with nothing moved. */
-    const stop = () => {
+    /** Stop the motion under way: the page is laid out as its end wants (unless a motion that takes over will), with nothing moved. */
+    const stop = (settle = true) => {
         if (!running) return;
         const { animations, commit } = running;
         running = null;
-        if (commit !== null) layout(commit);
+        if (settle) commit?.();
         for (const a of animations) a.cancel();
         root.classList.remove("keyboard-moving");
     };
@@ -89,38 +96,69 @@ function followAppKeyboard(root: HTMLElement) {
         return Math.min(Math.max(0, el.scrollTop + d), most) - el.scrollTop;
     };
     /**
-     * Glide from what is on screen now to a new layout. Rising (`rise`, the keyboard layout to end in), the
-     * page is laid out only once the motion arrives, so nothing near the bottom is cut off on the way; where
-     * things go is worked out from the feeds' scroll sizes rather than by laying the page out, so the motion
-     * starts at once. Otherwise `change` lays the page out at once and everything starts from where it was
-     * seen. `late` is how long ago the motion began (the keyboard's start, as the app reports it).
+     * Glide from what is on screen now to a new layout, laid out by `change`.
+     * - `rise`: the keyboard is coming up to that layout. The page is laid out only once the motion arrives,
+     *   so nothing near the bottom is cut off on the way, and where things go is worked out from the feeds'
+     *   scroll sizes rather than by laying the page out, so the motion starts at once.
+     * - `undo`: like rising, the page is laid out at the end (the composer shrinking: it closes downwards
+     *   first), with where things go measured by laying it out and back.
+     * - neither: the page is laid out at once and everything starts from where it was seen.
+     * The composer, anchored at its bottom, opens or closes from the height it was seen at (a clip, as
+     * transforms cannot change a height). `late` is how long ago the motion began, as the app reports it.
      */
-    const glide = (change: () => void, rise: number | null, late = 0) => {
+    const glide = (change: () => void, opts: { rise?: number; undo?: () => void; late?: number; takeOver?: boolean } = {}) => {
         const parts = movers();
         const seen = parts.map((p) => p.top());
-        stop();
+        const seenHeight = parts.map((p) => p.height());
+        stop(!opts.takeOver);
         const now = parts.map((p) => p.top());
+        const nowHeight = parts.map((p) => p.height());
         let to: number[];
-        if (rise !== null) {
-            const d = rise - reserved;
+        let endHeight: number[];
+        let commit: (() => void) | null = null;
+        if (opts.rise !== undefined) {
+            const d = opts.rise - reserved;
             to = parts.map((p) => -(p.el.classList.contains("chat-scroll") ? feedShift(p.el, d) : d));
+            endHeight = nowHeight;
+            commit = change;
+        } else if (opts.undo) {
+            const scrolls = feeds().map((el) => [el, el.scrollTop] as const);
+            change();
+            const after = parts.map((p) => p.top());
+            endHeight = parts.map((p) => p.height());
+            opts.undo();
+            for (const [el, top] of scrolls) el.scrollTop = top;
+            to = parts.map((p, i) => after[i]! - now[i]!);
+            commit = change;
         } else {
             change();
             const after = parts.map((p) => p.top());
             for (let i = 0; i < now.length; i += 1) now[i] = after[i]!;
+            endHeight = parts.map((p) => p.height());
+            for (let i = 0; i < nowHeight.length; i += 1) nowHeight[i] = endHeight[i]!;
             to = parts.map(() => 0);
         }
         const moves = parts.map((p, i) => ({ el: p.el, from: seen[i]! - now[i]!, to: to[i]! })).filter((m) => Math.abs(m.from) >= 0.5 || Math.abs(m.to) >= 0.5);
-        if (!moves.length) {
-            if (rise !== null) layout(rise);
+        // The composer shows from the top of its box down, opening or closing between the heights seen and wanted.
+        const clips = parts.flatMap((p, i) => {
+            if (!p.composer) return [];
+            const from = nowHeight[i]! - seenHeight[i]!;
+            const end = nowHeight[i]! - endHeight[i]!;
+            return (Math.abs(from) >= 1 || Math.abs(end) >= 1) && from >= 0 && end >= 0 ? [{ el: p.el, from, end }] : [];
+        });
+        if (!moves.length && !clips.length) {
+            commit?.();
             return;
         }
         root.classList.add("keyboard-moving");
         const timing = { id: "keyboard", duration: KEYBOARD_MS, easing: curve, fill: "forwards" as const };
-        const animations = moves.map((m) => m.el.animate([{ transform: `translateY(${m.from}px)` }, { transform: `translateY(${m.to}px)` }], timing));
-        const ahead = Math.min(Math.max(0, late), KEYBOARD_MS - 50);
+        const animations = [
+            ...moves.map((m) => m.el.animate([{ transform: `translateY(${m.from}px)` }, { transform: `translateY(${m.to}px)` }], timing)),
+            ...clips.map((c) => c.el.animate([{ clipPath: `inset(${c.from}px 0 0 0 round 22px)` }, { clipPath: `inset(${c.end}px 0 0 0 round 22px)` }], timing)),
+        ];
+        const ahead = Math.min(Math.max(0, opts.late ?? 0), KEYBOARD_MS - 50);
         if (ahead > 0) for (const a of animations) a.currentTime = ahead;
-        const mine = { animations, commit: rise };
+        const mine = { animations, commit, ends: opts.rise ?? null };
         running = mine;
         void Promise.all(animations.map((a) => a.finished)).then(() => {
             if (running !== mine) return;
@@ -139,15 +177,25 @@ function followAppKeyboard(root: HTMLElement) {
         const height = Math.max(0, Number(detail.height) || 0);
         const target = Math.max(0, height - (parseFloat(getComputedStyle(probe).paddingBottom) || 0));
         if (detail.duration === undefined) return layout(target);
-        const ending = running?.commit ?? reserved;
+        const ending = running?.ends ?? reserved;
         if (target === ending) return;
         if (!(Number(detail.duration) > 0) || still()) {
             stop();
             return layout(target);
         }
         // How late this is (the app's clock is the page's); a start out of reach (another clock, a stale event) counts as now.
-        const late = Number(detail.start) > 0 ? Date.now() - Number(detail.start) : 0;
-        glide(() => layout(target), target > ending ? target : null, late >= 0 && late < 1000 ? late : 0);
+        const since = Number(detail.start) > 0 ? Date.now() - Number(detail.start) : 0;
+        const late = since >= 0 && since < 1000 ? since : 0;
+        if (target > ending) return glide(() => layout(target), { rise: target, late });
+        // Falling while the composer is still closing (it was just left): one motion takes both to the end.
+        const closing = document.querySelector<HTMLElement>(".chat .composer.hold-expanded");
+        if (closing && running) {
+            const before = reserved;
+            return glide(() => { layout(target); pinned(() => closing.classList.remove("hold-expanded")); }, {
+                undo: () => { layout(before); pinned(() => closing.classList.add("hold-expanded")); }, late, takeOver: true,
+            });
+        }
+        glide(() => layout(target), { late });
     };
     // The composer grows when its box is focused and shrinks when it is left, a few frames before the
     // keyboard moves: that change glides too, from the composer as it was (held for one measurement).
@@ -156,9 +204,13 @@ function followAppKeyboard(root: HTMLElement) {
         if (!(box instanceof HTMLTextAreaElement) || still()) return;
         const composer = box.closest<HTMLElement>(".chat .composer");
         if (!composer || composer.classList.contains("has-content")) return;
+        // Growing: laid out at once, opening upwards from the old height. Shrinking: it closes downwards
+        // first and the page is laid out at the end.
         const hold = e.type === "focusin" ? "hold-collapsed" : "hold-expanded";
         composer.classList.add(hold);
-        glide(() => pinned(() => composer.classList.remove(hold)), null);
+        const release = () => pinned(() => composer.classList.remove(hold));
+        if (hold === "hold-collapsed") glide(release);
+        else glide(release, { undo: () => pinned(() => composer.classList.add(hold)) });
     };
     window.addEventListener("aio-keyboard", onKeyboard);
     document.addEventListener("focusin", onFocus);
