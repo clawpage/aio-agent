@@ -172,10 +172,20 @@ test("in the iOS app leaving the box and the keyboard going down make one motion
     at.push(top());
     window.dispatchEvent(new CustomEvent("aio-keyboard", { detail: { height: 0, duration: 0.25 } }));
     at.push(top());
-    return at;
+    // Along the way the feed never drops away from its header by more than the composer's closing.
+    const animations = document.getAnimations().filter((a) => a.id === "keyboard");
+    const head = document.querySelector(".chat-head")!.getBoundingClientRect().bottom;
+    const gaps: number[] = [];
+    for (const time of [50, 150, 250, 350, 450, 499]) {
+      animations.forEach((a) => { a.pause(); a.currentTime = time; });
+      gaps.push(document.querySelector(".chat-scroll")!.getBoundingClientRect().top - head);
+    }
+    animations.forEach((a) => a.play());
+    return { at, gaps };
   }, visibleTop);
-  expect(steps[0]).toBeCloseTo(up, 0);
-  for (let i = 1; i < steps.length; i += 1) expect(Math.abs(steps[i]! - steps[i - 1]!)).toBeLessThan(40);
+  expect(steps.at[0]).toBeCloseTo(up, 0);
+  for (let i = 1; i < steps.at.length; i += 1) expect(Math.abs(steps.at[i]! - steps.at[i - 1]!)).toBeLessThan(40);
+  for (const gap of steps.gaps) expect(gap).toBeLessThan(2);
   await expect.poll(() => moving(page), { timeout: 3000 }).toBe(0);
   expect(await page.evaluate(visibleTop)).toBeCloseTo(rest, 0);
 });

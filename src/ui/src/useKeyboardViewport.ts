@@ -101,43 +101,49 @@ function followAppKeyboard(root: HTMLElement) {
      * - `rise`: the keyboard is coming up to that layout. The page is laid out only once the motion arrives,
      *   so nothing near the bottom is cut off on the way, and where things go is worked out from the feeds'
      *   scroll sizes rather than by laying the page out, so the motion starts at once.
-     * - `undo`: like rising, the page is laid out at the end (the composer shrinking: it closes downwards
-     *   first), with where things go measured by laying it out and back.
-     * - neither: the page is laid out at once and everything starts from where it was seen.
-     * The composer, anchored at its bottom, opens or closes from the height it was seen at (a clip, as
-     * transforms cannot change a height). `late` is how long ago the motion began, as the app reports it.
+     * - otherwise the page is laid out at once and everything starts from where it was seen; with `then`
+     *   (the composer closing), that last step is applied when the motion ends, and the motion runs to
+     *   where it will put things (measured by applying it and back): the composer keeps its height until
+     *   then and closes downwards, and what is above follows it down by as much.
+     * The composer, anchored at its bottom, opens or closes between the height it was seen at and the one
+     * it ends with (a clip, as transforms cannot change a height). `late` is how long ago the motion began,
+     * as the app reports it; `takeOver` leaves the step the motion under way would apply to this one's `then`.
      */
-    const glide = (change: () => void, opts: { rise?: number; undo?: () => void; late?: number; takeOver?: boolean } = {}) => {
+    const glide = (change: () => void, opts: { rise?: number; then?: { apply: () => void; revert: () => void }; late?: number; takeOver?: boolean } = {}) => {
         const parts = movers();
         const seen = parts.map((p) => p.top());
         const seenHeight = parts.map((p) => p.height());
         stop(!opts.takeOver);
-        const now = parts.map((p) => p.top());
-        const nowHeight = parts.map((p) => p.height());
+        let now: number[];
+        let nowHeight: number[];
         let to: number[];
         let endHeight: number[];
         let commit: (() => void) | null = null;
         if (opts.rise !== undefined) {
+            now = parts.map((p) => p.top());
+            nowHeight = parts.map((p) => p.height());
             const d = opts.rise - reserved;
             to = parts.map((p) => -(p.el.classList.contains("chat-scroll") ? feedShift(p.el, d) : d));
             endHeight = nowHeight;
             commit = change;
-        } else if (opts.undo) {
-            const scrolls = feeds().map((el) => [el, el.scrollTop] as const);
-            change();
-            const after = parts.map((p) => p.top());
-            endHeight = parts.map((p) => p.height());
-            opts.undo();
-            for (const [el, top] of scrolls) el.scrollTop = top;
-            to = parts.map((p, i) => after[i]! - now[i]!);
-            commit = change;
         } else {
             change();
-            const after = parts.map((p) => p.top());
-            for (let i = 0; i < now.length; i += 1) now[i] = after[i]!;
-            endHeight = parts.map((p) => p.height());
-            for (let i = 0; i < nowHeight.length; i += 1) nowHeight[i] = endHeight[i]!;
-            to = parts.map(() => 0);
+            now = parts.map((p) => p.top());
+            nowHeight = parts.map((p) => p.height());
+            if (opts.then) {
+                const { apply, revert } = opts.then;
+                const scrolls = feeds().map((el) => [el, el.scrollTop] as const);
+                apply();
+                const after = parts.map((p) => p.top());
+                endHeight = parts.map((p) => p.height());
+                revert();
+                for (const [el, top] of scrolls) el.scrollTop = top;
+                to = parts.map((p, i) => after[i]! - now[i]!);
+                commit = apply;
+            } else {
+                to = parts.map(() => 0);
+                endHeight = nowHeight;
+            }
         }
         const moves = parts.map((p, i) => ({ el: p.el, from: seen[i]! - now[i]!, to: to[i]! })).filter((m) => Math.abs(m.from) >= 0.5 || Math.abs(m.to) >= 0.5);
         // The composer shows from the top of its box down, opening or closing between the heights seen and wanted.
@@ -173,6 +179,8 @@ function followAppKeyboard(root: HTMLElement) {
         }, () => undefined);
     };
     const still = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
+    /** A composer closing after its box was left (while it still has `hold-expanded`): how to finish it, and to put it back while measuring. */
+    let shrinking: { apply: () => void; revert: () => void } | null = null;
     const onKeyboard = (e: Event) => {
         const detail = (e as CustomEvent<{ height?: number; duration?: number; start?: number }>).detail ?? {};
         const height = Math.max(0, Number(detail.height) || 0);
@@ -190,11 +198,9 @@ function followAppKeyboard(root: HTMLElement) {
         if (target > ending) return glide(() => layout(target), { rise: target, late });
         // Falling while the composer is still closing (it was just left): one motion takes both to the end.
         const closing = document.querySelector<HTMLElement>(".chat .composer.hold-expanded");
-        if (closing && running) {
-            const before = reserved;
-            return glide(() => { layout(target); pinned(() => closing.classList.remove("hold-expanded")); }, {
-                undo: () => { layout(before); pinned(() => closing.classList.add("hold-expanded")); }, late, takeOver: true,
-            });
+        if (closing && running && shrinking) {
+            const { apply, revert } = shrinking;
+            return glide(() => layout(target), { then: { apply, revert }, late, takeOver: true });
         }
         glide(() => layout(target), { late });
     };
@@ -205,13 +211,28 @@ function followAppKeyboard(root: HTMLElement) {
         if (!(box instanceof HTMLTextAreaElement) || still()) return;
         const composer = box.closest<HTMLElement>(".chat .composer");
         if (!composer || composer.classList.contains("has-content")) return;
-        // Growing: laid out at once, opening upwards from the old height. Shrinking: it closes downwards
-        // first and the page is laid out at the end.
-        const hold = e.type === "focusin" ? "hold-collapsed" : "hold-expanded";
-        composer.classList.add(hold);
-        const release = () => pinned(() => composer.classList.remove(hold));
-        if (hold === "hold-collapsed") glide(release);
-        else glide(release, { undo: () => pinned(() => composer.classList.add(hold)) });
+        // Growing: laid out at once, opening upwards from the old height. Shrinking: the page is laid out for
+        // the small composer at once, while the composer keeps its height over the feed's bottom edge (a
+        // negative margin keeps its place small) and closes downwards; it becomes small when the motion ends,
+        // which moves nothing.
+        if (e.type === "focusin") {
+            shrinking = null;
+            composer.classList.add("hold-collapsed");
+            return glide(() => pinned(() => composer.classList.remove("hold-collapsed")));
+        }
+        composer.classList.add("hold-expanded");
+        const tall = composer.getBoundingClientRect().height;
+        composer.classList.remove("hold-expanded");
+        const small = composer.getBoundingClientRect().height;
+        const margin = parseFloat(getComputedStyle(composer).marginTop) || 0;
+        composer.classList.add("hold-expanded");
+        const hold = () => { composer.classList.add("hold-expanded"); composer.style.marginTop = `${margin - (tall - small)}px`; };
+        const mine = {
+            apply: () => { composer.classList.remove("hold-expanded"); composer.style.marginTop = ""; },
+            revert: hold,
+        };
+        shrinking = mine;
+        glide(() => pinned(hold), { then: mine });
     };
     window.addEventListener("aio-keyboard", onKeyboard);
     document.addEventListener("focusin", onFocus);
