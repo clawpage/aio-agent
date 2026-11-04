@@ -94,22 +94,27 @@ test("in the iOS app the composer's growth on focus glides instead of jumping, a
   const rest = await composerTop();
   const at = (focus: boolean) => page.evaluate((f) => {
     const box = document.querySelector<HTMLTextAreaElement>(".composer textarea")!;
+    const last = () => document.querySelector(".chat-scroll")!.lastElementChild!.getBoundingClientRect().top;
+    const lastBefore = last();
     if (f) box.focus(); else box.blur();
     const animations = document.getAnimations().filter((a) => a.id === "keyboard");
     animations.forEach((a) => a.pause());
     const composer = document.querySelector(".composer")!;
     const top = composer.getBoundingClientRect().top + (parseFloat(/^inset\(([\d.]+)px/.exec(getComputedStyle(composer).clipPath)?.[1] ?? "0") || 0);
+    const feedMoved = last() - lastBefore;
     animations.forEach((a) => a.play());
-    return { top, moving: animations.length };
+    return { top, moving: animations.length, feedMoved };
   }, focus);
   const opened = await at(true);
   expect(opened.moving).toBeGreaterThan(0);
   expect(opened.top).toBeCloseTo(rest, 0);
+  expect(Math.abs(opened.feedMoved)).toBeLessThan(1);
   await expect.poll(() => moving(page), { timeout: 3000 }).toBe(0);
   const grown = await composerTop();
   expect(grown).toBeLessThan(rest - 20);
   const closed = await at(false);
   expect(closed.top).toBeCloseTo(grown, 0);
+  expect(Math.abs(closed.feedMoved)).toBeLessThan(1);
   await expect.poll(() => moving(page), { timeout: 3000 }).toBe(0);
   expect(await composerTop()).toBeCloseTo(rest, 0);
 });
@@ -157,11 +162,11 @@ test("in the iOS app leaving the box and the keyboard going down make one motion
   await page.goto("/");
   await expect(page.getByText("任务 23").first()).toBeVisible();
   const visibleTop = "(() => { const n = document.querySelector('.composer'); return n.getBoundingClientRect().top + (parseFloat(/^inset\\(([\\d.]+)px/.exec(getComputedStyle(n).clipPath)?.[1] ?? '0') || 0); })()";
-  const rest = await page.evaluate(visibleTop);
+  const rest = Number(await page.evaluate(visibleTop));
   await page.evaluate(() => document.querySelector<HTMLTextAreaElement>(".composer textarea")!.focus());
   await animatedKeyboard(page, 336);
   await expect.poll(() => moving(page), { timeout: 3000 }).toBe(0);
-  const up = await page.evaluate(visibleTop);
+  const up = Number(await page.evaluate(visibleTop));
   // The box is left, and a frame later the keyboard starts down: the composer carries on from where it shows.
   const steps = await page.evaluate(async (expr) => {
     const top = () => (0, eval)(expr) as number;
@@ -187,7 +192,7 @@ test("in the iOS app leaving the box and the keyboard going down make one motion
   for (let i = 1; i < steps.at.length; i += 1) expect(Math.abs(steps.at[i]! - steps.at[i - 1]!)).toBeLessThan(40);
   for (const gap of steps.gaps) expect(gap).toBeLessThan(2);
   await expect.poll(() => moving(page), { timeout: 3000 }).toBe(0);
-  expect(await page.evaluate(visibleTop)).toBeCloseTo(rest, 0);
+  expect(Number(await page.evaluate(visibleTop))).toBeCloseTo(rest, 0);
 });
 
 test("without the app's marker the page ignores keyboard events from elsewhere", async ({ page }, info) => {

@@ -52,7 +52,7 @@ function followAppKeyboard(root: HTMLElement) {
     /** What the page gives up at the bottom beyond the safe area, as laid out now. */
     let reserved = 0;
     /** The motion under way: what lays the page out when it ends (rising, shrinking), and the keyboard layout it ends in. */
-    let running: { animations: Animation[]; commit: (() => void) | null; ends: number | null } | null = null;
+    let running: { animations: Animation[]; held: HTMLElement[]; commit: (() => void) | null; ends: number | null } | null = null;
     const feeds = () => Array.from(document.querySelectorAll<HTMLElement>(".chat-scroll"));
     /** Run a layout change with chat feeds keeping their distance from the bottom. */
     const pinned = (change: () => void) => {
@@ -81,10 +81,11 @@ function followAppKeyboard(root: HTMLElement) {
     /** Stop the motion under way: the page is laid out as its end wants (unless a motion that takes over will), with nothing moved. */
     const stop = (settle = true) => {
         if (!running) return;
-        const { animations, commit } = running;
+        const { animations, held, commit } = running;
         running = null;
         if (settle) commit?.();
         for (const a of animations) a.cancel();
+        for (const el of held) { el.style.transform = ""; el.style.clipPath = ""; }
         root.classList.remove("keyboard-moving");
     };
     /** How far a feed's content goes when the feed is `d` px shorter with its distance from the bottom kept (feeds are top-aligned). */
@@ -159,13 +160,17 @@ function followAppKeyboard(root: HTMLElement) {
         }
         root.classList.add("keyboard-moving");
         const timing = { id: "keyboard", duration: KEYBOARD_MS, easing: curve, fill: "forwards" as const };
+        // Where each part starts is also set directly: WebKit paints a new animation's first frame without it,
+        // which showed the new layout for a frame before everything went back to where it was.
+        for (const m of moves) m.el.style.transform = `translateY(${m.from}px)`;
+        for (const c of clips) c.el.style.clipPath = `inset(${c.from}px 0 0 0 round 22px)`;
         const animations = [
             ...moves.map((m) => m.el.animate([{ transform: `translateY(${m.from}px)` }, { transform: `translateY(${m.to}px)` }], timing)),
             ...clips.map((c) => c.el.animate([{ clipPath: `inset(${c.from}px 0 0 0 round 22px)` }, { clipPath: `inset(${c.end}px 0 0 0 round 22px)` }], timing)),
         ];
         const ahead = Math.min(Math.max(0, opts.late ?? 0), KEYBOARD_MS - 50);
         if (ahead > 0) for (const a of animations) a.currentTime = ahead;
-        const mine = { animations, commit, ends: opts.rise ?? null };
+        const mine = { animations, held: [...moves.map((m) => m.el), ...clips.map((c) => c.el)], commit, ends: opts.rise ?? null };
         running = mine;
         void Promise.all(animations.map((a) => a.finished)).then(() => {
             if (running !== mine) return;
@@ -221,11 +226,14 @@ function followAppKeyboard(root: HTMLElement) {
             return glide(() => pinned(() => composer.classList.remove("hold-collapsed")));
         }
         composer.classList.add("hold-expanded");
+        // Measuring it small lets the feed grow for a moment, which would scroll it: put the scrolling back.
+        const scrolls = feeds().map((el) => [el, el.scrollTop] as const);
         const tall = composer.getBoundingClientRect().height;
         composer.classList.remove("hold-expanded");
         const small = composer.getBoundingClientRect().height;
         const margin = parseFloat(getComputedStyle(composer).marginTop) || 0;
         composer.classList.add("hold-expanded");
+        for (const [el, top] of scrolls) el.scrollTop = top;
         const hold = () => { composer.classList.add("hold-expanded"); composer.style.marginTop = `${margin - (tall - small)}px`; };
         const mine = {
             apply: () => { composer.classList.remove("hold-expanded"); composer.style.marginTop = ""; },
