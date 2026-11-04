@@ -6,6 +6,7 @@ export const knowledge: typeof zh = {
   rulesTooLong: (max: number) => `Rules have at most ${max} characters`,
   sensitive: "This looks like it contains a password, a code, an ID number or a card number, which never go into a knowledge base",
   inviteInvalid: "This invitation link is invalid, expired or revoked",
+  inviteMessage: (name: string, url: string) => `You're invited to join the shared knowledge base "${name}".\nSend this message to your Clawpage Agent and it will join for you, or open the link (valid for 7 days):\n${url}`,
   transferFirst: "You're the administrator: hand that over to another member before you leave",
   cannotRemoveSelf: "You can't remove yourself; use Leave instead",
   notMember: "That person isn't a member of this library",

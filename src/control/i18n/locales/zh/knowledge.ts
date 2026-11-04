@@ -6,6 +6,8 @@ export const knowledge = {
   rulesTooLong: (max: number) => `规则最多 ${max} 个字`,
   sensitive: "内容里像是有密码、验证码、证件号或卡号，不能记进知识库",
   inviteInvalid: "邀请链接无效、已过期或已作废",
+  /** What the person forwards: also an explicit request when the invitee hands it to their own agent. */
+  inviteMessage: (name: string, url: string) => `邀请你加入共享知识库「${name}」\n把这条消息发给你的一站（Clawpage Agent），它会帮你加入；也可以直接打开链接（7 天内有效）：\n${url}`,
   transferFirst: "你是管理员，退出前请先把管理员转给其他成员",
   cannotRemoveSelf: "不能移出自己；要离开请用「退出」",
   notMember: "对方不是这个库的成员",

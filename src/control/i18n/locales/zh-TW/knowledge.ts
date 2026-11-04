@@ -6,6 +6,7 @@ export const knowledge: typeof zh = {
   rulesTooLong: (max: number) => `規則最多 ${max} 個字`,
   sensitive: "內容裡像是有密碼、驗證碼、證件號碼或卡號，不能記進知識庫",
   inviteInvalid: "邀請連結無效、已過期或已作廢",
+  inviteMessage: (name: string, url: string) => `邀請你加入共享知識庫「${name}」\n把這則訊息傳給你的一站（Clawpage Agent），它會幫你加入；也可以直接開啟連結（7 天內有效）：\n${url}`,
   transferFirst: "你是管理員，退出前請先把管理員轉給其他成員",
   cannotRemoveSelf: "不能移出自己；要離開請用「退出」",
   notMember: "對方不是這個庫的成員",

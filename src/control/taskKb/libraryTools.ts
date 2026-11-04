@@ -18,7 +18,7 @@ import { SharedKbError, type SharedKbs } from "./shared.js";
 export const LIBRARY_POLICY =
   "Shared knowledge bases are managed with these tools, with the same rights the person has on the console's knowledge page, acting as the person: kb_library_create sets one up (a name and the rules of what it keeps, or a preset), kb_libraries lists the person's libraries with their members, rules, domains and open invitation links, kb_library_manage renames one, changes its rules, makes or revokes an invitation link, leaves, removes a member, hands over administration or dissolves it, kb_library_join joins from a link the person gives you, kb_library_edit writes and organises its entries, and kb_library_history with kb_library_undo look back and undo. " +
   "Never open the console or its knowledge page in a browser for any of this, and never ask the person to do it there themselves; these tools do it directly. " +
-  "Create a library or write entries when the person asks for it or their request clearly needs it. An invitation link lets anyone who has it join for 7 days: make one when the person wants someone to join and give it to them to pass on; do not send it to anyone yourself unless they asked you to. Remove a member, hand over administration, leave or dissolve (which deletes the library and all its entries for every member and cannot be undone) only when the person explicitly asked for that; otherwise ask them first. " +
+  "Create a library or write entries when the person asks for it or their request clearly needs it. An invitation link lets anyone who has it join for 7 days: make one when the person wants someone to join and give them its message, exactly as returned, in a code block so they can copy it in one piece and pass it on; do not send it to anyone yourself unless they asked you to. A message from the person that carries such a link (…/knowledge?join=…), on its own or forwarded with an invitation, means they want to join unless they say otherwise: join it with kb_library_join straight away, never open the link in a browser, and tell them the library's name. Remove a member, hand over administration, leave or dissolve (which deletes the library and all its entries for every member and cannot be undone) only when the person explicitly asked for that; otherwise ask them first. " +
   "Entries you write with kb_library_edit are recorded as the person's own words, so write only what they said or confirmed or what this task established; something you only came across while working goes through kb_propose with library, so the library's maintainer checks it against its rules. Never write passwords, codes, ID or card numbers.";
 
 const LIBRARY = { type: "string", description: "The library's id or exact name, as kb_libraries lists it" };
@@ -60,8 +60,8 @@ export const LIBRARY_TOOLS = [
   },
   {
     name: "kb_library_join",
-    description: "Join a shared knowledge base from an invitation link the person gave you (…/knowledge?join=…).",
-    inputSchema: { type: "object", properties: { link: { type: "string", description: "The invitation link, or the token after join=" } }, required: ["link"] },
+    description: "Join a shared knowledge base from an invitation link the person gave you (…/knowledge?join=…), pasted alone or inside a forwarded invitation; joining a library they are already in changes nothing.",
+    inputSchema: { type: "object", properties: { link: { type: "string", description: "The invitation link (or the message it came in), or the token after join=" } }, required: ["link"] },
   },
   {
     name: "kb_library_edit",
@@ -156,8 +156,10 @@ export function callLibraryTool(runtime: LibraryToolRuntime, userId: string, nam
     }
     if (name === "kb_library_join") {
       const link = str(args.link);
-      let token = link;
-      try { token = new URL(link).searchParams.get("join") ?? link; } catch { /* a bare token */ }
+      // The link, a bare token, or the whole forwarded invitation around the link.
+      const token = /[?&]join=([A-Za-z0-9_-]+)/.exec(link)?.[1] ?? link;
+      const invited = kbs.previewInvite(token, userId);
+      if (invited.member) return text(`The person is already a member of the shared knowledge base "${invited.name}" (${invited.library}).`);
       const id = kbs.join(token, userId);
       track("shared_kb_join");
       return text(`Joined the shared knowledge base "${kbs.library(id)!.name}" (${id}).`);
@@ -172,8 +174,9 @@ export function callLibraryTool(runtime: LibraryToolRuntime, userId: string, nam
         case "invite": {
           const invite = kbs.createInvite(library, userId);
           track("shared_kb_invite");
-          return text({ invite: invite.id, url: `https://${runtime.cfg.primaryHost}/knowledge?join=${encodeURIComponent(invite.token)}`, expires: day(invite.expiresAt),
-            note: "Anyone with this link can join until it expires or is revoked; it is shown only now. Give it to the person to send on." });
+          const url = `https://${runtime.cfg.primaryHost}/knowledge?join=${encodeURIComponent(invite.token)}`;
+          return text({ invite: invite.id, url, expires: day(invite.expiresAt), message: t(runtime.tasks.locale()).knowledge.inviteMessage(kbs.library(library)!.name, url),
+            note: "Anyone with this link can join until it expires or is revoked; it is shown only now. Show the person message exactly as written, in a code block, for them to copy and send on: the invitee opens the link, or forwards the message to their own agent, which joins with kb_library_join." });
         }
         case "revoke_invite": kbs.revokeInvite(library, userId, str(args.invite)); return text("Invitation link revoked.");
         case "leave": return text(kbs.leave(library, userId).dissolved ? "Left; nobody else was in it, so the library is dissolved." : "Left the library; what the person wrote stays in it.");

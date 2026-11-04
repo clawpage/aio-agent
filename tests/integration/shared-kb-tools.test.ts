@@ -55,13 +55,20 @@ it("lets an agent set up a shared library, invite people and keep its entries, a
     })]);
 
     // An invitation link on the console's address, valid as long as the console's.
-    const invite = json<{ invite: string; url: string; expires: string }>(await owner("kb_library_manage", { library: "家庭日用品 · 待购与消耗", action: "invite" }));
+    const invite = json<{ invite: string; url: string; expires: string; message: string }>(await owner("kb_library_manage", { library: "家庭日用品 · 待购与消耗", action: "invite" }));
     expect(invite.url).toMatch(/^https:\/\/agent\.example\.com\/knowledge\?join=[A-Za-z0-9_-]{32}$/);
+    // What the person forwards names the library, says to hand it to one's own agent, and ends with the whole link.
+    expect(invite.message).toBe(t(h.ctx.tasks.locale()).knowledge.inviteMessage("家庭日用品 · 待购与消耗", invite.url));
+    expect(invite.message).toContain("Clawpage Agent");
+    expect(invite.message.endsWith(`\n${invite.url}`)).toBe(true);
+    expect(LIBRARY_POLICY).toContain("never open the link in a browser");
     const row = h.ctx.db.prepare("SELECT created_at, expires_at, created_by FROM kb_library_invites WHERE id=?").get(invite.invite) as { created_at: number; expires_at: number; created_by: string };
     expect(row).toMatchObject({ created_by: ids.owner, expires_at: row.created_at + 7 * 86_400_000 });
 
     // Another account's agent joins from the link the person passed on.
-    expect((await cr("kb_library_join", { link: invite.url })).content[0]!.text).toContain(`Joined the shared knowledge base "家庭日用品 · 待购与消耗" (${lib})`);
+    expect((await cr("kb_library_join", { link: invite.message })).content[0]!.text).toContain(`Joined the shared knowledge base "家庭日用品 · 待购与消耗" (${lib})`);
+    // Handing in the same link again (or the whole forwarded message's link) says so instead of claiming a new join.
+    expect((await cr("kb_library_join", { link: invite.url })).content[0]!.text).toBe(`The person is already a member of the shared knowledge base "家庭日用品 · 待购与消耗" (${lib}).`);
     expect(json<Array<Record<string, unknown>>>(await cr("kb_libraries"))).toMatchObject([{ id: lib, admin: "owner", you_are_admin: false, members: ["owner", "cr"], invites: [{ id: invite.invite, by: "owner", uses: 1 }] }]);
 
     // Entries are written as each person's own words, refused when they would hold secrets or a domain the library lacks.

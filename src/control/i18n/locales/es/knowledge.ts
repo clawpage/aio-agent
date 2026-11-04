@@ -6,6 +6,7 @@ export const knowledge: typeof zh = {
   rulesTooLong: (max: number) => `Las reglas tienen como máximo ${max} caracteres`,
   sensitive: "Parece contener una contraseña, un código, un número de documento o de tarjeta, que nunca se guardan en una base de conocimiento",
   inviteInvalid: "Este enlace de invitación no es válido, caducó o fue anulado",
+  inviteMessage: (name: string, url: string) => `Te invitan a unirte a la base de conocimiento compartida «${name}».\nEnvía este mensaje a tu Clawpage Agent y se unirá por ti, o abre el enlace (válido 7 días):\n${url}`,
   transferFirst: "Eres el administrador: pasa ese papel a otro miembro antes de salir",
   cannotRemoveSelf: "No puedes quitarte a ti mismo; usa Salir",
   notMember: "Esa persona no es miembro de esta biblioteca",
