@@ -17,7 +17,8 @@
  * `denied`); the SDK takes it, clears it, and knows the person from it (`user`). With
  * `signIn: "auto"` it asks silently on every load, so a person who allowed the page
  * once is signed in whenever they come back. `ai.ask` gets an answer from the signed-in
- * visitor's own AI, shaped by one of the page's `prompts/<name>.md`.
+ * visitor's own AI, shaped by one of the page's `prompts/<name>.md`; `ai.decide` has Jev choose
+ * among the options the page lists, for the signed-in visitor.
  */
 export const CLAWPAGE_SDK_JS = String.raw`/* clawpage-sdk.js - data for a clawpage (managed by Clawpage Agent; republishing refreshes this copy). */
 (function (root) {
@@ -225,6 +226,16 @@ export const CLAWPAGE_SDK_JS = String.raw`/* clawpage-sdk.js - data for a clawpa
         if (o.json) body.json = true;
         if (o.effort) body.effort = o.effort;
         return guard(request("POST", "/.ai", body));
+      },
+      /**
+       * Jev's choice among known candidates, for the signed-in visitor: {question, options: {id: what it means}, context, rules}
+       * gives {choice, confident, confidence, probabilities}.
+       */
+      decide: function (d) {
+        d = d || {};
+        if (self.mode !== "live") return Promise.reject(ClawpageError(0, "PREVIEW", "Decisions work once the page is published"));
+        if (!visitor) return Promise.reject(ClawpageError(401, "SIGN_IN_REQUIRED", "Sign in to use AI on this page"));
+        return guard(request("POST", "/.decide", { question: d.question, options: d.options, context: d.context, rules: d.rules }));
       },
     };
   }

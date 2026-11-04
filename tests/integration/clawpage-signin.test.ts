@@ -1,11 +1,17 @@
 import { it, expect } from "vitest";
 import http from "node:http";
 import path from "node:path";
+import fs from "node:fs";
+import os from "node:os";
 import { startHarness, login, type TestHarness } from "../helpers/harness.js";
 import { ShareStore, pageReturn, parseJsonAnswer } from "../../src/control/share.js";
 import { ClawpageData, type Visitor } from "../../src/control/clawpages.js";
 import { createMember } from "../../src/control/auth/owner.js";
 import type { AiRequest } from "../../src/control/clawpageAi.js";
+import { DecisionGateway } from "../../src/control/decision.js";
+import type { Jev, JevQuestion } from "../../src/control/jev.js";
+import { CLAWPAGE_SDK_JS } from "../../src/control/sandbox/clawpageSdk.js";
+import vm from "node:vm";
 
 const b64 = (text: string) => Buffer.from(text).toString("base64");
 
@@ -229,6 +235,109 @@ it("answers with the signed-in visitor's own AI, framed by the page's prompt", a
   } finally {
     await h.shutdown();
   }
+});
+
+it("lets a signed-in visitor's page ask Jev to decide, on the deployment's key, recorded against the visitor", async () => {
+  const { h, store, data } = await setup();
+  const asked: Array<{ state: Record<string, unknown>; questions: Record<string, JevQuestion> }> = [];
+  let fail: Error | null = null;
+  const jev = {
+    enabled: true,
+    decide: async (state: Record<string, unknown>, questions: Record<string, JevQuestion>) => {
+      asked.push({ state, questions });
+      if (fail) throw fail;
+      const ids = Object.keys(questions.decision!.criteria);
+      return { answers: { decision: { choice: ids[1]!, confidence: 0.9, probabilities: Object.fromEntries(ids.map((id, i) => [id, i === 1 ? 0.9 : 0.1 / (ids.length - 1)])) } }, usage: { tokens: 7 }, latencyMs: 1 };
+    },
+  } as unknown as Jev;
+  try {
+    const a: Visitor = { id: "user_a1", name: "a", email: "a@example.com" };
+    data.grant("owner_1", "toefl", a);
+    const token = data.visitorToken("owner_1", "toefl", a);
+    const move = { question: "Best move for black", options: { e5: "pawn e7-e5", c5: "pawn c7-c5" }, context: "1. e4", rules: ["keep the king safe"] };
+    const decide = (body: unknown, t: string | null = token) => ws(h, ".decide", { method: "POST", token: t ?? undefined, body });
+
+    // Before the deployment has Jev: signed-in visitors are told it is unavailable; anonymous ones still to sign in.
+    expect((await ws(h, ".decide", { method: "OPTIONS" })).status).toBe(204);
+    expect(await (await decide(move, null)).json()).toMatchObject({ error: "SIGN_IN_REQUIRED" });
+    const unavailable = await decide(move);
+    expect([unavailable.status, ((await unavailable.json()) as { error: string }).error]).toEqual([503, "AI_UNAVAILABLE"]);
+    store.decision = new DecisionGateway({ db: h.ctx.db, jev, log: h.ctx.log, port: 0 });
+    expect((await ws(h, ".decide", { method: "GET", token })).status).toBe(405);
+    expect((await ws(h, ".decide/x", { method: "POST", token, body: move })).status).toBe(404);
+    expect(await (await decide(move, "cpv1.bad.token")).json()).toMatchObject({ error: "SIGN_IN_EXPIRED" });
+
+    const res = await decide(move);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("access-control-allow-origin")).toBe("*");
+    expect(await res.json()).toEqual({ choice: "c5", confident: true, confidence: 0.9, probabilities: { e5: 0.1, c5: 0.9 } });
+    expect(asked[0]).toMatchObject({ state: { context: "1. e4" }, questions: { decision: { criteria: move.options, instructions: { goal: "Best move for black", rules: ["keep the king safe"] } } } });
+
+    // The tool's checks; nothing invalid reaches Jev.
+    const invalid = async (body: unknown) => { const r = await decide(body); return [r.status, ((await r.json()) as { error: string }).error]; };
+    expect(await invalid({ question: "x", options: { only: "one" } })).toEqual([400, "INVALID_INPUT"]);
+    expect(await invalid({ question: " ", options: { a: "A", b: "B" } })).toEqual([400, "INVALID_INPUT"]);
+    expect(await invalid({ question: "x", options: { "bad id": "a", b: "b" } })).toEqual([400, "INVALID_INPUT"]);
+    expect(await invalid({ question: "x", options: Object.fromEntries(Array.from({ length: 21 }, (_, i) => [`o${i}`, "x"])) })).toEqual([400, "INVALID_INPUT"]);
+    expect((await decide({ question: "x", options: { a: "A", b: "B" }, context: "x".repeat(300_000) })).status).toBe(413);
+    expect(asked).toHaveLength(1);
+
+    // Jev failing or running out of time.
+    fail = new Error("upstream 500");
+    expect(await invalid(move)).toEqual([502, "DECIDE_FAILED"]);
+    fail = Object.assign(new Error("timed out"), { name: "TimeoutError" });
+    expect(await invalid(move)).toEqual([504, "DECIDE_TIMEOUT"]);
+    fail = null;
+
+    const rows = h.ctx.db.prepare("SELECT owner_id,ok,choice,options FROM decision_events ORDER BY id").all();
+    expect(rows).toEqual([
+      { owner_id: "user_a1", ok: 1, choice: "c5", options: 2 },
+      { owner_id: "user_a1", ok: 0, choice: null, options: 2 },
+      { owner_id: "user_a1", ok: 0, choice: null, options: 2 },
+    ]);
+
+    // The SDK: signed in by the fragment, preview and anonymous refused up front.
+    const sdk = (href: string) => {
+      const url = new URL(href);
+      const window: Record<string, unknown> = {
+        location: { protocol: url.protocol, host: url.host, pathname: url.pathname, search: url.search, hash: url.hash },
+        history: { state: null, replaceState: () => undefined },
+        console: { info: () => undefined },
+        fetch: async (target: string, init: { method: string; headers: Record<string, string>; body?: string }) => {
+          const res = await h.request(new URL(target).pathname, { host: "workspace", method: init.method, headers: init.headers, body: init.body });
+          return { status: res.status, ok: res.status >= 200 && res.status < 300, text: () => res.text() };
+        },
+      };
+      window.window = window;
+      vm.runInNewContext(CLAWPAGE_SDK_JS, window);
+      return new (window as unknown as { Clawpage: new () => { user: unknown; ai: { decide(d: unknown): Promise<unknown> } } }).Clawpage();
+    };
+    const page = `https://${h.ctx.cfg.workspaceHost}/u/owner/share/toefl/`;
+    const cp = sdk(`${page}#cpv=${encodeURIComponent(token)}`);
+    expect(await cp.ai.decide(move)).toMatchObject({ choice: "c5", confident: true });
+    await expect(cp.ai.decide({ question: "x", options: {} })).rejects.toMatchObject({ name: "ClawpageError", status: 400, code: "INVALID_INPUT" });
+    await expect(sdk(page).ai.decide(move)).rejects.toMatchObject({ code: "SIGN_IN_REQUIRED" });
+    await expect(sdk("file:///home/gem/workspace/share/toefl/index.html").ai.decide(move)).rejects.toMatchObject({ code: "PREVIEW" });
+    data.revokeGrant("owner_1", "toefl", a.id);
+    await expect(cp.ai.decide(move)).rejects.toMatchObject({ code: "SIGN_IN_EXPIRED" });
+    expect(cp.user).toBeNull();
+  } finally {
+    await h.shutdown();
+  }
+});
+
+it("limits a visitor's decisions per page, apart from their AI answers", () => {
+  const data = new ClawpageData(path.join(fs.mkdtempSync(path.join(os.tmpdir(), "cp-decide-")), "clawpages"));
+  const now = Date.UTC(2026, 10, 4, 12, 0, 30);
+  const allowed = (n: number, f: () => boolean) => Array.from({ length: n }, f).filter(Boolean).length;
+  expect(allowed(31, () => data.allowDecide("v", "owner_1", "go", now))).toBe(30);
+  expect(data.allowDecide("v", "owner_1", "chess", now)).toBe(true);
+  expect(data.allowAi("v", "owner_1", "go", now)).toBe(true);
+  // A new minute, up to the day's 1000.
+  let total = 30;
+  for (let minute = 1; total < 1000; minute++) total += allowed(30, () => data.allowDecide("v", "owner_1", "go", now + minute * 60_000));
+  expect(total).toBe(1000);
+  expect(data.allowDecide("v", "owner_1", "go", now + 40 * 60_000)).toBe(false);
 });
 
 it("returns only to paths inside the page, and reads JSON out of an answer", () => {

@@ -78,6 +78,9 @@ window.aio = {
     var args = {}; for (var k in (opts || {})) args[k] = opts[k];
     if (typeof input === "string") args.input = input; else args.messages = input;
     return call("ai", args);
+  }, decide: function(d){
+    d = d || {};
+    return call("decide", { question: d.question, options: d.options, context: d.context, rules: d.rules });
   } },
   fetch: function(url, opts){
     var args = { url: String(url) }; for (var k in (opts || {})) args[k] = opts[k];

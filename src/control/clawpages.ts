@@ -48,6 +48,8 @@ export const SANDBOX_SIGN_IN_MS = 30 * 24 * 3600_000;
 const SANDBOX_PREFIX = "cpb1.";
 /** AI answers a signed-in visitor may ask of one page, on their own account. */
 export const AI_LIMITS = { perMinute: 10, perDay: 300 };
+/** Decisions (Jev, on the deployment's key, recorded against the visitor) one signed-in visitor may ask of one page. */
+export const DECIDE_LIMITS = { perMinute: 30, perDay: 1000 };
 
 export class DataError extends Error {
   constructor(readonly status: number, readonly code: string, message: string) {
@@ -318,12 +320,21 @@ export class ClawpageData {
 
   /** Count one AI answer for a visitor on a page; false once they went over their share (a minute's, or a day's). */
   allowAi(visitorId: string, userId: string, page: string, now = Date.now()): boolean {
+    return this.#allowVisitor("ai", AI_LIMITS, visitorId, userId, page, now);
+  }
+
+  /** The same for a decision. */
+  allowDecide(visitorId: string, userId: string, page: string, now = Date.now()): boolean {
+    return this.#allowVisitor("decide", DECIDE_LIMITS, visitorId, userId, page, now);
+  }
+
+  #allowVisitor(kind: string, limits: { perMinute: number; perDay: number }, visitorId: string, userId: string, page: string, now: number): boolean {
     const minute = Math.floor(now / 60_000), day = Math.floor(now / 86_400_000);
     if (minute !== this.#aiWindows.minute) { this.#aiWindows.minute = minute; this.#aiMinute.clear(); }
     if (day !== this.#aiWindows.day) { this.#aiWindows.day = day; this.#aiDay.clear(); }
-    const key = `${visitorId}\u0000${userId}\u0000${page}`;
+    const key = `${kind}\u0000${visitorId}\u0000${userId}\u0000${page}`;
     const m = this.#aiMinute.get(key) ?? 0, d = this.#aiDay.get(key) ?? 0;
-    if (m >= AI_LIMITS.perMinute || d >= AI_LIMITS.perDay) return false;
+    if (m >= limits.perMinute || d >= limits.perDay) return false;
     this.#aiMinute.set(key, m + 1);
     this.#aiDay.set(key, d + 1);
     return true;

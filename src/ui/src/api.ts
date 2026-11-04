@@ -345,6 +345,8 @@ export const api = {
   /** A message widget's calls (WidgetCard): the account's model, and a web fetch through the server. */
   widgetAi: (name: string, args: Record<string, unknown>) =>
     request<{ text: string; json?: unknown; model: string }>("/api/widgets/ai", { method: "POST", body: { ...args, name } }),
+  widgetDecide: (name: string, args: Record<string, unknown>) =>
+    request<{ choice: string; confident: boolean; confidence: number; probabilities: Record<string, number> }>("/api/widgets/decide", { method: "POST", body: { ...args, name } }),
   widgetFetch: (name: string, args: Record<string, unknown>) =>
     request<{ status: number; url: string; contentType: string; text?: string; base64?: string; truncated: boolean }>("/api/widgets/fetch", { method: "POST", body: { ...args, name } }),
 

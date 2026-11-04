@@ -483,6 +483,7 @@ owner 容器休眠期间新成员的端口隔离规则先记下，容器下次�
   （`src/control/widgetRuntime.ts`，`window.aio`），运行时只与外层控制台用 postMessage 通信（控制台只认来自该 iframe 的消息）：
   控制台交给它消息里的 `data`、标题、账号（`user`）、界面语言和主题（`--aio-bg`/`--aio-surface`/`--aio-text`/`--aio-accent` 等具体色值，跟随深浅切换）；高度随内容自适应（60–1600 px）；
   并代为调用本账号被允许的能力：`aio.ai.ask` → `POST /api/widgets/ai`（本账号的模型，与 clawpage `.ai` 相同：无工具、无记忆，用量记本账号，每分钟 20 次），
+  `aio.ai.decide` → `POST /api/widgets/decide`（与 clawpage `.decide` 相同的 Jev 决策，记入本账号的 `decision_events`，每分钟 30 次），
   `aio.fetch` → `POST /api/widgets/fetch`（由本账号沙箱发出，只许公网地址、每次重定向都复查，≤2 MB，不带浏览器 cookie，每分钟 60 次；不许设置 Host、Cookie 等头），
   `aio.send(text)` 把文字放进主会话输入框（接在已有文字后、聚焦，**由人确认发送**，不自动发出），`aio.open(url)` 新标签页打开 http(s) 链接。
   组件页面本身也能直接联网（CSP 不限制连接，受各站 CORS 约束）。伴随站对写请求与 WebSocket 都核对 Origin，组件的不透明来源（`null`）够不到终端、文件等沙箱入口。
@@ -729,7 +730,7 @@ Jev（TypeSafe System One）根据状态和选项返回选择、各选项概率�
 
 - **派单评分**：见[派单与历史召回](#2-派单与历史召回)。
 - **`decide` 工具**：执行会话注册 MCP 服务 `aio_decision`（成员网关 `/decision/<运行时令牌>/mcp`），参数 `question`、`options`
-  （id → 含义，2–20 个）、可选 `context` 与 `rules`。每次调用的账号、问题、选项数、选择、置信度、耗时与用量记入宿主库 `decision_events`，不设限额。
+  （id → 含义，2–20 个）、可选 `context` 与 `rules`。每次调用的账号、问题、选项数、选择、置信度、耗时与用量记入宿主库 `decision_events`，执行器调用不设限额（clawpage 与自建组件调用的限额见「Clawpages」「自建组件」）。
 
 没有 key 时两项都不出现。
 
@@ -940,6 +941,11 @@ Android 手机用 USB 接在装了 Mac App 的 Mac 上，由 App 运行的 `bin/
   也碰不到该账号的文件与历史。系统提示 = 平台说明（页面名、主人、无工具、按要求的语言作答；`json: true` 时只回一个 JSON 对象）+ 页面目录里 `prompts/<名>.md`（≤32 KB，随页面发布，访客可见），
   `json: true` 时服务端解析出 `json`（解析不了为 null）。输入为 `input` 文本或 `messages`（≤40 条、共 ≤6 万字，最后一条是用户；用户消息的 `content` 也可以是 `[{type:"text",text}, {type:"image_url",image_url:{url:"data:image/jpeg;base64,…"}}]`，图片只收内嵌的 JPEG/PNG/WebP/GIF data URL、每次 ≤4 张、每张 ≤2 MB，不抓取网址，请求体 ≤9 MB；错误码 `INVALID_IMAGE`、`IMAGE_TOO_LARGE`、`TOO_MANY_IMAGES`），`effort` 为 `low`（默认）/`medium`/`high`。
   限额：每人每页每分钟 10 次、每天 300 次（超出 429）；超时 120 秒。错误码：`SIGN_IN_REQUIRED`、`PROMPT_NOT_FOUND`、`RATE_LIMITED`、`AI_BUSY`（账号额度）、`AI_FAILED`、`AI_TIMEOUT`、`AI_UNAVAILABLE`。
+- **AI 决策**：`cp.ai.decide({ question, options, context, rules })` → `POST .decide`，必须登录，鉴权、CORS、`OPTIONS` 与方法检查同 `.ai`。与执行器的 `decide` 工具是同一个实现（`DecisionGateway.decide`）：
+  参数校验相同（`options` 为 id → 含义、2–20 个，id 只含字母数字与 `_.:-`、≤40 字符；`question` ≤2000、`context` ≤8000、`rules` ≤20 条各 ≤500 字符，超长截断；请求体 ≤256 KB），
+  在宿主侧用部署的 Jev 密钥调用（密钥不到页面，页面也不得自己调用 Jev），结果原样返回 `{choice, confident, confidence, probabilities}`，每次调用以**访客账号**记入 `decision_events`。
+  限额：每人每页每分钟 30 次、每天 1000 次（与 `.ai` 分开计）。错误码：`SIGN_IN_REQUIRED`/`SIGN_IN_EXPIRED`（401）、`INVALID_INPUT`（400）、`RATE_LIMITED`（429）、`AI_UNAVAILABLE`（503，部署未配置 Jev）、
+  `DECIDE_FAILED`（502）、`DECIDE_TIMEOUT`（504，超过 `PA_JEV_TIMEOUT_SECONDS`）；`file://` 预览里 SDK 直接给 `PREVIEW`。适合在已知候选中选一个（如对弈页面的电脑从合法着法里选一步、几件候选里挑最合适的），自由文本仍用 `ai.ask`。
 - **主人身份**：控制台点「打开」时由 `POST /api/clawpages/<页面名>/open` 生成主人链接：页面地址后附 `#cp=<令牌>`（片段不发给服务器），
   令牌用部署自己的密钥（`<PA_DATA_DIR>/clawpages-key`）签名，只对该账号该页有效、12 小时过期；SDK 取走后立即从地址栏抹掉。持令牌可读写所有表、不受限流，但不能改表权限或删表（页面脚本可能出自协作者之手；这两项只在控制台与沙箱 CLI 做）。
 - **执行器**：沙箱 CLI `data tables|create|permission|drop|list|get|put|patch|add|incr|delete|export|import` 以主人身份操作；每次执行提示词附上本账号
@@ -972,7 +978,7 @@ Android 手机用 USB 接在装了 Mac App 的 Mac 上，由 App 运行的 `bin/
   读取（只给本账号，带版本时长期缓存）：Clawpages 列表与详情用它做封面（没有时用标题首字），主会话里指向本账号 clawpage 的卡片也显示它（左侧竖条缩略图，卡片保持紧凑）。
 - **发布检查**：与封面渲染是同一次页面加载（匿名访客视角），渲染器在加载期间收集 Runtime、Log、Network 事件（只留错误与请求相关的几类，缓冲最多 1000 条；每页先切到空白页、读完上一页残留的事件再清空，上一页的定时器和请求不会算到下一页），
   `publish`、`cover <页面名>`、`cover --missing` 的每页结果附 `check`：`errors`（脚本异常与 `console.error`，附位置）、`failedRequests`（状态码 ≥400 或加载失败的请求；
-  本页数据接口 `.data`/`.ai`/`.auth` 失败时读取其 JSON 错误响应附上错误码，如 `TABLE_NOT_FOUND`、`PERMISSION_DENIED`）、`blank`（首屏无文字，也无图片/画布/表单控件/iframe 等元素；纯 CSS 方块算空白）、`ok`。
+  本页数据接口 `.data`/`.ai`/`.decide`/`.auth` 失败时读取其 JSON 错误响应附上错误码，如 `TABLE_NOT_FOUND`、`PERMISSION_DENIED`）、`blank`（首屏无文字，也无图片/画布/表单控件/iframe 等元素；纯 CSS 方块算空白）、`ok`。
   `TABLE_NOT_FOUND` 既可能是没建表，也可能是表为 private（访客看不到）：skill 要求先用 `data tables` 区分，后者改页面只在 `cp.owner` 时读该表，绝不为通过检查放宽 private 表的权限。
   匿名访客的预期结果（`SIGN_IN_REQUIRED`、`RECORD_NOT_FOUND`）单独列在 `expected`，不算问题；被取消或中止的加载与 favicon 不报。
   上限：每类 10 条（超出时给 `omitted` 总数），每条文字 200 字；最多读取 5 个本页数据接口的错误响应体，每个不超过 4 KB、最多等 3 秒，整页仍受 60 秒闹钟约束。
@@ -984,7 +990,7 @@ Android 手机用 USB 接在装了 Mac App 的 Mac 上，由 App 运行的 `bin/
 - **存储与隔离**：快照存在宿主 `<PA_DATA_DIR>/shares/<账号>/<页面名>/`，访问时只读快照，不触碰沙箱。每页最多 200 个文件、20 MB，每账号 100 页；
   路径拒绝 `..`、隐藏文件、反斜杠与控制字符。页面位于工作区来源，响应带 `Content-Security-Policy: sandbox allow-scripts …`（无 `allow-same-origin`），
   读不到工作区会话、cookie 或 localStorage；另带 `nosniff`、`no-referrer`、`noindex`，不设置 cookie。页面文件一律 `Cache-Control: private, no-cache`（只写 `no-cache` 时 Cloudflare 的 Browser Cache TTL 会把 js/css 等改成 `max-age=14400`，重发布后访客最多 4 小时还在跑旧脚本；`private` 它不改写）并带弱 ETag 与 Last-Modified（经 Cloudflare 时 ETag 会被去掉，靠 Last-Modified；每次发布的文件时间至少比上一版晚一秒）：
-  每次打开都向服务器确认，未变的文件回 304、不重传，同名重发布后访客立刻看到新版本，不会被浏览器或 CDN 缓存挡住。页面、其 `.data`、`.auth`、`.ai`（后两者凭访客令牌）与凭协作者令牌访问的 `.api` 是全站仅有的不需要登录的路径。
+  每次打开都向服务器确认，未变的文件回 304、不重传，同名重发布后访客立刻看到新版本，不会被浏览器或 CDN 缓存挡住。页面、其 `.data`、`.auth`、`.ai`、`.decide`（后三者凭访客令牌）与凭协作者令牌访问的 `.api` 是全站仅有的不需要登录的路径。
 
 ### 数据图表（消息里的 K 线、走势、对比、占比）
 

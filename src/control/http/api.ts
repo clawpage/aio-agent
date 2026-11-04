@@ -23,6 +23,7 @@ import { VoiceLog, type VoiceRecord } from "../voiceLog.js";
 import type { AppContext } from "../context.js";
 import { DataError, SANDBOX_SIGN_IN_MS } from "../clawpages.js";
 import { SHARE_NAME, aiInput, parseJsonAnswer } from "../share.js";
+import { DecisionError, decisionInput } from "../decision.js";
 import { AiError } from "../clawpageAi.js";
 import {
   InvalidConversationTitleError,
@@ -738,7 +739,7 @@ export function createApiRouter(context: AppContext): Router {
     res.setHeader("Cache-Control", "no-store");
     res.json({ widgets: context.share?.widgets?.list(ctxOf(req).session!.ownerId) ?? [] });
   });
-  const widgetCall = (req: Request, res: Response, kind: "ai" | "fetch", perMinute: number) => {
+  const widgetCall = (req: Request, res: Response, kind: "ai" | "decide" | "fetch", perMinute: number) => {
     const userId = ctxOf(req).session!.ownerId;
     const name = String(req.body?.name ?? "");
     const widgets = context.share?.widgets;
@@ -767,6 +768,19 @@ export function createApiRouter(context: AppContext): Router {
     } catch (err) {
       if (err instanceof DataError || err instanceof AiError) res.status(err.status).json({ error: err.code, message: err.message });
       else res.status(500).json({ error: "AI_FAILED", message: "The request failed" });
+    }
+  });
+  // Jev's choice among the options a widget lists, recorded against this account like its executors' decisions.
+  router.post("/widgets/decide", requireKind("primary"), requireSession, async (req, res) => {
+    const call = widgetCall(req, res, "decide", 30);
+    if (!call) return;
+    const decision = context.share?.decision;
+    if (!decision?.enabled) { res.status(503).json({ error: "AI_UNAVAILABLE", message: "This deployment offers no decisions" }); return; }
+    try {
+      res.json(await decision.decide(call.userId, decisionInput(req.body ?? {})));
+    } catch (err) {
+      if (err instanceof DecisionError) res.status(err.code === "INVALID_INPUT" ? 400 : err.code === "DECIDE_TIMEOUT" ? 504 : 502).json({ error: err.code, message: err.message });
+      else res.status(500).json({ error: "DECIDE_FAILED", message: "The request failed" });
     }
   });
   router.post("/widgets/fetch", requireKind("primary"), requireSession, async (req, res) => {

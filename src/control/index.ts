@@ -521,6 +521,8 @@ async function main(): Promise<void> {
   ctx.share.provision(ctx.cfg);
   const decision=new DecisionGateway({db:ctx.db,jev:ctx.jev!,log:ctx.log,port:ctx.cfg.memberModelPort??4902});
   decision.provision(ctx.cfg);
+  // Clawpages' signed-in visitors (and the console's widgets) ask the same decisions, recorded against their own account.
+  ctx.share.decision=decision;
   const kb=new KbGateway({cfg:ctx.cfg,log:ctx.log,port:ctx.cfg.memberModelPort??4902,usernameOf:id=>account("SELECT username AS v FROM owners WHERE id=?",id)});
   kb.provision(ctx.cfg);
   const haDashboard=HaDashboard.from(ctx.cfg,ctx.log);

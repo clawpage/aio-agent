@@ -46,6 +46,30 @@ export function decisionMcpServers(cfg: Config): Record<string, unknown> {
 export const DECISION_POLICY =
   "When you need to choose among several clearly defined candidates and the basis for the judgment is already complete, you can call the decide tool from aio_decision to get an independent judgment (with probabilities); it only gives advice, does not replace your own fact-checking, and is not user authorization.";
 
+export interface DecisionInput { question: string; criteria: Record<string, string>; rules: string[]; context: string }
+export interface DecisionResult { choice: string; confident: boolean; confidence: number; probabilities: Record<string, number> }
+
+export class DecisionError extends Error {
+  /** `detail`: the underlying failure, for the executor and the log (never the Jev key). */
+  constructor(readonly code: "INVALID_INPUT" | "DECIDE_FAILED" | "DECIDE_TIMEOUT", message: string, readonly detail = message) {
+    super(message);
+  }
+}
+
+/** A decision's arguments, checked and trimmed to their limits (the tool's and a clawpage's alike); throws INVALID_INPUT. */
+export function decisionInput(args: Record<string, unknown>): DecisionInput {
+  const question = typeof args.question === "string" ? args.question.trim().slice(0, 2000) : "";
+  const options = args.options && typeof args.options === "object" && !Array.isArray(args.options) ? Object.entries(args.options as Record<string, unknown>) : [];
+  const invalid = (message: string) => new DecisionError("INVALID_INPUT", message);
+  if (!question) throw invalid("question must not be empty");
+  if (options.length < 2 || options.length > MAX_OPTIONS) throw invalid(`options needs 2-${MAX_OPTIONS} candidates`);
+  if (options.some(([id, note]) => !OPTION_ID.test(id) || typeof note !== "string" || !note.trim())) throw invalid("option ids can only use letters, digits, underscores, dots, colons, and hyphens (at most 40 characters), and descriptions must not be empty");
+  const criteria = Object.fromEntries(options.map(([id, note]) => [id, String(note).slice(0, 1000)]));
+  const rules = Array.isArray(args.rules) ? args.rules.filter((r): r is string => typeof r === "string").map((r) => r.slice(0, 500)).slice(0, 20) : [];
+  const context = typeof args.context === "string" ? args.context.slice(0, 8000) : "";
+  return { question, criteria, rules, context };
+}
+
 export class DecisionGateway {
   #db: Db;
   #jev: Jev;
@@ -134,33 +158,46 @@ export class DecisionGateway {
     }
   }
 
+  /** The MCP tool's answer: the decision as text, or its error marked as one. */
   async #decide(userId: string, args: Record<string, unknown>): Promise<unknown> {
     const text = (value: unknown, isError = false) => ({ content: [{ type: "text", text: typeof value === "string" ? value : JSON.stringify(value, null, 2) }], ...(isError ? { isError: true } : {}) });
-    const question = typeof args.question === "string" ? args.question.trim().slice(0, 2000) : "";
-    const options = args.options && typeof args.options === "object" && !Array.isArray(args.options) ? Object.entries(args.options as Record<string, unknown>) : [];
-    if (!question) return text("question must not be empty", true);
-    if (options.length < 2 || options.length > MAX_OPTIONS) return text(`options needs 2-${MAX_OPTIONS} candidates`, true);
-    if (options.some(([id, note]) => !OPTION_ID.test(id) || typeof note !== "string" || !note.trim())) return text("option ids can only use letters, digits, underscores, dots, colons, and hyphens (at most 40 characters), and descriptions must not be empty", true);
-    const criteria = Object.fromEntries(options.map(([id, note]) => [id, String(note).slice(0, 1000)]));
-    const rules = Array.isArray(args.rules) ? args.rules.filter((r): r is string => typeof r === "string").map((r) => r.slice(0, 500)).slice(0, 20) : [];
-    const context = typeof args.context === "string" ? args.context.slice(0, 8000) : "";
+    try {
+      return text(await this.decide(userId, decisionInput(args)));
+    } catch (err) {
+      if (err instanceof DecisionError && err.code === "INVALID_INPUT") return text(err.message, true);
+      return text(`The judgment service is temporarily unavailable: ${err instanceof DecisionError ? err.detail : String(err)}`, true);
+    }
+  }
+
+  /** Whether decisions can be made at all (Jev has a key). */
+  get enabled(): boolean {
+    return this.#jev.enabled;
+  }
+
+  /**
+   * One decision for an account, recorded against it: what executors get through the tool and a
+   * signed-in visitor's clawpage through `.decide`. Throws a DecisionError when Jev fails or times out.
+   */
+  async decide(userId: string, input: DecisionInput): Promise<DecisionResult> {
+    const { question, criteria, rules, context } = input;
     const started = Date.now();
     const record = (row: { ok: boolean; choice?: string; confidence?: number; error?: string; usage?: unknown }) => {
       try {
         this.#db.prepare("INSERT INTO decision_events (created_at,owner_id,ok,latency_ms,question,options,choice,confidence,error,usage_json) VALUES (?,?,?,?,?,?,?,?,?,?)")
-          .run(started, userId, row.ok ? 1 : 0, Date.now() - started, question.slice(0, 500), options.length, row.choice ?? null, row.confidence ?? null, row.error ?? null, row.usage === undefined ? null : JSON.stringify(row.usage));
+          .run(started, userId, row.ok ? 1 : 0, Date.now() - started, question.slice(0, 500), Object.keys(criteria).length, row.choice ?? null, row.confidence ?? null, row.error ?? null, row.usage === undefined ? null : JSON.stringify(row.usage));
       } catch { /* monitoring never fails the call */ }
     };
     try {
       const result = await this.#jev.decide({ context, now: new Date().toISOString() }, { decision: { criteria, instructions: { goal: question, ...(rules.length ? { rules } : {}) } } });
       const answer = result.answers.decision!;
       record({ ok: true, choice: answer.choice, confidence: answer.confidence, usage: result.usage });
-      return text({ choice: answer.choice, confident: confident(answer), confidence: answer.confidence, probabilities: answer.probabilities });
+      return { choice: answer.choice, confident: confident(answer), confidence: answer.confidence, probabilities: answer.probabilities };
     } catch (err) {
       const error = err instanceof Error ? err.message : String(err);
       record({ ok: false, error });
       this.#log.warn("decision failed", { error });
-      return text(`The judgment service is temporarily unavailable: ${error}`, true);
+      const timedOut = err instanceof Error && err.name === "TimeoutError";
+      throw new DecisionError(timedOut ? "DECIDE_TIMEOUT" : "DECIDE_FAILED", timedOut ? "The judgment took too long" : "The judgment service is temporarily unavailable", error);
     }
   }
 }

@@ -119,6 +119,17 @@ it("publishes widgets over the share channel and frames them for the signed-in a
     // Without CSRF the console's own origin refuses.
     expect((await h.request("/api/widgets/ai", { method: "POST", headers: { cookie, "content-type": "application/json" }, body: JSON.stringify({ name: "board", input: "hi" }) })).status).toBe(403);
 
+    // Decisions are Jev's, recorded against this account.
+    const decideCall = (body: unknown) => h.request("/api/widgets/decide", { method: "POST", headers: { cookie, "x-csrf-token": csrf, "content-type": "application/json" }, body: JSON.stringify(body) });
+    const pick = { name: "board", question: "Which first?", options: { a: "A", b: "B" } };
+    expect((await decideCall(pick)).status).toBe(503);
+    const decide = vi.fn(async () => ({ choice: "b", confident: true, confidence: 0.8, probabilities: { a: 0.2, b: 0.8 } }));
+    store.decision = { enabled: true, decide };
+    expect(await (await decideCall(pick)).json()).toEqual({ choice: "b", confident: true, confidence: 0.8, probabilities: { a: 0.2, b: 0.8 } });
+    expect(decide).toHaveBeenCalledWith("owner_1", { question: "Which first?", criteria: { a: "A", b: "B" }, rules: [], context: "" });
+    expect(await (await decideCall({ ...pick, options: { a: "A" } })).json()).toMatchObject({ error: "INVALID_INPUT" });
+    expect((await decideCall({ ...pick, name: "nope" })).status).toBe(404);
+
     // Web requests run in the sandbox, checked first.
     const webFetch = vi.spyOn(h.ctx.documents, "webFetch").mockResolvedValue({ status: 200, url: "https://example.com/", contentType: "text/plain", truncated: false, text: "hello" });
     const get = (body: unknown) => h.request("/api/widgets/fetch", { method: "POST", headers: { cookie, "x-csrf-token": csrf, "content-type": "application/json" }, body: JSON.stringify(body) });

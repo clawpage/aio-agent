@@ -177,7 +177,7 @@ export class WidgetStore {
   }
 
   /** At most `perMinute` calls of one kind per account; false when this one is over. */
-  allow(userId: string, kind: "ai" | "fetch", perMinute: number): boolean {
+  allow(userId: string, kind: "ai" | "decide" | "fetch", perMinute: number): boolean {
     const key = `${kind}:${userId}`;
     const now = Date.now();
     const recent = (this.#calls.get(key) ?? []).filter((at) => now - at < 60_000);

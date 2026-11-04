@@ -99,11 +99,11 @@ export function WidgetCard({ spec }: { spec: WidgetSpec }) {
     const post = (message: Message) => frame.current?.contentWindow?.postMessage(message, "*");
     const call = async (id: string, op: unknown, args: Record<string, unknown>) => {
       if (calls.current >= MAX_CALLS) { post({ aio: "result", id, ok: false, error: { code: "BUSY", message: t.cards.widget.busy } }); return; }
-      if (op !== "ai" && op !== "fetch") { post({ aio: "result", id, ok: false, error: { code: "BAD_OP", message: t.cards.widget.callFailed } }); return; }
+      if (op !== "ai" && op !== "decide" && op !== "fetch") { post({ aio: "result", id, ok: false, error: { code: "BAD_OP", message: t.cards.widget.callFailed } }); return; }
       calls.current++;
       try {
         const name = latest.current.spec.component;
-        const value = op === "ai" ? await api.widgetAi(name, args) : await api.widgetFetch(name, args);
+        const value = op === "ai" ? await api.widgetAi(name, args) : op === "decide" ? await api.widgetDecide(name, args) : await api.widgetFetch(name, args);
         post({ aio: "result", id, ok: true, value });
       } catch (err) {
         const error = err instanceof ApiError

@@ -129,16 +129,17 @@ test("a widget that cannot load says so and still shows its data; a bad block st
 /** A widget written against the real runtime the server injects (window.aio), served with the server's CSP. */
 const RUNTIME_WIDGET = `<!doctype html><html><head><meta charset="utf-8"><title>w</title>
 <style>.panel{background:var(--aio-surface);color:var(--aio-text);border-radius:var(--aio-radius);padding:12px}</style></head><body>
-<div class="panel"><div id="items"></div><div id="answer"></div><div id="fetched"></div><button id="ask">ask</button><button id="get">get</button><button id="send">send</button><button id="more">more</button></div>
+<div class="panel"><div id="items"></div><div id="answer"></div><div id="decided"></div><div id="fetched"></div><button id="ask">ask</button><button id="decide">decide</button><button id="get">get</button><button id="send">send</button><button id="more">more</button></div>
 <script>
   aio.onData((d) => { document.getElementById("items").textContent = d.items.join(" / "); });
   document.getElementById("ask").onclick = () => aio.ai.ask("hi", { json: true }).then((a) => { document.getElementById("answer").textContent = "AI:" + a.json.ok; }, (e) => { document.getElementById("answer").textContent = "ERR:" + e.code; });
+  document.getElementById("decide").onclick = () => aio.ai.decide({ question: "q", options: { a: "A", b: "B" } }).then((d) => { document.getElementById("decided").textContent = "PICK:" + d.choice; }, (e) => { document.getElementById("decided").textContent = "ERR:" + e.code; });
   document.getElementById("get").onclick = () => aio.fetch("https://example.com/").then((r) => { document.getElementById("fetched").textContent = r.status + ":" + r.text; }, (e) => { document.getElementById("fetched").textContent = "ERR:" + e.code; });
   document.getElementById("send").onclick = () => aio.send("解释第一项");
   document.getElementById("more").onclick = () => { const p = document.createElement("div"); p.style.height = "300px"; p.id = "tall"; document.body.appendChild(p); };
 </script></body></html>`;
 
-test("the server's injected runtime drives the card: data, theme variables, AI, fetch, send and its own height", async ({ page }) => {
+test("the server's injected runtime drives the card: data, theme variables, AI, decisions, fetch, send and its own height", async ({ page }) => {
   const { injectRuntime } = await import("../../src/control/widgets.js");
   await mockConsole(page, { conversations: [] });
   await page.route("**/api/main*", (r) => r.fulfill({ json: { mode: "tasks", tasks: [task(`看板：\n\n${block({ component: "board", data: { items: ["甲", "乙"] } })}`)], nextBefore: null } }));
@@ -149,6 +150,7 @@ test("the server's injected runtime drives the card: data, theme variables, AI, 
     body: injectRuntime(RUNTIME_WIDGET, { items: ["example"] }),
   }));
   await page.route((url) => url.pathname === "/api/widgets/ai", (r) => r.fulfill({ json: { text: '{"ok":"yes"}', json: { ok: "yes" }, model: "m" } }));
+  await page.route((url) => url.pathname === "/api/widgets/decide", (r) => r.fulfill({ json: { choice: r.request().postDataJSON().options.b ? "b" : "?", confident: true, confidence: 0.9, probabilities: { a: 0.1, b: 0.9 } } }));
   await page.route((url) => url.pathname === "/api/widgets/fetch", (r) => r.fulfill({ status: 403, json: { error: "BLOCKED", message: "Only public web addresses can be fetched" } }));
   await page.goto("/");
   // The app's boot cover sits over everything until it lifts; clicks inside the frame would land on it.
@@ -178,6 +180,8 @@ test("the server's injected runtime drives the card: data, theme variables, AI, 
   expect(surface).not.toBe("rgba(0, 0, 0, 0)");
   await frame.locator("#ask").click();
   await expect(frame.locator("#answer")).toHaveText("AI:yes");
+  await frame.locator("#decide").click();
+  await expect(frame.locator("#decided")).toHaveText("PICK:b");
   await frame.locator("#get").click();
   await expect(frame.locator("#fetched")).toHaveText("ERR:BLOCKED");
   const composer = page.getByRole("textbox", { name: "消息" });

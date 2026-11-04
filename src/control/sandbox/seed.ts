@@ -498,7 +498,7 @@ def cdn_added(url):
 
 
 def own_data(path):
-    return path in (".data", ".ai", ".auth") or path.startswith(".data/") or path.startswith(".auth/")
+    return path in (".data", ".ai", ".decide", ".auth") or path.startswith(".data/") or path.startswith(".auth/")
 
 
 def fetch_bodies(page, events, page_url):
@@ -1115,6 +1115,7 @@ await cp.signOut();                             // forget this page's sign-in; t
 const mine = cp.table("progress");              // a per-user table: each person's own records
 await mine.put("state", { day: 3, done: [1, 2] });
 const { text, json } = await cp.ai.ask("Essay: ...", { prompt: "grade", json: true });   // the visitor's own AI
+const { choice } = await cp.ai.decide({ question: "Best move for white", options: { d4: "pawn to d4", nf3: "knight to f3" }, context: "position: ..." });   // Jev picks one
 \`\`\`
 
 - Without \`signIn: "auto"\`, a person is signed in only right after pressing your sign-in button (the page cannot keep it across reloads).
@@ -1124,7 +1125,7 @@ const { text, json } = await cp.ai.ask("Essay: ...", { prompt: "grade", json: tr
 - **Trying it yourself in the browser**: never ask the user to sign in for you. \`$CP sign-in <name>\` prints a link (valid 2 minutes); open it in your browser and you land on the page
   signed in as this account. From then on that browser stays signed in to all of this account's pages (their sign-in button and \`signIn: "auto"\` just work, also after reloads),
   so you can check per-user tables and real AI answers (\`ai.ask\`, photos included) end to end. If a page sends you to a console sign-in screen, run it again.
-- In a \`file://\` preview, \`signIn()\` signs in a stand-in person (\`id: "preview"\`) and \`ai.ask\` fails with \`PREVIEW\`: AI answers work once published.
+- In a \`file://\` preview, \`signIn()\` signs in a stand-in person (\`id: "preview"\`) and \`ai.ask\`/\`ai.decide\` fail with \`PREVIEW\`: AI answers work once published.
 
 **AI answers** (\`cp.ai.ask\`) need a signed-in visitor and run on *their* account (their model, counted in their usage, 10 a minute and 300 a day per page);
 the model has no tools, no web, no memory and nothing of their account: only the page's prompt and the messages it sends. Design that prompt as part of the page:
@@ -1135,7 +1136,26 @@ the model has no tools, no web, no memory and nothing of their account: only the
 - \`effort\`: \`low\` (default, fastest) for instant feedback, \`medium\`/\`high\` for harder judgement; a member account may be capped lower.
 - Errors: \`SIGN_IN_REQUIRED\`, \`PROMPT_NOT_FOUND\`, \`RATE_LIMITED\`, \`AI_BUSY\` (the account's quota), \`AI_FAILED\`/\`AI_TIMEOUT\`: say so and keep the person's input on the page.
 
-Describe the sign-in, the per-user tables and each prompt in the page's \`AGENTS.md\` (below), so whoever works on the page next keeps them working.
+**Decisions** (\`cp.ai.decide\`): when the page has to choose one of a few known candidates (a game AI picking among the legal moves it computed,
+the best match among some items, which hint to show next), have an independent judgment model (Jev) choose:
+
+\`\`\`js
+const { choice, probabilities, confidence, confident } = await cp.ai.decide({
+  question: "Which move is best for black?",                     // the goal
+  options: { e5: "pawn e7-e5", c5: "pawn c7-c5", nf6: "knight g8-f6" },  // 2-20 candidates: id -> what choosing it means
+  context: "Board (FEN): ... Moves so far: ...",                // the facts it needs (at most 8000 characters)
+  rules: ["Prefer moves that keep the king safe"],               // optional
+});
+\`\`\`
+
+- It needs a signed-in visitor (like \`ai.ask\`) and is recorded against them; it runs on this deployment's key, so the page holds no key and never calls Jev itself.
+  30 a minute and 1000 a day per person and page.
+- It only chooses: the page computes the candidates (only legal or valid ones), gives each a clear description, and acts on \`choice\` itself.
+  \`probabilities\` has every id; \`confident\` is false when the top choices are close (show it as a suggestion, or let the person pick). For free text, scores or explanations use \`ai.ask\`.
+- Ids use letters, digits, \`_ . : -\` (at most 40 characters). Errors: \`SIGN_IN_REQUIRED\`, \`INVALID_INPUT\`, \`RATE_LIMITED\`, \`AI_UNAVAILABLE\` (this deployment has no Jev),
+  \`DECIDE_FAILED\`/\`DECIDE_TIMEOUT\`: say so, and fall back to a simple rule of the page's own (e.g. a random legal move) so it keeps working.
+
+Describe the sign-in, the per-user tables, each prompt and each decision in the page's \`AGENTS.md\` (below), so whoever works on the page next keeps them working.
 
 ## Publish, update, pull, delete
 
@@ -4327,6 +4347,7 @@ The page has \`window.aio\` before its own scripts run:
 - Theme: style with the CSS variables \`--aio-bg --aio-surface --aio-text --aio-muted --aio-border --aio-accent --aio-attention --aio-success --aio-danger --aio-font --aio-radius\` (light and dark follow the console). The body is transparent, the message card is the background; use \`--aio-surface\` for inner panels. \`aio.onTheme(theme => ...)\` for canvas or chart colors.
 - Size: the frame follows the page's height by itself; never use \`100vh\` or heights over about 900 px. The width is the message width (360 to 760 px): design phone-first, no horizontal scrolling.
 - \`await aio.ai.ask(input or messages, {system, json: true, effort: "low"})\` gives \`{text, json}\`: an answer from the user's own AI (no tools, no memory; about 20 a minute).
+- \`await aio.ai.decide({question, options: {id: "what choosing it means"}, context, rules})\` gives \`{choice, confident, confidence, probabilities}\`: an independent judgment model (Jev) picks one of 2-20 known candidates (about 30 a minute; errors \`INVALID_INPUT\`, \`AI_UNAVAILABLE\`, \`DECIDE_FAILED\`, \`DECIDE_TIMEOUT\`).
 - \`await aio.fetch(url, {method, headers, body})\` gives \`{status, url, contentType, text or base64, truncated}\`: a web request made from this sandbox (public addresses only, at most 2 MB, no browser cookies; about 60 a minute). For live data such as prices, status pages and APIs. A plain \`fetch()\` from the page also works for APIs that allow any origin.
 - \`aio.send(text)\`: puts text in the user's input box for them to send to the main session (the user confirms it). For buttons like "Book this one" or "Explain this row".
 - \`aio.open(url)\`: opens a link in a new tab.
