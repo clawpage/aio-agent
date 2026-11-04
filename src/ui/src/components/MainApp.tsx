@@ -1,4 +1,5 @@
 import { useKeyboardViewport } from "../useKeyboardViewport";
+import { useDrawerSwipe } from "../useDrawerSwipe";
 import { PopupPresence, PopupSurface } from "./PopupMotion";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { forgetImages, setImageAccount } from "../imageStore";
@@ -50,7 +51,9 @@ export function MainApp({ firstSession }: { firstSession?: ReturnType<typeof api
     const [menuOpen, setMenuOpen] = useState(false);
     const menuButton = useRef<HTMLButtonElement>(null);
     const sidebar = useRef<HTMLElement>(null);
+    const scrim = useRef<HTMLElement>(null);
     const closeMenu = useCallback(() => { setMenuOpen(false); }, []);
+    const swipe = useDrawerSwipe({ enabled: mobile, open: menuOpen, setOpen: setMenuOpen, drawer: sidebar, scrim });
     useEffect(() => {
         const query = matchMedia("(max-width: 900px)");
         const change = () => { setMobile(query.matches); setMenuOpen(false); };
@@ -327,10 +330,10 @@ export function MainApp({ firstSession }: { firstSession?: ReturnType<typeof api
     const startFailed = status && !status.agent.sessionReady && !status.sandbox.idle ? status.sandbox.setupError ?? null : null;
     return <div className="app main-inbox-app">
     <button className="mobile-menu-button ghost" ref={menuButton} aria-label={t.nav.open} aria-expanded={menuOpen} aria-controls="main-navigation" onClick={() => setMenuOpen(true)}><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
-    <PopupPresence animate={mobile} onExited={() => menuButton.current?.focus()}>
-    {(!mobile || menuOpen) && <>
-    {mobile && <PopupSurface className="mobile-menu-backdrop" onClick={closeMenu} aria-hidden="true"/>}
-    <PopupSurface as="aside" ref={sidebar} id="main-navigation" className={`sidebar ${menuOpen ? "show-mobile" : ""}`} role={mobile && menuOpen ? "dialog" : undefined} aria-modal={mobile && menuOpen ? true : undefined} aria-label={t.nav.label} aria-hidden={mobile && !menuOpen ? true : undefined} inert={mobile && !menuOpen}>
+    <PopupPresence animate={mobile} onExited={() => { if (swipe.exited()) menuButton.current?.focus(); }}>
+    {(!mobile || menuOpen || swipe.pulling) && <>
+    {mobile && <PopupSurface ref={scrim} className={`mobile-menu-backdrop ${swipe.swiping ? "swiping" : ""}`} onClick={closeMenu} aria-hidden="true"/>}
+    <PopupSurface as="aside" ref={sidebar} id="main-navigation" className={`sidebar ${menuOpen || swipe.pulling || swipe.swiping ? "show-mobile" : ""} ${swipe.swiping ? "swiping" : ""}`} role={mobile && menuOpen ? "dialog" : undefined} aria-modal={mobile && menuOpen ? true : undefined} aria-label={t.nav.label} aria-hidden={mobile && !menuOpen ? true : undefined} inert={mobile && !menuOpen}>
       <button className="mobile-menu-close ghost" aria-label={t.nav.close} onClick={closeMenu}><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden><path d="M6 6l12 12M18 6L6 18"/></svg></button><div className="brand"><BrandMark/><div><strong>{t.app.brand.name}</strong><span className="muted tiny">{t.app.brand.tagline}</span></div></div>
       <button className={`ghost block ${view === "main" && !workspace ? "active" : ""}`} aria-current={view === "main" && !workspace ? "page" : undefined} onClick={() => navigate({ view: "main" })}><NavIcon name="chat"/>{t.nav.main}</button>
       <button className={`ghost block ${view === "tasks" && !workspace ? "active" : ""}`} aria-current={view === "tasks" && !workspace ? "page" : undefined} onClick={() => navigate({ view: "tasks" })}><NavIcon name="tasks"/>{t.nav.tasks}</button>
