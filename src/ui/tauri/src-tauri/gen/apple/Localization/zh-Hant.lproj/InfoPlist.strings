@@ -2,3 +2,8 @@
 "NSMicrophoneUsageDescription" = "語音輸入時錄下你說的話，轉成文字放進輸入框。";
 "NSCameraUsageDescription" = "拍照或錄影作為附件傳給一站。";
 "NSPhotoLibraryAddUsageDescription" = "下載圖片時存入你的相簿。";
+"NSPhotoLibraryUsageDescription" = "你在「iPhone 能力」裡打開相簿後，AI 依你的要求尋找照片，把用到的幾張縮小後傳給一站。";
+"NSRemindersFullAccessUsageDescription" = "你在「iPhone 能力」裡打開提醒事項後，AI 依你的要求查看、新增和完成提醒事項。";
+"NSRemindersUsageDescription" = "你在「iPhone 能力」裡打開提醒事項後，AI 依你的要求查看、新增和完成提醒事項。";
+"NSCalendarsFullAccessUsageDescription" = "你在「iPhone 能力」裡打開行事曆後，AI 依你的要求查看行程、新增行程。";
+"NSCalendarsUsageDescription" = "你在「iPhone 能力」裡打開行事曆後，AI 依你的要求查看行程、新增行程。";

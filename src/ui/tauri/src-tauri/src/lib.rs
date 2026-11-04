@@ -59,6 +59,9 @@ fn full_screen_on_ios(webview: tauri::webview::PlatformWebview) {
         // before Xcode links the app's Swift sources.
         let browser = AnyClass::get(c"AIODeviceBrowser").expect("native browser bridge");
         let _: () = msg_send![browser, installDeviceBrowser: wk];
+        // The iPhone's photos, reminders and calendar for the signed-in account's agent (DeviceTools.swift).
+        let tools = AnyClass::get(c"AIODeviceTools").expect("native device tools");
+        let _: () = msg_send![tools, installDeviceTools: wk];
     }
 }
 

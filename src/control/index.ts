@@ -17,6 +17,7 @@ import {PhoneGateway} from "./phone.js";
 import {UserBrowserGateway} from "./userBrowser.js";
 import {MacShellGateway} from "./macShell.js";
 import {MacNativeGateway} from "./macNative.js";
+import {IosDeviceGateway} from "./iosDevice.js";
 import {DeviceLinks} from "./deviceLink.js";
 import {ScheduleGateway} from "./scheduleTool.js";
 import {TaskKbGateway} from "./taskKb/gateway.js";
@@ -550,8 +551,14 @@ async function main(): Promise<void> {
   const macNative=new MacNativeGateway({cfg:ctx.cfg,log:ctx.log,port:ctx.cfg.memberModelPort??4902,links:deviceLinks,
     usernameOf:id=>account("SELECT username AS v FROM owners WHERE id=?",id),userIdOf,phone,browser:userBrowser,shell:macShell});
   macNative.provision(ctx.cfg);
-  // A first link gives the account's runtime the Mac tools; removing the last one takes them away.
-  deviceLinks.onAccountChange=id=>void (id===ctx.cfg.runtimeUserId?Promise.resolve(ctx):ctx.runtimeForUser!(id)).then(rt=>macNative.refresh(rt.cfg),
+  // The iPhone app links itself to the account signed in on it: its photos, reminders and calendar, as aio_ios.
+  const ios=new IosDeviceGateway({cfg:ctx.cfg,log:ctx.log,port:ctx.cfg.memberModelPort??4902,links:deviceLinks,
+    usernameOf:id=>account("SELECT username AS v FROM owners WHERE id=?",id),userIdOf,workspace:ctx.cfg.sandbox.containerWorkspaceDir,
+    filesFor:async id=>sandboxImageFiles(id===ctx.cfg.runtimeUserId?ctx:await ctx.runtimeForUser!(id))});
+  ios.provision(ctx.cfg);
+  ctx.ios=ios;
+  // A first link gives the account's runtime the Mac (or iPhone) tools; removing the last one takes them away.
+  deviceLinks.onAccountChange=id=>void (id===ctx.cfg.runtimeUserId?Promise.resolve(ctx):ctx.runtimeForUser!(id)).then(rt=>{macNative.refresh(rt.cfg);ios.refresh(rt.cfg);},
     err=>ctx.log.warn("Mac tools not refreshed",{error:err instanceof Error?err.message:String(err)}));
   // Each account's schedules live in its own runtime: the owner's here, a member's in its runtime.
   const schedule=new ScheduleGateway({port:ctx.cfg.memberModelPort??4902,log:ctx.log,
@@ -578,7 +585,7 @@ async function main(): Promise<void> {
       await runtime.browser.withCall("call",()=>undefined);
     }});
   browserGateway.provision(ctx.cfg);
-  const modelGateway=new MemberModelGateway(ctx.cfg,ctx.log,ctx.share,decision,kb,schedule,ctx.hostTokens,image,browserGateway,ha,printer,macNative,tts,taskKb);
+  const modelGateway=new MemberModelGateway(ctx.cfg,ctx.log,ctx.share,decision,kb,schedule,ctx.hostTokens,image,browserGateway,ha,printer,macNative,tts,taskKb,ios);
   await modelGateway.start();
   // Phone notifications: one key pair and one subscription store for every account.
   ctx.push=new PushService({db:ctx.db,log:ctx.log,keyFile:path.join(ctx.cfg.dataDir,"vapid.json"),subject:`https://${ctx.cfg.primaryHost}`,apns:loadApns(ctx.cfg.apns)});

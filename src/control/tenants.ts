@@ -43,6 +43,8 @@ export function memberConfig(base: Config, userId: string, port: number, model: 
     printer:undefined,
     // Nor the owner's Mac (its phone, Chrome and terminal): the gateway gives an account that linked a Mac its own.
     macNative:undefined,
+    // Nor the owner's iPhone: the gateway gives an account that linked an iPhone its own.
+    ios:undefined,
     // Nor the owner's schedule tool: the gateway gives every member one that reaches only its own schedules.
     schedule:undefined,
     // Nor its personal knowledge base: each account's is its own.
@@ -154,6 +156,7 @@ export class UserRuntimes {
     runtime.ctx.userBrowser=this.root.userBrowser;
     runtime.ctx.macShell=this.root.macShell;
     runtime.ctx.deviceLinks=this.root.deviceLinks;
+    runtime.ctx.ios=this.root.ios;
     // Clawpages live centrally; the member's console and executor see the account's own.
     runtime.ctx.share=this.root.share;
     // So do the shared knowledge bases; each method checks the account belongs to the library.

@@ -549,6 +549,9 @@ END;`);
   const vaultColumns = db.prepare("PRAGMA table_info(vault_entries)").all() as Array<{ name: string }>;
   if (!vaultColumns.some(c => c.name === "method")) db.exec("ALTER TABLE vault_entries ADD COLUMN method TEXT NOT NULL DEFAULT 'password' CHECK (method IN ('password','google'))");
   // Where a claim's evidence came from: a task (the original), or in a shared library also a member's own words.
+  // What a device link is: the Mac app (its phones, Chrome, terminal) or the iPhone app (iosDevice.ts).
+  const linkColumns = db.prepare("PRAGMA table_info(device_links)").all() as Array<{ name: string }>;
+  if (!linkColumns.some(c => c.name === "kind")) db.exec("ALTER TABLE device_links ADD COLUMN kind TEXT NOT NULL DEFAULT 'mac' CHECK (kind IN ('mac','ios'))");
   const kbSourceColumns = db.prepare("PRAGMA table_info(kb_sources)").all() as Array<{ name: string }>;
   if (!kbSourceColumns.some(c => c.name === "kind")) db.exec("ALTER TABLE kb_sources ADD COLUMN kind TEXT NOT NULL DEFAULT 'task'");
   if (!kbSourceColumns.some(c => c.name === "contributor")) db.exec("ALTER TABLE kb_sources ADD COLUMN contributor TEXT");

@@ -3771,6 +3771,10 @@ button.clawpage-version-restore.danger { background:var(--error); border-color:v
 }
 /* A checkbox keeps its own size; the global field rule would stretch it across the card. */
 .debug-toggle input { width: auto; margin: 0; }
+/* iPhone abilities: one switch per ability, its hint and what iOS allows underneath. */
+.iphone-abilities { list-style: none; margin: 0; padding: 0; display: grid; gap: 14px; }
+.iphone-abilities li { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
+.iphone-abilities li button { margin-top: 2px; }
 .debug-actions {
   justify-content: flex-end;
 }

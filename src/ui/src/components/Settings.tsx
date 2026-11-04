@@ -6,6 +6,7 @@ import { DebugSettings } from './DebugSettings';
 import { InviteSettings } from './InviteSettings';
 import { LanguageSettings } from './LanguageSettings';
 import { PushSettings } from './PushSettings';
+import { IphoneSettings } from './IphoneSettings';
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "../api";
 import type { AgentSettings, SettingsModel } from "../types";
@@ -294,6 +295,7 @@ export function Settings({ onBack, onSaved }: Props) {
         <SupportSettings/>
         <RecallSettings />
         <PushSettings />
+        <IphoneSettings />
         <LanguageSettings />
         <AccountPrivacySettings />
         <DebugSettings />

@@ -39,6 +39,7 @@ import { visibleEmail } from "../auth/email.js";
 import { CLIENT_EVENTS } from "../../common/analytics.js";
 import { RegisterError, createInvite, listInvites, registerWithInvite, registrationRequiresInvite, revokeInvite } from "../auth/invites.js";
 import { googleRouter } from "../auth/googleRoutes.js";
+import { DEVICE_KINDS, type DeviceKind } from "../deviceLink.js";
 import { appleRouter } from "../auth/appleRoutes.js";
 import { followLoginTimezone } from "../auth/loginTimezone.js";
 import { createSupportRequest, reviewSupportRequest, supportQueue, SupportError } from '../support.js';
@@ -2016,16 +2017,22 @@ export function createApiRouter(context: AppContext): Router {
     }),
   );
 
-  // Macs this account linked to offer their phones (the app's bridge dials in with the token, DeviceLinks).
+  // Macs this account linked to offer their phones (the app's bridge dials in with the token, DeviceLinks),
+  // and, as kind "ios", iPhones the iOS app linked to offer their photos, reminders and calendar (iosDevice.ts).
   // The token is returned once, to the console that asked for it, which hands it to the app.
+  const linkKind = (raw: unknown): DeviceKind | null => raw === undefined || raw === "" ? "mac" : DEVICE_KINDS.find((k) => k === raw) ?? null;
   router.get("/device-links", requireKind("primary"), requireSession, (req, res) => {
-    res.json({ links: context.deviceLinks?.list(ctxOf(req).session!.ownerId) ?? [] });
+    const kind = linkKind(req.query.kind);
+    if (!kind) { res.status(400).json({ error: "bad_request" }); return; }
+    res.json({ links: context.deviceLinks?.list(ctxOf(req).session!.ownerId, kind) ?? [] });
   });
   router.post("/device-links", requireKind("primary"), requireSession, (req, res) => {
     if (!context.deviceLinks) { res.status(404).json({ error: "not_found" }); return; }
+    const kind = linkKind(req.body?.kind);
+    if (!kind) { res.status(400).json({ error: "bad_request" }); return; }
     const name = typeof req.body?.name === "string" ? req.body.name : "";
-    const { link, token } = context.deviceLinks.create(ctxOf(req).session!.ownerId, name);
-    audit(db, "device_link_created", link.id, ctxOf(req).ip);
+    const { link, token } = context.deviceLinks.create(ctxOf(req).session!.ownerId, name, kind);
+    audit(db, kind === "ios" ? "ios_link_created" : "device_link_created", link.id, ctxOf(req).ip);
     res.setHeader("Cache-Control", "no-store");
     res.json({ link, token });
   });
@@ -2034,6 +2041,19 @@ export function createApiRouter(context: AppContext): Router {
     if (removed) audit(db, "device_link_revoked", String(req.params.id), ctxOf(req).ip);
     res.status(removed ? 200 : 404).json({ ok: removed });
   });
+
+  // What the account's connected iPhone says about its abilities (photos, reminders, calendar), for the console's list.
+  router.get(
+    "/ios-device",
+    requireKind("primary"),
+    requireSession,
+    asyncHandler(async (req, res) => {
+      const userId = ctxOf(req).session!.ownerId;
+      if (!context.deviceLinks?.hasLink(userId, "ios")) { res.json({ linked: false, reachable: false, abilities: null }); return; }
+      const status = (await context.ios?.status(userId)) ?? null;
+      res.json({ linked: true, reachable: status !== null, abilities: status?.abilities ?? null });
+    }),
+  );
 
   // ----------------------------------------------------------- capabilities
 

@@ -24,6 +24,7 @@ import type { UserBrowserGateway } from "./userBrowser.js";
 import type { MacShellGateway } from "./macShell.js";
 import type { HaCameras } from "./camera.js";
 import type { DeviceLinks } from "./deviceLink.js";
+import type { IosDeviceGateway } from "./iosDevice.js";
 import type { Vault } from "./vault.js";
 import type { Analytics } from "./analytics.js";
 import type { TaskKbMaintainer } from "./taskKb/maintainer.js";
@@ -50,6 +51,8 @@ export interface AppContext {
   cameras?: HaCameras;
   /** The Macs accounts linked to offer their phones; shared by every runtime. */
   deviceLinks?: DeviceLinks;
+  /** The account's iPhone abilities, reached over its device links (iosDevice.ts). */
+  ios?: IosDeviceGateway;
   /** The account's password vault; absent in runtimes built by hand in tests. */
   vault?: Vault;
   /** Whole-container idle stop/start; absent when the runtime keeps its container up. */

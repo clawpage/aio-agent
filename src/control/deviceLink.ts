@@ -18,6 +18,10 @@ import { classifyHost } from "./http/security.js";
  * screenshot) and the live screen down that socket. A link reaches only the
  * account that created it; revoking it closes the socket.
  *
+ * The iPhone app links itself the same way (kind `ios`, iosDevice.ts): its own
+ * Photos, Reminders and Calendar, answered by the app over the same frames. A
+ * kind's links never stand in for the other's.
+ *
  * Frames: JSON text for requests, responses and channel control; binary frames
  * carry a channel's binary data, prefixed by the channel id (4 bytes, big endian).
  */
@@ -25,6 +29,10 @@ export const DEVICE_LINK_PATH = "/api/device-link/connect";
 const MAX_FRAME = 32 * 1024 * 1024;
 const PING_MS = 25_000;
 const NAME_MAX = 80;
+
+/** What dialed in: the Mac app (its phones, Chrome and terminal) or the iPhone app (its photos, reminders and calendar). */
+export type DeviceKind = "mac" | "ios";
+export const DEVICE_KINDS: readonly DeviceKind[] = ["mac", "ios"];
 
 export interface DeviceLinkInfo {
   id: string;
@@ -64,7 +72,7 @@ export class Tunnel {
   #channels = new Map<number, TunnelChannel>();
   readonly connectedAt = Date.now();
 
-  constructor(readonly linkId: string, readonly ownerId: string, private ws: WebSocket) {
+  constructor(readonly linkId: string, readonly ownerId: string, private ws: WebSocket, readonly kind: DeviceKind = "mac") {
     ws.on("message", (data, binary) => this.#receive(data as Buffer, binary));
     ws.on("close", () => this.#shutdown());
   }
@@ -169,7 +177,7 @@ export class DeviceLinks {
   #wss = new WebSocketServer({ noServer: true, maxPayload: MAX_FRAME });
   #tunnels = new Map<string, Tunnel>();
   #log: Logger;
-  /** Told when an account's first link appears or its last one goes, so its runtime gains or loses the tools. */
+  /** Told when an account's first link of a kind appears or its last one goes, so its runtime gains or loses the tools. */
   onAccountChange?: (ownerId: string) => void;
 
   constructor(private db: Db, private cfg: Config, log: Logger) {
@@ -177,38 +185,39 @@ export class DeviceLinks {
   }
 
   /** A new link for an account; the token is shown once and only its hash is kept. */
-  create(ownerId: string, name: string): { link: DeviceLinkInfo; token: string } {
-    const first = !this.hasLink(ownerId);
+  create(ownerId: string, name: string, kind: DeviceKind = "mac"): { link: DeviceLinkInfo; token: string } {
+    const first = !this.hasLink(ownerId, kind);
     const token = `dl_${randomBytes(32).toString("base64url")}`;
     const link = { id: randomId("dlink"), name: name.trim().slice(0, NAME_MAX), createdAt: Date.now() };
-    this.db.prepare("INSERT INTO device_links (id,owner_id,token_hash,name,created_at) VALUES (?,?,?,?,?)").run(link.id, ownerId, hash(token), link.name, link.createdAt);
+    this.db.prepare("INSERT INTO device_links (id,owner_id,token_hash,name,created_at,kind) VALUES (?,?,?,?,?,?)").run(link.id, ownerId, hash(token), link.name, link.createdAt, kind);
     if (first) this.onAccountChange?.(ownerId);
     return { link: { ...link, lastSeenAt: null, online: false }, token };
   }
 
-  list(ownerId: string): DeviceLinkInfo[] {
-    return (this.db.prepare("SELECT id,name,created_at,last_seen_at FROM device_links WHERE owner_id=? ORDER BY created_at DESC").all(ownerId) as Array<{ id: string; name: string; created_at: number; last_seen_at: number | null }>)
+  list(ownerId: string, kind: DeviceKind = "mac"): DeviceLinkInfo[] {
+    return (this.db.prepare("SELECT id,name,created_at,last_seen_at FROM device_links WHERE owner_id=? AND kind=? ORDER BY created_at DESC").all(ownerId, kind) as Array<{ id: string; name: string; created_at: number; last_seen_at: number | null }>)
       .map((r) => ({ id: r.id, name: r.name, createdAt: r.created_at, lastSeenAt: r.last_seen_at, online: Boolean(this.#tunnels.get(r.id)?.alive) }));
   }
 
   /** Only the account's own link; its socket closes at once. */
   revoke(ownerId: string, id: string): boolean {
-    const removed = Number(this.db.prepare("DELETE FROM device_links WHERE id=? AND owner_id=?").run(id, ownerId).changes) > 0;
+    const row = this.db.prepare("SELECT kind FROM device_links WHERE id=? AND owner_id=?").get(id, ownerId) as { kind: DeviceKind } | undefined;
+    const removed = Boolean(row) && Number(this.db.prepare("DELETE FROM device_links WHERE id=? AND owner_id=?").run(id, ownerId).changes) > 0;
     if (!removed) return false;
     this.#tunnels.get(id)?.close(4001, "revoked");
     this.#tunnels.delete(id);
-    if (!this.hasLink(ownerId)) this.onAccountChange?.(ownerId);
+    if (!this.hasLink(ownerId, row!.kind)) this.onAccountChange?.(ownerId);
     return true;
   }
 
-  hasLink(ownerId: string): boolean {
-    return Boolean(this.db.prepare("SELECT 1 FROM device_links WHERE owner_id=? LIMIT 1").get(ownerId));
+  hasLink(ownerId: string, kind: DeviceKind = "mac"): boolean {
+    return Boolean(this.db.prepare("SELECT 1 FROM device_links WHERE owner_id=? AND kind=? LIMIT 1").get(ownerId, kind));
   }
 
-  /** The account's most recently connected Mac that is online. */
-  tunnelFor(ownerId: string): Tunnel | null {
+  /** The account's most recently connected device of a kind that is online. */
+  tunnelFor(ownerId: string, kind: DeviceKind = "mac"): Tunnel | null {
     let best: Tunnel | null = null;
-    for (const t of this.#tunnels.values()) if (t.ownerId === ownerId && t.alive && (!best || t.connectedAt > best.connectedAt)) best = t;
+    for (const t of this.#tunnels.values()) if (t.ownerId === ownerId && t.kind === kind && t.alive && (!best || t.connectedAt > best.connectedAt)) best = t;
     return best;
   }
 
@@ -220,7 +229,7 @@ export class DeviceLinks {
   handleUpgrade(req: http.IncomingMessage, socket: Duplex, head: Buffer): void {
     const host = req.headers.host;
     const token = /^Bearer (dl_[A-Za-z0-9_-]{43})$/.exec(String(req.headers.authorization ?? ""))?.[1];
-    const row = token ? (this.db.prepare("SELECT id,owner_id FROM device_links WHERE token_hash=?").get(hash(token)) as { id: string; owner_id: string } | undefined) : undefined;
+    const row = token ? (this.db.prepare("SELECT id,owner_id,kind FROM device_links WHERE token_hash=?").get(hash(token)) as { id: string; owner_id: string; kind: DeviceKind } | undefined) : undefined;
     if (classifyHost(this.cfg, host) !== "primary" || !row) {
       this.#log.warn("device link refused", { host, known: Boolean(row) });
       return endSocket(socket, "HTTP/1.1 401 Unauthorized\r\nConnection: close\r\nContent-Length: 0\r\n\r\n");
@@ -229,11 +238,11 @@ export class DeviceLinks {
     try { name = decodeURIComponent(String(req.headers["x-aio-device-name"] ?? "")).trim().slice(0, NAME_MAX); } catch { /* keep the stored name */ }
     this.#wss.handleUpgrade(req, socket, head, (ws) => {
       this.#tunnels.get(row.id)?.close(4002, "replaced");
-      const tunnel = new Tunnel(row.id, row.owner_id, ws);
+      const tunnel = new Tunnel(row.id, row.owner_id, ws, row.kind);
       this.#tunnels.set(row.id, tunnel);
       const seen = () => this.db.prepare("UPDATE device_links SET last_seen_at=?" + (name ? ",name=?" : "") + " WHERE id=?").run(...(name ? [Date.now(), name, row.id] : [Date.now(), row.id]));
       seen();
-      this.#log.info("device link online", { link: row.id });
+      this.#log.info("device link online", { link: row.id, kind: row.kind });
       let alive = true;
       ws.on("pong", () => { alive = true; });
       const ping = setInterval(() => {

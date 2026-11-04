@@ -921,6 +921,22 @@ Android 手机用 USB 接在装了 Mac App 的 Mac 上，由 App 运行的 `bin/
   任何一段不匹配就整个不写，保留文件原有的 CRLF 和 BOM。同一文件的写入串行，同一会话的命令串行。
 - **生命周期**：六小时没用过的会话连同目录一起删掉；桥接退出（App 退出、关掉终端开关、移除连接）时整个 tmux 服务器随之结束，在跑的命令也会结束，要长跑的放后台（`nohup … &`）。
 
+### iPhone 上的相册、提醒事项与日历
+
+iOS App 可以把那台 iPhone 的相册、提醒事项和日历交给**在这台 iPhone 上登录的账号**的执行器（MCP `aio_ios`，成员网关 `/ios-device/<运行时令牌>/mcp`，`src/control/iosDevice.ts`；App 端 `src/ui/tauri/src-tauri/gen/apple/Sources/aio-agent-tauri/DeviceTools.swift`）。
+
+- **打开**：「配置 → iPhone 能力」（只在 iOS App 里有开关）每项一个开关。打开某项时系统才弹出授权（相册 `PHPhotoLibrary` 读写，允许「部分照片」也可用；提醒事项、日历在 iOS 17+ 要完整访问 `requestFullAccessTo…`，更早的系统用 `requestAccess`）；被拒绝或日历只给了「仅添加」时开关保持关闭，显示原因和「去设置开启」（打开本 App 的系统设置页，回来自动刷新）。
+  打开第一项时控制台为该账号签发设备令牌（`POST /api/device-links`，`kind: "ios"`，只返回一次，库里只存哈希）交给 App，App 把令牌存进钥匙串（仅本机、首次解锁后可读），连同它属于的账号；最后一项关掉时控制台删除这条连接、App 忘掉令牌。
+  浏览器里的「iPhone 能力」只列出该账号连过的 iPhone（在线与否、在线时已打开哪几项，`GET /api/ios-device`），可移除；没有连过时不显示。
+- **只给登录的账号**：控制台每次知道登录状态时告诉 App 当前账号（`aioDeviceTools` 的 `account`）。只有与令牌同一账号登录时 App 才连接；退出登录时断开；换成别的账号登录时 App 删除令牌并把三项全部关掉，新账号要自己重新打开。别的账号、配件和分享页拿不到这台 iPhone。
+- **连接**：App 自己（不经网页）用 `URLSessionWebSocketTask` 连 `wss://<主站>/api/device-link/connect`，与 Mac App 同一个设备连接协议（`src/control/deviceLink.ts`，连接种类 `ios`，iPhone 的连接从不被当成 Mac，反之亦然），只回答两个入口：`GET /ios/status`（各项开关与系统授权、时区）与 `POST /ios/call`（`{tool, arguments}`）。
+  iOS 会在后台挂起 App 的网络，所以 App 退到后台时（等手头的调用答完，最多 5 秒）主动断开，回到前台立即重连，断线按 1 秒起倍增、最长 30 秒重试；连接被移除（关闭码 4001）或令牌已失效（401）时 App 忘掉令牌。
+- **执行器工具**：握手与工具列表由网关回答，不依赖手机（Codex 每个线程只在开始时启动一次 MCP；与 Mac 相同，连过 iPhone 的账号新开的执行会话获得 `aio_ios`，移除最后一台后失去）。App 不在前台时调用返回“iPhone 现在连不上，请用户打开 App 并留在前台”；某项没打开或系统不允许时返回去哪里打开。
+  `iphone_status`；相册 `photos_albums`、`photos_list`（按相簿、时间范围、收藏、类型筛选，最新在前，只回元数据：id、拍摄时间、尺寸、收藏、约 100 米精度的位置；相册没有文字搜索）、`photos_get`；提醒事项 `reminders_lists`、`reminders_list`（未完成按到期排序 / 已完成 / 全部）、`reminders_create`（带时间的会加一个到点提醒）、`reminders_complete`；日历 `calendar_calendars`、`calendar_events`（最长 366 天）、`calendar_create_event`。
+- **照片**：`photos_get` 一次最多 5 张，App 把每张缩成最长边不超过 1600 像素的 JPEG（质量 0.8，超过 4 MB 再压），必要时先从 iCloud 取回；网关核对是 JPEG 后存进该账号工作区（默认 `/home/gem/workspace/iphone-photos/`，可指定任务目录，文件名 `IMG-<拍摄时间>-<id>.jpg`），同时以图片内容交给模型。不会整库上传。
+- **写入要确认**：执行规则要求只在用户要求或确认后才添加/完成提醒事项、添加日程；写入途中连接中断时报告“是否已保存未知，先列出核对再重试”，不自动重发。
+- **日志**：控制面每次调用记一行（账号、工具、成败、耗时、照片张数与字节数），App 记工具名与成败；都不记内容。
+
 ### Clawpages（可分享、可存数据的页面）
 
 沙箱内置 `clawpages` skill（原名 `aio-share`，重新播种时删除旧目录），Codex 与 Claude Code 两个执行器都装：智能体把页面目录

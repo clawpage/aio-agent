@@ -389,6 +389,8 @@ export function loadConfig(): {
   tts?: { url: string };
   /** This runtime's URL for its account's Mac (phone, AI's Chrome, terminal) on the member gateway, when it linked a Mac (MacNativeGateway). */
   macNative?: { url: string };
+  /** This runtime's URL for its account's iPhone (photos, reminders, calendar) on the member gateway, when it linked an iPhone (IosDeviceGateway). */
+  ios?: { url: string };
   /**
    * The voice gadget's dictation page (src/control/dictation.ts): the keyboard
    * bridge on the host Mac (bin/keyboard-bridge.mjs) types what the gadget heard,

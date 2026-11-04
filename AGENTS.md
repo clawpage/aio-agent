@@ -56,6 +56,7 @@ cookie 名 `pa_*` 与 `PA_*` 前缀**保持不变**——它们承载既有容�
    唯一读写用户 Mac 文件、运行命令的通道是同一桥接的终端（`bin/mac-shell.mjs`，`aio_mac_native` 的终端工具，`docs/FEATURES.md`“Mac 上的终端”）：默认关闭，只能由那台 Mac 上的 App 打开（开关存在 App 本地，以 `PA_MAC_SHELL=1` 传给桥接，控制面与网页无法打开），只给连接它的账号；
    shell 环境不得带入桥接或 App 的任何令牌，命令只跑在专用 tmux 服务器（socket `aio-agent`）里；不要另开别的宿主机命令或文件通道，也不要把它接给其他账号或配件。键盘桥（`bin/keyboard-bridge.mjs`）只接受配件令牌下
    `/api/gadget/dictation` 的输入，不得接进成员网关或任何执行器工具。
+   iPhone 的相册、提醒事项与日历（`DeviceTools.swift`，执行器经 `aio_ios`，`docs/FEATURES.md`“iPhone 上的相册、提醒事项与日历”）只给在那台 iPhone 上登录的账号：由 App 自己连回控制面（设备令牌只存哈希、可随时移除），换账号登录即忘掉令牌；每项只能在那台 iPhone 的 App 里打开（系统授权随之弹出）；照片只按 id 取少量缩小后的副本，不得提供整库导出，也不要把它接给其他账号、配件或分享页。
 4. **两个来源**：主站与伴随站必须保持不同来源；不要把 AIO 生成内容放到主站上，也不要为了
    本地调试放宽 cookie 安全属性（localhost 明文是唯一例外）。
 5. **DNS**：只允许用 `bin/dns-agent.py` 维护 `agent.clawpage.ai` 与 `agent-workspace.clawpage.ai` 两条记录；不得运行

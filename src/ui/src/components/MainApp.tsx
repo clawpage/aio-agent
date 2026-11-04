@@ -33,6 +33,7 @@ import { KnowledgeList } from "./KnowledgeList";
 import {taskStatusLabels,type TaskFeed} from '../taskStatus';
 import { isSandboxLink } from "../sandboxLink";
 import { openDeviceBrowser } from "../deviceBrowser";
+import { syncDeviceToolsAccount } from "../deviceTools";
 import { attention } from "../attention";
 import { locale, localeChosen, localeSynced, markLocaleSynced, t } from "../i18n";
 import { track, trackOpen } from "../analytics";
@@ -204,6 +205,8 @@ export function MainApp({ firstSession }: { firstSession?: ReturnType<typeof api
         }
     }, [expired]);
     useEffect(() => { void check(); }, [check]);
+    // The iPhone app gives its abilities only to the account signed in here (deviceTools.ts).
+    useEffect(() => { if (auth !== null) syncDeviceToolsAccount(auth ? username : null); }, [auth, username]);
     useEffect(() => { document.documentElement.dataset.theme = theme; }, [theme]);
     useEffect(() => {
         if (!auth)

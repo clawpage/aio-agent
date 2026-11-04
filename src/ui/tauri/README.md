@@ -134,6 +134,22 @@ The shell itself bundles no UI, so a UI change still ships with the next UI depl
   `{"type":"shell","enabled":…}`, the app keeps it in `device-link.json` (`shell`), restarts the bridge with
   `PA_MAC_SHELL=1` and reports `shell` in its `aio-device-link` events. Needs tmux on the Mac (Homebrew's is found;
   `PA_TMUX` overrides). The control plane offers it as part of `aio_mac_native` (`src/control/macShell.ts`, `src/control/macNative.ts`).
+- iPhone abilities: `DeviceTools.swift` offers this iPhone's Photos, Reminders and Calendar to the agent of the
+  account signed in here (`aio_ios`, `src/control/iosDevice.ts`; see "iPhone 上的相册、提醒事项与日历" in
+  `docs/FEATURES.md`). The console's main frame posts JSON strings to `aioDeviceTools` (a reply handler:
+  `status`, `account`, `link`, `unlink`, `enable`/`disable` an ability, `settings`) and gets the state back, plus
+  `aio-device-tools` events when the connection changes. The app holds the device token in the Keychain and dials
+  `wss://agent.clawpage.ai/api/device-link/connect` itself while it is in the foreground. The permission texts
+  (`NSPhotoLibraryUsageDescription`, `NSRemindersFullAccessUsageDescription` / `NSRemindersUsageDescription`,
+  `NSCalendarsFullAccessUsageDescription` / `NSCalendarsUsageDescription`) are in `gen/apple/project.yml`, the
+  generated `Info.plist` and the four `InfoPlist.strings`. A new Swift file has to be added to
+  `aio-agent-tauri.xcodeproj` too: `xcodegen generate` does it, but it also empties the entitlements and drops
+  `DEVELOPMENT_TEAM`, so keep only its four `DeviceTools.swift` lines. Debug builds only:
+  `xcrun simctl launch <udid> ai.clawpage.agent -AIODeviceToolsSelfTest YES` runs every tool on the simulator's own
+  data and logs the results (`log show --predicate 'eventMessage CONTAINS "aio-device-tools"'`; grant the
+  permissions with `xcrun simctl privacy <udid> grant photos|reminders|calendar ai.clawpage.agent`, though iOS 18
+  still asks once for Photos), and `-AIODeviceToolsLinkURL ws://localhost:<port>/api/device-link/connect
+  -AIODeviceToolsLinkToken dl_…` links the app to a local control plane without the console.
 - Home-screen name: iOS shows Clawpage in English and Spanish and 一站 in Chinese
   (`gen/apple/Localization/<lang>.lproj/InfoPlist.strings`, which also localize the permission prompts;
   the base `CFBundleDisplayName` 一站 is in `gen/apple/project.yml`, then `xcodegen generate`); Android Clawpage Agent in

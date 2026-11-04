@@ -50,6 +50,11 @@ targets:
         NSMicrophoneUsageDescription: 语音输入时录下你说的话，转成文字放进输入框。
         NSCameraUsageDescription: 拍照或录像作为附件发给一站。
         NSPhotoLibraryAddUsageDescription: 下载图片时存入你的相册。
+        NSPhotoLibraryUsageDescription: 你在「iPhone 能力」里打开相册后，AI 按你的要求查找照片，把用到的几张缩小后发给一站。
+        NSRemindersFullAccessUsageDescription: 你在「iPhone 能力」里打开提醒事项后，AI 按你的要求查看、添加和完成提醒事项。
+        NSRemindersUsageDescription: 你在「iPhone 能力」里打开提醒事项后，AI 按你的要求查看、添加和完成提醒事项。
+        NSCalendarsFullAccessUsageDescription: 你在「iPhone 能力」里打开日历后，AI 按你的要求查看日程、添加日程。
+        NSCalendarsUsageDescription: 你在「iPhone 能力」里打开日历后，AI 按你的要求查看日程、添加日程。
         # Service workers (the console opening offline) need App-Bound Domains; navigation is then
         # limited to these registrable domains (the console and its workspace, the embedded players).
         WKAppBoundDomains: [localhost, clawpage.ai, youtube-nocookie.com, bilibili.com]

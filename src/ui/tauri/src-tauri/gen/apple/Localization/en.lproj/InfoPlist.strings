@@ -2,3 +2,8 @@
 "NSMicrophoneUsageDescription" = "Voice input records what you say and turns it into text in the message box.";
 "NSCameraUsageDescription" = "Take a photo or video to attach to your message.";
 "NSPhotoLibraryAddUsageDescription" = "Saves downloaded images to your photo library.";
+"NSPhotoLibraryUsageDescription" = "When you turn on Photos in iPhone abilities, the AI finds photos you ask about and sends the few it needs, downscaled, to Clawpage.";
+"NSRemindersFullAccessUsageDescription" = "When you turn on Reminders in iPhone abilities, the AI reads, adds and completes reminders as you ask.";
+"NSRemindersUsageDescription" = "When you turn on Reminders in iPhone abilities, the AI reads, adds and completes reminders as you ask.";
+"NSCalendarsFullAccessUsageDescription" = "When you turn on Calendar in iPhone abilities, the AI reads your schedule and adds events as you ask.";
+"NSCalendarsUsageDescription" = "When you turn on Calendar in iPhone abilities, the AI reads your schedule and adds events as you ask.";

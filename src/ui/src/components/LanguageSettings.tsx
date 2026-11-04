@@ -1,5 +1,6 @@
 import { AccountPrivacySettings } from "./Support";
 import { PushSettings } from "./PushSettings";
+import { IphoneSettings } from "./IphoneSettings";
 import { api } from "../api";
 import { LOCALES, locale, setLocale, t, type Locale } from "../i18n";
 
@@ -23,7 +24,7 @@ export function LanguagePicker() {
 export function MemberSettings({ onBack }: { onBack: () => void }) {
   return <section className="settings" aria-label={t.settings.page.title}>
     <header className="settings-head"><h2>{t.settings.page.title}</h2><span className="spacer"/><button type="button" className="ghost" onClick={onBack}>{t.settings.page.back}</button></header>
-    <div className="settings-body"><PushSettings/><LanguageSettings/><AccountPrivacySettings/></div>
+    <div className="settings-body"><PushSettings/><IphoneSettings/><LanguageSettings/><AccountPrivacySettings/></div>
   </section>;
 }
 
