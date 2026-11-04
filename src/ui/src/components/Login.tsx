@@ -178,9 +178,11 @@ export function Login({ onSuccess, notice, username: named }: { onSuccess: () =>
         if (el instanceof HTMLInputElement && el.closest(".login")) el.scrollIntoView({ block: "nearest" });
       }, 80);
     };
+    // In the iOS app the keyboard arrives as `aio-keyboard` events instead (useKeyboardViewport).
     vv?.addEventListener("resize", reveal);
+    window.addEventListener("aio-keyboard", reveal);
     document.addEventListener("focusin", reveal);
-    return () => { clearTimeout(timer); vv?.removeEventListener("resize", reveal); document.removeEventListener("focusin", reveal); };
+    return () => { clearTimeout(timer); vv?.removeEventListener("resize", reveal); window.removeEventListener("aio-keyboard", reveal); document.removeEventListener("focusin", reveal); };
   }, []);
   const switchMode = (next: Mode) => {
     setMode(next);
