@@ -1,9 +1,14 @@
 import { spawn } from "node:child_process";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { Readable } from "node:stream";
 import type http from "node:http";
 import type { Config, HaCameraSpec } from "./config.js";
 import type { Logger } from "../common/logger.js";
 import { expandHome, readSecretFile } from "../common/secrets.js";
+import type { AppContext } from "./context.js";
+import { requireWorkspaceFilePath } from "./documents/paths.js";
 
 /**
  * Home Assistant cameras beyond what Assist offers: a look at the picture now,
@@ -22,6 +27,10 @@ const PIECE_SECONDS = 600;
 /** An HLS session HA handed out stays usable this long after its last request. */
 const HLS_IDLE_MS = 10 * 60_000;
 const MAX_FRAMES = 6;
+/** The longest clip cut from the recording: about 110 MB at the cameras' bit rate. */
+const MAX_CLIP_SECONDS = 600;
+/** One ffmpeg run while cutting a clip. */
+const CLIP_TIMEOUT_MS = 180_000;
 const STEP = 10; // the Tapo App's single tap on a direction
 const DIRECTIONS = { left: [-1, 0], right: [1, 0], up: [0, 1], down: [0, -1] } as const;
 type Direction = keyof typeof DIRECTIONS;
@@ -43,6 +52,15 @@ export interface RecordingPiece {
   file: string;
   start: number;
   end: number;
+}
+
+/** What a recording piece's index (mfra) tells: its init segment, video track and key frames. */
+interface PieceIndex {
+  head: Buffer;
+  track: { trackId: number; timescale: number; initEnd: number };
+  points: Array<{ time: number; offset: number }>;
+  /** Where the fragments end (the index follows). */
+  dataEnd: number;
 }
 
 export interface CameraEvent {
@@ -249,14 +267,54 @@ export const CAMERA_TOOLS = [
       required: ["camera", "at"],
     },
   },
+  {
+    name: "camera_recording_clip",
+    description:
+      "Cut a video clip, with its sound, out of the continuous recording and save it as an MP4 in the user's workspace: from and to are local times, YYYY-MM-DD HH:MM:SS, at most " + MAX_CLIP_SECONDS / 60 + " minutes apart. " +
+      "The clip is copied from the recording without re-encoding, so it starts at the key frame just before from (it reports the exact times). " +
+      "This is how to export, download, send or edit a recording: never open the console's playback page in the browser for it. Put the returned path in your reply as a link on a line of its own, which the console shows as a player.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        camera: { type: "string", description: "The camera entity" },
+        from: { type: "string", description: "Start, local time YYYY-MM-DD HH:MM:SS" },
+        to: { type: "string", description: "End, local time YYYY-MM-DD HH:MM:SS" },
+        path: { type: "string", description: "Where to save it: an absolute .mp4 path in the workspace, e.g. in this task's folder; default a new file under camera/" },
+      },
+      required: ["camera", "from", "to"],
+    },
+  },
 ];
+
 
 export const CAMERA_TOOL_NAMES = new Set(CAMERA_TOOLS.map((t) => t.name));
 
+/** Saving a clip in one account's workspace. */
+export interface ClipFiles {
+  write(path: string, bytes: Buffer): Promise<void>;
+}
+
+/** An account's workspace, reached through its own sandbox. */
+export function sandboxClipFiles(ctx: Pick<AppContext, "container">): ClipFiles {
+  return {
+    async write(file, bytes) {
+      const mkdir = await ctx.container.execInSandbox(["mkdir", "-p", "--", path.posix.dirname(file)], { timeoutMs: 30_000 });
+      if (mkdir.code !== 0) throw new Error(`Failed to create the folder: ${mkdir.stderr.trim().slice(0, 200)}`);
+      const form = new FormData();
+      form.append("file", new Blob([new Uint8Array(bytes)]), path.posix.basename(file));
+      form.append("path", file);
+      const res = await ctx.container.fetch("/v1/file/upload", { method: "POST", body: form, signal: AbortSignal.timeout(300_000) });
+      const json = (await res.json().catch(() => ({}))) as { success?: boolean; message?: string };
+      if (!res.ok || json.success === false) throw new Error(`Failed to save the clip: ${json.message ?? res.status}`);
+    },
+  };
+}
+
 export const CAMERA_POLICY =
-  "Cameras are on aio_ha too: when the user wants to see a camera, check on a room, turn a camera, or find out what happened earlier, use camera_list, camera_snapshot, camera_ptz, camera_recordings and camera_recording_frames. " +
+  "Cameras are on aio_ha too: when the user wants to see a camera, check on a room, turn a camera, or find out what happened earlier, use camera_list, camera_snapshot, camera_ptz, camera_recordings, camera_recording_frames and camera_recording_clip. " +
   "To let the user watch, put a camera card in your reply (a fenced ```camera block with {\"camera\": \"<entity>\"} for live video, adding \"at\": \"YYYY-MM-DD HH:MM:SS\" to play the recording from that moment) rather than only describing it. " +
   "When asked what happened, find the events with camera_recordings, look at the frames before answering, say what you actually saw with times, and add a card at the moment so the user can watch it. " +
+  "When the user wants a recording exported, downloaded, sent or edited, cut it with camera_recording_clip and link the saved file; the console's playback page is not for the browser, and never ask the user to sign in to the console. " +
   "Turn a camera only when the user asks, and say where it points afterwards; do not switch camera detection or privacy settings unless asked.";
 
 type ToolResult = { content: Array<{ type: "text"; text: string } | { type: "image"; data: string; mimeType: string }>; isError?: boolean };
@@ -497,8 +555,8 @@ export class HaCameras {
     return { bytes: Buffer.from(await res.arrayBuffer()), total: Number(/\/(\d+)$/.exec(res.headers.get("content-range") ?? "")?.[1] ?? 0) };
   }
 
-  /** The init segment and the fragments from the last key frame before `seconds`; null for a piece without an index. */
-  async #fragment(path: string, seconds: number): Promise<{ data: Buffer; skip: number } | null> {
+  /** A piece's init segment, video track and key frames, from its index at the end; null for a piece without one. */
+  async #index(path: string): Promise<PieceIndex | null> {
     const tail = await this.#range(path, "bytes=-16");
     if (tail.bytes.length !== 16 || tail.bytes.toString("latin1", 4, 8) !== "mfro") return null;
     const mfraSize = tail.bytes.readUInt32BE(12);
@@ -507,14 +565,122 @@ export class HaCameras {
     const track = videoTrackOf(head.bytes);
     if (!track) return null;
     const points = syncPointsOf(mfra.bytes, track.trackId);
-    if (!points.length) return null;
+    return points.length ? { head: head.bytes, track, points, dataEnd: tail.total - mfraSize } : null;
+  }
+
+  /** The init segment and fragments `from` to `to` (exclusive), as one playable fragmented MP4. */
+  async #cut(path: string, index: PieceIndex, from: number, to: number): Promise<Buffer> {
+    const start = index.points[from]!.offset;
+    const end = index.points[to]?.offset ?? index.dataEnd;
+    const body = await this.#range(path, `bytes=${start}-${end - 1}`);
+    return Buffer.concat([index.head.subarray(0, index.track.initEnd), rebaseFragments(body.bytes, start - index.track.initEnd)]);
+  }
+
+  /** The last key frame at or before `seconds` into the piece. */
+  #keyBefore(index: PieceIndex, seconds: number): number {
     let i = 0;
-    while (i + 1 < points.length && points[i + 1]!.time / track.timescale <= seconds) i += 1;
+    while (i + 1 < index.points.length && index.points[i + 1]!.time / index.track.timescale <= seconds) i += 1;
+    return i;
+  }
+
+  /** The init segment and the fragments from the last key frame before `seconds`; null for a piece without an index. */
+  async #fragment(path: string, seconds: number): Promise<{ data: Buffer; skip: number } | null> {
+    const index = await this.#index(path);
+    if (!index) return null;
+    const i = this.#keyBefore(index, seconds);
     // Two fragments, so a moment near a fragment's end still has frames after it.
-    const end = points[i + 2]?.offset ?? tail.total - mfraSize;
-    const body = await this.#range(path, `bytes=${points[i]!.offset}-${end - 1}`);
-    const fragments = rebaseFragments(body.bytes, points[i]!.offset - track.initEnd);
-    return { data: Buffer.concat([head.bytes.subarray(0, track.initEnd), fragments]), skip: Math.max(0, seconds - points[i]!.time / track.timescale) };
+    const data = await this.#cut(path, index, i, i + 2);
+    return { data, skip: Math.max(0, seconds - index.points[i]!.time / index.track.timescale) };
+  }
+
+  /** The fragments covering `start` to `end` seconds into the piece, from the key frame at or before `start`; null without an index. */
+  async #span(path: string, start: number, end: number): Promise<{ data: Buffer; start: number } | null> {
+    const index = await this.#index(path);
+    if (!index) return null;
+    const i = this.#keyBefore(index, start);
+    let j = i + 1;
+    while (j < index.points.length && index.points[j]!.time / index.track.timescale < end) j += 1;
+    return { data: await this.#cut(path, index, i, j), start: index.points[i]!.time / index.track.timescale };
+  }
+
+  /**
+   * A clip of the continuous recording, `from` to `to` (local ms), with its sound and without
+   * re-encoding: each piece gives the fragments covering its part, from the key frame before it
+   * (only those bytes are fetched, by range), the parts are joined and the result made to play
+   * from the start (faststart). The piece still being written has no index and is read over HTTP.
+   */
+  async clip(entity: string, from: number, to: number): Promise<{ bytes: Buffer; start: number; end: number; gaps: Array<[number, number]> }> {
+    const folder = this.#cameras[entity]?.recordings;
+    if (!folder) throw new CameraError(`${entity} has no continuous recording`);
+    const pieces = (await this.pieces(entity)).filter((p) => p.end > from && p.start < to);
+    if (!pieces.length) await this.locate(entity, from); // says what the recording covers
+    if (!pieces.length) throw new CameraError(`Nothing was recorded from ${formatLocal(from)} to ${formatLocal(to)}`);
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "aio-clip-"));
+    const copy = ["-map", "0:v", "-map", "0:a?", "-c", "copy"];
+    try {
+      const parts: string[] = [];
+      const gaps: Array<[number, number]> = [];
+      let start = 0;
+      let cursor = from;
+      for (const piece of pieces) {
+        if (piece.start - cursor > 1000) gaps.push([cursor, piece.start]);
+        const s = Math.max(from, piece.start);
+        const e = Math.min(to, piece.end);
+        const media = `/media/${folder}/${encodeURIComponent(piece.file)}`;
+        const part = path.join(dir, `part${parts.length}.mp4`);
+        const span = await this.#span(media, (s - piece.start) / 1000, (e - piece.start) / 1000).catch((err) => {
+          if (err instanceof CameraError) throw err;
+          this.#log.warn("recording index unreadable", { entity, file: piece.file, error: err instanceof Error ? err.message : String(err) });
+          return null;
+        });
+        const partStart = span ? piece.start + span.start * 1000 : s;
+        const cut = span
+          ? await this.#ffmpegTo(["-f", "mp4", "-i", "pipe:0", "-t", ((e - partStart) / 1000).toFixed(3), ...copy, part], span.data)
+          : await this.#ffmpegTo(["-use_mfra_for", "pts", "-headers", `Authorization: ${this.#auth()}\r\n`, "-ss", ((s - piece.start) / 1000).toFixed(2), "-i", `${this.#base}${media}`, "-t", ((e - s) / 1000).toFixed(3), ...copy, part]);
+        if (!cut.ok || !(fs.statSync(part, { throwIfNoEntry: false })?.size)) {
+          this.#log.warn("recording clip failed", { entity, file: piece.file, error: cut.ok ? "empty" : cut.error });
+          throw new CameraError(`Could not cut ${formatLocal(s)} to ${formatLocal(e)} from the recording${piece.end >= Date.now() - 60_000 ? "; the last seconds may not be written yet" : ""}`);
+        }
+        if (!parts.length) start = partStart;
+        parts.push(part);
+        cursor = Math.max(cursor, e);
+      }
+      if (to - cursor > 1000) gaps.push([cursor, to]);
+      const out = path.join(dir, "clip.mp4");
+      let input: string[] = ["-i", parts[0]!];
+      if (parts.length > 1) {
+        const list = path.join(dir, "parts.txt");
+        fs.writeFileSync(list, parts.map((p) => `file '${p}'`).join("\n"));
+        input = ["-f", "concat", "-safe", "0", "-i", list];
+      }
+      const joined = await this.#ffmpegTo([...input, ...copy, "-movflags", "+faststart", out]);
+      if (!joined.ok) {
+        this.#log.warn("recording clip join failed", { entity, error: joined.error });
+        throw new CameraError("Could not put the clip together");
+      }
+      return { bytes: fs.readFileSync(out), start, end: cursor, gaps };
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }
+
+  /** ffmpeg writing a file (the last argument); a clip of several minutes may take a while. */
+  async #ffmpegTo(args: string[], input?: Buffer): Promise<{ ok: true } | { ok: false; error: string }> {
+    return await new Promise((resolve, reject) => {
+      const child = spawn(this.#ffmpeg, ["-v", "error", "-nostdin", "-y", ...args], { stdio: [input ? "pipe" : "ignore", "ignore", "pipe"] });
+      let err = "";
+      const timer = setTimeout(() => child.kill("SIGKILL"), CLIP_TIMEOUT_MS);
+      child.stderr!.on("data", (c: Buffer) => { err = (err + c.toString()).slice(-500); });
+      child.on("error", (e) => { clearTimeout(timer); reject(new CameraError(`Cannot read the recording (${e.message})`)); });
+      child.on("close", (code) => {
+        clearTimeout(timer);
+        resolve(code === 0 ? { ok: true } : { ok: false, error: err.trim() || `exit ${code}` });
+      });
+      if (input) {
+        child.stdin!.on("error", () => undefined);
+        child.stdin!.end(input);
+      }
+    });
   }
 
   async #ffmpeg_(args: string[], input?: Buffer): Promise<{ ok: true; out: Buffer } | { ok: false; error: string }> {
@@ -591,9 +757,10 @@ export class HaCameras {
 
   // ------------------------------------------------------------ MCP tools
 
-  async tool(name: string, args: Record<string, unknown>, username: string): Promise<ToolResult> {
+  async tool(name: string, args: Record<string, unknown>, username: string, files?: ClipTarget): Promise<ToolResult> {
     try {
       switch (name) {
+        case "camera_recording_clip": return text(await this.#toolClip(args, username, files));
         case "camera_list": return text(await this.#toolList(username));
         case "camera_snapshot": return await this.#toolSnapshot(args, username);
         case "camera_ptz": return await this.#toolPtz(args, username);
@@ -683,6 +850,30 @@ export class HaCameras {
     return out.join("\n");
   }
 
+  async #toolClip(args: Record<string, unknown>, username: string, target: ClipTarget | undefined): Promise<string> {
+    const camera = await this.camera(args.camera, username);
+    if (!target) throw new CameraError("Clips cannot be saved here");
+    if (!camera.recordings) throw new CameraError(`${camera.name} has no continuous recording`);
+    const from = parseLocal(args.from);
+    const to = parseLocal(args.to);
+    if (from === null || to === null) throw new CameraError("from and to must be local times like 2026-11-03 11:55:30");
+    if (to <= from) throw new CameraError("to must be after from");
+    if (to - from > MAX_CLIP_SECONDS * 1000) throw new CameraError(`A clip is at most ${MAX_CLIP_SECONDS / 60} minutes; cut a longer stretch into several clips`);
+    if (to > Date.now()) throw new CameraError(`${formatLocal(to)} has not happened yet (now ${formatLocal(Date.now())})`);
+    const file = clipPath(args.path, target.workspace, camera.entity, from);
+    const clip = await this.clip(camera.entity, from, to);
+    await (await target.files()).write(file, clip.bytes);
+    this.#log.info("recording clip saved", { entity: camera.entity, seconds: Math.round((clip.end - clip.start) / 1000), bytes: clip.bytes.length });
+    const out = [
+      `Clip saved: ${file}`,
+      `${camera.name}, ${formatLocal(clip.start)} to ${formatLocal(clip.end)} (${Math.round((clip.end - clip.start) / 1000)} s, ${megabytes(clip.bytes.length)}, with sound if the camera recorded it).`,
+    ];
+    if (clip.start < from - 500) out.push(`It starts at the key frame ${((from - clip.start) / 1000).toFixed(1)} s before ${formatLocal(from)}.`);
+    if (clip.gaps.length) out.push(`Not recorded, so not in the clip: ${clip.gaps.map(([a, b]) => `${formatLocal(a)} to ${formatLocal(b)}`).join("; ")}.`);
+    out.push(`Put it in your reply as a link on a line of its own: [description](${file})`);
+    return out.join("\n");
+  }
+
   async #toolFrames(args: Record<string, unknown>, username: string): Promise<ToolResult> {
     const camera = await this.camera(args.camera, username);
     const at = parseLocal(args.at);
@@ -710,6 +901,25 @@ export class HaCameras {
     return { content };
   }
 }
+
+/** Where a clip is saved: the account's workspace. */
+export interface ClipTarget {
+  workspace: string;
+  files: () => Promise<ClipFiles>;
+}
+
+function clipPath(raw: unknown, workspace: string, entity: string, at: number): string {
+  const root = workspace.replace(/\/$/, "");
+  if (raw === undefined || raw === null || raw === "") {
+    return `${root}/camera/${entity.replace(/^camera\./, "")}-${formatLocal(at).replace(/-/g, "").replace(" ", "-").replace(/:/g, "")}.mp4`;
+  }
+  const checked = requireWorkspaceFilePath(String(raw), root);
+  if (!checked.ok) throw new CameraError(`path: ${checked.message}`);
+  if (!/\.mp4$/i.test(checked.path)) throw new CameraError("path must end in .mp4");
+  return checked.path;
+}
+
+const megabytes = (bytes: number) => `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 
 function text(value: string): ToolResult {
   return { content: [{ type: "text", text: value }] };

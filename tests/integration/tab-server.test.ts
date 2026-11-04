@@ -81,6 +81,8 @@ beforeAll(async () => {
   process.env.AIO_TABS_TOOL_DEADLINE_MS = "4000";
   process.env.AIO_TABS_PROBE_MS = "1500";
   process.env.AIO_TABS_VAULT_STEP_MS = "1200";
+  process.env.AIO_TABS_CONSOLE_HOST = "console.example";
+  process.env.AIO_TABS_WORKSPACE_HOST = "workspace.example";
   await startServer();
 });
 
@@ -128,6 +130,19 @@ it.skipIf(!hasChromium)("cold-starts on tool use, leaves metadata asleep and nev
   expect(text(await call("lazy", "browser_get_text"))).toContain("recovered");
   await call("lazy", "browser_tab_close");
   expect(readyCalls).toBe(before + 4);
+});
+
+it.skipIf(!hasChromium)("never opens the console it runs in, nor asks to sign in to it, and says which tools to use instead", async () => {
+  for (const [name, args] of [["browser_navigate", { url: "https://console.example/u/owner?camera=x" }], ["browser_tab_new", { url: "https://app.console.example/" }]] as const) {
+    const refused = await call("own", name, args);
+    expect(refused.result?.isError).toBe(true);
+    expect(text(refused)).toContain("console.example is the console you are running in");
+    expect(text(refused)).toContain("camera_recording_clip");
+  }
+  expect(await records("own")).toEqual([]);
+  // Any other page still opens.
+  expect((await call("own", "browser_navigate", { url: page("own", "not the console") })).result?.isError).not.toBe(true);
+  await call("own", "browser_tab_close");
 });
 
 it.skipIf(!hasChromium)("tells the agent to retry a human check in a fresh tab before asking the person", async () => {

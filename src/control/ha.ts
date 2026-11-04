@@ -1,7 +1,7 @@
 import type { Config } from "./config.js";
 import type { Logger } from "../common/logger.js";
 import { McpGateway } from "./mcpGateway.js";
-import { CAMERA_POLICY, CAMERA_TOOLS, CAMERA_TOOL_NAMES, type HaCameras } from "./camera.js";
+import { CAMERA_POLICY, CAMERA_TOOLS, CAMERA_TOOL_NAMES, type ClipFiles, type HaCameras } from "./camera.js";
 import { HA_HISTORY_TOOLS, HA_HISTORY_TOOL_NAMES, type HaHistory } from "./haHistory.js";
 import type { HaDashboard } from "./haDashboard.js";
 
@@ -17,10 +17,12 @@ import type { HaDashboard } from "./haDashboard.js";
  */
 export const HA_MCP_KEY = "HA_MCP_TOKEN";
 const TIMEOUT_MS = 30_000;
+/** The executor waits this long for a tool: cutting a long recording clip and saving it takes minutes. */
+const TOOL_TIMEOUT_SEC = 330;
 
 /** Thread-level MCP wiring for a Codex executor. */
 export function haThreadServers(cfg: Config): Record<string, unknown> {
-  return cfg.ha ? { aio_ha: { url: cfg.ha.url, tool_timeout_sec: TIMEOUT_MS / 1000 + 10 } } : {};
+  return cfg.ha ? { aio_ha: { url: cfg.ha.url, tool_timeout_sec: TOOL_TIMEOUT_SEC } } : {};
 }
 
 /** The same for a Claude Code turn (`--mcp-config`). */
@@ -38,10 +40,14 @@ export class HaGateway extends McpGateway {
   #cameras: HaCameras | null;
   #history: HaHistory | null;
   #dashboard: HaDashboard | null;
+  #clipFiles: ((username: string) => Promise<ClipFiles>) | null;
+  #workspace: string;
 
   constructor(opts: {
     cfg: Config; log: Logger; port: number; usernameOf: (userId: string) => string | null;
     cameras?: HaCameras | null; history?: HaHistory | null; dashboard?: HaDashboard | null;
+    /** An account's workspace, where recording clips are saved. */
+    clipFiles?: (username: string) => Promise<ClipFiles>;
   }) {
     super({
       ...opts,
@@ -57,6 +63,8 @@ export class HaGateway extends McpGateway {
     this.#cameras = opts.cameras ?? null;
     this.#history = opts.history ?? null;
     this.#dashboard = opts.dashboard ?? null;
+    this.#clipFiles = opts.clipFiles ?? null;
+    this.#workspace = opts.cfg.sandbox.containerWorkspaceDir;
   }
 
   /**
@@ -86,7 +94,11 @@ export class HaGateway extends McpGateway {
     }
     if (method === "tools/call" && typeof params?.name === "string") {
       const args = params.arguments && typeof params.arguments === "object" ? (params.arguments as Record<string, unknown>) : {};
-      if (cameras && CAMERA_TOOL_NAMES.has(params.name)) return { jsonrpc: "2.0", id, result: await cameras.tool(params.name, args, username) };
+      if (cameras && CAMERA_TOOL_NAMES.has(params.name)) {
+        const clipFiles = this.#clipFiles;
+        const target = clipFiles ? { workspace: this.#workspace, files: () => clipFiles(username) } : undefined;
+        return { jsonrpc: "2.0", id, result: await cameras.tool(params.name, args, username, target) };
+      }
       if (history && HA_HISTORY_TOOL_NAMES.has(params.name)) return { jsonrpc: "2.0", id, result: await history.tool(params.name, args) };
     }
     return undefined;

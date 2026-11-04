@@ -510,6 +510,22 @@ function siteCovers(site, host) {
   return Boolean(site) && (host === site || host.endsWith(`.${site}`));
 }
 
+/**
+ * The console this agent runs in (AIO_TABS_CONSOLE_HOST) and its workspace origin (AIO_TABS_WORKSPACE_HOST).
+ * The agent never opens the console in this browser or signs in to either: what the console shows is
+ * reachable through the agent's own tools, and signing the console in here would ask the user to log in
+ * to the very service they are talking to. Public share pages on the workspace origin may still be viewed.
+ */
+const CONSOLE_HOST = String(process.env.AIO_TABS_CONSOLE_HOST || '').toLowerCase();
+const WORKSPACE_HOST = String(process.env.AIO_TABS_WORKSPACE_HOST || '').toLowerCase();
+const OWN_SITE = 'is the console you are running in. Do not open it in the browser or ask the user to sign in to it: what it shows is available through your own tools (camera recordings: camera_recordings, camera_recording_frames and camera_recording_clip on aio_ha; files: the workspace; past tasks: aio_history). If no tool can do what is needed, tell the user so instead.';
+function refuseConsole(url) {
+  if (siteCovers(CONSOLE_HOST, hostOf(String(url || '')))) throw new Error(`${CONSOLE_HOST} ${OWN_SITE}`);
+}
+function ownSite(host) {
+  return siteCovers(CONSOLE_HOST, host) || siteCovers(WORKSPACE_HOST, host);
+}
+
 const VAULT_STEP_MS = Number(process.env.AIO_TABS_VAULT_STEP_MS || 8000);
 const LIKELY_USERNAME = 'input[autocomplete~="username" i], input[type="email"], input[name*="user" i], input[name*="email" i], input[name*="login" i], input[name*="account" i], input[name*="phone" i], input[id*="user" i], input[id*="email" i], input[id*="login" i], input[id*="account" i]';
 
@@ -1180,6 +1196,7 @@ const TOOLS = {
   browser_navigate: {
     mode: 'write', description: 'Open a URL in this task\'s own tab (a tab is created automatically if there is none).', input: { url: str, tab: ownTabArg }, required: ['url'],
     run: async (ctx, a) => {
+      refuseConsole(a.url);
       const tab = await resolveTab(ctx, a.tab, 'write', true);
       await makeRoom(ctx.key);
       await tab.page.goto(a.url, { waitUntil: 'domcontentloaded', timeout: 60000 });
@@ -1323,6 +1340,8 @@ const TOOLS = {
     input: { reason: str, tab: ownTabArg }, required: ['reason'],
     run: async (ctx, a, signal) => {
       const tab = await resolveTab(ctx, a.tab, 'write', false, true);
+      const host = hostOf(safeUrl(tab.page));
+      if (ownSite(host)) return { content: [{ type: 'text', text: `${host} ${OWN_SITE}` }], isError: true };
       // Without a reason the control plane words a default for the person.
       tab.request = { reason: String(a.reason || '').slice(0, 300), at: Date.now() };
       save();
@@ -1352,6 +1371,7 @@ const TOOLS = {
       const tab = await resolveTab(ctx, a.tab, 'write', false, true);
       const site = hostOf(safeUrl(tab.page));
       if (!site) return { content: [{ type: 'text', text: 'The current tab is not a web page; first use browser_navigate to open the site you want to sign in to.' }], isError: true };
+      if (ownSite(site)) return { content: [{ type: 'text', text: `${site} ${OWN_SITE}` }], isError: true };
       if ((tab.loginTries || 0) >= MAX_LOGIN_TRIES) {
         return { content: [{ type: 'text', text: `Signing in to this site has failed ${tab.loginTries} times already. Do not call browser_login again: call browser_request_human to ask the user to sign in themselves in the browser, and say which step it got stuck on.` }], isError: true };
       }
@@ -1425,7 +1445,7 @@ const TOOLS = {
   },
   browser_tab_new: {
     mode: 'write', description: 'Open a new tab for this task and switch to it, optionally opening a URL.', input: { url: str },
-    run: async (ctx, a) => { const tab = await newTab(ctx.key, ctx.title); ctx.tab = tab; if (a.url) await tab.page.goto(a.url, { waitUntil: 'domcontentloaded', timeout: 60000 }); return textResult(await describe(tab)); },
+    run: async (ctx, a) => { if (a.url) refuseConsole(a.url); const tab = await newTab(ctx.key, ctx.title); ctx.tab = tab; if (a.url) await tab.page.goto(a.url, { waitUntil: 'domcontentloaded', timeout: 60000 }); return textResult(await describe(tab)); },
   },
   browser_tab_select: {
     mode: 'write', description: 'Switch to a tab this task created.', input: { tab: ownTabArg }, required: ['tab'],

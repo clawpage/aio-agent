@@ -10,7 +10,7 @@ import {Jev} from "./jev.js";
 import {DecisionGateway} from "./decision.js";
 import {KbGateway} from "./kb.js";
 import {HaGateway} from "./ha.js";
-import { HaCameras } from "./camera.js";
+import { HaCameras, sandboxClipFiles } from "./camera.js";
 import { HaHistory } from "./haHistory.js";
 import { HaDashboard } from "./haDashboard.js";
 import {PhoneGateway} from "./phone.js";
@@ -524,7 +524,8 @@ async function main(): Promise<void> {
   const kb=new KbGateway({cfg:ctx.cfg,log:ctx.log,port:ctx.cfg.memberModelPort??4902,usernameOf:id=>account("SELECT username AS v FROM owners WHERE id=?",id)});
   kb.provision(ctx.cfg);
   const haDashboard=HaDashboard.from(ctx.cfg,ctx.log);
-  const ha=new HaGateway({cfg:ctx.cfg,log:ctx.log,port:ctx.cfg.memberModelPort??4902,usernameOf:id=>account("SELECT username AS v FROM owners WHERE id=?",id),cameras:ctx.cameras,history:HaHistory.from(ctx.cfg,ctx.log,haDashboard),dashboard:haDashboard});
+  const ha=new HaGateway({cfg:ctx.cfg,log:ctx.log,port:ctx.cfg.memberModelPort??4902,usernameOf:id=>account("SELECT username AS v FROM owners WHERE id=?",id),cameras:ctx.cameras,history:HaHistory.from(ctx.cfg,ctx.log,haDashboard),dashboard:haDashboard,
+    clipFiles:async name=>{const id=account("SELECT id AS v FROM owners WHERE username=?",name);if(!id)throw new Error(`no account ${name}`);return sandboxClipFiles(id===ctx.cfg.runtimeUserId?ctx:await ctx.runtimeForUser!(id));}});
   ha.provision(ctx.cfg);
   const printer=new PrinterGateway({port:ctx.cfg.memberModelPort??4902,log:ctx.log,printerUri:ctx.cfg.printing.printerUri,accounts:ctx.cfg.printing.accounts,
     workspace:ctx.cfg.sandbox.containerWorkspaceDir,usernameOf:id=>account("SELECT username AS v FROM owners WHERE id=?",id),

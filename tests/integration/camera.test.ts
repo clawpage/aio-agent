@@ -157,7 +157,7 @@ describe("camera helpers", () => {
       expect(cameras.visible("camera.c201", "betaw")).toBe(true);
       expect((await cameras.list("betaw")).map((c) => c.entity)).toEqual(["camera.c201"]);
       expect((await cameras.list("owner")).map((c) => c.entity)).toEqual(["camera.c201", "camera.ring"]);
-      for (const tool of ["camera_snapshot", "camera_ptz", "camera_recordings", "camera_recording_frames"]) {
+      for (const tool of ["camera_snapshot", "camera_ptz", "camera_recordings", "camera_recording_frames", "camera_recording_clip"]) {
         const r = await cameras.tool(tool, { camera: "camera.ring", direction: "up", at: formatLocal(Date.now() - 60_000) }, "betaw");
         expect([tool, r.isError, r.content[0]]).toEqual([tool, true, { type: "text", text: "There is no camera camera.ring; see camera_list" }]);
       }
@@ -234,7 +234,7 @@ it("adds the camera tools to aio_ha: pictures, pan/tilt, recordings and frames, 
     const call = async (name: string, args: Record<string, unknown>) => (await rpc("tools/call", { name, arguments: args })).result as { content: any[]; isError?: boolean };
 
     const tools = (await rpc("tools/list")).result.tools.map((t: { name: string }) => t.name);
-    expect(tools).toEqual(["HassTurnOn", "camera_list", "camera_snapshot", "camera_ptz", "camera_recordings", "camera_recording_frames"]);
+    expect(tools).toEqual(["HassTurnOn", "camera_list", "camera_snapshot", "camera_ptz", "camera_recordings", "camera_recording_frames", "camera_recording_clip"]);
     // HA's own tools still go to HA.
     expect((await call("HassTurnOn", { name: "kitchen" })).content[0].text).toBe("done");
     expect(upstreamCalls.map((c: any) => c.method)).toEqual(["tools/list", "tools/call"]);
@@ -364,5 +364,90 @@ it("serves camera cards only to accounts granted Home Assistant: info, snapshot,
     fs.rmSync(dir, { recursive: true, force: true });
     await h.shutdown();
     await denied.shutdown();
+  }
+});
+
+/** An ffmpeg that logs each run's arguments, keeps what it was piped, and writes `CLIP<n>` to its output (the last argument). */
+function fakeClipFfmpeg(dir: string): { bin: string; runs: () => string[][]; piped: (n: number) => Buffer } {
+  const bin = path.join(dir, "ffmpeg");
+  const log = path.join(dir, "runs");
+  fs.writeFileSync(bin, `#!/bin/sh
+n=$(ls '${dir}' | grep -c '^run-' || true)
+printf '%s\\n' "$@" > '${dir}'/run-$n
+for a in "$@"; do last="$a"; done
+case " $* " in *" pipe:0 "*) cat > '${dir}'/stdin-$n ;; esac
+printf "CLIP$n" > "$last"
+`, { mode: 0o755 });
+  void log;
+  const runs = () => fs.readdirSync(dir).filter((f) => /^run-\d+$/.test(f)).sort((a, b) => Number(a.slice(4)) - Number(b.slice(4))).map((f) => fs.readFileSync(path.join(dir, f), "utf8").trimEnd().split("\n"));
+  return { bin, runs, piped: (n) => fs.readFileSync(path.join(dir, `stdin-${n}`)) };
+}
+
+it("cuts a recording clip with its sound into the account's workspace, fetching only the fragments it needs", async () => {
+  const ha = await fakeHa();
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "aio-clip-test-"));
+  const ffmpeg = fakeClipFfmpeg(dir);
+  const log = { child: () => log, info() {}, warn() {}, error() {}, debug() {} } as any;
+  const cameras = new HaCameras({ baseUrl: ha.base, token: () => TOKEN, cameras: CAMERAS, log, ffmpeg: ffmpeg.bin });
+  const saved: Array<{ path: string; bytes: string }> = [];
+  const target = { workspace: "/home/gem/workspace", files: async () => ({ write: async (p: string, b: Buffer) => { saved.push({ path: p, bytes: b.toString() }); } }) };
+  const clip = async (args: Record<string, unknown>, t: typeof target | null = target) => {
+    const r = await cameras.tool("camera_recording_clip", { camera: "camera.c201", ...args }, "cr", t ?? undefined);
+    return { isError: r.isError, text: (r.content[0] as { text: string }).text };
+  };
+  try {
+    // Inside the indexed piece (key frames every 2 s): from the key frame at 2 s, the fragments up to the one starting at 6 s.
+    const one = await clip({ from: formatLocal(ha.t0 + 3_000), to: formatLocal(ha.t0 + 5_000) });
+    expect(one.isError).toBeFalsy();
+    const reply = one.text;
+    const file = `/home/gem/workspace/camera/c201-${formatLocal(ha.t0 + 3_000).replace(/-/g, "").replace(" ", "-").replace(/:/g, "")}.mp4`;
+    expect(reply).toContain(`Clip saved: ${file}`);
+    expect(reply).toContain(`客厅 C201, ${formatLocal(ha.t0 + 2_000)} to ${formatLocal(ha.t0 + 5_000)} (3 s,`);
+    expect(reply).toContain(`It starts at the key frame 1.0 s before ${formatLocal(ha.t0 + 3_000)}.`);
+    expect(reply).toContain(`[description](${file})`);
+    let runs = ffmpeg.runs();
+    expect(runs).toHaveLength(2);
+    expect(runs[0]!.slice(runs[0]!.indexOf("-i"), runs[0]!.indexOf("-i") + 4)).toEqual(["-i", "pipe:0", "-t", "3.000"]);
+    expect(runs[0]).toEqual(expect.arrayContaining(["-map", "0:v", "-map", "0:a?", "-c", "copy"]));
+    const { file: piece, initEnd, moofs } = indexedPiece();
+    const sent = ffmpeg.piped(0);
+    expect(sent.subarray(0, initEnd)).toEqual(piece.subarray(0, initEnd));
+    expect(sent.length).toBe(initEnd + moofs[3]! - moofs[1]!);
+    // The joined result plays from the start, and it is what reached the workspace.
+    expect(runs[1]).toEqual(expect.arrayContaining(["-movflags", "+faststart"]));
+    expect(saved).toEqual([{ path: file, bytes: "CLIP1" }]);
+    expect(ha.seen.rest.filter((r) => r.url.startsWith("/media/") && !r.range)).toHaveLength(0);
+
+    // Across two pieces: the second has no index and is read over HTTP with the token; the parts are joined.
+    for (const f of fs.readdirSync(dir).filter((f) => /^(run|stdin)-/.test(f))) fs.rmSync(path.join(dir, f));
+    const two = await clip({ from: formatLocal(ha.t0 + 9 * 60_000 + 58_000), to: formatLocal(ha.t0 + 10 * 60_000 + 2_000), path: "/home/gem/workspace/tasks/t1/roy.mp4" });
+    expect(two.isError).toBeFalsy();
+    runs = ffmpeg.runs();
+    expect(runs).toHaveLength(3);
+    expect(runs[1]!.slice(runs[1]!.indexOf("-ss"), runs[1]!.indexOf("-ss") + 4)).toEqual(["-ss", "0.00", "-i", `${ha.base}/media/c201/${ha.pieces[1]}`]);
+    expect(runs[1]![runs[1]!.indexOf("-headers") + 1]).toBe(`Authorization: Bearer ${TOKEN}\r`);
+    expect(runs[2]!.slice(0, runs[2]!.indexOf("-i"))).toEqual(expect.arrayContaining(["-f", "concat"]));
+    expect(saved.at(-1)).toEqual({ path: "/home/gem/workspace/tasks/t1/roy.mp4", bytes: "CLIP2" });
+
+    // What is refused, before anything is cut.
+    const refused = async (args: Record<string, unknown>, t: typeof target | null = target) => {
+      const r = await clip({ from: formatLocal(ha.t0 + 3_000), to: formatLocal(ha.t0 + 5_000), ...args }, t);
+      expect([args, r.isError, r.text]).toEqual([args, true, expect.any(String)]);
+      return r.text;
+    };
+    const runsBefore = ffmpeg.runs().length;
+    expect(await refused({ to: formatLocal(ha.t0 + 3_000) })).toBe("to must be after from");
+    expect(await refused({ to: formatLocal(ha.t0 + 11 * 60_000) })).toContain("at most 10 minutes");
+    expect(await refused({ from: formatLocal(Date.now() - 30_000), to: formatLocal(Date.now() + 30_000) })).toContain("has not happened yet");
+    expect(await refused({ from: "yesterday" })).toContain("local times");
+    expect(await refused({ path: "/home/gem/workspace/roy.mov" })).toBe("path must end in .mp4");
+    expect(await refused({ path: "/etc/roy.mp4" })).toMatch(/^path: /);
+    expect(await refused({}, null)).toBe("Clips cannot be saved here");
+    expect(await refused({ from: formatLocal(ha.t0 - 3600_000), to: formatLocal(ha.t0 - 3590_000) })).toContain("Nothing was recorded at");
+    expect(ffmpeg.runs()).toHaveLength(runsBefore);
+    expect(fs.readdirSync(os.tmpdir()).filter((f) => f.startsWith("aio-clip-") && !f.startsWith("aio-clip-test-"))).toEqual([]);
+  } finally {
+    ha.close();
+    fs.rmSync(dir, { recursive: true, force: true });
   }
 });

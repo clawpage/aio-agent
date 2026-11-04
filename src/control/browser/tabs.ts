@@ -319,6 +319,8 @@ export class TabServer implements TabServerLike {
         AIO_TABS_PORT: String(TAB_SERVER_PORT),
         AIO_TABS_PLAYWRIGHT: path.posix.join(this.#cfg.browser.toolDir, "patchright-core"),
         AIO_TABS_OUTPUT: path.posix.join(this.#cfg.sandbox.containerWorkspaceDir, ".scratch", "artifacts", "browser"),
+        AIO_TABS_CONSOLE_HOST: this.#cfg.primaryHost,
+        AIO_TABS_WORKSPACE_HOST: this.#cfg.workspaceHost,
       },
     });
     if (started.code !== 0) throw new Error(t().browser.tabs.startFailed(redact(started.stderr || started.stdout)));
