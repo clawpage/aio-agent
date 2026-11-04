@@ -140,7 +140,6 @@ export const chat = {
     fullLabel: (title: string) => `完整消息：${title}`,
     closeLabel: "关闭消息",
     closeTitle: "关闭（Esc）",
-    close: "关闭",
   },
   choices: {
     label: "可选回答",

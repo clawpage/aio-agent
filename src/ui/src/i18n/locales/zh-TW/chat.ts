@@ -141,7 +141,6 @@ export const chat: typeof zh = {
     fullLabel: (title: string) => `完整訊息：${title}`,
     closeLabel: "關閉訊息",
     closeTitle: "關閉（Esc）",
-    close: "關閉",
   },
   choices: {
     label: "可選回答",

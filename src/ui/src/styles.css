@@ -3226,11 +3226,15 @@ button .loading-mark { color: inherit; }
 .message-preview-content { display: flow-root; }
 .message-more { position: absolute; bottom: 0; left: 0; width: 100%; min-height: 44px; padding: 12px; border: 0; border-radius: 0; color: var(--accent); background: var(--bg-soft); box-shadow: 0 -16px 20px var(--bg-soft); font-size: 14px; }
 .msg.user .message-more { background: var(--accent-soft); box-shadow: 0 -16px 20px var(--accent-soft); }
-.full-message-backdrop { position: fixed; inset: 0; bottom: auto; height: var(--viewport-height); z-index: 100; display: flex; align-items: flex-end; padding: var(--safe-top) var(--safe-right) 0 var(--safe-left); background: var(--scrim); backdrop-filter: blur(2px); }
-.full-message { width: 100%; height: calc(var(--safe-height) * .9 + var(--safe-bottom)); max-height: 100%; display: flex; flex-direction: column; padding-bottom: var(--safe-bottom); background: var(--bg); border-radius: 20px 20px 0 0; overflow: hidden; box-shadow: var(--shadow); }
-.full-message-grabber { flex: none; width: 36px; height: 4px; margin: 8px auto 4px; border-radius: 4px; background: var(--text-dim); opacity: .45; }
-.full-message-head { flex: none; display: flex; align-items: center; gap: 12px; min-height: 56px; padding: 8px 16px; border-bottom: 1px solid var(--border); }
+/* Phones: the full message is a page of its own, edge to edge, that slides up over the
+   feed (no sheet, no dimmed backdrop); it owns the safe-area insets. */
+.full-message-backdrop { position: fixed; inset: 0; bottom: auto; height: var(--viewport-height); z-index: 100; display: flex; align-items: stretch; }
+.full-message-backdrop[data-popup-motion] { animation: none; }
+.full-message { width: 100%; height: 100%; display: flex; flex-direction: column; padding: 0 var(--safe-right) var(--safe-bottom) var(--safe-left); background: var(--bg); overflow: hidden; }
+.full-message-head { flex: none; display: flex; align-items: center; gap: 6px; min-height: calc(var(--head-h) + var(--safe-top)); padding: var(--safe-top) 12px 0 4px; border-bottom: 1px solid var(--border); }
 .full-message-head strong { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.full-message-head .full-message-close { order: -1; display: grid; place-items: center; min-width: 44px; min-height: 44px; padding: 0 6px; border: 0; background: transparent; }
+.full-message-close > .nav-icon { width: 24px; height: 24px; }
 .full-message-body { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; display: block; padding: 16px; margin: 0; max-width: none; }
 .full-message-content { width: min(960px, 100%); margin: 0 auto; overflow-wrap: anywhere; line-height: 1.7; }
 .full-message-body.user p { white-space: pre-wrap; }
@@ -3238,17 +3242,18 @@ button .loading-mark { color: inherit; }
 /* A wide screen reads a long message in a centred window, not a phone's bottom sheet. */
 @media (min-width: 901px) {
   .full-message-backdrop { align-items: center; justify-content: center; padding: 40px; background: var(--scrim-tint); backdrop-filter: blur(6px); }
+  .full-message-backdrop[data-popup-motion="enter"] { animation: popup-fade-in 280ms ease-out; }
+  .full-message-backdrop[data-popup-motion="exit"] { animation: popup-fade-out calc(var(--popup-exit-ms) * 1ms) ease-in forwards; }
   .full-message {
-    width: min(880px, 100%); height: auto; max-height: min(860px, 100%); padding-bottom: 0;
+    width: min(880px, 100%); height: auto; max-height: min(860px, 100%); padding: 0;
     border: 1px solid var(--border); border-radius: 20px;
     box-shadow: var(--shadow-sheet);
   }
-  .full-message-grabber { display: none; }
-  .full-message-head { min-height: 64px; padding: 12px 16px 12px 28px; }
+  .full-message-head { gap: 12px; min-height: 64px; padding: 12px 16px 12px 28px; }
   .full-message-head strong { font-size: 16px; }
-  .full-message-head .full-message-close { display: grid; place-items: center; width: 36px; height: 36px; min-height: 36px; padding: 0; border-radius: 50%; border-color: transparent; color: var(--text-dim); }
+  .full-message-head .full-message-close { order: 0; width: 36px; height: 36px; min-width: 36px; min-height: 36px; padding: 0; border-radius: 50%; border-color: transparent; background: var(--bg-raised); color: var(--text-dim); }
   .full-message-head .full-message-close:hover { color: var(--text); background: color-mix(in srgb, var(--text) 7%, transparent); }
-  .full-message-close-label { display: none; }
+  .full-message-close > .nav-icon { display: none; }
   .full-message-close-icon { display: block; }
   .full-message-body { padding: 24px 40px 36px; }
   .full-message-content { width: min(720px, 100%); font-size: 15px; line-height: 1.8; }

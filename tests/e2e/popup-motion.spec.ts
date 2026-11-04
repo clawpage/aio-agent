@@ -81,7 +81,7 @@ test("sheets slide vertically while mobile task navigation slides horizontally",
   await audit(page, ".dispatch-log");
   await page.getByRole("button", { name: "派单日志：动画验证" }).click(); await entered(page, ".dispatch-log");
   await page.locator(".dispatch-log").getByRole("button", { name: "关闭", exact: true }).click(); await exited(page, ".dispatch-log");
-  // The full message is a bottom sheet on a phone and a centred window on a wide screen (it fades and scales in).
+  // The full message is a page that slides up on a phone and a centred window on a wide screen (it fades and scales in).
   const sheetSlides = info.project.name.startsWith("mobile");
   const centred = async (name: string) => {
     await expect.poll(() => page.locator(".full-message").evaluate((n, name) => (n.getAnimations() as CSSAnimation[]).some(a => a.animationName === name), name)).toBe(true);

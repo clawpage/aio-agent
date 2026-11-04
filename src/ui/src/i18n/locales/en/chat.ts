@@ -140,7 +140,6 @@ export const chat: typeof zh = {
     fullLabel: (title: string) => `Full message: ${title}`,
     closeLabel: "Close message",
     closeTitle: "Close (Esc)",
-    close: "Close",
   },
   choices: {
     label: "Answer options",

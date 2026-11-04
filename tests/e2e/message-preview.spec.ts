@@ -4,7 +4,7 @@ import { mockConsole } from "./mock-api";
 /** A main-chat message folds past this share of the usable screen height. */
 const FOLD = 1;
 
-test("long main messages cap at one screen, open in a nine-tenths sheet and retain device/private links and draft", async ({ page }, info) => {
+test("long main messages cap at one screen, open as a full-screen page on phones and retain device/private links and draft", async ({ page }, info) => {
   const opened: string[] = [];
   await mockConsole(page, { conversations: [], onBrowserTab: url => opened.push(url) });
   const result = `[公开链接](https://external.example/start)\n\n` + Array.from({ length: 50 }, (_, i) => `第 ${i + 1} 段：完整正文可以一直读到最后。`).join("\n\n") + "\n\n[末尾公开链接](https://external.example/end)\n\n[内网链接](http://192.168.1.8/page)\n\n完整正文结束";
@@ -34,11 +34,17 @@ test("long main messages cap at one screen, open in a nine-tenths sheet and reta
   await expect.poll(() => dialog.evaluate(n => n.getAnimations().length)).toBe(0);
   const sheet = (await dialog.boundingBox())!;
   const view = page.viewportSize()!;
-  if (info.project.name.startsWith("mobile")) {
-    // A phone reads it in a nine-tenths bottom sheet.
-    expect(Math.abs(sheet.height - (cap / FOLD * .9 + 34))).toBeLessThan(1);
-    expect(sheet.y).toBeGreaterThan(view.height * .09);
-    expect(Math.abs(sheet.y + sheet.height - view.height)).toBeLessThan(1);
+  const mobile = info.project.name.startsWith("mobile");
+  if (mobile) {
+    // A phone reads it as a page of its own: edge to edge, with its controls clear of the insets.
+    expect(sheet).toEqual({ x: 0, y: 0, width: view.width, height: view.height });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(view.width);
+    const back = (await dialog.getByRole("button", { name: "关闭消息" }).boundingBox())!;
+    expect(back.x).toBeLessThan(view.width / 2);
+    expect(back.y).toBeGreaterThanOrEqual(62);
+    const scroller = (await dialog.locator(".full-message-body").boundingBox())!;
+    expect(Math.abs(scroller.y + scroller.height - (view.height - 34))).toBeLessThan(1);
+    expect(await page.locator(".full-message-backdrop").evaluate(n => getComputedStyle(n).backgroundColor)).toBe("rgba(0, 0, 0, 0)");
   } else {
     // A wide screen reads it in a centred window with a readable measure, clear of every edge.
     expect(sheet.width).toBeLessThanOrEqual(880);
@@ -46,7 +52,6 @@ test("long main messages cap at one screen, open in a nine-tenths sheet and reta
     expect(Math.abs(sheet.y + sheet.height / 2 - view.height / 2)).toBeLessThan(2);
     expect(sheet.y).toBeGreaterThanOrEqual(39);
     expect((await dialog.locator(".full-message-content").boundingBox())!.width).toBeLessThanOrEqual(720);
-    await expect(dialog.locator(".full-message-grabber")).toBeHidden();
   }
   await expect(dialog.getByRole("button", { name: "关闭消息" })).toBeFocused();
   const body = dialog.locator(".full-message-body");
@@ -74,13 +79,24 @@ test("long main messages cap at one screen, open in a nine-tenths sheet and reta
   await preview.locator(".markdown p").nth(1).click();
   await expect(dialog).toBeVisible(); await page.keyboard.press("Escape"); await expect(dialog).toHaveCount(0);
   await more.click();
-  await page.locator(".full-message-backdrop").click({ position: { x: 10, y: 5 } });
-  await expect(dialog).toHaveCount(0);
+  if (mobile) {
+    // The system back gesture closes the page and stays on the same address; Close does not leave a stray entry.
+    await expect(dialog).toBeVisible();
+    const url = page.url(), depth = await page.evaluate(() => history.length);
+    await page.goBack(); await expect(dialog).toHaveCount(0);
+    expect(page.url()).toBe(url);
+    await more.click(); await dialog.getByRole("button", { name: "关闭消息" }).click(); await expect(dialog).toHaveCount(0);
+    await expect.poll(() => page.evaluate(() => (history.state as { message?: string } | null)?.message)).toBeUndefined();
+    expect(await page.evaluate(() => history.length)).toBe(depth);
+  } else {
+    await page.locator(".full-message-backdrop").click({ position: { x: 10, y: 5 } });
+    await expect(dialog).toHaveCount(0);
+  }
   await page.getByRole("button", { name: "点击看更多：用户消息", exact: true }).click();
   const user = page.getByRole("dialog", { name: "完整消息：用户消息", exact: true });
   await expect(user).toContainText("用户原始需求第 90 行");
   await user.getByRole("button", { name: "关闭消息" }).click();
-  if (info.project.name.startsWith("mobile")) {
+  if (mobile) {
     await page.setViewportSize({ width: 360, height: 640 });
     await expect.poll(async () => (await preview.boundingBox())!.height).toBeLessThanOrEqual((640 - 96) * FOLD + 1);
   }

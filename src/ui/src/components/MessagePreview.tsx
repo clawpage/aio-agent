@@ -1,6 +1,7 @@
 import { PopupPresence, PopupSurface } from "./PopupMotion";
-import { createContext, useLayoutEffect, useRef, useState, type ReactNode, type KeyboardEvent } from "react";
+import { createContext, useEffect, useLayoutEffect, useRef, useState, type ReactNode, type KeyboardEvent } from "react";
 import { createPortal } from "react-dom";
+import { NavIcon } from "./NavIcon";
 import { isSandboxLink } from "../sandboxLink";
 import { t } from "../i18n";
 
@@ -51,7 +52,25 @@ export function MessagePreview({ children, title, user = false }: { children: Re
     else if (wasOpen.current) more.current?.focus({ preventScroll: true });
     wasOpen.current = reading;
   }, [reading]);
-  const dismiss = () => setOpen(false);
+  /** On a phone the message is a page with its own history entry, so the back gesture closes it. */
+  const entry = useRef<string | null>(null);
+  const dismiss = () => {
+    if (entry.current && (window.history.state as { message?: string } | null)?.message === entry.current) window.history.back();
+    else setOpen(false);
+  };
+  // Same address, one more entry (the state the page had is kept); leaving it any way closes the message.
+  useEffect(() => {
+    if (!open || !matchMedia("(max-width: 900px)").matches) return;
+    const id = entry.current = Math.random().toString(36).slice(2);
+    window.history.pushState({ ...(window.history.state as object | null), message: id }, "");
+    const back = () => { if ((window.history.state as { message?: string } | null)?.message !== id) setOpen(false); };
+    window.addEventListener("popstate", back);
+    return () => {
+      window.removeEventListener("popstate", back);
+      entry.current = null;
+      if ((window.history.state as { message?: string } | null)?.message === id) window.history.back();
+    };
+  }, [open]);
   const keys = (event: KeyboardEvent<HTMLDivElement>) => {
     // React portal events bubble through the reading page too. A nested image,
     // map or file viewer must handle its own Escape and keyboard focus.
@@ -80,8 +99,7 @@ export function MessagePreview({ children, title, user = false }: { children: Re
       // The sandbox may open its workspace fallback underneath the reading page.
       if (isSandboxLink(url)) dismiss();
     }}>
-      <div className="full-message-grabber" aria-hidden="true" />
-      <header className="full-message-head"><strong>{title}</strong><button ref={close} type="button" className="ghost full-message-close" onClick={dismiss} aria-label={t.chat.preview.closeLabel} title={t.chat.preview.closeTitle}><span className="full-message-close-label">{t.chat.preview.close}</span><svg className="full-message-close-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button></header>
+      <header className="full-message-head"><strong>{title}</strong><button ref={close} type="button" className="ghost full-message-close" onClick={dismiss} aria-label={t.chat.preview.closeLabel} title={t.chat.preview.closeTitle}><NavIcon name="back" /><svg className="full-message-close-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button></header>
       <div className={`full-message-body${user ? " user" : ""}`}><article className="full-message-content"><ReadingPage.Provider value={true}>{children}</ReadingPage.Provider></article></div>
     </div></PopupSurface>, document.body)}</PopupPresence>
   </>;
