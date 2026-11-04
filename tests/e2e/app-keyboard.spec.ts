@@ -144,6 +144,8 @@ test("in the iOS app the rise ends exactly where the page is then laid out, with
     last: Math.round(document.querySelector(".chat-scroll")!.lastElementChild!.getBoundingClientRect().top),
     composer: Math.round(document.querySelector(".composer")!.getBoundingClientRect().top),
   });
+  const caret = () => page.evaluate(() => getComputedStyle(document.querySelector(".composer textarea")!).caretColor);
+  const shown = await caret();
   const arriving = await page.evaluate((w) => {
     window.dispatchEvent(new CustomEvent("aio-keyboard", { detail: { height: 336, duration: 0.25 } }));
     const animations = document.getAnimations().filter((a) => a.id === "keyboard");
@@ -152,8 +154,12 @@ test("in the iOS app the rise ends exactly where the page is then laid out, with
     animations.forEach((a) => a.play());
     return at;
   }, where.toString());
+  // iOS would draw the caret where the box is laid out, away from where it is seen moving: none until it settles.
+  expect(await caret()).toBe("rgba(0, 0, 0, 0)");
   await expect.poll(() => moving(page), { timeout: 3000 }).toBe(0);
   expect(await page.evaluate((w) => new Function(`return (${w})()`)(), where.toString())).toEqual(arriving);
+  expect(await caret()).toBe(shown);
+  expect(shown).not.toBe("rgba(0, 0, 0, 0)");
 });
 
 test("in the iOS app leaving the box and the keyboard going down make one motion, with no step between them", async ({ page }, info) => {

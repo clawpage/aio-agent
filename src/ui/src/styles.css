@@ -792,6 +792,8 @@ textarea:focus {
 }
 /* While the iOS app's keyboard moves a chat (useKeyboardViewport), what slides up passes under its header. */
 :root.keyboard-moving .chat > .chat-head { position: relative; z-index: 6; }
+/* iOS draws the caret where the box is laid out, not where the motion shows it: hidden until the box settles. */
+:root.keyboard-moving .composer textarea { caret-color: transparent; }
 
 .chat-title {
   display: flex;
