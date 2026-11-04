@@ -77,41 +77,54 @@ function followAppKeyboard(root: HTMLElement) {
         for (const a of animations) a.cancel();
         root.classList.remove("keyboard-moving");
     };
+    /** How far a feed's content goes when the feed is `d` px shorter with its distance from the bottom kept (feeds are top-aligned). */
+    const feedShift = (el: HTMLElement, d: number) => {
+        const last = el.lastElementChild;
+        const content = el.scrollHeight > el.clientHeight + 1 || !last
+            ? el.scrollHeight
+            : last.getBoundingClientRect().bottom - el.getBoundingClientRect().top + el.scrollTop + (parseFloat(getComputedStyle(el).paddingBottom) || 0);
+        const most = Math.max(0, content - (el.clientHeight - d));
+        return Math.min(Math.max(0, el.scrollTop + d), most) - el.scrollTop;
+    };
     /**
-     * Glide from what is on screen now to a new layout. `change` lays the page out as it will be; when
-     * `atEnd` (the keyboard layout to end in) is set the page is laid out only once the motion arrives
-     * (rising: nothing near the bottom is cut off on the way), otherwise at once, with everything starting
-     * from where it was seen.
+     * Glide from what is on screen now to a new layout. Rising (`rise`, the keyboard layout to end in), the
+     * page is laid out only once the motion arrives, so nothing near the bottom is cut off on the way; where
+     * things go is worked out from the feeds' scroll sizes rather than by laying the page out, so the motion
+     * starts at once. Otherwise `change` lays the page out at once and everything starts from where it was
+     * seen. `late` is how long ago the motion began (the keyboard's start, as the app reports it).
      */
-    const glide = (change: () => void, atEnd: number | null) => {
+    const glide = (change: () => void, rise: number | null, late = 0) => {
         const parts = movers();
         const seen = parts.map((p) => p.top());
         stop();
-        const prev = reserved;
-        const scrolls = feeds().map((el) => [el, el.scrollTop] as const);
-        const laidOut = parts.map((p) => p.top());
-        change();
-        const after = parts.map((p) => p.top());
-        if (atEnd !== null) {
-            layout(prev);
-            for (const [el, top] of scrolls) el.scrollTop = top;
+        const now = parts.map((p) => p.top());
+        let to: number[];
+        if (rise !== null) {
+            const d = rise - reserved;
+            to = parts.map((p) => -(p.el.classList.contains("chat-scroll") ? feedShift(p.el, d) : d));
+        } else {
+            change();
+            const after = parts.map((p) => p.top());
+            for (let i = 0; i < now.length; i += 1) now[i] = after[i]!;
+            to = parts.map(() => 0);
         }
-        const base = atEnd !== null ? laidOut : after;
-        const moves = parts.map((p, i) => ({ el: p.el, from: seen[i]! - base[i]!, to: after[i]! - base[i]! })).filter((m) => Math.abs(m.from) >= 0.5 || Math.abs(m.to) >= 0.5);
+        const moves = parts.map((p, i) => ({ el: p.el, from: seen[i]! - now[i]!, to: to[i]! })).filter((m) => Math.abs(m.from) >= 0.5 || Math.abs(m.to) >= 0.5);
         if (!moves.length) {
-            if (atEnd !== null) change();
+            if (rise !== null) layout(rise);
             return;
         }
         root.classList.add("keyboard-moving");
         const timing = { id: "keyboard", duration: KEYBOARD_MS, easing: curve, fill: "forwards" as const };
         const animations = moves.map((m) => m.el.animate([{ transform: `translateY(${m.from}px)` }, { transform: `translateY(${m.to}px)` }], timing));
-        const mine = { animations, commit: atEnd };
+        const ahead = Math.min(Math.max(0, late), KEYBOARD_MS - 50);
+        if (ahead > 0) for (const a of animations) a.currentTime = ahead;
+        const mine = { animations, commit: rise };
         running = mine;
         void Promise.all(animations.map((a) => a.finished)).then(() => { if (running === mine) stop(); }, () => undefined);
     };
     const still = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
     const onKeyboard = (e: Event) => {
-        const detail = (e as CustomEvent<{ height?: number; duration?: number }>).detail ?? {};
+        const detail = (e as CustomEvent<{ height?: number; duration?: number; start?: number }>).detail ?? {};
         const height = Math.max(0, Number(detail.height) || 0);
         const target = Math.max(0, height - (parseFloat(getComputedStyle(probe).paddingBottom) || 0));
         if (detail.duration === undefined) return layout(target);
@@ -121,7 +134,9 @@ function followAppKeyboard(root: HTMLElement) {
             stop();
             return layout(target);
         }
-        glide(() => layout(target), target > ending ? target : null);
+        // How late this is (the app's clock is the page's); a start out of reach (another clock, a stale event) counts as now.
+        const late = Number(detail.start) > 0 ? Date.now() - Number(detail.start) : 0;
+        glide(() => layout(target), target > ending ? target : null, late >= 0 && late < 1000 ? late : 0);
     };
     // The composer grows when its box is focused and shrinks when it is left, a few frames before the
     // keyboard moves: that change glides too, from the composer as it was (held for one measurement).

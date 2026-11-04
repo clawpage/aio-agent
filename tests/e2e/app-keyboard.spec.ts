@@ -111,6 +111,20 @@ test("in the iOS app the composer's growth on focus glides instead of jumping, a
   expect(await composerTop()).toBeCloseTo(rest, 0);
 });
 
+test("in the iOS app a keyboard event that arrives late starts its motion as far along as the keyboard is", async ({ page }, info) => {
+  test.skip(!info.project.name.startsWith("mobile"));
+  await setup(page);
+  await page.goto("/");
+  await expect(page.getByText("任务 23").first()).toBeVisible();
+  const progress = await page.evaluate(() => {
+    window.dispatchEvent(new CustomEvent("aio-keyboard", { detail: { height: 336, duration: 0.25, start: Date.now() - 200 } }));
+    return document.getAnimations().filter((a) => a.id === "keyboard").map((a) => Number(a.currentTime));
+  });
+  expect(progress.length).toBeGreaterThan(0);
+  for (const at of progress) expect(at).toBeGreaterThanOrEqual(190);
+  await expect.poll(() => moving(page), { timeout: 3000 }).toBe(0);
+});
+
 test("without the app's marker the page ignores keyboard events from elsewhere", async ({ page }, info) => {
   test.skip(!info.project.name.startsWith("mobile"));
   await mockConsole(page, { conversations: [] });

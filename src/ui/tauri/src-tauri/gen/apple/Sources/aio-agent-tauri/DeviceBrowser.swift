@@ -219,9 +219,10 @@ private final class PushHandler: NSObject, WKScriptMessageHandler, UNUserNotific
 // opened from the composer; sending the keyboard's height on every frame made the page lay itself out
 // on every frame, which a long conversation could not keep up with. So the web view keeps its size and
 // is held at the top while a keyboard is up or moving, and the page is told once, as the keyboard starts
-// to move, where it will end and whether it animates (`aio-keyboard` with `height` and `duration`); the
-// page moves its content with the keyboard's own curve on the compositor and settles its layout at the
-// end. WebKit keeps its own keyboard handling (it swaps the keyboard for the attachment menu, for one).
+// to move, where it will end, whether it animates and when it started (`aio-keyboard` with `height`,
+// `duration` and `start`); the page moves its content with the keyboard's own curve on the compositor,
+// in step with it, and settles its layout at the end. WebKit keeps its own keyboard handling (it swaps
+// the keyboard for the attachment menu, for one).
 final class KeyboardFit: NSObject, WKScriptMessageHandler {
     private weak var webView: WKWebView?
     private var height: CGFloat = 0
@@ -265,7 +266,9 @@ final class KeyboardFit: NSObject, WKScriptMessageHandler {
         movingUntil = Date().addingTimeInterval(max(duration, 0.6))
         guard value != height else { return }
         height = value
-        webView.evaluateJavaScript("window.dispatchEvent(new CustomEvent('aio-keyboard',{detail:{height:\(value),duration:\(duration)}}))")
+        // When the motion started (the page's clock), so a page that hears of it a frame or two late keeps pace.
+        let start = Int(Date().timeIntervalSince1970 * 1000)
+        webView.evaluateJavaScript("window.dispatchEvent(new CustomEvent('aio-keyboard',{detail:{height:\(value),duration:\(duration),start:\(start)}}))")
     }
 }
 
