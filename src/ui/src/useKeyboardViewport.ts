@@ -11,7 +11,8 @@ export function keepTyping(e: MouseEvent<HTMLElement>) {
 }
 
 /** The iOS app takes the keyboard from WebKit and reports it (`aioKeyboard`, DeviceBrowser.swift). */
-const appKeyboard = () => !!(window as { webkit?: { messageHandlers?: { aioKeyboard?: unknown } } }).webkit?.messageHandlers?.aioKeyboard;
+const appKeyboardBridge = () => (window as { webkit?: { messageHandlers?: { aioKeyboard?: { postMessage(body: string): void } } } }).webkit?.messageHandlers?.aioKeyboard;
+const appKeyboard = () => !!appKeyboardBridge();
 
 /** The iOS keyboard's own motion (UIKit's curve 7), sampled frame by frame in the simulator: its progress over KEYBOARD_MS. */
 const KEYBOARD_MS = 500;
@@ -43,6 +44,8 @@ function followAppKeyboard(root: HTMLElement) {
     probe.style.cssText = "position:fixed;visibility:hidden;pointer-events:none;padding-bottom:env(safe-area-inset-bottom,0px)";
     document.body.appendChild(probe);
     const curve = typeof CSS !== "undefined" && CSS.supports?.("animation-timing-function", KEYBOARD_CURVE) ? KEYBOARD_CURVE : KEYBOARD_FALLBACK;
+    // The page never scrolls as a document: the app keeps it at the top even before a keyboard is announced.
+    appKeyboardBridge()?.postMessage("hold");
     /** What the page gives up at the bottom beyond the safe area, as laid out now. */
     let reserved = 0;
     let settle: (() => void) | null = null;
@@ -104,6 +107,7 @@ function followAppKeyboard(root: HTMLElement) {
     window.addEventListener("aio-keyboard", onKeyboard);
     return () => {
         settle?.();
+        appKeyboardBridge()?.postMessage("release");
         window.removeEventListener("aio-keyboard", onKeyboard);
         probe.remove();
         root.style.removeProperty("--keyboard-viewport");

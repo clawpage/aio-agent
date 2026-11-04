@@ -226,6 +226,8 @@ final class KeyboardFit: NSObject, WKScriptMessageHandler {
     private weak var webView: WKWebView?
     private var height: CGFloat = 0
     private var movingUntil = Date.distantPast
+    /** The console asked to be held at the top for good (it never scrolls as a document); a new page load ends it. */
+    private var hold = false
     static var shared: KeyboardFit?
 
     init(_ webView: WKWebView) {
@@ -233,14 +235,24 @@ final class KeyboardFit: NSObject, WKScriptMessageHandler {
         super.init()
         NotificationCenter.default.addObserver(self, selector: #selector(change(_:)), name: UIResponder.keyboardWillChangeFrameNotification, object: nil)
         webView.scrollView.addObserver(self, forKeyPath: "contentOffset", options: [.new], context: nil)
-        // A marker: the console follows `aio-keyboard` only when the app sends it.
+        webView.addObserver(self, forKeyPath: "loading", options: [.new], context: nil)
+        // A marker: the console follows `aio-keyboard` only when the app sends it. It also says "hold" once
+        // it is up: WebKit scrolls to a focused box as soon as it is tapped, before the keyboard is announced.
         webView.configuration.userContentController.add(self, name: "aioKeyboard")
     }
 
-    func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {}
+    func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
+        guard message.frameInfo.isMainFrame else { return }
+        if message.body as? String == "hold" { hold = true }
+        if message.body as? String == "release" { hold = false }
+    }
 
     override func observeValue(forKeyPath keyPath: String?, of object: Any?, change: [NSKeyValueChangeKey: Any]?, context: UnsafeMutableRawPointer?) {
-        guard height > 0 || Date() < movingUntil, let scroll = webView?.scrollView, scroll.contentOffset != .zero else { return }
+        if keyPath == "loading" {
+            if webView?.isLoading == true { hold = false }
+            return
+        }
+        guard hold || height > 0 || Date() < movingUntil, let scroll = webView?.scrollView, scroll.contentOffset != .zero else { return }
         scroll.contentOffset = .zero
     }
 
