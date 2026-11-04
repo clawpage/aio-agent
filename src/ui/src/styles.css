@@ -4645,7 +4645,8 @@ button.map-card-switch { flex: 0 0 auto; padding: 4px 10px; }
   }
   .composer textarea, .task-chat .composer textarea {
     width: 100%; height: 44px; min-height: 44px;
-    max-height: max(64px, calc(var(--safe-height) * .25));
+    /* --composer-screen: the iOS app's whole screen, so the keyboard does not resize the composer as it moves (useKeyboardViewport). */
+    max-height: max(64px, calc(var(--composer-screen, var(--safe-height)) * .25));
     padding: 11px 48px; border: 0; border-radius: 0;
     background: transparent; outline: none; box-shadow: none;
     font-size: 16px; line-height: 22px;
@@ -4663,7 +4664,7 @@ button.map-card-switch { flex: 0 0 auto; padding: 4px 10px; }
   .composer:has(textarea:focus) { border-color: color-mix(in srgb, var(--accent) 50%, var(--border)); }
   /* hold-collapsed / hold-expanded: the iOS app measuring the composer as it was, to glide it (useKeyboardViewport). */
   .composer:has(textarea:focus):not(.hold-collapsed) textarea, .composer.has-content textarea, .composer.hold-expanded textarea {
-    min-height: clamp(64px, calc(var(--safe-height) * .12), 100px); padding: 8px 10px;
+    min-height: clamp(64px, calc(var(--composer-screen, var(--safe-height)) * .12), 100px); padding: 8px 10px;
   }
   .composer:has(textarea:focus):not(.hold-collapsed) .composer-row, .composer.has-content .composer-row, .composer.hold-expanded .composer-row { height: 48px; }
   .composer .chips, .composer .task-reference { margin: 4px 6px 6px; }

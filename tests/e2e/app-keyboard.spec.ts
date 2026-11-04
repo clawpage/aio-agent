@@ -125,6 +125,29 @@ test("in the iOS app a keyboard event that arrives late starts its motion as far
   await expect.poll(() => moving(page), { timeout: 3000 }).toBe(0);
 });
 
+test("in the iOS app the rise ends exactly where the page is then laid out, with the composer focused", async ({ page }, info) => {
+  test.skip(!info.project.name.startsWith("mobile"));
+  await setup(page);
+  await page.goto("/");
+  await expect(page.getByText("任务 23").first()).toBeVisible();
+  await page.evaluate(() => document.querySelector<HTMLTextAreaElement>(".composer textarea")!.focus());
+  await expect.poll(() => moving(page), { timeout: 3000 }).toBe(0);
+  const where = () => ({
+    last: Math.round(document.querySelector(".chat-scroll")!.lastElementChild!.getBoundingClientRect().top),
+    composer: Math.round(document.querySelector(".composer")!.getBoundingClientRect().top),
+  });
+  const arriving = await page.evaluate((w) => {
+    window.dispatchEvent(new CustomEvent("aio-keyboard", { detail: { height: 336, duration: 0.25 } }));
+    const animations = document.getAnimations().filter((a) => a.id === "keyboard");
+    animations.forEach((a) => { a.pause(); a.currentTime = 499; });
+    const at = new Function(`return (${w})()`)() as { last: number; composer: number };
+    animations.forEach((a) => a.play());
+    return at;
+  }, where.toString());
+  await expect.poll(() => moving(page), { timeout: 3000 }).toBe(0);
+  expect(await page.evaluate((w) => new Function(`return (${w})()`)(), where.toString())).toEqual(arriving);
+});
+
 test("without the app's marker the page ignores keyboard events from elsewhere", async ({ page }, info) => {
   test.skip(!info.project.name.startsWith("mobile"));
   await mockConsole(page, { conversations: [] });

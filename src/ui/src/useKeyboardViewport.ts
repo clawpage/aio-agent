@@ -46,6 +46,8 @@ function followAppKeyboard(root: HTMLElement) {
     const curve = typeof CSS !== "undefined" && CSS.supports?.("animation-timing-function", KEYBOARD_CURVE) ? KEYBOARD_CURVE : KEYBOARD_FALLBACK;
     // The page never scrolls as a document: the app keeps it at the top even before a keyboard is announced.
     appKeyboardBridge()?.postMessage("hold");
+    // The composer sizes itself by the whole screen here, not the part above the keyboard, so it keeps its size as the keyboard moves.
+    root.style.setProperty("--composer-screen", "calc(100dvh - var(--safe-top) - var(--safe-bottom))");
     /** What the page gives up at the bottom beyond the safe area, as laid out now. */
     let reserved = 0;
     /** The keyboard motion under way, and the layout it ends in (rising lays the page out at the end). */
@@ -120,7 +122,16 @@ function followAppKeyboard(root: HTMLElement) {
         if (ahead > 0) for (const a of animations) a.currentTime = ahead;
         const mine = { animations, commit: rise };
         running = mine;
-        void Promise.all(animations.map((a) => a.finished)).then(() => { if (running === mine) stop(); }, () => undefined);
+        void Promise.all(animations.map((a) => a.finished)).then(() => {
+            if (running !== mine) return;
+            // Arrived: lay the page out. Should anything land elsewhere than worked out, it eases over instead of jumping.
+            const arrived = parts.map((p) => p.top());
+            stop();
+            parts.forEach((p, i) => {
+                const off = arrived[i]! - p.top();
+                if (Math.abs(off) >= 1) p.el.animate([{ transform: `translateY(${off}px)` }, { transform: "none" }], { id: "keyboard", duration: 180, easing: "ease-out" });
+            });
+        }, () => undefined);
     };
     const still = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
     const onKeyboard = (e: Event) => {
@@ -160,6 +171,7 @@ function followAppKeyboard(root: HTMLElement) {
         window.removeEventListener("aio-keyboard", onKeyboard);
         probe.remove();
         root.style.removeProperty("--keyboard-viewport");
+        root.style.removeProperty("--composer-screen");
     };
 }
 
