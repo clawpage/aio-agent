@@ -12,7 +12,8 @@ async function setup(page: Page) {
   const now = Date.now();
   const tasks = Array.from({ length: 24 }, (_, i) => ({
     id: `task-${i}`, revision: 1, title: `任务 ${i}`, text: `任务 ${i}`, conversationId: "c-1", status: "completed",
-    result: `第 ${i} 个任务的结果，`.repeat(6), error: null, attachments: [], relatedTaskId: null, dependencies: [], approvals: 0,
+    // The latest is long enough to be shown clipped with "show more", which is sized by the screen.
+    result: `第 ${i} 个任务的结果，`.repeat(i === 23 ? 400 : 6), error: null, attachments: [], relatedTaskId: null, dependencies: [], approvals: 0,
     createdAt: now - (24 - i) * 60_000, completedAt: now - (24 - i) * 60_000 + 1000,
   }));
   await page.route("**/api/main*", (r) => r.fulfill({ json: { mode: "tasks", version: "v0", tasks, nextBefore: null } }));

@@ -46,8 +46,9 @@ function followAppKeyboard(root: HTMLElement) {
     const curve = typeof CSS !== "undefined" && CSS.supports?.("animation-timing-function", KEYBOARD_CURVE) ? KEYBOARD_CURVE : KEYBOARD_FALLBACK;
     // The page never scrolls as a document: the app keeps it at the top even before a keyboard is announced.
     appKeyboardBridge()?.postMessage("hold");
-    // The composer sizes itself by the whole screen here, not the part above the keyboard, so it keeps its size as the keyboard moves.
-    root.style.setProperty("--composer-screen", "calc(100dvh - var(--safe-top) - var(--safe-bottom))");
+    // What sizes itself by the screen (the composer, a long message's preview) uses the whole screen here, not
+    // the part above the keyboard, so nothing changes size as the keyboard moves.
+    root.style.setProperty("--screen-height", "calc(100dvh - var(--safe-top) - var(--safe-bottom))");
     /** What the page gives up at the bottom beyond the safe area, as laid out now. */
     let reserved = 0;
     /** The motion under way: what lays the page out when it ends (rising, shrinking), and the keyboard layout it ends in. */
@@ -223,7 +224,7 @@ function followAppKeyboard(root: HTMLElement) {
         window.removeEventListener("aio-keyboard", onKeyboard);
         probe.remove();
         root.style.removeProperty("--keyboard-viewport");
-        root.style.removeProperty("--composer-screen");
+        root.style.removeProperty("--screen-height");
     };
 }
 
