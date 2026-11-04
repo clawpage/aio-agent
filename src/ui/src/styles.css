@@ -3989,6 +3989,15 @@ button.clawpage-version-restore.danger { background:var(--error); border-color:v
 }
 .photo-compare-stage:focus-visible { outline: 2px solid var(--ai); outline-offset: 2px; }
 .photo-compare-stage img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; pointer-events: none; -webkit-user-drag: none; }
+.photo-compare-original { position: absolute; inset: 0; pointer-events: none; }
+/* A cropped edit: the original whole, the part the edit kept outlined and the rest dimmed. */
+.photo-compare-after, .photo-compare-original { transform-origin: 0 0; }
+.photo-compare-fit { position: absolute; overflow: hidden; }
+.photo-compare-kept { position: absolute; box-shadow: 0 0 0 1px var(--on-media), 0 0 0 100vmax var(--scrim); border-radius: 2px; }
+@media (prefers-reduced-motion: no-preference) {
+  .photo-compare.cropped .photo-compare-after,
+  .photo-compare.cropped .photo-compare-original { transition: transform 180ms ease-out, opacity 180ms ease-out; }
+}
 .photo-compare-status { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; padding: 16px; text-align: center; }
 .photo-compare-hint {
   position: absolute;
