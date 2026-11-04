@@ -83,6 +83,34 @@ test("in the iOS app the content moves with the keyboard on the compositor, and 
   expect(Math.abs((await feedGap(page)) - gap)).toBeLessThan(2);
 });
 
+test("in the iOS app the composer's growth on focus glides instead of jumping, and so does its shrinking on leaving", async ({ page }, info) => {
+  test.skip(!info.project.name.startsWith("mobile"));
+  await setup(page);
+  await page.goto("/");
+  await expect(page.getByText("任务 23").first()).toBeVisible();
+  const composerTop = () => page.locator(".composer").first().evaluate((n) => n.getBoundingClientRect().top);
+  const rest = await composerTop();
+  const at = (focus: boolean) => page.evaluate((f) => {
+    const box = document.querySelector<HTMLTextAreaElement>(".composer textarea")!;
+    if (f) box.focus(); else box.blur();
+    const animations = document.getAnimations().filter((a) => a.id === "keyboard");
+    animations.forEach((a) => a.pause());
+    const top = document.querySelector(".composer")!.getBoundingClientRect().top;
+    animations.forEach((a) => a.play());
+    return { top, moving: animations.length };
+  }, focus);
+  const opened = await at(true);
+  expect(opened.moving).toBeGreaterThan(0);
+  expect(opened.top).toBeCloseTo(rest, 0);
+  await expect.poll(() => moving(page), { timeout: 3000 }).toBe(0);
+  const grown = await composerTop();
+  expect(grown).toBeLessThan(rest - 20);
+  const closed = await at(false);
+  expect(closed.top).toBeCloseTo(grown, 0);
+  await expect.poll(() => moving(page), { timeout: 3000 }).toBe(0);
+  expect(await composerTop()).toBeCloseTo(rest, 0);
+});
+
 test("without the app's marker the page ignores keyboard events from elsewhere", async ({ page }, info) => {
   test.skip(!info.project.name.startsWith("mobile"));
   await mockConsole(page, { conversations: [] });

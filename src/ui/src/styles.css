@@ -4661,10 +4661,11 @@ button.map-card-switch { flex: 0 0 auto; padding: 4px 10px; }
   .composer-row > .spacer, .composer-button-label { display: none; }
   .composer:has(textarea:focus), .composer.has-content { border-radius: 22px; }
   .composer:has(textarea:focus) { border-color: color-mix(in srgb, var(--accent) 50%, var(--border)); }
-  .composer:has(textarea:focus) textarea, .composer.has-content textarea {
+  /* hold-collapsed / hold-expanded: the iOS app measuring the composer as it was, to glide it (useKeyboardViewport). */
+  .composer:has(textarea:focus):not(.hold-collapsed) textarea, .composer.has-content textarea, .composer.hold-expanded textarea {
     min-height: clamp(64px, calc(var(--safe-height) * .12), 100px); padding: 8px 10px;
   }
-  .composer:has(textarea:focus) .composer-row, .composer.has-content .composer-row { height: 48px; }
+  .composer:has(textarea:focus):not(.hold-collapsed) .composer-row, .composer.has-content .composer-row, .composer.hold-expanded .composer-row { height: 48px; }
   .composer .chips, .composer .task-reference { margin: 4px 6px 6px; }
   .composer .chip button, .composer .task-reference button { display: inline-flex; align-items: center; justify-content: center; }
   .composer .chip .composer-icon, .composer .task-reference .composer-icon { width: 16px; height: 16px; }

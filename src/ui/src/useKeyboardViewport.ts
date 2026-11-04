@@ -48,65 +48,99 @@ function followAppKeyboard(root: HTMLElement) {
     appKeyboardBridge()?.postMessage("hold");
     /** What the page gives up at the bottom beyond the safe area, as laid out now. */
     let reserved = 0;
-    let settle: (() => void) | null = null;
+    /** The keyboard motion under way, and the layout it ends in (rising lays the page out at the end). */
+    let running: { animations: Animation[]; commit: number | null } | null = null;
     const feeds = () => Array.from(document.querySelectorAll<HTMLElement>(".chat-scroll"));
-    /** Lay the page out giving up `r` px; feeds keep their distance from the bottom. */
-    const layout = (r: number) => {
-        const pinned = feeds().map((el) => [el, el.scrollHeight - el.scrollTop - el.clientHeight] as const);
+    /** Run a layout change with chat feeds keeping their distance from the bottom. */
+    const pinned = (change: () => void) => {
+        const gaps = feeds().map((el) => [el, el.scrollHeight - el.scrollTop - el.clientHeight] as const);
+        change();
+        for (const [el, gap] of gaps) el.scrollTop = el.scrollHeight - el.clientHeight - gap;
+    };
+    /** Lay the page out giving up `r` px. */
+    const layout = (r: number) => pinned(() => {
         if (r > 0) root.style.setProperty("--keyboard-viewport", `${Math.round(root.clientHeight - r)}px`);
         else root.style.removeProperty("--keyboard-viewport");
-        for (const [el, gap] of pinned) el.scrollTop = el.scrollHeight - el.clientHeight - gap;
         reserved = r;
-    };
-    /** What moves with the keyboard, and the point of it to follow: a feed's last message, anything else itself. */
+    });
+    /** What moves, and the point of it to follow: a feed's last message, anything else itself. Tops are as seen, motion included. */
     const movers = () => Array.from(document.querySelectorAll<HTMLElement>(".chat > :not(.chat-head)"), (el) => {
         const anchor = el.classList.contains("chat-scroll") ? (el.lastElementChild as HTMLElement | null) : el;
         return { el, top: () => anchor?.getBoundingClientRect().top ?? 0 };
     });
-    /** How far each mover's content goes when the layout changes from `from` to `to` (measured, then undone). */
-    const travel = (from: number, to: number) => {
-        const parts = movers();
-        const scrolls = feeds().map((el) => [el, el.scrollTop] as const);
-        const before = parts.map((p) => p.top());
-        layout(to);
-        const after = parts.map((p) => p.top());
-        layout(from);
-        for (const [el, top] of scrolls) el.scrollTop = top;
-        return parts.map((p, i) => ({ el: p.el, by: after[i]! - before[i]! })).filter((m) => Math.abs(m.by) >= 0.5);
+    /** Stop the motion under way where it is: the page is laid out as its end wants, with nothing moved. */
+    const stop = () => {
+        if (!running) return;
+        const { animations, commit } = running;
+        running = null;
+        if (commit !== null) layout(commit);
+        for (const a of animations) a.cancel();
+        root.classList.remove("keyboard-moving");
     };
+    /**
+     * Glide from what is on screen now to a new layout. `change` lays the page out as it will be; when
+     * `atEnd` (the keyboard layout to end in) is set the page is laid out only once the motion arrives
+     * (rising: nothing near the bottom is cut off on the way), otherwise at once, with everything starting
+     * from where it was seen.
+     */
+    const glide = (change: () => void, atEnd: number | null) => {
+        const parts = movers();
+        const seen = parts.map((p) => p.top());
+        stop();
+        const prev = reserved;
+        const scrolls = feeds().map((el) => [el, el.scrollTop] as const);
+        const laidOut = parts.map((p) => p.top());
+        change();
+        const after = parts.map((p) => p.top());
+        if (atEnd !== null) {
+            layout(prev);
+            for (const [el, top] of scrolls) el.scrollTop = top;
+        }
+        const base = atEnd !== null ? laidOut : after;
+        const moves = parts.map((p, i) => ({ el: p.el, from: seen[i]! - base[i]!, to: after[i]! - base[i]! })).filter((m) => Math.abs(m.from) >= 0.5 || Math.abs(m.to) >= 0.5);
+        if (!moves.length) {
+            if (atEnd !== null) change();
+            return;
+        }
+        root.classList.add("keyboard-moving");
+        const timing = { id: "keyboard", duration: KEYBOARD_MS, easing: curve, fill: "forwards" as const };
+        const animations = moves.map((m) => m.el.animate([{ transform: `translateY(${m.from}px)` }, { transform: `translateY(${m.to}px)` }], timing));
+        const mine = { animations, commit: atEnd };
+        running = mine;
+        void Promise.all(animations.map((a) => a.finished)).then(() => { if (running === mine) stop(); }, () => undefined);
+    };
+    const still = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
     const onKeyboard = (e: Event) => {
         const detail = (e as CustomEvent<{ height?: number; duration?: number }>).detail ?? {};
         const height = Math.max(0, Number(detail.height) || 0);
         const target = Math.max(0, height - (parseFloat(getComputedStyle(probe).paddingBottom) || 0));
         if (detail.duration === undefined) return layout(target);
-        settle?.();
-        if (target === reserved) return;
-        if (!(Number(detail.duration) > 0) || matchMedia("(prefers-reduced-motion: reduce)").matches) return layout(target);
-        const from = reserved;
-        const moves = travel(from, target);
-        const timing = { id: "keyboard", duration: KEYBOARD_MS, easing: curve };
-        root.classList.add("keyboard-moving");
-        let animations: Animation[];
-        if (target > from) {
-            animations = moves.map((m) => m.el.animate([{ transform: "none" }, { transform: `translateY(${m.by}px)` }], { ...timing, fill: "forwards" }));
-        } else {
-            layout(target);
-            animations = moves.map((m) => m.el.animate([{ transform: `translateY(${-m.by}px)` }, { transform: "none" }], timing));
+        const ending = running?.commit ?? reserved;
+        if (target === ending) return;
+        if (!(Number(detail.duration) > 0) || still()) {
+            stop();
+            return layout(target);
         }
-        const done = () => {
-            if (settle !== done) return;
-            settle = null;
-            if (reserved !== target) layout(target);
-            for (const a of animations) a.cancel();
-            root.classList.remove("keyboard-moving");
-        };
-        settle = done;
-        if (!animations.length) return done();
-        void Promise.all(animations.map((a) => a.finished)).then(done, () => undefined);
+        glide(() => layout(target), target > ending ? target : null);
+    };
+    // The composer grows when its box is focused and shrinks when it is left, a few frames before the
+    // keyboard moves: that change glides too, from the composer as it was (held for one measurement).
+    const onFocus = (e: FocusEvent) => {
+        const box = e.target;
+        if (!(box instanceof HTMLTextAreaElement) || still()) return;
+        const composer = box.closest<HTMLElement>(".chat .composer");
+        if (!composer || composer.classList.contains("has-content")) return;
+        const hold = e.type === "focusin" ? "hold-collapsed" : "hold-expanded";
+        composer.classList.add(hold);
+        glide(() => pinned(() => composer.classList.remove(hold)), null);
     };
     window.addEventListener("aio-keyboard", onKeyboard);
+    document.addEventListener("focusin", onFocus);
+    document.addEventListener("focusout", onFocus);
     return () => {
-        settle?.();
+        stop();
+        document.removeEventListener("focusin", onFocus);
+        document.removeEventListener("focusout", onFocus);
         appKeyboardBridge()?.postMessage("release");
         window.removeEventListener("aio-keyboard", onKeyboard);
         probe.remove();
