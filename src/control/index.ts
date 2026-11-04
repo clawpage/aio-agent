@@ -558,7 +558,9 @@ async function main(): Promise<void> {
   ios.provision(ctx.cfg);
   ctx.ios=ios;
   // A first link gives the account's runtime the Mac (or iPhone) tools; removing the last one takes them away.
-  deviceLinks.onAccountChange=id=>void (id===ctx.cfg.runtimeUserId?Promise.resolve(ctx):ctx.runtimeForUser!(id)).then(rt=>{macNative.refresh(rt.cfg);ios.refresh(rt.cfg);},
+  deviceLinks.onAccountChange=id=>void (id===ctx.cfg.runtimeUserId?Promise.resolve(ctx):ctx.runtimeForUser!(id)).then(rt=>{macNative.refresh(rt.cfg);ios.refresh(rt.cfg);
+    // Its sandbox Codex allows only the tool servers its policy listed when it started: list them anew, then restart it once idle.
+    void rt.container.enforceCodexIsolation().catch(err=>ctx.log.warn("sandbox tool policy not rewritten",{error:err instanceof Error?err.message:String(err)})).finally(()=>rt.agent.reloadTools());},
     err=>ctx.log.warn("Mac tools not refreshed",{error:err instanceof Error?err.message:String(err)}));
   // Each account's schedules live in its own runtime: the owner's here, a member's in its runtime.
   const schedule=new ScheduleGateway({port:ctx.cfg.memberModelPort??4902,log:ctx.log,

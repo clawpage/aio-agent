@@ -78,6 +78,9 @@ export class HarnessSession implements CodexSessionLike {
   interrupt(threadId: string, turnId: string) {
     return isClaudeThread(threadId) ? this.#claude.interrupt(threadId, turnId) : this.#codex.interrupt(threadId, turnId);
   }
+  restartIdle() {
+    return this.#codex.restartIdle?.() ?? true;
+  }
   compactThread(threadId: string) {
     if (isClaudeThread(threadId) || !this.#codex.compactThread) return Promise.reject(new Error("This session cannot be compacted"));
     return this.#codex.compactThread(threadId);

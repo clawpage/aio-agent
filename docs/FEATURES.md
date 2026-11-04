@@ -737,7 +737,8 @@ iOS App 需为声明了存入相册权限、带 `aioSaveFiles` 标记的新版�
 ## 14. 外部集成
 
 以下集成都只经成员模型网关按账号转发，凭据只留在宿主进程，沙箱只拿到各自运行时的能力地址。新增网关 MCP 必须同时写入沙箱 Codex 的
-受管策略 `/etc/codex/requirements.toml`，否则 Codex 会停用该线程级服务。
+受管策略 `/etc/codex/requirements.toml`，否则 Codex 会停用该线程级服务。Codex 只在启动时读这份策略：账号连上或移除 Mac / iPhone 后，
+控制面立即重写它，并在该账号没有轮次运行时重启沙箱 Codex，新工具才对之后的轮次生效。
 
 ### Jev 决策
 

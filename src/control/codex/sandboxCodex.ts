@@ -78,6 +78,9 @@ export class SandboxCodexSession {
   static readonly MAX_DISCARDED_THREADS = 64;
   #account: SandboxAccount | null = null;
   #lastError: string | null = null;
+  #retired: JsonRpcPeer | null = null;
+  /** Dispatcher, title and maintainer runs in progress, from before their thread exists. */
+  #auxRunning = 0;
 
   constructor(
     cfg: Config,
@@ -145,6 +148,8 @@ export class SandboxCodexSession {
     peer.on("notification", (method, params) => this.#routeNotification(method, params));
     peer.on("warning", (message) => this.#log.warn("sandbox codex warning", { message }));
     peer.on("closed", (reason) => {
+      // Retired on purpose with nothing running on it (restartIdle): the next use starts a new one.
+      if (peer === this.#retired) return;
       this.#log.warn("sandbox codex app-server closed", { reason });
       if (this.#peer === peer) this.#peer = null;
       for (const [, resolve] of this.#pendingRequests) resolve({ decision: "cancel" });
@@ -348,6 +353,11 @@ export class SandboxCodexSession {
 
   /** `ownModel` picks another model on the owner's own login; `requestedModel` goes through the gateway; `servers` are the only MCP servers the thread gets. */
   async #auxiliaryText(prompt: string, effort: string | null, timeoutMs: number, developerInstructions?: string, requestedModel?: string, onTiming?: DispatchTimingSink, ownModel?: string, servers: Record<string, unknown> = {}): Promise<{ text: string | null; error: string | null; timedOut?: boolean }> {
+    this.#auxRunning += 1;
+    try { return await this.#runAuxiliary(prompt, effort, timeoutMs, developerInstructions, requestedModel, onTiming, ownModel, servers); } finally { this.#auxRunning -= 1; }
+  }
+
+  async #runAuxiliary(prompt: string, effort: string | null, timeoutMs: number, developerInstructions?: string, requestedModel?: string, onTiming?: DispatchTimingSink, ownModel?: string, servers: Record<string, unknown> = {}): Promise<{ text: string | null; error: string | null; timedOut?: boolean }> {
     const connectionStarted = Date.now();
     await this.start();
     onTiming?.({ connectionMs: Date.now() - connectionStarted });
@@ -698,6 +708,22 @@ export class SandboxCodexSession {
       this.#pendingRequests.delete(id);
       resolve({ decision: "cancel" });
     }
+  }
+
+  /**
+   * Stop the app-server so the next use starts one that reads the sandbox's tool
+   * policy anew (Codex reads requirements.toml once, at start). Only while no
+   * dispatcher or title thread runs on it; the caller makes sure no turn does.
+   */
+  restartIdle(): boolean {
+    const peer = this.#peer;
+    if (!peer) return true;
+    if (this.#auxRunning || this.#threadSubscribers.size || this.#pendingRequests.size) return false;
+    this.#retired = peer;
+    this.#peer = null;
+    peer.close();
+    this.#log.info("sandbox codex restarted for a new tool policy");
+    return true;
   }
 
   close(): void {

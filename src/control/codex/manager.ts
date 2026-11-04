@@ -78,6 +78,8 @@ export interface CodexSessionLike {
   steerTurn?(params: {threadId:string;expectedTurnId:string;text:string;attachments?:TurnAttachment[]}): Promise<void>;
   /** Compact a thread's context in place; resolves with the compaction turn's final status. */
   compactThread?(threadId: string): Promise<string>;
+  /** Stop the app-server while nothing runs on it, so the next use reads the sandbox's tool policy anew; false while something does. */
+  restartIdle?(): boolean;
   /** One throwaway, tool-free run used only for automatic conversation titles. */
   planTask?(prompt: string, developerInstructions?: string, model?: string, onTiming?: DispatchTimingSink): Promise<string | null>;
   /** A short title on a small model (a member's on their assigned one); null when it gave none. Never throws. */
@@ -328,6 +330,8 @@ export class AgentManager {
   #tabs: TabServerLike | null;
 
   #activeTurns = new Map<string, ActiveTurn>();
+  /** The account's gateway tools changed since its Codex started (a device linked or removed). */
+  #toolsChanged = false;
   #capacity: number;
   #deltaBuffers = new Map<string, { conversationId: string; turnId: string | null; itemId: string; kind: string; text: string }>();
   #deltaTimer: NodeJS.Timeout | null = null;
@@ -994,6 +998,7 @@ export class AgentManager {
           void finishing.finally(releaseBrowser);
           this.#activeTurns.delete(turn.conversation_id);
           this.#db.prepare("UPDATE conversations SET status = 'idle', updated_at = ? WHERE id = ?").run(Date.now(), turn.conversation_id);
+          this.#restartForTools();
           this.#pump();
         });
     }
@@ -1055,6 +1060,7 @@ export class AgentManager {
     if (policy) turn.effort = this.#memberEffort(turn.effort);
     const { desiredProvider, currentProvider, startsFresh } = this.#threadPlan(conversation, model, turn.id);
     const inputText = startsFresh ? this.#withPriorContext(conversation.id, turn.id, turn.input_text) : turn.input_text;
+    this.#restartForTools(conversation.id);
     const { developerInstructions, browserTask } = this.#threadSettings(conversation);
     if (this.#tabs && turn.browser_required === 0) {
       // Not required, but the agent may still browse: keep the tools reachable.
@@ -1192,6 +1198,23 @@ export class AgentManager {
     } else {
       this.#failTurn(turn, reason ? t().agent.turn.failed(reason) : t().agent.turn.codexEnded(status));
     }
+  }
+
+  /**
+   * The account's gateway tools changed (a device linked or removed). Codex allows
+   * only the tool servers its policy listed when it started, so a new one stays
+   * disabled until it starts again: that happens as soon as no other turn runs.
+   */
+  reloadTools(): void {
+    this.#toolsChanged = true;
+    this.#restartForTools();
+  }
+
+  /** Restart Codex for changed tools when no turn but `starting` (about to begin) runs on it. */
+  #restartForTools(starting?: string): void {
+    if (!this.#toolsChanged || this.#compacting.size) return;
+    if ([...this.#activeTurns.keys()].some((id) => id !== starting)) return;
+    if (this.#codex.restartIdle?.() !== false) this.#toolsChanged = false;
   }
 
   /** The instructions and tab identity every execution thread runs with. */

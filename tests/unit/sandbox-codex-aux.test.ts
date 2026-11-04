@@ -507,3 +507,30 @@ it('names a task on Luna at low effort for the owner and on the assigned model f
  const s2=makeSession(failing,200);
  try {expect(await s2.titleTask('name it')).toBeNull();} finally {s2.close();}
 });
+
+describe("SandboxCodexSession restart for a new tool policy", () => {
+  it("retires an idle app-server quietly and starts a new one on next use, but not while a dispatcher thread runs", async () => {
+    const servers = [new FakeAppServer(), new FakeAppServer()];
+    let spawned = 0, closed = 0;
+    const container = { spawnCodexAppServer: () => servers[spawned++]!.child } as unknown as SandboxContainer;
+    const session = new SandboxCodexSession(testConfig("/tmp/pa-aux-restart", 1, {}), new Logger("error", undefined, false), container, hostTokens);
+    session.onClosed(() => { closed += 1; });
+    try {
+      await session.start();
+      servers[0]!.handle("thread/start", async () => { await wait(40); return { thread: { id: "aux" } }; });
+      servers[0]!.handle("turn/start", (p) => { setTimeout(() => servers[0]!.notify("turn/completed", { threadId: p.threadId, turn: { status: "completed", items: [{ type: "agentMessage", text: "{}" }] } }), 60); return { turn: { id: "t" } }; });
+      const planned = session.planTask("classify", undefined, undefined);
+      await wait(70);
+      expect(session.restartIdle()).toBe(false);
+      expect(await planned).toBe("{}");
+      expect(session.restartIdle()).toBe(true);
+      expect(session.ready).toBe(false);
+      (servers[0]!.child as unknown as EventEmitter).emit("exit", 0, null);
+      await wait(10);
+      expect(closed).toBe(0);
+      await session.start();
+      expect(spawned).toBe(2);
+      expect(session.ready).toBe(true);
+    } finally { session.close(); }
+  });
+});
