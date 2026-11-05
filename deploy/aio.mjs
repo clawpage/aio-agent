@@ -277,7 +277,7 @@ if (fs.existsSync(users)) for (const d of fs.readdirSync(users)) { const f = pat
 const out = [];
 for (const [account, file] of files) {
   const db = new DatabaseSync(file, { readOnly: true });
-  const goesOn = new Set(db.prepare("SELECT t.id FROM turns t JOIN conversations c ON c.id = t.conversation_id WHERE t.status = 'running' AND t.codex_turn_id IS NOT NULL AND COALESCE(c.model_provider, '') <> 'claude-code' AND EXISTS (SELECT 1 FROM events e WHERE e.turn_id = t.id AND e.type = 'turn.codex_started' AND e.payload LIKE '%\"bridged\":true%')").all().map((r) => r.id));
+  const goesOn = new Set(db.prepare("SELECT t.id FROM turns t JOIN conversations c ON c.id = t.conversation_id WHERE t.status = 'running' AND t.codex_turn_id IS NOT NULL AND COALESCE(c.model_provider, '') <> 'claude-code' AND EXISTS (SELECT 1 FROM events e WHERE e.turn_id = t.id AND e.type = 'turn.codex_started' AND json_extract(e.payload, '$.bridged') = 1)").all().map((r) => r.id));
   for (const r of db.prepare("SELECT title, status, turn_id FROM tasks WHERE status IN ('queued','running','stopping','merging','steering')").all()) {
     if (r.status === "running" && goesOn.has(r.turn_id)) continue;
     out.push({ account, title: r.title, status: r.status });
