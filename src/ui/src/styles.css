@@ -3189,6 +3189,13 @@ button .loading-mark { color: inherit; }
 .welcome-head { display: flex; align-items: center; gap: 8px; font-size: var(--fs-title); }
 .welcome-hint { margin: 4px 2px 0; }
 .welcome-starters { display: flex; flex-wrap: wrap; gap: 8px; }
+.welcome-features { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 8px; max-width: 760px; }
+.welcome-feature { display: flex; align-items: flex-start; gap: 10px; min-width: 0; padding: 12px 14px; border-radius: var(--radius); border: 1px solid var(--border-strong); background: var(--bg-soft); color: var(--text); text-align: left; cursor: pointer; }
+.welcome-feature:hover { border-color: var(--ai); background: var(--ai-soft); }
+.welcome-feature-icon { display: inline-grid; place-items: center; flex: none; width: 32px; height: 32px; border-radius: var(--radius-sm); background: var(--ai-soft); color: var(--ai); }
+.welcome-feature-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.welcome-feature-text strong { font-size: var(--fs-md); }
+.welcome-feature-text span { font-size: var(--fs-sm); color: var(--text-dim); line-height: 1.45; }
 .welcome-starters button { min-height: 36px; padding: 6px 14px; border-radius: 999px; border: 1px solid var(--border-strong); background: var(--bg-soft); color: var(--text); font-size: var(--fs-md); cursor: pointer; }
 .welcome-starters button:hover { border-color: var(--ai); background: var(--ai-soft); }
 /* Back to the latest message: rises in only while the feed is read more than a screen above it. */

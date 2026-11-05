@@ -65,12 +65,15 @@ export const feed = {
   /** A new account's first screen: the agent says hello and offers a few ways to begin. */
   empty: {
     title: "你好，我是一站",
-    body: "把要办的事直接告诉我就行：上网查资料、购物前比价、规划行程、写文档做表格、整理文件……我在自己的电脑上替你办，进展和结果都会在这里回报。办事期间你可以接着发别的任务。",
-    hint: "不知道从哪开始？点一个，我马上动手：",
+    body: "要办的事直接告诉我，我在自己的电脑上替你办好。",
+    hint: "点一个试试，或直接说：",
+    features: [
+      { icon: "clawpages", title: "Clawpages 小程序", body: "一句话做出记账本、报名表，发链接就能用", prompt: "帮我做一个家庭记账小程序：可以记收入和支出、按月看统计，发布成链接，我和家人都能打开记账。" },
+      { icon: "knowledge", title: "共享知识库", body: "和家人、团队共用，大家的 AI 都能查能记", prompt: "帮我建一个家庭共享知识库，记全家人的饮食偏好、过敏和常去的店，再生成一个邀请链接，我发给家人加入。" },
+      { icon: "workspace", title: "云浏览器", body: "替你上网查价、填表，随时看我操作或接手", prompt: "用你的浏览器打开 Amazon 搜索 AirPods Pro，告诉我现在的价格和评分，并把页面截图发给我。" },
+    ],
     starters: [
-      { label: "看我上网操作", prompt: "打开浏览器去 GitHub Trending，看看今天最火的 5 个开源项目，逐个点进去读 README，用中文告诉我它们各是做什么的，最后把榜单截图发给我。" },
       { label: "查资料做成表格", prompt: "上网查 4 款热门降噪耳机的价格、续航和降噪口碑，整理成一个 Excel 表格文件发给我，再推荐一款最值的。" },
-      { label: "做网页发链接", prompt: "帮我做一个周末两天的出游攻略网页（目的地你来推荐，包括路线、美食和预算），做好后发布成可以分享给朋友的链接。" },
       { label: "帮我盯价格", prompt: "去 Apple 官网查一下 iPhone 17 Pro 现在的价格告诉我，之后每天早上再查一次，降价了就提醒我。" },
     ],
   },

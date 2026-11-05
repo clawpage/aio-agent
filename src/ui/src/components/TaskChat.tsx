@@ -1,5 +1,6 @@
 import { SupportDialog } from './Support';
 import { BootCover, BrandMark, InlineLoading, LoadingMark } from "./Brand";
+import { NavIcon, type NavIconName } from "./NavIcon";
 import { createPortal } from "react-dom";
 import { ComposerIcon, SEND_SHORTCUT, isSendShortcut, useComposerHeight } from "./ComposerControls";
 import { PopupPresence } from "./PopupMotion";
@@ -573,6 +574,8 @@ export function TaskChat({ onDetails, onOpenLink, onOpenFileInBrowser, onExpired
       {!tasks.length && !outbox.length && arrival !== "loading" && <div className="feed-welcome">
         <article className="msg assistant welcome-msg"><div className="bubble"><div className="welcome-head"><BrandMark size={24}/><strong>{i18n.feed.empty.title}</strong></div><p>{i18n.feed.empty.body}</p></div></article>
         <p className="welcome-hint muted tiny">{i18n.feed.empty.hint}</p>
+        {/* What it can do, one tap each: the tap sends a first task that shows it. */}
+        <div className="welcome-features">{i18n.feed.empty.features.map(f => <button type="button" key={f.title} className="welcome-feature" onClick={() => sendStarter(f.prompt)}><span className="welcome-feature-icon" aria-hidden="true"><NavIcon name={f.icon as NavIconName}/></span><span className="welcome-feature-text"><strong>{f.title}</strong><span>{f.body}</span></span></button>)}</div>
         <div className="welcome-starters">{i18n.feed.empty.starters.map(s => <button type="button" key={s.label} onClick={() => sendStarter(s.prompt)}>{s.label}</button>)}</div>
       </div>}
       {/* Same key as the reply it becomes: the finished reply takes its place without coming in again. */}

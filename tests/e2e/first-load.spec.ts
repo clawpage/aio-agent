@@ -81,9 +81,16 @@ test("an account with nothing yet is greeted once the feed answers, and a starte
   await page.goto("/");
   await expect(page.getByText("你好，我是一站")).toBeVisible();
   await expect(page.locator(".boot-cover")).toHaveCount(0);
+  // Short: one line of welcome, three things it can do and two starters, all on the first screen.
+  await expect(page.locator(".welcome-msg p")).toHaveText("要办的事直接告诉我，我在自己的电脑上替你办好。");
+  const features = page.locator(".welcome-features button");
+  await expect(features).toHaveCount(3);
+  await expect(features.nth(0)).toContainText("Clawpages 小程序");
+  await expect(features.nth(1)).toContainText("共享知识库");
+  await expect(features.nth(2)).toContainText("云浏览器");
   const starters = page.locator(".welcome-starters button");
-  await expect(starters).toHaveCount(4);
-  for (const button of await starters.all()) await expect(button).toBeInViewport();
+  await expect(starters).toHaveCount(2);
+  for (const button of [...await features.all(), ...await starters.all()]) await expect(button).toBeInViewport();
   expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1);
   await page.screenshot({ path: info.outputPath("welcome.png") });
   // A starter goes out at once as its own message; a draft already in the composer stays where it is.
@@ -91,15 +98,15 @@ test("an account with nothing yet is greeted once the feed answers, and a starte
   await page.route("**/api/tasks", async (r) => {
     const body = r.request().postDataJSON();
     bodies.push(body);
-    const sent = { ...task(1), id: "starter", title: "周末出游攻略网页", text: body.text, status: "planning", result: null, completedAt: null, clientMessageId: body.clientMessageId, createdAt: Date.now() };
+    const sent = { ...task(1), id: "starter", title: "家庭记账小程序", text: body.text, status: "planning", result: null, completedAt: null, clientMessageId: body.clientMessageId, createdAt: Date.now() };
     rows.push(sent);
     await r.fulfill({ status: 202, json: { task: sent, duplicate: false } });
   });
   const composer = page.getByRole("textbox", { name: "消息", exact: true });
   await composer.fill("我自己的草稿");
-  await page.getByRole("button", { name: "做网页发链接", exact: true }).click();
+  await features.nth(0).click();
   await expect.poll(() => bodies.length).toBe(1);
-  expect(bodies[0]!.text).toMatch(/出游攻略网页/);
+  expect(bodies[0]!.text).toMatch(/家庭记账小程序/);
   await expect(page.locator(".feed-welcome")).toHaveCount(0);
   await expect(composer).toHaveValue("我自己的草稿");
   await page.screenshot({ path: info.outputPath("starter-sent.png") });
