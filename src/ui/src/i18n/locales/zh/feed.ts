@@ -65,7 +65,7 @@ export const feed = {
   /** A new account's first screen: the agent says hello and offers a few ways to begin. */
   empty: {
     title: "你好，我是一站",
-    beta: "限时内测 · GPT-6.1 Sol 不限量免费",
+    beta: "限时内测 · GPT-6.1 Sol 免费使用",
     body: "要办的事直接告诉我，我在自己的电脑上替你办好。",
     hint: "点一个试试，或直接说：",
     features: [
