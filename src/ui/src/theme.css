@@ -113,6 +113,13 @@
   --chart-red: #f0605a;
   --chart-green: #3fb27f;
   --chart-grid: rgb(236 235 243 / 0.08);
+  /* The owner dashboard's charts: its one series hue, good and bad outcomes, and gray context.
+   * Stepped for each theme's surface (lightness band, chroma and color-blind separation checked);
+   * stacks order them good, series, bad so the two outcome colors never touch. */
+  --dash-series: #7b72f2;
+  --dash-good: #3aa877;
+  --dash-bad: #e5574e;
+  --dash-context: var(--text-dim);
 
   /* Diagrams (Mermaid) are drawn on paper in both themes */
   --diagram-node: #f1efff;
@@ -149,6 +156,9 @@
   --chart-red: #d9363e;
   --chart-green: #1a9a5e;
   --chart-grid: rgb(29 27 38 / 0.08);
+  --dash-series: #5a4fe0;
+  --dash-good: #1f8a5b;
+  --dash-bad: #cc3b33;
   --on-accent: #ffffff;
   --on-you: #ffffff;
   --media-inset: rgb(20 16 40 / 0.1);

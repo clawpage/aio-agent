@@ -47,7 +47,7 @@ function header(spec: ChartSpec, legend: string[] | boolean) {
   };
 }
 
-function axisStyle() {
+export function axisStyle() {
   const dim = themeColor("--text-dim");
   return {
     axisLine: { lineStyle: { color: themeColor("--border-strong") } },
@@ -57,7 +57,7 @@ function axisStyle() {
   };
 }
 
-function tooltip() {
+export function tooltip() {
   return {
     trigger: "axis" as const,
     renderMode: "richText" as const,
@@ -210,8 +210,13 @@ export type MountedChart = { dispose: () => void; png: () => Promise<Blob> };
 
 /** Draws the chart into `el`, following its width and the console theme until disposed. */
 export function mountChart(el: HTMLElement, spec: ChartSpec): MountedChart {
+  return mountOption(el, () => optionOf(spec));
+}
+
+/** Draws an option built from the theme's current colors (the owner's dashboard builds its own, dashboardCharts.ts). */
+export function mountOption(el: HTMLElement, build: () => EChartsCoreOption): MountedChart {
   const chart = echarts.init(el, undefined, { renderer: "canvas" });
-  const draw = () => chart.setOption(optionOf(spec), { notMerge: true });
+  const draw = () => chart.setOption(build(), { notMerge: true });
   draw();
   const resize = new ResizeObserver(() => chart.resize());
   resize.observe(el);
