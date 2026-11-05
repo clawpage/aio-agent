@@ -82,6 +82,8 @@ PA_COMPANION_ORIGIN=https://agent-workspace.clawpage.ai npm run smoke
 | `PA_TITLE_MODEL` | `gpt-6.1-sol` | 主会话派单器（Codex 执行器时）的临时线程模型，Sol 6.1 / Luna 为 low、90 秒；其他模型 high；满载时 Sol 与 Luna 互为备用、只重试一次；变量名沿用旧称 |
 
 - 二进制路径：`/home/gem/.codex/tools/codex-<版本>/node_modules/.bin/codex`（在 `personal-agent-codex` 卷内）。
+  核实版本后再把它链接到 `/opt/gem/bin/codex`（登录 shell 的 PATH 首位、排在镜像自带旧版之前），
+  这样智能体在沙箱里执行 `codex --version` 看到的就是实际运行它的版本；链接在容器层，每次接管时重做。
 - 每次接管容器时控制面会核实版本；缺失或版本不符时用
   `npm install --prefix <前缀> @openai/codex@<版本>` 以 `gem` 用户补齐，不改动固定镜像。
   补齐失败会明确报错并保持 `/healthz.ready=false`，**不会**静默回退到镜像里的旧 CLI。

@@ -68,6 +68,8 @@ export type DockerRunResult = ExecResult;
  */
 /** The image's own browser entry point, restored when no newer build is in use. */
 export const IMAGE_BROWSER = "/usr/local/bin/browser";
+/** The first directory on the sandbox's login PATH, ahead of the image's own Codex. */
+const CODEX_PATH_LINK = "/opt/gem/bin/codex";
 
 export function parseCodexVersion(output: string): string | null {
   const match = /codex-cli\s+(\S+)/.exec(output);
@@ -254,7 +256,10 @@ export class SandboxContainer {
     const s = this.#cfg.sandbox;
     const probe = await this.execInSandbox([s.codexBin, "--version"], { timeoutMs: 30_000 });
     const found = parseCodexVersion(probe.stdout);
-    if (probe.code === 0 && found === s.codexVersion) return { version: found, installed: false };
+    if (probe.code === 0 && found === s.codexVersion) {
+      await this.#linkCodexOnPath();
+      return { version: found, installed: false };
+    }
 
     this.#log.warn("installing pinned sandbox codex cli", {
       wanted: s.codexVersion,
@@ -270,7 +275,19 @@ export class SandboxContainer {
     if (verify.code !== 0 || installed !== s.codexVersion) {
       throw new Error(t().sandbox.codexVerifyFailed(s.codexVersion, installed ?? (verify.stdout.trim() || verify.stderr.trim())));
     }
+    await this.#linkCodexOnPath();
     return { version: s.codexVersion, installed: true };
+  }
+
+  /**
+   * Make `codex` in the agent's shells the pinned binary too: /opt/gem/bin comes
+   * first on the login PATH, ahead of the image's own older Codex, so asking the
+   * sandbox for its Codex version reports the one that runs the agent. The link
+   * lives in the container layer and is redone on every start; a failure is logged.
+   */
+  async #linkCodexOnPath(): Promise<void> {
+    const link = await this.execInSandbox(["ln", "-sfn", this.#cfg.sandbox.codexBin, CODEX_PATH_LINK], { user: "root", timeoutMs: 15_000 });
+    if (link.code !== 0) this.#log.warn("could not put the pinned codex on PATH", { error: (link.stderr || link.stdout).trim().slice(0, 200) });
   }
 
   /**
