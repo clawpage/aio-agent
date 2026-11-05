@@ -45,7 +45,7 @@
 | `PA_TITLE_MODEL` | `gpt-6.1-sol` | Codex 执行器时派单器的临时线程模型；`gpt-6.1-sol` 与 `gpt-6-luna` 用 low，其他 high（变量名沿用旧称） |
 | `PA_MAX_CONCURRENT_TURNS` | `3` | 同时执行的轮次上限（clamp 到 1–3），同一会话串行，排队 FIFO |
 | `PA_REASONING_SUMMARY` | `concise` | 思考摘要模式（`concise` / `auto` / `detailed` / `none`） |
-| `PA_SANDBOX_CODEX_VERSION` | `0.160.0` | 沙箱内固定版 Codex CLI（持久卷内，升级见运行手册） |
+| `PA_SANDBOX_CODEX_VERSION` | `0.166.0` | 沙箱内固定版 Codex CLI（持久卷内，升级见运行手册） |
 | `PA_CLAUDE_CODE_ENABLED` | `auto` | 是否提供 Claude Code 执行器；`auto` 仅在取到凭据时出现，另有 `on` / `off` |
 | `PA_CLAUDE_CODE_SECRETS_FILE` | `~/.config/aio-agent/claude-code.env` | `CLAUDE_CODE_OAUTH_TOKEN` 或 `ANTHROPIC_API_KEY`（环境变量优先；权限宽于 600 / 400 拒绝） |
 | `PA_CLAUDE_CODE_VERSION` | `2.1.284` | 沙箱内固定版 Claude Code CLI |
