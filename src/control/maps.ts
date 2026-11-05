@@ -24,7 +24,7 @@ const GOOGLE_STATIC_URL = (m: StaticMapRequest, key: string) => {
 };
 const PLACE_TTL_MS = 30 * 86_400_000;
 /** The console's languages, as Google names them. */
-const GOOGLE_LANGUAGES: Record<string, string> = { zh: "zh-CN", "zh-CN": "zh-CN", "zh-TW": "zh-TW", en: "en", es: "es" };
+const GOOGLE_LANGUAGES: Record<string, string> = { zh: "zh-CN", "zh-CN": "zh-CN", "zh-TW": "zh-TW", en: "en", es: "es", ja: "ja" };
 
 export type MapProvider = "google" | "osm";
 

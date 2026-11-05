@@ -10,6 +10,7 @@ export const LOCALE_NAMES = {
     en: "English",
     es: "Spanish (español)",
     "zh-TW": "Traditional Chinese (繁體中文)", // i18n-exempt: language name in English prompts for the model
+    ja: "Japanese (日本語)", // i18n-exempt: language name in English prompts for the model
 } as const;
 export type Locale = keyof typeof LOCALE_NAMES;
 /** The language of an account, a request or a process that has none of its own. */
@@ -26,6 +27,7 @@ export function matchLocale(tag: string): Locale | null {
     if (lower === "zh" || lower.startsWith("zh-")) return /^zh-(hant|tw|hk|mo)\b/.test(lower) ? "zh-TW" : "zh-CN";
     if (lower === "en" || lower.startsWith("en-")) return "en";
     if (lower === "es" || lower.startsWith("es-")) return "es";
+    if (lower === "ja" || lower.startsWith("ja-")) return "ja";
     return null;
 }
 

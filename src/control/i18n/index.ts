@@ -4,6 +4,7 @@ import { zh, type Messages } from "./locales/zh/index.js";
 import { en } from "./locales/en/index.js";
 import { es } from "./locales/es/index.js";
 import { zhTW } from "./locales/zh-TW/index.js";
+import { ja } from "./locales/ja/index.js";
 
 /**
  * Every word the control plane writes for people (error messages, task and
@@ -18,7 +19,7 @@ import { zhTW } from "./locales/zh-TW/index.js";
  * runs on its own (a task, a timer) in its account's language. English when
  * none is known.
  */
-export const MESSAGES = { "zh-CN": zh, en, es, "zh-TW": zhTW } satisfies Record<Locale, Messages>;
+export const MESSAGES = { "zh-CN": zh, en, es, "zh-TW": zhTW, ja } satisfies Record<Locale, Messages>;
 
 const current = new AsyncLocalStorage<() => Locale>();
 

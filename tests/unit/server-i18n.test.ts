@@ -5,7 +5,7 @@ import ts from "typescript";
 import os from "node:os";
 import { MESSAGES, currentLocale, requestLocale, runInLocale, runInLocaleOr, t } from "../../src/control/i18n/index.js";
 import { getMeta, openDb } from "../../src/control/db.js";
-import { readLocale } from "../../src/control/locale.js";
+import { acceptedLocale, readLocale } from "../../src/control/locale.js";
 
 /**
  * The control plane, the sandbox node and the scripts they put in the sandbox
@@ -69,6 +69,15 @@ it("answers in the console's language, else the browser's, else English", () => 
   expect(requestLocale({})).toBe("en");
   expect(t()).toBe(MESSAGES.en);
   expect(runInLocale("zh-TW", () => t())).toBe(MESSAGES["zh-TW"]);
+});
+
+it("speaks Japanese to a Japanese console or browser", () => {
+  expect(acceptedLocale("ja-JP")).toBe("ja");
+  expect(acceptedLocale("ja")).toBe("ja");
+  expect(requestLocale({ "x-aio-locale": "ja", "accept-language": "en-US" })).toBe("ja");
+  expect(requestLocale({ "accept-language": "ja-JP,ja;q=0.9,en;q=0.8" })).toBe("ja");
+  expect(t(requestLocale({ "x-aio-locale": "ja" })).http.common.signInFirst).toBe("先にログインしてください");
+  expect(t(requestLocale({ "accept-language": "ja-JP" })).tasks.schedules.feedTitle).toBe("デイリーフィード");
 });
 
 /** A task row as an older account has them (only the columns a row needs). */

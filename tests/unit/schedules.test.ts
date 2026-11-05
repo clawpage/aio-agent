@@ -137,6 +137,18 @@ describe("saying it back", () => {
     expect(runInLocale("zh-TW", () => formatWhen(at("2026-10-02T17:05:00Z"), LA))).toBe("10月2日 週五 10:05");
   });
 
+  it("describes them in Japanese", () => runInLocale("ja", () => {
+    expect(describeSchedule({ kind: "daily", at: "08:00", times: ["08:00", "18:30"] })).toBe("毎日 08:00、18:30");
+    expect(describeSchedule({ kind: "weekly", at: "09:30", weekdays: [1, 3] })).toBe("毎週月・水曜日 09:30");
+    expect(describeSchedule({ kind: "monthly", at: "10:00", monthDay: 15, maxRuns: 6 })).toBe("毎月 15 日 10:00、計 6 回");
+    expect(describeSchedule({ kind: "interval", everyMinutes: 120, maxRuns: 3 })).toBe("2 時間ごと、計 3 回");
+    expect(describeSchedule({ kind: "interval", everyMinutes: 45, until: "2026-10-09" })).toBe("45 分ごと、10月9日まで");
+    expect(describeSchedule({ kind: "once", at: "15:00", date: "2026-10-03" })).toBe("10月3日 15:00（1 回のみ）");
+    expect(describeSchedule({ kind: "dates", dates: ["2026-10-08 09:00", "2026-10-15 14:30", "2026-11-02 08:00", "2026-12-01 10:00"] })).toBe("10月8日 09:00、10月15日 14:30、11月2日 08:00 など（計 4 回）");
+    expect(formatWhen(at("2026-10-02T17:05:00Z"), LA)).toBe("10月2日（金）10:05");
+    expect(validateSchedule({ kind: "once", at: "09:00", date: "2026-10-02" }, at("2026-10-02T17:00:00Z"), LA)).toEqual({ error: "この時刻はすでに過ぎています" });
+  }));
+
   it("gives the dispatcher the current time in English whatever the language", () => {
     expect(runInLocale("zh-CN", () => describeNow(at("2026-10-02T17:05:00Z"), LA))).toBe("2026-10-02 Fri 10:05");
   });
