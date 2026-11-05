@@ -493,6 +493,19 @@ describe("DocumentService image", () => {
     }
   });
 
+  it("serves an animated GIF (from image_generate) as image/gif, bytes untouched so it still moves", async () => {
+    const gif = Buffer.from("47494638396101000100800000000000ffffff21f90401000000002c00000000010001000002024401003b", "hex");
+    const { svc } = service(baseHandler({ realPath: `${ROOT}/tasks/t1/招手.gif`, size: String(gif.length) }));
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(new Uint8Array(gif), { status: 200 }));
+    try {
+      const result = await svc.image(`${ROOT}/tasks/t1/招手.gif`);
+      expect(result.contentType).toBe("image/gif");
+      expect(result.bytes).toEqual(gif);
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+
   it("answers an unchanged picture by its version alone, without reading the bytes", async () => {
     const handler = { mtime: "2026-10-06 09:00:00.000000001 -0700" };
     const { svc } = service((argv) => baseHandler({ realPath: `${ROOT}/a.png`, size: String(PNG.length), mtime: handler.mtime })(argv));

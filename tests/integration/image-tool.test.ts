@@ -9,6 +9,7 @@ import { memberConfig } from "../../src/control/tenants.js";
 import { codexRequirementsToml } from "../../src/control/sandbox/seed.js";
 
 const PNG = Buffer.from("89504e470d0a1a0a0000000d49484452000000020000000108020000007b40e8dd0000000f49444154789c63f8cfc0c0b0200000079101f0e7755c1d0000000049454e44ae426082", "hex");
+const GIF = Buffer.from("47494638396101000100800000000000ffffff21f90401000000002c00000000010001000002024401003b", "hex");
 
 it("gives every account an image tool that draws with the control plane's own login and saves into that account's workspace", async () => {
   const h = await startHarness();
@@ -121,6 +122,47 @@ it("gives every account an image tool that draws with the control plane's own lo
     answer = { status: 400, body: { error: { message: "Your request was rejected by the safety system.", code: "moderation_blocked" } } };
     expect((await call(member.image!.url, { prompt: "x" })).content[0]!.text).toContain("refused");
     expect(seen).toHaveLength(6);
+
+    // An animated GIF: one generations call asking GPT Image 2.6 for gif output, saved as .gif.
+    expect(IMAGE_POLICY).toContain("animated set to true");
+    answer = { status: 200, body: { created: 1, data: [{ b64_json: GIF.toString("base64") }] } };
+    const gifPath = "/home/gem/workspace/tasks/task-1/招手.gif";
+    const moving = await call(member.image!.url, { prompt: "一只小猫招手，循环", path: gifPath, animated: true, frame_count: 12, frame_duration_ms: 120, size: "1024x1024" });
+    expect(moving.isError).toBeUndefined();
+    expect(moving.content[0]!.text).toContain(`Animated GIF saved: ${gifPath}`);
+    expect(seen[6]).toMatchObject({ url: "/backend-api/codex/images/generations", body: { model: "gpt-image-2.6-sunburst", output_format: "gif", frame_count: 12, frame_duration_ms: 120, size: "1024x1024" } });
+    expect(seen[6]!.body).not.toHaveProperty("background");
+    expect(written.get("user_m")!.get(gifPath)).toEqual(GIF);
+    // Defaults are the API's own; without a path it goes into images/ as a .gif.
+    const plainGif = await call(member.image!.url, { prompt: "跳动的爱心", animated: true });
+    expect(plainGif.content[0]!.text).toMatch(/Animated GIF saved: \/home\/gem\/workspace\/images\/\d{8}-\d{6}-[0-9a-f]{6}\.gif/);
+    expect(seen[7]!.body).not.toHaveProperty("frame_count");
+    expect(seen[7]!.body).toMatchObject({ output_format: "gif" });
+    // Still images never carry gif fields.
+    expect(seen[0]!.body).not.toHaveProperty("output_format");
+    for (const [args, message] of [
+      [{ prompt: "x", animated: true, path: "/home/gem/workspace/a.png" }, ".gif"],
+      [{ prompt: "x", path: "/home/gem/workspace/a.gif" }, "set animated to true"],
+      [{ prompt: "x", animated: true, reference_paths: [poster] }, "prompt only"],
+      [{ prompt: "x", animated: true, transparent_background: true }, "transparent"],
+      [{ prompt: "x", animated: true, frame_count: 65 }, "frame_count must be a whole number from 2 to 64"],
+      [{ prompt: "x", animated: true, frame_duration_ms: 10 }, "frame_duration_ms must be a whole number from 20 to 2000"],
+      [{ prompt: "x", frame_count: 4 }, "only for an animated GIF"],
+    ] as const) {
+      const failed = await call(member.image!.url, args);
+      expect(failed.isError).toBe(true);
+      expect(failed.content[0]!.text).toContain(message);
+    }
+    expect(seen).toHaveLength(8);
+    // A PNG where a GIF was asked for is not saved under the .gif name.
+    answer = { status: 200, body: { created: 1, data: [{ b64_json: PNG.toString("base64") }] } };
+    expect((await call(member.image!.url, { prompt: "x", animated: true, path: "/home/gem/workspace/tasks/task-1/bad.gif" })).content[0]!.text).toContain("did not return a GIF");
+    expect(written.get("user_m")!.has("/home/gem/workspace/tasks/task-1/bad.gif")).toBe(false);
+    // An endpoint without GPT Image 2.6 cannot animate: said plainly, no fallback to a model that cannot.
+    unknownModel = "gpt-image-2.6-sunburst";
+    expect((await call(member.image!.url, { prompt: "x", animated: true })).content[0]!.text).toContain("Animated GIFs need GPT Image 2.6");
+    expect(seen).toHaveLength(10);
+    unknownModel = undefined;
 
     // A refused login is fetched afresh next time; a used-up quota says so plainly; never a non-PNG file.
     answer = { status: 401, body: { error: "expired" } };

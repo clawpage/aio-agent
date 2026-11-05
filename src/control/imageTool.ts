@@ -24,6 +24,10 @@ const TIMEOUT_MS = 300_000;
 const MAX_REFERENCES = 5;
 const SIZES = ["auto", "1024x1024", "1536x1024", "1024x1536"];
 const QUALITIES = ["auto", "low", "medium", "high"];
+/** Animated GIFs (GPT Image 2.6 only, generations only): frames and per-frame duration as the API allows. */
+const FRAMES = { min: 2, max: 64 };
+const FRAME_MS = { min: 20, max: 2000 };
+const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
 const TOOLS = [
   {
@@ -32,17 +36,21 @@ const TOOLS = [
       "Generate a new image, or edit or extend one based on reference images (photos, illustrations, posters, avatars, product renderings, stickers, and other raster images), save it to the workspace, and return its path. " +
       "To edit or reference existing images, put their paths in reference_paths (png/jpg/webp in the workspace, at most 5). " +
       "Each call makes one image and usually takes a minute or two; call it separately for each different image you need. " +
+      "For an animated GIF (a moving sticker or emoji, a short looping animation), set animated to true and path to a .gif: one call makes the whole animation from the prompt (not from reference images). " +
       "Not for images that are mainly text or layout (tables, schedules, plans, checklists, menus, infographics): build those as HTML and render them with the aio-graphic skill, and never use this tool to change their text; use it only for the illustrations they contain. " +
       "Never use it to retouch a real photo of people (light, color, skin softening, a studio look, the background smoothed or replaced): it redraws the faces; follow the aio-photo skill, which keeps the people as photographed.",
     inputSchema: {
       type: "object",
       properties: {
         prompt: { type: "string", description: "What to draw: subject, scene, style, composition, lighting, colors; put any text that should appear in the image verbatim in quotes. When editing an image, say clearly what to change and what to keep the same" },
-        path: { type: "string", description: "Where to save it: an absolute .png path in the workspace, inside this task's folder, e.g. /home/gem/workspace/tasks/<task id>/poster.png; if omitted, it is saved in /home/gem/workspace/images/" },
+        path: { type: "string", description: "Where to save it: an absolute .png path (.gif when animated) in the workspace, inside this task's folder, e.g. /home/gem/workspace/tasks/<task id>/poster.png; if omitted, it is saved in /home/gem/workspace/images/" },
         reference_paths: { type: "array", items: { type: "string" }, description: "Paths of images to edit or reference (optional)" },
         transparent_background: { type: "boolean", description: "true when a transparent background is needed (stickers, cutouts, icons)" },
         size: { type: "string", enum: SIZES, description: "Canvas: auto chooses automatically; 1024x1024 square; 1536x1024 landscape; 1024x1536 portrait" },
         quality: { type: "string", enum: QUALITIES, description: "Default auto" },
+        animated: { type: "boolean", description: "true for an animated GIF; describe the subject, the motion and how it loops in the prompt. Cannot be combined with reference_paths or transparent_background" },
+        frame_count: { type: "integer", minimum: FRAMES.min, maximum: FRAMES.max, description: "Animated GIF only: number of frames, default 9" },
+        frame_duration_ms: { type: "integer", minimum: FRAME_MS.min, maximum: FRAME_MS.max, description: "Animated GIF only: milliseconds per frame, default 200" },
       },
       required: ["prompt"],
     },
@@ -61,6 +69,7 @@ export function imageMcpServers(cfg: Config): Record<string, unknown> {
 
 export const IMAGE_POLICY =
   "When the user wants an image (photos, illustrations, posters, avatars, product renderings, stickers, and other raster images), or wants an image edited or extended, generate it with image_generate from aio_image, with path set to a .png in this task's folder; after it is generated, show it directly in your reply with ![description](path). " +
+  "When the user wants an animated picture (a GIF, a moving sticker or emoji, a short looping animation), make it in one image_generate call with animated set to true and path set to a .gif in this task's folder, describing the subject, the motion and how it loops in the prompt (frame_count 2-64, default 9; frame_duration_ms per frame, default 200); show it the same way. " +
   "An image that is mainly text or layout (tables, schedules, meal or study plans, checklists, menus, infographics, text-heavy posters) is never drawn or edited with image_generate, which redraws every pixel and garbles text a little more on each edit: build it as HTML and render it to PNG with the aio-graphic skill, change it by editing that HTML, and use image_generate only for the illustrations placed in it. " +
   "A real photo of people that the user wants retouched (light and color, skin softening, a studio look, a smoother or new background) is never redrawn with image_generate, which turns the faces into someone similar and leaves patches of color with each further edit: follow the aio-photo skill, which keeps the people's original pixels, always works from the original and checks the faces before delivery. " +
   "Flowcharts are better written as a mermaid code block; charts of data (K-lines, trends, bars, pies) as a chart code block, which the console draws from the numbers; other line drawings such as diagrams directly as an svg code block.";
@@ -195,9 +204,23 @@ export class ImageGateway {
     try {
       const prompt = typeof args.prompt === "string" ? args.prompt.trim() : "";
       if (!prompt) throw new ImageError("Missing prompt: say clearly what to draw");
-      const target = this.#target(args.path);
+      const animated = args.animated === true;
+      const target = this.#target(args.path, animated ? "gif" : "png");
       const refs = Array.isArray(args.reference_paths) ? args.reference_paths : [];
       if (refs.length > MAX_REFERENCES) throw new ImageError(`reference_paths allows at most ${MAX_REFERENCES} images`);
+      const gif: Record<string, number> = {};
+      if (animated) {
+        if (refs.length) throw new ImageError("An animated GIF is made from the prompt only: remove reference_paths and describe the picture instead");
+        if (args.transparent_background === true) throw new ImageError("An animated GIF cannot have a transparent background");
+        for (const [key, range] of [["frame_count", FRAMES], ["frame_duration_ms", FRAME_MS]] as const) {
+          if (args[key] === undefined || args[key] === null) continue;
+          const value = Number(args[key]);
+          if (!Number.isInteger(value) || value < range.min || value > range.max) throw new ImageError(`${key} must be a whole number from ${range.min} to ${range.max}`);
+          gif[key] = value;
+        }
+      } else if (args.frame_count !== undefined || args.frame_duration_ms !== undefined) {
+        throw new ImageError("frame_count and frame_duration_ms are only for an animated GIF: set animated to true");
+      }
       const size = SIZES.includes(String(args.size)) ? String(args.size) : "auto";
       const quality = QUALITIES.includes(String(args.quality)) ? String(args.quality) : "auto";
       const files = await this.#filesFor(userId);
@@ -212,14 +235,16 @@ export class ImageGateway {
       const picture = await this.#request(images.length ? "edits" : "generations", {
         ...(images.length ? { images } : {}),
         prompt,
-        background: args.transparent_background === true ? "transparent" : "opaque",
+        // A GIF request carries only the fields the API documents for GIF output.
+        ...(animated ? {} : { background: args.transparent_background === true ? "transparent" : "opaque" }),
         model: IMAGE_MODEL,
         quality,
         size,
+        ...(animated ? { output_format: "gif", ...gif } : {}),
       });
       await files.write(target, picture);
-      this.#log.info("image generated", { userId, edit: images.length > 0, bytes: picture.length, ms: Date.now() - started });
-      return text(`Image saved: ${target}\nShow it in your reply with ![description](${target}).`);
+      this.#log.info("image generated", { userId, edit: images.length > 0, animated, bytes: picture.length, ms: Date.now() - started });
+      return text(`${animated ? "Animated GIF" : "Image"} saved: ${target}\nShow it in your reply with ![description](${target}).`);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       if (!(err instanceof ImageError)) this.#log.warn("image generation failed", { userId, error: message, ms: Date.now() - started });
@@ -227,15 +252,17 @@ export class ImageGateway {
     }
   }
 
-  /** Where the picture goes: a .png the executor named inside the workspace, or a fresh one. */
-  #target(raw: unknown): string {
+  /** Where the picture goes: a .png (.gif) the executor named inside the workspace, or a fresh one. */
+  #target(raw: unknown, ext: "png" | "gif"): string {
     if (raw === undefined || raw === null || raw === "") {
       const stamp = new Date().toISOString().replace(/[-:]/g, "").replace("T", "-").slice(0, 15);
-      return `${this.#workspace}/images/${stamp}-${randomUUID().slice(0, 6)}.png`;
+      return `${this.#workspace}/images/${stamp}-${randomUUID().slice(0, 6)}.${ext}`;
     }
     const checked = requireWorkspaceFilePath(String(raw), this.#workspace);
     if (!checked.ok) throw new ImageError(`path: ${checked.message}`);
-    if (!/\.png$/i.test(checked.path)) throw new ImageError("path must end in .png (the generated image is a PNG)");
+    if (!checked.path.toLowerCase().endsWith(`.${ext}`)) {
+      throw new ImageError(ext === "gif" ? "path must end in .gif (an animated image is a GIF)" : "path must end in .png (the generated image is a PNG; set animated to true for a .gif)");
+    }
     return checked.path;
   }
 
@@ -256,6 +283,8 @@ export class ImageGateway {
       let detail = await detailOf(res);
       // The endpoint does not know the model (not a refused prompt): draw with the previous one.
       const modelRefused = (res.status === 400 || res.status === 404) && (detail.includes(String(body.model)) || /"param"\s*:\s*"model"/.test(detail));
+      // Only GPT Image 2.6 makes animated GIFs: nothing to fall back to.
+      if (modelRefused && body.output_format === "gif") throw new ImageError("Animated GIFs need GPT Image 2.6, which the image service does not offer yet; make a still image instead");
       if (modelRefused && body.model !== FALLBACK_MODEL) {
         this.#log.warn("image model refused, falling back", { model: body.model, fallback: FALLBACK_MODEL, status: res.status, detail });
         res = await post({ ...body, model: FALLBACK_MODEL });
@@ -270,8 +299,10 @@ export class ImageGateway {
     }
     const json = (await res.json()) as { data?: Array<{ b64_json?: string }> };
     const picture = Buffer.from(json.data?.[0]?.b64_json ?? "", "base64");
-    // Only PNG bytes are saved under a .png name.
-    if (!picture.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) throw new Error("The image service did not return a PNG image");
+    // Only PNG bytes are saved under a .png name, only GIF bytes under a .gif name.
+    if (body.output_format === "gif") {
+      if (!/^GIF8[79]a$/.test(picture.subarray(0, 6).toString("latin1"))) throw new Error("The image service did not return a GIF image");
+    } else if (!picture.subarray(0, 8).equals(PNG_MAGIC)) throw new Error("The image service did not return a PNG image");
     return picture;
   }
 }
