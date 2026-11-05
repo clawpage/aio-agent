@@ -1596,7 +1596,7 @@ def test_aio_restored_indices_preserves_extra_and_duplicate_tabs_and_cleans_mark
         assert_false(reconnect, "映射中不重连或重排")
         active[0] = index
         return True, ""
-    def request(*args):
+    def request(*args, **kwargs):
         return {"success": True, "data": {1: 0, 3: 1}.get(active[0])}, ""
     rt.aio_tabs = lambda: (rows, "")
     rt.aio_activate_index = activate
@@ -1607,13 +1607,13 @@ def test_aio_restored_indices_preserves_extra_and_duplicate_tabs_and_cleans_mark
         assert_eq(problem, "")
         assert_eq(cdp.cleaned, ["a", "b"], "必须清理所有临时标识")
         assert_eq(cdp.detached, ["a", "b"])
-        rt.aio_request = lambda *args: (None, "disconnected")
+        rt.aio_request = lambda *args, **kwargs: (None, "disconnected")
         cdp = FakeCdp()
         assert_eq(rt.aio_restored_indices(cdp, [{"targetId": "a"}])[0], None)
         assert_eq(cdp.cleaned, ["a"], "失败也清理")
-        rt.aio_request = lambda *args: ({"success": True, "data": None}, "")
+        rt.aio_request = lambda *args, **kwargs: ({"success": True, "data": None}, "")
         assert_eq(rt.aio_restored_indices(FakeCdp(), [{"targetId": "a"}])[0], None, "找不到身份不猜 index")
-        rt.aio_request = lambda *args: ({"success": True, "data": {1: 1, 3: 0}.get(active[0])}, "")
+        rt.aio_request = lambda *args, **kwargs: ({"success": True, "data": {1: 1, 3: 0}.get(active[0])}, "")
         assert_eq(rt.aio_restored_indices(FakeCdp(), [{"targetId": "a"}, {"targetId": "b"}])[0], None, "顺序改变不能报成功")
         assert_eq(rt.aio_restored_indices(FakeCdp(), [{"targetId": "a"}, {"targetId": "b"}], require_order=False)[0], [3, 1], "保存阶段按身份重排 CDP 枚举结果")
     finally:
@@ -1650,7 +1650,7 @@ def test_duplicate_capture_matches_identity_and_preserves_focus_on_failure() -> 
             return False, "active_activate_failed"
         active[0] = index
         return True, ""
-    def request(*args):
+    def request(*args, **kwargs):
         if fail[0] and active[0] == 1: return None, "offline"
         return {"success": True, "data": cdp.markers.get(["first", "second"][active[0]])}, ""
     rt.aio_tabs = lambda: (rows(), "")
@@ -1681,10 +1681,12 @@ def test_duplicate_capture_matches_identity_and_preserves_focus_on_failure() -> 
 @test
 def test_aio_activate_uses_the_verified_soft_reconnect_and_index_route() -> None:
     calls: list[tuple[str, str, Any]] = []
+    timeouts: list[float] = []
     saved = rt.aio_request
 
-    def fake(method: str, path: str, body: Any = None) -> tuple[Any, str]:
+    def fake(method: str, path: str, body: Any = None, timeout: float = rt.AIO_TIMEOUT_S) -> tuple[Any, str]:
         calls.append((method, path, body))
+        timeouts.append(timeout)
         return {}, ""
 
     rt.aio_request = fake  # type: ignore[assignment]
@@ -1697,6 +1699,9 @@ def test_aio_activate_uses_the_verified_soft_reconnect_and_index_route() -> None
     assert_eq(calls[0][0], "POST", "先做 soft 重连")
     assert_eq(calls[0][1], "/v1/browser/restart", "重连走 restart 路由")
     assert_eq(calls[0][2], {"mode": "soft"}, "只能 soft 重连，绝不能 hard 重启浏览器")
+    # 慢主机上 soft 重连要好几秒，5 秒就放弃曾让整次恢复失败（nginx 记 499）。
+    assert_eq(timeouts[0], rt.AIO_RECONNECT_TIMEOUT_S, "重连给足自己的时限")
+    assert_eq(timeouts[1], rt.AIO_TIMEOUT_S, "其他小请求仍是短时限")
     assert_eq(calls[1][0], "PUT", "激活是 PUT")
     assert_eq(calls[1][1], "/v1/browser/tabs/1/activate", "按 index 激活，且无 body")
     assert_eq(calls[1][2], None, "激活请求不带 body")

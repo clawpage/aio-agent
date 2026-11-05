@@ -1214,6 +1214,10 @@ def wait_for_ready_state(cdp: Cdp, session_id: str, timeout: float, want: str = 
 # ------------------------------------------------------- AIO tabs (ordering)
 
 AIO_TIMEOUT_S = 5.0
+# A soft restart re-attaches AIO's Playwright client to Chromium and lists its pages: on a slow sandbox host
+# (the Intel node) right after a restore that takes longer than a plain call, and giving up after 5 s failed
+# the whole restore (nginx logged the request as abandoned, 499).
+AIO_RECONNECT_TIMEOUT_S = 30.0
 
 
 def aio_tabs() -> tuple[list[dict[str, Any]] | None, str]:
@@ -1311,11 +1315,11 @@ def heal_aio_api(deadline: float | None = None) -> bool:
     return False
 
 
-def aio_request(method: str, path: str, body: Mapping[str, Any] | None = None) -> tuple[Any, str]:
+def aio_request(method: str, path: str, body: Mapping[str, Any] | None = None, timeout: float = AIO_TIMEOUT_S) -> tuple[Any, str]:
     """One small JSON call against the container's own browser API."""
     import http.client
 
-    conn = http.client.HTTPConnection(AIO_API_HOST, AIO_API_PORT, timeout=AIO_TIMEOUT_S)
+    conn = http.client.HTTPConnection(AIO_API_HOST, AIO_API_PORT, timeout=timeout)
     encoded = json.dumps(body).encode("utf-8") if body is not None else None
     headers = {"Content-Type": "application/json"} if encoded is not None else {}
     try:
@@ -1347,7 +1351,7 @@ def aio_activate_index(index: int, tab_count: int, reconnect: bool = True) -> tu
     if index < 0 or (tab_count and index >= tab_count):
         return False, "active_index_out_of_range"
     if reconnect:
-        _, reconnect_error = aio_request("POST", "/v1/browser/restart", {"mode": "soft"})
+        _, reconnect_error = aio_request("POST", "/v1/browser/restart", {"mode": "soft"}, timeout=AIO_RECONNECT_TIMEOUT_S)
         if reconnect_error:
             return False, "aio_reconnect_failed"
     _, activate_error = aio_request("PUT", f"/v1/browser/tabs/{int(index)}/activate")
@@ -2261,7 +2265,7 @@ def restore_tabs(
         # preserve creation order. Reconnecting afterwards enumerates CDP targets
         # in an unspecified order and can silently reverse the tool indices.
         if not any(isinstance(entry, dict) and entry.get("targetId") in existing_ids for entry in entries):
-            _, reconnect_error = aio_request("POST", "/v1/browser/restart", {"mode": "soft"})
+            _, reconnect_error = aio_request("POST", "/v1/browser/restart", {"mode": "soft"}, timeout=max(1.0, left(AIO_RECONNECT_TIMEOUT_S)))
             if reconnect_error:
                 return err("cannot reach the AIO browser API; snapshot kept", restoredTabs=0)
         # 1. Make sure every snapshot tab has a live target (re-using existing ones).

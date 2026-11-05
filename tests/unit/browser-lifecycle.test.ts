@@ -1632,9 +1632,35 @@ describe("BrowserLifecycle review fixes", () => {
     expect(life.status().lastErrorCode).toBeNull();
     expect(life.status().restorePending).toBe(false);
 
-    // Not tabs (the time budget, the focus, the browser itself): one try, as before.
+    // A restore that ran past its time budget (a cold start on a slow host) resumes in the same wake.
+    const slow = makeRuntime();
+    const { life: cold } = makeLifecycle(slow, { releaseWhenIdle: false });
+    slow.script.browserRunning = false;
+    await cold.observeRuntime();
+    const budget: WakeOutcome[] = [
+      { ok: false, message: "ran past its time budget", failedTabs: 0, reason: "deadline_exceeded" },
+      { ok: true, restoredTabs: 8 },
+    ];
+    let k = 0;
+    slow.wake = async () => budget[k++]!;
+    await cold.wake();
+    expect(k).toBe(2);
+    expect(cold.status().restorePending).toBe(false);
+    // One that never finishes stops at the same limit, the snapshot kept.
+    k = 0;
+    const never = makeRuntime();
+    const { life: stalled } = makeLifecycle(never, { releaseWhenIdle: false });
+    never.script.browserRunning = false;
+    await stalled.observeRuntime();
+    never.wake = async () => { k += 1; return { ok: false, message: "ran past its time budget", failedTabs: 0, reason: "deadline_exceeded" }; };
+    await expect(stalled.wake()).rejects.toThrow("Couldn't restore the browser");
+    expect(k).toBe(3);
+    expect(stalled.status().restorePending).toBe(true);
+    cold.shutdown();
+    stalled.shutdown();
+
+    // Not tabs or time (the focus, the browser itself): one try, as before.
     for (const failed of [
-      { ok: false, message: "ran past its time budget", failedTabs: 1, reason: "deadline_exceeded" },
       { ok: false, message: "focus could not be synced", failedTabs: 0 },
       { ok: false, message: "cdp timeout" },
     ] satisfies WakeOutcome[]) {

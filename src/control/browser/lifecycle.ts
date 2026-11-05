@@ -145,7 +145,9 @@ export interface WakeOutcome {
  * Restores of one snapshot after which the runtime gives up a tab that keeps
  * failing (browser-runtime.py RESTORE_TAB_MAX_ATTEMPTS), so the browser comes back
  * without it. A wake spends them at once: spread over separate wakes, every try
- * would fail the task that needed the browser (a daily task, for days).
+ * would fail the task that needed the browser (a daily task, for days). A restore that ran out of
+ * time is resumed the same way: its progress is kept, and a cold start on a slow sandbox host (the
+ * container, Chromium, then every tab) can take longer than one budget.
  */
 const WAKE_TAB_TRIES = 3;
 
@@ -1453,10 +1455,12 @@ status(): BrowserLifecycleStatus {
       this.#emit("wake.started", intoRunning ? "restoring the snapshot into the running browser" : "starting and restoring the browser");
       try {
         let res = await this.#runtime.wake({ timeoutMs: this.#wakeTimeoutMs });
-        // Only tabs failed (a sign-in page that no longer takes its saved session, say): try
-        // again now; the runtime resumes the restore and gives such a tab up on its last try.
-        for (let tries = 1; !res.ok && (res.failedTabs ?? 0) > 0 && res.reason !== "deadline_exceeded" && tries < WAKE_TAB_TRIES; tries++) {
-          this.#log.warn?.("browser restore left tabs behind; trying again", { failedTabs: res.failedTabs, attempt: tries + 1 });
+        // Only tabs failed (a sign-in page that no longer takes its saved session, say), or the
+        // budget ran out: try again now; the runtime resumes the restore where it stopped and gives
+        // a failing tab up on its last try.
+        const resumable = (r: typeof res) => !r.ok && (r.reason === "deadline_exceeded" || (r.failedTabs ?? 0) > 0);
+        for (let tries = 1; resumable(res) && tries < WAKE_TAB_TRIES; tries++) {
+          this.#log.warn?.("browser restore unfinished; trying again", { reason: res.reason ?? "tabs", failedTabs: res.failedTabs, attempt: tries + 1 });
           res = await this.#runtime.wake({ timeoutMs: this.#wakeTimeoutMs });
         }
         if (!res.ok) {
