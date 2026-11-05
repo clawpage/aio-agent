@@ -162,3 +162,24 @@ it('decides how long to wait after a 429 from its Retry-After, backing off witho
  expect(rateLimitWait(H(),'{"error":{"code":"insufficient_quota"}}',0,0,now)).toBeNull();
  expect(rateLimitWait(H({'retry-after':'1'}),'{"error":{"type":"usage_limit_reached"}}',0,0,now)).toBeNull();
 });
+it('holds a request that comes before its account is loaded until it is, rather than refusing it',async()=>{
+ const h=await startHarness();
+ const upstream=http.createServer(async(req,res)=>{for await(const _ of req);res.setHeader('content-type','text/event-stream');res.end('data: {"type":"response.completed"}\n\n');});
+ await new Promise<void>(resolve=>upstream.listen(0,'127.0.0.1',resolve));
+ const hostTokens={getTokens:async()=>({accessToken:'owner-chatgpt-access',chatgptAccountId:'acct_owner',planType:'pro',expiresAt:Date.now()+3600_000}),invalidate:()=>{}};
+ const cfg={...h.ctx.cfg,memberModelPort:0,hostCodex:{...h.ctx.cfg.hostCodex,chatgptUrl:`http://127.0.0.1:${(upstream.address() as any).port}/backend-api/codex/`}};
+ const gateway=new MemberModelGateway(cfg,h.ctx.log,undefined,undefined,undefined,undefined,hostTokens);
+ let loaded!:()=>void;
+ await gateway.start(new Promise<void>(resolve=>{loaded=resolve;}));
+ try{
+  // The account's token is on disk from before the restart; its runtime is still loading.
+  const a=memberConfig(cfg,'user_alpha',18082,'gpt-6.1-sol');
+  fs.mkdirSync(a.dataDir,{recursive:true});fs.writeFileSync(path.join(a.dataDir,'model-token'),'a'.repeat(64));
+  const arrived=new Promise(resolve=>(gateway as any).server.once('request',resolve));
+  const answer=fetch(`http://127.0.0.1:${gateway.port}/u/user_alpha/v1/responses`,{method:'POST',headers:{authorization:`Bearer ${'a'.repeat(64)}`,'content-type':'application/json'},body:JSON.stringify({input:'hi',stream:true})});
+  await arrived;
+  gateway.provision(a);loaded();
+  const r=await answer;
+  expect(r.status).toBe(200);expect(await r.text()).toContain('response.completed');
+ }finally{gateway.close();upstream.close();await h.shutdown();}
+});

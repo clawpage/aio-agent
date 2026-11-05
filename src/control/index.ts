@@ -613,11 +613,9 @@ async function main(): Promise<void> {
 
   const members=(ctx.db.prepare("SELECT id FROM owners WHERE role='member'").all() as {id:string}[]).map(user=>
     users.resolve(user.id).catch(()=>ctx.log.error("member runtime unavailable",{userId:user.id})));
-  // The gateway opens once the accounts are loaded (at most 45 s): a turn that went on through a
-  // restart would otherwise meet a gateway that does not know its account yet. Until then the
-  // node's relay waits for it (src/sandbox/relay.ts).
-  void Promise.race([Promise.allSettled(members),new Promise(resolve=>setTimeout(resolve,45_000).unref())])
-    .then(()=>modelGateway.start())
+  // Requests wait until the accounts are loaded (at most 120 s): a turn that went on through a
+  // restart would otherwise meet a gateway that does not know its account yet.
+  void modelGateway.start(Promise.race([Promise.allSettled(members),new Promise(resolve=>setTimeout(resolve,120_000).unref())]))
     .catch(err=>ctx.log.error("member gateway failed to start",{error:err instanceof Error?err.message:String(err)}));
   users.prepareSpare();
   const recovery = startRuntimeRecovery(ctx);

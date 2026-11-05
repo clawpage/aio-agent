@@ -133,9 +133,17 @@ export class MemberModelGateway {
     cfg.claudeCode={...cfg.claudeCode,enabled:'on',secretsFile:claudeSecret,gatewayUrl:`http://host.docker.internal:${this.cfg.memberModelPort??4902}/u/${cfg.runtimeUserId}/anthropic`};
   }
   get port():number {return (this.server?.address() as {port:number}|null)?.port??this.cfg.memberModelPort??4902;}
-  async start():Promise<void>{
+  /**
+   * `loaded`: settles once the accounts known at startup are provisioned. Requests that come before
+   * wait for it rather than meet a gateway that does not know their account yet (a turn that went on
+   * through a restart of the control plane); the port listens at once, since Docker answers a
+   * published port whose process is not listening by resetting the connection.
+   */
+  async start(loaded?:Promise<unknown>):Promise<void>{
     const claude=new ClaudeCodeHarness(this.cfg,this.log);
+    let loading=loaded?.then(()=>{loading=undefined;},()=>{loading=undefined;});
     this.server=http.createServer(async(req,res)=>{
+      if(loading)await loading;
       // The same sandbox-to-host channel carries share publishing, under its own per-runtime token.
       if(this.share&&(req.url??'').startsWith('/share/')){await this.share.handleApi(req,res);return;}
       if(this.decision&&(req.url??'').startsWith('/decision/')){await this.decision.handle(req,res);return;}
