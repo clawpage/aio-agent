@@ -10,7 +10,7 @@ import { FakeCodex, testConfig } from "../helpers/harness.js";
 import type { Config } from "../../src/control/config.js";
 
 class PlanningCodex extends FakeCodex {
-  async listModels() {
+  override async listModels() {
     return [...await super.listModels(), { id: "gpt-6.1-terra", model: "gpt-6.1-terra", displayName: "GPT-6.1 Terra", description: "test model", isDefault: false, supportedReasoningEfforts: ["low", "medium", "high", "xhigh"], defaultReasoningEffort: "low", inputModalities: ["text", "image"] }];
   }
   async planTask(p: string) {
