@@ -121,16 +121,16 @@ it("rejects cross-site registration", async () => {
   expect(res.status).toBe(403);
 });
 
-it("registers without an invite while fewer than 20 accounts exist", async () => {
+it("registers without an invite while fewer than 30 accounts exist", async () => {
   expect(await (await h.request("/api/auth/session")).json()).toMatchObject({ registrationRequiresInvite: false });
   const res = await register({ email: "open-member@example.com", password: "open-password-123" });
   expect(res.status).toBe(200);
   expect(await res.json()).toMatchObject({ role: "member", username: "open-member", email: "open-member@example.com" });
 });
 
-it("counts all existing accounts and requires a valid invite at 20", async () => {
+it("counts all existing accounts and requires a valid invite at 30", async () => {
   const count = () => (h.ctx.db.prepare("SELECT COUNT(*) AS n FROM owners").get() as {n: number}).n;
-  while (count() < 20) {
+  while (count() < 30) {
     const n = count();
     h.ctx.db.prepare("INSERT INTO owners (id,username,role,password_hash,password_salt,password_params,created_at) SELECT ?,?, 'member', password_hash,password_salt,password_params,created_at FROM owners WHERE role='owner'").run(`seed-${n}`, `seed-${n}`);
   }
@@ -138,7 +138,7 @@ it("counts all existing accounts and requires a valid invite at 20", async () =>
   const refused = await register({ email: "needs-invite@example.com", password: "open-password-123" });
   expect(await refused.json()).toMatchObject({ error: "invite_required" });
   expect(refused.status).toBe(400);
-  expect(count()).toBe(20);
+  expect(count()).toBe(30);
   expect((await register({ email: "needs-invite@example.com", password: "open-password-123", inviteCode: await issue() })).status).toBe(200);
-  expect(count()).toBe(21);
+  expect(count()).toBe(31);
 });

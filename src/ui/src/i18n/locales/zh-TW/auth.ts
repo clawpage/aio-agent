@@ -5,7 +5,7 @@ export const auth: typeof zh = {
   brand: "一站",
   heading: { login: "把事情交給一站", register: "開啟你的一站", invite: "只差一個邀請碼" },
   passwordAlternative: "或使用電子郵件和密碼",
-  intro: { openRegistration: "前 20 個帳號無需邀請碼註冊；名額滿後需使用邀請碼。",
+  intro: { openRegistration: "前 30 個帳號無需邀請碼註冊；名額滿後需使用邀請碼。",
     login: "登入後，繼續與你的 AI 助理一起工作。",
     register: "建立帳號，讓你的 AI 助理開始工作。",
   },

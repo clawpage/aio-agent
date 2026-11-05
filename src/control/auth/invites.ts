@@ -6,7 +6,7 @@ import { emailTaken, normalizeEmail, usernameFromEmail } from "./email.js";
 import { t } from "../i18n/index.js";
 
 /**
- * One-time invite codes: required once the deployment has 20 accounts.
+ * One-time invite codes: required once the deployment has 30 accounts.
  * The owner issues them from the settings page (people ask by mailing the
  * address shown on the register form); a code becomes unusable the moment an
  * account is created with it, or when the owner revokes it.
@@ -25,7 +25,7 @@ export interface Invite {
 }
 
 export const MIN_PASSWORD = 12;
-export const OPEN_REGISTRATION_LIMIT = 20;
+export const OPEN_REGISTRATION_LIMIT = 30;
 /** The id whose sandbox is already provisioned for the next registration (see UserRuntimes.prepareSpare). */
 export const SPARE_ACCOUNT_KEY = "spare_user_id";
 

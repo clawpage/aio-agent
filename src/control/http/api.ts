@@ -385,7 +385,7 @@ export function createApiRouter(context: AppContext): Router {
     }),
   );
 
-  // Self-registration is open for the first 20 accounts, then requires an invite.
+  // Self-registration is open for the first 30 accounts, then requires an invite.
   router.post(
     "/auth/register",
     requireKind("primary"),

@@ -78,7 +78,7 @@ test("login and register switch in place, and the address follows", async ({ pag
 test("open registration hides the invite and signs in without one", async ({ page }, info) => {
   const registers = await signedOut(page, { requiresInvite: false });
   await page.goto("/register");
-  await expect(page.getByText("前 20 个账号无需邀请码注册", { exact: false })).toBeVisible();
+  await expect(page.getByText("前 30 个账号无需邀请码注册", { exact: false })).toBeVisible();
   await expect(page.getByLabel("邀请码", { exact: true })).toHaveCount(0);
   await page.getByLabel("邮箱", { exact: true }).fill("open-member@example.com");
   await page.getByLabel("密码", { exact: true }).fill("open-password-123");

@@ -4,7 +4,7 @@ export const auth = {
   brand: "一站",
   heading: { login: "把事情交给一站", register: "开启你的一站", invite: "只差一个邀请码" },
   passwordAlternative: "或使用邮箱和密码",
-  intro: { openRegistration: "前 20 个账号无需邀请码注册；名额满后需使用邀请码。",
+  intro: { openRegistration: "前 30 个账号无需邀请码注册；名额满后需使用邀请码。",
     login: "登录后，继续与你的 AI 助理一起工作。",
     register: "创建账号，让你的 AI 助理开始工作。",
   },
