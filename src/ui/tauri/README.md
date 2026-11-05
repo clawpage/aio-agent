@@ -128,6 +128,10 @@ The shell itself bundles no UI, so a UI change still ships with the next UI depl
   takes over whenever the Mac or Chrome is not there. The console's task cards show a task's page (a screenshot, or a
   live CDP screencast over the link) and take it over; the person's input goes in over the bridge's own DevTools
   connection. `PA_AI_CHROME_PROFILE` / `PA_AI_CHROME_PATH` override the profile and the Chrome binary (tests, other installs).
+  That Chrome lives only as long as the bridge: closing the bridge ends it by the pid its `SingletonLock` names, and the
+  bridge ends itself within 5 s when the app goes away without stopping it (force quit, crash). A Chrome still holding
+  the profile that does not answer its DevTools within 3 s is hung (open port, no answer, unreaped children); the
+  next call ends it and starts a new one instead of waiting on it.
 - macOS terminal: the same bridge can give the agent this Mac's terminal (`bin/mac-shell.mjs`, bundled beside the bridge):
   read, write, edit and bash, bash in a tmux server of its own (`tmux -L aio-agent`), one session per task. It is off
   until the person turns on "Let the AI use this Mac's terminal" in the workspace's Mac Terminal app inside this app; the console posts

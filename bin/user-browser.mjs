@@ -25,7 +25,7 @@
 import { execFileSync, spawn } from "node:child_process";
 import crypto from "node:crypto";
 import fs from "node:fs";
-import net from "node:net";
+import http from "node:http";
 import path from "node:path";
 import readline from "node:readline";
 
@@ -60,6 +60,8 @@ const PAGE_URL = /^(https?:\/\/|about:blank$)/i;
 const CALL_TIMEOUT_MS = 100_000;
 /** Chrome writes its DevTools port within a second or two; a cold start after an update takes longer. */
 const START_TIMEOUT_MS = 30_000;
+/** A running Chrome answers its DevTools within this; one that does not is hung, however open its port. */
+const ANSWER_TIMEOUT_MS = 3_000;
 /** Every page the agent opens: a desktop window of its own. */
 const PAGE_SIZE = { width: 1280, height: 800 };
 /** Live view: the largest picture sent (pages are 1280 wide; a zoomed phone wants every pixel of that). */
@@ -166,14 +168,35 @@ async function livePort(profileDir) {
   }
   port = Number(port);
   if (!Number.isInteger(port) || port <= 0 || port > 65535 || !wsPath?.startsWith("/devtools/browser/")) return null;
-  const open = await new Promise((resolve) => {
-    const s = net.connect(port, "127.0.0.1");
-    const done = (ok) => { s.destroy(); resolve(ok); };
-    s.setTimeout(1500, () => done(false));
-    s.once("connect", () => done(true));
-    s.once("error", () => done(false));
+  // A hung Chrome still has its port open (the kernel accepts for it) but never answers.
+  const answers = await new Promise((resolve) => {
+    const req = http.get({ host: "127.0.0.1", port, path: "/json/version", timeout: ANSWER_TIMEOUT_MS }, (res) => { res.resume(); resolve(true); });
+    req.once("timeout", () => { req.destroy(); resolve(false); });
+    req.once("error", () => resolve(false));
   });
-  return open ? { port, wsPath: wsPath.trim() } : null;
+  return answers ? { port, wsPath: wsPath.trim() } : null;
+}
+
+/** The Chrome holding this profile (its SingletonLock names it), if that process is still a Chrome on this profile. */
+function profilePid(profileDir) {
+  let pid;
+  try { pid = Number(/-(\d+)$/.exec(fs.readlinkSync(path.join(profileDir, "SingletonLock")))?.[1]); } catch { return null; }
+  if (!Number.isInteger(pid) || pid <= 1) return null;
+  try {
+    return execFileSync("ps", ["-o", "command=", "-p", String(pid)], { encoding: "utf8" }).includes(`--user-data-dir=${profileDir}`) ? pid : null;
+  } catch {
+    return null;
+  }
+}
+
+const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+
+/** End the Chrome holding the profile: asked first, then killed, since a hung one never acts on the request. */
+async function endChrome(pid) {
+  try { process.kill(pid, "SIGTERM"); } catch { return; }
+  for (let i = 0; i < 30 && alive(pid); i++) await sleep(100);
+  try { process.kill(pid, "SIGKILL"); } catch { return; }
+  for (let i = 0; i < 30 && alive(pid); i++) await sleep(100);
 }
 
 /** A DevTools connection: send(method, params, sessionId) and the events it carries. */
@@ -198,8 +221,9 @@ function connectCdp(url) {
       onClose: null,
       close() { ws.close(); },
     };
-    ws.addEventListener("open", () => resolve(cdp));
-    ws.addEventListener("error", () => { if (!closed) reject(new Error("Chrome's DevTools did not answer")); });
+    const opening = setTimeout(() => { reject(new Error("Chrome's DevTools did not answer")); ws.close(); }, ANSWER_TIMEOUT_MS);
+    ws.addEventListener("open", () => { clearTimeout(opening); resolve(cdp); });
+    ws.addEventListener("error", () => { clearTimeout(opening); if (!closed) reject(new Error("Chrome's DevTools did not answer")); });
     ws.addEventListener("close", () => {
       closed = true;
       for (const { fail } of pending.values()) fail(new Error("Chrome closed"));
@@ -266,6 +290,12 @@ export function createUserBrowser({ entry, profileDir, chromePath = defaultChrom
         let proc = null;
         if (!found) {
           if (!fs.existsSync(chromePath)) throw new Error("Google Chrome is not installed");
+          // Still running on this profile but not answering: hung. A new Chrome would only hand over to it, so it goes first.
+          const hung = profilePid(profileDir);
+          if (hung) {
+            log("ai chrome not answering; ending it", { pid: hung });
+            await endChrome(hung);
+          }
           // A port file left by a Chrome that is gone would be read as this one's.
           fs.rmSync(path.join(profileDir, "DevToolsActivePort"), { force: true });
           proc = spawn(chromePath, chromeArgs(profileDir, userAgentFor(chromePath), macLanguages()), { stdio: "ignore" });
@@ -614,9 +644,9 @@ export function createUserBrowser({ entry, profileDir, chromePath = defaultChrom
     close() {
       closed = true;
       if (child) stop(child);
-      // Its own Chrome ends with the bridge; one found running from an earlier bridge is asked to close.
-      if (chrome?.proc) chrome.proc.kill("SIGTERM");
-      else if (chrome) void chrome.cdp.send("Browser.close").catch(() => undefined);
+      // The AI's Chrome ends with the bridge, whether this bridge started it or found it (or a hung one) running.
+      const pid = chrome?.proc?.pid ?? profilePid(profileDir);
+      if (pid) try { process.kill(pid, "SIGTERM"); } catch { /* already gone */ }
     },
   };
 }

@@ -615,6 +615,7 @@ function authorized(req, token) {
 }
 
 let shuttingDown = false;
+const PARENT_CHECK_MS = 5_000;
 
 async function serve() {
   const token = readToken();
@@ -737,6 +738,10 @@ async function serve() {
   };
   process.on("SIGTERM", shutdown);
   process.on("SIGINT", shutdown);
+  // The Mac app went away without stopping the bridge (force quit, crash): end with it, taking the AI's Chrome along,
+  // instead of lingering on with the device link and the browser's memory.
+  const parent = process.ppid;
+  setInterval(() => { if (process.ppid !== parent && !shuttingDown) shutdown(); }, PARENT_CHECK_MS).unref();
   // However the bridge ends (its port taken, a crash), mobile-mcp, the browser tools and the shells go with it instead of piling up orphaned.
   process.on("exit", () => { mcpChild?.kill("SIGTERM"); browser?.close(); shell.close(); });
 }

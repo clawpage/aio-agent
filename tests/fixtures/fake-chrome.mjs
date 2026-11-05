@@ -14,6 +14,9 @@ const profile = process.argv.find((a) => a.startsWith("--user-data-dir="))?.slic
 if (!profile) process.exit(2);
 fs.writeFileSync(path.join(profile, "args.json"), JSON.stringify(process.argv.slice(2)));
 fs.writeFileSync(path.join(profile, "pid"), String(process.pid));
+// As Chrome does: the profile names the process that holds it.
+fs.rmSync(path.join(profile, "SingletonLock"), { force: true });
+fs.symlinkSync(`fakehost-${process.pid}`, path.join(profile, "SingletonLock"));
 const targets = [{ targetId: "T0", url: "about:blank", mark: null }];
 let created = 0;
 const record = (entry) => fs.appendFileSync(path.join(profile, "calls.jsonl"), JSON.stringify(entry) + "\n");

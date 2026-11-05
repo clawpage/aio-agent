@@ -3,6 +3,7 @@ import { EventEmitter } from "node:events";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { spawn } from "node:child_process";
 // @ts-expect-error plain ESM script without types
 import { chromeArgs, createUserBrowser, filterTools, macLanguages, refused, UNAVAILABLE } from "../../bin/user-browser.mjs";
 
@@ -11,6 +12,7 @@ const FIXTURES = path.resolve(import.meta.dirname, "../fixtures");
 type Result = { content: Array<{ type: string; text?: string }>; isError?: boolean };
 const result = (a: unknown) => (a as { result: Result }).result;
 const textOf = (a: unknown) => result(a).content.filter((c) => c.type === "text").map((c) => c.text).join("\n");
+const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
 const until = async (check: () => boolean, ms = 3000) => {
   for (const end = Date.now() + ms; !check(); ) {
     if (Date.now() > end) throw new Error("timed out");
@@ -150,10 +152,53 @@ it("runs the AI's own Chrome on first use: a window per page, a screencast and t
     const again = createUserBrowser({ entry: path.join(FIXTURES, "fake-devtools-mcp.mjs"), profileDir, chromePath, log: (m: string) => logs.push(`again: ${m}`) });
     expect(textOf(await again.handle(call("list_pages")))).toMatch(/^1: \(about:blank\)$/m);
     expect(logs).toContain("again: ai chrome found running");
+    // …and ends it with itself, as it would one it started.
+    const running = Number(fs.readFileSync(path.join(profileDir, "pid"), "utf8"));
     again.close();
-    await until(() => calls().at(-1)!.method === "Browser.close");
+    await until(() => !alive(running));
   } finally {
     browser.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+it("ends a hung Chrome still holding the profile and starts a new one, instead of waiting on it forever", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "user-browser-"));
+  const profileDir = path.join(dir, "profile");
+  const chromePath = path.join(dir, "chrome");
+  fs.writeFileSync(chromePath, `#!/bin/sh\nexec "${process.execPath}" "${path.join(FIXTURES, "fake-chrome.mjs")}" "$@"\n`, { mode: 0o755 });
+  // Left by an earlier bridge: its port is open, it answers nothing, and SIGTERM does not move it.
+  const hung = spawn(process.execPath, [path.join(FIXTURES, "hung-chrome.mjs"), `--user-data-dir=${profileDir}`], { stdio: "ignore" });
+  const logs: string[] = [];
+  const browser = createUserBrowser({ entry: path.join(FIXTURES, "fake-devtools-mcp.mjs"), profileDir, chromePath, log: (m: string) => logs.push(m) });
+  try {
+    await until(() => fs.existsSync(path.join(profileDir, "DevToolsActivePort")));
+    expect(textOf(await browser.handle(call("list_pages")))).toMatch(/^1: \(about:blank\)$/m);
+    expect(logs).toContain("ai chrome not answering; ending it");
+    expect(logs).toContain("ai chrome started");
+    expect(alive(hung.pid!)).toBe(false);
+  } finally {
+    browser.close();
+    hung.kill("SIGKILL");
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}, 30_000);
+
+it("ends a hung Chrome left from an earlier bridge when the bridge closes, even one it never used", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "user-browser-"));
+  const profileDir = path.join(dir, "profile");
+  const hung = spawn(process.execPath, [path.join(FIXTURES, "hung-chrome.mjs"), `--user-data-dir=${profileDir}`], { stdio: "ignore" });
+  try {
+    await until(() => fs.existsSync(path.join(profileDir, "DevToolsActivePort")));
+    const browser = createUserBrowser({ entry: path.join(FIXTURES, "fake-devtools-mcp.mjs"), profileDir, chromePath: path.join(dir, "missing"), log: () => undefined });
+    // SIGTERM is all close() sends, and this one ignores it; what matters is that close() aimed at it.
+    const signals: string[] = [];
+    const kill = process.kill;
+    process.kill = ((pid: number, signal?: string) => { if (pid === hung.pid) signals.push(String(signal)); return kill(pid, signal); }) as typeof process.kill;
+    try { browser.close(); } finally { process.kill = kill; }
+    expect(signals).toEqual(["SIGTERM"]);
+  } finally {
+    hung.kill("SIGKILL");
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
