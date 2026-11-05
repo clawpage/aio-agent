@@ -20,6 +20,8 @@ import { requireWorkspaceFilePath } from "./documents/paths.js";
 const IMAGE_MODEL = "gpt-image-2.6-sunburst";
 /** Used only when the endpoint refuses IMAGE_MODEL itself (the ChatGPT backend may not offer 2.6 yet). */
 const FALLBACK_MODEL = "gpt-image-2";
+/** The public Images API: animated GIFs, which the ChatGPT login's endpoint refuses ("GIF output is not enabled"). */
+const OPENAI_API_URL = "https://api.openai.com/v1";
 const TIMEOUT_MS = 300_000;
 const MAX_REFERENCES = 5;
 const SIZES = ["auto", "1024x1024", "1536x1024", "1024x1536"];
@@ -106,6 +108,7 @@ export class ImageGateway {
   #log: Logger;
   #hostTokens: Pick<HostTokenSource, "getTokens" | "invalidate">;
   #chatgptUrl: string;
+  #openai: { url: string; key: string } | null;
   #workspace: string;
   #filesFor: (userId: string) => Promise<ImageFiles>;
   #tokens = new Map<string, string>();
@@ -115,6 +118,9 @@ export class ImageGateway {
     log: Logger;
     hostTokens: Pick<HostTokenSource, "getTokens" | "invalidate">;
     chatgptUrl: string;
+    /** An OpenAI API key for animated GIFs; without one, asking for a GIF says it is not available. */
+    openaiApiKey?: string;
+    openaiUrl?: string;
     workspace: string;
     filesFor: (userId: string) => Promise<ImageFiles>;
   }) {
@@ -122,6 +128,7 @@ export class ImageGateway {
     this.#log = opts.log.child("image-tool");
     this.#hostTokens = opts.hostTokens;
     this.#chatgptUrl = opts.chatgptUrl.replace(/\/$/, "");
+    this.#openai = opts.openaiApiKey ? { url: (opts.openaiUrl ?? OPENAI_API_URL).replace(/\/$/, ""), key: opts.openaiApiKey } : null;
     this.#workspace = opts.workspace.replace(/\/$/, "");
     this.#filesFor = opts.filesFor;
   }
@@ -268,6 +275,7 @@ export class ImageGateway {
 
   /** One request to the ChatGPT images endpoint, with the control plane's own login. */
   async #request(kind: "generations" | "edits", body: Record<string, unknown>): Promise<Buffer> {
+    if (body.output_format === "gif") return this.#gif(body);
     const tokens = await this.#hostTokens.getTokens();
     const post = (payload: Record<string, unknown>) =>
       fetch(`${this.#chatgptUrl}/images/${kind}`, {
@@ -283,8 +291,6 @@ export class ImageGateway {
       let detail = await detailOf(res);
       // The endpoint does not know the model (not a refused prompt): draw with the previous one.
       const modelRefused = (res.status === 400 || res.status === 404) && (detail.includes(String(body.model)) || /"param"\s*:\s*"model"/.test(detail));
-      // Only GPT Image 2.6 makes animated GIFs: nothing to fall back to.
-      if (modelRefused && body.output_format === "gif") throw new ImageError("Animated GIFs need GPT Image 2.6, which the image service does not offer yet; make a still image instead");
       if (modelRefused && body.model !== FALLBACK_MODEL) {
         this.#log.warn("image model refused, falling back", { model: body.model, fallback: FALLBACK_MODEL, status: res.status, detail });
         res = await post({ ...body, model: FALLBACK_MODEL });
@@ -299,10 +305,30 @@ export class ImageGateway {
     }
     const json = (await res.json()) as { data?: Array<{ b64_json?: string }> };
     const picture = Buffer.from(json.data?.[0]?.b64_json ?? "", "base64");
-    // Only PNG bytes are saved under a .png name, only GIF bytes under a .gif name.
-    if (body.output_format === "gif") {
-      if (!/^GIF8[79]a$/.test(picture.subarray(0, 6).toString("latin1"))) throw new Error("The image service did not return a GIF image");
-    } else if (!picture.subarray(0, 8).equals(PNG_MAGIC)) throw new Error("The image service did not return a PNG image");
+    // Only PNG bytes are saved under a .png name.
+    if (!picture.subarray(0, 8).equals(PNG_MAGIC)) throw new Error("The image service did not return a PNG image");
+    return picture;
+  }
+
+  /** An animated GIF from the public Images API, with the deployment's OpenAI key (no fallback: only 2.6 animates). */
+  async #gif(body: Record<string, unknown>): Promise<Buffer> {
+    if (!this.#openai) throw new ImageError("Animated GIFs are not available on this server; make a still image instead");
+    const res = await fetch(`${this.#openai.url}/images/generations`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${this.#openai.key}` },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+    if (!res.ok) {
+      const detail = (await res.text().catch(() => "")).replace(/\s+/g, " ").slice(0, 300);
+      if (res.status === 429) throw new Error(`The animated GIF quota is used up for now or requests are too frequent; try again later (${detail})`);
+      if (res.status === 400) throw new ImageError(`The animated GIF request was refused; try a different description or fewer, smaller frames (${detail})`);
+      throw new Error(`The image service returned ${res.status} (${detail})`);
+    }
+    const json = (await res.json()) as { data?: Array<{ b64_json?: string }> };
+    const picture = Buffer.from(json.data?.[0]?.b64_json ?? "", "base64");
+    // Only GIF bytes are saved under a .gif name.
+    if (!/^GIF8[79]a$/.test(picture.subarray(0, 6).toString("latin1"))) throw new Error("The image service did not return a GIF image");
     return picture;
   }
 }

@@ -113,6 +113,7 @@
 | `PA_ASR_URL` | 空 | 语音输入的识别服务；为空则不显示麦克风按钮 |
 | `PA_TTS_URL` | 空 | 朗读工具 `aio_tts` 的语音服务（`POST` JSON `{text, speaker, language}`、回 WAV 的地址，如 Qwen3-TTS 引擎的 `/v1/tts`）；为空则不提供 |
 | `PA_GOOGLE_MAPS_SECRETS_FILE` | 空 | `PA_GOOGLE_MAPS_API_KEY`（环境变量优先；Google Maps Platform key，只需开通 Maps Static API 与 Geocoding API，建议限制为这两项）；缺失则地图卡片用 OpenStreetMap |
+| `PA_OPENAI_SECRETS_FILE` | 空 | `PA_OPENAI_API_KEY`（环境变量优先；OpenAI API key，只用于出 GIF 动图：ChatGPT 登录的出图接口不开放 GIF，动图改走公开 Images API `gpt-image-2.6-sunburst`，按次计费）；缺失则要 GIF 时如实说不可用 |
 | `PA_JEV_SECRETS_FILE` | `~/.config/aio-agent/jev.env` | `TYPESAFE_API_KEY`（环境变量优先）；缺失则不提供 Jev |
 | `PA_JEV_ENDPOINT` / `PA_JEV_MODEL` | `https://api.typesafe.ai/v1/systemone` / `jev-latest` | Jev 接口与模型 |
 | `PA_JEV_TIMEOUT_SECONDS` / `PA_JEV_DISPATCH_TIMEOUT_SECONDS` | `30` / `15` | `decide` 工具与派单评分的等待上限 |

@@ -42,7 +42,9 @@ it("gives every account an image tool that draws with the control plane's own lo
       write: async (file, bytes) => { mine.set(file, bytes); },
     };
   };
-  const image = new ImageGateway({ port: 0, log: h.ctx.log, hostTokens, chatgptUrl: `http://127.0.0.1:${(upstream.address() as { port: number }).port}/backend-api/codex/`, workspace: "/home/gem/workspace", filesFor });
+  const upstreamUrl = `http://127.0.0.1:${(upstream.address() as { port: number }).port}`;
+  // GIFs go to the public Images API with the deployment's OpenAI key; the same stand-in answers both.
+  const image = new ImageGateway({ port: 0, log: h.ctx.log, hostTokens, chatgptUrl: `${upstreamUrl}/backend-api/codex/`, openaiApiKey: "sk-test-openai", openaiUrl: `${upstreamUrl}/v1`, workspace: "/home/gem/workspace", filesFor });
   const cfg = { ...h.ctx.cfg, memberModelPort: 0 };
   const gateway = new MemberModelGateway(cfg, h.ctx.log, undefined, undefined, undefined, undefined, hostTokens, image);
   await gateway.start();
@@ -130,7 +132,10 @@ it("gives every account an image tool that draws with the control plane's own lo
     const moving = await call(member.image!.url, { prompt: "一只小猫招手，循环", path: gifPath, animated: true, frame_count: 12, frame_duration_ms: 120, size: "1024x1024" });
     expect(moving.isError).toBeUndefined();
     expect(moving.content[0]!.text).toContain(`Animated GIF saved: ${gifPath}`);
-    expect(seen[6]).toMatchObject({ url: "/backend-api/codex/images/generations", body: { model: "gpt-image-2.6-sunburst", output_format: "gif", frame_count: 12, frame_duration_ms: 120, size: "1024x1024" } });
+    // The ChatGPT login's endpoint refuses GIF output, so this one goes to the public API with the OpenAI key, never the login.
+    expect(seen[6]).toMatchObject({ url: "/v1/images/generations", body: { model: "gpt-image-2.6-sunburst", output_format: "gif", frame_count: 12, frame_duration_ms: 120, size: "1024x1024" } });
+    expect(seen[6]!.headers.authorization).toBe("Bearer sk-test-openai");
+    expect(seen[6]!.headers).not.toHaveProperty("chatgpt-account-id");
     expect(seen[6]!.body).not.toHaveProperty("background");
     expect(written.get("user_m")!.get(gifPath)).toEqual(GIF);
     // Defaults are the API's own; without a path it goes into images/ as a .gif.
@@ -158,11 +163,28 @@ it("gives every account an image tool that draws with the control plane's own lo
     answer = { status: 200, body: { created: 1, data: [{ b64_json: PNG.toString("base64") }] } };
     expect((await call(member.image!.url, { prompt: "x", animated: true, path: "/home/gem/workspace/tasks/task-1/bad.gif" })).content[0]!.text).toContain("did not return a GIF");
     expect(written.get("user_m")!.has("/home/gem/workspace/tasks/task-1/bad.gif")).toBe(false);
-    // An endpoint without GPT Image 2.6 cannot animate: said plainly, no fallback to a model that cannot.
+    // A refused GIF is not retried with a model that cannot animate.
     unknownModel = "gpt-image-2.6-sunburst";
-    expect((await call(member.image!.url, { prompt: "x", animated: true })).content[0]!.text).toContain("Animated GIFs need GPT Image 2.6");
+    const refusedGif = await call(member.image!.url, { prompt: "x", animated: true });
+    expect(refusedGif.isError).toBe(true);
+    expect(refusedGif.content[0]!.text).toContain("animated GIF request was refused");
     expect(seen).toHaveLength(10);
     unknownModel = undefined;
+    // Without an OpenAI key there are no GIFs: said plainly, and nothing is sent.
+    const keyless = new ImageGateway({ port: 0, log: h.ctx.log, hostTokens, chatgptUrl: `${upstreamUrl}/backend-api/codex/`, workspace: "/home/gem/workspace", filesFor });
+    const keylessGateway = new MemberModelGateway(cfg, h.ctx.log, undefined, undefined, undefined, undefined, hostTokens, keyless);
+    await keylessGateway.start();
+    try {
+      const other = memberConfig(owner, "user_k", 18093);
+      keylessGateway.provision(other);
+      const url = other.image!.url.replace(/^http:\/\/host\.docker\.internal:0/, `http://127.0.0.1:${keylessGateway.port}`);
+      const answer = await (await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 9, method: "tools/call", params: { name: "image_generate", arguments: { prompt: "x", animated: true } } }) })).json();
+      expect(answer.result.isError).toBe(true);
+      expect(answer.result.content[0].text).toContain("Animated GIFs are not available on this server");
+      expect(seen).toHaveLength(10);
+    } finally {
+      keylessGateway.close();
+    }
 
     // A refused login is fetched afresh next time; a used-up quota says so plainly; never a non-PNG file.
     answer = { status: 401, body: { error: "expired" } };

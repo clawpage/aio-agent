@@ -103,6 +103,8 @@ export function loadConfig(): {
   voiceLog: { dir: string; users: string[]; days: number };
   /** Google Maps Platform key (Maps Static + Geocoding) for map cards; empty: OpenStreetMap. */
   googleMapsKey: string;
+  /** OpenAI API key for what the ChatGPT login's image endpoint does not offer (animated GIFs); empty leaves them off. */
+  openaiApiKey: string;
   logDir: string;
   primaryHost: string;
   legacyPrimaryHost?: string;
@@ -473,6 +475,15 @@ export function loadConfig(): {
       const file = envStr("PA_GOOGLE_MAPS_SECRETS_FILE");
       if (!file || !fs.statSync(file, { throwIfNoEntry: false })?.isFile()) return "";
       const secret = readSecretFile(file, "PA_GOOGLE_MAPS_API_KEY");
+      if (!secret.ok) throw new Error(secret.reason);
+      return secret.value;
+    })(),
+    openaiApiKey: (() => {
+      if (envStr("PA_OPENAI_API_KEY").trim()) return envStr("PA_OPENAI_API_KEY").trim();
+      // No file (or compose's /dev/null placeholder) leaves animated GIFs off.
+      const file = envStr("PA_OPENAI_SECRETS_FILE");
+      if (!file || !fs.statSync(file, { throwIfNoEntry: false })?.isFile()) return "";
+      const secret = readSecretFile(file, "PA_OPENAI_API_KEY");
       if (!secret.ok) throw new Error(secret.reason);
       return secret.value;
     })(),

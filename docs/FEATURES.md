@@ -651,7 +651,9 @@ iOS App 需为声明了存入相册权限、带 `aioSaveFiles` 标记的新版�
 - **动图（GIF）**：说「做个动图 / 会动的表情」时执行器传 `animated: true`、`path` 为工作区内 `.gif`（默认存入 `workspace/images/`），
   可选 `frame_count`（2–64，默认 9）与 `frame_duration_ms`（20–2000，默认 200）。GPT Image 2.6 原生出动图：一次 `/images/generations` 请求带
   `output_format: "gif"`，返回成品 GIF 直接写入工作区，不在沙箱里拼帧；不能带参考图（edits 接口不支持 GIF）、不能透明背景。
-  返回的不是 GIF 时不保存；接口不认 2.6 时直接报错（`gpt-image-2` 不会出动图，不回退）。消息里 `![…](….gif)` 原样显示、会动（超过 12 MB 的图只显示静态预览）。
+  ChatGPT 登录的出图接口不开放 GIF（2026-11-04 实测返回 `GIF output is not enabled for this request`），动图改走公开 Images API
+  （`api.openai.com/v1`，用 `PA_OPENAI_SECRETS_FILE` 的 key，按次计费，见 `docs/CONFIGURATION.md`）；静态图仍走 ChatGPT 登录。没配 key 时要动图如实说不可用。
+  返回的不是 GIF 时不保存；不回退到 `gpt-image-2`（它不会出动图）。消息里 `![…](….gif)` 原样显示、会动（超过 12 MB 的图只显示静态预览）。
 - **实现**：控制面用自己的 ChatGPT 登录调用出图接口（`gpt-image-2.6-sunburst`，即 GPT Image 2.6 Sunburst，`/images/generations` 或 `/images/edits`），把 PNG 写进该账号工作区；
   接口不认这个模型时（400/404 且错误指向 `model`）同一请求改用 `gpt-image-2` 重发一次并记 warn 日志，内容被拒不重发。所有账号（含成员）同一模型。
   登录只在宿主侧使用。成员的 Codex 走成员网关、没有内置 imagegen，因此用此工具代替。

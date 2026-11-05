@@ -572,7 +572,7 @@ async function main(): Promise<void> {
   taskKb.provision(ctx.cfg);
   // Pictures come from the control plane's own ChatGPT login, so only a deployment with one offers them.
   const image=ctx.cfg.hostCodex.enabled?new ImageGateway({port:ctx.cfg.memberModelPort??4902,log:ctx.log,hostTokens:ctx.hostTokens,
-    chatgptUrl:ctx.cfg.hostCodex.chatgptUrl,workspace:ctx.cfg.sandbox.containerWorkspaceDir,
+    chatgptUrl:ctx.cfg.hostCodex.chatgptUrl,openaiApiKey:ctx.cfg.openaiApiKey,workspace:ctx.cfg.sandbox.containerWorkspaceDir,
     filesFor:async id=>sandboxImageFiles(id===ctx.cfg.runtimeUserId?ctx:await ctx.runtimeForUser!(id))}):undefined;
   image?.provision(ctx.cfg);
   // Speech for every account, from the one speech server the deployment names.
