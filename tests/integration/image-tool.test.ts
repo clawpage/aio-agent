@@ -15,10 +15,17 @@ it("gives every account an image tool that draws with the control plane's own lo
   // A stand-in for ChatGPT's images endpoint.
   const seen: Array<{ url: string; headers: http.IncomingHttpHeaders; body: Record<string, any> }> = [];
   let answer: { status: number; body: unknown } = { status: 200, body: { created: 1, data: [{ b64_json: PNG.toString("base64") }] } };
+  // A model the endpoint does not offer (yet).
+  let unknownModel: string | undefined;
   const upstream = http.createServer(async (req, res) => {
     let data = "";
     for await (const chunk of req) data += chunk;
-    seen.push({ url: req.url!, headers: req.headers, body: JSON.parse(data) });
+    const body = JSON.parse(data);
+    seen.push({ url: req.url!, headers: req.headers, body });
+    if (unknownModel && body.model === unknownModel) {
+      res.writeHead(400, { "content-type": "application/json" }).end(JSON.stringify({ error: { message: `Invalid value: '${unknownModel}'.`, type: "invalid_request_error", param: "model", code: "invalid_value" } }));
+      return;
+    }
     res.writeHead(answer.status, { "content-type": "application/json" }).end(JSON.stringify(answer.body));
   });
   await new Promise<void>((r) => upstream.listen(0, "127.0.0.1", r));
@@ -72,7 +79,7 @@ it("gives every account an image tool that draws with the control plane's own lo
     const made = await call(member.image!.url, { prompt: "一张秋天的海报，写着“周末快乐”", path: poster, size: "1024x1536" });
     expect(made.isError).toBeUndefined();
     expect(made.content[0]!.text).toContain(`![description](${poster})`);
-    expect(seen[0]).toMatchObject({ url: "/backend-api/codex/images/generations", body: { prompt: "一张秋天的海报，写着“周末快乐”", model: "gpt-image-2", background: "opaque", quality: "auto", size: "1024x1536" } });
+    expect(seen[0]).toMatchObject({ url: "/backend-api/codex/images/generations", body: { prompt: "一张秋天的海报，写着“周末快乐”", model: "gpt-image-2.6-sunburst", background: "opaque", quality: "auto", size: "1024x1536" } });
     expect(seen[0]!.headers.authorization).toBe("Bearer owner-chatgpt-access");
     expect(seen[0]!.headers["chatgpt-account-id"]).toBe("acct_owner");
     expect(written.get("user_m")!.get(poster)).toEqual(PNG);
@@ -81,7 +88,7 @@ it("gives every account an image tool that draws with the control plane's own lo
     // A change to that picture sends it along as a reference, to the edits endpoint.
     const edited = await call(member.image!.url, { prompt: "背景改成雪天，其余不变", path: "/home/gem/workspace/tasks/task-1/海报-雪天.png", reference_paths: [poster], transparent_background: true });
     expect(edited.isError).toBeUndefined();
-    expect(seen[1]).toMatchObject({ url: "/backend-api/codex/images/edits", body: { images: [{ image_url: `data:image/png;base64,${PNG.toString("base64")}` }], background: "transparent", model: "gpt-image-2" } });
+    expect(seen[1]).toMatchObject({ url: "/backend-api/codex/images/edits", body: { images: [{ image_url: `data:image/png;base64,${PNG.toString("base64")}` }], background: "transparent", model: "gpt-image-2.6-sunburst" } });
 
     // Without a path it goes into the workspace's images folder; the owner's tool writes the owner's files.
     const plain = await call(owner.image!.url, { prompt: "一只猫" });
@@ -102,6 +109,18 @@ it("gives every account an image tool that draws with the control plane's own lo
       expect(failed.content[0]!.text).toContain(message);
     }
     expect(seen).toHaveLength(3);
+
+    // An endpoint that does not offer GPT Image 2.6 yet: the picture is drawn with gpt-image-2 instead.
+    unknownModel = "gpt-image-2.6-sunburst";
+    const fallback = await call(member.image!.url, { prompt: "一只狗", path: "/home/gem/workspace/tasks/task-1/狗.png" });
+    expect(fallback.isError).toBeUndefined();
+    expect(seen.slice(3).map((s) => s.body.model)).toEqual(["gpt-image-2.6-sunburst", "gpt-image-2"]);
+    expect(written.get("user_m")!.get("/home/gem/workspace/tasks/task-1/狗.png")).toEqual(PNG);
+    // A refused prompt is not a refused model: no second try.
+    unknownModel = undefined;
+    answer = { status: 400, body: { error: { message: "Your request was rejected by the safety system.", code: "moderation_blocked" } } };
+    expect((await call(member.image!.url, { prompt: "x" })).content[0]!.text).toContain("refused");
+    expect(seen).toHaveLength(6);
 
     // A refused login is fetched afresh next time; a used-up quota says so plainly; never a non-PNG file.
     answer = { status: 401, body: { error: "expired" } };

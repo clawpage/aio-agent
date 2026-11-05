@@ -16,7 +16,10 @@ import { requireWorkspaceFilePath } from "./documents/paths.js";
  * own capability URL (`/image/<token>/mcp`), which reaches only that account's files.
  */
 
-const IMAGE_MODEL = "gpt-image-2";
+/** GPT Image 2.6 Sunburst (OpenAI's 2.6 for detailed visual work; Flare is the faster sibling). */
+const IMAGE_MODEL = "gpt-image-2.6-sunburst";
+/** Used only when the endpoint refuses IMAGE_MODEL itself (the ChatGPT backend may not offer 2.6 yet). */
+const FALLBACK_MODEL = "gpt-image-2";
 const TIMEOUT_MS = 300_000;
 const MAX_REFERENCES = 5;
 const SIZES = ["auto", "1024x1024", "1536x1024", "1024x1536"];
@@ -239,18 +242,31 @@ export class ImageGateway {
   /** One request to the ChatGPT images endpoint, with the control plane's own login. */
   async #request(kind: "generations" | "edits", body: Record<string, unknown>): Promise<Buffer> {
     const tokens = await this.#hostTokens.getTokens();
-    const res = await fetch(`${this.#chatgptUrl}/images/${kind}`, {
-      method: "POST",
-      headers: { "content-type": "application/json", authorization: `Bearer ${tokens.accessToken}`, "chatgpt-account-id": tokens.chatgptAccountId },
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(TIMEOUT_MS),
-    });
+    const post = (payload: Record<string, unknown>) =>
+      fetch(`${this.#chatgptUrl}/images/${kind}`, {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${tokens.accessToken}`, "chatgpt-account-id": tokens.chatgptAccountId },
+        body: JSON.stringify(payload),
+        signal: AbortSignal.timeout(TIMEOUT_MS),
+      });
+    const detailOf = async (r: Response) => (await r.text().catch(() => "")).replace(/\s+/g, " ").slice(0, 300);
+    let res = await post(body);
     if (res.status === 401) this.#hostTokens.invalidate();
     if (!res.ok) {
-      const detail = (await res.text().catch(() => "")).replace(/\s+/g, " ").slice(0, 300);
-      if (res.status === 429) throw new Error(`The image generation quota is used up for now or requests are too frequent; try again later (${detail})`);
-      if (res.status === 400) throw new ImageError(`The image request was refused, possibly because the content does not meet the requirements; try a different description (${detail})`);
-      throw new Error(`The image service returned ${res.status} (${detail})`);
+      let detail = await detailOf(res);
+      // The endpoint does not know the model (not a refused prompt): draw with the previous one.
+      const modelRefused = (res.status === 400 || res.status === 404) && (detail.includes(String(body.model)) || /"param"\s*:\s*"model"/.test(detail));
+      if (modelRefused && body.model !== FALLBACK_MODEL) {
+        this.#log.warn("image model refused, falling back", { model: body.model, fallback: FALLBACK_MODEL, status: res.status, detail });
+        res = await post({ ...body, model: FALLBACK_MODEL });
+        if (res.status === 401) this.#hostTokens.invalidate();
+        if (!res.ok) detail = await detailOf(res);
+      }
+      if (!res.ok) {
+        if (res.status === 429) throw new Error(`The image generation quota is used up for now or requests are too frequent; try again later (${detail})`);
+        if (res.status === 400) throw new ImageError(`The image request was refused, possibly because the content does not meet the requirements; try a different description (${detail})`);
+        throw new Error(`The image service returned ${res.status} (${detail})`);
+      }
     }
     const json = (await res.json()) as { data?: Array<{ b64_json?: string }> };
     const picture = Buffer.from(json.data?.[0]?.b64_json ?? "", "base64");
