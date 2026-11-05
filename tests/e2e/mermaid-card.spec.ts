@@ -90,3 +90,29 @@ test("a flow drawn the way the executor is told (hexagon decisions, a short chai
   await pictures.nth(0).scrollIntoViewIfNeeded();
   await page.screenshot({ path: info.outputPath("mermaid-compact.png") });
 });
+
+test("a console from an older build whose diagram files are gone loads the deployed build once, never over and over", async ({ page }, info) => {
+  // The first request for the diagram library answers as a deploy since left it: not there.
+  let refused = 0;
+  await page.route(/\/assets\/mermaid\.core-[^/]+\.js$/, async (r) => {
+    // As src/ui/edge.mjs answers a build file it does not have: never kept by a cache.
+    if (refused++ === 0) return r.fulfill({ status: 404, body: "", headers: { "cache-control": "no-store" } });
+    await r.fallback();
+  });
+  let loads = 0;
+  page.on("load", () => { loads += 1; });
+  await setup(page, `关系如下：\n\n\`\`\`mermaid\n${FLOW}\n\`\`\``);
+  await expect.poll(() => loads, { timeout: 30_000 }).toBe(2);
+  if (info.project.name.includes("webkit")) {
+    // WebKit keeps the failed module for its URL across the reload; a real deploy names new files, so only
+    // the single reload is checked here: a file that stays missing never reloads the page again.
+    await page.waitForTimeout(3000);
+    expect(loads).toBe(2);
+    return;
+  }
+  // The page loaded again by itself and the diagram is drawn, not its source.
+  await expect(page.locator(".svg-card img.svg-image")).toBeVisible({ timeout: 60_000 });
+  expect(refused).toBe(2);
+  expect(loads).toBe(2);
+  await expect(page.locator(".mermaid-card .svg-source")).toHaveCount(0);
+});

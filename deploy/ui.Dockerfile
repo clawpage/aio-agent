@@ -11,9 +11,21 @@ COPY src/ui ./src/ui
 ARG VITE_AIO_API_BASE=
 RUN npx vite build
 
+# The UI image now serving (deploy/aio.mjs passes it); without one, the build stands alone.
+ARG AIO_UI_PREVIOUS=build
+FROM ${AIO_UI_PREVIOUS} AS previous
+
+# A console opened before this deploy keeps loading its own build's files (ui-keep-assets.mjs).
+FROM node:26-alpine AS merged
+ARG AIO_VERSION=dev
+COPY --from=build /app/dist/ui /ui/new
+COPY --from=previous /app/dist/ui /ui/previous
+COPY deploy/ui-keep-assets.mjs /ui/keep.mjs
+RUN node /ui/keep.mjs /ui/new /ui/previous "${AIO_VERSION}" 5
+
 FROM node:26-alpine
 WORKDIR /app
-COPY --from=build /app/dist/ui ./dist/ui
+COPY --from=merged /ui/new ./dist/ui
 COPY src/ui/edge.mjs ./src/ui/edge.mjs
 ARG AIO_VERSION=dev
 ARG AIO_API_REQUIRES=

@@ -157,6 +157,12 @@ export function createEdge({ dist, control, workspaceOrigin = "", log = () => un
       return;
     }
     if (fs.existsSync(file) && fs.statSync(file).isFile()) return serveFile(req, res, file, url.pathname.startsWith("/assets/"));
+    // A build file that is not here is gone, not a console route: the page in its place would be run
+    // as a script (and kept by the service worker) by a console from an older build.
+    if (url.pathname.startsWith("/assets/")) {
+      res.writeHead(404, { "cache-control": "no-store" }).end();
+      return;
+    }
     // Every other path is a console route (/u/<name>, ...): the app itself decides.
     serveFile(req, res, path.join(root, "index.html"), false);
   });

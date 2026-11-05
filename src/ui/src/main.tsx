@@ -21,6 +21,21 @@ if (import.meta.env.PROD && "serviceWorker" in navigator) {
   addEventListener("load", () => void navigator.serviceWorker.register("/sw.js", { scope: "/" }).catch(() => undefined));
 }
 
+// A part loaded on first use (diagrams, charts, video) that the server no longer has: the console is
+// from a build older than the one deployed since. Load the current one, at most once in a while, so a
+// file that is really missing cannot reload the page over and over.
+addEventListener("vite:preloadError", (event) => {
+  const KEY = "aio-reloaded-for-build";
+  try {
+    if (Date.now() - Number(sessionStorage.getItem(KEY) || 0) < 5 * 60_000) return;
+    sessionStorage.setItem(KEY, String(Date.now()));
+  } catch {
+    return;
+  }
+  event.preventDefault();
+  location.reload();
+});
+
 const container = document.getElementById("root");
 if (!container) throw new Error("#root not found");
 createRoot(container).render(

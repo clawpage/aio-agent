@@ -8,6 +8,8 @@ import type { MountedChart } from "../chartRender";
 let loading: Promise<typeof import("../chartRender")> | null = null;
 function renderer() {
   loading ??= import("../chartRender");
+  // A load that failed (a file of an older build, the network) is tried again by the next chart.
+  loading.catch(() => { loading = null; });
   return loading;
 }
 

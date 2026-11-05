@@ -21,6 +21,8 @@ node deploy/aio.mjs refresh [ui]               # 只替换指定服务（默认 
 node deploy/aio.mjs ps | logs control | down
 ```
 
+构建 ui 镜像时会带上正在运行的 ui 镜像（`aio-ui-1` 用的那个，或 `AIO_UI_PREVIOUS` 指定的）里最近 5 次构建的 `assets/` 文件（`deploy/ui-keep-assets.mjs`，各次构建的清单在 `dist/ui/.builds/`）：部署前打开、尚未刷新的控制台按需加载图表、Mermaid 等文件时仍拿得到自己那一版。边缘服务对不存在的 `/assets/` 文件回 404（不再回首页），页面加载这类文件失败时自动刷新一次（5 分钟内至多一次）。
+
 首次启动在数据卷里生成 owner 密码：`docker compose -p aio exec control cat /data/owner-secret.txt`。
 管理员命令在容器里运行，例如 `docker compose -p aio exec control node bin/create-user.mjs <账号>`。
 

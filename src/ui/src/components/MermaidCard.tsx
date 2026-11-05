@@ -39,6 +39,8 @@ function mermaid(): Promise<Mermaid> {
     });
     return m;
   });
+  // A load that failed (a file of an older build, the network) is tried again by the next diagram.
+  loading.catch(() => { loading = null; });
   return loading;
 }
 

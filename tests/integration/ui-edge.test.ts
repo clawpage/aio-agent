@@ -67,6 +67,12 @@ describe("UI edge", () => {
     expect(asset.headers.get("cache-control")).toContain("immutable");
     expect(asset.headers.get("content-type")).toContain("text/javascript");
     expect(asset.headers.get("x-content-type-options")).toBe("nosniff");
+    // A build file this build does not have (a console from an older build asks for one) is a 404, never the
+    // page: run as a script it failed every diagram, and the service worker kept it under the file's name.
+    const gone = await fetch(`${base}/assets/mermaid.core-OLDBUILD.js`);
+    expect(gone.status).toBe(404);
+    expect(await gone.text()).toBe("");
+    expect(gone.headers.get("cache-control")).toBe("no-store");
     expect((await fetch(`${base}/sw.js`)).headers.get("cache-control")).toBe("no-cache");
     // Dot segments are resolved inside the build; an encoded slash cannot climb out of it.
     expect(await (await fetch(`${base}/%2e%2e/%2e%2e/etc/passwd`)).text()).toContain("<title>一站</title>");

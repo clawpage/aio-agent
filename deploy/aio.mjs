@@ -77,6 +77,17 @@ function contract() {
   return { API: read("API_VERSION"), API_MIN: read("API_MIN"), SP: read("SANDBOX_PROTOCOL"), SP_MIN: read("SANDBOX_PROTOCOL_MIN"), SP_MAX: read("SANDBOX_PROTOCOL_MAX") };
 }
 
+/** The UI image consoles are loaded from now: AIO_UI_PREVIOUS, else the one the running ui container uses. */
+function previousUi() {
+  if (settings.AIO_UI_PREVIOUS) return settings.AIO_UI_PREVIOUS;
+  try {
+    const image = execFileSync("docker", ["inspect", "--format", "{{.Config.Image}}", `${project}-ui-1`], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+    return /^[\w./:-]+$/.test(image) ? image : null;
+  } catch {
+    return null;
+  }
+}
+
 function build(selected) {
   const c = contract();
   const args = {
@@ -87,7 +98,9 @@ function build(selected) {
   for (const layer of selected) {
     const image = imageOf(layer);
     console.log(`aio: building ${image}`);
-    const buildArgs = Object.entries({ AIO_VERSION: versionOf(layer), ...args[layer] }).flatMap(([k, v]) => ["--build-arg", `${k}=${v}`]);
+    const previous = layer === "ui" ? previousUi() : null;
+    if (previous) console.log(`aio: keeping the build files of ${previous} for consoles opened before this deploy`);
+    const buildArgs = Object.entries({ AIO_VERSION: versionOf(layer), ...args[layer], ...(previous ? { AIO_UI_PREVIOUS: previous } : {}) }).flatMap(([k, v]) => ["--build-arg", `${k}=${v}`]);
     const res = spawnSync("docker", ["build", "-f", `deploy/${layer}.Dockerfile`, "-t", image, ...buildArgs, "."], { cwd: ROOT, stdio: "inherit" });
     if (res.status !== 0) die(`building ${image} failed`);
   }
