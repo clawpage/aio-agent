@@ -1,0 +1,5 @@
+<resources>
+    <!-- Japanese keeps the short app name Clawpage, as on iOS and macOS. -->
+    <string name="app_name">Clawpage</string>
+    <string name="main_activity_title">Clawpage</string>
+</resources>

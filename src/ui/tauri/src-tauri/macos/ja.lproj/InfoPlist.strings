@@ -1,0 +1,3 @@
+"CFBundleDisplayName" = "Clawpage";
+"CFBundleName" = "Clawpage";
+"NSMicrophoneUsageDescription" = "音声入力では、話した内容を録音してテキストに変換し、入力欄に入れます。";

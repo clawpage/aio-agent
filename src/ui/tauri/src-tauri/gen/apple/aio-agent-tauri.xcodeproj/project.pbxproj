@@ -43,6 +43,7 @@
 		6BF15AE332B022EE18EA3B9E /* QuartzCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = QuartzCore.framework; path = System/Library/Frameworks/QuartzCore.framework; sourceTree = SDKROOT; };
 		6D193796F2576608CF7EAE2C /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		779DE91E2D7D05F7B07CA819 /* main.mm */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.objcpp; path = main.mm; sourceTree = "<group>"; };
+		7A3F0C2E91B54D6E8C1A2B3D /* ja */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = ja; path = ja.lproj/InfoPlist.strings; sourceTree = "<group>"; };
 		8FB3085F98BE3BB4E135B227 /* LaunchScreen.storyboard */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; path = LaunchScreen.storyboard; sourceTree = "<group>"; };
 		B7E01E6223D8B774B510F2EE /* aio-agent-tauri_iOS.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = "aio-agent-tauri_iOS.entitlements"; sourceTree = "<group>"; };
 		BC2E67F2BD1270C2F179C473 /* zh-Hans */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "zh-Hans"; path = "zh-Hans.lproj/InfoPlist.strings"; sourceTree = "<group>"; };
@@ -234,6 +235,7 @@
 				Base,
 				en,
 				es,
+				ja,
 				"zh-Hans",
 				"zh-Hant",
 			);
@@ -307,6 +309,7 @@
 			children = (
 				FD2D6F5D70E2F12E67D07164 /* en */,
 				108D302B85C2782FFABBD299 /* es */,
+				7A3F0C2E91B54D6E8C1A2B3D /* ja */,
 				BC2E67F2BD1270C2F179C473 /* zh-Hans */,
 				495960487E2973C2327630F9 /* zh-Hant */,
 			);

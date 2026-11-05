@@ -5,6 +5,7 @@ const MESSAGES = {
   es: { sending: 'Enviando…', failed: 'No se ha podido enviar. Inténtalo de nuevo más tarde.', received: 'Solicitud recibida; queda pendiente de verificación por el administrador. Guarda la referencia de tu solicitud: ' },
   'zh-CN': { sending: '提交中…', failed: '暂时无法提交，请稍后再试', received: '请求已收到，等待管理员核验。请保留请求编号：' },
   'zh-TW': { sending: '提交中…', failed: '暫時無法提交，請稍後再試', received: '請求已收到，等待管理員核驗。請保留請求編號：' },
+  ja: { sending: '送信中…', failed: '現在送信できません。しばらくしてからもう一度お試しください。', received: '申請を受け付けました。管理者による本人確認をお待ちください。受付番号を控えておいてください：' },
 };
 for (const form of document.querySelectorAll('.support-form')) form.addEventListener('submit', async event => {
   event.preventDefault();

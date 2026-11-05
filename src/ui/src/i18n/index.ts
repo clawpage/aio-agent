@@ -2,6 +2,7 @@ import { zh, type Messages } from "./locales/zh";
 import { en } from "./locales/en";
 import { es } from "./locales/es";
 import { zhTW } from "./locales/zh-TW";
+import { ja } from "./locales/ja";
 
 /**
  * Every word the console shows lives in `locales/<language>/`, one file per
@@ -16,7 +17,7 @@ import { zhTW } from "./locales/zh-TW";
  * console follows the browser's (or the phone's) languages: the first one it
  * speaks, English when it speaks none of them.
  */
-export const LOCALES = { "zh-CN": zh, en, es, "zh-TW": zhTW } satisfies Record<string, Messages>;
+export const LOCALES = { "zh-CN": zh, en, es, "zh-TW": zhTW, ja } satisfies Record<string, Messages>;
 export type Locale = keyof typeof LOCALES;
 
 const STORAGE_KEY = "aio.locale";
@@ -32,6 +33,7 @@ export function matchLocale(tag: string): Locale | null {
   if (lower === "zh" || lower.startsWith("zh-")) return /^zh-(hant|tw|hk|mo)\b/.test(lower) ? "zh-TW" : "zh-CN";
   if (lower === "en" || lower.startsWith("en-")) return "en";
   if (lower === "es" || lower.startsWith("es-")) return "es";
+  if (lower === "ja" || lower.startsWith("ja-")) return "ja";
   return null;
 }
 

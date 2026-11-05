@@ -1,0 +1,25 @@
+import type { nav as zh } from '../zh/nav';
+export const nav: typeof zh = {
+  label: 'ナビゲーション',
+  open: 'ナビゲーションを開く',
+  close: 'ナビゲーションを閉じる',
+  main: 'メインチャット',
+  tasks: 'タスク一覧',
+  schedules: '定期タスク',
+  vault: 'パスワード',
+  knowledge: 'ナレッジベース',
+  analytics: 'ダッシュボード',
+  workspace: 'ワークスペース',
+  settings: '設定',
+  logout: 'ログアウト',
+  lightMode: 'ライトモード',
+  darkMode: 'ダークモード',
+  agentOnline: 'エージェント接続中',
+  agentConnecting: 'エージェントに接続しています',
+  backTo: {
+    main: '← メインチャットに戻る',
+    tasks: '← タスク一覧に戻る',
+    schedules: '← 定期タスクに戻る',
+    knowledge: '← ナレッジベースに戻る',
+  },
+};

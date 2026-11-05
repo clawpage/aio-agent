@@ -7,12 +7,13 @@
  * language from the start.
  */
 (() => {
-  const LOCALES = ["en", "es", "zh-CN", "zh-TW"];
+  const LOCALES = ["en", "es", "zh-CN", "zh-TW", "ja"];
   const match = (tag) => {
     const lower = String(tag).toLowerCase();
     if (lower === "zh" || lower.startsWith("zh-")) return /^zh-(hant|tw|hk|mo)\b/.test(lower) ? "zh-TW" : "zh-CN";
     if (lower === "en" || lower.startsWith("en-")) return "en";
     if (lower === "es" || lower.startsWith("es-")) return "es";
+    if (lower === "ja" || lower.startsWith("ja-")) return "ja";
     return null;
   };
   const asked = new URLSearchParams(location.search).get("lang");

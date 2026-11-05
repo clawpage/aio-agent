@@ -6,6 +6,7 @@ const languages = [
   { id: 'en', google: 'Sign in / sign up with Google', invite: 'One invite away', main: 'Main chat', cancel: 'Use another sign-in method' },
   { id: 'es', google: 'Acceder o registrarse con Google', invite: 'Solo falta una invitación', main: 'Chat principal', cancel: 'Usar otro método de acceso' },
   { id: 'zh-TW', google: '使用 Google 登入 / 註冊', invite: '只差一個邀請碼', main: '主對話', cancel: '換一個登入方式' },
+  { id: 'ja', google: 'Google でログイン / 新規登録', invite: 'あとは招待コードだけ', main: 'メインチャット', cancel: '別の方法でログイン' },
 ];
 
 for (const language of languages) test(`${language.id}: sign-in language persists through invite and member navigation`, async ({ page }, info) => {
@@ -28,7 +29,7 @@ for (const language of languages) test(`${language.id}: sign-in language persist
   });
   await page.goto('/u/demo/settings');
   const localSettings = page.locator('.settings-card select');
-  await expect(localSettings.locator('option')).toHaveText(['中文', 'English', 'Español', '繁體中文']);
+  await expect(localSettings.locator('option')).toHaveText(['中文', 'English', 'Español', '繁體中文', '日本語']);
   await localSettings.selectOption(language.id);
   authenticated = false;
   await page.goto('/login');
@@ -50,11 +51,11 @@ for (const language of languages) test(`${language.id}: sign-in language persist
   await expect(page.getByRole('heading', { name: language.main, exact: true })).toBeVisible();
   if (info.project.name.startsWith('mobile')) await page.locator('.mobile-menu-button').click();
   await expect(page.locator('.sidebar select')).toHaveCount(0);
-  const settingsName = { 'zh-CN': '配置', en: 'Settings', es: 'Ajustes', 'zh-TW': '設定' }[language.id];
+  const settingsName = { 'zh-CN': '配置', en: 'Settings', es: 'Ajustes', 'zh-TW': '設定', ja: '設定' }[language.id];
   await page.locator('.sidebar').getByRole('button', { name: settingsName, exact: true }).click();
   const picker = page.locator('.settings-card select');
   await expect(picker).toBeVisible();
-  await expect(picker.locator('option')).toHaveText(['中文', 'English', 'Español', '繁體中文']);
+  await expect(picker.locator('option')).toHaveText(['中文', 'English', 'Español', '繁體中文', '日本語']);
   await picker.selectOption(language.id === 'en' ? 'es' : 'en');
   await page.goto('/');
   await expect(page.getByRole('heading', { name: language.id === 'en' ? 'Chat principal' : 'Main chat', exact: true })).toBeVisible();
@@ -70,6 +71,7 @@ for (const system of [
   { locale: 'es-ES', lang: 'es', google: 'Acceder o registrarse con Google' },
   { locale: 'de-DE', lang: 'en', google: 'Sign in / sign up with Google' },
   { locale: 'zh-HK', lang: 'zh-TW', google: '使用 Google 登入 / 註冊' },
+  { locale: 'ja-JP', lang: 'ja', google: 'Google でログイン / 新規登録' },
 ]) test.describe(`system language ${system.locale}`, () => {
   test.use({ locale: system.locale });
   test(`opens in ${system.lang} until a language is chosen`, async ({ page }) => {

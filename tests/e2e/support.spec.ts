@@ -98,3 +98,37 @@ test('public pages show one language: ?lang=, then the console choice, then the 
   await page.goto('/terms.html');
   await expect(page.locator('html')).toHaveAttribute('lang','zh-CN'); await expect(page.getByRole('heading',{level:1})).toHaveText('服务条款');
 });
+
+test('public pages speak Japanese: ?lang=ja, the console choice and a Japanese browser',async({browser})=>{
+  const context=await browser.newContext({locale:'ja-JP'}); const page=await context.newPage();
+  let locale: string|undefined; await page.route('**/api/support/requests',async r=>{locale=r.request().headers()['x-aio-locale'];await r.fulfill({json:{id:'req_ja'}});});
+  // A Japanese browser opens the Japanese section, with nothing chosen.
+  await page.goto('/about.html');
+  await expect(page.locator('html')).toHaveAttribute('lang','ja'); await expect(page.locator('main > section:visible')).toHaveCount(1);
+  await expect(page.getByRole('heading',{level:1})).toHaveText('AI にまかせるワークスペース');
+  await expect(page.locator('.langs a[aria-current]')).toHaveText('日本語');
+  await page.goto('/account-deletion.html');
+  await expect(page).toHaveTitle('サポートとアカウント削除 · Clawpage Agent');
+  await page.getByLabel('連絡先メールアドレス').fill('fixture@example.com');
+  await page.getByLabel('説明').fill('アカウントを削除してください。');
+  await page.getByRole('button',{name:'申請を送信'}).click();
+  await expect(page.getByRole('status')).toHaveText('申請を受け付けました。管理者による本人確認をお待ちください。受付番号を控えておいてください：req_ja'); expect(locale).toBe('ja');
+  // ?lang= wins over the browser.
+  await page.goto('/privacy.html?lang=en');
+  await expect(page.locator('main > section:visible')).toHaveAttribute('lang','en');
+  await context.close();
+  // On an English browser, the console's choice of Japanese wins, and ?lang=ja carries over to the other pages.
+  const english=await browser.newContext({locale:'en-US'}); const other=await english.newPage();
+  await other.goto('/terms.html');
+  await expect(other.locator('main > section:visible')).toHaveAttribute('lang','en');
+  await other.evaluate(()=>localStorage.setItem('aio.locale','ja'));
+  await other.reload();
+  await expect(other.locator('main > section:visible')).toHaveAttribute('lang','ja'); await expect(other).toHaveTitle('利用規約 · Clawpage Agent');
+  await other.evaluate(()=>localStorage.removeItem('aio.locale'));
+  await other.goto('/privacy.html?lang=ja');
+  await expect(other.getByRole('heading',{level:1})).toHaveText('プライバシーポリシー');
+  await other.getByRole('link',{name:'利用規約'}).click();
+  await expect(other).toHaveURL(/\/terms\.html\?lang=ja$/);
+  await expect(other.getByRole('heading',{level:1})).toHaveText('利用規約');
+  await english.close();
+});

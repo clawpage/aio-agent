@@ -104,10 +104,10 @@ The shell itself bundles no UI, so a UI change still ships with the next UI depl
   `env -u NODE_ENV npm run -- tauri build --bundles app` and copy
   `src-tauri/target/release/bundle/macos/Clawpage.app` to `/Applications`. A copy
   left in `target/` also claims the scheme; unregister it with `lsregister -u <path>`.
-  The Mac app is named Clawpage in English and Spanish and 一站 in Simplified and Traditional Chinese (`productName` in
+  The Mac app is named Clawpage in English, Spanish and Japanese and 一站 in Simplified and Traditional Chinese (`productName` in
   `tauri.macos.conf.json`, `src-tauri/macos/*.lproj/InfoPlist.strings`); the window title is
   read from the same localized name at start. Since 0.1.1 (versionCode 1001) Android shows Clawpage
-  Agent, and 一站 on a Chinese device (`values-zh`); iOS still shows 一站.
+  Agent, 一站 on a Chinese device (`values-zh`) and Clawpage on a Japanese one (`values-ja`); iOS still shows 一站.
   Verified 2026-10-12: Google sign-in returned to the app and survived a restart.
 - macOS phones: settings → "Phones on a Mac" links this Mac's USB Android phones to the
   signed-in account (`src-tauri/src/phone_link.rs`). The console posts JSON strings to the
@@ -146,7 +146,7 @@ The shell itself bundles no UI, so a UI change still ships with the next UI depl
   `wss://agent.clawpage.ai/api/device-link/connect` itself while it is in the foreground. The permission texts
   (`NSPhotoLibraryUsageDescription`, `NSRemindersFullAccessUsageDescription` / `NSRemindersUsageDescription`,
   `NSCalendarsFullAccessUsageDescription` / `NSCalendarsUsageDescription`) are in `gen/apple/project.yml`, the
-  generated `Info.plist` and the four `InfoPlist.strings`. A new Swift file has to be added to
+  generated `Info.plist` and the five `InfoPlist.strings`. A new Swift file has to be added to
   `aio-agent-tauri.xcodeproj` too: `xcodegen generate` does it, but it also empties the entitlements and drops
   `DEVELOPMENT_TEAM`, so keep only its four `DeviceTools.swift` lines. Debug builds only:
   `xcrun simctl launch <udid> ai.clawpage.agent -AIODeviceToolsSelfTest YES` runs every tool on the simulator's own
@@ -154,10 +154,10 @@ The shell itself bundles no UI, so a UI change still ships with the next UI depl
   permissions with `xcrun simctl privacy <udid> grant photos|reminders|calendar ai.clawpage.agent`, though iOS 18
   still asks once for Photos), and `-AIODeviceToolsLinkURL ws://localhost:<port>/api/device-link/connect
   -AIODeviceToolsLinkToken dl_…` links the app to a local control plane without the console.
-- Home-screen name: iOS shows Clawpage in English and Spanish and 一站 in Chinese
+- Home-screen name: iOS shows Clawpage in English, Spanish and Japanese and 一站 in Chinese
   (`gen/apple/Localization/<lang>.lproj/InfoPlist.strings`, which also localize the permission prompts;
   the base `CFBundleDisplayName` 一站 is in `gen/apple/project.yml`, then `xcodegen generate`); Android Clawpage Agent in
-  `gen/android/app/src/main/res/values/strings.xml` and 一站 in `values-zh/strings.xml`.
+  `gen/android/app/src/main/res/values/strings.xml`, 一站 in `values-zh/strings.xml` and Clawpage in `values-ja/strings.xml`.
 - App Store: iPhone only, a privacy manifest (`gen/apple/aio-agent-tauri_iOS/PrivacyInfo.xcprivacy`) and
   `ITSAppUsesNonExemptEncryption = false`; building, uploading and the App Store Connect answers are in
   [app-store.md](../../../docs/app-store.md).

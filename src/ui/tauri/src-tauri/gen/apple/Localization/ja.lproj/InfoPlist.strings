@@ -1,0 +1,9 @@
+"CFBundleDisplayName" = "Clawpage";
+"NSMicrophoneUsageDescription" = "音声入力では、話した内容を録音してテキストに変換し、入力欄に入れます。";
+"NSCameraUsageDescription" = "写真やビデオを撮影して、メッセージに添付します。";
+"NSPhotoLibraryAddUsageDescription" = "ダウンロードした画像を写真ライブラリに保存します。";
+"NSPhotoLibraryUsageDescription" = "「iPhone の機能」で写真をオンにすると、AI が依頼に応じて写真を探し、必要な数枚だけを縮小して Clawpage に送ります。";
+"NSRemindersFullAccessUsageDescription" = "「iPhone の機能」でリマインダーをオンにすると、AI が依頼に応じてリマインダーの確認、追加、完了を行います。";
+"NSRemindersUsageDescription" = "「iPhone の機能」でリマインダーをオンにすると、AI が依頼に応じてリマインダーの確認、追加、完了を行います。";
+"NSCalendarsFullAccessUsageDescription" = "「iPhone の機能」でカレンダーをオンにすると、AI が依頼に応じて予定の確認や追加を行います。";
+"NSCalendarsUsageDescription" = "「iPhone の機能」でカレンダーをオンにすると、AI が依頼に応じて予定の確認や追加を行います。";
