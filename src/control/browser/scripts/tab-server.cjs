@@ -1336,7 +1336,7 @@ const TOOLS = {
   },
   browser_request_human: {
     mode: 'write',
-    description: 'Ask the user to act in the browser themselves and wait for them to hand it back (up to 30 minutes): signing in, CAPTCHAs, two-factor verification, entering a password or payment details, paying, placing an order, sending a message, changing account settings and so on, or a page that needs the user\'s judgment. reason tells the user in one sentence what to do.',
+    description: 'Ask the user to act in the browser themselves and wait for them to hand it back (up to 30 minutes), only for what you cannot do even with their written permission: a CAPTCHA you could not pass, a QR-code sign-in, a password not saved in Passwords, a code only they have, or a page that needs their judgment. Steps they authorized in the conversation (typing a code, confirming, paying, sending) you do yourself. reason tells the user in one sentence what to do.',
     input: { reason: str, tab: ownTabArg }, required: ['reason'],
     run: async (ctx, a, signal) => {
       const tab = await resolveTab(ctx, a.tab, 'write', false, true);

@@ -367,3 +367,17 @@ it("gives every execution thread on a runtime with a linked Mac its task identit
   await tick();
   releaseGate();
 });
+
+it("lets the user's written go-ahead outrank handing the page over, in both browsers, and still never touches passwords", () => {
+  for (const policy of [TAB_POLICY, USER_BROWSER_POLICY]) {
+    expect(policy).toMatch(/written authorization in the conversation outranks/);
+    // Codes the agent made or the user gave are typed by the agent, not handed over.
+    expect(policy).toMatch(/typing a code you generated/);
+    // Steps that cannot be undone still need that go-ahead, asked for in the conversation.
+    expect(policy).toMatch(/need that authorization/);
+  }
+  expect(TAB_POLICY).toMatch(/Call browser_request_human only for what you cannot do even with their permission/);
+  expect(TAB_POLICY).toMatch(/Never ask for, type or read passwords/);
+  expect(TAB_POLICY).not.toMatch(/Do not ask for passwords or verification codes in the conversation/);
+  expect(USER_BROWSER_POLICY).toMatch(/never type a password yourself, never read password boxes, never ask the user for the password/);
+});
