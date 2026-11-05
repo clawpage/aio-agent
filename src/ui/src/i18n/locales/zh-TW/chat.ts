@@ -129,7 +129,6 @@ export const chat: typeof zh = {
       cancelled: "已取消排隊中的輪次",
       reconciled: "服務重啟後狀態已核對",
       stopRequested: "已請求停止…",
-      threadStarted: (model: string) => `已建立對話執行緒（模型 ${model}）`,
       started: "已開始處理任務",
       error: (message: string) => `錯誤：${message}`,
       warning: (message: string) => `提示：${message}`,

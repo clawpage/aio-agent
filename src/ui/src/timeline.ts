@@ -965,7 +965,7 @@ export function applyEvent(state: TimelineState, event: AgentEvent): void {
     }
     case "thread.started": {
       const turnId = resolveTurnId(state, event);
-      pushNotice(state, turnId, { kind: "status", id: `thread:${String(p.threadId ?? event.id)}`, text: p.model ? t.chat.timeline.notices.threadStarted(text(p.model)) : t.chat.timeline.notices.started, level: "info" });
+      pushNotice(state, turnId, { kind: "status", id: `thread:${String(p.threadId ?? event.id)}`, text: t.chat.timeline.notices.started, level: "info" });
       return;
     }
     case "error":

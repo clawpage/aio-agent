@@ -32,6 +32,13 @@ const BRIDGE_MODEL_SPECS: Record<string, BridgeModelSpec> = {
     defaultReasoningEffort: "low",
     inputModalities: ["text", "image"],
   },
+  "gpt-6.1-terra": {
+    displayName: "GPT-6.1 Terra",
+    description: () => t().agent.models.bridgeChatgpt,
+    supportedReasoningEfforts: ["low", "medium", "high", "xhigh", "max", "ultra"],
+    defaultReasoningEffort: "low",
+    inputModalities: ["text", "image"],
+  },
 };
 
 /** Metadata for one gateway model id; unknown ids get the conservative defaults. */

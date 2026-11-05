@@ -5,6 +5,8 @@ import { getUser } from "./owner.js";
 export const MEMBER_GPT_MODEL = "gpt-6.1-sol";
 /** Runs on Claude Code through the member gateway, with the owner's credential kept on the host. */
 export const MEMBER_CLAUDE_MODEL = "claude-sonnet-5-5";
+/** Every scheduled run on GPT (the owner's, and a GPT member's through its gateway), at Auto effort. */
+export const SCHEDULE_MODEL = "gpt-6.1-terra";
 /** What a member runs unless the administrator assigned otherwise. */
 export const MEMBER_MODEL = MEMBER_GPT_MODEL;
 /** The models an administrator may assign to a member (`bin/set-user-model.mjs`). */

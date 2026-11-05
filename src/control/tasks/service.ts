@@ -1102,6 +1102,8 @@ export class TaskService {
             if (active.length >= this.cfg.agent.maxConcurrentTurns)
                 break;
             const plan = JSON.parse(row.plan_json!) as TaskPlan;
+            // Jev's effort pick for a scheduled run is never waited on past its timeout (or across a restart).
+            if (plan.awaitingEffort && Date.now() - row.created_at < this.cfg.jev.dispatchTimeoutMs + 5_000) continue;
             if (row.related_task_id && this.get(row.related_task_id)?.status === "stopping") continue;
             const deps = plan.dependencies.map(id => this.get(id));
             if (deps.some(d => !d || ["blocked", "planning_failed"].includes(d.status) || (TERMINAL.has(d.status) && d.status !== "completed"))) {
@@ -1664,13 +1666,16 @@ export class TaskService {
     private startScheduledRun(s: ScheduleRow, previous: TaskRow | null, key: string, conditionOutput?: string): string | null {
         const clientMessageId = `schedule:${s.id}:${key}`;
         if (this.db.prepare("SELECT 1 FROM tasks WHERE client_message_id=?").get(clientMessageId)) return null;
-        const frozen = isMember(this.db, s.owner_id) ? this.agent.memberSettings() : this.agent.resolveSubmitSettings({ conversationId: "main", text: s.instruction, clientMessageId });
+        // Scheduled runs are on Terra at Auto: Jev picks the effort from the instruction before the run starts.
+        const frozen = this.agent.scheduleSettings(s.owner_id, { conversationId: "main", text: s.instruction, clientMessageId });
+        const auto = this.jev?.enabled ? frozen.auto : null;
         const id = randomId("task");
         const plan: TaskPlan = {
             title: s.title, description: t().tasks.schedules.runDescription(describeSchedule(JSON.parse(s.spec_json) as ScheduleSpec)),
             related: previous && s.builtin !== DAILY_FEED ? [previous.id] : [], dependencies: [], resources: JSON.parse(s.resources_json) as string[],
             appendTo: null, resume: null, clarification: null,
             ...(conditionOutput !== undefined ? { conditionOutput } : {}),
+            ...(auto ? { awaitingEffort: true } : {}),
         };
         this.db.exec("BEGIN IMMEDIATE");
         try {
@@ -1681,6 +1686,13 @@ export class TaskService {
                 .run(id, clientMessageId, conv.id, s.title, s.instruction, frozen.model, frozen.effort, now, JSON.stringify(plan), s.id);
             this.db.exec("COMMIT");
         } catch (err) { this.db.exec("ROLLBACK"); throw err; }
+        if (auto) void this.askEffort(auto, s.instruction, [], Date.now()).then((effort) => {
+            const row = this.get(id);
+            if (this.#closed || row?.status !== "waiting") return;
+            const { awaitingEffort: _, ...rest } = JSON.parse(row.plan_json!) as TaskPlan;
+            this.db.prepare("UPDATE tasks SET effort=?,plan_json=? WHERE id=?").run(effort.source === "jev" ? effort.effort : row.effort, JSON.stringify({ ...rest, effort }), id);
+            this.schedule();
+        });
         return id;
     }
     private scheduledRunNote(row: TaskRow): string {

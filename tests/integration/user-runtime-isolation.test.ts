@@ -73,7 +73,7 @@ it('derives disjoint persistent data, volumes and networks, coalesces concurrent
   const a=memberConfig(h.ctx.cfg,u.id,19001),b=memberConfig(h.ctx.cfg,'user_other',19002);
   for(const key of ['dbPath','dataDir','logDir'] as const)expect(a[key]).not.toBe(b[key]);
   for(const key of ['workspaceVolume','codexVolume','browserVolume','networkName','containerName','hostPort'] as const){expect(a.sandbox[key]).not.toBe(b.sandbox[key]);expect(a.sandbox[key]).not.toBe(h.ctx.cfg.sandbox[key]);}
-  expect(a.memberRuntime).toBe(true);expect(a.bridge.models).toEqual(['gpt-6.1-sol']);
+  expect(a.memberRuntime).toBe(true);expect(a.bridge.models).toEqual(['gpt-6.1-sol','gpt-6.1-terra']);
   const oauth=memberConfig({...h.ctx.cfg,googleClientId:'owner-client',googleClientSecret:'owner-secret'},u.id,19001);
   expect(oauth.googleClientId).toBe('');expect(oauth.googleClientSecret).toBe('');
   // Only the fixed Chromium flag reaches a member container, never the owner's extra env.
@@ -85,9 +85,9 @@ it('derives disjoint persistent data, volumes and networks, coalesces concurrent
   expect(memberConfig({...h.ctx.cfg,browser:{...h.ctx.cfg.browser,memberReleaseWhenIdle:false}},u.id,19001).browser.releaseWhenIdle).toBe(false);
   // Only the administrator's assignment picks another model, and only from the member list.
   expect(()=>memberConfig(h.ctx.cfg,u.id,19001,'claude-opus-5-5')).toThrow('Unsupported member model');
-  // A GPT member's model is what its gateway provider serves; a Claude member's runs on Claude Code.
+  // A GPT member's models (its own, and Terra for scheduled runs) are what its gateway provider serves; a Claude member's runs on Claude Code.
   const g=memberConfig(h.ctx.cfg,u.id,19001,'gpt-6.1-sol');
-  expect(g.bridge.models).toEqual(['gpt-6.1-sol']);expect(g.agent.defaultModel).toBe('gpt-6.1-sol');
+  expect(g.bridge.models).toEqual(['gpt-6.1-sol','gpt-6.1-terra']);expect(g.agent.defaultModel).toBe('gpt-6.1-sol');
   expect(memberConfig(h.ctx.cfg,u.id,19001,'claude-sonnet-5-5').bridge.models).toEqual([]);
   h.ctx.db.prepare('INSERT INTO meta(key,value) VALUES(?,?)').run(`member_model:${u.id}`,'claude-sonnet-5-5');
   let calls=0;

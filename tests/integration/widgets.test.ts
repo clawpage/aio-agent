@@ -110,7 +110,7 @@ it("publishes widgets over the share channel and frames them for the signed-in a
     expect((await ask({ name: "nope", input: "hi" })).status).toBe(404);
     expect((await ask({ name: "board" })).status).toBe(400);
     const ok = await ask({ name: "board", input: "hi", system: "Be brief.", json: true });
-    expect(await ok.json()).toEqual({ text: '```json\n{"ok":1}\n```', json: { ok: 1 }, model: "m" });
+    expect(await ok.json()).toEqual({ text: '```json\n{"ok":1}\n```', json: { ok: 1 } });
     const [userId, req] = answer.mock.calls[0] as unknown as [string, { system: string; messages: unknown[]; effort: string }];
     expect(userId).toBe("owner_1");
     expect(req.system).toContain('"看板"');

@@ -128,7 +128,6 @@ export const chat = {
       cancelled: "已取消排队中的轮次",
       reconciled: "服务重启后状态已核对",
       stopRequested: "已请求停止…",
-      threadStarted: (model: string) => `已创建会话线程（模型 ${model}）`,
       started: "已开始处理任务",
       error: (message: string) => `错误：${message}`,
       warning: (message: string) => `提示：${message}`,

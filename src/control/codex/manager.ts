@@ -1,4 +1,4 @@
-import { isMember, MEMBER_EFFORT, MEMBER_EFFORTS, MEMBER_GPT_MODEL, MEMBER_MODEL } from "../auth/policy.js";
+import { isMember, MEMBER_EFFORT, MEMBER_EFFORTS, MEMBER_GPT_MODEL, MEMBER_MODEL, SCHEDULE_MODEL } from "../auth/policy.js";
 import { AUTO_EFFORT_LEVELS, type AutoEffort } from "../tasks/effort.js";
 import { JsonRpcTimeoutError } from "./jsonrpc.js";
 import {readSoul} from '../soul.js';
@@ -807,12 +807,40 @@ export class AgentManager {
    */
   memberSettings(): { model: string; effort: string } {
     const model = this.#cfg.memberModel ?? MEMBER_MODEL;
-    // Fail closed: an unavailable member model never falls back to the ChatGPT account,
-    // and a GPT member runs only while the control plane has its own ChatGPT login.
-    const available = (this.#claudeCode?.owns(model) || (this.#bridge?.providerForModel(model) ?? "openai") !== "openai")
-      && (model !== MEMBER_GPT_MODEL || this.#cfg.hostCodex.enabled);
-    if (!available) throw new Error(t().agent.turn.serviceUnavailable);
+    if (!this.#memberRuns(model)) throw new Error(t().agent.turn.serviceUnavailable);
     return { model, effort: this.#cfg.memberEffort ?? MEMBER_EFFORT };
+  }
+
+  /**
+   * Fail closed: an unavailable member model never falls back to the ChatGPT account,
+   * and a GPT member runs only while the control plane has its own ChatGPT login.
+   */
+  #memberRuns(model: string): boolean {
+    return !!this.#claudeCode?.owns(model) || ((this.#bridge?.providerForModel(model) ?? "openai") !== "openai" && this.#cfg.hostCodex.enabled);
+  }
+
+  /** A member's turn: a scheduled run keeps Terra at the effort chosen for it; anything else runs as assigned. */
+  #memberTurnSettings(frozen: { model?: string | null; effort?: string | null } | undefined): { model: string; effort: string } {
+    if (frozen?.model === SCHEDULE_MODEL && this.#memberRuns(SCHEDULE_MODEL)) {
+      return { model: SCHEDULE_MODEL, effort: frozen.effort && MEMBER_EFFORTS.includes(frozen.effort) ? frozen.effort : MEMBER_EFFORT };
+    }
+    return { ...this.memberSettings(), effort: this.#memberEffort(frozen?.effort) };
+  }
+
+  /**
+   * What a scheduled run of this account runs on: GPT-6.1 Terra at Auto (`auto`: the levels Jev
+   * may pick and what runs when it cannot) whenever the account can run it, whatever effort the
+   * account is otherwise on. A Claude member, or a catalog without Terra, runs as its other tasks.
+   */
+  scheduleSettings(ownerId: string, input: SubmitTurnInput): { model: string; effort: string | null; auto: AutoEffort | null } {
+    if (isMember(this.#db, ownerId)) {
+      if (!this.#memberRuns(SCHEDULE_MODEL)) return { ...this.memberSettings(), auto: null };
+      return { model: SCHEDULE_MODEL, effort: MEMBER_EFFORT, auto: { levels: AUTO_EFFORT_LEVELS.filter((level) => MEMBER_EFFORTS.includes(level)), fallback: MEMBER_EFFORT } };
+    }
+    const catalog = this.#modelCatalog.find((m) => m.id === SCHEDULE_MODEL);
+    if (!catalog) return { ...this.resolveSubmitSettings(input), auto: null };
+    const levels = AUTO_EFFORT_LEVELS.filter((level) => catalog.supportedReasoningEfforts.includes(level));
+    return { model: SCHEDULE_MODEL, effort: null, auto: levels.length >= 2 ? { levels, fallback: null } : null };
   }
 
   /**
@@ -839,7 +867,7 @@ export class AgentManager {
 
   resolveSubmitSettings(input: SubmitTurnInput): { model: string; effort: string | null } {
     const conversation = this.getConversation(input.conversationId);
-    if (conversation && isMember(this.#db, conversation.owner_id)) return { ...this.memberSettings(), effort: this.#memberEffort(input.frozenSettings?.effort) };
+    if (conversation && isMember(this.#db, conversation.owner_id)) return this.#memberTurnSettings(input.frozenSettings);
     if (input.frozenSettings) return input.frozenSettings;
     const stored = effectiveAgentSettings(this.agentSettings(), this.#modelCatalog, this.#cfg.agent.defaultModel);
     const model = input.model ?? stored.model ?? this.#cfg.agent.defaultModel;
@@ -1055,9 +1083,9 @@ export class AgentManager {
     // `conversations.model`) must still run the model it was accepted with.
     // Legacy rows without a frozen model fall back to the conversation, then the
     // configured default (never Codex's own gpt-6-astra default).
-    const policy = isMember(this.#db, conversation.owner_id) ? this.memberSettings() : null;
+    const policy = isMember(this.#db, conversation.owner_id) ? this.#memberTurnSettings(turn) : null;
     const model = policy?.model ?? turn.model ?? conversation.model ?? this.#cfg.agent.defaultModel;
-    if (policy) turn.effort = this.#memberEffort(turn.effort);
+    if (policy) turn.effort = policy.effort;
     const { desiredProvider, currentProvider, startsFresh } = this.#threadPlan(conversation, model, turn.id);
     let inputText = startsFresh ? this.#withPriorContext(conversation.id, turn.id, turn.input_text) : turn.input_text;
     this.#restartForTools(conversation.id);
@@ -1340,7 +1368,7 @@ export class AgentManager {
   turnsInThread(conversationId: string, frozenModel: string | null): Set<string> {
     const conversation = this.getConversation(conversationId);
     if (!conversation?.codex_thread_id) return new Set();
-    const policy = isMember(this.#db, conversation.owner_id) ? this.memberSettings() : null;
+    const policy = isMember(this.#db, conversation.owner_id) ? this.#memberTurnSettings({ model: frozenModel }) : null;
     const model = policy?.model ?? frozenModel ?? conversation.model ?? this.#cfg.agent.defaultModel;
     const { desiredProvider, startsFresh } = this.#threadPlan(conversation, model, null);
     if (startsFresh || desiredProvider === CLAUDE_CODE_PROVIDER_ID) return new Set();

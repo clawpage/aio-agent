@@ -130,7 +130,6 @@ export const chat: typeof zh = {
       cancelled: "順番待ちのラウンドをキャンセルしました",
       reconciled: "サービスの再起動後に状態を確認しました",
       stopRequested: "停止をリクエストしました…",
-      threadStarted: (model: string) => `会話スレッドを作成しました（モデル ${model}）`,
       started: "タスクの処理を開始しました",
       error: (message: string) => `エラー：${message}`,
       warning: (message: string) => `お知らせ：${message}`,

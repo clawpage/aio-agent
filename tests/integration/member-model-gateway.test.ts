@@ -71,7 +71,7 @@ it('sends only a GPT-assigned member to ChatGPT on its model, adding the control
   gateway.provision(a);gateway.provision(b);gateway.provision(c);
   const token=(m:typeof a)=>fs.readFileSync(path.join(m.dataDir,'model-token'),'utf8');
   // The member sandbox only ever gets its own gateway token and address.
-  expect(a.bridge.models).toEqual(['gpt-6.1-sol']);
+  expect(a.bridge.models).toEqual(['gpt-6.1-sol','gpt-6.1-terra']);
   expect(a.bridge.baseUrl).toBe(`http://host.docker.internal:${cfg.memberModelPort}/u/user_alpha/v1`);
   expect(a.claudeCode.gatewayUrl).toBeUndefined();
   for(const name of fs.readdirSync(a.dataDir))expect(fs.readFileSync(path.join(a.dataDir,name),'utf8')).not.toContain('owner-chatgpt-access');
@@ -89,6 +89,9 @@ it('sends only a GPT-assigned member to ChatGPT on its model, adding the control
   expect(seen[0].headers).toMatchObject({authorization:'Bearer owner-chatgpt-access','chatgpt-account-id':'acct_owner',originator:'personal-agent','session-id':'s1','x-codex-turn-metadata':'{"turn_id":"t1"}','x-openai-internal-codex-responses-lite':'true'});
   expect(seen[0].headers['x-openai-account-routing-override']).toBeUndefined();expect(seen[0].headers.cookie).toBeUndefined();
   expect(JSON.stringify(seen[0].headers)).not.toContain(token(a));
+  // A scheduled run asks for Terra and keeps it; any other model runs as the assigned one.
+  await (await post('user_alpha',token(a),{model:'gpt-6.1-terra',input:'hi',stream:true})).text();
+  expect(seen.at(-1).body.model).toBe('gpt-6.1-terra');
   // The member's dispatcher may ask for less than high (low/medium); anything above stays high.
   await post('user_alpha',token(a),{reasoning:{effort:'low'},input:'route'});
   expect(seen.at(-1).body.reasoning).toEqual({effort:'low'});

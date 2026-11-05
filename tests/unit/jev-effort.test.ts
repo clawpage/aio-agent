@@ -10,6 +10,9 @@ import { FakeCodex, testConfig } from "../helpers/harness.js";
 import type { Config } from "../../src/control/config.js";
 
 class PlanningCodex extends FakeCodex {
+  async listModels() {
+    return [...await super.listModels(), { id: "gpt-6.1-terra", model: "gpt-6.1-terra", displayName: "GPT-6.1 Terra", description: "test model", isDefault: false, supportedReasoningEfforts: ["low", "medium", "high", "xhigh"], defaultReasoningEffort: "low", inputModalities: ["text", "image"] }];
+  }
   async planTask(p: string) {
     const data = JSON.parse(p.split("\n").findLast((l) => l.startsWith("{"))!);
     return JSON.stringify({ title: data.message, decision: { kind: "new", taskId: null }, related: [], dependencies: [], resources: [] });
@@ -169,6 +172,25 @@ describe("Jev decides the effort of tasks on Auto", () => {
     } finally {
       delete process.env.TYPESAFE_API_KEY;
     }
+  });
+});
+
+describe("scheduled runs", () => {
+  it("run on GPT-6.1 Terra, with Jev picking the effort from the instruction even when the account has a fixed one", async () => {
+    await agent.init();
+    writeAgentSettings(db, { model: "gpt-6-sol", effort: "low" });
+    const calls: Call[] = [];
+    start(fakeJev({ low: 0.05, medium: 0.85, high: 0.05, xhigh: 0.05 }, calls));
+    const created = tasks.createScheduleFor("owner_1", { title: "看价格", instruction: "查一下 T90 的价格", schedule: { kind: "daily", at: "09:00" }, needsBrowser: false });
+    if (!created.ok) throw new Error(created.error);
+    const { task } = tasks.runScheduleNow(created.schedule.id, "owner_1");
+    await vi.waitFor(() => expect(codex.startedTurns).toHaveLength(1), { timeout: 4_000, interval: 20 });
+    expect(Object.keys(calls[0]!.questions)).toEqual([EFFORT_QUESTION]);
+    expect(Object.keys(calls[0]!.questions[EFFORT_QUESTION]!.criteria)).toEqual(["low", "medium", "high", "xhigh"]);
+    expect(codex.startedTurns[0]).toMatchObject({ model: "gpt-6.1-terra", effort: "medium" });
+    expect(tasks.get(task.id)).toMatchObject({ model: "gpt-6.1-terra", effort: "medium" });
+    expect(plan(task.id)).toMatchObject({ effort: { effort: "medium", source: "jev" } });
+    expect(plan(task.id).awaitingEffort).toBeUndefined();
   });
 });
 

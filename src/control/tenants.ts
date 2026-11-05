@@ -10,7 +10,7 @@ import type {MemberModelGateway} from './memberModelGateway.js';
 import {getUser} from './auth/owner.js';
 import {SPARE_ACCOUNT_KEY} from './auth/invites.js';
 import {randomId} from './auth/passwords.js';
-import {MEMBER_EFFORTS,MEMBER_GPT_MODEL,MEMBER_MODEL,MEMBER_MODELS} from './auth/policy.js';
+import {MEMBER_EFFORTS,MEMBER_GPT_MODEL,MEMBER_MODEL,MEMBER_MODELS,SCHEDULE_MODEL} from './auth/policy.js';
 import type {SandboxNodes} from './sandbox/nodes.js';
 import {feedTimeFor} from './tasks/service.js';
 
@@ -33,8 +33,8 @@ export function memberConfig(base: Config, userId: string, port: number, model: 
       // Owner PA_SANDBOX_EXTRA_ENV is never inherited; only the fixed flag Chromium needs
       // on Docker Desktop (no user namespaces for its zygote), or the browser crash-loops.
       codexVolume:`aio-user-${suffix}-codex`,browserVolume:`aio-user-${suffix}-browser`,extraEnv:['BROWSER_NO_SANDBOX=--no-sandbox']},
-    // A GPT member's model is the one its gateway provider serves; a Claude member's runs on Claude Code.
-    bridge:{...base.bridge,models:model===MEMBER_GPT_MODEL?[model]:[]},
+    // A GPT member's models (its own, and Terra for scheduled runs) are the ones its gateway provider serves; a Claude member's runs on Claude Code.
+    bridge:{...base.bridge,models:model===MEMBER_GPT_MODEL?[model,SCHEDULE_MODEL]:[]},
     // The owner's knowledge-base address is never inherited; the gateway grants a listed member its own.
     kb:undefined,
     // Nor its Home Assistant address: the gateway grants a listed account its own.

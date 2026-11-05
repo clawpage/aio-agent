@@ -766,7 +766,7 @@ export function createApiRouter(context: AppContext): Router {
         ...(extra ? ["", "The widget's instructions:", "", extra] : []),
       ].join("\n");
       const answer = await ai.answer(call.userId, { system, messages: ask.messages, effort: ask.effort });
-      res.json({ text: answer.text, ...(ask.json ? { json: parseJsonAnswer(answer.text) } : {}), model: answer.model });
+      res.json({ text: answer.text, ...(ask.json ? { json: parseJsonAnswer(answer.text) } : {}) });
     } catch (err) {
       if (err instanceof DataError || err instanceof AiError) res.status(err.status).json({ error: err.code, message: err.message });
       else res.status(500).json({ error: "AI_FAILED", message: "The request failed" });

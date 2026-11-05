@@ -6,7 +6,7 @@ import { startHarness, login, type TestHarness } from '../helpers/harness.js';
 import { createMember } from '../../src/control/auth/owner.js';
 import {readSoul} from '../../src/control/soul.js';
 import {EXPERIENCE_POLICY} from '../../src/control/codex/experience.js';
-import { MEMBER_MODEL } from '../../src/control/auth/policy.js';
+import { MEMBER_MODEL, SCHEDULE_MODEL } from '../../src/control/auth/policy.js';
 let h:TestHarness, dir:string, userId:string;
 let member:Record<string,string>, owner:Record<string,string>;
 const planner=vi.fn(async(_prompt:string,_soul?:string,_model?:string)=>JSON.stringify({title:'处理请求',related:[],dependencies:[],resources:[]}));
@@ -14,7 +14,7 @@ beforeAll(async()=>{
  dir=fs.mkdtempSync(path.join(os.tmpdir(),'aio-members-'));
  const secret=path.join(dir,'model.env');fs.writeFileSync(secret,'AIO_MEMBER_MODEL_TOKEN=test-member-token\n',{mode:0o600});
  // The member's turns reach its model through the gateway provider, as on a member runtime.
- h=await startHarness({PA_MAX_CONCURRENT_TURNS:'3'},{configure:cfg=>{cfg.bridge={...cfg.bridge,enabled:'on',models:[MEMBER_MODEL],baseUrl:'http://host.docker.internal:4902/u/user_m/v1',secretsFile:secret};}});
+ h=await startHarness({PA_MAX_CONCURRENT_TURNS:'3'},{configure:cfg=>{cfg.bridge={...cfg.bridge,enabled:'on',models:[MEMBER_MODEL,SCHEDULE_MODEL],baseUrl:'http://host.docker.internal:4902/u/user_m/v1',secretsFile:secret};}});
  Object.assign(h.codex,{planTask:planner});
  userId=(await createMember(h.ctx.db,'yzmy','member-password-123')).id;
  const res=await h.request('/api/auth/login',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({username:'yzmy',password:'member-password-123'})});
@@ -90,4 +90,13 @@ it('fails closed when the gateway provider is unavailable instead of using the o
  expect(()=>disabled.ctx.tasks.submit({userId:user.id,text:'hi',clientMessageId:'blocked'})).toThrow('temporarily unavailable');
  expect(disabled.codex.startedTurns).toHaveLength(0);
  } finally {await disabled.shutdown();}
+});
+it('runs a member\'s scheduled task on Terra through its gateway, and its other tasks on the assigned model',async()=>{
+ const created=h.ctx.tasks.createScheduleFor(userId,{title:'看价格',instruction:'查一下 T90 的价格',schedule:{kind:'daily',at:'09:00'},needsBrowser:false});
+ if(!created.ok)throw new Error(created.error);
+ const {task}=h.ctx.tasks.runScheduleNow(created.schedule.id,userId);
+ await vi.waitFor(()=>expect(h.codex.startedTurns.some(t=>t.model===SCHEDULE_MODEL)).toBe(true));
+ const run=h.codex.startedTurns.find(t=>t.model===SCHEDULE_MODEL)!;
+ expect(run.effort).toBe('high');expect(h.codex.threadProviders.get(run.threadId)).toBe('aio_gateway');
+ expect(h.ctx.tasks.get(task.id)).toMatchObject({model:SCHEDULE_MODEL});
 });

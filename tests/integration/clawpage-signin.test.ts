@@ -203,7 +203,7 @@ it("answers with the signed-in visitor's own AI, framed by the page's prompt", a
 
     const res = await ws(h, ".ai", { method: "POST", token, body: { input: "Q: ... A: ...", prompt: "grade", json: true } });
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ text: expect.any(String), json: { score: 4, feedback: "ok" }, model: "test-model" });
+    expect(await res.json()).toEqual({ text: expect.any(String), json: { score: 4, feedback: "ok" } });
     expect(asked[0]).toMatchObject({ userId: "user_a1", effort: "low", messages: [{ role: "user", content: "Q: ... A: ..." }] });
     expect(asked[0]!.system).toContain("每日托福");
     expect(asked[0]!.system).toContain("Grade the answer from 0 to 5.");

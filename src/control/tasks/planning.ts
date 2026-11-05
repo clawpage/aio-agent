@@ -54,6 +54,8 @@ export interface TaskPlan {
     jev?: JevRelevance | null;
     /** How this task's reasoning effort was chosen, when the account's effort is on Auto. */
     effort?: EffortDecision;
+    /** A scheduled run waiting for Jev to pick its effort before it starts. */
+    awaitingEffort?: boolean;
     /** Related tasks this task's turn gave the executor in full, by a fingerprint of what it was given. */
     injectedContext?: Record<string, string>;
     /** The executor rules version this task's turn gave its thread in full. */

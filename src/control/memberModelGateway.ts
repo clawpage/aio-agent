@@ -6,7 +6,7 @@ import {Readable} from 'node:stream';
 import type {Config} from './config.js';
 import type {Logger} from '../common/logger.js';
 import {ClaudeCodeHarness,MEMBER_GATEWAY_TOKEN_KEY} from './claudeCode.js';
-import {MEMBER_CLAUDE_MODEL,MEMBER_EFFORT,MEMBER_EFFORTS,MEMBER_GPT_MODEL} from './auth/policy.js';
+import {MEMBER_CLAUDE_MODEL,MEMBER_EFFORT,MEMBER_EFFORTS,MEMBER_GPT_MODEL,SCHEDULE_MODEL} from './auth/policy.js';
 import type {ShareStore} from './share.js';
 import type {DecisionGateway} from './decision.js';
 import type {KbGateway} from './kb.js';
@@ -185,7 +185,8 @@ export class MemberModelGateway {
           const asked=(reasoning as {effort?:unknown}).effort;
           // Anything else (xhigh and up, or none) runs at high.
           const effort=typeof asked==='string'&&MEMBER_EFFORTS.includes(asked)?asked:MEMBER_EFFORT;
-          input.model=MEMBER_GPT_MODEL;input.reasoning={...reasoning,effort};input.store=false;delete input.service_tier;
+          // Scheduled runs ask for Terra; anything else runs on the assigned model.
+          input.model=input.model===SCHEDULE_MODEL?SCHEDULE_MODEL:MEMBER_GPT_MODEL;input.reasoning={...reasoning,effort};input.store=false;delete input.service_tier;
           dropEarlierToolImages(input.input);
           const headers:Record<string,string>={'content-type':'application/json',authorization:`Bearer ${tokens.accessToken}`,'chatgpt-account-id':tokens.chatgptAccountId};
           for(const [name,value] of Object.entries(req.headers))if(typeof value==='string'&&CODEX_HEADERS.test(name))headers[name]=value;

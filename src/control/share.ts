@@ -951,7 +951,7 @@ export class ShareStore {
       if (!this.data.allowAi(visitor.id, userId, page)) return reply(429, { error: "RATE_LIMITED", message: "Too many AI requests; try again in a minute" });
       const meta = this.#meta(userId, page);
       const answer = await this.ai.answer(visitor.id, { system: aiSystem(meta?.title ?? page, this.#usernameOf(userId) ?? userId, instructions, ask.json), messages: ask.messages, effort: ask.effort });
-      reply(200, { text: answer.text, ...(ask.json ? { json: parseJsonAnswer(answer.text) } : {}), model: answer.model });
+      reply(200, { text: answer.text, ...(ask.json ? { json: parseJsonAnswer(answer.text) } : {}) });
     } catch (err) {
       if (err instanceof DataError || err instanceof AiError) reply(err.status, { error: err.code, message: err.message });
       else reply(500, { error: "INTERNAL", message: "The request failed" });

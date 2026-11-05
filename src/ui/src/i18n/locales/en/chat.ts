@@ -128,7 +128,6 @@ export const chat: typeof zh = {
       cancelled: "Cancelled the queued turn",
       reconciled: "Status checked after the service restarted",
       stopRequested: "Stop requested…",
-      threadStarted: (model: string) => `Started a session thread (model ${model})`,
       started: "Started working on the task",
       error: (message: string) => `Error: ${message}`,
       warning: (message: string) => `Note: ${message}`,
