@@ -247,3 +247,25 @@ test("in the iOS app focusing the composer while the keyboard's motion has it be
   expect(scrolled).toEqual([0, 0]);
   await expect(page.locator(".chat-head").first()).toBeInViewport();
 });
+
+test("in the iOS app a keyboard report as tall as the screen is ignored instead of blanking the page", async ({ page }, info) => {
+  test.skip(!info.project.name.startsWith("mobile"));
+  await setup(page);
+  await page.goto("/");
+  await expect(page.getByText("任务 23").first()).toBeVisible();
+  const rest = await composerBottom(page);
+  // Closing the photo picker, iOS announced a keyboard frame that is not on screen, and the app reported
+  // the whole screen as keyboard: everything below the header slid up out of view, then the page laid
+  // itself out with no room left, header included.
+  for (const animate of [true, false]) {
+    await page.evaluate((a) => window.dispatchEvent(new CustomEvent("aio-keyboard", { detail: { height: window.innerHeight, ...(a ? { duration: 0.25 } : {}) } })), animate);
+    await page.waitForTimeout(600);
+    expect(await page.evaluate(() => document.documentElement.style.getPropertyValue("--keyboard-viewport"))).toBe("");
+    expect(await composerBottom(page)).toBeCloseTo(rest, 0);
+    await expect(page.locator(".chat-head").first()).toBeInViewport();
+    await expect(page.locator(".composer").first()).toBeInViewport();
+  }
+  // A real keyboard still moves the page.
+  await keyboard(page, 336);
+  expect(await composerBottom(page)).toBeCloseTo(rest - 336, 0);
+});

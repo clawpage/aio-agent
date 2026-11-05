@@ -260,7 +260,10 @@ final class KeyboardFit: NSObject, WKScriptMessageHandler {
     @objc private func change(_ note: Notification) {
         guard let webView, let info = note.userInfo,
               let end = (info[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue)?.cgRectValue else { return }
-        let target = max(0, webView.bounds.height - webView.convert(end, from: nil).minY)
+        // Only what the keyboard covers of the web view: closing the photo picker, iOS announces a frame that is
+        // not on screen (empty, at the top), which read as a keyboard the height of the screen.
+        let covered = webView.bounds.intersection(webView.convert(end, from: nil))
+        let target = covered.isNull || covered.isEmpty ? 0 : covered.height
         let duration = (info[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double) ?? 0
         let value = (target * 2).rounded() / 2
         movingUntil = Date().addingTimeInterval(max(duration, 0.6))

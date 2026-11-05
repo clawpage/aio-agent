@@ -17,6 +17,8 @@ const appKeyboard = () => !!appKeyboardBridge();
 /** The iOS keyboard's own motion (UIKit's curve 7), sampled frame by frame in the simulator: its progress over KEYBOARD_MS. */
 const KEYBOARD_MS = 500;
 const KEYBOARD_CURVE = "linear(0, 0.112 3.3%, 0.297 6.7%, 0.408 10%, 0.504 13.3%, 0.593 16.7%, 0.668 20%, 0.732 23.3%, 0.786 26.7%, 0.829 30%, 0.865 33.3%, 0.892 36.7%, 0.915 40%, 0.933 43.3%, 0.948 46.7%, 0.958 50%, 0.967 53.3%, 0.974 56.7%, 0.979 60%, 0.983 63.3%, 0.987 66.7%, 0.99 70%, 0.993 80%, 0.997 90%, 1)";
+/** The least a keyboard leaves of the page: a header and a one-line composer (a landscape iPhone leaves about 125). */
+const MIN_LEFT_PX = 120;
 /** Before iOS 17.2 (no linear()): the nearest curve. */
 const KEYBOARD_FALLBACK = "cubic-bezier(0.17, 0.84, 0.3, 1)";
 
@@ -190,6 +192,9 @@ function followAppKeyboard(root: HTMLElement) {
         const detail = (e as CustomEvent<{ height?: number; duration?: number; start?: number }>).detail ?? {};
         const height = Math.max(0, Number(detail.height) || 0);
         const target = Math.max(0, height - (parseFloat(getComputedStyle(probe).paddingBottom) || 0));
+        // No keyboard leaves less than a header and a composer: a report that would is not a keyboard on this
+        // screen (closing the photo picker, iOS announced one as tall as the screen) and laying it out blanked the page.
+        if (root.clientHeight - target < MIN_LEFT_PX) return;
         if (detail.duration === undefined) return layout(target);
         const ending = running?.ends ?? reserved;
         if (target === ending) return;
