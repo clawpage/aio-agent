@@ -106,3 +106,69 @@ test("on a computer a trackpad pinch (ctrl+wheel) zooms and a double click fits 
   await image.dblclick();
   expect(await zoom(page)).toBeCloseTo(2.5, 1);
 });
+
+test("a photo opens on black with quiet bars; a tap hides them, pulling down fades the black and closes it", async ({ page }, info) => {
+  const image = await open(page);
+  const dialog = page.getByRole("dialog");
+  const overlay = page.locator(".file-preview-photo-overlay");
+  const backdrop = () => overlay.evaluate((el) => getComputedStyle(el).backgroundColor);
+  const opaque = await backdrop();
+  expect(opaque).toMatch(/^rgb\(0, 0, 0\)$|^rgba?\(0, 0, 0(, 1)?\)$|color\(srgb 0 0 0\)$/);
+  // The bars sit over the photo, so it takes the whole screen.
+  const [shot, screen] = [(await image.boundingBox())!, page.viewportSize()!];
+  expect(Math.max(shot.width / screen.width, shot.height / screen.height)).toBeGreaterThan(0.95);
+  await expect(page.getByTestId("file-preview-download")).toBeVisible();
+  await page.screenshot({ path: info.outputPath("photo.png") });
+
+  const box = (await image.boundingBox())!;
+  const cx = box.x + box.width / 2, cy = box.y + box.height / 2;
+  // One tap hides the bars, another brings them back (after the double-tap window).
+  await touch(page, "pointerdown", [[1, cx, cy]]);
+  await touch(page, "pointerup", [[1, cx, cy]]);
+  await expect(dialog).toHaveAttribute("data-bars", "hidden");
+  await expect(page.locator(".file-preview-head")).toHaveCSS("opacity", "0");
+  await touch(page, "pointerdown", [[2, cx, cy]]);
+  await touch(page, "pointerup", [[2, cx, cy]]);
+  await expect(dialog).not.toHaveAttribute("data-bars", "hidden");
+
+  // A short pull follows the finger and thins the black, then springs back.
+  await touch(page, "pointerdown", [[3, cx, cy]]);
+  await touch(page, "pointermove", [[3, cx, cy + 20]]);
+  await touch(page, "pointermove", [[3, cx, cy + 80]]);
+  expect((await image.boundingBox())!.y).toBeGreaterThan(box.y + 40);
+  await expect(dialog).toHaveAttribute("data-bars", "hidden");
+  expect(await backdrop()).not.toBe(opaque);
+  await page.screenshot({ path: info.outputPath("pulled.png") });
+  await page.waitForTimeout(400);
+  await touch(page, "pointerup", [[3, cx, cy + 80]]);
+  await expect.poll(async () => Math.round((await image.boundingBox())!.y)).toBe(Math.round(box.y));
+  expect(await backdrop()).toBe(opaque);
+  await expect(page.getByTestId("file-preview-image")).toBeVisible();
+
+  // A sideways move is not a pull.
+  await touch(page, "pointerdown", [[4, cx, cy]]);
+  await touch(page, "pointermove", [[4, cx + 200, cy + 30]]);
+  await touch(page, "pointerup", [[4, cx + 200, cy + 30]]);
+  await expect(page.getByTestId("file-preview-image")).toBeVisible();
+
+  // Pulled far enough, letting go closes it.
+  await touch(page, "pointerdown", [[5, cx, cy]]);
+  await touch(page, "pointermove", [[5, cx, cy + 30]]);
+  await touch(page, "pointermove", [[5, cx, cy + 200]]);
+  await touch(page, "pointerup", [[5, cx, cy + 200]]);
+  await expect(page.getByTestId("file-preview-image")).toHaveCount(0);
+  await expect(page.locator(".bubble img.inline-media")).toBeVisible();
+});
+
+test("zoomed in, a finger moves the photo instead of pulling it away", async ({ page }) => {
+  const image = await open(page);
+  const box = (await image.boundingBox())!;
+  const cx = box.x + box.width / 2, cy = box.y + box.height / 2;
+  for (const _ of [0, 1]) { await touch(page, "pointerdown", [[1, cx, cy]]); await touch(page, "pointerup", [[1, cx, cy]]); }
+  expect(await zoom(page)).toBeCloseTo(2.5, 1);
+  await touch(page, "pointerdown", [[2, cx, cy]]);
+  await touch(page, "pointermove", [[2, cx, cy + 300]]);
+  await touch(page, "pointerup", [[2, cx, cy + 300]]);
+  await expect(page.getByTestId("file-preview-image")).toBeVisible();
+  expect(await zoom(page)).toBeCloseTo(2.5, 1);
+});

@@ -2434,6 +2434,65 @@ button .loading-mark { color: inherit; }
   .file-preview-page .file-preview-body > .zoomable-image { border-radius: 0; }
 }
 
+/* A photo fills the screen on black and the bars sit quietly over it (a tap
+   hides them). Pulled down, the black thins with the distance (--pull, 0–1) so
+   the page it came from shows through; it opens and closes with a fade, and a
+   pull closes it from where the finger let go. */
+.file-preview-overlay.file-preview-photo-overlay {
+  padding: 0;
+  align-items: stretch;
+  background: color-mix(in srgb, var(--media-bg) calc((1 - var(--pull, 0)) * 100%), transparent);
+}
+.file-preview-photo-overlay > .file-preview.file-preview-photo {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  max-height: none;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  background: none;
+  color: var(--media-text);
+}
+.file-preview-photo .file-preview-body { position: absolute; inset: 0; padding: 0; background: none; overflow: hidden; }
+.file-preview-photo .file-preview-body > .zoomable-image { border-radius: 0; }
+.file-preview-photo:focus { outline: none; }
+.file-preview-photo .zoomable-image:is(.pulled, .settling) { transform-origin: 50% 50%; }
+.file-preview-photo .zoomable-image.settling { transition: transform var(--dur-fast) var(--ease); }
+.file-preview-photo :is(.file-preview-head, .file-preview-foot) {
+  position: absolute;
+  left: 0;
+  right: 0;
+  z-index: 1;
+  border: 0;
+  transition: opacity var(--dur-fast) ease;
+}
+.file-preview-photo .file-preview-head {
+  top: 0;
+  min-height: 0;
+  padding: calc(var(--safe-top) + 4px) calc(var(--safe-right) + 12px) 28px calc(var(--safe-left) + 4px);
+  background: linear-gradient(var(--media-chip), transparent);
+}
+.file-preview-photo .file-preview-foot {
+  bottom: 0;
+  padding: 28px calc(var(--safe-right) + 12px) calc(var(--safe-bottom) + 12px) calc(var(--safe-left) + 12px);
+  background: linear-gradient(transparent, var(--media-chip));
+}
+.file-preview-photo .file-preview-name { font-size: 14px; font-weight: 500; color: var(--media-text-dim); text-align: center; }
+.file-preview-photo .file-preview-head > :is(.muted, .spacer) { display: none; }
+.file-preview-photo .file-preview-head button.ghost { color: var(--on-media); background: none; border-color: transparent; }
+.file-preview-photo .file-preview-foot :is(a.primary, button.ghost) {
+  color: var(--on-media);
+  background: var(--media-control);
+  border-color: var(--media-control-border);
+  font-weight: 500;
+}
+.file-preview-photo[data-bars="hidden"] :is(.file-preview-head, .file-preview-foot) { opacity: 0; pointer-events: none; }
+.file-preview-overlay.file-preview-photo-overlay[data-popup-motion] > .file-preview { animation: none; }
+.file-preview-overlay.file-preview-photo-overlay[data-popup-motion="enter"] { animation: popup-fade-in var(--dur-fast) ease-out; }
+.file-preview-overlay.file-preview-photo-overlay[data-popup-motion="exit"] { animation: popup-fade-out calc(var(--popup-exit-ms) * 1ms) ease-in forwards; }
+
 /* ------------------------------------------------------- conversation file cards */
 
 /* Cards for workspace files the agent produced or the user attached. */

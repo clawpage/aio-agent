@@ -3,6 +3,11 @@ import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, ty
 const MAX_SCALE = 6;
 const TAP_ZOOM = 2.5;
 const DOUBLE_TAP_MS = 300;
+/** Pulled this far down (or flicked), letting go closes the picture. */
+const DISMISS_PX = 120;
+const DISMISS_SPEED = 0.6;
+/** How far down the backdrop is fully gone (progress 1). */
+const PULL_RANGE_PX = 360;
 
 type View = { scale: number; x: number; y: number };
 const FIT: View = { scale: 1, x: 0, y: 0 };
@@ -11,21 +16,33 @@ const FIT: View = { scale: 1, x: 0, y: 0 };
  * A picture in the preview that zooms like a photo: pinch (two fingers, or a
  * trackpad pinch / ctrl+wheel) around the fingers, drag to move once zoomed,
  * double-tap or double-click to zoom in there or back to the whole picture.
- * The page itself never zooms (touch-action: none on the picture only), and a
- * picture at its fitted size passes single-finger touches through untouched.
+ * The page itself never zooms (touch-action: none on the picture only). At its
+ * fitted size a finger pulling down drags the picture (`onPull` gets 0–1 for the
+ * backdrop) and letting go far or fast enough calls `onDismiss`; a single tap
+ * that is not the start of a double tap calls `onTap`.
  */
-export function ZoomableImage({ src, alt, testId, onError }: { src: string; alt: string; testId?: string; onError?: (event: SyntheticEvent<HTMLImageElement>) => void }) {
+export function ZoomableImage({ src, alt, testId, onError, onTap, onPull, onDismiss }: {
+  src: string; alt: string; testId?: string; onError?: (event: SyntheticEvent<HTMLImageElement>) => void;
+  onTap?: () => void; onPull?: (progress: number) => void; onDismiss?: () => void;
+}) {
   const img = useRef<HTMLImageElement>(null);
   const [view, setView] = useState<View>(FIT);
   const live = useRef(view);
   live.current = view;
   const pointers = useRef(new Map<number, { x: number; y: number }>());
   const pinch = useRef<{ distance: number; start: View; mid: { x: number; y: number } } | null>(null);
-  const lastTap = useRef(0);
+  const lastTap = useRef(-Infinity);
   /** A lone finger that has not moved yet: lifting it is a tap. Lifting the fingers of a pinch is not. */
   const tap = useRef<{ id: number; x: number; y: number } | null>(null);
+  const tapTimer = useRef<number | undefined>(undefined);
+  /** A finger on the fitted picture that may become a pull down: `locked` is decided once it has moved (mostly down or not). */
+  const pull = useRef<{ id: number; x: number; y: number; at: number; locked: boolean | null } | null>(null);
+  const [drag, setDrag] = useState<{ x: number; y: number } | null>(null);
+  const [settling, setSettling] = useState(false);
 
-  useEffect(() => { setView(FIT); }, [src]);
+  useEffect(() => { setView(FIT); setDrag(null); }, [src]);
+  useEffect(() => () => clearTimeout(tapTimer.current), []);
+  const endPull = () => { pull.current = null; setSettling(true); setDrag(null); onPull?.(0); };
 
   /** Scale to `next` keeping the picture point under (cx, cy) in place; panning stays inside the picture. */
   const zoomAt = (from: View, next: number, cx: number, cy: number, dx = 0, dy = 0): View => {
@@ -64,6 +81,11 @@ export function ZoomableImage({ src, alt, testId, onError }: { src: string; alt:
     // Moves keep coming once the finger leaves the picture; capture can refuse a pointer it does not know.
     try { event.currentTarget.setPointerCapture(event.pointerId); } catch { /* still tracked by id */ }
     tap.current = pointers.current.size === 1 ? { id: event.pointerId, x: event.clientX, y: event.clientY } : null;
+    if (onDismiss && event.pointerType !== "mouse" && pointers.current.size === 1 && live.current.scale <= 1) {
+      pull.current = { id: event.pointerId, x: event.clientX, y: event.clientY, at: event.timeStamp, locked: null };
+      setSettling(false);
+    } else if (pull.current?.locked) endPull();
+    else pull.current = null;
     if (pointers.current.size === 2) {
       const [a, b] = [...pointers.current.values()];
       pinch.current = { distance: Math.hypot(a.x - b.x, a.y - b.y) || 1, start: live.current, mid: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 } };
@@ -74,6 +96,15 @@ export function ZoomableImage({ src, alt, testId, onError }: { src: string; alt:
     if (!before) return;
     pointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
     if (tap.current && Math.hypot(event.clientX - tap.current.x, event.clientY - tap.current.y) > 10) tap.current = null;
+    const start = pull.current;
+    if (start?.id === event.pointerId) {
+      const dx = event.clientX - start.x, dy = event.clientY - start.y;
+      if (start.locked === null && Math.hypot(dx, dy) > 10) start.locked = dy > Math.abs(dx);
+      if (!start.locked) return;
+      setDrag({ x: dx, y: Math.max(0, dy) });
+      onPull?.(Math.min(1, Math.max(0, dy) / PULL_RANGE_PX));
+      return;
+    }
     if (pinch.current && pointers.current.size >= 2) {
       const [a, b] = [...pointers.current.values()];
       const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
@@ -88,20 +119,39 @@ export function ZoomableImage({ src, alt, testId, onError }: { src: string; alt:
     if (pointers.current.size < 2) pinch.current = null;
     const tapped = tap.current?.id === event.pointerId;
     tap.current = null;
+    const start = pull.current;
+    if (start?.id === event.pointerId) {
+      const dy = event.clientY - start.y;
+      if (start.locked && event.type === "pointerup" && (dy > DISMISS_PX || (dy > 40 && dy / Math.max(1, event.timeStamp - start.at) > DISMISS_SPEED))) {
+        pull.current = null;
+        onDismiss?.(); // The picture leaves from where it was let go.
+        return;
+      }
+      if (start.locked) { endPull(); return; }
+      pull.current = null;
+    }
     if (event.type !== "pointerup" || event.pointerType === "mouse" || !tapped) return;
     // A second quick tap: zoom in there, or back to the whole picture.
     const now = event.timeStamp;
     if (now - lastTap.current < DOUBLE_TAP_MS) {
-      lastTap.current = 0;
+      lastTap.current = -Infinity;
+      clearTimeout(tapTimer.current);
       toggle(event.clientX, event.clientY);
-    } else lastTap.current = now;
+    } else {
+      lastTap.current = now;
+      if (onTap) tapTimer.current = window.setTimeout(onTap, DOUBLE_TAP_MS);
+    }
   };
   const toggle = (x: number, y: number) => setView((current) => current.scale > 1 ? FIT : zoomAt(current, TAP_ZOOM, x, y));
 
   const zoomed = view.scale > 1;
+  // Pulled down, the picture follows the finger and shrinks a little, about its centre.
+  const transform = zoomed ? `translate(${view.x}px, ${view.y}px) scale(${view.scale})`
+    : drag ? `translate(${drag.x}px, ${drag.y}px) scale(${Math.max(0.7, 1 - drag.y / 1200)})` : undefined;
   return <img ref={img} src={src} alt={alt} data-testid={testId} data-zoom={view.scale.toFixed(2)} onError={onError} draggable={false}
-    className={`zoomable-image${zoomed ? " zoomed" : ""}`}
-    style={{ transform: zoomed ? `translate(${view.x}px, ${view.y}px) scale(${view.scale})` : undefined }}
+    className={`zoomable-image${zoomed ? " zoomed" : ""}${drag ? " pulled" : ""}${settling ? " settling" : ""}`}
+    style={{ transform }}
+    onTransitionEnd={() => setSettling(false)}
     onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={up}
     onDoubleClick={(event) => toggle(event.clientX, event.clientY)} />;
 }

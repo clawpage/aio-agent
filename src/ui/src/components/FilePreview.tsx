@@ -59,6 +59,12 @@ export function FilePreview({ path: initialPath, onClose, onOpenLink, onOpenInBr
   const html = isHtmlPath(path);
   const kind = useMemo<WorkspaceFileKind>(() => workspaceFileKind(path), [path]);
   const name = baseName(path);
+  /** A picture opens like a photo: on black, the bars quiet over it, a tap hides them, pulling it down closes it. */
+  const photo = kind === "image";
+  const [bars, setBars] = useState(true);
+  /** How far the picture is pulled down (0–1): the backdrop fades by as much. */
+  const [pull, setPull] = useState(0);
+  const pointer = useRef("mouse");
   const [phase, setPhase] = useState<Phase>("loading");
   const [error, setError] = useState<string | null>(null);
   const [imageUrl, setImageUrl] = useState<string | null>(null);
@@ -74,6 +80,7 @@ export function FilePreview({ path: initialPath, onClose, onOpenLink, onOpenInBr
   const [browserNote, setBrowserNote] = useState<string | null>(null);
   const autoOpened = useRef<string | null>(null);
   const closeRef = useRef<HTMLButtonElement | null>(null);
+  const dialogRef = useRef<HTMLDivElement | null>(null);
   const closeLatest = useRef(onClose);
   closeLatest.current = onClose;
   /** On a phone the preview is a page with its own history entry, so the back gesture closes it. */
@@ -83,9 +90,10 @@ export function FilePreview({ path: initialPath, onClose, onOpenLink, onOpenInBr
     else onClose();
   }, [onClose]);
 
-  // Focus the close control so Escape/Enter work immediately after opening.
+  // Focus the close control so Escape/Enter work immediately after opening; a
+  // photo focuses itself instead, so no focus ring sits over the picture.
   useEffect(() => {
-    closeRef.current?.focus();
+    (photo ? dialogRef.current : closeRef.current)?.focus();
   }, []);
 
   useEffect(() => {
@@ -232,13 +240,16 @@ export function FilePreview({ path: initialPath, onClose, onOpenLink, onOpenInBr
 
   return createPortal(
     <PopupSurface
-      className="file-preview-overlay file-preview-page"
+      className={`file-preview-overlay file-preview-page${photo ? " file-preview-photo-overlay" : ""}`}
+      style={photo ? { "--pull": pull } as React.CSSProperties : undefined}
       role="presentation"
       onClick={(event) => {
         if (event.target === event.currentTarget) close();
       }}
     >
-      <div className={`file-preview ${markdown || html ? "file-preview-document" : ""}`} role="dialog" aria-modal="true" aria-label={t.files.preview.dialog(name)}>
+      <div className={`file-preview ${markdown || html ? "file-preview-document" : ""}${photo ? " file-preview-photo" : ""}`} role="dialog" aria-modal="true" aria-label={t.files.preview.dialog(name)}
+        ref={dialogRef} tabIndex={photo ? -1 : undefined}
+        data-bars={photo && (!bars || pull > 0) ? "hidden" : undefined}>
         <header className="file-preview-head">
           {history.length > 0 && <button className="ghost" aria-label={t.files.preview.back} onClick={() => { setPath(history.at(-1)!); setHistory(old => old.slice(0,-1)); }}>←</button>}
           <span className="file-preview-name" title={path}>
@@ -256,7 +267,13 @@ export function FilePreview({ path: initialPath, onClose, onOpenLink, onOpenInBr
           <button className="ghost" aria-pressed={!sourceView} onClick={() => { if (html && sourceView) retry(); else setSourceView(false); }}>{html ? t.files.preview.page : t.files.preview.read}</button>
           <button className="ghost" aria-pressed={sourceView} onClick={() => setSourceView(true)}>{html ? t.files.preview.source : t.files.preview.raw}</button>
         </div>}
-        <div className={`file-preview-body ${html && !sourceView && !textTruncated ? "file-preview-html-body" : ""}`}>
+        <div className={`file-preview-body ${html && !sourceView && !textTruncated ? "file-preview-html-body" : ""}`}
+          onPointerDown={(event) => { pointer.current = event.pointerType; }}
+          onClick={photo ? (event) => {
+            // Around the photo: a mouse click closes it, a tap shows or hides the bars.
+            if (event.target !== event.currentTarget) return;
+            if (pointer.current === "mouse") close(); else setBars((shown) => !shown);
+          } : undefined}>
           {phase === "loading" && (
             <p>
               <InlineLoading label={raster ? t.files.preview.converting : t.files.preview.loading} />
@@ -287,7 +304,8 @@ export function FilePreview({ path: initialPath, onClose, onOpenLink, onOpenInBr
           )}
 
           {phase === "ready" && kind === "image" && imageUrl && (
-            <ZoomableImage src={imageUrl} alt={name} testId="file-preview-image" onError={() => {
+            <ZoomableImage src={imageUrl} alt={name} testId="file-preview-image"
+              onTap={() => setBars((shown) => !shown)} onPull={setPull} onDismiss={close} onError={() => {
               setError(t.files.preview.imageDecodeFailed);
               setPhase("error");
             }} />

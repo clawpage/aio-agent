@@ -105,9 +105,8 @@ test("on a phone the preview is a full-screen page that the back gesture closes"
       // Its own history entry, at the same address.
       expect(await page.evaluate(() => typeof (history.state as { preview?: string } | null)?.preview)).toBe("string");
     } else {
-      // A wide screen keeps the centred window over the dimmed page.
-      expect(box.width).toBeLessThan(viewport.width - 100);
-      expect(box.y).toBeGreaterThan(0);
+      // A photo takes a wide screen too, on black (other files keep the centred window).
+      expect(box).toEqual({ x: 0, y: 0, width: viewport.width, height: viewport.height });
     }
     await page.getByTestId("file-preview-image").evaluate((el) => (el as HTMLImageElement).decode());
     await page.screenshot({ path: `${SHOTS}/${info.project.name}-${viewport.width}x${viewport.height}.png`, animations: "disabled" });
