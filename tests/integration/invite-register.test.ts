@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { startHarness, login, type TestHarness } from "../helpers/harness.js";
 import { createMember } from "../../src/control/auth/owner.js";
+import { OPEN_REGISTRATION_LIMIT } from "../../src/control/auth/invites.js";
 
 let h: TestHarness;
 let owner: Record<string, string>;
@@ -130,7 +131,7 @@ it("registers without an invite while fewer than 30 accounts exist", async () =>
 
 it("counts all existing accounts and requires a valid invite at 30", async () => {
   const count = () => (h.ctx.db.prepare("SELECT COUNT(*) AS n FROM owners").get() as {n: number}).n;
-  while (count() < 30) {
+  while (count() < OPEN_REGISTRATION_LIMIT) {
     const n = count();
     h.ctx.db.prepare("INSERT INTO owners (id,username,role,password_hash,password_salt,password_params,created_at) SELECT ?,?, 'member', password_hash,password_salt,password_params,created_at FROM owners WHERE role='owner'").run(`seed-${n}`, `seed-${n}`);
   }
@@ -138,7 +139,7 @@ it("counts all existing accounts and requires a valid invite at 30", async () =>
   const refused = await register({ email: "needs-invite@example.com", password: "open-password-123" });
   expect(await refused.json()).toMatchObject({ error: "invite_required" });
   expect(refused.status).toBe(400);
-  expect(count()).toBe(30);
+  expect(count()).toBe(OPEN_REGISTRATION_LIMIT);
   expect((await register({ email: "needs-invite@example.com", password: "open-password-123", inviteCode: await issue() })).status).toBe(200);
-  expect(count()).toBe(31);
+  expect(count()).toBe(OPEN_REGISTRATION_LIMIT + 1);
 });

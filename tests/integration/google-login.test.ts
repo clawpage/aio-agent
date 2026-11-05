@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, beforeEach, expect, it, vi } from "vitest";
 import { OAuth2Client, LoginTicket } from "google-auth-library";
 import { startHarness, type TestHarness } from "../helpers/harness.js";
-import { createInvite, registerWithInvite } from "../../src/control/auth/invites.js";
+import { createInvite, OPEN_REGISTRATION_LIMIT, registerWithInvite } from "../../src/control/auth/invites.js";
 import { GOOGLE_TTL } from "../../src/control/auth/google.js";
 
 let h: TestHarness;
@@ -179,7 +179,7 @@ it("registers a verified Google identity without an invite while places remain",
 
 it("atomically gives one remaining place to only one of a password and Google registration", async () => {
   const count = () => (h.ctx.db.prepare("SELECT COUNT(*) AS n FROM owners").get() as {n: number}).n;
-  while (count() < 19) {
+  while (count() < OPEN_REGISTRATION_LIMIT - 1) {
     const n = count();
     h.ctx.db.prepare("INSERT INTO owners (id,username,role,password_hash,password_salt,password_params,created_at) SELECT ?,?, 'member', password_hash,password_salt,password_params,created_at FROM owners WHERE role='owner'").run(`seed-${n}`, `seed-${n}`);
   }
@@ -191,9 +191,9 @@ it("atomically gives one remaining place to only one of a password and Google re
   expect(results.map(r => r.status).sort()).toEqual([200, 400]);
   const refused = results.find(r => r.status === 400)!;
   expect(await refused.json()).toMatchObject({ error: "invite_required" });
-  expect(count()).toBe(20);
+  expect(count()).toBe(OPEN_REGISTRATION_LIMIT);
   const next = await begin(); await callback(next);
   expect((await activate(next.client, "")).status).toBe(400);
   expect((await activate(next.client, createInvite(h.ctx.db).code)).status).toBe(200);
-  expect(count()).toBe(21);
+  expect(count()).toBe(OPEN_REGISTRATION_LIMIT + 1);
 });
