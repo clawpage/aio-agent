@@ -60,14 +60,31 @@ npm run typecheck && npm test
 npm run build                      # host 模式需要；bin/serve 会拒绝启动早于 src 的 dist
 node deploy/aio.mjs build          # compose 模式：重建三个镜像（只改了某层时可只建那层）
 AIO_ENV_FILE=var/deploy/aio.env node deploy/aio.mjs check
-AIO_ENV_FILE=var/deploy/aio.env node deploy/aio.mjs busy --wait 1200   # 等到所有账号都没有派单、排队或执行中的任务（最多 20 分钟）
-/Users/mengxiao/workspace/tools/start.sh restart personal-agent   # 自动先跑上面的 busy：有任务在跑就拒绝重启；确需打断用 FORCE=1
+AIO_ENV_FILE=var/deploy/aio.env node deploy/aio.mjs busy --wait 1200   # 等到没有重启会打断的工作（最多 20 分钟），见下方「控制面重启」
+/Users/mengxiao/workspace/tools/start.sh restart personal-agent   # 自动先跑上面的 busy：有会被打断的工作就拒绝重启；确需打断用 FORCE=1
 # 只改了界面（含移动端，App 加载的就是这个界面）时不用等任务结束：只换 ui 容器，控制面不重启
 AIO_ENV_FILE=var/deploy/aio.env node deploy/aio.mjs build ui && AIO_ENV_FILE=var/deploy/aio.env node deploy/aio.mjs refresh ui
 # npm run smoke 默认只打本地；当前部署要对公网冒烟必须显式给出两个 origin：
 PA_PRIMARY_ORIGIN=https://agent.clawpage.ai \
 PA_COMPANION_ORIGIN=https://agent-workspace.clawpage.ai npm run smoke
 ```
+
+### 控制面重启（不必等空闲）
+
+沙箱里的 `codex app-server` 跑在常驻桥接（`src/control/codex/appServerBridge.ts`）下：控制面经 `docker exec -i`
+只连到桥接的 unix socket（沙箱内 `/tmp/aio-codex-bridge.sock`，Codex 的 stderr 在 `/tmp/aio-codex-bridge.sock.log`），
+重启控制面只断开这条连接，Codex 和它的轮次照常跑。新控制面启动时把执行中的 Codex 轮次重新接上（不再标成 `unknown`），
+桥接把上一个控制面没确认的通知与未答复的请求重放一遍；桥接没了（沙箱重启过）或日志溢出丢了消息时，才照旧标 `unknown`、由任务续跑。
+重启窗口里沙箱调网关（模型、工具）连不上：节点上的转发（`src/sandbox/relay.ts`）对未送达的请求每 0.5 秒重试、最多 60 秒；
+控制面在成员账号都加载好之后（最多 45 秒）才打开网关，避免请求先撞上还不认识的账号。
+
+因此 `aio.mjs busy` 只拦重启真会打断的：排队中的轮次、Claude Code 上或还没拿到 Codex 轮次 ID 的轮次、正在停止或追加补充的任务；
+派单中、等待中的任务重启后自己接着来，也不拦。轮次是否在桥接下跑，看它的 `turn.codex_started` 事件里 `bridged: true`。
+
+- **首次上线**：已在跑的旧 app-server 不在桥接下，第一次部署带桥接的控制面仍要等空闲（`busy` 会照旧拦住）。之后每个沙箱的 Codex 都在桥接下启动。
+- **换 Codex 版本或启动参数**：桥接记着启动时的参数指纹；新控制面接上指纹不同的旧 app-server 时继续用它跑完手头的轮次，等没有轮次时自动换新的。
+- **改了 `src/sandbox/`（sandboxd，含上面的转发）**：重启 sandboxd 会断开 `docker exec` 连接，但桥接下的 Codex 不受影响，控制面重新接上即可。
+- **关掉**：`PA_CODEX_BRIDGE=0` 回到每个控制面直连自己的 app-server（重启即打断执行中的轮次）。
 
 ### 沙箱 Codex CLI 版本
 

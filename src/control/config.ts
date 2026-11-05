@@ -147,6 +147,8 @@ export function loadConfig(): {
     readyTimeoutMs: number;
     autostart: boolean;
     fileOpTimeoutMs: number;
+    /** Run `codex app-server` under the bridge that outlives the control plane (appServerBridge.ts). On by default. */
+    codexBridge: boolean;
     /** Versioned Codex CLI installed into the persistent CODEX_HOME volume. */
     codexVersion: string;
     codexPrefix: string;
@@ -547,6 +549,7 @@ export function loadConfig(): {
       codexVersion: sandboxCodexVersion,
       codexPrefix: sandboxCodexPrefix,
       codexBin: sandboxCodexBin,
+      codexBridge: envStr("PA_CODEX_BRIDGE", "1") === "1",
       releaseWhenIdle: envStr("PA_SANDBOX_RELEASE_IDLE", "1") === "1",
       memberReleaseWhenIdle: envStr("PA_MEMBER_SANDBOX_RELEASE_IDLE", "1") === "1",
       residentMembers: parseList(envStr("PA_RESIDENT_MEMBERS", "")),

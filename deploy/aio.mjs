@@ -13,8 +13,8 @@
  *   node deploy/aio.mjs import-data <dir>    copy a control data directory into the data volume
  *   node deploy/aio.mjs export-data <dir>    copy the data volume out (backup, rollback, moving machines)
  *   node deploy/aio.mjs codex-login [status] log the control plane into ChatGPT (device code), or show the login
- *   node deploy/aio.mjs busy [--wait <s>]    exit 0 when no account has a task planning, waiting or running (safe to
- *                                            restart), else list them and exit 3; --wait keeps checking up to <s> seconds
+ *   node deploy/aio.mjs busy [--wait <s>]    exit 0 when nothing a restart would cut off is in flight on any account
+ *                                            (safe to restart), else list it and exit 3; --wait keeps checking up to <s> seconds
  *
  * Settings come from AIO_ENV_FILE (default deploy/aio.env; see deploy/aio.env.example).
  * AIO_LAYERS picks the layers this machine runs (default ui,control,sandbox): a
@@ -261,9 +261,12 @@ function exportData(dir) {
 }
 
 /**
- * Work in flight on every account, read inside the control container (its data
- * lives in the volume). A restart now would leave a running turn `unknown` and
- * drop queued ones, so deploys check this first.
+ * Work in flight on every account that a restart would cut off, read inside the
+ * control container (its data lives in the volume). A Codex turn running under the
+ * app-server bridge goes on through a restart (src/control/codex/appServerBridge.ts),
+ * and planning or waiting tasks resume by themselves, so neither holds a deploy;
+ * a queued turn, a turn on Claude Code or one still starting, and a task being
+ * stopped or given a supplement do.
  */
 const BUSY_SCRIPT = `
 import {DatabaseSync} from "node:sqlite"; import fs from "node:fs"; import path from "node:path";
@@ -274,8 +277,12 @@ if (fs.existsSync(users)) for (const d of fs.readdirSync(users)) { const f = pat
 const out = [];
 for (const [account, file] of files) {
   const db = new DatabaseSync(file, { readOnly: true });
-  for (const r of db.prepare("SELECT title, status FROM tasks WHERE status IN ('planning','waiting','queued','running','stopping','merging','steering')").all()) out.push({ account, title: r.title, status: r.status });
-  const turns = db.prepare("SELECT count(*) AS n FROM turns WHERE status IN ('queued','running')").get().n;
+  const goesOn = new Set(db.prepare("SELECT t.id FROM turns t JOIN conversations c ON c.id = t.conversation_id WHERE t.status = 'running' AND t.codex_turn_id IS NOT NULL AND COALESCE(c.model_provider, '') <> 'claude-code' AND EXISTS (SELECT 1 FROM events e WHERE e.turn_id = t.id AND e.type = 'turn.codex_started' AND e.payload LIKE '%\"bridged\":true%')").all().map((r) => r.id));
+  for (const r of db.prepare("SELECT title, status, turn_id FROM tasks WHERE status IN ('queued','running','stopping','merging','steering')").all()) {
+    if (r.status === "running" && goesOn.has(r.turn_id)) continue;
+    out.push({ account, title: r.title, status: r.status });
+  }
+  const turns = db.prepare("SELECT id FROM turns WHERE status IN ('queued','running')").all().filter((r) => !goesOn.has(r.id)).length;
   if (turns && !out.some((t) => t.account === account)) out.push({ account, title: "(对话轮次)", status: turns + " running" });
   db.close();
 }

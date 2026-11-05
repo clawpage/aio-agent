@@ -8,6 +8,8 @@ export interface JsonRpcMessage {
   params?: unknown;
   result?: unknown;
   error?: { code: number; message: string; data?: unknown };
+  /** Sequence number the app-server bridge puts on what Codex sends (appServerBridge.ts). */
+  aioSeq?: number;
 }
 
 export interface PendingRequest {
@@ -83,6 +85,8 @@ export class JsonRpcPeer extends EventEmitter<PeerEvents> {
   }
 
   label: string;
+  /** The bridge's sequence number of the message being handled now (null without a bridge). */
+  lastSeq: number | null = null;
 
   get alive(): boolean {
     return !this.#closed && this.#child.exitCode === null;
@@ -172,6 +176,7 @@ export class JsonRpcPeer extends EventEmitter<PeerEvents> {
   }
 
   #handleMessage(msg: JsonRpcMessage): void {
+    this.lastSeq = typeof msg.aioSeq === "number" ? msg.aioSeq : null;
     if (msg.method && msg.id !== undefined && msg.id !== null) {
       void this.#handleServerRequest(msg);
       return;

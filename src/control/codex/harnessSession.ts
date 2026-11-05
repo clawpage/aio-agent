@@ -39,6 +39,15 @@ export class HarnessSession implements CodexSessionLike {
   get lastError() {
     return this.#codex.lastError;
   }
+  get reattaches() {
+    return this.#codex.reattaches === true;
+  }
+  get reattached() {
+    return this.#codex.reattached === true;
+  }
+  get stale() {
+    return this.#codex.stale === true;
+  }
 
   onNotification(handler: (method: string, params: unknown) => void): void {
     this.#codex.onNotification(handler);

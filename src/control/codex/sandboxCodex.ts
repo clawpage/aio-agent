@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+import { setTimeout as delay } from "node:timers/promises";
 import { MEMBER_GPT_MODEL } from "../auth/policy.js";
 import { tabThreadConfig, type BrowserTask } from "../browser/tabs.js";
 import { decisionThreadServers } from "../decision.js";
@@ -44,6 +46,13 @@ export interface CodexModel {
 
 export type ServerRequestResolver = (result: unknown) => void;
 
+/** What the app-server bridge says first on every attachment (appServerBridge.ts). */
+interface BridgeHello {
+  key: string;
+  fresh: boolean;
+  gap: boolean;
+}
+
 /**
  * One long-lived `codex app-server` process inside the sandbox, driven over
  * `docker exec -i` stdio. The sandbox owns execution; the Mac only supplies
@@ -81,6 +90,9 @@ export class SandboxCodexSession {
   #retired: JsonRpcPeer | null = null;
   /** Dispatcher, title and maintainer runs in progress, from before their thread exists. */
   #auxRunning = 0;
+  #onHello: ((hello: BridgeHello) => void) | null = null;
+  #reattached = false;
+  #stale = false;
 
   constructor(
     cfg: Config,
@@ -112,6 +124,21 @@ export class SandboxCodexSession {
     return this.#lastError;
   }
 
+  /** Whether the app-server runs under the bridge, so a control-plane restart leaves its turns running. */
+  get reattaches(): boolean {
+    return this.#cfg.sandbox.codexBridge && typeof this.#container.attachCodexBridge === "function";
+  }
+
+  /** The last start joined an app-server already running, with nothing it sent lost: its turns go on. */
+  get reattached(): boolean {
+    return this.#reattached;
+  }
+
+  /** The app-server joined was started with other settings: start a new one once nothing runs on it. */
+  get stale(): boolean {
+    return this.#stale;
+  }
+
   onNotification(handler: (method: string, params: unknown) => void): void {
     this.#onNotification = handler;
   }
@@ -134,7 +161,7 @@ export class SandboxCodexSession {
   }
 
   async #doStart(): Promise<void> {
-    const child = this.#container.spawnCodexAppServer([
+    const extraConfig = [
       "-c",
       'approval_policy="never"',
       "-c",
@@ -143,40 +170,11 @@ export class SandboxCodexSession {
       // so the sandbox config.toml is never rewritten. With no bridge key these
       // arguments are absent and the ChatGPT command line is unchanged.
       ...(this.#bridge?.providerConfigArgs() ?? []),
-    ], this.#bridge?.providerEnv());
-    const peer = new JsonRpcPeer(child, "sandbox-codex");
-    peer.on("notification", (method, params) => this.#routeNotification(method, params));
-    peer.on("warning", (message) => this.#log.warn("sandbox codex warning", { message }));
-    peer.on("closed", (reason) => {
-      // Retired on purpose with nothing running on it (restartIdle): the next use starts a new one.
-      if (peer === this.#retired) return;
-      this.#log.warn("sandbox codex app-server closed", { reason });
-      if (this.#peer === peer) this.#peer = null;
-      for (const [, resolve] of this.#pendingRequests) resolve({ decision: "cancel" });
-      this.#pendingRequests.clear();
-      this.#onClosed?.(reason);
-    });
-
-    // Server-initiated requests: approvals/input are surfaced to the UI; token
-    // refresh is answered immediately from the host Codex.
-    peer.onAnyServerRequest((method, params, id) => {
-      if (method === "account/chatgptAuthTokens/refresh") {
-        if (this.#cfg.memberRuntime || !this.#cfg.hostCodex.enabled) return Promise.reject(new Error("ChatGPT credentials are unavailable in this runtime"));
-        return this.#refreshTokens(params as { previousAccountId?: string | null });
-      }
-      // A background title thread must never raise a UI approval: deny it here
-      // rather than letting it be attributed to the active user conversation.
-      // Tombstoned threads keep being denied so a late approval cannot leak either.
-      const auxThreadId = (params as { threadId?: unknown } | undefined)?.threadId;
-      if (typeof auxThreadId === "string" && this.#isAuxThread(auxThreadId)) {
-        return Promise.resolve(denyForAuxThread(method));
-      }
-      const key = String(id);
-      return new Promise((resolve) => {
-        this.#pendingRequests.set(key, resolve);
-        this.#onServerRequest?.(key, method, params);
-      });
-    });
+    ];
+    const secretEnv = this.#bridge?.providerEnv();
+    this.#reattached = false;
+    this.#stale = false;
+    const peer = this.reattaches ? await this.#attachBridge(extraConfig, secretEnv ?? {}) : this.#wire(new JsonRpcPeer(this.#container.spawnCodexAppServer(extraConfig, secretEnv), "sandbox-codex"));
 
     try {
       await peer.request(
@@ -226,6 +224,88 @@ export class SandboxCodexSession {
     this.#lastError = null;
     this.#peer = peer;
     this.#log.info("sandbox codex session ready", { account: this.#account.email, plan: this.#account.planType });
+  }
+
+  /** Route what this app-server sends; on a bridge, acknowledge each message once it is handled. */
+  #wire(peer: JsonRpcPeer): JsonRpcPeer {
+    const ack = () => { if (peer.lastSeq !== null) peer.notify("aio/bridge/ack", { seq: peer.lastSeq }); };
+    peer.on("notification", (method, params) => {
+      if (method === "aio/bridge/hello") { this.#onHello?.(params as BridgeHello); return; }
+      this.#routeNotification(method, params);
+      // Streamed text is acknowledged by the next whole event, which is written only after it.
+      if (!/delta$/i.test(method)) ack();
+    });
+    peer.on("warning", (message) => this.#log.warn("sandbox codex warning", { message }));
+    peer.on("closed", (reason) => {
+      // Retired on purpose with nothing running on it (restartIdle), or never started: the next use starts a new one.
+      if (peer === this.#retired || peer !== this.#peer) return;
+      this.#log.warn("sandbox codex app-server closed", { reason });
+      this.#peer = null;
+      for (const [, resolve] of this.#pendingRequests) resolve({ decision: "cancel" });
+      this.#pendingRequests.clear();
+      // Under the bridge only the connection may have broken (sandboxd restarted, say): Codex and its
+      // turns are joined again before they are given up; a new Codex in their place means they are lost.
+      if (this.reattaches) {
+        void this.start().then(() => { if (!this.#reattached) this.#onClosed?.(reason); }, () => this.#onClosed?.(reason));
+        return;
+      }
+      this.#onClosed?.(reason);
+    });
+
+    // Server-initiated requests: approvals/input are surfaced to the UI; token
+    // refresh is answered immediately from the host Codex.
+    peer.onAnyServerRequest((method, params, id) => {
+      ack();
+      if (method === "account/chatgptAuthTokens/refresh") {
+        if (this.#cfg.memberRuntime || !this.#cfg.hostCodex.enabled) return Promise.reject(new Error("ChatGPT credentials are unavailable in this runtime"));
+        return this.#refreshTokens(params as { previousAccountId?: string | null });
+      }
+      // A background title thread must never raise a UI approval: deny it here
+      // rather than letting it be attributed to the active user conversation.
+      // Tombstoned threads keep being denied so a late approval cannot leak either.
+      const auxThreadId = (params as { threadId?: unknown } | undefined)?.threadId;
+      if (typeof auxThreadId === "string" && this.#isAuxThread(auxThreadId)) {
+        return Promise.resolve(denyForAuxThread(method));
+      }
+      const key = String(id);
+      return new Promise((resolve) => {
+        this.#pendingRequests.set(key, resolve);
+        this.#onServerRequest?.(key, method, params);
+      });
+    });
+    return peer;
+  }
+
+  /**
+   * Join the app-server the bridge keeps in the sandbox, starting the bridge first when none
+   * serves. Everything it sent that this control plane did not acknowledge comes again after
+   * the hello; a hello with nothing lost from an initialized Codex means its turns carry on.
+   */
+  async #attachBridge(extraConfig: string[], secretEnv: Record<string, string>): Promise<JsonRpcPeer> {
+    const key = createHash("sha256").update(JSON.stringify([this.#container.codexAppServerArgv(extraConfig), secretEnv])).digest("hex").slice(0, 16);
+    let started = false;
+    for (let attempt = 0; attempt < 40; attempt++) {
+      const peer = this.#wire(new JsonRpcPeer(this.#container.attachCodexBridge(), "sandbox-codex"));
+      const hello = await new Promise<BridgeHello | null>((resolve) => {
+        const timer = setTimeout(() => resolve(null), 15_000);
+        this.#onHello = (h) => { clearTimeout(timer); resolve(h); };
+        peer.once("closed", () => { clearTimeout(timer); resolve(null); });
+        peer.notify("aio/bridge/attach", { after: 0 });
+      });
+      this.#onHello = null;
+      if (hello) {
+        this.#reattached = !hello.fresh && !hello.gap;
+        this.#stale = hello.key !== key;
+        if (!hello.fresh) this.#log.info("joined the running sandbox codex", { lost: hello.gap, stale: this.#stale });
+        return peer;
+      }
+      peer.close();
+      if (!started) {
+        await this.#container.startCodexBridge(extraConfig, secretEnv, key);
+        started = true;
+      } else await delay(250);
+    }
+    throw new Error("sandbox codex bridge did not start");
   }
 
   #isAuxThread(threadId: string): boolean {
@@ -721,7 +801,10 @@ export class SandboxCodexSession {
     if (this.#auxRunning || this.#threadSubscribers.size || this.#pendingRequests.size) return false;
     this.#retired = peer;
     this.#peer = null;
+    // Under the bridge, closing only detaches: the bridge is told to stop Codex.
+    if (this.reattaches) peer.notify("aio/bridge/retire");
     peer.close();
+    this.#stale = false;
     this.#log.info("sandbox codex restarted for a new tool policy");
     return true;
   }

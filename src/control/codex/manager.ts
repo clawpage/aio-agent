@@ -45,6 +45,12 @@ export interface CodexSessionLike {
   readonly ready: boolean;
   readonly account: SandboxAccount | null;
   readonly lastError: string | null;
+  /** The app-server outlives this control plane (appServerBridge.ts): turns running at a restart are picked up again. */
+  readonly reattaches?: boolean;
+  /** The last start joined the app-server still running those turns, with nothing it sent lost. */
+  readonly reattached?: boolean;
+  /** The app-server joined was started with other settings; it is replaced once nothing runs on it. */
+  readonly stale?: boolean;
   onNotification(handler: (method: string, params: unknown) => void): void;
   onServerRequest(handler: (id: string, method: string, params: unknown) => void): void;
   onClosed(handler: (reason: string) => void): void;
@@ -402,13 +408,14 @@ export class AgentManager {
 
   /** `cold`: the sandbox is known to be stopped, so nothing is asked of it yet. */
   async init(opts: { cold?: boolean } = {}): Promise<void> {
-    this.#reconcileInterrupted(Boolean(opts.cold));
+    const carryOn = this.#reconcileInterrupted(Boolean(opts.cold));
     this.#migrateLegacyDefaultModel();
     this.#backfillTurnModels();
     this.#archiveDuplicateBlankConversations();
     this.#codex.onNotification((method, params) => this.#handleNotification(method, params));
     this.#codex.onServerRequest((id, method, params) => this.#handleServerRequest(id, method, params));
     this.#codex.onClosed((reason) => this.#handleCodexClosed(reason));
+    if (carryOn.length) this.#carryOn(carryOn);
     // Resume queue processing if the previous process died mid-queue.
     this.#pump();
     // Prime the model catalog so a submit can re-validate a stored effort without
@@ -424,10 +431,17 @@ export class AgentManager {
    * now, or they would count as a running task's forever (a stopped sandbox has
    * no tab server left to tell).
    */
-  #reconcileInterrupted(cold: boolean): void {
-    const stale = this.#db
-      .prepare("SELECT id, conversation_id, status FROM turns WHERE status IN ('running','queued')")
-      .all() as unknown as { id: string; conversation_id: string; status: string }[];
+  #reconcileInterrupted(cold: boolean): TurnRow[] {
+    const all = this.#db
+      .prepare("SELECT * FROM turns WHERE status IN ('running','queued')")
+      .all() as unknown as TurnRow[];
+    // A Codex turn under the bridge may still be running in the sandbox: it is picked up, not written off.
+    const carryOn = cold || !this.#codex.reattaches ? [] : all.filter((turn) => {
+      if (turn.status !== "running" || !turn.codex_turn_id) return false;
+      const conversation = this.getConversation(turn.conversation_id);
+      return !!conversation?.codex_thread_id && conversation.model_provider !== CLAUDE_CODE_PROVIDER_ID;
+    });
+    const stale = all.filter((turn) => !carryOn.includes(turn));
     for (const turn of stale) {
       if (turn.status === "running") {
         // Outcome is genuinely unknown: the sandbox may have already performed
@@ -462,9 +476,52 @@ export class AgentManager {
       this.#db.prepare("UPDATE server_requests SET status = 'expired', resolved_at = ? WHERE id = ?").run(Date.now(), req.id);
       this.#appendEvent(req.conversation_id, null, "approval.resolved", { requestId: req.id, decision: "expired" });
     }
-    this.#db.prepare("UPDATE conversations SET status = 'idle' WHERE status = 'running'").run();
+    const going = carryOn.map((turn) => turn.conversation_id);
+    this.#db.prepare(`UPDATE conversations SET status = 'idle' WHERE status = 'running' AND id NOT IN (${going.map(() => "?").join(",")})`).run(...going);
     if (stale.length || pending.length) {
       this.#log.warn("reconciled interrupted work after restart", { turns: stale.length, approvals: pending.length });
+    }
+    return carryOn;
+  }
+
+  /**
+   * Turns that were running on the bridged app-server when the control plane restarted go on:
+   * their slots, browser holds and completion waiters are taken again before Codex is joined,
+   * so a completion it replays on joining is not missed. When the app-server did not survive,
+   * or lost some of what it sent, they end `unknown` as before (their tasks carry on in a new turn).
+   */
+  #carryOn(turns: TurnRow[]): void {
+    const generation = this.#codexGeneration;
+    const runs = turns.map((turn) => {
+      const conversation = this.getConversation(turn.conversation_id)!;
+      const ctx: ActiveTurn = { conversationId: turn.conversation_id, turnId: turn.id, codexTurnId: turn.codex_turn_id, threadId: conversation.codex_thread_id };
+      this.#activeTurns.set(turn.conversation_id, ctx);
+      return { turn, conversation, status: this.#waitForTurn(turn.codex_turn_id!, generation) };
+    });
+    const joined = (async () => {
+      await this.ensureSandbox();
+      await this.#codex.start();
+      return this.#codex.reattached === true;
+    })().catch((err) => {
+      this.#log.warn("could not join the running sandbox codex", { error: err instanceof Error ? err.message : String(err) });
+      return false;
+    });
+    void joined.then((ok) => {
+      this.#log.info(ok ? "picked up turns still running in the sandbox" : "turns running before the restart were lost", { turns: turns.length });
+      if (ok) return;
+      for (const { turn } of runs) {
+        const waiter = this.#completionWaiters.get(turn.codex_turn_id!);
+        if (!waiter) continue;
+        this.#completionWaiters.delete(turn.codex_turn_id!);
+        this.#completedTurns.set(turn.codex_turn_id!, { status: "unknown" });
+        this.#turnErrors.set(turn.codex_turn_id!, t().agent.turn.restartedWhileRunning);
+        waiter();
+      }
+    });
+    for (const { turn, conversation, status } of runs) {
+      let releaseBrowser: () => void;
+      try { releaseBrowser = this.#browser ? this.#browser.reserveTurn() : () => {}; } catch { releaseBrowser = () => {}; }
+      this.#track(turn, this.#settleTurn(turn, conversation.id, turn.codex_turn_id!, status), releaseBrowser);
     }
   }
 
@@ -1007,29 +1064,34 @@ export class AgentManager {
           .run(Date.now(), turn.conversation_id);
         continue;
       }
-      void this.#runTurn(turn, ctx)
-        .catch((err) => {
-          const message = err instanceof Error ? err.message : String(err);
-          this.#lastError = message;
-          if (err instanceof TurnOutcomeUnknownError) {
-            this.#markTurnUnknown(turn, message);
-          } else {
-            this.#failTurn(turn, message);
-          }
-        })
-        .finally(() => {
-          // The task's tabs are marked finished (kept for a follow-up, destroyed on
-          // demand) before its browser hold ends.
-          const finishing = this.#tabs
-            ? this.#tabs.finish(turn.conversation_id).catch((err) => this.#log.warn("tab finish failed", { error: String(err) }))
-            : Promise.resolve();
-          void finishing.finally(releaseBrowser);
-          this.#activeTurns.delete(turn.conversation_id);
-          this.#db.prepare("UPDATE conversations SET status = 'idle', updated_at = ? WHERE id = ?").run(Date.now(), turn.conversation_id);
-          this.#restartForTools();
-          this.#pump();
-        });
+      this.#track(turn, this.#runTurn(turn, ctx), releaseBrowser);
     }
+  }
+
+  /** A turn's run to its end: its outcome recorded, then its tabs, browser hold and slot let go. */
+  #track(turn: TurnRow, run: Promise<void>, releaseBrowser: () => void): void {
+    void run
+      .catch((err) => {
+        const message = err instanceof Error ? err.message : String(err);
+        this.#lastError = message;
+        if (err instanceof TurnOutcomeUnknownError) {
+          this.#markTurnUnknown(turn, message);
+        } else {
+          this.#failTurn(turn, message);
+        }
+      })
+      .finally(() => {
+        // The task's tabs are marked finished (kept for a follow-up, destroyed on
+        // demand) before its browser hold ends.
+        const finishing = this.#tabs
+          ? this.#tabs.finish(turn.conversation_id).catch((err) => this.#log.warn("tab finish failed", { error: String(err) }))
+          : Promise.resolve();
+        void finishing.finally(releaseBrowser);
+        this.#activeTurns.delete(turn.conversation_id);
+        this.#db.prepare("UPDATE conversations SET status = 'idle', updated_at = ? WHERE id = ?").run(Date.now(), turn.conversation_id);
+        this.#restartForTools();
+        this.#pump();
+      });
   }
 
   async #runTurn(turn: TurnRow, ctx: ActiveTurn): Promise<void> {
@@ -1197,7 +1259,8 @@ export class AgentManager {
     }
     ctx.codexTurnId = codexTurnId;
     this.#db.prepare("UPDATE turns SET codex_turn_id = ? WHERE id = ?").run(codexTurnId, turn.id);
-    this.#appendEvent(conversation.id, turn.id, "turn.codex_started", { turnId: turn.id, codexTurnId });
+    // `bridged`: a restart of the control plane would not cut this turn off (deploy/aio.mjs busy reads it).
+    this.#appendEvent(conversation.id, turn.id, "turn.codex_started", { turnId: turn.id, codexTurnId, bridged: this.#codex.reattaches === true });
 
     // A stop request that arrived while we were still starting has to be honoured
     // now that a Codex turn id exists.
@@ -1213,7 +1276,12 @@ export class AgentManager {
       }
     }
 
-    const status = await this.#waitForTurn(codexTurnId, generation);
+    await this.#settleTurn(turn, conversation.id, codexTurnId, this.#waitForTurn(codexTurnId, generation));
+  }
+
+  /** Record how a started Codex turn ended, once `outcome` says. */
+  async #settleTurn(turn: TurnRow, conversationId: string, codexTurnId: string, outcome: Promise<string>): Promise<void> {
+    const status = await outcome;
     const reason = this.#turnErrors.get(codexTurnId);
     this.#turnErrors.delete(codexTurnId);
     clearTimeout(this.#stopTimers.get(codexTurnId));
@@ -1221,16 +1289,16 @@ export class AgentManager {
     this.#flushDeltas();
     if (status === "completed") {
       this.#db.prepare("UPDATE turns SET status = 'completed', completed_at = ? WHERE id = ?").run(Date.now(), turn.id);
-      this.#appendEvent(conversation.id, turn.id, "turn.finished", { turnId: turn.id, status: "completed" });
+      this.#appendEvent(conversationId, turn.id, "turn.finished", { turnId: turn.id, status: "completed" });
     } else if (status === "interrupted") {
       this.#db.prepare("UPDATE turns SET status = 'interrupted', completed_at = ? WHERE id = ?").run(Date.now(), turn.id);
-      this.#appendEvent(conversation.id, turn.id, "turn.finished", { turnId: turn.id, status: "interrupted" });
+      this.#appendEvent(conversationId, turn.id, "turn.finished", { turnId: turn.id, status: "interrupted" });
     } else if (status === "unknown") {
       const cause = reason ?? t().agent.turn.connectionLost;
       this.#db
         .prepare("UPDATE turns SET status = 'unknown', error = ?, completed_at = ? WHERE id = ?")
         .run(t().agent.turn.outcomeUnknown(cause), Date.now(), turn.id);
-      this.#appendEvent(conversation.id, turn.id, "turn.finished", {
+      this.#appendEvent(conversationId, turn.id, "turn.finished", {
         turnId: turn.id,
         status: "unknown",
         message: t().agent.turn.outcomeUnknownNotice(cause),
@@ -1252,7 +1320,7 @@ export class AgentManager {
 
   /** Restart Codex for changed tools when no turn but `starting` (about to begin) runs on it. */
   #restartForTools(starting?: string): void {
-    if (!this.#toolsChanged || this.#compacting.size) return;
+    if (!(this.#toolsChanged || this.#codex.stale) || this.#compacting.size) return;
     if ([...this.#activeTurns.keys()].some((id) => id !== starting)) return;
     if (this.#codex.restartIdle?.() !== false) this.#toolsChanged = false;
   }

@@ -594,7 +594,6 @@ async function main(): Promise<void> {
     }});
   browserGateway.provision(ctx.cfg);
   const modelGateway=new MemberModelGateway(ctx.cfg,ctx.log,ctx.share,decision,kb,schedule,ctx.hostTokens,image,browserGateway,ha,printer,macNative,tts,taskKb,ios);
-  await modelGateway.start();
   // Phone notifications: one key pair and one subscription store for every account.
   ctx.push=new PushService({db:ctx.db,log:ctx.log,keyFile:path.join(ctx.cfg.dataDir,"vapid.json"),subject:`https://${ctx.cfg.primaryHost}`,apns:loadApns(ctx.cfg.apns)});
   const ownerNotifications=startTaskNotifications(ctx,ctx.push);
@@ -612,9 +611,14 @@ async function main(): Promise<void> {
   });
   ctx.log.info("http server listening", { bind: ctx.cfg.bind, port: ctx.cfg.port });
 
-  for(const user of ctx.db.prepare("SELECT id FROM owners WHERE role='member'").all() as {id:string}[]) {
-    void users.resolve(user.id).catch(()=>ctx.log.error("member runtime unavailable",{userId:user.id}));
-  }
+  const members=(ctx.db.prepare("SELECT id FROM owners WHERE role='member'").all() as {id:string}[]).map(user=>
+    users.resolve(user.id).catch(()=>ctx.log.error("member runtime unavailable",{userId:user.id})));
+  // The gateway opens once the accounts are loaded (at most 45 s): a turn that went on through a
+  // restart would otherwise meet a gateway that does not know its account yet. Until then the
+  // node's relay waits for it (src/sandbox/relay.ts).
+  void Promise.race([Promise.allSettled(members),new Promise(resolve=>setTimeout(resolve,45_000).unref())])
+    .then(()=>modelGateway.start())
+    .catch(err=>ctx.log.error("member gateway failed to start",{error:err instanceof Error?err.message:String(err)}));
   users.prepareSpare();
   const recovery = startRuntimeRecovery(ctx);
   void recovery.tick();

@@ -54,6 +54,7 @@ import {
   PHOTO_TOOL_DIR,
   refreshWorkspaceAgents,
 } from "./seed.js";
+import { APP_SERVER_BRIDGE_JS, appServerBridgePaths } from "../codex/appServerBridge.js";
 import { CLAWPAGE_SDK_JS } from "./clawpageSdk.js";
 import { CLAWPAGE_STYLE_CSS } from "./clawpageStyle.js";
 
@@ -562,12 +563,31 @@ finally:
    * semantics; `secretEnv` never changes them.
    */
   spawnCodexAppServer(extraConfig: string[] = [], secretEnv: Record<string, string> = {}): ChildProcess {
+    return this.spawnInSandbox({ argv: this.codexAppServerArgv(extraConfig), env: secretEnv });
+  }
+
+  codexAppServerArgv(extraConfig: string[] = []): string[] {
     const s = this.#cfg.sandbox;
-    return this.spawnInSandbox({
-      // The agent's clock ("today", `date`) is the deployment's zone, not the image's TZ.
-      argv: ["env", `CODEX_HOME=${s.containerCodexHome}`, `TZ=${this.#cfg.browser.timezone}`, s.codexBin, "app-server", "--listen", "stdio://", ...extraConfig, ...CODEX_ISOLATION_OVERRIDES],
-      env: secretEnv,
-    });
+    // The agent's clock ("today", `date`) is the deployment's zone, not the image's TZ.
+    return ["env", `CODEX_HOME=${s.containerCodexHome}`, `TZ=${this.#cfg.browser.timezone}`, s.codexBin, "app-server", "--listen", "stdio://", ...extraConfig, ...CODEX_ISOLATION_OVERRIDES];
+  }
+
+  /**
+   * Start the app-server under the bridge that outlives this control plane (appServerBridge.ts),
+   * detached; `key` names how it was started. A bridge already serving is left as it is.
+   */
+  async startCodexBridge(extraConfig: string[], secretEnv: Record<string, string>, key: string): Promise<void> {
+    const bridge = appServerBridgePaths(this.#cfg.sandbox.containerCodexHome);
+    await this.execInSandbox(["mkdir", "-p", path.posix.dirname(bridge.script)], { timeoutMs: 30_000 });
+    await this.writeFileInSandbox(bridge.script, APP_SERVER_BRIDGE_JS);
+    const res = await this.execDetached(["node", bridge.script, "serve", bridge.socket, key, "--", ...this.codexAppServerArgv(extraConfig)], { env: secretEnv });
+    if (res.code !== 0) throw new Error(`failed to start the codex bridge: ${res.stderr.trim()}`);
+  }
+
+  /** Join the bridge's app-server over stdio; exits with code 3 at once when no bridge serves. */
+  attachCodexBridge(): ChildProcess {
+    const bridge = appServerBridgePaths(this.#cfg.sandbox.containerCodexHome);
+    return this.spawnInSandbox({ argv: ["node", bridge.script, "attach", bridge.socket] });
   }
 
   /**

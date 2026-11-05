@@ -212,4 +212,39 @@ describe("gateway relay on a remote sandbox node", () => {
       gateway.close();
     }
   });
+
+  it("holds a call while the control plane restarts, and sends it once the gateway is back", async () => {
+    const { createGatewayRelay } = await import("../../src/sandbox/relay.js");
+    // A port with nothing on it yet: the gateway comes up there a moment after the call.
+    const probe = http.createServer();
+    await new Promise<void>((resolve) => probe.listen(0, "127.0.0.1", resolve));
+    const port = (probe.address() as AddressInfo).port;
+    await new Promise<void>((resolve) => probe.close(() => resolve()));
+    const relay = createGatewayRelay(`http://127.0.0.1:${port}`, new Logger("error", undefined, false));
+    await new Promise<void>((resolve) => relay.listen(0, "127.0.0.1", resolve));
+    let body = "";
+    const gateway = http.createServer((req, res) => { req.on("data", (c) => (body += c)); req.on("end", () => res.end("ok")); });
+    const back = setTimeout(() => gateway.listen(port, "127.0.0.1"), 1_200);
+    try {
+      const res = await fetch(`http://127.0.0.1:${(relay.address() as AddressInfo).port}/schedule/t/mcp`, { method: "POST", body: '{"call":1}' });
+      expect(res.status).toBe(200);
+      expect(await res.text()).toBe("ok");
+      expect(body).toBe('{"call":1}');
+    } finally {
+      clearTimeout(back);
+      relay.close();
+      gateway.close();
+    }
+  });
+
+  it("gives up with 502 when the gateway stays away", async () => {
+    const { createGatewayRelay } = await import("../../src/sandbox/relay.js");
+    const relay = createGatewayRelay("http://127.0.0.1:1", new Logger("error", undefined, false), 1_000);
+    await new Promise<void>((resolve) => relay.listen(0, "127.0.0.1", resolve));
+    try {
+      expect((await fetch(`http://127.0.0.1:${(relay.address() as AddressInfo).port}/x`, { method: "POST", body: "{}" })).status).toBe(502);
+    } finally {
+      relay.close();
+    }
+  });
 });
