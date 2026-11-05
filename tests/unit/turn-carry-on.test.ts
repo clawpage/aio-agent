@@ -16,7 +16,7 @@ const managers: AgentManager[] = [];
 afterEach(() => { for (const m of managers.splice(0)) m.shutdown(); db?.close(); });
 
 /** A turn running on the first control plane, which then stops; the second one starts on the same data. */
-async function restartMidTurn(reattached: boolean) {
+async function restartMidTurn(reattached: boolean, givenUpBefore = false) {
   db = openDb(":memory:");
   const cfg = testConfig("/tmp/aio-carry-on", 1);
   const first = new BridgedCodex();
@@ -27,6 +27,14 @@ async function restartMidTurn(reattached: boolean) {
   await vi.waitFor(() => expect((db.prepare("SELECT codex_turn_id FROM turns WHERE id=?").get(turn.id) as { codex_turn_id: string | null }).codex_turn_id).toBeTruthy());
   const codexTurnId = first.startedTurns[0]!.turnId, threadId = first.startedTurns[0]!.threadId;
   before.shutdown();
+  if (givenUpBefore) {
+    // An earlier turn of the same task was given up as unknown while Codex went on with it; the
+    // resumed one (this turn) was joined by Codex to that same Codex turn.
+    // The given-up one was written first, so it comes first in the table.
+    db.exec("CREATE TEMP TABLE live AS SELECT * FROM turns; CREATE TEMP TABLE cut AS SELECT * FROM turns");
+    db.prepare("UPDATE cut SET id='turn_given_up', client_message_id='m0', status='unknown', created_at=created_at-1000").run();
+    db.exec("PRAGMA foreign_keys=OFF; DELETE FROM turns; INSERT INTO turns SELECT * FROM cut; INSERT INTO turns SELECT * FROM live; DROP TABLE cut; DROP TABLE live; PRAGMA foreign_keys=ON");
+  }
 
   const second = new BridgedCodex(reattached);
   const after = new AgentManager({ db, cfg, codex: second, log });
@@ -55,4 +63,14 @@ it("ends such a turn unknown, as before, when the app-server did not survive the
   const { row } = await restartMidTurn(false);
   await vi.waitFor(() => expect(row().status).toBe("unknown"));
   expect(row().error).toContain("The service restarted while this turn was running");
+});
+
+it("records what Codex says on a turn that an earlier, given-up turn was also joined to on the live one", async () => {
+  const { second, row, codexTurnId, threadId, turnId } = await restartMidTurn(true, true);
+  second.emitNotification("item/completed", { threadId, turnId: codexTurnId, item: { id: "i1", type: "agentMessage", text: "整理好了" } });
+  second.emitNotification("turn/completed", { threadId, turn: { id: codexTurnId, status: "completed" } });
+  await vi.waitFor(() => expect(row().status).toBe("completed"));
+  const of = (id: string) => (db.prepare("SELECT type FROM events WHERE turn_id=?").all(id) as Array<{ type: string }>).map((e) => e.type);
+  expect(of(turnId)).toContain("item/completed");
+  expect(of("turn_given_up")).not.toContain("item/completed");
 });

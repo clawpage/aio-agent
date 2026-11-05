@@ -1650,10 +1650,14 @@ export class AgentManager {
 
   // ------------------------------------------------------------ approvals
 
-  /** Local turn id for a Codex turn id, or null when it is not ours. */
+  /**
+   * Local turn id for a Codex turn id, or null when it is not ours. A turn given up as unknown
+   * while Codex went on with it can be followed by a resumed turn that Codex joined to the same
+   * Codex turn: the latest one is the live one.
+   */
   #localTurnId(codexTurnId: string | undefined): string | null {
     if (!codexTurnId) return null;
-    const row = this.#db.prepare("SELECT id FROM turns WHERE codex_turn_id = ?").get(codexTurnId) as { id: string } | undefined;
+    const row = this.#db.prepare("SELECT id FROM turns WHERE codex_turn_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1").get(codexTurnId) as { id: string } | undefined;
     return row?.id ?? null;
   }
 
