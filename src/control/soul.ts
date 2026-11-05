@@ -4,9 +4,9 @@ import {createHash,randomUUID} from 'node:crypto';
 import type {Config} from './config.js';
 import {t} from './i18n/index.js';
 
-export const DEFAULT_SOUL = /* i18n-exempt: model-facing, names the brand in Chinese */ `# SOUL.md
+export const DEFAULT_SOUL = /* i18n-exempt: model-facing */ `# SOUL.md
 
-You are Clawpage Agent (一站 in Chinese), the user's personal AI assistant. Think of a reliable, curious, occasionally witty partner: someone who gets things done and talks like a person.
+You are Clawpage Agent, the user's personal AI assistant. Think of a reliable, curious, occasionally witty partner: someone who gets things done and talks like a person.
 
 - Speak naturally in the first person. When asked "who are you", describe who you are and what you can do in your own words; never introduce yourself as an internal role such as the dispatcher or a sub-agent. Answer truthfully when the user asks about the technical implementation or the underlying model.
 - Keep the tone relaxed and warm. A well-placed metaphor or a bit of humor is welcome, but don't force cleverness, don't be slick or flattering, and don't put an exclamation mark or emoji on every sentence. When the user is in a hurry, something is broken, or the topic is serious, get the facts across first.
@@ -32,7 +32,9 @@ const CHINESE_DEFAULT = /* i18n-exempt: an older default, recognised in stored S
 - 默认中文，用户指定其他语言时遵循要求。这份身份与风格同样适用于承接任务的子 agent。
 `;
 /** Earlier defaults: a SOUL.md still exactly one of them was never edited, so it follows the current default. */
-export const PREVIOUS_DEFAULTS = [CHINESE_DEFAULT, CHINESE_DEFAULT.replace('你是一站（英文名 Clawpage Agent），', '你是 AIO Agent，')]; // i18n-exempt: older defaults, recognised in stored SOUL.md files
+/** How the English default named the brand until 2026-11-05; the owner dropped the Chinese name from it. */
+const CHINESE_NAME = 'You are Clawpage Agent (一站 in Chinese), '; // i18n-exempt: an older default's wording, recognised in stored SOUL.md files
+export const PREVIOUS_DEFAULTS = [CHINESE_DEFAULT, CHINESE_DEFAULT.replace('你是一站（英文名 Clawpage Agent），', '你是 AIO Agent，'), DEFAULT_SOUL.replace('You are Clawpage Agent, ', CHINESE_NAME)]; // i18n-exempt: older defaults, recognised in stored SOUL.md files
 export const SOUL_MAX_BYTES = 64 * 1024;
 export class SoulError extends Error { constructor(public status:number,message:string){super(message);} }
 const revision=(content:string)=>createHash('sha256').update(content).digest('hex');
@@ -45,10 +47,12 @@ export function readSoul(cfg:Pick<Config,'dataDir'>) {
   fs.mkdirSync(cfg.dataDir,{recursive:true});
   try{fs.writeFileSync(file,DEFAULT_SOUL,{encoding:'utf8',mode:0o600,flag:'wx'});}catch(err){if((err as NodeJS.ErrnoException).code!=='EEXIST')throw err;}
   let content=fs.readFileSync(file,'utf8');validate(content);
-  if(PREVIOUS_DEFAULTS.includes(content)){
+  // An untouched older default follows the current one; an edited copy only loses the brand's Chinese name.
+  const next=PREVIOUS_DEFAULTS.includes(content)?DEFAULT_SOUL:content.replace(CHINESE_NAME,'You are Clawpage Agent, ');
+  if(next!==content){
     const temp=`${file}.${randomUUID()}.tmp`;
-    try{fs.writeFileSync(temp,DEFAULT_SOUL,{encoding:'utf8',mode:0o600,flag:'wx'});fs.renameSync(temp,file);}finally{fs.rmSync(temp,{force:true});}
-    content=DEFAULT_SOUL;
+    try{fs.writeFileSync(temp,next,{encoding:'utf8',mode:0o600,flag:'wx'});fs.renameSync(temp,file);}finally{fs.rmSync(temp,{force:true});}
+    content=next;
   }
   return {content,revision:revision(content)};
 }

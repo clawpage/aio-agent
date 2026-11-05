@@ -19,8 +19,9 @@ describe('SOUL.md persistence',()=>{
   expect(writeSoul(cfg,'',saved.revision).content).toBe('');expect(readSoul(cfg).content).toBe('');
  });
  it('moves an unedited earlier default (both Chinese ones) to the English one and leaves an edited one alone',()=>{
-  expect(DEFAULT_SOUL).toContain('You are Clawpage Agent');
-  expect(PREVIOUS_DEFAULTS.map(d=>d.split('\n')[2])).toEqual(['你是一站（英文名 Clawpage Agent），用户的个人 AI 助理。像一位靠谱、有好奇心、偶尔有点机灵的搭档：能把事情办妥，也能把话说得有人味。','你是 AIO Agent，用户的个人 AI 助理。像一位靠谱、有好奇心、偶尔有点机灵的搭档：能把事情办妥，也能把话说得有人味。']);
+  expect(DEFAULT_SOUL).toContain('You are Clawpage Agent, the user');
+  expect(DEFAULT_SOUL).not.toContain('一站');
+  expect(PREVIOUS_DEFAULTS.map(d=>d.split('\n')[2])).toEqual(['你是一站（英文名 Clawpage Agent），用户的个人 AI 助理。像一位靠谱、有好奇心、偶尔有点机灵的搭档：能把事情办妥，也能把话说得有人味。','你是 AIO Agent，用户的个人 AI 助理。像一位靠谱、有好奇心、偶尔有点机灵的搭档：能把事情办妥，也能把话说得有人味。',"You are Clawpage Agent (一站 in Chinese), the user's personal AI assistant. Think of a reliable, curious, occasionally witty partner: someone who gets things done and talks like a person."]);
   for(const old of PREVIOUS_DEFAULTS){
    const cfg={dataDir:fs.mkdtempSync(path.join(os.tmpdir(),'aio-soul-'))};dirs.push(cfg.dataDir);
    const file=path.join(cfg.dataDir,'SOUL.md');
@@ -28,7 +29,9 @@ describe('SOUL.md persistence',()=>{
    expect(readSoul(cfg).content).toBe(DEFAULT_SOUL);expect(fs.readFileSync(file,'utf8')).toBe(DEFAULT_SOUL);
    expect(fs.statSync(file).mode&0o777).toBe(0o600);
    fs.writeFileSync(file,old+'\n我的补充\n');
-   expect(readSoul(cfg).content).toBe(old+'\n我的补充\n');
+   // An edited copy keeps every word of its own, but the brand's Chinese name goes (2026-11-05).
+   expect(readSoul(cfg).content).toBe(old.replace('You are Clawpage Agent (一站 in Chinese), ','You are Clawpage Agent, ')+'\n我的补充\n');
+   expect(fs.readFileSync(file,'utf8')).not.toContain('一站 in Chinese');
   }
  });
 });
