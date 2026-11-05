@@ -285,7 +285,7 @@
   把 Apple 签名的 identity token 交回页面，`POST /api/auth/apple/verify` 按 Apple 公钥（`appleid.apple.com/auth/keys`，未知 kid 最多每分钟重取一次）核对 RS256 签名、
   `iss`、`aud`（`PA_APPLE_CLIENT_ID`，默认 bundle id `ai.clawpage.agent`，置空即关闭）、过期时间、nonce 与已验证邮箱，每个 nonce 只用一次。已关联的 Apple ID（`apple_identities`）直接登录；
   新的 Apple ID 与 Google 一样走注册（以 Apple 给的邮箱为账号邮箱，可能是 `privaterelay.appleid.com` 转发地址，不按邮箱自动关联已有账号），邀请码规则相同。不保存任何 Apple 令牌。
-  猜错邀请码与输错密码共用按 IP 的失败锁定。设置 `PA_INVITE_EMAIL` 后注册页显示申请邮箱。
+  猜错邀请码与输错密码共用按 IP 的失败锁定；锁定只拦密码登录和填邀请码，不拦 Google / Apple 登录（用 Google 注册、没有密码的人试过几次密码后仍能用 Google 登进来）。设置 `PA_INVITE_EMAIL` 后注册页显示申请邮箱。
 - **分配成员模型**：`node --env-file=var/runtime.env bin/set-user-model.mjs <用户名> <gpt-6.1-sol|claude-sonnet-5-5> [auto|low|medium|high]`，
   重启后生效；省略推理强度时不修改，`auto` 改回「自动」。从未分配过推理强度（没有 `member_effort:<id>`）的成员即为「自动」；分配过固定档位的保持不变。分配 Claude 需要 owner 已配置 Claude Code 凭据，分配 `gpt-6.1-sol` 需要控制面已
   `codex-login`（`AIO_HOST_CODEX=on`），用量分别计入对应账号。

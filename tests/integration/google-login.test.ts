@@ -169,6 +169,18 @@ it("refuses expired, cancelled and cross-site registration flows, and rate limit
   expect((await activate(fresh.client, createInvite(h.ctx.db).code)).status).toBe(401);
 });
 
+it("signs in with Google after passwords tried on the same address locked password sign-in", async () => {
+  const first = await begin(); await callback(first, "locked-out-subject");
+  expect((await activate(first.client, createInvite(h.ctx.db).code)).status).toBe(200);
+  for (let i = 0; i < h.ctx.cfg.loginMaxFailures; i++) {
+    await h.request("/api/auth/login", {method: "POST", headers: json, body: JSON.stringify({username: "locked-out-subject", password: "not-the-password"})});
+  }
+  expect((h.ctx.db.prepare("SELECT locked_until FROM login_failures").get() as {locked_until: number}).locked_until).toBeGreaterThan(Date.now());
+  const again = await callback(await begin(), "locked-out-subject");
+  expect(again.headers.get("location")).toBe("/login");
+  expect(await (await h.request("/api/auth/session", {headers: {cookie: cookies(again)}})).json()).toMatchObject({username: "locked-out-subject"});
+});
+
 it("registers a verified Google identity without an invite while places remain", async () => {
   const flow = await begin(); await callback(flow);
   const result = await activate(flow.client, "");

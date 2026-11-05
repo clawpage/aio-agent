@@ -21,7 +21,9 @@ export function appleRouter(context: AppContext, apple = new AppleLogin(context.
     if (req.paCtx!.kind !== "primary") { res.status(404).json({error: "not_found"}); return; }
     if (req.method === "POST") {
       if (!originAllowed(cfg, "primary", req.paCtx!.origin)) { res.status(403).json({error: "origin_denied"}); return; }
-      if (limiter.state(req.paCtx!.ip).locked) { res.status(429).json({error: "rate_limited", message: t().http.auth.tooManyAttempts}); return; }
+      // Failed passwords lock out guessing, which is only possible with invite codes here: Apple vouches for the person,
+      // so a lockout from passwords tried on this address never stops their Apple sign-in.
+      if (req.path === "/register" && limiter.state(req.paCtx!.ip).locked) { res.status(429).json({error: "rate_limited", message: t().http.auth.tooManyAttempts}); return; }
     }
     next();
   });
