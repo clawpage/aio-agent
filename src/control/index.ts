@@ -524,7 +524,8 @@ async function main(): Promise<void> {
   decision.provision(ctx.cfg);
   // Clawpages' signed-in visitors (and the console's widgets) ask the same decisions, recorded against their own account.
   ctx.share.decision=decision;
-  const kb=new KbGateway({cfg:ctx.cfg,log:ctx.log,port:ctx.cfg.memberModelPort??4902,usernameOf:id=>account("SELECT username AS v FROM owners WHERE id=?",id)});
+  const kb=new KbGateway({cfg:ctx.cfg,log:ctx.log,port:ctx.cfg.memberModelPort??4902,usernameOf:id=>account("SELECT username AS v FROM owners WHERE id=?",id),
+    files:async name=>{const id=account("SELECT id AS v FROM owners WHERE username=?",name);if(!id)throw new Error(`no account ${name}`);return sandboxClipFiles(id===ctx.cfg.runtimeUserId?ctx:await ctx.runtimeForUser!(id));}});
   kb.provision(ctx.cfg);
   const haDashboard=HaDashboard.from(ctx.cfg,ctx.log);
   const ha=new HaGateway({cfg:ctx.cfg,log:ctx.log,port:ctx.cfg.memberModelPort??4902,usernameOf:id=>account("SELECT username AS v FROM owners WHERE id=?",id),cameras:ctx.cameras,history:HaHistory.from(ctx.cfg,ctx.log,haDashboard),dashboard:haDashboard,

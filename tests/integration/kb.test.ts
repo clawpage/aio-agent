@@ -115,3 +115,71 @@ it("offers no knowledge base without an upstream URL or without its token", asyn
     await h.shutdown();
   }
 });
+
+it("saves a cited original into the asking account's workspace with kb_file, never passing it through the model", async () => {
+  const h = await startHarness();
+  const seen: Array<{ url: string; auth?: string; user?: string | string[] }> = [];
+  const original = Buffer.from([0x00, 0x00, 0x00, 0x18, 0x66, 0x74, 0x79, 0x70, 0x68, 0x65, 0x69, 0x63]); // a HEIC's first bytes
+  const upstream = http.createServer(async (req, res) => {
+    let data = "";
+    for await (const chunk of req) data += chunk;
+    seen.push({ url: req.url!, auth: req.headers.authorization, user: req.headers["x-aio-user"] });
+    if (req.url!.startsWith("/file?")) {
+      const q = new URL(req.url!, "http://kb").searchParams;
+      if (q.get("id") !== "t0/roy-birth" || q.get("n") !== "2") return res.writeHead(404, { "content-type": "application/json" }).end(JSON.stringify({ error: "t0/roy-birth 没有第 9 条来源" }));
+      return res.writeHead(200, { "content-type": "application/octet-stream", "x-file-name": encodeURIComponent("IMG_0947.HEIC"), "x-source": encodeURIComponent("source/raw/家庭/IMG_0947.HEIC") }).end(original);
+    }
+    const body = JSON.parse(data);
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify({ jsonrpc: "2.0", id: body.id, result: body.method === "tools/list" ? { tools: [{ name: "kb_source" }] } : { echoed: body.params?.name } }));
+  });
+  await new Promise<void>((resolve) => upstream.listen(0, "127.0.0.1", resolve));
+  const keyFile = path.join(h.dataDir, "kb-mcp.env");
+  fs.writeFileSync(keyFile, "KB_MCP_TOKEN=host-kb-secret\n", { mode: 0o600 });
+  const saved = process.env.KB_MCP_TOKEN;
+  delete process.env.KB_MCP_TOKEN;
+  const cfg = { ...h.ctx.cfg, memberModelPort: 0, kbMcp: { upstreamUrl: `http://127.0.0.1:${(upstream.address() as any).port}/mcp`, secretsFile: keyFile, members: ["cr"] } };
+  const written = new Map<string, Map<string, Buffer>>();
+  const files = async (username: string) => {
+    const mine = written.get(username) ?? new Map<string, Buffer>();
+    written.set(username, mine);
+    return { write: async (file: string, bytes: Buffer) => { mine.set(file, bytes); } };
+  };
+  const kb = new KbGateway({ cfg, log: h.ctx.log, port: 0, usernameOf: (id) => USERS[id] ?? null, files });
+  const gateway = new MemberModelGateway(cfg, h.ctx.log, undefined, undefined, kb);
+  await gateway.start();
+  try {
+    Object.assign(cfg, { runtimeUserId: "owner_1", dataDir: path.join(h.dataDir, "owner-runtime") });
+    kb.provision(cfg);
+    const granted = memberConfig(cfg, "user_granted", 18091);
+    gateway.provision(granted);
+    const url = granted.kb!.url.replace(/^http:\/\/host\.docker\.internal:0/, `http://127.0.0.1:${gateway.port}`);
+    const rpc = async (body: unknown) => (await (await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })).json()) as any;
+    const fileCall = (args: Record<string, unknown>) => rpc({ jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "kb_file", arguments: args } });
+
+    // The upstream's tools, plus kb_file; other calls still go upstream as they are.
+    expect((await rpc({ jsonrpc: "2.0", id: 1, method: "tools/list" })).result.tools.map((t: { name: string }) => t.name)).toEqual(["kb_source", "kb_file"]);
+    expect((await rpc({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "kb_source", arguments: {} } })).result).toEqual({ echoed: "kb_source" });
+
+    // The original lands in the account's own workspace under its own name; the reply carries only the path.
+    const got = await fileCall({ id: "t0/roy-birth", n: 2 });
+    expect(got.result.isError).toBeUndefined();
+    expect(got.result.content[0].text).toContain("Original saved: /home/gem/workspace/kb-files/IMG_0947.HEIC (12 bytes, from source/raw/家庭/IMG_0947.HEIC)");
+    expect(written.get("cr")!.get("/home/gem/workspace/kb-files/IMG_0947.HEIC")).toEqual(original);
+    expect(written.has("owner")).toBe(false);
+    expect(seen.find((s) => s.url.startsWith("/file?"))).toMatchObject({ url: "/file?id=t0%2Froy-birth&n=2", auth: "Bearer host-kb-secret", user: "cr" });
+    // A named path inside the task's folder; never outside the workspace; a missing source is said plainly.
+    expect((await fileCall({ id: "t0/roy-birth", n: 2, path: "/home/gem/workspace/tasks/t1/birth.heic" })).result.isError).toBeUndefined();
+    expect(written.get("cr")!.has("/home/gem/workspace/tasks/t1/birth.heic")).toBe(true);
+    expect((await fileCall({ id: "t0/roy-birth", n: 2, path: "/etc/passwd" })).result.isError).toBe(true);
+    const missing = await fileCall({ id: "t0/roy-birth", n: 9 });
+    expect(missing.result).toMatchObject({ isError: true, content: [{ text: expect.stringContaining("没有第 9 条来源") }] });
+    expect((await fileCall({ id: "t0/roy-birth" })).result.isError).toBe(true);
+  } finally {
+    gateway.close();
+    upstream.closeAllConnections();
+    await new Promise<void>((r) => upstream.close(() => r()));
+    if (saved === undefined) delete process.env.KB_MCP_TOKEN; else process.env.KB_MCP_TOKEN = saved;
+    await h.shutdown();
+  }
+});
