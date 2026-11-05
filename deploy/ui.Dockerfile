@@ -1,5 +1,7 @@
 # syntax=docker/dockerfile:1
 # UI layer: the built console plus its edge server (static files + /api pass-through).
+# The UI image now serving (deploy/aio.mjs passes it); without one, the build stands alone.
+ARG AIO_UI_PREVIOUS=build
 FROM node:26-bookworm-slim AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
@@ -11,8 +13,6 @@ COPY src/ui ./src/ui
 ARG VITE_AIO_API_BASE=
 RUN npx vite build
 
-# The UI image now serving (deploy/aio.mjs passes it); without one, the build stands alone.
-ARG AIO_UI_PREVIOUS=build
 FROM ${AIO_UI_PREVIOUS} AS previous
 
 # A console opened before this deploy keeps loading its own build's files (ui-keep-assets.mjs).

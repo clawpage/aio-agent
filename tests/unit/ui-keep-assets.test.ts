@@ -41,6 +41,10 @@ it("keeps the last few builds' files beside a new UI build, so a console opened 
     const alone = path.join(dir, "alone");
     build(alone, ["index-Z.js"]);
     expect(keep(alone, alone, "z")).toContain("keeps 1 build(s): z; 0 earlier file(s)");
+    // As the Dockerfile builds without one: the "previous" stage is a copy of this very build.
+    const copy = path.join(dir, "copy");
+    build(copy, ["index-Z.js"]);
+    expect(keep(alone, copy, "z")).toContain("keeps 1 build(s): z; 0 earlier file(s)");
     const again = path.join(dir, "again");
     build(again, ["index-v5b.js"]);
     keep(again, previous, "v5");

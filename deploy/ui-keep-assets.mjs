@@ -28,7 +28,8 @@ if (path.resolve(previous) !== path.resolve(fresh)) {
         if (b && typeof b.version === "string" && Array.isArray(b.assets) && b.version !== version) earlier.push(b);
       } catch { /* an unreadable record keeps nothing */ }
     }
-  } else if (files(previous).length) {
+  } else if (files(previous).some((name) => !mine.assets.includes(name))) {
+    // Built without a previous image, the "previous" stage is this build itself: nothing to keep.
     earlier.push({ version: "previous", at: 0, assets: files(previous) });
   }
 }
