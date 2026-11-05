@@ -115,6 +115,8 @@ describe("BridgeModel configuration", () => {
     expect(args.join(" ")).toContain(`model_providers.aio_gateway.base_url="${GATEWAY_URL}"`);
     expect(args.join(" ")).toContain('model_providers.aio_gateway.wire_api="responses"');
     expect(args.join(" ")).toContain('model_providers.aio_gateway.env_key="AIO_MEMBER_MODEL_TOKEN"');
+    // Codex 0.166 refuses a turn whose thread provider is not the process default.
+    expect(args.slice(-2)).toEqual(["-c", 'model_provider="aio_gateway"']);
     // The key value is never in the arguments, only the variable name.
     expect(args.join(" ")).not.toContain(SECRET_VALUE);
 

@@ -178,7 +178,11 @@ export class BridgeModel {
 
   /**
    * `-c` overrides that define the provider on the Codex command line, so the
-   * sandbox never needs its `config.toml` rewritten. Empty while it is off,
+   * sandbox never needs its `config.toml` rewritten, and make it the process's
+   * default: from Codex 0.166 a turn is refused when the thread's provider is
+   * not the process default ("This chat uses aio_gateway, but your current
+   * provider is openai"), even on a thread started with `modelProvider`. A
+   * runtime with the bridge runs every model through it. Empty while it is off,
    * which keeps the ChatGPT-only command line exactly as it was.
    */
   providerConfigArgs(): string[] {
@@ -196,6 +200,8 @@ export class BridgeModel {
       `${key}.supports_websockets=false`,
       "-c",
       `${key}.env_key="${status.envKey}"`,
+      "-c",
+      `model_provider="${status.providerId}"`,
     ];
   }
 

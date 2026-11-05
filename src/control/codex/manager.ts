@@ -1059,7 +1059,7 @@ export class AgentManager {
     const model = policy?.model ?? turn.model ?? conversation.model ?? this.#cfg.agent.defaultModel;
     if (policy) turn.effort = this.#memberEffort(turn.effort);
     const { desiredProvider, currentProvider, startsFresh } = this.#threadPlan(conversation, model, turn.id);
-    const inputText = startsFresh ? this.#withPriorContext(conversation.id, turn.id, turn.input_text) : turn.input_text;
+    let inputText = startsFresh ? this.#withPriorContext(conversation.id, turn.id, turn.input_text) : turn.input_text;
     this.#restartForTools(conversation.id);
     const { developerInstructions, browserTask } = this.#threadSettings(conversation);
     if (this.#tabs && turn.browser_required === 0) {
@@ -1067,7 +1067,7 @@ export class AgentManager {
       await this.#tabs.ensure().catch((err) => this.#log.debug("tab server unavailable", { error: String(err) }));
     }
     let threadId = startsFresh ? null : conversation.codex_thread_id;
-    if (!threadId) {
+    const startThread = async (switchedFrom: string | null) => {
       const started = await this.#codex.startThread({
         developerInstructions,
         ...(browserTask ? { browserTask } : {}),
@@ -1075,19 +1075,22 @@ export class AgentManager {
         model,
         ...(desiredProvider !== CHATGPT_PROVIDER_ID ? { modelProvider: desiredProvider } : {}),
       });
-      threadId = started.threadId;
       this.#db
         .prepare(
           "UPDATE conversations SET codex_thread_id = ?, model = COALESCE(model, ?), model_provider = ?, cwd = ? WHERE id = ?",
         )
-        .run(threadId, started.model, desiredProvider, started.cwd, conversation.id);
+        .run(started.threadId, started.model, desiredProvider, started.cwd, conversation.id);
       this.#appendEvent(conversation.id, turn.id, "thread.started", {
-        threadId,
+        threadId: started.threadId,
         model: started.model,
         cwd: started.cwd,
         modelProvider: desiredProvider,
-        ...(startsFresh ? { switchedFrom: conversation.codex_thread_id } : {}),
+        ...(switchedFrom ? { switchedFrom } : {}),
       });
+      return started.threadId;
+    };
+    if (!threadId) {
+      threadId = await startThread(startsFresh ? conversation.codex_thread_id : null);
     } else if (desiredProvider !== currentProvider || this.#failedGatewayServers(conversation.id, threadId).length) {
       // Codex only honours `modelProvider` when a thread is created, so an
       // existing conversation switching providers continues on a fork that keeps
@@ -1127,8 +1130,17 @@ export class AgentManager {
         forkedFrom: conversation.codex_thread_id,
       });
     } else {
-      if (browserTask) await this.#codex.resumeThread(threadId, developerInstructions, browserTask);
-      else await this.#codex.resumeThread(threadId, developerInstructions);
+      try {
+        if (browserTask) await this.#codex.resumeThread(threadId, developerInstructions, browserTask);
+        else await this.#codex.resumeThread(threadId, developerInstructions);
+      } catch (err) {
+        // A thread whose first turn never ran has nothing on disk to resume ("no rollout found for thread id"):
+        // every later turn would fail the same way, so the conversation goes on in a new thread with its earlier requests and answers.
+        if (!/no rollout found/i.test(err instanceof Error ? err.message : String(err))) throw err;
+        this.#log.warn("conversation thread has no rollout; starting a new one", { conversationId: conversation.id, threadId });
+        threadId = await startThread(threadId);
+        inputText = this.#withPriorContext(conversation.id, turn.id, turn.input_text);
+      }
     }
     // Route later notifications for this thread back to this exact turn even
     // while several conversations are executing at once.

@@ -264,6 +264,16 @@ describe("main inbox delegation", () => {
         await codex.runTurn(codex.startedTurns.at(-1)!.turnId,{text:"Updated result"});await tick();
         expect(tasks.get(done.id)?.result).toBe("Selected original result");expect(tasks.get(update.id)?.result).toBe("Updated result");
     });
+    it("continues on a new thread, with the earlier exchange, when the old thread has nothing on disk to resume",async()=>{
+        const done=submit("done");await tick();await codex.runTurn(codex.startedTurns[0]!.turnId,{text:"Selected original result"});await tick();
+        // Codex keeps no rollout for a thread whose first turn never ran; resuming it fails every time.
+        codex.resumeThread=async(threadId:string)=>{throw new Error(`thread/resume: no rollout found for thread id ${threadId}`);};
+        const update=submit("update the result",done.id);await tick();
+        expect(tasks.get(update.id)?.status).toBe("running");
+        expect(codex.startedThreads).toHaveLength(2);
+        expect(codex.startedTurns.at(-1)!.threadId).toBe(codex.startedThreads[1]!.threadId);
+        expect(codex.startedTurns.at(-1)!.text).toContain("Selected original result");
+    });
     it("references to an old result steer its active resumed turn, preserving the original report",async()=>{
         const original=submit('original');await tick();await codex.runTurn(codex.startedTurns[0]!.turnId,{text:'Original report'});await tick();
         const continuation=submit('continue',original.id);await tick();
