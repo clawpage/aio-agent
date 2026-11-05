@@ -65,6 +65,7 @@ export const feed: typeof zh = {
   },
   empty: {
     title: "你好，我是一站",
+    beta: "限時內測 · GPT-6.1 Sol 不限量免費",
     body: "要辦的事直接告訴我，我在自己的電腦上替你辦好。",
     hint: "點一個試試，或直接說：",
     features: [

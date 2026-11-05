@@ -3188,6 +3188,7 @@ button .loading-mark { color: inherit; }
 .welcome-msg p { margin: 6px 0 0; }
 .welcome-head { display: flex; align-items: center; gap: 8px; font-size: var(--fs-title); }
 .welcome-hint { margin: 4px 2px 0; }
+.welcome-msg p.welcome-beta { display: inline-block; margin: 8px 0 2px; padding: 2px 10px; border-radius: 999px; background: var(--you-soft); color: var(--you); font-size: var(--fs-sm); font-weight: 600; }
 .welcome-starters { display: flex; flex-wrap: wrap; gap: 8px; }
 .welcome-features { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 8px; max-width: 760px; }
 .welcome-feature { display: flex; align-items: flex-start; gap: 10px; min-width: 0; padding: 12px 14px; border-radius: var(--radius); border: 1px solid var(--border-strong); background: var(--bg-soft); color: var(--text); text-align: left; cursor: pointer; }

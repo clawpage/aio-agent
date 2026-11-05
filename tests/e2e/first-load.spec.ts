@@ -82,7 +82,8 @@ test("an account with nothing yet is greeted once the feed answers, and a starte
   await expect(page.getByText("你好，我是一站")).toBeVisible();
   await expect(page.locator(".boot-cover")).toHaveCount(0);
   // Short: one line of welcome, three things it can do and two starters, all on the first screen.
-  await expect(page.locator(".welcome-msg p")).toHaveText("要办的事直接告诉我，我在自己的电脑上替你办好。");
+  await expect(page.locator(".welcome-msg .welcome-beta")).toHaveText("限时内测 · GPT-6.1 Sol 不限量免费");
+  await expect(page.locator(".welcome-msg p:not(.welcome-beta)")).toHaveText("要办的事直接告诉我，我在自己的电脑上替你办好。");
   const features = page.locator(".welcome-features button");
   await expect(features).toHaveCount(3);
   await expect(features.nth(0)).toContainText("Clawpages 小程序");

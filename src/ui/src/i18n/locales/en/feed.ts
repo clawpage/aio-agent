@@ -65,6 +65,7 @@ export const feed: typeof zh = {
   },
   empty: {
     title: "Hi, I'm Clawpage Agent",
+    beta: "Limited-time beta · GPT-6.1 Sol free and unlimited",
     body: "Tell me what you need done; I'll do it on my own computer.",
     hint: "Tap one to try, or just say it:",
     features: [
