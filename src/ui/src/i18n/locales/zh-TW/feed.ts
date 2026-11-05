@@ -71,7 +71,7 @@ export const feed: typeof zh = {
     features: [
       { icon: "clawpages", title: "Clawpages 小程式", body: "一句話做出記帳本、報名表，發連結就能用", prompt: "幫我做一個家庭記帳小程式：可以記收入和支出、按月看統計，發布成連結，我和家人都能打開記帳。" },
       { icon: "knowledge", title: "共享知識庫", body: "和家人、團隊共用，大家的 AI 都能查能記", prompt: "幫我建一個家庭共享知識庫，記全家人的飲食偏好、過敏和常去的店，再產生一個邀請連結，我傳給家人加入。" },
-      { icon: "workspace", title: "雲端瀏覽器", body: "替你上網查價、填表，隨時看我操作或接手", prompt: "用你的瀏覽器打開 Amazon 搜尋 AirPods Pro，告訴我現在的價格和評分，並把頁面截圖傳給我。" },
+      { icon: "sun", title: "照片精修", body: "調光調色、壓住天空，人還是原來的樣子", prompt: "幫我精修一張人像照片：整體調亮、更通透，天空別過曝，皮膚稍微柔和一點，但臉和五官保持原樣，不要 AI 重畫。我這就把照片傳給你。" },
     ],
     starters: [
       { label: "查資料做成表格", prompt: "上網查 4 款熱門降噪耳機的價格、電池續航力和降噪評價，整理成一個 Excel 表格檔案傳給我，再推薦一款最划算的。" },

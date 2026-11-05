@@ -70,8 +70,8 @@ export const feed: typeof zh = {
     hint: "Tap one to try, or just say it:",
     features: [
       { icon: "clawpages", title: "Clawpages mini apps", body: "A budget tracker, sign-up form or poll from one sentence, shared as a link", prompt: "Make me a family budget mini app: add income and expenses, see monthly totals, and publish it as a link my family and I can all use." },
-      { icon: "knowledge", title: "Shared knowledge base", body: "Shared with family or a team; everyone's AI can look things up and add to it", prompt: "Set up a shared family knowledge base for everyone's food preferences, allergies and favourite places, then give me an invitation link to send to my family." },
-      { icon: "workspace", title: "Cloud browser", body: "Checks prices and fills in forms for you; watch or take over any time", prompt: "Use your browser to search Amazon for AirPods Pro, tell me the current price and rating, and send me a screenshot of the page." },
+      { icon: "knowledge", title: "Shared knowledge base", body: "Shared with family or a team; everyone's AI can look things up and add to it", prompt: "Set up a shared family knowledge base for everyone's food preferences, allergies and favorite places, then give me an invitation link to send to my family." },
+      { icon: "sun", title: "Photo retouching", body: "Light, color and sky fixed, every face kept as it is", prompt: "Retouch a portrait photo for me: brighter and clearer, the sky not blown out, skin a little softer, but keep the faces exactly as photographed, no AI redrawing. I'll send you the photo now." },
     ],
     starters: [
       { label: "Research into a spreadsheet", prompt: "Look up 4 popular noise-cancelling earbuds online (price, battery life, what reviews say about the noise cancelling), put it all in an Excel file for me, and recommend the best value." },

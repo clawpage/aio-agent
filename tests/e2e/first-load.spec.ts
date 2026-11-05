@@ -88,7 +88,7 @@ test("an account with nothing yet is greeted once the feed answers, and a starte
   await expect(features).toHaveCount(3);
   await expect(features.nth(0)).toContainText("Clawpages 小程序");
   await expect(features.nth(1)).toContainText("共享知识库");
-  await expect(features.nth(2)).toContainText("云浏览器");
+  await expect(features.nth(2)).toContainText("照片精修");
   const starters = page.locator(".welcome-starters button");
   await expect(starters).toHaveCount(2);
   for (const button of [...await features.all(), ...await starters.all()]) await expect(button).toBeInViewport();
