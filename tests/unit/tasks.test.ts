@@ -140,7 +140,8 @@ describe("main inbox delegation", () => {
         expect(tasks.get(answer.id)?.execution_conversation_id).toBe(tasks.get(first.id)?.conversation_id);
         expect(tasks.get(answer.id)?.merged_into).toBeNull();
         expect(tasks.get(first.id)?.status).toBe("completed");
-        expect(tasks.get(first.id)?.result).toContain("Got your addition; the result is in the task that follows.");
+        // In the language of the reply the person wrote (Chinese), not the console's (English here).
+        expect(tasks.get(first.id)?.result).toContain("已收到补充，结果请看后续任务。");
         expect((JSON.parse(tasks.get(first.id)!.plan_json!) as {answeredBy?:string}).answeredBy).toBe(answer.id);
         expect(codex.startedTurns.at(-1)?.text).toContain("罗马，11月12日");
         expect(codex.startedTurns.at(-1)?.text).toContain("请告诉我目的地和日期？");

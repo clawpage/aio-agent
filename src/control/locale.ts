@@ -31,6 +31,30 @@ export function matchLocale(tag: string): Locale | null {
     return null;
 }
 
+/** Characters that tell Traditional from Simplified Chinese, in pairs (traditional, simplified). */
+const HAN_PAIRS = "這这個个們们來来時时會会說说國国對对學学過过還还點点為为與与發发體体關关開开麼么見见讓让讀读寫写買买賣卖電电話话錢钱車车門门問问題题請请謝谢實实現现務务應应該该"; // i18n-exempt: script detection, not text for people
+const TRADITIONAL = new Set([...HAN_PAIRS].filter((_, i) => i % 2 === 0));
+const SIMPLIFIED = new Set([...HAN_PAIRS].filter((_, i) => i % 2 === 1));
+// i18n-exempt: common function words, to tell Spanish from English
+const SPANISH_WORDS = new Set(["el", "la", "los", "las", "que", "de", "del", "por", "para", "con", "una", "uno", "es", "esta", "y", "en", "mi", "tu", "hola", "gracias", "quiero", "puedes", "como", "pero", "muy", "tambien", "ahora", "hazlo"]);
+const ENGLISH_WORDS = new Set(["the", "and", "to", "of", "is", "it", "you", "i", "my", "for", "please", "can", "what", "this", "that", "with", "do", "me", "a", "an", "on", "in", "how", "thanks"]);
+
+/**
+ * The console language a person's own message is written in, from its script and words: kana is
+ * Japanese, Han is Chinese (Traditional when its tell-tale characters outnumber the Simplified ones),
+ * Latin is Spanish or English. Null when the message says nothing (numbers, a link, emoji).
+ */
+export function messageLocale(text: string): Locale | null {
+    const plain = text.replace(/https?:\/\/\S+/g, " ");
+    if (/[\u3040-\u30ff]/.test(plain)) return "ja";
+    const han = [...plain].filter(c => /[\u4e00-\u9fff]/.test(c));
+    if (han.length) return han.filter(c => TRADITIONAL.has(c)).length > han.filter(c => SIMPLIFIED.has(c)).length ? "zh-TW" : "zh-CN";
+    const words = plain.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").match(/[a-z]+/g) ?? [];
+    if (!words.length) return null;
+    if (/[ñ¿¡]/i.test(plain) || words.filter(w => SPANISH_WORDS.has(w)).length > words.filter(w => ENGLISH_WORDS.has(w)).length) return "es";
+    return "en";
+}
+
 /** The first language of an Accept-Language header the console speaks, in the order of preference it gives. */
 export function acceptedLocale(header: string | undefined): Locale | null {
     const tags = (header ?? "").split(",").map((part, index) => {

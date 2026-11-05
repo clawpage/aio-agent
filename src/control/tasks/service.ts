@@ -19,7 +19,7 @@ import { decideEffort, EFFORT_QUESTION, effortQuestion, type AutoEffort, type Ef
 import { describeNow, describeSchedule, formatWhen, MAX_ACTIVE_SCHEDULES, nextRun, validateSchedule, type ScheduleSpec } from "./schedules.js";
 import type { PlanningSchedule, ScheduleActionName } from "./planning.js";
 import { checkCondition, validateCondition, type ConditionCheck, type ScheduleCondition } from "./scheduleCondition.js";
-import { answerLanguage, isLocale, readLocale, writeLocale, type Locale } from "../locale.js";
+import { answerLanguage, isLocale, messageLocale, readLocale, writeLocale, type Locale } from "../locale.js";
 import type { SharePage } from "../share.js";
 import type { Widget } from "../widgets.js";
 import { runInLocaleOr, t } from "../i18n/index.js";
@@ -946,7 +946,9 @@ export class TaskService {
         if (finalContinued?.status === "needs_input" && finalContinued.turn_id) {
             const answeredPlan = JSON.parse(finalContinued.plan_json!) as TaskPlan;
             answeredPlan.answeredBy = row.id;
-            const acknowledgement = row.client_message_id.startsWith(HANDBACK_PREFIX) ? t().tasks.notes.handedBack : t().tasks.notes.supplementReceived;
+            // Added to the answer the person reads, in the language of what they just wrote (the console's otherwise).
+            const words = t(messageLocale(row.input_text) ?? undefined).tasks.notes;
+            const acknowledgement = row.client_message_id.startsWith(HANDBACK_PREFIX) ? words.handedBack : words.supplementReceived;
             this.db.prepare("UPDATE tasks SET status='completed',result=?,plan_json=? WHERE id=? AND status='needs_input'")
                 .run([finalContinued.result, acknowledgement].filter(Boolean).join("\n\n"), JSON.stringify(answeredPlan), finalContinued.id);
         }
