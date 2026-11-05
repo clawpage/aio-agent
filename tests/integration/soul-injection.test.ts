@@ -1,7 +1,7 @@
 import {it,expect,vi} from 'vitest';
 import {startHarness} from '../helpers/harness.js';
 import {readSoul,writeSoul} from '../../src/control/soul.js';
-import {EXPERIENCE_POLICY} from '../../src/control/codex/experience.js';
+import {EXPERIENCE_POLICY,PRODUCT_DOCS_URL} from '../../src/control/codex/experience.js';
 
 it('reads current SOUL for planning, new execution and resume without rewriting user text or the active turn',async()=>{
  const h=await startHarness();
@@ -15,6 +15,9 @@ it('reads current SOUL for planning, new execution and resume without rewriting 
   await vi.waitFor(()=>expect(h.codex.startedTurns.length).toBe(1));
   expect(plan).toHaveBeenCalledWith(expect.stringContaining('你是谁'),firstSoul,undefined,expect.any(Function));
   expect(start).toHaveBeenCalledWith(expect.objectContaining({developerInstructions:`${firstSoul}\n\n${EXPERIENCE_POLICY}`}));
+  // Product questions are answered from the official docs, in every account's every thread.
+  expect(PRODUCT_DOCS_URL).toBe('https://clawpage.ai/docs');
+  expect(EXPERIENCE_POLICY).toContain(`read ${PRODUCT_DOCS_URL} (start with its FAQ) before answering`);
   expect(h.codex.startedTurns[0]!.text).not.toContain(firstSoul);
   const prompt=h.codex.startedTurns[0]!.text;
   expect(prompt).toContain('By default answer right in the message, without creating files');
