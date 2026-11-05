@@ -5,6 +5,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import type { Config } from "./config.js";
 import type { AppContext } from "./context.js";
 import type { Logger } from "../common/logger.js";
+import type { Analytics } from "./analytics.js";
 import type { HostTokenSource } from "./codex/hostTokens.js";
 import { requireWorkspaceFilePath } from "./documents/paths.js";
 
@@ -112,6 +113,7 @@ export class ImageGateway {
   #workspace: string;
   #filesFor: (userId: string) => Promise<ImageFiles>;
   #tokens = new Map<string, string>();
+  #analytics: Pick<Analytics, "track"> | undefined;
 
   constructor(opts: {
     port: number;
@@ -123,6 +125,7 @@ export class ImageGateway {
     openaiUrl?: string;
     workspace: string;
     filesFor: (userId: string) => Promise<ImageFiles>;
+    analytics?: Pick<Analytics, "track">;
   }) {
     this.#port = opts.port;
     this.#log = opts.log.child("image-tool");
@@ -131,6 +134,7 @@ export class ImageGateway {
     this.#openai = opts.openaiApiKey ? { url: (opts.openaiUrl ?? OPENAI_API_URL).replace(/\/$/, ""), key: opts.openaiApiKey } : null;
     this.#workspace = opts.workspace.replace(/\/$/, "");
     this.#filesFor = opts.filesFor;
+    this.#analytics = opts.analytics;
   }
 
   /** Give a runtime its image-tool URL. */
@@ -251,10 +255,13 @@ export class ImageGateway {
       });
       await files.write(target, picture);
       this.#log.info("image generated", { userId, edit: images.length > 0, animated, bytes: picture.length, ms: Date.now() - started });
+      this.#analytics?.track("image_generate", { userId, props: { via: "agent", ok: true, animated, edit: images.length > 0, seconds: Math.round((Date.now() - started) / 1000) } });
       return text(`${animated ? "Animated GIF" : "Image"} saved: ${target}\nShow it in your reply with ![description](${target}).`);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       if (!(err instanceof ImageError)) this.#log.warn("image generation failed", { userId, error: message, ms: Date.now() - started });
+      // Only a generation that failed upstream: a request the tool refused is the executor's mistake, not the feature failing.
+      if (!(err instanceof ImageError)) this.#analytics?.track("image_generate", { userId, props: { via: "agent", ok: false, animated: args.animated === true } });
       return text(message, true);
     }
   }

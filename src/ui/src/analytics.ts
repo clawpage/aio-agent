@@ -5,7 +5,9 @@ import { hasNativeBrowser } from "./deviceBrowser";
 /**
  * The console's side of product analytics (src/control/analytics.ts): which
  * platform it runs on (sent with every API request), opening the console and
- * the pages people visit. Everything else is recorded by the control plane.
+ * the pages people visit, and what happens only in the page (a welcome card
+ * tapped, a chart saved, a retry button). Everything else is recorded by the
+ * control plane. Props are small enumerated values: never text, names or URLs.
  */
 let cached: Platform | null = null;
 export function clientPlatform(): Platform {
@@ -36,5 +38,5 @@ export function trackOpen(lang: string): void {
   const now = Date.now();
   if (now - lastOpen < REOPEN_MS) return;
   lastOpen = now;
-  track("app_open", { lang });
+  track("app_open", { lang, ui: String(import.meta.env.VITE_AIO_UI_VERSION ?? "dev") });
 }

@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { t } from "../i18n";
 import { saveFile } from "../saveFile";
+import { track } from "../analytics";
 import { themeColor } from "../themeColor";
 
 /**
@@ -89,6 +90,7 @@ async function pngOf(code: string): Promise<{ blob: Blob; ext: "png" | "svg" }> 
 }
 
 async function download(code: string): Promise<void> {
+  track("file_save", { what: "svg" });
   const { blob, ext } = await pngOf(code);
   const name = `${fileStem(code)}.${ext}`;
   if (saveFile(blob, name)) return;

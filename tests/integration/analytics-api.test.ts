@@ -67,5 +67,10 @@ it('shows the report to the owner only', async () => {
   expect(report.totals).toMatchObject({ accounts: 2, signups: 2 });
   expect(report.totals.activeToday).toBeGreaterThanOrEqual(1);
   expect(report.funnel.registerViews).toBe(1);
+  // The new dashboard's figures: both accounts signed up in the range; the member registered from the form.
+  expect(report.activation.map((s: { step: string; count: number }) => [s.step, s.count]).slice(0, 2)).toEqual([['register_view', 1], ['signup', 2]]);
+  expect(report.accounts).toHaveLength(2);
+  expect(report.accounts.find((a: { role: string }) => a.role === 'member')).toMatchObject({ platforms: expect.arrayContaining(['android']), activeDays: 1 });
+  expect(report.current).toMatchObject({ signups: 2 }); expect(report.previous).toMatchObject({ signups: 0 });
   expect(JSON.stringify(report)).not.toMatch(/member@example\.com|password/);
 });

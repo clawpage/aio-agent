@@ -9,6 +9,7 @@ import { AI_EFFORTS, AiError, type AiEffort, type AiMessage, type AiPart, type C
 import { DecisionError, decisionInput, type DecisionGateway } from "./decision.js";
 import { requestLocale, t } from "./i18n/index.js";
 import { WIDGET_NAME, type WidgetStore } from "./widgets.js";
+import type { Analytics } from "./analytics.js";
 
 /**
  * Public share pages: clawpages.
@@ -165,6 +166,8 @@ export class ShareStore {
   decision?: Pick<DecisionGateway, "decide" | "enabled">;
   /** Components the account's executor builds for its main session (widgets.ts); published over the same token. */
   widgets?: WidgetStore;
+  /** Product analytics: publishes and visits (counted once per visitor and page every half hour). */
+  analytics?: Pick<Analytics, "track" | "trackOnce">;
   #history: typeof HISTORY_LIMITS;
   /** The last `retiredAt` given out: each is later than the one before, so two versions replaced in the same millisecond still have an order. */
   #retired = 0;
@@ -339,6 +342,8 @@ export class ShareStore {
         fs.utimesSync(path.join(staging, COVER), old.mtimeMs / 1000, old.mtimeMs / 1000);
       } catch { /* no cover yet */ }
       this.#swap(userId, name, staging, before);
+      // Published from the account's sandbox or by a collaborator's agent: the agent at work, not a visit to the console.
+      this.analytics?.track("clawpage_publish", { userId, props: { created: !before, collaborator: Boolean(by), via: "agent" } });
       return this.#page(userId, name, meta, this.data?.tables(userId, name) ?? [], this.data?.collaborators(userId, name).length ?? 0);
     } finally {
       fs.rmSync(staging, { recursive: true, force: true });
@@ -1050,6 +1055,8 @@ export class ShareStore {
         return notFound();
       }
       if (!stat.isFile() || !file.startsWith(pageDir + path.sep)) return notFound();
+      // A visit is a page's document (not its scripts and pictures), recorded against the page's owner and not as their activity.
+      if (req.method === "GET" && segments.join("/") === "index.html") this.analytics?.trackOnce(`visit:${req.paCtx?.ip ?? ""}:${userId}:${rawName}`, 30 * 60_000, "clawpage_visit", { userId });
       // Publishing writes every file anew, so a file's size and time name its version. Weak, because the
       // CDN in front compresses pages and drops a strong ETag when it does (a weak one it keeps).
       const tag = `"${stat.size.toString(36)}-${Math.floor(stat.mtimeMs).toString(36)}"`;

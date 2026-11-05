@@ -56,6 +56,7 @@ export class KbGateway extends McpGateway {
     cfg: Config; log: Logger; port: number; usernameOf: (userId: string) => string | null;
     /** An account's workspace, where kb_file saves originals. */
     files?: (username: string) => Promise<ClipFiles>;
+    onToolCall?: (username: string, tool: unknown) => void;
   }) {
     super({
       ...opts,

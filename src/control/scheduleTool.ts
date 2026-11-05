@@ -5,6 +5,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import type { Config } from "./config.js";
 import type { Logger } from "../common/logger.js";
 import type { TaskService } from "./tasks/service.js";
+import type { Analytics } from "./analytics.js";
 import { runInLocale } from "./i18n/index.js";
 import { MAX_DATES, MAX_TIMES_A_DAY, MIN_INTERVAL_MINUTES } from "./tasks/schedules.js";
 import { CONDITION_LANGUAGES, CONDITION_TIMEOUT_SECONDS, MAX_CONDITION_CODE, MAX_CONDITION_OUTPUT } from "./tasks/scheduleCondition.js";
@@ -155,16 +156,24 @@ export const SCHEDULE_POLICY =
   "When the user asks to do something at a future time, to repeat something on a pattern, or says things like \"帮我盯着…\" (\"keep an eye on … for me\") or \"到时候提醒我…\" (\"remind me when it's time…\"), create a scheduled task with schedule_create from aio_schedule (use kind=dates for a few irregular dates and times for several runs a day). It is saved in the user's AIO account and stays in effect across conversations and sessions; when due it automatically creates a new task to run and sends the result to the main session. Do not say that scheduled tasks only last for the current session, and do not ask the user to use some other reminder method because of that; when useful, you can check once now and then create the scheduled task. Inside a scheduled task's own automatic run, do not create further scheduled tasks. When the user wants to change an existing scheduled task's time, number of runs, or content, find it with schedule_list first, then change it with schedule_update; do not delete it and recreate it. " + // i18n-exempt: examples of what people type, for the executor
   "Each account has a built-in daily feed: when the user wants to change what it does, where it looks, or when it pushes, mentions what they care about or no longer want to see, or gives feedback on a feed item (useful, want more, stop pushing this), use feed_get to see the current state and feed_update to change or record it; do not create a separate scheduled task.";
 
+/** A schedule's kind (daily, weekly, dates…) as a property: one of the fixed words, never what the executor wrote. */
+const scheduleKind = (spec: unknown) => {
+  const kind = (spec as { kind?: unknown } | null)?.kind;
+  return typeof kind === "string" && /^[a-z_]{1,16}$/.test(kind) ? kind : "other";
+};
+
 export class ScheduleGateway {
   #port: number;
   #log: Logger;
   #tasksFor: (userId: string) => Promise<TaskService>;
   #tokens = new Map<string, string>();
+  #analytics: Pick<Analytics, "track"> | undefined;
 
-  constructor(opts: { port: number; log: Logger; tasksFor: (userId: string) => Promise<TaskService> }) {
+  constructor(opts: { port: number; log: Logger; tasksFor: (userId: string) => Promise<TaskService>; analytics?: Pick<Analytics, "track"> }) {
     this.#port = opts.port;
     this.#log = opts.log.child("schedule-tool");
     this.#tasksFor = opts.tasksFor;
+    this.#analytics = opts.analytics;
   }
 
   /** Give a runtime its schedule-tool URL. */
@@ -255,6 +264,7 @@ export class ScheduleGateway {
   #answer(tasks: TaskService, userId: string, name: string, args: Record<string, unknown>, text: (value: unknown, isError?: boolean) => unknown): unknown {
     if (name === "schedule_create") {
       const created = tasks.createScheduleFor(userId, args);
+      if (created.ok) this.#analytics?.track("schedule_create", { userId, props: { via: "agent", kind: scheduleKind(args.schedule), condition: Boolean(args.condition) } });
       return created.ok ? text(`${created.message}\n\nid: ${created.schedule.id}`) : text(created.error, true);
     }
     if (name === "schedule_list") {

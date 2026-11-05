@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { browserApi, type BrowserLifecycleStateView } from "../api";
 import { t } from "../i18n";
+import { track } from "../analytics";
 import {
   describeOccupancy,
   idleCountdownText,
@@ -48,6 +49,7 @@ export function BrowserStatusBar({ status, watching, onWake, onNotify, pinned, o
   }, [countdown]);
 
   const retry = async () => {
+    track("retry_tap", { what: "browser" });
     setRetrying(true);
     try {
       await onWake();

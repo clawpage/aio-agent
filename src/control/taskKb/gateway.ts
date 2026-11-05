@@ -11,7 +11,7 @@ import { checkProposal, getKbNode, kbNeighbors, kbSourceText, proposalStatus, pr
 import { SharedKbError, type SharedKbs } from "./shared.js";
 import { callHistoryTool, HISTORY_POLICY, HISTORY_TOOLS } from "./historyTools.js";
 import { callLibraryTool, LIBRARY_POLICY, LIBRARY_TOOL_NAMES, LIBRARY_TOOLS } from "./libraryTools.js";
-import type { Analytics } from "../analytics.js";
+import { toolName, type Analytics } from "../analytics.js";
 import type { TaskService } from "../tasks/service.js";
 
 /**
@@ -117,7 +117,7 @@ export function sandboxKbFiles(container: Pick<SandboxContainer, "execInSandbox"
   };
 }
 
-export interface TaskKbRuntime { db: Db; tasks: TaskService; cfg: Config; container: Pick<SandboxContainer, "execInSandbox">; taskKb?: { nudge(urgent: boolean): void }; sharedKb?: SharedKbs; analytics?: Pick<Analytics, "track"> }
+export interface TaskKbRuntime { db: Db; tasks: TaskService; cfg: Config; container: Pick<SandboxContainer, "execInSandbox">; taskKb?: { nudge(urgent: boolean): void }; sharedKb?: SharedKbs; analytics?: Pick<Analytics, "track" | "trackOnce"> }
 
 /** A shared node as an agent reads it: the library named, sources with who gave them (a path is someone else's file). */
 function sharedNode(shared: SharedKbs, library: string, node: NonNullable<ReturnType<typeof getKbNode>>) {
@@ -232,6 +232,8 @@ export class TaskKbGateway {
     const str = (v: unknown) => (typeof v === "string" ? v : undefined);
     try {
       const runtime = await this.#runtimeFor(userId);
+      // Counted once per tool and account every 10 minutes: an executor reads its knowledge many times in one task.
+      runtime.analytics?.trackOnce(`knowledge:${userId}:${name}`, 10 * 60_000, "knowledge_use", { userId, props: { via: "agent", tool: toolName(name), source: "personal" } });
       if (HISTORY_TOOL_NAMES.has(name)) return callHistoryTool(runtime, userId, name, args);
       if (LIBRARY_TOOL_NAMES.has(name)) return callLibraryTool(runtime, userId, name, args, this.#log);
       const { db, cfg } = runtime;

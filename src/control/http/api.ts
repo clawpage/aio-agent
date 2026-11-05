@@ -37,6 +37,7 @@ import { UNSAFE_METHODS, guardUnsafe, originAllowed } from "./security.js";
 import { BOOTSTRAP_USERNAME, authenticateUser, getUser } from "../auth/owner.js";
 import { visibleEmail } from "../auth/email.js";
 import { CLIENT_EVENTS } from "../../common/analytics.js";
+import { fileKind } from "../analytics.js";
 import { RegisterError, createInvite, listInvites, registerWithInvite, registrationRequiresInvite, revokeInvite } from "../auth/invites.js";
 import { googleRouter } from "../auth/googleRoutes.js";
 import { DEVICE_KINDS, type DeviceKind } from "../deviceLink.js";
@@ -2276,6 +2277,8 @@ export function createApiRouter(context: AppContext): Router {
       const controller = new AbortController();
       const cancel = () => controller.abort();
       res.on("close", cancel);
+      // Only what kind of file was saved, never its name or path.
+      track(req, "file_download", { kind: fileKind(checked.path) });
       try {
         const upstream = await container.fetch(`/v1/file/download?path=${encodeURIComponent(checked.path)}`,
           { method: "GET", signal: AbortSignal.any([controller.signal, AbortSignal.timeout(10 * 60_000)]) });

@@ -1105,19 +1105,38 @@ token 统计时区取 `PA_BROWSER_TIMEZONE`。计数持久保存在各账号控�
 ## 16a. 使用统计（埋点）
 
 自建、不接第三方统计。事件写入控制面中央数据库的 `analytics_events`（时间、事件名、账号 ID、平台、最多 8 个短标量属性），
-不记录消息内容、邮箱、IP 或设备标识，启动时删除 400 天前的事件。成员运行时与 owner 共用这张表，上报不会唤醒成员沙箱。
+不记录消息内容、文件名、路径、网址、邮箱、IP 或设备标识（属性只有枚举值、计数与时长），启动时删除 400 天前的事件。成员运行时与 owner 共用这张表，上报不会唤醒成员沙箱。
+服务端看得到的动作一律在服务端记，界面只上报只发生在页面里的动作。
 
-- **平台**：界面每个 API 请求带 `x-client-platform`（`web` / `pwa` / `ios` / `android` / `mac`，由 Mac App 的设备桥、手机 App 的浏览器桥和
-  主屏显示模式判断，`src/ui/src/analytics.ts`），服务端只接受这五个值。
-- **界面上报**（`POST /api/analytics`，`src/common/analytics.ts` 列出）：`app_open`（加载及离开 30 分钟后回到前台）、`page_view`（切换页面）、
-  `auth_view`（登录/注册页曝光，唯一允许未登录上报的事件，需同源 Origin，每 IP 每小时 30 次）。已登录每账号每小时 300 次。
-- **服务端记录**：`signup`、`login`（方式、用邮箱还是用户名）、`login_failed`、`logout`、`task_submit`（附件数、是否引用任务）、`task_stop`、
+- **平台与版本**：界面每个 API 请求带 `x-client-platform`（`web` / `pwa` / `ios` / `android` / `mac`，由 Mac App 的设备桥、手机 App 的浏览器桥和
+  主屏显示模式判断，`src/ui/src/analytics.ts`），服务端只接受这五个值。`app_open` 带界面构建版本 `ui`（`package.json` 版本，`vite.config.ts` 注入）；
+  App 外壳自己的版本远程页面读不到（远程控制台没有 IPC），不上报。
+- **界面上报**（`POST /api/analytics`，`src/common/analytics.ts` 的 `CLIENT_EVENTS`）：`app_open`（加载及离开 30 分钟后回到前台，即「会话」；`lang`、`ui`）、
+  `page_view`（切换页面，`view`）、`auth_view`（登录/注册页曝光，`mode`；唯一允许未登录上报的事件，需同源 Origin，每 IP 每小时 30 次）、
+  `welcome_card`（主会话欢迎页点了哪张卡：`kind=feature` 时 `card` 为卡片图标名 `clawpages` / `knowledge` / `workspace`，`kind=starter` 时为第几个示例）、
+  `file_save`（保存消息里的图表或 SVG 图，`what=chart|svg`）、`retry_tap`（浏览器状态栏的「重试」，`what=browser`）。已登录每账号每小时 300 次。
+- **服务端记录**：`signup`、`login`（方式、用邮箱还是用户名）、`login_failed`、`logout`、`task_submit`（附件数、其中图片数、是否引用任务）、`task_stop`、
   `task_archive`、`task_retry`、`schedule_edit`、`schedule_action`、`push_subscribe`/`push_unsubscribe`、`locale_change`、`vault_save`、
-  `support_request`、`voice_input`（是否成功、时长）、`browser_takeover`/`browser_handback`、`user_browser_takeover`/`user_browser_handback`（本机 Chrome）。新增埋点在 `src/control/http/api.ts` 调 `track()`。
-- **统计页**：显示在「运营看板」（见第 16 节；`GET /api/analytics/report?days=7|30|90`，仅 owner）：账号总数与新注册、
-  今日 / 7 天 / 30 天活跃账号、任务数与完成率、注册转化（同期注册页浏览与经注册页完成的邮箱注册事件，不含 Google 注册与历史账号）、每日趋势与明细、各事件次数与账号数、平台分布、任务来源。
-  活跃 = 当天有事件或手动提交任务的账号（定时任务自动执行不算）。任务数字在读报表时从各账号自己的任务表统计（只读打开，含历史，
-  合并进其他任务的补充不单独计）；注册数来自账号创建时间；其余数字从事件开始记录（`meta.analytics_started`）之后才有。
+  `support_request`（`kind`；`content` 即举报回答）、`voice_input`（是否成功、时长）、`browser_takeover`/`browser_handback`/`browser_handback_continue`、
+  `user_browser_takeover`/`user_browser_handback`（本机 Chrome）、`clawpage_open`/`clawpage_invite`/`clawpage_restore`/`clawpage_sign_in`（控制台里的 Clawpages 操作）、
+  `shared_kb_create`/`shared_kb_invite`/`shared_kb_join`/`shared_kb_dissolve`（控制台或执行器，后者 `via=agent`）、`knowledge_delete`/`knowledge_toggle`、
+  `file_download`（经 `/api/files/download` 下载或存到手机，只记 `kind`：image / video / audio / document / archive / other）。
+  执行器经成员网关的工具（`props.via=agent`）：`schedule_create`（`kind` 为规则类型 daily / weekly / dates…，`condition` 是否带条件）、
+  `image_generate`（`ok`、`animated` 即 GIF、`edit` 是否参考图、`seconds`）、`clawpage_publish`（`created` 是否新页面、`collaborator` 是否协作者发布）、
+  `knowledge_use`（个人知识库与任务历史工具，`tool` 为工具名）、`kb_use`（owner 配置的知识库 MCP，`tool`）；后两个同一账号同一工具每 10 分钟只记一次。
+  `clawpage_visit`：公开分享页的页面文档被打开（不含页内资源），记在页面主人名下，同一访客地址同一页每 30 分钟只记一次（地址只在内存里去重，不落库）。
+  `browser_restore_failed`：账号的沙箱浏览器恢复失败（生命周期 `wake.failed`）。新增埋点在 `src/control/http/api.ts` 调 `track()`，网关里经 `Analytics.track` / `trackOnce`。
+- **活跃的口径**：当天有事件或手动 / 语音配件提交任务的账号。定时任务自动执行、执行器的工具调用（`via=agent`）、别人访问其分享页、
+  浏览器恢复失败与登录失败都不算活跃。
+- **统计页**：显示在「运营看板」（见第 16 节；`GET /api/analytics/report?days=7|30|90`，仅 owner）。除原有字段外，报表给出：
+  `current` / `previous`（本期与紧邻的上一期同样天数：活跃账号、新注册、任务、完成、失败、中断、会话、完成任务耗时中位数）、
+  `activation`（本期注册的账号：注册页浏览 → 注册 → 首个任务（手动或语音配件，不含定时）→ 首个完成的任务 → 次日回访 → 7 日内回访；
+  后两步只计已满 1 / 7 天的账号，`eligible` 为分母）、`cohorts`（按注册周（周一起）分组的次日与 7 日内回访）、
+  `features`（各功能本期次数、账号数与上一期账号数，见 `FEATURES`）、`quality`（任务结果分布、耗时中位数与 P90、停止、重试、举报、浏览器恢复失败）、
+  `accounts`（每个账号：最近活跃、本期活跃天数、会话、任务、完成、失败、平台、最近一个任务的模型）、`versions`（各平台在用的界面版本）、`welcomeCards`。
+  每日明细另有 `sessions` 与 `wau`（截至当天 7 天内活跃账号数）。
+  任务数字在读报表时从各账号自己的任务表统计（只读打开，含历史，合并进其他任务的补充不单独计）；注册数来自账号创建时间；
+  其余数字从事件开始记录（`meta.analytics_started`）之后才有。报表读取最近 max(2×范围, 30) 天的事件与任务，一次扫描算出全部数字。
 
 ## 17. 界面与交互
 

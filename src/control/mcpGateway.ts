@@ -30,6 +30,8 @@ export interface McpGatewayOptions {
   /** Records the granted runtime's capability URL on its config. */
   assign: (runtime: Config, url: string) => void;
   timeoutMs: number;
+  /** Told of every tool an account calls (its name only), for product analytics. */
+  onToolCall?: (username: string, tool: unknown) => void;
 }
 
 /** One authorized call, already read: the account and what goes upstream. */
@@ -147,6 +149,8 @@ export class McpGateway {
       } catch {
         message = undefined; // not JSON: the upstream answers it
       }
+      const rpc = (message ?? {}) as { method?: unknown; params?: { name?: unknown } };
+      if (rpc.method === "tools/call") this.#opts.onToolCall?.(username, rpc.params?.name);
       const answer = message === undefined ? undefined : await this.local(message, username, req.headers);
       if (answer !== undefined) return answer === null ? send(202) : send(200, answer);
       const call: McpCall = { username, body: Buffer.concat(chunks), headers: { ...passed("mcp-session-id"), ...passed("mcp-protocol-version") } };

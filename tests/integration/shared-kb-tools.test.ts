@@ -23,7 +23,7 @@ async function setup() {
   const track = vi.fn();
   const container = { async execInSandbox() { return { code: 0, stdout: "", stderr: "" }; }, async writeFileInSandbox() {} };
   const cfg = { ...h.ctx.cfg, memberModelPort: 0, primaryHost: "agent.example.com" };
-  const runtimes = new Map(Object.values(ids).map((id) => [id, { db: h.ctx.db, tasks: h.ctx.tasks, cfg: { ...cfg, runtimeUserId: id, dataDir: path.join(h.dataDir, id) }, container, sharedKb: kbs, analytics: { track } }]));
+  const runtimes = new Map(Object.values(ids).map((id) => [id, { db: h.ctx.db, tasks: h.ctx.tasks, cfg: { ...cfg, runtimeUserId: id, dataDir: path.join(h.dataDir, id) }, container, sharedKb: kbs, analytics: { track, trackOnce: vi.fn() } }]));
   const taskKb = new TaskKbGateway({ port: 0, log: h.ctx.log, runtimeFor: async (id) => runtimes.get(id)! });
   const gateway = new MemberModelGateway(cfg, h.ctx.log, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, taskKb);
   await gateway.start();

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { t } from "../i18n";
 import { saveFile } from "../saveFile";
+import { track } from "../analytics";
 import { chartHeight, type ChartSpec } from "../chartBlocks";
 import type { MountedChart } from "../chartRender";
 
@@ -14,6 +15,7 @@ function renderer() {
 }
 
 async function save(chart: MountedChart, title: string | null): Promise<void> {
+  track("file_save", { what: "chart" });
   const blob = await chart.png();
   const name = `${(title || t.cards.chart.defaultFileName).replace(/[\\/:*?"<>|\s]+/g, "_").slice(0, 60)}.png`;
   if (saveFile(blob, name)) return;

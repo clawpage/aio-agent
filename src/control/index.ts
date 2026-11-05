@@ -1,5 +1,5 @@
 import http from "node:http";
-import { Analytics } from "./analytics.js";
+import { Analytics, toolName } from "./analytics.js";
 import path from "node:path";
 import {MemberModelGateway} from "./memberModelGateway.js";
 import {ShareStore} from "./share.js";
@@ -157,6 +157,8 @@ async function bootstrapRuntime(opts: BootstrapOptions, cfg: Config, log: Logger
     // A test override replaces only the container-facing runtime, so the state
     // machine under test is the same one production uses.
     runtime: tabs ? pruneBeforeSnapshot(resolvedBrowserRuntime, tabs) : resolvedBrowserRuntime,
+    // A member runtime gets the central analytics after it is built (UserRuntimes), so it is looked up when the event comes.
+    onEvent: (event) => { if (event.type === "wake.failed") ctx.analytics?.track("browser_restore_failed", { userId: cfg.runtimeUserId ?? "owner_1" }); },
   });
   // The manager protects the browser for the whole of every managed turn, so a
   // lease must exist before this point (a queued turn can start on construction).
@@ -517,6 +519,7 @@ async function main(): Promise<void> {
   sharedMaintainer.start(ctx.db);
   ctx.tasks.setClawpages(id=>ctx.share!.list(id));
   ctx.share.widgets=new WidgetStore(ctx.cfg);
+  ctx.share.analytics=ctx.analytics;
   ctx.tasks.setWidgets(id=>ctx.share!.widgets!.list(id));
   // The owner sandbox receives its token when refreshSandboxContent seeds it below.
   ctx.share.provision(ctx.cfg);
@@ -525,7 +528,9 @@ async function main(): Promise<void> {
   // Clawpages' signed-in visitors (and the console's widgets) ask the same decisions, recorded against their own account.
   ctx.share.decision=decision;
   const kb=new KbGateway({cfg:ctx.cfg,log:ctx.log,port:ctx.cfg.memberModelPort??4902,usernameOf:id=>account("SELECT username AS v FROM owners WHERE id=?",id),
-    files:async name=>{const id=account("SELECT id AS v FROM owners WHERE username=?",name);if(!id)throw new Error(`no account ${name}`);return sandboxClipFiles(id===ctx.cfg.runtimeUserId?ctx:await ctx.runtimeForUser!(id));}});
+    files:async name=>{const id=account("SELECT id AS v FROM owners WHERE username=?",name);if(!id)throw new Error(`no account ${name}`);return sandboxClipFiles(id===ctx.cfg.runtimeUserId?ctx:await ctx.runtimeForUser!(id));},
+    // Once per tool and account every 10 minutes: an executor searches the knowledge base many times in one task.
+    onToolCall:(name,tool)=>{const id=account("SELECT id AS v FROM owners WHERE username=?",name);if(id)ctx.analytics?.trackOnce(`kb:${id}:${toolName(tool)}`,10*60_000,"kb_use",{userId:id,props:{via:"agent",tool:toolName(tool)}});}});
   kb.provision(ctx.cfg);
   const haDashboard=HaDashboard.from(ctx.cfg,ctx.log);
   const ha=new HaGateway({cfg:ctx.cfg,log:ctx.log,port:ctx.cfg.memberModelPort??4902,usernameOf:id=>account("SELECT username AS v FROM owners WHERE id=?",id),cameras:ctx.cameras,history:HaHistory.from(ctx.cfg,ctx.log,haDashboard),dashboard:haDashboard,
@@ -565,7 +570,7 @@ async function main(): Promise<void> {
     err=>ctx.log.warn("Mac tools not refreshed",{error:err instanceof Error?err.message:String(err)}));
   // Each account's schedules live in its own runtime: the owner's here, a member's in its runtime.
   const schedule=new ScheduleGateway({port:ctx.cfg.memberModelPort??4902,log:ctx.log,
-    tasksFor:async id=>id===ctx.cfg.runtimeUserId?ctx.tasks:(await ctx.runtimeForUser!(id)).tasks});
+    tasksFor:async id=>id===ctx.cfg.runtimeUserId?ctx.tasks:(await ctx.runtimeForUser!(id)).tasks,analytics:ctx.analytics});
   schedule.provision(ctx.cfg);
   // Likewise its personal knowledge base, read by every agent of the account and written only by its kernel, with the past tasks and agreements beside it.
   const taskKb=new TaskKbGateway({port:ctx.cfg.memberModelPort??4902,log:ctx.log,
@@ -574,7 +579,7 @@ async function main(): Promise<void> {
   // Pictures come from the control plane's own ChatGPT login, so only a deployment with one offers them.
   const image=ctx.cfg.hostCodex.enabled?new ImageGateway({port:ctx.cfg.memberModelPort??4902,log:ctx.log,hostTokens:ctx.hostTokens,
     chatgptUrl:ctx.cfg.hostCodex.chatgptUrl,openaiApiKey:ctx.cfg.openaiApiKey,workspace:ctx.cfg.sandbox.containerWorkspaceDir,
-    filesFor:async id=>sandboxImageFiles(id===ctx.cfg.runtimeUserId?ctx:await ctx.runtimeForUser!(id))}):undefined;
+    filesFor:async id=>sandboxImageFiles(id===ctx.cfg.runtimeUserId?ctx:await ctx.runtimeForUser!(id)),analytics:ctx.analytics}):undefined;
   image?.provision(ctx.cfg);
   // Speech for every account, from the one speech server the deployment names.
   const tts=ctx.cfg.speech.url?new TtsGateway({port:ctx.cfg.memberModelPort??4902,log:ctx.log,speechUrl:ctx.cfg.speech.url,

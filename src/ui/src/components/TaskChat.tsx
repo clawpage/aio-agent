@@ -7,6 +7,7 @@ import { PopupPresence } from "./PopupMotion";
 import { MessageTime, TaskDuration, useDisplayClock } from "./MessageTime";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { api, openEventStream } from "../api";
+import { track } from "../analytics";
 import type { Attachment, Task } from "../types";
 import { AttachmentCards, MessageFileCards } from "./Chat";
 import { DispatchLog } from "./DispatchLog";
@@ -575,8 +576,8 @@ export function TaskChat({ onDetails, onOpenLink, onOpenFileInBrowser, onExpired
         <article className="msg assistant welcome-msg"><div className="bubble"><div className="welcome-head"><BrandMark size={24}/><strong>{i18n.feed.empty.title}</strong></div><p className="welcome-beta">{i18n.feed.empty.beta}</p><p>{i18n.feed.empty.body}</p></div></article>
         <p className="welcome-hint muted tiny">{i18n.feed.empty.hint}</p>
         {/* What it can do, one tap each: the tap sends a first task that shows it. */}
-        <div className="welcome-features">{i18n.feed.empty.features.map(f => <button type="button" key={f.title} className="welcome-feature" onClick={() => sendStarter(f.prompt)}><span className="welcome-feature-icon" aria-hidden="true"><NavIcon name={f.icon as NavIconName}/></span><span className="welcome-feature-text"><strong>{f.title}</strong><span>{f.body}</span></span></button>)}</div>
-        <div className="welcome-starters">{i18n.feed.empty.starters.map(s => <button type="button" key={s.label} onClick={() => sendStarter(s.prompt)}>{s.label}</button>)}</div>
+        <div className="welcome-features">{i18n.feed.empty.features.map(f => <button type="button" key={f.title} className="welcome-feature" onClick={() => { track("welcome_card", { kind: "feature", card: f.icon }); sendStarter(f.prompt); }}><span className="welcome-feature-icon" aria-hidden="true"><NavIcon name={f.icon as NavIconName}/></span><span className="welcome-feature-text"><strong>{f.title}</strong><span>{f.body}</span></span></button>)}</div>
+        <div className="welcome-starters">{i18n.feed.empty.starters.map((s, i) => <button type="button" key={s.label} onClick={() => { track("welcome_card", { kind: "starter", card: i }); sendStarter(s.prompt); }}>{s.label}</button>)}</div>
       </div>}
       {/* Same key as the reply it becomes: the finished reply takes its place without coming in again. */}
       {feed.map(({ task: t, report, at }, i) => {
