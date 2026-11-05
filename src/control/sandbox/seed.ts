@@ -2971,6 +2971,15 @@ def cmd_check(args):
         edited = edited.resize(original.size)
     boxes = [list(map(int, b.split(","))) for b in args.box] if args.box else faces_in(original)
     source = "given" if args.box else "faces"
+    skipped = []
+    if getattr(args, "markup", None) and not getattr(args, "crop", None):
+        # merge took the marked part from the AI on purpose (a person removed or changed there): only the others count.
+        marked = marked_area(args.markup, full_size)
+        skipped = [b for b in boxes if marked[b[1]:b[1] + b[3], b[0]:b[0] + b[2]].any()]
+        boxes = [b for b in boxes if b not in skipped]
+        if skipped and not boxes:
+            return out({"ok": True, "regions": [], "skipped": skipped, "compared": source,
+                        "message": "Every face found is inside the marked part, which was changed on purpose; look at the result yourself."})
     if not boxes:
         # No face found (a profile, sunglasses, a hand over it): the top of the people stands in for the head.
         alpha = subject_mask(args.original, full_size)
@@ -3014,10 +3023,214 @@ def cmd_check(args):
     os.makedirs(os.path.dirname(os.path.abspath(sheet_path)) or ".", exist_ok=True)
     sheet.save(sheet_path)
     ok = not any(r["redrawn"] for r in regions)
-    out({"ok": ok, "regions": regions, "compared": source, "resized": reframed, "sheet": sheet_path,
+    out({"ok": ok, "regions": regions, **({"skipped": skipped} if skipped else {}), "compared": source, "resized": reframed, "sheet": sheet_path,
          "message": "The faces keep the original detail." if ok else
          "A face was redrawn (its detail no longer matches the original; redrawn faces also come out with patches of color): redo this photo from the original with retouch (do not edit the edited one), and do not deliver it as is."})
 
+
+# ---------- one marked part changed by AI (image_generate with a markup layer), merged back onto the original ----------
+
+# What image_generate gets: the photo upright, at most this long (the model works at about 1.5 megapixels anyway and
+# refuses more than 16 megapixels), and an annotation layer of the same size.
+AI_SIDE = 3072
+MARK_RGBA = (255, 40, 40, 255)
+
+
+def mark_shapes(args, size):
+    """The shapes --circle, --box and --lasso give, in the original's pixels, checked against its size."""
+    W, H = size
+    shapes = []
+    for c in args.circle or []:
+        x, y, r = numbers(c, 3, "--circle")
+        shapes.append(("circle", x, y, r))
+    for b in args.box or []:
+        x0, y0, x1, y1 = numbers(b, 4, "--box")
+        shapes.append(("box", min(x0, x1), min(y0, y1), max(x0, x1), max(y0, y1)))
+    for l in args.lasso or []:
+        vals = [v for v in str(l).replace(" ", ",").split(",") if v]
+        try:
+            pts = [float(v) for v in vals]
+        except ValueError:
+            fail("--lasso takes x,y pairs (got %r)." % l)
+        if len(pts) < 6 or len(pts) % 2:
+            fail("--lasso takes at least three x,y points around the part (got %r)." % l)
+        shapes.append(("lasso", list(zip(pts[0::2], pts[1::2]))))
+    if not shapes:
+        fail("Mark the part to change with --circle X,Y,R, --box X0,Y0,X1,Y1 or --lasso X,Y,X,Y,… (pixels of the original).")
+    for s in shapes:
+        xs = [p[0] for p in s[1]] if s[0] == "lasso" else ([s[1] - s[3], s[1] + s[3]] if s[0] == "circle" else [s[1], s[3]])
+        ys = [p[1] for p in s[1]] if s[0] == "lasso" else ([s[2] - s[3], s[2] + s[3]] if s[0] == "circle" else [s[2], s[4]])
+        if max(xs) < 0 or max(ys) < 0 or min(xs) > W or min(ys) > H:
+            fail("A marked shape lies outside the photo (%dx%d): use pixels of the original." % (W, H))
+    return shapes
+
+
+def draw_marks(shapes, size, scale, fill=False):
+    """The shapes drawn on a transparent layer of the given size: outlines (what the model reads), or filled."""
+    from PIL import Image, ImageDraw
+    layer = Image.new("RGBA", size, (0, 0, 0, 0))
+    draw = ImageDraw.Draw(layer)
+    width = max(4, round(max(size) / 180))
+    for s in shapes:
+        if s[0] == "circle":
+            _, x, y, r = s
+            box = [(x - r) * scale, (y - r) * scale, (x + r) * scale, (y + r) * scale]
+            draw.ellipse(box, fill=MARK_RGBA if fill else None, outline=MARK_RGBA, width=width)
+        elif s[0] == "box":
+            _, x0, y0, x1, y1 = s
+            draw.rectangle([x0 * scale, y0 * scale, x1 * scale, y1 * scale], fill=MARK_RGBA if fill else None, outline=MARK_RGBA, width=width)
+        else:
+            pts = [(x * scale, y * scale) for x, y in s[1]]
+            if fill:
+                draw.polygon(pts, fill=MARK_RGBA)
+            draw.line(pts + [pts[0]], fill=MARK_RGBA, width=width, joint="curve")
+    return layer
+
+
+def cmd_markup(args):
+    from PIL import Image
+    img = load(args.input)
+    W, H = img.size
+    shapes = mark_shapes(args, (W, H))
+    scale = min(1.0, AI_SIDE / max(W, H))
+    size = (max(16, round(W * scale)), max(16, round(H * scale)))
+    stem = os.path.splitext(args.output or os.path.join(os.path.dirname(os.path.abspath(args.input)), os.path.basename(os.path.splitext(args.input)[0])))[0]
+    stem = stem[:-7] if stem.endswith("-markup") else stem
+    ai_input, layer_path, preview_path = stem + "-ai-input.jpg", stem + "-markup.png", stem + "-markup-preview.jpg"
+    os.makedirs(os.path.dirname(os.path.abspath(layer_path)) or ".", exist_ok=True)
+    work = img.resize(size, Image.LANCZOS) if size != (W, H) else img
+    work.save(ai_input, quality=95, subsampling=0)
+    layer = draw_marks(shapes, size, scale)
+    layer.save(layer_path)
+    preview = work.convert("RGBA")
+    preview.alpha_composite(layer)
+    preview.convert("RGB").resize((max(1, round(size[0] * 1024 / max(size))), max(1, round(size[1] * 1024 / max(size))))).save(preview_path, quality=85)
+    out({"ok": True, "input": ai_input, "markup": layer_path, "preview": preview_path, "size": [W, H],
+         "next": "Look at the preview: the marks must cover all of what should change (with a little margin) and nothing of the people who stay. "
+                 "Then image_generate with reference_paths [input], markup_path markup, complexity low and a prompt that says what to change inside the marks, what stays, and to remove the marks; "
+                 "then merge %s <the image_generate result> --markup %s -o <result>.jpg." % (args.input, layer_path)})
+
+
+def marked_area(layer_path, size):
+    """The marked part as a 0/1 array at size (w, h): the outlines and everything they enclose."""
+    import cv2
+    import numpy as np
+    from PIL import Image
+    if not os.path.isfile(layer_path):
+        fail("No such markup layer: " + layer_path)
+    alpha = np.asarray(Image.open(layer_path).convert("RGBA").resize(size, Image.NEAREST))[:, :, 3] > 127
+    if not alpha.any():
+        fail("The markup layer %s has no marks." % layer_path)
+    free = np.pad((~alpha).astype(np.uint8), 1, constant_values=1)
+    cv2.floodFill(free, np.zeros((free.shape[0] + 2, free.shape[1] + 2), np.uint8), (0, 0), 2)
+    return (free[1:-1, 1:-1] != 2).astype(np.uint8)
+
+
+def cmd_merge(args):
+    """Take only what the AI changed in and around the marked part; every other pixel stays the original's."""
+    import cv2
+    import numpy as np
+    from PIL import Image
+    original, edited = load(args.original), load(args.edited)
+    W, H = original.size
+    if abs(edited.size[0] / edited.size[1] - W / H) > 0.02:
+        fail("The AI result has a different shape (%dx%d) than the original (%dx%d): it was cropped or reframed, so it cannot be merged. "
+             "Run image_generate again on markup's input and say to keep the framing." % (edited.size[0], edited.size[1], W, H))
+    long_edge = max(W, H)
+    # The mask is worked out on a copy at most 1600 pixels long; the merge itself is at full size.
+    s = min(1.0, 1600.0 / long_edge)
+    ws, hs = max(1, round(W * s)), max(1, round(H * s))
+    a = np.asarray(original.resize((ws, hs), Image.BILINEAR), dtype=np.float32) / 255.0
+    b = np.asarray(edited.resize((ws, hs), Image.BILINEAR), dtype=np.float32) / 255.0
+    marks = marked_area(args.markup, (ws, hs))
+    px = lambda share: max(1, round(max(ws, hs) * share))
+    disk = lambda r: cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * r + 1, 2 * r + 1))
+    near = cv2.dilate(marks, disk(px(0.015)))
+    # Nothing is taken from the AI farther than this from the marks: what it changed beyond is reported, not merged.
+    allowed = cv2.dilate(marks, disk(px(0.05)))
+    # The model redraws the whole picture a little: take out its overall shift of color before looking for real changes.
+    shift = np.median((b - a)[near == 0], axis=0) if (near == 0).any() else np.zeros(3, np.float32)
+    diff = cv2.GaussianBlur(np.abs(b - shift - a).max(axis=2), (0, 0), max(1.0, px(0.002)))
+    # Clear changes that reach the marks, grown into the fainter changes joined to them, plus the small pieces the model
+    # changed close by (a flower head past the circle), all near the marks: never the parts of the marks the model left
+    # as they were.
+    strong = cv2.morphologyEx((diff > args.threshold).astype(np.uint8), cv2.MORPH_CLOSE, disk(px(0.004)))
+    count, labels = cv2.connectedComponents(strong)
+    touching = np.unique(labels[(near > 0) & (strong > 0)])
+    seed = np.isin(labels, touching[touching > 0]).astype(np.uint8)
+    faint = cv2.morphologyEx((diff > args.threshold / 2).astype(np.uint8), cv2.MORPH_CLOSE, disk(px(0.004)))
+    count, labels = cv2.connectedComponents(faint | seed)
+    grown = (np.isin(labels, np.unique(labels[seed > 0])) & (allowed > 0)).astype(np.uint8) if seed.any() else seed
+    count, labels = cv2.connectedComponents(strong)
+    close_by = np.unique(labels[(cv2.dilate(grown, disk(px(0.03))) > 0) & (strong > 0)])
+    region = (grown | np.isin(labels, close_by[close_by > 0])) & (allowed > 0)
+    region = cv2.dilate(region.astype(np.uint8), disk(px(0.008)))
+    beyond = float(((strong > 0) & (cv2.dilate(allowed, disk(px(0.01))) == 0)).mean())
+    # People the marks do not touch stay the original's whole (clothes, hands, hair), not just their faces.
+    people = (subject_mask(args.original, (ws, hs)) > 0.5).astype(np.uint8)
+    count, labels = cv2.connectedComponents(people)
+    kept = np.zeros_like(region)
+    kept_people = 0
+    for label in range(1, count):
+        person = labels == label
+        if person.sum() < 0.002 * ws * hs or (person & (near > 0)).any():
+            continue
+        guard = cv2.dilate(person.astype(np.uint8), disk(px(0.006))) > 0
+        if (region > 0)[guard].any():
+            kept_people += 1
+        kept[guard] = 1
+    # Faces away from the marks stay the original's, whatever the model did to them.
+    protected = 0
+    for (x, y, w, h) in faces_in(original):
+        x0, y0, x1, y1 = [round(v * s) for v in (x - 0.2 * w, y - 0.2 * h, x + 1.2 * w, y + 1.2 * h)]
+        x0, y0 = max(0, x0), max(0, y0)
+        if marks[y0:y1, x0:x1].any():
+            continue
+        if region[y0:y1, x0:x1].any():
+            protected += 1
+        kept[y0:y1, x0:x1] = 1
+    region[kept > 0] = 0
+    marked_share, changed_share = float(marks.mean()), float(region.mean())
+    warnings = []
+    if not seed.any():
+        warnings.append("The AI result shows no change at the marks.")
+    if beyond > 0.01:
+        warnings.append("The AI also clearly changed %.0f%% of the photo away from the marks, which was left as the original: if that belongs to the change (the rest of an object reaching past the marks), run markup again with marks around all of it and merge this same AI result with the new layer; otherwise it is the model drifting, which is fine." % (100 * beyond))
+    # Match the new part's color to the original just around it, place by place (light falls off across a wall), so
+    # the seam does not show: the difference along a ring outside the part, spread smoothly over the part.
+    ring = ((cv2.dilate(region, disk(px(0.02))) > 0) & (region == 0)).astype(np.float32)
+    sigma = max(2.0, px(0.04))
+    weight = cv2.GaussianBlur(ring, (0, 0), sigma)
+    overall = (a - b)[ring > 0].mean(axis=0) if ring.any() else np.zeros(3, np.float32)
+    local = cv2.GaussianBlur((a - b) * ring[:, :, None], (0, 0), sigma) / np.maximum(weight, 1e-6)[:, :, None]
+    blend = np.clip(weight / 0.05, 0, 1)[:, :, None]
+    offset = local * blend + overall * (1 - blend)
+    soft = cv2.GaussianBlur(region.astype(np.float32), (0, 0), max(1.0, px(0.008)))
+    soft[kept > 0] = 0  # the soft edge never reaches into a kept person or face
+    mask = cv2.resize(soft, (W, H), interpolation=cv2.INTER_LINEAR)
+    offset = cv2.resize(offset.astype(np.float32), (W, H), interpolation=cv2.INTER_LINEAR) * 255.0
+    big = np.asarray(edited.resize((W, H), Image.LANCZOS) if edited.size != (W, H) else edited)
+    base = np.asarray(original)
+    result = base.copy()
+    for y0 in range(0, H, STRIP):
+        y1 = min(H, y0 + STRIP)
+        m = mask[y0:y1, :, None]
+        if not m.any():
+            continue
+        o = base[y0:y1].astype(np.float32)
+        result[y0:y1] = np.clip(o + (big[y0:y1].astype(np.float32) + offset[y0:y1] - o) * m, 0, 255).astype(np.uint8)
+    info = dict(Image.open(args.original).info)
+    save(result, args.output, info)
+    preview_path = os.path.splitext(args.output)[0] + "-merged-part.jpg"
+    view = (a * 255).astype(np.uint8).copy()
+    view[soft > 0.5] = (0.5 * view[soft > 0.5] + 0.5 * np.array([255, 60, 60])).astype(np.uint8)
+    Image.fromarray(view).save(preview_path, quality=85)
+    out({"ok": not warnings, "output": args.output, "size": [W, H], "preview": preview_path,
+         "markedShare": round(marked_share, 3), "mergedShare": round(changed_share, 3), "keptPeople": kept_people, "keptFaces": protected, "warnings": warnings,
+         "check": "check %s %s --markup %s" % (args.original, args.output, args.markup),
+         "compare": {"before": args.original, "after": args.output},
+         "next": ("Look at the result and the preview (the merged part in red): the change is whole, no half objects or ghosts at its edge, no seam. Then run check."
+                  if not warnings else " ".join(warnings) + " Look at the result and the preview (the merged part in red) before going on.")})
 
 def main():
     p = argparse.ArgumentParser(prog="aio-photo", description=__doc__)
@@ -3053,6 +3266,19 @@ def main():
     c.add_argument("-o", "--output", help="Where to save the side-by-side sheet (default next to the edited photo)")
     c.add_argument("--box", action="append", help="A face to compare, x,y,w,h in the original (repeatable); default: found automatically")
     c.add_argument("--crop", help="x0,y0,x1,y1: the part of the original a cropped result shows (retouch prints it as crop)")
+    c.add_argument("--markup", help="The markup layer of a merge: faces inside the marked part were changed on purpose and are left out")
+    k = sub.add_parser("markup", help="Mark the part of a real photo the AI may change: writes image_generate's input (the photo upright, smaller) and its annotation layer")
+    k.add_argument("input", help="The ORIGINAL photo")
+    k.add_argument("-o", "--output", help="Where to save the layer (<name>-markup.png; the input copy and a preview go next to it); default next to the photo")
+    k.add_argument("--circle", action="append", metavar="X,Y,R", help="A circle around the part, center and radius in pixels of the original (repeatable)")
+    k.add_argument("--box", action="append", metavar="X0,Y0,X1,Y1", help="A rectangle around the part, in pixels of the original (repeatable)")
+    k.add_argument("--lasso", action="append", metavar="X,Y,X,Y,…", help="A closed outline around the part, at least three points in pixels of the original (repeatable)")
+    g = sub.add_parser("merge", help="Put only the AI's change of the marked part onto the original; every other pixel stays the original's")
+    g.add_argument("original", help="The ORIGINAL photo (the one markup was run on)")
+    g.add_argument("edited", help="image_generate's result for markup's input and layer")
+    g.add_argument("--markup", required=True, help="The layer markup wrote")
+    g.add_argument("-o", "--output", required=True, help="Where to save the result (.jpg) in this task's folder")
+    g.add_argument("--threshold", type=float, default=0.08, help=argparse.SUPPRESS)
     m = sub.add_parser("_mask", help=argparse.SUPPRESS)
     m.add_argument("input")
     m.add_argument("output")
@@ -3061,7 +3287,7 @@ def main():
     if args.cmd == "setup":
         return cmd_setup(args)
     in_venv()
-    return {"retouch": cmd_retouch, "check": cmd_check, "_mask": cmd_mask}[args.cmd](args)
+    return {"retouch": cmd_retouch, "check": cmd_check, "markup": cmd_markup, "merge": cmd_merge, "_mask": cmd_mask}[args.cmd](args)
 
 
 if __name__ == "__main__":
@@ -3070,7 +3296,7 @@ if __name__ == "__main__":
 
 export const PHOTO_SKILL_MD = /* i18n-exempt: model-facing, Chinese trigger words and examples */ `---
 name: aio-photo
-description: Retouch real photos (修图/P图/精修/专业修图/调色/调亮/通透/去灰/天空过曝/磨皮/肤色/摄影棚效果/写真/宝宝照/亲子照/证件照/换背景/去背景/背景布平整/降噪) with LightCraft's develop controls (the same as Lightroom's panel) and keep every person exactly as photographed — light and color, gentle skin softening, a smoothed or new studio background, a face check against the original, and a before/after comparison in the reply. Use whenever the user wants a real photo edited; image_generate must never redraw such a photo.
+description: Retouch real photos (修图/P图/精修/专业修图/调色/调亮/通透/去灰/天空过曝/磨皮/肤色/摄影棚效果/写真/宝宝照/亲子照/证件照/换背景/去背景/背景布平整/降噪/去路人/去杂物/消除/换天空) with LightCraft's develop controls (the same as Lightroom's panel) and keep every person exactly as photographed — light and color, gentle skin softening, a smoothed or new studio background, AI changes to one marked part only (a passer-by or a thing removed, a new sky) merged onto the original, a face check against the original, and a before/after comparison in the reply. Use whenever the user wants a real photo edited; image_generate must never redraw such a photo.
 ---
 
 # Retouching real photos (修图)
@@ -3087,9 +3313,10 @@ person or child, and every further edit drifts more and leaves blotchy patches o
 3. **Keep everyone and everything of the people**: adults in the frame, hands holding the baby, props, clothes. Do not crop or change the
    framing unless asked.
 4. **When the user sends originals again or says 再来/重做/重新修, redo them from those originals.** Never copy or resend earlier results.
-5. image_generate only for: an empty background picture without people (then \`--background <that png>\`), or when the user explicitly
-   asks to change the content (a new sky with clouds where the original is blown out, add or remove an object or a person, change clothes,
-   a drawing or cartoon). Then say plainly what was AI-made, keep the people from the original, and still run check.
+5. image_generate only for: an empty background picture without people (then \`--background <that png>\`), a change to the content of
+   one part (remove a passer-by or a thing, a new sky where the original is blown out, change one object: always through markup and
+   merge below, so only that part comes from the AI), or a drawing or cartoon made from the photo when the user asks for one. Say plainly
+   what was AI-made, and still run check.
 
 ## Retouch
 
@@ -3165,6 +3392,36 @@ Common asks:
 - 夜景: \`--look night\`. 商品 / 白底: \`--look clean\` (white backdrop: \`--subject any --background plain --color #FFFFFF\`).
 - 证件照: \`--id-photo <spec>\` (references/id-photos.md).
 
+## Changing the content of one part (去路人, 去杂物, 消除, 换天空, 换一个东西)
+
+LightCraft cannot add or remove things; GPT Image can, but it redraws the whole picture. So the AI changes only a marked part, and merge
+puts only that part onto the original: every other pixel, every person the marks do not touch and every face away from them stay the
+original's.
+
+1. Mark the part, generously (all of the thing, its shadow and reflection, a little margin), never a person who stays:
+   \`\`\`bash
+   python3 /home/gem/.codex/tools/aio-photo/aio-photo.py markup <original> -o /home/gem/workspace/tasks/<task id>/<name>-markup.png --circle X,Y,R | --box X0,Y0,X1,Y1 | --lasso X,Y,X,Y,…
+   \`\`\`
+   Pixels are the original's (upright); options repeat for several parts. It writes \`input\` (the photo for the AI), \`markup\` (the layer)
+   and \`preview\`: look at the preview before going on.
+2. image_generate with \`reference_paths: [input]\`, \`markup_path: markup\`, \`complexity: "low"\`, a .png path in the task folder, and a
+   prompt that names what to change inside the marks, what fills its place, that everything else stays exactly the same, and to remove the
+   marks (e.g. "Remove the man in the red jacket inside the red outline and continue the beach and the sea behind him naturally. Keep
+   everything else unchanged. Remove the red outline."). Never deliver this picture itself.
+3. Merge it onto the original:
+   \`\`\`bash
+   python3 /home/gem/.codex/tools/aio-photo/aio-photo.py merge <original> <image_generate result> --markup <markup> -o /home/gem/workspace/tasks/<task id>/<name>-修图.jpg
+   \`\`\`
+   Look at the result and the \`preview\` (the merged part in red). A warning that the AI also changed something beyond the marks: if it is
+   part of the thing (a branch, the rest of a shadow), run markup again around all of it and merge the same AI result with the new layer;
+   no new image_generate is needed. A half-removed thing or a ghost at the edge: redo step 2 with a clearer prompt.
+4. Then light and color as usual if asked: retouch the merged result (not the AI picture) with the options you would use on the original.
+5. Check against the original with the layer: \`check <original> <result> --markup <markup>\` (faces inside the marks were changed on
+   purpose and are left out). In the compare block \`before\` is the original; the note says what the AI changed.
+
+The AI part is drawn at about 1.5 megapixels and scaled up, so it is a little softer than the rest of a large photo: say so if it shows.
+Keep marked parts away from faces that stay; a change to a person (a face, a body) is not a retouch, say so instead.
+
 ## More detail (read the one that applies before you start)
 
 In \`references/\` next to this SKILL.md (for Codex \`/home/gem/.codex/skills/aio-photo/references/\`):
@@ -3215,6 +3472,7 @@ block. Then one sentence on what changed. Do not show originals, cut-out preview
 - No reshaping (slimming, bigger eyes, a different smile): it changes who people are. Skin softening and healing small spots are the
   only skin retouching.
 - No straightening or perspective correction (it would break the face check against the original); say so if asked.
+- AI changes go through markup and merge only; the user is told which part was AI-made.
 - Blown-out areas (pure white sky or skin) have no detail left to recover; only an AI-made replacement changes them (rule 5).
 - The cut-out follows the people's outline; fine wisps of hair against a busy background may blur. The preview shows it.
 `;

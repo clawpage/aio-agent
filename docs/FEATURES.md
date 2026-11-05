@@ -651,6 +651,13 @@ iOS App 需为声明了存入相册权限、带 `aioSaveFiles` 标记的新版�
 
 - **参数**：`prompt`；`path`（工作区内 `.png`，默认存入 `workspace/images/`）；`reference_paths`（工作区图片，最多 5 张，不支持 SVG）；
   可选 `transparent_background`、`size`（auto / 1024x1024 / 1536x1024 / 1024x1536）、`quality`。
+- **GPT Image 2.6 新能力**（2026-11-05 接入，`openai.com/index/introducing-images-2-6`）：
+  `markup_path`（工作区内透明 PNG，和第一张参考图同尺寸，上面圈出唯一要改的部分；以 `markup: {image_url}` 随 `/images/edits` 发出，不能和 mask 同用），
+  `complexity`（low / medium / high，模型出图前规划多少；不传为接口默认 high；局部修改用 low，改动最少），
+  `fast`（改用 `gpt-image-2.6-flare`，适合草稿和多出几版挑选；默认 Sunburst 用于成品和精确修改），
+  `svg: true` + `.svg` 路径（可编辑矢量 logo、图标、扁平插画，只从文字生成，`n: 1`）。
+  2026-11-05 用 ChatGPT 登录实测：markup、complexity、Flare 都被接受，markup 只改圈内（圈外平均差 2–5/255，是整张重绘的轻微漂移）；
+  `size` 被忽略（竖图编辑按原比例返回约 150 万像素，如 1086×1448）；SVG 请求返回的是 PNG，所以 SVG 与 GIF 一样走公开 Images API（同一 key），返回的不是 SVG 文档时不保存。
 - **动图（GIF）**：说「做个动图 / 会动的表情」时执行器传 `animated: true`、`path` 为工作区内 `.gif`（默认存入 `workspace/images/`），
   可选 `frame_count`（2–64，默认 9）与 `frame_duration_ms`（20–2000，默认 200）。GPT Image 2.6 原生出动图：一次 `/images/generations` 请求带
   `output_format: "gif"`，返回成品 GIF 直接写入工作区，不在沙箱里拼帧；不能带参考图（edits 接口不支持 GIF）、不能透明背景。
@@ -700,8 +707,16 @@ iOS App 需为声明了存入相册权限、带 `aioSaveFiles` 标记的新版�
   - `check <原片> <成片>`：只在人脸框内部比较细节结构（高频纹理的归一化相关，光影和颜色的整体变化不影响），相似度低于 0.85 判为被重画，
     另存原片/成片人脸并排对比图；skill 要求交付前每张都过 `check`，不过就从原片重做，不交付、不说"没问题"。
   - skill 的其他规则：一张照片一条命令，不拿别的照片或其结果做参考；照片里的大人、抱宝宝的手、道具一律保留，不改构图；用户重发原片或说"再来/重新修"就从原片重做，
-    不复制旧结果；只有空背景图、或用户明确要求改内容（过曝成纯白的天空换成 AI 蓝天、加减物体、换衣服、画成插画）时才用 `image_generate`，并说明哪部分是 AI 做的。
+    不复制旧结果；只有空背景图、改某一处内容（一律经上面的 markup → image_generate → merge）、或用户要画成插画时才用 `image_generate`，并说明哪部分是 AI 做的。
     输出里带本次的 `params` 与 `lightcraft`（自动选了什么、设了什么），追问「再亮一点」时只改用户说的那一项从原片重修。
+  - **只改圈出的一处（去路人、去杂物、消除、换天空、换一个东西）**（2026-11-05，配合 GPT Image 2.6 的 markup）：LightCraft 加不了也去不掉东西，
+    AI 能但会整张重画，所以三步走——`markup <原片> --circle|--box|--lasso …` 按原片像素画圈，输出给 AI 的扶正缩小副本（长边 ≤3072）、同尺寸透明标注层和预览；
+    `image_generate`（参考图为该副本、`markup_path`、`complexity: low`）只改圈内；`merge <原片> <AI 结果> --markup <标注层>` 把 AI 结果放大回原尺寸，
+    只取「AI 明显改动、且连到圈上」的部分（高低双阈值生长，并带上圈外 3% 内的小块，如伸出圈外的花头；圈里 AI 没动的地方仍用原片），
+    限制在圈外 5% 长边以内，按圈外一圈的颜色差逐点校色、羽化后合成；其余每个像素都是原片的。圈没碰到的人整个（衣服、手、头发）保留原片像素
+    （rembg 人像抠图，硬边、羽化不渗进去），圈外的人脸同样保留。AI 在圈外远处也明显改了东西时给出警告：属于这件东西就重画更大的圈、
+    用同一张 AI 结果再 merge（不用重新出图），否则是模型漂移、已按原片保留。`check <原片> <成片> --markup <标注层>` 跳过圈内（有意改动）的人脸。
+    之后要调光影就对合成结果 `retouch`；对比块的 before 仍是原片，并说明哪部分是 AI 做的。AI 部分约 150 万像素放大，大照片上会略软，如实说明。
   - **交付是修图前后对比**：skill 要求把结果放进 ```` ```compare ```` 块（`{"items":[{"before":原片,"after":成片,"title","note"}]}`，`retouch` 输出里的 `compare` 就是一项），
     多张一并放进同一块并另附 zip。控制台（`src/ui/src/compareBlocks.ts`、`components/PhotoCompare.tsx`）画成对比卡：默认显示成片，
     按住图片（鼠标按下、手指长按，或按住空格/回车）显示原片，松开回到成片；图上角标提示「按住看原图」，按住时变成「原图」；长按不弹系统菜单、不拖图、不选字，

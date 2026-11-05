@@ -65,6 +65,89 @@ print(json.dumps(results))
     }
   });
 
+  it("takes only the AI's change of the marked part: every other pixel and every person the marks do not touch stay the original's", () => {
+    const r = py(`
+import argparse, contextlib, io, os
+d = ${JSON.stringify(dir)}
+def run(fn, ns):
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        fn(argparse.Namespace(**ns))
+    return json.loads(buf.getvalue())
+rgb = photo(600, 800)
+src = os.path.join(d, "scene.png"); Image.fromarray(rgb).save(src)
+h, w = rgb.shape[:2]
+marked = run(ap.cmd_markup, dict(input=src, output=os.path.join(d, "scene-markup.png"), circle=["150,600,80"], box=None, lasso=None))
+layer = np.asarray(Image.open(marked["markup"]))
+# The AI's picture: smaller, all of it a little lighter, the marked thing painted over with its change spilling onto the person
+# standing next to it, who it also redrew, and a corner far from the marks changed too.
+ai = cv2.resize(rgb, (450, 600), interpolation=cv2.INTER_AREA).astype(np.int16) + 3
+cv2.rectangle(ai, (67, 405), (255, 495), (20, 200, 40), -1)
+cv2.rectangle(ai, (195, 337), (255, 562), (250, 250, 250), -1)
+cv2.rectangle(ai, (300, 480), (440, 590), (0, 0, 255), -1)
+ai_path = os.path.join(d, "scene-ai.png"); Image.fromarray(np.clip(ai, 0, 255).astype(np.uint8)).save(ai_path)
+person = np.zeros((h, w), np.float32); person[450:750, 260:340] = 1
+ap.subject_mask = lambda path, size, subject="people": cv2.resize(person, size, interpolation=cv2.INTER_NEAREST)
+ap.faces_in = lambda img: [[110, 560, 80, 80], [450, 150, 80, 80]]
+merged_path = os.path.join(d, "scene-merged.png")
+merged = run(ap.cmd_merge, dict(original=src, edited=ai_path, markup=marked["markup"], output=merged_path, threshold=0.08))
+res = np.asarray(Image.open(merged_path).convert("RGB")).astype(int)
+o = rgb.astype(int)
+yy, xx = np.mgrid[0:h, 0:w]
+dist = np.hypot(xx - 150, yy - 600)
+checked = run(ap.cmd_check, dict(original=src, edited=merged_path, output=None, box=None, crop=None, markup=marked["markup"]))
+print(json.dumps({"layer": [list(layer.shape), int(layer[:, :, 3].max()), float((layer[:, :, 3] == 0).mean())],
+  "input": list(Image.open(marked["input"]).size), "preview": os.path.exists(marked["preview"]),
+  "far": int(np.abs(res[dist > 200] - o[dist > 200]).max()),
+  "person": int(np.abs(res[450:750, 260:340] - o[450:750, 260:340]).max()),
+  "thing": [int(v) for v in res[600, 150]], "merged": merged, "check": checked}))
+`);
+    // A transparent layer of the photo's size with only the outline drawn, and the photo itself for the model.
+    expect(r.layer[0]).toEqual([800, 600, 4]);
+    expect(r.layer[1]).toBe(255);
+    expect(r.layer[2]).toBeGreaterThan(0.9);
+    expect(r.input).toEqual([600, 800]);
+    expect(r.preview).toBe(true);
+    // The marked thing is the AI's, color-matched to its surroundings; away from the marks not one pixel changed.
+    expect(r.thing[1]).toBeGreaterThan(150);
+    expect(r.far).toBe(0);
+    // The person the marks do not touch is the original's whole, though the AI changed them.
+    expect(r.person).toBe(0);
+    expect(r.merged.keptPeople).toBe(1);
+    // What the AI changed far from the marks is reported, not merged.
+    expect(r.merged.warnings).toHaveLength(1);
+    expect(r.merged.warnings[0]).toContain("away from the marks");
+    // The face inside the marks was changed on purpose: the check leaves it out and compares the other.
+    expect(r.check.ok).toBe(true);
+    expect(r.check.skipped).toEqual([[110, 560, 80, 80]]);
+    expect(r.check.regions.map((x: { box: number[] }) => x.box)).toEqual([[450, 150, 80, 80]]);
+  });
+
+  it("refuses marks outside the photo and an AI picture of another shape", () => {
+    const r = py(`
+import argparse, contextlib, io, os
+d = ${JSON.stringify(dir)}
+src = os.path.join(d, "shape.png"); Image.fromarray(photo(600, 800)).save(src)
+def run(fn, ns):
+    buf = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(buf):
+            fn(argparse.Namespace(**ns))
+    except SystemExit:
+        pass
+    return json.loads(buf.getvalue())
+outside = run(ap.cmd_markup, dict(input=src, output=None, circle=["5000,5000,10"], box=None, lasso=None))
+none = run(ap.cmd_markup, dict(input=src, output=None, circle=None, box=None, lasso=None))
+layer = run(ap.cmd_markup, dict(input=src, output=os.path.join(d, "shape-markup.png"), circle=None, box=["10,10,200,200"], lasso=None))
+wide = os.path.join(d, "wide.png"); Image.fromarray(photo(800, 600)).save(wide)
+shape = run(ap.cmd_merge, dict(original=src, edited=wide, markup=layer["markup"], output=os.path.join(d, "x.png"), threshold=0.08))
+print(json.dumps({"outside": outside, "none": none, "shape": shape}))
+`);
+    expect(r.outside.error).toContain("outside the photo");
+    expect(r.none.error).toContain("Mark the part to change");
+    expect(r.shape.error).toContain("different shape");
+  });
+
   it("tells a retouched face from a redrawn one, however strong the light and color change", () => {
     const r = py(`
 rgb = photo(400, 400)

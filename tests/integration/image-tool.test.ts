@@ -186,6 +186,50 @@ it("gives every account an image tool that draws with the control plane's own lo
       keylessGateway.close();
     }
 
+    // GPT Image 2.6: one marked part changed (a markup layer, low complexity), the fast model, and an SVG.
+    answer = { status: 200, body: { created: 1, data: [{ b64_json: PNG.toString("base64") }] } };
+    const layer = "/home/gem/workspace/tasks/task-1/海报-markup.png";
+    written.get("user_m")!.set(layer, PNG);
+    expect(IMAGE_POLICY).toContain("markup_path");
+    const marked = await call(member.image!.url, { prompt: "去掉圈里的路人，其余不变，去掉红圈", path: "/home/gem/workspace/tasks/task-1/去路人.png", reference_paths: [poster], markup_path: layer, complexity: "low" });
+    expect(marked.isError).toBeUndefined();
+    // The ChatGPT login's endpoint takes markup edits itself.
+    expect(seen[10]).toMatchObject({ url: "/backend-api/codex/images/edits", body: { images: [{ image_url: `data:image/png;base64,${PNG.toString("base64")}` }], markup: { image_url: `data:image/png;base64,${PNG.toString("base64")}` }, complexity: "low", model: "gpt-image-2.6-sunburst" } });
+    expect(seen[10]!.headers.authorization).toBe("Bearer owner-chatgpt-access");
+    await call(member.image!.url, { prompt: "一只猫的草图", fast: true });
+    expect(seen[11]!.body).toMatchObject({ model: "gpt-image-2.6-flare" });
+    expect(seen[11]!.body).not.toHaveProperty("complexity");
+    expect(seen[11]!.body).not.toHaveProperty("markup");
+    const SVG = '<?xml version="1.0"?>\n<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><circle cx="5" cy="5" r="4"/></svg>';
+    answer = { status: 200, body: { created: 1, data: [{ b64_json: Buffer.from(SVG).toString("base64") }] } };
+    const svgPath = "/home/gem/workspace/tasks/task-1/logo.svg";
+    const vector = await call(member.image!.url, { prompt: "麦穗面包店的扁平 logo", path: svgPath, svg: true });
+    expect(vector.content[0]!.text).toContain(`SVG saved: ${svgPath}`);
+    // The ChatGPT login's endpoint answers SVG requests with a PNG, so SVGs go to the public API with the key.
+    expect(seen[12]).toMatchObject({ url: "/v1/images/generations", body: { model: "gpt-image-2.6-sunburst", output_format: "svg", n: 1 } });
+    expect(seen[12]!.headers.authorization).toBe("Bearer sk-test-openai");
+    expect(seen[12]!.body).not.toHaveProperty("background");
+    expect(seen[12]!.body).not.toHaveProperty("size");
+    expect(written.get("user_m")!.get(svgPath)!.toString()).toBe(SVG);
+    answer = { status: 200, body: { created: 1, data: [{ b64_json: PNG.toString("base64") }] } };
+    expect((await call(member.image!.url, { prompt: "x", svg: true, path: "/home/gem/workspace/tasks/task-1/bad.svg" })).content[0]!.text).toContain("did not return an SVG");
+    expect(written.get("user_m")!.has("/home/gem/workspace/tasks/task-1/bad.svg")).toBe(false);
+    for (const [args, message] of [
+      [{ prompt: "x", markup_path: layer }, "put that image in reference_paths"],
+      [{ prompt: "x", reference_paths: [poster], markup_path: "/home/gem/workspace/none.png" }, "文件不存在"],
+      [{ prompt: "x", reference_paths: [poster], markup_path: "/etc/markup.png" }, "markup_path: Only files inside the sandbox workspace"],
+      [{ prompt: "x", svg: true, path: "/home/gem/workspace/a.png" }, ".svg"],
+      [{ prompt: "x", svg: true, reference_paths: [poster] }, "prompt only"],
+      [{ prompt: "x", svg: true, animated: true }, "Choose one"],
+      [{ prompt: "x", complexity: "max" }, "complexity must be one of low, medium, high"],
+      [{ prompt: "x", path: "/home/gem/workspace/a.svg" }, "svg to true"],
+    ] as const) {
+      const failed = await call(member.image!.url, args);
+      expect(failed.isError).toBe(true);
+      expect(failed.content[0]!.text).toContain(message);
+    }
+    expect(seen).toHaveLength(14);
+
     // A refused login is fetched afresh next time; a used-up quota says so plainly; never a non-PNG file.
     answer = { status: 401, body: { error: "expired" } };
     expect((await call(member.image!.url, { prompt: "x" })).isError).toBe(true);
