@@ -1039,8 +1039,11 @@ $CP style /home/gem/workspace/share/<name> --palette <palette>   # copies clawpa
   \`--done\` saved or finished, \`--you\` needs the visitor, \`--error\` failed; they are not decoration (a green header or button is not "the brand").
 - One accent-filled main action per screen (\`.cp-btn.primary\`); the rest \`.cp-btn\` or \`.cp-btn.quiet\`. Touch targets at least 44 px, body text 16 px, no horizontal scrolling at 360 px wide, light and dark both checked.
 - Quiet by default: flat surfaces with a soft shadow, no gradients, glass or glow, no emoji as icons (simple inline SVG strokes in \`currentColor\`), at most two font weights per screen.
-- **Few words.** The page is the content and the controls, not an explanation of them. Before publishing, cut every line that only
-  describes the page, repeats a nearby label or reassures:
+- **Avoid unnecessary secondary labels and descriptions. Let the layout do the explaining.** The page is the content and the controls,
+  not an explanation of them: grouping, order, alignment, size, icons and the status colors carry what a caption would spell out (a dimmed
+  control instead of a "coming soon" line, a connected line of steps named by their stops instead of a caption under each, a whole card
+  as the link instead of a "see more →" line, one action per screen instead of a sentence pointing at it). Before publishing, cut every line
+  that only describes the page, repeats a nearby label or reassures:
   - Header: a short title, plus at most one short line (an eyebrow or a subtitle, not both). No slogans, taglines or lines saying what the page does or where its data comes from.
   - No status or privacy lines ("synced", "only you can see this", "N items sorted by…"); show state with a \`.cp-chip\` or an icon only where it changes what the visitor does.
   - Labels are one to three words (\`Search\`, not \`Search and filter: title, topic, type, interest\`); hints go in placeholders, not in extra text.
