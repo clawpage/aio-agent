@@ -541,7 +541,7 @@ test("audio and video in a report play where the report puts them, with cards on
     await expect(media.nth(2)).toHaveAttribute("data-kind", "video");
     // In the order the report wrote them: the first clip right after its description.
     const order = await report.locator(".markdown").evaluate((el) => [...el.querySelectorAll("p, figure")].map((n) => n.tagName === "FIGURE" ? `[${n.querySelector("figcaption")!.textContent}]` : n.textContent!.slice(0, 8)));
-    expect(order.indexOf("[♪新生儿啼哭（23秒）]")).toBe(order.findIndex((t) => t.includes("短版")) + 1);
+    expect(order.indexOf("[♪新生儿啼哭（23秒）下载]")).toBe(order.findIndex((t) => t.includes("短版")) + 1);
     // No bare links to them and no duplicate cards: only the file mentioned in a sentence gets a card.
     await expect(report.locator(".markdown a:not(figcaption a)", { hasText: "新生儿啼哭" })).toHaveCount(0);
     await expect(report.getByTestId("file-card")).toHaveCount(1);

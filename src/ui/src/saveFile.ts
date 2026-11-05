@@ -85,6 +85,18 @@ export function saveFile(source: string | Blob, name: string): boolean {
   return true;
 }
 
+/** Save a file at a URL from a control that is not a link: the share sheet where that is how files are saved, otherwise a download. */
+export function downloadFile(url: string, name: string): void {
+  if (saveFile(url, name)) return;
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = name;
+  anchor.rel = "noopener";
+  document.body.append(anchor);
+  anchor.click();
+  anchor.remove();
+}
+
 /** For a download link's onClick: its own download, unless this device saves by sharing. */
 export function onDownloadClick(event: MouseEvent<HTMLAnchorElement>): void {
   const link = event.currentTarget;

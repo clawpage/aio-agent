@@ -28,6 +28,7 @@ import { PhotoCompare } from "./PhotoCompare";
 import { splitWidgetBlocks, type WidgetPart } from "../widgetBlocks";
 import { WidgetCard } from "./WidgetCard";
 import { copyText } from "./ShareCard";
+import { downloadFile } from "../saveFile";
 
 marked.setOptions({ gfm: true, breaks: true });
 
@@ -72,10 +73,13 @@ marked.use({
       if (filePath) {
         const kind = workspaceFileKind(filePath);
         if (kind === "image") return `<img class="inline-media" data-sandbox-image="${escapeAttr(filePath)}" alt="${escapeAttr(text)}"${titleAttr}>`;
-        // Audio and video are a small card: what it is (tap to open the preview, which also downloads) and the player.
+        // Audio and video are a small card: what it is (tap to open the preview), a 下载 of its own
+        // (the player's own menu has no save, least of all in the iOS app) and the player.
         if (kind === "video" || kind === "audio") {
-          const label = escapeAttr(text || filePath.slice(filePath.lastIndexOf("/") + 1));
-          const caption = `<figcaption><span class="media-card-icon" aria-hidden="true">${kind === "video" ? "▶" : "♪"}</span><a role="button" tabindex="0" data-sandbox-file="${escapeAttr(filePath)}">${label}</a></figcaption>`;
+          const name = text || filePath.slice(filePath.lastIndexOf("/") + 1);
+          const label = escapeAttr(name);
+          const save = `<span class="media-card-download" role="button" tabindex="0" data-sandbox-download="${escapeAttr(filePath)}" aria-label="${escapeAttr(t.files.card.downloadName(name))}">${escapeAttr(t.files.card.download)}</span>`;
+          const caption = `<figcaption><span class="media-card-icon" aria-hidden="true">${kind === "video" ? "▶" : "♪"}</span><a role="button" tabindex="0" data-sandbox-file="${escapeAttr(filePath)}">${label}</a>${save}</figcaption>`;
           const player = kind === "video"
             ? `<video class="inline-media" data-sandbox-video="${escapeAttr(filePath)}" controls playsinline preload="metadata"${titleAttr}></video>`
             : `<audio class="inline-audio" data-sandbox-audio="${escapeAttr(filePath)}" controls preload="metadata" title="${escapeAttr(text)}"></audio>`;
@@ -171,6 +175,12 @@ export function Markdown(props: MarkdownProps) {
   );
 }
 
+/** Save a workspace file: the share sheet in the iOS app and the home-screen app, a download elsewhere. */
+function saveWorkspaceFile(path: string): void {
+  if (!isWorkspaceFilePath(path)) return;
+  downloadFile(api.downloadUrl(path), path.slice(path.lastIndexOf("/") + 1) || "download");
+}
+
 function MarkdownBlock({
   source,
   onOpenLink,
@@ -187,7 +197,7 @@ function MarkdownBlock({
       // applied to every non-URI-safe attribute, it must be marked URI-safe or
       // DOMPurify would strip `tabindex="0"` and break keyboard focus.
       ADD_URI_SAFE_ATTR: ["tabindex"],
-      ADD_ATTR: ["target", "rel", "data-sandbox-file", "data-sandbox-image", "data-sandbox-video", "data-sandbox-audio", "data-web-image", "role", "tabindex", "controls", "playsinline", "preload", "loading"],
+      ADD_ATTR: ["target", "rel", "data-sandbox-file", "data-sandbox-download", "data-sandbox-image", "data-sandbox-video", "data-sandbox-audio", "data-web-image", "role", "tabindex", "controls", "playsinline", "preload", "loading"],
       ...(document ? {
         FORBID_TAGS: ["form", "input", "button", "textarea", "select", "option", "iframe", "object", "embed", "svg", "math", "style"],
         FORBID_ATTR: ["style", "id", "name"],
@@ -273,6 +283,13 @@ function MarkdownBlock({
 
   const onClick = useCallback(
     (event: MouseEvent<HTMLDivElement>) => {
+      // A media card's 下载 (the path is re-checked there: raw HTML could carry the attribute too).
+      const save = (event.target as HTMLElement | null)?.closest?.("[data-sandbox-download]");
+      if (save) {
+        event.preventDefault();
+        saveWorkspaceFile(save.getAttribute("data-sandbox-download") ?? "");
+        return;
+      }
       const image = (event.target as HTMLElement | null)?.closest?.("img[data-sandbox-image]");
       const imagePath = image?.getAttribute("data-sandbox-image") ?? "";
       if (onOpenFile && imagePath && isWorkspaceFilePath(imagePath)) {
@@ -311,6 +328,12 @@ function MarkdownBlock({
   const onKeyDown = useCallback(
     (event: KeyboardEvent<HTMLDivElement>) => {
       if (event.key !== "Enter" && event.key !== " ") return;
+      const save = (event.target as HTMLElement | null)?.closest?.("[data-sandbox-download]");
+      if (save) {
+        event.preventDefault();
+        saveWorkspaceFile(save.getAttribute("data-sandbox-download") ?? "");
+        return;
+      }
       const anchor = (event.target as HTMLElement | null)?.closest?.("[data-sandbox-file]");
       const file = anchor?.getAttribute("data-sandbox-file") ?? "";
       if (!onOpenFile || !file || !isWorkspaceFilePath(file)) return;
