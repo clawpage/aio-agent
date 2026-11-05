@@ -123,6 +123,31 @@ print(json.dumps({"layer": [list(layer.shape), int(layer[:, :, 3].max()), float(
     expect(r.check.regions.map((x: { box: number[] }) => x.box)).toEqual([[450, 150, 80, 80]]);
   });
 
+  it("with no face to compare, a subject inside the marks was changed on purpose and is not called redrawn", () => {
+    const r = py(`
+import argparse, contextlib, io, os
+d = ${JSON.stringify(dir)}
+src = os.path.join(d, "vase.png"); rgb = photo(600, 800); Image.fromarray(rgb).save(src)
+gone = rgb.copy(); gone[200:700, 150:450] = 200
+edited = os.path.join(d, "vase-gone.png"); Image.fromarray(gone).save(edited)
+def run(fn, ns):
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        fn(argparse.Namespace(**ns))
+    return json.loads(buf.getvalue())
+subject = np.zeros((800, 600), np.float32); subject[200:700, 150:450] = 1
+ap.subject_mask = lambda path, size, subject_kind="people": cv2.resize(subject, size, interpolation=cv2.INTER_NEAREST)
+ap.faces_in = lambda img: []
+layer = run(ap.cmd_markup, dict(input=src, output=os.path.join(d, "vase-markup.png"), circle=None, box=["120,170,480,730"], lasso=None))
+plain = run(ap.cmd_check, dict(original=src, edited=edited, output=None, box=None, crop=None, markup=None))
+marked = run(ap.cmd_check, dict(original=src, edited=edited, output=None, box=None, crop=None, markup=layer["markup"]))
+print(json.dumps({"plain": plain["ok"], "marked": marked}))
+`);
+    expect(r.plain).toBe(false);
+    expect(r.marked.ok).toBe(true);
+    expect(r.marked.compared).toBe("people");
+  });
+
   it("refuses marks outside the photo and an AI picture of another shape", () => {
     const r = py(`
 import argparse, contextlib, io, os

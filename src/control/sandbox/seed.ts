@@ -2972,14 +2972,19 @@ def cmd_check(args):
     boxes = [list(map(int, b.split(","))) for b in args.box] if args.box else faces_in(original)
     source = "given" if args.box else "faces"
     skipped = []
-    if getattr(args, "markup", None) and not getattr(args, "crop", None):
-        # merge took the marked part from the AI on purpose (a person removed or changed there): only the others count.
-        marked = marked_area(args.markup, full_size)
-        skipped = [b for b in boxes if marked[b[1]:b[1] + b[3], b[0]:b[0] + b[2]].any()]
-        boxes = [b for b in boxes if b not in skipped]
-        if skipped and not boxes:
-            return out({"ok": True, "regions": [], "skipped": skipped, "compared": source,
-                        "message": "Every face found is inside the marked part, which was changed on purpose; look at the result yourself."})
+    marked = marked_area(args.markup, full_size) if getattr(args, "markup", None) and not getattr(args, "crop", None) else None
+
+    def leave_out_marked(found):
+        # merge took the marked part from the AI on purpose (a person or a thing removed or changed there): only the rest counts.
+        if marked is None:
+            return found
+        skipped.extend(b for b in found if marked[b[1]:b[1] + b[3], b[0]:b[0] + b[2]].any())
+        return [b for b in found if b not in skipped]
+
+    boxes = leave_out_marked(boxes)
+    if skipped and not boxes:
+        return out({"ok": True, "regions": [], "skipped": skipped, "compared": source,
+                    "message": "Every face found is inside the marked part, which was changed on purpose; look at the result yourself."})
     if not boxes:
         # No face found (a profile, sunglasses, a hand over it): the top of the people stands in for the head.
         alpha = subject_mask(args.original, full_size)
@@ -2989,8 +2994,11 @@ def cmd_check(args):
         if not ys.size:
             return out({"ok": False, "message": "Found no face or person to compare; pass the face position with --box x,y,w,h."})
         x0, x1, y0, y1 = xs.min(), xs.max(), ys.min(), ys.max()
-        boxes = [[int(x0), int(y0), int(x1 - x0), int(max(1, (y1 - y0) * 0.4))]]
+        boxes = leave_out_marked([[int(x0), int(y0), int(x1 - x0), int(max(1, (y1 - y0) * 0.4))]])
         source = "people"
+        if not boxes:
+            return out({"ok": True, "regions": [], "skipped": skipped, "compared": source,
+                        "message": "No face found, and the people or subject are inside the marked part, which was changed on purpose; look at the result yourself."})
     regions, crops = [], []
     W, H = original.size
     for (x, y, w, h) in boxes:
