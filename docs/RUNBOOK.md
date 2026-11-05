@@ -83,7 +83,7 @@ PA_COMPANION_ORIGIN=https://agent-workspace.clawpage.ai npm run smoke
 
 - **首次上线**：已在跑的旧 app-server 不在桥接下，第一次部署带桥接的控制面仍要等空闲（`busy` 会照旧拦住）。之后每个沙箱的 Codex 都在桥接下启动。
 - **换 Codex 版本或启动参数**：桥接记着启动时的参数指纹；新控制面接上指纹不同的旧 app-server 时继续用它跑完手头的轮次，等没有轮次时自动换新的。
-- **改了 `src/sandbox/`（sandboxd，含上面的转发）**：重启 sandboxd 会断开 `docker exec` 连接，但桥接下的 Codex 不受影响，控制面重新接上即可。
+- **改了 `src/sandbox/`（sandboxd，含上面的转发）**：重启 sandboxd 会断开 `docker exec` 连接，但桥接下的 Codex 不受影响；控制面在连接断开后最多 60 秒内每秒重新接一次，sandboxd 回来就接上，执行中的轮次不标 `unknown`。
 - **关掉**：`PA_CODEX_BRIDGE=0` 回到每个控制面直连自己的 app-server（重启即打断执行中的轮次）。
 
 ### 沙箱 Codex CLI 版本

@@ -22,6 +22,10 @@ import type { HostTokenSource } from "./hostTokens.js";
 import type { UsageLedger } from '../usage.js';
 import { t } from "../i18n/index.js";
 
+/** After the connection to a bridged Codex breaks, how long to keep joining it again (sandboxd may be restarting). */
+const REJOIN_FOR_MS = 60_000;
+const REJOIN_EVERY_MS = 1_000;
+
 export interface SandboxAccount {
   email: string | null;
   planType: string | null;
@@ -246,7 +250,7 @@ export class SandboxCodexSession {
       // Under the bridge only the connection may have broken (sandboxd restarted, say): Codex and its
       // turns are joined again before they are given up; a new Codex in their place means they are lost.
       if (this.reattaches) {
-        void this.start().then(() => { if (!this.#reattached) this.#onClosed?.(reason); }, () => this.#onClosed?.(reason));
+        void this.#rejoin().then((joined) => { if (!joined) this.#onClosed?.(reason); });
         return;
       }
       this.#onClosed?.(reason);
@@ -274,6 +278,20 @@ export class SandboxCodexSession {
       });
     });
     return peer;
+  }
+
+  /** Join the bridged Codex again after the connection broke; false when its turns are lost. */
+  async #rejoin(): Promise<boolean> {
+    const until = Date.now() + REJOIN_FOR_MS;
+    for (;;) {
+      try {
+        await this.start();
+        return this.#reattached;
+      } catch {
+        if (Date.now() >= until) return false;
+        await delay(REJOIN_EVERY_MS);
+      }
+    }
   }
 
   /**

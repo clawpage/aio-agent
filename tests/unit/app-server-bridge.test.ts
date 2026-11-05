@@ -123,14 +123,20 @@ it("lets the control plane know at once when no bridge serves", async () => {
 it("lets the next control plane's session join the same Codex, and rejoins it when only the connection broke", async () => {
   const { dir, bridge, sock } = setup();
   let attached: ChildProcess | null = null;
+  // While sandboxd restarts, nothing in the sandbox can be reached.
+  let nodeDown = false;
   const container = {
     codexAppServerArgv: () => [process.execPath, path.join(dir, "codex.mjs")],
     startCodexBridge: async (_extra: string[], _env: Record<string, string>, key: string) => {
+      if (nodeDown) throw new Error("fetch failed");
       const serve = spawn(process.execPath, [bridge, "serve", sock, key, "--", process.execPath, path.join(dir, "codex.mjs")], { stdio: "ignore" });
       procs.push(serve);
       return { code: 0, stdout: "", stderr: "" };
     },
-    attachCodexBridge: () => { attached = spawn(process.execPath, [bridge, "attach", sock], { stdio: ["pipe", "pipe", "pipe"] }); procs.push(attached); return attached; },
+    attachCodexBridge: () => {
+      if (nodeDown) { const gone = spawn(process.execPath, ["-e", "process.exit(1)"], { stdio: ["pipe", "pipe", "pipe"] }); procs.push(gone); return gone; }
+      attached = spawn(process.execPath, [bridge, "attach", sock], { stdio: ["pipe", "pipe", "pipe"] }); procs.push(attached); return attached;
+    },
   } as unknown as SandboxContainer;
   const cfg = testConfig(dir, 1, {});
   cfg.hostCodex = { ...cfg.hostCodex, enabled: false };
@@ -163,6 +169,16 @@ it("lets the next control plane's session join the same Codex, and rejoins it wh
   broken.kill("SIGKILL");
   await waitUntil(() => attached !== broken && after.s.ready);
   await after.s.listModels();
+  expect(after.s.reattached).toBe(true);
+  expect(after.closed).toEqual([]);
+
+  // sandboxd itself restarts: the connection breaks and the sandbox stays out of reach for a while.
+  nodeDown = true;
+  const cut = attached!;
+  cut.kill("SIGKILL");
+  await new Promise((r) => setTimeout(r, 1_500));
+  nodeDown = false;
+  await waitUntil(() => attached !== cut && after.s.ready);
   expect(after.s.reattached).toBe(true);
   expect(after.closed).toEqual([]);
   after.s.restartIdle();
