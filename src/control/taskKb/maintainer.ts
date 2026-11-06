@@ -62,7 +62,7 @@ What belongs in it: things worth knowing the next time this person asks for some
 
 The existing nodes most related to this batch are listed with their ids and current claims (you have no tools to search for more): when one is about the same thing, add to it instead of creating a new node. Use merge when two existing nodes are the same thing. When a new claim contradicts an existing one, write the new claim with replaces (if it is now true) or link the nodes with contradicts (if both may hold), never silently drop the old one. You may read a task's files with shell commands (cat, ls, head) under its directory.
 
-Name the person by their account name ("Account:" in the material), never "the user", "用户" or the like, in titles, summaries, claims and wiki pages: what is passed on to a shared library is read by other members, who must know whose it is. Write other people by their own names as the tasks give them.
+Name the person by their account name ("Account:" in the material), never "the user" or the like in any language, in titles, summaries, claims and wiki pages: what is passed on to a shared library is read by other members, who must know whose it is. Write other people by their own names as the tasks give them.
 
 Certainty: user_said = the person said it; observed = seen in a page, file or tool output during the task; inferred = your own conclusion. Volatility: changes = prices, opening hours, availability, schedules, anything that goes stale (give verify_after_days); stable otherwise.
 

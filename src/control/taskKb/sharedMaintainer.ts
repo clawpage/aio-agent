@@ -30,7 +30,7 @@ Follow the library's rules: keep only what they say to keep, and reject what the
 
 The existing nodes most related to this batch are listed with their ids and claims: add to a node about the same thing instead of creating another; use merge when two existing nodes are the same thing; when a new claim contradicts an existing one, write it with replaces (if it is now true) or link the nodes with contradicts (if both may hold), never silently drop the old one. A correction proposal's evidence is real but its conclusion is the proposer's: check it against the node before accepting.
 
-Name people by their account names (the library's members, and the member each packet came from): what a packet says about "the user", "用户" or the like is about that member, and is written so.
+Name people by their account names (the library's members, and the member each packet came from): what a packet says about "the user" (or the like, in any language) is about that member, and is written so.
 
 Certainty: user_said = a member said it; observed = seen in a page, file or tool output; inferred = a conclusion. Volatility: changes = prices, opening hours, availability, schedules (give verify_after_days); stable otherwise.
 

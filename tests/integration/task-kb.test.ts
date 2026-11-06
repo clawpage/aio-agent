@@ -211,7 +211,7 @@ it("reads finished tasks in batches when the sandbox is awake and nothing else r
     expect(codex.maintainKb.mock.calls[0]![0]).toContain("Existing nodes related to this batch: none yet.");
     // The person is named by the account, so knowledge passed on to a shared library says whose it is.
     expect(codex.maintainKb.mock.calls[0]![0]).toMatch(/^Account: owner\n/);
-    expect(codex.maintainKb.mock.calls[0]![1]).toMatch(/never "the user", "用户"/);
+    expect(codex.maintainKb.mock.calls[0]![1]).toMatch(/never "the user" or the like in any language/);
     expect(codex.maintainKb.mock.calls[1]![0]).toContain("It was not accepted");
     expect(h.ctx.db.prepare("SELECT status, note FROM kb_packets WHERE id=?").get(packet)).toMatchObject({ status: "accepted", note: "clinic contact" });
     expect(searchKb(h.ctx.db, "owner_1", { query: "儿科诊所" })[0]!.title).toBe("Bay Pediatrics");
