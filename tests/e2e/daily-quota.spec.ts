@@ -38,6 +38,24 @@ test("a member sees only the share of today's tokens used, and when they come ba
   await card.screenshot({ path: `${evidence}/${info.project.name}-100.png` });
 });
 
+test("the usage card is there at once; only its figure waits on the answer", async ({ page }, info) => {
+  let answer!: () => void;
+  const held = new Promise<void>((r) => { answer = r; });
+  await mockConsole(page, { conversations: [] });
+  await page.route("**/api/auth/session", r => r.fulfill({ json: { authenticated: true, username: "member", role: "member" } }));
+  await page.route("**/api/main*", r => r.fulfill({ json: { mode: "tasks", version: "v0", tasks: [], nextBefore: null } }));
+  await page.route("**/api/account/quota", async r => { await held; await r.fulfill({ json: { limited: true, percent: 64, resetsAt: Date.now() + 3600_000 } }); });
+  await page.goto("/");
+  if (info.project.name.startsWith("mobile")) await page.getByRole("button", { name: "打开导航" }).click();
+  await page.locator(".sidebar-foot button", { hasText: "配置" }).click();
+  const card = page.getByRole("region", { name: "今日用量" });
+  await expect(card).toBeVisible();
+  await expect(card.getByRole("status")).toContainText("加载中");
+  answer();
+  await expect(card.locator("strong")).toHaveText("64%");
+  await expect(card.getByRole("status")).toHaveCount(0);
+});
+
 test("the owner has no limit and no card", async ({ page }, info) => {
   let asked = false;
   await openSettings(page, info.project.name.startsWith("mobile"), "owner", { limited: false });

@@ -4,6 +4,7 @@ import { PushSettings } from "./PushSettings";
 import { IphoneSettings, useIphoneEntry } from "./IphoneSettings";
 import { SettingsPages, type SettingsSection } from "./SettingsLayout";
 import { api } from "../api";
+import { InlineLoading } from "./Brand";
 import { LOCALES, locale, setLocale, t, type Locale } from "../i18n";
 
 /** The account remembers the choice too (scheduled runs and the voice gadget answer in it); the switch never waits on that. */
@@ -22,15 +23,18 @@ export function LanguagePicker() {
   </label>;
 }
 
-/** A member's share of today's tokens, as a share only; when used up, when it comes back (src/control/quota.ts). */
+/**
+ * A member's share of today's tokens, as a share only; when used up, when it comes back (src/control/quota.ts).
+ * The card is there from the start; only its figure waits on the answer (a dash if none comes).
+ */
 function QuotaSettings() {
-  const [quota, setQuota] = useState<{ percent: number; resetsAt: number } | null>(null);
-  useEffect(() => { void api.quota().then(q => { if (q.limited) setQuota(q); }, () => undefined); }, []);
-  if (!quota) return null;
+  const [quota, setQuota] = useState<{ percent: number; resetsAt: number } | null | undefined>(undefined);
+  useEffect(() => { void api.quota().then(q => setQuota(q.limited ? q : null), () => setQuota(null)); }, []);
   return <section className="settings-card" aria-label={t.settings.quota.title}>
     <div className="settings-section-head"><h3>{t.settings.quota.title}</h3></div>
-    <div className="quota-meter"><progress max={100} value={quota.percent} aria-label={t.settings.quota.title}/><strong>{quota.percent}%</strong></div>
-    {quota.percent >= 100 && <p className="muted tiny" role="status">{t.settings.quota.exceeded(new Date(quota.resetsAt).toLocaleString(locale, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }))}</p>}
+    <div className="quota-meter"><progress max={100} value={quota?.percent ?? 0} aria-label={t.settings.quota.title}/>
+      {quota === undefined ? <InlineLoading label={t.common.loading}/> : <strong>{quota ? `${quota.percent}%` : "—"}</strong>}</div>
+    {quota && quota.percent >= 100 && <p className="muted tiny" role="status">{t.settings.quota.exceeded(new Date(quota.resetsAt).toLocaleString(locale, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }))}</p>}
   </section>;
 }
 
