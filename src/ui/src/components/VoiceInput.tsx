@@ -95,12 +95,13 @@ export function VoiceButton({ disabled, onText, onError }: { disabled: boolean; 
   if (!enabled) return null;
   const listening = state === "recording";
   const clock = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
-  return <button ref={button} type="button" className={`ghost voice-button${listening ? " recording" : ""}`} data-testid="voice-button"
+  return <button ref={button} type="button" className={`ghost voice-button${state === "idle" ? "" : ` ${state}`}`} data-testid="voice-button"
     disabled={(disabled && !listening) || state === "starting" || state === "transcribing"}
     aria-pressed={listening} aria-label={listening ? t.voice.stopRecording(clock) : state === "transcribing" ? t.voice.transcribing : t.voice.input} title={listening ? t.voice.stopAndTranscribe : t.voice.input}
     onClick={() => void (listening ? finish() : start())}>
-    {state === "starting" || state === "transcribing" ? <ComposerIcon kind="busy"/> : listening ? <ComposerIcon kind="stop"/>
-      : <svg className="composer-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>}
+    {/* The microphone stays while it opens and while the words come back (the loading mark is unreadable at this size). */}
+    <span className="voice-glyph">{listening ? <ComposerIcon kind="stop"/>
+      : <svg className="composer-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>}</span>
     <span className="composer-button-label">{listening ? clock : state === "transcribing" ? t.voice.transcribing : t.voice.short}</span>
   </button>;
 }

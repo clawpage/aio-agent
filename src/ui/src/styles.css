@@ -4829,20 +4829,38 @@ button.map-card-switch { flex: 0 0 auto; padding: 4px 10px; }
 }
 .composer-row > .voice-button.recording .composer-icon { transform: scale(calc(1 - var(--voice-level, 0) * .15)); }
 .voice-button .composer-button-label { font-variant-numeric: tabular-nums; }
+/* Opening the microphone dims it; while the words come back an indigo arc (the AI at work) circles it. */
+.voice-glyph { position: relative; display: inline-flex; }
+.voice-button.starting .voice-glyph { opacity: .45; }
+.voice-button.transcribing .voice-glyph::after {
+  content: ""; position: absolute; inset: -5px; border-radius: 50%;
+  border: 2px solid color-mix(in srgb, var(--ai) 18%, transparent); border-top-color: var(--ai);
+  animation: voice-spin .8s linear infinite;
+}
+@keyframes voice-spin { to { transform: rotate(1turn); } }
 @property --voice-breath { syntax: "<length>"; inherits: false; initial-value: 1px; }
 @keyframes voice-listening { 0%, 100% { --voice-breath: 1px; } 50% { --voice-breath: 3px; } }
 @media (min-width: 901px) {
   .composer-row > .voice-button:not(.recording) { border-color: transparent; background: transparent; color: var(--text-dim); }
   .composer-row > .voice-button:not(.recording):hover { color: var(--text); }
+  .composer-row > .voice-button.transcribing { gap: 10px; }   /* the arc clears the label */
 }
 @media (max-width: 900px) {
   /* Beside the send button; the idle one-line field leaves room for both. */
-  .composer-row > .voice-button { right: 44px; --voice-reach: 3px; }   /* the ring stays clear of send and the card's edge */
+  .composer-row > .voice-button { right: 48px; }
   .composer-row > .voice-button:not(.recording) { border-color: transparent; background: transparent; }
-  .composer:has(.voice-button) textarea { padding-right: 92px; }
+  .composer:has(.voice-button) textarea { padding-right: 96px; }
+  /* Listening, it widens into a pill with the time, and the voice swells inside it: a ring outside would run into send. */
+  .composer-row > .voice-button.recording {
+    width: auto; padding: 0 14px 0 12px; border-radius: 22px; gap: 6px;
+    box-shadow: inset 0 0 0 calc(var(--voice-breath, 1px) + var(--voice-level, 0) * 4px) color-mix(in srgb, var(--you) 28%, transparent);
+  }
+  .composer-row > .voice-button.recording .composer-button-label { display: inline; font-size: 15px; font-weight: 600; }
+  .composer:has(.voice-button.recording) textarea { padding-right: 160px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .composer-row > .voice-button.recording { animation: none; box-shadow: 0 0 0 2px color-mix(in srgb, var(--you) 20%, transparent); }
+  .voice-button.transcribing .voice-glyph::after { animation-duration: 2.4s; }
   .composer-row > .voice-button.recording .composer-icon { transform: none; }
 }
 
