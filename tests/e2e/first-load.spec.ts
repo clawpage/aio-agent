@@ -15,6 +15,9 @@ test("opening the console: the drawn mark until the feed is here and the drawing
     if (++calls > 1) await feed;
     await r.fulfill({ json: { mode: "tasks", version: "v1", tasks: Array.from({ length: 6 }, (_, k) => task(k + 1)), nextBefore: null } });
   });
+  // The opening is reported once, step by step, when the mark lifts (src/ui/src/bootTiming.ts).
+  const boots: Array<Record<string, unknown>> = [];
+  await page.route("**/api/analytics", (r) => { const body = r.request().postDataJSON(); if (body?.name === "boot_timing") boots.push(body.props); return r.fulfill({ status: 204, body: "" }); });
   await page.goto("/");
   // Before the session answers: the loading screen shows the mark, and the page is not white.
   const boot = page.getByRole("status").filter({ hasText: "加载中…" });
@@ -53,6 +56,13 @@ test("opening the console: the drawn mark until the feed is here and the drawing
   // The centre has landed (76%) and the whole mark still stands (before 88%).
   expect(at).toBeGreaterThanOrEqual(2128 - 40);
   expect(at).toBeLessThan(2464);
+  await expect.poll(() => boots.length).toBe(1);
+  const timing = boots[0]!;
+  expect(Object.keys(timing).sort()).toEqual(["cover", "dom", "feed", "page", "session", "ttfb", "version"]);
+  // In order along the opening: the session before the feed, the feed before the mark lifted.
+  expect(timing.session as number).toBeGreaterThan(0);
+  expect(timing.feed as number).toBeGreaterThan(timing.session as number);
+  expect(timing.cover as number).toBeGreaterThanOrEqual(timing.feed as number);
 
   // The conversation is simply there: no message rising in, the latest at the bottom.
   const opacity = await page.locator(".task-feed .msg").evaluateAll((els) => els.map((e) => getComputedStyle(e).opacity));

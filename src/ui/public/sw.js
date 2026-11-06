@@ -40,7 +40,10 @@ async function openPage(event) {
       const response = (await event.preloadResponse) || await fetch(event.request);
       if (response.ok && !response.redirected && (response.headers.get("content-type") || "").startsWith("text/html")) await remember(response);
     })().catch(() => undefined));
-    return saved;
+    // Said in Server-Timing, so the page can report how it was opened (src/ui/src/bootTiming.ts).
+    const headers = new Headers(saved.headers);
+    headers.set("Server-Timing", "sw;desc=cache");
+    return new Response(saved.body, { status: saved.status, statusText: saved.statusText, headers });
   }
   let response;
   response = (await event.preloadResponse) || await fetch(event.request);

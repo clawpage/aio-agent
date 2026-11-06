@@ -6,8 +6,8 @@ import type { Config } from "./config.js";
 import type { Logger } from "../common/logger.js";
 import { userNamespace } from "./auth/workspaceHost.js";
 import {
-  FEATURES, PLATFORMS,
-  type AccountRow, type ActiveAccount, type AnalyticsDay, type AnalyticsReport, type Cohort, type Feature, type FunnelEntry, type PeriodTotals, type Platform, type TaskQuality,
+  BOOT_METRICS, FEATURES, PLATFORMS,
+  type AccountRow, type BootMetric, type BootTimes, type ActiveAccount, type AnalyticsDay, type AnalyticsReport, type Cohort, type Feature, type FunnelEntry, type PeriodTotals, type Platform, type TaskQuality,
 } from "../common/analytics.js";
 
 /**
@@ -29,7 +29,7 @@ const MAX_STRING = 64;
 const GADGET_PREFIX = "gadget:";
 const FAILED = new Set(["failed", "planning_failed", "unknown"]);
 /** Events that are not the account using the product: someone visiting its page, its browser failing to come back. */
-const PASSIVE = new Set(["clawpage_visit", "browser_restore_failed", "login_failed"]);
+const PASSIVE = new Set(["clawpage_visit", "browser_restore_failed", "login_failed", "boot_timing"]);
 /** Throttled events remembered at most this many keys (`trackOnce`). */
 const ONCE_KEYS = 5000;
 
@@ -206,6 +206,8 @@ export class Analytics {
     const quality = { stops: 0, retries: 0, reports: 0, restoreFailures: 0 };
     /** Which accounts' browsers would not come back, and at what step (src/control/browser/lifecycle.ts wakeFailureReason). */
     const restoreBy = new Map<string, number>(), restoreReasons: Record<string, number> = {};
+    /** Openings of the console this period, per platform (`boot_timing`, src/ui/src/bootTiming.ts). */
+    const boots = new Map<string, { opens: number; cached: number; times: Record<BootMetric, number[]> }>();
     // The funnel compares like with like: register-page views and the password sign-ups made from that page,
     // both recorded as events (account creation dates reach back before views were recorded).
     let registerViews = 0, loginViews = 0, formSignups = 0;
@@ -247,6 +249,16 @@ export class Analytics {
         case "task_stop": quality.stops++; break;
         case "task_retry": case "retry_tap": quality.retries++; break;
         case "support_request": if (props.kind === "content") quality.reports++; break;
+        case "boot_timing": {
+          if (p !== "current") break;
+          const b = boots.get(row.platform ?? "web") ?? { opens: 0, cached: 0, times: Object.fromEntries(BOOT_METRICS.map((m) => [m, []])) as unknown as Record<BootMetric, number[]> };
+          b.opens++;
+          if (props.page === "cache") b.cached++;
+          // A step not reached (-1), or a page left in the background for minutes, says nothing about speed.
+          for (const m of BOOT_METRICS) { const v = props[m]; if (typeof v === "number" && v >= 0 && v < 120_000) b.times[m].push(v); }
+          boots.set(row.platform ?? "web", b);
+          break;
+        }
         case "browser_restore_failed": {
           quality.restoreFailures++;
           if (row.user_id) restoreBy.set(row.user_id, (restoreBy.get(row.user_id) ?? 0) + 1);
@@ -364,6 +376,8 @@ export class Analytics {
       features: [...features].map(([feature, f]) => ({ feature, count: f.count, users: f.users.size, prevUsers: f.prevUsers.size })),
       quality: { outcomes, medianMs: period.current.medianTaskMs, p90Ms: quantile(durations.current, 0.9), ...quality,
         ...(quality.restoreFailures ? { restoreAccounts: [...restoreBy].map(([id, count]) => ({ username: users.find((u) => u.id === id)?.username ?? id, count })).sort((a, b) => b.count - a.count), restoreReasons } : {}) },
+      boot: [...boots].map(([platform, b]) => ({ platform, opens: b.opens, cached: b.cached,
+        times: Object.fromEntries(BOOT_METRICS.map((m) => [m, { p50: quantile(b.times[m]), p90: quantile(b.times[m], 0.9) }])) as BootTimes })).sort((a, b) => b.opens - a.opens),
       accounts,
       versions: [...versions.values()].map(v => ({ platform: v.platform, version: v.version, users: v.users.size })).sort((a, b) => b.users - a.users || b.version.localeCompare(a.version)),
       welcomeCards: [...welcome].map(([card, w]) => ({ card, count: w.count, users: w.users.size })).sort((a, b) => b.count - a.count || a.card.localeCompare(b.card)),

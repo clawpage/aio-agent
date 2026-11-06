@@ -39,6 +39,7 @@ const full = (days: number): AnalyticsReport => ({
   features: FEATURES.map((feature, i) => ({ feature, count: feature === 'task_typed' ? 30 : feature === 'clawpage_visit' ? 25 : i < 12 ? 12 - i : 0, users: feature === 'task_typed' ? 8 : i < 12 ? Math.max(1, 6 - (i >> 1)) : 0, prevUsers: feature === 'task_typed' ? 6 : i < 12 ? 2 : 0 })),
   quality: { outcomes: { completed: 30, failed: 3, interrupted: 2, unknown: 1, other: 4 }, medianMs: 3.5 * minute, p90Ms: 42 * minute, stops: 3, retries: 2, reports: 1, restoreFailures: 3,
     restoreAccounts: [{ username: 'cr', count: 2 }, { username: 'yzmy', count: 1 }], restoreReasons: { mcp_unready: 2, deadline: 1 } },
+  boot: [{ platform: 'ios', opens: 12, cached: 9, times: { ttfb: { p50: 30, p90: 900 }, dom: { p50: 400, p90: 1600 }, version: { p50: 600, p90: 1900 }, session: { p50: 650, p90: 2000 }, feed: { p50: 1100, p90: 3200 }, cover: { p50: 2800, p90: 5600 } } }],
   accounts: [
     { id: 'owner_1', username: 'owner', role: 'owner', createdAt: Date.UTC(2026, 0, 1), lastSeenAt: Date.UTC(2026, 9, 13, 16, 30), activeDays: 28, sessions: 30, tasks: 20, completed: 18, failed: 1, platforms: ['mac', 'web'], model: 'gpt-6.1-sol' },
     { id: 'm', username: 'yzmy', role: 'member', createdAt: Date.UTC(2026, 8, 22), lastSeenAt: Date.UTC(2026, 9, 13, 20, 5), activeDays: 12, sessions: 22, tasks: 15, completed: 10, failed: 2, platforms: ['android', 'web'], model: 'claude-sonnet-5.5' },
@@ -137,6 +138,9 @@ test('the owner reads the redesigned dashboard: overview with changes, trends, f
   // Quality: the outcome split and the signals.
   await expect(page.locator('section[aria-labelledby="dash-quality"]')).toContainText('完成 30（75%）');
   await expect(page.locator('.dash-stats')).toContainText('42分钟');
+  // Opening speed per platform: how often from the saved page, and each step's median / P90.
+  const boot = page.locator('.dash-boot tbody tr').first();
+  await expect(boot).toContainText('iOS App'); await expect(boot).toContainText('75%'); await expect(boot).toContainText('2.8 / 5.6');
   // Browser restores that failed: whose, and at what step.
   await expect(page.locator('.dash-restore-detail')).toContainText('cr 2、yzmy 1');
   await expect(page.locator('.dash-restore-detail')).toContainText('浏览器 MCP 未就绪 2、超时 1');

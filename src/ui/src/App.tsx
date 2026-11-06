@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { isSandboxLink } from "./sandboxLink";
 import { openDeviceBrowser } from "./deviceBrowser";
+import { bootStep } from "./bootTiming";
 import { api, ApiError, versionMismatch } from "./api";
 import type { Conversation, StatusResponse } from "./types";
 import { MainApp } from "./components/MainApp";
@@ -746,6 +747,7 @@ export function App() {
     // quick, and a control plane that gives one has the task inbox; only one without it is asked for the inbox itself,
     // where only a 404 means an older control plane (a slow or failed answer must not hold the page on "加载中…").
     void versionMismatch().then(({ answered, mismatch, staleUi }) => {
+      bootStep("version");
       // The console opened from the saved page (public/sw.js) and the service has moved past it: load the deployed one.
       if (staleUi && loadDeployedPage()) return;
       setMismatch(mismatch);

@@ -24,6 +24,7 @@ export const analytics = {
     features: "功能使用",
     platforms: "平台与版本",
     quality: "任务质量",
+    boot: "打开速度",
     accounts: "账号与用量",
     tokens: "token 用量",
   },
@@ -145,6 +146,12 @@ export const analytics = {
     image_generate: "生成图片", clawpage_publish: "发布 Clawpage", clawpage_visit: "Clawpage 被访问", knowledge_use: "使用个人知识库", kb_use: "使用知识库",
     browser_restore_failed: "浏览器恢复失败", shared_kb_create: "新建共享知识库", shared_kb_invite: "邀请加入共享知识库", shared_kb_join: "加入共享知识库",
   } as Record<string, string>,
+  /** Opening the console, per platform (src/ui/src/bootTiming.ts): each step's median / P90 from the start of the opening. */
+  boot: {
+    columns: { platform: "平台", opens: "打开次数", cached: "从缓存打开", ttfb: "首字节", dom: "页面就绪", version: "版本", session: "登录", feed: "对话流", cover: "开屏收起" },
+    note: "每次打开控制台记一次，各步为从开始打开起算的毫秒数（中位数 / P90）。「从缓存打开」是 service worker 直接用保存的页面、不等网络的次数。开屏收起前会等加载动画画完一轮。",
+    empty: "这个时间段还没有记录到打开数据。",
+  },
   platformNames: { web: "网页", pwa: "主屏网页应用", ios: "iOS App", android: "Android App", mac: "Mac App", unknown: "未标明" } as Record<string, string>,
   methodology: "统计口径",
   note: (since: string | null) => `活跃 = 当天打开应用、使用功能或手动提交任务的账号；定时任务自动运行、执行器的工具调用和别人访问分享页都不算。会话 = 打开应用（离开 30 分钟后回来算新的一次）。任务数据来自各账号的任务记录（含历史）；事件${since ? `自 ${since} 起记录` : "尚未开始记录"}，之前的日期只有账号与任务数据。不记录消息内容、文件名、网址、邮箱或设备标识。`,

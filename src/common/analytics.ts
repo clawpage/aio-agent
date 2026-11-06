@@ -9,7 +9,7 @@ export type Platform = (typeof PLATFORMS)[number];
  * (the control plane records what it sees itself). `auth_view` is the only one
  * accepted without a session.
  */
-export const CLIENT_EVENTS = ["app_open", "page_view", "auth_view", "welcome_card", "file_save", "retry_tap"] as const;
+export const CLIENT_EVENTS = ["app_open", "page_view", "auth_view", "welcome_card", "file_save", "retry_tap", "boot_timing"] as const;
 export type ClientEvent = (typeof CLIENT_EVENTS)[number];
 
 /** Features the report counts adoption of, in the order the dashboard lists them. */
@@ -80,6 +80,17 @@ export type TaskQuality = {
   restoreReasons?: Record<string, number>;
 };
 
+/**
+ * Opening the console, step by step (src/ui/src/bootTiming.ts), in milliseconds from the start of the
+ * navigation: the first byte of the page, the page ready, the version and the session answered, the feed
+ * here, the loading mark lifted.
+ */
+export const BOOT_METRICS = ["ttfb", "dom", "version", "session", "feed", "cover"] as const;
+export type BootMetric = (typeof BOOT_METRICS)[number];
+export type BootTimes = Record<BootMetric, { p50: number | null; p90: number | null }>;
+/** One platform's openings this period: how many, how many from the saved page, and how long each step took. */
+export type BootPlatform = { platform: string; opens: number; cached: number; times: BootTimes };
+
 /** One account in the range: activity, tasks, where it used the console and the model of its latest task. */
 export type AccountRow = {
   id: string;
@@ -140,4 +151,6 @@ export type AnalyticsReport = {
   versions?: Array<{ platform: string; version: string; users: number }>;
   /** Which welcome card in the main chat was tapped. */
   welcomeCards?: Array<{ card: string; count: number; users: number }>;
+  /** Openings of the console this period, per platform, most first. */
+  boot?: BootPlatform[];
 };

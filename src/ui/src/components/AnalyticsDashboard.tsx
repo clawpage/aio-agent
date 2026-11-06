@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode, type Ref } from '
 import { createPortal } from 'react-dom';
 import { api, ApiError } from '../api';
 import { PopupPresence, PopupSurface } from './PopupMotion';
-import { FEATURES, type AccountRow, type ActiveAccount, type AnalyticsReport, type FunnelEntry, type PeriodTotals } from '../../../common/analytics';
+import { BOOT_METRICS, FEATURES, type AccountRow, type BootPlatform, type ActiveAccount, type AnalyticsReport, type FunnelEntry, type PeriodTotals } from '../../../common/analytics';
 import type { AccountUsage, UsageReport } from '../../../common/usage';
 import type { DashChartSpec, DashSeries } from '../dashboardCharts';
 import type { MountedChart } from '../chartRender';
@@ -229,6 +229,21 @@ function Quality({ quality }: { quality: NonNullable<AnalyticsReport['quality']>
 }
 
 type SortKey = 'account' | 'lastSeen' | 'activeDays' | 'sessions' | 'tasks' | 'completion' | 'tokens' | 'cost';
+/** How long opening the console takes on each platform, step by step (median / P90 in seconds). */
+function Boot({ rows }: { rows: BootPlatform[] }) {
+  const b = a().boot;
+  const sec = (ms: number | null) => (ms === null ? "—" : (ms / 1000).toFixed(1));
+  if (!rows.length) return <p className="muted">{b.empty}</p>;
+  return <>
+    <div className="dash-table-scroll"><table className="dash-table dash-boot">
+      <thead><tr><th scope="col">{b.columns.platform}</th><th scope="col">{b.columns.opens}</th><th scope="col">{b.columns.cached}</th>{BOOT_METRICS.map(m => <th scope="col" key={m}>{b.columns[m]}</th>)}</tr></thead>
+      <tbody>{rows.map(r => <tr key={r.platform}><th scope="row">{a().platformNames[r.platform] ?? r.platform}</th><td>{fmt(r.opens)}</td><td>{pct(r.cached, r.opens)}</td>
+        {BOOT_METRICS.map(m => <td key={m}>{sec(r.times[m].p50)} / {sec(r.times[m].p90)}</td>)}</tr>)}</tbody>
+    </table></div>
+    <p className="dash-note muted tiny">{b.note}</p>
+  </>;
+}
+
 /** Every account in one table: what it did, and the tokens it used (owner only: an estimated cost and today's share of the limit). */
 function Accounts({ rows, usage, now, total }: { rows: AccountRow[]; usage: Map<string, AccountUsage> | null; now: number; total: number }) {
   const c = a().accounts;
@@ -433,6 +448,8 @@ export function AnalyticsDashboard({ onExpired }: { onExpired: () => void }) {
           <Section id="dash-platforms" title={a().sections.platforms}><Platforms report={p}/></Section>
           {p.quality && <Section id="dash-quality" title={a().sections.quality}><Quality quality={p.quality}/></Section>}
         </div>}
+
+        {p?.boot && <Section id="dash-boot" title={a().sections.boot} className="dash-wide-card"><Boot rows={p.boot}/></Section>}
 
         {p?.accounts && <Section id="dash-accounts" title={a().sections.accounts} className="dash-wide-card">
           {u?.accounts.some(x => !x.available) && <p className="banner error" role="alert">{t.usage.unavailable(u.accounts.filter(x => !x.available).map(x => x.username))}</p>}

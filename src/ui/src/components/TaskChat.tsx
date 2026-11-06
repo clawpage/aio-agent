@@ -27,6 +27,7 @@ import { TurnPills } from "./TurnPills";
 import { FormCard } from "./FormCard";
 import { VoiceButton } from "./VoiceInput";
 import { PushNudge } from "./PushSettings";
+import { bootStep, reportBoot } from "../bootTiming";
 import { QuotaNotice } from "./QuotaNotice";
 import type {TaskFeed} from '../taskStatus';
 import { t as i18n } from "../i18n";
@@ -127,6 +128,7 @@ export function TaskChat({ onDetails, onOpenLink, onOpenFileInBrowser, onExpired
                 setNextBefore(data.nextBefore);
                 pageLoaded.current = true;
                 setArrival("ready");
+                bootStep("feed");
             }
         }
         catch (err) {
@@ -569,7 +571,7 @@ export function TaskChat({ onDetails, onOpenLink, onOpenFileInBrowser, onExpired
         : connected ? i18n.feed.head.idle : i18n.feed.head.connecting}</span></div></header>
     <div className={`chat-scroll task-feed${bubbles ? " has-needs-you" : ""}${quiet ? " quiet" : ""}`} ref={scroll} onScroll={e => onFeedScroll(e.currentTarget)} onWheel={byHand} onPointerDown={byHand} onKeyDown={byHand}
       onTouchStart={() => { touching.current = true; byHand(); }} onTouchMove={byHand} onTouchEnd={() => { touching.current = false; byHand(); }} onTouchCancel={() => { touching.current = false; }} aria-busy={arrival === "loading" || undefined}>
-      {covered && createPortal(<BootCover ready={arrival === "ready" || waited} label={i18n.common.loading} onDone={() => setCovered(false)}/>, document.body)}
+      {covered && createPortal(<BootCover ready={arrival === "ready" || waited} label={i18n.common.loading} onDone={() => { setCovered(false); reportBoot(); }}/>, document.body)}
       {arrival === "loading" && !covered && <div className="feed-loading"><InlineLoading label={i18n.common.loading}/></div>}
       {nextBefore && <div className="feed-older" ref={olderTop}>{olderState === "failed"
         ? <button className="ghost tiny" onClick={() => void loadOlder()}>{i18n.feed.older.retry}</button>

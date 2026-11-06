@@ -50,6 +50,9 @@ function scenario() {
   ev('auth_view', d(2), { props: { mode: 'register' } });
   ev('app_open', d(11), { userId: 'user_a', platform: 'web', props: { ui: '1.3.0' } });
   ev('app_open', d(0), { userId: 'user_b', platform: 'ios', props: { ui: '1.4.0', lang: 'zh-CN' } });
+  // Openings of the console: one from the saved page, one from the network; a step not reached is -1.
+  ev('boot_timing', d(0), { userId: 'user_b', platform: 'ios', props: { page: 'cache', ttfb: 20, dom: 300, version: 500, session: 520, feed: 900, cover: 2800 } });
+  ev('boot_timing', d(0), { userId: 'user_b', platform: 'ios', props: { page: 'network', ttfb: 900, dom: 1500, version: 1700, session: 1750, feed: -1, cover: 9000 } });
   ev('task_submit', d(0), { userId: 'user_a', props: { attachments: 3, images: 1 } });
   ev('voice_input', d(0), { userId: 'user_a', props: { ok: false } });
   ev('voice_input', d(0), { userId: 'user_b', props: { ok: true, seconds: 4 } });
@@ -111,6 +114,9 @@ it('compares the range with the period before it and counts outcomes, durations,
   expect(f.welcome_card).toMatchObject({ count: 3, users: 1 });
   expect(report.welcomeCards).toEqual([{ card: 'feature:clawpages', count: 2, users: 1 }, { card: 'starter:0', count: 1, users: 1 }]);
   expect(report.versions).toEqual([{ platform: 'ios', version: '1.4.0', users: 1 }]);
+  expect(report.boot).toEqual([{ platform: 'ios', opens: 2, cached: 1, times: {
+    ttfb: { p50: expect.any(Number), p90: 900 }, dom: { p50: expect.any(Number), p90: 1500 }, version: { p50: expect.any(Number), p90: 1700 },
+    session: { p50: expect.any(Number), p90: 1750 }, feed: { p50: 900, p90: 900 }, cover: { p50: expect.any(Number), p90: 9000 } } }]);
   expect(report.daily.at(-1)).toMatchObject({ date: '2026-10-13', active: 2, sessions: 1, wau: 3 });
 
   const rows = Object.fromEntries(report.accounts!.map(r => [r.id, r]));

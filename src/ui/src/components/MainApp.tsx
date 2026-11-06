@@ -38,6 +38,7 @@ import { syncDeviceToolsAccount } from "../deviceTools";
 import { attention } from "../attention";
 import { locale, localeChosen, localeSynced, markLocaleSynced, t } from "../i18n";
 import { track, trackOpen } from "../analytics";
+import { bootStep } from "../bootTiming";
 /** One owner-facing inbox; executor conversations are implementation details. */
 /** The site a link goes to, named on the opening card. */
 function hostOf(url: string): string {
@@ -192,6 +193,7 @@ export function MainApp({ firstSession }: { firstSession?: ReturnType<typeof api
         const first = primed.current;
         primed.current = undefined;
         const session = await (first ?? api.session(AbortSignal.timeout(10000)));
+        bootStep("session");
         if (session.authenticated && session.username) {
             const at = pathUser();
             // An address without an account (the root, /login, an old link) becomes your own; one naming a page keeps it.
