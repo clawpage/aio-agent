@@ -989,12 +989,9 @@ textarea:focus {
 .boot-label { position: absolute; top: calc(50% + 40px); left: 0; right: 0; text-align: center; font-size: 12px; color: var(--text-dim); animation: skeleton-in 300ms ease-out 1.2s both; }
 /* Kept over the console while it opens (BootCover), above every surface of it. */
 .boot-cover { z-index: 1100; }
-/* Unseen; each of its iterations starts as the mark's drawing finishes (76%), which is when the cover may lift. */
-.boot-tick { position: absolute; width: 0; height: 0; overflow: hidden; }
-@media (prefers-reduced-motion: no-preference) {
-  .boot-tick { animation: boot-tick 2.8s var(--tick-phase, 0ms) infinite linear; }
-}
-@keyframes boot-tick { from { opacity: 0; } to { opacity: 0; } }
+/* As soon as the feed is there it fades, letting the console show through. */
+.boot-cover.lifting { animation: boot-lift 240ms ease-out forwards; pointer-events: none; }
+@keyframes boot-lift { to { opacity: 0; } }
 @media (prefers-reduced-motion: reduce) {
   .boot-label { animation: none; }
 }

@@ -20,9 +20,6 @@ export function BrandMark({ size = 28 }: { size?: number }) {
 
 /** One drawing, in milliseconds; the same length as the `.loading-mark` animations in styles.css. */
 const LOADING_CYCLE_MS = 2800;
-/** When the centre has landed (76%) and the finished mark rests until it fades (88%): the `lm-stop` and `lm-draw` keyframes. */
-const LOADING_DRAWN_MS = 2128;
-const LOADING_REST_MS = 2464;
 
 /**
  * The mark's outline in the order one pen draws it: the tile's rounded frame
@@ -74,32 +71,25 @@ export function PageLoading({ label }: { label: string }) {
 
 /**
  * The loading screen kept over the console while it opens, until `ready`; then
- * it waits for the drawing on screen to finish and calls `onDone` with the mark
- * standing whole. The wait follows the mark's own animation (an unseen tick
- * whose every iteration starts as a drawing finishes), not a timer, so it ends
- * exactly when the picture does; without motion there is nothing to wait for.
+ * it fades out at once, wherever the drawing is, and calls `onDone` when it has
+ * gone. Without motion it goes at once.
  */
 export function BootCover({ ready, label, onDone }: { ready: boolean; label: string; onDone: () => void }) {
-  const tick = useRef<HTMLSpanElement>(null);
   const done = useRef(onDone);
   done.current = onDone;
-  const [phase] = useState(drawingPhase);
-  const style = { "--tick-phase": `-${Math.round((phase - LOADING_DRAWN_MS + LOADING_CYCLE_MS) % LOADING_CYCLE_MS)}ms` } as CSSProperties;
+  const still = useRef(matchMedia("(prefers-reduced-motion: reduce)").matches);
   useEffect(() => {
-    const el = tick.current;
-    if (!ready || !el) return;
-    const timing = el.getAnimations?.()[0]?.effect?.getComputedTiming();
-    // No motion, or the finished mark is standing right now.
-    if (!timing || (timing.progress ?? 0) * LOADING_CYCLE_MS < LOADING_REST_MS - LOADING_DRAWN_MS) { done.current(); return; }
-    const lift = () => done.current();
-    el.addEventListener("animationiteration", lift, { once: true });
-    return () => el.removeEventListener("animationiteration", lift);
+    if (!ready) return;
+    if (still.current) { done.current(); return; }
+    // In case the fade's end is never told (a page in the background).
+    const timer = window.setTimeout(() => done.current(), 1000);
+    return () => clearTimeout(timer);
   }, [ready]);
   return (
-    <div className="boot boot-loading boot-cover" role="status">
+    <div className={`boot boot-loading boot-cover${ready ? " lifting" : ""}`} role="status"
+      onAnimationEnd={(e) => { if (e.target === e.currentTarget && e.animationName === "boot-lift") done.current(); }}>
       <LoadingMark size={56} />
       <span className="boot-label">{label}</span>
-      <span ref={tick} className="boot-tick" style={style} aria-hidden="true" />
     </div>
   );
 }
