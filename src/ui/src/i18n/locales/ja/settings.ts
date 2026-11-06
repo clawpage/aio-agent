@@ -101,6 +101,7 @@ export const settings: typeof zh = {
     copy: 'コピー',
     revoke: '無効化',
   },
+  quota: { title: '本日の利用量', exceeded: (at: string) => `上限に達しました。${at} にリセットされます` },
   language: {
     title: '表示言語',
     description: 'このブラウザにのみ適用されます。切り替えるとページを再読み込みします。',

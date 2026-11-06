@@ -99,6 +99,7 @@ export const settings = {
     copy: "复制",
     revoke: "作废",
   },
+  quota: { title: "今日用量", exceeded: (at: string) => `已用完，将于 ${at} 恢复` },
   language: {
     title: "界面语言",
     description: "只影响这个浏览器，切换后页面会重新加载。",

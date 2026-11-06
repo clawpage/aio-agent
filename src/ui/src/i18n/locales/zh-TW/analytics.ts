@@ -44,6 +44,8 @@ export const analytics: typeof zh = {
     sessions: "工作階段",
     sessionsSub: (perAccount: string, days: string) => `人均 ${perAccount} 次 · 人均活躍 ${days} 天`,
     tokens: "token",
+    cost: "估算費用",
+    costSub: "按 API 標價折算",
     tokensSub: (input: string, output: string) => `輸入 ${input} · 輸出 ${output}`,
   },
   activeList: {

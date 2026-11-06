@@ -44,6 +44,8 @@ export const analytics: typeof zh = {
     sessions: "セッション",
     sessionsSub: (perAccount: string, days: string) => `1 アカウントあたり ${perAccount} · 平均 ${days} 日アクティブ`,
     tokens: "トークン",
+    cost: '推定コスト',
+    costSub: 'API 定価で換算',
     tokensSub: (input: string, output: string) => `入力 ${input} · 出力 ${output}`,
   },
   activeList: {

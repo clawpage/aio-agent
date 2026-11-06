@@ -13,6 +13,8 @@ const fmt = (n: number) => n.toLocaleString(locale);
 const compact = new Intl.NumberFormat(locale, { notation: 'compact', maximumFractionDigits: 1 });
 const short = (n: number) => compact.format(n);
 const one = (n: number) => n.toLocaleString(locale, { maximumFractionDigits: 1 });
+/** An estimated cost in US dollars (src/control/usage.ts PRICES). */
+const usd = (n: number) => n.toLocaleString(locale, { style: 'currency', currency: 'USD', maximumFractionDigits: n < 100 ? 2 : 0 });
 const pct = (part: number, whole: number) => !whole ? '—' : part > 0 && part / whole < 0.01 ? '<1%' : `${Math.round(part / whole * 100)}%`;
 const unit = (u: 'second' | 'minute' | 'hour') => new Intl.NumberFormat(locale, { style: 'unit', unit: u, unitDisplay: 'short', maximumFractionDigits: 1 });
 const SECOND = unit('second'), MINUTE = unit('minute'), HOUR = unit('hour');
@@ -338,6 +340,7 @@ export function AnalyticsDashboard({ onExpired }: { onExpired: () => void }) {
   const generated = Math.min(p?.generatedAt ?? Infinity, u?.generatedAt ?? Infinity);
   const valid = u?.accounts.filter(x => x.available) ?? [];
   const tokenTotal = valid.reduce((n, x) => n + x.totals.total, 0);
+  const costTotal = valid.reduce((n, x) => n + (x.totals.usd ?? 0), 0);
   const tokens = u ? new Map(valid.map(x => [x.id, x.totals.total])) : null;
   const c = a().charts;
 
@@ -391,6 +394,7 @@ export function AnalyticsDashboard({ onExpired }: { onExpired: () => void }) {
             <Kpi days={p.days} label={a().kpi.completion} value={pct(p.totals.completed, p.totals.tasks)}/>
           </>}
           {u && <Kpi days={u.days} label={a().kpi.tokens} value={<span title={fmt(tokenTotal)}>{short(tokenTotal)}</span>} sub={a().kpi.tokensSub(short(valid.reduce((n, x) => n + x.totals.input, 0)), short(valid.reduce((n, x) => n + x.totals.output, 0)))}/>}
+          {u && valid.some(x => x.totals.usd !== undefined) && <Kpi days={u.days} label={a().kpi.cost} value={usd(costTotal)} sub={a().kpi.costSub}/>}
         </div></section>
 
         {(charts || tokenChart) && <Section id="dash-trends" title={a().sections.trends} className="dash-wide-card"><div className="dash-charts">
@@ -419,12 +423,14 @@ export function AnalyticsDashboard({ onExpired }: { onExpired: () => void }) {
         {u && <Section id="dash-tokens" title={a().sections.tokens} className="dash-wide-card dash-tokens">
           {u.accounts.some(x => !x.available) && <p className="banner error" role="alert">{t.usage.unavailable(u.accounts.filter(x => !x.available).map(x => x.username))}</p>}
           {tokenTotal === 0 ? <p className="muted">{t.usage.noUsage}</p> : <div className="dash-table-scroll"><table className="dash-table">
-            <thead><tr><th scope="col">{t.usage.columns.user}</th><th scope="col">{t.usage.columns.total}</th><th scope="col">{t.usage.columns.share}</th><th scope="col">{t.usage.columns.input}</th><th scope="col" className="dash-wide">{t.usage.columns.cached}</th><th scope="col">{t.usage.columns.output}</th></tr></thead>
+            <thead><tr><th scope="col">{t.usage.columns.user}</th><th scope="col">{t.usage.columns.total}</th><th scope="col">{t.usage.columns.share}</th><th scope="col">{t.usage.columns.input}</th><th scope="col" className="dash-wide">{t.usage.columns.cached}</th><th scope="col">{t.usage.columns.output}</th><th scope="col">{t.usage.columns.cost}</th><th scope="col">{t.usage.columns.quota}</th></tr></thead>
             <tbody>{[...u.accounts].sort((x, y) => (y.available ? y.totals.total : -1) - (x.available ? x.totals.total : -1)).map(x => <tr key={x.id}><th scope="row">{x.username}<small>{x.role === 'owner' ? t.usage.roles.owner : t.usage.roles.member}</small></th>
               {x.available ? <>
                 <td><span title={fmt(x.totals.total)}>{short(x.totals.total)}</span></td><td>{pct(x.totals.total, tokenTotal)}</td>
                 <td><span title={fmt(x.totals.input)}>{short(x.totals.input)}</span></td><td className="dash-wide"><span title={fmt(x.totals.cached)}>{short(x.totals.cached)}</span></td><td><span title={fmt(x.totals.output)}>{short(x.totals.output)}</span></td>
-              </> : <td colSpan={5}>{t.usage.notAvailable}</td>}</tr>)}</tbody>
+                <td>{x.totals.usd == null ? <span className="muted" title={x.model ?? undefined}>{t.usage.columns.noPrice}</span> : <span title={x.model ?? undefined}>{usd(x.totals.usd)}</span>}</td>
+                <td>{x.quota ? <span title={`${fmt(x.quota.used)} / ${fmt(x.quota.limit)}`}>{pct(x.quota.used, x.quota.limit)}</span> : '—'}</td>
+              </> : <td colSpan={7}>{t.usage.notAvailable}</td>}</tr>)}</tbody>
           </table></div>}
         </Section>}
 
@@ -442,6 +448,8 @@ export function AnalyticsDashboard({ onExpired }: { onExpired: () => void }) {
           {p && <p className="dash-note muted tiny">{a().note(p.collectionStartedAt ? new Date(p.collectionStartedAt).toLocaleString(locale, { timeZone: tz }) : null)}</p>}
           {u && <p className="dash-note muted tiny">{t.usage.note}</p>}
           {u && <p className="dash-note muted tiny">{t.usage.historyNote}</p>}
+          {u && <p className="dash-note muted tiny">{t.usage.costNote}</p>}
+          {u && <p className="dash-note muted tiny">{t.usage.quotaNote}</p>}
           {u && <ul className="usage-coverage muted tiny">{u.accounts.map(x => <li key={x.id}>{t.usage.coverage(x.username, x.collectionStartedAt ? new Date(x.collectionStartedAt).toLocaleString(locale, { timeZone: tz }) : null, x.firstRecordAt ? new Date(x.firstRecordAt).toLocaleDateString(locale, { timeZone: tz }) : null)}</li>)}</ul>}
         </details>
       </div>}

@@ -44,6 +44,8 @@ export const analytics: typeof zh = {
     sessions: "Sessions",
     sessionsSub: (perAccount: string, days: string) => `${perAccount} per account · ${days} active days each`,
     tokens: "Tokens",
+    cost: "Est. cost",
+    costSub: "At API list prices",
     tokensSub: (input: string, output: string) => `Input ${input} · output ${output}`,
   },
   activeList: {

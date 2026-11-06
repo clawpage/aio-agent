@@ -21,6 +21,9 @@ export const tasks = {
     supplementUnknown: "补充消息的送达状态待核对，不会自动重复发送。",
     dependencyFailed: "前置任务没有成功完成。请核对结果后补充一个关联任务，不会自动继续执行。",
   },
+  quota: {
+    exceeded: (at: string, hours: number) => `今日免费用量已用完，服务暂停，将于太平洋时间 ${at}（约 ${hours} 小时后）恢复。`,
+  },
   notes: {
     archived: "结果没有核对，已由你归档。",
     supplementReceived: "已收到补充，结果请看后续任务。",

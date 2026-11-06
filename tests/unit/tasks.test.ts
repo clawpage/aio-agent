@@ -1049,3 +1049,44 @@ describe("owner dispatch log", () => {
         expect((failed!.steps[6] as any).correction).toBe("the answer isn't JSON");
     });
 });
+describe("a member's daily tokens", () => {
+    const used = { value: 0 };
+    const resetsAt = Date.now() + 3 * 3600_000;
+    beforeEach(() => { used.value = 0; tasks.setQuota(() => ({ limit: 100, used: used.value, resetsAt, exceeded: used.value >= 100 })); });
+    it("refuses a new message once they are used up, saying when they come back", async () => {
+        used.value = 100;
+        expect(() => runInLocale("zh-CN", () => submit("还能用吗"))).toThrow(/^今日免费用量已用完，服务暂停，将于太平洋时间 .+（约 3 小时后）恢复。$/);
+        expect(db.prepare("SELECT COUNT(*) n FROM tasks").get()).toMatchObject({ n: 0 });
+        used.value = 99;
+        expect(submit("还能用").status).toBe("planning");
+    });
+    it("does not start a task waiting its turn, and says why a turn turned away midway failed", async () => {
+        const running = submit("长任务"); await tick();
+        expect(tasks.get(running.id)?.status).toBe("running");
+        // The gateway refused the next model request: Codex ends the turn as failed with its own words.
+        used.value = 100;
+        codex.completeTurn(codex.startedTurns[0]!.turnId, "failed"); await tick();
+        expect(tasks.get(running.id)).toMatchObject({ status: "failed", error: expect.stringContaining("(in about 3 hours)") });
+        // A task that was already dispatched and waiting does not start.
+        used.value = 0;
+        const waiting = submit("排队的"); await tick();
+        db.prepare("UPDATE tasks SET status='waiting',turn_id=NULL WHERE id=?").run(waiting.id);
+        const started = codex.startedTurns.length;
+        used.value = 100; tasks.setQuota(() => ({ limit: 100, used: used.value, resetsAt, exceeded: true }));
+        (tasks as unknown as { dispatch(): void }).dispatch();
+        expect(tasks.get(waiting.id)).toMatchObject({ status: "failed", error: expect.stringContaining("service is paused") });
+        expect(codex.startedTurns).toHaveLength(started);
+    });
+    it("skips a scheduled run quietly and refuses running one by hand", () => {
+        const made = tasks.createScheduleFor("owner_1", { title: "盯价格", instruction: "看看价格", schedule: { kind: "interval", everyMinutes: 15 }, needsBrowser: false });
+        if (!made.ok) throw new Error(made.error);
+        used.value = 100;
+        expect(() => runInLocale("zh-CN", () => tasks.runScheduleNow(made.schedule!.id, "owner_1"))).toThrow(/恢复/);
+        // Its time comes: the run is skipped like an unmet condition, and the schedule moves on.
+        db.prepare("UPDATE schedules SET next_run_at=? WHERE id=?").run(Date.now() - 1000, made.schedule!.id);
+        (tasks as unknown as { runDueSchedules(): void }).runDueSchedules();
+        expect(db.prepare("SELECT next_run_at FROM schedules WHERE id=?").get(made.schedule!.id)).toMatchObject({ next_run_at: expect.any(Number) });
+        expect((db.prepare("SELECT next_run_at FROM schedules WHERE id=?").get(made.schedule!.id) as { next_run_at: number }).next_run_at).toBeGreaterThan(Date.now());
+        expect(db.prepare("SELECT COUNT(*) n FROM tasks WHERE schedule_id IS NOT NULL").get()).toMatchObject({ n: 0 });
+    });
+});

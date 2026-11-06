@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { AccountPrivacySettings } from "./Support";
 import { PushSettings } from "./PushSettings";
 import { IphoneSettings } from "./IphoneSettings";
@@ -20,11 +21,23 @@ export function LanguagePicker() {
   </label>;
 }
 
+/** A member's share of today's tokens, as a share only; when used up, when it comes back (src/control/quota.ts). */
+function QuotaSettings() {
+  const [quota, setQuota] = useState<{ percent: number; resetsAt: number } | null>(null);
+  useEffect(() => { void api.quota().then(q => { if (q.limited) setQuota(q); }, () => undefined); }, []);
+  if (!quota) return null;
+  return <section className="settings-card" aria-label={t.settings.quota.title}>
+    <div className="settings-section-head"><h3>{t.settings.quota.title}</h3></div>
+    <div className="quota-meter"><progress max={100} value={quota.percent} aria-label={t.settings.quota.title}/><strong>{quota.percent}%</strong></div>
+    {quota.percent >= 100 && <p className="muted tiny" role="status">{t.settings.quota.exceeded(new Date(quota.resetsAt).toLocaleString(locale, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }))}</p>}
+  </section>;
+}
+
 /** Member account controls: this component never requests owner settings. */
 export function MemberSettings({ onBack }: { onBack: () => void }) {
   return <section className="settings" aria-label={t.settings.page.title}>
     <header className="settings-head"><h2>{t.settings.page.title}</h2><span className="spacer"/><button type="button" className="ghost" onClick={onBack}>{t.settings.page.back}</button></header>
-    <div className="settings-body"><PushSettings/><IphoneSettings/><LanguageSettings/><AccountPrivacySettings/></div>
+    <div className="settings-body"><QuotaSettings/><PushSettings/><IphoneSettings/><LanguageSettings/><AccountPrivacySettings/></div>
   </section>;
 }
 

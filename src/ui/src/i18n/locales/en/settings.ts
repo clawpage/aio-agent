@@ -101,6 +101,7 @@ export const settings: typeof zh = {
     copy: "Copy",
     revoke: "Revoke",
   },
+  quota: { title: "Today's usage", exceeded: (at: string) => `Used up; resets at ${at}` },
   language: {
     title: "Language",
     description: "Applies to this browser only; the page reloads when you switch.",

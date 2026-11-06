@@ -4,9 +4,27 @@ import { DatabaseSync } from 'node:sqlite';
 import type { Db } from './db.js';
 import { userNamespace } from './auth/workspaceHost.js';
 import type { Config } from './config.js';
-import type { TokenCounts, UsageReport, UsageDay } from '../common/usage.js';
+import type { QuotaStatus, TokenCounts, UsageReport, UsageDay } from '../common/usage.js';
+import { quotaStatus } from './quota.js';
+import { readAgentSettings } from './settings.js';
+import { MEMBER_MODEL, MEMBER_MODELS } from './auth/policy.js';
 
 type Json = Record<string, any>;
+/**
+ * List API prices, USD per million tokens, for the owner's cost estimate (docs/FEATURES.md 运营看板). An estimate only:
+ * the control plane pays through subscription logins, not per token. Input is charged without its cached part.
+ */
+export const PRICES: Record<string, { input: number; cached: number; cacheWrite: number; output: number }> = {
+  'gpt-6.1-sol': { input: 2, cached: 0.1, cacheWrite: 2.5, output: 10 },
+  'gpt-6.1-terra': { input: 1, cached: 0.05, cacheWrite: 1, output: 5 },
+  'claude-sonnet-5-5': { input: 2, cached: 0.2, cacheWrite: 2.5, output: 10 },
+};
+/** What these tokens would cost on `model` at list prices; null for a model with no price here. */
+export function estimateUsd(c: TokenCounts, model: string | null): number | null {
+  const price = model ? PRICES[model] : undefined;
+  if (!price) return null;
+  return ((c.input - c.cached - c.cacheWrite) * price.input + c.cached * price.cached + c.cacheWrite * price.cacheWrite + c.output * price.output) / 1e6;
+}
 const empty = (): TokenCounts => ({ input: 0, output: 0, cached: 0, cacheWrite: 0 });
 const number = (v: unknown): number | null => typeof v === 'number' && Number.isSafeInteger(v) && v >= 0 ? v : null;
 function counts(raw: Json | undefined, claude: boolean): TokenCounts | null {
@@ -32,6 +50,8 @@ export class UsageLedger {
     CREATE TABLE IF NOT EXISTS token_usage_counters (key TEXT PRIMARY KEY, counts TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS token_usage_meta (key TEXT PRIMARY KEY, value INTEGER NOT NULL);`);
     db.prepare("INSERT OR IGNORE INTO token_usage_meta VALUES ('collection_started',?)").run(Date.now());
+    // The daily limit (src/control/quota.ts) counts only what was used after it came in.
+    db.prepare("INSERT OR IGNORE INTO token_usage_meta VALUES ('quota_started',?)").run(Date.now());
   }
   private add(key: string, value: TokenCounts, at: number): void {
     this.db.prepare('INSERT OR IGNORE INTO token_usage(source_key,created_at,input,output,cached,cache_write) VALUES(?,?,?,?,?,?)')
@@ -95,8 +115,13 @@ export function usageReport(root: Db, cfg: Config, days: number, now = Date.now(
   const today = dateAt(now), anchor = Date.parse(`${today}T12:00:00Z`);
   const dates = Array.from({ length: days }, (_, i) => new Date(anchor - (days - 1 - i) * 86400000).toISOString().slice(0, 10));
   const users = root.prepare('SELECT id,username,role FROM owners ORDER BY created_at,id').all() as { id: string; username: string; role: string }[];
+  const meta = (key: string) => (root.prepare('SELECT value FROM meta WHERE key=?').get(key) as { value: string } | undefined)?.value;
   const accounts = users.map(user => {
-    const buckets = new Map(dates.map(date => [date, { date, ...empty(), total: 0 } as UsageDay]));
+    const buckets = new Map(dates.map(date => [date, { date, ...empty(), total: 0, usd: null } as UsageDay]));
+    // Costed at the account's model now: a member's assigned one, the owner's setting. Scheduled runs on Terra count at it too.
+    const assigned = meta(`member_model:${user.id}`);
+    const model = user.role === 'owner' ? readAgentSettings(root).model ?? cfg.agent.defaultModel : assigned && MEMBER_MODELS.includes(assigned) ? assigned : MEMBER_MODEL;
+    let quota: QuotaStatus | null = null;
     let db: Db | null = null, temporary: Db | null = null;
     let available = true, collectionStartedAt: number | null = null, firstRecordAt: number | null = null;
     try {
@@ -116,12 +141,14 @@ export function usageReport(root: Db, cfg: Config, days: number, now = Date.now(
           const bucket = buckets.get(dateAt(row.created_at));
           if (bucket) { bucket.input += row.input; bucket.output += row.output; bucket.cached += row.cached; bucket.cacheWrite += row.cache_write; bucket.total += row.input + row.output; }
         }
+        if (user.role === 'member' && source === db) quota = quotaStatus(db, now);
       }
     } catch { available = false; } finally { temporary?.close(); if (db && db !== root) db.close(); }
-    if (!available) for (const bucket of buckets.values()) Object.assign(bucket, empty(), { total: 0 });
+    if (!available) { for (const bucket of buckets.values()) Object.assign(bucket, empty(), { total: 0 }); quota = null; }
     const values = [...buckets.values()];
-    const totals = values.reduce((a, b) => ({ input: a.input + b.input, output: a.output + b.output, cached: a.cached + b.cached, cacheWrite: a.cacheWrite + b.cacheWrite, total: a.total + b.total }), { ...empty(), total: 0 });
-    return { ...user, available, collectionStartedAt, firstRecordAt, days: values, totals };
+    for (const day of values) day.usd = estimateUsd(day, model);
+    const counted = values.reduce((a, b) => ({ input: a.input + b.input, output: a.output + b.output, cached: a.cached + b.cached, cacheWrite: a.cacheWrite + b.cacheWrite, total: a.total + b.total }), { ...empty(), total: 0 });
+    return { ...user, available, collectionStartedAt, firstRecordAt, days: values, totals: { ...counted, usd: estimateUsd(counted, model) }, model, quota };
   });
   return { timezone, days, dates, accounts, generatedAt: now };
 }

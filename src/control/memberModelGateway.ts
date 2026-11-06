@@ -20,6 +20,7 @@ import type {HostTokenSource} from './codex/hostTokens.js';
 import type {ImageGateway} from './imageTool.js';
 import type {PrinterGateway} from './printer/gateway.js';
 import type {TtsGateway} from './ttsTool.js';
+import type {QuotaStatus} from '../common/usage.js';
 
 /** The CLI's subscription credential needs this beta on the Messages API. */
 const OAUTH_BETA='oauth-2025-04-20';
@@ -100,6 +101,8 @@ export class MemberModelGateway {
   private claudeModels=new Map<string,string>();
   private gptUsers=new Set<string>();
   private server:http.Server|null=null;
+  /** Today's use of a member's daily tokens (src/control/quota.ts); once used up, nothing more reaches a model. */
+  quota?:(userId:string)=>Promise<QuotaStatus|null>;
   constructor(private cfg:Config,private log:Logger,private share?:ShareStore,private decision?:DecisionGateway,private kb?:KbGateway,private schedule?:ScheduleGateway,private hostTokens?:Pick<HostTokenSource,'getTokens'|'invalidate'>,private image?:ImageGateway,private browser?:BrowserGateway,private ha?:HaGateway,private printer?:PrinterGateway,private macNative?:MacNativeGateway,private tts?:TtsGateway,private taskKb?:TaskKbGateway,private ios?:IosDeviceGateway){}
   provision(cfg:Config):void {
     fs.mkdirSync(cfg.dataDir,{recursive:true,mode:0o700});
@@ -169,6 +172,17 @@ export class MemberModelGateway {
         const chunks:Buffer[]=[];let size=0;
         for await(const chunk of req){size+=chunk.length;if(size>MAX_REQUEST_BYTES){this.log.warn('member model request too large',{userId,bytes:size});res.writeHead(413).end();return;}chunks.push(chunk);}
         const input=JSON.parse(Buffer.concat(chunks).toString()) as Record<string,unknown>;
+        // A turn under way when the day's tokens run out stops at its next request, with an answer neither
+        // client asks again after (Codex takes `usage_limit_reached` as final, Claude Code a 403); the task then
+        // says when they come back.
+        const quota=messages?.[2].endsWith('/count_tokens')?null:await this.quota?.(userId!);
+        if(quota?.exceeded){
+          const message='The daily usage limit for this account has been reached.';
+          res.writeHead(messages?403:429,{'content-type':'application/json','cache-control':'no-store'}).end(JSON.stringify(messages
+            ?{type:'error',error:{type:'permission_error',message}}
+            :{error:{type:'usage_limit_reached',code:'daily_limit',message,resets_at:Math.floor(quota.resetsAt/1000),resets_in_seconds:Math.max(0,Math.ceil((quota.resetsAt-Date.now())/1000))}}));
+          return;
+        }
         if(messages){
           const state=claude.status();if(!state.enabled||!state.secret)throw new Error('Provider unavailable');
           input.model=this.claudeModels.get(userId!);

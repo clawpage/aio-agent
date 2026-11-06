@@ -22,6 +22,7 @@ export default defineConfig({
     "**/knowledge.spec.ts",
     "**/support.spec.ts",
     "**/support-card.spec.ts",
+    "**/daily-quota.spec.ts",
     "**/image-zoom.spec.ts",
     "**/task-retry.spec.ts",
     "**/analytics.spec.ts",

@@ -600,6 +600,7 @@ async function main(): Promise<void> {
   const ownerVault=startVaultAutofill(ctx);
   const users=new UserRuntimes(ctx,bootstrap,modelGateway,nodes);
   ctx.runtimeForUser=id=>users.resolve(id);
+  modelGateway.quota=async id=>(await ctx.runtimeForUser!(id)).tasks.quota();
   const app = createApp(ctx);
   const server = http.createServer(app);
   server.on("upgrade", (req, socket, head) => deviceLinks.ownsUpgrade(req) ? deviceLinks.handleUpgrade(req, socket, head)

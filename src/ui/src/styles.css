@@ -4989,3 +4989,11 @@ button.map-card-switch { flex: 0 0 auto; padding: 4px 10px; }
 .knowledge-invite-link { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 8px; align-items: center; margin: 10px 0; }
 .knowledge-invite-link > p { grid-column: 1 / -1; margin: 0; }
 .knowledge-invite-link input { width: 100%; min-width: 0; box-sizing: border-box; }
+
+/* A member's share of today's tokens on the settings page (LanguageSettings.tsx). */
+.quota-meter { display: flex; align-items: center; gap: 12px; }
+.quota-meter progress { flex: 1; height: 8px; appearance: none; border: 0; border-radius: 999px; overflow: hidden; background: var(--border); }
+.quota-meter progress::-webkit-progress-bar { background: var(--border); }
+.quota-meter progress::-webkit-progress-value { background: var(--accent); border-radius: 999px; }
+.quota-meter progress::-moz-progress-bar { background: var(--accent); border-radius: 999px; }
+.quota-meter strong { font-variant-numeric: tabular-nums; min-width: 3.5em; text-align: right; }

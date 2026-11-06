@@ -51,8 +51,11 @@ const usage = (days: number): UsageReport => {
   const dates = datesFor(days);
   return { days, dates, timezone: 'America/Los_Angeles', generatedAt: Date.UTC(2026, 9, 13, 21), accounts: ([['owner_1', 'owner', 100], ['m', 'yzmy', 2_000_000]] as const).map(([id, username, n]) => ({
     id, username, role: username === 'owner' ? 'owner' : 'member', available: true, collectionStartedAt: Date.UTC(2026, 8, 1), firstRecordAt: Date.UTC(2026, 8, 1),
-    days: dates.map(date => ({ date, input: n, output: 10, cached: 50, cacheWrite: 0, total: n + 10 })),
-    totals: { input: n * days, output: 10 * days, cached: 50 * days, cacheWrite: 0, total: (n + 10) * days },
+    // The member is costed at Sol (2,000,000 − 50 at $2, 50 cached at $0.10, 10 out at $10 per million: $4.0001 a day); the owner's model has no price.
+    days: dates.map(date => ({ date, input: n, output: 10, cached: 50, cacheWrite: 0, total: n + 10, usd: username === 'owner' ? null : 4.0001 })),
+    totals: { input: n * days, output: 10 * days, cached: 50 * days, cacheWrite: 0, total: (n + 10) * days, usd: username === 'owner' ? null : 4.0001 * days },
+    model: username === 'owner' ? 'claude-opus-5-5' : 'gpt-6.1-sol',
+    quota: username === 'owner' ? null : { limit: 100_000_000, used: 37_000_000, resetsAt: Date.UTC(2026, 9, 14, 9), exceeded: false },
   })) };
 };
 
@@ -93,6 +96,12 @@ test('the owner reads the redesigned dashboard: overview with changes, trends, f
   await expect(tile('会话')).toContainText('人均 7.1 次 · 人均活跃 20 天');
   // 30 days × (100 + 10 + 2,000,000 + 10) tokens, short with the exact figure on hover.
   await expect(tile('token')).toContainText('6000.4万'); await expect(kpis.locator('[title="60,003,600"]')).toBeVisible();
+  // The cost at list prices adds up the priced accounts; the table shows each one's, and a member's share of today's tokens.
+  await expect(tile('估算费用')).toContainText('US$120');
+  const yzmy = page.locator('.dash-tokens tbody tr').filter({ hasText: /^yzmy/ });
+  await expect(yzmy).toContainText('US$120'); await expect(yzmy).toContainText('37%');
+  const owner = page.locator('.dash-tokens tbody tr').filter({ hasText: /^owner/ });
+  await expect(owner).toContainText('未定价'); await expect(owner.locator('td').last()).toHaveText('—');
 
   // The four daily charts are drawn on canvas by the shared ECharts renderer.
   const charts = page.locator('.dash-chart');

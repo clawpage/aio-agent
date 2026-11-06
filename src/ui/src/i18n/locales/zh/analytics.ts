@@ -43,6 +43,8 @@ export const analytics = {
     sessions: "会话",
     sessionsSub: (perAccount: string, days: string) => `人均 ${perAccount} 次 · 人均活跃 ${days} 天`,
     tokens: "token",
+    cost: "估算费用",
+    costSub: "按 API 标价折算",
     tokensSub: (input: string, output: string) => `输入 ${input} · 输出 ${output}`,
   },
   activeList: {

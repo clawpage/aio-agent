@@ -44,6 +44,8 @@ export const analytics: typeof zh = {
     sessions: "Sesiones",
     sessionsSub: (perAccount: string, days: string) => `${perAccount} por cuenta · ${days} días activos de media`,
     tokens: "Tokens",
+    cost: 'Coste est.',
+    costSub: 'A precios de lista de la API',
     tokensSub: (input: string, output: string) => `Entrada ${input} · salida ${output}`,
   },
   activeList: {

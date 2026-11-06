@@ -6,6 +6,7 @@ import type {AppContext} from './context.js';
 import {bootstrap, startSandboxRuntime, startRuntimeRecovery, startSandboxIdle, type Bootstrapped} from './index.js';
 import {startTaskNotifications} from './push.js';
 import {startVaultAutofill} from './vault.js';
+import {quotaStatus} from './quota.js';
 import type {MemberModelGateway} from './memberModelGateway.js';
 import {getUser} from './auth/owner.js';
 import {SPARE_ACCOUNT_KEY} from './auth/invites.js';
@@ -164,6 +165,8 @@ export class UserRuntimes {
     if(this.root.sharedKb){const kbs=this.root.sharedKb;runtime.ctx.tasks.setSharedLibraries(id=>kbs.librariesOf(id).map(l=>({db:kbs.db(l.id),id:l.id,name:l.name})));}
     if(this.root.share)runtime.ctx.tasks.setClawpages(id=>this.root.share!.list(id));
     if(this.root.share?.widgets)runtime.ctx.tasks.setWidgets(id=>this.root.share!.widgets!.list(id));
+    // A member's tokens are limited per day (src/control/quota.ts); the owner's are not.
+    if(user.role==='member')runtime.ctx.tasks.setQuota(()=>quotaStatus(runtime.ctx.db));
     // A container found stopped stays stopped: its account's first use starts it, so a
     // service start no longer wakes every account. Only where idle stopping is on;
     // without it nothing would start the container later.

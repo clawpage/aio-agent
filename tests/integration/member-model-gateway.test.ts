@@ -183,3 +183,26 @@ it('holds a request that comes before its account is loaded until it is, rather 
   expect(r.status).toBe(200);expect(await r.text()).toContain('response.completed');
  }finally{gateway.close();upstream.close();await h.shutdown();}
 });
+it('turns a member away once the day\'s tokens are used up, in a way neither client asks again after',async()=>{
+ const h=await startHarness();let asked=0;
+ const upstream=http.createServer(async(req,res)=>{for await(const _ of req);asked++;res.setHeader('content-type','text/event-stream');res.end('data: {"type":"response.completed"}\n\n');});
+ await new Promise<void>(resolve=>upstream.listen(0,'127.0.0.1',resolve));
+ const port=(upstream.address() as any).port;
+ const hostTokens={getTokens:async()=>({accessToken:'owner-chatgpt-access',chatgptAccountId:'acct_owner',planType:'pro',expiresAt:Date.now()+3600_000}),invalidate:()=>undefined};
+ const cfg={...h.ctx.cfg,memberModelPort:0,hostCodex:{...h.ctx.cfg.hostCodex,chatgptUrl:`http://127.0.0.1:${port}/backend-api/codex/`},claudeCode:{...h.ctx.cfg.claudeCode,apiBaseUrl:`http://127.0.0.1:${port}`}};
+ const gateway=new MemberModelGateway(cfg,h.ctx.log,undefined,undefined,undefined,undefined,hostTokens);
+ const resetsAt=Date.now()+5*3600_000;let used=99_999_999;
+ gateway.quota=async()=>({limit:100_000_000,used,resetsAt,exceeded:used>=100_000_000});
+ await gateway.start();
+ try{
+  const a=memberConfig(cfg,'user_alpha',18082,'gpt-6.1-sol');gateway.provision(a);
+  const token=fs.readFileSync(path.join(a.dataDir,'model-token'),'utf8');
+  const post=()=>fetch(`http://127.0.0.1:${gateway.port}/u/user_alpha/v1/responses`,{method:'POST',headers:{authorization:`Bearer ${token}`,'content-type':'application/json'},body:JSON.stringify({input:'hi',stream:true})});
+  expect((await post()).status).toBe(200);expect(asked).toBe(1);
+  used=100_000_000;
+  const refused=await post();
+  expect(refused.status).toBe(429);
+  expect((await refused.json()).error).toMatchObject({type:'usage_limit_reached',resets_at:Math.floor(resetsAt/1000)});
+  expect(asked).toBe(1);
+ }finally{gateway.close();upstream.closeAllConnections();await new Promise<void>(resolve=>upstream.close(()=>resolve()));await h.shutdown();}
+});

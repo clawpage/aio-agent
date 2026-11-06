@@ -25,6 +25,8 @@ import type { Widget } from "../widgets.js";
 import { runInLocaleOr, t } from "../i18n/index.js";
 import { kbBrief, kbEnabled } from "../taskKb/read.js";
 import { MAX_ATTACHMENTS } from "../../common/attachments.js";
+import { DailyLimitError, limitMessage } from "../quota.js";
+import type { QuotaStatus } from "../../common/usage.js";
 import { ATTENTION_STATUSES, DONE_STATUSES, WORKING_STATUSES, type TaskBucket, type TaskCounts, type TaskFilter, type TaskListPage } from "../../common/taskList.js";
 
 /** Bounded context keeps both live work and older matches in one Jev call. */
@@ -290,6 +292,16 @@ export class TaskService {
         return [`The user's clawpages (web pages and mini apps published for them; ${pages.length} in all${pages.length > shown.length ? `, the ${shown.length} most recently active listed` : ""}). When this message is about one of them, work on that clawpage with the clawpages skill: read or change its data with its data commands, and to change the page, pull it, edit, and publish again under the same name so the link stays. The data reflects what visitors and the user did since; it is the user's, so do not delete or overwrite it unless asked. A page with collaborators is also changed by other people's agents: pull it before changing it:`, ...lines].join("\n");
     }
     /** The account's widgets, so its executor reuses and improves them instead of building another. */
+    /** A member's daily tokens (src/control/quota.ts): once used up, no new turn starts until the day turns over. */
+    setQuota(status: (() => QuotaStatus) | null): void { this.#quota = status; }
+    #quota: (() => QuotaStatus) | null = null;
+    /** Today's use of the daily tokens; null for an account without a limit (the owner). */
+    quota(): QuotaStatus | null { return this.#quota?.() ?? null; }
+    /** The day's tokens are used up: when they come back. */
+    private overQuota(): number | null {
+        const status = this.#quota?.();
+        return status?.exceeded ? status.resetsAt : null;
+    }
     setWidgets(list: ((userId: string) => Widget[]) | null): void { this.#widgets = list; }
     #widgets: ((userId: string) => Widget[]) | null = null;
     private widgetsNote(row: TaskRow): string | null {
@@ -478,6 +490,8 @@ export class TaskService {
         }
         if (related && !this.belongsTo(related, userId))
             throw new Error(t().tasks.errors.relatedMissing);
+        const resetsAt = this.overQuota();
+        if (resetsAt !== null) throw new DailyLimitError(resetsAt);
         if (isLocale(input.locale)) writeLocale(this.db, input.locale, "message");
         const frozen = isMember(this.db, userId) ? this.agent.memberSettings() : this.agent.resolveSubmitSettings({ conversationId: "main", text, clientMessageId: input.clientMessageId });
         const id = randomId("task");
@@ -517,6 +531,8 @@ export class TaskService {
             if (this.ownerId(existing) !== input.userId || existing.input_text !== text) throw new TurnConflictError(t().tasks.errors.idOtherTask);
             return existing;
         }
+        const resetsAt = this.overQuota();
+        if (resetsAt !== null) throw new DailyLimitError(resetsAt);
         const frozen = isMember(this.db, input.userId) ? this.agent.memberSettings() : this.agent.resolveSubmitSettings({ conversationId: "main", text, clientMessageId, effort: "medium" });
         const previous = this.db.prepare("SELECT * FROM tasks WHERE client_message_id LIKE 'gadget:%' AND conversation_id IN (SELECT id FROM conversations WHERE owner_id=?) ORDER BY created_at DESC LIMIT 1").get(input.userId) as unknown as TaskRow | undefined;
         const id = randomId("task");
@@ -864,7 +880,9 @@ export class TaskService {
         catch (err) {
             if (!this.#closed && this.get(row.id)?.status === "planning") {
                 const reason = err instanceof Error ? err.message : t().tasks.errors.planningFailedGeneric;
-                this.db.prepare("UPDATE tasks SET status='planning_failed',error=? WHERE id=?").run(reason, row.id);
+                // The dispatcher is turned away too once the day's tokens run out: the person is told when they come back.
+                const resetsAt = this.overQuota();
+                this.db.prepare("UPDATE tasks SET status='planning_failed',error=? WHERE id=?").run(resetsAt !== null ? limitMessage(resetsAt) : reason, row.id);
                 measured = true; trace.failed = true; trace.failReason ??= reason;
                 steps.push({ kind: "failed", at: Date.now(), reason });
             }
@@ -1101,6 +1119,13 @@ export class TaskService {
             }
             if (active.length >= this.cfg.agent.maxConcurrentTurns)
                 break;
+            // Queued before the day's tokens ran out (a scheduled run, a task waiting its turn): it does not start.
+            const resetsAt = this.overQuota();
+            if (resetsAt !== null) {
+                this.db.prepare("UPDATE tasks SET status='failed',error=?,completed_at=? WHERE id=?").run(limitMessage(resetsAt), Date.now(), row.id);
+                this.notifyChange(row.id, row.status);
+                continue;
+            }
             const plan = JSON.parse(row.plan_json!) as TaskPlan;
             // Jev's effort pick for a scheduled run is never waited on past its timeout (or across a restart).
             if (plan.awaitingEffort && Date.now() - row.created_at < this.cfg.jev.dispatchTimeoutMs + 5_000) continue;
@@ -1234,8 +1259,10 @@ export class TaskService {
         const plan = question && row.plan_json ? JSON.parse(row.plan_json) as TaskPlan : null;
         if (plan && question) { plan.clarification = question.question; plan.options = question.options ?? undefined; plan.form = question.form ?? undefined; }
         const status = question ? "needs_input" : turn.status;
+        // The model gateway turned the turn away once the day's tokens ran out: say so, and when they come back.
+        const resetsAt = turn.status === "failed" ? this.overQuota() : null;
         this.db.prepare("UPDATE tasks SET status=?,result=?,error=?,completed_at=?,plan_json=COALESCE(?,plan_json) WHERE id=?")
-            .run(status, question ? question.result : last?.text ?? null, turn.error, turn.completed_at, plan ? JSON.stringify(plan) : null, row.id);
+            .run(status, question ? question.result : last?.text ?? null, resetsAt !== null ? limitMessage(resetsAt) : turn.error, turn.completed_at, plan ? JSON.stringify(plan) : null, row.id);
         if (status === "completed") { this.recordFeed(this.get(row.id)!); this.#onCompleted?.(row.id); }
         this.notifyChange(row.id, row.status);
     }
@@ -1666,6 +1693,8 @@ export class TaskService {
     private startScheduledRun(s: ScheduleRow, previous: TaskRow | null, key: string, conditionOutput?: string): string | null {
         const clientMessageId = `schedule:${s.id}:${key}`;
         if (this.db.prepare("SELECT 1 FROM tasks WHERE client_message_id=?").get(clientMessageId)) return null;
+        // With the day's tokens used up a run is skipped, as a run whose condition is not met is: no task, no notification.
+        if (this.overQuota() !== null) return null;
         // Scheduled runs are on Terra at Auto: Jev picks the effort from the instruction before the run starts.
         const frozen = this.agent.scheduleSettings(s.owner_id, { conversationId: "main", text: s.instruction, clientMessageId });
         const auto = this.jev?.enabled ? frozen.auto : null;
@@ -1795,6 +1824,8 @@ export class TaskService {
         const s = this.scheduleRow(id);
         if (!s || s.owner_id !== userId) throw new ScheduleNotFoundError();
         if (s.status === "done") throw new Error(t().tasks.schedules.ended);
+        const resetsAt = this.overQuota();
+        if (resetsAt !== null) throw new DailyLimitError(resetsAt);
         const taskId = this.fireSchedule(s, Date.now(), true);
         if (!taskId) throw new Error(t().tasks.schedules.stillRunning);
         this.schedule();

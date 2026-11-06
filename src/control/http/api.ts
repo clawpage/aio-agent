@@ -1,5 +1,6 @@
 import {workspacePrefix} from "../auth/workspaceHost.js";
 import {usageReport} from '../usage.js';
+import { DailyLimitError } from '../quota.js';
 import { isMember, publicPayload } from "../auth/policy.js";
 import {readSoul,writeSoul,SoulError,DEFAULT_SOUL,SOUL_MAX_BYTES} from '../soul.js';
 import { HTML_PREVIEW_CSP, htmlPreviewDocument } from "../documents/html.js";
@@ -970,6 +971,12 @@ export function createApiRouter(context: AppContext): Router {
     track(req, "locale_change", { locale });
     res.json({ ok: true });
   });
+  // How much of today's tokens the account has used, as a share only (the owner's has no limit).
+  router.get("/account/quota", requireKind("primary"), requireSession, (_req, res) => {
+    const quota = context.tasks.quota();
+    res.setHeader("Cache-Control", "no-store");
+    res.json(quota ? { limited: true, percent: Math.min(100, Math.floor(quota.used / quota.limit * 100)), resetsAt: quota.resetsAt } : { limited: false });
+  });
   router.post("/tasks", requireKind("primary"), requireSession, asyncHandler(async (req, res) => {
     try {
       const b = req.body ?? {};
@@ -984,6 +991,7 @@ export function createApiRouter(context: AppContext): Router {
       if (!result.duplicate) track(req, "task_submit", { attachments: attachments.length, images: attachments.filter((a: { kind: string }) => a.kind === "image").length, reference: typeof b.relatedTaskId === "string" });
       res.status(result.duplicate ? 200 : 202).json(result);
     } catch (err) {
+      if (err instanceof DailyLimitError) { res.status(429).json({ error: "daily_limit", message: err.message, resetsAt: err.resetsAt }); return; }
       res.status(err instanceof TurnConflictError ? 409 : 400).json({ error: "task_submit_failed", message: err instanceof Error ? err.message : t().http.tasks.submitFailed });
     }
   }));
@@ -1120,6 +1128,7 @@ export function createApiRouter(context: AppContext): Router {
       const row = account.tasks.submitGadget({ userId: account.userId, text: b.text, clientMessageId: b.clientMessageId });
       res.status(202).json(account.tasks.gadgetReply(row.id, account.userId));
     } catch (err) {
+      if (err instanceof DailyLimitError) { res.status(429).json({ error: "daily_limit", message: err.message, resetsAt: err.resetsAt }); return; }
       res.status(err instanceof TurnConflictError ? 409 : 400).json({ error: "gadget_submit_failed", message: err instanceof Error ? err.message : t().http.tasks.sendFailed });
     }
   }));

@@ -100,6 +100,7 @@ export const settings: typeof zh = {
     copy: "複製",
     revoke: "作廢",
   },
+  quota: { title: "今日用量", exceeded: (at: string) => `已用完，將於 ${at} 恢復` },
   language: {
     title: "介面語言",
     description: "只影響這個瀏覽器，切換後頁面會重新載入。",
