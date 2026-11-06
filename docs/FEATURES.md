@@ -541,6 +541,12 @@ owner 容器休眠期间新成员的端口隔离规则先记下，容器下次�
 「下载」在 iPhone/iPad 主屏幕网页 App 和 iOS App 里改为打开系统分享面板（「存储图像」/「存储视频」「存储到文件」），因为那里的下载链接要么把整个 App 换成文件页、要么（App 的 web view）直接无反应；
 iOS App 需为声明了存入相册权限、带 `aioSaveFiles` 标记的新版壳，更早的壳保持原下载链接，以免点「存储图像」时被系统关闭。其他浏览器照常下载。
 
+iOS 与 Android App 里，图片（png / jpg / gif / webp / heic，含消息里的图表与 SVG 图转成的 PNG）和视频（mp4 / mov / m4v）的「下载」不再经分享面板：
+页面把已取到的文件分块（每块 512 KB，base64）交给 App 的 `aioSaveMedia` 桥，App 直接写进系统相册（iOS `PHPhotoLibrary`，只要「仅添加」权限，第一次存时系统询问一次；
+Android 10+ 经 MediaStore 存到「Pictures/Clawpage」「Movies/Clawpage」，无需权限，7–9 第一次存时询问存储权限），底部提示依次显示「下载中…」「已存到相册」；
+获取失败或写入失败如实提示，没有相册权限时提示并给出「去设置」（打开本 App 的系统设置页）。只有控制台主站的主框架能用这座桥。
+没有该桥的旧版 App 保持原样（iOS 走分享面板，Android 为原下载链接），其他格式（PDF、音频、表格等）也照旧；浏览器与主屏幕网页 App 不变。需要新版 App 才生效。
+
 ## 8. 文档工具
 
 智能体可在沙箱内创建、修改、转换文档（Word / Excel / PPT 用 Python 库，格式转换与 PDF 用 LibreOffice）。

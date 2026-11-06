@@ -1,5 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 import { mockConsole } from "./mock-api";
+import { releaseSave, saveLog, stubSaveMedia, type Platform } from "./save-media-stub";
 
 /**
  * On an iPhone home-screen web app a download replaces the whole app with the
@@ -10,8 +11,12 @@ import { mockConsole } from "./mock-api";
 const PATH = "/home/gem/workspace/tasks/task-1/人物画像.png";
 const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==", "base64");
 
-/** standalone: a home-screen web app; app / old-app: the iOS app shell with and without the save marker. */
-async function setup(page: Page, opts: { standalone?: boolean; shell?: "app" | "old-app"; refuseFirst?: boolean }) {
+/**
+ * standalone: a home-screen web app; app / old-app: the iOS app shell with and without the save marker
+ * (both before the Photos bridge); native: an app with the `aioSaveMedia` bridge.
+ */
+async function setup(page: Page, opts: { standalone?: boolean; shell?: "app" | "old-app"; refuseFirst?: boolean; native?: Platform }) {
+  if (opts.native) await stubSaveMedia(page, opts.native);
   if (opts.shell) {
     await page.addInitScript((marker) => {
       const handler = { postMessage: () => undefined };
@@ -78,6 +83,25 @@ test("in a browser tab 下载 is still a real download", async ({ page }) => {
   await page.getByTestId("file-preview-download").click();
   expect((await download).suggestedFilename()).toBe("人物画像.png");
 });
+
+for (const platform of ["ios", "android"] as const) {
+  test(`in the ${platform} app the preview's 下载 puts the picture straight into Photos`, async ({ page }) => {
+    await setup(page, { native: platform });
+    let downloaded = false;
+    page.on("download", () => { downloaded = true; });
+    await page.getByTestId("file-preview-download").click();
+    await expect(page.locator(".save-notice")).toHaveText("下载中…");
+    await releaseSave(page);
+    await expect(page.locator(".save-notice")).toHaveText("已存到相册");
+    const log = await saveLog(page);
+    expect(log.begun).toEqual([{ name: "人物画像.png", mime: "image/png" }]);
+    expect(log.saved).toEqual([PNG.length]);
+    expect(log.shared).toBe(0);
+    expect(downloaded).toBe(false);
+    // Still the console, the preview open.
+    await expect(page.getByTestId("file-preview-download")).toBeVisible();
+  });
+}
 
 test("in the iOS app 下载 opens the share sheet too, since its web view ignores download links", async ({ page }) => {
   await setup(page, { shell: "app" });

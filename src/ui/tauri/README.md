@@ -86,6 +86,14 @@ The shell itself bundles no UI, so a UI change still ships with the next UI depl
   (`gen/apple/project.yml` and the generated `Info.plist`) or iOS kills the app on that tap. The shell registers
   an `aioSaveFiles` message handler as a marker (`DeviceBrowser.swift`); the console uses the share sheet only
   when it sees the marker, so an older shell keeps the plain link. Regression: `tests/e2e/home-screen-save.spec.ts`.
+- Saving images and videos to Photos: both shells offer `aioSaveMedia` (iOS: a reply handler in `DeviceBrowser.swift`;
+  Android: a web message listener in `MainActivity.kt`, answers carry the message's `seq`), main console frame only.
+  The console posts JSON strings: `begin` (name, mime; iOS asks for add-only Photos access here, Android 7–9 for
+  `WRITE_EXTERNAL_STORAGE`, declared with `maxSdkVersion 28`), base64 `chunk`s of 512 KB into a temp file
+  (`aio-save-*`, swept at start), then `finish` (PHAssetCreationRequest / MediaStore `Pictures|Movies/Clawpage`) or
+  `cancel`; `settings` opens the app's system settings after a refusal. The page shows 下载中… then 已存到相册.
+  Without the handler the console keeps the share sheet (iOS) or the plain link (Android). Regression:
+  `tests/e2e/media-save.spec.ts`, `tests/e2e/home-screen-save.spec.ts` (bridges stubbed).
 - Camera (the attachment picker's "Take Photo/Video"): iOS declares `NSCameraUsageDescription`
   (`gen/apple/project.yml` and the generated `Info.plist`). Without it iOS kills the app the
   moment the camera opens (TCC: "attempted to access privacy-sensitive data without a usage

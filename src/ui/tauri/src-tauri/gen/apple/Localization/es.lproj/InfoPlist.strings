@@ -1,7 +1,7 @@
 "CFBundleDisplayName" = "Clawpage";
 "NSMicrophoneUsageDescription" = "La entrada de voz graba lo que dices y lo convierte en texto en el cuadro de mensaje.";
 "NSCameraUsageDescription" = "Haz una foto o un vídeo para adjuntarlo a tu mensaje.";
-"NSPhotoLibraryAddUsageDescription" = "Guarda en tu fototeca las imágenes que descargas.";
+"NSPhotoLibraryAddUsageDescription" = "Guarda en tu fototeca las imágenes y los vídeos que descargas.";
 "NSPhotoLibraryUsageDescription" = "Cuando activas Fotos en Funciones del iPhone, la IA busca las fotos que le pides y envía a Clawpage, reducidas, solo las que necesita.";
 "NSRemindersFullAccessUsageDescription" = "Cuando activas Recordatorios en Funciones del iPhone, la IA consulta, añade y completa recordatorios cuando se lo pides.";
 "NSRemindersUsageDescription" = "Cuando activas Recordatorios en Funciones del iPhone, la IA consulta, añade y completa recordatorios cuando se lo pides.";

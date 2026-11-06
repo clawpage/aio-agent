@@ -6,6 +6,8 @@
     <!-- Voice input in the composer: the web view asks for the microphone (getUserMedia). -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+    <!-- Saving an image or video into the gallery: Android 10+ adds to MediaStore without it; 7-9 need it. -->
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28" />
 
     <!-- AndroidTV support -->
     <uses-feature android:name="android.software.leanback" android:required="false" />

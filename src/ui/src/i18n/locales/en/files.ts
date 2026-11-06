@@ -59,5 +59,10 @@ export const files: typeof zh = {
     ready: (name: string) => `${name} is ready`,
     save: "Save",
     failed: (name: string) => `Couldn't get ${name}. Try again later.`,
+    saving: "Downloading…",
+    saved: "Saved to Photos",
+    saveFailed: (name: string) => `Couldn't save ${name} to Photos. Try again later.`,
+    denied: "No permission to add to Photos",
+    settings: "Open Settings",
   },
 };

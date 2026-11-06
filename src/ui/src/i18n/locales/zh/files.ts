@@ -57,5 +57,11 @@ export const files = {
     ready: (name: string) => `${name} 已准备好`,
     save: "保存",
     failed: (name: string) => `${name} 获取失败，请稍后再试`,
+    /** In the app, an image or video goes straight into Photos (the gallery on Android). */
+    saving: "下载中…",
+    saved: "已存到相册",
+    saveFailed: (name: string) => `${name} 没能存到相册，请稍后再试`,
+    denied: "没有存入相册的权限",
+    settings: "去设置",
   },
 };

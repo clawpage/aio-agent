@@ -4,6 +4,7 @@ import SafariServices
 import AuthenticationServices
 import UserNotifications
 import ObjectiveC
+import Photos
 
 // This bridge grants one operation to the main console frame, not Tauri IPC.
 private final class DeviceBrowserHandler: NSObject, WKScriptMessageHandler, ASWebAuthenticationPresentationContextProviding {
@@ -106,6 +107,100 @@ private final class AppleSignInHandler: NSObject, WKScriptMessageHandler, ASAuth
 // WKWebView ignores download links, and an older shell would be closed by iOS on that tap.
 private final class SaveFilesMarker: NSObject, WKScriptMessageHandler {
     func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {}
+}
+
+// An image or video goes straight into Photos, from the bytes the console already has, with no share
+// sheet. The console sends JSON strings: "begin" (name, mime; this is where iOS asks once to add to
+// Photos), the file in base64 "chunk"s (a long video is never one huge message), then "finish" or
+// "cancel"; "settings" opens this app's page in Settings, where a refusal is undone. Every answer is a
+// JSON string: {"id"} for "begin", {"error": "denied" | …} when something failed, {} otherwise.
+private final class SaveMediaHandler: NSObject, WKScriptMessageHandlerWithReply {
+    private static let types: [String: (ext: String, kind: PHAssetResourceType)] = [
+        "image/png": ("png", .photo), "image/jpeg": ("jpg", .photo), "image/gif": ("gif", .photo),
+        "image/webp": ("webp", .photo), "image/heic": ("heic", .photo),
+        "video/mp4": ("mp4", .video), "video/quicktime": ("mov", .video), "video/x-m4v": ("m4v", .video),
+    ]
+    private struct Transfer { let file: URL; let handle: FileHandle; let kind: PHAssetResourceType; let name: String }
+    private var transfers: [String: Transfer] = [:]
+
+    override init() {
+        super.init()
+        // What is left of a transfer the app was closed in the middle of.
+        let temp = FileManager.default.temporaryDirectory
+        for file in (try? FileManager.default.contentsOfDirectory(at: temp, includingPropertiesForKeys: nil)) ?? []
+        where file.lastPathComponent.hasPrefix("aio-save-") {
+            try? FileManager.default.removeItem(at: file)
+        }
+    }
+
+    func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage, replyHandler: @escaping (Any?, String?) -> Void) {
+        let reply = { (detail: [String: String]) in
+            let data = try? JSONSerialization.data(withJSONObject: detail)
+            replyHandler(data.flatMap { String(data: $0, encoding: .utf8) } ?? "{}", nil)
+        }
+        let origin = message.frameInfo.securityOrigin
+        guard message.frameInfo.isMainFrame, origin.protocol == "https",
+              origin.host == "agent.clawpage.ai", origin.port == 443 || origin.port == 0,
+              let text = message.body as? String,
+              let body = (try? JSONSerialization.jsonObject(with: Data(text.utf8))) as? [String: Any],
+              let type = body["type"] as? String else { reply(["error": "refused"]); return }
+        let id = body["id"] as? String ?? ""
+        switch type {
+        case "begin":
+            guard let mime = body["mime"] as? String, let entry = Self.types[mime] else { reply(["error": "type"]); return }
+            let name = String(((body["name"] as? String) ?? "").replacingOccurrences(of: "/", with: "_").prefix(200))
+            PHPhotoLibrary.requestAuthorization(for: .addOnly) { status in
+                DispatchQueue.main.async {
+                    guard status == .authorized || status == .limited else { reply(["error": "denied"]); return }
+                    let id = UUID().uuidString
+                    let file = FileManager.default.temporaryDirectory.appendingPathComponent("aio-save-\(id).\(entry.ext)")
+                    guard FileManager.default.createFile(atPath: file.path, contents: nil),
+                          let handle = try? FileHandle(forWritingTo: file) else { reply(["error": "failed"]); return }
+                    self.transfers[id] = Transfer(file: file, handle: handle, kind: entry.kind, name: name)
+                    reply(["id": id])
+                }
+            }
+        case "chunk":
+            guard let transfer = transfers[id], let data = (body["data"] as? String).flatMap({ Data(base64Encoded: $0) }) else {
+                drop(id)
+                reply(["error": "failed"])
+                return
+            }
+            do {
+                try transfer.handle.write(contentsOf: data)
+                reply([:])
+            } catch {
+                drop(id)
+                reply(["error": "failed"])
+            }
+        case "finish":
+            guard let transfer = transfers.removeValue(forKey: id) else { reply(["error": "failed"]); return }
+            try? transfer.handle.close()
+            PHPhotoLibrary.shared().performChanges({
+                let options = PHAssetResourceCreationOptions()
+                if !transfer.name.isEmpty { options.originalFilename = transfer.name }
+                PHAssetCreationRequest.forAsset().addResource(with: transfer.kind, fileURL: transfer.file, options: options)
+            }) { ok, _ in
+                DispatchQueue.main.async {
+                    try? FileManager.default.removeItem(at: transfer.file)
+                    reply(ok ? [:] : ["error": "failed"])
+                }
+            }
+        case "cancel":
+            drop(id)
+            reply([:])
+        case "settings":
+            if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
+            reply([:])
+        default: reply(["error": "unknown"])
+        }
+    }
+
+    private func drop(_ id: String) {
+        guard let transfer = transfers.removeValue(forKey: id) else { return }
+        try? transfer.handle.close()
+        try? FileManager.default.removeItem(at: transfer.file)
+    }
 }
 
 // Notifications through APNs, because WKWebView has no Web Push. The console sends "status",
@@ -300,6 +395,7 @@ final class DeviceBrowser: NSObject {
     static func install(_ webView: WKWebView) {
         webView.configuration.userContentController.add(DeviceBrowserHandler(webView), name: "aioDeviceBrowser")
         webView.configuration.userContentController.add(SaveFilesMarker(), name: "aioSaveFiles")
+        webView.configuration.userContentController.addScriptMessageHandler(SaveMediaHandler(), contentWorld: .page, name: "aioSaveMedia")
         webView.configuration.userContentController.add(AppleSignInHandler(webView), name: "aioAppleSignIn")
         webView.configuration.userContentController.add(PushHandler(webView), name: "aioPush")
         KeyboardFit.shared = KeyboardFit(webView)
