@@ -40,6 +40,7 @@ function LegacyApp() {
   // The unified config page is a real separate view. The chat pane stays mounted
   // behind it so returning never loses a draft, attachments or the SSE stream.
   const [view, setView] = useState<"chat" | "settings">("chat");
+  const [settingsSection, setSettingsSection] = useState<string | undefined>();
   const lastRefresh = useRef(Date.now());
 
   const notify = useCallback((message: string, level: "info" | "error" = "info") => {
@@ -388,7 +389,7 @@ function LegacyApp() {
             </div>
           )}
         </div>
-        {view === "settings" && <Settings onBack={() => setView("chat")} />}
+        {view === "settings" && <Settings section={settingsSection} onOpen={setSettingsSection} onBack={() => { setSettingsSection(undefined); setView("chat"); }} />}
       </main>
 
       <Workspace

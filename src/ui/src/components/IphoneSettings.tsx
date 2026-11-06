@@ -5,6 +5,19 @@ import { locale, t } from "../i18n";
 import { ABILITIES, askDeviceTools, hasDeviceTools, listenDeviceTools, type Ability, type NativeTools } from "../deviceTools";
 
 const day = (ms: number) => new Date(ms).toLocaleDateString(locale);
+
+/** Whether the configuration page offers the iPhone entry: inside the iPhone app, or once the account linked one. */
+export function useIphoneEntry(): boolean {
+  const inApp = hasDeviceTools();
+  const [linked, setLinked] = useState(false);
+  useEffect(() => {
+    if (inApp) return;
+    let live = true;
+    api.deviceLinks("ios").then((r) => { if (live) setLinked(r.links.length > 0); }, () => undefined);
+    return () => { live = false; };
+  }, [inApp]);
+  return inApp || linked;
+}
 type Remote = Awaited<ReturnType<typeof api.iosDevice>>;
 
 /**

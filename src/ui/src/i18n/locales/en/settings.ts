@@ -4,6 +4,8 @@ export const settings: typeof zh = {
   page: {
     title: "Settings",
     back: "← Back to chat",
+    backToSettings: "← Settings",
+    entries: "Settings",
     intro: "Set up your assistant and run preferences. Saved settings apply on all your devices.",
   },
   run: {

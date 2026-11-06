@@ -3,6 +3,8 @@ export const settings: typeof zh = {
   page: {
     title: "設定",
     back: "← 返回對話",
+    backToSettings: "← 設定",
+    entries: "設定項目",
     intro: "設定你的助理與執行偏好，儲存後在所有裝置間保持一致。",
   },
   run: {

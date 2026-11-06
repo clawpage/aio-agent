@@ -98,6 +98,15 @@ export function MainApp({ firstSession }: { firstSession?: ReturnType<typeof api
     }, [auth, role]);
     const [status, setStatus] = useState<StatusResponse | null>(null);
     const [view, setView] = useState<AppRoute["view"]>("main");
+    /** The configuration page open within `/settings`; none: its entries. */
+    const [settingsSection, setSettingsSection] = useState<string | undefined>();
+    /** A configuration page opened from the entries goes back the way it came, so the entries are not stacked twice. */
+    const openedSection = useRef(false);
+    const openSettings = (section?: string) => {
+        if (section) { openedSection.current = true; go({ view: "settings", section }); return; }
+        if (openedSection.current) { openedSection.current = false; history.back(); return; }
+        go({ view: "settings" }, { replace: true });
+    };
     const [taskFeed,setTaskFeed]=useState<TaskFeed>({tasks:[],nextBefore:null,connected:false});
     const [detailReturn,setDetailReturn]=useState<DetailFrom>('main');
     const [detailTask,setDetailTask]=useState<Task|null>(null);
@@ -158,6 +167,8 @@ export function MainApp({ firstSession }: { firstSession?: ReturnType<typeof api
         // Owner pages are not there for a member: their address leads to the main session.
         if (OWNER_VIEWS.has(route.view) && !at.owner) { history.replaceState(null, "", homePath(at.username)); setView("main"); }
         else setView(route.view);
+        setSettingsSection(route.view === "settings" ? route.section : undefined);
+        if (route.view !== "settings" || !route.section) openedSection.current = false;
         setWorkspace(!!route.workspace);
         if (!route.workspace) setWorkspacePath(undefined);
     }, [showDetail]);
@@ -359,7 +370,9 @@ export function MainApp({ firstSession }: { firstSession?: ReturnType<typeof api
       <div className="view-slot" hidden={view !== 'schedules'}><ScheduleList active={view === 'schedules'} onExpired={expired} onOpenTask={id => void details(id, 'schedules')}/></div>
       <div className="view-slot" hidden={view !== 'knowledge'}><KnowledgeList active={view === 'knowledge' && !workspace} onExpired={expired} onOpenTask={id => void details(id, 'knowledge')} onOpenLink={u => void openLink(u)}/></div>
       <div className="view-slot" hidden={view !== 'vault'}><VaultList active={view === 'vault'} onExpired={expired}/></div>
-      {view === "settings" && (role === "owner" ? <Settings onBack={() => go({ view: "main" })}/> : <MemberSettings onBack={() => go({ view: "main" })}/>)}
+      {view === "settings" && (role === "owner"
+        ? <Settings section={settingsSection} onOpen={openSettings} onBack={() => go({ view: "main" })}/>
+        : <MemberSettings section={settingsSection} onOpen={openSettings} onBack={() => go({ view: "main" })}/>)}
       {role === 'owner' && view === 'analytics' && <AnalyticsDashboard onExpired={expired}/>}
       {role === 'owner' && view === 'gadget' && <GadgetHistory active={!workspace} onExpired={expired}/>}
       {view === "detail" && detail && <div className="task-detail"><div className="task-detail-bar"><button className="ghost" onClick={() => { if ((history.state as { aio?: boolean; from?: DetailFrom } | null)?.from) history.back(); else go({ view: detailReturn }); }}>{detailReturn === 'tasks' ? t.nav.backTo.tasks : detailReturn === 'files' ? t.library.back : detailReturn === 'schedules' ? t.nav.backTo.schedules : detailReturn === 'knowledge' ? t.nav.backTo.knowledge : t.nav.backTo.main}</button><span className="muted tiny">{taskStatusLabels[(taskFeed.tasks.find(t=>t.id===detailTask?.id)??detailTask)?.status??'']??t.app.detail.fallbackStatus}</span></div><Chat key={detail.id} readOnly conversation={detail} status={status} onConversationChanged={() => { }} onStatusChanged={() => void refreshStatus()} onOpenWorkspace={openWorkspace} onOpenBrowserLink={u => void openLink(u)} onOpenBrowserFile={p => void openFileInBrowser(p)}/></div>}

@@ -392,3 +392,8 @@ export async function mockTaskList(page: Page, source: () => Task[]): Promise<vo
     return route.fulfill({ contentType: "application/json", body: JSON.stringify({ counts, tasks: list.slice(offset, offset + limit), nextCursor: offset + limit < list.length ? String(offset + limit) : null }) });
   });
 }
+
+/** Open one page of the configuration page (`/settings/<section>`) from its entry, the page itself already open. */
+export async function openSettingsEntry(page: Page, title: string | RegExp): Promise<void> {
+  await page.getByRole("navigation", { name: "配置项" }).getByRole("button", { name: title }).click();
+}

@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { AccountPrivacySettings } from "./Support";
 import { PushSettings } from "./PushSettings";
-import { IphoneSettings } from "./IphoneSettings";
+import { IphoneSettings, useIphoneEntry } from "./IphoneSettings";
+import { SettingsPages, type SettingsSection } from "./SettingsLayout";
 import { api } from "../api";
 import { LOCALES, locale, setLocale, t, type Locale } from "../i18n";
 
@@ -34,11 +35,13 @@ function QuotaSettings() {
 }
 
 /** Member account controls: this component never requests owner settings. */
-export function MemberSettings({ onBack }: { onBack: () => void }) {
-  return <section className="settings" aria-label={t.settings.page.title}>
-    <header className="settings-head"><h2>{t.settings.page.title}</h2><span className="spacer"/><button type="button" className="ghost" onClick={onBack}>{t.settings.page.back}</button></header>
-    <div className="settings-body"><QuotaSettings/><PushSettings/><IphoneSettings/><LanguageSettings/><AccountPrivacySettings/></div>
-  </section>;
+export function MemberSettings({ section, onOpen, onBack }: { section?: string; onOpen: (section?: string) => void; onBack: () => void }) {
+  const iphone = useIphoneEntry();
+  const sections: SettingsSection[] = [
+    ...(iphone ? [{ id: "iphone", title: t.app.iphone.label, page: () => <IphoneSettings/> }] : []),
+    { id: "account", title: t.support.account, page: () => <AccountPrivacySettings/> },
+  ];
+  return <SettingsPages sections={sections} section={section} onOpen={onOpen} onBack={onBack} top={<QuotaSettings/>} switches={<><PushSettings/><LanguageSettings/></>}/>;
 }
 
 /** The console's language (this browser only): each choice is named in its own language. */

@@ -4,6 +4,8 @@ export const settings: typeof zh = {
   page: {
     title: '設定',
     back: '← チャットに戻る',
+    backToSettings: '← 設定',
+    entries: '設定項目',
     intro: 'アシスタントと実行の設定です。保存した内容はすべてのデバイスで共通です。',
   },
   run: {

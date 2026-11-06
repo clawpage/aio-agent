@@ -6,7 +6,8 @@ import { DebugSettings } from './DebugSettings';
 import { InviteSettings } from './InviteSettings';
 import { LanguageSettings } from './LanguageSettings';
 import { PushSettings } from './PushSettings';
-import { IphoneSettings } from './IphoneSettings';
+import { IphoneSettings, useIphoneEntry } from './IphoneSettings';
+import { SettingsPages, type SettingsSection } from './SettingsLayout';
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "../api";
 import type { AgentSettings, SettingsModel } from "../types";
@@ -28,18 +29,39 @@ function harnessOf(model: SettingsModel | undefined): Harness {
 }
 
 interface Props {
+  /** The page open behind an entry (`/settings/<section>`); none: the entries. */
+  section?: string;
+  onOpen: (section?: string) => void;
   onBack: () => void;
   /** Inform the shell so the sidebar/nav can reflect a saved change. */
   onSaved?: (settings: AgentSettings) => void;
 }
 
 /**
- * Unified configuration page. It owns the model and reasoning effort that every
- * later message runs with, persisted server-side in the owner's `meta` namespace
- * so the choice survives reloads and applies across devices. The conversation
- * view keeps no model control of its own.
+ * The owner's configuration page: entries and switches; what takes a page of its own (SOUL.md,
+ * the run preferences, invites, …) opens behind its entry.
  */
-export function Settings({ onBack, onSaved }: Props) {
+export function Settings({ section, onOpen, onBack, onSaved }: Props) {
+  const iphone = useIphoneEntry();
+  const sections: SettingsSection[] = [
+    { id: "soul", title: t.settings.soul.title, note: "SOUL.md", page: () => <SoulSettings/> },
+    { id: "run", title: t.settings.run.title, page: () => <RunSettings onSaved={onSaved}/> },
+    { id: "invites", title: t.settings.invite.title, page: () => <InviteSettings/> },
+    { id: "support", title: t.support.queue, page: () => <SupportSettings/> },
+    { id: "recall", title: t.settings.recall.title, page: () => <RecallSettings/> },
+    ...(iphone ? [{ id: "iphone", title: t.app.iphone.label, page: () => <IphoneSettings/> }] : []),
+    { id: "account", title: t.support.account, page: () => <AccountPrivacySettings/> },
+  ];
+  return <SettingsPages sections={sections} section={section} onOpen={onOpen} onBack={onBack}
+    switches={<><PushSettings/><LanguageSettings/><DebugSettings/></>}/>;
+}
+
+/**
+ * The model and reasoning effort every later message runs with, persisted server-side in the
+ * owner's `meta` namespace so the choice survives reloads and applies across devices. The
+ * conversation view keeps no model control of its own.
+ */
+function RunSettings({ onSaved }: { onSaved?: (settings: AgentSettings) => void }) {
   const [models, setModels] = useState<SettingsModel[]>([]);
   const [defaultModel, setDefaultModel] = useState<string>("");
   const [model, setModel] = useState<string>("");
@@ -148,22 +170,6 @@ export function Settings({ onBack, onSaved }: Props) {
   const locked = loading || saving;
 
   return (
-    <section className="settings" aria-label={t.settings.page.title}>
-      <header className="settings-head">
-        <h2>{t.settings.page.title}</h2>
-        <span className="spacer" />
-        <button type="button" className="ghost" onClick={onBack} disabled={saving}>
-          {t.settings.page.back}
-        </button>
-      </header>
-
-      <div className="settings-body">
-        <p className="muted settings-intro">
-          {t.settings.page.intro}
-        </p>
-
-        <SoulSettings />
-
         <section className="settings-card" aria-label={t.settings.run.title}>
           <div className="settings-section-head"><h3>{t.settings.run.title}</h3><p>{harnessChoice ? t.settings.run.introWithHarness : t.settings.run.introModelOnly}{t.settings.run.introSuffix}</p></div>
         {loading && <p><InlineLoading label={t.settings.run.loading}/></p>}
@@ -290,16 +296,5 @@ export function Settings({ onBack, onSaved }: Props) {
         </div>
 
         </section>
-
-        <InviteSettings />
-        <SupportSettings/>
-        <RecallSettings />
-        <PushSettings />
-        <IphoneSettings />
-        <LanguageSettings />
-        <AccountPrivacySettings />
-        <DebugSettings />
-      </div>
-    </section>
   );
 }

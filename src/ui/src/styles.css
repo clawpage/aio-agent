@@ -5008,3 +5008,16 @@ button.map-card-switch { flex: 0 0 auto; padding: 4px 10px; }
 .quota-notice { display: flex; align-items: center; gap: 10px; }
 .quota-notice > span { flex: 1; min-width: 0; }
 .quota-notice button { margin-left: 0; }
+
+/* The configuration page is entries and switches; an entry opens its own page (SettingsLayout.tsx). */
+.settings-entries { gap: 0; padding: 4px 0; }
+.settings-entry { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 48px; padding: 10px 20px; border: 0; border-radius: 0; background: transparent; color: var(--text); font-size: var(--fs-md); text-align: left; }
+.settings-entry + .settings-entry { border-top: 1px solid var(--border); }
+.settings-entry > span:first-child { flex: 1; min-width: 0; }
+.settings-entry:hover, .settings-entry:focus-visible { background: var(--bg-raised); }
+.settings-entry-chevron { color: var(--text-dim); font-size: 20px; line-height: 1; }
+/* Behind an entry the page header carries the title. */
+.settings-subpage .settings-section-head h3 { display: none; }
+.settings-subpage .settings-section-head p { margin-top: 0; }
+.settings-subpage .support-settings > h3 { display: none; }
+.settings-subpage[data-swiping] { box-shadow: var(--shadow-dialog); background: var(--bg); }

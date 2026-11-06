@@ -11,7 +11,8 @@ test('native account policy links use the system browser and preserve the dialog
   await page.goto('/'); await expect(page.getByRole('heading',{name:'主会话',exact:true})).toBeVisible();
   if(info.project.name.startsWith('mobile'))await page.getByRole('button',{name:'打开导航'}).click();
   await page.locator('.sidebar').getByRole('button',{name:'配置',exact:true}).click();
-  await page.getByRole('button',{name:'账户与隐私',exact:true}).click();
+  await page.getByRole('navigation',{name:'配置项'}).getByRole('button',{name:'账户与隐私',exact:true}).click();
+  await page.locator('.settings-card').getByRole('button',{name:'账户与隐私',exact:true}).click();
   const dialog=page.getByRole('dialog',{name:'账户与隐私',exact:true}),before=page.url();
   await dialog.getByLabel('说明',{exact:true}).fill('Keep this unsent request.');
   await dialog.getByRole('link',{name:'隐私政策',exact:true}).click();
@@ -59,7 +60,8 @@ test('members can request deletion from settings without leaving the app',async(
   await page.goto('/'); await expect(page.getByRole('heading',{name:'主会话',exact:true})).toBeVisible();
   if(info.project.name.startsWith('mobile')) await page.getByRole('button',{name:'打开导航'}).click();
   await page.locator('.sidebar').getByRole('button',{name:'配置',exact:true}).click();
-  await page.getByRole('button',{name:'账户与隐私',exact:true}).click();
+  await page.getByRole('navigation',{name:'配置项'}).getByRole('button',{name:'账户与隐私',exact:true}).click();
+  await page.locator('.settings-card').getByRole('button',{name:'账户与隐私',exact:true}).click();
   const dialog=page.getByRole('dialog',{name:'账户与隐私',exact:true}); await expect(dialog).toContainText('不会立即删除数据');
   await expect(dialog.getByRole('link',{name:'隐私政策'})).toHaveAttribute('href','/privacy.html');
   await dialog.getByLabel('说明',{exact:true}).fill('Please delete my account and data.');

@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { mockConsole } from "./mock-api";
+import { mockConsole, openSettingsEntry } from "./mock-api";
 
 type Link = { id: string; name: string; createdAt: number; lastSeenAt: number | null; online: boolean };
 
@@ -24,11 +24,13 @@ async function mockLinks(page: Page, links: Link[]) {
   return calls;
 }
 
-async function openSettings(page: Page, mobile: boolean) {
+/** The configuration page, and with `entry` its iPhone page (offered inside the app, or once an iPhone is linked). */
+async function openSettings(page: Page, mobile: boolean, entry = true) {
   await page.route("**/api/main*", (r) => r.fulfill({ json: { mode: "tasks", version: "v0", tasks: [], nextBefore: null } }));
   await page.goto("/");
   if (mobile) await page.getByRole("button", { name: "打开导航" }).click();
   await page.locator(".sidebar-foot button", { hasText: "配置" }).click();
+  if (entry) await openSettingsEntry(page, "iPhone 能力");
 }
 
 test("inside the iPhone app, each ability is switched on there: iOS asks, the first one links this iPhone, the last one off removes it", async ({ page }, info) => {
@@ -121,8 +123,10 @@ test("in a browser the card lists the iPhones the account linked, with what is o
 test("in a browser an account that never linked an iPhone has no card", async ({ page }, info) => {
   await mockConsole(page, { conversations: [] });
   const calls = await mockLinks(page, []);
-  await openSettings(page, info.project.name.startsWith("mobile"));
+  await openSettings(page, info.project.name.startsWith("mobile"), false);
   await expect(page.getByRole("region", { name: "配置" }).first()).toBeVisible();
+  // Nothing to show: no entry to open it either.
+  await expect(page.getByRole("navigation", { name: "配置项" }).getByRole("button", { name: "iPhone 能力" })).toHaveCount(0);
   await expect.poll(() => calls).toContain("GET /api/device-links?kind=ios");
   await expect(page.getByRole("region", { name: "iPhone 能力" })).toHaveCount(0);
 });

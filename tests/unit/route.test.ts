@@ -13,12 +13,13 @@ describe("console addresses", () => {
     expect(parseRoute("/u/owner/usage")).toEqual({ view: "analytics" });
     expect(parseRoute("/u/owner/gadget")).toEqual({ view: "gadget" });
     expect(parseRoute("/u/owner/settings")).toEqual({ view: "settings" });
+    expect(parseRoute("/u/owner/settings/soul")).toEqual({ view: "settings", section: "soul" });
     expect(parseRoute("/u/owner/workspace")).toEqual({ view: "main", workspace: true });
     expect(parseRoute("/u/owner/whatever/else")).toEqual({ view: "main" });
   });
 
   it("writes the address of every page, and reads it back the same", () => {
-    const routes = [{ view: "main" }, { view: "tasks" }, { view: "detail", task: "task 1/x" }, { view: "schedules" }, { view: "vault" }, { view: "analytics" }, { view: "gadget" }, { view: "settings" }, { view: "main", workspace: true }] as const;
+    const routes = [{ view: "main" }, { view: "tasks" }, { view: "detail", task: "task 1/x" }, { view: "schedules" }, { view: "vault" }, { view: "analytics" }, { view: "gadget" }, { view: "settings" }, { view: "settings", section: "run" }, { view: "main", workspace: true }] as const;
     for (const route of routes) expect(parseRoute(routePath("alice", route))).toEqual(route);
     expect(routePath("alice", { view: "main" })).toBe("/u/alice");
     expect(routePath("alice", { view: "files" })).toBe("/u/alice/files");

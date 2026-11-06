@@ -11,7 +11,8 @@
  *   /analytics      the owner's dashboard: accounts, activity, tasks and token usage
  *                   (the former `/usage` address opens it too)
  *   /gadget         the voice gadget account's conversation, read-only (owner)
- *   /settings       configuration (member: language and account privacy)
+ *   /settings       configuration: entries and switches (member: usage, notifications, language, account)
+ *   /settings/<sec> one entry's page (SOUL.md, run preferences, invites, …)
  *   /workspace      the workspace, over the main session
  * `/login` and `/register` stay outside any account; overlays such as a link's
  * browser console or a file preview do not change the address.
@@ -21,6 +22,8 @@ export interface AppRoute {
   view: AppView | "detail";
   /** The task a detail address shows. */
   task?: string;
+  /** The configuration page an address opens (`/settings/<section>`); none: the entries. */
+  section?: string;
   workspace?: boolean;
 }
 
@@ -33,6 +36,7 @@ export function parseRoute(pathname: string): AppRoute {
   const [page, id] = pathname.replace(ACCOUNT, "").split("/").filter(Boolean);
   if (page === "workspace") return { view: "main", workspace: true };
   if (page === "tasks" && id) return { view: "detail", task: decodeURIComponent(id) };
+  if (page === "settings" && id) return { view: "settings", section: decodeURIComponent(id) };
   return { view: (page && PAGES[page]) || "main" };
 }
 
@@ -41,6 +45,7 @@ export function routePath(username: string, route: AppRoute): string {
   const home = `/u/${username}`;
   if (route.workspace) return `${home}/workspace`;
   if (route.view === "detail") return `${home}/tasks/${encodeURIComponent(route.task ?? "")}`;
+  if (route.view === "settings" && route.section) return `${home}/settings/${encodeURIComponent(route.section)}`;
   return route.view === "main" ? home : `${home}/${route.view}`;
 }
 

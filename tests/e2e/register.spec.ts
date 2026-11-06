@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
-import { mockConsole } from "./mock-api";
+import { mockConsole, openSettingsEntry } from "./mock-api";
 import type { Invite } from "../../src/ui/src/types";
 
 const overflow = (page: Page) => page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
@@ -129,6 +129,7 @@ test("the owner generates, copies and revokes invite codes on the config page", 
   await expect(page.locator(".composer textarea")).toBeVisible();
   if (mobile) await page.getByRole("button", { name: "打开导航" }).click();
   await page.locator(".sidebar").getByRole("button", { name: "配置", exact: true }).click();
+  await openSettingsEntry(page, "邀请码");
   const card = page.getByRole("region", { name: "邀请码" });
   await expect(card.getByText("已被 cr 使用")).toBeVisible();
   await card.getByLabel("备注").fill("friend@example.com");

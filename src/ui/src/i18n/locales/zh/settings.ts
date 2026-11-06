@@ -2,6 +2,8 @@ export const settings = {
   page: {
     title: "配置",
     back: "← 返回会话",
+    backToSettings: "← 配置",
+    entries: "配置项",
     intro: "设置你的助理与运行偏好，保存后在所有设备间保持一致。",
   },
   run: {

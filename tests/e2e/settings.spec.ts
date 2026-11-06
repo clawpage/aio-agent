@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import { mkdir } from "node:fs/promises";
-import { makeConversation, mockConsole, MOCK_STATUS } from "./mock-api";
+import { makeConversation, mockConsole, MOCK_STATUS, openSettingsEntry } from "./mock-api";
 
 const id = "settings-layout";
 const evidence = "var/.playwright-artifacts/config";
@@ -17,17 +17,20 @@ function stream() {
   );
 }
 
-async function openSettings(page: Page, mobile: boolean) {
+/** The configuration page's entries; with `entry`, the page behind that entry. */
+async function openSettings(page: Page, mobile: boolean, entry?: string) {
   if (mobile) {
     await page.locator(".bottom-nav button", { hasText: "配置" }).click();
   } else {
     await page.locator(".sidebar-foot button", { hasText: "配置" }).click();
   }
   await expect(page.getByRole("heading", { name: "配置" })).toBeVisible();
+  if (entry) await openSettingsEntry(page, entry);
 }
 
-/** Wait until the settings form is really interactive (not the loading state). */
+/** Open the run preferences from the entries, and wait until that form is really interactive (not the loading state). */
 async function waitForLoadedSettings(page: Page) {
+  await openSettingsEntry(page, "运行偏好");
   await expect(page.getByLabel("模型", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "保存", exact: true })).toBeEnabled();
 }
@@ -89,6 +92,7 @@ test("config page saves, survives a reload and applies to later messages without
 
   // Returning to the conversation must not send model/effort: the server reads
   // the saved config. Draft text typed before navigating is preserved too.
+  await page.getByRole("button", { name: "← 配置" }).click();
   await page.getByRole("button", { name: "← 返回会话" }).click();
   await page.getByRole("textbox", { name: "消息" }).fill("这条消息用统一配置");
   await openSettings(page, mobile);
@@ -129,6 +133,7 @@ test("config page is reachable from the mobile conversation list and keeps draft
   await expect(page.locator(".sidebar.show-mobile")).toHaveCount(0);
   await waitForLoadedSettings(page);
 
+  await page.getByRole("button", { name: "← 配置" }).click();
   await page.getByRole("button", { name: "← 返回会话" }).click();
   await expect(page.getByRole("textbox", { name: "消息" })).toHaveValue("保留这段草稿");
   await expect(page.locator(".composer .chip")).toContainText("保留附件.txt");
@@ -163,10 +168,10 @@ test("config page surfaces a save failure, retries a failed load and disables sa
     await route.fallback();
   });
   await page.reload();
-  await openSettings(page, mobile);
+  await openSettings(page, mobile, "运行偏好");
   await expect(page.locator(".banner.error")).toContainText("加载配置失败");
   await page.getByRole("button", { name: "重试", exact: true }).click();
-  await waitForLoadedSettings(page);
+  await expect(page.getByLabel("模型", { exact: true })).toBeVisible();
 
   // No model list: saving is disabled and an explanatory banner shows.
   await page.unroute("**/api/settings");
@@ -179,7 +184,7 @@ test("config page surfaces a save failure, retries a failed load and disables sa
     await route.fallback();
   });
   await page.reload();
-  await openSettings(page, mobile);
+  await openSettings(page, mobile, "运行偏好");
   await expect(page.locator(".banner.warn")).toContainText("无法获取模型列表");
   await expect(page.getByRole("button", { name: "保存", exact: true })).toBeDisabled();
 });
@@ -284,6 +289,7 @@ test("config page locks edits while saving and restores defaults", async ({ page
 
   // The running turn is untouched: back in the chat the stop control is still
   // there, so the SSE stream and task were never torn down by the view change.
+  await page.getByRole("button", { name: "← 配置" }).click();
   await page.getByRole("button", { name: "← 返回会话" }).click();
   await expect(page.getByRole("button", { name: "停止", exact: true })).toBeVisible();
 });
@@ -315,6 +321,10 @@ test("config page has no horizontal overflow in dark and light at each viewport"
         scale: "css",
         path: `${evidence}/${info.project.name}-${width}-${theme}.png`,
       });
+      // Back to the entries, which fit as well, then to the chat.
+      await page.getByRole("button", { name: "← 配置" }).click();
+      expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
+      await page.screenshot({ animations: "disabled", scale: "css", path: `${evidence}/${info.project.name}-${width}-${theme}-entries.png` });
       await page.getByRole("button", { name: "← 返回会话" }).click();
     }
   }
@@ -323,7 +333,7 @@ test("config page has no horizontal overflow in dark and light at each viewport"
 test('SOUL editor saves independently, preserves conflict drafts and persists empty clearing',async({page},info)=>{
  await page.route('**/api/main*',r=>r.fulfill({json:{mode:'tasks',tasks:[],nextBefore:null}}));
  await setup(page,{settingsModels:[]});
- const openSoul=async()=>{if(info.project.name.startsWith('mobile'))await page.getByRole('button',{name:'打开导航'}).click();await page.locator('.sidebar').getByRole('button',{name:'配置',exact:true}).click();};
+ const openSoul=async()=>{if(info.project.name.startsWith('mobile'))await page.getByRole('button',{name:'打开导航'}).click();await page.locator('.sidebar').getByRole('button',{name:'配置',exact:true}).click();await openSettingsEntry(page,'助理设定');};
  let content='# SOUL.md\n你是小助理。';let revision='one';let conflict=false;
  await page.route('**/api/settings/soul',async r=>{
   if(r.request().method()==='PUT'){
@@ -350,35 +360,49 @@ test('SOUL editor saves independently, preserves conflict drafts and persists em
 });
 
 
-test('main settings use consistent cards and keep the mobile header clear',async({page},info)=>{
+test('main settings are entries and switches on one column, and keep the mobile header clear',async({page},info)=>{
  await page.route('**/api/main*',r=>r.fulfill({json:{mode:'tasks',tasks:[],nextBefore:null}}));
  await setup(page);
  const mobile=info.project.name.startsWith('mobile');
  if(mobile)await page.getByRole('button',{name:'打开导航'}).click();
  await page.locator('.sidebar').getByRole('button',{name:'配置',exact:true}).click();
- await expect(page.getByRole('textbox',{name:'SOUL.md 内容'})).toBeEnabled();
+ // Entries open pages of their own; the switches stay on the page. No iPhone entry in a browser that never linked one.
+ const entries=page.getByRole('navigation',{name:'配置项'}).getByRole('button');
+ await expect(entries).toHaveText(['助理设定SOUL.md','运行偏好','邀请码','用户支持','历史召回','账户与隐私'].map(x=>new RegExp(`^${x}`)));
+ await expect(page.getByRole('textbox',{name:'SOUL.md 内容'})).toHaveCount(0);
+ await expect(page.getByRole('combobox',{name:'界面语言'})).toBeVisible();
  for(const theme of ['light','dark'] as const){
   await page.evaluate(theme=>{document.documentElement.dataset.theme=theme;},theme);
   for(const width of mobile?[390,360]:[1440]){
    await page.setViewportSize({width,height:mobile?844:900});
-   await page.locator('.settings').evaluate(el=>el.scrollTop=0);
-   const cards=page.locator('.settings-card');await expect(cards).toHaveCount(9);
-   expect(await cards.first().getAttribute('aria-label')).toBe('助理设定');
+   const cards=page.locator('.settings-card');await expect(cards.first()).toHaveAttribute('aria-label','配置项');
+   const n=await cards.count();expect(n).toBeGreaterThanOrEqual(3);
    const a=await cards.nth(0).boundingBox();
-   for(const i of [1,2,3,4,5,6,7,8]){const b=await cards.nth(i).boundingBox();expect(a!.x).toBe(b!.x);expect(a!.width).toBe(b!.width);}
+   for(let i=1;i<n;i++){const b=await cards.nth(i).boundingBox();expect(a!.x).toBe(b!.x);expect(a!.width).toBe(b!.width);}
    expect(await page.evaluate(()=>document.documentElement.scrollWidth-innerWidth)).toBeLessThanOrEqual(1);
    if(mobile){const menu=await page.getByRole('button',{name:'打开导航'}).boundingBox();const heading=await page.locator('.settings-head h2').boundingBox();expect(heading!.x).toBeGreaterThanOrEqual(menu!.x+menu!.width);}
    await page.screenshot({path:info.outputPath(`settings-${width}-${theme}.png`)});
-   await page.getByRole('button',{name:'保存',exact:true}).scrollIntoViewIfNeeded();
-   await expect(page.getByRole('button',{name:'恢复默认',exact:true})).toBeVisible();
   }
  }
+ // An entry opens its page at its own address; its way back returns to the entries, and the browser's back from there leaves the page.
+ await openSettingsEntry(page,'运行偏好');
+ await expect(page).toHaveURL(/\/settings\/run$/);
+ await expect(page.getByRole('heading',{name:'运行偏好'})).toBeVisible();
+ await page.getByRole('button',{name:'保存',exact:true}).scrollIntoViewIfNeeded();
+ await expect(page.getByRole('button',{name:'恢复默认',exact:true})).toBeVisible();
+ await page.getByRole('button',{name:'← 配置'}).click();
+ await expect(page).toHaveURL(/\/settings$/);
+ await page.goBack();
+ await expect(page.getByRole('heading',{name:'配置'})).toHaveCount(0);
+ // An address naming a page opens it directly.
+ await page.goto('/u/owner/settings/soul');
+ await expect(page.getByRole('textbox',{name:'SOUL.md 内容'})).toBeVisible();
 });
 
 test("config page shows how well the dispatcher recalls past tasks, per range", async ({ page }, info) => {
   const mobile = info.project.name.startsWith("mobile");
   await setup(page);
-  await openSettings(page, mobile);
+  await openSettings(page, mobile, "历史召回");
   const card = page.getByRole("region", { name: "历史召回" });
   await expect(card).toContainText("34 次（失败 1 · 自动修正 3）");
   await expect(card).toContainText("召回找到 7");
