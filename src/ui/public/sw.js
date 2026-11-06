@@ -1,10 +1,11 @@
 /*
- * 一站 service worker: phone notifications, and opening the console without a network.
+ * 一站 service worker: phone notifications, and opening the console fast and without a network.
  *
- * Opening the console always asks the network first, so it is the latest deployed page
- * whenever the server answers; only when it cannot be reached does the last page that
- * loaded open instead (the console then says it is offline). Hashed build files never
- * change, so they come from the cache once fetched. /api and other sites are never touched.
+ * Opening the console shows the last page that loaded at once, without waiting on the network,
+ * and fetches the deployed page behind it for the next opening. Only a console that has never
+ * loaded asks the network first. A saved page too old for the service it talks to is dropped by
+ * the page itself (App.tsx), which then loads the deployed one. Hashed build files never change,
+ * so they come from the cache once fetched. /api and other sites are never touched.
  */
 const CACHE = "aio-console-v1";
 /** The one console page: every console route (/, /login, /u/<name>/…) is the same index.html. */
@@ -32,34 +33,36 @@ self.addEventListener("fetch", (event) => {
 });
 
 async function openPage(event) {
+  const saved = await caches.match(PAGE, { cacheName: CACHE });
+  if (saved) {
+    // The network answer (preloaded while the worker woke up) is kept for the next opening.
+    event.waitUntil((async () => {
+      const response = (await event.preloadResponse) || await fetch(event.request);
+      if (response.ok && !response.redirected && (response.headers.get("content-type") || "").startsWith("text/html")) await remember(response);
+    })().catch(() => undefined));
+    return saved;
+  }
   let response;
-  try {
-    response = (await event.preloadResponse) || await fetch(event.request);
-  } catch (err) {
-    const saved = await caches.match(PAGE, { cacheName: CACHE });
-    if (saved) return saved;
-    throw err;
-  }
-  if (response.ok && !response.redirected && (response.headers.get("content-type") || "").startsWith("text/html")) {
-    event.waitUntil(remember(response.clone()));
-    return response;
-  }
-  // The tunnel or the edge is down (a 5xx error page): the saved console explains it better.
-  if (response.status >= 500) return (await caches.match(PAGE, { cacheName: CACHE })) || response;
+  response = (await event.preloadResponse) || await fetch(event.request);
+  if (response.ok && !response.redirected && (response.headers.get("content-type") || "").startsWith("text/html")) event.waitUntil(remember(response.clone()));
   return response;
 }
 
-/** Keeps the page that just loaded and the build files it names; a new deploy drops the old build's files. */
+/**
+ * Keeps the deployed page for the next opening and the build files it names. A new deploy drops
+ * the files of the build before the one being replaced: the page open now may still be that one.
+ */
 async function remember(response) {
   const cache = await caches.open(CACHE);
   const html = await response.clone().text();
   const before = await cache.match(PAGE);
+  const previous = before ? await before.text() : null;
   await cache.put(PAGE, response);
-  if (before && (await before.text()) !== html) {
+  if (previous !== null && previous !== html) {
     // Lazily loaded files of the new build are fetched (and kept) again on use.
     for (const key of await cache.keys()) {
       const path = new URL(key.url).pathname;
-      if (path.startsWith("/assets/") && !html.includes(path)) await cache.delete(key);
+      if (path.startsWith("/assets/") && !html.includes(path) && !previous.includes(path)) await cache.delete(key);
     }
   }
   const named = new Set(html.match(/\/assets\/[^"'\s)]+/g) || []);

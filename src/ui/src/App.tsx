@@ -713,6 +713,28 @@ function RenameDialog({
   );
 }
 
+/** The cache the service worker opens the console from (public/sw.js), and its page. */
+const PAGE_CACHE = "aio-console-v1";
+
+/**
+ * Drops the saved console page and loads the deployed one; false (nothing done) when it already did
+ * so in the last five minutes, so a page that is really incompatible says so instead of reloading on.
+ */
+function loadDeployedPage(): boolean {
+  const KEY = "aio-reloaded-for-version";
+  try {
+    if (Date.now() - Number(sessionStorage.getItem(KEY) || 0) < 5 * 60_000) return false;
+    sessionStorage.setItem(KEY, String(Date.now()));
+  } catch {
+    return false;
+  }
+  void (async () => {
+    try { if ("caches" in window) await (await caches.open(PAGE_CACHE)).delete("/"); } catch { /* no saved page to drop */ }
+    location.reload();
+  })();
+  return true;
+}
+
 /** Rolling upgrades: a new bundle can still talk to an older control plane. */
 export function App() {
   const [mode, setMode] = useState<"loading" | "tasks" | "legacy">("loading");
@@ -723,7 +745,9 @@ export function App() {
     // The UI and the control plane deploy separately: say so when they no longer fit together. The version answer is
     // quick, and a control plane that gives one has the task inbox; only one without it is asked for the inbox itself,
     // where only a 404 means an older control plane (a slow or failed answer must not hold the page on "加载中…").
-    void versionMismatch().then(({ answered, mismatch }) => {
+    void versionMismatch().then(({ answered, mismatch, staleUi }) => {
+      // The console opened from the saved page (public/sw.js) and the service has moved past it: load the deployed one.
+      if (staleUi && loadDeployedPage()) return;
       setMismatch(mismatch);
       if (answered) { setMode("tasks"); return; }
       void api.main(undefined, AbortSignal.timeout(8000), 1).then(() => setMode("tasks")).catch(err => setMode(err instanceof ApiError && err.status === 404 ? "legacy" : "tasks"));

@@ -1,9 +1,10 @@
 import { test, expect, type Page } from "@playwright/test";
 import { mockConsole } from "./mock-api";
+import { API_VERSION } from "../../src/common/version";
 
-// The service worker (src/ui/public/sw.js) keeps the console openable without a network:
-// online it is always the deployed page, offline the last one that loaded, which says it
-// cannot reach the server and reloads itself once it can.
+// The service worker (src/ui/public/sw.js) opens the console from the last page that loaded,
+// fast and without a network, and keeps the deployed one for the next opening; offline the
+// console says it cannot reach the server and reloads itself once it can.
 test.use({ serviceWorkers: "allow" });
 
 const inbox = (page: Page) => page.getByRole("heading", { name: "主会话", exact: true });
@@ -20,17 +21,24 @@ async function setup(page: Page) {
   return net;
 }
 
-test("opens offline from the saved console, and online always from the server", async ({ page, context }) => {
+/** Puts an older deploy of the console (the same page, marked) where the worker opens it from. */
+const saveOlderPage = (page: Page) => page.evaluate(async () => {
+  const html = (await (await fetch("/", { cache: "no-store" })).text()).replace("<html", '<html data-deploy="old"');
+  await (await caches.open("aio-console-v1")).put("/", new Response(html, { headers: { "content-type": "text/html" } }));
+});
+const savedIsOlder = (page: Page) => page.evaluate(async () => (await (await caches.match("/"))!.text()).includes('data-deploy="old"'));
+
+test("opens from the saved console at once, keeps the deployed one for next time, and opens offline", async ({ page, context }) => {
   const net = await setup(page);
-  // An old copy in the cache: online, the page still comes from the server, which also replaces the copy.
-  await page.evaluate(async () => {
-    const cache = await caches.open("aio-console-v1");
-    await cache.put("/", new Response('<!doctype html><body data-deploy="old">old</body>', { headers: { "content-type": "text/html" } }));
-  });
+  // An older deploy saved: it opens without waiting on the server, which replaces the copy behind it.
+  await saveOlderPage(page);
   await page.reload();
   await expect(inbox(page)).toBeVisible();
-  await expect(page.locator("body")).not.toHaveAttribute("data-deploy", "old");
-  await expect.poll(() => page.evaluate(async () => (await (await caches.match("/"))!.text()).includes('data-deploy="old"'))).toBe(false);
+  await expect(page.locator("html")).toHaveAttribute("data-deploy", "old");
+  await expect.poll(() => savedIsOlder(page)).toBe(false);
+  await page.reload();
+  await expect(inbox(page)).toBeVisible();
+  await expect(page.locator("html")).not.toHaveAttribute("data-deploy", "old");
 
   net.down = true;
   await context.setOffline(true);
@@ -54,4 +62,15 @@ test("a server that cannot be reached is not a sign-out, and retrying opens the 
   net.down = false;
   await page.getByRole("button", { name: "重试" }).click();
   await expect(inbox(page)).toBeVisible();
+});
+
+test("a saved console the service has moved past is dropped for the deployed one, once", async ({ page }) => {
+  await setup(page);
+  await saveOlderPage(page);
+  // The service no longer speaks this console's API: the saved page cannot be used.
+  await page.route("**/api/version", (r) => r.fulfill({ json: { component: "control", version: "9.0.0", api: API_VERSION + 2, apiMin: API_VERSION + 1 } }));
+  await page.reload();
+  // Dropped and loaded from the server; this test's deployed page is just as old, so it then says so instead of reloading on.
+  await expect(page.locator(".version-banner")).toContainText("需要更新界面");
+  await expect(page.locator("html")).not.toHaveAttribute("data-deploy", "old");
 });

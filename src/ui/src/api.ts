@@ -553,11 +553,13 @@ export function openEventStream(
  * a message for the person; `answered` says whether the control plane has the version endpoint at all. A page cached from an older or newer release is told
  * to reload instead of half-working.
  */
-export async function versionMismatch(): Promise<{ answered: boolean; mismatch: string | null }> {
+/** `staleUi`: this page is older than the service allows (a newer deployed page would fit). */
+export async function versionMismatch(): Promise<{ answered: boolean; mismatch: string | null; staleUi?: boolean }> {
   try {
     const v = await request<{ api: number; apiMin: number }>("/api/version", { cache: "no-store", signal: AbortSignal.timeout(8000) });
     if (apiCompatible(API_VERSION, v.api, v.apiMin)) return { answered: true, mismatch: null };
-    return { answered: true, mismatch: t.app.versionMismatch(API_VERSION, v.apiMin, v.api, v.api < API_VERSION ? "server" : "ui") };
+    const side = v.api < API_VERSION ? "server" : "ui";
+    return { answered: true, mismatch: t.app.versionMismatch(API_VERSION, v.apiMin, v.api, side), staleUi: side === "ui" };
   } catch {
     // An older control plane has no version endpoint; it is served as before (see App's legacy mode).
     return { answered: false, mismatch: null };

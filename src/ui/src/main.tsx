@@ -15,8 +15,8 @@ document.querySelector('meta[name="apple-mobile-web-app-title"]')?.setAttribute(
 // the loading screen then matches the page that came before it, with no flash between.
 document.documentElement.dataset.theme ??= matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
 
-// The worker keeps the console openable without a network (public/sw.js); it never serves an
-// old page while the server answers. Not in dev, where the page is rebuilt on every change.
+// The worker opens the console from the last page that loaded, fast and without a network (public/sw.js),
+// and keeps the deployed one for next time. Not in dev, where the page is rebuilt on every change.
 if (import.meta.env.PROD && "serviceWorker" in navigator) {
   addEventListener("load", () => void navigator.serviceWorker.register("/sw.js", { scope: "/" }).catch(() => undefined));
 }
