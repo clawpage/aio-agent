@@ -3317,6 +3317,8 @@ button .loading-mark { color: inherit; }
 .full-message-content { width: min(960px, 100%); margin: 0 auto; overflow-wrap: anywhere; line-height: 1.7; }
 .full-message-body.user p { white-space: pre-wrap; }
 .full-message-close-icon { display: none; }
+/* Swiped back from the left edge (useSwipeBack): its edge stands out from the feed it uncovers. */
+.full-message[data-swiping] { box-shadow: var(--shadow-dialog); }
 /* A wide screen reads a long message in a centred window, not a phone's bottom sheet. */
 @media (min-width: 901px) {
   .full-message-backdrop { align-items: center; justify-content: center; padding: 40px; background: var(--scrim-tint); backdrop-filter: blur(6px); }

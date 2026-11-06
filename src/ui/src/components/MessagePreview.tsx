@@ -3,6 +3,7 @@ import { createContext, useEffect, useLayoutEffect, useRef, useState, type React
 import { createPortal } from "react-dom";
 import { NavIcon } from "./NavIcon";
 import { isSandboxLink } from "../sandboxLink";
+import { useSwipeBack } from "../useSwipeBack";
 import { t } from "../i18n";
 
 /** True inside the full-message reading page, where content is shown whole rather than animated in. */
@@ -14,6 +15,7 @@ export function MessagePreview({ children, title, user = false }: { children: Re
   const content = useRef<HTMLDivElement>(null);
   const more = useRef<HTMLButtonElement>(null);
   const close = useRef<HTMLButtonElement>(null);
+  const sheet = useRef<HTMLDivElement>(null);
   const wasOpen = useRef(false);
   const [clipped, setClipped] = useState(false);
   const [open, setOpen] = useState(false);
@@ -71,6 +73,8 @@ export function MessagePreview({ children, title, user = false }: { children: Re
       if ((window.history.state as { message?: string } | null)?.message === id) window.history.back();
     };
   }, [open]);
+  // The page leaves the way it came in on a phone: pushed off from the left edge.
+  useSwipeBack({ enabled: open && matchMedia("(max-width: 900px)").matches, page: sheet, onBack: dismiss });
   const keys = (event: KeyboardEvent<HTMLDivElement>) => {
     // React portal events bubble through the reading page too. A nested image,
     // map or file viewer must handle its own Escape and keyboard focus.
@@ -90,7 +94,7 @@ export function MessagePreview({ children, title, user = false }: { children: Re
       <div ref={content} className="message-preview-content">{children}</div>
       {clipped && <button ref={more} type="button" className="message-more" onClick={show} aria-label={t.chat.preview.moreLabel(title)}>{t.chat.preview.more}</button>}
     </div>
-    <PopupPresence onExited={() => setReading(false)}>{open && createPortal(<PopupSurface className="full-message-backdrop" onClick={event => { if (event.target === event.currentTarget) dismiss(); }}><div className="full-message" role="dialog" aria-modal="true" aria-label={t.chat.preview.fullLabel(title)} onKeyDown={keys} onClick={event => {
+    <PopupPresence onExited={() => setReading(false)}>{open && createPortal(<PopupSurface className="full-message-backdrop" onClick={event => { if (event.target === event.currentTarget) dismiss(); }}><div ref={sheet} className="full-message" role="dialog" aria-modal="true" aria-label={t.chat.preview.fullLabel(title)} onKeyDown={keys} onClick={event => {
       if (!event.currentTarget.contains(event.target as Node)) return;
       // An answer picked here is sent: the reading page has done its job, back to the feed.
       if ((event.target as HTMLElement).closest(".choice-list button.choice:not(:disabled)")) { dismiss(); return; }

@@ -105,3 +105,65 @@ test("long main messages cap at one screen, open as a full-screen page on phones
   await expect(page.locator(".message-more")).toHaveCount(0);
   await expect(preview).toContainText("更新后短回答");
 });
+
+test("on a phone the full message page is swiped back from the left edge, following the finger", async ({ page }, info) => {
+  test.skip(!info.project.name.startsWith("mobile"), "phone layout only");
+  await mockConsole(page, { conversations: [] });
+  const report = Array.from({ length: 60 }, (_, i) => `第 ${i + 1} 段正文。`).join("\n\n");
+  await page.route("**/api/main*", r => r.fulfill({ json: { mode: "tasks", tasks: [{ id: "long-message", revision: 1, title: "长消息", text: "问题", result: report, status: "completed", conversationId: "child", attachments: [], createdAt: 1000, completedAt: 2000, approvals: 0, dependencies: [] }], nextBefore: null } }));
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  await page.goto("/");
+  const more = page.getByRole("button", { name: "点击看更多：长消息", exact: true });
+  const dialog = page.getByRole("dialog", { name: "完整消息：长消息", exact: true });
+  const x = () => dialog.evaluate(n => Math.round(n.getBoundingClientRect().x));
+  /** A touch drag as the page's listeners see it; `hold` keeps the finger down before letting go (a slow release). */
+  const drag = (points: [number, number][], { hold = 150, release = true } = {}) => page.evaluate(async ({ points, hold, release }) => {
+    const wait = (ms: number) => new Promise(r => setTimeout(r, ms));
+    const target = document.elementFromPoint(...points[0])!;
+    const fire = (type: string, [x, y]: [number, number]) => target.dispatchEvent(new PointerEvent(type, { pointerId: 51, pointerType: "touch", isPrimary: true, clientX: x, clientY: y, bubbles: true, cancelable: true, composed: true }));
+    fire("pointerdown", points[0]);
+    for (const point of points.slice(1)) { await wait(24); fire("pointermove", point); }
+    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+    if (!release) return;
+    await wait(hold);
+    fire("pointerup", points.at(-1)!);
+  }, { points, hold, release });
+  await more.click();
+  await expect(dialog).toBeVisible();
+  await expect.poll(() => dialog.evaluate(n => n.getAnimations().length)).toBe(0);
+  const depth = await page.evaluate(() => history.length), url = page.url();
+
+  // Mid-drag the page sits under the finger, the feed showing beside it.
+  await drag([[6, 420], [30, 420], [70, 420], [110, 420], [150, 420]], { release: false });
+  expect(Math.abs(await x() - 144)).toBeLessThan(8);
+  await page.screenshot({ path: `/Users/mengxiao/workspace/.scratch/artifacts/swipe-back/${info.project.name}-midway.png` });
+  await page.evaluate(() => document.elementFromPoint(150, 420)!.dispatchEvent(new PointerEvent("pointerup", { pointerId: 51, pointerType: "touch", isPrimary: true, clientX: 150, clientY: 420, bubbles: true })));
+  // Let go short of 40%, slowly: back in place, still open.
+  await expect.poll(x).toBe(0);
+  await expect.poll(() => dialog.evaluate(n => n.style.transform)).toBe("");
+  await expect(dialog).toBeVisible();
+
+  // A vertical move at the edge, or a sideways one away from it, leaves the page alone.
+  await drag([[8, 600], [10, 560], [12, 480], [14, 380]]);
+  await drag([[80, 420], [140, 420], [220, 420], [300, 420]]);
+  await page.waitForTimeout(350);
+  await expect(dialog).toBeVisible();
+  expect(await x()).toBe(0);
+
+  // Past 40%: the page goes, through its history entry, and the address stays.
+  await drag([[6, 420], [60, 420], [120, 420], [180, 420], [240, 420]]);
+  await expect(dialog).toHaveCount(0);
+  await expect.poll(() => page.evaluate(() => (history.state as { message?: string } | null)?.message)).toBeUndefined();
+  expect(page.url()).toBe(url);
+  expect(await page.evaluate(() => history.length)).toBe(depth);
+
+  // A short flick does it too, and the page opened again is in place.
+  await more.click();
+  await expect(dialog).toBeVisible();
+  await expect.poll(() => dialog.evaluate(n => n.getAnimations().length)).toBe(0);
+  expect(await x()).toBe(0);
+  expect(await dialog.evaluate(n => n.getAttribute("style"))).toBeFalsy();
+  await drag([[6, 420], [30, 420], [60, 420], [100, 420]], { hold: 0 });
+  await expect(dialog).toHaveCount(0);
+  await expect(more).toBeVisible();
+});

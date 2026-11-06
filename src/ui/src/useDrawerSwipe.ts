@@ -3,11 +3,11 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObje
 /** Touches this close to the left edge (past the safe area) pull the closed drawer out. */
 const EDGE = 20;
 /** Movement before a touch picks a direction; a vertical one is left to the page. */
-const SLOP = 8;
+export const SLOP = 8;
 /** Share of the drawer past which a release settles on the other side, and a flick's speed (px/ms) that decides alone. */
-const PAST = 0.4, FLING = 0.3;
+export const PAST = 0.4, FLING = 0.3;
 /** The drawer's own entrance curve, so a release ends the way the ☰ button's opening does. */
-const SETTLE_MS = 280, EASE = "cubic-bezier(.16, 1, .3, 1)";
+export const SETTLE_MS = 280, EASE = "cubic-bezier(.16, 1, .3, 1)";
 /** Sheets and previews over the page: the edge belongs to them. */
 const OVERLAYS = "[aria-modal='true'], .task-console-overlay, .file-preview-overlay, .modal-backdrop, .map-sheet-backdrop, .full-message-backdrop";
 /** Surfaces with gestures of their own (the sandbox desktop, a remote screen, a picture being zoomed). */
@@ -16,7 +16,7 @@ const OWN_GESTURES = ".workspace, .remote-touch, .phone-canvas, .zoomable-image"
 type Gesture = { id: number; x: number; y: number; from: 0 | 1; locked: boolean; width: number; progress: number; moves: { x: number; t: number }[] };
 
 /** The edge zone's width, the safe area included (a phone on its side has its notch there). */
-function edgeWidth(): number {
+export function edgeWidth(): number {
   const probe = document.createElement("div");
   probe.style.cssText = `position:fixed;left:0;top:0;height:0;visibility:hidden;width:calc(${EDGE}px + env(safe-area-inset-left, 0px))`;
   document.body.append(probe);
@@ -27,7 +27,11 @@ function edgeWidth(): number {
 
 /** A touch at the edge that something else under it should keep. */
 function claimed(target: Element | null): boolean {
-  if (document.querySelector(OVERLAYS)) return true;
+  return Boolean(document.querySelector(OVERLAYS)) || ownsTouch(target);
+}
+
+/** A touch that what is under it handles itself: a selection, a surface with its own gestures, a strip scrolled sideways. */
+export function ownsTouch(target: Element | null): boolean {
   const selection = getSelection();
   if (selection && !selection.isCollapsed) return true;
   if (target?.closest(OWN_GESTURES)) return true;
@@ -38,6 +42,13 @@ function claimed(target: Element | null): boolean {
     if (/auto|scroll/.test(style.overflowX) && node.scrollLeft > 0) return true;
   }
   return false;
+}
+
+/** A drag is not a tap: whatever was under the finger at the start must not be clicked by it. */
+export function swallowClick() {
+  const stop = (event: Event) => { event.preventDefault(); event.stopPropagation(); };
+  window.addEventListener("click", stop, { capture: true, once: true });
+  window.setTimeout(() => window.removeEventListener("click", stop, { capture: true }), 400);
 }
 
 function paint(drawer: HTMLElement | null, scrim: HTMLElement | null, progress: number, animate: boolean) {
@@ -80,12 +91,6 @@ export function useDrawerSwipe({ enabled, open, setOpen, drawer, scrim }: { enab
         leaving.current = g.from ? "close" : "pull";
         if (g.from) latest.current.setOpen(false);
       }
-    };
-    // A drag is not a tap: whatever was under the finger at the start must not be clicked by it.
-    const swallowClick = () => {
-      const stop = (event: Event) => { event.preventDefault(); event.stopPropagation(); };
-      window.addEventListener("click", stop, { capture: true, once: true });
-      window.setTimeout(() => window.removeEventListener("click", stop, { capture: true }), 400);
     };
     const down = (event: PointerEvent) => {
       if (event.pointerType !== "touch") return;
