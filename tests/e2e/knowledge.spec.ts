@@ -90,6 +90,8 @@ test("the knowledge page lists entries by domain, shows sources and the quick re
   await expect(royRow).toContainText("更新于 2026-10-26");
   await expect(kb.locator('[data-node-id="kn_daycare"]')).toContainText("1 条待更正");
   expect(await overflow(page)).toBeLessThanOrEqual(0);
+  // Scrolled up and down only: an iPhone drags a scroller left `auto` sideways and bounces it, overflowing or not.
+  await expect(kb.locator(".task-list-scroll")).toHaveCSS("overflow-x", "hidden");
 
   // Domain filter with counts (an empty domain is not offered), and the search box.
   const filters = kb.getByRole("group", { name: "按领域筛选" });

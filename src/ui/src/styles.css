@@ -4997,3 +4997,11 @@ button.map-card-switch { flex: 0 0 auto; padding: 4px 10px; }
 .quota-meter progress::-webkit-progress-value { background: var(--accent); border-radius: 999px; }
 .quota-meter progress::-moz-progress-bar { background: var(--accent); border-radius: 999px; }
 .quota-meter strong { font-variant-numeric: tabular-nums; min-width: 3.5em; text-align: right; }
+
+/* Pages and sheets scroll up and down only. Left as `auto` sideways (which `overflow-y: auto` alone implies),
+   an iPhone lets them be dragged sideways and bounce even when nothing in them is wider. */
+:is(.task-list-scroll, .settings, .usage-body, .gadget-log, .phone-link-panel, .chat-scroll, .conv-list, .file-list, .caps, .login, .modal,
+  .support-dialog, .map-sheet, .browser-tabs, .clawpage-sheet-body, .full-message-body, .main-inbox-app .sidebar) {
+  overflow-x: hidden;
+  overscroll-behavior-x: none;
+}
