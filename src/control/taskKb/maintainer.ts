@@ -62,6 +62,8 @@ What belongs in it: things worth knowing the next time this person asks for some
 
 The existing nodes most related to this batch are listed with their ids and current claims (you have no tools to search for more): when one is about the same thing, add to it instead of creating a new node. Use merge when two existing nodes are the same thing. When a new claim contradicts an existing one, write the new claim with replaces (if it is now true) or link the nodes with contradicts (if both may hold), never silently drop the old one. You may read a task's files with shell commands (cat, ls, head) under its directory.
 
+Name the person by their account name ("Account:" in the material), never "the user", "用户" or the like, in titles, summaries, claims and wiki pages: what is passed on to a shared library is read by other members, who must know whose it is. Write other people by their own names as the tasks give them.
+
 Certainty: user_said = the person said it; observed = seen in a page, file or tool output during the task; inferred = your own conclusion. Volatility: changes = prices, opening hours, availability, schedules, anything that goes stale (give verify_after_days); stable otherwise.
 
 Every claim needs sources: {"task": "<task id>", "quote": "<the exact words, 4-600 characters, copied verbatim>", and optionally "path": "tasks/<task id>/<file>" when the words are in a file of that task's directory, or "url": "<page address>" when they come from a page the task opened}. The quote must appear word for word in the file, or in that task's messages, results or tool outputs; otherwise the whole answer is sent back to you.
@@ -94,6 +96,10 @@ export class TaskKbMaintainer {
   }
 
   get #owner(): string { return this.#d.cfg.runtimeUserId ?? "owner_1"; }
+  /** The account's name, as the knowledge it keeps calls this person. */
+  #username(): string {
+    return (this.#d.db.prepare("SELECT username FROM owners WHERE id=?").get(this.#owner) as { username: string } | undefined)?.username ?? this.#owner;
+  }
 
   /** Begin: the owner's one-off look back, then whatever is already waiting. */
   start(): void {
@@ -320,7 +326,7 @@ export class TaskKbMaintainer {
     const domains = (db.prepare("SELECT name, description FROM kb_domains WHERE owner_id=? ORDER BY name").all(this.#owner) as Array<{ name: string; description: string }>).map((d) => `${d.name}: ${d.description}`).join("\n");
     const shared = this.#d.shared?.();
     const libraries = shared ? shared.librariesOf(this.#owner) : [];
-    const prompt = [`Domains:\n${domains}`, this.#related(packets), this.#wikiCandidates(), ...(libraries.length ? [this.#sharing(shared!, libraries)] : []),
+    const prompt = [`Account: ${this.#username()}`, `Domains:\n${domains}`, this.#related(packets), this.#wikiCandidates(), ...(libraries.length ? [this.#sharing(shared!, libraries)] : []),
       `Packets to handle (${ids.join(", ")}):`, material, `Now answer with the JSON change list, with a decision for each of ${ids.join(", ")}.`].join("\n\n");
     const kernel = { db, ownerId: this.#owner, workspaceDir: this.#d.cfg.sandbox.containerWorkspaceDir, readFile: sandboxKbFiles(this.#d.container), packets: ids, libraries };
     let answer: KbAnswer | null = null;
