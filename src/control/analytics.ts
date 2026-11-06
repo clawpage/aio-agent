@@ -204,6 +204,8 @@ export class Analytics {
     const versions = new Map<string, { platform: string; version: string; users: Set<string> }>();
     const welcome = new Map<string, { count: number; users: Set<string> }>();
     const quality = { stops: 0, retries: 0, reports: 0, restoreFailures: 0 };
+    /** Which accounts' browsers would not come back, and at what step (src/control/browser/lifecycle.ts wakeFailureReason). */
+    const restoreBy = new Map<string, number>(), restoreReasons: Record<string, number> = {};
     // The funnel compares like with like: register-page views and the password sign-ups made from that page,
     // both recorded as events (account creation dates reach back before views were recorded).
     let registerViews = 0, loginViews = 0, formSignups = 0;
@@ -245,7 +247,13 @@ export class Analytics {
         case "task_stop": quality.stops++; break;
         case "task_retry": case "retry_tap": quality.retries++; break;
         case "support_request": if (props.kind === "content") quality.reports++; break;
-        case "browser_restore_failed": quality.restoreFailures++; break;
+        case "browser_restore_failed": {
+          quality.restoreFailures++;
+          if (row.user_id) restoreBy.set(row.user_id, (restoreBy.get(row.user_id) ?? 0) + 1);
+          const reason = typeof props.reason === "string" ? props.reason : "other";
+          restoreReasons[reason] = (restoreReasons[reason] ?? 0) + 1;
+          break;
+        }
       }
     }
 
@@ -354,7 +362,8 @@ export class Analytics {
       activation,
       cohorts: [...cohortMap.values()].sort((a, b) => a.start.localeCompare(b.start)),
       features: [...features].map(([feature, f]) => ({ feature, count: f.count, users: f.users.size, prevUsers: f.prevUsers.size })),
-      quality: { outcomes, medianMs: period.current.medianTaskMs, p90Ms: quantile(durations.current, 0.9), ...quality },
+      quality: { outcomes, medianMs: period.current.medianTaskMs, p90Ms: quantile(durations.current, 0.9), ...quality,
+        ...(quality.restoreFailures ? { restoreAccounts: [...restoreBy].map(([id, count]) => ({ username: users.find((u) => u.id === id)?.username ?? id, count })).sort((a, b) => b.count - a.count), restoreReasons } : {}) },
       accounts,
       versions: [...versions.values()].map(v => ({ platform: v.platform, version: v.version, users: v.users.size })).sort((a, b) => b.users - a.users || b.version.localeCompare(a.version)),
       welcomeCards: [...welcome].map(([card, w]) => ({ card, count: w.count, users: w.users.size })).sort((a, b) => b.count - a.count || a.card.localeCompare(b.card)),

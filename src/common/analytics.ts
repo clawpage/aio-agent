@@ -75,6 +75,9 @@ export type TaskQuality = {
   retries: number;
   reports: number;
   restoreFailures: number;
+  /** When some failed: the accounts they happened to, most first, and the step each failure stopped at (`mcp_unready`, `deadline`, …). */
+  restoreAccounts?: Array<{ username: string; count: number }>;
+  restoreReasons?: Record<string, number>;
 };
 
 /** One account in the range: activity, tasks, where it used the console and the model of its latest task. */

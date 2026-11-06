@@ -44,10 +44,20 @@ export class Logger {
     l.#level = this.#level;
     l.#stream = this.#stream;
     l.#scope = scope;
+    l.#account = this.#account;
     return l;
   }
 
+  /**
+   * The account every line of this logger (and the children it makes from now on) is about. Each
+   * account's runtime logs to the same output, where a line without it cannot be told apart.
+   */
+  setAccount(account: string): void {
+    this.#account = account;
+  }
+
   #scope = "";
+  #account = "";
 
   #write(level: LogLevel, msg: string, fields?: Record<string, unknown>): void {
     if (LEVELS[level] < this.#level) return;
@@ -55,6 +65,7 @@ export class Logger {
       ts: new Date().toISOString(),
       level,
       scope: this.#scope || undefined,
+      account: this.#account || undefined,
       msg,
     };
     if (fields) record.fields = redact(fields);

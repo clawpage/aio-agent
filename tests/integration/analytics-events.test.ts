@@ -66,5 +66,6 @@ it("records a browser restore that failed, against the runtime's account and not
   await h.ctx.browser.sleepNow();
   h.browserRuntime.wakeError = 'restore failed';
   try { await expect(h.ctx.browser.wake()).rejects.toThrow(); } finally { h.browserRuntime.wakeError = null; }
-  expect(events('browser_restore_failed')).toEqual([{ user_id: 'owner_1', platform: null, props: null }]);
+  // With the step it stopped at, as a fixed code (a runtime that throws gives none: other).
+  expect(events('browser_restore_failed')).toEqual([{ user_id: 'owner_1', platform: null, props: JSON.stringify({ reason: 'other' }) }]);
 });

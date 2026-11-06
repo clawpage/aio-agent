@@ -1659,6 +1659,22 @@ describe("BrowserLifecycle review fixes", () => {
     cold.shutdown();
     stalled.shutdown();
 
+    // The tabs are back but the browser MCP was not answering yet (cr, 2026-11-05): tried again in the same wake.
+    const mcp = makeRuntime();
+    const { life: settling } = makeLifecycle(mcp, { releaseWhenIdle: false });
+    mcp.script.browserRunning = false;
+    await settling.observeRuntime();
+    const answers: WakeOutcome[] = [
+      { ok: false, message: "browser MCP page connection check failed; snapshot kept", restoredTabs: 8, failedTabs: 0, reason: "mcp_unready" },
+      { ok: true, restoredTabs: 8 },
+    ];
+    let woken = 0;
+    mcp.wake = async () => answers[woken++]!;
+    await settling.wake();
+    expect(woken).toBe(2);
+    expect(settling.status().restorePending).toBe(false);
+    settling.shutdown();
+
     // Not tabs or time (the focus, the browser itself): one try, as before.
     for (const failed of [
       { ok: false, message: "focus could not be synced", failedTabs: 0 },

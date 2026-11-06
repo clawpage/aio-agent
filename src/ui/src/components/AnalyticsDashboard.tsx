@@ -220,7 +220,10 @@ function Quality({ quality }: { quality: NonNullable<AnalyticsReport['quality']>
       <div><dt>{q.signals.stops}</dt><dd>{fmt(quality.stops)}</dd></div>
       <div><dt>{q.signals.retries}</dt><dd>{fmt(quality.retries)}</dd></div>
       <div><dt>{q.signals.reports}</dt><dd>{fmt(quality.reports)}</dd></div>
-      <div><dt>{q.signals.restoreFailures}</dt><dd>{fmt(quality.restoreFailures)}</dd></div>
+      <div><dt>{q.signals.restoreFailures}</dt><dd>{fmt(quality.restoreFailures)}
+        {/* Whose browser, and at what step: enough to tell one account's stuck page from a fault everyone hits. */}
+        {quality.restoreAccounts?.length ? <small className="dash-restore-detail">{quality.restoreAccounts.map(x => `${x.username} ${fmt(x.count)}`).join(a().activeList.separator)}<br/>
+          {Object.entries(quality.restoreReasons ?? {}).sort((x, y) => y[1] - x[1]).map(([k, n]) => `${q.restoreReasons[k] ?? k} ${fmt(n)}`).join(a().activeList.separator)}</small> : null}</dd></div>
     </dl>
   </>;
 }

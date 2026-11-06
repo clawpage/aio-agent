@@ -1559,8 +1559,18 @@ def test_restore_finishes_with_reindexed_aio_tabs_and_focuses_the_original_targe
                 assert_eq(activated[-1], 2, "原选中目标 b 对应当前 index 2")
                 assert_true(rt.read_restore_state(path)["completed"])
             with patch.object(rt, "reconnect_mcp_browser", return_value={"ok": False, "message": "MCP reconnect failed"}):
-                assert_false(rt.restore_tabs(snapshot, snapshot_path=path)["ok"])
+                failed = rt.restore_tabs(snapshot, snapshot_path=path)
+                assert_false(failed["ok"])
+                assert_eq(failed.get("reason"), "mcp_unready", "标签已恢复、只差 MCP 时应可重试")
                 assert_false(rt.read_restore_state(path)["completed"], "MCP 失败必须保留待恢复状态")
+            # The tabs used the whole budget and the check ran out of time with it: a retry finishes that.
+            with fake_clock() as clock:
+                def slow_check(*_a: Any, **_k: Any) -> dict[str, Any]:
+                    clock.sleep(200)
+                    return {"ok": False, "message": "browser MCP page connection check failed; snapshot kept"}
+                with patch.object(rt, "reconnect_mcp_browser", slow_check):
+                    late = rt.restore_tabs(snapshot, snapshot_path=path, deadline=clock.now + 100)
+                assert_eq(late.get("reason"), "deadline_exceeded", "预算用尽导致的 MCP 失败应报超时")
             assert_true(rt.restore_tabs(snapshot, snapshot_path=path)["ok"])
             assert_false(any(m in ("Target.createTarget", "Target.closeTarget", "Page.navigate") for m, _ in cdp.calls), "重试不能重建、关闭或重新导航标签")
             assert_true(("Target.activateTarget", {"targetId": "b"}) in cdp.calls)

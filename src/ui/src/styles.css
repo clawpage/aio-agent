@@ -5021,3 +5021,4 @@ button.map-card-switch { flex: 0 0 auto; padding: 4px 10px; }
 .settings-subpage .settings-section-head p { margin-top: 0; }
 .settings-subpage .support-settings > h3 { display: none; }
 .settings-subpage[data-swiping] { box-shadow: var(--shadow-dialog); background: var(--bg); }
+.dash-restore-detail { display: block; margin-top: 2px; font-size: 12px; line-height: 1.5; color: var(--text-dim); overflow-wrap: anywhere; }

@@ -318,6 +318,7 @@ docker exec -i -u root personal-agent-sandbox python3 - status \
 - **上游 helper 的强杀**：向 `/opt/gem/browser-supervisor.py` 发 SIGTERM 后，它会在内部约 10 秒
   后强制结束其 Chrome（upstream 行为，不改镜像）。生产执行前应按下方受控脚本观察它确实退出。
 - **快照失败/未支持的页面**：不停止浏览器；拒绝原因会出现在 UI。恢复失败保留快照并可重试。
+- **恢复失败的监控**：运营看板「任务质量」的浏览器恢复失败列出账号与停在哪一步；日志里成员运行时的每行带 `account`，`grep '"browser restore failed"'` 看 `fields.reason`，具体原文在同一时刻的 `browser lifecycle failure` 行（`fields.detail`，已去掉网址）。同一账号反复出现同一原因再进容器查：`/var/log/gem/browser-supervisor.log` 看 Chromium 起停，`browser-snapshot.json.restore.json` 看 `tabFailures` 与 `completed`（不要读快照本身，含登录数据）。
 - **快照文件**：持久卷内 0600 原子写入，含标签/URL/滚动/sessionStorage、cookies 和当前站点的 localStorage/IndexedDB；URL 与存储内容从不
   进日志或 API。
 

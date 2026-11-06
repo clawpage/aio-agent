@@ -120,6 +120,7 @@ export const analytics: typeof zh = {
     median: "Duración mediana",
     p90: "Duración P90",
     signals: { stops: "Detenidas por el usuario", retries: "Reintentos", reports: "Respuestas denunciadas", restoreFailures: "Restauraciones del navegador fallidas" },
+    restoreReasons: { tabs: "Pestañas", deadline: "Tiempo agotado", mcp_unready: "MCP del navegador no listo", focus: "Foco", storage: "Datos de sesión", aio_api: "API del navegador", other: "Otros" } as Record<string, string>,
     noTasks: "No hubo tareas en este periodo.",
   },
   accounts: {

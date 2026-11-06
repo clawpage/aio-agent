@@ -120,6 +120,7 @@ export const analytics: typeof zh = {
     median: "耗時中位數",
     p90: "耗時 P90",
     signals: { stops: "使用者停止任務", retries: "重試", reports: "檢舉回答", restoreFailures: "瀏覽器還原失敗" },
+    restoreReasons: { tabs: "分頁", deadline: "逾時", mcp_unready: "瀏覽器 MCP 未就緒", focus: "焦點同步", storage: "登入資料", aio_api: "瀏覽器介面", other: "其他" } as Record<string, string>,
     noTasks: "這段期間沒有任務。",
   },
   accounts: {

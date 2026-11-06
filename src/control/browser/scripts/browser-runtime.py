@@ -2521,7 +2521,12 @@ def restore_tabs(
     if not mcp["ok"]:
         state["completed"] = False
         write_restore_state(snapshot_path, state)
-        return err(mcp["message"], restoredTabs=restored)
+        # The tabs are back; only the browser MCP is not answering yet. That is worth another try, which
+        # finds the tabs done and goes straight to this check: a budget the tabs used up is the commonest
+        # cause (eight heavy pages on a slow machine), and it was once reported as a final failure.
+        if out_of_time():
+            return deadline_exceeded(restoredTabs=restored)
+        return err(mcp["message"], restoredTabs=restored, reason="mcp_unready")
     state["completed"] = True
     state["browserPid"] = identity[0]
     state["browserStarttime"] = identity[1]

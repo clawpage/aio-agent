@@ -222,6 +222,22 @@ export interface LifecycleEvent {
   type: LifecycleEventType;
   state: BrowserLifecycleState;
   message?: string;
+  /** `wake.failed`: why, as a fixed code for monitoring (never runtime text, which can carry a URL). */
+  reason?: WakeFailureReason;
+}
+
+/** What a failed browser wake comes down to: the step the restore stopped at. */
+export type WakeFailureReason = "tabs" | "deadline" | "mcp_unready" | "focus" | "storage" | "aio_api" | "other";
+
+/** The fixed code for a runtime's failed wake; its message is matched only against the runtime's own fixed wording. */
+export function wakeFailureReason(res: Pick<WakeOutcome, "reason" | "failedTabs" | "message">): WakeFailureReason {
+  if (res.reason === "deadline_exceeded") return "deadline";
+  if (res.reason === "mcp_unready" || /browser MCP/.test(res.message ?? "")) return "mcp_unready";
+  if ((res.failedTabs ?? 0) > 0) return "tabs";
+  if (/focus could not be synced/.test(res.message ?? "")) return "focus";
+  if (/browser storage/.test(res.message ?? "")) return "storage";
+  if (/AIO browser API/.test(res.message ?? "")) return "aio_api";
+  return "other";
 }
 
 // ------------------------------------------------------------------- leases
@@ -1453,12 +1469,13 @@ status(): BrowserLifecycleStatus {
       const intoRunning = !this.#asleep;
       this.#setState("restoring");
       this.#emit("wake.started", intoRunning ? "restoring the snapshot into the running browser" : "starting and restoring the browser");
+      let failure: WakeFailureReason = "other";
       try {
         let res = await this.#runtime.wake({ timeoutMs: this.#wakeTimeoutMs });
-        // Only tabs failed (a sign-in page that no longer takes its saved session, say), or the
-        // budget ran out: try again now; the runtime resumes the restore where it stopped and gives
-        // a failing tab up on its last try.
-        const resumable = (r: typeof res) => !r.ok && (r.reason === "deadline_exceeded" || (r.failedTabs ?? 0) > 0);
+        // Only tabs failed (a sign-in page that no longer takes its saved session, say), the browser
+        // MCP was not answering yet once the tabs were back, or the budget ran out: try again now; the
+        // runtime resumes the restore where it stopped and gives a failing tab up on its last try.
+        const resumable = (r: typeof res) => !r.ok && (r.reason === "deadline_exceeded" || r.reason === "mcp_unready" || (r.failedTabs ?? 0) > 0);
         for (let tries = 1; resumable(res) && tries < WAKE_TAB_TRIES; tries++) {
           this.#log.warn?.("browser restore unfinished; trying again", { reason: res.reason ?? "tabs", failedTabs: res.failedTabs, attempt: tries + 1 });
           res = await this.#runtime.wake({ timeoutMs: this.#wakeTimeoutMs });
@@ -1467,6 +1484,7 @@ status(): BrowserLifecycleStatus {
           // Reject with the fixed, secret-free text: the caller (and its logs)
           // must never receive a container message that can embed a page URL.
           // (Only here: recorded before the check, every successful wake logged a failure.)
+          failure = wakeFailureReason(res);
           throw new WakeRefused(this.#fail("wake_failed", res.message).message);
         }
         this.#asleep = false;
@@ -1490,8 +1508,8 @@ status(): BrowserLifecycleStatus {
         const { message } = known ? this.#fail("wake_failed") : this.#fail("wake_failed", err);
         this.#pendingRestore = true;
         this.#setState("error");
-        this.#log.error?.("browser restore failed", { error: message });
-        this.#emit("wake.failed", message);
+        this.#log.error?.("browser restore failed", { error: message, reason: failure });
+        this.#emit("wake.failed", message, failure);
         // Always throw the fixed, secret-free sentence. A runtime that rejects
         // with a raw Error must never hand a page URL or token to the caller.
         throw new Error(message);
@@ -1778,8 +1796,8 @@ status(): BrowserLifecycleStatus {
     this.#since = this.#clock.now();
   }
 
-  #emit(type: LifecycleEventType, message?: string): void {
-    this.#onEvent?.({ type, state: this.#state, message });
+  #emit(type: LifecycleEventType, message?: string, reason?: WakeFailureReason): void {
+    this.#onEvent?.({ type, state: this.#state, message, ...(reason ? { reason } : {}) });
   }
 }
 

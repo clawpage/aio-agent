@@ -99,6 +99,11 @@ export async function bootstrap(opts: BootstrapOptions = {}): Promise<Bootstrapp
     opts.log ??
     new Logger(process.env.PA_LOG_LEVEL === "debug" ? "debug" : "info", `${cfg.logDir}/personal-agent.log`, true);
   const db = openDb(cfg.dbPath);
+  // A member's lines name the account (its runtime's lines share one output with every other account's).
+  if (!opts.log && cfg.runtimeUserId) {
+    const row = db.prepare("SELECT username FROM owners WHERE id=?").get(cfg.runtimeUserId) as { username: string } | undefined;
+    log.setAccount(row?.username ?? cfg.runtimeUserId);
+  }
   // Everything this runtime starts on its own writes for people in its account's language.
   return runInLocale(() => readLocale(db), () => bootstrapRuntime(opts, cfg, log, db));
 }
@@ -158,7 +163,7 @@ async function bootstrapRuntime(opts: BootstrapOptions, cfg: Config, log: Logger
     // machine under test is the same one production uses.
     runtime: tabs ? pruneBeforeSnapshot(resolvedBrowserRuntime, tabs) : resolvedBrowserRuntime,
     // A member runtime gets the central analytics after it is built (UserRuntimes), so it is looked up when the event comes.
-    onEvent: (event) => { if (event.type === "wake.failed") ctx.analytics?.track("browser_restore_failed", { userId: cfg.runtimeUserId ?? "owner_1" }); },
+    onEvent: (event) => { if (event.type === "wake.failed") ctx.analytics?.track("browser_restore_failed", { userId: cfg.runtimeUserId ?? "owner_1", props: { reason: event.reason ?? "other" } }); },
   });
   // The manager protects the browser for the whole of every managed turn, so a
   // lease must exist before this point (a queued turn can start on construction).
