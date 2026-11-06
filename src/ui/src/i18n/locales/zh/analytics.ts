@@ -24,7 +24,7 @@ export const analytics = {
     features: "功能使用",
     platforms: "平台与版本",
     quality: "任务质量",
-    accounts: "账号",
+    accounts: "账号与用量",
     tokens: "token 用量",
   },
   kpi: {

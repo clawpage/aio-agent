@@ -25,7 +25,7 @@ export const analytics: typeof zh = {
     features: "Uso de funciones",
     platforms: "Plataformas y versiones",
     quality: "Calidad de las tareas",
-    accounts: "Cuentas",
+    accounts: "Cuentas y uso",
     tokens: "Uso de tokens",
   },
   kpi: {

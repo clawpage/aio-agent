@@ -25,7 +25,7 @@ export const analytics: typeof zh = {
     features: "功能使用",
     platforms: "平台與版本",
     quality: "任務品質",
-    accounts: "帳號",
+    accounts: "帳號與用量",
     tokens: "token 用量",
   },
   kpi: {

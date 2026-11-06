@@ -4,7 +4,7 @@ import { createPortal } from 'react-dom';
 import { api, ApiError } from '../api';
 import { PopupPresence, PopupSurface } from './PopupMotion';
 import { FEATURES, type AccountRow, type ActiveAccount, type AnalyticsReport, type FunnelEntry, type PeriodTotals } from '../../../common/analytics';
-import type { UsageReport } from '../../../common/usage';
+import type { AccountUsage, UsageReport } from '../../../common/usage';
 import type { DashChartSpec, DashSeries } from '../dashboardCharts';
 import type { MountedChart } from '../chartRender';
 import { locale, t } from '../i18n';
@@ -225,8 +225,9 @@ function Quality({ quality }: { quality: NonNullable<AnalyticsReport['quality']>
   </>;
 }
 
-type SortKey = 'account' | 'lastSeen' | 'activeDays' | 'sessions' | 'tasks' | 'completion' | 'tokens';
-function Accounts({ rows, tokens, now, total }: { rows: AccountRow[]; tokens: Map<string, number> | null; now: number; total: number }) {
+type SortKey = 'account' | 'lastSeen' | 'activeDays' | 'sessions' | 'tasks' | 'completion' | 'tokens' | 'cost';
+/** Every account in one table: what it did, and the tokens it used (owner only: an estimated cost and today's share of the limit). */
+function Accounts({ rows, usage, now, total }: { rows: AccountRow[]; usage: Map<string, AccountUsage> | null; now: number; total: number }) {
   const c = a().accounts;
   const [query, setQuery] = useState('');
   const [sort, setSort] = useState<{ key: SortKey; desc: boolean }>({ key: 'lastSeen', desc: true });
@@ -238,7 +239,8 @@ function Accounts({ rows, tokens, now, total }: { rows: AccountRow[]; tokens: Ma
       case 'sessions': return r.sessions;
       case 'tasks': return r.tasks;
       case 'completion': return r.tasks ? r.completed / r.tasks : -1;
-      case 'tokens': return tokens?.get(r.id) ?? -1;
+      case 'tokens': return usage?.get(r.id)?.totals.total ?? -1;
+      case 'cost': return usage?.get(r.id)?.totals.usd ?? -1;
     }
   };
   const shown = rows.filter(r => r.username.toLowerCase().includes(query.trim().toLowerCase())).sort((x, y) => {
@@ -247,7 +249,7 @@ function Accounts({ rows, tokens, now, total }: { rows: AccountRow[]; tokens: Ma
     return (sort.desc ? -cmp : cmp) || x.username.localeCompare(y.username);
   });
   const head = (key: SortKey, wide = false) => {
-    const label = c.columns[key];
+    const label = key === 'cost' ? t.usage.columns.cost : c.columns[key];
     const on = sort.key === key;
     return <th scope="col" className={wide ? 'dash-wide' : undefined} aria-sort={on ? (sort.desc ? 'descending' : 'ascending') : 'none'}>
       <button type="button" className="dash-sort" aria-label={c.sort(label)} onClick={() => setSort(s => ({ key, desc: s.key === key ? !s.desc : key !== 'account' }))}>{label}<span aria-hidden="true">{on ? (sort.desc ? ' ↓' : ' ↑') : ''}</span></button>
@@ -259,7 +261,7 @@ function Accounts({ rows, tokens, now, total }: { rows: AccountRow[]; tokens: Ma
       <span className="muted tiny">{c.count(fmt(shown.length), fmt(total))}</span>
     </div>
     <div className="dash-table-scroll"><table className="dash-table dash-accounts">
-      <thead><tr>{head('account')}{head('lastSeen')}{head('activeDays')}{head('sessions', true)}{head('tasks')}{head('completion')}{tokens && head('tokens')}<th scope="col" className="dash-wide dash-text">{c.columns.platforms}</th><th scope="col" className="dash-wide dash-text">{c.columns.model}</th></tr></thead>
+      <thead><tr>{head('account')}{head('lastSeen')}{head('activeDays')}{head('sessions', true)}{head('tasks')}{head('completion')}{usage && <>{head('tokens')}<th scope="col" className="dash-wide">{t.usage.columns.input}</th><th scope="col" className="dash-wide">{t.usage.columns.cached}</th><th scope="col" className="dash-wide">{t.usage.columns.output}</th>{head('cost')}<th scope="col">{t.usage.columns.quota}</th></>}<th scope="col" className="dash-wide dash-text">{c.columns.platforms}</th><th scope="col" className="dash-wide dash-text">{c.columns.model}</th></tr></thead>
       <tbody>{shown.map(r => <tr key={r.id}>
         <th scope="row">{r.username}<small>{r.role === 'owner' ? t.usage.roles.owner : t.usage.roles.member}</small></th>
         <td>{r.lastSeenAt ? <time dateTime={new Date(r.lastSeenAt).toISOString()} title={new Date(r.lastSeenAt).toLocaleString(locale)}>{ago(r.lastSeenAt, now)}</time> : <span className="muted">{c.never}</span>}</td>
@@ -267,12 +269,23 @@ function Accounts({ rows, tokens, now, total }: { rows: AccountRow[]; tokens: Ma
         <td className="dash-wide">{fmt(r.sessions)}</td>
         <td>{fmt(r.tasks)}</td>
         <td>{pct(r.completed, r.tasks)}</td>
-        {tokens && <td>{tokens.has(r.id) ? <span title={fmt(tokens.get(r.id)!)}>{short(tokens.get(r.id)!)}</span> : '—'}</td>}
+        {usage && <UsageCells x={usage.get(r.id)}/>}
         <td className="dash-wide dash-text">{r.platforms.map(p => a().platformNames[p] ?? p).join(a().activeList.separator) || '—'}</td>
         <td className="dash-wide dash-text">{r.model ?? '—'}</td>
       </tr>)}</tbody>
     </table></div>
     {shown.length === 0 && <p className="muted">{c.empty}</p>}
+  </>;
+}
+
+/** An account's token columns; a dash where its ledger could not be read or it has none. */
+function UsageCells({ x }: { x: AccountUsage | undefined }) {
+  if (!x?.available) return <><td>—</td><td className="dash-wide">—</td><td className="dash-wide">—</td><td className="dash-wide">—</td><td>—</td><td>—</td></>;
+  const n = (v: number) => <span title={fmt(v)}>{short(v)}</span>;
+  return <>
+    <td>{n(x.totals.total)}</td><td className="dash-wide">{n(x.totals.input)}</td><td className="dash-wide">{n(x.totals.cached)}</td><td className="dash-wide">{n(x.totals.output)}</td>
+    <td>{x.totals.usd == null ? <span className="muted" title={x.model ?? undefined}>{t.usage.columns.noPrice}</span> : <span title={x.model ?? undefined}>{usd(x.totals.usd)}</span>}</td>
+    <td>{x.quota ? <span title={`${fmt(x.quota.used)} / ${fmt(x.quota.limit)}`}>{pct(x.quota.used, x.quota.limit)}</span> : '—'}</td>
   </>;
 }
 
@@ -341,7 +354,7 @@ export function AnalyticsDashboard({ onExpired }: { onExpired: () => void }) {
   const valid = u?.accounts.filter(x => x.available) ?? [];
   const tokenTotal = valid.reduce((n, x) => n + x.totals.total, 0);
   const costTotal = valid.reduce((n, x) => n + (x.totals.usd ?? 0), 0);
-  const tokens = u ? new Map(valid.map(x => [x.id, x.totals.total])) : null;
+  const usageOf = u ? new Map(u.accounts.map(x => [x.id, x])) : null;
   const c = a().charts;
 
   const charts = useMemo(() => {
@@ -418,9 +431,13 @@ export function AnalyticsDashboard({ onExpired }: { onExpired: () => void }) {
           {p.quality && <Section id="dash-quality" title={a().sections.quality}><Quality quality={p.quality}/></Section>}
         </div>}
 
-        {p?.accounts && <Section id="dash-accounts" title={a().sections.accounts} className="dash-wide-card"><Accounts rows={p.accounts} tokens={tokens} now={now} total={p.accounts.length}/></Section>}
+        {p?.accounts && <Section id="dash-accounts" title={a().sections.accounts} className="dash-wide-card">
+          {u?.accounts.some(x => !x.available) && <p className="banner error" role="alert">{t.usage.unavailable(u.accounts.filter(x => !x.available).map(x => x.username))}</p>}
+          <Accounts rows={p.accounts} usage={usageOf} now={now} total={p.accounts.length}/>
+        </Section>}
 
-        {u && <Section id="dash-tokens" title={a().sections.tokens} className="dash-wide-card dash-tokens">
+        {/* Without the activity report the token table stands alone. */}
+        {u && !p?.accounts && <Section id="dash-tokens" title={a().sections.tokens} className="dash-wide-card dash-tokens">
           {u.accounts.some(x => !x.available) && <p className="banner error" role="alert">{t.usage.unavailable(u.accounts.filter(x => !x.available).map(x => x.username))}</p>}
           {tokenTotal === 0 ? <p className="muted">{t.usage.noUsage}</p> : <div className="dash-table-scroll"><table className="dash-table">
             <thead><tr><th scope="col">{t.usage.columns.user}</th><th scope="col">{t.usage.columns.total}</th><th scope="col">{t.usage.columns.share}</th><th scope="col">{t.usage.columns.input}</th><th scope="col" className="dash-wide">{t.usage.columns.cached}</th><th scope="col">{t.usage.columns.output}</th><th scope="col">{t.usage.columns.cost}</th><th scope="col">{t.usage.columns.quota}</th></tr></thead>

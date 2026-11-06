@@ -98,10 +98,13 @@ test('the owner reads the redesigned dashboard: overview with changes, trends, f
   await expect(tile('token')).toContainText('6000.4万'); await expect(kpis.locator('[title="60,003,600"]')).toBeVisible();
   // The cost at list prices adds up the priced accounts; the table shows each one's, and a member's share of today's tokens.
   await expect(tile('估算费用')).toContainText('US$120');
-  const yzmy = page.locator('.dash-tokens tbody tr').filter({ hasText: /^yzmy/ });
+  // One table for accounts and their tokens: no separate token table next to it.
+  await expect(page.locator('.dash-tokens')).toHaveCount(0);
+  const yzmy = page.locator('.dash-accounts tbody tr').filter({ hasText: /^yzmy/ });
   await expect(yzmy).toContainText('US$120'); await expect(yzmy).toContainText('37%');
-  const owner = page.locator('.dash-tokens tbody tr').filter({ hasText: /^owner/ });
-  await expect(owner).toContainText('未定价'); await expect(owner.locator('td').last()).toHaveText('—');
+  const owner = page.locator('.dash-accounts tbody tr').filter({ hasText: /^owner/ });
+  // Columns after the account: last seen … completion, tokens, input, cached, output, cost, quota, platforms, model.
+  await expect(owner).toContainText('未定价'); await expect(owner.locator('td').nth(10)).toHaveText('—');
 
   // The four daily charts are drawn on canvas by the shared ECharts renderer.
   const charts = page.locator('.dash-chart');
