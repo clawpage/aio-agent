@@ -44,16 +44,21 @@ export function quotaStatus(db: Db, now = Date.now()): QuotaStatus {
   return { limit: DAILY_TOKEN_LIMIT, used, resetsAt, exceeded: used >= DAILY_TOKEN_LIMIT };
 }
 
-/** What a person is told once the day's tokens are used up: when service comes back, in Pacific time and from now. */
-export function limitMessage(resetsAt: number, now = Date.now()): string {
+/** The time zone the account last signed in from (its daily feed follows it, src/control/auth/loginTimezone.ts), if known. */
+export function accountTimezone(db: Db): string | null {
+  return (db.prepare("SELECT timezone FROM schedules WHERE builtin='daily_feed' LIMIT 1").get() as { timezone: string } | undefined)?.timezone ?? null;
+}
+
+/** What a person is told once the day's tokens are used up: when service comes back, in their own time zone and from now. */
+export function limitMessage(resetsAt: number, timeZone: string, now = Date.now()): string {
   const locale = currentLocale();
-  const at = new Intl.DateTimeFormat(locale, { timeZone: QUOTA_TIMEZONE, month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(resetsAt);
+  const at = new Intl.DateTimeFormat(locale, { timeZone, month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(resetsAt);
   return t(locale).tasks.quota.exceeded(at, Math.max(1, Math.ceil((resetsAt - now) / 3_600_000)));
 }
 
 /** A new turn refused because the account has used today's tokens. */
 export class DailyLimitError extends Error {
-  constructor(readonly resetsAt: number) {
-    super(limitMessage(resetsAt));
+  constructor(readonly resetsAt: number, timeZone: string) {
+    super(limitMessage(resetsAt, timeZone));
   }
 }

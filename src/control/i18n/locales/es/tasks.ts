@@ -27,7 +27,7 @@ export const tasks: typeof zh = {
     dependencyFailed: "Una tarea previa no se completó correctamente. Comprueba su resultado y envía una tarea relacionada; no continuará automáticamente.",
   },
   quota: {
-    exceeded: (at: string, hours: number) => `Has agotado el uso gratuito de hoy, así que el servicio está en pausa. Se restablece el ${at}, hora del Pacífico (en unas ${hours} ${hours === 1 ? "hora" : "horas"}).`,
+    exceeded: (at: string, hours: number) => `Has agotado el uso gratuito de hoy, así que el servicio está en pausa. Vuelve el ${at} (en unas ${hours} ${hours === 1 ? "hora" : "horas"}).`,
   },
   notes: {
     archived: "El resultado no se comprobó; lo archivaste tú.",

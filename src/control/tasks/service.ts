@@ -25,7 +25,7 @@ import type { Widget } from "../widgets.js";
 import { runInLocaleOr, t } from "../i18n/index.js";
 import { kbBrief, kbEnabled } from "../taskKb/read.js";
 import { MAX_ATTACHMENTS } from "../../common/attachments.js";
-import { DailyLimitError, limitMessage } from "../quota.js";
+import { accountTimezone, DailyLimitError, limitMessage } from "../quota.js";
 import type { QuotaStatus } from "../../common/usage.js";
 import { ATTENTION_STATUSES, DONE_STATUSES, WORKING_STATUSES, type TaskBucket, type TaskCounts, type TaskFilter, type TaskListPage } from "../../common/taskList.js";
 
@@ -302,6 +302,10 @@ export class TaskService {
         const status = this.#quota?.();
         return status?.exceeded ? status.resetsAt : null;
     }
+    /** The zone the account signed in from, for saying when the day's tokens come back. */
+    private accountZone(): string {
+        return accountTimezone(this.db) ?? this.cfg.browser.timezone;
+    }
     setWidgets(list: ((userId: string) => Widget[]) | null): void { this.#widgets = list; }
     #widgets: ((userId: string) => Widget[]) | null = null;
     private widgetsNote(row: TaskRow): string | null {
@@ -491,7 +495,7 @@ export class TaskService {
         if (related && !this.belongsTo(related, userId))
             throw new Error(t().tasks.errors.relatedMissing);
         const resetsAt = this.overQuota();
-        if (resetsAt !== null) throw new DailyLimitError(resetsAt);
+        if (resetsAt !== null) throw new DailyLimitError(resetsAt, this.accountZone());
         if (isLocale(input.locale)) writeLocale(this.db, input.locale, "message");
         const frozen = isMember(this.db, userId) ? this.agent.memberSettings() : this.agent.resolveSubmitSettings({ conversationId: "main", text, clientMessageId: input.clientMessageId });
         const id = randomId("task");
@@ -532,7 +536,7 @@ export class TaskService {
             return existing;
         }
         const resetsAt = this.overQuota();
-        if (resetsAt !== null) throw new DailyLimitError(resetsAt);
+        if (resetsAt !== null) throw new DailyLimitError(resetsAt, this.accountZone());
         const frozen = isMember(this.db, input.userId) ? this.agent.memberSettings() : this.agent.resolveSubmitSettings({ conversationId: "main", text, clientMessageId, effort: "medium" });
         const previous = this.db.prepare("SELECT * FROM tasks WHERE client_message_id LIKE 'gadget:%' AND conversation_id IN (SELECT id FROM conversations WHERE owner_id=?) ORDER BY created_at DESC LIMIT 1").get(input.userId) as unknown as TaskRow | undefined;
         const id = randomId("task");
@@ -882,7 +886,7 @@ export class TaskService {
                 const reason = err instanceof Error ? err.message : t().tasks.errors.planningFailedGeneric;
                 // The dispatcher is turned away too once the day's tokens run out: the person is told when they come back.
                 const resetsAt = this.overQuota();
-                this.db.prepare("UPDATE tasks SET status='planning_failed',error=? WHERE id=?").run(resetsAt !== null ? limitMessage(resetsAt) : reason, row.id);
+                this.db.prepare("UPDATE tasks SET status='planning_failed',error=? WHERE id=?").run(resetsAt !== null ? limitMessage(resetsAt, this.accountZone()) : reason, row.id);
                 measured = true; trace.failed = true; trace.failReason ??= reason;
                 steps.push({ kind: "failed", at: Date.now(), reason });
             }
@@ -1122,7 +1126,7 @@ export class TaskService {
             // Queued before the day's tokens ran out (a scheduled run, a task waiting its turn): it does not start.
             const resetsAt = this.overQuota();
             if (resetsAt !== null) {
-                this.db.prepare("UPDATE tasks SET status='failed',error=?,completed_at=? WHERE id=?").run(limitMessage(resetsAt), Date.now(), row.id);
+                this.db.prepare("UPDATE tasks SET status='failed',error=?,completed_at=? WHERE id=?").run(limitMessage(resetsAt, this.accountZone()), Date.now(), row.id);
                 this.notifyChange(row.id, row.status);
                 continue;
             }
@@ -1262,7 +1266,7 @@ export class TaskService {
         // The model gateway turned the turn away once the day's tokens ran out: say so, and when they come back.
         const resetsAt = turn.status === "failed" ? this.overQuota() : null;
         this.db.prepare("UPDATE tasks SET status=?,result=?,error=?,completed_at=?,plan_json=COALESCE(?,plan_json) WHERE id=?")
-            .run(status, question ? question.result : last?.text ?? null, resetsAt !== null ? limitMessage(resetsAt) : turn.error, turn.completed_at, plan ? JSON.stringify(plan) : null, row.id);
+            .run(status, question ? question.result : last?.text ?? null, resetsAt !== null ? limitMessage(resetsAt, this.accountZone()) : turn.error, turn.completed_at, plan ? JSON.stringify(plan) : null, row.id);
         if (status === "completed") { this.recordFeed(this.get(row.id)!); this.#onCompleted?.(row.id); }
         this.notifyChange(row.id, row.status);
     }
@@ -1825,7 +1829,7 @@ export class TaskService {
         if (!s || s.owner_id !== userId) throw new ScheduleNotFoundError();
         if (s.status === "done") throw new Error(t().tasks.schedules.ended);
         const resetsAt = this.overQuota();
-        if (resetsAt !== null) throw new DailyLimitError(resetsAt);
+        if (resetsAt !== null) throw new DailyLimitError(resetsAt, this.accountZone());
         const taskId = this.fireSchedule(s, Date.now(), true);
         if (!taskId) throw new Error(t().tasks.schedules.stillRunning);
         this.schedule();

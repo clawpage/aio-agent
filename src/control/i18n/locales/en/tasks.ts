@@ -27,7 +27,7 @@ export const tasks: typeof zh = {
     dependencyFailed: "A task this one depends on didn't finish successfully. Check its result and send a related follow-up; this won't continue automatically.",
   },
   quota: {
-    exceeded: (at: string, hours: number) => `You've used today's free usage, so service is paused. It resets at ${at} Pacific time (in about ${hours} ${hours === 1 ? "hour" : "hours"}).`,
+    exceeded: (at: string, hours: number) => `You've used today's free usage, so service is paused. It comes back ${at} (in about ${hours} ${hours === 1 ? "hour" : "hours"}).`,
   },
   notes: {
     archived: "The result was never checked; you archived it.",

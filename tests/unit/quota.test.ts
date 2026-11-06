@@ -1,7 +1,7 @@
 import { afterEach, expect, it } from 'vitest';
 import { openDb, type Db } from '../../src/control/db.js';
 import { UsageLedger } from '../../src/control/usage.js';
-import { DAILY_TOKEN_LIMIT, limitMessage, quotaStatus, quotaWindow } from '../../src/control/quota.js';
+import { accountTimezone, DAILY_TOKEN_LIMIT, limitMessage, quotaStatus, quotaWindow } from '../../src/control/quota.js';
 import { runInLocale } from '../../src/control/i18n/index.js';
 
 const stores: Db[] = [];
@@ -46,8 +46,16 @@ it('counts only what was used today and since the limit came in', () => {
   expect(quotaStatus(db, Date.parse('2026-11-06T10:00:00Z')).used).toBe(0);
 });
 
-it('says when service comes back, in Pacific time and from now', () => {
+it('says when service comes back, in the account\'s own time zone and from now', () => {
   const resetsAt = Date.parse('2026-11-06T10:00:00Z'), now = Date.parse('2026-11-06T05:30:00Z');
-  expect(runInLocale('zh-CN', () => limitMessage(resetsAt, now))).toBe('今日免费用量已用完，服务暂停，将于太平洋时间 11月6日 02:00（约 5 小时后）恢复。');
-  expect(runInLocale('en', () => limitMessage(resetsAt, now))).toBe("You've used today's free usage, so service is paused. It resets at Nov 6, 02:00 Pacific time (in about 5 hours).");
+  expect(runInLocale('zh-CN', () => limitMessage(resetsAt, 'America/Los_Angeles', now))).toBe('今日免费用量已用完，服务暂停，将于 11月6日 02:00（约 5 小时后）恢复。');
+  expect(runInLocale('ja', () => limitMessage(resetsAt, 'Asia/Tokyo', now))).toBe('本日の無料利用枠を使い切ったため、サービスを一時停止しています。11月6日 19:00（約 5 時間後）に再開します。');
+  expect(runInLocale('en', () => limitMessage(resetsAt, 'Asia/Tokyo', now))).toBe("You've used today's free usage, so service is paused. It comes back Nov 6, 19:00 (in about 5 hours).");
+});
+
+it('reads the zone the account signed in from off its daily feed', () => {
+  const db = openDb(':memory:'); stores.push(db);
+  expect(accountTimezone(db)).toBeNull();
+  db.prepare("INSERT INTO schedules (id,owner_id,title,instruction,spec_json,timezone,status,created_at,updated_at,builtin) VALUES ('s1','u','t','i','{}','America/Los_Angeles','active',0,0,NULL),('s2','u','feed','i','{}','Asia/Tokyo','active',0,0,'daily_feed')").run();
+  expect(accountTimezone(db)).toBe('Asia/Tokyo');
 });

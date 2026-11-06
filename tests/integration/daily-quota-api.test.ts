@@ -21,6 +21,6 @@ it('reports only the share of today\'s tokens used, and refuses a message once t
   expect(await (await h.request('/api/account/quota', { headers })).json()).toMatchObject({ percent: 100 });
   const refused = await h.request('/api/tasks', { method: 'POST', headers: { ...headers, 'x-aio-locale': 'ja' }, body: JSON.stringify({ text: 'まだ使える？', clientMessageId: 'over-1' }) });
   expect(refused.status).toBe(429);
-  expect(await refused.json()).toEqual({ error: 'daily_limit', resetsAt, message: expect.stringMatching(/^本日の無料利用枠を使い切ったため、サービスを一時停止しています。太平洋時間 .+（約 2 時間後）にリセットされます。$/) });
+  expect(await refused.json()).toEqual({ error: 'daily_limit', resetsAt, message: expect.stringMatching(/^本日の無料利用枠を使い切ったため、サービスを一時停止しています。.+（約 2 時間後）に再開します。$/) });
   h.ctx.tasks.setQuota(null);
 });

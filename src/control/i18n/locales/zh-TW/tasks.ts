@@ -24,7 +24,7 @@ export const tasks: typeof zh = {
     dependencyFailed: "前置任務沒有成功完成。請核對結果後補充一個關聯任務，不會自動繼續執行。",
   },
   quota: {
-    exceeded: (at: string, hours: number) => `今日免費用量已用完，服務暫停，將於太平洋時間 ${at}（約 ${hours} 小時後）恢復。`,
+    exceeded: (at: string, hours: number) => `今日免費用量已用完，服務暫停，將於 ${at}（約 ${hours} 小時後）恢復。`,
   },
   notes: {
     archived: "結果沒有核對，已由你封存。",

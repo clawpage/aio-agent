@@ -8,7 +8,7 @@ import { getUser } from "./auth/owner.js";
 import { MEMBER_EFFORT, MEMBER_EFFORTS, MEMBER_GPT_MODEL, MEMBER_MODEL, MEMBER_MODELS } from "./auth/policy.js";
 import { readAgentSettings } from "./settings.js";
 import { UsageLedger } from "./usage.js";
-import { limitMessage, quotaStatus } from "./quota.js";
+import { accountTimezone, limitMessage, quotaStatus } from "./quota.js";
 
 /**
  * Clawpages' AI answers: a page asks on behalf of the visitor signed in to it, and the
@@ -83,8 +83,9 @@ export class ClawpageAi {
     const account = this.#model(userId);
     // A member's daily tokens (src/control/quota.ts) cover a page's answers too.
     if (getUser(this.#db, userId)?.role === "member") {
-      const quota = quotaStatus(await this.#usageDb(userId));
-      if (quota.exceeded) throw new AiError(429, "DAILY_LIMIT", limitMessage(quota.resetsAt));
+      const db = await this.#usageDb(userId);
+      const quota = quotaStatus(db);
+      if (quota.exceeded) throw new AiError(429, "DAILY_LIMIT", limitMessage(quota.resetsAt, accountTimezone(db) ?? this.#cfg.browser.timezone));
     }
     const effort = account.maxEffort && AI_EFFORTS.indexOf(req.effort) > AI_EFFORTS.indexOf(account.maxEffort) ? account.maxEffort : req.effort;
     const started = Date.now();

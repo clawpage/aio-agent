@@ -1055,7 +1055,7 @@ describe("a member's daily tokens", () => {
     beforeEach(() => { used.value = 0; tasks.setQuota(() => ({ limit: 100, used: used.value, resetsAt, exceeded: used.value >= 100 })); });
     it("refuses a new message once they are used up, saying when they come back", async () => {
         used.value = 100;
-        expect(() => runInLocale("zh-CN", () => submit("还能用吗"))).toThrow(/^今日免费用量已用完，服务暂停，将于太平洋时间 .+（约 3 小时后）恢复。$/);
+        expect(() => runInLocale("zh-CN", () => submit("还能用吗"))).toThrow(/^今日免费用量已用完，服务暂停，将于 .+（约 3 小时后）恢复。$/);
         expect(db.prepare("SELECT COUNT(*) n FROM tasks").get()).toMatchObject({ n: 0 });
         used.value = 99;
         expect(submit("还能用").status).toBe("planning");

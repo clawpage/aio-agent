@@ -69,7 +69,7 @@ test("a message sent after the day's tokens ran out is answered with when servic
   await mockConsole(page, { conversations: [] });
   await page.route("**/api/auth/session", r => r.fulfill({ json: { authenticated: true, username: "member", role: "member" } }));
   await page.route("**/api/main*", r => r.fulfill({ json: { mode: "tasks", version: "v0", tasks: [], nextBefore: null } }));
-  const message = "今日免费用量已用完，服务暂停，将于太平洋时间 11月6日 02:00（约 3 小时后）恢复。";
+  const message = "今日免费用量已用完，服务暂停，将于 11月6日 19:00（约 3 小时后）恢复。";
   await page.route("**/api/tasks", r => r.request().method() === "POST" ? r.fulfill({ status: 429, json: { error: "daily_limit", message, resetsAt: 0 } }) : r.fallback());
   await page.goto("/");
   const box = page.getByRole("textbox", { name: "消息", exact: true });

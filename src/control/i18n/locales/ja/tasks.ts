@@ -24,7 +24,7 @@ export const tasks: typeof zh = {
     dependencyFailed: "前のタスクが正常に完了しませんでした。結果を確認してから関連タスクで補足してください。自動では続行しません。",
   },
   quota: {
-    exceeded: (at: string, hours: number) => `本日の無料利用枠を使い切ったため、サービスを一時停止しています。太平洋時間 ${at}（約 ${hours} 時間後）にリセットされます。`,
+    exceeded: (at: string, hours: number) => `本日の無料利用枠を使い切ったため、サービスを一時停止しています。${at}（約 ${hours} 時間後）に再開します。`,
   },
   notes: {
     archived: "結果は確認されないまま、あなたがアーカイブしました。",
