@@ -22,7 +22,7 @@ iOS App 是 `src/ui/tauri` 的 Tauri 壳（见该目录 README），加载线上
 | 只支持 iPhone（`TARGETED_DEVICE_FAMILY = 1`）：不需要 iPad 截图；iPad 上以兼容模式运行 | `gen/apple/project.yml` |
 | 主屏名称与权限说明四种语言：英/西 Clawpage，中文一站；麦克风、相机、存入相册 | `gen/apple/Localization/<语言>.lproj/InfoPlist.strings` |
 | 1024 图标不透明（App Store 拒收带 alpha 的图标） | `Assets.xcassets/AppIcon.appiconset/AppIcon-512@2x.png` |
-| 版本 `0.1.2`，构建号每次上传递增（`--build-number`） | `tauri.conf.json` `version` |
+| 版本 `0.1.3`，构建号每次上传递增（`--build-number`）；改版本同时改 `project.yml` 与 `Info.plist` 里的版本号 | `tauri.conf.json` `version` |
 
 改 `project.yml` 后在 `gen/apple` 跑 `xcodegen generate`；重新 `tauri ios init` 会覆盖 `gen/`，以上各项要重新放回。
 
@@ -93,3 +93,9 @@ The task browser can visit arbitrary websites on the user's request, so the age 
 语音输入首次弹出麦克风授权并能转写；附件“拍照”弹出相机授权、不闪退；回复里的外部链接在 Safari 面板打开并能关闭回到原处；
 下载图片走分享面板“存储图像”不闪退；“账户与隐私”打开删除申请页面；飞行模式冷启动显示离线页、恢复网络后自动重新加载；
 系统语言切到英文后主屏名称为 Clawpage、权限弹窗为英文。
+
+## 2026-11-06 0.1.3：存入相册（TestFlight）
+
+- 原生改动：`aioSaveMedia` 桥把页面已有的图片、视频直接写进相册（`DeviceBrowser.swift` 的 `SaveMediaHandler`，只要「添加到相册」权限），见 `docs/FEATURES.md`。
+- 构建 `0.1.3 (0.1.3.1)`，`altool` 上传成功（Delivery UUID `93ac50bf-1d82-4cb1-ac98-fa6a14f06be6`），处理为 VALID 后加入外部测试组、
+  填中英文「测试内容」并提交 Beta 审核，状态 `WAITING_FOR_REVIEW`。审核通过前外部测试者拿不到；未在真机上实际存过一次，也未验过首次权限弹窗。

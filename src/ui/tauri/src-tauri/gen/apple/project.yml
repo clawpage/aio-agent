@@ -72,8 +72,8 @@ targets:
           - UIInterfaceOrientationPortraitUpsideDown
           - UIInterfaceOrientationLandscapeLeft
           - UIInterfaceOrientationLandscapeRight
-        CFBundleShortVersionString: 0.1.2
-        CFBundleVersion: "0.1.2"
+        CFBundleShortVersionString: 0.1.3
+        CFBundleVersion: "0.1.3"
     entitlements:
       path: aio-agent-tauri_iOS/aio-agent-tauri_iOS.entitlements
     scheme:
