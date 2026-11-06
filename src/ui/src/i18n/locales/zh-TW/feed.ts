@@ -122,4 +122,5 @@ export const feed: typeof zh = {
     pickTask: "選擇要檢視的任務",
     viewTask: "檢視這個任務",
   },
+  quota: { near: (percent: number, at: string) => `今日免費用量已用 ${percent}%，將於 ${at} 重置。`, used: (at: string) => `今日免費用量已用完，將於 ${at} 恢復。`, ok: "知道了" },
 };

@@ -59,3 +59,51 @@ test("a message sent after the day's tokens ran out is answered with when servic
   await page.getByRole("button", { name: "发送", exact: true }).click();
   await expect(page.getByText(message)).toBeVisible();
 });
+
+test("from 90% a member is told above the composer, once per level, and again once it is used up", async ({ page }, info) => {
+  await mockConsole(page, { conversations: [] });
+  await page.route("**/api/auth/session", r => r.fulfill({ json: { authenticated: true, username: "member", role: "member" } }));
+  let quota = { limited: true, percent: 85, resetsAt: Date.parse("2026-11-06T10:00:00Z") };
+  let asked = 0;
+  await page.route("**/api/account/quota", r => { asked++; return r.fulfill({ json: quota }); });
+  const done = (id: string, at: number) => ({ id, revision: 1, title: "查天气", text: "查天气", conversationId: `c-${id}`, status: "completed", result: "晴", error: null, attachments: [], relatedTaskId: null, dependencies: [], approvals: 0, createdAt: at - 1000, completedAt: at });
+  let tasks = [done("t1", 1000)];
+  await page.route("**/api/main*", r => r.fulfill({ json: { mode: "tasks", version: `v${tasks.length}`, tasks, nextBefore: null } }));
+  await page.goto("/");
+  await expect(page.getByText("晴")).toBeVisible();
+  const notice = page.locator(".quota-notice");
+  await expect(notice).toHaveCount(0);
+
+  // A task finishing spends tokens: the share is asked again, and from 90% the notice shows.
+  quota = { ...quota, percent: 92 };
+  const before = asked;
+  tasks = [...tasks, done("t2", 2000)];
+  await expect.poll(() => asked, { timeout: 30_000 }).toBeGreaterThan(before);
+  await expect(notice).toContainText("今日免费用量已用 92%，将于");
+  await expect(notice).not.toContainText("token");
+  await mkdir(evidence, { recursive: true });
+  await page.screenshot({ path: `${evidence}/${info.project.name}-notice-92.png` });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(page.viewportSize()!.width);
+  await notice.getByRole("button", { name: "知道了" }).click();
+  await expect(notice).toHaveCount(0);
+  await page.reload();
+  await expect(page.getByText("晴").first()).toBeVisible();
+  await expect(notice).toHaveCount(0);
+
+  // Used up: a new level, so it shows again.
+  quota = { ...quota, percent: 100 };
+  await page.reload();
+  await expect(notice).toContainText("今日免费用量已用完，将于");
+});
+
+test("the owner's main session never asks about a limit", async ({ page }) => {
+  let asked = false;
+  page.on("request", r => { if (r.url().includes("/api/account/quota")) asked = true; });
+  await mockConsole(page, { conversations: [] });
+  await page.route("**/api/auth/session", r => r.fulfill({ json: { authenticated: true, username: "owner", role: "owner" } }));
+  await page.route("**/api/main*", r => r.fulfill({ json: { mode: "tasks", version: "v0", tasks: [], nextBefore: null } }));
+  await page.goto("/");
+  await expect(page.getByRole("textbox", { name: "消息", exact: true })).toBeVisible();
+  await expect(page.locator(".quota-notice")).toHaveCount(0);
+  expect(asked).toBe(false);
+});

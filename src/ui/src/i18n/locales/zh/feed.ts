@@ -122,4 +122,6 @@ export const feed = {
     pickTask: "选择要查看的任务",
     viewTask: "查看这个任务",
   },
+  /** Above the composer once a member has used 90% of the day's tokens (src/control/quota.ts). */
+  quota: { near: (percent: number, at: string) => `今日免费用量已用 ${percent}%，将于 ${at} 重置。`, used: (at: string) => `今日免费用量已用完，将于 ${at} 恢复。`, ok: "知道了" },
 };

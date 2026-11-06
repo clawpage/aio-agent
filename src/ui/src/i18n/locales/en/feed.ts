@@ -122,4 +122,5 @@ export const feed: typeof zh = {
     pickTask: "Choose a task to view",
     viewTask: "View this task",
   },
+  quota: { near: (percent: number, at: string) => `You've used ${percent}% of today's free usage. It resets ${at}.`, used: (at: string) => `Today's free usage is used up. It comes back ${at}.`, ok: "OK" },
 };

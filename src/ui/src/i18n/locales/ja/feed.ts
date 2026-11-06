@@ -123,4 +123,5 @@ export const feed: typeof zh = {
     pickTask: '表示するタスクを選択',
     viewTask: 'このタスクを表示',
   },
+  quota: { near: (percent: number, at: string) => `本日の無料利用枠の ${percent}% を使いました。${at} にリセットされます。`, used: (at: string) => `本日の無料利用枠を使い切りました。${at} に再開します。`, ok: 'OK' },
 };

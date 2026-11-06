@@ -5005,3 +5005,6 @@ button.map-card-switch { flex: 0 0 auto; padding: 4px 10px; }
   overflow-x: hidden;
   overscroll-behavior-x: none;
 }
+.quota-notice { display: flex; align-items: center; gap: 10px; }
+.quota-notice > span { flex: 1; min-width: 0; }
+.quota-notice button { margin-left: 0; }

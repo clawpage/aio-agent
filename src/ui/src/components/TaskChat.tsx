@@ -27,6 +27,7 @@ import { TurnPills } from "./TurnPills";
 import { FormCard } from "./FormCard";
 import { VoiceButton } from "./VoiceInput";
 import { PushNudge } from "./PushSettings";
+import { QuotaNotice } from "./QuotaNotice";
 import type {TaskFeed} from '../taskStatus';
 import { t as i18n } from "../i18n";
 import { MAX_ATTACHMENTS } from "../../../common/attachments";
@@ -56,9 +57,11 @@ interface Outgoing {
     state: "sending" | "failed";
     error?: string;
 }
-export function TaskChat({ onDetails, onOpenLink, onOpenFileInBrowser, onExpired, onFeed, onRevealBrowser, debug = false }: {
+export function TaskChat({ onDetails, onOpenLink, onOpenFileInBrowser, onExpired, onFeed, onRevealBrowser, debug = false, member = false }: {
     /** Owner debug mode: each message offers its dispatch log. */
     debug?: boolean;
+    /** A member account: it has a daily limit, and is told above the composer when it nears it. */
+    member?: boolean;
     onDetails: (task: Task) => void;
     /** Open the workspace on the browser, where a taken-over task tab is in front. */
     onRevealBrowser: () => void;
@@ -623,6 +626,7 @@ export function TaskChat({ onDetails, onOpenLink, onOpenFileInBrowser, onExpired
     </div>
     <div className="feed-latest-anchor">{waiting.length > 0 && <div className="needs-you" role="group" aria-label={i18n.feed.needsYou.label}>{waiting.map(t => <button type="button" key={t.id} className="needs-you-bubble" onClick={() => showWaiting(t.id)} aria-label={i18n.feed.needsYou.bubble(waitingLabel(t), t.title)}><span className="needs-you-dot" aria-hidden="true"/><span className="needs-you-kind">{waitingLabel(t)}</span><span className="needs-you-title">{t.title}</span></button>)}</div>}<button type="button" className={`feed-latest${away ? " show" : ""}`} aria-label={i18n.feed.toLatest} title={i18n.feed.toLatest} aria-hidden={!away} tabIndex={away ? 0 : -1} onClick={toLatest}><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 5v14M6 13l6 6 6-6"/></svg></button></div>
     {sent && <PushNudge/>}
+    {member && <QuotaNotice checkKey={String(tasks.reduce((latest, t) => Math.max(latest, t.completedAt ?? 0), 0))}/>}
     {error && <div className="banner error" role="alert">{error}<button onClick={() => setError(null)}>{i18n.chat.close}</button></div>}
     <div className={`composer${draft || attachments.length || reference || uploading ? " has-content" : ""}`}>
       {reference && <div className="task-reference" role="status"><div><span className="muted tiny">{i18n.feed.reference.label}</span><strong title={reference.title}>{reference.title}</strong></div><button type="button" className="ghost" aria-label={i18n.feed.reference.cancel} onClick={() => { setReference(null); input.current?.focus(); }}><ComposerIcon kind="close"/></button></div>}

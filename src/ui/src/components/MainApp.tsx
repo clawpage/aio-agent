@@ -352,7 +352,7 @@ export function MainApp({ firstSession }: { firstSession?: ReturnType<typeof api
     <main className="main" inert={mobile && menuOpen}>
       {notice && <div className="banner" role="alert">{notice}<button onClick={() => setNotice(null)}>{t.common.close}</button></div>}
       {startFailed && <div className="banner error">{t.app.agentNotReady(startFailed)}</div>}
-      <div className="view-slot" hidden={view !== "main"}><TaskChat debug={role === "owner" && debug} onFeed={setTaskFeed} onDetails={t => void details(t)} onOpenLink={u => void openLink(u)} onOpenFileInBrowser={p => void openFileInBrowser(p)} onExpired={expired} onRevealBrowser={revealBrowser}/></div>
+      <div className="view-slot" hidden={view !== "main"}><TaskChat debug={role === "owner" && debug} member={role === "member"} onFeed={setTaskFeed} onDetails={t => void details(t)} onOpenLink={u => void openLink(u)} onOpenFileInBrowser={p => void openFileInBrowser(p)} onExpired={expired} onRevealBrowser={revealBrowser}/></div>
       <div className="view-slot" hidden={view !== 'tasks'}><TaskList feed={taskFeed} active={view === 'tasks'} onDetails={t=>void details(t,'tasks')} onExpired={expired}/></div>
       <div className="view-slot" hidden={view !== 'clawpages'}><ClawpageList active={view === 'clawpages' && !workspace} onExpired={expired}/></div>
       <div className="view-slot" hidden={view !== 'files'}><FileLibrary active={view === 'files' && !workspace} onOpenTask={id => void details(id, 'files')} onOpenLink={u => void openLink(u)} onOpenFileInBrowser={p => void openFileInBrowser(p)} onExpired={expired}/></div>
