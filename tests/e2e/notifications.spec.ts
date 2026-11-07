@@ -27,13 +27,15 @@ test("no notification while the console is on screen, and opening it clears the 
   const origin = new URL(baseURL!).origin;
   const push = (title: string) => cdp.send("ServiceWorker.deliverPushMessage", { origin, registrationId, data: JSON.stringify({ title, body: "", tag: title }) });
   const worker = context.serviceWorkers().find((w) => w.url().startsWith(origin)) ?? await context.waitForEvent("serviceworker");
-  const shown = () => worker.evaluate(async () => (await (self as unknown as ServiceWorkerGlobalScope).registration.getNotifications()).map((n) => n.title));
+  // The worker's own globals, which this file's DOM types do not describe.
+  type Scope = { registration: ServiceWorkerRegistration; clients: { matchAll(o: object): Promise<{ url: string }[]> }; location: Location };
+  const shown = () => worker.evaluate(async () => (await (self as unknown as Scope).registration.getNotifications()).map((n: Notification) => n.title));
 
   await push("while open");
   await page.close();
   // The worker learns of the closed page a moment later.
-  await expect.poll(() => worker.evaluate(async () => (await (self as unknown as ServiceWorkerGlobalScope).clients.matchAll({ type: "window", includeUncontrolled: true }))
-    .filter((client) => new URL(client.url).origin === self.location.origin).length)).toBe(0);
+  await expect.poll(() => worker.evaluate(async () => (await (self as unknown as Scope).clients.matchAll({ type: "window", includeUncontrolled: true }))
+    .filter((client) => new URL(client.url).origin === (self as unknown as Scope).location.origin).length)).toBe(0);
   await push("while closed");
   // Pushes are handled in order: the first one was dropped, not just late.
   await expect.poll(shown).toEqual(["while closed"]);

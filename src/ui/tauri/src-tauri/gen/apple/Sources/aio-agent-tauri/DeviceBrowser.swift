@@ -203,6 +203,28 @@ private final class SaveMediaHandler: NSObject, WKScriptMessageHandlerWithReply 
     }
 }
 
+// A touch the console asks for (`aioHaptic`, src/ui/src/haptics.ts): "tap" for its main buttons, "start"
+// when the microphone opens, and the outcome of something important.
+private final class HapticHandler: NSObject, WKScriptMessageHandler {
+    private let light = UIImpactFeedbackGenerator(style: .light)
+    private let medium = UIImpactFeedbackGenerator(style: .medium)
+    private let outcome = UINotificationFeedbackGenerator()
+
+    func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
+        let origin = message.frameInfo.securityOrigin
+        guard message.frameInfo.isMainFrame, origin.protocol == "https", origin.host == "agent.clawpage.ai",
+              let kind = message.body as? String else { return }
+        switch kind {
+        case "tap": light.impactOccurred()
+        case "start": medium.impactOccurred()
+        case "success": outcome.notificationOccurred(.success)
+        case "warning": outcome.notificationOccurred(.warning)
+        case "error": outcome.notificationOccurred(.error)
+        default: return
+        }
+    }
+}
+
 // Notifications through APNs, because WKWebView has no Web Push. The console sends "status",
 // "enable" (the system prompt, then registering with APNs) or "settings" (this app's page in
 // Settings, where a refusal is undone). Each answer is an `aio-push` event with the permission
@@ -404,6 +426,7 @@ final class DeviceBrowser: NSObject {
         webView.configuration.userContentController.addScriptMessageHandler(SaveMediaHandler(), contentWorld: .page, name: "aioSaveMedia")
         webView.configuration.userContentController.add(AppleSignInHandler(webView), name: "aioAppleSignIn")
         webView.configuration.userContentController.add(PushHandler(webView), name: "aioPush")
+        webView.configuration.userContentController.add(HapticHandler(), name: "aioHaptic")
         KeyboardFit.shared = KeyboardFit(webView)
         NoInputBar.install(webView)
         // In the app the console does not zoom as a whole page (WKWebView, unlike Safari, honours the

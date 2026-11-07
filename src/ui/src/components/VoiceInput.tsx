@@ -3,6 +3,8 @@ import { api } from "../api";
 import { MAX_SECONDS, MIN_SECONDS, startRecording, voiceSupported, type Recording } from "../voice";
 import { ComposerIcon } from "./ComposerControls";
 import { locale, t } from "../i18n";
+import { haptic } from "../haptics";
+import { tapProps } from "../tap";
 
 /** Why the microphone would not open, in words the user can act on. */
 function micError(err: unknown): string {
@@ -44,6 +46,7 @@ export function VoiceButton({ disabled, onText, onError }: { disabled: boolean; 
     if (!r) return;
     recording.current = null;
     if (Date.now() - startedAt.current < MIN_SECONDS * 1000) { r.cancel(); setState("idle"); return; }
+    haptic("tap");
     setState("transcribing");
     try {
       const { text } = await api.transcribe(r.stop(), r.microphone);
@@ -91,6 +94,7 @@ export function VoiceButton({ disabled, onText, onError }: { disabled: boolean; 
       recording.current = await startRecording();
       startedAt.current = Date.now();
       setState("recording");
+      haptic("start");
     } catch (err) {
       setState("idle");
       callbacks.current.onError(micError(err));
@@ -103,7 +107,7 @@ export function VoiceButton({ disabled, onText, onError }: { disabled: boolean; 
   return <button ref={button} type="button" className={`ghost voice-button${state === "idle" ? "" : ` ${state}`}`} data-testid="voice-button"
     disabled={(disabled && !listening) || state === "starting" || state === "transcribing"}
     aria-pressed={listening} aria-label={listening ? t.voice.stopRecording(clock) : state === "transcribing" ? t.voice.transcribing : t.voice.input} title={listening ? t.voice.stopAndTranscribe : t.voice.input}
-    onClick={() => void (listening ? finish() : start())}>
+    {...tapProps(() => void (listening ? finish() : start()))}>
     {/* The microphone stays while it opens and while the words come back (the loading mark is unreadable at this size). */}
     <span className="voice-glyph">{listening ? <ComposerIcon kind="stop"/>
       : <svg className="composer-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>}</span>

@@ -33,6 +33,8 @@ import type {TaskFeed} from '../taskStatus';
 import { t as i18n } from "../i18n";
 import { MAX_ATTACHMENTS } from "../../../common/attachments";
 import { keepTyping } from "../useKeyboardViewport";
+import { tapProps } from "../tap";
+import { haptic, type Haptic } from "../haptics";
 
 /** A thumb up, or down: the votes on a reply. */
 function ThumbIcon({ down }: { down: boolean }) {
@@ -354,9 +356,11 @@ export function TaskChat({ onDetails, onOpenLink, onOpenFileInBrowser, onExpired
         setError(null);
         stick.current = true;
         queue(message.id);
+        haptic("tap");
         // A computer keeps typing; a phone puts its keyboard away, as before (an open composer that
         // collapses on the next tap would move the feed under the finger).
         if (matchMedia("(pointer: fine)").matches) input.current?.focus();
+        else input.current?.blur();
     };
     /** A welcome starter goes out at once as its own message; the composer's draft is left alone. */
     const sendStarter = (text: string) => {
@@ -484,6 +488,23 @@ export function TaskChat({ onDetails, onOpenLink, onOpenFileInBrowser, onExpired
     // Tasks waiting for the person whose card is not on screen: a bubble above the composer leads to each.
     const needsYou = tasks.filter(t => !t.mergedInto && !terminal.has(t.status) && turnOf(t) === "you");
     const needsKey = needsYou.map(t => t.id).join(",");
+    // Something important changed on screen: a reply done, one that went wrong, a task that now waits for you.
+    const outcomes = useRef<Map<string, string> | null>(null);
+    useEffect(() => {
+        const now = new Map(tasks.map(t => [t.id, terminal.has(t.status) ? t.status : turnOf(t)] as const));
+        const before = outcomes.current;
+        outcomes.current = now;
+        if (!before) return;
+        let felt: Haptic | null = null;
+        const rank: Haptic[] = ["success", "warning", "error"];
+        for (const [id, state] of now) {
+            const was = before.get(id);
+            if (!was || was === state || terminal.has(was)) continue;
+            const kind: Haptic | null = state === "completed" ? "success" : state === "failed" || state === "interrupted" || state === "err" ? "error" : state === "unknown" || state === "you" ? "warning" : null;
+            if (kind && (!felt || rank.indexOf(kind) > rank.indexOf(felt))) felt = kind;
+        }
+        if (felt) haptic(felt);
+    }, [tasks]);
     const [onScreen, setOnScreen] = useState<ReadonlySet<string>>(() => new Set());
     useEffect(() => {
         const root = scroll.current;
@@ -660,7 +681,7 @@ export function TaskChat({ onDetails, onOpenLink, onOpenFileInBrowser, onExpired
         e.preventDefault();
         send();
     } }}/>
-      <div className="composer-row"><label className="file-button" onPointerDown={keepTyping} onMouseDown={keepTyping}><ComposerIcon kind={uploading ? "busy" : "attach"}/><span className="composer-button-label">{uploading ? i18n.chat.composer.uploading : i18n.chat.composer.attach}</span><input type="file" multiple className="file-input" aria-label={i18n.chat.composer.addAttachment} data-testid="attachment-input" onChange={e => { pick(e.target.files); e.target.value = ""; }}/></label><VoiceButton disabled={false} onError={setError} onText={heard => { setDraft(old => old + (/[A-Za-z0-9]$/.test(old) && /^[A-Za-z0-9]/.test(heard) ? " " : "") + heard); input.current?.focus(); }}/><span className="spacer"/><button className="primary" disabled={!draft.trim() && !attachments.length && !uploading} onClick={send} aria-label={i18n.chat.composer.send} title={`${i18n.chat.composer.send} (${SEND_SHORTCUT})`}><ComposerIcon kind="send"/><span className="composer-button-label">{i18n.chat.composer.send}</span></button></div>
+      <div className="composer-row"><label className="file-button" onPointerDown={keepTyping} onMouseDown={keepTyping}><ComposerIcon kind={uploading ? "busy" : "attach"}/><span className="composer-button-label">{uploading ? i18n.chat.composer.uploading : i18n.chat.composer.attach}</span><input type="file" multiple className="file-input" aria-label={i18n.chat.composer.addAttachment} data-testid="attachment-input" onChange={e => { pick(e.target.files); e.target.value = ""; }}/></label><VoiceButton disabled={false} onError={setError} onText={heard => { setDraft(old => old + (/[A-Za-z0-9]$/.test(old) && /^[A-Za-z0-9]/.test(heard) ? " " : "") + heard); input.current?.focus(); }}/><span className="spacer"/><button className="primary" disabled={!draft.trim() && !attachments.length && !uploading} {...tapProps(send)} aria-label={i18n.chat.composer.send} title={`${i18n.chat.composer.send} (${SEND_SHORTCUT})`}><ComposerIcon kind="send"/><span className="composer-button-label">{i18n.chat.composer.send}</span></button></div>
     </div>
     <PopupPresence>{preview && <FilePreview path={preview} onClose={() => setPreview(null)} onOpenLink={onOpenLink} onOpenInBrowser={onOpenFileInBrowser}/>}</PopupPresence>
     <PopupPresence>{debug && dispatchLogFor && <DispatchLog taskId={dispatchLogFor} onClose={() => setDispatchLogFor(null)}/>}</PopupPresence>
