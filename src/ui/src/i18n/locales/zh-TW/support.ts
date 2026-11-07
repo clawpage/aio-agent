@@ -1,6 +1,7 @@
 import type { support as zh } from '../zh/support';
 export const support: typeof zh = {
-  settingsIntro: '查看隱私政策，或申請刪除帳號及相關資料。', signedInAs: (who: string) => `目前帳號：${who}`,
+  requestKind: '請求類型', ask: '諮詢或回饋', askInfo: '你的說明會傳送給管理員處理。', deleteAccount: '刪除帳號',
+  settingsIntro: '向管理員諮詢或回饋、查看隱私政策，或申請刪除帳號及相關資料。', signedInAs: (who: string) => `目前帳號：${who}`,
   account: '帳號與隱私', privacy: '隱私政策', deletion: '申請刪除帳號',
   limitations: 'AI 回覆可能有誤，僅供一般參考。一站不是醫療裝置，不提供診斷、治療或預防疾病的功能；醫療問題請諮詢合格醫生，法律和投資問題請諮詢相應專業人員。',
   feedbackTitle: '這則回覆哪裡不好？', feedbackInfo: '說明可以不寫。寫了的話，管理員會看到這則回覆（最多 20,000 字）和你的說明，用於改進回答。', feedbackHint: '例如：答錯了、沒理解我的意思、太囉嗦。請勿填寫密碼或其他機密。', alsoReport: '同時檢舉這則回覆（違法、有害或不當內容）', feedbackThanks: '謝謝，已記錄你的回饋。', feedbackQueue: '回覆回饋', feedbackQueueInfo: '使用者對 AI 回覆的按讚和倒讚，最新的在前。', feedbackEmpty: '暫無回饋', ratings: {up: '有幫助', down: '沒幫助'},

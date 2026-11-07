@@ -83,7 +83,13 @@ test('members can request deletion from settings without leaving the app',async(
   await page.locator('.sidebar').getByRole('button',{name:'配置',exact:true}).click();
   await page.getByRole('navigation',{name:'配置项'}).getByRole('button',{name:'账户与隐私',exact:true}).click();
   await page.locator('.settings-card').getByRole('button',{name:'账户与隐私',exact:true}).click();
-  const dialog=page.getByRole('dialog',{name:'账户与隐私',exact:true}); await expect(dialog).toContainText('不会立即删除数据');
+  const dialog=page.getByRole('dialog',{name:'账户与隐私',exact:true});
+  // A question or feedback is what it sends unless deleting the account is chosen.
+  await expect(dialog.getByRole('radio',{name:'咨询或反馈'})).toBeChecked();
+  await expect(dialog.getByRole('button',{name:'提交',exact:true})).toBeVisible();
+  await expect(dialog).not.toContainText('不会立即删除数据');
+  await dialog.getByRole('radio',{name:'删除账户'}).check();
+  await expect(dialog).toContainText('不会立即删除数据');
   await expect(dialog.getByRole('link',{name:'隐私政策'})).toHaveAttribute('href','/privacy.html');
   await dialog.getByLabel('说明',{exact:true}).fill('Please delete my account and data.');
   await dialog.getByRole('button',{name:'申请删除账户',exact:true}).click();
@@ -92,6 +98,24 @@ test('members can request deletion from settings without leaving the app',async(
   if(info.project.name.startsWith('mobile'))await page.setViewportSize({width:360,height:844});
   expect(await page.evaluate(()=>document.documentElement.scrollWidth-innerWidth)).toBeLessThanOrEqual(1);
   await page.screenshot({path:info.outputPath('account-request.png')});
+});
+test('a question or feedback from settings goes to the administrator as one',async({page},info)=>{
+  await mockConsole(page,{conversations:[]});
+  await page.route('**/api/auth/session',r=>r.fulfill({json:{authenticated:true,username:'member',role:'member'}}));
+  await page.route('**/api/main*',r=>r.fulfill({json:{mode:'tasks',tasks:[],nextBefore:null}}));
+  let sent: unknown; await page.route('**/api/support/requests',async r=>{sent=r.request().postDataJSON();await r.fulfill({status:201,json:{id:'question-reference'}});});
+  await page.goto('/'); await expect(page.getByRole('heading',{name:'主会话',exact:true})).toBeVisible();
+  if(info.project.name.startsWith('mobile')) await page.getByRole('button',{name:'打开导航'}).click();
+  await page.locator('.sidebar').getByRole('button',{name:'配置',exact:true}).click();
+  await page.getByRole('navigation',{name:'配置项'}).getByRole('button',{name:'账户与隐私',exact:true}).click();
+  await page.locator('.settings-card').getByRole('button',{name:'账户与隐私',exact:true}).click();
+  const dialog=page.getByRole('dialog',{name:'账户与隐私',exact:true});
+  await dialog.getByLabel('说明',{exact:true}).fill('语音输入能不能支持粤语？');
+  await expect(dialog.getByRole('button',{name:'申请删除账户'})).toHaveCount(0);
+  await dialog.getByRole('button',{name:'提交',exact:true}).click();
+  await expect(dialog.getByRole('status')).toContainText('question-reference');
+  expect(sent).toEqual({kind:'privacy',note:'语音输入能不能支持粤语？'});
+  await page.screenshot({path:info.outputPath('account-question.png')});
 });
 test('the public support form initiates deletion without app installation or login',async({page})=>{
   let sent: unknown;await page.route('**/api/support/requests',async r=>{sent=r.request().postDataJSON();await r.fulfill({status:201,json:{id:'external-reference'}});});

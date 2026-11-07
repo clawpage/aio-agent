@@ -9,22 +9,28 @@ export function SupportDialog({onClose}: {onClose: () => void}) {
   const [busy, setBusy] = useState(false);
   const [id, setId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // A question or feedback by default; deleting the account is chosen on purpose.
+  const [kind, setKind] = useState<'privacy' | 'deletion'>('privacy');
   useEffect(() => { dialog.current?.showModal(); }, []);
   return <dialog ref={dialog} className="support-dialog" aria-labelledby="support-title" onCancel={e => { e.preventDefault(); if (!busy) onClose(); }}>
     <form onSubmit={e => {
       e.preventDefault(); if (busy || id) return;
       setBusy(true); setError(null);
-      void api.supportRequest({kind: 'deletion', note}).then(r => setId(r.id)).catch(err => setError(err instanceof Error ? err.message : String(err))).finally(() => setBusy(false));
+      void api.supportRequest({kind, note}).then(r => setId(r.id)).catch(err => setError(err instanceof Error ? err.message : String(err))).finally(() => setBusy(false));
     }}>
       <h2 id="support-title">{t.support.account}</h2>
       {id ? <p role="status">{t.support.success}<code>{id}</code></p> : <>
-        <p className="muted">{t.support.deletionInfo}</p>
+        <fieldset className="support-kind"><legend>{t.support.requestKind}</legend>
+          <label className="check-row"><input type="radio" name="support-kind" checked={kind === 'privacy'} onChange={() => setKind('privacy')}/>{t.support.ask}</label>
+          <label className="check-row"><input type="radio" name="support-kind" checked={kind === 'deletion'} onChange={() => setKind('deletion')}/>{t.support.deleteAccount}</label>
+        </fieldset>
+        <p className="muted">{kind === 'deletion' ? t.support.deletionInfo : t.support.askInfo}</p>
         <p><a href="/privacy.html" target="_blank" rel="noreferrer" onClick={e => { if (openNativeBrowser(e.currentTarget.href)) e.preventDefault(); }}>{t.support.privacy}</a> · <a href="/account-deletion.html" target="_blank" rel="noreferrer" onClick={e => { if (openNativeBrowser(e.currentTarget.href)) e.preventDefault(); }}>{t.support.deletion}</a></p>
         <p className="tiny muted">{t.support.limitations}</p>
         <label className="field"><span>{t.support.note}</span><textarea autoFocus value={note} onChange={e => setNote(e.target.value)} placeholder={t.support.noteHint} maxLength={2000} required rows={4}/></label>
       </>}
       {error && <p role="alert" className="error">{error}</p>}
-      <div className="support-actions"><button className="ghost" type="button" disabled={busy} onClick={onClose}>{id ? t.support.close : t.support.cancel}</button>{!id && <button className="primary" disabled={busy || !note.trim()}>{busy ? t.support.sending : t.support.deletion}</button>}</div>
+      <div className="support-actions"><button className="ghost" type="button" disabled={busy} onClick={onClose}>{id ? t.support.close : t.support.cancel}</button>{!id && <button className="primary" disabled={busy || !note.trim()}>{busy ? t.support.sending : kind === 'deletion' ? t.support.deletion : t.support.send}</button>}</div>
     </form>
   </dialog>;
 }

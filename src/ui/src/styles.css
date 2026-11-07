@@ -4944,6 +4944,8 @@ button.map-card-switch { flex: 0 0 auto; padding: 4px 10px; }
 .task-actions .feedback-button[aria-pressed="true"] svg { fill: color-mix(in srgb, currentColor 18%, transparent); }
 .support-dialog .check-row { display: flex; align-items: flex-start; gap: 8px; margin: 4px 0 8px; font-size: 14px; line-height: 1.5; }
 .support-dialog .check-row input { flex: none; width: auto; margin-top: 3px; }
+.support-dialog .support-kind { border: 0; margin: 0 0 4px; padding: 0; }
+.support-dialog .support-kind legend { padding: 0; margin-bottom: 4px; font-size: 13px; color: var(--text-dim); }
 .login-policy { text-align:center; margin:18px 0 0; }
 
 /* ------------------------------------------------------------ personal knowledge base (KnowledgeList) */

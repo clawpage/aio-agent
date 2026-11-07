@@ -1,5 +1,6 @@
 export const support = {
-  settingsIntro: '查看隐私政策，或申请删除账户及关联数据。', signedInAs: (who: string) => `当前账号：${who}`,
+  requestKind: '请求类型', ask: '咨询或反馈', askInfo: '你的说明会发送给管理员处理。', deleteAccount: '删除账户',
+  settingsIntro: '向管理员咨询或反馈、查看隐私政策，或申请删除账户及关联数据。', signedInAs: (who: string) => `当前账号：${who}`,
   account: '账户与隐私', privacy: '隐私政策', deletion: '申请删除账户',
   limitations: 'AI 回复可能有误，仅供一般参考。一站不是医疗设备，不提供诊断、治疗或预防疾病的功能；医疗问题请咨询合格医生，法律和投资问题请咨询相应专业人员。',
   feedbackTitle: '这条回复哪里不好？', feedbackInfo: '说明可以不写。写了的话，管理员会看到这条回复（最多 20,000 字）和你的说明，用于改进回答。', feedbackHint: '比如：答错了、没理解我的意思、太啰嗦。请勿填写密码或其他秘密。', alsoReport: '同时举报这条回复（违法、有害或不当内容）', feedbackThanks: '谢谢，已记录你的反馈。', feedbackQueue: '回复反馈', feedbackQueueInfo: '用户对 AI 回复的点赞和点踩，最新的在前。', feedbackEmpty: '暂无反馈', ratings: {up: '有帮助', down: '没帮助'},

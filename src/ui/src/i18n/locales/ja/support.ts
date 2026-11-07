@@ -1,6 +1,7 @@
 import type { support as zh } from '../zh/support';
 export const support: typeof zh = {
-  settingsIntro: 'プライバシーポリシーの確認や、アカウントと関連データの削除申請ができます。', signedInAs: (who: string) => `ログイン中のアカウント：${who}`,
+  requestKind: '申請の種類', ask: '問い合わせ・フィードバック', askInfo: '説明は管理者に送られます。', deleteAccount: 'アカウントを削除',
+  settingsIntro: '管理者への問い合わせやフィードバック、プライバシーポリシーの確認、アカウントと関連データの削除申請ができます。', signedInAs: (who: string) => `ログイン中のアカウント：${who}`,
   account: 'アカウントとプライバシー', privacy: 'プライバシーポリシー', deletion: 'アカウント削除を申請',
   limitations: 'AI の回答には誤りが含まれる場合があり、一般的な情報の提供のみを目的としています。Clawpage Agent は医療機器ではなく、病気の診断・治療・予防は行いません。医療に関する相談は医師などの専門家に、法律や投資に関する相談はそれぞれの専門家にご相談ください。',
   feedbackTitle: 'この回答のどこがよくなかったですか？', feedbackInfo: '説明は任意です。書いた場合、管理者はこの回答（最大 20,000 文字）とご説明を確認し、回答の改善に使います。', feedbackHint: '例：内容が間違っている、意図を理解していない、長すぎる。パスワードなどの秘密は書かないでください。', alsoReport: 'この回答を報告する（違法・有害・不適切な内容）', feedbackThanks: 'ありがとうございます。フィードバックを記録しました。', feedbackQueue: '回答へのフィードバック', feedbackQueueInfo: 'AI の回答への高評価と低評価、新しい順。', feedbackEmpty: 'フィードバックはまだありません', ratings: {up: '役に立った', down: '役に立たなかった'},
