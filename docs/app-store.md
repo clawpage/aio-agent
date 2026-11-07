@@ -99,3 +99,8 @@ The task browser can visit arbitrary websites on the user's request, so the age 
 - 原生改动：`aioSaveMedia` 桥把页面已有的图片、视频直接写进相册（`DeviceBrowser.swift` 的 `SaveMediaHandler`，只要「添加到相册」权限），见 `docs/FEATURES.md`。
 - 构建 `0.1.3 (0.1.3.1)`，`altool` 上传成功（Delivery UUID `93ac50bf-1d82-4cb1-ac98-fa6a14f06be6`），处理为 VALID 后加入外部测试组、
   填中英文「测试内容」并提交 Beta 审核，状态 `WAITING_FOR_REVIEW`。审核通过前外部测试者拿不到；未在真机上实际存过一次，也未验过首次权限弹窗。
+
+## 2026-11-06 0.1.3 (0.1.3.2)：前台不弹通知、震动（TestFlight）
+
+- 原生改动（`DeviceBrowser.swift`）：App 在前台时不显示通知，变为活跃时清掉已送达的通知；`aioHaptic` 桥按控制台的请求震动（`HapticHandler`），见 `docs/FEATURES.md`「手机通知」「语音输入」。
+- `altool` 上传成功（Delivery UUID `86924b5e-daa2-478e-a8b6-42dceeda90f3`），只上传，未加入外部测试组或提交 Beta 审核；未在真机上验过震动和清通知。
