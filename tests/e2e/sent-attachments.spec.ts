@@ -54,46 +54,62 @@ test("pictures the person sent show as pictures, files as cards under them", asy
   await expect(page.getByRole("dialog")).toBeVisible();
 });
 
-test("pictures are kept on the device: a restart asks only whether a workspace picture changed", async ({ page }, info) => {
+test("pictures are kept on the device: reopening shows them at once and asks behind them whether a workspace picture changed", async ({ page }, info) => {
   // Playwright's WebKit cannot fulfill a 304; there an unanswered check stands in (the kept copy is shown either way).
   const no304 = info.project.name === "mobile-webkit";
   await mockConsole(page, { conversations: [] });
   const PATH = "/home/gem/workspace/uploads/a.jpg", WEB = "https://m.media-amazon.com/images/I/saros.jpg";
+  // The file as first written (1600 wide) and as written again (900 wide).
+  const bodies: Record<string, string> = { '"v1"': pictures[PATH], '"v2"': picture(900, 1200, "#a15f00", "#ffd38a") };
   const asked: Array<{ known: string | null }> = [];
   let webAsked = 0, version = '"v1"';
-  await page.route("**/api/documents/image*", (r) => {
+  // While set, the image endpoint does not answer: a sandbox that is slow to reach.
+  let held: Promise<void> | null = null;
+  await page.route("**/api/documents/image*", async (r) => {
     const known = new URL(r.request().url()).searchParams.get("known");
     asked.push({ known });
+    if (held) await held;
     if (known === version) return no304 ? r.abort("failed") : r.fulfill({ status: 304, headers: { etag: version } });
-    return r.fulfill({ contentType: "image/svg+xml", headers: { etag: version }, body: pictures[PATH] });
+    return r.fulfill({ contentType: "image/svg+xml", headers: { etag: version }, body: bodies[version] });
   });
   await page.route("**/api/documents/web-image*", (r) => { webAsked++; return r.fulfill({ contentType: "image/svg+xml", body: pictures[PATH] }); });
   const products = [{ name: "Roborock Saros 10R", image: WEB, price: "$899", store: "Amazon" }];
   const tasks = [{ ...base, id: "t1", title: "看图", text: "看看这张", conversationId: "c1", attachments: [att(PATH)], result: `比价：\n\n\`\`\`products\n${JSON.stringify(products)}\n\`\`\``, createdAt: Date.now() - 60_000, completedAt: Date.now() - 30_000 }];
   await page.route("**/api/main*", (r) => r.fulfill({ json: { mode: "tasks", version: "v1", tasks, nextBefore: null } }));
   const thumb = page.locator('.msg.user [data-testid="file-card-thumb"]');
-  const drawn = () => thumb.evaluate((el) => (el as HTMLImageElement).naturalWidth);
+  const drawn = () => thumb.evaluate((el) => (el as HTMLImageElement).naturalWidth).catch(() => 0);
 
   await page.goto("/");
-  await expect.poll(drawn, { timeout: 60_000 }).toBeGreaterThan(0);
+  await expect.poll(drawn, { timeout: 60_000 }).toBe(1600);
   await expect.poll(() => webAsked).toBe(1);
   expect(asked).toEqual([{ known: null }]);
 
-  // A restart: the workspace picture is only checked (304, no bytes), the web picture not asked at all.
+  // Reopening: the kept picture is drawn while the check is still unanswered, and the web picture is not asked at all.
+  let answer = () => {};
+  held = new Promise((resolve) => { answer = resolve; });
   await page.reload();
-  await expect.poll(drawn, { timeout: 60_000 }).toBeGreaterThan(0);
-  expect(asked).toEqual([{ known: null }, { known: '"v1"' }]);
+  await expect.poll(() => asked.length).toBe(2);
+  await expect.poll(drawn, { timeout: 15_000 }).toBe(1600);
+  expect(asked.at(-1)).toEqual({ known: '"v1"' });
+  held = null;
+  answer();
   await page.waitForTimeout(500);
   expect(webAsked).toBe(1);
+  expect(await drawn()).toBe(1600);
 
-  // The file was written again: the new bytes are downloaded and kept.
+  // The file was written again: the kept picture shows first, then the new one replaces it and is kept.
   version = '"v2"';
+  held = new Promise((resolve) => { answer = resolve; });
   await page.reload();
-  await expect.poll(drawn, { timeout: 60_000 }).toBeGreaterThan(0);
+  await expect.poll(() => asked.length).toBe(3);
+  await expect.poll(drawn, { timeout: 15_000 }).toBe(1600);
+  held = null;
+  answer();
+  await expect.poll(drawn, { timeout: 15_000 }).toBe(900);
   expect(asked.at(-1)).toEqual({ known: '"v1"' });
   await page.reload();
-  await expect.poll(drawn, { timeout: 60_000 }).toBeGreaterThan(0);
-  expect(asked.at(-1)).toEqual({ known: '"v2"' });
+  await expect.poll(drawn, { timeout: 60_000 }).toBe(900);
+  await expect.poll(() => asked.at(-1)).toEqual({ known: '"v2"' });
 
   const keptCount = () => page.evaluate(() => new Promise<number>((resolve) => {
     const req = indexedDB.open("aio-images");
@@ -106,6 +122,15 @@ test("pictures are kept on the device: a restart asks only whether a workspace p
   await page.route("**/api/documents/image*", (r) => r.abort("internetdisconnected"));
   await page.reload();
   await expect.poll(drawn, { timeout: 60_000 }).toBeGreaterThan(0);
+
+  // A file that is gone takes its kept copy with it: the next opening asks afresh and says it is missing.
+  await page.unroute("**/api/documents/image*");
+  await page.route("**/api/documents/image*", (r) => { asked.push({ known: new URL(r.request().url()).searchParams.get("known") }); return r.fulfill({ status: 404, json: { error: "not_found" } }); });
+  await page.reload();
+  await expect.poll(keptCount).toBe(1);
+  await page.reload();
+  await expect.poll(() => asked.at(-1)).toEqual({ known: null });
+  await expect(thumb).toHaveCount(0);
 
   // Signing out takes the account's pictures off the device.
   await page.route("**/api/auth/logout", (r) => r.fulfill({ json: { ok: true } }));

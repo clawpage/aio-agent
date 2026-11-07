@@ -53,7 +53,7 @@ export const FileCard = memo(function FileCard({ path, name, title, kind, onOpen
     // message or the preview is not loaded again. Only an image response is used.
     const load = (): void => {
       if (release) return;
-      const held = holdImage(path);
+      const held = holdImage(path, (url) => { if (live) setThumbUrl(url); });
       release = held.release;
       held.promise.then((url) => { if (live) setThumbUrl(url); }, () => { if (live) setThumbFailed(true); });
     };

@@ -157,7 +157,7 @@ export function FilePreview({ path: initialPath, onClose, onOpenLink, onOpenInBr
           // opens at once instead of being fetched again. Only an image response
           // (the server sniffs the bytes) is ever used.
           if (attempt > 0) retryImage(path);
-          const held = holdImage(path);
+          const held = holdImage(path, (url) => { if (!controller.signal.aborted) setImageUrl(url); });
           release = held.release;
           const cached = cachedImage(path);
           if (cached) { setImageUrl(cached); setPhase("ready"); return; }

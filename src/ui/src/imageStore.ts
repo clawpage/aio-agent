@@ -122,6 +122,20 @@ export async function saveImage(src: string, blob: Blob, etag: string | null): P
   }
 }
 
+/** Drop one kept picture (its file is gone). */
+export async function dropImage(src: string): Promise<void> {
+  const key = keyOf(account, src);
+  if (!key) return;
+  try {
+    const s = await stores("readwrite");
+    if (!s) return;
+    s.bytes.delete(key);
+    await done(s.meta.delete(key));
+  } catch {
+    /* only a shortcut */
+  }
+}
+
 async function evict(): Promise<void> {
   const s = await stores("readwrite");
   if (!s) return;

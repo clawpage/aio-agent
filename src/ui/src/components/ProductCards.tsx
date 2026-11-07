@@ -16,7 +16,7 @@ export function useMessageImage(src: string | null): { url: string | null; faile
   useEffect(() => {
     if (!src) return;
     let live = true;
-    const held = holdImage(src);
+    const held = holdImage(src, (url) => { if (live) setState({ src, url, failed: false }); });
     held.promise.then((url) => { if (live) setState({ src, url, failed: false }); }, () => { if (live) setState({ src, url: null, failed: true }); });
     return () => { live = false; held.release(); };
   }, [src]);

@@ -33,6 +33,12 @@ The shell itself bundles no UI, so a UI change still ships with the next UI depl
 - A device that never opened the console online has no saved page and shows the
   web view's own error page.
 
+Pictures in messages are likewise kept by the shared UI, not the shell: a copy in the
+web view's IndexedDB (both shells use the persistent default store) is shown at once
+on a cold start and checked behind it (see "图片留在设备上" in `docs/FEATURES.md`).
+A native cache could not do better: WKWebView lets no native code answer its https
+requests, and the wait was the check with the sandbox, which any cache has to make.
+
 ## Native adjustments
 
 - Google authentication opens a system authentication browser and returns to the

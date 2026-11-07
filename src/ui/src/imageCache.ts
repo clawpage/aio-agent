@@ -1,5 +1,5 @@
 import { api, API_CREDENTIALS } from "./api";
-import { readImage, saveImage, touchImage } from "./imageStore";
+import { dropImage, readImage, saveImage, touchImage } from "./imageStore";
 
 /**
  * Pictures shown from messages, shared across everywhere the same picture
@@ -8,10 +8,13 @@ import { readImage, saveImage, touchImage } from "./imageStore";
  * ("/home/...", read through the document endpoint) or an https URL (fetched by
  * the account's sandbox). Only an image response is ever cached.
  *
- * Behind the in-memory cache is a copy kept on the device (imageStore): a web
- * picture is shown from it for a week without asking; a workspace picture asks
- * only whether the file changed (304, no bytes) and is shown from the copy if not.
- * Offline or with the server briefly failing, the kept copy is shown.
+ * Behind the in-memory cache is a copy kept on the device (imageStore), shown at
+ * once on reopening without waiting for the network: answering for a workspace
+ * picture means a trip to the account's sandbox, often a second or more. Behind
+ * it, a workspace picture asks whether the file changed (304, no bytes) and, if
+ * it did, the new picture replaces the copy wherever it shows; a file that is gone
+ * takes its copy with it. A web picture is asked about again only after a week,
+ * for the next opening. Offline or with the server failing, the copy stays.
  */
 export type ImageSource = string;
 
@@ -21,6 +24,8 @@ interface Entry {
   failed: boolean;
   refs: number;
   used: number;
+  /** Told when a picture shown from the device copy turns out to have changed. */
+  listeners: Set<(url: string) => void>;
 }
 
 /** Pictures kept once nothing shows them; past this the least recently used go. */
@@ -34,27 +39,31 @@ let clock = 0;
 /** A kept web picture is shown without asking for this long. */
 const WEB_KEEP_MS = 7 * 24 * 3600_000;
 
-function fetchImage(src: ImageSource): Promise<string> {
+function fetchImage(src: ImageSource, replace: (url: string) => void): Promise<string> {
   return (async () => {
     const web = !src.startsWith("/");
     const kept = await readImage(src);
-    const fromKept = () => { void touchImage(kept!.meta); return kept!.url(); };
-    if (kept && web && Date.now() - kept.meta.savedAt < WEB_KEEP_MS) return fromKept();
-    let res: Response;
-    try {
-      const url = web ? api.webImageUrl(src) : `${api.documentImageUrl(src)}${kept?.meta.etag ? `&known=${encodeURIComponent(kept.meta.etag)}` : ""}`;
-      res = await fetch(url, { credentials: API_CREDENTIALS });
-    } catch (err) {
-      if (kept) return fromKept();
-      throw err;
+    if (!kept) return URL.createObjectURL((await download(src, null))!);
+    void touchImage(kept.meta);
+    if (!web || Date.now() - kept.meta.savedAt >= WEB_KEEP_MS) {
+      // A changed web picture is kept for the next opening; swapping it now would only flicker.
+      void download(src, kept.meta.etag).then((blob) => { if (blob && !web) replace(URL.createObjectURL(blob)); }, () => undefined);
     }
-    if (kept && (res.status === 304 || res.status >= 500)) return fromKept();
-    if (!res.ok || !(res.headers.get("content-type") ?? "").startsWith("image/")) throw new Error("unavailable");
-    const blob = await res.blob();
-    if (!blob.size) throw new Error("empty");
-    void saveImage(src, blob, web ? null : res.headers.get("etag"));
-    return URL.createObjectURL(blob);
+    return kept.url();
   })();
+}
+
+/** A picture's bytes from the server, kept on the device; null when the kept version is still current. */
+async function download(src: ImageSource, known: string | null): Promise<Blob | null> {
+  const web = !src.startsWith("/");
+  const res = await fetch(web ? api.webImageUrl(src) : `${api.documentImageUrl(src)}${known ? `&known=${encodeURIComponent(known)}` : ""}`, { credentials: API_CREDENTIALS });
+  if (known && res.status === 304) return null;
+  if (res.status === 404) void dropImage(src);
+  if (!res.ok || !(res.headers.get("content-type") ?? "").startsWith("image/")) throw new Error("unavailable");
+  const blob = await res.blob();
+  if (!blob.size) throw new Error("empty");
+  void saveImage(src, blob, web ? null : res.headers.get("etag"));
+  return blob;
 }
 
 function evict(): void {
@@ -73,13 +82,22 @@ export function cachedImage(src: ImageSource | null): string | null {
 
 /**
  * Hold a picture while something shows it: resolves to its object URL, fetched
- * once however many places ask. Call the returned release when it is no longer
- * shown; the URL stays cached for the next one.
+ * once however many places ask. `changed` gets the new URL when the copy shown
+ * from the device turns out to be out of date. Call the returned release when it
+ * is no longer shown; the URL stays cached for the next one.
  */
-export function holdImage(src: ImageSource): { promise: Promise<string>; release: () => void } {
+export function holdImage(src: ImageSource, changed?: (url: string) => void): { promise: Promise<string>; release: () => void } {
   let entry = entries.get(src);
   if (!entry) {
-    const created: Entry = { promise: fetchImage(src), url: null, failed: false, refs: 0, used: 0 };
+    const created: Entry = { promise: Promise.resolve(""), url: null, failed: false, refs: 0, used: 0, listeners: new Set() };
+    created.promise = fetchImage(src, (url) => {
+      if (entries.get(src) !== created) { URL.revokeObjectURL(url); return; }
+      const old = created.url;
+      created.url = url;
+      created.promise = Promise.resolve(url);
+      for (const listener of created.listeners) listener(url);
+      if (old) URL.revokeObjectURL(old);
+    });
     created.promise.then(
       (url) => { created.url = url; evict(); },
       () => { created.failed = true; window.setTimeout(() => { if (entries.get(src) === created) entries.delete(src); }, RETRY_MS); },
@@ -90,12 +108,14 @@ export function holdImage(src: ImageSource): { promise: Promise<string>; release
   const held = entry;
   held.refs += 1;
   held.used = ++clock;
+  if (changed) held.listeners.add(changed);
   let released = false;
   return {
     promise: held.promise,
     release: () => {
       if (released) return;
       released = true;
+      if (changed) held.listeners.delete(changed);
       held.refs -= 1;
       held.used = ++clock;
       evict();
@@ -108,7 +128,7 @@ export function primeImage(src: ImageSource, blob: Blob): void {
   const known = entries.get(src);
   if (known && !known.failed) return;
   const url = URL.createObjectURL(blob);
-  entries.set(src, { promise: Promise.resolve(url), url, failed: false, refs: 0, used: ++clock });
+  entries.set(src, { promise: Promise.resolve(url), url, failed: false, refs: 0, used: ++clock, listeners: new Set() });
   evict();
 }
 

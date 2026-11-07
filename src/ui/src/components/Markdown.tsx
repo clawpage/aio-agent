@@ -239,7 +239,7 @@ function MarkdownBlock({
       const path = img.getAttribute("data-sandbox-image") ?? "";
       if (web !== null ? !/^https:\/\//i.test(web) : !isWorkspaceFilePath(path) || workspaceFileKind(path) !== "image") return fail(img);
       // Fetched once and shared: the same picture elsewhere (a task panel, the preview) reuses it.
-      const held = holdImage(web ?? path);
+      const held = holdImage(web ?? path, (url) => { if (live) img.src = url; });
       releases.push(held.release);
       held.promise.then((url) => { if (live) img.src = url; }, () => { if (live) fail(img); });
     };
