@@ -4925,7 +4925,8 @@ button.map-card-switch { flex: 0 0 auto; padding: 4px 10px; }
 /* A keyboard types into the page through this box (IME included); 16px so iOS does not zoom to it. */
 .user-browser-keys { position: absolute; left: 0; bottom: 0; width: 1px; height: 1px; padding: 0; border: 0; opacity: 0; font-size: 16px; resize: none; pointer-events: none; }
 
-.support-dialog { border:1px solid var(--border); border-radius:20px; background:var(--bg-raised); color:var(--text); padding:24px; width:min(520px, calc(100vw - 32px)); max-height:calc(100dvh - 40px); overflow:auto; box-shadow:var(--shadow-dialog); }
+/* Centred in what a phone keyboard leaves (--viewport-height): the iOS app's page keeps its size under the keyboard, which hid the dialog's buttons. */
+.support-dialog { border:1px solid var(--border); border-radius:20px; background:var(--bg-raised); color:var(--text); padding:24px; width:min(520px, calc(100vw - 32px)); inset-block:0 calc(100dvh - var(--viewport-height)); max-height:calc(var(--viewport-height) - var(--safe-top) - 24px); overflow:auto; box-shadow:var(--shadow-dialog); }
 .support-dialog::backdrop { background:color-mix(in srgb, var(--shadow-ink) 40%, transparent); backdrop-filter:blur(5px); }
 .support-dialog h2 { margin:0 0 16px; font-size:20px; }
 .support-dialog p { line-height:1.65; overflow-wrap:anywhere; }

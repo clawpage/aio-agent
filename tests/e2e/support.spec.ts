@@ -73,6 +73,26 @@ test('members rate a reply: 👍 toggles, 👎 asks what was wrong and reporting
   await page.keyboard.press('Escape'); await expect(dialog).toHaveCount(0);
   await expect(down).toHaveAttribute('aria-pressed','true');
 });
+test('on a phone the 👎 dialog shows whole, and sits above the keyboard once one is up',async({page},info)=>{
+  test.skip(!info.project.name.startsWith('mobile'));
+  await mockConsole(page,{conversations:[]});
+  await page.route('**/api/auth/session',r=>r.fulfill({json:{authenticated:true,username:'member',role:'member'}}));
+  await page.route('**/api/main*',r=>r.fulfill({json:{mode:'tasks',tasks:[{id:'reported-task',revision:1,title:'Test reply',text:'question',conversationId:'report-conv',status:'completed',result:'AI result',error:null,attachments:[],createdAt:1,completedAt:2}],nextBefore:null}}));
+  await page.route('**/api/support/feedback/*',r=>r.fulfill({json:{rating:'down'}}));
+  await page.goto('/');
+  await page.getByRole('button',{name:'没帮助',exact:true}).click();
+  const dialog=page.getByRole('dialog',{name:'这条回复哪里不好？'}), submit=dialog.getByRole('button',{name:'提交',exact:true});
+  // The note is optional: no keyboard comes up on its own to cover the buttons.
+  await expect(dialog.getByLabel('说明',{exact:true})).not.toBeFocused();
+  await expect(submit).toBeInViewport();
+  // A keyboard up (the iOS app reports the area it leaves): the whole dialog stays above it.
+  await page.evaluate(()=>document.documentElement.style.setProperty('--keyboard-viewport','420px'));
+  await expect.poll(async()=>{const b=(await dialog.boundingBox())!;return b.y+b.height;}).toBeLessThanOrEqual(420);
+  const box=(await dialog.boundingBox())!; expect(box.y).toBeGreaterThanOrEqual(0);
+  await submit.scrollIntoViewIfNeeded();
+  expect((await submit.boundingBox())!.y+(await submit.boundingBox())!.height).toBeLessThanOrEqual(420);
+  await page.screenshot({path:info.outputPath('dislike-keyboard.png')});
+});
 test('members can request deletion from settings without leaving the app',async({page},info)=>{
   await mockConsole(page,{conversations:[]});
   await page.route('**/api/auth/session',r=>r.fulfill({json:{authenticated:true,username:'member',role:'member'}}));

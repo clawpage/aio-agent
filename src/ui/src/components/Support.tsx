@@ -3,6 +3,18 @@ import { api } from '../api';
 import { locale, t } from '../i18n';
 import { openNativeBrowser } from '../deviceBrowser';
 
+/** A computer starts typing at once; a phone shows the whole dialog first, its keyboard only once the box is tapped. */
+const typingFirst = () => matchMedia("(pointer: fine)").matches;
+/** Opened, a dialog focuses its first box (raising a phone's keyboard over its buttons): on a phone it keeps the focus itself. */
+function showDialog(dialog: HTMLDialogElement | null) {
+  if (!dialog) return;
+  const phone = !typingFirst();
+  dialog.toggleAttribute("autofocus", phone);
+  dialog.showModal();
+  // WebKit honours the dialog's autofocus; Chromium still focuses the first box.
+  if (phone && document.activeElement !== dialog) { dialog.tabIndex = -1; dialog.focus(); }
+}
+
 export function SupportDialog({onClose}: {onClose: () => void}) {
   const dialog = useRef<HTMLDialogElement>(null);
   const [note, setNote] = useState('');
@@ -11,7 +23,7 @@ export function SupportDialog({onClose}: {onClose: () => void}) {
   const [error, setError] = useState<string | null>(null);
   // A question or feedback by default; deleting the account is chosen on purpose.
   const [kind, setKind] = useState<'privacy' | 'deletion'>('privacy');
-  useEffect(() => { dialog.current?.showModal(); }, []);
+  useEffect(() => { showDialog(dialog.current); }, []);
   return <dialog ref={dialog} className="support-dialog" aria-labelledby="support-title" onCancel={e => { e.preventDefault(); if (!busy) onClose(); }}>
     <form onSubmit={e => {
       e.preventDefault(); if (busy || id) return;
@@ -27,7 +39,7 @@ export function SupportDialog({onClose}: {onClose: () => void}) {
         <p className="muted">{kind === 'deletion' ? t.support.deletionInfo : t.support.askInfo}</p>
         <p><a href="/privacy.html" target="_blank" rel="noreferrer" onClick={e => { if (openNativeBrowser(e.currentTarget.href)) e.preventDefault(); }}>{t.support.privacy}</a> · <a href="/account-deletion.html" target="_blank" rel="noreferrer" onClick={e => { if (openNativeBrowser(e.currentTarget.href)) e.preventDefault(); }}>{t.support.deletion}</a></p>
         <p className="tiny muted">{t.support.limitations}</p>
-        <label className="field"><span>{t.support.note}</span><textarea autoFocus value={note} onChange={e => setNote(e.target.value)} placeholder={t.support.noteHint} maxLength={2000} required rows={4}/></label>
+        <label className="field"><span>{t.support.note}</span><textarea autoFocus={typingFirst()} value={note} onChange={e => setNote(e.target.value)} placeholder={t.support.noteHint} maxLength={2000} required rows={4}/></label>
       </>}
       {error && <p role="alert" className="error">{error}</p>}
       <div className="support-actions"><button className="ghost" type="button" disabled={busy} onClick={onClose}>{id ? t.support.close : t.support.cancel}</button>{!id && <button className="primary" disabled={busy || !note.trim()}>{busy ? t.support.sending : kind === 'deletion' ? t.support.deletion : t.support.send}</button>}</div>
@@ -46,7 +58,7 @@ export function FeedbackDialog({taskId, onClose}: {taskId: string; onClose: () =
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState<{reportId: string | null} | null>(null);
   const [error, setError] = useState<string | null>(null);
-  useEffect(() => { dialog.current?.showModal(); }, []);
+  useEffect(() => { showDialog(dialog.current); }, []);
   return <dialog ref={dialog} className="support-dialog" aria-labelledby="feedback-title" onCancel={e => { e.preventDefault(); if (!busy) onClose(); }}>
     <form onSubmit={e => {
       e.preventDefault(); if (busy || done) return;
@@ -60,7 +72,7 @@ export function FeedbackDialog({taskId, onClose}: {taskId: string; onClose: () =
       <h2 id="feedback-title">{t.support.feedbackTitle}</h2>
       {done ? <p role="status">{done.reportId ? <>{t.support.success}<code>{done.reportId}</code></> : t.support.feedbackThanks}</p> : <>
         <p className="muted">{report ? t.support.reportInfo : t.support.feedbackInfo}</p>
-        <label className="field"><span>{t.support.note}</span><textarea autoFocus value={note} onChange={e => setNote(e.target.value)} placeholder={t.support.feedbackHint} maxLength={2000} required={report} rows={4}/></label>
+        <label className="field"><span>{t.support.note}</span><textarea autoFocus={typingFirst()} value={note} onChange={e => setNote(e.target.value)} placeholder={t.support.feedbackHint} maxLength={2000} required={report} rows={4}/></label>
         <label className="check-row"><input type="checkbox" checked={report} onChange={e => setReport(e.target.checked)}/><span>{t.support.alsoReport}</span></label>
       </>}
       {error && <p role="alert" className="error">{error}</p>}
