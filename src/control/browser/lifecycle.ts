@@ -99,6 +99,8 @@ export interface SnapshotOutcome {
   savedAt?: number | null;
   tabs?: number;
   skipped?: number;
+  /** Pages nobody owns, untouched since the last wake, deliberately left out (never counted as skipped). */
+  orphansDropped?: number;
   warnings?: SnapshotWarning[];
   /** True when the runtime refused the snapshot for a conservative reason. */
   blocked?: boolean;
@@ -1631,6 +1633,7 @@ status(): BrowserLifecycleStatus {
     this.#storageCounts = snap.storageCounts ?? null;
     this.#dirtySince = null;
     this.#clearError();
+    if (snap.orphansDropped) this.#log.info?.("left pages nobody owns out of the snapshot", { dropped: snap.orphansDropped });
 
     // A shutdown mid-snapshot must not start a stop: the cycle no longer owns
     // the browser's fate and shutting the control plane down is not a reason to

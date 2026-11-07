@@ -84,6 +84,9 @@ DEFAULT_DOWNLOAD_DIRS = (
 
 SNAPSHOT_SCHEMA = 2
 DEFAULT_SNAPSHOT_PATH = "/home/gem/.codex/tools/aio-browser/browser-snapshot.json"
+# The tab server's ownership record (tab-server.cjs STATE_FILE): which Chromium
+# targets are a task's or the person's tabs.
+TAB_SERVER_STATE_PATH = "/tmp/aio-tabs-state.json"
 
 # The Playwright-backed storage exporter/importer, provisioned next to this
 # script. It is the only component that reads/writes cookies + localStorage +
@@ -1612,6 +1615,100 @@ def _capture_one_tab(
         }
 
 
+def tab_server_targets() -> set[str] | None:
+    """Chromium target ids of the pages the tab server has on record, or None when
+    that record cannot be trusted (missing, unreadable, or a tab whose target is
+    not known yet)."""
+    try:
+        with open(TAB_SERVER_STATE_PATH, encoding="utf-8") as handle:
+            data = json.load(handle)
+    except (OSError, ValueError):
+        return None
+    records = data.get("tabs") if isinstance(data, dict) else None
+    if not isinstance(records, list):
+        return None
+    targets: set[str] = set()
+    for record in records:
+        target = record.get("targetId") if isinstance(record, dict) else None
+        if not isinstance(target, str) or not target:
+            return None
+        targets.add(target)
+    return targets
+
+
+def page_lineage(snapshot_path: str, browser: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
+    """Target id -> the tab of the snapshot on disk that page was saved or restored as.
+
+    `restored` is True for a page the last completed restore of that snapshot
+    opened in this very browser process; False for a page of a snapshot saved
+    from this process itself (a release that was then called off).
+    """
+    previous, _problem = read_snapshot(snapshot_path)
+    if previous is None or not browser.get("ok"):
+        return {}
+    identity = (int(browser["pid"]), int(browser["starttime"]))
+    tabs = [tab for tab in previous.get("tabs") or [] if isinstance(tab, dict)]
+    if snapshot_source_pids(previous) == identity:
+        return {str(tab["targetId"]): {**tab, "restored": False} for tab in tabs if isinstance(tab.get("targetId"), str)}
+    state = read_restore_state(snapshot_path)
+    if (
+        state is None
+        or state.get("snapshotSavedAt") != previous.get("savedAt")
+        or state.get("completed") is not True
+        or (state.get("browserPid"), state.get("browserStarttime")) != identity
+    ):
+        return {}
+    lineage: dict[str, dict[str, Any]] = {}
+    for tab, entry in zip(tabs, state.get("tabs") or []):
+        if isinstance(entry, dict) and isinstance(entry.get("targetId"), str):
+            lineage[entry["targetId"]] = {**tab, "restored": True}
+    return lineage
+
+
+def leave_out_orphans(
+    tabs: list[dict[str, Any]],
+    owners: set[str] | None,
+    lineage: Mapping[str, Mapping[str, Any]],
+) -> tuple[list[dict[str, Any]], int]:
+    """Mark each captured tab `owned` and drop the orphans. Returns (kept, dropped).
+
+    The tab server forgets every page when Chromium is released, and a restore
+    cannot hand pages back to it, so ownership is carried in the snapshot: a page
+    is owned when the tab server has it on record, or when it came back as a tab
+    that was owned at the last save. An orphan is a page nobody owns that came
+    back from the last release and was left exactly as it came back (same address,
+    same scroll) through the whole time since. A page nobody owns that is new since
+    then (one opened on the desktop) is kept once, so it is only dropped after a
+    whole spell untouched. Without a trustworthy tab record nothing is dropped,
+    and the last page is never dropped.
+    """
+    kept: list[dict[str, Any]] = []
+    orphans: list[dict[str, Any]] = []
+    for tab in tabs:
+        came_from = lineage.get(str(tab.get("targetId")))
+        tab["owned"] = bool(
+            (owners is not None and tab.get("targetId") in owners)
+            or (came_from is not None and came_from.get("owned") is True)
+            # Unknown ownership: rather keep it than let a later save drop it.
+            or (owners is None and came_from is None)
+        )
+        untouched = (
+            came_from is not None
+            and came_from["restored"]
+            and came_from.get("url") == tab.get("url")
+            and abs((tab.get("scrollY") or 0) - (came_from.get("scrollY") or 0)) <= 8
+        )
+        (orphans if owners is not None and not tab["owned"] and untouched else kept).append(tab)
+    if not kept and orphans:
+        # A snapshot needs a page: keep the selected one.
+        keep = next((tab for tab in orphans if tab["active"]), orphans[0])
+        orphans.remove(keep)
+        kept.append(keep)
+    for index, tab in enumerate(kept):
+        tab["index"] = index
+    return kept, len(orphans)
+
+
 def capture_snapshot(
     snapshot_path: str,
     policy: str = DEFAULT_DIRTY_INPUT_POLICY,
@@ -1625,7 +1722,8 @@ def capture_snapshot(
     Any tab that cannot be captured in full (unsupported scheme, unreachable,
     unsubmitted input under the `block` policy, read error) fails the whole
     capture: the existing snapshot on disk is left untouched and the browser is
-    never released on top of a lossy capture.
+    never released on top of a lossy capture. Orphan pages are the one deliberate
+    omission (see `leave_out_orphans`), counted in `orphansDropped`.
     """
     downloads = find_in_flight_downloads(download_dirs)
     if downloads:
@@ -1728,6 +1826,7 @@ def capture_snapshot(
                 "scrollY": None,
                 "sessionStorage": None,
                 "origin": origin_of(url),
+                "targetId": planned.get("targetId"),
             }
             target_id = planned.get("targetId")
             if not isinstance(target_id, str) or not target_id:
@@ -1750,6 +1849,10 @@ def capture_snapshot(
             tabs.append(entry)
     finally:
         cdp.close()
+
+    # Pages nobody owns, left untouched since the last release brought them back,
+    # are not saved: the next wake does not reload them.
+    tabs, orphans_dropped = leave_out_orphans(tabs, tab_server_targets(), page_lineage(snapshot_path, browser))
 
     if not tabs:
         return err("no tab can be saved safely", blocked=True, warnings=warnings)
@@ -1792,6 +1895,7 @@ def capture_snapshot(
         "tabs": tabs,
         "warnings": warnings,
         "skipped": 0,
+        "orphansDropped": orphans_dropped,
         "orderVerified": order_verified,
         "storage": storage,
         # Owed only once `stop` marks it released (see `restore_pending`); older
@@ -1814,6 +1918,7 @@ def capture_snapshot(
         savedAt=snapshot["savedAt"],
         tabs=len(tabs),
         skipped=0,
+        orphansDropped=orphans_dropped,
         warnings=warnings,
         orderVerified=order_verified,
         storageCounts=storage_counts(snapshot),

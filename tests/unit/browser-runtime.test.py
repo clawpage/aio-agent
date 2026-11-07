@@ -2671,6 +2671,190 @@ def test_wake_and_restore_take_a_total_deadline() -> None:
         rt.verify_helper, rt.wait_for_cdp, rt.restore_tabs = saved
 
 
+def _pages_env(pages: list[tuple[str, str, int]], active: str, tab_state: Any, tmp: str) -> Any:
+    """A browser (pid 600, start 7) showing `pages` as (targetId, url, scrollY), and
+    the tab server's record `tab_state` (None: no record file)."""
+    from contextlib import ExitStack
+    from unittest.mock import patch
+
+    scroll = {target: y for target, _url, y in pages}
+
+    class PagesCdp(_CaptureCdp):
+        def targets(self) -> list[dict[str, Any]]:
+            return [{"id": target, "type": "page", "url": url, "title": url} for target, url, _y in pages]
+
+        def attach(self, target: str) -> str:
+            return target
+
+        def evaluate(self, session: str, expression: str) -> Any:
+            if "sessionStorage" in expression:
+                return {}
+            return scroll[session] if "scroll" in expression else False
+
+    state_path = os.path.join(tmp, "aio-tabs-state.json")
+    if tab_state is not None:
+        with open(state_path, "w", encoding="utf-8") as handle:
+            json.dump(tab_state, handle)
+    rows = [{"url": url, "title": url, "index": i, "is_active": target == active} for i, (target, url, _y) in enumerate(pages)]
+    stack = _capture_env()
+    stack.enter_context(patch.object(rt, "Cdp", PagesCdp))
+    stack.enter_context(patch.object(rt, "aio_tabs", lambda: (rows, "")))
+    stack.enter_context(patch.object(rt, "TAB_SERVER_STATE_PATH", state_path, create=True))
+    return stack
+
+
+def _came_back(path: str, tabs: list[dict[str, Any]], targets: list[str]) -> None:
+    """A snapshot of an earlier browser (pid 500) whose tabs the last restore
+    reopened in the running one (pid 600, start 7) as `targets`."""
+    snapshot = _tracked_snapshot()
+    snapshot["source"] = {"browserPid": 500, "browserStarttime": 3}
+    snapshot["tabs"] = [{"index": i, "active": False, "scrollY": 0, "sessionStorage": None, **tab} for i, tab in enumerate(tabs)]
+    rt.write_snapshot(path, snapshot)
+    rt.write_restore_state(path, {
+        "snapshotSavedAt": snapshot["savedAt"], "released": True, "completed": True,
+        "browserPid": 600, "browserStarttime": 7, "tabs": [{"targetId": t} for t in targets],
+    })
+
+
+def _saved_urls(path: str) -> list[str]:
+    return [tab["url"] for tab in rt.read_snapshot(path)[0]["tabs"]]
+
+
+@test
+def test_capture_leaves_out_pages_nobody_owns_that_came_back_untouched() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "snapshot.json")
+        _came_back(path, [
+            {"url": "https://mychart.example/login", "owned": False},
+            {"url": "https://person.example/read", "owned": True},
+            {"url": "about:blank"},  # saved before ownership was recorded
+            {"url": "https://task.example/a", "owned": False},
+        ], ["r1", "r2", "r3", "r4"])
+        pages = [
+            ("r1", "https://mychart.example/login", 0),
+            ("r2", "https://person.example/read", 0),
+            ("r3", "about:blank", 0),
+            ("r4", "https://task.example/a", 0),
+            ("n1", "https://desktop.example/new", 0),
+        ]
+        # r4 came back without an owner, but a task took it since (the tab server has it on record).
+        with _pages_env(pages, "r2", {"seq": 3, "tabs": [{"id": "t3", "key": "k", "targetId": "r4"}]}, tmp):
+            result = rt.capture_snapshot(path)
+        assert_true(result["ok"], f"快照应成功：{result}")
+        assert_eq(result.get("orphansDropped"), 2, "无主、恢复后原样未动的两个页面不进快照")
+        saved = rt.read_snapshot(path)[0]
+        assert_eq(saved.get("orphansDropped"), 2, "清掉的页数记进快照")
+        assert_eq([t["url"] for t in saved["tabs"]],
+                  ["https://person.example/read", "https://task.example/a", "https://desktop.example/new"],
+                  "有主的、标签页服务登记的、本次新开的都保留")
+        assert_eq([t["index"] for t in saved["tabs"]], [0, 1, 2], "保留的页面重新编号")
+        assert_eq([t["owned"] for t in saved["tabs"]], [True, True, False],
+                  "上次有主的恢复回来仍算有主；桌面上新开的不算")
+        assert_true(saved["tabs"][0]["active"], "选中页不变")
+
+
+@test
+def test_capture_keeps_a_page_used_since_it_came_back() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "snapshot.json")
+        _came_back(path, [
+            {"url": "https://a.example/1", "owned": False},
+            {"url": "https://b.example/1", "owned": False, "scrollY": 400},
+            {"url": "https://c.example/1", "owned": False},
+        ], ["r1", "r2", "r3"])
+        pages = [("r1", "https://a.example/2", 0), ("r2", "https://b.example/1", 1200), ("r3", "https://c.example/1", 0)]
+        with _pages_env(pages, "r1", {"seq": 0, "tabs": []}, tmp):
+            result = rt.capture_snapshot(path)
+        assert_true(result["ok"], f"快照应成功：{result}")
+        assert_eq(_saved_urls(path), ["https://a.example/2", "https://b.example/1"], "换过地址或滚动过的页面有人在用，保留")
+        assert_eq(result.get("orphansDropped"), 1)
+
+
+@test
+def test_capture_drops_nothing_without_a_trustworthy_tab_record() -> None:
+    tabs = [{"url": "https://a.example/1", "owned": False}, {"url": "https://b.example/1", "owned": False}]
+    pages = [("r1", "https://a.example/1", 0), ("r2", "https://b.example/1", 0)]
+    for note, record in (
+        ("没有登记文件", None),
+        ("登记文件坏了", "not a record"),
+        ("有标签还不知道对应哪个页面", {"seq": 1, "tabs": [{"id": "t1", "key": "k", "targetId": None}]}),
+    ):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "snapshot.json")
+            _came_back(path, tabs, ["r1", "r2"])
+            with _pages_env(pages, "r1", record, tmp):
+                result = rt.capture_snapshot(path)
+            assert_true(result["ok"], f"{note}：快照应成功：{result}")
+            assert_eq(_saved_urls(path), ["https://a.example/1", "https://b.example/1"], f"{note}：宁可多恢复，全部保留")
+            assert_eq(result.get("orphansDropped"), 0, note)
+
+
+@test
+def test_capture_trusts_only_a_completed_restore_into_this_browser() -> None:
+    tabs = [{"url": "https://a.example/1", "owned": False}, {"url": "https://b.example/1", "owned": False}]
+    pages = [("r1", "https://a.example/1", 0), ("r2", "https://b.example/1", 0)]
+    for note, change in (
+        ("恢复没做完", {"completed": False}),
+        ("恢复进的是别的浏览器进程", {"browserStarttime": 8}),
+    ):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "snapshot.json")
+            _came_back(path, tabs, ["r1", "r2"])
+            rt.write_restore_state(path, {**rt.read_restore_state(path), **change})
+            with _pages_env(pages, "r1", {"seq": 0, "tabs": []}, tmp):
+                result = rt.capture_snapshot(path)
+            assert_eq(len(_saved_urls(path)), 2, f"{note}：说不清页面从哪来，不清")
+
+
+@test
+def test_capture_never_drops_the_last_page() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "snapshot.json")
+        _came_back(path, [{"url": "https://a.example/1", "owned": False}, {"url": "https://b.example/1", "owned": False}], ["r1", "r2"])
+        with _pages_env([("r1", "https://a.example/1", 0), ("r2", "https://b.example/1", 0)], "r2", {"seq": 0, "tabs": []}, tmp):
+            result = rt.capture_snapshot(path)
+        assert_true(result["ok"], f"快照应成功：{result}")
+        assert_eq(_saved_urls(path), ["https://b.example/1"], "全是游离页时留下选中的那一页")
+
+
+@test
+def test_ownership_carries_across_naps_and_a_desktop_page_gets_one_spell() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "snapshot.json")
+        # Nap 1: the person's tab (on record) and a page opened on the desktop.
+        first = [("p1", "https://person.example/read", 0), ("p2", "https://desktop.example/x", 0)]
+        with _pages_env(first, "p1", {"seq": 1, "tabs": [{"id": "t1", "key": "person", "targetId": "p1"}]}, tmp):
+            assert_true(rt.capture_snapshot(path)["ok"])
+        assert_eq(_saved_urls(path), ["https://person.example/read", "https://desktop.example/x"], "第一次小睡都保留")
+        # Released, then restored into a new browser: the tab server's record is empty again.
+        snapshot = rt.read_snapshot(path)[0]
+        snapshot["source"] = {"browserPid": 500, "browserStarttime": 3}
+        rt.write_snapshot(path, snapshot)
+        rt.write_restore_state(path, {"snapshotSavedAt": snapshot["savedAt"], "released": True, "completed": True,
+                                      "browserPid": 600, "browserStarttime": 7, "tabs": [{"targetId": "q1"}, {"targetId": "q2"}]})
+        second = [("q1", "https://person.example/read", 0), ("q2", "https://desktop.example/x", 0)]
+        with _pages_env(second, "q1", {"seq": 1, "tabs": []}, tmp):
+            result = rt.capture_snapshot(path)
+        assert_eq(_saved_urls(path), ["https://person.example/read"], "第二次：本人的页仍保留，桌面页原样放了一整轮才清")
+        assert_eq(result.get("orphansDropped"), 1)
+
+
+@test
+def test_capture_keeps_pages_of_a_release_that_was_called_off() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "snapshot.json")
+        snapshot = _tracked_snapshot()
+        # Saved from this very browser; the stop was then cancelled, so nothing was restored.
+        snapshot["source"] = {"browserPid": 600, "browserStarttime": 7}
+        snapshot["tabs"] = [{"index": 0, "url": "https://person.example/read", "active": True, "scrollY": 0,
+                             "sessionStorage": None, "owned": True, "targetId": "p1"}]
+        rt.write_snapshot(path, snapshot)
+        with _pages_env([("p1", "https://person.example/read", 0)], "p1", {"seq": 0, "tabs": []}, tmp):
+            assert_true(rt.capture_snapshot(path)["ok"])
+        saved = rt.read_snapshot(path)[0]["tabs"]
+        assert_eq([(t["url"], t["owned"]) for t in saved], [("https://person.example/read", True)], "同一浏览器上次保存的有主页面仍算有主")
+
+
 # Node helper deadline and redaction are behavior-tested in browser-storage.test.ts.
 
 

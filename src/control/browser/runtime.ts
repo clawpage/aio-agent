@@ -278,6 +278,7 @@ p.mkdir(parents=True, exist_ok=True, mode=0o755)
       savedAt: typeof res.savedAt === "number" ? res.savedAt : null,
       tabs: typeof res.tabs === "number" ? res.tabs : undefined,
       skipped: typeof res.skipped === "number" ? res.skipped : 0,
+      orphansDropped: typeof res.orphansDropped === "number" ? res.orphansDropped : 0,
       warnings: Array.isArray(res.warnings) ? (res.warnings as SnapshotWarning[]) : [],
       blocked: res.blocked === true,
       orderVerified: res.orderVerified === true,

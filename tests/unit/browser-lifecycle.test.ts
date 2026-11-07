@@ -334,6 +334,20 @@ describe("BrowserLifecycle idle release", () => {
     life.shutdown();
   });
 
+  it("logs orphan pages left out of the snapshot and still releases", async () => {
+    const runtime = makeRuntime({
+      snapshot: { ok: true, savedAt: 1_700_000_000_123, tabs: 1, skipped: 0, orphansDropped: 8, warnings: [],
+        storageCounts: { cookies: 2, origins: 1, localStorageEntries: 3, indexedDbDatabases: 1 } },
+    });
+    const { life, clock, logs } = makeLifecycle(runtime);
+    clock.advance(300_000);
+    await settle();
+    expect(runtime.calls.stop).toBe(1);
+    expect(life.status().state).toBe("asleep");
+    expect(logs).toContainEqual({ level: "info", message: "left pages nobody owns out of the snapshot", meta: { dropped: 8 } });
+    life.shutdown();
+  });
+
   it("keeps a held browser awake, then releases after the holder is gone", async () => {
     const runtime = makeRuntime();
     const { life, clock } = makeLifecycle(runtime);
