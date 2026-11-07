@@ -845,6 +845,11 @@ export function createApiRouter(context: AppContext): Router {
     });
     res.send(cover.data);
   });
+  // Offline: the page answers nobody but its owner here (its files, data and history stay); online again on request.
+  router.patch("/clawpages/:page", requireKind("primary"), requireSession, (req, res) => clawpages(req, res, (userId, page, share) => {
+    if (typeof req.body?.offline !== "boolean") throw new DataError(400, "INVALID_INPUT", "Send {offline: true} or {offline: false}");
+    return share.setOffline(userId, page, req.body.offline);
+  }));
   router.delete("/clawpages/:page", requireKind("primary"), requireSession, (req, res) => clawpages(req, res, (userId, page, share) => {
     if (!share.remove(userId, page)) throw new DataError(404, "PAGE_NOT_FOUND", "The page does not exist");
     return undefined;
@@ -899,7 +904,7 @@ export function createApiRouter(context: AppContext): Router {
     const page = typeof req.query.page === "string" ? req.query.page : typeof req.body?.page === "string" ? req.body.page : "";
     const userId = share?.data && /^[A-Za-z0-9_-]{2,40}$/.test(owner) ? share.userIdOf(owner) : null;
     const facts = userId ? share!.page(userId, page) : null;
-    return facts ? { userId: userId!, page, title: facts.title, url: facts.url } : null;
+    return facts && !facts.offlineAt ? { userId: userId!, page, title: facts.title, url: facts.url } : null;
   };
   const visitorOf = (userId: string): { id: string; name: string; email: string | null } => ({ id: userId, name: getUser(db, userId)?.username ?? userId, email: visibleEmail(db, userId) });
   // The account's own sandbox browser (signed in by `aio-share sign-in`): it may sign in to the account's own pages,

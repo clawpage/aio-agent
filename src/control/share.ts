@@ -122,10 +122,11 @@ export class ShareError extends Error {
 }
 
 /** `updatedBy` names the collaborator who published the current version (null when the owner did). */
-export interface SharePage { name: string; title: string; url: string; files: number; bytes: number; updatedAt: number; updatedBy: string | null; collaborators: number; tables: TableSummary[]; cover: number | null; restoredFrom: number | null }
+export interface SharePage { name: string; title: string; url: string; files: number; bytes: number; updatedAt: number; updatedBy: string | null; collaborators: number; tables: TableSummary[]; cover: number | null; restoredFrom: number | null; offlineAt: number | null }
 /** `restoredFrom`: the version this one was restored from (its `updatedAt`), null when it was published. */
 /** retiredAt: when a kept version was replaced; the account's history drops the longest replaced first. */
-interface PageMeta { title: string; files: number; bytes: number; updatedAt: number; updatedBy?: string | null; restoredFrom?: number | null; retiredAt?: number }
+/** `offlineAt`: when the owner took the page offline (nobody else reaches it until they put it back); null while it is online. */
+interface PageMeta { title: string; files: number; bytes: number; updatedAt: number; updatedBy?: string | null; restoredFrom?: number | null; retiredAt?: number; offlineAt?: number | null }
 /** A version a publish replaced, as the owner sees it in the page's history. */
 export interface PageVersion { at: number; title: string; files: number; bytes: number; updatedBy: string | null; restoredFrom: number | null }
 /** A publish: the page's files, and the version they were made from (a collaborator must name it). */
@@ -262,7 +263,7 @@ export class ShareStore {
 
   #page(userId: string, name: string, meta: PageMeta, tables: TableSummary[], collaborators: number): SharePage {
     return { name, url: this.pageUrl(userId, name), title: meta.title, files: meta.files, bytes: meta.bytes, updatedAt: meta.updatedAt,
-      updatedBy: meta.updatedBy ?? null, collaborators, tables, cover: this.#coverAt(userId, name), restoredFrom: meta.restoredFrom ?? null };
+      updatedBy: meta.updatedBy ?? null, collaborators, tables, cover: this.#coverAt(userId, name), restoredFrom: meta.restoredFrom ?? null, offlineAt: meta.offlineAt ?? null };
   }
 
   /** One page as `list` shows it, or null. */
@@ -321,6 +322,10 @@ export class ShareStore {
     const before = this.#meta(userId, name);
     if (before) this.#checkBase(before, input, by);
     else if (by) throw new ShareError(404, "The page does not exist");
+    // A folder that holds a version of a page deleted since (in the console or with delete) does not bring it back by itself.
+    else if (typeof input.baseUpdatedAt === "number" && input.force !== true) {
+      throw new ShareError(409, "This page was deleted after this folder's version was published (in the console or with delete). Ask the user before publishing it again; publish with --force creates it anew, with no data");
+    }
     // One line (it is shown in lists and told to agents); without one the page keeps the title it has.
     const given = typeof input.title === "string" ? input.title.replace(/[\u0000-\u001f\u007f\u2028\u2029]+/g, " ").trim().slice(0, 200) : "";
     const title = given || before?.title || name;
@@ -332,7 +337,8 @@ export class ShareStore {
         fs.writeFileSync(file, f.data);
         fs.utimesSync(file, updatedAt / 1000, updatedAt / 1000);
       }
-      const meta: PageMeta = { title, files: files.length, bytes, updatedAt, updatedBy: by ?? null };
+      // A page the owner took offline stays offline: only they put it back.
+      const meta: PageMeta = { title, files: files.length, bytes, updatedAt, updatedBy: by ?? null, offlineAt: before?.offlineAt ?? null };
       fs.writeFileSync(path.join(staging, META), JSON.stringify(meta));
       // The old cover stays until the new one is rendered.
       // Its time is its version: the console keeps showing the copy it has.
@@ -483,7 +489,7 @@ export class ShareStore {
         }
       };
       touch(staging);
-      const meta: PageMeta = { title: version.title, files: version.files, bytes: version.bytes, updatedAt, updatedBy: null, restoredFrom: Number(at) };
+      const meta: PageMeta = { title: version.title, files: version.files, bytes: version.bytes, updatedAt, updatedBy: null, restoredFrom: Number(at), offlineAt: current.offlineAt ?? null };
       fs.writeFileSync(path.join(staging, META), JSON.stringify(meta));
       // The cover it had, as a new one (the console fetches it again); without one, none.
       const cover = path.join(staging, COVER);
@@ -546,6 +552,28 @@ export class ShareStore {
 
   exists(userId: string, name: string): boolean {
     return SHARE_NAME.test(name) && fs.existsSync(path.join(this.#userDir(userId), name, META));
+  }
+
+  /** Whether visitors, signed-in visitors and collaborators reach the page: it exists and is not offline. */
+  #live(userId: string, name: string): boolean {
+    const meta = SHARE_NAME.test(name) ? this.#meta(userId, name) : null;
+    return Boolean(meta && !meta.offlineAt);
+  }
+
+  /**
+   * Take a page offline, or put it back: offline, its address and its `.data`, `.auth`, `.ai`, `.decide`
+   * and `.api` answer as if it did not exist, while its files, data, collaborators and history stay.
+   */
+  setOffline(userId: string, name: string, offline: boolean): SharePage {
+    const meta = SHARE_NAME.test(name) ? this.#meta(userId, name) : null;
+    if (!meta) throw new DataError(404, "PAGE_NOT_FOUND", "The page does not exist");
+    if (Boolean(meta.offlineAt) !== offline) {
+      const file = path.join(this.#userDir(userId), name, META);
+      const tmp = `${file}.${randomBytes(4).toString("hex")}`;
+      fs.writeFileSync(tmp, JSON.stringify({ ...meta, offlineAt: offline ? Date.now() : null }));
+      fs.renameSync(tmp, file);
+    }
+    return this.page(userId, name)!;
   }
 
   /** A page goes with its data. */
@@ -820,6 +848,7 @@ export class ShareStore {
     const token = String(req.headers.authorization ?? "").replace(/^Bearer\s+/i, "");
     const collaborator = token && this.exists(userId, page) ? this.data?.collaboratorOf(token, userId, page) : null;
     if (!collaborator) return reply(401, { error: "UNAUTHORIZED", message: "This needs a collaborator token for this page: Authorization: Bearer cpc_..." });
+    if (!this.#live(userId, page)) return reply(404, { error: "PAGE_OFFLINE", message: "The owner took this page offline; nobody can work on it until they put it back online" });
     const method = req.method ?? "GET";
     try {
       const [sub, ...tail] = rest.split("/").filter(Boolean).map((s) => decodeURIComponent(s));
@@ -858,7 +887,7 @@ export class ShareStore {
     };
     if (req.method === "OPTIONS") return reply(204);
     const data = this.data;
-    if (!data || !this.exists(userId, page)) return reply(404, { error: "PAGE_NOT_FOUND", message: "The page does not exist" });
+    if (!data || !this.#live(userId, page)) return reply(404, { error: "PAGE_NOT_FOUND", message: "The page does not exist" });
     const token = String(req.headers.authorization ?? "").replace(/^Bearer\s+/i, "");
     const owner = !!token && data.isOwnerToken(token, userId, page);
     const visitor = !owner && data.isVisitorToken(token) ? data.visitorOf(token, userId, page) : null;
@@ -893,7 +922,7 @@ export class ShareStore {
       else res.send(JSON.stringify(body));
     };
     if (req.method === "OPTIONS") return reply(204);
-    if (!this.data || !this.exists(userId, page)) return reply(404, { error: "PAGE_NOT_FOUND", message: "The page does not exist" });
+    if (!this.data || !this.#live(userId, page)) return reply(404, { error: "PAGE_NOT_FOUND", message: "The page does not exist" });
     if (rest === "/sign-in") {
       if (req.method !== "GET") return reply(405, { error: "METHOD_NOT_ALLOWED", message: "GET only" });
       const params = new URLSearchParams(query);
@@ -936,7 +965,7 @@ export class ShareStore {
       else res.send(JSON.stringify(body));
     };
     if (req.method === "OPTIONS") return reply(204);
-    if (!this.data || !this.exists(userId, page)) return reply(404, { error: "PAGE_NOT_FOUND", message: "The page does not exist" });
+    if (!this.data || !this.#live(userId, page)) return reply(404, { error: "PAGE_NOT_FOUND", message: "The page does not exist" });
     if (rest !== "" && rest !== "/") return reply(404, { error: "NOT_FOUND", message: "No such path" });
     if (req.method !== "POST") return reply(405, { error: "METHOD_NOT_ALLOWED", message: "POST only" });
     const token = String(req.headers.authorization ?? "").replace(/^Bearer\s+/i, "");
@@ -969,7 +998,7 @@ export class ShareStore {
       else res.send(JSON.stringify(body));
     };
     if (req.method === "OPTIONS") return reply(204);
-    if (!this.data || !this.exists(userId, page)) return reply(404, { error: "PAGE_NOT_FOUND", message: "The page does not exist" });
+    if (!this.data || !this.#live(userId, page)) return reply(404, { error: "PAGE_NOT_FOUND", message: "The page does not exist" });
     if (rest !== "" && rest !== "/") return reply(404, { error: "NOT_FOUND", message: "No such path" });
     if (req.method !== "POST") return reply(405, { error: "METHOD_NOT_ALLOWED", message: "POST only" });
     const token = String(req.headers.authorization ?? "").replace(/^Bearer\s+/i, "");
@@ -1033,7 +1062,7 @@ export class ShareStore {
       if (rawName === undefined) {
         return SHARE_NAME.test(query) ? res.redirect(302, `/u/${username}/share/${query}/`) : notFound();
       }
-      if (!SHARE_NAME.test(rawName)) return notFound();
+      if (!SHARE_NAME.test(rawName) || !this.#live(userId, rawName)) return notFound();
       // Relative links inside the page need the trailing slash.
       if (rest === undefined) return res.redirect(301, `/u/${username}/share/${rawName}/${q < 0 ? "" : url.slice(q)}`);
       let rel: string;

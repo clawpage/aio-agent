@@ -3667,6 +3667,10 @@ button.turn-pill:focus-visible { outline: 2px solid currentColor; outline-offset
 .clawpage-cover-glyph { position:absolute; inset:0; display:grid; place-items:center; font-size:46px; font-weight:650; line-height:1; letter-spacing:-.02em; }
 .clawpage-cover-count { position:absolute; left:8px; bottom:8px; padding:2px 9px; border-radius:999px; background:var(--accent); color:var(--on-accent); font-size:11.5px; line-height:1.7; font-variant-numeric:tabular-nums; }
 .clawpage-cover:not(.has-cover) .clawpage-cover-count { background:var(--on-accent); color:var(--accent); }
+/* Offline: faded, and said so on the tile. */
+.clawpage-cover.is-offline:not(.has-cover), .clawpage-sheet-cover.is-offline:not(.has-cover) { background:var(--bg-soft); border-color:var(--border); color:var(--text-dim); }
+.is-offline > img, .is-offline > .clawpage-cover-glyph, .is-offline > .clawpage-cover-count { opacity:.4; filter:grayscale(1); }
+.clawpage-cover-offline { position:absolute; left:8px; top:8px; padding:2px 9px; border-radius:999px; border:1px solid var(--border); background:var(--bg-raised); color:var(--text-dim); font-size:11.5px; line-height:1.7; }
 .clawpage-tile-title { padding:0 2px; font-size:13.5px; line-height:1.4; display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; overflow:hidden; overflow-wrap:anywhere; }
 /* The empty state's mark. */
 .clawpage-glyph { display:inline-grid; place-items:center; width:68px; height:68px; border-radius:20px; font-size:30px; line-height:1; background:var(--accent); color:var(--on-accent); }
@@ -3684,13 +3688,19 @@ button.turn-pill:focus-visible { outline: 2px solid currentColor; outline-offset
 .clawpage-sheet-name p { display:flex; flex-wrap:wrap; gap:4px 10px; margin:4px 0 0; }
 .clawpage-icon-button { display:inline-grid; place-items:center; width:38px; height:38px; padding:0; }
 .clawpage-sheet-head button.clawpage-icon-button { align-self:flex-start; border-color:transparent; background:none; }
-.clawpage-sheet-actions { display:flex; align-items:center; gap:8px; padding:16px 18px; }
+.clawpage-sheet-actions { display:flex; flex-wrap:wrap; align-items:center; gap:8px; padding:16px 18px; }
 .clawpage-sheet-actions .primary { min-width:112px; height:38px; }
+/* Taking it offline and deleting it: beside the rest on a wide screen, a line of their own on a phone. */
+.clawpage-manage { display:inline-flex; gap:8px; margin-left:auto; }
+.clawpage-manage button { height:38px; white-space:nowrap; }
+button.ghost.clawpage-danger { color:var(--error); border-color:color-mix(in srgb, var(--error) 40%, var(--border)); }
+button.ghost.clawpage-danger:hover { background:color-mix(in srgb, var(--error) 10%, transparent); border-color:var(--error); }
+.clawpage-offline-badge { padding:0 8px; border-radius:999px; border:1px solid var(--border); color:var(--text-dim); }
+.clawpage-offline-note { margin:0; padding:10px 12px; border-radius:12px; background:var(--bg-soft); color:var(--text-dim); }
+.clawpage-delete-confirm { margin:0 18px 14px; }
 .clawpage-copied { color:var(--ok); }
 .clawpage-sheet-body { flex:1; min-height:0; overflow:auto; padding:0 18px 18px; display:flex; flex-direction:column; gap:14px; }
 .clawpage-tip { margin:0; }
-button.clawpage-delete { align-self:flex-start; padding:2px 0; border:0; background:none; }
-button.clawpage-delete:hover { text-decoration:underline; }
 .clawpage-confirm { display:flex; flex-wrap:wrap; align-items:center; gap:8px; padding:10px 12px; border-radius:12px; background:color-mix(in srgb,var(--error) 8%,transparent); }
 .clawpage-confirm-actions { display:inline-flex; gap:6px; margin-left:auto; }
 
@@ -3710,11 +3720,20 @@ button.clawpage-delete:hover { text-decoration:underline; }
 .clawpage-sso-list { margin:0; padding-left:20px; display:grid; gap:6px; overflow-wrap:anywhere; }
 .clawpage-export { padding:5px 10px; }
 .clawpage-no-rows { margin:6px 2px; }
-.clawpage-table-wrap { overflow-x:auto; border:1px solid var(--border); border-radius:12px; background:var(--bg); }
-.clawpage-table { width:100%; border-collapse:collapse; font-size:var(--fs-sm); }
-.clawpage-table th { position:sticky; top:0; padding:8px 12px; text-align:left; font-size:11.5px; font-weight:500; color:var(--text-dim); background:var(--bg-soft); border-bottom:1px solid var(--border); white-space:nowrap; }
-.clawpage-table td { padding:9px 12px; border-bottom:1px solid var(--border); vertical-align:top; max-width:260px; overflow-wrap:anywhere; }
+/* The records scroll in their own box, both ways: one line a cell, so a long value never stretches the sheet. */
+.clawpage-table-wrap { flex:none; overflow:auto; max-height:min(420px, 55vh); container-type:inline-size; border:1px solid var(--border); border-radius:12px; background:var(--bg); }
+.clawpage-table { width:max-content; min-width:100%; border-collapse:collapse; font-size:var(--fs-sm); }
+.clawpage-table th { position:sticky; top:0; z-index:1; padding:8px 12px; text-align:left; font-size:11.5px; font-weight:500; color:var(--text-dim); background:var(--bg-soft); border-bottom:1px solid var(--border); white-space:nowrap; }
+.clawpage-table td { padding:9px 12px; border-bottom:1px solid var(--border); vertical-align:top; white-space:nowrap; }
 .clawpage-table tbody tr:last-child td { border-bottom:0; }
+.clawpage-table tbody tr[data-key] { cursor:pointer; }
+.clawpage-table tbody tr[data-key]:hover td, .clawpage-table tbody tr.is-open td { background:var(--accent-soft); }
+.clawpage-cell { display:block; max-width:16em; overflow:hidden; text-overflow:ellipsis; }
+button.clawpage-row-toggle { padding:0; border:0; background:none; color:inherit; font:inherit; cursor:pointer; }
+/* A record shown whole: below its row, as wide as the box shows, wherever the table is scrolled to. */
+.clawpage-table .clawpage-record-row td { padding:0; white-space:normal; background:var(--bg-soft); }
+.clawpage-record-full { position:sticky; left:0; box-sizing:border-box; width:100cqi; display:flex; flex-direction:column; gap:6px; padding:10px 12px; }
+.clawpage-record-full pre { margin:0; max-height:240px; overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; font-family:var(--mono); font-size:12px; line-height:1.5; }
 .clawpage-time { width:1%; white-space:nowrap; color:var(--text-dim); font-size:var(--fs-xs); }
 .clawpage-row-action { width:1%; padding:4px 8px !important; text-align:right; vertical-align:middle !important; }
 button.clawpage-row-delete { display:inline-grid; place-items:center; min-width:28px; height:28px; padding:0 8px; border-color:transparent; background:none; color:var(--text-dim); }
@@ -3759,6 +3778,12 @@ button.clawpage-version-restore.danger { background:var(--error); border-color:v
   .clawpage-sheet-actions { padding:14px; }
   .clawpage-sheet-body { padding:0 14px 14px; }
   .clawpage-confirm-actions { margin-left:0; }
+  .clawpage-delete-confirm { margin:0 14px 14px; }
+}
+/* Five permissions do not fit one line on a phone: three columns, two rows, each the same width. */
+@media(max-width:640px) {
+  .clawpage-segments { display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:2px; width:100%; }
+  .clawpage-segment { white-space:normal; text-align:center; padding:6px 4px; line-height:1.3; }
 }
 @media(max-width:900px) { .library-grid { grid-template-columns:repeat(auto-fill, minmax(104px, 1fr)); gap:12px 8px; } }
 @media(max-width:900px) { .task-list-scroll { padding:12px; } .task-list-meta { gap:8px; flex-wrap:wrap; } .task-group-head { top:-12px; } .task-list-tools { gap:8px; } .task-filters { flex-wrap:nowrap; overflow-x:auto; scrollbar-width:none; width:100%; } .task-filter { flex:none; } .task-search { max-width:none; margin-left:0; flex-basis:100%; } }

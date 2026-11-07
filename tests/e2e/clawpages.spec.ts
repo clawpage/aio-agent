@@ -182,7 +182,7 @@ test("the clawpages page is a home screen of mini apps and pages; an icon opens 
   await expect(tripSheet.locator(".clawpage-sheet-cover .clawpage-cover-glyph")).toHaveText("东");
   await expect(tripSheet.getByTestId("clawpage-data")).toHaveCount(0);
   await tripSheet.getByRole("button", { name: "删除这个 clawpage" }).click();
-  await expect(tripSheet.getByRole("alertdialog")).toContainText("里面的数据也一起删除");
+  await expect(tripSheet.getByRole("alertdialog")).toContainText("页面文件、历史版本都会删掉");
   await tripSheet.getByRole("button", { name: "确认删除" }).click();
   await expect(tripSheet).toHaveCount(0);
   await expect(page.locator('li[data-page="tokyo-trip"]')).toHaveCount(0);

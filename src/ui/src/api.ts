@@ -168,6 +168,8 @@ export const api = {
   /** A clawpage's cover picture; with its version the browser keeps it. */
   clawpageCoverUrl: (page: string, version?: number | null) => apiUrl(`/api/clawpages/${encodeURIComponent(page)}/cover${version ? `?v=${version}` : ""}`),
   clawpageDelete: (page: string) => request<void>(`/api/clawpages/${encodeURIComponent(page)}`, { method: "DELETE" }),
+  /** Take a clawpage offline (its link and data stop answering; everything is kept), or put it back online. */
+  clawpageSetOffline: (page: string, offline: boolean) => request<import("./types").Clawpage>(`/api/clawpages/${encodeURIComponent(page)}`, { method: "PATCH", body: { offline } }),
   /** Other people's agents allowed to maintain a clawpage. */
   clawpageCollaborators: (page: string) => request<{ collaborators: import("./types").ClawpageCollaborator[] }>(`/api/clawpages/${encodeURIComponent(page)}/collaborators`, { cache: "no-store" }),
   /** A new collaborator: its invitation (API and token) is shown once. */

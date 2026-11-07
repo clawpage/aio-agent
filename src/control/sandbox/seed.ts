@@ -879,11 +879,14 @@ def main():
     elif args.cmd == "cover":
         pages = call("GET", "/pages")["pages"]
         if args.missing:
-            chosen = [p for p in pages if not p.get("cover")]
+            # An offline page answers visitors 404: a picture of that would not be its cover.
+            chosen = [p for p in pages if not p.get("cover") and not p.get("offlineAt")]
         elif args.name:
             chosen = [p for p in pages if p["name"] == page_name(args.name)]
             if not chosen:
                 fail("The page does not exist: " + args.name)
+            if chosen[0].get("offlineAt"):
+                fail("The page is offline (the user took it down in the console), so there is nothing to render; only the user can put it back online there")
         else:
             fail("Name a page, or pass --missing")
         if args.missing:
@@ -969,7 +972,9 @@ def main():
         page = call("POST", "/pages/" + name, body)
         write_state(root, dict(state if state and state.get("name") == name else {}, name=name, updatedAt=page["updatedAt"], **({"api": REMOTE["api"], "token": REMOTE["token"], "owner": REMOTE["owner"]} if REMOTE else {})))
         page["ok"] = True
-        if not args.no_cover:
+        if page.get("offlineAt"):
+            page["offline"] = "Published, but the page stays offline: the user took it down in the console, so its link answers 404 and no cover or check was made. Tell the user; only they can put it back online, in the console."
+        elif not args.no_cover:
             covers = Covers()
             try:
                 page.update(covers.make(name, page["url"]))
@@ -1188,6 +1193,11 @@ $CP delete <name>                                                   # the page A
 - A pulled or published folder remembers the version it holds (\`.clawpage.json\`, never published). Publishing fails when the page changed since,
   for example because a collaborator published: \`pull <name> --force\` the new version, redo the change on it, publish again. \`publish --force\` replaces it anyway; only when the user wants exactly that.
 - Delete only when the user asks; tell them the data goes too.
+- **Offline pages**: the user can take a page offline in the console (its link and data answer 404 to everyone else; files, data and history stay).
+  \`list\` shows it with \`offlineAt\`. Publishing it still works but keeps it offline (the output says so, with no cover or check): tell the user.
+  Only the user brings it back online, in the console; you cannot.
+- **Deleted pages**: the user can also delete a page in the console. Its folder in the workspace stays, but publishing that folder again fails
+  ("deleted after this folder's version"), so a deleted page never comes back by itself. Publish it again only when the user asks (\`publish --force\` creates it anew, without the old data).
 - When a command fails, relay its \`error\` faithfully; do not pretend it worked.
 
 ## Undoing a change: earlier versions
