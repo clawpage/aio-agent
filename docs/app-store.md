@@ -46,7 +46,11 @@ env -u NODE_ENV APPLE_API_KEY=<Key ID> APPLE_API_ISSUER=<Issuer ID> APPLE_API_KE
 
 商店文案（名称 30、副标题 30、宣传文本 170、关键词 100、描述 4000 字符以内，已校验）在
 `docs/assets/app-store/<语言>/listing.json`：`zh-Hans`、`zh-Hant`、`en-US`、`es-MX`。
-截图由 `scripts/app-store.mts` 用真实界面和虚构演示任务生成（6.9 英寸 1320×2868；不登录真实账号）。
+截图由 `scripts/store-shots.mts` 生成（与 Google Play 共用，用法见脚本开头）：真实界面加虚构演示任务，不登录真实账号；
+截取主会话、执行过程、引用补充、侧栏与整屏的片段，排成五张海报（大标题 + 倾斜卡片，品牌靛紫与荧光黄绿），
+输出到 `app-store/<语言>/`，6.9 英寸 1320×2868、无透明通道（Connect 的 `APP_IPHONE_67` 截图组）。
+颜色取自 `src/ui/src/theme.css`，标题字体用 macOS 的 PingFang / SF，须在 Mac 上生成。
+已上架（`READY_FOR_SALE`）或在审的版本不能换截图：要么在新版本里换，要么先从审核中撤回当前版本、换好后重新提交。
 
 - 类别：效率（Productivity），次要类别可选“工具”。价格：免费。不含 App 内购买，App 里没有任何付费或外部购买入口。
 - 支持网址 / 营销网址：`https://agent.clawpage.ai/about.html`（含支持邮箱 `feedback@clawpage.ai`）；

@@ -23,8 +23,8 @@ AI 回复可能有误，仅供一般参考。一站不是医疗设备，不提�
 
 - 简体中文默认文案见上文。
 - 英语（美国）`en-US`、西语（拉丁美洲）`es-419`、繁体中文 `zh-TW` 的完整文案分别在对应目录的 `listing.json`；这些文件是各语言商店文案的来源。
-- 每种新增语言都有 `feature.svg` 和真实 UI 演示截图。应用 UI 的英语代码为 `en`，西语为 `es`，繁体为 `zh-TW`；商店区域代码与 UI 代码分别管理。
-- 从项目根执行 `npm run build`，然后 `npx tsx scripts/play-store.mts /absolute/output/directory`，为默认简体中文（`zh-CN`，宣传图用本目录的 `feature.svg`）和三种新增语言各输出 1024×500 宣传图和两张 1080×1920 截图。临时输出应放 workspace `.scratch/artifacts/`。
+- 应用 UI 的英语代码为 `en`，西语为 `es`，繁体为 `zh-TW`；商店区域代码与 UI 代码分别管理。
+- 截图和宣传图与 App Store 共用一个生成器：在 macOS 上从项目根执行 `npm run build:ui`，然后 `npx tsx scripts/store-shots.mts /absolute/output/directory`，`play-store/<区域>/` 下为四种语言各输出五张 1080×1920 截图和一张 1024×500 宣传图（`feature-<区域>.png`），另有总览 `overview.png`。每张是海报式排版：大标题加倾斜摆放的真实界面片段（主会话、执行过程、引用补充、侧栏、整屏），文案在脚本里按语言分别写。临时输出应放 workspace `.scratch/artifacts/`。
 - 生成器使用隔离浏览器和虚构任务，不登录真实账号；登录截图不显示语言选择器，语言与账户隐私入口都在配置页。
 - 宣传图和包含 AI 演示回复的主会话截图须通过 Play 的 AI 资源声明添加标签；图库的“管理标签”仅供内部组织，不能替代公开声明。
 - 本地生成、上传保存、提交审核和批准上线是不同状态，以 Play Console 发布概览为准。
@@ -33,7 +33,7 @@ AI 回复可能有误，仅供一般参考。一站不是医疗设备，不提�
 
 - 类别建议：效率（Productivity）；目标用户为成年人。
 - 应用图标：同目录 `icon-512.png`（512×512、不透明、满版方形，圆角和阴影由 Play 加）。它是把 `src/ui/public/icon-512.png` 铺在品牌靛紫 `#5a4fe0` 上压平得到的，标志位置大小不变；不要直接上传网页那张自带圆角、四角透明的图标，Play 的圆角比它小，透明角会露成白边。
-- Feature graphic：同目录 `feature.svg`，渲染为 1024×500 PNG；宣传图不是应用截图。
+- Feature graphic：由上述生成器输出（1024×500，不透明 PNG）；宣传图不是应用截图。
 - 真实截图须使用清空输入的登录页或审核专用成员的测试任务；不要上传真实用户的会话、邮箱、邀请码或工作空间资料。
 - 商店支持邮箱及发行地区须按用户明确选择填写。
 - 隐私与删除链接：部署验证后使用 `https://agent.clawpage.ai/privacy.html`、`https://agent.clawpage.ai/account-deletion.html`。
