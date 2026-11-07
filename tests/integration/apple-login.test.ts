@@ -57,6 +57,20 @@ it("registers a new Apple ID with its verified email, then signs the same Apple 
   expect(await (await h.request("/api/auth/session", {headers: {cookie: cookies(back)}})).json()).toMatchObject({authenticated: true, email: "stable-apple@privaterelay.appleid.com"});
 });
 
+it("refuses a suspended account's Apple sign-in with the account notice", async () => {
+  const userId = (h.ctx.db.prepare("SELECT id FROM owners WHERE email='stable-apple@privaterelay.appleid.com'").get() as {id: string}).id;
+  h.ctx.db.prepare("INSERT INTO meta (key, value) VALUES (?, ?)").run(`suspended:${userId}`, "1");
+  try {
+    const flow = await begin();
+    const refused = await verify(flow.client, token(claims(flow.nonce, "stable-apple")));
+    expect(refused.status).toBe(403);
+    expect(cookies(refused)).not.toContain("pa_session=");
+    expect(await refused.json()).toMatchObject({error: "account_suspended"});
+  } finally {
+    h.ctx.db.prepare("DELETE FROM meta WHERE key=?").run(`suspended:${userId}`);
+  }
+});
+
 it("refuses a wrong nonce, audience, issuer, signature, key, expiry or unverified email", async () => {
   const bad: Array<(nonce: string) => string> = [
     () => token(claims("other-nonce")),

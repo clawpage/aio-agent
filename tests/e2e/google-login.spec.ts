@@ -153,3 +153,17 @@ test("the web console, with no iOS shell, shows no Apple button", async ({page})
   await expect(page.getByRole("button", {name: "使用 Google 登录 / 注册"})).toBeVisible();
   await expect(page.getByRole("button", {name: "通过 Apple 登录"})).toHaveCount(0);
 });
+
+test("a suspended account's sign-in shows the account notice: Google on the web, and a password", async ({page}, info) => {
+  await setup(page, false);
+  await page.route("**/api/auth/login", r => r.fulfill({status: 403, json: {error: "account_suspended", message: "账号异常，已停止使用。如有疑问，请发邮件至 feedback@clawpage.ai"}}));
+  await page.goto("/login?google=suspended");
+  await expect(page.getByText("账号异常，已停止使用。如有疑问，请发邮件至 feedback@clawpage.ai")).toBeVisible();
+  await page.screenshot({path: info.outputPath("suspended.png"), fullPage: true});
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
+  await page.goto("/login");
+  await page.getByLabel("邮箱", {exact: true}).fill("stopped@example.com");
+  await page.getByLabel("密码", {exact: true}).fill("member-password-123");
+  await page.getByRole("button", {name: "登录", exact: true}).click();
+  await expect(page.getByText("账号异常，已停止使用。如有疑问，请发邮件至 feedback@clawpage.ai")).toBeVisible();
+});

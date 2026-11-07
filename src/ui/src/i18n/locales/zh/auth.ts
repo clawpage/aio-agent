@@ -21,6 +21,7 @@ export const auth = {
     inviteCode: "邀请码",
   },
   passwordMismatch: "两次输入的密码不一样",
+  suspended: "账号异常，已停止使用。如有疑问，请发邮件至 feedback@clawpage.ai",
   google: { activateOpen: "注册并进入",
     button: "使用 Google 登录 / 注册",
     inviteIntro: "首次使用需要邀请码，验证后即可进入。",

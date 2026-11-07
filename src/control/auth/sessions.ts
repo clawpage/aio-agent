@@ -1,6 +1,7 @@
 import { EventEmitter } from "node:events";
 import type { Db } from "../db.js";
 import { generateSecret, randomId, safeEqual, sha256Hex } from "./passwords.js";
+import { AccountSuspendedError, isSuspended } from "./suspension.js";
 
 export type SessionKind = "primary" | "workspace";
 
@@ -52,6 +53,7 @@ export class SessionStore {
     token: string;
     csrfToken: string;
   } {
+    if (isSuspended(this.#db, ownerId)) throw new AccountSuspendedError();
     const token = generateSecret(32);
     const csrfToken = generateSecret(24);
     const now = Date.now();
@@ -88,6 +90,7 @@ export class SessionStore {
     if (!row) return null;
     if (row.revoked_at !== null) return null;
     if (row.expires_at <= now) return null;
+    if (isSuspended(this.#db, row.owner_id)) return null;
 
     if (now - row.last_seen_at > this.#renewMs) {
       const expiresAt = now + this.#ttlMs;

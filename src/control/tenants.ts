@@ -9,6 +9,7 @@ import {startVaultAutofill} from './vault.js';
 import {quotaStatus} from './quota.js';
 import type {MemberModelGateway} from './memberModelGateway.js';
 import {getUser} from './auth/owner.js';
+import {isSuspended} from './auth/suspension.js';
 import {SPARE_ACCOUNT_KEY} from './auth/invites.js';
 import {randomId} from './auth/passwords.js';
 import {MEMBER_EFFORTS,MEMBER_GPT_MODEL,MEMBER_MODEL,MEMBER_MODELS,SCHEDULE_MODEL} from './auth/policy.js';
@@ -71,6 +72,7 @@ export class UserRuntimes {
     const user=getUser(this.root.db,id);
     if(!user) throw new Error('Unknown account');
     if(user.role==='owner') return this.root;
+    if(isSuspended(this.root.db,id)) throw new Error('Account suspended');
     let pending=this.entries.get(id);
     if(!pending){
       pending=this.spare?.id===id?this.adopt(user):this.create(user);

@@ -22,6 +22,7 @@ export const auth: typeof zh = {
     inviteCode: "Invite code",
   },
   passwordMismatch: "The passwords don't match",
+  suspended: "This account has been stopped due to unusual activity. If you have questions, email feedback@clawpage.ai",
   google: { activateOpen: "Register and continue",
     button: "Sign in / sign up with Google",
     inviteIntro: "The first time, you need an invite code. Once it's verified, you're in.",

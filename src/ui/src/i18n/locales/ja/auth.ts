@@ -23,6 +23,7 @@ export const auth: typeof zh = {
     inviteCode: '招待コード',
   },
   passwordMismatch: 'パスワードが一致しません',
+  suspended: '異常なアクティビティのため、このアカウントは停止されています。ご不明な点は feedback@clawpage.ai までメールでお問い合わせください',
   google: { activateOpen: '登録して始める',
     button: 'Google でログイン / 新規登録',
     inviteIntro: '初回は招待コードが必要です。確認が済むとすぐに使えます。',

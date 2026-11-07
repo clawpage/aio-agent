@@ -20,6 +20,7 @@ export const http: typeof zh = {
     passwordRequired: "請輸入密碼",
     locked: "密碼錯誤次數過多，帳號已暫時鎖定",
     wrongPassword: "密碼錯誤",
+    accountSuspended: "帳號異常，已停止使用。如有疑問，請寄信至 feedback@clawpage.ai",
     sessionExpired: "工作階段已過期，請重新登入",
     googleFailed: "Google 登入失敗或已過期，請重新登入",
     googleDisabled: "Google 登入尚未設定",

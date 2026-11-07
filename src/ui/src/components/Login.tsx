@@ -31,7 +31,8 @@ export function Login({ onSuccess, notice, username: named }: { onSuccess: () =>
   const [pending, setPending] = useState<Pending | null>(null);
   const pendingEmail = pending?.email ?? null;
   const [googleWaiting, setGoogleWaiting] = useState(false);
-  const googleError = useRef(new URLSearchParams(location.search).get("google") === "error");
+  /** A web Google sign-in that came back refused: `?google=error`, or `suspended` for a stopped account. */
+  const googleError = useRef(new URLSearchParams(location.search).get("google"));
 
   const [checking, setChecking] = useState(true);
   const [sessionError, setSessionError] = useState(false);
@@ -71,9 +72,9 @@ export function Login({ onSuccess, notice, username: named }: { onSuccess: () =>
             setGoogleEnabled(google.enabled);
             setAppleEnabled(apple.enabled);
             setPending(google.pending ? {provider: "google", email: google.pending.email} : apple.pending ? {provider: "apple", email: apple.pending.email} : null);
-            if (googleError.current) {
-              setError(t.auth.google.failed);
-              googleError.current = false;
+            if (googleError.current === "error" || googleError.current === "suspended") {
+              setError(googleError.current === "suspended" ? t.auth.suspended : t.auth.google.failed);
+              googleError.current = null;
             }
           } catch { /* Password sign-in remains available if the Google endpoint is unavailable. */ }
         }
@@ -116,7 +117,7 @@ export function Login({ onSuccess, notice, username: named }: { onSuccess: () =>
     void api.googleRedeem(detail.ticket).then(async result => {
       if (result.authenticated) await onRestored.current();
       else { setPending(result.pending ? {provider: "google", email: result.pending.email} : null); setError(null); }
-    }).catch(() => setError(t.auth.google.failed)).finally(() => {
+    }).catch(err => setError(err instanceof ApiError && err.code === "account_suspended" ? err.message : t.auth.google.failed)).finally(() => {
       submitting.current = false; setBusy(false); setChecking(false);
     });
   }), []);

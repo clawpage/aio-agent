@@ -4,6 +4,7 @@ import { audit } from "../db.js";
 import { originAllowed } from "../http/security.js";
 import { RegisterError, registerGoogleWithInvite } from "./invites.js";
 import { serializeCookie, sessionCookies } from "./sessions.js";
+import { isSuspended } from "./suspension.js";
 import { t } from "../i18n/index.js";
 import { followLoginTimezone } from "./loginTimezone.js";
 import { AppleLogin, AppleAuthError, APPLE_TTL, APPLE_CLIENT_COOKIE, type AppleFlow } from "./apple.js";
@@ -63,6 +64,10 @@ export function appleRouter(context: AppContext, apple = new AppleLogin(context.
     const user = apple.user(row);
     if (!user) { res.json({authenticated: false, pending: {email: row.email}}); return; }
     db.prepare("DELETE FROM apple_login_flows WHERE client_hash=?").run(row.client_hash);
+    if (isSuspended(db, user.id)) {
+      audit(db, "login_suspended", user.username, req.paCtx!.ip);
+      res.status(403).json({error: "account_suspended", message: t().http.auth.accountSuspended}); return;
+    }
     signIn(req, res, user.id, user.username);
     audit(db, "apple_login_ok", user.username, req.paCtx!.ip);
     context.analytics?.track("login", {userId: user.id, platform: req.get("x-client-platform"), props: {method: "apple", native: true}});

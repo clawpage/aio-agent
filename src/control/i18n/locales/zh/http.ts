@@ -19,6 +19,7 @@ export const http = {
     passwordRequired: "请输入密码",
     locked: "密码错误次数过多，账号已临时锁定",
     wrongPassword: "密码错误",
+    accountSuspended: "账号异常，已停止使用。如有疑问，请发邮件至 feedback@clawpage.ai",
     sessionExpired: "会话已过期，请重新登录",
     googleFailed: "Google 登录失败或已过期，请重新登录",
     googleDisabled: "Google 登录尚未配置",

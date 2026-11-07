@@ -77,6 +77,23 @@ it("returns an existing Google subject directly to its member account without an
   expect(await (await h.request("/api/auth/session", {headers: {cookie: cookies(result)}})).json()).toMatchObject({username: "stable-subject", role: "member"});
 });
 
+it("refuses a suspended account's Google sign-in with the account notice, on the web and in the app", async () => {
+  const userId = (h.ctx.db.prepare("SELECT id FROM owners WHERE username='stable-subject'").get() as {id: string}).id;
+  h.ctx.db.prepare("INSERT INTO meta (key, value) VALUES (?, ?)").run(`suspended:${userId}`, "1");
+  try {
+    const web = await callback(await begin(), "stable-subject");
+    expect(web.headers.get("location")).toBe("/login?google=suspended");
+    expect(cookies(web)).not.toContain("pa_session=");
+    const flow = await begin(true);
+    const handoff = new URL((await callback(flow, "stable-subject", true)).headers.get("location")!);
+    const redeem = await h.request("/api/auth/google/redeem", {method: "POST", headers: {...json, cookie: flow.client}, body: JSON.stringify({ticket: handoff.searchParams.get("ticket")})});
+    expect(redeem.status).toBe(403);
+    expect(await redeem.json()).toMatchObject({error: "account_suspended"});
+  } finally {
+    h.ctx.db.prepare("DELETE FROM meta WHERE key=?").run(`suspended:${userId}`);
+  }
+});
+
 it("never treats a matching email as an existing account link", async () => {
   const existing = await registerWithInvite(h.ctx.db, {email: "Linked@Example.com", password: "linked-password-123", code: ""});
   const flow = await begin();

@@ -20,6 +20,7 @@ export const http: typeof zh = {
     passwordRequired: "Enter your password",
     locked: "Too many wrong passwords. The account is temporarily locked",
     wrongPassword: "Wrong password",
+    accountSuspended: "This account has been stopped due to unusual activity. If you have questions, email feedback@clawpage.ai",
     sessionExpired: "Your session has expired. Please log in again",
     googleFailed: "Google sign-in failed or expired. Please sign in again",
     googleDisabled: "Google sign-in isn't set up",

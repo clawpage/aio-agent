@@ -38,6 +38,7 @@ import { SessionStore } from "./auth/sessions.js";
 import { TicketStore } from "./auth/tickets.js";
 import { LoginRateLimiter } from "./auth/ratelimit.js";
 import { ensureOwner } from "./auth/owner.js";
+import { activeMembers, pageAccount } from "./auth/suspension.js";
 import { SandboxContainer } from "./sandbox/container.js";
 import type { SandboxNode } from "./sandbox/node.js";
 import { SandboxNodes } from "./sandbox/nodes.js";
@@ -512,7 +513,7 @@ async function main(): Promise<void> {
     usageDb:async id=>id===ctx.cfg.runtimeUserId?ctx.db:(await ctx.runtimeForUser!(id)).db});
   ctx.share=new ShareStore({cfg:ctx.cfg,port:ctx.cfg.memberModelPort??4902,
     usernameOf:id=>account("SELECT username AS v FROM owners WHERE id=?",id),
-    userIdOf:name=>account("SELECT id AS v FROM owners WHERE username=?",name),
+    userIdOf:name=>pageAccount(ctx.db,name),
     data:new ClawpageData(ctx.cfg.dataDir),
     // A page's AI answers come from the signed-in visitor's own account, counted in its usage.
     ai});
@@ -617,8 +618,8 @@ async function main(): Promise<void> {
   });
   ctx.log.info("http server listening", { bind: ctx.cfg.bind, port: ctx.cfg.port });
 
-  const members=(ctx.db.prepare("SELECT id FROM owners WHERE role='member'").all() as {id:string}[]).map(user=>
-    users.resolve(user.id).catch(()=>ctx.log.error("member runtime unavailable",{userId:user.id})));
+  const members=activeMembers(ctx.db).map(id=>
+    users.resolve(id).catch(()=>ctx.log.error("member runtime unavailable",{userId:id})));
   // Requests wait until the accounts are loaded (at most 120 s): a turn that went on through a
   // restart would otherwise meet a gateway that does not know its account yet.
   void modelGateway.start(Promise.race([Promise.allSettled(members),new Promise(resolve=>setTimeout(resolve,120_000).unref())]))

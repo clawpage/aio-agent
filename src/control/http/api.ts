@@ -47,6 +47,7 @@ import { followLoginTimezone } from "../auth/loginTimezone.js";
 import { createSupportRequest, reviewSupportRequest, supportQueue, SupportError } from '../support.js';
 import { parseHttpUrl } from "../aio/client.js";
 import { COOKIE_NAMES, clearSessionCookies, serializeCookie, sessionCookies } from "../auth/sessions.js";
+import { isSuspended } from "../auth/suspension.js";
 import { safeRedirectPath } from "../auth/tickets.js";
 import { audit } from "../db.js";
 import { dispatchLog, recallStats } from "../tasks/recall.js";
@@ -371,6 +372,11 @@ export function createApiRouter(context: AppContext): Router {
           error: "invalid_credentials",
           message: after.locked ? t().http.auth.locked : t().http.auth.wrongPassword,
         });
+        return;
+      }
+      if (isSuspended(db, owner.id)) {
+        audit(db, "login_suspended", owner.username, ctx.ip);
+        res.status(403).json({ error: "account_suspended", message: t().http.auth.accountSuspended });
         return;
       }
       limiter.recordSuccess(ctx.ip);

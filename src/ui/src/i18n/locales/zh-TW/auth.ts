@@ -21,6 +21,7 @@ export const auth: typeof zh = {
     inviteCode: "邀請碼",
   },
   passwordMismatch: "兩次輸入的密碼不一樣",
+  suspended: "帳號異常，已停止使用。如有疑問，請寄信至 feedback@clawpage.ai",
   google: { activateOpen: "註冊並進入",
     button: "使用 Google 登入 / 註冊",
     inviteIntro: "首次使用需要邀請碼，驗證後即可進入。",

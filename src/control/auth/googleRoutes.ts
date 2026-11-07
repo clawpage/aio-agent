@@ -5,6 +5,7 @@ import { originAllowed } from "../http/security.js";
 import { generateSecret, sha256Hex } from "./passwords.js";
 import { RegisterError, registerGoogleWithInvite } from "./invites.js";
 import { serializeCookie, sessionCookies } from "./sessions.js";
+import { isSuspended } from "./suspension.js";
 import { t } from "../i18n/index.js";
 import { followLoginTimezone } from "./loginTimezone.js";
 import { GoogleLogin, GoogleAuthError, GOOGLE_TTL, GOOGLE_CLIENT_COOKIE, GOOGLE_BROWSER_COOKIE, type GoogleFlow } from "./google.js";
@@ -53,6 +54,13 @@ export function googleRouter(context: AppContext): Router {
       return;
     }
     const ctx = req.paCtx!;
+    if (isSuspended(db, user.id)) {
+      audit(db, "login_suspended", user.username, ctx.ip);
+      db.prepare("DELETE FROM google_login_flows WHERE state_hash=?").run(row.state_hash);
+      if (redirect) res.redirect(303, "/login?google=suspended");
+      else res.status(403).json({error: "account_suspended", message: t().http.auth.accountSuspended});
+      return;
+    }
     const auth = sessions.create(user.id, "primary", {ip: ctx.ip, userAgent: req.get("user-agent")});
     res.setHeader("Set-Cookie", [...sessionCookies("primary", auth.token, auth.csrfToken, {secure: ctx.secure, ttlMs: cfg.sessionTtlMs}),
       cookie(GOOGLE_CLIENT_COOKIE, "", ctx.secure)]);

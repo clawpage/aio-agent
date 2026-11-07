@@ -20,6 +20,7 @@ export const http: typeof zh = {
     passwordRequired: "Escribe tu contraseña",
     locked: "Demasiadas contraseñas incorrectas. La cuenta está bloqueada temporalmente",
     wrongPassword: "Contraseña incorrecta",
+    accountSuspended: "Esta cuenta se ha detenido por actividad inusual. Si tienes preguntas, escribe a feedback@clawpage.ai",
     sessionExpired: "Tu sesión ha caducado. Vuelve a iniciar sesión",
     googleFailed: "El acceso con Google falló o caducó. Vuelve a iniciar sesión",
     googleDisabled: "El acceso con Google no está configurado",

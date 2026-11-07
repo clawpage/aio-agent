@@ -290,6 +290,9 @@
   `iss`、`aud`（`PA_APPLE_CLIENT_ID`，默认 bundle id `ai.clawpage.agent`，置空即关闭）、过期时间、nonce 与已验证邮箱，每个 nonce 只用一次。已关联的 Apple ID（`apple_identities`）直接登录；
   新的 Apple ID 与 Google 一样走注册（以 Apple 给的邮箱为账号邮箱，可能是 `privaterelay.appleid.com` 转发地址，不按邮箱自动关联已有账号），邀请码规则相同。不保存任何 Apple 令牌。
   猜错邀请码与输错密码共用按 IP 的失败锁定；锁定只拦密码登录和填邀请码，不拦 Google / Apple 登录（用 Google 注册、没有密码的人试过几次密码后仍能用 Google 登进来）。设置 `PA_INVITE_EMAIL` 后注册页显示申请邮箱。
+- **停用成员账号**：`docker exec aio-control-1 node bin/suspend-user.mjs <用户名>`（host 模式 `node --env-file=var/runtime.env bin/suspend-user.mjs …`）在中央库写 `suspended:<id>` 并登出它的全部会话。
+  此后密码、Google、Apple 登录都返回 403 `account_suspended`，登录页显示「账号异常，已停止使用。如有疑问，请发邮件至 feedback@clawpage.ai」（五种语言）；输错密码仍只提示密码错误。
+  它的公开分享页（含 `.data`/`.api`/`.auth`/`.ai`）立即按不存在返回 404，控制面不再为它加载运行环境；已加载的运行环境（任务、定时任务）在下次重启控制面后停下，沙箱容器另行停止。数据全部保留，`--lift` 恢复。
 - **分配成员模型**：`node --env-file=var/runtime.env bin/set-user-model.mjs <用户名> <gpt-6.1-sol|claude-sonnet-5-5> [auto|low|medium|high]`，
   重启后生效；省略推理强度时不修改，`auto` 改回「自动」。从未分配过推理强度（没有 `member_effort:<id>`）的成员即为「自动」；分配过固定档位的保持不变。分配 Claude 需要 owner 已配置 Claude Code 凭据，分配 `gpt-6.1-sol` 需要控制面已
   `codex-login`（`AIO_HOST_CODEX=on`），用量分别计入对应账号。
