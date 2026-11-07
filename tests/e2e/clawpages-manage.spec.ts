@@ -13,11 +13,12 @@ const PAGES: Clawpage[] = [
   },
   { name: "old-quiz", title: "旧测验", url: `${WS}/u/owner/share/old-quiz/`, files: 1, bytes: 2_000, updatedAt: now - 86_400_000 * 3, updatedBy: null, collaborators: 0, tables: [], cover: null, offlineAt: now - 86_400_000 },
 ];
-const by = { id: "owner_1", name: "owner", email: null };
+/** A signed-in visitor as the owner sees them: their public id and nickname. */
+const by = { id: "6a1d3c2e-8f4b-4d7a-9c10-2b3e4f5a6b7c", name: "小站" };
 const RECORDS: ClawpageRecord[] = [
-  { key: "owner_1.state", value: { game: GAME, human: 1, mode: "coach", review: "黑棋第 12 手可以考虑先补断点，再去抢大场；这一步之后白棋的厚味开始发挥作用。", level: "beginner", extra: "hidden" }, createdAt: now - 900_000, updatedAt: now - 900_000, by },
-  { key: "owner_1.prefs", value: { game: null, human: 2, mode: "play", review: "", level: "easy" }, createdAt: now - 800_000, updatedAt: now - 800_000, by },
-  { key: "owner_1.last", value: { game: { n: 13 }, human: 1, mode: "coach", review: "short", level: "hard" }, createdAt: now - 700_000, updatedAt: now - 700_000, by },
+  { key: "6a1d3c2e-8f4b-4d7a-9c10-2b3e4f5a6b7c.state", value: { game: GAME, human: 1, mode: "coach", review: "黑棋第 12 手可以考虑先补断点，再去抢大场；这一步之后白棋的厚味开始发挥作用。", level: "beginner", extra: "hidden" }, createdAt: now - 900_000, updatedAt: now - 900_000, by },
+  { key: "6a1d3c2e-8f4b-4d7a-9c10-2b3e4f5a6b7c.prefs", value: { game: null, human: 2, mode: "play", review: "", level: "easy" }, createdAt: now - 800_000, updatedAt: now - 800_000, by },
+  { key: "6a1d3c2e-8f4b-4d7a-9c10-2b3e4f5a6b7c.last", value: { game: { n: 13 }, human: 1, mode: "coach", review: "short", level: "hard" }, createdAt: now - 700_000, updatedAt: now - 700_000, by },
 ];
 
 /** How the server answers 打开's request for an owner link: at once, never, out of reach (the edge's 502), or the page gone. */
@@ -197,10 +198,10 @@ for (const width of [390, 360]) {
     await rows.first().locator("td").nth(3).click();
     const record = data.getByTestId("clawpage-record");
     await expect(record).toBeVisible();
-    await expect(rows.first().getByRole("button", { name: "查看完整数据（owner_1.state）" })).toHaveAttribute("aria-expanded", "true");
+    await expect(rows.first().getByRole("button", { name: "查看完整数据（6a1d3c2e-8f4b-4d7a-9c10-2b3e4f5a6b7c.state）" })).toHaveAttribute("aria-expanded", "true");
     await expect(record.locator("pre")).toContainText('"komi": 6.5');
     await expect(record.locator("pre")).toContainText("这一步之后白棋的厚味开始发挥作用");
-    await expect(record).toContainText("键 owner_1.state");
+    await expect(record).toContainText("键 6a1d3c2e-8f4b-4d7a-9c10-2b3e4f5a6b7c.state");
     const [full, box] = await Promise.all([record.locator(".clawpage-record-full").boundingBox(), wrap.boundingBox()]);
     expect(full!.x).toBeGreaterThanOrEqual(box!.x - 1);
     expect(full!.x + full!.width).toBeLessThanOrEqual(box!.x + box!.width + 1);
@@ -209,9 +210,9 @@ for (const width of [390, 360]) {
     await page.waitForTimeout(200);
     await page.screenshot({ path: info.outputPath(`clawpage-record-${viewport.width}.png`) });
     // Deleting a record does not open it.
-    await rows.nth(1).getByRole("button", { name: "删除这条数据（owner_1.prefs）" }).click();
-    await expect(data.getByTestId("clawpage-record")).toContainText("owner_1.state");
-    await rows.first().getByRole("button", { name: "查看完整数据（owner_1.state）" }).click();
+    await rows.nth(1).getByRole("button", { name: "删除这条数据（6a1d3c2e-8f4b-4d7a-9c10-2b3e4f5a6b7c.prefs）" }).click();
+    await expect(data.getByTestId("clawpage-record")).toContainText("6a1d3c2e-8f4b-4d7a-9c10-2b3e4f5a6b7c.state");
+    await rows.first().getByRole("button", { name: "查看完整数据（6a1d3c2e-8f4b-4d7a-9c10-2b3e4f5a6b7c.state）" }).click();
     await expect(data.getByTestId("clawpage-record")).toHaveCount(0);
   });
 }

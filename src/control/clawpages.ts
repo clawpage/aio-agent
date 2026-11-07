@@ -1,7 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
+import { t } from "./i18n/index.js";
 
 /**
  * Clawpages' data: the tables a published page (a "clawpage", see share.ts) reads
@@ -60,8 +61,13 @@ export class DataError extends Error {
 export interface TableSummary { name: string; permission: Permission; records: number; bytes: number; createdAt: number; updatedAt: number }
 /** `by`: who wrote the record first, for the owner; `mine`: whether the signed-in visitor asking wrote it. */
 export interface RecordSummary { key: string; value: unknown; createdAt: number; updatedAt: number; by?: Visitor; mine?: boolean }
-/** A person signed in to a page: their account's id, its name and email (null for an account without one). */
-export interface Visitor { id: string; name: string; email: string | null }
+/**
+ * A person signed in to a page, as the page and its owner know them: their account's public id (a UUID,
+ * the same on every page) and nickname. Which account that is stays on the host (`cp_grants.account_id`).
+ */
+export interface Visitor { id: string; name: string }
+/** Who an account id is to the pages (src/control/profile.ts), for moving grants made before public ids. */
+export type PageIdentityOf = (accountId: string) => Visitor | null;
 /**
  * `owner` may use every table. Managing tables (permissions, dropping) also takes `manage`: the account
  * itself has it, while an owner link (which runs whatever script the page holds) and a collaborator
@@ -91,7 +97,7 @@ CREATE TABLE IF NOT EXISTS cp_collaborators (
 CREATE INDEX IF NOT EXISTS cp_collaborators_page ON cp_collaborators (user_id, page);
 CREATE TABLE IF NOT EXISTS cp_grants (
   user_id TEXT NOT NULL, page TEXT NOT NULL, visitor_id TEXT NOT NULL, name TEXT NOT NULL, email TEXT,
-  granted_at INTEGER NOT NULL, last_seen_at INTEGER, active INTEGER NOT NULL DEFAULT 1,
+  granted_at INTEGER NOT NULL, last_seen_at INTEGER, active INTEGER NOT NULL DEFAULT 1, account_id TEXT,
   PRIMARY KEY (user_id, page, visitor_id)
 );
 `;
@@ -128,7 +134,7 @@ export class ClawpageData {
   #hits = new Map<string, number>();
   #window = 0;
 
-  constructor(dataDir: string) {
+  constructor(dataDir: string, identityOf?: PageIdentityOf) {
     fs.mkdirSync(dataDir, { recursive: true, mode: 0o700 });
     this.db = new DatabaseSync(path.join(dataDir, "clawpages.sqlite"));
     this.db.exec("PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;");
@@ -137,6 +143,7 @@ export class ClawpageData {
     if (!(this.db.prepare("PRAGMA table_info(cp_records)").all() as Array<{ name: string }>).some((c) => c.name === "author")) {
       this.db.exec("ALTER TABLE cp_records ADD COLUMN author TEXT");
     }
+    if (!(this.db.prepare("PRAGMA table_info(cp_grants)").all() as Array<{ name: string }>).some((c) => c.name === "account_id")) this.#publicVisitors(identityOf);
     // Owner links are signed with a key of this deployment's own; it never leaves the host.
     const keyFile = path.join(dataDir, "clawpages-key");
     try {
@@ -150,6 +157,43 @@ export class ClawpageData {
 
   close(): void {
     this.db.close();
+  }
+
+  /**
+   * Grants, record authors and per-user keys once named the visitor by their account id (and kept
+   * their email). From now on a page knows a visitor only by their public id: every place the old id
+   * was stored for a page (grants, authors, per-user key prefixes, keys and string values equal to it,
+   * which a page kept from `cp.user.id`) takes the public id instead, emails are dropped and names
+   * become nicknames. The account id stays only in `cp_grants.account_id`. Runs once, in one transaction.
+   */
+  #publicVisitors(identityOf?: PageIdentityOf): void {
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      this.db.exec("ALTER TABLE cp_grants ADD COLUMN account_id TEXT");
+      const ids = new Map<string, Visitor>();
+      const grants = this.db.prepare("SELECT DISTINCT user_id, page, visitor_id FROM cp_grants").all() as Array<{ user_id: string; page: string; visitor_id: string }>;
+      for (const g of grants) {
+        let who = ids.get(g.visitor_id);
+        // An account deleted since still gets an id of its own, so its records stay apart from everyone else's.
+        if (!who) {
+          const id = randomUUID();
+          who = identityOf?.(g.visitor_id) ?? { id, name: t().http.profile.anonymous(id.slice(0, 4).toUpperCase()) };
+          ids.set(g.visitor_id, who);
+        }
+        const old = g.visitor_id, scope = [g.user_id, g.page];
+        this.db.prepare("UPDATE cp_grants SET account_id=?, visitor_id=?, name=?, email=NULL WHERE user_id=? AND page=? AND visitor_id=?").run(old, who.id, who.name, ...scope, old);
+        this.db.prepare("UPDATE cp_records SET author=? WHERE user_id=? AND page=? AND author=?").run(who.id, ...scope, old);
+        this.db.prepare("UPDATE cp_records SET key=?||substr(key,?) WHERE user_id=? AND page=? AND (key=? OR substr(key,1,?)=?)").run(who.id, old.length + 1, ...scope, old, old.length + 1, `${old}.`);
+        this.db.prepare("UPDATE cp_records SET value=replace(value,?,?) WHERE user_id=? AND page=? AND instr(value,?)>0").run(JSON.stringify(old), JSON.stringify(who.id), ...scope, JSON.stringify(old));
+      }
+      this.db.exec("UPDATE cp_grants SET email=NULL");
+      this.db.exec("UPDATE cp_records SET bytes=length(CAST(value AS BLOB))");
+      this.db.exec("UPDATE cp_tables SET bytes=(SELECT COALESCE(SUM(r.bytes),0) FROM cp_records r WHERE r.user_id=cp_tables.user_id AND r.page=cp_tables.page AND r.tbl=cp_tables.name)");
+      this.db.exec("COMMIT");
+    } catch (err) {
+      this.db.exec("ROLLBACK");
+      throw err;
+    }
   }
 
   // ------------------------------------------------------------------ owner links
@@ -223,9 +267,14 @@ export class ClawpageData {
    * A visitor allowed a page to know who they are (and to use their AI): in force until they sign
    * out of it. Who they are stays on record after that, so the owner still knows whose records are whose.
    */
-  grant(userId: string, page: string, visitor: Visitor, now = Date.now()): void {
-    this.db.prepare("INSERT INTO cp_grants (user_id,page,visitor_id,name,email,granted_at,last_seen_at,active) VALUES (?,?,?,?,?,?,?,1) ON CONFLICT(user_id,page,visitor_id) DO UPDATE SET name=excluded.name, email=excluded.email, granted_at=excluded.granted_at, last_seen_at=excluded.last_seen_at, active=1")
-      .run(userId, page, visitor.id, visitor.name, visitor.email, now, now);
+  grant(userId: string, page: string, visitor: Visitor, accountId: string, now = Date.now()): void {
+    this.db.prepare("INSERT INTO cp_grants (user_id,page,visitor_id,name,email,granted_at,last_seen_at,active,account_id) VALUES (?,?,?,?,NULL,?,?,1,?) ON CONFLICT(user_id,page,visitor_id) DO UPDATE SET name=excluded.name, email=NULL, granted_at=excluded.granted_at, last_seen_at=excluded.last_seen_at, active=1, account_id=excluded.account_id")
+      .run(userId, page, visitor.id, visitor.name, now, now, accountId);
+  }
+
+  /** The account a page's visitor signed in with (for their own AI and usage); never told to the page. */
+  accountOf(userId: string, page: string, visitorId: string): string | null {
+    return (this.db.prepare("SELECT account_id FROM cp_grants WHERE user_id=? AND page=? AND visitor_id=? AND active=1").get(userId, page, visitorId) as { account_id: string | null } | undefined)?.account_id ?? null;
   }
 
   granted(userId: string, page: string, visitorId: string): boolean {
@@ -239,8 +288,14 @@ export class ClawpageData {
 
   /** A token naming a signed-in visitor on one page, signed apart from owner links (they never pass for one another). */
   visitorToken(userId: string, page: string, visitor: Visitor, now = Date.now()): string {
-    const body = Buffer.from(JSON.stringify({ v: visitor.id, n: visitor.name, m: visitor.email, u: userId, p: page, e: now + VISITOR_TOKEN_MS })).toString("base64url");
-    return `${VISITOR_PREFIX}${body}.${createHmac("sha256", this.#key).update(VISITOR_PREFIX + body).digest("base64url")}`;
+    // The page can read this body (the SDK does): it names the visitor only as the page may know them, and
+    // the page's account only through the signature, so no account id is in it.
+    const body = Buffer.from(JSON.stringify({ v: visitor.id, n: visitor.name, p: page, e: now + VISITOR_TOKEN_MS })).toString("base64url");
+    return `${VISITOR_PREFIX}${body}.${this.#visitorSignature(body, userId).toString("base64url")}`;
+  }
+
+  #visitorSignature(body: string, userId: string): Buffer {
+    return createHmac("sha256", this.#key).update(`${VISITOR_PREFIX}${body}\u0000${userId}`).digest();
   }
 
   /**
@@ -277,26 +332,26 @@ export class ClawpageData {
     if (!token.startsWith(VISITOR_PREFIX) || token.length > 1200) return null;
     const [body, sig] = token.slice(VISITOR_PREFIX.length).split(".");
     if (!body || !sig) return null;
-    const expected = createHmac("sha256", this.#key).update(VISITOR_PREFIX + body).digest();
+    const expected = this.#visitorSignature(body, userId);
     const given = Buffer.from(sig, "base64url");
     if (given.length !== expected.length || !timingSafeEqual(given, expected)) return null;
-    let claim: { v?: unknown; n?: unknown; m?: unknown; u?: unknown; p?: unknown; e?: unknown };
+    let claim: { v?: unknown; n?: unknown; p?: unknown; e?: unknown };
     try {
       claim = JSON.parse(Buffer.from(body, "base64url").toString()) as typeof claim;
     } catch {
       return null;
     }
-    if (claim.u !== userId || claim.p !== page || typeof claim.e !== "number" || claim.e <= now || typeof claim.v !== "string") return null;
-    const row = this.db.prepare("SELECT name,email,last_seen_at FROM cp_grants WHERE user_id=? AND page=? AND visitor_id=? AND active=1").get(userId, page, claim.v) as { name: string; email: string | null; last_seen_at: number | null } | undefined;
+    if (claim.p !== page || typeof claim.e !== "number" || claim.e <= now || typeof claim.v !== "string") return null;
+    const row = this.db.prepare("SELECT name,last_seen_at FROM cp_grants WHERE user_id=? AND page=? AND visitor_id=? AND active=1").get(userId, page, claim.v) as { name: string; last_seen_at: number | null } | undefined;
     if (!row) return null;
     if (!row.last_seen_at || now - row.last_seen_at > 60_000) this.db.prepare("UPDATE cp_grants SET last_seen_at=? WHERE user_id=? AND page=? AND visitor_id=?").run(now, userId, page, claim.v);
-    return { id: claim.v, name: row.name, email: row.email };
+    return { id: claim.v, name: row.name };
   }
 
   /** The people signed in to a page, most recent first: who the owner's per-user records belong to. */
   visitors(userId: string, page: string): Array<Visitor & { grantedAt: number; lastSeenAt: number | null }> {
-    return (this.db.prepare("SELECT visitor_id,name,email,granted_at,last_seen_at FROM cp_grants WHERE user_id=? AND page=? ORDER BY COALESCE(last_seen_at,granted_at) DESC").all(userId, page) as Array<{ visitor_id: string; name: string; email: string | null; granted_at: number; last_seen_at: number | null }>)
-      .map((r) => ({ id: r.visitor_id, name: r.name, email: r.email, grantedAt: r.granted_at, lastSeenAt: r.last_seen_at }));
+    return (this.db.prepare("SELECT visitor_id,name,granted_at,last_seen_at FROM cp_grants WHERE user_id=? AND page=? ORDER BY COALESCE(last_seen_at,granted_at) DESC").all(userId, page) as Array<{ visitor_id: string; name: string; granted_at: number; last_seen_at: number | null }>)
+      .map((r) => ({ id: r.visitor_id, name: r.name, grantedAt: r.granted_at, lastSeenAt: r.last_seen_at }));
   }
 
   // ------------------------------------------------------------------ rate limits
@@ -449,8 +504,8 @@ export class ClawpageData {
     const by = (id: string): Visitor => {
       let who = people.get(id);
       if (!who) {
-        const row = this.db.prepare("SELECT name,email FROM cp_grants WHERE user_id=? AND page=? AND visitor_id=?").get(t.user_id, t.page, id) as { name: string; email: string | null } | undefined;
-        who = { id, name: row?.name ?? id, email: row?.email ?? null };
+        const row = this.db.prepare("SELECT name FROM cp_grants WHERE user_id=? AND page=? AND visitor_id=?").get(t.user_id, t.page, id) as { name: string } | undefined;
+        who = { id, name: row?.name ?? id };
         people.set(id, who);
       }
       return who;

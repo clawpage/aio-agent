@@ -45,6 +45,7 @@ export const knowledge = {
     food: "饮食",
     learning: "学习",
     other: "其他",
+    profile: "个人资料",
   } as Record<string, string>,
   detail: {
     back: "← 返回知识库",
@@ -62,6 +63,8 @@ export const knowledge = {
     superseded: "已被更新",
     sources: "来源",
     unknownTask: "已删除的任务",
+    /** A claim copied from the person's profile (settings), not from a task. */
+    fromProfile: "来自你的个人资料",
     linksTitle: "关系",
     relOut: {
       about: "关于",

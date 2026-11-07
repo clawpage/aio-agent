@@ -34,7 +34,7 @@ export const clawpages: typeof zh = {
     heading: (title: string) => `「${title}」にログイン`,
     madeBy: (owner: string) => `${owner} さんが作ったページ`,
     intro: "許可すると、このページは次のことができます：",
-    identity: (who: string) => `あなたが誰かを知る：${who}`,
+    identity: (who: string) => `ニックネームを見る：${who}（メールアドレスやユーザー名は見えません）`,
     data: "あなたとしてこのページにデータを保存する",
     ai: "あなたの AI でこのページのリクエストに回答する（あなたの利用量に計上）。ファイルや記憶、その他のデータにはアクセスできません",
     remember: "次回からはこのページを開くと自動でログインします。ページでログアウトすると取り消せます。",

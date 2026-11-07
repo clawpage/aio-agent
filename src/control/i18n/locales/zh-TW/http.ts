@@ -226,4 +226,24 @@ export const http: typeof zh = {
   share: {
     notFound: "頁面不存在或已刪除",
   },
+  profile: {
+    invalid: "資料格式不對",
+    tooLong: (field: string, max: number) => `${field}最多 ${max} 個字`,
+    sensitive: "資料裡像是有密碼、驗證碼、證件號碼或卡號，請刪掉後再儲存",
+    fields: { nickname: "暱稱", preferredName: "稱呼", location: "所在地或時區", language: "常用語言", occupation: "職業或身分", interests: "興趣", notes: "想讓助理注意的事" } as Record<string, string>,
+    anonymous: (code: string) => `一站使用者 ${code}`,
+    memory: {
+      title: (who: string) => `${who} 的個人資料`,
+      summary: (who: string) => `${who} 在設定頁自己填寫的資料，以此為準；會隨資料修改而更新。`,
+      claims: {
+        nickname: (who: string, v: string) => `${who} 的暱稱是「${v}」`,
+        preferredName: (who: string, v: string) => `${who} 希望被稱呼為「${v}」`,
+        location: (who: string, v: string) => `${who} 的所在地或時區：${v}`,
+        language: (who: string, v: string) => `${who} 常用的語言：${v}`,
+        occupation: (who: string, v: string) => `${who} 的職業或身分：${v}`,
+        interests: (who: string, v: string) => `${who} 的興趣：${v}`,
+        notes: (who: string, v: string) => `${who} 希望助理注意：${v}`,
+      },
+    },
+  },
 };

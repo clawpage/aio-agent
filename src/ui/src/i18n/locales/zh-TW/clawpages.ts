@@ -34,7 +34,7 @@ export const clawpages: typeof zh = {
     heading: (title: string) => `登入到「${title}」`,
     madeBy: (owner: string) => `${owner} 做的 clawpage`,
     intro: "允許後，這個頁面可以：",
-    identity: (who: string) => `知道你是誰：${who}`,
+    identity: (who: string) => `知道你的暱稱：${who}（看不到你的電子郵件和帳號名稱）`,
     data: "用你的身分在這個頁面儲存資料",
     ai: "用你的 AI 回答這個頁面的請求，計入你的用量；它碰不到你的檔案、記憶和其他資料",
     remember: "之後再打開這個頁面會自動登入；在頁面裡登出即可撤銷。",

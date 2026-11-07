@@ -491,7 +491,7 @@ function ClawpageData({ page, onChanged, onError }: { page: Clawpage; onChanged:
           {/* A tap anywhere on the row shows the whole record; its time is the button that says so. */}
           <tr data-key={r.key} className={opened === r.key ? "is-open" : undefined} onClick={() => setOpened((o) => o === r.key ? null : r.key)}>
             <td className="clawpage-time"><button type="button" className="clawpage-row-toggle" aria-expanded={opened === r.key} aria-label={t.clawpages.expandRecord(r.key)}><MessageTime at={r.updatedAt} now={now}/></button></td>
-            {authored && <td><span className="clawpage-cell">{r.by ? r.by.email ?? r.by.name : ""}</span></td>}
+            {authored && <td><span className="clawpage-cell">{r.by?.name ?? ""}</span></td>}
             {columns.length ? columns.map((c) => <td key={c}><span className="clawpage-cell">{isObject(r.value) ? cell(r.value[c]) : ""}</span></td>) : <td><span className="clawpage-cell">{cell(r.value)}</span></td>}
             <td className="clawpage-row-action"><button type="button" className={`tiny clawpage-row-delete ${armed === r.key ? "danger" : "ghost"}`} aria-label={t.clawpages.deleteRecord(r.key)} title={t.clawpages.deleteRecord(r.key)} onClick={(event) => { event.stopPropagation(); void removeRow(r.key); }}>{armed === r.key ? t.clawpages.confirmDeleteRecord : <Icon d={CLOSE}/>}</button></td>
           </tr>

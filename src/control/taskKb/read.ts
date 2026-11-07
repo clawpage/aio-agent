@@ -130,6 +130,8 @@ export async function kbSourceText(db: Db, ownerId: string, id: string, readFile
     const start = Math.max(0, at - 1500);
     return at < 0 ? null : text.slice(start, start + 3000 + s.excerpt.length);
   };
+  // The person's own words, written on the settings page (their profile): nothing else to read.
+  if (s.kind === "manual") return { ...base, state: "current", note: "The person wrote this themselves (their profile on the settings page)." };
   if (s.path) {
     let file: { text: string; sha256: string } | null = null;
     try { file = await readFile(path.posix.join(workspaceDir, s.path)); } catch { return { ...base, path: s.path, state: "unreachable", note: "The sandbox is not reachable right now; the quote above is what was recorded." }; }

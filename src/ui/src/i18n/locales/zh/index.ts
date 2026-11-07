@@ -25,8 +25,9 @@ import { files } from "./files";
 import { library } from "./library";
 import { clawpages } from "./clawpages";
 import { cards } from "./cards";
+import { profile } from "./profile";
 
 /** Chinese is the reference language: its shape is the contract every other language matches. */
-export const zh = { support, common, app, auth, nav, time, voice, usage, analytics, gadget, chat, feed, dispatch, workspace, browser, phone, userBrowser, macTerminal, settings, tasks, schedules, vault, knowledge, files, library, clawpages, cards };
+export const zh = { support, common, app, auth, nav, time, voice, usage, analytics, gadget, chat, feed, dispatch, workspace, browser, phone, userBrowser, macTerminal, settings, tasks, schedules, vault, knowledge, files, library, clawpages, cards, profile };
 
 export type Messages = typeof zh;

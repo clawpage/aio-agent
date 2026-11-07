@@ -20,7 +20,7 @@ let ownerToken: string;
 let session: { cookie: string; csrf: string };
 let member: { cookie: string; csrf: string };
 const b64 = (text: string) => Buffer.from(text).toString("base64");
-const VISITOR = { id: "user_rui", name: "rui", email: "rui@example.com" };
+const VISITOR = { id: "0d6b2f7a-3c1e-4b8d-9a5f-6e7c8d9e0f1a", name: "rui" };
 
 beforeAll(async () => {
   h = await startHarness();
@@ -99,7 +99,7 @@ it("takes a page offline for everyone but its owner, keeps everything, and puts 
   store.data!.createTable("owner_1", "poll", "votes", "read-public");
   store.data!.put("owner_1", "poll", "votes", "alice", { pick: "noodles", note: "x".repeat(400) }, { owner: true });
   const collaborator = store.data!.addCollaborator("owner_1", "poll", "Rui's agent").token;
-  store.data!.grant("owner_1", "poll", VISITOR);
+  store.data!.grant("owner_1", "poll", VISITOR, "user_rui");
   const visitor = store.data!.visitorToken("owner_1", "poll", VISITOR);
 
   const live = await reach("poll", collaborator, visitor);
@@ -187,7 +187,7 @@ it("deletes a page with all its data for good, and a folder of the deleted page 
   store.data!.createTable("owner_1", "trip", "secret", "private");
   store.data!.put("owner_1", "trip", "plans", "day1", { where: "Tokyo" }, { owner: true });
   const collaborator = store.data!.addCollaborator("owner_1", "trip", "Mom's agent").token;
-  store.data!.grant("owner_1", "trip", VISITOR);
+  store.data!.grant("owner_1", "trip", VISITOR, "user_rui");
   const visitor = store.data!.visitorToken("owner_1", "trip", VISITOR);
   expect(store.versions("owner_1", "trip")).toHaveLength(1);
 

@@ -47,6 +47,7 @@ export const knowledge: typeof zh = {
     food: "食事",
     learning: "学び",
     other: "その他",
+    profile: "プロフィール",
   },
   detail: {
     back: "← ナレッジベースに戻る",
@@ -64,6 +65,7 @@ export const knowledge: typeof zh = {
     superseded: "更新済み",
     sources: "出典",
     unknownTask: "削除されたタスク",
+    fromProfile: "あなたのプロフィールから",
     linksTitle: "関連",
     relOut: {
       about: "対象",

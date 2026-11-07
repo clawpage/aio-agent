@@ -61,7 +61,10 @@ it("signs a visitor in through the console, once per page, and back with a token
     // Signed in to the console, allowed once.
     const { cookie, csrf } = await login(h);
     const info = (await (await h.request("/api/clawpage-sso/page?owner=owner&page=toefl", { headers: { cookie } })).json()) as { account: Visitor };
-    expect(info.account).toMatchObject({ id: "owner_1", name: "owner" });
+    // The page will know the account by its public id and a name made from it (no nickname yet): no username, email or account id.
+    const publicId = (h.ctx.db.prepare("SELECT public_id FROM owners WHERE id='owner_1'").get() as { public_id: string }).public_id;
+    expect(publicId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+    expect(info.account).toEqual({ id: publicId, name: `Clawpage user ${publicId.slice(0, 4).toUpperCase()}` });
     expect((await h.request("/api/clawpage-sso/authorize?owner=owner&page=toefl&silent=1", { headers: { cookie } })).headers.get("location")).toMatch(/#cpv=none$/);
     const grant = { method: "POST", headers: { cookie, "content-type": "application/json", "x-csrf-token": csrf }, body: JSON.stringify({ owner: "owner", page: "toefl", return: "../../x" }) };
     expect((await h.request("/api/clawpage-sso/grant", { ...grant, headers: { ...grant.headers, "x-csrf-token": "wrong" } })).status).toBe(403);
@@ -73,7 +76,15 @@ it("signs a visitor in through the console, once per page, and back with a token
     const again = await h.request("/api/clawpage-sso/authorize?owner=owner&page=toefl&silent=1&return=a.html", { headers: { cookie } });
     expect(again.headers.get("location")).toMatch(/\/u\/owner\/share\/toefl\/a\.html#cpv=cpv1\./);
 
-    expect(await (await ws(h, ".auth", { token })).json()).toEqual({ user: { id: "owner_1", name: "owner", email: null } });
+    expect(await (await ws(h, ".auth", { token })).json()).toEqual({ user: info.account });
+    // Nor does the token, whose middle the page can read.
+    const claim = JSON.parse(Buffer.from(token.split(".")[1]!, "base64url").toString()) as Record<string, unknown>;
+    expect(claim).toMatchObject({ v: publicId, n: info.account.name });
+    expect(JSON.stringify(claim)).not.toMatch(/owner_1"|"owner"|@/);
+    // A nickname is what pages see from the next sign-in on.
+    h.ctx.db.prepare("INSERT INTO profiles (owner_id, nickname, updated_at) VALUES ('owner_1', '小站', 0)").run();
+    const renamed = (await (await h.request("/api/clawpage-sso/authorize?owner=owner&page=toefl&silent=1", { headers: { cookie } })).headers.get("location"))!;
+    expect(await (await ws(h, ".auth", { token: decodeURIComponent(renamed.split("#cpv=")[1]!) })).json()).toEqual({ user: { id: publicId, name: "小站" } });
     // A visitor token is no owner link, for this page or any other.
     expect(data.isOwnerToken(token, "owner_1", "toefl")).toBe(false);
     expect(data.visitorOf(token, "owner_1", "other")).toBeNull();
@@ -123,7 +134,8 @@ it("signs the account's own sandbox browser in to its own pages without asking a
     expect(setCookie).toContain("HttpOnly");
     const cookie = setCookie.split(";")[0]!;
     const token = decodeURIComponent(opened.headers.get("location")!.split("#cpv=")[1]!);
-    expect(await (await ws(h, ".auth", { token })).json()).toMatchObject({ user: { id: "owner_1" } });
+    const publicId = (h.ctx.db.prepare("SELECT public_id FROM owners WHERE id='owner_1'").get() as { public_id: string }).public_id;
+    expect(await (await ws(h, ".auth", { token })).json()).toMatchObject({ user: { id: publicId } });
 
     // After that, the account's other pages sign in silently too, and after a reload.
     const silent = await h.request("/api/clawpage-sso/authorize?owner=owner&page=diary&silent=1", { headers: { cookie } });
@@ -149,9 +161,10 @@ it("signs the account's own sandbox browser in to its own pages without asking a
 it("keeps per-user records apart and lets signed-in visitors change only what they wrote", async () => {
   const { h, data } = await setup();
   try {
-    const a: Visitor = { id: "user_a1", name: "a", email: "a@example.com" };
-    const b: Visitor = { id: "user_b2", name: "b", email: null };
-    for (const v of [a, b]) data.grant("owner_1", "toefl", v);
+    const a: Visitor = { id: "aaaaaaaa-0000-4000-8000-000000000001", name: "a" };
+    const b: Visitor = { id: "bbbbbbbb-0000-4000-8000-000000000002", name: "b" };
+    data.grant("owner_1", "toefl", a, "user_a1");
+    data.grant("owner_1", "toefl", b, "user_b2");
     const ta = data.visitorToken("owner_1", "toefl", a), tb = data.visitorToken("owner_1", "toefl", b);
     data.createTable("owner_1", "toefl", "answers", "per-user");
     data.createTable("owner_1", "toefl", "board", "signed-in");
@@ -166,11 +179,12 @@ it("keeps per-user records apart and lets signed-in visitors change only what th
     expect(await (await ws(h, ".data/answers")).json()).toMatchObject({ error: "SIGN_IN_REQUIRED" });
     expect((await ws(h, ".data/answers/state")).status).toBe(401);
     // A visitor cannot reach another's record through its stored key either.
-    expect((await ws(h, ".data/answers/user_a1.state", { token: tb })).status).toBe(404);
-    // The owner sees everyone's, under each person's id, and who they are.
+    expect((await ws(h, `.data/answers/${a.id}.state`, { token: tb })).status).toBe(404);
+    // The owner sees everyone's, under each person's public id, and their nickname (never their account).
     const owned = data.list("owner_1", "toefl", "answers", { owner: true });
-    expect(owned.records.map((r) => [r.key, r.by?.email ?? r.by?.name])).toEqual([["user_a1.state", "a@example.com"], ["user_b2.state", "b"]]);
-    data.patch("owner_1", "toefl", "answers", "user_a1.state", { feedback: "good" }, { owner: true });
+    expect(owned.records.map((r) => [r.key, r.by])).toEqual([[`${a.id}.state`, a], [`${b.id}.state`, b]]);
+    expect(JSON.stringify(owned)).not.toContain("user_a1");
+    data.patch("owner_1", "toefl", "answers", `${a.id}.state`, { feedback: "good" }, { owner: true });
     expect(data.get("owner_1", "toefl", "answers", "state", { owner: false, visitor: a }).value).toEqual({ day: 1, feedback: "good" });
 
     // A shared table for signed-in visitors: everyone reads, each changes only their own.
@@ -195,8 +209,8 @@ it("keeps per-user records apart and lets signed-in visitors change only what th
 it("answers with the signed-in visitor's own AI, framed by the page's prompt", async () => {
   const { h, data, asked } = await setup();
   try {
-    const a: Visitor = { id: "user_a1", name: "a", email: "a@example.com" };
-    data.grant("owner_1", "toefl", a);
+    const a: Visitor = { id: "aaaaaaaa-0000-4000-8000-000000000001", name: "a" };
+    data.grant("owner_1", "toefl", a, "user_a1");
     const token = data.visitorToken("owner_1", "toefl", a);
     expect(await (await ws(h, ".ai", { method: "POST", body: { input: "hi" } })).json()).toMatchObject({ error: "SIGN_IN_REQUIRED" });
     expect((await ws(h, ".ai", { method: "OPTIONS" })).status).toBe(204);
@@ -251,8 +265,8 @@ it("lets a signed-in visitor's page ask Jev to decide, on the deployment's key, 
     },
   } as unknown as Jev;
   try {
-    const a: Visitor = { id: "user_a1", name: "a", email: "a@example.com" };
-    data.grant("owner_1", "toefl", a);
+    const a: Visitor = { id: "aaaaaaaa-0000-4000-8000-000000000001", name: "a" };
+    data.grant("owner_1", "toefl", a, "user_a1");
     const token = data.visitorToken("owner_1", "toefl", a);
     const move = { question: "Best move for black", options: { e5: "pawn e7-e5", c5: "pawn c7-c5" }, context: "1. e4", rules: ["keep the king safe"] };
     const decide = (body: unknown, t: string | null = token) => ws(h, ".decide", { method: "POST", token: t ?? undefined, body });

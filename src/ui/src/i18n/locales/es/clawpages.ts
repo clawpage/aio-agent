@@ -34,7 +34,7 @@ export const clawpages: typeof zh = {
     heading: (title: string) => `Iniciar sesión en «${title}»`,
     madeBy: (owner: string) => `Una clawpage de ${owner}`,
     intro: "Si lo permites, esta página podrá:",
-    identity: (who: string) => `Saber quién eres: ${who}`,
+    identity: (who: string) => `Ver tu apodo: ${who} (no tu correo ni tu nombre de usuario)`,
     data: "Guardar datos en esta página a tu nombre",
     ai: "Responder a sus solicitudes con tu IA, contando en tu uso; no puede tocar tus archivos, tu memoria ni otros datos",
     remember: "La próxima vez que abras esta página, se iniciará tu sesión automáticamente; ciérrala en la página para deshacerlo.",

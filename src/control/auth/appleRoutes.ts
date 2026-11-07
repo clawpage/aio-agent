@@ -7,6 +7,7 @@ import { serializeCookie, sessionCookies } from "./sessions.js";
 import { isSuspended } from "./suspension.js";
 import { t } from "../i18n/index.js";
 import { followLoginTimezone } from "./loginTimezone.js";
+import { warmNewAccount } from "../profile.js";
 import { AppleLogin, AppleAuthError, APPLE_TTL, APPLE_CLIENT_COOKIE, type AppleFlow } from "./apple.js";
 
 /** Sign in with Apple for the iOS app; a new Apple ID registers like a new Google account. */
@@ -82,6 +83,8 @@ export function appleRouter(context: AppContext, apple = new AppleLogin(context.
       signIn(req, res, user.id, user.username);
       audit(db, "apple_register_ok", user.username, req.paCtx!.ip);
       context.analytics?.track("signup", {userId: user.id, platform: req.get("x-client-platform"), props: {method: "apple", invite: Boolean(code.trim())}});
+      // The sandbox gets ready while the person fills in the profile step.
+      warmNewAccount(context, user.id);
       res.json({ok: true, username: user.username, email: user.email, role: user.role});
     } catch (err) {
       if (!(err instanceof RegisterError)) throw err;

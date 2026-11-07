@@ -34,7 +34,7 @@ export const clawpages: typeof zh = {
     heading: (title: string) => `Sign in to “${title}”`,
     madeBy: (owner: string) => `A clawpage by ${owner}`,
     intro: "If you allow it, this page can:",
-    identity: (who: string) => `Know who you are: ${who}`,
+    identity: (who: string) => `See your nickname: ${who} (not your email or username)`,
     data: "Save data on this page as you",
     ai: "Answer the page's requests with your AI, counted in your usage; it can't reach your files, memory or other data",
     remember: "Next time you open this page you're signed in automatically; sign out on the page to undo this.",

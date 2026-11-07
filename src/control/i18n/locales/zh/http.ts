@@ -225,4 +225,26 @@ export const http = {
   share: {
     notFound: "页面不存在或已删除",
   },
+  /** The profile a person keeps on the settings page, and its copy in their knowledge base (src/control/profile.ts). */
+  profile: {
+    invalid: "资料格式不对",
+    tooLong: (field: string, max: number) => `${field}最多 ${max} 个字`,
+    sensitive: "资料里像是有密码、验证码、证件号或卡号，请删掉后再保存",
+    fields: { nickname: "昵称", preferredName: "称呼", location: "所在地或时区", language: "常用语言", occupation: "职业或身份", interests: "兴趣", notes: "想让助理注意的事" } as Record<string, string>,
+    /** What a clawpage calls a signed-in visitor who has no nickname: made from their public id, never their username or email. */
+    anonymous: (code: string) => `一站用户 ${code}`,
+    memory: {
+      title: (who: string) => `${who} 的个人资料`,
+      summary: (who: string) => `${who} 在设置页自己填写的资料，以此为准；会随资料修改而更新。`,
+      claims: {
+        nickname: (who: string, v: string) => `${who} 的昵称是「${v}」`,
+        preferredName: (who: string, v: string) => `${who} 希望被称呼为「${v}」`,
+        location: (who: string, v: string) => `${who} 的所在地或时区：${v}`,
+        language: (who: string, v: string) => `${who} 常用的语言：${v}`,
+        occupation: (who: string, v: string) => `${who} 的职业或身份：${v}`,
+        interests: (who: string, v: string) => `${who} 的兴趣：${v}`,
+        notes: (who: string, v: string) => `${who} 希望助理注意：${v}`,
+      },
+    },
+  },
 };

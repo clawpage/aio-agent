@@ -32,7 +32,7 @@ export const clawpages = {
     heading: (title: string) => `登录到「${title}」`,
     madeBy: (owner: string) => `${owner} 做的 clawpage`,
     intro: "允许后，这个页面可以：",
-    identity: (who: string) => `知道你是谁：${who}`,
+    identity: (who: string) => `知道你的昵称：${who}（看不到你的邮箱和账号名）`,
     data: "用你的身份在这个页面保存数据",
     ai: "用你的 AI 回答这个页面的请求，计入你的用量；它碰不到你的文件、记忆和其他数据",
     remember: "之后再打开这个页面会自动登录；在页面里退出即可撤销。",

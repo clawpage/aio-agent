@@ -42,7 +42,7 @@ export function ClawpageSignIn() {
   if (state === "loading") return <PageLoading label={t.common.loading}/>;
   if (state === "login") return <Login onSuccess={load}/>;
   const words = t.clawpages.sso;
-  const who = info?.account ? info.account.email ?? info.account.name : "";
+  const who = info?.account?.name ?? "";
   return (
     <div className="login">
       <div className="login-card clawpage-sso" data-testid="clawpage-sso">

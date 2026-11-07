@@ -368,7 +368,7 @@ test('main settings are entries and switches on one column, and keep the mobile 
  await page.locator('.sidebar').getByRole('button',{name:'配置',exact:true}).click();
  // Entries open pages of their own; the switches stay on the page. No iPhone entry in a browser that never linked one.
  const entries=page.getByRole('navigation',{name:'配置项'}).getByRole('button');
- await expect(entries).toHaveText(['助理设定SOUL.md','运行偏好','邀请码','用户支持','历史召回','账户与隐私'].map(x=>new RegExp(`^${x}`)));
+ await expect(entries).toHaveText(['个人资料','助理设定SOUL.md','运行偏好','邀请码','用户支持','历史召回','账户与隐私'].map(x=>new RegExp(`^${x}`)));
  await expect(page.getByRole('textbox',{name:'SOUL.md 内容'})).toHaveCount(0);
  await expect(page.getByRole('combobox',{name:'界面语言'})).toBeVisible();
  for(const theme of ['light','dark'] as const){

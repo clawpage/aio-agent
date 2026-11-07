@@ -26,4 +26,5 @@ import { files } from './files';
 import { library } from './library';
 import { clawpages } from './clawpages';
 import { cards } from './cards';
-export const zhTW: Messages = { support, common, app, auth, nav, time, voice, usage, analytics, gadget, chat, feed, dispatch, workspace, browser, phone, userBrowser, macTerminal, settings, tasks, schedules, vault, knowledge, files, library, clawpages, cards };
+import { profile } from './profile';
+export const zhTW: Messages = { support, common, app, auth, nav, time, voice, usage, analytics, gadget, chat, feed, dispatch, workspace, browser, phone, userBrowser, macTerminal, settings, tasks, schedules, vault, knowledge, files, library, clawpages, cards, profile };

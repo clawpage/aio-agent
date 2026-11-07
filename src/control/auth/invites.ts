@@ -4,6 +4,7 @@ import { hashPassword, randomId, generateSecret } from "./passwords.js";
 import type { User } from "./owner.js";
 import { emailTaken, normalizeEmail, usernameFromEmail } from "./email.js";
 import { t } from "../i18n/index.js";
+import { startOnboarding } from "../profile.js";
 
 /**
  * One-time invite codes: required once the deployment has 30 accounts.
@@ -112,6 +113,8 @@ export async function registerWithInvite(db: Db, input: { email: string; passwor
     db.prepare("INSERT INTO owners (id,username,email,password_hash,password_salt,password_params,created_at,role) VALUES (?,?,?,?,?,?,?,'member')")
       .run(id, username, email, rec.hash, rec.salt, rec.params, now);
     if (code) db.prepare("UPDATE invites SET used_at=?,used_by=? WHERE code=?").run(now, id, code);
+    // Every new account starts with the profile step (src/control/profile.ts).
+    startOnboarding(db, id, now);
     if (google) {
       const table = google.provider === "apple" ? "apple" : "google";
       db.prepare(`INSERT INTO ${table}_identities (subject,owner_id,email,created_at) VALUES (?,?,?,?)`).run(google.subject, id, google.email, now);

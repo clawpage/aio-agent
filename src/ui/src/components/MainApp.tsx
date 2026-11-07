@@ -6,7 +6,7 @@ import { forgetImages, setImageAccount } from "../imageStore";
 import { forgetCachedImages } from "../imageCache";
 import { forgetCovers } from "../clawpageCover";
 import { api, ApiError } from "../api";
-import type { Conversation, StatusResponse, Task, TaskTab } from "../types";
+import type { Conversation, Profile, StatusResponse, Task, TaskTab } from "../types";
 import { personConsoleTarget, TaskConsole } from "./TaskConsole";
 import { homePath, pathUser } from "../userPath";
 import { namesPage, OWNER_VIEWS, parseRoute, routePath, type AppRoute } from "../route";
@@ -31,6 +31,7 @@ import { ClawpageList } from "./ClawpageList";
 import { ScheduleList } from "./ScheduleList";
 import { VaultList } from "./VaultList";
 import { KnowledgeList } from "./KnowledgeList";
+import { ProfileOnboarding } from "./ProfileSettings";
 import {taskStatusLabels,type TaskFeed} from '../taskStatus';
 import { isSandboxLink } from "../sandboxLink";
 import { openDeviceBrowser } from "../deviceBrowser";
@@ -89,6 +90,17 @@ export function MainApp({ firstSession }: { firstSession?: ReturnType<typeof api
     /** The address names another account than the one signed in. */
     const [foreign, setForeign] = useState<string | null>(null);
     const [auth, setAuth] = useState<boolean | null>(null);
+    /** A new account's first step (its profile) is still ahead; the console is already loading behind it. */
+    const [onboarding, setOnboarding] = useState(false);
+    /** What the profile says to call the person, for the main session's hello. */
+    const [greeting, setGreeting] = useState<string | null>(null);
+    const greet = useCallback((p: Profile | null) => { if (p) setGreeting(p.preferredName || p.nickname || null); }, []);
+    useEffect(() => {
+        if (!auth) { setGreeting(null); return; }
+        const controller = new AbortController();
+        api.profile(controller.signal).then(s => greet(s.profile), () => undefined);
+        return () => controller.abort();
+    }, [auth, username, greet]);
     /** The member account the voice gadget speaks for, shown to the owner as its own entry. */
     const [gadgetAccount, setGadgetAccount] = useState<string | null>(null);
     useEffect(() => {
@@ -206,6 +218,7 @@ export function MainApp({ firstSession }: { firstSession?: ReturnType<typeof api
             else { setView("main"); setWorkspace(false); }
         }
         setRole(session.role ?? (session.username === "owner" ? "owner" : "member"));
+        setOnboarding(session.authenticated && !!session.onboarding);
         setAuth(session.authenticated);
     }
     catch {
@@ -369,7 +382,7 @@ export function MainApp({ firstSession }: { firstSession?: ReturnType<typeof api
     <main className="main" inert={mobile && menuOpen}>
       {/* Notices sit at the bottom, where the chat shows its own errors: above its composer, or at the foot of another view. */}
       {(view !== "main" || workspace) && notices.length > 0 && <div className="app-notices">{notices.map(n => <div key={n.key} className={`banner${n.error ? " error" : ""}`} role="alert">{n.text}{n.onClose && <button onClick={n.onClose}>{t.common.close}</button>}</div>)}</div>}
-      <div className="view-slot" hidden={view !== "main"}><TaskChat notices={view === "main" && !workspace ? notices : []} debug={role === "owner" && debug} member={role === "member"} onFeed={setTaskFeed} onDetails={t => void details(t)} onOpenLink={u => void openLink(u)} onOpenFileInBrowser={p => void openFileInBrowser(p)} onExpired={expired} onRevealBrowser={revealBrowser}/></div>
+      <div className="view-slot" hidden={view !== "main"}><TaskChat notices={view === "main" && !workspace ? notices : []} debug={role === "owner" && debug} member={role === "member"} greeting={greeting} onFeed={setTaskFeed} onDetails={t => void details(t)} onOpenLink={u => void openLink(u)} onOpenFileInBrowser={p => void openFileInBrowser(p)} onExpired={expired} onRevealBrowser={revealBrowser}/></div>
       <div className="view-slot" hidden={view !== 'tasks'}><TaskList feed={taskFeed} active={view === 'tasks'} onDetails={t=>void details(t,'tasks')} onExpired={expired}/></div>
       <div className="view-slot" hidden={view !== 'clawpages'}><ClawpageList active={view === 'clawpages' && !workspace} onExpired={expired}/></div>
       <div className="view-slot" hidden={view !== 'files'}><FileLibrary active={view === 'files' && !workspace} onOpenTask={id => void details(id, 'files')} onOpenLink={u => void openLink(u)} onOpenFileInBrowser={p => void openFileInBrowser(p)} onExpired={expired}/></div>
@@ -377,8 +390,8 @@ export function MainApp({ firstSession }: { firstSession?: ReturnType<typeof api
       <div className="view-slot" hidden={view !== 'knowledge'}><KnowledgeList active={view === 'knowledge' && !workspace} onExpired={expired} onOpenTask={id => void details(id, 'knowledge')} onOpenLink={u => void openLink(u)}/></div>
       <div className="view-slot" hidden={view !== 'vault'}><VaultList active={view === 'vault'} onExpired={expired}/></div>
       {view === "settings" && (role === "owner"
-        ? <Settings section={settingsSection} onOpen={openSettings} onBack={() => go({ view: "main" })}/>
-        : <MemberSettings section={settingsSection} onOpen={openSettings} onBack={() => go({ view: "main" })}/>)}
+        ? <Settings section={settingsSection} onOpen={openSettings} onBack={() => go({ view: "main" })} onProfile={greet}/>
+        : <MemberSettings section={settingsSection} onOpen={openSettings} onBack={() => go({ view: "main" })} onProfile={greet}/>)}
       {role === 'owner' && view === 'analytics' && <AnalyticsDashboard onExpired={expired}/>}
       {role === 'owner' && view === 'gadget' && <GadgetHistory active={!workspace} onExpired={expired}/>}
       {view === "detail" && detail && <div className="task-detail"><div className="task-detail-bar"><button className="ghost" onClick={() => { if ((history.state as { aio?: boolean; from?: DetailFrom } | null)?.from) history.back(); else go({ view: detailReturn }); }}>{detailReturn === 'tasks' ? t.nav.backTo.tasks : detailReturn === 'files' ? t.library.back : detailReturn === 'schedules' ? t.nav.backTo.schedules : detailReturn === 'knowledge' ? t.nav.backTo.knowledge : t.nav.backTo.main}</button><span className="muted tiny">{taskStatusLabels[(taskFeed.tasks.find(t=>t.id===detailTask?.id)??detailTask)?.status??'']??t.app.detail.fallbackStatus}</span></div><Chat key={detail.id} readOnly conversation={detail} status={status} onConversationChanged={() => { }} onStatusChanged={() => void refreshStatus()} onOpenWorkspace={openWorkspace} onOpenBrowserLink={u => void openLink(u)} onOpenBrowserFile={p => void openFileInBrowser(p)}/></div>}
@@ -395,6 +408,7 @@ export function MainApp({ firstSession }: { firstSession?: ReturnType<typeof api
       </div>
     </PopupSurface>}</PopupPresence>
     <PopupPresence>{linkTab && <TaskConsole key={linkTab.id} target={personConsoleTarget} tab={linkTab} label={t.app.opening.consoleLabel} closeLabel={t.app.opening.closePage} onClose={closeLink} onReveal={() => { setLinkTab(null); revealBrowser(); }}/>}</PopupPresence>
+    {onboarding && <ProfileOnboarding onDone={p => { setOnboarding(false); greet(p); }}/>}
     <Workspace canConfigure={role === "owner"} open={workspace} status={status} initialPath={workspacePath} browserNonce={browserNonce} onClose={closeWorkspace} onNotify={notify}/>
   </div>;
 }

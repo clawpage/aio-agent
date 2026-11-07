@@ -9,8 +9,8 @@
  * when the newer side still understands the older one.
  */
 
-/** The control plane's HTTP API version the UI is written against (13: taking clawpages offline; 12: iPhone links and abilities; 11: message widgets; 10: the workspace's Mac terminal status; 9: clawpage version history; 8: signing in to clawpages, their AI answers; 7: clawpage collaborators; 6: the workspace's Mac browser pages; 5: clawpages and their data). */
-export const API_VERSION = 13;
+/** The control plane's HTTP API version the UI is written against (14: account profiles, clawpage visitors known by public id and nickname; 13: taking clawpages offline; 12: iPhone links and abilities; 11: message widgets; 10: the workspace's Mac terminal status; 9: clawpage version history; 8: signing in to clawpages, their AI answers; 7: clawpage collaborators; 6: the workspace's Mac browser pages; 5: clawpages and their data). */
+export const API_VERSION = 14;
 /** The oldest UI API version this control plane still serves (a v2 UI registers with a username, which v3 refuses). */
 export const API_MIN = 3;
 

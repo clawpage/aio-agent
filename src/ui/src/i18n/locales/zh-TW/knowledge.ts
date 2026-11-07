@@ -47,6 +47,7 @@ export const knowledge: typeof zh = {
     food: "飲食",
     learning: "學習",
     other: "其他",
+    profile: "個人資料",
   },
   detail: {
     back: "← 返回知識庫",
@@ -64,6 +65,7 @@ export const knowledge: typeof zh = {
     superseded: "已被更新",
     sources: "來源",
     unknownTask: "已刪除的任務",
+    fromProfile: "來自你的個人資料",
     linksTitle: "關係",
     relOut: {
       about: "關於",

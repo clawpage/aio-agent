@@ -226,4 +226,24 @@ export const http: typeof zh = {
   share: {
     notFound: "ページが存在しないか、削除されました",
   },
+  profile: {
+    invalid: "プロフィールの形式が正しくありません",
+    tooLong: (field: string, max: number) => `${field}は ${max} 文字までです`,
+    sensitive: "プロフィールにパスワード、確認コード、身分証番号またはカード番号のようなものが含まれています。削除してから保存してください",
+    fields: { nickname: "ニックネーム", preferredName: "呼び方", location: "居住地またはタイムゾーン", language: "よく使う言語", occupation: "職業・立場", interests: "興味", notes: "アシスタントに気をつけてほしいこと" } as Record<string, string>,
+    anonymous: (code: string) => `Clawpage ユーザー ${code}`,
+    memory: {
+      title: (who: string) => `${who} のプロフィール`,
+      summary: (who: string) => `${who} が設定ページに自分で書いた情報。これを優先し、変更されるたびに更新されます。`,
+      claims: {
+        nickname: (who: string, v: string) => `${who} のニックネームは「${v}」`,
+        preferredName: (who: string, v: string) => `${who} は「${v}」と呼ばれたい`,
+        location: (who: string, v: string) => `${who} の居住地またはタイムゾーン：${v}`,
+        language: (who: string, v: string) => `${who} がよく使う言語：${v}`,
+        occupation: (who: string, v: string) => `${who} の職業・立場：${v}`,
+        interests: (who: string, v: string) => `${who} の興味：${v}`,
+        notes: (who: string, v: string) => `${who} がアシスタントに気をつけてほしいこと：${v}`,
+      },
+    },
+  },
 };

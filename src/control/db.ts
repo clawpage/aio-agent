@@ -9,6 +9,9 @@ export const SCHEMA_VERSION = 1;
 /** The domain of the hidden placeholder email given to accounts that have no email of their own. */
 export const PLACEHOLDER_EMAIL_DOMAIN = "clawpage.ai";
 
+/** A random version-4 UUID, made by SQLite itself (so a trigger can give one to every new row). */
+const UUID_SQL = "lower(hex(randomblob(4))||'-'||hex(randomblob(2))||'-4'||substr(hex(randomblob(2)),2)||'-'||substr('89ab',1+(abs(random())%4),1)||substr(hex(randomblob(2)),2)||'-'||hex(randomblob(6)))";
+
 /**
  * A knowledge base's tables (docs/TASK-KB.md): in every account's database for its personal
  * library, and the same in each shared library's own file (docs/SHARED-KB.md), where
@@ -211,6 +214,22 @@ CREATE TABLE IF NOT EXISTS apple_login_flows (
   expires_at INTEGER NOT NULL,
   subject TEXT,
   email TEXT
+);
+
+-- What a person tells about themselves (src/control/profile.ts): every field optional. onboarding is 1
+-- from registration until they save or skip the first step. The executor reads a copy kept in the
+-- account's knowledge base, never this.
+CREATE TABLE IF NOT EXISTS profiles (
+  owner_id TEXT PRIMARY KEY REFERENCES owners(id) ON DELETE CASCADE,
+  nickname TEXT NOT NULL DEFAULT '',
+  preferred_name TEXT NOT NULL DEFAULT '',
+  location TEXT NOT NULL DEFAULT '',
+  language TEXT NOT NULL DEFAULT '',
+  occupation TEXT NOT NULL DEFAULT '',
+  interests TEXT NOT NULL DEFAULT '',
+  notes TEXT NOT NULL DEFAULT '',
+  onboarding INTEGER NOT NULL DEFAULT 0,
+  updated_at INTEGER NOT NULL
 );
 
 -- Requests are reviewed by the operator, never executed as agent instructions.
@@ -551,6 +570,14 @@ function migrate(db: Db): void {
 CREATE UNIQUE INDEX IF NOT EXISTS idx_owners_email ON owners(email);
 CREATE TRIGGER IF NOT EXISTS owners_placeholder_email AFTER INSERT ON owners WHEN NEW.email IS NULL BEGIN
   UPDATE owners SET email=NEW.username||'@${PLACEHOLDER_EMAIL_DOMAIN}',email_placeholder=1 WHERE id=NEW.id;
+END;`);
+  // Each account's public id (a UUID): the only thing besides its nickname that a clawpage it signs in to learns.
+  // Filled for existing accounts here and by a trigger for every new one, as the placeholder email is.
+  if (!users.some(c => c.name === "public_id")) db.exec("ALTER TABLE owners ADD COLUMN public_id TEXT");
+  db.exec(`UPDATE owners SET public_id=${UUID_SQL} WHERE public_id IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_owners_public_id ON owners(public_id);
+CREATE TRIGGER IF NOT EXISTS owners_public_id AFTER INSERT ON owners WHEN NEW.public_id IS NULL BEGIN
+  UPDATE owners SET public_id=${UUID_SQL} WHERE id=NEW.id;
 END;`);
   const taskColumns = db.prepare("PRAGMA table_info(tasks)").all() as Array<{ name: string }>;
   if (!taskColumns.some(c => c.name === "execution_conversation_id")) db.exec("ALTER TABLE tasks ADD COLUMN execution_conversation_id TEXT REFERENCES conversations(id)");

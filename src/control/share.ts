@@ -733,7 +733,7 @@ export class ShareStore {
       "",
       "## Signed-in visitors and AI answers",
       "",
-      "Visitors can sign in to the page with their Clawpage Agent account (asked once per page): `new Clawpage({ signIn: \"auto\" })` signs in, silently, anyone who allowed the page before (on every load; skip your start-up while `cp.redirecting`); `cp.signIn()` sends someone to sign in and back; `cp.user` is `{id, name, email}` or null; `await cp.signOut()`.",
+      "Visitors can sign in to the page with their Clawpage Agent account (asked once per page): `new Clawpage({ signIn: \"auto\" })` signs in, silently, anyone who allowed the page before (on every load; skip your start-up while `cp.redirecting`); `cp.signIn()` sends someone to sign in and back; `cp.user` is `{id, name}` or null (`id`: the visitor's public id, the same on every page; `name`: their nickname); `await cp.signOut()`.",
       "- `signed-in` tables: signed-in visitors read every record, add records, and change or delete only their own (records carry `mine`). `per-user` tables: each signed-in visitor has records of their own under their own keys and sees no one else's. Both answer anonymous visitors with 401 `SIGN_IN_REQUIRED`; `SIGN_IN_EXPIRED` means sign in again. Through this API you act as the owner: records show who wrote them (`by`), and a per-user table's keys are stored as `<visitor id>.<key>`.",
       "- `const { text, json } = await cp.ai.ask(input, { prompt: \"<name>\", json: true, effort: \"low\" })` answers with the signed-in visitor's own AI (their model and quota; no tools, web or memory). `prompt` names a file `prompts/<name>.md` in the page folder: the task, the rubric and the exact JSON fields to return. The page sends the material as labelled text in `input` (or `{messages: [{role, content}]}`). To ask about a picture (a photo the visitor takes or picks), send a user message whose content is `[{type: \"text\", text: \"...\"}, {type: \"image_url\", image_url: {url: dataUrl}}]`: the picture inline as a `data:image/jpeg;base64,...` URL (JPEG, PNG, WebP or GIF; scale it to about 1024 px on a canvas first; at most 4 pictures, each under 2 MB as a data URL); a web address is not fetched. Errors: `SIGN_IN_REQUIRED`, `PROMPT_NOT_FOUND`, `RATE_LIMITED` (10 a minute, 300 a day per person and page), `AI_BUSY`, `AI_FAILED`, `AI_TIMEOUT`, `INVALID_IMAGE`, `IMAGE_TOO_LARGE`; in a `file://` preview, `PREVIEW`.",
       "- `const { choice, probabilities, confidence, confident } = await cp.ai.decide({ question, options: { <id>: \"what choosing it means\" }, context, rules })` has an independent judgment model (Jev) choose one of 2-20 known candidates for the signed-in visitor (e.g. a game AI picking among the legal moves, the best match among a few items). Ids use letters, digits, `_.:-` (at most 40); `context` (at most 8000 characters) holds the facts, `rules` the constraints. It only chooses: the page lists the candidates and checks the choice itself. Errors: `SIGN_IN_REQUIRED`, `INVALID_INPUT`, `RATE_LIMITED` (30 a minute, 1000 a day per person and page), `AI_UNAVAILABLE`, `DECIDE_FAILED`, `DECIDE_TIMEOUT`; in a `file://` preview, `PREVIEW`. Never put a key in the page or call Jev directly.",
@@ -970,7 +970,9 @@ export class ShareStore {
     if (req.method !== "POST") return reply(405, { error: "METHOD_NOT_ALLOWED", message: "POST only" });
     const token = String(req.headers.authorization ?? "").replace(/^Bearer\s+/i, "");
     const visitor = this.data.visitorOf(token, userId, page);
-    if (!visitor) return reply(401, { error: this.data.isVisitorToken(token) ? "SIGN_IN_EXPIRED" : "SIGN_IN_REQUIRED", message: "AI answers need the visitor to sign in to this page" });
+    // The account answers and is charged; the page knows the visitor only by their public id.
+    const account = visitor && this.data.accountOf(userId, page, visitor.id);
+    if (!visitor || !account) return reply(401, { error: this.data.isVisitorToken(token) ? "SIGN_IN_EXPIRED" : "SIGN_IN_REQUIRED", message: "AI answers need the visitor to sign in to this page" });
     if (!this.ai) return reply(503, { error: "AI_UNAVAILABLE", message: "This deployment offers no AI answers" });
     try {
       const body = await readJson(req, AI_INPUT.body);
@@ -979,7 +981,7 @@ export class ShareStore {
       if (ask.prompt !== null && instructions === null) throw new DataError(404, "PROMPT_NOT_FOUND", `The page has no prompts/${ask.prompt}.md`);
       if (!this.data.allowAi(visitor.id, userId, page)) return reply(429, { error: "RATE_LIMITED", message: "Too many AI requests; try again in a minute" });
       const meta = this.#meta(userId, page);
-      const answer = await this.ai.answer(visitor.id, { system: aiSystem(meta?.title ?? page, this.#usernameOf(userId) ?? userId, instructions, ask.json), messages: ask.messages, effort: ask.effort });
+      const answer = await this.ai.answer(account, { system: aiSystem(meta?.title ?? page, this.#usernameOf(userId) ?? userId, instructions, ask.json), messages: ask.messages, effort: ask.effort });
       reply(200, { text: answer.text, ...(ask.json ? { json: parseJsonAnswer(answer.text) } : {}) });
     } catch (err) {
       if (err instanceof DataError || err instanceof AiError) reply(err.status, { error: err.code, message: err.message });
@@ -1003,12 +1005,14 @@ export class ShareStore {
     if (req.method !== "POST") return reply(405, { error: "METHOD_NOT_ALLOWED", message: "POST only" });
     const token = String(req.headers.authorization ?? "").replace(/^Bearer\s+/i, "");
     const visitor = this.data.visitorOf(token, userId, page);
-    if (!visitor) return reply(401, { error: this.data.isVisitorToken(token) ? "SIGN_IN_EXPIRED" : "SIGN_IN_REQUIRED", message: "Decisions need the visitor to sign in to this page" });
+    // The account answers and is charged; the page knows the visitor only by their public id.
+    const account = visitor && this.data.accountOf(userId, page, visitor.id);
+    if (!visitor || !account) return reply(401, { error: this.data.isVisitorToken(token) ? "SIGN_IN_EXPIRED" : "SIGN_IN_REQUIRED", message: "Decisions need the visitor to sign in to this page" });
     if (!this.decision?.enabled) return reply(503, { error: "AI_UNAVAILABLE", message: "This deployment offers no decisions" });
     try {
       const input = decisionInput(await readJson(req, DECIDE_BODY));
       if (!this.data.allowDecide(visitor.id, userId, page)) return reply(429, { error: "RATE_LIMITED", message: "Too many decisions; try again in a minute" });
-      reply(200, await this.decision.decide(visitor.id, input));
+      reply(200, await this.decision.decide(account, input));
     } catch (err) {
       if (err instanceof DataError) reply(err.status, { error: err.code, message: err.message });
       else if (err instanceof DecisionError) reply(err.code === "INVALID_INPUT" ? 400 : err.code === "DECIDE_TIMEOUT" ? 504 : 502, { error: err.code, message: err.message });

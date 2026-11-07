@@ -47,6 +47,7 @@ export const knowledge: typeof zh = {
     food: 'Comida',
     learning: 'Aprendizaje',
     other: 'Otros',
+    profile: 'Perfil',
   },
   detail: {
     back: '← Volver al conocimiento',
@@ -64,6 +65,7 @@ export const knowledge: typeof zh = {
     superseded: 'Reemplazado',
     sources: 'Fuentes',
     unknownTask: 'Tarea eliminada',
+    fromProfile: 'De tu perfil',
     linksTitle: 'Relacionado',
     relOut: {
       about: 'Sobre',

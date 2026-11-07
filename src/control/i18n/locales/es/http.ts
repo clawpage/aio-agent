@@ -226,4 +226,24 @@ export const http: typeof zh = {
   share: {
     notFound: "La página no existe o se ha eliminado",
   },
+  profile: {
+    invalid: "El perfil no tiene el formato correcto",
+    tooLong: (field: string, max: number) => `${field} admite como máximo ${max} caracteres`,
+    sensitive: "El perfil parece contener una contraseña, un código, un documento o un número de tarjeta; quítalo y guarda de nuevo",
+    fields: { nickname: "Apodo", preferredName: "Cómo llamarte", location: "Ubicación o zona horaria", language: "Idiomas", occupation: "Ocupación o rol", interests: "Intereses", notes: "Lo que el asistente debe tener en cuenta" } as Record<string, string>,
+    anonymous: (code: string) => `Usuario de Clawpage ${code}`,
+    memory: {
+      title: (who: string) => `Perfil de ${who}`,
+      summary: (who: string) => `Lo que ${who} escribió sobre sí en la página de configuración; prevalece y se actualiza cada vez que lo cambia.`,
+      claims: {
+        nickname: (who: string, v: string) => `El apodo de ${who} es «${v}»`,
+        preferredName: (who: string, v: string) => `${who} prefiere que le llamen «${v}»`,
+        location: (who: string, v: string) => `Ubicación o zona horaria de ${who}: ${v}`,
+        language: (who: string, v: string) => `Idiomas que usa ${who}: ${v}`,
+        occupation: (who: string, v: string) => `Ocupación o rol de ${who}: ${v}`,
+        interests: (who: string, v: string) => `Intereses de ${who}: ${v}`,
+        notes: (who: string, v: string) => `${who} quiere que el asistente tenga en cuenta: ${v}`,
+      },
+    },
+  },
 };

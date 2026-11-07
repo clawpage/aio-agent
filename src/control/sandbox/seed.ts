@@ -1111,13 +1111,13 @@ The owner writing to a table that does not exist yet creates it as private.
 ## Signed-in visitors and AI answers
 
 A page can let its visitors sign in with their account on this deployment (Clawpage Agent): the console asks each person once per page
-whether the page may know who they are (their name and email) and use their AI. Use it when visitors need data of their own
+whether the page may know who they are (their nickname and a public id, never their email or username) and use their AI. Use it when visitors need data of their own
 (progress, answers, notes) or AI answers; leave pages that need neither anonymous.
 
 \`\`\`js
 const cp = new Clawpage({ signIn: "auto" });    // "auto": someone who allowed the page before is signed in on every visit, silently
 if (cp.redirecting) return;                     // (inside your start-up code) the page is checking the sign-in and reloads by itself
-cp.user;                                        // {id, name, email} when signed in (email may be null), else null
+cp.user;                                        // {id, name} when signed in, else null: id is the person's public id (a UUID, the same on every page), name their nickname
 cp.signIn();                                    // a "Sign in" button: goes to the console and comes back signed in (or cp.signInDenied)
 await cp.signOut();                             // forget this page's sign-in; the next one asks again
 const mine = cp.table("progress");              // a per-user table: each person's own records

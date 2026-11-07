@@ -38,7 +38,7 @@ export const TASK_KB_POLICY = `${KNOWLEDGE_POLICY}\n\n${LIBRARY_POLICY}\n\n${HIS
 const KB_TOOLS = [
   {
     name: "kb_search",
-    description: "Search the personal knowledge base: nodes ranked by relevance, each with its domain, kind, gist, its best-matching claims, and how many corrections are pending. Without query, lists the most recently changed nodes.",
+    description: "Search the personal knowledge base: nodes ranked by relevance, each with its domain, kind, gist, its best-matching claims, and how many corrections are pending. Without query, lists the most recently changed nodes. The person's own profile (nickname, what to call them, location or time zone, languages, occupation, interests, what to keep in mind) is the node in domain `profile`: search it (domain \"profile\") when any of that matters, rather than guessing.",
     inputSchema: {
       type: "object",
       properties: {

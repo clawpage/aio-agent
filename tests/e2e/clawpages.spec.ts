@@ -41,7 +41,7 @@ const RECORDS: Record<string, ClawpageRecord[]> = {
     { key: "bob", value: { choice: "rice" }, createdAt: now - 800_000, updatedAt: now - 800_000 },
     { key: "carol", value: { choice: "rice", note: "no spice" }, createdAt: now - 700_000, updatedAt: now - 700_000 },
   ],
-  notes: [{ key: "n1", value: { text: "订 12 点的位子" }, createdAt: now - 900_000, updatedAt: now - 900_000, by: { id: "user_rui", name: "rui", email: "rui@example.com" } }],
+  notes: [{ key: "n1", value: { text: "订 12 点的位子" }, createdAt: now - 900_000, updatedAt: now - 900_000, by: { id: "5f0c2a9e-1b7d-4c3e-9a21-7d4e0b6f8c13", name: "小睿" } }],
 };
 
 /** Earlier versions of lunch-poll: one a collaborator published, one the owner did. */
@@ -170,7 +170,7 @@ test("the clawpages page is a home screen of mini apps and pages; an icon opens 
   await data.getByRole("tab", { name: /^notes/ }).click();
   // A record a signed-in visitor wrote says who.
   await expect(data.locator("thead th")).toHaveText(["时间", "谁写的", "text", ""]);
-  await expect(data.locator("tbody tr")).toHaveText([/rui@example\.com.*订 12 点的位子/]);
+  await expect(data.locator("tbody tr")).toHaveText([/小睿.*订 12 点的位子/]);
   await expect(data.getByRole("link", { name: "导出" })).toHaveAttribute("href", /\/api\/clawpages\/lunch-poll\/tables\/notes\/export$/);
   await page.keyboard.press("Escape");
   await expect(sheet).toHaveCount(0);

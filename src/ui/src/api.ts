@@ -230,7 +230,11 @@ export const api = {
   taskUserBrowserScreenshotUrl: (id: string, at: number) => apiUrl(`/api/tasks/${encodeURIComponent(id)}/user-browser/screenshot?at=${at}`),
   taskUserBrowserControl: (id: string, action: "take" | "release") => request<{ userBrowser: import("./types").UserBrowserState }>(`/api/tasks/${encodeURIComponent(id)}/user-browser/control`, { method: "POST", body: { action } }),
   taskBrowserScreenshotUrl: (id: string, tab: string, at: number) => apiUrl(`/api/tasks/${encodeURIComponent(id)}/browser/screenshot?tab=${encodeURIComponent(tab)}&at=${at}`),
-  session: (signal?: AbortSignal) => request<{ authenticated: boolean; role?: "owner" | "member"; username: string | null; email?: string | null; expiresAt?: number; secure?: boolean; inviteEmail?: string | null; registrationRequiresInvite?: boolean }>("/api/auth/session", {signal,cache:"no-store"}),
+  session: (signal?: AbortSignal) => request<{ authenticated: boolean; role?: "owner" | "member"; username: string | null; email?: string | null; expiresAt?: number; secure?: boolean; inviteEmail?: string | null; registrationRequiresInvite?: boolean; onboarding?: boolean }>("/api/auth/session", {signal,cache:"no-store"}),
+  profile: (signal?: AbortSignal) => request<import("./types").ProfileState>("/api/profile", { cache: "no-store", signal }),
+  saveProfile: (profile: import("./types").Profile) => request<{ profile: import("./types").Profile; onboarding: false }>("/api/profile", { method: "PUT", body: { profile } }),
+  /** The first step after registering, skipped: it does not come back. */
+  skipProfile: () => request<{ onboarding: false }>("/api/profile/skip", { method: "POST", body: {} }),
   /** `email` is the account's email, or the username of an account from before email. */
   // Signing in tells the server the browser's time zone: the daily feed follows it.
   login: (password: string, email = "owner") => request<{ ok: boolean; username: string; expiresAt: number }>("/api/auth/login", { method: "POST", body: { password, email, timeZone: browserTimeZone() } }),

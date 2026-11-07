@@ -8,6 +8,7 @@ import { serializeCookie, sessionCookies } from "./sessions.js";
 import { isSuspended } from "./suspension.js";
 import { t } from "../i18n/index.js";
 import { followLoginTimezone } from "./loginTimezone.js";
+import { warmNewAccount } from "../profile.js";
 import { GoogleLogin, GoogleAuthError, GOOGLE_TTL, GOOGLE_CLIENT_COOKIE, GOOGLE_BROWSER_COOKIE, type GoogleFlow } from "./google.js";
 
 export function googleRouter(context: AppContext): Router {
@@ -129,6 +130,8 @@ export function googleRouter(context: AppContext): Router {
       limiter.recordSuccess(ctx.ip);
       audit(db, "google_register_ok", user.username, ctx.ip);
       context.analytics?.track("signup", {userId: user.id, platform: req.get("x-client-platform"), props: {method: "google", invite: Boolean(str(req.body?.inviteCode).trim())}});
+      // The sandbox gets ready while the person fills in the profile step.
+      warmNewAccount(context, user.id);
       followLoginTimezone(context, user.id, zoneOf(row.client_hash));
       res.json({ok: true, username: user.username, email: user.email, role: user.role});
     } catch (err) {

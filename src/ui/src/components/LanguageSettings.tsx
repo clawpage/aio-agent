@@ -3,6 +3,8 @@ import { AccountPrivacySettings } from "./Support";
 import { PushSettings } from "./PushSettings";
 import { IphoneSettings, useIphoneEntry } from "./IphoneSettings";
 import { SettingsPages, type SettingsSection } from "./SettingsLayout";
+import { ProfileSettings } from "./ProfileSettings";
+import type { Profile } from "../types";
 import { api } from "../api";
 import { InlineLoading } from "./Brand";
 import { LOCALES, locale, setLocale, t, type Locale } from "../i18n";
@@ -39,9 +41,10 @@ function QuotaSettings() {
 }
 
 /** Member account controls: this component never requests owner settings. */
-export function MemberSettings({ section, onOpen, onBack }: { section?: string; onOpen: (section?: string) => void; onBack: () => void }) {
+export function MemberSettings({ section, onOpen, onBack, onProfile }: { section?: string; onOpen: (section?: string) => void; onBack: () => void; onProfile?: (profile: Profile) => void }) {
   const iphone = useIphoneEntry();
   const sections: SettingsSection[] = [
+    { id: "profile", title: t.profile.title, page: () => <ProfileSettings onSaved={onProfile}/> },
     ...(iphone ? [{ id: "iphone", title: t.app.iphone.label, page: () => <IphoneSettings/> }] : []),
     { id: "account", title: t.support.account, page: () => <AccountPrivacySettings/> },
   ];

@@ -8,9 +8,10 @@ import { LanguageSettings } from './LanguageSettings';
 import { PushSettings } from './PushSettings';
 import { IphoneSettings, useIphoneEntry } from './IphoneSettings';
 import { SettingsPages, type SettingsSection } from './SettingsLayout';
+import { ProfileSettings } from './ProfileSettings';
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "../api";
-import type { AgentSettings, SettingsModel } from "../types";
+import type { AgentSettings, Profile, SettingsModel } from "../types";
 import { t } from "../i18n";
 
 /** Human labels for the reasoning-effort values the model catalog reports. */
@@ -35,15 +36,18 @@ interface Props {
   onBack: () => void;
   /** Inform the shell so the sidebar/nav can reflect a saved change. */
   onSaved?: (settings: AgentSettings) => void;
+  /** The profile was saved (the main session's hello follows it). */
+  onProfile?: (profile: Profile) => void;
 }
 
 /**
  * The owner's configuration page: entries and switches; what takes a page of its own (SOUL.md,
  * the run preferences, invites, …) opens behind its entry.
  */
-export function Settings({ section, onOpen, onBack, onSaved }: Props) {
+export function Settings({ section, onOpen, onBack, onSaved, onProfile }: Props) {
   const iphone = useIphoneEntry();
   const sections: SettingsSection[] = [
+    { id: "profile", title: t.profile.title, page: () => <ProfileSettings onSaved={onProfile}/> },
     { id: "soul", title: t.settings.soul.title, note: "SOUL.md", page: () => <SoulSettings/> },
     { id: "run", title: t.settings.run.title, page: () => <RunSettings onSaved={onSaved}/> },
     { id: "invites", title: t.settings.invite.title, page: () => <InviteSettings/> },

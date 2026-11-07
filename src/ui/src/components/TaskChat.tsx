@@ -67,7 +67,9 @@ interface Outgoing {
     state: "sending" | "failed";
     error?: string;
 }
-export function TaskChat({ onDetails, onOpenLink, onOpenFileInBrowser, onExpired, onFeed, onRevealBrowser, notices = [], debug = false, member = false }: {
+export function TaskChat({ onDetails, onOpenLink, onOpenFileInBrowser, onExpired, onFeed, onRevealBrowser, notices = [], debug = false, member = false, greeting = null }: {
+    /** What the person's profile says to call them: the hello on an empty main session uses it. */
+    greeting?: string | null;
     /** The console's own notices (MainApp), shown where this chat shows its errors: just above the composer. */
     notices?: { key: string; text: string; error?: boolean; onClose?: () => void }[];
     /** Owner debug mode: each message offers its dispatch log. */
@@ -621,7 +623,7 @@ export function TaskChat({ onDetails, onOpenLink, onOpenFileInBrowser, onExpired
         : <span className="muted tiny">{olderState === "loading" && <InlineLoading label={i18n.feed.older.loading}/>}</span>}</div>}
       {/* Nothing here yet (a new account): the agent says hello, and a starter is sent with one tap. */}
       {!tasks.length && !outbox.length && arrival !== "loading" && <div className="feed-welcome">
-        <article className="msg assistant welcome-msg"><div className="bubble"><div className="welcome-head"><BrandMark size={24}/><strong>{i18n.feed.empty.title}</strong></div><p className="welcome-beta">{i18n.feed.empty.beta}</p><p>{i18n.feed.empty.body}</p></div></article>
+        <article className="msg assistant welcome-msg"><div className="bubble"><div className="welcome-head"><BrandMark size={24}/><strong>{greeting ? i18n.feed.empty.titleFor(greeting) : i18n.feed.empty.title}</strong></div><p className="welcome-beta">{i18n.feed.empty.beta}</p><p>{i18n.feed.empty.body}</p></div></article>
         <p className="welcome-hint muted tiny">{i18n.feed.empty.hint}</p>
         {/* What it can do, one tap each: the tap sends a first task that shows it. */}
         <div className="welcome-features">{i18n.feed.empty.features.map(f => <button type="button" key={f.title} className="welcome-feature" onClick={() => { track("welcome_card", { kind: "feature", card: f.icon }); sendStarter(f.prompt); }}><span className="welcome-feature-icon" aria-hidden="true"><NavIcon name={f.icon as NavIconName}/></span><span className="welcome-feature-text"><strong>{f.title}</strong><span>{f.body}</span></span></button>)}</div>

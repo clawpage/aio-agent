@@ -233,10 +233,14 @@ export interface ClawpageTable { name: string; permission: ClawpagePermission; r
 export interface Clawpage { name: string; title: string; url: string; files: number; bytes: number; updatedAt: number; /** The collaborator who published this version; null when the owner did. */ updatedBy: string | null; /** How many other people's agents may maintain it. */ collaborators: number; tables: ClawpageTable[]; /** When its cover was rendered; null without one. */ cover: number | null; /** The earlier version this one was restored from; null when it was published. */ restoredFrom?: number | null; /** When the owner took it offline (nobody else reaches it); null while online. */ offlineAt?: number | null }
 /** A version of a clawpage that a later publish replaced (`at` is its time). */
 export interface ClawpageVersion { at: number; title: string; files: number; bytes: number; updatedBy: string | null; restoredFrom: number | null }
+/** What a person tells about themselves (settings → profile); every field may be empty. */
+export interface Profile { nickname: string; preferredName: string; location: string; language: string; occupation: string; interests: string; notes: string }
+/** The profile, and whether the first step after registering (filling it in) is still ahead. */
+export interface ProfileState { profile: Profile; onboarding: boolean }
 /** Someone else's agent the owner lets maintain a clawpage (its token is only ever in the invitation). */
 export interface ClawpageCollaborator { id: string; label: string; createdAt: number; lastUsedAt: number | null }
-/** Someone signed in to a clawpage (email null for an account without one). */
-export interface ClawpageVisitor { id: string; name: string; email: string | null }
+/** Someone signed in to a clawpage, as pages know them: their account's public id and nickname. */
+export interface ClawpageVisitor { id: string; name: string }
 /** `by`: the signed-in visitor who wrote the record. */
 export interface ClawpageRecord { key: string; value: unknown; createdAt: number; updatedAt: number; by?: ClawpageVisitor }
 /** What signing in to someone's clawpage shows: the page, and (signed in) the account it would know. */

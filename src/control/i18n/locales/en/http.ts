@@ -226,4 +226,24 @@ export const http: typeof zh = {
   share: {
     notFound: "The page doesn't exist or was deleted",
   },
+  profile: {
+    invalid: "The profile is not in the right format",
+    tooLong: (field: string, max: number) => `${field} can be at most ${max} characters`,
+    sensitive: "The profile seems to contain a password, code, ID or card number; remove it and save again",
+    fields: { nickname: "Nickname", preferredName: "What to call you", location: "Location or time zone", language: "Languages", occupation: "Occupation or role", interests: "Interests", notes: "Things the assistant should keep in mind" } as Record<string, string>,
+    anonymous: (code: string) => `Clawpage user ${code}`,
+    memory: {
+      title: (who: string) => `${who}'s profile`,
+      summary: (who: string) => `What ${who} wrote about themselves on the settings page; it takes precedence and is updated whenever they change it.`,
+      claims: {
+        nickname: (who: string, v: string) => `${who}'s nickname is "${v}"`,
+        preferredName: (who: string, v: string) => `${who} would like to be called "${v}"`,
+        location: (who: string, v: string) => `${who}'s location or time zone: ${v}`,
+        language: (who: string, v: string) => `Languages ${who} uses: ${v}`,
+        occupation: (who: string, v: string) => `${who}'s occupation or role: ${v}`,
+        interests: (who: string, v: string) => `${who}'s interests: ${v}`,
+        notes: (who: string, v: string) => `${who} would like the assistant to keep in mind: ${v}`,
+      },
+    },
+  },
 };

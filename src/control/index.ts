@@ -64,6 +64,7 @@ import { ACTIVE_TASKS, SandboxIdle } from "./sandbox/idle.js";
 import { OnDemandPrograms } from "./sandbox/programs.js";
 import { startVaultAutofill, Vault } from "./vault.js";
 import { loadApns, PushService, startTaskNotifications } from "./push.js";
+import { pageIdentity } from "./profile.js";
 
 export interface Bootstrapped {
   ctx: AppContext;
@@ -514,7 +515,8 @@ async function main(): Promise<void> {
   ctx.share=new ShareStore({cfg:ctx.cfg,port:ctx.cfg.memberModelPort??4902,
     usernameOf:id=>account("SELECT username AS v FROM owners WHERE id=?",id),
     userIdOf:name=>pageAccount(ctx.db,name),
-    data:new ClawpageData(ctx.cfg.dataDir),
+    // Grants from before public ids move to them, named as each account is to pages now (profile.ts).
+    data:new ClawpageData(ctx.cfg.dataDir,id=>pageIdentity(ctx.db,id)),
     // A page's AI answers come from the signed-in visitor's own account, counted in its usage.
     ai});
   // Shared knowledge bases (docs/SHARED-KB.md): one registry for every runtime, and their maintainer.

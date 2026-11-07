@@ -53,7 +53,7 @@ export const CLAWPAGE_SDK_JS = String.raw`/* clawpage-sdk.js - data for a clawpa
     try {
       var body = token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
       var claim = JSON.parse(decodeURIComponent(escape(root.atob(body))));
-      return { id: claim.v, name: claim.n, email: claim.m || null };
+      return { id: claim.v, name: claim.n };
     } catch (e) { return null; }
   }
 
@@ -195,7 +195,7 @@ export const CLAWPAGE_SDK_JS = String.raw`/* clawpage-sdk.js - data for a clawpa
     };
     /** Go sign in (the console asks once per page) and come back signed in; in a preview, a stand-in person. */
     this.signIn = function () {
-      if (self.mode !== "live") { self.user = { id: "preview", name: "preview", email: null }; return Promise.resolve(self.user); }
+      if (self.mode !== "live") { self.user = { id: "preview", name: "preview" }; return Promise.resolve(self.user); }
       go(false);
       return new Promise(function () { /* the page is leaving */ });
     };

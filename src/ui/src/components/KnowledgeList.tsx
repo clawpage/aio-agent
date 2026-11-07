@@ -178,12 +178,13 @@ export function KnowledgeList({ active, onExpired, onOpenTask, onOpenLink }: { a
               </p>
               {c.sources.length > 0 && <ul className="knowledge-sources" aria-label={D.sources}>{c.sources.map((s) => <li key={s.id}>
                 <div className="knowledge-source-head">
-                  <button type="button" className="link tiny" onClick={() => onOpenTask(s.task)}>{node.sourceTasks[s.task] ?? D.unknownTask}</button>
+                  {s.kind === "manual" ? <span className="knowledge-tag">{D.fromProfile}</span>
+                    : <button type="button" className="link tiny" onClick={() => onOpenTask(s.task)}>{node.sourceTasks[s.task] ?? D.unknownTask}</button>}
                   <span className="muted tiny">{s.captured}</span>
                 </div>
                 {s.url && <button type="button" className="link tiny knowledge-source-ref" onClick={() => onOpenLink(s.url!)}>{s.url}</button>}
                 {s.path && <code className="knowledge-source-ref tiny">{s.path}</code>}
-                {s.excerpt && <blockquote className="knowledge-excerpt">{s.excerpt}</blockquote>}
+                {s.excerpt && s.kind !== "manual" && <blockquote className="knowledge-excerpt">{s.excerpt}</blockquote>}
               </li>)}</ul>}
             </li>)}</ul>
           </section>}

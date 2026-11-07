@@ -15,6 +15,7 @@ import {randomId} from './auth/passwords.js';
 import {MEMBER_EFFORTS,MEMBER_GPT_MODEL,MEMBER_MODEL,MEMBER_MODELS,SCHEDULE_MODEL} from './auth/policy.js';
 import type {SandboxNodes} from './sandbox/nodes.js';
 import {feedTimeFor} from './tasks/service.js';
+import {syncProfileMemory} from './profile.js';
 
 /** A stable opaque namespace: no user-controlled paths, names, ports or upstreams. */
 export function memberConfig(base: Config, userId: string, port: number, model: string = MEMBER_MODEL, effort?: string, resident = false): Config {
@@ -189,6 +190,8 @@ export class UserRuntimes {
     await runtime.ctx.agent.init({cold:asleep});runtime.ctx.tasks.init();
     // Nobody's knowledge lives in the spare; the account that takes it starts its own.
     if(spare)runtime.ctx.taskKb?.stop();else runtime.ctx.taskKb?.start();
+    // The profile's copy in the account's knowledge base, in case its last save could not reach this runtime.
+    if(!spare){try{syncProfileMemory(this.root.db,runtime.ctx.db,user.id);}catch(err){this.root.log.warn('profile memory not written',{error:err instanceof Error?err.message:String(err)});}}
     if(runtime.ctx.push)recoveries.push(startTaskNotifications(runtime.ctx,runtime.ctx.push));
     recoveries.push(startVaultAutofill(runtime.ctx));
     if(runtime.ctx.cfg.sandbox.autostart){

@@ -22,7 +22,8 @@ import { readFirmware } from "../gadgetFirmware.js";
 import { Dictation, DictationError, DICTATION_MAX_CHARS } from "../dictation.js";
 import { VoiceLog, type VoiceRecord } from "../voiceLog.js";
 import type { AppContext } from "../context.js";
-import { DataError, SANDBOX_SIGN_IN_MS } from "../clawpages.js";
+import { DataError, SANDBOX_SIGN_IN_MS, type Visitor } from "../clawpages.js";
+import { ProfileError, finishOnboarding, onboardingPending, pageIdentity, readProfile, saveProfile, syncProfileMemory, warmNewAccount } from "../profile.js";
 import { SHARE_NAME, aiInput, parseJsonAnswer } from "../share.js";
 import { DecisionError, decisionInput } from "../decision.js";
 import { AiError } from "../clawpageAi.js";
@@ -448,6 +449,8 @@ export function createApiRouter(context: AppContext): Router {
       audit(db, "register_ok", user.username, ctx.ip);
       track(req, "signup", { method: "password", invite: Boolean(str(req.body?.inviteCode).trim()) }, user.id);
       log.info("user registered", { ip: ctx.ip });
+      // The sandbox gets ready while the person fills in the profile step.
+      warmNewAccount(context, user.id);
       followLoginTimezone(context, user.id, req.body?.timeZone);
       res.json({ ok: true, username: user.username, email: user.email, role: user.role, expiresAt: session.expiresAt });
     }),
@@ -506,6 +509,8 @@ export function createApiRouter(context: AppContext): Router {
         // The account's email; null for an account that only has the hidden placeholder.
         email: owner ? visibleEmail(db, owner.id) : null,
         role: owner?.role ?? null,
+        // A new account's first step (the profile) is still ahead of it.
+        onboarding: owner ? onboardingPending(db, owner.id) : false,
         expiresAt: ctx.session.expiresAt,
         secure: ctx.secure,
       });
@@ -906,7 +911,12 @@ export function createApiRouter(context: AppContext): Router {
     const facts = userId ? share!.page(userId, page) : null;
     return facts && !facts.offlineAt ? { userId: userId!, page, title: facts.title, url: facts.url } : null;
   };
-  const visitorOf = (userId: string): { id: string; name: string; email: string | null } => ({ id: userId, name: getUser(db, userId)?.username ?? userId, email: visibleEmail(db, userId) });
+  // A page learns an account's public id and nickname only (src/control/profile.ts), never its username, email or account id.
+  const visitorOf = (userId: string): Visitor => {
+    const identity = pageIdentity(db, userId);
+    if (!identity) throw new Error("the account has no public id");
+    return identity;
+  };
   // The account's own sandbox browser (signed in by `aio-share sign-in`): it may sign in to the account's own pages,
   // and to pages the account already allowed; nothing else of the console. Anything else asks a real sign-in.
   const SANDBOX_SSO_COOKIE = "pa_sandbox_sso";
@@ -922,15 +932,15 @@ export function createApiRouter(context: AppContext): Router {
     const share = context.share!;
     const session = ctxOf(req).session;
     const sandbox = session ? null : sandboxAccount(req);
-    if (sandbox && getUser(db, sandbox) && (sandbox === target.userId || share.data!.granted(target.userId, target.page, sandbox))) {
+    if (sandbox && getUser(db, sandbox) && (sandbox === target.userId || share.data!.granted(target.userId, target.page, visitorOf(sandbox).id))) {
       const visitor = visitorOf(sandbox);
-      share.data!.grant(target.userId, target.page, visitor);
+      share.data!.grant(target.userId, target.page, visitor, sandbox);
       res.redirect(303, share.returnUrl(target.userId, target.page, req.query.return, share.data!.visitorToken(target.userId, target.page, visitor)));
       return;
     }
-    if (session && share.data!.granted(target.userId, target.page, session.ownerId)) {
+    if (session && share.data!.granted(target.userId, target.page, visitorOf(session.ownerId).id)) {
       const visitor = visitorOf(session.ownerId);
-      share.data!.grant(target.userId, target.page, visitor);
+      share.data!.grant(target.userId, target.page, visitor, session.ownerId);
       res.redirect(303, share.returnUrl(target.userId, target.page, req.query.return, share.data!.visitorToken(target.userId, target.page, visitor)));
       return;
     }
@@ -948,7 +958,7 @@ export function createApiRouter(context: AppContext): Router {
     if (!userId || !getUser(db, userId)) { res.status(403).json({ error: "SIGN_IN_LINK_EXPIRED", message: "The sign-in link has expired; get a new one" }); return; }
     if (!share!.page(userId, page)) { res.status(404).json({ error: "PAGE_NOT_FOUND", message: "The page does not exist" }); return; }
     const visitor = visitorOf(userId);
-    share!.data!.grant(userId, page, visitor);
+    share!.data!.grant(userId, page, visitor, userId);
     res.setHeader("Set-Cookie", serializeCookie({ name: SANDBOX_SSO_COOKIE, value: share!.data!.sandboxToken(userId, "cookie"), httpOnly: true, secure: ctxOf(req).secure,
       sameSite: "Lax", path: "/api/clawpage-sso", maxAgeSeconds: SANDBOX_SIGN_IN_MS / 1000 }));
     res.redirect(303, share!.returnUrl(userId, page, req.query.return, share!.data!.visitorToken(userId, page, visitor)));
@@ -969,7 +979,7 @@ export function createApiRouter(context: AppContext): Router {
     if (!target) { res.status(404).json({ error: "PAGE_NOT_FOUND", message: "The page does not exist" }); return; }
     const share = context.share!;
     const visitor = visitorOf(ctxOf(req).session!.ownerId);
-    share.data!.grant(target.userId, target.page, visitor);
+    share.data!.grant(target.userId, target.page, visitor, ctxOf(req).session!.ownerId);
     track(req, "clawpage_sign_in", {});
     res.json({ url: share.returnUrl(target.userId, target.page, req.body?.return, share.data!.visitorToken(target.userId, target.page, visitor)) });
   });
@@ -992,6 +1002,32 @@ export function createApiRouter(context: AppContext): Router {
       res.status(400).json({ error: "bad_request", message: err.message });
     }
   }));
+  // The person's profile (src/control/profile.ts), kept centrally (this router is the root one: see server.ts).
+  // Each save also rewrites its copy in the account's knowledge base, once that account's runtime is up.
+  router.get("/profile", requireKind("primary"), requireSession, (req, res) => {
+    res.setHeader("Cache-Control", "no-store");
+    res.json(readProfile(db, ctxOf(req).session!.ownerId));
+  });
+  router.put("/profile", requireKind("primary"), requireSession, (req, res) => {
+    const userId = ctxOf(req).session!.ownerId;
+    let profile;
+    try { profile = saveProfile(db, userId, req.body?.profile); } catch (err) {
+      if (!(err instanceof ProfileError)) throw err;
+      res.status(err.status).json({ error: err.code, message: err.message });
+      return;
+    }
+    const user = getUser(db, userId);
+    void (user?.role === "owner" || !context.runtimeForUser ? Promise.resolve(db) : context.runtimeForUser(userId).then((r) => r.db))
+      .then((accountDb) => { syncProfileMemory(db, accountDb, userId); })
+      .catch((err: unknown) => log.warn("profile memory not written", { error: err instanceof Error ? err.message : String(err) }));
+    res.json({ profile, onboarding: false });
+  });
+  // Skipping the first step after registering: it does not come back; the profile stays reachable in settings.
+  router.post("/profile/skip", requireKind("primary"), requireSession, (req, res) => {
+    const userId = ctxOf(req).session!.ownerId;
+    finishOnboarding(db, userId);
+    res.json({ onboarding: false });
+  });
   // The console language decides what language the account's agents write for people in.
   router.put("/account/locale", requireKind("primary"), requireSession, (req, res) => {
     const locale = req.body?.locale;
