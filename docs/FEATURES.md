@@ -1051,7 +1051,8 @@ iOS App 可以把那台 iPhone 的相册、提醒事项和日历交给**在这�
   限额：每人每页每分钟 30 次、每天 1000 次（与 `.ai` 分开计）。错误码：`SIGN_IN_REQUIRED`/`SIGN_IN_EXPIRED`（401）、`INVALID_INPUT`（400）、`RATE_LIMITED`（429）、`AI_UNAVAILABLE`（503，部署未配置 Jev）、
   `DECIDE_FAILED`（502）、`DECIDE_TIMEOUT`（504，超过 `PA_JEV_TIMEOUT_SECONDS`）；`file://` 预览里 SDK 直接给 `PREVIEW`。适合在已知候选中选一个（如对弈页面的电脑从合法着法里选一步、几件候选里挑最合适的），自由文本仍用 `ai.ask`。
 - **主人身份**：控制台点「打开」时由 `POST /api/clawpages/<页面名>/open` 生成主人链接：页面地址后附 `#cp=<令牌>`（片段不发给服务器），
-  令牌用部署自己的密钥（`<PA_DATA_DIR>/clawpages-key`）签名，只对该账号该页有效、12 小时过期；SDK 取走后立即从地址栏抹掉。持令牌可读写所有表、不受限流，但不能改表权限或删表（页面脚本可能出自协作者之手；这两项只在控制台与沙箱 CLI 做）。
+  令牌用部署自己的密钥（`<PA_DATA_DIR>/clawpages-key`）签名，只对该账号该页有效、12 小时过期；SDK 取走后立即从地址栏抹掉。界面只等主人链接 2 秒：控制面慢或连不上（超时、网络错误、5xx）时直接打开页面的公开地址（以访客身份），按钮随即恢复；控制面明确拒绝（如页面已被删除，4xx）时提示错误、不打开。
+  网页版在点击时先开一个空白标签页再填地址，iOS/Android App 交给 App 内浏览器（`aioDeviceBrowser` 桥），都不经沙箱或沙箱浏览器。持令牌可读写所有表、不受限流，但不能改表权限或删表（页面脚本可能出自协作者之手；这两项只在控制台与沙箱 CLI 做）。
 - **执行器**：沙箱 CLI `data tables|create|permission|drop|list|get|put|patch|add|incr|delete|export|import` 以主人身份操作；每次执行提示词附上本账号
   最近活跃的 12 个 clawpages（地址、发布时间与发布者、协作者数、各表权限、记录数与最近改动时间），主会话因此知道已有哪些 clawpage、数据有什么变化，并按 skill 拉取 → 修改 → 同名发布迭代。
 - **版本**：`pull`/`publish` 在页面目录里写 `.clawpage.json`（页面名与所持版本 `updatedAt`，0600，点文件不发布）；之后发布带上 `baseUpdatedAt`，

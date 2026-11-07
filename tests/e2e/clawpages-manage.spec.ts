@@ -20,7 +20,10 @@ const RECORDS: ClawpageRecord[] = [
   { key: "owner_1.last", value: { game: { n: 13 }, human: 1, mode: "coach", review: "short", level: "hard" }, createdAt: now - 700_000, updatedAt: now - 700_000, by },
 ];
 
-async function setup(page: Page) {
+/** How the server answers 打开's request for an owner link: at once, never, out of reach (the edge's 502), or the page gone. */
+type OpenMode = "ok" | "hang" | "unreachable" | "gone";
+
+async function setup(page: Page, open: OpenMode = "ok") {
   const calls: string[] = [];
   let list = structuredClone(PAGES);
   await mockConsole(page, { conversations: [] });
@@ -37,6 +40,12 @@ async function setup(page: Page) {
       return r.fulfill({ json: list.find((p) => p.name === name) });
     }
     if (!sub && req.method() === "DELETE") { list = list.filter((p) => p.name !== name); return r.fulfill({ status: 204 }); }
+    if (sub === "open") {
+      if (open === "hang") return; // never answered
+      if (open === "unreachable") return r.fulfill({ status: 502, json: { error: "control_unreachable", message: "服务暂时不可用，请稍后重试" } });
+      if (open === "gone") return r.fulfill({ status: 404, json: { error: "PAGE_NOT_FOUND", message: "这个页面不存在" } });
+      return r.fulfill({ json: { url: `${WS}/u/owner/share/${name}/#cp=owner-token` } });
+    }
     if (sub === "collaborators") return r.fulfill({ json: { collaborators: [] } });
     if (sub === "tables" && req.method() === "GET" && table === "games") return r.fulfill({ json: { records: RECORDS, nextCursor: null } });
     return r.fulfill({ status: 404, json: { error: "not_found" } });
@@ -206,3 +215,63 @@ for (const width of [390, 360]) {
     await expect(data.getByTestId("clawpage-record")).toHaveCount(0);
   });
 }
+
+/** The iOS and Android apps' in-app browser: the shell takes the address through this bridge. */
+const nativeBrowser = (page: Page) => page.addInitScript(() => {
+  (window as unknown as { opened: string[] }).opened = [];
+  (window as unknown as { aioDeviceBrowser: { postMessage(url: string): void } }).aioDeviceBrowser = { postMessage: (url) => (window as unknown as { opened: string[] }).opened.push(url) };
+});
+const nativeOpened = (page: Page) => page.evaluate(() => (window as unknown as { opened: string[] }).opened);
+
+test("in the app, 打开 hands the owner link to the in-app browser at once", async ({ page }) => {
+  await nativeBrowser(page);
+  const calls = await setup(page);
+  await page.goto("/u/owner/clawpages");
+  await page.getByRole("button", { name: "打开 一手 · 围棋教室 的详情" }).click();
+  const sheet = page.getByRole("dialog", { name: "一手 · 围棋教室" });
+  const open = sheet.getByRole("button", { name: "打开", exact: true });
+  await open.click();
+  await expect.poll(() => nativeOpened(page)).toEqual([`${WS}/u/owner/share/go-class/#cp=owner-token`]);
+  expect(calls).toContain("POST go-class/open");
+  await expect(open).toBeEnabled();
+});
+
+test("in the app, when the server does not answer, 打开 opens the public address within seconds and the button comes back", async ({ page }) => {
+  await nativeBrowser(page);
+  await setup(page, "hang");
+  await page.goto("/u/owner/clawpages");
+  await page.getByRole("button", { name: "打开 一手 · 围棋教室 的详情" }).click();
+  const sheet = page.getByRole("dialog", { name: "一手 · 围棋教室" });
+  const started = Date.now();
+  await sheet.getByRole("button", { name: "打开", exact: true }).click();
+  await expect(sheet.getByRole("button", { name: "正在打开…" })).toBeDisabled();
+  await expect.poll(() => nativeOpened(page), { timeout: 5000 }).toEqual([`${WS}/u/owner/share/go-class/`]);
+  expect(Date.now() - started).toBeLessThan(5000);
+  await expect(sheet.getByRole("button", { name: "打开", exact: true })).toBeEnabled();
+  await expect(page.getByRole("alert")).toHaveCount(0);
+});
+
+test("on the web, 打开 opens a new tab; with the server out of reach, at the public address", async ({ page, context }) => {
+  await context.route(`${WS}/**`, (r) => r.fulfill({ contentType: "text/html", body: "<p>clawpage</p>" }));
+  await setup(page, "unreachable");
+  await page.goto("/u/owner/clawpages");
+  await page.getByRole("button", { name: "打开 一手 · 围棋教室 的详情" }).click();
+  const sheet = page.getByRole("dialog", { name: "一手 · 围棋教室" });
+  const open = sheet.getByRole("button", { name: "打开", exact: true });
+  const [tab] = await Promise.all([context.waitForEvent("page"), open.click()]);
+  await expect.poll(() => tab.url()).toBe(`${WS}/u/owner/share/go-class/`);
+  await tab.close();
+  await expect(open).toBeEnabled();
+});
+
+test("打开 on a page deleted meanwhile says so, opens nothing and comes back", async ({ page }) => {
+  await nativeBrowser(page);
+  await setup(page, "gone");
+  await page.goto("/u/owner/clawpages");
+  await page.getByRole("button", { name: "打开 一手 · 围棋教室 的详情" }).click();
+  const sheet = page.getByRole("dialog", { name: "一手 · 围棋教室" });
+  await sheet.getByRole("button", { name: "打开", exact: true }).click();
+  await expect(page.getByRole("alert")).toContainText("这个页面不存在");
+  await expect(sheet.getByRole("button", { name: "打开", exact: true })).toBeEnabled();
+  expect(await nativeOpened(page)).toEqual([]);
+});

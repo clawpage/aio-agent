@@ -11,8 +11,10 @@ import { useClawpageCover } from "../clawpageCover";
 import { t } from "../i18n";
 
 const PERMISSIONS: ClawpagePermission[] = ["private", "read-public", "public", "signed-in", "per-user"];
-/** Columns shown for object records; the rest of a record is in its tooltip. */
+/** Columns shown for object records; the rest of a record opens below its row. */
 const MAX_COLUMNS = 5;
+/** How long 打开 waits for the owner link before opening the page's public address instead. */
+const OWNER_LINK_WAIT_MS = 2000;
 
 async function copyText(text: string): Promise<boolean> {
   try {
@@ -138,18 +140,31 @@ function ClawpageSheet({ page, onClose, onChanged, onRemoved, onError }: { page:
   }, [onClose]);
 
   // The owner link is made on the server; a window opened in the tap itself is not blocked while it comes.
+  // It is waited for only briefly: when the server is slow or out of reach the page opens at its public
+  // address instead, so the button never hangs. A refusal from the server (a page gone) is shown instead.
   const open = async () => {
     const pending = hasNativeBrowser() ? null : window.open("about:blank", "_blank");
     setOpening(true);
+    const wait = new AbortController();
+    const timer = setTimeout(() => wait.abort(), OWNER_LINK_WAIT_MS);
+    let url = page.url;
     try {
-      const { url } = await api.clawpageOpen(page.name);
+      url = (await api.clawpageOpen(page.name, wait.signal)).url;
+    } catch (err) {
+      if (err instanceof ApiError && err.status < 500) {
+        pending?.close();
+        onError(err);
+        setOpening(false);
+        return;
+      }
+    } finally {
+      clearTimeout(timer);
+    }
+    try {
       if (pending) {
         pending.opener = null;
         pending.location.href = url;
       } else if (!openNativeBrowser(url)) window.open(url, "_blank", "noopener,noreferrer");
-    } catch (err) {
-      pending?.close();
-      onError(err);
     } finally {
       setOpening(false);
     }
