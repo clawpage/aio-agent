@@ -752,7 +752,7 @@ export function App() {
       // The console opened from the saved page (public/sw.js) and the service has moved past it: load the deployed one.
       if (staleUi && loadDeployedPage()) return;
       setMismatch(mismatch);
-      void checkBuild(loadDeployedPage);
+      void session.then((s) => checkBuild(loadDeployedPage, !s.authenticated), () => checkBuild(loadDeployedPage));
       if (answered) { setMode("tasks"); return; }
       void api.main(undefined, AbortSignal.timeout(8000), 1).then(() => setMode("tasks")).catch(err => setMode(err instanceof ApiError && err.status === 404 ? "legacy" : "tasks"));
     });

@@ -75,3 +75,23 @@ test("with a message being typed, the console waits", async ({ page }) => {
   expect(stale(events)).toHaveLength(1);
   await expect(page.getByRole("textbox", { name: "消息", exact: true })).toHaveValue("还没写完");
 });
+
+test("signed out, the registration page switches to the deployed one at once: an old one may lack a step the server asks for", async ({ page }) => {
+  await mockConsole(page, { conversations: [] });
+  await page.route("**/api/auth/session", (r) => r.fulfill({ json: { authenticated: false, emailCode: true } }));
+  const events: { name: string; props: Record<string, unknown> }[] = [];
+  await page.route("**/api/analytics", (r) => { events.push(r.request().postDataJSON()); return r.fulfill({ json: { ok: true } }); });
+  let newer = true;
+  await page.route((url) => url.pathname === "/", async (r) => {
+    if (r.request().resourceType() !== "fetch" || !newer) return r.fallback();
+    const html = (await (await r.fetch()).text()).replace(/\/assets\/index-[^"']+\.js/, "/assets/index-NEWER.js");
+    await r.fulfill({ body: html, headers: { "content-type": "text/html" } });
+  });
+  let loads = 0;
+  page.on("load", () => { loads += 1; if (loads > 1) newer = false; });
+  await page.goto("/register");
+  // Found behind for the first time, no three hours waited: it switches.
+  await expect.poll(() => stale(events)[0]).toEqual(expect.objectContaining({ behind_min: 0, switched: true }));
+  await expect.poll(() => loads).toBe(2);
+  await expect(page).toHaveURL(/\/register$/);
+});
