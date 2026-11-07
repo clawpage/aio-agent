@@ -37,6 +37,27 @@ export const http = {
     inviteNotRevocable: "这个邀请码已经用过或已作废",
     emailTaken: "这个邮箱已经注册过，请直接登录",
     emailTakenUsePassword: "这个邮箱已经注册过，请用邮箱和密码登录",
+    /** The code emailed before a password registration (src/control/auth/signupCode.ts). */
+    emailCode: {
+      required: "请先获取并填写邮箱验证码",
+      invalid: "验证码不正确",
+      expired: "验证码已过期，请重新获取",
+      attempts: "验证码错误次数过多，已作废，请重新获取",
+      cooldown: (seconds: number) => `验证码发送太频繁，请在 ${seconds} 秒后再试`,
+      tooMany: "验证码发送太频繁，请过一会儿再试",
+      sendFailed: "验证码邮件没有发出去，请稍后再试",
+    },
+  },
+  /** The registration email: the code, or a notice when the email already has an account (no code then). */
+  signupMail: {
+    sender: "一站",
+    codeSubject: (code: string) => `一站验证码：${code}`,
+    codeIntro: "你正在注册一站，邮箱验证码是：",
+    codeValid: (minutes: number) => `验证码 ${minutes} 分钟内有效，只能用一次。`,
+    ignore: "如果不是你本人操作，忽略这封邮件即可。",
+    takenSubject: "一站：这个邮箱已有账号",
+    takenBody: "有人用这个邮箱申请注册一站，但它已经有账号了，不需要再注册。",
+    takenSignIn: "直接登录即可：可以用邮箱和密码，或者注册时用的 Google / 通过 Apple 登录。",
   },
   session: {
     expired: "会话已过期",

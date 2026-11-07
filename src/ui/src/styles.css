@@ -775,6 +775,15 @@ textarea:focus {
 .login-invite a { color: var(--accent); text-decoration: none; overflow-wrap: anywhere; }
 .login-invite a:hover { text-decoration: underline; }
 .login-switch { margin: 4px 0 0; text-align: center; }
+/* Email and its send-code button on one line, equally tall; the button keeps its width while it counts down. */
+.login-card .field > label { font-size: var(--fs-sm); color: var(--text); font-weight: 500; }
+.login-code-row { display: flex; gap: 8px; }
+.login-code-row > input { flex: 1; min-width: 0; }
+.login-card button.login-send-code { flex: none; min-height: 48px; min-width: 104px; border-radius: 12px; padding: 0 14px; font-size: var(--fs-sm); font-weight: 500; color: var(--accent); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.login-card button.login-send-code:disabled { color: var(--text-dim); cursor: default; }
+.login-card input.login-code-input { font-family: var(--mono); letter-spacing: 0.3em; }
+.login-card input.login-code-input::placeholder { font-family: var(--font); letter-spacing: normal; }
+.login-code-sent { margin: -8px 0 0; line-height: 1.6; }
 .login-card > button.link { align-self: center; min-height: 36px; font-size: var(--fs-sm); }
 .login-card .banner { font-size: var(--fs-sm); border-radius: 12px; line-height: 1.6; }
 @media (hover: none) and (pointer: coarse) {

@@ -5,6 +5,7 @@ import type { User } from "./owner.js";
 import { emailTaken, normalizeEmail, usernameFromEmail } from "./email.js";
 import { t } from "../i18n/index.js";
 import { startOnboarding } from "../profile.js";
+import { consumeSignupCode, verifySignupCode } from "./signupCode.js";
 
 /**
  * One-time invite codes: required once the deployment has 30 accounts.
@@ -75,12 +76,21 @@ export function revokeInvite(db: Db, code: string): boolean {
  * and insert the account in one write transaction. Concurrent registrations
  * cannot exceed the quota or spend the same code twice. A Google or Apple
  * registration takes the provider's verified email as the account's email.
+ * `emailCode`, when given, is the code emailed to that address (signupCode.ts),
+ * checked before anything about the account and used up with it.
  */
-export async function registerWithInvite(db: Db, input: { email: string; password: string; code: string }, google?: OAuthIdentity): Promise<User & { email: string }> {
+export async function registerWithInvite(db: Db, input: { email: string; password: string; code: string; emailCode?: string }, google?: OAuthIdentity): Promise<User & { email: string }> {
   const email = normalizeEmail(input.email);
   const code = normalizeCode(input.code);
   if (!email) throw new RegisterError(400, "invalid_email", t().http.auth.invalidEmail);
   if (input.password.length < MIN_PASSWORD) throw new RegisterError(400, "weak_password", t().http.auth.weakPassword(MIN_PASSWORD));
+  // Before "this email is taken": without the code, nobody learns whether an address has an account.
+  let emailCodeHash: string | null = null;
+  if (input.emailCode !== undefined) {
+    const check = verifySignupCode(db, email, input.emailCode);
+    if (!check.ok) throw new RegisterError(400, `email_code_${check.reason}`, t().http.auth.emailCode[check.reason]);
+    emailCodeHash = check.hash;
+  }
   const rec = await hashPassword(input.password);
   let id = randomId("user");
   let username = "";
@@ -92,6 +102,7 @@ export async function registerWithInvite(db: Db, input: { email: string; passwor
       if (!invite || invite.revoked_at !== null) throw new RegisterError(400, "invalid_invite", t().http.auth.invalidInvite);
       if (invite.used_at !== null) throw new RegisterError(400, "invite_used", t().http.auth.inviteUsed);
     }
+    if (emailCodeHash && !consumeSignupCode(db, email, emailCodeHash)) throw new RegisterError(400, "email_code_expired", t().http.auth.emailCode.expired);
     if (emailTaken(db, email)) {
       throw google ? new RegisterError(409, "email_taken", t().http.auth.emailTakenUsePassword)
         : new RegisterError(409, "email_taken", t().http.auth.emailTaken);

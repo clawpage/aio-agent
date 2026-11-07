@@ -54,10 +54,13 @@ export function friendlyStatusMessage(status: number): string {
 export class ApiError extends Error {
   status: number;
   code: string;
-  constructor(status: number, code: string, message: string) {
+  /** Seconds the server asks to wait before trying again, when it says. */
+  retryAfter?: number;
+  constructor(status: number, code: string, message: string, retryAfter?: number) {
     super(message);
     this.status = status;
     this.code = code;
+    this.retryAfter = retryAfter;
   }
 }
 
@@ -110,12 +113,12 @@ async function request<T>(
     }
   }
   if (!res.ok) {
-    const body = (parsed ?? {}) as { error?: string; message?: string };
+    const body = (parsed ?? {}) as { error?: string; message?: string; retryAfter?: unknown };
     const readable =
       typeof body.message === "string" && body.message.trim().length > 0 && body.message.length <= 300
         ? body.message
         : friendlyStatusMessage(res.status);
-    throw new ApiError(res.status, body.error ?? "error", readable);
+    throw new ApiError(res.status, body.error ?? "error", readable, typeof body.retryAfter === "number" ? body.retryAfter : undefined);
   }
   return (parsed ?? {}) as T;
 }
@@ -230,7 +233,7 @@ export const api = {
   taskUserBrowserScreenshotUrl: (id: string, at: number) => apiUrl(`/api/tasks/${encodeURIComponent(id)}/user-browser/screenshot?at=${at}`),
   taskUserBrowserControl: (id: string, action: "take" | "release") => request<{ userBrowser: import("./types").UserBrowserState }>(`/api/tasks/${encodeURIComponent(id)}/user-browser/control`, { method: "POST", body: { action } }),
   taskBrowserScreenshotUrl: (id: string, tab: string, at: number) => apiUrl(`/api/tasks/${encodeURIComponent(id)}/browser/screenshot?tab=${encodeURIComponent(tab)}&at=${at}`),
-  session: (signal?: AbortSignal) => request<{ authenticated: boolean; role?: "owner" | "member"; username: string | null; email?: string | null; expiresAt?: number; secure?: boolean; inviteEmail?: string | null; registrationRequiresInvite?: boolean; onboarding?: boolean }>("/api/auth/session", {signal,cache:"no-store"}),
+  session: (signal?: AbortSignal) => request<{ authenticated: boolean; role?: "owner" | "member"; username: string | null; email?: string | null; expiresAt?: number; secure?: boolean; inviteEmail?: string | null; registrationRequiresInvite?: boolean; emailCode?: boolean; onboarding?: boolean }>("/api/auth/session", {signal,cache:"no-store"}),
   profile: (signal?: AbortSignal) => request<import("./types").ProfileState>("/api/profile", { cache: "no-store", signal }),
   saveProfile: (profile: import("./types").Profile) => request<{ profile: import("./types").Profile; onboarding: false }>("/api/profile", { method: "PUT", body: { profile } }),
   /** The first step after registering, skipped: it does not come back. */
@@ -238,7 +241,9 @@ export const api = {
   /** `email` is the account's email, or the username of an account from before email. */
   // Signing in tells the server the browser's time zone: the daily feed follows it.
   login: (password: string, email = "owner") => request<{ ok: boolean; username: string; expiresAt: number }>("/api/auth/login", { method: "POST", body: { password, email, timeZone: browserTimeZone() } }),
-  register: (account: { email: string; password: string; inviteCode: string }) => request<{ ok: boolean; username: string; expiresAt: number }>("/api/auth/register", { method: "POST", body: { ...account, timeZone: browserTimeZone() } }),
+  /** Emails the code a password registration gives back (when the session says `emailCode`); `retryAfter` is in seconds. */
+  sendSignupCode: (email: string) => request<{ ok: boolean; retryAfter: number }>("/api/auth/register/code", { method: "POST", body: { email } }),
+  register: (account: { email: string; password: string; inviteCode: string; emailCode?: string }) => request<{ ok: boolean; username: string; expiresAt: number }>("/api/auth/register", { method: "POST", body: { ...account, timeZone: browserTimeZone() } }),
   googlePending: (signal?: AbortSignal) => request<{enabled: boolean; pending: {email: string} | null}>("/api/auth/google/pending", {cache: "no-store", signal}),
   googleStart: (native: boolean) => request<{url: string}>("/api/auth/google/start", {method: "POST", body: {native, timeZone: browserTimeZone()}}),
   googleRedeem: (ticket: string) => request<{authenticated: boolean; pending?: {email: string}}>("/api/auth/google/redeem", {method: "POST", body: {ticket}}),

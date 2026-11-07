@@ -29,11 +29,14 @@ import type { Vault } from "./vault.js";
 import type { Analytics } from "./analytics.js";
 import type { TaskKbMaintainer } from "./taskKb/maintainer.js";
 import type { SharedKbs } from "./taskKb/shared.js";
+import type { SignupCodes } from "./auth/signupCode.js";
 
 export interface AppContext {
   runtimeForUser?: (userId: string) => Promise<AppContext>;
   /** Clawpages (public share pages) and their data: one store, shared by every runtime. */
   share?: ShareStore;
+  /** The code emailed before a password registration; absent without a Resend key (registration then asks for none). */
+  signupCodes?: SignupCodes;
   /** Jev structured decisions (host-side key; absent without one). */
   jev?: Jev;
   tasks: TaskService;

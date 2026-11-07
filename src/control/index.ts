@@ -7,6 +7,7 @@ import {WidgetStore} from "./widgets.js";
 import {ClawpageData} from "./clawpages.js";
 import {ClawpageAi} from "./clawpageAi.js";
 import {Jev} from "./jev.js";
+import { ResendMailer, SignupCodes, type Mailer } from "./auth/signupCode.js";
 import {DecisionGateway} from "./decision.js";
 import {KbGateway} from "./kb.js";
 import {HaGateway} from "./ha.js";
@@ -91,6 +92,8 @@ export interface BootstrapOptions {
     documents?: DocumentService;
     browserRuntime?: BrowserRuntimeLike;
     cameras?: HaCameras;
+    /** Replaces Resend for the registration code email (and turns that code on). */
+    mailer?: Mailer;
   };
 }
 
@@ -173,6 +176,9 @@ async function bootstrapRuntime(opts: BootstrapOptions, cfg: Config, log: Logger
   const aio = opts.overrides?.aio ?? new AioClient(log, container);
 
   const jev = new Jev(cfg, log);
+  // Registration is the root runtime's; a member runtime never sends it.
+  const mailer = opts.skipOwner ? undefined : opts.overrides?.mailer ?? (cfg.resendApiKey ? new ResendMailer(cfg.resendApiKey) : undefined);
+  if (!opts.skipOwner && !mailer) log.warn("no Resend API key: password registration does not verify the email (PA_RESEND_SECRETS_FILE)");
   const tasks = new TaskService(db, cfg, agent, codex, container, jev);
   tasks.setHumanTabRelease((key) => handBackToAgent(key, tabs, ctx.userBrowser ? {
     view: (k) => ctx.userBrowser!.view(cfg.runtimeUserId ?? "", k),
@@ -180,6 +186,7 @@ async function bootstrapRuntime(opts: BootstrapOptions, cfg: Config, log: Logger
   } : null));
   const ctx: AppContext = {
     jev,
+    ...(mailer ? { signupCodes: new SignupCodes(db, mailer, cfg.mailFrom, log) } : {}),
     tasks,
     // Member runtimes record into the central database instead (UserRuntimes hands them the root's).
     ...(opts.skipOwner ? {} : { analytics: new Analytics(db, log) }),

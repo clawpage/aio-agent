@@ -24,6 +24,13 @@ export function Login({ onSuccess, notice, username: named }: { onSuccess: () =>
   const [inviteCode, setInviteCode] = useState("");
   const [inviteEmail, setInviteEmail] = useState<string | null>(null);
   const [requiresInvite, setRequiresInvite] = useState(true);
+  // The deployment emails a code a password registration must give back.
+  const [emailCodeOn, setEmailCodeOn] = useState(false);
+  const [emailCode, setEmailCode] = useState("");
+  const [codeSentTo, setCodeSentTo] = useState<string | null>(null);
+  const [sendingCode, setSendingCode] = useState(false);
+  const [resendAt, setResendAt] = useState(0);
+  const [now, setNow] = useState(() => Date.now());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [googleEnabled, setGoogleEnabled] = useState(false);
@@ -61,6 +68,7 @@ export function Login({ onSuccess, notice, username: named }: { onSuccess: () =>
         setSessionError(false);
         setInviteEmail(session.inviteEmail ?? null);
         setRequiresInvite(session.registrationRequiresInvite !== false);
+        setEmailCodeOn(session.emailCode === true);
         if (session.authenticated) {
           setChecking(true);
           await onRestored.current();
@@ -165,6 +173,31 @@ export function Login({ onSuccess, notice, username: named }: { onSuccess: () =>
   };
 
   const register = mode === "register";
+  const needCode = register && !pendingEmail && emailCodeOn;
+  // The send button counts down the server's wait (a minute after each code).
+  useEffect(() => {
+    if (!resendAt) return;
+    const timer = window.setInterval(() => { const at = Date.now(); setNow(at); if (at >= resendAt) clearInterval(timer); }, 1000);
+    return () => clearInterval(timer);
+  }, [resendAt]);
+  const waitSeconds = Math.max(0, Math.ceil((resendAt - now) / 1000));
+  const waitFor = (seconds: number) => { const at = Date.now(); setNow(at); setResendAt(at + seconds * 1000); };
+  const sendCode = async () => {
+    if (sendingCode || waitSeconds > 0) return;
+    const email = account.trim();
+    setSendingCode(true);
+    setError(null);
+    try {
+      const { retryAfter } = await api.sendSignupCode(email);
+      setCodeSentTo(email);
+      waitFor(retryAfter);
+    } catch (err) {
+      if (err instanceof ApiError && err.retryAfter) waitFor(err.retryAfter);
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSendingCode(false);
+    }
+  };
   useEffect(() => { if (!checking && !pendingEmail) track("auth_view", { mode }); }, [mode, checking, pendingEmail]);
   // A phone keyboard shrinks the page to the area above it and keeps the window at the top
   // (useKeyboardViewport), so iOS no longer scrolls the box being typed in into view: the
@@ -202,7 +235,7 @@ export function Login({ onSuccess, notice, username: named }: { onSuccess: () =>
     setError(null);
     try {
       if (pending) await (pending.provider === "apple" ? api.appleRegister : api.googleRegister)({inviteCode: inviteCode.trim()});
-      else if (register) await api.register({ email: account.trim(), password, inviteCode: inviteCode.trim() });
+      else if (register) await api.register({ email: account.trim(), password, inviteCode: inviteCode.trim(), ...(needCode ? { emailCode } : {}) });
       else await api.login(password, account.trim());
       setPassword("");
       setConfirm("");
@@ -211,13 +244,34 @@ export function Login({ onSuccess, notice, username: named }: { onSuccess: () =>
       if (err instanceof ApiError && err.code === "invite_required") {
         setRequiresInvite(true);
         setError(t.auth.invite.quotaReached);
-      } else if (err instanceof ApiError) setError(err.message);
+      } else if (err instanceof ApiError) {
+        // A code that can no longer work is cleared, so the next one is typed into an empty box.
+        if (err.code === "email_code_expired" || err.code === "email_code_attempts") setEmailCode("");
+        setError(err.message);
+      }
       else setError(err instanceof Error ? err.message : String(err));
     } finally {
       submitting.current = false;
       setBusy(false);
     }
   };
+
+  // Old account names are matched exactly: a phone must not capitalize or "correct" them.
+  const emailInput = (
+    <input
+      id="login-email"
+      type={register ? "email" : "text"}
+      inputMode="email"
+      value={account}
+      onChange={e => setAccount(e.target.value)}
+      autoComplete={register ? "email" : "username"}
+      autoCapitalize="none"
+      autoCorrect="off"
+      spellCheck={false}
+      autoFocus={!named}
+      placeholder={register ? t.auth.fields.emailHint : t.auth.fields.signInHint}
+    />
+  );
 
   if (offline) return (
     <div className="login">
@@ -264,22 +318,36 @@ export function Login({ onSuccess, notice, username: named }: { onSuccess: () =>
         </>}
         {googleWaiting && <p className="banner" role="status">{t.auth.google.waiting}</p>}
         {/* A Google registration takes the verified Google email shown above. */}
-        {!pendingEmail && <label className="field">
-          <span>{t.auth.fields.email}</span>
-          {/* Old account names are matched exactly: a phone must not capitalize or "correct" them. */}
-          <input
-            type={register ? "email" : "text"}
-            inputMode="email"
-            value={account}
-            onChange={e => setAccount(e.target.value)}
-            autoComplete={register ? "email" : "username"}
-            autoCapitalize="none"
-            autoCorrect="off"
-            spellCheck={false}
-            autoFocus={!named}
-            placeholder={register ? t.auth.fields.emailHint : t.auth.fields.signInHint}
-          />
-        </label>}
+        {!pendingEmail && (needCode
+          // The send button sits in the box's row, as tall as it; outside the label so the box's name stays "email".
+          ? <div className="field">
+            <label htmlFor="login-email">{t.auth.fields.email}</label>
+            <div className="login-code-row">
+              {emailInput}
+              <button type="button" className="ghost login-send-code" disabled={busy || sendingCode || waitSeconds > 0 || !account.trim()} onClick={() => void sendCode()}>
+                {sendingCode ? t.auth.emailCode.sending : waitSeconds > 0 ? t.auth.emailCode.resend(waitSeconds) : t.auth.emailCode.send}
+              </button>
+            </div>
+          </div>
+          : <label className="field">
+            <span>{t.auth.fields.email}</span>
+            {emailInput}
+          </label>)}
+        {needCode && <>
+          <label className="field">
+            <span>{t.auth.fields.emailCode}</span>
+            {/* No maxLength: a pasted "123 456" is cut to digits here, not to six characters first. */}
+            <input
+              className="login-code-input"
+              value={emailCode}
+              onChange={e => setEmailCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              placeholder={t.auth.fields.emailCodeHint}
+            />
+          </label>
+          {codeSentTo && <p className="muted tiny login-code-sent" role="status">{t.auth.emailCode.sent(codeSentTo)}</p>}
+        </>}
         {!pendingEmail && <label className="field">
           <span>{t.auth.fields.password}</span>
           <input
@@ -319,7 +387,7 @@ export function Login({ onSuccess, notice, username: named }: { onSuccess: () =>
         {sessionError && <div className="banner warn" role="status">{t.auth.sessionUnverified}</div>}
         {notice && <div className="banner warn">{notice}</div>}
         {error && <div className="banner error">{error}</div>}
-        <button type="submit" className="primary block" disabled={busy || (pendingEmail ? requiresInvite && !inviteCode.trim() : !account.trim() || !password || (register && (!confirm || (requiresInvite && !inviteCode.trim()))))}>
+        <button type="submit" className="primary block" disabled={busy || (pendingEmail ? requiresInvite && !inviteCode.trim() : !account.trim() || !password || (register && (!confirm || (requiresInvite && !inviteCode.trim()) || (needCode && emailCode.length !== 6))))}>
           <span>{pendingEmail ? (busy ? t.auth.google.activating : requiresInvite ? t.auth.google.activate : t.auth.google.activateOpen) : register ? (busy ? t.auth.submit.registering : t.auth.submit.register) : (busy ? t.auth.submit.loggingIn : t.auth.submit.login)}</span><AuthIcon name="arrow" size={18}/>
         </button>
         {(pendingEmail || googleWaiting) && <button type="button" className="link" disabled={busy} onClick={() => void cancelGoogle()}>{t.auth.google.cancel}</button>}

@@ -43,6 +43,10 @@ Google 地图（可选）：在 `aio.env` 设置 `AIO_SECRET_GOOGLE_MAPS` 指向
 （`PA_GOOGLE_MAPS_API_KEY=...`，Google Cloud 中开通 Maps Static API 与 Geocoding API，key 限制为这两项），
 Compose 将其只读挂载到 `/run/secrets/google-maps`；不设置时地图卡片用 OpenStreetMap。
 
+注册邮箱验证码（可选）：在 `aio.env` 设置 `AIO_SECRET_RESEND` 指向私有 `0600` env 文件（`PA_RESEND_API_KEY=re_...`），
+Compose 将其只读挂载到 `/run/secrets/resend`；发件地址 `PA_MAIL_FROM` 写在 `AIO_CONTROL_ENV_FILE` 指向的文件里，
+域名须先在 Resend 验证。不设置时邮箱注册不发验证码（控制面启动日志警告一次）。改后重建并刷新 control 与 ui。
+
 ## 多机
 
 每台机器只跑自己那一层，`AIO_LAYERS` 指定：

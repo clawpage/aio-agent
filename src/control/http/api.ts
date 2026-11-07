@@ -37,7 +37,7 @@ import type { AgentEvent } from "../codex/manager.js";
 import type { HostKind, RequestContext } from "./security.js";
 import { UNSAFE_METHODS, guardUnsafe, originAllowed } from "./security.js";
 import { BOOTSTRAP_USERNAME, authenticateUser, getUser } from "../auth/owner.js";
-import { visibleEmail } from "../auth/email.js";
+import { normalizeEmail, visibleEmail } from "../auth/email.js";
 import { CLIENT_EVENTS } from "../../common/analytics.js";
 import { fileKind } from "../analytics.js";
 import { RegisterError, createInvite, listInvites, registerWithInvite, registrationRequiresInvite, revokeInvite } from "../auth/invites.js";
@@ -432,7 +432,9 @@ export function createApiRouter(context: AppContext): Router {
       const str = (v: unknown) => (typeof v === "string" ? v : "");
       let user;
       try {
-        user = await registerWithInvite(db, { email: str(req.body?.email), password: str(req.body?.password), code: str(req.body?.inviteCode) });
+        // With a Resend key, a password registration gives back the code emailed to it.
+        user = await registerWithInvite(db, { email: str(req.body?.email), password: str(req.body?.password), code: str(req.body?.inviteCode),
+          ...(context.signupCodes ? { emailCode: str(req.body?.emailCode) } : {}) });
       } catch (err) {
         if (!(err instanceof RegisterError)) throw err;
         // Guessing codes counts like guessing passwords.
@@ -453,6 +455,28 @@ export function createApiRouter(context: AppContext): Router {
       warmNewAccount(context, user.id);
       followLoginTimezone(context, user.id, req.body?.timeZone);
       res.json({ ok: true, username: user.username, email: user.email, role: user.role, expiresAt: session.expiresAt });
+    }),
+  );
+
+  // Emails the code a password registration needs; the same answer whether or not the email has an account.
+  router.post(
+    "/auth/register/code",
+    requireKind("primary"),
+    asyncHandler(async (req, res, ctx) => {
+      if (!ctx.origin || !originAllowed(cfg, "primary", ctx.origin)) {
+        res.status(403).json({ error: "origin_denied", message: t().http.common.originDenied });
+        return;
+      }
+      if (!context.signupCodes) { res.status(404).json({ error: "not_found" }); return; }
+      const email = normalizeEmail(typeof req.body?.email === "string" ? req.body.email : "");
+      if (!email) { res.status(400).json({ error: "invalid_email", message: t().http.auth.invalidEmail }); return; }
+      const sent = await context.signupCodes.send(email, ctx.ip);
+      if (!sent.ok) {
+        if (sent.retryAfter) res.setHeader("Retry-After", String(sent.retryAfter));
+        res.status(sent.status).json({ error: sent.error, message: sent.message, ...(sent.retryAfter ? { retryAfter: sent.retryAfter } : {}) });
+        return;
+      }
+      res.json({ ok: true, retryAfter: sent.retryAfter });
     }),
   );
 
@@ -499,7 +523,9 @@ export function createApiRouter(context: AppContext): Router {
     asyncHandler(async (req, res, ctx) => {
       const owner = ctx.session ? getUser(db, ctx.session.ownerId) : null;
       if (!ctx.session) {
-        res.json({ authenticated: false, kind: ctx.kind, username: owner?.username ?? null, inviteEmail: cfg.inviteEmail || null, registrationRequiresInvite: registrationRequiresInvite(db) });
+        res.json({ authenticated: false, kind: ctx.kind, username: owner?.username ?? null, inviteEmail: cfg.inviteEmail || null, registrationRequiresInvite: registrationRequiresInvite(db),
+          // Whether a password registration needs the emailed code (a Resend key is configured).
+          emailCode: Boolean(context.signupCodes) });
         return;
       }
       res.json({

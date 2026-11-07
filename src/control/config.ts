@@ -123,6 +123,10 @@ export function loadConfig(): {
   loginLockoutMs: number;
   /** Where the register form tells people to ask for an invite code; empty means "ask the administrator". */
   inviteEmail: string;
+  /** Resend API key for the code a password registration is sent (src/control/auth/signupCode.ts); empty: registration asks for no code. */
+  resendApiKey: string;
+  /** The sender of that email: `Name <address>`, or a bare address the product's name is put before in the email's language. */
+  mailFrom: string;
   googleClientId: string;
   googleClientSecret: string;
   googleRedirectUri: string;
@@ -507,6 +511,16 @@ export function loadConfig(): {
     loginWindowMs: envInt("PA_LOGIN_WINDOW_MINUTES", 15) * 60_000,
     loginLockoutMs: envInt("PA_LOGIN_LOCKOUT_MINUTES", 15) * 60_000,
     inviteEmail: /^[^\s@<>"]+@[^\s@<>"]+\.[^\s@<>"]+$/.test(envStr("PA_INVITE_EMAIL").trim()) ? envStr("PA_INVITE_EMAIL").trim() : "",
+    resendApiKey: (() => {
+      if (envStr("PA_RESEND_API_KEY").trim()) return envStr("PA_RESEND_API_KEY").trim();
+      // No file (or compose's /dev/null placeholder) leaves registration without an emailed code.
+      const file = envStr("PA_RESEND_SECRETS_FILE");
+      if (!file || !fs.statSync(file, { throwIfNoEntry: false })?.isFile()) return "";
+      const secret = readSecretFile(file, "PA_RESEND_API_KEY");
+      if (!secret.ok) throw new Error(secret.reason);
+      return secret.value;
+    })(),
+    mailFrom: envStr("PA_MAIL_FROM").trim() || "noreply@clawpage.ai",
     googleClientId: envStr("PA_GOOGLE_CLIENT_ID").trim(),
     googleClientSecret: (() => {
       if (!envStr("PA_GOOGLE_CLIENT_ID").trim()) return "";

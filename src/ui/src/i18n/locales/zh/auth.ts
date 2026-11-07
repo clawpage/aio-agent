@@ -19,8 +19,12 @@ export const auth = {
     confirm: "确认密码",
     confirmHint: "再输入一次密码",
     inviteCode: "邀请码",
+    emailCode: "邮箱验证码",
+    emailCodeHint: "6 位数字",
   },
   passwordMismatch: "两次输入的密码不一样",
+  /** The code emailed before a password registration, when the deployment sends one. */
+  emailCode: { send: "发送验证码", sending: "发送中…", resend: (seconds: number) => `${seconds} 秒后重发`, sent: (email: string) => `验证码已发到 ${email}，10 分钟内有效。没收到可以看看垃圾邮件。` },
   suspended: "账号异常，已停止使用。如有疑问，请发邮件至 feedback@clawpage.ai",
   google: { activateOpen: "注册并进入",
     button: "使用 Google 登录 / 注册",

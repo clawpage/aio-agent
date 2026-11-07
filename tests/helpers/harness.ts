@@ -16,6 +16,7 @@ import type { SandboxContainer } from "../../src/control/sandbox/container.js";
 import { createApp, handleUpgrade } from "../../src/control/http/server.js";
 import { FakeBrowserRuntime } from "./fakeBrowserRuntime.js";
 import { SandboxNode } from "../../src/control/sandbox/node.js";
+import type { Mailer } from "../../src/control/auth/signupCode.js";
 
 async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | void> {
   let timer: NodeJS.Timeout | undefined;
@@ -603,6 +604,8 @@ export interface StartHarnessOptions {
   browserRuntime?: FakeBrowserRuntime;
   /** Adjust the loaded config before bootstrap, for settings no environment variable controls. */
   configure?: (cfg: Config) => void;
+  /** Stands in for Resend: registration then needs the emailed code. */
+  mailer?: Mailer;
 }
 
 export async function startHarness(
@@ -636,7 +639,7 @@ export async function startHarness(
     log,
     // The browser runtime is always scripted: the real adapter shells into the
     // sandbox, which a unit/integration test must never touch.
-    overrides: { codex, container: containerStub, browserRuntime },
+    overrides: { codex, container: containerStub, browserRuntime, ...(options.mailer ? { mailer: options.mailer } : {}) },
   });
   const app = createApp(ctx);
   const server = http.createServer(app);

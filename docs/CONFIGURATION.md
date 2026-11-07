@@ -30,6 +30,8 @@
 | `PA_DB_PATH` / `PA_OWNER_SECRET_PATH` | `<数据目录>/personal-agent.sqlite` / `<数据目录>/owner-secret.txt` | 数据库与 owner 明文密码文件 |
 | `PA_OWNER_PASSWORD` | 空 | 设置则使用它，否则首次启动生成到 `owner-secret.txt` |
 | `PA_INVITE_EMAIL` | 空 | 注册页显示的邀请码申请邮箱 |
+| `PA_RESEND_SECRETS_FILE` | 空 | `PA_RESEND_API_KEY`（环境变量优先；Resend API key，只用于邮箱注册的验证码邮件）；缺失则邮箱注册不要验证码，启动日志警告一次。compose 中由 `AIO_SECRET_RESEND` 挂到 `/run/secrets/resend` |
+| `PA_MAIL_FROM` | `noreply@clawpage.ai` | 验证码邮件的发件人：裸地址时按邮件语言加上产品名（中文「一站」，英文/西文/日文 Clawpage Agent，即默认 `一站 <noreply@clawpage.ai>`）；写成 `名字 <地址>` 则各语言都用它。域名须在 Resend 验证，**自行部署必须覆盖** |
 | `PA_SESSION_TTL_HOURS` / `PA_SESSION_RENEW_MINUTES` | `720` / `60` | 登录会话有效期与续期间隔 |
 | `PA_TICKET_TTL_SECONDS` | `60` | 工作区一次性票据有效期 |
 | `PA_LOGIN_MAX_FAILURES` / `PA_LOGIN_WINDOW_MINUTES` / `PA_LOGIN_LOCKOUT_MINUTES` | `5` / `15` / `15` | 同一 IP 密码或邀请码错误次数、统计窗口与锁定时长 |

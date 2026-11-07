@@ -31,6 +31,7 @@ services:
       PA_GOOGLE_SECRETS_FILE: /run/secrets/google-oauth
       PA_GOOGLE_MAPS_SECRETS_FILE: /run/secrets/google-maps
       PA_OPENAI_SECRETS_FILE: /run/secrets/openai
+      PA_RESEND_SECRETS_FILE: /run/secrets/resend
     volumes:
       - control-data:/data
     ports:
@@ -40,7 +41,7 @@ services:
     extra_hosts:
       - host.docker.internal:host-gateway
     # Nodes can be remote; the control layer checks their protocol and readiness itself.
-    secrets: [sandbox-node, claude-code, jev, kb-mcp, ha-mcp, keyboard-bridge, google-oauth, google-maps, openai]
+    secrets: [sandbox-node, claude-code, jev, kb-mcp, ha-mcp, keyboard-bridge, google-oauth, google-maps, openai, resend]
     networks: [aio]
 networks:
   aio:
@@ -68,3 +69,5 @@ secrets:
     file: ${AIO_SECRET_GOOGLE_MAPS:-/dev/null}
   openai:
     file: ${AIO_SECRET_OPENAI:-/dev/null}
+  resend:
+    file: ${AIO_SECRET_RESEND:-/dev/null}
