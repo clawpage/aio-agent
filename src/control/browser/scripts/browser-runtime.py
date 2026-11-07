@@ -134,6 +134,8 @@ BLOCKING_PROBLEMS = (
 # not come back by retrying; it is then reported as a warning so the restore can
 # finish instead of blocking the browser forever.
 RESTORE_TAB_MAX_ATTEMPTS = 3
+# Tabs a wake loads side by side: far quicker than one after another, without loading every heavy page at once.
+RESTORE_SIDE_BY_SIDE = 3
 # Below this much wake budget the storage import is not started: the node helper
 # needs its own deadline plus cleanup time to close what it opened.
 STORAGE_IMPORT_MIN_S = 10.0
@@ -2315,114 +2317,119 @@ def restore_tabs(
         #    The init script is removed once the document is up so a later, normal
         #    navigation is not stomped by the values we restored here.
         #
-        #    Every tab is navigated first and only then is each one waited for: the
-        #    pages load side by side, so a wake costs about the slowest page rather
-        #    than the sum of them all (seen live: 8 pages loaded one after another
-        #    made most of a 38 s wake, while a person waited to reopen one page).
+        #    A few tabs at a time are navigated first and only then is each one waited
+        #    for: they load side by side, so a wake costs far less than the sum of all
+        #    pages (seen live: 8 pages loaded one after another made most of a 38 s wake,
+        #    while a person waited to reopen one page); a few, not all, so heavy pages
+        #    loading together do not push a sandbox already near its memory limit over.
         sessions: dict[int, str] = {}
-        for index, tab in enumerate(tabs):
-            if out_of_time():
-                break
-            entry = entries[index] if isinstance(entries[index], dict) else None
-            if not entry or not isinstance(entry.get("targetId"), str):
-                continue
-            target_id = str(entry["targetId"])
-            url = str(tab.get("url") or "")
-            origin = str(tab.get("origin") or origin_of(url))
-            storage = tab.get("sessionStorage")
-            if target_id not in _page_target_ids(cdp):
-                failed.append({"index": index, "reason": "target_disappeared"})
-                continue
-            try:
-                session_id = cdp.attach(target_id)
-                cdp.call("Page.enable", {}, session_id=session_id)
-                cdp.call("Runtime.enable", {}, session_id=session_id)
-            except CdpError as exc:
-                failed.append({"index": index, "reason": "attach_failed", "detail": redact_urls(str(exc))})
-                continue
-            if not entry.get("navigated"):
-                # Install the boot-time storage seed before any application code
-                # runs on the target origin.
-                if isinstance(storage, dict) and storage and origin:
+        for first in range(0, len(tabs), RESTORE_SIDE_BY_SIDE):
+            batch = list(enumerate(tabs))[first:first + RESTORE_SIDE_BY_SIDE]
+            for index, tab in batch:
+                if out_of_time():
+                    break
+                entry = entries[index] if isinstance(entries[index], dict) else None
+                if not entry or not isinstance(entry.get("targetId"), str):
+                    continue
+                target_id = str(entry["targetId"])
+                url = str(tab.get("url") or "")
+                origin = str(tab.get("origin") or origin_of(url))
+                storage = tab.get("sessionStorage")
+                if target_id not in _page_target_ids(cdp):
+                    failed.append({"index": index, "reason": "target_disappeared"})
+                    continue
+                try:
+                    session_id = cdp.attach(target_id)
+                    cdp.call("Page.enable", {}, session_id=session_id)
+                    cdp.call("Runtime.enable", {}, session_id=session_id)
+                except CdpError as exc:
+                    failed.append({"index": index, "reason": "attach_failed", "detail": redact_urls(str(exc))})
+                    continue
+                if not entry.get("navigated"):
+                    # Install the boot-time storage seed before any application code
+                    # runs on the target origin.
+                    if isinstance(storage, dict) and storage and origin:
+                        try:
+                            installed = cdp.call(
+                                "Page.addScriptToEvaluateOnNewDocument",
+                                {"source": storage_init_script(origin, storage)},
+                                session_id=session_id,
+                            )
+                        except CdpError as exc:
+                            failed.append({"index": index, "reason": "init_script_failed", "detail": redact_urls(str(exc))})
+                            continue
+                        script_id = installed.get("identifier")
+                        entry["scriptId"] = script_id if isinstance(script_id, str) else None
                     try:
-                        installed = cdp.call(
-                            "Page.addScriptToEvaluateOnNewDocument",
-                            {"source": storage_init_script(origin, storage)},
+                        cdp.call("Page.navigate", {"url": url}, session_id=session_id)
+                    except CdpError as exc:
+                        failed.append({"index": index, "reason": "navigate_failed", "detail": redact_urls(str(exc))})
+                        continue
+                    entry["navigated"] = True
+                    state["tabs"] = entries
+                    write_restore_state(snapshot_path, state)
+                sessions[index] = session_id
+
+            for index, tab in batch:
+                if index not in sessions:
+                    continue
+                if out_of_time():
+                    break
+                entry = entries[index]
+                session_id = sessions[index]
+                url = str(tab.get("url") or "")
+                origin = str(tab.get("origin") or origin_of(url))
+                storage = tab.get("sessionStorage")
+                if not wait_for_ready_state(cdp, session_id, left(load_timeout)):
+                    failed.append({"index": index, "reason": "load_timeout"})
+                    continue
+                if isinstance(entry.get("scriptId"), str):
+                    # The document is up; drop the seed so future navigations are not
+                    # overwritten by the restored values.
+                    try:
+                        cdp.call(
+                            "Page.removeScriptToEvaluateOnNewDocument",
+                            {"identifier": entry["scriptId"]},
                             session_id=session_id,
                         )
                     except CdpError as exc:
-                        failed.append({"index": index, "reason": "init_script_failed", "detail": redact_urls(str(exc))})
+                        failed.append({"index": index, "reason": "init_script_remove_failed", "detail": redact_urls(str(exc))})
                         continue
-                    script_id = installed.get("identifier")
-                    entry["scriptId"] = script_id if isinstance(script_id, str) else None
-                try:
-                    cdp.call("Page.navigate", {"url": url}, session_id=session_id)
-                except CdpError as exc:
-                    failed.append({"index": index, "reason": "navigate_failed", "detail": redact_urls(str(exc))})
-                    continue
-                entry["navigated"] = True
+                    entry["scriptId"] = None
+                if not entry.get("storageApplied"):
+                    if isinstance(storage, dict) and storage and origin:
+                        try:
+                            applied = cdp.evaluate(session_id, apply_storage_expression(origin, storage))
+                        except CdpError as exc:
+                            failed.append({"index": index, "reason": "storage_failed", "detail": redact_urls(str(exc))})
+                            continue
+                        if applied == "origin-mismatch":
+                            # The page redirected off-origin (often to a sign-in
+                            # page). Refusing to write is correct, and no retry
+                            # changes where the site sends us: a warning.
+                            problems.append("storage_origin_mismatch")
+                        elif applied not in ("ok", "skip-present"):
+                            failed.append({"index": index, "reason": "storage_failed"})
+                            continue
+                    entry["storageApplied"] = True
+                if not entry.get("scrollApplied"):
+                    scroll = tab.get("scrollY")
+                    if isinstance(scroll, (int, float)) and scroll > 0:
+                        try:
+                            actual = cdp.evaluate(session_id, apply_scroll_expression(int(scroll)))
+                        except CdpError as exc:
+                            failed.append({"index": index, "reason": "scroll_failed", "detail": redact_urls(str(exc))})
+                            continue
+                        if not isinstance(actual, (int, float)) or abs(float(actual) - float(scroll)) > 8:
+                            # A page shorter after reload (a lazy feed) cannot reach
+                            # the old offset; the page itself is back: a warning.
+                            problems.append("scroll_unverified")
+                    entry["scrollApplied"] = True
                 state["tabs"] = entries
                 write_restore_state(snapshot_path, state)
-            sessions[index] = session_id
 
-        for index, tab in enumerate(tabs):
-            if index not in sessions:
-                continue
             if out_of_time():
                 break
-            entry = entries[index]
-            session_id = sessions[index]
-            url = str(tab.get("url") or "")
-            origin = str(tab.get("origin") or origin_of(url))
-            storage = tab.get("sessionStorage")
-            if not wait_for_ready_state(cdp, session_id, left(load_timeout)):
-                failed.append({"index": index, "reason": "load_timeout"})
-                continue
-            if isinstance(entry.get("scriptId"), str):
-                # The document is up; drop the seed so future navigations are not
-                # overwritten by the restored values.
-                try:
-                    cdp.call(
-                        "Page.removeScriptToEvaluateOnNewDocument",
-                        {"identifier": entry["scriptId"]},
-                        session_id=session_id,
-                    )
-                except CdpError as exc:
-                    failed.append({"index": index, "reason": "init_script_remove_failed", "detail": redact_urls(str(exc))})
-                    continue
-                entry["scriptId"] = None
-            if not entry.get("storageApplied"):
-                if isinstance(storage, dict) and storage and origin:
-                    try:
-                        applied = cdp.evaluate(session_id, apply_storage_expression(origin, storage))
-                    except CdpError as exc:
-                        failed.append({"index": index, "reason": "storage_failed", "detail": redact_urls(str(exc))})
-                        continue
-                    if applied == "origin-mismatch":
-                        # The page redirected off-origin (often to a sign-in
-                        # page). Refusing to write is correct, and no retry
-                        # changes where the site sends us: a warning.
-                        problems.append("storage_origin_mismatch")
-                    elif applied not in ("ok", "skip-present"):
-                        failed.append({"index": index, "reason": "storage_failed"})
-                        continue
-                entry["storageApplied"] = True
-            if not entry.get("scrollApplied"):
-                scroll = tab.get("scrollY")
-                if isinstance(scroll, (int, float)) and scroll > 0:
-                    try:
-                        actual = cdp.evaluate(session_id, apply_scroll_expression(int(scroll)))
-                    except CdpError as exc:
-                        failed.append({"index": index, "reason": "scroll_failed", "detail": redact_urls(str(exc))})
-                        continue
-                    if not isinstance(actual, (int, float)) or abs(float(actual) - float(scroll)) > 8:
-                        # A page shorter after reload (a lazy feed) cannot reach
-                        # the old offset; the page itself is back: a warning.
-                        problems.append("scroll_unverified")
-                entry["scrollApplied"] = True
-            state["tabs"] = entries
-            write_restore_state(snapshot_path, state)
-
         if out_of_time():
             # Failures cut short by the budget say nothing about the tab: they are
             # not counted toward giving it up.

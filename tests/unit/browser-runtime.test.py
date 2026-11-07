@@ -2363,11 +2363,11 @@ def test_restore_loads_every_tab_side_by_side() -> None:
 
     with tempfile.TemporaryDirectory() as tmp, _restore_env(cdp, ready):
         path = os.path.join(tmp, "snapshot.json")
-        snapshot = {"savedAt": 9, "tabs": [_tab("https://a.example/", active=True), _tab("https://b.example/"), _tab("https://c.example/")]}
+        snapshot = {"savedAt": 9, "tabs": [_tab("https://a.example/", active=True), *(_tab(f"https://{n}.example/") for n in "bcde")]}
         result = rt.restore_tabs(snapshot, snapshot_path=path)
         assert_true(result["ok"], f"恢复应成功：{result}")
-        assert_eq(waits, [3, 3, 3], "所有标签都先导航，再逐个等待加载")
-        assert_eq(result["restoredTabs"], 3, "三个标签都恢复")
+        assert_eq(waits, [3, 3, 3, 5, 5], "每批三个标签先一起导航，再逐个等待加载")
+        assert_eq(result["restoredTabs"], 5, "五个标签都恢复")
 
 
 @test

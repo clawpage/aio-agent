@@ -75,7 +75,7 @@ const INSTRUCTIONS = [
 // ----------------------------------------------------------------- registry
 
 /**
- * tabId -> { id, page, key, title, targetId, createdAt, lastUsed, finishedAt, holder, humanSince, request }
+ * tabId -> { id, page, key, title, targetId, createdAt, lastUsed, finishedAt, holder, humanSince, request, reopenedUrl }
  * plus, never saved: `locked` (the vault is typing into it) and `scripted` (an
  * agent ran its own script in the current document).
  */
@@ -832,7 +832,8 @@ function reopenTab(body) {
   if (!key || key === PERSON || !/^https?:\/\//i.test(url)) return Promise.resolve({ status: 400, body: { error: 'bad_request' } });
   // One at a time per task: a second tap (or a retry after the first answer was lost) gets the page the first opened.
   return serialized(`reopen:${key}`, async () => {
-    const open = ownTabs(key).filter((t) => t.finishedAt).sort((a, b) => b.lastUsed - a.lastUsed)[0];
+    // Only a page this reopened for the same address: the task's other pages are not this one.
+    const open = ownTabs(key).filter((t) => t.reopenedUrl === url).sort((a, b) => b.lastUsed - a.lastUsed)[0];
     if (open) {
       await takeControl(open);
       return { status: 200, body: { tab: snapshotRecords().find((r) => r.id === open.id) } };
@@ -845,6 +846,7 @@ function reopenTab(body) {
     }
     // A finished task's page: kept while the person holds it, cleared like its others once handed back.
     tab.finishedAt = Date.now();
+    tab.reopenedUrl = url;
     await takeControl(tab);
     // The person watches it load in the live view: answer once the page is on its way, not once it has loaded.
     await tab.page.goto(url, { waitUntil: 'commit', timeout: 20000 }).catch(() => undefined);
