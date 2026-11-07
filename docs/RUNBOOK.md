@@ -515,6 +515,13 @@ sqlite3 <库> "SELECT status,count(*) FROM kb_nodes GROUP BY 1"
 - 只读副本 `workspace/kb/` 坏了或被改了不用管，下一次变更会重写；要立刻重写，可在页面上删一条无关内容，或等管家下一批。
 - 用户在页面上关掉知识库后，已有内容保留、仍可读；不再整理新任务、不再注入派单。
 
+## 13b. 注册验证码发信（Resend，现有部署）
+
+- 账号：Resend，注册邮箱是 owner 的 Gmail（2026-11-07）。凭据只在本机 `var/user-secrets/`（Git 忽略、0600）：`resend-account.txt`（登录密码）、`resend-admin.key`（完全权限，只用于本机配置域名，不进任何容器）、`resend-sending.key`（只能发信、只限 clawpage.ai）、`resend-domain.json`（域名 id 和要求的 DNS 记录）。
+- 域名 `clawpage.ai` 在 Resend 已验证（区域 us-east-1）。Cloudflare 上为它新建了 4 条记录，都在子域，不碰根域的收信：TXT `resend._domainkey`（DKIM）、MX `send`（10 feedback-smtp.us-east-1.amazonses.com）、TXT `send`（`v=spf1 include:amazonses.com ~all`）、CNAME `rsend` → `send.forge.rmta.net`（仅 DNS）。这是用户明确同意的一次例外，其他 DNS 仍只按 AGENTS.md 规则维护。
+- 生产：`~/.config/aio-agent/resend.env`（0600，`PA_RESEND_API_KEY=` 发信 key），`var/deploy/aio.env` 的 `AIO_SECRET_RESEND` 指向它，compose 挂到 control 的 `/run/secrets/resend`。去掉这一行并刷新 control 即关闭验证码（注册不再要求码）。
+- 查发信：Resend 控制台 Logs，或 `GET https://api.resend.com/emails/<id>`（用 admin key）。换发信 key：用 admin key 新建 `sending_access` 且限定域名的 key，写进 resend.env，刷新 control。
+
 ## 14. 已知限制
 
 - 未实现自动滚动升级镜像；升级需人工按第 3 节执行。沙箱内 Codex CLI 是卷里的固定版本，
