@@ -4523,10 +4523,48 @@ button.map-card-switch { flex: 0 0 auto; padding: 4px 10px; }
 }
 
 /* ------------------------------------------------------------ schedules */
-.schedule-hint { max-width: var(--page-max); margin: 0 auto 16px; }
-.schedule-item { cursor: default; }
+/* The page reads as a dense list: the how-to is one line that opens to examples, and each
+   card shows its rule, a two-line request and its actions, with the rest one tap away. */
+.schedule-hint { max-width: var(--page-max); margin: 0 auto 12px; }
+.schedule-hint summary, .schedule-feed-more summary { display: flex; flex-wrap: wrap; align-items: center; row-gap: 4px; width: fit-content; max-width: 100%; cursor: pointer; list-style: none; }
+.schedule-hint summary::-webkit-details-marker, .schedule-feed-more summary::-webkit-details-marker { display: none; }
+.schedule-hint summary::before, .schedule-feed-more summary::before { content: "▸"; margin-right: 6px; font-size: 10px; }
+.schedule-hint[open] > summary::before, .schedule-feed-more[open] > summary::before { content: "▾"; }
+.schedule-hint > p { margin: 4px 0 0; }
+.schedule-page .task-list { gap: 8px; }
+.schedule-item { cursor: default; padding: 14px 16px; }
 .task-list-item.schedule-item:hover { border-color: var(--border); }
-.schedule-rule { margin: 4px 0 2px; font-size: 14px; font-weight: 600; color: var(--text); }
+.schedule-rule { margin: 2px 0 0; font-size: 14px; font-weight: 600; color: var(--text); }
+.schedule-item .task-list-summary { margin: 6px 0 0; line-height: 1.5; }
+/* The daily feed's explanation and what it remembers: folded to a line of counts. */
+.schedule-feed-more { margin: 6px 0 0; }
+.schedule-feed-more summary { font-size: var(--fs-xs); color: var(--text-dim); }
+.schedule-feed-more summary > span:first-child { margin-right: 8px; }
+.schedule-feed-more > p { margin: 6px 0 0; }
+.schedule-feed-more summary .schedule-feed-label[data-kind="avoid"] { color: var(--text-dim); background: var(--bg-raised); }
+/* Opening the feed's details shows its whole request too. */
+.schedule-item:has(.schedule-feed-more[open]) .task-list-summary { display: block; -webkit-line-clamp: unset; overflow: visible; }
+/* Run count and last run on the left, actions on the right; on a narrow screen the actions come first. */
+.schedule-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-top: 10px; }
+.schedule-foot .schedule-actions { margin: 0 0 0 auto; }
+@media (max-width: 900px) {
+  .schedule-item { padding: 12px 14px; }
+  .schedule-foot { gap: 8px; }
+  .schedule-foot .task-list-meta { order: 1; flex-basis: 100%; }
+  .schedule-foot .schedule-actions { margin-left: 0; }
+}
+/* Touch: every control here is at least 44px tall to the finger, with no extra height on screen. */
+@media (hover: none) and (pointer: coarse) {
+  .schedule-hint summary, .schedule-feed-more summary { position: relative; }
+  .schedule-hint summary::after { content: ""; position: absolute; inset: -11px -8px; }
+  .schedule-feed-more summary { padding: 3px 0; }
+  .schedule-feed-more summary::after { content: ""; position: absolute; inset: -14px -8px -6px; }
+  .schedule-foot .schedule-actions { row-gap: 8px; }
+  .schedule-foot .schedule-actions button:is(.ghost, .primary, .danger) { position: relative; height: 36px; }
+  .schedule-foot .schedule-actions button::after { content: ""; position: absolute; inset: -4px 0; }
+  .schedule-foot .task-list-meta button.link { position: relative; }
+  .schedule-foot .task-list-meta button.link::after { content: ""; position: absolute; inset: -4px -6px -18px; }
+}
 .schedule-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 12px; }
 /* Card actions: one compact height on every page. */
 .schedule-actions button.ghost, .schedule-actions button.primary, .schedule-actions button.danger { display: inline-flex; align-items: center; height: var(--control-h-sm); padding: 0 12px; border-radius: var(--radius-sm); font-size: var(--fs-xs); }
