@@ -1219,10 +1219,15 @@ it.skipIf(!hasChromium)("reopens the page a finished task left as a new tab of t
   for (const bad of [{ key: "RO", url: "file:///etc/passwd" }, { key: "RO", url: "javascript:alert(1)" }, { key: "person", url }, { url }]) {
     expect((await reopen(bad)).status, JSON.stringify(bad)).toBe(400);
   }
-  const res = await reopen({ key: "RO", url, title: "旧标题" });
+  // Two taps at once (or a retry after a lost answer): one tab, the same for both.
+  const [res, again] = await Promise.all([reopen({ key: "RO", url, title: "旧标题" }), reopen({ key: "RO", url, title: "旧标题" })]);
   expect(res.status).toBe(200);
   const { tab } = (await res.json()) as { tab: TabRecord };
-  expect(tab).toMatchObject({ key: "RO", holder: "human", url, title: "Checkout /spc" });
+  expect(tab).toMatchObject({ key: "RO", holder: "human", url });
+  expect(((await again.json()) as { tab: TabRecord }).tab.id).toBe(tab.id);
+  expect((await records("RO")).map((t) => t.id)).toEqual([tab.id]);
+  // The answer comes once the page is on its way; its own title follows when it has loaded.
+  await expect.poll(async () => (await records("RO")).find((t) => t.id === tab.id)?.title).toBe("Checkout /spc");
   // A finished task's page: handed back, it is cleared like the task's other finished tabs.
   expect(tab.finishedAt).toEqual(expect.any(Number));
   // The task's agent (a follow-up) is shut out until the person hands it back.

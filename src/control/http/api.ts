@@ -1399,14 +1399,19 @@ export function createApiRouter(context: AppContext): Router {
     if (!key || !last || !context.tabs?.reopen) { res.status(404).json({ error: "not_found", message: t().http.browser.noReopen }); return; }
     // A task's page is often closed because the browser was released for idleness: bring it back first
     // (as for a link the person opens), or the tab server finds no Chromium to open the page in.
+    const started = Date.now();
     try {
       await context.browser.wake();
     } catch (err) {
+      log.warn("task page reopen: browser wake failed", { wakeMs: Date.now() - started });
       res.status(503).json({ error: "browser_wake_failed", message: err instanceof Error ? err.message : t().http.browser.wakeFailedRetry });
       return;
     }
+    const wakeMs = Date.now() - started;
     // Only the page the task itself was on: the address is never taken from the request.
     const out = await context.tabs.reopen(key, last.url, last.title);
+    // A person waits on this button: where the time went is what a slow reopen is diagnosed from.
+    log.info("task page reopened", { status: out.status, wakeMs, openMs: Date.now() - started - wakeMs });
     res.status(out.status).json(out.body);
   }));
   // A phone cannot raise its keyboard inside the remote browser view, so its native

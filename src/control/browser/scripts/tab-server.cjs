@@ -827,22 +827,34 @@ async function personOpen(body) {
  * The person reopens the page a finished task left behind (its tab was closed since):
  * a new tab of that task, at that address, theirs to operate until they hand it back.
  */
-async function reopenTab(body) {
+function reopenTab(body) {
   const key = String(body.key || ''), url = String(body.url || '');
-  if (!key || key === PERSON || !/^https?:\/\//i.test(url)) return { status: 400, body: { error: 'bad_request' } };
-  let tab;
-  try {
-    tab = await newTab(key, String(body.title || '').slice(0, 200) || 'Reopened page');
-  } catch (err) {
-    return { status: 503, body: { error: 'unavailable', ...(err && err.code ? { reason: err.code } : {}), message: String(err && err.message || err) } };
-  }
-  // A finished task's page: kept while the person holds it, cleared like its others once handed back.
-  tab.finishedAt = Date.now();
-  await takeControl(tab);
-  await tab.page.goto(url, { waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => undefined);
-  tab.title = (await tab.page.title().catch(() => '')) || tab.title;
-  save();
-  return { status: 200, body: { tab: snapshotRecords().find((r) => r.id === tab.id) } };
+  if (!key || key === PERSON || !/^https?:\/\//i.test(url)) return Promise.resolve({ status: 400, body: { error: 'bad_request' } });
+  // One at a time per task: a second tap (or a retry after the first answer was lost) gets the page the first opened.
+  return serialized(`reopen:${key}`, async () => {
+    const open = ownTabs(key).filter((t) => t.finishedAt).sort((a, b) => b.lastUsed - a.lastUsed)[0];
+    if (open) {
+      await takeControl(open);
+      return { status: 200, body: { tab: snapshotRecords().find((r) => r.id === open.id) } };
+    }
+    let tab;
+    try {
+      tab = await newTab(key, String(body.title || '').slice(0, 200) || 'Reopened page');
+    } catch (err) {
+      return { status: 503, body: { error: 'unavailable', ...(err && err.code ? { reason: err.code } : {}), message: String(err && err.message || err) } };
+    }
+    // A finished task's page: kept while the person holds it, cleared like its others once handed back.
+    tab.finishedAt = Date.now();
+    await takeControl(tab);
+    // The person watches it load in the live view: answer once the page is on its way, not once it has loaded.
+    await tab.page.goto(url, { waitUntil: 'commit', timeout: 20000 }).catch(() => undefined);
+    save();
+    void tab.page.waitForLoadState('domcontentloaded', { timeout: 20000 }).catch(() => undefined).then(async () => {
+      tab.title = (await tab.page.title().catch(() => '')) || tab.title;
+      save();
+    });
+    return { status: 200, body: { tab: snapshotRecords().find((r) => r.id === tab.id) } };
+  });
 }
 
 /** A person closes a tab they opened; task tabs are never closed from here. */

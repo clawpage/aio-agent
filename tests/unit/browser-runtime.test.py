@@ -2352,6 +2352,25 @@ def test_restore_treats_a_shorter_page_and_an_off_origin_redirect_as_warnings() 
 
 
 @test
+def test_restore_loads_every_tab_side_by_side() -> None:
+    """One page after another made a wake cost the sum of every page's load."""
+    cdp = _RestoreCdp()
+    waits: list[int] = []
+
+    def ready(_cdp: Any, session: str, *_a: Any, **_k: Any) -> bool:
+        waits.append(sum(1 for method, _ in cdp.calls if method == "Page.navigate"))
+        return True
+
+    with tempfile.TemporaryDirectory() as tmp, _restore_env(cdp, ready):
+        path = os.path.join(tmp, "snapshot.json")
+        snapshot = {"savedAt": 9, "tabs": [_tab("https://a.example/", active=True), _tab("https://b.example/"), _tab("https://c.example/")]}
+        result = rt.restore_tabs(snapshot, snapshot_path=path)
+        assert_true(result["ok"], f"恢复应成功：{result}")
+        assert_eq(waits, [3, 3, 3], "所有标签都先导航，再逐个等待加载")
+        assert_eq(result["restoredTabs"], 3, "三个标签都恢复")
+
+
+@test
 def test_restore_gives_up_on_a_tab_after_three_failed_attempts() -> None:
     cdp = _RestoreCdp()
     # The second restored tab never finishes loading.

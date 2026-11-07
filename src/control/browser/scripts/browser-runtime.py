@@ -2314,6 +2314,12 @@ def restore_tabs(
         #      -> remove the init script -> apply the scroll offset.
         #    The init script is removed once the document is up so a later, normal
         #    navigation is not stomped by the values we restored here.
+        #
+        #    Every tab is navigated first and only then is each one waited for: the
+        #    pages load side by side, so a wake costs about the slowest page rather
+        #    than the sum of them all (seen live: 8 pages loaded one after another
+        #    made most of a 38 s wake, while a person waited to reopen one page).
+        sessions: dict[int, str] = {}
         for index, tab in enumerate(tabs):
             if out_of_time():
                 break
@@ -2357,6 +2363,18 @@ def restore_tabs(
                 entry["navigated"] = True
                 state["tabs"] = entries
                 write_restore_state(snapshot_path, state)
+            sessions[index] = session_id
+
+        for index, tab in enumerate(tabs):
+            if index not in sessions:
+                continue
+            if out_of_time():
+                break
+            entry = entries[index]
+            session_id = sessions[index]
+            url = str(tab.get("url") or "")
+            origin = str(tab.get("origin") or origin_of(url))
+            storage = tab.get("sessionStorage")
             if not wait_for_ready_state(cdp, session_id, left(load_timeout)):
                 failed.append({"index": index, "reason": "load_timeout"})
                 continue
