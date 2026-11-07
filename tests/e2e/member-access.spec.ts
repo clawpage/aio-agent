@@ -78,6 +78,19 @@ test('a start that failed is still reported',async({page},info)=>{
  await page.route('**/api/auth/session',r=>r.fulfill({json:{authenticated:true,username:'yzmy',role:'member'}}));
  await page.route('**/api/main*',r=>r.fulfill({json:{mode:'tasks',tasks:[],nextBefore:null}}));
  await page.goto('/');
- await expect(page.locator('.banner.error')).toHaveText('智能体暂未就绪：服务正在连接。消息仍会保留。');
+ const banner=page.locator('.banner.error');
+ await expect(banner).toHaveText('智能体暂未就绪：服务正在连接。消息仍会保留。');
+ // At the bottom, just above the composer, where the chat's own errors show: not over the header.
+ const composer=(await page.locator('.composer').boundingBox())!, box=(await banner.boundingBox())!;
+ expect(box.y+box.height).toBeLessThanOrEqual(composer.y+1);
+ expect(composer.y-(box.y+box.height)).toBeLessThan(40);
  await expect(await sidebarFoot(page,info.project.name.startsWith('mobile'))).toContainText('正在连接智能体');
+ // On a view without a composer it sits at the view's foot.
+ if(info.project.name.startsWith('mobile'))await page.keyboard.press('Escape');
+ await page.goto('/settings');
+ const foot=page.locator('.app-notices .banner.error');
+ await expect(foot).toBeVisible();
+ const vh=page.viewportSize()!.height, f=(await foot.boundingBox())!;
+ expect(f.y+f.height).toBeGreaterThan(vh-80);
+ await page.screenshot({path:info.outputPath('notice-at-foot.png')});
 });

@@ -381,6 +381,7 @@ pre {
 }
 
 .main {
+  position: relative;
   display: flex;
   flex-direction: column;
   min-width: 0;
@@ -676,6 +677,15 @@ textarea:focus {
   background: color-mix(in srgb, var(--error) 18%, var(--bg-raised));
   box-shadow: var(--shadow);
 }
+/* MainApp's notices on a view without a composer: at its foot, where the chat shows them above its composer. */
+.app-notices {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: var(--safe-bottom);
+  z-index: 20;
+}
+.app-notices .banner { background: var(--bg-raised); box-shadow: var(--shadow); }
 .banner button {
   margin-left: auto;
   border: none;

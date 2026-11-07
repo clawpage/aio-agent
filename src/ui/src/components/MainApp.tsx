@@ -341,6 +341,10 @@ export function MainApp({ firstSession }: { firstSession?: ReturnType<typeof api
         </div>;
     // An environment that is starting or waking says nothing: the wait is part of the first request. Only a start that failed is reported.
     const startFailed = status && !status.agent.sessionReady && !status.sandbox.idle ? status.sandbox.setupError ?? null : null;
+    const notices = [
+        ...(startFailed ? [{ key: "start", text: t.app.agentNotReady(startFailed), error: true }] : []),
+        ...(notice ? [{ key: "notice", text: notice, onClose: () => setNotice(null) }] : []),
+    ];
     return <div className="app main-inbox-app">
     <button className="mobile-menu-button ghost" ref={menuButton} aria-label={t.nav.open} aria-expanded={menuOpen} aria-controls="main-navigation" onClick={() => setMenuOpen(true)}><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
     <PopupPresence animate={mobile} onExited={() => { if (swipe.exited()) menuButton.current?.focus(); }}>
@@ -363,9 +367,9 @@ export function MainApp({ firstSession }: { firstSession?: ReturnType<typeof api
     </>}
     </PopupPresence>
     <main className="main" inert={mobile && menuOpen}>
-      {notice && <div className="banner" role="alert">{notice}<button onClick={() => setNotice(null)}>{t.common.close}</button></div>}
-      {startFailed && <div className="banner error">{t.app.agentNotReady(startFailed)}</div>}
-      <div className="view-slot" hidden={view !== "main"}><TaskChat debug={role === "owner" && debug} member={role === "member"} onFeed={setTaskFeed} onDetails={t => void details(t)} onOpenLink={u => void openLink(u)} onOpenFileInBrowser={p => void openFileInBrowser(p)} onExpired={expired} onRevealBrowser={revealBrowser}/></div>
+      {/* Notices sit at the bottom, where the chat shows its own errors: above its composer, or at the foot of another view. */}
+      {(view !== "main" || workspace) && notices.length > 0 && <div className="app-notices">{notices.map(n => <div key={n.key} className={`banner${n.error ? " error" : ""}`} role="alert">{n.text}{n.onClose && <button onClick={n.onClose}>{t.common.close}</button>}</div>)}</div>}
+      <div className="view-slot" hidden={view !== "main"}><TaskChat notices={view === "main" && !workspace ? notices : []} debug={role === "owner" && debug} member={role === "member"} onFeed={setTaskFeed} onDetails={t => void details(t)} onOpenLink={u => void openLink(u)} onOpenFileInBrowser={p => void openFileInBrowser(p)} onExpired={expired} onRevealBrowser={revealBrowser}/></div>
       <div className="view-slot" hidden={view !== 'tasks'}><TaskList feed={taskFeed} active={view === 'tasks'} onDetails={t=>void details(t,'tasks')} onExpired={expired}/></div>
       <div className="view-slot" hidden={view !== 'clawpages'}><ClawpageList active={view === 'clawpages' && !workspace} onExpired={expired}/></div>
       <div className="view-slot" hidden={view !== 'files'}><FileLibrary active={view === 'files' && !workspace} onOpenTask={id => void details(id, 'files')} onOpenLink={u => void openLink(u)} onOpenFileInBrowser={p => void openFileInBrowser(p)} onExpired={expired}/></div>
