@@ -85,8 +85,9 @@ test('on a phone the 👎 dialog shows whole, and sits above the keyboard once o
   // The note is optional: no keyboard comes up on its own to cover the buttons.
   await expect(dialog.getByLabel('说明',{exact:true})).not.toBeFocused();
   await expect(submit).toBeInViewport();
-  // A keyboard up (the iOS app reports the area it leaves): the whole dialog stays above it.
-  await page.evaluate(()=>document.documentElement.style.setProperty('--keyboard-viewport','420px'));
+  // A keyboard up (the iOS app reports the area it leaves): the whole dialog stays above it. Set from a
+  // stylesheet: the web page's own keyboard follower clears an inline value once nothing is being typed.
+  await page.addStyleTag({content:':root{--keyboard-viewport:420px}'});
   await expect.poll(async()=>{const b=(await dialog.boundingBox())!;return b.y+b.height;}).toBeLessThanOrEqual(420);
   const box=(await dialog.boundingBox())!; expect(box.y).toBeGreaterThanOrEqual(0);
   await submit.scrollIntoViewIfNeeded();
