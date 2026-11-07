@@ -715,7 +715,7 @@ function RenameDialog({
 }
 
 /** The cache the service worker opens the console from (public/sw.js), and its page. */
-const PAGE_CACHE = "aio-console-v1";
+const PAGE_CACHE = "aio-console-v2";
 
 /**
  * Drops the saved console page and loads the deployed one; false (nothing done) when it already did
