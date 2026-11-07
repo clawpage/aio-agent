@@ -784,8 +784,8 @@ Android 10+ 经 MediaStore 存到「Pictures/Clawpage」「Movies/Clawpage」，
   只向已知推送服务的 https 地址发送；返回 404 / 410 的订阅自动删除。
 - **iOS App**：控制台经 `window.webkit.messageHandlers.aioPush`（`DeviceBrowser.swift`，只认主站主框架）问 App：`status` / `enable`（系统授权弹窗，同意后向 APNs 注册）/ `settings`（打开本 App 的系统设置页），App 以 `aio-push` 事件回答授权状态、设备令牌与 APNs 环境（TestFlight 与 App Store 为 production，开发包按描述文件，模拟器为 development）。
   令牌以 `apns:<环境>:<令牌>` 存进同一张表，`GET /api/push?endpoint=` 告诉 App 本机是否已开；系统里拒绝过时配置页显示「去设置开启」，从设置回来自动刷新。
-  服务器用 APNs 令牌密钥（ES256 JWT，见 `docs/CONFIGURATION.md` 的 `PA_APNS_*`）经 HTTP/2 发送；APNs 回 410 或 `BadDeviceToken` / `DeviceTokenNotForTopic` / `Unregistered` 的令牌自动删除。App 在前台也显示横幅（服务器已跳过控制台正在屏幕上的设备）。
-- service worker（`/sw.js`）显示通知、点按打开一站；它另外只缓存控制台页面与构建文件（见「无网打开」），不碰 `/api`。
+  服务器用 APNs 令牌密钥（ES256 JWT，见 `docs/CONFIGURATION.md` 的 `PA_APNS_*`）经 HTTP/2 发送；APNs 回 410 或 `BadDeviceToken` / `DeviceTokenNotForTopic` / `Unregistered` 的令牌自动删除。App 在前台时不显示通知（服务器按心跳跳过控制台正在屏幕上的设备，这条兜住心跳间隙到达的）；打开 App 即清掉它的全部通知。
+- service worker（`/sw.js`）显示通知、点按打开一站，控制台正在屏幕上时不显示；控制台打开或切回前台时清掉本设备的全部通知（Android 与桌面浏览器、主屏幕网页版）。Android App 没有通知。它另外只缓存控制台页面与构建文件（见「无网打开」），不碰 `/api`。
 
 ## 14. 外部集成
 

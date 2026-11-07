@@ -19,6 +19,14 @@ document.documentElement.dataset.theme ??= matchMedia("(prefers-color-scheme: li
 // and keeps the deployed one for next time. Not in dev, where the page is rebuilt on every change.
 if (import.meta.env.PROD && "serviceWorker" in navigator) {
   addEventListener("load", () => void navigator.serviceWorker.register("/sw.js", { scope: "/" }).catch(() => undefined));
+  // Opening the console clears this device's notifications: it now shows what they said.
+  const clearNotifications = () => {
+    if (document.visibilityState !== "visible") return;
+    void navigator.serviceWorker.getRegistration("/").then((registration) => registration?.getNotifications?.())
+      .then((notifications) => notifications?.forEach((notification) => notification.close())).catch(() => undefined);
+  };
+  addEventListener("load", clearNotifications);
+  document.addEventListener("visibilitychange", clearNotifications);
 }
 
 // A part loaded on first use (diagrams, charts, video) that the server no longer has: the console is

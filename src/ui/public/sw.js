@@ -94,13 +94,19 @@ async function buildFile(event) {
 self.addEventListener("push", (event) => {
   let data = {};
   try { data = event.data ? event.data.json() : {}; } catch { data = { body: event.data ? event.data.text() : "" }; }
-  event.waitUntil(self.registration.showNotification(data.title || "Clawpage Agent", {
-    body: data.body || "",
-    tag: data.tag || undefined,
-    icon: "/icon-192.png",
-    badge: "/icon-192.png",
-    data: { url: data.url || "/" },
-  }));
+  event.waitUntil((async () => {
+    // Not shown while the console is on screen, which already says it (the server skips such a
+    // device by its heartbeat, so one can still arrive in the meantime).
+    const windows = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+    if (windows.some((client) => client.visibilityState === "visible" && new URL(client.url).origin === self.location.origin)) return;
+    await self.registration.showNotification(data.title || "Clawpage Agent", {
+      body: data.body || "",
+      tag: data.tag || undefined,
+      icon: "/icon-192.png",
+      badge: "/icon-192.png",
+      data: { url: data.url || "/" },
+    });
+  })());
 });
 
 self.addEventListener("notificationclick", (event) => {

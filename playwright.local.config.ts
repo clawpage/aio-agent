@@ -54,6 +54,7 @@ export default defineConfig({
     "**/map-card.spec.ts",
     "**/schedules.spec.ts",
     "**/push.spec.ts",
+    "**/notifications.spec.ts",
     "**/app-keyboard.spec.ts",
     "**/version.spec.ts",
     "**/svg-card.spec.ts",
@@ -107,7 +108,7 @@ export default defineConfig({
     locale: "zh-CN",
     storageState: { cookies: [], origins: [] },
     // Mocks are page routes, which a page under the console's service worker can slip past
-    // (WebKit). Only offline.spec.ts, which tests the worker itself, lets it register.
+    // (WebKit). Only offline.spec.ts and notifications.spec.ts, which test the worker itself, let it register.
     serviceWorkers: "block",
   },
   webServer: {

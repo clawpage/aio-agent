@@ -216,6 +216,11 @@ private final class PushHandler: NSObject, WKScriptMessageHandler, UNUserNotific
         PushHandler.shared = self
         UNUserNotificationCenter.current().delegate = self
         PushHandler.hookAppDelegate()
+        // Opening the app clears its notifications: the console now shows what they said.
+        NotificationCenter.default.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { _ in
+            UNUserNotificationCenter.current().removeAllDeliveredNotifications()
+        }
+        UNUserNotificationCenter.current().removeAllDeliveredNotifications()
     }
 
     func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
@@ -260,9 +265,10 @@ private final class PushHandler: NSObject, WKScriptMessageHandler, UNUserNotific
         webView.evaluateJavaScript("window.dispatchEvent(new CustomEvent('aio-push',{detail:\(json)}));")
     }
 
-    // Shown while the app is open too: the server already skips a device whose console is on screen.
+    // Not shown while the app is open: the console on screen already says it. The server skips a device
+    // whose console is on screen, but only by its heartbeat, so one can still arrive in the meantime.
     func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification, withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
-        completionHandler([.banner, .list, .sound])
+        completionHandler([])
     }
 
     // A tap opens the app on the console; a notification naming another console page opens that page.
