@@ -46,7 +46,9 @@ test("opening the console: the drawn mark until the feed is here, then it fades 
   expect(await page.evaluate(() => performance.now()) - released).toBeLessThan(1000);
   await expect.poll(() => boots.length).toBe(1);
   const timing = boots[0]!;
-  expect(Object.keys(timing).sort()).toEqual(["cover", "dom", "feed", "page", "session", "ttfb", "version"]);
+  expect(Object.keys(timing).sort()).toEqual(["build", "cover", "dom", "feed", "page", "session", "ttfb", "version"]);
+  // The build is the entry script's name, so an opening on an old saved page can be told apart.
+  expect(timing.build).toMatch(/^index-[\w-]+$/);
   // In order along the opening: the session before the feed, the feed before the mark lifted.
   expect(timing.session as number).toBeGreaterThan(0);
   expect(timing.feed as number).toBeGreaterThan(timing.session as number);

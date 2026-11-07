@@ -23,6 +23,12 @@ function pageSource(nav: PerformanceNavigationTiming | undefined): string {
   return navigator.serviceWorker?.controller ? "network" : "no_worker";
 }
 
+/** The build this page is: its entry script's name changes with every build, so a device opening an old saved page shows up. */
+function build(): string {
+  const src = document.querySelector<HTMLScriptElement>('script[type="module"][src*="/assets/"]')?.src ?? "";
+  return src.split("/").pop()?.replace(/\.js$/, "") ?? "";
+}
+
 /** Sent when the mark lifts: the opening is over then, as far as the person can tell. */
 export function reportBoot(): void {
   bootStep("cover");
@@ -31,6 +37,7 @@ export function reportBoot(): void {
   const nav = performance.getEntriesByType("navigation")[0] as PerformanceNavigationTiming | undefined;
   track("boot_timing", {
     page: pageSource(nav),
+    build: build(),
     ttfb: Math.round(nav?.responseStart ?? -1),
     dom: Math.round(nav?.domContentLoadedEventEnd ?? -1),
     version: marks.version ?? -1,

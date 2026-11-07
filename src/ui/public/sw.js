@@ -6,8 +6,11 @@
  * loaded asks the network first. A saved page too old for the service it talks to is dropped by
  * the page itself (App.tsx), which then loads the deployed one. Hashed build files never change,
  * so they come from the cache once fetched. /api and other sites are never touched.
+ * A deployed page that arrives but cannot be kept drops the saved one, so a device whose saves fail
+ * opens from the network instead of staying on an old console for good.
  */
-const CACHE = "aio-console-v1";
+/** v2: a fresh start for devices left on an old saved page by saves that failed (2026-11-06). */
+const CACHE = "aio-console-v2";
 /** The one console page: every console route (/, /login, /u/<name>/…) is the same index.html. */
 const PAGE = "/";
 
@@ -19,6 +22,7 @@ self.addEventListener("install", (event) => {
 self.addEventListener("activate", (event) => event.waitUntil((async () => {
   // The page request starts while the worker wakes up, so the network is not waited on twice.
   await self.registration.navigationPreload?.enable().catch(() => undefined);
+  for (const name of await caches.keys()) if (name.startsWith("aio-console-") && name !== CACHE) await caches.delete(name);
   await self.clients.claim();
 })()));
 
@@ -38,7 +42,9 @@ async function openPage(event) {
     // The network answer (preloaded while the worker woke up) is kept for the next opening.
     event.waitUntil((async () => {
       const response = (await event.preloadResponse) || await fetch(event.request);
-      if (response.ok && !response.redirected && (response.headers.get("content-type") || "").startsWith("text/html")) await remember(response);
+      if (!response.ok || response.redirected || !(response.headers.get("content-type") || "").startsWith("text/html")) return;
+      // Offline the fetch above fails and the saved page stays; here the server answered and keeping it failed.
+      try { await remember(response); } catch { await (await caches.open(CACHE)).delete(PAGE).catch(() => undefined); }
     })().catch(() => undefined));
     // Said in Server-Timing, so the page can report how it was opened (src/ui/src/bootTiming.ts).
     const headers = new Headers(saved.headers);

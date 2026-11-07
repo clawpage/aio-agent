@@ -24,7 +24,7 @@ async function setup(page: Page) {
 /** Puts an older deploy of the console (the same page, marked) where the worker opens it from. */
 const saveOlderPage = (page: Page) => page.evaluate(async () => {
   const html = (await (await fetch("/", { cache: "no-store" })).text()).replace("<html", '<html data-deploy="old"');
-  await (await caches.open("aio-console-v1")).put("/", new Response(html, { headers: { "content-type": "text/html" } }));
+  await (await caches.open("aio-console-v2")).put("/", new Response(html, { headers: { "content-type": "text/html" } }));
 });
 const savedIsOlder = (page: Page) => page.evaluate(async () => (await (await caches.match("/"))!.text()).includes('data-deploy="old"'));
 
