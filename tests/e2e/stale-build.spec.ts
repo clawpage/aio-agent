@@ -58,7 +58,7 @@ test("three hours after it was first found behind, the console switches to the d
 test("with a message being typed, the console waits", async ({ page }) => {
   await page.clock.install();
   const { events, loads, deployed } = await setup(page, false);
-  expect(deployed.checks).toBe(1);
+  await expect.poll(() => deployed.checks).toBe(1);
   await page.getByRole("textbox", { name: "消息", exact: true }).fill("还没写完");
   deployed.newer = true;
   // Back on screen: found behind for the first time (a check at most every ten minutes).
