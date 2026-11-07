@@ -45,6 +45,7 @@ import { DEVICE_KINDS, type DeviceKind } from "../deviceLink.js";
 import { appleRouter } from "../auth/appleRoutes.js";
 import { followLoginTimezone } from "../auth/loginTimezone.js";
 import { createSupportRequest, reviewSupportRequest, supportQueue, SupportError } from '../support.js';
+import { feedbackOf, feedbackQueue, setFeedback } from '../feedback.js';
 import { parseHttpUrl } from "../aio/client.js";
 import { COOKIE_NAMES, clearSessionCookies, serializeCookie, sessionCookies } from "../auth/sessions.js";
 import { isSuspended } from "../auth/suspension.js";
@@ -298,6 +299,25 @@ export function createApiRouter(context: AppContext): Router {
       res.status(err.status).json({error:err.code,message:err.message});
     }
   }));
+  // 👍 / 👎 on an AI reply (src/control/feedback.ts): the account's own votes, and setting one.
+  router.get('/support/feedback', requireKind('primary'), requireSession, (req, res) => {
+    res.setHeader('Cache-Control','no-store'); res.json({ratings: feedbackOf(db, ctxOf(req).session!.ownerId)});
+  });
+  router.put('/support/feedback/:task', requireKind('primary'), requireSession, asyncHandler(async (req, res) => {
+    const userId = ctxOf(req).session!.ownerId;
+    try {
+      const taskDb = context.runtimeForUser ? (await context.runtimeForUser(userId)).db : db;
+      const rating = setFeedback(db, userId, param(req, 'task'), req.body ?? {}, taskDb);
+      if (rating) track(req, 'message_feedback', { rating, note: Boolean(typeof req.body?.note === 'string' && req.body.note.trim()) });
+      res.json({rating});
+    } catch (err) {
+      if (!(err instanceof SupportError)) throw err;
+      res.status(err.status).json({error:err.code,message:err.message});
+    }
+  }));
+  router.get('/settings/support/feedback', requireKind('primary'), requireSession, (_req, res) => {
+    res.setHeader('Cache-Control','no-store'); res.json({feedback: feedbackQueue(db)});
+  });
   router.get('/settings/support', requireKind('primary'), requireSession, (_req, res) => {
     res.setHeader('Cache-Control','no-store'); res.json({requests:supportQueue(db)});
   });

@@ -41,7 +41,7 @@ export const feed = {
   phoneDone: "我已在手机上操作完成，请继续。",
   actions: {
     quote: "引用任务",
-    quoteLabel: (title: string) => `引用任务：${title}`,
+    helpful: "有帮助", notHelpful: "没帮助", quoteLabel: (title: string) => `引用任务：${title}`,
     retryPlanning: "重试分配",
     retry: "重试",
     retryLabel: (title: string) => `重试任务：${title}`,

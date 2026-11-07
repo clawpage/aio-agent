@@ -1,4 +1,4 @@
-import { SupportDialog } from './Support';
+import { FeedbackDialog } from './Support';
 import { BootCover, BrandMark, InlineLoading, LoadingMark } from "./Brand";
 import { NavIcon, type NavIconName } from "./NavIcon";
 import { createPortal } from "react-dom";
@@ -33,6 +33,13 @@ import type {TaskFeed} from '../taskStatus';
 import { t as i18n } from "../i18n";
 import { MAX_ATTACHMENTS } from "../../../common/attachments";
 import { keepTyping } from "../useKeyboardViewport";
+
+/** A thumb up, or down: the votes on a reply. */
+function ThumbIcon({ down }: { down: boolean }) {
+    return <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={down ? { transform: "rotate(180deg)" } : undefined}>
+      <path d="M7 10v12"/><path d="M15 5.88 14 10h5.83a2 2 0 0 1 1.92 2.56l-2.33 8A2 2 0 0 1 17.5 22H4a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2h2.76a2 2 0 0 0 1.79-1.11L12 2a3.13 3.13 0 0 1 3 3.88Z"/>
+    </svg>;
+}
 const terminal = new Set(["completed", "failed", "interrupted", "unknown"]);
 /** Whose move it is: the person's (amber), the AI's (indigo), or stuck on an error (red). */
 function turnOf(t: Task): "you" | "ai" | "err" {
@@ -547,7 +554,20 @@ export function TaskChat({ onDetails, onOpenLink, onOpenFileInBrowser, onExpired
           <div className="task-actions"><button className="ghost tiny" onClick={() => quoteTask(t)} aria-label={i18n.feed.actions.quoteLabel(t.title)}>{i18n.feed.actions.quote}</button>{t.status === "planning_failed" ? <button className="ghost tiny" onClick={() => void act(() => api.retryTaskPlanning(t.id))}>{i18n.feed.actions.retryPlanning}</button> : t.status === "blocked" ? null : <button className="ghost tiny" disabled={t.status === "stopping"} onClick={() => void act(() => api.stopTask(t.id))}>{i18n.feed.actions.stop}</button>}</div>
         </div>;
     };
-    const [reportedTask, setReportedTask] = useState<string | null>(null);
+    /** 👍 / 👎 the person gave each reply (src/control/feedback.ts); a 👎 asks what was wrong, and offers to report it. */
+    const [ratings, setRatings] = useState<Record<string, "up" | "down">>({});
+    const [dislikedTask, setDislikedTask] = useState<string | null>(null);
+    useEffect(() => { api.feedback().then(r => setRatings(r.ratings), () => undefined); }, []);
+    const vote = (task: Task, rating: "up" | "down") => {
+        const before = ratings[task.id];
+        const next = before === rating ? null : rating;
+        setRatings(old => { const out = { ...old }; if (next) out[task.id] = next; else delete out[task.id]; return out; });
+        if (next === "down") setDislikedTask(task.id);
+        void api.setFeedback(task.id, next).catch(err => {
+            setRatings(old => { const out = { ...old }; if (before) out[task.id] = before; else delete out[task.id]; return out; });
+            setError(err instanceof Error ? err.message : String(err));
+        });
+    };
     /** The answer a running task is writing, shown where its reply will be until the reply itself arrives. */
     const draftOf = (t: Task) => !t.mergedInto && ["running", "stopping"].includes(t.status) ? drafts[t.conversationId]?.text || null : null;
     /** A reply being written keeps the latest in view only when it has grown, and never under the person's finger (a scroll each keystroke would fight their scrolling). */
@@ -561,7 +581,7 @@ export function TaskChat({ onDetails, onOpenLink, onOpenFileInBrowser, onExpired
     const feed = tasks.flatMap(t => [{ task: t, report: false, at: t.createdAt }, ...(!t.mergedInto && terminal.has(t.status) ? [{ task: t, report: true, at: t.completedAt ?? t.createdAt }] : draftOf(t) ? [{ task: t, report: true, at: Number.MAX_SAFE_INTEGER }] : [])])
         .sort((a, b) => a.at - b.at || Number(a.report) - Number(b.report) || a.task.id.localeCompare(b.task.id));
     return <WidgetComposer.Provider value={fillComposer}><section className="chat task-chat">
-    {reportedTask && <SupportDialog taskId={reportedTask} onClose={() => setReportedTask(null)}/>}
+    {dislikedTask && <FeedbackDialog taskId={dislikedTask} onClose={() => setDislikedTask(null)}/>}
     <header className="chat-head"><div className="chat-title"><h2>{i18n.feed.head.title}</h2><span className={`dot ${connected ? "ok" : "warn"}`}/><span className="chat-sub">{active.length || awaiting.length
         ? <TurnPills onJump={showWaiting} groups={[
             { key: "input", tone: "you", label: i18n.feed.head.awaitingInput(awaiting.length), tasks: awaiting, state: waitingLabel },
@@ -601,8 +621,11 @@ export function TaskChat({ onDetails, onOpenLink, onOpenFileInBrowser, onExpired
           {/* Until something follows it up: a retry (or any reply) then carries the task on. */}
           {t.status === "failed" && !replyTo(t) && <button className="ghost tiny task-retry" disabled={!!choosing[`${t.id}:${t.revision}`]} onClick={() => void retryTask(t)} aria-label={i18n.feed.actions.retryLabel(t.title)}>{i18n.feed.actions.retry}</button>}
           <button className="ghost tiny" onClick={() => quoteTask(t)} aria-label={i18n.feed.actions.quoteLabel(t.title)}>{i18n.feed.actions.quote}</button><button className="ghost tiny" onClick={() => onDetails(t)}>{i18n.feed.actions.details}</button>
-          {/* Reporting stays available but out of the way: a quiet link at the end of the row. */}
-          {t.result && !t.support && <button className="link tiny report-response" onClick={() => setReportedTask(t.id)}>{i18n.support.report}</button>}
+          {/* Out of the way at the end of the row; 👎 also leads to reporting the reply, if the person wants. */}
+          {t.result && !t.support && <span className="message-feedback">
+            <button className="feedback-button" aria-pressed={ratings[t.id] === "up"} aria-label={i18n.feed.actions.helpful} title={i18n.feed.actions.helpful} onClick={() => vote(t, "up")}><ThumbIcon down={false}/></button>
+            <button className="feedback-button" aria-pressed={ratings[t.id] === "down"} aria-label={i18n.feed.actions.notHelpful} title={i18n.feed.actions.notHelpful} onClick={() => vote(t, "down")}><ThumbIcon down/></button>
+          </span>}
         </div>
       </article> : <div className={`task-entry${adopted.current.has(t.id) ? " adopted" : ""}`} key={t.id} data-task-id={t.id} data-at={at}>
         {t.schedule ? <div className="schedule-run-note" role="note">{i18n.feed.scheduleRun(t.schedule.title, t.schedule.rule)}<MessageTime at={t.createdAt} now={now}/></div> : t.support ? <div className="schedule-run-note" role="note">{i18n.feed.supportNote}<MessageTime at={t.createdAt} now={now}/></div> : t.handBack ? <div className="schedule-run-note" role="note">{i18n.feed.handBackNote}<MessageTime at={t.createdAt} now={now}/></div> : <article className="msg user"><MessagePreview title={i18n.feed.userMessage} user>{t.relatedTaskId && <small className="muted">{i18n.feed.quoted(t.relatedTaskTitle ?? tasks.find(task => task.id === t.relatedTaskId)?.title ?? i18n.feed.earlierTask)}</small>}<p>{t.text}</p>{t.attachments.length > 0 && <AttachmentCards attachments={t.attachments} onOpen={setPreview}/>}<div className="message-meta"><MessageTime at={t.createdAt} now={now}/></div></MessagePreview></article>}

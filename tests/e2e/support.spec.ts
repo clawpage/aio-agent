@@ -36,21 +36,42 @@ test('native login policy links use the iOS browser bridge without leaving sign-
   await expect(page).toHaveURL(before); await expect(page.getByRole('button',{name:'使用 Google 登录 / 注册'})).toBeVisible();
   expect(page.context().pages()).toHaveLength(1);
 });
-test('members report a specific reply in-app and receive a reference; Escape closes the modal',async({page},info)=>{
+test('members rate a reply: 👍 toggles, 👎 asks what was wrong and reporting it is optional',async({page},info)=>{
   await mockConsole(page,{conversations:[]});
   await page.route('**/api/auth/session',r=>r.fulfill({json:{authenticated:true,username:'member',role:'member'}}));
   await page.route('**/api/main*',r=>r.fulfill({json:{mode:'tasks',tasks:[{id:'reported-task',revision:1,title:'Test reply',text:'question',conversationId:'report-conv',status:'completed',result:'AI result',error:null,attachments:[],createdAt:1,completedAt:2}],nextBefore:null}}));
-  let sent: unknown;
-  await page.route('**/api/support/requests',async r=>{sent=r.request().postDataJSON();await r.fulfill({status:201,json:{id:'report-reference'}});});
+  const votes: unknown[] = []; let reports: unknown[] = [];
+  await page.route('**/api/support/feedback/*',async r=>{const body=r.request().postDataJSON();votes.push(body);await r.fulfill({json:{rating:body.rating}});});
+  await page.route('**/api/support/requests',async r=>{reports.push(r.request().postDataJSON());await r.fulfill({status:201,json:{id:'report-reference'}});});
   await page.goto('/');
-  await page.getByRole('button',{name:'举报回复',exact:true}).click();
-  const dialog=page.getByRole('dialog'); await expect(dialog).toContainText('不会发送其他会话');
+  const up=page.getByRole('button',{name:'有帮助',exact:true}), down=page.getByRole('button',{name:'没帮助',exact:true});
+  await up.click(); await expect(up).toHaveAttribute('aria-pressed','true');
+  await up.click(); await expect(up).toHaveAttribute('aria-pressed','false');
+  expect(votes).toEqual([{rating:'up'},{rating:null}]);
+
+  // 👎 with nothing more to say: the vote stands, nothing is reported.
+  await down.click(); await expect(down).toHaveAttribute('aria-pressed','true');
+  let dialog=page.getByRole('dialog',{name:'这条回复哪里不好？'}); await expect(dialog).toContainText('说明可以不写');
+  await dialog.getByRole('button',{name:'提交',exact:true}).click();
+  await expect(dialog.getByRole('status')).toContainText('已记录你的反馈');
+  await page.keyboard.press('Escape'); await expect(dialog).toHaveCount(0);
+  expect(votes.at(-1)).toEqual({rating:'down'}); expect(reports).toEqual([]);
+
+  // Again, now with a note and a report: a report needs the note, and gets a reference.
+  await down.click(); await expect(down).toHaveAttribute('aria-pressed','false');
+  await down.click();
+  dialog=page.getByRole('dialog',{name:'这条回复哪里不好？'});
+  await dialog.getByLabel('同时举报这条回复（违法、有害或不当内容）').check();
+  await expect(dialog).toContainText('不会发送其他会话');
+  await expect(dialog.getByRole('button',{name:'提交',exact:true})).toBeDisabled();
   await dialog.getByLabel('说明',{exact:true}).fill('This response contains unsafe instructions.');
+  await page.screenshot({path:info.outputPath('dislike-report.png')});
   await dialog.getByRole('button',{name:'提交',exact:true}).click();
   await expect(dialog.getByRole('status')).toContainText('report-reference');
-  expect(sent).toEqual({kind:'content',taskId:'reported-task',note:'This response contains unsafe instructions.'});
-  await page.screenshot({path:info.outputPath('report-confirmed.png')});
+  expect(votes.at(-1)).toEqual({rating:'down',note:'This response contains unsafe instructions.'});
+  expect(reports).toEqual([{kind:'content',taskId:'reported-task',note:'This response contains unsafe instructions.'}]);
   await page.keyboard.press('Escape'); await expect(dialog).toHaveCount(0);
+  await expect(down).toHaveAttribute('aria-pressed','true');
 });
 test('members can request deletion from settings without leaving the app',async({page},info)=>{
   await mockConsole(page,{conversations:[]});
@@ -133,4 +154,22 @@ test('public pages speak Japanese: ?lang=ja, the console choice and a Japanese b
   await expect(other).toHaveURL(/\/terms\.html\?lang=ja$/);
   await expect(other.getByRole('heading',{level:1})).toHaveText('利用規約');
   await english.close();
+});
+test('the owner reads the votes on replies under user support',async({page},info)=>{
+  await mockConsole(page,{conversations:[]});
+  await page.route('**/api/auth/session',r=>r.fulfill({json:{authenticated:true,username:'owner',role:'owner'}}));
+  await page.route('**/api/main*',r=>r.fulfill({json:{mode:'tasks',tasks:[],nextBefore:null}}));
+  await page.route(url=>url.pathname==='/api/settings/support',r=>r.fulfill({json:{requests:[]}}));
+  await page.route('**/api/settings/support/feedback',r=>r.fulfill({json:{feedback:[
+    {id:'f1',task_id:'t1',rating:'down',title:'Trip plan',content:'The reply with the wrong dates',note:'Wrong dates.',updated_at:Date.now(),account_username:'cr'},
+    {id:'f2',task_id:'t2',rating:'up',title:'Grocery list',content:'',note:'',updated_at:Date.now()-60000,account_username:'yzmy'}]}}));
+  await page.goto('/u/owner/settings/support');
+  const items=page.locator('.support-settings .support-request');
+  await expect(page.getByRole('heading',{name:'回复反馈'})).toBeVisible();
+  await expect(items).toHaveCount(2);
+  await expect(items.nth(0)).toContainText('👎 没帮助 · cr'); await expect(items.nth(0)).toContainText('Wrong dates.');
+  await items.nth(0).getByText('Trip plan',{exact:true}).last().click();
+  await expect(items.nth(0)).toContainText('The reply with the wrong dates');
+  await expect(items.nth(1)).toContainText('👍 有帮助 · yzmy');
+  await page.screenshot({path:info.outputPath('owner-feedback.png'),fullPage:true});
 });

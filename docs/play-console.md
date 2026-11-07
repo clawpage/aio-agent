@@ -17,7 +17,7 @@
 不能据此认定账号所有权。提交成功只表示排入支持队列，不表示已验证身份或完成删除。
 这两页与 `/about.html`、`/terms.html` 各含简体中文、英文、西语、繁体中文四份完整正文，内容一致；`policy-lang.js` 按 `?lang=`、控制台已选语言（`aio.locale`）、浏览器首选语言依次选定一种显示，都不匹配或未启用 JavaScript 时显示英文，网址不变。支持表单的提示随所选语言，并以 `x-aio-locale` 请求服务器用同一语言回复错误。
 
-应用配置页“账户与隐私”可提交绑定当前身份的删除请求。终态任务的回复旁有“举报回复”；提交前说明
+应用配置页“账户与隐私”可提交绑定当前身份的删除请求。终态任务的回复旁有 👍 / 👎；点 👎 后可选“同时举报这条回复”，提交前说明
 管理员将收到该回复（最多 20,000 字）、标题、账号和说明。服务端从该身份自己的账本读取结果，不接受
 客户端伪造回复，也不附带原始请求或其他会话。请求集中保存在认证数据库的 `support_requests` 中，
 仅所有者可从设置中的“用户支持”读取和记录处理结果。匿名请求限制为每 IP 每小时 4 次，登录请求每日 20 次。
@@ -42,7 +42,7 @@
    - Docker 卷 `aio-user-<namespace>-workspace`、`-codex`、`-browser`。
    - `<PA_DATA_DIR>/user-secrets/<username>.txt`（若管理员创建了密码账号）。
    先核对标签、挂载和账号一致性，再逐对象删除；不能按模糊匹配删除其他卷或目录。
-5. 在中央账本事务中清除该账号的 Google 与 Apple 身份（`google_identities`、`apple_identities`）及对应临时登录 flow、会话与票据、已用邀请关联、支持请求；
+5. 在中央账本事务中清除该账号的 Google 与 Apple 身份（`google_identities`、`apple_identities`）及对应临时登录 flow、会话与票据、已用邀请关联、支持请求与回复反馈（`message_feedback`，删除身份时随外键级联删除）；
    核对旧版本迁移残留的 conversations/tasks、events/turns/server_requests、vault、schedules、feed/search/recall、
    agreements、push 和 decision 数据，只清理确属该用户的记录，再删除成员身份。必须核对外键，失败时回滚。
    所有者账号不走成员删除流程，需单独评估部署停止和数据范围。

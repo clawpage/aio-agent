@@ -168,6 +168,7 @@ export const http: typeof zh = {
     describe: "請填寫說明（最多 2000 字）",
     contact: "請填寫可聯絡的電子郵件和有效的帳號",
     noReply: "找不到可檢舉的回覆",
+    feedbackRating: "請選擇有幫助或沒幫助",
     dailyLimit: "今日提交次數已達上限，請稍後重試",
     decision: "請記錄核實情況和處理結果",
     notFound: "請求不存在",

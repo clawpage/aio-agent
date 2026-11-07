@@ -167,6 +167,7 @@ export const http = {
     describe: "请填写说明（最多 2000 字）",
     contact: "请填写可联系的邮箱和有效的账号",
     noReply: "未找到可举报的回复",
+    feedbackRating: "请选择有帮助或没帮助",
     dailyLimit: "今日提交次数已达上限，请稍后重试",
     decision: "请记录核实情况和处理结果",
     notFound: "请求不存在",

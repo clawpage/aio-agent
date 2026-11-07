@@ -132,6 +132,10 @@ export interface GadgetMessage { id: string; text: string; status: string; done:
 
 export const api = {
   supportRequest: (body: {kind: 'content' | 'deletion' | 'privacy'; taskId?: string; note: string}) => request<{id:string}>('/api/support/requests', {method:'POST',body}),
+  /** 👍 / 👎 on AI replies (src/control/feedback.ts): the account's own, by task. */
+  feedback: () => request<{ratings: Record<string, 'up' | 'down'>}>('/api/support/feedback', {cache:'no-store'}),
+  setFeedback: (taskId: string, rating: 'up' | 'down' | null, note?: string) => request<{rating: 'up' | 'down' | null}>(`/api/support/feedback/${encodeURIComponent(taskId)}`, {method:'PUT',body:{rating, note}}),
+  feedbackQueue: () => request<{feedback: Array<{id:string;task_id:string;rating:'up'|'down';title:string;content:string;note:string;updated_at:number;account_username:string|null}>}>('/api/settings/support/feedback', {cache:'no-store'}),
   supportQueue: () => request<{requests: Array<{id:string;kind:'content'|'deletion'|'privacy';account_username:string|null;account_email:string|null;username:string;email:string;title:string;content:string;note:string;status:string;decision:string|null;created_at:number}>}>('/api/settings/support', {cache:'no-store'}),
   reviewSupport: (id: string, decision: string) => request<{ok:true}>(`/api/settings/support/${encodeURIComponent(id)}/review`, {method:'POST',body:{decision}}),
   /** The account's phone (on a Mac it linked): offered at all, and which device is connected. */

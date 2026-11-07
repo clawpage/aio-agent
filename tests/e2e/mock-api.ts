@@ -181,6 +181,7 @@ export async function mockConsole(page: Page, opts: MockConsoleOptions): Promise
 
   await page.route('**/api/settings/soul',route=>json(route,{content:'# SOUL.md\n你是个人助理。',revision:'initial',defaultContent:'# SOUL.md\n你是个人助理。',maxBytes:65536}));
   await page.route((url) => url.pathname === "/api/settings/invites", (route) => json(route, { invites: [] }));
+  await page.route((url) => url.pathname === "/api/support/feedback", (route) => json(route, { ratings: {} }));
   await page.route((url) => url.pathname === "/api/device-links", (route) => json(route, { links: [] }));
   await page.route((url) => url.pathname === "/api/settings/recall", (route) => {
     const days = Number(new URL(route.request().url()).searchParams.get("days"));

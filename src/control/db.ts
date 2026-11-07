@@ -231,6 +231,21 @@ CREATE TABLE IF NOT EXISTS support_requests (
 );
 CREATE INDEX IF NOT EXISTS idx_support_owner ON support_requests(owner_id,created_at);
 
+-- A person's 👍 / 👎 on one AI reply (src/control/feedback.ts); read by the owner, never by an agent.
+CREATE TABLE IF NOT EXISTS message_feedback (
+  id TEXT PRIMARY KEY,
+  owner_id TEXT NOT NULL REFERENCES owners(id) ON DELETE CASCADE,
+  task_id TEXT NOT NULL,
+  rating TEXT NOT NULL CHECK(rating IN ('up','down')),
+  title TEXT NOT NULL DEFAULT '',
+  content TEXT NOT NULL DEFAULT '',
+  note TEXT NOT NULL DEFAULT '',
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  UNIQUE(owner_id, task_id)
+);
+CREATE INDEX IF NOT EXISTS idx_feedback_updated ON message_feedback(updated_at);
+
 CREATE TABLE IF NOT EXISTS conversations (
   id TEXT PRIMARY KEY,
   owner_id TEXT NOT NULL,

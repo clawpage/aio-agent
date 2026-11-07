@@ -71,6 +71,9 @@ function scenario() {
   ev('clawpage_publish', d(0), { userId: 'user_c', props: { via: 'agent', created: false } });
   ev('clawpage_visit', d(0), { userId: 'user_c' });
   ev('browser_restore_failed', d(0), { userId: 'user_c', props: { reason: 'mcp_unready' } });
+  // Votes on replies as they stand: two this week, one before the range.
+  const vote = (id: string, owner: string, rating: string, at: number) => root.prepare("INSERT INTO message_feedback (id,owner_id,task_id,rating,created_at,updated_at) VALUES (?,?,?,?,?,?)").run(id, owner, id, rating, at, at);
+  vote('f1', 'user_a', 'up', d(0)); vote('f2', 'user_b', 'down', d(1)); vote('f3', 'user_a', 'up', d(20));
   return { cfg, analytics };
 }
 
@@ -100,7 +103,7 @@ it('compares the range with the period before it and counts outcomes, durations,
   // Active: the owner (typed and gadget tasks), user_a (a task today), user_b (opened the app). Not user_c.
   expect(report.current).toEqual({ active: 3, signups: 2, tasks: 5, completed: 2, failed: 1, interrupted: 1, sessions: 1, medianTaskMs: 120_000 });
   expect(report.previous).toEqual({ active: 2, signups: 1, tasks: 2, completed: 2, failed: 0, interrupted: 0, sessions: 1, medianTaskMs: 300_000 });
-  expect(report.quality).toEqual({ outcomes: { completed: 2, failed: 1, interrupted: 1, unknown: 0, other: 1 }, medianMs: 120_000, p90Ms: 120_000, stops: 1, retries: 2, reports: 1, restoreFailures: 1,
+  expect(report.quality).toEqual({ outcomes: { completed: 2, failed: 1, interrupted: 1, unknown: 0, other: 1 }, medianMs: 120_000, p90Ms: 120_000, stops: 1, retries: 2, reports: 1, likes: 1, dislikes: 1, restoreFailures: 1,
     // Whose browser would not come back, and at what step.
     restoreAccounts: [{ username: 'user_c', count: 1 }], restoreReasons: { mcp_unready: 1 } });
   const f = Object.fromEntries(report.features!.map(x => [x.feature, x]));

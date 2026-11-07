@@ -74,6 +74,9 @@ export type TaskQuality = {
   stops: number;
   retries: number;
   reports: number;
+  /** 👍 and 👎 on replies given this period, as they stand now (a vote taken back is not counted). */
+  likes: number;
+  dislikes: number;
   restoreFailures: number;
   /** When some failed: the accounts they happened to, most first, and the step each failure stopped at (`mcp_unready`, `deadline`, …). */
   restoreAccounts?: Array<{ username: string; count: number }>;

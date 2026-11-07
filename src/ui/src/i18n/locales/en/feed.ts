@@ -42,7 +42,7 @@ export const feed: typeof zh = {
   phoneDone: "I've finished on the phone. Please continue.",
   actions: {
     quote: "Quote task",
-    quoteLabel: (title: string) => `Quote task: ${title}`,
+    helpful: "Helpful", notHelpful: "Not helpful", quoteLabel: (title: string) => `Quote task: ${title}`,
     retryPlanning: "Retry assignment",
     retry: "Retry",
     retryLabel: (title: string) => `Retry task: ${title}`,

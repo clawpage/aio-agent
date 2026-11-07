@@ -37,7 +37,7 @@ const full = (days: number): AnalyticsReport => ({
     { start: '2026-10-12', size: 3, d1: { eligible: 2, retained: 0 }, d7: { eligible: 0, retained: 0 } },
   ],
   features: FEATURES.map((feature, i) => ({ feature, count: feature === 'task_typed' ? 30 : feature === 'clawpage_visit' ? 25 : i < 12 ? 12 - i : 0, users: feature === 'task_typed' ? 8 : i < 12 ? Math.max(1, 6 - (i >> 1)) : 0, prevUsers: feature === 'task_typed' ? 6 : i < 12 ? 2 : 0 })),
-  quality: { outcomes: { completed: 30, failed: 3, interrupted: 2, unknown: 1, other: 4 }, medianMs: 3.5 * minute, p90Ms: 42 * minute, stops: 3, retries: 2, reports: 1, restoreFailures: 3,
+  quality: { outcomes: { completed: 30, failed: 3, interrupted: 2, unknown: 1, other: 4 }, medianMs: 3.5 * minute, p90Ms: 42 * minute, stops: 3, retries: 2, reports: 1, likes: 7, dislikes: 2, restoreFailures: 3,
     restoreAccounts: [{ username: 'cr', count: 2 }, { username: 'yzmy', count: 1 }], restoreReasons: { mcp_unready: 2, deadline: 1 } },
   boot: [{ platform: 'ios', opens: 12, cached: 9, times: { ttfb: { p50: 30, p90: 900 }, dom: { p50: 400, p90: 1600 }, version: { p50: 600, p90: 1900 }, session: { p50: 650, p90: 2000 }, feed: { p50: 1100, p90: 3200 }, cover: { p50: 2800, p90: 5600 } } }],
   accounts: [

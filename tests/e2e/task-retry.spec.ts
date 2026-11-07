@@ -3,7 +3,7 @@ import { mockConsole } from './mock-api';
 
 const base = { revision: 1, conversationId: 'conv', error: null, attachments: [], createdAt: Date.now() - 60_000, completedAt: Date.now() - 30_000 };
 
-test('a failed card retries its request once as a follow-up, and the report link stays quiet at the end of a reply', async ({ page }, info) => {
+test('a failed card retries its request once as a follow-up, and 👍 / 👎 stay quiet at the end of a reply', async ({ page }, info) => {
   await mockConsole(page, { conversations: [] });
   await page.route('**/api/auth/session', r => r.fulfill({ json: { authenticated: true, username: 'member', role: 'member' } }));
   const tasks: Array<Record<string, unknown>> = [
@@ -21,14 +21,14 @@ test('a failed card retries its request once as a follow-up, and the report link
   await page.goto('/');
   const failed = page.locator('.task-report[data-task-id="broken"]');
   await expect(failed).toContainText('执行失败：网络中断');
-  // A failed card has no reply to report; the finished one keeps a quiet link after its actions.
-  await expect(failed.getByRole('button', { name: '举报回复' })).toHaveCount(0);
+  // A failed card has no reply to rate; the finished one keeps quiet 👍 / 👎 after its actions.
+  await expect(failed.getByRole('button', { name: '没帮助' })).toHaveCount(0);
   const done = page.locator('.task-report[data-task-id="done"]');
-  const report = done.getByRole('button', { name: '举报回复', exact: true });
-  await expect(report).toBeVisible();
-  const [quote, link] = await Promise.all([done.getByRole('button', { name: '引用任务：Done task' }).boundingBox(), report.boundingBox()]);
-  expect(link!.x).toBeGreaterThan(quote!.x);
-  expect(await report.evaluate(el => [getComputedStyle(el).borderTopWidth, getComputedStyle(el).backgroundColor])).toEqual(['0px', 'rgba(0, 0, 0, 0)']);
+  const up = done.getByRole('button', { name: '有帮助', exact: true }), down = done.getByRole('button', { name: '没帮助', exact: true });
+  await expect(up).toBeVisible(); await expect(down).toBeVisible();
+  const [quote, like] = await Promise.all([done.getByRole('button', { name: '引用任务：Done task' }).boundingBox(), up.boundingBox()]);
+  expect(like!.x).toBeGreaterThan(quote!.x);
+  expect(await down.evaluate(el => [getComputedStyle(el).borderTopWidth, getComputedStyle(el).backgroundColor, Number(getComputedStyle(el).opacity) < 1])).toEqual(['0px', 'rgba(0, 0, 0, 0)', true]);
   await expect(done.getByRole('button', { name: /^重试/ })).toHaveCount(0);
   await expect(page.locator('.boot-cover')).toHaveCount(0);
   await failed.scrollIntoViewIfNeeded();

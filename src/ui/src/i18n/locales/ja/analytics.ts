@@ -120,7 +120,7 @@ export const analytics: typeof zh = {
     interrupted: "中断",
     median: "所要時間（中央値）",
     p90: "所要時間（P90）",
-    signals: { stops: "ユーザーによる停止", retries: "再試行", reports: "回答の報告", restoreFailures: "ブラウザの復元失敗" },
+    signals: { stops: "ユーザーによる停止", retries: "再試行", reports: "回答の報告", likes: "高評価の回答", dislikes: "低評価の回答", restoreFailures: "ブラウザの復元失敗" },
     restoreReasons: { tabs: "タブ", deadline: "タイムアウト", mcp_unready: "ブラウザ MCP 未準備", focus: "フォーカス同期", storage: "ログインデータ", aio_api: "ブラウザ API", other: "その他" } as Record<string, string>,
     noTasks: "この期間のタスクはありません。",
   },

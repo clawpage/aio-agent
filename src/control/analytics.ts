@@ -203,7 +203,7 @@ export class Analytics {
     };
     const versions = new Map<string, { platform: string; version: string; users: Set<string> }>();
     const welcome = new Map<string, { count: number; users: Set<string> }>();
-    const quality = { stops: 0, retries: 0, reports: 0, restoreFailures: 0 };
+    const quality = { stops: 0, retries: 0, reports: 0, likes: 0, dislikes: 0, restoreFailures: 0 };
     /** Which accounts' browsers would not come back, and at what step (src/control/browser/lifecycle.ts wakeFailureReason). */
     const restoreBy = new Map<string, number>(), restoreReasons: Record<string, number> = {};
     /** Openings of the console this period, per platform (`boot_timing`, src/ui/src/bootTiming.ts). */
@@ -267,6 +267,11 @@ export class Analytics {
           break;
         }
       }
+    }
+
+    // 👍 / 👎 on replies as they stand now (src/control/feedback.ts), by when each was last given.
+    for (const f of this.db.prepare("SELECT rating,updated_at FROM message_feedback WHERE updated_at>=? AND updated_at<=?").iterate(since, now) as Iterable<{ rating: string; updated_at: number }>) {
+      if (periodOf(dateAt(f.updated_at)) === "current") { if (f.rating === "up") quality.likes++; else quality.dislikes++; }
     }
 
     const totals: AnalyticsReport["totals"] = { accounts: users.length, signups: 0, activeToday: 0, active7: 0, active30: 0, tasks: 0, completed: 0, failed: 0, sources: { manual: 0, schedule: 0, gadget: 0 } };

@@ -119,7 +119,7 @@ export const analytics = {
     interrupted: "中断",
     median: "耗时中位数",
     p90: "耗时 P90",
-    signals: { stops: "用户停止任务", retries: "重试", reports: "举报回答", restoreFailures: "浏览器恢复失败" },
+    signals: { stops: "用户停止任务", retries: "重试", reports: "举报回答", likes: "点赞回答", dislikes: "点踩回答", restoreFailures: "浏览器恢复失败" },
     /** Why a browser would not come back, per step (src/control/browser/lifecycle.ts wakeFailureReason). */
     restoreReasons: { tabs: "标签页", deadline: "超时", mcp_unready: "浏览器 MCP 未就绪", focus: "焦点同步", storage: "登录数据", aio_api: "浏览器接口", other: "其他" } as Record<string, string>,
     noTasks: "这个时间段没有任务。",

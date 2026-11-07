@@ -42,7 +42,7 @@ export const feed: typeof zh = {
   phoneDone: "我已在手機上操作完成，請繼續。",
   actions: {
     quote: "引用任務",
-    quoteLabel: (title: string) => `引用任務：${title}`,
+    helpful: "有幫助", notHelpful: "沒幫助", quoteLabel: (title: string) => `引用任務：${title}`,
     retryPlanning: "重試分配",
     retry: "重試",
     retryLabel: (title: string) => `重試任務：${title}`,

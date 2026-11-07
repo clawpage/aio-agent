@@ -120,7 +120,7 @@ export const analytics: typeof zh = {
     interrupted: "Interrupted",
     median: "Median duration",
     p90: "P90 duration",
-    signals: { stops: "Stopped by the user", retries: "Retries", reports: "Reported answers", restoreFailures: "Browser restores failed" },
+    signals: { stops: "Stopped by the user", retries: "Retries", reports: "Reported answers", likes: "Liked answers", dislikes: "Disliked answers", restoreFailures: "Browser restores failed" },
     restoreReasons: { tabs: "Tabs", deadline: "Timed out", mcp_unready: "Browser MCP not ready", focus: "Focus sync", storage: "Sign-in data", aio_api: "Browser API", other: "Other" } as Record<string, string>,
     noTasks: "No tasks in this period.",
   },

@@ -168,6 +168,7 @@ export const http: typeof zh = {
     describe: "Describe your request (up to 2000 characters)",
     contact: "Enter a contact email and a valid account",
     noReply: "No reply to report was found",
+    feedbackRating: "Choose helpful or not helpful",
     dailyLimit: "You've reached today's limit. Please try again later",
     decision: "Record what you verified and how it was handled",
     notFound: "The request doesn't exist",

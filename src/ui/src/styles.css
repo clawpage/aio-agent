@@ -4936,8 +4936,14 @@ button.map-card-switch { flex: 0 0 auto; padding: 4px 10px; }
 .support-request pre { max-height:300px; overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; font-size:12px; }
 .support-note { white-space:pre-wrap; overflow-wrap:anywhere; }
 /* Quiet on purpose: a small dim link after the reply's actions, not a button among them. */
-.task-actions .report-response { padding: 3px 0; border: 0; background: none; color: var(--text-dim); font-size: 12px; text-decoration: none; opacity: .7; }
-.task-actions .report-response:hover, .task-actions .report-response:focus-visible { opacity: 1; text-decoration: underline; }
+/* 👍 / 👎 on a reply: quiet at the end of the row; a vote given stays only a little stronger. */
+.task-actions .message-feedback { display: inline-flex; gap: 2px; }
+.task-actions .feedback-button { display: inline-flex; align-items: center; justify-content: center; min-width: 30px; min-height: 30px; padding: 0; border: 0; border-radius: 8px; background: none; color: var(--text-dim); opacity: .6; }
+.task-actions .feedback-button:hover, .task-actions .feedback-button:focus-visible { opacity: 1; }
+.task-actions .feedback-button[aria-pressed="true"] { opacity: .9; color: var(--text); }
+.task-actions .feedback-button[aria-pressed="true"] svg { fill: color-mix(in srgb, currentColor 18%, transparent); }
+.support-dialog .check-row { display: flex; align-items: flex-start; gap: 8px; margin: 4px 0 8px; font-size: 14px; line-height: 1.5; }
+.support-dialog .check-row input { flex: none; width: auto; margin-top: 3px; }
 .login-policy { text-align:center; margin:18px 0 0; }
 
 /* ------------------------------------------------------------ personal knowledge base (KnowledgeList) */
@@ -5035,5 +5041,7 @@ button.map-card-switch { flex: 0 0 auto; padding: 4px 10px; }
 .settings-subpage .settings-section-head h3 { display: none; }
 .settings-subpage .settings-section-head p { margin-top: 0; }
 .settings-subpage .support-settings > h3 { display: none; }
+.support-feedback { margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--border); }
+.support-feedback h3 { margin: 0 0 4px; }
 .settings-subpage[data-swiping] { box-shadow: var(--shadow-dialog); background: var(--bg); }
 .dash-restore-detail { display: block; margin-top: 2px; font-size: 12px; line-height: 1.5; color: var(--text-dim); overflow-wrap: anywhere; }

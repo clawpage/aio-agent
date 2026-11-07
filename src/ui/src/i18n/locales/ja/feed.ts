@@ -42,7 +42,7 @@ export const feed: typeof zh = {
   phoneDone: 'スマートフォンでの操作が終わりました。続けてください。',
   actions: {
     quote: 'タスクを引用',
-    quoteLabel: (title: string) => `タスクを引用：${title}`,
+    helpful: '役に立った', notHelpful: '役に立たなかった', quoteLabel: (title: string) => `タスクを引用：${title}`,
     retryPlanning: '振り分けを再試行',
     retry: '再試行',
     retryLabel: (title: string) => `タスクを再試行：${title}`,

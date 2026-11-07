@@ -31,10 +31,10 @@ test('a support card reads as a message from support, not as something the perso
   await expect(card.locator('.schedule-badge')).toHaveText('客服');
   await expect(card).toContainText('辅食表重做好了');
   await expect(card.locator('img[data-sandbox-image]')).toHaveCount(1);
-  // It can be quoted for a follow-up, but there is no AI reply in it to report.
+  // It can be quoted for a follow-up, but there is no AI reply in it to rate or report.
   await expect(card.getByRole('button', { name: '引用任务：Roy 辅食表清晰版' })).toBeVisible();
-  await expect(card.getByRole('button', { name: '举报回复' })).toHaveCount(0);
-  await expect(page.locator('.task-report[data-task-id="asked"]').getByRole('button', { name: '举报回复' })).toBeVisible();
+  await expect(card.getByRole('button', { name: '没帮助' })).toHaveCount(0);
+  await expect(page.locator('.task-report[data-task-id="asked"]').getByRole('button', { name: '没帮助' })).toBeVisible();
 
   await expect(page.locator('.boot-cover')).toHaveCount(0);
   for (const width of info.project.name.startsWith('mobile') ? [390, 360] : [1440]) {
