@@ -6,6 +6,8 @@
 
 /** The speech server takes about a minute of 16 kHz audio per request. */
 export const MAX_SECONDS = 60;
+/** A tap shorter than this is taken as a slip, not speech: it is dropped without asking the server. */
+export const MIN_SECONDS = 1;
 const RATE = 16_000;
 
 /** Which microphone recorded, for the voice log: on a phone it should be the phone's own. */

@@ -59,9 +59,24 @@ test("says so when nothing was heard", async ({ page }) => {
   await open(page, { heard: "" });
   const mic = page.getByRole("button", { name: "语音输入" });
   await mic.click();
+  await page.waitForTimeout(1200);
   await page.getByRole("button", { name: /停止录音/ }).click();
   await expect(page.getByRole("alert")).toContainText("没听清");
   await expect(page.getByRole("textbox", { name: "消息", exact: true })).toHaveValue("");
+});
+
+test("a tap shorter than a second is ignored: nothing is sent and nothing is said", async ({ page }) => {
+  const posted = await open(page);
+  const composer = page.locator(".composer"), input = page.getByRole("textbox", { name: "消息", exact: true });
+  await composer.getByRole("button", { name: "语音输入" }).click();
+  await composer.getByRole("button", { name: /停止录音/ }).click();
+  const mic = composer.getByRole("button", { name: "语音输入" });
+  await expect(mic).toBeEnabled();
+  await expect(mic).toHaveAttribute("aria-pressed", "false");
+  await page.waitForTimeout(500);
+  expect(posted).toHaveLength(0);
+  await expect(page.getByRole("alert")).toHaveCount(0);
+  await expect(input).toHaveValue("");
 });
 
 test("has no microphone when no speech recognizer is configured", async ({ page }) => {

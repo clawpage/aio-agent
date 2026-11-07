@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
-import { MAX_SECONDS, startRecording, voiceSupported, type Recording } from "../voice";
+import { MAX_SECONDS, MIN_SECONDS, startRecording, voiceSupported, type Recording } from "../voice";
 import { ComposerIcon } from "./ComposerControls";
 import { locale, t } from "../i18n";
 
@@ -14,7 +14,8 @@ function micError(err: unknown): string {
 }
 
 /**
- * The composer's microphone: tap to talk, tap again to stop (a minute at most).
+ * The composer's microphone: tap to talk, tap again to stop (a minute at most;
+ * under a second is ignored).
  * What was said is added to the draft for a look before sending. Hidden when
  * the browser cannot record, no speech recognizer is configured, or it does not
  * hear the console's language.
@@ -24,6 +25,8 @@ export function VoiceButton({ disabled, onText, onError }: { disabled: boolean; 
   const [state, setState] = useState<"idle" | "starting" | "recording" | "transcribing">("idle");
   const [seconds, setSeconds] = useState(0);
   const recording = useRef<Recording | null>(null);
+  /** When the microphone started listening. */
+  const startedAt = useRef(0);
   const button = useRef<HTMLButtonElement>(null);
   const callbacks = useRef({ onText, onError });
   callbacks.current = { onText, onError };
@@ -40,6 +43,7 @@ export function VoiceButton({ disabled, onText, onError }: { disabled: boolean; 
     const r = recording.current;
     if (!r) return;
     recording.current = null;
+    if (Date.now() - startedAt.current < MIN_SECONDS * 1000) { r.cancel(); setState("idle"); return; }
     setState("transcribing");
     try {
       const { text } = await api.transcribe(r.stop(), r.microphone);
@@ -85,6 +89,7 @@ export function VoiceButton({ disabled, onText, onError }: { disabled: boolean; 
     callbacks.current.onError(null);
     try {
       recording.current = await startRecording();
+      startedAt.current = Date.now();
       setState("recording");
     } catch (err) {
       setState("idle");
