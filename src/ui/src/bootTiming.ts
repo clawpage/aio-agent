@@ -24,7 +24,7 @@ function pageSource(nav: PerformanceNavigationTiming | undefined): string {
 }
 
 /** The build this page is: its entry script's name changes with every build, so a device opening an old saved page shows up. */
-function build(): string {
+export function build(): string {
   const src = document.querySelector<HTMLScriptElement>('script[type="module"][src*="/assets/"]')?.src ?? "";
   return src.split("/").pop()?.replace(/\.js$/, "") ?? "";
 }

@@ -9,7 +9,7 @@ export type Platform = (typeof PLATFORMS)[number];
  * (the control plane records what it sees itself). `auth_view` is the only one
  * accepted without a session.
  */
-export const CLIENT_EVENTS = ["app_open", "page_view", "auth_view", "welcome_card", "file_save", "retry_tap", "boot_timing"] as const;
+export const CLIENT_EVENTS = ["app_open", "page_view", "auth_view", "welcome_card", "file_save", "retry_tap", "boot_timing", "stale_build"] as const;
 export type ClientEvent = (typeof CLIENT_EVENTS)[number];
 
 /** Features the report counts adoption of, in the order the dashboard lists them. */

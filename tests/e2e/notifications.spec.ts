@@ -31,6 +31,8 @@ test("no notification while the console is on screen, and opening it clears the 
   type Scope = { registration: ServiceWorkerRegistration; clients: { matchAll(o: object): Promise<{ url: string }[]> }; location: Location };
   const shown = () => worker.evaluate(async () => (await (self as unknown as Scope).registration.getNotifications()).map((n: Notification) => n.title));
 
+  // Pushes go only to an activated worker (the first opening also fills its cache while installing).
+  await expect.poll(() => worker.evaluate(() => (self as unknown as Scope).registration.active?.state)).toBe("activated");
   await push("while open");
   await page.close();
   // The worker learns of the closed page a moment later.

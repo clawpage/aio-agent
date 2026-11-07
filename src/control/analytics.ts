@@ -29,7 +29,7 @@ const MAX_STRING = 64;
 const GADGET_PREFIX = "gadget:";
 const FAILED = new Set(["failed", "planning_failed", "unknown"]);
 /** Events that are not the account using the product: someone visiting its page, its browser failing to come back. */
-const PASSIVE = new Set(["clawpage_visit", "browser_restore_failed", "login_failed", "boot_timing"]);
+const PASSIVE = new Set(["clawpage_visit", "browser_restore_failed", "login_failed", "boot_timing", "stale_build"]);
 /** Throttled events remembered at most this many keys (`trackOnce`). */
 const ONCE_KEYS = 5000;
 
