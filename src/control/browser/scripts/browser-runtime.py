@@ -38,6 +38,7 @@ import argparse
 import fcntl
 import json
 import os
+import posixpath
 import re
 import shutil
 import signal
@@ -46,7 +47,7 @@ import tempfile
 import time
 import uuid
 from typing import Any, Iterable, Mapping, Sequence
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
 
 # ---------------------------------------------------------------- constants
 
@@ -109,6 +110,11 @@ NODE_CANDIDATES = (
 # A page we are willing to re-open. Everything else is reported, never guessed.
 RESTORABLE_SCHEMES = ("http", "https")
 RESTORABLE_LITERAL = ("about:blank",)
+# A local page the agent opened from the workspace (a page it wrote, previewed
+# before publishing) lives on the persistent workspace volume and holds no
+# sign-ins, so it is re-opened like a web page. Blocking on it kept the whole
+# container running for days (verified real case). Other file:// pages still block.
+WORKSPACE_FILE_ROOT = "/home/gem/workspace/"
 # Chromium's own empty pages. AIO reports `chrome://new-tab-page/` while CDP
 # reports `chrome://newtab/` for the *same* default tab, so the two are
 # normalised to `about:blank` before any strict tab matching. Without this the
@@ -203,7 +209,21 @@ def classify_url(url: str) -> tuple[bool, str]:
     if not match:
         return False, ""
     scheme = match.group(1).lower()
+    if scheme == "file":
+        return is_workspace_file(trimmed), scheme
     return scheme in RESTORABLE_SCHEMES, scheme
+
+
+def is_workspace_file(url: str) -> bool:
+    """A file:// URL with no host whose path stays inside the workspace (no `..` escape)."""
+    try:
+        parts = urlsplit(url)
+    except ValueError:
+        return False
+    if parts.netloc not in ("", "localhost"):
+        return False
+    path = posixpath.normpath(unquote(parts.path))
+    return (path + "/").startswith(WORKSPACE_FILE_ROOT) and path + "/" != WORKSPACE_FILE_ROOT
 
 
 def redact_urls(text: str) -> str:

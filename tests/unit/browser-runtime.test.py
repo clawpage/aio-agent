@@ -472,7 +472,14 @@ def test_classify_url_and_origin() -> None:
     assert_eq(rt.classify_url("about:blank"), (True, "about"), "about:blank 可恢复")
     assert_eq(rt.classify_url("chrome://settings"), (False, "chrome"), "chrome:// 不可恢复")
     assert_eq(rt.classify_url("devtools://x"), (False, "devtools"), "devtools:// 不可恢复")
-    assert_eq(rt.classify_url("file:///etc/passwd"), (False, "file"), "file:// 不可恢复")
+    assert_eq(rt.classify_url("file:///etc/passwd"), (False, "file"), "工作区外的 file:// 不可恢复")
+    # A page the agent wrote in the workspace persists across a stop: it must not pin the container.
+    assert_eq(rt.classify_url("file:///home/gem/workspace/tasks/t1/csv-notes/index.html"), (True, "file"), "工作区内的 file:// 可恢复")
+    assert_eq(rt.classify_url("file://localhost/home/gem/workspace/a%20b.html"), (True, "file"), "localhost 与转义路径可恢复")
+    assert_eq(rt.classify_url("file:///home/gem/workspace/../.ssh/id_rsa"), (False, "file"), "用 .. 逃出工作区不可恢复")
+    assert_eq(rt.classify_url("file:///home/gem/workspace/"), (False, "file"), "工作区根目录不可恢复")
+    assert_eq(rt.classify_url("file:///home/gem/workspace-other/x.html"), (False, "file"), "同前缀的其他目录不可恢复")
+    assert_eq(rt.classify_url("file://host/home/gem/workspace/x.html"), (False, "file"), "带主机名的 file:// 不可恢复")
     assert_eq(rt.classify_url(""), (False, ""), "空 URL 不可恢复")
     assert_eq(rt.classify_url(None), (False, ""), "非字符串不可恢复")
     # A javascript: URL is exactly the case where a naive restore would run
