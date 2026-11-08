@@ -3,7 +3,7 @@ import {usageReport} from '../usage.js';
 import { DailyLimitError } from '../quota.js';
 import { isMember, publicPayload } from "../auth/policy.js";
 import {readSoul,writeSoul,SoulError,DEFAULT_SOUL,SOUL_MAX_BYTES} from '../soul.js';
-import { HTML_PREVIEW_CSP, htmlPreviewDocument } from "../documents/html.js";
+import { HTML_PREVIEW_CSP, HTML_PREVIEW_PREFIX } from "../documents/html.js";
 import express, { type Request, type Response, type NextFunction, type Router } from "express";
 import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import { pathToFileURL } from "node:url";
@@ -2631,17 +2631,29 @@ export function createApiRouter(context: AppContext): Router {
       if (!/\.html?$/i.test(target)) {
         res.status(400).json({error:"unsupported",message:t().http.files.htmlOnly}); return;
       }
-      const result = await context.documents.text(target);
-      if (result.truncated) {
-        res.status(413).json({error:"too_large",message:t().http.files.pageTooLarge}); return;
-      }
-      res.setHeader("Content-Security-Policy", `${HTML_PREVIEW_CSP}; frame-ancestors ${cfg.primaryOrigins.join(" ")}`);
-      res.setHeader("Content-Type", "text/html; charset=utf-8");
-      res.setHeader("X-Content-Type-Options", "nosniff");
-      res.setHeader("Cache-Control", "no-store");
-      res.setHeader("Referrer-Policy", "no-referrer");
-      res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
-      res.end(htmlPreviewDocument(result.text));
+      // Streamed whole, so a page with its pictures inlined shows here in the person's own
+      // browser instead of being sent to wake and load in the sandbox's.
+      const controller = new AbortController();
+      const cancel = () => controller.abort();
+      res.on("close", cancel);
+      try {
+        let page;
+        try { page = await context.documents.html(target, controller.signal); } catch (err) {
+          if (err instanceof DocumentError && err.code === "too_large") { res.status(413).json({error:"too_large",message:t().http.files.pageTooLarge}); return; }
+          throw err;
+        }
+        res.setHeader("Content-Security-Policy", `${HTML_PREVIEW_CSP}; frame-ancestors ${cfg.primaryOrigins.join(" ")}`);
+        res.setHeader("Content-Type", "text/html; charset=utf-8");
+        res.setHeader("X-Content-Type-Options", "nosniff");
+        res.setHeader("Cache-Control", "no-store");
+        res.setHeader("Referrer-Policy", "no-referrer");
+        res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+        res.write(HTML_PREVIEW_PREFIX);
+        await pipeline(Readable.fromWeb(page.body as import("node:stream/web").ReadableStream), res);
+      } catch (err) {
+        if (res.headersSent || controller.signal.aborted) { res.destroy(); return; }
+        throw err;
+      } finally { res.off("close", cancel); }
     }),
   );
 

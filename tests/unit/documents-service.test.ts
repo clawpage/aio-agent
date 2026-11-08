@@ -213,6 +213,20 @@ describe("DocumentService path and revision handling", () => {
       await expect(svc.media(`${ROOT}/a.mp4`,undefined,false,new AbortController().signal)).rejects.toMatchObject({status:502});expect(cancel).toHaveBeenCalled();
     } finally {fetcher.mockRestore();}
   });
+  it("streams a whole HTML page from its resolved path, up to the preview cap", async () => {
+    const big = "<h1>Menu</h1>" + "x".repeat(600 * 1024);
+    const { svc } = service(baseHandler({ realPath: `${ROOT}/real/menu.html`, size: String(big.length) }));
+    const fetcher = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(big, { status: 200 }));
+    try {
+      const page = await svc.html(`${ROOT}/menu.html`);
+      expect(page.size).toBe(big.length);
+      expect(await new Response(page.body).text()).toBe(big);
+      expect(String(fetcher.mock.calls[0]![0])).toBe(`http://sandbox.test/v1/file/download?path=${encodeURIComponent(`${ROOT}/real/menu.html`)}`);
+    } finally { fetcher.mockRestore(); }
+    await expect(service(baseHandler({ realPath: "/etc/passwd" })).svc.html(`${ROOT}/link.html`)).rejects.toMatchObject({ code: "not_found" });
+    await expect(service(baseHandler({ realPath: `${ROOT}/huge.html`, size: String(21 * 1024 * 1024) })).svc.html(`${ROOT}/huge.html`)).rejects.toMatchObject({ code: "too_large", status: 413 });
+  });
+
   it("refuses a path whose realpath escapes the workspace", async () => {
     const { svc } = service(baseHandler({ realPath: "/etc/passwd" }));
     await expect(svc.render(`${ROOT}/link.docx`)).rejects.toMatchObject({ code: "not_found" });

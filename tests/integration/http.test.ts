@@ -1257,7 +1257,10 @@ describe("document endpoints", () => {
   it("serves HTML only with origin isolation, no network and size/path guards", async () => {
     const {cookie}=await login(h);
     const {cookie:wsCookie}=await bootstrapWorkspace(h);
-    const text=vi.spyOn(h.ctx.documents,"text").mockResolvedValue({text:"<h1>Demo</h1><script>document.title='demo'</script>",size:65,truncated:false});
+    // Streamed whole: no inline cap, so a page with its pictures inlined shows in the person's own browser.
+    const page=(body:string)=>({size:body.length,body:new Response(body).body!});
+    const big="<h1>Demo</h1><script>document.title='demo'</script>"+"x".repeat(600*1024);
+    const html=vi.spyOn(h.ctx.documents,"html").mockImplementation(async()=>page(big));
     try {
       expect((await h.request("/api/documents/html?path=/home/gem/workspace/demo.html",{headers:{cookie}})).status).toBe(404);
       expect((await h.request("/api/documents/html?path=/home/gem/workspace/demo.html",{host:"workspace"})).status).toBe(401);
@@ -1268,13 +1271,15 @@ describe("document endpoints", () => {
       expect(csp).toContain("sandbox allow-scripts");expect(csp).not.toContain("allow-same-origin");
       expect(csp).toContain("connect-src 'none'");expect(csp).toContain("default-src 'none'");
       expect(res.headers.get("cache-control")).toBe("no-store");
-      expect(await res.text()).toContain("<h1>Demo");
+      const body=await res.text();
+      expect(body.startsWith('<!doctype html><meta charset="utf-8">')).toBe(true);
+      expect(body).toContain("<h1>Demo");expect(body.length).toBeGreaterThan(600*1024);
       for(const path of ["/etc/secret.html","/home/gem/workspace/a.svg"]){
         expect((await h.request(`/api/documents/html?path=${encodeURIComponent(path)}`,{host:"workspace",headers:{cookie:wsCookie}})).status).toBe(400);
       }
-      text.mockResolvedValue({text:"partial",size:999999,truncated:true});
+      html.mockRejectedValue(new DocumentError("too_large","too large",413));
       expect((await h.request("/api/documents/html?path=/home/gem/workspace/demo.html",{host:"workspace",headers:{cookie:wsCookie}})).status).toBe(413);
-    } finally {text.mockRestore();}
+    } finally {html.mockRestore();}
   });
   it("serves a web picture for a message only to a signed-in console, fetched by the sandbox", async () => {
     const { cookie } = await login(h);

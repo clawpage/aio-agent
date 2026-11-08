@@ -2,7 +2,7 @@ import { InlineLoading } from "./Brand";
 import { createPortal } from "react-dom";
 import { PopupSurface } from "./PopupMotion";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { api, ApiError } from "../api";
+import { api } from "../api";
 import { onDownloadClick } from "../saveFile";
 import { ZoomableImage } from "./ZoomableImage";
 import { cachedImage, holdImage, retryImage } from "../imageCache";
@@ -29,7 +29,8 @@ import { extractFileRefs } from "../fileRefs";
  * Images use typed blobs; Office/PDF are rasterised; Markdown is sanitized.
  * HTML uses an authenticated endpoint with CSP sandbox plus a sandboxed iframe
  * (scripts allowed, same-origin/storage/parent access and network disallowed).
- * An HTML page too large to inline opens in full in the sandbox's real browser.
+ * An HTML page, however large, is streamed whole into that frame in the person's own browser; its
+ * source text is fetched only when they ask for it.
  * Plain text is escaped and all text previews are capped. Downloads remain
  * attachment-only and preserve the original bytes.
  */
@@ -46,8 +47,7 @@ interface Props {
   actions?: React.ReactNode;
 }
 
-/** "browser": an HTML page over the inline cap, shown in the sandbox browser instead. */
-type Phase = "loading" | "ready" | "error" | "unsupported" | "browser";
+type Phase = "loading" | "ready" | "error" | "unsupported";
 
 export function FilePreview({ path: initialPath, onClose, onOpenLink, onOpenInBrowser, onConvert, actions }: Props) {
   const [path, setPath] = useState(initialPath);
@@ -78,7 +78,8 @@ export function FilePreview({ path: initialPath, onClose, onOpenLink, onOpenInBr
   const [pageFailed, setPageFailed] = useState(false);
   const [attempt, setAttempt] = useState(0);
   const [browserNote, setBrowserNote] = useState<string | null>(null);
-  const autoOpened = useRef<string | null>(null);
+  /** Why an HTML page's source cannot be shown (too large to show as text), once asked for. */
+  const [sourceError, setSourceError] = useState<string | null>(null);
   const closeRef = useRef<HTMLButtonElement | null>(null);
   const dialogRef = useRef<HTMLDivElement | null>(null);
   const closeLatest = useRef(onClose);
@@ -133,6 +134,7 @@ export function FilePreview({ path: initialPath, onClose, onOpenLink, onOpenInBr
     setText(null);
     setHtmlUrl(null);
     setTextTruncated(false);
+    setSourceError(null);
     setPage(1);
     setPageCount(0);
     setTotalPages(0);
@@ -171,17 +173,20 @@ export function FilePreview({ path: initialPath, onClose, onOpenLink, onOpenInBr
           }
           return;
         }
+        if (html) {
+          // The page itself, straight from the workspace origin: no text round trip first.
+          const ticket = await api.ticket(api.documentHtmlUrl(path));
+          if (controller.signal.aborted) return;
+          setHtmlUrl(ticket.url);
+          setPhase("ready");
+          return;
+        }
         if (kind === "text") {
           // The signal is passed so the in-flight request is cancelled when the
           // dialog switches files or retries; the aborted check below stops a
           // late resolution from writing into the new dialog either way.
           const result = await api.documentText(path, controller.signal);
           if (controller.signal.aborted) return;
-          if (html && !result.truncated) {
-            const ticket = await api.ticket(api.documentHtmlUrl(path));
-            if (controller.signal.aborted) return;
-            setHtmlUrl(ticket.url);
-          }
           setText(result.text);
           setTextTruncated(result.truncated);
           setPhase("ready");
@@ -198,10 +203,6 @@ export function FilePreview({ path: initialPath, onClose, onOpenLink, onOpenInBr
         // An aborted request rejects with an AbortError; that is the expected
         // result of switching files, not a failure to show the user.
         if (controller.signal.aborted) return;
-        if (html && err instanceof ApiError && err.status === 413) {
-          setPhase("browser");
-          return;
-        }
         setError(err instanceof Error ? err.message : String(err));
         setPhase("error");
       }
@@ -231,12 +232,18 @@ export function FilePreview({ path: initialPath, onClose, onOpenLink, onOpenInBr
     }
     catch (err) { setBrowserNote(err instanceof Error ? err.message : String(err)); }
   };
-  // A page too large to inline goes straight to the browser, once per file.
+  // An HTML page's source, only when asked for.
   useEffect(() => {
-    if (phase !== "browser" || autoOpened.current === path) return;
-    autoOpened.current = path;
-    void openInBrowser();
-  }, [phase, path]);
+    if (!html || !sourceView || phase !== "ready" || text !== null || sourceError) return;
+    const controller = new AbortController();
+    api.documentText(path, controller.signal).then((result) => {
+      setText(result.text);
+      setTextTruncated(result.truncated);
+    }, (err) => {
+      if (!controller.signal.aborted) setSourceError(err instanceof Error ? err.message : String(err));
+    });
+    return () => controller.abort();
+  }, [html, sourceView, phase, text, sourceError, path]);
 
   return createPortal(
     <PopupSurface
@@ -267,7 +274,7 @@ export function FilePreview({ path: initialPath, onClose, onOpenLink, onOpenInBr
           <button className="ghost" aria-pressed={!sourceView} onClick={() => { if (html && sourceView) retry(); else setSourceView(false); }}>{html ? t.files.preview.page : t.files.preview.read}</button>
           <button className="ghost" aria-pressed={sourceView} onClick={() => setSourceView(true)}>{html ? t.files.preview.source : t.files.preview.raw}</button>
         </div>}
-        <div className={`file-preview-body ${html && !sourceView && !textTruncated ? "file-preview-html-body" : ""}`}
+        <div className={`file-preview-body ${html && !sourceView ? "file-preview-html-body" : ""}`}
           onPointerDown={(event) => { pointer.current = event.pointerType; }}
           onClick={photo ? (event) => {
             // Around the photo: a mouse click closes it, a tap shows or hides the bars.
@@ -296,11 +303,16 @@ export function FilePreview({ path: initialPath, onClose, onOpenLink, onOpenInBr
             </div>
           )}
 
-          {phase === "browser" && (
-            <div className="file-preview-note" role="status" data-testid="file-preview-browser-note">
-              <p>{t.files.preview.tooLarge}</p>
-              {browserNote && <p className="muted tiny">{browserNote}</p>}
+          {phase === "ready" && html && !sourceView && htmlUrl && (
+            <div className="file-preview-text file-preview-html">
+              <iframe title={t.files.preview.htmlFrame(name)} data-testid="file-preview-html" sandbox="allow-scripts" referrerPolicy="no-referrer" src={htmlUrl} />
             </div>
+          )}
+
+          {phase === "ready" && html && sourceView && text === null && (
+            sourceError
+              ? <div className="banner error" role="alert"><span>{sourceError}</span></div>
+              : <p><InlineLoading label={t.files.preview.loading} /></p>
           )}
 
           {phase === "ready" && kind === "image" && imageUrl && (
@@ -325,14 +337,14 @@ export function FilePreview({ path: initialPath, onClose, onOpenLink, onOpenInBr
             </div>
           )}
 
-          {phase === "ready" && kind === "text" && text !== null && (
-            <div className={`file-preview-text ${html && !sourceView && !textTruncated ? "file-preview-html" : ""}`}>
+          {phase === "ready" && kind === "text" && text !== null && (!html || sourceView) && (
+            <div className="file-preview-text">
               {textTruncated && (
                 <p className="banner warn" role="status">
                   {t.files.preview.textTruncated}
                 </p>
               )}
-              {html && !sourceView && !textTruncated && htmlUrl ? <iframe title={t.files.preview.htmlFrame(name)} data-testid="file-preview-html" sandbox="allow-scripts" referrerPolicy="no-referrer" src={htmlUrl} /> : markdown && !sourceView ? <article className="document-reading" data-testid="file-preview-markdown">
+              {markdown && !sourceView ? <article className="document-reading" data-testid="file-preview-markdown">
                 <Markdown source={text} document onOpenLink={url => void openLink(url)} onOpenFile={openFile}/>
                 {refs.length > 0 && <div className="file-cards">{refs.map(ref => <FileCard key={ref.path} {...ref} onOpen={openFile}/>)}</div>}
               </article> : <pre data-testid="file-preview-text">{text}</pre>}
@@ -382,6 +394,7 @@ export function FilePreview({ path: initialPath, onClose, onOpenLink, onOpenInBr
             </div>
           )}
           {truncated && pageCount > 0 && <span className="muted tiny">{t.files.preview.truncated}</span>}
+          {browserNote && <span className="muted tiny" role="status">{browserNote}</span>}
           <span className="spacer" />
           {onConvert && (kind === "word" || kind === "excel" || kind === "ppt") && (
             <button type="button" className="ghost" onClick={() => onConvert(path, "pdf")}>
@@ -389,7 +402,7 @@ export function FilePreview({ path: initialPath, onClose, onOpenLink, onOpenInBr
             </button>
           )}
           {actions}
-          {html && (phase === "ready" || phase === "browser") && (
+          {html && phase === "ready" && (
             <button type="button" className="ghost" onClick={() => void openInBrowser()} data-testid="file-preview-open-browser">
               {t.files.preview.openInBrowser}
             </button>

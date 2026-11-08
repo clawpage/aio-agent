@@ -32,7 +32,6 @@ export const files: typeof zh = {
     retry: "重試",
     unsupported: "該格式暫不支援線上預覽。",
     unsupportedHint: "你可以直接下載原檔案，或在工作區「檔案」頁對它有轉換入口時把它轉換成可預覽的格式。",
-    tooLarge: "頁面較大，超過內嵌預覽上限，改用沙箱瀏覽器完整開啟。",
     emptyFile: "檔案是空的（0 位元組）",
     loadFailed: "無法載入檔案（可能已被移動或刪除）",
     openingInBrowser: "正在沙箱瀏覽器中開啟…",

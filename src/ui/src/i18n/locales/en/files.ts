@@ -33,7 +33,6 @@ export const files: typeof zh = {
     retry: "Retry",
     unsupported: "This format can't be previewed here yet.",
     unsupportedHint: "Download the original file, or convert it to a previewable format from the Files page in the workspace if it offers one.",
-    tooLarge: "This page is too large to preview inline, so it opens in full in the sandbox browser.",
     emptyFile: "The file is empty (0 bytes)",
     loadFailed: "Couldn't load the file (it may have been moved or deleted)",
     openingInBrowser: "Opening in the sandbox browser…",

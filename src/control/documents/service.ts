@@ -5,6 +5,7 @@ import type { Config } from "../config.js";
 import type { Logger } from "../../common/logger.js";
 import type { SandboxContainer } from "../sandbox/container.js";
 import { looksLikeSvg } from "../../common/svg.js";
+import { HTML_PREVIEW_MAX_BYTES } from "./html.js";
 import { t, type Messages } from "../i18n/index.js";
 import {
   documentKind,
@@ -1056,6 +1057,24 @@ print("venv" if venv_python else "novenv")
     } finally {
       release();
     }
+  }
+
+  /** An HTML page streamed whole for the isolated preview (no inline cap; HTML_PREVIEW_MAX_BYTES at most). */
+  async html(validatedPath: string, signal?: AbortSignal): Promise<{ size: number; body: ReadableStream<Uint8Array> }> {
+    const stat = await this.stat(validatedPath);
+    if (!stat.exists) throw new DocumentError("not_found", t().documents.notFound, 404);
+    if (!stat.isFile) throw new DocumentError("not_a_file", t().documents.notAFile, 400);
+    if (stat.size > HTML_PREVIEW_MAX_BYTES) {
+      throw new DocumentError("too_large", t().documents.textTooLarge(formatBytes(stat.size), formatBytes(HTML_PREVIEW_MAX_BYTES)), 413);
+    }
+    // The resolved path, as in text(): a symlink out of the workspace is never followed.
+    const res = await this.#container.fetch(`/v1/file/download?path=${encodeURIComponent(stat.realPath)}`,
+      { method: "GET", signal: AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(5 * 60_000)]) });
+    if (!res.ok || !res.body) {
+      await res.body?.cancel();
+      throw new DocumentError("not_found", t().documents.readFailed, 502);
+    }
+    return { size: stat.size, body: res.body as ReadableStream<Uint8Array> };
   }
 
   /** Read a small text file for inline display; larger files are download-only. */

@@ -31,7 +31,6 @@ export const files = {
     retry: "重试",
     unsupported: "该格式暂不支持在线预览。",
     unsupportedHint: "你可以直接下载原文件，或在工作区「文件」页对它有转换入口时把它转换成可预览的格式。",
-    tooLarge: "页面较大，超过内联预览上限，改用沙箱浏览器完整打开。",
     emptyFile: "文件是空的（0 字节）",
     loadFailed: "无法加载文件（可能已被移动或删除）",
     openingInBrowser: "正在沙箱浏览器中打开…",

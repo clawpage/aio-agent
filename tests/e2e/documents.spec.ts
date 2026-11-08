@@ -735,7 +735,7 @@ test("Markdown deliverables have readable titles, formatted preview, source togg
   await expect(dialog).toHaveCount(0);
 });
 
-test("Markdown preview cannot execute HTML and truncated HTML stays source",async({page})=>{
+test("Markdown preview cannot execute HTML and truncated HTML source says it is cut",async({page})=>{
   await mockDocuments(page);
   const content='# 安全文档\n\n<script>window.previewPwned=1</script><form action="https://evil.example"><input name="secret"><button>发送秘密</button></form><iframe src="https://evil.example"></iframe><img src=x onerror="window.previewPwned=1"><a href="javascript:alert(1)">危险链接</a>\n\n**可阅读内容**';
   await page.route('**/api/documents/text**',r=>r.fulfill({json:{text:content,truncated:true}}));
@@ -747,8 +747,14 @@ test("Markdown preview cannot execute HTML and truncated HTML stays source",asyn
   expect(await page.evaluate(()=>(window as any).previewPwned)).toBeUndefined();
   await expect(dialog.getByRole('status')).toContainText('仅显示开头部分');
   await dialog.getByRole('button',{name:'关闭预览'}).click();
+  // An HTML page always opens as the page (streamed whole); its source, asked for, says it is cut.
+  await page.route('**/api/workspace/ticket',r=>r.fulfill({json:{url:'/api/documents/html?path=source.html'}}));
+  await page.route('**/api/documents/html**',r=>r.fulfill({headers:{'content-type':'text/html; charset=utf-8','content-security-policy':HTML_PREVIEW_CSP},body:htmlPreviewDocument('<h1>网页</h1>')}));
   await page.getByRole('button',{name:'预览 网页源码',exact:true}).click();
+  await expect(page.frameLocator('[data-testid="file-preview-html"]').getByRole('heading',{name:'网页'})).toBeVisible();
+  await page.getByRole('dialog').getByRole('button',{name:'源码',exact:true}).click();
   await expect(page.getByTestId('file-preview-text')).toContainText('<script>');
+  await expect(page.getByRole('dialog').getByRole('status')).toContainText('仅显示开头部分');
   await expect(page.getByTestId('file-preview-markdown')).toHaveCount(0);
 });
 
