@@ -48,6 +48,9 @@ const openingTabs = new Map();
 /** A finished task's tabs stay this long for a follow-up, then close on their own. */
 const FINISHED_TTL_MS = Number(process.env.AIO_TABS_FINISHED_TTL_MS || 10 * 60 * 1000);
 const HUMAN_WAIT_MS = Number(process.env.AIO_TABS_HUMAN_WAIT_MS || 30 * 60 * 1000);
+// Same words as HUMAN_WAIT_HINT in tabs.ts: a code-mode exec cell yields every 30 seconds and the
+// agent used to poll it with 1-10 second waits, each a full model call over the whole context.
+const HUMAN_WAIT_HINT = 'While it waits, stay in this one call: it returns by itself as soon as the user hands back or sends a message, and every check you make meanwhile is a full model call that achieves nothing. If you call it from a code exec cell, call nothing else in that cell and start the cell with `// @exec: {"yield_time_ms": 1800000}`; if the cell yields anyway, call wait with yield_time_ms 1800000 again. Do not poll with short waits, sleep or snapshots meanwhile.';
 /** No browser tool may hang a task: past this it fails with a reason (waiting for a person excepted). */
 const TOOL_DEADLINE_MS = Number(process.env.AIO_TABS_TOOL_DEADLINE_MS || 90 * 1000);
 /** A page that cannot evaluate `1` this fast, twice, is hung (a crashed or starved renderer). */
@@ -1350,7 +1353,7 @@ const TOOLS = {
   },
   browser_request_human: {
     mode: 'write',
-    description: 'Ask the user to act in the browser themselves and wait for them to hand it back (up to 30 minutes), only for what you cannot do even with their written permission: a CAPTCHA you could not pass, a QR-code sign-in, a password not saved in Passwords, a code only they have, or a page that needs their judgment. Steps they authorized in the conversation (typing a code, confirming, paying, sending) you do yourself. reason tells the user in one sentence what to do.',
+    description: 'Ask the user to act in the browser themselves and wait for them to hand it back (up to 30 minutes), only for what you cannot do even with their written permission: a CAPTCHA you could not pass, a QR-code sign-in, a password not saved in Passwords, a code only they have, or a page that needs their judgment. Steps they authorized in the conversation (typing a code, confirming, paying, sending) you do yourself. reason tells the user in one sentence what to do. ' + HUMAN_WAIT_HINT,
     input: { reason: str, tab: ownTabArg }, required: ['reason'],
     run: async (ctx, a, signal) => {
       const tab = await resolveTab(ctx, a.tab, 'write', false, true);
@@ -1372,7 +1375,7 @@ const TOOLS = {
   },
   browser_login: {
     mode: 'write',
-    description: 'Sign in to the current site with the password manager. First use browser_snapshot to see the sign-in form clearly, then write steps: starting after a fresh reload of the current page, open the sign-in entry, fill {{username}} into the account box, fill {{password}} into the password box (it must be a type=password box), and submit. The system substitutes the account and password the user saved for the placeholders and runs the steps; you never see the values. If the user saved Google sign-in for this site, you are told to click the Google button and which account to choose. If nothing has been saved, the user is asked to fill it in (waiting up to 30 minutes). When it returns, read the page and call browser_login_report to report whether sign-in succeeded.',
+    description: 'Sign in to the current site with the password manager. First use browser_snapshot to see the sign-in form clearly, then write steps: starting after a fresh reload of the current page, open the sign-in entry, fill {{username}} into the account box, fill {{password}} into the password box (it must be a type=password box), and submit. The system substitutes the account and password the user saved for the placeholders and runs the steps; you never see the values. If the user saved Google sign-in for this site, you are told to click the Google button and which account to choose. If nothing has been saved, the user is asked to fill it in (waiting up to 30 minutes). When it returns, read the page and call browser_login_report to report whether sign-in succeeded. ' + HUMAN_WAIT_HINT,
     input: {
       steps: {
         type: 'array',

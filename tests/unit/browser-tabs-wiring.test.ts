@@ -5,7 +5,7 @@ import { createHash } from "node:crypto";
 import { AgentManager } from "../../src/control/codex/manager.js";
 import { openDb, type Db } from "../../src/control/db.js";
 import { Logger } from "../../src/common/logger.js";
-import { handBackToAgent, pruneBeforeSnapshot, TAB_POLICY, tabMcpServers, tabThreadConfig, type BrowserTask, type TabRecord } from "../../src/control/browser/tabs.js";
+import { handBackToAgent, HUMAN_WAIT_HINT, pruneBeforeSnapshot, TAB_POLICY, tabMcpServers, tabThreadConfig, type BrowserTask, type TabRecord } from "../../src/control/browser/tabs.js";
 import type { BrowserRuntimeLike } from "../../src/control/browser/lifecycle.js";
 import { FakeCodex, testConfig } from "../helpers/harness.js";
 import { KB_POLICY } from "../../src/control/kb.js";
@@ -13,7 +13,7 @@ import { SCHEDULE_POLICY } from "../../src/control/scheduleTool.js";
 import { IMAGE_POLICY } from "../../src/control/imageTool.js";
 import type { Config } from "../../src/control/config.js";
 import { macNativeMcpServers, macNativeThreadServers } from "../../src/control/macNative.js";
-import { USER_BROWSER_POLICY } from "../../src/control/userBrowser.js";
+import { REQUEST_HUMAN_TOOL, USER_BROWSER_POLICY } from "../../src/control/userBrowser.js";
 
 class RecordingCodex extends FakeCodex {
   threadOpts: Array<{ browserTask?: BrowserTask; developerInstructions?: string }> = [];
@@ -380,4 +380,15 @@ it("lets the user's written go-ahead outrank handing the page over, in both brow
   expect(TAB_POLICY).toMatch(/Never ask for, type or read passwords/);
   expect(TAB_POLICY).not.toMatch(/Do not ask for passwords or verification codes in the conversation/);
   expect(USER_BROWSER_POLICY).toMatch(/never type a password yourself, never read password boxes, never ask the user for the password/);
+});
+
+it("every tool that waits for the person tells the agent to stay in the call rather than poll it", () => {
+  // Codex runs tools in exec cells that yield after 30 seconds; polling the wait in 1-10
+  // second steps re-read about 220k tokens each time while the person typed an SMS code.
+  const script = fs.readFileSync(path.resolve(import.meta.dirname, "../../src/control/browser/scripts/tab-server.cjs"), "utf8");
+  expect(script).toContain(`const HUMAN_WAIT_HINT = '${HUMAN_WAIT_HINT}';`);
+  expect(script.match(/' \+ HUMAN_WAIT_HINT,/g)).toHaveLength(2); // browser_request_human and browser_login
+  expect(TAB_POLICY).toContain(HUMAN_WAIT_HINT);
+  expect(REQUEST_HUMAN_TOOL.description).toContain(HUMAN_WAIT_HINT);
+  expect(HUMAN_WAIT_HINT).toContain('"yield_time_ms": 1800000');
 });

@@ -10,7 +10,7 @@ import { getUser } from "./auth/owner.js";
 import { resolveRequest } from "./http/security.js";
 import { endSocket } from "./http/proxy.js";
 import type { DeviceLinks, Tunnel, TunnelChannel } from "./deviceLink.js";
-import { TAB_TASK_HEADER } from "./browser/tabs.js";
+import { HUMAN_WAIT_HINT, TAB_TASK_HEADER } from "./browser/tabs.js";
 import { USER_BROWSER_TOOLS } from "./userBrowserTools.js";
 import { siteCovers, siteOfUrl, type Vault } from "./vault.js";
 import { CLEAR_PASSWORDS_SCRIPT, loginSteps, MAX_MAC_LOGIN_TRIES, runMacLogin } from "./macLogin.js";
@@ -45,11 +45,11 @@ export const USER_BROWSER_INSTRUCTIONS =
     "The AI's own Google Chrome on the user's Mac: a profile of its own that keeps the sign-ins the user made in it, running in the background (it never covers the user's screen); the user watches its pages from the console. This is not the sandbox browser (aio_tabs). Start with list_pages; when a call reports that this browser is unavailable, use aio_tabs instead. Open your own pages with new_page and pass their pageId on every call.";
 
 /** The gateway's own tool: wait for the person to do a step in the task's page. */
-const REQUEST_HUMAN_TOOL = {
+export const REQUEST_HUMAN_TOOL = {
   name: "request_human",
   title: "Ask the user to act in the page",
   description:
-    "Ask the user to do a step themselves in the page this task works in, only for what you cannot do even with their written permission (no saved account, a CAPTCHA you could not pass, a QR-code sign-in, a code only they have). Steps they authorized in the conversation you do yourself. The task card shows the request and the page; the user takes it over, does the step, and hands it back. This call waits until they do (up to 30 minutes); then read the page again before continuing. Use it instead of ending your turn to ask them: a turn that ends asking for a step in the page leaves the task waiting for a reply.",
+    "Ask the user to do a step themselves in the page this task works in, only for what you cannot do even with their written permission (no saved account, a CAPTCHA you could not pass, a QR-code sign-in, a code only they have). Steps they authorized in the conversation you do yourself. The task card shows the request and the page; the user takes it over, does the step, and hands it back. This call waits until they do (up to 30 minutes); then read the page again before continuing. Use it instead of ending your turn to ask them: a turn that ends asking for a step in the page leaves the task waiting for a reply. " + HUMAN_WAIT_HINT,
   inputSchema: {
     type: "object",
     properties: { reason: { type: "string", description: "What the user should do, in one short sentence in the user's language." } },
