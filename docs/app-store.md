@@ -114,3 +114,4 @@ The task browser can visit arbitrary websites on the user's request, so the age 
 - 原生代码与 0.1.3 (0.1.3.2) 相同，只改版本号：上架版本不能换截图，新截图随新版本提交。
 - 构建 `0.1.4 (0.1.4.1)`，`altool` 上传成功（Delivery UUID `cf0b5795-3bdc-4713-86e2-a56c66011ca5`）。
 - Connect 新建版本 0.1.4（元数据从 0.1.3 复制），四种语言的 6.9 英寸截图换成 `scripts/store-shots.mts` 生成的五张海报，填了四语言「此版本的新增内容」。
+- 2026-11-07 提审：挂上构建 0.1.4.1，审核联系人与审核账号沿用 0.1.3（逐项回读一致），提交后状态 `WAITING_FOR_REVIEW`；审核通过后自动上架（`AFTER_APPROVAL`）。
