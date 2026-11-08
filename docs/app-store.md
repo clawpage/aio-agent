@@ -22,7 +22,7 @@ iOS App 是 `src/ui/tauri` 的 Tauri 壳（见该目录 README），加载线上
 | 只支持 iPhone（`TARGETED_DEVICE_FAMILY = 1`）：不需要 iPad 截图；iPad 上以兼容模式运行 | `gen/apple/project.yml` |
 | 主屏名称与权限说明四种语言：英/西 Clawpage，中文一站；麦克风、相机、存入相册 | `gen/apple/Localization/<语言>.lproj/InfoPlist.strings` |
 | 1024 图标不透明（App Store 拒收带 alpha 的图标） | `Assets.xcassets/AppIcon.appiconset/AppIcon-512@2x.png` |
-| 版本 `0.1.3`，构建号每次上传递增（`--build-number`）；改版本同时改 `project.yml` 与 `Info.plist` 里的版本号 | `tauri.conf.json` `version` |
+| 版本 `0.1.4`，构建号每次上传递增（`--build-number`）；改版本同时改 `project.yml` 与 `Info.plist` 里的版本号 | `tauri.conf.json` `version` |
 
 改 `project.yml` 后在 `gen/apple` 跑 `xcodegen generate`；重新 `tauri ios init` 会覆盖 `gen/`，以上各项要重新放回。
 
@@ -108,3 +108,9 @@ The task browser can visit arbitrary websites on the user's request, so the age 
 
 - 原生改动（`DeviceBrowser.swift`）：App 在前台时不显示通知，变为活跃时清掉已送达的通知；`aioHaptic` 桥按控制台的请求震动（`HapticHandler`），见 `docs/FEATURES.md`「手机通知」「语音输入」。
 - `altool` 上传成功（Delivery UUID `86924b5e-daa2-478e-a8b6-42dceeda90f3`），只上传，未加入外部测试组或提交 Beta 审核；未在真机上验过震动和清通知。
+
+## 2026-11-07 0.1.4：新商店截图
+
+- 原生代码与 0.1.3 (0.1.3.2) 相同，只改版本号：上架版本不能换截图，新截图随新版本提交。
+- 构建 `0.1.4 (0.1.4.1)`，`altool` 上传成功（Delivery UUID `cf0b5795-3bdc-4713-86e2-a56c66011ca5`）。
+- Connect 新建版本 0.1.4（元数据从 0.1.3 复制），四种语言的 6.9 英寸截图换成 `scripts/store-shots.mts` 生成的五张海报，填了四语言「此版本的新增内容」。
