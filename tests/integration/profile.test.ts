@@ -75,6 +75,31 @@ it("starts a newly registered account on the profile step, once, while its runti
   expect(await session(owner)).toMatchObject({ onboarding: false });
 });
 
+it("fills the location and language the profile page does not ask for from the browser, never over a value already there", async () => {
+  const dana = await register("dana@example.com");
+  const fill = (profile: unknown, browser: unknown) => h.request("/api/profile", { method: "PUT", headers: dana.headers, body: JSON.stringify({ profile, browser }) });
+  // The page sends one name for both, the browser's time zone (spelled as the browser may, checked as at sign-in) and the console language's name.
+  const first = await fill({ nickname: "Dana", preferredName: "Dana" }, { timeZone: "asia/shanghai", language: "中文" });
+  expect(first.status).toBe(200);
+  expect(((await first.json()) as { profile: Record<string, string> }).profile).toMatchObject({ nickname: "Dana", preferredName: "Dana", location: "Asia/Shanghai", language: "中文" });
+
+  // Stored values stay: another browser does not move them.
+  expect((await fill({ nickname: "Dana" }, { timeZone: "Europe/Lisbon", language: "English" })).status).toBe(200);
+  expect((await getProfile(dana.headers)).profile).toMatchObject({ location: "Asia/Shanghai", language: "中文" });
+  // Nor over what this save gives itself.
+  expect((await fill({ location: "Lisbon", language: "Português" }, { timeZone: "Europe/Lisbon", language: "English" })).status).toBe(200);
+  expect((await getProfile(dana.headers)).profile).toMatchObject({ location: "Lisbon", language: "Português" });
+
+  // What is not a time zone, or would be refused if typed, is quietly left out: the save goes through.
+  expect((await put(dana.headers, {})).status).toBe(200);
+  const odd = await fill({ nickname: "D" }, { timeZone: "Mars/Olympus", language: "x".repeat(61) });
+  expect(odd.status).toBe(200);
+  expect(((await odd.json()) as { profile: Record<string, string> }).profile).toMatchObject({ nickname: "D", location: "", language: "" });
+  // Without it (the settings page), an emptied location stays empty.
+  expect((await put(dana.headers, { nickname: "D" })).status).toBe(200);
+  expect((await getProfile(dana.headers)).profile).toMatchObject({ location: "", language: "" });
+});
+
 it("refuses what does not belong in a profile", async () => {
   const bad = async (profile: unknown) => { const r = await put(owner, profile); return [r.status, ((await r.json()) as { error: string }).error]; };
   expect(await bad({ nickname: "x".repeat(41) })).toEqual([400, "too_long"]);

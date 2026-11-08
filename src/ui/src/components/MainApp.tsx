@@ -31,7 +31,7 @@ import { ClawpageList } from "./ClawpageList";
 import { ScheduleList } from "./ScheduleList";
 import { VaultList } from "./VaultList";
 import { KnowledgeList } from "./KnowledgeList";
-import { ProfileOnboarding } from "./ProfileSettings";
+import { ProfileOnboarding } from "./ProfileOnboarding";
 import {taskStatusLabels,type TaskFeed} from '../taskStatus';
 import { isSandboxLink } from "../sandboxLink";
 import { openDeviceBrowser } from "../deviceBrowser";
@@ -358,7 +358,7 @@ export function MainApp({ firstSession }: { firstSession?: ReturnType<typeof api
         ...(startFailed ? [{ key: "start", text: t.app.agentNotReady(startFailed), error: true }] : []),
         ...(notice ? [{ key: "notice", text: notice, onClose: () => setNotice(null) }] : []),
     ];
-    return <div className="app main-inbox-app">
+    return <><div className="app main-inbox-app" inert={onboarding}>
     <button className="mobile-menu-button ghost" ref={menuButton} aria-label={t.nav.open} aria-expanded={menuOpen} aria-controls="main-navigation" onClick={() => setMenuOpen(true)}><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
     <PopupPresence animate={mobile} onExited={() => { if (swipe.exited()) menuButton.current?.focus(); }}>
     {(!mobile || menuOpen || swipe.pulling) && <>
@@ -408,7 +408,9 @@ export function MainApp({ firstSession }: { firstSession?: ReturnType<typeof api
       </div>
     </PopupSurface>}</PopupPresence>
     <PopupPresence>{linkTab && <TaskConsole key={linkTab.id} target={personConsoleTarget} tab={linkTab} label={t.app.opening.consoleLabel} closeLabel={t.app.opening.closePage} onClose={closeLink} onReveal={() => { setLinkTab(null); revealBrowser(); }}/>}</PopupPresence>
-    {onboarding && <ProfileOnboarding onDone={p => { setOnboarding(false); greet(p); }}/>}
     <Workspace canConfigure={role === "owner"} open={workspace} status={status} initialPath={workspacePath} browserNonce={browserNonce} onClose={closeWorkspace} onNotify={notify}/>
-  </div>;
+  </div>
+  {/* A new account's first page covers the console, which keeps loading underneath, out of reach until it is done. */}
+  {onboarding && <ProfileOnboarding onDone={p => { setOnboarding(false); greet(p); }}/>}
+  </>;
 }

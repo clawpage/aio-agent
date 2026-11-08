@@ -19,8 +19,10 @@ export const profile: typeof zh = {
   loadFailed: "沒能讀取資料，請重試。",
   retry: "重試",
   onboarding: {
+    step: "最後一步",
     title: "介紹一下你自己",
-    body: "填一些基本資料，助理能更懂你。都可以略過，之後隨時在「設定 → 個人資料」修改。",
+    body: "四項都可以不填。寫上幾句，助理就知道怎麼稱呼你、該留意什麼；之後隨時可以在「設定 → 個人資料」修改。",
+    name: { label: "怎麼稱呼你", placeholder: "例如：小林", hint: "助理會這樣稱呼你；登入 clawpage 頁面時，頁面看到的也是這個名字" },
     done: "完成",
     skip: "略過",
   },

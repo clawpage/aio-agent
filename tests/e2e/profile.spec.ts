@@ -2,6 +2,9 @@ import { test, expect, type Page, type TestInfo } from "@playwright/test";
 import { mockConsole, openSettingsEntry } from "./mock-api";
 import type { Profile } from "../../src/ui/src/types";
 
+// The browser's time zone is what the profile page sends for the location it does not ask for.
+test.use({ timezoneId: "Asia/Shanghai" });
+
 const EMPTY: Profile = { nickname: "", preferredName: "", location: "", language: "", occupation: "", interests: "", notes: "" };
 const overflow = (page: Page) => page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
 
@@ -33,46 +36,59 @@ async function newAccount(page: Page) {
   return { state, calls };
 }
 
-test("a new account starts on the profile step; what it fills in greets it on the main session", async ({ page }, info) => {
+test("a new account starts on its own profile page: four questions, one name for both, where and which language unasked", async ({ page }, info) => {
   const { calls } = await newAccount(page);
   await page.goto("/u/lin");
-  const dialog = page.getByRole("dialog", { name: "介绍一下你自己" });
-  await expect(dialog).toBeVisible();
-  // Every field optional; the nickname says who sees it, and nothing talks about the sandbox starting.
-  await expect(dialog.getByLabel("昵称")).toHaveAccessibleDescription("登录 clawpage 时页面看到的名字");
+  const step = page.getByRole("form", { name: "介绍一下你自己" });
+  await expect(step).toBeVisible();
+  // A page of its own, not a dialog over the console: the console underneath is out of reach until it is done.
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(page.locator(".app")).toHaveAttribute("inert", "");
+  // Exactly four boxes; one name stands for both the nickname and the form of address, and its hint says a clawpage sees it.
+  await expect(step.getByRole("textbox")).toHaveCount(4);
+  await expect(step.getByLabel("怎么称呼你")).toHaveAccessibleDescription("助理会这样称呼你；登录 clawpage 页面时，页面看到的也是这个名字");
+  for (const label of ["职业或身份", "兴趣", "想让助理注意的事"]) await expect(step.getByLabel(label)).toBeVisible();
+  for (const unasked of ["昵称", "希望怎么称呼你", "所在地或时区", "常用语言"]) await expect(step.getByLabel(unasked, { exact: true })).toHaveCount(0);
+  // Nothing talks about the sandbox starting.
   await expect(page.getByText(/启动|正在准备|准备中/)).toHaveCount(0);
-  await dialog.getByLabel("昵称").fill("小林");
-  await dialog.getByLabel("希望怎么称呼你").fill("林老师");
-  await dialog.getByLabel("兴趣").fill("摄影、徒步");
-  await dialog.getByLabel("想让助理注意的事").fill("回答简短一些");
+  await step.getByLabel("怎么称呼你").fill("林老师");
+  await step.getByLabel("兴趣").fill("摄影、徒步");
+  await step.getByLabel("想让助理注意的事").fill("回答简短一些");
   await shoot(page, info, "onboarding");
-  await dialog.getByRole("button", { name: "完成" }).click();
-  await expect(dialog).toHaveCount(0);
-  expect(calls.filter((c) => c.method !== "GET")).toEqual([{ method: "PUT", path: "/api/profile", body: { profile: { ...EMPTY, nickname: "小林", preferredName: "林老师", interests: "摄影、徒步", notes: "回答简短一些" } } }]);
+  await step.getByRole("button", { name: "完成" }).click();
+  await expect(step).toHaveCount(0);
+  // The name fills both; the browser's time zone and the console's language go along, for the control plane to fill in where empty.
+  expect(calls.filter((c) => c.method !== "GET")).toEqual([{ method: "PUT", path: "/api/profile", body: {
+    profile: { ...EMPTY, nickname: "林老师", preferredName: "林老师", interests: "摄影、徒步", notes: "回答简短一些" },
+    browser: { timeZone: "Asia/Shanghai", language: "中文" },
+  } }]);
+  await expect(page.locator(".app")).not.toHaveAttribute("inert");
   await expect(page.getByText("林老师，你好，我是一站")).toBeVisible();
   await shoot(page, info, "welcome");
 
   // It comes only once.
   await page.reload();
   await expect(page.getByText("林老师，你好，我是一站")).toBeVisible();
-  await expect(page.getByRole("dialog", { name: "介绍一下你自己" })).toHaveCount(0);
+  await expect(page.getByRole("form", { name: "介绍一下你自己" })).toHaveCount(0);
 });
 
-test("the profile step can be skipped, and does not come back", async ({ page }) => {
+test("the profile page can be skipped, and does not come back", async ({ page }, info) => {
   const { calls } = await newAccount(page);
+  await page.emulateMedia({ colorScheme: "dark", reducedMotion: "reduce" });
   await page.goto("/u/lin");
-  const dialog = page.getByRole("dialog", { name: "介绍一下你自己" });
-  await dialog.getByLabel("昵称").fill("半途");
+  const step = page.getByRole("form", { name: "介绍一下你自己" });
+  await step.getByLabel("怎么称呼你").fill("半途");
+  await shoot(page, info, "onboarding-dark");
   // Escape is no way out: the step ends only by a choice.
   await page.keyboard.press("Escape");
-  await expect(dialog).toBeVisible();
-  await dialog.getByRole("button", { name: "跳过" }).click();
-  await expect(dialog).toHaveCount(0);
+  await expect(step).toBeVisible();
+  await step.getByRole("button", { name: "跳过" }).click();
+  await expect(step).toHaveCount(0);
   expect(calls.filter((c) => c.method !== "GET").map((c) => `${c.method} ${c.path}`)).toEqual(["POST /api/profile/skip"]);
   await expect(page.getByText("你好，我是一站", { exact: true })).toBeVisible();
   await page.reload();
   await expect(page.getByText("你好，我是一站", { exact: true })).toBeVisible();
-  await expect(page.getByRole("dialog", { name: "介绍一下你自己" })).toHaveCount(0);
+  await expect(page.getByRole("form", { name: "介绍一下你自己" })).toHaveCount(0);
 });
 
 test("every account edits its profile on the settings page", async ({ page }, info) => {

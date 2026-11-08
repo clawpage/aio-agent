@@ -9,7 +9,7 @@ export const PAST = 0.4, FLING = 0.3;
 /** The drawer's own entrance curve, so a release ends the way the ☰ button's opening does. */
 export const SETTLE_MS = 280, EASE = "cubic-bezier(.16, 1, .3, 1)";
 /** Sheets and previews over the page: the edge belongs to them. */
-const OVERLAYS = "[aria-modal='true'], .task-console-overlay, .file-preview-overlay, .modal-backdrop, .map-sheet-backdrop, .full-message-backdrop";
+const OVERLAYS = "[aria-modal='true'], .task-console-overlay, .file-preview-overlay, .modal-backdrop, .map-sheet-backdrop, .full-message-backdrop, .onboarding";
 /** Surfaces with gestures of their own (the sandbox desktop, a remote screen, a picture being zoomed). */
 const OWN_GESTURES = ".workspace, .remote-touch, .phone-canvas, .zoomable-image";
 

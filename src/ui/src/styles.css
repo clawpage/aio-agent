@@ -5031,19 +5031,33 @@ button.map-card-switch { flex: 0 0 auto; padding: 4px 10px; }
 .support-dialog .support-kind legend { padding: 0; margin-bottom: 4px; font-size: 13px; color: var(--text-dim); }
 .login-policy { text-align:center; margin:18px 0 0; }
 
-/* ------------------------------------------------------------ profile (settings page, and a new account's first step) */
+/* ------------------------------------------------------------ profile (settings page) */
 .profile-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 14px; margin: 4px 0 12px; }
 .profile-fields .profile-wide { grid-column: 1 / -1; }
 .profile-fields input, .profile-fields textarea { width: 100%; min-width: 0; }
 .profile-fields textarea { min-height: 72px; resize: vertical; }
 .profile-field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .profile-fields small { line-height: 1.4; }
-.profile-onboarding { width: min(600px, calc(100vw - 32px)); }
-.profile-onboarding h2 { margin-bottom: 6px; }
-.profile-onboarding > form > p { margin: 0 0 16px; }
 @media (max-width: 560px) {
   .profile-fields { grid-template-columns: minmax(0, 1fr); gap: 10px; }
-  .profile-onboarding { padding: 20px 16px; }
+}
+
+/* A new account's first page (ProfileOnboarding.tsx): the sign-in page's look, covering the console
+   that loads underneath (above its loading cover too). */
+.onboarding { position: fixed; inset: 0; bottom: auto; z-index: 1120; }
+.onboarding-card { width: min(480px, 100%); }
+.onboarding-step { display: inline-block; margin-bottom: 12px; padding: 3px 10px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); font-size: var(--fs-xs); font-weight: 600; letter-spacing: 0.02em; }
+.onboarding-card textarea { min-height: 96px; border-radius: 12px; padding: 12px 14px; font-size: 15px; line-height: 1.6; background: var(--bg-raised); resize: vertical; scroll-margin-block: 56px 72px; }
+.onboarding-card textarea::placeholder { color: var(--text-dim); font-size: var(--fs-sm); }
+.onboarding-hint { font-size: var(--fs-xs); line-height: 1.6; color: var(--text-dim); }
+.onboarding-card button.onboarding-skip { margin-left: auto; min-height: 36px; padding: 0 4px; font-size: var(--fs-md); font-weight: 500; letter-spacing: normal; color: var(--text-dim); }
+.onboarding-card button.onboarding-skip:hover:not(:disabled) { color: var(--text); }
+@media (hover: none) and (pointer: coarse) {
+  .onboarding-card textarea { font-size: 16px; }
+}
+@media (max-width: 600px) {
+  .onboarding { padding-top: calc(24px + var(--safe-top)); }
+  .onboarding-card textarea { background: var(--bg); }
 }
 
 /* ------------------------------------------------------------ personal knowledge base (KnowledgeList) */

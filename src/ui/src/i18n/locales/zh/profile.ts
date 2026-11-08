@@ -17,9 +17,13 @@ export const profile = {
   failed: "没能保存，请重试。",
   loadFailed: "没能读取资料，请重试。",
   retry: "重试",
+  /** A new account's first page: four questions; where and in which language come from the browser, unasked. */
   onboarding: {
+    step: "最后一步",
     title: "介绍一下你自己",
-    body: "填一些基本资料，助理能更懂你。都可以跳过，之后随时在「配置 → 个人资料」修改。",
+    body: "四项都可以不填。写上几句，助理就知道怎么称呼你、该留意什么；之后随时可以在「配置 → 个人资料」修改。",
+    /** One name for both: what the assistant calls the person, and the nickname a clawpage sees. */
+    name: { label: "怎么称呼你", placeholder: "例如：小林", hint: "助理会这样称呼你；登录 clawpage 页面时，页面看到的也是这个名字" },
     done: "完成",
     skip: "跳过",
   },

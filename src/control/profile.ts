@@ -4,6 +4,7 @@ import { randomId } from "./auth/passwords.js";
 import { readLocale } from "./locale.js";
 import { runInLocale, t } from "./i18n/index.js";
 import { deleteKbNode, reindexNode, sensitiveReason, sha256 } from "./taskKb/kernel.js";
+import { loginTimezone } from "./auth/loginTimezone.js";
 
 /**
  * What a person tells about themselves (docs/FEATURES.md「个人资料」): every field optional, kept in
@@ -72,11 +73,27 @@ function field(name: ProfileField, value: unknown): string {
   return v;
 }
 
-/** Replace the whole profile (a field left out is empty); also ends the first step. */
-export function saveProfile(db: Db, userId: string, input: unknown, now = Date.now()): Profile {
+/** A value the person did not type (their browser's): kept when it fits, dropped otherwise, never a refusal. */
+function quietly(name: ProfileField, value: unknown): string {
+  try { return typeof value === "string" ? field(name, value) : ""; } catch { return ""; }
+}
+
+/**
+ * Replace the whole profile (a field left out is empty); also ends the first step.
+ * `browser` is what the console knows without asking (the first step does not ask where or in which
+ * language): its time zone, checked as at sign-in, and the name of its language. They fill the
+ * location and the language only where neither this save nor the stored profile has one.
+ */
+export function saveProfile(db: Db, userId: string, input: unknown, now = Date.now(), browser?: unknown): Profile {
   if (!input || typeof input !== "object" || Array.isArray(input)) throw new ProfileError(400, "bad_request", t().http.profile.invalid);
   const given = input as Record<string, unknown>;
   const profile = Object.fromEntries(PROFILE_FIELDS.map((f) => [f, field(f, given[f])])) as Profile;
+  if (browser && typeof browser === "object" && !Array.isArray(browser)) {
+    const { timeZone, language } = browser as Record<string, unknown>;
+    const stored = readProfile(db, userId).profile;
+    profile.location ||= stored.location || quietly("location", loginTimezone(timeZone));
+    profile.language ||= stored.language || quietly("language", language);
+  }
   const columns = PROFILE_FIELDS.map((f) => COLUMNS[f]);
   db.prepare(`INSERT INTO profiles (owner_id, ${columns.join(", ")}, onboarding, updated_at) VALUES (?, ${columns.map(() => "?").join(", ")}, 0, ?)
     ON CONFLICT(owner_id) DO UPDATE SET ${columns.map((c) => `${c}=excluded.${c}`).join(", ")}, onboarding=0, updated_at=excluded.updated_at`)

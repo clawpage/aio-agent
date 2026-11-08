@@ -235,7 +235,8 @@ export const api = {
   taskBrowserScreenshotUrl: (id: string, tab: string, at: number) => apiUrl(`/api/tasks/${encodeURIComponent(id)}/browser/screenshot?tab=${encodeURIComponent(tab)}&at=${at}`),
   session: (signal?: AbortSignal) => request<{ authenticated: boolean; role?: "owner" | "member"; username: string | null; email?: string | null; expiresAt?: number; secure?: boolean; inviteEmail?: string | null; registrationRequiresInvite?: boolean; emailCode?: boolean; onboarding?: boolean }>("/api/auth/session", {signal,cache:"no-store"}),
   profile: (signal?: AbortSignal) => request<import("./types").ProfileState>("/api/profile", { cache: "no-store", signal }),
-  saveProfile: (profile: import("./types").Profile) => request<{ profile: import("./types").Profile; onboarding: false }>("/api/profile", { method: "PUT", body: { profile } }),
+  /** With `language` (the console language's name), it and the browser's time zone fill a location and language the profile does not have yet. */
+  saveProfile: (profile: import("./types").Profile, browser?: { language: string }) => request<{ profile: import("./types").Profile; onboarding: false }>("/api/profile", { method: "PUT", body: { profile, ...(browser ? { browser: { timeZone: browserTimeZone(), language: browser.language } } : {}) } }),
   /** The first step after registering, skipped: it does not come back. */
   skipProfile: () => request<{ onboarding: false }>("/api/profile/skip", { method: "POST", body: {} }),
   /** `email` is the account's email, or the username of an account from before email. */

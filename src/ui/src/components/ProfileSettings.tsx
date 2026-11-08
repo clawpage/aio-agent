@@ -1,12 +1,12 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { api } from "../api";
 import type { Profile } from "../types";
 import { InlineLoading } from "./Brand";
 import { t } from "../i18n";
 
-const EMPTY: Profile = { nickname: "", preferredName: "", location: "", language: "", occupation: "", interests: "", notes: "" };
+export const EMPTY: Profile = { nickname: "", preferredName: "", location: "", language: "", occupation: "", interests: "", notes: "" };
 /** The same limits as the control plane's (src/control/profile.ts). */
-const LIMITS: Record<keyof Profile, number> = { nickname: 40, preferredName: 40, location: 80, language: 60, occupation: 80, interests: 300, notes: 400 };
+export const LIMITS: Record<keyof Profile, number> = { nickname: 40, preferredName: 40, location: 80, language: 60, occupation: 80, interests: 300, notes: 400 };
 const SHORT: Array<keyof Profile> = ["nickname", "preferredName", "location", "language", "occupation"];
 
 function browserZone(): string {
@@ -64,43 +64,4 @@ export function ProfileSettings({ onSaved }: { onSaved?: (profile: Profile) => v
       <div className="settings-actions"><span className="spacer"/><button type="submit" className="primary" disabled={!changed || state === "saving"}>{state === "saving" ? t.profile.saving : t.profile.save}</button></div>
     </form>}
   </section>;
-}
-
-/**
- * The step a new account starts with, over the main session: the profile, all optional, or skip it.
- * It shows once (the control plane remembers it was done). Meanwhile the account's sandbox is getting
- * ready behind it, which nothing here mentions.
- */
-export function ProfileOnboarding({ onDone }: { onDone: (profile: Profile | null) => void }) {
-  const dialog = useRef<HTMLDialogElement>(null);
-  const [draft, setDraft] = useState<Profile>(EMPTY);
-  const [busy, setBusy] = useState<"save" | "skip" | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  useEffect(() => { dialog.current?.showModal(); }, []);
-  useEffect(() => {
-    const controller = new AbortController();
-    // Whatever the person already typed stays.
-    api.profile(controller.signal).then(({ profile }) => setDraft((d) => (Object.keys(EMPTY) as Array<keyof Profile>).some((k) => d[k]) ? d : profile), () => undefined);
-    return () => controller.abort();
-  }, []);
-  const finish = async (how: "save" | "skip") => {
-    setBusy(how); setError(null);
-    try {
-      if (how === "save") onDone((await api.saveProfile(draft)).profile);
-      else { await api.skipProfile(); onDone(null); }
-    } catch (err) { setError(err instanceof Error ? err.message : t.profile.failed); setBusy(null); }
-  };
-  const O = t.profile.onboarding;
-  return <dialog ref={dialog} className="support-dialog profile-onboarding" aria-labelledby="profile-onboarding-title" onCancel={(e) => e.preventDefault()}>
-    <form onSubmit={(e) => { e.preventDefault(); if (!busy) void finish("save"); }}>
-      <h2 id="profile-onboarding-title">{O.title}</h2>
-      <p className="muted">{O.body}</p>
-      <ProfileFields value={draft} onChange={setDraft} disabled={!!busy}/>
-      {error && <p role="alert" className="error">{error}</p>}
-      <div className="support-actions">
-        <button type="button" className="ghost" disabled={!!busy} onClick={() => void finish("skip")}>{O.skip}</button>
-        <button type="submit" className="primary" disabled={!!busy}>{busy === "save" ? t.profile.saving : O.done}</button>
-      </div>
-    </form>
-  </dialog>;
 }

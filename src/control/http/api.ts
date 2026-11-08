@@ -1037,7 +1037,7 @@ export function createApiRouter(context: AppContext): Router {
   router.put("/profile", requireKind("primary"), requireSession, (req, res) => {
     const userId = ctxOf(req).session!.ownerId;
     let profile;
-    try { profile = saveProfile(db, userId, req.body?.profile); } catch (err) {
+    try { profile = saveProfile(db, userId, req.body?.profile, Date.now(), req.body?.browser); } catch (err) {
       if (!(err instanceof ProfileError)) throw err;
       res.status(err.status).json({ error: err.code, message: err.message });
       return;

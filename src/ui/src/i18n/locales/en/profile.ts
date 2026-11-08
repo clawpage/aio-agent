@@ -19,8 +19,10 @@ export const profile: typeof zh = {
   loadFailed: "Couldn't load your profile. Please try again.",
   retry: "Retry",
   onboarding: {
+    step: "One last step",
     title: "Tell us about yourself",
-    body: "A few basics help the assistant understand you. You can skip any of it and change it anytime in Settings → Profile.",
+    body: "All four are optional. A few words tell the assistant what to call you and what to keep in mind. You can change them anytime in Settings → Profile.",
+    name: { label: "What should we call you?", placeholder: "e.g. Sam", hint: "The assistant calls you this, and it's the name a clawpage sees when you sign in to it" },
     done: "Done",
     skip: "Skip",
   },

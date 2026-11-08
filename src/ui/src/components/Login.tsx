@@ -5,9 +5,33 @@ import { t } from "../i18n";
 import { hasAppleSignIn, hasNativeBrowser, listenGoogleReturn, openDeviceBrowser, openNativeBrowser, signInWithApple } from "../deviceBrowser";
 import { track } from "../analytics";
 
-function AuthIcon({name, size}: {name: "check" | "arrow" | "mail"; size: number}) {
+export function AuthIcon({name, size}: {name: "check" | "arrow" | "mail"; size: number}) {
   const paths = {check: "M5 12l4 4L19 6", arrow: "M5 12h14m-6-6 6 6-6 6", mail: "M4 5h16v14H4Z M4 6l8 7 8-7"};
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={paths[name]}/></svg>;
+}
+
+/**
+ * A phone keyboard shrinks the page to the area above it and keeps the window at the top
+ * (useKeyboardViewport), so iOS no longer scrolls the box being typed in into view: a `.login`
+ * page (sign-in, and a new account's first step) scrolls itself, once the keyboard has settled.
+ */
+export function useRevealTypedBox() {
+  useEffect(() => {
+    const vv = window.visualViewport;
+    let timer: number | undefined;
+    const reveal = () => {
+      clearTimeout(timer);
+      timer = window.setTimeout(() => {
+        const el = document.activeElement;
+        if ((el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) && el.closest(".login")) el.scrollIntoView({ block: "nearest" });
+      }, 80);
+    };
+    // In the iOS app the keyboard arrives as `aio-keyboard` events instead (useKeyboardViewport).
+    vv?.addEventListener("resize", reveal);
+    window.addEventListener("aio-keyboard", reveal);
+    document.addEventListener("focusin", reveal);
+    return () => { clearTimeout(timer); vv?.removeEventListener("resize", reveal); window.removeEventListener("aio-keyboard", reveal); document.removeEventListener("focusin", reveal); };
+  }, []);
 }
 
 type Mode = "login" | "register";
@@ -199,25 +223,7 @@ export function Login({ onSuccess, notice, username: named }: { onSuccess: () =>
     }
   };
   useEffect(() => { if (!checking && !pendingEmail) track("auth_view", { mode }); }, [mode, checking, pendingEmail]);
-  // A phone keyboard shrinks the page to the area above it and keeps the window at the top
-  // (useKeyboardViewport), so iOS no longer scrolls the box being typed in into view: the
-  // form scrolls itself, once the keyboard has settled.
-  useEffect(() => {
-    const vv = window.visualViewport;
-    let timer: number | undefined;
-    const reveal = () => {
-      clearTimeout(timer);
-      timer = window.setTimeout(() => {
-        const el = document.activeElement;
-        if (el instanceof HTMLInputElement && el.closest(".login")) el.scrollIntoView({ block: "nearest" });
-      }, 80);
-    };
-    // In the iOS app the keyboard arrives as `aio-keyboard` events instead (useKeyboardViewport).
-    vv?.addEventListener("resize", reveal);
-    window.addEventListener("aio-keyboard", reveal);
-    document.addEventListener("focusin", reveal);
-    return () => { clearTimeout(timer); vv?.removeEventListener("resize", reveal); window.removeEventListener("aio-keyboard", reveal); document.removeEventListener("focusin", reveal); };
-  }, []);
+  useRevealTypedBox();
   const switchMode = (next: Mode) => {
     setMode(next);
     setError(null);
