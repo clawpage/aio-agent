@@ -46,7 +46,11 @@ test('revoked cookies do not bypass login and signing out stays signed out',asyn
  await page.getByRole('button',{name:'登录',exact:true}).click();await expect(inbox(page)).toBeVisible();
  if(info.project.name.startsWith('mobile'))await page.getByRole('button',{name:'打开导航'}).click();
  await expect.poll(()=>new URL(page.url()).pathname).toBe('/u/owner');
- await page.locator('.sidebar').getByRole('button',{name:'退出登录',exact:true}).click();await expect(password(page)).toBeVisible();await expect(inbox(page)).toHaveCount(0);
+ // Signing out is on the configuration page, above the console's version.
+ await page.locator('.sidebar').getByRole('button',{name:'配置',exact:true}).click();
+ await expect(page.locator('.sidebar').getByRole('button',{name:'退出登录'})).toHaveCount(0);
+ await expect(page.locator('.settings-version')).toHaveText(/^版本 \S+$/);
+ await page.locator('.settings').getByRole('button',{name:'退出登录',exact:true}).click();await expect(password(page)).toBeVisible();await expect(inbox(page)).toHaveCount(0);
  // Signing out leaves the account's address, so the next person starts from a blank form.
  expect(new URL(page.url()).pathname).toBe('/login');await expect(page.getByLabel('邮箱',{exact:true})).toHaveValue('');
 });

@@ -16,8 +16,9 @@ export default defineConfig({
     },
   ],
   esbuild: { jsx: "automatic" },
-  // The console reports its build with app_open, so the dashboard shows which versions are still in use (an app's cached copy, say).
-  define: { "import.meta.env.VITE_AIO_UI_VERSION": JSON.stringify(version) },
+  // The console reports its build with app_open, so the dashboard shows which versions are still in use (an app's cached copy, say),
+  // and shows it at the foot of the configuration page: the deployed tag (deploy/aio.mjs), else package.json's.
+  define: { "import.meta.env.VITE_AIO_UI_VERSION": JSON.stringify(process.env.AIO_VERSION || version) },
   build: {
     outDir: "../../dist/ui",
     emptyOutDir: true,

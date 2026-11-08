@@ -387,7 +387,7 @@ test("mobile drawer replaces bottom navigation and preserves the chat draft",asy
         expect(Math.abs((markBox!.x+markBox!.width/2)-(closeBox!.x+closeBox!.width/2))).toBeLessThan(1);
         expect(Math.abs((markBox!.y+markBox!.height/2)-(closeBox!.y+closeBox!.height/2))).toBeLessThan(1);
         await page.keyboard.press('Shift+Tab');
-        await expect(drawer.getByRole('button',{name:'退出登录'})).toBeFocused();
+        await expect(drawer.getByRole('button',{name:'配置',exact:true})).toBeFocused();
         await page.keyboard.press('Escape');
         await expect(drawer).toHaveCount(0);await expect(menu).toBeFocused();
         await menu.click();

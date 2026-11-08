@@ -5137,6 +5137,8 @@ button.map-card-switch { flex: 0 0 auto; padding: 4px 10px; }
 .settings-entry > span:first-child { flex: 1; min-width: 0; }
 .settings-entry:hover, .settings-entry:focus-visible { background: var(--bg-raised); }
 .settings-entry-chevron { color: var(--text-dim); font-size: 20px; line-height: 1; }
+.settings-logout { justify-content: center; color: var(--error); }
+.settings-version { margin: 0; text-align: center; }
 /* Behind an entry the page header carries the title. */
 .settings-subpage .settings-section-head h3 { display: none; }
 .settings-subpage .settings-section-head p { margin-top: 0; }

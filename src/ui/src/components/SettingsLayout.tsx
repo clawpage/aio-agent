@@ -13,13 +13,15 @@ export interface SettingsSection {
 
 /**
  * The configuration page: its entries, each opening a page of its own at `/settings/<id>`, and the
- * switches that need no page (`switches`). An unknown section shows the entries.
+ * switches that need no page (`switches`), then signing out and the console's version. An unknown
+ * section shows the entries.
  */
-export function SettingsPages({ sections, section, onOpen, onBack, top, switches }: {
+export function SettingsPages({ sections, section, onOpen, onBack, onLogout, top, switches }: {
   sections: SettingsSection[];
   section?: string;
   onOpen: (section?: string) => void;
   onBack: () => void;
+  onLogout: () => void;
   /** Above the entries (a member's share of today's tokens). */
   top?: ReactNode;
   switches: ReactNode;
@@ -46,6 +48,8 @@ export function SettingsPages({ sections, section, onOpen, onBack, top, switches
         </button>)}
       </nav>
       {switches}
+      <div className="settings-card settings-entries"><button type="button" className="settings-entry settings-logout" onClick={onLogout}>{t.nav.logout}</button></div>
+      <p className="settings-version muted tiny">{t.settings.page.version(String(import.meta.env.VITE_AIO_UI_VERSION ?? "dev"))}</p>
     </div>
   </section>;
 }

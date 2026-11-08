@@ -38,13 +38,14 @@ interface Props {
   onSaved?: (settings: AgentSettings) => void;
   /** The profile was saved (the main session's hello follows it). */
   onProfile?: (profile: Profile) => void;
+  onLogout: () => void;
 }
 
 /**
  * The owner's configuration page: entries and switches; what takes a page of its own (SOUL.md,
  * the run preferences, invites, …) opens behind its entry.
  */
-export function Settings({ section, onOpen, onBack, onSaved, onProfile }: Props) {
+export function Settings({ section, onOpen, onBack, onSaved, onProfile, onLogout }: Props) {
   const iphone = useIphoneEntry();
   const sections: SettingsSection[] = [
     { id: "profile", title: t.profile.title, page: () => <ProfileSettings onSaved={onProfile}/> },
@@ -56,7 +57,7 @@ export function Settings({ section, onOpen, onBack, onSaved, onProfile }: Props)
     ...(iphone ? [{ id: "iphone", title: t.app.iphone.label, page: () => <IphoneSettings/> }] : []),
     { id: "account", title: t.support.account, page: () => <AccountPrivacySettings/> },
   ];
-  return <SettingsPages sections={sections} section={section} onOpen={onOpen} onBack={onBack}
+  return <SettingsPages sections={sections} section={section} onOpen={onOpen} onBack={onBack} onLogout={onLogout}
     switches={<><PushSettings/><LanguageSettings/><DebugSettings/></>}/>;
 }
 

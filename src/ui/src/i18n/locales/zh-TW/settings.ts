@@ -6,6 +6,7 @@ export const settings: typeof zh = {
     backToSettings: "← 設定",
     entries: "設定項目",
     intro: "設定你的助理與執行偏好，儲存後在所有裝置間保持一致。",
+    version: (v: string) => `版本 ${v}`,
   },
   run: {
     title: "執行偏好",

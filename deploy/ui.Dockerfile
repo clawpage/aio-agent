@@ -11,6 +11,8 @@ COPY src/common ./src/common
 COPY src/ui ./src/ui
 # Empty: the console talks to its own origin (the edge passes /api through).
 ARG VITE_AIO_API_BASE=
+# The deployed tag, shown on the configuration page and sent with app_open.
+ARG AIO_VERSION=
 RUN npx vite build
 
 FROM ${AIO_UI_PREVIOUS} AS previous

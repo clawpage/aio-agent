@@ -391,7 +391,7 @@ function LegacyApp() {
             </div>
           )}
         </div>
-        {view === "settings" && <Settings section={settingsSection} onOpen={setSettingsSection} onBack={() => { setSettingsSection(undefined); setView("chat"); }} />}
+        {view === "settings" && <Settings section={settingsSection} onOpen={setSettingsSection} onBack={() => { setSettingsSection(undefined); setView("chat"); }} onLogout={() => void logout()} />}
       </main>
 
       <Workspace

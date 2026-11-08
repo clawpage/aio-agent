@@ -7,6 +7,7 @@ export const settings: typeof zh = {
     backToSettings: '← 設定',
     entries: '設定項目',
     intro: 'アシスタントと実行の設定です。保存した内容はすべてのデバイスで共通です。',
+    version: (v: string) => `バージョン ${v}`,
   },
   run: {
     title: '実行の設定',

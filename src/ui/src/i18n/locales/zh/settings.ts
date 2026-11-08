@@ -5,6 +5,7 @@ export const settings = {
     backToSettings: "← 配置",
     entries: "配置项",
     intro: "设置你的助理与运行偏好，保存后在所有设备间保持一致。",
+    version: (v: string) => `版本 ${v}`,
   },
   run: {
     title: "运行偏好",

@@ -7,6 +7,7 @@ export const settings: typeof zh = {
     backToSettings: "← Settings",
     entries: "Settings",
     intro: "Set up your assistant and run preferences. Saved settings apply on all your devices.",
+    version: (v: string) => `Version ${v}`,
   },
   run: {
     title: "Run preferences",

@@ -135,6 +135,7 @@ test("pictures are kept on the device: reopening shows them at once and asks beh
   // Signing out takes the account's pictures off the device.
   await page.route("**/api/auth/logout", (r) => r.fulfill({ json: { ok: true } }));
   if (info.project.name !== "desktop") await page.getByRole("button", { name: /菜单|导航/ }).first().click();
+  await page.getByRole("button", { name: "配置", exact: true }).click();
   await page.getByRole("button", { name: "退出登录" }).click();
   await expect.poll(keptCount).toBe(0);
 });

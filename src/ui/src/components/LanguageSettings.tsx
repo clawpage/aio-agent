@@ -41,14 +41,14 @@ function QuotaSettings() {
 }
 
 /** Member account controls: this component never requests owner settings. */
-export function MemberSettings({ section, onOpen, onBack, onProfile }: { section?: string; onOpen: (section?: string) => void; onBack: () => void; onProfile?: (profile: Profile) => void }) {
+export function MemberSettings({ section, onOpen, onBack, onProfile, onLogout }: { section?: string; onOpen: (section?: string) => void; onBack: () => void; onProfile?: (profile: Profile) => void; onLogout: () => void }) {
   const iphone = useIphoneEntry();
   const sections: SettingsSection[] = [
     { id: "profile", title: t.profile.title, page: () => <ProfileSettings onSaved={onProfile}/> },
     ...(iphone ? [{ id: "iphone", title: t.app.iphone.label, page: () => <IphoneSettings/> }] : []),
     { id: "account", title: t.support.account, page: () => <AccountPrivacySettings/> },
   ];
-  return <SettingsPages sections={sections} section={section} onOpen={onOpen} onBack={onBack} top={<QuotaSettings/>} switches={<><PushSettings/><LanguageSettings/></>}/>;
+  return <SettingsPages sections={sections} section={section} onOpen={onOpen} onBack={onBack} onLogout={onLogout} top={<QuotaSettings/>} switches={<><PushSettings/><LanguageSettings/></>}/>;
 }
 
 /** The console's language (this browser only): each choice is named in its own language. */
