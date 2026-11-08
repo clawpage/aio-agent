@@ -70,9 +70,21 @@ it("emails a 6-digit code in the console's language, keeps only its hash, and re
   const row = h.ctx.db.prepare("SELECT * FROM signup_codes WHERE email='carol@example.com'").get() as Record<string, unknown>;
   expect(Object.values(row).map(String)).not.toContain(code);
 
-  // English (and Spanish, Japanese) mail comes from Clawpage Agent.
-  await sendCode("dan@example.com", ip, "en");
-  expect(mailer.sent.at(-1)).toMatchObject({ from: "Clawpage Agent <noreply@clawpage.ai>", subject: `Clawpage Agent verification code: ${lastCode()}` });
+  // The code goes out in the sign-up page's language (each of the console's five), and
+  // English, Spanish and Japanese mail comes from Clawpage Agent.
+  const byLocale: Array<[string, string, (code: string) => string, string]> = [
+    ["en", "Clawpage Agent", (c) => `Clawpage Agent verification code: ${c}`, "signing up for Clawpage Agent"],
+    ["es", "Clawpage Agent", (c) => `Código de verificación de Clawpage Agent: ${c}`, "Estás creando una cuenta en Clawpage Agent"],
+    ["ja", "Clawpage Agent", (c) => `Clawpage Agent 確認コード：${c}`, "Clawpage Agent に登録しようとしています"],
+    ["zh-TW", "一站", (c) => `一站驗證碼：${c}`, "你正在註冊一站"],
+  ];
+  for (const [locale, sender, subject, intro] of byLocale) {
+    expect((await sendCode(`dan-${locale}@example.com`, ip, locale)).status).toBe(200);
+    const sentMail = mailer.sent.at(-1)!;
+    expect(sentMail).toMatchObject({ from: `${sender} <noreply@clawpage.ai>`, subject: subject(lastCode()) });
+    expect(sentMail.text).toContain(intro);
+    expect(sentMail.html).toContain(intro);
+  }
 
   const base = { email: "carol@example.com", password: "carol-password-123", inviteCode: "" };
   expect(await (await register(base, ip)).json()).toMatchObject({ error: "email_code_required" });
