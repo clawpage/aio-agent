@@ -40,6 +40,23 @@ test("a scheduled run shows as an automatic run, not as something you typed", as
   await page.screenshot({ path: info.outputPath("schedule-run.png") });
 });
 
+test("a long schedule rule stays inside the screen", async ({ page }, info) => {
+  const rule = "11月5日 08:00、11月6日 08:00、11月7日 08:00、11月8日 08:00、11月9日 08:00 等 44 次";
+  const long = { ...run, schedule: { ...run.schedule, rule } };
+  await mockConsole(page, { conversations: [] });
+  await page.route("**/api/main*", (r) => r.fulfill({ json: { mode: "tasks", tasks: [long], nextBefore: null } }));
+  await mockTaskList(page, () => [long]);
+  await page.goto("/");
+  const badge = page.locator(".schedule-badge");
+  await expect(badge).toBeVisible({ timeout: 60_000 });
+  const box = (await badge.boundingBox())!, report = (await page.locator(".task-report").first().boundingBox())!;
+  expect(box.x + box.width).toBeLessThanOrEqual(report.x + report.width + 1);
+  // Text wider than the badge is cut off inside it (with an ellipsis), not painted past the edge.
+  expect(await badge.evaluate((el) => el.scrollWidth <= el.clientWidth || (getComputedStyle(el).overflow === "hidden" && getComputedStyle(el).textOverflow === "ellipsis"))).toBe(true);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
+  await page.screenshot({ path: info.outputPath("schedule-long-rule.png") });
+});
+
 test("the schedules page lists rules and pauses, resumes, runs and deletes them", async ({ page }, info) => {
   const { actions } = await setup(page);
   if (info.project.name.startsWith("mobile")) await page.getByRole("button", { name: "打开导航" }).click();

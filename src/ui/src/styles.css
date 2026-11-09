@@ -4639,6 +4639,11 @@ button.map-card-switch { flex: 0 0 auto; padding: 4px 10px; }
   color: var(--accent);
   background: var(--accent-soft);
   white-space: nowrap;
+  /* A long rule (many dates) is cut short instead of running past the screen's edge. */
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 /* A run a schedule started, or a support card: nobody typed it, so it is not shown as your message. */
 .schedule-run-note {
