@@ -323,13 +323,27 @@ export async function vaultLogin(
  * Signs in by itself when exactly one saved account fits the page an agent is
  * waiting on. Anything less certain (no account, several, or a second request
  * right after a sign-in that did not take) is left for the person to decide.
+ * Until then the request is the vault's, not the person's: `ctx.vaultSigningIn`
+ * says so, and the console and notifications do not ask the person for it.
  */
 export function startVaultAutofill(ctx: AppContext, intervalMs = 2500, maxTries = 3): { stop(): void; tick(): Promise<void> } {
   const seen = new Set<string>();
   const reported = new Set<string>();
   /** tab:site -> automatic tries; the agent revises its steps between them, the person decides after. */
   const tries = new Map<string, number>();
+  /** Requests the vault tried and could not sign in for: the person's now. */
+  const handed = new Set<string>();
   let busy = false;
+  const signingIn = (tab: TabRecord): boolean => {
+    if (tab.request?.kind !== "login" || tab.holder !== "ai" || !ctx.vault) return false;
+    const request = `${tab.id}:${tab.request.at}`;
+    if (handed.has(request)) return false;
+    const host = siteOfUrl(tab.url);
+    if (!host || ctx.vault.matching(host).length !== 1) return false;
+    // A request already taken counts its own try; a new one needs a try left.
+    return seen.has(request) || (tries.get(`${tab.id}:${host}`) ?? 0) < maxTries;
+  };
+  ctx.vaultSigningIn = signingIn;
   const tick = async (): Promise<void> => {
     if (busy || !ctx.tabs || !ctx.vault || !ctx.tasks.hasRunning()) return;
     busy = true;
@@ -352,6 +366,7 @@ export function startVaultAutofill(ctx: AppContext, intervalMs = 2500, maxTries 
         if (entries.length !== 1 || (tries.get(again) ?? 0) >= maxTries) continue;
         tries.set(again, (tries.get(again) ?? 0) + 1);
         const out = await vaultLogin(ctx, tab, { entryId: entries[0]!.id });
+        if (!out.ok) handed.add(request);
         ctx.log.info("vault sign-in", { site: host, result: out.ok ? out.result : out.error });
       }
     } catch (err) {
@@ -362,5 +377,5 @@ export function startVaultAutofill(ctx: AppContext, intervalMs = 2500, maxTries 
   };
   const timer = setInterval(() => void tick(), intervalMs);
   timer.unref?.();
-  return { tick, stop: () => clearInterval(timer) };
+  return { tick, stop: () => { clearInterval(timer); if (ctx.vaultSigningIn === signingIn) ctx.vaultSigningIn = undefined; } };
 }

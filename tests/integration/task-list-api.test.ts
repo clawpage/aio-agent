@@ -88,8 +88,13 @@ it("counts a task whose browser waits on the person as their turn", async () => 
     expect(body.counts).toMatchObject({ attention: 2, working: 1 });
     expect(ids(body)).toEqual(["asking", "running-old"]);
     expect(body.tasks[1]!.browser?.request).toBe("请登录 Target");
+    // A sign-in the vault is doing by itself is not the person's turn.
+    Object.assign(h.ctx, { vaultSigningIn: () => true });
+    const { body: vaulted } = await get("filter=attention");
+    expect(vaulted.counts).toMatchObject({ attention: 1 });
+    expect(ids(vaulted)).toEqual(["asking"]);
   } finally {
-    Object.assign(h.ctx, { tabs });
+    Object.assign(h.ctx, { tabs, vaultSigningIn: undefined });
   }
 });
 

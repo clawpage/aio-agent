@@ -86,6 +86,12 @@ it("answers a task's sign-in request from the vault without the password ever co
   expect(saved).toMatchObject([{ site: "billing.example.com", username: "max@example.com" }]);
   expect(saved[0]!.lastUsedAt).not.toBeNull();
 
+  // With the account saved, the next sign-in is the vault's to do: the card does not ask the person.
+  h.ctx.vaultSigningIn = (tab) => tab.request?.kind === "login";
+  try {
+    expect((await json(await h.request(`/api/tasks/${task.id}/browser`, { headers: { cookie } }))).tabs[0].request).toBeNull();
+  } finally { h.ctx.vaultSigningIn = undefined; }
+
   // Next time: one tap on the saved account.
   expect(await json(await send(`/api/tasks/${task.id}/browser/login`, "POST", { tab: "t1", entryId: saved[0]!.id }))).toEqual({ result: "submitted" });
   expect(logins).toHaveLength(2);

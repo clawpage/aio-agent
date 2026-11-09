@@ -312,7 +312,7 @@ export function startTaskNotifications(ctx: AppContext, push: PushService, inter
       for (const tab of tabs) {
         if (!tab.request || tab.holder !== "ai") continue;
         // The vault answers a sign-in it has an account for within seconds: only one still waiting is the person's.
-        if (tab.request.kind === "login" && Date.now() - tab.request.at < VAULT_GRACE_MS) continue;
+        if (tab.request.kind === "login" && (ctx.vaultSigningIn?.(tab) || Date.now() - tab.request.at < VAULT_GRACE_MS)) continue;
         const key = `${tab.id}:${tab.request.at}`;
         if (asked.has(key)) continue;
         asked.add(key);

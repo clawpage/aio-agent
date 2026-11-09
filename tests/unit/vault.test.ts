@@ -144,8 +144,12 @@ describe("signing in from the vault", () => {
     const { ctx, logins } = world(tabs);
     const auto = startVaultAutofill(ctx, 60_000);
     const ask = async (at: number) => { tabs[0] = tabRecord({ request: { kind: "login", site: "github.com", reason: "r", at } }); await auto.tick(); };
+    // While the vault can answer a request, it is not the person's: the console does not ask them.
+    const vaults = (tab: TabRecord) => ctx.vaultSigningIn?.(tab) ?? false;
     try {
+      expect(vaults(tabs[0]!)).toBe(true);
       await auto.tick();
+      expect(vaults(tabs[0]!)).toBe(true);
       await auto.tick();
       expect(logins).toHaveLength(1);
       // The agent revises its steps and asks again: answered, twice more.
@@ -153,7 +157,9 @@ describe("signing in from the vault", () => {
       await ask(300);
       expect(logins).toHaveLength(3);
       // A fourth try on the same tab is the person's to decide.
-      await ask(400);
+      tabs[0] = tabRecord({ request: { kind: "login", site: "github.com", reason: "r", at: 400 } });
+      expect(vaults(tabs[0]!)).toBe(false);
+      await auto.tick();
       expect(logins).toHaveLength(3);
       // Two accounts for a site, no account, or a plain request for the person: never automatic.
       vault.create({ site: "github.com", username: "work", password: "x" });
@@ -161,9 +167,24 @@ describe("signing in from the vault", () => {
       tabs.push(tabRecord({ id: "t3", url: "https://unknown.example/login", request: { kind: "login", site: "unknown.example", reason: "r", at: 500 } }), tabRecord({ id: "t4", request: { reason: "验证码", at: 500 } }));
       await auto.tick();
       expect(logins).toHaveLength(3);
+      expect(tabs.map(vaults)).toEqual([false, false, false]);
     } finally {
       auto.stop();
     }
+    expect(ctx.vaultSigningIn).toBeUndefined();
+  });
+
+  it("hands a sign-in it could not do to the person at once", async () => {
+    vault.create({ site: "github.com", username: "max", password: SECRET });
+    const tabs = [tabRecord()];
+    const { ctx } = world(tabs);
+    (ctx.tabs as unknown as { login: unknown }).login = async () => ({ status: 409, body: { error: "busy", message: "x" } });
+    const auto = startVaultAutofill(ctx, 60_000);
+    try {
+      expect(ctx.vaultSigningIn!(tabs[0]!)).toBe(true);
+      await auto.tick();
+      expect(ctx.vaultSigningIn!(tabs[0]!)).toBe(false);
+    } finally { auto.stop(); }
   });
 });
 

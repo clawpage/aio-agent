@@ -53,7 +53,7 @@ import { isSuspended } from "../auth/suspension.js";
 import { safeRedirectPath } from "../auth/tickets.js";
 import { audit } from "../db.js";
 import { dispatchLog, recallStats } from "../tasks/recall.js";
-import { PERSON_KEY } from "../browser/tabs.js";
+import { PERSON_KEY, type TabRecord } from "../browser/tabs.js";
 import { normalizeSite, vaultLogin, VaultError, type Vault } from "../vault.js";
 import { DocumentError, WEB_FETCH_LIMITS, type WebFetchRequest } from "../documents/service.js";
 import { isLocale, type Locale } from "../locale.js";
@@ -788,8 +788,10 @@ export function createApiRouter(context: AppContext): Router {
     }
     return false;
   };
+  // A sign-in the vault is doing by itself is not asked of the person: its tab shows as the agent's, working.
+  const personal = <T extends TabRecord>(tab: T): T => (tab.request && context.vaultSigningIn?.(tab) ? { ...tab, request: null } : tab);
   const browserState = async (userId: string) => {
-    const tabs = context.tabs ? await Promise.race([context.tabs.list().catch(() => []), new Promise<[]>((r) => setTimeout(() => r([]), 2000).unref())]) : [];
+    const tabs = (context.tabs ? await Promise.race([context.tabs.list().catch(() => []), new Promise<[]>((r) => setTimeout(() => r([]), 2000).unref())]) : []).map(personal);
     const byKey = new Map<string, typeof tabs>();
     for (const tab of tabs) byKey.set(tab.key, [...(byKey.get(tab.key) ?? []), tab]);
     const asking = [...byKey].filter(([, own]) => own.some((t) => t.request && t.holder === "ai")).map(([key]) => key);
@@ -1495,7 +1497,7 @@ export function createApiRouter(context: AppContext): Router {
     const key = taskBrowserKey(req);
     if (!key) { res.status(404).json({ error: "not_found" }); return; }
     res.setHeader("Cache-Control", "no-store");
-    res.json({ tabs: context.tabs ? await context.tabs.list(key) : [] });
+    res.json({ tabs: context.tabs ? (await context.tabs.list(key)).map(personal) : [] });
   }));
   router.get("/tasks/:id/browser/screenshot", requireKind("primary"), requireSession, asyncHandler(async (req, res) => {
     const key = taskBrowserKey(req);

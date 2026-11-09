@@ -1,6 +1,6 @@
 import type { ShareStore } from "./share.js";
 import type { Jev } from "./jev.js";
-import type { TabServerLike } from "./browser/tabs.js";
+import type { TabRecord, TabServerLike } from "./browser/tabs.js";
 import type { Config } from "./config.js";
 import type { Db } from "./db.js";
 import type { Logger } from "../common/logger.js";
@@ -58,6 +58,8 @@ export interface AppContext {
   ios?: IosDeviceGateway;
   /** The account's password vault; absent in runtimes built by hand in tests. */
   vault?: Vault;
+  /** True while the vault is signing in for a tab's request (startVaultAutofill): not the person's to answer yet. */
+  vaultSigningIn?: (tab: TabRecord) => boolean;
   /** Whole-container idle stop/start; absent when the runtime keeps its container up. */
   idle?: SandboxIdle;
   /** The account's knowledge maintainer (docs/TASK-KB.md). */
