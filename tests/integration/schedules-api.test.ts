@@ -17,7 +17,7 @@ describe("schedules API", () => {
     const headers = { cookie, "x-csrf-token": csrf, "content-type": "application/json" };
     const all = (await (await h.request("/api/schedules", { headers: { cookie } })).json()) as { schedules: Array<{ id: string; rule: string; nextRunText: string; builtin: string | null }> };
     // Every account also has the built-in daily feed.
-    expect(all.schedules.filter((s) => s.builtin)).toMatchObject([{ builtin: "daily_feed", rule: "Every day at 08:00" }]);
+    expect(all.schedules.filter((s) => s.builtin)).toMatchObject([{ builtin: "daily_feed", rule: "Every day at 08:00, 12:00" }]);
     const list = { schedules: all.schedules.filter((s) => !s.builtin) };
     expect(list.schedules.map((s) => s.id)).toEqual(["sched-own"]);
     expect(list.schedules[0]).toMatchObject({ rule: "Every day at 08:00", nextRunText: expect.stringMatching(/^\w{3}, \w{3} \d+, \d{2}:\d{2}$/) });

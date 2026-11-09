@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { openDb, type Db } from "../../src/control/db.js";
 import { AgentManager } from "../../src/control/codex/manager.js";
 import { feedTimeFor, TaskService } from "../../src/control/tasks/service.js";
@@ -6,7 +6,7 @@ import { Logger } from "../../src/common/logger.js";
 import { taskNotification } from "../../src/control/push.js";
 import { FakeCodex, testConfig } from "../helpers/harness.js";
 import { answerLanguage } from "../../src/control/locale.js";
-import { nextRun } from "../../src/control/tasks/schedules.js";
+import { nextRun, type ScheduleSpec } from "../../src/control/tasks/schedules.js";
 import { runInLocale } from "../../src/control/i18n/index.js";
 
 class PlanningCodex extends FakeCodex {
@@ -48,16 +48,16 @@ afterEach(async () => {
 });
 
 describe("the built-in daily feed", () => {
-  it("exists once for every account, at 08:00 with the browser", async () => {
+  it("exists once for every account, in the morning at 08:00 and at midday, with the browser", async () => {
     expect(feed()).toMatchObject({ status: "active", run_count: 0, resources_json: JSON.stringify(["browser"]) });
     tasks.close(); agent.shutdown();
     await start();
     expect((db.prepare("SELECT COUNT(*) AS n FROM schedules WHERE builtin='daily_feed'").get() as { n: number }).n).toBe(1);
-    expect(tasks.listSchedules("owner_1")).toMatchObject([{ title: "Daily feed", rule: "Every day at 08:00", builtin: "daily_feed" }]);
+    expect(tasks.listSchedules("owner_1")).toMatchObject([{ title: "Daily feed", rule: "Every day at 08:00, 12:00", builtin: "daily_feed" }]);
   });
 
   it("is shown in the language it is read in, also a feed stored under the earlier Chinese title and instruction", async () => {
-    expect(runInLocale("zh-CN", () => tasks.listSchedules("owner_1"))).toMatchObject([{ title: "每日推送", rule: "每天 08:00", instruction: "根据你过往的任务，整理今天你可能感兴趣的内容和需要的提醒", feed: { customized: false } }]);
+    expect(runInLocale("zh-CN", () => tasks.listSchedules("owner_1"))).toMatchObject([{ title: "每日推送", rule: "每天 08:00、12:00", instruction: "根据你过往的任务，整理今天你可能感兴趣的内容和需要的提醒", feed: { customized: false } }]);
     db.prepare("UPDATE schedules SET title='每日推送',instruction='根据你过往的任务，整理今天你可能感兴趣的内容和需要的提醒' WHERE builtin='daily_feed'").run();
     expect(tasks.listSchedules("owner_1")).toMatchObject([{ title: "Daily feed", instruction: "Based on your past tasks, gather what you may find interesting today and the reminders you need", feed: { customized: false } }]);
     expect(runInLocale("es", () => tasks.feedSettings("owner_1"))).toMatchObject({ title: "Novedades diarias", customized: false });
@@ -65,7 +65,7 @@ describe("the built-in daily feed", () => {
     const run = tasks.get(feed().last_task_id!)!;
     expect(run.title).toBe("每日推送");
     expect(tasks.view(run)).toMatchObject({ title: "Daily feed", schedule: { title: "Daily feed", builtin: "daily_feed" } });
-    expect(runInLocale("zh-TW", () => tasks.view(run))).toMatchObject({ title: "每日推播", schedule: { title: "每日推播", rule: "每天 08:00" } });
+    expect(runInLocale("zh-TW", () => tasks.view(run))).toMatchObject({ title: "每日推播", schedule: { title: "每日推播", rule: "每天 08:00、12:00" } });
   });
 
   it("stays quiet after a day without messages, and runs after one", async () => {
@@ -83,7 +83,7 @@ describe("the built-in daily feed", () => {
     const prompt = codex.startedTurns.at(-1)!.text;
     expect(prompt).toContain("This is the built-in daily feed");
     expect(prompt).toContain("帮我看看 Mac Studio 现在多少钱"); // the person's earlier tasks
-    expect(prompt).toContain("pushed 3 times in a row");
+    expect(prompt).toContain("pushed on 3 days in a row");
     expect(prompt).toContain("<!--feed-topics:");
   });
 
@@ -148,23 +148,28 @@ describe("the built-in daily feed", () => {
     cfg.agent.dailyFeedAt = "08:08";
     try {
       await start();
-      expect(tasks.listSchedules("owner_1")).toMatchObject([{ rule: "Every day at 08:08", builtin: "daily_feed" }]);
+      expect(tasks.listSchedules("owner_1")).toMatchObject([{ rule: "Every day at 08:08, 12:08", builtin: "daily_feed" }]);
       expect(new Date(feed().next_run_at).getUTCMinutes()).toBe(8);
     } finally { delete cfg.agent.dailyFeedAt; }
   });
 
-  it("moves a feed still on 08:00 to the account's minutes, same day; a time the person chose stays", async () => {
-    const before = feed().next_run_at;
-    tasks.close(); agent.shutdown();
-    cfg.agent.dailyFeedAt = "08:12";
-    try {
-      await start();
-      expect(tasks.listSchedules("owner_1")).toMatchObject([{ rule: "Every day at 08:12" }]);
-      // Not recomputed from now: a feed already run today is not run again later today.
-      expect(feed().next_run_at - before).toBe(12 * 60_000);
+  it("turns a feed still once a day at 08:00 or the account's minutes into a morning and a midday run; a time the person chose stays", async () => {
+    const tz = cfg.browser.timezone;
+    for (const old of ["08:00", "08:12"]) {
       tasks.close(); agent.shutdown();
-      db.prepare("UPDATE schedules SET spec_json=? WHERE builtin='daily_feed'").run(JSON.stringify({ kind: "daily", at: "07:30" }));
-      cfg.agent.dailyFeedAt = "08:04";
+      db.prepare("UPDATE schedules SET spec_json=?,next_run_at=? WHERE builtin='daily_feed'").run(JSON.stringify({ kind: "daily", at: old }), Date.now() + 86_400_000);
+      cfg.agent.dailyFeedAt = "08:12";
+      try {
+        await start();
+        expect(tasks.listSchedules("owner_1")).toMatchObject([{ rule: "Every day at 08:12, 12:12" }]);
+        // The first of the new times still ahead: a morning run made today is not made again.
+        expect(feed().next_run_at).toBe(nextRun({ kind: "daily", at: "08:12", times: ["08:12", "12:12"] }, Date.now(), tz));
+      } finally { delete cfg.agent.dailyFeedAt; }
+    }
+    tasks.close(); agent.shutdown();
+    db.prepare("UPDATE schedules SET spec_json=? WHERE builtin='daily_feed'").run(JSON.stringify({ kind: "daily", at: "07:30" }));
+    cfg.agent.dailyFeedAt = "08:04";
+    try {
       await start();
       expect(tasks.listSchedules("owner_1")).toMatchObject([{ rule: "Every day at 07:30" }]);
     } finally { delete cfg.agent.dailyFeedAt; }
@@ -183,7 +188,7 @@ describe("what the daily feed keeps in mind", () => {
   const section = (text: string, label: string) => JSON.parse(text.split(label)[1]!.trim().split("\n\n")[0]!);
 
   it("starts from the default instruction, nothing remembered, and a brief that reads the person's own pages read-only", async () => {
-    expect(tasks.feedSettings("owner_1")).toMatchObject({ rule: "Every day at 08:00", customized: false, memory: [] });
+    expect(tasks.feedSettings("owner_1")).toMatchObject({ rule: "Every day at 08:00, 12:00", customized: false, memory: [] });
     tasks.runScheduleNow(feed().id, "owner_1");
     await tick();
     expect(brief()).toContain("Read-only look at the user's own pages");
@@ -225,18 +230,18 @@ describe("what the daily feed keeps in mind", () => {
       add: [{ kind: "care", text: "Roy 的疫苗和体检预约" }, { kind: "avoid", text: "加密货币行情" }, { kind: "note", text: "只在有降价时才提商品" }],
     });
     expect(said).toContain("Updated the daily feed's instruction");
-    expect(said).toContain("Feed time changed to Every day at 07:30");
+    expect(said).toContain("Feed time changed to Every day at 07:30, 11:30");
     expect(said).toContain("Remembered 3");
     const settings = tasks.feedSettings("owner_1");
-    expect(settings).toMatchObject({ rule: "Every day at 07:30", customized: true, instruction: "每天看一下 Gmail 有没有要交的账单，少说新闻" });
+    expect(settings).toMatchObject({ rule: "Every day at 07:30, 11:30", customized: true, instruction: "每天看一下 Gmail 有没有要交的账单，少说新闻" });
     expect(settings.memory.map((m) => [m.kind, m.text, m.source])).toEqual([["care", "Roy 的疫苗和体检预约", "user"], ["avoid", "加密货币行情", "user"], ["note", "只在有降价时才提商品", "user"]]);
     const local = new Intl.DateTimeFormat("en-GB", { timeZone: cfg.browser.timezone, hour: "2-digit", minute: "2-digit" }).format(feed().next_run_at);
-    expect(local).toBe("07:30");
-    expect(tasks.listSchedules("owner_1")[0]).toMatchObject({ rule: "Every day at 07:30", feed: { customized: true, memory: [{ kind: "care" }, { kind: "avoid" }, { kind: "note" }] } });
+    expect(["07:30", "11:30"]).toContain(local);
+    expect(tasks.listSchedules("owner_1")[0]).toMatchObject({ rule: "Every day at 07:30, 11:30", feed: { customized: true, memory: [{ kind: "care" }, { kind: "avoid" }, { kind: "note" }] } });
 
     tasks.runScheduleNow(feed().id, "owner_1");
     await tick();
-    expect(brief()).toContain("every day at 07:30");
+    expect(brief()).toContain("every day at 07:30 and 11:30");
     expect(brief()).toContain("The user's instruction for the daily feed (follow it first; it may change the default approach below, but never the read-only and safety rules): 每天看一下 Gmail 有没有要交的账单，少说新闻");
     expect(section(brief(), "Remembered memory:")).toMatchObject({ care: [{ text: "Roy 的疫苗和体检预约", from: "said by the user" }], avoid: [{ text: "加密货币行情" }], note: [{ text: "只在有降价时才提商品" }] });
 
@@ -267,6 +272,45 @@ describe("what the daily feed keeps in mind", () => {
     expect(memory).toHaveLength(30);
   });
 
+  it("keeps a feed made once a day once a day when its time moves, and takes another set of times", () => {
+    expect(tasks.updateFeed("owner_1", { times: ["07:30"] })).toContain("Feed time changed to Every day at 07:30");
+    expect(tasks.updateFeed("owner_1", { at: "09:00" })).toContain("Feed time changed to Every day at 09:00");
+    expect(tasks.updateFeed("owner_1", { times: ["08:00", "12:30"] })).toContain("Feed time changed to Every day at 08:00, 12:30");
+    expect(() => tasks.updateFeed("owner_1", { times: ["06:00", "09:00", "12:00", "18:00"] })).toThrow("1–3 push times");
+  });
+
+  it("tells the midday run it is the midday one and gives it the morning push in full, so nothing is said twice", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      // An instant whose local clock leaves room for an hour on either side.
+      const local = (at: number) => { const [h, m] = new Intl.DateTimeFormat("en-GB", { timeZone: cfg.browser.timezone, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(at).split(":").map(Number); return h! * 60 + m!; };
+      let at = Date.UTC(2026, 10, 9, 12, 0);
+      if (local(at) < 120 || local(at) > 22 * 60) at += 12 * 3_600_000;
+      vi.setSystemTime(at);
+      const hhmm = (minutes: number) => `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
+      const c = local(at);
+      tasks.updateFeed("owner_1", { times: [hhmm(c), hhmm(c + 60)] });
+      tasks.runScheduleNow(feed().id, "owner_1");
+      await tick();
+      expect(brief()).toContain("this is the morning run");
+      expect(brief()).toContain("This is the morning feed: start their day");
+      expect(section(brief(), "The previous push lastPush (null if none in the last day):")).toBeNull();
+      await finishFeed("今日为你留意\n- 《城南旧事》在 B 站可以免费看。\n<!--feed-topics: [\"老电影\"]-->");
+
+      vi.setSystemTime(at + 60_000);
+      tasks.updateFeed("owner_1", { times: [hhmm(c - 60), hhmm(c + 1)] });
+      tasks.runScheduleNow(feed().id, "owner_1");
+      await tick();
+      expect(brief()).toContain("this is the midday run");
+      expect(brief()).toContain("This is the midday feed; the user already had the morning one");
+      expect(brief()).toContain("no item, link or topic from lastPush");
+      // The push as the person read it, without the machine lines.
+      const lastPush = section(brief(), "The previous push lastPush (null if none in the last day):") as { text: string };
+      expect(lastPush.text).toContain("《城南旧事》在 B 站可以免费看。");
+      expect(lastPush.text).not.toContain("feed-topics");
+    } finally { vi.useRealTimers(); }
+  });
+
   it("shows the next run what the person replied to an earlier push", async () => {
     tasks.runScheduleNow(feed().id, "owner_1");
     await tick();
@@ -283,6 +327,7 @@ describe("what the daily feed keeps in mind", () => {
   });
 
   it("runs at the same time of day in the time zone the person signed in from", () => {
+    const twice: ScheduleSpec = { kind: "daily", at: "08:00", times: ["08:00", "12:00"] };
     const zone = () => db.prepare("SELECT timezone,next_run_at FROM schedules WHERE builtin='daily_feed'").get() as { timezone: string; next_run_at: number | null };
     expect(zone().timezone).toBe(cfg.browser.timezone);
     const before = Date.now();
@@ -290,9 +335,9 @@ describe("what the daily feed keeps in mind", () => {
     const after = Date.now();
     const moved = zone();
     expect(moved.timezone).toBe("Asia/Shanghai");
-    expect([nextRun({ kind: "daily", at: "08:00" }, before, "Asia/Shanghai"), nextRun({ kind: "daily", at: "08:00" }, after, "Asia/Shanghai")]).toContain(moved.next_run_at);
-    expect(new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Shanghai", hour: "2-digit", minute: "2-digit" }).format(moved.next_run_at!)).toBe("08:00");
-    expect(tasks.listSchedules("owner_1")[0]).toMatchObject({ timezone: "Asia/Shanghai", rule: "Every day at 08:00" });
+    expect([nextRun(twice, before, "Asia/Shanghai"), nextRun(twice, after, "Asia/Shanghai")]).toContain(moved.next_run_at);
+    expect(["08:00", "12:00"]).toContain(new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Shanghai", hour: "2-digit", minute: "2-digit" }).format(moved.next_run_at!));
+    expect(tasks.listSchedules("owner_1")[0]).toMatchObject({ timezone: "Asia/Shanghai", rule: "Every day at 08:00, 12:00" });
     // Signing in again from the same place changes nothing; a paused feed stays without a next run.
     expect(tasks.followFeedTimezone("owner_1", "Asia/Shanghai")).toBe(false);
     db.prepare("UPDATE schedules SET status='paused',next_run_at=NULL WHERE builtin='daily_feed'").run();

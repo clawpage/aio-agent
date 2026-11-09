@@ -308,8 +308,8 @@ export function TaskChat({ onDetails, onOpenLink, onOpenFileInBrowser, onExpired
     const outboxNow = useRef<Outgoing[]>([]);
     const setOutboxNow = (next: (old: Outgoing[]) => Outgoing[]) => { outboxNow.current = next(outboxNow.current); setOutbox(outboxNow.current); };
     const sending = useRef<Promise<unknown>>(Promise.resolve());
-    /** A message went through on this page: the moment to offer phone notifications. */
-    const [sent, setSent] = useState(false);
+    /** Messages that went through on this page: each is a moment to offer phone notifications. */
+    const [sent, setSent] = useState(0);
     const adopted = useRef(new Set<string>());
     /** Uploads by tray item: a message sent before they finish waits for them. */
     const uploads = useRef(new Map<string, Promise<Attachment | null>>());
@@ -328,7 +328,7 @@ export function TaskChat({ onDetails, onOpenLink, onOpenFileInBrowser, onExpired
         try {
             const { task } = await api.submitTask({ text: o.text, attachments: [...o.attachments, ...results as Attachment[]], relatedTaskId: o.reference?.id ?? null, clientMessageId: id });
             adopted.current.add(task.id);
-            setSent(true);
+            setSent(n => n + 1);
             stick.current = true;
             merge([task]);
             setOutboxNow(old => old.filter(x => x.id !== id));
@@ -675,7 +675,7 @@ export function TaskChat({ onDetails, onOpenLink, onOpenFileInBrowser, onExpired
       </div>)}
     </div>
     <div className="feed-latest-anchor">{waiting.length > 0 && <div className="needs-you" role="group" aria-label={i18n.feed.needsYou.label}>{waiting.map(t => <button type="button" key={t.id} className="needs-you-bubble" onClick={() => showWaiting(t.id)} aria-label={i18n.feed.needsYou.bubble(waitingLabel(t), t.title)}><span className="needs-you-dot" aria-hidden="true"/><span className="needs-you-kind">{waitingLabel(t)}</span><span className="needs-you-title">{t.title}</span></button>)}</div>}<button type="button" className={`feed-latest${away ? " show" : ""}`} aria-label={i18n.feed.toLatest} title={i18n.feed.toLatest} aria-hidden={!away} tabIndex={away ? 0 : -1} onClick={toLatest}><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 5v14M6 13l6 6 6-6"/></svg></button></div>
-    {sent && <PushNudge/>}
+    {sent > 0 && <PushNudge key={sent}/>}
     {member && <QuotaNotice checkKey={String(tasks.reduce((latest, t) => Math.max(latest, t.completedAt ?? 0), 0))}/>}
     {notices.map(n => <div key={n.key} className={`banner${n.error ? " error" : ""}`} role="alert">{n.text}{n.onClose && <button onClick={n.onClose}>{i18n.chat.close}</button>}</div>)}
     {error && <div className="banner error" role="alert">{error}<button onClick={() => setError(null)}>{i18n.chat.close}</button></div>}

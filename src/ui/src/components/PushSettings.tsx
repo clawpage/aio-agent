@@ -61,18 +61,22 @@ function usePush() {
   const [state, setState] = useState<State>("loading");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  /** The system has never asked for notifications on this device. */
+  const [unasked, setUnasked] = useState(false);
   const app = Boolean(appBridge());
   const refresh = useCallback(async () => {
     if (app) {
       // Only offered once the deployment can reach the app (it has an APNs key).
       if (!(await api.pushInfo()).apns) { setState("unsupported"); return; }
       const answer = await askApp("status");
+      setUnasked(answer.permission === "default");
       if (answer.permission !== "granted") { setState(answer.permission === "denied" ? "denied" : "off"); return; }
       const endpoint = appEndpoint(answer);
       setState(endpoint && (await api.pushInfo(endpoint)).subscribed ? "on" : "off");
       return;
     }
     if (!supported()) { setState(iosBrowser() && !standalone() ? "install" : "unsupported"); return; }
+    setUnasked(Notification.permission === "default");
     if (Notification.permission === "denied") { setState("denied"); return; }
     const registration = await navigator.serviceWorker.getRegistration("/");
     const subscription = await registration?.pushManager.getSubscription();
@@ -91,6 +95,7 @@ function usePush() {
     try {
       if (app) {
         const answer = await askApp("enable");
+        setUnasked(false);
         if (answer.permission !== "granted") { setState(answer.permission === "denied" ? "denied" : "off"); return; }
         if (!answer.token || !answer.environment) throw new Error(t.app.push.enableFailed);
         await api.pushSubscribeApp(answer.token, answer.environment);
@@ -100,6 +105,7 @@ function usePush() {
       }
       // Ask first, straight from the tap: iOS refuses a prompt that follows other awaits.
       const permission = await Notification.requestPermission();
+      setUnasked(permission === "default");
       if (permission !== "granted") { setState(permission === "denied" ? "denied" : "off"); return; }
       const registration = await navigator.serviceWorker.register("/sw.js", { scope: "/" });
       await navigator.serviceWorker.ready;
@@ -127,7 +133,7 @@ function usePush() {
       setState("off");
     } catch (err) { setMessage(err instanceof Error ? err.message : t.app.push.disableFailed); } finally { setBusy(false); }
   };
-  return { state, busy, message, enable, disable, app };
+  return { state, busy, message, enable, disable, app, unasked };
 }
 
 /** The configuration page's switch; hidden where the device cannot receive notifications at all. */
@@ -153,26 +159,33 @@ export function PushSettings() {
   );
 }
 
-/** Asked once per device: after the person's first message, while notifications could still be turned on here. */
+/** The hint to add the console to the home screen is shown once per device: nothing here can turn notifications on. */
 const NUDGE_KEY = "aio.pushNudge";
 function nudged(): boolean {
   try { return localStorage.getItem(NUDGE_KEY) === "1"; } catch { return false; }
 }
 
-/** Under the feed after a message is sent: one tap turns notifications on; either answer puts it away for good. */
+/**
+ * Under the feed after each message sent, on a device the system has never asked for notifications:
+ * one tap brings up its prompt. "Not now" puts it away until the next message; once the system has
+ * asked (allowed or refused), or notifications were turned off here on purpose, it is not offered again.
+ */
 export function PushNudge() {
-  const { state, busy, message, enable } = usePush();
-  const [done, setDone] = useState(nudged);
-  const finish = () => {
-    try { localStorage.setItem(NUDGE_KEY, "1"); } catch { /* storage unavailable: it goes away for this page only */ }
+  const { state, busy, message, enable, unasked } = usePush();
+  const [done, setDone] = useState(false);
+  const [installSeen, setInstallSeen] = useState(nudged);
+  const later = () => {
+    if (state === "install") {
+      try { localStorage.setItem(NUDGE_KEY, "1"); } catch { /* storage unavailable: it goes away for this page only */ }
+      setInstallSeen(true);
+    }
     setDone(true);
   };
-  useEffect(() => { if (state === "on" || state === "denied") finish(); }, [state]);
-  if (done || (state !== "off" && state !== "install")) return null;
+  if (done || !(state === "off" && (unasked || busy)) && !(state === "install" && !installSeen)) return null;
   return <div className="banner push-nudge" role="status">
     <NavIcon name="bell"/>
     <span>{state === "install" ? t.app.push.install : t.app.push.nudge}{message && <span className="muted tiny"> {message}</span>}</span>
     {state === "off" && <button type="button" disabled={busy} onClick={() => void enable()}>{t.app.push.nudgeEnable}</button>}
-    <button type="button" onClick={finish}>{state === "install" ? t.app.push.nudgeOk : t.app.push.nudgeLater}</button>
+    <button type="button" onClick={later}>{state === "install" ? t.app.push.nudgeOk : t.app.push.nudgeLater}</button>
   </div>;
 }

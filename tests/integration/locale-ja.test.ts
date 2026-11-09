@@ -31,7 +31,7 @@ describe("a Japanese console over real HTTP", () => {
     expect(feed).toMatchObject({
       title: "デイリーフィード",
       instruction: "これまでのタスクをもとに、今日あなたが興味を持ちそうな内容と必要なリマインダーをまとめます",
-      rule: expect.stringMatching(/^毎日 \d{2}:\d{2}$/),
+      rule: expect.stringMatching(/^毎日 \d{2}:\d{2}、\d{2}:\d{2}$/),
       nextRunText: expect.stringMatching(/^\d{1,2}月\d{1,2}日（[月火水木金土日]）\d{2}:\d{2}$/),
     });
   });

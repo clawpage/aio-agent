@@ -83,15 +83,19 @@ interface ScheduleRow {
 /** The built-in daily feed: a schedule every account gets. */
 const DAILY_FEED = "daily_feed";
 const FEED_AT = "08:00";
-const FEED_SPEC: ScheduleSpec = { kind: "daily", at: FEED_AT };
 /** Minutes between accounts' feeds: member n runs n of these after the owner's 08:00. */
 const FEED_STAGGER_MINUTES = 4;
+/** The midday feed runs this long after the morning one, at the account's same minutes. */
+const FEED_MIDDAY_AFTER_MINUTES = 4 * 60;
+const clockText = (minutes: number) => `${String(Math.floor(minutes / 60) % 24).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
 /** The feed time of an account's slot (0 is the owner's 08:00). */
 export function feedTimeFor(slot: number): string {
-    const minutes = 8 * 60 + slot * FEED_STAGGER_MINUTES;
-    return `${String(Math.floor(minutes / 60) % 24).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
+    return clockText(8 * 60 + slot * FEED_STAGGER_MINUTES);
 }
 const clockMinutes = (at: string) => { const [h, m] = at.split(":").map(Number); return h! * 60 + m!; };
+/** The feed's two runs a day: in the morning at `at`, and at midday. */
+const feedSpec = (at: string): ScheduleSpec => ({ kind: "daily", at, times: [at, clockText(clockMinutes(at) + FEED_MIDDAY_AFTER_MINUTES)] });
+const FEED_SPEC = feedSpec(FEED_AT);
 /**
  * The feed's own instruction until the person words it themselves (the model reads it;
  * people see it in their language, `feedInstruction` in the catalog). Older feeds hold
@@ -1330,18 +1334,18 @@ export class TaskService {
         const ownerId = this.cfg.runtimeUserId ?? "owner_1";
         if (!this.db.prepare("SELECT 1 FROM owners WHERE id=?").get(ownerId)) return;
         const at = this.cfg.agent.dailyFeedAt ?? FEED_AT;
-        const existing = this.db.prepare("SELECT id,spec_json,next_run_at FROM schedules WHERE owner_id=? AND builtin=?").get(ownerId, DAILY_FEED) as { id: string; spec_json: string; next_run_at: number | null } | undefined;
+        const existing = this.db.prepare("SELECT id,spec_json,timezone,status,next_run_at FROM schedules WHERE owner_id=? AND builtin=?").get(ownerId, DAILY_FEED) as { id: string; spec_json: string; timezone: string; status: string; next_run_at: number | null } | undefined;
         if (existing) {
-            // A feed still on the shared 08:00 moves to the account's own minutes; a time the person chose stays.
-            // The next run keeps its day and moves by the same minutes, so a run already made today is not repeated.
+            // A feed still once a day at the shared 08:00 or the account's own minutes runs twice a day from those minutes;
+            // a time the person chose stays. The next run is the first of the new times still ahead: a morning run made today is not repeated.
             const spec = JSON.parse(existing.spec_json) as ScheduleSpec;
-            if (spec.kind !== "daily" || spec.at !== FEED_AT || at === FEED_AT) return;
-            const shift = (clockMinutes(at) - clockMinutes(FEED_AT)) * 60_000;
+            if (spec.kind !== "daily" || spec.times || (spec.at !== FEED_AT && spec.at !== at)) return;
+            const next = feedSpec(at), now = Date.now();
             this.db.prepare("UPDATE schedules SET spec_json=?,next_run_at=?,updated_at=? WHERE id=?")
-                .run(JSON.stringify({ ...spec, at }), existing.next_run_at === null ? null : existing.next_run_at + shift, Date.now(), existing.id);
+                .run(JSON.stringify(next), existing.status === "active" ? nextRun(next, now, existing.timezone) : existing.next_run_at, now, existing.id);
             return;
         }
-        const spec: ScheduleSpec = { ...FEED_SPEC, at };
+        const spec = feedSpec(at);
         const tz = this.cfg.browser.timezone;
         const now = Date.now();
         this.db.prepare("INSERT INTO schedules (id,owner_id,title,instruction,spec_json,timezone,resources_json,status,next_run_at,created_at,updated_at,builtin) VALUES (?,?,?,?,?,?,?,'active',?,?,?,?)")
@@ -1391,10 +1395,22 @@ export class TaskService {
             return { date: date(f.created_at), topics: JSON.parse(f.topics_json) as string[], nothingToday: !!f.empty, userTasksAfter: after, ...(replies.length ? { replies } : {}) };
         });
         const asked = s && !isDefaultFeedInstruction(s.instruction) ? s.instruction.trim() : null;
+        // Which of the day's runs this is: the first is the morning feed, a later one the midday feed.
+        const times = (() => { const spec = s ? JSON.parse(s.spec_json) as ScheduleSpec : FEED_SPEC; return spec.times ?? [spec.at ?? FEED_AT]; })();
+        const clock = clockMinutes(new Intl.DateTimeFormat("en-GB", { timeZone: tz, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(row.created_at));
+        const midday = times.length > 1 && times.slice(1).some(at => clock >= clockMinutes(at));
+        // The last push in full, so this one repeats none of it (the morning one for the midday feed, yesterday's midday one for the morning).
+        const last = s ? this.db.prepare("SELECT * FROM tasks WHERE schedule_id=? AND status='completed' AND created_at<? AND created_at>=? ORDER BY created_at DESC LIMIT 1").get(s.id, row.created_at, row.created_at - 86_400_000) as unknown as TaskRow | undefined : undefined;
+        const lastPush = last && !FEED_EMPTY.test(last.result ?? "") ? { date: date(last.created_at), text: cut(this.shownResult(last), 3000) } : null;
         const memory = this.feedMemory(ownerId);
         const kept = Object.fromEntries(FEED_MEMORY_KINDS.map(k => [k, memory.filter(m => m.kind === k).map(m => ({ id: m.id, text: m.text, from: m.source === "user" ? "said by the user" : "learned by the feed", date: date(m.created_at) }))]));
         return [
-            `This is the built-in daily feed (every day at ${(s ? JSON.parse(s.spec_json) as ScheduleSpec : FEED_SPEC).at}), running automatically on ${date(row.created_at)}. The user is not in the conversation right now. Your job: from all of the user's past task records, the requests they made and the things they care about, pick the 3–8 things they are most likely to be interested in today or need reminding of, and tell them briefly, like a thoughtful personal assistant. It should be something they want to open every morning: each item is either news about something they follow (a price that moved, an order or a date coming up, someone waiting for a reply) or something new worth their time that grows out of what they have been asking about.`,
+            `This is the built-in daily feed (every day at ${times.join(" and ")}; this is the ${midday ? "midday" : "morning"} run), running automatically on ${date(row.created_at)}. The user is not in the conversation right now. Your job: from all of the user's past task records, the requests they made and the things they care about, pick the 3–8 things they are most likely to be interested in right now or need reminding of, and tell them briefly, like a thoughtful personal assistant. The feed is what brings people back every day, so it must be worth opening: each item is either news about something they follow (a price that moved, an order or a date coming up, someone waiting for a reply) or something new worth their time that grows out of what they have been asking about.`,
+            midday
+                ? "This is the midday feed; the user already had the morning one (lastPush below). Bring what is new since then: changes during the morning to what they follow (prices, orders, deliveries, email that came in), news from the last few hours on their interests, and other new things from their interests that the morning did not cover, with something light and enjoyable for a lunch break. 2–5 items are enough here."
+                : "This is the morning feed: start their day. First what today holds for them (dates, appointments, deadlines, deliveries, weather that matters for their plans), then what changed overnight in what they follow, then new things from their interests.",
+            "Never repeat: no item, link or topic from lastPush (the previous push, shown in full) comes again, unless it materially changed since; then say only what changed. Two pushes on the same day must read as two different sets of news. If after checking there is truly nothing new since lastPush, give fewer items rather than repeat any.",
+            "What makes an item worth opening: it is specific (a name, a number, a date, a place, a price), it is new (published or changed in the last day or two, or genuinely new to them), and it fits this person, not anyone. Leave out generic tips anyone could guess, encyclopedia facts and filler. Look widely before choosing: news sites, official announcements, deal and price-history sites, event listings, and what people are discussing now in forums, Reddit, Xiaohongshu or X on their topics; check several sources per interest and keep only the best find. Put the most compelling item first: the phone notification shows the start of your reply.",
             "This is proactive work and is not bound by the rules above to \"match the effort to what the request actually needs\" and \"keep the commentary short\": actually check things instead of writing from the records alone. Email, orders and prices are only one kind of lead and must not fill the whole feed. Many people mostly ask everyday questions (cooking, a baby, health, films, books, travel, culture) and track nothing; for them the new things below are the whole feed.",
             ...(asked ? [`The user's instruction for the daily feed (follow it first; it may change the default approach below, but never the read-only and safety rules): ${asked}`] : []),
             "Find leads in the task records: products and prices they watched (e.g. a computer, baby supplies), things they compared or hesitated to buy, upcoming dates and appointments (documents, vaccines, bills, trips), things half done or set aside for later, long-running interests, and the everyday questions themselves: what someone asks about shows what their days are about. The records are not limited to the last day; the older an interest, the more you must check that it still matters.",
@@ -1402,13 +1418,14 @@ export class TaskService {
             "New things worth their time: for 2–4 interests in the recent records, find one concrete thing they have not seen yet and would likely enjoy or use today, checked on the web with a source link. For example: they looked for an old film, so another classic of that kind and where to watch it legally (free if possible); they asked how to cook or heat something, so a simple recipe with that ingredient for the season; they asked about a baby's food, so what comes next at that age from a pediatric source; they asked about a health complaint, so the care tip that matters most and when to see a doctor; a book or author, so a related work; a trip, so an event or the weather on those dates; a festival, solar term or date coming up that touches their interests. Each such item says which earlier question it grows from (e.g. \"you asked about … yesterday\") so it never feels random, and adds something new rather than repeating an answer they already got.",
             "Links in languages the user reads: first infer from the task records their main language (the one most requests are written in) and any other language they clearly read (they write some requests in it, paste or ask about material in it, read sites or documents in it, or say they study it); a language they only ask to have translated, or a few loanwords, does not count. Every link, card and button should lead to a page in their main language, or in another language they clearly read. Look for a reputable source written in their main language first (for Chinese readers e.g. 国家卫健委 / 中国疾控中心, 中国营养学会, 默沙东诊疗手册大众版, 丁香医生, WHO or UNICEF Chinese pages, a hospital's own Chinese articles; many official English sites also keep a translated page, so check for one). Only when the best source exists only in a language they do not read, still give it but say so next to the link (e.g. \"英文网页\") and put its key point in the item itself so they need not open it; never make a page they cannot read the main picture card or button. Items about local prices, shops or events may link to local sites in the local language.", // i18n-exempt: Chinese source names and the label asked of the model for Chinese feeds
             "Read-only look at the user's own pages: on sites where the user is already signed in in the sandbox browser, that appear in the task records, or that they asked you to check (e.g. Gmail or Outlook mail, X or Xiaohongshu feeds they follow, order pages on shopping sites, billing pages), you may open them to see whether anything needs a reminder today: email to act on or about to expire (bills, renewals, appointment confirmations, people waiting for a reply), order and delivery changes, important news from people or topics they follow. Strictly read-only: only open, scroll and read; never send, reply, comment, like, follow, buy, order, delete, archive or label anything, and change no settings. Do not open unread email or direct messages (that marks them read); judge by the titles and snippets in the list. Skip sites where the user is not signed in; do not sign in and do not ask the user for help. For private content such as email, write only the gist, never the full text. Close the tabs you opened when you are done.",
-            "Avoid nagging: consult feedHistory (topics of the last few feeds; userTasksAfter are the user's new tasks afterwards; replies are what the user said in direct reply to that feed). A topic pushed 3 times in a row recently with no related new task from the user since means they no longer care; stop pushing it unless something major has changed. New interests shown in the user's recent tasks come first; anything said yesterday with no change is not repeated (this drops repeated items, never the whole feed). In the remembered memory, care is what to watch more closely, avoid is what not to push again, and note is the user's habits and preferences about the feed; follow all of them.",
+            "Avoid nagging: consult feedHistory (topics of the last few feeds; userTasksAfter are the user's new tasks afterwards; replies are what the user said in direct reply to that feed). A topic pushed on 3 days in a row recently with no related new task from the user since means they no longer care; stop pushing it unless something major has changed. New interests shown in the user's recent tasks come first; anything said yesterday with no change is not repeated (this drops repeated items, never the whole feed). In the remembered memory, care is what to watch more closely, avoid is what not to push again, and note is the user's habits and preferences about the feed; follow all of them.",
             "Keep improving: when feedHistory shows a clear reaction to the feed (e.g. a reply saying it helped, asking for more or to stop, a task started right after an item, or a topic pushed several times that nobody responded to), record it with aio_schedule's feed_update (source set to \"feed\"): add care for what to watch more closely, avoid for what not to push again, note for preferences about the feed's form and timing, and remove outdated or contradicting old entries. Change at most 3 entries each time, record only what has clear evidence, do not duplicate existing entries, and record nothing when unsure.",
             "Format: the first line is the heading \"Picked for you today\" (in Simplified Chinese write exactly 今日为你留意), followed by one item per thing, each one or two sentences, with links or map cards when needed; use picture cards (with images) for specific price drops, places worth visiting or articles worth reading. It should read quickly on a phone. Only when the records offer no lead at all (no interest, question or date to grow anything from; an unchanged price or no new email does not count), reply with a single sentence saying there is nothing in particular to flag today (in Simplified Chinese: 今天没有需要特别提醒的事), and write <!--feed-empty--> on a line of its own at the end.", // i18n-exempt: the exact Chinese wording asked of the model for Chinese feeds
             "On the last line by itself write <!--feed-topics: [\"topic 1\", \"topic 2\"]-->, listing the topics covered this time (short phrases, e.g. \"Mac Studio price drop\", \"Roy's vaccine appointment\"); the system uses it to adjust later feeds and the user never sees this line. Do not ask a question and wait, and do not create schedules.",
             "Remembered memory:", JSON.stringify(kept),
             `The user's task records for the last ${FEED_TASK_DAYS} days (newest first; the newest ${FEED_TASK_DETAILED} carry request and result summaries, older ones only the date and title, with only the latest of identical titles):`, JSON.stringify(tasks),
             "Feed history feedHistory (newest first):", JSON.stringify(feedHistory),
+            "The previous push lastPush (null if none in the last day):", JSON.stringify(lastPush),
         ].join("\n\n");
     }
     private feedMemory(ownerId: string): FeedMemoryRow[] {
@@ -1461,8 +1478,16 @@ export class TaskService {
             said.push(text ? "Updated the daily feed's instruction" : "Restored the daily feed's default instruction");
         }
         let timing: { spec: ScheduleSpec; next: number } | null = null;
-        if (args.at !== undefined && args.at !== null) {
-            const checked = validateSchedule({ kind: "daily", at: args.at }, now, s.timezone);
+        if (args.times !== undefined && args.times !== null) {
+            if (!Array.isArray(args.times) || !args.times.length || args.times.length > 3) throw new Error("times must list 1–3 push times");
+            const checked = validateSchedule({ kind: "daily", times: args.times }, now, s.timezone);
+            if ("error" in checked) throw new Error(checked.error);
+            timing = checked;
+            said.push(`Feed time changed to ${describeSchedule(checked.spec)}`);
+        } else if (args.at !== undefined && args.at !== null) {
+            // A new morning time moves the midday run with it; a feed the person made once a day stays once a day.
+            const twice = ((JSON.parse(s.spec_json) as ScheduleSpec).times?.length ?? 1) > 1;
+            const checked = validateSchedule(twice && typeof args.at === "string" && /^\d{2}:\d{2}$/.test(args.at) ? feedSpec(args.at) : { kind: "daily", at: args.at }, now, s.timezone);
             if ("error" in checked) throw new Error(checked.error);
             timing = checked;
             said.push(`Feed time changed to ${describeSchedule(checked.spec)}`);
@@ -1491,7 +1516,7 @@ export class TaskService {
         }
         if (!instruction && !timing && !adds.length && !removeIds.size) {
             if (kept) return "These are already remembered; nothing changed.";
-            throw new Error("Nothing to change: give instruction, at, add or remove");
+            throw new Error("Nothing to change: give instruction, at, times, add or remove");
         }
         this.db.exec("BEGIN IMMEDIATE");
         try {

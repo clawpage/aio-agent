@@ -64,29 +64,38 @@ test("the configuration page has one switch for phone notifications", async ({ p
   expect(bodies.unsubscribe).toEqual({ endpoint: "https://web.push.apple.com/fake" });
 });
 
-test("after the first message the console offers phone notifications, once", async ({ page }, info) => {
+test("until the system has asked on this device, every message sent offers phone notifications", async ({ page }, info) => {
   const bodies = await setup(page);
   await page.route("**/api/tasks", async (r) => {
     const body = r.request().postDataJSON() as Record<string, unknown>;
-    const task = { id: "task-1", revision: 1, title: String(body.text), text: body.text, conversationId: "c-1", status: "planning", result: null, error: null, attachments: [], relatedTaskId: null, dependencies: [], approvals: 0, createdAt: Date.now(), completedAt: null, clientMessageId: body.clientMessageId };
+    const task = { id: `task-${body.clientMessageId}`, revision: 1, title: String(body.text), text: body.text, conversationId: "c-1", status: "planning", result: null, error: null, attachments: [], relatedTaskId: null, dependencies: [], approvals: 0, createdAt: Date.now(), completedAt: null, clientMessageId: body.clientMessageId };
     await r.fulfill({ status: 202, json: { task, duplicate: false } });
   });
+  // An answer of "not now" on an earlier version of the console does not count: the system never asked.
+  await page.addInitScript(() => localStorage.setItem("aio.pushNudge", "1"));
   await page.goto("/");
   await expect(page.locator(".boot-cover")).toHaveCount(0, { timeout: 60_000 });
   const nudge = page.locator(".push-nudge");
+  const send = async (text: string) => {
+    await page.getByRole("textbox", { name: "消息", exact: true }).fill(text);
+    await page.getByRole("button", { name: "发送", exact: true }).click();
+    await expect(page.getByText(text).first()).toBeVisible();
+  };
   await expect(nudge).toHaveCount(0);
-  await page.getByRole("textbox", { name: "消息", exact: true }).fill("帮我查天气");
-  await page.getByRole("button", { name: "发送", exact: true }).click();
+  await send("帮我查天气");
   await expect(nudge).toContainText("开启手机通知");
   await page.screenshot({ path: info.outputPath("push-nudge.png") });
+  // "Not now" puts it away until the next message.
+  await nudge.getByRole("button", { name: "暂不", exact: true }).click();
+  await expect(nudge).toHaveCount(0);
+  await send("明天呢");
+  await expect(nudge).toContainText("开启手机通知");
   await nudge.getByRole("button", { name: "开启", exact: true }).click();
   await expect(nudge).toHaveCount(0);
   expect(bodies.subscribe).toBeTruthy();
-  // Answered on this device: a reload and another message do not ask again.
+  // The system has asked on this device: a reload and another message do not ask again.
   await page.reload();
-  await page.getByRole("textbox", { name: "消息", exact: true }).fill("再查一次");
-  await page.getByRole("button", { name: "发送", exact: true }).click();
-  await expect(page.getByText("再查一次").first()).toBeVisible();
+  await send("再查一次");
   await expect(nudge).toHaveCount(0);
 });
 
@@ -174,6 +183,24 @@ test("in the iOS app the nudge after the first message turns notifications on", 
   await expect(nudge).toHaveCount(0);
   expect(bodies.subscribe).toEqual({ apns: { token: "ab".repeat(32), environment: "production" } });
 });
+
+for (const permission of ["granted", "denied"] as const) {
+  test(`in the iOS app a device the system already asked (${permission}) is not offered notifications after a message`, async ({ page }) => {
+    await setupApp(page, { permission });
+    await page.route("**/api/tasks", async (r) => {
+      const body = r.request().postDataJSON() as Record<string, unknown>;
+      const task = { id: "task-1", revision: 1, title: String(body.text), text: body.text, conversationId: "c-1", status: "planning", result: null, error: null, attachments: [], relatedTaskId: null, dependencies: [], approvals: 0, createdAt: Date.now(), completedAt: null, clientMessageId: body.clientMessageId };
+      await r.fulfill({ status: 202, json: { task, duplicate: false } });
+    });
+    await page.goto("/");
+    await expect(page.locator(".boot-cover")).toHaveCount(0, { timeout: 60_000 });
+    await page.getByRole("textbox", { name: "消息", exact: true }).fill("帮我查天气");
+    await page.getByRole("button", { name: "发送", exact: true }).click();
+    await expect(page.getByText("帮我查天气").first()).toBeVisible();
+    await page.waitForTimeout(500);
+    await expect(page.locator(".push-nudge")).toHaveCount(0);
+  });
+}
 
 test("in the iOS app nothing is offered until the deployment can reach the app", async ({ page }, info) => {
   await setupApp(page, { permission: "default", apns: false });
