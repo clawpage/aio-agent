@@ -44,6 +44,23 @@ addEventListener("vite:preloadError", (event) => {
   location.reload();
 });
 
+// On a poor network the stylesheet can fail while the script arrives, leaving an unstyled page.
+// Once the page has settled, a stylesheet that did not load is asked for again, a few times.
+// (A browser may keep a sheet for a file that failed, whose rules it refuses to show.)
+function loaded(link: HTMLLinkElement) {
+  try { return Boolean(link.sheet?.cssRules.length); } catch { return false; }
+}
+function retryStyles(link: HTMLLinkElement, attempt: number) {
+  if (loaded(link) || attempt > 3) return;
+  const again = link.cloneNode() as HTMLLinkElement;
+  again.href = `${link.href.split("?")[0]}?retry=${attempt}`;
+  again.addEventListener("error", () => setTimeout(() => retryStyles(again, attempt + 1), attempt * 1000));
+  link.replaceWith(again);
+}
+const checkStyles = () => document.querySelectorAll<HTMLLinkElement>('link[rel="stylesheet"]').forEach((link) => retryStyles(link, 1));
+if (document.readyState === "complete") checkStyles();
+else addEventListener("load", checkStyles);
+
 const container = document.getElementById("root");
 if (!container) throw new Error("#root not found");
 createRoot(container).render(

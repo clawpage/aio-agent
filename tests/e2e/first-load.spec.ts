@@ -112,3 +112,15 @@ test("an account with nothing yet is greeted once the feed answers, and a starte
   await expect(composer).toHaveValue("我自己的草稿");
   await page.screenshot({ path: info.outputPath("starter-sent.png") });
 });
+
+test("a stylesheet lost on a poor network is asked for again, so the page is not left unstyled", async ({ page }) => {
+  await mockConsole(page, { conversations: [] });
+  await page.route("**/api/main*", (r) => r.fulfill({ json: { mode: "tasks", tasks: [], nextBefore: null } }));
+  let failed = 0;
+  await page.route((url) => /^\/assets\/index-[^/]+\.css$/.test(url.pathname) && !url.search, (r) => { failed++; return r.abort("connectionreset"); });
+  await page.goto("/");
+  await expect.poll(() => page.evaluate(() => [...document.styleSheets].some((s) => s.href?.includes("?retry=")))).toBe(true);
+  expect(failed).toBe(1);
+  const bg = await page.evaluate(() => getComputedStyle(document.body).backgroundColor);
+  expect(bg).not.toBe("rgba(0, 0, 0, 0)");
+});
