@@ -15,6 +15,7 @@ import { USER_BROWSER_TOOLS } from "./userBrowserTools.js";
 import { siteCovers, siteOfUrl, type Vault } from "./vault.js";
 import { CLEAR_PASSWORDS_SCRIPT, loginSteps, MAX_MAC_LOGIN_TRIES, runMacLogin } from "./macLogin.js";
 import type { LoginStep } from "./browser/tabs.js";
+import type { EnvAnswer } from "./envs/catalog.js";
 
 /**
  * An account's AI Chrome, on the Mac it linked for its phones (DeviceLinks):
@@ -332,6 +333,33 @@ export class UserBrowserGateway {
         ? "The browser bridge on the user's Mac did not answer (the Mac app may need an update). Use the sandbox browser (aio_tabs) for this task instead."
         : MAC_OFFLINE);
     }
+  }
+
+  /**
+   * aio_env's browser on a Mac that answers it itself (device protocol 1, envs/registry.ts). The device
+   * does the browsing; the console keeps what only it can: the page on the task's card, the person
+   * taking it over, and request_human, which waits here for the person to hand the page back.
+   */
+  async envCall(userId: string, headers: http.IncomingHttpHeaders, tool: string, args: Record<string, unknown>, send: () => Promise<EnvAnswer>): Promise<EnvAnswer> {
+    const header = headers[TAB_TASK_HEADER.toLowerCase()];
+    const key = typeof header === "string" && KEY.test(header) ? header : null;
+    if (tool === "browser_request_human") {
+      if (!key) return { ok: false, code: "invalid", message: "request_human is not available in this session; ask the user in your reply instead." };
+      const answer = (await this.#waitForHuman(0, userId, key, String(args.reason ?? "").trim().slice(0, 300))) as { result: { content: Array<{ text: string }>; isError?: boolean } };
+      const text = answer.result.content[0]!.text;
+      return answer.result.isError ? { ok: false, message: text } : { ok: true, result: { text } };
+    }
+    if (key && this.#page(userId, key)?.holder === "human") return { ok: false, code: "busy", message: TAKEN_OVER };
+    if (this.#signingIn.has(userId)) return { ok: false, code: "busy", message: SIGNING_IN };
+    const answer = await send();
+    const opened = answer.ok ? (answer.result ?? {}) as { page?: unknown; title?: unknown; url?: unknown } : null;
+    if (key && tool === "browser_open" && opened && Number.isInteger(opened.page)) {
+      const page = this.#page(userId, key, true)!;
+      page.pageId = opened.page as number;
+      page.title = String(opened.title ?? "").slice(0, 200);
+      page.url = String(opened.url ?? "").slice(0, 2000);
+    }
+    return answer;
   }
 
   /** Remember which page a task works in, from what it asked for and what came back. */

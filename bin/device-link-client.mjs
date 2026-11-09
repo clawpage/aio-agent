@@ -4,16 +4,18 @@
  * and serves what comes down the socket from its own loopback server. Only the
  * bridge's endpoints pass: POST /mcp, GET /status, GET /screenshot, the
  * browser's POST /browser/mcp, GET /browser/status, GET /browser/screenshot and
- * POST /browser/front, the terminal's POST /shell/mcp and GET /shell/status, and
- * the /screen and /browser/screen WebSockets; anything
- * else is answered 404 without reaching it.
+ * POST /browser/front, the terminal's POST /shell/mcp and GET /shell/status,
+ * device protocol 1's GET /env/manifest and POST /env/call, and the /screen and
+ * /browser/screen WebSockets; anything else is answered 404 without reaching it.
+ * The bridge tells the control plane what changed unasked with `event` (a
+ * `{ t: "event", name, data }` frame).
  *
  * Frames: JSON text for requests, responses and channel control; binary frames
  * carry a channel's binary data, prefixed by the channel id (4 bytes, big endian).
  */
 import WebSocket from "ws";
 
-const ROUTES = new Set(["POST /mcp", "GET /status", "GET /screenshot", "POST /browser/mcp", "GET /browser/status", "GET /browser/screenshot", "POST /browser/front", "POST /shell/mcp", "GET /shell/status"]);
+const ROUTES = new Set(["POST /mcp", "GET /status", "GET /screenshot", "POST /browser/mcp", "GET /browser/status", "GET /browser/screenshot", "POST /browser/front", "POST /shell/mcp", "GET /shell/status", "GET /env/manifest", "POST /env/call"]);
 /** A browser page named by its id, the only query a path may carry. */
 const PAGE_QUERY = /^(?:\?page=[1-9]\d{0,5})?$/;
 /** The routes a path names, or null when it carries anything else. */
@@ -22,7 +24,7 @@ const route = (method, path) => {
   const name = at < 0 ? String(path) : String(path).slice(0, at), query = at < 0 ? "" : String(path).slice(at);
   return PAGE_QUERY.test(query) && ROUTES.has(`${method} ${name}`) ? name : null;
 };
-const PASSED_HEADERS = ["content-type", "accept", "mcp-session-id", "mcp-protocol-version", "x-aio-shell-session"];
+const PASSED_HEADERS = ["content-type", "accept", "mcp-session-id", "mcp-protocol-version", "x-aio-shell-session", "x-aio-task"];
 const REPLY_HEADERS = ["content-type", "mcp-session-id"];
 const MAX_FRAME = 32 * 1024 * 1024;
 
@@ -137,6 +139,10 @@ export function linkDevice({ url, token, name, local, localToken, onState, silen
 
   connect();
   return {
+    /** Tell the control plane something unasked (dropped while offline: it reads everything again on reconnect). */
+    event(name, data) {
+      send({ t: "event", name, data });
+    },
     close() {
       stopped = true;
       clearTimeout(timer);

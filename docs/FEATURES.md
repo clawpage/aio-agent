@@ -947,7 +947,8 @@ Android 手机用 USB 接在装了 Mac App 的 Mac 上，由 App 运行的 `bin/
   （`POST /api/device-links`，只返回一次，库里只存哈希），App 把它存在只有本机用户能读的文件里（`~/Library/Application Support/ai.clawpage.agent/device-link.json`，0600），
   首次使用时把手机组件装进同一目录（Node.js、mobile-mcp 与 ws 按 App 内锁文件 `npm ci`、scrcpy、adb；都是固定版本并校验 SHA-256，Mac 上已有 adb 就直接用），
   然后运行桥接。桥接主动连到 `wss://<主站>/api/device-link/connect`（`bin/device-link-client.mjs`），控制面把该账号的工具调用、状态、截图和实时画面经这条连接发给它；
-  这条连接只放行桥接自己的入口（手机的 MCP、状态、截图、实时画面，以及浏览器的 MCP 与状态）。App 开着时手机可用；「手机」里列出该账号连过的 Mac，可随时移除，移除后连接立即断开、App 删掉令牌。
+  这条连接只放行桥接自己的入口（手机的 MCP、状态、截图、实时画面，浏览器与终端的 MCP 与状态，以及执行环境协议的 `GET /env/manifest`、`POST /env/call`）。
+  桥接同时讲执行环境协议 1（`bin/mac-env.mjs`，见 `docs/EXEC-ENVS.md`「The Mac」）：这台 Mac（AI 的 Chrome 可用时有 `browser`，终端打开时有 `shell`）与 USB 上的每部手机（`apps`、`screen`）各是一个环境，插拔手机、装上或卸掉 Chrome 后约 3 秒内告知控制面；只在 `PA_EXEC_ENVS=1` 时由 `aio_env` 使用，`aio_mac_native` 照旧。App 开着时手机可用；「手机」里列出该账号连过的 Mac，可随时移除，移除后连接立即断开、App 删掉令牌。
   一个账号连了多台 Mac 时用最近连上的那台。在浏览器里打开时「手机」只列出连过的 Mac 并说明要装 Mac App。
 - **授权**：每个账号只有自己的手机。成员网关只给连过 Mac 的账号发手机令牌：连上第一台 Mac 时该账号新开的执行会话获得 `aio_mac_native`，
   移除最后一台后失去；`/api/phone` 与画面接口只返回本账号的手机，没有时返回“不可用”。

@@ -33,7 +33,8 @@
       "../../../../bin/phone-bridge.mjs": "phone/phone-bridge.mjs",
       "../../../../bin/device-link-client.mjs": "phone/device-link-client.mjs",
       "../../../../bin/user-browser.mjs": "phone/user-browser.mjs",
-      "../../../../bin/mac-shell.mjs": "phone/mac-shell.mjs"
+      "../../../../bin/mac-shell.mjs": "phone/mac-shell.mjs",
+      "../../../../bin/mac-env.mjs": "phone/mac-env.mjs"
     }
   }
 }

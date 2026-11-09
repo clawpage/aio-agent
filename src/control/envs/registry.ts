@@ -3,7 +3,8 @@ import type { Logger } from "../../common/logger.js";
 import type { DeviceLinks, Tunnel } from "../deviceLink.js";
 import type { PhoneGateway } from "../phone.js";
 import type { UserBrowserGateway } from "../userBrowser.js";
-import type { MacShellGateway } from "../macShell.js";
+import { MAX_COMMAND_S, SLACK_MS, type MacShellGateway } from "../macShell.js";
+import { TAB_TASK_HEADER } from "../browser/tabs.js";
 import { CAPABILITIES, TOOL_CAPABILITY, type Capability, type EnvAnswer, type EnvInfo, type EnvKind } from "./catalog.js";
 import { iosCapabilities, OldMac, type MacCaller } from "./legacy.js";
 
@@ -63,6 +64,7 @@ export class EnvRegistry {
   #links: DeviceLinks;
   #log: Logger;
   #mac: OldMac;
+  #browser?: UserBrowserGateway;
   #known = new Map<string, Known[]>();
   #reading = new Map<Tunnel, Promise<void>>();
 
@@ -70,6 +72,7 @@ export class EnvRegistry {
     this.#links = opts.links;
     this.#log = opts.log.child("envs");
     this.#mac = new OldMac(opts);
+    this.#browser = opts.browser;
     opts.links.watch((tunnel, online) => {
       if (online) {
         tunnel.events.on("event", (name: string, data: unknown) => { if (name === "manifest") this.#apply(tunnel, this.#fromManifest(tunnel, data)); });
@@ -121,9 +124,21 @@ export class EnvRegistry {
       if (route.kind === "android") return this.#mac.phone(caller, tool, args, route.deviceId);
       return TOOL_CAPABILITY.get(tool) === "shell" ? this.#mac.shell(caller, tool, args) : this.#mac.browser(caller, tool, args);
     }
+    // A Mac's Chrome browses on the Mac; its page on the task's card, the person taking it over and request_human stay with the console.
+    if (route.protocol === "v1" && route.kind === "mac" && TOOL_CAPABILITY.get(tool) === "browser" && this.#browser) {
+      return this.#browser.envCall(route.tunnel.ownerId, caller.headers, tool, args, () => this.#post(route, caller, tool, args, timeoutMs));
+    }
+    // A command may run up to its own timeout on the Mac, and longer than any other call.
+    const seconds = Number(args.timeout_sec);
+    return this.#post(route, caller, tool, args, tool === "shell_bash" ? Math.min(seconds > 0 ? seconds : CALL_TIMEOUT_MS / 1000, MAX_COMMAND_S) * 1000 + SLACK_MS : timeoutMs);
+  }
+
+  async #post(route: Route, caller: MacCaller, tool: string, args: Record<string, unknown>, timeoutMs: number): Promise<EnvAnswer> {
     const body = route.protocol === "v1" ? { env: route.deviceId, tool, arguments: args } : { tool, arguments: args };
+    // The task names its own shell on a device that keeps one per task (a Mac).
+    const task = caller.headers[TAB_TASK_HEADER.toLowerCase()];
     const reply = await route.tunnel.request("POST", route.protocol === "v1" ? CALL_PATH : "/ios/call", {
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", ...(typeof task === "string" ? { [TAB_TASK_HEADER.toLowerCase()]: task } : {}) },
       body: Buffer.from(JSON.stringify(body)),
       timeoutMs,
     });
@@ -156,6 +171,8 @@ export class EnvRegistry {
       const deviceId = typeof raw.deviceId === "string" && raw.deviceId ? raw.deviceId.slice(0, 200) : "";
       if (!kind || !deviceId) return [];
       const aliases = Array.isArray(raw.aliases) ? raw.aliases.filter((a): a is string => typeof a === "string" && a.length > 0).map((a) => a.slice(0, 200)) : [];
+      // A Mac is first known by its link (as before protocol 1), so its id holds when its app is updated.
+      if (kind === "mac" && tunnel.kind === "mac") aliases.unshift(`link:${tunnel.linkId}`);
       const capabilities = CAPABILITIES.filter((c) => Array.isArray(raw.capabilities) && raw.capabilities.includes(c));
       return [{ tunnel, protocol: "v1" as const, deviceId, keys: [...aliases, deviceId], kind, name: typeof raw.name === "string" ? raw.name.slice(0, 80) : kind, capabilities, foreground: raw.foreground === true }];
     });

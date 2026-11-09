@@ -67,11 +67,11 @@ export async function startEnvWorld() {
   /** A runtime's gateway URL as reached from here (the sandbox reaches it as host.docker.internal). */
   const local = (url: string) => url.replace(/^http:\/\/host\.docker\.internal:\d+/, `http://127.0.0.1:${gateway.port}`);
 
-  /** The account's aio_env, as its executor calls it. */
-  function executor(runtime: { env?: { url: string } }) {
+  /** The account's aio_env, as its executor calls it (a task's thread adds its X-AIO-Task header). */
+  function executor(runtime: { env?: { url: string } }, headers: Record<string, string> = {}) {
     let id = 0;
     const rpc = async (method: string, params: unknown = {}) => {
-      const res = await fetch(local(runtime.env!.url), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: ++id, method, params }) });
+      const res = await fetch(local(runtime.env!.url), { method: "POST", headers: { "content-type": "application/json", ...headers }, body: JSON.stringify({ jsonrpc: "2.0", id: ++id, method, params }) });
       return (await res.json()) as { result: any; error?: unknown };
     };
     const call = async (name: string, args: Record<string, unknown> = {}) => (await rpc("tools/call", { name, arguments: args })).result as { content: Array<{ type: string; text?: string; data?: string; mimeType?: string }>; isError?: boolean };
@@ -87,7 +87,7 @@ export async function startEnvWorld() {
     await h.shutdown();
   }
 
-  return { h, links, registry, gateway, saved, devices, url: `ws://localhost:${h.primaryPort}${DEVICE_LINK_PATH}`, signIn, link, runtimeFor, local, executor, close };
+  return { h, links, registry, gateway, mac, saved, devices, url: `ws://localhost:${h.primaryPort}${DEVICE_LINK_PATH}`, signIn, link, runtimeFor, local, executor, close };
 }
 
 /** Polls until `probe` gives something truthy (every 25 ms, at most `ms`). */

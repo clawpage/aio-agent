@@ -70,7 +70,7 @@ read through an adapter.
 
 - An old iPhone app: its environment comes from `/ios/status` (the abilities turned on), calls go to
   `/ios/call`, which already answers in the shape above.
-- An old Mac app: the Mac's own environment from what its bridge offers, and one `android` environment
+- An old Mac app (before its bridge spoke protocol 1, see "The Mac"): the Mac's own environment from what its bridge offers, and one `android` environment
   per phone `/status` lists; `screen_*` / `apps_*` are translated to the bridge's whitelisted mobile-mcp
   tools, `browser_*` to its Chrome tools, `shell_*` to its terminal.
 
@@ -87,6 +87,27 @@ their capabilities, and where the message came from (the console's `x-client-pla
    scheduled runs (nobody is at a device; phones sleep).
 3. A device going offline falls back to the sandbox where the work allows; otherwise the agent says in
    one sentence what the person should do (open the app, keep it on screen).
+
+## The Mac
+
+The Mac app's bridge (`bin/phone-bridge.mjs`, its protocol half in `bin/mac-env.mjs`) speaks protocol 1
+itself. Its manifest lists the Mac (`deviceId` a hash of the Mac's hardware UUID; `browser` while the AI's
+Chrome can be used, `shell` only while the person turned the terminal on in the app, which restarts the
+bridge with `PA_MAC_SHELL=1`) and one `android` environment per phone ready on its USB (`deviceId` its adb
+serial, `apps` and `screen`). It checks every 3 s what it offers and sends a `manifest` event when that
+changed. `/env/call` translates aio_env's tools to the bridge's own: mobile-mcp's whitelisted tools on the
+phone (the bridge keeps its own session with mobile-mcp), the AI's Chrome and the terminal (the task named
+by `X-AIO-Task`, which the control plane sends with every call, gets its own shell).
+
+- **Same ids after the update.** The registry knows a Mac first by its link (`link:<id>`, as for an old
+  Mac) and a phone by its serial (as before, and as the side-loaded app names it in `aliases`), so a Mac
+  updating its app keeps both environments' ids, and a phone on USB and in its own app stays one.
+- **The console's part of the browser.** The Mac's Chrome is headless; the person sees and takes over a
+  task's page in the console. So for a Mac, `browser_*` go to the device through `UserBrowserGateway.envCall`:
+  a page `browser_open` opened (its `page` in the answer) goes on the task's card, calls are refused while
+  the person holds the page, and `browser_request_human` waits there and never reaches the Mac.
+- The old endpoints (`/mcp`, `/status`, `/browser/*`, `/shell/*`) are unchanged, so a control plane with
+  `PA_EXEC_ENVS` off, or one from before, works with an updated bridge as it did.
 
 ## The iPhone app's browser
 
@@ -126,5 +147,8 @@ speaking protocol 1 are live and the device-link log shows no old-protocol devic
 
 - `tests/integration/exec-envs.test.ts`: the control plane end to end with stand-in devices over a real
   device-link socket (new and old iPhone, old Mac with a USB phone, a Play-build and an APK Android).
+- `tests/integration/mac-env.test.ts`: the real Mac bridge linked to a local control plane, with fakes only at
+  the edge (adb, mobile-mcp, Chrome, a tmux server of its own): ids kept from the old adapter, phones plugged
+  in and out, Chrome appearing, the terminal off and on, and the old endpoints still answering.
 - `tests/devices/ios.e2e.test.ts`: the real iPhone app in the simulator against a local control plane.
 - `tests/devices/android.e2e.mjs`: the real Android app in the emulator, both builds.

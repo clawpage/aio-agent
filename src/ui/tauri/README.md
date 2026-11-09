@@ -133,7 +133,8 @@ requests, and the wait was the check with the sandbox, which any cache has to ma
   `aio-device-link` events back. On first use `phone/install.sh` fills
   `~/Library/Application Support/ai.clawpage.agent/phone/` (about 300 MB: pinned Node.js,
   mobile-mcp and ws from `phone/package-lock.json`, scrcpy, and Google's platform-tools unless the
-  Mac already has adb); the bridge (`bin/phone-bridge.mjs`, bundled as a resource) then dials
+  Mac already has adb); the bridge (`bin/phone-bridge.mjs`, bundled as a resource with every `bin/` module it
+  imports, which `tests/integration/mac-env.test.ts` checks) then dials
   `wss://agent.clawpage.ai/api/device-link/connect` and runs while the app is open. The token is in
   `device-link.json` beside it (0600), not the Keychain: an ad-hoc signed build would re-prompt for
   Keychain access after every rebuild. When `phone/package.json` changes, regenerate the lock with

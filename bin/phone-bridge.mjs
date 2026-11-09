@@ -21,6 +21,10 @@
  *                       once the person here turned it on in the app (PA_MAC_SHELL=1); the task's
  *                       shell is named by X-AIO-Shell-Session
  *   GET  /shell/status  whether it is on, and whether tmux is there
+ *   GET  /env/manifest  device protocol 1 (mac-env.mjs, docs/EXEC-ENVS.md): this Mac and each
+ *                       phone on its USB as execution environments; told again over the link
+ *                       as a `manifest` event whenever that changes
+ *   POST /env/call      one aio_env tool call on one of them (the task named by X-AIO-Task)
  *
  * PA_PHONE_SCREEN_OFF=1 keeps the phone's own screen dark while all of the above
  * still sees it (see keepDark).
@@ -35,7 +39,7 @@
  *     installs mobile-mcp's helper app on the connected phone (needed to type
  *     Chinese and other non-ASCII text)
  */
-import { spawn, execFile } from "node:child_process";
+import { spawn, execFile, execFileSync } from "node:child_process";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import fs from "node:fs";
 import http from "node:http";
@@ -47,7 +51,9 @@ import { promisify } from "node:util";
 import { WebSocketServer } from "ws";
 import { linkDevice } from "./device-link-client.mjs";
 import { createUserBrowser } from "./user-browser.mjs";
-import { createMacShell } from "./mac-shell.mjs";
+import { createMacShell, OFF as SHELL_OFF } from "./mac-shell.mjs";
+import { UNAVAILABLE as BROWSER_UNAVAILABLE } from "./user-browser.mjs";
+import { createMacEnv } from "./mac-env.mjs";
 
 const run = promisify(execFile);
 const ROOT = path.resolve(import.meta.dirname, "..");
@@ -151,6 +157,28 @@ async function deviceName(serial) {
   return name === "null" ? "" : name;
 }
 
+/** Every phone on USB that is ready (only PA_PHONE_SERIAL when set), named as each shows itself. */
+const phoneNames = new Map();
+async function usbPhones() {
+  const { stdout } = await run(ADB, ["devices", "-l"], { timeout: 10_000 });
+  const serials = stdout.split("\n").slice(1).map((l) => l.trim().split(/\s+/)).filter((p) => p[1] === "device").map((p) => p[0])
+    .filter((s) => !process.env.PA_PHONE_SERIAL || s === process.env.PA_PHONE_SERIAL);
+  return Promise.all(serials.map(async (serial) => {
+    if (!phoneNames.has(serial)) {
+      const model = (await run(ADB, ["-s", serial, "shell", "getprop", "ro.product.model"], { timeout: 10_000 }).catch(() => ({ stdout: "" }))).stdout.trim();
+      phoneNames.set(serial, (await deviceName(serial)) || model || "Android");
+    }
+    return { serial, name: phoneNames.get(serial) };
+  }));
+}
+
+/** This Mac's id for its environment: a hash of its hardware UUID (which never leaves it), the same however often the app restarts. */
+function machineId() {
+  let uuid = "";
+  try { uuid = /"IOPlatformUUID" = "([^"]+)"/.exec(execFileSync("/usr/sbin/ioreg", ["-rd1", "-c", "IOPlatformExpertDevice"], { encoding: "utf8", timeout: 5000 }))?.[1] ?? ""; } catch { /* not a Mac */ }
+  return `mac-${createHash("sha256").update(`aio-env\u0000${uuid || os.hostname()}`).digest("hex").slice(0, 32)}`;
+}
+
 async function phoneInfo() {
   const serial = await phoneSerial();
   if (!serial) return null;
@@ -210,6 +238,7 @@ async function startMobileMcp() {
   });
   mcpChild.on("exit", (code, signal) => {
     mcpChild = null;
+    mobileSession = null;
     if (shuttingDown) return;
     log("mobile-mcp exited; restarting in 3s", { code, signal });
     setTimeout(() => void startMobileMcp(), 3000);
@@ -245,6 +274,53 @@ function filterResult(msg) {
     }
   }
   return msg;
+}
+
+/** One JSON-RPC message from mobile-mcp's reply, plain JSON or an event stream. */
+function rpcOf(text, id) {
+  const messages = text.trim().startsWith("{") ? [text] : text.split("\n").filter((l) => l.startsWith("data:")).map((l) => l.slice(5));
+  for (const raw of messages) {
+    try { const msg = JSON.parse(raw); if (msg.id === id) return msg; } catch { /* not JSON */ }
+  }
+  throw new Error("mobile-mcp gave no answer");
+}
+
+/** The bridge's own session with mobile-mcp, for /env/call (a new one after mobile-mcp restarts). */
+let mobileSession = null;
+let mobileIds = 0;
+async function mobilePost(body, session) {
+  return fetch(`http://127.0.0.1:${mcpPort}/mcp`, {
+    method: "POST",
+    headers: { "content-type": "application/json", accept: "application/json, text/event-stream", authorization: `Bearer ${internalAuth}`, ...(session ? { "mcp-session-id": session } : {}) },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(120_000),
+  });
+}
+
+/** One whitelisted mobile-mcp tool call: its JSON-RPC answer. */
+async function mobileTool(name, args, again = true) {
+  const msg = { jsonrpc: "2.0", id: ++mobileIds, method: "tools/call", params: { name, arguments: args } };
+  const why = refused(msg);
+  if (why) return rpcError(msg.id, why);
+  if (!mcpChild) throw new Error("mobile-mcp unavailable");
+  const opening = mobileSession ??= (async () => {
+    const init = await mobilePost({ jsonrpc: "2.0", id: 0, method: "initialize", params: { protocolVersion: "2025-03-26", capabilities: {}, clientInfo: { name: "aio-phone-bridge", version: "1" } } });
+    await init.text();
+    if (!init.ok) throw new Error(`mobile-mcp did not open a session (${init.status})`);
+    const id = init.headers.get("mcp-session-id") ?? "";
+    await (await mobilePost({ jsonrpc: "2.0", method: "notifications/initialized" }, id)).text();
+    return id;
+  })();
+  opening.catch(() => { if (mobileSession === opening) mobileSession = null; });
+  const res = await mobilePost(msg, await opening);
+  const text = await res.text();
+  // mobile-mcp forgot the session (it restarted between two checks): a new one, and the call once more.
+  if ((res.status === 400 || res.status === 404) && again) {
+    if (mobileSession === opening) mobileSession = null;
+    return mobileTool(name, args, false);
+  }
+  if (!res.ok) throw new Error(`mobile-mcp answered ${res.status}`);
+  return rpcOf(text, msg.id);
 }
 
 async function handleMcp(req, res, body) {
@@ -616,6 +692,8 @@ function authorized(req, token) {
 
 let shuttingDown = false;
 const PARENT_CHECK_MS = 5_000;
+/** How often what this Mac offers is checked (one `adb devices`). */
+const MANIFEST_CHECK_MS = 3_000;
 
 async function serve() {
   const token = readToken();
@@ -630,6 +708,16 @@ async function serve() {
     : null;
   // Off unless the person at this Mac turned it on in the app; an older app never passes it.
   const shell = createMacShell({ enabled: process.env.PA_MAC_SHELL === "1", log });
+  const env = createMacEnv({
+    deviceId: machineId(),
+    name: process.env.PA_DEVICE_NAME || os.hostname(),
+    phones: usbPhones,
+    mobile: mobileTool,
+    browser,
+    shell,
+    off: SHELL_OFF,
+    noBrowser: BROWSER_UNAVAILABLE,
+  });
   const wss = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024 });
   const server = http.createServer(async (req, res) => {
     try {
@@ -648,6 +736,7 @@ async function serve() {
         return sendJson(res, 200, browser ? await browser.status() : { available: false, connected: false });
       }
       if (url.pathname === "/shell/status" && req.method === "GET") return sendJson(res, 200, shell.status());
+      if (url.pathname === "/env/manifest" && req.method === "GET") return sendJson(res, 200, await env.manifest());
       const page = Number(url.searchParams.get("page"));
       if ((url.pathname === "/browser/screenshot" || url.pathname === "/browser/front") && browser && Number.isInteger(page) && page > 0) {
         try {
@@ -663,7 +752,7 @@ async function serve() {
           return sendJson(res, 404, { error: err.message });
         }
       }
-      if (url.pathname === "/mcp" || url.pathname === "/browser/mcp" || url.pathname === "/shell/mcp") {
+      if (url.pathname === "/mcp" || url.pathname === "/browser/mcp" || url.pathname === "/shell/mcp" || url.pathname === "/env/call") {
         if (req.method === "DELETE") return sendJson(res, 200, {});
         if (req.method !== "POST") return sendJson(res, 405, { error: "method not allowed" });
         const chunks = [];
@@ -674,6 +763,16 @@ async function serve() {
           chunks.push(chunk);
         }
         if (url.pathname === "/mcp") return await handleMcp(req, res, Buffer.concat(chunks));
+        if (url.pathname === "/env/call") {
+          let body;
+          try { body = JSON.parse(Buffer.concat(chunks).toString("utf8")); } catch { return sendJson(res, 200, { ok: false, code: "invalid", message: "invalid JSON" }); }
+          try {
+            return sendJson(res, 200, await env.call(body, req.headers["x-aio-task"]));
+          } catch (err) {
+            log("environment call failed", { tool: body?.tool, error: err.message });
+            return sendJson(res, 200, { ok: false, message: err.message });
+          }
+        }
         if (url.pathname === "/shell/mcp") {
           let msg;
           try { msg = JSON.parse(Buffer.concat(chunks).toString("utf8")); } catch { return sendJson(res, 400, rpcError(null, "invalid JSON")); }
@@ -706,6 +805,14 @@ async function serve() {
     wss.handleUpgrade(req, socket, head, (ws) => (browserScreen ? browser.stream(ws, page) : void screen.join(ws)));
   });
   let link = null;
+  // What this Mac offers changes as phones come and go and Chrome is installed or removed: the control plane hears it at once.
+  let told = "";
+  const watching = setInterval(async () => {
+    const now = JSON.stringify(await env.manifest().catch(() => null));
+    if (now === told || now === "null") return;
+    told = now;
+    link?.event("manifest", JSON.parse(now));
+  }, MANIFEST_CHECK_MS);
   server.listen(PORT, BIND, () => {
     const port = server.address().port;
     log("listening", { bind: BIND, port, adb: ADB });
@@ -729,6 +836,7 @@ async function serve() {
     shuttingDown = true;
     link?.close();
     clearInterval(dark);
+    clearInterval(watching);
     screen.stop("shutdown");
     browser?.close();
     shell.close();
